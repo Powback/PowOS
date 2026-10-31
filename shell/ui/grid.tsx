@@ -18,7 +18,7 @@ import { tapTaken } from "./taps.ts";
 import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { computed, signal } from "@preact/signals";
-import { byKey, carry, dockAim, editing, folder, home, launch, page, pages, selected, setDocked, type Carry } from "../state.ts";
+import { byKey, carry, dockAim, editing, folder, home, launch, page, pages, searchInDock, selected, setDocked, type Carry } from "../state.ts";
 import { addHome, dropOnDock, hoverDock } from "./dockdrop.ts";
 import { dropOut, hoverOut, outAim } from "./dockout.tsx";
 import { powos } from "../bridge.ts";
@@ -129,7 +129,9 @@ const overlaps = (a: Cell, b: Cell) => a.x < b.x + b.w && b.x < a.x + a.w && a.y
 /** Items on the page number [n] (home.pages' numbers, not indices). */
 /** Page [n]'s placed items, plus any widget still being composed (creationwidgets.tsx: client-only until it's done, never through the host). */
 const itemsOn = (n: number) =>
-  [...home.value.items, ...creationWidgets.value.items].filter((i) => i.page === n && i.cell);
+  [...home.value.items, ...creationWidgets.value.items].filter((i) => i.page === n && i.cell && !searchHere(i));
+/** The search widget where this screen has the search docked (searchwidget.tsx: one home item, a spot per screen). */
+const searchHere = (i: HomeItem) => i.key === SEARCH_KEY && searchInDock.value;
 
 /** A tile's own cell (its stored span): apps and folders are always 1x1. */
 const own = (i: HomeItem): Cell => (i.resizable ? i.cell! : { ...i.cell!, w: 1, h: 1 });
@@ -164,7 +166,7 @@ const groupSpans = computed(() => {
   const out = new Map<string, Cell>();
   if (typeof document !== "undefined" && document.documentElement.dataset.mode === "desktop") return out;
   const lifted = carry.value?.item?.key;
-  const all = [...home.value.items, ...creationWidgets.value.items].filter((i) => i.cell && i.key !== lifted);
+  const all = [...home.value.items, ...creationWidgets.value.items].filter((i) => i.cell && i.key !== lifted && !searchHere(i));
   const lim = { cols: home.value.columns, rows: geometry.value.rows || Infinity };
   for (const n of new Set(all.map((i) => i.page))) {
     const on = all.filter((i) => i.page === n);

@@ -8,13 +8,16 @@
  * weird"); it no longer turns into a grid tile there. It goes on the grid from the widget picker.
  */
 import { signal } from "@preact/signals";
-import { byKey, carry, dock, dockAim, dockMode, dockPosition, home, searchInDock, searchPlacement, selected, stored, type Carry } from "../state.ts";
+import { byKey, carry, dock, dockAim, dockMode, dockPosition, home, searchInDock, searchPlacement, searchSpot, selected, stored, type Carry } from "../state.ts";
 import type { Cell, HomeItem } from "../types.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { powos } from "../bridge.ts";
 import { Bar } from "./bar.tsx";
 
-export const hasSearchWidget = () => home.value.items.some((i) => i.kind === "panel" && i.name === "search");
+/** The search widget on this screen's grid (not where this screen has the search docked: dockSearch). */
+export const hasSearchWidget = () => !searchInDock.value && onHome();
+/** The search widget is a home item (either screen's: the host keeps one layout). */
+const onHome = () => home.value.items.some((i) => i.key === SEARCH_KEY);
 
 /** The search widget's key on home (the host's "panel:<name>"). */
 export const SEARCH_KEY = "panel:search";
@@ -30,7 +33,7 @@ export function placeItem(key: string, cell: Cell, page: number): Promise<unknow
  */
 export function putBackInBar(): Promise<unknown> {
   navigator.vibrate?.(10);
-  if (!hasSearchWidget()) return Promise.resolve();
+  if (!onHome()) return Promise.resolve();
   return powos.home.remove(SEARCH_KEY);
 }
 
@@ -44,17 +47,22 @@ function setSpot(v: "dock" | "bar", how: string) {
 
 /**
  * The search widget let go on the dock: docked - the round button between the pinned apps and the recent ones
- * (docksearch.tsx). Off the grid if it was there, so it's in one place only.
+ * (docksearch.tsx).
  */
 export function dockSearch(): Promise<unknown> {
   setSpot("dock", "dragged onto the dock");
-  return putBackInBar();
+  // One home item for both screens (the host keeps one layout): the other screen's widget stays, hidden on this one
+  // (grid.tsx itemsOn), until both are docked.
+  return otherSpot() === "dock" ? putBackInBar() : Promise.resolve();
 }
+
+/** The search spot of the screen not in use (folded / unfolded). */
+const otherSpot = () => (dockMode.value === "unfolded" ? searchSpot.mobile : searchSpot.unfolded).value;
 
 /** The dock's button (or the foot's pill) let go on home's grid at [cell] of [page]: the bar widget there. */
 export function undockSearch(page: number, cell: Cell): Promise<unknown> {
   setSpot("bar", "dragged onto home");
-  return hasSearchWidget() ? placeItem(SEARCH_KEY, cell, page) : powos.home.addPanel("search", page, cell);
+  return onHome() ? placeItem(SEARCH_KEY, cell, page) : powos.home.addPanel("search", page, cell);
 }
 
 /** The search as a home item to carry (grid.tsx startCarry): the grid's widget, or the foot's pill / the dock's button. */
@@ -142,7 +150,7 @@ export function dropSearchOnFoot(c: Carry | null, ev: PointerEvent): boolean {
 }
 
 /** Home's classes for the search widget (shell.css): on the grid (the foot's pill parked), carried under the dock. */
-export const searchClasses = () => `${hasSearchWidget() && !searchInDock.value ? "search-parked" : ""} ${footAim.value === "below" ? "search-below-aim" : ""} ${carryingSearch() ? "search-carried" : ""}`;
+export const searchClasses = () => `${hasSearchWidget() ? "search-parked" : ""} ${footAim.value === "below" ? "search-below-aim" : ""} ${carryingSearch() ? "search-carried" : ""}`;
 
 /** In the foot: the pill under the dock ("1"), else over it. */
 export const footBelow = stored("search.belowDock", "");

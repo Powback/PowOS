@@ -478,7 +478,7 @@ export async function searchDragDocks() {
   const cells = pinnedCells();
   fails.push(...atSeparator("dock button (dropped)", { i: cells.findIndex((c) => c.matches(".dock-search")), n: cells.length }, vertical));
   if (document.querySelector(".home > .bar")) fails.push("the bar is still on home");
-  if (S.home.value.items.some((i) => i.key === "panel:search")) fails.push("a search widget left on the grid");
+  if (document.querySelector(".home .search-face")) fails.push("a search widget left on the grid");
   return fails.map((f) => `dock: ${f}`);
 }
 
@@ -501,6 +501,27 @@ export async function searchDragOut() {
   if (S.searchInDock.value) fails.push("still docked");
   if (document.querySelector(".home > .dock .dock-search")) fails.push("the dock button is still there");
   return fails.map((f) => `out: ${f}`);
+}
+
+/**
+ * The widget per screen: this screen docked (a check's, searchTry) and the other's the bar, the one home item stays (the
+ * other screen's) but isn't on this grid; undocked again it is.
+ */
+export async function searchWidgetPerScreen() {
+  const S = await importShim("./state.ts");
+  const other = S.dockMode.value === "unfolded" ? S.searchSpot.mobile : S.searchSpot.unfolded;
+  const was = other.value;
+  other.value = "bar";
+  S.searchTry.value = "dock";
+  await sleep(300);
+  const fails = [];
+  if (document.querySelector(".home .search-face")) fails.push("docked here, the other screen's search widget is on this grid");
+  if (!S.home.value.items.some((i) => i.key === "panel:search")) fails.push("the other screen's search widget is gone");
+  S.searchTry.value = "";
+  await sleep(300);
+  if (!document.querySelector(".home .search-face")) fails.push("undocked, the search widget isn't back on the grid");
+  other.value = was;
+  return fails.map((f) => `per screen: ${f}`);
 }
 
 /** After a reload: the spot the drag left (undocked), then docked again and reloaded: docked. [want]: "bar" | "dock". */

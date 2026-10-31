@@ -2486,25 +2486,9 @@ async function searchLauncherCheck() {
   return [...fails, ...(await searchPutBack()), ...(await searchToDock())];
 }
 
-/** Still in edit mode, folded, after the drop under the dock: the pill stays where it was put, under the dock (not
- *  back on top as a grid tile - the user, 2026-10-28). */
-async function pillBelowDockInEdit(W, wide) {
-  if (wide) return [];
-  const bar = document.querySelector(".home > .bar");
-  await window.__gw.settled(() => getComputedStyle(bar).visibility === "visible");
-  const p = bar.querySelector(".bar-pill").getBoundingClientRect();
-  // The dock's icons, not its box: the box has transparent padding under the icons that the pill may sit in.
-  const icons = [...document.querySelectorAll(".home > .dock:not(.dock-tray) .app-icon")].map((e) => e.getBoundingClientRect()).filter((r) => r.height);
-  const d = { bottom: Math.max(...icons.map((r) => r.bottom), -Infinity) };
-  const fails = document.querySelector('.home-tile[data-key="panel:search"]') ? ["edit mode after the drop under the dock: the pill is a grid tile again"] : [];
-  if (getComputedStyle(bar).visibility !== "visible" || p.top < d.bottom - 1)
-    fails.push(`edit mode after the drop under the dock: the pill isn't below the dock (pill top ${p.top}, dock bottom ${d.bottom})`);
-  return fails;
-}
-
 /**
  * The user's own move (2026-10-23, 5th report): edit mode, the search widget's tile carried down onto the dock and let
- * go - the pill is in the foot under the dock (folded), back in the bar (unfolded), and the drawer still has it.
+ * go - it docks as the dock's button (folded: SW1, 2026-10-31 15:34), back in the bar (unfolded), the drawer still has it.
  */
 async function searchToDock() {
   const S = await window.__gw.mod("./state.ts");
@@ -2514,28 +2498,33 @@ async function searchToDock() {
   W.footBelow.value = "";
   const item = await window.__sp.placeSearchWidget();
   S.editing.value = true;
-  // Folded the dock's row (under the dock); wide the one bar's middle (no "under" there).
+  // Folded the dock's row: it docks (SW1, the user 15:34: the button between pinned and recents); wide the one bar's
+  // middle, the bar's slot in the foot.
   const foot = wide ? ".home > .edit-sheet" : ".home > .dock:not(.dock-tray)";
   await window.__gw.settled(() => document.querySelector('.home-tile[data-key="panel:search"]') && document.querySelector(foot));
   const tile = document.querySelector('.home-tile[data-key="panel:search"]')?.getBoundingClientRect();
   const to = document.querySelector(foot)?.getBoundingClientRect();
   if (!tile || !item || !to) return ["edit mode: no search tile or foot to drag it to"];
+  const spot = S.searchPlacement.value;
+  const was = spot.value;
   const at = (type, x, y) => new PointerEvent(type, { pointerId: 11, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true });
   G.startCarry({ item }, at("pointerdown", tile.left + 20, tile.top + 10), { x: 20, y: 10 });
   window.dispatchEvent(at("pointermove", to.left + to.width / 2, to.top + to.height / 2));
   await window.__gw.frames(2);
   window.dispatchEvent(at("pointerup", to.left + to.width / 2, to.top + to.height / 2));
-  await window.__gw.until(() => W.footBelow.value === (wide ? "" : "1") && !W.hasSearchWidget());
-  const fails = [];
-  fails.push(...(await window.__sp.pillBelowDockInEdit(W, wide)));
+  const onHome = () => S.home.value.items.some((i) => i.key === "panel:search");
+  const done = () => (wide ? !onHome() : spot.value === "dock");
+  await window.__gw.until(done);
   S.editing.value = false;
   await window.__gw.settled(() => !document.querySelector(".carried"));
-  if (W.footBelow.value !== (wide ? "" : "1")) fails.push(`dragged onto the foot: footBelow is "${W.footBelow.value}"`);
-  if (W.hasSearchWidget()) fails.push("dragged onto the foot: the search widget stayed on the grid");
+  const missed = { true: "dragged onto the foot: the search widget stayed on the grid", false: `dragged onto the dock: the search spot is "${spot.value}", not "dock"` };
+  const fails = done() ? [] : [missed[wide]];
+  spot.value = was;
+  await W.putBackInBar();
+  await window.__gw.settled(() => !onHome());
   await window.__sp.pullUpFrom(document.querySelector(".home > .bar .bar-pill"));
   fails.push(...window.__sp.drawerWithPill("pulled up after the drop on the foot"));
   await window.__sp.closeDrawerNow();
-  W.footBelow.value = "";
   return fails;
 }
 
@@ -4405,6 +4394,8 @@ async function tileBarsScene(r) {
 async function barSwipeSetup(withWindows) {
   const S = await window.__gw.mod("./state.ts");
   const W = await window.__gw.mod("./ui/webwindows.tsx");
+  // The swipe is the pill's (folded's default is the dock button since SW1).
+  S.searchTry.value = "bar";
   S.page.value = 0;
   const page = S.pages.value[0];
   W.webWins.value = withWindows ? [941, 942].map((id, i) => ({ id, key: `a:gate.sb${i}`, label: `SB ${i}`, page, x: 40 + 60 * i, y: 120, w: 160, h: 200, live: true })) : [];
@@ -5963,7 +5954,7 @@ try {
     return failures;
   })));
   const dockRun = (name, query, part, position = name.split("-")[3]) => open(browser, `${ORIGIN}/index.html${query}`, name, dockViews[name.split("-")[2]]).then(r => whenReady(r, async () => {
-    const failures = await r.page.evaluate(dockPositionCheck, position, part);
+    const failures = await r.page.evaluate(barOnHome).then(() => r.page.evaluate(dockPositionCheck, position, part));
     if (process.env.DOCK_SHOTS) await r.page.screenshot({path: `${process.env.DOCK_SHOTS}/${name}.png`});
     return failures;
   }));
@@ -6117,7 +6108,7 @@ try {
       runs.push(open(browser, `${ORIGIN}/index.html`, `joins-${label}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(joinsCheck))));
   // The Agents screen and widget in plain words (ui/agents.tsx, fleet.ts): working / needs attention / folded idle.
   if (process.env.SHELL_PAGES !== "0")
-    runs.push(open(browser, `${ORIGIN}/index.html`, "agents-fleet", { width: 412, height: 915 }).then((r) => whenReady(r, () => r.page.evaluate(agentsFleetCheck, FLEET_SETUP))));
+    runs.push(open(browser, `${ORIGIN}/index.html`, "agents-fleet", { width: 412, height: 915 }).then((r) => whenReady(r, () => r.page.evaluate(barOnHome).then(() => r.page.evaluate(agentsFleetCheck, FLEET_SETUP)))));
   // Floating windows live on home's pages (ui/desktops.ts; the user's design, 2026-10-22): page switch hides and
   // shows them, and the placement survives the page loading afresh.
   if (process.env.SHELL_PAGES !== "0")
@@ -6224,11 +6215,12 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `search-launcher-${label}`, viewport).then(async (r) => {
-        const helpers = `window.__sp = { pullUpFrom: ${pullUpFrom}, drawerWithPill: ${drawerWithPill}, pillOverDrawer: ${pillOverDrawer}, closeDrawerNow: ${closeDrawerNow}, searchPutBack: ${searchPutBack}, searchToDock: ${searchToDock}, pillBelowDockInEdit: ${pillBelowDockInEdit}, placeSearchWidget: ${placeSearchWidget}, overlayAsked: ${overlayAsked} }`;
-        const s = await whenReady(r, async () => [...(await r.page.evaluate(searchDefaultCheck)), ...(await r.page.evaluate(helpers).then(() => r.page.evaluate(homeAsks)).then(() => r.page.evaluate(searchLauncherCheck)))]);
+        const helpers = `window.__sp = { pullUpFrom: ${pullUpFrom}, drawerWithPill: ${drawerWithPill}, pillOverDrawer: ${pillOverDrawer}, closeDrawerNow: ${closeDrawerNow}, searchPutBack: ${searchPutBack}, searchToDock: ${searchToDock}, placeSearchWidget: ${placeSearchWidget}, overlayAsked: ${overlayAsked} }`;
+        const s = await whenReady(r, async () => [...(await r.page.evaluate(barOnHome).then(() => r.page.evaluate(searchDefaultCheck))), ...(await r.page.evaluate(helpers).then(() => r.page.evaluate(homeAsks)).then(() => r.page.evaluate(searchLauncherCheck)))]);
         if (s.problems.length) return s;
         await r.page.reload().catch(() => {});
-        return whenReady(r, () => r.page.evaluate(() => (document.querySelector(".home > .bar .bar-pill, .search-face .bar-pill") ? [] : ["after a reload: no search pill anywhere"])));
+        // Folded's default after a reload is the dock button (SW1): the search is there either way.
+        return whenReady(r, () => r.page.evaluate(() => (document.querySelector(".home > .bar .bar-pill, .search-face .bar-pill, .home > .dock .dock-search") ? [] : ["after a reload: no search pill or button anywhere"])));
       }));
   // ...and the launcher overlay's side of it (index.html?mode=pull): open from home's pill, its own field typing.
   if (process.env.SHELL_PAGES !== "0")
@@ -6344,6 +6336,7 @@ try {
         await call("searchDragSetup", position);
         fails.push(...(await call("searchDragDocks")));
         fails.push(...(await call("searchDragOut")));
+        fails.push(...(await call("searchWidgetPerScreen")));
         await reload();
         fails.push(...(await call("searchSpotKept", "bar", position)));
         await call("searchDragDone");
