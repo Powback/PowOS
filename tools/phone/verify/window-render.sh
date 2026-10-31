@@ -7,6 +7,8 @@
 #   tools/phone/verify/window-render.sh        exit 0 PASS, 1 FAIL, 2 SKIP (user active / folded / phone not free)
 #   tools/phone/verify/window-render.sh --hidden   exit 0 PASS, 1 FAIL (timeout included), never a skip: the ship gate's
 #                                                  run - the host path on a display nobody sees (see hidden() below)
+#   tools/phone/verify/window-render.sh --hidden --hold S   the same, its display kept up S s after content+tap pass
+#                                                  (ship.sh runs render_watch across it; see hold below)
 # What it does, touching nothing of the user's:
 #   1. waits (idle.sh --wait, AWAKE_ONLY) for the screen on and no touch for WR_IDLE_S (30) s, the keyguard down and the
 #      phone unfolded (web windows only exist there), up to WR_WAIT_S (900) s; else "SKIP: user active" (or folded),
@@ -92,7 +94,14 @@ shot() {   # shot NAME: raw screencap gzipped on the phone -> $OUT/NAME.raw.gz
 # Then its task removed (`am stack remove`; a Calculator task the user had before is moved back to display 0, never
 # removed), the display released and the helper ended (its stdin closed: it releases what's left and exits; a holder
 # that keeps stdin open ends by itself after WR_HOLD_S, so a killed check leaves nothing either). Exit 0 PASS, 1 FAIL;
-# the whole run is bounded by WR_TIMEOUT_S (150): a timeout is a FAIL. Shots in WR_OUT/<stamp>/ (display.png, tap.png).
+# the whole run is bounded by WR_TIMEOUT_S (150, plus the hold): a timeout is a FAIL. Shots in WR_OUT/<stamp>/.
+# --hold S (HOLD): after content+tap pass, the PASS line is logged at once (ship.sh window_gate waits for it, then runs
+# its passive render_watch) and the display stays up S s with Calculator on it: every ~5 s its content is measured again
+# and logged to the phone's logcat (tag PowosWrHidden: "hold display D ..." - the helper's display geometry first),
+# so render_watch sees a live window across its watch. Gone flat or its task gone during the hold: FAIL (exit 1, a
+# "window-render: FAIL" line after the PASS one). The display is the adb-started helper's, never in WebWindows.kt's
+# window list: the app's watchdog (RenderWatch) doesn't count it, and it gets no `w.f` lines (never mirrored).
+HOLD=0
 hidden() {
   local tag=wrh$$ dir=/data/local/tmp/powos-wr-hidden-$$ W=${WR_W:-1080} H=${WR_H:-1500} dpi D= S= comp t0 pre task= st dom edg d1 noise fx fy wd
   t0=$(date +%s)
@@ -123,7 +132,7 @@ hidden() {
   trap 'hclean' EXIT
   trap 'log "FAIL: timeout (${WR_TIMEOUT_S:-150} s)"; hclean; log "window-render: FAIL (hidden: timeout) - $OUT"; exit 1' TERM INT
   # The watchdog: kills whatever adb call hangs (bash runs the trap only once its foreground child is gone), then us.
-  ( sleep "${WR_TIMEOUT_S:-150}"; pkill -P $$ 2>/dev/null; kill -TERM $$ 2>/dev/null ) & wd=$!
+  ( sleep $(( ${WR_TIMEOUT_S:-150} + HOLD )); pkill -P $$ 2>/dev/null; kill -TERM $$ 2>/dev/null ) & wd=$!
 
   "$A" get-state >/dev/null 2>&1 || hfail "no phone (adb get-state)"
   dpi=$(sh_ "wm density" | sed -n 's/^Override density: //p'); [ -n "$dpi" ] || dpi=$(sh_ "wm density" | sed -n 's/^Physical density: //p')
@@ -135,7 +144,7 @@ hidden() {
   # holder keeps open for WR_HOLD_S; "selftest": own display group/focus/lock state (an older helper ignores it).
   cat > "$OUT/wrh.sh" <<EOF
 mkdir -p $dir && mkfifo $dir/in && chmod 777 $dir $dir/in || exit 1
-nohup sh -c 'exec sleep ${WR_HOLD_S:-180} > $dir/in' >/dev/null 2>&1 &
+nohup sh -c 'exec sleep $(( ${WR_HOLD_S:-180} + HOLD )) > $dir/in' >/dev/null 2>&1 &
 echo \$! > $dir/holder
 nohup su -g 2000 -G 3011 2000 -c "CLASSPATH='$apk' exec app_process /system/bin dev.omalauncher.shell.WebWindowsHost" < $dir/in > $dir/out 2>&1 &
 for i in \$(seq 1 30); do grep -q '^hello' $dir/out && break; sleep 0.2; done
@@ -180,12 +189,37 @@ EOF
   for n in display tap; do $PY png "$OUT/$n.raw.gz" "$OUT/$n.png" 2>/dev/null && rm -f "$OUT/$n.raw.gz"; done; rm -f "$OUT/pre.raw.gz"
   case "$d1$noise" in ""|*[!0-9.]*) hfail "a measurement is missing (tap=$d1 noise=$noise)" ;; esac
   awk "BEGIN{exit !($d1 >= 0.002 && $d1 > 3 * $noise)}" || hfail "the tap changed nothing in the app ($d1 vs noise $noise)"
+  if [ "$HOLD" -gt 0 ]; then
+    log "window-render: PASS (hidden: task $task on display $D drew the app, the tap reached it; $(( $(date +%s) - t0 )) s; holding $HOLD s) - $OUT"
+    # Into logcat: the helper's geometry line for this display, then the content every ~5 s (no quotes in the text).
+    lc() { "$A" shell "log -t PowosWrHidden '$(echo "$*" | tr -d "'\"\\\\")'" </dev/null >/dev/null 2>&1; }
+    lc "hold display $D start: $(echo "$r" | grep -m1 "^log display $D " | cut -c5-) task $task, $HOLD s"
+    local h0 hs hd he
+    h0=$(date +%s)
+    while :; do
+      sleep 5
+      "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/hold.raw.gz" 2>/dev/null
+      hs=$($PY stats "$OUT/hold.raw.gz" 0 0 "$W" "$H" 2>&1)
+      hd=$(echo "$hs" | sed -n 's/.*dominant=\([0-9.]*\).*/\1/p'); he=$(echo "$hs" | sed -n 's/.*edges=\([0-9.]*\).*/\1/p')
+      if [ -z "$hd" ] || ! awk "BEGIN{exit !($hd < 0.97 && $he >= 0.003)}"; then lc "hold display $D FLAT: $hs"; hfail "during the hold display $D went flat ($hs)"; fi
+      [ -n "$(tasks_on "$D")" ] || { lc "hold display $D: task gone"; hfail "during the hold $APP's task left display $D"; }
+      lc "hold display $D live $(( $(date +%s) - h0 )) s: $hs"; log "hold $(( $(date +%s) - h0 )) s: $hs"
+      [ $(( $(date +%s) - h0 )) -ge "$HOLD" ] && break
+    done
+    rm -f "$OUT/hold.raw.gz"; lc "hold display $D end"
+    hclean
+    log "hold: display $D stayed drawn for $HOLD s"
+    exit 0
+  fi
   hclean
   log "window-render: PASS (hidden: task $task on display $D drew the app, the tap reached it; $(( $(date +%s) - t0 )) s) - $OUT"
   ls "$OUT"/*.png 2>/dev/null | sed 's/^/  /' | tee -a "$OUT/log.txt"
   exit 0
 }
-[ "${1:-}" = --hidden ] && { trap - EXIT TERM INT; hidden; }
+if [ "${1:-}" = --hidden ]; then
+  [ "${2:-}" = --hold ] && { case ${3:-} in ''|*[!0-9]*) echo "--hold wants seconds" >&2; exit 1 ;; esac; HOLD=$3; }
+  trap - EXIT TERM INT; hidden
+fi
 
 # 1. A free phone: screen on, no touch for WR_IDLE_S, no keyguard, unfolded.
 deadline=$(( $(date +%s) + ${WR_WAIT_S:-900} ))

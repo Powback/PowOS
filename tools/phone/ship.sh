@@ -292,10 +292,15 @@ run)
   # done while windows are broken: as long as $Q/window-failed is there EVERY ship runs the check, window files or not,
   # and only a PASS clears it. No rollback (fix forward). The log ($Q/done/window-render-<tip>.log) is always written.
   # SHIP_WINDOW_GATE=0 turns it off; off in tests (SHIP_DIR), as e2e_round. WINDOW_GATE_TIMEOUT_S (240) bounds it.
+  # It runs with --hold RENDER_WATCH_S: once its log shows the content+tap PASS line, render_watch runs WHILE the hidden
+  # display stays up (a live window across the watch; manager: "a watch with no window open is not a pass"), then the
+  # gate waits for window-render's exit (its hold re-measures the display: going flat there is a FAIL too). RW_DONE=TIP
+  # tells the caller's own render_watch call that this tip was watched already.
   WINDOW_FILES='(^|/)(webwindows[^/]*|WebWindows[^/]*\.kt|WebWindowLaunch\.kt|FreeformTasks\.kt|SystemFloat\.kt|home\.tsx|shell\.css)$'
   window_gate() {
     [ "${SHIP_WINDOW_GATE:-1}" = 1 ] && [ -z "${SHIP_DIR:-}" ] || return 0
     local b=$1 t=$2 what=$3 f= wb wl wrc gp wdg
+    RW_DONE=
     if [ -n "$b" ] && git cat-file -e "$b^{commit}" 2>/dev/null; then
       f=$(git diff --name-only "$b" "$t" 2>/dev/null | grep -E "$WINDOW_FILES" | sed 's|.*/||' | sort -u | paste -sd' ' -)
     else f="(no base: every window file)"; fi
@@ -307,9 +312,11 @@ run)
     wb=$Q/window-render/bin; mkdir -p "$wb"
     if [ -x "$here/verify/window-render.sh" ] && cp "$here/verify/window-render.sh" "$here/verify/window-render.py" "$wb/"; then
       echo "$(date +%T) ${t:0:9}: window files changed ($f) - device window check running ($wl)"
-      WR_TOOLS=$here WR_OUT=$Q/window-render bash "$wb/window-render.sh" --hidden >> "$wl" 2>&1 & gp=$!
+      WR_TOOLS=$here WR_OUT=$Q/window-render bash "$wb/window-render.sh" --hidden --hold "${RENDER_WATCH_S:-20}" >> "$wl" 2>&1 & gp=$!
       echo "$gp" > "$Q/window-gate.pid"
       ( sleep "${WINDOW_GATE_TIMEOUT_S:-240}"; killtree "$gp" ) & wdg=$!
+      while kill -0 "$gp" 2>/dev/null && ! grep -q '^window-render: PASS' "$wl"; do sleep 1; done
+      if grep -q '^window-render: PASS' "$wl"; then render_watch "$t" "$what"; RW_DONE=$t; fi
       wait "$gp"; wrc=$?
       kill "$wdg" 2>/dev/null; rm -f "$Q/window-gate.pid"
       [ $wrc -ge 128 ] && echo "window-render: FAIL (killed after ${WINDOW_GATE_TIMEOUT_S:-240} s, rc $wrc)" >> "$wl"
@@ -330,28 +337,41 @@ run)
   # render empty" P0s all shipped unchecked). Live web windows (`PowosWebWindows: window N: live`, in the last 2 min,
   # by the app's current process) with a `RENDER STALL` (WebWindows' watchdog, RenderWatch.kt) or no applied geometry
   # (`w.f f...` line) since the ship = WINDOWS BROKEN, marked as window_gate marks a FAIL. No geometry while home isn't
-  # on screen (an app full screen) is not judged. SHIP_RENDER_WATCH=0 turns it off; off in tests (SHIP_DIR).
+  # on screen (an app full screen) is not judged. No live window = NOT JUDGED, never a pass (manager: "a watch with no
+  # window open is not a pass"): logged + shipped.log, the ship not failed, nothing opened on the user's screen. The
+  # window that covers it is window_gate's hidden display, held across this watch (window-render.sh --hold, its
+  # `PowosWrHidden: hold display ...` lines): that display is the adb-started helper's, not in WebWindows.kt's list, so
+  # it has no `live`/`w.f` lines and the app's watchdog doesn't count it - judged by WebWindows' watchdog only (no
+  # `RENDER STALL` from the app's process). SHIP_RENDER_WATCH=0 turns it off; off in tests (SHIP_DIR).
   # Synchronous (20 s): the service is a launchd job that exits when idle, and launchd kills what it leaves running -
   # a backgrounded check died mid-sleep (10-31 14:46, 38fdae87: only its first log line).
   render_watch() {
     [ "${SHIP_RENDER_WATCH:-1}" = 1 ] && [ -z "${SHIP_DIR:-}" ] && [ -x "$here/adb.sh" ] || return 0
     local t=$1 what=$2
+    [ "${RW_DONE:-}" = "$t" ] && return 0
     ( rl=$Q/done/render-watch-${t:0:9}.log
       t0=$("$here/adb.sh" shell 'date +%s' 2>/dev/null | tr -d '\r')
       case $t0 in ''|*[!0-9]*) echo "$(date +%T) render-watch ${t:0:9} ($what): not run - the phone's clock unreadable (no phone?)" > "$rl"; exit 0 ;; esac
       echo "$(date +%T) render-watch ${t:0:9} ($what): 20 s passive log check from phone time $t0" > "$rl"
       sleep "${RENDER_WATCH_S:-20}"
-      lc=$("$here/adb.sh" shell 'logcat -d -v epoch -s PowosWebWindows:*' 2>/dev/null | tr -d '\r')
+      lc=$("$here/adb.sh" shell 'logcat -d -v epoch -s PowosWebWindows:* PowosWrHidden:*' 2>/dev/null | tr -d '\r')
       # The app's current process: the newest line's pid (an APK ship restarted it; the old one's windows are gone).
       pid=$(echo "$lc" | awk '/PowosWebWindows:/ {p=$2} END {print p}')
-      v=$(echo "$lc" | awk -v t0="$t0" -v pid="$pid" '$2 != pid {next}
+      v=$(echo "$lc" | awk -v t0="$t0" -v pid="$pid" '$1 >= t0 && /PowosWrHidden: hold display [0-9]+ live/ {hid++}
+        $2 != pid {next}
         $1 >= t0 - 120 && /PowosWebWindows: window [0-9]+: live/ {live++}
         $1 >= t0 && /RENDER STALL/ {stall++; last=$0}
         $1 >= t0 && /PowosWebWindows: w\.f f/ {wf++}
-        END {printf "%d %d %d %s", live, stall, wf, last}')
-      read -r live stall wf last <<< "$v"
-      echo "live lines $live, RENDER STALL lines $stall, w.f lines $wf (pid ${pid:-?})${last:+; last stall: $last}" >> "$rl"
+        END {printf "%d %d %d %d %s", live, stall, wf, hid, last}')
+      read -r live stall wf hid last <<< "$v"
+      echo "live lines $live, RENDER STALL lines $stall, w.f lines $wf, hidden hold lines $hid (pid ${pid:-?})${last:+; last stall: $last}" >> "$rl"
+      if [ "${live:-0}" = 0 ] && [ "${hid:-0}" = 0 ]; then
+        echo "$(date +%T) render-watch: NO WINDOW - not judged" >> "$rl"
+        echo "$(date '+%F %T') ${t:0:9} $what render-watch NOT JUDGED (no live window)" >> "$Q/shipped.log"; exit 0
+      fi
       bad=""
+      # Only the hidden hold display: no w.f to expect (never mirrored) - the watchdog's stall line alone judges.
+      if [ "${live:-0}" = 0 ] && [ "${stall:-0}" -gt 0 ]; then bad="RENDER STALL during the hidden window's hold: ${last:0:200}"; fi
       if [ "${live:-0}" -gt 0 ] && [ "${stall:-0}" -gt 0 ]; then bad="RENDER STALL after the ship: ${last:0:200}"
       elif [ "${live:-0}" -gt 0 ] && [ "${wf:-0}" = 0 ]; then
         foc=$("$here/adb.sh" shell 'dumpsys window | grep -m1 mCurrentFocus' 2>/dev/null | tr -d '\r')
@@ -359,7 +379,7 @@ run)
         if [ -n "$home" ] && echo "$foc" | grep -q "$home"; then bad="no w.f geometry applied in ${RENDER_WATCH_S:-20} s with live windows and home on screen ($foc)"
         else echo "not judged: no geometry, but home is not on screen ($foc)" >> "$rl"; fi
       fi
-      if [ -z "$bad" ]; then echo "$(date +%T) render-watch: PASS" >> "$rl"; echo "$(date '+%F %T') ${t:0:9} $what render-watch PASS (live $live, w.f $wf)" >> "$Q/shipped.log"; exit 0; fi
+      if [ -z "$bad" ]; then echo "$(date +%T) render-watch: PASS" >> "$rl"; echo "$(date '+%F %T') ${t:0:9} $what render-watch PASS (live $live, w.f $wf, hidden hold $hid)" >> "$Q/shipped.log"; exit 0; fi
       echo "$(date +%T) render-watch: FAIL: $bad" >> "$rl"
       echo "$t $what render-watch" > "$Q/window-failed"
       if [ "$what" = apk ]; then echo "$t" > "$Q/failed-apk"; else echo "$t" > "$Q/failed"; fi
