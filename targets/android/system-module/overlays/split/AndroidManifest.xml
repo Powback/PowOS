@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android's own split screen (WM Shell's SplitScreen and divider) side by side on the unfolded inner screen.
+     The inner screen is 2268x2440, portrait by a hair, so WM Shell's SplitLayout split it top/bottom (Discord over
+     Chrome). SplitLayout's constructor reads the framework bool config_leftRightSplitInPortrait (0x011101e0, OxygenOS
+     16 SystemUI.apk: SplitScreenUtils.allowLeftRightSplitInPortrait, no aconfig gate on this build) into
+     mAllowLeftRightSplitInPortrait; with it true, SplitScreenUtils.isLeftRightSplit gives left/right on a large screen
+     (smallest width >= 600 dp: unfolded) in portrait and top/bottom on the folded cover screen, recomputed on every
+     configuration change, so an open split switches on fold/unfold. The phone's framework-res ships it false.
+     Static and in the module (not the app's runtime `cmd overlay fabricate`): it is applied before SystemUI starts, so
+     SplitLayout sees it on every boot - the fabricated one landed 29 s after SystemUI on 2026-10-30 and never took.
+     Off again: disable the module (Magisk) and reboot. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.powos.config.split">
+    <application android:hasCode="false" />
+    <overlay android:targetPackage="android" android:isStatic="true" android:priority="902" />
+</manifest>
