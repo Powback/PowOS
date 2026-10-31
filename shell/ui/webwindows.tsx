@@ -505,6 +505,7 @@ export function WebWindowsOn({ page }: { page: number }) {
       ))}
       {t && dividers(t, tileArea()).map((d) => <DividerEl key={d.ratio} page={page} d={d} o={o} />)}
       {dropView.value?.page === page && <DropPreview d={dropView.value} o={o} />}
+      {snapView.value?.page === page && <DropPreview d={snapView.value} o={o} />}
     </div>
   );
 }
@@ -710,19 +711,37 @@ const floatingOn = (page: number, skip: number[]) =>
  * takes the page's topmost floating window (two windows, one split - as Android's), an empty corner stays empty.
  */
 export function tile(id: number, slot: Slot) {
-  const w = webWins.value.find((v) => v.id === id);
-  if (!w) return;
   if (slot === "float") return untile(id, "float");
+  const plan = slotPlan(id, slot);
+  if (!plan) return;
+  const { page, others, tiling } = plan;
+  const { layout, ids } = tiling;
+  // Alone: no tiling of one (SC1) - a half or a corner is just where it goes, a floating window at that tile's rect.
+  if (plan.alone) return snapAlone(id, layout, ids.indexOf(id));
+  // Tiled windows that found no tile float again.
+  const left = others.filter((o) => !ids.includes(o));
+  setTiling(page, tiling);
+  for (const o of left) refloat(o);
+  console.info(`[tiles] page ${page}: ${layout} [${ids.join(",")}] (${slot} for window ${id})`);
+}
+
+/** What [tile] (id, slot) makes, slot not "float": the page, its other tiled windows, the tiling (alone: no tiling of one). */
+function slotPlan(id: number, slot: Slot) {
+  const w = webWins.value.find((v) => v.id === id);
+  if (!w || slot === "float") return null;
   const page = w.page;
   const others = (tilings.value[page]?.ids ?? []).filter((v): v is number => v != null && v !== id);
   const { layout, ids } = slot === "grid" ? gridOf(page, id, others) : slotOf(page, id, slot, others);
-  // Alone: no tiling of one (SC1) - a half or a corner is just where it goes, a floating window at that tile's rect.
-  if (ids.filter((v) => v != null).length < 2) return snapAlone(id, layout, ids.indexOf(id));
-  // Tiled windows that found no tile float again.
-  const left = others.filter((o) => !ids.includes(o));
-  setTiling(page, { layout, ids, rx: 0.5, ry: 0.5 });
-  for (const o of left) refloat(o);
-  console.info(`[tiles] page ${page}: ${layout} [${ids.join(",")}] (${slot} for window ${id})`);
+  const tiling: Tiling = { layout, ids, rx: 0.5, ry: 0.5 };
+  return { page, others, tiling, alone: ids.filter((v) => v != null).length < 2 };
+}
+
+/** The rect (viewport CSS px) window [id] takes after [tile] (id, slot): its snap's preview ([snapView]). */
+function slotRect(id: number, slot: Slot): Box | null {
+  const plan = slotPlan(id, slot);
+  if (!plan) return null;
+  const t = plan.alone ? plan.tiling : compact(plan.tiling);
+  return tileRects(t, tileArea())[t.ids.indexOf(id)] ?? null;
 }
 
 /** Window [id], the page's only one to tile, at tile [i] of [layout]'s rect (restore: its frame before). */
@@ -880,6 +899,10 @@ interface Landing {
 
 /** The drop in progress (a floating window's bar dragged over its page's tiles): its zone and landing ([DropPreview]). */
 export const dropView = signal<(Landing & { zone: Zone }) | null>(null);
+/** A bar drag's edge snap in progress (no tile or tab drop there): the rect window [id] would take ([DropPreview]). */
+export const snapView = signal<{ id: number; page: number; slot: Slot; rect: Box } | null>(null);
+/** A drag's previews gone (let go, cancelled). */
+const clearAim = () => (dropView.value = tabView.value = snapView.value = null);
 
 /** [t] as a split tree of its windows ("4": two columns of two). */
 function treeOfTiling(t: Tiling): Tree {
@@ -946,10 +969,21 @@ const perms = (a: number[]): number[][] => (a.length <= 1 ? [a] : a.flatMap((v, 
 function aim(id: number, x: number, y: number, docks = true) {
   const tab = tabTarget(id, x, y);
   const next = tab || !docks ? null : tileDrop(id, x, y);
-  if (dropKey(next?.zone) + tabKey(tab) === dropKey(dropView.value?.zone) + tabKey(tabView.value)) return;
-  if (next || tab) hapticTick();
+  const snap = tab || next ? null : snapAim(id, x, y);
+  const key = (d: typeof next, t: typeof tab, s: typeof snap) => `${dropKey(d?.zone)}|${tabKey(t)}|${s?.slot ?? ""}`;
+  if (key(next, tab, snap) === key(dropView.value, tabView.value, snapView.value)) return;
+  if (next || tab || snap) hapticTick();
   dropView.value = next;
   tabView.value = tab;
+  snapView.value = snap;
+}
+
+/** The edge snap window [id]'s bar makes let go at (x, y) ([release]'s fallback): its slot and rect, or null. */
+function snapAim(id: number, x: number, y: number) {
+  const slot = snapSlot(x, y);
+  const rect = slot && slotRect(id, slot);
+  const w = rect && webWins.value.find((v) => v.id === id);
+  return w && slot && rect ? { id, page: w.page, slot, rect } : null;
 }
 
 /** WT1: the tab drop window [id]'s bar makes at (x, y) - another window's bar there - or null. */
@@ -971,7 +1005,7 @@ function tileDrop(id: number, x: number, y: number) {
 function release(id: number, x: number, y: number) {
   const drop = dropView.value;
   const tab = tabView.value;
-  dropView.value = tabView.value = null;
+  clearAim();
   if (tab?.id === id) return joinStack(tab);
   // GL1: over the tiles, the previewed drop; with none (no tiles yet, a full grid), an edge snap as before.
   if (drop?.id === id) return dock(drop);
@@ -1127,12 +1161,12 @@ function holdAppSizes(ids: (number | null)[]) {
 }
 
 /** The drop's preview: the tile the window would take, translucent; it glides between zones. */
-function DropPreview({ d, o }: { d: Landing & { zone: Zone }; o: { x: number; y: number } }) {
+function DropPreview({ d, o }: { d: { rect: Box; zone?: Zone; slot?: Slot }; o: { x: number; y: number } }) {
   const r = d.rect;
   const style = { left: `${r.x - o.x}px`, top: `${r.y - o.y}px`, width: `${r.w}px`, height: `${r.h}px`, zIndex: 999 };
   return (
-    <div class={`ww-drop ${d.zone.kind}`} data-zone={dropKey(d.zone)} style={style}>
-      {d.zone.kind === "swap" && <span class="ww-drop-label tile">Swap</span>}
+    <div class={`ww-drop ${d.zone?.kind ?? "snap"}`} data-zone={d.zone ? dropKey(d.zone) : `snap:${d.slot}`} style={style}>
+      {d.zone?.kind === "swap" && <span class="ww-drop-label tile">Swap</span>}
     </div>
   );
 }
@@ -1671,7 +1705,7 @@ function TitleBar({ win }: { win: WebWin }) {
     if (!d) return;
     e.stopPropagation();
     drag.current = null;
-    if (cancelled || !d.moved) dropView.value = tabView.value = null;
+    if (cancelled || !d.moved) clearAim();
     if (cancelled) return;
     if (!d.moved) {
       const now = performance.now();
@@ -1691,7 +1725,7 @@ function TitleBar({ win }: { win: WebWin }) {
         raise(win.id);
         capture(e);
         drag.current = { px: e.clientX, py: e.clientY, x: win.x, y: win.y, moved: false, tiled: tiledOn(win.id) != null };
-        oneFinger.set(win.id, () => ((drag.current = null), (dropView.value = tabView.value = null)));
+        oneFinger.set(win.id, () => ((drag.current = null), clearAim()));
       }}
       onPointerMove={(e) => {
         const d = drag.current;
@@ -1793,7 +1827,7 @@ function tabPress(e: PointerEvent, id: number, shown: number) {
   const cancel = (ev: PointerEvent) => {
     if (ev.pointerId !== pid) return;
     stop();
-    dropView.value = tabView.value = null;
+    clearAim();
   };
   const move = (ev: PointerEvent) => {
     if (ev.pointerId !== pid) return;
@@ -1823,7 +1857,7 @@ function tabPress(e: PointerEvent, id: number, shown: number) {
   addEventListener("pointermove", move, true);
   addEventListener("pointerup", up, true);
   addEventListener("pointercancel", cancel, true);
-  oneFinger.set(shown, () => (stop(), (dropView.value = tabView.value = null)));
+  oneFinger.set(shown, () => (stop(), clearAim()));
 }
 
 const MIN_W = 220;

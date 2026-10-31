@@ -3769,6 +3769,45 @@ async function webWindowTileDockCheck() {
 }
 
 /**
+ * In the page: the edge snap's ghost (the user, 10-31 03:17: "there should be like a preview showing that hey by doing
+ * this you're gonna end up with the window here like a ghost thing"). A floating window's bar held at the left edge's
+ * middle shows a .ww-drop at the rect it then takes (+-3 px); back in the middle it goes; let go at the edge, it is there.
+ */
+async function webWindowSnapGhostCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const g = window.__dockg;
+  const page = S.pages.value[0];
+  const move = (at) => g.frame(941).querySelector(".webwindow-title").dispatchEvent(new PointerEvent("pointermove", { bubbles: true, cancelable: true, pointerId: 83, isPrimary: true, clientX: at[0], clientY: at[1] }));
+  try {
+    S.page.value = 0;
+    W.webWins.value = [{ id: 941, key: "a:gate.snap", label: "Snap", page, x: 260, y: 220, w: 360, h: 280, live: true }];
+    await window.__gw.settled();
+    const a = W.tileArea();
+    const edge = [a.left + 4, (a.top + a.bottom) / 2];
+    const mid = [(a.left + a.right) / 2, (a.top + a.bottom) / 2];
+    await g.hold(941, edge);
+    const ghost = document.querySelector(".ww-drop")?.getBoundingClientRect();
+    if (!ghost) return ["SG1: a bar held at the left edge's middle shows no snap ghost (.ww-drop)"];
+    move(mid);
+    await window.__gw.settled();
+    const fails = document.querySelector(".ww-drop") ? ["SG1: the snap ghost stayed with the bar back in the middle"] : [];
+    move(edge);
+    await window.__gw.settled();
+    await g.release(941, edge);
+    const got = g.frame(941).getBoundingClientRect();
+    const want = { x: ghost.left, y: ghost.top, w: ghost.width, h: ghost.height };
+    if (!g.near(got, want)) fails.push(`SG1: let go at the edge it is at ${g.fmt(got)}, the ghost showed ${g.fmt(want)}`);
+    if (document.querySelector(".ww-drop")) fails.push("SG1: the snap ghost stayed after the snap");
+    return fails;
+  } finally {
+    W.webWins.value = [];
+    W.tilings.value = {};
+    W.snapView.value = null;
+  }
+}
+
+/**
  * [webWindowPinchCheck]'s helpers into the page (window.__pzg; page.evaluate sends only the one function).
  * PZ1 (the user, 10-31 01:40: "If I zoom normally IN the app, I'm now resizing the window"): a pinch whose fingers start
  * on the BODY is the app's (Chrome's page zoom) - the window keeps its size and scale, the app gets ONE two-finger
@@ -4708,7 +4747,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }
