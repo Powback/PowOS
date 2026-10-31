@@ -63,6 +63,20 @@ export async function state() {
   };
 }
 
+/**
+ * The folded overlay (?mode=pull) has its dock only when opened from the dock's search button (LN1, pull.tsx dockShown;
+ * the user, 2026-10-31 20:2x: "I don't know why the dock is showing in the launcher at all"): opens it so, unless open.
+ */
+export async function openFromButton() {
+  const S = await mod("./state.ts");
+  if (document.querySelector(".pull-screen > .dock") || S.dockMode.value !== "mobile") return;
+  const E = window.__mockEvents;
+  E.emit("pull.begin", { kind: "apps", from: { left: innerWidth / 2 - 32, top: innerHeight - 80, width: 64, height: 64 } });
+  E.emit("pull.end", { open: true });
+  await window.__gw.settled();
+  await window.__gw.frames(2);
+}
+
 /** Clears the calls, the menu, the page and the strip between steps. */
 export async function reset() {
   const S = await mod("./state.ts");

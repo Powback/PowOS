@@ -4560,6 +4560,7 @@ function dlLifted(seen, zone, tag) {
 /** Folded (?mode=pull, Chrome in front): [key] up 40 px and on to [end]: the ghost's [zone], then [want] of the host. */
 async function dlFoldedOnce(r, f, [key, end, zone, want]) {
   await dl(r.page, "reset");
+  await dl(r.page, "openFromButton");
   const c = await dl(r.page, "cell", key);
   if (!c) return [`DL1 folded: no dock cell for ${key}`];
   const tag = `DL1 folded ${key} to ${end}`;
