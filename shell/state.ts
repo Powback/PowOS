@@ -356,6 +356,10 @@ export interface LauncherOpen {
   context?: boolean;
   text?: string;
   draft?: string;
+  /** DS2: opened from home's dock search button, at this rect (page px): the launcher grows out of it (launchmorph.ts). */
+  from?: { left: number; top: number; width: number; height: number };
+  /** With [from]: a swipe up from the button, the host's pull following it (pull.drive). */
+  drag?: boolean;
 }
 
 /**

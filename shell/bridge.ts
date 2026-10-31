@@ -258,6 +258,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       closed: () => call("pull.closed"),
       launched: () => call("pull.launched"),
       open: (kind, how) => call<boolean>("pull.open", kind, how ?? {}),
+      drive: (phase, arg) => call<boolean>("pull.drive", phase, arg ?? null),
       homePull: (on, exclude, split, regions) =>
         call<boolean>("pull.homePull", on, exclude ?? null, split ?? false, regions ?? null),
     },

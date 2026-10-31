@@ -3085,6 +3085,10 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
   will-change: transform, opacity;
 }
 
+/* DS2: opened from home's dock search button (launchmorph.ts), the foot stays put - the dock lies over home's, the bar's
+   glass grows out of the button itself - only the panel rises and fades in. */
+.home.pull-screen.from-button > :is(.bar, .dock) { transform: none; opacity: 1; }
+
 /* Quick launchers (launchers.tsx): the toggles' chips holding an app's icon, in a row of their own under the toggles. */
 .cc3-launchers { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--soft-fill); }
 .cc3-launch .cc3-chip { position: relative; }
@@ -3247,41 +3251,25 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 }
 .dock-search .mic svg { width: 14px; height: 14px; }
 .dock-search .mic.on, .dock-search.on .mic { background: var(--color-red); }
-/* Expanded: the button's face is the bar now (it morphs out of it, docksearch.tsx morph). */
+/* The launcher opened from it (launchmorph.ts): the overlay's own button is away under the bar's glass growing out of it. */
 .dock .dock-search.away { opacity: 0; pointer-events: none; transition: none; }
-/* The bottom dock's icons fade under the bar as it grows over them, and come back as it folds. */
-.home.search-dock > .dock .app { transition: opacity 160ms ease-out, scale 160ms ease-out; }
-.home.search-open:not(.dock-left, .dock-right) > .dock :is(.app, .dock-dots) { opacity: 0; scale: 0.92; pointer-events: none; }
-.home.search-open:not(.dock-left, .dock-right) > .dock-tray .app { opacity: 1; scale: 1; pointer-events: auto; }
-/* The bar: over the dock's row, the pill centred in it (left/right measured from the dock: docksearch.tsx placeOver). */
-.dock-search-bar {
-  position: absolute;
-  z-index: 4;
-  left: calc(var(--dsb-l, 0px) + var(--edge));
-  right: calc(var(--dsb-r, 0px) + var(--edge));
-  bottom: calc(max(var(--inset-bottom, env(safe-area-inset-bottom)), calc(var(--inset-keyboard, 0px) + var(--pill-foot))) + (var(--strip-height) - var(--pill-height)) / 2);
-  margin: 0;
-}
-.dock-search-bar .pill { position: relative; will-change: transform; }
-.dock-search-bar.closing { pointer-events: none; }
-/* A side dock: out of its column to the foot, centred between the column and the other edge. */
-.home:is(.dock-left, .dock-right) > .dock-search-bar {
-  left: 0;
-  right: 0;
-  width: min(360px, calc(100% - 2 * var(--side-dock) - 2 * var(--edge)));
-  margin: 0 auto;
-  bottom: calc(max(var(--inset-bottom, env(safe-area-inset-bottom)), calc(var(--inset-keyboard, 0px) + var(--pill-foot))) + var(--edge));
-}
+.dock-search .mic { pointer-events: none; }
+/* The bar's glass in pieces while it grows out of the button (two round caps, a middle): transforms only. */
+.launch-glass { position: absolute; top: 0; height: 100%; transform-origin: 0 0; pointer-events: none; z-index: -1; will-change: transform; box-sizing: border-box; }
+.bar-pill.launch-morph { isolation: isolate; contain: none; }
 /* No pill in the foot: the wide grid's pill column goes to the dock, a side column runs down to the foot. */
 .home.wide.search-dock:not(.dock-left, .dock-right) > .dock:not(.dock-tray) { grid-column: 1 / 3; }
 .home.wide.search-dock:is(.dock-left, .dock-right) { grid-template-rows: minmax(0, 1fr) 0; }
 .home.search-dock:is(.dock-left, .dock-right) > .dock:not(.dock-tray) {
   bottom: calc(max(var(--inset-bottom, env(safe-area-inset-bottom)), calc(var(--inset-keyboard, 0px) + var(--pill-foot))) + var(--edge) + var(--side-rise, 0px));
 }
-@media (prefers-reduced-motion: reduce) { .home.search-dock > .dock .app { transition: none; } }
 /* A side column centres its pinned apps, so the button sits at its middle (auto margins: nothing cut once it scrolls). */
 .home.search-dock:is(.dock-left, .dock-right) .dock-pages > .dock-page:first-child { margin-top: auto; }
 .home.search-dock:is(.dock-left, .dock-right) .dock-pages > .dock-page:last-child { margin-bottom: auto; }
+/* DK2 (the user, 2026-10-31: "We need a separator between the docking and the recent items"): a short thin line in the
+   theme's border colour between a side column's pinned group (with the button) and its recent apps. The one divider
+   DESIGN-LANGUAGE allows here, asked for by name; rounded, not a hairline outline. */
+.home.search-dock:is(.dock-left, .dock-right) .dock-sep { flex: none; align-self: center; width: 24px; height: 2px; margin-top: 12px; border-radius: 1px; background: var(--color-border); }
 /* Edit mode's theme sheet: home's search, bar or dock button (editsheet.tsx SearchPlace). */
 .search-place-pick { display: flex; gap: 4px; }
 

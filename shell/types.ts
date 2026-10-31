@@ -844,6 +844,11 @@ export interface Bridge {
      */
     open?(kind: "apps" | "ai", how?: object): Promise<boolean>;
     /**
+     * Home's page drives the overlay's pull itself (DS2: a swipe up from the dock's search button, which the host's own
+     * lift leaves to the dock): "begin" { ...how }, "drag" openness 0..1, "end" open. An older host has none.
+     */
+    drive?(phase: "begin" | "drag" | "end", arg?: unknown): Promise<boolean>;
+    /**
      * Home's page: a swipe up on home is the launcher's now ([on]: nothing open over home's pages), as [shade.homePull]
      * is a swipe down's; [split]: from home's left half it brings PowOS AI's panel (state.ts pullPanels). Resolves true
      * when the host takes that finger itself (its gesture input); false - home asks [open] on a swipe up instead. [regions]:
