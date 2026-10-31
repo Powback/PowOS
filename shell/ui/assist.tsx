@@ -396,7 +396,9 @@ export function Assist() {
         <div class="assist-grip" {...swipe} aria-hidden="true"><span /></div>
         <div class="assist-head" {...swipe}>
           {!on && s?.screenshot ? (
-            <img class="assist-shot" src={region.value ?? s.screenshot} alt="" />
+            // The circled part at its own shape (AO4: "if I draw a little square, I should show a little square"); the
+            // whole screen as the screen's tall strip.
+            <img class={`assist-shot ${region.value ? "crop" : ""}`} src={region.value ?? s.screenshot} alt="" />
           ) : (
             !on && <span class="assist-shot blank" />
           )}
