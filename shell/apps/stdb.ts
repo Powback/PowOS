@@ -19,6 +19,7 @@ import { closeApp, openApp } from "./pages.ts";
 import { powos } from "../bridge.ts";
 import type { AppLinks, AppWidgetData, Bridge } from "../types.ts";
 import { net, type Net } from "./net.ts";
+import { stableRows } from "./stable.ts";
 import { DetailSheet, type DetailSheetProps } from "./sheet.ts";
 import { notifications, type AppNotifications } from "./notify.tsx";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
@@ -500,7 +501,8 @@ export function useRows<T = any>(db: Db, table: string, query: string): T[] {
     const t = accessor(db.conn, table);
     if (!t) return;
     let live = true;
-    const refresh = perFrame(() => live && setRows([...t.iter()] as T[]));
+    // Equal rows keep their objects (apps/stable.ts): a message re-renders only the rows it changed.
+    const refresh = perFrame(() => live && setRows((was) => stableRows(was, [...t.iter()] as T[])));
     t.onInsert(refresh);
     t.onDelete(refresh);
     t.onUpdate?.(refresh);
@@ -527,13 +529,19 @@ export function watchRows<T = any>(database: string, make: Builder, table: strin
   let e: Entry | null = null;
   let detach: (() => void) | null = null;
   let seen: { conn: any; epoch: number; status: Status } | null = null;
+  let last: T[] | null = null;
+  const deliver = (rows: T[]) => {
+    const next = stableRows(last, rows);
+    if (next !== last) onRows((last = next));
+  };
   const attach = () => {
     detach?.();
     detach = null;
     const t = e?.conn ? accessor(e.conn, table) : null;
     if (!e || !t || e.status !== "connected" || e.stale?.includes(table)) return;
     let live = true;
-    const refresh = perFrame(() => live && onRows([...t.iter()] as T[]));
+    // Equal rows keep their objects, and nothing changed (a reconnect's resubscribe) calls nobody (apps/stable.ts).
+    const refresh = perFrame(() => live && deliver([...t.iter()] as T[]));
     t.onInsert(refresh);
     t.onDelete(refresh);
     t.onUpdate?.(refresh);
