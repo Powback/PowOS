@@ -63,7 +63,15 @@ cleanup() {
 trap 'cleanup' EXIT
 trap 'cleanup; exit 143' TERM INT
 skip() { log "SKIP: $*"; log "window-render: SKIP ($*) - $OUT"; exit 2; }
-verdict() { log "window-render: $1 - shots: $OUT"; ls "$OUT"/*.png 2>/dev/null | sed 's/^/  /' | tee -a "$OUT/log.txt"; }
+verdict() {
+  # A FAIL keeps the window path's own record: the ring log WebWindows/WebWindowLaunch/FreeformTasks append to
+  # (shell/WindowLog.kt: files/window-log.1.txt then window-log.txt, ~1 h+) and logcat's window tags as they are now.
+  if [ "$1" = FAIL ]; then
+    "$A" exec-out "su -c 'cat /data/data/com.powos.app/files/window-log.1.txt /data/data/com.powos.app/files/window-log.txt 2>/dev/null'" > "$OUT/window-log.txt" 2>/dev/null
+    sh_ "logcat -d -v time -s PowosWebWindows:V PowosFreeform:V" > "$OUT/logcat-windows.txt"
+    log "window path log: $OUT/window-log.txt ($(wc -l < "$OUT/window-log.txt" | tr -d ' ') lines; empty = an APK before WindowLog), logcat: $OUT/logcat-windows.txt"
+  fi
+  log "window-render: $1 - shots: $OUT";ls "$OUT"/*.png 2>/dev/null | sed 's/^/  /' | tee -a "$OUT/log.txt"; }
 touched() { [ "$(irq)" = "$I0" ] || skip "user active (a real touch during the check at $1; its window closed)"; }
 shot() {   # shot NAME: raw screencap gzipped on the phone -> $OUT/NAME.raw.gz
   "$A" exec-out "screencap | gzip -1" > "$OUT/$1.raw.gz" 2>/dev/null && [ -s "$OUT/$1.raw.gz" ] || { log "screencap $1 failed"; return 1; }

@@ -12,7 +12,6 @@ import android.os.HandlerThread
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
-import android.util.Log
 import android.view.InputDevice
 import android.view.InputEvent
 import android.view.MotionEvent
@@ -107,7 +106,7 @@ class WebWindows(
 
             override fun onDisplayRemoved(displayId: Int) {
                 wins.values.firstOrNull { it.displayId == displayId }?.let { w ->
-                    Log.i(TAG, "display $displayId removed: window ${w.id} closed")
+                    WindowLog.i(TAG, "display $displayId removed: window ${w.id} closed")
                     drop(w, released = true)
                 }
             }
@@ -180,7 +179,7 @@ class WebWindows(
         val task = w.taskId
         main.post {
             if (w.closed) return@post
-            Log.i(TAG, "window ${w.id} (${w.component.packageName}${stateOf(w)}): its app's task $task is gone (removed by ${dev.omalauncher.system.Tasks.removedBy(task)}): window closed")
+            WindowLog.i(TAG, "window ${w.id} (${w.component.packageName}${stateOf(w)}): its app's task $task is gone (removed by ${dev.omalauncher.system.Tasks.removedBy(task)}): window closed")
             WebWindowDisplays.fullScreen(task, w.id, false)
             // Nothing left to remove: its task is gone already.
             w.full = false
@@ -212,7 +211,7 @@ class WebWindows(
         // D1: the user made its app an Android floating window on purpose ("..." or the switcher's Floating window): it
         // stays native. The window lets go of it (false: its display empty, checkOrphan closes it), never pulls it back.
         if ((mode == WINDOWING_MODE_FREEFORM || mode == WINDOWING_MODE_ZOOM) && dev.omalauncher.system.FreeformTasks.isNativeFloat(t.taskId, mode)) {
-            if (w.followed != "native") Log.i(TAG, "window ${w.id} (${w.component.packageName}): its task ${t.taskId} is a floating window the user picked: left native")
+            if (w.followed != "native") WindowLog.i(TAG, "window ${w.id} (${w.component.packageName}): its task ${t.taskId} is a floating window the user picked: left native")
             w.followed = "native"
             return false
         }
@@ -224,7 +223,7 @@ class WebWindows(
         val key = "$display/$mode"
         if (w.followed == key) return true
         w.followed = key
-        Log.i(TAG, "window ${w.id} (${w.component.packageName}): its task ${t.taskId} went to display $display mode $mode by the system or the app: $act")
+        WindowLog.i(TAG, "window ${w.id} (${w.component.packageName}): its task ${t.taskId} went to display $display mode $mode by the system or the app: $act")
         followNow(w, t.taskId, act)
         return true
     }
@@ -271,7 +270,7 @@ class WebWindows(
         task: Int,
     ) {
         val ok = moveTask(task, w.displayId)
-        Log.i(TAG, "window ${w.id}: task $task followed back onto its display ${w.displayId}: $ok")
+        WindowLog.i(TAG, "window ${w.id}: task $task followed back onto its display ${w.displayId}: $ok")
         if (!ok) {
             w.followed = null
             return
@@ -307,7 +306,7 @@ class WebWindows(
         if (!gone(w, again)) return
         main.post {
             if (!gone(w, again)) return@post
-            Log.i(TAG, "window ${w.id} (${w.component.packageName}): its app's task left display ${w.displayId} (finished, moved to another display or re-parented): window closed")
+            WindowLog.i(TAG, "window ${w.id} (${w.component.packageName}): its app's task left display ${w.displayId} (finished, moved to another display or re-parented): window closed")
             drop(w)
         }
     }
@@ -494,9 +493,9 @@ class WebWindows(
 
     private fun root(): SurfaceControl? {
         root?.takeIf { it.isValid }?.let { return it.also { rootAgain(it) } }
-        val attached = web.rootSurfaceControl ?: return null.also { Log.w(TAG, "home's window has no surface yet") }
+        val attached = web.rootSurfaceControl ?: return null.also { WindowLog.w(TAG, "home's window has no surface yet") }
         val sc = SurfaceControl.Builder().setName("powos-webwindows").build()
-        val t = underHome(sc, "made") ?: return null.also { sc.release(); Log.w(TAG, "home's surface refused a child") }
+        val t = underHome(sc, "made") ?: return null.also { sc.release(); WindowLog.w(TAG, "home's surface refused a child") }
         t.setVisibility(sc, !underSwitcher).apply()
         root = sc
         watchSurface()
@@ -522,12 +521,12 @@ class WebWindows(
     ): SurfaceControl.Transaction? {
         val home = homeSurface()
         if (home != null) {
-            if (rootParent != "home's buffer") Log.i(TAG, "windows' root under home's buffer ($why)")
+            if (rootParent != "home's buffer") WindowLog.i(TAG, "windows' root under home's buffer ($why)")
             rootParent = "home's buffer"
             return SurfaceControl.Transaction().reparent(r, home).setLayer(r, -1)
         }
         val t = web.rootSurfaceControl?.buildReparentTransaction(r) ?: return null
-        if (rootParent != "bounds") Log.w(TAG, "windows' root on home's bounds layer ($why): no window surface by reflection - apps cover the DOM over them")
+        if (rootParent != "bounds") WindowLog.w(TAG, "windows' root on home's bounds layer ($why): no window surface by reflection - apps cover the DOM over them")
         rootParent = "bounds"
         return t.setLayer(r, -1)
     }
@@ -542,9 +541,9 @@ class WebWindows(
      */
     private fun rootAgain(r: SurfaceControl) {
         val switcher = dev.omalauncher.system.Switcher.open
-        if (underSwitcher && !switcher) Log.w(TAG, "windows' root was still hidden for a switcher that is gone: shown again")
+        if (underSwitcher && !switcher) WindowLog.w(TAG, "windows' root was still hidden for a switcher that is gone: shown again")
         underSwitcher = switcher
-        val t = underHome(r, "open") ?: return Log.w(TAG, "windows' root: home has no surface to hang it on at open").let { }
+        val t = underHome(r, "open") ?: return WindowLog.w(TAG, "windows' root: home has no surface to hang it on at open").let { }
         t.setVisibility(r, !underSwitcher).apply()
     }
 
@@ -557,7 +556,7 @@ class WebWindows(
             HiddenApi.allow()
             val vri = web.rootSurfaceControl ?: return null
             vri.javaClass.getMethod("getSurfaceControl").invoke(vri) as SurfaceControl?
-        }.onFailure { if (rootParent != "bounds") Log.w(TAG, "home's window surface unreadable", it) }.getOrNull()?.takeIf { it.isValid }
+        }.onFailure { if (rootParent != "bounds") WindowLog.w(TAG, "home's window surface unreadable", it) }.getOrNull()?.takeIf { it.isValid }
 
     /** The switcher is up: every window's layer hidden under it (main thread). */
     private var underSwitcher = false
@@ -576,7 +575,7 @@ class WebWindows(
             return
         }
         t.setVisibility(r, on).apply()
-        Log.i(TAG, "windows ${if (on) "shown again (switcher down)" else "hidden under the switcher (each is its card)"}: ${wins.size} window(s)")
+        WindowLog.i(TAG, "windows ${if (on) "shown again (switcher down)" else "hidden under the switcher (each is its card)"}: ${wins.size} window(s)")
     }
 
     /**
@@ -588,10 +587,10 @@ class WebWindows(
         rect: JSONObject,
         task: Int = -1,
     ): Int {
-        if (!enabled()) return -1.also { Log.w(TAG, "open ${component.packageName}: $SETTING is off") }
+        if (!enabled()) return -1.also { WindowLog.w(TAG, "open ${component.packageName}: $SETTING is off") }
         unresizeable(component)?.let { why ->
             // Fallback: Android's own window (the caller launches it as before; the switcher uses Android's split).
-            Log.w(TAG, "fallback: ${component.packageName} keeps Android's own window/split, not a web window: $why")
+            WindowLog.w(TAG, "fallback: ${component.packageName} keeps Android's own window/split, not a web window: $why")
             // A launch held for this window (WebWindowLaunch) goes the old way now, not after its wait.
             WebWindowLaunch.refused(component.packageName)
             return -1
@@ -609,7 +608,7 @@ class WebWindows(
         wins[id] = win
         helper.create(id, w, h) { displayId, error ->
             if (displayId < 0) {
-                Log.w(TAG, "window $id (${component.packageName}): no display: $error")
+                WindowLog.w(TAG, "window $id (${component.packageName}): no display: $error")
                 main.post { drop(win, released = true) }
                 return@create
             }
@@ -618,7 +617,7 @@ class WebWindows(
             WebWindowDisplays.add(displayId, id)
             // Closed while its display was being made: the display goes too.
             if (win.closed) return@create helper.release(displayId)
-            Log.i(TAG, "window $id: trusted display $displayId ${w}x$h dpi $dpi (${component.packageName})")
+            WindowLog.i(TAG, "window $id: trusted display $displayId ${w}x$h dpi $dpi (${component.packageName})")
             main.post { scheduleReconcile() }
             io.post { mirrorWhenKnown(win, SystemClock.uptimeMillis()) }
         }
@@ -639,7 +638,7 @@ class WebWindows(
         val pkg = component.packageName
         val w = wins.values.firstOrNull { it.linux == null && !it.closed && it.component.packageName == pkg } ?: return null
         if (task >= 0 && task != w.taskId && !secondTask(w, task)) return null
-        Log.i(TAG, "open $pkg task $task: window ${w.id} (display ${w.displayId}) has the app already: raised, no second display")
+        WindowLog.i(TAG, "open $pkg task $task: window ${w.id} (display ${w.displayId}) has the app already: raised, no second display")
         emit("webwindows.show", w.id)
         return w.id
     }
@@ -653,11 +652,11 @@ class WebWindows(
         task: Int,
     ): Boolean {
         if (newDocument(task)) {
-            Log.i(TAG, "open ${w.component.packageName} task $task: a new document of the app (window ${w.id} has task ${w.taskId}): a window of its own")
+            WindowLog.i(TAG, "open ${w.component.packageName} task $task: a new document of the app (window ${w.id} has task ${w.taskId}): a window of its own")
             return false
         }
         val onDisplay = w.displayId >= 0 && !w.full && w.leftAt == 0L
-        if (onDisplay) io.post { Log.i(TAG, "open ${w.component.packageName} task $task: its second task moved into window ${w.id} (display ${w.displayId}): ${moveTask(task, w.displayId)}") }
+        if (onDisplay) io.post { WindowLog.i(TAG, "open ${w.component.packageName} task $task: its second task moved into window ${w.id} (display ${w.displayId}): ${moveTask(task, w.displayId)}") }
         return true
     }
 
@@ -683,20 +682,20 @@ class WebWindows(
         offer: LinuxOffer,
     ) {
         wins.values.firstOrNull { it.linux?.kwin == kwin }?.let { w ->
-            Log.i(TAG, "KWin window $kwin (${offer.appId}) again: web window ${w.id} shown where it was")
+            WindowLog.i(TAG, "KWin window $kwin (${offer.appId}) again: web window ${w.id} shown where it was")
             emit("webwindows.show", w.id)
             return
         }
         if (pendingLinux.containsKey(kwin)) return
         offer.key = key
         pendingLinux[kwin] = offer
-        Log.i(TAG, "KWin window $kwin (${offer.appId}, \"${offer.title}\"): offered to the page as $key")
+        WindowLog.i(TAG, "KWin window $kwin (${offer.appId}, \"${offer.title}\"): offered to the page as $key")
         // "ownFrame": it draws its own complete frame (Brave, Steam, GTK CSD; kwin 0046) - the page shows no bar over it.
         val own = andro.marchy.WebWindowSource.ownFrame(kwin)
         emit("webwindows.adopt", JSONObject().put("kwin", kwin).put("key", key).put("label", offer.label).put("ownFrame", own))
         main.postDelayed({
             pendingLinux.remove(kwin)?.let { p ->
-                Log.w(TAG, "fallback: KWin window $kwin (${p.appId}): the page made no web window in $LINUX_ADOPT_MS ms, a task instead")
+                WindowLog.w(TAG, "fallback: KWin window $kwin (${p.appId}): the page made no web window in $LINUX_ADOPT_MS ms, a task instead")
                 andro.marchy.WebWindowSource.fallback(context, kwin, p.appId, p.title)
             }
         }, LINUX_ADOPT_MS)
@@ -711,7 +710,7 @@ class WebWindows(
         kwin: Int,
         rect: JSONObject,
     ): Int {
-        val p = pendingLinux.remove(kwin) ?: return -1.also { Log.w(TAG, "open KWin window $kwin: not offered (or taken already)") }
+        val p = pendingLinux.remove(kwin) ?: return -1.also { WindowLog.w(TAG, "open KWin window $kwin: not offered (or taken already)") }
         val parent = root() ?: return -1.also { andro.marchy.WebWindowSource.fallback(context, kwin, p.appId, p.title) }
         val id = nextId++
         val d = density()
@@ -739,7 +738,7 @@ class WebWindows(
             andro.marchy.WebWindowSource.configure(context)
             val handle = andro.marchy.WebWindowSource.start(src.surface, kwin, bw, bh)
             if (handle == 0L) {
-                Log.e(TAG, "window $id (KWin window $kwin): consumer did not start")
+                WindowLog.e(TAG, "window $id (KWin window $kwin): consumer did not start")
                 return@execute
             }
             // Published before the crop: a resize placed meanwhile (place() on main) crops this consumer too, and a
@@ -754,13 +753,13 @@ class WebWindows(
                 andro.marchy.WebWindowSource.stop(handle)
                 return@execute
             }
-            Log.i(TAG, "window $id: KWin window $kwin (${p.appId}) consumer up, buffers ${bw}x$bh, body ${win.w}x${win.h}")
+            WindowLog.i(TAG, "window $id: KWin window $kwin (${p.appId}) consumer up, buffers ${bw}x$bh, body ${win.w}x${win.h}")
             liveWhenDrawn(win)
         }
         andro.marchy.WebWindowSource.size(kwin, w, h)
         // KWin focused the new window (its task's start): a touch back on the window it came from focuses that again.
         linuxFocused = kwin
-        Log.i(TAG, "window $id: KWin window $kwin (${p.appId}) as a web window, ${w}x$h")
+        WindowLog.i(TAG, "window $id: KWin window $kwin (${p.appId}) as a web window, ${w}x$h")
         return id
     }
 
@@ -789,7 +788,7 @@ class WebWindows(
     fun closeLinuxApp(key: String): Boolean {
         val ws = wins.values.filter { it.linux?.offer?.key == key }
         ws.forEach { w ->
-            Log.i(TAG, "window ${w.id}: closed with its app $key (the app menu's close)")
+            WindowLog.i(TAG, "window ${w.id}: closed with its app $key (the app menu's close)")
             drop(w)
         }
         return ws.isNotEmpty()
@@ -800,7 +799,7 @@ class WebWindows(
         pendingLinux.remove(kwin)
         val w = wins.values.firstOrNull { it.linux?.kwin == kwin } ?: return
         w.linux?.kwinClosed = true
-        Log.i(TAG, "KWin closed window $kwin: web window ${w.id} goes")
+        WindowLog.i(TAG, "KWin closed window $kwin: web window ${w.id} goes")
         drop(w)
     }
 
@@ -823,7 +822,7 @@ class WebWindows(
         if (src.kwinClosed) return
         if (handBack) andro.marchy.WebWindowSource.fallback(context, src.kwin, src.offer.appId, src.offer.title)
         else andro.marchy.WebWindowSource.quit(context, src.kwin)
-        Log.i(TAG, "close window ${w.id}: KWin window ${src.kwin} ${if (handBack) "handed back as a task" else "quit (KWin closes it, then ends the app)"}")
+        WindowLog.i(TAG, "close window ${w.id}: KWin window ${src.kwin} ${if (handBack) "handed back as a task" else "quit (KWin closes it, then ends the app)"}")
     }
 
     /**
@@ -840,18 +839,18 @@ class WebWindows(
                 mirror(win.displayId)
             } catch (e: Exception) {
                 // S1's open question (docs/WEB_WINDOWS.md): mirrorDisplay from PowOS's own uid. Logged when refused.
-                Log.w(TAG, "mirrorDisplay(${win.displayId}) refused for PowOS's uid: ${e.cause ?: e}")
+                WindowLog.w(TAG, "mirrorDisplay(${win.displayId}) refused for PowOS's uid: ${e.cause ?: e}")
                 main.post { drop(win) }
                 return
             }
         val waited = SystemClock.uptimeMillis() - since
         when {
             out != null -> {
-                Log.i(TAG, "window ${win.id}: display ${win.displayId} mirrored after $waited ms (PowOS uid)")
+                WindowLog.i(TAG, "window ${win.id}: display ${win.displayId} mirrored after $waited ms (PowOS uid)")
                 main.post { attach(win, out) }
             }
             waited > MIRROR_WAIT_MS -> {
-                Log.w(TAG, "window ${win.id}: display ${win.displayId} not known to WM after $waited ms")
+                WindowLog.w(TAG, "window ${win.id}: display ${win.displayId} not known to WM after $waited ms")
                 main.post { drop(win) }
             }
             else -> io.postDelayed({ mirrorWhenKnown(win, since) }, 16)
@@ -900,7 +899,7 @@ class WebWindows(
         val task = win.adopt
         win.adopt = -1
         val ok = moveTask(task, win.displayId)
-        Log.i(TAG, "window ${win.id}: app's task $task ${if (ok) "moved onto display ${win.displayId}" else "NOT moved: launched there instead"}")
+        WindowLog.i(TAG, "window ${win.id}: app's task $task ${if (ok) "moved onto display ${win.displayId}" else "NOT moved: launched there instead"}")
         if (ok) win.taskId = task else main.post { if (!win.closed) launch(win) }
     }
 
@@ -951,7 +950,7 @@ class WebWindows(
             }
             Triple(t[0].toLong(), geos, page)
         } catch (e: RuntimeException) {
-            Log.w(TAG, "w.f: bad geometry ($e)")
+            WindowLog.w(TAG, "w.f: bad geometry ($e)")
             null
         }
 
@@ -1080,7 +1079,7 @@ class WebWindows(
         if (layers == null) {
             if (!dump.contains("Output Layer")) {
                 orderCheckBroken = true
-                Log.w(TAG, "layer order check: the dump has no output layers (${dump.take(120).replace('\n', ' ')}); off")
+                WindowLog.w(TAG, "layer order check: the dump has no output layers (${dump.take(120).replace('\n', ' ')}); off")
             }
             return
         }
@@ -1088,11 +1087,11 @@ class WebWindows(
         val home = layers.indexOfFirst { it.contains("HomeShell") }
         val divergence = orderDivergence(order, at) ?: overHome(at, home)
         if (divergence == null) {
-            if (!orderCheckOk) Log.i(TAG, "layer order check: ok - page (bottom first) ${order.joinToString()} at output layers ${order.map { at[it] }}, home's buffer at $home (logged once)")
+            if (!orderCheckOk) WindowLog.i(TAG, "layer order check: ok - page (bottom first) ${order.joinToString()} at output layers ${order.map { at[it] }}, home's buffer at $home (logged once)")
             orderCheckOk = true
             return
         }
-        Log.w(
+        WindowLog.w(
             TAG,
             "layer order != page order: $divergence; page (bottom first) ${order.joinToString { "$it(${names[it]})" }}, " +
                 "SurfaceFlinger's output: ${layers.withIndex().joinToString { (i, n) -> "$i ${n.take(60)}" }} (home's buffer at $home)",
@@ -1117,12 +1116,12 @@ class WebWindows(
             val p = ProcessBuilder("dumpsys", "SurfaceFlinger").redirectErrorStream(true).start()
             val own = p.inputStream.bufferedReader().use { it.readText() }.also { p.waitFor() }
             if (!own.startsWith("Permission Denial")) return@runCatching own
-            if (!orderCheckViaRoot) Log.i(TAG, "layer order check: SurfaceFlinger refuses the app's uid, read as root")
+            if (!orderCheckViaRoot) WindowLog.i(TAG, "layer order check: SurfaceFlinger refuses the app's uid, read as root")
             orderCheckViaRoot = true
             andro.marchy.RootShell.run("dumpsys SurfaceFlinger", null, ROOT_DUMP_MS).output
         }.getOrElse {
             orderCheckBroken = true
-            Log.w(TAG, "layer order check: no SurfaceFlinger dump ($it); off")
+            WindowLog.w(TAG, "layer order check: no SurfaceFlinger dump ($it); off")
             null
         }
 
@@ -1198,7 +1197,7 @@ class WebWindows(
         val now = SystemClock.uptimeMillis()
         if (now - lastPlaceLog < PLACE_LOG_MS || geos.isEmpty()) return
         lastPlaceLog = now
-        Log.i(TAG, "w.f f$frame behind=$behind (${behindFrames}/$appliedFrames applies behind) lag=${sync.lag.joinToString("/")} pf=${sync.pageLag.joinToString("/")} rx=${"%.1f".format(sync.receiptMs / sync.pageLag.sum().coerceAtLeast(1))}ms (page ${"%.1f".format(rxPage / rxSplit.coerceAtLeast(1))} + hop ${"%.1f".format(rxHop / rxSplit.coerceAtLeast(1))}) via=$via " + geos.joinToString { "${it.id}@${it.body.toShortString()} clip ${it.clip.toShortString()} z${it.z} ${if (it.visible) "shown" else "hidden"}" })
+        WindowLog.i(TAG, "w.f f$frame behind=$behind (${behindFrames}/$appliedFrames applies behind) lag=${sync.lag.joinToString("/")} pf=${sync.pageLag.joinToString("/")} rx=${"%.1f".format(sync.receiptMs / sync.pageLag.sum().coerceAtLeast(1))}ms (page ${"%.1f".format(rxPage / rxSplit.coerceAtLeast(1))} + hop ${"%.1f".format(rxHop / rxSplit.coerceAtLeast(1))}) via=$via " + geos.joinToString { "${it.id}@${it.body.toShortString()} clip ${it.clip.toShortString()} z${it.z} ${if (it.visible) "shown" else "hidden"}" })
     }
 
     private var lastPlaceLog = 0L
@@ -1218,7 +1217,7 @@ class WebWindows(
         val ms = win.shownAt - win.openedAt
         val display = if (win.displayAt > 0) "display after ${win.displayAt - win.openedAt} ms" else "no display (KWin)"
         val line = "window ${win.id} (${win.linux?.offer?.appId ?: win.component.packageName}): shown $ms ms after open ($display)"
-        if (ms > SHOWN_SLOW_MS) Log.w(TAG, "$line - slow, over $SHOWN_SLOW_MS ms") else Log.i(TAG, line)
+        if (ms > SHOWN_SLOW_MS) WindowLog.w(TAG, "$line - slow, over $SHOWN_SLOW_MS ms") else WindowLog.i(TAG, line)
     }
 
 
@@ -1241,7 +1240,7 @@ class WebWindows(
         fillUnder(t, win, g)
         val released = paced(win, g)
         resizeContent(win, g.cw, g.ch)
-        released?.let { counts -> if (win.linux == null && win.displayId >= 0) helper.settle(win.displayId, counts) else Log.i(TAG, "$counts (Linux: no settle measure)") }
+        released?.let { counts -> if (win.linux == null && win.displayId >= 0) helper.settle(win.displayId, counts) else WindowLog.i(TAG, "$counts (Linux: no settle measure)") }
     }
 
     /**
@@ -1332,7 +1331,7 @@ class WebWindows(
             val canvas = surface.lockCanvas(null)
             canvas.drawColor(argb)
             surface.unlockCanvasAndPost(canvas)
-        }.onFailure { Log.w(TAG, "window ${win.id}: fill not drawn", it) }
+        }.onFailure { WindowLog.w(TAG, "window ${win.id}: fill not drawn", it) }
         surface.release()
     }
 
@@ -1350,7 +1349,7 @@ class WebWindows(
         if (!win.container.isValid) return
         t.reparent(win.container, r)
         win.underRoot = true
-        Log.w(TAG, "window ${win.id}: its layer was outside the windows' root (left by full screen): back under it, at the page's z")
+        WindowLog.w(TAG, "window ${win.id}: its layer was outside the windows' root (left by full screen): back under it, at the page's z")
     }
 
     /** A new body size ([bw]x[bh] px) to [win]'s source: KWin's window size, or its display's (the helper). */
@@ -1429,7 +1428,7 @@ class WebWindows(
         runCatching {
             HiddenApi.allow()
             SurfaceControl.Transaction::class.java.getMethod("setCornerRadius", SurfaceControl::class.java, Float::class.javaPrimitiveType)
-        }.onFailure { Log.w(TAG, "no setCornerRadius: square windows", it) }.getOrNull()
+        }.onFailure { WindowLog.w(TAG, "no setCornerRadius: square windows", it) }.getOrNull()
     }
 
     private fun cornerRadius(
@@ -1472,7 +1471,7 @@ class WebWindows(
             val cb = Class.forName("android.view.ViewRootImpl\$SurfaceChangedCallback")
             val proxy = java.lang.reflect.Proxy.newProxyInstance(cb.classLoader, arrayOf(cb)) { p, m, args -> surfaceCall(p, m.name, args) }
             vri.javaClass.getMethod("addSurfaceChangedCallback", cb).invoke(vri, proxy)
-        }.onFailure { Log.w(TAG, "no surface callback: re-attached on window visibility instead", it) }.isSuccess
+        }.onFailure { WindowLog.w(TAG, "no surface callback: re-attached on window visibility instead", it) }.isSuccess
 
     /** One call on the surface callback's Proxy (UI thread). */
     private fun surfaceCall(
@@ -1482,7 +1481,7 @@ class WebWindows(
     ): Any? =
         when (name) {
             "surfaceCreated", "surfaceReplaced" -> reattach(args?.getOrNull(0) as? SurfaceControl.Transaction, name).let { null }
-            "surfaceDestroyed" -> Log.i(TAG, "home's surface destroyed: ${wins.size} window(s) wait for the next one").let { null }
+            "surfaceDestroyed" -> WindowLog.i(TAG, "home's surface destroyed: ${wins.size} window(s) wait for the next one").let { null }
             "hashCode" -> System.identityHashCode(proxy)
             "equals" -> proxy === args?.getOrNull(0)
             "toString" -> "powos-webwindows surface watch"
@@ -1513,9 +1512,9 @@ class WebWindows(
         why: String,
     ) {
         val r = root?.takeIf { it.isValid } ?: return
-        val re = underHome(r, "home's surface $why") ?: run { Log.w(TAG, "home's surface $why: no surface to re-attach to"); return }
+        val re = underHome(r, "home's surface $why") ?: run { WindowLog.w(TAG, "home's surface $why: no surface to re-attach to"); return }
         if (t != null) t.merge(re) else re.apply()
-        Log.i(TAG, "home's surface $why: windows' root re-attached (${wins.size} window(s): ${wins.values.joinToString { "${it.id}@d${it.displayId}" }})")
+        WindowLog.i(TAG, "home's surface $why: windows' root re-attached (${wins.size} window(s): ${wins.values.joinToString { "${it.id}@d${it.displayId}" }})")
         for (w in wins.values) if (w.displayId >= 0 && w.mirror?.isValid == false) io.post { remirror(w) }
         // Every window's whole layer state again, from the page's next frame (not only when its geometry next changes).
         resend("home's surface $why")
@@ -1524,7 +1523,7 @@ class WebWindows(
     /** On [io]: [w]'s display mirrored again into its container (its mirror lost), the app left running as it is. */
     private fun remirror(w: Win) {
         if (w.closed) return
-        val out = runCatching { mirror(w.displayId) }.getOrNull() ?: run { Log.w(TAG, "window ${w.id}: display ${w.displayId} not mirrored again"); return }
+        val out = runCatching { mirror(w.displayId) }.getOrNull() ?: run { WindowLog.w(TAG, "window ${w.id}: display ${w.displayId} not mirrored again"); return }
         main.post {
             if (w.closed || !w.container.isValid) return@post out.release()
             w.mirror?.release()
@@ -1532,7 +1531,7 @@ class WebWindows(
             val t = SurfaceControl.Transaction().reparent(out, w.container).setLayer(out, 0).setVisibility(out, true).setCrop(out, Rect(0, 0, 0, 0))
             w.geo?.let { place(t, w, it) }
             t.apply()
-            Log.i(TAG, "window ${w.id}: display ${w.displayId} mirrored again")
+            WindowLog.i(TAG, "window ${w.id}: display ${w.displayId} mirrored again")
             resend("window ${w.id} mirrored again")
         }
     }
@@ -1619,7 +1618,7 @@ class WebWindows(
                 val dy = yOf(ev) - e.y0
                 if (dy * -e.side > EDGE_PULL_DP * density()) {
                     fullEdge = null
-                    Log.i(TAG, "window ${e.id}: ${if (e.side < 0) "top" else "bottom"} edge pull: leaves full screen")
+                    WindowLog.i(TAG, "window ${e.id}: ${if (e.side < 0) "top" else "bottom"} edge pull: leaves full screen")
                     toWindow(e.id)
                 }
             }
@@ -1632,7 +1631,7 @@ class WebWindows(
      */
     fun leaveFullScreen(why: String): Boolean {
         val w = wins.values.firstOrNull { it.linuxFull } ?: return false
-        Log.i(TAG, "window ${w.id}: $why: leaves full screen")
+        WindowLog.i(TAG, "window ${w.id}: $why: leaves full screen")
         return toWindow(w.id)
     }
 
@@ -1644,7 +1643,7 @@ class WebWindows(
         val why = staleFull(w) ?: return w
         if (staleFullLogged != w.id) {
             staleFullLogged = w.id
-            Log.w(TAG, "IR1: window ${w.id} is marked full screen but $why: its touches go to home's page")
+            WindowLog.w(TAG, "IR1: window ${w.id} is marked full screen but $why: its touches go to home's page")
             // The page's model wins: back in its window, as the page shows it.
             if (w.fullListedAt != 0L && !w.closed) main.post { linuxFullScreen(w, false) }
         }
@@ -1687,7 +1686,7 @@ class WebWindows(
     /** The page's "w.f" lists window [id], which the host has no more: the page drops it ("webwindows.closed"). */
     private fun staleInPage(id: Int) {
         if (id < 0 || !staleIds.add(id)) return
-        Log.w(TAG, "window $id is in the page's w.f but not the host's: the page told it is closed")
+        WindowLog.w(TAG, "window $id is in the page's w.f but not the host's: the page told it is closed")
         emit("webwindows.closed", id)
     }
 
@@ -1705,7 +1704,7 @@ class WebWindows(
             andro.marchy.WebWindowSource.focus(src.kwin)
         }
         val g = win.geo
-        Log.i(TAG, "window ${win.id}: gesture to KWin window ${src.kwin}${g?.let { " (body ${it.body.toShortString()} x${it.scale})" } ?: ""}${if (src.handle == 0L) ": its consumer isn't up, dropped" else ""}")
+        WindowLog.i(TAG, "window ${win.id}: gesture to KWin window ${src.kwin}${g?.let { " (body ${it.body.toShortString()} x${it.scale})" } ?: ""}${if (src.handle == 0L) ": its consumer isn't up, dropped" else ""}")
         gesture?.let { linuxInput(win, it) }
     }
 
@@ -1778,7 +1777,7 @@ class WebWindows(
     private fun goLive(w: Win) {
         if (w.closed || w.live) return
         w.live = true
-        Log.i(TAG, "window ${w.id}: live (its content shows; the page drops the placeholder)")
+        WindowLog.i(TAG, "window ${w.id}: live (its content shows; the page drops the placeholder)")
         emit("webwindows.live", w.id)
     }
 
@@ -1823,10 +1822,10 @@ class WebWindows(
         // The injector: the shell-uid helper (holds INJECT_EVENTS), one line per event over its stdin - no process per
         // touch. The fallbacks below only when it can't be reached.
         if (helper.touch(w, act, px, py)) {
-            if (act != MotionEvent.ACTION_MOVE) Log.i(TAG, "input: window ${w.id} $action at ${px.toInt()},${py.toInt()} -> display ${w.displayId} (helper)")
+            if (act != MotionEvent.ACTION_MOVE) WindowLog.i(TAG, "input: window ${w.id} $action at ${px.toInt()},${py.toInt()} -> display ${w.displayId} (helper)")
             return true
         }
-        Log.w(TAG, "input: window ${w.id} $action -> display ${w.displayId}: helper unreachable, falling back")
+        WindowLog.w(TAG, "input: window ${w.id} $action -> display ${w.displayId}: helper unreachable, falling back")
         injectFallback(w, MotionEvent.obtain(w.downAt, now, act, px, py, 0))
         return true
     }
@@ -1838,11 +1837,11 @@ class WebWindows(
     ) {
         try {
             if (injectWorks != false && injectReflect(w.displayId, ev)) {
-                if (injectWorks == null) Log.i(TAG, "input path: InputManager.injectInputEvent (reflection, setDisplayId)")
+                if (injectWorks == null) WindowLog.i(TAG, "input path: InputManager.injectInputEvent (reflection, setDisplayId)")
                 injectWorks = true
                 return
             }
-            if (injectWorks != false) Log.i(TAG, "input path: root `input -d <id> motionevent` (reflection refused)")
+            if (injectWorks != false) WindowLog.i(TAG, "input path: root `input -d <id> motionevent` (reflection refused)")
             injectWorks = false
             injectRoot(w.displayId, ev)
         } finally {
@@ -1888,7 +1887,7 @@ class WebWindows(
         val window = activityOf(web.context)?.window ?: return
         homeImeOn = on
         if (on) window.clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM) else window.addFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
-        Log.i(TAG, "home's window ${if (on) "takes the keyboard again" else "leaves the keyboard to the web window's app"}")
+        WindowLog.i(TAG, "home's window ${if (on) "takes the keyboard again" else "leaves the keyboard to the web window's app"}")
     }
 
     private fun activityOf(c: Context): android.app.Activity? {
@@ -1941,7 +1940,7 @@ class WebWindows(
         w.closed = true
         logDrop(w, released)
         dropLinux(w, handBack)
-        Log.i(TAG, "close window ${w.id} (${w.component.packageName}, display ${w.displayId}, task ${w.taskId}${if (w.full) ", full screen" else ""}): 1/4 layers off")
+        WindowLog.i(TAG, "close window ${w.id} (${w.component.packageName}, display ${w.displayId}, task ${w.taskId}${if (w.full) ", full screen" else ""}): 1/4 layers off")
         releaseLayers(w)
         main.post { publishBars() }
         val displayId = w.displayId
@@ -1954,11 +1953,11 @@ class WebWindows(
             io.post {
                 // DESTROY_CONTENT_ON_REMOVAL finishes the activities but leaves the task in recents (S0): removed first.
                 removeTasks(displayId)
-                Log.i(TAG, "close window ${w.id}: 3/4 display $displayId released")
+                WindowLog.i(TAG, "close window ${w.id}: 3/4 display $displayId released")
                 helper.release(displayId)
             }
         }
-        Log.i(TAG, "close window ${w.id}: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4")
+        WindowLog.i(TAG, "close window ${w.id}: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4")
         emit("webwindows.closed", w.id)
     }
 
@@ -2006,9 +2005,9 @@ class WebWindows(
             for (id in ids) {
                 dev.omalauncher.system.Tasks.logRemove("removeTask", id, "every task on closed web window display $displayId", removes = true)
                 val ok = runCatching { remove.invoke(atm, id) as Boolean }.getOrDefault(false)
-                Log.i(TAG, "display $displayId: task $id removed=$ok")
+                WindowLog.i(TAG, "display $displayId: task $id removed=$ok")
             }
-        }.onFailure { Log.w(TAG, "display $displayId: its tasks not removed (they stay in recents)", it) }
+        }.onFailure { WindowLog.w(TAG, "display $displayId: its tasks not removed (they stay in recents)", it) }
     }
 
     private fun removeTask(
@@ -2017,7 +2016,7 @@ class WebWindows(
     ) {
         dev.omalauncher.system.Tasks.logRemove("removeTask", id, why, removes = true)
         val ok = runCatching { atm().javaClass.getMethod("removeTask", Int::class.javaPrimitiveType).invoke(atm(), id) as Boolean }.getOrDefault(false)
-        Log.i(TAG, "task $id removed=$ok ($why)")
+        WindowLog.i(TAG, "task $id removed=$ok ($why)")
     }
 
     // ---- minimise: a home gesture's lifecycle (MN1/MN2) -------------------------------------------------------------------
@@ -2044,10 +2043,10 @@ class WebWindows(
     /** On [io]: [minimise]'s home gesture for [w]'s task. */
     private fun leaveNow(w: Win) {
         if (w.closed || w.leftAt != 0L) return
-        val task = taskOn(w.displayId) ?: return Unit.also { Log.w(TAG, "window ${w.id}: no task on display ${w.displayId} to minimise") }
+        val task = taskOn(w.displayId) ?: return Unit.also { WindowLog.w(TAG, "window ${w.id}: no task on display ${w.displayId} to minimise") }
         val top = taskInfo(task)?.topActivity
         if (top == null || !supportsPip(top)) {
-            Log.i(TAG, "window ${w.id}: minimised (${top?.flattenToShortString()} has no picture-in-picture: just hidden)")
+            WindowLog.i(TAG, "window ${w.id}: minimised (${top?.flattenToShortString()} has no picture-in-picture: just hidden)")
             return
         }
         w.taskId = task
@@ -2058,14 +2057,14 @@ class WebWindows(
         if (!moveTask(task, android.view.Display.DEFAULT_DISPLAY)) {
             WebWindowDisplays.fullScreen(task, w.id, false)
             w.leftAt = 0L
-            Log.w(TAG, "window ${w.id}: minimise's move to display 0 FAILED: just hidden")
+            WindowLog.w(TAG, "window ${w.id}: minimise's move to display 0 FAILED: just hidden")
             return
         }
         val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val ok = runCatching { context.startActivity(home, ActivityOptions.makeBasic().setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY).toBundle()) }
-            .onFailure { Log.w(TAG, "window ${w.id}: home not started for the minimise", it) }.isSuccess
-        Log.i(TAG, "window ${w.id}: minimised as a home gesture (${top.flattenToShortString()}, task $task on display 0, home started=$ok)")
-        io.postDelayed({ Log.i(TAG, "window ${w.id}: after its minimise task $task is ${taskInfo(task)?.let { "mode ${windowingMode(it)} visible ${visibleOf(it)} on display ${WebWindowDisplays.displayOf(it)}" } ?: "gone"}") }, LEFT_SETTLE_MS)
+            .onFailure { WindowLog.w(TAG, "window ${w.id}: home not started for the minimise", it) }.isSuccess
+        WindowLog.i(TAG, "window ${w.id}: minimised as a home gesture (${top.flattenToShortString()}, task $task on display 0, home started=$ok)")
+        io.postDelayed({ WindowLog.i(TAG, "window ${w.id}: after its minimise task $task is ${taskInfo(task)?.let { "mode ${windowingMode(it)} visible ${visibleOf(it)} on display ${WebWindowDisplays.displayOf(it)}" } ?: "gone"}") }, LEFT_SETTLE_MS)
     }
 
     /** MN2: the page's way back from minimised (dock, switcher, its page): an app [minimise] moved out, back in window [id]. */
@@ -2087,7 +2086,7 @@ class WebWindows(
         val alive = taskDisplay(task) != null
         val ok = if (alive) moveTask(task, w.displayId) else true.also { main.post { if (!w.closed) launch(w) } }
         WebWindowDisplays.fullScreen(task, w.id, false)
-        Log.i(TAG, "window ${w.id}: back in its window ($why; task $task ${if (alive) "moved back to display ${w.displayId}: $ok" else "gone: launched again"})")
+        WindowLog.i(TAG, "window ${w.id}: back in its window ($why; task $task ${if (alive) "moved back to display ${w.displayId}: $ok" else "gone: launched again"})")
     }
 
     /**
@@ -2112,7 +2111,7 @@ class WebWindows(
     /** Main thread: [checkLeft] found [w]'s minimised app gone (its PiP dismissed): the window closes with it. */
     private fun leftGone(w: Win) {
         if (w.closed || w.leftAt == 0L) return
-        Log.i(TAG, "window ${w.id}: its minimised app (task ${w.taskId}) is gone (PiP dismissed): window closed")
+        WindowLog.i(TAG, "window ${w.id}: its minimised app (task ${w.taskId}) is gone (PiP dismissed): window closed")
         w.leftAt = 0L
         WebWindowDisplays.fullScreen(w.taskId, w.id, false)
         drop(w)
@@ -2159,12 +2158,12 @@ class WebWindows(
                 // area's maximise (the user, 10-30 20:15: "When I press maximise, I still mean full screen"; Dolphin
                 // under the old KWin got "the work area's maximise"): PowOS puts it over the whole screen itself, no
                 // bar, KWin's window at the screen's size. Pinned by WebWindowsBarTest.
-                Log.i(TAG, "window ${win.id}: KWin takes no full-screen request: full screen by PowOS alone")
+                WindowLog.i(TAG, "window ${win.id}: KWin takes no full-screen request: full screen by PowOS alone")
                 linuxFullScreen(win, true)
                 return
             }
             // KWin puts the window itself full screen (its F11); shown so at once, KWin's "fullscreen <id> 1|0" confirms.
-            Log.i(TAG, "window ${win.id}: KWin window ${src.kwin} full screen asked")
+            WindowLog.i(TAG, "window ${win.id}: KWin window ${src.kwin} full screen asked")
             win.fullAsked = true
             andro.marchy.WebWindowSource.fullScreen(src.kwin, true)
             linuxFullScreen(win, true)
@@ -2184,7 +2183,7 @@ class WebWindows(
     private fun fullScreenNow(win: Win) {
         val task = taskOn(win.displayId)
         if (task == null) {
-            Log.w(TAG, "window ${win.id}: no task on display ${win.displayId} to make full screen")
+            WindowLog.w(TAG, "window ${win.id}: no task on display ${win.displayId} to make full screen")
             announce(win, false)
             return
         }
@@ -2193,7 +2192,7 @@ class WebWindows(
         WebWindowDisplays.fullScreen(task, win.id, true)
         val ok = moveTask(task, android.view.Display.DEFAULT_DISPLAY)
         if (!ok) WebWindowDisplays.fullScreen(task, win.id, false)
-        Log.i(TAG, "window ${win.id}: ${if (ok) "its app (task $task) is a full-screen app on display 0" else "full screen FAILED (task $task stays on display ${win.displayId})"}")
+        WindowLog.i(TAG, "window ${win.id}: ${if (ok) "its app (task $task) is a full-screen app on display 0" else "full screen FAILED (task $task stays on display ${win.displayId})"}")
         announce(win, ok)
     }
 
@@ -2215,7 +2214,7 @@ class WebWindows(
      * a Discord window back from full screen showed a bare hole until the user dragged it (its next changed geometry).
      */
     private fun resend(why: String) {
-        Log.i(TAG, "geometry resend asked: $why")
+        WindowLog.i(TAG, "geometry resend asked: $why")
         emit("webwindows.resend", 0)
     }
 
@@ -2244,7 +2243,7 @@ class WebWindows(
             win.geo?.let { place(t, win, it) } ?: underRoot(t, win)
             t.apply()
         }
-        Log.i(TAG, "window ${win.id}: KWin window ${src.kwin} ${if (on) "full screen" else "back in its window"}")
+        WindowLog.i(TAG, "window ${win.id}: KWin window ${src.kwin} ${if (on) "full screen" else "back in its window"}")
         win.full = on
         emit("webwindows.full", mapOf("id" to win.id, "on" to on))
         if (!on) resend("window ${win.id} back from full screen")
@@ -2292,7 +2291,7 @@ class WebWindows(
         t.apply()
         win.shown = true
         if (win.fullAsked) {
-            Log.i(TAG, "window ${win.id}: full screen ${area.width()}x${area.height()} at ${area.left},${area.top}: sized on KWin's answer")
+            WindowLog.i(TAG, "window ${win.id}: full screen ${area.width()}x${area.height()} at ${area.left},${area.top}: sized on KWin's answer")
         } else {
             linuxResize(win, src, area.width(), area.height())
         }
@@ -2322,7 +2321,7 @@ class WebWindows(
         val src = win.linux ?: return
         if (win.closed || !win.linuxFull) return
         val area = fullScreenArea()
-        Log.i(TAG, "window ${win.id}: KWin window ${src.kwin} full screen ($why): sized ${area.width()}x${area.height()}")
+        WindowLog.i(TAG, "window ${win.id}: KWin window ${src.kwin} full screen ($why): sized ${area.width()}x${area.height()}")
         linuxResize(win, src, area.width(), area.height())
     }
 
@@ -2344,7 +2343,7 @@ class WebWindows(
         own: Boolean,
     ) {
         val w = wins.values.firstOrNull { it.linux?.kwin == kwin } ?: return
-        Log.i(TAG, "window ${w.id}: KWin window $kwin ${if (own) "draws its own frame: no PowOS bar" else "has PowOS's bar"}")
+        WindowLog.i(TAG, "window ${w.id}: KWin window $kwin ${if (own) "draws its own frame: no PowOS bar" else "has PowOS's bar"}")
         emit("webwindows.frame", mapOf("id" to w.id, "own" to own))
     }
 
@@ -2372,7 +2371,7 @@ class WebWindows(
             cancel.recycle()
             linuxTouch = null
         }
-        Log.i(TAG, "window ${w.id}: KWin window $kwin's own frame ${if (edges == "move") "dragged: the window moves" else "resized ($edges): the window resizes"}")
+        WindowLog.i(TAG, "window ${w.id}: KWin window $kwin's own frame ${if (edges == "move") "dragged: the window moves" else "resized ($edges): the window resizes"}")
         emit("webwindows.moveresize", mapOf("id" to w.id, "edges" to edges))
     }
 
@@ -2385,7 +2384,7 @@ class WebWindows(
         action: String,
     ) {
         val w = wins.values.firstOrNull { it.linux?.kwin == kwin } ?: return
-        Log.i(TAG, "window ${w.id}: KWin window $kwin's own $action button")
+        WindowLog.i(TAG, "window ${w.id}: KWin window $kwin's own $action button")
         when (action) {
             "maximize" -> if (w.linuxFull) toWindow(w.id) else fullScreen(w.id)
             "minimize" -> emit("webwindows.control", mapOf("id" to w.id, "action" to "minimise"))
@@ -2424,7 +2423,7 @@ class WebWindows(
         // Still running: moved back. Gone meanwhile (its app finished): the app launched on its display afresh.
         val alive = taskDisplay(task) != null
         val ok = if (alive) moveTask(task, w.displayId) else true.also { main.post { if (!w.closed) launch(w) } }
-        Log.i(TAG, "window ${w.id}: back to a window (task $task ${if (alive) "moved back to display ${w.displayId}: $ok" else "gone: launched again"})")
+        WindowLog.i(TAG, "window ${w.id}: back to a window (task $task ${if (alive) "moved back to display ${w.displayId}: $ok" else "gone: launched again"})")
         if (!ok) return
         WebWindowDisplays.fullScreen(task, w.id, false)
         announce(w, false)
@@ -2435,7 +2434,7 @@ class WebWindows(
         val w = wins[id] ?: return false
         io.post {
             if (taskDisplay(w.taskId) == null) {
-                Log.i(TAG, "window ${w.id}: its full-screen app (task ${w.taskId}) is gone: back to its window")
+                WindowLog.i(TAG, "window ${w.id}: its full-screen app (task ${w.taskId}) is gone: back to its window")
                 main.post { toWindow(id) }
                 return@post
             }
@@ -2455,7 +2454,7 @@ class WebWindows(
                 val children = runCatching { r.javaClass.getField("childTaskIds").get(r) as IntArray }.getOrNull()
                 children?.firstOrNull() ?: android.app.TaskInfo::class.java.getField("taskId").getInt(r)
             }
-        }.onFailure { Log.w(TAG, "display $displayId: its tasks unreadable", it) }.getOrNull()
+        }.onFailure { WindowLog.w(TAG, "display $displayId: its tasks unreadable", it) }.getOrNull()
 
     /** The display task [taskId] runs on, or null (not running). */
     private fun taskDisplay(taskId: Int): Int? {
@@ -2480,16 +2479,16 @@ class WebWindows(
         HiddenApi.allow()
         val moved =
             runCatching { atm().javaClass.getMethod("moveRootTaskToDisplay", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType).invoke(atm(), taskId, displayId) }
-                .onFailure { Log.w(TAG, "moveRootTaskToDisplay($taskId, $displayId) refused: ${it.cause ?: it}") }.isSuccess
+                .onFailure { WindowLog.w(TAG, "moveRootTaskToDisplay($taskId, $displayId) refused: ${it.cause ?: it}") }.isSuccess
         val started = fromRecents(taskId, displayId)
         var now = taskDisplay(taskId)
         if (now != displayId) {
             val r = runCatching { andro.marchy.RootShell.run("cmd activity display move-stack $taskId $displayId") }.getOrNull()
-            Log.w(TAG, "task $taskId still on display $now: root move-stack -> code ${r?.code} ${r?.output?.take(160)}")
+            WindowLog.w(TAG, "task $taskId still on display $now: root move-stack -> code ${r?.code} ${r?.output?.take(160)}")
             fromRecents(taskId, displayId)
             now = taskDisplay(taskId)
         }
-        Log.i(TAG, "task $taskId to display $displayId: moveRootTaskToDisplay=$moved startActivityFromRecents=$started, now on display $now")
+        WindowLog.i(TAG, "task $taskId to display $displayId: moveRootTaskToDisplay=$moved startActivityFromRecents=$started, now on display $now")
         return now == displayId
     }
 
@@ -2502,7 +2501,7 @@ class WebWindows(
         runCatching { ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType).invoke(opts, WINDOWING_MODE_FULLSCREEN) }
         return runCatching {
             (atm().javaClass.getMethod("startActivityFromRecents", Int::class.javaPrimitiveType, android.os.Bundle::class.java).invoke(atm(), taskId, opts.toBundle()) as Int) >= 0
-        }.onFailure { Log.w(TAG, "startActivityFromRecents($taskId) on display $displayId refused: ${it.cause ?: it}") }.getOrDefault(false)
+        }.onFailure { WindowLog.w(TAG, "startActivityFromRecents($taskId) on display $displayId refused: ${it.cause ?: it}") }.getOrDefault(false)
     }
 
     private fun atm(): Any = Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null)!!
@@ -2527,7 +2526,7 @@ class WebWindows(
             val shot = sc.getMethod("captureLayers", args.javaClass).invoke(null, args) ?: return null
             val hw = shot.javaClass.getMethod("asBitmap").invoke(shot) as android.graphics.Bitmap? ?: return null
             hw.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
-        }.onFailure { Log.w(TAG, "window $windowId: its content not captured", it) }.getOrNull()
+        }.onFailure { WindowLog.w(TAG, "window $windowId: its content not captured", it) }.getOrNull()
     }
 
     // ---- launch, IME -----------------------------------------------------------------------------------------------------
@@ -2564,12 +2563,12 @@ class WebWindows(
         val n = tasksOn(w.displayId)
         if (n != null && n > 0) w.landed = true
         if (n == null || n > 0 || pullStrayTask(w)) return
-        Log.w(TAG, "fallback: ${w.component.packageName} has no task on display ${w.displayId} ${ESCAPE_CHECK_MS} ms after its launch: Android's own window instead of web window ${w.id}")
+        WindowLog.w(TAG, "fallback: ${w.component.packageName} has no task on display ${w.displayId} ${ESCAPE_CHECK_MS} ms after its launch: Android's own window instead of web window ${w.id}")
         main.post {
             drop(w)
             runCatching {
                 context.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(w.component).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }.onFailure { Log.w(TAG, "fallback launch of ${w.component.packageName} failed", it) }
+            }.onFailure { WindowLog.w(TAG, "fallback launch of ${w.component.packageName} failed", it) }
         }
     }
 
@@ -2582,7 +2581,7 @@ class WebWindows(
     private fun pullStrayTask(w: Win): Boolean {
         val stray = strayTask(w) ?: return false
         val ok = moveTask(stray, w.displayId)
-        Log.w(TAG, "window ${w.id} (${w.component.packageName}): its display was empty, the app's task $stray ran elsewhere - ${if (ok) "moved into the window" else "NOT moved"}")
+        WindowLog.w(TAG, "window ${w.id} (${w.component.packageName}): its display was empty, the app's task $stray ran elsewhere - ${if (ok) "moved into the window" else "NOT moved"}")
         if (ok) w.landed = true
         return ok
     }
@@ -2622,12 +2621,12 @@ class WebWindows(
         try {
             val opts = ActivityOptions.makeBasic().setLaunchDisplayId(w.displayId)
             context.startActivity(intent, opts.toBundle())
-            Log.i(TAG, "launched ${w.component.flattenToShortString()} on display ${w.displayId} (ActivityOptions)")
+            WindowLog.i(TAG, "launched ${w.component.flattenToShortString()} on display ${w.displayId} (ActivityOptions)")
         } catch (e: Exception) {
-            Log.w(TAG, "ActivityOptions launch on display ${w.displayId} refused: ${e.message}; trying root am start")
+            WindowLog.w(TAG, "ActivityOptions launch on display ${w.displayId} refused: ${e.message}; trying root am start")
             io.post {
                 val r = runCatching { andro.marchy.RootShell.run("am start --display ${w.displayId} -f 0x10000000 -n ${w.component.flattenToShortString()}") }.getOrNull()
-                Log.i(TAG, "launched ${w.component.flattenToShortString()} on display ${w.displayId} (root am start): code ${r?.code} ${r?.output?.take(200)}")
+                WindowLog.i(TAG, "launched ${w.component.flattenToShortString()} on display ${w.displayId} (root am start): code ${r?.code} ${r?.output?.take(200)}")
             }
         }
     }
@@ -2639,8 +2638,8 @@ class WebWindows(
                 val wms = Class.forName("android.view.WindowManagerGlobal").getMethod("getWindowManagerService").invoke(null)!!
                 wms.javaClass.getMethod("setDisplayImePolicy", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType).invoke(wms, displayId, IME_POLICY_FALLBACK_DISPLAY)
             }
-        if (result.isSuccess) Log.i(TAG, "IME policy of display $displayId: fallback to default display (ok)")
-        else Log.w(TAG, "IME policy of display $displayId not set: ${result.exceptionOrNull()?.let { it.cause ?: it }}")
+        if (result.isSuccess) WindowLog.i(TAG, "IME policy of display $displayId: fallback to default display (ok)")
+        else WindowLog.w(TAG, "IME policy of display $displayId not set: ${result.exceptionOrNull()?.let { it.cause ?: it }}")
     }
 
     // ---- the helper (WebWindowsHost, shell uid) ------------------------------------------------------------------------
@@ -2667,10 +2666,10 @@ class WebWindows(
                 process = p
                 writer = BufferedWriter(OutputStreamWriter(p.outputStream))
                 Thread({ read(p) }, "powos-ww-helper").apply { isDaemon = true }.start()
-                Log.i(TAG, "display helper started (shell uid, app_process)")
+                WindowLog.i(TAG, "display helper started (shell uid, app_process)")
                 writer
             } catch (e: Exception) {
-                Log.w(TAG, "display helper not started", e)
+                WindowLog.w(TAG, "display helper not started", e)
                 null
             }
         }
@@ -2679,7 +2678,7 @@ class WebWindows(
         private fun read(p: Process) {
             val r = BufferedReader(InputStreamReader(p.inputStream))
             while (true) answer(runCatching { r.readLine() }.getOrNull() ?: break)
-            Log.w(TAG, "display helper gone (exit ${runCatching { p.waitFor() }.getOrNull()}): its windows close")
+            WindowLog.w(TAG, "display helper gone (exit ${runCatching { p.waitFor() }.getOrNull()}): its windows close")
             val left = synchronized(waiting) { waiting.values.toList().also { waiting.clear() } }
             left.forEach { it(-1, "helper gone") }
             main.post { wins.values.filter { it.displayId >= 0 }.toList().forEach { drop(it, released = true) } }
@@ -2689,10 +2688,10 @@ class WebWindows(
             val a = line.split(' ', limit = 3)
             val waiter = if (a.size >= 2 && (a[0] == "display" || a[0] == "error")) synchronized(waiting) { waiting.remove(a[1]) } else null
             when {
-                a[0] == "hello" -> Log.i(TAG, "display helper ready")
+                a[0] == "hello" -> WindowLog.i(TAG, "display helper ready")
                 a[0] == "display" -> waiter?.invoke(a.getOrNull(2)?.trim()?.toIntOrNull() ?: -1, "bad answer: $line")
                 a[0] == "error" -> waiter?.invoke(-1, a.getOrNull(2))
-                else -> Log.i(TAG, "display helper: $line")
+                else -> WindowLog.i(TAG, "display helper: $line")
             }
         }
 
@@ -2704,7 +2703,7 @@ class WebWindows(
                 w.flush()
                 true
             } catch (e: java.io.IOException) {
-                Log.w(TAG, "display helper: '$line' not sent", e)
+                WindowLog.w(TAG, "display helper: '$line' not sent", e)
                 false
             }
         }
@@ -2755,7 +2754,7 @@ class WebWindows(
         ): Boolean {
             if (process?.isAlive != true) return false
             val line = "touch ${w.displayId} $action ${w.downAt} $x $y"
-            io.post { if (!send(line)) Log.w(TAG, "input: '$line' not sent") }
+            io.post { if (!send(line)) WindowLog.w(TAG, "input: '$line' not sent") }
             return true
         }
 
@@ -2782,7 +2781,7 @@ class WebWindows(
                 Class.forName("android.view.IWindowManager").getMethod("mirrorDisplay", Int::class.javaPrimitiveType, SurfaceControl::class.java),
                 SurfaceControl::class.java.getDeclaredConstructor().apply { isAccessible = true },
             )
-        }.onFailure { Log.w(TAG, "no IWindowManager.mirrorDisplay: no web windows", it) }.getOrNull()
+        }.onFailure { WindowLog.w(TAG, "no IWindowManager.mirrorDisplay: no web windows", it) }.getOrNull()
     }
 
     // null: not tried yet; false: refused once, root from then on.
@@ -2804,7 +2803,7 @@ class WebWindows(
             val im = context.getSystemService(android.hardware.input.InputManager::class.java)
             inject.invoke(im, ev, 0) as? Boolean ?: false // INJECT_INPUT_EVENT_MODE_ASYNC
         } catch (e: Exception) {
-            Log.w(TAG, "injectInputEvent refused: ${(e.cause ?: e)}")
+            WindowLog.w(TAG, "injectInputEvent refused: ${(e.cause ?: e)}")
             false
         }
     }
@@ -2820,7 +2819,7 @@ class WebWindows(
         val verb = VERBS[ev.actionMasked] ?: "CANCEL"
         val cmd = "input -d $displayId touchscreen motionevent $verb ${ev.x.toInt()} ${ev.y.toInt()}"
         if (ev.actionMasked != MotionEvent.ACTION_MOVE) {
-            io.post { runCatching { andro.marchy.RootShell.run(cmd) }.onFailure { Log.w(TAG, "root input failed", it) } }
+            io.post { runCatching { andro.marchy.RootShell.run(cmd) }.onFailure { WindowLog.w(TAG, "root input failed", it) } }
             return
         }
         val queued = synchronized(moveLock) { (pendingMove != null).also { pendingMove = cmd } }
@@ -2911,7 +2910,7 @@ class WebWindows(
         fun followTask(taskId: Int): Boolean {
             val ww = current ?: return false
             val w = ww.wins.values.firstOrNull { it.taskId == taskId && it.linux == null && !it.closed && !it.full } ?: return false
-            Log.i(TAG, "task $taskId floating on display 0 is window ${w.id}'s app: followed, no second window")
+            WindowLog.i(TAG, "task $taskId floating on display 0 is window ${w.id}'s app: followed, no second window")
             ww.main.removeCallbacks(ww.reconcileRun)
             ww.main.post(ww.reconcileRun)
             return true
@@ -2925,7 +2924,7 @@ class WebWindows(
             val ww = current ?: return
             ww.main.post {
                 val id = ww.windowOfTask(taskId) ?: return@post
-                Log.w(TAG, "task $taskId removed by PowOS outside its window's close: web window $id closed with it (a stale task map)")
+                WindowLog.w(TAG, "task $taskId removed by PowOS outside its window's close: web window $id closed with it (a stale task map)")
                 ww.close(id)
             }
         }
@@ -3053,13 +3052,13 @@ class WebWindows(
         ): Boolean {
             val ww = current ?: return false
             linuxCardWindow(taskId)?.let { id ->
-                Log.i(TAG, "card $taskId removed (switcher / Tasks.remove): Linux web window $id - closing it (the bar's close path)")
+                WindowLog.i(TAG, "card $taskId removed (switcher / Tasks.remove): Linux web window $id - closing it (the bar's close path)")
                 ww.main.post { ww.close(id) }
                 return true
             }
             val id = WebWindowDisplays.windowOf(context, taskId) ?: ww.windowOfTask(taskId) ?: return false
             dev.omalauncher.system.Tasks.logRemove("closeForTask", taskId, "web window $id")
-            Log.i(TAG, "task $taskId removed (switcher / Tasks.remove): it is web window $id - closing the window (the bar's close path)")
+            WindowLog.i(TAG, "task $taskId removed (switcher / Tasks.remove): it is web window $id - closing the window (the bar's close path)")
             ww.main.post { ww.close(id) }
             return true
         }
@@ -3075,13 +3074,13 @@ class WebWindows(
         ): Boolean {
             val ww = current ?: return false
             linuxCardWindow(taskId)?.let { id ->
-                Log.i(TAG, "card $taskId opened from the switcher: Linux web window $id shown where it was, on its page")
+                WindowLog.i(TAG, "card $taskId opened from the switcher: Linux web window $id shown where it was, on its page")
                 ww.main.post { ww.emit("webwindows.show", id) }
                 return true
             }
             if (WebWindowDisplays.fullScreenWindow(taskId) != null) return false
             val id = WebWindowDisplays.windowOf(context, taskId) ?: return false
-            Log.i(TAG, "task $taskId opened from the switcher: web window $id shown where it was, on its page")
+            WindowLog.i(TAG, "task $taskId opened from the switcher: web window $id shown where it was, on its page")
             ww.main.post { ww.emit("webwindows.show", id) }
             return true
         }
@@ -3110,8 +3109,8 @@ class WebWindows(
             if (WebWindowDisplays.fullScreenWindow(taskId) != null) return null
             dev.omalauncher.system.Tasks.capture(taskId)
             dev.omalauncher.system.Tasks.snapshot(taskId, width)?.let { return it }
-            val shot = ww.contentShot(id) ?: return null.also { Log.w(TAG, "task $taskId (window $id): no picture for its card") }
-            Log.i(TAG, "task $taskId (window $id): card picture from its mirror (no task snapshot)")
+            val shot = ww.contentShot(id) ?: return null.also { WindowLog.w(TAG, "task $taskId (window $id): no picture for its card") }
+            WindowLog.i(TAG, "task $taskId (window $id): card picture from its mirror (no task snapshot)")
             return jpeg(shot, width)
         }
 
@@ -3134,8 +3133,8 @@ class WebWindows(
                 if (dev.omalauncher.system.FreeformTasks.homeTaskId(app) != null) return@Thread
                 val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setPackage(app.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 runCatching { app.startActivity(home, ActivityOptions.makeBasic().setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY).toBundle()) }
-                    .onSuccess { Log.w(TAG, "no home ${HOME_GRACE_MS} ms after PowOS came back (web windows on): started it on display 0") }
-                    .onFailure { Log.w(TAG, "no home after PowOS came back, and starting it failed", it) }
+                    .onSuccess { WindowLog.w(TAG, "no home ${HOME_GRACE_MS} ms after PowOS came back (web windows on): started it on display 0") }
+                    .onFailure { WindowLog.w(TAG, "no home after PowOS came back, and starting it failed", it) }
             }, "powos-ww-home").start()
         }
 

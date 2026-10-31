@@ -7,7 +7,7 @@ import android.graphics.Rect
 import android.os.Binder
 import android.os.IBinder
 import android.os.Parcel
-import android.util.Log
+import dev.omalauncher.shell.WindowLog
 
 /**
  * Android's floating (freeform) app windows ([AppWindows] opens them): which are on screen and where, and moving,
@@ -81,7 +81,7 @@ object FreeformTasks {
         // A web window (a task on a web window's own display, shell/WebWindowDisplays) is never a floating window of this
         // path, whatever its mode - no frame, no full-screen fix-up. Every other task (Linux windows too): as before.
         if (dev.omalauncher.shell.WebWindowDisplays.isWebWindow(t)) return null
-        val wc = runCatching { windowConfiguration(t) }.onFailure { if (!unreadable) Log.w(TAG, "can't read task ${t.taskId}'s window", it) }.getOrNull()
+        val wc = runCatching { windowConfiguration(t) }.onFailure { if (!unreadable) WindowLog.w(TAG, "can't read task ${t.taskId}'s window", it) }.getOrNull()
         unreadable = wc == null
         if (wc == null) { failedThisList = true; return null }
         if (wc.javaClass.getMethod("getWindowingMode").invoke(wc) != FREEFORM) return null
@@ -94,7 +94,7 @@ object FreeformTasks {
         // or the camera app and it's broken"). Left exactly where Android puts it; WindowFrames drops its look.
         if (!resizable(t)) {
             if (compatLogged.add(t.taskId)) {
-                Log.i(TAG, "task ${t.taskId} (${(t.baseActivity ?: t.topActivity)?.packageName}) not resizable: Android places it (compat), PowOS leaves its surface alone")
+                WindowLog.i(TAG, "task ${t.taskId} (${(t.baseActivity ?: t.topActivity)?.packageName}) not resizable: Android places it (compat), PowOS leaves its surface alone")
             }
             return null
         }
@@ -115,7 +115,7 @@ object FreeformTasks {
         runCatching {
             val roots = atm().javaClass.getMethod("getAllRootTaskInfos").invoke(atm()) as List<*>
             roots.map { android.app.TaskInfo::class.java.getField("taskId").getInt(it) }
-        }.onFailure { if (!noOrder) Log.w(TAG, "no stacking order: windows in last-active order", it) }
+        }.onFailure { if (!noOrder) WindowLog.w(TAG, "no stacking order: windows in last-active order", it) }
             .also { noOrder = it.isFailure }.getOrNull()
 
     @Volatile private var noOrder = false
@@ -162,7 +162,7 @@ object FreeformTasks {
         transact(context, id.also { markOwnFloat(it) }) { wct, token ->
             wct.javaClass.getMethod("setWindowingMode", token.javaClass, Int::class.javaPrimitiveType).invoke(wct, token, FREEFORM)
             wct.javaClass.getMethod("setBounds", token.javaClass, Rect::class.java).invoke(wct, token, bounds)
-        }.onFailure { Log.w(TAG, "can't make task $id a window", it) }.isSuccess
+        }.onFailure { WindowLog.w(TAG, "can't make task $id a window", it) }.isSuccess
 
     /**
      * Task [id] over the whole screen ([on]: the app asked for full screen - a video, a game) or a floating window
@@ -185,7 +185,7 @@ object FreeformTasks {
         return runCatching {
             apply(token(context, id), transition = true) { wct, token -> fullScreenChange(wct, token, id, if (on) null else to) }
         }
-            .onFailure { Log.w(TAG, "can't put task $id in windowing mode $mode", it) }.isSuccess
+            .onFailure { WindowLog.w(TAG, "can't put task $id in windowing mode $mode", it) }.isSuccess
     }
 
     /** [setFullScreen]'s change: a window at [window], or full screen (null) and focusable again; its caption inset. */
@@ -218,7 +218,7 @@ object FreeformTasks {
     ): Boolean =
         runCatching {
             apply(token(context, id), transition = true) { wct, token -> wct.javaClass.getMethod("setBounds", token.javaClass, Rect::class.java).invoke(wct, token, bounds) }
-        }.onFailure { Log.w(TAG, "can't move task $id", it) }.isSuccess
+        }.onFailure { WindowLog.w(TAG, "can't move task $id", it) }.isSuccess
 
     private fun modeAndBounds(
         wct: Any,
@@ -251,7 +251,7 @@ object FreeformTasks {
             HiddenApi.allow()
             atm().javaClass.getMethod("resizeTask", Int::class.javaPrimitiveType, Rect::class.java, Int::class.javaPrimitiveType)
                 .invoke(atm(), id, bounds, RESIZE_MODE_USER) as Boolean
-        }.onFailure { Log.w(TAG, "can't resize task $id", it) }.getOrDefault(false)
+        }.onFailure { WindowLog.w(TAG, "can't resize task $id", it) }.getOrDefault(false)
 
     /** Task [id]'s window above the others (a touch on its frame). */
     fun raise(
@@ -259,7 +259,7 @@ object FreeformTasks {
         id: Int,
     ): Boolean =
         runCatching { context.getSystemService(ActivityManager::class.java).moveTaskToFront(id, 0) }
-            .onFailure { Log.w(TAG, "can't raise task $id", it) }.isSuccess
+            .onFailure { WindowLog.w(TAG, "can't raise task $id", it) }.isSuccess
 
     /**
      * Task [id]'s window to the bottom, under home (out of sight, still running): what WM Shell's desktop mode does to
@@ -271,7 +271,7 @@ object FreeformTasks {
         id: Int,
     ): Boolean =
         transact(context, id) { wct, token -> wct.javaClass.getMethod("reorder", token.javaClass, Boolean::class.javaPrimitiveType).invoke(wct, token, false) }
-            .onFailure { Log.w(TAG, "can't minimise task $id", it) }.isSuccess
+            .onFailure { WindowLog.w(TAG, "can't minimise task $id", it) }.isSuccess
 
     /**
      * Task [id] may take input focus ([on]) or not: a window whose page is off the screen stays above home with its
@@ -283,7 +283,7 @@ object FreeformTasks {
         on: Boolean,
     ): Boolean =
         transact(context, id) { wct, token -> TaskLeash.setFocusable(wct, token, on) }
-            .onFailure { Log.w(TAG, "can't set task $id focusable=$on", it) }.isSuccess
+            .onFailure { WindowLog.w(TAG, "can't set task $id focusable=$on", it) }.isSuccess
 
     /**
      * Task [id]'s window on a page off the screen ([on]) or back on the shown one: hidden in WM and not focusable
@@ -298,8 +298,8 @@ object FreeformTasks {
         transact(context, id) { wct, token ->
             TaskLeash.setHidden(wct, token, on)
             TaskLeash.setFocusable(wct, token, !on)
-        }.onFailure { Log.w(TAG, "can't set task $id away=$on", it) }.isSuccess
-            .also { Log.i(TAG, "task $id ${if (on) "hidden in WM (off page, no input)" else "shown in WM (its page)"}: ok=$it") }
+        }.onFailure { WindowLog.w(TAG, "can't set task $id away=$on", it) }.isSuccess
+            .also { WindowLog.i(TAG, "task $id ${if (on) "hidden in WM (off page, no input)" else "shown in WM (its page)"}: ok=$it") }
 
     /**
      * Task [id]'s content drawn at [dpi] (0: the screen's own again): a real per-task density, the app lays itself out
@@ -313,7 +313,7 @@ object FreeformTasks {
         dpi: Int,
     ): Boolean =
         transact(context, id) { wct, token -> wct.javaClass.getMethod("setDensityDpi", token.javaClass, Int::class.javaPrimitiveType).invoke(wct, token, dpi) }
-            .onFailure { Log.w(TAG, "can't set task $id to $dpi dpi", it) }.isSuccess
+            .onFailure { WindowLog.w(TAG, "can't set task $id to $dpi dpi", it) }.isSuccess
 
     /**
      * Apps that draw their own caption in a desktop window (Chromium: a captionBar inset turns on its tab strip in the
@@ -336,7 +336,7 @@ object FreeformTasks {
     ): Boolean {
         if (captions.remove(id) == null) return true
         return transact(context, id) { wct, token -> removeCaption(wct, token) }
-            .onFailure { Log.w(TAG, "task $id: caption inset not removed", it) }.isSuccess
+            .onFailure { WindowLog.w(TAG, "task $id: caption inset not removed", it) }.isSuccess
     }
 
     /** The caption inset (px) each task's in-task bar (TaskFrame) asked for. */
@@ -359,7 +359,7 @@ object FreeformTasks {
     ): Boolean =
         transact(context, id) { wct, token -> addCaption(wct, token, bounds, height) }
             .onSuccess { captions[id] = height }
-            .onFailure { Log.w(TAG, "task $id: no caption inset", it) }.isSuccess
+            .onFailure { WindowLog.w(TAG, "task $id: no caption inset", it) }.isSuccess
 
     /** The in-task bar's caption inset (TaskFrame) off for the full screen ([to] null), back with the window at [to]. */
     private fun captionFor(
@@ -370,7 +370,7 @@ object FreeformTasks {
     ) {
         val h = captions[id] ?: return
         runCatching { if (to == null) removeCaption(wct, token) else addCaption(wct, token, to, h) }
-            .onFailure { Log.w(TAG, "task $id: caption inset not ${if (to == null) "removed" else "restored"}", it) }
+            .onFailure { WindowLog.w(TAG, "task $id: caption inset not ${if (to == null) "removed" else "restored"}", it) }
     }
 
     private fun addCaption(
@@ -455,8 +455,8 @@ object FreeformTasks {
         runCatching { apply(token(context, id)) { wct, token -> TaskLeash.setFocusable(wct, token, focusable) } }
             .onSuccess {
                 homeFocusTold = focusable
-                Log.i(TAG, "home task $id ${if (focusable) "focusable" else "non-focusable (desktop windows show)"}")
-            }.onFailure { Log.w(TAG, "can't set home task $id focusable=$focusable", it) }
+                WindowLog.i(TAG, "home task $id ${if (focusable) "focusable" else "non-focusable (desktop windows show)"}")
+            }.onFailure { WindowLog.w(TAG, "can't set home task $id focusable=$focusable", it) }
     }
 
     /**
@@ -473,11 +473,11 @@ object FreeformTasks {
         val change = (hold - typingHeld).map { it to false } + (typingHeld - hold).map { it to true }
         for ((id, focusable) in change) {
             runCatching { apply(token(context, id)) { wct, token -> TaskLeash.setFocusable(wct, token, focusable) } }
-                .onFailure { Log.w(TAG, "can't set window task $id focusable=$focusable", it) }
+                .onFailure { WindowLog.w(TAG, "can't set window task $id focusable=$focusable", it) }
             // A task gone meanwhile has nothing to restore: it leaves the set either way.
             if (focusable) typingHeld.remove(id) else typingHeld.add(id)
         }
-        if (change.isNotEmpty()) Log.i(TAG, "typing on home: window tasks non-focusable $typingHeld")
+        if (change.isNotEmpty()) WindowLog.i(TAG, "typing on home: window tasks non-focusable $typingHeld")
     }
 
     /** PowOS's home task (this app's CATEGORY_HOME activity), or null when it isn't running. */
@@ -520,7 +520,7 @@ object FreeformTasks {
         if (transition) {
             val started = runCatching { organizer.getMethod("startNewTransition", Int::class.javaPrimitiveType, wctClass).invoke(o, TRANSIT_CHANGE, wct) }
             if (started.isSuccess) return
-            Log.w(TAG, "no change transition, the bounds without one", started.exceptionOrNull())
+            WindowLog.w(TAG, "no change transition, the bounds without one", started.exceptionOrNull())
         }
         organizer.getMethod("applyTransaction", wctClass).invoke(o, wct)
     }
@@ -539,7 +539,7 @@ object FreeformTasks {
         private val id: Int,
         private val resizing: Boolean,
     ) {
-        private val token = runCatching { token(context, id) }.onFailure { Log.w(TAG, "no live bounds for task $id", it) }.getOrNull()
+        private val token = runCatching { token(context, id) }.onFailure { WindowLog.w(TAG, "no live bounds for task $id", it) }.getOrNull()
         private var started = false
 
         /** The window to [bounds] now: true when applied (a fallback to resizeTask says false). */
@@ -565,7 +565,7 @@ object FreeformTasks {
                 }
                 started = drag
                 true
-            }.onFailure { Log.w(TAG, "can't set task $id's bounds", it) }.getOrElse { resize(id, bounds).let { false } }
+            }.onFailure { WindowLog.w(TAG, "can't set task $id's bounds", it) }.getOrElse { resize(id, bounds).let { false } }
         }
     }
 
@@ -673,12 +673,12 @@ object FreeformTasks {
             val type = Class.forName("android.app.ITaskStackListener")
             val listener = Class.forName("android.app.ITaskStackListener\$Stub").getMethod("asInterface", IBinder::class.java).invoke(null, binder)
             atm().javaClass.getMethod("registerTaskStackListener", type).invoke(atm(), listener)
-            Log.i(TAG, "task stack listener on")
+            WindowLog.i(TAG, "task stack listener on")
             val stop: () -> Unit = {
                 runCatching { atm().javaClass.getMethod("unregisterTaskStackListener", type).invoke(atm(), listener) }
             }
             stop
-        }.onFailure { Log.w(TAG, "no task stack listener", it) }.getOrNull()
+        }.onFailure { WindowLog.w(TAG, "no task stack listener", it) }.getOrNull()
     }
 
     private const val MAX_TASKS = 24

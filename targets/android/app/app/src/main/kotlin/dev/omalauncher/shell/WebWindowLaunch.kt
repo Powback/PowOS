@@ -7,7 +7,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.util.Log
 import android.view.Display
 import java.util.concurrent.ConcurrentHashMap
 
@@ -73,7 +72,7 @@ object WebWindowLaunch {
     ): Boolean {
         if (!ShellBridge.openOnHome(context, pkg)) return false
         val full = shown == WebWindows.FULL_APP
-        Log.i(TAG, "launch $pkg: " + if (full) "its window's app is full screen: on display 0, plain" else "onto its window's display $shown at once")
+        WindowLog.i(TAG, "launch $pkg: " + if (full) "its window's app is full screen: on display 0, plain" else "onto its window's display $shown at once")
         run(pkg, p, if (full) Display.DEFAULT_DISPLAY else shown)
         return true
     }
@@ -91,11 +90,11 @@ object WebWindowLaunch {
             pending.remove(pkg, p)
             return false
         }
-        Log.i(TAG, "launch $pkg: held for its web window's display (${if (asked) "window asked of home" else "window being made"})")
+        WindowLog.i(TAG, "launch $pkg: held for its web window's display (${if (asked) "window asked of home" else "window being made"})")
         main.postDelayed({
             if (pending.remove(pkg, p)) {
-                Log.w(TAG, "launch $pkg: no window display after $WAIT_MS ms: launched the old way")
-                runCatching(p.fallback).onFailure { Log.w(TAG, "launch $pkg (old way) failed", it) }
+                WindowLog.w(TAG, "launch $pkg: no window display after $WAIT_MS ms: launched the old way")
+                runCatching(p.fallback).onFailure { WindowLog.w(TAG, "launch $pkg (old way) failed", it) }
             }
         }, WAIT_MS)
         return true
@@ -110,7 +109,7 @@ object WebWindowLaunch {
         displayId: Int,
     ): Boolean {
         val p = pending.remove(pkg) ?: return false
-        Log.i(TAG, "launch $pkg: its window's display $displayId came ${SystemClock.uptimeMillis() - p.at} ms after the tap")
+        WindowLog.i(TAG, "launch $pkg: its window's display $displayId came ${SystemClock.uptimeMillis() - p.at} ms after the tap")
         run(pkg, p, displayId)
         return true
     }
@@ -118,8 +117,8 @@ object WebWindowLaunch {
     /** No window for [pkg] after all (the page fell back, WebWindows refused): its held launch goes the old way. True: one did. */
     fun refused(pkg: String): Boolean {
         val p = pending.remove(pkg) ?: return false
-        Log.i(TAG, "launch $pkg: no web window for it: launched the old way")
-        runCatching(p.fallback).onFailure { Log.w(TAG, "launch $pkg (old way) failed", it) }
+        WindowLog.i(TAG, "launch $pkg: no web window for it: launched the old way")
+        runCatching(p.fallback).onFailure { WindowLog.w(TAG, "launch $pkg (old way) failed", it) }
         return true
     }
 
@@ -130,9 +129,9 @@ object WebWindowLaunch {
     ) {
         val opts = (p.base ?: ActivityOptions.makeBasic()).setLaunchDisplayId(displayId)
         runCatching { p.start(opts.toBundle()) }.onFailure {
-            Log.w(TAG, "launch $pkg on display $displayId refused (${it.message}): the old way instead")
+            WindowLog.w(TAG, "launch $pkg on display $displayId refused (${it.message}): the old way instead")
             p.base?.setLaunchDisplayId(Display.DEFAULT_DISPLAY)
-            runCatching(p.fallback).onFailure { e -> Log.w(TAG, "launch $pkg (old way) failed", e) }
+            runCatching(p.fallback).onFailure { e -> WindowLog.w(TAG, "launch $pkg (old way) failed", e) }
         }
     }
 
@@ -140,6 +139,6 @@ object WebWindowLaunch {
     private fun frontHome(context: Context) {
         val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setPackage(context.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { context.startActivity(home, ActivityOptions.makeBasic().setLaunchDisplayId(Display.DEFAULT_DISPLAY).toBundle()) }
-            .onFailure { Log.w(TAG, "home to the front for a launch failed", it) }
+            .onFailure { WindowLog.w(TAG, "home to the front for a launch failed", it) }
     }
 }
