@@ -18,7 +18,8 @@
 #   on the list: privapp-permissions.txt, reviewed by hand - each entry is a power the app gets.
 # - overlays/<slot>/: one resource overlay per system UI slot (config_dozeComponent, ...). Static, as the system server
 #   only takes immutable framework overlays: each is on while the module is (off: disable it in Magisk, reboot).
-#   Signed with a key of their own (~/.local/share/powos/overlay.jks, made once; not the app's). overlays-disabled/
+#   Signed with a key of their own (~/.local/share/powos/overlay.jks, made once; not the app's).
+#   overlays/split (config_leftRightSplitInPortrait: Android's split screen left | right unfolded) ships. overlays-disabled/
 #   keeps slots that aren't shipped: doze (PowOS as the screen-off display) felt laggy on the phone and was reverted.
 #   --slot NAME ships one of those too, for trying it on the phone before it moves to overlays/. The recents slot
 #   (PowOS as the recents provider: switcher, shade) needs --priv-app: SystemUI binds only a system package's service.
