@@ -24,7 +24,7 @@ import { dropOut, hoverOut, outAim } from "./dockout.tsx";
 import { powos } from "../bridge.ts";
 import { applyTrack, drawerOpen, held } from "./gesture.ts";
 import { LibraryPage } from "./library.tsx";
-import { underWindows, WebWindowsOn } from "./webwindows.tsx";
+import { provideHomeGrid, underWindows, WebWindowsOn } from "./webwindows.tsx";
 import { FolderView } from "./folderview.tsx";
 import { FolderFace, folderable, morphing, folderName, groupIntoFolder, loadFolderNames } from "./folders.tsx";
 import { chosen, isChosen, marquee, MARQUEE_DWELL, partyCells, partyOf, startMarquee, toggleChosen } from "./homeselect.ts";
@@ -144,6 +144,13 @@ const own = (i: HomeItem): Cell => (i.resizable ? i.cell! : { ...i.cell!, w: 1, 
  * Spans are whole cells, so box() puts the edges on the grid's lines with the gutter exactly as for a single tile.
  */
 const shown = (i: HomeItem): Cell => groupSpans.value.get(i.key) ?? own(i);
+
+// WG1: a web window dragged on home snaps into the cells around the tiles (webwindows.tsx cellAim): every placed tile's
+// cells, as shown, are taken; where the grid sits on screen.
+provideHomeGrid((n) => {
+  const g = geometry.peek();
+  return { cols: home.value.columns, rows: g.rows, taken: itemsOn(n).map(shown), left: g.left + g.pad, top: g.top + g.pad, cellW: g.cellW, cellH: g.cellH };
+});
 
 /** Do boxed cells [a] and [b] touch edge to edge (over part of it at least)? "v": one above the other, "h": side by side. */
 function touch(a: Cell, b: Cell): "v" | "h" | null {
