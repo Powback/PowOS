@@ -3493,7 +3493,7 @@ html:root .ai-view > .ai-menu.tile { background: color-mix(in srgb, var(--color-
  */
 .ai-view { --ai-bubble: color-mix(in srgb, var(--color-surface) 86%, transparent); }
 .ai-screen > .ai-glass { position: absolute; inset: 0; z-index: -1; width: auto; max-width: none; margin: 0; border: 0; border-radius: 0; pointer-events: none; }
-.ai-screen > .ai-chat, .ai-screen > .ai-sub {
+.ai-screen > .ai-chat, .ai-screen > .ai-sub, .ai-screen > .ais {
   --ai-head-fade: 18px;
   -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--ai-head) - 4px), black calc(var(--ai-head) + var(--ai-head-fade)), black calc(100% - var(--ai-fade-at, 0px) - var(--ai-fade, 0px)), transparent calc(100% - var(--ai-fade-at, 0px)));
   mask-image: linear-gradient(to bottom, transparent calc(var(--ai-head) - 4px), black calc(var(--ai-head) + var(--ai-head-fade)), black calc(100% - var(--ai-fade-at, 0px) - var(--ai-fade, 0px)), transparent calc(100% - var(--ai-fade-at, 0px)));
@@ -3731,3 +3731,65 @@ html.glass:root:not([data-light="false"][data-wallpaper="light"], [data-light="t
 :root:is([data-align-control="bottom"], [data-align-control="middle"]) .panel-body:not(.together) > .cc { flex: 1 1 auto; }
 :root:is([data-align-control="bottom"], [data-align-control="middle"]) .panel-body:not(.together) > .cc > .notif-bar + * { margin-top: auto; }
 :root[data-align-control="middle"] .panel-body:not(.together) > .cc > :last-child:not(.notif-bar) { margin-bottom: auto; }
+/*
+ * The folded AI page as a status page (aistatus.tsx; the user, 2026-10-31: "it shouldn't just be a chat", "more dynamic
+ * and futuristic"): one pane of THE backdrop (--backdrop-tint / --backdrop-blur-native), the UI's proportional font,
+ * headed sections and one-line rows straight on it - no card inside the pane. Bars slide to each value on a spring, a
+ * working agent's step cross-fades, new rows rise in; all transform / opacity, none of it with reduced motion.
+ */
+html:root .ai-screen.status > .ai-glass { --glass-blur-native: var(--backdrop-blur-native); }
+/* Over a wallpaper of the other tone the pane is the swapped (paper) frost: the text on it its ink, as inside a tile. */
+:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) .ai-screen.status > :is(.ais, .ais-top, .ais-foot) {
+  --color-foreground: var(--frost-ink);
+  --color-muted: color-mix(in srgb, var(--frost-ink) 80%, transparent);
+}
+.ai-screen.status { font-family: var(--font-ui); --ais-spring: linear(0, 0.25 8%, 0.68 18%, 1.02 30%, 1.1 38%, 1.04 50%, 0.99 62%, 1.005 78%, 1); --aip-blue: #5aa7e8; --aip-amber: #e3a03c; --aip-on-amber: #1a1206; }
+.ai-screen.status * { font-family: inherit; }
+.ais-top { gap: 12px; }
+.ais-ring { position: relative; flex: none; width: 36px; height: 36px; display: grid; place-items: center; }
+.ais-ring > svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.ais-ring .aip-ring-track, .ais-ring .aip-ring-fill { stroke-width: 4; }
+.ais-ring-fill { transition: stroke-dasharray 900ms var(--ais-spring); }
+.ais-ring-pct { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--color-foreground); }
+.ais-status { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.ais-title { font-size: var(--text-item); font-weight: 650; color: var(--color-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ais-line { font-size: var(--text-small); color: var(--color-foreground); opacity: 0.86; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ai-screen > .ai-scroll.ais { gap: 22px; padding-inline: 2px; padding-bottom: calc(var(--ai-tail) + 40px); }
+.ais-sec { display: flex; flex-direction: column; animation: ais-rise 420ms var(--ais-spring) both; }
+.ais-h { display: flex; white-space: nowrap; align-items: center; gap: 8px; margin: 0 0 4px; padding: 0 4px; font-size: var(--text-small); font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-foreground); opacity: 0.9; }
+.ais-n { padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--color-foreground) 14%, transparent); font-size: 11px; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.ais-sec[data-sec="needs"] .ais-n { background: var(--aip-amber); color: var(--aip-on-amber); }
+.ais-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0; border: 0; background: none; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; }
+.ais-chev { width: 7px; height: 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg) translateY(-2px); transition: transform 260ms var(--ais-spring); }
+.ais-toggle[aria-expanded="true"] .ais-chev { transform: rotate(-135deg) translateY(-1px); }
+.ais .aip-need-row { padding: 0 4px; min-height: 44px; }
+.ais .aip-need-more { padding: 0 4px 10px 22px; }
+.ais .aip-need + .aip-need, .ais-list > li + li { border-top: 1px solid color-mix(in srgb, var(--color-foreground) 10%, transparent); }
+.ais-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.ais-work-row { display: grid; grid-template-columns: 1fr; gap: 3px; width: 100%; padding: 9px 4px 10px; border: 0; background: none; font: inherit; color: var(--color-foreground); text-align: start; }
+.ais-work-line { display: flex; align-items: center; gap: 10px; min-width: 0; white-space: nowrap; }
+.ais-work-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-item); font-weight: 600; }
+.ais-count, .ais-when { flex: none; font-size: var(--text-small); font-variant-numeric: tabular-nums; color: var(--color-foreground); opacity: 0.86; }
+.ais-step { position: relative; display: block; height: 1.4em; margin-left: 18px; overflow: hidden; font-size: var(--text-small); color: var(--color-foreground); }
+.ais-step-t { position: absolute; inset: 0; opacity: 0.86; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ais-step-t.in { animation: ais-in 360ms var(--ais-spring) both; }
+.ais-step-t.out { animation: ais-out 300ms ease-out both; }
+.ais-bar { position: relative; display: block; height: 3px; margin: 4px 0 0 18px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--color-foreground) 14%, transparent); }
+.ais-bar-fill { position: absolute; inset: 0; border-radius: inherit; background: var(--color-accent); transform-origin: left center; transition: transform 900ms var(--ais-spring); animation: aip-fill 900ms var(--ais-spring) both; }
+.ais-bar.sweep .ais-bar-fill { inset: 0 auto 0 0; width: 32%; transform: translateX(-100%); animation: ais-sweep 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+.ais-done-row { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 4px; white-space: nowrap; font-size: var(--text-body); color: var(--color-foreground); animation: ais-rise 320ms var(--ais-spring) both; }
+.ais-done-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ais-empty { padding: 28px 8px; text-align: center; font-size: var(--text-body); color: var(--color-foreground); opacity: 0.86; }
+.ai-screen > .ais-foot { position: relative; z-index: 2; margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
+.ais-foot-row { display: flex; align-items: flex-end; justify-content: flex-end; gap: 8px; min-height: 28px; }
+.ais-reply { flex: 1; min-width: 0; max-height: 4.4em; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; padding: 8px 12px; border: 0; border-radius: 16px 16px 16px 4px; background: var(--ai-bubble); box-shadow: var(--lift); font: inherit; font-size: var(--text-body); line-height: 1.35; text-align: start; color: var(--color-foreground); animation: ais-rise 360ms var(--ais-spring) both; }
+.ais-open-chat { flex: none; min-height: 28px; padding: 0 10px; border: 0; border-radius: 999px; background: var(--ai-bubble); font: inherit; font-size: var(--text-small); font-weight: 600; color: var(--color-foreground); }
+@keyframes ais-rise { from { opacity: 0; transform: translateY(8px); } }
+@keyframes ais-in { from { opacity: 0; transform: translateY(60%); } }
+@keyframes ais-out { to { opacity: 0; transform: translateY(-60%); } }
+@keyframes ais-sweep { to { transform: translateX(320%); } }
+@media (prefers-reduced-motion: reduce) {
+  .ais-sec, .ais-step-t, .ais-bar-fill, .ais-done-row, .ais-reply, .ais-ring-fill, .ais-chev { animation: none; transition: none; }
+  .ais-step-t.out { display: none; }
+  .ais-bar.sweep .ais-bar-fill { transform: none; }
+}

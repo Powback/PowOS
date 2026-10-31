@@ -1973,11 +1973,10 @@ async function aiChatAt(page, size) {
  * Renders: /cache/ai-page-<size>-*.png.
  */
 async function aiChatCheck(page) {
-  const fails = await aiChatAt(page, "folded");
+  // Folded the page is the status page (aistatus.tsx, ai-status checks it); the chat is the unfolded middle pane's.
   await page.setViewport({ width: 821, height: 883 });
   await page.evaluate(() => window.__gw.until(() => innerWidth === 821));
-  fails.push(...(await aiChatAt(page, "unfolded")));
-  return fails;
+  return aiChatAt(page, "unfolded");
 }
 
 /**
@@ -2090,9 +2089,10 @@ function aiProgressContrast(lines) {
  * Unfolded, the right column's Try this lists the same open asks and Working now the mock fleet's agents.
  * Renders: /cache/ai-needs-you-<size>.png (the opened row).
  */
-async function aiNeedsSetup() {
+async function aiNeedsSetup(screen = "progress") {
   const G = window.__gw;
-  const [S, P, { powos }] = await Promise.all([G.mod("./state.ts"), G.mod("./ui/powai.tsx"), G.mod("./bridge.ts")]);
+  const [S, P, { powos }, T] = await Promise.all([G.mod("./state.ts"), G.mod("./ui/powai.tsx"), G.mod("./bridge.ts"), G.mod("./ui/trycard.tsx")]);
+  T.answers.value = {};
   const got = (window.__nyGot = []);
   window.__nyRestore ??= [powos.ai.verdict, powos.agents.message];
   powos.ai.verdict = async (...a) => void got.push(["verdict", ...a]);
@@ -2110,7 +2110,7 @@ async function aiNeedsSetup() {
   P.checks.value = [{ job: "j1", task: "ny-said", name: "you", state: "PASS", line: "", at: now - 3e4, shipped: true }];
   P.boardSeen.value = true;
   S.page.value = -1;
-  S.aiScreen.value = "progress";
+  S.aiScreen.value = screen;
   return !!(await G.until(() => document.querySelector(".ai-screen .aip-need"), 4000));
 }
 
@@ -2198,9 +2198,13 @@ async function aiNeedsPane(setup) {
 
 const NY_WANT = ["ny-try2", "ny-try1", "ny-ask"];
 
-/** The Progress half: 3 rows, the opened one's controls, works -> the chat's call, the row gone at once. */
-async function aiNeedsProgress(page, size) {
-  if (!(await page.evaluate(aiNeedsSetup))) return [`${size}: Progress shows no needs-you rows`];
+/**
+ * One surface (Progress, or the folded status page: [screen] "chat"): 3 rows, the opened one's controls, the row gone at
+ * once on works; [calls] gets the bridge calls works made (compared with the chat card's after).
+ */
+const NY_SURFACE = { progress: "Progress", chat: "the status page" };
+async function aiNeedsProgress(page, size, screen, calls) {
+  if (!(await page.evaluate(aiNeedsSetup, screen))) return [`${size}: ${NY_SURFACE[screen]} shows no needs-you rows`];
   const fails = [];
   const o = await page.evaluate(aiNeedsOpen);
   if (o.ids.slice().sort().join() !== NY_WANT.slice().sort().join()) fails.push(`needs-you rows are [${o.ids.join(", ")}], not exactly [${NY_WANT.join(", ")}] (answered / done must not show)`);
@@ -2212,19 +2216,22 @@ async function aiNeedsProgress(page, size) {
   const a = await page.evaluate(aiNeedsAnswer);
   if (a.left.includes("ny-try1")) fails.push(`"works" didn't take the row out of needs you at once (left: ${a.left.join(", ")})`);
   if (!/you said it works/.test(a.said)) fails.push(`the answered row doesn't collapse to "you said it works" ("${a.said}")`);
-  const chat = await page.evaluate(aiNeedsChatCall);
   if (!a.calls.length) fails.push("works on the row made no bridge call");
-  else if (JSON.stringify(a.calls) !== JSON.stringify(chat)) fails.push(`the row's works called ${JSON.stringify(a.calls)}, the chat's try card ${JSON.stringify(chat)}`);
+  calls.push([size, a.calls]);
   return fails.map((f) => `${size}: ${f}`);
 }
 
 async function aiNeedsCheck(page) {
   const fails = [];
-  for (const [size, vp] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]]) {
+  const calls = [];
+  for (const [size, vp, screen] of [["folded", { width: 404, height: 900 }, "progress"], ["status", { width: 404, height: 900 }, "chat"], ["unfolded", { width: 821, height: 883 }, "progress"]]) {
     await page.setViewport(vp);
     await page.evaluate((w) => window.__gw.until(() => innerWidth === w), vp.width);
-    fails.push(...(await aiNeedsProgress(page, size)));
+    fails.push(...(await aiNeedsProgress(page, size, screen, calls)));
   }
+  // Unfolded (the chat is the middle pane's): the chat's present_try card's works on the same task, the same call.
+  const chat = await page.evaluate(aiNeedsChatCall);
+  for (const [size, got] of calls) if (got.length && JSON.stringify(got) !== JSON.stringify(chat)) fails.push(`${size}: the row's works called ${JSON.stringify(got)}, the chat's try card ${JSON.stringify(chat)}`);
   // Unfolded: the right column against the same board (re-set: the answer above took one out) and the mock fleet.
   await page.evaluate(aiNeedsSetup);
   const p = await page.evaluate(aiNeedsPane, FLEET_SETUP);
@@ -2235,6 +2242,125 @@ async function aiNeedsCheck(page) {
   fails.push(...(await page.evaluate(aiNeedsLooks, ".ai-screen")).map((f) => `unfolded: an answer button looks already chosen before a tap: ${f}`));
   await page.screenshot({ path: "/cache/ai-needs-you-pane.png" });
   await page.evaluate(aiChatRestore);
+  return fails;
+}
+
+/**
+ * The folded AI page is a status page, not a chat (the user, 2026-10-31: "I don't wanna see the chat ... You wanna see
+ * the other shit"; aistatus.tsx): with a conversation loaded no transcript renders on it; Needs you / Ready to try /
+ * Working now / Recently done appear in that order with data and not without; every text proportional, one line per
+ * row (no wrapping), each bar's fill its done/total, text at 4.5:1 or more on the page's glass over the wallpaper's tone;
+ * the field to ask and "Open chat" at its foot. Renders: /cache/ai-status-folded-<light|dark>.png.
+ */
+async function aiStatusSetup([fleetSetup]) {
+  const G = window.__gw;
+  const [S, P, T] = await Promise.all([G.mod("./state.ts"), G.mod("./ui/powai.tsx"), G.mod("./ui/trycard.tsx")]);
+  T.answers.value = {};
+  const now = Date.now();
+  const row = (id, status, title, extra = {}) => ({ id, title, owner: "coder", status, note: "", project: "Windows", created: now - 9e6, updated: now - 6e4, done: status === "done" ? now - 36e5 : 0, progressDone: 0, progressTotal: 0, step: "", steps: "", commits: "", images: "", activity: now - 6e4, tryLine: "", ...extra });
+  P.board.value = [
+    row("st-dd", "working", "Daily driver: everything the phone needs every day", { progressDone: 13, progressTotal: 20 }),
+    row("st-ask", "waiting", "Dock size", { note: "Which dock size do you want? (small / large)" }),
+    row("st-try", "waiting", "Raise a window behind another", { tryLine: "Tap a window behind another: it comes to the front", commits: '[{"sha":"abc1234","subject":""}]' }),
+    row("st-done1", "done", "Media card redesign with album art cropped to the card"),
+    row("st-done2", "done", "Page dots centred"),
+  ];
+  P.checks.value = [];
+  P.boardSeen.value = true;
+  S.chat.value = { busy: false, items: [{ kind: "user", text: "how is it going" }, { kind: "assistant", text: "Three agents are on it." }] };
+  S.aiScreen.value = "chat";
+  S.page.value = -1;
+  const run = (body) => new (Object.getPrototypeOf(async function () {}).constructor)("U", "E", "sleep", body)(G.mod, window.__mockEvents, (ms) => new Promise((r) => setTimeout(r, ms)));
+  await run(fleetSetup);
+  return !!(await G.until(() => document.querySelectorAll(".ai-screen.status .ais-work").length >= 3, 4000));
+}
+
+/** In the page: the sections in order, the transcript elements on it, the foot's field and link. */
+function aiStatusShape() {
+  const scr = document.querySelector(".ai-screen.status");
+  if (!scr) return { none: true };
+  const secs = [...scr.querySelectorAll(".ais-sec")].map((e) => `${e.dataset.sec}:${e.querySelector(".ais-h")?.textContent.replace(/\d+$/, "").trim()}`);
+  const chat = [".ai-chat", ".ai-chat-in", ".msg", ".ai-strip"].filter((q) => scr.querySelector(q));
+  const foot = !!scr.querySelector(".ais-foot .ai-compose textarea") && /Open chat/.test(scr.querySelector(".ais-foot .ais-open-chat")?.textContent ?? "");
+  return { secs, chat, foot };
+}
+
+/** In the page: monospace texts, texts that wrap, bars off their value, text under 4.5:1 on the glass over [tone]. */
+function aiStatusLook(tone) {
+  const scr = document.querySelector(".ai-screen.status");
+  const texts = [...scr.querySelectorAll("*")].filter((e) => !e.closest(".ai-compose") && [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) && e.getClientRects().length);
+  const mono = texts.filter((e) => /mono/i.test(getComputedStyle(e).fontFamily.split(",")[0]));
+  const fails = mono.length ? [`monospace text: ${mono.slice(0, 3).map((e) => `"${e.textContent.trim().slice(0, 20)}"`).join(", ")}`] : [];
+  const wraps = (e) => e.getBoundingClientRect().height > (parseFloat(getComputedStyle(e).lineHeight) || parseFloat(getComputedStyle(e).fontSize) * 1.4) * 1.5;
+  fails.push(...[...scr.querySelectorAll(".ais-h, .ais-title, .ais-line, .aip-need-title, .ais-work-title, .ais-step-t.in, .ais-done-title")].filter(wraps).map((e) => `"${e.textContent.trim().slice(0, 24)}" wraps`));
+  const off = (bar) => {
+    const want = Number(bar.dataset.done) / Number(bar.dataset.total);
+    const got = bar.querySelector(".ais-bar-fill").getBoundingClientRect().width / bar.getBoundingClientRect().width;
+    return Math.abs(got - want) > 0.03 ? [`a bar is ${got.toFixed(2)} full, not ${want.toFixed(2)}`] : [];
+  };
+  fails.push(...[...scr.querySelectorAll(".ais-bar:not(.sweep)")].flatMap(off));
+  const rgb = (c) => (c.match(/[\d.]+/g) ?? []).map(Number);
+  const lum = (c) => c.slice(0, 3).map((v) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)).reduce((n, v, i) => n + v * [0.2126, 0.7152, 0.0722][i], 0);
+  const mix = (top, a, under) => [0, 1, 2].map((i) => top[i] * a + under[i] * (1 - a));
+  const ratio = (x, y) => (Math.max(lum(x), lum(y)) + 0.05) / (Math.min(lum(x), lum(y)) + 0.05);
+  const glass = rgb(getComputedStyle(scr.querySelector(".ai-glass")).backgroundImage.match(/rgba?\([^)]*\)/)?.[0] || getComputedStyle(scr.querySelector(".ai-glass")).backgroundColor);
+  const wall = tone === "light" ? [235, 232, 226] : [16, 20, 24];
+  const back = mix(glass, glass[3] ?? 1, wall);
+  const opacity = (e) => { let k = 1; for (let x = e; x && x !== scr; x = x.parentElement) k *= parseFloat(getComputedStyle(x).opacity); return k; };
+  const low = texts.filter((e) => e.closest(".ais, .ais-top") && !e.closest(".ais-n, .aip-chip, .try-acts")).map((e) => {
+    const fg = rgb(getComputedStyle(e).color);
+    return [e, ratio(mix(fg, opacity(e) * (fg[3] ?? 1), back), back)];
+  }).filter(([, k]) => k < 4.5);
+  fails.push(...new Set(low.map(([e, k]) => `"${e.textContent.trim().slice(0, 20)}" at ${k.toFixed(1)}:1 on the ${tone} page`)));
+  return fails;
+}
+
+/** In the page: the wallpaper's tone ([fill] a picture of one colour), settled; Recently done opened. */
+async function aiStatusTone(fill) {
+  const c = document.createElement("canvas");
+  c.width = c.height = 32;
+  const x = c.getContext("2d");
+  x.fillStyle = fill;
+  x.fillRect(0, 0, 32, 32);
+  window.__mockEvents.emit("system.glass", { wallpaper: { url: c.toDataURL("image/png"), rev: `st-${fill}`, source: "live" }, blurBehind: false });
+  const want = fill === "#ebe8e2" ? "light" : "dark";
+  await window.__gw.until(() => document.documentElement.dataset.wallpaper === want, 3000);
+  const t = document.querySelector('.ai-screen.status .ais-sec[data-sec="done"] .ais-toggle');
+  if (t?.getAttribute("aria-expanded") === "false") t.click();
+  await window.__gw.until(() => document.querySelector(".ai-screen.status .ais-done-row"), 2000);
+  // Its own finite animations settled (bounded: a paused one elsewhere never finishes).
+  const scr = document.querySelector(".ai-screen.status");
+  const mine = document.getAnimations().filter((a) => scr?.contains(a.effect?.target) && a.effect.getTiming().iterations !== Infinity);
+  await Promise.race([Promise.all(mine.map((a) => a.finished.catch(() => 0))), new Promise((r) => setTimeout(r, 1500))]);
+  return document.documentElement.dataset.wallpaper ?? "?";
+}
+
+/** In the page: the board emptied but the fleet: only Working now is left. */
+async function aiStatusEmpty() {
+  const P = await window.__gw.mod("./ui/powai.tsx");
+  P.board.value = [];
+  await window.__gw.until(() => document.querySelectorAll(".ai-screen.status .ais-sec").length === 1, 2000);
+  return [...document.querySelectorAll(".ai-screen.status .ais-sec")].map((e) => e.dataset.sec);
+}
+
+const AIS_WANT = ["needs:Needs you", "try:Ready to try", "working:Working now", "done:Recently done"];
+
+async function aiStatusCheck(page) {
+  if (!(await page.evaluate(aiStatusSetup, [FLEET_SETUP]))) return ["folded: the status page shows no Working now rows for the mock fleet"];
+  const fails = [];
+  const shape = await page.evaluate(aiStatusShape);
+  if (shape.none) return ["folded: the AI page is not the status page (.ai-screen.status)"];
+  if (shape.chat.length) fails.push(`folded: the status page has chat transcript elements (${shape.chat.join(", ")})`);
+  if (shape.secs.join(" | ") !== AIS_WANT.join(" | ")) fails.push(`folded: the sections are [${shape.secs.join(" | ")}], not [${AIS_WANT.join(" | ")}]`);
+  if (!shape.foot) fails.push("folded: no field to ask and \"Open chat\" at the status page's foot");
+  for (const [tone, fill] of [["light", "#ebe8e2"], ["dark", "#101418"]]) {
+    const got = await page.evaluate(aiStatusTone, fill);
+    if (got !== tone) fails.push(`folded: the wallpaper's tone is ${got}, not ${tone}`);
+    fails.push(...(await page.evaluate(aiStatusLook, tone)).map((f) => `folded ${tone}: ${f}`));
+    await page.screenshot({ path: `/cache/ai-status-folded-${tone}.png` });
+  }
+  const left = await page.evaluate(aiStatusEmpty);
+  if (left.join() !== "working") fails.push(`folded: with an empty board the sections are [${left.join(", ")}], not only Working now`);
   return fails;
 }
 
@@ -6699,6 +6825,9 @@ try {
   // Needs you answered in place, one source with the right column's Try this (the user, 2026-10-31 20:12).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-needs-you", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiNeedsCheck(r.page))));
+  // The folded AI page is a status page, not a chat (the user, 2026-10-31: "I don't wanna see the chat").
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-status", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiStatusCheck(r.page))));
   // THE backdrop (dev/backdrop-check.js; 2026-10-31 "the launcher ... not using the same dark background"): the widgets,
   // a folder, the shade, the launcher and its PowOS AI panel - one tint, one compositor blur. Both screens.
   if (process.env.SHELL_PAGES !== "0")

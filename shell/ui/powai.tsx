@@ -7,6 +7,7 @@
  * user as messages under it. The rest - Progress, Agents & terminals, Devices - is behind the header's ⋯, each its own
  * screen with back (aimenu.tsx). Under it the shared field to ask (the mic: hold to talk and send, tap to dictate).
  * Unfolded the same chat, centred at reading width; Progress (from ⋯ or the strip) a glass sheet over its side.
+ * Folded, the page (not the launcher's AI panel) is a status page instead of the chat (aistatus.tsx, 2026-10-31).
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
@@ -25,6 +26,7 @@ import { WorkFeed } from "./aiboard.tsx";
 import { agent, sessions as agentSessions } from "../agents.ts";
 import { untried } from "./trycard.tsx";
 import { AiContext, AiNav, FleetPane, useAgentsInPane } from "./aipanes.tsx";
+import { AiStatus, noteAsked } from "./aistatus.tsx";
 
 // The board's state, for what reads it from here (perfrec, the gate, the renders): it lives in aiboard.tsx now.
 export { board, boardSeen, checks, type WorkRow } from "./aiboard.tsx";
@@ -39,6 +41,8 @@ const send = () => {
   const text = draft.value.trim();
   if (!text) return;
   draft.value = "";
+  // The folded status page shows its reply as one bubble (aistatus.tsx), not a transcript.
+  noteAsked(text);
   // The one queue (assistant.ts): mid-turn it waits as a queued bubble, here and in every other chat.
   askQueued(text);
 };
@@ -365,6 +369,9 @@ function AiPanes({ shown, rail }: { shown: boolean; rail: boolean }) {
   );
 }
 
+/** The folded page's own screen shows the status page (not a holder without panes, not a menu screen). */
+const isStatus = (panes: boolean, wide: boolean) => panes && !wide && aiScreen.value === "chat";
+
 export function AiView({ shown, cls, pill = true, panes = false }: { shown: boolean; cls: string; pill?: boolean; panes?: boolean }) {
   const [ref, wide, rail] = useWide();
   if (panes && wide)
@@ -373,12 +380,33 @@ export function AiView({ shown, cls, pill = true, panes = false }: { shown: bool
         <AiPanes shown={shown} rail={rail} />
       </div>
     );
-  // The page folded: one pane of the widgets' glass under its header, strip and chat (shell.css .ai-glass).
+  // The page folded: one pane of the backdrop's glass under its header and the status page (shell.css .ai-glass).
+  const status = isStatus(panes, wide);
   return (
-    <div ref={ref} class={aiViewClass(cls, wide, wide && aiScreen.value === "progress")}>
+    <div ref={ref} class={`${aiViewClass(cls, wide, wide && aiScreen.value === "progress")} ${status ? "status" : ""}`}>
       {panes && <div class="ai-glass tile" aria-hidden="true" />}
-      <AiColumn shown={shown} wide={wide} pill={pill} />
+      {status ? <StatusColumn shown={shown} /> : <AiColumn shown={shown} wide={wide} pill={pill} />}
     </div>
+  );
+}
+
+/**
+ * The AI page folded: the status page (aistatus.tsx; the user, 2026-10-31: "I don't wanna see the chat") - its header's
+ * ⋯ opens the same screens (Progress, Agents & terminals, Devices, Friction), the field asks the manager.
+ */
+function StatusColumn({ shown }: { shown: boolean }) {
+  const [menu, setMenu] = useState(false);
+  const more = (
+    <button type="button" class="ai-more" aria-label="more" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
+      ⋯
+    </button>
+  );
+  return (
+    <>
+      <AiStatus shown={shown} more={more} compose={<AiCompose />} />
+      {menu && <div class="ai-menu-scrim" onClick={() => setMenu(false)} />}
+      {menu && <Menu close={() => setMenu(false)} />}
+    </>
   );
 }
 

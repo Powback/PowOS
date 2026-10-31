@@ -146,6 +146,15 @@ function useRows(needs: Need[]): [Need, Answer | undefined][] {
   return [...seen.current.values()].filter((n) => open.has(n.w.id) || said[n.w.id]).map((n) => [n, open.has(n.w.id) ? undefined : said[n.w.id]]);
 }
 
+/** The rows as a list (open asks and those just answered), each answered in place. */
+function NeedList({ rows }: { rows: [Need, Answer | undefined][] }) {
+  return (
+    <ul class="aip-need-list">
+      {rows.map(([n, a]) => (a ? <SaidRow key={n.w.id} n={n} a={a} /> : <NeedRow key={n.w.id} n={n} />))}
+    </ul>
+  );
+}
+
 /** Progress's Needs you card: one row per task that waits on the user (not drawn when none does or did). */
 export function NeedsYouCard({ needs }: { needs: Need[] }) {
   const rows = useRows(needs);
@@ -156,9 +165,22 @@ export function NeedsYouCard({ needs }: { needs: Need[] }) {
         <span class="aip-area-name">Needs you</span>
         {needs.length > 0 && <span class="aip-chip">{needs.length}</span>}
       </div>
-      <ul class="aip-need-list">
-        {rows.map(([n, a]) => (a ? <SaidRow key={n.w.id} n={n} a={a} /> : <NeedRow key={n.w.id} n={n} />))}
-      </ul>
+      <NeedList rows={rows} />
+    </section>
+  );
+}
+
+/** The folded status page's section of asks (aistatus.tsx): its heading and the same rows, no card; none: not drawn. */
+export function NeedSection({ title, sec, needs }: { title: string; sec: string; needs: Need[] }) {
+  const rows = useRows(needs);
+  if (!rows.length) return null;
+  return (
+    <section class="ais-sec" data-sec={sec} aria-label={title}>
+      <h3 class="ais-h">
+        {title}
+        {needs.length > 0 && <span class="ais-n">{needs.length}</span>}
+      </h3>
+      <NeedList rows={rows} />
     </section>
   );
 }
