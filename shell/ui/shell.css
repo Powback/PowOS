@@ -3542,7 +3542,7 @@ html:root .ai-view .ai-updates-list :is(.mail, .msg.ai-mail) { background: var(-
 html:root .ai-screen .aip-area.tile { --glass-blur-native: var(--backdrop-blur-native); --frost-fill: var(--backdrop-tint); --frost-sheen: transparent; --glass-veil: transparent; background: var(--backdrop-tint); box-shadow: none; }
 .aip-area-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 14px; border: 0; background: none; font: inherit; color: var(--color-foreground); text-align: start; white-space: nowrap; }
 .aip-area-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-body); font-weight: 600; }
-.aip-chip { flex: none; padding: 2px 8px; border-radius: 999px; background: var(--aip-amber); color: #1a1206; font-size: 12px; font-weight: 600; }
+.aip-chip { flex: none; padding: 2px 8px; border-radius: 999px; background: var(--aip-amber); color: var(--aip-on-amber); font-size: 12px; font-weight: 600; }
 .aip-bar { flex: none; position: relative; width: clamp(56px, 18%, 120px); height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--color-foreground) 16%, transparent); overflow: hidden; }
 .aip-bar-fill { position: absolute; inset: 0; border-radius: inherit; background: var(--color-accent); transform-origin: left center; animation: aip-fill 700ms var(--aip-spring) both; }
 .aip-count { flex: none; min-width: 3.4em; text-align: end; font-size: var(--text-small); font-variant-numeric: tabular-nums; color: var(--color-foreground); opacity: 0.86; }
@@ -3555,7 +3555,7 @@ html:root .ai-screen .aip-area.tile { --glass-blur-native: var(--backdrop-blur-n
 .aip-task-title { flex: 1; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 /* The dots by true state (design QA): working the accent, pulsing; awaiting its check blue; needs you amber, filled;
    stalled / no check grey. The blue and the amber are fixed meanings, not the theme's (dev/style-allow.txt). */
-.aip { --aip-blue: #5aa7e8; --aip-amber: #e3a03c; }
+.aip { --aip-blue: #5aa7e8; --aip-amber: #e3a03c; --aip-on-amber: #1a1206; }
 .aip-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 45%, transparent); }
 .aip-dot.working { background: var(--color-accent); animation: aip-pulse 1.6s ease-in-out infinite; }
 .aip-dot.check { background: var(--aip-blue); }

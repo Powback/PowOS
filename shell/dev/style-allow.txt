@@ -23,4 +23,4 @@ ui/shell.css .assist-attach .chip { font: var(--text-small) var(--font); padding
 ui/shell.css .assist-live { font:  # assist: yesterday's look restored (the exception)
 ui/shell.css transparent calc(var(--fr) - 0.5px), #000 var(--fr));  # a CSS mask's keep-area (mask semantics, not a colour): the seam fillet's quarter-circle cut
 dev/preview/sheet.tsx .pv-cell.bad .home-tile { outline: 2px solid var(--color-red);  # the widget-fit sheet's marker on a tile with problems: dev tooling, never on the phone
-ui/shell.css .aip { --aip-blue: #5aa7e8; --aip-amber: #e3a03c; }  # Progress dots: awaiting-check blue and needs-you amber are fixed state meanings (design QA 2026-10-31), not theme colours
+ui/shell.css .aip { --aip-blue: #5aa7e8; --aip-amber: #e3a03c; --aip-on-amber: #1a1206; }  # Progress dots + need-you chip: awaiting-check blue, needs-you amber and its dark ink are fixed state meanings (design QA 2026-10-31), not theme colours
