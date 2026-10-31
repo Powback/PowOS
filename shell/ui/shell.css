@@ -3438,12 +3438,14 @@ html:root .ai-view > .ai-menu.tile { background: color-mix(in srgb, var(--color-
 
 /*
  * The AI page reads like a messenger (the user, 2026-10-31 13:03: "It looks complete trash" - text on the bright
- * wallpaper through near-clear bubbles, rows drawn over the title). One solid surface for the whole page: the theme's
- * background at --ai-dim over the (frosted) wallpaper, so any text passes 4.5:1 whatever the picture. The header and
- * strip lie on that same surface; the list scrolls under them and fades out over --ai-head-fade before the title.
+ * wallpaper through near-clear bubbles, rows drawn over the title) on home's widget glass (14:17: "There's actually no
+ * transparency on the AI page" - the theme's background at 88% over the whole page was a flat grey slab): no page
+ * fill; folded, one full-screen pane of the widgets' frost (.ai-glass) under the header, strip and chat; unfolded, each
+ * pane that frost (below). Text reads off the bubbles and cards (--ai-bubble: the surface, a touch see-through), not off
+ * a page dim. The list scrolls under the header and fades out over --ai-head-fade before the title.
  */
-.ai-screen, .ai-panel { --ai-surface: color-mix(in srgb, var(--color-background) 88%, transparent); }
-.ai-screen { background: var(--ai-surface); }
+.ai-view { --ai-bubble: color-mix(in srgb, var(--color-surface) 86%, transparent); }
+.ai-screen > .ai-glass { position: absolute; inset: 0; z-index: -1; width: auto; max-width: none; margin: 0; border: 0; border-radius: 0; pointer-events: none; }
 .ai-screen > .ai-chat, .ai-screen > .ai-sub {
   --ai-head-fade: 18px;
   -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--ai-head) - 4px), black calc(var(--ai-head) + var(--ai-head-fade)), black calc(100% - var(--ai-fade-at, 0px) - var(--ai-fade, 0px)), transparent calc(100% - var(--ai-fade-at, 0px)));
@@ -3455,11 +3457,11 @@ html:root .ai-screen .ai-top > :is(.ai-title, .ai-state, .ai-more, .ai-back, .ai
 html:root .ai-screen .ai-top > .ai-state { padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--color-foreground) 10%, transparent); }
 .ai-top > .ai-strip { padding: 0; color: var(--color-foreground); }
 /* The manager's messages: a real bubble on the surface. The user's: the accent as a tint, the text the normal colour. */
-html:root .ai-view .ai-chat-in :is(.msg.assistant, .present, .choice-opt) { background: var(--color-surface); border-color: transparent; box-shadow: none; }
+html:root .ai-view .ai-chat-in :is(.msg.assistant, .present, .choice-opt) { background: var(--ai-bubble); border-color: transparent; box-shadow: none; }
 html:root .ai-view .ai-chat-in .msg.user {
   max-width: 80%;
   padding: 8px 12px;
-  background: color-mix(in srgb, var(--color-accent) 18%, var(--color-surface));
+  background: color-mix(in srgb, var(--color-accent) 18%, var(--ai-bubble));
   color: var(--color-foreground);
 }
 .ai-chat-in .msg.user .sent-imgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
@@ -3472,8 +3474,8 @@ html:root .ai-view .ai-chat-in > :is(.tl, .msg.note) { background: none; box-sha
 .ai-updates-head { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 4px; font: inherit; font-size: var(--text-small); color: var(--color-muted); background: none; border: 0; }
 .ai-updates.open .ai-updates-head .mail-chev { transform: rotate(180deg); }
 .ai-updates-list { display: flex; flex-direction: column; gap: 6px; }
-html:root .ai-view .ai-updates-list :is(.mail, .msg.ai-mail) { background: var(--color-surface); border-radius: var(--radius); box-shadow: none; }
-/* Progress, wide: a glass sheet over the chat's right side, near-solid; a tap beside it closes it. */
+html:root .ai-view .ai-updates-list :is(.mail, .msg.ai-mail) { background: var(--ai-bubble); border-radius: var(--radius); box-shadow: none; }
+/* Progress, wide: a sheet of the widgets' glass (below) over the chat's right side; a tap beside it closes it. */
 .ai-view > .ai-sheet-scrim { position: absolute; inset: 0; z-index: 3; max-width: none; margin: 0; }
 .ai-view.split > .ai-aside {
   position: absolute;
@@ -3490,10 +3492,9 @@ html:root .ai-view .ai-updates-list :is(.mail, .msg.ai-mail) { background: var(-
   padding: 8px 12px 12px;
   border-radius: var(--radius);
 }
-html:root .ai-view.split > .ai-aside.tile { background: color-mix(in srgb, var(--color-background) 92%, transparent); }
 .ai-aside > .ai-scroll { flex: 1; mask-image: none; -webkit-mask-image: none; }
 .ai-summary { display: flex; flex-direction: column; gap: 2px; padding: 8px 14px; border-radius: var(--radius); }
-html:root .ai-screen .ai-summary.tile { background: var(--color-surface); }
+html:root .ai-screen .ai-summary.tile { background: var(--ai-bubble); }
 .ai-summary-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; font-size: var(--text-body); }
 .ai-summary-area { font-weight: 600; }
 .ai-summary-foot { padding: 10px 0 4px; font-size: var(--text-small); }
@@ -3511,15 +3512,16 @@ html:root .ai-screen .ai-summary.tile { background: var(--color-surface); }
 }
 .ai-screen.panes > * { max-width: none; margin: 0; }
 .ai-screen.panes > .tile { border-radius: var(--radius); min-height: 0; }
-.ai-nav { flex: none; width: clamp(150px, 20%, 220px); display: flex; flex-direction: column; gap: 4px; padding: 14px 8px; overflow-y: auto; scrollbar-width: none; }
+.ai-nav { flex: none; width: max-content; min-width: 160px; max-width: 260px; display: flex; flex-direction: column; gap: 4px; padding: 14px 8px; overflow-y: auto; scrollbar-width: none; }
 .ai-nav.rail { width: 60px; align-items: center; }
 .ai-nav-title { padding: 0 10px 12px; font-size: var(--text-item); font-weight: bold; color: var(--color-foreground); }
 .ai-nav-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 0 10px; border: 0; border-radius: calc(var(--radius) * 0.7); background: none; font: inherit; color: var(--color-foreground); text-align: start; }
 .ai-nav.rail .ai-nav-item { position: relative; justify-content: center; padding: 0; }
 .ai-nav-item.on { background: color-mix(in srgb, var(--color-accent) 22%, transparent); color: var(--accent-text); font-weight: 600; }
 .ai-nav-icon { flex: none; width: 1.4em; text-align: center; font-size: 1.1em; }
-.ai-nav-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ai-nav-n { flex: none; font-size: var(--text-small); color: var(--color-muted); }
+.ai-nav-name { flex: 1; white-space: nowrap; }
+/* The count a small chip beside the name: the nav as wide as its longest label, never "Progre…" (the user's review, 14:17). */
+.ai-nav-n { flex: none; min-width: 1.6em; padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, var(--color-foreground) 10%, transparent); font-size: 11px; text-align: center; color: var(--color-muted); }
 .ai-nav-item.on .ai-nav-n { color: inherit; }
 .ai-nav.rail .ai-nav-n { position: absolute; top: 2px; right: 0; font-size: 10px; }
 /* The middle pane: its header, its scroller and the field at its own foot, the chat at reading width inside it. */
@@ -3532,16 +3534,35 @@ html:root .ai-screen .ai-summary.tile { background: var(--color-surface); }
 .ai-mid > .ai-menu-scrim { position: fixed; inset: 0; z-index: 4; }
 .ai-mid > .ai-menu { position: absolute; z-index: 5; top: 48px; right: 12px; min-width: 220px; display: flex; flex-direction: column; padding: 6px 0; border-radius: var(--radius); }
 /* Inside the pane the chat's bubbles keep their own solid fill (not the page's wallpaper tint twice). */
-html:root .ai-mid .ai-chat-in :is(.msg.assistant, .msg.note, .tl, .present, .choice-opt) { background: var(--color-surface); box-shadow: none; }
+html:root .ai-mid .ai-chat-in :is(.msg.assistant, .msg.note, .tl, .present, .choice-opt) { background: var(--ai-bubble); box-shadow: none; }
 /* The context column: Working now, Try this, Needs attention - sections parted by spacing, cards on the pane. */
 .ai-ctx { flex: none; width: clamp(220px, 30%, 340px); display: flex; flex-direction: column; gap: 18px; padding: 14px 12px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
 .ai-ctx-sec { display: flex; flex-direction: column; gap: 6px; }
 .ai-ctx-head { margin: 0 4px 2px; font-size: var(--text-small); font-weight: 600; color: var(--color-muted); }
-.ai-ctx-card { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 10px 12px; border: 0; border-radius: calc(var(--radius) * 0.8); background: var(--color-surface); font: inherit; color: var(--color-foreground); text-align: start; }
+.ai-ctx-card { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 10px 12px; border: 0; border-radius: calc(var(--radius) * 0.8); background: var(--ai-bubble); font: inherit; color: var(--color-foreground); text-align: start; }
 .ai-ctx-card .fl-bar { align-self: stretch; height: 3px; }
 .ai-ctx-title { font-weight: 600; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ai-ctx-now { font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ai-ctx-card.bad .ai-ctx-title { color: var(--color-red); }
-.ai-ctx-try { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border-radius: calc(var(--radius) * 0.8); background: var(--color-surface); }
+.ai-ctx-card.bad .ai-ctx-title { color: color-mix(in srgb, var(--color-red) 65%, var(--color-foreground)); }
+.ai-ctx-try { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border-radius: calc(var(--radius) * 0.8); background: var(--ai-bubble); }
+/* Working now's other projects: one quiet toggle line, closed at first. */
+.ai-ctx-other { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; min-height: 32px; padding: 0 4px; border: 0; background: none; font: inherit; font-size: var(--text-small); color: var(--color-muted); }
+.ai-ctx-other[aria-expanded="true"] .mail-chev { transform: rotate(180deg); }
+/*
+ * PowOS AI's panes on home's widget glass (the user, 14:17): folded the page's one pane (.ai-glass), unfolded the nav,
+ * the middle pane and the context column, and the wide Progress sheet - the widgets' tint at their strength (the open
+ * shade's --shade-tint, no veil, no sheen; over a wallpaper of the other tone the swapped frost, as the widgets) and
+ * their compositor blur (nativeglass.ts reads --glass-blur-native per .tile), so the wallpaper shows through blurred.
+ */
+html:root :is(.ai-screen > .ai-glass, .ai-screen.panes > .tile, .ai-view.split > .ai-aside.tile) {
+  --glass-blur-native: var(--widget-blur-native);
+  background: linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
+}
+:root:not([data-light="false"][data-wallpaper="light"], [data-light="true"][data-wallpaper="dark"]) :is(.ai-screen > .ai-glass, .ai-screen.panes > .tile, .ai-view.split > .ai-aside.tile) {
+  --frost-fill: var(--shade-tint);
+  --frost-sheen: transparent;
+  --glass-veil: transparent;
+}
+.ai-screen > .ai-glass { box-shadow: none; }
 .ai-ctx-try .try-title { font-weight: 600; }
 .ai-ctx-empty { padding: 24px 6px; text-align: center; font-size: var(--text-small); }

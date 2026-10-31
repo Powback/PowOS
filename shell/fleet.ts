@@ -180,10 +180,31 @@ function trouble(a: Agent, w: WorkLite | undefined, now: number): Pick<Worker, "
   return null;
 }
 
-/** [a]'s task words: its board task's title, else its own plain words, else what and where it is. */
+/**
+ * The project [a] works in, by its working directory: a PowOS checkout or worktree (~/Projects/PowOS/…, ~/pw/<name>,
+ * the phone's powos paths) is "PowOS", another ~/Projects/<p>/… is <p>, else the folder's own name; a helper is its
+ * parent's. No directory known: PowOS (the board's own agents report none on the phone).
+ */
+export function projectOf(a: Agent, depth = 0): string {
+  const up = a.parent && depth < 4 ? agent(a.parent)?.value : undefined;
+  return up ? projectOf(up, depth + 1) : projectOfDir(a.cwd || "");
+}
+
+/** A working directory's project ("" and PowOS paths: "PowOS"). */
+function projectOfDir(cwd: string): string {
+  if (!cwd || /(^|\/)(pw|PowOS)(\/|$)|powos/i.test(cwd)) return "PowOS";
+  const m = /\/Projects\/([^/]+)/.exec(cwd);
+  return m ? m[1] : cwd.replace(/\/+$/, "").split("/").pop() || "PowOS";
+}
+
+/** [a] works on PowOS (the AI page's own project: its column leads with these). */
+export const isPowOS = (a: Agent) => projectOf(a) === "PowOS";
+
+/** [a]'s task words: its board task's title, else its own plain words, else where it works ("Work in rsi-native"). */
 function titleOf(a: Agent, w: WorkLite | undefined) {
   if (w?.title) return plain(w.title);
-  return ownWords(a) || `${plain(a.role)} session in ${a.cwd || a.host}`;
+  const p = projectOf(a);
+  return ownWords(a) || (p === "PowOS" ? `${plain(a.role)} session` : `Work in ${p}`);
 }
 
 /** The board's step for [w] ("" when none or only queued). */

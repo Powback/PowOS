@@ -214,7 +214,7 @@ function Strip({ shown }: { shown: boolean }) {
 }
 
 /** Its header: the chat's name and what the manager is doing and ⋯, or - on a menu's screen - back and that screen's name. */
-function AiHeader({ sub, shown = false, strip = true }: { sub: AiScreen | null; shown?: boolean; strip?: boolean }) {
+function AiHeader({ sub, shown = false, strip = true, title = true }: { sub: AiScreen | null; shown?: boolean; strip?: boolean; title?: boolean }) {
   const [menu, setMenu] = useState(false);
   if (sub)
     return (
@@ -229,7 +229,7 @@ function AiHeader({ sub, shown = false, strip = true }: { sub: AiScreen | null; 
   return (
     <>
       <header class="ai-top">
-        <span class="ai-title">PowOS AI</span>
+        {title && <span class="ai-title">PowOS AI</span>}
         <span class={`ai-state ${busy ? "busy" : ""}`}>{stateOf()}</span>
         <button type="button" class="ai-more" aria-label="more" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
           ⋯
@@ -354,7 +354,7 @@ function AiPanes({ shown, rail }: { shown: boolean; rail: boolean }) {
           <FleetPane />
         ) : (
           <>
-            <AiHeader sub={sub} strip={false} />
+            <AiHeader sub={sub} strip={false} title={false} />
             <AiBody sub={sub} shown={shown} />
             {!sub && <AiCompose />}
           </>
@@ -367,9 +367,17 @@ function AiPanes({ shown, rail }: { shown: boolean; rail: boolean }) {
 
 export function AiView({ shown, cls, pill = true, panes = false }: { shown: boolean; cls: string; pill?: boolean; panes?: boolean }) {
   const [ref, wide, rail] = useWide();
+  if (panes && wide)
+    return (
+      <div ref={ref} class={`${aiViewClass(cls, true, false)} panes ${rail ? "rail" : ""}`}>
+        <AiPanes shown={shown} rail={rail} />
+      </div>
+    );
+  // The page folded: one pane of the widgets' glass under its header, strip and chat (shell.css .ai-glass).
   return (
-    <div ref={ref} class={panes && wide ? `${aiViewClass(cls, true, false)} panes ${rail ? "rail" : ""}` : aiViewClass(cls, wide, wide && aiScreen.value === "progress")}>
-      {panes && wide ? <AiPanes shown={shown} rail={rail} /> : <AiColumn shown={shown} wide={wide} pill={pill} />}
+    <div ref={ref} class={aiViewClass(cls, wide, wide && aiScreen.value === "progress")}>
+      {panes && <div class="ai-glass tile" aria-hidden="true" />}
+      <AiColumn shown={shown} wide={wide} pill={pill} />
     </div>
   );
 }

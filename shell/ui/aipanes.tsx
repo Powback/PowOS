@@ -5,11 +5,11 @@
  * middle; Try this: the newest things-to-try message only; Needs attention: stuck agents). Each a glass pane of its own;
  * an empty section isn't drawn. Folded sideways (rail) the nav is icons and the column is gone. powai.tsx lays them out.
  */
-import { useEffect } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { aiScreen, chat } from "../state.ts";
 import { agentsView, closeAgents, useAgents } from "../agents.ts";
-import { fleet, type Fleet, type Worker } from "../fleet.ts";
+import { fleet, isPowOS, projectOf, type Fleet, type Worker } from "../fleet.ts";
 import { AgentsView, Bar, BoardFeed, needsBoard } from "./agents.tsx";
 import { areas, dailyDriver, type AiScreen } from "./aimenu.tsx";
 import { WorkFeed } from "./aiboard.tsx";
@@ -110,6 +110,33 @@ function Sec({ title, children, when }: { title: string; children: preact.Compon
   );
 }
 
+/**
+ * Working now: PowOS's own agents (fleet.ts projectOf: the session's working directory); other projects' under a small
+ * "Other projects (N)" toggle, closed at first (the user's review, 14:17: "Fix #815 answer contracts", "Coder session
+ * in rsi-native" listed as if they were PowOS work).
+ */
+function WorkingNow({ working }: { working: Worker[] }) {
+  const [open, setOpen] = useState(false);
+  const own = working.filter((x) => isPowOS(x.a));
+  const other = working.filter((x) => !isPowOS(x.a));
+  return (
+    <Sec title="Working now" when={working.length > 0}>
+      {own.slice(0, 6).map((x) => (
+        <Card key={x.a.id} x={x} />
+      ))}
+      {other.length > 0 && (
+        <button type="button" class="ai-ctx-other" aria-expanded={open} onClick={() => setOpen(!open)}>
+          Other projects ({other.length}) <span class="mail-chev" aria-hidden="true" />
+        </button>
+      )}
+      {open &&
+        other.slice(0, 6).map((x) => (
+          <Card key={x.a.id} x={{ ...x, now: x.now ? `${projectOf(x.a)} · ${x.now}` : projectOf(x.a) }} />
+        ))}
+    </Sec>
+  );
+}
+
 /** The right context column: Working now, Try this (the newest bundle), Needs attention. */
 export function AiContext() {
   useAgents();
@@ -119,11 +146,7 @@ export function AiContext() {
   const empty = !f.working.length && !f.attention.length && !hasTry;
   return (
     <aside class="ai-ctx tile" aria-label="right now">
-      <Sec title="Working now" when={f.working.length > 0}>
-        {f.working.slice(0, 6).map((x) => (
-          <Card key={x.a.id} x={x} />
-        ))}
-      </Sec>
+      <WorkingNow working={f.working} />
       <Sec title="Try this" when={hasTry}>
         <LatestTry texts={texts} />
       </Sec>
