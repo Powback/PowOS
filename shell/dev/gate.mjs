@@ -1297,6 +1297,111 @@ async function aiStillBrokenCheck(page) {
   return fails;
 }
 
+/** In the page: the bridge recorded (window.__nyGot) and three Needs-you cards on the board ([try], [todo]: their words). */
+async function nyTrySetup([tryLine, todo]) {
+  const G = window.__gw;
+  const [S, P, { powos }] = await Promise.all([G.mod("./state.ts"), G.mod("./ui/powai.tsx"), G.mod("./bridge.ts")]);
+  const got = (window.__nyGot = []);
+  window.__nyRestore = [powos.ai.verdict, powos.agents.message];
+  powos.ai.verdict = async (...a) => void got.push(["verdict", ...a]);
+  powos.agents.message = async (...a) => void got.push(["message", ...a]);
+  const now = Date.now();
+  const base = { owner: "coder", status: "waiting", project: "Windows", created: now - 9e5, done: 0, progressDone: 0, progressTotal: 0, step: "", steps: "", commits: "", images: "" };
+  const row = (id, title, more, t) => ({ ...base, id, title, note: "", tryLine: "", ...more, updated: now - t, activity: now - t });
+  P.board.value = [
+    row("gate-ny-try", "Window tabs: drop a title bar onto another to group them", { note: "waiting on you", tryLine }, 6e4),
+    row("gate-ny-do", "Charge the phone", { note: todo }, 7e4),
+    row("gate-ny-none", "Window tabs in the switcher", {}, 8e4),
+  ];
+  P.boardSeen.value = true;
+  S.page.value = -1;
+  return !!(await G.until(() => document.querySelectorAll(".ai-work-list .ai-group.you .ai-item").length === 3, 4000));
+}
+
+/** In the page: each Needs-you card's actions and its line under the title. */
+function nyCards() {
+  return [...document.querySelectorAll(".ai-work-list .ai-group.you .ai-item")].map((c) => ({
+    title: c.querySelector(".ai-item-title")?.textContent.trim(),
+    line: c.querySelector(".ai-item-line > .ai-item-facts")?.textContent.trim(),
+    acts: [...c.querySelectorAll(".ai-item-acts .ai-act")].map((b) => b.textContent.trim()).join(" / "),
+  }));
+}
+
+/** In the page: [label] on the card titled [title], "x" typed in its reply line, sent; what the bridge got (null: no line). */
+async function nyReply([title, label, want]) {
+  const G = window.__gw;
+  const card = () => [...document.querySelectorAll(".ai-work-list .ai-item")].find((e) => e.querySelector(".ai-item-title")?.textContent.trim() === title);
+  [...card().querySelectorAll(".ai-act")].find((b) => b.textContent.trim() === label)?.click();
+  if (!(await G.until(() => card()?.querySelector(".ai-reply textarea"), 2000))) return null;
+  const field = card().querySelector(".ai-reply textarea");
+  field.value = "x";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  await G.frames(2);
+  card().querySelector(".ai-reply").requestSubmit();
+  await G.until(() => window.__nyGot.length >= want, 2000);
+  return window.__nyGot.splice(0);
+}
+
+/** In the page: the bridge and board as they were. */
+async function nyRestore() {
+  const [{ powos }, P] = await Promise.all([window.__gw.mod("./bridge.ts"), window.__gw.mod("./ui/powai.tsx")]);
+  [powos.ai.verdict, powos.agents.message] = window.__nyRestore;
+  P.board.value = [];
+}
+
+const NY_TRY_TITLE = "Window tabs: drop a title bar onto another to group them";
+const NY_TRY = "Drop one window's title bar onto another: they become tabs";
+const NY_DO = "Plug the phone into the Mac and leave it charging";
+/** The manager's mail naming [id], with the words "x". */
+const nyMailOk = (m, id) => !!m && m[1] === "manager" && m[2].includes(id) && m[2].includes('"x"');
+
+/** The cards' actions and lines: works / still broken under the --try line, done / can't on the thing to do, no empty phrase. */
+function nyCardFails(cards) {
+  const by = (t) => cards.find((c) => c.title === t) ?? {};
+  const [tryCard, doCard, none] = [by(NY_TRY_TITLE), by(NY_DO), by("Window tabs in the switcher")];
+  const fails = [];
+  if (tryCard.acts !== "works / still broken / skip") fails.push(`the card to try offers ${tryCard.acts || "nothing"}, not works / still broken / skip`);
+  if (tryCard.line !== NY_TRY) fails.push(`the card to try says "${tryCard.line}", not its --try line`);
+  if (doCard.acts !== "done / can't / problem / skip") fails.push(`the thing to do offers ${doCard.acts || "nothing"}, not done / can't / problem / skip`);
+  if (!none.line || /waiting on you/.test(none.line)) fails.push(`the card with no words says "${none.line}"`);
+  return fails;
+}
+
+/** "still broken", "x" on the card to try: the user FAIL check with the words and the manager's mail. */
+function nyBrokenFails(got) {
+  if (!got) return ["still broken opened no reply line"];
+  const v = nyCall(got, "verdict");
+  const fails = [];
+  if (!(v && v[1] === "gate-ny-try" && v[2] === false && v[3] === "still broken: x")) fails.push(`still broken recorded no user FAIL check with the words (${JSON.stringify(v)})`);
+  if (!nyMailOk(nyCall(got, "message"), "gate-ny-try")) fails.push(`still broken mailed the manager nothing naming the task (${JSON.stringify(got)})`);
+  return fails;
+}
+
+/** "can't / problem", "x" on the thing to do: the manager's mail, no check recorded. */
+function nyCantFails(got) {
+  if (!got) return ["can't / problem opened no reply line"];
+  const fails = [];
+  if (!nyMailOk(nyCall(got, "message"), "gate-ny-do")) fails.push(`can't / problem mailed the manager nothing naming the task (${JSON.stringify(got)})`);
+  if (nyCall(got, "verdict")) fails.push("can't / problem recorded a check on a thing to do");
+  return fails;
+}
+
+/**
+ * Needs-you cards answer like Ready to try (the user, 2026-10-31 01:44: "Needs you doesn't let me say that it's
+ * broken" - a "waiting on you" card had only done / skip): one asking to try (a --try, the note only "waiting on you")
+ * offers works / still broken / skip under its --try line, and "still broken", "x" records the user FAIL check with
+ * those words and mails the manager, as Ready to try does; a thing to do offers done / can't / problem / skip, the
+ * reply mailed to the manager; one with neither says so plainly, never "waiting on you".
+ */
+async function nyTryCheck(page) {
+  if (!(await page.evaluate(nyTrySetup, [NY_TRY, NY_DO]))) return ["the three Needs-you cards didn't show"];
+  const fails = nyCardFails(await page.evaluate(nyCards));
+  fails.push(...nyBrokenFails(await page.evaluate(nyReply, [NY_TRY_TITLE, "still broken", 2])));
+  fails.push(...nyCantFails(await page.evaluate(nyReply, [NY_DO, "can't / problem", 1])));
+  await page.evaluate(nyRestore);
+  return fails;
+}
+
 async function scrollFadeCheck() {
   const S = await window.__gw.mod("./state.ts");
   S.drawer.value = 1;
@@ -4017,6 +4122,9 @@ try {
   // A Needs-you card to try: works / still broken, the reply line reaches the board and the manager (2026-10-30).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-still-broken", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiStillBrokenCheck(r.page))));
+  // Needs-you cards answer like Ready to try: works / still broken under their --try line; can't on a thing to do (2026-10-31).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-needs-you-try", { width: 404, height: 900 }).then((r) => whenReady(r, () => nyTryCheck(r.page))));
   // The pinned dock never fades (folded: the dock pages to the recent apps; the user, 2026-10-23).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "dock-no-fade", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(dockPinnedNoFade))));
