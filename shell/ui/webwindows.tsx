@@ -172,6 +172,7 @@ async function takePlaceholder(ph: WebWin, kwin: number, ownFrame?: boolean): Pr
     void powos.webwindows!.close(id);
     return true;
   }
+  hostGave(id);
   webWins.value = webWins.value.map((w) => (w.id === ph.id ? { ...w, id, el: w.el ?? ph.id, pending: undefined, failed: undefined, ownFrame: ownFrame || undefined } : w));
   const t = tiledOn(ph.id);
   if (t != null) setTiling(t, { ...tilings.value[t], ids: tilings.value[t].ids.map((v) => (v === ph.id ? id : v)) });
@@ -212,6 +213,7 @@ export async function openWindow(key: string, label: string, page: number): Prom
   // The host's window for this app already (a second tap while the first open was in flight, a model the host knows
   // better): that one comes here, never a second entry or display.
   if (webWins.value.some((v) => v.id === id)) return cameHere(id, page);
+  hostGave(id);
   webWins.value = [...webWins.value, { id, key, label, page, x, y, w, h }];
   fillEmptyTile(page, id);
   return id;
@@ -260,6 +262,7 @@ export async function adoptWebWindow(
     toPage(page);
     return true;
   }
+  hostGave(id);
   webWins.value = [...webWins.value, { id, key: m.key, label: m.label, page, x: vx - o.x, y: vy - o.y, w, h, task: m.task, ownFrame: m.ownFrame || undefined }];
   if (m.kwin != null) watchStart(id);
   // As any window opened on the page: a tiling there with an empty tile takes it (its floating frame kept for a float
@@ -301,10 +304,31 @@ export function raise(id: number) {
   webWins.value = [...list.filter((w) => w.id !== id), win];
 }
 
-powos.on("webwindows.closed", (id: number) => {
+/**
+ * The host's window ids as its last "webwindows.alive" listed them, plus each one it gave the page since (an open, an
+ * adoption); null: no list yet (the mock, a host before it). A window not in it has no host window: [WebWindowEl] gives
+ * it its PowOS bar with a close button whatever its state (own frame, tiled), never a bare picture (10-31 03:05, "Clear
+ * all": "like it's missing the title bar but it's not done properly").
+ */
+export const hostIds = signal<Set<number> | null>(null);
+function hostGave(id: number) {
+  const ids = hostIds.value;
+  if (ids && !ids.has(id)) hostIds.value = new Set([...ids, id]);
+}
+/** Window [id] has no host window (the host's list doesn't name it): its bar shows, with a close button. */
+export function orphaned(id: number): boolean {
+  const ids = hostIds.value;
+  return id >= 0 && ids != null && !ids.has(id);
+}
+function forget(id: number) {
   leaveStack(id);
   untile(id, "gone");
   webWins.value = webWins.value.filter((w) => w.id !== id);
+}
+powos.on("webwindows.closed", (id: number) => {
+  const ids = hostIds.value;
+  if (ids?.has(id)) hostIds.value = new Set([...ids].filter((v) => v !== id));
+  forget(id);
 });
 /**
  * The host's windows, by id (each reconcile, at least every 2 s): an entry it has no window for is a ghost - it goes,
@@ -312,12 +336,8 @@ powos.on("webwindows.closed", (id: number) => {
  */
 powos.on("webwindows.alive", (ids: number[]) => {
   const alive = new Set(ids);
-  for (const w of webWins.value) {
-    if (w.id < 0 || w.pending || alive.has(w.id)) continue;
-    leaveStack(w.id);
-    untile(w.id, "gone");
-    webWins.value = webWins.value.filter((v) => v.id !== w.id);
-  }
+  hostIds.value = alive;
+  for (const w of webWins.value) if (!(w.id < 0 || w.pending || alive.has(w.id))) forget(w.id);
 });
 /** Home to a page (by its number, as pages lists them): state.ts sets it (it imports this file, not the reverse). */
 let toPage: (page: number) => void = () => {};
@@ -2221,7 +2241,7 @@ function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[
     <>
       <WindowShadow win={win} z={z} above={above} focused={focused} />
       <div class={cls} data-wwid={win.id} data-z={z} style={{ ...frame, "--ww-k": s }} {...pinch}>
-        {!win.ownFrame && <TitleBar win={win} />}
+        {(!win.ownFrame || orphaned(win.id)) && <TitleBar win={win} />}
         <Body win={win} body={body} />
         {free && <Handles id={win.id} zones={zoneKey(win)} />}
         {sizing && <ResizeOutline win={win} />}

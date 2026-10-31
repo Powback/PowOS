@@ -3026,6 +3026,48 @@ async function webWindowRegionsTiled() {
   }
 }
 
+/**
+ * CL1 (10-31 03:05, the switcher's "Clear all": "it didn't really close the comb window properly" / "like it's missing
+ * the title bar"): three windows, two of them tiled - the host's "webwindows.closed" for each leaves no .webwindow
+ * within 1 s; and a window the host's "webwindows.alive" doesn't list (no host window) shows its PowOS bar with a close
+ * button even when it draws its own frame - never a bare picture.
+ */
+async function webWindowClearAll() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const was = S.page.value;
+  const fails = [];
+  try {
+    S.page.value = 0;
+    await window.__gw.settled();
+    const p = S.pages.value[0];
+    W.webWins.value = [
+      { id: 941, key: "a:gate.c1", label: "C1", page: p, x: 60, y: 140, w: 200, h: 200, live: true },
+      { id: 942, key: "a:gate.c2", label: "C2", page: p, x: 300, y: 140, w: 200, h: 200, live: true },
+      { id: 943, key: "a:gate.c3", label: "C3", page: p, x: 120, y: 400, w: 220, h: 200, live: true, ownFrame: true },
+    ];
+    await window.__gw.settled();
+    W.tileWindows(p, [941, 942]);
+    await window.__gw.settled();
+    if (document.querySelectorAll(".webwindow[data-wwid]").length < 3) fails.push("CL1: the three windows never showed");
+    for (const id of [941, 942, 943]) window.__mockEvents.emit("webwindows.closed", id);
+    await sleep(1000);
+    const left = [...document.querySelectorAll(".webwindow[data-wwid]")].map((e) => e.dataset.wwid);
+    if (left.length) fails.push(`CL1: after the host closed all three, .webwindow left: ${left.join(", ")}`);
+    window.__mockEvents.emit("webwindows.alive", [950]);
+    W.webWins.value = [{ id: 951, key: "a:gate.ghost", label: "Ghost", page: p, x: 80, y: 160, w: 260, h: 220, live: true, ownFrame: true }];
+    await window.__gw.settled();
+    if (!document.querySelector('.webwindow[data-wwid="951"] .webwindow-title .ww-close')) fails.push("CL1: a window the host doesn't list (own frame) has no PowOS bar with a close button");
+    return fails;
+  } finally {
+    W.webWins.value = [];
+    W.tilings.value = {};
+    W.hostIds.value = null;
+    S.page.value = was;
+  }
+}
+
 /** W-IN1, a floating window resized bigger: its grown corner is excluded, and drags from it (body, bar) stay the window's. */
 async function webWindowRegionsResized() {
   const S = await window.__gw.mod("./state.ts");
@@ -4666,7 +4708,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }

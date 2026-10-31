@@ -131,10 +131,13 @@ class WebWindows(
      */
     private fun reconcile() {
         tick()
-        val ws = wins.values.filter { it.linux == null && !it.closed && it.displayId >= 0 }
-        if (ws.isEmpty()) return
+        val all = wins.values.filter { it.linux == null && !it.closed }
+        val ws = all.filter { it.displayId >= 0 }
+        // Any state (tiled, a hidden tab, full screen, minimised, no display): a known task that is gone closes it.
+        val tasked = all.filter { it.displayId < 0 && it.taskId >= 0 }
+        if (ws.isEmpty() && tasked.isEmpty()) return
         // A window minimised as a home gesture (MN1: its task left for display 0 / PiP) is checkLeft's, not follow's.
-        io.post { reconcileNow(ws) }
+        io.post { reconcileNow(ws, tasked) }
     }
 
     /** [reconcile]'s next run [HEARTBEAT_MS] on, and the host's window ids to the page (its model agrees: no stale entry in "w.f"). */
@@ -145,12 +148,15 @@ class WebWindows(
     }
 
     /** On [io]: [reconcile]'s reads for Android windows [ws]. */
-    private fun reconcileNow(ws: List<Win>) {
+    private fun reconcileNow(
+        ws: List<Win>,
+        tasked: List<Win> = emptyList(),
+    ) {
         @Suppress("DEPRECATION")
         val running = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrNull()
         // A window whose app's task is gone closes, whatever state it is in (on its display, full screen, minimised,
         // removed by PowOS itself or anyone else): the frame never outlives its task.
-        running?.let { r -> ws.filter { taskDead(it, r) }.forEach { w -> io.postDelayed({ confirmDead(w) }, DEAD_CONFIRM_MS) } }
+        running?.let { r -> (ws + tasked).filter { taskDead(it, r) }.forEach { w -> io.postDelayed({ confirmDead(w) }, DEAD_CONFIRM_MS) } }
         ws.filter { it.leftAt == 0L }.forEach { if (running == null || !follow(it, running)) checkOrphan(it) }
         ws.filter { it.leftAt != 0L }.forEach(::checkLeft)
     }
@@ -168,7 +174,14 @@ class WebWindows(
     ): Boolean {
         if (w.closed || w.adopt >= 0 || w.taskId < 0) return false
         if (running.any { it.taskId == w.taskId }) return false
-        return tasksOn(w.displayId) == 0
+        return w.displayId < 0 || tasksOn(w.displayId) == 0
+    }
+
+    /** On [io]: task [id] is still running somewhere (unknown: true; removing a task that is gone is a no-op). */
+    private fun taskAlive(id: Int): Boolean {
+        @Suppress("DEPRECATION")
+        val running = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrNull() ?: return true
+        return running.any { it.taskId == id }
     }
 
     /** On [io]: [taskDead] still true [DEAD_CONFIRM_MS] later - the window closed the bar's way (main thread). */
@@ -1968,7 +1981,12 @@ class WebWindows(
     fun close(id: Int): Boolean {
         val w = wins[id] ?: return false
         dev.omalauncher.system.Tasks.logRemove("close", w.taskId, "web window $id (${w.component.packageName}, display ${w.displayId})")
+        val full = w.full || w.leftAt != 0L
         drop(w)
+        // Its app's task off the display by now (a move in flight - full screen, a minimise, PiP - ran before the close's
+        // removeTasks): it goes with the window all the same. Queued after drop's own removals on [io].
+        val app = w.taskId
+        if (w.linux == null && app >= 0 && !full) io.post { if (taskAlive(app)) removeTask(app, "app of window $id, off its display at the close") }
         return true
     }
 
@@ -2244,6 +2262,10 @@ class WebWindows(
 
     /** On [io]: [fullScreen]'s move. */
     private fun fullScreenNow(win: Win) {
+        // Closed while this waited on [io] (10-31 03:05, "Clear all": window 1 closed at .466, this ran at .588 and moved
+        // Chrome's task to display 0 before the close's removeTasks(224) - the task outlived its window, a second window
+        // took it and the next Tasks.remove found the closed window 1 in the stale full-screen map): nothing to move.
+        if (win.closed) return
         val task = taskOn(win.displayId)
         if (task == null) {
             WindowLog.w(TAG, "window ${win.id}: no task on display ${win.displayId} to make full screen")
@@ -2254,7 +2276,12 @@ class WebWindows(
         // Known as a full-screen web window BEFORE it lands on display 0: the old path's adopt must never float it.
         WebWindowDisplays.fullScreen(task, win.id, true)
         val ok = moveTask(task, android.view.Display.DEFAULT_DISPLAY)
-        if (!ok) WebWindowDisplays.fullScreen(task, win.id, false)
+        if (!ok || win.closed) WebWindowDisplays.fullScreen(task, win.id, false)
+        if (win.closed) {
+            // Closed during the move: its app goes with it, wherever the move left it.
+            removeTask(task, "app of window ${win.id}, closed while it went full screen")
+            return
+        }
         WindowLog.i(TAG, "window ${win.id}: ${if (ok) "its app (task $task) is a full-screen app on display 0" else "full screen FAILED (task $task stays on display ${win.displayId})"}")
         announce(win, ok)
     }
