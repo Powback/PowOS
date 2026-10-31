@@ -4646,6 +4646,114 @@ async function swapScene(r) {
 }
 
 /**
+ * In the page: TS1, a tiled window's content zoom (the user, 10-31 15:31: "when I try to scale it, it just detaches the
+ * window. And when I reattach it, it resets the scaling"). Two tiles: a two-finger pinch spreading on the left one's
+ * bar previews (its body scaled, the tile not) and on release sends the host the new zoom ("webwindows.zoom") - the
+ * tile's rect unchanged, still in the tiling. Dragged out (float) and tiled again, then swapped: the zoom stays. A
+ * page-reload rebuild from the host's list (zoom 1.5) brings it back.
+ */
+async function ZOOM_HELPERS() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  S.page.value = 0;
+  await window.__gw.settled();
+  const page = S.pages.value[0];
+  const had = powos.webwindows;
+  const sent = [];
+  powos.webwindows = { ...had, zoom: (id, k) => (sent.push([id, k]), Promise.resolve(true)), input: () => Promise.resolve(true) };
+  const get = (id = 971) => W.webWins.value.find((w) => w.id === id);
+  const el = (q) => document.querySelector(`.webwindow[data-wwid="971"] ${q}`);
+  window.__tz = {
+    W, page, powos, sent, get, el,
+    rest: async () => (await new Promise((ok) => setTimeout(ok, 300)), await window.__gw.settled()),
+    rect: () => { const w = get(); return w && `${w.x},${w.y} ${w.w}x${w.h}`; },
+    win: (id, i) => ({ id, key: `a:gate.zoom${i}`, label: `Zoom ${i}`, page, x: 60 + 50 * i, y: 140 + 40 * i, w: 300, h: 240, live: true }),
+    /** Pointer [type] [id] on 971's bar at [x], [y] (its centre's y when omitted). */
+    at(type, id, x, y) {
+      const bar = el(".webwindow-title");
+      const b = bar.getBoundingClientRect();
+      bar.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: "touch", isPrimary: id !== 42, clientX: x, clientY: y ?? b.top + b.height / 2, bubbles: true }));
+    },
+    centre: () => { const b = el(".webwindow-title").getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; },
+    bodyScale: () => { const body = el(".webwindow-body"); return body.getBoundingClientRect().width / body.offsetWidth; },
+    /** [got]'s fields that aren't [want]'s, as "TS1: <what> <got> (want <want>)". */
+    diff: (got, want) => Object.keys(want).filter((k) => got[k] !== want[k]).map((k) => `TS1: ${k} ${got[k]} (want ${want[k]})`),
+    done() {
+      powos.webwindows = had;
+      W.webWins.value = [];
+      W.tilings.value = {};
+      W.hostIds.value = null;
+    },
+  };
+  return [];
+}
+
+/** TS1: two tiles, a spreading pinch on 971's bar (60 -> 90 px: zoom 1.5): previewed, sent on release, the tile kept. */
+async function zoomPinchStep() {
+  const { W, page, sent, get, rest, rect, win, at, centre, bodyScale } = window.__tz;
+  W.webWins.value = [win(971, 0), win(972, 1)];
+  W.tilings.value = {};
+  W.tileWindows(page, [971, 972]);
+  await rest();
+  const r0 = rect();
+  const [cx] = centre();
+  (at("pointerdown", 41, cx - 30), at("pointerdown", 42, cx + 30));
+  for (let i = 1; i <= 6; i++) (at("pointermove", 41, cx - 30 - i * 2.5), at("pointermove", 42, cx + 30 + i * 2.5));
+  await window.__gw.frames(2);
+  const preview = bodyScale().toFixed(2);
+  const mid = rect();
+  (at("pointerup", 41, cx - 45), at("pointerup", 42, cx + 45));
+  await rest();
+  const got = { "mid-pinch body preview scale": preview, "mid-pinch tile rect": mid, "still tiled after the pinch (no detach)": W.tiledOn(971) != null,
+    "tile rect after": rect(), "zoom after": get().zoom, "zooms sent to the host": JSON.stringify(sent), "body scale after release": bodyScale().toFixed(2), "frame scale": get().scale ?? 1 };
+  return window.__tz.diff(got, { "mid-pinch body preview scale": "1.50", "mid-pinch tile rect": r0, "still tiled after the pinch (no detach)": true,
+    "tile rect after": r0, "zoom after": 1.5, "zooms sent to the host": "[[971,1.5]]", "body scale after release": "1.00", "frame scale": 1 });
+}
+
+/** TS1: 971 dragged out by its bar (floats), tiled again, swapped: its zoom stays, nothing more goes to the host. */
+async function zoomKeepStep() {
+  const { W, page, sent, get, rest, at, centre } = window.__tz;
+  const [cx, cy] = centre();
+  at("pointerdown", 43, cx, cy);
+  for (let i = 1; i <= 6; i++) at("pointermove", 43, cx + i * 10, cy + i * 30);
+  at("pointerup", 43, cx + 60, cy + 180);
+  await rest();
+  const got = { "floated by the bar drag": W.tiledOn(971) == null, "zoom floated": get().zoom };
+  W.tileWindows(page, [971, 972]);
+  await rest();
+  Object.assign(got, { "tiled again": W.tiledOn(971) != null, "zoom tiled again": get().zoom });
+  W.swapWindow(971);
+  await rest();
+  Object.assign(got, { "zoom swapped": get().zoom, "the other's zoom swapped": get(972).zoom ?? 1, "zooms sent": sent.length });
+  return window.__tz.diff(got, { "floated by the bar drag": true, "zoom floated": 1.5, "tiled again": true, "zoom tiled again": 1.5, "zoom swapped": 1.5, "the other's zoom swapped": 1, "zooms sent": 1 });
+}
+
+/** TS1: a page reload's rebuild takes the host's zoom ("webwindows.list"). */
+async function zoomReloadStep() {
+  const { W, powos } = window.__tz;
+  W.webWins.value = [];
+  W.tilings.value = {};
+  const host = { id: 973, key: "a:gate.zoomr", label: "R", state: "floating", live: true, zoom: 1.5, frame: { left: 80, top: 160, width: 300, height: 240 }, body: { left: 80, top: 196, width: 300, height: 204 } };
+  powos.webwindows = { ...powos.webwindows, list: () => Promise.resolve([host]) };
+  await W.rebuildFromHost();
+  return W.webWins.value.find((w) => w.id === 973)?.zoom === 1.5 ? [] : ["TS1: a reload's rebuild lost the host's zoom 1.5"];
+}
+
+/** TS1's steps in one page, the windows and the mock host restored after. */
+async function tileZoomScene(r) {
+  try {
+    for (const step of [ZOOM_HELPERS, zoomPinchStep, zoomKeepStep, zoomReloadStep]) {
+      const fails = await r.page.evaluate(step);
+      if (fails.length) return fails;
+    }
+    return [];
+  } finally {
+    await r.page.evaluate(() => window.__tz?.done()).catch(() => {});
+  }
+}
+
+/**
  * In the page: GL1, docking into the tiles (the user, 10-31 01:28: "drag them into a grid again. Like check out how
  * golden layout work"). Two tiles and a floating window: its bar dragged over the left tile's right edge shows the
  * preview there (and ticks); let go, three tiles with it where previewed; its bar dragged out again, two tiles.
@@ -5918,6 +6026,9 @@ try {
   // WX1: a tap on a divider / the ⇄ hint swaps the sides (ww-swap-unfolded; the user, 10-31 15:47-15:52).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-swap-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => swapScene(r))));
+  // TS1: a pinch on a tiled window's bar zooms its content in place (tile-zoom-unfolded; the user, 10-31 15:31).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "tile-zoom-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tileZoomScene(r))));
   // WT-IDLE: the web windows' rAF tick does nothing while no window moves (ww-idle-tick).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-idle-tick", { width: 900, height: 1000 }).then((r) => whenReady(r, async () => {

@@ -3289,6 +3289,8 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-button.ww-close:active { background: color-mix(in srgb, var(--color-red) 70%, transparent); }
 .ww-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .webwindow-body { position: relative; border-radius: 0 0 12px 12px; }
+/* TS1: a tiled window's content-zoom preview (its body scaled) stays inside its tile. */
+.webwindow.ww-zooming { overflow: hidden; }
 .webwindow.maximised .webwindow-body { border-radius: 0; }
 /* Until the app's first frame: a solid placeholder on the theme's surface (never a hole) - its icon and a quiet line. */
 .webwindow-body.placeholder { background: var(--color-surface); }

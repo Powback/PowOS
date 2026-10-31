@@ -33,6 +33,24 @@ internal object WindowDpi {
         if (pkg in SCREEN_DENSITY_APPS) return screenDpi
         return screenDpi * 2 / 3
     }
+
+    /** A window's content zoom range (TS1: the pinch on a tiled window's bar): 0.5x to 2x its [of] density. */
+    const val MIN_ZOOM = 0.5
+    const val MAX_ZOOM = 2.0
+
+    /** [zoom] clamped to [MIN_ZOOM]..[MAX_ZOOM] (1 for a non-number). */
+    fun clampZoom(zoom: Double): Double = if (zoom.isNaN()) 1.0 else zoom.coerceIn(MIN_ZOOM, MAX_ZOOM)
+
+    /**
+     * TS1 (the user, 10-31 15:31: "I should be able to scale an app, and it should keep its size on the screen, but with
+     * a new scale"): the dpi of a window's display at content zoom [zoom] over its [base] ([of]): its size in px stays,
+     * the app sees a bigger (zoom > 1: less fits) or smaller density. Changed only by the user's pinch, never by a
+     * resize, reload or rebind (the [of] rule's reason: the density never moves by itself).
+     */
+    fun zoomed(
+        base: Int,
+        zoom: Double,
+    ): Int = if (base <= 0) base else maxOf(1, Math.round(base * clampZoom(zoom)).toInt())
 }
 
 /**

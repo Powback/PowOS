@@ -33,6 +33,12 @@ export interface WebWin {
   h: number;
   /** Two fingers on its bar or edge zoom the whole window (the host's layer matrix; the app keeps its resolution). */
   scale?: number;
+  /**
+   * TS1: its app's CONTENT zoom (1 = the window's own density): a pinch on a tiled window's bar - the app shows less
+   * (> 1) or more, the frame stays. The host's display dpi ("webwindows.zoom"). Its own property: no layout pass, tile,
+   * float or swap touches it; a reload gets it back from "webwindows.list".
+   */
+  zoom?: number;
   /** Off its page, in the dock (a tap on the dock icon brings it back: openWebWindow). */
   minimised?: boolean;
   /** Filling the work area (above the dock); the frame to go back to. */
@@ -351,8 +357,12 @@ function fromHost(h: HostWebWindow, page: number): WebWin {
     task: h.task != null && h.task >= 0 ? h.task : undefined,
     live: h.live || undefined, ownFrame: h.ownFrame || undefined,
     minimised: h.state === "minimised" || undefined, full: h.state === "full" || undefined,
+    zoom: zoomOf(h),
   };
 }
+
+/** TS1: host window [h]'s content zoom, undefined at 1. */
+const zoomOf = (h: HostWebWindow) => (h.zoom != null && h.zoom !== 1 ? h.zoom : undefined);
 void rebuildFromHost();
 
 /** The pointer kept by its element (a synthetic or already-ended pointer can't be: the drag still works). */
@@ -2042,6 +2052,32 @@ const bodyFinger = new Map<number, (e: PointerEvent) => void>();
 export const MIN_SCALE = 0.4;
 export const MAX_SCALE = 1.5;
 
+/** TS1: a tiled window's content zoom range (the host's WindowDpi.MIN_ZOOM..MAX_ZOOM). */
+export const MIN_ZOOM = 0.5;
+export const MAX_ZOOM = 2;
+
+/** TS1: a pinch on a tiled window's bar in progress: the body's preview scale (new zoom / old), by window id. */
+export const zoomPreview = signal<{ id: number; k: number } | null>(null);
+
+/** TS1: window [id]'s content zoom [k] (clamped, 3 decimals) kept on it and sent to the host (its display's dpi). */
+export function setZoom(id: number, k: number) {
+  const z = Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, k)) * 1000) / 1000;
+  update(id, { zoom: z === 1 ? undefined : z });
+  if (id >= 0) void powos.webwindows?.zoom?.(id, z).catch(() => false);
+}
+
+/** TS1: a tiled window's pinch [p] let go: its preview ends, the app's display takes the new density. */
+function zoomReleased(id: number, p: { s0: number; k: number }) {
+  if (zoomPreview.value?.id === id) zoomPreview.value = null;
+  if (p.k !== p.s0) setZoom(id, p.k);
+  p.s0 = p.k;
+}
+
+/** TS1: a tiled window's pinch from zoom [s0] at spread [spread0]: the zoom at spread [d], clamped. */
+function zoomAt(s0: number, spread0: number, d: number) {
+  return spread0 > 0 ? Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, (s0 * d) / spread0)) : s0;
+}
+
 /**
  * SC1 (the user, 10-31: "Doing the two finger scaling motion is no longer scaling it, it's resizing it"): two fingers
  * on a window (bar or body) SCALE it - the whole frame, bar and app, zoomed uniformly like a picture; the app keeps its
@@ -2055,10 +2091,13 @@ export const MAX_SCALE = 1.5;
  * the chrome (the bar, an edge zone or corner grip) scales; a second finger on the body then is still the pinch's. A
  * gesture that starts on the body is the app's, every finger ([Body]: one multi-touch gesture, a pinch zooms Chrome's
  * page), a later finger off the body included ([bodyFinger]).
+ * TS1 (the user, 10-31 15:31: "when I try to scale it, it just detaches the window"): on a TILED window the same pinch
+ * scales the app's CONTENT ([WebWin.zoom]): the tile stays where it is, in the tiling; the body previews it (a CSS
+ * scale of the app's layer, [zoomPreview]) and the host's display takes the new density on release ([setZoom]).
  */
 function usePinch(win: WebWin) {
   const fingers = useRef(new Map<number, { x: number; y: number }>());
-  const pinch = useRef<{ spread0: number; s0: number; px: number; py: number } | null>(null);
+  const pinch = useRef<{ spread0: number; s0: number; px: number; py: number; tiled: boolean; k: number } | null>(null);
   const onBody = useRef(false);
   const live = useRef(win);
   live.current = win;
@@ -2083,11 +2122,12 @@ function usePinch(win: WebWin) {
     oneFinger.get(win.id)?.();
     oneFinger.delete(win.id);
     const w = live.current;
-    if (tiledOn(w.id) != null) untile(w.id, "keep");
     const o = pageOrigin();
     const f = spread();
-    const s0 = w.scale ?? 1;
-    pinch.current = { spread0: f.d, s0, px: (f.cx - o.x - w.x) / s0, py: (f.cy - o.y - w.y) / s0 };
+    // TS1: a tiled window's pinch zooms its content in place (it once untiled the window here: the detach).
+    const tiled = tiledOn(w.id) != null;
+    const s0 = (tiled ? w.zoom : w.scale) ?? 1;
+    pinch.current = { spread0: f.d, s0, px: (f.cx - o.x - w.x) / s0, py: (f.cy - o.y - w.y) / s0, tiled, k: s0 };
   };
   const move = (e: PointerEvent) => {
     if (!fingers.current.has(e.pointerId)) return;
@@ -2098,6 +2138,7 @@ function usePinch(win: WebWin) {
     if (fingers.current.size < 2) return;
     const f = spread();
     const w = live.current;
+    if (p.tiled) return void ((p.k = zoomAt(p.s0, p.spread0, f.d)), (zoomPreview.value = { id: w.id, k: p.k / p.s0 }));
     const a = workArea();
     const top = Math.max(MIN_SCALE, Math.min(MAX_SCALE, (a.right - a.left) / w.w, (a.bottom - a.top) / w.h));
     const k = p.spread0 > 0 ? Math.min(top, Math.max(MIN_SCALE, (p.s0 * f.d) / p.spread0)) : p.s0;
@@ -2109,6 +2150,7 @@ function usePinch(win: WebWin) {
     fingers.current.delete(e.pointerId);
     if (!pinch.current) return;
     e.stopPropagation();
+    if (pinch.current.tiled && fingers.current.size < 2) zoomReleased(live.current.id, pinch.current);
     if (fingers.current.size === 0) pinch.current = null;
   };
   return { onPointerDownCapture: down, onPointerMoveCapture: move, onPointerUpCapture: up, onPointerCancelCapture: up };
@@ -2608,7 +2650,7 @@ function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | nu
     <div
       class={`webwindow-body ${win.live ? "live" : "placeholder"}`}
       ref={body}
-      style={{ flex: 1, touchAction: "none" }}
+      style={{ flex: 1, touchAction: "none", ...previewOf(win.id) }}
       onPointerDown={down}
       onPointerMove={(e) => {
         const n = pressed.current.get(e.pointerId);
@@ -2731,9 +2773,15 @@ function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[
   );
 }
 
+/** TS1: a tiled window's body during its zoom pinch: scaled about its top left (the host draws its layer so). */
+function previewOf(id: number) {
+  const p = zoomPreview.value;
+  return p?.id === id && p.k !== 1 ? { transform: `scale(${p.k})`, transformOrigin: "0 0" } : {};
+}
+
 /** The frame element's classes: maximised, live, focused (the top window: its grips, RZ1), being resized. */
 function frameClass(win: WebWin, focused: boolean, sizing: boolean): string {
-  const on: [boolean, string][] = [[!!win.restore, "maximised"], [!!win.live, "live"], [focused, "focused"], [sizing, "ww-resizing"], [gripsOn.value === win.id, "ww-grips"], [reflowing.value === win.page, "ww-reflow"]];
+  const on: [boolean, string][] = [[!!win.restore, "maximised"], [!!win.live, "live"], [focused, "focused"], [sizing, "ww-resizing"], [gripsOn.value === win.id, "ww-grips"], [reflowing.value === win.page, "ww-reflow"], [zoomPreview.value?.id === win.id, "ww-zooming"]];
   return ["webwindow", ...on.filter(([b]) => b).map(([, c]) => c)].join(" ");
 }
 

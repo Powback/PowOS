@@ -297,6 +297,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       toWindow: (id) => call<boolean>("webwindows.toWindow", id),
       minimise: (id) => call<boolean>("webwindows.minimise", id),
       restore: (id) => call<boolean>("webwindows.restore", id),
+      zoom: (id, k) => call<boolean>("webwindows.zoom", id, k),
     },
     tasks: {
       list: () => call<RecentTask[]>("tasks.list"),
