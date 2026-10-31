@@ -53,13 +53,28 @@ const measure = () => {
  * screen's short side does not change with rotation or a keyboard, so it tells the two screens apart in any orientation.
  */
 const SHORT = 600;
-const shortSide = () => (typeof screen === "object" && screen.width > 0 ? Math.min(screen.width, screen.height) : Infinity);
+/**
+ * The screen object as the page sees it now, or null when it is stale: a page bigger than its screen. The WebView
+ * updates window.screen AFTER the resize of a fold (the user, 10-31 00:18: unfolded, home in the mobile layout until
+ * the page was moved - the resize was judged on the cover's 404-px screen and nothing looked again until a read).
+ */
+const SLACK = 2;
+function screenNow(m: { w: number; h: number }) {
+  if (typeof screen !== "object" || !(screen.width > 0)) return null;
+  const s = { w: screen.width, h: screen.height };
+  return m.w > s.w + SLACK || m.h > s.h + SLACK ? null : s;
+}
+/** Stale (screenNow null): the page's own short side - the screen is at least the page's size. */
+const shortSide = (m: { w: number; h: number }) => {
+  const s = screenNow(m);
+  return s ? Math.min(s.w, s.h) : Math.min(m.w, m.h);
+};
 /**
  * THE mode rule, for every page (home, the launcher, the shade's control center): the inner display is desktop mode in
  * any orientation, the cover screen is mobile in any orientation (the user, 2026-10-30: the launcher and the control
  * center in landscape). Pages read this, never innerWidth on their own.
  */
-export const desktopScreen = ({ w, h }: { w: number; h: number } = measure()) => w >= WIDE && w >= h * TALL && shortSide() >= SHORT;
+export const desktopScreen = (m: { w: number; h: number } = measure()) => m.w >= WIDE && m.w >= m.h * TALL && shortSide(m) >= SHORT;
 const decide = (m: { w: number; h: number }) => isHome && desktopScreen(m);
 const isWide = () => decide(measure());
 /** The width the last decision was made at (a keyboard changes only the height). */
@@ -122,6 +137,16 @@ function freeSpot(c: Cell, used: Set<string>, columns: number): Cell {
       if (!covers(at).some((k) => used.has(k))) return at;
     }
   return c;
+}
+
+/** Asked often and changing nothing: not logged (a keyboard's resize stream, every home.get, a resize's settle). */
+const QUIET = ["resize", "read", "visualViewport", "settled"];
+/** A decision with every input it used (console -> logcat PowosShell): the next wrong layout explains itself. */
+function logDecision(now: boolean, m: { w: number; h: number }, why: string, changed: boolean) {
+  const h = hint;
+  const vv = window.visualViewport;
+  const scr = `${screen.width}x${screen.height}${screenNow(m) ? "" : "(stale)"}`;
+  console.info(`layout wide=${now} w=${m.w} h=${m.h} why=${why}${changed ? " (changed)" : ""} inner=${innerWidth}x${innerHeight} screen=${scr} vv=${vv ? `${Math.round(vv.width)}x${Math.round(vv.height)}@${vv.scale.toFixed(2)}` : "-"} dpr=${devicePixelRatio.toFixed(2)}${h ? ` hint=${h.widthDp}x${h.heightDp}dp display=${h.displayId} rot=${h.rotation} folded=${h.folded}` : ""}`);
 }
 
 export function wide(n: Bridge): Bridge {
@@ -283,11 +308,7 @@ export function wide(n: Bridge): Bridge {
     // Every decision that changes something, and every one asked by a show or a host push, is logged with its inputs
     // (console -> logcat PowosShell), so the next wrong layout explains itself. Plain resizes, viewport changes and reads
     // that change nothing stay quiet (a keyboard's resize stream, every home.get).
-    if (changed || !["resize", "read", "visualViewport"].includes(why)) {
-      const h = hint;
-      const vv = window.visualViewport;
-      console.info(`layout wide=${now} w=${m.w} h=${m.h} why=${why}${changed ? " (changed)" : ""} inner=${innerWidth}x${innerHeight} vv=${vv ? `${Math.round(vv.width)}x${Math.round(vv.height)}@${vv.scale.toFixed(2)}` : "-"} dpr=${devicePixelRatio.toFixed(2)}${h ? ` hint=${h.widthDp}x${h.heightDp}dp display=${h.displayId} rot=${h.rotation} folded=${h.folded}` : ""}`);
-    }
+    if (changed || !QUIET.includes(why)) logDecision(now, m, why, changed);
     if (!changed) return;
     was = wideHome.value = now;
     emit("home.changed", null);
@@ -296,7 +317,15 @@ export function wide(n: Bridge): Bridge {
   // - Broforce - left home hidden at its size: the resize while hidden was judged on that, and none came on return,
   // so home stayed laid out wide - tiny cells squashed at the top). Hidden, nothing is decided; shown again, at once
   // and once more after the window has its size. These serve the no-host case; with a host they only re-ask it.
-  addEventListener("resize", () => recheck());
+  // A resize is judged at once and again once the window has settled: the WebView updates window.screen after the
+  // resize event (screenNow), and nothing else would look again until the next read - a touch on home (10-31 00:18).
+  let settling = 0;
+  const settle = () => {
+    clearTimeout(settling);
+    requestAnimationFrame(() => requestAnimationFrame(() => recheck("settled")));
+    settling = window.setTimeout(() => recheck("settled"), 400);
+  };
+  addEventListener("resize", () => (recheck(), settle()));
   // The visual viewport changes on its own (an overlay's keyboard, a zoom): the layout viewport may send no resize.
   window.visualViewport?.addEventListener("resize", () => recheck("visualViewport"));
   addEventListener("focus", () => recheck("focus"));
