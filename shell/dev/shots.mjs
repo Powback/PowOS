@@ -16,6 +16,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import puppeteer from "puppeteer";
+import { FLEET_SETUP } from "./agents-fleet.mjs";
 
 const ORIGIN = "https://shell.powos";
 const ROOT = "/shell";
@@ -432,6 +433,14 @@ const SCENES = [
   ["ai-chat-scrolled", "home", `S.chat.value = { busy: false, items: [...${CHAT_SAMPLE}, ...${CHAT_SAMPLE}, ...${CHAT_SAMPLE}] }; S.page.value = -1; await sleep(400); const t = document.querySelector('.ai-screen .ai-talk') ?? document.querySelector('.ai-screen .ai-scroll'); t.scrollTop = -(t.scrollHeight - t.clientHeight) / 2; await sleep(100);`, "wallpaper", undefined, { ...SIZES, "unfolded-land": LAND_SIZES["unfolded-land"] }],
   ["ai-compose", "home", "S.page.value = -1; await sleep(300); const f = document.querySelector('.ai-compose textarea, .ai-compose input'); f?.focus(); if (f) { f.value = 'summarise what the agents did overnight and what needs me'; f.dispatchEvent(new Event('input', { bubbles: true })); }", "wallpaper"],
   ["widget-screen", "home", "const w = S.home.value.items.find((i) => i.kind === 'widget'); S.screen.value = { key: w.key, title: 'weather' };", "wallpaper"],
+  // The Agents screen and widget in plain words (ui/agents.tsx, fleet.ts; the user 2026-10-31: "this agent screen is
+  // still not very informative"): 3 working on board tasks, 1 stopped (model_not_found), 12 idle folded into one line.
+  ["agents-screen", "home", "(await U('./agents.ts')).openAgents(null); await sleep(300);" + FLEET_SETUP, "wallpaper"],
+  ["agents-screen-open", "home", "(await U('./agents.ts')).openAgents(null); await sleep(300);" + FLEET_SETUP + " document.querySelector('.fl-fold-head')?.click(); await sleep(200);", "wallpaper"],
+  ["agents-live", "home", "(await U('./agents.ts')).openAgents(null); await sleep(300);" + FLEET_SETUP + " (await U('./agents.ts')).openAgents('mac:c0/s1'); await sleep(300);", "wallpaper"],
+  ["agents-widget-2x2", "home", "{ const B = (await U('./bridge.ts')).powos; for (const i of (await B.home.get()).items) await B.home.remove(i.key); const pg = (await B.home.get()).pages[0] ?? 1; await B.home.addPanel('agents', pg, { x: 0, y: 0, w: 2, h: 2 }); S.page.value = 0; await sleep(400); }" + FLEET_SETUP, "wallpaper"],
+  ["agents-widget-4x2", "home", "{ const B = (await U('./bridge.ts')).powos; for (const i of (await B.home.get()).items) await B.home.remove(i.key); const pg = (await B.home.get()).pages[0] ?? 1; await B.home.addPanel('agents', pg, { x: 0, y: 0, w: 4, h: 2 }); S.page.value = 0; await sleep(400); }" + FLEET_SETUP, "wallpaper"],
+  ["agents-widget-4x4", "home", "{ const B = (await U('./bridge.ts')).powos; for (const i of (await B.home.get()).items) await B.home.remove(i.key); const pg = (await B.home.get()).pages[0] ?? 1; await B.home.addPanel('agents', pg, { x: 0, y: 0, w: 4, h: 4 }); S.page.value = 0; await sleep(400); }" + FLEET_SETUP, "wallpaper"],
   ["settings", "home", "(await U('./screens.ts')).openScreen('settings');", "wallpaper"],
   // The desktop's home: a laptop-wide grid (as hosts/desktop.ts's first home: ~110 px a column), the launcher, the chat.
   ["desktop", "desktop", DESKTOP_HOME, "wallpaper"],

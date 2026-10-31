@@ -10,7 +10,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 out=$1; only=$2; S=${3:-$here/..}; wp=${4:-}
 mkdir -p "$out"; out=$(cd "$out" && pwd); S=$(cd "$S" && pwd)
-m=(-v "$S:/shell:ro" -v "$here/shots.mjs:/usr/src/app/shots.mjs:ro" -v "$out:/out")
+m=(-v "$S:/shell:ro" -v "$here/shots.mjs:/usr/src/app/shots.mjs:ro" -v "$here/agents-fleet.mjs:/usr/src/app/agents-fleet.mjs:ro" -v "$out:/out")
 [ -n "$wp" ] && m+=(-v "$(cd "$(dirname "$wp")" && pwd)/$(basename "$wp"):/wallpaper.jpg:ro")
 # The icon glyphs' font, as gate.sh mounts it (shell/fonts/nerd_symbols.ttf links out of shell/ into the APK's
 # res/font): without it every shot reported "missing glyphs" and SHOTS_STRICT=1 could never pass here.
