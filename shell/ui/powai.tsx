@@ -17,7 +17,7 @@ import { ago } from "./time.ts";
 import { md } from "./md.ts";
 import type { AgentMail, ChatItem } from "../types.ts";
 import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
-import { Item } from "./chat.tsx";
+import { renderItem } from "./chat.tsx";
 import { AgentUpdates, Queued, Thread, onLink, toolLabel } from "./rich.tsx";
 import { askQueued } from "./assistant.ts";
 import { MenuScreen, SCREENS, dailyDriver, type AiScreen } from "./aimenu.tsx";
@@ -130,7 +130,7 @@ function Conversation() {
     <div class="ai-chat-in">
       <div ref={top} class="ai-chat-top" />
       {!items.length && <div class="ai-empty muted">Ask PowOS AI anything - about PowOS, the phone, your projects.</div>}
-      <Thread items={items.slice(from)} render={(item, reply) => <Item item={item} reply={reply} />} />
+      <Thread items={items.slice(from)} render={renderItem} />
       {busy && items.at(-1)?.kind !== "assistant" && <div class="msg note muted thinking">thinking…</div>}
       <Queued />
       <Unread />
