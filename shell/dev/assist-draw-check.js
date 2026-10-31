@@ -108,7 +108,8 @@ export async function assistDrawStart() {
   s.n.starts = 0;
   await shortPress(s, fails);
   screenshot();
-  await sleep(300);
+  // The panel's entrance over before its rect is read (f30: not a fixed 300 ms - a loaded gate runs it late).
+  await window.__gw.settled(() => document.querySelector(".assist-draw") && panel(), ".assist-panel");
   const draw = document.querySelector(".assist-draw");
   const p = panel()?.getBoundingClientRect();
   if (!draw || !p) return (s.restore(), [...fails, "no .assist-draw or .assist-panel"]);

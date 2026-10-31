@@ -63,7 +63,8 @@ function firstRowGap(list, clipTop) {
 async function gridBreathes(E, at) {
   E.emit("pull.begin", { kind: "apps" });
   E.emit("pull.end", { open: true });
-  await sleep(500);
+  // The open's slide over, not a fixed 500 ms (f30: frames lag the clock on a loaded gate).
+  await window.__gw.settled(() => document.querySelector(".pull-screen .launcher-clip"), ".pull-screen");
   const clip = document.querySelector(".pull-screen .launcher-clip")?.getBoundingClientRect();
   const lists = [...document.querySelectorAll(".pull-screen .drawer-page > .drawer-list")];
   const fails = clip && lists.length ? [] : [`${at}: the launcher has no app grid`];

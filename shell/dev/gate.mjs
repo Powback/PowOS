@@ -660,8 +660,8 @@ async function shadeLayout() {
   P("pointerup", 340);
   await sleep(400);
   (await window.__gw.mod("./state.ts")).notif.value = true;
-  for (let t = 0; t < 150 && !document.querySelector(".notif-panel.shown .cc"); t++) await sleep(20);
-  await sleep(400);
+  // Shown, then its slide in over (f30: a fixed 400 ms read the panel mid-slide on a loaded gate).
+  await window.__gw.settled(() => document.querySelector(".notif-panel.shown .cc"), ".notif-panel");
   const seen = window.__shadeSeen();
   if (seen.length) return seen;
   const body = document.querySelector(".notif-panel .panel-body");
@@ -4377,10 +4377,10 @@ async function webWindowIdleTick() {
       await window.__gw.frames(1);
     }
     full.sort((a, b) => a - b);
-    window.__wwIdle = `p95 ${p95.toFixed(3)} ms idle; a full measure p95 ${full[114].toFixed(3)} ms`;
+    window.__wwIdle = `p50 ${ms[Math.floor(ms.length * 0.5)]?.toFixed(3)} ms, p95 ${p95.toFixed(3)} ms idle; a full measure p95 ${full[114].toFixed(3)} ms`;
     console.warn(`[gate] ww-idle-tick p95 ${p95.toFixed(3)} ms over ${ms.length} frames (a full measure: p95 ${full[114].toFixed(3)} ms); dirtied by ${window.__ww.dirtyBy}`);
     if (ms.length < 100) fails.push(`WT-IDLE: only ${ms.length} ticks measured`);
-    if (!(p95 < 1)) fails.push(`WT-IDLE: idle tick p95 ${p95.toFixed(2)} ms (want < 1; last dirtied by ${window.__ww.dirtyBy})`);
+    fails.push(...window.__wwTickFails(ms));
     if (window.__ww.sent.length !== sentAt || window.__ww.sent.at(-1) !== last) fails.push(`WT-IDLE: ${window.__ww.sent.length - sentAt} w.f sent while idle`);
     const before = window.__ww.sent.at(-1);
     window.__mockEvents.emit("webwindows.resend", 0);
@@ -5207,7 +5207,15 @@ async function fingerOf(page) {
     await Promise.all([down, touch("touchEnd", [])]);
     await wait(80);
   };
-  return { touch, wait, tap };
+  // A drag through [pts] on the page's clock, one point every stepMs: each event sent when its time comes, not after the
+  // previous one's round trip - awaited one by one, a loaded gate (f30) stretched an 8-step swipe into a slow drag.
+  const swipe = async (pts, stepMs = 16) => {
+    const sent = [touch("touchStart", [pts[0]])];
+    for (const p of pts.slice(1)) { await wait(stepMs); sent.push(touch("touchMove", [p])); }
+    sent.push(touch("touchEnd", []));
+    await Promise.all(sent);
+  };
+  return { touch, wait, tap, swipe };
 }
 
 /** LN2: a finger drags down over PowOS AI's chat (scrolling back through it); it scrolls, the panel stays open. */
@@ -5248,12 +5256,11 @@ async function homeGesturesScene(r) {
   await f.wait(400);
   let at = await empty();
   if (!at) return ["E2E1: no empty spot on home"];
-  await f.touch("touchStart", [{ x: at[0], y: at[1] }]);
-  for (let i = 1; i <= 8; i++) { await f.touch("touchMove", [{ x: at[0], y: at[1] - i * 30 }]); await f.wait(16); }
-  await f.touch("touchEnd", []);
+  await f.swipe(Array.from({ length: 9 }, (_, i) => ({ x: at[0], y: at[1] - i * 30 })));
   // Polled, not a fixed wait: under the full gate's load the drawer's settle took longer than 700 ms (it passed alone).
-  const until = (fn, ms) => r.page.waitForFunction(fn, { timeout: ms, polling: 50 }).then(() => true, () => false);
-  await until(() => !!document.querySelector(".home.open"), 4000);
+  // The budget is READY_MS (load-scaled), not a fixed 4000/3000 (f30).
+  const until = (fn) => r.page.waitForFunction(fn, { timeout: READY_MS, polling: 50 }).then(() => true, () => false);
+  await until(() => !!document.querySelector(".home.open"));
   const st = await r.page.evaluate(() => ({ open: !!document.querySelector(".home.open"), focused: !!document.activeElement?.matches(".bar textarea") }));
   if (!st.open) fails.push("E2E1: a plain swipe up from empty home space didn't open the drawer");
   if (st.focused) fails.push("E2E1: a plain swipe up focused the search");
@@ -5268,7 +5275,7 @@ async function homeGesturesScene(r) {
   if (!sp) fails.push("E2E1: no search on home (neither the bar nor the dock's button)");
   else {
     await f.tap(sp);
-    const ok = await until(() => document.activeElement?.matches(".bar textarea"), 4000);
+    const ok = await until(() => document.activeElement?.matches(".bar textarea"));
     if (!ok) fails.push("E2E1: a tap on home's search didn't focus its field");
   }
   await reset(); await f.wait(500);
@@ -5277,7 +5284,7 @@ async function homeGesturesScene(r) {
   await f.touch("touchStart", [{ x: at[0], y: at[1] }]);
   await f.wait(900);
   await f.touch("touchEnd", []);
-  if (!(await until(() => !!document.querySelector(".home.editing"), 3000))) fails.push("E2E1: a hold on empty home space didn't enter edit mode");
+  if (!(await until(() => !!document.querySelector(".home.editing")))) fails.push("E2E1: a hold on empty home space didn't enter edit mode");
   await reset();
   return fails;
 }
@@ -6639,7 +6646,55 @@ async function desktopsReloaded() {
 // (friction f30, 2026-10-23). A page's ready clock starts when it gets its slot; the slot frees when it's ready or
 // failed (or READY_MS passed), so the checks after boot still run side by side.
 const os = await import("node:os");
-const BOOTS = Number(process.env.GATE_BOOTS) || Math.max(3, Math.min(12, Math.round(os.cpus().length - os.loadavg()[0] + 4)));
+// The load the gate sizes itself from: the larger of the VM's (this container's view) and the Mac's (gate.sh passes
+// GATE_HOST_LOAD/GATE_HOST_CPUS: the docker VM's loadavg misses the agents and builds running on the Mac itself).
+const LOAD = Math.max(os.loadavg()[0], Number(process.env.GATE_HOST_LOAD) || 0);
+const CORES = Math.min(os.cpus().length, Number(process.env.GATE_HOST_CPUS) || Infinity);
+const BOOTS = Number(process.env.GATE_BOOTS) || Math.max(3, Math.min(12, Math.round(CORES - LOAD + 4)));
+// Scene slots (f30, 10-31): every scene's page used to be opened at once and kept to the end - ~190 live pages, each
+// drawing, polling and evaluating side by side. The boot slots above only spaced out the boots; after that all of them
+// competed, and at load 8-21 a different 1-23 scenes failed each run (not ready, navigation/protocol timeouts, "Promise
+// was collected", timing reads mid-animation) that pass alone. Now at most SCENES scenes are live at once - sized from
+// the free cores (2 per free core + 8, 6..32) - and a scene's pages close when it is done, so a loaded machine runs
+// fewer at once instead of timing all of them out. Never under 6: a scene of two pages holds one while it waits for
+// the other's slot. GATE_SCENES overrides.
+// Re-sized as the run goes: the load at the start is not the load a minute in (10-31: 6.8 at the start, 33 by the end
+// as other work piled on), so gate.sh writes the Mac's load into /cache/.hostload every 2 s and each slot taken
+// re-reads it.
+const scenesFor = (load) => Number(process.env.GATE_SCENES) || Math.max(6, Math.min(32, Math.round(2 * (CORES - load)) + 8));
+let SCENES = scenesFor(LOAD), loadNow = LOAD, loadRead = Date.now();
+const sceneLimit = () => {
+  if (Date.now() - loadRead > 2000) {
+    loadRead = Date.now();
+    let host = 0;
+    try { host = Number(fs.readFileSync("/cache/.hostload", "utf8").trim()) || 0; } catch {}
+    loadNow = Math.max(os.loadavg()[0], host);
+    const n = scenesFor(loadNow);
+    if (n !== SCENES) console.log(`gate: concurrency ${SCENES} -> ${n} scenes (load ${loadNow.toFixed(1)})`);
+    SCENES = n;
+  }
+  return SCENES;
+};
+console.log(`gate: concurrency ${SCENES} scenes, ${BOOTS} booting at once (load ${LOAD.toFixed(1)}, ${CORES} cores)`);
+let live = 0;
+const sceneQueue = [];
+const pump = () => { while (sceneQueue.length && live < sceneLimit()) (live++, sceneQueue.shift()()); };
+const sceneSlot = () => new Promise((ok) => (sceneQueue.push(ok), pump()));
+const sceneDone = () => (live--, pump());
+// A limit that grew again (the load fell) admits the queue without waiting for a scene to end.
+setInterval(pump, 1000).unref();
+// Tickets of the pages open() was called for since the last runs.push: open() files its ticket synchronously (before
+// its first await), so the scene expression passed to runs.push has filed all of its pages' tickets by the time push
+// runs; push ties them to that scene and, when it settles, closes their pages and frees their slots.
+let opening = [];
+const claimTickets = () => opening.splice(0);
+async function releaseTickets(tickets) {
+  for (const t of tickets) {
+    await t.opened.catch(() => {});
+    if (t.context) await t.context.close().catch(() => {});
+    if (t.slot) sceneDone();
+  }
+}
 let booting = 0;
 const bootQueue = [];
 const bootSlot = () => new Promise((ok) => (booting < BOOTS ? (booting++, ok()) : bootQueue.push(ok)));
@@ -6647,8 +6702,15 @@ const bootDone = () => (bootQueue.length ? bootQueue.shift()() : booting--);
 
 async function open(browser, url, name, viewport = { width: 412, height: 915 }) {
   if (ONLY && !ONLY.test(name)) throw SKIP;
+  const ticket = { name, slot: false, context: null };
+  let opened;
+  ticket.opened = new Promise((ok) => (opened = ok));
+  opening.push(ticket);
+  await sceneSlot();
+  ticket.slot = true;
   // A context (a window) of its own: tabs side by side in one window are hidden but the front one - no frames.
-  const context = await step(`${name}: createBrowserContext`, browser.createBrowserContext());
+  const context = await step(`${name}: createBrowserContext`, browser.createBrowserContext()).finally(opened);
+  ticket.context = context;
   const page = await step(`${name}: newPage`, context.newPage());
   // puppeteer's own 30 s defaults (goto, waitFor*) are fixed too: scale them with the load like READY_MS (f30).
   page.setDefaultTimeout(PUPPETEER_MS);
@@ -6789,6 +6851,24 @@ async function open(browser, url, name, viewport = { width: 412, height: 915 }) 
     };
     window.__gw = { sleep, frames, until, still, settled, steady, mod, documentAnimations };
   }, READY_MS);
+  // The machine's load as the gate sized itself from it: timing checks (ww-idle-tick) scale their thresholds with it.
+  await page.evaluateOnNewDocument((l) => {
+    window.__gateLoad = l;
+    // WT-IDLE's thresholds over the sorted tick times, load-aware (f30, 10-31: p95 1.00 ms at load ~20 on an idle tick
+    // of ~0.05 ms - a preempted frame, not the code). The median must stay under 1 ms at any load: preemption hits a
+    // few frames, a tick that does work (the 5-25 ms of a full measure every frame, before 622ff79a) is slow in every
+    // frame. The p95's 1 ms grows with the load per core past half the machine, capped at 4 ms - still under the 5 ms
+    // the old tick cost at its cheapest.
+    window.__wwTickFails = (ms) => {
+      const p50 = ms[Math.floor(ms.length * 0.5)] ?? Infinity, p95 = ms[Math.floor(ms.length * 0.95)] ?? Infinity;
+      const p95Max = Math.min(4, 1 + 2 * Math.max(0, l.load / l.cores - 0.5));
+      const why = `load ${l.load.toFixed(1)} on ${l.cores} cores; last dirtied by ${window.__ww.dirtyBy}`;
+      return [
+        ...(p50 < 1 ? [] : [`WT-IDLE: idle tick median ${p50.toFixed(2)} ms (want < 1; ${why})`]),
+        ...(p95 < p95Max ? [] : [`WT-IDLE: idle tick p95 ${p95.toFixed(2)} ms (want < ${p95Max.toFixed(2)}; ${why})`]),
+      ];
+    };
+  }, { load: LOAD, cores: CORES });
   // Counts the page's requestAnimationFrame callbacks (the idle check): counted as they run, nothing else changes.
   await page.evaluateOnNewDocument(() => {
     const raf = window.requestAnimationFrame.bind(window);
@@ -6923,7 +7003,16 @@ let failed = 0;
 try {
   const runs = [];
   // A run not in GATE_ONLY: open() throws SKIP before it makes a page; it reports nothing.
-  runs.push = (...ps) => Array.prototype.push.apply(runs, ps.map((p) => p.catch((e) => (e === SKIP ? null : Promise.reject(e)))));
+  // A scene's pages close (and free their scene slots) once all of what this push brought settled.
+  runs.push = (...ps) => {
+    const tickets = claimTickets();
+    // A scene that threw (a protocol timeout out of a step, say) is that scene's FAIL, named by its first page - not
+    // the whole run's crash with no scene reported (gate.sh retries it if that was the machine).
+    const name = tickets[0]?.name ?? "?";
+    const all = ps.map((p) => p.catch((e) => (e === SKIP ? null : { name, problems: [`run: ${String(e?.message ?? e).split("\n")[0]}`], warnings: [], ms: 0 })));
+    Promise.allSettled(all).then(() => releaseTickets(tickets));
+    return Array.prototype.push.apply(runs, all);
+  };
   if (process.env.SHELL_PAGES !== "0") {
     for (const mode of modes()) {
       const url = `${ORIGIN}/index.html${mode === "home" ? "" : `?mode=${mode}`}`;
@@ -7839,6 +7928,7 @@ try {
   // mark-as-read, and nothing pressed without a gesture.
   if (apps().some((a) => a.id === "local.needs-me"))
     runs.push(open(browser, `${ORIGIN}/__gate_app.html`, "app local.needs-me actions", { width: 404, height: 900 }).then((r) => settleNeedsMe(r)));
+  if (opening.length) console.log(`gate: ${opening.length} page(s) opened outside runs.push (their scene slots are held to the end)`);
   for (const r of (await Promise.all(runs)).filter(Boolean)) {
     if (r.problems.length) {
       failed++;

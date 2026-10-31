@@ -72,6 +72,9 @@ t0=$(date +%s) slot_wait=0
 # budget scales with the load actually measured at this run, instead of a constant every run guesses at.
 load=$(sysctl -n vm.loadavg 2>/dev/null | awk '{print int($2)}'); [ -n "$load" ] || load=$(awk '{print int($1)}' /proc/loadavg 2>/dev/null)
 load=${load:-0}
+# The same, unrounded, and the Mac's cores: gate.mjs sizes its scene concurrency from them (the docker VM's own loadavg
+# misses what runs on the Mac outside it).
+host_load=$(sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}'); host_cpus=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null)
 # Under $HOME, not $TMPDIR: Colima's VM mounts the home folder only (a /var/folders path is empty in the container).
 mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate"
 # The slots (2026-10-23: ~8 agents gated at once, Mac load 17 - pages timed out and retried with longer READY_MS, and
@@ -258,8 +261,11 @@ else echo "$missing" | sed 's/^/FAIL missing: /; s/$/ (not in what the phone wil
 # Load-scaled ready budget (an explicit READY_MS still wins): 1500 ms/load-point, floor 8000 - calibrated off
 # f30's own history (GATE_BOOTS alone passed at load 18.8 with the hand-set READY_MS=30000 workaround:
 # 1500*18.8=28200, close enough), capped at 60000 so a truly wedged page still fails instead of hanging.
-ready_default=$(( load * 1500 )); [ "$ready_default" -ge 8000 ] || ready_default=8000
-[ "$ready_default" -le 60000 ] || ready_default=60000
+# Floor 20000 since the scene slots (f30, 10-31): a page that errors says so at once (window.__powosBoot.failed ends the
+# wait), so the budget only bounds a page that is merely slow - 8000 failed "not ready within ~11.6 s" at load ~8. It
+# is also every in-page until()'s default; those return as soon as their state holds, so only a failure waits it out.
+ready_default=$(( load * 2000 )); [ "$ready_default" -ge 20000 ] || ready_default=20000
+[ "$ready_default" -le 90000 ] || ready_default=90000
 docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull -q "$IMAGE" >/dev/null
 # The shared transpile's cache (gate.mjs transpiled()): by source hash, so it never goes stale; pruned of week-old files.
 tx="${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/tx"
@@ -271,6 +277,10 @@ if [ -n "$app" ]; then
   [ -d "$app/out/ui" ] || { echo "FAIL app: $app/out/ui isn't built (apps/build.sh)"; exit 1; }
   mounts+=(-v "$app/powos-app.json:/apps/$id/powos-app.json:ro" -v "$app/out/ui:/apps/$id/ui:ro")
 fi
+# The Mac's load every 2 s for gate.mjs's scene concurrency (/cache/.hostload): it re-sizes as the load moves.
+( while :; do sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}' > "$tx/.hostload.tmp" && mv "$tx/.hostload.tmp" "$tx/.hostload"; sleep 2; done ) &
+hostload_pid=$!
+trap 'kill $hostload_pid 2>/dev/null; rm -rf "$work" ${slot:+"$slot"}' EXIT
 set +e
 # The Mac-wide build slot (tools/agents/build-slot.sh): booting the pages competes for CPU with
 # compile-check/build-pkgs/warm-builder's docker runs, and a fixed READY_MS can't tell a slow page from a
@@ -284,6 +294,7 @@ browser_run() {
   # slots (GATE_SLOTS) that already cap how many gates run. GATE_BUILD_SLOT=1 brings it back.
   ${GATE_BUILD_SLOT:+"$SHELL_DIR/../tools/agents/build-slot.sh" "gate $base" --} \
   docker run --rm --platform linux/arm64 --shm-size 512m $cpu "${mounts[@]}" -e READY_MS="$1" \
+    ${host_load:+-e GATE_HOST_LOAD="$host_load"} ${host_cpus:+-e GATE_HOST_CPUS="$host_cpus"} ${GATE_SCENES:+-e GATE_SCENES="$GATE_SCENES"} \
     ${GATE_SHELL_PAGES:+-e SHELL_PAGES="$GATE_SHELL_PAGES"} ${IDLE_MS:+-e IDLE_MS="$IDLE_MS"} ${IDLE_WAIT_MS:+-e IDLE_WAIT_MS="$IDLE_WAIT_MS"} ${GATE_SHARED_TX:+-e GATE_SHARED_TX="$GATE_SHARED_TX"} \
     ${2:+-e GATE_ONLY="$2"} ${3:+-e GATE_BOOTS="$3"} ${GATE_THROTTLE:+-e GATE_THROTTLE="$GATE_THROTTLE"} \
     -w /usr/src/app --entrypoint node "$IMAGE" gate.mjs
@@ -293,18 +304,36 @@ ts=$(mark)
 browser_log="$work/browser.log"
 browser_run "$ready_ms" "${GATE_ONLY:-}" "${GATE_BOOTS:-}" 2>&1 | tee "$browser_log"
 rc=${PIPESTATUS[0]}
-# A starved Mac (load 17-25, 2026-10-24: 12 cases "not ready" after 30-186 s though a lone run boots in 2 s and the whole
-# gate passed minutes later) can miss the ready budget with nothing wrong in the code. When EVERY failure of the run is
-# a "not ready" (no console/uncaught/module error, no other check), run just those cases once more, two pages at a
-# time with twice the budget. A real boot error is not "not ready" alone (the boot guard names it) and fails again.
-if [ $rc -eq 1 ] && grep -q '^FAIL ' "$browser_log" && ! grep '^FAIL ' "$browser_log" | grep -qv '^FAIL [^:]*: not ready (window.__powosAlive)'; then
-  names=$(grep '^FAIL ' "$browser_log" | sed 's/^FAIL \([^:]*\):.*/\1/' | sort -u | sed 's/[][\.*+?^${}()|]/\\&/g; s/^/^/; s/$/$/' | paste -sd'|' -)
-  echo "gate: only 'not ready' failures at load $load - retrying those cases alone (2 pages at a time, READY_MS x2)"
-  retry=$(( ready_ms * 2 )); [ "$retry" -le 120000 ] || retry=120000
-  set +e
-  browser_run "$retry" "$names" 2 2>&1 | tee "$work/browser-retry.log"
-  rc=${PIPESTATUS[0]}
-  set -e
+# One retry of the scenes that failed ONLY on the machine, never on an assertion (f30): a page not ready in time, a
+# navigation or protocol timeout, an evaluate whose context or promise was lost - what a starved Mac does (load 8-21,
+# 10-31: a different 1-23 scenes each run that pass alone). Those scenes run once more on their own, two pages booting
+# at once and twice the budget, logged as a retry. A scene with any other failure is never retried, and a retried scene
+# passes only if the retry printed its "ok" (a scene the retry's GATE_ONLY skipped is not a pass).
+infra='not ready \(window\.__powosAlive\)|navigation: |Navigation timeout|protocolTimeout|callFunctionOn timed out|Promise was collected|Execution context was destroyed|Cannot find context with specified id|Target closed|Session closed|Connection closed'
+if [ $rc -ne 0 ] && grep -q '^FAIL ' "$browser_log"; then
+  failing=$(grep '^FAIL ' "$browser_log" | sed 's/^FAIL \([^:]*\):.*/\1/' | sort -u)
+  assert_fail="" retry_names=""
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    if grep -F "FAIL $n: " "$browser_log" | grep -vqE "^FAIL [^:]*: ($infra)|^FAIL [^:]*: (evaluate|run): .*($infra)"; then assert_fail+="$n "
+    else retry_names+="$n"$'\n'; fi
+  done <<< "$failing"
+  if [ -n "$retry_names" ]; then
+    names=$(printf '%s' "$retry_names" | sed 's/[][\.*+?^${}()|]/\\&/g; s/^/^/; s/$/(-launcher)?$/' | paste -sd'|' -)
+    echo "gate: retry: $(printf '%s' "$retry_names" | paste -sd' ' -) failed only on load/timeouts at load $load - running them once more alone (2 booting, READY_MS x2)"
+    retry=$(( ready_ms * 2 )); [ "$retry" -le 120000 ] || retry=120000
+    set +e
+    GATE_SCENES=6 browser_run "$retry" "$names" 2 2>&1 | tee "$work/browser-retry.log"
+    rrc=${PIPESTATUS[0]}
+    set -e
+    while IFS= read -r n; do
+      [ -n "$n" ] || continue
+      grep -qF "ok   $n (" "$work/browser-retry.log" || { echo "gate: retry: $n did not pass on its retry"; rrc=1; }
+    done <<< "$retry_names"
+    [ -n "$assert_fail" ] || rc=$rrc
+    [ $rrc -ne 0 ] || echo "gate: retry: all passed on the retry"
+  fi
+  [ -z "$assert_fail" ] || echo "gate: assertion failures (never retried): $assert_fail"
 fi
 [ $rc -eq 0 ] || fail=1
 t_browser=$(( $(mark) - ts ))
@@ -354,8 +383,11 @@ fi
 [ $rc -le 1 ] || echo "FAIL gate: the browser run itself failed (exit $rc)"
 # The summary: scenes PASS/FAIL, where the time went (slot wait is queueing for CPU, not work).
 n_ok=$(cat "$browser_log" "$work/browser-retry.log" 2>/dev/null | grep -c '^ok   ' || true)
-bad_scenes=$(grep -h '^FAIL ' "$browser_log" 2>/dev/null | sed 's/^FAIL \([^:]*\):.*/\1/' | sort -u | paste -sd' ' - || true)
-echo "gate: summary: scenes $n_ok PASS, $(echo "$bad_scenes" | wc -w | tr -d ' ') FAIL${bad_scenes:+ ($bad_scenes)}; slot wait ${slot_wait} s; tsc ${t_tsc} s, lints ${t_lint} s, browser ${t_browser} s, widgets ${t_widgets} s"
+# A scene that passed its retry (above) is not a FAIL; it is counted once, as the retry's ok.
+bad_scenes=$(grep -h '^FAIL ' "$browser_log" 2>/dev/null | sed 's/^FAIL \([^:]*\):.*/\1/' | sort -u | while IFS= read -r n; do
+  grep -qF "ok   $n (" "$work/browser-retry.log" 2>/dev/null || echo "$n"; done | paste -sd' ' - || true)
+n_retried=$(grep -c '^ok   ' "$work/browser-retry.log" 2>/dev/null || true); [ "${n_retried:-0}" != 0 ] || n_retried=
+echo "gate: summary: scenes $n_ok PASS${n_retried:+ ($n_retried on a retry)}, $(echo "$bad_scenes" | wc -w | tr -d ' ') FAIL${bad_scenes:+ ($bad_scenes)}; slot wait ${slot_wait} s; tsc ${t_tsc} s, lints ${t_lint} s, browser ${t_browser} s, widgets ${t_widgets} s"
 [ $fail = 0 ] && [ -z "$shots" ] && echo "$(date +%F\ %T) $scope_note" > "$cache_dir/$cache_key"
 echo "gate: $([ $fail = 0 ] && echo pass || echo FAIL) in $(($(date +%s) - t0)) s ($base$([ -n "$overrides" ] && echo " + phone overrides")$([ ${#files[@]} -gt 0 ] && echo " + ${#files[@]} pushed file(s)"))"
 # A failure while the Mac is loaded (1-min load >= GATE_LOAD_FRICTION, 12) is friction: the gate may have failed for

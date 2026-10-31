@@ -273,7 +273,8 @@ async function fromButtonDock(E) {
   const fails = [];
   E.emit("pull.begin", { kind: "apps", from: { left: 170, top: 820, width: 64, height: 64 } });
   E.emit("pull.end", { open: true });
-  await sleep(700);
+  // The bar and the dock at rest, not a fixed 700 ms (f30).
+  await window.__gw.settled(() => document.querySelector(".pull-screen > form.bar") && document.querySelector(".pull-screen > .dock:not(.dock-tray)"), ".pull-screen");
   const bar = document.querySelector(".pull-screen > form.bar")?.getBoundingClientRect();
   const dock = [...document.querySelectorAll(".pull-screen > .dock:not(.dock-tray)")].filter(shown)[0]?.getBoundingClientRect();
   if (!bar || !dock) fails.push(`from the dock's button: ${bar ? "" : "no bar "}${dock ? "" : "no dock"}`);
@@ -286,7 +287,8 @@ async function fromButtonDock(E) {
 export async function aiScrollSetup() {
   const S = await importShim("./state.ts");
   S.openPanel("ai");
-  await sleep(700);
+  // The panel open and at rest, not a fixed 700 ms (f30).
+  await window.__gw.settled(() => document.querySelector(".home .ai-panel .ai-scroll"), ".home .ai-panel");
   const list = document.querySelector(".home .ai-panel .ai-scroll.ai-chat") ?? document.querySelector(".home .ai-panel .ai-scroll");
   if (!list) return { fail: "no PowOS AI scroller in home's launcher" };
   for (let i = 0; i < 40; i++) {
@@ -296,7 +298,7 @@ export async function aiScrollSetup() {
     d.textContent = `line ${i}`;
     list.append(d);
   }
-  await sleep(100);
+  await window.__gw.settled(() => true, ".home .ai-panel");
   const r = list.getBoundingClientRect();
   return { x: r.left + r.width / 2, y: r.top + r.height * 0.3, top: list.scrollTop, scrolls: list.scrollHeight > list.clientHeight + 100 };
 }
