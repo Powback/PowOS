@@ -19,6 +19,7 @@ import android.os.Looper
  *   create <tag> <w> <h> <dpi>      -> "display <tag> <displayId>" | "error <tag> <why>"
  *   resize <displayId> <w> <h> <dpi>
  *   release <displayId>
+ *   touch <displayId> <action> <downTime> <x> <y>   -> an injected touch on that display ("log touch ..." for downs/ups)
  *   (stdin closed: the app is gone - every display released, then exit)
  *
  * Why it exists: a window's display must be TRUSTED, else the app's own launches leave it. Measured 2026-10-30
@@ -105,6 +106,7 @@ object WebWindowsHost {
                 "resize" -> resize(a[1].toInt(), a[2].toInt(), a[3].toInt(), a[4].toInt())
                 "release" -> vds.remove(a[1].toInt())?.let(::release)
                 "settle" -> settle(a[1].toInt(), a.drop(2).joinToString(" "))
+                "touch" -> Inject.touch(a)
             }
         }
 
@@ -288,6 +290,57 @@ object WebWindowsHost {
                 m.invoke(svc, *args)
             }
         }
+    }
+
+    /**
+     * The web windows' Android input: a body touch the page forwarded, injected on the window's display from this
+     * long-lived shell-uid process (shell holds INJECT_EVENTS; PowOS's uid doesn't, so its own injectInputEvent is
+     * refused). Before this, every event was a root `input -d <id> touchscreen motionevent ...` - a new app_process
+     * per touch (logcat's "app_process: Opened libinputextensionsimpl.so" on every tap, 10-31 01:11), ~0.3-1 s each, a
+     * DOWN and its UP raced as separate processes, and taps on window bodies did nothing (the user, 10-31 01:11:
+     * "I can't interact with Android windows").
+     */
+    private object Inject {
+        private val im by lazy {
+            val b = Class.forName("android.os.ServiceManager").getMethod("getService", String::class.java).invoke(null, "input") as android.os.IBinder
+            Class.forName("android.hardware.input.IInputManager\$Stub").getMethod("asInterface", android.os.IBinder::class.java).invoke(null, b)!!
+        }
+        private val inject by lazy { im.javaClass.getMethod("injectInputEvent", android.view.InputEvent::class.java, Int::class.javaPrimitiveType) }
+        private val setDisplayId by lazy { android.view.MotionEvent::class.java.getMethod("setDisplayId", Int::class.javaPrimitiveType) }
+        private val props = arrayOf(android.view.MotionEvent.PointerProperties().apply { id = 0; toolType = android.view.MotionEvent.TOOL_TYPE_FINGER })
+        private val coords = arrayOf(android.view.MotionEvent.PointerCoords().apply { pressure = 1f; size = 1f })
+
+        /** "touch <displayId> <action> <downTime> <x> <y>" (device px on that display). */
+        fun touch(a: List<String>) {
+            val displayId = a[1].toInt()
+            val action = a[2].toInt()
+            val downTime = a[3].toLong()
+            val x = a[4].toFloat()
+            val y = a[5].toFloat()
+            coords[0].x = x
+            coords[0].y = y
+            val now = android.os.SystemClock.uptimeMillis()
+            val ev =
+                android.view.MotionEvent.obtain(
+                    downTime, now, action, 1, props, coords, 0, 0, 1f, 1f, VIRTUAL_DEVICE, 0, android.view.InputDevice.SOURCE_TOUCHSCREEN, 0,
+                )
+            val result =
+                try {
+                    setDisplayId.invoke(ev, displayId)
+                    // INJECT_INPUT_EVENT_MODE_ASYNC: never blocks the next line on the app's handling.
+                    if (inject.invoke(im, ev, 0) as? Boolean == true) "ok" else "REFUSED"
+                } catch (e: Exception) {
+                    "FAILED ${(e.cause ?: e)}"
+                } finally {
+                    ev.recycle()
+                }
+            if (action != android.view.MotionEvent.ACTION_MOVE || result != "ok") {
+                say("log touch display $displayId action $action at ${x.toInt()},${y.toInt()}: $result")
+            }
+        }
+
+        /** KeyCharacterMap.VIRTUAL_KEYBOARD: the id the platform's own `input` command injects as. */
+        private const val VIRTUAL_DEVICE = -1
     }
 
     /** The system context under the shell package's name (the uid this runs as), as scrcpy's server does. */
