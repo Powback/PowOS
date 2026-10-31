@@ -3391,6 +3391,43 @@ async function webDockToggleCell() {
 }
 
 /**
+ * DG1 (ui/dockgroups.tsx; the user 10-31 03:18: "the homebar doesn't really show them as docked together"): two web
+ * windows tiled on page 1 and one floating -> the dock has exactly one group cell (2 mini icons) and one single cell,
+ * and no cell of their own for the tiled apps; a tap on the group cell raises both tiled windows over the floating one.
+ */
+async function webDockGroupCheck() {
+  const { S, W, P, win, step } = window.__dtg;
+  const keys = [...S.byKey.value.keys()].filter((k) => !S.dock.value.includes(k)).slice(0, 3);
+  return step(async (fails) => {
+    if (keys.length < 3) return void fails.push(`DG1: ${keys.length} unpinned apps, want 3`);
+    const [a, b, c] = keys;
+    try {
+      W.webWins.value = [win(951, a), win(952, b), win(953, c)];
+      W.tilings.value = { [P[0]]: { layout: "2h", ids: [951, 952], rx: 0.5, ry: 0.5 } };
+      await window.__gw.frames(3);
+      const groups = [...document.querySelectorAll(".home .dock .app.group")];
+      const icons = groups[0]?.querySelectorAll(".task-icon").length;
+      if (groups.length !== 1 || icons !== 2) fails.push(`DG1: ${groups.length} group cells (${icons} icons), want 1 with 2`);
+      const own = (k) => document.querySelectorAll(`.home .dock .app[data-key="${CSS.escape(k)}"]`).length;
+      if (own(a) || own(b)) fails.push(`DG1: the tiled apps have own cells too (${own(a)}, ${own(b)})`);
+      if (own(c) !== 1) fails.push(`DG1: the floating window's app has ${own(c)} cells, want 1`);
+      W.raise(953);
+      const cell = groups[0];
+      if (!cell) return;
+      const r = cell.getBoundingClientRect();
+      const at = { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, bubbles: true, pointerId: 8, button: 0 };
+      cell.dispatchEvent(new PointerEvent("pointerdown", at));
+      cell.dispatchEvent(new PointerEvent("pointerup", at));
+      await window.__gw.frames(2);
+      const top2 = W.webWins.value.slice(-2).map((w) => w.id).sort().join();
+      if (top2 !== "951,952") fails.push(`DG1: a tap on the group cell left [${W.webWins.value.map((w) => w.id)}] (want 951 and 952 on top)`);
+    } finally {
+      W.tilings.value = {};
+    }
+  });
+}
+
+/**
  * In the page: two fingers on a web window's body (the native frame's zoom, back in the DOM, the user 10-30 21:04: "i
  * can no longer use two fingers to rescale the windows") scale it, floor 0.4; the body's measured scale (the w.f
  * entry's) follows; the pinch never reaches the app (its press ends in one cancel); and at that scale a press at the
@@ -4747,7 +4784,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }

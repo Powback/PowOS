@@ -204,6 +204,21 @@ const Icon = memo(function Icon({ src }: { src: string | null }) {
   return src ? <img class="task-icon" src={src} alt="" draggable={false} /> : <span class="task-icon blank" />;
 });
 
+/**
+ * A group's icons together: a split card's apps (Android's split screen), and the dock's cell for a PowOS window group
+ * (ui/dockgroups.tsx: a tiling's tiles, a tab stack's tabs) - 2-4 mini icons, laid out as [layout] (a Tiling's layout,
+ * "stack" for tabs; CSS lays each out as the group sits on screen; none: side by side).
+ */
+export function SplitIcons({ icons, layout }: { icons: (string | null)[]; layout?: string }) {
+  return (
+    <span class="task-icons" data-layout={layout}>
+      {icons.map((src, i) => (
+        <Icon key={i} src={src} />
+      ))}
+    </span>
+  );
+}
+
 /** What a head shows of [t]: a new task object from each recents update is the same head when these are. */
 const sameHead = (a: { t: RecentTask }, b: { t: RecentTask }) =>
   a.t === b.t ||
@@ -217,11 +232,7 @@ const TaskHead = memo(function TaskHead({ t }: { t: RecentTask }) {
   return (
     <div class="task-head">
       {t.split ? (
-        <span class="task-icons">
-          {t.split.map((s) => (
-            <Icon key={s.id} src={s.icon} />
-          ))}
-        </span>
+        <SplitIcons icons={t.split.map((s) => s.icon)} />
       ) : (
         <Icon src={t.icon} />
       )}

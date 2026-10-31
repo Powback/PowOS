@@ -29,6 +29,7 @@ import { EditSheet } from "./editsheet.tsx";
 import { PowAiPage } from "./powai.tsx";
 import { Pet } from "./pet.tsx";
 import { markClass, pageFocus } from "./pagemarks.ts";
+import { DockGroupCell, groupedKeys, unpinnedGroups } from "./dockgroups.tsx";
 import { Recents } from "./recents.tsx";
 import { appOf, dockTap } from "./desktops.ts";
 import { overWindows } from "./panellift.ts";
@@ -328,7 +329,8 @@ function useGlide(el: { current: HTMLDivElement | null }, keys: string) {
  */
 function DockRecents({ count }: { count: number }) {
   // An app with a floating window is in the pinned dock already (DockWindows): never twice in the dock.
-  const pinned = new Set([...dock.value, ...windowed.value.keys()]);
+  // DG1: nor an app of a window group (its group's cell is the dock's, DockWindows).
+  const pinned = new Set([...dock.value, ...windowed.value.keys(), ...groupedKeys.value]);
   const shown = recent.value
     .filter((k) => !pinned.has(k))
     .map((k) => byKey.value.get(k))
@@ -371,11 +373,22 @@ function windowedOnly(pinned: string[]): [string, string][] {
   return [...windowed.value.entries()].filter(([k]) => !pinned.includes(k) && byKey.value.has(k));
 }
 
+/** How many cells DockWindows draws for [pinned]: a group's one (DG1) and each other window's app. */
+function windowCells(pinned: string[]): number {
+  const grouped = groupedKeys.value;
+  return unpinnedGroups(pinned).length + windowedOnly(pinned).filter(([k]) => !grouped.has(k)).length;
+}
+
 /** After the pinned apps: the apps with a floating window that aren't pinned, so every window can be reached. */
 function DockWindows({ pinned }: { pinned: string[] }) {
-  const shown = windowedOnly(pinned);
+  // DG1 (ui/dockgroups.tsx): a window group is one cell, before the single windows; its apps get none of their own.
+  const grouped = groupedKeys.value;
+  const shown = windowedOnly(pinned).filter(([k]) => !grouped.has(k));
   return (
     <>
+      {unpinnedGroups(pinned).map((g) => (
+        <DockGroupCell key={`g ${g.ids.join()}`} group={g} />
+      ))}
       {shown.map(([k, state]) => {
         const app = byKey.value.get(k);
         return app && <AppCell key={`w ${k}`} app={app} labels={false} class={`windowed ${state} ${markClass(k)}`} onTap={() => dockTap(k)} />;
@@ -498,7 +511,7 @@ export function Dock() {
               // Wide, the cells share the bar's left end: more than six (the windows' apps after the pinned ones) get
               // narrower slots instead of running on under the pill (shell.css --cells; a Calculator window's icon
               // sat under the pill, its tap opened the drawer: dock-taskbar FAIL 2026-10-23).
-              style={{ "--cells": String(slots + (ownWindows ? windowedOnly(dock.value).length : 0)) }}
+              style={{ "--cells": String(slots + (ownWindows ? windowCells(dock.value) : 0)) }}
               ref={(node) => {
                 el.current = node;
               }}

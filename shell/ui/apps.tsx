@@ -20,7 +20,7 @@ const SLOP = 10;
  * Press-and-hold without a move opens the menu; a tap launches. Held and then moved ([onDrag]): the menu gives way to
  * dragging the app. A move before the hold is a scroll or a swipe, not the app's.
  */
-function usePress(onTap: () => void, onLong: (el: HTMLElement) => void, onDrag: ((e: PointerEvent) => void) | null) {
+export function usePress(onTap: () => void, onLong: (el: HTMLElement) => void, onDrag: ((e: PointerEvent) => void) | null) {
   const s = useRef<{ x: number; y: number; long: boolean; timer: number; el: HTMLElement } | null>(null);
   const cancel = () => {
     if (s.current) clearTimeout(s.current.timer);

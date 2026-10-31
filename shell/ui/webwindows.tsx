@@ -356,6 +356,20 @@ function bringBack(id: number) {
 }
 
 /**
+ * The dock's group cell tapped (ui/dockgroups.tsx; the user 10-31 03:18: "the homebar doesn't really show them as
+ * docked together"): every window of the group [ids] shown and in front, in their order, home on [page]. A stack's
+ * hidden tabs stay hidden (its shown tab is the one brought).
+ */
+export function bringGroup(ids: number[], page: number) {
+  for (const id of ids) {
+    if (hiddenTab(id) || !webWins.value.some((v) => v.id === id)) continue;
+    update(id, { minimised: false });
+    raise(id);
+  }
+  toPage(page);
+}
+
+/**
  * TB4 (the user, 2026-10-30: "If I click on the icon of an open window I should be able to minimize it that way"): a
  * dock tap on app [key] with web windows, taskbar style - one code path for Android and Linux windows. Its window in
  * front (the top-most one showing on the page on screen) minimises; with several windows of the app the tap cycles
