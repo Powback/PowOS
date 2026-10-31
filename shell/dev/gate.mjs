@@ -4135,10 +4135,15 @@ const dl = (page, fn, ...args) => page.evaluate(async (fn, args) => (await impor
 /** One finger from [from] through [path] (five moves to each point), let go at its end; the state at the points [at] names. */
 async function dlDrag(r, f, { from, path, at = {} }) {
   const seen = {};
-  await f.touch("touchStart", [{ x: from[0], y: from[1] }]);
+  const step = (a, to, k) => [{ x: a[0] + ((to[0] - a[0]) * k) / 5, y: a[1] + ((to[1] - a[1]) * k) / 5 }];
+  // The press and the moves to the first point go out together, not one awaited round trip each: under the ship
+  // gate's load those took 1.7 s (10-31), past usePress's 420 ms hold, so the press was a hold and the move a reorder
+  // (no lift, the sideways drag no page). The page gets them in order, as a finger's.
+  const first = path[0];
+  await Promise.all([f.touch("touchStart", [{ x: from[0], y: from[1] }]), ...[1, 2, 3, 4, 5].map((k) => f.touch("touchMove", step(from, first, k)))]);
   let p = from;
   for (const [i, to] of path.entries()) {
-    for (let k = 1; k <= 5; k++) (await f.touch("touchMove", [{ x: p[0] + ((to[0] - p[0]) * k) / 5, y: p[1] + ((to[1] - p[1]) * k) / 5 }]), await f.wait(17));
+    if (i) for (let k = 1; k <= 5; k++) (await f.touch("touchMove", step(p, to, k)), await f.wait(17));
     p = to;
     // The state each point waits for (DL_WANT): under the ship gate's load the moves are handled late.
     if (at[i]) seen[at[i]] = await dlUntil(r, f, DL_WANT[at[i]]);
