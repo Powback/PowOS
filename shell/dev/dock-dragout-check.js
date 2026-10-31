@@ -42,8 +42,10 @@ async function drag(G, key, from, path) {
   const ev = (type, p) => new PointerEvent(type, { pointerId: id, clientX: p.x, clientY: p.y, bubbles: true });
   G.startCarry({ app: key, fromDock: true }, ev("pointerdown", from), { x: 30, y: 30 });
   for (const p of path) (window.dispatchEvent(ev("pointermove", p)), await frames(1));
-  await sleep(250); // the ghost's 140 ms glide between zones (shell.css .ww-drop)
+  await sleep(250);
+  // The ghost's spring between targets (shell.css .ww-drop) ended: a busy machine runs it late, so wait for it.
   const ghost = document.querySelector(".ww-drop.dock-out");
+  await Promise.all((ghost?.getAnimations() ?? []).map((a) => a.finished.catch(() => {})));
   const seen = ghost ? { zone: ghost.dataset.zone, place: ghost.dataset.place, rect: ghost.getBoundingClientRect(), spot: !!document.querySelector(".drop-spot") } : null;
   window.dispatchEvent(ev("pointerup", path.at(-1)));
   return seen;
