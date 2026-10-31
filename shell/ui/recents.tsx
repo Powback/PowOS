@@ -602,7 +602,7 @@ function Menu() {
                   powos.tasks.desktopWindow?.(t.id, !t.window).catch(() => showNote("Not supported by this build yet")),
                 )}
               >
-                {t.window ? "Full screen" : "PowOS desktop window"}
+                {t.window ? "Full screen" : "Desktop window"}
               </button>
             )}
             <button

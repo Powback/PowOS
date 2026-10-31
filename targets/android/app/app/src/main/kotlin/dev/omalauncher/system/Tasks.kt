@@ -192,6 +192,9 @@ object Tasks {
         val w = screen.width() * 3 / 4
         val h = screen.height() / 2
         FreeformTasks.markOwnFloat(id)
+        // The switcher's "Floating window" (and the split drawer's): the user's own pick, a native floating window that
+        // stays one (D1) - never turned into a web window; "Desktop window" is the path for that.
+        FreeformTasks.markNativeFloat(id)
         return open(context, id, freeformOptions(android.graphics.Rect(screen.centerX() - w / 2, screen.centerY() - h / 2, screen.centerX() + w / 2, screen.centerY() + h / 2)))
     }
 

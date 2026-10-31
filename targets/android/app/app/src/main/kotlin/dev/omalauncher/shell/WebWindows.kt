@@ -209,6 +209,13 @@ class WebWindows(
         val t = followedTask(w, running) ?: return false
         val display = WebWindowDisplays.displayOf(t)
         val mode = modeOf(t)
+        // D1: the user made its app an Android floating window on purpose ("..." or the switcher's Floating window): it
+        // stays native. The window lets go of it (false: its display empty, checkOrphan closes it), never pulls it back.
+        if ((mode == WINDOWING_MODE_FREEFORM || mode == WINDOWING_MODE_ZOOM) && dev.omalauncher.system.FreeformTasks.isNativeFloat(t.taskId, mode)) {
+            if (w.followed != "native") Log.i(TAG, "window ${w.id} (${w.component.packageName}): its task ${t.taskId} is a floating window the user picked: left native")
+            w.followed = "native"
+            return false
+        }
         val act = followOf(display == w.displayId, display == android.view.Display.DEFAULT_DISPLAY, mode)
         if (act == null) {
             if (display == w.displayId) w.followed = null

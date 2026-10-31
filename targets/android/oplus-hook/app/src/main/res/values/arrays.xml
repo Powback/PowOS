@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- LSPosed scope: OnePlus's launcher (also the recents/gesture provider). -->
+    <!-- LSPosed scope: OnePlus's launcher (also the recents/gesture provider); SystemUI (the "..." menu's Desktop window). -->
     <string-array name="xposed_scope">
         <item>com.android.launcher</item>
+        <item>com.android.systemui</item>
     </string-array>
 </resources>
