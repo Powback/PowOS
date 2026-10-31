@@ -347,20 +347,21 @@ export const aiDraft = stored("powai.draft");
 /** PowOS AI's screen (powai.tsx): its chat, or one its ⋯ menu opened (aimenu.tsx) - Back goes back to the chat. */
 export const aiScreen = signal<"chat" | "progress" | "agents" | "devices" | "friction" | "fleet">("chat");
 /**
- * Home's page: it has no launcher of its own. The launcher is one overlay, as the notification shade is (the user,
- * 2026-10-29: "the launcher is supposed to be an overlay just like the notifications"): the host's pull-up window
- * (PullHost.kt, page mode=pull) over whatever shows - home, an app, floating windows - for every way in.
+ * Home's page. Its launcher ADOPTS home's dock and bar (the user, 2026-10-31 15:45: "If the docking and recents is
+ * already available, we should just reuse that, instead of creating a new one"): the app grid opens in place, in home's
+ * own page under its dock and bar, which stay put - the same elements, state, text and focus. The overlay window
+ * (PullHost.kt, page mode=pull) is the launcher where no home dock is on screen - over an app, the corners, the
+ * assistant - and brings its own dock and bar there (pull.tsx).
  */
 export const homePage = !new URLSearchParams(location.search).get("mode");
 /**
- * This page's launcher is the overlay (pull.tsx, opened through Bridge.pull.open), not one of its own: home's page, and
- * the desktop home inside the phone's Plasma app (mode=desktop, powos-shell: its host says launcherOverlay and forwards
+ * This page's launcher is the overlay (pull.tsx, opened through Bridge.pull.open), not one of its own: the desktop home inside the phone's Plasma app (mode=desktop, powos-shell: its host says launcherOverlay and forwards
  * pull.open to the APK's PullHost - bridge.cpp overlayLauncher). The user, 2026-10-30, over Plasma: "doesn't seem to
  * have the latest changes, like the wide menu, and it doesn't adjust to the keyboard" - that was desktop.tsx's own
  * column. The desktop's host answers false while the APK doesn't serve it yet (an older APK): openPanel then opens
  * desktop.tsx's launcher in place. A desktop PC's powos-shell has no overlay and keeps desktop.tsx's launcher.
  */
-export const launcherIsOverlay = homePage || !!window.PowosHost?.launcherOverlay;
+export const launcherIsOverlay = !homePage && !!window.PowosHost?.launcherOverlay;
 /** The launcher overlay's own page (PullHost.kt, mode=pull). */
 export const pullPage = new URLSearchParams(location.search).get("mode") === "pull";
 /** SI1: home's bar and the overlay's are one input (ui/barsync.ts); other pages' bars keep their own. */
@@ -394,11 +395,13 @@ export interface LauncherOpen {
 
 /**
  * Opens the pull-up panel with [kind] in it (the pet's long press, a bubble's "more": "ai"; the pill, the search
- * widget). On home: the launcher overlay over it (home never draws a drawer); in the overlay's own page: in place.
+ * widget). On home and in the overlay's own page: in place (home's adopts its dock and bar); the desktop: the overlay.
  */
 export function openPanel(kind: "apps" | "ai", how: LauncherOpen = {}) {
   if (homePage) {
-    void powos.pull.open?.(kind, how).catch(() => {});
+    openInPlace(kind);
+    if (how.text != null) query.value = how.text;
+    if (how.search) requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".home > .bar textarea")?.focus());
     return;
   }
   if (launcherIsOverlay) {

@@ -19,7 +19,7 @@
  * listens - keeps them there to edit (takeOver).
  */
 import { computed, effect, signal } from "@preact/signals";
-import { chat, chatting, drawer, homePage, openPanel, page, pullKind, query } from "../state.ts";
+import { chat, chatting, drawer, openPanel, page, pullKind, query } from "../state.ts";
 import { dictate, interrupt, type MicTarget } from "./dictation.ts";
 import { powos } from "../bridge.ts";
 
@@ -144,8 +144,6 @@ export interface OpenAssistant {
 /** Opens the chat surface: home's drawer in chat mode (from PowOS AI's page, home slides back first). */
 export function openAssistant(o: OpenAssistant = {}) {
   if (page.value === -1) page.value = 0;
-  // Home has no drawer: the launcher overlay opens in chat mode and does this there (pull.tsx).
-  if (homePage) return openPanel("apps", { ...o, chat: true });
   // The chat surface is the drawer's (from PowOS AI's pull-up panel too).
   pullKind.value = "apps";
   drawer.value = 1;

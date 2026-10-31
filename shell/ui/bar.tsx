@@ -250,7 +250,7 @@ export const dictateBar = () => dictate(barMic);
 /** The launcher's bar field focused, the keyboard up (ShellBridge.overlayKeyboard makes the overlay the IME's target). */
 export function focusBar() {
   requestAnimationFrame(() => {
-    document.querySelector<HTMLTextAreaElement>(".pull-screen > .bar textarea")?.focus();
+    document.querySelector<HTMLTextAreaElement>(".home > .bar textarea")?.focus();
     void powos.keyboard.show();
   });
 }

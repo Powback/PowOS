@@ -3162,13 +3162,13 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .home.pull-screen:is(.dock-left, .dock-right) > .dock:not(.dock-tray) { pointer-events: auto; }
 /* The launcher's app grid and folders page start a row gap below the panel's top edge, not pinned to it (the user,
    2026-10-31: "Give them a little breathing space on the top"); they still scroll up under the edge. */
-.home.pull-screen .drawer-page > .drawer-list { padding-top: 24px; }
-.home.pull-screen.dock-left .drawer-clip { padding-left: var(--side-dock); }
-.home.pull-screen.dock-right .drawer-clip { padding-right: var(--side-dock); }
+.home .drawer-page > .drawer-list { padding-top: 24px; }
+.home.dock-left .drawer-clip { padding-left: var(--side-dock); }
+.home.dock-right .drawer-clip { padding-right: var(--side-dock); }
 /* The folders page waits a dock, an A-Z bar and a gutter beyond the apps page (drawer.tsx Pages steps by width + gap):
    with the drawer narrowed by the dock it sat right after the apps page's clip, under the side dock on the cover. */
-.home.pull-screen:is(.dock-left, .dock-right) .drawer-track { --page-gap: calc(var(--side-dock) + var(--letter-bar) + 4px + var(--edge)); }
-.home.wide.pull-screen:is(.dock-left, .dock-right) .drawer-track { --page-gap: calc(var(--side-dock) + var(--letter-bar) + 2 * var(--wide-margin)); }
+.home:is(.dock-left, .dock-right) .drawer-track { --page-gap: calc(var(--side-dock) + var(--letter-bar) + 4px + var(--edge)); }
+.home.wide:is(.dock-left, .dock-right) .drawer-track { --page-gap: calc(var(--side-dock) + var(--letter-bar) + 2 * var(--wide-margin)); }
 .home.pull-screen:is(.dock-left, .dock-right):has(> .dock) .stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--foot))); }
 /* Unfolded, the launcher's recent apps (the dock's recent page) sit at the app grid's spacing, not a sixth of the width
    each: a couple more icons in the row, same icon size (the user, 2026-10-29: "the recent ones are too spread out"). */
@@ -3185,6 +3185,19 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
   transform: translateY(calc((1 - var(--p)) * var(--rise)));
   opacity: calc(1 - var(--fade) * var(--fade) * var(--fade));
   will-change: transform, opacity;
+}
+
+/* Home's launcher ADOPTS home's foot (home.tsx HomeLauncher; the user, 2026-10-31 15:44: "It should also reuse the
+   docking, so that we don't get duplicate docking"): the bar, the dock and the wide foot's recents stay where they are,
+   as they are - no slide, no fade, still tappable - and only the app grid's layer rises behind and above them. Over the
+   launcher's chat (folded) the dock still gives way (the user, 2026-10-28: a page of text, the dock had no place on it).
+   !important: it outranks the older per-layout give-way rules (pill-below, wide, side docks), many and specific. */
+.home:not(.pull-screen):not(:has(.drawer .chat)) > .dock,
+.home.wide:not(.pull-screen) > .dock,
+.home:not(.pull-screen):not(.search-parked) > .bar {
+  transform: none !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
 }
 
 /* DS2: opened from home's dock search button (launchmorph.ts), the foot stays put - the dock lies over home's, the bar's
