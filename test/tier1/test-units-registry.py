@@ -115,7 +115,7 @@ def commands(line):
     parts = re.split(r"\s*(?:&&|\|\||;|\||\bthen\b|\bdo\b|\belse\b)\s*", line)
     out = []
     for p in parts:
-        p = p.strip().lstrip("({").strip()
+        p = p.strip().lstrip("({").rstrip(")}").strip()
         m = re.match(r"^(?:asu|adb shell|su -c|sh -c|bash -c)\s+[\"'](.*)$", p)
         out.append(m.group(1) if m else p)
     return [c for c in out if c]

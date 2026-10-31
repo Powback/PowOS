@@ -13,7 +13,8 @@
   ],
   "processes": [
     {
-      "match": "lib/powos/ai/manager/manager.py"
+      "match": "^python3 \\S*lib/powos/ai/manager/manager\\.py",
+      "tree": true
     }
   ],
   "unbounded": "a claude session tree the user talks to; bounded by the session it runs in"

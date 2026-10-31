@@ -58,7 +58,7 @@ object PowosAiChat {
     val items = mutableStateListOf<Item>()
 
     /** A message sent while a turn was under way: it waits here, in order, and becomes the next turn ([send]). */
-    data class Queued(val id: Long, val text: String, val prompt: String) {
+    data class Queued(val id: Long, val text: String, val prompt: String, val at: Long = System.currentTimeMillis()) {
         fun json() = JSONObject().put("id", id).put("text", text)
     }
 
@@ -208,6 +208,23 @@ object PowosAiChat {
     }
 
     /** One turn: [prompt] the user's, or null for the inbox's (nothing waiting there: no turn, nothing said). */
+    /** Everything sent mid-turn becomes ONE next turn, in queue order; each prompt keeps its send time. */
+    private fun sendQueued(): Boolean {
+        val all = queued.toList()
+        if (all.isEmpty()) return false
+        queued.clear()
+        val ctx = appContext ?: return true
+        if (all.size == 1) {
+            send(ctx, all[0].text, all[0].prompt)
+            return true
+        }
+        val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+        val text = all.joinToString("\n\n") { it.text }
+        val prompt = all.joinToString("\n\n") { "[sent ${fmt.format(java.util.Date(it.at))}]\n${it.prompt}" }
+        send(ctx, text, prompt)
+        return true
+    }
+
     private fun turn(prompt: String?) {
         val errors = ArrayDeque<String>()
         var answered = false
@@ -252,12 +269,7 @@ object PowosAiChat {
                 add(Item.Note("PowOS AI didn't answer" + (why?.let { ": $it" } ?: " (exit $exit)"), error = true))
             }
             busy = false
-            val next = queued.firstOrNull()
-            if (next != null) {
-                queued.removeAt(0)
-                appContext?.let { send(it, next.text, next.prompt) }
-                return@post
-            }
+            if (sendQueued()) return@post
             if (inboxWaiting) {
                 inboxWaiting = false
                 appContext?.let(::inboxArrived)

@@ -51,7 +51,7 @@ Usage:
                                    [--try "plain sentence"|-]
                                    --parent: make it a sub-task of P (add takes it too; "-" clears it).
                                    --try: what the user can try now, ONE plain sentence - the task's line
-                                   under "Ready to try" on the PowOS AI page (never --step or --note,
+                                   in the manager's things-to-try message (present_try) (never --step or --note,
                                    which are for agents). At most 90 characters; refused with a commit
                                    hash, a path or file name with "/"; "-" clears it. Cleared when the
                                    user says it works. e.g. --try "Floating windows are back, try moving

@@ -20,5 +20,6 @@
       "echo 'reboot to drop the CA from the trust store'"
     ],
     "note": "removing the Magisk module + reboot fully reverts the trust store; nothing else changes. Keep nothing."
-  }
+  },
+  "ondemand": true
 }

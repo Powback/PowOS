@@ -1,0 +1,22 @@
+{
+  "id": "powos-app-root-helpers",
+  "name": "PowOS app's root/shell helpers",
+  "kind": "service",
+  "owner": "system:powos-app",
+  "host": "phone-android",
+  "purpose": "what the PowOS app (com.powos.app) starts through su outside PowOS: WebWindowsHost (app_process as shell: native windows inside the web UI, docs/WEB_WINDOWS.md) with its uinput devices, and the power key's `getevent -ql` (assist/PowerKey.kt). They end with the app (their su pipe closes)",
+  "installedBy": "the PowOS APK (targets/android/app: shell/WebWindowsHost.kt, assist/PowerKey.kt)",
+  "processes": [
+    {
+      "match": "dev\\.omalauncher\\.shell\\.WebWindowsHost",
+      "tree": true
+    },
+    {
+      "match": "^getevent -ql /dev/input/"
+    }
+  ],
+  "unbounded": "Android app helpers: bounded by the app's lifetime; Android's own memcg (/apps) holds them",
+  "remove": {
+    "commands": []
+  }
+}

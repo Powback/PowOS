@@ -9,6 +9,8 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // The web windows' ring log (files/window-log.txt): their events outlive logcat's ~30 s (shell/WindowLog.kt).
+        if (Application.getProcessName() == packageName) dev.omalauncher.shell.WindowLog.init(filesDir)
         // PowOS windows (KWin's, WindowTasks) float on the unfolded home like Android apps. Set here, before the
         // session's service connects to KWin - set lazily (by Runtime) KWin's "caps" could come first and it was never
         // told to open new windows as tasks.

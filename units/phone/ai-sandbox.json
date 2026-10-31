@@ -22,5 +22,6 @@
     "commands": [
       "rm -rf /usr/lib/powos/ai/sandbox"
     ]
-  }
+  },
+  "enter": "powos"
 }

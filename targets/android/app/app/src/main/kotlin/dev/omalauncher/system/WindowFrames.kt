@@ -90,6 +90,8 @@ class WindowFrames(
     private var lastGrant = 0L
 
     fun stop() {
+        generation++
+        readAgain = false
         stopListening?.invoke()
         stopListening = null
         main.removeCallbacks(refreshNow)
@@ -173,8 +175,47 @@ class WindowFrames(
             return
         }
         refreshSkipped = false
-        val all = runCatching { FreeformTasks.list(context) }.onFailure { Log.w(TAG, "no floating windows", it) }.getOrDefault(emptyList())
-        if (FreeformTasks.hadUnreadableTask && unreadableRetries < UNREADABLE_RETRIES_MAX) {
+        // The task list is binder calls (getRunningTasks + getAllRootTaskInfos: 104-200 ms on the main thread in
+        // perf-1793409569119): read on [reader], applied back here. One read at a time; a refresh asked meanwhile
+        // reads again once it lands, so the frames are never older than the last task stack event + one read.
+        if (reading) {
+            readAgain = true
+            return
+        }
+        reading = true
+        val asked = generation
+        reader.post {
+            val r = runCatching { FreeformTasks.read(context) }.onFailure { Log.w(TAG, "no floating windows", it) }
+                .getOrDefault(FreeformTasks.Read(emptyList(), false))
+            main.post {
+                reading = false
+                if (asked == generation) applyRead(r)
+                if (readAgain) {
+                    readAgain = false
+                    refresh()
+                }
+            }
+        }
+    }
+
+    /** A refresh is reading the task list on [reader] ([refresh]). Main thread. */
+    private var reading = false
+
+    /** Another refresh was asked while [reading]: one more read once it lands. */
+    private var readAgain = false
+
+    /** Bumped by [stop]: a read that lands after it is dropped (no frames for a stopped instance). */
+    private var generation = 0
+
+    /** [refresh]'s second half, on the main thread with the task list [r] read on [reader]. */
+    private fun applyRead(r: FreeformTasks.Read) {
+        // A slide may have started while the list was read: same rule as at the top of refresh.
+        if (sliding.isNotEmpty() && !clearStaleSlide()) {
+            skipForSlide()
+            return
+        }
+        val all = r.windows
+        if (r.unreadable && unreadableRetries < UNREADABLE_RETRIES_MAX) {
             unreadableRetries++
             main.postDelayed(refreshNow, RETRY_MS)
             return
@@ -982,6 +1023,9 @@ class WindowFrames(
     )
 
     companion object {
+        /** Where [refresh] reads the task list (binder calls), off the main thread; shared by every instance. */
+        private val reader: Handler by lazy { android.os.HandlerThread("frames-read").apply { start() }.let { Handler(it.looper) } }
+
         /**
          * true: hide each sliding window's title bar for the slide and fade it back in at its final place. false (now):
          * bars move with their window - their own surfaces offset in the leash's transaction (WindowFrame.slideSurface),

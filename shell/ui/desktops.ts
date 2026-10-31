@@ -228,7 +228,19 @@ export async function dockTap(key: string) {
   } else {
     console.debug("dockTap", key, front ? "raise" : "launch", front?.id);
   }
+  toWindowPage(key);
   await launch(key);
+}
+
+/**
+ * PI2 (the user, 2026-10-31): app [key]'s window open on another page - home goes to that page, so the raise that
+ * follows ("windows.raised") finds it on the page on screen and leaves it there. Minimised ones come to this page.
+ */
+function toWindowPage(key: string) {
+  const cur = pageId();
+  const there = windows.value.find((w) => isOf(w, key) && !w.minimised && placed.value[w.id] !== undefined && placed.value[w.id] !== cur);
+  const i = there ? indexOf(placed.value[there.id]) : null;
+  if (i !== null && i >= 0) page.value = i;
 }
 
 /** Whether window [w] is app [key]'s: a PowOS (Linux) app's by its key, an Android app's by its package. */

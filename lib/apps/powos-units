@@ -24,8 +24,12 @@ Usage:
   powos units baseline <id> --before YYYY-MM-DD [--owner O] [--purpose P]
                                         adopt what was installed before a date as one unit (the image, the user's
                                         own tools); what came after stays unclaimed for check to show
-  powos units publish [--stdin]         this host's units to the PowOS AI page (the powos-agents module's `unit`
-                                        table); --stdin: another host's `list --json --check` (the Colima VM's)
+  powos units enter <id> [-- cmd...]    this process into the unit's cgroup, then exec cmd (a unit with "enter":
+                                        "<user>" is delegated to that user by enforce, for what it starts unprivileged)
+  powos units publish [--stdin [--failed REASON]]
+                                        this host's units to the PowOS AI page (the powos-agents module's `unit`
+                                        table); --stdin: another host's `list --json --check` (the Colima VM's);
+                                        --failed: that host couldn't be read - its last rows, its _check "stale"
 
 A manifest:
   {"id": "spacetimedb", "name": "SpacetimeDB", "kind": "service", "owner": "system:powos-deploy",
@@ -37,6 +41,8 @@ A manifest:
    "autosleep": "never",                                               powos-sleep-common's key
    "remove": {"stop": ["cmd"], "commands": ["cmd"], "keep": ["/var/lib/powos/stdb"]},
    "orphan": true, "decide": "the question for the user"}             found with no clear owner: the user decides
+   "ondemand": true                                                    installed only while used: absent isn't "missing"
+   "enter": "powos"                                                    started by that user: enforce delegates its cgroup
   kind: app | service | container | system | package | watcher | compose | scratch.
   owner: app:<id> | agent:<role> | user | system:<what installed it>.
 
@@ -505,6 +511,11 @@ def proc_table():
             "uid": os.stat(p).st_uid, "cpu": int(rest[11]) + int(rest[12]), "rss": int(rest[21]) * PAGE // 1024,
             "cg": rd(f"{p}/cgroup"), "ctx": rd(f"{p}/attr/current").rstrip("\0"), "powos": root == here,
         }
+    # A sandbox inside PowOS chroots its helpers away from PowOS's root (Chromium's zygotes: Steam's steamwebhelper,
+    # QtWebEngine's): still PowOS's processes, not Android's - whatever a PowOS process started is PowOS's.
+    for q in out.values():
+        if not q["powos"] and any(out[a]["powos"] for a in ancestors(q["ppid"], out)):
+            q["powos"] = True
     return out
 
 
@@ -947,8 +958,11 @@ def drift(units=None):
     table = proc_table()
     by_id = {u["id"]: u for u in mine}
     taken = {pid: by_id[uid] for pid, uid in owners(mine, table).items()}
+    # The check itself and whatever is asking for it (the shell or timer that ran it: root.sh's bash, a publish
+    # pass) are never drift - their own units, if any, answer for them elsewhere.
+    me = descendants(os.getpid(), table) | ancestors(os.getpid(), table) | {os.getpid()}
     for pid, p in sorted(table.items()):
-        if pid == os.getpid() or pid in descendants(os.getpid(), table) or not in_scope(p, HOST):
+        if pid in me or not in_scope(p, HOST):
             continue
         u = taken.get(pid)
         if not u:
@@ -957,6 +971,9 @@ def drift(units=None):
             out["unbounded"].append({"unit": u["id"], "pid": pid, "cmd": p["cmd"][:100]})
     for u in mine:
         if u.get("host") == "powstation":
+            continue
+        # "ondemand": installed only while it's used (the App API's capture units: absent is their resting state)
+        if u.get("ondemand"):
             continue
         if u["files"] and not expand_files(u) and not u["packages"] and not u["processes"]:
             out["missing"].append(u["id"])
@@ -1210,6 +1227,67 @@ def cmd_enforce(args):
         n += 1
         print(f"  {u['id']}: {len(pids)} process(es) -> {group_name(u['id'])}: {', '.join(done) or 'nothing enforceable'}")
     print(f"{n} unit(s) placed" if n else "every running unit with limits is in its cgroup")
+    delegate(todo)
+    return 0
+
+
+def unit_groups(uid):
+    """Every cgroup directory the unit's group has on this host (the phone's hybrid ones, else cgroup v2's)."""
+    if sys.platform == "darwin":
+        return []
+    if HOST in ("phone", "phone-android") or os.path.isdir("/dev/memcg"):
+        return list(container_module().groups(group_name(uid)).values())
+    return [f"/sys/fs/cgroup/powos-units/{uid}"]
+
+
+def delegate(units):
+    """A unit with "enter": "<user>" is started by that user, not by root (the manager's claude starts the sandbox's
+    MCP server as powos): its groups are made now, with its limits, and their cgroup.procs given to that user, so
+    `powos units enter <id>` puts the process there itself at start (cgroup v1 lets the owner of cgroup.procs move its
+    own processes in; where v2 refuses that, the v1 groups that carry the limits still take it)."""
+    if os.getuid() != 0:
+        return
+    for u in units:
+        who = u.get("enter")
+        if not who or not u.get("limits") or u.get("host", HOST) != HOST:
+            continue
+        try:
+            if HOST in ("phone", "phone-android") or os.path.isdir("/dev/memcg"):
+                container_module().apply(group_name(u["id"]), limits_of(u["limits"]))
+            else:
+                place_v2(u["id"], [], u["limits"])
+        except OSError as e:
+            print(f"  {u['id']}: delegate: {e}", file=sys.stderr)
+        uid = user_id(who)
+        for g in unit_groups(u["id"]):
+            try:
+                os.chown(f"{g}/cgroup.procs", uid, -1)
+            except OSError:
+                pass
+
+
+def cmd_enter(args):
+    """powos units enter <id> [-- cmd...]: this process into the unit's cgroup (root: made with its limits; another
+    user: the groups enforce delegated to it), then exec cmd. Never fatal: a launch must not fail on its cgroup."""
+    if not args:
+        die("usage: powos units enter <id> [-- cmd ...]")
+    uid, cmd = args[0], args[args.index("--") + 1:] if "--" in args else args[1:]
+    if os.getuid() == 0:
+        u = next((x for x in load() if x["id"] == uid), None)
+        if u and u.get("limits"):
+            try:
+                place(uid, [os.getpid()], u["limits"])
+            except OSError as e:
+                print(f"powos units enter {uid}: {e}", file=sys.stderr)
+    else:
+        for g in unit_groups(uid):
+            try:
+                with open(f"{g}/cgroup.procs", "w") as f:
+                    f.write(str(os.getpid()))
+            except OSError:
+                pass
+    if cmd:
+        os.execvp(cmd[0], cmd)
     return 0
 
 
@@ -1274,6 +1352,9 @@ def cmd_publish(args):
     """The rows for the PowOS AI page, one sync per host (the Mac's view carries PowStation's containers as host
     "powstation"). --stdin: another host's `powos units list --json --check` (the Colima VM's), published from here."""
     ov = json.load(sys.stdin) if "--stdin" in args else overview()
+    # --failed REASON (with --stdin: the host's last good snapshot, or {"host": H, "units": []}): its publisher ran but
+    # couldn't read the host - the rows stay as last seen and its _check row says "stale" with why, never a silent age.
+    failed = args[args.index("--failed") + 1] if "--failed" in args and args.index("--failed") + 1 < len(args) else ""
     n = ov.get("check") or {}
     by_host = {}
     for r in ov["units"]:
@@ -1286,9 +1367,13 @@ def cmd_publish(args):
         keys = ("containers",) if host == "powstation" else ("packages", "files", "processes", "unbounded")
         counts = {k: n.get(k, 0) for k in keys}
         drifted = any(counts.get(k) for k in ("packages", "files", "processes", "containers"))
+        purpose = ", ".join(f"{v} {k}" for k, v in counts.items() if v) or "no drift"
+        status = "drift" if drifted else "clean"
+        if failed:
+            seen = time.strftime("%Y-%m-%d %H:%M", time.localtime(ov["at"])) if ov.get("at") else "never"
+            purpose, status = f"publish failed: {failed[:180]} (rows as of {seen})", "stale"
         rows.append({"id": "_check", "name": "check", "kind": "system", "owner": "", "host": host,
-                     "purpose": ", ".join(f"{v} {k}" for k, v in counts.items() if v) or "no drift",
-                     "status": "drift" if drifted else "clean", "memKB": 0, "cpuPct": 0, "limits": "",
+                     "purpose": purpose, "status": status, "memKB": 0, "cpuPct": 0, "limits": "",
                      "autosleep": "", "orphan": False, "decide": ""})
         code = sync_rows(host, rows) or code
     return code
@@ -1349,7 +1434,7 @@ def main(argv):
 
 COMMANDS = {"list": cmd_list, "ls": cmd_list, "show": cmd_show, "check": cmd_check, "remove": cmd_remove,
             "rm": cmd_remove, "register": cmd_register, "enforce": cmd_enforce, "baseline": cmd_baseline,
-            "publish": cmd_publish,
+            "publish": cmd_publish, "enter": cmd_enter,
             "unregister": lambda a: 0 if a and unregister(a[0]) else die(f"no unit {a[0] if a else '?'}")}
 
 

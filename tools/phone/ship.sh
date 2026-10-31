@@ -127,6 +127,8 @@ status)
   [ -s "$Q/shell-held" ] && { read -r ht hc < "$Q/shell-held"; echo "shell held for its APK ${ht:0:9} (APK inputs + shell in the same commit: $hc) - they land together at the install"; }
   [ -e "$HOME/.config/powos/ship-no-idle-wait" ] && echo "APK installs: at once, no idle wait (~/.config/powos/ship-no-idle-wait)"
   [ -s "$Q/rooted-pending" ] && { read -r rb rt < "$Q/rooted-pending"; echo "rooted deploy pending since ${rb:0:9} (origin ${rt:0:9}; runs after the APK, under the phone-busy rules)"; }
+  [ -s "$Q/window-failed" ] && { read -r wt ww wf < "$Q/window-failed"; echo "WINDOWS BROKEN: ${wt:0:9} ($ww) failed the device window check (verify/window-render.sh; changed: $wf) - log $Q/done/window-render-${wt:0:9}.log"; }
+  [ -s "$Q/window-gate.pid" ] && kill -0 "$(cat "$Q/window-gate.pid")" 2>/dev/null && echo "device window check running (pid $(cat "$Q/window-gate.pid"); waits for a free, unfolded phone)"
   [ -d "$Q/apk" ] && echo "APK ship out: $(cut -c1-9 "$Q/apk/tip" 2>/dev/null) (log $(cat "$Q/apk/log" 2>/dev/null))"
   echo "last ships:"; tail -6 "$Q/shipped.log" 2>/dev/null | sed 's/^/  /' ;;
 run)
@@ -211,7 +213,15 @@ run)
   rooted_inputs() { git diff --name-only "$1" "$2" -- targets/android/rooted targets/android/session \
     targets/android/pkgs/fex-emu bin/powos-panel-phone desktop/autostart/powos-panel-phone.desktop \
     lib/powos-tmux-shell lib/self-phone.sh config/etc/profile.d/60-powos-picker-key.sh lib/ai/agents lib/ai/comms/comms-mcp.py \
-    tools/app-api lib/ai/manager lib/ai/sandbox desktop/plasmoid 2>/dev/null | grep -v '^lib/ai/sandbox/node_modules/'; }
+    tools/app-api lib/ai/manager lib/ai/sandbox desktop/plasmoid units/phone units/phone-android lib/apps/powos-units \
+    2>/dev/null | grep -v '^lib/ai/sandbox/node_modules/'; }
+  # units_gate: nothing ships to the phone that installs a file no unit claims (DU1: every ship registers what it
+  # installs). test-units-registry.py reads every deploy script against units/; a FAIL refuses the rooted deploy.
+  units_gate() { python3 test/tier1/test-units-registry.py > "$1" 2>&1 && return 0
+    grep -E '^ *FAIL' "$1" | head -3 | cut -c1-200; return 1; }
+  # units_publish: the phone's units to the PowOS AI page after a ship to it (in the background, one adb call; the
+  # rooted deploy publishes itself). tools/units/publish.sh; a failure is in its log, the page then shows "stale".
+  units_publish() { ( tools/units/publish.sh phone > /dev/null 2>&1 & ) ; }
   # rooted_due: rooted_inputs changed since the last rooted deploy ($Q/rooted-live) up to this checkout's HEAD, and
   # the deploy didn't fail on HEAD. Sets rbase/rchg; keeps $Q/rooted-pending ("BASE TIP", for status) in step.
   # It keeps the runner up until the deploy ran (2026-10-30: a tip with APK + rooted inputs installed its APK, which
@@ -270,6 +280,44 @@ run)
       else rm -f "$Q/postgate-failed"; fi
       rm -f "$Q/postgate.pid" ) &
     echo $! > "$Q/postgate.pid"
+  }
+  # window_gate BASE TIP WHAT: a ship whose BASE..TIP diff touches web-window files (WINDOW_FILES) is checked ON THE
+  # DEVICE after it's live: verify/window-render.sh opens Calculator as a web window, screencaps its body (app content,
+  # not the page under it, not a flat fill) and taps it (the app redraws). Why (2026-10-31): web windows shipped as
+  # empty frames twice in one night with every headless gate green. In the background, one at a time (a newer ship's
+  # check replaces a running one); the check waits for a free, unfolded phone itself and SKIPs (exit 2) while the user
+  # is active - tried again up to WINDOW_GATE_TRIES (8) times, ~15 min each. A FAIL marks the ship failed
+  # ($Q/window-failed, $Q/failed or $Q/failed-apk, shipped.log, status) and mails the coder + logs friction, as a
+  # failed ship does. No rollback (fix forward). SHIP_WINDOW_GATE=0 turns it off; off in tests (SHIP_DIR), as e2e_round.
+  WINDOW_FILES='(^|/)(webwindows[^/]*|WebWindows[^/]*\.kt|WebWindowLaunch\.kt|FreeformTasks\.kt|SystemFloat\.kt|home\.tsx|shell\.css)$'
+  window_gate() {
+    [ "${SHIP_WINDOW_GATE:-1}" = 1 ] && [ -z "${SHIP_DIR:-}" ] && [ -x "$here/verify/window-render.sh" ] || return 0
+    local b=$1 t=$2 what=$3 f old wb
+    if [ -n "$b" ] && git cat-file -e "$b^{commit}" 2>/dev/null; then
+      f=$(git diff --name-only "$b" "$t" 2>/dev/null | grep -E "$WINDOW_FILES" | sed 's|.*/||' | sort -u | paste -sd' ' -)
+      [ -n "$f" ] || return 0
+    else f="(no base: every window file)"; fi
+    old=$(cat "$Q/window-gate.pid" 2>/dev/null) && [ -n "$old" ] && killtree "$old" 2>/dev/null
+    # A copy to run: this checkout is reset under a running script (bash reads it as it goes).
+    wb=$Q/window-render/bin; mkdir -p "$wb"; cp "$here/verify/window-render.sh" "$here/verify/window-render.py" "$wb/" || return 0
+    echo "$(date +%T) ${t:0:9}: window files changed ($f) - device window check queued ($Q/done/window-render-${t:0:9}.log)"
+    ( wl=$Q/done/window-render-${t:0:9}.log; : > "$wl"; n=0
+      while :; do
+        n=$((n + 1)); WR_TOOLS=$here WR_OUT=$Q/window-render bash "$wb/window-render.sh" >> "$wl" 2>&1; wrc=$?
+        [ $wrc = 2 ] && [ $n -lt "${WINDOW_GATE_TRIES:-8}" ] && { sleep 60; continue; }; break
+      done
+      res=$(grep '^window-render: ' "$wl" | tail -1 | cut -c1-300)
+      case $wrc in
+        0) rm -f "$Q/window-failed"; echo "$(date '+%F %T') ${t:0:9} $what window-render PASS" >> "$Q/shipped.log" ;;
+        2) echo "$(date '+%F %T') ${t:0:9} $what window-render NOT RUN after $n tries: $res" >> "$Q/shipped.log" ;;
+        *) echo "$t $what $f" > "$Q/window-failed"
+           if [ "$what" = apk ]; then echo "$t" > "$Q/failed-apk"; else echo "$t" > "$Q/failed"; fi
+           echo "$(date '+%F %T') ${t:0:9} $what window-render FAILED: $(grep -m1 '^FAIL' "$wl" | cut -c1-200)" >> "$Q/shipped.log"
+           echo "$(date +%T) ${t:0:9}: WINDOWS BROKEN on the device after this ship (window-render FAIL, log $wl)"
+           mail "ship ${t:0:9} ($what) FAILED the device window check - web windows are BROKEN on the phone (changed: $f): $(grep -m1 '^FAIL' "$wl" | cut -c1-220) - log $wl on the Mac (shots beside it); fix it on origin, then ship.sh request again" ;;
+      esac
+      rm -f "$Q/window-gate.pid" ) &
+    echo $! > "$Q/window-gate.pid"
   }
   # done_req FILE RESULT: a request fully on the phone.
   done_req() { echo "result=$2" >> "$1"; mv "$1" "$Q/done/"; }
@@ -336,7 +384,10 @@ run)
         n=0; for r in "$Q"/*.req; do [ -f "$r" ] || continue; sha=; . "$r"
           git merge-base --is-ancestor "$sha" "$A" 2>/dev/null && { done_req "$r" "shipped:${A:0:9}:apk"; n=$((n+1)); }; done
         echo "$(date '+%F %T') ${A:0:9} apk $n req: $(grep -h '^note=' "$Q/apk/notes" 2>/dev/null | head -1 | cut -c6- || true)" >> "$Q/shipped.log"
+        units_publish
         echo "$(date +%T) ${A:0:9}: APK installed ($n request(s) done)"
+        # The build it replaced: ship-apk's snapshot of the previous install (ship-guard.sh snapshot DIR/commit).
+        window_gate "$(cat "$HOME/.cache/powos-ship-snapshot/commit" 2>/dev/null)" "$st" apk
         e2e_round
       elif [ "$arc" = 8 ]; then echo "$(date +%T) ${A:0:9}: a newer APK is wanted - the pending one is replaced"
       elif [ "$arc" = 4 ]; then echo "$(date +%T) ${A:0:9}: the user stayed active - the APK goes again"
@@ -472,7 +523,9 @@ run)
         if [ $rc = 0 ]; then
           echo "$T" > "$Q/live"; rm -f "$Q/failed"
           post_gate "$T" "$log" $add
+          window_gate "$base" "$T" shell
           echo "$(date '+%F %T') ${T:0:9} shell ${#sreqs[@]} req ($who_s): ${sn:-(silent)}" >> "$Q/shipped.log"
+          units_publish
           for r in ${nreqs[@]+"${nreqs[@]}"}; do [ -f "$r" ] && echo "noted=1" >> "$r"; done
           for r in ${sreqs[@]+"${sreqs[@]}"}; do done_req "$r" "shipped:${T:0:9}:shell"; done
           echo "$(date +%T) ${T:0:9}: shipped (shell)"
@@ -534,6 +587,7 @@ run)
           if [ $arc = 0 ]; then
             echo "$T" > "$Q/apps-live"; rm -f "$Q/failed-apps"
             echo "$(date '+%F %T') ${T:0:9} apps ($achg) for $who_s: $an" >> "$Q/shipped.log"
+            units_publish
             echo "$(date +%T) ${T:0:9}: apps shipped ($achg)"
           else
             echo "$T" > "$Q/failed-apps"
@@ -559,7 +613,11 @@ run)
           rlog=$Q/done/$(date +%Y%m%d-%H%M%S)-${T:0:9}-rooted.log
           echo "$(date +%T) ship ${T:0:9} as a rooted deploy ($rchg) for $who_s" | tee -a "$rlog" >/dev/null
           rrc=0
-          ( PATH="$here/bin:$PATH" POWOS_SHIP_SERVICE=1 targets/android/rooted/rooted.sh deploy --note "$rn" ) >> "$rlog" 2>&1 || rrc=$?
+          if ! ug=$(units_gate "$Q/units-gate.log"); then
+            rrc=9; echo "REFUSED: an install no unit claims (units/; test/tier1/test-units-registry.py): $ug" >> "$rlog"
+          else
+            ( PATH="$here/bin:$PATH" POWOS_SHIP_SERVICE=1 targets/android/rooted/rooted.sh deploy --note "$rn" ) >> "$rlog" 2>&1 || rrc=$?
+          fi
           rm -rf "$SL"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"
           if [ $rrc = 0 ]; then
             echo "$T" > "$Q/rooted-live"; rm -f "$Q/failed-rooted" "$Q/rooted-pending" "$Q/rooted-note"

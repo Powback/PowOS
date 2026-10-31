@@ -1,4 +1,4 @@
-import { Component, h, type FunctionComponent } from "preact";
+import { Component, h, type ComponentType, type FunctionComponent } from "preact";
 
 /** Shallow equality of two props objects: the same keys, each value identical (Object.is). */
 export function sameProps(a: object, b: object): boolean {
@@ -9,15 +9,15 @@ export function sameProps(a: object, b: object): boolean {
 }
 
 /**
- * [C], re-rendered only when its props change (shallowly): Preact core has no memo (preact/compat's would pull in the
+ * [C], re-rendered only when its props change (shallowly, or by [same] - for a prop rebuilt equal on every render): Preact core has no memo (preact/compat's would pull in the
  * whole compat layer). For leaves a parent re-renders every frame with the same props - a dragged window's edges and
  * bar buttons (render scan 10-31). Its own state, hooks and signals still re-render it as usual.
  */
-export function memo<P extends object>(C: FunctionComponent<P>): FunctionComponent<P> {
+export function memo<P extends object>(C: ComponentType<P>, same: (a: P, b: P) => boolean = sameProps): FunctionComponent<P> {
   class Memo extends Component<P> {
     static displayName = `memo(${C.displayName || C.name})`;
     shouldComponentUpdate(next: P) {
-      return !sameProps(this.props, next);
+      return !same(this.props, next);
     }
     render(p: P) {
       return h(C, p);

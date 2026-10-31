@@ -1,0 +1,31 @@
+{
+  "id": "phone-dev-tools",
+  "name": "The Mac's phone tools' state on the phone",
+  "kind": "watcher",
+  "owner": "system:tools/phone",
+  "host": "phone-android",
+  "purpose": "what tools/phone keeps on the phone between runs: the touch monitor tools/phone/idle.sh starts (powos-touchmon.sh: the last touch-panel IRQ change every 2 s -> powos-lasttouch, so the Mac knows if the user is active; it exits 30 min after the last ask) and the verify runner's heartbeat (powos-verify-runner, the AI page's VerifyRun state)",
+  "installedBy": "tools/phone/idle.sh, tools/phone/verify/window-lock.sh",
+  "files": [
+    "/data/local/tmp/powos-touchmon.sh",
+    "/data/local/tmp/powos-touchmon.pid",
+    "/data/local/tmp/powos-touchmon.ask",
+    "/data/local/tmp/powos-lasttouch",
+    "/data/local/tmp/powos-verify-runner"
+  ],
+  "processes": [
+    {
+      "match": "powos-touchmon\\.sh",
+      "tree": true
+    }
+  ],
+  "unbounded": "one sh loop (awk on /proc/interrupts + sleep 2), self-ending after 30 min without an ask",
+  "remove": {
+    "stop": [
+      "pkill -f powos-touchmon.sh"
+    ],
+    "commands": [
+      "rm -f /data/local/tmp/powos-touchmon.* /data/local/tmp/powos-lasttouch /data/local/tmp/powos-verify-runner"
+    ]
+  }
+}

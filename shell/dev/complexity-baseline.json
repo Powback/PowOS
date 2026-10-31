@@ -161,6 +161,11 @@
       "count": 1
     }
   },
+  "ui/aiboard.tsx": {
+    "complexity": {
+      "count": 1
+    }
+  },
   "ui/appbuild.tsx": {
     "sonarjs/cognitive-complexity": {
       "count": 1
@@ -392,11 +397,6 @@
     },
     "sonarjs/cognitive-complexity": {
       "count": 3
-    }
-  },
-  "ui/powai.tsx": {
-    "complexity": {
-      "count": 1
     }
   },
   "ui/recents.tsx": {

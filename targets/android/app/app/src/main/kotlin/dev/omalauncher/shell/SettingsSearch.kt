@@ -13,8 +13,30 @@ class SettingsSearch(private val context: Context) {
      * Every destination with the app it opens in: "package", that app's name ("app") and, for one that isn't a launcher
      * app, its picture ("appIcon", a PNG data URL) - the launcher lists each app's settings under it (shell/search.ts group). Copies: the index's snapshot is shared.
      */
-    fun destinations(changed: () -> Unit = {}): JSONArray = JSONArray().apply {
+    fun destinations(changed: () -> Unit = {}): JSONArray {
+        watchPackages(context)
         val indexed = NativeSettingsIndex.destinations(context, changed)
+        val key = Key(indexed, java.util.Locale.getDefault().toLanguageTag(), packagesChanged)
+        synchronized(apps) { if (builtKey == key) built?.let { return it } }
+        return build(indexed).also { synchronized(apps) { built = it; builtKey = key } }
+    }
+
+    /**
+     * What a built list depends on: the index's snapshot (a new array each time it's read again), the locale (labels)
+     * and the installed apps (which packages resolve, their names, which are launcher apps). Same key, same list - so a
+     * list is built once per change of these, not per call (153 ms in ShellBridge on the main thread, perf-1793409701579).
+     */
+    private data class Key(
+        val indexed: JSONArray,
+        val locale: String,
+        val packages: Int,
+    ) {
+        override fun equals(other: Any?) = other is Key && other.indexed === indexed && other.locale == locale && other.packages == packages
+
+        override fun hashCode() = System.identityHashCode(indexed) * 31 + locale.hashCode() * 7 + packages
+    }
+
+    private fun build(indexed: JSONArray): JSONArray = JSONArray().apply {
         for (i in 0 until indexed.length()) put(withApp(JSONObject(indexed.getJSONObject(i).toString())))
         pages.forEach { page ->
             val pkg = resolve(page)?.packageName ?: return@forEach
@@ -75,6 +97,40 @@ class SettingsSearch(private val context: Context) {
     companion object {
         private val apps = HashMap<String, Pair<String, String?>>()
         private var appsLocale = ""
+
+        /** The last list built ([destinations]) and what it was built from; under [apps]'s lock. */
+        private var built: JSONArray? = null
+        private var builtKey: Key? = null
+
+        /** Bumped on every app installed, removed or changed: the built list and the apps' names/icons go stale. */
+        @Volatile private var packagesChanged = 0
+        private var watching = false
+
+        private fun watchPackages(context: Context) {
+            synchronized(apps) {
+                if (watching) return
+                watching = true
+            }
+            val filter = android.content.IntentFilter().apply {
+                addAction(Intent.ACTION_PACKAGE_ADDED)
+                addAction(Intent.ACTION_PACKAGE_REMOVED)
+                addAction(Intent.ACTION_PACKAGE_CHANGED)
+                addAction(Intent.ACTION_PACKAGE_REPLACED)
+                addDataScheme("package")
+            }
+            val receiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(c: Context, i: Intent) {
+                    synchronized(apps) { apps.clear() }
+                    packagesChanged++
+                }
+            }
+            val app = context.applicationContext
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                app.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                app.registerReceiver(receiver, filter)
+            }
+        }
 
         // Only navigation actions that need no package/account URI or other arguments.
         private val pages = listOf(
