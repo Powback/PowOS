@@ -32,7 +32,7 @@ import { drawerDrag, drawerOpen, drawerShown, followOpenness, homeGestures } fro
 import { AiView } from "./powai.tsx";
 
 /** The host's calls (the edge gestures' OverlayHost); an older host has none - then nothing to tell. */
-const host = () => (powos as unknown as { pull?: { closed?: () => Promise<void>; launched?: () => Promise<void> } }).pull;
+const host = () => (powos as unknown as { pull?: { closed?: () => Promise<void>; launched?: () => Promise<void>; blur?: (dp: number) => Promise<void> } }).pull;
 
 const kindOf = (k: unknown) => (k === "ai" ? "ai" : "apps");
 pullKind.value = kindOf(new URLSearchParams(location.search).get("kind"));
@@ -47,7 +47,13 @@ let asked: LauncherOpen = {};
  */
 let rising = false;
 
+/** The one backdrop's blur (theme.css --backdrop-blur-native): what the host blurs behind the window, at full openness, dp. */
+const BACKDROP_DP = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--backdrop-blur-native")) || 170;
+const backdropBlur = () => void host()?.blur?.(BACKDROP_DP).catch(() => {});
+backdropBlur();
+
 powos.on("pull.begin", (e: { kind?: string } & LauncherOpen) => {
+  backdropBlur();
   pullKind.value = kindOf(e?.kind);
   asked = e ?? {};
   if (asked.draft) aiDraft.value = aiDraft.value ? `${aiDraft.value}\n${asked.draft}` : asked.draft;

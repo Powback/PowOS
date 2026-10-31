@@ -40,6 +40,9 @@ class PullHost(
 
     override fun onPageReady() = blur.set(behind)
 
+    /** The page's backdrop radius at full openness, dp ("pull.blur": theme.css --backdrop-blur-native). */
+    fun radius(dp: Float) = blur.radius(dp)
+
     fun begin(): Boolean = start().also { if (it) current = this }
 
     override fun stop() {

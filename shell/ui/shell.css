@@ -1895,12 +1895,10 @@ html[data-mode="assist"] .assist {
  */
 html[data-mode="assist"] .assist-panel { background: var(--color-background); backdrop-filter: none; -webkit-backdrop-filter: none; }
 html.glass[data-mode="assist"] .assist-panel {
-  /* The theme's background as the tint, more of it than the reference: an app's screen is often light (the wallpaper
-     rarely) - its text keeps 4.5:1 over any app. */
-  --assist-fill: color-mix(in srgb, var(--color-background) 84%, transparent);
+  /* The one backdrop's tint (theme.css --backdrop-tint) over the frosted screenshot, as every other surface (2026-10-31). */
+  --assist-fill: var(--backdrop-tint);
   background:
     linear-gradient(var(--assist-fill), var(--assist-fill)) border-box,
-    linear-gradient(var(--glass-veil), var(--glass-veil)) border-box,
     var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
   border-radius: var(--radius);
   box-shadow: var(--lift);
@@ -3577,3 +3575,34 @@ html:root :is(.ai-screen > .ai-glass, .ai-screen.panes > .tile, .ai-view.split >
 .ai-screen > .ai-glass { box-shadow: none; }
 .ai-ctx-try .try-title { font-weight: 600; }
 .ai-ctx-empty { padding: 24px 6px; text-align: center; font-size: var(--text-small); }
+/*
+ * THE backdrop (theme.css --backdrop-tint, --backdrop-blur-native: the widgets' and the shade's own) on every surface
+ * over the wallpaper or an app - the launcher's frame (home's and the pull window's: its kind "apps" and "ai"; the
+ * host blurs behind the pull window by the radius pull.tsx sends), an open folder's sheet and the dim behind it -
+ * as the widgets, PowOS AI's page (above) and the shade (.notif-scrim) wear it: one tint, one compositor radius, no
+ * veil, no sheen, nothing per surface (2026-10-31 "the launcher and the PoAi launcher is not using the same dark
+ * background as everything else"; it was --text-fill, the grey reference lifted to the foreground, at 74% over a
+ * 20% veil: a light milky wash). Over a wallpaper of the other tone the widgets' swapped frost stands (above). Last in
+ * the file and html-prefixed: it wins over each surface's earlier fill.
+ */
+/* (.home:has(.ai-panel) named too: :is() takes its weight, so this outranks the frost's 360 on PowOS AI's panel.) */
+html:root :is(.home:has(.ai-panel) .launcher-frame.tile, .home .launcher-frame.tile, .folder-view .folder-focus.tile, .folder-sheet .folder-bg.tile) {
+  --glass-blur-native: var(--backdrop-blur-native);
+}
+html:root:not([data-light="false"][data-wallpaper="light"], [data-light="true"][data-wallpaper="dark"]) :is(.home .launcher-frame.tile, .folder-view .folder-focus.tile, .folder-sheet .folder-bg.tile) {
+  --frost-fill: var(--backdrop-tint);
+  --frost-sheen: transparent;
+  --glass-veil: transparent;
+  background: var(--backdrop-tint);
+}
+/* With CSS glass (no compositor blur, ui/glass.ts): the same tint over the frosted wallpaper, as the widgets' page glass. */
+html.glass:root:not([data-light="false"][data-wallpaper="light"], [data-light="true"][data-wallpaper="dark"]) .home .launcher-frame.tile {
+  background:
+    linear-gradient(var(--backdrop-tint), var(--backdrop-tint)) border-box,
+    var(--glass-image) left calc(-1 * var(--gx)) bottom calc(-1 * var(--gb)) / var(--glass-w) var(--glass-h) no-repeat border-box;
+}
+html.glass:root:not([data-light="false"][data-wallpaper="light"], [data-light="true"][data-wallpaper="dark"]) :is(.folder-view .folder-focus.tile, .folder-sheet .folder-bg.tile) {
+  background:
+    linear-gradient(var(--backdrop-tint), var(--backdrop-tint)) border-box,
+    var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
+}

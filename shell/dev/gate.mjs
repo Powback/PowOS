@@ -5561,6 +5561,15 @@ try {
   // The AI page is one chat: things to try as the manager's message, ⋯ for the rest, older on scroll-up (2026-10-31).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-chat", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiChatCheck(r.page))));
+  // THE backdrop (dev/backdrop-check.js; 2026-10-31 "the launcher ... not using the same dark background"): the widgets,
+  // a folder, the shade, the launcher and its PowOS AI panel - one tint, one compositor blur. Both screens.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport, part, query] of [["folded", 404, 900], ["unfolded", 821, 883]].flatMap(([l, width, height]) => [["home", ""], ["apps", "?mode=pull"], ["ai", "?mode=pull"]].map(([p, q]) => [l, { width, height }, p, q])))
+      runs.push(open(browser, `${ORIGIN}/index.html${query}`, `backdrop-${part}-${label}`, viewport).then((r) => whenReady(r, async () => {
+        const { fails, read } = await r.page.evaluate(async (p) => (await importShim("./dev/backdrop-check.js")).backdrop(p), part);
+        if (!fails.length) console.log(`backdrop-${part}-${label}: ${JSON.stringify(read)}`);
+        return fails;
+      })));
   // The pinned dock never fades (folded: the dock pages to the recent apps; the user, 2026-10-23).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "dock-no-fade", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(dockPinnedNoFade))));
