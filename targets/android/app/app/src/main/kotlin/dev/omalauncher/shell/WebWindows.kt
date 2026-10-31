@@ -460,6 +460,12 @@ class WebWindows(
 
     private val dpi get() = context.resources.displayMetrics.densityDpi
 
+    /** A new window's display dpi ([WindowDpi]): the desktop density on the unfolded screen. */
+    private fun windowDpi(pkg: String): Int {
+        val m = context.resources.displayMetrics
+        return WindowDpi.of(m.densityDpi, minOf(m.widthPixels, m.heightPixels), pkg)
+    }
+
     /** One window: its container layer, its display (-1 until the helper made it), its mirror (once WM knows the display). */
     private class Win(
         val id: Int,
@@ -468,6 +474,8 @@ class WebWindows(
         /** The display's size, px (what it was made or last resized to). */
         var w: Int,
         var h: Int,
+        /** Its display's dpi ([WindowDpi]): fixed from its creation, every resize at it. */
+        val dpi: Int,
     ) {
         @Volatile var displayId = -1
         var mirror: SurfaceControl? = null
@@ -734,18 +742,22 @@ class WebWindows(
             WebWindowLaunch.refused(component.packageName)
             return -1
         }
-        existingFor(component, task)?.let { return it }
+        val pkg = component.packageName
+        val how = launchDecision(component, task)
+        if (how is LaunchReuse.Decision.Reuse) return how.window
+        val adopt = (how as? LaunchReuse.Decision.Adopt)?.task ?: -1
         val parent = root() ?: return -1
         val id = nextId++
+        WindowLog.i(TAG, "launch $pkg: new window $id (running task moved in: $adopt; -1: launched)")
         val d = density()
         val w = (rect.optDouble("width") * d).toInt().coerceAtLeast(1)
         val h = (rect.optDouble("height") * d).toInt().coerceAtLeast(1)
         // Hidden until the page's first "w.f" places it.
         val container = SurfaceControl.Builder().setName("powos-ww-$id").setParent(parent).setHidden(true).build()
-        val win = Win(id, component, container, w, h)
-        win.adopt = task
+        val win = Win(id, component, container, w, h, windowDpi(component.packageName))
+        win.adopt = adopt
         wins[id] = win
-        helper.create(id, w, h) { displayId, error ->
+        helper.create(win) { displayId, error ->
             if (displayId < 0) {
                 WindowLog.w(TAG, "window $id (${component.packageName}): no display: $error")
                 main.post { drop(win, released = true) }
@@ -756,7 +768,7 @@ class WebWindows(
             WebWindowDisplays.add(displayId, id)
             // Closed while its display was being made: the display goes too.
             if (win.closed) return@create helper.release(displayId)
-            WindowLog.i(TAG, "window $id: trusted display $displayId ${w}x$h dpi $dpi (${component.packageName})")
+            WindowLog.i(TAG, "window $id: trusted display $displayId ${w}x$h dpi ${win.dpi} (screen $dpi) (${component.packageName})")
             main.post { scheduleReconcile() }
             io.post { mirrorWhenKnown(win, SystemClock.uptimeMillis()) }
         }
@@ -780,6 +792,38 @@ class WebWindows(
         WindowLog.i(TAG, "open $pkg task $task: window ${w.id} (display ${w.displayId}) has the app already: raised, no second display")
         emit("webwindows.show", w.id)
         return w.id
+    }
+
+    /**
+     * [open]'s rule: [component]'s window to raise (Reuse, "webwindows.show" sent), its task to move into a new window
+     * (Adopt: [task], or a fresh launch's app already running anywhere), or New. A fresh launch ([task] < 0): the app's
+     * window (one still launching too) or its running task anywhere is THAT one - never a second display (10-31
+     * "opening two instances of the app": a fresh display launched with NEW_TASK while the task lived on display 0
+     * stayed empty). [LaunchReuse] is the rule.
+     */
+    private fun launchDecision(
+        component: ComponentName,
+        task: Int,
+    ): LaunchReuse.Decision {
+        if (task >= 0) return existingFor(component, task)?.let { LaunchReuse.Decision.Reuse(it, task) } ?: LaunchReuse.Decision.Adopt(task)
+        val pkg = component.packageName
+        val d = LaunchReuse.decide(pkg, liveWindows(), if (pkg == context.packageName) emptyList() else runningTasks())
+        if (d is LaunchReuse.Decision.Reuse) {
+            WindowLog.i(TAG, "launch $pkg: reused window ${d.window} (task ${d.task})")
+            emit("webwindows.show", d.window)
+        }
+        return d
+    }
+
+    /** [LaunchReuse]'s windows: every live Android window (main thread). */
+    private fun liveWindows(): List<LaunchReuse.Window> =
+        wins.values.filter { it.linux == null && !it.closed }.map { LaunchReuse.Window(it.id, it.component.packageName, it.taskId, it.displayId) }
+
+    /** [LaunchReuse]'s running tasks with their displays (empty: not readable - a new window then, as before). */
+    private fun runningTasks(): List<LaunchReuse.Task> {
+        @Suppress("DEPRECATION")
+        val tasks = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
+        return tasks.map { LaunchReuse.Task(it.taskId, it.baseActivity?.packageName, it.topActivity?.packageName, WebWindowDisplays.displayOf(it)) }
     }
 
     /**
@@ -865,7 +909,7 @@ class WebWindows(
             SurfaceControl.Builder().setName("powos-ww-$id-linux").setParent(container).setBufferSize(w, h)
                 .setFormat(android.graphics.PixelFormat.TRANSLUCENT).build()
         val src = LinuxSource(kwin, p, content, android.view.Surface(content))
-        val win = Win(id, ComponentName(context.packageName, "kwin:${p.appId}"), container, w, h)
+        val win = Win(id, ComponentName(context.packageName, "kwin:${p.appId}"), container, w, h, dpi)
         win.linux = src
         // The content takes the mirror's place: shown under the bar, cropped to the body (nothing until KWin's first frame).
         win.mirror = content
@@ -1511,7 +1555,7 @@ class WebWindows(
             win.h = bh
             // The app lays out at the body's real size; the crop already follows the DOM (its last frame shows anchored
             // top-left until it draws at the new size).
-            helper.resize(win.displayId, bw, bh, dpi)
+            helper.resize(win.displayId, bw, bh, win.dpi)
         }
     }
 
@@ -1662,6 +1706,25 @@ class WebWindows(
         for (w in wins.values) if (w.displayId >= 0 && w.mirror?.isValid == false) io.post { remirror(w) }
         // Every window's whole layer state again, from the page's next frame (not only when its geometry next changes).
         resend("home's surface $why")
+    }
+
+    /**
+     * Main thread: the helper's "quiet <displayId> <ms> <rebinds>" - no display frame for <ms> since its last resize
+     * ([FrozenWatch]). A window whose app is alive and on screen is re-bound in place (never closed for the user).
+     */
+    private fun quiet(line: String) {
+        val a = line.split(' ')
+        val displayId = a.getOrNull(1)?.toIntOrNull() ?: return
+        val ms = a.getOrNull(2)?.toLongOrNull() ?: return
+        val w = wins.values.firstOrNull { it.displayId == displayId } ?: return
+        val alive = !w.closed && w.landed && !w.full && w.leftAt == 0L
+        val visible = w.shown && homeShown()
+        if (!FrozenWatch.rebind(ms, alive, visible)) {
+            WindowLog.i(TAG, "window ${w.id}: no VD frames for ${ms} ms after a resize, not rebound (alive $alive, visible $visible)")
+            return
+        }
+        WindowLog.w(TAG, "window ${w.id}: FROZEN (no VD frames for ${"%.1f".format(ms / 1000.0)}s) - rebinding")
+        helper.rebind(displayId)
     }
 
     /** On [io]: [w]'s display mirrored again into its container (its mirror lost), the app left running as it is. */
@@ -2905,6 +2968,7 @@ class WebWindows(
                 a[0] == "hello" -> WindowLog.i(TAG, "display helper ready")
                 a[0] == "display" -> waiter?.invoke(a.getOrNull(2)?.trim()?.toIntOrNull() ?: -1, "bad answer: $line")
                 a[0] == "error" -> waiter?.invoke(-1, a.getOrNull(2))
+                a[0] == "quiet" -> main.post { quiet(line) }
                 else -> WindowLog.i(TAG, "display helper: $line")
             }
         }
@@ -2922,15 +2986,25 @@ class WebWindows(
             }
         }
 
-        /** A display of [w] x [h] px at the device's dpi; [done] hears its id (or -1 and why) on the helper's thread. */
+        /** [win]'s display, its size and dpi now; [done] hears its id (or -1 and why) on the helper's thread. */
         fun create(
-            id: Int,
-            w: Int,
-            h: Int,
+            win: Win,
             done: (Int, String?) -> Unit,
-        ) = io.post {
+        ) {
+            val id = win.id
+            val w = win.w
+            val h = win.h
+            val dpi = win.dpi
+            io.post { create(id, "$w $h $dpi", done) }
+        }
+
+        private fun create(
+            id: Int,
+            size: String,
+            done: (Int, String?) -> Unit,
+        ) {
             synchronized(waiting) { waiting["$id"] = done }
-            if (!send("create $id $w $h $dpi")) synchronized(waiting) { waiting.remove("$id") }?.invoke(-1, "no helper")
+            if (!send("create $id $size")) synchronized(waiting) { waiting.remove("$id") }?.invoke(-1, "no helper")
         }
 
         /** Coalesced: only the newest size per display goes out (a drag resizes every frame). */
@@ -2954,6 +3028,10 @@ class WebWindows(
 
         fun release(displayId: Int) {
             io.post { send("release $displayId") }
+        }
+
+        fun rebind(displayId: Int) {
+            io.post { send("rebind $displayId") }
         }
 
         /**

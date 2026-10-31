@@ -139,6 +139,10 @@ hidden() {
   apk=$(sh_ "pm path com.powos.app" | sed -n '1s/^package://p'); [ -n "$apk" ] || hfail "PowOS isn't installed (pm path com.powos.app)"
   comp=$(sh_ "cmd package resolve-activity --brief -c android.intent.category.LAUNCHER $APP" | tail -1); case $comp in "$APP"/*) ;; *) hfail "no launcher activity for $APP ($comp)" ;; esac
   pre=" $(app_tasks) "
+  # The user's page's windows (count + ids) before; the same after the check or FAIL - the check never opens,
+  # closes or moves one of theirs.
+  wlist() { ev "(()=>{const w=[...document.querySelectorAll('.webwindow')];return w.length+':'+w.map(e=>e.dataset.wwid||'?').join(',')})()"; }
+  local wl0 wl1; wl0=$(wlist); log "the user's page's windows before: ${wl0:-unreadable}"
   log "hidden check: $comp on a ${W}x$H display at $dpi dpi from $apk (the user's $APP tasks before:${pre% })"
   # The helper (WebWindowsHost from the installed APK, as WebWindows.kt starts it: su 2000, group uhid), stdin a fifo a
   # holder keeps open for WR_HOLD_S; "selftest": own display group/focus/lock state (an older helper ignores it).
@@ -198,6 +202,18 @@ EOF
   for n in display tap; do $PY png "$OUT/$n.raw.gz" "$OUT/$n.png" 2>/dev/null && rm -f "$OUT/$n.raw.gz"; done; rm -f "$OUT/pre.raw.gz"
   case "$d1$noise" in ""|*[!0-9.]*) hfail "a measurement is missing (tap=$d1 noise=$noise)" ;; esac
   awk "BEGIN{exit !($d1 >= 0.002 && $d1 > 3 * $noise)}" || hfail "the tap changed nothing in the app ($d1 vs noise $noise)"
+  # (c) a resize through the helper (as WebWindows.resizeContent sends it): dumpsys display shows the new size at the
+  # SAME density (a window's density is fixed for its life, WindowDpi - 10-31 Chrome lost its desktop layout).
+  vdinfo() { sh_ "dumpsys display" | grep -m1 "DisplayDeviceInfo{\"powos-ww-$tag\"" | sed -n 's/.*", \([0-9]*\) x \([0-9]*\),.* density \([0-9]*\),.*/\1 \2 \3/p'; }
+  local g0 g1 W2 H2; g0=$(vdinfo); log "display $D before the resize: ${g0:-unreadable} (w h dpi)"
+  [ -n "$g0" ] || hfail "dumpsys display has no powos-ww-$tag"
+  set -- $g0; W2=$(( $1 * 3 / 4 )); H2=$(( $2 * 3 / 4 ))
+  sh_ "echo resize $D $W2 $H2 $3 > $dir/in" >/dev/null
+  for _ in 1 2 3 4 5 6 7 8 9 10; do g1=$(vdinfo); [ "$g1" = "$W2 $H2 $3" ] && break; sleep 0.3; done
+  log "display $D after 'resize $D $W2 $H2 $3': ${g1:-unreadable}"
+  [ "$g1" = "$W2 $H2 $3" ] || hfail "display $D after the resize is '${g1:-unreadable}', not '$W2 $H2 $3' (size, density unchanged)"
+  wl1=$(wlist); log "the user's page's windows after: ${wl1:-unreadable}"
+  [ "$wl0" = "$wl1" ] || hfail "the user's page's window list changed during the check ('${wl0:-unreadable}' -> '${wl1:-unreadable}')"
   if [ "$HOLD" -gt 0 ]; then
     log "window-render: PASS (hidden: task $task on display $D drew the app, the tap reached it; $(( $(date +%s) - t0 )) s; holding $HOLD s) - $OUT"
     # Into logcat: the helper's geometry line for this display, then the content every ~5 s (no quotes in the text).
