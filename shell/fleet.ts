@@ -183,16 +183,25 @@ function trouble(a: Agent, w: WorkLite | undefined, now: number): Pick<Worker, "
 /**
  * The project [a] works in, by its working directory: a PowOS checkout or worktree (~/Projects/PowOS/…, ~/pw/<name>,
  * the phone's powos paths) is "PowOS", another ~/Projects/<p>/… is <p>, else the folder's own name; a helper is its
- * parent's. No directory known: PowOS (the board's own agents report none on the phone).
+ * parent's. No directory known: PowOS (the board's own agents report none on the phone). An agent on a board task is
+ * PowOS's whatever its directory (the board is PowOS's).
  */
 export function projectOf(a: Agent, depth = 0): string {
+  if (a.work) return "PowOS";
   const up = a.parent && depth < 4 ? agent(a.parent)?.value : undefined;
   return up ? projectOf(up, depth + 1) : projectOfDir(a.cwd || "");
 }
 
-/** A working directory's project ("" and PowOS paths: "PowOS"). */
+/**
+ * The workspace root, no project of its own: the Mac's spool sends only the directory's last name (powos-agentsd, mirror
+ * mac.json: cwd "Projects" for the PowOS coordinator in ~/Projects and its helpers, "rsi-native" for that project), and
+ * the coordinator that runs PowOS's agents sits there (2026-10-31: every working PowOS agent was under "Other projects").
+ */
+const WORKSPACE = /^(~|Projects|macback|home)$/i;
+
+/** A working directory's project ("", the workspace root and PowOS paths: "PowOS"). */
 function projectOfDir(cwd: string): string {
-  if (!cwd || /(^|\/)(pw|PowOS)(\/|$)|powos/i.test(cwd)) return "PowOS";
+  if (!cwd || WORKSPACE.test(cwd.replace(/\/+$/, "").split("/").pop() || "") || /(^|\/)(pw|PowOS)(\/|$)|powos/i.test(cwd)) return "PowOS";
   const m = /\/Projects\/([^/]+)/.exec(cwd);
   return m ? m[1] : cwd.replace(/\/+$/, "").split("/").pop() || "PowOS";
 }

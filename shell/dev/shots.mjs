@@ -502,6 +502,8 @@ const SCENES = [
   ["ai-panes-chat", "home", LOOK + "{" + FLEET_SETUP + OTHER_PROJECT + "}", "wallpaper", undefined, { ...SIZES, "folded-land": LAND_SIZES["folded-land"] }],
   ["ai-panes-agents", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'fleet'; await sleep(400);", "wallpaper", undefined, { unfolded: SIZES.unfolded }],
   ["ai-panes-progress", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'progress'; await sleep(600);", "wallpaper", undefined, { unfolded: SIZES.unfolded }],
+  // Progress (aiprogress.tsx, the user 15:12): the ring and the area cards, the first one opened; folded and unfolded.
+  ["ai-progress-open", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'progress'; await sleep(700); document.querySelector('.ai-screen .aip-area-row')?.click(); await sleep(700);", "wallpaper"],
   ["ai-msgr-menu", "home", MSGR + " document.querySelector('.ai-screen .ai-more').click(); await sleep(300);", "wallpaper"],
   ["ai-msgr-split", "home", MSGR + " S.aiScreen.value = 'progress'; await sleep(600);", "wallpaper", undefined, WIDE_SIZES],
   ["ai-msgr-agents", "home", MSGR + " S.aiScreen.value = 'agents'; await sleep(400);", "wallpaper"],
