@@ -1231,6 +1231,8 @@ async function aiTrySetup(id) {
   P.board.value = [{ id, title: "Windows: tap the one behind to raise it", owner: "coder", status: "waiting", note: "Overlap two windows and tap the one behind: it should come to the front", project: "Windows", created: now - 9e5, updated: now - 6e4, done: 0, progressDone: 0, progressTotal: 0, step: "", steps: "", commits: JSON.stringify([{ sha: "abc1234", subject: "" }]), images: JSON.stringify(["/run/powos-app/powos-ai-shared/screen-1793386307690.jpg"]), activity: now - 6e4 }];
   P.boardSeen.value = true;
   S.page.value = -1;
+  // The board is behind the AI page's ⋯ now: Progress (no powos-progress app here: the board itself).
+  S.aiScreen.value = "progress";
   const card = () => [...document.querySelectorAll(".ai-work-list .ai-item")].find((e) => e.textContent.includes("Overlap two windows"));
   if (!(await G.until(card, 4000))) return false;
   card().querySelector(".ai-item-row").click();
@@ -1315,6 +1317,8 @@ async function nyTrySetup([tryLine, todo]) {
   ];
   P.boardSeen.value = true;
   S.page.value = -1;
+  // The board is behind the AI page's ⋯ now: Progress (no powos-progress app here: the board itself).
+  S.aiScreen.value = "progress";
   return !!(await G.until(() => document.querySelectorAll(".ai-work-list .ai-group.you .ai-item").length === 3, 4000));
 }
 
@@ -1399,6 +1403,153 @@ async function nyTryCheck(page) {
   fails.push(...nyBrokenFails(await page.evaluate(nyReply, [NY_TRY_TITLE, "still broken", 2])));
   fails.push(...nyCantFails(await page.evaluate(nyReply, [NY_DO, "can't / problem", 1])));
   await page.evaluate(nyRestore);
+  return fails;
+}
+
+const AI_CHAT_TRY = "gate-chat-try";
+const AI_CHAT_DO = "gate-chat-do";
+
+/** In the page: a conversation of [n] exchanges, the last one the manager's things to try (a ```try block). */
+async function aiChatSetup([n, tag]) {
+  const G = window.__gw;
+  const [S, P, { powos }] = await Promise.all([G.mod("./state.ts"), G.mod("./ui/powai.tsx"), G.mod("./bridge.ts")]);
+  const now = Date.now();
+  const row = (id, title, more) => ({ id, title, owner: "coder", note: "", project: "Windows", created: now - 9e5, updated: now - 6e4, done: 0, progressDone: 0, progressTotal: 0, step: "", steps: "", commits: "", images: "", activity: now - 6e4, tryLine: "", ...more });
+  P.board.value = [row("gate-epic", "Daily driver: everything on the phone", { status: "working", progressDone: 5, progressTotal: 8 }), row("gate-plug", "Kernel test", { status: "waiting", note: "Plug the phone into the Mac once" })];
+  P.boardSeen.value = true;
+  const got = (window.__nyGot = []);
+  window.__nyRestore = [powos.ai.verdict, powos.agents.message];
+  powos.ai.verdict = async (...a) => void got.push(["verdict", ...a]);
+  powos.agents.message = async (...a) => void got.push(["message", ...a]);
+  try { localStorage.removeItem("powos.ai.tried"); } catch {}
+  const items = [];
+  for (let i = 0; i < n; i++) {
+    items.push({ kind: "user", text: `question ${i}` });
+    items.push({ kind: "tool", name: "Bash", hint: "ls", ok: true, text: "", out: "" });
+    items.push({ kind: "tool", name: "Read", hint: "/x/y.md", ok: true, text: "", out: "" });
+    items.push({ kind: "assistant", text: `answer ${i}` });
+  }
+  const tryBlock = { title: "2 things ready", items: [{ id: `gate-chat-try${tag}`, line: "Tap a window behind another: it comes to the front" }, { id: `gate-chat-do${tag}`, line: "Plug the phone into the Mac once", do: true }] };
+  items.push({ kind: "assistant", text: "Shipped.\n\n```try\n" + JSON.stringify(tryBlock) + "\n```" });
+  S.aiScreen.value = "chat";
+  S.chat.value = { busy: false, items };
+  S.page.value = -1;
+  return !!(await G.until(() => document.querySelector(".ai-screen .ai-chat .msg.try"), 4000));
+}
+
+/** In the page: what of the old page is still on the chat (board boxes, at work, units, the agents tile, "earlier"). */
+function aiChatBoxes() {
+  const scr = document.querySelector(".ai-screen");
+  const left = [".ai-group", ".ai-work-list", ".ai-board", ".ai-session", ".ai-card", ".ai-history", ".ai-fold"].filter((q) => scr.querySelector(q));
+  const text = scr.textContent;
+  const words = ["Needs you", "Ready to try", "Being worked on", "Waiting for an agent", "installed & running", "earlier ·", "friction ·", "at work"].filter((w) => text.includes(w));
+  return [...left, ...words];
+}
+
+/** In the page: the try message's buttons, "still broken" + "x" sent; what the bridge got and what the item says now. */
+async function aiChatBroken() {
+  const G = window.__gw;
+  const item = () => [...document.querySelectorAll(".ai-screen .try-item")].find((e) => e.textContent.includes("Tap a window behind"));
+  const acts = [...item().querySelectorAll(".try-acts .ai-act")].map((b) => b.textContent.trim()).join(" / ");
+  const doActs = [...document.querySelectorAll(".ai-screen .try-item")].find((e) => e.textContent.includes("Plug the phone"))?.querySelectorAll(".try-acts .ai-act");
+  [...item().querySelectorAll(".ai-act")].find((b) => b.textContent.trim() === "still broken").click();
+  if (!(await G.until(() => item()?.querySelector(".ai-reply textarea"), 2000))) return { acts, got: null };
+  const field = item().querySelector(".ai-reply textarea");
+  field.value = "x";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  await G.frames(2);
+  item().querySelector(".ai-reply").requestSubmit();
+  await G.until(() => window.__nyGot.length >= 2 && item()?.querySelector(".try-said"), 2000);
+  return { acts, doActs: [...(doActs ?? [])].map((b) => b.textContent.trim()).join(" / "), got: window.__nyGot.splice(0), said: item()?.querySelector(".try-said")?.textContent.trim() ?? "" };
+}
+
+/** In the page: ⋯, then each screen and back; a fail per screen that didn't open, name itself, or come back. */
+async function aiChatMenu() {
+  const G = window.__gw;
+  const fails = [];
+  for (const name of ["Progress", "Agents & terminals", "Devices", "Friction"]) {
+    document.querySelector(".ai-screen .ai-more")?.click();
+    const find = () => [...document.querySelectorAll(".ai-screen .ai-menu-item")].find((b) => b.textContent.trim() === name);
+    await G.until(find, 2000);
+    const item = find();
+    if (!item) { fails.push(`⋯ has no "${name}"`); continue; }
+    item.click();
+    const opened = await G.until(() => [...document.querySelectorAll(".ai-screen .ai-top .ai-title")].some((t) => t.textContent.trim() === name) && document.querySelector(".ai-screen .ai-sub"), 2000);
+    if (!opened) fails.push(`"${name}" didn't open as its own screen`);
+    if (name === "Progress" && !document.querySelector(".ai-screen .ai-sub .ai-work-list")) fails.push("Progress (no powos-progress app) shows no board");
+    document.querySelector(".ai-screen .ai-back")?.click();
+    if (!(await G.until(() => document.querySelector(".ai-screen .ai-chat .msg.try"), 2000))) fails.push(`back from "${name}" didn't return to the chat`);
+  }
+  [...document.querySelectorAll(".ai-screen .ai-strip-seg")].find((b) => /Daily driver/.test(b.textContent))?.click();
+  if (!(await G.until(() => [...document.querySelectorAll(".ai-screen .ai-top .ai-title")].some((t) => t.textContent.trim() === "Progress"), 2000))) fails.push("the strip's progress didn't open Progress");
+  document.querySelector(".ai-screen .ai-back")?.click();
+  return fails;
+}
+
+/** In the page: messages drawn, then the chat scrolled to its top: more drawn (older ones load on scroll-up). */
+async function aiChatOlder() {
+  const G = window.__gw;
+  const pane = document.querySelector(".ai-screen .ai-chat");
+  const count = () => pane.querySelectorAll(".msg").length;
+  const fade = () => Math.round(parseFloat(getComputedStyle(pane).getPropertyValue("--ai-fade")) || 0);
+  const before = count();
+  const rest = fade();
+  pane.scrollTop = -pane.scrollHeight;
+  await G.until(() => count() > before, 3000);
+  await G.frames(2);
+  return [before, count(), rest, fade()];
+}
+
+/** In the page: the bridge as it was. */
+async function aiChatRestore() {
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  [powos.ai.verdict, powos.agents.message] = window.__nyRestore;
+}
+
+/** The chat's checks at one size: no old boxes, the try message answered, ⋯'s screens, older on scroll-up. */
+async function aiChatAt(page, size) {
+  const fails = [];
+  if (!(await page.evaluate(aiChatSetup, [120, `-${size}-a`]))) return [`${size}: the manager's things-to-try message didn't render`];
+  const boxes = await page.evaluate(aiChatBoxes);
+  if (boxes.length) fails.push(`${size}: the chat page still shows ${boxes.join(", ")}`);
+  await page.screenshot({ path: `/cache/ai-page-${size}-chat.png` });
+  const width = await page.evaluate(() => Math.round(document.querySelector(".ai-screen .ai-chat").getBoundingClientRect().width));
+  if (width > 700) fails.push(`${size}: the chat is ${width} px wide, not centred at reading width`);
+  const strip = await page.evaluate(() => document.querySelector(".ai-screen .ai-strip")?.textContent ?? "");
+  if (!/Daily driver 63%/.test(strip) || !/1 needs you/.test(strip)) fails.push(`${size}: the strip at the chat's top says "${strip}", not the progress and what needs you`);
+  const [before, after, rest, up] = await page.evaluate(aiChatOlder);
+  if (!(after > before)) fails.push(`${size}: scrolling up loaded no older messages (${before} -> ${after})`);
+  if (rest !== 0 || up < 40) fails.push(`${size}: the chat's foot fade is ${rest} px at the newest and ${up} px scrolled up (want 0, then ~48)`);
+  await page.screenshot({ path: `/cache/ai-page-${size}-scrolled.png` });
+  await page.evaluate(aiChatSetup, [3, `-${size}`]);
+  const r = await page.evaluate(aiChatBroken);
+  if (r.acts !== "works / still broken") fails.push(`${size}: the thing to try offers ${r.acts || "nothing"}, not works / still broken`);
+  if (r.doActs !== "done / can't / problem") fails.push(`${size}: the thing to do offers ${r.doActs || "nothing"}, not done / can't / problem`);
+  const v = r.got && nyCall(r.got, "verdict");
+  if (!(v && v[1] === `${AI_CHAT_TRY}-${size}` && v[2] === false && v[3] === "still broken: x")) fails.push(`${size}: still broken recorded no user FAIL check with the words (${JSON.stringify(r.got)})`);
+  if (!(r.got && nyMailOk(nyCall(r.got, "message"), `${AI_CHAT_TRY}-${size}`))) fails.push(`${size}: still broken mailed the manager nothing naming the task`);
+  if (!/still broken: "x"/.test(r.said ?? "")) fails.push(`${size}: the item doesn't say what was answered ("${r.said}")`);
+  await page.screenshot({ path: `/cache/ai-page-${size}-answered.png` });
+  await page.evaluate(() => document.querySelector(".ai-screen .ai-more")?.click());
+  await page.screenshot({ path: `/cache/ai-page-${size}-menu.png` });
+  await page.evaluate(() => document.querySelector(".ai-screen .ai-menu-scrim")?.click());
+  fails.push(...(await page.evaluate(aiChatMenu)).map((f) => `${size}: ${f}`));
+  await page.evaluate(aiChatRestore);
+  return fails;
+}
+
+/**
+ * The AI page is one chat (the user, 2026-10-31: "a bunch of different boxes ... stacked on top of each other"): folded
+ * and unfolded no board boxes, no at-work list, no units; the manager's things to try (```try) render as its message
+ * with works / still broken (done / can't on a thing to do), "still broken" + a reply records the user FAIL check and
+ * mails the manager; ⋯ opens Progress / Agents & terminals / Devices, each with back; scrolling up loads older messages.
+ * Renders: /cache/ai-page-<size>-*.png.
+ */
+async function aiChatCheck(page) {
+  const fails = await aiChatAt(page, "folded");
+  await page.setViewport({ width: 821, height: 883 });
+  await page.evaluate(() => window.__gw.until(() => innerWidth === 821));
+  fails.push(...(await aiChatAt(page, "unfolded")));
   return fails;
 }
 
@@ -4122,6 +4273,9 @@ try {
   // A Needs-you card to try: works / still broken, the reply line reaches the board and the manager (2026-10-30).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-still-broken", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiStillBrokenCheck(r.page))));
+  // The AI page is one chat: things to try as the manager's message, ⋯ for the rest, older on scroll-up (2026-10-31).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-chat", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiChatCheck(r.page))));
   // Needs-you cards answer like Ready to try: works / still broken under their --try line; can't on a thing to do (2026-10-31).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-needs-you-try", { width: 404, height: 900 }).then((r) => whenReady(r, () => nyTryCheck(r.page))));

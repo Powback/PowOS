@@ -182,11 +182,14 @@ const board = (actions) =>
   ` P.board.value = B.map((r) => ({ ...r, note: A[r.id] ?? r.note, created: now - r.createdAgo, updated: now - r.updatedAgo, done: r.doneAgo ? now - r.doneAgo : 0, activity: r.activityAgo ? now - r.activityAgo : 0 }));` +
   ` P.boardSeen.value = true; S.chat.value = { busy: false, items: [{ kind: "user", text: "what changed overnight?" }, { kind: "assistant", text: "Three pushes: the shade, the pet, the speech fix." }, ...${CHAT_SAMPLE}] }; S.page.value = -1; await sleep(300);`;
 
+/** The AI page as one chat (AI1-AI8): the board's state for the strip, the manager's things to try last. */
+const MSGR_TRY = { kind: "assistant", text: "Shipped the window raise fix.\n\n```try\n" + JSON.stringify({ title: "2 things ready", items: [{ id: "overlap", line: "Tap a window behind another: it comes to the front" }, { id: "plug", line: "Plug the phone into the Mac once, for the kernel test", do: true }] }) + "\n```" };
+const MSGR = board(true).replace(" S.page.value = -1;", "") + ` S.chat.value = { busy: false, items: [...S.chat.value.items, ${JSON.stringify(MSGR_TRY)}] }; S.page.value = -1; await sleep(500);`;
 /** Rows with queued phone checks (queue.sh's marker), a failed check (its screenshot) and a passed one: "test now". */
 const TEST_NOW =
   " const R = P.board.value; const w = R.filter((r) => r.status === 'working'); w[0].step = 'phone check queued'; w[1].step = 'phone check queued';" +
   " w[2].step = 'verify FAIL rc=1: FAIL: not freeform (log ~/.cache/powos-verify-queue/done/x.log)'; w[2].images = JSON.stringify(['/home/powos/design-qa/verify-x.png']);" +
-  " w[3].step = 'verify PASS: 3 swipes ok (log ~/.cache/powos-verify-queue/done/y.log)'; P.board.value = [...R]; await sleep(200); document.querySelector('.ai-work-list').scrollIntoView();";
+  " w[3].step = 'verify PASS: 3 swipes ok (log ~/.cache/powos-verify-queue/done/y.log)'; P.board.value = [...R]; await sleep(200); S.aiScreen.value = 'progress'; await sleep(250); document.querySelector('.ai-work-list')?.scrollIntoView();";
 /**
  * The grouped work board (powai.tsx Work, the user 2026-10-30: "let's group the PowOS AI in-progress things"): 13 tasks
  * across its four groups - two waiting on the user, six shipped and waiting on the user's verdict (five shown, one
@@ -228,7 +231,7 @@ const GROUPED_SCENE =
   ` P.boardSeen.value = true; if (P.checks) P.checks.value = [{ job: 'j1', task: 'speech', name: 'speech-release', state: 'queued', line: '', at: now - 6e4, shipped: true }, { job: 'j2', task: 'pet', name: 'pet-dock', state: 'FAIL', line: 'pet over icon', at: now - 3e5, shipped: true }, { job: 'you-dock', task: 'dock-epic', name: 'you', state: 'PASS', line: 'works: the user tried it', at: now - 2e5, shipped: true }];` +
   ` S.chat.value = { busy: false, items: [{ kind: "user", text: "how is the board?" }, { kind: "assistant", text: "Six things are ready for you to try." }] }; S.page.value = -1; await sleep(400);` +
   ` const ag = (id, work, role) => ({ id, host: 'phone', role, parent: null, state: 'working', title: work, step: '', cwd: '~', pid: 1, subs: 0, unread: 0, report: '', work, started: now - 6e5, last: Date.now(), rev: 1 });` +
-  ` E.emit('agents.delta', { agents: [ag('a-chat', 'ai-board', 'powos-chat'), ag('a-perf', 'perf', 'powos-perf')] }); await sleep(300); document.querySelector('.ai-work-list').scrollIntoView();`;
+  ` E.emit('agents.delta', { agents: [ag('a-chat', 'ai-board', 'powos-chat'), ag('a-perf', 'perf', 'powos-perf')] }); await sleep(300); S.aiScreen.value = 'progress'; await sleep(250); document.querySelector('.ai-work-list')?.scrollIntoView();`;
 
 /**
  * A Needs-you card that asks the user to try something (the user, 2026-10-30: "How am I supposed to give feedback to
@@ -237,7 +240,7 @@ const GROUPED_SCENE =
  */
 const NY_CARD = (img) =>
   `const now = Date.now(); const P = await U('./ui/powai.tsx'); P.board.value = [{ id: 'overlap', title: 'Windows: tap the one behind to raise it', owner: 'coder', status: 'waiting', note: 'Overlap two windows and tap the one behind: it should come to the front', project: 'Windows', created: now - 9e5, updated: now - 6e4, done: 0, progressDone: 0, progressTotal: 0, step: '', steps: '', commits: JSON.stringify([{ sha: 'abc1234', subject: '' }, { sha: 'def5678', subject: 'Tapping a window behind raises it' }]), images: JSON.stringify(${img ? "['/run/powos-app/powos-ai-shared/screen-ny.png']" : "[]"}), activity: now - 6e4 }, { id: 'plug', title: 'Kernel test build', owner: 'kernel', status: 'waiting', note: "Plug the phone into the Mac's USB once, for the kernel test", project: 'Kernel & system', created: now - 9e5, updated: now - 9e4, done: 0, steps: '', commits: '', images: '', activity: now - 9e4 }];` +
-  ` P.boardSeen.value = true; S.chat.value = { busy: false, items: [] }; S.page.value = -1; await sleep(400); document.querySelector('.ai-work-list').scrollIntoView();`;
+  ` P.boardSeen.value = true; S.chat.value = { busy: false, items: [] }; S.page.value = -1; await sleep(400); S.aiScreen.value = 'progress'; await sleep(250); document.querySelector('.ai-work-list')?.scrollIntoView();`;
 const NY_OPEN = " document.querySelector('.ai-work-list .ai-item-row').click(); await sleep(300);";
 const NY_REPLY = " [...document.querySelectorAll('.ai-act')].find((b) => b.textContent.trim() === 'still broken').click(); await sleep(200); const f = document.querySelector('.ai-reply textarea'); f.value = 'the one behind stays behind'; f.dispatchEvent(new Event('input', { bubbles: true })); await sleep(100); [...document.querySelectorAll('.ai-reply .ai-act')].find((b) => /screenshot/.test(b.textContent)).click(); await sleep(400); document.activeElement?.blur();";
 
@@ -392,8 +395,8 @@ const SCENES = [
   ["ai-board-open", "home", GROUPED_SCENE + " document.querySelectorAll('.ai-work-list .ai-group-fold[aria-expanded=false]').forEach((b) => b.click()); await sleep(200); document.querySelectorAll('.ai-work-list .ai-group-more').forEach((b) => b.click()); await sleep(200); (document.querySelector('.ai-group.on') ?? document.querySelector('.ai-work-list')).scrollIntoView();", "wallpaper"],
   ["ai-v2", "home", board(false), "wallpaper"],
   ["ai-v2-actions", "home", board(true), "wallpaper"],
-  ["ai-v2-open", "home", board(true) + " document.querySelectorAll('.ai-work-list .ai-fold, .ai-history .ai-fold').forEach((b) => b.click()); await sleep(100); document.querySelector('.ai-screen .ai-item')?.click(); await sleep(100); document.querySelector('.ai-work-list').scrollIntoView();", "wallpaper"],
-  ["progress", "home", board(false) + " document.querySelector('.ai-work-list').scrollIntoView();", "wallpaper"],
+  ["ai-v2-open", "home", board(true) + " document.querySelectorAll('.ai-work-list .ai-fold, .ai-history .ai-fold').forEach((b) => b.click()); await sleep(100); document.querySelector('.ai-screen .ai-item')?.click(); await sleep(100); S.aiScreen.value = 'progress'; await sleep(250); document.querySelector('.ai-work-list')?.scrollIntoView();", "wallpaper"],
+  ["progress", "home", board(false) + " S.aiScreen.value = 'progress'; await sleep(250); document.querySelector('.ai-work-list')?.scrollIntoView();", "wallpaper"],
   ["progress-open", "home", board(false) + " [...document.querySelectorAll('.ai-item-row')].find((b) => /queued/i.test(b.textContent))?.click(); await sleep(300); document.querySelector('.ai-item-more')?.scrollIntoView({ block: 'center' }); await sleep(300);", "wallpaper"],
   ["test-now", "home", board(false) + TEST_NOW, "wallpaper"],
   ["test-now-testing", "home", board(false) + TEST_NOW + " document.querySelector('.ai-test')?.click(); await sleep(200);", "wallpaper"],
@@ -416,6 +419,11 @@ const SCENES = [
   ["mail-ai", "home", `S.chat.value = { busy: false, items: ${MAIL_SAMPLE} }; S.page.value = -1;`, "wallpaper", undefined, WIDE_SIZES],
   ["kbd-panel", "home", `E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); S.chat.value = { busy: false, items: ${MAIL_SAMPLE} }; S.openPanel('ai');`, "wallpaper"],
   ["kbd-ai-wide", "home", `E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); S.chat.value = { busy: false, items: ${MAIL_SAMPLE} }; S.page.value = -1;`, "wallpaper", undefined, WIDE_SIZES],
+  ["ai-msgr", "home", MSGR, "wallpaper", undefined, WIDE_SIZES],
+  ["ai-msgr-menu", "home", MSGR + " document.querySelector('.ai-screen .ai-more').click(); await sleep(300);", "wallpaper"],
+  ["ai-msgr-split", "home", MSGR + " S.aiScreen.value = 'progress'; await sleep(600);", "wallpaper", undefined, WIDE_SIZES],
+  ["ai-msgr-agents", "home", MSGR + " S.aiScreen.value = 'agents'; await sleep(400);", "wallpaper"],
+  ["ai-msgr-panel", "home", MSGR.replace(" S.page.value = -1;", "") + " S.openPanel('ai'); await sleep(600);", "wallpaper", undefined, WIDE_SIZES],
   ["ai-chat", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.page.value = -1;`, "wallpaper"],
   /* A long conversation scrolled mid-way: unfolded, the chat pane stops under the status bar like the left column. */
   ["ai-chat-scrolled", "home", `S.chat.value = { busy: false, items: [...${CHAT_SAMPLE}, ...${CHAT_SAMPLE}, ...${CHAT_SAMPLE}] }; S.page.value = -1; await sleep(400); const t = document.querySelector('.ai-screen .ai-talk') ?? document.querySelector('.ai-screen .ai-scroll'); t.scrollTop = -(t.scrollHeight - t.clientHeight) / 2; await sleep(100);`, "wallpaper", undefined, { ...SIZES, "unfolded-land": LAND_SIZES["unfolded-land"] }],

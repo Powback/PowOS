@@ -1543,8 +1543,8 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .ai-state.busy { color: var(--accent-text); }
 .ai-state.busy::before { content: "● "; }
 .ai-open { font: var(--text-small) var(--font); color: var(--accent-text); }
-/* Unfolded, PowOS AI reads as a column, not a 2268 px line: its content capped and centred (the folded width is less). */
-.ai-screen > *, .ai-panel > * { width: 100%; max-width: 720px; margin-inline: auto; }
+/* Unfolded, PowOS AI reads as a chat, not a 2268 px line: the one column capped and centred (the folded width is less). */
+.ai-screen > *, .ai-panel > * { width: 100%; max-width: 680px; margin-inline: auto; }
 .ai-scroll {
   flex: 1;
   min-height: 0;
@@ -1563,19 +1563,23 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
   padding-bottom: 12px;
 }
 /*
- * Wide (the AI page or panel >= 700 px: unfolded, a wide window - powai.tsx AiView): two panes, each its own scroll.
- * Left what needs the user, the board, the agents; right the conversation at reading width with the pill under it, by the right
- * thumb. Both panes start on one line and end on the pill's; the pair stays centred on a very wide window.
+ * Wide (the AI page or panel >= 700 px: unfolded, a wide window - powai.tsx AiView): the same chat, centred at reading
+ * width. With Progress opened from ⋯ (.split) the chat and Progress side by side, each its own scroll; both end on the
+ * pill's line.
  */
-.ai-view.wide {
+.ai-view.split {
   display: grid;
-  grid-template-columns: minmax(300px, 1fr) minmax(0, 70ch);
+  grid-template-columns: minmax(0, 680px) minmax(320px, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   column-gap: 20px;
   row-gap: 10px;
-  padding-inline: max(var(--edge), calc((100% - 70ch - 40rem - 20px) / 2));
+  padding-inline: max(var(--edge), calc((100% - 680px - 40rem - 20px) / 2));
 }
-.ai-view.wide > * { max-width: none; margin-inline: 0; }
+.ai-view.split > * { max-width: none; margin-inline: 0; }
+.ai-view.split > .ai-top { grid-column: 1; grid-row: 1; }
+.ai-view.split > .ai-chat { grid-column: 1; grid-row: 2; }
+.ai-view.split > .ai-compose { grid-column: 1; grid-row: 3; }
+.ai-view.split > .ai-aside { grid-column: 2; grid-row: 1 / 4; display: flex; flex-direction: column; gap: 10px; min-height: 0; margin-bottom: var(--ai-foot); }
 /* The panel, wide: its panes scroll, not it; its own pill under the conversation instead of home's bar. */
 .ai-panel.wide { overflow: hidden; }
 :is(.home, .pull-screen).open:has(.ai-panel.wide) > .bar { visibility: hidden; }
@@ -1592,13 +1596,25 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .home.wide:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip { bottom: calc(-1 * var(--strip-height)); }
 .pull-screen:has(.ai-panel.wide) > .stage > .launcher-clip { bottom: -48px; }
 .home:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip .launcher-inner { padding-bottom: 0; }
-.ai-view.wide > .ai-side { grid-column: 1; grid-row: 1 / 4; margin-bottom: var(--ai-foot); }
-.ai-view.wide > .ai-talk { grid-column: 2; grid-row: 1 / 3; flex-direction: column-reverse; }
-/* The whole conversation (powai.tsx History): reversed, the pane opens at the newest and holds it; short, it sits on top. */
-.ai-talk-in { display: flex; flex-direction: column; gap: 14px; margin-bottom: auto; min-width: 0; }
-/* No child of the conversation is wider than its pane: flex items' min-width defaults to their longest word. */
-.ai-scroll > *, .ai-talk-in > *, .ai-card > *, .ai-history-list > * { min-width: 0; max-width: 100%; }
-.ai-view.wide > .ai-compose { grid-column: 2; grid-row: 3; margin-bottom: var(--ai-foot); }
+/*
+ * The chat (powai.tsx Conversation): reversed, the scroller opens at the newest and holds it as a reply streams in or
+ * older messages load above; short, it sits by the pill, as a messenger's does.
+ */
+.ai-scroll.ai-chat { flex-direction: column-reverse; }
+.ai-chat-in { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ai-chat-in > * { min-width: 0; }
+.ai-chat-top { flex: none; height: 1px; }
+/* No child of a menu screen is wider than its pane: flex items' min-width defaults to their longest word. */
+.ai-scroll > * { min-width: 0; max-width: 100%; }
+/* On the AI page the chat lies on the wallpaper: the manager's bubbles, its quiet step lines and cards carry the text tint. */
+.ai-screen .ai-chat-in :is(.msg.assistant, .msg.note, .tl, .present, .choice-opt) { background: var(--text-fill); box-shadow: var(--lift); }
+.ai-screen .ai-chat-in > .tl { align-self: flex-start; width: fit-content; max-width: 100%; padding: 0 12px; border-radius: 999px; }
+.ai-screen .ai-chat-in > .msg.note { align-self: flex-start; width: fit-content; padding: 4px 12px; border-radius: 999px; }
+.ai-chat-in > .tl { color: var(--color-muted); }
+/* Images in their own shape, a size a phone chat shows them at. */
+.ai-chat-in .sent-img img { max-width: min(240px, 60vw); max-height: 300px; }
+.ai-chat-in > .ai-mail-clear { align-self: flex-start; }
+.ai-chat-in > .msg.ai-mail { margin: 0; font-size: var(--text-body); }
 /*
  * The AI page's scrollers run the page's full height (the user, 2026-10-28, 4th time: "the cutoff"): no clip at the header
  * or the pill, no fade, no rounded mask. The header and the pill float over them (z-index), the scroller's padding keeps
@@ -1620,19 +1636,33 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
   padding-bottom: var(--ai-tail);
   scroll-padding-block: var(--ai-head) var(--ai-tail);
 }
-.ai-screen.wide > .ai-scroll { position: static; grid-row: 1 / -1; }
-.ai-screen.wide > .ai-compose { margin-top: 0; grid-row: 3; }
-.ai-screen.wide > .ai-top { grid-row: 1; }
-.ai-screen.wide > .ai-side { margin-bottom: 0; }
-/* Wide, the header is the left pane's first row (powai.tsx AiView), so it scrolls away with the board: the pane starts on
-   the chat pane's line, nothing floats over it. */
-.ai-screen.wide > .ai-side { padding-top: var(--ai-head-top); scroll-padding-top: 0; }
-.ai-side > .ai-top { min-height: 36px; margin-bottom: 10px; }
-/* Wide, the chat pane scrolls up to the screen's top edge like the left pane (no clip line under the status bar, the
-   user 10-30 23:15): its first message starts on the left column's line (--ai-head-top) as padding, not a margin. */
-.ai-screen.wide > .ai-talk { padding-top: var(--ai-head-top); scroll-padding-top: 0; }
-/* Wide, a fold heading a pane ("needs you", "paused") sits on the panes' top line. */
-.ai-view.wide .ai-fold:not(.tile *) { margin: 0 0 0 2px; }
+/* Split (chat + Progress), the panes are grid cells under their headers: nothing floats over them. */
+.ai-screen.split > .ai-scroll { position: static; padding-top: 0; padding-bottom: 12px; scroll-padding-block: 0; }
+.ai-screen.split > .ai-compose { margin-top: 0; }
+.ai-screen.split > .ai-aside { padding-top: var(--ai-head-top); }
+.ai-aside > .ai-top { min-height: 36px; }
+.ai-aside > .ai-scroll { flex: 1; }
+/* The header's ⋯ (powai.tsx AiHeader): the menu under it at the right, over the chat; a tap outside closes it. */
+.ai-top > .ai-more, .ai-top > .ai-back { flex: none; min-width: 40px; min-height: 36px; justify-content: center; font: inherit; font-size: 20px; line-height: 1; border: 0; background: none; color: var(--color-foreground); }
+.ai-top > .ai-more { margin-left: auto; }
+.ai-panel { position: relative; }
+.ai-view > .ai-menu-scrim { position: fixed; inset: 0; z-index: 4; max-width: none; margin: 0; }
+.ai-view > .ai-menu {
+  position: absolute;
+  z-index: 5;
+  top: calc(var(--ai-head, 56px) - 4px);
+  right: var(--edge);
+  width: auto;
+  min-width: 220px;
+  max-width: calc(100% - 2 * var(--edge));
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 0;
+  border-radius: var(--radius);
+}
+.ai-menu-item { min-height: 44px; padding: 10px 18px; text-align: start; font: inherit; font-size: var(--text-item); color: var(--color-foreground); background: none; border: 0; }
+.ai-app-page { position: relative; min-height: 100%; }
 /* The board (powai.tsx AiContent): one surface - what was a card each is a section on it, parted by spacing. */
 .ai-board { display: flex; flex-direction: column; gap: 12px; padding: 4px 0; }
 html:root .ai-board .tile { background: none; box-shadow: none; }
@@ -3226,3 +3256,34 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .home.search-dock:is(.dock-left, .dock-right) .dock-pages > .dock-page:last-child { margin-bottom: auto; }
 /* Edit mode's theme sheet: home's search, bar or dock button (editsheet.tsx SearchPlace). */
 .search-place-pick { display: flex; gap: 4px; }
+
+/*
+ * PowOS AI's glanceable line (powai.tsx Strip, AI7): one slim row under the header - agents working · the task moving
+ * most and how far · what needs the user - each segment a tap into its screen. One line, never a box of its own.
+ */
+.ai-top { flex-wrap: wrap; row-gap: 8px; }
+.ai-top > .ai-strip { flex: 1 0 100%; width: auto; min-width: 0; overflow: hidden; white-space: nowrap; gap: 0; padding: 0 6px; font-size: var(--text-small); }
+.ai-strip-seg { flex: 0 1 auto; min-width: 0; min-height: 30px; padding: 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; color: var(--color-foreground); background: none; border: 0; }
+.ai-strip-seg.you { color: var(--accent-text); font-weight: 600; }
+.ai-strip-dot { margin-right: 8px; color: var(--color-muted); font-weight: normal; }
+.ai-screen:has(.ai-strip) { --ai-head: calc(var(--ai-head-top) + 36px + 8px + 30px + 10px); }
+/*
+ * The chat fades out softly where it scrolls behind the pill (AI8, the user 2026-10-31 02:44: no hard cut line): a
+ * short mask at its foot, only while there's more to scroll below (at the newest, nothing fades). The AI page's chat
+ * runs under its floating pill, so its fade ends at the pill's top (--ai-fade-at); in the panel the pane ends there.
+ * Top edge as it was.
+ */
+@property --ai-fade { syntax: "<length>"; inherits: false; initial-value: 0px; }
+.ai-chat { --ai-fade-at: 0px; -webkit-mask-image: linear-gradient(to top, transparent var(--ai-fade-at), black calc(var(--ai-fade-at) + var(--ai-fade))); mask-image: linear-gradient(to top, transparent var(--ai-fade-at), black calc(var(--ai-fade-at) + var(--ai-fade))); }
+.ai-screen:not(.split) > .ai-chat { --ai-fade-at: calc(var(--ai-tail) - 14px); }
+@supports (animation-timeline: scroll()) {
+  /* Column-reverse: the scroll origin is the newest end, so the timeline's start is "at the newest". */
+  .ai-chat { animation: ai-fade linear both; animation-timeline: scroll(self y); animation-range: 0 48px; }
+}
+@keyframes ai-fade { from { --ai-fade: 0px; } to { --ai-fade: 48px; } }
+/* The chat's bubbles keep the screen's side margin (the scroller runs edge to edge under the floating header/pill). */
+.ai-screen > .ai-chat, .ai-screen > .ai-sub { padding-inline: var(--edge); }
+.try-item + .try-item { padding-top: 8px; }
+/* The ⋯ menu over the chat: at the centred column's right edge, near-solid so the messages under it don't read through. */
+.ai-view > .ai-menu { right: max(var(--edge), calc((100% - 680px) / 2)); }
+html:root .ai-view > .ai-menu.tile { background: color-mix(in srgb, var(--color-background) 94%, transparent); }

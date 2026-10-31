@@ -7,6 +7,9 @@ description: Use for the PowOS phone's SpacetimeDB (modules, vendored bindings, 
 - Files: `apps/<app>/src/lib.rs` (the STDB module), `shell/vendor/<db>.js`+`.d.ts`+`VERSIONS`, `shell/apps/stdb.ts`;
   comms: `lib/ai/comms/{comms.sh,comms-mcp.py}`, `lib/ai/agents/{powos-agents-cli,powos-agentsd}`,
   `lib/ai/manager/manager.py`, Kotlin `AgentMail.kt`; chat rendering: `shell/ui/{rich,chat,powai}.tsx`.
+- Things to try reach the user as the manager's chat message: comms tool `present_try {title, items: [{id, line, do?}]}`
+  (one per ship, board task ids + their --try lines) -> manager.py emits a ```try block -> `shell/ui/trycard.tsx` draws
+  works / still broken (do: done / can't) and records it on the task (bridge ai.verdict + mail naming the task).
 - Build/regen bindings: `apps/vendor.sh <app>` (must reproduce committed vendor files byte-for-byte; commit, then push).
 - Check (no device needed first): `tools/phone/bindings-check.sh --no-publish`; tier-1
   `python3 test/tier1/test-{comms,comms-fulltext,manager,agents,board-truth}.py` and `bash test/tier1/test-bindings-check.sh` (bindings-check is .sh only). Device:
@@ -283,7 +286,9 @@ registered only when COMMS_AGENT_ID=manager (the only stream a chat renders). Th
     ```choices            or        ```present
     {one JSON line}                 {"title":..,"format":..,"body":..}   (body capped at 64 KB)
     ```                             ```
-So any consumer of the stream gets it (the KDE plasmoid shows it as code). Only these two names are blocks
+`present_try {title, items:[{id, line, do?}]}` is a third: ```try + {"title":..,"items":[..]} (trycard.tsx, registered
+in rich.tsx `blocks`).
+So any consumer of the stream gets it (the KDE plasmoid shows it as code). Only these names are blocks
 (rich.tsx BLOCK); every other fence is code inside the prose. Tools named present / present_choices are hidden from
 tool runs (shownElsewhere). AskUserQuestion is disallowed for the manager (--disallowedTools): headless, nobody can
 answer it.

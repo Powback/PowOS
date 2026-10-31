@@ -250,3 +250,13 @@
 .mail-sum { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--text-small); }
 .mail-body { font-size: var(--text-small); }
 .mail-body h5 { margin: 8px 0 2px; font-size: var(--text-small); font-weight: 600; letter-spacing: 0.04em; }
+
+/* Things to try, the manager's message (trycard.tsx ```try): its title, then a line per task with works / still broken. */
+.msg.try { display: flex; flex-direction: column; gap: 10px; white-space: normal; min-width: min(300px, 85%); }
+.try-title { font-weight: 600; }
+.try-item { display: flex; flex-direction: column; gap: 6px; }
+.try-line { white-space: pre-wrap; }
+.try-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.try-said { font-size: var(--text-small); }
+.try-said.error { color: var(--color-red); }
+.try-item .ai-reply { margin: 0; }
