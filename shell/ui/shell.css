@@ -3274,6 +3274,20 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 }
 .ww-outline.snapped { box-shadow: 0 0 0 3px var(--color-accent); opacity: 1; }
 .ww-outline-size { padding: 6px 12px; border-radius: 999px; font: var(--text-small) var(--font); color: var(--color-foreground); }
+/* GL1: a drop into the tiles (webwindows.tsx DropPreview) - the tile the dragged window would take, translucent in the
+   accent, gliding between zones; after the drop the windows glide to their tiles (ww-reflow, REFLOW_MS). */
+.ww-drop {
+  position: absolute; pointer-events: none; border-radius: 12px; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent); box-shadow: 0 0 0 2px var(--color-accent);
+  transition: left 140ms ease-out, top 140ms ease-out, width 140ms ease-out, height 140ms ease-out;
+  animation: ww-drop-in 120ms ease-out;
+}
+@keyframes ww-drop-in { from { opacity: 0; } }
+.ww-drop-label { padding: 6px 14px; border-radius: 999px; font: var(--text-small) var(--font); color: var(--color-foreground); }
+.webwindow.ww-reflow, .ww-shadow.ww-reflow {
+  transition: left 220ms cubic-bezier(0.2, 0.8, 0.2, 1), top 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 220ms cubic-bezier(0.2, 0.8, 0.2, 1), height 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
 /* WS1: a window's drop shadow (its own element under the frame: a hole in the frame never cuts it), deeper than a
    widget's lift as a window floats higher; the focused window's stronger. The frame keeps only --lift-edge. */
 .ww-shadow { position: absolute; pointer-events: none; }

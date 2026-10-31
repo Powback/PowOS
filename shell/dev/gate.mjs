@@ -3475,6 +3475,88 @@ async function webWindowTileLayoutCheck() {
 }
 
 /**
+ * In the page: GL1, docking into the tiles (the user, 10-31 01:28: "drag them into a grid again. Like check out how
+ * golden layout work"). Two tiles and a floating window: its bar dragged over the left tile's right edge shows the
+ * preview there (and ticks); let go, three tiles with it where previewed; its bar dragged out again, two tiles.
+ */
+function DOCK_HELPERS() {
+  const frame = (id) => document.querySelector(`.webwindow[data-wwid="${id}"]`);
+  const ev = (id, type, [x, y]) => frame(id).querySelector(".webwindow-title").dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 83, isPrimary: true, clientX: x, clientY: y }));
+  const fmt = (b) => `${Math.round(b.x)},${Math.round(b.y)} ${Math.round(b.width ?? b.w)}x${Math.round(b.height ?? b.h)}`;
+  window.__dockg = {
+    frame,
+    fmt,
+    near: (a, b) => [a.x - b.x, a.y - b.y, a.width - b.w, a.height - b.h].every((d) => Math.abs(d) <= 3),
+    /** Window [id]'s bar dragged to [to] (held there: no pointerup). */
+    async hold(id, to) {
+      const bar = frame(id).querySelector(".webwindow-title").getBoundingClientRect();
+      const from = [bar.left + 60, bar.top + bar.height / 2];
+      ev(id, "pointerdown", from);
+      for (let k = 1; k <= 8; k++) ev(id, "pointermove", [from[0] + ((to[0] - from[0]) * k) / 8, from[1] + ((to[1] - from[1]) * k) / 8]);
+      await window.__gw.settled();
+    },
+    async release(id, at) {
+      ev(id, "pointerup", at);
+      await new Promise((r) => setTimeout(r, 400));
+      await window.__gw.settled();
+    },
+    /** Let go: 931 | 933 | 932, 933 at the previewed rect [want], the preview gone. */
+    landed(W, page, want) {
+      const t = W.tilings.value[page];
+      if (JSON.stringify(t?.ids) !== "[931,933,932]") return [`GL1: let go, the tiles are ${JSON.stringify(t)} (want 931 | 933 | 932)`];
+      const got = frame(933).getBoundingClientRect();
+      const fails = want && !this.near(got, want) ? [`GL1: it landed at ${fmt(got)}, previewed ${fmt(want)}`] : [];
+      return document.querySelector(".ww-drop") ? [...fails, "GL1: the preview stayed after the drop"] : fails;
+    },
+    /** While held: the zone is the left tile's right half, the preview drawn, a haptic tick since [ticks]. */
+    preview(W, ticks) {
+      const z = W.dropView.value?.zone;
+      const fails = z?.kind === "split" && z.tile === 0 && z.side === "right" ? [] : [`GL1: over the left tile's right edge the zone is ${JSON.stringify(z)}`];
+      if (!document.querySelector(".ww-drop")) fails.push("GL1: no drop preview over the tiles");
+      if ((window.__hapticsMock?.tick ?? 0) <= ticks) fails.push("GL1: no haptic tick as the preview zone showed");
+      return fails;
+    },
+  };
+  return [];
+}
+
+async function webWindowTileDockCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const g = window.__dockg;
+  const page = S.pages.value[0];
+  const win = (id, i) => ({ id, key: `a:gate.dock${i}`, label: `Dock ${i}`, page, x: 120 + 40 * i, y: 160 + 40 * i, w: 360, h: 280, live: true });
+  try {
+    S.page.value = 0;
+    await window.__gw.settled();
+    W.webWins.value = [win(931, 0), win(932, 1)];
+    W.tileWindows(page, [931, 932]);
+    W.webWins.value = [...W.webWins.value, win(933, 2)];
+    await window.__gw.settled();
+    const left = W.tileRects(W.tilings.value[page], W.tileArea())[0];
+    const at = [left.x + left.w * 0.92, left.y + left.h * 0.6];
+    const ticks = window.__hapticsMock?.tick ?? 0;
+    await g.hold(933, at);
+    const fails = g.preview(W, ticks);
+    const want = W.dropView.value?.rect;
+    await g.release(933, at);
+    const three = g.landed(W, page, want);
+    if (three.length) return [...fails, ...three];
+    const got = g.frame(933).getBoundingClientRect();
+    // Out again by its bar: floating, the other two a 2-split.
+    const out = [got.left + got.width / 2, got.top + 200];
+    await g.hold(933, out);
+    await g.release(933, out);
+    const two = JSON.stringify(W.tilings.value[page]?.ids);
+    return W.tiledOn(933) == null && two === "[931,932]" ? fails : [...fails, `GL1: dragged out, the tiles are ${two} (want 933 floating, 931 | 932)`];
+  } finally {
+    W.webWins.value = [];
+    W.tilings.value = {};
+    W.dropView.value = null;
+  }
+}
+
+/**
  * [webWindowPinchCheck]'s helpers into the page (window.__pzg; page.evaluate sends only the one function).
  * PZ1 (the user, 10-31 01:40: "If I zoom normally IN the app, I'm now resizing the window"): a pinch whose fingers start
  * on the BODY is the app's (Chrome's page zoom) - the window keeps its size and scale, the app gets ONE two-finger
@@ -4414,7 +4496,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }
