@@ -3586,6 +3586,105 @@ async function webDockLaunchFull() {
 }
 
 /**
+ * OI1 (the user, 10-31: "Sometimes it shows it as empty if it's opening two instances of the app"): the same app opened
+ * twice within 50 ms (a double tap: the second while the first waits for the host), and again once its window is live
+ * -> exactly one .webwindow for that key and ONE "webwindows.open" bridge call. A window with no task bound [BOUND]
+ * after its launch (never live) is removed, not left empty.
+ */
+/** OI1's helpers (each step is evaluated on its own: they go on window.__oneg). */
+function ONE_HELPERS() {
+  /** OI1's stubbed host: "webwindows.open" answers after 120 ms with a new id each, every call recorded. */
+  async function oneInstanceHost() {
+    const [S, W, H, B] = await Promise.all(["./state.ts", "./ui/webwindows.tsx", "./hosts/wide.ts", "./bridge.ts"].map((m) => window.__gw.mod(m)));
+    const ww = B.powos.webwindows ?? (B.powos.webwindows = {});
+    const was = { open: ww.open, enabled: ww.enabled, close: ww.close, bound: W.BOUND.ms, page: S.page.value, wide: H.wideHome.value };
+    const calls = [];
+    let next = 7700;
+    Object.assign(ww, { open: (k) => (calls.push(k), new Promise((ok) => setTimeout(() => ok(next++), 120))), enabled: async () => true, close: async () => true });
+    const restore = () => {
+      W.webWins.value = [];
+      W.BOUND.ms = was.bound;
+      Object.assign(ww, { open: was.open, enabled: was.enabled, close: was.close });
+      H.wideHome.value = was.wide;
+      S.page.value = was.page;
+    };
+    W.webWins.value = [];
+    S.page.value = 0;
+    H.wideHome.value = true;
+    await window.__gw.settled();
+    return { W, calls, restore, p: S.pages.value[0], count: () => document.querySelectorAll(".webwindow[data-wwid]").length };
+  }
+
+  /** OI1: two opens 50 ms apart, then one with the window live - one window, one bridge call. */
+  async function oneInstanceTwice({ W, calls, p, count }, fails) {
+    const key = "a:gate.oneinstance/.Main";
+    W.BOUND.ms = 60_000;
+    const a = W.openWindow(key, "One", p);
+    await new Promise((ok) => setTimeout(ok, 50));
+    const [ia, ib] = await Promise.all([a, W.openWindow(key, "One", p)]);
+    await window.__gw.settled();
+    const n = () => W.webWins.value.filter((w) => w.key === key).length;
+    if (ia == null || ia !== ib) fails.push(`OI1: two opens of ${key} 50 ms apart gave windows ${ia} and ${ib} (want one, the same)`);
+    if (calls.length !== 1 || n() !== 1 || count() !== 1) fails.push(`OI1: a double open made ${calls.length} "webwindows.open" calls, ${n()} entries, ${count()} .webwindow (want 1, 1, 1)`);
+    W.update(ia, { live: true });
+    const ic = await W.openWindow(key, "One", p);
+    await window.__gw.settled();
+    if (ic !== ia || calls.length !== 1 || count() !== 1) fails.push(`OI1: an open with its window live gave ${ic} (had ${ia}), ${calls.length} calls, ${count()} .webwindow (want the same, 1, 1)`);
+  }
+
+  /** OI1: a window never bound (no task, never live) is gone [BOUND] after its launch. */
+  async function oneInstanceUnbound({ W, p }, fails) {
+    W.webWins.value = [];
+    W.BOUND.ms = 150;
+    const id = await W.openWindow("a:gate.neverbound/.Main", "Never", p);
+    await new Promise((ok) => setTimeout(ok, 400));
+    await window.__gw.settled();
+    if (id == null) return void fails.push("OI1: the never-bound app opened no window at all");
+    if (W.webWins.value.some((w) => w.id === id) || document.querySelector(`.webwindow[data-wwid="${id}"]`)) fails.push(`OI1: window ${id} with no task ${W.BOUND.ms} ms after its launch is still there (want removed)`);
+  }
+  window.__oneg = { oneInstanceHost, oneInstanceTwice, oneInstanceUnbound };
+  return [];
+}
+
+/** OI2 (15:16 "full screen and then they show desktop mode"): a launcher launch that windows it is ONE window open, no plain (full-screen) launch. */
+async function webWindowOneLauncher() {
+  const fails = [];
+  const h = await window.__oneg.oneInstanceHost();
+  const { W, calls, count } = h;
+  const [S, B] = await Promise.all([window.__gw.mod("./state.ts"), window.__gw.mod("./bridge.ts")]);
+  W.webWins.value = [];
+  W.BOUND.ms = 60_000;
+  calls.length = 0;
+  const plain = [];
+  let n = 0;
+  const was = B.powos.apps.launch;
+  B.powos.apps.launch = async (k, o) => void plain.push(`${k}${o?.fullScreen ? " full" : ""}`);
+  try {
+    await S.launch("a:gate.launcher/.Main");
+    await window.__gw.settled();
+    n = count();
+  } finally {
+    B.powos.apps.launch = was;
+    h.restore();
+  }
+  if (calls.length !== 1 || plain.length || n !== 1) fails.push(`OI2: a launcher launch made ${calls.length} window opens, plain launches [${plain}], ${n} .webwindow (want 1, none, 1)`);
+  return fails;
+}
+
+async function webWindowOneInstance() {
+  const { oneInstanceHost, oneInstanceTwice, oneInstanceUnbound } = window.__oneg;
+  const h = await oneInstanceHost();
+  const fails = [];
+  try {
+    await oneInstanceTwice(h, fails);
+    await oneInstanceUnbound(h, fails);
+  } finally {
+    h.restore();
+  }
+  return fails;
+}
+
+/**
  * DG1 (ui/dockgroups.tsx; the user 10-31 03:18: "the homebar doesn't really show them as docked together"): two web
  * windows tiled on page 1 and one floating -> the dock has exactly one group cell (2 mini icons) and one single cell,
  * and no cell of their own for the tiled apps; a tap on the group cell raises both tiled windows over the floating one.
@@ -5048,7 +5147,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }

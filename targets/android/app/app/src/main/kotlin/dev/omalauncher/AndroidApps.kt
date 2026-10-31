@@ -228,6 +228,8 @@ class AndroidAppCatalog(
         // Uninstalled or disabled since the list was loaded.
         // A dock tap asking for full screen (DB1): plain full-screen options, never the floating window's freeform ones.
         val options = if (fullScreen) dev.omalauncher.system.Tasks.fullScreenOptions().toBundle() else dev.omalauncher.system.AppWindows.launchOptions(context)
+        // Its task stays full screen: WindowFrames' adopt doesn't float it into a web window (FullScreenLaunch).
+        if (fullScreen) dev.omalauncher.system.FullScreenLaunch.mark(component.packageName, android.os.SystemClock.uptimeMillis())
         runCatching { launcherApps.startMainActivity(component, user, null, options) }
             .onFailure { Log.w(TAG, "cannot open $component in $user", it) }
     }
