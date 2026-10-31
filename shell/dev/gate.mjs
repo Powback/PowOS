@@ -4044,6 +4044,11 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, position] of [["folded", "bottom"], ["folded", "right"], ["unfolded", "bottom"], ["unfolded", "right"], ["unfolded", "left"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `dock-search-${label}-${position}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos) => (await importShim("./dev/dock-search-check.js")).dockSearchCheck(pos), position))));
+  // DS2: the launcher overlay's side - opened from the button, its bar's glass grows out of it (wider, higher, never
+  // fading), a tap's open focused, a hold's dictating, push-to-talk's release leaving the words.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, position] of [["folded", "bottom"], ["unfolded", "bottom"], ["folded", "right"]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, `dock-search-launch-${label}-${position}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos) => (await importShim("./dev/dock-search-check.js")).dockSearchLaunch(pos).then((o) => o.fails), position))));
   // The same in the user's unfolded home: the dock on the right, the pill below it, 821x883 (the phone, 2026-10-28).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-keyboard-side", { width: 821, height: 883 }).then((r) => whenReady(r, () => launcherKeyboardSide(r.page, { width: 821, height: 883 }))));

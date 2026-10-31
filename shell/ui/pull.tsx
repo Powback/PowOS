@@ -12,7 +12,7 @@
  * the page tells the host (pull.closed / pull.launched) and the window goes.
  */
 import { useEffect } from "preact/hooks";
-import { computed, signal } from "@preact/signals";
+import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { aiDraft, chatting, closeDrawer, dockPosition, drawer, pullKind, query, type LauncherOpen } from "../state.ts";
 import { AppMenu } from "./apps.tsx";
@@ -22,7 +22,9 @@ import { Screens } from "./screens.tsx";
 import { screens } from "../screens.ts";
 import { openAssistant } from "./assistant.ts";
 import { wideHome } from "../hosts/wide.ts";
-import { Bar } from "./bar.tsx";
+import { Bar, dictateBar, focusBar } from "./bar.tsx";
+import { morphBegin, morphDrag, morphFrom, morphTo, morphing, reset as resetMorph } from "./launchmorph.ts";
+import { dockButton } from "./docksearch.tsx";
 import { Drawer } from "./drawer.tsx";
 import { Dock, DockTray } from "./home.tsx";
 import { drawerDrag, drawerOpen, drawerShown, followOpenness, homeGestures } from "./gesture.ts";
@@ -37,37 +39,55 @@ pullKind.value = kindOf(new URLSearchParams(location.search).get("kind"));
 /** How the opening one asked for it (home's pill: the search; the side button: the chat), done once it's open. */
 let asked: LauncherOpen = {};
 
+/**
+ * DS2: opened from home's dock search button ({ from }: its rect; launchmorph.ts). Not following a finger (a tap or a
+ * hold: the host's open() sends drag 1 at once), the panel still rises - from 0, on the launcher swipe's settle - with
+ * the bar's glass growing out of the button; a swipe up from the button ({ drag }) follows the finger as any pull.
+ */
+let rising = false;
+
 powos.on("pull.begin", (e: { kind?: string } & LauncherOpen) => {
   pullKind.value = kindOf(e?.kind);
   asked = e ?? {};
   if (asked.draft) aiDraft.value = aiDraft.value ? `${aiDraft.value}\n${asked.draft}` : asked.draft;
+  rising = !!asked.from && !asked.drag;
+  // Before the panel's followers read their CSS (drawerDrag below): the foot stays put (.from-button).
+  if (asked.from) morphBegin(asked.from);
   drawerDrag.value = 0;
+  // A hold on home's button: the bar dictates now, while the launcher comes up (the finger may still be down: home's
+  // release stops it, push-to-talk).
+  if (asked.listen) dictateBar();
 });
-powos.on("pull.drag", (e: { p: number }) => (drawerDrag.value = Math.max(0, Math.min(1, e?.p ?? 0))));
+powos.on("pull.drag", (e: { p: number }) => {
+  const p = Math.max(0, Math.min(1, e?.p ?? 0));
+  if (rising) return;
+  drawerDrag.value = p;
+  if (morphing()) morphDrag(p);
+});
 powos.on("pull.end", (e: { open: boolean }) => {
+  rising = false;
   drawerDrag.value = null;
+  if (morphing()) morphTo(e?.open ? 1 : 0);
   if (!e?.open) return closeDrawer();
   drawer.value = 1;
   const how = asked;
   asked = {};
   if (how.chat) openAssistant(how);
-  else if (how.search) {
-    // What home's dock search button had typed (docksearch.tsx showResults) carries on here, its results shown.
+  else if (how.search && !how.listen) {
     if (how.text != null) query.value = how.text;
-    focusSearch();
+    focusBar();
   }
 });
 
-/** The pill's field focused and the keyboard up (ShellBridge.overlayKeyboard makes this window the IME's target). */
-function focusSearch() {
-  requestAnimationFrame(() => {
-    document.querySelector<HTMLTextAreaElement>(".pull-screen > .bar textarea")?.focus();
-    void powos.keyboard.show();
-  });
-}
 powos.on("pull.hide", () => {
   drawerDrag.value = null;
   closeDrawer();
+  resetMorph();
+});
+
+// Shut (Back, a tap beside it, swiped down, an app launched) after an open from the button: back into the button.
+effect(() => {
+  if (!drawerOpen.value && morphing()) morphTo(0);
 });
 
 /** The keyboard up (the host's insets: app.tsx applies the same ones as --inset-keyboard). */
@@ -101,7 +121,7 @@ export function Pull() {
     return () => clearTimeout(t);
   }, [open, screenUp]);
   return (
-    <div class={`home pull-screen dock-${dockPosition.value} ${wideHome.value ? "wide unfolded" : ""} ${open ? "open" : ""} ${pullDragging.value ? "dragging" : ""}`} {...homeGestures()}>
+    <div class={`home pull-screen dock-${dockPosition.value} ${dockButton.value ? "search-dock" : ""} ${morphFrom.value ? "from-button" : ""} ${wideHome.value ? "wide unfolded" : ""} ${open ? "open" : ""} ${pullDragging.value ? "dragging" : ""}`} {...homeGestures()}>
       <div class="stage">
         <div class="launcher-frame tile" data-p ref={followOpenness} />
         <div class="launcher-clip" data-p ref={followOpenness}>

@@ -1,8 +1,9 @@
 /**
  * Home's search as a dock button (ui/docksearch.tsx; the user, 2026-10-31 01:24-01:26). Runs in home's page
  * (index.html): gate.mjs's dock-search-* cases. [position]: the dock's placement. The failures, empty when it holds:
- * in "dock button" no .bar on home; the button in the dock's centre slot (and centred on the bottom row); a tap expands
- * it in place into the bar, focused, the launcher not opened; dismissed it folds back; "bar" brings the pill back.
+ * in "dock button" no .bar on home; the button in the dock's centre slot (and centred on the bottom row); a tap, a hold,
+ * push-to-talk and a swipe up open the launcher as DS2 says (pressOpens); "bar" brings the pill back.
+ * dockSearchLaunch runs in the launcher overlay's page (index.html?mode=pull): its side of those opens (launchmorph.ts).
  */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -21,39 +22,84 @@ function centred(position) {
   return Math.abs(off) > 2 ? `button ${Math.round(off)} px off the dock's centre` : "";
 }
 
-function tap(el) {
+function fire(el, type, dx = 0, dy = 0) {
   const r = el.getBoundingClientRect();
-  const at = { bubbles: true, pointerId: 7, isPrimary: true, clientX: r.left + r.width / 2 - 6, clientY: r.top + r.height / 2 - 6 };
-  el.dispatchEvent(new PointerEvent("pointerdown", at));
-  el.dispatchEvent(new PointerEvent("pointerup", at));
+  const at = { bubbles: true, pointerId: 7, isPrimary: true, pointerType: "touch", clientX: r.left + r.width / 2 - 6 + dx, clientY: r.top + r.height / 2 - 6 + dy };
+  el.dispatchEvent(new PointerEvent(type, at));
 }
 
-/** A tap on the button: the bar expanded over the dock, focused, the launcher not opened; Escape folds it back. */
-async function tapExpands(S, D, position) {
-  const fails = [];
-  const btn = document.querySelector(".home > .dock .dock-search");
-  if (!btn) return fails;
-  tap(btn);
+/** Home's page: the host's launcher overlay recorded, not opened (the browser has no host); speech calls counted. */
+async function record() {
+  const { powos } = await importShim("./bridge.ts");
+  const asked = [];
+  const speech = { hold: 0, stop: 0 };
+  powos.pull.open = async (kind, how) => (asked.push({ kind, how }), true);
+  const { hold, stop } = powos.speech;
+  powos.speech.hold = async () => (speech.hold++, hold());
+  powos.speech.stop = async () => (speech.stop++, stop());
+  return { asked, speech };
+}
+
+/** A tap: the launcher opened with its field focused (pull.open { search, from }), no bar expanded in place. */
+async function tapOpens(btn, asked) {
+  fire(btn, "pointerdown");
+  fire(btn, "pointerup");
+  await sleep(100);
+  const tap = asked.shift();
+  if (!tap) return ["a tap didn't open the launcher"];
+  const ok = tap.how?.search && !tap.how.listen && tap.how.from?.width;
+  return ok ? [] : [`a tap opened it as ${JSON.stringify(tap.how)}`];
+}
+
+/** Held 300 ms: the launcher dictating ({ listen }); let go soon after, the dictation goes on (no stop). */
+async function holdDictates(btn, asked, speech) {
+  fire(btn, "pointerdown");
   await sleep(400);
-  const field = document.querySelector(".home > .dock-search-bar textarea");
-  if (!field) fails.push("a tap didn't expand the bar");
-  else if (document.activeElement !== field) fails.push(`the expanded bar isn't focused (${document.activeElement?.tagName})`);
-  if (S.drawer.value !== 0) fails.push("the tap opened the launcher");
-  if (position === "bottom") fails.push(...overDock());
-  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-  await sleep(400);
-  if (document.querySelector(".home > .dock-search-bar")) fails.push("Escape didn't fold it back");
-  if (D.dockSearch.value !== "closed") fails.push(`after folding: ${D.dockSearch.value}`);
+  const hold = asked.shift();
+  fire(btn, "pointerup");
+  await sleep(100);
+  const fails = hold?.how?.listen ? [] : [`held 300 ms: ${hold ? JSON.stringify(hold.how) : "no launcher"}, not dictating`];
+  if (speech.stop) fails.push("a short hold let go stopped the dictation (it goes on as a tap's)");
   return fails;
 }
 
-/** The expanded pill over the bottom dock's row, most of its width. */
-function overDock() {
-  const bar = document.querySelector(".home > .dock-search-bar .pill")?.getBoundingClientRect();
-  const dock = document.querySelector(".home > .dock:not(.dock-tray)")?.getBoundingClientRect();
-  if (!bar || !dock) return ["no expanded pill or dock to compare"];
-  const off = bar.top < dock.top - 1 || bar.bottom > dock.bottom + 1 || bar.width < dock.width * 0.6;
-  return off ? [`expanded bar not over the dock: ${Math.round(bar.top)}..${Math.round(bar.bottom)} w${Math.round(bar.width)} vs ${Math.round(dock.top)}..${Math.round(dock.bottom)} w${Math.round(dock.width)}`] : [];
+/** Still held: push-to-talk (speech.hold); let go at 1.5 s, the dictation stops (speech.stop, never a send). */
+async function pushToTalk(btn, asked, speech) {
+  fire(btn, "pointerdown");
+  await sleep(1500);
+  asked.length = 0;
+  const fails = speech.hold ? [] : ["held 1.5 s: not push-to-talk (no speech.hold)"];
+  fire(btn, "pointerup");
+  await sleep(50);
+  if (speech.stop !== 1) fails.push(`push-to-talk let go: ${speech.stop} stops`);
+  return fails;
+}
+
+/** A swipe up from it: the host's pull, following the finger (pull.drive), never a tap's open. */
+async function swipeUp(btn, asked) {
+  const { powos } = await importShim("./bridge.ts");
+  const drives = [];
+  powos.pull.drive = async (phase, arg) => (drives.push([phase, arg]), true);
+  fire(btn, "pointerdown");
+  for (let i = 1; i <= 6; i++) fire(btn, "pointermove", 0, -i * 20);
+  fire(btn, "pointerup", 0, -120);
+  await sleep(50);
+  const phases = drives.map((d) => d[0]).join(",");
+  const fails = [];
+  if (!/^begin,(drag,)+end$/.test(phases)) fails.push(`swipe up: drove ${phases || "nothing"}`);
+  else if (drives.at(-1)[1] !== true) fails.push("swipe up 120 px: let go, it didn't open");
+  if (asked.length) fails.push("swipe up: also a tap's open");
+  return fails;
+}
+
+/** DS2 (the user, 01:53): tap, hold, push-to-talk and a swipe up from the button. */
+async function pressOpens(position) {
+  const btn = document.querySelector(".home > .dock .dock-search");
+  if (!btn) return [];
+  const { asked, speech } = await record();
+  const fails = [...(await tapOpens(btn, asked)), ...(await holdDictates(btn, asked, speech)), ...(await pushToTalk(btn, asked, speech)), ...(await swipeUp(btn, asked))];
+  if (document.querySelector(".dock-search-bar")) fails.push("a bar expanded in place");
+  return fails.map((f) => `${position}: ${f}`);
 }
 
 /** Switched back to "bar": the pill on home again, the button gone. */
@@ -68,7 +114,6 @@ async function backToBar(S) {
 
 export async function dockSearchCheck(position) {
   const S = await importShim("./state.ts");
-  const D = await importShim("./ui/docksearch.tsx");
   const was = S.dock.value;
   if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6);
   S.dockTry.value = position;
@@ -78,9 +123,115 @@ export async function dockSearchCheck(position) {
   if (document.querySelector(".home > .bar")) fails.push("a .bar on home in dock-button mode");
   const c = centred(position);
   if (c) fails.push(c);
-  fails.push(...(await tapExpands(S, D, position)), ...(await backToBar(S)));
+  fails.push(...(await pressOpens(position)), ...(await backToBar(S)));
   S.searchTry.value = "";
   S.dockTry.value = "";
   S.dock.value = was;
   return fails.map((f) => `${position}: ${f}`);
+}
+
+/** The bar's glass pieces' union (launchmorph.ts), or the pill once it's done. */
+function glassRect() {
+  const pieces = [...document.querySelectorAll(".pull-screen > .bar .launch-glass")].map((e) => e.getBoundingClientRect());
+  if (!pieces.length) return null;
+  const left = Math.min(...pieces.map((r) => r.left));
+  const right = Math.max(...pieces.map((r) => r.right));
+  const top = Math.min(...pieces.map((r) => r.top));
+  return { left, right, top, width: right - left };
+}
+
+const opened = (E, how) => {
+  E.emit("pull.begin", { kind: "apps", search: true, ...how });
+  E.emit("pull.drag", { p: 1 });
+  E.emit("pull.end", { open: true });
+};
+
+/** The glass's rect every frame of the open (260 ms: past the settle), and the lowest opacity of its pieces. */
+async function sampleOpen(E, from) {
+  const samples = [];
+  const t0 = performance.now();
+  opened(E, { from });
+  while (performance.now() - t0 < 260) {
+    const g = glassRect();
+    const op = [...document.querySelectorAll(".pull-screen > .bar .launch-glass")].map((e) => +getComputedStyle(e).opacity);
+    if (g) samples.push({ t: Math.round(performance.now() - t0), w: Math.round(g.width), top: Math.round(g.top), op: Math.min(...op) });
+    await new Promise(requestAnimationFrame);
+  }
+  return samples;
+}
+
+/** Out of the button's width, wider every frame, higher (the bottom dock's), never fading. */
+function grows(samples, from, rises) {
+  if (samples.length < 4) return [`the open had ${samples.length} morph frames`];
+  const [a, z] = [samples[0], samples.at(-1)];
+  const fails = [];
+  if (Math.abs(a.w - from.width) > from.width * 0.5) fails.push(`first frame ${a.w} px wide, not the button's ${Math.round(from.width)}`);
+  if (!(z.w > a.w * 2)) fails.push(`the glass didn't widen: ${a.w} -> ${z.w}`);
+  if (rises && !(z.top < a.top - 4)) fails.push(`the glass didn't rise: top ${a.top} -> ${z.top}`);
+  if (samples.some((s, i) => i && s.w < samples[i - 1].w - 1)) fails.push("the glass narrowed on the way");
+  if (samples.some((s) => s.op < 0.99)) fails.push("the glass faded (opacity < 1)");
+  return fails;
+}
+
+/** Open: the pill is the bar again, focused (a tap's); shut: the glass back on the button. */
+async function openThenShut(S, E, from) {
+  await sleep(150);
+  const fails = [];
+  if (document.querySelector(".launch-glass")) fails.push("the morph's pieces stayed after the open");
+  if (document.activeElement !== document.querySelector(".pull-screen > .bar textarea")) fails.push(`tap's open: the field isn't focused (${document.activeElement?.tagName})`);
+  S.drawer.value = 0;
+  await sleep(250);
+  const back = glassRect();
+  if (!back || Math.abs(back.width - from.width) > from.width * 0.5) fails.push(`shut: the glass isn't back on the button (${back ? Math.round(back.width) : "none"})`);
+  E.emit("pull.hide", {});
+  await sleep(50);
+  return fails;
+}
+
+/** A hold's open: the bar dictating at once; home's release (push-to-talk) stops it, the words stay, nothing sent. */
+async function holdOpen(S, E, from) {
+  const { powos } = await importShim("./bridge.ts");
+  const D = await importShim("./ui/dictation.ts");
+  S.query.value = "";
+  opened(E, { listen: true, from });
+  await sleep(100);
+  const fails = [];
+  if (!D.speech.value.listening || !document.querySelector(".pull-screen > .bar .mic.on")) fails.push("hold's open: the bar isn't dictating");
+  await sleep(1400);
+  await powos.speech.stop();
+  await sleep(100);
+  if (D.speech.value.listening) fails.push("push-to-talk released: still listening");
+  if (!S.query.value.trim()) fails.push("push-to-talk released: the words didn't stay in the field");
+  if (S.chatting.value) fails.push("push-to-talk released: it was sent");
+  E.emit("pull.hide", {});
+  return fails;
+}
+
+/** The button's rect on the overlay's dock (its bottom dock folded), else a stand-in for home's. */
+function buttonRect() {
+  const face = document.querySelector(".pull-screen .dock .dock-search-face")?.getBoundingClientRect();
+  return face ? { left: face.left, top: face.top, width: face.width, height: face.height } : { left: innerWidth / 2 - 24, top: innerHeight - 70, width: 48, height: 48 };
+}
+
+/**
+ * The launcher overlay's side (DS2): opened from home's button ({ from }), the bar's glass grows out of the button -
+ * wider and higher frame by frame, never fading - then the pill is the bar, focused; a hold's ({ listen }) dictates
+ * into the bar, and home's push-to-talk release (speech.stop) leaves the words in the field, nothing sent. Closed, the
+ * glass goes back into the button. Unfolded, the overlay's dock keeps its own layout and its bar sits beside it.
+ */
+export async function dockSearchLaunch(position) {
+  const S = await importShim("./state.ts");
+  const E = window.__mockEvents;
+  if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6);
+  S.dockTry.value = position;
+  S.searchTry.value = "dock";
+  await sleep(300);
+  const folded = position === "bottom" && !document.querySelector(".pull-screen.wide");
+  const fails = folded && !document.querySelector(".pull-screen .dock .dock-search-face") ? ["the overlay's dock has no button slot"] : [];
+  const from = buttonRect();
+  const samples = await sampleOpen(E, from);
+  fails.push(...grows(samples, from, folded), ...(await openThenShut(S, E, from)), ...(await holdOpen(S, E, from)));
+  S.searchTry.value = "";
+  S.dockTry.value = "";
+  return { fails: fails.map((f) => `launch ${position}: ${f}`), samples };
 }

@@ -15,7 +15,7 @@ import { followOpenness } from "./gesture.ts";
 import { chatting, drawer, launcherIsOverlay, openPanel, pullKind, query, sharesBar } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
-import { drop, finish, finishing, forget, hearing, listen, listeningFor, makeHold, release, settle, speech, stopTap, type MicTarget } from "./dictation.ts";
+import { dictate, drop, finish, finishing, forget, hearing, listen, listeningFor, makeHold, release, settle, speech, stopTap, type MicTarget } from "./dictation.ts";
 import { remoteHearing, startBarSync } from "./barsync.ts";
 
 /** A press longer than this is a hold (talk, then send); shorter, a tap (dictate). */
@@ -218,6 +218,17 @@ const barMic: MicTarget = {
   heard: (full, send) => (send ? askHere(full) : (query.value = full)),
   started: () => openHere(),
 };
+
+/** DS2: the launcher's bar dictating (home's dock search button held: pull.begin { listen }, or the overlay's own button). */
+export const dictateBar = () => dictate(barMic);
+
+/** The launcher's bar field focused, the keyboard up (ShellBridge.overlayKeyboard makes the overlay the IME's target). */
+export function focusBar() {
+  requestAnimationFrame(() => {
+    document.querySelector<HTMLTextAreaElement>(".pull-screen > .bar textarea")?.focus();
+    void powos.keyboard.show();
+  });
+}
 
 /** SI1: what the bar shows (barsync.ts writes it to the other window's bar): a dictation's words as heard, else the query. */
 const barShown = () => {

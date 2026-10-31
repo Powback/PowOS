@@ -13,7 +13,7 @@ import { powos } from "../bridge.ts";
 import type { PageRect } from "../types.ts";
 import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
-import { DockSearchBar, DockSearchButton, dockButton, dockSearch } from "./docksearch.tsx";
+import { DockSearchButton, dockButton } from "./docksearch.tsx";
 import { drawerDragging, drawerOpen, followOpenness, homeGestures, launcherTakesHome, pageDrag, shadeTakesHome } from "./gesture.ts";
 import { PageDots } from "./pagedots.tsx";
 import { Carried, Folders, Pages, startCarry } from "./grid.tsx";
@@ -498,11 +498,11 @@ function HomeDots() {
   );
 }
 
-/** The foot's pill, or the bar the dock's search button expands into. */
-const HomeSearch = () => (dockButton.value ? <DockSearchBar /> : <Bar />);
+/** The foot's pill, unless home's search is the dock's button (docksearch.tsx: it opens the launcher). */
+const HomeSearch = () => (dockButton.value ? null : <Bar />);
 
-/** Home's search as the dock's button (docksearch.tsx), and that button expanded. */
-const searchDockClasses = () => `${dockButton.value ? "search-dock" : ""} ${dockSearch.value !== "closed" ? "search-open" : ""}`;
+/** Home's search as the dock's button (docksearch.tsx). */
+const searchDockClasses = () => (dockButton.value ? "search-dock" : "");
 
 export function Home() {
   // data-p: these follow the panel's openness (--p, written by gesture.ts, not through a render).

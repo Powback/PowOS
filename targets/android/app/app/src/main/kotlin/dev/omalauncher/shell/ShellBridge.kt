@@ -530,6 +530,7 @@ class ShellBridge(
             "pull.launched" -> overlay?.launched()
             // Home's page: the launcher overlay up over home (the pill, the side button's chat) / its lift on home's body.
             "pull.open" -> launcherOpen(a.getString(0), a.optJSONObject(1))
+            "pull.drive" -> launcherDrive(a.getString(0), a.opt(1))
             "pull.homePull" -> launcherHomePull(a.getBoolean(0), a, a.optBoolean(2, false))
             // Which shell panel is open (system/Panels.kt): the bottom-edge home gesture closes it.
             "panels.open" -> dev.omalauncher.system.Panels.set(a.getString(0), this)
@@ -704,6 +705,22 @@ class ShellBridge(
     private fun launcherOpen(kind: String, how: JSONObject?): Boolean {
         val pull = dev.omalauncher.system.PullHost.current ?: return false
         main.post { pull.open(kind, how) }
+        return true
+    }
+
+    /**
+     * Home's page drives the overlay's pull (DS2: a swipe up from the dock's search button, a strip the host's own lift
+     * leaves to the dock): "begin" with the open's how, "drag" with the openness, "end" with whether it opens.
+     */
+    private fun launcherDrive(phase: String, arg: Any?): Boolean {
+        val pull = dev.omalauncher.system.PullHost.current ?: return false
+        main.post {
+            when (phase) {
+                "begin" -> pull.pullBegin("apps", arg as? JSONObject)
+                "drag" -> pull.pullDrag((arg as? Number)?.toFloat() ?: 0f)
+                "end" -> pull.pullEnd(arg == true)
+            }
+        }
         return true
     }
 
