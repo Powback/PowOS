@@ -196,8 +196,8 @@ function VerdictActs({ it, open, toggle }: { it: TryItem; at?: Surface; open: bo
   );
 }
 
-/** What the user said about an item (answered). */
-const Said = ({ a }: { a: Answer }) => (
+/** What the user said about an item (answered): the chat card's answered state, also a Needs you row's once answered. */
+export const Said = ({ a }: { a: Answer }) => (
   <div class="try-said muted">
     {SAID[a.how]}
     {a.text ? `: "${a.text}"` : ""}

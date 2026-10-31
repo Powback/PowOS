@@ -2128,6 +2128,27 @@ async function aiNeedsOpen() {
   return { ids, acts, line };
 }
 
+/**
+ * In the page: answer buttons styled as already chosen before a tap (design QA, 2026-10-31: "works" and "small" were
+ * filled accent) - any that differs from the others' fill or text colour, or is filled with the accent.
+ */
+function aiNeedsLooks(scope) {
+  const accent = (() => {
+    const e = document.createElement("span");
+    e.style.color = "var(--color-accent)";
+    document.body.append(e);
+    const c = getComputedStyle(e).color;
+    e.remove();
+    return c;
+  })();
+  const look = (b) => `${getComputedStyle(b).backgroundColor} / ${getComputedStyle(b).color}`;
+  return [...document.querySelectorAll(`${scope} .try-acts`)].flatMap((g) => {
+    const btns = [...g.querySelectorAll(".ai-act")];
+    const bad = btns.filter((b) => getComputedStyle(b).backgroundColor === accent || look(b) !== look(btns[btns.length - 1]));
+    return bad.map((b) => `"${b.textContent.trim()}" (${look(b)})`);
+  });
+}
+
 /** In the page: "works" on the opened row; the bridge's calls and the rows left after it. */
 async function aiNeedsAnswer() {
   const G = window.__gw;
@@ -2136,9 +2157,10 @@ async function aiNeedsAnswer() {
   [...document.querySelectorAll(".ai-screen .aip-need.open .try-acts .ai-act")].find((b) => b.textContent.trim() === "works")?.click();
   // At once: no wait for the bridge (optimistic).
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-  const left = [...document.querySelectorAll(".ai-screen .aip-need")].map((e) => e.dataset.task);
+  const left = [...document.querySelectorAll(".ai-screen .aip-need:not(.answered)")].map((e) => e.dataset.task);
+  const said = document.querySelector('.ai-screen .aip-need.answered[data-task="ny-try1"]')?.textContent ?? "";
   await G.until(() => got.length, 1000);
-  return { calls: got.slice(), left };
+  return { calls: got.slice(), left, said };
 }
 
 /** In the page: the chat's present_try card's "works" on the same task - the call it makes. */
@@ -2184,9 +2206,12 @@ async function aiNeedsProgress(page, size) {
   if (o.ids.slice().sort().join() !== NY_WANT.slice().sort().join()) fails.push(`needs-you rows are [${o.ids.join(", ")}], not exactly [${NY_WANT.join(", ")}] (answered / done must not show)`);
   if (o.acts.join(" / ") !== "works / still broken") fails.push(`the opened try offers "${o.acts.join(" / ")}", not works / still broken`);
   if (!/comes to the front/.test(o.line)) fails.push(`the opened row doesn't say what to try ("${o.line}")`);
+  const looks = await page.evaluate(aiNeedsLooks, ".ai-screen .aip-need.open");
+  if (looks.length) fails.push(`answer buttons look already chosen before a tap: ${looks.join(", ")}`);
   await page.screenshot({ path: `/cache/ai-needs-you-${size}.png` });
   const a = await page.evaluate(aiNeedsAnswer);
   if (a.left.includes("ny-try1")) fails.push(`"works" didn't take the row out of needs you at once (left: ${a.left.join(", ")})`);
+  if (!/you said it works/.test(a.said)) fails.push(`the answered row doesn't collapse to "you said it works" ("${a.said}")`);
   const chat = await page.evaluate(aiNeedsChatCall);
   if (!a.calls.length) fails.push("works on the row made no bridge call");
   else if (JSON.stringify(a.calls) !== JSON.stringify(chat)) fails.push(`the row's works called ${JSON.stringify(a.calls)}, the chat's try card ${JSON.stringify(chat)}`);
@@ -2207,6 +2232,7 @@ async function aiNeedsCheck(page) {
   if (p.tries.length !== 3) fails.push(`unfolded: Try this lists ${p.tries.length} asks, not Progress's 3 (${p.tries.join(" | ")})`);
   if (p.working < 3) fails.push(`unfolded: Working now shows ${p.working} agents, not the mock fleet's 3 working helpers`);
   if (p.empty) fails.push(`unfolded: the right column still says "Nothing running and nothing to try"`);
+  fails.push(...(await page.evaluate(aiNeedsLooks, ".ai-screen")).map((f) => `unfolded: an answer button looks already chosen before a tap: ${f}`));
   await page.screenshot({ path: "/cache/ai-needs-you-pane.png" });
   await page.evaluate(aiChatRestore);
   return fails;

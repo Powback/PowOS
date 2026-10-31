@@ -11,10 +11,11 @@
  * present_try card (recordVerdict / doneAsk / sendCantMail / answerMail) and the same answers store, so the row leaves at
  * once and comes back with one plain line when the call failed.
  */
+import { useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { boardState, type BoardCheck } from "../agents.ts";
 import { board, checks, noteOf, youChecks, type WorkRow } from "./aiboard.tsx";
-import { answers, TryLine, type Answer, type TryItem } from "./trycard.tsx";
+import { answers, Said, TryLine, type Answer, type TryItem } from "./trycard.tsx";
 
 /** try: works / still broken; do: done / can't; ask: the question's options or their words. */
 export type NeedKind = "try" | "do" | "ask";
@@ -118,19 +119,45 @@ function NeedRow({ n }: { n: Need }) {
   );
 }
 
-/** Progress's Needs you card: one row per task that waits on the user (not drawn when none does). */
+/** A row answered while the card shows: collapsed to what the user said (no longer counted, no controls). */
+function SaidRow({ n, a }: { n: Need; a: Answer }) {
+  return (
+    <li class="aip-need answered" data-task={n.w.id}>
+      <div class="aip-need-row">
+        <span class="aip-dot" aria-hidden="true" />
+        <span class="aip-need-title">{n.w.title}</span>
+      </div>
+      <div class="aip-need-more">
+        <Said a={a} />
+      </div>
+    </li>
+  );
+}
+
+/**
+ * The rows to draw: the open asks, and those answered here since the card showed (in place, collapsed to the answer)
+ * - an answer takes the row out of the count at once without it jumping away under the finger.
+ */
+function useRows(needs: Need[]): [Need, Answer | undefined][] {
+  const seen = useRef(new Map<string, Need>());
+  for (const n of needs) seen.current.set(n.w.id, n);
+  const open = new Set(needs.map((n) => n.w.id));
+  const said = answers.value;
+  return [...seen.current.values()].filter((n) => open.has(n.w.id) || said[n.w.id]).map((n) => [n, open.has(n.w.id) ? undefined : said[n.w.id]]);
+}
+
+/** Progress's Needs you card: one row per task that waits on the user (not drawn when none does or did). */
 export function NeedsYouCard({ needs }: { needs: Need[] }) {
-  if (!needs.length) return null;
+  const rows = useRows(needs);
+  if (!rows.length) return null;
   return (
     <section class="aip-area aip-needs tile open" aria-label="Needs you">
       <div class="aip-area-row aip-needs-head">
         <span class="aip-area-name">Needs you</span>
-        <span class="aip-chip">{needs.length}</span>
+        {needs.length > 0 && <span class="aip-chip">{needs.length}</span>}
       </div>
       <ul class="aip-need-list">
-        {needs.map((n) => (
-          <NeedRow key={n.w.id} n={n} />
-        ))}
+        {rows.map(([n, a]) => (a ? <SaidRow key={n.w.id} n={n} a={a} /> : <NeedRow key={n.w.id} n={n} />))}
       </ul>
     </section>
   );
