@@ -807,28 +807,34 @@ async function panelTracksFinger() {
  * The launcher's pull (pull.tsx, the host's pull.drag p) ticks the haptics (ui/haptics.ts; the mock counts them in
  * window.__hapticsMock) once as it crosses its threshold (gesture.ts OPEN_AT): nothing short of it, nothing more held
  * past it, once more back and over again (the user, 10-31: "some small haptics thing there").
+ *
+ * Driven from the gate, one synchronous evaluate per event: no promise is left pending in the page between the drag's
+ * frames. A long async evaluate awaiting the page's own frames/timers failed "Promise was collected" about one full gate
+ * in five (10-31, rAF and a 16 ms timer alike, its whenReady retry too) - nothing reloaded the page (no files.changed from
+ * the mock, no reload before the evaluate); the awaited promise was lost under load. A synchronous call has none to lose.
  */
-async function launcherHapticsCheck() {
-  const ev = window.__mockEvents, h = window.__hapticsMock;
-  if (!ev || !h) return ["no mock events or mock haptics to drive the launcher's pull"];
-  // A timer, not requestAnimationFrame: a throttled page under load could stall rAF until the protocol dropped the
-  // evaluate ("Promise was collected", 3x on 10-31). The pull's drag handler is synchronous; nothing here needs a paint.
-  const frame = () => new Promise((ok) => setTimeout(ok, 16));
-  const t0 = h.tick, fails = [];
+async function launcherHapticsCheck(page) {
+  const emit = (name, data) => page.evaluate((n, d) => void window.__mockEvents.emit(n, d), name, data);
+  const ticks = () => page.evaluate(() => window.__hapticsMock.tick);
+  const has = await page.evaluate(() => !!(window.__mockEvents && window.__hapticsMock));
+  if (!has) return ["no mock events or mock haptics to drive the launcher's pull"];
+  const t0 = await ticks();
+  const fails = [];
   const to = async (ps, want, what) => {
     for (const p of ps) {
-      ev.emit("pull.drag", { p });
-      await frame();
+      await emit("pull.drag", { p });
+      await new Promise((ok) => setTimeout(ok, 16));
     }
-    if (h.tick - t0 !== want) fails.push(`${what}: ${h.tick - t0} haptic ticks, want ${want}`);
+    const now = await ticks();
+    if (now - t0 !== want) fails.push(`${what}: ${now - t0} haptic ticks, want ${want}`);
   };
-  ev.emit("pull.begin", { kind: "apps" });
+  await emit("pull.begin", { kind: "apps" });
   await to([0.02, 0.06, 0.1], 0, "short of the threshold");
   await to([0.3], 1, "past the threshold");
   await to([0.5, 0.8, 1, 0.9, 0.6, 0.4], 1, "held past it");
   await to([0.1, 0.05], 1, "back under it");
   await to([0.35], 2, "over it again");
-  ev.emit("pull.end", { open: false });
+  await emit("pull.end", { open: false });
   return fails;
 }
 
@@ -5022,7 +5028,7 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "scroll-fade", { width: 404, height: 560 }).then((r) => whenReady(r, () => r.page.evaluate(scrollFadeCheck))));
   if (process.env.SHELL_PAGES !== "0")
-    runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-haptics", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(launcherHapticsCheck))));
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-haptics", { width: 404, height: 900 }).then((r) => whenReady(r, () => launcherHapticsCheck(r.page))));
     runs.push(open(browser, `${ORIGIN}/index.html`, "close-up", { width: 404, height: 560 }).then((r) => whenReady(r, () => r.page.evaluate(closeUpCheck))));
   // Unfolded home is one wide page with one bar (hosts/wide.ts, home.tsx; the user, 2026-10-22), migrated from the two
   // side-by-side pages without moving a tile.
