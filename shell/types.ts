@@ -432,6 +432,19 @@ export interface ChromeState {
 export interface ChromeRegion { action: string; x: number; y: number; width: number; height: number }
 
 /** A web window's element rect (CSS px, the viewport). */
+/** One of the host's live web windows (WebWindows.list): frame/body in viewport CSS px once the page placed it. */
+export interface HostWebWindow {
+  id: number;
+  key: string;
+  label: string;
+  state: "floating" | "minimised" | "full";
+  live?: boolean;
+  task?: number;
+  ownFrame?: boolean;
+  frame?: WebWindowRect;
+  body?: WebWindowRect;
+}
+
 export interface WebWindowRect { left: number; top: number; width: number; height: number }
 
 export interface Bridge {
@@ -949,6 +962,8 @@ export interface Bridge {
    */
   webwindows?: {
     enabled(): Promise<boolean>;
+    /** Host-optional (RL1): the host's live windows, for a (re)loaded page to rebuild its list (ui/webwindows.tsx). */
+    list?(): Promise<HostWebWindow[]>;
     /**
      * The app (an "a:" key) launched into a new window at [rect]: its id, or -1. [task]: its running task moved in instead.
      * [kwin]: a Linux window KWin opened ("l:" key, "webwindows.adopt" with its KWin id) shown in it (docs/WEB_WINDOWS.md S6).

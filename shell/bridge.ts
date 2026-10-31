@@ -5,6 +5,7 @@
  * the phone, so the shell still runs.
  */
 import type {
+  HostWebWindow,
   BarInput,
   Agent,
   AgentEvent,
@@ -287,6 +288,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     // Web windows (ui/webwindows.tsx): the phone's only.
     webwindows: host.name === "powos" ? undefined : {
       enabled: () => call<boolean>("webwindows.enabled"),
+      list: () => call<HostWebWindow[]>("webwindows.list"),
       open: (key, rect, task, kwin) => call<number>("webwindows.open", key, rect, task ?? -1, kwin ?? -1),
       input: (id, action, at) => call<boolean>("webwindows.input", id, action, at.x, at.y, at.finger ?? 0),
       close: (id) => call<boolean>("webwindows.close", id),

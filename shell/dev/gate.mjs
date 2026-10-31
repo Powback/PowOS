@@ -3110,6 +3110,62 @@ async function webWindowClearAll() {
   }
 }
 
+/**
+ * RL1 (10-31 14:19, "my widgets A window behind my widgets."): a page reload drops the page's window list while the
+ * host keeps the windows. The mock host's "webwindows.list" returns two; the page's rebuild gives two .webwindow with
+ * their bars at the host's rects, each the top element at its centre (over the widgets), and "w.f" geometry naming
+ * them goes out again within 500 ms (RL0: geometry resumes after a reload).
+ */
+async function webWindowReloadCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const was = S.page.value;
+  const had = powos.webwindows;
+  const fails = [];
+  // One rebuilt window: there, with its bar, at the host's frame, the top element at its centre.
+  const judge = (h) => {
+    const el = document.querySelector(`.webwindow[data-wwid="${h.id}"]`);
+    if (!el) return [`RL1: no .webwindow for host window ${h.id}`];
+    const r = el.getBoundingClientRect();
+    const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return [
+      !el.querySelector(".webwindow-title") && `RL1: window ${h.id} has no bar`,
+      (Math.abs(r.left - h.frame.left) > 2 || Math.abs(r.top - h.frame.top) > 2) && `RL1: window ${h.id} at ${Math.round(r.left)},${Math.round(r.top)}, host had ${h.frame.left},${h.frame.top}`,
+      top?.closest(".webwindow") !== el && `RL1: window ${h.id}'s centre shows ${top?.className || top?.tagName}, not the window`,
+    ].filter(Boolean);
+  };
+  // A "w.f" naming both windows (ids no other check uses; __ww.sent keeps the last 120) within [ms] of [t0].
+  const geometrySent = async (t0, ms) => {
+    const named = () => window.__ww.sent.slice(-20).some((l) => / 961 /.test(l) && / 962 /.test(l));
+    while (performance.now() - t0 < ms && !named()) await sleep(20);
+    return named();
+  };
+  try {
+    S.page.value = 0;
+    await window.__gw.settled();
+    W.webWins.value = [];
+    const host = [
+      { id: 961, key: "a:gate.r1", label: "R1", state: "floating", live: true, frame: { left: 80, top: 160, width: 300, height: 240 }, body: { left: 80, top: 196, width: 300, height: 204 } },
+      { id: 962, key: "a:gate.r2", label: "R2", state: "floating", live: true, frame: { left: 420, top: 200, width: 320, height: 260 }, body: { left: 420, top: 236, width: 320, height: 224 } },
+    ];
+    powos.webwindows = { ...had, list: () => Promise.resolve(host) };
+    const t0 = performance.now();
+    const n = await W.rebuildFromHost();
+    await window.__gw.settled();
+    if (n !== 2) fails.push(`RL1: rebuild added ${n} windows, not 2`);
+    fails.push(...host.flatMap(judge));
+    if (!(await geometrySent(t0, 500))) fails.push("RL0: no w.f naming both rebuilt windows within 500 ms");
+    return fails;
+  } finally {
+    powos.webwindows = had;
+    W.webWins.value = [];
+    W.hostIds.value = null;
+    S.page.value = was;
+  }
+}
+
 /** W-IN1, a floating window resized bigger: its grown corner is excluded, and drags from it (body, bar) stay the window's. */
 async function webWindowRegionsResized() {
   const S = await window.__gw.mod("./state.ts");
@@ -4930,7 +4986,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }

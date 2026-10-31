@@ -11,7 +11,7 @@ import { useRef, useState } from "preact/hooks";
 import { geometryChannel, native, nextFrameId, sendGeometry } from "../apps/port.ts";
 import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
-import type { WebWindowRect } from "../types.ts";
+import type { HostWebWindow, WebWindowRect } from "../types.ts";
 import { Mark } from "./chrome.tsx";
 import { memo } from "./memo.ts";
 import { confirm as hapticConfirm, tick as hapticTick } from "./haptics.ts";
@@ -271,6 +271,40 @@ export async function adoptWebWindow(
   toPage(page);
   return true;
 }
+
+/**
+ * RL1 (the user, 10-31 14:19: "my widgets A window behind my widgets."): the page's list lives in memory only, and a
+ * reload (a shell update) dropped it while the host kept the windows - their app layers under home with no frame, bar
+ * or close. On load the page asks the host for its live windows ("webwindows.list") and rebuilds each on the page on
+ * screen, at its last frame (clamped into the work area), in its state (minimised, full screen). Tilings and stacks are
+ * the page's alone: they come back as floating windows at their last frames. The count of windows added.
+ */
+export async function rebuildFromHost(): Promise<number> {
+  const list = await powos.webwindows?.list?.().catch(() => [] as HostWebWindow[]);
+  if (!list?.length) return 0;
+  const have = new Set(webWins.value.map((w) => w.id));
+  const page = shownPage();
+  const add = list.filter((h) => h.id >= 0 && !have.has(h.id)).map((h) => fromHost(h, page));
+  if (!add.length) return 0;
+  add.forEach((w) => hostGave(w.id));
+  webWins.value = [...webWins.value, ...add];
+  return add.length;
+}
+
+/** Host window [h] as the page's entry on [page]: its frame (the body plus its bar) where the host last had it. */
+function fromHost(h: HostWebWindow, page: number): WebWin {
+  const bar = h.ownFrame ? 0 : TITLE;
+  const body = h.body ?? (h.frame && { ...h.frame, top: h.frame.top + bar, height: h.frame.height - bar });
+  const o = pageOrigin();
+  const { vx, vy, w, h: hh } = adoptPlace(body, bar);
+  return {
+    id: h.id, key: h.key, label: h.label, page, x: vx - o.x, y: vy - o.y, w, h: hh,
+    task: h.task != null && h.task >= 0 ? h.task : undefined,
+    live: h.live || undefined, ownFrame: h.ownFrame || undefined,
+    minimised: h.state === "minimised" || undefined, full: h.state === "full" || undefined,
+  };
+}
+void rebuildFromHost();
 
 /** The pointer kept by its element (a synthetic or already-ended pointer can't be: the drag still works). */
 function capture(e: PointerEvent) {
