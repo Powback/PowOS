@@ -378,7 +378,7 @@ const isAnswered = (w: WorkRow) => answered.value[w.id] === Number(w.updated);
  */
 function answer(w: WorkRow, how: "done" | "skip") {
   answered.value = { ...answered.value, [w.id]: Number(w.updated) };
-  askQueued(how === "done" ? `Done: ${w.note || w.title} (task ${w.id})` : `Skip for now: ${w.note || w.title} (task ${w.id})`);
+  askQueued(how === "done" ? `Done: ${noteOf(w) || w.title} (task ${w.id})` : `Skip for now: ${noteOf(w) || w.title} (task ${w.id})`);
 }
 
 /**
@@ -623,9 +623,52 @@ function freeState(w: WorkRow) {
   return last && !last.ok ? "its last test failed" : "nobody on it yet";
 }
 
+/** A note that says nothing ("waiting on you"): the agents' placeholder, not what to do. */
+const EMPTY_NOTE = /^\s*(waiting|needs?)\s+(on\s+)?(you|the user)\W*$/i;
+const noteOf = (w: WorkRow) => (w.note && !EMPTY_NOTE.test(w.note) ? w.note.trim() : "");
+
+/** A sentence that tells the user to do something: it starts with a verb of doing ("Open Health and allow ..."). */
+const INSTRUCTION = /^(open|tap|press|hold|swipe|pull|drag|drop|switch|turn|enable|disable|set|pick|choose|decide|approve|allow|grant|log|sign|install|update|restart|reboot|plug|charge|connect|pair|send|give|answer|reply|tell|say|type|enter|look|watch|play|launch|start|run|use|go|move|resize|scroll|dictate|try|check|test|see|confirm|verify)\b/i;
+/** A check: the ask is to try / look at something and say if it holds ("...: it should respond"). */
+const CHECK = /\b(should|try|tried|check|test|see if|see whether|verify|does it|still works?|works?)\b/i;
+
+/** What a Needs-you card says to do, in the imperative: its --try line, else its note when that is an instruction. */
+function youDo(w: WorkRow): string {
+  const t = w.tryLine?.trim();
+  if (t) return t;
+  const n = noteOf(w);
+  return n && INSTRUCTION.test(n) ? n : "";
+}
+
+/**
+ * Whether a Needs-you card asks the user to try or check something (works / still broken) rather than do a thing
+ * (done / can't): its --try line or its changes say so, or its words read as a check; a plain instruction without a
+ * check in it ("Open Health once and allow Health Connect") is a thing to do, and so is a card with nothing to go on
+ * but a feature's name read as one shipped to look at (the user, 2026-10-31 01:44: "Needs you doesn't let me say that
+ * it's broken").
+ */
+function youChecks(w: WorkRow): boolean {
+  if (w.tryLine?.trim() || list<Commit>(w.commits).length > 0) return true;
+  const n = noteOf(w);
+  if (n) return CHECK.test(n) || !INSTRUCTION.test(n);
+  return CHECK.test(w.title) || !INSTRUCTION.test(w.title);
+}
+
+/**
+ * A Needs-you card's line under its title: what to do (youDo, when the title isn't already that), else the task's
+ * name under its note, else a plain "it didn't say" - never the empty "waiting on you".
+ */
+function youState(w: WorkRow): string {
+  const n = noteOf(w);
+  const d = youDo(w);
+  if (d && d !== n) return d;
+  if (n) return w.title;
+  return "no steps given - ask PowOS AI what to do";
+}
+
 /** A row's state in plain words per group: no hashes, no raw step text, no check jargon. */
 const STATES: Record<Group, (w: WorkRow) => string> = {
-  you: (w) => (w.note ? w.title : "waiting on you"),
+  you: youState,
   // Only the plain line written for the user (--try): never the agents' step or note (hashes, file names, jargon).
   try: (w) => w.tryLine?.trim() || "ready to try",
   on: (w) => withStep(w, onState(w)),
@@ -636,25 +679,47 @@ const plainState = (w: WorkRow, g: Group | null) =>
   g ? STATES[g](w) : w.status === "done" ? "done" : withStep(w, w.status === "blocked" ? "paused" : "");
 
 /** A card that asks the user to try something: Ready to try, or a Needs-you card for something shipped (its try line, its changes). */
-const asksToTry = (w: WorkRow, g: Group | null) => g === "try" || (g === "you" && (!!w.tryLine?.trim() || list<Commit>(w.commits).length > 0));
+const asksToTry = (w: WorkRow, g: Group | null) => g === "try" || (g === "you" && youChecks(w));
 
 /** The card whose "still broken" reply line is open (one at a time). */
 const replying = signal<string | null>(null);
 
 type Act = [label: string, act: () => void, quiet?: boolean];
 
+/** The label that opens a card's reply line: "still broken" on one to try, "can't / problem" on a thing to do. */
+const STILL_BROKEN = "still broken";
+const CANT = "can't / problem";
+const toggleReply = (w: WorkRow) => (replying.value = replying.value === w.id ? null : w.id);
+
 /**
  * What the user can do about a row, beside its state: works / still broken on anything to try ("still broken" opens
- * the reply line; skip, quiet, on a Needs-you one), done / skip on the other Needs-you cards.
+ * the reply line; skip, quiet, on a Needs-you one), done / can't / skip on the other Needs-you cards ("can't" opens
+ * the same reply line).
  */
 function actsOf(w: WorkRow, g: Group | null): Act[] | null {
   const skip: Act = ["skip", () => answer(w, "skip"), true];
   if (asksToTry(w, g)) {
-    const acts: Act[] = [["works", () => void verdict(w, true)], ["still broken", () => (replying.value = replying.value === w.id ? null : w.id)]];
+    const acts: Act[] = [["works", () => void verdict(w, true)], [STILL_BROKEN, () => toggleReply(w)]];
     return g === "you" ? [...acts, skip] : acts;
   }
-  if (g === "you") return [["done", () => answer(w, "done")], skip];
+  if (g === "you") return [["done", () => answer(w, "done")], [CANT, () => toggleReply(w)], skip];
   return null;
+}
+
+/** The manager's mail for a "can't / problem" reply on a thing to do: the task id first, as brokenMail. */
+const cantMail = (w: WorkRow, b: Broken) =>
+  `Can't do it / problem (task ${w.id}): ${noteOf(w) || w.title}. The user says: "${b.text}"${b.image ? ` - their screenshot: ${b.image}` : ""}`;
+
+/**
+ * "Can't / problem" sent: to the manager's inbox (it owns the board), the card answered at once like done / skip; a
+ * failed call (an older host): told in the one conversation.
+ */
+function sendCant(w: WorkRow, b: Broken) {
+  replying.value = null;
+  answered.value = { ...answered.value, [w.id]: Number(w.updated) };
+  clearBroken(w.id);
+  const mail = cantMail(w, b);
+  powos.agents.message("manager", mail).catch((e) => (console.warn(`agents.message ${w.id}:`, e), askQueued(mail)));
 }
 
 /** "Still broken" sent from the reply line: shown at once (the card moves), the line back with its words on a failure. */
@@ -663,6 +728,9 @@ async function sendBroken(w: WorkRow, b: Broken) {
   if (await verdict(w, false, b)) clearBroken(w.id);
   else replying.value = w.id;
 }
+
+/** The reply line sent: "still broken" on a card to try, "can't / problem" on a thing to do. */
+const sendReply = (w: WorkRow, g: Group | null, b: Broken) => (asksToTry(w, g) ? void sendBroken(w, b) : sendCant(w, b));
 
 /** An open row's detail: its note, the steps done / now / next, the changes in words, its review images. */
 function Details({ w, g }: { w: WorkRow; g: Group | null }) {
@@ -713,7 +781,7 @@ function WorkLine({ w, g, open, onTap }: { w: WorkRow; g: Group | null; open: bo
       <button type="button" class="ai-item-row" onClick={onTap} aria-expanded={open}>
         <span class={`ai-dot ${on ? "on" : ""}`} />
         <span class="ai-item-main">
-          <span class="ai-item-title">{g === "you" ? w.note || w.title : w.title}</span>
+          <span class="ai-item-title">{g === "you" ? noteOf(w) || w.title : w.title}</span>
           {!acts && <span class="ai-item-facts">{plainState(w, g)}</span>}
         </span>
       </button>
@@ -722,14 +790,14 @@ function WorkLine({ w, g, open, onTap }: { w: WorkRow; g: Group | null; open: bo
           <span class="ai-item-facts">{plainState(w, g)}</span>
           <span class="ai-item-acts">
             {acts.map(([label, act, quiet]) => (
-              <button key={label} type="button" class={`ai-act ${quiet ? "quiet" : ""}`} onClick={act} aria-expanded={label === "still broken" ? replying.value === w.id : undefined}>
+              <button key={label} type="button" class={`ai-act ${quiet ? "quiet" : ""}`} onClick={act} aria-expanded={label === STILL_BROKEN || label === CANT ? replying.value === w.id : undefined}>
                 {label}
               </button>
             ))}
           </span>
         </div>
       )}
-      {acts && replying.value === w.id && <BrokenReply id={w.id} onSend={(b) => void sendBroken(w, b)} onCancel={() => (replying.value = null)} />}
+      {acts && replying.value === w.id && <BrokenReply id={w.id} onSend={(b) => sendReply(w, g, b)} onCancel={() => (replying.value = null)} />}
       {g === "on" && !open && <CheckActs w={w} />}
       {open && <Details w={w} g={g} />}
     </div>

@@ -46,6 +46,11 @@ export interface Spec {
      * URLs), [frame] the pixel fallback's picture (a tree with nothing to draw shows it).
      */
     android?: { tree: any; images?: Record<string, string>; frame?: string };
+    /**
+     * host.notifications' list (apps/notify.tsx): PhoneNotification-shaped, a negative [time] (and a message's) is that
+     * many seconds ago. Its actions answer and do nothing.
+     */
+    notifications?: any[];
     /** The app's localStorage before it mounts (e.g. what it cached from an earlier visit). */
     storage?: Record<string, string>;
     /**
@@ -65,6 +70,18 @@ const canvases: Record<string, Record<string, [number, number]>> = {};
 powos.widgets.canvas = async (key: string, id: string, w: number, h: number) => {
   (canvases[key] ??= {})[id] = [Math.round(w * 10) / 10, Math.round(h * 10) / 10];
 };
+
+/** host.notifications over the data's list, times made relative to now; the actions press nothing. */
+function mockNotifications(items: any[]) {
+  const now = Date.now() / 1000;
+  const at = (t: number) => (t < 0 ? now + t : t);
+  const list = {
+    available: true,
+    items: items.map((n) => ({ ...n, time: at(n.time), messages: n.messages?.map((m: any) => ({ ...m, time: at(m.time) * 1000 })) })),
+  };
+  const none = async () => {};
+  return { ...realHost.notifications!, list: async () => list, useList: () => list, action: none, open: none, dismiss: none, access: none };
+}
 
 /** An island's host over mock data: the app's tables as given, its network answered from the data's patterns. */
 function mockHost(spec: Spec) {
@@ -88,6 +105,7 @@ function mockHost(spec: Spec) {
     useDb: () => db,
     useRows: (_db: unknown, table: string) => rows[table] ?? [],
     openApp: () => {},
+    notifications: spec.data?.notifications ? mockNotifications(spec.data.notifications) : realHost.notifications,
     appWidget: spec.data?.android && {
       idOf: async () => 1,
       data: (id: number, on: (d: unknown) => void) => {
