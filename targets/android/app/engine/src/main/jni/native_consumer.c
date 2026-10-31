@@ -657,6 +657,13 @@ static int do_connect(struct consumer_state *s)
             LOGE("api_connect(CPU) failed");
             return -1;
         }
+        /* PowOS: a web window's dequeue is bounded. Its layer goes off screen (reparented, released) when the window
+         * closes, before nativeStopWindow: SurfaceFlinger releases no more of its buffers, so an unbounded dequeue
+         * blocked the render thread forever and the stop's pthread_join with it (10-31 15:57 window 4: every later
+         * window's start queued behind that stop). Timed out, the loop sees running = false and the join returns.
+         * Set before the buffers are collected: a timeout set later can change the queue's slot count. */
+        if (!s->primary && api.setDequeueTimeout && api.setDequeueTimeout(win, 100000000LL) != 0)
+            LOGE("surface %u: setDequeueTimeout failed: a stop may wait for a buffer", s->surface_id);
 
         int min_undequeued = 0;
         api.query(win, ANATIVEWINDOW_QUERY_MIN_UNDEQUEUED_BUFFERS, &min_undequeued);

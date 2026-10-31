@@ -608,6 +608,12 @@ class WebWindows(
 
         /** KWin closed the window itself: nothing to tell it on the way out. */
         var kwinClosed = false
+
+        /** Its consumer's starts and stops: a thread of its own ([ConsumerLane]), new after a [consumerCheck] rebind. */
+        @Volatile var lane = ConsumerLane("powos-ww-linux-$kwin")
+
+        /** Rebinds so far ([consumerCheck]): a second one, or a start failing after one, says the window failed. */
+        var rebinds = 0
     }
 
     /** A KWin window for a web window: its app id and caption (KWin's), its name and icon (PowOS's, for the bar). */
@@ -623,15 +629,6 @@ class WebWindows(
 
     /** KWin windows on their way to a web window: offered to the page ("webwindows.adopt"), not opened yet (main thread). */
     private val pendingLinux = HashMap<Int, LinuxOffer>()
-
-    /**
-     * The consumers' starts and stops: one at a time, in order, never on main (a stop joins its render thread). Made
-     * again by [consumerCheck] when a job wedged it (10-31 15:57 window 4's stop never returned: every later start
-     * queued behind it, Dolphin's window 5 "loading forever").
-     */
-    private var consumers = newConsumers()
-
-    private fun newConsumers() = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "powos-ww-linux") }
 
     /**
      * One window as the page measured it this frame, in home's window surface px, after transforms: [frame] the
@@ -965,7 +962,7 @@ class WebWindows(
         src.bw = bw
         src.bh = bh
         src.rate = web.display?.refreshRate ?: 0f
-        consumers.execute { startConsumer(win, src) }
+        src.lane.run { startConsumer(win, src) }
         main.postDelayed({ consumerCheck(win, "open") }, CONSUMER_UP_MS)
         andro.marchy.WebWindowSource.size(kwin, w, h)
         // KWin focused the new window (its task's start): a touch back on the window it came from focuses that again.
@@ -987,6 +984,7 @@ class WebWindows(
         if (handle == 0L) {
             WindowLog.e(TAG, "window $id (KWin window $kwin): consumer did not start")
             src.starting.set(false)
+            if (src.rebinds > 0) main.post { linuxFailed(win, "did not start again") }
             return
         }
         // Published before the crop: a resize placed meanwhile (place() on main) crops this consumer too, and a
@@ -1022,10 +1020,25 @@ class WebWindows(
             ConsumerCheck.Act.STARTING -> return WindowLog.w(TAG, "window ${win.id}: consumer still starting ($why)").let { }
             ConsumerCheck.Act.REBIND -> Unit
         }
+        if (++src.rebinds > 1) return linuxFailed(win, "still not up ($why)")
         WindowLog.w(TAG, "window ${win.id}: KWin window ${src.kwin}'s consumer not up ($why): re-bound on a new consumer thread")
-        consumers.shutdown()
-        consumers = newConsumers()
-        consumers.execute { startConsumer(win, src) }
+        src.lane.abandon()
+        src.lane = ConsumerLane("powos-ww-linux-${src.kwin}")
+        src.lane.run { startConsumer(win, src) }
+    }
+
+    /**
+     * Main thread: Linux window [win]'s consumer is gone for good (its compositor or consumer not answering, [why]): its
+     * body says so under the window's own bar ("webwindows.failed"), never an endless spinner. The page shows the
+     * reason as the window's failed state, with its close.
+     */
+    private fun linuxFailed(
+        win: Win,
+        why: String,
+    ) {
+        if (win.closed) return
+        WindowLog.e(TAG, "window ${win.id}: KWin window ${win.linux?.kwin}'s consumer $why: shown as not responding")
+        emit("webwindows.failed", JSONObject().put("id", win.id).put("reason", LINUX_NOT_RESPONDING))
     }
 
     /**
@@ -1078,11 +1091,22 @@ class WebWindows(
     ) {
         if (linuxTouch === w) linuxTouch = null
         val src = w.linux ?: return
-        consumers.execute {
-            val h = src.handle
-            src.handle = 0
-            andro.marchy.WebWindowSource.stop(h)
-            src.surface.release()
+        // On the window's own thread, bounded (native_consumer.c times its dequeue out): never another window's wait.
+        val lane = src.lane
+        val stopped =
+            lane.stop {
+                val h = src.handle
+                src.handle = 0
+                andro.marchy.WebWindowSource.stop(h)
+                src.surface.release()
+            }
+        if (stopped != null) {
+            main.postDelayed({
+                if (!stopped.isDone) {
+                    WindowLog.e(TAG, "close window ${w.id}: KWin window ${src.kwin}'s consumer stop still blocked after ${ConsumerLane.STOP_MS} ms: its thread left (no other window waits on it)")
+                    lane.abandon()
+                }
+            }, ConsumerLane.STOP_MS)
         }
         if (src.kwinClosed) return
         if (handBack) andro.marchy.WebWindowSource.fallback(context, src.kwin, src.offer.appId, src.offer.title)
@@ -3247,6 +3271,9 @@ class WebWindows(
 
         /** A Linux window's consumer is up within this of its open or its reclaim, else re-bound ([consumerCheck]). */
         private const val CONSUMER_UP_MS = ConsumerCheck.CONSUMER_UP_MS
+
+        /** A Linux window whose consumer is gone ([linuxFailed]): its body's text ("webwindows.failed"). */
+        const val LINUX_NOT_RESPONDING = "Linux app not responding: reopen"
 
         /** RL1: a window the page hasn't claimed this long after a page load is hidden ([pageStarted]). */
         private const val CLAIM_MS = 3000L

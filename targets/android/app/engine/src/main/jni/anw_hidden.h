@@ -102,6 +102,7 @@ typedef int (*pfn_ANativeWindow_query)(const ANativeWindow *, int, int *);
 typedef int (*pfn_ANativeWindow_dequeueBuffer)(ANativeWindow *, ANativeWindowBuffer **, int *fenceFd);
 typedef int (*pfn_ANativeWindow_queueBuffer)(ANativeWindow *, ANativeWindowBuffer *, int fenceFd);
 typedef int (*pfn_ANativeWindow_cancelBuffer)(ANativeWindow *, ANativeWindowBuffer *, int fenceFd);
+typedef int (*pfn_ANativeWindow_setDequeueTimeout)(ANativeWindow *, int64_t timeoutNs);
 
 struct anw_api {
     pfn_ANativeWindow_setBufferCount setBufferCount;
@@ -109,6 +110,8 @@ struct anw_api {
     pfn_ANativeWindow_dequeueBuffer  dequeueBuffer;
     pfn_ANativeWindow_queueBuffer    queueBuffer;
     pfn_ANativeWindow_cancelBuffer   cancelBuffer;
+    /* PowOS: optional (API 30+; NULL before): a dequeue that waits at most this long, so a stop never joins forever. */
+    pfn_ANativeWindow_setDequeueTimeout setDequeueTimeout;
 };
 
 static inline int anw_api_load(struct anw_api *api)
@@ -122,6 +125,7 @@ static inline int anw_api_load(struct anw_api *api)
     api->dequeueBuffer  = (pfn_ANativeWindow_dequeueBuffer)  dlsym(lib, "ANativeWindow_dequeueBuffer");
     api->queueBuffer    = (pfn_ANativeWindow_queueBuffer)    dlsym(lib, "ANativeWindow_queueBuffer");
     api->cancelBuffer   = (pfn_ANativeWindow_cancelBuffer)   dlsym(lib, "ANativeWindow_cancelBuffer");
+    api->setDequeueTimeout = (pfn_ANativeWindow_setDequeueTimeout) dlsym(lib, "ANativeWindow_setDequeueTimeout");
 
     if (!api->setBufferCount || !api->query ||
         !api->dequeueBuffer || !api->queueBuffer || !api->cancelBuffer)
