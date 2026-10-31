@@ -381,13 +381,16 @@ public class Hook implements IXposedHookLoadPackage {
     private static volatile boolean desktopWindowHooked;
 
     /**
-     * HACK: on OxygenOS 16 the loader Vector hands handleLoadPackage for SystemUI doesn't see WM Shell's classes
-     * (ClassNotFoundException for FullscreenCaptionHandleMenu, 2026-10-31), though they are in SystemUI.apk
-     * (classes8.dex). So: that loader first, else the loaders of SystemUI's Application once it attaches (its class's
-     * loader and its context's), first one that has the class wins. Real fix: none needed once the hook goes (see
-     * [desktopWindowItem]); for a module, the libxposed API's onPackageLoaded/onPackageReady with the final loader.
+     * HACK: Vector (v2.2, OxygenOS 16) calls handleLoadPackage for com.android.systemui twice: on the main thread with
+     * SystemUI.apk's loader (the hooks go in there), then from another thread with an empty PathClassLoader (no dex
+     * path) - that second call logged the ClassNotFoundException for FullscreenCaptionHandleMenu (2026-10-31). So: once
+     * hooked, later calls are no-ops; a loader without the class waits for SystemUI's Application.attach and tries its
+     * loaders. Real fix: none needed once the hook goes (see [desktopWindowItem]); for a module, the libxposed API's
+     * onPackageLoaded with the package's final loader.
      */
     private static void desktopWindowItemWhenLoaded(ClassLoader cl) {
+        if (desktopWindowHooked)
+            return;
         if (has(cl, CAPTION_MENU_CLASS)) {
             desktopWindowItem(cl, "handleLoadPackage");
             return;
