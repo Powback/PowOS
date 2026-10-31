@@ -2768,6 +2768,99 @@ async function webWindowResizeCheck() {
 }
 
 /**
+ * In the page: W-IN1 (the user, 10-31: "Try to interact with one of the floating windows I still activate the launcher
+ * or the search or the AI page or the notifications"; "Seems like the window resized, but like the touch handlers ...
+ * didn't realize"). Two windows tiled, the divider moved so the left one grows (a resize with no finger on it), and a
+ * window resized bigger: within a few frames the regions home sends the host's shade/pull (the mock records them)
+ * hold a point in each newly grown part, and a drag up, down and sideways starting there (body and bar) opens no
+ * launcher, shade or page swipe.
+ */
+async function webWindowRegionsTiled() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const frames = async (n) => { for (let i = 0; i < n; i++) await new Promise((ok) => requestAnimationFrame(ok)); };
+  const covered = (x, y) => (globalThis.__homePullRegions ?? []).some((r) => x >= r.left && x <= r.left + r.width && y >= r.top && y <= r.top + r.height);
+  const was = S.page.value;
+  try {
+    S.page.value = 0;
+    await window.__gw.settled();
+    const p = S.pages.value[0];
+    W.webWins.value = [
+      { id: 921, key: "a:gate.r1", label: "R1", page: p, x: 60, y: 140, w: 200, h: 200, live: true },
+      { id: 922, key: "a:gate.r2", label: "R2", page: p, x: 300, y: 140, w: 200, h: 200, live: true },
+    ];
+    await window.__gw.settled();
+    W.tileWindows(p, [921, 922]);
+    await (window.__gw.settled(), frames(3));
+    const el = () => document.querySelector('.webwindow[data-wwid="921"]').getBoundingClientRect();
+    const before = el();
+    // The divider let go further right: the left window grows (tilings + relayout, no finger on the window).
+    W.tilings.value = { ...W.tilings.value, [p]: { ...W.tilings.value[p], rx: 0.7 } };
+    W.webWins.value = [...W.webWins.value];
+    await (window.__gw.settled(), frames(3));
+    const after = el();
+    const pt = [(before.right + after.right) / 2, after.top + after.height / 2];
+    if (after.right > before.right + 20 && !covered(...pt)) return [`W-IN1: after the divider grew window 921 (${before.right} -> ${after.right}), ${pt} isn't in the host's excluded regions`];
+    return [];
+  } finally {
+    W.webWins.value = [];
+    W.tilings.value = {};
+    S.page.value = was;
+  }
+}
+
+/** W-IN1, a floating window resized bigger: its grown corner is excluded, and drags from it (body, bar) stay the window's. */
+async function webWindowRegionsResized() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const G = await window.__gw.mod("./ui/gesture.ts");
+  const frames = async (n) => { for (let i = 0; i < n; i++) await new Promise((ok) => requestAnimationFrame(ok)); };
+  const covered = (x, y) => (globalThis.__homePullRegions ?? []).some((r) => x >= r.left && x <= r.left + r.width && y >= r.top && y <= r.top + r.height);
+  const pulled = () => S.drawer.value > 0 || G.drawerDrag.value != null || S.notif.value || G.notifDrag.value != null || S.page.value !== 0;
+  const drag = async (el, a, d) => {
+    const send = (kind, k) => {
+      const [x, y] = [a[0] + d[0] * k, a[1] + d[1] * k];
+      el.dispatchEvent(new PointerEvent(`pointer${kind}`, { pointerId: 13, pointerType: "touch", isPrimary: true, clientX: x, clientY: y, bubbles: true }));
+      const t = [new Touch({ identifier: 13, target: el, clientX: x, clientY: y })];
+      const name = { down: "Start", move: "Move", up: "End" }[kind];
+      const init = { touches: kind === "up" ? [] : t, changedTouches: t, bubbles: true, cancelable: true };
+      for (const type of [`touch${name.toLowerCase()}`, `Touch${name}`]) el.dispatchEvent(new TouchEvent(type, init));
+    };
+    let seen = (send("down", 0), false);
+    for (let i = 1; i <= 6; i++) (send("move", i / 6), await new Promise((ok) => setTimeout(ok, 8)), (seen ||= pulled()));
+    await (send("up", 1), window.__gw.settled());
+    return seen || pulled();
+  };
+  const was = S.page.value;
+  const fails = [];
+  try {
+    S.page.value = 0;
+    const home = { id: 923, key: "a:gate.r3", label: "R3", page: S.pages.value[0], x: 80, y: 160, w: 240, h: 200, live: true };
+    W.webWins.value = [home];
+    await (window.__gw.settled(), frames(3));
+    W.webWins.value = [{ ...home, w: 420, h: 360 }];
+    await (window.__gw.settled(), frames(3));
+    const sel = '.webwindow[data-wwid="923"]';
+    const f = document.querySelector(sel).getBoundingClientRect();
+    const grown = [f.right - 30, f.bottom - 30];
+    if (!covered(...grown)) fails.push(`W-IN1: window 923 resized to ${f.width}x${f.height}: its grown corner ${grown} isn't in the host's excluded regions`);
+    const [body, bar] = [document.querySelector(`${sel} .webwindow-body`), document.querySelector(`${sel} .webwindow-title`)];
+    const b = bar.getBoundingClientRect();
+    const onBar = [b.left + 40, b.top + 12];
+    const cases = [["up on the body", body, grown, [0, -260]], ["down on the body", body, grown, [0, 260]], ["sideways on the body", body, grown, [-300, 0]], ["down on the bar", bar, onBar, [0, 260]], ["sideways on the bar", bar, onBar, [-300, 0]]];
+    for (const [label, node, a, d] of cases) {
+      if (await drag(node, a, d)) fails.push(`W-IN1: a drag ${label} of a window opened the launcher, the shade or turned the page`);
+      W.webWins.value = [{ ...home, w: 420, h: 360 }];
+      await window.__gw.settled();
+    }
+  } finally {
+    W.webWins.value = [];
+    S.page.value = was;
+  }
+  return fails;
+}
+
+/**
  * In the page: RZ5 (the user, 10-31: "When I try to resize an application ... It sometimes activates the launcher or the
  * notification panel"). A fast vertical drag up from a bottom-corner zone, and one down from it, resize the window and
  * open neither the launcher nor the shade (pull and drawer state stay closed, the page stays); a zone never reaches
@@ -3115,7 +3208,7 @@ async function webWindowTileInputCheck() {
   const { powos } = await window.__gw.mod("./bridge.ts");
   const had = powos.webwindows;
   const calls = [];
-  powos.webwindows = { ...had, input: (id, action, x, y) => (calls.push([id, action, x, y]), Promise.resolve(true)) };
+  powos.webwindows = { ...had, input: (id, action, a) => (calls.push([id, action, a.x, a.y]), Promise.resolve(true)) };
   const page = S.pages.value[0];
   try {
     S.page.value = 0;
@@ -3205,71 +3298,102 @@ async function webWindowTileLayoutCheck() {
   }
 }
 
-async function webWindowPinchCheck() {
-  // SC1 after a pinch 200 -> 140 px on window [pw] (400x320): scaled to 0.7, still 400x320 (no relayout), the frame
-  // transformed (bar and body zoom together), the app's size in w.f unchanged and never a resize.
-  const pinchScaled = (pw, body, from) => {
+/**
+ * [webWindowPinchCheck]'s helpers into the page (window.__pzg; page.evaluate sends only the one function).
+ * PZ1 (the user, 10-31 01:40: "If I zoom normally IN the app, I'm now resizing the window"): a pinch whose fingers start
+ * on the BODY is the app's (Chrome's page zoom) - the window keeps its size and scale, the app gets ONE two-finger
+ * gesture (finger 0 down, finger 1 down, both moving, both up; no cancel). SC1: a pinch whose first finger is on the BAR
+ * (the second on the body) scales the window: 0.4..1.5, still 400x320 (no relayout), the frame transformed (bar and
+ * body zoom together), the app's size in w.f unchanged and never a resize, nothing to the app.
+ */
+function PINCH_HELPERS() {
+  const at = (el, type, id, [x, y]) => el.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: "touch", isPrimary: id % 2 === 1, clientX: x, clientY: y, bubbles: true }));
+  // Two fingers 200 px apart (about [cx]) come together to 140 px (8 moves): ids[0] on els[0] at ys[0], ids[1] on els[1].
+  const pinchOn = (els, ys, ids, cx) =>
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].forEach((i) => {
+      const t = i === 0 ? "pointerdown" : i === 9 ? "pointerup" : "pointermove";
+      const q = Math.min(i, 8) * 3.75;
+      (at(els[0], t, ids[0], [cx - 100 + q, ys[0]]), at(els[1], t, ids[1], [cx + 100 - q, ys[1]]));
+    });
+  // Both fingers in one gesture: down0, down1, moves of both, both up, never a cancel.
+  const oneGesture = (seq) =>
+    seq.slice(0, 2).join() === "down0,down1" && ["move0", "move1"].every((m) => seq.includes(m)) && seq.slice(-2).sort().join() === "up0,up1" && !seq.some((s) => s.startsWith("cancel"));
+  // PZ1: the body's pinch, on window [pw] after it; [calls]: the app's input as [action, x, y, finger].
+  const bodyPinch = (pw, body, calls) => {
+    const fails = (pw.scale ?? 1) !== 1 || pw.w !== 400 || pw.h !== 320 ? [`a pinch on the body changed the window: ${pw.w}x${pw.h}@${pw.scale} (want 400x320@1: the app's zoom)`] : [];
+    const seq = calls.map((c) => `${c[0]}${c[3]}`);
+    if (!oneGesture(seq)) fails.push(`a pinch on the body sent the app ${seq.join(",")} (want down0,down1, moves of both, up0 and up1: one two-finger gesture)`);
+    const m1 = calls.filter((c) => c[0] === "move" && c[3] === 1).at(-1);
+    if (m1 && Math.abs(m1[1] - (body.offsetWidth / 2 + 70)) > 1) fails.push(`finger 1's last move reached the app at x ${m1[1]} (want ${body.offsetWidth / 2 + 70})`);
+    return fails;
+  };
+  // SC1: the bar's pinch (40 px apart vertically: 204 -> 146 px, about 0.71) scaled [pw]; w.f entries from [from].
+  const barPinch = (pw, body, from) => {
     const ours = (t) => [...Array(Math.floor(t.length / 24)).keys()].map((i) => t.slice(i * 24, i * 24 + 24)).find((e) => e[0] === "902");
     const entries = window.__ww.sent.slice(from).map((l) => ours(l.split(" ").slice(4))).filter(Boolean);
     const [tf, sizes] = [getComputedStyle(body.closest(".webwindow")).transform, new Set(entries.map((e) => `${e[21]}x${e[22]}`))];
-    const bad = [Math.abs((pw.scale ?? 1) - 0.7) > 0.03 && `scale ${pw.scale} (want 0.7)`, (pw.w !== 400 || pw.h !== 320) && `size ${pw.w}x${pw.h} (want 400x320, unchanged)`,
+    const bad = [Math.abs((pw.scale ?? 1) - 0.71) > 0.03 && `scale ${pw.scale} (want 0.71)`, (pw.w !== 400 || pw.h !== 320) && `size ${pw.w}x${pw.h} (want 400x320, unchanged)`,
       tf === "none" && "no transform on the frame (want the whole window zoomed)",
       Math.abs(body.getBoundingClientRect().width / body.offsetWidth - (pw.scale ?? 1)) > 0.01 && `a measured body scale ${body.getBoundingClientRect().width / body.offsetWidth} (the model's ${pw.scale})`,
       entries.some((e) => e[20] === "1") && "an app resize (w.f said resizing)",
       sizes.size > 1 && `the app's size changed: ${[...sizes].join(", ")}`];
-    return bad.filter(Boolean).map((b) => `a pinch 200 -> 140 px on the body left ${b}`);
+    return bad.filter(Boolean).map((b) => `a pinch from the bar left ${b}`);
   };
+  // At scale [k], a press at the body's centre reaches the app there; one finger whose up landed outside the frame
+  // (never seen by it), then a new one-finger drag: only a move, no scale (10-30 "dragging with one finger rescales").
+  const afterScale = async (W, body, calls) => {
+    const pw = W.webWins.value.find((w) => w.id === 902);
+    const b2 = body.getBoundingClientRect();
+    const p = [b2.left + b2.width / 2, b2.top + b2.height / 2];
+    calls.length = 0;
+    (at(body, "pointerdown", 23, p), at(body, "pointerup", 23, p));
+    const d = [...(calls[0] ?? []), NaN, NaN, NaN];
+    const want = [body.offsetWidth / 2, body.offsetHeight / 2];
+    const fails = Math.hypot(d[1] - want[0], d[2] - want[1]) > 1 ? [`at scale ${pw.scale}, a press at the body's centre went to the app at ${d[1]},${d[2]} (want ${want})`] : [];
+    at(body, "pointerdown", 31, [p[0] - 80, p[1]]);
+    document.body.dispatchEvent(new PointerEvent("pointerup", { pointerId: 31, pointerType: "touch", isPrimary: true, bubbles: true }));
+    at(body, "pointerdown", 33, p);
+    [20, 40, 60].forEach((dx) => at(body, "pointermove", 33, [p[0] + dx, p[1]]));
+    at(body, "pointerup", 33, [p[0] + 60, p[1]]);
+    await window.__gw.settled();
+    const p2 = W.webWins.value.find((w) => w.id === 902);
+    if (p2.w !== pw.w || p2.h !== pw.h || p2.scale !== pw.scale) fails.push(`a one-finger drag after a finger lifted outside the window changed it ${pw.w}x${pw.h}@${pw.scale} -> ${p2.w}x${p2.h}@${p2.scale}`);
+    return fails;
+  };
+  window.__pzg = { pinchOn, bodyPinch, barPinch, afterScale };
+  return [];
+}
+
+async function webWindowPinchCheck() {
+  const g = window.__pzg;
   const W = await window.__gw.mod("./ui/webwindows.tsx");
   const { powos } = await window.__gw.mod("./bridge.ts");
   // The app's input, recorded (restored after: the gate's host may have no webwindows at all).
   const had = powos.webwindows;
   const calls = [];
-  powos.webwindows = { ...had, input: (id, action, x, y) => (calls.push([action, x, y]), Promise.resolve(true)) };
-  const fails = [];
+  powos.webwindows = { ...had, input: (id, action, a) => (calls.push([action, a.x, a.y, a.finger ?? 0]), Promise.resolve(true)) };
   try {
     const S = await window.__gw.mod("./state.ts");
     W.webWins.value = [{ id: 902, key: "a:gate.pinch", label: "Pinch", page: S.pages.value[0], x: 300, y: 160, w: 400, h: 320 }];
     await window.__gw.settled();
     const body = document.querySelector('.webwindow[data-wwid="902"] .webwindow-body');
-    if (!body) return ["pinch: no web window body on the page on screen"];
-    const pb = body.getBoundingClientRect();
-    const [cx, cy] = [pb.left + pb.width / 2, pb.top + pb.height / 2];
-    const [pe, sentFrom] = [(type, id, x) => body.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: "touch", isPrimary: id === 21, clientX: x, clientY: cy, bubbles: true })), window.__ww.sent.length];
-    // Two fingers 200 px apart come together to 140 px (8 moves).
-    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].forEach((i) => {
-      const t = i === 0 ? "pointerdown" : i === 9 ? "pointerup" : "pointermove";
-      const q = Math.min(i, 8) * 3.75;
-      (pe(t, 21, cx - 100 + q), pe(t, 22, cx + 100 - q));
-    });
+    const bar = document.querySelector('.webwindow[data-wwid="902"] .webwindow-title');
+    if (!body || !bar) return ["pinch: no web window body or bar on the page on screen"];
+    const [pb, pr] = [body.getBoundingClientRect(), bar.getBoundingClientRect()];
+    g.pinchOn([body, body], [pb.top + pb.height / 2, pb.top + pb.height / 2], [21, 22], pb.left + pb.width / 2);
     await window.__gw.settled();
-    const [pw, k] = [W.webWins.value.find((w) => w.id === 902), W.webWins.value.find((w) => w.id === 902).scale ?? 1];
-    fails.push(...pinchScaled(pw, body, sentFrom));
-    const b2 = body.getBoundingClientRect();
-    const acts = calls.map((c) => c[0]).join(",");
-    if (acts !== "down,cancel") fails.push(`a pinch on the body reached the app: ${acts} (want down,cancel)`);
+    const fails = g.bodyPinch(W.webWins.value.find((w) => w.id === 902), body, calls);
     calls.length = 0;
-    const p = [b2.left + b2.width / 2, b2.top + b2.height / 2];
-    body.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 23, pointerType: "touch", clientX: p[0], clientY: p[1], bubbles: true }));
-    body.dispatchEvent(new PointerEvent("pointerup", { pointerId: 23, pointerType: "touch", clientX: p[0], clientY: p[1], bubbles: true }));
-    const d = [...(calls[0] ?? []), NaN, NaN, NaN];
-    const want = [body.offsetWidth / 2, body.offsetHeight / 2];
-    if (Math.hypot(d[1] - want[0], d[2] - want[1]) > 1) fails.push(`at scale ${k}, a press at the body's centre went to the app at ${d[1]},${d[2]} (want ${want})`);
-    // One finger whose up landed outside the frame (never seen by it), then a new one-finger drag: only a move, no
-    // scale (10-30 "dragging with one finger rescales").
-    const one = (type, id, x, primary) => body.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: "touch", isPrimary: primary, clientX: x, clientY: p[1], bubbles: true }));
-    one("pointerdown", 31, p[0] - 80, true);
-    document.body.dispatchEvent(new PointerEvent("pointerup", { pointerId: 31, pointerType: "touch", isPrimary: true, bubbles: true }));
-    one("pointerdown", 32, p[0], true);
-    [20, 40, 60].forEach((dx) => one("pointermove", 32, p[0] + dx, true));
-    one("pointerup", 32, p[0] + 60, true);
+    const from = window.__ww.sent.length;
+    g.pinchOn([bar, body], [pr.top + pr.height / 2, pr.top + pr.height / 2 + 40], [25, 24], pb.left + pb.width / 2);
     await window.__gw.settled();
-    const p2 = W.webWins.value.find((w) => w.id === 902);
-    if (p2.w !== pw.w || p2.h !== pw.h || p2.scale !== pw.scale) fails.push(`a one-finger drag after a finger lifted outside the window changed it ${pw.w}x${pw.h}@${pw.scale} -> ${p2.w}x${p2.h}@${p2.scale}`);
+    fails.push(...g.barPinch(W.webWins.value.find((w) => w.id === 902), body, from));
+    if (calls.length) fails.push(`a pinch from the bar reached the app: ${calls.map((c) => c[0] + c[3]).join(",")} (want nothing)`);
+    return [...fails, ...(await g.afterScale(W, body, calls))];
   } finally {
     W.webWins.value = [];
     powos.webwindows = had;
   }
-  return fails;
 }
 
 /**
@@ -4114,7 +4238,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, webWindowResizeCheck, webWindowZoneKeepsHome, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }
@@ -4227,6 +4351,11 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, position] of [["folded", "bottom"], ["folded", "right"], ["unfolded", "bottom"], ["unfolded", "right"], ["unfolded", "left"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `dock-search-${label}-${position}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos) => (await importShim("./dev/dock-search-check.js")).dockSearchCheck(pos), position))));
+  // The launcher's panel fits its window (dev/launcher-fit-check.js, LP1/LT1 2026-10-31): PowOS AI's pill above the nav
+  // inset or the keyboard, the app grid a row gap under the panel's top - folded and unfolded, every dock side.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, position, keyboard] of ["unfolded", "folded"].flatMap((l) => ["bottom", "left", "right"].flatMap((p) => [[l, p, false], [l, p, true]])))
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, `launcher-fit-${label}-${position}${keyboard ? "-kbd" : ""}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos, kb) => (await importShim("./dev/launcher-fit-check.js")).launcherFits(pos, kb), position, keyboard))));
   // The same in the user's unfolded home: the dock on the right, the pill below it, 821x883 (the phone, 2026-10-28).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-keyboard-side", { width: 821, height: 883 }).then((r) => whenReady(r, () => launcherKeyboardSide(r.page, { width: 821, height: 883 }))));
@@ -4565,6 +4694,12 @@ try {
       }),
     );
   }
+  // What needs me (apps/needs-me, its UI through --app): the widget on the real host.notifications over mock Discord /
+  // WhatsApp / Gmail notifications (MessagingStyle, a RemoteInput reply, mark-as-read), driven as the user does - the rows
+  // grouped (one person across two apps), a reply pressing the reply action exactly once with the text, a swipe pressing
+  // mark-as-read, and nothing pressed without a gesture.
+  if (apps().some((a) => a.id === "local.needs-me"))
+    runs.push(open(browser, `${ORIGIN}/__gate_app.html`, "app local.needs-me actions", { width: 404, height: 900 }).then((r) => settleNeedsMe(r)));
   for (const r of (await Promise.all(runs)).filter(Boolean)) {
     if (r.problems.length) {
       failed++;
@@ -4591,4 +4726,128 @@ function overpullInFlow() {
   if (Math.abs(sr.left - lr.left) > 1 || Math.abs(sr.right - lr.right) > 1)
     fails.push(`${at}, a stack is ${Math.round(sr.left - lr.left)}/${Math.round(lr.right - sr.right)} px in from its list's edges`);
   };
+}
+
+/** The What needs me case (above): mount, then each gesture, every step in the page (window.__nm); its problems. */
+async function settleNeedsMe(r) {
+  const steps = [nmMount, nmRows, nmReply, nmSwipe, nmOpen];
+  try {
+    await r.page.evaluate(() => new Promise((ok) => (window.importShim ? ok() : addEventListener("load", ok))));
+    await r.page.evaluate(`window.__nmItems = ${nmItems.toString()}`);
+    for (const step of steps) {
+      const out = await r.page.evaluate(step);
+      r.problems.push(...out);
+      if (out.length && step === nmMount) break;
+    }
+  } catch (e) {
+    r.problems.push(`evaluate: ${e.message.split("\n")[0]}`);
+  }
+  r.problems.push(...r.uncaught);
+  return { ...r, ready: true, ms: Date.now() - r.started };
+}
+
+/** Mock Discord / WhatsApp / Gmail notifications (and one from a package the app may not read) on the mock bridge. */
+function nmItems() {
+  const now = Date.now();
+  const reply = { title: "Reply", input: true, semantic: 1 };
+  const read = { title: "Mark as read", input: false, semantic: 2 };
+  const msg = (sender, text, ago) => ({ sender, text, time: now - ago * 1000 });
+  const base = { icon: null, clearable: true, profile: null, tappable: true, conversation: true, groupConversation: false };
+  const t = (ago) => now / 1000 - ago;
+  return [
+    { ...base, key: "wa", app: "WhatsApp", pkg: "com.whatsapp", title: "Anna Berg", text: "", time: t(60), actions: [reply, read], messages: [msg("Anna Berg", "Coming tonight?", 60)] },
+    { ...base, key: "gm", app: "Gmail", pkg: "com.google.android.gm", title: "Anna Berg", text: "Photos", time: t(600), actions: [{ title: "Archive", input: false }] },
+    { ...base, key: "dc", app: "Discord", pkg: "com.discord", title: "#powos", text: "", time: t(300), actions: [read, reply], messages: [msg("kai", "build is green", 300)], conversationTitle: "#powos", groupConversation: true },
+    { ...base, key: "other", app: "Signal", pkg: "org.thoughtcrime.securesms", title: "Not ours", text: "hidden", time: t(0) },
+  ];
+}
+
+/** In the page: the widget on the shell's own host (apps/stdb.ts) over the mock list, every press recorded. */
+async function nmMount() {
+  const imp = (p) => window.importShim(p);
+  const { powos } = await imp("./bridge.ts");
+  const P = await imp("./apps/pages.ts");
+  const { host } = await imp("./apps/stdb.ts");
+  const { h, render } = await imp("preact");
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const until = async (f, ms = 3000) => {
+    for (const end = Date.now() + ms; Date.now() < end; await sleep(25)) if (f()) return true;
+    return false;
+  };
+  const perms = ["notifications:com.discord", "notifications:com.whatsapp", "notifications:com.google.android.gm"];
+  P.installedApps.value = [{ id: "local.needs-me", name: "What needs me", version: "0", database: "", tier: 0, manifest: JSON.stringify({ permissions: perms }) }];
+  const calls = [];
+  const list = { available: true, items: window.__nmItems() };
+  Object.assign(powos.notifications, {
+    list: async () => list,
+    action: async (...a) => void calls.push(["action", ...a]),
+    dismiss: async (k) => void calls.push(["dismiss", k]),
+    open: async (k) => void calls.push(["open", k]),
+  });
+  const mod = await imp("./_app/local.needs-me/widgets/main.js");
+  const root = Object.assign(document.createElement("div"), { style: "width:360px;height:360px;position:relative;font:14px sans-serif" });
+  document.body.append(root);
+  render(h(mod.default, { host, app: "local.needs-me", base: "./_app/local.needs-me/", cells: [4, 4] }), root);
+  // By the row's group (a long name is shortened to fit, model.ts groupKey): a person's, or a conversation's.
+  const row = (name) => [...root.querySelectorAll(".nm-row")].find((r) => r.dataset.group.endsWith(name.toLowerCase()));
+  window.__nm = { calls, root, sleep, until, row, said: () => JSON.stringify(calls) };
+  if (!(await until(() => row("Anna Berg") && row(":#powos")))) return [`the rows didn't render: "${root.textContent.slice(0, 200)}"`];
+  await sleep(800);
+  return [];
+}
+
+/** Grouped: Anna Berg once for WhatsApp + Gmail, #powos, nothing from Signal - and nothing pressed by showing them. */
+async function nmRows() {
+  const { root, row, calls, said } = window.__nm;
+  const fails = [];
+  const n = root.querySelectorAll(".nm-row").length;
+  if (n !== 2) fails.push(`${n} rows, want 2 (Anna Berg across WhatsApp + Gmail, #powos; Signal not permitted)`);
+  if (row("Anna Berg").querySelectorAll("[data-open]").length !== 2) fails.push("Anna Berg's row doesn't group WhatsApp and Gmail (two app icons)");
+  if (root.textContent.includes("Not ours")) fails.push("a notification from a package the manifest doesn't permit shows");
+  if (calls.length) fails.push(`pressed without a gesture: ${said()}`);
+  return fails;
+}
+
+/** Tap the row, type, tap send twice fast: one press of WhatsApp's reply (action 0) with the text, nothing before send. */
+async function nmReply() {
+  const { row, calls, until, sleep, said } = window.__nm;
+  const anna = row("Anna Berg");
+  anna.querySelector("[role=button]").click();
+  if (!(await until(() => anna.querySelector("form textarea, form input")))) return ["no reply field after tapping the row"];
+  const field = anna.querySelector("form textarea, form input");
+  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field), "value").set.call(field, "on my way");
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  await sleep(150);
+  const before = calls.length ? [`tapping the row or typing pressed something: ${said()}`] : [];
+  const send = anna.querySelector("form [type=submit]");
+  send.click();
+  send.click();
+  await sleep(500);
+  const ok = said() === JSON.stringify([["action", "wa", 0, "on my way"]]);
+  return [...before, ...(ok ? [] : [`reply pressed ${said()}, want once ["action","wa",0,"on my way"]`])];
+}
+
+/** Swipe #powos sideways: Discord's own mark-as-read (action 0), once. */
+async function nmSwipe() {
+  const { row, calls, sleep, said } = window.__nm;
+  calls.length = 0;
+  const el = row(":#powos").querySelector("[role=button]");
+  const box = el.getBoundingClientRect();
+  const ev = (t, x) => el.dispatchEvent(new PointerEvent(t, { bubbles: true, clientX: box.left + x, clientY: box.top + box.height / 2, pointerId: 3, isPrimary: true }));
+  ev("pointerdown", 20);
+  for (let x = 20; x <= 20 + box.width * 0.6; x += 20) ev("pointermove", x);
+  ev("pointerup", 20 + box.width * 0.6);
+  await sleep(400);
+  const ok = calls.length === 1 && JSON.stringify(calls[0].slice(0, 3)) === JSON.stringify(["action", "dc", 0]) && calls[0][3] == null;
+  return ok ? [] : [`swipe pressed ${said()}, want once ["action","dc",0] (no text)`];
+}
+
+/** A tap on an app icon: that notification's own tap action (contentIntent), once. */
+async function nmOpen() {
+  const { row, calls, sleep, said, root } = window.__nm;
+  calls.length = 0;
+  row("Anna Berg").querySelector("[data-open]").click();
+  await sleep(200);
+  root.remove();
+  return said() === JSON.stringify([["open", "wa"]]) ? [] : [`icon tap pressed ${said()}, want once ["open","wa"]`];
 }

@@ -546,10 +546,21 @@ powos.on("webwindows.adopt", (m: { task?: number; kwin?: number; key: string; la
 // An app opened from another PowOS window (the launcher overlay, Quick Tools, the AI; ShellBridge.launchOnHome): a web
 // window on this page, as home's own launch makes one. Not one here (no window for it): the host launches it as before.
 powos.on("webwindows.launch", ({ key }: { key: string }) => {
-  void openWebWindow(key, byKey.value.get(key)?.label ?? key, pages.value[page.value] ?? 1).then((ok) => {
+  void openAsWebWindow(key).then((ok) => {
     if (!ok) void powos.apps.launch(key);
   });
 });
+
+/**
+ * [key] opened as a web window on this page (false: the host launches it as before). Not Plasma (App.desktop): it shows
+ * the whole desktop in its own activity and never opens a KWin window, so a placeholder waiting for one only ever said
+ * "Couldn't start Plasma. It opened no window." (the user, 2026-10-31 02:09) and kept the next dock taps for itself.
+ */
+function openAsWebWindow(key: string): Promise<boolean> {
+  const app = byKey.value.get(key);
+  if (app?.desktop) return Promise.resolve(false);
+  return openWebWindow(key, app?.label ?? key, pages.value[page.value] ?? 1);
+}
 
 export async function launch(key: string) {
   menu.value = null;
@@ -560,7 +571,7 @@ export async function launch(key: string) {
     return;
   }
   // Unfolded with web windows on (Settings.Global powos_web_windows): the app opens as an element of this page.
-  if (await openWebWindow(key, byKey.value.get(key)?.label ?? key, pages.value[page.value] ?? 1)) {
+  if (await openAsWebWindow(key)) {
     closeDrawer(true);
     return;
   }

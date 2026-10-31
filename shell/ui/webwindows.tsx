@@ -1023,6 +1023,14 @@ function fillOf(): string {
   return fillHex;
 }
 
+/**
+ * W-IN1: bumped in the frame any window's geometry changes - a move, a resize, a snap or its transition, open, close,
+ * raise, full screen, a page swipe carrying it, a fold. Home re-reports the pull-exclusion regions from it (home.tsx),
+ * so they follow the same per-frame geometry as the layer (03:15: "the window resized, but ... the touch handlers
+ * didn't realize": they were refreshed only on webWins changes, then read mid-transition).
+ */
+export const windowFrame = signal(0);
+
 /** "<dpr> <n> <entries...>": every window the page shows, bottom first (DOM order = z-order). */
 export function geometry(): string {
   const parts = webWins.value.filter((w) => !w.pending).map(entry).filter((e): e is string => e != null);
@@ -1057,6 +1065,7 @@ function tick(ts: number) {
   const g = geometry();
   if (g !== lastGeometry) {
     lastGeometry = g;
+    windowFrame.value++;
     const id = nextFrameId();
     const now = Date.now();
     // Two stamps (wall-clock ms): the rAF's frame time, and now - the send - so the host splits its "rx=" into the page's
@@ -1196,6 +1205,9 @@ addEventListener("pointerdown", (e) => {
  */
 const oneFinger = new Map<number, () => void>();
 
+/** PZ1: a window's body taking another finger of its gesture that landed off the body (the bar, a zone), by window id. */
+const bodyFinger = new Map<number, (e: PointerEvent) => void>();
+
 /** A pinch's floor (the old native frame's MIN_SCALE) and ceiling (never past the work area either: [usePinch]). */
 export const MIN_SCALE = 0.4;
 export const MAX_SCALE = 1.5;
@@ -1206,24 +1218,37 @@ export const MAX_SCALE = 1.5;
  * size (w, h: no relayout), its layer is drawn at the frame's measured scale (entry()). Scale = start x spread / start
  * spread, [MIN_SCALE]..[MAX_SCALE] and no bigger than the work area; the window point under the fingers' centroid stays
  * under it. The scale is saved with the window. An edge or a grip RESIZES (w, h; the bar stays [TITLE]: RB1). The
- * first finger's gesture ends unfinished ([oneFinger]): the body's pinch never reaches the app. One finger never
- * scales: a primary pointer down starts a new touch.
+ * first finger's gesture ends unfinished ([oneFinger]). One finger never scales: a primary pointer down starts a new
+ * touch.
+ * PZ1 (the user, 10-31 01:40: "I shouldn't be able to rescale the window with two fingers unless I'm pressing the
+ * corners/resizers. If I zoom normally IN the app, I'm now resizing the window"): only a gesture whose FIRST finger is on
+ * the chrome (the bar, an edge zone or corner grip) scales; a second finger on the body then is still the pinch's. A
+ * gesture that starts on the body is the app's, every finger ([Body]: one multi-touch gesture, a pinch zooms Chrome's
+ * page), a later finger off the body included ([bodyFinger]).
  */
 function usePinch(win: WebWin) {
   const fingers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ spread0: number; s0: number; px: number; py: number } | null>(null);
+  const onBody = useRef(false);
   const live = useRef(win);
   live.current = win;
   const spread = () => {
     const [a, b] = [...fingers.current.values()];
     return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) };
   };
+  // PZ1: finger [e] counted; true = the gesture is the body's (its first finger was there): never a pinch.
+  const bodyGesture = (e: PointerEvent) => {
+    const inBody = !!(e.target as Element | null)?.closest?.(".webwindow-body");
+    if (!fingers.current.size) onBody.current = inBody;
+    fingers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (onBody.current && !inBody) (e.stopPropagation(), bodyFinger.get(win.id)?.(e));
+    return onBody.current;
+  };
   const down = (e: PointerEvent) => {
     // The first finger of a new touch starts clean: an earlier finger's up that landed outside this frame was never
     // seen here, and a stale entry made the next one-finger drag a pinch (10-30: "dragging with one finger rescales").
     if (e.isPrimary) (fingers.current.clear(), (pinch.current = null));
-    fingers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (fingers.current.size !== 2 || pinch.current) return;
+    if (bodyGesture(e) || fingers.current.size !== 2 || pinch.current) return;
     e.stopPropagation();
     oneFinger.get(win.id)?.();
     oneFinger.delete(win.id);
@@ -1574,21 +1599,45 @@ const SHADOW_PAD = 64;
  * to the app - the window raised, so it is in front and focused, the same for Android and Linux apps.
  */
 function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | null } }) {
-  const pressed = useRef(false);
-  const toApp = (e: PointerEvent, action: "down" | "move" | "up" | "cancel") => {
+  // PZ1: its fingers down now (pointer id -> finger 0, 1, ...: the lowest free), each sent to the app as that finger.
+  const pressed = useRef(new Map<number, number>());
+  const toApp = (e: PointerEvent, action: "down" | "move" | "up" | "cancel", finger = 0) => {
     e.stopPropagation();
     const el = body.current;
     const r = el?.getBoundingClientRect();
     // The body's on-screen scale as measured (its own scale times every ancestor's: the page's zoom, a swipe), the same
     // as entry()'s: dividing by win.scale alone put presses in the wrong place at a page zoom (x0.53).
     const s = el && el.offsetWidth ? r!.width / el.offsetWidth : (win.scale ?? 1);
-    if (r && win.id >= 0) void powos.webwindows?.input(win.id, action, (e.clientX - r.left) / s, (e.clientY - r.top) / s);
+    if (r && win.id >= 0) void powos.webwindows?.input(win.id, action, { x: (e.clientX - r.left) / s, y: (e.clientY - r.top) / s, finger });
   };
+  const down = (e: PointerEvent) => {
+    const p = pressed.current;
+    // A new touch: fingers whose up this body never saw end first (the app's gesture never keeps a stale finger).
+    if (e.isPrimary && p.size) (p.clear(), toApp(e, "cancel"));
+    if (!p.size) raise(win.id);
+    try {
+      body.current?.setPointerCapture(e.pointerId);
+    } catch {}
+    let n = 0;
+    while ([...p.values()].includes(n)) n++;
+    p.set(e.pointerId, n);
+    toApp(e, "down", n);
+    if (n === 0)
+      oneFinger.set(win.id, () => {
+        if (!p.size) return;
+        p.clear();
+        toApp(e, "cancel");
+      });
+  };
+  bodyFinger.set(win.id, down);
   const end = (e: PointerEvent, action: "up" | "cancel") => {
-    if (!pressed.current) return;
-    pressed.current = false;
-    if (appDragEnd(win.id, e, action === "cancel")) return;
-    toApp(e, action);
+    const n = pressed.current.get(e.pointerId);
+    if (n === undefined) return;
+    pressed.current.delete(e.pointerId);
+    // A cancel ends the app's whole gesture (the host's ACTION_CANCEL is every finger's).
+    if (action === "cancel") pressed.current.clear();
+    if (n === 0 && appDragEnd(win.id, e, action === "cancel")) return;
+    toApp(e, action, n);
   };
   const icon = iconOf(win.key);
   return (
@@ -1596,18 +1645,11 @@ function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | nu
       class={`webwindow-body ${win.live ? "live" : "placeholder"}`}
       ref={body}
       style={{ flex: 1, touchAction: "none" }}
-      onPointerDown={(e) => {
-        raise(win.id);
-        capture(e);
-        pressed.current = true;
-        toApp(e, "down");
-        oneFinger.set(win.id, () => {
-          if (!pressed.current) return;
-          pressed.current = false;
-          toApp(e, "cancel");
-        });
+      onPointerDown={down}
+      onPointerMove={(e) => {
+        const n = pressed.current.get(e.pointerId);
+        if (n !== undefined && !(n === 0 && appDragMove(win.id, e))) toApp(e, "move", n);
       }}
-      onPointerMove={(e) => pressed.current && !appDragMove(win.id, e) && toApp(e, "move")}
       onPointerUp={(e) => end(e, "up")}
       onPointerCancel={(e) => end(e, "cancel")}
     >

@@ -422,7 +422,7 @@ class ShellBridge(
                     runtime.usage.record(a.getString(0))
                     webWindows.also { webWindowsMade = true }.open(app.component, a.getJSONObject(1), a.optInt(2, -1))
                 } ?: -1
-            "webwindows.input" -> webWindowsMade && webWindows.input(a.getInt(0), a.getString(1), a.getDouble(2), a.getDouble(3))
+            "webwindows.input" -> webWindowsMade && webWindows.input(a.getInt(0), a.getString(1), WebWindows.BodyTouch(a.getDouble(2), a.getDouble(3), a.optInt(4, 0)))
             "webwindows.close" -> webWindowsMade && webWindows.close(a.getInt(0))
             "webwindows.fullScreen" -> webWindowsMade && webWindows.fullScreen(a.getInt(0))
             "webwindows.toWindow" -> webWindowsMade && webWindows.toWindow(a.getInt(0))
@@ -694,6 +694,9 @@ class ShellBridge(
                     .put("label", app.name)
                     .put("icon", icon("l:${app.id}"))
                     .put("kind", "linux")
+                    // Plasma (PLASMA_COMMAND) opens its own Android activity with the whole desktop (Runtime.showDesktop),
+                    // never a KWin toplevel: the page mustn't wait for one (its placeholder said "It opened no window.").
+                    .apply { if (app.exec == dev.omalauncher.linux.PLASMA_COMMAND) put("desktop", true) }
                     .putOpt("categories", app.categories),
             )
         }
@@ -1064,28 +1067,42 @@ class ShellBridge(
 
     /**
      * A notification as the page shows it: { key, app, icon, title, text, time, clearable, profile, actions: [{ title,
-     * input }], category, pkg, group, conversation } - the panel's (grouped: notifications.tsx), and the shade's
+     * input, semantic }], category, pkg, group, conversation, messages: [{ sender, text, time }], conversationTitle,
+     * groupConversation, tappable } - the panel's (grouped: notifications.tsx), and the shade's
      * heads-up banner's ("shade.peek").
      */
     fun notificationJson(item: dev.omalauncher.widgets.runtime.Notifications.Item): JSONObject {
         // The app's drawer icon (its own profile's, badge and all, when it's from a work or cloned one).
         val app = runtime.androidApps.apps.firstOrNull { it.component.packageName == item.pkg && (item.profile == null) == (it.profile == null) }
-        return JSONObject()
-            .put("key", item.key)
-            .put("app", item.app)
-            .put("icon", linuxIcon(item) ?: app?.let { icon("a:${it.key}") } ?: JSONObject.NULL)
-            .put("title", item.title)
-            .put("text", item.text)
-            .put("time", item.time)
-            .put("clearable", item.clearable)
-            .put("profile", item.profile ?: JSONObject.NULL)
-            .put("actions", JSONArray(item.actions.map { JSONObject().put("title", it.title).put("input", it.input) }))
-            .put("category", item.category ?: JSONObject.NULL)
-            // A Plasma one groups by its Linux app (not with PowOS's own notifications, which share the app's package).
-            .put("pkg", item.linuxEntry?.let { "linux:" + it.ifEmpty { item.app } } ?: item.pkg)
-            .put("group", item.group ?: JSONObject.NULL)
-            .put("conversation", item.conversation)
+        return messaging(
+            item,
+            JSONObject()
+                .put("key", item.key)
+                .put("app", item.app)
+                .put("icon", linuxIcon(item) ?: app?.let { icon("a:${it.key}") } ?: JSONObject.NULL)
+                .put("title", item.title)
+                .put("text", item.text)
+                .put("time", item.time)
+                .put("clearable", item.clearable)
+                .put("profile", item.profile ?: JSONObject.NULL)
+                .put("actions", JSONArray(item.actions.map { JSONObject().put("title", it.title).put("input", it.input).put("semantic", it.semantic) }))
+                .put("category", item.category ?: JSONObject.NULL)
+                // A Plasma one groups by its Linux app (not with PowOS's own notifications, which share the app's package).
+                .put("pkg", item.linuxEntry?.let { "linux:" + it.ifEmpty { item.app } } ?: item.pkg)
+                .put("group", item.group ?: JSONObject.NULL)
+                .put("conversation", item.conversation),
+        )
     }
+
+    /** MessagingStyle's part of [item] (the What needs me app's who and line): sender "" is the user's own reply. */
+    private fun messaging(
+        item: dev.omalauncher.widgets.runtime.Notifications.Item,
+        o: JSONObject,
+    ): JSONObject =
+        o.put("messages", JSONArray(item.messages.map { JSONObject().put("sender", it.sender).put("text", it.text).put("time", it.time) }))
+            .put("conversationTitle", item.conversationTitle ?: JSONObject.NULL)
+            .put("groupConversation", item.groupConversation)
+            .put("tappable", item.tappable)
 
     /**
      * A Plasma notification's icon (PlasmaBridge): its Linux app's drawer icon - by its desktop entry, else the app
