@@ -26,6 +26,9 @@
 # - module/: the boot watchdog (post-fs-data.sh counts boots, service.sh clears the count once Android is up; two
 #   that never finish and the module disables itself), and load-kernel-modules.sh: the containers kernel's nftables
 #   modules (kernel/out/modules, when built), insmodded at boot in the background (docs/PHONE-KERNEL-CONTAINERS.md §9).
+#   split-orientation.sh: the split screen divider menu's horizontal/vertical item for every app (OxygenOS greys it out
+#   for apps missing from its <vSplit> list, which this phone's configs leave empty): a copy of the stock split config
+#   with the installed apps added, built at post-fs-data and mounted by Magisk over /system_ext/oplus.
 #
 # Output: ~/Projects/android-app-dev/output/powos-system-module.zip (install: magisk --install-module, reboot).
 set -euo pipefail
@@ -109,7 +112,7 @@ cp "$APK" "$M/system/priv-app/PowOS/PowOS.apk"
     echo '</permissions>'
 } > "$M/system/etc/permissions/privapp-permissions-com.powos.app.xml"
 fi
-cp "$HERE/module/post-fs-data.sh" "$HERE/module/service.sh" "$HERE/module/load-kernel-modules.sh" "$M/"
+cp "$HERE/module/post-fs-data.sh" "$HERE/module/service.sh" "$HERE/module/load-kernel-modules.sh" "$HERE/module/split-orientation.sh" "$M/"
 # What the module installs and runs, as units (lib/apps/powos-units: `powos units` on the phone's Android side reads
 # /data/adb/modules/*/powos-units/*.json): the module registers itself, and goes with itself.
 mkdir -p "$M/powos-units" && cp "$HERE/../../../units/system-module/"*.json "$M/powos-units/"

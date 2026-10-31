@@ -5,3 +5,5 @@ MODDIR=${0%/*}
 [ -f "$MODDIR/load-kernel-modules.sh" ] && sh "$MODDIR/load-kernel-modules.sh" &
 until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 2; done
 echo 0 > "$MODDIR/boot-attempts"
+# The installed apps, for the next boot's split orientation list (split-orientation.sh).
+sh "$MODDIR/split-orientation.sh" list
