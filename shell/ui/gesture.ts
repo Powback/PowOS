@@ -20,7 +20,7 @@
 import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { dropKeyboard } from "./keyboard.ts";
-import { crossing, panelTicks } from "./haptics.ts";
+import { panelTicks } from "./haptics.ts";
 import { overPull, overRelease } from "./overpull.ts";
 import { inWindow } from "./desktops.ts";
 import { ccEditing, ccExpanded, EXPAND_AT, expandedByDefault, FOLD_AT, settle as settleCc, stretch as stretchCc } from "./ccexpand.ts";
@@ -78,20 +78,11 @@ export const held = signal(false);
 export const pageDrag = signal<number | null>(null);
 
 // Haptics (haptics.ts): a tick as a finger crosses what letting go would commit - the launcher's openness (the host's
-// pull.drag or home's own swipe: OPEN_AT, PanelPull.kt's too; shutting it, CLOSE_KEEP), the shade's (its pull, its
-// swipe shut) and the pages' snap (PAGE_AT of the width, to a page there is). Once per crossing, never while held.
+// pull.drag or home's own swipe: OPEN_AT, PanelPull.kt's too; shutting it, CLOSE_KEEP) and the shade's (its pull, its
+// swipe shut). Once per crossing, never while held. Page changes are silent (the user, 10-31: "Don't need haptics
+// when changing page"; gate page-swipe-no-haptic).
 panelTicks(drawerDrag, () => drawer.peek() > 0, OPEN_AT, CLOSE_KEEP);
 panelTicks(notifDrag, () => notif.peek(), OPEN_AT, CLOSE_KEEP);
-const pageGate = crossing();
-let pageWidth = 0;
-effect(() => {
-  const dx = pageDrag.value;
-  if (dx == null) return void ((pageWidth = 0), pageGate.reset());
-  pageWidth ||= document.querySelector(".pages")?.clientWidth || innerWidth;
-  const at = page.peek();
-  const to = Math.max(editing.peek() ? 0 : -1, Math.min(pageCount.peek() - 1, at - Math.sign(dx)));
-  pageGate.at(to !== at && Math.abs(dx) >= pageWidth * PAGE_AT);
-});
 
 // The page, the shade/control panel opening or switching: the same, whatever started it (a swipe, a tap, the bridge).
 let seen = "";

@@ -230,11 +230,6 @@
       "count": 2
     }
   },
-  "ui/glass.ts": {
-    "complexity": {
-      "count": 1
-    }
-  },
   "ui/glasses.tsx": {
     "complexity": {
       "count": 2

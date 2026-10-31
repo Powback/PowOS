@@ -133,32 +133,55 @@ let assistLive = false;
  * tint for its text to keep 4.5:1 (theme.css); without a picture, none is set and the reference stays as it is.
  */
 let toneFor: string | null = null;
-async function tone(url: string | null) {
-  if (url === toneFor) return;
-  toneFor = url;
-  if (!url) return void delete root.dataset.wallpaper;
-  try {
-    const img = new Image();
-    img.src = url;
-    await img.decode();
-    const c = document.createElement("canvas");
-    c.width = c.height = 16;
-    const x = c.getContext("2d", { willReadFrequently: true })!;
-    x.drawImage(img, 0, 0, 16, 16);
-    const d = x.getImageData(0, 0, 16, 16).data;
-    let l = 0;
-    for (let i = 0; i < d.length; i += 4) l += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
-    if (toneFor === url) root.dataset.wallpaper = l / 256 / 255 > 0.5 ? "light" : "dark";
-  } catch {
-    if (toneFor === url) delete root.dataset.wallpaper;
-  }
+let toneOf: string | null = null;
+/**
+ * Which wallpaper a picture is of: its URL, but a live wallpaper's every frame is another picture (ShellWallpaper.kt:
+ * rev "live-<component>-<fingerprint>", read again on every resume and 2.5 s later). The frame captured as home came
+ * back from an app toned the theme the other way until the next one (the user, 10-31 20:08: "When I return home from
+ * an app, the theme is fucked up for a moment" - dark labels with a white halo, a light search bar: data-wallpaper
+ * flipped to light). The tone is the wallpaper's, read from its first picture; another frame keeps it.
+ */
+function wallpaperOf(w: GlassSource["wallpaper"]): string | null {
+  const live = w?.source === "live" ? /^live-(-?\d+)-/.exec(w.rev) : null;
+  return live ? `live-${live[1]}` : (w?.url ?? null);
 }
+/** The picture's mean luminance (0..1), read small. */
+async function luminance(url: string) {
+  const img = new Image();
+  img.src = url;
+  await img.decode();
+  const c = document.createElement("canvas");
+  c.width = c.height = 16;
+  const x = c.getContext("2d", { willReadFrequently: true })!;
+  x.drawImage(img, 0, 0, 16, 16);
+  const d = x.getImageData(0, 0, 16, 16).data;
+  let l = 0;
+  for (let i = 0; i < d.length; i += 4) l += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+  return l / 256 / 255;
+}
+async function tone(url: string | null, of: string | null = url) {
+  const kept = of != null && of === toneOf && root.dataset.wallpaper;
+  if (url === toneFor || kept) return;
+  toneFor = url;
+  toneOf = of;
+  if (!url) return void delete root.dataset.wallpaper;
+  const l = await luminance(url).catch(() => null);
+  if (toneFor !== url) return;
+  if (l == null) delete root.dataset.wallpaper;
+  else root.dataset.wallpaper = l > 0.5 ? "light" : "dark";
+}
+
+/** What the page tones by (its wallpaper's picture), when it's over the wallpaper or is chrome over it. */
+const tonedBy = (g: GlassSource | null) => (OVER_WALLPAPER.has(mode) || CHROME.has(mode) ? (g?.wallpaper ?? null) : null);
+/** What the page frosts: the wallpaper over it, the assistant's screen it was opened over. */
+const frostedBy = (g: GlassSource | null) => (OVER_WALLPAPER.has(mode) ? (g?.wallpaper?.url ?? null) : mode === "assist" && !assistLive ? assistShot : null);
 
 function use(g: GlassSource | null) {
   lastSource = g;
-  void tone((OVER_WALLPAPER.has(mode) || CHROME.has(mode)) ? (g?.wallpaper?.url ?? null) : null);
+  const w = tonedBy(g);
+  void tone(w?.url ?? null, wallpaperOf(w));
   root.classList.toggle("glass-behind", TINT_ONLY.has(mode) && g != null);
-  source = OVER_WALLPAPER.has(mode) ? (g?.wallpaper?.url ?? null) : mode === "assist" && !assistLive ? assistShot : null;
+  source = frostedBy(g);
   void refrost();
 }
 
