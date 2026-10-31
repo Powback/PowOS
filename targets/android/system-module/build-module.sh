@@ -126,7 +126,8 @@ fi
 KEYS=~/.local/share/powos
 mkdir -p "$KEYS" "$M/system/product/overlay" "$WORK/overlays"
 shopt -s nullglob  # no overlays at all is fine: the module is then the priv-app (or just the watchdog)
-for dir in "$HERE"/overlays/*/; do cp -R "$dir" "$WORK/overlays/"; done
+# No trailing slash - BSD cp -R dir/ copies the contents, not the dir
+for dir in "$HERE"/overlays/*/; do cp -R "${dir%/}" "$WORK/overlays/"; done
 for slot in ${slots[@]+"${slots[@]}"}; do cp -R "$HERE/overlays-disabled/$slot" "$WORK/overlays/"; done
 [ -f "$KEYS/overlay.jks" ] || {
     sdk keytool -genkeypair -keystore /t/overlay.jks -storepass powos-overlay -keypass powos-overlay -alias overlay \
