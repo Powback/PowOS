@@ -23,6 +23,9 @@ export function homeBlank(): string {
   const vw = innerWidth, vh = innerHeight, sw = screen.width, sh = screen.height;
   if (Math.abs(vw - sw) > sw * TOL || vh > sh * (1 + TOL)) return `viewport ${vw}x${vh} is not the screen's ${sw}x${sh}`;
   if (!document.querySelector(".home")) return "no .home on the page";
+  // The PowOS AI page on screen slides home's dock off it (unfolded: the dock at x 1577 of 821, 10-31 14:14 - a false
+  // "blank"): any drawn content counts - the dock, the bar, or the AI page.
+  if (onScreen(".ai-screen", Math.min(vw, sw), Math.min(vh, sh))) return "";
   // The dock (or the bar, which the dock's search face replaces on some layouts) inside the screen's own box.
   if (!onScreen(".home .dock:not(.dock-tray), .home .bar", Math.min(vw, sw), Math.min(vh, sh))) return `neither the dock nor the bar on the ${sw}x${sh} screen`;
   return "";
