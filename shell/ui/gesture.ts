@@ -500,7 +500,14 @@ function ownerUnder(target: Element) {
 function listUnder(target: Element) {
   const list = target.closest?.(".drawer-list, .ai-panel .ai-scroll, .ai-panel, .chat, .notif-list");
   if (!list) return { inList: false, listTop: true, listBottom: true };
-  return { inList: true, listTop: list.scrollTop <= 0, listBottom: list.scrollTop + list.clientHeight >= list.scrollHeight - 1 };
+  // A column-reverse list (PowOS AI's chat, .ai-scroll.ai-chat) starts at its foot: scrollTop is 0 at the newest line and
+  // goes negative scrolled back, so "<= 0" read it at its top always and a drag down to scroll back closed the panel
+  // (the user, 2026-10-31 20:2x: "trying to scroll up in the AI launcher and it just dismisses it").
+  const back = getComputedStyle(list).flexDirection === "column-reverse";
+  const span = list.scrollHeight - list.clientHeight;
+  const top = back ? list.scrollTop <= -span + 1 : list.scrollTop <= 0;
+  const bottom = back ? list.scrollTop >= -1 : list.scrollTop >= span - 1;
+  return { inList: true, listTop: top, listBottom: bottom };
 }
 
 /**

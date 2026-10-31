@@ -168,15 +168,10 @@
 .home.pull-screen > :is(.bar, .dock) { flex: none; translate: none; margin: 0; }
 .home.pull-screen > .bar { order: 1; height: 48px; }
 .home.pull-screen > .dock { order: 2; height: var(--strip-height); opacity: 1; }
-/* The dock stays while the launcher is open (bottom dock, search bar above it): the pill and dock don't move, the drawer's
-   window ends at the pill's top, and the drawer only rises (as pill-below). Wide and side docks keep giving way. */
-.home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar) > :is(.bar, .dock) { transform: none; }
-/* ...but not over the launcher's chat (chat.tsx in the drawer): a page of text, the dock had no place on it (the user,
-   2026-10-28); it gives way as it does for a side dock, and comes back as the chat closes. */
-.home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar):not(:has(.drawer .chat)) > .dock { opacity: 1; }
-.home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar).open > .dock { pointer-events: auto; }
-.home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar) > .stage > .launcher-clip { inset: 0 0 4px; transform: none; }
-.home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar) > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
+/* Folded, the launcher has no dock (the user, 2026-10-31 20:05: "I don't feel like we should draw the dock at all unless
+   we're launching it with the launcher"; 20:2x: "The dock is still showing over the search bar. In mobile mode"): the
+   dock gives way (.dock, down and out), the pill slides down into its place (.home > .bar) and the grid's window rides
+   with the pill (.launcher-clip) - the grid ends just above the bar. The .adopts block below is unfolded's only. */
 
 /* A row of recent apps (recentwidget.tsx). */
 .strip {
@@ -3169,6 +3164,9 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
    2026-10-29: "the launcher shows the dock on the bottom even though I set the dock to be on the right side"). Still
    only on the app grid (pull.tsx dockShown: not in the chat, not with the keyboard). */
 .home.pull-screen:is(.dock-left, .dock-right) > .dock:not(.dock-tray) { pointer-events: auto; }
+/* LN1: folded, the overlay's dock shows only opened from the dock's search button (pull.tsx dockShown), under the pill -
+   a dock to use, not a picture of one (.home.open .dock gives way otherwise): its apps tap and drag out (DL1). */
+.home.pull-screen.from-button > .dock:not(.dock-tray) { pointer-events: auto; }
 /* The launcher's app grid and folders page start a row gap below the panel's top edge, not pinned to it (the user,
    2026-10-31: "Give them a little breathing space on the top"); they still scroll up under the edge. */
 .home .drawer-page > .drawer-list { padding-top: 24px; }
@@ -3198,25 +3196,16 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 
 /* Home's launcher ADOPTS home's foot (home.tsx HomeLauncher; the user, 2026-10-31 15:44: "It should also reuse the
    docking, so that we don't get duplicate docking"): the bar, the dock and the wide foot's recents stay where they are,
-   as they are - no slide, no fade, still tappable - and only the app grid's layer rises behind and above them. Over the
-   launcher's chat (folded) the dock still gives way (the user, 2026-10-28: a page of text, the dock had no place on it).
-   Home's page only (.adopts, home.tsx): the desktop's own launcher still has its side dock give way. !important: it
+   as they are - no slide, no fade, still tappable - and only the app grid's layer rises behind and above them. Unfolded
+   (.wide) only: folded the dock gives way (the user, 2026-10-31 20:2x: "I think when we said we have to reuse the dock,
+   it meant like if the dock is shown anyway"). Home's page only (.adopts, home.tsx): the desktop's own launcher still has its side dock give way. !important: it
    outranks the older per-layout give-way rules (pill-below, wide, side docks), many and specific. */
-.home.adopts:not(:has(.drawer .chat)) > .dock,
 .home.adopts.wide > .dock,
-.home.adopts:not(.search-parked) > .bar {
+.home.adopts.wide:not(.search-parked) > .bar {
   transform: none !important;
   opacity: 1 !important;
   pointer-events: auto !important;
 }
-
-/* LB1: so the app grid's window ends at the stage's foot - above the adopted dock and bar, wherever they sit (the pill
-   under the dock, the dock's search button, the parked pill, no pill yet while it opens) - and the last row scrolls
-   into view a gap over the dock (the user, 2026-10-31 18:27: "This doesn't look right in the bottom." - the grid ran on
-   under the dock, which stays now). The older layouts reached past the stage's foot, over where the dock gave way.
-   Not the wide foot (its own rule), the chat (the dock gives way there) or PowOS AI's panel (its own reach). */
-.home.adopts:not(.wide):not(:has(.drawer .chat)):not(:has(.ai-panel)) > .stage > .launcher-clip { inset: 0 0 4px; transform: none; }
-.home.adopts:not(.wide):not(:has(.drawer .chat)):not(:has(.ai-panel)) > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
 
 /* DS2: opened from home's dock search button (launchmorph.ts), the foot stays put - the dock lies over home's, the bar's
    glass grows out of the button itself - only the panel rises and fades in. */

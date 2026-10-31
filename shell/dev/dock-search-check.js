@@ -267,7 +267,8 @@ export async function dockSearchLaunch(position) {
   S.searchTry.value = "dock";
   await sleep(300);
   const folded = position === "bottom" && !document.querySelector(".pull-screen.wide");
-  const fails = folded && !document.querySelector(".pull-screen .dock .dock-search-face") ? ["the overlay's dock has no button slot"] : [];
+  // LN1: folded, the overlay has no dock until it opens from the button (pull.tsx dockShown): no slot at rest to check.
+  const fails = [];
   const from = buttonRect();
   fails.push(...(await morphOpen(E, from, folded)), ...(await shut(S, E, from)), ...(await holdOpen(S, E, from)));
   S.searchTry.value = "";

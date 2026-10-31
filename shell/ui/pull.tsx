@@ -106,8 +106,10 @@ powos.on("system.insets", (i: { keyboard?: number } | null) => (keyboardUp.value
     up (the user: the dock stays with the launcher so it's there when the launcher is used over other apps; 2026-10-29,
     the side dock hidden here: "This is supposed to be wired in..."). Folded only does it give way to the chat and the
     keyboard: unfolded (wide.ts desktopScreen, .wide) it stays with them, its column or the foot above the keyboard (the
-    user, 2026-10-30: "The dock is still hiding in unfolded mode when the keyboard shows in the launcher"). */
-const dockShown = computed(() => pullKind.value === "apps" && (wideHome.value || (!chatting.value && !keyboardUp.value)));
+    user, 2026-10-30: "The dock is still hiding in unfolded mode when the keyboard shows in the launcher"). Folded, only
+    when opened from the dock's search button (DS2 .from-button: the dock is where the open came from), under the pill;
+    any other open has none (the user, 2026-10-31 20:2x: "I don't know why the dock is showing in the launcher at all"). */
+const dockShown = computed(() => pullKind.value === "apps" && (wideHome.value || (!!morphFrom.value && !chatting.value && !keyboardUp.value)));
 
 /** A finger on the panel: a render when that starts and ends, not one for every frame of the drag. */
 const pullDragging = computed(() => drawerDrag.value != null);

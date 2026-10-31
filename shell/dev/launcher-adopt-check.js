@@ -1,4 +1,10 @@
 /**
+ * LN1 (the user, 2026-10-31 20:05-20:2x: "I don't feel like we should draw the dock at all unless we're launching it
+ * with the launcher and even then the dock should appear under the search bar" / "Like in mobile mode we don't show the
+ * dock in the AI launcher"): FOLDED, the launcher has no dock - home's gives way, the grid runs down to the bar; the
+ * overlay over an app has none, but opened from the dock's search button (DS2) its dock is under the bar. Unfolded
+ * keeps LA1 below.
+ *
  * LA1: the launcher adopts home's dock and bar (the user, 2026-10-31 15:44-15:45: "It should also reuse the docking, so
  * that we don't get duplicate docking" / "If the docking and recents is already available, we should just reuse that").
  * gate.mjs's launcher-adopt-* cases.
@@ -31,6 +37,9 @@ function foot() {
   return { bars: bars.length, docks: docks.length, rects: [...bars, ...docks].map(at).join(" ") };
 }
 
+/** Folded (no .wide on home or the overlay): the launcher has no dock (LN1). */
+const folded = () => !document.querySelector(".home.wide");
+
 /** Ten frames - five through the open's animation, five after it settled: one bar, one dock, where they were. */
 async function sampled(before) {
   const fails = [];
@@ -57,7 +66,8 @@ function backdropFails() {
   const root = getComputedStyle(document.documentElement).getPropertyValue("--backdrop-blur-native").trim();
   if (getComputedStyle(frame).backgroundColor !== tint) fails.push(`frame fill ${getComputedStyle(frame).backgroundColor}, not --backdrop-tint ${tint}`);
   if (getComputedStyle(frame).getPropertyValue("--glass-blur-native").trim() !== root) fails.push("frame blur isn't --backdrop-blur-native");
-  return [...fails, ...["form.bar", ".home > .dock:not(.dock-tray)"].filter(under).map((sel) => `${sel} is under the launcher, not over it`)];
+  const over = folded() ? ["form.bar"] : ["form.bar", ".home > .dock:not(.dock-tray)"];
+  return [...fails, ...over.filter(under).map((sel) => `${sel} is under the launcher, not over it`)];
 }
 
 /** The frame's rect is the whole viewport. */
@@ -78,7 +88,8 @@ function under(sel) {
 function footRects() {
   return [["dock", ".home > .dock:not(.dock-tray)"], ["dock button", ".home > .dock .dock-search"], ["bar", ".home > form.bar"]]
     .map(([name, sel]) => [name, document.querySelector(sel)])
-    .filter(([, el]) => el && shown(el))
+    // The dock's button: shown only with its dock (opacity is the dock's, not inherited into the button's own).
+    .filter(([, el]) => el && shown(el) && (!el.matches(".dock-search") || shown(el.closest(".dock"))))
     .map(([name, el]) => [name, el.getBoundingClientRect()]);
 }
 
@@ -103,6 +114,16 @@ function lastRowFails(list, cells, dock, gap) {
   return fails;
 }
 
+/** LN1 folded: no dock on screen, and the grid's last row ends just above the bar (within a row's gap, 40 px). */
+function foldedGridFails(cells, feet) {
+  const fails = feet.filter(([n]) => n !== "bar").map(([n]) => `the ${n} is shown in the folded launcher`);
+  const bar = feet.find(([n]) => n === "bar")?.[1];
+  if (!bar) return [...fails, "no bar in the folded launcher"];
+  const last = Math.max(...cells.map((r) => r.bottom));
+  if (last > bar.top + 0.5 || last < bar.top - 40) fails.push(`the last row ends at ${Math.round(last)}, not just above the bar's top ${Math.round(bar.top)}`);
+  return fails;
+}
+
 /**
  * LB1 (the user, 2026-10-31 18:27: "This doesn't look right in the bottom."): the grid scrolled to its end, its last row
  * sits wholly above home's foot - a bottom dock: the last cell's bottom 8 px over the dock's top - and no cell touches
@@ -118,8 +139,8 @@ async function gridClear(position) {
   if (!cells.length) return ["no app cells on screen"];
   const feet = footRects();
   const fails = cells.flatMap((r) => feet.filter(([, f]) => hit(r, f)).map(([name]) => `a grid cell (${box(r)}) overlaps the ${name}`));
-  const dock = position === "bottom" ? feet.find(([n]) => n === "dock")?.[1] : null;
-  fails.push(...lastRowFails(list, cells, dock, 8));
+  if (folded()) fails.push(...foldedGridFails(cells, feet));
+  else fails.push(...lastRowFails(list, cells, position === "bottom" ? feet.find(([n]) => n === "dock")?.[1] : null, 8));
   list.scrollTop = 0;
   return [...new Set(fails)];
 }
@@ -137,7 +158,10 @@ async function openedAdopting(S, button) {
   }
   const fails = before.bars === 1 && before.docks === 1 ? [] : [`at rest: ${before.bars} bars, ${before.docks} docks`];
   S.openPanel("apps", { search: true });
-  return [...fails, ...(await sampled(before))];
+  if (!folded()) return [...fails, ...(await sampled(before))];
+  await sleep(700);
+  const f = foot();
+  return f.bars === 1 && f.docks === 0 ? fails : [...fails, `open folded: ${f.bars} bars, ${f.docks} docks (one bar, no dock)`];
 }
 
 /** A phone's worth of apps (60), so the grid scrolls and its last row meets the foot (the mock's few fit on one page). */
@@ -184,8 +208,7 @@ async function cornerDragged(E) {
   for (const p of [0.2, 0.5, 0.8]) {
     E.emit("home.panel.drag", { p });
     await frame();
-    const f = foot();
-    if (f.bars !== 1 || f.docks !== 1) fails.push(`dragged to ${p}: ${f.bars} bars, ${f.docks} docks`);
+    if (foot().bars !== 1) fails.push(`dragged to ${p}: ${foot().bars} bars`);
     if (!document.querySelector(".home > .stage .launcher")) fails.push(`dragged to ${p}: no launcher in home's page`);
   }
   return fails;
@@ -218,20 +241,75 @@ export async function cornerOverHome() {
   const fails = before.bars === 1 && before.docks === 1 ? [] : [`at rest: ${before.bars} bars, ${before.docks} docks`];
   fails.push(...(await cornerDragged(E)));
   E.emit("home.panel.end", { open: true });
-  fails.push(...(await sampled(before)), ...cornerOpened(S, asked));
+  await sleep(700);
+  const f = foot();
+  if (f.bars !== 1 || f.docks !== 0) fails.push(`opened: ${f.bars} bars, ${f.docks} docks (folded: one bar, no dock)`);
+  fails.push(...cornerOpened(S, asked));
   S.closeDrawer();
   S.searchTry.value = "";
   return [...new Set(fails)];
 }
 
+/**
+ * The overlay over an app, folded (LN1): opened by the gesture, one bar and no dock; opened from the dock's search
+ * button (DS2 { from }), one dock, under the bar (dock.top >= bar.bottom).
+ */
 export async function ownDock() {
   const E = window.__mockEvents;
+  const S = await importShim("./state.ts");
+  if (S.dock.value.length < 4) S.dock.value = S.recent.value.slice(0, 4);
   E.emit("pull.begin", { kind: "apps" });
   E.emit("pull.end", { open: true });
   await sleep(450);
   const f = foot();
-  const fails = f.docks === 1 && f.bars === 1 ? [] : [`over an app: ${f.bars} bars, ${f.docks} docks (its own, one each)`];
+  const fails = f.docks === 0 && f.bars === 1 ? [] : [`over an app: ${f.bars} bars, ${f.docks} docks (folded: one bar, no dock)`];
   E.emit("pull.end", { open: false });
+  await sleep(500);
+  return [...fails, ...(await fromButtonDock(E))];
+}
+
+/** Opened from the dock's search button: its dock under the bar. */
+async function fromButtonDock(E) {
+  const fails = [];
+  E.emit("pull.begin", { kind: "apps", from: { left: 170, top: 820, width: 64, height: 64 } });
+  E.emit("pull.end", { open: true });
+  await sleep(700);
+  const bar = document.querySelector(".pull-screen > form.bar")?.getBoundingClientRect();
+  const dock = [...document.querySelectorAll(".pull-screen > .dock:not(.dock-tray)")].filter(shown)[0]?.getBoundingClientRect();
+  if (!bar || !dock) fails.push(`from the dock's button: ${bar ? "" : "no bar "}${dock ? "" : "no dock"}`);
+  else if (dock.top < bar.bottom - 0.5) fails.push(`from the dock's button: the dock (top ${Math.round(dock.top)}) is over the bar (bottom ${Math.round(bar.bottom)})`);
+  E.emit("pull.end", { open: false });
+  return fails;
+}
+
+/** LN2 setup: PowOS AI's panel open on home, its chat (column-reverse, newest at the foot) longer than the screen. */
+export async function aiScrollSetup() {
+  const S = await importShim("./state.ts");
+  S.openPanel("ai");
+  await sleep(700);
+  const list = document.querySelector(".home .ai-panel .ai-scroll.ai-chat") ?? document.querySelector(".home .ai-panel .ai-scroll");
+  if (!list) return { fail: "no PowOS AI scroller in home's launcher" };
+  for (let i = 0; i < 40; i++) {
+    const d = document.createElement("div");
+    d.className = "ln2-filler";
+    d.style.cssText = "flex:none;height:60px;";
+    d.textContent = `line ${i}`;
+    list.append(d);
+  }
+  await sleep(100);
+  const r = list.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height * 0.3, top: list.scrollTop, scrolls: list.scrollHeight > list.clientHeight + 100 };
+}
+
+/** LN2 after the finger: the chat scrolled, the panel still open. */
+export async function aiScrollAfter(top) {
+  const S = await importShim("./state.ts");
+  const list = document.querySelector(".home .ai-panel .ai-scroll.ai-chat") ?? document.querySelector(".home .ai-panel .ai-scroll");
+  const fails = [];
+  if (!(S.drawer.value > 0) || !document.querySelector(".home.open")) fails.push("a scroll inside PowOS AI's chat dismissed the panel");
+  if (!list || Math.abs(list.scrollTop - top) < 20) fails.push(`the chat didn't scroll (scrollTop ${top} -> ${list?.scrollTop})`);
+  document.querySelectorAll(".ln2-filler").forEach((el) => el.remove());
+  S.closeDrawer();
   return fails;
 }
 
