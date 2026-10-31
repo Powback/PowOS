@@ -262,6 +262,17 @@ const TILES = (n) =>
   `const W = await U('./ui/webwindows.tsx'); const p = S.pages.value[0]; const names = ['Chrome', 'Files', 'Calculator', 'Messages'];` +
   ` W.webWins.value = names.slice(0, ${n}).map((label, i) => ({ id: i + 1, key: 'a:' + label, label, page: p, x: 40 + 30 * i, y: 80 + 30 * i, w: 300, h: 260, live: true }));` +
   ` W.tileWindows(p, W.webWins.value.map((w) => w.id));` + PAINT + ` await sleep(300);`;
+/**
+ * GL1: a third, floating window's bar dragged to share ([fx], [fy]) of the left tile (fy -1: the area's bottom edge band),
+ * let go when [up].
+ */
+const DOCK_DRAG = (fx, fy, up) =>
+  ` W.webWins.value = [...W.webWins.value, { id: 9, key: 'a:Notes', label: 'Notes', page: p, x: 300, y: 300, w: 360, h: 280, live: true }]; await sleep(200);` +
+  ` const L = W.tileRects(W.tilings.value[p], W.tileArea())[0]; const A = W.tileArea(); const bar = document.querySelector('.webwindow[data-wwid="9"] .webwindow-title');` +
+  ` const tx = L.x + L.w * ${fx}, ty = ${fy} < 0 ? A.bottom - 12 : L.y + L.h * ${fy}; const b = bar.getBoundingClientRect(); const x0 = b.left + 60, y0 = b.top + b.height / 2;` +
+  ` const ev = (t, x, y) => bar.dispatchEvent(new PointerEvent(t, { bubbles: true, cancelable: true, pointerId: 7, isPrimary: true, clientX: x, clientY: y }));` +
+  ` ev('pointerdown', x0, y0); for (let k = 1; k <= 8; k++) ev('pointermove', x0 + (tx - x0) * k / 8, y0 + (ty - y0) * k / 8); await sleep(300);` +
+  (up ? ` ev('pointerup', tx, ty); await sleep(500);` : "");
 /** Two windows over the widgets: Chrome live (the app's stand-in), Files still starting (its placeholder). */
 const WINDOWS = (extra) =>
   `const W = await U('./ui/webwindows.tsx'); const p = S.pages.value[0]; W.webWins.value = [{ id: 1, key: 'a:x', label: 'Chrome', page: p, x: 20, y: 70, w: Math.round(innerWidth * 0.55), h: 420, live: true }, { id: 2, key: 'a:y', label: 'Files', page: p, x: Math.round(innerWidth * 0.3), y: 260, w: Math.round(innerWidth * 0.5), h: 300 }];` +
@@ -311,6 +322,12 @@ const SCENES = [
   ["ww-tiles-2", "home", TILES(2), "wallpaper", undefined, TILE_SIZES],
   ["ww-tiles-3", "home", TILES(3), "wallpaper", undefined, TILE_SIZES],
   ["ww-tiles-4", "home", TILES(4), "wallpaper", undefined, TILE_SIZES],
+  // GL1: docking into the tiles - a floating window's bar over the left tile's right edge (the preview there), let go
+  // (three columns), and over a tile's centre (swap).
+  ["ww-tile-dock", "home", TILES(2) + DOCK_DRAG(0.92, 0.6, false), "wallpaper", undefined, TILE_SIZES],
+  ["ww-tile-dock-swap", "home", TILES(2) + DOCK_DRAG(1.5, 0.6, false), "wallpaper", undefined, TILE_SIZES],
+  ["ww-tile-dock-edge", "home", TILES(2) + DOCK_DRAG(0.5, -1, false), "wallpaper", undefined, TILE_SIZES],
+  ["ww-tile-dock-3", "home", TILES(2) + DOCK_DRAG(0.92, 0.6, true), "wallpaper", undefined, TILE_SIZES],
   ["edit", "home", "S.editing.value = true;", "wallpaper"],
   // The side dock unfolded (the user, 2026-10-30: "The search bar turns weird"): edit mode keeps the search bar as it
   // is, the edit bar below it; the dock column starts under the status bar (its battery uncovered).
