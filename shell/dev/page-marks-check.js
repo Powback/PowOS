@@ -8,6 +8,20 @@
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let saved = null;
 
+/**
+ * Once the dock's opacity/pill transitions are done (no running animation in the dock, max 3 s): a fixed 400 ms read
+ * mid-transition under load (10-31 13:2x: "faded to 0.909", "the pill is 17.3px wide", passing alone).
+ */
+async function settled() {
+  await sleep(200);
+  const dock = () => document.querySelector(".home > .dock:not(.dock-tray)");
+  for (const end = performance.now() + 3000; performance.now() < end; ) {
+    const d = dock();
+    if (!d || !d.getAnimations({ subtree: true }).length) return;
+    await sleep(16);
+  }
+}
+
 const cell = (key) => document.querySelector(`.home > .dock:not(.dock-tray) .app[data-key="${CSS.escape(key)}"]`);
 const iconOpacity = (el) => Number(getComputedStyle(el.querySelector(".app-icon")).opacity);
 
@@ -61,7 +75,7 @@ function awayFails(at, key, fades) {
 export async function pageMarksAt(index, here, away, fades) {
   const S = await importShim("./state.ts");
   S.page.value = index;
-  await sleep(400);
+  await settled();
   const at = `page ${index + 1}`;
   const fails = [...(here ? hereFails(at, here) : []), ...awayFails(at, away, fades)];
   const btn = document.querySelector(".home > .dock .dock-search");
