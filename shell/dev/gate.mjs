@@ -23,6 +23,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import puppeteer from "puppeteer";
+import { FLEET_SETUP } from "./agents-fleet.mjs";
 
 const ORIGIN = "https://shell.powos";
 const ROOT = "/shell";
@@ -358,6 +359,58 @@ async function joinsCheck() {
     near(A.face.bottom, A.cell.bottom) && near(B.face.top, B.cell.top) && near(A.cell.bottom, B.cell.top) ? "" : `the shared side isn't a seam on the row line (${Math.round(B.face.top - A.face.bottom)} px between the faces)`,
     document.querySelector(".page:not(.away) .seam.fillet") ? "a rounded inner corner in a straight stack (it should be one rectangle)" : "",
   ].filter(Boolean);
+}
+
+/**
+ * In the page: the Agents screen and widget against dev/agents-fleet.mjs's fleet (3 working, 1 stopped with
+ * model_not_found, 12 idle; ui/agents.tsx, fleet.ts): the screen shows 3 working cards, 1 attention item and the
+ * folded "12 idle" line, no raw label anywhere; the widget at 2x2 shows the count and the top (stopped) task, at 4x2
+ * four tiles with the stopped one first, in red. [setup]: FLEET_SETUP.
+ */
+async function agentsFleetCheck(setup) {
+  const G = window.__gw;
+  const run = (body) => new (Object.getPrototypeOf(async function () {}).constructor)("U", "E", "sleep", body)(G.mod, window.__mockEvents, (ms) => new Promise((r) => setTimeout(r, ms)));
+  const A = await G.mod("./agents.ts");
+  const { powos } = await G.mod("./bridge.ts");
+  const S = await G.mod("./state.ts");
+  const fails = [];
+  const RAW = /<ta|<task|model_not_found|\bidle \d|\(mac\)|Bash /;
+  A.openAgents(null);
+  await run(setup);
+  await G.until(() => document.querySelectorAll(".ag-screen .fl-card").length >= 4, 3000);
+  const scr = document.querySelector(".ag-screen");
+  const working = [...document.querySelectorAll(".ag-screen .fl-sec .fl-card:not(.fl-bad)")].length;
+  const bad = [...document.querySelectorAll(".ag-screen .fl-card.fl-bad")];
+  const fold = document.querySelector(".ag-screen .fl-fold-head")?.textContent ?? "";
+  if (working !== 3) fails.push(`screen: ${working} working cards, not 3`);
+  if (bad.length !== 1 || !/model not found/i.test(bad[0]?.textContent ?? "")) fails.push(`screen: ${bad.length} attention items (want 1, "model not found")`);
+  if (!/12 idle/.test(fold)) fails.push(`screen: the folded line says "${fold.trim()}", not "12 idle ..."`);
+  if (!/Manager/.test(document.querySelector(".ag-screen .fl-mgr")?.textContent ?? "")) fails.push("screen: no manager row");
+  if (!document.querySelector(".ag-screen .fl-card .fl-bar")) fails.push("screen: no progress bar on the working cards");
+  const raw = (scr?.textContent ?? "").match(RAW);
+  if (raw) fails.push(`screen: a raw label "${raw[0]}"`);
+  document.querySelector(".ag-screen .fl-fold-head")?.click();
+  await G.frames(2);
+  const rawOpen = (document.querySelector(".ag-screen")?.textContent ?? "").match(RAW);
+  if (rawOpen) fails.push(`screen, idle opened: a raw label "${rawOpen[0]}"`);
+  A.closeAgents();
+  for (const [w, h, want] of [[2, 2, 1], [4, 2, 4]]) {
+    const home = await powos.home.get();
+    for (const i of home.items) await powos.home.remove(i.key);
+    await powos.home.addPanel("agents", home.pages[0] ?? 1, { x: 0, y: 0, w, h });
+    S.page.value = 0;
+    await G.until(() => document.querySelector(".page:not(.away) .ag-panel .fl-tile"), 3000);
+    await G.frames(4);
+    const panel = document.querySelector(".page:not(.away) .ag-panel");
+    const tiles = [...(panel?.querySelectorAll(".fl-tile") ?? [])];
+    const head = panel?.querySelector(".ag-head")?.textContent ?? "";
+    if (tiles.length !== want) fails.push(`widget ${w}x${h}: ${tiles.length} tiles, not ${want}`);
+    if (!tiles[0]?.classList.contains("bad") || !/Can.t start/.test(tiles[0]?.textContent ?? "")) fails.push(`widget ${w}x${h}: the first tile isn't the stopped one in red`);
+    if (!/3 working/.test(head) || !/1 needs you/.test(head) || /\+\d/.test(head)) fails.push(`widget ${w}x${h}: its head says "${head}"`);
+    const rw = (panel?.textContent ?? "").match(RAW);
+    if (rw) fails.push(`widget ${w}x${h}: a raw label "${rw[0]}"`);
+  }
+  return fails;
 }
 
 /** The tiles on the page on screen, as "text@left,top,WxH", sorted. */
@@ -4022,6 +4075,9 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 412, height: 915 }], ["unfolded", { width: 900, height: 1000 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `joins-${label}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(joinsCheck))));
+  // The Agents screen and widget in plain words (ui/agents.tsx, fleet.ts): working / needs attention / folded idle.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "agents-fleet", { width: 412, height: 915 }).then((r) => whenReady(r, () => r.page.evaluate(agentsFleetCheck, FLEET_SETUP))));
   // Floating windows live on home's pages (ui/desktops.ts; the user's design, 2026-10-22): page switch hides and
   // shows them, and the placement survives the page loading afresh.
   if (process.env.SHELL_PAGES !== "0")

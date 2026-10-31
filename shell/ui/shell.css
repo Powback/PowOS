@@ -2396,7 +2396,7 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 }
 .ag-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0 0.6em; white-space: nowrap; flex: none; }
 .ag-head > :first-child { color: var(--color-foreground); font-weight: bold; }
-.ag-head > :last-child { font-size: 0.85em; }
+.ag-head > :last-child { font-size: 0.85em; white-space: normal; }
 .ag-list { flex: 1; min-height: 0; display: grid; gap: 0.4em; overflow: hidden; }
 .ag-card {
   overflow: hidden; min-width: 0; min-height: 0; box-sizing: border-box; padding: 0.35em 0.6em; border-radius: 0.7em;
@@ -2430,6 +2430,62 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
   .ag-head { flex: 1; padding: 0.35em 0.6em; border-radius: 0.7em; background: color-mix(in srgb, currentColor 8%, transparent); }
   .ag-head > :last-child { font-size: 1em; white-space: normal; }
 }
+/* The fleet in plain words (agents.tsx, fleet.ts): widget tiles, the screen's cards, a thin progress bar. */
+.fl-tile {
+  position: relative; overflow: hidden; min-width: 0; min-height: 0; box-sizing: border-box; padding: 0.2em 0.55em; border-radius: 0.6em;
+  background: color-mix(in srgb, currentColor 8%, transparent); color: var(--color-foreground);
+  display: flex; flex-direction: column; justify-content: center; gap: 0.1em; cursor: pointer;
+}
+.fl-tile.bad { background: color-mix(in srgb, var(--color-red) 18%, transparent); }
+.fl-tile.bad .fl-t1-text { color: var(--color-red); font-weight: bold; }
+.fl-t1 { display: flex; align-items: center; gap: 0.4em; min-width: 0; line-height: 1.25; }
+.fl-t1-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.fl-t2 { font-size: 0.85em; line-height: 1.25; overflow-wrap: anywhere; }
+.fl-icon { flex: none; font: inherit; font-size: 0.85em; line-height: 1.2; padding: 0 0.45em; border-radius: 0.5em; border: 0;
+  color: var(--color-muted); background: var(--soft-fill); cursor: pointer; }
+.fl-icon.danger { color: var(--color-red); font-weight: bold; }
+/* Its progress: a thin line along the tile's foot, taking no line of its own. */
+.fl-tile > .fl-bar { position: absolute; left: 0.55em; right: 0.55em; bottom: 0.12em; height: 2px; }
+.fl-bar { flex: none; height: 0.25em; border-radius: 1em; overflow: hidden; background: color-mix(in srgb, currentColor 14%, transparent); }
+.fl-bar > i { display: block; height: 100%; border-radius: inherit; background: var(--accent-text); }
+.fl-need { color: var(--color-red); }
+.fl-head { font-size: var(--text-small); white-space: nowrap; }
+.fl-sec { display: flex; flex-direction: column; gap: 6px; }
+.fl-sec > .ai-heading { margin: 0; }
+.fl-none { padding: 4px 2px; font-size: var(--text-small); }
+.fl-card {
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px; width: 100%; box-sizing: border-box; padding: 10px 12px; text-align: start;
+  font: inherit; color: var(--color-foreground); cursor: pointer;
+}
+.fl-card.fl-bad { border-color: color-mix(in srgb, var(--color-red) 60%, transparent); }
+.fl-card.fl-bad > .fl-c1 .fl-title { color: var(--color-red); }
+.fl-c1, .fl-c3 { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.fl-title { flex: 1; min-width: 0; font-weight: bold; overflow-wrap: anywhere; }
+.fl-now { flex: 1; min-width: 0; font-size: var(--text-small); overflow-wrap: anywhere; }
+.fl-ago { flex: none; font-size: var(--text-small); }
+.fl-prog { display: flex; align-items: center; gap: 8px; font-size: var(--text-small); }
+.fl-prog > .fl-bar { flex: 1; }
+.fl-chip { flex: none; font-size: 0.75em; padding: 0.05em 0.55em; border-radius: 1em; color: var(--color-muted);
+  background: color-mix(in srgb, currentColor 10%, transparent); }
+.fl-mgr { display: flex; align-items: baseline; gap: 8px; width: 100%; box-sizing: border-box; padding: 10px 12px; font: inherit;
+  color: var(--color-foreground); text-align: start; cursor: pointer; }
+.fl-mgr-who { flex: none; font-weight: bold; }
+.fl-dot { flex: none; width: 0.55em; height: 0.55em; border-radius: 50%; background: var(--color-muted); align-self: center; }
+.fl-dot.on { background: var(--accent-text); }
+.fl-fold { padding: 4px 6px; display: flex; flex-direction: column; }
+.fl-fold-head { display: flex; gap: 6px; padding: 6px; background: none; border: 0; font: inherit; color: var(--color-muted); text-align: start; cursor: pointer; }
+.fl-fold-list { display: flex; flex-direction: column; font-size: var(--text-small); }
+.fl-rest { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 5px 6px; background: none; border: 0; font: inherit;
+  color: var(--color-foreground); text-align: start; cursor: pointer; }
+.fl-rest.gone { color: var(--color-muted); }
+.fl-rest-what { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.fl-sub { padding: 6px 6px 2px; }
+.fl-steps { margin: 0; padding: 8px 12px; list-style: none; display: flex; flex-direction: column; gap: 3px; font-size: var(--text-small); }
+.fl-steps .done { color: var(--color-muted); }
+.fl-steps .current { color: var(--accent-text); }
+.fl-mark { display: inline-block; width: 1.2em; }
+.fl-term { padding: 8px 12px; display: flex; flex-direction: column; gap: 2px; font-size: var(--text-small); line-height: 1.4; user-select: text; }
+.fl-report { padding: 8px 12px; font-size: var(--text-small); }
 .ag-line, .ag-node {
   display: flex;
   align-items: baseline;
