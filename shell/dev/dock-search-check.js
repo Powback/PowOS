@@ -68,9 +68,10 @@ function inPlace(what, S, asked) {
 async function tapOpens(btn, asked, speech, S) {
   fire(btn, "pointerdown");
   fire(btn, "pointerup");
-  await sleep(150);
+  const field = () => document.querySelector(".home > .bar textarea");
+  for (let t = 0; t < 40 && !(field() && document.activeElement === field()); t++) await sleep(50);
   const fails = inPlace("a tap", S, asked);
-  if (document.activeElement !== document.querySelector(".home > .bar textarea")) fails.push("a tap: home's bar not focused");
+  if (document.activeElement !== field()) fails.push("a tap: home's bar not focused");
   await shutHome(S);
   return fails;
 }

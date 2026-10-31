@@ -3189,10 +3189,11 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
    docking, so that we don't get duplicate docking"): the bar, the dock and the wide foot's recents stay where they are,
    as they are - no slide, no fade, still tappable - and only the app grid's layer rises behind and above them. Over the
    launcher's chat (folded) the dock still gives way (the user, 2026-10-28: a page of text, the dock had no place on it).
-   !important: it outranks the older per-layout give-way rules (pill-below, wide, side docks), many and specific. */
-.home:not(.pull-screen):not(:has(.drawer .chat)) > .dock,
-.home.wide:not(.pull-screen) > .dock,
-.home:not(.pull-screen):not(.search-parked) > .bar {
+   Home's page only (.adopts, home.tsx): the desktop's own launcher still has its side dock give way. !important: it
+   outranks the older per-layout give-way rules (pill-below, wide, side docks), many and specific. */
+.home.adopts:not(:has(.drawer .chat)) > .dock,
+.home.adopts.wide > .dock,
+.home.adopts:not(.search-parked) > .bar {
   transform: none !important;
   opacity: 1 !important;
   pointer-events: auto !important;
@@ -3611,7 +3612,8 @@ html:root:not([data-light="false"][data-wallpaper="light"], [data-light="true"][
 /* The pull window's launcher (pull.tsx, kinds "apps" and "ai"): its backdrop is the whole screen - behind the status
    bar's row, the search pill and the dock too - one surface with no seam (design QA, 2026-10-31: it stopped above the
    pill with a hard edge, the pill and dock on a lighter strip). Fixed to the window, so no layout rule cuts it short. */
-html:root .home.pull-screen:is(.wide, .pull-screen) > .stage > .launcher-frame.tile { position: fixed; inset: 0; border-radius: 0; box-shadow: none; }
+html:root :is(.home.pull-screen, .home.adopts) > .stage > .launcher-frame.tile { position: fixed; inset: 0; border-radius: 0; box-shadow: none; }
+/* Home's in-place launcher (home.tsx HomeLauncher) wears the same full-screen backdrop, under home's own bar and dock. */
 /* With CSS glass (no compositor blur, ui/glass.ts): the same tint over the frosted wallpaper, as the widgets' page glass. */
 html.glass:root:not([data-light="false"][data-wallpaper="light"], [data-light="true"][data-wallpaper="dark"]) .home .launcher-frame.tile {
   background:

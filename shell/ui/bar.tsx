@@ -248,9 +248,12 @@ const barMic: MicTarget = {
 export const dictateBar = () => dictate(barMic);
 
 /** The launcher's bar field focused, the keyboard up (ShellBridge.overlayKeyboard makes the overlay the IME's target). */
-export function focusBar() {
+export function focusBar(tries = 10) {
   requestAnimationFrame(() => {
-    document.querySelector<HTMLTextAreaElement>(".home > .bar textarea")?.focus();
+    // Home's bar in dock-button mode mounts with the launcher's open (home.tsx HomeSearch): a few frames for it.
+    const field = document.querySelector<HTMLTextAreaElement>(".home > .bar textarea");
+    if (!field && tries > 0) return focusBar(tries - 1);
+    field?.focus();
     void powos.keyboard.show();
   });
 }

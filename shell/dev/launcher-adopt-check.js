@@ -5,6 +5,8 @@
  *
  * adoptsHome (home's page, index.html): the launcher opened over home keeps ONE bar and ONE dock on screen in every
  * frame sampled through the open and after, at the same rects - only the app grid's layer moves.
+ * Its frame is THE backdrop (--backdrop-tint, --backdrop-blur-native) over the whole screen, as the pull window's, with
+ * home's bar and dock on top of it (what a finger at their centre hits).
  * ownDock (the overlay's page, index.html?mode=pull, over an app): no home dock under it, so it brings its own (one).
  */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -42,6 +44,36 @@ async function sampled(before) {
   return fails;
 }
 
+/** The open launcher's frame: the backdrop's tint and radius, the whole viewport; the bar and dock over it. */
+function backdropFails() {
+  const frame = document.querySelector(".home > .stage > .launcher-frame");
+  if (!frame) return ["no launcher frame on home"];
+  const fails = coversScreen(frame);
+  const probe = document.createElement("div");
+  probe.style.background = "var(--backdrop-tint)";
+  document.body.append(probe);
+  const tint = getComputedStyle(probe).backgroundColor;
+  probe.remove();
+  const root = getComputedStyle(document.documentElement).getPropertyValue("--backdrop-blur-native").trim();
+  if (getComputedStyle(frame).backgroundColor !== tint) fails.push(`frame fill ${getComputedStyle(frame).backgroundColor}, not --backdrop-tint ${tint}`);
+  if (getComputedStyle(frame).getPropertyValue("--glass-blur-native").trim() !== root) fails.push("frame blur isn't --backdrop-blur-native");
+  return [...fails, ...["form.bar", ".home > .dock:not(.dock-tray)"].filter(under).map((sel) => `${sel} is under the launcher, not over it`)];
+}
+
+/** The frame's rect is the whole viewport. */
+function coversScreen(frame) {
+  const r = frame.getBoundingClientRect();
+  const full = r.left <= 0.5 && r.top <= 0.5 && r.right >= innerWidth - 0.5 && r.bottom >= innerHeight - 0.5;
+  return full ? [] : [`frame ${[r.left, r.top, r.right, r.bottom].map(Math.round)} doesn't cover the screen`];
+}
+
+/** A finger at [sel]'s centre lands on something else (the launcher over it). */
+function under(sel) {
+  const el = document.querySelector(sel);
+  const b = el?.getBoundingClientRect();
+  return !!b && !el.contains(document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2));
+}
+
 export async function adoptsHome(position) {
   const S = await importShim("./state.ts");
   const { powos } = await importShim("./bridge.ts");
@@ -55,6 +87,7 @@ export async function adoptsHome(position) {
   S.openPanel("apps", { search: true });
   fails.push(...(await sampled(before)));
   if (S.drawer.value !== 1) fails.push("the launcher didn't open in place");
+  fails.push(...backdropFails());
   if (asked.length) fails.push("asked the host's overlay over home");
   if (document.querySelector(".pull-screen")) fails.push("a launcher copy (.pull-screen) on home's page");
   S.closeDrawer();
