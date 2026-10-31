@@ -5,6 +5,8 @@
 # Why (2026-10-31): web windows shipped as empty frames twice in one night with every headless gate green. This is the
 # device check the ship service runs after a ship that touches window files (tools/phone/ship.sh window_gate).
 #   tools/phone/verify/window-render.sh        exit 0 PASS, 1 FAIL, 2 SKIP (user active / folded / phone not free)
+#   tools/phone/verify/window-render.sh --hidden   exit 0 PASS, 1 FAIL (timeout included), never a skip: the ship gate's
+#                                                  run - the host path on a display nobody sees (see hidden() below)
 # What it does, touching nothing of the user's:
 #   1. waits (idle.sh --wait, AWAKE_ONLY) for the screen on and no touch for WR_IDLE_S (30) s, the keyguard down and the
 #      phone unfolded (web windows only exist there), up to WR_WAIT_S (900) s; else "SKIP: user active" (or folded),
@@ -77,6 +79,113 @@ touched() { [ "$(irq)" = "$I0" ] || skip "user active (a real touch during the c
 shot() {   # shot NAME: raw screencap gzipped on the phone -> $OUT/NAME.raw.gz
   "$A" exec-out "screencap ${DISP:+-d $DISP} | gzip -1" > "$OUT/$1.raw.gz" 2>/dev/null && [ -s "$OUT/$1.raw.gz" ] || { log "screencap $1 failed"; return 1; }
 }
+
+# --hidden: the ship gate's check (tools/phone/ship.sh window_gate), run on EVERY window-touching ship whatever the user
+# is doing - nothing on their screen, no wait, no skip. The host path of a web window without the page's half: the
+# APK's own WebWindowsHost (the shell-uid display maker WebWindows.kt runs: `create` -> a trusted virtual display, its
+# touchscreen) is started here from adb, Calculator launched on that display (the root `am start --display` launch()
+# falls back to), and the display is never mirrored (no element, no hole, no mirror under home). Checked:
+#   task     Calculator's task is on that display (`am stack list`);
+#   content  `screencap -d <that display>` is the app, not a flat fill (dominant colour < 97%, edges >= 0.3%), within 15 s;
+#   tap      `input -d <that display> tap` on its "7" (WR_TAP fx fy of the display, 0.14 0.69) changes the number area
+#            (top 55%): >= 0.2% of it differs and > 3x the noise of two shots without a tap.
+# Then its task removed (`am stack remove`; a Calculator task the user had before is moved back to display 0, never
+# removed), the display released and the helper ended (its stdin closed: it releases what's left and exits; a holder
+# that keeps stdin open ends by itself after WR_HOLD_S, so a killed check leaves nothing either). Exit 0 PASS, 1 FAIL;
+# the whole run is bounded by WR_TIMEOUT_S (150): a timeout is a FAIL. Shots in WR_OUT/<stamp>/ (display.png, tap.png).
+hidden() {
+  local tag=wrh$$ dir=/data/local/tmp/powos-wr-hidden-$$ W=${WR_W:-1080} H=${WR_H:-1500} dpi D= S= comp t0 pre task= st dom edg d1 noise fx fy wd
+  t0=$(date +%s)
+  hfail() { log "FAIL: $*"; hclean; log "window-render: FAIL (hidden: $*) - $OUT"; exit 1; }
+  hclean() {
+    [ -n "${HCLEANED:-}" ] && return; HCLEANED=1
+    [ -n "${wd:-}" ] && kill "$wd" 2>/dev/null
+    if [ -n "$D" ]; then
+      local t
+      for t in $(tasks_on "$D"); do
+        case " $pre " in
+          *" $t "*) log "task $t was there before the check (the user's): moved back to display 0: $(sh_ "am display move-stack $t 0" | head -1)" ;;
+          *) sh_ "am stack remove $t" >/dev/null; log "task $t removed" ;;
+        esac
+      done
+      sh_ "echo release $D > $dir/in" >/dev/null
+    fi
+    sh_ "kill \$(cat $dir/holder 2>/dev/null) 2>/dev/null; sleep 0.5; cat $dir/out 2>/dev/null; rm -rf $dir" | sed 's/^/  helper: /' >> "$OUT/log.txt"
+    if [ -n "$D" ]; then
+      local left
+      for _ in 1 2 3 4; do left=$(tasks_on "$D"); [ -z "$left" ] && break; sleep 1; done
+      if [ -z "$left" ]; then log "display $D released, no task left on it"; else log "WARNING: tasks still on display $D: $left"; fi
+    fi
+  }
+  # tasks_on DISPLAY: the task ids on a display; app_tasks: every task of $APP (any display).
+  tasks_on() { sh_ "am stack list" | awk -v d="$1" '/^RootTask id=/{on=($0 ~ ("displayId=" d " "))} on && /^ *taskId=/{sub(/^ *taskId=/,"");sub(/:.*/,"");print}' | sort -u | paste -sd' ' -; }
+  app_tasks() { sh_ "am stack list" | awk -v p="$APP/" '/^ *taskId=/ && index($0, " " p){x=$0;sub(/^ *taskId=/,"",x);sub(/:.*/,"",x);print x}' | sort -u | paste -sd' ' -; }
+  trap 'hclean' EXIT
+  trap 'log "FAIL: timeout (${WR_TIMEOUT_S:-150} s)"; hclean; log "window-render: FAIL (hidden: timeout) - $OUT"; exit 1' TERM INT
+  # The watchdog: kills whatever adb call hangs (bash runs the trap only once its foreground child is gone), then us.
+  ( sleep "${WR_TIMEOUT_S:-150}"; pkill -P $$ 2>/dev/null; kill -TERM $$ 2>/dev/null ) & wd=$!
+
+  "$A" get-state >/dev/null 2>&1 || hfail "no phone (adb get-state)"
+  dpi=$(sh_ "wm density" | sed -n 's/^Override density: //p'); [ -n "$dpi" ] || dpi=$(sh_ "wm density" | sed -n 's/^Physical density: //p')
+  apk=$(sh_ "pm path com.powos.app" | sed -n '1s/^package://p'); [ -n "$apk" ] || hfail "PowOS isn't installed (pm path com.powos.app)"
+  comp=$(sh_ "cmd package resolve-activity --brief -c android.intent.category.LAUNCHER $APP" | tail -1); case $comp in "$APP"/*) ;; *) hfail "no launcher activity for $APP ($comp)" ;; esac
+  pre=" $(app_tasks) "
+  log "hidden check: $comp on a ${W}x$H display at $dpi dpi from $apk (the user's $APP tasks before:${pre% })"
+  # The helper (WebWindowsHost from the installed APK, as WebWindows.kt starts it: su 2000, group uhid), stdin a fifo a
+  # holder keeps open for WR_HOLD_S; "selftest": own display group/focus/lock state (an older helper ignores it).
+  cat > "$OUT/wrh.sh" <<EOF
+mkdir -p $dir && mkfifo $dir/in && chmod 777 $dir $dir/in || exit 1
+nohup sh -c 'exec sleep ${WR_HOLD_S:-180} > $dir/in' >/dev/null 2>&1 &
+echo \$! > $dir/holder
+nohup su -g 2000 -G 3011 2000 -c "CLASSPATH='$apk' exec app_process /system/bin dev.omalauncher.shell.WebWindowsHost" < $dir/in > $dir/out 2>&1 &
+for i in \$(seq 1 30); do grep -q '^hello' $dir/out && break; sleep 0.2; done
+echo "create $tag $W $H $dpi selftest" > $dir/in
+for i in \$(seq 1 30); do grep -qE '^(display|error) $tag' $dir/out && break; sleep 0.2; done
+cat $dir/out
+EOF
+  "$A" push "$OUT/wrh.sh" "$dir.sh" >/dev/null 2>&1 || hfail "can't push the helper script"
+  r=$(sh_ "sh $dir.sh; rm -f $dir.sh")
+  echo "$r" | sed 's/^/  helper: /' | tee -a "$OUT/log.txt"
+  D=$(echo "$r" | sed -n "s/^display $tag \([0-9]*\).*/\1/p")
+  [ -n "$D" ] || hfail "the host made no display: $(echo "$r" | grep -m1 "^error $tag" || echo "${r:-no answer from WebWindowsHost}")"
+  S=$(sh_ "dumpsys SurfaceFlinger --display-id" | sed -n "s/^Display \([0-9]*\) (Virtual display): displayName=\"powos-ww-$tag\".*/\1/p")
+  [ -n "$S" ] || hfail "display $D isn't in SurfaceFlinger's list (no powos-ww-$tag)"
+  log "display $D (SurfaceFlinger $S), never mirrored"
+  # A task of its own even if the user has Calculator open (NEW_TASK | MULTIPLE_TASK): theirs is never pulled over.
+  log "launch: $(sh_ "am start --display $D -f 0x18000000 -n $comp" | grep -v '^Starting' | head -2 | paste -sd' ' -)"
+  # (a) its task on that display and its content drawn.
+  for _ in $(seq 1 15); do task=$(tasks_on "$D"); [ -n "$task" ] && break; sleep 1; done
+  [ -n "$task" ] || hfail "$APP's task never reached display $D"
+  for t in $task; do case "$pre" in *" $t "*) log "WARNING: task $t was the user's (it moved to the check's display; it goes back after)" ;; esac; done
+  log "task $task on display $D"
+  for i in $(seq 1 15); do
+    "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/display.raw.gz" 2>/dev/null
+    st=$($PY stats "$OUT/display.raw.gz" 0 0 "$W" "$H" 2>&1)
+    dom=$(echo "$st" | sed -n 's/.*dominant=\([0-9.]*\).*/\1/p'); edg=$(echo "$st" | sed -n 's/.*edges=\([0-9.]*\).*/\1/p')
+    [ -n "$dom" ] && awk "BEGIN{exit !($dom < 0.97 && $edg >= 0.003)}" && break; sleep 1
+  done
+  log "content ($i s): $st"
+  [ -n "$dom" ] && [ -n "$edg" ] || hfail "no screencap of display $D ($st)"
+  awk "BEGIN{exit !($dom < 0.97 && $edg >= 0.003)}" || hfail "display $D shows a flat fill, not the app (dominant $dom, edges $edg)"
+  # (b) a tap on THAT display changes the app's number area.
+  sleep 1; "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/pre.raw.gz" 2>/dev/null
+  local A0=0 B0=$(( H * 55 / 100 ))
+  noise=$($PY diff "$OUT/display.raw.gz" "$OUT/pre.raw.gz" 0 $A0 "$W" $B0)
+  set -- ${WR_TAP:-0.14 0.69}; fx=$1 fy=$2
+  local x y; x=$(awk "BEGIN{print int($W*$fx)}"); y=$(awk "BEGIN{print int($H*$fy)}")
+  sh_ "input -d $D tap $x $y" >/dev/null; log "tap: input -d $D tap $x $y ($fx,$fy)"
+  sleep 1.5; "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/tap.raw.gz" 2>/dev/null
+  d1=$($PY diff "$OUT/pre.raw.gz" "$OUT/tap.raw.gz" 0 $A0 "$W" $B0)
+  log "tap: $d1 of the number area changed (noise without a tap: $noise)"
+  for n in display tap; do $PY png "$OUT/$n.raw.gz" "$OUT/$n.png" 2>/dev/null && rm -f "$OUT/$n.raw.gz"; done; rm -f "$OUT/pre.raw.gz"
+  case "$d1$noise" in ""|*[!0-9.]*) hfail "a measurement is missing (tap=$d1 noise=$noise)" ;; esac
+  awk "BEGIN{exit !($d1 >= 0.002 && $d1 > 3 * $noise)}" || hfail "the tap changed nothing in the app ($d1 vs noise $noise)"
+  hclean
+  log "window-render: PASS (hidden: task $task on display $D drew the app, the tap reached it; $(( $(date +%s) - t0 )) s) - $OUT"
+  ls "$OUT"/*.png 2>/dev/null | sed 's/^/  /' | tee -a "$OUT/log.txt"
+  exit 0
+}
+[ "${1:-}" = --hidden ] && { trap - EXIT TERM INT; hidden; }
 
 # 1. A free phone: screen on, no touch for WR_IDLE_S, no keyguard, unfolded.
 deadline=$(( $(date +%s) + ${WR_WAIT_S:-900} ))
