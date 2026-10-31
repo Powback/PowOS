@@ -2302,7 +2302,7 @@ async function aiNeedsProgress(page, size, screen, calls) {
 async function aiNeedsCheck(page) {
   const fails = [];
   const calls = [];
-  for (const [size, vp, screen] of [["folded", { width: 404, height: 900 }, "progress"], ["status", { width: 404, height: 900 }, "chat"], ["unfolded", { width: 821, height: 883 }, "progress"]]) {
+  for (const [size, vp, screen] of [["folded", { width: 404, height: 900 }, "progress"], ["unfolded", { width: 821, height: 883 }, "progress"]]) {
     await page.setViewport(vp);
     await page.evaluate((w) => window.__gw.until(() => innerWidth === w), vp.width);
     fails.push(...(await aiNeedsProgress(page, size, screen, calls)));
@@ -2377,16 +2377,22 @@ function aiStatusLook(tone) {
     return Math.abs(got - want) > 0.03 ? [`a bar is ${got.toFixed(2)} full, not ${want.toFixed(2)}`] : [];
   };
   fails.push(...[...scr.querySelectorAll(".ais-bar:not(.sweep)")].flatMap(off));
-  const rgb = (c) => (c.match(/[\d.]+/g) ?? []).map(Number);
+  // rgb()/rgba() in 0-255; a color-mix() result is color(srgb r g b / a) in 0-1.
+  const rgb = (c) => { const n = (c.match(/[\d.]+/g) ?? []).map(Number); return /^color\(srgb/.test(c) ? [...n.slice(0, 3).map((v) => v * 255), ...n.slice(3)] : n; };
   const lum = (c) => c.slice(0, 3).map((v) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)).reduce((n, v, i) => n + v * [0.2126, 0.7152, 0.0722][i], 0);
   const mix = (top, a, under) => [0, 1, 2].map((i) => top[i] * a + under[i] * (1 - a));
   const ratio = (x, y) => (Math.max(lum(x), lum(y)) + 0.05) / (Math.min(lum(x), lum(y)) + 0.05);
-  const glass = rgb(getComputedStyle(scr.querySelector(".ai-glass")).backgroundImage.match(/rgba?\([^)]*\)/)?.[0] || getComputedStyle(scr.querySelector(".ai-glass")).backgroundColor);
+  // What a text sits on: the wallpaper, the page's wash, then every glass card it is in - each one's layers (its
+  // gradients' colours and its fill) composited in turn.
+  const layers = (e) => [getComputedStyle(e).backgroundColor, ...(getComputedStyle(e).backgroundImage.match(/rgba?\([^)]*\)/g) ?? []).reverse()].map(rgb).filter((c) => c.length >= 3);
+  const over = (under, e) => layers(e).reduce((u, c) => mix(c, c[3] ?? 1, u), under);
   const wall = tone === "light" ? [235, 232, 226] : [16, 20, 24];
-  const back = mix(glass, glass[3] ?? 1, wall);
+  const wash = over(wall, scr.querySelector(".ai-glass"));
+  const backOf = (e) => [...scr.querySelectorAll(".ais-sec, .ais-empty, .ais-card-top")].filter((c) => c.contains(e)).reduce(over, wash);
   const opacity = (e) => { let k = 1; for (let x = e; x && x !== scr; x = x.parentElement) k *= parseFloat(getComputedStyle(x).opacity); return k; };
   const low = texts.filter((e) => e.closest(".ais, .ais-top") && !e.closest(".ais-n, .aip-chip, .try-acts")).map((e) => {
     const fg = rgb(getComputedStyle(e).color);
+    const back = backOf(e);
     return [e, ratio(mix(fg, opacity(e) * (fg[3] ?? 1), back), back)];
   }).filter(([, k]) => k < 4.5);
   fails.push(...new Set(low.map(([e, k]) => `"${e.textContent.trim().slice(0, 20)}" at ${k.toFixed(1)}:1 on the ${tone} page`)));
@@ -2421,7 +2427,182 @@ async function aiStatusEmpty() {
   return [...document.querySelectorAll(".ai-screen.status .ais-sec")].map((e) => e.dataset.sec);
 }
 
-const AIS_WANT = ["needs:Needs you", "try:Ready to try", "working:Working now", "done:Recently done"];
+const AIS_WANT = ["needs:Needs you", "working:Working now", "done:Recently done"];
+
+/**
+ * Needs you as a card stack (design QA 2026-10-31, aistack.tsx): [n] needs on the board (a try with a screenshot, a
+ * thing to do, a question, more tries), the bridge's verdict / message recorded (window.__stGot); the stack drawn.
+ */
+async function aiStackSetup(n) {
+  const G = window.__gw;
+  const [P, T, K, { powos }] = await Promise.all([G.mod("./ui/powai.tsx"), G.mod("./ui/trycard.tsx"), G.mod("./ui/aistack.tsx"), G.mod("./bridge.ts")]);
+  const got = (window.__stGot = []);
+  window.__stRestore ??= [powos.ai.verdict, powos.agents.message];
+  powos.ai.verdict = async (...a) => void got.push(["verdict", ...a]);
+  powos.agents.message = async (...a) => void got.push(["message", ...a]);
+  T.answers.value = {};
+  K.trying.value = null;
+  const now = Date.now();
+  const row = (id, title, extra, age) => ({ id, title, owner: "coder", status: "waiting", note: "", project: "Windows", created: now - 9e6, updated: now - age, done: 0, progressDone: 0, progressTotal: 0, step: "", steps: "", commits: "", images: "", activity: now - age, tryLine: "", ...extra });
+  const all = [
+    row("st-try1", "Raise a window behind another", { tryLine: "Open Settings, then tap a window behind another: it comes to the front", commits: '[{"sha":"abc1234","subject":""}]', images: JSON.stringify(["/run/powos-app/powos-ai-shared/screen-1793386307690.jpg"]) }, 1e4),
+    row("st-try2", "Dock highlights this page's apps", { tryLine: "Swipe between pages: this page's apps stand out in the dock", commits: '[{"sha":"def5678","subject":""}]' }, 2e4),
+    row("st-do", "Plug in the phone", { note: "Plug the phone into the Mac for the kernel test" }, 3e4),
+    row("st-ask", "Dock size", { note: "Which dock size do you want? (small / large)" }, 4e4),
+    row("st-try3", "Page dots centred", { tryLine: "Look at the page dots: they sit centred", commits: '[{"sha":"aaa1111","subject":""}]' }, 5e4),
+  ];
+  P.board.value = [...all.slice(0, n), row("st-dd", "Daily driver: everything the phone needs every day", { status: "working", progressDone: 13, progressTotal: 20 }, 6e4), { ...row("st-done1", "Media card redesign", {}, 7e4), status: "done", done: now - 36e5 }];
+  P.checks.value = [];
+  await G.until(() => (document.querySelector(".ai-screen.status .ais-stack")?.dataset.count ?? "0") === String(n), 3000);
+  const anims = document.getAnimations().filter((a) => document.querySelector(".ai-screen.status")?.contains(a.effect?.target) && a.effect.getTiming().iterations !== Infinity);
+  await Promise.race([Promise.all(anims.map((a) => a.finished.catch(() => 0))), new Promise((r) => setTimeout(r, 1200))]);
+  return document.querySelectorAll(".ai-screen.status .ais-card-top").length;
+}
+
+/** In the page: the stack's shape - one top card, the peeking ones, its count, Try, the thumbnail. */
+function aiStackShape() {
+  const st = document.querySelector(".ai-screen.status .ais-stack");
+  if (!st) return { tops: 0, peeks: 0 };
+  const top = st.querySelector(".ais-card-top");
+  return { count: st.dataset.count, tops: st.querySelectorAll(".ais-card-top").length, peeks: st.querySelectorAll(".ais-card-peek").length, tryBtn: !!top?.querySelector(".ais-try") };
+}
+
+/** The top card dragged by the mouse (real pointer events) [dx, dy] px, then let go; settled after the fly-out. */
+async function aiStackSwipe(page, dx, dy) {
+  const box = await (await page.$(".ai-screen.status .ais-card-top .ais-card-title")).boundingBox();
+  const x = box.x + box.width / 2, y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  for (let i = 1; i <= 8; i++) await page.mouse.move(x + (dx * i) / 8, y + (dy * i) / 8);
+  await page.mouse.up();
+  await new Promise((r) => setTimeout(r, 600));
+  return page.evaluate(() => ({ got: window.__stGot, top: document.querySelector(".ai-screen.status .ais-card-top")?.dataset.task, field: !!document.querySelector(".ai-screen.status .ais-card-top .ai-reply textarea") }));
+}
+
+/** In the page: the open "why" field's words typed and sent (the reply line's own send). */
+async function aiStackWhy(text) {
+  const f = document.querySelector(".ai-screen.status .ais-card-top .ai-reply");
+  const ta = f.querySelector("textarea");
+  ta.value = text;
+  ta.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 50));
+  f.requestSubmit();
+  await new Promise((r) => setTimeout(r, 400));
+  return window.__stGot;
+}
+
+const stVerdict = (got, id) => got.find((g) => g[0] === "verdict" && g[1] === id);
+
+/** Right on a try = a user PASS and the next card on top; left = the why field, its words a user FAIL. */
+async function aiStackRightLeft(page) {
+  const fails = [];
+  let r = await aiStackSwipe(page, 220, 0);
+  if (stVerdict(r.got, "st-try1")?.[2] !== true) fails.push(`swipe right on a try recorded no user PASS (${JSON.stringify(r.got)})`);
+  if (r.top !== "st-try2") fails.push(`after a swipe right the top card is ${r.top}, not the next (st-try2)`);
+  r = await aiStackSwipe(page, -220, 0);
+  if (!r.field) return [...fails, "swipe left didn't open the why field"];
+  const got = await page.evaluate(aiStackWhy, "dock stays grey");
+  const w = stVerdict(got, "st-try2");
+  if (!(w && w[2] === false && w[3] === "still broken: dock stays grey")) fails.push(`still broken (swipe left + why) recorded no user FAIL with the words (${JSON.stringify(got)})`);
+  return fails;
+}
+
+/** Up = later: the next card on top, this one at the back of the stack, no verdict. */
+async function aiStackUp(page) {
+  const fails = [];
+  const r = await aiStackSwipe(page, 0, -220);
+  if (r.top !== "st-ask") fails.push(`swipe up (later) left ${r.top} on top, not the next (st-ask)`);
+  const order = await page.evaluate(async () => (await window.__gw.mod("./ui/aistack.tsx")).stackOrder((await window.__gw.mod("./ui/needsyou.tsx")).needsYou()).map((n) => n.w.id));
+  if (order.at(-1) !== "st-do") fails.push(`later didn't put the card at the back (${order.join(", ")})`);
+  if (r.got.some((g) => g[1] === "st-do")) fails.push("later recorded a verdict");
+  return fails;
+}
+
+/** Try: the app the line names launches (the bridge's apps.launch), home shows; back on the page the card is first, "Worked?". */
+async function aiStackTry() {
+  const G = window.__gw;
+  const [S, { powos }, P] = await Promise.all([G.mod("./state.ts"), G.mod("./bridge.ts"), G.mod("./ui/powai.tsx")]);
+  const app = S.apps.value.find((a) => a.label.length >= 4 && !a.key.startsWith("powos:"));
+  if (!app) return ["no host app in the mock to try"];
+  P.board.value = [{ ...P.board.value[0], id: "st-tryapp", title: "Open an app", tryLine: `Open ${app.label} and check it opens full screen`, status: "waiting", commits: '[{"sha":"abc1234","subject":""}]' }];
+  await G.until(() => document.querySelector('.ai-screen.status .ais-card-top[data-task="st-tryapp"] .ais-try'), 2000);
+  const was = powos.apps.launch;
+  let launched = null;
+  powos.apps.launch = async (k, o) => void (launched = k);
+  document.querySelector(".ai-screen.status .ais-card-top .ais-try").click();
+  await G.until(() => launched, 2000);
+  powos.apps.launch = was;
+  const fails = [];
+  if (launched !== app.key) fails.push(`Try launched ${launched}, not ${app.key} (named in the try line)`);
+  if (S.page.value !== 0) fails.push("Try didn't leave the AI page");
+  S.page.value = -1;
+  await G.until(() => document.querySelector(".ai-screen.status.shown"), 2000);
+  const kind = document.querySelector('.ai-screen.status .ais-card-top[data-task="st-tryapp"] .ais-card-kind')?.textContent;
+  if (kind !== "Worked?") fails.push(`back on the page the tried card asks "${kind}", not "Worked?"`);
+  return fails;
+}
+
+/** The layout: 16 dp side margins, every section on the backdrop's glass token (no text on the bare wash). */
+function aiStackLayout() {
+  // [el]'s --backdrop-tint as a colour, resolved where [el] is (the token differs by the wallpaper's tone).
+  const tintAt = (el) => {
+    const probe = el.appendChild(document.createElement("span"));
+    probe.style.background = "var(--backdrop-tint)";
+    const c = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return c;
+  };
+  const scr = document.querySelector(".ai-screen.status");
+  const fails = [];
+  const cards = [...scr.querySelectorAll(".ais > .ais-sec:not(.ais-stack-sec), .ais > .ais-empty, .ais-stack > .ais-card-top")];
+  for (const c of cards) {
+    const b = c.getBoundingClientRect();
+    const name = c.className.split(" ")[0];
+    if (Math.abs(b.left - 16) > 1.5 || Math.abs(innerWidth - b.right - 16) > 1.5) fails.push(`${name} at ${Math.round(b.left)}/${Math.round(innerWidth - b.right)} px from the sides, not 16`);
+    if (getComputedStyle(c).backgroundColor !== tintAt(c)) fails.push(`${name} is ${getComputedStyle(c).backgroundColor}, not the backdrop's tint ${tintAt(c)}`);
+  }
+  const wash = scr.querySelector(".ai-glass");
+  if (getComputedStyle(wash).backgroundColor !== tintAt(wash)) fails.push(`the page's wash is ${getComputedStyle(wash).backgroundColor}, not the backdrop's tint ${tintAt(wash)}`);
+  const loose = [...scr.querySelectorAll(".ais .ais-done-title, .ais .ais-work-title, .ais .ais-card-title")].filter((e) => !e.closest(".ais-sec:not(.ais-stack-sec), .ais-card-top"));
+  if (loose.length) fails.push(`${loose.length} texts float on the wash`);
+  return [...new Set(fails)];
+}
+
+/** At rest on screen: no endless animation on the page (its own idle check; the AI page shown). */
+function aiStackRest() {
+  const scr = document.querySelector(".ai-screen.status");
+  return document.getAnimations().filter((a) => scr.contains(a.effect?.target) && a.playState === "running" && a.effect.getComputedTiming().endTime === Infinity).map((a) => `${a.animationName} on .${String(a.effect.target.className).split(" ").join(".")}`);
+}
+
+/** One render: [n] needs on the [tone] page - the stack's shape and the layout - to /cache/ai-status-folded-<tone>-<n>.png. */
+async function aiStackRender(page, tone, n) {
+  const tops = await page.evaluate(aiStackSetup, n);
+  const sh = await page.evaluate(aiStackShape);
+  const fails = [];
+  if (tops !== Math.min(1, n)) fails.push(`${tops} top cards, not ${Math.min(1, n)}`);
+  if (n && sh.peeks !== Math.min(2, n - 1)) fails.push(`${sh.peeks} cards peek behind, not ${Math.min(2, n - 1)}`);
+  if (n && !sh.tryBtn) fails.push("the top card (a try) has no Try");
+  fails.push(...(await page.evaluate(aiStackLayout)));
+  await page.screenshot({ path: `/cache/ai-status-folded-${tone}-${n}.png` });
+  return fails.map((f) => `${tone} ${n}: ${f}`);
+}
+
+async function aiStackCheck(page) {
+  const fails = [];
+  for (const [tone, fill] of [["light", "#ebe8e2"], ["dark", "#101418"]]) {
+    await page.evaluate(aiStatusTone, fill);
+    for (const n of [0, 1, 5]) fails.push(...(await aiStackRender(page, tone, n)));
+  }
+  await new Promise((r) => setTimeout(r, 6000));
+  const rest = await page.evaluate(aiStackRest);
+  if (rest.length) fails.push(`at rest the page still animates: ${rest.slice(0, 3).join(", ")}`);
+  await page.evaluate(aiStackSetup, 5);
+  fails.push(...(await aiStackRightLeft(page)), ...(await aiStackUp(page)));
+  await page.evaluate(aiStackSetup, 5);
+  fails.push(...(await page.evaluate(aiStackTry)));
+  await page.evaluate(async () => { const { powos } = await window.__gw.mod("./bridge.ts"); [powos.ai.verdict, powos.agents.message] = window.__stRestore; });
+  return fails;
+}
 
 async function aiStatusCheck(page) {
   if (!(await page.evaluate(aiStatusSetup, [FLEET_SETUP]))) return ["folded: the status page shows no Working now rows for the mock fleet"];
@@ -2439,6 +2620,7 @@ async function aiStatusCheck(page) {
   }
   const left = await page.evaluate(aiStatusEmpty);
   if (left.join() !== "working") fails.push(`folded: with an empty board the sections are [${left.join(", ")}], not only Working now`);
+  fails.push(...(await aiStackCheck(page)).map((f) => `folded stack: ${f}`));
   return fails;
 }
 

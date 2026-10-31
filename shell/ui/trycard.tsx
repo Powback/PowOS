@@ -111,7 +111,7 @@ function setAnswer(id: string, a: Answer | null) {
  * Where a try line shows: the chat's message or the wide page's "Try this" column (the same item can be in both).
  * The reply line opens only on the one pressed, so the open one is keyed by surface and item.
  */
-type Surface = "chat" | "col" | "board";
+export type Surface = "chat" | "col" | "board";
 const replyKey = (s: Surface, id: string) => `${s}:${id}`;
 
 /** The reply line open (one at a time, as replyKey), and the one plain line of a save that failed. */
@@ -121,7 +121,7 @@ const failed = signal<Record<string, string>>({});
 const taskOf = (it: TryItem): Tried => ({ id: it.id, title: it.line });
 
 /** works / still broken pressed (still broken: with the reply): shown at once, put back if it couldn't be saved. */
-async function tryVerdict(it: TryItem, works: boolean, b?: Broken, at: Surface = "chat") {
+export async function tryVerdict(it: TryItem, works: boolean, b?: Broken, at: Surface = "chat") {
   replying.value = null;
   failed.value = { ...failed.value, [it.id]: "" };
   setAnswer(it.id, works ? { how: "works" } : { how: "broken", text: b?.text });
@@ -132,7 +132,7 @@ async function tryVerdict(it: TryItem, works: boolean, b?: Broken, at: Surface =
 }
 
 /** done / can't on a thing to do: to the manager (it owns the board), marked at once. */
-function doVerdict(it: TryItem, b?: Broken) {
+export function doVerdict(it: TryItem, b?: Broken) {
   replying.value = null;
   if (!b) {
     setAnswer(it.id, { how: "done" });
@@ -150,7 +150,7 @@ export const answerMail = (t: Tried, text: string) => `Answer (task ${t.id}): ${
  * A question answered (an option or their words): to the manager's inbox naming the task, marked at once; put back
  * with one plain line when it couldn't be sent. An older host (no agents.message): told in the conversation.
  */
-async function askVerdict(it: TryItem, text: string, at: Surface) {
+export async function askVerdict(it: TryItem, text: string, at: Surface) {
   replying.value = null;
   failed.value = { ...failed.value, [it.id]: "" };
   setAnswer(it.id, { how: "answered", text });
@@ -205,7 +205,7 @@ export const Said = ({ a }: { a: Answer }) => (
 );
 
 /** The reply line's words sent: the question's answer, a thing to do's problem, or what's still broken. */
-const sendOf = (it: TryItem, at: Surface) => (b: Broken) =>
+export const sendOf = (it: TryItem, at: Surface) => (b: Broken) =>
   it.ask ? void askVerdict(it, b.text, at) : it.do ? doVerdict(it, b) : void tryVerdict(it, false, b, at);
 
 /** One item: its sentence, then its buttons - or, answered, what the user said. [bare]: no sentence (its row shows it). */

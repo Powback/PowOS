@@ -3741,24 +3741,24 @@ html.glass:root:not([data-light="false"][data-wallpaper="light"], [data-light="t
  * headed sections and one-line rows straight on it - no card inside the pane. Bars slide to each value on a spring, a
  * working agent's step cross-fades, new rows rise in; all transform / opacity, none of it with reduced motion.
  */
-html:root .ai-screen.status > .ai-glass { --glass-blur-native: var(--backdrop-blur-native); }
-/* Over a wallpaper of the other tone the pane is the swapped (paper) frost: the text on it its ink, as inside a tile. */
-:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) .ai-screen.status > :is(.ais, .ais-top, .ais-foot) {
-  --color-foreground: var(--frost-ink);
-  --color-muted: color-mix(in srgb, var(--frost-ink) 80%, transparent);
+html:root .ai-screen.status > .ai-glass.tile { --glass-blur-native: var(--backdrop-blur-native); background: var(--backdrop-tint); }
+/* The pane is THE backdrop on either wallpaper tone (theme.css keeps its tint the theme's): the theme's own text on it. */
+/* Over a wallpaper of the other tone the text needs more of the tint (theme.css --glass-dim): the backdrop twice. */
+:root:is([data-light="false"][data-wallpaper="light"], [data-light="true"][data-wallpaper="dark"]) .ai-screen.status > .ai-glass.tile {
+  background: linear-gradient(var(--backdrop-tint), var(--backdrop-tint)), var(--backdrop-tint);
 }
-.ai-screen.status { font-family: var(--font-ui); --ais-spring: linear(0, 0.25 8%, 0.68 18%, 1.02 30%, 1.1 38%, 1.04 50%, 0.99 62%, 1.005 78%, 1); }
+.ai-screen.status { --ais-side: 16px; font-family: var(--font-ui); --ais-spring: linear(0, 0.25 8%, 0.68 18%, 1.02 30%, 1.1 38%, 1.04 50%, 0.99 62%, 1.005 78%, 1); }
 .ai-screen.status * { font-family: inherit; }
 .ais-top { gap: 12px; }
-.ais-ring { position: relative; flex: none; width: 36px; height: 36px; display: grid; place-items: center; }
+.ais-ring { position: relative; flex: none; width: 56px; height: 56px; display: grid; place-items: center; }
 .ais-ring > svg { position: absolute; inset: 0; width: 100%; height: 100%; }
-.ais-ring .aip-ring-track, .ais-ring .aip-ring-fill { stroke-width: 4; }
+.ais-ring .aip-ring-track, .ais-ring .aip-ring-fill { stroke-width: 5; }
 .ais-ring-fill { transition: stroke-dasharray 900ms var(--ais-spring); }
-.ais-ring-pct { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--color-foreground); }
+.ais-ring-pct { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--color-foreground); }
 .ais-status { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
-.ais-title { font-size: var(--text-item); font-weight: 650; color: var(--color-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ais-title { font-size: calc(var(--text-item) * 1.18); font-weight: 700; color: var(--color-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ais-line { font-size: var(--text-small); color: var(--color-foreground); opacity: 0.86; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ai-screen > .ai-scroll.ais { gap: 22px; padding-inline: 2px; padding-bottom: calc(var(--ai-tail) + 40px); }
+.ai-screen > .ai-scroll.ais { display: flex; flex-direction: column; gap: 12px; padding-inline: var(--ais-side); padding-top: calc(var(--ai-head) + 22px); padding-bottom: calc(var(--ai-tail) + 40px); }
 .ais-sec { display: flex; flex-direction: column; animation: ais-rise 420ms var(--ais-spring) both; }
 .ais-h { display: flex; white-space: nowrap; align-items: center; gap: 8px; margin: 0 0 4px; padding: 0 4px; font-size: var(--text-small); font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-foreground); opacity: 0.9; }
 .ais-n { padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--color-foreground) 14%, transparent); font-size: 11px; letter-spacing: 0; font-variant-numeric: tabular-nums; }
@@ -3779,10 +3779,10 @@ html:root .ai-screen.status > .ai-glass { --glass-blur-native: var(--backdrop-bl
 .ais-step-t.out { animation: ais-out 300ms ease-out both; }
 .ais-bar { position: relative; display: block; height: 3px; margin: 4px 0 0 18px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--color-foreground) 14%, transparent); }
 .ais-bar-fill { position: absolute; inset: 0; border-radius: inherit; background: var(--color-accent); transform-origin: left center; transition: transform 900ms var(--ais-spring); animation: aip-fill 900ms var(--ais-spring) both; }
-.ais-bar.sweep .ais-bar-fill { inset: 0 auto 0 0; width: 32%; transform: translateX(-100%); animation: ais-sweep 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+.ais-bar.sweep .ais-bar-fill { inset: 0 auto 0 0; width: 32%; transform: translateX(-100%); animation: ais-sweep 1.8s cubic-bezier(0.4, 0, 0.2, 1) 3; }
 .ais-done-row { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 4px; white-space: nowrap; font-size: var(--text-body); color: var(--color-foreground); animation: ais-rise 320ms var(--ais-spring) both; }
 .ais-done-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ais-empty { padding: 28px 8px; text-align: center; font-size: var(--text-body); color: var(--color-foreground); opacity: 0.86; }
+.ais-empty { padding: 16px; text-align: start; font-size: var(--text-body); color: var(--color-foreground); opacity: 0.86; }
 .ai-screen > .ais-foot { position: relative; z-index: 2; margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
 .ais-foot-row { display: flex; align-items: flex-end; justify-content: flex-end; gap: 8px; min-height: 28px; }
 .ais-reply { flex: 1; min-width: 0; max-height: 4.4em; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; padding: 8px 12px; border: 0; border-radius: 16px 16px 16px 4px; background: var(--ai-bubble); box-shadow: var(--lift); font: inherit; font-size: var(--text-body); line-height: 1.35; text-align: start; color: var(--color-foreground); animation: ais-rise 360ms var(--ais-spring) both; }
@@ -3791,7 +3791,61 @@ html:root .ai-screen.status > .ai-glass { --glass-blur-native: var(--backdrop-bl
 @keyframes ais-in { from { opacity: 0; transform: translateY(60%); } }
 @keyframes ais-out { to { opacity: 0; transform: translateY(-60%); } }
 @keyframes ais-sweep { to { transform: translateX(320%); } }
+/* The hero: no pill, the ring and two lines straight on the wash, 16 dp in from the sides; the foot as far in. */
+/* (Not .ai-top: its children are the wallpaper labels' frost pills - the hero is on the page's own wash.) */
+.ai-screen.status > .ais-top { position: relative; z-index: 2; display: flex; align-items: center; gap: 14px; min-height: 56px; margin: var(--ai-head-top) calc(var(--ais-side) - var(--edge)) 0; }
+.ais-top > .ai-more { flex: none; align-self: flex-start; min-width: 40px; min-height: 36px; margin-left: auto; border: 0; background: none; font: inherit; font-size: 20px; line-height: 1; color: var(--color-foreground); }
+.ai-screen.status > .ais-foot { margin-inline: calc(var(--ais-side) - var(--edge)); }
+.ai-screen.status { --ai-head: calc(var(--ai-head-top) + 56px + 10px); }
+/* Every section on the shared glass card (the backdrop's tint and blur): no text floating on the wash. */
+html:root .ai-screen.status .ais > :is(.ais-sec:not(.ais-stack-sec), .ais-empty) {
+  --glass-blur-native: var(--backdrop-blur-native);
+  padding: 12px 12px 8px; border-radius: var(--radius); background: var(--backdrop-tint);
+}
+/* With few items nothing is centred: Recently done (open) takes what's left. */
+.ais > .ais-sec.fill.open { flex: 1 0 auto; }
+/* Needs you: the card stack - the top card, the next ones peeking under it (their count), all of the backdrop's glass. */
+.ais-stack { position: relative; display: grid; padding-bottom: calc(var(--peek, 0) * 8px); }
+html:root .ai-screen.status .ais-stack > :is(.ais-card-top, .ais-card-peek) { --glass-blur-native: var(--backdrop-blur-native); grid-area: 1 / 1; border-radius: calc(var(--radius) * 1.2); background: var(--backdrop-tint); }
+/* The stack's heading is its name for a screen reader only: the top card says what it is and how many are left. */
+.ais-stack-sec > .ais-h { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; overflow: hidden; clip-path: inset(50%); }
+.ais-card-count { position: absolute; top: 16px; right: 16px; font-size: var(--text-small); font-variant-numeric: tabular-nums; color: var(--color-foreground); opacity: 0.86; }
+html:root .ai-screen.status .ais-stack > .ais-card-peek { background: linear-gradient(color-mix(in srgb, var(--color-foreground) 10%, transparent), color-mix(in srgb, var(--color-foreground) 10%, transparent)), var(--backdrop-tint); }
+.ais-card-peek { align-self: end; height: 60px; transform: translateY(calc(var(--i) * 8px)) scale(calc(1 - var(--i) * 0.05)); opacity: calc(1 - var(--i) * 0.3); pointer-events: none; }
+.ais-card-top {
+  position: relative; z-index: 1; display: flex; flex-direction: column; gap: 6px; min-height: 180px; padding: 16px; touch-action: none; user-select: none;
+  color: var(--color-foreground); box-shadow: var(--lift); transition: transform 420ms var(--ais-spring), opacity 220ms ease-out; animation: ais-card-in 420ms var(--ais-spring) both;
+}
+.ais-card-top.dragging { transition: none; }
+.ais-card-top[data-lean="right"] .ais-act.yes { background: var(--color-accent); color: var(--color-background); }
+.ais-card-top[data-lean="left"] .ais-act.no { background: var(--aip-amber); color: var(--aip-on-amber); }
+.ais-card-top[data-lean="up"] { opacity: 0.8; }
+.ais-card-top.fly.right { transform: translateX(120%) rotate(12deg); opacity: 0; }
+.ais-card-top.fly.left { transform: translateX(-120%) rotate(-12deg); opacity: 0; }
+.ais-card-top.fly.up { transform: translateY(-80%) scale(0.9); opacity: 0; }
+.ais-card-kind { font-size: var(--text-small); font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-foreground); }
+.ais-card-title { font-size: calc(var(--text-item) * 1.15); font-weight: 700; line-height: 1.25; }
+.ais-card-line { font-size: var(--text-body); line-height: 1.4; color: var(--color-foreground); opacity: 0.9; }
+.ais-shot { align-self: flex-start; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: none; }
+.ais-shot img { display: block; max-width: 100%; max-height: 140px; object-fit: cover; }
+.ais-try { align-self: flex-start; min-height: 36px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--color-accent); color: var(--color-accent-foreground, var(--color-background)); font: inherit; font-weight: 650; }
+.ais-acts { display: flex; gap: 8px; margin-top: auto; padding-top: 8px; }
+.ais-act { flex: 1; min-height: 44px; padding: 0 10px; border: 0; border-radius: 14px; background: color-mix(in srgb, var(--color-foreground) 12%, transparent); font: inherit; font-weight: 600; color: var(--color-foreground); }
+.ais-act.yes { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
+.ais-act.no { background: color-mix(in srgb, var(--aip-amber) 26%, transparent); }
+.ais-act.later { flex: 0 0 auto; }
+/* The foot's mic chip: hold anywhere on the page to talk; while it listens, what it hears. */
+.ais-mic { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; margin-right: auto; padding: 0 10px; border-radius: 999px; background: color-mix(in srgb, var(--color-foreground) 12%, transparent); font-size: var(--text-small); color: var(--color-foreground); max-width: 60%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ais-mic-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--color-foreground); opacity: 0.6; }
+.ais-mic.on .ais-mic-dot { background: var(--color-accent); opacity: 1; animation: aip-pulse 1.2s ease-in-out infinite; }
+.ais-reply + .ais-mic { display: none; }
+/* Off screen, at rest: nothing on the page animates (the idle check; it never paints behind home). */
+.ai-screen.status:not(.shown) * { animation: none !important; transition: none !important; }
+/* At rest on screen too: a working agent's dot is still (its bar and step move when it does). */
+.ai-screen.status .aip-dot.working { animation-iteration-count: 3; }
+@keyframes ais-card-in { from { opacity: 0; transform: translateY(14px) scale(0.96); } }
 @media (prefers-reduced-motion: reduce) {
+  .ais-card-top { animation: none; transition: none; }
   .ais-sec, .ais-step-t, .ais-bar-fill, .ais-done-row, .ais-reply, .ais-ring-fill, .ais-chev::before { animation: none; transition: none; }
   .ais-step-t.out { display: none; }
   .ais-bar.sweep .ais-bar-fill { transform: none; }

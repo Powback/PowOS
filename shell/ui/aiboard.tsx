@@ -52,7 +52,7 @@ export interface WorkRow {
 }
 
 /** A JSON-array column ("" or bad = none). */
-function list<T>(json: string | undefined): T[] {
+export function list<T>(json: string | undefined): T[] {
   try {
     const v = JSON.parse(json || "[]");
     return Array.isArray(v) ? v : [];

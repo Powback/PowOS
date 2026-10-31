@@ -403,7 +403,7 @@ function StatusColumn({ shown }: { shown: boolean }) {
   );
   return (
     <>
-      <AiStatus shown={shown} more={more} compose={<AiCompose />} />
+      <AiStatus shown={shown} more={more} compose={<AiCompose />} mic={pageMic} />
       {menu && <div class="ai-menu-scrim" onClick={() => setMenu(false)} />}
       {menu && <Menu close={() => setMenu(false)} />}
     </>
