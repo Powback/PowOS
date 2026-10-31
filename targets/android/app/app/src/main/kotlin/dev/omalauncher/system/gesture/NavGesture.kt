@@ -66,6 +66,10 @@ class NavGesture(
 
     /** Where the finger went down (screen px): the window follows it sideways. */
     private var downX = 0f
+    private var downY = 0f
+
+    /** This swipe's [SidewaysOwner] reading, decided once (it asks the running tasks). */
+    private var sidewaysHome: Boolean? = null
 
     /** The hold state last logged. */
     private var armedLogged = false
@@ -128,6 +132,8 @@ class NavGesture(
         transition = null
         from = null
         downX = e.rawX
+        downY = e.rawY
+        sidewaysHome = null
         armedLogged = false
         overFullWindow = false
         switcherTick.reset()
@@ -221,13 +227,49 @@ class NavGesture(
     }
 
     /**
-     * SB1 (10-31 15:09, the user: swiping sideways on home's search bar "flashes back and forth" - the trace: this
-     * quick switch, Tasks.open, 250 ms on the main thread): over home's own page (no app's window under the finger, no
-     * full-screen window, not the switcher) the bottom strip is home's search bar and dock, and a sideways swipe there
-     * is home's page swipe (shell/ui/gesture.ts chromeWay) - dropped here, the WebView keeps it. Over an app, sideways
-     * along the strip is still the quick switch.
+     * SB1 (10-31 15:09, the user: swiping sideways on home's search bar "flashes back and forth") and QS1 (15:50:
+     * "swipe left on the bottom left corner ... activates the last app always" - over a web window's task, ~32 dp up):
+     * with home the shown surface (its page front, not the switcher, no real full-screen app on display 0 - a floating /
+     * web window task under the finger doesn't count) the quick switch is only the system's gesture strip at the very
+     * bottom; a sideways swipe starting above it is home's page swipe (shell/ui/gesture.ts chromeWay) - dropped here,
+     * the WebView keeps it. Over a real full-screen app, sideways along the strip is still the quick switch.
      */
-    private fun homeOwnsSideways(): Boolean = from == null && !overFullWindow && !Switcher.open && Switcher.onHome && Switcher.homeVisible
+    private fun homeOwnsSideways(): Boolean =
+        sidewaysHome ?: run {
+            val homeShown = !overFullWindow && !Switcher.open && Switcher.onHome && Switcher.homeVisible
+            val full = homeShown && from?.let(::fullScreenApp) == true
+            val owner = SidewaysOwner.decide(homeShown, full, downY, screen.bottom.toFloat(), homeStrip().toFloat())
+            Log.i(TAG, "gesture: sideways from y ${downY.toInt()} (strip ${homeStrip()} px, home shown $homeShown, full-screen app $full): $owner")
+            (owner == SidewaysOwner.Owner.HOME_PAGE).also { sidewaysHome = it }
+        }
+
+    /** Task [id] is a real full-screen app on the main display (not a web window, not floating). */
+    private fun fullScreenApp(id: Int): Boolean {
+        @Suppress("DEPRECATION")
+        val t =
+            runCatching { service.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(16) }.getOrNull()
+                ?.firstOrNull { it.taskId == id } ?: return false
+        if (dev.omalauncher.shell.WebWindowDisplays.isWebWindow(t)) return false
+        val display = dev.omalauncher.shell.WebWindowDisplays.displayOf(t)
+        if (display != Display.DEFAULT_DISPLAY && display != -1) return false
+        // HACK: TaskInfo.getWindowingMode is hidden (reflected). Real fix: none, no public windowing mode on TaskInfo.
+        val mode = runCatching { android.app.TaskInfo::class.java.getMethod("getWindowingMode").invoke(t) as Int }.getOrDefault(-1)
+        return mode == WINDOWING_MODE_FULLSCREEN
+    }
+
+    /** The system's bottom gesture strip: the navigation bar's inset (~24 dp in gesture navigation). */
+    @SuppressLint("DiscouragedApi", "InternalInsetResource")
+    private fun homeStrip(): Int {
+        val inset =
+            runCatching {
+                displayContext.getSystemService(WindowManager::class.java).maximumWindowMetrics.windowInsets
+                    .getInsets(android.view.WindowInsets.Type.navigationBars()).bottom
+            }.getOrDefault(0)
+        if (inset > 0) return inset
+        val res = service.resources
+        return res.getIdentifier("navigation_bar_height", "dimen", "android").takeIf { it != 0 }?.let(res::getDimensionPixelSize)?.takeIf { it > 0 }
+            ?: (24 * res.displayMetrics.density).toInt()
+    }
 
     private fun drop(): GestureConsumer.Verdict {
         classifier = null
@@ -556,6 +598,7 @@ class NavGesture(
         const val PANEL_TRAVEL = 0.4f
         const val HOME_SETTLE_MS = 220L
         const val NAV_MODE_GESTURAL = 2
+        const val WINDOWING_MODE_FULLSCREEN = 1
 
         // QuickStepContract.SYSUI_STATE_* (this phone's SystemUI: QuickStepContract.getSystemUiStateString).
         const val SYSUI_SCREEN_PINNED = 1L shl 0
