@@ -150,6 +150,7 @@ class WebWindows(
         val src = w.linux
         val (key, label) = src?.let { it.offer.key to it.offer.label } ?: appOf(w.component) ?: ("a:${w.component.packageName}" to w.component.packageName)
         val o = JSONObject().put("id", w.id).put("key", key).put("label", label).put("display", w.displayId).put("task", w.taskId).put("state", listedState(w)).put("live", w.live)
+        if (w.zoom != 1.0) o.put("zoom", w.zoom)
         if (src != null) o.put("kwin", src.kwin).put("ownFrame", andro.marchy.WebWindowSource.ownFrame(src.kwin))
         w.geo?.let { g -> o.put("frame", css(g.frame)).put("body", css(g.body)).put("maximised", g.maximised) }
         return o
@@ -495,9 +496,13 @@ class WebWindows(
         /** The display's size, px (what it was made or last resized to). */
         var w: Int,
         var h: Int,
-        /** Its display's dpi ([WindowDpi]): fixed from its creation, every resize at it. */
-        val dpi: Int,
+        /** Its display's dpi at content zoom 1 ([WindowDpi.of]): fixed from its creation. */
+        val baseDpi: Int,
     ) {
+        /** TS1: its content zoom (the user's pinch, [zoom]) and its display's dpi at it ([WindowDpi.zoomed]): every resize at it. */
+        var zoom = 1.0
+        var dpi = baseDpi
+
         @Volatile var displayId = -1
         var mirror: SurfaceControl? = null
 
@@ -2437,6 +2442,25 @@ class WebWindows(
             .onFailure { WindowLog.w(TAG, "window ${w.id}: home not started for the minimise", it) }.isSuccess
         WindowLog.i(TAG, "window ${w.id}: minimised as a home gesture (${top.flattenToShortString()}, task $task on display 0, home started=$ok)")
         io.postDelayed({ WindowLog.i(TAG, "window ${w.id}: after its minimise task $task is ${taskInfo(task)?.let { "mode ${windowingMode(it)} visible ${visibleOf(it)} on display ${WebWindowDisplays.displayOf(it)}" } ?: "gone"}") }, LEFT_SETTLE_MS)
+    }
+
+    /**
+     * TS1: window [id]'s app at content zoom [k] ([WindowDpi.zoomed]): its display keeps its size and takes the new dpi
+     * (the app reconfigures in place, its state kept). The page's pinch on a bar sends it on release. Main thread.
+     */
+    fun zoom(
+        id: Int,
+        k: Double,
+    ): Boolean {
+        val w = wins[id] ?: return false
+        if (w.linux != null) return false
+        w.zoom = WindowDpi.clampZoom(k)
+        val dpi = WindowDpi.zoomed(w.baseDpi, w.zoom)
+        if (dpi == w.dpi) return true
+        WindowLog.i(TAG, "window $id: content zoom ${w.zoom}: dpi ${w.dpi} -> $dpi (${w.w}x${w.h} kept)")
+        w.dpi = dpi
+        if (w.displayId >= 0) helper.resize(w.displayId, w.w, w.h, dpi)
+        return true
     }
 
     /** MN2: the page's way back from minimised (dock, switcher, its page): an app [minimise] moved out, back in window [id]. */

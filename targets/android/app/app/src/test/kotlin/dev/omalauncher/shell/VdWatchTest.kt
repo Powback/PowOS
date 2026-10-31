@@ -18,6 +18,15 @@ class VdWatchTest {
         assertEquals(442, WindowDpi.of(442, 2268, "com.discord"))
     }
 
+    @Test fun contentZoomScalesTheBaseDensityClamped() {
+        assertEquals(294, WindowDpi.zoomed(294, 1.0))
+        assertEquals(441, WindowDpi.zoomed(294, 1.5)) // bigger content, less fits
+        assertEquals(221, WindowDpi.zoomed(294, 0.75)) // more fits
+        assertEquals(588, WindowDpi.zoomed(294, 9.0)) // clamped to MAX_ZOOM
+        assertEquals(147, WindowDpi.zoomed(294, 0.1)) // clamped to MIN_ZOOM
+        assertEquals(294, WindowDpi.zoomed(294, Double.NaN))
+    }
+
     @Test fun noFrameTwoSecondsAfterResizeIsFrozenOnce() {
         val f = FrozenWatch()
         f.resized(1_000)

@@ -443,6 +443,8 @@ export interface HostWebWindow {
   ownFrame?: boolean;
   frame?: WebWindowRect;
   body?: WebWindowRect;
+  /** TS1: its app's content zoom (its display's dpi over the window's own), when not 1. */
+  zoom?: number;
 }
 
 export interface WebWindowRect { left: number; top: number; width: number; height: number }
@@ -985,6 +987,8 @@ export interface Bridge {
     minimise?(id: number): Promise<boolean>;
     /** Host-optional: back from minimised - its app (out of picture-in-picture too) back in its window. */
     restore?(id: number): Promise<boolean>;
+    /** Host-optional (TS1): its app at content zoom [k] - its display's size kept, its dpi x [k] (the app reconfigures). */
+    zoom?(id: number, k: number): Promise<boolean>;
   };
   /**
    * The switcher, a layer of home (ui/recents.tsx). The host drives it: "recents.begin" ({ from, tasks }: a swipe up
