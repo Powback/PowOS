@@ -2311,6 +2311,15 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .recents .task:not(:first-child) { transform: translateX(calc((var(--rp) - 1) * 0.45 * var(--screen-w, 100vw))); opacity: var(--rp); }
 .recents .task:first-child .task-head, .recents .task-clear { opacity: var(--rp); }
 .recents.live .task:first-child .task-shot { visibility: hidden; }
+/*
+ * Over an app (live) the closing app's card is the app's window itself (RecentsTransition.kt moves, shrinks and fades
+ * it) - nothing of the page's animates with it: its icon and label (.task-head) show once it has landed in the switcher
+ * (landed: live off), and the row only fades into the home zone, never scaled. The head fading and the row shrinking
+ * under the native window's own shrink and fade was the swipe home's "pop, like something is fighting with the home
+ * animation and the icon fading out" (the user, 10-31 20:22). Gate swipe-home-one-anim.
+ */
+.recents.live .task:first-child .task-head { visibility: hidden; }
+.recents.live .task-row { transform: translate(var(--rx), var(--ry)); }
 /* A swipe up over home has no app window growing into the first card: it rises and fades in with the finger too. */
 .recents.homeswipe .task:first-child .task-shot { opacity: var(--rp); transform: translateY(calc((1 - var(--rp)) * 10vh)) scale(calc(0.92 + 0.08 * var(--rp))); }
 .recents .task[aria-hidden] { visibility: hidden; }

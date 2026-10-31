@@ -1077,6 +1077,125 @@ async function relayout(page, to, from) {
  * up a little bit" ... "it should just like always be there"). Sampled every frame from the swipe's start to 600 ms
  * after it ends.
  */
+/**
+ * A swipe home from an app has ONE closing animation: the app's window (native, RecentsTransition.kt) - the switcher's
+ * card for that app (the first one: its head, its shot) and the row holding it neither fade nor scale under it (the
+ * user, 10-31 20:22: "some pop, like something is fighting with the home animation and the icon fading out").
+ * Sampled every frame of the swipe into the home zone and its settle.
+ */
+async function swipeHomeOneAnimCheck() {
+  const fails = [];
+  const host = (event, data) => window.__mockEvents.emit(event, data);
+  const raf = () => new Promise((ok) => requestAnimationFrame(() => ok()));
+  const tasks = [{ id: 511, label: "Chrome", key: null, icon: null, snapshot: "" }, { id: 512, label: "Camera", key: null, icon: null, snapshot: "" }];
+  host("recents.begin", { from: 511, tasks });
+  await raf();
+  const card = document.querySelector(".recents .task:first-child");
+  if (!card) return ["swipe-home-one-anim: no first card in the switcher"];
+  const scaled = (el) => {
+    const t = getComputedStyle(el).transform;
+    if (t === "none") return false;
+    const m = new DOMMatrix(t);
+    return Math.abs(Math.hypot(m.a, m.b) - 1) > 0.001 || Math.abs(Math.hypot(m.c, m.d) - 1) > 0.001;
+  };
+  const look = (when) => {
+    const head = card.querySelector(".task-head");
+    const shot = card.querySelector(".task-shot");
+    for (const [name, el] of [["head", head], ["shot", shot]]) {
+      if (el && getComputedStyle(el).visibility !== "hidden") fails.push(`${when}: the closing app's card ${name} is shown (opacity ${getComputedStyle(el).opacity}) under its window`);
+    }
+    for (let el = card; el && !el.classList.contains("recents"); el = el.parentElement) if (scaled(el)) fails.push(`${when}: ${el.className} is scaled (${getComputedStyle(el).transform}) under the app's window`);
+  };
+  for (let i = 1; i <= 24; i++) {
+    host("recents.drag", { progress: Math.min(1, i / 12), x: 0, y: -i * 8, home: Math.max(0, Math.min(1, (i - 8) / 12)) });
+    await raf();
+    look(`drag ${i}`);
+  }
+  host("recents.end", { to: "home" });
+  await raf();
+  return [...new Set(fails)].slice(0, 8);
+}
+
+/**
+ * Back home from an app (the page hidden, then visible: visibilitychange, pageshow, focus, the host's resume - a live
+ * wallpaper's picture read again, another frame of it: "system.glass"): the theme as it was - the labels' and widgets'
+ * text, the search bar's tint, the wallpaper's tone - on each of the first 10 frames and after (the user, 10-31 20:08:
+ * "When I return home from an app, the theme is fucked up for a moment").
+ */
+async function resumeThemeCheck() {
+  const fails = [];
+  const host = (event, data) => window.__mockEvents.emit(event, data);
+  const raf = () => new Promise((ok) => requestAnimationFrame(() => ok()));
+  const picture = (fill) => {
+    const c = document.createElement("canvas");
+    c.width = c.height = 32;
+    const x = c.getContext("2d");
+    x.fillStyle = fill;
+    x.fillRect(0, 0, 32, 32);
+    return c.toDataURL("image/png");
+  };
+  const glass = (url, rev) => ({ wallpaper: { url, rev, source: "live" }, blurBehind: false });
+  const root = document.documentElement;
+  host("system.glass", glass(picture("#101418"), "live-4242-111"));
+  await window.__gw.until(() => root.dataset.wallpaper === "dark");
+  for (let i = 0; i < 10; i++) await raf();
+  const state = () => {
+    const css = (sel, prop) => { const el = document.querySelector(sel); return el ? getComputedStyle(el)[prop] : "-"; };
+    return {
+      tone: root.dataset.wallpaper ?? "-",
+      label: css(".tile-app .app-label", "color"),
+      widget: css(".page .home-tile > .tile", "color"),
+      bar: css(".home > .bar .bar-pill", "backgroundColor"),
+    };
+  };
+  const steady = state();
+  if (steady.label === "-" && steady.bar === "-") return ["resume-theme: no label or search bar on home to look at"];
+  const set = (hidden) => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (hidden ? "hidden" : "visible") });
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+  set(true);
+  await raf();
+  // The host on resume: the live wallpaper's frame read again - a bright one (mid-playback, mid-transition).
+  host("system.glass", glass(picture("#f4f4f4"), "live-4242-222"));
+  set(false);
+  dispatchEvent(new Event("pageshow"));
+  dispatchEvent(new Event("focus"));
+  host("system.home", {});
+  const diff = (when) => {
+    const now = state();
+    for (const k of Object.keys(steady)) if (now[k] !== steady[k]) fails.push(`${when}: ${k} ${steady[k]} -> ${now[k]}`);
+  };
+  for (let f = 0; f < 10; f++) {
+    await raf();
+    diff(`frame ${f}`);
+  }
+  await new Promise((ok) => setTimeout(ok, 400));
+  diff("400 ms after");
+  delete document.hidden;
+  delete document.visibilityState;
+  return [...new Set(fails)].slice(0, 8);
+}
+
+/** A page swipe changes the page without a haptic tick (the user, 10-31: "Don't need haptics when changing page"). */
+async function pageSwipeNoHapticCheck() {
+  const raf = () => new Promise((ok) => requestAnimationFrame(() => ok()));
+  if (!window.__hapticsMock) return ["page-swipe-no-haptic: no mock haptics"];
+  const G = await window.__gw.mod("./ui/gesture.ts");
+  const t0 = window.__hapticsMock.tick + window.__hapticsMock.confirm;
+  for (const dir of [1, -1]) {
+    for (let i = 1; i <= 20; i++) {
+      G.pageDrag.value = dir * i * 20;
+      await raf();
+    }
+    G.pageDrag.value = null;
+    await raf();
+  }
+  const n = window.__hapticsMock.tick + window.__hapticsMock.confirm - t0;
+  return n ? [`page swipe: ${n} haptic bridge calls, want none`] : [];
+}
+
 async function homeReturnCheck() {
   const fails = [];
   const host = (event, data) => window.__mockEvents.emit(event, data);
@@ -6436,6 +6555,12 @@ try {
   // side-by-side pages without moving a tile.
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "home-return", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(homeReturnCheck))));
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "swipe-home-one-anim", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(swipeHomeOneAnimCheck))));
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeCheck))));
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "page-swipe-no-haptic", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(pageSwipeNoHapticCheck))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "recents-renders", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(recentsRendersCheck))));
   if (process.env.SHELL_PAGES !== "0")
