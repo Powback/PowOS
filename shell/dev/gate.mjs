@@ -4044,6 +4044,28 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, position] of [["folded", "bottom"], ["folded", "right"], ["unfolded", "bottom"], ["unfolded", "right"], ["unfolded", "left"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `dock-search-${label}-${position}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos) => (await importShim("./dev/dock-search-check.js")).dockSearchCheck(pos), position))));
+  // PI1 (dev/page-marks-check.js; the user, 2026-10-31 01:34): the dock marks the apps open on the page on screen - a
+  // pill and full opacity for page 1's app, a dot and a fade for page 2's; a swipe to page 2 swaps them; no windows,
+  // nothing fades. Folded: a running app's dot only. Renders: /cache/pi1-<case>-<step>.png.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, position] of [["folded", "bottom"], ["folded", "right"], ["unfolded", "bottom"], ["unfolded", "right"]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `page-marks-${label}-${position}`, dockOpensView[label]).then((r) => whenReady(r, async () => {
+        const call = (fn, ...args) => r.page.evaluate(async (f, a) => (await importShim("./dev/page-marks-check.js"))[f](...a), fn, args);
+        const shot = (step) => r.page.screenshot({ path: `/cache/pi1-${label}-${position}-${step}.png` });
+        const unfolded = label === "unfolded";
+        const { a, b, pages } = await call("pageMarksSetup", position, unfolded);
+        const fails = [];
+        if (unfolded && pages < 2) fails.push(`only ${pages} home page(s) to put two windows on`);
+        fails.push(...(await call("pageMarksAt", 0, unfolded ? a : null, b, unfolded)));
+        await shot("page1");
+        if (unfolded) {
+          fails.push(...(await call("pageMarksAt", 1, b, a, true)));
+          await shot("page2");
+        }
+        fails.push(...(await call("pageMarksNone", b)));
+        await shot("none");
+        return fails.map((f) => `${position}: ${f}`);
+      })));
   // The same in the user's unfolded home: the dock on the right, the pill below it, 821x883 (the phone, 2026-10-28).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-keyboard-side", { width: 821, height: 883 }).then((r) => whenReady(r, () => launcherKeyboardSide(r.page, { width: 821, height: 883 }))));

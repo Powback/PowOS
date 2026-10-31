@@ -28,6 +28,7 @@ import { Screens } from "./screens.tsx";
 import { EditSheet } from "./editsheet.tsx";
 import { PowAiPage } from "./powai.tsx";
 import { Pet } from "./pet.tsx";
+import { markClass, pageFocus } from "./pagemarks.ts";
 import { Recents } from "./recents.tsx";
 import { appOf, dockTap } from "./desktops.ts";
 import { overWindows } from "./panellift.ts";
@@ -291,7 +292,7 @@ function DockRecents({ count }: { count: number }) {
   return (
     <>
       {shown.map((app) => (
-        <AppCell key={app.key} app={app} labels={false} draggable onTap={() => dockTap(app.key)} />
+        <AppCell key={app.key} app={app} labels={false} class={markClass(app.key)} draggable onTap={() => dockTap(app.key)} />
       ))}
     </>
   );
@@ -332,7 +333,7 @@ function DockWindows({ pinned }: { pinned: string[] }) {
     <>
       {shown.map(([k, state]) => {
         const app = byKey.value.get(k);
-        return app && <AppCell key={`w ${k}`} app={app} labels={false} class={`windowed ${state}`} onTap={() => dockTap(k)} />;
+        return app && <AppCell key={`w ${k}`} app={app} labels={false} class={`windowed ${state} ${markClass(k)}`} onTap={() => dockTap(k)} />;
       })}
     </>
   );
@@ -400,7 +401,7 @@ export function Dock() {
         key={app.key}
         app={app}
         labels={false}
-        class={`${d?.key === app.key ? "lifted" : swapOut === app.key ? "swap-out" : ""} ${windowed.value.has(app.key) ? `windowed ${windowed.value.get(app.key)}` : ""}`}
+        class={`${d?.key === app.key ? "lifted" : swapOut === app.key ? "swap-out" : ""} ${windowed.value.has(app.key) ? `windowed ${windowed.value.get(app.key)}` : ""} ${markClass(app.key)}`}
         style={style}
         onDrag={(e) => el.current && moveInDock(app.key, e, el.current)}
         onTap={() => dockTap(app.key)}
@@ -417,7 +418,7 @@ export function Dock() {
        * The pinned apps' page, then the recent apps in a row that scrolls on (the browser's own scroll, on the
        * compositor: momentum, snapping only near the two starts). The dots below follow when a scroll settles.
        */}
-      <div class={`dock ${ghost && carried ? "dock-ghost" : ""} ${aim ? "aimed" : ""} ${paged ? "paged" : ""}`} data-p ref={followDock}>
+      <div class={`dock ${ghost && carried ? "dock-ghost" : ""} ${aim ? "aimed" : ""} ${paged ? "paged" : ""} ${pageFocus.value ? "page-focus" : ""}`} data-p ref={followDock}>
         <div class="dock-pages" ref={pagesEl}>
           {(!ghost || carried || button) && (
             <div
@@ -465,7 +466,7 @@ export function DockTray() {
   if (dockPosition.value !== "bottom") return null;
   if (!recent.value.some((k) => !dock.value.includes(k) && !windowed.value.has(k) && byKey.value.has(k))) return null;
   return (
-    <div class="dock dock-tray paged" data-p ref={followOpenness}>
+    <div class={`dock dock-tray paged ${pageFocus.value ? "page-focus" : ""}`} data-p ref={followOpenness}>
       <div class="dock-pages">
         <div class="dock-page dock-recent">
           <DockRecents count={30} />
