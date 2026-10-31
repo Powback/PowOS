@@ -15,7 +15,7 @@ import type { HostWebWindow, WebWindowRect } from "../types.ts";
 import { Mark } from "./chrome.tsx";
 import { memo } from "./memo.ts";
 import { confirm as hapticConfirm, tick as hapticTick } from "./haptics.ts";
-import { dropAt, dropInto, freeCells, freeRect, insertAt, leaves, splitBox, tabAt, treeRects, zoneKey as dropKey, type Bar, type Cells, type Tree, type Zone } from "./tiledrop.ts";
+import { dropAt, dropInto, freeRegion, insertAt, leaves, splitBox, tabAt, treeRects, zoneKey as dropKey, type Bar, type Tree, type Zone } from "./tiledrop.ts";
 
 const TITLE = 36;
 const RADIUS = 12;
@@ -620,16 +620,8 @@ export function WebWindowsOn({ page }: { page: number }) {
 
 /** A drag's ghosts on [page]: its tile drop, edge snap or park (TG3a). */
 function Previews({ page, o }: { page: number; o: { x: number; y: number } }) {
-  const d = [dropView.value, snapView.value, parkView.value, cellView.value].find((v) => v?.page === page);
-  const hints = hintView.value?.page === page ? hintView.value.cells : [];
-  return (
-    <>
-      {hints.map((c) => (
-        <div key={`${c.x},${c.y}`} class="ww-cell-hint" style={{ left: `${c.x - o.x}px`, top: `${c.y - o.y}px`, width: `${c.w}px`, height: `${c.h}px`, zIndex: 998 }} />
-      ))}
-      {d && <DropPreview d={d} o={o} />}
-    </>
-  );
+  const d = [dropView.value, snapView.value, parkView.value, placeView.value].find((v) => v?.page === page);
+  return d ? <DropPreview d={d} o={o} /> : null;
 }
 
 // ---- tiles -------------------------------------------------------------------------------------------------------------
@@ -1024,12 +1016,20 @@ export const dropView = signal<(Landing & { zone: Zone }) | null>(null);
 /** A bar drag's edge snap in progress (no tile or tab drop there): the rect window [id] would take ([DropPreview]). */
 export const snapView = signal<{ id: number; page: number; slot: Slot; rect: Box } | null>(null);
 /** A drag's previews gone (let go, cancelled). */
-const clearAim = () => (dropView.value = tabView.value = snapView.value = parkView.value = cellView.value = hintView.value = null);
+const clearAim = () => (dropView.value = tabView.value = snapView.value = parkView.value = placeView.value = null);
 
-// ---- WG1: home's free cells as snap targets beside the widgets (the free rect: ui/tiledrop.ts freeRect) ------------
+// ---- WG1: the free region around the finger as the snap target beside the widgets (ui/tiledrop.ts freeRegion) -------
+//
+// The user, 10-31 20:19: "fill out the space between the widgets ... And for the floating window, show a preview of
+// where it will appear." One ghost ([DropPreview]) for both: the free region's rect, or the floating rect the window
+// opens at; the drop lands exactly on the ghost.
 
 /** Home's grid on a page, from ui/grid.tsx ([provideHomeGrid]: it imports this module, so it hands the grid in). */
-export interface HomeGrid extends Cells {
+export interface HomeGrid {
+  cols: number;
+  rows: number;
+  /** The tiles' spans (cells). */
+  taken: Box[];
   /** Cell (0, 0)'s top left on screen, viewport CSS px, and a cell's size. */
   left: number;
   top: number;
@@ -1041,47 +1041,75 @@ export const provideHomeGrid = (f: (page: number) => HomeGrid | null) => void (h
 /** A cell span's rect on screen (viewport CSS px). */
 const cellBox = (g: HomeGrid, c: Box): Box => ({ x: g.left + c.x * g.cellW, y: g.top + c.y * g.cellH, w: c.w * g.cellW, h: c.h * g.cellH });
 
-/** A floating window's drag over home's free cells: the cells it would snap to and their rect ([DropPreview]). */
-export const cellView = signal<{ id: number; page: number; cells: Box; rect: Box } | null>(null);
-/** The drag's faint hints: page [page]'s free cells (viewport rects), shown while a floating window is dragged there. */
-export const hintView = signal<{ page: number; cells: Box[] } | null>(null);
+/** A drop on home's free space: "region" (the free region around the finger) or "float" (where it floats). Viewport px. */
+export interface Place {
+  page: number;
+  kind: "region" | "float";
+  rect: Box;
+}
+/** A floating window's drag over home: the place it lands ([DropPreview]); [id]: the window. */
+export const placeView = signal<(Place & { id: number }) | null>(null);
 
-/** Page [page]'s grid where web windows are (unfolded), with cells to snap to; null folded or not measured yet. */
+/** Page [page]'s grid where web windows are (unfolded); null folded or not measured yet. */
 const gridOn = (page: number) => {
   const g = wideHome.value ? homeGrid?.(page) : null;
-  return g && g.cellW > 0 && g.cellH > 0 && g.rows > 0 ? g : null;
+  return g && g.cellW > 0 && g.cellH > 0 ? g : null;
 };
 
-/** The free cells' hints for window [id]'s page, put up once per page in a drag. */
-function showHints(id: number) {
-  const w = webWins.value.find((v) => v.id === id);
-  const g = w && gridOn(w.page);
-  if (!w || !g || hintView.peek()?.page === w.page) return;
-  hintView.value = { page: w.page, cells: freeCells(g).map((c) => cellBox(g, c)) };
+/** The free region around (x, y) on [page]: the tiles kept [TILE_GAP] off, inside the tile area; null if too small. */
+function regionAt(page: number, x: number, y: number): Box | null {
+  const g = gridOn(page);
+  if (!g) return null;
+  const a = tileArea();
+  const bounds = { x: a.left + TILE_GAP, y: a.top + TILE_GAP, w: a.right - a.left - 2 * TILE_GAP, h: a.bottom - a.top - TILE_GAP };
+  const r = freeRegion(bounds, g.taken.map((c) => cellBox(g, c)), { x, y }, TILE_GAP);
+  return r && r.w >= MIN_W && r.h >= MIN_H ? r : null;
 }
 
-/** The cells window [id]'s bar dragged to (x, y) snaps to: the largest free rect there, big enough for a window; or null. */
-function cellAim(id: number, x: number, y: number) {
-  const w = webWins.value.find((v) => v.id === id);
-  const g = w && gridOn(w.page);
-  const cells = g && freeRect(g, (x - g.left) / g.cellW, (y - g.top) / g.cellH);
-  const rect = g && cells && cellBox(g, cells);
-  return w && cells && rect && rect.w >= MIN_W && rect.h >= MIN_H ? { id, page: w.page, cells, rect } : null;
+/**
+ * Where a new window of [size] let go at (x, y) on [page] goes (the dock's drag-out, dockout.tsx): the free region
+ * there, else floating at [size] centred under the finger, kept inside the tile area. null folded (no web windows).
+ */
+export function placeAt(page: number, x: number, y: number, size = cascade()): Place | null {
+  if (!wideHome.value) return null;
+  const region = regionAt(page, x, y);
+  if (region) return { page, kind: "region", rect: region };
+  const a = tileArea();
+  const w = Math.min(size.w, a.right - a.left);
+  const h = Math.min(size.h, a.bottom - a.top);
+  const left = Math.min(Math.max(x - w / 2, a.left), a.right - w);
+  const top = Math.min(Math.max(y - h / 2, a.top), a.bottom - h);
+  return { page, kind: "float", rect: { x: left, y: top, w, h } };
 }
 
-/** WG1: window [id] let go on cell hints: its frame exactly those cells (inward to whole px), its zoom and scale kept. */
-function snapToCells(c: NonNullable<ReturnType<typeof cellAim>>) {
-  const w = webWins.value.find((v) => v.id === c.id);
+/** Window [id]'s bar dragged to (x, y): the free region there, else where it floats now (its own frame); or null. */
+function placeAim(id: number, x: number, y: number): (Place & { id: number }) | null {
+  const w = webWins.value.find((v) => v.id === id);
+  if (!w || !gridOn(w.page)) return null;
+  const region = regionAt(w.page, x, y);
+  if (region) return { id, page: w.page, kind: "region", rect: region };
+  const o = pageOrigin();
+  const s = w.scale ?? 1;
+  return { id, page: w.page, kind: "float", rect: { x: w.x + o.x, y: w.y + o.y, w: w.w * s, h: w.h * s } };
+}
+
+/** Window [id] at [rect] (viewport px) exactly: its frame there, its zoom and scale kept, on top. */
+export function placeWindow(id: number, rect: Box) {
+  const w = webWins.value.find((v) => v.id === id);
   if (!w) return;
   const o = pageOrigin();
   const s = w.scale ?? 1;
-  const x = Math.ceil(c.rect.x - o.x);
-  const y = Math.ceil(c.rect.y - o.y);
-  const r = Math.floor(c.rect.x + c.rect.w - o.x);
-  const b = Math.floor(c.rect.y + c.rect.h - o.y);
-  update(c.id, { x, y, w: (r - x) / s, h: (b - y) / s, restore: undefined });
-  raise(c.id);
-  console.info(`[cells] window ${c.id} snapped to cells ${c.cells.x},${c.cells.y} ${c.cells.w}x${c.cells.h} on page ${c.page}`);
+  update(id, { x: rect.x - o.x, y: rect.y - o.y, w: rect.w / s, h: rect.h / s, restore: undefined });
+  raise(id);
+  console.info(`[place] window ${id} at ${Math.round(rect.x)},${Math.round(rect.y)} ${Math.round(rect.w)}x${Math.round(rect.h)}`);
+}
+
+/** A new window for app [key] on [page] at [p] (the dock's drag-out): false when it can't be a web window. */
+export async function openWindowAt(key: string, label: string, p: Place): Promise<boolean> {
+  const id = key.startsWith("l:") ? await linuxWindow(key, label, p.page) : await openWindow(key, label, p.page);
+  if (id == null) return false;
+  if (tiledOn(id) == null) placeWindow(id, p.rect);
+  return true;
 }
 
 /** [t] as a split tree of its windows ("4": two columns of two). */
@@ -1148,20 +1176,20 @@ const perms = (a: number[]): number[][] => (a.length <= 1 ? [a] : a.flatMap((v, 
  */
 function aim(id: number, x: number, y: number, docks = true) {
   const a = aimAt(id, x, y, docks);
-  if (docks) showHints(id);
-  if (aimKey(a) === aimKey({ next: dropView.value, tab: tabView.value, snap: snapView.value, park: parkView.value, cell: cellView.value })) return;
-  if (a.next || a.tab || a.snap || a.park || a.cell) hapticTick();
+  const was: Aim = { next: dropView.value, tab: tabView.value, snap: snapView.value, park: parkView.value, place: placeView.value };
+  if (aimKey(a) === aimKey(was)) return followFloat(a);
+  if (a.next || a.tab || a.snap || a.park || a.place?.kind === "region") hapticTick();
   dropView.value = a.next;
   tabView.value = a.tab;
   snapView.value = a.snap;
   parkView.value = a.park;
-  cellView.value = a.cell;
+  placeView.value = a.place;
 }
 
 /** What a bar drag at (x, y) aims at: a park, a tab drop, a tile drop, an edge snap or home's free cells (at most one). */
 function aimAt(id: number, x: number, y: number, docks: boolean): Aim {
   // TG3a: a window dragged out of the tiles parks at the screen's very edge (beyond the snap) - before anything else.
-  const none: Aim = { next: null, tab: null, snap: null, park: null, cell: null };
+  const none: Aim = { next: null, tab: null, snap: null, park: null, place: null };
   const park = docks ? null : parkAim(id, x);
   if (park) return { ...none, park };
   const tab = tabTarget(id, x, y);
@@ -1170,18 +1198,23 @@ function aimAt(id: number, x: number, y: number, docks: boolean): Aim {
   if (next) return { ...none, next };
   const snap = snapAim(id, x, y);
   if (snap || !docks) return { ...none, snap };
-  // WG1: no tile, tab or edge there - a floating window over home's free cells snaps to them.
-  return { ...none, cell: cellAim(id, x, y) };
+  // WG1: no tile, tab or edge there - a floating window over home fills the free region there, else floats.
+  return { ...none, place: placeAim(id, x, y) };
 }
+/** The same target as before: only a floating ghost moves (it follows the window); the rest stand still. */
+function followFloat(a: Aim) {
+  if (a.place?.kind === "float") placeView.value = a.place;
+}
+
 interface Aim {
   next: ReturnType<typeof tileDrop>;
   tab: ReturnType<typeof tabTarget>;
   snap: ReturnType<typeof snapAim>;
   park: ReturnType<typeof parkAim>;
-  cell: ReturnType<typeof cellAim>;
+  place: ReturnType<typeof placeAim>;
 }
-const cellKey = (c: Aim["cell"]) => (c ? `${c.cells.x},${c.cells.y},${c.cells.w},${c.cells.h}` : "");
-const aimKey = (a: Aim) => `${dropKey(a.next?.zone)}|${tabKey(a.tab)}|${a.snap?.slot ?? ""}|${a.park?.side ?? ""}|${cellKey(a.cell)}`;
+const placeKey = (p: Aim["place"]) => (p?.kind === "region" ? `${Math.round(p.rect.x)},${Math.round(p.rect.y)},${Math.round(p.rect.w)},${Math.round(p.rect.h)}` : (p?.kind ?? ""));
+const aimKey = (a: Aim) => `${dropKey(a.next?.zone)}|${tabKey(a.tab)}|${a.snap?.slot ?? ""}|${a.park?.side ?? ""}|${placeKey(a.place)}`;
 
 /** The edge snap window [id]'s bar makes let go at (x, y) ([release]'s fallback): its slot and rect, or null. */
 function snapAim(id: number, x: number, y: number) {
@@ -1211,7 +1244,7 @@ function release(id: number, x: number, y: number) {
   const drop = dropView.value;
   const tab = tabView.value;
   const park = parkView.value;
-  const cell = cellView.value;
+  const place = placeView.value;
   clearAim();
   if (park?.id === id) return parkWindow(park);
   if (tab?.id === id) return joinStack(tab);
@@ -1219,7 +1252,12 @@ function release(id: number, x: number, y: number) {
   if (drop?.id === id) return dock(drop);
   const slot = snapSlot(x, y);
   if (slot) return tile(id, slot);
-  if (cell?.id === id) snapToCells(cell);
+  landPlace(id, place);
+}
+
+/** Window [id] let go on home's free space: the free region's ghost filled; floating it stays (its frame is the ghost). */
+function landPlace(id: number, place: (Place & { id: number }) | null) {
+  if (place?.kind === "region" && place.id === id) placeWindow(id, place.rect);
 }
 
 /** The previewed drop made: the new tiling, a swapped-out window floating again, the tiles re-flowing ([reflow]). */
@@ -1475,11 +1513,12 @@ function holdAppSizes(ids: (number | null)[]) {
 }
 
 /** The drop's preview: the tile the window would take, translucent; it glides between zones. */
-function DropPreview({ d, o }: { d: { rect: Box; zone?: Zone; slot?: Slot; cells?: Box }; o: { x: number; y: number } }) {
+function DropPreview({ d, o }: { d: { rect: Box; zone?: Zone; slot?: Slot; kind?: Place["kind"] }; o: { x: number; y: number } }) {
   const r = d.rect;
-  const style = { left: `${r.x - o.x}px`, top: `${r.y - o.y}px`, width: `${r.w}px`, height: `${r.h}px`, zIndex: 999 };
+  // A dragged window's floating ghost is its own frame: under the windows, never over the window it previews.
+  const style = { left: `${r.x - o.x}px`, top: `${r.y - o.y}px`, width: `${r.w}px`, height: `${r.h}px`, zIndex: d.kind === "float" ? 0 : 999 };
   return (
-    <div class={`ww-drop ${d.zone?.kind ?? (d.cells ? "cells" : "snap")}`} data-zone={d.zone ? dropKey(d.zone) : d.cells ? `cells:${d.cells.x},${d.cells.y},${d.cells.w},${d.cells.h}` : `snap:${d.slot}`} style={style}>
+    <div class={`ww-drop ${d.zone?.kind ?? d.kind ?? "snap"}`} data-zone={d.zone ? dropKey(d.zone) : d.kind ? `place:${d.kind}` : `snap:${d.slot}`} style={style}>
       {d.zone?.kind === "swap" && <span class="ww-drop-label tile">Swap</span>}
     </div>
   );

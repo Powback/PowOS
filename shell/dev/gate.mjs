@@ -4919,10 +4919,9 @@ async function swapAloneHalf() {
 }
 
 /**
- * In the page: WG1, a window dragged on home snaps into the free cells beside the widgets (the user, 10-31 15:49: "hints
- * to grid them so that they work with my widgets"). Two widgets on the page; a floating window (zoom 1.5) dragged by
- * its bar over the free area shows the free cells as hints (none over a widget) and a ghost; let go, its frame is the
- * ghost's cells exactly, touching no widget, the zoom kept. Dragged to the left edge, it still snaps to the half.
+ * In the page: WG1, a window dragged on home fills the free region beside the widgets (the user, 10-31 15:49: "hints
+ * to grid them so that they work with my widgets"; 20:19: "fill out the space between the widgets"). Two widgets on the
+ * page, a floating window (zoom 1.5) dragged by its bar ([gridDropAt]).
  */
 async function GRIDSNAP_HELPERS() {
   const S = await window.__gw.mod("./state.ts");
@@ -4968,62 +4967,58 @@ async function GRIDSNAP_HELPERS() {
       W.tilings.value = {};
       S.home.value = had;
     },
+    /** The ghost [p] of drop [name]: there, the expected kind, a free region on no widget, no per-cell hints. */
+    ghostFails(name, p) {
+      if (!p || !document.querySelector(".ww-drop")) return [`WG1 ${name}: no ghost`];
+      const want = { widget: "float", free: "region" }[name] ?? p.kind;
+      const fails = document.querySelector(".ww-cell-hint") ? [`WG1 ${name}: a .ww-cell-hint shows`] : [];
+      if (p.kind !== want) fails.push(`WG1 ${name}: the ghost is ${p.kind ?? p.slot}, not ${want}`);
+      if (p.kind === "region" && this.widgets.some((w) => this.hit(p.rect, w))) fails.push(`WG1 ${name}: the free region ${JSON.stringify(p.rect)} overlaps a widget`);
+      return fails;
+    },
   };
   return [];
 }
 
-/** WG1: the finger over a free cell mid-page (column 2, the row below the second widget): hints, none on a widget, a ghost. */
-async function gridHoverStep() {
-  const { W, cols, cellRect, widgets, hit, drag } = window.__wg;
-  const t = cellRect({ x: Math.min(2, cols - 3), y: 4, w: 1, h: 1 });
-  window.__wg.at = [t.x + t.w / 2, t.y + t.h / 2];
-  await drag(...window.__wg.at, true);
-  const hints = W.hintView.value?.cells ?? [];
-  const aimed = (window.__wg.aimed = W.cellView.value);
-  const fails = [];
-  if (!hints.length) fails.push("WG1: no cell hints while dragging over home");
-  if (hints.some((h) => widgets.some((w) => hit(h, w)))) fails.push("WG1: a cell hint over a widget");
-  if (!aimed) fails.push("WG1: no cell snap aimed over the free area");
-  if (!document.querySelector(".ww-drop.cells")) fails.push("WG1: no ghost of the cells while hovering");
-  if (aimed && widgets.some((w) => hit(aimed.rect, w))) fails.push("WG1: the aimed cells overlap a widget");
-  return fails;
+/**
+ * WG1 (10-31 20:19: "fill out the space between the widgets ... for the floating window, show a preview of where it will
+ * appear"): the bar dragged to the top, bottom, left and right, into a free region and over a widget - each drop lands
+ * exactly on its last ghost (+-1 px), a free region's ghost touches no widget, no per-cell hints anywhere.
+ */
+function gridDropPoints() {
+  const { W, cols, cellRect, widgets } = window.__wg;
+  const a = W.tileArea();
+  const mid = (a.top + a.bottom) / 2;
+  const free = cellRect({ x: Math.min(2, cols - 3), y: 4, w: 1, h: 1 });
+  const w1 = widgets[0];
+  return { top: [(a.left + a.right) / 2, a.top + 30], bottom: [(a.left + a.right) / 2, a.bottom - 40], left: [a.left + 4, mid], right: [a.right - 4, mid], free: [free.x + free.w / 2, free.y + free.h / 2], widget: [w1.x + w1.w / 2, w1.y + w1.h / 2] };
 }
 
-/** WG1: let go there - the window's frame is the hinted cells (whole px inward), on no widget, its zoom kept. */
-async function gridReleaseStep() {
-  const { W, widgets, hit, send, rest, aimed, at } = window.__wg;
-  send("pointerup", ...at);
+/** WG1: one drop ([name]) at (x, y): its ghost judged while held, then the window's frame against it once let go. */
+async function gridDropAt([name, x, y]) {
+  const { W, drag, send, rest } = window.__wg;
+  await drag(x, y, true);
+  await new Promise((ok) => setTimeout(ok, 250));
+  const p = W.placeView.value ?? W.snapView.value ?? W.dropView.value;
+  const fails = window.__wg.ghostFails(name, p);
+  send("pointerup", x, y);
   await rest();
   const got = window.__wg.frame();
-  const off = ["x", "y", "w", "h"].map((k, i) => Math.abs(got[k] - aimed.rect[k]) - (i < 2 ? 1 : 2));
-  const fails = [];
-  if (off.some((d) => d > 0.01)) fails.push(`WG1: let go, the window is ${JSON.stringify(got)}, not the hinted cells ${JSON.stringify(aimed.rect)}`);
-  if (widgets.some((r) => hit(got, r))) fails.push("WG1: the snapped window overlaps a widget");
-  if (window.__wg.win().zoom !== 1.5) fails.push(`WG1: the zoom changed to ${window.__wg.win().zoom} (want 1.5)`);
-  if (W.hintView.value || W.cellView.value) fails.push("WG1: the hints stayed after letting go");
-  return fails;
-}
-
-/** WG1: dragged to the work area's left edge, mid-height: the edge still halves, the zoom kept. */
-async function gridEdgeStep() {
-  const { W, drag } = window.__wg;
-  const a = W.workArea();
-  await drag(a.left + 4, (a.top + a.bottom) / 2);
-  const f = window.__wg.frame();
-  const half = Math.abs(f.x - a.left) < 2 && f.w < (a.right - a.left) * 0.6 && f.h > (a.bottom - a.top) * 0.7;
-  const fails = half ? [] : [`WG1: an edge drop didn't halve: ${JSON.stringify(f)}`];
-  if (window.__wg.win().zoom !== 1.5) fails.push(`WG1: the edge snap changed the zoom to ${window.__wg.win().zoom}`);
+  const off = p && ["x", "y", "w", "h"].some((k) => Math.abs(got[k] - p.rect[k]) > 1);
+  if (off) fails.push(`WG1 ${name}: let go, the window is ${JSON.stringify(got)}, not its ghost ${JSON.stringify(p.rect)}`);
+  if (W.placeView.value) fails.push(`WG1 ${name}: the ghost stayed after letting go`);
+  if (window.__wg.win().zoom !== 1.5) fails.push(`WG1 ${name}: the zoom changed to ${window.__wg.win().zoom} (want 1.5)`);
   return fails;
 }
 
 /** WG1's steps in one page, the windows and home restored after. */
 async function gridSnapScene(r) {
   try {
-    for (const step of [GRIDSNAP_HELPERS, gridHoverStep, gridReleaseStep, gridEdgeStep]) {
-      const fails = await r.page.evaluate(step);
-      if (fails.length) return fails;
-    }
-    return [];
+    const ready = await r.page.evaluate(GRIDSNAP_HELPERS);
+    if (ready.length) return ready;
+    const fails = [];
+    for (const [name, at] of Object.entries(await r.page.evaluate(gridDropPoints))) fails.push(...(await r.page.evaluate(gridDropAt, [name, ...at])));
+    return fails;
   } finally {
     await r.page.evaluate(() => window.__wg?.done()).catch(() => {});
   }
@@ -5453,8 +5448,8 @@ async function webWindowSnapGhostCheck() {
     if (!ghost) return ["SG1: a bar held at the left edge's middle shows no snap ghost (.ww-drop)"];
     move(mid);
     await window.__gw.settled();
-    // Back in the middle the edge's ghost goes (a ghost of home's free cells may show there instead: WG1).
-    const fails = document.querySelector(".ww-drop:not(.cells)") ? ["SG1: the snap ghost stayed with the bar back in the middle"] : [];
+    // Back in the middle the edge's ghost goes (the free region's or the floating ghost may show there instead: WG1).
+    const fails = document.querySelector(".ww-drop.snap") ? ["SG1: the snap ghost stayed with the bar back in the middle"] : [];
     move(edge);
     await window.__gw.settled();
     await g.release(941, edge);
@@ -6561,7 +6556,7 @@ try {
   // front, the middle = a window (unfolded a web window, folded Android's floating one); on home with no app in front it's
   // unpinned onto the grid as before; back on the dock = the dock's.
   if (process.env.SHELL_PAGES !== "0")
-    for (const [kind, query, width, height] of [["split", "?mode=pull", 900, 600], ["float", "?mode=pull", 404, 900], ["window", "", 821, 883], ["home", "", 404, 900]])
+    for (const [kind, query, width, height] of [["split", "?mode=pull", 900, 600], ["float", "?mode=pull", 404, 900], ["window", "", 821, 883], ["place", "", 821, 883], ["home", "", 404, 900]])
       runs.push(open(browser, `${ORIGIN}/index.html${query}`, `dock-dragout-${kind}`, { width, height }).then((r) => whenReady(r, () => r.page.evaluate(async (k) => (await importShim("./dev/dock-dragout-check.js")).dockDragOut(k), kind))));
   // The drawer's list fades at an edge with more to scroll (2026-10-24): a short screen, so the mock's apps scroll.
   if (process.env.SHELL_PAGES !== "0")

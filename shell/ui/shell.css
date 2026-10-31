@@ -3352,22 +3352,20 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 }
 .ww-outline.snapped { box-shadow: 0 0 0 3px var(--color-accent); opacity: 1; }
 .ww-outline-size { padding: 6px 12px; border-radius: 999px; font: var(--text-small) var(--font); color: var(--color-foreground); }
-/* GL1: a drop into the tiles (webwindows.tsx DropPreview) - the tile the dragged window would take, translucent in the
-   accent, gliding between zones; after the drop the windows glide to their tiles (ww-reflow, REFLOW_MS). */
+/* GL1/WG1: every drop's ghost (webwindows.tsx DropPreview, dockout.tsx DockOutGhost) - the exact rect the window takes:
+   a tile, an edge snap, the free region between the widgets or where it floats. One look: a ghost of glass (a faint
+   frost, a thin accent ring), never a solid slab; a short spring as the target changes. */
 .ww-drop {
-  position: absolute; pointer-events: none; border-radius: 12px; display: grid; place-items: center;
-  background: color-mix(in srgb, var(--color-accent) 22%, transparent); box-shadow: 0 0 0 2px var(--color-accent);
-  transition: left 140ms ease-out, top 140ms ease-out, width 140ms ease-out, height 140ms ease-out;
+  position: absolute; pointer-events: none; border-radius: 12px; display: grid; place-items: center; box-sizing: border-box;
+  background: color-mix(in srgb, var(--color-foreground) 8%, transparent); backdrop-filter: blur(6px);
+  box-shadow: 0 0 0 1px var(--color-accent);
+  transition: left 180ms cubic-bezier(0.34, 1.4, 0.64, 1), top 180ms cubic-bezier(0.34, 1.4, 0.64, 1),
+    width 180ms cubic-bezier(0.34, 1.4, 0.64, 1), height 180ms cubic-bezier(0.34, 1.4, 0.64, 1);
   animation: ww-drop-in 120ms ease-out;
 }
+/* A floating ghost follows the finger 1:1 (no spring lag between it and the drop). */
+.ww-drop.float { transition: none; }
 @keyframes ww-drop-in { from { opacity: 0; } }
-/* WG1: a floating window's drag on home - its page's free cells, faint (webwindows.tsx Previews); the free rect under the
-   finger is the drop's ghost (.ww-drop.cells). Never over a widget: only free cells get one. */
-.ww-cell-hint {
-  position: absolute; pointer-events: none; box-sizing: border-box; border-radius: 10px;
-  background: color-mix(in srgb, var(--color-foreground) 5%, transparent); animation: ww-drop-in 120ms ease-out;
-  box-shadow: inset 0 0 0 1px var(--color-border);
-}
 /* TG3a: a parked window's strip on the screen's edge (webwindows.tsx ParkStrip): the shared glass, its app's icon, the
    drop's accent ring while a finger is on it. Rounded on the inner side only. */
 .ww-park { display: grid; place-items: center; box-sizing: border-box; padding: 0; }
