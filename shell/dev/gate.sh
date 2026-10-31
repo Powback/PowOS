@@ -118,27 +118,30 @@ if [ -n "${GATE_STUB_SLEEP:-}" ]; then
   echo "gate: stub ${GATE_PRIORITY:-agent} $(basename "$slot") start"; sleep "$GATE_STUB_SLEEP"
   echo "gate: stub ${GATE_PRIORITY:-agent} $(basename "$slot") end"; exit 0
 fi
+# The composed tree is extracted with tar -m (mtime = now): PowStation/scripts/disk-watchdog.sh deletes files older than
+# 3 days under ~/.cache/powos-gate every 10 min, and kept source mtimes made it delete files (ui/pet.css,
+# vendor/local-pet.js) out of a running gate - gate.mjs then died on ENOENT before any scene ran.
 work=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/run.XXXXXX")
 trap 'rm -rf "$work" ${slot:+"$slot"}' EXIT
 S=$work/shell
 case $base in
   dir) S=$dir ;;
-  tree) mkdir -p "$S" && (cd "$SHELL_DIR" && tar --exclude ./node_modules -cf - .) | tar -xf - -C "$S" ;;
+  tree) mkdir -p "$S" && (cd "$SHELL_DIR" && tar --exclude ./node_modules -cf - .) | tar -mxf - -C "$S" ;;
   installed)
-    mkdir -p "$S" && (cd "$installed" && tar -cf - .) | tar -xf - -C "$S"
+    mkdir -p "$S" && (cd "$installed" && tar -cf - .) | tar -mxf - -C "$S"
     # The APK doesn't ship the type-checker's config: the committed one.
     [ -f "$S/tsconfig.json" ] || cp "$SHELL_DIR/tsconfig.json" "$S/tsconfig.json"
     ;;
   head)
     top=$(git -C "$SHELL_DIR" rev-parse --show-toplevel)
     rel=${SHELL_DIR#"$top"/}
-    git -C "$top" archive HEAD "$rel" | tar -xf - -C "$work"
+    git -C "$top" archive HEAD "$rel" | tar -mxf - -C "$work"
     [ "$rel" = shell ] || mv "$work/$rel" "$S"
     ;;
 esac
 if [ "$base" != dir ]; then
   # The phone's overrides, then the pushed files: what the phone serves after the push (ShellHost.open).
-  [ -n "$overrides" ] && [ -d "$overrides" ] && (cd "$overrides" && tar -cf - .) | tar -xf - -C "$S"
+  [ -n "$overrides" ] && [ -d "$overrides" ] && (cd "$overrides" && tar -cf - .) | tar -mxf - -C "$S"
   for f in ${files[@]+"${files[@]}"}; do
     [ -f "$SHELL_DIR/$f" ] || { echo "gate: no such shell file: $f" >&2; exit 2; }
     mkdir -p "$S/$(dirname "$f")" && cp "$SHELL_DIR/$f" "$S/$f"
