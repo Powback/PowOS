@@ -50,24 +50,33 @@ object FreeformTasks {
      * whose window configuration briefly couldn't be read (right after it opened or changed, not "it isn't floating"):
      * a caller that publishes this list to the dock shouldn't treat a window dropped that way as closed.
      */
-    fun list(context: Context): List<Window> {
+    fun list(context: Context): List<Window> = read(context).also { hadUnreadableTask = it.unreadable }.windows
+
+    /** One [list] reading: the windows and whether a task in it was unreadable ([hadUnreadableTask]'s value for it). */
+    class Read(
+        val windows: List<Window>,
+        val unreadable: Boolean,
+    )
+
+    /**
+     * [list] with its unreadable flag in the result instead of the shared [hadUnreadableTask]: binder calls
+     * (getRunningTasks, getAllRootTaskInfos), safe off the main thread - [WindowFrames] reads it on its own thread,
+     * and a [list] on another thread meanwhile can't change this reading's flag.
+     */
+    fun read(context: Context): Read {
         HiddenApi.allow()
-        failedThisList = false
+        val failed = BooleanArray(1)
         // getRunningTasks is deprecated for apps (their own tasks only); the recents provider sees them all.
         @Suppress("DEPRECATION")
         val tasks = runCatching { context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
         val z = stackOrder()?.withIndex()?.associate { (i, id) -> id to i }
-        val result = (if (z == null) tasks else tasks.sortedBy { z[it.taskId] ?: Int.MAX_VALUE }).mapNotNull { window(it) }
-        hadUnreadableTask = failedThisList
-        return result
+        val result = (if (z == null) tasks else tasks.sortedBy { z[it.taskId] ?: Int.MAX_VALUE }).mapNotNull { window(it, failed) }
+        return Read(result, failed[0])
     }
 
     /** Set by [list] after each call: see its doc. */
     @Volatile var hadUnreadableTask = false
         private set
-
-    /** This [list] call hit [window]'s unreadable case at least once (reset at its start). */
-    @Volatile private var failedThisList = false
 
     /** Tasks already logged as left to Android ([resizable] false), so the line comes once per task. */
     private val compatLogged = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
@@ -77,13 +86,16 @@ object FreeformTasks {
         runCatching { android.app.TaskInfo::class.java.getField("isResizeable").getBoolean(t) }.getOrDefault(true)
 
     /** Task [t] as a floating window, or null (another mode, a fixed-size app, or its window configuration unreadable). */
-    private fun window(t: ActivityManager.RunningTaskInfo): Window? {
+    private fun window(
+        t: ActivityManager.RunningTaskInfo,
+        failed: BooleanArray,
+    ): Window? {
         // A web window (a task on a web window's own display, shell/WebWindowDisplays) is never a floating window of this
         // path, whatever its mode - no frame, no full-screen fix-up. Every other task (Linux windows too): as before.
         if (dev.omalauncher.shell.WebWindowDisplays.isWebWindow(t)) return null
         val wc = runCatching { windowConfiguration(t) }.onFailure { if (!unreadable) WindowLog.w(TAG, "can't read task ${t.taskId}'s window", it) }.getOrNull()
         unreadable = wc == null
-        if (wc == null) { failedThisList = true; return null }
+        if (wc == null) { failed[0] = true; return null }
         if (wc.javaClass.getMethod("getWindowingMode").invoke(wc) != FREEFORM) return null
         val bounds = Rect(wc.javaClass.getMethod("getBounds").invoke(wc) as Rect)
         // A fixed-size (non-resizable) app is never a PowOS window, whatever its mode says: on the unfolded screen
@@ -233,7 +245,7 @@ object FreeformTasks {
     /** WindowConfiguration.WINDOWING_MODE_UNDEFINED: the display's own (full screen). */
     private const val UNDEFINED = 0
 
-    /** The last task's window couldn't be read (logged once, not on every refresh; [failedThisList]/[hadUnreadableTask]
+    /** The last task's window couldn't be read (logged once, not on every refresh; [read]/[hadUnreadableTask]
      * are the per-[list]-call signal callers act on). */
     @Volatile private var unreadable = false
 

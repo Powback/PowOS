@@ -26,7 +26,7 @@ export type ToolItem = Extract<ChatItem, { kind: "tool" }>;
 const bare = (name: string) => name.split("__").at(-1) ?? name;
 
 /** Calls the chat draws as something else (a choice card, a presentation): not listed as steps. */
-export const shownElsewhere = (t: ToolItem) => /^(present|present_choices)$/.test(bare(t.name));
+export const shownElsewhere = (t: ToolItem) => /^(present|present_choices|present_try)$/.test(bare(t.name));
 
 const ICON: Record<string, IconName> = {
   Bash: "console",
@@ -159,7 +159,7 @@ export function Thread({
 type Part = { text: string } | { block: string; body: string };
 
 /** The fences that are blocks of their own (manager.py _rich_block); any other fence is code, part of the prose. */
-const BLOCK = /^\s*```(choices|present)\s*$/;
+const BLOCK = /^\s*```(choices|present|try)\s*$/;
 
 /** Prose (Markdown, its code fences in it) and blocks, in order. A fence left open (a reply cut off) runs to the end. */
 export function parts(text: string): Part[] {
@@ -332,6 +332,12 @@ export function PresentCard({ p }: { p: Presented }) {
   );
 }
 
+/**
+ * Blocks drawn by a module of their own, by fence name (trycard.tsx: ```try): it registers here on import, as this
+ * module can't import it (it imports this one). A renderer's null: the block shows as code.
+ */
+export const blocks: Record<string, (body: string, reply: string | null) => preact.ComponentChild> = {};
+
 /** An assistant message: its prose as Markdown in a bubble, its blocks as what they are. */
 export function Said({ text, reply }: { text: string; reply: string | null }) {
   return (
@@ -346,6 +352,8 @@ export function Said({ text, reply }: { text: string; reply: string | null }) {
           const d = json<Presented>(p.body);
           if (d && typeof d.body === "string") return <PresentCard key={i} p={d} />;
         }
+        const own = blocks[p.block]?.(p.body, reply);
+        if (own) return <Fragment key={i}>{own}</Fragment>;
         // A block that can't be read: shown as what it is.
         return <div key={i} class="msg assistant md" dangerouslySetInnerHTML={{ __html: md("```\n" + p.body + "\n```") }} />;
       })}

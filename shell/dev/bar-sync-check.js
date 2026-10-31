@@ -9,7 +9,10 @@
  *  1. text typed in home shows in the launcher's field;
  *  2. a dictation in home: its words show in the launcher's field while it listens (and its send), the final text after;
  *  3. send in the launcher clears both;
- *  4. send in the launcher while home dictates: both empty, home's dictation ended, its words never written back.
+ *  4. send in the launcher while home dictates: both empty, home's dictation ended, its words never written back;
+ *  5. SB5: with text the pill's leading glyph is an × button (40 px); tapped in the launcher, both fields empty and
+ *     the glyph is `>` again;
+ *  6. SB5: × tapped in home while it dictates: both empty, the dictation ended, its words never written back.
  */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const HOME = ".home > .bar";
@@ -64,6 +67,18 @@ const homeMicOn = (home) => home.evaluate((f) => !!document.querySelector(`${f} 
 const heardAll = (home) => home.evaluate(() => window.__speechMock.open === 1 && document.querySelector(".home > .bar textarea")?.value.endsWith("battery is left"));
 const micClosed = (home) => home.evaluate(() => window.__speechMock.open === 0);
 const submitPull = (pull) => pull.evaluate((f) => document.querySelector(f).requestSubmit(), PULL);
+/** SB5: the pill's leading slot in [form]: filled (an × to tap), its box, and which glyph shows. */
+const lead = (page, form) =>
+  page.evaluate((f) => {
+    const b = document.querySelector(`${f} .pill .lead`);
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    const op = (sel) => Number(getComputedStyle(b.querySelector(sel)).opacity);
+    return { filled: b.classList.contains("filled"), w: r.width, h: r.height, x: op(".x"), prompt: op(".prompt") };
+  }, form);
+/** The launcher's pill as it shows ([name]: "x" with text, "empty"), for a look (/cache: ~/.cache/powos-gate/tx). */
+const shot = async (page, name) => (await page.$(`${PULL} .pill`))?.screenshot({ path: `/cache/bar-clear-${name}.png` }).catch(() => {});
+const tapClear = (page, form) => page.evaluate((f) => document.querySelector(`${f} .pill .lead`).click(), form);
 const setQuery = (page, v) => page.evaluate(async (x) => ((await importShim("./state.ts")).query.value = x), v);
 
 export async function barSyncCheck(home, pull, host) {
@@ -94,5 +109,39 @@ export async function barSyncCheck(home, pull, host) {
   await waitFor(fails, "send mid-dictation: both empty, nothing in flight", async () => host.busy === 0 && (await query(pull)) === "" && (await query(home)) === "");
   const after = [await query(home), await query(pull), host.v?.text];
   if (after.some((v) => v !== "")) fails.push(`dictation words written back after the send: home=${JSON.stringify(after[0])} launcher=${JSON.stringify(after[1])} host=${JSON.stringify(after[2])}`);
+  return [...fails, ...(await clearCheck(home, pull, host))];
+}
+
+/** SB5 (the user, 2026-10-31 02:46: "we should have an x to clear on the left side of the inputs"): checks 5 and 6. */
+async function clearCheck(home, pull, host) {
+  const fails = [];
+  // 5. SB5: text in the launcher: its leading glyph an × button; tapped, both fields empty, the glyph `>` again.
+  await setQuery(pull, "maps");
+  await waitFor(fails, "'maps' in home's field", async () => (await field(home, HOME)) === "maps");
+  await waitFor(fails, "the launcher's leading glyph is an × with text", async () => {
+    const l = await lead(pull, PULL);
+    return l?.filled && l.x > 0.99 && l.prompt < 0.01;
+  });
+  await shot(pull, "x");
+  const box = await lead(pull, PULL);
+  if (box && (box.w < 40 || box.h < 40)) fails.push(`the clear button is ${box.w}x${box.h}, under 40 px`);
+  await tapClear(pull, PULL);
+  await waitFor(fails, "× in the launcher clears both", async () => host.busy === 0 && (await field(pull, PULL)) === "" && (await query(home)) === "" && (await field(home, HOME)) === "");
+  await waitFor(fails, "the launcher's glyph back to `>` once empty", async () => {
+    const l = await lead(pull, PULL);
+    return l && !l.filled && l.prompt > 0.99 && l.x < 0.01;
+  });
+  await shot(pull, "empty");
+  // 6. SB5: × in home while it dictates: the dictation ends, both empty, its words never back.
+  await setQuery(home, "call");
+  await waitFor(fails, "home's 'call' in the launcher's field", async () => (await field(pull, PULL)) === "call");
+  await tapHomeMic(home);
+  await waitFor(fails, "home's dictation heard all its words (for ×)", () => heardAll(home));
+  await tapClear(home, HOME);
+  await waitFor(fails, "× mid-dictation ends home's dictation", async () => !(await homeMicOn(home)) && (await micClosed(home)));
+  await waitFor(fails, "× mid-dictation: both empty, nothing in flight", async () => host.busy === 0 && (await query(pull)) === "" && (await query(home)) === "" && (await field(home, HOME)) === "");
+  const cleared = [await query(home), await query(pull), host.v?.text];
+  if (cleared.some((v) => v !== "")) fails.push(`dictation words written back after ×: home=${JSON.stringify(cleared[0])} launcher=${JSON.stringify(cleared[1])} host=${JSON.stringify(cleared[2])}`);
+  if ((await lead(home, HOME))?.filled) fails.push("home's glyph still an × once cleared");
   return fails;
 }

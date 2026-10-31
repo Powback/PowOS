@@ -19,7 +19,8 @@ import android.os.Looper
  *   create <tag> <w> <h> <dpi>      -> "display <tag> <displayId>" | "error <tag> <why>"
  *   resize <displayId> <w> <h> <dpi>
  *   release <displayId>
- *   touch <displayId> <action> <downTime> <x> <y>   -> an injected touch on that display ("log touch ..." for downs/ups)
+ *   touch <displayId> <action> <downTime> <id>,<x>,<y> ...   -> an injected touch on that display, every finger down
+ *                                                            now ("log touch ..." for downs/ups); also <x> <y> (one)
  *   (stdin closed: the app is gone - every display released, then exit)
  *
  * Why it exists: a window's display must be TRUSTED, else the app's own launches leave it. Measured 2026-10-30
@@ -307,22 +308,32 @@ object WebWindowsHost {
         }
         private val inject by lazy { im.javaClass.getMethod("injectInputEvent", android.view.InputEvent::class.java, Int::class.javaPrimitiveType) }
         private val setDisplayId by lazy { android.view.MotionEvent::class.java.getMethod("setDisplayId", Int::class.javaPrimitiveType) }
-        private val props = arrayOf(android.view.MotionEvent.PointerProperties().apply { id = 0; toolType = android.view.MotionEvent.TOOL_TYPE_FINGER })
-        private val coords = arrayOf(android.view.MotionEvent.PointerCoords().apply { pressure = 1f; size = 1f })
-
-        /** "touch <displayId> <action> <downTime> <x> <y>" (device px on that display). */
+        /**
+         * "touch <displayId> <action> <downTime> <id>,<x>,<y> ..." (device px on that display): PZ1, every finger on the
+         * body (by id; [action] carries the pointer index of a POINTER_DOWN/UP), so a pinch is one multi-touch gesture.
+         * The older "... <x> <y>" is finger 0 alone.
+         */
         fun touch(a: List<String>) {
             val displayId = a[1].toInt()
             val action = a[2].toInt()
             val downTime = a[3].toLong()
-            val x = a[4].toFloat()
-            val y = a[5].toFloat()
-            coords[0].x = x
-            coords[0].y = y
+            val fingers = if (a.size == 6 && ',' !in a[4]) listOf("0,${a[4]},${a[5]}") else a.drop(4)
+            val props = Array(fingers.size) { android.view.MotionEvent.PointerProperties() }
+            val coords = Array(fingers.size) { android.view.MotionEvent.PointerCoords() }
+            fingers.forEachIndexed { i, f ->
+                val (id, fx, fy) = f.split(',')
+                props[i].id = id.toInt()
+                props[i].toolType = android.view.MotionEvent.TOOL_TYPE_FINGER
+                coords[i].x = fx.toFloat()
+                coords[i].y = fy.toFloat()
+                coords[i].pressure = 1f
+                coords[i].size = 1f
+            }
+            val (x, y) = coords[0].x to coords[0].y
             val now = android.os.SystemClock.uptimeMillis()
             val ev =
                 android.view.MotionEvent.obtain(
-                    downTime, now, action, 1, props, coords, 0, 0, 1f, 1f, VIRTUAL_DEVICE, 0, android.view.InputDevice.SOURCE_TOUCHSCREEN, 0,
+                    downTime, now, action, fingers.size, props, coords, 0, 0, 1f, 1f, VIRTUAL_DEVICE, 0, android.view.InputDevice.SOURCE_TOUCHSCREEN, 0,
                 )
             val result =
                 try {
@@ -335,7 +346,7 @@ object WebWindowsHost {
                     ev.recycle()
                 }
             if (action != android.view.MotionEvent.ACTION_MOVE || result != "ok") {
-                say("log touch display $displayId action $action at ${x.toInt()},${y.toInt()}: $result")
+                say("log touch display $displayId action $action fingers ${fingers.size} at ${x.toInt()},${y.toInt()}: $result")
             }
         }
 

@@ -261,7 +261,7 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull -q "$IMAGE" >/dev/n
 # The shared transpile's cache (gate.mjs transpiled()): by source hash, so it never goes stale; pruned of week-old files.
 tx="${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/tx"
 mkdir -p "$tx" && find "$tx" -type f -mtime +7 -delete 2>/dev/null || true
-mounts=(-v "$S:/shell:ro" -v "$SHELL_DIR/dev/gate.mjs:/usr/src/app/gate.mjs:ro" -v "$SHELL_DIR/dev/search-check.js:/usr/src/app/search-check.js:ro" -v "$tx:/cache")
+mounts=(-v "$S:/shell:ro" -v "$SHELL_DIR/dev/gate.mjs:/usr/src/app/gate.mjs:ro" -v "$SHELL_DIR/dev/agents-fleet.mjs:/usr/src/app/agents-fleet.mjs:ro" -v "$SHELL_DIR/dev/search-check.js:/usr/src/app/search-check.js:ro" -v "$tx:/cache")
 # node_modules is a link out of the composed folder: the browser half needs none of it.
 if [ -n "$app" ]; then
   id=$(sed -n 's/^ *"id": *"\([^"]*\)".*/\1/p' "$app/powos-app.json" | head -1)
@@ -337,7 +337,7 @@ if [ "$widgets" = 1 ]; then
 fi
 # 3. Design QA's renders (not a check: they're looked at).
 if [ -n "$shots" ]; then
-  smounts=(-v "$S:/shell:ro" -v "$SHELL_DIR/dev/shots.mjs:/usr/src/app/shots.mjs:ro" -v "$shots:/out")
+  smounts=(-v "$S:/shell:ro" -v "$SHELL_DIR/dev/shots.mjs:/usr/src/app/shots.mjs:ro" -v "$SHELL_DIR/dev/agents-fleet.mjs:/usr/src/app/agents-fleet.mjs:ro" -v "$shots:/out")
   [ -n "$wallpaper" ] && smounts+=(-v "$wallpaper:/wallpaper.jpg:ro")
   # The icon glyphs' font: shell/fonts/nerd_symbols.ttf is a link out of shell/ (the APK's res/font), which the
   # container can't follow - without it every icon glyph renders as tofu.

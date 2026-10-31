@@ -720,6 +720,15 @@ def tool_present(args):
     return f"Shown to the user in the chat as a card, '{args.get('title', '')}'; a tap opens it full screen."
 
 
+def tool_present_try(args):
+    items = [i for i in args.get("items") or [] if str((i or {}).get("id", "")).strip() and str(i.get("line", "")).strip()]
+    if not items:
+        raise ValueError("present_try needs items, each a board task id and a line")
+    return (f"Shown to the user as your message with {len(items)} thing(s) to try, each with works / still broken "
+            "(done / can't for a thing to do). Their answer is recorded on each board task (a user check; still "
+            "broken's words also come to your inbox naming the task): no need to ask again.")
+
+
 def _compose(*argv, timeout=600):
     """`powos compose` (lib/apps/powos-compose, docs/COMPOSER.md): the installed CLI, else this checkout's."""
     here = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "apps", "powos-compose")
@@ -809,6 +818,30 @@ if AGENT_ID == "manager":
                 "multi": {"type": "boolean", "default": False, "description": "Several may be picked."},
             },
             "required": ["question", "options"],
+        },
+    }
+    TOOLS["present_try"] = {
+        "fn": tool_present_try,
+        "description": (
+            "Tell the user what's ready to try, as your chat message: one per ship, bundling what it brought "
+            "(\"2 things ready\"), each item a board task id and ONE plain sentence of what to try (its --try "
+            "line). The chat draws works / still broken under each (do=true: a thing for the user to do - done / "
+            "can't); the answer is recorded on that task. Use this instead of listing things to try in prose."),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Optional, e.g. '2 things ready'."},
+                "items": {"type": "array", "minItems": 1, "maxItems": 8, "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string", "description": "The board task's id (powos agents task)."},
+                        "line": {"type": "string", "description": "What to try, one plain sentence, no hashes or paths."},
+                        "do": {"type": "boolean", "default": False, "description": "A thing to do, not a fix to try."},
+                    },
+                    "required": ["id", "line"],
+                }},
+            },
+            "required": ["items"],
         },
     }
     TOOLS["present"] = {

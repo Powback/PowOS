@@ -210,7 +210,11 @@ class WebWindows(
         val mode = modeOf(t)
         // D1: the user made its app an Android floating window on purpose ("..." or the switcher's Floating window): it
         // stays native. The window lets go of it (false: its display empty, checkOrphan closes it), never pulls it back.
-        if ((mode == WINDOWING_MODE_FREEFORM || mode == WINDOWING_MODE_ZOOM) && dev.omalauncher.system.FreeformTasks.isNativeFloat(t.taskId, mode)) {
+        // Only a float on the main display: OnePlus' Floating window never puts a task on a window's own display, and a
+        // task PowOS launched or pulled into its window is never the user's native float, whatever mode it reports there.
+        if (display == android.view.Display.DEFAULT_DISPLAY && (mode == WINDOWING_MODE_FREEFORM || mode == WINDOWING_MODE_ZOOM) &&
+            dev.omalauncher.system.FreeformTasks.isNativeFloat(t.taskId, mode)
+        ) {
             if (w.followed != "native") WindowLog.i(TAG, "window ${w.id} (${w.component.packageName}): its task ${t.taskId} is a floating window the user picked: left native")
             w.followed = "native"
             return false
@@ -350,6 +354,9 @@ class WebWindows(
         /** The last geometry the page gave it (main thread): applied again when the mirror arrives. */
         var geo: Geo? = null
         var downAt = 0L
+
+        /** PZ1: the fingers on its body now (pointer id -> device px x, y; the pointer index is its place by id), on the bridge thread. */
+        val fingers = java.util.TreeMap<Int, FloatArray>()
 
         /** Its app's content shows: the page dropped the placeholder ([liveWhenDrawn]). */
         var live = false
@@ -1790,44 +1797,100 @@ class WebWindows(
     fun input(
         id: Int,
         action: String,
-        x: Double,
-        y: Double,
+        at: BodyTouch,
     ): Boolean {
         val w = wins[id] ?: return false
-        return forward(w, action, x, y)
+        return forward(w, action, at)
     }
+
+    /** A body touch's place (CSS px from the body's top-left, unscaled) and finger (PZ1: 0, 1, ... of one gesture). */
+    data class BodyTouch(val x: Double, val y: Double, val finger: Int = 0)
 
     /**
      * A body touch to [w]'s app: Linux - a DOWN claims the native gesture for KWin ([linuxClaim]; its moves and UP
      * come from the gesture itself, every pointer); Android - injected on its display (v0; S4: the injector). Both
      * focus their window: KWin's "focus", or the injected touch moving the top focused display to the window's.
+     * PZ1: every finger of a body gesture is [pointer] (0, 1, ...): Android gets ONE multi-touch gesture (a second
+     * finger's DOWN is ACTION_POINTER_DOWN, every MOVE carries every finger), so a pinch in Chrome zooms its page; a
+     * Linux window already gets every native pointer from its claim, so only finger 0 claims.
      */
     private fun forward(
         w: Win,
         action: String,
-        x: Double,
-        y: Double,
+        at: BodyTouch,
     ): Boolean {
-        if (w.linux != null) return forwardLinux(w, action)
+        if (w.linux != null) return if (at.finger == 0 || action == "cancel") forwardLinux(w, action) else true
         if (w.displayId < 0) return false
-        val act = ACTIONS[action] ?: MotionEvent.ACTION_CANCEL
-        val now = SystemClock.uptimeMillis()
-        if (act == MotionEvent.ACTION_DOWN) {
-            w.downAt = now
-            androidGesture = true
-            main.post { homeIme(false) }
-        }
-        val px = (x * density()).toFloat()
-        val py = (y * density()).toFloat()
+        val px = (at.x * density()).toFloat()
+        val py = (at.y * density()).toFloat()
+        val act = fingerAction(w, action, at.finger, px to py) ?: return true
+        val pts = fingersSent(w, act, at.finger)
         // The injector: the shell-uid helper (holds INJECT_EVENTS), one line per event over its stdin - no process per
         // touch. The fallbacks below only when it can't be reached.
-        if (helper.touch(w, act, px, py)) {
-            if (act != MotionEvent.ACTION_MOVE) WindowLog.i(TAG, "input: window ${w.id} $action at ${px.toInt()},${py.toInt()} -> display ${w.displayId} (helper)")
+        if (helper.touch(w, act, pts)) {
+            if (act != MotionEvent.ACTION_MOVE) WindowLog.i(TAG, "input: window ${w.id} $action finger ${at.finger} of ${pts.size} at ${px.toInt()},${py.toInt()} -> display ${w.displayId} (helper)")
             return true
         }
         WindowLog.w(TAG, "input: window ${w.id} $action -> display ${w.displayId}: helper unreachable, falling back")
-        injectFallback(w, MotionEvent.obtain(w.downAt, now, act, px, py, 0))
+        val props = Array(pts.size) { i -> MotionEvent.PointerProperties().apply { id = pts[i].first; toolType = MotionEvent.TOOL_TYPE_FINGER } }
+        val coords = Array(pts.size) { i -> MotionEvent.PointerCoords().apply { x = pts[i].second; y = pts[i].third; pressure = 1f; size = 1f } }
+        injectFallback(w, MotionEvent.obtain(w.downAt, SystemClock.uptimeMillis(), act, pts.size, props, coords, 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0))
         return true
+    }
+
+    /** PZ1: every finger [act] carries (id, x, y), then the lifted ones dropped from [Win.fingers]. */
+    private fun fingersSent(
+        w: Win,
+        act: Int,
+        finger: Int,
+    ): List<Triple<Int, Float, Float>> {
+        val pts = w.fingers.entries.map { (id, p) -> Triple(id, p[0], p[1]) }
+        when (act and MotionEvent.ACTION_MASK) {
+            MotionEvent.ACTION_POINTER_UP -> w.fingers.remove(finger)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> w.fingers.clear()
+        }
+        return pts
+    }
+
+    /**
+     * PZ1: finger [finger] of [w]'s body gesture at [at] (device px) into [Win.fingers]: the MotionEvent action for it (a
+     * second finger's down ACTION_POINTER_DOWN with its pointer index, its up ACTION_POINTER_UP), or null: nothing to
+     * send (a finger the app never got a down for, a cancel with none down).
+     */
+    private fun fingerAction(
+        w: Win,
+        action: String,
+        finger: Int,
+        at: Pair<Float, Float>,
+    ): Int? {
+        val f = w.fingers
+        val index = { f.headMap(finger).size shl MotionEvent.ACTION_POINTER_INDEX_SHIFT }
+        if (action == "down") return fingerDown(w, finger, at) ?: (MotionEvent.ACTION_POINTER_DOWN or index())
+        if (action != "move" && action != "up") return if (f.isEmpty()) null else MotionEvent.ACTION_CANCEL
+        val p = f[finger] ?: return null
+        p[0] = at.first
+        p[1] = at.second
+        return when {
+            action == "move" -> MotionEvent.ACTION_MOVE
+            f.size == 1 -> MotionEvent.ACTION_UP
+            else -> MotionEvent.ACTION_POINTER_UP or index()
+        }
+    }
+
+    /** [fingerAction]'s down: ACTION_DOWN for the gesture's first finger (its start), null for a later one. */
+    private fun fingerDown(
+        w: Win,
+        finger: Int,
+        at: Pair<Float, Float>,
+    ): Int? {
+        val first = w.fingers.isEmpty()
+        if (first) {
+            w.downAt = SystemClock.uptimeMillis()
+            androidGesture = true
+            main.post { homeIme(false) }
+        }
+        w.fingers[finger] = floatArrayOf(at.first, at.second)
+        return if (first) MotionEvent.ACTION_DOWN else null
     }
 
     /** Without the helper: PowOS's own injectInputEvent (refused without INJECT_EVENTS), else root `input` per event. */
@@ -2749,11 +2812,10 @@ class WebWindows(
         fun touch(
             w: Win,
             action: Int,
-            x: Float,
-            y: Float,
+            pointers: List<Triple<Int, Float, Float>>,
         ): Boolean {
             if (process?.isAlive != true) return false
-            val line = "touch ${w.displayId} $action ${w.downAt} $x $y"
+            val line = "touch ${w.displayId} $action ${w.downAt} " + pointers.joinToString(" ") { (id, x, y) -> "$id,$x,$y" }
             io.post { if (!send(line)) WindowLog.w(TAG, "input: '$line' not sent") }
             return true
         }
@@ -2816,6 +2878,8 @@ class WebWindows(
         displayId: Int,
         ev: MotionEvent,
     ) {
+        // `input motionevent` is one pointer: a second finger's down/up can't be said (PZ1: the helper's path can).
+        if (ev.actionMasked == MotionEvent.ACTION_POINTER_DOWN || ev.actionMasked == MotionEvent.ACTION_POINTER_UP) return
         val verb = VERBS[ev.actionMasked] ?: "CANCEL"
         val cmd = "input -d $displayId touchscreen motionevent $verb ${ev.x.toInt()} ${ev.y.toInt()}"
         if (ev.actionMasked != MotionEvent.ACTION_MOVE) {
@@ -3039,6 +3103,24 @@ class WebWindows(
         }
 
         /**
+         * A full-screen Linux window is up on home's page (main thread). It is home's own page underneath, so no
+         * Android task is visible: the nav swipe asks this to treat it as an app (a swipe = home, a hold = the switcher)
+         * instead of as home's main page, where a swipe up opens the switcher (10-31 02:13, the user: "If I open an
+         * application full screen and then swipe home then it always activates the switcher instead").
+         */
+        fun fullScreenUp(): Boolean = current?.fullLinux() != null
+
+        /** The home swipe over a full-screen window: it leaves full screen and is minimised to the dock - home shows. */
+        fun homeGesture(why: String) {
+            val ww = current ?: return
+            ww.main.post {
+                val w = ww.wins.values.firstOrNull { it.linuxFull } ?: return@post
+                ww.leaveFullScreen(why)
+                if (!w.closed) ww.emit("webwindows.control", mapOf("id" to w.id, "action" to "minimise"))
+            }
+        }
+
+        /**
          * THE close of a web window for a task (Tasks.remove: the switcher's swipe away, "Clear all", any task removal
          * PowOS makes): when task [taskId] is a web window's - on its display, or a full-screen app out of one - that
          * window is closed exactly as its bar's close does ([close] -> [drop]: its layers off at once in one transaction,
@@ -3172,7 +3254,6 @@ class WebWindows(
         /** OnePlus' own floating ("zoom") window: its "..." menu's "Floating window". */
         private const val WINDOWING_MODE_ZOOM = 100
         private const val MAX_TASKS = 64
-        private val ACTIONS = mapOf("down" to MotionEvent.ACTION_DOWN, "move" to MotionEvent.ACTION_MOVE, "up" to MotionEvent.ACTION_UP)
         private val VERBS = mapOf(MotionEvent.ACTION_DOWN to "DOWN", MotionEvent.ACTION_MOVE to "MOVE", MotionEvent.ACTION_UP to "UP")
     }
 }
