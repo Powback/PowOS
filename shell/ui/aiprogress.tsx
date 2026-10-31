@@ -1,7 +1,7 @@
 /**
  * PowOS AI's Progress (the user, 2026-10-31 15:12: "The design of the progress page can be better"): at the top a large
  * ring with the daily driver's percentage, under it one glass row card per area - its name, a thin bar of what's done of
- * the last 30 days' work and the counts, an accent "N need you" chip - and a tap opens an area in place: its open tasks,
+ * the last 30 days' work and the counts, an amber "N need you" chip (the needs-you colour) - and a tap opens an area in place: its open tasks,
  * one line each, a state dot (working / waiting on you / no check). The parts are exported for the folded status page.
  */
 import { useState } from "preact/hooks";
