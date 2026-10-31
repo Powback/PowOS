@@ -29,7 +29,7 @@ public class Hook implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (SYSTEMUI.equals(lp.packageName)) {
-            desktopWindowItem(lp.classLoader);
+            desktopWindowItemWhenLoaded(lp.classLoader);
             return;
         }
         if (!LAUNCHER.equals(lp.packageName))
@@ -377,9 +377,61 @@ public class Hook implements IXposedHookLoadPackage {
      * (WM Shell HandleMenu) with a PowOS desktop task repository / DesktopModeTransitionSource for "Desktop window",
      * once OxygenOS ships WM Shell's desktop windowing on the Open - then this hook goes.
      */
-    private static void desktopWindowItem(ClassLoader cl) {
+    private static final String CAPTION_MENU_CLASS = "com.android.wm.shell.fullscreen.FullscreenCaptionHandleMenu";
+    private static volatile boolean desktopWindowHooked;
+
+    /**
+     * HACK: on OxygenOS 16 the loader Vector hands handleLoadPackage for SystemUI doesn't see WM Shell's classes
+     * (ClassNotFoundException for FullscreenCaptionHandleMenu, 2026-10-31), though they are in SystemUI.apk
+     * (classes8.dex). So: that loader first, else the loaders of SystemUI's Application once it attaches (its class's
+     * loader and its context's), first one that has the class wins. Real fix: none needed once the hook goes (see
+     * [desktopWindowItem]); for a module, the libxposed API's onPackageLoaded/onPackageReady with the final loader.
+     */
+    private static void desktopWindowItemWhenLoaded(ClassLoader cl) {
+        if (has(cl, CAPTION_MENU_CLASS)) {
+            desktopWindowItem(cl, "handleLoadPackage");
+            return;
+        }
+        XposedBridge.log(TAG + ": desktopWindowItem: " + CAPTION_MENU_CLASS + " not in " + cl + ", waiting for Application.attach");
         try {
-            Class<?> menu = XposedHelpers.findClass("com.android.wm.shell.fullscreen.FullscreenCaptionHandleMenu", cl);
+            XposedHelpers.findAndHookMethod(android.app.Application.class, "attach", android.content.Context.class, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    if (desktopWindowHooked)
+                        return;
+                    android.app.Application app = (android.app.Application) param.thisObject;
+                    ClassLoader[] loaders = {app.getClass().getClassLoader(), app.getClassLoader(),
+                            Thread.currentThread().getContextClassLoader()};
+                    for (ClassLoader l : loaders)
+                        if (has(l, CAPTION_MENU_CLASS)) {
+                            desktopWindowItem(l, "Application.attach " + app.getClass().getName());
+                            return;
+                        }
+                    XposedBridge.log(TAG + ": desktopWindowItem: " + CAPTION_MENU_CLASS + " in no loader at Application.attach ("
+                            + app.getClass().getName() + "); menu left as is");
+                }
+            });
+        } catch (Throwable t) {
+            log("desktopWindowItem attach", t);
+        }
+    }
+
+    private static boolean has(ClassLoader cl, String name) {
+        if (cl == null)
+            return false;
+        try {
+            Class.forName(name, false, cl);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static synchronized void desktopWindowItem(ClassLoader cl, String via) {
+        if (desktopWindowHooked)
+            return;
+        try {
+            Class<?> menu = XposedHelpers.findClass(CAPTION_MENU_CLASS, cl);
             Class<?> builder = XposedHelpers.findClass("com.coui.appcompat.poplist.PopupListItem$Builder", cl);
             XposedHelpers.findAndHookMethod(menu, "initPopupListWindow", new XC_MethodHook() {
                 @Override
@@ -474,6 +526,8 @@ public class Hook implements IXposedHookLoadPackage {
                     }
                 }
             });
+            desktopWindowHooked = true;
+            XposedBridge.log(TAG + ": desktopWindowItem: hooks installed on " + CAPTION_MENU_CLASS + " (via " + via + ")");
         } catch (Throwable t) {
             log("desktopWindowItem", t);
         }
