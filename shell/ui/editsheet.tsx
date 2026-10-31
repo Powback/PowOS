@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { carry, editing, home, page, pages } from "../state.ts";
+import { carry, editing, home, page, pages, searchPlacement } from "../state.ts";
 import { openScreen } from "../screens.ts";
 import { AppWidgetPicker, picker } from "./appwidget.tsx";
 import { geometry, placeNew, placeNewCells } from "./grid.tsx";
@@ -253,6 +253,29 @@ function AppPicker() {
  * (one picker: the shell's widgets, PowOS apps', Android's, the stores, new ones with the agent), the theme (a small
  * popover of swatches, with the settings), done. The pages stay in view and in reach above it.
  */
+/**
+ * Home's search for this mode (folded / unfolded: state.ts searchPlacement): the pill over the dock, or the dock's
+ * centre button that expands into it (docksearch.tsx). Switched at once, nothing reloaded.
+ */
+function SearchPlace() {
+  const place = searchPlacement.value;
+  if (!place) return null;
+  const pick = (v: string) => () => (place.value = v);
+  return (
+    <div class="sheet-row search-place">
+      <span class="muted">search</span>
+      <span class="search-place-pick" role="radiogroup" aria-label="search">
+        <button type="button" role="radio" aria-checked={place.value !== "dock"} class={`edit-act ${place.value !== "dock" ? "on" : ""}`} onClick={pick("bar")}>
+          bar
+        </button>
+        <button type="button" role="radio" aria-checked={place.value === "dock"} class={`edit-act ${place.value === "dock" ? "on" : ""}`} onClick={pick("dock")}>
+          dock button
+        </button>
+      </span>
+    </div>
+  );
+}
+
 export function EditSheet() {
   const strip = useRef<HTMLDivElement>(null);
   const open = editing.value;
@@ -288,6 +311,7 @@ export function EditSheet() {
               settings
             </button>
           </div>
+          <SearchPlace />
           <div class="swatches" ref={strip}>
             {themes.value.map((t) => (
               <Swatch key={t.name} theme={t} />

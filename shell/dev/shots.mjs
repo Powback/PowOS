@@ -314,6 +314,17 @@ const SCENES = [
   ["edit", "home", "S.editing.value = true;", "wallpaper"],
   // The side dock unfolded (the user, 2026-10-30: "The search bar turns weird"): edit mode keeps the search bar as it
   // is, the edit bar below it; the dock column starts under the status bar (its battery uncovered).
+  // Home's search as a dock button (ui/docksearch.tsx; the user, 2026-10-31 01:24): the bar as it was, then the
+  // button in the dock's centre (3 | button | 3) bottom and side, and expanded in place (a tap) over the dock.
+  ["dsearch-bar-bottom", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'bottom'; S.searchTry.value = 'bar'; await sleep(300);", "wallpaper"],
+  ["dsearch-btn-bottom", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'bottom'; S.searchTry.value = 'dock'; await sleep(300);", "wallpaper"],
+  ["dsearch-open-bottom", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'bottom'; S.searchTry.value = 'dock'; await sleep(300); (await U('./ui/docksearch.tsx')).expand(false); await sleep(400);", "wallpaper"],
+  ["dsearch-bar-right", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'right'; S.searchTry.value = 'bar'; await sleep(300);", "wallpaper"],
+  ["dsearch-btn-right", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'right'; S.searchTry.value = 'dock'; await sleep(300);", "wallpaper"],
+  ["dsearch-open-right", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'right'; S.searchTry.value = 'dock'; await sleep(300); (await U('./ui/docksearch.tsx')).expand(false); await sleep(400);", "wallpaper"],
+  ["dsearch-bar-left", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'left'; S.searchTry.value = 'bar'; await sleep(300);", "wallpaper"],
+  ["dsearch-btn-left", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'left'; S.searchTry.value = 'dock'; await sleep(300);", "wallpaper"],
+  ["dsearch-open-left", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'left'; S.searchTry.value = 'dock'; await sleep(300); (await U('./ui/docksearch.tsx')).expand(false); await sleep(400);", "wallpaper"],
   ["home-dockright", "home", "S.dockTry.value = 'right'; await sleep(200);", "wallpaper"],
   ["edit-dockright", "home", "S.dockTry.value = 'right'; await sleep(200); S.editing.value = true;", "wallpaper"],
   ["edit-land", "home", "S.editing.value = true;", "wallpaper", undefined, LAND_SIZES],

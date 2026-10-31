@@ -13,10 +13,11 @@ import { powos } from "../bridge.ts";
 import type { PageRect } from "../types.ts";
 import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
+import { DockSearchBar, DockSearchButton, dockButton, dockSearch } from "./docksearch.tsx";
 import { drawerDragging, drawerOpen, followOpenness, homeGestures, launcherTakesHome, pageDrag, shadeTakesHome } from "./gesture.ts";
 import { PageDots } from "./pagedots.tsx";
 import { Carried, Folders, Pages, startCarry } from "./grid.tsx";
-import { carriedApp, shownLess } from "./dockdrop.ts";
+import { buttonSlot, carriedApp, shownLess, slotPast } from "./dockdrop.ts";
 import { ScreenPanel } from "./screen.tsx";
 import { SessionScreen } from "./session.tsx";
 import { AppScreen } from "./appscreen.tsx";
@@ -190,10 +191,13 @@ const DOCK_EXIT = 48;
 function moveInDock(key: string, e: PointerEvent, dockEl: HTMLElement) {
   const vertical = dockPosition.value !== "bottom";
   const axis = (ev: PointerEvent) => vertical ? ev.clientY : ev.clientX;
+  // The search button (docksearch.tsx) holds a slot of its own in the dock's middle: the apps' slots skip it.
+  const n = dock.value.length;
+  const cells = n + (dockButton.value ? 1 : 0);
   const slotOf = (x: number) => {
     const r = dockEl.getBoundingClientRect();
-    const slot = vertical ? (x - r.top) / 56 : ((x - r.left) / r.width) * dock.value.length;
-    return Math.max(0, Math.min(dock.value.length - 1, Math.floor(slot)));
+    const slot = vertical ? (x - r.top) / 56 : ((x - r.left) / r.width) * cells;
+    return Math.max(0, Math.min(n - 1, slotPast(Math.floor(slot), n)));
   };
   menu.value = null;
   dockDrag.value = { key, x: axis(e), slot: slotOf(axis(e)) };
@@ -334,6 +338,16 @@ function DockWindows({ pinned }: { pinned: string[] }) {
   );
 }
 
+/** The held dock app at app slot [i] of [slots], its finger at [x]: drawn there (the search button's slot skipped). */
+function heldStyle(row: HTMLElement, i: number, slots: number, x: number) {
+  const vertical = dockPosition.value !== "bottom";
+  const r = row.getBoundingClientRect();
+  const button = dockButton.value ? 1 : 0;
+  const at = button && i >= buttonSlot(slots) ? i + 1 : i;
+  const slotCenter = vertical ? r.top + at * 56 + 28 : r.left + ((at + 0.5) * r.width) / (slots + button);
+  return { transform: `translate${vertical ? "Y" : "X"}(${x - slotCenter}px)` };
+}
+
 /** Which of the dock's pages shows (0 pinned, 1 recent): its dots follow it, told when a scroll ends - never per frame. */
 const dockPage = signal(0);
 
@@ -372,18 +386,15 @@ export function Dock() {
   // Wide (unfolded), the recent apps are the bar's right end (DockTray): the dock is its pinned apps only.
   const wide = wideHome.value;
   const recents = (!wide || vertical) && recent.value.some((k) => !dock.value.includes(k) && byKey.value.has(k));
-  if (ghost && !carried && !recents) return null;
+  // Home's search as a dock button (docksearch.tsx): the dock is there for it even with nothing pinned.
+  const button = dockButton.value;
+  if (ghost && !carried && !recents && !button) return null;
   // While an app is carried or moved along it, the dock is its pinned page only.
-  const paged = !vertical && recents && !carried && !d && !ghost;
+  const paged = !vertical && recents && !carried && !d && (!ghost || button);
   const slots = pinned.length + (gap >= 0 ? 1 : 0);
   const cells = pinned.map((app, i) => {
     // The held one follows the finger from its new slot; the others have moved aside (a slot each, equal widths).
-    let style: Record<string, string> | undefined;
-    if (d?.key === app.key && el.current) {
-      const r = el.current.getBoundingClientRect();
-      const slotCenter = vertical ? r.top + i * 56 + 28 : r.left + ((i + 0.5) * r.width) / slots;
-      style = { transform: `translate${vertical ? "Y" : "X"}(${d.x - slotCenter}px)` };
-    }
+    const style = d?.key === app.key && el.current ? heldStyle(el.current, i, slots, d.x) : undefined;
     return (
       <AppCell
         key={app.key}
@@ -397,6 +408,8 @@ export function Dock() {
     );
   });
   if (gap >= 0) cells.splice(gap, 0, <div key=" gap" class="app dock-gap" />);
+  // The centre slot: as many apps left of it as right, an odd one more on the right (the user, 01:26: "3 | 3").
+  if (button) cells.splice(buttonSlot(cells.length), 0, <DockSearchButton key=" search" />);
   const r = aim?.swap && el.current?.getBoundingClientRect();
   return (
     <>
@@ -406,7 +419,7 @@ export function Dock() {
        */}
       <div class={`dock ${ghost && carried ? "dock-ghost" : ""} ${aim ? "aimed" : ""} ${paged ? "paged" : ""}`} data-p ref={followDock}>
         <div class="dock-pages" ref={pagesEl}>
-          {(!ghost || carried) && (
+          {(!ghost || carried || button) && (
             <div
               class="dock-page"
               // Wide, the cells share the bar's left end: more than six (the windows' apps after the pinned ones) get
@@ -417,7 +430,7 @@ export function Dock() {
                 el.current = node;
               }}
             >
-              {ghost && gap < 0 ? <div class="dock-empty">drop here to pin</div> : cells}
+              {ghost && gap < 0 && !button ? <div class="dock-empty">drop here to pin</div> : cells}
               {!d && !carried && <DockWindows pinned={dock.value} />}
             </div>
           )}
@@ -485,6 +498,12 @@ function HomeDots() {
   );
 }
 
+/** The foot's pill, or the bar the dock's search button expands into. */
+const HomeSearch = () => (dockButton.value ? <DockSearchBar /> : <Bar />);
+
+/** Home's search as the dock's button (docksearch.tsx), and that button expanded. */
+const searchDockClasses = () => `${dockButton.value ? "search-dock" : ""} ${dockSearch.value !== "closed" ? "search-open" : ""}`;
+
 export function Home() {
   // data-p: these follow the panel's openness (--p, written by gesture.ts, not through a render).
   return (
@@ -493,7 +512,7 @@ export function Home() {
       <div class="screens" {...homeGestures()}>
         <PowAiPage />
         <div
-          class={`home dock-${dockPosition.value} ${wideHome.value ? "wide" : ""} ${footBelow.value ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${overWindows.value ? "over-windows" : ""} ${carriedApp(carry.value) ? "carry-app" : ""}`}
+          class={`home dock-${dockPosition.value} ${wideHome.value ? "wide" : ""} ${footBelow.value ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${overWindows.value ? "over-windows" : ""} ${carriedApp(carry.value) ? "carry-app" : ""} ${searchDockClasses()}`}
         >
           <div class="stage">
             <div class="home-content" data-p ref={followOpenness}>
@@ -504,7 +523,9 @@ export function Home() {
           </div>
           {/* Always the foot's pill: the launcher's face - a tap opens the overlay with its search (bar.tsx). With the
               search widget on the grid it's parked (shell.css .search-parked). */}
-          <Bar />
+          {/* Or, as the user picked (Settings > style > home: "search: dock button"), no pill here: the dock's centre
+              button, which expands into this bar in place (docksearch.tsx). */}
+          <HomeSearch />
           <Dock />
           {wideHome.value && <DockTray />}
           <AppMenu />

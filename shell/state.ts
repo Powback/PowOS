@@ -250,6 +250,19 @@ export function validDockPosition(value: string, fallback: string): string {
 export const dockTry = signal("");
 export const dockPosition = computed(() => validDockPosition(dockTry.value || sidewaysDock(dockPlacement.value), dockMode.value === "desktop" ? "left" : "bottom"));
 /**
+ * Home's search per mode (Settings > style > home, edit mode's theme sheet): "bar" - the pill over the dock, as always
+ * (the default) - or "dock": no pill on home, an app-sized button in the middle of the dock that expands into the bar
+ * in place (ui/docksearch.tsx; the user, 2026-10-31 01:24). Folded and unfolded each keep their own, as the dock's
+ * placement does; the desktop shell has its own launcher and keeps the bar. [searchTry]: a check's choice for this
+ * page only, never stored (as dockTry).
+ */
+export const mobileSearchPlacement = stored("search.place.mobile", "bar");
+export const unfoldedSearchPlacement = stored("search.place.unfolded", "bar");
+export const searchTry = signal("");
+/** The search placement setting of the mode in use (folded / unfolded); null in the desktop shell. */
+export const searchPlacement = computed(() => (dockMode.value === "unfolded" ? unfoldedSearchPlacement : dockMode.value === "mobile" ? mobileSearchPlacement : null));
+export const searchInDock = computed(() => (searchTry.value || searchPlacement.value?.value) === "dock");
+/**
  * The folded home turned sideways (hosts/wide.ts sidewaysHome): the bottom dock becomes the right column, with its
  * recents, so the tiles get the height back (the user, 2026-10-30). A side the user picked for mobile stays; folded
  * portrait and unfolded keep their own placement.
