@@ -6057,8 +6057,12 @@ try {
   // LA1: the launcher over home adopts home's dock and bar - one of each in every frame, unmoved; over an app the overlay
   // brings its own (dev/launcher-adopt-check.js; the user, 2026-10-31 15:44).
   if (process.env.SHELL_PAGES !== "0") {
-    for (const [label, position] of [["folded", "bottom"], ["unfolded", "bottom"], ["unfolded", "right"]])
-      runs.push(open(browser, `${ORIGIN}/index.html`, `launcher-adopt-${label}-${position}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos) => (await importShim("./dev/launcher-adopt-check.js")).adoptsHome(pos), position))));
+    // LB1: + the grid's last row above the foot; the user's foot (18:27): the pill under the dock, search as its button.
+    const adopts = [["folded", "bottom"], ["unfolded", "bottom"], ["unfolded", "right"], ["folded", "bottom", "below-button"], ["unfolded", "bottom", "below-button"]];
+    for (const [label, position, foot = ""] of adopts) {
+      const opts = { below: foot.includes("below"), button: foot.includes("button") };
+      runs.push(open(browser, `${ORIGIN}/index.html`, `launcher-adopt-${label}-${position}${foot ? `-${foot}` : ""}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos, o) => (await importShim("./dev/launcher-adopt-check.js")).adoptsHome(pos, o), position, opts))));
+    }
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-adopt-overlay", dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/launcher-adopt-check.js")).ownDock()))));
     // LH1: the home gesture with the launcher open closes it (on home in place, and the pull window over an app).
     for (const kind of ["apps", "ai"]) {
