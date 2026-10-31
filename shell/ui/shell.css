@@ -3028,6 +3028,9 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
    2026-10-29: "the launcher shows the dock on the bottom even though I set the dock to be on the right side"). Still
    only on the app grid (pull.tsx dockShown: not in the chat, not with the keyboard). */
 .home.pull-screen:is(.dock-left, .dock-right) > .dock:not(.dock-tray) { pointer-events: auto; }
+/* The launcher's app grid and folders page start a row gap below the panel's top edge, not pinned to it (the user,
+   2026-10-31: "Give them a little breathing space on the top"); they still scroll up under the edge. */
+.home.pull-screen .drawer-page > .drawer-list { padding-top: 24px; }
 .home.pull-screen.dock-left .drawer-clip { padding-left: var(--side-dock); }
 .home.pull-screen.dock-right .drawer-clip { padding-right: var(--side-dock); }
 /* The folders page waits a dock, an A-Z bar and a gutter beyond the apps page (drawer.tsx Pages steps by width + gap):
