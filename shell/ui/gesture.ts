@@ -24,7 +24,7 @@ import { crossing, panelTicks } from "./haptics.ts";
 import { overPull, overRelease } from "./overpull.ts";
 import { inWindow } from "./desktops.ts";
 import { ccEditing, ccExpanded, EXPAND_AT, expandedByDefault, FOLD_AT, settle as settleCc, stretch as stretchCc } from "./ccexpand.ts";
-import { carry, closeDrawer, dockDrag, drawer, editing, folder, launcherIsOverlay, menu, notif, onLibrary, openPanel, page, pageCount, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
+import { carry, closeDrawer, dockDrag, dockPosition, drawer, editing, folder, launcherIsOverlay, menu, notif, onLibrary, openPanel, page, pageCount, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
 
 const SLOP = 10;
 /** Page swipe (iOS rule): commit past this share of a page's width, or on a flick. 0.3 / 0.3 px/ms were too hard
@@ -333,6 +333,8 @@ interface Gesture {
   height: number;
   /** The drawer's way, closed to open: its rise (shell.css --rise). */
   travel: number;
+  /** Started on home's bottom chrome ([chromeAt]): its own direction rule ([chromeWay]), else null. */
+  chrome: Chrome | null;
 }
 
 /** The gesture under way: module state, so a re-render in the middle of one (the drawer moving) keeps it. */
@@ -399,7 +401,8 @@ function startGesture(x: number, y: number, target: Element, t: number) {
   // A touch inside a floating app window is the app's, always (a scroll in Chrome must never pull the launcher up or
   // the shade down): home's swipes start only outside every window (ui/desktops.ts inWindow).
   // A web window (ui/webwindows.tsx) the same: its title bar drags only the window, its body is the app's.
-  if (busy() || windowGestureActive() || inWindow(x, y) || target.closest?.(".dock, .webwindow")) return;
+  const chrome = chromeAt(target);
+  if (!homeMayStart(x, y, target, chrome)) return;
   g = {
     x0: x,
     y0: y,
@@ -417,7 +420,50 @@ function startGesture(x: number, y: number, target: Element, t: number) {
     target,
     height: document.querySelector(".home")?.clientHeight || innerHeight,
     travel: travelOf(),
+    chrome,
   };
+}
+
+/**
+ * SB1 (the user, 10-31 15:11: "I should be able to swipe on the search bar to change page"): home's bottom chrome a
+ * swipe may start on - the search bar, the bottom dock (sideways is its axis), a side dock (its axis is up and down) -
+ * or null (home's usual rules).
+ */
+type Chrome = "bar" | "dock" | "dock-side";
+
+/** Whether home's swipes may start at ([x], [y]) on [target] ([chrome]: home's bottom chrome under it, or null). */
+function homeMayStart(x: number, y: number, target: Element, chrome: Chrome | null): boolean {
+  if (busy() || windowGestureActive() || target.closest?.(".webwindow") || chrome === "dock-side") return false;
+  // The bar and the dock sit over every window (none reaches below barTop): a floating window's bounds never take them.
+  return !!chrome || !(inWindow(x, y) || target.closest?.(".dock"));
+}
+function chromeAt(target: Element): Chrome | null {
+  if (target.closest?.(".home > .bar")) return "bar";
+  if (!target.closest?.(".dock")) return null;
+  return dockPosition.value === "bottom" ? "dock" : "dock-side";
+}
+
+/** How far (CSS px, ~8 dp) a finger on the bottom chrome moves before its direction is decided. */
+const CHROME_DECIDE = 8;
+
+/**
+ * The one direction rule for a swipe from home's bottom chrome ([chromeAt]), once the finger is past [CHROME_DECIDE]:
+ * "pages" (home pages, as on empty home), "home" (home's usual rules: up from the bar is the launcher), null (not home's:
+ * a move away from the dock is kept for dragging an app out to a window - never paged, never claimed), undefined (not
+ * decided yet). Sideways on the search bar always pages; on the dock only along its own axis (a bottom dock: sideways),
+ * unless the dock's own strip scrolls that way.
+ */
+export function chromeWay(chrome: Chrome, dx: number, dy: number, stripScrolls = false): "pages" | "home" | null | undefined {
+  const sideways = Math.abs(dx) > CHROME_DECIDE && Math.abs(dx) >= Math.abs(dy);
+  if (!sideways && Math.hypot(dx, dy) <= CHROME_DECIDE) return undefined;
+  if (chrome === "bar") return sideways ? "pages" : "home";
+  return chrome === "dock" && sideways && !stripScrolls ? "pages" : null;
+}
+
+/** The dock's own sideways strip under [target] has more to show sideways (it scrolls itself). */
+function stripScrolls(target: Element): boolean {
+  const strip = target.closest?.(".dock-pages");
+  return !!strip && strip.scrollWidth > strip.clientWidth + 1;
 }
 
 /**
@@ -496,8 +542,9 @@ export function sampleVx(samples: [number, number][], now: number) {
 
 /** The gesture's kind, once the finger is past SLOP. False: not yet, or not home's at all (dropped). */
 function claim(gs: Gesture, dx: number, dy: number): boolean {
-  if (Math.hypot(dx, dy) < SLOP) return false;
-  const mode = gs.notif ? claimOnPanel(gs, dx, dy) : claimOnHome(gs, dx, dy);
+  const way = gs.chrome ? chromeWay(gs.chrome, dx, dy, stripScrolls(gs.target)) : "home";
+  if (way === undefined || (way === "home" && Math.hypot(dx, dy) < SLOP)) return false;
+  const mode = way && claimWay(gs, way, dx, dy);
   if (!mode) {
     g = null;
     return false;
@@ -506,6 +553,12 @@ function claim(gs: Gesture, dx: number, dy: number): boolean {
   // A page swipe or an overlay change takes the keyboard down as it starts, not once it settles.
   dropKeyboard();
   return true;
+}
+
+/** The kind of a gesture decided [way] ([chromeWay]): the bar's or the dock's sideways pages home, as on empty home. */
+function claimWay(gs: Gesture, way: "pages" | "home", dx: number, dy: number): Gesture["mode"] {
+  if (way === "pages" && !gs.open && !gs.notif) return "pages";
+  return gs.notif ? claimOnPanel(gs, dx, dy) : claimOnHome(gs, dx, dy);
 }
 
 /** The notification panel down. */

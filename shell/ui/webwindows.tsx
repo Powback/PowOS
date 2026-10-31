@@ -1419,6 +1419,9 @@ function DividerEl({ page, d, o }: { page: number; d: Divider; o: { x: number; y
     <div
       class="webwindow ww-divider"
       data-div={`${page}:${d.ratio}`}
+      // The split's axis, not its ratio's name: "3"'s right column splits top / bottom on "ry", "3c"'s on "ry" too but
+      // left | right - the pill's orientation follows this (shell.css; 10-31 15:10 an upright pill over Discord's bar).
+      data-axis={d.axis}
       style={style}
       onPointerDown={(e) => {
         e.stopPropagation();
