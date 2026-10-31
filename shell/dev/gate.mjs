@@ -6060,6 +6060,11 @@ try {
     for (const [label, position] of [["folded", "bottom"], ["unfolded", "bottom"], ["unfolded", "right"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `launcher-adopt-${label}-${position}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos) => (await importShim("./dev/launcher-adopt-check.js")).adoptsHome(pos), position))));
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-adopt-overlay", dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/launcher-adopt-check.js")).ownDock()))));
+    // LH1: the home gesture with the launcher open closes it (on home in place, and the pull window over an app).
+    for (const kind of ["apps", "ai"]) {
+      runs.push(open(browser, `${ORIGIN}/index.html`, `launcher-home-gesture-${kind}`, dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async (k) => (await importShim("./dev/launcher-adopt-check.js")).homeGestureCloses(k), kind))));
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, `launcher-home-gesture-pull-${kind}`, dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async (k) => (await importShim("./dev/launcher-adopt-check.js")).homeGestureCloses(k), kind))));
+    }
   }
   // Home's search as a dock button (dev/dock-search-check.js; the user, 2026-10-31): no .bar, the button centred in the
   // dock, a tap expands it in place focused (not the launcher), folded and unfolded, bottom and side docks.

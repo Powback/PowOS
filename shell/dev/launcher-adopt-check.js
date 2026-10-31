@@ -105,3 +105,48 @@ export async function ownDock() {
   E.emit("pull.end", { open: false });
   return fails;
 }
+
+/**
+ * LH1 (the user, 2026-10-31 15:15-15:16: "When I swipe up to show the switcher while it's already active, it should be
+ * deactivated. ... I mean the launcher."): the home gesture with the launcher (grid or PowOS AI) open closes it, back
+ * to where it was opened - never the switcher, a second launcher, or nothing. The page tells the host the panel is open
+ * (panels.open, Panels.kt) - then NavGesture's Home/Switcher ends in "panel.close.*" { shut: true }, which this sends.
+ * [kind]: "apps" or "ai". On home (index.html) home's bar and dock stay; in the pull window (?mode=pull) it shuts.
+ */
+/** NavGesture's home gesture over a live panel: begin on the down, the finger's drag, the release (Home/Switcher: shut). */
+async function homeGesture(kind) {
+  const host = (event, data) => window.__mockEvents.emit(event, data);
+  host("panel.close.begin", { kind });
+  for (const p of [0.2, 0.5, 0.9]) {
+    host("panel.close.drag", { p });
+    await frame();
+  }
+  host("panel.close.end", { shut: true });
+  await sleep(600);
+}
+
+/** After the gesture: shut, the host told, no switcher; on home its bar and dock as before ([before]: null in the pull window). */
+function afterHomeGesture(kind, S, Gs, before) {
+  const fails = [];
+  if (S.drawer.value > 0 || Gs.drawerOpen.value) fails.push(`${kind}: the home gesture did not close the launcher`);
+  if (window.__mockPanel != null) fails.push(`${kind}: the host still thinks the ${window.__mockPanel} panel is open`);
+  if (document.querySelector(".recents.open")) fails.push(`${kind}: the switcher opened`);
+  if (!before) return fails;
+  const f = foot();
+  if (f.bars !== before.bars || f.docks !== before.docks) fails.push(`${kind}: home's bar/dock changed (${before.bars}/${before.docks} -> ${f.bars}/${f.docks})`);
+  if (document.querySelector(".home.open")) fails.push(`${kind}: home still shows the launcher open (.home.open)`);
+  return fails;
+}
+
+export async function homeGestureCloses(kind = "apps") {
+  const G = window.__gw;
+  const [S, Gs] = await Promise.all([G.mod("./state.ts"), G.mod("./ui/gesture.ts")]);
+  const pull = new URLSearchParams(location.search).get("mode") === "pull";
+  const before = pull ? null : foot();
+  S.openPanel(kind);
+  await sleep(500);
+  if (!(S.drawer.value > 0)) return [`${kind}: the launcher did not open`];
+  const told = window.__mockPanel === kind ? [] : [`${kind}: the page did not tell the host the ${kind} panel is open (panels.open: ${window.__mockPanel}) - its home gesture would go home / to the switcher instead`];
+  await homeGesture(kind);
+  return [...told, ...afterHomeGesture(kind, S, Gs, before)];
+}

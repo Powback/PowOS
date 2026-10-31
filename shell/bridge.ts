@@ -831,7 +831,11 @@ function mock(): Bridge {
         },
       };
     })(),
-    panels: { open: async () => {}, closed: async () => {} },
+    // The panel the host's home gesture would close (Panels.kt), for the gate's launcher-home-gesture checks.
+    panels: {
+      open: async (kind) => void ((window as unknown as { __mockPanel?: string | null }).__mockPanel = kind),
+      closed: async () => void ((window as unknown as { __mockPanel?: string | null }).__mockPanel = null),
+    },
     shade: {
       closed: async () => console.log("[mock] shade closed"),
       expand: async () => console.log("[mock] shade expanded"),
