@@ -21,7 +21,8 @@ import android.os.Looper
  *                                   app): also its own display group, focus and lock state ([SELFTEST_FLAGS]), so the
  *                                   check's display stays on with the screen off or locked and never takes the
  *                                   user's focus; refused -> the window flags
- *   resize <displayId> <w> <h> <dpi>
+ *   resize <displayId> <w> <h> <dpi>      (no display frame FrozenWatch.FROZEN_MS after it -> "quiet <id> <ms> <rebinds>")
+ *   rebind <displayId>                    -> the display's surface off and on (its frozen app draws again)
  *   release <displayId>
  *   touch <displayId> <action> <downTime> <id>,<x>,<y> ...   -> an injected touch on that display, every finger down
  *                                                            now ("log touch ..." for downs/ups); also <x> <y> (one)
@@ -40,14 +41,13 @@ import android.os.Looper
  * and the app STOPS within ~40 ms, S0), the app draws at its full rate, and SurfaceFlinger's composition into it is 1
  * pixel. What the user sees is not this output but the display's mirror under home ([WebWindows]).
  *
- * The dpi PowOS sends is the phone's (its screen's density) and the display is made AT it, always: a window's app
- * lays out at the same density as full screen, its display exactly the body's device px, 1:1. A window's display at
- * another density (the sw600 rule of 5e74d81c: 302 dpi for a 1135x1364 window against the screen's 442) made the app
- * change density whenever it moved between the window and full screen or a resize crossed the rule, and apps that
- * keep metrics from the density they started at (Discord, React Native: avatars, names and timestamps at
- * 302/442 = 0.68 of their size, labels cut to "Messa", the bottoms of glyphs clipped - measured 2026-10-30) drew
- * mixed and cut, in the window and full screen both. A window narrower than 600 dp gets the app's compact layout,
- * as a phone that size would.
+ * The dpi PowOS sends is the window's ([WindowDpi], fixed for its life) and the display is made and resized AT it: on
+ * the unfolded screen the desktop density (2/3 of the screen's), so a window of desktop size is >= 600 dp and its app
+ * takes its large-screen layout (Chrome's tab strip, 10-31 "Why isn't Chrome in desktop mode anymore?"); folded, the
+ * screen's. 83fcef17 had made every window the screen's density (Chrome at 1135 px = 411 dp: the phone toolbar)
+ * because the sw600 rule of 5e74d81c recomputed the density on every resize and Discord, which keeps its start
+ * density, drew mixed and cut: now the density never changes while the app is in its window, and Discord keeps the
+ * screen's ([WindowDpi.SCREEN_DENSITY_APPS]).
  *
  * HACK: a root-spawned shell-uid helper because an app can't hold ADD_TRUSTED_DISPLAY. Real fix: the displays made
  * from the platform-signed side (PowOS's system module) or a role that grants it; the S4 input injector will be the
@@ -70,7 +70,10 @@ object WebWindowsHost {
     private const val SHELL_UID = 2000
 
 
-    private class Vd(val display: VirtualDisplay, val reader: ImageReader, val touch: Touch?) {
+    private class Vd(val display: VirtualDisplay, var reader: ImageReader, val touch: Touch?) {
+        /** The frozen-app watch ([FrozenWatch]), on the frames thread only. */
+        val freeze = FrozenWatch()
+
         /** RS1's settle watch ([Host.settle]): its start, its last display frame (uptime ms), what to log with it. */
         var settleFrom = 0L
         var lastFrame = 0L
@@ -80,6 +83,9 @@ object WebWindowsHost {
     /** A display that composed nothing new for this long after a resize has settled (its app drew at the size). */
     private const val SETTLE_QUIET_MS = 150L
     private const val SETTLE_MAX_MS = 3000L
+
+    /** A rebind's display stays off this long: the app sees it stop (S0: ~40 ms), then start. */
+    private const val REBIND_OFF_MS = 120L
 
     @JvmStatic
     fun main(args: Array<String>) {
@@ -116,6 +122,7 @@ object WebWindowsHost {
             when (a[0]) {
                 "create" -> create(a)
                 "resize" -> resize(a[1].toInt(), a[2].toInt(), a[3].toInt(), a[4].toInt())
+                "rebind" -> rebind(a[1].toInt())
                 "release" -> vds.remove(a[1].toInt())?.let(::release)
                 "settle" -> settle(a[1].toInt(), a.drop(2).joinToString(" "))
                 "touch" -> Inject.touch(a)
@@ -131,10 +138,7 @@ object WebWindowsHost {
             val selftest = a.getOrNull(5) == "selftest"
             val r = ImageReader.newInstance(1, 1, PixelFormat.RGBA_8888, 2)
             var made: Vd? = null
-            r.setOnImageAvailableListener({
-                it.acquireLatestImage()?.close()
-                made?.lastFrame = android.os.SystemClock.uptimeMillis()
-            }, frames)
+            r.setOnImageAvailableListener({ made?.let(::framed) ?: it.acquireLatestImage()?.close() }, frames)
             val vd =
                 try {
                     val own =
@@ -163,7 +167,49 @@ object WebWindowsHost {
             h: Int,
             dpi: Int,
         ) {
-            vds[id]?.display?.resize(w, h, dpi)
+            val v = vds[id] ?: return
+            v.display.resize(w, h, dpi)
+            frames.post { v.freeze.resized(android.os.SystemClock.uptimeMillis()) }
+            frames.postDelayed({ freezeCheck(id, v) }, FrozenWatch.FROZEN_MS + 50)
+        }
+
+        /** On [frames]: [v]'s display composed a frame. */
+        private fun framed(v: Vd) {
+            v.reader.acquireLatestImage()?.close()
+            val now = android.os.SystemClock.uptimeMillis()
+            v.lastFrame = now
+            v.freeze.frame(now)
+        }
+
+        /** On [frames]: no frame since [v]'s last resize/rebind for [FrozenWatch.FROZEN_MS] -> "quiet <id> <ms> <rebinds>". */
+        private fun freezeCheck(
+            id: Int,
+            v: Vd,
+        ) {
+            if (vds[id] !== v) return
+            val quiet = v.freeze.step(android.os.SystemClock.uptimeMillis())
+            if (quiet > 0) say("quiet $id $quiet ${v.freeze.rebinds}")
+        }
+
+        /**
+         * `rebind <displayId>`: the display's output surface off and on (a new reader): the display turns OFF (its app
+         * stops, S0) and ON again (it starts and draws a frame at the display's size) - a frozen app unstuck in place.
+         */
+        private fun rebind(id: Int) {
+            val v = vds[id] ?: return
+            v.display.surface = null
+            frames.postDelayed({
+                if (vds[id] !== v) return@postDelayed
+                val r = ImageReader.newInstance(1, 1, PixelFormat.RGBA_8888, 2)
+                r.setOnImageAvailableListener({ framed(v) }, frames)
+                val old = v.reader
+                v.reader = r
+                v.display.surface = r.surface
+                old.close()
+                v.freeze.rebound(android.os.SystemClock.uptimeMillis())
+                frames.postDelayed({ freezeCheck(id, v) }, FrozenWatch.FROZEN_MS + 50)
+                say("log display $id: surface re-bound (rebind ${v.freeze.rebinds})")
+            }, REBIND_OFF_MS)
         }
 
         /**
