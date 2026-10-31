@@ -103,3 +103,53 @@ export async function pageMarksNone(probe) {
   R.running.value = saved.running;
   return fails;
 }
+
+/**
+ * DR1 (the user, 2026-10-31 15:55: "the docking is redrawing every time I change page"; perf-1793458475110: AppCell
+ * 161x and Recents 16x by a signal over page swipes): after pageMarksSetup (unfolded, A's window on page 1, B's on
+ * page 2), three page swipes - each with the host's "apps.running" and "recents.tasks" sent again, equal, as the phone
+ * does on a task-stack change. AppCell renders at most once per cell whose mark changed, Recents not at all.
+ */
+export async function pageSwipeRenders() {
+  const S = await importShim("./state.ts");
+  const R = await importShim("./ui/running.ts");
+  const ev = window.__mockEvents;
+  const runningNow = () => ({ ...R.running.value });
+  const tasksNow = () => [
+    { id: 41, label: "One", key: "a:chrome", icon: null, snapshot: "/icons/none.png" },
+    { id: 42, label: "Two", key: "a:camera", icon: null, snapshot: "/icons/none.png" },
+  ];
+  if (!ev) return { fails: ["no __mockEvents (mock bridge) to send host events with"], cells: 0, recents: 0, changed: 0 };
+  ev.emit("apps.running", runningNow());
+  ev.emit("recents.tasks", { tasks: tasksNow() });
+  await settled();
+  const classes = () => new Map([...document.querySelectorAll(".app[data-key]")].map((el, i) => [`${i} ${el.dataset.key}`, el.className]));
+  window.__powosRenders.start();
+  window.__powosRenders.reset();
+  let changed = 0;
+  for (const to of [1, 0, 1]) {
+    const before = classes();
+    S.page.value = to;
+    ev.emit("apps.running", runningNow());
+    ev.emit("recents.tasks", { tasks: tasksNow() });
+    await settled();
+    changed += [...classes()].filter(([k, c]) => before.has(k) && before.get(k) !== c).length;
+  }
+  const rows = window.__powosRenders.top(500).byCount;
+  window.__powosRenders.stop();
+  const count = (name) => rows.filter((r) => r.name === name).reduce((n, r) => n + r.renders, 0);
+  const cells = count("AppCell");
+  const recents = count("Recents");
+  const fails = swipeFails(cells, recents, changed);
+  console.warn(`[gate] dock-renders: AppCell ${cells} (marks changed ${changed}), Recents ${recents}`);
+  return { fails, cells, recents, changed };
+}
+
+/** DR1's verdict: AppCell renders within the marks that changed, no Recents render, and some mark did change. */
+function swipeFails(cells, recents, changed) {
+  const fails = [];
+  if (cells > changed) fails.push(`DR1: ${cells} AppCell renders over 3 page swipes, but only ${changed} cell marks changed`);
+  if (recents) fails.push(`DR1: Recents rendered ${recents}x over 3 page swipes (want 0)`);
+  if (!changed) fails.push("DR1: no cell's mark changed over the swipes - the scene isn't testing the marks");
+  return fails;
+}

@@ -509,9 +509,13 @@ powos.on("recents.update", (e: { tasks: RecentTask[] }) => {
   if (!same) tasks.value = next.map((t) => tasks.value.find((o) => kin(o, t)) ?? t);
 });
 // The list for the next swipe, while an app is in front: laid out (hidden) now, snapshots loading.
+// Kept while equal: the host sends it again on every task-stack change (a page swipe), and a new list re-rendered the
+// switcher and its cards each time (Recents 16/16 by a signal, perf-1793458475110). Cards that didn't change keep theirs.
 powos.on("recents.tasks", (e: { tasks: RecentTask[] }) => {
   if (phase.value !== "closed") return;
-  tasks.value = order(e.tasks, null);
+  const was = tasks.value;
+  const next = order(e.tasks, null).map((t, i) => (was[i] && sameTask(was[i], t) ? was[i] : t));
+  if (next.length !== was.length || next.some((t, i) => t !== was[i])) tasks.value = next;
   toStart();
   prefetch(e.tasks);
 });
@@ -522,6 +526,9 @@ powos.on("switcher.toggle", () => {
   if (next) open(next.id, row?.querySelector<HTMLElement>(`.task[data-task="${next.id}"] .task-shot`) ?? undefined);
   else close();
 });
+/** The same card: every field equal (a split's apps compared by value). */
+const sameTask = (a: RecentTask, b: RecentTask) => JSON.stringify(a) === JSON.stringify(b);
+
 function resized() {
   const next = bounds(size.value);
   if (next.w !== size.value.w || next.h !== size.value.h) size.value = next;
