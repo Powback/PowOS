@@ -260,6 +260,8 @@
 .try-item { display: flex; flex-direction: column; gap: 6px; }
 .try-line { white-space: pre-wrap; }
 .try-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+/* An answer's buttons are equal, neutral pills until one is tapped: none looks already chosen (design QA, 2026-10-31). */
+.try-acts > .ai-act:first-child { color: var(--color-foreground); background: var(--soft-fill); }
 .try-said { font-size: var(--text-small); }
 .try-said.error { color: var(--color-red); }
 .try-item .ai-reply { margin: 0; }

@@ -1872,8 +1872,8 @@ async function aiChatRestore() {
 
 /**
  * In the page, unfolded (the user, 2026-10-31 13:29: three panes, "not a stretched chat"): the nav with Chat / Agents /
- * Progress / Devices (Chat marked), the chat in the middle pane, the right column's "Try this" with the newest try
- * message's works / still broken; no strip (the panes say it).
+ * Progress / Devices (Chat marked), the chat in the middle pane, the right column's "Try this" with the board's open
+ * asks (needsyou.tsx: the setup's one, "Plug the phone into the Mac once", with done / can't); no strip (the panes say it).
  */
 function aiPanesFails() {
   const scr = document.querySelector(".ai-screen");
@@ -1885,7 +1885,7 @@ function aiPanesFails() {
   const heads = [...scr.querySelectorAll(".ai-ctx .ai-ctx-head")].map((e) => e.textContent.trim());
   if (!heads.includes("Try this")) fails.push(`the right column has no "Try this" (has ${heads.join(", ") || "nothing"})`);
   const acts = [...scr.querySelectorAll(".ai-ctx .ai-ctx-try .try-acts")].length;
-  if (acts !== 2) fails.push(`"Try this" offers ${acts} lines with buttons, not the newest message's 2`);
+  if (acts !== 1) fails.push(`"Try this" offers ${acts} lines with buttons, not the board's 1 open ask`);
   if (scr.querySelector(".ai-strip")) fails.push("the strip still shows over the panes");
   return fails;
 }
@@ -2080,6 +2080,162 @@ function aiProgressContrast(lines) {
   };
   const low = [...document.querySelectorAll(lines)].filter((e) => e.closest(".aip-area")).map((e) => [e, worst(e)]).filter(([, k]) => k < 4.5);
   return [...new Set(low.map(([e, k]) => `"${e.textContent.trim().slice(0, 20)}" at ${k.toFixed(1)}:1 on its fill`))];
+}
+
+/**
+ * Progress's Needs you, answered in place (the user, 2026-10-31 20:12: "It says it needs me, but how am I supposed to
+ * answer?" ... "I answered a bunch of them"; needsyou.tsx): a board of 2 open tries, 1 question, 1 try the user already
+ * answered (their check on the board) and 1 done shows exactly 3 needs-you rows; a tap opens one with its controls;
+ * "works" makes the very bridge call the chat's present_try card makes for the same task, and the row leaves at once.
+ * Unfolded, the right column's Try this lists the same open asks and Working now the mock fleet's agents.
+ * Renders: /cache/ai-needs-you-<size>.png (the opened row).
+ */
+async function aiNeedsSetup() {
+  const G = window.__gw;
+  const [S, P, { powos }] = await Promise.all([G.mod("./state.ts"), G.mod("./ui/powai.tsx"), G.mod("./bridge.ts")]);
+  const got = (window.__nyGot = []);
+  window.__nyRestore ??= [powos.ai.verdict, powos.agents.message];
+  powos.ai.verdict = async (...a) => void got.push(["verdict", ...a]);
+  powos.agents.message = async (...a) => void got.push(["message", ...a]);
+  try { localStorage.removeItem("powos.ai.tried"); } catch {}
+  const now = Date.now();
+  const row = (id, status, title, extra = {}) => ({ id, title, owner: "coder", status, note: "", project: "Windows", created: now - 9e6, updated: now - 6e4, done: status === "done" ? now - 864e5 : 0, progressDone: 0, progressTotal: 0, step: "", steps: "", commits: "", images: "", activity: now - 6e4, tryLine: "", ...extra });
+  P.board.value = [
+    row("ny-try1", "waiting", "Raise a window behind another", { tryLine: "Tap a window behind another: it comes to the front", commits: '[{"sha":"abc1234","subject":""}]' }),
+    row("ny-try2", "working", "Dock highlights this page's apps", { tryLine: "Swipe between pages: this page's apps stand out in the dock", commits: '[{"sha":"def5678","subject":""}]', updated: now - 3e4 }),
+    row("ny-ask", "waiting", "Dock size", { note: "Which dock size do you want? (small / large)", updated: now - 9e4 }),
+    row("ny-said", "waiting", "Page dots", { tryLine: "Page dots are small and centred", commits: '[{"sha":"aaa1111","subject":""}]' }),
+    row("ny-done", "done", "Old thing", { tryLine: "" }),
+  ];
+  P.checks.value = [{ job: "j1", task: "ny-said", name: "you", state: "PASS", line: "", at: now - 3e4, shipped: true }];
+  P.boardSeen.value = true;
+  S.page.value = -1;
+  S.aiScreen.value = "progress";
+  return !!(await G.until(() => document.querySelector(".ai-screen .aip-need"), 4000));
+}
+
+/** In the page: the needs-you rows' tasks; the first try opened, its controls' words. */
+async function aiNeedsOpen() {
+  const G = window.__gw;
+  const rows = () => [...document.querySelectorAll(".ai-screen .aip-need")];
+  const ids = rows().map((e) => e.dataset.task);
+  const row = rows().find((e) => e.dataset.task === "ny-try1");
+  if (row && !row.classList.contains("open")) row.querySelector(".aip-need-row").click();
+  await G.until(() => document.querySelector('.ai-screen .aip-need.open .try-acts'), 2000);
+  const acts = [...document.querySelectorAll(".ai-screen .aip-need.open .try-acts .ai-act")].map((b) => b.textContent.trim());
+  const line = document.querySelector(".ai-screen .aip-need.open .aip-need-line")?.textContent ?? "";
+  await new Promise((r) => setTimeout(r, 450));
+  return { ids, acts, line };
+}
+
+/**
+ * In the page: answer buttons styled as already chosen before a tap (design QA, 2026-10-31: "works" and "small" were
+ * filled accent) - any that differs from the others' fill or text colour, or is filled with the accent.
+ */
+function aiNeedsLooks(scope) {
+  const accent = (() => {
+    const e = document.createElement("span");
+    e.style.color = "var(--color-accent)";
+    document.body.append(e);
+    const c = getComputedStyle(e).color;
+    e.remove();
+    return c;
+  })();
+  const look = (b) => `${getComputedStyle(b).backgroundColor} / ${getComputedStyle(b).color}`;
+  return [...document.querySelectorAll(`${scope} .try-acts`)].flatMap((g) => {
+    const btns = [...g.querySelectorAll(".ai-act")];
+    const bad = btns.filter((b) => getComputedStyle(b).backgroundColor === accent || look(b) !== look(btns[btns.length - 1]));
+    return bad.map((b) => `"${b.textContent.trim()}" (${look(b)})`);
+  });
+}
+
+/** In the page: "works" on the opened row; the bridge's calls and the rows left after it. */
+async function aiNeedsAnswer() {
+  const G = window.__gw;
+  const got = window.__nyGot;
+  got.length = 0;
+  [...document.querySelectorAll(".ai-screen .aip-need.open .try-acts .ai-act")].find((b) => b.textContent.trim() === "works")?.click();
+  // At once: no wait for the bridge (optimistic).
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const left = [...document.querySelectorAll(".ai-screen .aip-need:not(.answered)")].map((e) => e.dataset.task);
+  const said = document.querySelector('.ai-screen .aip-need.answered[data-task="ny-try1"]')?.textContent ?? "";
+  await G.until(() => got.length, 1000);
+  return { calls: got.slice(), left, said };
+}
+
+/** In the page: the chat's present_try card's "works" on the same task - the call it makes. */
+async function aiNeedsChatCall() {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const got = window.__nyGot;
+  got.length = 0;
+  try { localStorage.removeItem("powos.ai.tried"); } catch {}
+  const T = await G.mod("./ui/trycard.tsx");
+  T.answers.value = {};
+  const block = { items: [{ id: "ny-try1", line: "Tap a window behind another: it comes to the front" }] };
+  S.chat.value = { busy: false, items: [{ kind: "assistant", text: "```try\n" + JSON.stringify(block) + "\n```" }] };
+  S.aiScreen.value = "chat";
+  await G.until(() => document.querySelector(".ai-screen .ai-chat .msg.try .ai-act"), 3000);
+  [...document.querySelectorAll(".ai-screen .ai-chat .msg.try .ai-act")].find((b) => b.textContent.trim() === "works")?.click();
+  await G.until(() => got.length, 1000);
+  T.answers.value = {};
+  return got.slice();
+}
+
+/** In the page (unfolded, the fleet mocked): the right column's Try this tasks' lines and Working now's cards. */
+async function aiNeedsPane(setup) {
+  const G = window.__gw;
+  const run = (body) => new (Object.getPrototypeOf(async function () {}).constructor)("U", "E", "sleep", body)(G.mod, window.__mockEvents, (ms) => new Promise((r) => setTimeout(r, ms)));
+  await run(setup);
+  await G.until(() => document.querySelector(".ai-screen .ai-ctx .ai-ctx-card"), 3000);
+  const ctx = document.querySelector(".ai-screen .ai-ctx");
+  const heads = [...(ctx?.querySelectorAll(".ai-ctx-head") ?? [])].map((e) => e.textContent.trim());
+  const tries = [...(ctx?.querySelectorAll(".ai-ctx-try .try-line") ?? [])].map((e) => e.textContent.trim());
+  const working = ctx?.querySelectorAll(".ai-ctx-sec .ai-ctx-card:not(.bad)").length ?? 0;
+  const empty = !!ctx?.querySelector(".ai-ctx-empty");
+  return { heads, tries, working, empty };
+}
+
+const NY_WANT = ["ny-try2", "ny-try1", "ny-ask"];
+
+/** The Progress half: 3 rows, the opened one's controls, works -> the chat's call, the row gone at once. */
+async function aiNeedsProgress(page, size) {
+  if (!(await page.evaluate(aiNeedsSetup))) return [`${size}: Progress shows no needs-you rows`];
+  const fails = [];
+  const o = await page.evaluate(aiNeedsOpen);
+  if (o.ids.slice().sort().join() !== NY_WANT.slice().sort().join()) fails.push(`needs-you rows are [${o.ids.join(", ")}], not exactly [${NY_WANT.join(", ")}] (answered / done must not show)`);
+  if (o.acts.join(" / ") !== "works / still broken") fails.push(`the opened try offers "${o.acts.join(" / ")}", not works / still broken`);
+  if (!/comes to the front/.test(o.line)) fails.push(`the opened row doesn't say what to try ("${o.line}")`);
+  const looks = await page.evaluate(aiNeedsLooks, ".ai-screen .aip-need.open");
+  if (looks.length) fails.push(`answer buttons look already chosen before a tap: ${looks.join(", ")}`);
+  await page.screenshot({ path: `/cache/ai-needs-you-${size}.png` });
+  const a = await page.evaluate(aiNeedsAnswer);
+  if (a.left.includes("ny-try1")) fails.push(`"works" didn't take the row out of needs you at once (left: ${a.left.join(", ")})`);
+  if (!/you said it works/.test(a.said)) fails.push(`the answered row doesn't collapse to "you said it works" ("${a.said}")`);
+  const chat = await page.evaluate(aiNeedsChatCall);
+  if (!a.calls.length) fails.push("works on the row made no bridge call");
+  else if (JSON.stringify(a.calls) !== JSON.stringify(chat)) fails.push(`the row's works called ${JSON.stringify(a.calls)}, the chat's try card ${JSON.stringify(chat)}`);
+  return fails.map((f) => `${size}: ${f}`);
+}
+
+async function aiNeedsCheck(page) {
+  const fails = [];
+  for (const [size, vp] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]]) {
+    await page.setViewport(vp);
+    await page.evaluate((w) => window.__gw.until(() => innerWidth === w), vp.width);
+    fails.push(...(await aiNeedsProgress(page, size)));
+  }
+  // Unfolded: the right column against the same board (re-set: the answer above took one out) and the mock fleet.
+  await page.evaluate(aiNeedsSetup);
+  const p = await page.evaluate(aiNeedsPane, FLEET_SETUP);
+  if (!p.heads.includes("Try this")) fails.push(`unfolded: the right column has no "Try this" (has ${p.heads.join(", ") || "nothing"})`);
+  if (p.tries.length !== 3) fails.push(`unfolded: Try this lists ${p.tries.length} asks, not Progress's 3 (${p.tries.join(" | ")})`);
+  if (p.working < 3) fails.push(`unfolded: Working now shows ${p.working} agents, not the mock fleet's 3 working helpers`);
+  if (p.empty) fails.push(`unfolded: the right column still says "Nothing running and nothing to try"`);
+  fails.push(...(await page.evaluate(aiNeedsLooks, ".ai-screen")).map((f) => `unfolded: an answer button looks already chosen before a tap: ${f}`));
+  await page.screenshot({ path: "/cache/ai-needs-you-pane.png" });
+  await page.evaluate(aiChatRestore);
+  return fails;
 }
 
 async function aiProgressCheck(page) {
@@ -6540,6 +6696,9 @@ try {
   // Progress: a ring, one-line area cards with bars, no monospace, readable (the user, 2026-10-31 15:12).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-progress", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiProgressCheck(r.page))));
+  // Needs you answered in place, one source with the right column's Try this (the user, 2026-10-31 20:12).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-needs-you", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiNeedsCheck(r.page))));
   // THE backdrop (dev/backdrop-check.js; 2026-10-31 "the launcher ... not using the same dark background"): the widgets,
   // a folder, the shade, the launcher and its PowOS AI panel - one tint, one compositor blur. Both screens.
   if (process.env.SHELL_PAGES !== "0")

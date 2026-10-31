@@ -450,7 +450,7 @@ function freeState(w: WorkRow) {
 
 /** A note that says nothing ("waiting on you"): the agents' placeholder, not what to do. */
 const EMPTY_NOTE = /^\s*(waiting|needs?)\s+(on\s+)?(you|the user)\W*$/i;
-const noteOf = (w: WorkRow) => (w.note && !EMPTY_NOTE.test(w.note) ? w.note.trim() : "");
+export const noteOf = (w: WorkRow) => (w.note && !EMPTY_NOTE.test(w.note) ? w.note.trim() : "");
 
 /** A sentence that tells the user to do something: it starts with a verb of doing ("Open Health and allow ..."). */
 const INSTRUCTION = /^(open|tap|press|hold|swipe|pull|drag|drop|switch|turn|enable|disable|set|pick|choose|decide|approve|allow|grant|log|sign|install|update|restart|reboot|plug|charge|connect|pair|send|give|answer|reply|tell|say|type|enter|look|watch|play|launch|start|run|use|go|move|resize|scroll|dictate|try|check|test|see|confirm|verify)\b/i;
@@ -472,7 +472,7 @@ function youDo(w: WorkRow): string {
  * but a feature's name read as one shipped to look at (the user, 2026-10-31 01:44: "Needs you doesn't let me say that
  * it's broken").
  */
-function youChecks(w: WorkRow): boolean {
+export function youChecks(w: WorkRow): boolean {
   if (w.tryLine?.trim() || list<Commit>(w.commits).length > 0) return true;
   const n = noteOf(w);
   if (n) return CHECK.test(n) || !INSTRUCTION.test(n);

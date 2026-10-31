@@ -82,7 +82,7 @@ function micOf(id: string, onSend: (b: Broken) => void): MicTarget {
   return m.target;
 }
 
-export function BrokenReply({ id, onSend, onCancel }: { id: string; onSend: (b: Broken) => void; onCancel: () => void }) {
+export function BrokenReply({ id, onSend, onCancel, ask = "what's still wrong" }: { id: string; onSend: (b: Broken) => void; onCancel: () => void; ask?: string }) {
   const d = draftOf(id);
   const mic = micOf(id, onSend);
   return (
@@ -93,7 +93,7 @@ export function BrokenReply({ id, onSend, onCancel }: { id: string; onSend: (b: 
         sendDraft(id, onSend);
       }}
     >
-      <Pill target={mic} send value={hearing(mic) ?? d.text} onInput={(v: string) => setDraft(id, { text: v })} onFocus={() => powos.keyboard.show()} placeholder="what's still wrong?" aria-label="what's still wrong" enterKeyHint="send" autocomplete="off" autofocus />
+      <Pill target={mic} send value={hearing(mic) ?? d.text} onInput={(v: string) => setDraft(id, { text: v })} onFocus={() => powos.keyboard.show()} placeholder={`${ask}?`} aria-label={ask} enterKeyHint="send" autocomplete="off" autofocus />
       <div class="ai-reply-foot">
         {d.image ? <Thumb id={id} path={d.image} /> : (
           <button type="button" class="ai-act quiet" disabled={attaching.value} onClick={() => void attach(id, () => (noShot.value = id))}>
