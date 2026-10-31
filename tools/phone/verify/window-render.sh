@@ -176,8 +176,16 @@ EOF
   log "content ($i s): $st"
   [ -n "$dom" ] && [ -n "$edg" ] || hfail "no screencap of display $D ($st)"
   awk "BEGIN{exit !($dom < 0.97 && $edg >= 0.003)}" || hfail "display $D shows a flat fill, not the app (dominant $dom, edges $edg)"
+  # Still there: home's adopt took this task to a web window of its own (window-log "app's task N moved onto display M")
+  # before FreeformTasks counted only display 0's tasks - this display went black and the tap hit nothing.
+  # Gone elsewhere, it's still the check's (a new task, never one of $pre): removed there - else a Calculator window
+  # the check made stays on the user's screen (its web window closes with its task).
+  stayed() { local now t to; now=$(tasks_on "$D"); case " $now " in *" ${task%% *} "*) return 0 ;; esac
+    to=$(sh_ "am stack list" | awk -v t="taskId=${task%% *}:" '/^RootTask id=/{d=$0;sub(/.*displayId=/,"",d);sub(/ .*/,"",d)} index($0,t){print d;exit}')
+    for t in $task; do case "$pre" in *" $t "*) ;; *) sh_ "am stack remove $t" >/dev/null; log "task $t removed where it went (display ${to:-?})" ;; esac; done
+    hfail "$APP's task $task left display $D $1 (to display ${to:-?}: PowOS's adopt of a full-screen task on another display - fixed in FreeformTasks.onMainDisplay)"; }
   # (b) a tap on THAT display changes the app's number area.
-  sleep 1; "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/pre.raw.gz" 2>/dev/null
+  sleep 1; stayed "after its content showed"; "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/pre.raw.gz" 2>/dev/null
   local A0=0 B0=$(( H * 55 / 100 ))
   noise=$($PY diff "$OUT/display.raw.gz" "$OUT/pre.raw.gz" 0 $A0 "$W" $B0)
   set -- ${WR_TAP:-0.14 0.69}; fx=$1 fy=$2
@@ -186,6 +194,7 @@ EOF
   sleep 1.5; "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/tap.raw.gz" 2>/dev/null
   d1=$($PY diff "$OUT/pre.raw.gz" "$OUT/tap.raw.gz" 0 $A0 "$W" $B0)
   log "tap: $d1 of the number area changed (noise without a tap: $noise)"
+  stayed "by the tap"
   for n in display tap; do $PY png "$OUT/$n.raw.gz" "$OUT/$n.png" 2>/dev/null && rm -f "$OUT/$n.raw.gz"; done; rm -f "$OUT/pre.raw.gz"
   case "$d1$noise" in ""|*[!0-9.]*) hfail "a measurement is missing (tap=$d1 noise=$noise)" ;; esac
   awk "BEGIN{exit !($d1 >= 0.002 && $d1 > 3 * $noise)}" || hfail "the tap changed nothing in the app ($d1 vs noise $noise)"

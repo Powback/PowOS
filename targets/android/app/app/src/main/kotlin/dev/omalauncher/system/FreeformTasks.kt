@@ -146,6 +146,15 @@ object FreeformTasks {
         return tasks.filter { isFullScreenApp(it, hiddenToo) }.map { it.taskId to (it.baseActivity ?: it.topActivity)?.packageName }
     }
 
+    /**
+     * [t] is on the user's screen (display 0, unfolded and folded alike). A task on another display - the device check's
+     * hidden display (window-render.sh --hidden), a cast or helper display - is that display's: WindowFrames' adopt and
+     * SystemFloat's hand-over floated it off there (2026-10-31: the hidden check's Calculator became web window 13 and
+     * its display went black). Unreadable (TaskInfo.displayId is hidden, -1): counted, as before.
+     */
+    private fun onMainDisplay(t: ActivityManager.RunningTaskInfo): Boolean =
+        dev.omalauncher.shell.WebWindowDisplays.displayOf(t).let { it == -1 || it == android.view.Display.DEFAULT_DISPLAY }
+
     /** [t] a standard app task in full screen - shown now, or also behind home ([hiddenToo]: a full-screen window gone home). */
     private fun isFullScreenApp(
         t: ActivityManager.RunningTaskInfo,
@@ -153,6 +162,7 @@ object FreeformTasks {
     ): Boolean {
         // A web window is home's page's, never adopted as a floating window (WindowFrames' adopt).
         if (dev.omalauncher.shell.WebWindowDisplays.isWebWindow(t)) return false
+        if (!onMainDisplay(t)) return false
         val wc = runCatching { windowConfiguration(t) }.getOrNull() ?: return false
         val mode = wc.javaClass.getMethod("getWindowingMode").invoke(wc)
         val type = wc.javaClass.getMethod("getActivityType").invoke(wc)
@@ -594,7 +604,7 @@ object FreeformTasks {
         @Suppress("DEPRECATION")
         val tasks = runCatching { context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
         return tasks.mapNotNull { t ->
-            if (dev.omalauncher.shell.WebWindowDisplays.isWebWindow(t)) return@mapNotNull null
+            if (dev.omalauncher.shell.WebWindowDisplays.isWebWindow(t) || !onMainDisplay(t)) return@mapNotNull null
             val mode = runCatching { windowConfiguration(t).let { it.javaClass.getMethod("getWindowingMode").invoke(it) as Int } }.getOrNull()
             if (mode != FREEFORM && mode != ZOOM) null else Triple(t.taskId, (t.baseActivity ?: t.topActivity)?.packageName, mode)
         }
