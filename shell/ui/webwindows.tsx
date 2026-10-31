@@ -143,6 +143,9 @@ function linuxPlaceholder(key: string, label: string, page: number): number {
 powos.on("apps.launchfailed", ({ key, reason }: { key: string; reason?: string }) => {
   for (const w of webWins.value.filter((v) => v.key === key && !v.live && !v.failed)) update(w.id, { failed: `${(reason || "The launch failed").replace(/\.$/, "")}.` });
 });
+// A Linux window whose content stopped and didn't come back after two rebinds (host ConsumerLane, 7d3bc624): its body
+// says so instead of an endless placeholder (10-31 16:01 "Dolphin is loading forever").
+powos.on("webwindows.failed", ({ id, reason }: { id: number; reason: string }) => update(id, { live: false, failed: reason }));
 
 /** Window [id] not live in [LINUX_START] (no toplevel, or one that never drew): "couldn't start" - never forever. */
 function watchStart(id: number) {
