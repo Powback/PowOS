@@ -4744,6 +4744,117 @@ async function swapAloneHalf() {
   return right ? [] : [`WX1: ⇄ on a lone left half moved it to ${w.x},${w.y} ${w.w}x${w.h}, not the right half`];
 }
 
+/**
+ * In the page: WG1, a window dragged on home snaps into the free cells beside the widgets (the user, 10-31 15:49: "hints
+ * to grid them so that they work with my widgets"). Two widgets on the page; a floating window (zoom 1.5) dragged by
+ * its bar over the free area shows the free cells as hints (none over a widget) and a ghost; let go, its frame is the
+ * ghost's cells exactly, touching no widget, the zoom kept. Dragged to the left edge, it still snaps to the half.
+ */
+async function GRIDSNAP_HELPERS() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const G = await window.__gw.mod("./ui/grid.tsx");
+  S.page.value = 0;
+  await window.__gw.settled();
+  const page = S.pages.value[0];
+  const cols = S.home.value.columns;
+  const had = S.home.value;
+  const rest = async () => (await new Promise((ok) => setTimeout(ok, 300)), await window.__gw.settled());
+  const wid = (k, cell) => ({ key: `widget:gate.wg${k}`, kind: "widget", name: `gate-wg${k}`, page, cell, resizable: true, minSize: [1, 1], size: [cell.w, cell.h] });
+  S.home.value = { ...had, items: [wid(1, { x: 0, y: 0, w: 2, h: 2 }), wid(2, { x: cols - 2, y: 2, w: 2, h: 2 })] };
+  W.webWins.value = [{ id: 991, key: "a:gate.wg", label: "Grid", page, x: 80, y: 160, w: 300, h: 240, live: true, zoom: 1.5 }];
+  W.tilings.value = {};
+  await rest();
+  const g = G.geometry.value;
+  const cellRect = (c) => ({ x: g.left + g.pad + c.x * g.cellW, y: g.top + g.pad + c.y * g.cellH, w: c.w * g.cellW, h: c.h * g.cellH });
+  const bar = () => document.querySelector('.webwindow[data-wwid="991"] .webwindow-title');
+  const send = (type, x, y) => bar().dispatchEvent(new PointerEvent(type, { pointerId: 51, pointerType: "touch", isPrimary: true, clientX: x, clientY: y, bubbles: true }));
+  window.__wg = {
+    W, cols, rest, cellRect, send,
+    widgets: S.home.value.items.map((i) => cellRect(i.cell)),
+    hit: (a, b) => a.x < b.x + b.w - 0.5 && b.x < a.x + a.w - 0.5 && a.y < b.y + b.h - 0.5 && b.y < a.y + a.h - 0.5,
+    win: () => W.webWins.value.find((v) => v.id === 991),
+    /** Its frame on screen (viewport px, its scale counted). */
+    frame() {
+      const o = document.querySelector(".page:not(.away)").getBoundingClientRect();
+      const w = this.win();
+      return { x: o.left + w.x, y: o.top + w.y, w: w.w * (w.scale ?? 1), h: w.h * (w.scale ?? 1) };
+    },
+    /** 991's bar dragged (one finger, 8 moves) to (tx, ty); let go there unless [hold]. */
+    async drag(tx, ty, hold = false) {
+      const b = bar().getBoundingClientRect();
+      const [sx, sy] = [b.left + 40, b.top + b.height / 2];
+      send("pointerdown", sx, sy);
+      for (let i = 1; i <= 8; i++) send("pointermove", sx + ((tx - sx) * i) / 8, sy + ((ty - sy) * i) / 8);
+      await window.__gw.frames(2);
+      if (!hold) (send("pointerup", tx, ty), await rest());
+    },
+    done() {
+      W.webWins.value = [];
+      W.tilings.value = {};
+      S.home.value = had;
+    },
+  };
+  return [];
+}
+
+/** WG1: the finger over a free cell mid-page (column 2, the row below the second widget): hints, none on a widget, a ghost. */
+async function gridHoverStep() {
+  const { W, cols, cellRect, widgets, hit, drag } = window.__wg;
+  const t = cellRect({ x: Math.min(2, cols - 3), y: 4, w: 1, h: 1 });
+  window.__wg.at = [t.x + t.w / 2, t.y + t.h / 2];
+  await drag(...window.__wg.at, true);
+  const hints = W.hintView.value?.cells ?? [];
+  const aimed = (window.__wg.aimed = W.cellView.value);
+  const fails = [];
+  if (!hints.length) fails.push("WG1: no cell hints while dragging over home");
+  if (hints.some((h) => widgets.some((w) => hit(h, w)))) fails.push("WG1: a cell hint over a widget");
+  if (!aimed) fails.push("WG1: no cell snap aimed over the free area");
+  if (!document.querySelector(".ww-drop.cells")) fails.push("WG1: no ghost of the cells while hovering");
+  if (aimed && widgets.some((w) => hit(aimed.rect, w))) fails.push("WG1: the aimed cells overlap a widget");
+  return fails;
+}
+
+/** WG1: let go there - the window's frame is the hinted cells (whole px inward), on no widget, its zoom kept. */
+async function gridReleaseStep() {
+  const { W, widgets, hit, send, rest, aimed, at } = window.__wg;
+  send("pointerup", ...at);
+  await rest();
+  const got = window.__wg.frame();
+  const off = ["x", "y", "w", "h"].map((k, i) => Math.abs(got[k] - aimed.rect[k]) - (i < 2 ? 1 : 2));
+  const fails = [];
+  if (off.some((d) => d > 0.01)) fails.push(`WG1: let go, the window is ${JSON.stringify(got)}, not the hinted cells ${JSON.stringify(aimed.rect)}`);
+  if (widgets.some((r) => hit(got, r))) fails.push("WG1: the snapped window overlaps a widget");
+  if (window.__wg.win().zoom !== 1.5) fails.push(`WG1: the zoom changed to ${window.__wg.win().zoom} (want 1.5)`);
+  if (W.hintView.value || W.cellView.value) fails.push("WG1: the hints stayed after letting go");
+  return fails;
+}
+
+/** WG1: dragged to the work area's left edge, mid-height: the edge still halves, the zoom kept. */
+async function gridEdgeStep() {
+  const { W, drag } = window.__wg;
+  const a = W.workArea();
+  await drag(a.left + 4, (a.top + a.bottom) / 2);
+  const f = window.__wg.frame();
+  const half = Math.abs(f.x - a.left) < 2 && f.w < (a.right - a.left) * 0.6 && f.h > (a.bottom - a.top) * 0.7;
+  const fails = half ? [] : [`WG1: an edge drop didn't halve: ${JSON.stringify(f)}`];
+  if (window.__wg.win().zoom !== 1.5) fails.push(`WG1: the edge snap changed the zoom to ${window.__wg.win().zoom}`);
+  return fails;
+}
+
+/** WG1's steps in one page, the windows and home restored after. */
+async function gridSnapScene(r) {
+  try {
+    for (const step of [GRIDSNAP_HELPERS, gridHoverStep, gridReleaseStep, gridEdgeStep]) {
+      const fails = await r.page.evaluate(step);
+      if (fails.length) return fails;
+    }
+    return [];
+  } finally {
+    await r.page.evaluate(() => window.__wg?.done()).catch(() => {});
+  }
+}
+
 /** WX1's steps in one page, the windows cleared after. */
 async function swapScene(r) {
   try {
@@ -5168,7 +5279,8 @@ async function webWindowSnapGhostCheck() {
     if (!ghost) return ["SG1: a bar held at the left edge's middle shows no snap ghost (.ww-drop)"];
     move(mid);
     await window.__gw.settled();
-    const fails = document.querySelector(".ww-drop") ? ["SG1: the snap ghost stayed with the bar back in the middle"] : [];
+    // Back in the middle the edge's ghost goes (a ghost of home's free cells may show there instead: WG1).
+    const fails = document.querySelector(".ww-drop:not(.cells)") ? ["SG1: the snap ghost stayed with the bar back in the middle"] : [];
     move(edge);
     await window.__gw.settled();
     await g.release(941, edge);
@@ -6142,6 +6254,9 @@ try {
   // WX1: a tap on a divider / the ⇄ hint swaps the sides (ww-swap-unfolded; the user, 10-31 15:47-15:52).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-swap-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => swapScene(r))));
+  // WG1: a window dragged on home snaps into the free cells beside the widgets (ww-gridsnap-unfolded; the user, 10-31 15:49).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ww-gridsnap-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => gridSnapScene(r))));
   // TS1: a pinch on a tiled window's bar zooms its content in place (tile-zoom-unfolded; the user, 10-31 15:31).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "tile-zoom-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tileZoomScene(r))));

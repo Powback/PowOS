@@ -15,7 +15,7 @@ import type { HostWebWindow, WebWindowRect } from "../types.ts";
 import { Mark } from "./chrome.tsx";
 import { memo } from "./memo.ts";
 import { confirm as hapticConfirm, tick as hapticTick } from "./haptics.ts";
-import { dropAt, dropInto, insertAt, leaves, splitBox, tabAt, treeRects, zoneKey as dropKey, type Bar, type Tree, type Zone } from "./tiledrop.ts";
+import { dropAt, dropInto, freeCells, freeRect, insertAt, leaves, splitBox, tabAt, treeRects, zoneKey as dropKey, type Bar, type Cells, type Tree, type Zone } from "./tiledrop.ts";
 
 const TITLE = 36;
 const RADIUS = 12;
@@ -620,8 +620,16 @@ export function WebWindowsOn({ page }: { page: number }) {
 
 /** A drag's ghosts on [page]: its tile drop, edge snap or park (TG3a). */
 function Previews({ page, o }: { page: number; o: { x: number; y: number } }) {
-  const d = [dropView.value, snapView.value, parkView.value].find((v) => v?.page === page);
-  return d ? <DropPreview d={d} o={o} /> : null;
+  const d = [dropView.value, snapView.value, parkView.value, cellView.value].find((v) => v?.page === page);
+  const hints = hintView.value?.page === page ? hintView.value.cells : [];
+  return (
+    <>
+      {hints.map((c) => (
+        <div key={`${c.x},${c.y}`} class="ww-cell-hint" style={{ left: `${c.x - o.x}px`, top: `${c.y - o.y}px`, width: `${c.w}px`, height: `${c.h}px`, zIndex: 998 }} />
+      ))}
+      {d && <DropPreview d={d} o={o} />}
+    </>
+  );
 }
 
 // ---- tiles -------------------------------------------------------------------------------------------------------------
@@ -1016,7 +1024,65 @@ export const dropView = signal<(Landing & { zone: Zone }) | null>(null);
 /** A bar drag's edge snap in progress (no tile or tab drop there): the rect window [id] would take ([DropPreview]). */
 export const snapView = signal<{ id: number; page: number; slot: Slot; rect: Box } | null>(null);
 /** A drag's previews gone (let go, cancelled). */
-const clearAim = () => (dropView.value = tabView.value = snapView.value = parkView.value = null);
+const clearAim = () => (dropView.value = tabView.value = snapView.value = parkView.value = cellView.value = hintView.value = null);
+
+// ---- WG1: home's free cells as snap targets beside the widgets (the free rect: ui/tiledrop.ts freeRect) ------------
+
+/** Home's grid on a page, from ui/grid.tsx ([provideHomeGrid]: it imports this module, so it hands the grid in). */
+export interface HomeGrid extends Cells {
+  /** Cell (0, 0)'s top left on screen, viewport CSS px, and a cell's size. */
+  left: number;
+  top: number;
+  cellW: number;
+  cellH: number;
+}
+let homeGrid: ((page: number) => HomeGrid | null) | null = null;
+export const provideHomeGrid = (f: (page: number) => HomeGrid | null) => void (homeGrid = f);
+/** A cell span's rect on screen (viewport CSS px). */
+const cellBox = (g: HomeGrid, c: Box): Box => ({ x: g.left + c.x * g.cellW, y: g.top + c.y * g.cellH, w: c.w * g.cellW, h: c.h * g.cellH });
+
+/** A floating window's drag over home's free cells: the cells it would snap to and their rect ([DropPreview]). */
+export const cellView = signal<{ id: number; page: number; cells: Box; rect: Box } | null>(null);
+/** The drag's faint hints: page [page]'s free cells (viewport rects), shown while a floating window is dragged there. */
+export const hintView = signal<{ page: number; cells: Box[] } | null>(null);
+
+/** Page [page]'s grid where web windows are (unfolded), with cells to snap to; null folded or not measured yet. */
+const gridOn = (page: number) => {
+  const g = wideHome.value ? homeGrid?.(page) : null;
+  return g && g.cellW > 0 && g.cellH > 0 && g.rows > 0 ? g : null;
+};
+
+/** The free cells' hints for window [id]'s page, put up once per page in a drag. */
+function showHints(id: number) {
+  const w = webWins.value.find((v) => v.id === id);
+  const g = w && gridOn(w.page);
+  if (!w || !g || hintView.peek()?.page === w.page) return;
+  hintView.value = { page: w.page, cells: freeCells(g).map((c) => cellBox(g, c)) };
+}
+
+/** The cells window [id]'s bar dragged to (x, y) snaps to: the largest free rect there, big enough for a window; or null. */
+function cellAim(id: number, x: number, y: number) {
+  const w = webWins.value.find((v) => v.id === id);
+  const g = w && gridOn(w.page);
+  const cells = g && freeRect(g, (x - g.left) / g.cellW, (y - g.top) / g.cellH);
+  const rect = g && cells && cellBox(g, cells);
+  return w && cells && rect && rect.w >= MIN_W && rect.h >= MIN_H ? { id, page: w.page, cells, rect } : null;
+}
+
+/** WG1: window [id] let go on cell hints: its frame exactly those cells (inward to whole px), its zoom and scale kept. */
+function snapToCells(c: NonNullable<ReturnType<typeof cellAim>>) {
+  const w = webWins.value.find((v) => v.id === c.id);
+  if (!w) return;
+  const o = pageOrigin();
+  const s = w.scale ?? 1;
+  const x = Math.ceil(c.rect.x - o.x);
+  const y = Math.ceil(c.rect.y - o.y);
+  const r = Math.floor(c.rect.x + c.rect.w - o.x);
+  const b = Math.floor(c.rect.y + c.rect.h - o.y);
+  update(c.id, { x, y, w: (r - x) / s, h: (b - y) / s, restore: undefined });
+  raise(c.id);
+  console.info(`[cells] window ${c.id} snapped to cells ${c.cells.x},${c.cells.y} ${c.cells.w}x${c.cells.h} on page ${c.page}`);
+}
 
 /** [t] as a split tree of its windows ("4": two columns of two). */
 function treeOfTiling(t: Tiling): Tree {
@@ -1082,31 +1148,40 @@ const perms = (a: number[]): number[][] => (a.length <= 1 ? [a] : a.flatMap((v, 
  */
 function aim(id: number, x: number, y: number, docks = true) {
   const a = aimAt(id, x, y, docks);
-  if (aimKey(a) === aimKey({ next: dropView.value, tab: tabView.value, snap: snapView.value, park: parkView.value })) return;
-  if (a.next || a.tab || a.snap || a.park) hapticTick();
+  if (docks) showHints(id);
+  if (aimKey(a) === aimKey({ next: dropView.value, tab: tabView.value, snap: snapView.value, park: parkView.value, cell: cellView.value })) return;
+  if (a.next || a.tab || a.snap || a.park || a.cell) hapticTick();
   dropView.value = a.next;
   tabView.value = a.tab;
   snapView.value = a.snap;
   parkView.value = a.park;
+  cellView.value = a.cell;
 }
 
-/** What a bar drag at (x, y) aims at: a park, a tab drop, a tile drop or an edge snap (at most one). */
+/** What a bar drag at (x, y) aims at: a park, a tab drop, a tile drop, an edge snap or home's free cells (at most one). */
 function aimAt(id: number, x: number, y: number, docks: boolean): Aim {
   // TG3a: a window dragged out of the tiles parks at the screen's very edge (beyond the snap) - before anything else.
+  const none: Aim = { next: null, tab: null, snap: null, park: null, cell: null };
   const park = docks ? null : parkAim(id, x);
-  if (park) return { next: null, tab: null, snap: null, park };
+  if (park) return { ...none, park };
   const tab = tabTarget(id, x, y);
-  const next = tab || !docks ? null : tileDrop(id, x, y);
-  const snap = tab || next ? null : snapAim(id, x, y);
-  return { next, tab, snap, park: null };
+  if (tab) return { ...none, tab };
+  const next = docks ? tileDrop(id, x, y) : null;
+  if (next) return { ...none, next };
+  const snap = snapAim(id, x, y);
+  if (snap || !docks) return { ...none, snap };
+  // WG1: no tile, tab or edge there - a floating window over home's free cells snaps to them.
+  return { ...none, cell: cellAim(id, x, y) };
 }
 interface Aim {
   next: ReturnType<typeof tileDrop>;
   tab: ReturnType<typeof tabTarget>;
   snap: ReturnType<typeof snapAim>;
   park: ReturnType<typeof parkAim>;
+  cell: ReturnType<typeof cellAim>;
 }
-const aimKey = (a: Aim) => `${dropKey(a.next?.zone)}|${tabKey(a.tab)}|${a.snap?.slot ?? ""}|${a.park?.side ?? ""}`;
+const cellKey = (c: Aim["cell"]) => (c ? `${c.cells.x},${c.cells.y},${c.cells.w},${c.cells.h}` : "");
+const aimKey = (a: Aim) => `${dropKey(a.next?.zone)}|${tabKey(a.tab)}|${a.snap?.slot ?? ""}|${a.park?.side ?? ""}|${cellKey(a.cell)}`;
 
 /** The edge snap window [id]'s bar makes let go at (x, y) ([release]'s fallback): its slot and rect, or null. */
 function snapAim(id: number, x: number, y: number) {
@@ -1136,13 +1211,15 @@ function release(id: number, x: number, y: number) {
   const drop = dropView.value;
   const tab = tabView.value;
   const park = parkView.value;
+  const cell = cellView.value;
   clearAim();
   if (park?.id === id) return parkWindow(park);
   if (tab?.id === id) return joinStack(tab);
   // GL1: over the tiles, the previewed drop; with none (no tiles yet, a full grid), an edge snap as before.
   if (drop?.id === id) return dock(drop);
   const slot = snapSlot(x, y);
-  if (slot) tile(id, slot);
+  if (slot) return tile(id, slot);
+  if (cell?.id === id) snapToCells(cell);
 }
 
 /** The previewed drop made: the new tiling, a swapped-out window floating again, the tiles re-flowing ([reflow]). */
@@ -1398,11 +1475,11 @@ function holdAppSizes(ids: (number | null)[]) {
 }
 
 /** The drop's preview: the tile the window would take, translucent; it glides between zones. */
-function DropPreview({ d, o }: { d: { rect: Box; zone?: Zone; slot?: Slot }; o: { x: number; y: number } }) {
+function DropPreview({ d, o }: { d: { rect: Box; zone?: Zone; slot?: Slot; cells?: Box }; o: { x: number; y: number } }) {
   const r = d.rect;
   const style = { left: `${r.x - o.x}px`, top: `${r.y - o.y}px`, width: `${r.w}px`, height: `${r.h}px`, zIndex: 999 };
   return (
-    <div class={`ww-drop ${d.zone?.kind ?? "snap"}`} data-zone={d.zone ? dropKey(d.zone) : `snap:${d.slot}`} style={style}>
+    <div class={`ww-drop ${d.zone?.kind ?? (d.cells ? "cells" : "snap")}`} data-zone={d.zone ? dropKey(d.zone) : d.cells ? `cells:${d.cells.x},${d.cells.y},${d.cells.w},${d.cells.h}` : `snap:${d.slot}`} style={style}>
       {d.zone?.kind === "swap" && <span class="ww-drop-label tile">Swap</span>}
     </div>
   );

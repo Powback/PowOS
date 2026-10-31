@@ -155,3 +155,63 @@ export function dropInto(t: Tree, zone: Zone, target: number, id: number): Tree 
   };
   return map(t);
 }
+
+// ---- WG1: a window snapped into home's free cells, beside the widgets ----------------------------------------------
+//
+// The user, 10-31 15:49: "Would be cool if when I was dragging the window I could also see hints to grid them so that
+// they work with my widgets." A page's grid as cells: [cols] x [rows], [taken] the tiles' spans (in cells). Dragged over
+// a free cell, the window takes the largest free rectangle of whole cells that holds it; the widgets never move.
+
+export interface Cells {
+  cols: number;
+  rows: number;
+  taken: Box[];
+}
+
+/** [g]'s free cells, row by row (a cell as a 1x1 span). */
+export function freeCells(g: Cells): Box[] {
+  const free = freeMap(g);
+  const out: Box[] = [];
+  for (let y = 0; y < g.rows; y++) for (let x = 0; x < g.cols; x++) if (free[y][x]) out.push({ x, y, w: 1, h: 1 });
+  return out;
+}
+
+function freeMap(g: Cells): boolean[][] {
+  const free = Array.from({ length: g.rows }, () => new Array<boolean>(g.cols).fill(true));
+  for (const t of g.taken)
+    for (let y = Math.max(0, t.y); y < Math.min(g.rows, t.y + t.h); y++) for (let x = Math.max(0, t.x); x < Math.min(g.cols, t.x + t.w); x++) free[y][x] = false;
+  return free;
+}
+
+/**
+ * The largest rectangle of free cells of [g] holding the cell under the finger ([fx], [fy]: in cells, fractional), or
+ * null (the cell is taken or off the grid). Each span of rows through that cell is widened left and right as far as all
+ * its rows are free there; the largest area wins, a tie the one centred nearest the finger.
+ */
+export function freeRect(g: Cells, fx: number, fy: number): Box | null {
+  const cx = Math.floor(fx);
+  const cy = Math.floor(fy);
+  if (cx < 0 || cy < 0 || cx >= g.cols || cy >= g.rows) return null;
+  const free = freeMap(g);
+  const colFree = (x: number, y0: number, y1: number) => free.slice(y0, y1 + 1).every((row) => row[x]);
+  let best: Box | null = null;
+  for (let y0 = cy; y0 >= 0 && free[y0][cx]; y0--)
+    for (let y1 = cy; y1 < g.rows && colFree(cx, y0, y1); y1++) best = better(best, widest({ cx, y0, y1 }, g.cols, colFree), fx, fy);
+  return best;
+}
+
+/** Rows [y0]..[y1] through column [cx], widened each way while the column there is free ([colFree]). */
+function widest({ cx, y0, y1 }: { cx: number; y0: number; y1: number }, cols: number, colFree: (x: number, y0: number, y1: number) => boolean): Box {
+  let l = cx;
+  let r = cx;
+  while (l > 0 && colFree(l - 1, y0, y1)) l--;
+  while (r < cols - 1 && colFree(r + 1, y0, y1)) r++;
+  return { x: l, y: y0, w: r - l + 1, h: y1 - y0 + 1 };
+}
+
+/** The larger of [a] and [b] (a tie: the one centred nearer (fx, fy)). */
+function better(a: Box | null, b: Box, fx: number, fy: number): Box {
+  if (!a || b.w * b.h !== a.w * a.h) return !a || b.w * b.h > a.w * a.h ? b : a;
+  const off = (c: Box) => Math.hypot(c.x + c.w / 2 - fx, c.y + c.h / 2 - fy);
+  return off(b) < off(a) ? b : a;
+}
