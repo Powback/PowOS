@@ -4999,6 +4999,7 @@ async function gridDropAt([name, x, y]) {
   const { W, drag, send, rest } = window.__wg;
   await drag(x, y, true);
   await new Promise((ok) => setTimeout(ok, 250));
+  await Promise.all([...document.querySelectorAll(".ww-drop")].flatMap((g) => g.getAnimations()).map((a) => a.finished.catch(() => {})));
   const p = W.placeView.value ?? W.snapView.value ?? W.dropView.value;
   const fails = window.__wg.ghostFails(name, p);
   send("pointerup", x, y);
