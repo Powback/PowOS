@@ -440,6 +440,16 @@ class ShellBridge(
                 if (a.getString(0) == "perf.meter") runCatching { JSONObject(a.get(1).toString()).toString() }.getOrNull()?.let { broadcast("perf.meter", it) }
                 Unit
             }
+            // SI1: the one search/chat bar input home's bar (and its search widget) and the launcher overlay share: the
+            // latest kept here (last writer wins by its time), re-built (never spliced raw) and sent to the other windows.
+            "bar.publish" -> a.optJSONObject(0)?.let { v ->
+                val next = JSONObject().put("text", v.optString("text").take(BAR_TEXT_MAX)).put("hearing", v.optBoolean("hearing"))
+                    .put("at", v.optLong("at"))
+                val won = synchronized(live) { (barInput?.optLong("at") ?: Long.MIN_VALUE).let { at -> (next.optLong("at") >= at).also { if (it) barInput = next } } }
+                if (won) broadcast("bar.input", next.toString(), except = this)
+                won
+            } ?: false
+            "bar.get" -> synchronized(live) { barInput?.toString() }?.let { RawJson(it) }
             // The main shell's frame samples (fps + new frame times, ~4 Hz) to the other windows' meter: re-parsed, never spliced raw.
             "perf.publish" -> a.getString(0).takeIf { it.length < 8192 }?.let { broadcast("perf.sample", JSONObject(it).toString(), except = this) }
             // Perf trace from the status bar's fps meter: saved where PowOS AI sees it (the shared run dir), the last 20 kept,
@@ -1687,6 +1697,12 @@ class ShellBridge(
 
         /** Every open shell window's bridge (weak: a closed window just drops out), for events meant for all of them. */
         private val live: MutableSet<ShellBridge> = java.util.Collections.newSetFromMap(java.util.WeakHashMap())
+
+        /** SI1: the shared bar input ({text, hearing, at}, "bar.publish"), guarded by [live]'s lock; null until written. */
+        private var barInput: JSONObject? = null
+
+        /** The bar's text, at most (a long paste still syncs; the field never holds a book). */
+        private const val BAR_TEXT_MAX = 8000
 
         private const val TAG = "PowosShell"
 

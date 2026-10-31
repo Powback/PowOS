@@ -5,6 +5,7 @@
  * the phone, so the shell still runs.
  */
 import type {
+  BarInput,
   Agent,
   AgentEvent,
   AgentMail,
@@ -147,6 +148,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       get: <T>(name: string) => call<T | null>("store.get", name),
       set: (name, value) => call("store.set", name, value),
     },
+    bar: { publish: (v) => call("bar.publish", v), get: () => call<BarInput | null>("bar.get") },
     perf: { save: (json) => call<string | null>("perf.save", json), publish: (json) => call("perf.publish", json), native: (on) => call<NativePerf | true | null>("perf.native", on), front: () => call<FrontPresents | null>("perf.front") },
     ai: {
       chat: () => call<Chat>("ai.chat"),
@@ -594,6 +596,7 @@ function mock(): Bridge {
       page: async () => {},
     },
     // A stand-in that answers after a tool call, as a streamed turn does.
+    bar: mockBar(),
     perf: { publish: async () => {}, front: async () => null, native: async (on) => (on ? true : { thresholdMs: 50, blocks: [], frameGaps: [] }), save: async (json) => (console.log("[mock] perf.save", json.length), "/run/powos-app/powos-ai-shared/perf-mock.json") },
     ai: {
       chat: async () => chat,
@@ -1089,6 +1092,16 @@ function mock(): Bridge {
 
 /** The mock's Android widgets: a light switch and a note card, their frames SVG data URLs. */
 const dataTimers = new Map<number, ReturnType<typeof setInterval>>();
+
+/**
+ * The browser preview has one page: the bar's input is kept, and handed to window.__barRelay when there is one - the
+ * gate (dev/bar-sync-check.js) relays it to a second page as the host's "bar.input", as ShellBridge does.
+ */
+function mockBar(): Bridge["bar"] {
+  let v: BarInput | null = null;
+  const relay = () => (window as unknown as { __barRelay?: (v: BarInput) => unknown }).__barRelay;
+  return { publish: async (next) => void ((v = next), relay()?.(next)), get: async () => v };
+}
 
 function mockAppWidgets(home: Home, changed: () => void, events: Events): Bridge["appWidgets"] {
   const providers: AppWidgetProvider[] = [
