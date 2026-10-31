@@ -34,6 +34,9 @@ export function Item({ item, reply = null }: { item: ChatItem; reply?: string | 
   }
 }
 
+/** Thread's [render]: one function for every entry and render (a new one each render re-rendered every entry). */
+export const renderItem = (item: ChatItem, reply: string | null) => <Item item={item} reply={reply} />;
+
 /** [head]: its "PowOS AI · open" line (the assistant's panel over an app has its own). */
 export function ChatView({ head = true }: { head?: boolean } = {}) {
   const list = useRef<HTMLDivElement>(null);
@@ -53,7 +56,7 @@ export function ChatView({ head = true }: { head?: boolean } = {}) {
           </button>
         </div>
       )}
-      <Thread items={items.slice(-SHOWN)} render={(item, reply) => <Item item={item} reply={reply} />} />
+      <Thread items={items.slice(-SHOWN)} render={renderItem} />
       {busy && <div class="msg tool muted thinking">thinking…</div>}
       <Queued />
       <AskHint list={list} busy={busy} empty={!items.length} />

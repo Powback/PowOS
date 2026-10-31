@@ -19,6 +19,7 @@ import { powos } from "../bridge.ts";
 import { topBack } from "../state.ts";
 import { openLink } from "../apps/native.ts";
 import { md } from "./md.ts";
+import { memo, sameProps } from "./memo.ts";
 
 export type ToolItem = Extract<ChatItem, { kind: "tool" }>;
 
@@ -171,14 +172,40 @@ export function AgentUpdates({ n, children }: { n: number; children: preact.Comp
   );
 }
 
-/** What the user said next after entry [i] (a question's answer), null while nothing yet. */
-const replyAfter = (list: Entry[], i: number) => {
-  const next = list.slice(i + 1).find((e) => "item" in e && e.item.kind === "user") as { item: { text: string } } | undefined;
-  return next ? next.item.text : null;
+/** For each entry, what the user said next (a question's answer), null while nothing yet: one pass from the end. */
+const repliesAfter = (list: Entry[]): (string | null)[] => {
+  const out: (string | null)[] = new Array(list.length);
+  let next: string | null = null;
+  for (let i = list.length - 1; i >= 0; i--) {
+    out[i] = next;
+    const e = list[i];
+    if ("item" in e && e.item.kind === "user") next = e.item.text;
+  }
+  return out;
 };
 
-/** One entry: a tool run's line, agents' mail as one line, or the item as [render] draws it. */
-function EntryView({ e, reply, render }: { e: Entry; reply: () => string | null; render: (item: Exclude<ChatItem, ToolItem>, reply: string | null) => preact.ComponentChild }) {
+type Render = (item: Exclude<ChatItem, ToolItem>, reply: string | null) => preact.ComponentChild;
+type EntryProps = { e: Entry; reply: string | null; render: Render };
+
+/** The items of entry [e]: its tool run, its mail, or its one item. */
+const itemsOf = (e: Entry): ChatItem[] => ("tools" in e ? e.tools : "mails" in e ? e.mails : [e.item]);
+
+/**
+ * Two entries alike: the same items, field by field. The thread's entries (and the chat's items) are rebuilt on every
+ * message, equal to the last: compared by identity every entry re-rendered for each new one (render scan 10-31:
+ * EntryView 254 renders, "e~", Item 136 needless).
+ */
+function sameEntry(a: Entry, b: Entry): boolean {
+  if ("tools" in a !== "tools" in b || "mails" in a !== "mails" in b) return false;
+  const x = itemsOf(a), y = itemsOf(b);
+  return x.length === y.length && x.every((item, i) => item === y[i] || sameProps(item, y[i]));
+}
+
+const sameEntryProps = (a: EntryProps, b: EntryProps) => a.reply === b.reply && a.render === b.render && sameEntry(a.e, b.e);
+
+/** One entry: a tool run's line, agents' mail as one line, or the item as [render] draws it. Re-rendered only when its
+ * items, its reply or [render] change: [render] must be one function, not a new one each render (chat.tsx renderItem). */
+const EntryView = memo(function EntryView({ e, reply, render }: EntryProps) {
   if ("tools" in e) return <ToolRun tools={e.tools} />;
   if ("mails" in e)
     return (
@@ -188,8 +215,8 @@ function EntryView({ e, reply, render }: { e: Entry; reply: () => string | null;
         ))}
       </AgentUpdates>
     );
-  return <>{render(e.item, reply())}</>;
-}
+  return <>{render(e.item, reply)}</>;
+}, sameEntryProps);
 
 /** The conversation: each item as [render] draws it (with what the user said next), tool runs folded. */
 export function Thread({
@@ -200,10 +227,11 @@ export function Thread({
   render: (item: Exclude<ChatItem, ToolItem>, reply: string | null) => preact.ComponentChild;
 }) {
   const list = entries(items);
+  const replies = repliesAfter(list);
   return (
     <>
       {list.map((e, i) => (
-        <EntryView key={i} e={e} reply={() => replyAfter(list, i)} render={render} />
+        <EntryView key={i} e={e} reply={replies[i]} render={render} />
       ))}
     </>
   );

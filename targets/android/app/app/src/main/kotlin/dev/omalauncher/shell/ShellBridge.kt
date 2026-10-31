@@ -432,6 +432,15 @@ class ShellBridge(
                 if (!webWindowsMade) JSONArray()
                 else webWindows.list { c -> runtime.androidApps.apps.firstOrNull { it.component == c }?.let { "a:${it.key}" to it.label } }
             "webwindows.close" -> webWindowsMade && webWindows.close(a.getInt(0))
+            // The ship gate's hidden Linux check (window-render.sh --hidden): Linux app [0]'s next KWin window through
+            // the web-window consumer offscreen - never on the page. "started", else why not.
+            "webwindows.selftestLinux" ->
+                if (activity == null) "not home's bridge"
+                else runtime.linuxApps.firstOrNull { it.id == a.getString(0) }?.let { app ->
+                    webWindows.also { webWindowsMade = true }.selftestLinux(app.id)
+                        ?: "started".also { runtime.launch(app) { why -> Log.w(TAG, "selftest launch ${app.id}: $why") } }
+                } ?: "no Linux app ${a.getString(0)}"
+            "webwindows.selftestLinuxResult" -> RawJson(webWindows.also { webWindowsMade = true }.selftestLinuxResult())
             "webwindows.fullScreen" -> webWindowsMade && webWindows.fullScreen(a.getInt(0))
             "webwindows.toWindow" -> webWindowsMade && webWindows.toWindow(a.getInt(0))
             "webwindows.minimise" -> webWindowsMade && webWindows.minimise(a.getInt(0))
