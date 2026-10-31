@@ -9,10 +9,12 @@ package dev.omalauncher.shell
  * idle phone. This one is passive and always on: no touch, only the page's own geometry channel.
  *
  * The page sends "w.f" only when the geometry changed, so a quiet second is normal. A window with no frame for
- * [STALE_MS] gets a quiet probe first ([Act.PROBE]: "webwindows.resend", which a working page answers with every
- * window's geometry on its next frame, changed or not). Unanswered [STALE_MS] later it is a stall ([Act.STALL]: logged,
- * asked again); still unanswered [STALE_MS] after that, the page is reloaded ([Act.RELOAD]: reported, the sender starts
- * again) and the watch backs off [BACKOFF_MS] - once per stall, never a reload loop.
+ * [PROBE_MS] gets a quiet probe first ([Act.PROBE]: "webwindows.resend", which a working page answers at once with
+ * every window's geometry, changed or not). Unanswered [REBIND_MS] later it is a stall ([Act.STALL]: logged, the
+ * windows' root re-attached to home's surface, the WebView's visibility poked, asked again); still unanswered
+ * [RELOAD_MS] after that, the page is reloaded ([Act.RELOAD]: reported, the sender starts again) and the watch backs
+ * off [BACKOFF_MS] - once per stall, never a reload loop. 10-31 15:37 (the old 2 s steps on a 2 s heartbeat): ~9 s
+ * from the stall to windows back; now a rebind at 1.5 s, a reload no sooner than 4 s.
  */
 internal class RenderWatch {
     enum class Act { NONE, PROBE, STALL, RELOAD }
@@ -36,10 +38,10 @@ internal class RenderWatch {
     ): Act {
         // Nothing to watch, or the page answered what was asked: a new watch from here.
         if (resting(now, live, homeShown) || answered(lastFrame)) clear()
-        if (resting(now, live, homeShown) || now - lastFrame < STALE_MS) return Act.NONE
+        if (resting(now, live, homeShown) || now - lastFrame < PROBE_MS) return Act.NONE
         return when {
-            stalledAt != 0L -> due(now, stalledAt) { reload(now) }
-            probedAt != 0L -> due(now, probedAt) { Act.STALL.also { stalledAt = now } }
+            stalledAt != 0L -> due(now, stalledAt, RELOAD_MS) { reload(now) }
+            probedAt != 0L -> due(now, probedAt, REBIND_MS) { Act.STALL.also { stalledAt = now } }
             else -> Act.PROBE.also { probedAt = now }
         }
     }
@@ -55,12 +57,13 @@ internal class RenderWatch {
         return pending != 0L && lastFrame >= pending
     }
 
-    /** [act] once [STALE_MS] passed since [since]. */
+    /** [act] once [after] ms passed since [since]. */
     private inline fun due(
         now: Long,
         since: Long,
+        after: Long,
         act: () -> Act,
-    ): Act = if (now - since >= STALE_MS) act() else Act.NONE
+    ): Act = if (now - since >= after) act() else Act.NONE
 
     private fun reload(now: Long): Act {
         clear()
@@ -74,10 +77,42 @@ internal class RenderWatch {
     }
 
     companion object {
-        /** No geometry for this long: probed; a probe or a stall's resend unanswered this long: the next step. */
-        const val STALE_MS = 2_000L
+        /** No geometry for this long: probed (a working page answers at once). */
+        const val PROBE_MS = 1_000L
+
+        /** A probe unanswered this long: a stall - re-bound (root re-attached, visibility poked, resent): 1.5 s in. */
+        const val REBIND_MS = 500L
+
+        /** The rebind unanswered this long: home's page reloaded - never before 4 s without geometry. */
+        const val RELOAD_MS = 2_500L
+
+        /** How often [WebWindows] looks while there are windows (the steps above land within this of their time). */
+        const val WATCH_MS = 250L
 
         /** After a reload, no look for this long: the page boots and its sender starts. */
         const val BACKOFF_MS = 30_000L
     }
+}
+
+/**
+ * A Linux web window's content check ([WebWindows.consumerCheck]), [CONSUMER_UP_MS] after its open, a reclaim by a
+ * reloaded page, or a render stall's rebind: its consumer up ([UP]: nothing to do), its start running ([STARTING]:
+ * logged), or never taken / failed ([REBIND]: started again on a new consumer thread). 10-31 16:00 Dolphin.
+ */
+internal object ConsumerCheck {
+    enum class Act { UP, STARTING, REBIND }
+
+    /** How long after an open or a reclaim the consumer must be up. */
+    const val CONSUMER_UP_MS = 1_000L
+
+    fun step(
+        closed: Boolean,
+        handle: Long,
+        starting: Boolean,
+    ): Act =
+        when {
+            closed || handle != 0L -> Act.UP
+            starting -> Act.STARTING
+            else -> Act.REBIND
+        }
 }

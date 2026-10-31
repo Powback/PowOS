@@ -536,6 +536,8 @@ class ShellBridge(
             "shade.open" -> dev.omalauncher.system.ShadeHost.current?.let { s -> main.post { s.openPanel(control = false) } } ?: notifications(true)
             "overlay.closed", "pull.closed" -> overlay?.closed()
             "pull.launched" -> overlay?.launched()
+            // The pull page's backdrop blur (theme.css --backdrop-blur-native, dp): the same radius as the widgets' glass.
+            "pull.blur" -> dev.omalauncher.system.PullHost.current?.radius(a.getDouble(0).toFloat())
             // Home's page: the launcher overlay up over home (the pill, the side button's chat) / its lift on home's body.
             "pull.open" -> launcherOpen(a.getString(0), a.optJSONObject(1))
             "pull.drive" -> launcherDrive(a.getString(0), a.opt(1))

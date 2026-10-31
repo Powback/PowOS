@@ -539,6 +539,13 @@ const SCENES = [
   ["home-dots-right", "home", "S.dockPlacement.value = 'right'; await sleep(300);", "wallpaper"],
   ["home-dots-left", "home", "S.dockPlacement.value = 'left'; await sleep(300);", "wallpaper"],
   ["pull-ai", "pull", "E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true });", "blurred"],
+  // THE backdrop (theme.css --backdrop-tint / --backdrop-blur-native, 2026-10-31): the launcher, its PowOS AI panel, an open
+  // folder and the shade over the same wallpaper, beside home's widgets - one tint, one blur (gate: backdrop-*).
+  ["backdrop-widgets", "home", "await sleep(300);", "wallpaper"],
+  ["backdrop-launcher", "pull", "E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.end', { open: true }); await sleep(400);", "blurred"],
+  ["backdrop-ai", "pull", "E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true }); await sleep(400);", "blurred"],
+  ["backdrop-folder", "home", "S.page.value = S.pages.value.length; await sleep(400); document.querySelectorAll('.page.library .lib-card')[2]?.click(); await sleep(500);", "wallpaper"],
+  ["backdrop-shade", "shade", "S.panel.value = 'notifications'; S.notif.value = true; await sleep(300);", "blurred"],
   // PowOS AI's panel in the launcher with home's dock at the side (unfolded desktop docks left): its pill on screen.
   ["pull-ai-left", "pull", "S.dockPlacement.value = 'left'; await sleep(100); E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true }); await sleep(300);", "blurred"],
   ["pull-ai-right", "pull", "S.dockPlacement.value = 'right'; await sleep(100); E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true }); await sleep(300);", "blurred"],
@@ -979,7 +986,7 @@ async function shoot(name, mode, setup, behind, sizeName, size, touch) {
                   ? ""
                   : `html { background: ${pic}; } .glass-native :is(.tile, .notif-panel):not(:is(.tile, .notif-panel) *) { backdrop-filter: blur(calc(var(--glass-blur-native, 140px) * 0.22)); }`
                 : behind === "blurred"
-                  ? `html::before { content: ""; position: fixed; inset: -40px; z-index: -1; background: ${pic}; filter: blur(30px) brightness(.8); }`
+                  ? `html::before { content: ""; position: fixed; inset: -40px; z-index: -1; background: ${pic}; filter: blur(calc(var(--backdrop-blur-native, 170px) * 0.22)); }`
                   : `html { background: url("${window.__shotsApp}") 0 0 / 100% 100% no-repeat; }`;
             document.head.append(back);
             if (glassMode === "page" || !["home", "desktop"].includes(root.dataset.mode)) window.__glass?.use(wp);

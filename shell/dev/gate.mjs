@@ -3369,6 +3369,106 @@ async function webWindowReloadCheck() {
   }
 }
 
+/**
+ * WS1 (10-31 15:37: home's surface re-made, then no "w.f" for ~9 s until the watchdog reloaded home): with the page's
+ * rAF held (a WebView that paused it while hidden), a visibilitychange to hidden and back sends the windows' geometry
+ * within 500 ms, and so does the host's "webwindows.resend" alone - neither waits for a frame.
+ */
+async function webWindowStallCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const was = S.page.value;
+  const raf = window.requestAnimationFrame;
+  const fails = [];
+  // A "w.f" naming window 971 newer than [before] within 500 ms of [t0].
+  const sentSince = async (before, t0) => {
+    const got = () => window.__ww.sent.at(-1) !== before && / 971 /.test(window.__ww.sent.at(-1) ?? "");
+    while (performance.now() - t0 < 500 && !got()) await sleep(10);
+    return got();
+  };
+  const setHidden = (on) => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => on });
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (on ? "hidden" : "visible") });
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+  try {
+    S.page.value = 0;
+    W.webWins.value = [{ id: 971, key: "a:gate.stall", label: "Stall", page: S.pages.value[0], x: 80, y: 140, w: 320, h: 240, live: true }];
+    await window.__gw.settled();
+    // The rAF held from here: the frame already asked for runs once and parks the loop on the held one.
+    window.requestAnimationFrame = () => 1;
+    await sleep(80);
+    let before = window.__ww.sent.at(-1);
+    let t0 = performance.now();
+    setHidden(true);
+    setHidden(false);
+    window.__mockEvents.emit("webwindows.resend", 0);
+    if (!(await sentSince(before, t0))) fails.push("WS1: rAF held, hidden and back plus a resend: no w.f within 500 ms");
+    before = window.__ww.sent.at(-1);
+    t0 = performance.now();
+    window.__mockEvents.emit("webwindows.resend", 0);
+    if (!(await sentSince(before, t0))) fails.push("WS1: rAF held, a resend alone: no w.f within 500 ms");
+    return fails;
+  } finally {
+    window.requestAnimationFrame = raf;
+    delete document.hidden;
+    delete document.visibilityState;
+    // The page's loop parked on the held rAF: a resend asks a real frame again.
+    window.__mockEvents.emit("webwindows.resend", 0);
+    W.webWins.value = [];
+    S.page.value = was;
+    await window.__gw.settled();
+  }
+}
+
+/**
+ * GH1 (the user 10-31 15:33, "Like check this out, what's going on there."): ONE Termux task, two .webwindow - its web
+ * window 5 and window 6, KWin's stand-in for the Android app ("l:android-com.termux") offered and adopted as a Linux
+ * window. After a rebuild from the host (the same window, a second host entry of its task, the stand-in), the
+ * stand-in's adopt and a launch of the same app, the .webwindow count is the distinct host windows: one.
+ */
+async function webWindowGhostCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const H = await window.__gw.mod("./hosts/wide.ts");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const had = powos.webwindows;
+  const was = { page: S.page.value, wide: H.wideHome.value };
+  const fails = [];
+  const key = "a:gate.ghost/.Main";
+  const frame = { left: 100, top: 160, width: 320, height: 260 };
+  const opens = [];
+  try {
+    S.page.value = 0;
+    H.wideHome.value = true;
+    const p = S.pages.value[0];
+    W.webWins.value = [{ id: 985, key, label: "Ghost", page: p, x: 100, y: 160, w: 320, h: 260, live: true, task: 2676 }];
+    const host = [
+      { id: 985, key, label: "Ghost", state: "floating", live: true, task: 2676, frame },
+      { id: 986, key, label: "Ghost", state: "floating", live: true, task: 2676, frame },
+      { id: 987, key: "l:android-gate.ghost", label: "Ghost", state: "floating", live: true, frame },
+    ];
+    // The host's one-window-per-app rule: any open of the app gives its window 985 ("webwindows.show").
+    powos.webwindows = { ...had, enabled: async () => true, list: () => Promise.resolve(host), open: async (k) => (opens.push(k), 985), close: async () => true };
+    await W.rebuildFromHost();
+    window.__mockEvents.emit("webwindows.adopt", { kwin: 41, key: "l:android-gate.ghost", label: "Ghost" });
+    await W.openWindow(key, "Ghost", p);
+    await window.__gw.settled();
+    const els = document.querySelectorAll(".webwindow[data-wwid]").length;
+    const ids = W.webWins.value.map((w) => w.id).join();
+    if (els !== 1 || W.webWins.value.length !== 1) fails.push(`GH1: one host window (task 2676): ${els} .webwindow, entries [${ids}] (want 1, [985])`);
+    if (opens.some((k) => k.startsWith("l:android-"))) fails.push(`GH1: the Android app's KWin stand-in was opened as a window (${opens})`);
+    return fails;
+  } finally {
+    powos.webwindows = had;
+    W.webWins.value = [];
+    W.hostIds.value = null;
+    H.wideHome.value = was.wide;
+    S.page.value = was.page;
+  }
+}
+
 /** W-IN1, a floating window resized bigger: its grown corner is excluded, and drags from it (body, bar) stay the window's. */
 async function webWindowRegionsResized() {
   const S = await window.__gw.mod("./state.ts");
@@ -4046,7 +4146,13 @@ async function fingerOf(page) {
   await page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
   const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
   const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const tap = async ([x, y]) => (await touch("touchStart", [{ x, y }]), await wait(50), await touch("touchEnd", []), await wait(80));
+  // The lift 50 ms after the press, not after its round trip: under the ship gate's load that took over 420 ms, a hold.
+  const tap = async ([x, y]) => {
+    const down = touch("touchStart", [{ x, y }]);
+    await wait(50);
+    await Promise.all([down, touch("touchEnd", [])]);
+    await wait(80);
+  };
   return { touch, wait, tap };
 }
 
@@ -4144,10 +4250,15 @@ const dl = (page, fn, ...args) => page.evaluate(async (fn, args) => (await impor
 /** One finger from [from] through [path] (five moves to each point), let go at its end; the state at the points [at] names. */
 async function dlDrag(r, f, { from, path, at = {} }) {
   const seen = {};
-  await f.touch("touchStart", [{ x: from[0], y: from[1] }]);
+  const step = (a, to, k) => [{ x: a[0] + ((to[0] - a[0]) * k) / 5, y: a[1] + ((to[1] - a[1]) * k) / 5 }];
+  // The press and the moves to the first point go out together, not one awaited round trip each: under the ship
+  // gate's load those took 1.7 s (10-31), past usePress's 420 ms hold, so the press was a hold and the move a reorder
+  // (no lift, the sideways drag no page). The page gets them in order, as a finger's.
+  const first = path[0];
+  await Promise.all([f.touch("touchStart", [{ x: from[0], y: from[1] }]), ...[1, 2, 3, 4, 5].map((k) => f.touch("touchMove", step(from, first, k)))]);
   let p = from;
   for (const [i, to] of path.entries()) {
-    for (let k = 1; k <= 5; k++) (await f.touch("touchMove", [{ x: p[0] + ((to[0] - p[0]) * k) / 5, y: p[1] + ((to[1] - p[1]) * k) / 5 }]), await f.wait(17));
+    if (i) for (let k = 1; k <= 5; k++) (await f.touch("touchMove", step(p, to, k)), await f.wait(17));
     p = to;
     // The state each point waits for (DL_WANT): under the ship gate's load the moves are handled late.
     if (at[i]) seen[at[i]] = await dlUntil(r, f, DL_WANT[at[i]]);
@@ -5574,7 +5685,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }
@@ -5673,6 +5784,15 @@ try {
   // Progress: a ring, one-line area cards with bars, no monospace, readable (the user, 2026-10-31 15:12).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-progress", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiProgressCheck(r.page))));
+  // THE backdrop (dev/backdrop-check.js; 2026-10-31 "the launcher ... not using the same dark background"): the widgets,
+  // a folder, the shade, the launcher and its PowOS AI panel - one tint, one compositor blur. Both screens.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport, part, query] of [["folded", 404, 900], ["unfolded", 821, 883]].flatMap(([l, width, height]) => [["home", ""], ["apps", "?mode=pull"], ["ai", "?mode=pull"]].map(([p, q]) => [l, { width, height }, p, q])))
+      runs.push(open(browser, `${ORIGIN}/index.html${query}`, `backdrop-${part}-${label}`, viewport).then((r) => whenReady(r, async () => {
+        const { fails, read } = await r.page.evaluate(async (p) => (await importShim("./dev/backdrop-check.js")).backdrop(p), part);
+        if (!fails.length) console.log(`backdrop-${part}-${label}: ${JSON.stringify(read)}`);
+        return fails;
+      })));
   // The pinned dock never fades (folded: the dock pages to the recent apps; the user, 2026-10-23).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "dock-no-fade", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(dockPinnedNoFade))));
