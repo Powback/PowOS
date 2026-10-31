@@ -103,7 +103,7 @@ function order(list: RecentTask[], over: number | null) {
 
 /**
  * A frame: [p] 0 (the app full screen, home as it was) .. 1 (the switcher up), the row moved by [x], [y] (CSS px).
- * Custom properties on the layer (its few nodes restyle) and an inline transform on home's content - no render.
+ * Custom properties on the layer (its few nodes restyle) and home's content's opacity - no render.
  */
 function frame(p: number, x = 0, y = 0, home = 0) {
   if (layer) {
@@ -115,11 +115,12 @@ function frame(p: number, x = 0, y = 0, home = 0) {
   }
   const s = screens();
   if (s) {
+    // Home is a desktop: always there, where it is (the user, 2026-10-31: "the whole thing pops up a little bit" ...
+    // "it should just like always be there"). Never scaled or moved by the switcher - it had receded to 0.92 with the
+    // swipe and a swipe home let go (collapse at once) put it back to 1 in one frame: the pop. Only the app's window
+    // moves; home only fades under the cards once the switcher is up (landed). A swipe up over an app keeps it at full
+    // opacity the whole way - faded with the window's progress, a quick swipe home had it at nothing from frame one.
     const shown = Math.max(1 - p, home);
-    s.style.transform = shown < 1 ? `scale(${0.92 + 0.08 * shown})` : "";
-    // A swipe up over an app: home stays in sight behind the window the whole way (it only recedes); it fades out
-    // under the cards only once the switcher is up (landed). Faded with the window's progress, a quick swipe home had
-    // it at nothing from the swipe's first frame.
     const fade = phase.value === "drag" && from.value != null ? 1 : shown;
     s.style.opacity = fade < 1 ? String(fade) : "";
   }
@@ -128,7 +129,7 @@ function frame(p: number, x = 0, y = 0, home = 0) {
 function settle(on: boolean) {
   settling.value = on;
   const s = screens();
-  if (s) s.style.transition = on ? `transform ${spring.ms}ms ${spring.easing}, opacity 240ms ease` : "none";
+  if (s) s.style.transition = on ? "opacity 240ms ease" : "none";
 }
 
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
