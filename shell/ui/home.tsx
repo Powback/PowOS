@@ -17,6 +17,7 @@ import { DockSearchButton, dockButton } from "./docksearch.tsx";
 import { drawerDragging, drawerOpen, followOpenness, homeGestures, launcherTakesHome, pageDrag, shadeTakesHome, windowGestureActive } from "./gesture.ts";
 import { PageDots } from "./pagedots.tsx";
 import { Carried, Folders, Pages, startCarry } from "./grid.tsx";
+import { DockOutGhost } from "./dockout.tsx";
 import { buttonSlot, carriedApp, shownLess, slotPast } from "./dockdrop.ts";
 import { ScreenPanel } from "./screen.tsx";
 import { SessionScreen } from "./session.tsx";
@@ -232,8 +233,8 @@ const DOCK_EXIT = 48;
 
 /**
  * Held and moved along the dock, a pinned app reorders it (the others make room as it passes); taken up out of it,
- * it's carried like a drawer app (grid.tsx startCarry): let go off the dock it's unpinned (and on home, where there's
- * room), brought back over the dock it goes where it's let go (dockdrop.ts).
+ * it's carried like a drawer app (grid.tsx startCarry): let go off the dock it opens there, split screen on a half or a
+ * window in the middle (dockout.tsx); brought back over the dock it goes where it's let go (dockdrop.ts).
  */
 function moveInDock(key: string, e: PointerEvent, dockEl: HTMLElement) {
   const vertical = dockPosition.value !== "bottom";
@@ -634,6 +635,7 @@ export function Home() {
       {/* An open folder: the tile grows into it, over everything (ui/folderview.tsx). */}
       <Folders />
       <Carried />
+      <DockOutGhost />
     </>
   );
 }

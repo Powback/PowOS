@@ -18,8 +18,9 @@ import { tapTaken } from "./taps.ts";
 import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { computed, signal } from "@preact/signals";
-import { byKey, carry, dockAim, editing, folder, home, launch, page, pages, selected, setDocked, type Carry } from "../state.ts";
-import { addHome, dropOnDock, hoverDock } from "./dockdrop.ts";
+import { byKey, carry, dockAim, editing, folder, home, launch, page, pages, selected, type Carry } from "../state.ts";
+import { dropOnDock, hoverDock } from "./dockdrop.ts";
+import { dropOut, hoverOut, outAim } from "./dockout.tsx";
 import { powos } from "../bridge.ts";
 import { applyTrack, drawerOpen, held } from "./gesture.ts";
 import { LibraryPage } from "./library.tsx";
@@ -337,6 +338,8 @@ export function startCarry(what: { item?: HomeItem; app?: string; fromDock?: boo
     carry.value = { ...carry.value, x: ev.clientX - geo.left, y: ev.clientY - geo.top };
     // Over the dock, the dock makes room for it (an app; a widget or a folder passes over it).
     hoverDock(carry.value, ev.clientX, ev.clientY);
+    // Off the dock, a dock app's ghost shows the half (split screen) or the middle (a window) it would open in.
+    hoverOut(carry.value, ev.clientX, ev.clientY);
     hoverFoot(carry.value, ev.clientX, ev.clientY);
   };
   const up = async (ev: PointerEvent) => {
@@ -360,21 +363,17 @@ async function letGo(c: Carry | null, ev: PointerEvent) {
   const party = c && ev.type === "pointerup" ? partyAim(c) : null;
   if (ev.type !== "pointerup" || !c || party) {
     dockAim.value = null;
+    outAim.value = null;
     carry.value = null;
     return party && dropParty(party);
   }
   // Let go over the dock: pinned there (dockdrop.ts) - not dropped on home under it.
   const docked = dropOnDock(c, ev.clientX, ev.clientY);
-  const target = docked ? null : aim(c);
+  // Taken out of the dock and let go off it: opened there, split screen on a half or a window in the middle (dockout.tsx).
+  const out = !docked && dropOut(c, ev.clientX, ev.clientY);
+  const target = docked || out ? null : aim(c);
   carry.value = null;
-  if (docked) return;
-  // Taken out of the dock and let go off it: unpinned, and on home where it's let go (if there's room there).
-  if (c.fromDock && c.app) {
-    setDocked(c.app, false);
-    navigator.vibrate?.(10);
-    if (target?.cell) await addHome(c.app, target.page, target.cell);
-    return;
-  }
+  if (docked || out) return;
   if (c.fromFolder) return dropFromFolder(c, target);
   if (!target) return;
   navigator.vibrate?.(10);

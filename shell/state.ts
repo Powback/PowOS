@@ -53,7 +53,7 @@ export const selected = signal<string | null>(null);
 export interface Carry {
   item?: HomeItem;
   app?: string;
-  /** Taken up out of the dock: let go anywhere off it, it's unpinned. */
+  /** Taken up out of the dock: let go off it, it opens there - split screen or a window (ui/dockout.tsx). */
   fromDock?: boolean;
   /** Taken out of this folder (its key): let go off it, it's out of the folder - on home where it's let go. */
   fromFolder?: string;
