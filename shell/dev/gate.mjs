@@ -4037,7 +4037,13 @@ async function fingerOf(page) {
   await page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
   const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
   const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const tap = async ([x, y]) => (await touch("touchStart", [{ x, y }]), await wait(50), await touch("touchEnd", []), await wait(80));
+  // The lift 50 ms after the press, not after its round trip: under the ship gate's load that took over 420 ms, a hold.
+  const tap = async ([x, y]) => {
+    const down = touch("touchStart", [{ x, y }]);
+    await wait(50);
+    await Promise.all([down, touch("touchEnd", [])]);
+    await wait(80);
+  };
   return { touch, wait, tap };
 }
 
