@@ -365,7 +365,8 @@ async function joinsCheck() {
  * In the page: the Agents screen and widget against dev/agents-fleet.mjs's fleet (3 working, 1 stopped with
  * model_not_found, 12 idle; ui/agents.tsx, fleet.ts): the screen shows 3 working cards, 1 attention item and the
  * folded "12 idle" line, no raw label anywhere; the widget at 2x2 shows the count and the top (stopped) task, at 4x2
- * four tiles with the stopped one first, in red. [setup]: FLEET_SETUP.
+ * four tiles with the stopped one first, in red. [setup]: FLEET_SETUP, run again once the widget mounts (the mock
+ * answers its subscription with its own snapshot).
  */
 async function agentsFleetCheck(setup) {
   const G = window.__gw;
@@ -398,8 +399,8 @@ async function agentsFleetCheck(setup) {
     if (!document.querySelector(".ag-screen .fl-card .fl-bar")) fails.push("screen: no progress bar on the working cards");
     return fails;
   };
-  const firstStopped = (tiles) => tiles[0]?.classList.contains("bad") && /Can.t start/.test(tiles[0]?.textContent ?? "");
-  // The widget at [w]x[h]: [want] tiles, the stopped one first in red, the head's counts.
+  const firstStopped = (tiles) => tiles[0]?.classList.contains("bad") && /^Can.t( start|…)/.test(tiles[0]?.textContent ?? "");
+  // The widget at [w]x[h]: [want] tiles, the stopped one first in red (its reason, cut to "Can't…" at 2x2), the head's counts.
   const widgetFails = (panel, w, h, want) => {
     const fails = [];
     const tiles = [...(panel?.querySelectorAll(".fl-tile") ?? [])];
@@ -415,7 +416,8 @@ async function agentsFleetCheck(setup) {
     for (const i of home.items) await powos.home.remove(i.key);
     await powos.home.addPanel("agents", home.pages[0] ?? 1, { x: 0, y: 0, w, h });
     S.page.value = 0;
-    await G.until(() => document.querySelector(".page:not(.away) .ag-panel .fl-tile"), 3000);
+    await G.until(() => document.querySelector(".page:not(.away) .ag-panel"), 3000).then(() => run(setup));
+    await G.until(() => /needs you/.test(text(".page:not(.away) .ag-panel .ag-head")) && document.querySelector(".page:not(.away) .ag-panel .fl-tile"), 3000);
     await G.frames(4);
     const panel = document.querySelector(".page:not(.away) .ag-panel");
     return [...widgetFails(panel, w, h, want), ...rawIn(`widget ${w}x${h}`, panel?.textContent ?? "")];

@@ -398,7 +398,7 @@ export function AgentsPanel({ item }: { item: HomeItem }) {
       {needsBoard(f) && <BoardFeed />}
       <div class="ag-in">
         <div class="ag-head">
-          <span>Agents</span>
+          <span>Agents</span>{" "}
           <span class={f.attention.length ? "fl-need" : "muted"}>{headline(f)}</span>
         </div>
         <div ref={list} class="ag-list" style={{ gridTemplateColumns: `repeat(${c}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${r}, minmax(0, 1fr))` }}>
