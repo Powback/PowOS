@@ -1811,12 +1811,29 @@ class WebWindows(
             androidGesture = true
             main.post { homeIme(false) }
         }
-        val ev = MotionEvent.obtain(w.downAt, now, act, (x * density()).toFloat(), (y * density()).toFloat(), 0)
+        val px = (x * density()).toFloat()
+        val py = (y * density()).toFloat()
+        // The injector: the shell-uid helper (holds INJECT_EVENTS), one line per event over its stdin - no process per
+        // touch. The fallbacks below only when it can't be reached.
+        if (helper.touch(w, act, px, py)) {
+            if (act != MotionEvent.ACTION_MOVE) Log.i(TAG, "input: window ${w.id} $action at ${px.toInt()},${py.toInt()} -> display ${w.displayId} (helper)")
+            return true
+        }
+        Log.w(TAG, "input: window ${w.id} $action -> display ${w.displayId}: helper unreachable, falling back")
+        injectFallback(w, MotionEvent.obtain(w.downAt, now, act, px, py, 0))
+        return true
+    }
+
+    /** Without the helper: PowOS's own injectInputEvent (refused without INJECT_EVENTS), else root `input` per event. */
+    private fun injectFallback(
+        w: Win,
+        ev: MotionEvent,
+    ) {
         try {
             if (injectWorks != false && injectReflect(w.displayId, ev)) {
                 if (injectWorks == null) Log.i(TAG, "input path: InputManager.injectInputEvent (reflection, setDisplayId)")
                 injectWorks = true
-                return true
+                return
             }
             if (injectWorks != false) Log.i(TAG, "input path: root `input -d <id> motionevent` (reflection refused)")
             injectWorks = false
@@ -1824,7 +1841,6 @@ class WebWindows(
         } finally {
             ev.recycle()
         }
-        return true
     }
 
     // ---- the keyboard (K2) ---------------------------------------------------------------------------------------------
@@ -2718,6 +2734,22 @@ class WebWindows(
 
         fun release(displayId: Int) {
             io.post { send("release $displayId") }
+        }
+
+        /**
+         * A body touch injected on [displayId] by the helper (in order on [io]); false when no helper runs (the caller
+         * falls back). The helper answers "log touch ..." for every down/up (and any move it couldn't inject).
+         */
+        fun touch(
+            w: Win,
+            action: Int,
+            x: Float,
+            y: Float,
+        ): Boolean {
+            if (process?.isAlive != true) return false
+            val line = "touch ${w.displayId} $action ${w.downAt} $x $y"
+            io.post { if (!send(line)) Log.w(TAG, "input: '$line' not sent") }
+            return true
         }
 
         fun stop() =
