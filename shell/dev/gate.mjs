@@ -840,6 +840,56 @@ async function staleWide(page, to) {
   return (await isWide()) ? [`home stayed wide at ${to.width}x${to.height} after a desktop size, a resize dropped while hidden and a show`] : [];
 }
 
+/**
+ * Fold <-> unfold with no input (the user, 10-31 00:18: unfolded, home kept the mobile layout until the page was moved).
+ * window.screen pinned at the old screen's size over each resize (the WebView updates it after the resize event): in
+ * the first frame after the resize, home's layout classes and the dock's side are already the new mode's.
+ */
+async function foldSameFrame(page) {
+  const F = "./dev/fold-check.js";
+  const call = (fn, ...a) => page.evaluate(async (F, fn, a) => (await importShim(F))[fn](...a), F, fn, a);
+  const folded = { width: 404, height: 899 }, unfolded = { width: 821, height: 883 };
+  await call("setUnfoldedRight");
+  await call("pinScreen", folded.width, folded.height);
+  const bad = [];
+  const steps = [[folded, unfolded, { wide: true, dock: "right" }], [unfolded, folded, { wide: false, dock: "bottom" }], [folded, unfolded, { wide: true, dock: "right" }]];
+  for (const [from, to, want] of steps) {
+    await call("watchNextResize", to.width);
+    await viewTo(page, to);
+    const seen = await page.evaluate(() => window.__gw.until(() => window.__foldSeen).then(() => window.__foldSeen));
+    if (seen?.wide !== want.wide || seen?.dock !== want.dock)
+      bad.push(`${from.width}x${from.height} -> ${to.width}x${to.height}, screen still ${seen?.screen}: first frame after the resize wide=${seen?.wide} dock=${seen?.dock}, want wide=${want.wide} dock=${want.dock}`);
+    // The screen catches up (the WebView's, a moment later).
+    await call("pinScreen", to.width, to.height);
+    await restAt(page, to);
+  }
+  return bad;
+}
+
+/**
+ * The grip while folding (EM2): a long press on home that ends with a fold change within 1 s never leaves edit mode
+ * on - the press's timer firing after the resize (EM2), or edit mode entered just before it (EM1).
+ */
+async function foldGrip(page) {
+  const F = "./dev/fold-check.js";
+  const call = (fn, ...a) => page.evaluate(async (F, fn, a) => (await importShim(F))[fn](...a), F, fn, a);
+  const folded = { width: 404, height: 899 }, unfolded = { width: 821, height: 883 };
+  const bad = [];
+  for (const [label, before, to] of [["press, fold change, hold", 150, unfolded], ["held into edit mode, then the fold change", 600, folded]]) {
+    await call("setUnfoldedRight");
+    const why = await call("pressEmpty");
+    if (why) return [why];
+    await page.evaluate((ms) => window.__gw.sleep(ms), before);
+    if (before > 420 && !(await call("editingNow"))) bad.push(`${label}: a 600 ms hold on empty space didn't enter edit mode (the scene's premise)`);
+    await viewTo(page, to);
+    await restAt(page, to);
+    await page.evaluate(() => window.__gw.sleep(600));
+    await call("releasePress");
+    if (await call("editingNow")) bad.push(`${label}: editing after a long press and a fold change within 1 s`);
+  }
+  return bad;
+}
+
 /** The relayout case: each way of getting back to [to] must give a fresh layout's tiles and a full-width grid. */
 async function relayout(page, to, from) {
   await viewTo(page, to);
@@ -3964,6 +4014,12 @@ try {
   // and when the last user stops Preact's options hooks are the originals again - zero cost when off.
   if (process.env.SHELL_PAGES !== "0" && fs.existsSync(path.join(ROOT, "ui/renderscan.ts")))
     runs.push(open(browser, `${ORIGIN}/index.html`, "render-scan").then((r) => whenReady(r, () => r.page.evaluate(renderScanCheck))));
+  // Fold <-> unfold: home's layout and dock change in the first frame after the resize, the screen object lagging
+  // (foldSameFrame); a long press that ends with a fold change leaves edit mode off (foldGrip).
+  if (process.env.SHELL_PAGES !== "0") {
+    runs.push(open(browser, `${ORIGIN}/index.html`, "fold-same-frame", { width: 404, height: 899 }).then((r) => whenReady(r, () => foldSameFrame(r.page))));
+    runs.push(open(browser, `${ORIGIN}/index.html`, "fold-grip", { width: 404, height: 899 }).then((r) => whenReady(r, () => foldGrip(r.page))));
+  }
   // Never a stale wide home on the cover screen (staleWide: a desktop size, a resize dropped while hidden, a show).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "stale-wide", { width: 412, height: 900 }).then((r) => whenReady(r, () => staleWide(r.page, { width: 412, height: 900 }))));

@@ -70,10 +70,31 @@ export const editing = signal(false);
 /** A fold or unfold ends edit mode: the long press that starts it often lands while the phone is being folded (the
  *  user, 10-31: "When I change the fold state we should close the edit mode"). */
 let wasWide = wideHome.peek();
+/** When the fold state last changed (performance.now()): -Infinity before the first. */
+let foldedAt = -Infinity;
+/**
+ * The grip while folding (EM2, 10-31): a long press whose timer fires within this long after a fold change (the press
+ * began with the hinge moving) is the fold's, not the user's - it never enters edit mode.
+ */
+export const FOLD_GRIP_MS = 1000;
+/** Out of edit mode, the tile a long press picked up dropped where it was (grid.tsx letGo: no carry, nothing moves). */
+function endEditByFold(why: string) {
+  console.info(`edit mode ended by the fold (${why})`);
+  carry.value = null;
+  selected.value = null;
+  editing.value = false;
+}
 effect(() => {
   const wide = wideHome.value;
-  if (wide !== wasWide && editing.peek()) editing.value = false;
+  if (wide !== wasWide) {
+    foldedAt = performance.now();
+    if (editing.peek()) endEditByFold(`wide=${wide}`);
+  }
   wasWide = wide;
+});
+effect(() => {
+  // Both: grid.tsx's tile press sets editing, then starts the carry (the second would outlive the first's undo).
+  if ((editing.value || carry.value) && performance.now() - foldedAt < FOLD_GRIP_MS) endEditByFold("long press during the fold");
 });
 /** Page ids that hold a live floating window (ui/desktops.ts): unfolded, a page of its own even with no tiles. */
 export const desktopPages = signal<number[]>([]);
