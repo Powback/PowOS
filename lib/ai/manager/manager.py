@@ -105,6 +105,11 @@ class Manager:
         self.stop = threading.Event()
         self.proc = None
         self.turns_done = 0
+        # A `result` with no assistant/tool event since the last one: Claude Code's own housekeeping turn (a resumed
+        # session first replays a stale <task-notification>, 10-31 13:03), not the answer to our prompt. once() must
+        # not stop on it, or the real turn is killed mid-flight ("PowOS AI didn't answer (exit 0)").
+        self.saw_reply = False
+        self.empty_results = 0
         self.enable_inbox = enable_inbox
         self.sink = sink or self._term_sink
         self._comms_root = os.environ.get("COMMS_ROOT", "")
@@ -298,6 +303,7 @@ class Manager:
                 self.store.save(self.cwd, sid)
                 self._emit({"kind": "session", "id": sid})
         elif t == "assistant":
+            self.saw_reply = True
             for b in ev["message"].get("content", []):
                 if b.get("type") == "text" and b.get("text", "").strip():
                     self._emit({"kind": "assistant", "text": b["text"].strip()})
@@ -317,7 +323,11 @@ class Manager:
                                 "out": self._result_out(b.get("content", ""))})
         elif t == "result":
             self.busy.clear()
-            self.turns_done += 1
+            if self.saw_reply:
+                self.turns_done += 1
+            else:
+                self.empty_results += 1
+            self.saw_reply = False
             if ev.get("session_id"):
                 self.session_id = ev["session_id"]
                 self.store.save(self.cwd, ev["session_id"])
@@ -396,7 +406,8 @@ class Manager:
         self._spawn_workers()
         self.pending.put((source, text))
         t0 = time.time()
-        while self.turns_done < 1 and not self.stop.is_set():
+        # Done on the first turn that answered; two empty results in a row (a turn that truly said nothing) end it too.
+        while self.turns_done < 1 and self.empty_results < 2 and not self.stop.is_set():
             if time.time() - t0 > timeout:
                 break
             time.sleep(0.05)

@@ -43,6 +43,11 @@ STUB = textwrap.dedent("""
             ev = json.loads(line)
         except Exception:
             continue
+        if os.environ.get('STUB_STALE_RESULT') and not os.environ.get('_stale_done'):
+            # A resumed session's stale <task-notification> turn: a result with no assistant event (10-31 13:03).
+            os.environ['_stale_done'] = '1'
+            emit({'type': 'result', 'subtype': 'success', 'session_id': sid, 'total_cost_usd': 0.0})
+            import time; time.sleep(1.0)   # the real turn is still being answered (the API call takes a while)
         text = ''
         for b in ev.get('message', {}).get('content', []):
             if b.get('type') == 'text':
@@ -194,6 +199,16 @@ class OnceModeTests(unittest.TestCase):
         # exactly one turn_done — once() must not hang waiting for more.
         evs = self._once("just one")
         self.assertEqual(sum(1 for e in evs if e["kind"] == "turn_done"), 1)
+
+    def test_once_waits_past_an_empty_result(self):
+        # A stale housekeeping result (no assistant event) must not end once() before the real answer arrives.
+        os.environ['STUB_STALE_RESULT'] = '1'
+        try:
+            evs = self._once("answer me")
+        finally:
+            del os.environ['STUB_STALE_RESULT']
+        texts = [e.get("text", "") for e in evs if e["kind"] == "assistant"]
+        self.assertTrue(any("echo: answer me" in t for t in texts), evs)
 
     def test_cwd_gives_separate_thread(self):
         d1 = os.path.join(self.tmp, "projA"); os.makedirs(d1)
