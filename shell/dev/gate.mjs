@@ -619,14 +619,51 @@ async function overpullHalf() {
 }
 
 /**
+ * What the user sees in the open shade: its notification cards and control tiles each inside the viewport, opaque
+ * (> 0.5 with every ancestor's opacity) and the top element at its centre. The layout checks measured rects only
+ * relative to each other, so a panel moved off screen whole still passed them.
+ */
+function shadeSeen() {
+  const opacity = (el) => (el ? Number(getComputedStyle(el).opacity) * opacity(el.parentElement) : 1);
+  const inView = (b, x, y) => b.width > 0 && x >= 0 && x <= innerWidth && y >= 0 && y <= innerHeight;
+  const onTop = (el, top) => !!top && (el.contains(top) || top.contains(el));
+  const why = (el, what) => {
+    const b = el.getBoundingClientRect();
+    const [x, y] = [b.left + b.width / 2, b.top + b.height / 2];
+    if (!inView(b, x, y)) return `a ${what} is off screen (centre ${Math.round(x)},${Math.round(y)} in ${innerWidth}x${innerHeight})`;
+    if (opacity(el) <= 0.5) return `a ${what} is see-through (opacity ${opacity(el).toFixed(2)})`;
+    const top = document.elementFromPoint(x, y);
+    return onTop(el, top) ? null : `a ${what} is covered by ${top?.className || top?.tagName}`;
+  };
+  const look = (sel, what) => {
+    // Not a folded stack's rest (inert, clipped to the slivers peeking under its front card).
+    const els = [...document.querySelectorAll(sel)].filter((el) => !el.closest("[inert]")).slice(0, 3);
+    return els.length ? els.map((el) => why(el, what)).filter(Boolean) : [`no ${what} in the open shade`];
+  };
+  return [...look(".notif-panel.shown .notif.tile:not(.notif-access)", "notification card"), ...look(".notif-panel.shown .cc3-cell", "control tile")];
+}
+
+/**
  * The shade's layout by width (notifications.tsx wideShade): unfolded two columns side by side - the notifications
  * left, the control center right, each its own scroll, in the one frost panel; folded the one stacked list.
  */
 async function shadeLayout() {
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  // SH-P0 (the user, 10-31 20:22: "Notification screen is broken right now" - only the blurred wallpaper): a sideways
+  // swipe on the shade's page while its panel was shut ran home's page swipe there (gesture.ts claimOnHome "pages",
+  // page -1), and applyTrack slid the shade's own .home a screen to the right, panel and all. The finger first, as then.
+  const screen = document.querySelector(".shade-screen");
+  const P = (type, x) =>
+    screen?.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: innerHeight / 2, pointerId: 1, isPrimary: true, pointerType: "mouse", buttons: type === "pointerup" ? 0 : 1 }));
+  P("pointerdown", 40);
+  for (let i = 1; i <= 6; i++) P("pointermove", 40 + i * 50), await sleep(16);
+  P("pointerup", 340);
+  await sleep(400);
   (await window.__gw.mod("./state.ts")).notif.value = true;
   for (let t = 0; t < 150 && !document.querySelector(".notif-panel.shown .cc"); t++) await sleep(20);
   await sleep(400);
+  const seen = window.__shadeSeen();
+  if (seen.length) return seen;
   const body = document.querySelector(".notif-panel .panel-body");
   const box = (el) => el.getBoundingClientRect();
   // Folded: the one list, the controls in it.
@@ -6802,6 +6839,7 @@ try {
       runs.push(
         open(browser, `${ORIGIN}/index.html?mode=shade`, `shade-${label}`, viewport).then(async (r) => {
           await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+          await r.page.evaluate(`window.__shadeSeen = ${shadeSeen}`);
           r.problems.push(...((await r.page.evaluate(shadeLayout).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])) ?? []));
           return { ...r, ready: true, ms: Date.now() - r.started };
         }),

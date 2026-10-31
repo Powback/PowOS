@@ -29,7 +29,7 @@ public class Hook implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (SYSTEMUI.equals(lp.packageName)) {
-            desktopWindowItem(lp.classLoader);
+            desktopWindowItemWhenLoaded(lp.classLoader);
             return;
         }
         if (!LAUNCHER.equals(lp.packageName))
@@ -369,10 +369,72 @@ public class Hook implements IXposedHookLoadPackage {
      * PowOS takes only from a STATUS_BAR_SERVICE holder) and closes the menu; a click below it is passed on with our item
      * out of the list for that call, so OnePlus' positions hold. A click on Floating window also tells PowOS, so that
      * task stays a native floating window. Guarded: a SystemUI update that renames any of this leaves OnePlus' menu as is.
+     *
+     * HACK: every hook point here is OxygenOS 16 SystemUI internals, checked against the phone's SystemUI.apk
+     * 2026-10-31 (FullscreenCaptionHandleMenu.mPopupListItems/mPopupWindow/mTaskId/mContext, initPopupListWindow,
+     * lambda$initPopupListWindow$3(AdapterView, View, int, long), COUI PopupListItem$Builder). Why: OnePlus' menu has no
+     * extension point (items built in code, clicks by position). Real fix: AOSP desktop mode's app handle menu
+     * (WM Shell HandleMenu) with a PowOS desktop task repository / DesktopModeTransitionSource for "Desktop window",
+     * once OxygenOS ships WM Shell's desktop windowing on the Open - then this hook goes.
      */
-    private static void desktopWindowItem(ClassLoader cl) {
+    private static final String CAPTION_MENU_CLASS = "com.android.wm.shell.fullscreen.FullscreenCaptionHandleMenu";
+    private static volatile boolean desktopWindowHooked;
+
+    /**
+     * HACK: Vector (v2.2, OxygenOS 16) calls handleLoadPackage for com.android.systemui twice: on the main thread with
+     * SystemUI.apk's loader (the hooks go in there), then from another thread with an empty PathClassLoader (no dex
+     * path) - that second call logged the ClassNotFoundException for FullscreenCaptionHandleMenu (2026-10-31). So: once
+     * hooked, later calls are no-ops; a loader without the class waits for SystemUI's Application.attach and tries its
+     * loaders. Real fix: none needed once the hook goes (see [desktopWindowItem]); for a module, the libxposed API's
+     * onPackageLoaded with the package's final loader.
+     */
+    private static void desktopWindowItemWhenLoaded(ClassLoader cl) {
+        if (desktopWindowHooked)
+            return;
+        if (has(cl, CAPTION_MENU_CLASS)) {
+            desktopWindowItem(cl, "handleLoadPackage");
+            return;
+        }
+        XposedBridge.log(TAG + ": desktopWindowItem: " + CAPTION_MENU_CLASS + " not in " + cl + ", waiting for Application.attach");
         try {
-            Class<?> menu = XposedHelpers.findClass("com.android.wm.shell.fullscreen.FullscreenCaptionHandleMenu", cl);
+            XposedHelpers.findAndHookMethod(android.app.Application.class, "attach", android.content.Context.class, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    if (desktopWindowHooked)
+                        return;
+                    android.app.Application app = (android.app.Application) param.thisObject;
+                    ClassLoader[] loaders = {app.getClass().getClassLoader(), app.getClassLoader(),
+                            Thread.currentThread().getContextClassLoader()};
+                    for (ClassLoader l : loaders)
+                        if (has(l, CAPTION_MENU_CLASS)) {
+                            desktopWindowItem(l, "Application.attach " + app.getClass().getName());
+                            return;
+                        }
+                    XposedBridge.log(TAG + ": desktopWindowItem: " + CAPTION_MENU_CLASS + " in no loader at Application.attach ("
+                            + app.getClass().getName() + "); menu left as is");
+                }
+            });
+        } catch (Throwable t) {
+            log("desktopWindowItem attach", t);
+        }
+    }
+
+    private static boolean has(ClassLoader cl, String name) {
+        if (cl == null)
+            return false;
+        try {
+            Class.forName(name, false, cl);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static synchronized void desktopWindowItem(ClassLoader cl, String via) {
+        if (desktopWindowHooked)
+            return;
+        try {
+            Class<?> menu = XposedHelpers.findClass(CAPTION_MENU_CLASS, cl);
             Class<?> builder = XposedHelpers.findClass("com.coui.appcompat.poplist.PopupListItem$Builder", cl);
             XposedHelpers.findAndHookMethod(menu, "initPopupListWindow", new XC_MethodHook() {
                 @Override
@@ -396,6 +458,8 @@ public class Hook implements IXposedHookLoadPackage {
                         XposedHelpers.callMethod(b, "setIsEnable", true);
                         XposedHelpers.callMethod(b, "setGroupId", XposedHelpers.getIntField(items.get(0), "mGroupId"));
                         Object item = XposedHelpers.callMethod(b, "build");
+                        // HACK: position 2 = after OnePlus' Floating window (Split View, Floating window, Close, ...);
+                        // real fix: the AOSP handle menu's own desktop item (see desktopWindowItem).
                         items.add(DESKTOP_AT, item);
                         synchronized (desktopItems) {
                             desktopItems.put(self, item);
@@ -434,6 +498,8 @@ public class Hook implements IXposedHookLoadPackage {
                         }
                         if (pos == 1)
                             tell(self, task, "float");
+                        // HACK: OnePlus' click handler indexes its list by position, so our item is lifted out for
+                        // the length of the call; real fix: no position dispatch (the AOSP handle menu has ids).
                         if (pos > at) {
                             items.remove(at);
                             synchronized (lifted) {
@@ -463,6 +529,8 @@ public class Hook implements IXposedHookLoadPackage {
                     }
                 }
             });
+            desktopWindowHooked = true;
+            XposedBridge.log(TAG + ": desktopWindowItem: hooks installed on " + CAPTION_MENU_CLASS + " (via " + via + ")");
         } catch (Throwable t) {
             log("desktopWindowItem", t);
         }

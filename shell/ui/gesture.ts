@@ -242,6 +242,13 @@ effect(() => {
   for (const el of document.querySelectorAll<HTMLElement>("[data-q]")) el.style.setProperty("--q", q);
 });
 /**
+ * Whether this page has home's pages: home and the desktop home. The shade's and the launcher overlay's pages (mode=shade,
+ * mode=pull) share these gestures and their root's "home" class, but no pages: the user, 2026-10-31 20:22, "Notification
+ * screen is broken right now" - a sideways swipe on the shade's page while its panel was shut paged it to PowOS AI's
+ * (page -1), and applyTrack slid its .home (the panel in it) a screen to the right: only the blur showed.
+ */
+const PAGED = ["home", "desktop"].includes(new URLSearchParams(location.search).get("mode") ?? "home");
+/**
  * The pages' track: its position and whether it follows the finger (no transition) are set here only, never by a
  * render - a render in the middle of a swipe put it back where the page rests, and the next move took it to the
  * finger again: it jumped back and forth.
@@ -251,6 +258,7 @@ export function applyTrack() {
   // Read first: an effect subscribes to what it reads, and the track may not be there yet on its first run.
   const dx = pageDrag.value;
   const at = page.value;
+  if (!PAGED) return;
   // Page -1 is PowOS AI's, left of home: the whole screen slides to it - home (bar and dock with it) and the AI page
   // move as one; home's own pages stay on the first meanwhile.
   const toAi = at === -1 || (at === 0 && (dx ?? 0) > 0);
@@ -580,7 +588,7 @@ function claim(gs: Gesture, dx: number, dy: number): boolean {
 
 /** The kind of a gesture decided [way] ([chromeWay]): the bar's or the dock's sideways pages home, as on empty home. */
 function claimWay(gs: Gesture, way: "pages" | "home", dx: number, dy: number): Gesture["mode"] {
-  if (way === "pages" && !gs.open && !gs.notif) return "pages";
+  if (way === "pages" && !gs.open && !gs.notif && PAGED) return "pages";
   return gs.notif ? claimOnPanel(gs, dx, dy) : claimOnHome(gs, dx, dy);
 }
 
@@ -676,7 +684,7 @@ function claimOnHome(gs: Gesture, dx: number, dy: number): Gesture["mode"] {
 
 /** Sideways on home: the pages, unless the drawer is open or a strip scrolls sideways itself (logged, as a miss). */
 function claimSideways(gs: Gesture, dx: number, dy: number): Gesture["mode"] {
-  if (!gs.open && !gs.inStrip) return "pages";
+  if (!gs.open && !gs.inStrip && PAGED) return "pages";
   logSwipe(`drop sideways dx=${r(dx)} dy=${r(dy)} open=${gs.open} strip=${gs.inStrip} page=${page.value}`);
   return null;
 }

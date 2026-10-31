@@ -4,13 +4,14 @@
   "kind": "system",
   "owner": "system:powos-system-module",
   "host": "phone-android",
-  "purpose": "Magisk module: PowOS.apk as a privileged system app + its permissions, the recents overlay, the containers kernel's nftables modules, a two-strike boot watchdog",
+  "purpose": "Magisk module: PowOS.apk as a privileged system app + its permissions, the recents overlay, the containers kernel's nftables modules, the split screen orientation list (split-orientation.sh: /system_ext/oplus/sys_wms_split_app_ps.xml + <vSplit> per installed app), a two-strike boot watchdog",
   "installedBy": "the module zip (targets/android/system-module), installed with rooted.sh module (pushed to /data/local/tmp, magisk --install-module, then deleted), active after a reboot",
   "packages": [
     "powos-system"
   ],
   "files": [
-    "/data/adb/modules/powos-system"
+    "/data/adb/modules/powos-system",
+    "/data/adb/powos-split-apps.txt"
   ],
   "remove": {
     "commands": []

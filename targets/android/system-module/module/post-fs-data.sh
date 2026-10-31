@@ -12,3 +12,5 @@ if [ "$n" -ge 2 ]; then
     exit 0
 fi
 echo $((n + 1)) > "$COUNT"
+# The split screen divider menu's orientation item, for every app (split-orientation.sh): before Magisk's mount.
+sh "$MODDIR/split-orientation.sh" build
