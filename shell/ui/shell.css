@@ -2539,7 +2539,7 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .fl-tile > .fl-bar { position: absolute; left: 0.55em; right: 0.55em; bottom: 0.12em; height: 2px; }
 .fl-bar { flex: none; height: 0.25em; border-radius: 1em; overflow: hidden; background: color-mix(in srgb, currentColor 14%, transparent); }
 .fl-bar > i { display: block; height: 100%; border-radius: inherit; background: var(--accent-text); }
-.fl-need { color: var(--color-red); }
+.fl-need { color: var(--ai-danger-text); }
 .fl-head { font-size: var(--text-small); white-space: nowrap; }
 .fl-sec { display: flex; flex-direction: column; gap: 6px; }
 .fl-sec > .ai-heading { margin: 0; }
@@ -2549,7 +2549,7 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
   font: inherit; color: var(--color-foreground); cursor: pointer;
 }
 .fl-card.fl-bad { border-color: color-mix(in srgb, var(--color-red) 60%, transparent); }
-.fl-card.fl-bad > .fl-c1 .fl-title { color: var(--color-red); }
+.fl-card.fl-bad > .fl-c1 .fl-title { color: var(--ai-danger-text); }
 .fl-c1, .fl-c3 { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .fl-title { flex: 1; min-width: 0; font-weight: bold; overflow-wrap: anywhere; }
 .fl-now { flex: 1; min-width: 0; font-size: var(--text-small); overflow-wrap: anywhere; }
@@ -2656,7 +2656,12 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
   padding: 7px 9px;
 }
 .ag-act { flex: none; font: var(--text-small) var(--font); color: var(--accent-text); background: var(--soft-fill); border: var(--frame) solid var(--line); border-radius: 999px; padding: 6px 12px; box-shadow: var(--lift); }
-.ag-act.danger { color: var(--color-red); }
+/* Red text on the AI page's frosted panes: --color-red alone falls under 4.5:1 there, so it is lifted toward the text colour
+ * (computed per element, so it follows the pane's own --color-foreground). One token for the danger action and the
+ * "Needs attention" titles. */
+.ag-act, .ai-ctx-card, .fl-need, .fl-title { --ai-danger-text: color-mix(in srgb, var(--color-red) 45%, var(--color-foreground)); }
+/* The danger action: an opaque deep-red fill instead of the light soft fill (red text on that can't reach 4.5:1). */
+.ag-act.danger { color: var(--ai-danger-text); background: color-mix(in srgb, var(--color-red) 20%, var(--color-background)); }
 .ag-act:disabled { opacity: 0.4; }
 .ag-ask { padding: 10px 12px; margin-bottom: 6px; display: flex; flex-direction: column; gap: 6px; font-size: var(--text-small); }
 .ag-ask-what { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-foreground); }
@@ -3543,7 +3548,7 @@ html:root .ai-mid .ai-chat-in :is(.msg.assistant, .msg.note, .tl, .present, .cho
 .ai-ctx-card .fl-bar { align-self: stretch; height: 3px; }
 .ai-ctx-title { font-weight: 600; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ai-ctx-now { font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ai-ctx-card.bad .ai-ctx-title { color: color-mix(in srgb, var(--color-red) 65%, var(--color-foreground)); }
+.ai-ctx-card.bad .ai-ctx-title { color: var(--ai-danger-text); }
 .ai-ctx-try { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border-radius: calc(var(--radius) * 0.8); background: var(--ai-bubble); }
 /* Working now's other projects: one quiet toggle line, closed at first. */
 .ai-ctx-other { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; min-height: 32px; padding: 0 4px; border: 0; background: none; font: inherit; font-size: var(--text-small); color: var(--color-muted); }
