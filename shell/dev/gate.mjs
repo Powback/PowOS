@@ -145,10 +145,10 @@ async function dockPositionCheck(position, part = "all") {
   }
   // In the page: page.evaluate serialises this function only, so the launcher check lives inside it.
   async function dockLauncherCheck(position) {    const S = await importShim("./state.ts");    S.drawer.value = 1;    await new Promise(r => setTimeout(r, 450));    const clip = document.querySelector(".launcher-clip").getBoundingClientRect();    const bar = document.querySelector(".home > .bar").getBoundingClientRect();    const fails = [];    if (clip.left > 20 || clip.right < innerWidth - 20) fails.push("launcher loses width beside dock");    if (bar.bottom > innerHeight + 1 || bar.top < 0) fails.push(`launcher search is off screen: top=${bar.top}, bottom=${bar.bottom}, viewport=${innerHeight}`);    if (bar.bottom < innerHeight - 60) fails.push(`${position} dock leaves launcher search above the bottom edge`);    return fails;  }
-  async function launcherDockCheck(dock, position) {    const side = position !== "bottom";    const fails = side ? await dockLauncherCheck(position) : await openedFor(450);    const r = dock.getBoundingClientRect();    fails.push(...(side ? sideColumnFails(r, position) : r.width < r.height ? ["launcher's bottom dock is vertical"] : []));    const o = getComputedStyle(dock).opacity;    if (o !== "1") fails.push(`launcher's dock not shown open: opacity ${o}`);    return fails;  }  async function openedFor(ms) { (await importShim("./state.ts")).drawer.value = 1; await new Promise(r => setTimeout(r, ms)); return []; }  function sideColumnFails(r, position) {    const fails = [];    const pill = document.querySelector(".home > .bar").getBoundingClientRect();    if (r.width > 80 || r.height < 200 || r.top < 0 || r.bottom > pill.top + 1) fails.push("launcher's side dock is not a column above the pill");    const cells = [...document.querySelectorAll(".drawer-clip .app")].map(n => Object.assign(n.getBoundingClientRect().toJSON(), { what: `${n.parentElement?.className}/${n.textContent}` })).filter(c => c.width > 0 && c.left >= 0 && c.right <= innerWidth);    const under = cells.find(c => position === "left" ? c.left < r.right - 1 : c.right > r.left + 1);    if (under) fails.push(`launcher's list runs under its side dock (${under.what} at ${Math.round(under.left)}..${Math.round(under.right)}, dock ${Math.round(r.left)}..${Math.round(r.right)})`);    return fails;  }
+  async function foldedLauncher(dock, position) {    /* LN1 (the user, 2026-10-31 20:2x: "I don't know why the dock is showing in the launcher at all"): the folded overlay opened by a gesture has no dock; its pill still at the foot beside where a side dock would be. */    const f = dock ? ["folded launcher: a dock (LN1: none unless opened from the dock's button)"] : [];    return [...f, ...(position === "bottom" ? [] : await dockLauncherCheck(position))];  }  async function launcherDockCheck(dock, position) {    if (!document.querySelector(".pull-screen.wide")) return foldedLauncher(dock, position);    if (!dock) return ["launcher: no dock"];    const side = position !== "bottom";    const fails = side ? await dockLauncherCheck(position) : await openedFor(450);    const r = dock.getBoundingClientRect();    fails.push(...(side ? sideColumnFails(r, position) : r.width < r.height ? ["launcher's bottom dock is vertical"] : []));    const o = getComputedStyle(dock).opacity;    if (o !== "1") fails.push(`launcher's dock not shown open: opacity ${o}`);    return fails;  }  async function openedFor(ms) { (await importShim("./state.ts")).drawer.value = 1; await new Promise(r => setTimeout(r, ms)); return []; }  function sideColumnFails(r, position) {    const fails = [];    const pill = document.querySelector(".home > .bar").getBoundingClientRect();    if (r.width > 80 || r.height < 200 || r.top < 0 || r.bottom > pill.top + 1) fails.push("launcher's side dock is not a column above the pill");    const cells = [...document.querySelectorAll(".drawer-clip .app")].map(n => Object.assign(n.getBoundingClientRect().toJSON(), { what: `${n.parentElement?.className}/${n.textContent}` })).filter(c => c.width > 0 && c.left >= 0 && c.right <= innerWidth);    const under = cells.find(c => position === "left" ? c.left < r.right - 1 : c.right > r.left + 1);    if (under) fails.push(`launcher's list runs under its side dock (${under.what} at ${Math.round(under.left)}..${Math.round(under.right)}, dock ${Math.round(r.left)}..${Math.round(r.right)})`);    return fails;  }
   setPosition();
   await new Promise(r => setTimeout(r, 250)); const dock = document.querySelector(".home > .dock");
-  if (!dock) return [...fails, `${part}: no dock`]; if (part === "launcher") return [...fails, ...(await launcherDockCheck(dock, position))];
+  if (part === "launcher") return [...fails, ...(await launcherDockCheck(dock, position))]; if (!dock) return [...fails, `${part}: no dock`];
   const rect = dock.getBoundingClientRect();
   const cells = [...dock.querySelectorAll(".dock-page:first-child > .app")].map(n => n.getBoundingClientRect());
   if (cells.length < 4) fails.push("missing pinned icons");
@@ -4368,6 +4368,23 @@ async function fingerOf(page) {
   return { touch, wait, tap };
 }
 
+/** LN2: a finger drags down over PowOS AI's chat (scrolling back through it); it scrolls, the panel stays open. */
+async function aiScrollScene(r) {
+  const f = await fingerOf(r.page);
+  const chk = "./dev/launcher-adopt-check.js";
+  const at = await r.page.evaluate(async (m) => (await importShim(m)).aiScrollSetup(), chk);
+  if (at.fail) return [at.fail];
+  if (!at.scrolls) return ["PowOS AI's chat didn't get long enough to scroll"];
+  await f.touch("touchStart", [{ x: at.x, y: at.y }]);
+  for (let i = 1; i <= 12; i++) {
+    await f.touch("touchMove", [{ x: at.x, y: at.y + i * 25 }]);
+    await f.wait(16);
+  }
+  await f.touch("touchEnd", []);
+  await f.wait(500);
+  return r.page.evaluate(async (m, top) => (await importShim(m)).aiScrollAfter(top), chk, at.top);
+}
+
 /** TI1 with a finger: Discord's minimise and then Settings' close, tapped where they are. */
 async function tileBarsScene(r) {
   const f = await fingerOf(r.page);
@@ -6423,6 +6440,9 @@ try {
     }
     // LC1: the host's corner swipe over home opens home's own launcher in place, following the finger (CornerPull.kt).
     runs.push(open(browser, `${ORIGIN}/index.html`, "launcher-corner-home", dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/launcher-adopt-check.js")).cornerOverHome()))));
+    // LN2 (the user, 2026-10-31 20:2x: "trying to scroll up in the AI launcher and it just dismisses it"): a finger
+    // scrolling PowOS AI's chat back (down, its column-reverse list scrolled to the newest) scrolls it, never dismisses.
+    runs.push(open(browser, `${ORIGIN}/index.html`, "launcher-ai-scroll", dockOpensView.folded).then((r) => whenReady(r, () => aiScrollScene(r))));
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-adopt-overlay", dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/launcher-adopt-check.js")).ownDock()))));
     // LH1: the home gesture with the launcher open closes it (on home in place, and the pull window over an app).
     for (const kind of ["apps", "ai"]) {

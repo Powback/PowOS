@@ -62,6 +62,10 @@ export async function launcherDockOpens(position, keyboard) {
   await sleep(50);
   E.emit("pull.end", { open: true });
   await sleep(400);
+  // LN1 (the user, 2026-10-31 20:2x: "I don't know why the dock is showing in the launcher at all"): folded, the
+  // overlay opened by the gesture has no dock (only from the dock's search button, launcher-adopt-check.js ownDock).
+  if (!document.querySelector(".pull-screen.wide"))
+    return document.querySelector(".pull-screen > .dock:not(.dock-tray)") ? [`folded ${position}: a dock in the launcher`] : [];
   const wrong = await settledWrong();
   return wrong ? [`${position}${keyboard ? " +keyboard" : ""}: ${wrong}`] : [];
 }
