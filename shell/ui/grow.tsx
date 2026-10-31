@@ -67,19 +67,7 @@ export function GrowField({ value, onInput, rows = 3, inputRef, ...rest }: Props
   };
   useLayoutEffect(fit, [value, rows]);
   const reported = useClearDropsComposition(own, value);
-  // Its width changing (laid out late, a fold, a widget resized) wraps its text again: measured again then.
-  useEffect(() => {
-    const t = el();
-    if (!t) return;
-    let w = t.clientWidth;
-    const ro = new ResizeObserver(() => {
-      if (t.clientWidth === w) return;
-      w = t.clientWidth;
-      fit();
-    });
-    ro.observe(t);
-    return () => ro.disconnect();
-  }, [rows]);
+  useRefitOnWidth(el, fit, rows);
   return (
     <textarea
       {...rest}
@@ -101,4 +89,29 @@ export function GrowField({ value, onInput, rows = 3, inputRef, ...rest }: Props
       }}
     />
   );
+}
+
+/** [fit] again when the field's width changes (laid out late, a fold, a widget resized): its text wraps again. */
+function useRefitOnWidth(el: () => HTMLTextAreaElement | null, fit: () => void, rows: number) {
+  useEffect(() => {
+    const t = el();
+    if (!t) return;
+    let w = t.clientWidth;
+    let raf = 0;
+    // fit() in the next frame, never inside the observer's callback: it sets the textarea's height there, which resizes
+    // its bar (observed higher up: desktops.ts, home.tsx) in the same observer loop - Chrome's "ResizeObserver loop
+    // completed with undelivered notifications" on home (gate ro-loop, 2026-10-31: grow.tsx the last callback before
+    // every one).
+    const ro = new ResizeObserver(() => {
+      if (t.clientWidth === w || raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        if (t.clientWidth === w) return;
+        w = t.clientWidth;
+        fit();
+      });
+    });
+    ro.observe(t);
+    return () => (ro.disconnect(), cancelAnimationFrame(raf));
+  }, [rows]);
 }

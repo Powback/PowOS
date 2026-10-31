@@ -4919,6 +4919,61 @@ async function aiScrollScene(r) {
   return r.page.evaluate(async (m, top) => (await importShim(m)).aiScrollAfter(top), chk, at.top);
 }
 
+/**
+ * E2E1: the phone journey's three home gestures with a real finger (tools/phone/verify/e2e-desktop.sh part 3, round 189
+ * read them as broken): a plain swipe up from empty home space opens the drawer (search not focused); home's search
+ * (the bar, or the dock's search button) tapped takes the focus; a hold on empty space enters edit mode.
+ */
+async function homeGesturesScene(r) {
+  const f = await fingerOf(r.page);
+  const fails = [];
+  const reset = () => r.page.evaluate(async () => { const S = await importShim("./state.ts"); S.drawer.value = 0; S.editing && (S.editing.value = false); document.activeElement?.blur?.(); });
+  // An empty spot of home's page, right half (the left is PowOS AI's pull-up corner), clear of anything that takes a touch.
+  const empty = () => r.page.evaluate(() => {
+    for (let y = innerHeight * 0.3; y <= innerHeight * 0.7; y += 12)
+      for (let x = innerWidth * 0.9; x >= innerWidth * 0.55; x -= 12) {
+        const e = document.elementFromPoint(x, y);
+        if (e && e.closest(".page-track") && !e.closest(".webwindow,.tile,.home-tile,.app,.panel,.widget,.island,button,a,input,textarea,.bar,.dock,[data-key]")) return [Math.round(x), Math.round(y)];
+      }
+    return null;
+  });
+  await f.wait(400);
+  let at = await empty();
+  if (!at) return ["E2E1: no empty spot on home"];
+  await f.touch("touchStart", [{ x: at[0], y: at[1] }]);
+  for (let i = 1; i <= 8; i++) { await f.touch("touchMove", [{ x: at[0], y: at[1] - i * 30 }]); await f.wait(16); }
+  await f.touch("touchEnd", []);
+  // Polled, not a fixed wait: under the full gate's load the drawer's settle took longer than 700 ms (it passed alone).
+  const until = (fn, ms) => r.page.waitForFunction(fn, { timeout: ms, polling: 50 }).then(() => true, () => false);
+  await until(() => !!document.querySelector(".home.open"), 4000);
+  const st = await r.page.evaluate(() => ({ open: !!document.querySelector(".home.open"), focused: !!document.activeElement?.matches(".bar textarea") }));
+  if (!st.open) fails.push("E2E1: a plain swipe up from empty home space didn't open the drawer");
+  if (st.focused) fails.push("E2E1: a plain swipe up focused the search");
+  await reset(); await f.wait(500);
+  const sp = await r.page.evaluate(() => {
+    const bar = document.querySelector(".home > .bar textarea"), btn = document.querySelector(".home .dock .app.dock-search");
+    const e = bar && bar.getBoundingClientRect().height > 2 ? bar : btn;
+    if (!e) return null;
+    const b = e.getBoundingClientRect();
+    return [Math.round(b.x + b.width / 2), Math.round(b.y + b.height / 2)];
+  });
+  if (!sp) fails.push("E2E1: no search on home (neither the bar nor the dock's button)");
+  else {
+    await f.tap(sp);
+    const ok = await until(() => document.activeElement?.matches(".bar textarea"), 4000);
+    if (!ok) fails.push("E2E1: a tap on home's search didn't focus its field");
+  }
+  await reset(); await f.wait(500);
+  at = await empty();
+  if (!at) return [...fails, "E2E1: no empty spot on home to hold"];
+  await f.touch("touchStart", [{ x: at[0], y: at[1] }]);
+  await f.wait(900);
+  await f.touch("touchEnd", []);
+  if (!(await until(() => !!document.querySelector(".home.editing"), 3000))) fails.push("E2E1: a hold on empty home space didn't enter edit mode");
+  await reset();
+  return fails;
+}
+
 /** TI1 with a finger: Discord's minimise and then Settings' close, tapped where they are. */
 async function tileBarsScene(r) {
   const f = await fingerOf(r.page);
@@ -7005,6 +7060,28 @@ try {
       runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, `launcher-home-gesture-pull-${kind}`, dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async (k) => (await importShim("./dev/launcher-adopt-check.js")).homeGestureCloses(k), kind))));
     }
   }
+  // RO1: home folded/unfolded, the drawer, edit mode and a long query in the bar raise no "ResizeObserver loop completed
+  // with undelivered notifications" (grow.tsx fit() in its observer resized the bar in the same loop; phone log 10-31).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ro-loop", dockOpensView.unfolded).then((r) => whenReady(r, async () => {
+      await r.page.evaluateOnNewDocument(() => {
+        const RO = window.ResizeObserver; window.__roLog = []; window.__roErr = [];
+        window.ResizeObserver = class extends RO { constructor(cb) { const where = (new Error().stack || "").split("\n").slice(2, 4).join(" | "); super((es, o) => { window.__roLog.push(performance.now().toFixed(0) + " " + where + " " + es.map((e) => e.target.className && String(e.target.className).slice(0, 30)).join(",")); if (window.__roLog.length > 60) window.__roLog.shift(); return cb(es, o); }); } };
+        addEventListener("error", (e) => { if (/ResizeObserver/.test(e.message)) window.__roErr.push(window.__roLog.slice(-8)); });
+      });
+      await r.page.reload(); await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS });
+      const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+      await wait(1500);
+      for (const [w, h] of [[404, 899], [821, 883], [404, 899], [821, 883]]) { await r.page.setViewport({ width: w, height: h }); await wait(800); }
+      await r.page.evaluate(async () => { const S = await importShim("./state.ts"); S.drawer.value = 1; await new Promise((o) => setTimeout(o, 700)); S.drawer.value = 0; S.editing.value = true; await new Promise((o) => setTimeout(o, 700)); S.editing.value = false; S.query.value = "hello there this is a long query that wraps the bar"; await new Promise((o) => setTimeout(o, 700)); S.query.value = ""; });
+      await wait(800);
+      const errs = await r.page.evaluate(() => window.__roErr);
+      return errs.length ? ["RO1: ResizeObserver loop errors; the observers' callbacks before each: " + JSON.stringify(errs)] : [];
+    })));
+  // E2E1: the e2e journey's home gestures with a finger (swipe up -> drawer, search tap -> focused, hold -> edit mode).
+  if (process.env.SHELL_PAGES !== "0")
+    for (const label of ["folded", "unfolded"])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `e2e-home-gestures-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => homeGesturesScene(r))));
   // Home's search as a dock button (dev/dock-search-check.js; the user, 2026-10-31): no .bar, the button centred in the
   // dock, a tap expands it in place focused (not the launcher), folded and unfolded, bottom and side docks.
   if (process.env.SHELL_PAGES !== "0")

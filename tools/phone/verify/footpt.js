@@ -1,6 +1,6 @@
 // A spot to start home's pull-up from that is always free (device px "x y", or "none"): the bottom bar's row or the
 // dock's, where elementFromPoint is the row itself - a gap between icons, beside the pill - never an icon, the pill, a
-// button, or a floating window (windows stop above the bar: desktops.ts barTop), 40 px clear of the screen's edge
+// button, or a window (a floating one: desktops.ts inWindow; a web window: its .webwindow element), 40 px clear of the screen's edge
 // where it can be.
 // The right half only: the left half is PowOS AI's pull-up corner. Dock row first (higher: more room for a long pull). Read-only.
 (async () => {
@@ -20,7 +20,7 @@
         // Under the drawer's frost at rest (.launcher-frame: hit on the device though pointer-events none): what's below.
         const e = document.elementsFromPoint(x, cy).find((n) => !n.closest(".launcher-frame"));
         if (!e || !e.closest(".home") || D.inWindow(x, cy)) continue;
-        if (e.closest(".dock, .app, .app-icon, button, a, input, textarea, .bar-pill, .tile, [data-key], .mic, .letter-bar")) continue;
+        if (e.closest(".webwindow, .dock, .app, .app-icon, button, a, input, textarea, .bar-pill, .tile, [data-key], .mic, .letter-bar")) continue;
         return Math.round(x * r) + " " + Math.round(cy * r);
       }
     }
