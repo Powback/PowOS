@@ -146,6 +146,8 @@ const beside = (n: Tree, id: number, side: Side): Tree => ({ axis: axisOf(side),
 /** [t] with [id] dropped at [zone] (its [target]: the zone's tile's leaf): split beside it, swapped in, or along the edge. */
 export function dropInto(t: Tree, zone: Zone, target: number, id: number): Tree {
   if (zone.kind === "outer") return beside(t, id, zone.side);
+  // A tab drop stacks onto the window (webwindows.tsx joinStack): the tiling itself doesn't change.
+  if (zone.kind === "tab") return t;
   const map = (n: Tree): Tree => {
     if (typeof n !== "number") return { ...n, a: map(n.a), b: map(n.b) };
     if (n !== target) return n;
