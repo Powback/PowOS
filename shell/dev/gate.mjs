@@ -4882,9 +4882,10 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "dock-no-fade", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(dockPinnedNoFade))));
   // A dock app dragged out of the dock (ui/dockout.tsx; the user, 2026-10-31 03:00): a half = split screen with the app in
-  // front, the middle = a window (unfolded a web window, folded Android's floating one); back on the dock = the dock's.
+  // front, the middle = a window (unfolded a web window, folded Android's floating one); on home with no app in front it's
+  // unpinned onto the grid as before; back on the dock = the dock's.
   if (process.env.SHELL_PAGES !== "0")
-    for (const [kind, query, width, height] of [["split", "?mode=pull", 900, 600], ["float", "", 404, 900], ["window", "", 821, 883]])
+    for (const [kind, query, width, height] of [["split", "?mode=pull", 900, 600], ["float", "?mode=pull", 404, 900], ["window", "", 821, 883], ["home", "", 404, 900]])
       runs.push(open(browser, `${ORIGIN}/index.html${query}`, `dock-dragout-${kind}`, { width, height }).then((r) => whenReady(r, () => r.page.evaluate(async (k) => (await importShim("./dev/dock-dragout-check.js")).dockDragOut(k), kind))));
   // The drawer's list fades at an edge with more to scroll (2026-10-24): a short screen, so the mock's apps scroll.
   if (process.env.SHELL_PAGES !== "0")

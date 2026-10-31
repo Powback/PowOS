@@ -5,8 +5,10 @@
  *
  * - "split" (index.html?mode=pull, a screen wider than tall, the mock's top task Chrome in front): to the left half -
  *   the ghost on the left half, tasks.split(dragged, front); an app with no task is launched and its task split.
- * - "float" (home folded): to the middle - tasks.float(its task); back onto the dock - neither split nor float.
- * - "window" (home unfolded, a mock web-windows host): to the middle - a new .webwindow, no float.
+ * - "float" (?mode=pull folded, Chrome in front): to the middle - tasks.float(its task).
+ * - "window" (home unfolded, a mock web-windows host, a window open on the page): to the middle - a new .webwindow.
+ * - "home" (home folded, no app in front): onto home's grid - unpinned and placed there as before, no ghost, no split
+ *   or float; back onto the dock - neither split nor float.
  */
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -83,7 +85,25 @@ async function floatCase({ S, G, calls }, fails, dockAt) {
   const seen = await drag(G, "a:spotify", dockAt, [{ x: w / 2, y: h - 200 }, { x: w / 2, y: h / 2 }]);
   ghostIs(fails, seen, "window", "dragged to the middle");
   await firstCall(fails, calls.float, "102", "folded, middle: tasks.float (102 Spotify's task)");
-  calls.float.length = 0;
+}
+
+/** "home": no app in front - a dock app let go on home's grid is unpinned and put there (the old way), nothing opens. */
+async function homeCase({ S, G, powos, calls }, fails, dockAt) {
+  const keys = [...S.byKey.value.keys()].filter((k) => k.startsWith("a:"));
+  S.setDock(keys.slice(0, 4));
+  await window.__gw.settled();
+  const key = S.dock.value[1];
+  const added = [];
+  const add = powos.home.add;
+  powos.home.add = async (app, pg, cell) => (added.push([app, pg, cell]), add(app, pg, cell));
+  const at = { x: innerWidth / 2, y: innerHeight * 0.45 };
+  const seen = await drag(G, key, dockAt, [{ x: innerWidth / 2, y: innerHeight - 200 }, at]);
+  if (seen) fails.push(`on home with no app in front, a ghost (${seen.zone}) shows`);
+  await sleep(600);
+  if (S.dock.value.includes(key)) fails.push(`let go on home's grid, ${key} is still pinned to the dock`);
+  if (!added.some(([app]) => app === key)) fails.push(`let go on home's grid, ${key} wasn't put on home (home.add: ${JSON.stringify(added)})`);
+  if (calls.split.length || calls.float.length || calls.launch.length) fails.push(`let go on home's grid: split ${calls.split} float ${calls.float} launch ${calls.launch}`);
+  powos.home.add = add;
   await backOnDock({ S, G, calls }, fails);
 }
 
@@ -98,8 +118,10 @@ async function backOnDock({ S, G, calls }, fails) {
 }
 
 /** "window": unfolded with web windows on, the middle opens a web window, never Android's floating one. */
-async function windowCase({ G, W, H, powos, calls }, fails, dockAt) {
+async function windowCase({ S, G, W, H, powos, calls }, fails, dockAt) {
   H.wideHome.value = true;
+  // A window open on this page: the dock is a taskbar over it (dockout.tsx overApps).
+  W.webWins.value = [{ id: 951, key: "a:gate.open", label: "Open", page: S.pages.value[S.page.value], x: 80, y: 120, w: 300, h: 240, live: true }];
   powos.webwindows = { enabled: async () => true, open: async () => 77, close: async () => true, input: async () => true, minimise: async () => true, restore: async () => true };
   const before = document.querySelectorAll(".webwindow").length;
   await drag(G, "a:maps", dockAt, [{ x: innerWidth / 2, y: innerHeight - 200 }, { x: innerWidth / 2, y: innerHeight / 2 }]);
@@ -111,6 +133,6 @@ export async function dockDragOut(kind) {
   const e = await env();
   e.O.TASK_WAIT.ms = 3000;
   const fails = [];
-  await { split: splitCase, float: floatCase, window: windowCase }[kind](e, fails, { x: innerWidth / 2, y: innerHeight - 30 });
+  await { split: splitCase, float: floatCase, window: windowCase, home: homeCase }[kind](e, fails, { x: innerWidth / 2, y: innerHeight - 30 });
   return fails;
 }

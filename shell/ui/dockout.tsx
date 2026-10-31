@@ -9,7 +9,8 @@
  * - the middle third: a window - unfolded a PowOS web window (openWebWindow), folded Android's floating window
  *   (powos.tasks.float).
  *
- * Let go back over the dock it's the dock's again (dockdrop.ts dropOnDock: reorder, or back where it was).
+ * Let go back over the dock it's the dock's again (dockdrop.ts dropOnDock: reorder, or back where it was). On home with
+ * no app in front ([overApps]) none of this: let go on home's grid it's unpinned and placed there, as before.
  */
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
@@ -17,7 +18,7 @@ import { byKey, launch, page, pages, pullPage, type Carry } from "../state.ts";
 import { PREFIX } from "../apps/pages.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { aimDock, carriedApp } from "./dockdrop.ts";
-import { openWebWindow } from "./webwindows.tsx";
+import { openWebWindow, webWins } from "./webwindows.tsx";
 import type { RecentTask } from "../types.ts";
 
 export type OutZone = "first" | "second" | "window";
@@ -32,11 +33,21 @@ export const TASK_WAIT = { ms: 6000 };
 /** Where [c], held at [x], [y], would go off the dock: a half or the middle of the screen, or null. */
 export function aimOut(c: Carry, x: number, y: number): OutAim | null {
   const key = carriedApp(c);
-  if (!c.fromDock || !key || aimDock(c, x, y)) return null;
+  if (!c.fromDock || !key || !overApps() || aimDock(c, x, y)) return null;
   const w = window.innerWidth, h = window.innerHeight;
   const at = w >= h ? x / w : y / h;
   const zone: OutZone = at < 1 / 3 ? "first" : at > 2 / 3 ? "second" : "window";
   return { key, zone, rect: zoneRect(zone, w, h) };
+}
+
+/**
+ * The dock is a taskbar over apps: the pull-up overlay over an app, or unfolded home with a window open on this page.
+ * Else (home's grid under the finger) a dock app let go off the dock is unpinned onto home, as always (grid.tsx letGo).
+ */
+export function overApps() {
+  if (pullPage) return true;
+  const here = pages.value[page.value];
+  return wideHome.value && webWins.value.some((w) => w.page === here && !w.minimised);
 }
 
 /** The screen ([w] x [h]) [zone] takes: its half (left / right across, top / bottom on a tall screen) or a window's. */

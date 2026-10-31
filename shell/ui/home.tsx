@@ -233,8 +233,9 @@ const DOCK_EXIT = 48;
 
 /**
  * Held and moved along the dock, a pinned app reorders it (the others make room as it passes); taken up out of it,
- * it's carried like a drawer app (grid.tsx startCarry): let go off the dock it opens there, split screen on a half or a
- * window in the middle (dockout.tsx); brought back over the dock it goes where it's let go (dockdrop.ts).
+ * it's carried like a drawer app (grid.tsx startCarry): let go off the dock it's unpinned (and on home, where there's
+ * room) - over an app it opens there instead, split screen or a window (dockout.tsx); brought back over the dock it goes
+ * where it's let go (dockdrop.ts).
  */
 function moveInDock(key: string, e: PointerEvent, dockEl: HTMLElement) {
   const vertical = dockPosition.value !== "bottom";
