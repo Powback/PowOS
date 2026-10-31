@@ -142,11 +142,19 @@ class ShellNative(
             key: String?,
             line: String?,
         ) {
-            val want = this.key ?: return
-            if (key == null || line == null || line.length > MAX_GEOMETRY) return
-            if (!java.security.MessageDigest.isEqual(key.toByteArray(), want.toByteArray())) return
-            if (!line.startsWith("w.f ") || !GEOMETRY.matches(line.substring(4))) return
-            windowFrame?.invoke(line.substring(4), true)
+            val want = this.key ?: return dropped("no key handed over yet")
+            if (key == null || line == null || line.length > MAX_GEOMETRY) return dropped("no key or line, or too long")
+            if (!java.security.MessageDigest.isEqual(key.toByteArray(), want.toByteArray())) return dropped("stale key")
+            if (!line.startsWith("w.f ") || !GEOMETRY.matches(line.substring(4))) return dropped("not w.f numbers: ${line.take(160)}")
+            val to = windowFrame ?: return dropped("no web windows to take it")
+            to.invoke(line.substring(4), true)
+        }
+
+        /** A dropped frame leaves every window's layer where it was (an empty body): said in the log, once a reason. */
+        private val said = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+        private fun dropped(why: String) {
+            if (said.add(why.substringBefore(':'))) Log.w(TAG, "w.f dropped (direct): $why - the windows' layers stay where they were")
         }
     }
 
@@ -436,8 +444,13 @@ class ShellNative(
     companion object {
         private const val TAG = "PowosNative"
 
-        /** "w.f"'s words: numbers and single spaces only (ids, CSS px, flags, the page frame's time). */
-        private val GEOMETRY = Regex("[0-9.eE+-]+( [0-9.eE+-]+)*")
+        /**
+         * "w.f"'s words: numbers and single spaces only (ids, CSS px, flags, the page frame's time) - and the theme's
+         * surface as "rrggbb" hex (webwindows.tsx fillOf, since RS1). The class was decimal-only: a surface with any of
+         * a-d/f in it (the default theme's 2a2a37) failed the match, every frame of every window was dropped without a
+         * word, and each window stayed a hidden layer - title bar and frame drawn, the body empty (10-31 01:46).
+         */
+        private val GEOMETRY = Regex("[0-9a-fA-F.+-]+( [0-9a-fA-F.+-]+)*")
 
         /** Longer than any real "w.f" (~200 chars a window). */
         private const val MAX_GEOMETRY = 32_768
