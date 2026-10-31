@@ -3523,25 +3523,35 @@ html:root .ai-view .ai-updates-list :is(.mail, .msg.ai-mail) { background: var(-
 .aip-ring-sub { font-size: var(--text-small); color: var(--color-foreground); opacity: 0.86; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .aip-areas { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .aip-area { display: block; width: auto; max-width: none; margin: 0; padding: 0; border-radius: calc(var(--radius) * 0.85); overflow: hidden; }
-html:root .ai-screen .aip-area.tile { background: var(--ai-bubble); box-shadow: none; }
+/* The cards wear THE backdrop (theme.css --backdrop-tint / --backdrop-blur-native; design QA 2026-10-31: no solid slab):
+   folded each its own glass, unfolded the tint over the pane's glass. */
+html:root .ai-screen .aip-area.tile { --glass-blur-native: var(--backdrop-blur-native); --frost-fill: var(--backdrop-tint); --frost-sheen: transparent; --glass-veil: transparent; background: var(--backdrop-tint); box-shadow: none; }
 .aip-area-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 14px; border: 0; background: none; font: inherit; color: var(--color-foreground); text-align: start; white-space: nowrap; }
 .aip-area-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-body); font-weight: 600; }
 .aip-chip { flex: none; padding: 2px 8px; border-radius: 999px; background: var(--color-accent); color: var(--color-background); font-size: 12px; font-weight: 600; }
 .aip-bar { flex: none; position: relative; width: clamp(56px, 18%, 120px); height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--color-foreground) 16%, transparent); overflow: hidden; }
 .aip-bar-fill { position: absolute; inset: 0; border-radius: inherit; background: var(--color-accent); transform-origin: left center; animation: aip-fill 700ms var(--aip-spring) both; }
 .aip-count { flex: none; min-width: 3.4em; text-align: end; font-size: var(--text-small); font-variant-numeric: tabular-nums; color: var(--color-foreground); opacity: 0.86; }
+.aip-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 0 4px; font-size: var(--text-small); color: var(--color-foreground); }
+.aip-legend-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .aip-tasks { display: flex; flex-direction: column; margin: 0; padding: 0 14px 10px; list-style: none; animation: aip-open 380ms var(--aip-spring) both; transform-origin: top center; }
-.aip-task { display: flex; align-items: center; gap: 10px; min-height: 30px; font-size: var(--text-small); color: var(--color-foreground); white-space: nowrap; }
-.aip-task-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.aip-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 40%, transparent); }
-.aip-dot.working { background: var(--color-accent); }
-.aip-dot.waiting { background: color-mix(in srgb, var(--color-red) 70%, var(--color-foreground)); }
-.aip-dot.nocheck { background: transparent; box-shadow: inset 0 0 0 1.5px var(--color-muted); }
+.aip-task { display: flex; align-items: flex-start; gap: 10px; padding: 5px 0; font-size: 13px; line-height: 18px; color: var(--color-foreground); }
+.aip-task > .aip-dot { margin-top: 5px; }
+/* Up to two lines, then the ellipsis (design QA). */
+.aip-task-title { flex: 1; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+/* The dots by true state (design QA): working the accent, pulsing; awaiting its check blue; needs you amber, filled;
+   stalled / no check grey. The blue and the amber are fixed meanings, not the theme's (dev/style-allow.txt). */
+.aip { --aip-blue: #5aa7e8; --aip-amber: #e3a03c; }
+.aip-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 45%, transparent); }
+.aip-dot.working { background: var(--color-accent); animation: aip-pulse 1.6s ease-in-out infinite; }
+.aip-dot.check { background: var(--aip-blue); }
+.aip-dot.waiting { background: var(--aip-amber); }
+@keyframes aip-pulse { 50% { opacity: 0.45; transform: scale(0.8); } }
 .aip-empty { padding: 16px 4px; font-size: var(--text-body); color: var(--color-foreground); opacity: 0.86; }
 @keyframes aip-fill { from { transform: scaleX(0); } }
 @keyframes aip-open { from { opacity: 0; transform: translateY(-6px) scaleY(0.96); } }
 @keyframes aip-pop { from { opacity: 0; transform: scale(0.9); } }
-@media (prefers-reduced-motion: reduce) { .aip-ring, .aip-bar-fill, .aip-tasks { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .aip-ring, .aip-bar-fill, .aip-tasks, .aip-dot.working { animation: none; } }
 /* The nav's counts on the pane's glass: the full foreground (muted read 4.06:1 there). */
 .ai-screen.panes .ai-nav .ai-nav-n { color: var(--color-foreground); }
 
@@ -3585,12 +3595,12 @@ html:root .ai-mid .ai-chat-in :is(.msg.assistant, .msg.note, .tl, .present, .cho
 .ai-ctx { flex: none; width: clamp(220px, 30%, 340px); display: flex; flex-direction: column; gap: 18px; padding: 14px 12px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
 .ai-ctx-sec { display: flex; flex-direction: column; gap: 6px; }
 .ai-ctx-head { margin: 0 4px 2px; font-size: var(--text-small); font-weight: 600; color: var(--color-muted); }
-.ai-ctx-card { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 10px 12px; border: 0; border-radius: calc(var(--radius) * 0.8); background: var(--ai-bubble); font: inherit; color: var(--color-foreground); text-align: start; }
+.ai-ctx-card { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 10px 12px; border: 0; border-radius: calc(var(--radius) * 0.8); background: var(--backdrop-tint); font: inherit; color: var(--color-foreground); text-align: start; }
 .ai-ctx-card .fl-bar { align-self: stretch; height: 3px; }
 .ai-ctx-title { font-weight: 600; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ai-ctx-now { font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-ctx-card.bad .ai-ctx-title { color: var(--ai-danger-text); }
-.ai-ctx-try { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border-radius: calc(var(--radius) * 0.8); background: var(--ai-bubble); }
+.ai-ctx-try { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border-radius: calc(var(--radius) * 0.8); background: var(--backdrop-tint); }
 /* Working now's other projects: one quiet toggle line, closed at first. */
 .ai-ctx-other { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; min-height: 32px; padding: 0 4px; border: 0; background: none; font: inherit; font-size: var(--text-small); color: var(--color-muted); }
 .ai-ctx-other[aria-expanded="true"] .mail-chev { transform: rotate(180deg); }

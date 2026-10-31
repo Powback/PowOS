@@ -1848,18 +1848,18 @@ async function aiProgressSetup() {
   return !!(await G.until(() => document.querySelector(".ai-screen .aip .aip-area"), 4000));
 }
 
-/** In the page: the first area opened, its animations settled; whether there is a Progress view. */
+/** In the page: the first area opened, its animations settled (not the working dots' endless pulse); whether there is a Progress view. */
 async function aiProgressOpen() {
   const view = document.querySelector(".ai-screen .aip");
   if (!view) return false;
   document.querySelector(".ai-screen .aip-area-row")?.click();
   await window.__gw.until(() => document.querySelector(".ai-screen .aip-tasks"), 2000);
-  await Promise.all(document.getAnimations().filter((a) => view.contains(a.effect?.target)).map((a) => a.finished.catch(() => 0)));
+  await Promise.all(document.getAnimations().filter((a) => view.contains(a.effect?.target) && a.effect.getTiming().iterations !== Infinity).map((a) => a.finished.catch(() => 0)));
   return true;
 }
 
 /** The one-line texts the Progress view has (in the page: a selector list). */
-const AIP_LINES = ".ai-screen .aip :is(.aip-area-name, .aip-task-title, .aip-count, .aip-chip, .aip-ring-label, .aip-ring-sub)";
+const AIP_LINES = ".ai-screen .aip :is(.aip-area-name, .aip-task-title, .aip-count, .aip-chip, .aip-ring-label, .aip-ring-sub, .aip-legend-item)";
 
 /** In the page: monospace text in the view or its header; texts that wrap. */
 function aiProgressType(lines) {
@@ -1874,8 +1874,18 @@ function aiProgressType(lines) {
     const cs = getComputedStyle(e);
     const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5;
     const h = e.getBoundingClientRect().height;
-    if (h > lh * 1.5) fails.push(`"${e.textContent.trim().slice(0, 24)}" wraps (${Math.round(h)} px, line ${Math.round(lh)})`);
+    // A task's title takes two lines before its ellipsis (design QA); the rest one.
+    if (h > lh * (e.matches(".aip-task-title") ? 2.5 : 1.5)) fails.push(`"${e.textContent.trim().slice(0, 24)}" wraps (${Math.round(h)} px, line ${Math.round(lh)})`);
   }
+  return fails;
+}
+
+/** In the page: the areas are the board's (no old project names), the dots' legend is there. */
+function aiProgressAreas() {
+  const fails = [];
+  const names = [...document.querySelectorAll(".ai-screen .aip-area-name")].map((e) => e.textContent.trim());
+  if (names.some((n) => /PowOS ·/.test(n))) fails.push(`areas named by old projects: ${names.join(", ")}`);
+  if (!document.querySelector(".ai-screen .aip-legend")) fails.push("no dots legend under the ring");
   return fails;
 }
 
@@ -1926,7 +1936,7 @@ async function aiProgressCheck(page) {
       continue;
     }
     if (!(await page.evaluate(aiProgressOpen))) fails.push(`${size}: no Progress view (.aip)`);
-    const found = [...(await page.evaluate(aiProgressType, AIP_LINES)), ...(await page.evaluate(aiProgressMarks)), ...(await page.evaluate(aiProgressContrast, AIP_LINES))];
+    const found = [...(await page.evaluate(aiProgressType, AIP_LINES)), ...(await page.evaluate(aiProgressMarks)), ...(await page.evaluate(aiProgressAreas)), ...(await page.evaluate(aiProgressContrast, AIP_LINES))];
     fails.push(...found.map((f) => `${size}: ${f}`));
     await page.screenshot({ path: `/cache/ai-progress-${size}.png` });
   }

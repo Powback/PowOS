@@ -19,11 +19,31 @@ export interface AreaStat {
   open: WorkRow[];
 }
 
-const areaOf = (w: WorkRow) => w.project.trim() || "Other";
+/**
+ * The board's areas (design QA, 2026-10-31) in their order, each with the older project names that belong to it: a row
+ * from before `task infer` ("PowOS · phone UI", "PowOS · kernel") is counted in its area, never under its own name.
+ */
+export const AREAS: [string, RegExp][] = [
+  ["Windows", /window|desktop/i],
+  ["Home & launcher", /home|launcher|dock|widget|phone ui/i],
+  ["Shade & lock", /shade|lock|notif|quick ?settings/i],
+  ["AI page", /\bai\b|chat|assistant/i],
+  ["Apps", /\bapps?\b|store/i],
+  ["Games", /game/i],
+  ["Performance", /perf|speed|battery/i],
+  ["Kernel & system", /kernel|system|boot|driver|root/i],
+  ["Agents & tooling", /agent|tool|gate|ship/i],
+];
+
+/** The area a board row is in (its project, mapped; "Other" when none fits). */
+export function areaOf(w: WorkRow) {
+  const p = w.project.trim();
+  return AREAS.find(([name, rx]) => name === p || rx.test(p))?.[0] ?? "Other";
+}
 const doneAt = (w: WorkRow) => Number(w.done || w.updated || 0);
 const inMonth = (w: WorkRow, now: number) => w.status !== "done" || now - doneAt(w) < MONTH_MS;
 
-/** The board per area, the most open first (then the most done). */
+/** The board per area: the most waiting on the user first, then the most open. */
 export function areaStats(rows: WorkRow[] = board.value, now = Date.now()): AreaStat[] {
   const by = new Map<string, AreaStat>();
   for (const w of rows) {
@@ -36,7 +56,8 @@ export function areaStats(rows: WorkRow[] = board.value, now = Date.now()): Area
     if (w.status === "waiting") a.you++;
     by.set(name, a);
   }
-  return [...by.values()].sort((x, y) => y.open.length - x.open.length || y.done - x.done || x.name.localeCompare(y.name));
+  // Those that need the user first, then the most open.
+  return [...by.values()].sort((x, y) => y.you - x.you || y.open.length - x.open.length || x.name.localeCompare(y.name));
 }
 
 /** The ring's figure: the daily-driver epic's own progress (its board row), else the month's share done overall. */
@@ -79,17 +100,38 @@ export function ThinBar({ done, total }: { done: number; total: number }) {
   );
 }
 
-type Dot = "working" | "waiting" | "nocheck";
-const DOT_WORDS: Record<Dot, string> = { working: "working", waiting: "waiting on you", nocheck: "no check yet" };
+type Dot = "working" | "check" | "waiting" | "stalled";
+/** Each dot's words, in the legend's order. */
+export const DOTS: [Dot, string][] = [
+  ["working", "working"],
+  ["check", "awaiting check"],
+  ["waiting", "needs you"],
+  ["stalled", "stalled / no check"],
+];
+const DOT_WORDS = Object.fromEntries(DOTS) as Record<Dot, string>;
 
-/** An open task's dot: waiting on the user, an agent on it (or its check running), else nothing checks it. */
+/** An open task's true state: waiting on the user, an agent on it, its phone check queued or running, else stalled. */
 export function dotOf(w: WorkRow): Dot {
   if (w.status === "waiting") return "waiting";
   const s = boardState(w, checks.value);
-  return s === "working" || s === "awaiting check" ? "working" : "nocheck";
+  return s === "working" ? "working" : s === "awaiting check" ? "check" : "stalled";
 }
 
-/** An area's open tasks, one line each. */
+/** The dots' legend: one small line. */
+export function DotLegend() {
+  return (
+    <div class="aip-legend">
+      {DOTS.map(([d, words]) => (
+        <span key={d} class="aip-legend-item">
+          <span class={`aip-dot ${d}`} aria-hidden="true" />
+          {words}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** An area's open tasks, up to two lines each. */
 function Tasks({ open }: { open: WorkRow[] }) {
   return (
     <ul class="aip-tasks">
@@ -139,6 +181,7 @@ export function ProgressView({ shown }: { shown: boolean }) {
     <section class="aip">
       {shown && <WorkFeed />}
       {ring && <ProgressRing pct={ring.pct} label={ring.label} sub={subLine(stats)} />}
+      {stats.length > 0 && <DotLegend />}
       <ul class="aip-areas">
         {stats.map((a) => (
           <AreaRow key={a.name} a={a} open={opened === a.name} toggle={() => setOpened(opened === a.name ? null : a.name)} />
