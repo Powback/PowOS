@@ -14,7 +14,7 @@
 import { useEffect } from "preact/hooks";
 import { computed, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { aiDraft, chatting, closeDrawer, dockPosition, drawer, pullKind, type LauncherOpen } from "../state.ts";
+import { aiDraft, chatting, closeDrawer, dockPosition, drawer, pullKind, query, type LauncherOpen } from "../state.ts";
 import { AppMenu } from "./apps.tsx";
 import { detailSheet } from "../apps/sheet.ts";
 import { WidgetSheet } from "./widgetsheet.tsx";
@@ -51,7 +51,11 @@ powos.on("pull.end", (e: { open: boolean }) => {
   const how = asked;
   asked = {};
   if (how.chat) openAssistant(how);
-  else if (how.search) focusSearch();
+  else if (how.search) {
+    // What home's dock search button had typed (docksearch.tsx showResults) carries on here, its results shown.
+    if (how.text != null) query.value = how.text;
+    focusSearch();
+  }
 });
 
 /** The pill's field focused and the keyboard up (ShellBridge.overlayKeyboard makes this window the IME's target). */

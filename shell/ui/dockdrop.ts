@@ -3,7 +3,7 @@
  * recent strip, home's grid, or out of the dock itself - pins where it's let go over the dock. While it hovers there
  * the dock makes room for it (home.tsx Dock reads [dockAim]); a full dock offers to swap the app under the finger.
  */
-import { byKey, dock, dockPosition, dockAim, editing, selected, setDock, type Carry } from "../state.ts";
+import { byKey, dock, dockPosition, dockAim, editing, homePage, searchInDock, selected, setDock, type Carry } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
 
@@ -44,17 +44,26 @@ function overDock(r: DOMRect, x: number, y: number, vertical: boolean) {
   return r.width > 0 && y >= r.top - REACH && x >= r.left - reach && x <= r.right + reach && (!vertical || y <= r.bottom);
 }
 
+/** The search button's index among [cells] dock cells (docksearch.tsx): the middle, an odd extra app on the right. */
+export const buttonSlot = (cells: number) => Math.floor(cells / 2);
+
+/** The app slot (of [n]) for the dock's rendered cell [cell], which counts the search button when it's there. */
+export function slotPast(cell: number, n: number) {
+  return homePage && searchInDock.value && cell > buttonSlot(n) ? cell - 1 : cell;
+}
+
 /** Which of [n] slots of the dock [el] (at [r]) [x] is over. */
 function slotAt(el: HTMLElement, r: DOMRect, point: { x: number; y: number }, n: number) {
+  const cells = n + (homePage && searchInDock.value ? 1 : 0);
   if (dockPosition.value !== "bottom") {
     const row = el.querySelector<HTMLElement>(".dock-page");
     const top = row?.getBoundingClientRect().top ?? r.top;
-    return Math.max(0, Math.min(n - 1, Math.floor((point.y - top) / 56)));
+    return Math.max(0, Math.min(n - 1, slotPast(Math.floor((point.y - top) / 56), n)));
   }
   // Wide (one bar: home.tsx .home.wide), the pinned row is as long as its icons, not the dock's whole side.
   const row = wideHome.value ? el.querySelector<HTMLElement>(".dock-page")?.getBoundingClientRect() : null;
   const s = row?.width ? row : r;
-  return Math.max(0, Math.min(n - 1, Math.floor(((point.x - s.left) / s.width) * n)));
+  return Math.max(0, Math.min(n - 1, slotPast(Math.floor(((point.x - s.left) / s.width) * cells), n)));
 }
 
 /** Follows the finger: the dock makes room as it comes and goes, with a tick for each new slot. */
