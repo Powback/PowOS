@@ -287,10 +287,11 @@
 /* Home's: at the stage's foot, in the gap above the pill / dock, over the pages' width only (the stage is already
    clear of a side dock); it fades with the pages as the launcher opens. */
 .home-dots { position: absolute; left: 0; right: 0; bottom: calc(var(--gap) / 2 - 7px); opacity: calc(1 - var(--p)); pointer-events: none; }
-/* The launcher's: a row of its own under the two pages, above its recent row and the search pill. */
-.drawer-pages { display: flex; flex-direction: column; }
-.drawer-pages > .drawer-track { flex: 1; min-height: 0; height: auto; }
-.drawer-pages > .page-dots { flex: none; margin-top: 4px; }
+/* The launcher's: no row of their own - laid over the gap under the pages (the launcher's 16 px over the pill, or the
+   recent row's margin), so the app grid runs down to it. The user, 2026-10-31: "The page indicator takes up a lot of
+   space." The pages clip with clip-path (open 16 px at the foot), not overflow, so the dots show below their box. */
+.drawer-pages { position: relative; }
+.drawer-pages > .page-dots { position: absolute; left: 0; right: 0; bottom: -10px; height: 6px; }
 .dock .app { flex: 1 1 0; min-width: 0; height: calc(var(--strip-height) - 2 * var(--frame)); justify-content: center; padding: 0; }
 .dock .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
 
@@ -545,7 +546,7 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 }
 
 /* Two pages (drawer.tsx Pages): all apps | folders, side by side, moved by transform only. */
-.drawer-pages { grid-column: 1 / -1; grid-row: 1; min-height: 0; overflow: hidden; }
+.drawer-pages { grid-column: 1 / -1; grid-row: 1; min-height: 0; clip-path: inset(0 0 -16px); }
 .drawer-track { display: flex; gap: var(--page-gap, 0px); height: 100%; will-change: transform; }
 .drawer-page { flex: 0 0 100%; min-width: 0; min-height: 0; display: grid; grid-template-columns: 1fr var(--letter-bar); grid-template-rows: minmax(0, 1fr); }
 .drawer-page > .drawer-folders { grid-column: 1 / -1; padding-right: 0; }
