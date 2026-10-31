@@ -369,6 +369,13 @@ public class Hook implements IXposedHookLoadPackage {
      * PowOS takes only from a STATUS_BAR_SERVICE holder) and closes the menu; a click below it is passed on with our item
      * out of the list for that call, so OnePlus' positions hold. A click on Floating window also tells PowOS, so that
      * task stays a native floating window. Guarded: a SystemUI update that renames any of this leaves OnePlus' menu as is.
+     *
+     * HACK: every hook point here is OxygenOS 16 SystemUI internals, checked against the phone's SystemUI.apk
+     * 2026-10-31 (FullscreenCaptionHandleMenu.mPopupListItems/mPopupWindow/mTaskId/mContext, initPopupListWindow,
+     * lambda$initPopupListWindow$3(AdapterView, View, int, long), COUI PopupListItem$Builder). Why: OnePlus' menu has no
+     * extension point (items built in code, clicks by position). Real fix: AOSP desktop mode's app handle menu
+     * (WM Shell HandleMenu) with a PowOS desktop task repository / DesktopModeTransitionSource for "Desktop window",
+     * once OxygenOS ships WM Shell's desktop windowing on the Open - then this hook goes.
      */
     private static void desktopWindowItem(ClassLoader cl) {
         try {
@@ -396,6 +403,8 @@ public class Hook implements IXposedHookLoadPackage {
                         XposedHelpers.callMethod(b, "setIsEnable", true);
                         XposedHelpers.callMethod(b, "setGroupId", XposedHelpers.getIntField(items.get(0), "mGroupId"));
                         Object item = XposedHelpers.callMethod(b, "build");
+                        // HACK: position 2 = after OnePlus' Floating window (Split View, Floating window, Close, ...);
+                        // real fix: the AOSP handle menu's own desktop item (see desktopWindowItem).
                         items.add(DESKTOP_AT, item);
                         synchronized (desktopItems) {
                             desktopItems.put(self, item);
@@ -434,6 +443,8 @@ public class Hook implements IXposedHookLoadPackage {
                         }
                         if (pos == 1)
                             tell(self, task, "float");
+                        // HACK: OnePlus' click handler indexes its list by position, so our item is lifted out for
+                        // the length of the call; real fix: no position dispatch (the AOSP handle menu has ids).
                         if (pos > at) {
                             items.remove(at);
                             synchronized (lifted) {
