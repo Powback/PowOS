@@ -579,6 +579,12 @@ run)
       # Stopped WITH its runner (the TERM trap marked it before killing ship-apk, whose subshell still writes 143): not
       # a failure of this tip - it goes again, as one whose runner died without an rc does (apk_alive's rc 4).
       elif [ -e "$Q/apk/stopped" ]; then echo "$(date +%T) ${A:0:9}: APK ship stopped with the runner (rc $arc) - it goes again"
+      # The PHONE LINK dropped, not this tip (11-01 measure: 12 of 36 APK FAILs were "couldn't snapshot" / "phone
+      # unavailable" / "error: closed" / an empty adb install failure; each held every request until an unrelated push,
+      # 293 min in 2 days). Nothing new is on the phone (ship-apk restored the overrides), so the same tip goes again, up
+      # to SHIP_APK_LINK_RETRIES (default 2) times; a code fault (build, shell doesn't load, guard) still fails at once.
+      elif apk_link_fault "$alog" && lr=$(apk_link_retry "$A") && [ "$lr" -le "${SHIP_APK_LINK_RETRIES:-2}" ]; then
+        echo "$(date +%T) ${A:0:9}: APK ship rc $arc: the phone link dropped (log $alog) - it goes again ($lr/${SHIP_APK_LINK_RETRIES:-2})"
       else
         echo "$A" > "$Q/failed-apk"
         echo "$(date +%T) ${A:0:9}: APK ship FAILED rc $arc (log $alog) - waiting for a new origin commit"
@@ -586,6 +592,17 @@ run)
       fi
       rm -rf "$Q/apk"; inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
     fi
+  }
+  # apk_link_fault LOG: the APK ship failed on the adb link to the phone (before or at the install), not on the tip.
+  apk_link_fault() {
+    [ -f "$1" ] || return 1
+    grep -q 'REFUSED - this commit\|build-app.sh failed\|INSTALL_FAILED' "$1" && return 1
+    grep -q "phone unavailable after reconnect\|^error: closed\|couldn't snapshot the phone\|couldn't reset the phone's shell overrides\|failed to install /powos.apk: *\$" "$1"
+  }
+  # apk_link_retry TIP: prints how many link retries TIP has had, this one counted ($Q/apk-link-retry: "tip n").
+  apk_link_retry() {
+    local t="" n=0; [ -s "$Q/apk-link-retry" ] && read -r t n < "$Q/apk-link-retry"; case $n in ''|*[!0-9]*) n=0 ;; esac
+    [ "$t" = "$1" ] || n=0; n=$((n+1)); echo "$1 $n" > "$Q/apk-link-retry"; echo "$n"
   }
   # shell_done: a live shell ship of T whose window check passed (or wasn't needed): its records, then its requests done.
   shell_done() {
