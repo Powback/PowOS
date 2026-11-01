@@ -2717,6 +2717,19 @@ class WebWindows(
         return true
     }
 
+    /**
+     * Back reached home (ShellActivity.onBackPressed) with a quick page's card on screen: sent to the card's display
+     * ([QuickPageRoute.backDisplay]), so its page goes back one screen, or at its root finishes and the card closes with
+     * its task. False: no card on screen (or no display maker), Back is home's page's. Main thread.
+     */
+    fun quickBack(): Boolean {
+        val cards = wins.values.filter { it.quick != null && it.linux == null }
+        val display = QuickPageRoute.backDisplay(cards.map { QuickPageRoute.Card(it.displayId, it.closed, it.shown) }) ?: return false
+        val sent = helper.line(QuickPageRoute.backLine(display))
+        WindowLog.i(TAG, "back: to quick page ${cards.first { it.displayId == display }.quick}'s display $display (its page's own back stack): ${if (sent) "sent" else "no display helper"}")
+        return sent
+    }
+
     /** MN2: the page's way back from minimised (dock, switcher, its page): an app [minimise] moved out, back in window [id]. */
     fun restore(id: Int): Boolean {
         val w = wins[id] ?: return false
@@ -3447,6 +3460,13 @@ class WebWindows(
             if (process?.isAlive != true) return false
             val line = "touch ${w.displayId} $action ${w.downAt} " + pointers.joinToString(" ") { (id, x, y) -> "$id,$x,$y" }
             io.post { if (!send(line)) WindowLog.w(TAG, "input: '$line' not sent") }
+            return true
+        }
+
+        /** [line] to the display maker, as it is ([QuickPageRoute.backLine]). False: it isn't running. */
+        fun line(line: String): Boolean {
+            if (process?.isAlive != true) return false
+            io.post { if (!send(line)) WindowLog.w(TAG, "helper: '$line' not sent") }
             return true
         }
 

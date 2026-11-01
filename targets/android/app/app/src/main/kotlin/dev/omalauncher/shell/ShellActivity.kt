@@ -339,6 +339,8 @@ class ShellActivity : Activity() {
     override fun onBackPressed() {
         // Back from a full-screen Linux web window: it leaves full screen, nothing else (FL3).
         if (host.bridge.leaveFullScreen("back")) return
+        // A quick page's card on screen: Back is its page's - back one screen, or at its root the card closes.
+        if (host.bridge.quickBack()) return
         host.bridge.emit("system.back", null)
     }
 

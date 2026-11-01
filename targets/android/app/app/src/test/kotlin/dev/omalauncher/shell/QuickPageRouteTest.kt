@@ -78,4 +78,21 @@ class QuickPageRouteTest {
         assertEquals("q:7", QuickPageRoute.key("7"))
         assertNotEquals("com.android.settings", QuickPageRoute.key("com.android.settings"))
     }
+
+    @Test
+    fun backWithACardOnScreenGoesToTheCardsPageNotHome() {
+        val card = QuickPageRoute.Card(displayId = 101, closed = false, shown = true)
+        // The page's own Back: a sub-screen goes back one screen; at its root the page finishes and the card closes.
+        assertEquals(101, QuickPageRoute.backDisplay(listOf(card)))
+        assertEquals("key 101 4", QuickPageRoute.backLine(101))
+    }
+
+    @Test
+    fun backWithNoCardOnScreenIsHomesPage() {
+        assertEquals(null, QuickPageRoute.backDisplay(emptyList()))
+        // Closed, not on screen (another page, under the switcher) or with no display yet: home's page has Back.
+        assertEquals(null, QuickPageRoute.backDisplay(listOf(QuickPageRoute.Card(101, closed = true, shown = true))))
+        assertEquals(null, QuickPageRoute.backDisplay(listOf(QuickPageRoute.Card(101, closed = false, shown = false))))
+        assertEquals(null, QuickPageRoute.backDisplay(listOf(QuickPageRoute.Card(-1, closed = false, shown = true))))
+    }
 }

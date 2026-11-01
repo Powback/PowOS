@@ -88,6 +88,29 @@ internal object QuickPageRoute {
     /** The quick flags off again: pop-out relaunches the same page in its app's normal window (recents, dock). */
     fun poppedOut(flags: Int): Int = (flags and (FLAG_EXCLUDE_FROM_RECENTS or FLAG_MULTIPLE_TASK).inv()) or FLAG_NEW_TASK
 
+    /** android.view.KeyEvent.KEYCODE_BACK (a constant here so the JVM tests need no Android stubs). */
+    const val KEYCODE_BACK = 4
+
+    /** An open quick page's card as Back sees it: its display (-1: none yet), closed, its page on screen ([shown]). */
+    data class Card(
+        val displayId: Int,
+        val closed: Boolean,
+        val shown: Boolean,
+    )
+
+    /**
+     * Where a Back that reached home goes while quick page [cards] are open (the user, 11-01: "it's closing when returning
+     * back"): the display of the card on screen - its page's own Back there pops the page's back stack (a sub-screen
+     * goes back one screen; at the page's root the page finishes itself, its task goes, the card closes the bar's way:
+     * WebWindows.confirmDead) - or null: no card on screen, Back is home's page's. A Back reaches home whenever display
+     * 0 holds the top focus: the edge back gesture's own touch on display 0, a touch on the card's bar or home moved
+     * it there - never the card's page then, and the page's back() had no card in it.
+     */
+    fun backDisplay(cards: List<Card>): Int? = cards.lastOrNull { !it.closed && it.shown && it.displayId >= 0 }?.displayId
+
+    /** The display maker's (WebWindowsHost) line that sends Back to display [displayId]: a down and an up there. */
+    fun backLine(displayId: Int): String = "key $displayId $KEYCODE_BACK"
+
     /** A quick page's held-launch key and page key ("q:<token>"): never an app's ("a:...") or its package. */
     fun key(token: String): String = "q:$token"
 }
