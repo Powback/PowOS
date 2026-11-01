@@ -1,0 +1,77 @@
+From af9a16e2eedd0150e80efee6e3dc3a45fc940303 Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Sun, 1 Nov 2026 04:25:57 +0100
+Subject: [PATCH] backends/anland: a task's window stays inside the output, so
+ its menus open at their button
+
+Dolphin's hamburger menu in a wide web window opened far left of its button (the user, 2026-10-31). KWin places a
+new window (Dolphin at 274,51 logical, 504 wide) and fitWindow() grew it from that top left to the task's size: a
+web window of 2268 px made it 1008 logical wide, its right edge at 1282 - past the 1008-logical output. The task draws
+the window wherever it lies (viewport), but its menus are placed against the screen: Qt clamps a QMenu to its
+QScreen, KWin an X11 menu to Xwayland's root and an xdg popup to the output, so a menu at the window's right edge was
+pushed back inside the output, ~270 logical px left of its button.
+
+fitWindow() now also keeps the frame inside the output's placement area (insideOutput: moved left/up as far as
+needed, never past its top left); a task's size never exceeds its buffers (the screen), so the window always fits.
+---
+ src/backends/anland/anland_window_task.cpp | 27 ++++++++++++++++++++--
+ src/backends/anland/anland_window_task.h   |  2 ++
+ 2 files changed, 27 insertions(+), 2 deletions(-)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 115c04c..c189080 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -859,11 +859,34 @@ void AnlandWindowTask::fitWindow()
+     // latest size wins - KWin configures the client, which commits when it has laid itself out (render() draws
+     // whatever it has meanwhile, at its real size from the top left: never stretched).
+     const QSizeF client = wantedClientSize();
+-    if (!sameSize(contentGeometry().size(), client)) {
++    const QSizeF frame = contentToFrameSize(client);
++    const QPointF at = insideOutput(frame);
++    const bool resize = !sameSize(contentGeometry().size(), client);
++    if (resize) {
+         m_resizeAsked = std::chrono::steady_clock::now();
+         m_resizeWanted = client;
+-        m_window->moveResize(RectF(m_window->frameGeometry().topLeft(), contentToFrameSize(client)));
+     }
++    if (resize || at != m_window->frameGeometry().topLeft()) {
++        m_window->moveResize(RectF(at, frame));
++    }
++}
++
++QPointF AnlandWindowTask::insideOutput(const QSizeF &frame) const
++{
++    // The task shows the window wherever it lies in KWin's space (viewport: its client area's top left), but its menus
++    // are placed against its screen: Qt clamps a QMenu to its QScreen, KWin an X11 menu to Xwayland's root and an
++    // xdg popup's positioner to the output. KWin had placed Dolphin at 274,51 logical (504 wide); a wide web window
++    // grew it from there past the 1008-px output, and its hamburger menu - clamped to the output's right edge - opened
++    // far left of its button (the user, 2026-10-31: "the pop-up ... don't show up on the right place"). Kept inside
++    // the output (moved left/up as far as needed, never past its top left), every popup opens at its button.
++    const RectF screen = workspace()->clientArea(PlacementArea, m_window);
++    const QPointF at = m_window->frameGeometry().topLeft();
++    if (screen.isEmpty()) {
++        return at;
++    }
++    const qreal x = std::max(screen.x(), std::min(at.x(), screen.x() + screen.width() - frame.width()));
++    const qreal y = std::max(screen.y(), std::min(at.y(), screen.y() + screen.height() - frame.height()));
++    return QPointF(x, y);
+ }
+ 
+ void AnlandWindowTask::fitFullScreen()
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 07722df..3fda6e7 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -159,6 +159,8 @@ private:
+     bool fitsWindow() const;
+     QSize taskSize() const;
+     void fitWindow();
++    // Where the window's frame of [frame] size lies inside its output (its popups are clamped to the output).
++    QPointF insideOutput(const QSizeF &frame) const;
+     void fitFullScreen();
+     bool fillsAsFullScreen();
+     void noteResized();
+-- 
+2.50.1 (Apple Git-155)
+
