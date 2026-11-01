@@ -93,7 +93,7 @@ const WORK_QUERY = "SELECT * FROM work";
 /** The board's facts (apps/agents work_check: each task's phone checks, synced from the verify queue) and friction. */
 export const checks = signal<BoardCheck[]>([]);
 /** A friction row (apps/agents `friction`: what got in an agent's way; `powos friction`). */
-interface FrictionRow {
+export interface FrictionRow {
   id: string;
   area: string;
   kind: string;
@@ -101,8 +101,20 @@ interface FrictionRow {
   count: number;
   status: string;
   last: bigint | number;
+  /** The whole story, how to make it happen again, a log path or screenshot, who logged it (absent on old bindings). */
+  details?: string;
+  repro?: string;
+  evidence?: string;
+  by?: string;
+  first?: bigint | number;
+  fixCommit?: string;
+  fixNote?: string;
+  fixedAt?: bigint | number;
+  reopened?: number;
+  /** The board task it is evidence for ("" = none). */
+  task?: string;
 }
-const friction = signal<FrictionRow[]>([]);
+export const friction = signal<FrictionRow[]>([]);
 /** One of the user's asks (apps/agents `user_ask`: their words, whole, and the board task it became; "" = none yet). */
 export interface UserAsk {
   id: string;
