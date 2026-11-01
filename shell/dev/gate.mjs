@@ -3559,6 +3559,9 @@ async function aiKeyboardUp(kb) {
   const S = await window.__gw.mod("./state.ts");
   S.aiScreen.value = "chat";
   S.page.value = -1;
+  // A turn under way: its "thinking…" row is the thread's last, and it too sits over the field (11-01 22:1x); the
+  // manager's long answer before it must wrap in the folded column too.
+  S.chat.value = { busy: true, items: [...S.chat.value.items, { kind: "assistant", text: window.__aiLong }, { kind: "user", text: "and the dock?" }] };
   window.__mockEvents.emit("system.insets", { top: 45, bottom: 16, left: 0, right: 0, keyboard: kb });
   document.querySelector(".bar[data-role] textarea")?.focus();
   await new Promise((r) => setTimeout(r, 900));
@@ -3574,7 +3577,7 @@ function aiKeyboardFacts(kb) {
   const last = [...(chat?.querySelector(".ai-chat-in")?.children ?? [])].filter((e) => !e.matches(".ai-new-pill")).at(-1);
   const fields = [...document.querySelectorAll("textarea, input:not([type=hidden])")].filter((e) => shown(e) && tb(e)[1] > 0 && tb(e)[0] < innerHeight - kb);
   return {
-    kbTop: innerHeight - kb, pill: tb(document.querySelector(".bar[data-role] .bar-pill")), segs: shown(scr?.querySelector(":scope > .ai-segs")),
+    over: window.__aiOverflow(".ai-screen.status .ais-chat-wrap > .ai-chat"), kbTop: innerHeight - kb, pill: tb(document.querySelector(".bar[data-role] .bar-pill")), segs: shown(scr?.querySelector(":scope > .ai-segs")),
     chat: tb(chat), last: tb(last), fields: fields.length, scrollY, atNewest: Math.abs(chat?.scrollTop ?? 99) < 2,
     tops: [...(scr?.querySelectorAll(":scope > .ais-top, .ais-chat-wrap > .ai-chat") ?? [])].map((e) => tb(e)[0]),
   };
@@ -3606,9 +3609,74 @@ async function aiSideButton() {
   return { said, focused: !!field && document.activeElement === field, bars: document.querySelectorAll(".bar[data-role]").length };
 }
 
+/** A long answer as the manager writes them (11-01 22:16, "overflow"): bold leads, a numbered list, an unbreakable token. */
+const AI_LONG_ANSWER = [
+  "Here are the numbers. Today a request took a median of 86 minutes from your report to your phone, longer in the slow cases. Three things ate the time:",
+  "",
+  ...Array.from({ length: 8 }, (_, i) => `${i + 1}. **Waiting for a free agent ${i}:** your requests sat behind big projects while only three agents could work at once.`),
+  "",
+  "The trace: /run/powos-app/powos-ai-shared/perf-1793567766122-a-very-long-unbreakable-path-name-that-must-wrap.json",
+].join("\n");
+
+/** In the page: the thread [q]'s parts that reach past its right edge (a code block scrolls inside: its own box only). */
+function aiThreadOverflow(q) {
+  const t = document.querySelector(q);
+  if (!t) return ["no thread"];
+  const edge = t.getBoundingClientRect().right + 1;
+  return [...t.querySelectorAll(".ai-chat-in *")].filter((e) => !e.parentElement?.closest("pre") && e.getClientRects().length && e.getBoundingClientRect().right > edge)
+    .slice(0, 3).map((e) => `${e.tagName.toLowerCase()}.${e.className} right ${Math.round(e.getBoundingClientRect().right)} > ${Math.round(edge)}`);
+}
+
+/**
+ * In the page, unfolded, no keyboard (the user, 11-01 22:1x: "smh" - the newest message's last line and "thinking…"
+ * under "Message the manager"): a long newest answer and a turn under way; the [top, bottom] of the last message, the
+ * thinking row and the seated bar's pill.
+ */
+async function aiWideClearFacts(where) {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const long = window.__aiLong;
+  const items = [];
+  for (let i = 0; i < 8; i++) items.push({ kind: "user", text: `question ${i}` }, { kind: "assistant", text: i === 7 ? long : `Answer ${i}.` });
+  items.push({ kind: "user", text: "and the dock?" });
+  S.chat.value = { busy: true, items };
+  S.aiScreen.value = "chat";
+  if (where === "panel") (S.page.value = 0, S.openPanel("ai"));
+  else S.page.value = -1;
+  await new Promise((r) => setTimeout(r, 1200));
+  const tb = (e) => { const b = e?.getBoundingClientRect(); return b ? [Math.round(b.top), Math.round(b.bottom)] : null; };
+  const kids = [...(document.querySelector(where === "panel" ? ".ai-panel .ai-chat-in" : ".ai-screen .ai-right .ai-chat-in")?.children ?? [])];
+  const over = window.__aiOverflow(where === "panel" ? ".ai-panel .ai-page-chat" : ".ai-screen .ai-right .ai-page-chat");
+  return { over, msg: tb(kids.filter((e) => e.matches(".msg:not(.note)")).at(-1)), thinking: tb(kids.find((e) => e.matches(".thinking"))), pill: tb(document.querySelector(".home > .bar[data-role] .bar-pill")) };
+}
+
+/** Puts the long answer and the overflow probe in [page] (its evaluated functions reach them on window). */
+const aiThreadProbe = (page) => page.evaluate(`window.__aiLong = ${JSON.stringify(AI_LONG_ANSWER)}; window.__aiOverflow = ${aiThreadOverflow.toString()};`);
+
+async function aiWideClearCheck(page) {
+  await aiThreadProbe(page);
+  const fails = [];
+  for (const where of ["page", "panel"]) {
+    const f = await page.evaluate(aiWideClearFacts, where);
+    await page.screenshot({ path: `/cache/ai-keyboard-wide-${where}.png` });
+    fails.push(...aiWideClearFails(f).map((x) => `ai-wide-clear ${where}: ${x}`));
+  }
+  return fails;
+}
+
+function aiWideClearFails(f) {
+  if (!f.msg || !f.thinking || !f.pill) return [`missing the last message, "thinking…" or the bar (${JSON.stringify(f)})`];
+  return failsOf([
+    [f.msg[1] <= f.pill[0], `the newest message's foot (${f.msg[1]}) is under the bar's top (${f.pill[0]})`],
+    [f.thinking[1] <= f.pill[0], `"thinking…" (${f.thinking}) is under the bar's top (${f.pill[0]})`],
+    [!f.over.length, `the thread runs past its right edge: ${f.over.join("; ")}`],
+  ]);
+}
+
 async function aiKeyboardCheck(page) {
   if (!(await page.evaluate(aiStatusSetup, [FLEET_SETUP]))) return ["ai-keyboard: no folded status page for the mock fleet"];
   await page.evaluate(aiFoldSet, [0, false]);
+  await aiThreadProbe(page);
   const kb = 330;
   await page.evaluate(aiKeyboardUp, kb);
   const f = await page.evaluate(aiKeyboardFacts, kb);
@@ -3626,6 +3694,7 @@ function aiKeyboardFails(f, side) {
     [Math.abs(f.pill[1] + 8 - f.kbTop) <= 12, `the field's foot (${f.pill[1]}) isn't on the keyboard's top (${f.kbTop}): ${at}`],
     [!f.segs, `the tabs show while typing: ${at}`],
     [f.fields === 1, `${f.fields} inputs visible above the keyboard, not one`],
+    [!f.over.length, `the thread runs past its right edge: ${f.over.join("; ")}`],
     [f.tops.every((t) => t >= 45 - 1) && f.scrollY === 0, `something sits under the status bar (tops ${f.tops}, scrollY ${f.scrollY})`],
     [f.chat[1] <= f.pill[0] + 2 && f.chat[1] - f.chat[0] > 100, `the chat (${f.chat}) doesn't fill the room down to the field (${f.pill})`],
     [f.atNewest && f.last[1] <= f.pill[0] + 2 && f.last[0] >= f.chat[0] - 2, `the newest message (${f.last}) isn't visible over the field (${f.pill}, chat ${f.chat})`],
@@ -9636,6 +9705,9 @@ try {
   // The folded Chat with the keyboard up (the user, 11-01 21:32, P1: "chat screen broken when trying to type").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-keyboard", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiKeyboardCheck(r.page))));
+  // Unfolded, no keyboard: the newest message and "thinking…" end over the shared bar (the user, 11-01 22:1x: "smh").
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-wide-clear", { width: 821, height: 883 }).then((r) => whenReady(r, () => aiWideClearCheck(r.page))));
   // The terminals from the AI page in at most 2 taps, both modes (the user, 11-01 16:57: "There's no terminal option anymore").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-terms", { width: 821, height: 883 }).then((r) => whenReady(r, () => aiTermsCheck(r.page))));

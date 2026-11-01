@@ -323,6 +323,47 @@ function aiViewClass(cls: string, wide: boolean, split: boolean) {
   return `${cls} ai-view ${wide ? "wide" : ""} ${split ? "split" : ""}`;
 }
 
+/** Kept clear over the bar's pill: the thread's last line and its live row ("thinking…") end this far above it. */
+const BAR_CLEAR = 16;
+
+/** The page's one input: home's bar (seated on the AI page, or under the launcher's AI panel) or the overlay's. */
+const barPill = () => document.querySelector<HTMLElement>(".bar[data-role] .bar-pill") ?? document.querySelector<HTMLElement>(".bar .bar-pill");
+
+/**
+ * Thread [el] ends above the bar (the user, 11-01 22:1x: "smh" - the newest message's last line and "thinking…" under
+ * "Message the manager"): where the pill overlaps it, bottom padding of the overlap plus [BAR_CLEAR], so scrolled to
+ * its end (column-reverse: always, unless scrolled up) all of it shows over the bar; else its own CSS padding.
+ */
+function clearOfBar(el: HTMLElement) {
+  el.style.removeProperty("padding-bottom");
+  const pill = barPill();
+  if (!pill) return;
+  const p = pill.getBoundingClientRect(), r = el.getBoundingClientRect();
+  const across = r.width > 0 && p.width > 0 && p.left < r.right && p.right > r.left && p.top < r.bottom;
+  const need = across ? r.bottom - (p.top - BAR_CLEAR) : 0;
+  if (need > (parseFloat(getComputedStyle(el).paddingBottom) || 0)) el.style.paddingBottom = `${Math.ceil(need)}px`;
+}
+
+/** Keeps [ref]'s thread clear of the bar as either moves: the bar seated or growing, the strip, the keyboard. */
+function useBarClear(ref: { current: HTMLElement | null }) {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const run = () => clearOfBar(el);
+    const ro = new ResizeObserver(run);
+    ro.observe(el);
+    const pill = barPill();
+    if (pill) ro.observe(pill);
+    // The seated bar's translate eases into place: measured again where it ends.
+    const ended = (e: Event) => (e.target as Element).matches?.(".bar") && run();
+    document.addEventListener("transitionend", ended);
+    document.addEventListener("bar-seated", run);
+    const off = powos.on("system.insets", () => requestAnimationFrame(run));
+    run();
+    return () => (ro.disconnect(), document.removeEventListener("transitionend", ended), document.removeEventListener("bar-seated", run), off());
+  }, []);
+}
+
 /** The view's body: a menu screen with back, or the chat. */
 function AiBody({ sub, shown, beside = false }: { sub: AiScreen | null; shown: boolean; beside?: boolean }) {
   if (sub) {
@@ -334,7 +375,16 @@ function AiBody({ sub, shown, beside = false }: { sub: AiScreen | null; shown: b
   }
   return (
     // .ai-page-chat: THE chat, styled as one wherever it's held (the page, its panes, the launcher's AI panel: shell.css).
-    <div class="ai-scroll ai-chat ai-page-chat">
+    <ChatScroll shown={shown} />
+  );
+}
+
+/** THE chat's scroller, kept clear of the bar (useBarClear). */
+function ChatScroll({ shown }: { shown: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useBarClear(ref);
+  return (
+    <div ref={ref} class="ai-scroll ai-chat ai-page-chat">
       <ChatPane shown={shown} />
     </div>
   );

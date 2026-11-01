@@ -1657,6 +1657,13 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 :is(.ai-screen, .ai-page-chat) .ai-chat-in :is(.msg.assistant, .msg.note, .tl, .present, .choice-opt) { background: var(--text-fill); box-shadow: var(--lift); }
 :is(.ai-screen, .ai-page-chat) .ai-chat-in > .tl { align-self: flex-start; width: fit-content; max-width: 100%; padding: 0 12px; border-radius: var(--radius); }
 :is(.ai-screen, .ai-page-chat) .ai-chat-in > .msg.note { align-self: flex-start; width: fit-content; padding: 4px 12px; border-radius: 999px; }
+/* The thread is never wider than its column (the user, 11-01 22:16: "overflow"): every row at most its width, shrinking
+   in the flex column, a long token (a path, a URL) broken; a code block scrolls inside its own box. :where - no rule's
+   own narrower max-width is overridden. */
+:where(.ai-page-chat) { min-width: 0; overflow-x: hidden; }
+:where(.ai-page-chat .ai-chat-in) { min-width: 0; max-width: 100%; }
+:where(.ai-page-chat .ai-chat-in) > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+:where(.ai-page-chat) pre { max-width: 100%; overflow-x: auto; }
 .ai-page-chat { font-family: var(--font-ui); }
 .ai-page-chat * { font-family: inherit; }
 .ai-chat-in > .tl { color: var(--color-muted); }
