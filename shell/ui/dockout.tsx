@@ -18,6 +18,7 @@
  * everywhere, home too.
  */
 import { signal } from "@preact/signals";
+import { tick } from "./haptics.ts";
 import { powos } from "../bridge.ts";
 import { byKey, launch, page, pages, pullPage, type Carry } from "../state.ts";
 import { PREFIX } from "../apps/pages.ts";
@@ -74,7 +75,7 @@ function zoneRect(zone: OutZone, w: number, h: number) {
 export function hoverOut(c: Carry, x: number, y: number) {
   const a = aimOut(c, x, y);
   if (outKey(a) !== outKey(outAim.value)) {
-    if (a) navigator.vibrate?.(5);
+    if (a) tick();
     outAim.value = a;
   } else if (a?.place) outAim.value = a; // floating: the ghost follows the finger
 }
@@ -97,7 +98,7 @@ export function dropOut(c: Carry, x: number, y: number): boolean {
   const a = lastAim(c, x, y);
   outAim.value = null;
   if (!a) return false;
-  navigator.vibrate?.(10);
+  tick();
   // A PowOS app is a page of home's own (no task to split or float): it opens as a tap opens it.
   if (a.key.startsWith(PREFIX)) void launch(a.key);
   else if (a.place) void openPlaced(a.key, a.place);

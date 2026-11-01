@@ -538,6 +538,9 @@ const SCENES = [
   // .home-dots and the launcher's dots, right and left.
   ["home-dots-right", "home", "S.dockPlacement.value = 'right'; await sleep(300);", "wallpaper"],
   ["home-dots-left", "home", "S.dockPlacement.value = 'left'; await sleep(300);", "wallpaper"],
+  // The launcher's alignment (ui/align.ts alignTry): its grid from the top and from the foot, over home's dock and bar.
+  ["pull-align-top", "pull", "(await U('./ui/align.ts')).alignTry.value = { launcher: 'top' }; E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.end', { open: true });", "blurred"],
+  ["pull-align-bottom", "pull", "(await U('./ui/align.ts')).alignTry.value = { launcher: 'bottom' }; E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.end', { open: true });", "blurred"],
   ["pull-ai", "pull", "E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true });", "blurred"],
   // THE backdrop (theme.css --backdrop-tint / --backdrop-blur-native, 2026-10-31): the launcher, its PowOS AI panel, an open
   // folder and the shade over the same wallpaper, beside home's widgets - one tint, one blur (gate: backdrop-*).

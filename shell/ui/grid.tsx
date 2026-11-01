@@ -14,6 +14,7 @@
  * closes under the finger, a page turns.
  */
 import { AppIcon } from "./apps.tsx";
+import { tick } from "./haptics.ts";
 import { tapTaken } from "./taps.ts";
 import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
@@ -240,7 +241,7 @@ function underFinger(c: Carry, items: HomeItem[]) {
  */
 async function dropFromFolder(c: Carry, target: Aim | null) {
   if (underFinger(c, itemsOn(pages.value[page.value]))?.key === c.fromFolder) return;
-  navigator.vibrate?.(10);
+  tick();
   await powos.home.add(c.app!, target?.page ?? pages.value[page.value], target?.cell);
 }
 
@@ -282,7 +283,7 @@ function partyAim(c: Carry): { party: HomeItem[]; cells: Map<string, Cell> | nul
 /** Lets the carried party go: every tile to its cell (one after another: the host keeps one layout). */
 async function dropParty(t: NonNullable<ReturnType<typeof partyAim>>) {
   if (!t.cells) return;
-  navigator.vibrate?.(10);
+  tick();
   for (const [key, cell] of t.cells) await placeItem(key, cell, t.page);
 }
 
@@ -336,7 +337,6 @@ export function startCarry(what: { item?: HomeItem; app?: string; fromDock?: boo
       const next = page.value + side;
       if (next >= 0 && next < pages.value.length) {
         page.value = next;
-        navigator.vibrate?.(5);
       }
       edgeSince = Date.now() + PAGE_TURN_MS;
     }
@@ -387,13 +387,13 @@ async function letGo(c: Carry | null, ev: PointerEvent) {
   // Taken out of the dock and let go off it: unpinned, and on home where it's let go (if there's room there).
   if (c.fromDock && c.app) {
     setDocked(c.app, false);
-    navigator.vibrate?.(10);
+    tick();
     if (target?.cell) await addHome(c.app, target.page, target.cell);
     return;
   }
   if (c.fromFolder) return dropFromFolder(c, target);
   if (!target) return;
-  navigator.vibrate?.(10);
+  tick();
   if (c.app) await powos.home.add(c.app, target.page, target.cell);
   else if (target.group) await powos.home.group(c.item!.key, target.group);
   // The search (the dock's button, the foot's pill or its widget) let go on the grid: the bar widget there.
@@ -416,7 +416,7 @@ function useTilePress(item: HomeItem, onTap: () => void) {
       const s = { x: e.clientX, y: e.clientY, long: false, timer: 0 };
       s.timer = window.setTimeout(() => {
         s.long = true;
-        navigator.vibrate?.(10);
+        tick();
         // One of several picked: they go together (partyAim), none of them selected on its own.
         if (!partyOf(item, itemsOn(item.page))) selected.value = item.key;
         // Picking a tile up is editing home: the sheet and the empty page to move it to come with it.
@@ -514,6 +514,9 @@ function joinOf(at: Map<string, string>, i: HomeItem): Record<string, number> | 
     "--jr": jr,
     "--jb": jb,
     "--jl": jl,
+    // The top's light edge only where nothing at all sits above (shell.css): a top touched over PART of it (--jt 0)
+    // drew the light across the shared span too - a bright seam line inside the group (design audit, home gap 2).
+    "--free-top": cover[0] === 0 ? 1 : 0,
     "--ctl": 1 - Math.max(other(c.x - 1, c.y), other(c.x, c.y - 1)),
     "--ctr": 1 - Math.max(other(r, c.y), other(r - 1, c.y - 1)),
     "--cbr": 1 - Math.max(other(r, b - 1), other(r - 1, b)),
@@ -1109,7 +1112,7 @@ function useEmptyPress() {
       else
         p.timer = window.setTimeout(() => {
           p.long = true;
-          navigator.vibrate?.(10);
+          tick();
           selected.value = null;
           editing.value = true;
         }, LONG_PRESS_MS);

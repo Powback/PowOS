@@ -8,6 +8,7 @@
  *   folder: powos.home.add, the host takes it out).
  */
 import { signal } from "@preact/signals";
+import { tick } from "./haptics.ts";
 import { useRef } from "preact/hooks";
 import { byKey, folder, home, launch } from "../state.ts";
 import { powos } from "../bridge.ts";
@@ -59,7 +60,7 @@ export async function groupIntoFolder(items: HomeItem[]): Promise<string | null>
   if (!into) return null;
   let target = into.key;
   for (const a of order.filter((i) => i.kind === "app" && i.key !== into.key)) target = (await powos.home.group(a.key, target)) ?? target;
-  navigator.vibrate?.(10);
+  tick();
   return target;
 }
 
@@ -99,7 +100,7 @@ export function AppPress({ a, from, onHold, onLeave, onLift, small }: { a: { key
         const p = { x: e.clientX, y: e.clientY, timer: 0, long: false };
         p.timer = window.setTimeout(() => {
           p.long = true;
-          navigator.vibrate?.(10);
+          tick();
           onLift?.();
           onHold(a.app, from, e, { x: e.clientX - r.left, y: e.clientY - r.top });
         }, HOLD_MS);

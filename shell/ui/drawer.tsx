@@ -19,6 +19,7 @@ import type { App } from "../types.ts";
 
 import { searchResults, searchSections, searchPending, openSearchResult, type SearchResult } from "../search.ts";
 import { springFast } from "./spring.ts";
+import { tick } from "./haptics.ts";
 
 const ALPHABET = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
 const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
@@ -115,7 +116,7 @@ function LetterBar({ onPick }: { onPick: (letter: string | null) => void }) {
     const i = Math.max(0, Math.min(letters.length - 1, Math.floor(((y - r.top) / r.height) * letters.length)));
     if (letters[i] === current) return;
     setCurrent(letters[i]);
-    navigator.vibrate?.(5);
+    tick();
     onPick(letters[i]);
   };
   return (

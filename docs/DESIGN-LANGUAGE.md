@@ -21,6 +21,8 @@ Checks:
   ornament that carries no content.
 - **Empty states hide.** A section, list or chip with nothing in it is not drawn: no "Nothing yet" or "No X"
   line. A whole page with nothing in it says so once, in one line. See `aistatus.tsx` (empty sections hide, `quiet`).
+- **One row of page dots.** Every page indicator is `ui/pagedots.tsx` `PageDots`; home has one row (the dock has none
+  of its own). lint-design blocks a dot row with its own "on" state.
 - **One icon shape.** Every app icon is the squircle `--icon-radius` (22%). An irregular icon sits on the one plate,
   `--icon-plate`, and never gets a second plate. See `ui/iconshape.ts`.
 - **Rewrites keep every feature.** Before a rewrite lands, list the old code's gestures and features in the commit,
@@ -116,6 +118,7 @@ Checks:
 - **Haptics only at commit points.** A haptic fires on lift-out, on a snap (a threshold crossed, a window snapped),
   on a long-press opening, and on push-to-talk start. It never fires on page changes, scrolling or reordering steps.
   - Use `ui/haptics.ts` `tick()` and `confirm()`, plus `panelTicks()` for pulls.
+  - Never `navigator.vibrate()` (silent in the phone's WebView): lint-design blocks it outside `ui/haptics.ts`.
 - **Long-press opens a menu or edit mode.** A menu shows only what no tab or button already offers.
 
 ## 8. One bar, one assistant

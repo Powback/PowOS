@@ -12,6 +12,7 @@ import { byKey, carry, dock, dockAim, dockMode, dockPosition, home, searchInDock
 import type { Cell, HomeItem } from "../types.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { powos } from "../bridge.ts";
+import { tick } from "./haptics.ts";
 import { Bar } from "./bar.tsx";
 
 /** The search widget on this screen's grid (not where this screen has the search docked: dockSearch). */
@@ -32,7 +33,7 @@ export function placeItem(key: string, cell: Cell, page: number): Promise<unknow
  * is the foot's again. Never removed otherwise - the foot is where it goes when home has none, so it can't be lost.
  */
 export function putBackInBar(): Promise<unknown> {
-  navigator.vibrate?.(10);
+  tick();
   if (!onHome()) return Promise.resolve();
   return powos.home.remove(SEARCH_KEY);
 }
@@ -125,7 +126,6 @@ export const footAim = signal<"dock" | "bar" | "below" | null>(null);
 export function hoverFoot(c: Carry | null, x: number, y: number) {
   const a = footAimAt(c?.item?.key, x, y);
   if (a !== footAim.value) {
-    if (a) navigator.vibrate?.(5);
     footAim.value = a;
   }
 }
@@ -141,7 +141,7 @@ export function dropSearchOnFoot(c: Carry | null, ev: PointerEvent): boolean {
   dockAim.value = null;
   carry.value = null;
   selected.value = null;
-  navigator.vibrate?.(10);
+  tick();
   if (a === "dock") return void dockSearch(), true;
   footBelow.value = a === "below" ? "1" : "";
   setSpot("bar", "dragged onto the foot");
