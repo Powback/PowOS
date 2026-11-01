@@ -321,7 +321,7 @@ function QuickEl({ win, z }: { win: WebWin; z: number }) {
   return (
     <>
       <div class="quickpage-scrim" style={{ zIndex: 19 + z }} onPointerDown={(e) => (e.stopPropagation(), close(win.id))} />
-      <div class={`webwindow quickpage${win.quick?.sheet ? " sheet" : ""}${win.live ? " live" : ""}`} data-wwid={win.id} data-z={z} data-quick={win.quick?.token} style={frame}>
+      <div class={`webwindow quickpage${win.quick?.sheet ? " quick-sheet" : ""}${win.live ? " live" : ""}`} data-wwid={win.id} data-z={z} data-quick={win.quick?.token} style={frame}>
         <QuickBar label={win.label} icon={quickIconKeys(win.quick?.pkg).map(iconOf).find(Boolean) ?? iconOf(win.key)} height={TITLE} onPopOut={() => popOut(win)} onClose={() => close(win.id)} />
         <Body win={win} body={body} />
       </div>

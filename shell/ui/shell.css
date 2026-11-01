@@ -3289,7 +3289,8 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .quickpage-scrim { position: absolute; inset: 0; background: transparent; }
 .webwindow.quickpage { border-radius: 16px; box-shadow: var(--lift-edge); overflow: hidden; animation: quickpage-in 260ms cubic-bezier(0.2, 1.3, 0.4, 1) both; }
 /* Folded: the sheet rises on the shared spring (ui/spring.ts --spring / --spring-ms, the switcher's). */
-.webwindow.quickpage.sheet { animation: quickpage-rise var(--spring-ms, 420ms) var(--spring, cubic-bezier(0.2, 0.9, 0.25, 1.05)) both; }
+/* Not ".sheet": html:has(.sheet) hides home under a full-screen sheet - a folded card sits over home. */
+.webwindow.quickpage.quick-sheet { animation: quickpage-rise var(--spring-ms, 420ms) var(--spring, cubic-bezier(0.2, 0.9, 0.25, 1.05)) both; }
 .webwindow.quickpage .webwindow-title { border-radius: 16px 16px 0 0; padding: 0 4px 0 12px; }
 .quickpage-btn { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border: 0; border-radius: 10px; background: none; color: inherit; font: inherit; }
 .quickpage-btn:active { background: var(--soft-fill); }

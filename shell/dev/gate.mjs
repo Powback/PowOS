@@ -7273,6 +7273,7 @@ async function quickPageScene(r, folded) {
   await r.page.evaluate(QUICK_HELPERS, folded);
   await r.page.evaluate(QUICK_JUDGES);
   await r.page.evaluate(QUICK_BAR_JUDGES);
+  await r.page.evaluate(QUICK_SHEET_JUDGES);
   const shot = async (name) => {
     await r.page.evaluate(() => window.__qp.open({ id: "settings:WIFI_SETTINGS", label: "Wi-Fi" }, "com.oplus.wirelesssettings"));
     await r.page.screenshot({ path: `/cache/quick-page-${name}.png` }).catch(() => {});
@@ -7352,28 +7353,9 @@ function QUICK_JUDGES() {
     if (!c[0].textContent.includes(label)) out.push(`QP1: ${label}: its card's bar says "${c[0].textContent}"`);
     if (Math.abs(box.width - want) > 2) out.push(`QP1: ${label}: card ${Math.round(box.width)} px wide (want ${want}, ${folded ? "folded: full width minus 16" : "unfolded: ~440"})`);
     if (box.height > innerHeight * 0.7 + 1) out.push(`QP1: ${label}: card ${Math.round(box.height)} px high (want <= 70% of ${innerHeight})`);
-    if (folded !== c[0].classList.contains("sheet")) out.push(`QP1: ${label}: sheet ${!folded} (want ${folded})`);
-    if (folded) out.push(...sheet(c[0], box, label));
+    if (folded !== c[0].classList.contains("quick-sheet")) out.push(`QP1: ${label}: sheet ${!folded} (want ${folded})`);
+    if (folded) out.push(...window.__qpsheet.check(c[0], box, label));
     return [...out, ...window.__qpbar.icon(c[0], label), ...window.__qpbar.glass(c[0], label)];
-  }
-  // Folded: its bottom above the bar (16 over the work area's foot), rising on the shared spring (ui/spring.ts).
-  function sheet(el, box, label) {
-    const out = [];
-    const foot = q.W.workArea().bottom;
-    const bar = [...document.querySelectorAll(".home > .dock, .home > .bar")].map((b) => b.getBoundingClientRect()).filter((b) => b.height > 0 && b.top > innerHeight / 2);
-    if (!bar.length) out.push(`QP1: ${label}: folded home has no bar to sit above`);
-    if (bar.some((b) => box.bottom > b.top + 0.5) || Math.abs(foot - 16 - box.bottom) > 2) out.push(`QP1: ${label}: sheet bottom ${Math.round(box.bottom)} (want 16 above the bar's top ${Math.round(foot)})`);
-    if (Math.abs(box.left - 16) > 2) out.push(`QP1: ${label}: sheet left ${Math.round(box.left)} (want 16)`);
-    const probe = document.createElement("div");
-    probe.style.cssText = "animation-timing-function: var(--spring); animation-duration: var(--spring-ms)";
-    document.body.append(probe);
-    const want = getComputedStyle(probe);
-    const got = getComputedStyle(el);
-    if (!want.animationTimingFunction.startsWith("linear(") && !want.animationTimingFunction.startsWith("cubic-bezier(")) out.push(`QP1: the shared spring isn't set (--spring "${want.animationTimingFunction}")`);
-    if (got.animationName !== "quickpage-rise" || got.animationTimingFunction !== want.animationTimingFunction || got.animationDuration !== want.animationDuration)
-      out.push(`QP1: ${label}: the sheet's ${got.animationName} ${got.animationDuration} isn't a rise on the shared spring (${want.animationDuration})`);
-    probe.remove();
-    return out;
   }
   async function closes() {
     const out = [];
@@ -7401,6 +7383,42 @@ function QUICK_JUDGES() {
     return n === 1 && !document.querySelector(".webwindow") ? [] : [`QP1: a forced route failure: ${n} refusals to the host, ${document.querySelectorAll(".webwindow").length} windows (want 1 refusal, none)`];
   }
   window.__qpj = { card, closes, failure };
+  return [];
+}
+
+/**
+ * QP1's folded judges (window.__qpsheet): the sheet full width minus 16, its bottom 16 above the bar; rising on the
+ * shared spring (ui/spring.ts); over home, never hiding it (a ".sheet" class did: html:has(.sheet) - a white screen).
+ */
+function QUICK_SHEET_JUDGES() {
+  function place(box, label) {
+    const out = [];
+    const foot = window.__qp.W.workArea().bottom;
+    const bar = [...document.querySelectorAll(".home > .dock, .home > .bar")].map((b) => b.getBoundingClientRect()).filter((b) => b.height > 0 && b.top > innerHeight / 2);
+    if (!bar.length) out.push(`QP1: ${label}: folded home has no bar to sit above`);
+    if (bar.some((b) => box.bottom > b.top + 0.5) || Math.abs(foot - 16 - box.bottom) > 2) out.push(`QP1: ${label}: sheet bottom ${Math.round(box.bottom)} (want 16 above the bar's top ${Math.round(foot)})`);
+    if (Math.abs(box.left - 16) > 2) out.push(`QP1: ${label}: sheet left ${Math.round(box.left)} (want 16)`);
+    return out;
+  }
+  function motion(el, label) {
+    const probe = document.createElement("div");
+    probe.style.cssText = "animation-timing-function: var(--spring); animation-duration: var(--spring-ms)";
+    document.body.append(probe);
+    const want = getComputedStyle(probe);
+    const got = getComputedStyle(el);
+    const set = /^(linear|cubic-bezier)\(/.test(want.animationTimingFunction);
+    const same = got.animationName === "quickpage-rise" && got.animationTimingFunction === want.animationTimingFunction && got.animationDuration === want.animationDuration;
+    const out = set ? [] : [`QP1: the shared spring isn't set (--spring "${want.animationTimingFunction}")`];
+    if (!same) out.push(`QP1: ${label}: the sheet's ${got.animationName} ${got.animationDuration} isn't a rise on the shared spring (${want.animationDuration})`);
+    probe.remove();
+    return out;
+  }
+  function shown(el, label) {
+    const stage = getComputedStyle(document.querySelector(".home > .stage") ?? document.body).visibility;
+    const card = getComputedStyle(el).visibility;
+    return stage === "visible" && card === "visible" ? [] : [`QP1: ${label}: folded, home or the card is hidden (stage ${stage}, card ${card})`];
+  }
+  window.__qpsheet = { check: (el, box, label) => [...place(box, label), ...motion(el, label), ...shown(el, label)] };
   return [];
 }
 
