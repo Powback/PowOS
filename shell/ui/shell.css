@@ -1711,13 +1711,17 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 }
 .ai-screen > .ai-top { position: relative; z-index: 2; min-height: 36px; margin-top: var(--ai-head-top); }
 .ai-screen > .ai-compose { position: relative; z-index: 2; margin-top: auto; }
+/*
+ * W5 (the user: content "under the status bar"): the scroller starts under the status bar, never behind it - cards
+ * still pass under the page's own header, but the clock and battery always sit on the page's backdrop alone.
+ */
 .ai-screen > .ai-scroll {
   position: absolute;
-  inset: 0;
+  inset: var(--inset-top, 0px) 0 0;
   z-index: 1;
-  padding-top: var(--ai-head);
+  padding-top: calc(var(--ai-head) - var(--inset-top, 0px));
   padding-bottom: var(--ai-tail);
-  scroll-padding-block: var(--ai-head) var(--ai-tail);
+  scroll-padding-block: calc(var(--ai-head) - var(--inset-top, 0px)) var(--ai-tail);
 }
 .ai-aside > .ai-top { min-height: 36px; }
 .ai-aside > .ai-scroll { flex: 1; }
@@ -3690,7 +3694,7 @@ html:root .ai-screen .aip-area.tile { --glass-blur-native: var(--backdrop-blur-n
 @media (prefers-reduced-motion: reduce) { .aip-ring, .aip-bar-fill, .aip-tasks, .aip-dot.working { animation: none; } }
 /*
  * PowOS AI unfolded, two columns (powai.tsx AiPanes; the manager's design, 11-01): left (~42%) the folded status page
- * itself (.ai-left: aistatus.tsx, its rules below with the status page's), right (~58%) the segmented row and the chat
+ * itself (.ai-left, ~56%: the work leads, the chat never dominates - the user 11-01 "just like a huge chat"; aistatus.tsx, its rules below with the status page's), right (~44%) the segmented row and the chat
  * or the screen it picked (.ai-right). Each on THE backdrop's glass, 16 dp gutters, the UI's proportional font only.
  */
 .ai-screen.panes {
@@ -3705,8 +3709,8 @@ html:root .ai-screen .aip-area.tile { --glass-blur-native: var(--backdrop-blur-n
 .ai-screen.panes * { font-family: inherit; }
 .ai-screen.panes > * { max-width: none; margin: 0; }
 .ai-screen.panes > .tile { border-radius: var(--radius); min-height: 0; min-width: 0; }
-.ai-left { flex: 42 1 0; position: relative; display: flex; flex-direction: column; overflow: hidden; --ai-head: 0px; --ai-tail: 0px; }
-.ai-right { flex: 58 1 0; position: relative; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; overflow: hidden; }
+.ai-left { flex: 56 1 0; align-self: flex-start; max-height: 100%; position: relative; display: flex; flex-direction: column; overflow: hidden; --ai-head: 0px; --ai-tail: 0px; }
+.ai-right { flex: 44 1 0; position: relative; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; overflow: hidden; }
 /* The segmented row: one slim pill track, the open segment lifted on it; each label whole, its live count beside it. */
 /* At the right column's foot (above the field on Chat): margin-top auto keeps it down under a short screen. */
 .ai-right > .ai-segs { margin-top: auto; }
@@ -3851,7 +3855,7 @@ html:root .ai-screen.status > .ai-glass.tile { --glass-blur-native: var(--backdr
 /* Wraps rather than cut (the user, 11-01: "Done this month…" truncated); the title itself is kept short (aistatus.tsx heroTitle). */
 .ais-title { font-size: calc(var(--text-item) * 1.18); font-weight: 700; color: var(--color-foreground); overflow-wrap: anywhere; }
 .ais-line { font-size: var(--text-small); color: var(--color-foreground); opacity: 0.86; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ai-screen > .ai-scroll.ais { display: flex; flex-direction: column; gap: 12px; padding-inline: var(--ais-side); padding-top: calc(var(--ai-head) + 22px); padding-bottom: calc(var(--ai-tail) + 40px); }
+.ai-screen > .ai-scroll.ais { display: flex; flex-direction: column; gap: 12px; padding-inline: var(--ais-side); padding-top: calc(var(--ai-head) - var(--inset-top, 0px) + 22px); padding-bottom: calc(var(--ai-tail) + 40px); }
 .ais-sec { display: flex; flex-direction: column; animation: ais-rise var(--spring-slow-ms) var(--spring-slow) both; }
 .ais-h { display: flex; white-space: nowrap; align-items: center; gap: 8px; margin: 0 0 4px; padding: 0 4px; font-size: var(--text-small); font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-foreground); opacity: 0.9; }
 .ais-n { padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--color-foreground) 14%, transparent); font-size: 11px; letter-spacing: 0; font-variant-numeric: tabular-nums; }
@@ -3880,6 +3884,11 @@ html:root .ai-screen.status > .ai-glass.tile { --glass-blur-native: var(--backdr
 .ais-sev.p1 { background: color-mix(in srgb, var(--color-foreground) 22%, transparent); color: var(--color-foreground); }
 .ais-sev.infra { opacity: 0.6; }
 .ais-done-item, .ais-next-item { animation: ais-rise var(--spring-ms) var(--spring) both; }
+/* By area (aistatus.tsx ByArea): one line per area - dot, name, its tasks in plain state words; never two lines. */
+.ais-area-row.rest .ais-area-name { color: var(--color-muted); }
+.ais-area-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 0 4px; border: 0; background: none; font: inherit; text-align: start; white-space: nowrap; color: var(--color-foreground); }
+.ais-area-name { flex: none; font-size: var(--text-body); }
+.ais-area-words { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: end; font-size: var(--text-small); color: var(--color-muted); }
 .ais-done-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 0 4px; border: 0; background: none; font: inherit; text-align: start; white-space: nowrap; font-size: var(--text-body); color: var(--color-foreground); }
 .ais-done-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ais-done-item.open .ais-done-row, .ais-next-item.open .ais-done-row { align-items: baseline; padding-block: 10px 4px; white-space: normal; }

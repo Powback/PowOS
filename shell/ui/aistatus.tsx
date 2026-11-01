@@ -21,7 +21,7 @@ import { fleet, isPowOS, otherProjects, projectOf, workingNow, type Worker } fro
 import { aiScreen, chat, openPanel, page } from "../state.ts";
 import { board, boardSeen, checks, list, noteOf, WorkFeed, type WorkRow } from "./aiboard.tsx";
 import { upNext, UpNext } from "./upnext.tsx";
-import { areaStats, driverPct } from "./aiprogress.tsx";
+import { areaStats, dotOf, driverPct, type AreaStat } from "./aiprogress.tsx";
 import { NeedStack } from "./aistack.tsx";
 import type { MicTarget } from "./dictation.ts";
 import { BrokenReply, clearBroken, type Broken } from "./brokenreply.tsx";
@@ -193,6 +193,67 @@ function NeedsAttention({ stuck }: { stuck: Worker[] }) {
         {stuck.slice(0, 6).map((x) => (
           <StuckRow key={x.a.id} x={x} />
         ))}
+      </ul>
+    </section>
+  );
+}
+
+/** An area's open tasks in plain words, what needs the user first: "1 needs you · 2 working · 3 waiting for a check". */
+export function areaWords(a: AreaStat, you: Set<string>): string {
+  const n = { waiting: 0, working: 0, check: 0, stalled: 0 };
+  for (const w of a.open) n[dotOf(w, you)]++;
+  const parts: [number, string][] = [
+    [n.waiting, `${n.waiting} need${n.waiting === 1 ? "s" : ""} you`],
+    [n.working, `${n.working} working`],
+    [n.check, `${n.check} to check`],
+    [n.stalled, `${n.stalled} idle`],
+  ];
+  return parts.filter(([k]) => k > 0).map(([, t]) => t).join(" · ");
+}
+
+/** An area's dot: the state that matters most to the user in it (needs you, then working, a check, idle). */
+const areaDot = (a: AreaStat, you: Set<string>) => {
+  const d = a.open.map((w) => dotOf(w, you));
+  return (["waiting", "working", "check", "stalled"] as const).find((k) => d.includes(k)) ?? "stalled";
+};
+
+/**
+ * By area (unfolded; the user, 10-30 "let's group the PowOS AI in-progress things", 10-31 "categorizing them", 11-01
+ * "just like a huge chat instead of a proper setup"): every open area on ONE line - its dot, its name, its open tasks in
+ * plain state words - the areas that need the user first. A tap opens Progress (the area's tasks) in the right column.
+ */
+function ByArea() {
+  const you = needIds(needsYou());
+  const open = areaStats(board.value, Date.now(), you).filter((a) => a.open.length > 0);
+  // Areas where nothing moves (every task idle) don't get a line each: one calm last line counts them.
+  const stats = open.filter((a) => areaDot(a, you) !== "stalled");
+  const rest = open.filter((a) => areaDot(a, you) === "stalled");
+  const idle = rest.reduce((n, a) => n + a.open.length, 0);
+  if (!open.length) return null;
+  return (
+    <section class="ais-sec" data-sec="areas" aria-label="By area">
+      <h3 class="ais-h">
+        By area<span class="ais-n">{open.length}</span>
+      </h3>
+      <ul class="ais-list">
+        {stats.map((a) => (
+          <li key={a.name}>
+            <button type="button" class="ais-area-row" data-area={a.name} onClick={() => ((aiAgent.value = null), (aiScreen.value = "progress"))}>
+              <span class={`aip-dot ${areaDot(a, you)}`} aria-hidden="true" />
+              <span class="ais-area-name">{a.name}</span>
+              <span class="ais-area-words">{areaWords(a, you)}</span>
+            </button>
+          </li>
+        ))}
+        {rest.length > 0 && (
+          <li>
+            <button type="button" class="ais-area-row rest" data-area="rest" onClick={() => ((aiAgent.value = null), (aiScreen.value = "progress"))}>
+              <span class="aip-dot stalled" aria-hidden="true" />
+              <span class="ais-area-name">{stats.length ? `${rest.length} more area${rest.length === 1 ? "" : "s"}` : `${rest.length} area${rest.length === 1 ? "" : "s"}`}</span>
+              <span class="ais-area-words">nothing moving · {idle} idle</span>
+            </button>
+          </li>
+        )}
       </ul>
     </section>
   );
@@ -418,6 +479,7 @@ function StatusPage(props: { shown: boolean; more: preact.ComponentChildren; com
       <div class="ai-scroll ais">
         <NeedStack needs={needs} />
         {props.beside && <NeedsAttention stuck={f.attention} />}
+        {props.beside && <ByArea />}
         <WorkingNow working={workingNow(f)} />
         <UpNext rows={next} busy={busyPage(needs.length, workingNow(f).length)} />
         <RecentlyDone rows={done} />
