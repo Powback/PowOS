@@ -1558,22 +1558,78 @@ async function switcherLinuxMaxCheck(page) {
   await new Promise((ok) => setTimeout(ok, 400));
   const opened = await page.evaluate(() => window.__opened.slice());
   if (opened.join() !== String(LINUX)) fails.push(`switcher-linux-max: tapping the Linux card asked the host to open [${opened}], want only its card ${LINUX}`);
-  return [...fails, ...(await page.evaluate(switcherLinuxMaxBack, WIN))];
+  const closed = await page.evaluate(() => window.__closed.slice());
+  if (closed.join() !== String(WIN)) fails.push(`switcher-linux-max: tapping the Linux card closed the switcher with [${closed}], want to its window ${WIN} (not home)`);
+  fails.push(...(await page.evaluate(switcherLinuxMaxBack, WIN)));
+  return [...fails, ...(await switcherLinuxFullCase(page))];
+}
+
+/**
+ * [switcherLinuxMaxCheck]'s full-screen case (the user's step: a FULL-SCREEN Linux window's card tapped came back as a
+ * plain window - the page's close went "home", WebWindows.switcherHome took it out of full screen before
+ * openForTask showed it): its card tapped closes the switcher TO that window (recents.closed(its id): the host keeps
+ * it full screen) and opens only its card; "webwindows.show" leaves it full screen. Back over home still closes to
+ * home (recents.closed() with no window: a full-screen window leaves full screen, as before).
+ */
+async function switcherLinuxFullCase(page) {
+  const WIN = 8;
+  const LINUX = (1 << 29) + WIN;
+  const setup = await page.evaluate(switcherLinuxMaxSetup, [LINUX, WIN, true]);
+  if (setup) return [`switcher-linux-max (full screen): ${setup}`];
+  const at = await page.evaluate((id) => {
+    const c = document.querySelector(`.recents .task[data-task="${id}"] .task-shot`);
+    c?.scrollIntoView({ inline: "center" });
+    const b = c?.getBoundingClientRect();
+    return b && { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+  }, LINUX);
+  if (!at) return ["switcher-linux-max (full screen): no card for the full-screen Linux window"];
+  await new Promise((ok) => setTimeout(ok, 150));
+  await page.mouse.click(at.x, at.y);
+  await new Promise((ok) => setTimeout(ok, 400));
+  const fails = [];
+  const got = await page.evaluate(async (win) => {
+    const W = await window.__gw.mod("./ui/webwindows.tsx");
+    window.__mockEvents.emit("webwindows.show", win);
+    await window.__gw.settled();
+    return { opened: window.__opened.slice(), closed: window.__closed.slice(), full: !!W.webWins.value.find((v) => v.id === win)?.full };
+  }, WIN);
+  if (got.opened.join() !== String(LINUX)) fails.push(`switcher-linux-max (full screen): tapping the card asked the host to open [${got.opened}], want only ${LINUX}`);
+  if (got.closed.join() !== String(WIN)) fails.push(`switcher-linux-max (full screen): tapping the card closed the switcher with [${got.closed}], want to its window ${WIN} - closed to home, the host takes it out of full screen first`);
+  if (!got.full) fails.push("switcher-linux-max (full screen): the window came back from its card no longer full screen");
+  // Home, not a card: the switcher up again over home, a tap beside its cards - a close to home, no window named.
+  const home = await page.evaluate(async (linux) => {
+    window.__closed = [];
+    const task = (id, label, key, more = {}) => ({ id, label, key, icon: null, snapshot: "", ...more });
+    window.__mockEvents.emit("recents.show", { open: true, from: null, tasks: [task(linux, "Dolphin", "l:org.kde.dolphin", { webwindow: linux - (1 << 29) }), task(905, "Chrome", "a:chrome")] });
+    await new Promise((ok) => setTimeout(ok, 500));
+    if (!document.querySelector(".recents")?.classList.contains("shown")) return "the switcher isn't up again";
+    // A tap beside the cards over home (X2): home.
+    document.querySelector(".recents").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((ok) => setTimeout(ok, 400));
+    return window.__closed.slice();
+  }, LINUX);
+  if (typeof home === "string") fails.push(`switcher-linux-max (full screen): ${home}`);
+  else if (home.length !== 1 || home[0] != null) fails.push(`switcher-linux-max (full screen): closing the switcher to home sent recents.closed with [${home}], want one close naming no window`);
+  return fails;
 }
 
 /** [switcherLinuxMaxCheck]'s home: a maximised Linux window (Dolphin), then the switcher up with its card and two apps'. */
-async function switcherLinuxMaxSetup([linux, win]) {
+async function switcherLinuxMaxSetup([linux, win, full]) {
   const { powos } = await window.__gw.mod("./bridge.ts");
   const S = await window.__gw.mod("./state.ts");
   const W = await window.__gw.mod("./ui/webwindows.tsx");
   window.__opened = [];
+  window.__closed = [];
   powos.tasks.open = async (id) => (window.__opened.push(id), true);
+  powos.recents.closed = async (opening) => void window.__closed.push(opening ?? null);
   S.page.value = 0;
   await window.__gw.settled();
-  // Maximised: the work area, its floating frame kept to go back to (restore).
+  // Maximised: the work area, its floating frame kept to go back to (restore). Full screen: the host's "webwindows.full".
   W.webWins.value = [{ id: win, key: "l:org.kde.dolphin", label: "Dolphin", page: S.pages.value[0], x: 0, y: 0, w: innerWidth, h: innerHeight - 120, restore: { x: 40, y: 120, w: 320, h: 400 }, live: true }];
   await window.__gw.settled();
-  if (!document.querySelector(`.webwindow.maximised[data-wwid="${win}"]`)) return "no maximised .webwindow for the Linux window on home";
+  if (full) window.__mockEvents.emit("webwindows.full", { id: win, on: true });
+  await window.__gw.settled();
+  if (full ? !W.webWins.value.find((v) => v.id === win)?.full : !document.querySelector(`.webwindow.maximised[data-wwid="${win}"]`)) return `no ${full ? "full-screen" : "maximised"} web window for the Linux window on home`;
   const c = document.createElement("canvas");
   [c.width, c.height] = [40, 80];
   const g = c.getContext("2d");

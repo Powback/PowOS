@@ -3884,11 +3884,21 @@ class WebWindows(
         /**
          * Home from the switcher (its "recents.end" to home, or its close): a full-screen Linux window leaves full screen
          * as on Home ([leaveFullScreen], FL3) - shown again with the windows' root, it covered home after "swipe up to the
-         * switcher, then home". Any thread.
+         * switcher, then home". [opening]: the switcher closed to that window (its card tapped), not home - it stays
+         * full screen if it was (another full-screen window still leaves, it would cover it). Any thread.
          */
-        fun switcherHome(why: String) {
+        fun switcherHome(
+            why: String,
+            opening: Int? = null,
+        ) {
             val ww = current ?: return
-            ww.main.post { ww.leaveFullScreen(why) }
+            ww.main.post {
+                if (opening != null && ww.wins[opening]?.linuxFull == true) {
+                    WindowLog.i(TAG, "window $opening: $why: its card was tapped, it stays full screen")
+                } else {
+                    ww.leaveFullScreen(why)
+                }
+            }
         }
 
         /**

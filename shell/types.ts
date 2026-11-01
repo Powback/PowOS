@@ -1025,8 +1025,11 @@ export interface Bridge {
     slot(rect: { left: number; top: number; width: number; height: number; radius: number }): Promise<void>;
     /** After "recents.end" to the switcher: the first card shows the app's snapshot, its window may go. */
     ready(): Promise<void>;
-    /** The page closed it (a tap beside the cards, Back, Home). */
-    closed(): Promise<void>;
+    /**
+     * The page closed it (a tap beside the cards, Back, Home): home is what's left. [opening]: no - its web window
+     * [opening]'s card was tapped, that window comes back as it was (full screen stays full screen).
+     */
+    closed(opening?: number): Promise<void>;
     /** Whether it's up, over what, with the tasks (a page that just loaded). */
     state(): Promise<{ open: boolean; from: number | null; tasks: RecentTask[] }>;
   };

@@ -531,16 +531,19 @@ object Switcher {
     /**
      * The page closed the layer itself (a tap beside the cards, Back, the last card removed): on home's page, home is
      * what's left; on the recents activity's, home is brought up (the activity goes once it's out of sight).
+     * [opening]: web window [opening]'s card was tapped - it comes back as it was, so a full-screen one stays full
+     * screen (before: it left full screen here, then came back as a plain window).
      */
     fun closed(
         context: Context,
         bridge: ShellBridge,
+        opening: Int? = null,
     ) {
         if (bridge !== home || gesture) return
         open = false
         from = null
         depthTo(0f)
-        dev.omalauncher.shell.WebWindows.switcherHome("switcher closed by the page")
+        dev.omalauncher.shell.WebWindows.switcherHome(if (opening == null) "switcher closed by the page" else "switcher closed to window $opening", opening)
         if (!onHome) {
             runCatching {
                 context.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
