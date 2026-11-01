@@ -12,11 +12,11 @@
  * answerMail) and the same answers store, so the row leaves at once and comes back with one plain line when the call
  * failed.
  */
-import { useRef } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { boardState, type BoardCheck } from "../agents.ts";
 import { board, checks, noteOf, youChecks, type WorkRow } from "./aiboard.tsx";
-import { answers, Said, TryLine, type Answer, type TryItem } from "./trycard.tsx";
+import { answers, TryLine, type Answer, type TryItem } from "./trycard.tsx";
 
 /** try: works / still broken; do: done / can't; ask: the question's options or their words. */
 export type NeedKind = "try" | "do" | "ask";
@@ -120,8 +120,11 @@ function NeedRow({ n }: { n: Need }) {
   );
 }
 
-/** A row answered while the card shows: collapsed to what the user said (no longer counted, no controls). */
-function SaidRow({ n, a }: { n: Need; a: Answer }) {
+/** How long an answered row shows its thanks before it leaves Needs you (the user, 2026-11-01: "What am I supposed to do with this?"). */
+const THANKS_MS = 1000;
+
+/** A row answered while the card shows: a brief "✓ Thanks" (no longer counted, no controls), then it leaves. */
+function SaidRow({ n }: { n: Need }) {
   return (
     <li class="aip-need answered" data-task={n.w.id}>
       <div class="aip-need-row">
@@ -129,7 +132,7 @@ function SaidRow({ n, a }: { n: Need; a: Answer }) {
         <span class="aip-need-title">{n.w.title}</span>
       </div>
       <div class="aip-need-more">
-        <Said a={a} />
+        <div class="try-said muted">✓ Thanks</div>
       </div>
     </li>
   );
@@ -144,14 +147,26 @@ function useRows(needs: Need[]): [Need, Answer | undefined][] {
   for (const n of needs) seen.current.set(n.w.id, n);
   const open = new Set(needs.map((n) => n.w.id));
   const said = answers.value;
-  return [...seen.current.values()].filter((n) => open.has(n.w.id) || said[n.w.id]).map((n) => [n, open.has(n.w.id) ? undefined : said[n.w.id]]);
+  const [, tick] = useState(0);
+  const now = Date.now();
+  // Answered: kept for THANKS_MS after the answer, then gone (done -> Recently done; waiting on an agent -> out of the list).
+  const thanking = (id: string) => !open.has(id) && !!said[id] && now - (said[id].at ?? 0) < THANKS_MS;
+  for (const id of [...seen.current.keys()]) if (!open.has(id) && !thanking(id)) seen.current.delete(id);
+  const rows = [...seen.current.values()];
+  const next = rows.filter((n) => thanking(n.w.id)).map((n) => (said[n.w.id].at ?? 0) + THANKS_MS - now);
+  useEffect(() => {
+    if (!next.length) return;
+    const t = window.setTimeout(() => tick((x) => x + 1), Math.max(0, Math.min(...next)) + 20);
+    return () => window.clearTimeout(t);
+  });
+  return rows.map((n) => [n, open.has(n.w.id) ? undefined : said[n.w.id]]);
 }
 
 /** The rows as a list (open asks and those just answered), each answered in place. */
 function NeedList({ rows }: { rows: [Need, Answer | undefined][] }) {
   return (
     <ul class="aip-need-list">
-      {rows.map(([n, a]) => (a ? <SaidRow key={n.w.id} n={n} a={a} /> : <NeedRow key={n.w.id} n={n} />))}
+      {rows.map(([n, a]) => (a ? <SaidRow key={n.w.id} n={n} /> : <NeedRow key={n.w.id} n={n} />))}
     </ul>
   );
 }
