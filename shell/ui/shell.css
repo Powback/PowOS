@@ -282,6 +282,9 @@
 /* Home's: at the stage's foot, in the gap above the pill / dock, over the pages' width only (the stage is already
    clear of a side dock); it fades with the pages as the launcher opens. */
 .home-dots { position: absolute; left: 0; right: 0; bottom: calc(var(--gap) / 2 - 7px); opacity: calc(1 - var(--p)); pointer-events: none; }
+/* Folded with the pill in the foot (not the docked button), the foot starts right at the stage's foot: the dots' usual
+   7px reach below it put them under the pill's top edge (gate edit-search: "the page dots overlap bar-pill"). */
+.home:not(.wide):has(> .bar .bar-pill) > .stage > .home-dots { bottom: var(--gap); }
 /* The launcher's: no row of their own - laid over the gap under the pages (the launcher's 16 px over the pill, or the
    recent row's margin), so the app grid runs down to it. The user, 2026-10-31: "The page indicator takes up a lot of
    space." They sit in the drawer's grid beside the pages (same cell), over the pages' last 6 px: not inside the pages
@@ -1257,9 +1260,13 @@ input.folder-title:focus { background: var(--soft-fill); }
 /* A side dock is a column pinned under the status bar (top: --inset-top): it doesn't rise - risen, its first icon covered
    the status bar's battery (the user's screenshot, 2026-10-30); its foot ends above the risen pill instead. */
 .home > .dock:not(.dock-tray),
-.home > .bar { transition: translate var(--spring-fast-ms) var(--spring-fast); }
+.home > .bar,
+.home > .stage > .home-dots { transition: translate var(--spring-fast-ms) var(--spring-fast); }
+/* Home's page dots rise with the foot: their own row stays above the risen button/pill, never behind it (the manager's
+   wave 2 review: in edit mode they sat under the docked search button). The gate's edit-foot scene asserts it. */
 .home.editing:not(.dock-left, .dock-right) > .dock:not(.dock-tray),
-.home.editing > .bar { translate: 0 calc(-1 * var(--edit-rise)); }
+.home.editing > .bar,
+.home.editing > .stage > .home-dots { translate: 0 calc(-1 * var(--edit-rise)); }
 /* Edit mode's buttons sit on the wallpaper: THE backdrop's tint (§2), not the faint --soft-fill (4.25:1 over a light
    wallpaper, design audit home gap 9). */
 .edit-act {

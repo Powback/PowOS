@@ -4083,6 +4083,11 @@ async function editSearchCheck() {
   const S = await window.__gw.mod("./state.ts");
   const fails = [];
   for (const place of ["bottom", "right"]) fails.push(...(await window.__es.at(S, place)));
+  // Wave 2 (the manager's review): home's page dots keep their own row in edit mode - with the pill above (barOnHome)
+  // and with the screen's default search (folded: the docked button they sat behind).
+  fails.push(...(await window.__es.dotsAt(S, "the pill", false)), ...(await window.__es.dotsAt(S, "the pill")));
+  S.searchTry.value = "";
+  fails.push(...(await window.__es.dotsAt(S, "the default search", false)), ...(await window.__es.dotsAt(S, "the default search")));
   S.editing.value = false;
   S.dockTry.value = "";
   return fails;
@@ -4105,6 +4110,25 @@ const editSearchHelpers = `window.__es = {
     if (E.box(now) !== E.box(was)) out.push(\`\${at}: the search bar changed from \${E.box(was)} to \${E.box(now)}\`);
     if (getComputedStyle(el).background !== glass) out.push(\`\${at}: the search bar's glass changed\`);
     if (sheet.top < now.bottom - 1) out.push(\`\${at}: the edit bar (top \${Math.round(sheet.top)}) isn't below the search bar (bottom \${Math.round(now.bottom)})\`);
+    return out;
+  },
+  // Home's page dots in edit mode: their box meets none of the foot's (the pill, the search button, the edit bar).
+  dotsAt: async (S, search, editing = true) => {
+    const E = window.__es, at = \`\${editing ? "edit mode" : "home"}, \${search}\`;
+    S.dockTry.value = "bottom";
+    S.editing.value = editing;
+    await window.__gw.settled(() => !editing || document.querySelector(".home.editing > .edit-sheet"));
+    await new Promise((ok) => setTimeout(ok, 250)); // the foot's rise
+    const dots = document.querySelector(".home-dots .page-dots");
+    if (!E.shown(dots)) return [];
+    const d = dots.getBoundingClientRect();
+    const out = [];
+    for (const el of document.querySelectorAll(".home > .bar .bar-pill, .home .dsb-glass, .home > .edit-sheet")) {
+      if (!E.shown(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width && r.height && d.left < r.right && r.left < d.right && d.top < r.bottom && r.top < d.bottom)
+        out.push(\`\${at}: the page dots (\${Math.round(d.top)}-\${Math.round(d.bottom)}) overlap \${el.className.split(" ")[0]} (\${Math.round(r.top)}-\${Math.round(r.bottom)})\`);
+    }
     return out;
   },
   at: async (S, place) => {
