@@ -8318,46 +8318,8 @@ async function settleLightsPills(r) {
     const mounted = await r.page.evaluate(lpMount);
     r.problems.push(...mounted);
     if (!mounted.length) {
-      const cdp = await r.page.target().createCDPSession();
-      await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
-      const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-      const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
-      const drag = async (x0, y0, x1, y1, steps = 12) => {
-        await touch("touchStart", [{ x: x0, y: y0 }]);
-        for (let i = 1; i <= steps; i++) (await touch("touchMove", [{ x: x0 + ((x1 - x0) * i) / steps, y: y0 + ((y1 - y0) * i) / steps }]), await sleep(16));
-        await touch("touchEnd", []);
-        await sleep(700);
-      };
-      const box = (i) => r.page.evaluate((i) => { const p = window.__lp.pill(i), b = p.getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, h: b.height, group: `group-${window.__lp.names.indexOf(p.getAttribute("aria-label"))}` }; }, i);
-      const state = () => r.page.evaluate(() => ({ top: window.__lp.list.scrollTop, calls: window.__lp.calls.slice() }));
-      // Up the list from the second pill: it scrolls, no brightness or switch sent.
-      let b = await box(1);
-      await drag(b.x + b.w * 0.3, b.y + b.h / 2, b.x + b.w * 0.33, b.y + b.h / 2 - 90);
-      let s = await state();
-      if (s.top < 20) r.problems.push(`a vertical drag on a pill didn't scroll the room list (scrollTop ${s.top})`);
-      if (s.calls.length) r.problems.push(`a vertical drag on a pill sent ${JSON.stringify(s.calls)} - want nothing (no dim, no switch)`);
-      // Back to the top once the fling is over, then nothing sent since.
-      for (let i = 0, prev = -1; i < 40 && (s = await state()).top !== prev; i++) (prev = s.top, await sleep(100));
-      await r.page.evaluate(() => { window.__lp.list.scrollTo({ top: 0, behavior: "instant" }); window.__lp.calls.length = 0; });
-      await sleep(300);
-      if ((await state()).top > 2) r.problems.push(`the room list didn't go back to the top for the next check (scrollTop ${(await state()).top})`);
-      // Sideways along the first pill to 25%: brightness ~25 for that room's group (the widget sorts them by name), the list where it was.
-      b = await box(0);
-      await drag(b.x + b.w * 0.7, b.y + b.h / 2, b.x + b.w * 0.25, b.y + b.h / 2 + 3);
-      s = await state();
-      const dims = s.calls.filter((c) => c.body?.dimming);
-      const last = dims.at(-1);
-      if (!last || !last.url.endsWith(`/grouped_light/${b.group}`) || Math.abs(last.body.dimming.brightness - 25) > 4)
-        r.problems.push(`a horizontal drag on a pill (${JSON.stringify(b)}, scrollTop ${s.top}) didn't dim its room to ~25%: ${JSON.stringify(s.calls)}`);
-      if (s.calls.some((c) => c.body?.on && !c.body.dimming)) r.problems.push(`a horizontal drag also switched the room: ${JSON.stringify(s.calls)}`);
-      if (s.top > 2) r.problems.push(`a horizontal drag scrolled the list (scrollTop ${s.top})`);
-      await r.page.evaluate(() => (window.__lp.calls.length = 0));
-      // A tap on the third pill (on): exactly one switch of its group, off.
-      b = await box(2);
-      await drag(b.x + b.w / 2, b.y + b.h / 2, b.x + b.w / 2 + 2, b.y + b.h / 2 + 1, 2);
-      s = await state();
-      if (s.calls.length !== 1 || !s.calls[0].url.endsWith(`/grouped_light/${b.group}`) || s.calls[0].body?.on?.on !== false || s.calls[0].body.dimming)
-        r.problems.push(`a tap on a pill sent ${JSON.stringify(s.calls)} - want one switch of ${b.group} off`);
+      const f = await lpFinger(r.page);
+      for (const check of [lpScroll, lpDim, lpTap]) r.problems.push(...(await check(f)));
       await r.page.evaluate(() => window.__lp.root.remove());
     }
   } catch (e) {
@@ -8365,6 +8327,72 @@ async function settleLightsPills(r) {
   }
   r.problems.push(...r.uncaught);
   return { ...r, ready: true, ms: Date.now() - r.started };
+}
+
+/** A finger on the page (CDP touches): drag from a to b, a pill's box (and its group), the list's scroll and the writes. */
+async function lpFinger(page) {
+  const cdp = await page.target().createCDPSession();
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  const drag = async (a, b, steps = 12) => {
+    await touch("touchStart", [a]);
+    for (let i = 1; i <= steps; i++) (await touch("touchMove", [{ x: a.x + ((b.x - a.x) * i) / steps, y: a.y + ((b.y - a.y) * i) / steps }]), await sleep(16));
+    await touch("touchEnd", []);
+    await sleep(700);
+  };
+  const box = (i) =>
+    page.evaluate((i) => {
+      const p = window.__lp.pill(i);
+      const b = p.getBoundingClientRect();
+      return { x: b.left, y: b.top, w: b.width, h: b.height, group: `group-${window.__lp.names.indexOf(p.getAttribute("aria-label"))}` };
+    }, i);
+  const state = () => page.evaluate(() => ({ top: window.__lp.list.scrollTop, calls: window.__lp.calls.slice() }));
+  return { page, sleep, drag, box, state };
+}
+
+/** Up the list from the second pill: it scrolls, no brightness or switch sent; then back to the top, the writes cleared. */
+async function lpScroll({ page, sleep, drag, box, state }) {
+  const b = await box(1);
+  const y = b.y + b.h / 2;
+  await drag({ x: b.x + b.w * 0.3, y }, { x: b.x + b.w * 0.33, y: y - 90 });
+  let s = await state();
+  const fails = [];
+  if (s.top < 20) fails.push(`a vertical drag on a pill didn't scroll the room list (scrollTop ${s.top})`);
+  if (s.calls.length) fails.push(`a vertical drag on a pill sent ${JSON.stringify(s.calls)} - want nothing (no dim, no switch)`);
+  // Once the fling is over.
+  for (let i = 0, prev = -1; i < 40 && s.top !== prev; i++) (prev = s.top, await sleep(100), (s = await state()));
+  await page.evaluate(() => (window.__lp.list.scrollTo({ top: 0, behavior: "instant" }), (window.__lp.calls.length = 0)));
+  await sleep(300);
+  if ((await state()).top > 2) fails.push(`the room list didn't go back to the top for the next check`);
+  return fails;
+}
+
+/** Sideways along the first pill to 25%: brightness ~25 for that room's group (sorted by name), no switch, no scroll. */
+async function lpDim({ page, drag, box, state }) {
+  const b = await box(0);
+  const y = b.y + b.h / 2;
+  await drag({ x: b.x + b.w * 0.7, y }, { x: b.x + b.w * 0.25, y: y + 3 });
+  const s = await state();
+  const last = s.calls.filter((c) => c.body?.dimming).at(-1);
+  const ok = last && last.url.endsWith(`/grouped_light/${b.group}`) && Math.abs(last.body.dimming.brightness - 25) <= 4;
+  const fails = [];
+  if (!ok) fails.push(`a horizontal drag on a pill (${JSON.stringify(b)}, scrollTop ${s.top}) didn't dim its room to ~25%: ${JSON.stringify(s.calls)}`);
+  if (s.calls.some((c) => c.body?.on && !c.body.dimming)) fails.push(`a horizontal drag also switched the room: ${JSON.stringify(s.calls)}`);
+  if (s.top > 2) fails.push(`a horizontal drag scrolled the list (scrollTop ${s.top})`);
+  await page.evaluate(() => (window.__lp.calls.length = 0));
+  return fails;
+}
+
+/** A tap on the third pill (on): exactly one switch of its group, off. */
+async function lpTap({ drag, box, state }) {
+  const b = await box(2);
+  const at = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+  await drag(at, { x: at.x + 2, y: at.y + 1 }, 2);
+  const { calls } = await state();
+  const c = calls[0];
+  const ok = calls.length === 1 && c.url.endsWith(`/grouped_light/${b.group}`) && c.body?.on?.on === false && !c.body.dimming;
+  return ok ? [] : [`a tap on a pill sent ${JSON.stringify(calls)} - want one switch of ${b.group} off`];
 }
 
 /** In the page: Lights' widget over a mock host (8 rooms, all on at 60%), every bridge write recorded. */
