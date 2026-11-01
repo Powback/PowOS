@@ -70,4 +70,18 @@ class WebWindowsReconcileTest {
         val src = File("src/main/kotlin/dev/omalauncher/shell/WebWindows.kt").readText()
         assertTrue("reconcile no longer follows before the orphan check", src.substringAfter("private fun reconcile() {").substringBefore("\n    }\n").contains("follow(it, running)"))
     }
+
+    /** MX1 (11-01 15:38: "it's going fullscreen for a sec and then it's back to desktop"): a launch check never pulls a full-screen / minimised app back. */
+    @Test
+    fun launchChecksLeaveAFullScreenAppAlone() {
+        val src = File("src/main/kotlin/dev/omalauncher/shell/WebWindows.kt").readText()
+        val away = src.substringAfter("private fun awayByChoice(w: Win): Boolean =").substringBefore("\n\n")
+        assertTrue("full screen must count as away by choice", away.contains("w.full"))
+        assertTrue("full screen in flight (the display map, set before the move) must count", away.contains("WebWindowDisplays.fullScreenWindow(w.taskId) == w.id"))
+        assertTrue("minimised must count", away.contains("w.leftAt != 0L"))
+        val check = src.substringAfter("private fun checkLanded(w: Win) {").substringBefore("\n    }\n")
+        assertTrue("the 0.7 s stray pull must skip a full-screen app", check.contains("!awayByChoice(w) && tasksOn(w.displayId) == 0) pullStrayTask(w)"))
+        val fallback = src.substringAfter("private fun landedOrFallback(w: Win) {").substringBefore("\n    }\n")
+        assertTrue("the 3 s check must skip a full-screen app", fallback.lines().first { it.isNotBlank() }.contains("awayByChoice(w)) return"))
+    }
 }
