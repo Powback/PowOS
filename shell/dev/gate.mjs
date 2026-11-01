@@ -10017,10 +10017,15 @@ try {
           for (const s of surfaces) fails.push(...(await call("alignAt", s, mode, `${name} ${s} ${mode}`)));
           await r.page.screenshot({ path: `/cache/align-${name}-${mode}.png` });
         }
+        // AL4: reopened, the launcher starts at its list's start in every mode (never pre-scrolled to its end).
+        if (surfaces.includes("launcher")) fails.push(...(await call("alignOpensAtStart", where, `${name} unfolded`)));
         return fails;
       })));
     for (const [name, url] of [["folded-home", "index.html"], ["folded-shade", "index.html?mode=shade"]])
       runs.push(open(browser, `${ORIGIN}/${url}`, `align-${name}`, dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/align-check.js")).alignDefaults("folded")))));
+    // AL4 folded: the launcher over home and the overlay reopen at the list's start, top / middle / bottom.
+    for (const [name, url, where] of [["folded-launcher-home", "index.html", "home"], ["folded-launcher-pull", "index.html?mode=pull", "pull"]])
+      runs.push(open(browser, `${ORIGIN}/${url}`, `align-${name}`, dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async (w, n) => (await importShim("./dev/align-check.js")).alignOpensAtStart(w, n), where, name))));
   }
   // The same in the user's unfolded home: the dock on the right, the pill below it, 821x883 (the phone, 2026-10-28).
   if (process.env.SHELL_PAGES !== "0")

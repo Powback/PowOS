@@ -3798,8 +3798,8 @@ html.glass:root:not([data-light="false"][data-wallpaper="light"], [data-light="t
 /*
  * Alignment (ui/align.ts, Settings > style > alignment): per surface, html[data-align-launcher|shade|control] is top
  * (as before), middle or bottom - unfolded bottom unless picked, folded top. Flex/grid placement only, nothing per
- * frame; "safe": content taller than its surface starts at its top edge and scrolls (the bottom ones open scrolled to
- * their foot, drawer.tsx/notifications.tsx), never pushed out of the scroll's reach.
+ * frame; "safe": content taller than its surface starts at its top edge and scrolls, never pushed out of the scroll's
+ * reach. The launcher opens at its list's start every time (drawer.tsx AppList), bottom only hugs a short grid low.
  */
 /* The launcher: the app grid (and the folders page) at the panel's foot or centred; the A-Z bar ending where the grid does. */
 :root:is([data-align-launcher="bottom"], [data-align-launcher="middle"]) .drawer-page > .drawer-list:not(.results) { display: flex; flex-direction: column; }

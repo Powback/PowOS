@@ -4,6 +4,7 @@
  * control center - in each mode puts its content where it says: bottom, the content's foot within 24 px of the
  * surface's (its inset: padding, the header row); middle, centred within 24 px; top, from the surface's top as before.
  * AL2: unset, unfolded is bottom and folded top (the notifications top both modes, 11-01). AL3: a pick in the settings applies on the page at once, no reload.
+ * AL4: the launcher reopened starts at its list's start in every mode, folded and unfolded (alignOpensAtStart).
  */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const frames = (n) => new Promise((r) => { const f = () => (--n <= 0 ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); });
@@ -116,5 +117,45 @@ export async function alignDefaults(mode) {
   const fails = [];
   // The notifications: top both modes (the user, 11-01 16:47: "Let's move the notifications to the top").
   for (const s of ["launcher", "shade", "control"]) fails.push(...(await defaultsOf(A, s, mode, mode === "unfolded" && s !== "shade" ? "bottom" : "top")));
+  return fails;
+}
+
+const launcherList = () => [...document.querySelectorAll(".drawer.shown .drawer-page > .drawer-list:not(.drawer-folders):not(.results)")].at(-1);
+
+/** The launcher's list just opened: at its start, long enough to tell, the first app in view - the failures. */
+function atStart(list, at) {
+  if (!list) return [`${at}: the launcher's list isn't shown after reopening`];
+  const fails = [];
+  if (list.scrollHeight <= list.clientHeight + 1) fails.push(`${at}: the list isn't long (${list.scrollHeight}/${list.clientHeight}) - nothing to check`);
+  if (list.scrollTop > 1) fails.push(`${at}: opened scrolled to ${Math.round(list.scrollTop)} of ${list.scrollHeight - list.clientHeight}, not its start`);
+  const first = list.querySelector(".grid.az > :first-child")?.getBoundingClientRect(), l = list.getBoundingClientRect();
+  if (!first || first.top < l.top - 1 || first.top > l.bottom) fails.push(`${at}: the first app isn't in view on open`);
+  return fails;
+}
+
+/**
+ * AL4 (ask-1a198f5c13d, the user 11-01: "Why is the launcher always scrolled to bottom when I open it?"): in each mode,
+ * the launcher opened again after being left scrolled to its end opens at its list's start - scrollTop 0, the first app
+ * in view. Bottom only hugs a grid shorter than the panel low; it never pre-scrolls a long list. [where] as alignOpen.
+ */
+export async function alignOpensAtStart(where, at) {
+  const S = await importShim("./state.ts");
+  const A = await importShim("./ui/align.ts");
+  const fails = [];
+  for (const mode of ["top", "middle", "bottom"]) {
+    A.alignTry.value = { ...A.alignTry.value, launcher: mode };
+    await frames(2);
+    // The mock's apps fit the panel: a capped list overflows like the phone's long one (the user's 1684 over 764).
+    const before = launcherList();
+    if (before) (before.style.maxHeight = "240px", before.scrollTop = before.scrollHeight);
+    S.closeDrawer();
+    await sleep(500);
+    await alignOpen(where);
+    const list = launcherList();
+    if (list) (list.style.maxHeight = "240px", await frames(2));
+    fails.push(...atStart(list, `${at} ${mode}`));
+    if (list) list.style.maxHeight = "";
+  }
+  A.alignTry.value = {};
   return fails;
 }
