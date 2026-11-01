@@ -3180,6 +3180,59 @@ async function aiUnfoldedRestored(page) {
  * in the chat (aiPanesGlassFails), the segmented row swapping the right column, the left column the folded status page's
  * own component (the same hero, sections and stack as folded). Renders: /cache/ai-unfolded-<size>-<tone>-<n>.png.
  */
+/**
+ * In the page, the unfolded chat column (the user, 11-01: "then why is it still showing…" - yesterday's thread): a
+ * message arriving after mount is drawn at the bottom, scrolled to the end, within two frames; it is the store's newest
+ * (state.ts chat, the one the folded status page reads); scrolled up, the next one leaves the place and raises "New
+ * messages ↓", whose tap goes to the end. The chat's items are put back after.
+ */
+async function aiUnfoldedFollow() {
+  const S = await window.__gw.mod("./state.ts");
+  const pane = document.querySelector(".ai-right > .ai-chat");
+  if (!pane) return ["no chat column (.ai-right > .ai-chat)"];
+  const frames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const atEnd = () => Math.abs(pane.scrollTop) <= 2;
+  const add = async (text) => {
+    S.chat.value = { ...S.chat.value, items: [...S.chat.value.items, { kind: "assistant", text }] };
+    await frames();
+  };
+  // A message after mount: the column's last, scrolled to the end, and the store's newest (the folded page's).
+  const newest = async () => {
+    const fails = [];
+    await add("gate newest one");
+    const last = [...pane.querySelectorAll(".ai-chat-in .msg")].at(-1);
+    const r = pane.getBoundingClientRect(), m = last?.getBoundingClientRect();
+    if (!last?.textContent.includes("gate newest one")) fails.push(`the newest message isn't the chat's last: "${last?.textContent.slice(0, 40)}"`);
+    if (!atEnd() || !m || m.bottom > r.bottom + 1) fails.push(`not at the end after a new message (scrollTop ${pane.scrollTop})`);
+    const store = S.chat.value.items.at(-1)?.text;
+    if (store !== "gate newest one") fails.push(`the store's newest (the folded page's) is "${store}", not the column's`);
+    return fails;
+  };
+  // Scrolled up: a new message keeps the place and raises the pill; its tap goes to the end and it goes.
+  const pilled = async () => {
+    pane.scrollTop = -400;
+    pane.dispatchEvent(new Event("scroll"));
+    await frames();
+    await add("gate newest two");
+    const fails = atEnd() ? ["scrolled up, a new message pulled the chat to the end"] : [];
+    const pill = pane.querySelector(".ai-new-pill");
+    if (!pill) return [...fails, "scrolled up, no \"New messages ↓\" pill"];
+    pill.click();
+    await frames();
+    if (!atEnd()) fails.push(`the pill's tap didn't go to the end (scrollTop ${pane.scrollTop})`);
+    if (pane.querySelector(".ai-new-pill")) fails.push("the pill stayed after its tap");
+    return fails;
+  };
+  const kept = S.chat.value;
+  const long = Array.from({ length: 24 }, (_, i) => ({ kind: i % 2 ? "assistant" : "user", text: `older ${i} ` + "words ".repeat(40) }));
+  S.chat.value = { ...kept, items: [...kept.items, ...long] };
+  await frames();
+  const fails = [...(await newest()), ...(await pilled())];
+  S.chat.value = kept;
+  await frames();
+  return fails;
+}
+
 async function aiUnfoldedCheck(page) {
   const fails = [];
   await page.evaluate(aiStackSetup, 5);
@@ -3194,6 +3247,7 @@ async function aiUnfoldedCheck(page) {
     if (JSON.stringify(left) !== JSON.stringify(folded)) fails.push(`${size}: the status column ${JSON.stringify(left)} isn't the folded status page ${JSON.stringify(folded)}`);
     if (!(await page.evaluate(aiChatSetup, [3, `-${size}-uf`]))) { fails.push(`${size}: the chat's try message didn't render`); continue; }
     await page.evaluate(aiPanesRest);
+    if (size === "unfolded") fails.push(...(await page.evaluate(aiUnfoldedFollow)).map((f) => `${size} follow: ${f}`));
     fails.push(...[...(await page.evaluate(aiPanesFails)), ...(await page.evaluate(aiColumnsContent)), ...(await page.evaluate(aiPanesGlassFails)), ...(await page.evaluate(aiSegsSwitch))].map((f) => `${size}: ${f}`));
     await page.screenshot({ path: `/cache/ai-unfolded-${size}-chat.png` });
     await page.evaluate(aiChatRestore);
