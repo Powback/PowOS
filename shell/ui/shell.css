@@ -3805,8 +3805,8 @@ html:root .ai-screen.status > .ai-glass.tile { --glass-blur-native: var(--backdr
 .ais-bar.sweep .ais-bar-fill { inset: 0 auto 0 0; width: 32%; transform: translateX(-100%); animation: ais-sweep 1.8s cubic-bezier(0.4, 0, 0.2, 1) 3; }
 /* A task's severity from evidence (aiboard.tsx SevChip): P0 / P1, small, before the title; infra-only is muted. */
 .ais-sev { flex: none; align-self: center; margin-inline-end: 6px; padding: 0 5px; border-radius: 4px; font-size: 11px; font-weight: 700; line-height: 16px; letter-spacing: 0.02em; color: var(--color-background); background: var(--color-foreground); }
-.ais-sev.p0 { background: #d93a3a; color: #fff; }
-.ais-sev.p1 { background: #d98a1a; color: #fff; }
+.ais-sev.p0 { background: var(--color-red); color: var(--color-foreground); }
+.ais-sev.p1 { background: var(--aip-amber); color: var(--aip-on-amber); }
 .ais-sev.infra { opacity: 0.6; }
 .ais-done-item, .ais-next-item { animation: ais-rise 320ms var(--ais-spring) both; }
 .ais-done-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 0 4px; border: 0; background: none; font: inherit; text-align: start; white-space: nowrap; font-size: var(--text-body); color: var(--color-foreground); }
