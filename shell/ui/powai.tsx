@@ -25,7 +25,7 @@ import { AgentUpdates, Queued, Thread, onLink, toolLabel } from "./rich.tsx";
 import { askQueued } from "./assistant.ts";
 import { MenuScreen, SCREENS, dailyDriver, type AiScreen } from "./aimenu.tsx";
 import { WorkFeed } from "./aiboard.tsx";
-import { agent, sessions as agentSessions } from "../agents.ts";
+import { agent, aiAgent, sessions as agentSessions } from "../agents.ts";
 import { untried } from "./trycard.tsx";
 import { AiSegs, FleetPane, useAgentsInPane } from "./aipanes.tsx";
 import { AiStatus, noteAsked, openChat, OtherProjectsItem } from "./aistatus.tsx";
@@ -474,12 +474,15 @@ function Folded({ shown }: { shown: boolean }) {
   const s = aiScreen.value;
   useAgentsInPane(shown && s === "fleet");
   if (s === "chat") return <StatusColumn shown={shown} />;
-  if (SEGMENTED.has(s)) return <RightBody s={s} shown={shown} />;
+  if (foldedTabbed(s)) return <RightBody s={s} shown={shown} />;
   return <AiColumn shown={shown} wide={false} pill />;
 }
 
+/** Folded, a bottom tab's screen - but one agent opened (a Working now row) is its own full page with back ("Agent"). */
+const foldedTabbed = (s: AiScreen) => SEGMENTED.has(s) && !(s === "fleet" && aiAgent.value);
+
 /** The folded page's classes: .status on Chat (the status page), .stacked wherever the bottom tabs lead. */
-const foldedClass = (s: AiScreen) => `${s === "chat" ? "status" : ""} ${SEGMENTED.has(s) ? "stacked" : ""}`;
+const foldedClass = (s: AiScreen) => `${s === "chat" ? "status" : ""} ${foldedTabbed(s) ? "stacked" : ""}`;
 
 export function AiView({ shown, cls, pill = true, panes = false }: { shown: boolean; cls: string; pill?: boolean; panes?: boolean }) {
   const [ref, wide, rail] = useWide();
