@@ -35,8 +35,32 @@ export function useSize(ref: { current: HTMLElement | null }): [number, number] 
   return size;
 }
 
+/**
+ * Bumps when a web font finishes loading: a text measured in the fallback face is measured again in the real one (else
+ * a cut made for the narrower fallback wraps to a second line once the font arrives - a row taller than counted).
+ */
+function useFontsLoaded(): number {
+  const [k, setK] = useState(0);
+  useLayoutEffect(() => {
+    const f = document.fonts;
+    if (!f) return;
+    let live = true;
+    const bump = () => live && setK((v) => v + 1);
+    void f.ready.then(bump);
+    f.addEventListener?.("loadingdone", bump);
+    return () => {
+      live = false;
+      f.removeEventListener?.("loadingdone", bump);
+    };
+  }, []);
+  return k;
+}
+
 /** Line height of a clamped text, em of its own size: rows are a fixed height (widgets/main.tsx counts what fits). */
 export const LINE = 1.25;
+
+/** An app icon's size, em of the row's (--text-body) size. */
+export const ICON_EM = 2.1;
 
 const cut = (text: string, k: number) => (k >= text.length ? text : text.slice(0, k).trimEnd() + "…");
 
@@ -48,6 +72,7 @@ export function Clamp({ text, lines, style }: { text: string; lines: number; sty
   const ref = useRef<HTMLDivElement>(null);
   const [w] = useSize(ref);
   const [n, setN] = useState(text.length);
+  const fonts = useFontsLoaded();
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el?.parentElement || !w) return;
@@ -65,7 +90,15 @@ export function Clamp({ text, lines, style }: { text: string; lines: number; sty
     }
     probe.remove();
     setN(lo);
-  }, [text, lines, w]);
+  }, [text, lines, w, fonts]);
+  // The probe's answer checked on the shown node itself: still taller than [lines] (an emoji's fallback face wraps
+  // where the probe didn't), a word shorter until it isn't - so a row is never taller than the widget counted.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || n <= 0) return;
+    const max = (parseFloat(getComputedStyle(el).lineHeight) || 16) * lines + 1;
+    if (el.scrollHeight > max) setN(Math.max(0, text.lastIndexOf(" ", n - 2) > 0 ? text.lastIndexOf(" ", n - 2) : n - 1));
+  }, [n]);
   return (
     <div ref={ref} style={{ ...style, whiteSpace: "normal", overflowWrap: "anywhere", overflow: "visible", minHeight: `${lines * LINE}em` }}>
       {cut(text, n)}
@@ -145,7 +178,14 @@ function Line({ g, lines }: { g: Group; lines: number }) {
   return <Clamp text={text} lines={lines} style={{ ...S.line, color: s?.state === "error" ? "var(--color-red)" : undefined }} />;
 }
 
-export function Row({ g, host, app, open, onToggle, lines = 2 }: { g: Group; host: Host; app: string; open: boolean; onToggle(): void; lines?: number }) {
+/**
+ * [narrow]: a tile too narrow for the icons and the time beside the text (a 2-column widget) - the row is its text
+ * alone, at the same size; the time drops first ("time"), then the icons too ("text").
+ */
+export type Narrow = "no" | "time" | "text";
+
+export function Row(p: { g: Group; host: Host; app: string; open: boolean; onToggle(): void; lines?: number; narrow?: Narrow }) {
+  const { g, host, app, open, onToggle, lines = 2, narrow = "no" } = p;
   const { dx, moved, handlers } = useSwipe(() => void markRead(host, app, g));
   return (
     <div class="nm-row" data-group={g.id} style={{ display: "flex", flexDirection: "column", gap: "0.35em", flex: "none" }}>
@@ -156,15 +196,15 @@ export function Row({ g, host, app, open, onToggle, lines = 2 }: { g: Group; hos
         style={{ ...S.row, transform: dx ? `translateX(${dx}px)` : undefined, opacity: dx ? 1 - Math.min(0.6, Math.abs(dx) / 300) : 1 }}
         onClick={() => !moved.current && onToggle()}
       >
-        <Icons g={g} host={host} app={app} />
+        {narrow !== "text" && <Icons g={g} host={host} app={app} />}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={S.who}>
+          <div class="nm-who" style={S.who}>
             <Clamp text={g.who} lines={1} style={{ flex: 1, minWidth: 0, lineHeight: LINE }} />
             {g.count > 1 && <span style={S.badge}>{g.count}</span>}
           </div>
           <Line g={g} lines={lines} />
         </div>
-        <div style={S.time}>{ago(g.time)}</div>
+        {narrow === "no" && <div class="nm-time" style={S.time}>{ago(g.time)}</div>}
       </div>
       {open && <Reply g={g} host={host} app={app} done={onToggle} />}
     </div>
@@ -227,8 +267,8 @@ function Reply({ g, host, app, done }: { g: Group; host: Host; app: string; done
 export const S = {
   row: { display: "flex", alignItems: "center", gap: "0.6em", touchAction: "pan-y", cursor: "pointer", userSelect: "none" },
   icon: {
-    width: "2.1em",
-    height: "2.1em",
+    width: `${ICON_EM}em`,
+    height: `${ICON_EM}em`,
     flex: "none",
     padding: 0,
     border: "2px solid var(--color-background)",
@@ -241,10 +281,10 @@ export const S = {
     placeItems: "center",
     overflow: "hidden",
   },
-  who: { display: "flex", alignItems: "center", gap: "0.4em", fontWeight: 600, position: "relative" },
-  line: { fontSize: "0.85em", color: "var(--color-muted)", lineHeight: LINE },
-  time: { fontSize: "0.75em", color: "var(--color-muted)", flex: "none", alignSelf: "flex-start", marginTop: "0.2em" },
-  badge: { fontSize: "0.7em", fontWeight: 600, padding: "0 0.5em", borderRadius: "1em", background: "var(--color-accent)", color: "var(--color-background)", lineHeight: 1.5 },
+  who: { display: "flex", alignItems: "center", gap: "0.4em", fontSize: "var(--text-body)", fontWeight: 600, position: "relative" },
+  line: { fontSize: "var(--text-body)", color: "var(--color-muted)", lineHeight: LINE },
+  time: { fontSize: "var(--text-small)", color: "var(--color-muted)", flex: "none", alignSelf: "flex-start", marginTop: "0.2em" },
+  badge: { fontSize: "var(--text-small)", fontWeight: 600, padding: "0 0.5em", borderRadius: "1em", background: "var(--color-accent)", color: "var(--color-background)", lineHeight: 1.5 },
   input: { flex: 1, minWidth: 0, font: "inherit", padding: "0.5em 0.8em", borderRadius: "1.2em", border: 0, background: soft, color: "var(--color-foreground)" },
   pillButton: { font: "inherit", fontSize: "0.85em", padding: "0.35em 0.9em", borderRadius: "1em", border: 0, background: soft, color: "var(--color-foreground)" },
 } as const;
