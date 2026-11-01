@@ -243,10 +243,17 @@ EOF
     to=$(sh_ "am stack list" | awk -v t="taskId=${task%% *}:" '/^RootTask id=/{d=$0;sub(/.*displayId=/,"",d);sub(/ .*/,"",d)} index($0,t){print d;exit}')
     for t in $task; do case "$pre" in *" $t "*) ;; *) sh_ "am stack remove $t" >/dev/null; log "task $t removed where it went (display ${to:-?})" ;; esac; done
     hfail "$APP's task $task left display $D $1 (to display ${to:-?}: PowOS's adopt of a full-screen task on another display - fixed in FreeformTasks.onMainDisplay)"; }
-  # (b) a tap on THAT display changes the app's number area.
-  sleep 1; stayed "after its content showed"; "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/pre.raw.gz" 2>/dev/null
+  # (b) a tap on THAT display changes the app's number area. Calculator keeps its number across launches (each check
+  # added a 7): at its digit limit a 7 changes nothing (11-01 03:24, 15 sevens: 0.0013). So its AC key first (WR_CLEAR
+  # fx fy, 0.14 0.606: the key above the 7), then six 7s: the measured 7 shifts the whole number (a lone "0" -> "7" is
+  # ~0.002, at the threshold).
+  local cx cy kx ky; set -- ${WR_CLEAR:-0.14 0.606}; cx=$(awk "BEGIN{print int($W*$1)}"); cy=$(awk "BEGIN{print int($H*$2)}")
+  set -- ${WR_TAP:-0.14 0.69}; kx=$(awk "BEGIN{print int($W*$1)}"); ky=$(awk "BEGIN{print int($H*$2)}")
+  awake_or_nj "clear"; sh_ "input -d $D tap $cx $cy; for i in 1 2 3 4 5 6; do input -d $D tap $kx $ky; done" >/dev/null
+  sleep 1; stayed "after its content showed"; "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/clr.raw.gz" 2>/dev/null
+  sleep 0.5; "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/pre.raw.gz" 2>/dev/null
   local A0=0 B0=$(( H * 55 / 100 ))
-  noise=$($PY diff "$OUT/display.raw.gz" "$OUT/pre.raw.gz" 0 $A0 "$W" $B0)
+  noise=$($PY diff "$OUT/clr.raw.gz" "$OUT/pre.raw.gz" 0 $A0 "$W" $B0)
   set -- ${WR_TAP:-0.14 0.69}; fx=$1 fy=$2
   local x y; x=$(awk "BEGIN{print int($W*$fx)}"); y=$(awk "BEGIN{print int($H*$fy)}")
   awake_or_nj "tap"; sh_ "input -d $D tap $x $y" >/dev/null; log "tap: input -d $D tap $x $y ($fx,$fy)"
