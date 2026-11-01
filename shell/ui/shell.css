@@ -3915,8 +3915,8 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
   color: var(--color-foreground); box-shadow: var(--lift); transition: transform var(--spring-slow-ms) var(--spring-slow), opacity var(--spring-ms) var(--spring); animation: ais-card-in var(--spring-slow-ms) var(--spring-slow) both;
 }
 .ais-card-top.dragging { transition: none; }
-.ais-card-top[data-lean="right"] .ais-act.yes { background: var(--color-accent); color: var(--color-background); }
-.ais-card-top[data-lean="left"] .ais-act.no { background: var(--status-needs); color: var(--status-on-needs); }
+.ais-card-top[data-lean="right"] .ais-act.yes { background: var(--status-working); color: var(--color-background); }
+.ais-card-top[data-lean="left"] .ais-act.no { background: color-mix(in srgb, var(--color-foreground) 28%, transparent); }
 .ais-card-top[data-lean="up"] { opacity: 0.8; }
 .ais-card-top.fly.right { transform: translateX(120%) rotate(12deg); opacity: 0; }
 .ais-card-top.fly.left { transform: translateX(-120%) rotate(-12deg); opacity: 0; }
@@ -3926,6 +3926,19 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .ais-card-line { font-size: var(--text-body); line-height: 1.4; color: var(--color-foreground); opacity: 0.9; }
 .ais-shot { align-self: flex-start; padding: 0; border: 0; border-radius: 8px; overflow: hidden; background: none; }
 .ais-shot img { display: block; max-width: 100%; max-height: 140px; object-fit: cover; }
+/* A picture with its label under it ("before", "after", "what you reported"). */
+.ais-pic { display: flex; flex-direction: column; gap: 4px; min-width: 0; margin: 0; }
+.ais-pic-label, .ais-pic-coming { font-size: var(--text-small); font-weight: 600; color: var(--color-foreground); opacity: 0.86; }
+.ais-pic-coming { align-self: center; opacity: 0.7; }
+/* Try cards: before | after. Folded: a swipeable pair (each most of the card's width, snapping); unfolded: side by side. */
+.ais-pair { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; touch-action: pan-x; scrollbar-width: none; }
+.ais-pair::-webkit-scrollbar { display: none; }
+/* Each picture its own shape at one height; two that don't fit side by side scroll sideways, one at a time. */
+.ais-pair > .ais-pic { flex: 0 0 auto; max-width: 82%; scroll-snap-align: start; }
+.ais-pair .ais-shot img { width: auto; height: 180px; max-width: 100%; max-height: none; object-fit: contain; }
+.ai-left .ais-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; touch-action: auto; }
+.ai-left .ais-pair > .ais-pic { max-width: none; }
+.ai-left .ais-pair .ais-shot img { width: 100%; height: auto; max-height: 220px; object-position: left top; }
 .ais-try { align-self: flex-start; min-height: 36px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--color-accent); color: var(--color-accent-foreground, var(--color-background)); font: inherit; font-weight: 650; }
 .ais-acts { display: flex; gap: 8px; margin-top: auto; padding-top: 8px; }
 /* The stack's one column never wider than the section (a long field must not widen the card past its column). */
@@ -3942,9 +3955,9 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .ais-card-top > .ai-reply > .ai-reply-foot > .ai-act.send:disabled { opacity: 0.5; }
 .ais-more { min-height: 40px; padding: 0 4px; border: 0; background: none; font: inherit; font-size: var(--text-small); font-weight: 600; color: var(--color-foreground); }
 .ais-act { flex: 1; min-height: 44px; padding: 0 10px; border: 0; border-radius: 12px; background: color-mix(in srgb, var(--color-foreground) 12%, transparent); font: inherit; font-weight: 600; color: var(--color-foreground); }
-.ais-act.yes { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
-.ais-act.no { background: color-mix(in srgb, var(--status-needs) 26%, transparent); }
-.ais-act.later { flex: 0 0 auto; }
+/* works = the positive status (accent), still broken = neutral (the plain button), later = quiet (no fill). */
+.ais-act.yes { background: color-mix(in srgb, var(--status-working) 45%, transparent); }
+.ais-act.later { flex: 0 0 auto; background: none; opacity: 0.75; }
 /* The foot's mic chip: hold anywhere on the page to talk; while it listens, what it hears. */
 .ais-mic { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; margin-right: auto; padding: 0 10px; border-radius: 999px; background: color-mix(in srgb, var(--color-foreground) 12%, transparent); font-size: var(--text-small); color: var(--color-foreground); max-width: 60%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ais-mic-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--color-foreground); opacity: 0.6; }

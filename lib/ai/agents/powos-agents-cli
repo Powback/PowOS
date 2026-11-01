@@ -100,6 +100,14 @@ How far along (the page shows a bar, the steps done / now / next, the commits an
                    mentions the task id (git log of the repo you're in, last 30 days) are linked by themselves
                    on every add/set/done.
   --image PATH     a review image for it (repeatable; e.g. /home/powos/design-qa/<file>.png).
+  --image-kind report|after
+                   what this call's --image shows: report (the default: what the user reported, the pre-fix state)
+                   or after (the fixed build in the same scene: an emulator shot, POWOS_DEVICE=emu tools/phone/shot.sh,
+                   or a gate scene render, shell/dev/shot.sh). The Ready-to-try card shows before | after.
+  --no-after "<why>"
+                   a --try on a UI task (Windows, Home & launcher, Shade & lock, Games, AI page, Apps) is refused
+                   until it has an after image (--image PATH --image-kind after); --no-after gives the reason a
+                   picture can't show the fix ("timing only", "audio").
   --image-rm PATH  drop an image entry (a dead path); repeatable.
   task done marks the current step done and fills the bar.
   powos agents task rm <task>      Remove one (a duplicate, a mistake).
@@ -423,7 +431,44 @@ def opts(argv, spec):
     return got, rest
 
 
-TRACK = ["progress", "step", "plan", "commit*", "image*", "image-rm*", "commits-json"]
+TRACK = ["progress", "step", "plan", "commit*", "image*", "image-rm*", "image-kind", "commits-json"]
+# HACK: an image's kind rides in its path ("after:/home/powos/design-qa/x.png"; a bare path is a report image) because
+# the module's `images` column is a JSON list of strings (apps/agents/module json_list::<String>). Real fix: images as
+# [{path, kind}] in the module, then drop the prefix here and in shell/ui/aiboard.tsx reviewImages.
+AFTER = "after:"
+# The areas whose fixes are seen: a --try on one needs an after image (or --no-after "<why>").
+VISUAL_PROJECTS = ("Windows", "Home & launcher", "Shade & lock", "Games", "AI page", "Apps")
+
+
+def image_path(p):
+    """A stored image entry's file path (its kind prefix off)."""
+    return p[len(AFTER):] if p.startswith(AFTER) else p
+
+
+def image_entries(o):
+    """This call's --image paths as stored entries, by --image-kind (report: bare, after: prefixed)."""
+    kind = o.get("image-kind") or "report"
+    if kind not in ("report", "after"):
+        die(f"--image-kind is report or after (got {kind!r})")
+    if o.get("image-kind") and not o.get("image"):
+        die("--image-kind says what an --image shows: give the --image PATH too")
+    return [AFTER + p if kind == "after" else p for p in o.get("image") or []]
+
+
+def need_after(w_images, project, o, tl):
+    """The ship gate on ready-to-try: a UI task's --try needs an after image (stored or in this call) or --no-after."""
+    if not tl or project not in VISUAL_PROJECTS:
+        return
+    if "no-after" in o:
+        if not _line(o["no-after"]):
+            die('--no-after needs the reason no picture can show the fix (--no-after "timing only")')
+        return
+    have = [p for p in _jl(w_images or "") if isinstance(p, str)] + image_entries(o)
+    if not any(p.startswith(AFTER) for p in have):
+        die(f"--try on a {project} task needs an after image: the fixed build in the same scene, taken on the emulator "
+            "(POWOS_DEVICE=emu tools/phone/shot.sh OUT.png) or a gate scene render (shell/dev/shot.sh OUTDIR 'scene'), "
+            "copied to the phone (tools/phone/review-image.sh OUT.png) and attached: --image "
+            "/home/powos/design-qa/OUT.png --image-kind after. Nothing a picture can show: --no-after \"<why>\"")
 # Owners that say nobody in particular has it: `task list --unowned` lists these as free.
 GENERIC_OWNERS = ("", "coder")
 
@@ -495,8 +540,10 @@ def track(w, progress=None, step=None, plan=None, commits=(), images=(), done=Fa
         if not any(sha.startswith(x["sha"]) or x["sha"].startswith(sha) for x in cs):
             cs.append({"sha": sha, "subject": _line(c.get("subject", ""))})
     ims = [p for p in _jl(w.get("images", "")) if isinstance(p, str)]
+    # The same file added again as another kind: it moves to that kind (one entry per file).
+    ims = [p for p in ims if not any(image_path(p) == image_path(q) and p != q for q in images)]
     ims += [p for p in images if p not in ims]
-    ims = [p for p in ims if p not in images_rm]
+    ims = [p for p in ims if image_path(p) not in images_rm and p not in images_rm]
     new = {"progress_done": pd, "progress_total": pt, "step": cur,
            "steps": json.dumps(steps, ensure_ascii=False, separators=(",", ":")) if steps else "",
            "commits": json.dumps(cs, ensure_ascii=False, separators=(",", ":")) if cs else "",
@@ -541,7 +588,7 @@ def resolve_commits(argv):
         return argv
     verb = "add" if argv[0] == "new" else argv[0]
     o, rest = opts(argv[1:], ["owner", "status", "note", "title", "project", "id", "ask", "no-check", "parent", "try",
-                              "friction"] + TRACK)
+                              "friction", "no-after"] + TRACK)
     wid = o.get("id") or (slug(" ".join(rest)) if verb == "add" else " ".join(rest))
     mention = wid if re.fullmatch(r"[a-z0-9][a-z0-9._-]{3,63}", wid or "") else None
     commits = (json.loads(o["commits-json"]) if o.get("commits-json") else []) + git_commits(o.get("commit") or [], mention)
@@ -566,7 +613,7 @@ def apply_track(w, o, done=False):
     # Run where the repo is (a phone-side run has none; the caller's side resolved them already): its id's mentions.
     commits += git_commits([], mention=w["id"])
     new = track(w, progress_of(o["progress"]) if o.get("progress") else None, o.get("step"), o.get("plan"),
-                commits, o.get("image") or [], done=done, images_rm=o.get("image-rm") or [])
+                commits, image_entries(o), done=done, images_rm=o.get("image-rm") or [])
     if new:
         call("work_track", w["id"], new["progress_done"], new["progress_total"], new["step"], new["steps"],
              new["commits"], new["images"])
@@ -724,7 +771,7 @@ def task(argv):
         verb = "add"
     if verb == "add":
         o, rest = opts(argv, ["owner", "status", "note", "id", "project", "ask", "no-check", "parent", "try",
-                              "friction"] + TRACK)
+                              "friction", "no-after"] + TRACK)
         title = " ".join(rest).strip()
         if not title:
             die("usage: powos agents task add <title...> [--owner ROLE] [--status S] [--note TEXT]")
@@ -741,6 +788,7 @@ def task(argv):
         owner = o.get("owner", "")
         project = project_opt(o) or infer_project(owner, wid, title)
         tl = try_line(o)
+        need_after("", project, o, tl)
         st = status_of(o.get("status")) or "working"
         if st == "done":
             die("a new task isn't done: add it, then `task done` once its check passed")
@@ -758,7 +806,7 @@ def task(argv):
         print(wid)
     elif verb == "set":
         o, rest = opts(argv, ["owner", "status", "note", "title", "project", "ask", "no-check", "parent", "try",
-                              "friction"] + TRACK)
+                              "friction", "no-after"] + TRACK)
         if not rest:
             die("usage: powos agents task set <task> [--status S] [--owner ROLE] [--title T] [--note TEXT]")
         w = find(" ".join(rest))
@@ -767,6 +815,7 @@ def task(argv):
         if not st and w["status"] == "queued" and any(o.get(k) for k in ("step", "progress", "plan")):
             st = "working"
         project, tl = project_opt(o), try_line(o)
+        need_after(w.get("images", ""), project or w.get("project", ""), o, tl)
         if o.get("parent"):
             call("work_parent", w["id"], "" if o["parent"] == "-" else find(o["parent"])["id"])
         if st == "done":
@@ -780,7 +829,7 @@ def task(argv):
         link_friction(o, w["id"])
         print(w["id"])
     elif verb == "done":
-        o, rest = opts(argv, ["note", "commit*", "image*", "image-rm*", "commits-json", "no-check"])
+        o, rest = opts(argv, ["note", "commit*", "image*", "image-rm*", "image-kind", "commits-json", "no-check"])
         if not rest:
             die('usage: powos agents task done <task> [--note TEXT] [--no-check "<why no device check is possible>"]')
         w = find(" ".join(rest))

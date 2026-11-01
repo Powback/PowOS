@@ -185,11 +185,16 @@ Shell tsc: a fresh worktree has no shell/node_modules - the gate skips tsc; syml
   progress_total, step, steps, commits, images) writes the progress columns WHOLE (the CLI computes them from the
   row); work_drop(id). Statuses working|blocked|waiting|done.
 - Progress columns (after `project`, all #[default]): progress_done/progress_total u32 (0/0 = no bar), step, steps
-  (JSON [{text, state: done|current|next}]), commits (JSON [{sha(12), subject}]), images (JSON [path]), activity u64
+  (JSON [{text, state: done|current|next}]), commits (JSON [{sha(12), subject}]), images (JSON [path]; an after image
+  is "after:<path>", HACK until the module stores {path, kind}: aiboard.tsx reviewImages), activity u64
   (0 on old rows -> use updated). "" = empty list. TS client keys: progressDone/progressTotal (camelCase).
 - CLI: `task add|new <title> [--id --owner --project --status --note]`, `task set <t> --progress N/M --step TEXT
   --plan "a; b; c" --commit SHA... --image PATH... --image-rm PATH... --owner E`, `task done <t>`,
   `task list [--all --json --project P --unowned --owner E]`, `task rm`, `task infer`.
+  - `--image P --image-kind after`: the fixed build in the same scene (report = the default, the pre-fix shot). The
+    Ready-to-try card (aistack.tsx Shots) shows before | after; no after: "what you reported" + "after: coming".
+    `--try` on a Windows / Home & launcher / Shade & lock / Games / AI page / Apps task is refused without an after
+    image (stored or in that call) unless `--no-after "<why>"`. Tier-1: test-agents-board.py; gate: try-pair.
   - --step: the old current becomes done; a planned step of that text becomes current, else inserted before nexts.
   - Count follows the steps unless --progress set it (explicit wins); done fills the bar.
   - Commits are resolved in the CALLER's git repo before the relay (resolve_commits), plus commits of the last 30
