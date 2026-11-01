@@ -27,6 +27,7 @@ description: Use to reach, inspect, ship to, verify, or measure perf on the PowO
   `home.tsx`, `shell.css` (ship.sh `window_gate`): a FAIL = "WINDOWS BROKEN" in `ship.sh status`, the ship marked failed,
   the coder mailed - fix forward, no rollback.
 - Evidence off PowOS's root: `tools/phone/pull-root.sh <path-under-/data/powos/root> <mac-dir>` (plain `adb.sh pull` there is Permission denied; it copies via `su cp` to /data/local/tmp first).
+- Ask attachments (`/run/powos-app/powos-ai-shared/screen-*.png|jpg`, `live-*`, `perf-*`) are NOT cleaned up (11-02: 900+ kept back to 10-20; f406 was a false "gone"). They're mode 600 in the app's dir, so plain `adb shell ls` says missing: fetch one with `tools/phone/pull-root.sh /run/powos-app/powos-ai-shared/<name> <mac-dir>`; the page serves them at `/_shared/<name>`. A region (.png) and the full screen (.jpg) carry different ms stamps.
 - Friction: `tools/agents/friction add --area phone --kind <refused|broken-tool|flaky-check|unclear-rule|slow> "<title>" --repro "<cmd>"`.
 
 ### verify
