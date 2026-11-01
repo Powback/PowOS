@@ -2465,7 +2465,7 @@ class WebWindows(
         val w = wins[id] ?: return false
         if (w.full) return true
         minimisedIs(w, true)
-        if (w.linux != null || w.leftAt != 0L || w.displayId < 0) return true
+        if (!minimiseGoesPip(w.linux != null, w.displayId, w.leftAt != 0L, true)) return true
         io.post { leaveNow(w) }
         return true
     }
@@ -2488,7 +2488,7 @@ class WebWindows(
         if (w.closed || w.leftAt != 0L) return
         val task = taskOn(w.displayId) ?: return Unit.also { WindowLog.w(TAG, "window ${w.id}: no task on display ${w.displayId} to minimise") }
         val top = taskInfo(task)?.topActivity
-        if (top == null || !supportsPip(top)) {
+        if (top == null || !minimiseGoesPip(w.linux != null, w.displayId, false, supportsPip(top))) {
             WindowLog.i(TAG, "window ${w.id}: minimised (${top?.flattenToShortString()} has no picture-in-picture: just hidden)")
             return
         }
@@ -2503,10 +2503,62 @@ class WebWindows(
             WindowLog.w(TAG, "window ${w.id}: minimise's move to display 0 FAILED: just hidden")
             return
         }
+        // PiP only from a leave of an app in front on display 0: home started at once (15:45:03, YouTube: home 54 ms
+        // after the move, its window not yet relaid out at the screen's size, no PiP - "mode 1 visible false") pauses
+        // it before it is the foreground app a home swipe leaves. Home once it shows there and settled ([leaveStep]).
+        awaitFront(w, Leave(task, top, android.os.SystemClock.uptimeMillis()))
+    }
+
+    /** [leaveNow]'s home gesture under way: [task] (top activity [top]) moved to display 0 at [movedAt]. */
+    private class Leave(
+        val task: Int,
+        val top: ComponentName,
+        val movedAt: Long,
+    ) {
+        /** Uptime it was first seen in front on display 0, or -1 (not in front). */
+        private var frontAt = -1L
+
+        /** In front ([front]) at [now]: for how long ([leaveStep]'s frontFor), -1 not in front. */
+        fun frontFor(
+            front: Boolean,
+            now: Long,
+        ): Long {
+            frontAt = if (!front) -1L else if (frontAt < 0) now else frontAt
+            return if (frontAt < 0) -1L else now - frontAt
+        }
+    }
+
+    /** On [io]: [leaveNow]'s wait for [l]'s task in front on display 0 ([leaveStep]), then home ([leaveHome]). */
+    private fun awaitFront(
+        w: Win,
+        l: Leave,
+    ) {
+        if (w.closed || w.leftAt == 0L) return
+        val t = taskInfo(l.task)
+        val now = android.os.SystemClock.uptimeMillis()
+        val front = t != null && visibleOf(t) == true && WebWindowDisplays.displayOf(t) == android.view.Display.DEFAULT_DISPLAY
+        when (leaveStep(front, now - l.movedAt, l.frontFor(front, now))) {
+            LeaveStep.WAIT -> io.postDelayed({ awaitFront(w, l) }, LEAVE_POLL_MS)
+            LeaveStep.HOME -> leaveHome(w, l, front)
+        }
+    }
+
+    /** On [io]: the home start of [leaveNow]'s home gesture, [w]'s app in front on display 0 ([front]) or past the cap. */
+    private fun leaveHome(
+        w: Win,
+        l: Leave,
+        front: Boolean,
+    ) {
+        val task = l.task
+        val top = l.top
+        val waited = android.os.SystemClock.uptimeMillis() - l.movedAt
+        // The leave's settle ([checkLeft]) counts from home's start, not the move: the app is in front until now.
+        w.leftAt = android.os.SystemClock.uptimeMillis()
+        if (!front) WindowLog.w(TAG, "window ${w.id}: task $task not in front on display 0 after $waited ms: home all the same")
         val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra(EXTRA_APP_LEFT, true)
         val ok = runCatching { context.startActivity(home, ActivityOptions.makeBasic().setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY).toBundle()) }
             .onFailure { WindowLog.w(TAG, "window ${w.id}: home not started for the minimise", it) }.isSuccess
-        WindowLog.i(TAG, "window ${w.id}: minimised as a home gesture (${top.flattenToShortString()}, task $task on display 0, home started=$ok)")
+        WindowLog.i(TAG, "window ${w.id}: minimised as a home gesture (${top.flattenToShortString()}, task $task in front on display 0 after $waited ms, home started=$ok)")
         io.postDelayed({ WindowLog.i(TAG, "window ${w.id}: after its minimise task $task is ${taskInfo(task)?.let { "mode ${windowingMode(it)} visible ${visibleOf(it)} on display ${WebWindowDisplays.displayOf(it)}" } ?: "gone"}") }, LEFT_SETTLE_MS)
     }
 
@@ -3319,6 +3371,9 @@ class WebWindows(
         }
     }
 
+    /** [leaveStep]'s answer: keep waiting, or start home now. */
+    enum class LeaveStep { WAIT, HOME }
+
     companion object {
         private const val TAG = "PowosWebWindows"
 
@@ -3359,6 +3414,15 @@ class WebWindows(
 
         /** [WebWindows.minimise]: its move + home (and the PiP entry) settle in this; [checkLeft] waits it out. */
         private const val LEFT_SETTLE_MS = 2000L
+
+        /** [awaitFront]'s poll of the minimised task while it comes to the front on display 0. */
+        private const val LEAVE_POLL_MS = 50L
+
+        /** [leaveStep]: in front this long before home (its window relaid out at the screen's size and drawn). */
+        const val LEAVE_FRONT_SETTLE_MS = 400L
+
+        /** [leaveStep]: home after this at most, in front or not (never an app left full screen by a minimise). */
+        const val LEAVE_FRONT_MAX_MS = 1500L
 
         /** An open slower than this to show is logged as a warning ([shown]). */
         private const val SHOWN_SLOW_MS = 1000L
@@ -3497,6 +3561,34 @@ class WebWindows(
         ): Int = bar.coerceIn(0, h / 4)
 
         /** Which edge strip [y] is in on an [h] px tall screen: -1 the top ([top] px), 1 the bottom ([bottom] px), 0 neither. */
+        /**
+         * MN1's home start, a minimise of a PiP app ([leaveNow]): HOME once its task has been in front on display 0
+         * ([front]) for [LEAVE_FRONT_SETTLE_MS] ([frontFor], -1: not yet), as the app a home swipe leaves is; HOME
+         * anyway [LEAVE_FRONT_MAX_MS] after the move ([sinceMove]). Else WAIT.
+         */
+        fun leaveStep(
+            front: Boolean,
+            sinceMove: Long,
+            frontFor: Long,
+        ): LeaveStep =
+            when {
+                sinceMove >= LEAVE_FRONT_MAX_MS -> LeaveStep.HOME
+                front && frontFor >= LEAVE_FRONT_SETTLE_MS -> LeaveStep.HOME
+                else -> LeaveStep.WAIT
+            }
+
+        /**
+         * MN1: a minimise is a home gesture (task to display 0, home, PiP) only for an Android window ([linux] false)
+         * on its own display ([displayId] >= 0), not left already, whose top activity declares picture-in-picture
+         * ([supportsPip]). Every other minimise just hides the window.
+         */
+        fun minimiseGoesPip(
+            linux: Boolean,
+            displayId: Int,
+            left: Boolean,
+            supportsPip: Boolean,
+        ): Boolean = !linux && displayId >= 0 && !left && supportsPip
+
         fun fullScreenEdge(
             y: Float,
             h: Int,
