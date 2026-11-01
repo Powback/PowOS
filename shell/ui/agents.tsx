@@ -16,7 +16,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import { holdRefresh } from "./refresh.ts";
 import { agent, agentsView, asks, closeAgents, live, messages, openAgents, recent, since, tasks, useAgentEvents, useAgents } from "../agents.ts";
-import { fleet, headline, ownWords, restartNote, shorten, stepsOf, taskOf, workingNow, workRows, type Fleet, type Step, type WorkLite, type Worker } from "../fleet.ts";
+import { fleet, headline, ownWords, restartNote, shorten, stepsOf, taskOf, titleOf, workingNow, workRows, type Fleet, type Step, type WorkLite, type Worker } from "../fleet.ts";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import { useDb, useRows } from "../apps/stdb.ts";
 import { takeTap } from "./taps.ts";
@@ -276,7 +276,7 @@ function fitLine(text: string, w: number, px: number, weight = 400) {
   return shorten(text, Math.max(2, Math.floor(w / (0.55 * px))));
 }
 
-/** A tile's height in em: padding, the title's line, a bar's slot under it; [second]: the step's line too. */
+/** A row's height in em at most: padding, the title's line, a bar under it; [second]: the step's line too. */
 const tileEm = (second: boolean) => 0.5 + 1.35 + 0.45 + (second ? 0.85 * 1.35 + 0.25 : 0);
 
 const ICON = { restart: "↻", answer: "allow", open: "›" } as const;
@@ -298,7 +298,9 @@ const titleRoom = (box: Box, label: string) => box.w - (label ? textWidth(label,
 
 /**
  * One agent at work, as a widget row: its task on one line (a stuck one: why, in red, and its one action), its step now
- * when the widget has room ([second]), and a thin progress bar UNDER the title - each line whole, cut only by an ellipsis.
+ * when the widget has room ([second]), and a thin progress bar UNDER the title when the task has progress (none without)
+ * - each line whole, cut only by an ellipsis. A plain row on the widget's glass, set apart by space alone - never a card
+ * in the card (the design principles' "no boxes in boxes", the manager 11-01 19:20).
  */
 function Tile({ x, box, manager, second }: { x: Worker; box: Box; manager?: boolean; second: boolean }) {
   const bad = !!x.reason;
@@ -319,8 +321,21 @@ function Tile({ x, box, manager, second }: { x: Worker; box: Box; manager?: bool
           </button>
         )}
       </div>
-      {!bad && x.total > 0 ? <Bar done={x.done} total={x.total} /> : <i class="fl-bar-slot" aria-hidden="true" />}
+      {!bad && x.total > 0 && <Bar done={x.done} total={x.total} />}
       {second && next && <div class="fl-t2 muted">{fitLine(next, box.w, 0.85 * box.font)}</div>}
+    </div>
+  );
+}
+
+/** A session that finished lately, in the widget's spare rows: muted, its title and (with room) what it reported. */
+function DoneRow({ a, box, second }: { a: Agent; box: Box; second: boolean }) {
+  const next = a.report || `done ${since(a.last)} ago`;
+  return (
+    <div role="button" tabIndex={0} class="fl-tile fl-done muted" onPointerUp={takeTap} onClick={() => openAgents(a.id)}>
+      <div class="fl-t1">
+        <span class="fl-t1-text">{fitLine(`✓ ${titleOf(a, taskOf(a.work))}`, box.w, box.font, 600)}</span>
+      </div>
+      {second && <div class="fl-t2">{fitLine(next, box.w, 0.85 * box.font)}</div>}
     </div>
   );
 }
@@ -352,8 +367,14 @@ function rowsLayout(size: { w: number; h: number; font: number }, n0: number, co
   const tf = best.tf || tries[0].tf || 10;
   const fit = Math.max(1, Math.floor((size.h + 0.3 * tf) / ((tileEm(second) + 0.3) * tf)));
   const n = Math.min(want, c * fit);
-  return { c, r: Math.max(1, Math.ceil(n / c)), n, second, tf };
+  return { c, n, second, tf, slots: c * fit };
 }
+
+/** The widget list's class: [rows] agents' rows, each at its own height, the rest empty glass (the preview's fill checks told so). */
+const listAttrs = (rows: boolean) => (rows ? { class: "ag-list rows", "data-sparse": "" } : { class: "ag-list" });
+
+/** The sessions done lately for the widget's spare rows: [slots] less the [shown] working ones (none working: none). */
+const spareDone = (f: Fleet, shown: number, slots: number) => (shown ? f.doneToday.slice(0, slots - shown) : []);
 
 const HINT = "Ask PowOS AI for one, or start claude in a terminal";
 
@@ -419,9 +440,12 @@ export function AgentsPanel({ item }: { item: HomeItem }) {
   // How many rows: from the widget's cell span, never its pixels - a row per two cells across per row (4x2: four), 2x2
   // the top task alone; rowsLayout fits them, each at its text's own height.
   const n0 = tw <= 2 && th <= 2 ? 1 : Math.max(1, Math.floor(tw / 2) * th);
-  const { c, r, n, second, tf } = rowsLayout(size, n0, all.length);
+  const { c, n, second, tf, slots } = rowsLayout(size, n0, all.length);
   const shown = all.slice(0, n);
-  const box: Box = { w: (w - 0.3 * tf * (c - 1)) / c - 1.1 * tf, h, font: tf };
+  // Rows keep their own height, top-aligned (never stretched to the tile, the manager 11-01 19:20); the rows to spare
+  // show what finished lately, muted - none finished: the glass stays empty.
+  const done = spareDone(f, shown.length, slots);
+  const box: Box = { w: (w - 0.6 * tf * (c - 1)) / c - 0.2 * tf, h, font: tf };
   return (
     <div class="tile ag-panel">
       {needsBoard(f) && <BoardFeed />}
@@ -430,9 +454,12 @@ export function AgentsPanel({ item }: { item: HomeItem }) {
           <span>Agents</span>{" "}
           <span class={f.attention.length ? "fl-need" : "muted"}>{headline(f)}</span>
         </div>
-        <div ref={list} class="ag-list" data-fit={`${c}x${r} at ${Math.round(tf)} px in ${w}x${h} (${Math.round(font)} px)`} style={{ fontSize: `${tf}px`, gridTemplateColumns: `repeat(${c}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${r}, minmax(auto, 1fr))` }}>
+        <div ref={list} {...listAttrs(shown.length > 0)} data-fit={`${n}+${done.length} rows in ${c} col at ${Math.round(tf)} px in ${w}x${h} (${Math.round(font)} px)`} style={{ fontSize: `${tf}px`, gridTemplateColumns: `repeat(${c}, minmax(0, 1fr))` }}>
           {shown.map((x) => (
             <Tile key={x.a.id} x={x} box={box} manager={mgr[0] === x} second={second} />
+          ))}
+          {done.map((a) => (
+            <DoneRow key={a.id} a={a} box={box} second={second} />
           ))}
           {w > 0 && !all.length && (plain ? <IdleLine w={w} font={font} /> : <Idle box={box} f={f} />)}
         </div>

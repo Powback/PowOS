@@ -451,7 +451,7 @@ async function agentsFleetCheck(setup) {
   // The widget at [w]x[h]: [want] tiles, the stopped one first in red (its reason, cut to "Can't…" at 2x2), the head's counts.
   const widgetFails = (panel, w, h, want) => {
     const fails = [];
-    const tiles = [...(panel?.querySelectorAll(".fl-tile") ?? [])];
+    const tiles = [...(panel?.querySelectorAll(".fl-tile:not(.fl-done)") ?? [])];
     const head = text(".ag-head", panel);
     if (tiles.length !== want) fails.push(`widget ${w}x${h}: ${tiles.length} tiles, not ${want} (${fitOf(panel)})`);
     if (!firstStopped(tiles)) fails.push(`widget ${w}x${h}: the first tile isn't the stopped one in red ("${text(".fl-tile", panel)}")`);
@@ -479,7 +479,90 @@ async function agentsFleetCheck(setup) {
   fails.push(...rawIn("screen, idle opened", text(".ag-screen")));
   A.closeAgents();
   for (const [w, h, want] of [[2, 2, 1], [4, 2, 4], [4, 4, 5]]) fails.push(...(await widget(w, h, want)));
-  return [...fails, ...(await window.__agCountFails())];
+  fails.push(...(await window.__agCountFails()));
+  // Two agents on a tall widget (the manager's QA 11-01 19:20): rows at their own height from the top, the spare ones
+  // the recently done (muted) - none done: empty glass.
+  for (const [w, h] of [[2, 4], [4, 4], [3, 3]]) for (const done of [true, false]) fails.push(...(await window.__agTwo(w, h, done)));
+  return fails;
+}
+
+/** In the page (window.__agTwo): home holding only the agents widget at [w]x[h] with agentTwoSetup([done])'s fleet; its fails. */
+async function agentTwoWidget(w, h, done) {
+  const G = window.__gw;
+  const [{ powos }, S] = [await G.mod("./bridge.ts"), await G.mod("./state.ts")];
+  const home = await powos.home.get();
+  for (const i of home.items) await powos.home.remove(i.key);
+  await powos.home.addPanel("agents", home.pages[0] ?? 1, { x: 0, y: 0, w, h });
+  S.page.value = 0;
+  const panel = () => document.querySelector(".page:not(.away) .ag-panel");
+  await G.until(panel, 3000);
+  const body = window.__agTwoSetup(done);
+  await new (Object.getPrototypeOf(async function () {}).constructor)("E", "sleep", body)(window.__mockEvents, (ms) => new Promise((r) => setTimeout(r, ms)));
+  await G.until(() => /2 working/.test(panel()?.querySelector(".ag-head")?.textContent ?? "") && panel()?.querySelector(".fl-tile"), 3000);
+  await G.frames(4);
+  return window.__agTwoFails(`widget ${w}x${h}, 2 agents${done ? " + done" : ""}`, panel(), done);
+}
+
+/**
+ * In the page (window.__agTwoSetup): two working sessions - one on the board's media-card (FLEET_SETUP's workRows: 3 of
+ * 5, a bar), one with no plan (no bar) - and, with [done], six that finished today; an agentsFleetCheck body.
+ */
+function agentTwoSetup(done) {
+  return `
+    window.__powosMockQuiet = true;
+    const now = Date.now();
+    const row = (id, state, o) => ({ id, host: 'mac', role: 'coder', parent: null, state, title: '', step: '', cwd: 'PowOS', pid: 0, subs: 0, unread: 0, report: '', work: '', started: now - 3_600_000, last: now - 60_000, rev: 1, ...o });
+    const agents = [
+      row('mac:w1', 'working', { title: 'Media card', work: 'media-card', step: 'Bash renders', last: now - 10_000 }),
+      row('mac:w2', 'working', { title: 'Fix the drawer padding', step: 'Edit drawer.tsx', last: now - 20_000 }),
+      ...(${done} ? [0, 1, 2, 3, 4, 5].map((i) => row('mac:g' + i, 'gone', { title: 'Finished job ' + i, report: 'pushed, gate green', last: now - (i + 1) * 600_000 })) : []),
+    ];
+    E.emit('agents.delta', { full: true, agents, tasks: [], messages: [], asks: [] });
+    await sleep(200);`;
+}
+
+/**
+ * In the page (window.__agTwoFails): [panel] holding agentTwoSetup's two at [where]: two working rows, every row as tall
+ * as its content (never stretched) with no background of its own, the first at the list's top; the media-card row a bar
+ * under its title, the planless one none; [done]: muted done rows in the spare room, else none.
+ */
+function agentTwoFails(where, panel, done) {
+  const list = panel?.querySelector(".ag-list");
+  const rows = [...(panel?.querySelectorAll(".fl-tile") ?? [])];
+  const work = rows.filter((t) => !t.classList.contains("fl-done"));
+  const fails = work.length === 2 ? [] : [`${work.length} working rows, not 2 (${list?.dataset.fit})`];
+  // A row as tall as its content plus its padding (never stretched), and no background of its own.
+  const rowFails = (t) => {
+    const cs = getComputedStyle(t);
+    const kids = [...t.children].map((k) => k.getBoundingClientRect());
+    const content = Math.max(...kids.map((k) => k.bottom)) - Math.min(...kids.map((k) => k.top));
+    const want = content + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    const hgt = t.getBoundingClientRect().height;
+    return [
+      ...(Math.abs(hgt - want) > 1.5 ? [`"${t.textContent}" is ${Math.round(hgt)} px tall for ${Math.round(want)} px of content (stretched)`] : []),
+      ...(/^(transparent|rgba\(0, 0, 0, 0\))$/.test(cs.backgroundColor) ? [] : [`"${t.textContent}" has its own background ${cs.backgroundColor} (a box in the box)`]),
+    ];
+  };
+  const topped = rows[0] && list && rows[0].getBoundingClientRect().top - list.getBoundingClientRect().top <= 1.5;
+  return [...fails, ...rows.flatMap(rowFails), ...(topped ? [] : ["the rows aren't top-aligned"]), ...window.__agBarFails(work), ...window.__agDoneFails(rows, done)].map((f) => `${where}: ${f}`);
+}
+
+/** In the page (window.__agBarFails): the media-card row (3 of 5) a bar under its title, the planless "drawer" row none. */
+function agentBarFails(work) {
+  const media = work.find((t) => /Media card/.test(t.textContent));
+  const plain = work.find((t) => /drawer/.test(t.textContent));
+  const [title, bar] = [media?.querySelector(".fl-t1")?.getBoundingClientRect(), media?.querySelector(".fl-bar")?.getBoundingClientRect()];
+  const fails = plain?.querySelector(".fl-bar") ? ["the row with no progress shows a bar"] : [];
+  if (!bar) return [...fails, "the media-card row (3 of 5) has no progress bar"];
+  return bar.top < title.bottom - 0.5 || bar.width < 4 ? [...fails, `the media-card bar isn't under its title (${Math.round(bar.top)} vs ${Math.round(title.bottom)}, ${Math.round(bar.width)} px wide)`] : fails;
+}
+
+/** In the page (window.__agDoneFails): [done] muted done rows in the spare room; none finished, none. */
+function agentDoneFails(rows, done) {
+  const finished = rows.filter((t) => t.classList.contains("fl-done"));
+  if (!done) return finished.length ? [`${finished.length} done rows with none finished`] : [];
+  if (!finished.length) return ["no recently-done rows in the spare room"];
+  return finished.some((t) => !t.classList.contains("muted")) ? ["a done row isn't muted"] : [];
 }
 
 /**
@@ -8930,7 +9013,7 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     // Both home layouts: the default (search docked, no pill row: taller cells) and the bar - the same tiles in each.
     for (const [name, layout] of [["agents-fleet", null], ["agents-fleet-bar", barOnHome]])
-      runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: 412, height: 915 }).then((r) => whenReady(r, () => (layout ? r.page.evaluate(layout) : Promise.resolve()).then(() => r.page.evaluate(`window.__agRowFails = ${agentRowFails}; window.__agCountFails = ${agentCountFails}`)).then(() => r.page.evaluate(agentsFleetCheck, FLEET_LETTERED)))));
+      runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: 412, height: 915 }).then((r) => whenReady(r, () => (layout ? r.page.evaluate(layout) : Promise.resolve()).then(() => r.page.evaluate(`window.__agRowFails = ${agentRowFails}; window.__agCountFails = ${agentCountFails}; window.__agTwoSetup = ${agentTwoSetup}; window.__agTwoFails = ${agentTwoFails}; window.__agTwo = ${agentTwoWidget}; window.__agBarFails = ${agentBarFails}; window.__agDoneFails = ${agentDoneFails}`)).then(() => r.page.evaluate(agentsFleetCheck, FLEET_LETTERED)))));
   // Floating windows live on home's pages (ui/desktops.ts; the user's design, 2026-10-22): page switch hides and
   // shows them, and the placement survives the page loading afresh.
   if (process.env.SHELL_PAGES !== "0")

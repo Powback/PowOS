@@ -12,7 +12,7 @@
  * (its own row), and the rest folded: idle sessions, sessions done today, and anything older than a day.
  */
 import { signal } from "@preact/signals";
-import { agent, agentIds, asks, isSub, QUEUED_STEP } from "./agents.ts";
+import { agent, agentIds, asks, isSub, QUEUED_STEP, tasks } from "./agents.ts";
 import type { Agent } from "./types.ts";
 
 /** The board columns the fleet reads (powai.tsx WorkRow's). */
@@ -266,11 +266,17 @@ export function titleOf(a: Agent, w: WorkLite | undefined) {
 /** The board's step for [w] ("" when none or only queued). */
 const boardStepOf = (w: WorkLite | undefined) => (w?.step && w.step !== QUEUED_STEP ? plain(w.step.replace(PATHY, " ")) : "");
 
+/** [a]'s progress [done, total]: its board task's plan, else the session's own task list (items done of all); [0, 0] none. */
+function progressOf(a: Agent, w: WorkLite | undefined): [number, number] {
+  if (w?.progressTotal) return [Math.min(w.progressDone ?? 0, w.progressTotal), w.progressTotal];
+  const own = tasks.value.get(a.id) ?? [];
+  return [own.filter((t) => t.status === "done").length, own.length];
+}
+
 /** [a] as a fleet line: task words, progress and its step now. */
 function workerOf(a: Agent): Worker {
   const w = taskOf(a.work);
-  const total = w?.progressTotal ?? 0;
-  const done = Math.min(w?.progressDone ?? 0, total);
+  const [done, total] = progressOf(a, w);
   // The board's --step first (the agent's own words, the user 11-01); its live tool step only without one.
   const live = a.state === "working" ? stepWords(a.step) : "";
   return { a, title: titleOf(a, w), done, total, now: boardStepOf(w) || live, task: w };
