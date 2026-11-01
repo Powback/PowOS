@@ -120,7 +120,9 @@ async function aiPageIs(G, S, powos, folded) {
   const button = faceBox();
   const f = folded && button ? await morphs("AI page", G, () => (S.page.value = -1), button) : ((S.page.value = -1), []);
   await G.until(() => document.querySelector(`${BAR}.seated`), 3000);
-  await sleep(450);
+  // The screens' slide settles before the seat is judged: a fixed 450 ms read the slot mid-slide under a loaded Mac
+  // (the gate 11-01 23:40: slot at -460..-30, the bar already at its end 287..717). A bar never on the slot still fails.
+  await G.until(() => !seated("AI page").length, 3000);
   f.push(...barIs("AI page", "ai", "Message the manager"), ...seated("AI page"), ...(folded ? fullBar("AI page") : []));
   return f.length ? f : aiSends("AI page", powos, S);
 }
