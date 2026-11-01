@@ -442,11 +442,23 @@ export function NotificationPanel() {
     return () => (l.removeEventListener("scroll", follow), off());
   }, [together, two, shown]);
   // Bottom-aligned (ui/align.ts): the newest card nearest the thumb, so a list taller than its column opens scrolled to
-  // its foot and scrolls up for more. Not the folded one panel: its scroll collapses the control center's card.
+  // its foot (newest in view) and scrolls up for more - folded too (its scroll there compacts the control center's card,
+  // the sticky ride above). The cards still lay out after the open (the cascade, a group unfolding, more arriving), so
+  // the list stays at its foot while it grows until the user scrolls away from it.
   const bottom = alignOf("shade") === "bottom";
   useLayoutEffect(() => {
     const l = listEl.current;
-    if (shown && bottom && l && (two || !together)) l.scrollTop = l.scrollHeight;
+    const c = itemsEl.current;
+    if (!shown || !bottom || !l || !c) return;
+    let pinned = true;
+    const toEnd = () => pinned && (l.scrollTop = l.scrollHeight);
+    const away = () => (pinned = l.scrollHeight - l.clientHeight - l.scrollTop < 2);
+    toEnd();
+    const ro = new ResizeObserver(toEnd);
+    ro.observe(c);
+    ro.observe(l);
+    l.addEventListener("scroll", away, { passive: true });
+    return () => (ro.disconnect(), l.removeEventListener("scroll", away));
   }, [shown, bottom, two, together, items.length]);
   // The cards, newest first, each group a row of the cascade (shell.css .cascade) from --i [from], after the rows above.
   const items$ = (from: number) => (

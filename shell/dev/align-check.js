@@ -3,7 +3,7 @@
  * AL1: unfolded, each surface - the launcher (over home in place, and the overlay over an app), the notifications, the
  * control center - in each mode puts its content where it says: bottom, the content's foot within 24 px of the
  * surface's (its inset: padding, the header row); middle, centred within 24 px; top, from the surface's top as before.
- * AL2: unset, unfolded is bottom and folded top. AL3: a pick in the settings applies on the page at once, no reload.
+ * AL2: unset, unfolded is bottom and folded top (the notifications top both modes, 11-01). AL3: a pick in the settings applies on the page at once, no reload.
  */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const frames = (n) => new Promise((r) => { const f = () => (--n <= 0 ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); });
@@ -114,6 +114,7 @@ export async function alignDefaults(mode) {
   const A = await importShim("./ui/align.ts");
   A.alignTry.value = {};
   const fails = [];
-  for (const s of ["launcher", "shade", "control"]) fails.push(...(await defaultsOf(A, s, mode, mode === "unfolded" ? "bottom" : "top")));
+  // The notifications: top both modes (the user, 11-01 16:47: "Let's move the notifications to the top").
+  for (const s of ["launcher", "shade", "control"]) fails.push(...(await defaultsOf(A, s, mode, mode === "unfolded" && s !== "shade" ? "bottom" : "top")));
   return fails;
 }

@@ -8478,18 +8478,21 @@ try {
       );
   // NS1-NS4 (dev/notif-stacks-check.js; the user, 11-01 16:39: "just show like 3 cards and then an 'x more' hint"):
   // groups of 1, 3 and 7 all on screen at once, each up to 3 full cards one after another and "+4 more" on the 7, top-
-  // and bottom-aligned; a tap on "+4 more" opens that group alone. Renders: /cache/notif-stacks-*.png.
+  // and bottom-aligned; a tap on "+4 more" opens that group alone. NS5-NS7 (11-01 16:47: "Let's move the notifications
+  // to the top"): unset is top, newest first; bottom opens at its thumb end; a stored bottom moves to top once.
+  // Renders: /cache/notif-stacks-*.png.
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, `shade-notif-stacks-${label}`, viewport).then((r) => whenReady(r, async () => {
         const call = (fn, ...args) => r.page.evaluate(async (f, a) => (await importShim("./dev/notif-stacks-check.js"))[f](...a), fn, args);
-        const fails = [...(await call("stacksSeed"))];
+        const fails = [...(await call("stacksSeed")), ...(await call("stacksDefault", `${label} default`))];
         for (const align of ["top", "bottom"]) {
           const at = `${label} ${align}`;
           fails.push(...(await call("stacksAt", align, at)));
           await r.page.screenshot({ path: `/cache/notif-stacks-${label}-${align}.png` });
           if (!fails.length) fails.push(...(await call("stacksExpand", at)));
         }
+        fails.push(...(await call("stacksOpenEnd", `${label} bottom open`)), ...(await call("stacksMigrate", `${label} migrate`)));
         return fails;
       })));
   // The pet (ui/pet.tsx): home with local.pet installed, driven through what the user does - shown, touched, each

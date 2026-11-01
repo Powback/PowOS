@@ -17,14 +17,15 @@ const title = (app, i) => `${app} title ${i + 1}`;
 const text = (app, i) => `${app} first line ${i + 1}\nsecond line`;
 
 /** The mock's notifications: the groups (the newest app first: Solo, then Trio, then Seven), then the shade open. */
-export async function stacksSeed() {
-  const now = Math.floor(Date.now() / 1000);
-  const items = GROUPS.flatMap(([app, n], g) =>
+const seedItems = (now) =>
+  GROUPS.flatMap(([app, n], g) =>
     Array.from({ length: n }, (_, i) => ({
       key: `${app}-${i}`, app, pkg: `test.${app.toLowerCase()}`, title: title(app, i), text: text(app, i),
       time: now - 60 * (g * 10 + i + 1), icon: null, clearable: true, profile: null, conversation: false,
     })),
   );
+export async function stacksSeed() {
+  const items = seedItems(Math.floor(Date.now() / 1000));
   window.__mockEvents.emit("notifications.changed", { available: true, items });
   (await importShim("./state.ts")).notif.value = true;
   await sleep(700);
@@ -140,4 +141,73 @@ export async function stacksAt(align, at) {
   for (let el = card?.parentElement; el; el = el.parentElement) if (el.scrollHeight > el.clientHeight + 1) el.scrollTop = align === "bottom" ? el.scrollHeight : 0;
   await frames(2);
   return fails;
+}
+
+/**
+ * NS5 (the user, 11-01 16:47: "Let's move the notifications to the top"): nothing stored, the shade's list is top-
+ * aligned folded and unfolded, the newest group first - Solo above Trio above Seven.
+ */
+export async function stacksDefault(at) {
+  await frames(2);
+  const a = document.documentElement.dataset.alignShade;
+  if (a !== "top") return [`${at}: no stored setting, the notifications are ${a}-aligned, not top`];
+  const tops = GROUPS.map(([app]) => groupOf(app).stack ?? groupOf(app).cards[0]).map((el) => el?.getBoundingClientRect().top ?? NaN);
+  return tops[0] < tops[1] && tops[1] < tops[2] ? [] : [`${at}: top-aligned, the groups aren't newest first (Solo ${r0(tops[0])}, Trio ${r0(tops[1])}, Seven ${r0(tops[2])})`];
+}
+
+/** NS6: bottom-aligned, an overflowing list opens (shade shut, then opened) scrolled to its thumb end, newest in view. */
+export async function stacksOpenEnd(at) {
+  const S = await importShim("./state.ts");
+  const A = await importShim("./ui/align.ts");
+  A.alignTry.value = { ...A.alignTry.value, shade: "bottom" };
+  // Enough to overflow the unfolded column too: ten more apps of one card each, then the shade shut and opened again.
+  const now = Math.floor(Date.now() / 1000);
+  const extra = Array.from({ length: 10 }, (_, i) => ({
+    key: `Extra-${i}`, app: `Extra${i}`, pkg: `test.extra${i}`, title: `Extra ${i}`, text: "one line\nsecond line",
+    time: now - 3600 - 60 * i, icon: null, clearable: true, profile: null, conversation: false,
+  }));
+  window.__mockEvents.emit("notifications.changed", { available: true, items: [...seedItems(now), ...extra] });
+  S.notif.value = false;
+  await sleep(500);
+  S.notif.value = true;
+  await sleep(800);
+  const l = [...document.querySelectorAll(".notif-panel.shown .notif-list")].find((el) => el.querySelector(".notif-items"));
+  if (!l) return [`${at}: no notification list in the open shade`];
+  const max = l.scrollHeight - l.clientHeight;
+  if (max < 40) return [`${at}: the list doesn't overflow (${max} px) - the check needs it to`];
+  return max - l.scrollTop > 2 ? [`${at}: bottom-aligned, the list opens at ${r0(l.scrollTop)} of ${r0(max)} px, not its thumb end`] : [];
+}
+
+/**
+ * NS7: the one-time move of the user's stored pick (ui/align.ts shadeMoved), on a fresh copy of the module as a new
+ * page loads it: a stored "bottom" with no marker reads top (stored as top, marker set); then an explicit bottom, the
+ * marker in place, stays bottom on the next load. The launcher's stored pick is untouched.
+ */
+const ls = (k) => localStorage.getItem(`powos.${k}`);
+const MIGRATE_KEYS = ["align.shade.folded", "align.shade.unfolded", "align.launcher.unfolded", "align.shade-moved-top"];
+
+/** The old state: the notifications and the launcher stored bottom, no marker; then a fresh module load. */
+async function movedOnce(at) {
+  localStorage.removeItem("powos.align.shade-moved-top");
+  for (const k of MIGRATE_KEYS.slice(0, 3)) localStorage.setItem(`powos.${k}`, "bottom");
+  const A = await importShim(`./ui/align.ts?ns7a=${Date.now()}`);
+  const fails = ["folded", "unfolded"].flatMap((m) => {
+    const v = A.alignChoice("shade", m).value;
+    return v === "top" && ls(`align.shade.${m}`) === "top" ? [] : [`${at}: a stored old bottom (${m}) reads ${v} (stored ${ls(`align.shade.${m}`)}) after the move, not top`];
+  });
+  if (ls("align.shade-moved-top") !== "1") fails.push(`${at}: the move left no marker`);
+  if (ls("align.launcher.unfolded") !== "bottom") fails.push(`${at}: the move touched the launcher's pick (${ls("align.launcher.unfolded")})`);
+  return { A, fails };
+}
+
+export async function stacksMigrate(at) {
+  const keep = MIGRATE_KEYS.map((k) => [k, ls(k)]);
+  try {
+    const { A, fails } = await movedOnce(at);
+    A.alignChoice("shade", "unfolded").value = "bottom";
+    const v = (await importShim(`./ui/align.ts?ns7b=${Date.now()}`)).alignChoice("shade", "unfolded").value;
+    return v === "bottom" ? fails : [...fails, `${at}: a later pick of bottom didn't stick (reads ${v})`];
+  } finally {
+    for (const [k, v] of keep) v == null ? localStorage.removeItem(`powos.${k}`) : localStorage.setItem(`powos.${k}`, v);
+  }
 }
