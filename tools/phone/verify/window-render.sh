@@ -47,7 +47,10 @@ log() { echo "$*" | tee -a "$OUT/log.txt"; }
 sh_() { "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
 # asleep: true when the phone's power state isn't Awake (Dozing/Asleep/Dreaming); WAKE is that state. Read-only
 # (dumpsys power) - it never wakes the screen. Unreadable (no answer) counts as awake: the step is judged as before.
-asleep() { WAKE=$("$A" shell "dumpsys power | grep -m1 mWakefulness=" </dev/null 2>/dev/null | tr -d '\r ' | cut -d= -f2); [ -n "$WAKE" ] && [ "$WAKE" != Awake ]; }
+asleep() { WAKE=$("$A" shell "dumpsys power | grep -m1 mWakefulness=" </dev/null 2>/dev/null | tr -d '\r ' | cut -d= -f2); [ -n "$WAKE" ] && [ "$WAKE" != Awake ] && return 0
+  # Locked counts as asleep: the test display is in the default display group since 63cdfdb9, so it follows the
+  # keyguard and draws no app (11-01 04:18: 16 colours, flat, the phone woken by keys but still on its swipe lock).
+  "$A" shell "dumpsys window | grep -m1 isKeyguardShowing" </dev/null 2>/dev/null | grep -q "isKeyguardShowing=true" && { WAKE=locked; return 0; }; return 1; }
 UNQ='import json,sys
 s=sys.stdin.read().strip()
 try:
