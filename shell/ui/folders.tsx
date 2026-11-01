@@ -120,7 +120,7 @@ export function AppPress({ a, from, onHold, onLeave, onLift, small }: { a: { key
       onPointerCancel={cancel}
     >
       <div class="tile-app">
-        {app ? <AppIcon src={app.icon} label={a.label} /> : <div class="app-icon initials">{a.label[0]}</div>}
+        {app ? <AppIcon src={app.icon} label={a.label} app={app.key} /> : <div class="app-icon initials">{a.label[0]}</div>}
         {!small && <div class="app-label">{a.label}</div>}
       </div>
     </div>

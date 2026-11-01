@@ -6,6 +6,7 @@
  * Which of a notification's own buttons does what: the reply is its action taking typed text (RemoteInput; the one the
  * app marks SEMANTIC_ACTION_REPLY first), mark-as-read is SEMANTIC_ACTION_MARK_AS_READ (or a button so named).
  */
+import { mdPlain } from "@powos/shared/mdplain";
 
 export interface Message {
   sender: string;
@@ -111,7 +112,8 @@ export function entry(n: Notif): Entry {
   return {
     n,
     who: who(n, ms),
-    line: line(n, ms),
+    // The preview is plain text: a message's markdown (**bold**, `code`, links) is read, not shown as marks.
+    line: mdPlain(line(n, ms)),
     time: last?.time || n.time * 1000,
     count: ms.length ? waiting(ms) : 1,
     reply: replyIndex(n),

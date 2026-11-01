@@ -5814,6 +5814,57 @@ async function petOverlayOffScene() {
 }
 
 /**
+ * App badge (host.badge, apps/badge.ts; the user, 11-01: "I shouldn't see the red dot unless there's unread stuff"):
+ * What needs me's icon on home (a tile), in the dock and in the drawer carries the shell's dot only while the app's
+ * count is above 0 - none at 0, one at 2, gone again at 0, live with each call - and the count survives a reload.
+ */
+async function appBadgeScene() {
+  const P = await window.__gw.mod("./apps/pages.ts");
+  const S = await window.__gw.mod("./state.ts");
+  const B = await window.__gw.mod("./apps/badge.ts");
+  const { host } = await window.__gw.mod("./apps/stdb.ts");
+  const id = "local.needs-me", key = `p:${id}`;
+  if (!host.badge) return ["host.badge is missing (apps/stdb.ts IslandHost)"];
+  P.installedApps.value = [...P.installedApps.value.filter((a) => a.id !== id), { id, name: "What needs me", version: "0", database: "", tier: 0, manifest: JSON.stringify({ icon: "icon.svg", page: { entry: "pages/main.js" } }) }];
+  S.dock.value = [...S.dock.value.filter((k) => k !== key), key];
+  const pageNo = S.pages.value[S.page.value] ?? 1;
+  S.home.value = { ...S.home.value, items: [...S.home.value.items.filter((i) => i.key !== "gate-badge"), { key: "gate-badge", kind: "app", app: key, label: "What needs me", page: pageNo, cell: { x: 0, y: 0, w: 1, h: 1 }, resizable: false, minSize: [1, 1], size: null }] };
+  host.badge(id, 0);
+  const places = { home: `.page:not(.away) [data-key="gate-badge"] .app-icon`, dock: `.dock .app[data-key="${key}"] .app-icon` };
+  const fails = [];
+  const look = () => Object.fromEntries(Object.entries(places).map(([n, q]) => [n, [...document.querySelectorAll(q)].map((el) => !!el.querySelector(".app-badge"))]));
+  const check = async (n, want) => {
+    host.badge(id, n);
+    await window.__gw.frames(3);
+    for (const [where, dots] of Object.entries(look())) {
+      if (!dots.length) fails.push(`unread ${n}: no What needs me icon in the ${where}`);
+      else if (dots.some((d) => d !== want)) fails.push(`unread ${n}: the ${where} icon ${want ? "has no dot" : "shows a dot"}`);
+    }
+  };
+  await window.__gw.settled(() => Object.values(places).every((q) => document.querySelector(q)));
+  await check(0, false);
+  await check(2, true);
+  if (JSON.parse(localStorage.getItem("powos.badges") ?? "{}")[id] !== 2) fails.push("the count isn't kept for a reload (powos.badges)");
+  // The drawer: its icon with the dot while the count is 2, without once it's 0 (live, the drawer open).
+  S.drawer.value = 1;
+  const inDrawer = `.launcher-clip .app[data-key="${key}"] .app-icon`;
+  await window.__gw.settled(() => document.querySelector(inDrawer));
+  const drawerDot = () => document.querySelector(inDrawer)?.querySelector(".app-badge");
+  if (!document.querySelector(inDrawer)) fails.push("no What needs me icon in the drawer");
+  else if (!drawerDot()) fails.push("unread 2: the drawer icon has no dot");
+  host.badge(id, 0);
+  await window.__gw.frames(3);
+  if (drawerDot()) fails.push("unread 0: the drawer icon still shows a dot");
+  S.drawer.value = 0;
+  await check(0, false);
+  if (B.badges.value[id] !== undefined) fails.push("unread 0 left a count behind");
+  window.__appBadge = fails.length ? "failed" : "home, dock, drawer: dot only above 0, live";
+  S.home.value = { ...S.home.value, items: S.home.value.items.filter((i) => i.key !== "gate-badge") };
+  S.dock.value = S.dock.value.filter((k) => k !== key);
+  return fails;
+}
+
+/**
  * PERF5-STDB (perf-1793474464493: one SpacetimeDB message re-rendered 30 Tiles and 14 AppCells, AppCell "app~"): the
  * registry's rows delivered again as fresh copies (a message, a reconnect's resubscribe) with one app renamed render
  * only that app's cells - and the same rows again render nothing (apps/stable.ts).
@@ -9612,7 +9663,7 @@ try {
       return fails;
     })));
     // PERF5 (perf-1793474464493): no pet.overlay with the pet off, stable registry rows, the glass measure after layout.
-    for (const [name, fn, out] of [["pet-overlay-off", petOverlayOffScene, "__petOverlay"], ["stdb-rows-stable", stdbRowsStableScene, "__stdbStable"], ["glass-frame-layout", glassFrameLayoutScene, "__glassLayout"]])
+    for (const [name, fn, out] of [["pet-overlay-off", petOverlayOffScene, "__petOverlay"], ["stdb-rows-stable", stdbRowsStableScene, "__stdbStable"], ["app-badge-home", appBadgeScene, "__appBadge"], ["glass-frame-layout", glassFrameLayoutScene, "__glassLayout"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
         const fails = await r.page.evaluate(fn);
         console.log(`     ${name}: ${await r.page.evaluate((k) => window[k], out).catch(() => "?")}`);
@@ -10398,10 +10449,12 @@ function overpullInFlow() {
 
 /** The What needs me case (above): mount, then each gesture, every step in the page (window.__nm); its problems. */
 async function settleNeedsMe(r) {
-  const steps = [nmMount, nmRows, nmReply, nmSwipe, nmOpen];
+  const steps = [nmMount, nmRows, nmBadge, nmReply, nmSwipe, nmOpen, nmScale];
   try {
     await r.page.evaluate(() => new Promise((ok) => (window.importShim ? ok() : addEventListener("load", ok))));
     await r.page.evaluate(`window.__nmItems = ${nmItems.toString()}`);
+    // nmScale's helpers, as page globals (each step runs in the page by its source alone).
+    await r.page.evaluate([nmMany, nmAtSize, nmFonts, nmFit].map((f) => `window.${f.name} = ${f}`).join(";\n"));
     for (const step of steps) {
       const out = await r.page.evaluate(step);
       r.problems.push(...out);
@@ -10564,6 +10617,84 @@ function nmItems() {
   ];
 }
 
+/**
+ * The widget at every tile size (2x2 .. 4x6, the 4x3 the user's): every text at the fixed type scale (theme.css
+ * --text-body / --text-small, the Agents/Lights widgets' sizes) - a bigger tile shows more rows, never bigger letters
+ * (the user, 2026-11-01: the 4x3 tile drew "Needs me" and its one row at 26px) - every row whole inside the tile, and a
+ * message's markdown read as plain text ("**⚠️ Friction**" shown literally).
+ */
+async function nmScale() {
+  const css = getComputedStyle(document.documentElement);
+  const t = { body: parseFloat(css.getPropertyValue("--text-body")), small: parseFloat(css.getPropertyValue("--text-small")) };
+  if (!(t.body > 0 && t.small > 0)) return [`the theme's type tokens are missing (--text-body, --text-small)`];
+  window.__nm.list.items = nmMany();
+  const fails = [];
+  let prev = 0;
+  for (const size of [["2x2", 119, 128], ["2x3", 170, 196], ["4x2", 360, 170], ["4x3", 360, 251], ["4x4", 360, 360], ["4x6", 360, 540]]) {
+    const out = await nmAtSize(size, t, prev);
+    fails.push(...out.fails);
+    prev = out.rows;
+  }
+  return fails;
+}
+
+/** 8 Discord conversations, each message markdown (bold, code, italic, a link) long enough to wrap. */
+function nmMany() {
+  const now = Date.now();
+  const base = { icon: null, clearable: true, profile: null, tappable: true, conversation: true, groupConversation: false, actions: [], app: "Discord", pkg: "com.discord", text: "" };
+  return Array.from({ length: 8 }, (_, i) => ({
+    ...base,
+    key: `s${i}`,
+    title: `AgentGateway ${i}`,
+    time: now / 1000 - 60 * (i + 1),
+    messages: [{ sender: `AgentGateway ${i}`, text: `**⚠️ Friction** f${i}: \`gate.sh\` took _long_ - see [the board](https://x.example/b) and more words to wrap`, time: now - 60000 * (i + 1) }],
+  }));
+}
+
+/** The widget on a [w]x[ht] tile: the fonts at the tokens [t], every row whole, no fewer rows than [prev], no marks. */
+async function nmAtSize([name, w, ht], t, prev) {
+  const { mod, h, render, host, sleep, until } = window.__nm;
+  const root = Object.assign(document.createElement("div"), { style: `width:${w}px;height:${ht}px;position:relative` });
+  document.body.append(root);
+  render(h(mod.default, { host, app: "local.needs-me", base: "./_app/local.needs-me/", cells: [Number(name[0]), Number(name[2])] }), root);
+  const fails = [];
+  if (await until(() => root.querySelector(".nm-row"))) {
+    await sleep(150);
+    const rows = [...root.querySelectorAll(".nm-row")];
+    fails.push(...nmFonts(name, root, rows[0], t), ...nmFit(name, root, rows, prev));
+  } else fails.push(`${name}: no rows rendered`);
+  const rows = root.querySelectorAll(".nm-row").length;
+  render(null, root);
+  root.remove();
+  return { fails, rows };
+}
+
+function nmFonts(name, root, r0, t) {
+  const fs = (el) => (el ? parseFloat(getComputedStyle(el).fontSize) : NaN);
+  const got = {
+    title: [fs(root.querySelector(".nm-title")), t.body],
+    who: [fs(r0.querySelector(".nm-who > div")), t.body],
+    line: [fs(r0.querySelector(".nm-who")?.nextElementSibling), t.body],
+  };
+  // The time shows beside the text from 220px wide (rows.tsx Narrow).
+  if (root.offsetWidth >= 220) got.time = [fs(r0.querySelector(".nm-time")), t.small];
+  return Object.entries(got)
+    .filter(([, [v, want]]) => v !== want)
+    .map(([k, [v, want]]) => `${name}: ${k} font-size ${v}px, want the type scale's ${want}px at every tile size`);
+}
+
+function nmFit(name, root, rows, prev) {
+  const fails = [];
+  const ht = root.offsetHeight;
+  const top = root.getBoundingClientRect().top;
+  const cut = rows.map((r) => Math.round(r.getBoundingClientRect().bottom - top)).filter((b) => b > ht + 0.5);
+  if (cut.length) fails.push(`${name}: a row is cut off by the tile's bottom (ends at ${cut[0]} > ${ht}px)`);
+  if (rows.length < prev) fails.push(`${name}: ${rows.length} rows, fewer than the smaller tile's ${prev} - a bigger tile shows more rows`);
+  if (name === "4x3" && rows.length < 3) fails.push(`4x3: ${rows.length} row(s) shown of 8, want at least 3`);
+  if (/\*\*|`|\]\(/.test(root.textContent)) fails.push(`${name}: markdown shown as marks: "${root.textContent.slice(0, 120)}"`);
+  return fails;
+}
+
 /** In the page: the widget on the shell's own host (apps/stdb.ts) over the mock list, every press recorded. */
 async function nmMount() {
   const imp = (p) => window.importShim(p);
@@ -10592,7 +10723,7 @@ async function nmMount() {
   render(h(mod.default, { host, app: "local.needs-me", base: "./_app/local.needs-me/", cells: [4, 4] }), root);
   // By the row's group (a long name is shortened to fit, model.ts groupKey): a person's, or a conversation's.
   const row = (name) => [...root.querySelectorAll(".nm-row")].find((r) => r.dataset.group.endsWith(name.toLowerCase()));
-  window.__nm = { calls, root, sleep, until, row, said: () => JSON.stringify(calls) };
+  window.__nm = { calls, root, sleep, until, row, list, mod, h, render, host, said: () => JSON.stringify(calls) };
   if (!(await until(() => row("Anna Berg") && row(":#powos")))) return [`the rows didn't render: "${root.textContent.slice(0, 200)}"`];
   await sleep(800);
   return [];
@@ -10607,6 +10738,26 @@ async function nmRows() {
   if (row("Anna Berg").querySelectorAll("[data-open]").length !== 2) fails.push("Anna Berg's row doesn't group WhatsApp and Gmail (two app icons)");
   if (root.textContent.includes("Not ours")) fails.push("a notification from a package the manifest doesn't permit shows");
   if (calls.length) fails.push(`pressed without a gesture: ${said()}`);
+  return fails;
+}
+
+/**
+ * The icon's dot follows the widget's unread count (host.badge, apps/badge.ts): above 0 with the mock's rows, 0 once
+ * the notifications are gone (live, "notifications.changed"), back when they return.
+ */
+async function nmBadge() {
+  const { until, list } = window.__nm;
+  const B = await window.importShim("./apps/badge.ts");
+  const { powos } = await window.importShim("./bridge.ts");
+  const count = () => B.badges.value["local.needs-me"] ?? 0;
+  const fails = [];
+  if (!(await until(() => count() > 0))) fails.push(`unread rows shown but the icon's count is ${count()}`);
+  const fire = (items) => window.__mockEvents.emit("notifications.changed", { available: true, items });
+  if (!powos.on) return [...fails, "no powos.on to drive notifications.changed"];
+  fire([]);
+  if (!(await until(() => count() === 0))) fails.push(`no unread left but the icon's count is ${count()}`);
+  fire(list.items);
+  if (!(await until(() => count() > 0))) fails.push("unread back but the icon's count stayed 0");
   return fails;
 }
 

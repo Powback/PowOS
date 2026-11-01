@@ -193,6 +193,278 @@
    "groupConversation": true,
    "tappable": true,
    "conversation": true
+  },
+  {
+   "key": "0|com.discord|7|agentgateway",
+   "app": "Discord",
+   "pkg": "com.discord",
+   "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2018%2018%22%3E%3Ccircle%20cx%3D%229%22%20cy%3D%229%22%20r%3D%229%22%20fill%3D%22%235865f2%22/%3E%3Ctext%20x%3D%229%22%20y%3D%2213%22%20font-size%3D%2210%22%20text-anchor%3D%22middle%22%20fill%3D%22%23fff%22%20font-family%3D%22sans-serif%22%3ED%3C/text%3E%3C/svg%3E",
+   "title": "AgentGateway",
+   "text": "**⚠️ Friction** f386: `home not ready` on the gate - see [the board](https://example.com/b)",
+   "time": -60,
+   "clearable": true,
+   "profile": null,
+   "actions": [
+    {
+     "title": "Reply",
+     "input": true,
+     "semantic": 1
+    },
+    {
+     "title": "Mark As Read",
+     "input": false,
+     "semantic": 2
+    }
+   ],
+   "messages": [
+    {
+     "sender": "AgentGateway",
+     "text": "**⚠️ Friction** f386: `home not ready` on the gate - see [the board](https://example.com/b)",
+     "time": -60
+    }
+   ],
+   "conversationTitle": null,
+   "groupConversation": false,
+   "tappable": true,
+   "conversation": true
+  },
+  {
+   "key": "0|com.whatsapp|8|lena",
+   "app": "WhatsApp",
+   "pkg": "com.whatsapp",
+   "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2018%2018%22%3E%3Ccircle%20cx%3D%229%22%20cy%3D%229%22%20r%3D%229%22%20fill%3D%22%2325d366%22/%3E%3Ctext%20x%3D%229%22%20y%3D%2213%22%20font-size%3D%2210%22%20text-anchor%3D%22middle%22%20fill%3D%22%23fff%22%20font-family%3D%22sans-serif%22%3EW%3C/text%3E%3C/svg%3E",
+   "title": "Lena Okafor",
+   "text": "Can you send me the _slides_ before the call?",
+   "time": -900,
+   "clearable": true,
+   "profile": null,
+   "actions": [
+    {
+     "title": "Reply",
+     "input": true,
+     "semantic": 1
+    },
+    {
+     "title": "Mark as read",
+     "input": false,
+     "semantic": 2
+    }
+   ],
+   "messages": [
+    {
+     "sender": "Lena Okafor",
+     "text": "Can you send me the _slides_ before the call?",
+     "time": -900
+    }
+   ],
+   "conversationTitle": null,
+   "groupConversation": false,
+   "tappable": true,
+   "conversation": true
+  },
+  {
+   "key": "0|com.discord|9|builds",
+   "app": "Discord",
+   "pkg": "com.discord",
+   "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2018%2018%22%3E%3Ccircle%20cx%3D%229%22%20cy%3D%229%22%20r%3D%229%22%20fill%3D%22%235865f2%22/%3E%3Ctext%20x%3D%229%22%20y%3D%2213%22%20font-size%3D%2210%22%20text-anchor%3D%22middle%22%20fill%3D%22%23fff%22%20font-family%3D%22sans-serif%22%3ED%3C/text%3E%3C/svg%3E",
+   "title": "#builds",
+   "text": "Build 2412 **failed** on the unfolded gate",
+   "time": -1500,
+   "clearable": true,
+   "profile": null,
+   "actions": [
+    {
+     "title": "Reply",
+     "input": true,
+     "semantic": 1
+    },
+    {
+     "title": "Mark As Read",
+     "input": false,
+     "semantic": 2
+    }
+   ],
+   "messages": [
+    {
+     "sender": "ci",
+     "text": "Build 2412 **failed** on the unfolded gate",
+     "time": -1500
+    }
+   ],
+   "conversationTitle": "#builds (PowOS Lab)",
+   "groupConversation": true,
+   "tappable": true,
+   "conversation": true
+  },
+  {
+   "key": "0|com.whatsapp|10|tom",
+   "app": "WhatsApp",
+   "pkg": "com.whatsapp",
+   "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2018%2018%22%3E%3Ccircle%20cx%3D%229%22%20cy%3D%229%22%20r%3D%229%22%20fill%3D%22%2325d366%22/%3E%3Ctext%20x%3D%229%22%20y%3D%2213%22%20font-size%3D%2210%22%20text-anchor%3D%22middle%22%20fill%3D%22%23fff%22%20font-family%3D%22sans-serif%22%3EW%3C/text%3E%3C/svg%3E",
+   "title": "Tom Weber",
+   "text": "Padel on Thursday at 7?",
+   "time": -5400,
+   "clearable": true,
+   "profile": null,
+   "actions": [
+    {
+     "title": "Reply",
+     "input": true,
+     "semantic": 1
+    },
+    {
+     "title": "Mark as read",
+     "input": false,
+     "semantic": 2
+    }
+   ],
+   "messages": [
+    {
+     "sender": "Tom Weber",
+     "text": "Padel on Thursday at 7?",
+     "time": -5400
+    }
+   ],
+   "conversationTitle": null,
+   "groupConversation": false,
+   "tappable": true,
+   "conversation": true
+  },
+  {
+   "key": "0|com.whatsapp|11|climb",
+   "app": "WhatsApp",
+   "pkg": "com.whatsapp",
+   "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2018%2018%22%3E%3Ccircle%20cx%3D%229%22%20cy%3D%229%22%20r%3D%229%22%20fill%3D%22%2325d366%22/%3E%3Ctext%20x%3D%229%22%20y%3D%2213%22%20font-size%3D%2210%22%20text-anchor%3D%22middle%22%20fill%3D%22%23fff%22%20font-family%3D%22sans-serif%22%3EW%3C/text%3E%3C/svg%3E",
+   "title": "Climbing",
+   "text": "Who's in for Saturday morning?",
+   "time": -14400,
+   "clearable": true,
+   "profile": null,
+   "actions": [
+    {
+     "title": "Reply",
+     "input": true,
+     "semantic": 1
+    },
+    {
+     "title": "Mark as read",
+     "input": false,
+     "semantic": 2
+    }
+   ],
+   "messages": [
+    {
+     "sender": "Mia",
+     "text": "Who's in for Saturday morning?",
+     "time": -14400
+    }
+   ],
+   "conversationTitle": "Climbing",
+   "groupConversation": true,
+   "tappable": true,
+   "conversation": true
+  },
+  {
+   "key": "0|com.whatsapp|20|sara",
+   "app": "WhatsApp",
+   "pkg": "com.whatsapp",
+   "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2018%2018%22%3E%3Ccircle%20cx%3D%229%22%20cy%3D%229%22%20r%3D%229%22%20fill%3D%22%2325d366%22/%3E%3Ctext%20x%3D%229%22%20y%3D%2213%22%20font-size%3D%2210%22%20text-anchor%3D%22middle%22%20fill%3D%22%23fff%22%20font-family%3D%22sans-serif%22%3EW%3C/text%3E%3C/svg%3E",
+   "title": "Sara Lind",
+   "text": "Dinner at ours on Friday?",
+   "time": -18000,
+   "clearable": true,
+   "profile": null,
+   "actions": [
+    {
+     "title": "Reply",
+     "input": true,
+     "semantic": 1
+    },
+    {
+     "title": "Mark as read",
+     "input": false,
+     "semantic": 2
+    }
+   ],
+   "messages": [
+    {
+     "sender": "Sara Lind",
+     "text": "Dinner at ours on Friday?",
+     "time": -18000
+    }
+   ],
+   "conversationTitle": null,
+   "groupConversation": false,
+   "tappable": true,
+   "conversation": true
+  },
+  {
+   "key": "0|com.whatsapp|21|ben",
+   "app": "WhatsApp",
+   "pkg": "com.whatsapp",
+   "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2018%2018%22%3E%3Ccircle%20cx%3D%229%22%20cy%3D%229%22%20r%3D%229%22%20fill%3D%22%2325d366%22/%3E%3Ctext%20x%3D%229%22%20y%3D%2213%22%20font-size%3D%2210%22%20text-anchor%3D%22middle%22%20fill%3D%22%23fff%22%20font-family%3D%22sans-serif%22%3EW%3C/text%3E%3C/svg%3E",
+   "title": "Ben Arnold",
+   "text": "Sent the invoice, thanks!",
+   "time": -21600,
+   "clearable": true,
+   "profile": null,
+   "actions": [
+    {
+     "title": "Reply",
+     "input": true,
+     "semantic": 1
+    },
+    {
+     "title": "Mark as read",
+     "input": false,
+     "semantic": 2
+    }
+   ],
+   "messages": [
+    {
+     "sender": "Ben Arnold",
+     "text": "Sent the invoice, thanks!",
+     "time": -21600
+    }
+   ],
+   "conversationTitle": null,
+   "groupConversation": false,
+   "tappable": true,
+   "conversation": true
+  },
+  {
+   "key": "0|com.whatsapp|22|ola",
+   "app": "WhatsApp",
+   "pkg": "com.whatsapp",
+   "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2018%2018%22%3E%3Ccircle%20cx%3D%229%22%20cy%3D%229%22%20r%3D%229%22%20fill%3D%22%2325d366%22/%3E%3Ctext%20x%3D%229%22%20y%3D%2213%22%20font-size%3D%2210%22%20text-anchor%3D%22middle%22%20fill%3D%22%23fff%22%20font-family%3D%22sans-serif%22%3EW%3C/text%3E%3C/svg%3E",
+   "title": "Ola Nordmann",
+   "text": "Are you still selling the bike?",
+   "time": -25200,
+   "clearable": true,
+   "profile": null,
+   "actions": [
+    {
+     "title": "Reply",
+     "input": true,
+     "semantic": 1
+    },
+    {
+     "title": "Mark as read",
+     "input": false,
+     "semantic": 2
+    }
+   ],
+   "messages": [
+    {
+     "sender": "Ola Nordmann",
+     "text": "Are you still selling the bike?",
+     "time": -25200
+    }
+   ],
+   "conversationTitle": null,
+   "groupConversation": false,
+   "tappable": true,
+   "conversation": true
   }
  ]
 }

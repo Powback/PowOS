@@ -620,6 +620,7 @@ Status: **exists** = works today; **small** = a change of days to existing code;
 | Android widgets in home | Phone launcher | `AppWidgets.kt` and `appwidget.tsx` (VirtualDisplay → PNG) | in progress (not for PowOS apps) |
 | App window | Phone | A full-screen `ShellHost` WebView on `https://<id>.app.powos/` (one per *open* app, 4 exist today) | **small** (ShellHost already serves arbitrary hosts; add app routing) |
 | Drawer, search, recent strip | Phone launcher | `apps.list` (`ShellBridge.kt:265`) merges Android apps and Linux `.desktop` apps (`a:`/`l:` keys). Add `p:<id>` from the registry subscription | **small** |
+| Icon badge (unread dot) | Phone + desktop shell | `host.badge?.(app, n)` from the app's page or widget island (`shell/apps/badge.ts`): above 0 the shell draws a red dot on the app's icon everywhere it renders (home tile, dock, drawer, folders, library: `ui/apps.tsx` `AppIcon`), 0 hides it; kept per app across reloads, live as the app calls it. Apps never bake a dot into `icon.svg`. Used by What needs me (`apps/needs-me/ui/lib/rows.tsx` `useGroups`) | **exists** |
 | Recents/switcher | Phone | `system/Tasks.kt` tasks. A PowOS app window must be a task (its own activity instance or document) | **small–new** |
 | Notifications | Phone | Bridge `notifications.*` lists Android notifications only; posting exists only as OWL `notify`. Add `notifications.post` (per-app channel, manifest permission) | **small** |
 | Share sheet (send) | Phone | Only OWL `share()` (`WidgetServices.kt:396`). Add bridge `share` | **small** |

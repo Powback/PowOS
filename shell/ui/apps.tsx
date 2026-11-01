@@ -6,6 +6,7 @@ import { tinted } from "./icontint.ts";
 import { tick } from "./haptics.ts";
 import { placement, shapeOf, type Shape } from "./iconshape.ts";
 import { running, runOf } from "./running.ts";
+import { badgeOf } from "../apps/badge.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { closeDrawer, dock, launch, menu, setDocked, shownHomePage } from "../state.ts";
 import { startCarry } from "./grid.tsx";
@@ -106,7 +107,7 @@ export const AppCell = memo(function AppCell({ app, labels = true, draggable = f
   );
   return (
     <div class={`app ${cls}`} style={style} data-key={app.key} data-run={runOf(app.key).value} {...press}>
-      <AppIcon src={app.icon} label={app.label} />
+      <AppIcon src={app.icon} label={app.label} app={app.key} />
       {labels && <div class="app-label">{app.label}</div>}
     </div>
   );
@@ -124,8 +125,9 @@ const ICON_GIVE_UP_MS = 4000;
  * The host draws icons in the background, so an icon asked for early may not be there yet (a 404); the list comes
  * again when it is (its URL changes), and loads it then. One that fails and stays failed (no new URL within
  * ICON_GIVE_UP_MS) ends as the app's initial, never as a tile loading forever; a new URL tries the picture again.
+ * [app] (its launcher key): the app's unread dot over the corner while its count is above 0 (host.badge, apps/badge.ts).
  */
-export function AppIcon({ src, label }: { src: string; label?: string }) {
+export function AppIcon({ src, label, app }: { src: string; label?: string; app?: string }) {
   const [missing, setMissing] = useState(false);
   // In the theme's colours when that's on and its copy is made (ui/icontint.ts), else as the app draws it.
   const shown = tinted(src) ?? src;
@@ -170,6 +172,7 @@ export function AppIcon({ src, label }: { src: string; label?: string }) {
         }}
       />
       </span>
+      {badgeOf(app) > 0 && <span class="app-badge" />}
     </span>
   );
 }
