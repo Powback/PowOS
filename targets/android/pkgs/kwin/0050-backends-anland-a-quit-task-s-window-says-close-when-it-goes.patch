@@ -1,0 +1,33 @@
+From 06392e4fb65125fefd498ab3d5cadffb41e2da7a Mon Sep 17 00:00:00 2001
+From: Mats Bakken <mats@powback.com>
+Date: Sun, 1 Nov 2026 17:04:41 +0100
+Subject: [PATCH] backends/anland: a quit task's window says close when it goes
+
+---
+ src/backends/anland/anland_window_task.cpp | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index c189080..e5b5a8a 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -1370,8 +1370,16 @@ void AnlandWindowTasks::quit(AnlandWindowTask *task)
+     remove(task);
+     if (!window || window->isDeleted()) {
+         qCInfo(KWIN_ANLAND) << "quit" << id << ": its window is gone already";
++        send({QStringLiteral("close"), QString::number(id)});
+         return;
+     }
++    // The task is gone ([remove]) and its Window::closed hook with it, so "close" is said here once the window really
++    // goes: the app learns the quit closed it (the ship gate's hidden Linux check waits for that; before, "close"
++    // never came after a quit and the check failed with the window closed).
++    connect(window, &Window::closed, this, [this, id]() {
++        qCInfo(KWIN_ANLAND) << "quit" << id << ": its window closed";
++        send({QStringLiteral("close"), QString::number(id)});
++    });
+     qCInfo(KWIN_ANLAND) << "quit" << id << ": closing" << window->resourceClass() << "pid" << pid;
+     window->closeWindow();
+     if (reshow) {
+-- 
+2.50.1 (Apple Git-155)
+
