@@ -24,6 +24,12 @@ ship_pending() { local kind=$1 mark path base tip
   tip=$(git rev-parse -q --verify "origin/${PREFLIGHT_BASE:-worktree-powos-multiplatform}" 2>/dev/null) || return 0
   [ "$base" = "$tip" ] && return 0
   git cat-file -e "$base^{commit}" 2>/dev/null || return 0
+  # apps: only app modules (apps/<app>/ with a powos-app.json) - ship.sh's apps_changed. apps/install.sh & co. never
+  # ship as apps, so counting them blocked app checks forever (f320, 11-01: apps/install.sh 259a0fcf).
+  if [ "$kind" = apps ]; then
+    git diff --name-only "$base" "$tip" -- ":(top)apps" 2>/dev/null | sed -n 's#^apps/\([^/]*\)/.*#\1#p' | sort -u |
+      while read -r a; do [ -f "$(git rev-parse --show-toplevel)/apps/$a/powos-app.json" ] && echo "$a"; done | grep -q . || return 0
+    echo "waiting for ship of $kind (live ${base:0:9}, origin ${tip:0:9})"; return; fi
   git diff --quiet "$base" "$tip" -- ":(top)$path" 2>/dev/null || echo "waiting for ship of $kind (live ${base:0:9}, origin ${tip:0:9})"; }
 
 # phone_probe: one adb call -> "kwin=<0|1>" and "py:<mod>=<0|1>" lines.
