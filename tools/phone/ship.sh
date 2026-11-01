@@ -670,7 +670,13 @@ run)
         if [ $rc = 0 ]; then
           echo "$T" > "$Q/live"; rm -f "$Q/failed"
           post_gate "$T" "$log" $add
-          window_gate "$base" "$T" shell; wgr=$?
+          # A shell whose tip also has APK inputs not yet installed is checked by that APK's ship, on the build it needs:
+          # checked here it ran on the OLD APK, failed, marked the ship broken, and the APK carrying the fix never
+          # went out (11-01 03:47, 6339815a: f356 deadlock).
+          inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
+          if pending_apk "$T"; then
+            echo "$(date +%T) ${T:0:9}: window check deferred to its APK ship (APK inputs not installed yet)"; wgr=0
+          else window_gate "$base" "$T" shell; wgr=$?; fi
           if [ $wgr = 2 ]; then
             # NOT JUDGED (phone asleep): live, but its requests stay NOT done; the loop top retries the check (~60 s).
             { printf 'ww_at=%s\nww_base=%q\nww_tip=%q\nwho_s=%q\nsn=%q\n' "$(date +%s)" "$base" "$T" "$who_s" "$sn"
