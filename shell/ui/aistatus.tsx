@@ -7,7 +7,8 @@
  * live agents: task, step now, a thin bar that fills smoothly, the step cross-fading when it changes), Recently done
  * (closed). A section with nothing in it isn't drawn. At the foot the shared field to ask the manager (powai.tsx's
  * send path), its reply as one bubble over the field - never a transcript - and "Open chat": the launcher's AI panel.
- * The unfolded page (aipanes.tsx) is unchanged.
+ * Unfolded the same component is the page's left column (powai.tsx, [beside]): the chat is its right column, so its foot
+ * keeps only the mic chip - no field, reply bubble or "Open chat" of its own.
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { computed, signal } from "@preact/signals";
@@ -19,6 +20,7 @@ import { areaStats, driverPct } from "./aiprogress.tsx";
 import { NeedStack } from "./aistack.tsx";
 import { listen, listeningFor, release, speech, type MicTarget } from "./dictation.ts";
 import { needIds, needsYou } from "./needsyou.tsx";
+import { aiAgent } from "./aipanes.tsx";
 import { ago } from "./time.ts";
 
 /** Done in this window shows under Recently done. */
@@ -117,18 +119,74 @@ function WorkRowLive({ x }: { x: Worker }) {
   );
 }
 
-/** Working now: PowOS's own agents first, then other projects', up to six. */
-function WorkingNow({ working }: { working: Worker[] }) {
-  if (!working.length) return null;
-  const rows = [...working.filter((x) => isPowOS(x.a)), ...working.filter((x) => !isPowOS(x.a))].slice(0, 6);
+/**
+ * Unfolded, Working now lists PowOS's own agents only; the ⋯ menu's "Other projects (N)" adds the rest, each with its
+ * project (the old context column's toggle, closed at first; the user's review 10-31 14:17: other projects' sessions
+ * listed as if they were PowOS work). Folded lists both, PowOS's first.
+ */
+export const otherProjects = signal(false);
+
+/** Working now: PowOS's own agents first, then other projects' (unfolded [beside]: only with otherProjects on), up to six. */
+function WorkingNow({ working, beside }: { working: Worker[]; beside: boolean }) {
+  const own = working.filter((x) => isPowOS(x.a));
+  const other = working.filter((x) => !isPowOS(x.a));
+  const shown = !beside ? [...own, ...other] : otherProjects.value ? [...own, ...other.map((x) => ({ ...x, now: x.now ? `${projectOf(x.a)} · ${x.now}` : projectOf(x.a) }))] : own;
+  if (!shown.length) return null;
   return (
     <section class="ais-sec" data-sec="working" aria-label="Working now">
       <h3 class="ais-h">
-        Working now<span class="ais-n">{working.length}</span>
+        Working now<span class="ais-n">{shown.length}</span>
       </h3>
       <ul class="ais-list">
-        {rows.map((x) => (
+        {shown.slice(0, 6).map((x) => (
           <WorkRowLive key={x.a.id} x={x} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** The ⋯ menu's "Other projects (N)" (unfolded): shows or hides other projects' agents under Working now; none: no item. */
+export function OtherProjectsItem({ close }: { close: () => void }) {
+  useAgents();
+  const n = fleet().working.filter((x) => !isPowOS(x.a)).length;
+  if (!n) return null;
+  const on = otherProjects.value;
+  return (
+    <button type="button" role="menuitemcheckbox" aria-checked={on} class="ai-menu-item ai-menu-other" onClick={() => ((otherProjects.value = !on), close())}>
+      Other projects ({n})
+    </button>
+  );
+}
+
+/** One stuck agent: why it's stuck, then its task; a tap opens it live in the right column's Agents view. */
+function StuckRow({ x }: { x: Worker }) {
+  return (
+    <li class="ais-work">
+      <button type="button" class="ais-work-row ais-stuck" onClick={() => ((aiAgent.value = x.a.id), (aiScreen.value = "fleet"))}>
+        <span class="ais-work-line">
+          <span class="aip-dot stuck" aria-hidden="true" />
+          <span class="ais-work-title">{x.reason}</span>
+        </span>
+        <span class="ais-step">
+          <span class="ais-step-t">{x.title}</span>
+        </span>
+      </button>
+    </li>
+  );
+}
+
+/** Needs attention (unfolded, under the needs-you stack): the fleet's stuck agents, up to six; none: not drawn. */
+function NeedsAttention({ stuck }: { stuck: Worker[] }) {
+  if (!stuck.length) return null;
+  return (
+    <section class="ais-sec" data-sec="attention" aria-label="Needs attention">
+      <h3 class="ais-h">
+        Needs attention<span class="ais-n">{stuck.length}</span>
+      </h3>
+      <ul class="ais-list">
+        {stuck.slice(0, 6).map((x) => (
+          <StuckRow key={x.a.id} x={x} />
         ))}
       </ul>
     </section>
@@ -266,6 +324,22 @@ function MicChip({ mic }: { mic: MicTarget }) {
   );
 }
 
+/** The foot folded: the reply bubble or the mic chip, "Open chat", the field. */
+function Foot({ mic, compose }: { mic: MicTarget; compose: preact.ComponentChildren }) {
+  return (
+    <div class="ais-foot">
+      <div class="ais-foot-row">
+        <ReplyBubble />
+        <MicChip mic={mic} />
+        <button type="button" class="ais-open-chat" onClick={openChat}>
+          Open chat
+        </button>
+      </div>
+      {compose}
+    </div>
+  );
+}
+
 /** The hero: the daily driver's ring and two lines - its name and share, then what's going on. */
 function Hero({ needs, working, more }: { needs: number; working: number; more: preact.ComponentChildren }) {
   const ring = driverPct(areaStats(board.value, Date.now(), needIds(needsYou())));
@@ -283,9 +357,11 @@ function Hero({ needs, working, more }: { needs: number; working: number; more: 
 
 /**
  * The status page: hero, sections, foot. [more]: the header's ⋯ (powai.tsx owns its menu); [compose]: its field;
- * [mic]: the field's mic target (a hold anywhere on the page talks into it). Off screen ([shown] false) it is at rest.
+ * [mic]: the field's mic target (a hold anywhere on the page talks into it); [beside]: the chat is beside it (unfolded).
+ * Off screen ([shown] false) it is at rest.
  */
-export function AiStatus({ shown, more, compose, mic }: { shown: boolean; more: preact.ComponentChildren; compose: preact.ComponentChildren; mic: MicTarget }) {
+export function AiStatus(props: { shown: boolean; more: preact.ComponentChildren; compose?: preact.ComponentChildren; mic: MicTarget; beside?: boolean }) {
+  const { shown, more, mic } = props;
   useAgents();
   const hold = useHoldToTalk(mic);
   const needs = needsYou();
@@ -298,20 +374,18 @@ export function AiStatus({ shown, more, compose, mic }: { shown: boolean; more: 
       <Hero needs={needs.length} working={f.working.length} more={more} />
       <div class="ai-scroll ais" {...hold}>
         <NeedStack needs={needs} />
-        <WorkingNow working={f.working} />
+        {props.beside && <NeedsAttention stuck={f.attention} />}
+        <WorkingNow working={f.working} beside={!!props.beside} />
         <RecentlyDone rows={done} />
         {quiet && <div class="ais-empty">Nothing waits on you and no agent is working right now.</div>}
       </div>
-      <div class="ais-foot">
-        <div class="ais-foot-row">
-          <ReplyBubble />
+      {props.beside ? (
+        <div class="ais-foot">
           <MicChip mic={mic} />
-          <button type="button" class="ais-open-chat" onClick={openChat}>
-            Open chat
-          </button>
         </div>
-        {compose}
-      </div>
+      ) : (
+        <Foot mic={mic} compose={props.compose} />
+      )}
     </>
   );
 }
