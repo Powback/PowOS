@@ -1107,7 +1107,8 @@ class ShellBridge(
     /**
      * A notification as the page shows it: { key, app, icon, title, text, time, clearable, profile, actions: [{ title,
      * input, semantic }], category, pkg, group, conversation, messages: [{ sender, text, time }], conversationTitle,
-     * groupConversation, tappable, picture? } - picture (a URL, NotificationPicture) only when it has one - the
+     * groupConversation, tappable, picture?, smallIcon?, color } - picture and smallIcon (URLs, NotificationPicture)
+     * only when it has one, color its tint for that icon (null: none) - the
      * panel's (grouped: notifications.tsx), and the shade's
      * heads-up banner's ("shade.peek").
      */
@@ -1147,6 +1148,9 @@ class ShellBridge(
             .put("conversationTitle", item.conversationTitle ?: JSONObject.NULL)
             .put("groupConversation", item.groupConversation)
             .put("tappable", item.tappable)
+            // Its small icon, tinted: an Android one's (a Plasma one shows its Linux app's icon).
+            .put("color", NotificationPicture.color(item.color) ?: JSONObject.NULL)
+            .apply { if (item.smallIcon && item.linuxEntry == null) put("smallIcon", NotificationPicture.smallUrl(ShellHost.ORIGIN, item.key, item.time)) }
 
     /**
      * A Plasma notification's icon (PlasmaBridge): its Linux app's drawer icon - by its desktop entry, else the app

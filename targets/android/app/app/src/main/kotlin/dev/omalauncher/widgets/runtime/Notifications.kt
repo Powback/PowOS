@@ -90,6 +90,10 @@ class Notifications(
         val tappable: Boolean = false,
         /** It carries a big picture (NotificationPicture.has): the page loads it by URL, only when the card opens. */
         val picture: Boolean = false,
+        /** It has a small icon (Notification.getSmallIcon): the page loads it by URL (NotificationPicture.smallUrl). */
+        val smallIcon: Boolean = false,
+        /** Notification.color, the app's tint for that icon: COLOR_DEFAULT (0) when it set none. */
+        val color: Int = Notification.COLOR_DEFAULT,
     )
 
     data class Action(
@@ -149,12 +153,20 @@ class Notifications(
             sbn.notification.extras.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION),
             sbn.notification.contentIntent != null,
             NotificationPicture.has(sbn.notification.extras),
+            sbn.notification.smallIcon != null,
+            sbn.notification.color,
         )
 
     /** [key]'s big picture as a JPEG (NotificationPicture.jpeg), null: no such notification, or none. */
     fun picture(key: String): ByteArray? {
         val sbn = runCatching { MediaListener.connected?.activeNotifications?.firstOrNull { it.key == key } }.getOrNull() ?: return null
         return NotificationPicture.jpeg(sbn, context)
+    }
+
+    /** [key]'s small icon as a PNG (NotificationPicture.smallPng), null: no such notification, or none. */
+    fun smallIcon(key: String): ByteArray? {
+        val sbn = runCatching { MediaListener.connected?.activeNotifications?.firstOrNull { it.key == key } }.getOrNull() ?: return null
+        return NotificationPicture.smallPng(sbn, context)
     }
 
     /** Keys of what had a banner (the time it was posted), for once-only alerts' updates. */

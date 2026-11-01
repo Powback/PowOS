@@ -190,9 +190,10 @@ class ShellNet(
         val c = u.openConnection() as HttpURLConnection
         if (c is HttpsURLConnection && private(u.host.lowercase().trim('[', ']'))) {
             val pinKey = "$app\u0000${u.host.lowercase()}:${if (u.port > 0) u.port else 443}"
+            // One factory per app+host:port, and one verifier for all: the connection pool keys sockets on both (by
+            // identity), so a new one per request would make every request a new TCP + TLS handshake.
             c.sslSocketFactory = factories.getOrPut(pinKey) { pinned(pinKey) }
-            // The pin is the device's identity; its certificate names a serial number, not the address.
-            c.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, _ -> true }
+            c.hostnameVerifier = PIN_IS_IDENTITY
         }
         c.connectTimeout = 8_000
         c.readTimeout = 20_000
@@ -214,12 +215,14 @@ class ShellNet(
                 if (c.getRequestProperty("Content-Type") == null) c.setRequestProperty("Content-Type", "application/json")
                 c.outputStream.use { it.write(r.getString("body").toByteArray()) }
             }
-            val status = c.responseCode
-            var body = (if (status >= 400) c.errorStream else c.inputStream)?.use { it.readBytes().decodeToString() } ?: ""
+            val (status, raw) = readAndRelease(c)
+            var body = raw
             r.optJSONObject("capture")?.let { cap -> body = capture(app, cap, body) }
             return JSONObject().put("status", status).put("body", body)
-        } finally {
-            c.disconnect()
+        } catch (e: Exception) {
+            // Failed, timed out or cancelled mid-request: that socket's state is unknown, so it goes.
+            runCatching { c.disconnect() }
+            throw e
         }
     }
 
@@ -425,6 +428,20 @@ class ShellNet(
 
     companion object {
         private const val TAG = "PowosNet"
+
+        /** The pin is a LAN device's identity; its certificate names a serial number, not the address. One instance. */
+        internal val PIN_IS_IDENTITY = javax.net.ssl.HostnameVerifier { _, _ -> true }
+
+        /**
+         * The status and whole body of [c]'s response. Reading the body to its end and closing the stream (not
+         * disconnect()) is what hands the socket back to the keep-alive pool: a LAN device (a Hue bridge, while the
+         * Lights widget PUTs ~3 a second) is then asked over one connection instead of a new handshake each time.
+         */
+        internal fun readAndRelease(c: HttpURLConnection): Pair<Int, String> {
+            val status = c.responseCode
+            val body = (if (status >= 400) c.errorStream else c.inputStream)?.use { it.readBytes().decodeToString() } ?: ""
+            return status to body
+        }
         private val APP_ID = Regex("^[a-z0-9][a-z0-9.-]{0,63}$")
         private val IP_LITERAL = Regex("^[0-9.]+$|^[0-9a-f:]+(%.*)?$")
         private val SECRET_REF = Regex("""\$\{secret:([a-zA-Z0-9_.-]{1,64})\}""")

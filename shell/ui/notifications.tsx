@@ -12,6 +12,7 @@ import { notif, panel, separatePanels } from "../state.ts";
 import { alignOf, wideShade } from "./align.ts";
 import { ControlCenter } from "./control.tsx";
 import { Icon } from "./icons.tsx";
+import { animateLayout, closeGap, foldAway } from "./notifmotion.ts";
 import { followNotif, notifOpen, notifShown } from "./gesture.ts";
 import { ago } from "./time.ts";
 import type { NotificationList, PhoneNotification } from "../types.ts";
@@ -97,7 +98,8 @@ const toggleCard = (key: string) => {
   const s = new Set(openCards.value);
   if (s.has(key)) s.delete(key);
   else s.add(key);
-  openCards.value = s;
+  // Grown open (or folded) on the spring (notifmotion.ts), never in one frame.
+  animateLayout(() => (openCards.value = s));
 };
 
 /** The reply typed in place: sent into the notification's action as its inline reply. */
@@ -140,7 +142,8 @@ function Reply({ n, index }: { n: PhoneNotification; index: number }) {
     </form>
   );
 }
-powos.on("notifications.changed", (l: NotificationList) => (list.value = l));
+// A new list: what arrived slides in at its place, what left closes up (notifmotion.ts).
+powos.on("notifications.changed", (l: NotificationList) => animateLayout(() => (list.value = l)));
 // A host without notifications yet (the desktop's powos-shell) rejects: an empty list, not an uncaught error.
 powos.notifications.list().then((l) => (list.value = l), () => {});
 
@@ -161,6 +164,8 @@ interface CardProps {
   name?: string;
   more?: number;
   class?: string;
+  /** One of the singles: its app's small icon beside its name (SmallIcon). */
+  small?: boolean;
 }
 
 type Drag = { x: number; y: number; t: number; dx: number; sideways: boolean | null };
@@ -180,7 +185,8 @@ function useCardGesture(n: PhoneNotification) {
     const v = d.dx / Math.max(1, performance.now() - d.t);
     if (Math.abs(d.dx) <= w * DISMISS && Math.abs(v) <= FLICK) return settle(0);
     settle(Math.sign(d.dx) * w);
-    setTimeout(() => powos.notifications.dismiss(n.key), 180);
+    // Slid out, then its gap closes on the spring before it's dismissed (the cards around it move into its place).
+    setTimeout(() => closeGap(el.current!, () => powos.notifications.dismiss(n.key)), 180);
   };
   const handlers = {
     onPointerDown: (e: PointerEvent) => {
@@ -216,7 +222,23 @@ function useCardGesture(n: PhoneNotification) {
   return { el, handlers };
 }
 
-function Card({ n, name, more = 0, class: cls = "" }: CardProps) {
+/**
+ * A single's icon (the user, 11-01: "There is no icon for these notifications" - System UI, Google Play services,
+ * Android System have no drawer icon): the notification's small icon (the host's URL; a monochrome glyph, so a mask
+ * in its app's color), else [fallback] (the app's icon). A tap opens the app, as the icon does on any card.
+ */
+function SmallIcon({ n, fallback }: { n: GroupedNotification; fallback: string | null }) {
+  const on = {
+    onPointerDown: (e: PointerEvent) => e.stopPropagation(),
+    onClick: (e: MouseEvent) => (e.stopPropagation(), openNotif(n)),
+  };
+  if (!n.smallIcon) return fallback ? <img class="notif-icon" src={fallback} alt="" role="button" aria-label="open" {...on} /> : null;
+  const mask = `url("${n.smallIcon}") center / contain no-repeat`;
+  const style = { ...(n.color ? { "--tint": n.color } : {}), mask, WebkitMask: mask } as preact.JSX.CSSProperties;
+  return <span class="notif-icon notif-small" style={style} role="button" aria-label="open" {...on} />;
+}
+
+function Card({ n, name, more = 0, class: cls = "", small = false }: CardProps) {
   const { el, handlers } = useCardGesture(n);
   const open = openCards.value.has(n.key);
   const icon = notifIconSrc(n);
@@ -226,7 +248,9 @@ function Card({ n, name, more = 0, class: cls = "" }: CardProps) {
       <div class="notif-head">
         {/* PowOS's own (its app isn't in the drawer, no icon from the host): PowOS's mark; another without one: none. */}
         {/* The icon opens the app (a tap on the body only expands it). */}
-        {icon && (
+        {small ? (
+          <SmallIcon n={n} fallback={icon} />
+        ) : icon && (
           <img
             class="notif-icon"
             src={icon}
@@ -264,6 +288,9 @@ type GroupedNotification = PhoneNotification & {
   conversation?: boolean;
   /** Its big picture (BigPictureStyle), shown when the card is expanded - a host that sends none: none. */
   picture?: string | null;
+  /** Its small icon's URL (the status bar's glyph, a mask), and its app's tint for it (null: none set). */
+  smallIcon?: string | null;
+  color?: string | null;
 };
 
 /** PowOS's deploy notes, one group. */
@@ -327,7 +354,7 @@ function rows(items: GroupedNotification[], from: number) {
       {body}
     </div>
   );
-  const one = (g: Group) => <Card key={g.id} n={g.items[0]} name={g.name !== g.items[0].app ? g.name : undefined} />;
+  const one = (g: Group) => <Card key={g.id} n={g.items[0]} name={g.name !== g.items[0].app ? g.name : undefined} small />;
   return [
     ...convos.map((g, i) => row(g.id, i, <Stack g={g} />)),
     ...(singles.length ? [row("singles", convos.length, <div class="notif-singles">{singles.map(one)}</div>)] : []),
@@ -346,18 +373,20 @@ const expanded = signal<Set<string>>(new Set());
 effect(() => {
   if (!notif.value && expanded.peek().size) expanded.value = new Set();
 });
-const toggle = (id: string) => {
+/** [id]'s group unfolded on the spring, or folded: its rest ([stack]'s) fades out and shrinks first (notifmotion.ts). */
+const toggle = (id: string, stack?: Element | null) => {
   const s = new Set(expanded.value);
-  if (s.has(id)) s.delete(id);
-  else s.add(id);
-  expanded.value = s;
+  const set = () => animateLayout(() => (expanded.value = s));
+  if (!s.has(id)) return s.add(id), set();
+  s.delete(id);
+  foldAway(stack?.querySelector<HTMLElement>(":scope > .notif-rest"), set);
 };
 
 /**
  * One group: a single notification is its card. More than one: its head (the group's name, its count) then up to three
  * of its cards in full, one after another - each readable, with its own actions, dismissal and reply (the user, 11-01
  * 16:39: "no, just show like 3 cards and then an 'x more' hint") - and past three a "+N more" line: a tap unfolds the
- * rest of that group in place (a grid row from 0fr to 1fr - an animated auto height), its head folds it again. Every
+ * rest of that group in place (grown on the spring, its cards fading in: notifmotion.ts), its head folds it again. Every
  * group shows at once. Bottom-aligned the order flips (notifications.css): the newest nearest the thumb, "+N more"
  * on the far side.
  */
@@ -369,7 +398,7 @@ function Stack({ g }: { g: Group }) {
   const open = more > 0 && expanded.value.has(g.id);
   return (
     <div class={`notif-stack ${open ? "open" : ""}`} data-depth={Math.min(2, others.length)}>
-      <button type="button" class="notif-group-head" aria-expanded={open} onClick={() => more > 0 && toggle(g.id)}>
+      <button type="button" class="notif-group-head" aria-expanded={open} onClick={(e) => more > 0 && toggle(g.id, e.currentTarget.parentElement)}>
         {notifIconSrc(top) && <img class="notif-icon" src={notifIconSrc(top)!} alt="" />}
         <span class="notif-app">{g.name}</span>
         <span class="notif-more">{g.items.length}</span>
@@ -392,7 +421,7 @@ function Stack({ g }: { g: Group }) {
         </div>
       </div>
       {more > 0 && !open && (
-        <button type="button" class="notif-show-more muted" onClick={() => toggle(g.id)}>
+        <button type="button" class="notif-show-more muted" onClick={(e) => toggle(g.id, e.currentTarget.parentElement)}>
           +{more} more
         </button>
       )}
