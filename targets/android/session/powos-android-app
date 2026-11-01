@@ -23,6 +23,14 @@ mkdir -p "$W"
 # Picking the second app of a split (Split View dropped over PowOS: the PowOS app wrote split-pick, a timestamp):
 # the app starts on the phone's own screen, where Android puts it in the split's other half - not in a window here.
 # An app that has a window leaves it first (closing it moves the app back to the phone's screen).
+# Web windows on (the PowOS app's Settings.Global powos_web_windows, on unless 0): the PowOS app shows every Android
+# app as its own web window with PowOS's title bar. A running task moved onto a scrcpy display here became a bare KWin
+# window task instead - no title bar, no frame (ask-1a198e611f5: X, 11-01 21:47). Its task stays where it is.
+if [ -n "$task" ] && [ "$(adb -s $dev shell settings get global powos_web_windows 2>/dev/null | tr -d '\r')" != 0 ]; then
+  echo "powos-android-app: web windows are on - task $task ($pkg) stays the PowOS app's own window" >&2
+  exit 0
+fi
+
 pick=${XDG_RUNTIME_DIR:-/run/powos-app}/split-pick
 if [ -z "$task" ] && [ -f "$pick" ] && [ $(( $(date +%s) - $(cat "$pick" 2>/dev/null || echo 0) )) -lt 60 ] &&
   [ "$(adb -s $dev get-state 2>/dev/null)" = device ]; then
