@@ -144,6 +144,13 @@ const own = (i: HomeItem): Cell => (i.resizable ? i.cell! : { ...i.cell!, w: 1, 
  */
 const shown = (i: HomeItem): Cell => own(i);
 
+// WG1: a web window dragged on home fills the free region around the finger (webwindows.tsx regionAt): every placed
+// tile's cells, as shown, bound it; where the grid sits on screen.
+provideHomeGrid((n) => {
+  const g = geometry.peek();
+  return { cols: home.value.columns, rows: g.rows, taken: itemsOn(n).map(shown), left: g.left + g.pad, top: g.top + g.pad, cellW: g.cellW, cellH: g.cellH };
+});
+
 /**
  * Do cells [a] and [b] merge (M1)? Stacked, the same columns exactly; side by side, the same rows exactly - a shared
  * edge covered whole on both sides. Touching over part of an edge only (steam 6 wide over fetch 3 wide) isn't a merge.
