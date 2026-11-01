@@ -1541,7 +1541,8 @@ QUIET_MS = 7 * 86400_000       # a one-off friction unseen this long goes quiet
 STALE_QUEUE_MS = 86400_000     # a queued task nobody took in a day: listed as never picked up
 SWEEP_PASSES = 5               # passes per sweep while one decided something and items remain
 TOP_N = 10                     # the mail lists counts + this many by severity, never raw rows
-STAFFERS = ("coordinator", "manager")   # roles that hold tasks to staff them: never "freed"
+REQUEUE_KINDS = ("plan", "failed", "dead-owner", "requeue")   # an orphan's decisions: each moves it to the queue
+DEAD_OWNER_MS = 3600_000       # an owner with no live agent on a row that hasn't moved this long is a dead owner
 
 
 def _norm_title(t):
@@ -1558,9 +1559,15 @@ def sweep_decide(ws, frictions, checks, asks, now_ms):
       close    - open, nothing else open on it, and its latest deciding check is a PASS of a shipped build (an agent's or
                  the user's "works") or a recorded no-check reason, nobody holding it: closed done with that evidence
       merge    - an open task whose title is the same words as an older open one: merged into the older
-      free     - stalled with an owner role that isn't running: the owner cleared to "coder" (free: `task list --unowned`)
+      every orphan left (stalled / no-check / blocked without a reason) is DECIDED, never only listed: status queued
+      (a picker sees it) with a why line, and a dead owner (not running, row unmoved DEAD_OWNER_MS - the coordinator
+      too) cleared to "coder":
+        plan       - its check PASSED but planned steps are left: flagged "plan leftover" (step names in the mail)
+        failed     - its last check FAILED/INVALID/SKIPPED and nobody is on it: queued at its severity
+        dead-owner - stalled, its owner isn't running
+        requeue    - anything else nobody is on (a fix with no check, a PASS not closed, blocked with no reason)
       quiet    - a one-off friction (x1) unseen for 7 days: leaves the live list (reopens when logged again)
-    Everything else is "still valid" and only counted/listed (never closed without evidence)."""
+    Nothing is closed without evidence, and never over the user's own "still broken" verdict."""
     out = []
     open_ = [w for w in ws if w.get("status") != "done"]
     # The manager's own tasks (it builds some itself, e.g. the progress widget): never re-owned, closed, merged or
@@ -1609,6 +1616,10 @@ def sweep_decide(ws, frictions, checks, asks, now_ms):
             continue
         res = sorted((c for c in by.get(w["id"], []) if c.get("state") in ("PASS", "FAIL", "none")), key=lambda c: int(c.get("at") or 0))
         last = res[-1] if res else None
+        # The user's own latest verdict "still broken" (check `you` FAIL) is never closed over, whatever passed since.
+        mine_ = [c for c in res if c.get("name") == "you" and c.get("state") in ("PASS", "FAIL")]
+        if mine_ and mine_[-1]["state"] == "FAIL":
+            continue
         if last and ((last["state"] == "PASS" and last.get("shipped", True)) or (last["state"] == "none" and (last.get("line") or "").strip())):
             ev_ = (f"check {_check_name(last)} PASSED" if last["state"] == "PASS" else f"no device check: {last['line']}")[:200]
             out.append({"kind": "close", "id": w["id"], "why": ev_,
@@ -1623,12 +1634,43 @@ def sweep_decide(ws, frictions, checks, asks, now_ms):
             out.append({"kind": "merge", "id": w["id"], "why": f"same title as {seen[k]}", "into": seen[k], "calls": []})
         else:
             seen[k] = w["id"]
-    for w in open_:
+    # Every orphan left (stalled / no-check / blocked without a reason, past the grace) gets a decision - a sweep that
+    # only lists is broken (the user's rule, 11-01: for hours "Decided: nothing. orphans 65 -> 65" because only a
+    # stalled task with an expert owner was ever "freed"; the coordinator's own, the FAILs and the PASS-with-plan-steps
+    # rows had no decision at all). Each one goes to the queue (status queued) so a picker sees it, with a why line.
+    taken = {d["id"] for d in out if d["kind"] in ("close", "merge", "leaked")}
+    for w in orphans([w for w in open_ if w.get("truth") != "done"], now_ms):
+        if w["id"] in taken or w.get("_closing"):
+            continue
         owner = w.get("owner") or ""
-        # The coordinator/manager own tasks to staff them, they don't run as an expert: theirs stay (listed in the mail).
-        if (w.get("truth") == "stalled" and owner not in GENERIC_OWNERS + STAFFERS and not w.get("_closing")):
-            out.append({"kind": "free", "id": w["id"], "why": f"owner {owner} isn't running",
-                        "calls": [("work_set", w["id"], "", "coder", "", "", "")]})
+        moved = int(w.get("activity") or 0) or int(w.get("updated") or 0)
+        # Owner not running (no live agent of its role holds it - truth would be "working") and the row hasn't moved
+        # in DEAD_OWNER_MS: a dead owner, cleared to "coder" (free) - the coordinator too: it staffs, it doesn't run it.
+        dead = owner not in GENERIC_OWNERS and now_ms - moved >= DEAD_OWNER_MS
+        new_owner = "coder" if dead else ""
+        why0 = _line(w.get("why") or "")
+        sev = SEV_NAMES.get(int(w.get("severity") or 0)) or "no severity"
+        kids, steps = open_items(w, ws)
+        res = sorted((c for c in by.get(w["id"], []) if c.get("state") in CHECK_RESULTS), key=lambda c: int(c.get("at") or 0))
+        last = res[-1] if res else None
+        if last and last["state"] == "PASS" and (steps or kids):
+            # Its check PASSED but plan steps are left: a plan leftover - the coordinator decides next step vs drop;
+            # meanwhile it waits in the queue for the picker of the next step.
+            kind = "plan"
+            why = f"plan leftover: check {_check_name(last)} PASSED, {open_why(kids, steps)} - queued for the next step"
+        elif last and last["state"] in ("FAIL", "INVALID", "SKIP"):
+            kind = "failed"
+            why = f"check {_check_name(last)} {last['state']}, nobody on it - queued at {sev}"
+        elif dead:
+            kind = "dead-owner"
+            why = f"owner {owner} isn't running ({ago(moved)} since it moved) - owner cleared, queued"
+        else:
+            kind = "requeue"
+            why = f"nobody on it ({why0[:120]}) - queued at {sev}"
+        if dead and kind != "dead-owner":
+            why += f"; owner {owner} isn't running, cleared"
+        out.append({"kind": kind, "id": w["id"], "why": why[:280], "steps": steps,
+                    "calls": [("work_set", w["id"], "", new_owner, "queued", f"board sweep: {why}"[:280], "")]})
     for f in frictions:
         if f.get("status") == "open" and int(f.get("count") or 0) <= 1 and now_ms - int(f.get("last") or 0) >= QUIET_MS:
             out.append({"kind": "quiet", "id": f["id"], "why": f"x1, unseen {ago(int(f['last']))}", "calls": [("friction_quiet", f["id"])]})
@@ -1660,13 +1702,15 @@ def sweep(now_ms=None, mail=True, to="coder", full=False):
             sync_asks()
     except (Down, SystemExit):
         pass
-    decided, passes, before = [], 0, None
+    decided, passes, before, orph0 = [], 0, None, None
     while True:
         ws, frictions, checks, asks = _board_facts(now_ms)
         if before is None:
             before = (len([w for w in ws if w.get("status") != "done"]), len(orphans([w for w in ws if w["truth"] != "done"], now_ms)),
                       len([f for f in frictions if f.get("status") == "open"]))
         ds = sweep_decide(ws, frictions, checks, asks, now_ms)
+        if orph0 is None:   # what nobody was on when the sweep started (scored by sweep_decide): the digest's list
+            orph0 = orphans([w for w in ws if w["truth"] != "done"], now_ms)
         passes += 1
         if not mail:
             decided += ds
@@ -1702,7 +1746,7 @@ def sweep(now_ms=None, mail=True, to="coder", full=False):
     seen = {"tasks": {}, "asks": {}, "friction": {}}
     new_tasks, new_asks, new_fr = [], [], []
     orph = orphans(open_, now_ms)
-    for w in orph:
+    for w in orph0:
         sig = _sig(w["truth"], w["why"], w.get("severity") or 0)
         seen["tasks"][w["id"]] = sig
         if prev.get("tasks", {}).get(w["id"]) != sig:
@@ -1720,14 +1764,15 @@ def sweep(now_ms=None, mail=True, to="coder", full=False):
     after = (len([w for w in ws if w.get("status") != "done"]), len(orph), len(live_fr))
     if not mail:   # predicted: what applying the decisions would leave
         gone = {d["id"] for d in decided if d["kind"] in ("close", "merge")}
-        after = (before[0] - len(gone), len([w for w in orph if w["id"] not in gone]),
+        moved = gone | {d["id"] for d in decided if d["kind"] in REQUEUE_KINDS}
+        after = (before[0] - len(gone), len([w for w in orph if w["id"] not in moved]),
                  before[2] - sum(1 for d in decided if d["kind"] == "quiet"))
     stale_q = [w for w in open_ if w.get("status") == "queued" and now_ms - int(w.get("created") or now_ms) >= STALE_QUEUE_MS]
     digest = digest_text(open_, new_tasks, new_asks, new_fr, len(orph), len(seen["asks"]), loud, passes, before, after,
-                         stale_q, sorted(orph, key=rank_key), live_fr)
+                         stale_q, sorted(orph0, key=rank_key), live_fr)
     if full:
         digest = (digest or digest_text(open_, [], [], [], len(orph), len(seen["asks"]), loud, passes, before, after,
-                                        stale_q, sorted(orph, key=rank_key), live_fr, force=True)) + full_text(open_, decided)
+                                        stale_q, sorted(orph0, key=rank_key), live_fr, force=True)) + full_text(open_, decided)
     mgr = [d["id"] for d in decided if d["kind"] == "manager"]
     if digest and mgr:   # the manager's own tasks: listed, never acted on (the manager, 11-01)
         digest += f"\n\nManager's own (left alone): {len(mgr)}: " + ", ".join(mgr[:10]) + (" ..." if len(mgr) > 10 else "")
@@ -1767,16 +1812,27 @@ def digest_text(open_, tasks, asks, fr, n_orphans, n_asks, decided=(), passes=1,
                    + (", ".join(f"{n} {k}" for k, n in sorted(kinds.items())) or "nothing")
                    + (f". Open {before[0]} -> {after[0]}, orphans {before[1]} -> {after[1]}, live friction {before[2]} -> {after[2]}."
                       if before and after else ""))
+    plans = [d for d in decided if d["kind"] == "plan"]
+    if plans:
+        out.append(f"Plan leftover (check PASSED, steps left; next step or drop them): {len(plans)}")
+        for d in plans[:TOP_N]:
+            out.append(f"- {d['id']}: " + "; ".join(d.get("steps") or [])[:200])
     if stale_q:
         out.append(f"Queued over a day, nobody took them: {len(stale_q)} (top: "
                    + ", ".join(w["id"] for w in sorted(stale_q, key=queue_key)[:5]) + ")")
     if ranked:
-        out.append(f"\nTop {min(TOP_N, len(ranked))} of {len(ranked)} nobody is on (by severity, then reports, then age):")
+        out.append(f"\nTop {min(TOP_N, len(ranked))} of {len(ranked)} nobody was on (by severity, then reports, then age), "
+                   f"each with this sweep's decision:")
         new_ids = {w["id"] for w in tasks}
+        dec = {}
+        for d in decided:
+            dec.setdefault(d["id"], d["kind"])
         for w in list(ranked)[:TOP_N]:
             owner = f", owner {w['owner']}" if w.get("owner") else ""
             mark = " (new)" if w["id"] in new_ids else ""
-            out.append(f"- {_sev_tag(w)}[{w['truth']}] {w['title']} ({w['id']}{owner}) - {_line(w['why'])[:200]}{mark}")
+            k = dec.get(w["id"])
+            act = f" -> queued ({k})" if k in REQUEUE_KINDS else (f" -> {k}" if k else "")
+            out.append(f"- {_sev_tag(w)}[{w['truth']}] {w['title']} ({w['id']}{owner}) - {_line(w['why'])[:200]}{mark}{act}")
     if asks:
         out.append(f"\nUser asks with no task ({len(asks)} new; manager: task add --ask <id>, or ask none <id> --reason):")
         for a in asks[:TOP_N]:

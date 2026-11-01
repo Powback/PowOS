@@ -554,10 +554,14 @@ class BoardTest(unittest.TestCase):
         self.assertNotIn("Fresh one", m)
         self.assertIn("- ask-9", m)
         self.assertIn("f1 x1 [verify/flaky-check] paused queue blocks checks - repro: queue.sh pause", m)
+        # Every orphan was decided: each one queued so a picker sees it (none only listed).
+        self.assertIn("FAIL timeout - nobody on it (new) -> queued (failed)", m)
+        self.assertEqual({FakeStdb.db["work"][w]["status"] for w in ("teardown-starts", "broforce-folds", "chat-frost")}, {"queued"})
         # Nothing changed: no mail at all.
         self.assertIn("nothing new", self.run_cli("sweep").stdout)
         self.assertEqual(len(self.mails_sent()), 1)
         # One thing changed (Teardown's check now FAILED; the friction recurred): only those.
+        self.run_cli("task", "set", "teardown-starts", "--status", "working")   # a picker took it, then left it
         self.run_cli("check", "set", "teardown-starts", "j3", "FAIL", "--name", "td-launch", "--line", "FAIL no window")
         self.old("teardown-starts")
         self.run_cli("friction", "add", "--area", "verify", "--kind", "flaky-check", "paused queue blocks checks", "--repro", "x")
@@ -565,8 +569,7 @@ class BoardTest(unittest.TestCase):
         m = self.mails_sent()[1]
         self.assertIn("Board sweep: 1 task(s), 0 ask(s), 1 friction", m)
         self.assertIn("td-launch FAILED: FAIL no window - nobody on it (new)", m)
-        self.assertIn("[no-check] Broforce folds (broforce-folds) - last check bf-fold FAILED: FAIL timeout - nobody on it\n", m,
-                      "the top 10 by severity lists every orphan; only the changed ones are marked new")
+        self.assertNotIn("Broforce folds", m, "queued by the last sweep: no orphan any more")
         self.assertIn("f1 x2", m)
         # A dry run prints the digest but mails nothing and remembers nothing: the next real pass still mails it.
         self.run_cli("task", "add", "Dry one")
@@ -699,7 +702,8 @@ class HygieneCliTest(BoardTest):
 
     def test_sweep_resolves_dead_ends_and_requeues(self):
         # leaked plan steps + a PASS: the leak is dropped, then the next pass (at once) closes it on the PASS
-        self.run_cli("task", "add", "Owner of the steps", "--id", "own", "--plan", "w1 build it; w2 test it", "--status", "blocked")
+        self.run_cli("task", "add", "Owner of the steps", "--id", "own", "--plan", "w1 build it; w2 test it", "--status", "blocked",
+                     "--note", "waits on the kernel")
         self.run_cli("task", "add", "Leaky", "--id", "leaky", "--plan", "w1 build it")
         self.run_cli("check", "set", "leaky", "j1", "PASS", "--name", "leaky-check")
         self.run_cli("task", "add", "No check reason", "--id", "nc")
@@ -717,7 +721,7 @@ class HygieneCliTest(BoardTest):
         out = self.run_cli("sweep").stdout
         W = FakeStdb.db["work"]
         self.assertEqual(W["leaky"]["status"], "done", out)
-        self.assertRegex(out, r"Decided \([2-5] passes\)", "a pass that decided something re-ran at once")
+        self.assertRegex(out, r"Decided \([1-5] pass(es)?\): .*\d requeue", "every orphan decided")
         self.assertEqual(W["nc"]["status"], "done")
         self.assertEqual(W["ghost"]["owner"], "coder")
         self.assertEqual(W["twin-b"]["status"], "done")
@@ -727,6 +731,47 @@ class HygieneCliTest(BoardTest):
         self.assertIn("w1 build it", W["own"]["steps"], "the other task keeps its steps")
         self.assertEqual(len(self.mails_sent()), 1)
         self.assertLessEqual(self.mails_sent()[0].count("\n- "), 3 * cli.TOP_N)
+
+    def test_sweep_decides_every_orphan(self):
+        """Every stalled/no-check orphan gets a board action (11-01: "Decided: nothing, orphans 65 -> 65" for hours)."""
+        # dead owner: the coordinator owns it, nothing ran it for 2 h -> owner cleared, queued, why line
+        self.run_cli("task", "add", "Coordinator's stale task", "--id", "dead", "--owner", "coordinator")
+        self.old("dead", 120)
+        # PASSED check + planned steps left -> "plan leftover" with the step names in the mail, queued
+        self.run_cli("task", "add", "Dock epic", "--id", "epic", "--plan", "d1 build the dock; d2 animate the dock")
+        self.run_cli("check", "set", "epic", "j1", "PASS", "--name", "epic-check")
+        # the user's FAILED check, nobody on it -> queued at its severity
+        self.run_cli("task", "add", "Taps broken", "--id", "taps")
+        self.run_cli("check", "set", "taps", "j2", "FAIL", "--name", "you", "--line", "still broken")
+        # the user's "still broken" with an agent's PASS after it: never closed
+        self.run_cli("task", "add", "Theme flash", "--id", "flash", "--commit", "abc1234")
+        self.run_cli("check", "set", "flash", "j3", "FAIL", "--name", "you", "--line", "still broken")
+        FakeStdb.clock[0] += 1000
+        self.run_cli("check", "set", "flash", "j4", "PASS", "--name", "agent-check")
+        # the manager's own: listed, untouched
+        self.run_cli("task", "add", "Manager builds this", "--id", "mgr", "--owner", "manager")
+        for w in ("epic", "taps", "flash", "mgr"):
+            self.old(w)
+        dry = self.run_cli("sweep", "--dry-run", "--full").stdout
+        for line in ("dead-owner dead", "plan    epic", "failed  taps"):
+            self.assertIn(line.split()[0], dry)
+            self.assertRegex(dry, line.replace(" ", r"\s+"))
+        self.assertEqual(FakeStdb.db["work"]["dead"]["status"], "working", "a dry run applies nothing")
+        self.run_cli("sweep")
+        W = FakeStdb.db["work"]
+        self.assertEqual((W["dead"]["owner"], W["dead"]["status"]), ("coder", "queued"))
+        self.assertIn("coordinator isn't running", W["dead"]["note"])
+        self.assertEqual(W["epic"]["status"], "queued")
+        self.assertIn("plan leftover", W["epic"]["note"])
+        self.assertEqual(W["taps"]["status"], "queued")
+        self.assertIn("queued at P1", W["taps"]["note"])
+        self.assertGreaterEqual(int(W["taps"]["severity"]), 1)
+        self.assertNotEqual(W["flash"]["status"], "done", "never closed over the user's still broken")
+        self.assertEqual((W["mgr"]["owner"], W["mgr"]["status"]), ("manager", "working"))
+        mail = "".join(self.mails_sent())
+        self.assertIn("Plan leftover", mail)
+        self.assertIn("d1 build the dock; d2 animate the dock", mail)
+        self.assertNotIn("nothing", mail.split("Decided")[1].split("\n")[0])
 
     def test_sweep_never_acts_on_manager_tasks(self):
         # The manager builds some tasks itself: a PASS, a stalled owner or a twin title never closes/re-owns/merges them.
@@ -749,7 +794,7 @@ class HygieneCliTest(BoardTest):
         self.assertIn('echo "powos agents sweep $dry"', sh)
         src = open(CLI).read()
         body = src[src.index("def sweep_decide("):src.index("def _board_facts(")]
-        for kind in ('"score"', '"leaked"', '"close"', '"merge"', '"free"', '"quiet"'):
+        for kind in ('"score"', '"leaked"', '"close"', '"merge"', '"dead-owner"', '"plan"', '"failed"', '"requeue"', '"quiet"'):
             self.assertIn(kind, body)
 
 
