@@ -7433,7 +7433,9 @@ try {
       runs.push(open(browser, `${ORIGIN}/index.html`, `joins-${label}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(joinsCheck))));
   // The Agents screen and widget in plain words (ui/agents.tsx, fleet.ts): working / needs attention / folded idle.
   if (process.env.SHELL_PAGES !== "0")
-    runs.push(open(browser, `${ORIGIN}/index.html`, "agents-fleet", { width: 412, height: 915 }).then((r) => whenReady(r, () => r.page.evaluate(barOnHome).then(() => r.page.evaluate(agentsFleetCheck, FLEET_SETUP)))));
+    // Both home layouts: the default (search docked, no pill row: taller cells) and the bar - the same tiles in each.
+    for (const [name, layout] of [["agents-fleet", null], ["agents-fleet-bar", barOnHome]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: 412, height: 915 }).then((r) => whenReady(r, () => (layout ? r.page.evaluate(layout) : Promise.resolve()).then(() => r.page.evaluate(agentsFleetCheck, FLEET_SETUP)))));
   // Floating windows live on home's pages (ui/desktops.ts; the user's design, 2026-10-22): page switch hides and
   // shows them, and the placement survives the page loading afresh.
   if (process.env.SHELL_PAGES !== "0")

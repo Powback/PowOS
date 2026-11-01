@@ -356,8 +356,9 @@ function IdleLine({ w, font }: { w: number; font: number }) {
 
 /**
  * Home's Agents widget (grid.tsx draws it for a "panel" item named "agents"), on the phone's home and the desktop's.
- * It fills its tile at every size (shell/dev/preview.sh checks it): the tiles in a grid, its columns from the measured
- * width (~13 em a tile), its rows from the height (~1.6 em a tile) - whole tiles only. 2x2 shows
+ * It fills its tile at every size (shell/dev/preview.sh checks it): as many tiles as its cell span holds (a tile per
+ * two cells across per row - the same count at any cell height), its columns from the width (~13 em a tile), the
+ * rows sharing the height. 2x2 shows
  * the count and the top task.
  */
 export function AgentsPanel({ item }: { item: HomeItem }) {
@@ -385,10 +386,13 @@ export function AgentsPanel({ item }: { item: HomeItem }) {
   }, []);
   const { w, h, font, ch } = size;
   const gap = font * 0.3;
-  // A tile: ~13 em wide (a task's words, not a stub of them), ~1.6 em tall at least (a line, its progress along its foot).
+  // How many tiles: from the widget's cell span, never its pixels - a tile per two cells across per row (4x2: four),
+  // 2x2 the top task alone. A taller cell (home with the search docked) grows the cqmin type, and a count fit by
+  // pixel height at that type dropped a 4x2 to 3. The width only picks the columns (~13 em a tile); the rows share
+  // the height, so the tiles scale to the cells (Tile fits its text to its box).
+  const n0 = tw <= 2 && th <= 2 ? 1 : Math.max(1, Math.floor(tw / 2) * th);
   const c0 = Math.max(1, Math.min(3, Math.floor((w + gap) / (font * 13 + gap))));
-  const r0 = tw <= 2 && th <= 2 ? 1 : Math.max(1, Math.floor((h + gap) / (font * 1.6 + gap)));
-  const shown = w ? all.slice(0, c0 * r0) : [];
+  const shown = w ? all.slice(0, n0) : [];
   const c = Math.max(1, Math.min(c0, shown.length));
   const r = Math.max(1, Math.ceil(shown.length / c));
   // A tile's inner box (less its padding: .fl-tile's 0.2em 0.55em).
