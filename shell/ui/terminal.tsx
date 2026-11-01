@@ -18,6 +18,7 @@ import { effect, signal } from "@preact/signals";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { powos } from "../bridge.ts";
+import { tick } from "./haptics.ts";
 import { takeTap } from "./taps.ts";
 import { page, screen } from "../state.ts";
 import type { TermState, TermStyle } from "../types.ts";
@@ -486,7 +487,7 @@ function Cap({ k }: { k: Key }) {
       class="term-key"
       onPointerDown={(e) => {
         e.preventDefault();
-        navigator.vibrate?.(5);
+        tick();
         press(k.key);
         if (k.repeats) {
           const again = () => {
@@ -512,7 +513,7 @@ function Sticky({ name, mod }: { name: string; mod: typeof ctrl }) {
       class={`term-key sticky ${mod.value ? "on" : ""} ${mod.value === 2 ? "locked" : ""}`}
       onPointerDown={(e) => {
         e.preventDefault();
-        navigator.vibrate?.(5);
+        tick();
         const timer = window.setTimeout(() => {
           mod.value = 2;
           held.current = null;

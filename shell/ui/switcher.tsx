@@ -8,6 +8,7 @@
 import { useRef, useState } from "preact/hooks";
 import type { RecentTask, SplitSide } from "../types.ts";
 import { spring } from "./spring.ts";
+import { tick } from "./haptics.ts";
 import { memo } from "./memo.ts";
 
 /** Pushed up this far (of its height), or flicked up (px/ms), a card is removed. */
@@ -114,7 +115,7 @@ export const TaskCard = memo(function TaskCard({
         const press = window.setTimeout(() => {
           // Held still: its menu, and the touch is the menu's now.
           drag.current = null;
-          navigator.vibrate?.(10);
+          tick();
           onMenu(t.id, el.current!);
         }, LONG_PRESS);
         drag.current = { x: e.clientX, y: e.clientY, dy: 0, up: null, samples: [{ y: e.clientY, t: e.timeStamp }], press };

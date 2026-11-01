@@ -13,6 +13,7 @@
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
+import { tick } from "./haptics.ts";
 import { Icon } from "./icons.tsx";
 import {
   ALT,
@@ -252,7 +253,7 @@ function Touchpad() {
           if (points.size === 1 && travel < TAP_SLOP) {
             held = 1;
             powos.remote.mouse(1, 0, 0).catch(() => {});
-            navigator.vibrate?.(12);
+            tick();
           }
         }, HOLD_MS);
       }

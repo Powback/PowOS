@@ -19,6 +19,7 @@
  * swipe's settle; closed, it goes back into the button.
  */
 import { useLayoutEffect, useRef } from "preact/hooks";
+import { tick } from "./haptics.ts";
 import { computed } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { carry, closeDrawer, dockPosition, drawer, editing, homePage, openPanel, page, pullKind, pullPage, searchInDock } from "../state.ts";
@@ -54,7 +55,7 @@ export function grabSearch(e: PointerEvent, el: Element): boolean {
     // Held where the finger is on the pill; the button's small face: the carried row's middle.
     const wide = from.width > 2 * from.height;
     const grab = wide ? { x: e.clientX - from.left, y: e.clientY - from.top } : { x: (item.cell!.w * g.cellW) / 2, y: (item.cell!.h * g.cellH) / 2 };
-    navigator.vibrate?.(10);
+    tick();
     startCarry({ item }, ev, grab);
   };
   addEventListener("pointermove", move);
@@ -226,7 +227,7 @@ function down(e: PointerEvent): Press {
   const p: Press = { x: e.clientX, y: e.clientY, hold: 0, ptt: 0, kind: "tap", last: [e.clientY, performance.now()] };
   p.hold = window.setTimeout(() => {
     p.kind = "held";
-    navigator.vibrate?.(10);
+    tick();
     launch(true);
   }, HOLD_MS);
   p.ptt = window.setTimeout(() => {
@@ -234,7 +235,7 @@ function down(e: PointerEvent): Press {
     p.kind = "ptt";
     // The recognizer goes on through pauses until the release's stop().
     void powos.speech.hold();
-    navigator.vibrate?.(5);
+    tick();
   }, PTT_MS);
   return p;
 }

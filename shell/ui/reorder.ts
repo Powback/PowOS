@@ -13,6 +13,7 @@
  * a container inside an item (a category's members inside its tile) is its own.
  */
 import type { Signal } from "@preact/signals";
+import { tick } from "./haptics.ts";
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { springFast } from "./spring.ts";
 
@@ -136,7 +137,7 @@ export function useReorder(
     const el = item(p.key);
     if (!el) return;
     p.lifted = true;
-    navigator.vibrate?.(10);
+    tick();
     editing.value = true;
     opts.onLift?.(p.key);
     try {
@@ -177,7 +178,7 @@ export function useReorder(
     window.setTimeout(() => (swallow.current = false), 0);
     const final = liveRef.current;
     if (p.moved && final && final.join() !== keys.join()) {
-      navigator.vibrate?.(10);
+      tick();
       done(final);
     } else if (!p.moved) opts.onSelect?.(p.key);
     opts.onLand?.();

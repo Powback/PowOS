@@ -15,6 +15,7 @@ import { searchResults, searchPending, openSearchResult } from "../search.ts";
 import { followOpenness, pageDrag } from "./gesture.ts";
 import { chatting, drawer, homePage, launcherIsOverlay, openPanel, page, pullKind, pullPage, query, sharesBar } from "../state.ts";
 import { powos } from "../bridge.ts";
+import { tick } from "./haptics.ts";
 import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
 import { dictate, drop, finish, finishing, forget, hearing, listen, listeningFor, makeHold, release, settle, speech, stopTap, type MicTarget } from "./dictation.ts";
 import { remoteHearing, startBarSync } from "./barsync.ts";
@@ -99,7 +100,7 @@ export function Mic({ target }: { target: MicTarget }) {
           p.cancelled = true;
           forget(target);
           powos.speech.cancel();
-          navigator.vibrate?.(5);
+          tick();
         }
       }}
       onPointerUp={() => {

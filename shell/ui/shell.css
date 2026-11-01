@@ -269,12 +269,9 @@
 }
 @keyframes scroll-fade-t { from { --scroll-fade-t: 0px; } to { --scroll-fade-t: var(--scroll-fade); } }
 @keyframes scroll-fade-b { from { --scroll-fade-b: var(--scroll-fade); } to { --scroll-fade-b: 0px; } }
-.dock-dots { position: absolute; left: 50%; bottom: 3px; transform: translateX(-50%); display: flex; gap: 5px; pointer-events: none; }
-.dock-dots i { width: 5px; height: 5px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 28%, transparent); }
-.dock-dots i.on { background: color-mix(in srgb, var(--color-foreground) 80%, transparent); }
 
 /*
- * Page dots (ui/pagedots.tsx): home's pages and the launcher's, one style - the dock's dots' size and tints. Each dot's
+ * Page dots (ui/pagedots.tsx): home's pages and the launcher's, one style - one row on home (the dock has none of its own). Each dot's
  * --on (0..1, how much its page is on screen) is written as the swipe moves: the bright fill fades in and the dot
  * grows a little with it. Opacity and transform only; .live (a finger on it) tracks exactly, at rest it eases.
  */
@@ -285,6 +282,9 @@
 /* Home's: at the stage's foot, in the gap above the pill / dock, over the pages' width only (the stage is already
    clear of a side dock); it fades with the pages as the launcher opens. */
 .home-dots { position: absolute; left: 0; right: 0; bottom: calc(var(--gap) / 2 - 7px); opacity: calc(1 - var(--p)); pointer-events: none; }
+/* Folded with the pill in the foot (not the docked button), the foot starts right at the stage's foot: the dots' usual
+   7px reach below it put them under the pill's top edge (gate edit-search: "the page dots overlap bar-pill"). */
+.home:not(.wide):has(> .bar .bar-pill) > .stage > .home-dots { bottom: var(--gap); }
 /* The launcher's: no row of their own - laid over the gap under the pages (the launcher's 16 px over the pill, or the
    recent row's margin), so the app grid runs down to it. The user, 2026-10-31: "The page indicator takes up a lot of
    space." They sit in the drawer's grid beside the pages (same cell), over the pages' last 6 px: not inside the pages
@@ -659,7 +659,7 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   padding: 6px 2px;
   border-radius: var(--radius);
   touch-action: manipulation;
-  transition: background 120ms;
+  transition: background var(--spring-fast-ms) var(--spring-fast);
 }
 .app:active { background: var(--color-surface); }
 .app-icon { position: relative; display: block; width: var(--icon); height: var(--icon); pointer-events: none; border-radius: var(--icon-radius); }
@@ -708,11 +708,11 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   translate: -50% 0;
   background: var(--color-accent);
   box-shadow: 0 0 0 1px var(--color-background);
-  transition: width 150ms, height 150ms, opacity 150ms;
+  transition: width var(--spring-fast-ms) var(--spring-fast), height var(--spring-fast-ms) var(--spring-fast), opacity var(--spring-fast-ms) var(--spring-fast);
 }
 .dock .app.mark-here .app-icon::after { width: 22px; height: 4px; border-radius: 8px; opacity: 1; }
 .dock .app.mark-away .app-icon::after { width: 4px; height: 4px; border-radius: 8px; opacity: 0.45; }
-.dock .app:not(.dock-search) .app-icon { transition: opacity 150ms; }
+.dock .app:not(.dock-search) .app-icon { transition: opacity var(--spring-fast-ms) var(--spring-fast); }
 .dock.page-focus .app:not(.mark-here, .dock-search) .app-icon { opacity: 0.65; }
 /* DG1 (ui/dockgroups.tsx): a window group's cell - its apps' icons together (switcher.tsx SplitIcons), laid out as the
    group sits on screen: side by side (2h, a tab stack), one over the other (2v), the 3-tile layouts, a 2x2 grid (4). */
@@ -727,7 +727,7 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 .dock .group-icon .task-icons[data-layout="3b"] > :last-child { grid-column: span 2; }
 .dock .group-icon .task-icon { display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain; border-radius: 8px; }
 .dock .group-icon .task-icon.blank { background: var(--soft-fill); }
-.app-icon img { display: block; width: 100%; height: 100%; object-fit: contain; transition: opacity 160ms; }
+.app-icon img { display: block; width: 100%; height: 100%; object-fit: contain; transition: opacity var(--spring-fast-ms) var(--spring-fast); }
 /* Not loaded yet (apps.tsx AppIcon): a pulsing tile in its place, not a broken image. */
 /* Pulses ~10 s, not forever: an app with no icon at all (a Linux app like lstopo) stays "loading", and an endless
    animation kept the compositor drawing 60 frames a second on an idle home (app + renderer ~20% of a core). */
@@ -838,7 +838,7 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
      whole group (grid.tsx GroupShadow). */
   box-shadow: none;
 }
-.home-tile.joined[style*="--jt: 0"] > .tile { box-shadow: var(--lift-edge); }
+.home-tile.joined[style*="--free-top: 1"] > .tile { box-shadow: var(--lift-edge); }
 .group-shadow { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 /*
  * The pieces merging tiles that touch over part of an edge (grid.tsx seams): the gutter along the shared span, and a
@@ -1127,7 +1127,7 @@ input.folder-title:focus { background: var(--soft-fill); }
   border-radius: var(--radius);
 }
 .dock.aimed { border-color: var(--color-accent); }
-.dock .app.swap-out { opacity: 0.35; scale: 0.8; transition: scale 120ms, opacity 120ms; }
+.dock .app.swap-out { opacity: 0.35; scale: 0.8; transition: scale var(--spring-fast-ms) var(--spring-fast), opacity var(--spring-fast-ms) var(--spring-fast); }
 .dock.dock-ghost {
   position: fixed;
   left: 0;
@@ -1155,7 +1155,7 @@ input.folder-title:focus { background: var(--soft-fill); }
   z-index: 1;
   opacity: 0.85;
   scale: 1.12;
-  transition: scale 120ms;
+  transition: scale var(--spring-fast-ms) var(--spring-fast);
 }
 
 /* A widget's screen (screen.tsx), over home. A terminal's: edge to edge under the status bar, the keys over its foot. */
@@ -1260,19 +1260,25 @@ input.folder-title:focus { background: var(--soft-fill); }
 /* A side dock is a column pinned under the status bar (top: --inset-top): it doesn't rise - risen, its first icon covered
    the status bar's battery (the user's screenshot, 2026-10-30); its foot ends above the risen pill instead. */
 .home > .dock:not(.dock-tray),
-.home > .bar { transition: translate var(--spring-fast-ms) var(--spring-fast); }
+.home > .bar,
+.home > .stage > .home-dots { transition: translate var(--spring-fast-ms) var(--spring-fast); }
+/* Home's page dots rise with the foot: their own row stays above the risen button/pill, never behind it (the manager's
+   wave 2 review: in edit mode they sat under the docked search button). The gate's edit-foot scene asserts it. */
 .home.editing:not(.dock-left, .dock-right) > .dock:not(.dock-tray),
-.home.editing > .bar { translate: 0 calc(-1 * var(--edit-rise)); }
+.home.editing > .bar,
+.home.editing > .stage > .home-dots { translate: 0 calc(-1 * var(--edit-rise)); }
+/* Edit mode's buttons sit on the wallpaper: THE backdrop's tint (§2), not the faint --soft-fill (4.25:1 over a light
+   wallpaper, design audit home gap 9). */
 .edit-act {
   font: var(--text-item) var(--font-body);
   color: var(--color-foreground);
-  background: var(--soft-fill);
+  background: var(--backdrop-tint);
   box-shadow: var(--lift);
   border-radius: 999px;
   padding: 8px 14px;
 }
 .edit-act.on { background: color-mix(in srgb, var(--color-accent) 22%, transparent); color: var(--accent-text); }
-.edit-act.done { box-shadow: none; background: none; color: var(--accent-text); padding-right: 0; }
+.edit-act.done { box-shadow: none; background: none; color: var(--accent-text); text-shadow: var(--label-shadow); padding-right: 0; }
 .edit-note { flex: 1; min-width: 0; font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The theme popover, just above the bar. */
 .theme-pop {

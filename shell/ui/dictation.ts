@@ -5,6 +5,7 @@
  */
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
+import { tick } from "./haptics.ts";
 
 /** What the recognizer hears, as it hears it; [elsewhere]: another window's dictation has the mic (one in the app). */
 export interface SpeechState {
@@ -90,7 +91,7 @@ export async function listen(hold: boolean, target: MicTarget) {
   target.started?.();
   (document.activeElement as HTMLElement | null)?.blur();
   powos.keyboard.hide();
-  navigator.vibrate?.(10);
+  tick();
   const r = await starting;
   if (r !== "started") notStarted(r, target);
 }

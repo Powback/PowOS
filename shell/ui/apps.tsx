@@ -3,6 +3,7 @@
  * over everything so no scrolling list clips it). In the drawer, holding an app and moving it drags it onto home.
  */
 import { tinted } from "./icontint.ts";
+import { tick } from "./haptics.ts";
 import { placement, shapeOf, type Shape } from "./iconshape.ts";
 import { running, runOf } from "./running.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
@@ -35,7 +36,7 @@ export function usePress(onTap: () => void, onLong: (el: HTMLElement) => void, o
       const state = { x: e.clientX, y: e.clientY, long: false, timer: 0, el };
       state.timer = window.setTimeout(() => {
         state.long = true;
-        navigator.vibrate?.(10);
+        tick();
         // Its moves stay its own from here: the menu's scrim comes up under the finger, the app can still be dragged.
         try {
           el.setPointerCapture(e.pointerId);

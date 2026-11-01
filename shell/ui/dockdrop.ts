@@ -4,6 +4,7 @@
  * the dock makes room for it (home.tsx Dock reads [dockAim]); a full dock offers to swap the app under the finger.
  */
 import { byKey, dock, dockPosition, dockAim, editing, homePage, searchInDock, selected, setDock, type Carry } from "../state.ts";
+import { tick } from "./haptics.ts";
 import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { aimSearch } from "./searchwidget.tsx";
@@ -77,7 +78,6 @@ export function hoverDock(c: Carry, x: number, y: number) {
   const a = aimDock(c, x, y) ?? aimSearch(c, x, y);
   const was = dockAim.value;
   if (a?.slot !== was?.slot || a?.key !== was?.key) {
-    if (a) navigator.vibrate?.(5);
     dockAim.value = a;
   }
 }
@@ -87,7 +87,7 @@ export function dropOnDock(c: Carry, x: number, y: number): boolean {
   const a = aimDock(c, x, y);
   dockAim.value = null;
   if (!a) return false;
-  navigator.vibrate?.(10);
+  tick();
   const rest = shownLess(a.key);
   const hidden = dock.value.filter((k) => k !== a.key && !byKey.value.has(k));
   let out: string | undefined;
