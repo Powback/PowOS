@@ -3311,7 +3311,7 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-placeholder.failed .ww-placeholder-icon { opacity: 0.5; }
 .ww-failed-text { max-width: 260px; padding: 0 16px; text-align: center; font-size: 14px; line-height: 1.4; color: var(--color-muted); }
 .ww-failed-close { padding: 8px 20px; border: none; border-radius: 999px; font: inherit; font-size: 14px; color: var(--color-foreground); background: color-mix(in srgb, var(--color-foreground) 12%, transparent); }
-/* RZ2: the resize zones, all OUTSIDE the frame (never over the app or the bar's buttons): 32 dp along each edge, 48x48 dp
+/* RZ2: the resize zones, OUTSIDE the frame (never over the app or the bar's buttons; the bottom corners' GR1 inset aside): 32 dp along each edge, 48x48 dp
    off each corner, in screen dp whatever the window's pinch scale (--ww-k). A strip's ends act as its corners. */
 .ww-edge { position: absolute; touch-action: none; --ww-zone: calc(32px / var(--ww-k, 1)); --ww-corner: calc(48px / var(--ww-k, 1)); }
 .ww-edge-n, .ww-edge-s { left: 0; right: 0; height: var(--ww-zone); }
@@ -3319,7 +3319,11 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-edge-n { bottom: 100%; } .ww-edge-s { top: 100%; } .ww-edge-e { left: 100%; } .ww-edge-w { right: 100%; }
 .ww-edge-ne, .ww-edge-nw, .ww-edge-se, .ww-edge-sw { width: var(--ww-corner); height: var(--ww-corner); }
 .ww-edge-ne { bottom: 100%; left: 100%; } .ww-edge-nw { bottom: 100%; right: 100%; }
-.ww-edge-se { top: 100%; left: 100%; } .ww-edge-sw { top: 100%; right: 100%; }
+/* GR1 (e2e 193, steps 29-32: a finger on the drawn bottom grip - its arc sits on the corner, 3 dp inside the frame - hit
+   the app, so nothing resized): the bottom corners' squares reach 14 dp in over the corner too, under the arc, so where
+   the grip is drawn is grabbable (62x62 dp in all). The top ones stay outside: the bar's buttons are there. */
+.ww-edge-se, .ww-edge-sw { --ww-in: calc(14px / var(--ww-k, 1)); top: calc(100% - var(--ww-in)); width: calc(var(--ww-corner) + var(--ww-in)); height: calc(var(--ww-corner) + var(--ww-in)); }
+.ww-edge-se { left: calc(100% - var(--ww-in)); } .ww-edge-sw { right: calc(100% - var(--ww-in)); }
 /* RZ1: the focused window's corner grips - a short arc (~28 dp) hugging each rounded corner just outside it, the theme's
    light stroke; the top ones subtler. They fade in briefly on activation (RZ6), full while it is being resized. */
 .ww-grip {

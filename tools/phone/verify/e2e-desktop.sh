@@ -43,12 +43,26 @@ put_away() {
   local wl='l=>JSON.stringify(l.map(w=>({id:w.id,pkg:w.pkg,app:w.app,min:w.minimised,away:w.away,b:w.bounds})))'
   local ww='l=>JSON.stringify(l.map(w=>({id:w.id,key:w.key,state:w.state})))'
   local before after; before="$(hcall windows.list "[]" "$wl") web: $(hcall webwindows.list "[]" "$ww")"
-  dock_tap "$2" "$3" || return 1; sleep 1.8; chk "minimise $3"
+  dock_tap "$2" "$3" || { put_away_fallback "$1" "$3"; return 1; }; sleep 1.8; chk "minimise $3"
   after="$(hcall windows.list "[]" "$wl") web: $(hcall webwindows.list "[]" "$ww")"
   note "windows.list before the dock tap: $before"; note "windows.list after: $after"
   step "$4" "$3 put away: a tap on its dock cell while its window is in front"
   local m; m=$(win "$1" minimised)
-  [ "$m" = true ] && pass "$3 minimised into the dock" || fail "$3 after a dock tap on it in front: minimised=$m (windows.list before: $before; after: $after; WindowFrames log: $(sh_ "logcat -d | grep -E \"minimise task|can.t minimise\" | tail -3" | tr "\n" "~"))"
+  [ "$m" = true ] && { pass "$3 minimised into the dock"; return 0; }
+  fail "$3 after a dock tap on it in front: minimised=$m (windows.list before: $before; after: $after; WindowFrames log: $(sh_ "logcat -d | grep -E \"minimise task|can.t minimise\" | tail -3" | tr "\n" "~"))"
+  put_away_fallback "$1" "$3"
+}
+# put_away_fallback <window key> <name>: the dock tap left it up (round 193: Chrome stayed on screen, so steps 56/57
+# found no empty spot on home and failed too) - its title bar's minimise button, else its close button, so the next
+# steps start from home whatever the dock did. Notes only: the dock's failure is already the step's FAIL.
+put_away_fallback() {
+  local id p; id=$(win "$1" id); case $id in none|ERR*|"") return 0 ;; esac
+  p=$(minbtn "$id")
+  if [ -n "$p" ]; then set -- "$1" "$2" $p; tap "$3" "$4" "$2's minimise button (fallback)"; sleep 1.5; chk "minimise $2 by its bar"
+    [ "$(win "$1" minimised)" = true ] && { note "fallback: $2 minimised by its title bar's minimise button"; return 0; }; fi
+  p=$(closebtn "$id")
+  if [ -n "$p" ]; then set -- "$1" "$2" $p; tap "$3" "$4" "$2's close button (fallback)"; sleep 2; chk "close $2 by its bar"; fi
+  wgone "$id" && note "fallback: $2 closed by its title bar's close button" || note "fallback: $2 still up after its bar's minimise and close (the next steps may cascade)"
 }
 # closebar <task> <name> <slug>: its title bar's close button, a real tap.
 closebar() {
@@ -180,6 +194,7 @@ part2() {
   # Resize by the grip, 4 frames while the finger is down.
   local g; g=$(grippt "$CT")
   if [ -n "$g" ]; then set -- $g; x=$1; y=$2
+    note "grip hit test at $x,$y: $(hitat $x $y) (want div.ww-edge...: else the touch goes to the app)"
     b0=$(tbounds "$CT"); set -- $b0; local w0=$(($3 - $1)) wl=$(($3 - $1)) wi grow=0 mono=1
     if mdown $x $y "Calculator's grip"; then
       for i in 1 2 3 4; do

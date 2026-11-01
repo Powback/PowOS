@@ -230,6 +230,10 @@ screenrect() { set -- $1; [ $# -ge 4 ] || { echo "$*"; return; }
 closebtn() { case $1 in w*) wwpt "$1" .ww-close; return ;; esac; local b; b=$(wframe "PowOS window bar $1}"); [ -n "$b" ] || return 0; set -- $b; echo "$(($3 - $(dp 21))) $((($2 + $4) / 2))"; }
 # wwpt <w-id> <selector>: the centre of that element inside the web window, "x y" device px, or "".
 wwpt() { local v; v=$(wwel "$1" "e=>{const b=e.querySelector('$2');if(!b)return '';const r=b.getBoundingClientRect(),d=devicePixelRatio;return r.width<1?'':Math.round((r.left+r.width/2)*d)+' '+Math.round((r.top+r.height/2)*d)}"); [ "$v" = none ] || echo "$v"; }
+# minbtn <w-id>: a web window's title-bar minimise button, "x y" device px or "".
+minbtn() { case $1 in w*) wwpt "$1" ".ww-button[aria-label=Minimise]" ;; esac; }
+# hitat <x> <y>: what the page's hit test finds at that device-px point ("tag.class.es" or "none") - a grip's log line.
+hitat() { ev "(()=>{const d=devicePixelRatio,e=document.elementFromPoint($1/d,$2/d);return e?e.tagName.toLowerCase()+'.'+String(e.className&&e.className.baseVal!==undefined?e.className.baseVal:e.className).trim().split(/ +/).join('.'):'none'})()"; }
 # grippt <id>: its resize grip (bottom right), "x y" or "" - a web window's .ww-grip-br, else the old grip window.
 grippt() { case $1 in w*) wwpt "$1" ".ww-grip-se"; return ;; esac; local g; g=$(wframe "PowOS window grip $1}"); [ -n "$g" ] || return 0; set -- $g; echo "$((($1 + $3) / 2)) $((($2 + $4) / 2))"; }
 # barpt <task>: a spot on its title bar for a drag: the left part, away from the buttons, clear of the pill if it can.

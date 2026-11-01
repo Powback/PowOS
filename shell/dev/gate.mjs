@@ -5774,6 +5774,64 @@ async function gridSnapScene(r) {
 }
 
 /** WX1's steps in one page, the windows cleared after. */
+/**
+ * GR1 (e2e round 193, steps 29-32: a finger on the drawn bottom-right grip, mid-drag, left the window 1135 px wide in
+ * all 4 frames - the arc sits on the corner, 3 dp inside the frame, so the press hit the app's body, not a zone). A
+ * real finger (CDP touch events) on the journey's point - the .ww-grip-se's centre, e2e-lib.sh grippt - dragged in 6
+ * steps: the DOM's hit test there is a resize zone, the frame is wider at every step (live, not on release), the
+ * zones are comfortable (bottom-right corner >= 44 dp square, the edge strips >= 24 dp) and a press 24 dp inside the
+ * corner is still the app's.
+ */
+async function gripDragScene(r) {
+  const at = await r.page.evaluate(async () => {
+    const S = await window.__gw.mod("./state.ts");
+    const W = await window.__gw.mod("./ui/webwindows.tsx");
+    S.page.value = 0;
+    await window.__gw.settled();
+    W.webWins.value = [{ id: 961, key: "a:gate.grip", label: "Grip", page: S.pages.value[0], x: 120, y: 160, w: 300, h: 260, live: true }];
+    await window.__gw.settled();
+    const sel = '.webwindow[data-wwid="961"]';
+    const box = (q) => document.querySelector(`${sel} ${q}`)?.getBoundingClientRect();
+    const g = box(".ww-grip-se"), se = box(".ww-edge-se"), e = box(".ww-edge-e"), s = box(".ww-edge-s");
+    const f = document.querySelector(sel).getBoundingClientRect();
+    const [x, y] = [g.left + g.width / 2, g.top + g.height / 2];
+    const name = (el) => (el ? `${el.tagName.toLowerCase()}.${String(el.className?.baseVal ?? el.className).trim().split(/\s+/).join(".")}` : "none");
+    const hit = document.elementFromPoint(x, y);
+    const inside = document.elementFromPoint(f.right - 24, f.bottom - 24);
+    const fails = [
+      !hit?.closest(".ww-edge") && `GR1: the grip's centre (${x | 0},${y | 0}; the journey's grippt) hits ${name(hit)}, not a resize zone`,
+      (se.width < 44 || se.height < 44) && `GR1: the bottom-right corner zone is ${se.width}x${se.height} (want >= 44 dp square)`,
+      (e.width < 24 || s.height < 24) && `GR1: the edge strips are ${e.width} (right) / ${s.height} (bottom) dp (want >= 24)`,
+      !inside?.closest(".webwindow-body") && `GR1: a press 24 dp inside the corner hits ${name(inside)} (want the app's body)`,
+    ].filter(Boolean);
+    return { x, y, w0: f.width, fails };
+  });
+  const fails = [...at.fails];
+  if (fails.length) return fails;
+  const cdp = await r.page.target().createCDPSession();
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  const width = () => r.page.evaluate(async () => (await window.__gw.frames(1), document.querySelector('.webwindow[data-wwid="961"]').getBoundingClientRect().width));
+  try {
+    await touch("touchStart", [{ x: at.x, y: at.y, id: 1 }]);
+    let last = at.w0;
+    const seen = [];
+    for (let i = 1; i <= 6; i++) {
+      // 14 px a step: 300 -> 384, clear of the tile sizes it would snap to (RZ4: a third ~270, a half ~407 here).
+      await touch("touchMove", [{ x: at.x + 14 * i, y: at.y + 10 * i, id: 1 }]);
+      const w = await width();
+      seen.push(Math.round(w));
+      if (!(w > last)) fails.push(`GR1: step ${i} of the grip's drag left the window ${w} px wide (was ${last}): not live`);
+      last = w;
+    }
+    await touch("touchEnd", []);
+    console.log(`     ww-grip-drag: widths ${Math.round(at.w0)} -> ${seen.join(" ")}`);
+    return fails;
+  } finally {
+    await r.page.evaluate(async () => ((await window.__gw.mod("./ui/webwindows.tsx")).webWins.value = [])).catch(() => {});
+  }
+}
+
 async function swapScene(r) {
   try {
     for (const step of [SWAP_HELPERS, swapDividerTap, swapHintTap, swapVertical, swapAloneHalf]) {
@@ -7254,6 +7312,9 @@ try {
   // WX1: a tap on a divider / the ⇄ hint swaps the sides (ww-swap-unfolded; the user, 10-31 15:47-15:52).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-swap-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => swapScene(r))));
+  // GR1: a real finger on the journey's grip point resizes live, every step (ww-grip-drag; e2e round 193 steps 29-32).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ww-grip-drag", { width: 821, height: 883 }).then((r) => whenReady(r, () => gripDragScene(r))));
   // WG1: a window dragged on home snaps into the free cells beside the widgets (ww-gridsnap-unfolded; the user, 10-31 15:49).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-gridsnap-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => gridSnapScene(r))));

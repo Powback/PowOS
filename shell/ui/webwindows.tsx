@@ -2525,6 +2525,9 @@ const appDrags = new Map<number, AppDrag>();
 /** An edge zone's press this near (frame px) a corner resizes from that corner (RZ2: the strips' ends are the corner's). */
 const CORNER_ALONG = 24;
 
+/** GR1: how far (screen px) a bottom corner's zone reaches in over the frame's corner, under its drawn grip (shell.css). */
+export const CORNER_IN = 14;
+
 /** The sides a press [e] on edge zone [side] resizes: a strip's end near a corner is that corner. */
 function sideAt(side: string, e: PointerEvent): string {
   if (side.length === 2) return side;
@@ -2536,7 +2539,7 @@ function sideAt(side: string, e: PointerEvent): string {
 
 /**
  * A resize grab (RZ2): an invisible zone OUTSIDE the frame - 32 dp along each edge, 48x48 dp off each corner - so it
- * never covers the app or the bar's buttons; a higher window's content is over a lower window's zones (z order: the
+ * never covers the app or the bar's buttons (the bottom corners also reach CORNER_IN in, under their drawn grips: GR1); a higher window's content is over a lower window's zones (z order: the
  * DOM's hit test). The frame follows the finger, the app's size paced ([pace]: RS1), the final on release; a haptic
  * tick on the grab, the live size outline ([resizeView]) while it lasts, tile sizes snapped to ([snapLen]: RZ4).
  */
@@ -2628,7 +2631,9 @@ function zoneHeight(win: WebWin, side: string): string | undefined {
   }
   if (side.startsWith("s")) {
     const room = Math.max(0, innerHeight - strips.bottom - (top + win.h * k));
-    return room < zone ? `${room / k}px` : undefined;
+    // GR1: a bottom corner's square starts CORNER_IN screen px inside the frame (shell.css), so it keeps that part.
+    const inset = side.length === 2 ? CORNER_IN : 0;
+    return room < zone ? `${(room + inset) / k}px` : undefined;
   }
   return undefined;
 }
