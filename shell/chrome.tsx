@@ -3,6 +3,7 @@ import { render } from "preact";
 import { powos } from "./bridge.ts";
 import { WindowBar, WindowGrip, StatusBar } from "./ui/chrome.tsx";
 import { loadTheme } from "./ui/theme.ts";
+import "./ui/uifont.ts";
 import type { ChromeState } from "./types.ts";
 import "./hot.ts";
 import "./ui/glass.ts";

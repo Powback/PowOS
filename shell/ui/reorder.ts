@@ -14,6 +14,7 @@
  */
 import type { Signal } from "@preact/signals";
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
+import { springFast } from "./spring.ts";
 
 /** Home's long press (grid.tsx, apps.tsx): held this long (ms), a tile lifts. */
 export const LONG_PRESS_MS = 420;
@@ -109,8 +110,8 @@ export function useReorder(
       const was = rects.current.get(k);
       if (live && was && (Math.abs(was.left - r.left) > 0.5 || Math.abs(was.top - r.top) > 0.5))
         el.animate([{ transform: `translate(${was.left - r.left}px, ${was.top - r.top}px)` }, { transform: "none" }], {
-          duration: 180,
-          easing: "cubic-bezier(0.2, 0.9, 0.3, 1)",
+          duration: springFast.ms,
+          easing: springFast.easing,
         });
     }
     rects.current = next;

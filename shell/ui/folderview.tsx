@@ -16,10 +16,11 @@ import { folder, home } from "../state.ts";
 import { AppPress, folderNames, morphing, nameFolder, type DragOut } from "./folders.tsx";
 import { library } from "./library.tsx";
 import { geometry } from "./grid.tsx";
+import { spring, springFast } from "./spring.ts";
 
-const MORPH_MS = 240;
+const MORPH_MS = spring.ms;
 /** A spring's ease: a little past, then home. */
-const EASE = "cubic-bezier(0.3, 1.25, 0.4, 1)";
+const EASE = spring.easing;
 const SWIPE_CLOSE = 70;
 
 type Shown = { key: string; name: string; apps: { key: string; label: string; app: string }[]; own: boolean };
@@ -54,7 +55,7 @@ function place(root: HTMLElement, out: boolean, ease: boolean) {
   const minis = minisOf(tile);
   const fades = [...root.querySelectorAll<HTMLElement>(".folder-title, .folder-grid .app-label")];
   const all = [bg, focus, ...icons, ...fades];
-  for (const el of all) el.style.transition = ease ? `transform ${MORPH_MS}ms ${EASE}, opacity ${MORPH_MS}ms ease-out` : "none";
+  for (const el of all) el.style.transition = ease ? `transform ${MORPH_MS}ms ${EASE}, opacity ${springFast.ms}ms ${springFast.easing}` : "none";
   focus.style.opacity = out ? "0" : "1";
   bg.style.transform = out && t ? from(t, bg.getBoundingClientRect()) : "";
   icons.forEach((icon, i) => {

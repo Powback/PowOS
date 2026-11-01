@@ -34,6 +34,7 @@ import {
 import { Icon, type IconName } from "./icons.tsx";
 import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
 import { iconTint } from "./icontint.ts";
+import { UI_FONTS, uiFont } from "./uifont.ts";
 import { ALIGNS, alignChoice, type AlignMode, type AlignSurface } from "./align.ts";
 
 /** "icon colours" options after "the apps'": theme hues, the accent. */
@@ -584,6 +585,12 @@ function StyleScreen() {
             <AlignOption key={`${sf}.${m}`} label={`${m} ${name}`} surface={sf} mode={m} />
           )),
         )}
+      </Section>
+      {/* The theme's UI font (ui/uifont.ts): every UI text at once; code, terminals and logs stay monospace. */}
+      <Section icon="formatFont" title="font">
+        <Option label="font">
+          <Segmented options={["UI (default)", "Mono"]} picked={UI_FONTS.indexOf(uiFont.value)} onPick={(i) => (uiFont.value = UI_FONTS[i])} />
+        </Option>
       </Section>
       <Section icon="apps" title="icons">
         {/* The page's own (ui/icontint.ts): each icon redrawn once - its hues the theme's, all the accent - or as drawn. */}

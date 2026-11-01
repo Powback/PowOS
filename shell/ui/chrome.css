@@ -2,8 +2,8 @@
 html:is([data-mode="windowbar"], [data-mode="windowgrip"], [data-mode="statusbar"]),
 html:is([data-mode="windowbar"], [data-mode="windowgrip"], [data-mode="statusbar"]) body { width: 100%; height: 100%; overflow: hidden; margin: 0; }
 .window-chrome { position: relative; display: flex; align-items: stretch; width: 100%; height: 100%; padding: 0 2px 0 10px; color: var(--color-foreground); user-select: none; touch-action: none; }
-.window-glass { position: absolute; inset: 8px 0 0; border-radius: 10px 10px 0 0; pointer-events: none; }
-.window-caption { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding-top: 8px; font: 10.5px var(--font); }
+.window-glass { position: absolute; inset: 8px 0 0; border-radius: 8px 8px 0 0; pointer-events: none; }
+.window-caption { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding-top: 8px; font: 10.5px var(--font-body); }
 .window-caption span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .window-caption img { width: 12px; height: 12px; object-fit: contain; }
 .window-chrome button { position: relative; flex: 0 0 34px; display: grid; place-items: center; padding: 8px 0 0; border: 0; border-radius: 0; background: transparent; color: inherit; }
@@ -14,7 +14,7 @@ html:is([data-mode="windowbar"], [data-mode="windowgrip"], [data-mode="statusbar
 .window-grip { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%; color: var(--color-foreground); }
 .window-grip svg { width: 24px; height: 24px; }
 .status-chrome { width: 100%; height: 100%; display: flex; align-items: center; justify-content: space-between; gap: 24px; color: var(--color-foreground); user-select: none; }
-.status-chrome button { display: flex; align-items: center; gap: 6px; min-height: 24px; border: 0; border-radius: 0; padding: 3px 2px; background: transparent; box-shadow: none; color: inherit; font: 12px var(--font); }
+.status-chrome button { display: flex; align-items: center; gap: 6px; min-height: 24px; border: 0; border-radius: 0; padding: 3px 2px; background: transparent; box-shadow: none; color: inherit; font: 12px var(--font-body); }
 .status-chrome button:focus, .status-chrome button:focus-visible { outline: none; background: transparent; box-shadow: none; }
 .status-chrome svg { width: 16px; height: 16px; display: block; }
 .status-battery { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
@@ -44,4 +44,4 @@ html:root .chrome-surface { --frost-fill: color-mix(in srgb, var(--frost-base) 8
 .fps-meter .fps-rs { font-size: 9px; opacity: .45; padding: 0 2px; }
 .fps-meter .fps-rs.on { opacity: 1; color: var(--color-accent); font-weight: 600; }
 .fps-meter.rec .fps-rec { color: var(--color-red); font-weight: 600; }
-.fps-meter.rec { box-shadow: inset 0 0 0 1.5px var(--color-red); border-radius: 10px; }
+.fps-meter.rec { box-shadow: inset 0 0 0 1.5px var(--color-red); border-radius: 8px; }

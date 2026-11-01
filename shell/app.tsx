@@ -13,6 +13,8 @@ import type { Insets } from "./types.ts";
 import "./hot.ts";
 import { measureIcons } from "./ui/iconperf.ts";
 import "./ui/glass.ts";
+import "./ui/spring.ts";
+import "./ui/uifont.ts";
 import "./ui/refresh.ts";
 import { handOff, keepSnapshots, restored } from "./ui/snapshot.ts";
 

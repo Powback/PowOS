@@ -1,174 +1,150 @@
 # PowOS shell: design language
 
-These rules apply to every page of the phone shell (home, drawer, search, PowOS AI, assist, shade, control
-center, switcher, lock face, PowOS app pages, widgets), folded and unfolded. Tokens live in `shell/theme.css`.
-How the shell is built is in [`shell/DESIGN.md`](../shell/DESIGN.md). Renders for checking a change come from
-`shell/dev/gate.sh --shots DIR`.
+Every page of the phone shell follows these rules, folded (404x899) and unfolded (821x883): home, the launcher,
+folders, the shade, the lock face, the switcher, web windows, PowOS AI, the assistant, app pages, settings and
+widgets. Home is the reference: when a page and home differ, home wins.
+
+Each rule is one sentence plus the token or function that implements it. Tokens are in `shell/theme.css`. How the
+shell is built is in [`shell/DESIGN.md`](../shell/DESIGN.md).
+
+Checks:
+
+- `shell/dev/lint-style.sh` fails the gate on raw colours, borders and shadows.
+- `shell/dev/lint-design.sh` fails the gate on monospace UI text, off-scale radii, literal easings and status
+  colours outside their tokens. It reports hard-coded blur, and the gate's `design-lint-*` runs report pop-ins and
+  monospace text on screen; those are report-only for now.
+- `shell/dev/gate.sh --shots DIR` renders every surface and measures text contrast (`report.json`).
 
 ## 1. Less is more
 
-If in doubt, take it out. Default to calm.
+- **Reduce.** A change removes elements, layers or effects instead of adding them. No plate, wrapper, shadow or
+  ornament that carries no content.
+- **Empty states hide.** A section, list or chip with nothing in it is not drawn: no "Nothing yet" or "No X"
+  line. A whole page with nothing in it says so once, in one line. See `aistatus.tsx` (empty sections hide, `quiet`).
+- **One icon shape.** Every app icon is the squircle `--icon-radius` (22%). An irregular icon sits on the one plate,
+  `--icon-plate`, and never gets a second plate. See `ui/iconshape.ts`.
+- **Rewrites keep every feature.** Before a rewrite lands, list the old code's gestures and features in the commit,
+  and keep each one or name its replacement. The gate case for the old behaviour stays.
 
-- **Reduce.** A change removes elements, layers, surfaces or effects instead of adding them. Before adding a
-  surface, plate, wrapper, shadow or effect, ask whether the same can be done with less. Usually it can, by
-  deleting something.
-- No decoration that carries no content: no extra plates behind icons, no double backgrounds, no ornamental layers.
-- App icons: one shape and one visual size everywhere (`ui/iconshape.ts`): a squircle (`--icon-radius`, 22%). An icon
-  that is a shape already (adaptive, full-bleed, a rounded square) fills it, trimmed of clear padding; a transparent
-  or irregular one (most Linux icons) is trimmed, fitted to ~76% and sits on the one plate (`--icon-plate`: the frost's neutral
-  tint, never the theme's surface or accent) of the same squircle, so every silhouette matches. Never a second plate behind a shaped icon.
+## 2. One material, one backdrop
 
-## 2. One material
+- **THE backdrop.** Every surface over the wallpaper or an app uses one blur and one tint:
+  `--backdrop-blur-native` (170) and `--backdrop-tint` (black 55%, or the theme's background in light themes). This
+  covers home's widgets, the search bar, the launcher, the PowOS AI page and panel, folders, the shade and the
+  assistant's panel.
+  - `--shade-tint` and `--widget-blur-native` only alias these.
+  - No surface names its own blur or tint. See `dev/backdrop-check.js` and commits 3e6e5825 and 160e64ed.
+- **Menus are opaque.** A menu over a page (⋯, a long-press menu, a tile menu) is filled with `--menu-tint` (the
+  theme's background at 94%), so nothing underneath reads through it.
+- **Sheets hide home.** A page-sized sheet (`.tile.sheet`) fades home's content out, so only the frosted wallpaper
+  is behind it. There are no page-wide dims or scrims. See shell.css `html:has(...)`.
+- **No hard lines.** Rows are separated by spacing, never by 1px borders or dividers. `--line` is transparent and
+  lint-style enforces it.
+- **The light top edge.** A surface's only edge is `--lift` (a 7% top edge plus a soft shadow). A window uses
+  `--lift-window`, and the focused window `--lift-window-focused`.
+- **Liquid glass stays off.** Refraction (`--liquid-*`) may return only as a faint edge effect, and only after a
+  reviewed contact sheet.
 
-Every surface is the same material: the **reference**.
+## 3. Layout
 
-The reference was locked on 2026-10-21 from PowOS AI's page as the user approved it at 08:55 on Nord ("the
-current blur effect looks really nice"): strong even frost, cool tint, a light top edge, and the compose pill.
-Its commit is `912a284` + `3b9b5a3` (liquid refraction off) on `worktree-powos-multiplatform`.
+- **16 dp gutters.** Content sits 16 dp from a surface's edge and from the screen's edge: `--edge` (16px), on every
+  page. The widget sheet (`widgetsheet.tsx`) and home's grid (`grid.tsx`) read it, and the AI page's `--ais-side` is
+  only an alias of it.
+- **The radius scale.** Use 8px inside a surface, `--radius` (12px) for surfaces, 20px for pills and buttons, and
+  999px or 50% for round shapes. No other radius.
+- **Spacing.** `--gap` (8px) goes between surfaces. Hierarchy comes from size and weight, not from boxes.
+- **Alignment is a setting.** The launcher, notifications and control center stack from the top, the middle or
+  the bottom.
+  - It is set per screen, through `ui/align.ts` `alignOf(surface)` and `html[data-align-*]`.
+  - Defaults: unfolded bottom, folded top. Notifications default to top on both screens.
 
-| token | value | what |
-|---|---|---|
-| `--glass-base` | foreground 18% into background | the tint's colour (from the active theme only) |
-| `--glass-tint` | 32% (40% light) under `html.glass-native` | how much tint |
-| `--glass-dim` | 16% | extra tint for surfaces carrying text |
-| `--text-fill` | `--glass-base` at tint + dim (48%) | **the reference fill** |
-| `--glass-veil` | `rgb(0 0 0 / 20%)` (light: `rgb(255 255 255 / 8%)`) | the lock frost's brightness, under the tint |
-| `--glass-blur-native` | 140px | compositor blur radius (it blurs at about 0.15-0.3 of this) |
-| `--glass-blur` | 28px | CSS/picture blur (lock face, popovers) |
-| `--lift` | `--lift-edge` (inset 0 1px 0 white 7%) + `--lift-shadow` | a surface's light top edge and soft shadow |
-| `--radius` / pill | 12px / 20px | the radius scale: 12 for surfaces, 20 for pills and round controls, 8 inside a surface |
-| `--gap` / `--edge` | 8px / 12px | spacing between surfaces / from the screen edge |
+## 4. Type and contrast
 
-Don't tune blur strength or tint without a reason you can measure (contrast, a frame time, a user report).
+- **Proportional UI font.** All UI text is `--font-body`, which is the proportional `--font-ui` by default.
+  - The font is a theme setting: Settings › Style › Font, "UI (default)" or "Mono" (`ui/uifont.ts`,
+    `html[data-font]`). A pick applies at once to every page.
+  - Code, terminals (xterm, `TerminalView`) and logs always use the monospace `--font`, whatever the setting
+    (`pre`, `code`, `.term`).
+  - A UI rule never names `--font`, and never measures text by counting monospace characters (`agents.tsx`
+    `charWidth` measures the theme's font).
+  - Known exception: OWL widgets (`owl.tsx` `OWL_FONT`) stay monospace until OWL scripts can measure text. They size
+    their text by counting characters today.
+- **Contrast ≥ 4.5:1.** Text needs 4.5:1 contrast against what is drawn behind it (3:1 for large text). Measure it
+  with `gate.sh --shots` (`report.json`).
+- **Secondary text** uses `--color-muted`, never a dimmed opacity. Text on the wallpaper uses `--on-wallpaper` with
+  `--label-shadow`.
+- **Accent text** uses `--accent-text`. A fill (an on tile, a switch) uses `--color-accent`.
 
-- A **surface** is `.tile`: the fill plus `--lift`. A surface inside a surface is only `--soft-fill`.
-- A **sheet** (`.tile.sheet`) is anything over home's own content: a widget's screen, an app's page, the
-  picker, a menu, a popover. It gets the reference fill. Under a page-sized sheet, home's content fades out and
-  is hidden, so only the frosted wallpaper is behind it. Small popovers (`.pop`) blur what is under them.
-- A **pill** (`.tile.pill`) is the one text-entry component: home's search and PowOS AI's compose. It is the
-  same material, 20px round, with a field that grows to 3 rows and the mic on the right. Only the placeholder
-  differs.
-- **No hard borders, ever.** No 1px outlines, no divider lines. Rows are separated by spacing. OWL `border`
-  renders as a lifted soft surface, and a coloured border as a soft ring of that colour.
-- **No page-wide dims.** No scrim colour behind sheets, and no darkened page under a panel.
-- A **quick page** (`ui/quickpage.tsx`) is one settings page of any app as a compact card on the same glass,
-  16px round, with a small bar (the app's icon, the page's name, pop-out, close). It springs out of what opened it.
-  **Known exception:** Android's native panels (the internet, NFC and Wi-Fi panels, the volume panel) stay
-  Android's own bottom sheets, not quick pages.
+## 5. Colour and status
 
-## 3. Wallpaper behind every page
+- **Theme tokens only.** Colour comes from `--color-*`, `--glass-*`, `--soft-fill` and `--backdrop-*`. Exceptions
+  are listed in `dev/style-allow.txt`.
+- **Status colours have one meaning each, on every surface:**
 
-The wallpaper shows behind every page, frosted. Surfaces appear only where they carry content: the dock is
-bare icons, and the search pill floats. The drawer's frost runs to the screen's foot.
+  | state | colour |
+  |---|---|
+  | working | `--status-working`: the accent, pulsing |
+  | awaiting check | `--status-check`: blue |
+  | needs you | `--status-needs`: amber, with `--status-on-needs` for text on it |
+  | stalled | `--status-stalled`: grey |
 
-- Home's glass is the compositor's live blur (`html.glass-native`, `ui/nativeglass.ts`). The compositor blurs
-  only what is under the window (the wallpaper), never home's own tiles. That is why sheets hide home's
-  content instead of blurring it.
-- Windows over apps (shade, switcher) have the host blur behind them, and their surfaces only tint. The
-  assistant is tinted only, because it draws on the app under it.
-- Liquid glass (refraction at the edges, native) stays off by default. It may come back only as a very faint
-  edge effect, never in the middle, after a reviewed contact sheet.
+  - Red (`--color-red`) means only broken or failed.
+  - The tokens are in theme.css. No surface names a status colour of its own.
+- **P0/P1 chips.** A task with severity shows one small chip, P0 or P1, before its title, and a task with no severity
+  shows none (`aiboard.tsx` `SevChip`, `.ais-sev`).
+  - P0 is red.
+  - P1 is a neutral chip (the foreground at 22%). It never reuses the needs-you amber.
 
-### The pull-up corners (experiment, beside everything else)
+## 6. Motion: no pop-ins
 
-The drawer and PowOS AI share one pull-up panel, `state.ts` `pullKind`. A swipe up from the right half of home
-brings up the drawer, and a swipe up from the left half brings up PowOS AI's panel.
+- **Nothing pops in.** Every appear, disappear, resize and reorder animates. An element is never there in one frame
+  and gone in the next.
+- **Shared springs only.** Motion uses one spring set in `ui/spring.ts`: `springFast`, `spring` and `springSlow`. In
+  CSS these are `--spring-fast`, `--spring` and `--spring-slow`, each paired with its duration (`--spring-fast-ms`,
+  `--spring-ms`, `--spring-slow-ms`). Use fast for small things (a fade, a chip), the default for a surface moving,
+  and slow for a large or far move. WAAPI uses the same objects (`.easing`, `.ms`). Lists use `notifmotion.ts` (arrivals fade and slide in 30 ms apart, a dismissed item closes its gap,
+  "+N more" grows). Do not use a local `cubic-bezier()` or ms value.
+  - Loops (a pulse, a sweep, a blink) are not motion between states. They keep their own period on `--ambient`.
+- **Finger-tied.** During a swipe only `--p`, transforms and opacity move, and the spring runs on release. There are
+  no reloads, flashes, blank frames or keyboard jumps.
+- **Reduced motion.** Under `prefers-reduced-motion`, everything jumps to its end state. Same code path, no special
+  layout.
+- **Theme changes crossfade.**
 
-- Both use the same mechanics: the panel follows the finger, wears the same frost, and home fades under it.
-- Both dismiss the same way and have the same pill at the foot ("search" or "ask PowOS AI").
-- The toggle is settings → style → home, or `pullPanels` = "off". With it off, a swipe up anywhere is the drawer,
-  as before.
-- PowOS AI's sideways page stays either way.
+## 7. Touch and haptics
 
-### The exception: the assistant overlay. The chrome is glass, the screen is 1:1
+- **Haptics only at commit points.** A haptic fires on lift-out, on a snap (a threshold crossed, a window snapped),
+  on a long-press opening, and on push-to-talk start. It never fires on page changes, scrolling or reordering steps.
+  - Use `ui/haptics.ts` `tick()` and `confirm()`, plus `panelTicks()` for pulls.
+- **Long-press opens a menu or edit mode.** A menu shows only what no tab or button already offers.
 
-The side button's overlay (`?mode=assist`) leaves the screen it was opened on exactly as it is, so it can be
-circled. Nothing is drawn over or behind that screen: no frost, no blur, no scaling, no second copy.
+## 8. One bar, one assistant
 
-- Only its chrome (the panel with the chat and the pill) is glass. The panel is frosted from the screenshot of
-  that same screen (`glass.ts`), so its frost shows what is really under it.
-- The panel's tint is the theme's background at 84%, more than the reference, because an app's screen is often
-  light and the text must keep 4.5:1.
-- Until the screenshot arrives, and in live mode, the panel is solid.
-- The panel's other styles are the ones from before `be049e7`, restored on 2026-10-21.
+- **One search bar, with a role per page.** Home's bar is the launcher's search, the filter on a folder or app list,
+  and the PowOS AI page's input to the manager.
+  - It changes only its placeholder and glyph, with a crossfade. No page has a compose field of its own.
+  - See `ui/bar.tsx` `Bar` and commit ceafb73c.
+  - It is the one pill (`.tile.pill`): `--pill-height` (40px), it grows up to 3 rows, and the mic sits on the right.
+- **One conversation.** Every "ask the AI" entry point feeds the manager's chat through `ui/assistant.ts`
+  `openAssistant()`. There is never a second thread or an "open ↗".
+- **The assistant overlay** leaves the screen under it 1:1: no frost or scaling. Only its panel is glass, frosted
+  from that same screenshot (`glass.ts`).
+- **The pet** is the assistant's face. It is still at rest, plays one animation per state change, and shows bubbles
+  for 3-6 s, one at a time.
 
-### Notifications: grouped, calm
+## 9. Surface patterns
 
-The shade and home's notification panel show one stack per app. Our own notifications are grouped by sender
-instead: deploy notes go into a single "PowOS · updates" group.
-
-- **Grouping:** Android's group key is used when an app sets one. An app's summary notification never gets a
-  card of its own.
-- **Conversations:** shown on their own above the stacks, newest first.
-- **A stack:** its newest notification with the group's name, a "+N" count, and two slim cards peeking under it.
-  A tap unfolds it in place without a jump, and a tap on its head folds it again.
-- **Swipes:** swiping a folded stack dismisses the whole group. In an unfolded group, a swipe dismisses one card.
-
-### Control center: eight category tiles
-
-- **Header:** the time and date, and the settings gear.
-- **Sliders:** two slim ones.
-  - Brightness has its "auto" as a small "A" at the end.
-  - Volume's icon cycles silent, vibrate and ring.
-- **Eight category tiles,** 2x4, in one shape: a rounded tile in the accent colour when on.
-  - A tap does the category's primary action. Its subtitle says what's on inside it ("wi-fi · 5G", "bt · nfc").
-  - The chevron or a long press unfolds the category in place: the row under it opens (its height animates, the
-    grid below moves down) into the members as small round toggles. One category is open at a time.
-- **The eight** (the user's curation of 2026-10-21):
-  - Internet: wi-fi, mobile data, airplane, hotspot.
-  - Connect: bluetooth, NFC, quick share, screencast, glasses, location.
-  - Display: auto-rotate (its tap), dark mode.
-  - Eye comfort.
-  - Focus.
-  - Battery saver.
-  - Capture: screenshot, screen record.
-  - Tools: torch (its tap), then every utility tile the phone has.
-- **Left out:** lock, OnePlus Share (the same as quick share), remote input and Link to Windows. They come back
-  only from Settings, never from a page in the control center.
-- **An open category** is one row of round toggles that scrolls sideways, snapping one member at a time: about
-  five in view, the next one peeking. A single-member category has no chevron.
-- **What's behind:** home's content fades out as the panel comes down.
-
-## 4. Colour
-
-Colours come from the active theme only: `--color-*`, `--glass-*`, `--soft-fill`. No raw colours in
-components. `shell/dev/lint-style.sh` (part of the gate) fails a raw colour, border or box-shadow outside the
-tokens.
-
-## 5. Text contrast >= 4.5:1
-
-Text needs at least 4.5:1 contrast (3:1 when large) against what is actually drawn behind it.
-
-- Secondary text is `--color-muted`: the theme's foreground at 84%, never the theme's own grey.
-- Hierarchy comes from size and weight, not from dim opacities.
-- `gate.sh --shots` measures each text's contrast against the rendered frost (`report.json`).
-
-## 6. Motion tied to the finger
-
-Motion follows the finger. Only `--p`, transforms and opacity move during a swipe, with springs on release.
-
-- No reloads, no flashes, no blank frames, no jumps when the keyboard comes up.
-- The pill grows upward over home without moving anything else.
-- Changing the theme crossfades.
-
-## 7. One assistant, one conversation, one chat surface
-
-- **One conversation:** the manager's (PowOS AI's chat). Every "ask the AI" entry point feeds that conversation.
-  None of them starts a thread of its own.
-- **One chat UI:** the home search pill's chat mode. Typing searches. Asking turns the drawer into the chat, in
-  place.
-  - Everything that opens "the assistant" opens this surface (`shell/ui/assistant.ts`
-    `openAssistant({listen, autosend, text, context})`): the side button, a bubble's expand, PowOS AI's pill.
-  - There is no other compose field, and no "open ↗" to a separate chat app.
-- **PowOS AI's page** (left of home) shows that conversation's history and the work board. It is not a chat of
-  its own: its pill opens the one surface.
-- **The pet** is the assistant's face and its notifier:
-  - A tap makes it listen in place. A small bubble shows the live transcript, then the reply in a few lines. A
-    tap on the bubble opens the chat surface.
-  - Its look comes from live state only: working, looking at you, worried, sleepy, hungry.
-  - While the chat surface is open, it sits by the pill.
-  - With the surface closed, it speaks only in short bubbles: 3-6 s, one at a time, batched. They carry deploy
-    notes, agents' mail, and replies nobody was looking at. A bubble's "more" opens the AI page, and so does a
-    long press on the pet.
-- **Calm:** the pet is still at rest. It plays one short animation per state change and runs no timers while
-  hidden.
+- **Quick pages.** A settings page of any app, opened from search or a tile, is a compact card on the backdrop glass
+  (`ui/quickpage.tsx`), `--radius` round, with a small title bar (the app's icon, the page's name, pop-out to a
+  window, close). It springs out of what opened it; folded it is a full-width sheet rising from the bottom. It is
+  never the whole Settings app.
+  - Known exception: Android's native panels (the internet, NFC and Wi-Fi panels, Bluetooth, the volume panel) stay
+    Android's own bottom sheets until they are drawn by us.
+- **Notifications.** There is one stack per app, newest in full and two strips behind it, then "+N".
+  - Conversations sit on top.
+  - A swipe on a folded stack dismisses the group, and a swipe in an open group dismisses one card.
+- **Control center.** Two slim sliders and eight category tiles (2x4).
+  - A tap does the primary action.
+  - The chevron or a long press unfolds one category in place.
+- **Pull-up corners.** The drawer comes from the right half and PowOS AI from the left half. Both share one panel,
+  frost, dismissal and pill (`state.ts` `pullKind`).

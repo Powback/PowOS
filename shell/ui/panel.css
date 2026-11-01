@@ -7,7 +7,7 @@ html[data-mode="panel"] .panel {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  font: var(--text-body) var(--font);
+  font: var(--text-body) var(--font-body);
   color: var(--color-foreground);
   user-select: none;
 }
@@ -80,7 +80,7 @@ html[data-mode="panel"] .panel-task-android {
   bottom: -2px;
   width: 7px;
   height: 11px;
-  border-radius: 2px;
+  border-radius: 8px;
   background: var(--color-accent);
   box-shadow: 0 0 0 2px var(--color-background);
 }
@@ -92,7 +92,7 @@ html[data-mode="panel"] .panel-task-close {
   height: 22px;
   display: grid;
   place-items: center;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 16px;
   line-height: 1;
   opacity: 0;
@@ -108,7 +108,7 @@ html[data-mode="panel"] .panel-task.active::after {
   right: 10px;
   bottom: 1px;
   height: 3px;
-  border-radius: 2px;
+  border-radius: 8px;
   background: var(--color-accent);
 }
 html[data-mode="panel"] .panel-task.minimized { opacity: 0.5; }

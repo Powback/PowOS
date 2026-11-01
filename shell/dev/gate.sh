@@ -232,6 +232,12 @@ t_tsc=$(( $(mark) - ts )); ts=$(mark)
 # A push: the files it brings (what's already on the phone isn't this push's to answer for); otherwise all of the shell.
 if [ "${GATE_SCOPE:-}" = boot ]; then echo "     style lint: skipped (GATE_SCOPE=boot)"
 elif out=$("$SHELL_DIR/dev/lint-style.sh" "$S" ${files[@]+"${files[@]}"} 2>&1); then echo "$out"; else echo "$out" | head -30; fail=1; fi
+# 1b-design. The design language's static check (dev/lint-design.sh): monospace, radius, easing and status colours
+# BLOCK (design wave 1); blur only reports.
+if [ "${GATE_SCOPE:-}" != boot ]; then
+  out=$("$SHELL_DIR/dev/lint-design.sh" "$S" 2>&1) || fail=1
+  echo "$out" | head -60
+fi
 # 1b'. The complexity lint (dev/lint-complexity.sh: per function cyclomatic/cognitive 10, depth 3, 60 lines, 4 params;
 # old debt frozen in dev/complexity-baseline.json, which only shrinks). A push: the files it brings; else all.
 # Fail closed: it installs its own deps if missing; only GATE_LINT=0 skips it.

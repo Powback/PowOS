@@ -248,7 +248,7 @@ export function Bar({ done, total }: { done: number; total: number }) {
 }
 const stepLabel = (x: Worker) => (!x.total ? "" : x.done >= x.total ? "all steps done" : `step ${x.done + 1} of ${x.total}`);
 
-/** A tile's inner box (px) and type size: what picks its lines (the widget's font is proportional: ~0.55 em a char). */
+/** A tile's inner box (px) and type size: what picks its lines (the theme font, --font-body: proportional by default, ~0.55 em a char). */
 interface Box {
   w: number;
   h: number;
@@ -258,11 +258,11 @@ interface Box {
 const cols = (b: Box, scale = 1) => Math.max(4, Math.floor(b.w / (0.55 * b.font * scale)) - 1);
 
 let pen: CanvasRenderingContext2D | null | undefined;
-/** [text]'s width (px) in the widget's own (proportional) font at [px], [weight]; ~0.55 em a char unmeasurable. */
+/** [text]'s width (px) in the theme font (--font-body: UI or Mono, Settings > Style) at [px], [weight]; ~0.55 em a char unmeasurable. */
 function textWidth(text: string, px: number, weight = 400) {
   pen ??= document.createElement("canvas").getContext("2d");
   if (!pen) return text.length * 0.55 * px;
-  pen.font = `${weight} ${px}px ${getComputedStyle(document.documentElement).getPropertyValue("--font-ui") || "sans-serif"}`;
+  pen.font = `${weight} ${px}px ${getComputedStyle(document.documentElement).getPropertyValue("--font-body") || "sans-serif"}`;
   return pen.measureText(text).width;
 }
 
@@ -278,6 +278,13 @@ function fitLine(text: string, w: number, px: number, weight = 400) {
 
 /** A row's height in em at most: padding, the title's line, a bar under it; [second]: the step's line too. */
 const tileEm = (second: boolean) => 0.5 + 1.35 + 0.45 + (second ? 0.85 * 1.35 + 0.25 : 0);
+
+/** shorten(), but never inside a word while the text has a space before [max] ("Can't…", not "Can't sta…"). */
+function atWord(text: string, max: number) {
+  if (text.length <= max) return text;
+  const at = text.slice(0, Math.max(1, max - 1)).lastIndexOf(" ");
+  return at > 0 ? `${text.slice(0, at).replace(/[\s,.;:-]+$/, "")}…` : shorten(text, max);
+}
 
 const ICON = { restart: "↻", answer: "allow", open: "›" } as const;
 

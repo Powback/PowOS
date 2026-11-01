@@ -16,6 +16,7 @@ import { byKey, desktopPages, launch, page, pages, windows } from "../state.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { pageDrag } from "./gesture.ts";
 import { dockToggle } from "./webwindows.tsx";
+import { spring } from "./spring.ts";
 
 const STORE = "home.windows";
 /** Window ids kept for closed tasks at most (folded, the list is empty but the windows aren't gone). */
@@ -150,7 +151,9 @@ function trackCurve(): { ms: number; curve?: number[] } {
   const cs = getComputedStyle(track);
   const d = cs.transitionDuration;
   const ms = parseFloat(d) * (d.endsWith("ms") ? 1 : 1000) || 280;
-  return { ms, curve: cs.transitionTimingFunction.match(/cubic-bezier\(([^)]+)\)/)?.[1].split(",").map(Number) };
+  // The track moves on the spring (linear(), which the host can't take): its close cubic-bezier then (spring.ts approx).
+  const bez = cs.transitionTimingFunction.match(/cubic-bezier\(([^)]+)\)/)?.[1].split(",").map(Number);
+  return { ms, curve: bez ?? [...spring.approx] };
 }
 
 /** The track's settle and the desktop change after it. */

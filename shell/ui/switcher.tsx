@@ -94,7 +94,7 @@ export const TaskCard = memo(function TaskCard({
         { transform: `translateY(${dy}px)`, opacity: String(1 - Math.min(1, -dy / card.clientHeight)) },
         { transform: `translateY(${to}px)`, opacity: "0" },
       ],
-      { duration: ms, easing: "cubic-bezier(0.3, 0.6, 0.6, 1)", fill: "forwards" },
+      { duration: ms, easing: spring.easing, fill: "forwards" },
     ).onfinish = () => onRemove(t.id);
   };
 

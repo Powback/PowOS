@@ -176,7 +176,7 @@ function useCardGesture(n: PhoneNotification) {
   const drag = useRef<Drag | null>(null);
   const settle = (dx: number) => {
     const card = el.current!;
-    card.style.transition = "transform 180ms ease, opacity 180ms ease";
+    card.style.transition = "transform var(--spring-fast-ms) var(--spring-fast), opacity var(--spring-fast-ms) var(--spring-fast)";
     card.style.transform = `translateX(${dx}px)`;
     card.style.opacity = dx ? "0" : "";
   };

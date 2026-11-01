@@ -45,6 +45,7 @@ import { appView } from "../apps/pages.ts";
 import { remoteOpen } from "../remote.ts";
 import { glassesOpen } from "../glasses/open.ts";
 import { agentsView } from "../agents.ts";
+import { springFast } from "./spring.ts";
 
 /**
  * A pull down on home is the system shade's (ShadeHost, the same window, pull and blur as over an app): home has no
@@ -358,7 +359,7 @@ function useGlide(el: { current: HTMLDivElement | null }, keys: string) {
       const from = was.current.get(k);
       // The held one rides the finger (its own transform); a new one just appears.
       if (from == null || from === left || node.classList.contains("lifted")) continue;
-      node.animate([{ transform: `translate${dockPosition.value === "bottom" ? "X" : "Y"}(${from - left}px)` }, { transform: "none" }], { duration: 160, easing: "ease-out" });
+      node.animate([{ transform: `translate${dockPosition.value === "bottom" ? "X" : "Y"}(${from - left}px)` }, { transform: "none" }], { duration: springFast.ms, easing: springFast.easing });
     }
     was.current = now;
   }, [keys]);
