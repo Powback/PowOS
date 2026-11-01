@@ -166,14 +166,10 @@ part1() {
   part1_dock_and_image
 }
 
-part2() {
-  dock_tap "a:$CALC/" Calculator || return
-  sleep 2.5; chk calc; CT=$(waitwin $CALC 6)
-  step calculator "Calculator opened from the dock"
-  [ "$CT" != none ] && floating "$CT" Calculator && pass "Calculator floats (task $CT, $(tbounds "$CT"))" || { fail "no floating Calculator ($CT)"; return; }
-
+# Calculator dragged by its title bar. Split out of part2() (length budget) - same steps, CT global.
+part2_drag() {
   # Drag by the title bar.
-  local b0 b1 p x y i dx=$(dp 120) dy=$(dp 60); b0=$(tbounds "$CT"); p=$(barpt "$CT")
+  local b0 b1 p x y dx=$(dp 120) dy=$(dp 60); b0=$(tbounds "$CT"); p=$(barpt "$CT")
   # The product stops a window's bottom at home's bottom bar (WindowFrame.moved, by design): a 70%-tall window has
   # ~65 px of room down, so dragging down 165 "failed" by exactly the clamp. With less room than the drag, go UP.
   local dock room; dock=$(pt "$(dockel "a:$CALC/")"); set -- $b0; room=$(( ${dock#* } - ${4:-0} ))
@@ -190,9 +186,12 @@ part2() {
       [ $# -ge 8 ] && [ $((($5 - $1) * ${dx#-} / dx)) -ge $((${dx#-} * 7 / 10)) ] && [ $((($6 - $2) * ${dy#-} / dy)) -ge $((${dy#-} * 5 / 10)) ] && pass "it moved with the finger: $b0 -> $b1" || fail "dragged $dx,$dy: $b0 -> $b1"
     fi
   else fail "no title bar on Calculator's window"; fi
+}
 
+# Calculator resized by its grip, live while the finger is down. Split out of part2() (length budget) - same steps, CT global.
+part2_resize() {
   # Resize by the grip, 4 frames while the finger is down.
-  local g; g=$(grippt "$CT")
+  local g x y i b0 b1; g=$(grippt "$CT")
   if [ -n "$g" ]; then set -- $g; x=$1; y=$2
     note "grip hit test at $x,$y: $(hitat $x $y) (want div.ww-edge...: else the touch goes to the app)"
     b0=$(tbounds "$CT"); set -- $b0; local w0=$(($3 - $1)) wl=$(($3 - $1)) wi grow=0 mono=1
@@ -211,18 +210,24 @@ part2() {
       [ $grow -ge 2 ] && [ $mono = 1 ] && pass "live: it grew while the finger moved ($grow of 4 frames bigger)" || fail "not live: $grow of 4 mid-drag frames bigger (monotonic=$mono)"
     fi
   else fail "no grip on Calculator's window"; fi
+}
 
+# Calculator minimised and restored from the dock. Split out of part2() (length budget) - same steps, CT global.
+part2_minimise() {
   # Minimise and restore from the dock.
-  b0=$(tbounds "$CT")
+  local b0; b0=$(tbounds "$CT")
   dock_tap "a:$CALC/" Calculator && { sleep 1.8; chk min
     step minimised "a dock tap on Calculator (in front): minimised"
     [ "$(win $CALC minimised)" = true ] && [ "$(tvis "$CT")" = false ] && pass "minimised into the dock" || fail "after the dock tap: minimised=$(win $CALC minimised), visible=$(tvis "$CT")"; }
   dock_tap "a:$CALC/" Calculator && { sleep 1.8; chk restore
     step restored "another dock tap: Calculator restored"
     [ "$(win $CALC minimised)" = false ] && [ "$(tvis "$CT")" = true ] && [ "$(tbounds "$CT")" = "$b0" ] && pass "restored where it was ($b0)" || fail "restored: minimised=$(win $CALC minimised), at $(tbounds "$CT") (was $b0)"; }
+}
 
+# Home pages swiped beside the window, and back. Split out of part2() (length budget) - same steps, CT global.
+part2_pages() {
   # Pages swiped beside it.
-  local d=$((W * 35 / 100)) pg0; pg0=$(hpage)
+  local d=$((W * 35 / 100)) p x y b0; b0=$(tbounds "$CT")   # pg0: part2's, read before the swipe
   p=$(freept "$(tbounds "$CT")" -1 "$d")
   if [ "$p" != none ] && [ -n "$p" ]; then set -- $p; x=$1; y=$2; local to=$((x - d)); [ $to -lt 20 ] && to=20
     # The room there is what the window leaves (E2E 194: a resized window left 298 px of 793): a shorter swipe is a
@@ -237,7 +242,10 @@ part2() {
         step page1 "swiped back: the window's page, the window as it was"
         [ "$(hpage)" = "$pg0" ] && [ "$(tvis "$CT")" = true ] && [ "$(tbounds "$CT")" = "$b0" ] && pass "back on page $((pg0 + 1)), Calculator shown at $b0" || fail "back: page $(hpage), visible=$(tvis "$CT"), at $(tbounds "$CT") (was $b0)"; }; }
   else fail "no empty spot beside the window to swipe from"; fi
+}
 
+# The window dragged over the right edge to the next page, and back over the left. Split out of part2() (length budget) - same steps, CT global.
+part2_edges() {
   # Moved to page 2 over the screen's right edge, and back over the left.
   edge() { # <to x> <slug> <what> <want page>
     local p; p=$(barpt "$CT"); [ -n "$p" ] || { fail "no title bar to drag"; return 1; }; set -- "$@" $p
@@ -251,9 +259,12 @@ part2() {
   # SNAP's strip, so the left edge only "passed" because home was on page 0 already (it snapped to the half, E2E 194).
   edge $((W - 1)) to-page2 "Calculator dragged onto the screen's right edge: it and home go to the next page" $((pg0 + 1)) &&
     edge 1 to-page1 "and onto the left edge: back to the first page" "$pg0"
+}
 
+# Calculator reopened from its switcher card. Split out of part2() (length budget) - same steps, CT global.
+part2_recents() {
   # Reopened from recents (the switcher): a real tap on its card.
-  b0=$(tbounds "$CT"); sh_ "input keyevent KEYCODE_APP_SWITCH"; sleep 2; chk switcher
+  local b0 p; b0=$(tbounds "$CT"); sh_ "input keyevent KEYCODE_APP_SWITCH"; sleep 2; chk switcher
   step recents "the switcher (recents) over the window"
   local ctask=$CT; case $CT in w*) ctask=$(wwhost "$CT" task) ;; esac
   p=$(pt "document.querySelector('.recents.open .task[data-task=\"$ctask\"] .task-shot')")
@@ -265,7 +276,10 @@ part2() {
       [ "$(tvis "$CT")" = true ] && [ "$(tbounds "$CT")" = "$b0" ] && pass "back where it was ($b0)" || fail "reopened: visible=$(tvis "$CT"), at $(tbounds "$CT") (was $b0)"
       [ "$gh" = clean ] && pass "no switcher layer or grown card left behind" || fail "the switcher's layer / grown card stays behind the window"; } ;;
   esac
+}
 
+# The shade pulled down over the window and pushed away. Split out of part2() (length budget) - same steps, CT global.
+part2_shade() {
   # The shade over the window.
   local S=$((H / 100)) X=$((W * 8 / 10)) q
   if mdown $X 8 "the status bar (the shade)"; then
@@ -283,6 +297,17 @@ part2() {
     step shade-closed "the shade pushed away: the window again"
     awk -v q="$q" 'BEGIN{exit !(q < 0.05)}' && [ "$(tvis "$CT")" = true ] && pass "the shade is shut, Calculator still there" || fail "after closing the shade: q $q, Calculator visible=$(tvis "$CT")"
   fi
+}
+
+part2() {
+  dock_tap "a:$CALC/" Calculator || return
+  sleep 2.5; chk calc; CT=$(waitwin $CALC 6)
+  step calculator "Calculator opened from the dock"
+  [ "$CT" != none ] && floating "$CT" Calculator && pass "Calculator floats (task $CT, $(tbounds "$CT"))" || { fail "no floating Calculator ($CT)"; return; }
+
+  part2_drag; part2_resize; part2_minimise
+  local pg0; pg0=$(hpage)   # the window's page: part2_pages and part2_edges come back to it
+  part2_pages; part2_edges; part2_recents; part2_shade
   closebar "$CT" Calculator closed
 }
 

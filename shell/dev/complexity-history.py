@@ -31,9 +31,22 @@ for path in FILES:
         new, old = load(sha, path), load(f"{sha}^", path)
         if new is None or old is None:  # added (the first baseline) or removed
             continue
+        # Code moved, not added: a raise in a file this commit ADDED is covered by the same rule's drop elsewhere in
+        # the same commit (0a5f85f6 moved the board out of powai.tsx into the new aiboard.tsx, its one complexity
+        # entry with it). The rule's total never grows this way; a raise in an existing file is never covered.
+        added = git("show", "--format=", "--name-only", "--diff-filter=A", sha).stdout.split()
+        drop = {}
+        for f, rules in old.items():
+            for r, v in rules.items():
+                d = v["count"] - new.get(f, {}).get(r, {}).get("count", 0)
+                if d > 0:
+                    drop[r] = drop.get(r, 0) + d
         for f, rules in new.items():
             for r, v in rules.items():
                 was, now = old.get(f, {}).get(r, {}).get("count", 0), v["count"]
+                if now > was and any(a.endswith("/" + f) for a in added) and drop.get(r, 0) >= now - was:
+                    drop[r] -= now - was
+                    continue
                 if now > was:
                     print(f"{sha[:8]} {path}: {f} {r}: {was} -> {now} (raised without [baseline-reset])")
                     bad += 1
