@@ -454,7 +454,63 @@ run)
     [ -n "$vmods" ] || [ -n "$touch" ] || return 0
     pub=$(echo "$vmods" | awk 'NF {print $1}' | paste -sd' ' -)
     [ -z "$pub" ] || vendor_ok $pub || return 1
-    ${SHIP_BINDINGS_CHECK:-tools/phone/bindings-check.sh} --no-publish --vendor shell/vendor ${pub:+--publishing "$pub"}; }
+    # No --publishing: modules_first (below) published every module these bindings need already - they must match now.
+    ${SHIP_BINDINGS_CHECK:-tools/phone/bindings-check.sh} --no-publish --vendor shell/vendor; }
+  # MODULE FIRST (11-01 c615e0f6, f391; 10-30 try_line): a shell - pushed, or carried by an APK install - whose vendored
+  # bindings (shell/vendor/<db>.js) need columns/reducers the phone's module doesn't have can't subscribe ("bindings
+  # stale"). So the module goes out BEFORE the bindings, in the same pass, and the shell/APK waits for that publish:
+  #   (1) history: a vendored app whose module changed (vmods) and whose bindings differ between the phone's shell
+  #       (phone_shell) and the tip;
+  #   (2) the device, trusting no record: bindings-check.sh --needs, the tip's bindings against the phone's LIVE module
+  #       schemas (tables, columns, reducers) - anything the phone lacks names its app.
+  # Either one = the apps step for that app runs now (build + install), then the device is checked again. A failure
+  # holds the shell (and the APK), logged and mailed like any failed ship. $Q/apps-first "TIP APP": published first for
+  # that tip (the apps step below doesn't publish it again).
+  phone_shell() { local l; l=$(cat "$Q/live" 2>/dev/null || true)
+    { [ -n "$l" ] && { [ -z "$inst" ] || git merge-base --is-ancestor "$inst" "$l" 2>/dev/null; }; } || l=$inst; echo "$l"; }
+  device_needs() {   # the vendored apps whose live module on the phone lacks what this tip's bindings need; rc 1 = can't vouch
+    local o; o=$(${SHIP_BINDINGS_CHECK:-tools/phone/bindings-check.sh} --needs --vendor shell/vendor 2>&1) || { echo "$o" | sed 's/^/  /' >&2; return 1; }
+    echo "$o" | sed -n 's/^needs \([a-z0-9-]*\) .*/\1/p'; }
+  modules_needed() { local va vd ps h dv
+    ps=$(phone_shell)
+    h=$(while read -r va vd; do [ -n "$va" ] || continue
+      { [ -n "$ps" ] && git diff --quiet "$ps" "$T" -- "shell/vendor/$vd.js" 2>/dev/null; } || echo "$va"; done <<< "$vmods")
+    dv=$(device_needs) || return 1
+    printf '%s\n' $h $dv | sed '/^$/d' | sort -u; }
+  first_done() { grep -qx "$T $1" "$Q/apps-first" 2>/dev/null; }
+  # modules_first WHAT ("shell"/"APK") [lock]: 0 = nothing needed or all published; 1 = held (logged + mailed); 2 = the
+  # phone is busy, try again (lock: take the ship lock for the publish - the shell step holds the phone already).
+  modules_first() {
+    local need a mlog mrc=0 left mn lk=
+    if ! need=$(modules_needed 2>"$Q/modules-first.err"); then mrc=11; need="(unreadable)"
+    else need=$(for a in $need; do first_done "$a" || echo "$a"; done | paste -sd' ' -); [ -n "$need" ] || return 0; fi
+    if [ $mrc = 0 ] && [ "${2:-}" = lock ]; then
+      if verify_held; then echo $$ > "$Q/wants-phone"; return 2; fi
+      ship_lock || return 2; lk=1; echo $$ > "$Q/installing"
+    fi
+    mlog=$Q/done/$(date +%Y%m%d-%H%M%S)-${T:0:9}-modules-first.log; mkdir -p "$Q/done"; cat "$Q/modules-first.err" > "$mlog" 2>/dev/null
+    if [ $mrc = 0 ]; then
+      echo "$(date +%T) ${T:0:9}: module first - publishing $need before the $1 carries its bindings (log $mlog)"
+      mn=$(joined ${snotes[@]+"${snotes[@]}"} ${anotes[@]+"${anotes[@]}"}); mn=${mn:-"app update"}
+      vendor_ok $need >> "$mlog" 2>&1 || { mrc=9; echo "modules-first: REFUSED - committed bindings aren't what the module builds" >> "$mlog"; }
+      [ $mrc = 0 ] && for a in $need; do
+        ( PATH="$here/bin:$PATH" apps/build.sh "$a" && PATH="$here/bin:$PATH" POWOS_SHIP_SERVICE=1 apps/install.sh "$a" install --note "$mn" ) >> "$mlog" 2>&1 || { mrc=$?; [ $mrc != 0 ] || mrc=1; break; }
+        echo "$T $a" >> "$Q/apps-first"
+      done
+      # The device again: nothing these bindings need may be missing now.
+      if [ $mrc = 0 ]; then
+        if ! left=$(device_needs 2>>"$mlog"); then mrc=11
+        else left=$(echo "$left" | paste -sd' ' -); [ -z "$left" ] || { mrc=10; echo "modules-first: the phone still lacks what the bindings need for $left" >> "$mlog"; }; fi
+      fi
+    fi
+    [ -z "$lk" ] || { rm -rf "$SL"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"; }
+    if [ $mrc = 0 ]; then echo "$(date '+%F %T') ${T:0:9} apps-first ($need) for $who_s: before the $1" >> "$Q/shipped.log"; return 0; fi
+    [ $mrc = 11 ] && echo "modules-first: the phone's module schemas can't be checked against these bindings (above)" >> "$mlog"
+    echo "$T" > "$Q/failed-apps"
+    echo "$(date +%T) ${T:0:9}: $1 HELD - module first ($need) failed rc $mrc (log $mlog) - waiting for a new origin commit"
+    [ "$(cat "$Q/modules-first-mailed" 2>/dev/null)" = "$T" ] || { echo "$T" > "$Q/modules-first-mailed"
+      mail "ship ${T:0:9} ($1) HELD for $who_s: its bindings need a module publish first ($need), which failed rc $mrc: $(tail -1 "$mlog" | cut -c1-200) - log $mlog on the Mac; fix it on origin, then ship.sh request again"; }
+    return 1; }
   # reap_apk: an APK ship that ended (rc exists) is recorded + its requests done. Called every loop turn, at the
   # runner start (a previous runner's finished APK) and before it exits (f252: the runner left while the APK was
   # out, so a finished install was never recorded and phone checks kept waiting for their ship).
@@ -642,10 +698,16 @@ run)
           if [ -n "${SHIP_BRIDGE_STRICT:-}" ]; then
             echo "$(date +%T) ${T:0:9}: shell ship held by SHIP_BRIDGE_STRICT (f307)"; rm -rf "$held"; rm -f "$Q/installing"; echo "$T" > "$Q/failed"; continue; fi
         fi
+        # MODULE FIRST (modules_first above, 11-01 f391): every module these bindings need is published on the phone
+        # before this push; a failed publish holds the shell (logged + mailed there).
+        if ! modules_first shell; then
+          rm -rf "$held"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"
+          echo "$T" > "$Q/failed"; continue
+        fi
         # Schema changes ship atomically (2026-10-30, powos-agents work.try_line): a vendored app's module change in
         # this tip needs its committed bindings to be exactly what the module builds (apps/vendor.sh --check), and the
-        # bindings the phone will run after this push must decode its live modules - ahead only of the modules this
-        # ship publishes right after (the apps step: bindings first, then the module). Else the whole tip is refused.
+        # bindings the phone will run after this push must decode its live modules (published first, above). Else the
+        # whole tip is refused.
         if ! bok=$(schema_gate "$add" 2>&1); then
           echo "$bok" | sed 's/^/  /'
           rm -rf "$held"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"
@@ -708,8 +770,14 @@ run)
         an=$(joined ${anotes[@]+"${anotes[@]}"})
         if [ -n "$an" ]; then na=(--note "$an"); else na=(--silent); fi
         why="no record of the installed build"; [ -n "$inst" ] && why="APK inputs changed: $(apk_inputs "$inst" "$T" | head -3 | paste -sd' ' -)"
+        # MODULE FIRST for the shell this APK's install brings (11-01 c615e0f6: the shell held for its APK went live
+        # with the install while the agents module waited for the apps step, which never ran): under the ship lock.
+        mfa=0; modules_first APK lock || mfa=$?
+        if [ $mfa = 1 ]; then echo "$T" > "$Q/failed-apk"
+        elif [ $mfa = 0 ]; then
         echo "$(date +%T) ship ${T:0:9} as an APK ($why) for $who_s - beside the loop"
         apk_launch "$T" "${na[@]}" && echo "note=${an:-(silent)}" > "$Q/apk/notes" || echo "$(date +%T) ${T:0:9}: couldn't check out $SA for the APK"
+        fi
       fi
       # 3. Apps: apps/<app>/ changed since the last apps ship, built + installed on the phone - after the APK
       #    (never while one's out, same debounce as the shell ship above so this never waits on an open request
@@ -717,14 +785,19 @@ run)
       #    verify window, never during another install).
       # A vendored module waits for its bindings to be live (the shell part held for an APK, or not pushed yet).
       # What the phone's shell is at: the live record, or the installed APK's own when that's newer / there's none.
-      vwait=; lv=$(cat "$Q/live" 2>/dev/null || true)
-      { [ -n "$lv" ] && { [ -z "$inst" ] || git merge-base --is-ancestor "$inst" "$lv" 2>/dev/null; }; } || lv=$inst
+      # A module published first for this tip (modules_first) isn't published again; all of them = the apps are live.
+      vwait=; lv=$(phone_shell)
+      aleft=$(for a in $achg; do first_done "$a" || echo "$a"; done | paste -sd' ' -)
+      if [ -n "$achg" ] && [ -z "$aleft" ]; then
+        echo "$T" > "$Q/apps-live"; rm -f "$Q/failed-apps" "$Q/apps-held"; echo "$(date +%T) ${T:0:9}: apps live (published first: $achg)"; fi
+      achg=$aleft
       while read -r va vd; do [ -n "$va" ] || continue
+        first_done "$va" && continue
         { [ -n "$lv" ] && git diff --quiet "$lv" "$T" -- "shell/vendor/$vd.js" 2>/dev/null; } || vwait="$vwait $vd"
       done <<< "$vmods"
       if [ -n "$vwait" ] && [ -n "$achg" ]; then
         [ "$(cat "$Q/apps-held" 2>/dev/null)" = "$T" ] || { echo "$T" > "$Q/apps-held"
-          echo "$(date +%T) ${T:0:9}: apps held - the shell's bindings for$vwait aren't live yet (they ship first)"; }
+          echo "$(date +%T) ${T:0:9}: apps held - the shell's bindings for$vwait aren't live yet (the module goes first, with the shell's ship)"; }
       elif [ -n "$achg" ] && ! apk_alive && [ "$age" -ge "$QS" ] && [ "$(cat "$Q/failed-apps" 2>/dev/null)" != "$T" ]; then
         rm -f "$Q/apps-held"
         if verify_held; then echo $$ > "$Q/wants-phone"

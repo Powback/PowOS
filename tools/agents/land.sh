@@ -117,6 +117,9 @@ if ! git commit -q -m "$msg" -- "${paths[@]}"; then
 fi
 sha=$(git rev-parse --short HEAD)
 echo "land: committed $sha \"$msg\" (${#paths[@]} path(s))"
+# 2.1. Report-only (11-01 f391): a vendored module this branch changed is published on the phone before its shell goes
+# live (the ship service's MODULE FIRST rule) - said here so the agent knows its shell waits for that publish.
+[ -x tools/phone/module-first-check.sh ] && perl -e 'alarm 30; exec @ARGV' tools/phone/module-first-check.sh HEAD 2>/dev/null | sed 's/^/land: /'
 
 # 2.5. Warn (never block - friction f115: two agents fixed the same bug in parallel, found only at rebase) when
 # origin picked up a commit, since this worktree's merge-base with it, that touches the same files AND overlapping
