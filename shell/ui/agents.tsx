@@ -16,7 +16,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import { holdRefresh } from "./refresh.ts";
 import { agent, agentsView, asks, closeAgents, live, messages, openAgents, recent, since, tasks, useAgentEvents, useAgents } from "../agents.ts";
-import { fleet, headline, ownWords, restartNote, shorten, stepsOf, taskOf, workRows, type Fleet, type Step, type WorkLite, type Worker } from "../fleet.ts";
+import { fleet, headline, ownWords, restartNote, shorten, stepsOf, taskOf, workingNow, workRows, type Fleet, type Step, type WorkLite, type Worker } from "../fleet.ts";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import { useDb, useRows } from "../apps/stdb.ts";
 import { takeTap } from "./taps.ts";
@@ -248,69 +248,66 @@ export function Bar({ done, total }: { done: number; total: number }) {
 }
 const stepLabel = (x: Worker) => (!x.total ? "" : x.done >= x.total ? "all steps done" : `step ${x.done + 1} of ${x.total}`);
 
-/** A tile's inner box (px) and type size: what its lines are fitted to (the font is monospace: ~0.62 em a char). */
+/** A tile's inner box (px) and type size: what picks its lines (the widget's font is proportional: ~0.55 em a char). */
 interface Box {
   w: number;
   h: number;
   font: number;
-  /** One character's width at [font], measured (the shell's font is monospace). */
-  ch: number;
 }
-const cols = (b: Box, scale = 1) => Math.max(4, Math.floor(b.w / (b.ch * scale)) - 1);
+/** About how many characters a line of [b] holds (an estimate for picking words). */
+const cols = (b: Box, scale = 1) => Math.max(4, Math.floor(b.w / (0.55 * b.font * scale)) - 1);
 
-/** [el]'s font's character width (px; 0.62 em when it can't be measured). */
-function charWidth(el: HTMLElement, font: number) {
-  const cs = getComputedStyle(el);
-  const g = document.createElement("canvas").getContext("2d");
-  if (!g) return 0.62 * font;
-  g.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
-  return g.measureText("0123456789".repeat(4)).width / 40 || 0.62 * font;
+let pen: CanvasRenderingContext2D | null | undefined;
+/** [text]'s width (px) in the widget's own (proportional) font at [px], [weight]; ~0.55 em a char unmeasurable. */
+function textWidth(text: string, px: number, weight = 400) {
+  pen ??= document.createElement("canvas").getContext("2d");
+  if (!pen) return text.length * 0.55 * px;
+  pen.font = `${weight} ${px}px ${getComputedStyle(document.documentElement).getPropertyValue("--font-ui") || "sans-serif"}`;
+  return pen.measureText(text).width;
 }
 
-/** How many lines [text] takes at [n] characters a line (monospace: word wrapping is counting). */
-function wrapped(text: string, n: number) {
-  let lines = 1;
-  let used = 0;
-  for (const word of text.split(/\s+/).filter(Boolean)) {
-    const need = used ? used + 1 + word.length : word.length;
-    if (need <= n) used = need;
-    else if (word.length <= n) (lines++, (used = word.length));
-    else (lines += Math.ceil(word.length / n) - (used ? 0 : 1), (used = word.length % n || n));
+/** [text] cut at a word (with "…") so one line of it fits [w] px at [px]: never cut mid-word or by the box. */
+function fitLine(text: string, w: number, px: number, weight = 400) {
+  const words = text.split(" ");
+  for (let k = words.length; k > 0; k--) {
+    const t = k === words.length ? text : `${words.slice(0, k).join(" ").replace(/[\s,.;:-]+$/, "")}…`;
+    if (textWidth(t, px, weight) <= w) return t;
   }
-  return lines;
+  return shorten(text, Math.max(2, Math.floor(w / (0.55 * px))));
 }
 
-/** [text] cut at a word so it fits [lines] lines of [n] characters, never cut by the box. */
-function fit(text: string, n: number, lines: number) {
-  let max = n * lines;
-  let t = shorten(text, max);
-  while (max > 4 && wrapped(t, n) > lines) t = shorten(text, (max -= Math.max(1, Math.floor(n / 4))));
-  return t;
-}
+/** A tile's height in em: padding, the title's line, a bar's slot under it; [second]: the step's line too. */
+const tileEm = (second: boolean) => 0.5 + 1.35 + 0.45 + (second ? 0.85 * 1.35 + 0.25 : 0);
 
 const ICON = { restart: "↻", answer: "allow", open: "›" } as const;
 
+/** A widget row's words: the first line (a stuck one: why; the manager: what it does) and the step's line under it. */
+function tileWords(x: Worker, manager?: boolean): [string, string] {
+  if (x.reason) return [x.reason, x.title];
+  return manager ? [`Manager: ${x.now}`, ""] : [x.title, x.now];
+}
+
+/** A row's one button: a stuck one's action ([wide]: its word, else its icon), the phone manager's stop; "" none. */
+function tileLabel(x: Worker, wide: boolean, manager?: boolean) {
+  if (x.reason) return x.action ? (wide ? ACT_LABEL[x.action] : ICON[x.action]) : "";
+  return manager && x.a.host === "phone" && x.a.state === "working" && x.a.pid > 1 ? "■" : "";
+}
+
+/** A row's title room (px): the row less its button, if any (0.85 em type, 0.45 em padding a side, 0.4 em gap). */
+const titleRoom = (box: Box, label: string) => box.w - (label ? textWidth(label, 0.85 * box.font, 700) + 1.3 * box.font : 0);
+
 /**
- * One agent at work, as a widget tile: its task (a stuck one: why, in red, and its one action), its step now while
- * there's room, and a thin progress line along its foot - as many lines as fit its box, never cut.
+ * One agent at work, as a widget row: its task on one line (a stuck one: why, in red, and its one action), its step now
+ * when the widget has room ([second]), and a thin progress bar UNDER the title - each line whole, cut only by an ellipsis.
  */
-function Tile({ x, box, manager }: { x: Worker; box: Box; manager?: boolean }) {
+function Tile({ x, box, manager, second }: { x: Worker; box: Box; manager?: boolean; second: boolean }) {
   const bad = !!x.reason;
-  const f = box.font;
-  const stoppable = manager && x.a.host === "phone" && x.a.state === "working" && x.a.pid > 1;
-  const n = cols(box);
-  const wide = n >= 30;
-  const label = bad && x.action ? (wide ? ACT_LABEL[x.action] : ICON[x.action]) : stoppable ? "■" : "";
-  const first = bad ? x.reason! : manager ? `Manager: ${x.now}` : x.title;
-  const second = bad ? x.title : manager ? "" : x.now;
-  // Lines: the first gets one (two on a tall tile), the second (0.85 em) what's left, up to three.
-  const total = Math.max(1, Math.floor(box.h / (1.25 * f)));
-  const firstLines = total >= 4 && !second ? Math.min(3, total) : total >= 4 ? 2 : 1;
-  const secondLines = second ? Math.min(3, Math.floor((box.h - firstLines * 1.25 * f) / (1.1 * f))) : 0;
+  const label = tileLabel(x, cols(box) >= 30, manager);
+  const [first, next] = tileWords(x, manager);
   return (
     <div role="button" tabIndex={0} class={`fl-tile ${bad ? "bad" : ""}`} onPointerUp={takeTap} onClick={() => openAgents(x.a.id)}>
       <div class="fl-t1">
-        <span class="fl-t1-text">{fit(first, n - (label ? label.length + 3 : 0), firstLines)}</span>
+        <span class="fl-t1-text">{fitLine(first, titleRoom(box, label), box.font, 600)}</span>
         {label && (
           <button
             type="button"
@@ -322,10 +319,40 @@ function Tile({ x, box, manager }: { x: Worker; box: Box; manager?: boolean }) {
           </button>
         )}
       </div>
-      {secondLines > 0 && <div class="fl-t2 muted">{fit(second, cols(box, 0.85), secondLines)}</div>}
-      {!bad && x.total > 0 && <Bar done={x.done} total={x.total} />}
+      {!bad && x.total > 0 ? <Bar done={x.done} total={x.total} /> : <i class="fl-bar-slot" aria-hidden="true" />}
+      {second && next && <div class="fl-t2 muted">{fitLine(next, box.w, 0.85 * box.font)}</div>}
     </div>
   );
+}
+
+/** The type size the widget's rows need: never above [font], small enough that [rows] rows of [em] fit [h] (≥ 10 px). */
+const rowFont = (font: number, h: number, rows: number, em: number) => Math.max(10, Math.min(font, h / (rows * (em + 0.3) - 0.3)));
+
+/** [want] rows in [c] columns of [w]x[h] at up to [font]: the type they fit at, and whether the step's line fits too. */
+function inColumns(c: number, { w, h, font }: { w: number; h: number; font: number }, want: number) {
+  const r0 = Math.max(1, Math.ceil(want / c));
+  const second = rowFont(font, h, r0, tileEm(true)) >= font;
+  const tf = rowFont(font, h, r0, tileEm(second));
+  // A column narrower than ~8 em at that size holds no words worth reading: this many columns doesn't fit.
+  const roomy = (w - 0.3 * tf * (c - 1)) / c >= 8 * tf;
+  return { c, second, tf: roomy ? tf : 0 };
+}
+
+/**
+ * The widget's rows: [n0] (from its cell span) of [count], in the columns (1-3) that keep their type largest - a short
+ * wide widget lays 4 out 2x2, never 4 squeezed in one column (the user, 11-01 18:26: every line clipped top and bottom)
+ * - each at its text's own height, the step's line only when they fit with it at full size; any that still can't fit
+ * at 10 px aren't drawn.
+ */
+function rowsLayout(size: { w: number; h: number; font: number }, n0: number, count: number) {
+  const want = size.w ? Math.min(n0, count) : 0;
+  const tries = [1, 2, 3].filter((c) => c === 1 || c <= want).map((c) => inColumns(c, size, want));
+  const best = tries.reduce((a, b) => (b.tf > a.tf ? b : a));
+  const { c, second } = best;
+  const tf = best.tf || tries[0].tf || 10;
+  const fit = Math.max(1, Math.floor((size.h + 0.3 * tf) / ((tileEm(second) + 0.3) * tf)));
+  const n = Math.min(want, c * fit);
+  return { c, r: Math.max(1, Math.ceil(n / c)), n, second, tf };
 }
 
 const HINT = "Ask PowOS AI for one, or start claude in a terminal";
@@ -352,7 +379,7 @@ function Idle({ box, f }: { box: Box; f: Fleet }) {
 function IdleLine({ w, font }: { w: number; font: number }) {
   return (
     <div role="button" tabIndex={0} class="ag-idle-line muted" onPointerUp={takeTap} onClick={() => openAgents()}>
-      {(HINT.length + 2) * 0.62 * font <= w ? HINT : "No agent working"}
+      {(HINT.length + 2) * 0.55 * font <= w ? HINT : "No agent working"}
     </div>
   );
 }
@@ -370,36 +397,31 @@ export function AgentsPanel({ item }: { item: HomeItem }) {
   const plain = document.documentElement.dataset.mode === "desktop" || (tw <= 3 && th <= 2);
   const f = fleet();
   const mgr = f.manager && f.manager.a.state === "working" ? [f.manager] : [];
-  const work = [...f.working, ...mgr].sort((x, y) => y.a.last - x.a.last);
+  const work = [...workingNow(f), ...mgr].sort((x, y) => y.a.last - x.a.last);
   const all = [...f.attention, ...work];
   const list = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 0, h: 0, font: 14, ch: 8 });
+  const [size, setSize] = useState({ w: 0, h: 0, font: 14 });
   useLayoutEffect(() => {
     const el = list.current;
     if (!el) return;
     const measure = () => {
-      const font = parseFloat(getComputedStyle(el).fontSize) || 14;
-      const next = { w: el.clientWidth, h: el.clientHeight, font, ch: charWidth(el, font) };
-      setSize((s) => (s.w === next.w && s.h === next.h && s.font === next.font && s.ch === next.ch ? s : next));
+      // The panel's type (.ag-in's cqmin size): the list's own is the fitted row size set below.
+      const font = parseFloat(getComputedStyle(el.parentElement ?? el).fontSize) || 14;
+      const next = { w: el.clientWidth, h: el.clientHeight, font };
+      setSize((s) => (s.w === next.w && s.h === next.h && s.font === next.font ? s : next));
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const { w, h, font, ch } = size;
-  const gap = font * 0.3;
-  // How many tiles: from the widget's cell span, never its pixels - a tile per two cells across per row (4x2: four),
-  // 2x2 the top task alone. A taller cell (home with the search docked) grows the cqmin type, and a count fit by
-  // pixel height at that type dropped a 4x2 to 3. The width only picks the columns (~13 em a tile); the rows share
-  // the height, so the tiles scale to the cells (Tile fits its text to its box).
+  const { w, h, font } = size;
+  // How many rows: from the widget's cell span, never its pixels - a row per two cells across per row (4x2: four), 2x2
+  // the top task alone; rowsLayout fits them, each at its text's own height.
   const n0 = tw <= 2 && th <= 2 ? 1 : Math.max(1, Math.floor(tw / 2) * th);
-  const c0 = Math.max(1, Math.min(3, Math.floor((w + gap) / (font * 13 + gap))));
-  const shown = w ? all.slice(0, n0) : [];
-  const c = Math.max(1, Math.min(c0, shown.length));
-  const r = Math.max(1, Math.ceil(shown.length / c));
-  // A tile's inner box (less its padding: .fl-tile's 0.2em 0.55em).
-  const box: Box = { w: (w - gap * (c - 1)) / c - 1.1 * font, h: (h - gap * (r - 1)) / r - 0.4 * font, font, ch };
+  const { c, r, n, second, tf } = rowsLayout(size, n0, all.length);
+  const shown = all.slice(0, n);
+  const box: Box = { w: (w - 0.3 * tf * (c - 1)) / c - 1.1 * tf, h, font: tf };
   return (
     <div class="tile ag-panel">
       {needsBoard(f) && <BoardFeed />}
@@ -408,9 +430,9 @@ export function AgentsPanel({ item }: { item: HomeItem }) {
           <span>Agents</span>{" "}
           <span class={f.attention.length ? "fl-need" : "muted"}>{headline(f)}</span>
         </div>
-        <div ref={list} class="ag-list" style={{ gridTemplateColumns: `repeat(${c}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${r}, minmax(0, 1fr))` }}>
+        <div ref={list} class="ag-list" data-fit={`${c}x${r} at ${Math.round(tf)} px in ${w}x${h} (${Math.round(font)} px)`} style={{ fontSize: `${tf}px`, gridTemplateColumns: `repeat(${c}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${r}, minmax(auto, 1fr))` }}>
           {shown.map((x) => (
-            <Tile key={x.a.id} x={x} box={box} manager={mgr[0] === x} />
+            <Tile key={x.a.id} x={x} box={box} manager={mgr[0] === x} second={second} />
           ))}
           {w > 0 && !all.length && (plain ? <IdleLine w={w} font={font} /> : <Idle box={box} f={f} />)}
         </div>
@@ -539,9 +561,9 @@ function List({ f, foot }: { f: Fleet; foot?: preact.ComponentChildren }) {
         </section>
       )}
       <section class="fl-sec">
-        <h3 class="ai-heading muted">Working now ({f.working.length})</h3>
-        {!f.working.length && <div class="muted fl-none">No agent is working right now.</div>}
-        {f.working.map((x) => (
+        <h3 class="ai-heading muted">Working now ({workingNow(f).length})</h3>
+        {!workingNow(f).length && <div class="muted fl-none">No agent is working right now.</div>}
+        {workingNow(f).map((x) => (
           <WorkCard key={x.a.id} x={x} />
         ))}
       </section>

@@ -25,7 +25,8 @@ import { AgentUpdates, Queued, Thread, onLink, toolLabel } from "./rich.tsx";
 import { askQueued } from "./assistant.ts";
 import { MenuScreen, SCREENS, TABBED, dailyDriver, type AiScreen } from "./aimenu.tsx";
 import { WorkFeed } from "./aiboard.tsx";
-import { agent, aiAgent, sessions as agentSessions } from "../agents.ts";
+import { aiAgent } from "../agents.ts";
+import { fleet, workingNow } from "../fleet.ts";
 import { untried } from "./trycard.tsx";
 import { AiSegs, FleetPane, useAgentsInPane } from "./aipanes.tsx";
 import { AiStatus, noteAsked, openChat, OtherProjectsItem } from "./aistatus.tsx";
@@ -241,8 +242,8 @@ function Menu({ close, tabs = false, children }: { close: () => void; tabs?: boo
 
 const nameOf = (s: AiScreen) => SCREENS.find(([k]) => k === s)?.[1] ?? (s === "fleet" ? "Agent" : "");
 
-/** Session agents working now (the live hooks, agents.ts). */
-const agentsWorking = () => agentSessions.value.filter((id) => agent(id)?.value.state === "working").length;
+/** Agents working now: fleet.ts workingNow, the one count the status page and the home widget show too. */
+const agentsWorking = () => workingNow(fleet()).length;
 
 /** "3 to try": the newest things-to-try message still unanswered, in view. */
 function showTry() {

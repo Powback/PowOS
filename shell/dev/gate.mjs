@@ -427,10 +427,7 @@ async function agentsFleetCheck(setup) {
   const RAW = /<ta|<task|model_not_found|\bidle \d|\(mac\)|Bash /;
   // Helpers are inner: page.evaluate serialises only this function.
   const text = (q, root = document) => root?.querySelector(q)?.textContent ?? "";
-  const rawIn = (where, t) => {
-    const m = t.match(RAW);
-    return m ? [`${where}: a raw label "${m[0]}"`] : [];
-  };
+  const rawIn = (where, t) => (RAW.test(t) ? [`${where}: a raw label "${t.match(RAW)[0]}"`] : []);
   // The screen's groups: 3 working, 1 stopped ("model not found"), "12 idle" folded.
   const screenGroups = () => {
     const fails = [];
@@ -449,16 +446,17 @@ async function agentsFleetCheck(setup) {
     if (!document.querySelector(".ag-screen .fl-card .fl-bar")) fails.push("screen: no progress bar on the working cards");
     return fails;
   };
+  const fitOf = (panel) => panel?.querySelector(".ag-list")?.dataset.fit; // agents.tsx's own account of its layout
   const firstStopped = (tiles) => tiles[0]?.classList.contains("bad") && /^Can.t( start|…)/.test(tiles[0]?.textContent ?? "");
   // The widget at [w]x[h]: [want] tiles, the stopped one first in red (its reason, cut to "Can't…" at 2x2), the head's counts.
   const widgetFails = (panel, w, h, want) => {
     const fails = [];
     const tiles = [...(panel?.querySelectorAll(".fl-tile") ?? [])];
     const head = text(".ag-head", panel);
-    if (tiles.length !== want) fails.push(`widget ${w}x${h}: ${tiles.length} tiles, not ${want}`);
-    if (!firstStopped(tiles)) fails.push(`widget ${w}x${h}: the first tile isn't the stopped one in red`);
+    if (tiles.length !== want) fails.push(`widget ${w}x${h}: ${tiles.length} tiles, not ${want} (${fitOf(panel)})`);
+    if (!firstStopped(tiles)) fails.push(`widget ${w}x${h}: the first tile isn't the stopped one in red ("${text(".fl-tile", panel)}")`);
     if (!/3 working/.test(head) || !/1 needs you/.test(head) || /\+\d/.test(head)) fails.push(`widget ${w}x${h}: its head says "${head}"`);
-    return fails;
+    return [...fails, ...window.__agRowFails(`widget ${w}x${h}`, tiles, want > 1)];
   };
   // Home holding only the agents widget at [w]x[h]; its fails.
   const widget = async (w, h, want) => {
@@ -480,7 +478,51 @@ async function agentsFleetCheck(setup) {
   await G.frames(2);
   fails.push(...rawIn("screen, idle opened", text(".ag-screen")));
   A.closeAgents();
-  for (const [w, h, want] of [[2, 2, 1], [4, 2, 4]]) fails.push(...(await widget(w, h, want)));
+  for (const [w, h, want] of [[2, 2, 1], [4, 2, 4], [4, 4, 5]]) fails.push(...(await widget(w, h, want)));
+  return [...fails, ...(await window.__agCountFails())];
+}
+
+/**
+ * In the page (installed as window.__agRowFails before agentsFleetCheck): the widget's rows [tiles] at [where] (the user,
+ * 11-01 18:26 "this looks bugged"): no line clipped, a row as tall as its text, the bar under the title (never through
+ * it), no tmux letter name ("E: issues"), a proportional font; [bars]: some row must have a bar to check.
+ */
+function agentRowFails(where, tiles, bars) {
+  const box = (el) => el?.getBoundingClientRect();
+  const clipped = (t) => [...t.querySelectorAll(".fl-t1-text, .fl-t2")].filter((el) => el.scrollHeight > el.clientHeight + 1).map((el) => `"${el.textContent}" is clipped (${el.scrollHeight} > ${el.clientHeight} px)`);
+  const barOver = (t) => {
+    const [title, bar] = [box(t.querySelector(".fl-t1")), box(t.querySelector(".fl-bar"))];
+    return title && bar && bar.top < title.bottom - 0.5 ? [`the bar (top ${Math.round(bar.top)}) overlaps the title (bottom ${Math.round(title.bottom)})`] : [];
+  };
+  const short = (t) => (box(t).bottom < box(t.querySelector(".fl-t2") ?? t.querySelector(".fl-t1")).bottom - 0.5 ? ["a row shorter than its text"] : []);
+  const named = (t) => {
+    const name = t.querySelector(".fl-t1-text")?.textContent ?? "";
+    return /^[A-Z]: /.test(name) ? [`a tmux letter name "${name}"`] : [];
+  };
+  const mono = (t) => {
+    const ff = getComputedStyle(t.querySelector(".fl-t1-text") ?? t).fontFamily;
+    return /mono/i.test(ff) ? [`a monospace font (${ff})`] : [];
+  };
+  const fails = tiles.flatMap((t) => [...clipped(t), ...barOver(t), ...short(t), ...named(t), ...mono(t)]);
+  if (bars && !tiles.some((t) => t.querySelector(".fl-bar"))) fails.push("no row has a progress bar to check");
+  return fails.map((f) => `${where}: ${f}`);
+}
+
+/**
+ * In the page (window.__agCountFails): one "working" (fleet.ts workingNow) - the widget's head, the AI page's and the
+ * screen's count one number, the other project's "E: issues" session (FLEET_LETTERED's mac:t1) not in it - and no title
+ * a tmux letter code.
+ */
+async function agentCountFails() {
+  const F = await window.__gw.mod("./fleet.ts");
+  const fl = F.fleet();
+  const n = F.workingNow(fl).length;
+  const head = document.querySelector(".page:not(.away) .ag-panel .ag-head")?.textContent ?? "";
+  const fails = [];
+  if (n !== 3 || fl.working.length !== 4) fails.push(`workingNow says ${n} of fleet().working's ${fl.working.length} (want 3 of 4: mac:t1 is another project's)`);
+  if (!head.includes(`${n} working`)) fails.push(`the widget's head "${head}" isn't workingNow's ${n}`);
+  const t = F.titleOf({ ...fl.working[0].a, id: "mac:t9", title: "E: PowOS", prompt: "", work: "" }, undefined);
+  if (/^[A-Z]: /.test(t)) fails.push(`titleOf names a tmux session "${t}"`);
   return fails;
 }
 
@@ -3428,6 +3470,9 @@ async function aiUnfoldedRenders(page, size) {
   await page.evaluate(async () => { const { powos } = await window.__gw.mod("./bridge.ts"); if (window.__stRestore) [powos.ai.verdict, powos.agents.message] = window.__stRestore; });
   return fails;
 }
+
+/** FLEET_SETUP plus a Mac tmux session in another project, by its window letter (the user's "E: issues", 11-01 18:26). */
+const FLEET_LETTERED = FLEET_SETUP.replace("const agents = [", "const agents = [ row('mac:t1', 'coder', 'working', { title: 'E: issues', step: 'Bash ls', cwd: 'issues', last: now - 30_000 }),");
 
 /** FLEET_SETUP plus one working session in another project (rsi-native), and [stuck] false: its stopped session idle. */
 const fleetVariant = (stuck) => {
@@ -8885,7 +8930,7 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     // Both home layouts: the default (search docked, no pill row: taller cells) and the bar - the same tiles in each.
     for (const [name, layout] of [["agents-fleet", null], ["agents-fleet-bar", barOnHome]])
-      runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: 412, height: 915 }).then((r) => whenReady(r, () => (layout ? r.page.evaluate(layout) : Promise.resolve()).then(() => r.page.evaluate(agentsFleetCheck, FLEET_SETUP)))));
+      runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: 412, height: 915 }).then((r) => whenReady(r, () => (layout ? r.page.evaluate(layout) : Promise.resolve()).then(() => r.page.evaluate(`window.__agRowFails = ${agentRowFails}; window.__agCountFails = ${agentCountFails}`)).then(() => r.page.evaluate(agentsFleetCheck, FLEET_LETTERED)))));
   // Floating windows live on home's pages (ui/desktops.ts; the user's design, 2026-10-22): page switch hides and
   // shows them, and the placement survives the page loading afresh.
   if (process.env.SHELL_PAGES !== "0")
