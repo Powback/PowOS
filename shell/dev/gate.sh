@@ -281,9 +281,11 @@ if [ -n "$app" ]; then
   mounts+=(-v "$app/powos-app.json:/apps/$id/powos-app.json:ro" -v "$app/out/ui:/apps/$id/ui:ro")
 fi
 # The Mac's load every 2 s for gate.mjs's scene concurrency (/cache/.hostload): it re-sizes as the load moves.
-( while :; do sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}' > "$tx/.hostload.tmp" && mv "$tx/.hostload.tmp" "$tx/.hostload"; sleep 2; done ) &
+# Its own temp name: gates run side by side on one $tx, and a shared .hostload.tmp lost the mv race, which ended this
+# loop (set -e) - the EXIT trap's kill then failed and turned a printed "gate: pass" into exit 1 (f381, 11-01).
+( while :; do sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}' > "$tx/.hostload.$$.tmp" && mv -f "$tx/.hostload.$$.tmp" "$tx/.hostload" || true; sleep 2; done ) &
 hostload_pid=$!
-trap 'kill $hostload_pid 2>/dev/null; rm -rf "$work" ${slot:+"$slot"}' EXIT
+trap 'kill $hostload_pid 2>/dev/null || true; rm -rf "$work" ${slot:+"$slot"}' EXIT
 set +e
 # The Mac-wide build slot (tools/agents/build-slot.sh): booting the pages competes for CPU with
 # compile-check/build-pkgs/warm-builder's docker runs, and a fixed READY_MS can't tell a slow page from a
