@@ -872,7 +872,7 @@ class WebWindows(
         if (!openable(component, component.packageName)) return -1
         val how = launchDecision(component, task)
         if (how is LaunchReuse.Decision.Reuse) return how.window
-        return make(component, rect, (how as? LaunchReuse.Decision.Adopt)?.task ?: -1, null, apart = how is LaunchReuse.Decision.Apart)
+        return make(component, rect, how, null)
     }
 
     /**
@@ -883,7 +883,7 @@ class WebWindows(
         component: ComponentName,
         rect: JSONObject,
         token: String,
-    ): Int = if (openable(component, QuickPageRoute.key(token))) make(component, rect, -1, token) else -1
+    ): Int = if (openable(component, QuickPageRoute.key(token))) make(component, rect, LaunchReuse.Decision.New, token) else -1
 
     /** Web windows on and [component] resizeable; else false, its held launch ([held]'s key) let go the old way. */
     private fun openable(
@@ -899,14 +899,14 @@ class WebWindows(
         return false
     }
 
-    /** [open]'s new window: its display made, [adopt] (a running task) moved in or its app launched there. */
+    /** [open]'s new window: its display made, [how] (LaunchReuse: Adopt's running task moved in, Apart launched beside another tool's task) or its app launched there. */
     private fun make(
         component: ComponentName,
         rect: JSONObject,
-        adopt: Int,
+        how: LaunchReuse.Decision,
         quick: String?,
-        apart: Boolean = false,
     ): Int {
+        val adopt = (how as? LaunchReuse.Decision.Adopt)?.task ?: -1
         val pkg = component.packageName
         val parent = root() ?: return -1
         val id = nextId++
@@ -919,7 +919,7 @@ class WebWindows(
         val win = Win(id, component, container, w, h, windowDpi(component.packageName))
         win.adopt = adopt
         win.quick = quick
-        win.apart = apart
+        win.apart = how is LaunchReuse.Decision.Apart
         wins[id] = win
         helper.create(win) { displayId, error ->
             if (displayId < 0) {
