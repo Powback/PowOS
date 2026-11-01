@@ -26,7 +26,7 @@ echo two >> f; git add f
 GIT_COMMITTER_DATE="$recent" git commit -q --date="$recent" -m two
 git push -q origin worktree-powos-multiplatform
 
-export POWOS_WT_ROOT=$T/pw POWOS_RUN_ROOT=$T/run
+export POWOS_WT_ROOT=$T/pw POWOS_RUN_ROOT=$T/run POWOS_WT_RMLOG=$T/removals.log
 mkdir -p "$POWOS_WT_ROOT"
 
 # at_old <name>: a worktree at C1 (old, fully merged into origin's tip - C1 is its ancestor) - the "should be
@@ -42,6 +42,16 @@ echo unique >> "$POWOS_WT_ROOT/ahead-old/f"; git -C "$POWOS_WT_ROOT/ahead-old" c
 at_old runner-marked; echo "test runner" > "$POWOS_WT_ROOT/runner-marked/.powos-runner-checkout"    # marker -> kept
 at_old powos-multiplatform                                     # excluded by name -> kept
 git worktree add -q --detach "$T/main/.claude/worktrees/legacy-old" "$C1"   # the legacy $WT location -> gc'd too
+
+at_old touched-old; at_old busy-old; at_old fresh-old           # f405/f407: liveness beyond HEAD age                           # f405: liveness beyond HEAD age
+# Backdate every file (worktrees + their git dirs) 40 min: a fresh checkout's mtimes are "now", and gc now
+# (f405) keeps anything modified in the last 30 min. Then make the two f405 cases live again.
+stamp=$(date -r $(( $(date +%s) - 2400 )) +%Y%m%d%H%M 2>/dev/null || date -d "@$(( $(date +%s) - 2400 ))" +%Y%m%d%H%M)
+find "$POWOS_WT_ROOT" "$T/main/.claude" "$T/main/.git/worktrees" -exec touch -h -t "$stamp" {} + 2>/dev/null
+touch "$POWOS_WT_ROOT/touched-old/f"                            # clean (same content), but just modified
+date +%s > "$T/main/.git/worktrees/fresh-old/powos-created"      # f407: made just now on an old tip, untouched since
+( cd "$POWOS_WT_ROOT/busy-old" && exec sleep 60 ) & busy=$!; disown $busy
+trap 'kill $busy 2>/dev/null; cd /; rm -rf "$T"' EXIT
 
 dry=$(bash "$WT_SCRIPT" gc --dry-run)
 ok "dry-run: flags old-merged" 'echo "$dry" | grep -q "would remove old-merged"'
@@ -63,6 +73,12 @@ ok "gc: kept dirty-old" '[ -d "$POWOS_WT_ROOT/dirty-old" ]'
 ok "gc: kept ahead-old" '[ -d "$POWOS_WT_ROOT/ahead-old" ]'
 ok "gc: kept runner-marked (never touches a runner checkout)" '[ -d "$POWOS_WT_ROOT/runner-marked" ]'
 ok "gc: kept the powos-multiplatform-named one" '[ -d "$POWOS_WT_ROOT/powos-multiplatform" ]'
+ok "gc: kept touched-old (file modified <30 min ago, f405)" '[ -d "$POWOS_WT_ROOT/touched-old" ]'
+ok "gc: kept busy-old (a process has its cwd in it, f405)" '[ -d "$POWOS_WT_ROOT/busy-old" ]'
+ok "dry-run: says why busy-old was kept" 'echo "$dry" | grep -q "kept busy-old (in use: process"'
+ok "gc: kept fresh-old (created <30 min ago on an old base tip, f407)" '[ -d "$POWOS_WT_ROOT/fresh-old" ]'
+ok "gc: logged the removal with why (f405)" 'grep -q "removed old-merged .*by=gc why: .*idle" "$POWOS_WT_RMLOG"'
+ok "gc: logged nothing for kept ones" '! grep -q -e touched-old -e busy-old "$POWOS_WT_RMLOG"'
 
 [ $fails = 0 ] && echo "worktree-gc-test: pass" || echo "worktree-gc-test: FAIL"
 exit $fails
