@@ -2516,7 +2516,8 @@ async function aiNeedsProgress(page, size, screen, calls) {
   await page.screenshot({ path: `/cache/ai-needs-you-${size}.png` });
   const a = await page.evaluate(aiNeedsAnswer);
   if (a.left.includes("ny-try1")) fails.push(`"works" didn't take the row out of needs you at once (left: ${a.left.join(", ")})`);
-  if (!/you said it works/.test(a.said)) fails.push(`the answered row doesn't collapse to "you said it works" ("${a.said}")`);
+  if (!/Thanks/.test(a.said)) fails.push(`the answered row doesn't show its brief "✓ Thanks" ("${a.said}")`);
+  if (await page.evaluate(() => window.__gw.until(() => !document.querySelector('.ai-screen .aip-need[data-task="ny-try1"]'), 2500).then((x) => !x))) fails.push(`the answered row is still in Needs you after its thanks (nothing left to do)`);
   if (!a.calls.length) fails.push("works on the row made no bridge call");
   calls.push([size, a.calls]);
   return fails.map((f) => `${size}: ${f}`);
