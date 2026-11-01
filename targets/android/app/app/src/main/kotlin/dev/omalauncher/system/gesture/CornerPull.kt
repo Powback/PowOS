@@ -77,6 +77,7 @@ class CornerPull(
             appOver = runCatching { Tasks.visible(service) }.getOrNull() != null,
             homeMain = Switcher.homeVisible && Switcher.homeMainPage && !Switcher.open,
             window = PullHost.current != null,
+            shadeOpen = dev.omalauncher.system.ShadeHost.current?.isShown == true,
         )
 
     override fun onDown(e: MotionEvent): Boolean {
@@ -211,14 +212,17 @@ object CornerRoute {
     /**
      * [appOver]: an app's task shows on the default display. [homeMain]: home's page shows its main page with nothing
      * over it. [window]: the overlay's host is up. Over an app the overlay (with its own dock); over home, home's page
-     * opens its launcher in place under its own dock (never the overlay: two docks).
+     * opens its launcher in place under its own dock (never the overlay: two docks). [shadeOpen]: PowOS's shade is
+     * down - a corner swipe is the navigation swipe that shuts it (S9, NavGesture's ShadeFirst), never a panel over it.
      */
     fun of(
         appOver: Boolean,
         homeMain: Boolean,
         window: Boolean,
+        shadeOpen: Boolean = false,
     ): Target =
         when {
+            shadeOpen -> Target.NONE
             appOver -> if (window) Target.WINDOW else Target.NONE
             homeMain -> Target.PAGE
             else -> Target.NONE

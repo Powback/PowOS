@@ -63,6 +63,11 @@ class NavGesture(
 
     /** The page whose open panel this swipe closes (system/Panels.kt); null: the swipe is home's/the switcher's. */
     private var panel: dev.omalauncher.shell.ShellBridge? = null
+    /**
+     * S9: PowOS's shade (the notifications / control center) was down when the finger came down: the swipe is the
+     * shade's close ([ShadeFirst]) - nothing under it follows the finger (no app window, home's switcher layer or panel).
+     */
+    private var overShade = false
 
     /** Where the finger went down (screen px): the window follows it sideways. */
     private var downX = 0f
@@ -145,6 +150,12 @@ class NavGesture(
         // WM Shell takes 50-80 ms to hand over the app's window, as long as a quick swipe lasts - asked for after the
         // touch slop, the window only came loose once the finger was gone. A tap or a sideways swipe ends it straight
         // back to the app.
+        overShade = ShadeHost.current?.isShown == true
+        if (overShade) {
+            Log.i(TAG, "gesture: over PowOS's shade - the swipe shuts it (its own close), nothing under it moves")
+            panel = null
+            return true
+        }
         panel = if (pinned) null else dev.omalauncher.system.Panels.live()
         panel?.let { dev.omalauncher.system.Panels.begin(it) } ?: began()
         return true
@@ -202,6 +213,8 @@ class NavGesture(
 
     /** The swipe went along the bar. */
     private fun sideways(): GestureConsumer.Verdict {
+        // Along the bar over the shade: still the shade's swipe (Android shuts its shade on any navigation swipe).
+        if (overShade) return GestureConsumer.Verdict.TAKE
         if (panel != null) return drop()
         if (homeOwnsSideways()) {
             Log.i(TAG, "gesture: sideways over home's page - home's page swipe (its search bar / dock), not the quick switch")
@@ -218,7 +231,7 @@ class NavGesture(
         outcome: NavGestureClassifier.Outcome,
         why: String,
     ): GestureConsumer.Verdict {
-        if (outcome is NavGestureClassifier.Outcome.QuickSwitch && homeOwnsSideways()) {
+        if (outcome is NavGestureClassifier.Outcome.QuickSwitch && !overShade && homeOwnsSideways()) {
             ended(NavGestureClassifier.Outcome.None, "sideways over home's page: home's page swipe")
             return GestureConsumer.Verdict.DROP
         }
@@ -273,6 +286,7 @@ class NavGesture(
 
     private fun drop(): GestureConsumer.Verdict {
         classifier = null
+        overShade = false
         endPanel(false)
         // A layer begun over home goes back down with it.
         if (overHome && homeBegun) endOverHome(NavGestureClassifier.Outcome.None)
@@ -335,9 +349,10 @@ class NavGesture(
         Log.i(TAG, "gesture: $outcome (over task $over, animated ${t != null || overHome}; $why)")
         // PowOS's shade down (over an app, home's main page or a panel): the swipe only puts it up, as SystemUI's does -
         // whatever followed the finger under it goes back. Over home it never reached the Home branch below (overHome).
-        if ((outcome == NavGestureClassifier.Outcome.Home || outcome == NavGestureClassifier.Outcome.Switcher) &&
-            ShadeHost.current?.closeIfOpen() == true
-        ) {
+        // S9: over the shade every navigation swipe shuts it (the page's own close spring, shade.settle), as Android's.
+        val shade = overShade
+        overShade = false
+        if (ShadeFirst.closes(outcome, shade, ShadeHost.current?.isShown == true) && ShadeHost.current?.closeIfOpen() == true) {
             if (panel != null) endPanel(false)
             if (overHome && homeBegun) endOverHome(NavGestureClassifier.Outcome.None)
             overHome = false
@@ -612,5 +627,23 @@ class NavGesture(
         const val SYSUI_QUICK_SETTINGS_VISIBLE = 1L shl 11
         const val SYSUI_ALLOW_GESTURE_IGNORING_BAR_VISIBILITY = 1L shl 17
         const val SYSUI_DEVICE_DOZING = 1L shl 21
+    }
+}
+
+/**
+ * S9 (the home gesture shuts the shade, as Android's): whether a navigation swipe let go with [outcome] closes PowOS's
+ * shade instead of doing its own thing. [downOverShade]: the shade was down when the finger came down - then every swipe
+ * that went somewhere (home, the switcher, along the bar) is the shade's. [shownNow]: the shade is down at the release
+ * (it may have come down during the swipe): home and the switcher shut it first, so it never stays open under home.
+ */
+internal object ShadeFirst {
+    fun closes(
+        outcome: NavGestureClassifier.Outcome,
+        downOverShade: Boolean,
+        shownNow: Boolean,
+    ): Boolean {
+        if (!shownNow) return false
+        if (downOverShade) return outcome != NavGestureClassifier.Outcome.None
+        return outcome == NavGestureClassifier.Outcome.Home || outcome == NavGestureClassifier.Outcome.Switcher
     }
 }
