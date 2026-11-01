@@ -269,12 +269,9 @@
 }
 @keyframes scroll-fade-t { from { --scroll-fade-t: 0px; } to { --scroll-fade-t: var(--scroll-fade); } }
 @keyframes scroll-fade-b { from { --scroll-fade-b: var(--scroll-fade); } to { --scroll-fade-b: 0px; } }
-.dock-dots { position: absolute; left: 50%; bottom: 3px; transform: translateX(-50%); display: flex; gap: 5px; pointer-events: none; }
-.dock-dots i { width: 5px; height: 5px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 28%, transparent); }
-.dock-dots i.on { background: color-mix(in srgb, var(--color-foreground) 80%, transparent); }
 
 /*
- * Page dots (ui/pagedots.tsx): home's pages and the launcher's, one style - the dock's dots' size and tints. Each dot's
+ * Page dots (ui/pagedots.tsx): home's pages and the launcher's, one style - one row on home (the dock has none of its own). Each dot's
  * --on (0..1, how much its page is on screen) is written as the swipe moves: the bright fill fades in and the dot
  * grows a little with it. Opacity and transform only; .live (a finger on it) tracks exactly, at rest it eases.
  */
@@ -285,6 +282,9 @@
 /* Home's: at the stage's foot, in the gap above the pill / dock, over the pages' width only (the stage is already
    clear of a side dock); it fades with the pages as the launcher opens. */
 .home-dots { position: absolute; left: 0; right: 0; bottom: calc(var(--gap) / 2 - 7px); opacity: calc(1 - var(--p)); pointer-events: none; }
+/* Folded with the pill in the foot (not the docked button), the foot starts right at the stage's foot: the dots' usual
+   7px reach below it put them under the pill's top edge (gate edit-search: "the page dots overlap bar-pill"). */
+.home:not(.wide):has(> .bar .bar-pill) > .stage > .home-dots { bottom: var(--gap); }
 /* The launcher's: no row of their own - laid over the gap under the pages (the launcher's 16 px over the pill, or the
    recent row's margin), so the app grid runs down to it. The user, 2026-10-31: "The page indicator takes up a lot of
    space." They sit in the drawer's grid beside the pages (same cell), over the pages' last 6 px: not inside the pages
@@ -659,7 +659,7 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   padding: 6px 2px;
   border-radius: var(--radius);
   touch-action: manipulation;
-  transition: background 120ms;
+  transition: background var(--spring-fast-ms) var(--spring-fast);
 }
 .app:active { background: var(--color-surface); }
 .app-icon { position: relative; display: block; width: var(--icon); height: var(--icon); pointer-events: none; border-radius: var(--icon-radius); }
@@ -673,6 +673,21 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 .app-icon.initials .app-icon-face { position: absolute; inset: 0; }
 .app-icon-face.plate { background: var(--icon-plate); }
 .app-icon-face.placed img { position: absolute; max-width: none; }
+/*
+ * An app's unread dot (host.badge, apps/badge.ts): as Android marks a launcher icon with notifications, a small red
+ * dot on the icon's top-right, ringed in the theme background so it reads on any icon or wallpaper. Only while the
+ * app's count is above 0; it scales with the icon (dock, drawer, home tiles alike). Static: no frames.
+ */
+.app-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 22%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--color-red);
+  box-shadow: 0 0 0 1.5px var(--color-background);
+}
 /*
  * A running app (ui/running.ts: a task, a Linux window) or one with a floating window (the dock, unfolded): a short
  * accent bar centred under its icon, bare (no plate) - in the dock, its recent apps and the drawer. Frozen (asleep in
@@ -708,11 +723,11 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   translate: -50% 0;
   background: var(--color-accent);
   box-shadow: 0 0 0 1px var(--color-background);
-  transition: width 150ms, height 150ms, opacity 150ms;
+  transition: width var(--spring-fast-ms) var(--spring-fast), height var(--spring-fast-ms) var(--spring-fast), opacity var(--spring-fast-ms) var(--spring-fast);
 }
 .dock .app.mark-here .app-icon::after { width: 22px; height: 4px; border-radius: 8px; opacity: 1; }
 .dock .app.mark-away .app-icon::after { width: 4px; height: 4px; border-radius: 8px; opacity: 0.45; }
-.dock .app:not(.dock-search) .app-icon { transition: opacity 150ms; }
+.dock .app:not(.dock-search) .app-icon { transition: opacity var(--spring-fast-ms) var(--spring-fast); }
 .dock.page-focus .app:not(.mark-here, .dock-search) .app-icon { opacity: 0.65; }
 /* DG1 (ui/dockgroups.tsx): a window group's cell - its apps' icons together (switcher.tsx SplitIcons), laid out as the
    group sits on screen: side by side (2h, a tab stack), one over the other (2v), the 3-tile layouts, a 2x2 grid (4). */
@@ -727,7 +742,7 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 .dock .group-icon .task-icons[data-layout="3b"] > :last-child { grid-column: span 2; }
 .dock .group-icon .task-icon { display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain; border-radius: 8px; }
 .dock .group-icon .task-icon.blank { background: var(--soft-fill); }
-.app-icon img { display: block; width: 100%; height: 100%; object-fit: contain; transition: opacity 160ms; }
+.app-icon img { display: block; width: 100%; height: 100%; object-fit: contain; transition: opacity var(--spring-fast-ms) var(--spring-fast); }
 /* Not loaded yet (apps.tsx AppIcon): a pulsing tile in its place, not a broken image. */
 /* Pulses ~10 s, not forever: an app with no icon at all (a Linux app like lstopo) stays "loading", and an endless
    animation kept the compositor drawing 60 frames a second on an idle home (app + renderer ~20% of a core). */
@@ -821,6 +836,10 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 .glass :is(.page .home-tile > .tile, .lib-card.tile) { background: var(--glass-fill); }
 .home-tile { position: absolute; padding: calc(var(--gap) / 2); touch-action: none; }
 .home-tile.lifted { opacity: 0.25; }
+/* Editing home, a widget's content is a picture: the tile takes every press (pick, lift, drag; its actions and resize
+   handle on top), whatever the widget does with a finger otherwise - an app's island that stops its rows' presses
+   (needs-me: "All widgets are editable, except the Needs me widget", 2026-11-01) included. */
+.home.editing .home-tile:is(.widget, .appwidget, .panel) > :not(.tile-actions, .resize-handle) { pointer-events: none; }
 /*
  * Neighbouring widgets are one surface (grid.tsx joins): no gap on a side that touches another, square corners inside
  * the group, round ones only on its outside; no edge light or shadow between them.
@@ -838,7 +857,7 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
      whole group (grid.tsx GroupShadow). */
   box-shadow: none;
 }
-.home-tile.joined[style*="--jt: 0"] > .tile { box-shadow: var(--lift-edge); }
+.home-tile.joined[style*="--free-top: 1"] > .tile { box-shadow: var(--lift-edge); }
 .group-shadow { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 /*
  * The pieces merging tiles that touch over part of an edge (grid.tsx seams): the gutter along the shared span, and a
@@ -1127,7 +1146,7 @@ input.folder-title:focus { background: var(--soft-fill); }
   border-radius: var(--radius);
 }
 .dock.aimed { border-color: var(--color-accent); }
-.dock .app.swap-out { opacity: 0.35; scale: 0.8; transition: scale 120ms, opacity 120ms; }
+.dock .app.swap-out { opacity: 0.35; scale: 0.8; transition: scale var(--spring-fast-ms) var(--spring-fast), opacity var(--spring-fast-ms) var(--spring-fast); }
 .dock.dock-ghost {
   position: fixed;
   left: 0;
@@ -1155,7 +1174,7 @@ input.folder-title:focus { background: var(--soft-fill); }
   z-index: 1;
   opacity: 0.85;
   scale: 1.12;
-  transition: scale 120ms;
+  transition: scale var(--spring-fast-ms) var(--spring-fast);
 }
 
 /* A widget's screen (screen.tsx), over home. A terminal's: edge to edge under the status bar, the keys over its foot. */
@@ -1260,19 +1279,25 @@ input.folder-title:focus { background: var(--soft-fill); }
 /* A side dock is a column pinned under the status bar (top: --inset-top): it doesn't rise - risen, its first icon covered
    the status bar's battery (the user's screenshot, 2026-10-30); its foot ends above the risen pill instead. */
 .home > .dock:not(.dock-tray),
-.home > .bar { transition: translate var(--spring-fast-ms) var(--spring-fast); }
+.home > .bar,
+.home > .stage > .home-dots { transition: translate var(--spring-fast-ms) var(--spring-fast); }
+/* Home's page dots rise with the foot: their own row stays above the risen button/pill, never behind it (the manager's
+   wave 2 review: in edit mode they sat under the docked search button). The gate's edit-foot scene asserts it. */
 .home.editing:not(.dock-left, .dock-right) > .dock:not(.dock-tray),
-.home.editing > .bar { translate: 0 calc(-1 * var(--edit-rise)); }
+.home.editing > .bar,
+.home.editing > .stage > .home-dots { translate: 0 calc(-1 * var(--edit-rise)); }
+/* Edit mode's buttons sit on the wallpaper: THE backdrop's tint (§2), not the faint --soft-fill (4.25:1 over a light
+   wallpaper, design audit home gap 9). */
 .edit-act {
   font: var(--text-item) var(--font-body);
   color: var(--color-foreground);
-  background: var(--soft-fill);
+  background: var(--backdrop-tint);
   box-shadow: var(--lift);
   border-radius: 999px;
   padding: 8px 14px;
 }
 .edit-act.on { background: color-mix(in srgb, var(--color-accent) 22%, transparent); color: var(--accent-text); }
-.edit-act.done { box-shadow: none; background: none; color: var(--accent-text); padding-right: 0; }
+.edit-act.done { box-shadow: none; background: none; color: var(--accent-text); text-shadow: var(--label-shadow); padding-right: 0; }
 .edit-note { flex: 1; min-width: 0; font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The theme popover, just above the bar. */
 .theme-pop {
@@ -1657,6 +1682,13 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 :is(.ai-screen, .ai-page-chat) .ai-chat-in :is(.msg.assistant, .msg.note, .tl, .present, .choice-opt) { background: var(--text-fill); box-shadow: var(--lift); }
 :is(.ai-screen, .ai-page-chat) .ai-chat-in > .tl { align-self: flex-start; width: fit-content; max-width: 100%; padding: 0 12px; border-radius: var(--radius); }
 :is(.ai-screen, .ai-page-chat) .ai-chat-in > .msg.note { align-self: flex-start; width: fit-content; padding: 4px 12px; border-radius: 999px; }
+/* The thread is never wider than its column (the user, 11-01 22:16: "overflow"): every row at most its width, shrinking
+   in the flex column, a long token (a path, a URL) broken; a code block scrolls inside its own box. :where - no rule's
+   own narrower max-width is overridden. */
+:where(.ai-page-chat) { min-width: 0; overflow-x: hidden; }
+:where(.ai-page-chat .ai-chat-in) { min-width: 0; max-width: 100%; }
+:where(.ai-page-chat .ai-chat-in) > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+:where(.ai-page-chat) pre { max-width: 100%; overflow-x: auto; }
 .ai-page-chat { font-family: var(--font-ui); }
 .ai-page-chat * { font-family: inherit; }
 .ai-chat-in > .tl { color: var(--color-muted); }
@@ -1914,8 +1946,8 @@ html.glass[data-mode="assist"] .assist-panel {
 }
 /* What's on the panel: soft fills (a surface inside a surface), the pill too. */
 html:root .assist-panel .tile.pill { background: var(--soft-fill); }
-/* The one chat in the panel (assistant.ts, chat.tsx ChatView), under the crop screen's head and above its field. */
-.assist-panel .chat { flex: 1 1 auto; min-height: 0; }
+/* The one chat in the panel - the AI page's (powai.tsx PageChat) - under the crop screen's head and above its field. */
+.assist-panel .assist-chat { flex: 1 1 auto; min-height: 0; }
 /* Without its head line (the panel has its own), the chat still sits at the bottom while short. */
 .chat.headless > :first-child { margin-top: auto; }
 .assist-panel .bar { flex: none; }
@@ -3766,8 +3798,8 @@ html.glass:root:not([data-light="false"][data-wallpaper="light"], [data-light="t
 /*
  * Alignment (ui/align.ts, Settings > style > alignment): per surface, html[data-align-launcher|shade|control] is top
  * (as before), middle or bottom - unfolded bottom unless picked, folded top. Flex/grid placement only, nothing per
- * frame; "safe": content taller than its surface starts at its top edge and scrolls (the bottom ones open scrolled to
- * their foot, drawer.tsx/notifications.tsx), never pushed out of the scroll's reach.
+ * frame; "safe": content taller than its surface starts at its top edge and scrolls, never pushed out of the scroll's
+ * reach. The launcher opens at its list's start every time (drawer.tsx AppList), bottom only hugs a short grid low.
  */
 /* The launcher: the app grid (and the folders page) at the panel's foot or centred; the A-Z bar ending where the grid does. */
 :root:is([data-align-launcher="bottom"], [data-align-launcher="middle"]) .drawer-page > .drawer-list:not(.results) { display: flex; flex-direction: column; }
@@ -3862,11 +3894,10 @@ html:root .ai-screen.status > .ai-glass.tile { --glass-blur-native: var(--backdr
 .ais-top > .ai-more { flex: none; align-self: flex-start; min-width: 40px; min-height: 36px; margin-left: auto; border: 0; background: none; font: inherit; font-size: 20px; line-height: 1; color: var(--color-foreground); }
 .ai-screen.status > .ais-foot { margin-inline: calc(var(--ais-side) - var(--edge)); }
 .ai-screen.status { --ai-head: calc(var(--ai-head-top) + 56px + 10px); }
-/* Every section on the shared glass card (the backdrop's tint and blur): no text floating on the wash. */
-html:root :is(.ai-screen.status, .ai-left) :is(.ais, .ais-sum-in) > :is(.ais-sec:not(.ais-stack-sec), .ais-empty) {
-  --glass-blur-native: var(--backdrop-blur-native);
-  padding: 12px 12px 8px; border-radius: var(--radius); background: var(--backdrop-tint);
-}
+/* Every section straight on the page's one glass (folded .ai-glass, unfolded the .ai-left tile - both the backdrop's tint):
+   no card of its own inside it (the user, 11-01 22:40: "double box the ai page, it wastes a lot of space";
+   docs/DESIGN-LANGUAGE.md: a surface gets one container). Sections part by the column's gap and their headings. */
+html:root :is(.ai-screen.status, .ai-left) :is(.ais, .ais-sum-in) > :is(.ais-sec:not(.ais-stack-sec), .ais-empty) { padding: 0; border-radius: 0; background: none; }
 /* With few items nothing is centred: every section its content's height, the rest just the backdrop. */
 /* Needs you: the card stack - the top card, the next ones peeking under it (their count), all of the backdrop's glass. */
 .ais-stack { position: relative; display: grid; padding-bottom: calc(var(--peek, 0) * 8px); }
@@ -3883,8 +3914,8 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
   color: var(--color-foreground); box-shadow: var(--lift); transition: transform var(--spring-slow-ms) var(--spring-slow), opacity var(--spring-ms) var(--spring); animation: ais-card-in var(--spring-slow-ms) var(--spring-slow) both;
 }
 .ais-card-top.dragging { transition: none; }
-.ais-card-top[data-lean="right"] .ais-act.yes { background: var(--color-accent); color: var(--color-background); }
-.ais-card-top[data-lean="left"] .ais-act.no { background: var(--status-needs); color: var(--status-on-needs); }
+.ais-card-top[data-lean="right"] .ais-act.yes { background: var(--status-working); color: var(--color-background); }
+.ais-card-top[data-lean="left"] .ais-act.no { background: color-mix(in srgb, var(--color-foreground) 28%, transparent); }
 .ais-card-top[data-lean="up"] { opacity: 0.8; }
 .ais-card-top.fly.right { transform: translateX(120%) rotate(12deg); opacity: 0; }
 .ais-card-top.fly.left { transform: translateX(-120%) rotate(-12deg); opacity: 0; }
@@ -3894,6 +3925,19 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .ais-card-line { font-size: var(--text-body); line-height: 1.4; color: var(--color-foreground); opacity: 0.9; }
 .ais-shot { align-self: flex-start; padding: 0; border: 0; border-radius: 8px; overflow: hidden; background: none; }
 .ais-shot img { display: block; max-width: 100%; max-height: 140px; object-fit: cover; }
+/* A picture with its label under it ("before", "after", "what you reported"). */
+.ais-pic { display: flex; flex-direction: column; gap: 4px; min-width: 0; margin: 0; }
+.ais-pic-label, .ais-pic-coming { font-size: var(--text-small); font-weight: 600; color: var(--color-foreground); opacity: 0.86; }
+.ais-pic-coming { align-self: center; opacity: 0.7; }
+/* Try cards: before | after. Folded: a swipeable pair (each most of the card's width, snapping); unfolded: side by side. */
+.ais-pair { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; touch-action: pan-x; scrollbar-width: none; }
+.ais-pair::-webkit-scrollbar { display: none; }
+/* Each picture its own shape at one height; two that don't fit side by side scroll sideways, one at a time. */
+.ais-pair > .ais-pic { flex: 0 0 auto; max-width: 82%; scroll-snap-align: start; }
+.ais-pair .ais-shot img { width: auto; height: 180px; max-width: 100%; max-height: none; object-fit: contain; }
+.ai-left .ais-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; touch-action: auto; }
+.ai-left .ais-pair > .ais-pic { max-width: none; }
+.ai-left .ais-pair .ais-shot img { width: 100%; height: auto; max-height: 220px; object-position: left top; }
 .ais-try { align-self: flex-start; min-height: 36px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--color-accent); color: var(--color-accent-foreground, var(--color-background)); font: inherit; font-weight: 650; }
 .ais-acts { display: flex; gap: 8px; margin-top: auto; padding-top: 8px; }
 /* The stack's one column never wider than the section (a long field must not widen the card past its column). */
@@ -3909,10 +3953,26 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .ais-card-top > .ai-reply > .ai-reply-foot > .ai-act.send { color: var(--color-background); background: var(--color-accent); }
 .ais-card-top > .ai-reply > .ai-reply-foot > .ai-act.send:disabled { opacity: 0.5; }
 .ais-more { min-height: 40px; padding: 0 4px; border: 0; background: none; font: inherit; font-size: var(--text-small); font-weight: 600; color: var(--color-foreground); }
+/* The Friction page (aifriction.tsx): Progress's cards, one per area; a row is a chip, a plain line and how often, its
+   state under it; the logged words behind a tap. */
+.afr { display: flex; flex-direction: column; gap: var(--gap); }
+.afr > .afr-sec, .afr > .afr-empty { padding: 12px 12px 8px; border-radius: var(--radius); }
+.afr-row { display: flex; flex-direction: column; align-items: stretch; gap: 3px; width: 100%; padding: 9px 4px 10px; border: 0; background: none; font: inherit; text-align: start; color: var(--color-foreground); }
+.afr-line { display: flex; align-items: flex-start; gap: 8px; width: 100%; min-width: 0; }
+.afr-line > .ais-sev { margin: 0.15em 0 0; }
+.afr-title { flex: 1; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.3; font-size: var(--text-item); font-weight: 600; overflow-wrap: anywhere; }
+.afr-item.open .afr-title { -webkit-line-clamp: unset; line-clamp: none; }
+.afr-n { flex: none; margin: 0.1em 0 0 auto; }
+.afr-facts { display: flex; align-items: center; gap: 8px; font-size: var(--text-small); color: var(--color-muted); }
+.afr-raw-h { margin-top: 6px; font-weight: 600; }
+.afr-raw { margin: 0; padding-inline-start: 16px; display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; opacity: 0.86; }
+.afr-raw-n, .afr-raw-p { color: var(--color-muted); overflow-wrap: anywhere; white-space: pre-line; }
+.afr-ask { align-self: flex-start; margin-top: 6px; }
+.afr-empty { font-size: var(--text-body); color: var(--color-foreground); }
 .ais-act { flex: 1; min-height: 44px; padding: 0 10px; border: 0; border-radius: 12px; background: color-mix(in srgb, var(--color-foreground) 12%, transparent); font: inherit; font-weight: 600; color: var(--color-foreground); }
-.ais-act.yes { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
-.ais-act.no { background: color-mix(in srgb, var(--status-needs) 26%, transparent); }
-.ais-act.later { flex: 0 0 auto; }
+/* works = the positive status (accent), still broken = neutral (the plain button), later = quiet (no fill). */
+.ais-act.yes { background: color-mix(in srgb, var(--status-working) 45%, transparent); }
+.ais-act.later { flex: 0 0 auto; background: none; opacity: 0.75; }
 /* The foot's mic chip: hold anywhere on the page to talk; while it listens, what it hears. */
 .ais-mic { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; margin-right: auto; padding: 0 10px; border-radius: 999px; background: color-mix(in srgb, var(--color-foreground) 12%, transparent); font-size: var(--text-small); color: var(--color-foreground); max-width: 60%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ais-mic-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--color-foreground); opacity: 0.6; }
@@ -3934,6 +3994,19 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .ai-screen.stacked > .ai-segs { margin-top: auto; }
 /* Home's shared bar sits under the tabs (its AI-page role is its own task): its room kept, on every tab. */
 .ai-screen.stacked > .ai-bar-slot { flex: none; height: calc(var(--pill-height) + var(--ai-foot)); }
+/*
+ * The keyboard up (the user, 11-01 21:32, P1: "chat screen broken when trying to type"): the host keeps the WebView's
+ * size (ShellActivity adjustNothing), so the page itself ends at the keyboard's top - its padding - and the bar's room
+ * under the tabs is the pill's own (no keyboard in it). It was --ai-foot's keyboard inside the slot: the slot's foot at
+ * the screen's, bar.tsx seatOnAi set the field there, behind the keyboard, and the WebView scrolled the whole page up
+ * to show it (the chat under the status bar, the tabs mid-screen, a keyboard-high gap over the field).
+ */
+.ai-screen.stacked {
+  --ai-foot: calc(max(calc(var(--inset-bottom, 0px) - var(--inset-keyboard, 0px)), var(--pill-foot)) + var(--pill-foot));
+  padding-bottom: var(--inset-keyboard, 0px);
+}
+/* Typing in the page's one field (home's bar, seated here): the tabs give the chat their room (the manager, 11-01). */
+html:has(.home > .bar[data-role="ai"] textarea:focus) .ai-screen.stacked > .ai-segs { display: none; }
 .ai-screen.stacked > .ai-segs:last-child { margin-bottom: calc(var(--pill-height) + var(--ai-foot) + 8px); }
 .ai-screen.stacked > .ag-scroll { flex: 1; min-height: 0; }
 .ai-screen.stacked > .ais-top { flex: none; cursor: pointer; }
@@ -3941,7 +4014,7 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .ai-screen.stacked > .ais-fold.shrunk { grid-template-rows: 0fr; opacity: 0; }
 .ais-fold > .ai-scroll.ais { min-height: 0; max-height: 56dvh; display: flex; flex-direction: column; gap: 8px; padding: 0 var(--ais-side) 2px; }
 .ais-fold.shrunk > .ai-scroll.ais { overflow: hidden; }
-.ais-sum { flex: none; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 14px; border: 0; border-radius: var(--radius); background: var(--backdrop-tint); font: inherit; font-size: var(--text-small); font-weight: 600; color: var(--color-foreground); text-align: start; }
+.ais-sum { flex: none; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 4px; border: 0; border-radius: 0; background: none; font: inherit; font-size: var(--text-small); font-weight: 600; color: var(--color-foreground); text-align: start; }
 .ais-sum-dots { flex: none; display: inline-flex; gap: 4px; }
 .ais-sum-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent); }
 .ais-sum-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

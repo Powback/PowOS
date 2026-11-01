@@ -22,6 +22,7 @@ import { net, type Net } from "./net.ts";
 import { stableRows } from "./stable.ts";
 import { DetailSheet, type DetailSheetProps } from "./sheet.ts";
 import { notifications, type AppNotifications } from "./notify.tsx";
+import { setBadge } from "./badge.ts";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 
 export const STDB_URL = "ws://127.0.0.1:3410";
@@ -85,6 +86,11 @@ export interface IslandHost {
    * and each one's own actions - reply, mark as read, open, dismiss (apps/notify.tsx). An older shell has none.
    */
   notifications?: AppNotifications;
+  /**
+   * The app's unread count on its icon (apps/badge.ts): above 0 the shell draws a dot on the app's icon everywhere it
+   * shows, 0 removes it. Kept across reloads; call it again whenever the count changes. An older shell has none.
+   */
+  badge?(app: string, n: number): void;
 }
 
 export interface AppWidgetHost {
@@ -607,4 +613,5 @@ export const host: IslandHost = {
   appWidget,
   health: powos.health,
   notifications,
+  badge: setBadge,
 };

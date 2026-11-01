@@ -53,7 +53,7 @@
   --lift-drop: drop-shadow(0 8px 16px rgb(0 0 0 / 40%));
   /* Labels straight on the wallpaper (home's app labels): the one text shadow, so they read on any picture. */
   /* A halo of the theme's background round text on the wallpaper (any picture, any theme): 4.5:1 where it's bright. */
-  --label-shadow: 0 0 2px var(--on-wallpaper-halo), 0 0 4px var(--on-wallpaper-halo), 0 0 7px var(--on-wallpaper-halo), 0 0 14px color-mix(in srgb, var(--on-wallpaper-halo) 75%, transparent);
+  --label-shadow: 0 0 1px var(--on-wallpaper-halo), 0 0 2px var(--on-wallpaper-halo), 0 0 4px var(--on-wallpaper-halo), 0 0 7px var(--on-wallpaper-halo), 0 0 14px color-mix(in srgb, var(--on-wallpaper-halo) 75%, transparent);
   /* Text straight on the wallpaper (home's app labels, PowOS AI's page header): the theme's foreground with a halo of
      its background - turned round over a wallpaper of the other tone (data-wallpaper, below), as iOS does. */
   --on-wallpaper: var(--color-foreground);

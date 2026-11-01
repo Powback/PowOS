@@ -252,6 +252,8 @@ function file(url) {
   let p = decodeURIComponent(u.pathname).replace(/^\/+/, "") || "index.html";
   if (p.split("/").includes("..")) return null;
   if (p === "__gate_app.html") return { virtual: true };
+  // Review images (ShellHost /_qa/, /_shared/): the try cards' before / after stand-ins (try-pair) from dev/media/.
+  if (/^_(qa|shared)\/gate-(before|after)\.png$/.test(p)) p = `dev/media/${path.basename(p)}`;
   let f;
   if (p.startsWith("_app/")) {
     const [, id, ...rest] = p.split("/");
@@ -895,6 +897,42 @@ async function shadeLayout() {
   if (innerWidth < 700) return folded();
   const n = body.querySelector(":scope > .notif-col"), c = body.querySelector(":scope > .cc-col");
   return body.classList.contains("two") && n && c ? columns(n, c) : [`unfolded (${innerWidth}px): not two columns`];
+}
+
+/**
+ * Every tile of the user's saved arrangement renders (the user, 11-01 22:14: "fps indicator etc is gone from control
+ * centre" - a tile taken out of the list vanished with no trace): the fps meter, the phone checks and the controller
+ * are in the control center, and a saved arrangement that names them (the fps meter moved first, the rest reversed)
+ * shows the same tiles as before it - the count unchanged, the fps meter first. Folded and unfolded.
+ */
+async function ccEveryTile() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await window.__gw.mod("./state.ts");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const keys = () => [...document.querySelectorAll(".notif-panel.shown .cc3-list .cc3-cell")].map((c) => c.dataset.key);
+  const open = async () => {
+    S.notif.value = false;
+    await sleep(300);
+    S.notif.value = true;
+    await window.__gw.settled(() => document.querySelector(".notif-panel.shown .cc3-list .cc3-cell"), ".notif-panel");
+    await window.__gw.until(() => keys().includes("powos.tests"), 4000);
+  };
+  const fails = [];
+  await powos.store.set("controls.layout", { order: [], hidden: [] });
+  await open();
+  const before = keys();
+  for (const id of ["powos.fps", "powos.tests"]) if (!before.includes(id)) fails.push(`${innerWidth}px: no "${id}" tile in the control center (${before.length} tiles: ${before.join(" ")})`);
+  const saved = ["powos.fps", ...before.filter((id) => id !== "powos.fps").reverse()];
+  await powos.store.set("controls.layout", { order: saved, hidden: [], v3: true });
+  await open();
+  const after = keys();
+  if (after.length !== before.length) fails.push(`${innerWidth}px: the saved arrangement shows ${after.length} tiles, ${before.length} before it (missing: ${before.filter((id) => !after.includes(id)).join(" ") || "-"})`);
+  const lost = saved.filter((id) => !after.includes(id));
+  if (lost.length) fails.push(`${innerWidth}px: saved tiles not rendered: ${lost.join(" ")}`);
+  if (after[0] !== "powos.fps") fails.push(`${innerWidth}px: the saved arrangement's first tile is "${after[0]}", not the fps meter`);
+  await powos.store.set("controls.layout", { order: [], hidden: [] });
+  S.notif.value = false;
+  return fails;
 }
 
 /**
@@ -1544,12 +1582,69 @@ async function resumeThemeCheck() {
     const now = state();
     for (const k of Object.keys(steady)) if (now[k] !== steady[k]) fails.push(`${when}: ${k} ${steady[k]} -> ${now[k]}`);
   };
-  for (let f = 0; f < 10; f++) {
+  const everyFrame = async (what, ms) => {
+    const t0 = performance.now();
+    for (let f = 0; performance.now() - t0 < ms; f++) {
+      await raf();
+      diff(`${what} frame ${f}`);
+    }
+  };
+  await everyFrame("resume", 500);
+  delete document.hidden;
+  delete document.visibilityState;
+  return [...new Set(fails)].slice(0, 8);
+}
+
+/**
+ * A wallpaper's first frame read while the closing app was still on the screen (the compositor's capture of the display
+ * minus home, WallpaperBackdrop.still -> displayStill): a light "wallpaper" under the dark one. The frames after it (each
+ * resume, 2.5 s later) are the dark wallpaper's: the tone follows them, never stuck light (the user, 11-01 22:28: dark
+ * widget text, a light search bar), and a light frame on the next return doesn't flip it - checked on every frame.
+ */
+async function resumeThemeHealCheck() {
+  const fails = [];
+  const host = (event, data) => window.__mockEvents.emit(event, data);
+  const raf = () => new Promise((ok) => requestAnimationFrame(() => ok()));
+  const picture = (fill) => {
+    const c = document.createElement("canvas");
+    c.width = c.height = 32;
+    const x = c.getContext("2d");
+    x.fillStyle = fill;
+    x.fillRect(0, 0, 32, 32);
+    return c.toDataURL("image/png");
+  };
+  const glass = (url, rev) => ({ wallpaper: { url, rev, source: "live" }, blurBehind: false });
+  const root = document.documentElement;
+  const set = (hidden) => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (hidden ? "hidden" : "visible") });
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+  const everyFrame = async (what, ms) => {
+    const t0 = performance.now();
+    for (let f = 0; performance.now() - t0 < ms; f++) {
+      await raf();
+      if (root.dataset.wallpaper !== "dark") fails.push(`${what} frame ${f}: tone ${root.dataset.wallpaper ?? "-"}, the wallpaper is dark`);
+    }
+  };
+  host("system.glass", glass(picture("#f4f4f4"), "live-5151-1"));
+  await window.__gw.until(() => root.dataset.wallpaper === "light");
+  for (const [i, rev] of ["live-5151-2", "live-5151-3"].entries()) {
+    set(true);
     await raf();
-    diff(`frame ${f}`);
+    host("system.glass", glass(picture(i ? "#0c1016" : "#101418"), rev));
+    set(false);
+    host("system.home", {});
+    await new Promise((ok) => setTimeout(ok, 120));
   }
-  await new Promise((ok) => setTimeout(ok, 400));
-  diff("400 ms after");
+  await window.__gw.until(() => root.dataset.wallpaper === "dark");
+  if (root.dataset.wallpaper !== "dark") return [`a light first frame stuck: tone ${root.dataset.wallpaper} after two dark frames of the same wallpaper`];
+  await everyFrame("healed", 200);
+  set(true);
+  await raf();
+  host("system.glass", glass(picture("#fafafa"), "live-5151-4"));
+  set(false);
+  await everyFrame("light frame again", 500);
   delete document.hidden;
   delete document.visibilityState;
   return [...new Set(fails)].slice(0, 8);
@@ -3057,7 +3152,7 @@ async function aiStackTry() {
   return fails;
 }
 
-/** The layout: 16 dp side margins, every section on the backdrop's glass token (no text on the bare wash). */
+/** The layout: 16 dp side margins, the sections straight on the page's one glass (no card of their own), the Needs-you card on the backdrop's tint. */
 function aiStackLayout() {
   // [el]'s --backdrop-tint as a colour, resolved where [el] is (the token differs by the wallpaper's tone).
   const tintAt = (el) => {
@@ -3074,12 +3169,12 @@ function aiStackLayout() {
     const b = c.getBoundingClientRect();
     const name = c.className.split(" ")[0];
     if (Math.abs(b.left - 16) > 1.5 || Math.abs(innerWidth - b.right - 16) > 1.5) fails.push(`${name} at ${Math.round(b.left)}/${Math.round(innerWidth - b.right)} px from the sides, not 16`);
-    if (getComputedStyle(c).backgroundColor !== tintAt(c)) fails.push(`${name} is ${getComputedStyle(c).backgroundColor}, not the backdrop's tint ${tintAt(c)}`);
+    const card = c.matches(".ais-card-top");
+    if (card && getComputedStyle(c).backgroundColor !== tintAt(c)) fails.push(`${name} is ${getComputedStyle(c).backgroundColor}, not the backdrop's tint ${tintAt(c)}`);
+    if (!card && getComputedStyle(c).backgroundColor !== "rgba(0, 0, 0, 0)") fails.push(`${name} is a box (${getComputedStyle(c).backgroundColor}) on the page's glass: a box inside a box`);
   }
   const wash = scr.querySelector(".ai-glass");
   if (getComputedStyle(wash).backgroundColor !== tintAt(wash)) fails.push(`the page's wash is ${getComputedStyle(wash).backgroundColor}, not the backdrop's tint ${tintAt(wash)}`);
-  const loose = [...scr.querySelectorAll(".ais .ais-done-title, .ais .ais-work-title, .ais .ais-card-title")].filter((e) => !e.closest(".ais-sec:not(.ais-stack-sec), .ais-card-top"));
-  if (loose.length) fails.push(`${loose.length} texts float on the wash`);
   return [...new Set(fails)];
 }
 
@@ -3303,6 +3398,29 @@ function aiStackRest() {
   return document.getAnimations().filter((a) => scr.contains(a.effect?.target) && a.playState === "running" && a.effect.getComputedTiming().endTime === Infinity).map((a) => `${a.animationName} on .${String(a.effect.target.className).split(" ").join(".")}`);
 }
 
+/**
+ * In the page: no box inside a box on the AI page (the user, 11-01 22:40: "double box the ai page, it wastes a lot of
+ * space"; docs/DESIGN-LANGUAGE.md: a surface gets one container). Under each of [sels] (the page's glass surfaces: the
+ * folded screen, the unfolded columns, the chat wherever it's held), a container - a block at least 40 px tall and 40% of
+ * the surface wide with a fill, a gradient or a border - is a box in the surface's box. Not containers: the content's
+ * own objects (a chat bubble, a step, the Needs-you swipe card), controls (buttons, the segmented row's track), menus.
+ */
+function aiNestedBoxes(sels) {
+  const boxed = (e) => {
+    const s = getComputedStyle(e);
+    const a = (s.backgroundColor.match(/[\d.]+/g) ?? []).map(Number)[3] ?? (s.backgroundColor === "transparent" ? 0 : 1);
+    return a > 0.01 || s.backgroundImage !== "none" || parseFloat(s.borderTopWidth) + parseFloat(s.borderLeftWidth) > 0;
+  };
+  const own = "button, .msg, .present, .choice-opt, .tl, .ais-stack, .ai-segs, .ai-menu, .ai-glass, textarea, input, img, pre";
+  const inner = (root, rb) => [...root.querySelectorAll("*")].filter((e) => {
+    const b = e.getBoundingClientRect();
+    return b.height >= 40 && b.width >= rb.width * 0.4 && !e.closest(own) && boxed(e);
+  });
+  const named = (sel, e) => `${sel}: .${e.className.toString().split(" ").join(".")} is a box inside the page's box`;
+  const roots = sels.flatMap((sel) => [...document.querySelectorAll(sel)].map((r) => [sel, r, r.getBoundingClientRect()]));
+  return [...new Set(roots.filter(([, , rb]) => rb.width).flatMap(([sel, r, rb]) => inner(r, rb).map((e) => named(sel, e))))];
+}
+
 /** One render: [n] needs on the [tone] page - the stack's shape and the layout - to /cache/ai-status-folded-<tone>-<n>.png. */
 async function aiStackRender(page, tone, n) {
   const tops = await page.evaluate(aiStackSetup, n);
@@ -3311,7 +3429,7 @@ async function aiStackRender(page, tone, n) {
   if (tops !== Math.min(1, n)) fails.push(`${tops} top cards, not ${Math.min(1, n)}`);
   if (n && sh.peeks !== Math.min(2, n - 1)) fails.push(`${sh.peeks} cards peek behind, not ${Math.min(2, n - 1)}`);
   if (n && !sh.tryBtn) fails.push("the top card (a try) has no Try");
-  fails.push(...(await page.evaluate(aiStackLayout)));
+  fails.push(...(await page.evaluate(aiStackLayout)), ...(await page.evaluate(aiNestedBoxes, [".ai-screen.status", ".ai-screen .ai-page-chat"])));
   await page.screenshot({ path: `/cache/ai-status-folded-${tone}-${n}.png` });
   return fails.map((f) => `${tone} ${n}: ${f}`);
 }
@@ -3548,6 +3666,162 @@ async function aiFoldedCheck(page) {
   return fails.map((f) => `ai-folded: ${f}`);
 }
 
+/**
+ * The folded AI page's Chat with the keyboard up (the user, 11-01 21:32, P1: "chat screen broken when trying to type" -
+ * the conversation under the status bar, the tabs mid-screen, a keyboard-high gap over the field). The host keeps the
+ * WebView's size and reports the keyboard as an inset (ShellActivity adjustNothing); the page fits above it: the strip
+ * put, the tabs hidden while typing, the chat filling to the one field, newest visible, the field right on the keyboard.
+ */
+/** In the page: the field focused with the keyboard [kb] px up, as the phone's host reports it. */
+async function aiKeyboardUp(kb) {
+  const S = await window.__gw.mod("./state.ts");
+  S.aiScreen.value = "chat";
+  S.page.value = -1;
+  // A turn under way: its "thinking…" row is the thread's last, and it too sits over the field (11-01 22:1x); the
+  // manager's long answer before it must wrap in the folded column too.
+  S.chat.value = { busy: true, items: [...S.chat.value.items, { kind: "assistant", text: window.__aiLong }, { kind: "user", text: "and the dock?" }] };
+  window.__mockEvents.emit("system.insets", { top: 45, bottom: 16, left: 0, right: 0, keyboard: kb });
+  document.querySelector(".bar[data-role] textarea")?.focus();
+  await new Promise((r) => setTimeout(r, 900));
+  return true;
+}
+
+/** In the page: the boxes ([top, bottom]) the keyboard case checks. */
+function aiKeyboardFacts(kb) {
+  const scr = document.querySelector(".ai-screen.status");
+  const tb = (e) => { const b = e?.getBoundingClientRect(); return b ? [Math.round(b.top), Math.round(b.bottom)] : null; };
+  const shown = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== "hidden" && Number(getComputedStyle(e).opacity) > 0.05;
+  const chat = scr?.querySelector(".ais-chat-wrap > .ai-chat");
+  const last = [...(chat?.querySelector(".ai-chat-in")?.children ?? [])].filter((e) => !e.matches(".ai-new-pill")).at(-1);
+  const fields = [...document.querySelectorAll("textarea, input:not([type=hidden])")].filter((e) => shown(e) && tb(e)[1] > 0 && tb(e)[0] < innerHeight - kb);
+  return {
+    over: window.__aiOverflow(".ai-screen.status .ais-chat-wrap > .ai-chat"), kbTop: innerHeight - kb, pill: tb(document.querySelector(".bar[data-role] .bar-pill")), segs: shown(scr?.querySelector(":scope > .ai-segs")),
+    chat: tb(chat), last: tb(last), fields: fields.length, scrollY, atNewest: Math.abs(chat?.scrollTop ?? 99) < 2,
+    tops: [...(scr?.querySelectorAll(":scope > .ais-top, .ais-chat-wrap > .ai-chat") ?? [])].map((e) => tb(e)[0]),
+  };
+}
+
+/** In the page: the keyboard down again, the field let go. */
+async function aiKeyboardDown() {
+  window.__mockEvents.emit("system.insets", { top: 45, bottom: 16, left: 0, right: 0, keyboard: 0 });
+  document.activeElement?.blur();
+  await new Promise((r) => setTimeout(r, 400));
+}
+
+/**
+ * In the page: the side button over the AI page (the user, 11-01 21:32: the assist sheet stacked a second input over
+ * the page's): the page tells the host it's up (ai.pageShown, PowosAssistSession then opens no sheet) and the host's
+ * "ai.focus" puts the keys in the page's one field.
+ */
+async function aiSideButton() {
+  const [S, { powos }] = await Promise.all([window.__gw.mod("./state.ts"), window.__gw.mod("./bridge.ts")]);
+  const said = [];
+  powos.ai.pageShown = async (on) => void said.push(on);
+  S.page.value = 0;
+  await window.__gw.frames(3);
+  S.page.value = -1;
+  await window.__gw.frames(3);
+  window.__mockEvents.emit("ai.focus", {});
+  await window.__gw.frames(2);
+  const field = document.querySelector(".bar[data-role=ai] textarea");
+  return { said, focused: !!field && document.activeElement === field, bars: document.querySelectorAll(".bar[data-role]").length };
+}
+
+/** A long answer as the manager writes them (11-01 22:16, "overflow"): bold leads, a numbered list, an unbreakable token. */
+const AI_LONG_ANSWER = [
+  "Here are the numbers. Today a request took a median of 86 minutes from your report to your phone, longer in the slow cases. Three things ate the time:",
+  "",
+  ...Array.from({ length: 8 }, (_, i) => `${i + 1}. **Waiting for a free agent ${i}:** your requests sat behind big projects while only three agents could work at once.`),
+  "",
+  "The trace: /run/powos-app/powos-ai-shared/perf-1793567766122-a-very-long-unbreakable-path-name-that-must-wrap.json",
+].join("\n");
+
+/** In the page: the thread [q]'s parts that reach past its right edge (a code block scrolls inside: its own box only). */
+function aiThreadOverflow(q) {
+  const t = document.querySelector(q);
+  if (!t) return ["no thread"];
+  const edge = t.getBoundingClientRect().right + 1;
+  return [...t.querySelectorAll(".ai-chat-in *")].filter((e) => !e.parentElement?.closest("pre") && e.getClientRects().length && e.getBoundingClientRect().right > edge)
+    .slice(0, 3).map((e) => `${e.tagName.toLowerCase()}.${e.className} right ${Math.round(e.getBoundingClientRect().right)} > ${Math.round(edge)}`);
+}
+
+/**
+ * In the page, unfolded, no keyboard (the user, 11-01 22:1x: "smh" - the newest message's last line and "thinking…"
+ * under "Message the manager"): a long newest answer and a turn under way; the [top, bottom] of the last message, the
+ * thinking row and the seated bar's pill.
+ */
+async function aiWideClearFacts(where) {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const long = window.__aiLong;
+  const items = [];
+  for (let i = 0; i < 8; i++) items.push({ kind: "user", text: `question ${i}` }, { kind: "assistant", text: i === 7 ? long : `Answer ${i}.` });
+  items.push({ kind: "user", text: "and the dock?" });
+  S.chat.value = { busy: true, items };
+  S.aiScreen.value = "chat";
+  if (where === "panel") (S.page.value = 0, S.openPanel("ai"));
+  else S.page.value = -1;
+  await new Promise((r) => setTimeout(r, 1200));
+  const tb = (e) => { const b = e?.getBoundingClientRect(); return b ? [Math.round(b.top), Math.round(b.bottom)] : null; };
+  const kids = [...(document.querySelector(where === "panel" ? ".ai-panel .ai-chat-in" : ".ai-screen .ai-right .ai-chat-in")?.children ?? [])];
+  const over = window.__aiOverflow(where === "panel" ? ".ai-panel .ai-page-chat" : ".ai-screen .ai-right .ai-page-chat");
+  return { over, msg: tb(kids.filter((e) => e.matches(".msg:not(.note)")).at(-1)), thinking: tb(kids.find((e) => e.matches(".thinking"))), pill: tb(document.querySelector(".home > .bar[data-role] .bar-pill")) };
+}
+
+/** Puts the long answer and the overflow probe in [page] (its evaluated functions reach them on window). */
+const aiThreadProbe = (page) => page.evaluate(`window.__aiLong = ${JSON.stringify(AI_LONG_ANSWER)}; window.__aiOverflow = ${aiThreadOverflow.toString()};`);
+
+async function aiWideClearCheck(page) {
+  await aiThreadProbe(page);
+  const fails = [];
+  for (const where of ["page", "panel"]) {
+    const f = await page.evaluate(aiWideClearFacts, where);
+    await page.screenshot({ path: `/cache/ai-keyboard-wide-${where}.png` });
+    fails.push(...aiWideClearFails(f).map((x) => `ai-wide-clear ${where}: ${x}`));
+    fails.push(...(await page.evaluate(aiNestedBoxes, [where === "panel" ? ".ai-panel" : ".ai-screen .ai-right"])).map((x) => `ai-wide-clear ${where}: ${x}`));
+  }
+  return fails;
+}
+
+function aiWideClearFails(f) {
+  if (!f.msg || !f.thinking || !f.pill) return [`missing the last message, "thinking…" or the bar (${JSON.stringify(f)})`];
+  return failsOf([
+    [f.msg[1] <= f.pill[0], `the newest message's foot (${f.msg[1]}) is under the bar's top (${f.pill[0]})`],
+    [f.thinking[1] <= f.pill[0], `"thinking…" (${f.thinking}) is under the bar's top (${f.pill[0]})`],
+    [!f.over.length, `the thread runs past its right edge: ${f.over.join("; ")}`],
+  ]);
+}
+
+async function aiKeyboardCheck(page) {
+  if (!(await page.evaluate(aiStatusSetup, [FLEET_SETUP]))) return ["ai-keyboard: no folded status page for the mock fleet"];
+  await page.evaluate(aiFoldSet, [0, false]);
+  await aiThreadProbe(page);
+  const kb = 330;
+  await page.evaluate(aiKeyboardUp, kb);
+  const f = await page.evaluate(aiKeyboardFacts, kb);
+  await page.screenshot({ path: "/cache/ai-keyboard-folded.png" });
+  await page.evaluate(aiKeyboardDown);
+  const side = await page.evaluate(aiSideButton);
+  if (!f.pill || !f.chat || !f.last) return [`ai-keyboard: missing the field, the chat or a message (${JSON.stringify(f)})`];
+  return aiKeyboardFails(f, side).map((x) => `ai-keyboard: ${x}`);
+}
+
+/** [f] the keyboard's facts, [side] the side button's: what's wrong. */
+function aiKeyboardFails(f, side) {
+  const at = JSON.stringify(f);
+  return failsOf([
+    [Math.abs(f.pill[1] + 8 - f.kbTop) <= 12, `the field's foot (${f.pill[1]}) isn't on the keyboard's top (${f.kbTop}): ${at}`],
+    [!f.segs, `the tabs show while typing: ${at}`],
+    [f.fields === 1, `${f.fields} inputs visible above the keyboard, not one`],
+    [!f.over.length, `the thread runs past its right edge: ${f.over.join("; ")}`],
+    [f.tops.every((t) => t >= 45 - 1) && f.scrollY === 0, `something sits under the status bar (tops ${f.tops}, scrollY ${f.scrollY})`],
+    [f.chat[1] <= f.pill[0] + 2 && f.chat[1] - f.chat[0] > 100, `the chat (${f.chat}) doesn't fill the room down to the field (${f.pill})`],
+    [f.atNewest && f.last[1] <= f.pill[0] + 2 && f.last[0] >= f.chat[0] - 2, `the newest message (${f.last}) isn't visible over the field (${f.pill}, chat ${f.chat})`],
+    [side.said.at(-1) === true && side.said.includes(false), `the page didn't tell the host it's up/down (ai.pageShown ${JSON.stringify(side.said)})`],
+    [side.focused && side.bars === 1, `"ai.focus" (the side button over the page) didn't focus the page's one field (focused ${side.focused}, ${side.bars} bars)`],
+  ]);
+}
+
 async function aiStatusCheck(page) {
   if (!(await page.evaluate(aiStatusSetup, [FLEET_SETUP]))) return ["folded: the status page shows no Working now rows for the mock fleet"];
   const fails = [];
@@ -3610,6 +3884,125 @@ async function aiSegsSwitch() {
     if (!document.querySelector(".ai-screen .ai-left > .ais-top")) fails.push(`with "${name}" the status column is gone`);
     fails.push(...segsAtFoot(name));
   }
+  return fails;
+}
+
+/**
+ * In the page: one try card on the AI page's stack, its report screenshot and, [after], the fix's after shot (`task set
+ * --image P --image-kind after`: an "after:" entry). The user, 2026-11-01: "this is showing the old screenshot that I
+ * took... it should show me a comparison between the old and new with a ss taken from the emu".
+ */
+async function aiTryPairSetup(after) {
+  const G = window.__gw;
+  const [S, P, T, K] = await Promise.all([G.mod("./state.ts"), G.mod("./ui/powai.tsx"), G.mod("./ui/trycard.tsx"), G.mod("./ui/aistack.tsx")]);
+  T.answers.value = {};
+  K.trying.value = null;
+  const now = Date.now();
+  const images = ["/home/powos/design-qa/gate-before.png", ...(after ? ["after:/home/powos/design-qa/gate-after.png"] : [])];
+  P.board.value = [{ id: "tp-raise", title: "Raise a window behind another", owner: "coder", status: "waiting", note: "", project: "Windows", created: now - 9e6, updated: now - 1e4, done: 0, progressDone: 0, progressTotal: 0, step: "", steps: "", commits: '[{"sha":"abc1234","subject":""}]', images: JSON.stringify(images), activity: now - 1e4, tryLine: "Tap a window behind another: it comes to the front" }];
+  P.checks.value = [];
+  S.page.value = -1;
+  const col = ".ai-screen:is(.status, .panes)";
+  const want = after ? "both" : "before";
+  await G.until(() => document.querySelector(`${col} .ais-card-top .ais-pair[data-pair="${want}"]`), 3000);
+  await G.until(() => [...document.querySelectorAll(`${col} .ais-pair img`)].every((i) => i.complete && i.naturalWidth > 0), 3000);
+  const anims = document.getAnimations().filter((a) => document.querySelector(col)?.contains(a.effect?.target) && a.effect.getTiming().iterations !== Infinity);
+  await Promise.race([Promise.all(anims.map((a) => a.finished.catch(() => 0))), new Promise((r) => setTimeout(r, 1200))]);
+}
+
+/** In the page: the try card's picture labels - "before | after", or "what you reported" + "after: coming" - and each loaded. */
+function aiTryPairLabels(after) {
+  const pair = document.querySelector(`.ai-screen:is(.status, .panes) .ais-card-top .ais-pair`);
+  if (!pair) return ["the try card has no picture pair"];
+  const labels = [...pair.querySelectorAll(".ais-pic-label")].map((l) => l.textContent.trim()).join(" | ");
+  const coming = pair.querySelector(".ais-pic-coming")?.textContent.trim() ?? "";
+  const [want, wantComing] = after ? ["before | after", ""] : ["what you reported", "after: coming"];
+  const fails = [...pair.querySelectorAll("img")].filter((i) => !i.naturalWidth).map((i) => `a picture didn't load (${i.getAttribute("src")})`);
+  if (labels !== want) fails.push(`the pictures are labelled [${labels}], not [${want}]`);
+  if (coming !== wantComing) fails.push(`it says "${coming}" for the after, not "${wantComing}"`);
+  return fails;
+}
+
+/** In the page: the card, its pair and the before / after boxes (null: no pair of two). */
+function aiTryPairBoxes() {
+  const card = document.querySelector(".ai-screen:is(.status, .panes) .ais-card-top");
+  const pair = card?.querySelector(".ais-pair");
+  const [b, a] = [...(pair?.querySelectorAll(".ais-pic") ?? [])].map((p) => p.getBoundingClientRect());
+  return a ? { card, pair, b, a } : null;
+}
+
+/** In the page, folded: before and after side by side in a sideways-snapping strip (swiped between when they don't fit). */
+function aiTryPairFolded() {
+  const got = window.__tpBoxes();
+  if (!got) return ["no before and after pictures"];
+  const { pair, b, a } = got, cs = getComputedStyle(pair);
+  const fails = Math.abs(b.top - a.top) > 1 ? [`before and after aren't side by side (tops ${Math.round(b.top)} / ${Math.round(a.top)})`] : [];
+  if (cs.overflowX !== "auto") fails.push("the pair isn't a swipeable strip (it can't scroll sideways)");
+  if (!cs.scrollSnapType.includes("x")) fails.push("the pair doesn't snap to a picture");
+  return fails;
+}
+
+/** In the page, unfolded: before and after side by side, both inside the card, one width. */
+function aiTryPairUnfolded() {
+  const got = window.__tpBoxes();
+  if (!got) return ["no before and after pictures"];
+  const { b, a } = got, c = got.card.getBoundingClientRect();
+  const fails = Math.abs(b.top - a.top) > 1 ? [`before and after aren't side by side (tops ${Math.round(b.top)} / ${Math.round(a.top)})`] : [];
+  if (a.right > c.right - 8 || b.left < c.left + 8) fails.push(`the pair [${Math.round(b.left)}, ${Math.round(a.right)}] isn't inside the card [${Math.round(c.left)}, ${Math.round(c.right)}]`);
+  if (Math.abs(a.width - b.width) > 2) fails.push(`before and after aren't the same width (${Math.round(b.width)} / ${Math.round(a.width)})`);
+  return fails;
+}
+
+/** In the page: the buttons in the --status-* tokens - works the positive one, still broken neutral, later quiet. */
+function aiTryPairActs() {
+  const card = document.querySelector(".ai-screen:is(.status, .panes) .ais-card-top");
+  const bg = (q) => getComputedStyle(card.querySelector(q) ?? card).backgroundColor;
+  const probe = document.createElement("span");
+  probe.style.backgroundColor = "color-mix(in srgb, var(--status-working) 45%, transparent)";
+  card.append(probe);
+  const positive = getComputedStyle(probe).backgroundColor;
+  probe.remove();
+  const [yes, no, later] = [bg(".ais-act.yes"), bg(".ais-act.no"), bg(".ais-act.later")];
+  const fails = yes === positive ? [] : [`"works" is ${yes}, not the positive status ${positive}`];
+  if (no === positive || no === yes) fails.push(`"still broken" isn't neutral (${no})`);
+  if (!/rgba\(0, 0, 0, 0\)|transparent/.test(later)) fails.push(`"later" isn't quiet (filled ${later})`);
+  return fails;
+}
+
+/** In the page: a tap on the last picture opens it full screen under its label ([label]); closed again. */
+async function aiTryPairFull(label) {
+  [...document.querySelectorAll(`.ai-screen:is(.status, .panes) .ais-card-top .ais-pair .ais-shot`)].at(-1)?.click();
+  const full = await window.__gw.until(() => document.querySelector(".present-full img.ai-img-full"), 1500);
+  const title = document.querySelector(".present-full .present-title")?.textContent ?? "";
+  document.querySelector(".present-full .present-close")?.click();
+  if (!full) return ["a tap on the picture didn't open it full screen"];
+  return title.startsWith(label) ? [] : [`full screen is titled "${title}", not the picture's label "${label}"`];
+}
+
+/** One state's checks ([after] shot or not, [folded] or not), named for the gate's line. */
+async function aiTryPairFails(page, after, folded) {
+  const fails = [...(await page.evaluate(aiTryPairLabels, after)), ...(await page.evaluate(aiTryPairActs))];
+  if (after) {
+    await page.evaluate(`window.__tpBoxes = ${aiTryPairBoxes}`);
+    fails.push(...(await page.evaluate(folded ? aiTryPairFolded : aiTryPairUnfolded)));
+  }
+  fails.push(...(await page.evaluate(aiTryPairFull, after ? "after" : "what you reported")));
+  return fails;
+}
+
+/** The try card's before | after, folded and unfolded, with and without the after shot: /cache/try-pair-<size>-<state>.png. */
+async function aiTryPairCheck(page) {
+  const fails = [];
+  for (const [size, vp] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]]) {
+    await page.setViewport(vp);
+    await page.evaluate((w) => window.__gw.until(() => innerWidth === w, 3000), vp.width);
+    for (const after of [true, false]) {
+      await page.evaluate(aiTryPairSetup, after);
+      fails.push(...(await aiTryPairFails(page, after, size === "folded")).map((f) => `${size} ${after ? "with after" : "no after"}: ${f}`));
+      await page.screenshot({ path: `/cache/try-pair-${size}-${after ? "after" : "before"}.png` });
+    }
+  }
+  await page.setViewport({ width: 404, height: 900 });
   return fails;
 }
 
@@ -3902,6 +4295,64 @@ async function agentConvoCheck(page, label) {
   return fails;
 }
 
+/** The raw hook events of the user's 11-01 screenshot: 9 shell calls, the hand-back, 6 log tails (agent-activity). */
+const agentRawEvents = (id, base) => [
+  { kind: "prompt", name: "", hint: "Back gesture goes to the focused window" },
+  ...Array.from({ length: 9 }, () => ({ kind: "tool", name: "Bash", hint: "cd ~/pw/quickpage-back && git status", ok: true, ms: 3000 })),
+  { kind: "tool", name: "SubagentHandback", hint: "SubagentHandback", ok: true },
+  ...Array.from({ length: 6 }, () => ({ kind: "tool", name: "Bash", hint: "tail -3 /tmp/qpb-gate.log", ok: true, ms: 2500 })),
+  { kind: "tool", name: "Read", hint: "shell/ui/agents.tsx", ok: true },
+  { kind: "fail", name: "Bash", hint: "cd ~/pw/x && make" },
+].map((e, i) => ({ id: base + i, agent: id, ts: Date.now() - 60_000 + i * 1000, n: 1, ms: 0, ok: null, ...e }));
+
+/** Its transcript: tool calls with raw hints and output, the hand-back with its summary. */
+const agentRawConvo = () => [
+  { kind: "user", text: "make back go to the focused window" },
+  { kind: "tool", name: "Bash", hint: "cd ~/pw/quickpage-back", ok: true, out: "/Users/macback/pw/quickpage-back" },
+  { kind: "tool", name: "Bash", hint: "tail -3 /tmp/qpb-gate.log", ok: true, out: "gate rc=0" },
+  { kind: "assistant", text: "Back now goes to the focused window." },
+  { kind: "tool", name: "SubagentHandback", hint: "back follows the focused window, gate green", ok: true },
+];
+
+/** In the page: [events] (and [convo] when given) sent for [id]; every row's text of the agent page once it shows. */
+async function agentRawSend([id, events, convo]) {
+  const G = window.__gw;
+  const E = window.__mockEvents;
+  E.emit("agents.delta", { eventsOf: id, events, ...(convo ? { convo } : {}) });
+  await G.until(() => document.querySelector(convo ? ".ai-screen .ag-convo .msg" : ".ai-screen .ag-activity .ag-tool"), 3000);
+  await new Promise((r) => setTimeout(r, 150));
+  for (const b of document.querySelectorAll(".ai-screen .ag-convo .tl-row")) b.click();
+  await new Promise((r) => setTimeout(r, 100));
+  const box = document.querySelector(convo ? ".ai-screen .ag-convo" : ".ai-screen .ag-activity");
+  return box ? box.innerText : "";
+}
+
+/**
+ * An agent's live view never shows the machine's words (the user, 11-01: "wtf is up with the activity of this agent"):
+ * hook events and a transcript full of shell calls read as plain lines - no "cd ", "tail ", "ran:", tool name or path.
+ */
+async function agentActivityCheck(page) {
+  await page.evaluate(aiTermsSetup, "folded");
+  await page.evaluate(aiTermsFleet, FLEET_SETUP);
+  await page.evaluate(() => window.__gw.until(() => document.querySelector(".ai-screen .ais-sec[data-sec=working] .ais-work-row"), 3000));
+  const id = await page.evaluate(agentConvoOpen);
+  if (!id) return ["agent-activity: tapping a Working now row didn't open its agent"];
+  await page.evaluate(aiTermsFleet, FLEET_SETUP);
+  const bad = /\bcd |\btail |SubagentHandback|\bBash\b|ran:|~\/|\/tmp|\/Users|\.log\b|\.tsx?\b/;
+  const fails = [];
+  const acts = await page.evaluate(agentRawSend, [id, agentRawEvents(id, 900000), null]);
+  if (!acts) fails.push("agent-activity: no Activity rows");
+  for (const l of acts.split("\n").filter((x) => bad.test(x))) fails.push(`agent-activity: raw row "${l}"`);
+  if (!/working · 9 steps|worked · 9 steps/.test(acts)) fails.push(`agent-activity: the 9 shell calls aren't one "9 steps" line:\n${acts}`);
+  if (!/handed back/.test(acts)) fails.push("agent-activity: no hand-back line");
+  await page.screenshot({ path: "/cache/agent-activity.png" });
+  const convo = await page.evaluate(agentRawSend, [id, [], agentRawConvo()]);
+  for (const l of convo.split("\n").filter((x) => bad.test(x))) fails.push(`agent-activity convo: raw row "${l}"`);
+  if (!/Handed back: back follows the focused window/.test(convo)) fails.push(`agent-activity convo: the hand-back isn't its summary:\n${convo}`);
+  if (!/Back now goes to the focused window/.test(convo)) fails.push("agent-activity convo: the reply is missing");
+  return fails;
+}
+
 /**
  * In the page: [steps] tapped in turn (each a selector, or [selector, text] for the one whose text starts so), from the
  * AI page with nothing open, until the terminal of [want] ("host:session") shows; fails with the step that wasn't there.
@@ -3929,6 +4380,107 @@ async function aiTermsTaps([steps, want]) {
 async function aiTermsFleet(body) {
   const G = window.__gw;
   await new (Object.getPrototypeOf(async function () {}).constructor)("U", "E", "sleep", body)(G.mod, window.__mockEvents, (ms) => new Promise((r) => setTimeout(r, ms)));
+}
+
+/**
+ * The Friction page (ui/aifriction.tsx; the user, 2026-11-01 22:41 / 23:01: "fricticon page is trash" - raw log lines
+ * with hashes, exit codes, file names and kebab tags in one box). With ~20 logged rows: every collapsed row is a plain
+ * line (no path, no "f123" id, no hash, no shell command or flag), the rows and the areas worst first (P0 before P1
+ * before the rest), repeats merged, details only after a tap, nothing past the screen's edge.
+ */
+async function frictionSetup() {
+  const G = window.__gw;
+  const [S, B] = await Promise.all([G.mod("./state.ts"), G.mod("./ui/aiboard.tsx")]);
+  const now = Date.now();
+  const r = ([n, area, kind, title, count, ageMin], more = {}) => ({ id: `f${n}`, area, kind, title, count, status: "open", last: now - ageMin * 6e4, first: now - ageMin * 6e4 - 864e5, details: `${title} - the whole log is in /home/powos/logs/run-${n}.log`, repro: `bin/powos ship --apk --force  # f${n}`, evidence: `/tmp/powos/evidence-${n}.png`, by: "coder", fixCommit: "", fixNote: "", fixedAt: 0, reopened: 0, task: "", ...more });
+  window.__frWas = [B.friction.value, B.board.value, B.boardSeen.value];
+  B.board.value = [{ id: "gate-fr-task", title: "Shell checks: retry when the Mac is busy", owner: "coder", status: "working", note: "", project: "", created: now - 9e5, updated: now - 6e4, done: 0, severity: 2 }];
+  B.friction.value = [
+    r([30, "gate", "flaky-check", "shell gate failed while the Mac's load was high", 543, 0], { task: "gate-fr-task" }),
+    r([41, "permissions", "refused", "Bash refused by the permission system: cd", 14, 1440]),
+    r([42, "permissions", "refused", "Bash refused by the permission system: Run", 3, 2880]),
+    r([51, "ship", "refused", "ship 68221469a (apk) FAILED rc 5: ship-apk: REFUSED - build-app.sh failed (above; whole log...", 9, 2880]),
+    r([52, "ship", "refused", "ship d91d143ff (apps:app-api) FAILED rc 1: install.sh: refused - the gate failed (above). Fix it, or --force to install anyway.", 9, 5760]),
+    r([53, "ship", "broken-tool", "ship 34ef9a7f1 (apk) FAILED rc 6:", 4, 49]),
+    r([54, "ship", "refused", "ship cbeb91c05 (apps:app-api health) FAILED rc 1: install.sh: refused - the gate failed (above).", 4, 5760]),
+    r([55, "ship", "refused", "ship 1d3a80acb (shell) FAILED rc 2: push.sh: refused", 40, 120]),
+    r([61, "verify", "flaky-check", "check e2e-appapi was SKIP: ENV: waiting for ship of apps (live 1d3a80acb, origin 542dbf213)", 3, 180]),
+    r([62, "verify", "flaky-check", "check launcher-scroll FAIL on phone: timeout after 30s", 7, 300]),
+    r([71, "adb", "broken-tool", "adb shell su -c dumpsys window: device offline", 61, 20]),
+    r([72, "adb", "slow", "adb push of the apk took 4 minutes", 2, 600]),
+    r([81, "worktree", "unclear-rule", "tools/agents/worktree.sh new: which base branch?", 5, 900]),
+    r([82, "git", "broken-tool", "git push -u origin HEAD rejected: non-fast-forward", 12, 240]),
+    r([83, "git", "other", "x521 merge conflict in shell/ui/shell.css", 2, 1200]),
+    r([91, "stdb", "slow", "spacetime publish took 9 minutes on agents module", 3, 2000]),
+    r([92, "board", "unclear-rule", "task set --step overwrote the note", 1, 3000]),
+    r([93, "build", "broken-tool", "apps/build.sh: esbuild crashed with SIGKILL (out of memory)", 6, 400]),
+    r([94, "phone", "slow", "the WebView took 40 s to boot after an install", 18, 90]),
+    r([95, "gate", "flaky-check", "design-lint-contrast failed once then passed", 2, 60], { status: "fixed", fixCommit: "abc1234def", fixNote: "the contrast probe waits for fonts", fixedAt: now - 36e5 }),
+  ];
+  B.boardSeen.value = true;
+  S.page.value = -1;
+  S.aiScreen.value = "friction";
+  return !!(await G.until(() => document.querySelectorAll(".afr .afr-row").length >= 8, 4000));
+}
+
+/** In the page: each collapsed row's text, severity, area order, and anything past the screen's right edge. */
+function frictionFacts() {
+  const secs = [...document.querySelectorAll(".afr > .afr-sec")];
+  const areas = secs.map((s) => ({ name: s.getAttribute("aria-label"), sevs: [...s.querySelectorAll(".afr-item")].map((i) => Number(i.dataset.sev)) }));
+  const rows = [...document.querySelectorAll(".afr .afr-row")].map((b) => b.textContent.replace(/\s+/g, " ").trim());
+  const over = [...document.querySelectorAll(".afr, .afr *")].filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.right > innerWidth + 1; }).map((e) => e.className).slice(0, 3);
+  return { areas, rows, over, details: document.querySelectorAll(".afr .afr-detail").length, chips: document.querySelectorAll(".afr .ais-sev").length };
+}
+
+const FR_RAW = [
+  [/\S*\/\S*/, "a path"],
+  [/\bf\d+\b|\bx\d+\b/, "an id"],
+  [/\b[0-9a-f]{7,40}\b/, "a hash"],
+  [/\brc ?\d+\b|(^|\s)--?[a-z]|\.(sh|py|ts|tsx|mjs|log|png)\b|\b(adb|git|bin|powos|sudo|su -c|cd)\s/i, "a shell command"],
+  [/\bnow ago\b/, '"now ago"'],
+];
+
+/** Collapsed rows with raw tokens in them. */
+const frictionRawFails = (rows) => rows.flatMap((t) => FR_RAW.filter(([re]) => re.test(t)).map(([, what]) => `a collapsed row shows ${what}: "${t}"`));
+
+/** Rows and areas not worst first, the P0 not first, the failed updates not merged. */
+function frictionOrderFails(areas) {
+  const open = areas.filter((a) => a.name !== "Fixed recently");
+  const fails = open.filter((a) => a.sevs.some((s, i) => i && s > a.sevs[i - 1])).map((a) => `"${a.name}" isn't worst first (${a.sevs})`);
+  const firsts = open.map((a) => a.sevs[0]);
+  if (firsts.some((s, i) => i && s > firsts[i - 1])) fails.push(`the areas aren't worst first (${open.map((a) => `${a.name} ${a.sevs[0]}`).join(", ")})`);
+  if (open[0]?.sevs[0] !== 2) fails.push("the P0 (543x, its task P0) isn't first");
+  const ship = open.find((a) => a.name === "Updates");
+  if (!ship || ship.sevs.length > 3) fails.push(`the six failed updates aren't merged per app (${ship?.sevs.length ?? 0} rows)`);
+  return fails;
+}
+
+function frictionFails(f, label) {
+  return [
+    ...failsOf([
+      [f.rows.length >= 8, `only ${f.rows.length} rows`],
+      [!f.details, `${f.details} rows show details before a tap`],
+      [!f.over.length, `past the right edge: ${f.over.join(", ")}`],
+    ]),
+    ...frictionRawFails(f.rows),
+    ...frictionOrderFails(f.areas),
+  ].map((x) => `${label}: ${x}`);
+}
+
+async function frictionCheck(page, label) {
+  if (!(await page.evaluate(frictionSetup))) return [`${label}: the Friction page showed no rows`];
+  await page.evaluate(() => window.__gw.frames(20));
+  const fails = frictionFails(await page.evaluate(frictionFacts), label);
+  await page.screenshot({ path: `/cache/friction-${label}.png` });
+  await page.evaluate(() => document.querySelector(".afr .afr-row")?.click());
+  if (!(await page.evaluate(() => window.__gw.until(() => document.querySelector(".afr .afr-detail"), 2000)))) fails.push(`${label}: a tap opened no details`);
+  await page.evaluate(() => window.__gw.frames(20));
+  await page.screenshot({ path: `/cache/friction-${label}-open.png` });
+  await page.evaluate(async () => {
+    const B = await window.__gw.mod("./ui/aiboard.tsx");
+    [B.friction.value, B.board.value, B.boardSeen.value] = window.__frWas;
+  });
+  return fails;
 }
 
 /**
@@ -4001,7 +4553,7 @@ async function aiUnfoldedCheck(page) {
     if (!(await page.evaluate(aiChatSetup, [3, `-${size}-uf`]))) { fails.push(`${size}: the chat's try message didn't render`); continue; }
     await page.evaluate(aiPanesRest);
     if (size === "unfolded") fails.push(...(await page.evaluate(aiUnfoldedFollow)).map((f) => `${size} follow: ${f}`));
-    fails.push(...[...(await page.evaluate(aiPanesFails)), ...(await page.evaluate(aiColumnsContent)), ...(await page.evaluate(aiPanesGlassFails)), ...(await page.evaluate(aiSegsSwitch))].map((f) => `${size}: ${f}`));
+    fails.push(...[...(await page.evaluate(aiPanesFails)), ...(await page.evaluate(aiColumnsContent)), ...(await page.evaluate(aiPanesGlassFails)), ...(await page.evaluate(aiSegsSwitch)), ...(await page.evaluate(aiNestedBoxes, [".ai-screen .ai-left", ".ai-screen .ai-right"]))].map((f) => `${size}: ${f}`));
     await page.screenshot({ path: `/cache/ai-unfolded-${size}-chat.png` });
     await page.evaluate(aiChatRestore);
     if (size === "unfolded") fails.push(...(await aiUnfoldedRows(page)));
@@ -4083,6 +4635,11 @@ async function editSearchCheck() {
   const S = await window.__gw.mod("./state.ts");
   const fails = [];
   for (const place of ["bottom", "right"]) fails.push(...(await window.__es.at(S, place)));
+  // Wave 2 (the manager's review): home's page dots keep their own row in edit mode - with the pill above (barOnHome)
+  // and with the screen's default search (folded: the docked button they sat behind).
+  fails.push(...(await window.__es.dotsAt(S, "the pill", false)), ...(await window.__es.dotsAt(S, "the pill")));
+  S.searchTry.value = "";
+  fails.push(...(await window.__es.dotsAt(S, "the default search", false)), ...(await window.__es.dotsAt(S, "the default search")));
   S.editing.value = false;
   S.dockTry.value = "";
   return fails;
@@ -4105,6 +4662,25 @@ const editSearchHelpers = `window.__es = {
     if (E.box(now) !== E.box(was)) out.push(\`\${at}: the search bar changed from \${E.box(was)} to \${E.box(now)}\`);
     if (getComputedStyle(el).background !== glass) out.push(\`\${at}: the search bar's glass changed\`);
     if (sheet.top < now.bottom - 1) out.push(\`\${at}: the edit bar (top \${Math.round(sheet.top)}) isn't below the search bar (bottom \${Math.round(now.bottom)})\`);
+    return out;
+  },
+  // Home's page dots in edit mode: their box meets none of the foot's (the pill, the search button, the edit bar).
+  dotsAt: async (S, search, editing = true) => {
+    const E = window.__es, at = \`\${editing ? "edit mode" : "home"}, \${search}\`;
+    S.dockTry.value = "bottom";
+    S.editing.value = editing;
+    await window.__gw.settled(() => !editing || document.querySelector(".home.editing > .edit-sheet"));
+    await new Promise((ok) => setTimeout(ok, 250)); // the foot's rise
+    const dots = document.querySelector(".home-dots .page-dots");
+    if (!E.shown(dots)) return [];
+    const d = dots.getBoundingClientRect();
+    const out = [];
+    for (const el of document.querySelectorAll(".home > .bar .bar-pill, .home .dsb-glass, .home > .edit-sheet")) {
+      if (!E.shown(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width && r.height && d.left < r.right && r.left < d.right && d.top < r.bottom && r.top < d.bottom)
+        out.push(\`\${at}: the page dots (\${Math.round(d.top)}-\${Math.round(d.bottom)}) overlap \${el.className.split(" ")[0]} (\${Math.round(r.top)}-\${Math.round(r.bottom)})\`);
+    }
     return out;
   },
   at: async (S, place) => {
@@ -5631,6 +6207,57 @@ async function petOverlayOffScene() {
     delete document.visibilityState;
     document.dispatchEvent(new Event("visibilitychange"));
   }
+  return fails;
+}
+
+/**
+ * App badge (host.badge, apps/badge.ts; the user, 11-01: "I shouldn't see the red dot unless there's unread stuff"):
+ * What needs me's icon on home (a tile), in the dock and in the drawer carries the shell's dot only while the app's
+ * count is above 0 - none at 0, one at 2, gone again at 0, live with each call - and the count survives a reload.
+ */
+async function appBadgeScene() {
+  const P = await window.__gw.mod("./apps/pages.ts");
+  const S = await window.__gw.mod("./state.ts");
+  const B = await window.__gw.mod("./apps/badge.ts");
+  const { host } = await window.__gw.mod("./apps/stdb.ts");
+  const id = "local.needs-me", key = `p:${id}`;
+  if (!host.badge) return ["host.badge is missing (apps/stdb.ts IslandHost)"];
+  P.installedApps.value = [...P.installedApps.value.filter((a) => a.id !== id), { id, name: "What needs me", version: "0", database: "", tier: 0, manifest: JSON.stringify({ icon: "icon.svg", page: { entry: "pages/main.js" } }) }];
+  S.dock.value = [...S.dock.value.filter((k) => k !== key), key];
+  const pageNo = S.pages.value[S.page.value] ?? 1;
+  S.home.value = { ...S.home.value, items: [...S.home.value.items.filter((i) => i.key !== "gate-badge"), { key: "gate-badge", kind: "app", app: key, label: "What needs me", page: pageNo, cell: { x: 0, y: 0, w: 1, h: 1 }, resizable: false, minSize: [1, 1], size: null }] };
+  host.badge(id, 0);
+  const places = { home: `.page:not(.away) [data-key="gate-badge"] .app-icon`, dock: `.dock .app[data-key="${key}"] .app-icon` };
+  const fails = [];
+  const look = () => Object.fromEntries(Object.entries(places).map(([n, q]) => [n, [...document.querySelectorAll(q)].map((el) => !!el.querySelector(".app-badge"))]));
+  const check = async (n, want) => {
+    host.badge(id, n);
+    await window.__gw.frames(3);
+    for (const [where, dots] of Object.entries(look())) {
+      if (!dots.length) fails.push(`unread ${n}: no What needs me icon in the ${where}`);
+      else if (dots.some((d) => d !== want)) fails.push(`unread ${n}: the ${where} icon ${want ? "has no dot" : "shows a dot"}`);
+    }
+  };
+  await window.__gw.settled(() => Object.values(places).every((q) => document.querySelector(q)));
+  await check(0, false);
+  await check(2, true);
+  if (JSON.parse(localStorage.getItem("powos.badges") ?? "{}")[id] !== 2) fails.push("the count isn't kept for a reload (powos.badges)");
+  // The drawer: its icon with the dot while the count is 2, without once it's 0 (live, the drawer open).
+  S.drawer.value = 1;
+  const inDrawer = `.launcher-clip .app[data-key="${key}"] .app-icon`;
+  await window.__gw.settled(() => document.querySelector(inDrawer));
+  const drawerDot = () => document.querySelector(inDrawer)?.querySelector(".app-badge");
+  if (!document.querySelector(inDrawer)) fails.push("no What needs me icon in the drawer");
+  else if (!drawerDot()) fails.push("unread 2: the drawer icon has no dot");
+  host.badge(id, 0);
+  await window.__gw.frames(3);
+  if (drawerDot()) fails.push("unread 0: the drawer icon still shows a dot");
+  S.drawer.value = 0;
+  await check(0, false);
+  if (B.badges.value[id] !== undefined) fails.push("unread 0 left a count behind");
+  window.__appBadge = fails.length ? "failed" : "home, dock, drawer: dot only above 0, live";
+  S.home.value = { ...S.home.value, items: S.home.value.items.filter((i) => i.key !== "gate-badge") };
+  S.dock.value = S.dock.value.filter((k) => k !== key);
   return fails;
 }
 
@@ -7423,6 +8050,7 @@ async function quickPageScene(r, folded) {
   };
   try {
     const out = await r.page.evaluate(quickPageChecks, folded);
+    out.push(...(await r.page.evaluate(quickSearchReturn)));
     if (!out.length) await shot(folded ? "folded" : "unfolded");
     return out;
   } finally {
@@ -7668,6 +8296,60 @@ async function quickPageChecks(folded) {
   }
   fails.push(...(await j.closes()), ...(await j.failure()));
   return fails;
+}
+
+/**
+ * QP3 (the user, 11-01: "it's closing when returning back"): search "hotspot" -> its settings result opens as a card ->
+ * the card closes (its page's Back at the root: the host's "webwindows.closed") -> the search is back with "hotspot" and
+ * its results; a second Back closes it. The pop-out (↗) leaves the search closed. In the page (the stubbed host of QP1).
+ */
+async function quickSearchReturn() {
+  const q = window.__qp;
+  const [S, B] = await Promise.all(["./state.ts", "./bridge.ts"].map((m) => window.__gw.mod(m)));
+  const was = B.powos.qs.destinations;
+  B.powos.qs.destinations = async () => [{ id: "settings:OPLUS_WIFI_AP_SETTINGS", label: "Personal hotspot", keywords: "hotspot tethering", package: "com.oplus.wirelesssettings", app: "Settings" }];
+  const wait = async (ok) => {
+    for (let i = 0; i < 80 && !ok(); i++) await new Promise((r) => setTimeout(r, 25));
+    await window.__gw.settled();
+    return ok();
+  };
+  const row = () => [...document.querySelectorAll(".drawer.shown [data-search-result]")].find((el) => el.textContent.includes("Personal hotspot"));
+  const card = async () => {
+    S.openPanel("apps");
+    S.query.value = "hotspot";
+    if (!(await wait(row))) return 'QP3: searching "hotspot" shows no "Personal hotspot" result';
+    row().click();
+    return (await wait(() => q.cards().length === 1)) ? "" : `QP3: the hotspot result opened ${q.cards().length} cards (want 1)`;
+  };
+  // The card's page's Back at its root (the host closes its window): the search is back, then a second Back closes it.
+  const closed = async () => {
+    window.__mockEvents.emit("webwindows.closed", q.W.webWins.value.find((w) => w.quick)?.id);
+    await wait(row);
+    const out = [];
+    const back = !q.cards().length && S.drawer.value > 0 && S.query.value === "hotspot" && row();
+    if (!back) out.push(`QP3: after the card closed: ${q.cards().length} cards, drawer ${S.drawer.value}, query "${S.query.value}", hotspot row ${!!row()} (want the search back with "hotspot" and its result)`);
+    S.back();
+    await window.__gw.settled();
+    if (S.drawer.value !== 0) out.push("QP3: a second Back left the search open");
+    return out;
+  };
+  // The pop-out (↗): its app's window - the search stays closed.
+  const popped = async () => {
+    q.cards()[0]?.querySelector('[aria-label="Open in its app"]')?.click();
+    await window.__gw.settled();
+    await new Promise((r) => setTimeout(r, 200));
+    return S.drawer.value === 0 ? [] : ["QP3: the pop-out (↗) reopened the search under the app's window"];
+  };
+  try {
+    const first = await card();
+    if (first) return [first];
+    const out = await closed();
+    const second = await card();
+    return second ? [...out, second] : [...out, ...(await popped())];
+  } finally {
+    B.powos.qs.destinations = was;
+    S.closeDrawer(true);
+  }
 }
 
 /** MX1's two windows (a Linux and an Android one, floating on page 0), their full screen button and checks. */
@@ -8191,6 +8873,114 @@ async function webWindowTabsCheck() {
     W.stacks.value = [];
     W.tabView.value = W.dropView.value = null;
   }
+}
+
+/**
+ * WT3 (the user, 11-01: "if I try to drag an app maximized like this it should tab with the existing maximized app"):
+ * an Android window's bar dragged over a maximised Linux window's middle aims a tab drop (its strip lit, a ghost tab, no
+ * tile / snap / free-region rect); let go: one stack of two, maximised, the dropped one shown. At the left edge it
+ * still snaps (no tab, the left half). Helpers: window.__tmx (the scene's two windows, the drags).
+ */
+async function TABS_MAX_HELPERS() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const g = window.__tabg;
+  const page = S.pages.value[0];
+  const bar = () => g.frame(952).querySelector(".webwindow-title");
+  window.__tmx = {
+    W,
+    g,
+    async fresh() {
+      S.page.value = 0;
+      W.stacks.value = [];
+      W.tilings.value = {};
+      W.webWins.value = [
+        { id: 951, key: "l:org.kde.dolphin", label: "Dolphin", page, x: 40, y: 120, w: 360, h: 280, live: true },
+        { id: 952, key: "a:gate.tabmax", label: "X", page, x: 300, y: 360, w: 320, h: 260, live: true },
+      ];
+      await window.__gw.settled();
+      W.toggleMaximise(951);
+      W.webWins.value = [...W.webWins.value].sort((x, y) => x.id - y.id);
+      await new Promise((ok) => setTimeout(ok, 300));
+      await window.__gw.settled();
+    },
+    /** X's bar held at [to] (the area's middle, or its left edge when [edge]). */
+    async hold(edge) {
+      const A = W.tileArea();
+      const b = bar().getBoundingClientRect();
+      g.at = [edge ? A.left + 6 : (A.left + A.right) / 2, (A.top + A.bottom) / 2];
+      await g.drag(bar(), [b.left + 60, b.top + b.height / 2], g.at, true);
+    },
+    done() {
+      W.webWins.value = [];
+      W.tilings.value = {};
+      W.stacks.value = [];
+      W.tabView.value = W.dropView.value = W.snapView.value = W.placeView.value = null;
+    },
+  };
+  return [];
+}
+
+/** WT3's judges: what the hold over the middle shows, what the drop made, what the left edge does. */
+function TABS_MAX_JUDGES() {
+  const t = window.__tmx;
+  const off = (r, b) => !r || [r.left - b.left, r.width - b.width, r.height - b.height].some((d) => Math.abs(d) > 3);
+  Object.assign(t, {
+    aimed() {
+      const { W, g } = t;
+      const v = W.tabView.value;
+      const fails = v?.target === 951 ? [] : [`WT3: over a maximised window's middle the tab target is ${JSON.stringify(v)} (want 951)`];
+      if (!g.frame(951)?.querySelector(".ww-tab.ghost")) fails.push("WT3: no ghost tab in the maximised window's strip");
+      const rect = W.dropView.value || W.snapView.value || W.placeView.value?.kind === "region";
+      return rect ? [...fails, "WT3: a rect preview shows over the maximised window (want only the ghost tab)"] : fails;
+    },
+    dropped(max) {
+      const { W, g } = t;
+      const s = W.stacks.value;
+      const fails = s.length === 1 && s[0].ids.join() === "951,952" && s[0].active === 952 ? [] : [`WT3: after the drop stacks ${JSON.stringify(s)} (want [951,952] showing 952)`];
+      if (!W.webWins.value.find((w) => w.id === 952)?.restore) fails.push("WT3: the dropped tab isn't maximised");
+      return off(g.frame(952)?.getBoundingClientRect(), max) ? [...fails, "WT3: the group's frame isn't the maximised frame"] : fails;
+    },
+    edged() {
+      const { W } = t;
+      const fails = W.tabView.value ? [`WT3: at the left edge a tab drop aims ${JSON.stringify(W.tabView.value)} (want the snap)`] : [];
+      return W.snapView.value?.slot === "left" ? fails : [...fails, `WT3: at the left edge the snap is ${JSON.stringify(W.snapView.value?.slot)} (want left)`];
+    },
+    split() {
+      const A = t.W.tileArea();
+      const l = t.g.frame(952)?.getBoundingClientRect();
+      const fails = t.W.stacks.value.length ? ["WT3: a left-edge drop made a stack"] : [];
+      return !l || Math.abs(l.left - A.left) > 12 || l.width > (A.right - A.left) * 0.6 ? [...fails, "WT3: a left-edge drop didn't take the left half"] : fails;
+    },
+  });
+  return [];
+}
+
+async function webWindowTabsMaxCheck() {
+  const t = window.__tmx;
+  try {
+    await t.fresh();
+    const max = t.g.frame(951).getBoundingClientRect();
+    await t.hold(false);
+    const fails = t.aimed();
+    await t.g.let(952);
+    fails.push(...t.dropped(max));
+    await t.fresh();
+    await t.hold(true);
+    fails.push(...t.edged());
+    await t.g.let(952);
+    return [...fails, ...t.split()];
+  } finally {
+    t.done();
+  }
+}
+
+/** WT3's scene: the tab helpers, then [webWindowTabsMaxCheck]. */
+async function tabsMaxScene(r) {
+  for (const f of [TAB_HELPERS, TABS_MAX_HELPERS, TABS_MAX_JUDGES]) await r.page.evaluate(f);
+  const out = await r.page.evaluate(webWindowTabsMaxCheck);
+  await r.page.screenshot({ path: "/cache/ww-tabs-max-unfolded.png" }).catch(() => {});
+  return out;
 }
 
 async function webWindowTileDockCheck() {
@@ -9246,6 +10036,42 @@ try {
       return ended;
     })));
   }
+  // AI P0 (the user, 11-01: "AI overlay: no dock showing, full bar, same design as the AI page"): the side button's
+  // overlay, once asked, draws the AI page's own chat (powai.tsx PageChat, .ai-page-chat - no chat.tsx ChatView of its
+  // own), no dock anywhere in it, its field the panel's full width, no hold-to-talk hint. Folded and unfolded.
+  for (const [size, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]]) {
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=assist`, `assist-overlay-${size}`, viewport).then((r) => whenReady(r, async () => {
+      await r.page.waitForSelector("form.assist-ask .pill", { timeout: READY_MS });
+      const fails = await r.page.evaluate(async () => {
+        const S = await importShim("./state.ts");
+        window.__mockEvents?.emit?.("assist.context", { text: "Inbox - 3 unread", screenshot: null });
+        const f = document.querySelector(".assist-ask textarea");
+        f.value = "what is this?";
+        f.dispatchEvent(new Event("input", { bubbles: true }));
+        document.querySelector(".assist-ask").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        await window.__gw.until(() => document.querySelector(".assist-panel .ai-page-chat"), 3000);
+        S.chat.value = { busy: false, items: [{ kind: "user", text: "what is this?" }, { kind: "assistant", text: "Your inbox: three unread." }] };
+        await new Promise((res) => setTimeout(res, 300));
+        const out = [];
+        const panel = document.querySelector(".assist-panel");
+        const chats = panel.querySelectorAll(".ai-page-chat");
+        if (chats.length !== 1) out.push(`${chats.length} AI page chats in the overlay, not one`);
+        if (panel.querySelector(".chat")) out.push("the overlay still draws chat.tsx's ChatView (.chat), a second chat component");
+        if (!panel.querySelector(".ai-page-chat .ai-chat-in > .msg.assistant")) out.push("the page chat drew no reply bubble");
+        const docks = [...document.querySelectorAll(".dock, .dock-tray")].filter((d) => { const b = d.getBoundingClientRect(); return b.width > 0 && b.height > 0 && getComputedStyle(d).visibility !== "hidden" && +getComputedStyle(d).opacity > 0; });
+        if (docks.length) out.push(`a dock is visible in the overlay (${docks.map((d) => d.className.trim()).join(", ")})`);
+        const pr = panel.getBoundingClientRect(), ps = getComputedStyle(panel);
+        const inner = pr.width - parseFloat(ps.paddingLeft) - parseFloat(ps.paddingRight);
+        // Full width: the field spans the panel's padding box (its own 2 px margin each side, as the shared bar's, aside).
+        const pill = panel.querySelector(".assist-ask .pill").getBoundingClientRect();
+        if (Math.abs(pill.width - inner) > 6) out.push(`the field is ${Math.round(pill.width)} px wide, not the panel's full ${Math.round(inner)}`);
+        if (/hold anywhere/i.test(document.body.textContent)) out.push('a "Hold anywhere to talk" hint is drawn');
+        return out;
+      });
+      await r.page.screenshot({ path: `/cache/assist-overlay-${size}.png` });
+      return fails.map((f) => `assist-overlay-${size}: ${f}`);
+    })));
+  }
   // AO3 (the user, 2026-10-31: "I'm starting two microphone conversations"): one dictation at a time - start->start
   // leaves one session, a tap on a mic while another window dictates ends that one instead of starting a second, a
   // superseded dictation leaves nothing pending (dev/mic-one-check.js; the mock's speech counts its sessions).
@@ -9386,6 +10212,9 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [name, size, folded] of [["quick-page-unfolded", { width: 821, height: 883 }, false], ["quick-page-folded", { width: 404, height: 900 }, true]])
       runs.push(open(browser, `${ORIGIN}/index.html`, name, size).then((r) => whenReady(r, () => quickPageScene(r, folded))));
+  // WT3: a window dragged over a maximised one tabs into it; at the left edge it still splits (ww-tabs-max-unfolded; the user, 11-01).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ww-tabs-max-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tabsMaxScene(r))));
   // MX1: full screen stays full screen through ticks (a Linux and an Android window, hostless and host-shaped); restore brings the floating frame back (ww-full-stays-unfolded; the user, 11-01 15:39).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-full-stays-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => fullStaysScene(r))));
@@ -9433,7 +10262,7 @@ try {
       return fails;
     })));
     // PERF5 (perf-1793474464493): no pet.overlay with the pet off, stable registry rows, the glass measure after layout.
-    for (const [name, fn, out] of [["pet-overlay-off", petOverlayOffScene, "__petOverlay"], ["stdb-rows-stable", stdbRowsStableScene, "__stdbStable"], ["glass-frame-layout", glassFrameLayoutScene, "__glassLayout"]])
+    for (const [name, fn, out] of [["pet-overlay-off", petOverlayOffScene, "__petOverlay"], ["stdb-rows-stable", stdbRowsStableScene, "__stdbStable"], ["app-badge-home", appBadgeScene, "__appBadge"], ["glass-frame-layout", glassFrameLayoutScene, "__glassLayout"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
         const fails = await r.page.evaluate(fn);
         console.log(`     ${name}: ${await r.page.evaluate((k) => window[k], out).catch(() => "?")}`);
@@ -9544,16 +10373,32 @@ try {
   // The folded AI page is a status page, not a chat (the user, 2026-10-31: "I don't wanna see the chat").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-status", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiStatusCheck(r.page))));
+  // Try cards show before | after, the after an emulator shot of the fix (the user, 2026-11-01).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "try-pair", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiTryPairCheck(r.page))));
   // Folded stacked: the strip, Needs you, one summary row, the chat filling the rest, the tabs (the manager's design, 11-01).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-folded", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiFoldedCheck(r.page))));
+  // The folded Chat with the keyboard up (the user, 11-01 21:32, P1: "chat screen broken when trying to type").
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-keyboard", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiKeyboardCheck(r.page))));
+  // Unfolded, no keyboard: the newest message and "thinking…" end over the shared bar (the user, 11-01 22:1x: "smh").
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-wide-clear", { width: 821, height: 883 }).then((r) => whenReady(r, () => aiWideClearCheck(r.page))));
   // The terminals from the AI page in at most 2 taps, both modes (the user, 11-01 16:57: "There's no terminal option anymore").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-terms", { width: 821, height: 883 }).then((r) => whenReady(r, () => aiTermsCheck(r.page))));
+  // The Friction page in plain words per area, worst first, details on a tap (the user, 11-01 22:41: "fricticon page is trash").
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `friction-${label}`, viewport).then((r) => whenReady(r, () => frictionCheck(r.page, label))));
   // An agent's page is its conversation, folded and unfolded (the user, 11-01 16:45 / 17:10; ui/agents.tsx Convo).
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `agent-convo-${label}`, viewport).then((r) => whenReady(r, () => agentConvoCheck(r.page, label))));
+  // An agent's live view in plain words, never its raw shell calls (the user, 11-01: "wtf is up with the activity").
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "agent-activity", { width: 404, height: 900 }).then((r) => whenReady(r, () => agentActivityCheck(r.page))));
   // Unfolded two columns: the status page left, the chat right under its segmented row (the manager's design, 11-01).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-unfolded", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiUnfoldedCheck(r.page))));
@@ -9603,6 +10448,7 @@ try {
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-swipe-close", { width: 404, height: 900 }).then((r) => whenReady(r, () => switcherSwipeCloseCheck(r.page))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeCheck))));
+    runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme-heal", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeHealCheck))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "page-swipe-no-haptic", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(pageSwipeNoHapticCheck))));
   if (process.env.SHELL_PAGES !== "0")
@@ -9781,10 +10627,15 @@ try {
           for (const s of surfaces) fails.push(...(await call("alignAt", s, mode, `${name} ${s} ${mode}`)));
           await r.page.screenshot({ path: `/cache/align-${name}-${mode}.png` });
         }
+        // AL4: reopened, the launcher starts at its list's start in every mode (never pre-scrolled to its end).
+        if (surfaces.includes("launcher")) fails.push(...(await call("alignOpensAtStart", where, `${name} unfolded`)));
         return fails;
       })));
     for (const [name, url] of [["folded-home", "index.html"], ["folded-shade", "index.html?mode=shade"]])
       runs.push(open(browser, `${ORIGIN}/${url}`, `align-${name}`, dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/align-check.js")).alignDefaults("folded")))));
+    // AL4 folded: the launcher over home and the overlay reopen at the list's start, top / middle / bottom.
+    for (const [name, url, where] of [["folded-launcher-home", "index.html", "home"], ["folded-launcher-pull", "index.html?mode=pull", "pull"]])
+      runs.push(open(browser, `${ORIGIN}/${url}`, `align-${name}`, dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async (w, n) => (await importShim("./dev/align-check.js")).alignOpensAtStart(w, n), where, name))));
   }
   // The same in the user's unfolded home: the dock on the right, the pill below it, 821x883 (the phone, 2026-10-28).
   if (process.env.SHELL_PAGES !== "0")
@@ -10054,6 +10905,7 @@ try {
           await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           await r.page.evaluate(`window.__shadeSeen = ${shadeSeen}`);
           r.problems.push(...((await r.page.evaluate(shadeLayout).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])) ?? []));
+          r.problems.push(...((await r.page.evaluate(ccEveryTile).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])) ?? []));
           return { ...r, ready: true, ms: Date.now() - r.started };
         }),
       );
@@ -10213,10 +11065,12 @@ function overpullInFlow() {
 
 /** The What needs me case (above): mount, then each gesture, every step in the page (window.__nm); its problems. */
 async function settleNeedsMe(r) {
-  const steps = [nmMount, nmRows, nmReply, nmSwipe, nmOpen];
+  const steps = [nmMount, nmRows, nmBadge, nmReply, nmSwipe, nmOpen, nmScale];
   try {
     await r.page.evaluate(() => new Promise((ok) => (window.importShim ? ok() : addEventListener("load", ok))));
     await r.page.evaluate(`window.__nmItems = ${nmItems.toString()}`);
+    // nmScale's helpers, as page globals (each step runs in the page by its source alone).
+    await r.page.evaluate([nmMany, nmAtSize, nmFonts, nmFit].map((f) => `window.${f.name} = ${f}`).join(";\n"));
     for (const step of steps) {
       const out = await r.page.evaluate(step);
       r.problems.push(...out);
@@ -10379,6 +11233,84 @@ function nmItems() {
   ];
 }
 
+/**
+ * The widget at every tile size (2x2 .. 4x6, the 4x3 the user's): every text at the fixed type scale (theme.css
+ * --text-body / --text-small, the Agents/Lights widgets' sizes) - a bigger tile shows more rows, never bigger letters
+ * (the user, 2026-11-01: the 4x3 tile drew "Needs me" and its one row at 26px) - every row whole inside the tile, and a
+ * message's markdown read as plain text ("**⚠️ Friction**" shown literally).
+ */
+async function nmScale() {
+  const css = getComputedStyle(document.documentElement);
+  const t = { body: parseFloat(css.getPropertyValue("--text-body")), small: parseFloat(css.getPropertyValue("--text-small")) };
+  if (!(t.body > 0 && t.small > 0)) return [`the theme's type tokens are missing (--text-body, --text-small)`];
+  window.__nm.list.items = nmMany();
+  const fails = [];
+  let prev = 0;
+  for (const size of [["2x2", 119, 128], ["2x3", 170, 196], ["4x2", 360, 170], ["4x3", 360, 251], ["4x4", 360, 360], ["4x6", 360, 540]]) {
+    const out = await nmAtSize(size, t, prev);
+    fails.push(...out.fails);
+    prev = out.rows;
+  }
+  return fails;
+}
+
+/** 8 Discord conversations, each message markdown (bold, code, italic, a link) long enough to wrap. */
+function nmMany() {
+  const now = Date.now();
+  const base = { icon: null, clearable: true, profile: null, tappable: true, conversation: true, groupConversation: false, actions: [], app: "Discord", pkg: "com.discord", text: "" };
+  return Array.from({ length: 8 }, (_, i) => ({
+    ...base,
+    key: `s${i}`,
+    title: `AgentGateway ${i}`,
+    time: now / 1000 - 60 * (i + 1),
+    messages: [{ sender: `AgentGateway ${i}`, text: `**⚠️ Friction** f${i}: \`gate.sh\` took _long_ - see [the board](https://x.example/b) and more words to wrap`, time: now - 60000 * (i + 1) }],
+  }));
+}
+
+/** The widget on a [w]x[ht] tile: the fonts at the tokens [t], every row whole, no fewer rows than [prev], no marks. */
+async function nmAtSize([name, w, ht], t, prev) {
+  const { mod, h, render, host, sleep, until } = window.__nm;
+  const root = Object.assign(document.createElement("div"), { style: `width:${w}px;height:${ht}px;position:relative` });
+  document.body.append(root);
+  render(h(mod.default, { host, app: "local.needs-me", base: "./_app/local.needs-me/", cells: [Number(name[0]), Number(name[2])] }), root);
+  const fails = [];
+  if (await until(() => root.querySelector(".nm-row"))) {
+    await sleep(150);
+    const rows = [...root.querySelectorAll(".nm-row")];
+    fails.push(...nmFonts(name, root, rows[0], t), ...nmFit(name, root, rows, prev));
+  } else fails.push(`${name}: no rows rendered`);
+  const rows = root.querySelectorAll(".nm-row").length;
+  render(null, root);
+  root.remove();
+  return { fails, rows };
+}
+
+function nmFonts(name, root, r0, t) {
+  const fs = (el) => (el ? parseFloat(getComputedStyle(el).fontSize) : NaN);
+  const got = {
+    title: [fs(root.querySelector(".nm-title")), t.body],
+    who: [fs(r0.querySelector(".nm-who > div")), t.body],
+    line: [fs(r0.querySelector(".nm-who")?.nextElementSibling), t.body],
+  };
+  // The time shows beside the text from 220px wide (rows.tsx Narrow).
+  if (root.offsetWidth >= 220) got.time = [fs(r0.querySelector(".nm-time")), t.small];
+  return Object.entries(got)
+    .filter(([, [v, want]]) => v !== want)
+    .map(([k, [v, want]]) => `${name}: ${k} font-size ${v}px, want the type scale's ${want}px at every tile size`);
+}
+
+function nmFit(name, root, rows, prev) {
+  const fails = [];
+  const ht = root.offsetHeight;
+  const top = root.getBoundingClientRect().top;
+  const cut = rows.map((r) => Math.round(r.getBoundingClientRect().bottom - top)).filter((b) => b > ht + 0.5);
+  if (cut.length) fails.push(`${name}: a row is cut off by the tile's bottom (ends at ${cut[0]} > ${ht}px)`);
+  if (rows.length < prev) fails.push(`${name}: ${rows.length} rows, fewer than the smaller tile's ${prev} - a bigger tile shows more rows`);
+  if (name === "4x3" && rows.length < 3) fails.push(`4x3: ${rows.length} row(s) shown of 8, want at least 3`);
+  if (/\*\*|`|\]\(/.test(root.textContent)) fails.push(`${name}: markdown shown as marks: "${root.textContent.slice(0, 120)}"`);
+  return fails;
+}
+
 /** In the page: the widget on the shell's own host (apps/stdb.ts) over the mock list, every press recorded. */
 async function nmMount() {
   const imp = (p) => window.importShim(p);
@@ -10407,7 +11339,7 @@ async function nmMount() {
   render(h(mod.default, { host, app: "local.needs-me", base: "./_app/local.needs-me/", cells: [4, 4] }), root);
   // By the row's group (a long name is shortened to fit, model.ts groupKey): a person's, or a conversation's.
   const row = (name) => [...root.querySelectorAll(".nm-row")].find((r) => r.dataset.group.endsWith(name.toLowerCase()));
-  window.__nm = { calls, root, sleep, until, row, said: () => JSON.stringify(calls) };
+  window.__nm = { calls, root, sleep, until, row, list, mod, h, render, host, said: () => JSON.stringify(calls) };
   if (!(await until(() => row("Anna Berg") && row(":#powos")))) return [`the rows didn't render: "${root.textContent.slice(0, 200)}"`];
   await sleep(800);
   return [];
@@ -10422,6 +11354,26 @@ async function nmRows() {
   if (row("Anna Berg").querySelectorAll("[data-open]").length !== 2) fails.push("Anna Berg's row doesn't group WhatsApp and Gmail (two app icons)");
   if (root.textContent.includes("Not ours")) fails.push("a notification from a package the manifest doesn't permit shows");
   if (calls.length) fails.push(`pressed without a gesture: ${said()}`);
+  return fails;
+}
+
+/**
+ * The icon's dot follows the widget's unread count (host.badge, apps/badge.ts): above 0 with the mock's rows, 0 once
+ * the notifications are gone (live, "notifications.changed"), back when they return.
+ */
+async function nmBadge() {
+  const { until, list } = window.__nm;
+  const B = await window.importShim("./apps/badge.ts");
+  const { powos } = await window.importShim("./bridge.ts");
+  const count = () => B.badges.value["local.needs-me"] ?? 0;
+  const fails = [];
+  if (!(await until(() => count() > 0))) fails.push(`unread rows shown but the icon's count is ${count()}`);
+  const fire = (items) => window.__mockEvents.emit("notifications.changed", { available: true, items });
+  if (!powos.on) return [...fails, "no powos.on to drive notifications.changed"];
+  fire([]);
+  if (!(await until(() => count() === 0))) fails.push(`no unread left but the icon's count is ${count()}`);
+  fire(list.items);
+  if (!(await until(() => count() > 0))) fails.push("unread back but the icon's count stayed 0");
   return fails;
 }
 

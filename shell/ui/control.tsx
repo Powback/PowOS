@@ -20,7 +20,7 @@ import { openGlasses } from "../glasses/open.ts";
 import { useMinuteClock } from "./time.ts";
 import { Launchers, apps } from "./launchers.tsx";
 import { PAD_ID, askPad, editPad, padTile, togglePad } from "./padtile.ts";
-import { FPS_ID, askFps, toggleFps } from "./fpstile.ts";
+import { FPS_ID, askFps, fpsTile, toggleFps } from "./fpstile.ts";
 import { TESTS_ID, askTests, testsTile, toggleTests } from "./tests.ts";
 import type { GlassesState, MediaState, QuickState, QuickTile, RemoteState, RemoteTarget } from "../types.ts";
 
@@ -1037,6 +1037,20 @@ function ownOrder(every: QuickTile[]): boolean {
   return saved.length > 0 && saved.join() !== curated.filter((id) => saved.includes(id)).join();
 }
 
+/** Saved ids already reported as not shown (once each). */
+const unshownLogged = new Set<string>();
+/**
+ * A tile in the user's saved arrangement that no longer renders is never dropped in silence: logged once, by id (a
+ * renamed or removed tile, or one the host doesn't have now - the glasses unpaired, a curated left-out).
+ */
+function logUnshown(every: QuickTile[]) {
+  const shown = new Set(every.map((t) => t.id));
+  const gone = layout.value.order.filter((id) => !shown.has(id) && !unshownLogged.has(id));
+  if (!gone.length || !quick.value.tiles?.length) return;
+  gone.forEach((id) => unshownLogged.add(id));
+  console.warn(`[cc] saved tiles not shown: ${gone.join(", ")}`);
+}
+
 function Controls() {
   const open = notifOpen.value;
   useEffect(() => {
@@ -1060,7 +1074,10 @@ function Controls() {
   const q = quick.value;
   const tests = testsTile();
   const pad = padTile();
-  const every = [...(q.tiles ?? []), ...(glasses.value ? [glassesTile()] : []), ...(pad ? [pad] : []), ...(tests ? [tests] : [])].filter((t) => !leftOut(t)); // no FPS tile: the meter is the status bar's, toggled in settings (the user, 16:59)
+  const every = [...(q.tiles ?? []), ...(glasses.value ? [glassesTile()] : []), ...(pad ? [pad] : []), ...(tests ? [tests] : []), fpsTile()].filter((t) => !leftOut(t));
+  // The fps meter's tile is back in Tools (the user, 11-01 22:14: "fps indicator etc is gone from control centre" -
+  // 5921e6dc had taken it out on 10-28); the status bar's meter and settings' switch stay too.
+  logUnshown(every);
   const b = q.brightness ?? { value: 0.5, auto: false };
   const v = q.volume ?? { value: 0.5, ringer: 2 };
   // The user's order (controls.layout) within each group; the curated order after.

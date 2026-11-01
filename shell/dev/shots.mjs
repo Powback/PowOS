@@ -332,6 +332,19 @@ const TABS = (up) =>
   ` ev('pointerdown', x0, y0); for (let k = 1; k <= 8; k++) ev('pointermove', x0 + (tx - x0) * k / 8, y0 + (ty - y0) * k / 8); await sleep(300);` +
   (up ? ` ev('pointerup', tx, ty); await sleep(400);` : "");
 
+/**
+ * WT3: Chrome maximised, Dolphin floating over it; Dolphin's bar dragged to the middle ([edge] false: Chrome's tab strip
+ * lit with Dolphin's ghost tab; let go: one maximised group of two, Dolphin shown) or the left edge (a split, as before).
+ */
+const TABS_MAX = (edge, up) =>
+  `const W = await U('./ui/webwindows.tsx'); const p = S.pages.value[0]; W.webWins.value = [{ id: 1, key: 'a:Dolphin', label: 'Dolphin', page: p, x: 30, y: 90, w: Math.round(innerWidth * 0.55), h: 420, live: true }, { id: 2, key: 'a:X', label: 'X', page: p, x: Math.round(innerWidth * 0.3), y: 300, w: Math.round(innerWidth * 0.45), h: 320, live: true }];` +
+  PAINT + ` await sleep(200); W.toggleMaximise(1); W.webWins.value = [...W.webWins.value].sort((a, b) => a.id - b.id); await sleep(300);` +
+  ` const bar = document.querySelector('.webwindow[data-wwid="2"] .webwindow-title'); const b = bar.getBoundingClientRect(); const A = W.tileArea();` +
+  ` const x0 = b.left + 60, y0 = b.top + b.height / 2, tx = ${edge} ? A.left + 6 : innerWidth * 0.5, ty = (A.top + A.bottom) / 2;` +
+  ` const ev = (t2, x, y) => bar.dispatchEvent(new PointerEvent(t2, { bubbles: true, cancelable: true, pointerId: 7, isPrimary: true, clientX: x, clientY: y }));` +
+  ` ev('pointerdown', x0, y0); for (let k = 1; k <= 8; k++) ev('pointermove', x0 + (tx - x0) * k / 8, y0 + (ty - y0) * k / 8); await sleep(300);` +
+  (up ? ` ev('pointerup', tx, ty); await sleep(400);` : "");
+
 const SCENES = [
   ["chrome-status", "statusbar", "E.emit('chrome.changed', {kind:'status', battery:74, charging:true, network:'wifi', vpn:true, left:44});", "blurred", null, { folded: {width:404,height:46,insets:{top:0,bottom:0}}, unfolded: {width:821,height:46,insets:{top:0,bottom:0}} }],
   // A maximised web window's bar merged under the status bar (StatusChrome.merge): the clock after its title, the icons before its controls.
@@ -380,6 +393,11 @@ const SCENES = [
   // stack tiled beside a third window.
   ["ww-tabs-aim", "home", TABS(false), "wallpaper", undefined, TILE_SIZES],
   ["ww-tabs", "home", TABS(true), "wallpaper", undefined, TILE_SIZES],
+  // WT3: a window dragged over a maximised one tabs into it (the strip's ghost tab; let go: a maximised group of two, the
+  // dropped one shown); at the screen's left edge it still splits.
+  ["ww-tabs-max-aim", "home", TABS_MAX(false, false), "wallpaper", undefined, TILE_SIZES],
+  ["ww-tabs-max", "home", TABS_MAX(false, true), "wallpaper", undefined, TILE_SIZES],
+  ["ww-tabs-max-edge", "home", TABS_MAX(true, true), "wallpaper", undefined, TILE_SIZES],
   ["ww-tabs-tiled", "home", TABS(true) + ` W.webWins.value = [...W.webWins.value, { id: 3, key: 'a:Files', label: 'Files', page: p, x: 200, y: 500, w: 320, h: 260, live: true }]; await sleep(100); W.tileWindows(p, [2, 3]); await sleep(400);`, "wallpaper", undefined, TILE_SIZES],
   ["edit", "home", "S.editing.value = true;", "wallpaper"],
   // The side dock unfolded (the user, 2026-10-30: "The search bar turns weird"): edit mode keeps the search bar as it
@@ -459,7 +477,7 @@ const SCENES = [
   ["present-ai", "home", `S.chat.value = { busy: false, items: ${PRESENT_ORDER} }; S.page.value = -1; await sleep(400);`, "wallpaper"],
   ["present-assist", "assist", `await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(800); const f = document.querySelector('.assist-ask textarea'); f.value = 'plan the cleanup'; f.dispatchEvent(new Event('input', { bubbles: true })); await sleep(100); document.querySelector('.assist-ask').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await sleep(2500); S.chat.value = { busy: false, items: ${PRESENT_ORDER} }; await sleep(400);`, "app"],
   ["present-assist-long", "assist", `await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(800); const f = document.querySelector('.assist-ask textarea'); f.value = 'plan the cleanup'; f.dispatchEvent(new Event('input', { bubbles: true })); await sleep(100); document.querySelector('.assist-ask').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await sleep(2500); S.chat.value = { busy: false, items: [...${CHAT_SAMPLE}, ...${CHAT_SAMPLE}, ...${PRESENT_ORDER}] }; await sleep(400);`, "app"],
-  ["present-assist-arrive", "assist", `await sleep(2500); E.emit('assist.reset', null); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(300); const B = (await U('./bridge.ts')).powos; await B.speech.cancel(); await sleep(300); const q = document.querySelectorAll('.assist .chat').length; window.__chatBefore = q; S.chat.value = { busy: false, items: [...S.chat.value.items, ...${PRESENT_ORDER}] }; await sleep(400);`, "app"],
+  ["present-assist-arrive", "assist", `await sleep(2500); E.emit('assist.reset', null); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(300); const B = (await U('./bridge.ts')).powos; await B.speech.cancel(); await sleep(300); const q = document.querySelectorAll('.assist .ai-page-chat').length; window.__chatBefore = q; S.chat.value = { busy: false, items: [...S.chat.value.items, ...${PRESENT_ORDER}] }; await sleep(400);`, "app"],
   ["assist-crop", "assist", ASSIST_CROP, "app"],
   ["ny-card", "home", NY_CARD(true), "wallpaper"],
   ["ny-card-open", "home", NY_CARD(true) + NY_OPEN, "wallpaper"],
@@ -538,6 +556,9 @@ const SCENES = [
   // .home-dots and the launcher's dots, right and left.
   ["home-dots-right", "home", "S.dockPlacement.value = 'right'; await sleep(300);", "wallpaper"],
   ["home-dots-left", "home", "S.dockPlacement.value = 'left'; await sleep(300);", "wallpaper"],
+  // The launcher's alignment (ui/align.ts alignTry): its grid from the top and from the foot, over home's dock and bar.
+  ["pull-align-top", "pull", "(await U('./ui/align.ts')).alignTry.value = { launcher: 'top' }; E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.end', { open: true });", "blurred"],
+  ["pull-align-bottom", "pull", "(await U('./ui/align.ts')).alignTry.value = { launcher: 'bottom' }; E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.end', { open: true });", "blurred"],
   ["pull-ai", "pull", "E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true });", "blurred"],
   // THE backdrop (theme.css --backdrop-tint / --backdrop-blur-native, 2026-10-31): the launcher, its PowOS AI panel, an open
   // folder and the shade over the same wallpaper, beside home's widgets - one tint, one blur (gate: backdrop-*).

@@ -687,6 +687,14 @@ Git and process
 - Report progress on your board task as you go (the user watches it on the AI page): when you start, set the plan
   (`powos agents task set <t> --plan "a; b; c"` or `--progress 0/N`); at each step `--progress k/N --step "what now"`;
   link commits (`--commit <sha>`, or mention the task id in the message) and review images (`--image <path>`).
+- Finishing a UI task (ready to try, `--try`): attach an AFTER shot - the fixed build in the same scene the user
+  reported - so the card shows before | after (the user, 2026-11-01: "it should show me a comparison between the old
+  and new with a ss taken from the emu"). Emulator: `POWOS_DEVICE=emu tools/phone/shot.sh /tmp/x-after.png` (after
+  `tools/emu/emu.sh start`, the scene opened); or a gate scene render of your tree: `shell/dev/shot.sh ~/tmp/shots
+  '<scene>'`. Copy it to the phone (`tools/phone/review-image.sh FILE`) and attach it:
+  `powos agents task set <t> --try "..." --image /home/powos/design-qa/<file>.png --image-kind after`. The CLI
+  refuses `--try` on a UI-area task without one; `--no-after "<why>"` only when no picture can show the fix
+  (timing, audio, haptics).
   `powos agents help` has the flags. Own what you take: `task set <t> --owner <your expert name>` (powos-widgets,
   powos-design...).
 - A task waiting on the user gets a `--note` that is the ACTION, in plain imperative words ("Pull down on home to try

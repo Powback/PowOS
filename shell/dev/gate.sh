@@ -33,7 +33,8 @@
 #      SHOTS_THEME / SHOTS_ONLY / SHOTS_SCALE / SHOTS_PROBE / SHOTS_STRICT pass through (STRICT=1: overlapping tiles
 #      or missing glyphs fail it).
 # Exit 0: pass. 1: failed (the reasons on stdout). 2: couldn't run (no docker...). Time: ~5-10 s, the image cached.
-# GATE_ONLY=<regex>: only the browser runs so named (a case worked on alone); GATE_THROTTLE=N: every page's CPU slowed
+# GATE_REMOTE=<ssh host>: the browser runs (scenes, widget sweep) on that box over ssh, not on the Mac (dev/gate-remote.sh;
+# unreachable: local). GATE_ONLY=<regex>: only the browser runs so named (a case worked on alone); GATE_THROTTLE=N: every page's CPU slowed
 # N times (a loaded Mac on demand: a case's waits must hold at 6). GATE_IMAGE overrides the Chromium image. Docker's
 # build cache and images are never pruned here.
 set -euo pipefail
@@ -55,7 +56,7 @@ while [ $# -gt 0 ]; do
     --wallpaper) wallpaper=$(cd "$(dirname "$2")" && pwd)/$(basename "$2"); shift 2 ;;
     --widgets) widgets=1; shift ;;
     --all) GATE_ALL=1; shift ;;
-    -h|--help) sed -n '2,38p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,39p' "$0"; exit 0 ;;
     # f305: repo-relative (shell/ui/x.tsx), absolute and ./ paths name the same shell file as ui/x.tsx.
     *) f=${1#./}; f=${f#"$SHELL_DIR"/}; f=${f#shell/}; files+=("$f"); shift ;;
   esac
@@ -286,12 +287,31 @@ if [ -n "$app" ]; then
   [ -d "$app/out/ui" ] || { echo "FAIL app: $app/out/ui isn't built (apps/build.sh)"; exit 1; }
   mounts+=(-v "$app/powos-app.json:/apps/$id/powos-app.json:ro" -v "$app/out/ui:/apps/$id/ui:ro")
 fi
+# GATE_REMOTE=<ssh host> (dev/gate-remote.sh): the browser runs (here and the widget sweep's) on that box, the Mac's CPU
+# left to the agents. The composed tree goes to its slot's dir there (reused: a warm delta), the transpile cache stays
+# there. Unreachable: local, said so.
+. "$SHELL_DIR/dev/gate-remote.sh"
+gr_init "$IMAGE"
+gr_id=${slot:+$(basename "$slot")} gr_id=${gr_id:-dir} gr_mounts=() GR_PREFIX=powos-gate-$$-
+if [ -n "$GR_HOST" ]; then
+  gr_dir=run/$gr_id
+  if gr_push "$S" "$gr_dir/shell" --exclude /node_modules &&
+     gr_push "$SHELL_DIR/dev" "$gr_dir/dev" --include gate.mjs --include agents-fleet.mjs --include search-check.js --exclude '*' &&
+     { [ -z "$app" ] || { gr_push "$app/out/ui" "$gr_dir/app/ui" && gr_push "$app/powos-app.json" "$gr_dir/app/powos-app.json"; }; }; then
+    gr_mounts=(-v "@/$gr_dir/shell:/shell:ro" -v "@/$gr_dir/dev/gate.mjs:/usr/src/app/gate.mjs:ro" -v "@/$gr_dir/dev/agents-fleet.mjs:/usr/src/app/agents-fleet.mjs:ro"
+      -v "@/$gr_dir/dev/search-check.js:/usr/src/app/search-check.js:ro" -v "@/tx:/cache")
+    [ -z "$app" ] || gr_mounts+=(-v "@/$gr_dir/app/powos-app.json:/apps/$id/powos-app.json:ro" -v "@/$gr_dir/app/ui:/apps/$id/ui:ro")
+    export GATE_REMOTE_READY=$GR_HOST GATE_REMOTE_ID=$gr_id   # dev/preview.sh: the widget sweep's browser passes too
+  else
+    echo "gate: remote $GR_HOST: pushing the tree failed - running locally"; GR_HOST=""
+  fi
+fi
 # The Mac's load every 2 s for gate.mjs's scene concurrency (/cache/.hostload): it re-sizes as the load moves.
 # Its own temp name: gates run side by side on one $tx, and a shared .hostload.tmp lost the mv race, which ended this
 # loop (set -e) - the EXIT trap's kill then failed and turned a printed "gate: pass" into exit 1 (f381, 11-01).
 ( while :; do sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}' > "$tx/.hostload.$$.tmp" && mv -f "$tx/.hostload.$$.tmp" "$tx/.hostload" || true; sleep 2; done ) &
 hostload_pid=$!
-trap 'kill $hostload_pid 2>/dev/null || true; rm -rf "$work" ${slot:+"$slot"}' EXIT
+trap 'kill $hostload_pid 2>/dev/null || true; gr_cleanup; rm -rf "$work" ${slot:+"$slot"}' EXIT
 set +e
 # The Mac-wide build slot (tools/agents/build-slot.sh): booting the pages competes for CPU with
 # compile-check/build-pkgs/warm-builder's docker runs, and a fixed READY_MS can't tell a slow page from a
@@ -303,11 +323,19 @@ browser_run() {
   # Not under tools/agents/build-slot.sh any more: that is ONE Mac-wide lock shared with compile-check/build-pkgs, so
   # with N agents the N-1 others queued behind the gate holding it - ~210 s of f311's waits, on top of this file's own
   # slots (GATE_SLOTS) that already cap how many gates run. GATE_BUILD_SLOT=1 brings it back.
-  ${GATE_BUILD_SLOT:+"$SHELL_DIR/../tools/agents/build-slot.sh" "gate $base" --} \
-  docker run --rm --platform linux/arm64 --shm-size 512m $cpu "${mounts[@]}" -e READY_MS="$1" \
-    ${host_load:+-e GATE_HOST_LOAD="$host_load"} ${host_cpus:+-e GATE_HOST_CPUS="$host_cpus"} ${GATE_SCENES:+-e GATE_SCENES="$GATE_SCENES"} \
+  local envs=(-e READY_MS="$1" ${GATE_SCENES:+-e GATE_SCENES="$GATE_SCENES"} \
     ${GATE_SHELL_PAGES:+-e SHELL_PAGES="$GATE_SHELL_PAGES"} ${IDLE_MS:+-e IDLE_MS="$IDLE_MS"} ${IDLE_WAIT_MS:+-e IDLE_WAIT_MS="$IDLE_WAIT_MS"} ${GATE_SHARED_TX:+-e GATE_SHARED_TX="$GATE_SHARED_TX"} \
-    ${2:+-e GATE_ONLY="$2"} ${3:+-e GATE_BOOTS="$3"} ${GATE_THROTTLE:+-e GATE_THROTTLE="$GATE_THROTTLE"} \
+    ${2:+-e GATE_ONLY="$2"} ${3:+-e GATE_BOOTS="$3"} ${GATE_THROTTLE:+-e GATE_THROTTLE="$GATE_THROTTLE"})
+  # GATE_REMOTE (dev/gate-remote.sh): the same run on the remote, over the tree pushed there; its own load and cores
+  # size the scene concurrency (the Mac's GATE_HOST_LOAD/CPUS don't apply there).
+  if [ -n "$GR_HOST" ]; then
+    gr_run "${GR_PREFIX}r$1" --shm-size 512m $cpu "${gr_mounts[@]}" "${envs[@]}" \
+      -w /usr/src/app --entrypoint node "$GR_IMAGE" gate.mjs
+    return
+  fi
+  ${GATE_BUILD_SLOT:+"$SHELL_DIR/../tools/agents/build-slot.sh" "gate $base" --} \
+  docker run --rm --platform linux/arm64 --shm-size 512m $cpu "${mounts[@]}" "${envs[@]}" \
+    ${host_load:+-e GATE_HOST_LOAD="$host_load"} ${host_cpus:+-e GATE_HOST_CPUS="$host_cpus"} \
     -w /usr/src/app --entrypoint node "$IMAGE" gate.mjs
 }
 ready_ms=${READY_MS:-$ready_default}

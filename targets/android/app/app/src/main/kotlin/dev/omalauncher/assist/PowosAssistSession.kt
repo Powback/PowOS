@@ -63,6 +63,12 @@ class PowosAssistSession(
         showFlags: Int,
     ) {
         super.onShow(args, showFlags)
+        // Over home's PowOS AI page: that page's own field takes the keys, no second chat sheet over it.
+        if (dev.omalauncher.shell.ShellBridge.focusAiOnHome()) {
+            android.util.Log.i("speech", "assist: over the PowOS AI page - its field focused, no sheet")
+            finish()
+            return
+        }
         // The pet over apps keeps out of the assistant (its crop screen) while it shows.
         dev.omalauncher.system.PetOverlay.assistShowing = true
         // Drawn again (paused while hidden, onHide).

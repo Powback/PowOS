@@ -56,6 +56,22 @@ def all_tasks():
     return found
 
 
+def web_windows_on(value):
+    """Settings.Global powos_web_windows as `settings get` prints it: on unless "0" (unset prints "null")."""
+    return value.strip() != "0"
+
+
+def web_windows():
+    """The PowOS app shows every Android app as its own web window (docs/WEB_WINDOWS.md; on unless the setting is 0).
+    Then no stand-ins and no scrcpy windows: an app moved onto a scrcpy display became a KWin window shown as a bare
+    PowosWindowActivity task - X with no PowOS title bar, no frame, a dark strip beside it (ask-1a198e611f5, 11-01
+    21:47: its stand-in activated 2 s after the tap, task 2268 moved to scrcpy's display 102)."""
+    try:
+        return web_windows_on(adb("shell", "settings", "get", "global", "powos_web_windows", timeout=5))
+    except Exception:
+        return True  # the default; a wrong "on" only leaves the taskbar without stand-ins
+
+
 def phone_screen(found):
     """{root task id: [packages]} of the apps on the phone's own screen (display 0) - the taskbar entries."""
     return {
@@ -197,7 +213,7 @@ def watch():
                     os.kill(pid, signal.SIGTERM)
                 except OSError:
                     pass
-        now = phone_screen(found)
+        now = phone_screen(found) if not web_windows() else {}
         for tid in list(stubs):
             if stubs[tid].poll() is not None:  # exits only when clicked
                 moving[tid] = time.monotonic()

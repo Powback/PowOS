@@ -308,12 +308,12 @@ class BoardTest(unittest.TestCase):
         # line is its own field, set only by --try, never the step or the note.
         self.cli("add", "Floating windows", "--id", "fw", "--step", "P0 fixed 18:23 (APK 46120ff9)")
         self.assertEqual(self.row("fw")["try_line"], "")
-        self.cli("set", "fw", "--try", "Floating windows are back, try moving and resizing one")
+        self.cli("set", "fw", "--try", "Floating windows are back, try moving and resizing one", "--no-after", "the try line alone")
         self.assertEqual(self.row("fw")["try_line"], "Floating windows are back, try moving and resizing one")
         self.assertEqual(self.row("fw")["step"], "P0 fixed 18:23 (APK 46120ff9)", "--try leaves the step alone")
         self.cli("set", "fw", "--note", "agents' words")
         self.assertEqual(self.row("fw")["try_line"], "Floating windows are back, try moving and resizing one")
-        self.cli("add", "Page dots", "--id", "pd", "--try", "Swipe between home pages and watch the dots")
+        self.cli("add", "Page dots", "--id", "pd", "--try", "Swipe between home pages and watch the dots", "--no-after", "the try line alone")
         self.assertEqual(self.row("pd")["try_line"], "Swipe between home pages and watch the dots")
         self.cli("set", "fw", "--try", "-")
         self.assertEqual(self.row("fw")["try_line"], "")
@@ -332,7 +332,49 @@ class BoardTest(unittest.TestCase):
         self.assertIn("commit hash", p.stderr)
         self.assertNotIn("ot", FakeStdb.work, "a refused add adds nothing")
         # Plain words that happen to be hex letters ("defaced") are no hash.
-        self.cli("set", "fw", "--try", "The defaced icon is fixed, open the dock")
+        self.cli("set", "fw", "--try", "The defaced icon is fixed, open the dock", "--no-after", "the try line alone")
+
+    def test_image_kinds_report_default_after_marked(self):
+        # 2026-11-01 (the user): a try card showed only "the old screenshot that I took" - it is to show before | after,
+        # the after an emulator shot of the fix. --image-kind after marks one; report (a bare path) is the default.
+        self.cli("add", "Kernel netfilter modules", "--id", "k", "--image", "/home/powos/design-qa/before.png")
+        self.cli("set", "k", "--image", "/home/powos/design-qa/after.png", "--image-kind", "after")
+        self.assertEqual(json.loads(self.row("k")["images"]),
+                         ["/home/powos/design-qa/before.png", "after:/home/powos/design-qa/after.png"])
+        # The same file again as the other kind: one entry, its new kind.
+        self.cli("set", "k", "--image", "/home/powos/design-qa/before.png", "--image-kind", "after")
+        self.assertEqual(json.loads(self.row("k")["images"]),
+                         ["after:/home/powos/design-qa/after.png", "after:/home/powos/design-qa/before.png"])
+        # --image-rm takes the bare path, whatever its kind.
+        self.cli("set", "k", "--image-rm", "/home/powos/design-qa/before.png")
+        self.assertEqual(json.loads(self.row("k")["images"]), ["after:/home/powos/design-qa/after.png"])
+        p = self.cli("set", "k", "--image", "/x.png", "--image-kind", "later", ok=False)
+        self.assertIn("report or after", p.stderr)
+        p = self.cli("set", "k", "--image-kind", "after", ok=False)
+        self.assertIn("give the --image PATH too", p.stderr)
+
+    def test_try_on_ui_task_needs_after_image(self):
+        self.cli("add", "Split screen side by side", "--id", "w", "--image", "/home/powos/design-qa/report.png")
+        self.assertEqual(self.row("w")["project"], "Windows")
+        p = self.cli("set", "w", "--try", "Open two apps side by side", ok=False)
+        self.assertIn("needs an after image", p.stderr)
+        self.assertIn("--image-kind after", p.stderr)
+        self.assertIn("--no-after", p.stderr)
+        self.assertEqual(self.row("w")["try_line"], "", "a refused --try writes nothing")
+        p = self.cli("add", "Swipe the dock away", "--id", "dk", "--project", "home", "--try", "Swipe the dock", ok=False)
+        self.assertNotIn("dk", FakeStdb.work, "a refused add adds nothing")
+        p = self.cli("set", "w", "--try", "Open two apps side by side", "--no-after", "  ", ok=False)
+        self.assertIn("needs the reason", p.stderr)
+        # The after image in the same call: accepted.
+        self.cli("set", "w", "--try", "Open two apps side by side", "--image", "/home/powos/design-qa/fixed.png",
+                 "--image-kind", "after")
+        self.assertEqual(self.row("w")["try_line"], "Open two apps side by side")
+        # Already has one: a new --try passes. A non-visual area never needs one; --no-after waives it.
+        self.cli("set", "w", "--try", "Drag the split to resize both")
+        self.cli("add", "Kernel netfilter modules", "--id", "k", "--try", "Start the VPN and browse")
+        self.cli("add", "Dock haptics", "--id", "hp", "--project", "home", "--try", "Tap the dock and feel it",
+                 "--no-after", "haptics only")
+        self.assertEqual(self.row("hp")["try_line"], "Tap the dock and feel it")
 
     def test_projects_are_the_page_areas(self):
         self.cli("add", "Kernel netfilter modules", "--id", "k")
@@ -358,7 +400,7 @@ class BoardTest(unittest.TestCase):
 
     def test_help_documents_it(self):
         out = subprocess.run([sys.executable, CLI, "help"], capture_output=True, text=True).stdout
-        for flag in ("--progress N/M", "--step TEXT", "--plan", "--commit SHA", "--image PATH", "--image-rm PATH",
+        for flag in ("--progress N/M", "--step TEXT", "--plan", "--commit SHA", "--image PATH", "--image-rm PATH", "--image-kind report|after", "--no-after",
                      "--unowned", "add|new", "task merge", "--into", "task dupes", '--try "plain sentence"'):
             self.assertIn(flag, out)
 

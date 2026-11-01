@@ -42,7 +42,7 @@ export interface WorkRow {
   steps?: string;
   /** JSON: [{sha, subject}] oldest first ("" = []). */
   commits?: string;
-  /** JSON: [path] - review images, e.g. /home/powos/design-qa/x.png ("" = []). */
+  /** JSON: [path] - review images, e.g. /home/powos/design-qa/x.png ("" = []); an "after:" one shows the fix (reviewImages). */
   images?: string;
   /** When it last moved (ms; 0 on old rows: `updated`). */
   activity?: bigint | number;
@@ -69,6 +69,18 @@ export function SevChip({ w }: { w: WorkRow }) {
   );
 }
 
+/** The prefix of an after image's entry (`task set --image P --image-kind after`); a bare path is a report image. */
+const AFTER = "after:";
+/**
+ * A task's review images by kind: before (what the user reported, the pre-fix state) and after (the fixed build in the
+ * same scene, an emulator shot), each in the order added. HACK: the kind rides in the path (the module's images column
+ * is a list of strings; powos-agents-cli AFTER) - the real fix is [{path, kind}] in the module.
+ */
+export function reviewImages(w: Pick<WorkRow, "images">): { before: string[]; after: string[] } {
+  const all = list<unknown>(w.images).filter((p): p is string => typeof p === "string");
+  return { before: all.filter((p) => !p.startsWith(AFTER)), after: all.filter((p) => p.startsWith(AFTER)).map((p) => p.slice(AFTER.length)) };
+}
+
 /** A JSON-array column ("" or bad = none). */
 export function list<T>(json: string | undefined): T[] {
   try {
@@ -93,7 +105,7 @@ const WORK_QUERY = "SELECT * FROM work";
 /** The board's facts (apps/agents work_check: each task's phone checks, synced from the verify queue) and friction. */
 export const checks = signal<BoardCheck[]>([]);
 /** A friction row (apps/agents `friction`: what got in an agent's way; `powos friction`). */
-interface FrictionRow {
+export interface FrictionRow {
   id: string;
   area: string;
   kind: string;
@@ -101,8 +113,20 @@ interface FrictionRow {
   count: number;
   status: string;
   last: bigint | number;
+  /** The whole story, how to make it happen again, a log path or screenshot, who logged it (absent on old bindings). */
+  details?: string;
+  repro?: string;
+  evidence?: string;
+  by?: string;
+  first?: bigint | number;
+  fixCommit?: string;
+  fixNote?: string;
+  fixedAt?: bigint | number;
+  reopened?: number;
+  /** The board task it is evidence for ("" = none). */
+  task?: string;
 }
-const friction = signal<FrictionRow[]>([]);
+export const friction = signal<FrictionRow[]>([]);
 /** One of the user's asks (apps/agents `user_ask`: their words, whole, and the board task it became; "" = none yet). */
 export interface UserAsk {
   id: string;
@@ -586,7 +610,8 @@ function Details({ w, g }: { w: WorkRow; g: Group | null }) {
   const steps = list<Step>(w.steps);
   // A change with no subject says nothing to the user ("a change"): only the ones in words.
   const commits = list<Commit>(w.commits).filter((c) => c.subject?.trim());
-  const images = list<string>(w.images).filter((p) => imageUrl(p));
+  const { before, after } = reviewImages(w);
+  const images = [...before, ...after].filter((p) => imageUrl(p));
   return (
     <div class="ai-item-more">
       {w.note && g !== "you" && <p class="ai-item-note">{w.note}</p>}

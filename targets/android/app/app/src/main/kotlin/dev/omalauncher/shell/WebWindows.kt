@@ -2386,6 +2386,8 @@ class WebWindows(
             main.post { homeIme(false) }
         }
         w.fingers[finger] = floatArrayOf(at.first, at.second)
+        // A press on its body: the window the user is in (Back / Forward go to it: windowKey).
+        if (first) focused = w.id
         return if (first) MotionEvent.ACTION_DOWN else null
     }
 
@@ -2715,6 +2717,28 @@ class WebWindows(
         w.dpi = dpi
         if (w.displayId >= 0) helper.resize(w.displayId, w.w, w.h, dpi)
         return true
+    }
+
+    /** The window the user is in (last pressed: its body here, its bar via the page's [focus]), -1: home. */
+    @Volatile private var focused = -1
+
+    /** The page: window [id] pressed (its bar or body), -1: home pressed outside every window. */
+    fun focus(id: Int): Boolean {
+        focused = id
+        return true
+    }
+
+    /**
+     * [key] (Back / Forward) that reached PowOS: pressed on the display of the window the user is in
+     * ([WindowKeys.target]) - its app goes back / forward a page, at its root it finishes and the window closes with its
+     * task. False: no window is the user's (or no display maker), home's page has it. Any thread.
+     */
+    fun windowKey(key: WindowKeys.Key): Boolean {
+        val all = runCatching { wins.values.toList() }.getOrNull() ?: return false
+        val t = WindowKeys.target(all.map { WindowKeys.Win(it.id, it.displayId, it.closed, it.shown, it.quick != null, it.linux != null) }, focused) ?: return false
+        val sent = helper.line(WindowKeys.line(t.displayId, key))
+        WindowLog.i(TAG, "${key.name.lowercase()}: to window ${t.id}${if (t.quick) " (a quick page)" else ""} on display ${t.displayId}: ${if (sent) "sent" else "no display helper"}")
+        return sent
     }
 
     /** MN2: the page's way back from minimised (dock, switcher, its page): an app [minimise] moved out, back in window [id]. */
@@ -3450,6 +3474,13 @@ class WebWindows(
             return true
         }
 
+        /** [line] to the display maker, as it is ([QuickPageRoute.backLine]). False: it isn't running. */
+        fun line(line: String): Boolean {
+            if (process?.isAlive != true) return false
+            io.post { if (!send(line)) WindowLog.w(TAG, "helper: '$line' not sent") }
+            return true
+        }
+
         fun stop() =
             io.post {
                 runCatching { writer?.close() }
@@ -3822,6 +3853,9 @@ class WebWindows(
 
         /** Home's web windows (the one home page's), or null: what [closeForTask] closes through. */
         @Volatile private var current: WebWindows? = null
+
+        /** [key] to the web window the user is in ([windowKey]), from outside home (PowOS's edge back): false - none. */
+        fun keyToWindow(key: WindowKeys.Key): Boolean = current?.windowKey(key) == true
 
         /**
          * The switcher up ([open]) or down (Switcher.open's setter). It is home's own page, and the windows are a layer

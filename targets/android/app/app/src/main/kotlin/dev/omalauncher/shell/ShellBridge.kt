@@ -77,6 +77,9 @@ class ShellBridge(
     /** Home / Back (ShellActivity, main thread): a full-screen Linux web window leaves full screen; true if one did. */
     fun leaveFullScreen(why: String): Boolean = webWindowsMade && webWindows.leaveFullScreen(why)
 
+    /** Back / Forward to the web window the user is in (WebWindows.windowKey); false: home's page has it. */
+    fun windowKey(key: WindowKeys.Key): Boolean = webWindowsMade && webWindows.windowKey(key)
+
     /**
      * Linux (KWin) windows as web windows (docs/WEB_WINDOWS.md S6): KWin's "open" comes here instead of a
      * PowosWindowActivity task while web windows are on and the home is the wide one. Set by home's bridge only.
@@ -511,6 +514,11 @@ class ShellBridge(
             }
             "ai.unqueue" -> PowosAiChat.unqueue(a.getLong(0))
             "ai.open" -> PowosAiActivity.open(context, null)
+            // Home's PowOS AI page shown or not: the side button focuses its field instead of a second chat over it.
+            "ai.pageShown" -> {
+                if (activity is ShellActivity) aiPageShown = a.optBoolean(0)
+                Unit
+            }
             // "Create app": PowOS AI in a fresh thread of its own building it (PowosAiChat.newApp); back to the main one.
             "ai.newApp" -> PowosAiChat.newApp(context.applicationContext, a.getString(0))
             "ai.closeThread" -> PowosAiChat.closeThread(context.applicationContext)
@@ -529,6 +537,8 @@ class ShellBridge(
             "quickpage.open" -> QuickPages.open(context, a.getJSONObject(0))
             "quickpage.popout" -> QuickPages.popOut(a.getString(0)) { if (webWindowsMade) webWindows.close(a.optInt(1, -1)) }
             "quickpage.refused" -> WebWindowLaunch.refused(QuickPageRoute.key(a.getString(0)))
+            // The window the user is in (its bar or body pressed; -1: home): Back / Forward go to it (WindowKeys).
+            "webwindows.focus" -> webWindowsMade && webWindows.focus(a.getInt(0))
             "qs.set" -> quick.set(a.getString(0), a.getDouble(1)).let { quick.state() }
             "qs.listening" -> quick.listening(a.getBoolean(0))
             // The touch controller overlay (andro.marchy.GamepadOverlay): the control centre's Controller tile.
@@ -1774,6 +1784,21 @@ class ShellBridge(
             val home = synchronized(live) { live.firstOrNull { it.activity != null } } ?: return false
             if (!WebWindows.on(context)) return false
             home.emit(event, json)
+            return true
+        }
+
+        /** Home's PowOS AI page is its page ("ai.pageShown"); only home's window sets it. */
+        @Volatile private var aiPageShown = false
+
+        /**
+         * The side button over home's PowOS AI page (the user, 11-01 21:32: two inputs, the page's showing through under
+         * the assist sheet): no sheet - home's page gets "ai.focus" (its field takes the keys). False: home isn't in
+         * front on that page, the sheet opens as ever.
+         */
+        fun focusAiOnHome(): Boolean {
+            if (!aiPageShown || !WebWindowLaunch.homeInFront) return false
+            val home = synchronized(live) { live.firstOrNull { it.activity is ShellActivity } } ?: return false
+            home.emit("ai.focus", JSONObject())
             return true
         }
 

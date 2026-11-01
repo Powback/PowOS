@@ -17,7 +17,8 @@ import type { AgentHost } from "../types.ts";
 import { SessionRow, hostOf, hosts, localHost, sessions, sessionsOn, useSessions } from "./terms.tsx";
 import { ago } from "./time.ts";
 import { HOSTS, Units } from "./units.tsx";
-import { Friction, WorkFeed, board, type WorkRow } from "./aiboard.tsx";
+import { WorkFeed, board, type WorkRow } from "./aiboard.tsx";
+import { FrictionPage } from "./aifriction.tsx";
 import { ProgressView } from "./aiprogress.tsx";
 
 declare function importShim(url: string): Promise<{ default: ComponentType<any> }>;
@@ -162,13 +163,13 @@ function ProgressScreen({ shown, back, beside = false }: { shown: boolean; back:
   );
 }
 
-/** Friction: what keeps getting in the agents' way, open (the board's feed while it shows). */
+/** Friction: what keeps getting in the agents' way, in plain words per area (aifriction.tsx; the board's feed while it shows). */
 function FrictionScreen({ shown }: { shown: boolean }) {
   return (
-    <section class="ai-work-list tile">
+    <>
       {shown && <WorkFeed />}
-      <Friction start={true} />
-    </section>
+      <FrictionPage />
+    </>
   );
 }
 

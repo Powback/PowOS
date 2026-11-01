@@ -15,7 +15,7 @@ import { wideHome } from "../hosts/wide.ts";
 import "./spring.ts";
 import type { HostWebWindow, WebWindowRect } from "../types.ts";
 import { Mark } from "./chrome.tsx";
-import { QuickBar, quickIconKeys, quickPlace, QUICK, type QuickInfo, type QuickRect } from "./quickpage.tsx";
+import { forgetQuickReturn, QuickBar, quickGone, quickIconKeys, quickPlace, quickShown, QUICK, type QuickInfo, type QuickRect } from "./quickpage.tsx";
 import { memo } from "./memo.ts";
 import { confirm as hapticConfirm, tick as hapticTick } from "./haptics.ts";
 import { dropAt, dropInto, freeRegion, insertAt, leaves, splitBox, tabAt, treeRects, zoneKey as dropKey, type Bar, type Tree, type Zone } from "./tiledrop.ts";
@@ -269,12 +269,42 @@ async function openFresh(key: string, label: string, page: number): Promise<numb
   return id;
 }
 
+// ---- the window the user is in: Back / Forward go to it (the host's WindowKeys.kt) ---------------------------------
+// The user, 11-01 (Chrome floating over home): "when I use the back or forward button/gesture it doesn't do anything for
+// the given window". A press on a window (its bar or body) makes it the user's at once; home is theirs again only after a
+// whole press outside every window (its UP: the edge back gesture's own DOWN on home is cancelled, so it never takes
+// the focus off the window it is meant for).
+let focusedWin = -1;
+function focusWin(id: number) {
+  if (id === focusedWin) return;
+  focusedWin = id;
+  void powos.webwindows?.focus?.(id);
+}
+if (typeof addEventListener === "function") {
+  let outside = false;
+  addEventListener(
+    "pointerdown",
+    (e) => {
+      const el = (e.target as Element | null)?.closest?.(".webwindow[data-wwid]");
+      const id = el ? Number(el.getAttribute("data-wwid")) : NaN;
+      outside = !Number.isFinite(id);
+      if (!outside) focusWin(id);
+    },
+    { capture: true, passive: true },
+  );
+  addEventListener("pointerup", () => outside && focusWin(-1), { capture: true, passive: true });
+  addEventListener("pointercancel", () => (outside = false), { capture: true, passive: true });
+}
+
 // ---- quick pages (ui/quickpage.tsx; the host: QuickPages.kt) --------------------------------------------------------
 
 // The host started a quick page's launch: its card here, springing out of [anchor]; its page starts on the card's display.
 powos.on("quickpage.show", (m: { token: string; pkg: string; label: string; anchor?: QuickRect | null }) => {
   void openQuick(m).then((id) => {
-    if (id == null) void powos.quickpage?.refused(m.token);
+    if (id == null) {
+      forgetQuickReturn();
+      void powos.quickpage?.refused(m.token);
+    } else quickShown(m.token);
   });
 });
 
@@ -310,6 +340,7 @@ wideHome.subscribe((wide) => {
 function popOut(win: WebWin) {
   const q = powos.quickpage;
   if (!q || !win.quick) return close(win.id);
+  quickGone(win.quick.token, "popout");
   void q.popout(win.quick.token, win.id);
   webWins.value = webWins.value.filter((w) => w.id !== win.id);
 }
@@ -493,6 +524,9 @@ export function orphaned(id: number): boolean {
   return id >= 0 && ids != null && !ids.has(id);
 }
 function forget(id: number) {
+  // A quick page's card closed: back to the search it was opened from (ui/quickpage.tsx returnAfterQuick).
+  const token = webWins.value.find((w) => w.id === id)?.quick?.token;
+  if (token) quickGone(token, "closed");
   leaveStack(id);
   untile(id, "gone");
   webWins.value = webWins.value.filter((w) => w.id !== id);
@@ -1325,9 +1359,12 @@ function snapAim(id: number, x: number, y: number) {
   return w && slot && rect ? { id, page: w.page, slot, rect } : null;
 }
 
-/** WT1: the tab drop window [id]'s bar makes at (x, y) - another window's bar there - or null. */
+/**
+ * WT1: the tab drop window [id]'s bar makes at (x, y) - another window's bar there, or (WT3) anywhere on a maximised
+ * window but the snap edges: the group stays maximised, the dropped one its shown tab ([joinStack]) - or null.
+ */
 function tabTarget(id: number, x: number, y: number) {
-  const z = tabAt(x, y, barsUnder(id));
+  const z = tabAt(x, y, barsUnder(id), snapSlot(x, y) == null);
   return z?.kind === "tab" ? { id, target: z.tile, at: z.at } : null;
 }
 
@@ -1629,7 +1666,8 @@ function barsUnder(id: number): Bar[] {
     const bar = el.querySelector(".webwindow-title");
     const tabs = [...el.querySelectorAll(".ww-tab[data-tab]")];
     const list = tabs.length ? tabs : [...el.querySelectorAll(".ww-title-label")];
-    out.push({ id: wid, frame: boxOfRect(el.getBoundingClientRect()), bar: bar ? boxOfRect(bar.getBoundingClientRect()) : undefined, tabs: list.map((t) => boxOfRect(t.getBoundingClientRect())) });
+    const max = !!webWins.value.find((w) => w.id === wid)?.restore;
+    out.push({ id: wid, frame: boxOfRect(el.getBoundingClientRect()), bar: bar ? boxOfRect(bar.getBoundingClientRect()) : undefined, tabs: list.map((t) => boxOfRect(t.getBoundingClientRect())), max });
   }
   return out;
 }

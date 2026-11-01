@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
+import { tick } from "./haptics.ts";
 import { carry, editing, home, page, pages } from "../state.ts";
 import { openScreen } from "../screens.ts";
 import { AppWidgetPicker, picker } from "./appwidget.tsx";
@@ -228,7 +229,7 @@ function AppPicker() {
       const spot = placeNewCells(1, 1);
       await powos.home.add(app.key, spot.page, spot.cell);
       home.value = await powos.home.get();
-      navigator.vibrate?.(5);
+      tick();
       setSaid(`added ${app.label.toLowerCase()}`);
     }).catch(() => setSaid(`${app.label.toLowerCase()} wasn't added`)));
   return (

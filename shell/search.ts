@@ -1,10 +1,10 @@
 /** Launcher providers return destinations, never execute capabilities while searching. */
 import { computed, effect, signal } from "@preact/signals";
-import { apps, chatting, closeDrawer, launch, query } from "./state.ts";
+import { apps, chatting, closeDrawer, launch, openPanel, query } from "./state.ts";
 import { openScreen, type ScreenName } from "./screens.ts";
 import { installedApps, openApp } from "./apps/pages.ts";
 import { powos } from "./bridge.ts";
-import { openQuickPage } from "./ui/quickpage.tsx";
+import { openQuickPage, returnAfterQuick } from "./ui/quickpage.tsx";
 import type { NativeSetting } from "./types.ts";
 import { net } from "./apps/net.ts";
 
@@ -19,7 +19,8 @@ export interface SearchResult {
   group?: SearchGroup;
   /** Where it is in its app, for a setting ("Apps › Default apps"). */
   detail?: string;
-  open(): void;
+  /** Opens it; true: as a quick page's card (ui/quickpage.tsx), the search kept to return to when the card closes. */
+  open(): void | boolean;
 }
 export interface SearchGroup { id: string; label: string; icon?: string }
 /** The launcher app that is [pkg] (an Android app's key is "a:<package>/<activity>[@profile]"), its own profile first. */
@@ -92,7 +93,11 @@ registerSearchProvider({ id: "android-settings", async search() {
       id: `android-settings:${entry.id}`, label: entry.label, source: detail ? `${group.label} · ${detail}` : group.label, group, detail,
       keywords: `${entry.keywords} settings preferences android`,
       // A quick page (ui/quickpage.tsx) springing out of the result's row; an older host: its old way.
-      open: () => { if (!openQuickPage({ id: entry.id, label: entry.label })) void powos.qs.open(entry.id); },
+      open: () => {
+        if (openQuickPage({ id: entry.id, label: entry.label })) return true;
+        void powos.qs.open(entry.id);
+        return false;
+      },
     };
   });
 } });
@@ -191,9 +196,31 @@ export const searchSections = computed(() => {
   }
   return { apps: appsFound, groups: [...groups.values()] };
 });
+/**
+ * Opens [result] from the launcher's search. A quick page's card (a settings result) keeps the search to come back to
+ * (the user, 11-01: "it's closing when returning back"): the card's close reopens the launcher with the same query, its
+ * results and their scroll, as Android's and iOS's settings search do; a second Back closes it. An app, the pop-out (↗)
+ * or home leave it cleared.
+ */
 export function openSearchResult(result: SearchResult) {
+  const q = query.peek();
+  const scroll = document.querySelector<HTMLElement>(".drawer-list.results")?.scrollTop;
   closeDrawer(true);
-  result.open();
+  if (result.open() === true) returnAfterQuick(() => restoreSearch(q, scroll));
+}
+
+/** The launcher back up with query [q] and its results list at [scroll] (once they're there again). */
+function restoreSearch(q: string, scroll: number | undefined) {
+  openPanel("apps");
+  query.value = q;
+  if (scroll == null) return;
+  let tries = 0;
+  const put = () => {
+    const list = document.querySelector<HTMLElement>(".drawer-list.results");
+    if (list && list.scrollHeight > list.clientHeight) list.scrollTop = scroll;
+    else if (++tries < 20) requestAnimationFrame(put);
+  };
+  requestAnimationFrame(put);
 }
 // State imports shell UI too; start after the module graph has initialized.
 queueMicrotask(() => effect(() => {

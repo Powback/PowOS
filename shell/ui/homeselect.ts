@@ -59,7 +59,6 @@ export function startMarquee(e0: PointerEvent, from: { x: number; y: number }, p
     const r = { x0, y0, x1: ev.clientX - origin.left, y1: ev.clientY - origin.top };
     marquee.value = r;
     const next = hits(items(), boxOf, r, before);
-    if (next.length !== chosen.value.length) navigator.vibrate?.(5);
     chosen.value = next;
   };
   const move = (ev: PointerEvent) => ev.pointerId === e0.pointerId && to(ev);

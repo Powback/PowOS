@@ -160,6 +160,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       verifyState: () => call("verify.state"),
       verifyStop: (dry = false) => call("verify.stop", dry),
       open: () => call("ai.open"),
+      pageShown: (shown) => call("ai.pageShown", shown),
       newApp: (description) => call<boolean>("ai.newApp", description),
       closeThread: () => call<boolean>("ai.closeThread"),
       mail: () => call<AgentMail[]>("ai.mail"),
@@ -298,6 +299,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       minimise: (id) => call<boolean>("webwindows.minimise", id),
       restore: (id) => call<boolean>("webwindows.restore", id),
       zoom: (id, k) => call<boolean>("webwindows.zoom", id, k),
+      focus: (id) => call<boolean>("webwindows.focus", id),
     },
     // Quick pages (ui/quickpage.tsx; QuickPages.kt): the phone's only.
     quickpage: host.name === "powos" ? undefined : {

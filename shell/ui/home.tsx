@@ -7,7 +7,7 @@
  * the drawer move with it in CSS, so a frame of the swipe moves an edge, not a re-laid-out list of apps.
  */
 import { WidgetSheet } from "./widgetsheet.tsx";
-import { useCallback, useEffect, useLayoutEffect, useRef } from "preact/hooks";
+import { useCallback, useLayoutEffect, useRef } from "preact/hooks";
 import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import type { App, PageRect } from "../types.ts";
@@ -292,7 +292,6 @@ function moveInDock(key: string, e: PointerEvent, dockEl: HTMLElement) {
       return startCarry({ app: key, fromDock: true }, ev, { x: 30, y: 30 });
     }
     const slot = slotOf(axis(ev));
-    if (slot !== dockDrag.value?.slot) navigator.vibrate?.(5);
     dockDrag.value = { key, x: axis(ev), slot };
   };
   const up = (ev: PointerEvent) => {
@@ -301,7 +300,7 @@ function moveInDock(key: string, e: PointerEvent, dockEl: HTMLElement) {
     const d = dockDrag.value;
     dockDrag.value = null;
     if (d) {
-      navigator.vibrate?.(10);
+      tick();
       setDock(order(d.key, d.slot));
     }
   };
@@ -478,9 +477,6 @@ function RecentSection({ held }: { held: boolean }) {
   );
 }
 
-/** Which of the dock's pages shows (0 pinned, 1 recent): its dots follow it, told when a scroll ends - never per frame. */
-const dockPage = signal(0);
-
 /** Exported for the desktop's home (ui/desktop.tsx): the same dock under its pill. */
 export function Dock() {
   const el = useRef<HTMLDivElement>(null);
@@ -501,16 +497,6 @@ export function Dock() {
   const pinned = keys.map((k) => byKey.value.get(k)).filter((a) => a != null);
   const swapOut = aim?.swap ? pinned[aim.slot]?.key : undefined;
   useGlide(el, `${pinned.map((a) => a.key).join()}|${gap}`);
-  // The page the dock settled on, once a swipe's scroll has ended (scrollend: no work while it moves).
-  const pagesEl = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const node = pagesEl.current;
-    if (!node) return;
-    // Anywhere in the recent apps (they scroll on past a page) is the second dot.
-    const settle = () => (dockPage.value = Math.min(1, Math.round(node.scrollLeft / Math.max(1, node.clientWidth))));
-    node.addEventListener("scrollend", settle);
-    return () => node.removeEventListener("scrollend", settle);
-  });
   // Nothing pinned AND no floating window either (not just the one carried out of it): no pinned page, only the drop
   // zone while carrying. A window with nothing pinned (possible with an empty dock, e.g. a fresh install - 2026-10-24
   // emulator FAIL "no dock cell for Calculator") still needs the pinned page: it's the only place DockWindows renders.
@@ -552,10 +538,11 @@ export function Dock() {
     <>
       {/*
        * The pinned apps' page, then the recent apps in a row that scrolls on (the browser's own scroll, on the
-       * compositor: momentum, snapping only near the two starts). The dots below follow when a scroll settles.
+       * compositor: momentum, snapping only near the two starts). No dots of its own: home's page dots are the one row
+       * (design wave 2, DESIGN-LANGUAGE §1) - the recent row reads by what it shows.
        */}
       <div class={`dock ${ghost && carried ? "dock-ghost" : ""} ${aim ? "aimed" : ""} ${paged ? "paged" : ""} ${pageFocus.value ? "page-focus" : ""}`} data-p ref={followDock}>
-        <div class="dock-pages" ref={pagesEl}>
+        <div class="dock-pages">
           {(!ghost || carried || button) && (
             <div
               class="dock-page"
@@ -575,12 +562,6 @@ export function Dock() {
               search button, last in the pinned group, is that separator (13:31) - never one run of icons. */}
           {showRecents && <RecentSection held={!!d || !!carried} />}
         </div>
-        {paged && (
-          <div class="dock-dots">
-            <i class={dockPage.value === 0 ? "on" : ""} />
-            <i class={dockPage.value === 1 ? "on" : ""} />
-          </div>
-        )}
       </div>
       {r && (
         <div class="dock-hint tile" style={{ bottom: `${innerHeight - r.top + 6}px` }}>

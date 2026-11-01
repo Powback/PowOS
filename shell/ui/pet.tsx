@@ -25,6 +25,7 @@
 import { computed, effect, signal } from "@preact/signals";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
+import { tick as hapticTick } from "./haptics.ts";
 import { carry, chat, chatting, closeDrawer, editing, home, menu, openPanel, page, pullPanels, stored } from "../state.ts";
 import { drawerOpen } from "./gesture.ts";
 // From bar.tsx, which re-exports ui/dictation.ts: the phone runs an older bar.tsx until the dictation rework ships.
@@ -1086,7 +1087,7 @@ function PetLayer() {
           const p = { x: e.clientX, y: e.clientY, dx: 0, dy: 0, lx: 0, ly: 0, moved: false, timer: 0, long: false };
           p.timer = window.setTimeout(() => {
             p.long = true;
-            navigator.vibrate?.(12);
+            hapticTick();
             if (chatOpen.peek()) closeDrawer();
             openAi();
           }, LONG_MS);

@@ -1,6 +1,7 @@
 #!/bin/bash
 # The design language's static check (docs/DESIGN-LANGUAGE.md §2-§6): prints what breaks a rule, per file. Four rules
-# BLOCK (design wave 1 made them hold: exit 1 on any hit) - monospace, radius, easing, status; the rest report only.
+# BLOCK (design wave 1 made them hold: exit 1 on any hit) - monospace, radius, easing, status - and design wave 2 (home)
+# added three more: page dots, haptics, home motion; the rest report only.
 # Outside theme.css:
 #   - monospace: a rule naming var(--font) (theme.css's monospace) - UI text is --font-ui; code/terminals excepted
 #     (terminal.*, a selector with term/code/pre/kbd/log/id in it);
@@ -8,7 +9,13 @@
 #   - radius: a border-radius off the scale (8px, var(--radius) 12px, 20px, 999px, 50%, inherit, 0, --icon-radius);
 #   - easing: a transition/animation with its own cubic-bezier()/ease, or a local spring (--ais-spring, --aip-spring),
 #     instead of the spring set (--spring-fast / --spring / --spring-slow, ui/spring.ts; loops on --ambient);
-#   - status: a status colour of its own (the old --aip-blue / --aip-amber, their hex) instead of theme.css --status-*.
+#   - status: a status colour of its own (the old --aip-blue / --aip-amber, their hex) instead of theme.css --status-*;
+#   - page dots: a page indicator of its own (dots with an "on" state: `<i class={... ? "on"`, a `.x-dots i.on` rule)
+#     instead of ui/pagedots.tsx PageDots - home had two rows at its foot, the dock's and its own (§1: one row);
+#   - haptics: navigator.vibrate() outside ui/haptics.ts - the host's tick()/confirm() are the one feel (§7; the
+#     WebView's vibrate is silent on the phone, home's long presses had no haptic at all);
+#   - home motion: a transition with a literal duration (120ms...) in a rule for home's pieces (.dock, .app, .home,
+#     .page, .home-tile, .page-dots, .app-icon) instead of the spring set's --spring*-ms (§6).
 #
 #   shell/dev/lint-design.sh [DIR]   DIR: the shell (default: this one). Exit 1: a blocking rule broken.
 set -uo pipefail
@@ -31,12 +38,23 @@ radius=$(grep -noE 'border-radius: *[^;"}]+' $css 2>/dev/null | grep -vE 'border
 easing=$( { grep -nE '(transition|animation)[^;]*(cubic-bezier\(|[0-9]m?s +ease)' $css 2>/dev/null | strip | grep -v -- '--spring'
   grep -nE -- '--ai[sp]-spring' $code 2>/dev/null | strip; } || true)
 status=$(grep -niE -- '--aip-(blue|amber|on-amber)|#5aa7e8|#e3a03c|#1a1206' $code 2>/dev/null | strip || true)
+dots=$( { grep -nE '<i class=\{[^}]*\? *"on"' ui/*.tsx 2>/dev/null; grep -nE -- '-dots +i\.on' $css 2>/dev/null | grep -v '\.page-dots'; } | strip || true)
+vibrate=$(grep -nE 'navigator\.vibrate' ui/*.ts ui/*.tsx *.ts *.tsx 2>/dev/null | grep -vE '^(ui/haptics|bridge)\.ts:' | strip || true)
+homemotion=$(awk '
+  /\{/ { sel = $0; sub(/\{.*/, "", sel); if (sel ~ /^[ \t]*$/) sel = last }
+  { if ($0 !~ /^[ \t]*(\/\*|\*)/ && $0 ~ /(transition|animation)(-duration)?:[^;]*[0-9.]+m?s([ ,;]|$)/ && $0 !~ /var\(--(spring|ambient)/ && $0 !~ /infinite/ && sel ~ /\.(dock|app|home|page|home-tile|page-dots|app-icon)([^a-z-]|$)/) printf "%s:%d:%s\n", FILENAME, FNR, $0 }
+  /\}/ { last = sel = "" }
+  { if ($0 ~ /\{/ && $0 !~ /\}/) last = sel }
+' ui/shell.css 2>/dev/null || true)
 count() { printf '%s' "$1" | grep -c . || true; }
-bad=$(( $(count "$mono") + $(count "$radius") + $(count "$easing") + $(count "$status") ))
+bad=$(( $(count "$mono") + $(count "$radius") + $(count "$easing") + $(count "$status") + $(count "$dots") + $(count "$vibrate") + $(count "$homemotion") ))
 if [ "$bad" = 0 ]; then echo "ok   design lint (docs/DESIGN-LANGUAGE.md)"; else echo "FAIL design lint: $bad blocking (docs/DESIGN-LANGUAGE.md)"; fi
 report "monospace in UI" "$mono"
 report "radius off the scale" "$radius"
 report "easing not the shared spring" "$easing"
 report "status colour not a --status-* token" "$status"
+report "page dots not ui/pagedots.tsx" "$dots"
+report "haptic not ui/haptics.ts" "$vibrate"
+report "home motion with a literal duration" "$homemotion"
 report "hard-coded blur (report-only)" "$blur"
 [ "$bad" = 0 ]

@@ -25,6 +25,8 @@ import android.os.Looper
  *   release <displayId>
  *   touch <displayId> <action> <downTime> <id>,<x>,<y> ...   -> an injected touch on that display, every finger down
  *                                                            now ("log touch ..." for downs/ups); also <x> <y> (one)
+ *   key <displayId> <keycode>             -> that key pressed (down, up) on that display ("log key ...": a quick page's
+ *                                            Back, QuickPageRoute.backLine)
  *   (stdin closed: the app is gone - every display released, then exit)
  *
  * Why it exists: a window's display must be TRUSTED, else the app's own launches leave it. Measured 2026-10-30
@@ -134,6 +136,7 @@ object WebWindowsHost {
                 "release" -> vds.remove(a[1].toInt())?.let(::release)
                 "settle" -> settle(a[1].toInt(), a.drop(2).joinToString(" "))
                 "touch" -> Inject.touch(a)
+                "key" -> Inject.key(a[1].toInt(), a[2].toInt())
             }
         }
 
@@ -419,6 +422,34 @@ object WebWindowsHost {
             if (action != android.view.MotionEvent.ACTION_MOVE || result != "ok") {
                 say("log touch display $displayId action $action fingers ${fingers.size} at ${x.toInt()},${y.toInt()}: $result")
             }
+        }
+
+        private val setKeyDisplayId by lazy { android.view.KeyEvent::class.java.getMethod("setDisplayId", Int::class.javaPrimitiveType) }
+
+        /**
+         * "key <displayId> <keycode>": [code] down and up on display [displayId], as the platform's `input -d <id>
+         * keyevent` sends it. HACK: KeyEvent.setDisplayId is hidden (reflected). Real fix: none public for a key's display.
+         */
+        fun key(
+            displayId: Int,
+            code: Int,
+        ) {
+            val now = android.os.SystemClock.uptimeMillis()
+            val result =
+                listOf(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.ACTION_UP).map { action ->
+                    val ev =
+                        android.view.KeyEvent(
+                            now, now, action, code, 0, 0, VIRTUAL_DEVICE, 0,
+                            android.view.KeyEvent.FLAG_FROM_SYSTEM, android.view.InputDevice.SOURCE_KEYBOARD,
+                        )
+                    try {
+                        setKeyDisplayId.invoke(ev, displayId)
+                        if (inject.invoke(im, ev, 0) as? Boolean == true) "ok" else "REFUSED"
+                    } catch (e: Exception) {
+                        "FAILED ${(e.cause ?: e)}"
+                    }
+                }
+            say("log key display $displayId code $code: ${result.joinToString("/")}")
         }
 
         /** KeyCharacterMap.VIRTUAL_KEYBOARD: the id the platform's own `input` command injects as. */

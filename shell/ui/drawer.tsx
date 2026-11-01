@@ -19,6 +19,7 @@ import type { App } from "../types.ts";
 
 import { searchResults, searchSections, searchPending, openSearchResult, type SearchResult } from "../search.ts";
 import { springFast } from "./spring.ts";
+import { tick } from "./haptics.ts";
 
 const ALPHABET = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
 const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
@@ -115,7 +116,7 @@ function LetterBar({ onPick }: { onPick: (letter: string | null) => void }) {
     const i = Math.max(0, Math.min(letters.length - 1, Math.floor(((y - r.top) / r.height) * letters.length)));
     if (letters[i] === current) return;
     setCurrent(letters[i]);
-    navigator.vibrate?.(5);
+    tick();
     onPick(letters[i]);
   };
   return (
@@ -156,12 +157,14 @@ export function AppList({ found, onTap }: { found: App[] | null; onTap?: (app: A
     const el = l != null ? list.current?.querySelector<HTMLElement>(`.az > :nth-child(${first.get(l)! + 1})`) : null;
     if (el) list.current!.scrollTop += el.getBoundingClientRect().top - list.current!.getBoundingClientRect().top;
   };
-  // Bottom-aligned (ui/align.ts): the grid's last row over the search bar as it opens, scrolling up for more.
-  const bottom = alignOf("launcher") === "bottom" && !found;
+  // Every open starts at the list's start - the first section (A) in view - whatever the alignment (ui/align.ts). Bottom
+  // alignment places a grid shorter than the panel at its foot (shell.css "Alignment"), near the thumb; it never means
+  // scrolled to the last app - opening at Z every time was the bug (the user, 11-01: "Why is the launcher always
+  // scrolled to bottom when I open it?"). Search results keep their own bottom-up start (Results below).
   const open = drawerOpen.value;
   useLayoutEffect(() => {
-    if (bottom && open && list.current) list.current.scrollTop = list.current.scrollHeight;
-  }, [bottom, open]);
+    if (open && !found && list.current) list.current.scrollTop = 0;
+  }, [open, !found]);
   const cell = (app: App) => <AppCell key={app.key} app={app} draggable={!onTap} onTap={onTap} />;
   return (
     <>

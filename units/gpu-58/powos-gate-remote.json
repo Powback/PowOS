@@ -1,0 +1,35 @@
+{
+  "id": "powos-gate-remote",
+  "name": "PowOS shell gate - remote browser runs (.58)",
+  "kind": "container",
+  "host": "desktop",
+  "hostNote": "the 9950X3D box (192.168.50.58, Bazzite, 32 threads), idle most of the day",
+  "owner": "system:powos-gate",
+  "purpose": "the Mac's shell gate (shell/dev/gate.sh, dev/preview.sh) with GATE_REMOTE=powos@192.168.50.58 runs its headless-Chromium work here instead of on the Mac: the scene run (gate.mjs) and the widget sweep's browser passes (preview.mjs), each a throwaway podman container of the same image the Mac uses, over the composed shell rsynced from the Mac. tsc, the lints and the OWL JVM step stay on the Mac. Started over ssh per gate run; nothing runs between gates",
+  "installedBy": "shell/dev/gate-remote.sh (gr_init: the dirs, the image pull and this record, on the first remote gate)",
+  "image": "docker.io/zenika/alpine-chrome:with-puppeteer (amd64; the Mac runs the arm64 build of the same tag)",
+  "ports": [],
+  "files": [
+    "/var/home/powos/.cache/powos-gate-remote/run (one composed shell per Mac gate slot, reused: rsync deltas)",
+    "/var/home/powos/.cache/powos-gate-remote/tx (gate.mjs's transpile cache by source hash; week-old files pruned)",
+    "/var/home/powos/.config/powos/units.d/powos-gate-remote.json"
+  ],
+  "processes": [
+    {
+      "container": "powos-gate-<mac pid>-r<ready ms> / powos-preview-<mac pid>-<pass> (podman run --rm, per gate)"
+    }
+  ],
+  "unbounded": "no memory/cpu limits: agent gates run at --cpu-shares 256 (the ship's at the default), gate.mjs sizes its scene concurrency from this box's load and cores; containers are --rm and removed by name when the Mac's gate is interrupted",
+  "autosleep": "none needed: nothing runs between gates",
+  "health": "ssh -o BatchMode=yes powos@192.168.50.58 true",
+  "remove": {
+    "stop": [
+      "unset GATE_REMOTE on the Mac (the gate runs locally)"
+    ],
+    "commands": [
+      "rm -rf /var/home/powos/.cache/powos-gate-remote /var/home/powos/.config/powos/units.d/powos-gate-remote.json",
+      "podman rmi docker.io/zenika/alpine-chrome:with-puppeteer"
+    ],
+    "keep": []
+  }
+}

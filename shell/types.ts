@@ -616,6 +616,11 @@ export interface Bridge {
     /** Opens PowOS AI's own app. */
     open(): Promise<void>;
     /**
+     * Home's PowOS AI page shown or not (powai.tsx): while it is, the side button doesn't stack the assist sheet - a
+     * second chat - over it; home gets "ai.focus" and its field takes the keys (PowosAssistSession.onShow). ?: older hosts.
+     */
+    pageShown?(shown: boolean): Promise<void>;
+    /**
      * "Create app": a fresh thread in a new directory, building [description] as a PowOS app (`powos app new` /
      * `install`). False while a turn is under way (or PowOS isn't running).
      */
@@ -1005,6 +1010,8 @@ export interface Bridge {
     restore?(id: number): Promise<boolean>;
     /** Host-optional (TS1): its app at content zoom [k] - its display's size kept, its dpi x [k] (the app reconfigures). */
     zoom?(id: number, k: number): Promise<boolean>;
+    /** Host-optional: window [id] pressed (its bar or body; -1: home outside every window) - Back / Forward go to it (WindowKeys.kt). */
+    focus?(id: number): Promise<boolean>;
   };
   /**
    * The switcher, a layer of home (ui/recents.tsx). The host drives it: "recents.begin" ({ from, tasks }: a swipe up

@@ -15,6 +15,7 @@ import { searchResults, searchPending, openSearchResult } from "../search.ts";
 import { followOpenness, pageDrag } from "./gesture.ts";
 import { chatting, drawer, homePage, launcherIsOverlay, openPanel, page, pullKind, pullPage, query, sharesBar } from "../state.ts";
 import { powos } from "../bridge.ts";
+import { tick } from "./haptics.ts";
 import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
 import { dictate, drop, finish, finishing, forget, hearing, listen, listeningFor, makeHold, release, settle, speech, stopTap, type MicTarget } from "./dictation.ts";
 import { remoteHearing, startBarSync } from "./barsync.ts";
@@ -99,7 +100,7 @@ export function Mic({ target }: { target: MicTarget }) {
           p.cancelled = true;
           forget(target);
           powos.speech.cancel();
-          navigator.vibrate?.(5);
+          tick();
         }
       }}
       onPointerUp={() => {
@@ -382,6 +383,8 @@ function seatOnAi(bar: HTMLElement) {
   void bar.offsetWidth;
   bar.classList.add("seated");
   bar.style.translate = `${Math.round(x)}px ${Math.round(y)}px`;
+  // The threads under it keep clear of where it lands (powai.tsx useBarClear; its translate's end re-measures).
+  bar.dispatchEvent(new Event("bar-seated", { bubbles: true }));
 }
 
 /** BM1: on the way home from the page the bar stays seated while it morphs back into the button (docksearch.tsx). */
@@ -392,6 +395,17 @@ function unseat(bar: HTMLElement) {
   bar.style.removeProperty("translate");
   bar.style.removeProperty("width");
 }
+
+/**
+ * The side button over PowOS AI's page (ShellBridge.focusAiOnHome; the user, 11-01 21:32: the assist sheet stacked a
+ * second input over the page's): no sheet - the page's one field, this bar, takes the keys.
+ */
+if (homePage)
+  powos.on("ai.focus", () => {
+    if (page.peek() !== -1) return;
+    document.querySelector<HTMLTextAreaElement>(".home > .bar[data-role=ai] textarea")?.focus();
+    void powos.keyboard.show();
+  });
 
 /** Seats the bar on PowOS AI's page while that's the page (and re-seats it as the page's layout changes). */
 function useAiSeat(proxy: boolean) {
@@ -413,7 +427,17 @@ function useAiSeat(proxy: boolean) {
     const ro = new ResizeObserver(() => seatOnAi(el));
     if (slot) ro.observe(slot);
     ro.observe(document.documentElement);
-    return () => ro.disconnect();
+    // Home's foot changing under the bar (the keyboard's room, the recents strip coming or going) moves the bar's own
+    // place without resizing it: home's stage, over the bar, resizes then - the seat follows.
+    const stage = el.parentElement?.querySelector(":scope > .stage");
+    if (stage) ro.observe(stage);
+    // The pill growing (a long ask wraps up to three rows).
+    const pill = el.querySelector(".bar-pill");
+    if (pill) ro.observe(pill);
+    // The keyboard moves the slot (the page ends at its top, shell.css .ai-screen.stacked) whatever its size does: the
+    // field follows it onto the keyboard, never left where the slot was (P1 11-01: behind the keyboard).
+    const off = powos.on("system.insets", () => requestAnimationFrame(() => seatOnAi(el)));
+    return () => (ro.disconnect(), off());
   }, [at, dragging]);
   return formRef;
 }

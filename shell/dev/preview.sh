@@ -108,10 +108,38 @@ browser() { # PASS
   # The preview's own page and baseline, from here: the shell checked (the installed APK's, say) may not carry them.
   mounts+=(-v "$SHELL_DIR/dev/preview:/shell/dev/preview:ro")
   [ -n "$wallpaper" ] && mounts+=(-v "$(cd "$(dirname "$wallpaper")" && pwd)/$(basename "$wallpaper"):/wallpaper.jpg:ro")
-  docker run --rm --platform linux/arm64 --shm-size 1g ${GATE_CPU_SHARES:+--cpu-shares "$GATE_CPU_SHARES"} "${mounts[@]}" -e PASS="$1" -e HOST_WORK="$work" -e PREVIEW_THEMES="$themes" \
+  local envs=(-e PASS="$1" -e HOST_WORK="$work" -e PREVIEW_THEMES="$themes" \
     -e PREVIEW_LIVE="$live" -e PREVIEW_FAST="$fast" ${only:+-e PREVIEW_ONLY="$only"} ${PREVIEW_EMPTY:+-e PREVIEW_EMPTY="$PREVIEW_EMPTY"} \
-    ${PREVIEW_JOBS:+-e PREVIEW_JOBS="$PREVIEW_JOBS"} ${PREVIEW_DEBUG:+-e PREVIEW_DEBUG=1} ${PREVIEW_DEBUG_KEY:+-e PREVIEW_DEBUG_KEY="$PREVIEW_DEBUG_KEY"} ${PREVIEW_BASELINE:+-e PREVIEW_BASELINE="$PREVIEW_BASELINE"} \
+    ${PREVIEW_JOBS:+-e PREVIEW_JOBS="$PREVIEW_JOBS"} ${PREVIEW_DEBUG:+-e PREVIEW_DEBUG=1} ${PREVIEW_DEBUG_KEY:+-e PREVIEW_DEBUG_KEY="$PREVIEW_DEBUG_KEY"} ${PREVIEW_BASELINE:+-e PREVIEW_BASELINE="$PREVIEW_BASELINE"})
+  if [ -n "$GR_HOST" ]; then browser_remote "$1" "${envs[@]}"; return; fi
+  docker run --rm --platform linux/arm64 --shm-size 1g ${GATE_CPU_SHARES:+--cpu-shares "$GATE_CPU_SHARES"} "${mounts[@]}" "${envs[@]}" \
     -w /usr/src/app --entrypoint node "$IMAGE" preview.mjs
+}
+# GATE_REMOTE (dev/gate-remote.sh): the browser passes on the remote. The OWL trees between them stay here (the JVM
+# image is the Mac's): /work goes up before each pass and comes back after it, with /out. HOST_WORK stays this $work,
+# the path the local JVM container sees.
+. "$SHELL_DIR/dev/gate-remote.sh"
+gr_init "$IMAGE"
+GR_PREFIX=powos-preview-$$- gr_dir=run/${GATE_REMOTE_ID:-preview}/pv
+trap 'gr_cleanup; rm -rf "$work"' EXIT
+browser_remote() { # PASS ENVS...
+  local pass=$1 m; shift
+  m=(-v "@/$gr_dir/shell:/shell:ro" -v "@/$gr_dir/work:/work" -v "@/$gr_dir/out:/out" -v "@/$gr_dir/preview.mjs:/usr/src/app/preview.mjs:ro"
+    -v "@/$gr_dir/work/apps:/apps:ro" -v "@/$gr_dir/font:/targets/android/app/app/src/main/res/font:ro" -v "@/$gr_dir/preview:/shell/dev/preview:ro")
+  if [ "$pass" = plan ]; then
+    gr_push "$S" "$gr_dir/shell" --exclude /node_modules || return 2
+    gr_push "$SHELL_DIR/dev/preview" "$gr_dir/preview" && gr_push "$SHELL_DIR/dev/preview/preview.mjs" "$gr_dir/preview.mjs" &&
+      gr_push "$REPO/targets/android/app/app/src/main/res/font" "$gr_dir/font" --copy-links &&
+      gr_push "$out" "$gr_dir/out" || return 2
+    [ -z "$wallpaper" ] || gr_push "$wallpaper" "$gr_dir/wallpaper.jpg" || return 2
+  fi
+  [ -z "$wallpaper" ] || m+=(-v "@/$gr_dir/wallpaper.jpg:/wallpaper.jpg:ro")
+  gr_push "$work" "$gr_dir/work" || return 2
+  local rc=0
+  gr_run "${GR_PREFIX}$pass" --shm-size 1g ${GATE_CPU_SHARES:+--cpu-shares "$GATE_CPU_SHARES"} "${m[@]}" "$@" \
+    -w /usr/src/app --entrypoint node "$GR_IMAGE" preview.mjs || rc=$?
+  gr_pull "$gr_dir/work" "$work" && gr_pull "$gr_dir/out" "$out" || return 2
+  return $rc
 }
 step() { echo "     $1: $(($(date +%s) - t0)) s"; }
 browser plan; step plan

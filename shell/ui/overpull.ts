@@ -8,6 +8,7 @@
  * currentTime, so no style is written per frame (nativeglass.ts's MutationObserver re-measures on style writes).
  */
 import { powos } from "../bridge.ts";
+import { tick } from "./haptics.ts";
 import { springFast } from "./spring.ts";
 
 /**
@@ -42,7 +43,7 @@ export function overPull(d: number) {
   anim.currentTime = (band(d) / MAX) * SPAN;
   if (!armed && d >= at) {
     armed = true;
-    navigator.vibrate?.(10);
+    tick();
     raiseSearch();
   } else if (armed && d < at - HYST) {
     armed = false;

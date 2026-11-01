@@ -10,7 +10,7 @@
 import { useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { apps, launch, openPanel, page } from "../state.ts";
-import { list } from "./aiboard.tsx";
+import { reviewImages } from "./aiboard.tsx";
 import { BrokenReply } from "./brokenreply.tsx";
 import { itemOf, type Need } from "./needsyou.tsx";
 import { imageUrl, openFull } from "./rich.tsx";
@@ -122,7 +122,8 @@ function useSwipe(onCommit: (d: Dir) => void) {
   };
   const handlers = {
     onPointerDown: (e: PointerEvent) => {
-      if ((e.target as Element).closest("button, textarea, input, .ai-reply")) return;
+      // The before|after pair pans on its own (folded: swiped between the two), never the card.
+      if ((e.target as Element).closest("button, textarea, input, .ai-reply, .ais-pair")) return;
       at.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       ref.current?.classList.add("dragging");
@@ -136,15 +137,45 @@ function useSwipe(onCommit: (d: Dir) => void) {
 
 const KIND: Record<Need["kind"], string> = { try: "Ready to try", do: "To do", ask: "Question" };
 
-/** The card's screenshot: a thumbnail (a tap: full screen); none when the page can't load it. */
-function Shot({ n }: { n: Need }) {
-  const [failed, setFailed] = useState(false);
-  const url = list<string>(n.w.images).map(imageUrl).find(Boolean);
-  if (!url || failed) return null;
+/** One picture of the card, labelled (a tap: full screen); nothing once it fails to load. */
+function Pic({ url, label, title, onFail }: { url: string; label: string; title: string; onFail: () => void }) {
   return (
-    <button type="button" class="ais-shot" onClick={() => openFull(n.w.title, <img class="ai-img-full" src={url} alt="" />)}>
-      <img src={url} alt="" loading="lazy" onError={() => setFailed(true)} />
-    </button>
+    <figure class="ais-pic" data-pic={label}>
+      <button type="button" class="ais-shot" onClick={() => openFull(`${label} - ${title}`, <img class="ai-img-full" src={url} alt="" />)}>
+        <img src={url} alt={label} loading="lazy" onError={onFail} />
+      </button>
+      <figcaption class="ais-pic-label">{label}</figcaption>
+    </figure>
+  );
+}
+
+/**
+ * The card's pictures (the user, 2026-11-01: "it should show me a comparison between the old and new with a ss taken
+ * from the emu"): a thing to try shows before (the user's report screenshot) | after (the fix, an emulator shot:
+ * `task set --image P --image-kind after`) - side by side unfolded, a swipeable pair folded; no after yet: the before
+ * alone, "what you reported", and "after: coming". Other cards: their screenshot. Each one a tap: full screen.
+ */
+function Shots({ n }: { n: Need }) {
+  const [failed, setFailed] = useState<string[]>([]);
+  const { before, after } = reviewImages(n.w);
+  const ok = (ps: string[]) => ps.map(imageUrl).filter((u): u is string => !!u && !failed.includes(u));
+  const b = ok(before)[0];
+  // The newest after: the last fix shot attached.
+  const a = ok(after).at(-1);
+  const fail = (u: string) => () => setFailed((f) => [...f, u]);
+  if (n.kind !== "try") return b ? <Pic url={b} label="screenshot" title={n.w.title} onFail={fail(b)} /> : null;
+  if (!a)
+    return b ? (
+      <div class="ais-pair single" data-pair="before">
+        <Pic url={b} label="what you reported" title={n.w.title} onFail={fail(b)} />
+        <span class="ais-pic-coming">after: coming</span>
+      </div>
+    ) : null;
+  return (
+    <div class={`ais-pair ${b ? "" : "single"}`} data-pair={b ? "both" : "after"}>
+      {b && <Pic url={b} label="before" title={n.w.title} onFail={fail(b)} />}
+      <Pic url={a} label="after" title={n.w.title} onFail={fail(a)} />
+    </div>
   );
 }
 
@@ -199,7 +230,7 @@ function TopCard({ n, count }: { n: Need; count: number }) {
       {count > 1 && <span class="ais-card-count">1 of {count}</span>}
       <span class="ais-card-title">{n.w.title}</span>
       <span class="ais-card-line">{n.line}</span>
-      <Shot n={n} />
+      <Shots n={n} />
       {n.kind === "try" && (
         <button type="button" class="ais-try" onClick={() => openTry(n)}>
           Try it
