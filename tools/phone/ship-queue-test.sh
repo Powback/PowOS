@@ -59,6 +59,10 @@ cat > tools/phone/ship-apk.sh <<'EOF'
 l=$HOME/.cache/powos-ship.lock; mkdir "$l" && echo "apk pid $$ x" > "$l/who"
 trap 'rm -rf "$l"; [ "$(cat "$SHIP_DIR/installing" 2>/dev/null)" = $$ ] && rm -f "$SHIP_DIR/installing"' EXIT
 echo "APKSTART $(git rev-parse HEAD)" >> "$LOG"
+# $HOME/apk-link-drop N: the phone's adb link drops before the install N more times (ship-apk's snapshot refusal, rc 3)
+if [ -s "$HOME/apk-link-drop" ]; then d=$(cat "$HOME/apk-link-drop"); echo $((d-1)) > "$HOME/apk-link-drop"; [ "$d" -le 1 ] && rm -f "$HOME/apk-link-drop"
+  echo "APKLINKDROP" >> "$LOG"; echo "adb.sh: phone unavailable after reconnect; not caching device state" >&2
+  echo "ship-apk: REFUSED - couldn't snapshot the phone's current APK + overrides (above): not installing without a way back (APK built, kept)" >&2; exit 3; fi
 while [ -e "$HOME/hold-apk" ]; do sleep 0.3; done
 until mkdir "$l/phone" 2>/dev/null; do sleep 0.3; done
 # the installing mark + the pause flag, as the real one; APK_INSTALL_S: how long the install takes
@@ -359,6 +363,20 @@ drained
 landm 5 targets/android/app/Main.kt; req --note "x with its APK"; t14e=$(tip)
 drained && appslive "$t14e"
 [ "$(first2)" = "APPINSTALL,APK" ] && ok "module published before the APK that carries its bindings" || { bad "APK path: $(first2)"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+
+# 15. 11-01 ask latency: the phone's adb link drops at the APK ship (not the tip's fault) - the same tip goes again and
+#     installs, no FAILED mail, no wait for an unrelated push; a link that keeps dropping fails after the retries.
+: > "$LOG"; echo 1 > "$HOME/apk-link-drop"
+land targets/android/app/Main.kt 'class Main15' "kt15"; req --note "fifteen"; t15=$(tip)
+drained 60
+grep -q '^APKLINKDROP' "$LOG" && grep -q "^APK $t15" "$LOG" && ! grep -q '^MAIL.*FAILED' "$LOG" && [ "$(cat "$Q/failed-apk" 2>/dev/null)" != "$t15" ] &&
+  grep -q "${t15:0:9}: APK ship rc 3: the phone link dropped" "$Q/runner.log" && ok "link drop: the same tip goes again and installs" || { bad "link drop retry"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+: > "$LOG"; echo 9 > "$HOME/apk-link-drop"
+land targets/android/app/Main.kt 'class Main15b' "kt15b"; req --note "fifteen b"; t15b=$(tip)
+for _ in $(seq 300); do [ "$(cat "$Q/failed-apk" 2>/dev/null)" = "$t15b" ] && break; sleep 0.2; done
+[ "$(cat "$Q/failed-apk" 2>/dev/null)" = "$t15b" ] && [ "$(grep -c '^APKLINKDROP' "$LOG")" = 3 ] && [ "$(grep -c '^MAIL.*FAILED' "$LOG")" = 1 ] &&
+  ok "a link that keeps dropping: FAILED after 2 retries, mailed once" || { bad "link drop cap: $(grep -c '^APKLINKDROP' "$LOG") drops"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+rm -f "$HOME/apk-link-drop"; land targets/android/app/Main.kt 'class Main15c' "kt15c"; drained 60 && ok "the next tip ships" || bad "after link-drop cap"
 
 for _ in $(seq 75); do [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 0.2; done
 runner_left=$(cat "$Q/runner.lock/pid" 2>/dev/null)

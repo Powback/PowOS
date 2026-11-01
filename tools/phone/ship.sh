@@ -305,6 +305,9 @@ run)
     [ "${SHIP_WINDOW_GATE:-1}" = 1 ] && [ -z "${SHIP_DIR:-}" ] || return 0
     local b=$1 t=$2 what=$3 f= wb wl wrc gp wdg
     RW_DONE=
+    # A shell window check superseded while NOT JUDGED (window_wait) left its base here: this check covers that base's
+    # window changes too, so a newer tip shipping past an unjudged one never skips its device check.
+    [ -s "$Q/window-unjudged" ] && b=$(cat "$Q/window-unjudged")
     if [ -n "$b" ] && git cat-file -e "$b^{commit}" 2>/dev/null; then
       f=$(git diff --name-only "$b" "$t" 2>/dev/null | grep -E "$WINDOW_FILES" | sed 's|.*/||' | sort -u | paste -sd' ' -)
     else f="(no base: every window file)"; fi
@@ -333,6 +336,7 @@ run)
       echo "$(date +%T) ${t:0:9}: window check waiting for an awake phone - its requests are kept, retried in ${WINDOW_WAIT_S:-60} s (log $wl)"
       return 2
     fi
+    rm -f "$Q/window-unjudged"   # judged (PASS or FAIL; a FAIL keeps window-failed, which checks every ship)
     if [ $wrc = 0 ]; then
       rm -f "$Q/window-failed"; echo "$(date '+%F %T') ${t:0:9} $what window-render PASS" >> "$Q/shipped.log"
       echo "$(date +%T) ${t:0:9}: device window check PASS"; return 0
@@ -575,6 +579,12 @@ run)
       # Stopped WITH its runner (the TERM trap marked it before killing ship-apk, whose subshell still writes 143): not
       # a failure of this tip - it goes again, as one whose runner died without an rc does (apk_alive's rc 4).
       elif [ -e "$Q/apk/stopped" ]; then echo "$(date +%T) ${A:0:9}: APK ship stopped with the runner (rc $arc) - it goes again"
+      # The PHONE LINK dropped, not this tip (11-01 measure: 12 of 36 APK FAILs were "couldn't snapshot" / "phone
+      # unavailable" / "error: closed" / an empty adb install failure; each held every request until an unrelated push,
+      # 293 min in 2 days). Nothing new is on the phone (ship-apk restored the overrides), so the same tip goes again, up
+      # to SHIP_APK_LINK_RETRIES (default 2) times; a code fault (build, shell doesn't load, guard) still fails at once.
+      elif apk_link_fault "$alog" && lr=$(apk_link_retry "$A") && [ "$lr" -le "${SHIP_APK_LINK_RETRIES:-2}" ]; then
+        echo "$(date +%T) ${A:0:9}: APK ship rc $arc: the phone link dropped (log $alog) - it goes again ($lr/${SHIP_APK_LINK_RETRIES:-2})"
       else
         echo "$A" > "$Q/failed-apk"
         echo "$(date +%T) ${A:0:9}: APK ship FAILED rc $arc (log $alog) - waiting for a new origin commit"
@@ -582,6 +592,17 @@ run)
       fi
       rm -rf "$Q/apk"; inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
     fi
+  }
+  # apk_link_fault LOG: the APK ship failed on the adb link to the phone (before or at the install), not on the tip.
+  apk_link_fault() {
+    [ -f "$1" ] || return 1
+    grep -q 'REFUSED - this commit\|build-app.sh failed\|INSTALL_FAILED' "$1" && return 1
+    grep -q "phone unavailable after reconnect\|^error: closed\|couldn't snapshot the phone\|couldn't reset the phone's shell overrides\|failed to install /powos.apk: *\$" "$1"
+  }
+  # apk_link_retry TIP: prints how many link retries TIP has had, this one counted ($Q/apk-link-retry: "tip n").
+  apk_link_retry() {
+    local t="" n=0; [ -s "$Q/apk-link-retry" ] && read -r t n < "$Q/apk-link-retry"; case $n in ''|*[!0-9]*) n=0 ;; esac
+    [ "$t" = "$1" ] || n=0; n=$((n+1)); echo "$1 $n" > "$Q/apk-link-retry"; echo "$n"
   }
   # shell_done: a live shell ship of T whose window check passed (or wasn't needed): its records, then its requests done.
   shell_done() {
@@ -600,6 +621,18 @@ run)
     local ww_at ww_base ww_tip wgr
     [ -s "$Q/window-wait" ] || { [ -f "$Q/apk/window-wait" ] && return 0; return 1; }
     . "$Q/window-wait"
+    # Superseded (ask-latency 11-01: one dozing-phone wait blocked every later ship for 94 min, 5 requests stuck): the
+    # phone is asleep (nobody looking) and origin has a newer tip that changes the shell again and needs no APK - the
+    # loop ships that tip now. Its own window check covers this tip's base too ($Q/window-unjudged, window_gate), and
+    # this tip's requests are ancestors of the new one, so none is done before a check of its window changes passes.
+    local nt; nt=$(git rev-parse HEAD)
+    if [ "$nt" != "$ww_tip" ] && git merge-base --is-ancestor "$ww_tip" "$nt" 2>/dev/null &&
+       ! pending_apk "$nt" && [ -n "$(delta "$ww_tip" "$nt")" ]; then
+      [ -s "$Q/window-unjudged" ] || echo "$ww_base" > "$Q/window-unjudged"
+      rm -f "$Q/window-wait"
+      echo "$(date +%T) ${ww_tip:0:9}: window check still waiting for an awake phone - superseded by ${nt:0:9} (its check covers both)"
+      return 1
+    fi
     [ $(( $(date +%s) - ww_at )) -ge "${WINDOW_WAIT_S:-60}" ] || return 0
     T=$ww_tip; window_gate "$ww_base" "$T" shell; wgr=$?
     if [ $wgr = 2 ]; then sed -i '' "s/^ww_at=.*/ww_at=$(date +%s)/" "$Q/window-wait"; return 0; fi
