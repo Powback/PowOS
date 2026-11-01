@@ -8193,6 +8193,114 @@ async function webWindowTabsCheck() {
   }
 }
 
+/**
+ * WT3 (the user, 11-01: "if I try to drag an app maximized like this it should tab with the existing maximized app"):
+ * an Android window's bar dragged over a maximised Linux window's middle aims a tab drop (its strip lit, a ghost tab, no
+ * tile / snap / free-region rect); let go: one stack of two, maximised, the dropped one shown. At the left edge it
+ * still snaps (no tab, the left half). Helpers: window.__tmx (the scene's two windows, the drags).
+ */
+async function TABS_MAX_HELPERS() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const g = window.__tabg;
+  const page = S.pages.value[0];
+  const bar = () => g.frame(952).querySelector(".webwindow-title");
+  window.__tmx = {
+    W,
+    g,
+    async fresh() {
+      S.page.value = 0;
+      W.stacks.value = [];
+      W.tilings.value = {};
+      W.webWins.value = [
+        { id: 951, key: "l:org.kde.dolphin", label: "Dolphin", page, x: 40, y: 120, w: 360, h: 280, live: true },
+        { id: 952, key: "a:gate.tabmax", label: "X", page, x: 300, y: 360, w: 320, h: 260, live: true },
+      ];
+      await window.__gw.settled();
+      W.toggleMaximise(951);
+      W.webWins.value = [...W.webWins.value].sort((x, y) => x.id - y.id);
+      await new Promise((ok) => setTimeout(ok, 300));
+      await window.__gw.settled();
+    },
+    /** X's bar held at [to] (the area's middle, or its left edge when [edge]). */
+    async hold(edge) {
+      const A = W.tileArea();
+      const b = bar().getBoundingClientRect();
+      g.at = [edge ? A.left + 6 : (A.left + A.right) / 2, (A.top + A.bottom) / 2];
+      await g.drag(bar(), [b.left + 60, b.top + b.height / 2], g.at, true);
+    },
+    done() {
+      W.webWins.value = [];
+      W.tilings.value = {};
+      W.stacks.value = [];
+      W.tabView.value = W.dropView.value = W.snapView.value = W.placeView.value = null;
+    },
+  };
+  return [];
+}
+
+/** WT3's judges: what the hold over the middle shows, what the drop made, what the left edge does. */
+function TABS_MAX_JUDGES() {
+  const t = window.__tmx;
+  const off = (r, b) => !r || [r.left - b.left, r.width - b.width, r.height - b.height].some((d) => Math.abs(d) > 3);
+  Object.assign(t, {
+    aimed() {
+      const { W, g } = t;
+      const v = W.tabView.value;
+      const fails = v?.target === 951 ? [] : [`WT3: over a maximised window's middle the tab target is ${JSON.stringify(v)} (want 951)`];
+      if (!g.frame(951)?.querySelector(".ww-tab.ghost")) fails.push("WT3: no ghost tab in the maximised window's strip");
+      const rect = W.dropView.value || W.snapView.value || W.placeView.value?.kind === "region";
+      return rect ? [...fails, "WT3: a rect preview shows over the maximised window (want only the ghost tab)"] : fails;
+    },
+    dropped(max) {
+      const { W, g } = t;
+      const s = W.stacks.value;
+      const fails = s.length === 1 && s[0].ids.join() === "951,952" && s[0].active === 952 ? [] : [`WT3: after the drop stacks ${JSON.stringify(s)} (want [951,952] showing 952)`];
+      if (!W.webWins.value.find((w) => w.id === 952)?.restore) fails.push("WT3: the dropped tab isn't maximised");
+      return off(g.frame(952)?.getBoundingClientRect(), max) ? [...fails, "WT3: the group's frame isn't the maximised frame"] : fails;
+    },
+    edged() {
+      const { W } = t;
+      const fails = W.tabView.value ? [`WT3: at the left edge a tab drop aims ${JSON.stringify(W.tabView.value)} (want the snap)`] : [];
+      return W.snapView.value?.slot === "left" ? fails : [...fails, `WT3: at the left edge the snap is ${JSON.stringify(W.snapView.value?.slot)} (want left)`];
+    },
+    split() {
+      const A = t.W.tileArea();
+      const l = t.g.frame(952)?.getBoundingClientRect();
+      const fails = t.W.stacks.value.length ? ["WT3: a left-edge drop made a stack"] : [];
+      return !l || Math.abs(l.left - A.left) > 12 || l.width > (A.right - A.left) * 0.6 ? [...fails, "WT3: a left-edge drop didn't take the left half"] : fails;
+    },
+  });
+  return [];
+}
+
+async function webWindowTabsMaxCheck() {
+  const t = window.__tmx;
+  try {
+    await t.fresh();
+    const max = t.g.frame(951).getBoundingClientRect();
+    await t.hold(false);
+    const fails = t.aimed();
+    await t.g.let(952);
+    fails.push(...t.dropped(max));
+    await t.fresh();
+    await t.hold(true);
+    fails.push(...t.edged());
+    await t.g.let(952);
+    return [...fails, ...t.split()];
+  } finally {
+    t.done();
+  }
+}
+
+/** WT3's scene: the tab helpers, then [webWindowTabsMaxCheck]. */
+async function tabsMaxScene(r) {
+  for (const f of [TAB_HELPERS, TABS_MAX_HELPERS, TABS_MAX_JUDGES]) await r.page.evaluate(f);
+  const out = await r.page.evaluate(webWindowTabsMaxCheck);
+  await r.page.screenshot({ path: "/cache/ww-tabs-max-unfolded.png" }).catch(() => {});
+  return out;
+}
+
 async function webWindowTileDockCheck() {
   const S = await window.__gw.mod("./state.ts");
   const W = await window.__gw.mod("./ui/webwindows.tsx");
@@ -9386,6 +9494,9 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [name, size, folded] of [["quick-page-unfolded", { width: 821, height: 883 }, false], ["quick-page-folded", { width: 404, height: 900 }, true]])
       runs.push(open(browser, `${ORIGIN}/index.html`, name, size).then((r) => whenReady(r, () => quickPageScene(r, folded))));
+  // WT3: a window dragged over a maximised one tabs into it; at the left edge it still splits (ww-tabs-max-unfolded; the user, 11-01).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ww-tabs-max-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tabsMaxScene(r))));
   // MX1: full screen stays full screen through ticks (a Linux and an Android window, hostless and host-shaped); restore brings the floating frame back (ww-full-stays-unfolded; the user, 11-01 15:39).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-full-stays-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => fullStaysScene(r))));
