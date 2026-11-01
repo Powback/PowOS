@@ -130,9 +130,16 @@ public final class WebWindowSource {
         return ids.contains(id) && full.contains(id);
     }
 
-    /** Window [id] is a web window's (its control lines go to the host). */
+    /**
+     * Web windows quit ([quit]) whose KWin "close" hasn't come yet: it still goes to the host ([closed]) when it does -
+     * the ship gate's hidden Linux check waits for it (kwin 0050; before, the id was forgotten at the quit and the close
+     * went nowhere: "KWin window 19 wasn't closed after the quit").
+     */
+    private static final Set<Integer> quitting = ConcurrentHashMap.newKeySet();
+
+    /** Window [id] is a web window's (its control lines go to the host), or one quit and not closed yet. */
     static boolean isWeb(int id) {
-        return ids.contains(id);
+        return ids.contains(id) || quitting.contains(id);
     }
 
     static void title(int id, String title) {
@@ -144,6 +151,7 @@ public final class WebWindowSource {
     /** KWin's "close" for a web window's [id]. */
     static void closed(int id) {
         ids.remove(id);
+        quitting.remove(id);
         full.remove(id);
         Host h = host;
         if (h != null)
@@ -152,6 +160,7 @@ public final class WebWindowSource {
 
     /** A new KWin ([live]: its windows): every web window of another is gone. */
     static void session(Set<Integer> live) {
+        quitting.retainAll(live);
         for (Integer id : ids.toArray(new Integer[0]))
             if (!live.contains(id)) {
                 Log.i(TAG, "window " + id + ": not the running KWin's, its web window goes");
@@ -390,6 +399,7 @@ public final class WebWindowSource {
     /** Its close button: KWin closes the window, then ends the app if it stays (kwin 0041 "quit"; older: "closed"). */
     public static void quit(Context context, int id) {
         ids.remove(id);
+        quitting.add(id);
         full.remove(id);
         WindowTasks.quit(context.getApplicationContext(), id);
     }

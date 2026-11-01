@@ -16,6 +16,8 @@ class WebWindowsSwipeCloseTest {
     private val src = File("src/main/kotlin/dev/omalauncher/shell/WebWindows.kt").readText()
     private val kwin = File("../../pkgs/kwin/0042-backends-anland-a-task-the-user-closes-quits-its-app.patch").readText()
     private val quit = File("../../session/powos-app-quit").readText()
+    private val source = File("../engine/src/main/java/andro/marchy/WebWindowSource.java").readText()
+    private val closeAfterQuit = File("../../pkgs/kwin/0050-backends-anland-a-quit-task-s-window-says-close-when-it-goes.patch").readText()
 
     private fun body(start: String) = src.substringAfter(start).substringBefore("\n        }\n\n")
 
@@ -68,5 +70,32 @@ class WebWindowsSwipeCloseTest {
         }
         assertTrue("never another user's", quit.contains("stat -c %u"))
         assertTrue("never by name globally", !quit.contains("pkill") && !quit.contains("killall"))
+    }
+
+    /**
+     * The ship gate's hidden Linux check (11-01 16:43-16:55, 3 FAILs "KWin window 19 wasn't closed after the quit"):
+     * after a quit, KWin's "close" never reached the selftest - KWin removed the task before closing (no close hook
+     * left) and the app forgot the id at the quit (a later close went nowhere). Now KWin says "close" once the window
+     * goes (0050) and a quit id stays routed to the host until it does.
+     */
+    @Test
+    fun aQuitWindowsCloseStillReachesTheHost() {
+        val q = source.substringAfter("public static void quit(").substringBefore("\n    }\n")
+        assertTrue("the quit id is kept for its close", q.contains("quitting.add(id);"))
+        assertTrue(source.contains("return ids.contains(id) || quitting.contains(id);"))
+        val closed = source.substringAfter("static void closed(int id) {").substringBefore("\n    }\n")
+        assertTrue(closed.contains("quitting.remove(id);") && closed.contains("h.closed(id)"))
+        assertTrue("KWin: close once the quit window goes", closeAfterQuit.contains("+    connect(window, &Window::closed, this, [this, id]() {"))
+        assertTrue(closeAfterQuit.contains("+        send({QStringLiteral(\"close\"), QString::number(id)});"))
+        assertTrue(File("../../pkgs/kwin/PKGBUILD").readText().contains("0050-backends-anland-a-quit-task-s-window-says-close-when-it-goes.patch"))
+    }
+
+    @Test
+    fun theSelftestsWindowOfferedAgainStaysOffThePage() {
+        assertTrue(WebWindows.selftestOwns(selftestKwin = 19, kwin = 19))
+        assertTrue(!WebWindows.selftestOwns(selftestKwin = 19, kwin = 20))
+        assertTrue("none taken yet", !WebWindows.selftestOwns(selftestKwin = -1, kwin = -1))
+        val opened = src.substringAfter("fun linuxOpened(").substringBefore("\n    }\n")
+        assertTrue(opened.indexOf("selftestOwns(t.kwin, kwin)") in 0 until opened.indexOf("pendingLinux[kwin] = offer"))
     }
 }

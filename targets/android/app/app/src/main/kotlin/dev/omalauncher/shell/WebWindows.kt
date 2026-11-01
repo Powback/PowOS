@@ -1018,7 +1018,15 @@ class WebWindows(
         }
         if (pendingLinux.containsKey(kwin)) return
         // The ship gate's hidden Linux check (selftestLinux): its app's next KWin window never reaches the page.
-        selftest?.let { t -> if (t.kwin < 0 && t.matches(offer.appId)) return t.take(kwin, offer.appId) }
+        selftest?.let { t ->
+            if (t.kwin < 0 && t.matches(offer.appId)) return t.take(kwin, offer.appId)
+            // KWin's "open" again for the selftest's own window (its "already a task: to the front"): still never the
+            // page's - before, it became a visible web window on the user's page mid-check (window-log 11-01 16:43:30).
+            if (selftestOwns(t.kwin, kwin)) {
+                WindowLog.i(TAG, "selftest: KWin window $kwin again: kept offscreen")
+                return
+            }
+        }
         if (androidStandIn(offer.appId)) {
             WindowLog.i(TAG, "KWin window $kwin (${offer.appId}): the Linux session's stand-in for an Android app - its own window is the app's, not a second web window")
             return
@@ -3733,6 +3741,12 @@ class WebWindows(
             val scaled = if (shot.width > width) android.graphics.Bitmap.createScaledBitmap(shot, width, shot.height * width / shot.width, true) else shot
             return java.io.ByteArrayOutputStream().also { scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, it) }.toByteArray()
         }
+
+        /** KWin window [kwin] is the hidden Linux selftest's ([selftestKwin], -1 = none taken yet): never the page's. */
+        fun selftestOwns(
+            selftestKwin: Int,
+            kwin: Int,
+        ): Boolean = selftestKwin >= 0 && selftestKwin == kwin
 
         /** The Linux web window card [taskId] stands for ([linuxCards]), or null for a real task. */
         fun linuxCardWindow(taskId: Int): Int? = (taskId - LINUX_CARD).takeIf { taskId >= LINUX_CARD }
