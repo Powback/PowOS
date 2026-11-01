@@ -3,7 +3,7 @@
  * (Android's, the app's Speech.kt) - what it hears, where the words go (a MicTarget), and how a dictation ends.
  * Continuous: pauses don't end it; a tap's ends after ~4 s with nothing heard (or the next tap), a hold's when let go.
  */
-import { signal } from "@preact/signals";
+import { computed, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { tick } from "./haptics.ts";
 
@@ -15,6 +15,12 @@ export interface SpeechState {
   elsewhere?: boolean;
 }
 export const speech = signal<SpeechState>({ listening: false, text: "", error: null });
+/**
+ * Whether a mic is on (this page's dictation or another window's): what a mic button shows. Derived once, so a button
+ * that only lights up re-renders when it flips, not on every word heard (speech.state per partial result: the dock's
+ * search button rendered 121x in the 02:23 trace, perf-1793409701579).
+ */
+export const micOn = computed(() => speech.value.listening || !!speech.value.elsewhere);
 
 /** Where a recognition's words go: the field it's for (what was typed before it, and what to do with the whole). */
 export interface MicTarget {

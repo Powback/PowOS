@@ -613,3 +613,38 @@ export async function pttHoldResult() {
   S.dockTry.value = "";
   return fails;
 }
+
+/**
+ * A dictation's words stream in (speech.state per partial result) while home shows the dock button: the dock redraws
+ * at most for the button's on and off, never per word (02:23 trace perf-1793409701579: the dock's search 121 renders,
+ * all signal-triggered - it read the whole speech state, text included, to show only whether the mic is on).
+ * Returns {fails, counts: name -> renders} over 20 partials.
+ */
+export async function dockSpeechRenders(position) {
+  const S = await importShim("./state.ts");
+  const scan = await importShim("./ui/renderscan.ts");
+  const was = S.dock.value;
+  if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6);
+  S.dockTry.value = position;
+  S.searchTry.value = "dock";
+  await window.__gw.settled(() => document.querySelector(".home > .dock .dock-search"), ".home > .dock");
+  const raf = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(() => ok())));
+  const host = (s) => window.__mockEvents.emit("speech.state", s);
+  scan.startScan("gate-dock-speech");
+  scan.reset();
+  const words = "turn on the bluetooth and play some music from the kitchen speaker please now ok".split(" ");
+  for (let i = 1; i <= 20; i++) (host({ listening: true, text: words.slice(0, i).join(" "), error: null }), await raf());
+  host({ listening: false, text: "", error: null });
+  await raf();
+  const counts = {};
+  for (const x of scan.scanStats()) counts[x.name] = (counts[x.name] ?? 0) + x.renders;
+  scan.stopScan("gate-dock-speech");
+  S.searchTry.value = "";
+  S.dockTry.value = "";
+  S.dock.value = was;
+  const fails = [];
+  const button = counts.DockSearchButton ?? 0;
+  if (button > 2) fails.push(`${position}: the dock's search button rendered ${button}x over 20 words, expected <= 2 (on, off)`);
+  for (const k of ["Dock", "AppCell", "memo(AppCell)"]) if (counts[k]) fails.push(`${position}: ${k} rendered ${counts[k]}x over 20 words, expected 0`);
+  return { fails, counts };
+}

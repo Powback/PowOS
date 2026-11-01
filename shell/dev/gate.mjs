@@ -10586,6 +10586,15 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, position] of [["folded", "bottom"], ["folded", "right"], ["unfolded", "bottom"], ["unfolded", "right"], ["unfolded", "left"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `dock-search-${label}-${position}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos) => (await importShim("./dev/dock-search-check.js")).dockSearchCheck(pos), position))));
+  // Perf P1 (dev/dock-search-check.js dockSpeechRenders; 02:23 trace): a dictation's words streaming in redraw the dock
+  // button only for its on/off, the dock and its cells never - folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const label of ["folded", "unfolded"])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `dock-speech-renders-${label}`, dockOpensView[label]).then((r) => whenReady(r, async () => {
+        const o = await r.page.evaluate(async () => (await importShim("./dev/dock-search-check.js")).dockSpeechRenders("bottom"));
+        console.log(`dock-speech-renders-${label}: renders over 20 words ${JSON.stringify(o.counts)}`);
+        return o.fails;
+      })));
   // SW1 (dev/dock-search-check.js; the user, 2026-10-31 15:34): edit mode's drag docks home's search and back - the old
   // hidden setting migrates, the defaults, the bar onto the dock (a gap at the separator, then the button, no bar), the
   // button onto home (the bar widget at the drop cell), the spot kept across reloads.
