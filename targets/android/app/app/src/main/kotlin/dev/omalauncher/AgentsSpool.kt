@@ -321,16 +321,27 @@ object AgentsSpool {
         }
     }
 
+    /**
+     * [agent]'s events and its conversation (the Agents view's agent page draws it as a chat; null from an older
+     * agentsd): a mirror's, else its events file's.
+     */
+    private fun ringOf(
+        d: File,
+        agent: String,
+    ): Pair<JSONArray, JSONArray?> {
+        val file by lazy { readJson(File(d, "events/${safeFile(agent)}.json")) }
+        val events = sources.values.firstNotNullOfOrNull { it.events[agent] } ?: file?.optJSONArray("events") ?: JSONArray()
+        val convo = sources.values.firstNotNullOfOrNull { it.convos[agent] } ?: file?.optJSONArray("convo")
+        return events to convo
+    }
+
     /** [agent]'s events to the pages that watch it, when they changed ([force]: to that page anyway). */
     private fun sendEvents(
         agent: String,
         force: Viewer? = null,
     ) {
         val d = dir ?: return
-        val file by lazy { readJson(File(d, "events/${safeFile(agent)}.json")) }
-        val events = sources.values.firstNotNullOfOrNull { it.events[agent] } ?: file?.optJSONArray("events") ?: JSONArray()
-        // Its conversation (the Agents view's agent page draws it as a chat): none from an older agentsd.
-        val convo = sources.values.firstNotNullOfOrNull { it.convos[agent] } ?: file?.optJSONArray("convo")
+        val (events, convo) = ringOf(d, agent)
         val s = events.toString() + (convo?.toString() ?: "")
         val same = eventRows[agent] == s
         eventRows[agent] = s
