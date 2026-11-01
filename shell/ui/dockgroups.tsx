@@ -51,7 +51,7 @@ const sig = (gs: DockGroup[]) => JSON.stringify(gs);
 
 /** The window groups on the dock, tilings by page, then stacks. */
 export const dockGroups = computed((): DockGroup[] => {
-  const wins = new Map(webWins.value.filter((w) => !w.full).map((w) => [w.id, w]));
+  const wins = new Map(webWins.value.filter((w) => !w.full && !w.quick).map((w) => [w.id, w]));
   const out: DockGroup[] = [];
   const taken = new Set<number>();
   for (const t of Object.values(tilings.value)) {

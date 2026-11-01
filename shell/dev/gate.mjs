@@ -7262,6 +7262,134 @@ async function fullStaysScene(r) {
   }
 }
 
+/**
+ * QP1 (quick pages; the user: "we don't need to open the whole Settings"): hotspot, Display and Bluetooth each open as ONE
+ * compact card (~440 wide unfolded, full width minus 16 folded: a sheet), springing out of the pressed row; pop-out asks
+ * the host for the app's normal window and the card goes; Back at the page's root (the host's "webwindows.closed")
+ * closes it; a tap outside closes it; a card the page can't make is refused to the host (its net: full screen, logged -
+ * never a freeform window; QuickPageRouteTest). Stubbed host: quickpage.open answers with "quickpage.show".
+ */
+async function quickPageScene(r, folded) {
+  await r.page.evaluate(QUICK_HELPERS);
+  await r.page.evaluate(QUICK_JUDGES);
+  const shot = async (name) => {
+    await r.page.evaluate(() => window.__qp.open({ id: "settings:WIFI_SETTINGS", label: "Wi-Fi" }, "com.oplus.wirelesssettings"));
+    await r.page.screenshot({ path: `/cache/quick-page-${name}.png` }).catch(() => {});
+  };
+  try {
+    const out = await r.page.evaluate(quickPageChecks, folded);
+    if (!out.length) await shot(folded ? "folded" : "unfolded");
+    return out;
+  } finally {
+    await r.page.evaluate(() => window.__qp?.done()).catch(() => {});
+  }
+}
+
+/** QP1's stubbed host (window.__qp): webwindows.open / close, quickpage.open / popout / refused, every call recorded. */
+async function QUICK_HELPERS() {
+  const [S, W, H, B, Q] = await Promise.all(["./state.ts", "./ui/webwindows.tsx", "./hosts/wide.ts", "./bridge.ts", "./ui/quickpage.tsx"].map((m) => window.__gw.mod(m)));
+  const p = B.powos;
+  const was = { ww: p.webwindows, qp: p.quickpage, wide: H.wideHome.value };
+  const calls = { open: [], popout: [], refused: [], closed: [] };
+  let next = 8800;
+  let token = 0;
+  let failOpen = false;
+  p.webwindows = { ...(p.webwindows ?? {}), enabled: async () => true, open: async (k) => (calls.open.push(k), failOpen ? -1 : next++), close: async (id) => (calls.closed.push(id), window.__mockEvents.emit("webwindows.closed", id), true) };
+  let pkgOf = "com.android.settings";
+  p.quickpage = {
+    open: async (spec) => (window.__mockEvents.emit("quickpage.show", { token: String(++token), pkg: pkgOf, label: spec.label ?? spec.action ?? spec.id, anchor: spec.anchorRect }), true),
+    popout: async (t, id) => (calls.popout.push(`${t}:${id}`), window.__mockEvents.emit("webwindows.closed", id), true),
+    refused: async (t) => (calls.refused.push(t), true),
+  };
+  H.wideHome.value = true;
+  S.page.value = 0;
+  W.webWins.value = [];
+  await window.__gw.settled();
+  const cards = () => [...document.querySelectorAll(".webwindow.quickpage")];
+  const row = { left: 200, top: 300, width: 300, height: 48 };
+  window.__qp = {
+    W, Q, calls, cards, row,
+    fail: (on) => (failOpen = on),
+    async open(spec, pkg = "com.android.settings") {
+      pkgOf = pkg;
+      Q.openQuickPage(spec, row);
+      for (let i = 0; i < 40 && !W.webWins.value.some((w) => w.quick?.token === String(token) || failOpen); i++) await new Promise((ok) => setTimeout(ok, 25));
+      await window.__gw.settled();
+      await new Promise((ok) => setTimeout(ok, 320));
+    },
+    done() {
+      W.webWins.value = [];
+      p.webwindows = was.ww;
+      p.quickpage = was.qp;
+      H.wideHome.value = was.wide;
+    },
+  };
+  return [];
+}
+
+/** QP1's judges (window.__qpj): one card's look, the three ways it closes, a forced failure. */
+function QUICK_JUDGES() {
+  const q = window.__qp;
+  const settle = () => window.__gw.settled();
+  function card(label, folded) {
+    const c = q.cards();
+    if (c.length !== 1) return [`QP1: ${label}: ${c.length} quick page cards (want exactly 1)`];
+    const box = c[0].getBoundingClientRect();
+    const want = folded ? innerWidth - 32 : Math.min(440, innerWidth - 32);
+    const out = [];
+    if (!c[0].textContent.includes(label)) out.push(`QP1: ${label}: its card's bar says "${c[0].textContent}"`);
+    if (Math.abs(box.width - want) > 2) out.push(`QP1: ${label}: card ${Math.round(box.width)} px wide (want ${want}, ${folded ? "folded: full width minus 16" : "unfolded: ~440"})`);
+    if (box.height > innerHeight * 0.7 + 1) out.push(`QP1: ${label}: card ${Math.round(box.height)} px high (want <= 70% of ${innerHeight})`);
+    if (folded !== c[0].classList.contains("sheet")) out.push(`QP1: ${label}: sheet ${!folded} (want ${folded})`);
+    return out;
+  }
+  async function closes() {
+    const out = [];
+    q.cards()[0]?.querySelector('[aria-label="Open in its app"]')?.click();
+    await settle();
+    if (q.calls.popout.length !== 1 || q.cards().length) out.push(`QP1: pop-out made ${q.calls.popout.length} host pop-outs, ${q.cards().length} cards left (want 1, 0)`);
+    // Back at the page's root: its task ends, the host closes the window.
+    await q.open({ action: "android.settings.DISPLAY_SETTINGS", label: "Display" });
+    window.__mockEvents.emit("webwindows.closed", q.W.webWins.value.find((w) => w.quick)?.id);
+    await settle();
+    if (q.cards().length) out.push("QP1: Back at the root (the host closed its window): the card is still there");
+    await q.open({ action: "android.settings.BLUETOOTH_SETTINGS", label: "Bluetooth" });
+    document.querySelector(".quickpage-scrim")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    await settle();
+    if (q.cards().length) out.push("QP1: a tap outside the card left it open");
+    return out;
+  }
+  // A card the page can't make: refused to the host (its safety net: full screen, logged - never freeform), no window.
+  async function failure() {
+    q.fail(true);
+    const before = q.calls.refused.length;
+    await q.open({ action: "android.settings.DISPLAY_SETTINGS", label: "Display" });
+    q.fail(false);
+    const n = q.calls.refused.length - before;
+    return n === 1 && !document.querySelector(".webwindow") ? [] : [`QP1: a forced route failure: ${n} refusals to the host, ${document.querySelectorAll(".webwindow").length} windows (want 1 refusal, none)`];
+  }
+  window.__qpj = { card, closes, failure };
+  return [];
+}
+
+/** QP1's checks ([folded]: a narrow screen, the card a bottom sheet): hotspot, Display, Bluetooth; closes; failure. */
+async function quickPageChecks(folded) {
+  const q = window.__qp;
+  const j = window.__qpj;
+  const fails = [];
+  const pages = [
+    [{ component: "com.android.settings/.TetherSettings", label: "Hotspot & tethering" }, "com.oplus.wirelesssettings"],
+    [{ action: "android.settings.DISPLAY_SETTINGS", label: "Display" }, "com.android.settings"],
+    [{ action: "android.settings.BLUETOOTH_SETTINGS", label: "Bluetooth" }, "com.oplus.wirelesssettings"],
+  ];
+  for (const [spec, pkg] of pages) {
+    await q.open(spec, pkg);
+    fails.push(...j.card(spec.label, folded));
+  }
+  fails.push(...(await j.closes()), ...(await j.failure()));
+  return fails;
+}
+
 /** MX1's two windows (a Linux and an Android one, floating on page 0), their full screen button and checks. */
 async function FULL_STAYS_HELPERS() {
   const S = await window.__gw.mod("./state.ts");
@@ -8974,6 +9102,10 @@ try {
         return whenReady(r, () => r.page.evaluate(desktopsReloaded));
       }),
     );
+  // QP1: settings pages as quick pages - one compact card each (unfolded ~440 wide, folded a full-width sheet), pop-out, Back at the root, tap outside, a forced failure refused (quick-page-unfolded / -folded).
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [name, size, folded] of [["quick-page-unfolded", { width: 821, height: 883 }, false], ["quick-page-folded", { width: 412, height: 915 }, true]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, name, size).then((r) => whenReady(r, () => quickPageScene(r, folded))));
   // MX1: full screen stays full screen through ticks (a Linux and an Android window, hostless and host-shaped); restore brings the floating frame back (ww-full-stays-unfolded; the user, 11-01 15:39).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-full-stays-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => fullStaysScene(r))));

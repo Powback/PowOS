@@ -299,6 +299,12 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       restore: (id) => call<boolean>("webwindows.restore", id),
       zoom: (id, k) => call<boolean>("webwindows.zoom", id, k),
     },
+    // Quick pages (ui/quickpage.tsx; QuickPages.kt): the phone's only.
+    quickpage: host.name === "powos" ? undefined : {
+      open: (spec) => call<boolean>("quickpage.open", spec),
+      popout: (token, id) => call<boolean>("quickpage.popout", token, id),
+      refused: (token) => call<boolean>("quickpage.refused", token),
+    },
     tasks: {
       list: () => call<RecentTask[]>("tasks.list"),
       open: (id, from) => call<boolean>("tasks.open", id, from ?? null),

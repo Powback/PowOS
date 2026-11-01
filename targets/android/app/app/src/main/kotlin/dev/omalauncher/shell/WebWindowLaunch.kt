@@ -58,7 +58,23 @@ object WebWindowLaunch {
     ): Boolean {
         if (pkg == context.packageName) return false
         val shown = WebWindows.displayOfApp(pkg)
-        val routed = if (shown != null && shown != -1) now(context, pkg, p, shown) else hold(context, pkg, p, shown == null)
+        val routed = if (shown != null && shown != -1) now(context, pkg, p, shown) else hold(pkg, p, shown == null) { ShellBridge.openOnHome(context, pkg) }
+        if (routed && !homeInFront) frontHome(context)
+        return routed
+    }
+
+    /**
+     * Quick page [key] (QuickPageRoute.key: "q:<token>")'s launch [p]: home's page asked for its card ("quickpage.show"
+     * [show]), [p] held until its display exists (WebWindows.open with the token, then [take]). No drawer app needed,
+     * never an app's window. False: no home page - the caller's safety net (full screen) runs.
+     */
+    fun routeQuick(
+        context: Context,
+        key: String,
+        p: Pending,
+        show: org.json.JSONObject,
+    ): Boolean {
+        val routed = hold(key, p, true) { ShellBridge.showOnHome(context, "quickpage.show", show) }
         if (routed && !homeInFront) frontHome(context)
         return routed
     }
@@ -79,14 +95,14 @@ object WebWindowLaunch {
 
     /** [p] held for [pkg]'s window ([asked]: a new one asked of home; else one being made), the old way after [WAIT_MS]. */
     private fun hold(
-        context: Context,
         pkg: String,
         p: Pending,
         asked: Boolean,
+        ask: () -> Boolean,
     ): Boolean {
         // Held first, then the page asked: its window can't take the launch before it's here.
         pending[pkg] = p
-        if (!ShellBridge.openOnHome(context, pkg)) {
+        if (!ask()) {
             pending.remove(pkg, p)
             return false
         }
