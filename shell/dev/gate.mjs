@@ -5861,16 +5861,18 @@ async function gridSnapScene(r) {
 }
 
 /**
- * EC1 (E2E 194 step 38): unfolded with the right sidebar dock, a floating window's bar let go past the work area's
- * right edge (over the dock, 4 px in from its inner edge) carries it and home to the next page; the screen's left edge
- * carries it back; 4 px inside the work area's edge is still the edge snap (WG1), no page change.
+ * EC1 (E2E 194 step 38, 197 step 39): unfolded with the right sidebar dock, a floating window's bar let go at the
+ * screen's last pixel on the right carries it and home to the next page, at the left one back to the previous page;
+ * over the dock (4 px in from its inner edge) carries right too; 4 px inside the work area's edge is still the edge snap
+ * (WG1), no page change. Each carry leaves the frame whole inside the work area, its bar clear of the dock (E2E 197:
+ * a frame left past the edge put its bar under the dock, and the next grab opened Chrome).
  */
 async function edgeCarryScene(r) {
   const ready = await r.page.evaluate(EDGE_CARRY_HELPERS);
   if (ready.length) return ready;
   try {
     const fails = [];
-    for (const [name, want] of [["dock", 1], ["left", 0], ["inside", 0]]) fails.push(...(await r.page.evaluate(edgeCarryStep, name, want)));
+    for (const [name, want] of [["right", 1], ["left", 0], ["dock", 1], ["inside", 1]]) fails.push(...(await r.page.evaluate(edgeCarryStep, name, want)));
     return fails;
   } finally {
     await r.page.evaluate(() => window.__ec?.done()).catch(() => {});
@@ -5894,8 +5896,10 @@ async function EDGE_CARRY_HELPERS() {
   window.__ec = {
     S,
     win: () => W.webWins.value.find((v) => v.id === 971),
-    /** Where each step lets go: over the dock 4 px in from its inner edge, the screen's left edge, 4 px inside the work area. */
-    at: { dock: dock && dock.left + 4, left: 1, inside: W.tileArea().right - 4 },
+    W,
+    dock,
+    /** Where each step lets go: the screen's last pixel right / left, over the dock 4 px in from its inner edge, 4 px inside the work area. */
+    at: { right: innerWidth - 1, left: 0, dock: dock && dock.left + 4, inside: W.tileArea().right - 4 },
     async drag(tx, ty) {
       const b = bar().getBoundingClientRect();
       const [sx, sy] = [b.left + 40, b.top + b.height / 2];
@@ -5922,8 +5926,22 @@ async function edgeCarryStep(name, want) {
   await drag(at[name], innerHeight / 2);
   const fails = [];
   if (S.page.value !== want || win()?.page !== S.pages.value[want]) fails.push(`EC1 ${name} (x ${Math.round(at[name])}): home page ${S.page.value}, window page ${win()?.page} (want ${want} / ${S.pages.value[want]})`);
-  if (!document.querySelector('.page:not(.away) .webwindow[data-wwid="971"]')) fails.push(`EC1 ${name}: the window is not on the page on screen`);
-  return fails;
+  const el = document.querySelector('.page:not(.away) .webwindow[data-wwid="971"]');
+  if (!el) return [...fails, `EC1 ${name}: the window is not on the page on screen`];
+  return name === "inside" ? fails : [...fails, ...carriedFrameFails(name, el)];
+
+  /** EC1: a carried window [el] whole inside the work area, its bar clear of the dock; [] or why not. */
+  function carriedFrameFails(name, el) {
+    const span = (b) => `${Math.round(b.left)}..${Math.round(b.right)} x ${Math.round(b.top)}..${Math.round(b.bottom)}`;
+    const over = (p, q) => p.right > q.left && p.left < q.right && p.bottom > q.top && p.top < q.bottom;
+    const r = el.getBoundingClientRect();
+    const a = window.__ec.W.workArea();
+    const t = el.querySelector(".webwindow-title").getBoundingClientRect();
+    const inside = r.left >= a.left - 1 && r.right <= a.right + 1 && r.top >= a.top - 1 && r.bottom <= a.bottom + 1;
+    const fails = inside ? [] : [`EC1 ${name}: carried frame ${span(r)} not inside the work area ${span(a)}`];
+    if (over(t, window.__ec.dock)) fails.push(`EC1 ${name}: the carried window's bar ${span(t)} is under the dock ${span(window.__ec.dock)}`);
+    return fails;
+  }
 }
 
 /** WX1's steps in one page, the windows cleared after. */
@@ -7464,7 +7482,7 @@ try {
         return whenReady(r, () => r.page.evaluate(desktopsReloaded));
       }),
     );
-  // EC1: a window let go past the right sidebar dock's inner edge goes to the next page with home (ww-edge-carry-unfolded; E2E 194 step 38).
+  // EC1: a window let go at the screen's right / left edge (or over the right dock) goes to the next / previous page with home, whole inside the work area (ww-edge-carry-unfolded; E2E 194 step 38, 197 step 39).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-edge-carry-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => edgeCarryScene(r))));
   // WX1: a tap on a divider / the ⇄ hint swaps the sides (ww-swap-unfolded; the user, 10-31 15:47-15:52).

@@ -1314,8 +1314,26 @@ function carryTo(x: number): number | null {
 function carry(id: number, to: number) {
   if (tiledOn(id) != null) untile(id, "keep");
   cameHere(id, to);
+  update(id, insideArea(id));
   console.info(`[windows] window ${id} carried to page ${to}`);
   toPage(to);
+}
+
+/**
+ * Window [id]'s frame pulled whole inside the work area (page-local; every page rests at the same origin). E2E 197
+ * step 39: a carry kept the frame where the bar was let go - past the screen's edge, its bar under the right dock - so
+ * the next grab of its bar hit the dock's Chrome icon instead.
+ */
+function insideArea(id: number): Partial<WebWin> {
+  const w = webWins.value.find((v) => v.id === id);
+  if (!w) return {};
+  const a = tileArea();
+  const o = pageOrigin();
+  const s = w.scale ?? 1;
+  const [fw, fh] = [w.w * s, w.h * s];
+  const x = Math.max(a.left, Math.min(w.x + o.x, a.right - fw));
+  const y = Math.max(a.top, Math.min(w.y + o.y, a.bottom - fh));
+  return { x: Math.round(x - o.x), y: Math.round(y - o.y) };
 }
 
 // ---- TG3a: the edge drawer - a tile parked at the screen's edge (the native split's SplitDrawer, FLOAT_PULL) ----------
