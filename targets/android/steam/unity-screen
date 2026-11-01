@@ -71,15 +71,39 @@ PY
 fi
 
 py=$(command -v python3 || command -v python3.13)
-size=$([ -n "$py" ] && [ -n "${DISPLAY:-}" ] && "$py" -c '
+# The size: Xwayland root's _POWOS_SCREEN_SIZE (kwin 0051: the Android screen the game's full-screen task gets, in its
+# orientation now) - the root itself is KWin's output, which follows the desktop consumer (home below the status bar
+# 2268x2314, a floating task 1360x1708, the cover 1116x2358): a game launched at that drew a smaller frame that Proton
+# scaled up to its window ("not the right resolution", 2026-10-30). No property (an older KWin): the root, as before.
+size=$([ -n "$py" ] && [ -n "${DISPLAY:-}" ] && "$py" -c "$(cat <<'PY'
 import ctypes
 x = ctypes.CDLL("libX11.so.6")
-x.XOpenDisplay.restype = ctypes.c_void_p; x.XOpenDisplay.argtypes = [ctypes.c_char_p]
-for f in (x.XDisplayWidth, x.XDisplayHeight, x.XDefaultScreen): f.argtypes = [ctypes.c_void_p] + [ctypes.c_int] * (f is not x.XDefaultScreen)
+P, L, I, U = ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.POINTER
+x.XOpenDisplay.restype = P; x.XOpenDisplay.argtypes = [ctypes.c_char_p]
+for f in (x.XDisplayWidth, x.XDisplayHeight): f.argtypes = [P, I]
+x.XDefaultScreen.argtypes = [P]
+x.XRootWindow.restype = L; x.XRootWindow.argtypes = [P, I]
+x.XInternAtom.restype = L; x.XInternAtom.argtypes = [P, ctypes.c_char_p, I]
+x.XGetWindowProperty.argtypes = [P, L, L, ctypes.c_long, ctypes.c_long, I, L,
+                                 U(L), U(I), U(L), U(L), U(P)]
+x.XFree.argtypes = [P]
 d = x.XOpenDisplay(None)
 if d:
-    n = x.XDefaultScreen(d); print(x.XDisplayWidth(d, n), x.XDisplayHeight(d, n))
-' 2>/dev/null)
+    n = x.XDefaultScreen(d)
+    size = (x.XDisplayWidth(d, n), x.XDisplayHeight(d, n))
+    atom = x.XInternAtom(d, b"_POWOS_SCREEN_SIZE", 1)  # only_if_exists: 0 = no KWin ever set it
+    if atom:
+        t, fmt, nitems, after, data = L(), I(), L(), L(), P()
+        if x.XGetWindowProperty(d, x.XRootWindow(d, n), atom, 0, 2, 0, 6, ctypes.byref(t), ctypes.byref(fmt),
+                                ctypes.byref(nitems), ctypes.byref(after), ctypes.byref(data)) == 0 and data.value:
+            # format 32 comes back as C longs (Xlib), AnyPropertyType 0 / XA_CARDINAL 6
+            v = ctypes.cast(data, U(ctypes.c_long))
+            if fmt.value == 32 and nitems.value == 2 and v[0] > 0 and v[1] > 0:
+                size = (v[0], v[1])
+            x.XFree(data)
+    print(size[0], size[1])
+PY
+)" 2>/dev/null)
 case $size in
   [1-9]*' '[1-9]*)
     echo "unity-screen: fullscreen ${size% *}x${size#* }" >&2

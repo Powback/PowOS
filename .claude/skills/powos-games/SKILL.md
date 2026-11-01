@@ -266,6 +266,13 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   %command%`) appends `-screen-fullscreen 1 -screen-width W -screen-height H` = the X root size at launch. Set with
   `unity-screen --install <appid>` / `--remove` in the session with Steam OFF (it rewrites localconfig.vdf on exit;
   backup localconfig.vdf.powos-bak). Installed for 274190. Fold/rotate mid-game: see Fold below.
+- Launch size = the container (kwin 0051, 3.58, 2026-11-02): the X root is KWin's OUTPUT, which follows the desktop
+  consumer (home 2268x2314, a floating task 1360x1708, the cover 1116x2358), not the game's full-screen task (the whole
+  screen) - Broforce drew the smaller size and Proton scaled it up ("not the right resolution"). KWin publishes the
+  Android screen (daemon at connect, each window task's buffers) as root `_POWOS_SCREEN_SIZE` (CARDINAL[2]);
+  unity-screen prefers it. The launch option runs the COPY in ~/.local/share/powos/unity-screen: re-copy after a change.
+  Test off-device: Xvfb `-noreset` (else the root property dies with the setter's connection) + XChangeProperty.
+  Still open (G2): Unity keeps its launch size after a rotate/fold; the window follows (0032), the frame is scaled.
 
 - Minimised game (Broforce 2026-10-30: WM_STATE Iconic + _NET_WM_STATE_HIDDEN = isMinimized, since KWin clears
   HIDDEN for a window merely on another desktop): a full-screen Wine/Unity game minimises ITSELF when it loses KWin's

@@ -1,0 +1,110 @@
+From: PowOS <mats@powback.com>
+Subject: [PATCH] backends/anland: the screen a full-screen task gets is on Xwayland's root (_POWOS_SCREEN_SIZE)
+
+Games at the wrong resolution (the user, 2026-10-30 01:03 "It's also not the right resolution"; 20:39 "fps sucks").
+unity-screen starts a Unity game full screen at the X root's size - KWin's output - but the output follows the desktop
+consumer: home below the status bar (2268x2314), a floating task (1360x1708, hyprland.log during a Broforce session),
+the folded cover's 1116x2358. The game's full-screen task is the whole Android screen (2268x2440 unfolded), so KWin
+configured its window to the container (0032/0040) while the game drew its smaller launch size, and Proton's
+full-screen hack scaled every frame up to the window: blurred, and a scaling pass per frame on top of the game's own.
+
+KWin knows the screen: the display daemon's at connect, then every window task's buffers (made at the Android
+screen's size, in its current orientation - 0048). It now publishes that as _POWOS_SCREEN_SIZE (CARDINAL[2], px) on
+Xwayland's root window, again when Xwayland restarts. A launcher reads it before the game's window exists; nothing
+else changes.
+---
+diff --git a/src/backends/anland/anland_backend.cpp b/src/backends/anland/anland_backend.cpp
+index 8996ad9..606c476 100644
+--- a/src/backends/anland/anland_backend.cpp
++++ b/src/backends/anland/anland_backend.cpp
+@@ -31,6 +31,7 @@
+ #include "workspace.h"
+ 
+ #include <QDBusConnection>
++#include <xcb/xcb.h>
+ #include <QElapsedTimer>
+ #include <QFutureWatcher>
+ #include <QScopeGuard>
+@@ -144,6 +145,12 @@ bool AnlandBackend::initialize()
+         qCWarning(KWIN_ANLAND) << "daemon reported invalid screen size";
+         return false;
+     }
++    publishScreenSize(QSize(int(w), int(h)));
++    connect(kwinApp(), &Application::x11ConnectionChanged, this, [this]() {
++        const QSize screen = m_publishedScreen;
++        m_publishedScreen = QSize();
++        publishScreenSize(screen);
++    });
+ 
+     // KWin 6.7 port: the backend owns a RenderDevice (as VirtualBackend does), built
+     // from a surfaceless EGL display plus, when there is one, a DRM render node. On
+@@ -297,6 +304,29 @@ void AnlandBackend::followWindowScreen(const QSize &screen)
+     m_outputs[0]->resize(screen);
+ }
+ 
++void AnlandBackend::publishScreenSize(const QSize &screen)
++{
++    if (!screen.isValid()) {
++        return;
++    }
++    xcb_connection_t *c = kwinApp()->x11Connection();
++    if (!c || screen == m_publishedScreen) {
++        m_publishedScreen = screen; // no Xwayland yet: published when it starts (x11ConnectionChanged)
++        return;
++    }
++    m_publishedScreen = screen;
++    static const char name[] = "_POWOS_SCREEN_SIZE";
++    xcb_intern_atom_reply_t *atom = xcb_intern_atom_reply(c, xcb_intern_atom(c, false, sizeof(name) - 1, name), nullptr);
++    if (!atom) {
++        return;
++    }
++    const uint32_t size[2] = {uint32_t(screen.width()), uint32_t(screen.height())};
++    xcb_change_property(c, XCB_PROP_MODE_REPLACE, kwinApp()->x11RootWindow(), atom->atom, XCB_ATOM_CARDINAL, 32, 2, size);
++    xcb_flush(c);
++    free(atom);
++    qCInfo(KWIN_ANLAND) << "screen size for full-screen tasks:" << screen;
++}
++
+ EglDisplay *AnlandBackend::sceneEglDisplayObject() const
+ {
+     return m_renderDevice ? m_renderDevice->eglDisplay() : nullptr;
+diff --git a/src/backends/anland/anland_backend.h b/src/backends/anland/anland_backend.h
+index 32e14d0..388102c 100644
+--- a/src/backends/anland/anland_backend.h
++++ b/src/backends/anland/anland_backend.h
+@@ -112,6 +112,14 @@ public:
+      * buffers keep deciding (AnlandEglLayer::importBuffers).
+      */
+     void followWindowScreen(const QSize &screen);
++    /**
++     * PowOS: the Android screen's size now, in px and in its current orientation (the display daemon's screen at
++     * connect, then every window task's buffers), published on Xwayland's root as _POWOS_SCREEN_SIZE (CARDINAL[2]):
++     * the size a full-screen game's task will have. A launcher asks for it before the game's window exists
++     * (targets/android/steam/unity-screen) - the root itself is KWin's output, which follows the desktop consumer
++     * (home below the status bar, a floating task, the folded cover) and is not the game's container.
++     */
++    void publishScreenSize(const QSize &screen);
+ 
+ private:
+     void setupNotifiers();
+@@ -164,6 +172,7 @@ private:
+ 
+     bool m_consumerReady = false;
+     bool m_inFallback = false;
++    QSize m_publishedScreen; // PowOS: publishScreenSize's last size, published again when Xwayland (re)starts
+     bool m_noDrmDeviceMode = false;
+ 
+     // Last known clipboard text — used to de-duplicate (KWin changed -> we sent ->
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index e5b5a8a..bed0c92 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -617,6 +617,8 @@ bool AnlandWindowTask::importBuffers()
+     // KWin's screen is the one the windows are on: placed against a smaller one (the cover screen KWin started on),
+     // a client's menus and X11 override-redirect popups landed far from their parent's buttons.
+     m_tasks->backend()->followWindowScreen(m_bufferSize);
++    // The screen a full-screen game's task gets, for its launcher (unity-screen: the game's resolution = its container).
++    m_tasks->backend()->publishScreenSize(m_bufferSize);
+     return true;
+ }
+ 
