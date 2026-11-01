@@ -1359,9 +1359,12 @@ function snapAim(id: number, x: number, y: number) {
   return w && slot && rect ? { id, page: w.page, slot, rect } : null;
 }
 
-/** WT1: the tab drop window [id]'s bar makes at (x, y) - another window's bar there - or null. */
+/**
+ * WT1: the tab drop window [id]'s bar makes at (x, y) - another window's bar there, or (WT3) anywhere on a maximised
+ * window but the snap edges: the group stays maximised, the dropped one its shown tab ([joinStack]) - or null.
+ */
 function tabTarget(id: number, x: number, y: number) {
-  const z = tabAt(x, y, barsUnder(id));
+  const z = tabAt(x, y, barsUnder(id), snapSlot(x, y) == null);
   return z?.kind === "tab" ? { id, target: z.tile, at: z.at } : null;
 }
 
@@ -1663,7 +1666,8 @@ function barsUnder(id: number): Bar[] {
     const bar = el.querySelector(".webwindow-title");
     const tabs = [...el.querySelectorAll(".ww-tab[data-tab]")];
     const list = tabs.length ? tabs : [...el.querySelectorAll(".ww-title-label")];
-    out.push({ id: wid, frame: boxOfRect(el.getBoundingClientRect()), bar: bar ? boxOfRect(bar.getBoundingClientRect()) : undefined, tabs: list.map((t) => boxOfRect(t.getBoundingClientRect())) });
+    const max = !!webWins.value.find((w) => w.id === wid)?.restore;
+    out.push({ id: wid, frame: boxOfRect(el.getBoundingClientRect()), bar: bar ? boxOfRect(bar.getBoundingClientRect()) : undefined, tabs: list.map((t) => boxOfRect(t.getBoundingClientRect())), max });
   }
   return out;
 }

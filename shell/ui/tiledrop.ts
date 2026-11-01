@@ -77,24 +77,31 @@ export const zoneKey = (z: Zone | null | undefined) => (z ? `${z.kind}:${z.tile}
 /** Where a tab dropped at [x] goes among [tabs] (left to right): before the first whose centre is right of it. */
 export const insertAt = (tabs: Box[], x: number) => tabs.filter((t) => t.x + t.w / 2 < x).length;
 
-/** A window under a dragged one: its whole [frame], its [bar] strip (none: it has no bar) and the tabs on that bar. */
+/**
+ * A window under a dragged one: its whole [frame], its [bar] strip (none: it has no bar) and the tabs on that bar;
+ * [max]: it is maximised (its whole frame is a tab zone, [tabAt]).
+ */
 export interface Bar {
   id: number;
   frame: Box;
   bar?: Box;
   tabs: Box[];
+  max?: boolean;
 }
 
 /**
  * WT1 (the user, 10-31 01:31: "grab the title bar of Dolphin and drag it into the title bar of Chrome, and then they can
  * share a title bar"): the "tab" zone at (x, y) over [bars] (bottom first: z order), or null - the top-most window under
- * the point decides, so a bar covered by another window's body is no target.
+ * the point decides, so a bar covered by another window's body is no target. WT3 (the user, 11-01: "if I try to drag an
+ * app maximized like this it should tab with the existing maximized app"): with [body], a maximised window's whole
+ * frame takes it as its last tab (the caller leaves [body] off at the screen's snap edges: those still split).
  */
-export function tabAt(x: number, y: number, bars: Bar[]): Zone | null {
+export function tabAt(x: number, y: number, bars: Bar[], body = false): Zone | null {
   for (let k = bars.length - 1; k >= 0; k--) {
     const b = bars[k];
     if (!inside(b.frame, x, y)) continue;
-    return b.bar && inside(b.bar, x, y) ? { kind: "tab", tile: b.id, at: insertAt(b.tabs, x) } : null;
+    if (b.bar && inside(b.bar, x, y)) return { kind: "tab", tile: b.id, at: insertAt(b.tabs, x) };
+    return body && b.max ? { kind: "tab", tile: b.id, at: -1 } : null;
   }
   return null;
 }
