@@ -7,7 +7,7 @@
  */
 import { useState } from "preact/hooks";
 import { boardState } from "../agents.ts";
-import { board, boardSeen, checks, WorkFeed, type WorkRow } from "./aiboard.tsx";
+import { board, boardSeen, checks, SevChip, WorkFeed, type WorkRow } from "./aiboard.tsx";
 import { needIds, needsYou, NeedsYouCard } from "./needsyou.tsx";
 import { upNext, UpNext } from "./upnext.tsx";
 
@@ -144,6 +144,7 @@ function Tasks({ open }: { open: WorkRow[] }) {
         return (
           <li key={w.id} class="aip-task">
             <span class={`aip-dot ${d}`} role="img" aria-label={DOT_WORDS[d]} />
+            <SevChip w={w} />
             <span class="aip-task-title">{w.title}</span>
           </li>
         );

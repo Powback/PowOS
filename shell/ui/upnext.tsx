@@ -6,12 +6,22 @@
  * its place in line, since when it waits.
  */
 import { useState } from "preact/hooks";
-import { board, noteOf, userAsks, type UserAsk, type WorkRow } from "./aiboard.tsx";
+import { board, noteOf, SevChip, userAsks, type UserAsk, type WorkRow } from "./aiboard.tsx";
 import { clockAt } from "./time.ts";
 
-/** The queue: the board's queued tasks in line, oldest accepted first (the CLI's queue_of: the same order). */
+/**
+ * The queue in line (the CLI's queue_of / queue_key: the same order): severity first; at one level the user's own
+ * evidence (still broken, repeated asks) above infra-only reports; then the score; then oldest accepted first.
+ */
 export function upNext(rows: WorkRow[] = board.value) {
-  return rows.filter((w) => w.status === "queued").sort((a, b) => Number(a.created) - Number(b.created) || (a.id < b.id ? -1 : 1));
+  const k = (w: WorkRow) => [-Number(w.severity || 0), Number(w.userScore || 0) > 0 ? -1 : 0, -Number(w.score || 0), Number(w.created)];
+  return rows
+    .filter((w) => w.status === "queued")
+    .sort((a, b) => {
+      const x = k(a), y = k(b);
+      for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] - y[i];
+      return a.id < b.id ? -1 : 1;
+    });
 }
 
 /** The user's ask a task came from (the latest linked one), or none. */
@@ -42,6 +52,7 @@ function NextRow({ w, pos, open, onToggle }: { w: WorkRow; pos: number; open: bo
   return (
     <li class={`ais-next-item ${open ? "open" : ""}`} data-task={w.id}>
       <button type="button" class="ais-done-row" aria-expanded={open} onClick={onToggle}>
+        <SevChip w={w} />
         <span class="ais-done-title">{w.title}</span>
         {ask && <span class="ais-when">{clockAt(Number(ask.at))}</span>}
       </button>
