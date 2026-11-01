@@ -309,10 +309,14 @@ object SplitDrawer {
         val screen = screenOf(ctx)
         val running = runningTasks(ctx)
         if (screen != null) running.filter { it.taskId in stageOf }.forEach { t -> shareOf(t, screen)?.let { share[t.taskId] = it } }
-        val b = pair.map { id -> running.firstOrNull { it.taskId == id }?.let(::bounds) }
-        val (first, second) = (b.getOrNull(0) to b.getOrNull(1))
-        if (first != null && second != null && !first.isEmpty && !second.isEmpty) measured = layoutOf(first.left, first.top, second.left, second.top)
+        measureLayout(running)
         if (stageOf.size >= 2) work?.postDelayed(sample, SAMPLE_MS)
+    }
+
+    /** [measured] from [pair]'s two tasks' bounds in [running], when both are known. */
+    private fun measureLayout(running: List<ActivityManager.RunningTaskInfo>) {
+        val b = pair.mapNotNull { id -> running.firstOrNull { it.taskId == id }?.let(::bounds)?.takeIf { !it.isEmpty } }
+        if (b.size == 2) measured = layoutOf(b[0].left, b[0].top, b[1].left, b[1].top)
     }
 
     /** The screen's bounds, or null when unknown or empty (nothing to divide by). */
