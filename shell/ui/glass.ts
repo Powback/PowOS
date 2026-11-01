@@ -159,16 +159,45 @@ async function luminance(url: string) {
   for (let i = 0; i < d.length; i += 4) l += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
   return l / 256 / 255;
 }
-async function tone(url: string | null, of: string | null = url) {
-  const kept = of != null && of === toneOf && root.dataset.wallpaper;
-  if (url === toneFor || kept) return;
+/**
+ * The luminances of a wallpaper's pictures read so far (its last [FRAMES] frames), and its tone from their median - not
+ * from one frame. A live wallpaper's frame is the compositor's capture of it, and when the wallpaper's own mirror comes
+ * back black the capture is of the whole display minus home (WallpaperBackdrop.still -> displayStill): read on a resume
+ * while the closing app's window is still on the screen, that "wallpaper" is the app (a light one) - and the tone kept
+ * from it stayed light over the dark wallpaper until the next wallpaper (the user, 11-01 22:27 "I still get a theme glitch
+ * sometimes when I close the app", 22:28 screenshot: dark widget text, the search bar a light slab - data-wallpaper
+ * "light" under a dark theme). One odd frame now never flips it, and a wrong first one is outvoted by the next two.
+ */
+const FRAMES = 7;
+/** Hysteresis round 0.5: the median has to clear it by this much to turn the tone round (no flicker on a mid picture). */
+const BAND = 0.05;
+let seen: number[] = [];
+function toneFrom(cur: string | undefined): "light" | "dark" {
+  const s = [...seen].sort((a, b) => a - b);
+  const n = s.length;
+  const m = n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
+  if (cur === "light") return m < 0.5 - BAND ? "dark" : "light";
+  if (cur === "dark") return m > 0.5 + BAND ? "light" : "dark";
+  return m > 0.5 ? "light" : "dark";
+}
+async function tone(url: string | null, of: string | null = url, source = "") {
+  if (url === toneFor) return;
+  const another = of !== toneOf;
   toneFor = url;
   toneOf = of;
+  if (another) seen = [];
   if (!url) return void delete root.dataset.wallpaper;
   const l = await luminance(url).catch(() => null);
-  if (toneFor !== url) return;
-  if (l == null) delete root.dataset.wallpaper;
-  else root.dataset.wallpaper = l > 0.5 ? "light" : "dark";
+  if (toneFor === url) toned(l, another, `${source} ${of}`);
+}
+/** A frame's luminance (null: unreadable) counted in: a new wallpaper toned afresh, another frame by the median. */
+function toned(l: number | null, fresh: boolean, what: string) {
+  if (l == null) return void (seen.length || delete root.dataset.wallpaper);
+  seen = [...seen.slice(1 - FRAMES), l];
+  const was = root.dataset.wallpaper;
+  const t = toneFrom(fresh ? undefined : was);
+  if (t !== was) console.log(`glass tone ${was ?? "-"} -> ${t}: ${what} l=${l.toFixed(2)} frames=[${seen.map((v) => v.toFixed(2))}]`);
+  root.dataset.wallpaper = t;
 }
 
 /** What the page tones by (its wallpaper's picture), when it's over the wallpaper or is chrome over it. */
@@ -179,7 +208,7 @@ const frostedBy = (g: GlassSource | null) => (OVER_WALLPAPER.has(mode) ? (g?.wal
 function use(g: GlassSource | null) {
   lastSource = g;
   const w = tonedBy(g);
-  void tone(w?.url ?? null, wallpaperOf(w));
+  void tone(w?.url ?? null, wallpaperOf(w), w?.source ?? "");
   root.classList.toggle("glass-behind", TINT_ONLY.has(mode) && g != null);
   source = frostedBy(g);
   void refrost();
@@ -317,6 +346,37 @@ document.addEventListener(
   { capture: true, passive: true },
 );
 powos.on("system.glass", use);
+
+/**
+ * Evidence for the next wrong-theme return (the user, 11-01 22:27, intermittent): on every return of home, its theme as
+ * the first 5 frames, 1 s and 5 s after drew it - the tone, the theme, the glass, a widget's text and the search bar's
+ * fill - each that differs from the 5 s one logged as a "theme mismatch" (stuck when the 5 s one is the odd one out is
+ * shown by the tone log above; a short flash, by frames only).
+ */
+function probeTheme() {
+  const css = (sel: string, prop: "color" | "backgroundColor") => {
+    const el = document.querySelector(sel);
+    return el ? getComputedStyle(el)[prop] : "-";
+  };
+  const state = () =>
+    [root.dataset.light ?? "-", root.dataset.wallpaper ?? "-", root.classList.contains("glass") ? "glass" : "plain", css(".page .home-tile > .tile", "color"), css(".home > .bar .bar-pill", "backgroundColor")].join(" ");
+  const t0 = performance.now();
+  const got: [number, string][] = [];
+  const take = () => got.push([Math.round(performance.now() - t0), state()]);
+  let n = 0;
+  const frame = () => {
+    take();
+    if (++n < 5) requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+  setTimeout(take, 1000);
+  setTimeout(() => {
+    const steady = state();
+    const odd = got.filter(([, s]) => s !== steady);
+    if (odd.length) console.warn(`theme mismatch after resume: steady(5s)=[${steady}] ${odd.map(([t, s]) => `${t}ms=[${s}]`).join(" ")}`);
+  }, 5000);
+}
+if (mode === "home") document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && probeTheme());
 nativeGlass.subscribe(() => void refrost());
 powos.on("theme.changed", () => setTimeout(() => void refrost(), 0));
 powos.system.glass().then(use, () => use(null));

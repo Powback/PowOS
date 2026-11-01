@@ -1580,12 +1580,69 @@ async function resumeThemeCheck() {
     const now = state();
     for (const k of Object.keys(steady)) if (now[k] !== steady[k]) fails.push(`${when}: ${k} ${steady[k]} -> ${now[k]}`);
   };
-  for (let f = 0; f < 10; f++) {
+  const everyFrame = async (what, ms) => {
+    const t0 = performance.now();
+    for (let f = 0; performance.now() - t0 < ms; f++) {
+      await raf();
+      diff(`${what} frame ${f}`);
+    }
+  };
+  await everyFrame("resume", 500);
+  delete document.hidden;
+  delete document.visibilityState;
+  return [...new Set(fails)].slice(0, 8);
+}
+
+/**
+ * A wallpaper's first frame read while the closing app was still on the screen (the compositor's capture of the display
+ * minus home, WallpaperBackdrop.still -> displayStill): a light "wallpaper" under the dark one. The frames after it (each
+ * resume, 2.5 s later) are the dark wallpaper's: the tone follows them, never stuck light (the user, 11-01 22:28: dark
+ * widget text, a light search bar), and a light frame on the next return doesn't flip it - checked on every frame.
+ */
+async function resumeThemeHealCheck() {
+  const fails = [];
+  const host = (event, data) => window.__mockEvents.emit(event, data);
+  const raf = () => new Promise((ok) => requestAnimationFrame(() => ok()));
+  const picture = (fill) => {
+    const c = document.createElement("canvas");
+    c.width = c.height = 32;
+    const x = c.getContext("2d");
+    x.fillStyle = fill;
+    x.fillRect(0, 0, 32, 32);
+    return c.toDataURL("image/png");
+  };
+  const glass = (url, rev) => ({ wallpaper: { url, rev, source: "live" }, blurBehind: false });
+  const root = document.documentElement;
+  const set = (hidden) => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (hidden ? "hidden" : "visible") });
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+  const everyFrame = async (what, ms) => {
+    const t0 = performance.now();
+    for (let f = 0; performance.now() - t0 < ms; f++) {
+      await raf();
+      if (root.dataset.wallpaper !== "dark") fails.push(`${what} frame ${f}: tone ${root.dataset.wallpaper ?? "-"}, the wallpaper is dark`);
+    }
+  };
+  host("system.glass", glass(picture("#f4f4f4"), "live-5151-1"));
+  await window.__gw.until(() => root.dataset.wallpaper === "light");
+  for (const [i, rev] of ["live-5151-2", "live-5151-3"].entries()) {
+    set(true);
     await raf();
-    diff(`frame ${f}`);
+    host("system.glass", glass(picture(i ? "#0c1016" : "#101418"), rev));
+    set(false);
+    host("system.home", {});
+    await new Promise((ok) => setTimeout(ok, 120));
   }
-  await new Promise((ok) => setTimeout(ok, 400));
-  diff("400 ms after");
+  await window.__gw.until(() => root.dataset.wallpaper === "dark");
+  if (root.dataset.wallpaper !== "dark") return [`a light first frame stuck: tone ${root.dataset.wallpaper} after two dark frames of the same wallpaper`];
+  await everyFrame("healed", 200);
+  set(true);
+  await raf();
+  host("system.glass", glass(picture("#fafafa"), "live-5151-4"));
+  set(false);
+  await everyFrame("light frame again", 500);
   delete document.hidden;
   delete document.visibilityState;
   return [...new Set(fails)].slice(0, 8);
@@ -9911,6 +9968,7 @@ try {
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-swipe-close", { width: 404, height: 900 }).then((r) => whenReady(r, () => switcherSwipeCloseCheck(r.page))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeCheck))));
+    runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme-heal", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeHealCheck))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "page-swipe-no-haptic", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(pageSwipeNoHapticCheck))));
   if (process.env.SHELL_PAGES !== "0")
