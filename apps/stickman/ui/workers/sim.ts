@@ -73,7 +73,7 @@ let smooth: Float64Array = new Float64Array(10);
 let prevHead: V2 | null = null;
 let hidden: Float64Array | null = null;
 let last = 0, acc = 0;
-let cam: V2 | null = null;
+let cam: [number, number, number] | null = null; // the view's left x, bottom z and height, m (eased)
 const segBody: number[] = []; // mocap index -> body id
 let segContype = new Int32Array(0); // each geom's contype as the model has it
 
@@ -399,7 +399,7 @@ function loadLesson(i: number) {
   cam = null;
 }
 
-// ---- drawing: the camera follows the figure through the course, the room's height (or as much as fits) in view ---------
+// ---- drawing: the camera follows the figure through the course, the floor to its head in view (fit to the tile) -------
 function bodyPoint(b: number, l: V2): V2 {
   const xp = data.xpos, xm = data.xmat;
   return [xp[b * 3] + xm[b * 9] * l[0] + xm[b * 9 + 2] * l[1], xp[b * 3 + 2] + xm[b * 9 + 6] * l[0] + xm[b * 9 + 8] * l[1]];
@@ -505,17 +505,21 @@ let native = false; // frames to the page's native surface ("target")
 function draw() {
   const Wp = canvas.width, Hp = canvas.height;
   if (!Wp || !Hp) return;
-  // 4.5 m of height at most (the figure ~1.3 m tall stays big in a small tile), all of it if the room is lower; wide
-  // tiles show more of the course, never more than the room
-  const viewH = Math.min(H + 0.3, 4.5);
-  const scale = Math.max(Hp / viewH, Wp / (W + 0.3));
+  // The camera fits the tile's aspect, never letterboxed: the view runs from just under the floor to just over the
+  // figure's head (its height eased, so a jump doesn't pump the zoom), and its width is that times the tile's aspect -
+  // a wide tile shows more of the course, a tall one zooms in on the figure and the ground under it instead of showing
+  // empty sky over it. Never wider than the room: a tile wider than that shows the whole room (its walls reach up the
+  // tile's sides) and the extra height above.
+  const pts = meta.draw.flatMap((p) => [bodyPoint(p.body, p.a), bodyPoint(p.body, p.b)]);
+  const headTop = Math.max(...pts.map((q) => q[1])) + 0.12; // (+ the head's radius)
+  const span = Math.min(H + 0.3, Math.max(1.2, headTop + 0.12 + 0.12));
+  const ease = (a: number, b: number, k: number) => a + (b - a) * k;
+  const s0 = cam ? ease(cam[2], span, 0.25) : span;
+  const scale = Math.max(Hp / s0, Wp / (W + 0.3));
   const vw = Wp / scale, vh = Hp / scale;
   const tp = torsoPos();
-  const want: V2 = [
-    Math.max(-0.15, Math.min(W + 0.15 - vw, tp[0] - vw / 2)),
-    Math.max(-0.15, Math.min(H + 0.15 - vh, tp[1] - vh * 0.42)),
-  ];
-  cam = cam ? [cam[0] + (want[0] - cam[0]) * 0.12, cam[1] + (want[1] - cam[1]) * 0.12] : want;
+  const want: V2 = [Math.max(-0.15, Math.min(W + 0.15 - vw, tp[0] - vw / 2)), Math.max(-0.15, Math.min(H + 0.15 - vh, -0.12))];
+  cam = cam ? [ease(cam[0], want[0], 0.12), ease(cam[1], want[1], 0.12), s0] : [want[0], want[1], s0];
   const [cx, cz] = cam;
   const X = (x: number) => (x - cx) * scale, Z = (z: number) => Hp - (z - cz) * scale;
   const key = new Float64Array(5 + meta.draw.length * 4);

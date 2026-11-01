@@ -276,7 +276,10 @@ export default function Parkour({ host, base }: { host: Host; base: string; cell
         </div>
       )}
       {state.status !== "ready" && (
+        // One calm line while the simulation loads (or says why it didn't): sparse by design (the widget sweep's
+        // data-sparse), the stage fills the tile once the worker draws.
         <div
+          data-sparse=""
           style={{
             position: "absolute",
             inset: 0,

@@ -299,7 +299,15 @@ export async function mount(spec: Spec, settleMs = 900) {
 }
 
 /** What the sheet shows, as a number: its markup and every canvas's drawn pixels. */
-const shown = (root: HTMLElement) => root.innerHTML.length + [...root.querySelectorAll("canvas")].reduce((n, c) => n + (c.width ? c.toDataURL().length : 0), 0);
+const shown = (root: HTMLElement) => root.innerHTML.length + [...root.querySelectorAll("canvas")].reduce((n, c) => n + (c.width ? pixels(c) : 0), 0);
+/** A canvas's pixels as a number; one handed to a worker (transferControlToOffscreen: the stickman's) can't be read. */
+function pixels(c: HTMLCanvasElement) {
+  try {
+    return c.toDataURL().length;
+  } catch {
+    return 0;
+  }
+}
 
 /**
  * Resolves once the sheet has stopped changing for 400 ms (at most 6 s): a tile whose content arrives or paints late
@@ -331,10 +339,20 @@ function visible(el: Element, r: DOMRect, stop: Element) {
   return { left, top, right, bottom, w: Math.max(0, right - left), h: Math.max(0, bottom - top) };
 }
 
-/** A canvas's drawn pixels' box, in page coordinates (null: nothing drawn). */
+/**
+ * A canvas's drawn pixels' box, in page coordinates (null: nothing drawn). Read through a copy (drawImage), never the
+ * canvas's own context: asking for one claims the canvas (a widget's later transferControlToOffscreen or WebGL context
+ * then fails), and a canvas a worker draws (an OffscreenCanvas's placeholder: the stickman's) has none to give.
+ */
 function inked(c: HTMLCanvasElement) {
   if (!c.width || !c.height) return null;
-  const d = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
+  const copy = document.createElement("canvas");
+  copy.width = c.width;
+  copy.height = c.height;
+  const g = copy.getContext("2d", { willReadFrequently: true });
+  if (!g) return null;
+  g.drawImage(c, 0, 0);
+  const d = g.getImageData(0, 0, c.width, c.height).data;
   let x0 = c.width, y0 = c.height, x1 = -1, y1 = -1;
   for (let y = 0; y < c.height; y++)
     for (let x = 0; x < c.width; x++)
