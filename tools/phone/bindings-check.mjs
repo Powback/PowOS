@@ -2,6 +2,7 @@
 // (GET /v1/database/<db>/schema?version=9): one line per database -
 //   <db> ok | <db> ahead <what> (the bindings add tables/columns at the end: publishing the module fixes it) |
 //   <db> differs <what> (anything else: the bindings are older or another shape) | <db> absent (no such database)
+// Reducers too (11-01, f391): a reducer the bindings call that the phone's module lacks is "ahead" (publish fixes it).
 // node tools/phone/bindings-check.mjs SDK SCHEMAS <db>=<vendor.js>...   SDK: shell/vendor/spacetimedb.js; SCHEMAS: "@@<db>"
 // lines, each followed by its JSON.
 // Run by tools/phone/bindings-check.sh.
@@ -19,7 +20,8 @@ for (const line of readFileSync(schemasFile, "utf8").split("\n")) {
 const live = (db) => {
   try {
     const s = JSON.parse(schemas[db]);
-    return Object.fromEntries(s.tables.map((t) => [t.name, s.typespace.types[t.product_type_ref].Product.elements.map((c) => c.name.some)]));
+    const tables = Object.fromEntries(s.tables.map((t) => [t.name, s.typespace.types[t.product_type_ref].Product.elements.map((c) => c.name.some)]));
+    return { tables, reducers: new Set((s.reducers ?? []).map((r) => r.name)) };
   } catch {
     return null;
   }
@@ -47,7 +49,7 @@ try {
     const diff = [];
     let additive = true;
     for (const [t, cols] of Object.entries(mine)) {
-      const have = server[t];
+      const have = server.tables[t];
       if (have && have.join() === cols.join()) continue;
       if (!have) diff.push(`table ${t} (${cols.join(", ")}) not on the phone`);
       else if (cols.slice(0, have.length).join() === have.join()) diff.push(`${t}: + ${cols.slice(have.length).join(", ")}`);
@@ -56,6 +58,9 @@ try {
         diff.push(`${t}: bindings ${cols.join(", ")}; phone ${have.join(", ")}`);
       }
     }
+    const reducers = (DbConnection.builder().remoteModule.reducers ?? []).map((r) => r.name).filter(Boolean);
+    const lacks = reducers.filter((r) => !server.reducers.has(r));
+    if (lacks.length) diff.push(`reducers ${lacks.join(", ")} not on the phone`);
     console.log(diff.length ? `${db} ${additive ? "ahead" : "differs"} ${diff.join("; ")}` : `${db} ok`);
   }
 } finally {

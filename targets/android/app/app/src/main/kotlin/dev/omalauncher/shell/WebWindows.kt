@@ -27,8 +27,8 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 
 /**
- * Web windows: an Android app's window as an element of PowOS home (unfolded, `Settings.Global powos_web_windows` = 1;
- * off by default). docs/WEB_WINDOWS.md, steps S1-S3.
+ * Web windows: an Android app's window as an element of PowOS home (unfolded; on by default, `Settings.Global
+ * powos_web_windows` = 0 turns it off). docs/WEB_WINDOWS.md, steps S1-S3.
  *
  * Why - the user, 2026-10-29: "its because we arent doing it natively inside powos. like the powos home typescript
  * should deal with the windows and their content", "it should be pinned to a page properly natively", "idk why you do
@@ -140,6 +140,14 @@ class WebWindows(
         return out
     }
 
+    /** [listed]'s key and label of Android window [w]: a quick page's ("q:<token>"), else its app's. */
+    private fun keyLabel(
+        w: Win,
+        appOf: (ComponentName) -> Pair<String, String>?,
+    ): Pair<String, String> =
+        w.quick?.let { QuickPageRoute.key(it) to (QuickPages.entry(it)?.label ?: w.component.packageName) }
+            ?: appOf(w.component) ?: ("a:${w.component.packageName}" to w.component.packageName)
+
     /** [list]'s entry for [w]: geometry from window px ([at]: the WebView's place) to CSS px by [dpr]. */
     private fun listed(
         w: Win,
@@ -149,7 +157,7 @@ class WebWindows(
     ): JSONObject {
         fun css(r: Rect) = JSONObject().put("left", (r.left - at[0]) / dpr).put("top", (r.top - at[1]) / dpr).put("width", r.width() / dpr).put("height", r.height() / dpr)
         val src = w.linux
-        val (key, label) = src?.let { it.offer.key to it.offer.label } ?: appOf(w.component) ?: ("a:${w.component.packageName}" to w.component.packageName)
+        val (key, label) = src?.let { it.offer.key to it.offer.label } ?: keyLabel(w, appOf)
         val o = JSONObject().put("id", w.id).put("key", key).put("label", label).put("display", w.displayId).put("task", w.taskId).put("state", listedState(w)).put("live", w.live)
         if (w.zoom != 1.0) o.put("zoom", w.zoom)
         if (src != null) o.put("kwin", src.kwin).put("ownFrame", andro.marchy.WebWindowSource.ownFrame(src.kwin))
@@ -165,7 +173,7 @@ class WebWindows(
             else -> "floating"
         }
 
-    /** Off unless `settings put global powos_web_windows 1`. */
+    /** On by default (the board's "switch on", 11-01); `settings put global powos_web_windows 0` turns it off. */
     fun enabled(): Boolean = on(context)
 
     private val displayListener =
@@ -567,6 +575,9 @@ class WebWindows(
         /** Its display's dpi at content zoom 1 ([WindowDpi.of]): fixed from its creation. */
         val baseDpi: Int,
     ) {
+        /** A quick page's token (QuickPages; ui/quickpage.tsx), null: an app's window. Never reused for an app launch. */
+        var quick: String? = null
+
         /** TS1: its content zoom (the user's pinch, [zoom]) and its display's dpi at it ([WindowDpi.zoomed]): every resize at it. */
         var zoom = 1.0
         var dpi = baseDpi
@@ -855,18 +866,44 @@ class WebWindows(
         rect: JSONObject,
         task: Int = -1,
     ): Int {
-        if (!enabled()) return -1.also { WindowLog.w(TAG, "open ${component.packageName}: $SETTING is off") }
-        unresizeable(component)?.let { why ->
-            // Fallback: Android's own window (the caller launches it as before; the switcher uses Android's split).
-            WindowLog.w(TAG, "fallback: ${component.packageName} keeps Android's own window/split, not a web window: $why")
-            // A launch held for this window (WebWindowLaunch) goes the old way now, not after its wait.
-            WebWindowLaunch.refused(component.packageName)
-            return -1
-        }
-        val pkg = component.packageName
+        if (!openable(component, component.packageName)) return -1
         val how = launchDecision(component, task)
         if (how is LaunchReuse.Decision.Reuse) return how.window
-        val adopt = (how as? LaunchReuse.Decision.Adopt)?.task ?: -1
+        return make(component, rect, (how as? LaunchReuse.Decision.Adopt)?.task ?: -1, null)
+    }
+
+    /**
+     * Quick page [token] (QuickPages; ui/quickpage.tsx)'s window for [component] at [rect]: always a display of its
+     * own, its held launch started there - never an app's window reused, never its task adopted. -1: none.
+     */
+    fun openQuick(
+        component: ComponentName,
+        rect: JSONObject,
+        token: String,
+    ): Int = if (openable(component, QuickPageRoute.key(token))) make(component, rect, -1, token) else -1
+
+    /** Web windows on and [component] resizeable; else false, its held launch ([held]'s key) let go the old way. */
+    private fun openable(
+        component: ComponentName,
+        held: String,
+    ): Boolean {
+        if (!enabled()) return false.also { WindowLog.w(TAG, "open ${component.packageName}: $SETTING is off") }
+        val why = unresizeable(component) ?: return true
+        // Fallback: Android's own window (the caller launches it as before; the switcher uses Android's split).
+        WindowLog.w(TAG, "fallback: ${component.packageName} keeps Android's own window/split, not a web window: $why")
+        // A launch held for this window (WebWindowLaunch) goes the old way now, not after its wait.
+        WebWindowLaunch.refused(held)
+        return false
+    }
+
+    /** [open]'s new window: its display made, [adopt] (a running task) moved in or its app launched there. */
+    private fun make(
+        component: ComponentName,
+        rect: JSONObject,
+        adopt: Int,
+        quick: String?,
+    ): Int {
+        val pkg = component.packageName
         val parent = root() ?: return -1
         val id = nextId++
         WindowLog.i(TAG, "launch $pkg: new window $id (running task moved in: $adopt; -1: launched)")
@@ -877,6 +914,7 @@ class WebWindows(
         val container = SurfaceControl.Builder().setName("powos-ww-$id").setParent(parent).setHidden(true).build()
         val win = Win(id, component, container, w, h, windowDpi(component.packageName))
         win.adopt = adopt
+        win.quick = quick
         wins[id] = win
         helper.create(win) { displayId, error ->
             if (displayId < 0) {
@@ -908,7 +946,7 @@ class WebWindows(
         task: Int,
     ): Int? {
         val pkg = component.packageName
-        val w = wins.values.firstOrNull { it.linux == null && !it.closed && it.component.packageName == pkg } ?: return null
+        val w = wins.values.firstOrNull { it.linux == null && !it.closed && it.quick == null && it.component.packageName == pkg } ?: return null
         if (task >= 0 && task != w.taskId && !secondTask(w, task)) return null
         WindowLog.i(TAG, "open $pkg task $task: window ${w.id} (display ${w.displayId}) has the app already: raised, no second display")
         emit("webwindows.show", w.id)
@@ -938,13 +976,15 @@ class WebWindows(
 
     /** [LaunchReuse]'s windows: every live Android window (main thread). */
     private fun liveWindows(): List<LaunchReuse.Window> =
-        wins.values.filter { it.linux == null && !it.closed }.map { LaunchReuse.Window(it.id, it.component.packageName, it.taskId, it.displayId) }
+        wins.values.filter { it.linux == null && !it.closed && it.quick == null }.map { LaunchReuse.Window(it.id, it.component.packageName, it.taskId, it.displayId) }
 
     /** [LaunchReuse]'s running tasks with their displays (empty: not readable - a new window then, as before). */
     private fun runningTasks(): List<LaunchReuse.Task> {
         @Suppress("DEPRECATION")
         val tasks = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
-        return tasks.map { LaunchReuse.Task(it.taskId, it.baseActivity?.packageName, it.topActivity?.packageName, WebWindowDisplays.displayOf(it)) }
+        // A quick page's task (its own display; MULTIPLE_TASK for Settings) is never an app launch's to take.
+        val quickDisplays = wins.values.filter { it.quick != null && it.displayId >= 0 }.map { it.displayId }.toSet()
+        return tasks.map { LaunchReuse.Task(it.taskId, it.baseActivity?.packageName, it.topActivity?.packageName, WebWindowDisplays.displayOf(it)) }.filter { it.display !in quickDisplays }
     }
 
     /**
@@ -3239,7 +3279,12 @@ class WebWindows(
         checkLanded(w)
         // A launch held for this window (a notification, a widget, settings search: WebWindowLaunch) starts on its
         // display instead of the app's launcher activity - straight into the window, never via display 0.
-        if (WebWindowLaunch.take(w.component.packageName, w.displayId)) return
+        if (WebWindowLaunch.take(w.quick?.let(QuickPageRoute::key) ?: w.component.packageName, w.displayId)) return
+        // A quick page starts only its held page, never its app's launcher activity (that's the full window).
+        w.quick?.let {
+            WindowLog.w(TAG, "quick page $it (window ${w.id}): no held launch for its display: nothing started")
+            return
+        }
         val intent =
             Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_LAUNCHER)
@@ -3608,7 +3653,7 @@ class WebWindows(
         fun displayOfApp(pkg: String): Int? {
             val ww = current ?: return null
             // wins is main-thread state; a copy taken off it may race a change: then no window (the old way).
-            val w = (runCatching { ww.wins.values.toList() }.getOrNull() ?: return null).firstOrNull { it.linux == null && !it.closed && it.component.packageName == pkg } ?: return null
+            val w = (runCatching { ww.wins.values.toList() }.getOrNull() ?: return null).firstOrNull { it.linux == null && !it.closed && it.quick == null && it.component.packageName == pkg } ?: return null
             return if (w.full) FULL_APP else w.displayId
         }
 
@@ -3927,7 +3972,10 @@ class WebWindows(
         private const val HOME_GRACE_MS = 4000L
 
         /** Web windows on: Android apps opened from the wide home are web windows (only those stand the old path down: WebWindowDisplays). */
-        fun on(context: Context): Boolean = runCatching { Settings.Global.getInt(context.contentResolver, SETTING, 0) == 1 }.getOrDefault(false)
+        fun on(context: Context): Boolean = isOn(runCatching { Settings.Global.getInt(context.contentResolver, SETTING) }.getOrNull())
+
+        /** Web windows are THE window path (board "device check, then switch on", 11-01): on unless stored 0; unset = on. */
+        fun isOn(stored: Int?): Boolean = stored != 0
         private const val PLACE_LOG_MS = 1000L
 
         /** RS1: the fill under a resized app stays this long after release (its final relayout's ~100-200 ms). */

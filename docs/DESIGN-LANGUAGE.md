@@ -137,9 +137,12 @@ Checks:
 
 ## 9. Surface patterns
 
-- **Quick pages.** A settings page opened from search or a tile is a compact glass card with a small title bar
-  (title, pop-out to a window, close). It is never the whole Settings app.
-  - Android's native panels (Wi-Fi, Bluetooth, internet) are a known exception until they are drawn by us.
+- **Quick pages.** A settings page of any app, opened from search or a tile, is a compact card on the backdrop glass
+  (`ui/quickpage.tsx`), `--radius` round, with a small title bar (the app's icon, the page's name, pop-out to a
+  window, close). It springs out of what opened it; folded it is a full-width sheet rising from the bottom. It is
+  never the whole Settings app.
+  - Known exception: Android's native panels (the internet, NFC and Wi-Fi panels, Bluetooth, the volume panel) stay
+    Android's own bottom sheets until they are drawn by us.
 - **Notifications.** There is one stack per app, newest in full and two strips behind it, then "+N".
   - Conversations sit on top.
   - A swipe on a folded stack dismisses the group, and a swipe in an open group dismisses one card.

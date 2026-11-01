@@ -116,7 +116,8 @@ export const pageCount = computed(() => pages.value.length + 1);
 // The switcher's split screen tiles its apps on the home page on screen (ui/webwindows.tsx can't import this file).
 setShownPage(() => pages.value[page.value] ?? 1);
 setPageBeside((side) => (page.value < 0 ? null : (pages.value[page.value + side] ?? null)));
-setIconOf((key) => byKey.value.get(key)?.icon);
+// "a:<package>" (a quick page's app, no activity): that package's launcher entry ("a:<package>/<activity>").
+setIconOf((key) => byKey.value.get(key)?.icon ?? apps.value.find((a) => a.key.startsWith(`${key}/`))?.icon);
 export const onLibrary = () => page.value === pages.value.length;
 /** A widget's screen open over home (its onTap's screen()); Back closes it first. */
 export const screen = signal<WidgetScreen>({ key: null });

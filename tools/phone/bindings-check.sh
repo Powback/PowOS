@@ -11,6 +11,9 @@
 # Anything else fails (exit 1) with the command that fixes it. --no-publish: fail instead of publishing.
 # --publishing "APP..." (the ship service, before its shell push): bindings AHEAD of those apps' modules pass - the same
 # ship publishes them right after the bindings (additive change: bindings first, then the module).
+# --needs (the ship service's module-first rule and tools/phone/module-first-check.sh, 11-01 f391): report-only for the
+# AHEAD case - prints "needs <app> <db> <what>" per module the phone must get published BEFORE these bindings go live,
+# and doesn't count it as a failure (never publishes); anything else fails as above.
 # Tests: BINDINGS_ADB, BINDINGS_VENDOR, BINDINGS_PUBLISH replace the adb call, apps/vendor.sh and apps/install.sh.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -18,13 +21,14 @@ pairs=$(sed -n 's|^\([a-z0-9-]*\)\.js  *generated  *apps/\([a-z0-9-]*\):.*|\1 \2
 dbs=$(echo "$pairs" | awk '{print $1}' | tr '\n' ' ')
 remote="su -c 'for d in $dbs; do echo @@\$d; chroot /data/powos/root /usr/bin/curl -s -m 5 http://127.0.0.1:3410/v1/database/\$d/schema?version=9; echo; done'"
 [ "${1:-}" = --remote-cmd ] && { echo "$remote"; exit 0; }
-schemas="" dirs=() publish=1 publishing=""
+schemas="" dirs=() publish=1 publishing="" needs=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --schemas) schemas=$2; shift 2 ;;
     --vendor) dirs+=("$2"); shift 2 ;;
     --no-publish) publish=""; shift ;;
     --publishing) publishing=" $2 "; shift 2 ;;
+    --needs) needs=1; publish=""; shift ;;
     *) echo "bindings-check: unknown $1" >&2; exit 2 ;;
   esac
 done
@@ -54,7 +58,9 @@ while read -r db state what; do
     ok) echo "bindings: $db matches the phone" ;;
     absent) echo "bindings: $db isn't on the phone - not checked" ;;
     ahead)
-      if [[ "$publishing" == *" $app "* ]]; then
+      if [ -n "$needs" ]; then
+        echo "needs $app $db $what"
+      elif [[ "$publishing" == *" $app "* ]]; then
         echo "bindings: $db is ahead of the phone's module ($what) - this ship publishes apps/$app/module right after"
       elif [ -f "$ROOT/apps/$app/powos-app.json" ] && [ -d "$ROOT/apps/$app/module" ] &&
          ${BINDINGS_VENDOR:-"$ROOT/apps/vendor.sh"} "$app" --out "$tmp/$db.js" >/dev/null && cmp -s "$tmp/$db.js" "$file"; then

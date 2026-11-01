@@ -299,6 +299,12 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       restore: (id) => call<boolean>("webwindows.restore", id),
       zoom: (id, k) => call<boolean>("webwindows.zoom", id, k),
     },
+    // Quick pages (ui/quickpage.tsx; QuickPages.kt): the phone's only.
+    quickpage: host.name === "powos" ? undefined : {
+      open: (spec) => call<boolean>("quickpage.open", spec),
+      popout: (token, id) => call<boolean>("quickpage.popout", token, id),
+      refused: (token) => call<boolean>("quickpage.refused", token),
+    },
     tasks: {
       list: () => call<RecentTask[]>("tasks.list"),
       open: (id, from) => call<boolean>("tasks.open", id, from ?? null),
@@ -1589,6 +1595,10 @@ function mockAgents(
             updated: now,
           },
           { id: "mac:c1#3", agent: "mac:c1", subject: "commit", status: "open", order: 2, updated: now },
+          // A helper's own list (the widget's progress bar under its title; mac:c1/a2 has none: no bar).
+          { id: "mac:c1/a1#1", agent: "mac:c1/a1", subject: "list the watchers", status: "done", order: 0, updated: now },
+          { id: "mac:c1/a1#2", agent: "mac:c1/a1", subject: "check each one", status: "in_progress", order: 1, updated: now },
+          { id: "mac:c1/a1#3", agent: "mac:c1/a1", subject: "report", status: "open", order: 2, updated: now },
         ],
         messages: [
           {

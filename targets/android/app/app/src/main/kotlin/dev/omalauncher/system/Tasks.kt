@@ -253,8 +253,8 @@ object Tasks {
      * canvas/flexible pairing (setLaunchWindowingMode is hidden, reflected). Real fix: none for an app - the canvas
      * rule is in OxygenOS's system_server (CanvasCalculateLayoutRect); a ROM without pscanvas, or a public opt-out, is.
      */
-    fun fullScreenOptions(): ActivityOptions {
-        val options = ActivityOptions.makeBasic().setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY)
+    fun fullScreenOptions(base: ActivityOptions? = null): ActivityOptions {
+        val options = (base ?: ActivityOptions.makeBasic()).setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY)
         runCatching {
             HiddenApi.allow()
             ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType).invoke(options, WINDOWING_MODE_FULLSCREEN)
