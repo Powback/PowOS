@@ -27,6 +27,7 @@ import dev.omalauncher.PowosAiChat
 import dev.omalauncher.Runtime
 import dev.omalauncher.ui.Palette
 import dev.omalauncher.widgets.runtime.MediaListener
+import dev.omalauncher.widgets.runtime.NotificationPicture
 import dev.omalauncher.ui.Speech
 import dev.omalauncher.linux.Agent
 import dev.omalauncher.linux.matches
@@ -1106,7 +1107,8 @@ class ShellBridge(
     /**
      * A notification as the page shows it: { key, app, icon, title, text, time, clearable, profile, actions: [{ title,
      * input, semantic }], category, pkg, group, conversation, messages: [{ sender, text, time }], conversationTitle,
-     * groupConversation, tappable } - the panel's (grouped: notifications.tsx), and the shade's
+     * groupConversation, tappable, picture? } - picture (a URL, NotificationPicture) only when it has one - the
+     * panel's (grouped: notifications.tsx), and the shade's
      * heads-up banner's ("shade.peek").
      */
     fun notificationJson(item: dev.omalauncher.widgets.runtime.Notifications.Item): JSONObject {
@@ -1132,12 +1134,16 @@ class ShellBridge(
         )
     }
 
-    /** MessagingStyle's part of [item] (the What needs me app's who and line): sender "" is the user's own reply. */
+    /**
+     * MessagingStyle's part of [item] (the What needs me app's who and line): sender "" is the user's own reply; and
+     * its big picture's URL, only when it has one (NotificationPicture).
+     */
     private fun messaging(
         item: dev.omalauncher.widgets.runtime.Notifications.Item,
         o: JSONObject,
     ): JSONObject =
-        o.put("messages", JSONArray(item.messages.map { JSONObject().put("sender", it.sender).put("text", it.text).put("time", it.time) }))
+        NotificationPicture.put(o, NotificationPicture.url(ShellHost.ORIGIN, item.key, item.time, item.picture))
+            .put("messages", JSONArray(item.messages.map { JSONObject().put("sender", it.sender).put("text", it.text).put("time", it.time) }))
             .put("conversationTitle", item.conversationTitle ?: JSONObject.NULL)
             .put("groupConversation", item.groupConversation)
             .put("tappable", item.tappable)

@@ -318,12 +318,7 @@ class ShellHost(
                 val jpeg = ShellWallpaper.jpeg(context) ?: return notFound()
                 return WebResourceResponse("image/jpeg", null, ByteArrayInputStream(jpeg)).apply { responseHeaders = mapOf("Cache-Control" to "max-age=31536000") }
             }
-            // What's playing's album art, for the control center's media card (its id from media.state).
-            if (path.startsWith("_media/")) {
-                val bitmap = runtime.widgets.media.art(URLDecoder.decode(path.removePrefix("_media/"), "UTF-8")) ?: return notFound()
-                val png = ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
-                return WebResourceResponse("image/png", null, ByteArrayInputStream(png)).apply { responseHeaders = mapOf("Cache-Control" to "no-store") }
-            }
+            if (path.startsWith("_media/") || path.startsWith("_npic/")) return shadeImage(path)
             // The assistant's screenshot of the screen it was opened over (PowosAssistSession writes it).
             if (path.startsWith("_assist/")) {
                 val file = File(File(context.cacheDir, "assist"), path.removePrefix("_assist/").substringAfterLast('/'))
@@ -450,6 +445,21 @@ class ShellHost(
         return WebResourceResponse("image/png", null, ByteArrayInputStream(png)).apply {
             responseHeaders = mapOf("Cache-Control" to "no-cache")
         }
+    }
+
+    /**
+     * The shade's pictures: what's playing's album art, for the control center's media card ("_media/<id>", its id
+     * from media.state), and a notification's big picture for its expanded card ("_npic/<key>", NotificationPicture;
+     * ?t= names its post, so it's kept).
+     */
+    private fun shadeImage(path: String): WebResourceResponse {
+        if (path.startsWith("_npic/")) {
+            val jpeg = runtime.widgets.notifications.picture(URLDecoder.decode(path.removePrefix("_npic/"), "UTF-8")) ?: return notFound()
+            return WebResourceResponse("image/jpeg", null, ByteArrayInputStream(jpeg)).apply { responseHeaders = mapOf("Cache-Control" to "max-age=3600") }
+        }
+        val bitmap = runtime.widgets.media.art(URLDecoder.decode(path.removePrefix("_media/"), "UTF-8")) ?: return notFound()
+        val png = ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        return WebResourceResponse("image/png", null, ByteArrayInputStream(png)).apply { responseHeaders = mapOf("Cache-Control" to "no-store") }
     }
 
     /** A widget's Image src (a file, media: art, an icon), as its instance loads it for the Compose tile. */

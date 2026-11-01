@@ -88,6 +88,8 @@ class Notifications(
         val groupConversation: Boolean = false,
         /** It has a tap action (contentIntent): "open" opens the conversation. */
         val tappable: Boolean = false,
+        /** It carries a big picture (NotificationPicture.has): the page loads it by URL, only when the card opens. */
+        val picture: Boolean = false,
     )
 
     data class Action(
@@ -146,7 +148,14 @@ class Notifications(
             sbn.notification.extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()?.takeIf { it.isNotBlank() },
             sbn.notification.extras.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION),
             sbn.notification.contentIntent != null,
+            NotificationPicture.has(sbn.notification.extras),
         )
+
+    /** [key]'s big picture as a JPEG (NotificationPicture.jpeg), null: no such notification, or none. */
+    fun picture(key: String): ByteArray? {
+        val sbn = runCatching { MediaListener.connected?.activeNotifications?.firstOrNull { it.key == key } }.getOrNull() ?: return null
+        return NotificationPicture.jpeg(sbn, context)
+    }
 
     /** Keys of what had a banner (the time it was posted), for once-only alerts' updates. */
     private val alerted = HashMap<String, Long>()
