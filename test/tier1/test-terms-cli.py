@@ -52,9 +52,11 @@ def stub(name, body):
 
 
 # tmux: list-sessions prints LOCAL; attach is logged. ssh: logged; a remote list prints REMOTE unless SSH_DOWN.
-stub("tmux", f'echo "tmux $*" >> {LOG}\ncase "$*" in *list-sessions*) printf "{LOCAL.encode("unicode_escape").decode()}";; esac\n')
+stub("tmux", f'echo "tmux $*" >> {LOG}\ncase "$*" in *list-sessions*) printf "{LOCAL.encode("unicode_escape").decode()}";; '
+     f'*capture-pane*) [ -f {T}/cap ] && exit 1; touch {T}/cap; printf "a  \\nb\\n\\n";; esac\n')
 stub("ssh", f'echo "ssh $*" >> {LOG}\n[ -n "$SSH_DOWN" ] && {{ echo "connect refused" >&2; exit 255; }}\n'
-     f'case "$*" in *list-sessions*) printf "{REMOTE.encode("unicode_escape").decode()}";; esac\n')
+     f'case "$*" in *list-sessions*) printf "{REMOTE.encode("unicode_escape").decode()}";; '
+     f'*capture-pane*) [ -f {T}/rcap ] && exit 1; touch {T}/rcap; printf "x\\n";; esac\n')
 
 ENV = dict(os.environ, PATH=BIN + ":" + os.environ["PATH"], POWOS_TERMS_HOST="phone",
            POWOS_TERMS_HOSTS="mac=me@10.0.0.9", POWOS_TERMS_CACHE=os.path.join(T, "cache"))
@@ -96,15 +98,21 @@ check("unreachable: error, last list kept", not m["ok"] and "unreachable" in m["
 
 print("== attach ==")
 open(LOG, "w").close()
-run("attach", "phone", "main")
-check("local view-only is a read-only client", "tmux attach -r -t main" in calls())
+r = run("attach", "phone", "main")
+c = calls()
+check("local view-only is no tmux client: a UTF-8 capture of the pane, joined lines", "tmux -u capture-pane -p -e -J" in c and "attach" not in c)
+check("the view hides the cursor and draws whole frames", r.stdout.startswith("\x1b[?25l\x1b[H\x1b[2J\x1b[3J"))
+check("the view ends when the session is gone", "[session ended]" in r.stdout and r.returncode == 0)
 open(LOG, "w").close()
 run("attach", "phone", "main", "--write")
-check("--write is a read-write client", "tmux attach -t main" in calls() and "-r" not in calls())
+check("--write is a read-write UTF-8 client", "tmux -u attach -t main" in calls() and "-r" not in calls())
 open(LOG, "w").close()
 run("attach", "mac", "7")
 c = calls()
-check("mac over ssh -t, read-only", c.startswith("ssh ") and " -t " in c and "tmux attach -r -t 7" in c)
+check("mac view-only over ssh: a capture, never an attach, never -t", c.startswith("ssh ") and "capture-pane" in c and "attach" not in c and " -t me@" not in c)
+open(LOG, "w").close()
+run("attach", "mac", "7", "--write")
+check("mac --write: ssh -t, tmux -u attach", " -t " in calls() and "tmux -u attach -t 7" in calls())
 r = run("attach", "mac", "x;rm -rf /")
 check("bad session name refused", r.returncode == 2 and "bad session name" in r.stderr)
 r = run("attach", "nowhere", "7")

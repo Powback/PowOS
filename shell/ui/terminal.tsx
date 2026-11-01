@@ -91,10 +91,13 @@ function loadFont(name: string, url: string) {
 }
 async function fontFamily(style: TermStyle) {
   const fallback = getComputedStyle(document.documentElement).getPropertyValue("--font").trim() || "monospace";
-  const symbols = (await loadFont("PowOS Symbols", "/_font/symbols")) ? '"PowOS Symbols", ' : "";
+  const symbols = (await loadFont("PowOS Symbols", "/_font/symbols")) ? ', "PowOS Symbols"' : "";
   const face = `PowOS Terminal ${style.family}`;
   const own = style.font && (await loadFont(face, `/_font/terminal/${encodeURIComponent(style.family)}`));
-  return `${own ? JSON.stringify(face) + ", " : ""}${symbols}${fallback}`;
+  // The symbols last: only the glyphs no monospace face has fall through to it. First in the list (before the
+  // terminal file arrived, style.font false) it was the face xterm measured its cell with, and the text's own face
+  // didn't fit that grid (letters spread apart, the columns off the width).
+  return `${own ? JSON.stringify(face) + ", " : ""}${fallback}${symbols}`;
 }
 
 // --- sessions --------------------------------------------------------------------------------------------------------
@@ -253,11 +256,14 @@ class Session {
     this.fit.fit();
     // Whole rows fit; what's left of a row is split above and below them, not all left under the last one (a tile's
     // bottom stood a row's height empty). xterm maps the pointer from the screen's own rect, so the shift is safe.
+    // Layout sizes on both sides (offsetHeight, not the bounding rect): a session screen fits while it grows out of
+    // its card under a scale transform, and the rect's scaled height left most of the screen as "space to split" -
+    // the content shifted half a screen down, an empty band above it and its last rows under the bottom edge.
     requestAnimationFrame(() => {
       const xt = this.holder.querySelector<HTMLElement>(".xterm");
       const scr = this.holder.querySelector<HTMLElement>(".xterm-screen");
       if (!xt || !scr) return;
-      const left = this.holder.clientHeight - scr.getBoundingClientRect().height;
+      const left = Math.min(this.holder.clientHeight - scr.offsetHeight, this.holder.clientHeight / this.term.rows);
       xt.style.transform = left > 1 ? `translateY(${Math.floor(left / 2)}px)` : "";
     });
   }
@@ -291,6 +297,9 @@ powos.on("files.changed", ({ path }: { path: string }) => {
 });
 
 /** Ends a terminal that no widget owns (a terminal screen of the shell's own); a widget's end with it on the host. */
+/** The xterm behind a terminal id (dev/gate.mjs's terminal scenes read its cols, rows and cursor). */
+export const terminalFor = (id: string) => sessions.get(id)?.term ?? null;
+
 export function closeTerminal(id: string) {
   sessions.get(id)?.term.dispose();
   sessions.delete(id);
