@@ -19,7 +19,9 @@ VERB=${2:-install}
 [ -n "${NOTE// }" ] || { echo "install.sh: --note \"what changed, for the user\" is required (the phone's update notification)" >&2; exit 2; }
 NOTE64=$(printf '%s' "$NOTE" | base64 | tr -d '\n')
 case $APP in */*) D=$(cd "$APP" && pwd) ;; *) D=$HERE/$APP ;; esac
-ADB=${ADB:-adb}
+# The project's wrapper by default: it finds the phone (USB, LAN or VPN), and plain Homebrew adb is SIGKILLed on this Mac
+# (11-01: the Lights install died at `adb push` with rc 137).
+ADB=${ADB:-$(cd "$(dirname "$0")/.." && pwd)/tools/phone/adb.sh}
 # A module publish (install / publish) goes through the ship service (tools/phone/ship.sh's apps step: the module with
 # its regenerated bindings, after the shell has them). 2026-10-30 19:31: an agent published powos-agents' new column
 # work.try_line from its own worktree before shell/vendor/powos-agents.js shipped - home's board subscription stopped
