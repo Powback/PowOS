@@ -1623,7 +1623,7 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
  */
 /* The panel, wide: its panes scroll, not it; its own pill under the conversation instead of home's bar. */
 .ai-panel.wide { overflow: hidden; }
-:is(.home, .pull-screen).open:has(.ai-panel.wide) > .bar { visibility: hidden; }
+/* OB1: no pill of its own any more - home's one bar is its input (bar.tsx "ai" role), its room an .ai-bar-slot. */
 /*
  * Its pill where home's bar pill is, with or without the keyboard: the panel's window reaches down over the bar's place
  * (no fade, no gap under it), so the pill's foot is --ai-foot's as on the AI page. Dragged, the bar (over the launcher)
@@ -3938,3 +3938,28 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .ag-wait.needs_you, .ag-wait.blocked { color: var(--color-red); }
 .ag-foot { display: flex; flex-direction: column; gap: 8px; }
 .ag-foot > .fl-term-open { align-self: flex-start; }
+
+/*
+ * OB1 (the user, 2026-11-01: "one single search bar that acts differently depending on which page you're on"): home's
+ * one bar on PowOS AI's page - seated on the page's .ai-bar-slot by a translate that counters home's slide (bar.tsx
+ * seatOnAi), moving there on home's own slide curve; while a finger drags the screens, no transition (it rides along).
+ * Shown and tappable there whatever home's foot does with it (parked under the search widget, the dock's button).
+ */
+.home > .bar.seated { transition: translate 280ms cubic-bezier(0.2, 0.9, 0.3, 1), width 280ms cubic-bezier(0.2, 0.9, 0.3, 1); z-index: 5; }
+.home > .bar.seated.sliding { transition: none; }
+.home.search-parked > .bar.seated { opacity: 1; pointer-events: auto; }
+/* The folded page's single column (a screen no tab names): the bar's room at its foot. */
+.ai-screen > .ai-bar-slot { flex: none; margin-top: auto; height: calc(var(--pill-height) + var(--ai-foot)); }
+/* The role's glyph (the launcher's apps, the AI page's manager) where home's prompt glyph is. */
+.pill .prompt.role-icon { display: flex; align-items: center; justify-content: center; height: 40px; }
+/* Switching pages changes the role in place: its hint and glyph fade in anew (one animation name per role, so a
+   change of role restarts it), no jump. */
+@keyframes bar-role-search { from { opacity: 0; } to { opacity: 1; } }
+@keyframes bar-role-apps { from { opacity: 0; } to { opacity: 1; } }
+@keyframes bar-role-ai { from { opacity: 0; } to { opacity: 1; } }
+.bar.role-search .bar-pill textarea::placeholder, .bar.role-search .bar-pill .lead > .prompt { animation: bar-role-search 220ms ease-out; }
+.bar.role-apps .bar-pill textarea::placeholder, .bar.role-apps .bar-pill .lead > .prompt { animation: bar-role-apps 220ms ease-out; }
+.bar.role-ai .bar-pill textarea::placeholder, .bar.role-ai .bar-pill .lead > .prompt { animation: bar-role-ai 220ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .bar[data-role] .bar-pill textarea::placeholder, .bar[data-role] .bar-pill .lead > .prompt { animation: none; }
+}

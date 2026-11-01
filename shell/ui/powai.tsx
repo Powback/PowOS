@@ -15,7 +15,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { aiDraft, aiScreen, chat, page } from "../state.ts";
-import { Pill, hearing, type MicTarget } from "./bar.tsx";
+import { onManagerSend, type MicTarget } from "./bar.tsx";
 import { ago } from "./time.ts";
 import { md } from "./md.ts";
 import type { AgentMail, ChatItem } from "../types.ts";
@@ -48,6 +48,12 @@ const send = () => {
   // The one queue (assistant.ts): mid-turn it waits as a queued bubble, here and in every other chat.
   askQueued(text);
 };
+
+// OB1: the one bar's "ai" role sends as this page's own field did - the status page's bubble noted, the one queue.
+onManagerSend((text) => {
+  noteAsked(text);
+  askQueued(text);
+});
 
 const pageMic: MicTarget = {
   typed: () => draft.value,
@@ -315,32 +321,6 @@ function AiHeader({ sub, shown = false, strip = true, title = true }: { sub: AiS
   );
 }
 
-/** Its compose field: ask PowOS AI right here (the mic: hold to talk and send, tap to dictate). */
-function AiCompose() {
-  const input = useRef<HTMLTextAreaElement>(null);
-  return (
-    <form
-      class="ai-compose"
-      onSubmit={(e) => {
-        e.preventDefault();
-        send();
-      }}
-    >
-      <Pill
-        target={pageMic}
-        send
-        inputRef={input}
-        value={hearing(pageMic) ?? draft.value}
-        onInput={(v: string) => (draft.value = v)}
-        onFocus={() => powos.keyboard.show()}
-        aria-label="Ask PowOS AI"
-        enterKeyHint="send"
-        autocomplete="off"
-      />
-    </form>
-  );
-}
-
 /** The page's width, not the device's, picks the layout: chat + Progress side by side from WIDE_PX (the inner screen). */
 const WIDE_PX = 700;
 /** Under this height, wide is the folded screen turned sideways (.rail: the two columns' spacing tighter). */
@@ -560,7 +540,8 @@ function AiColumn({ shown, wide, pill }: { shown: boolean; wide: boolean; pill: 
     <>
       <AiHeader sub={sub} shown={shown && !sub} />
       <AiBody sub={sub} shown={shown} />
-      {!sub && (pill || wide) && <AiCompose />}
+      {/* OB1: no field of its own - the one shared bar (bar.tsx, its "ai" role) takes this room. */}
+      {!sub && (pill || wide) && <div class="ai-bar-slot" data-bar-slot="ai" aria-hidden="true" />}
       {split && <Sheet s={s} shown={shown} />}
     </>
   );
