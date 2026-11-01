@@ -68,14 +68,15 @@
 /*
  * Grouped notifications (notifications.tsx Stack): a group is its head (name, count, chevron) over up to three of its
  * cards in full, one after another, and past three a "+N more" line; open, the rest unfold in place under them (a grid
- * row from 0fr to 1fr - an animated auto height, nothing jumps). The cards are styled the same folded and open.
+ * row from 0fr to 1fr, grown on the spring by notifmotion.ts - nothing jumps). The cards are styled the same folded and open.
  */
 .notif-more { flex: none; padding: 1px 7px; border-radius: 999px; background: var(--soft-fill); font-size: var(--text-small); }
 .notif-stack { position: relative; flex: none; display: flex; flex-direction: column; }
 .notif-shown { display: flex; flex-direction: column; gap: 6px; }
 .notif-show-more { align-self: center; padding: 6px 12px 2px; font: var(--text-small) var(--font); background: none; border: 0; }
 /* The rest: folded to nothing, unfolded to its height. */
-.notif-rest { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 220ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+/* No transition of its own: notifmotion.ts grows it (and the group, and its row) on the shell's spring. */
+.notif-rest { display: grid; grid-template-rows: 0fr; }
 .notif-rest > div { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 6px; }
 .notif-stack.open .notif-rest { grid-template-rows: 1fr; }
 .notif-rest > div > .notif:first-child { margin-top: 6px; }
@@ -125,3 +126,5 @@
 .notif.expanded .notif-text, .notif.expanded .notif-text.lines { display: block; -webkit-line-clamp: unset; overflow: visible; white-space: pre-line; overflow-wrap: anywhere; }
 .notif-picture { display: block; width: 100%; max-height: 240px; object-fit: cover; margin-top: 8px; border-radius: var(--radius); }
 .notif-head > .notif-icon[role="button"] { cursor: pointer; }
+/* A single's small icon (notifications.tsx SmallIcon): the status bar's glyph as a mask, in its app's color. */
+.notif-icon.notif-small { flex: none; display: inline-block; border-radius: 0; background: var(--tint, var(--color-foreground)); }
