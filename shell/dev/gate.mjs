@@ -393,39 +393,104 @@ async function termSessionCheck() {
   return out;
 }
 
-/** In the page: steam (6x3) over fetch (3x3, flush right) on home's first page - a straight stack: ONE clean rectangle
- * (the user's 2026-10-28 "looks ugly af if the widgets arent the same width"), fetch shown 6 wide, outer edges on the
- * row and column lines, the shared side a seam, no inner corner. */
+/** In the page: merged widgets M1-M2 (grid.tsx joins; the user's 2026-10-28 "the widget combiner looks ugly af if the
+ * widgets arent the same width"). An equal-width stack (agents 6x3 over recents 6x3) merges: both .joined, one width,
+ * the faces meet on the row line (one seamless surface, no gutter or seam strip between). An unequal stack (agents 6x3
+ * over recents 3x3 flush right) stays separate: neither .joined, each at its own width, the normal gap between, no seam
+ * piece. */
 async function joinsCheck() {
   const S = await window.__gw.mod("./state.ts");
   const { powos } = await window.__gw.mod("./bridge.ts");
+  const G = window.__gw;
+  const w = Math.min(6, (await powos.home.get()).columns || 6);
+  const half = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--gap")) || 8) / 2;
+  const near = (a, b) => Math.abs(a - b) <= 1;
+  const placed = () => [...document.querySelectorAll(".page:not(.away) .home-tile")];
+  const lay = async (lowerX, lowerW) => {
+    const h = await powos.home.get();
+    for (const i of h.items) await powos.home.remove(i.key);
+    const pg = h.pages[0] ?? 1;
+    await powos.home.addPanel("agents", pg, { x: 0, y: 0, w, h: 3 });
+    await powos.home.addPanel("recents", pg, { x: lowerX, y: 3, w: lowerW, h: 3 });
+    S.page.value = 0;
+    await G.until(() => placed().length === 2 && G.still());
+    await G.steady(() => placed().map((t) => t.querySelector(":scope > .tile")?.getBoundingClientRect().toJSON()));
+    return placed()
+      .map((t) => ({ t, cell: t.getBoundingClientRect(), face: t.querySelector(":scope > .tile").getBoundingClientRect() }))
+      .sort((p, q) => p.cell.top - q.cell.top);
+  };
+  const cls = (x) => x.t.classList.contains("joined");
+  const seam = () => !!document.querySelector(".page:not(.away) .seam");
+  // M1/M2 equal: one surface.
+  const equal = ([A, B]) => [
+    cls(A) && cls(B) ? "" : "equal pair: not merged (no .joined)",
+    near(A.face.left, B.face.left) && near(A.face.right, B.face.right) ? "" : "equal pair: faces not one width",
+    near(A.face.bottom, B.face.top) ? "" : `equal pair: ${Math.round(B.face.top - A.face.bottom)} px between the faces (not one seamless surface)`,
+    seam() ? "equal pair: a seam piece between faces that meet" : "",
+  ];
+  // M1 unequal: separate, each its own width, the normal gap.
+  const unequal = ([A, B]) => [
+    cls(A) || cls(B) ? "unequal pair: merged (.joined) though the edges differ" : "",
+    near(B.face.left, A.face.left) ? "unequal pair: the narrow tile stretched to the wide one's width" : "",
+    near(B.face.top - A.face.bottom, 2 * half) ? "" : `unequal pair: ${Math.round(B.face.top - A.face.bottom)} px between the faces, not the normal gap ${2 * half}`,
+    seam() ? "unequal pair: a seam piece joins them" : "",
+  ];
+  const fails = equal(await lay(0, w));
+  fails.push(...unequal(await lay(w - 3, 3)));
+  return fails.filter(Boolean);
+}
+
+/** In the page: edit-mode widget resize R1-R3 (grid.tsx ResizeHandle, Actions). A widget under another one, selected:
+ * R1 its corner handle, dragged two cells right and one down, resizes it; R2 to whole cells (the drop lands off the
+ * line, the span snaps); R3 its actions pill (remove) stays clear of the widget above. */
+async function editResizeCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const G = window.__gw;
   const h = await powos.home.get();
   for (const i of h.items) await powos.home.remove(i.key);
-  const w = Math.min(6, h.columns || 6);
-  // Home's first page (pages are 1-based; the wide layout maps it to the left half).
   const pg = h.pages[0] ?? 1;
-  await powos.home.addPanel("agents", pg, { x: 0, y: 0, w, h: 3 });
-  await powos.home.addPanel("recents", pg, { x: w - 3, y: 3, w: 3, h: 3 });
+  await powos.home.addPanel("agents", pg, { x: 0, y: 0, w: 4, h: 2 });
+  await powos.home.addPanel("recents", pg, { x: 0, y: 2, w: 2, h: 2 });
   S.page.value = 0;
-  // Both laid out and joined, at rest (the tiles' own moves and the seams after them).
-  const placed = () => [...document.querySelectorAll(".page:not(.away) .home-tile")];
-  await window.__gw.until(() => placed().length === 2 && placed().every((t) => t.classList.contains("joined")) && window.__gw.still());
-  await window.__gw.steady(() => placed().map((t) => t.querySelector(":scope > .tile")?.getBoundingClientRect().toJSON()));
-  const half = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--gap")) || 8) / 2;
-  const tiles = [...document.querySelectorAll(".page:not(.away) .home-tile")];
-  if (tiles.length !== 2) return [`${tiles.length} tiles on the page, not the 2 placed`];
-  const [A, B] = tiles.map((t) => ({ t, cell: t.getBoundingClientRect(), face: t.querySelector(":scope > .tile").getBoundingClientRect() })).sort((p, q) => p.cell.top - q.cell.top);
-  const near = (a, b) => Math.abs(a - b) <= 1;
-  // Outer edges: half a gutter in from the cell box, as a single tile's. The shared side: the faces meet (a seam).
-  const inset = (x) => ["top", "right", "bottom", "left"].filter((k) => !near(Math.abs(x.face[k] - x.cell[k]), half));
-  return [
-    !A.t.classList.contains("joined") || !B.t.classList.contains("joined") ? "the two aren't merged (no .joined)" : "",
-    near(A.face.left, B.face.left) && near(A.face.right, B.face.right) ? "" : `not one width: left edges differ by ${Math.round(A.face.left - B.face.left)} px, right by ${Math.round(A.face.right - B.face.right)} px`,
-    ...inset(A).filter((k) => k !== "bottom").map((k) => `the wide tile's ${k} edge is off its grid line`),
-    ...inset(B).filter((k) => k !== "top").map((k) => `the stacked tile's ${k} edge is off its grid line`),
-    near(A.face.bottom, A.cell.bottom) && near(B.face.top, B.cell.top) && near(A.cell.bottom, B.cell.top) ? "" : `the shared side isn't a seam on the row line (${Math.round(B.face.top - A.face.bottom)} px between the faces)`,
-    document.querySelector(".page:not(.away) .seam.fillet") ? "a rounded inner corner in a straight stack (it should be one rectangle)" : "",
-  ].filter(Boolean);
+  const tiles = () => [...document.querySelectorAll(".page:not(.away) .home-tile")].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+  await G.until(() => tiles().length === 2 && G.still());
+  const key = tiles()[1].dataset.key;
+  S.editing.value = true;
+  S.selected.value = key;
+  const lower = () => document.querySelector(`.home-tile[data-key="${CSS.escape(key)}"]`);
+  await G.until(() => lower()?.querySelector(".resize-handle") && lower()?.querySelector(".tile-actions"));
+  // R3: the pill against the widget above.
+  const pillOver = () => {
+    const above = tiles()[0].querySelector(":scope > .tile").getBoundingClientRect();
+    const pill = lower().querySelector(".tile-actions").getBoundingClientRect();
+    const over = pill.top < above.bottom && pill.bottom > above.top && pill.left < above.right && pill.right > above.left;
+    return over ? `R3: the actions pill covers the widget above (pill top ${Math.round(pill.top)}, widget above ends ${Math.round(above.bottom)})` : "";
+  };
+  // R1/R2: drag the handle ~2.4 cells right and ~1.3 down from the tile's corner.
+  const drag = (cw, ch) => {
+    const hd = lower().querySelector(".resize-handle");
+    const hr = hd.getBoundingClientRect();
+    const ev = (type, x, y, buttons) => hd.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 7, clientX: x, clientY: y, buttons, isPrimary: true }));
+    const [x0, y0] = [hr.left + hr.width / 2, hr.top + hr.height / 2];
+    ev("pointerdown", x0, y0, 1);
+    for (let k = 1; k <= 6; k++) ev("pointermove", x0 + (2.4 * cw * k) / 6, y0 + (1.3 * ch * k) / 6, 1);
+    ev("pointerup", x0 + 2.4 * cw, y0 + 1.3 * ch, 0);
+  };
+  const cellOf = async () => (await powos.home.get()).items.find((i) => i.key === key)?.cell;
+  const fails = [pillOver()];
+  const b0 = lower().getBoundingClientRect();
+  drag(b0.width / 2, b0.height / 2);
+  await G.until(async () => (await cellOf())?.w !== 2);
+  const cell = await cellOf();
+  if (cell?.w !== 4 || cell?.h !== 3) fails.push(`R1/R2: dragged the handle +2.4/+1.3 cells; the widget is ${cell?.w}x${cell?.h}, not 4x3`);
+  await G.until(() => G.still());
+  const b1 = lower()?.getBoundingClientRect();
+  const onCells = b1 && Math.abs(b1.width - 2 * b0.width) <= 2 && Math.abs(b1.height - 1.5 * b0.height) <= 2;
+  if (!onCells) fails.push(`R2: the tile is ${Math.round(b1?.width)}x${Math.round(b1?.height)} px, not on whole cells (${Math.round(2 * b0.width)}x${Math.round(1.5 * b0.height)})`);
+  S.selected.value = null;
+  S.editing.value = false;
+  return fails.filter(Boolean);
 }
 
 /**
@@ -10165,12 +10230,14 @@ try {
       }),
     );
   }
-  // Merged tiles in a straight stack (grid.tsx groupSpans/joins; the user's steam-over-fetch, 2026-10-28): a wide widget
-  // over a half-width one shows as ONE rectangle - one width, outer edges on the grid lines, the shared side a seam, no
-  // inner corner. Folded and unfolded.
+  // Merged widgets M1-M2 (grid.tsx joins; the user's 2026-10-28 "looks ugly af if the widgets arent the same width"):
+  // an equal-width stack is one seamless surface, an unequal one two separate tiles with the normal gap. Folded and
+  // unfolded. And edit-mode resize R1-R3 (corner handle resizes, to whole cells, the actions pill clear of the widget above).
   if (process.env.SHELL_PAGES !== "0")
-    for (const [label, viewport] of [["folded", { width: 412, height: 915 }], ["unfolded", { width: 900, height: 1000 }]])
+    for (const [label, viewport] of [["folded", { width: 412, height: 915 }], ["unfolded", { width: 900, height: 1000 }]]) {
       runs.push(open(browser, `${ORIGIN}/index.html`, `joins-${label}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(joinsCheck))));
+      runs.push(open(browser, `${ORIGIN}/index.html`, `edit-resize-${label}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(editResizeCheck))));
+    }
   // An "at work" session's terminal at the screen's geometry (ui/terminal.tsx, session.tsx): folded and unfolded.
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])

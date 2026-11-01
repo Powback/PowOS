@@ -992,6 +992,8 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   padding: 4px;
   background: var(--color-surface);
 }
+/* Something above (or the page's top row): inside the tile's own top edge, never over the widget above (grid.tsx roomAbove). */
+.tile-actions.inside { bottom: auto; top: 4px; left: 4px; max-width: calc(100% - 8px); flex-wrap: wrap; }
 .tile-actions button { padding: 8px 12px; border-radius: 8px; }
 .tile-actions .danger { color: var(--color-red); }
 

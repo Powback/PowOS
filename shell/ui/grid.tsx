@@ -138,89 +138,20 @@ const searchHere = (i: HomeItem) => i.key === SEARCH_KEY && searchInDock.value;
 const own = (i: HomeItem): Cell => (i.resizable ? i.cell! : { ...i.cell!, w: 1, h: 1 });
 
 /**
- * A tile's cell as shown and occupied: its own, or - a member of a straight merged stack or row - the group's common
- * span. A stack (members one above another) takes one width, a row one height, so the group's glass is one clean
- * rectangle instead of ragged edges (2026-10-28 "the widget combiner looks ugly af if the widgets arent the same
- * width"). Display only: the stored cell stays each member's own span, so unmerging shows it at that span again.
- * Spans are whole cells, so box() puts the edges on the grid's lines with the gutter exactly as for a single tile.
+ * A tile's cell as shown and occupied: its own span. Merged widgets are never stretched to a common width: two tiles
+ * merge only where their touching edges match exactly (joins, M1 of 2026-10-28 "the widget combiner looks ugly af if
+ * the widgets arent the same width"); an unequal pair stays two separate tiles with the normal gap.
  */
-const shown = (i: HomeItem): Cell => groupSpans.value.get(i.key) ?? own(i);
-
-// WG1: a web window dragged on home fills the free region around the finger (webwindows.tsx regionAt): every placed
-// tile's cells, as shown, bound it; where the grid sits on screen.
-provideHomeGrid((n) => {
-  const g = geometry.peek();
-  return { cols: home.value.columns, rows: g.rows, taken: itemsOn(n).map(shown), left: g.left + g.pad, top: g.top + g.pad, cellW: g.cellW, cellH: g.cellH };
-});
-
-/** Do boxed cells [a] and [b] touch edge to edge (over part of it at least)? "v": one above the other, "h": side by side. */
-function touch(a: Cell, b: Cell): "v" | "h" | null {
-  const xo = a.x < b.x + b.w && b.x < a.x + a.w;
-  const yo = a.y < b.y + b.h && b.y < a.y + a.h;
-  if (xo && (a.y + a.h === b.y || b.y + b.h === a.y)) return "v";
-  if (yo && (a.x + a.w === b.x || b.x + b.w === a.x)) return "h";
-  return null;
-}
+const shown = (i: HomeItem): Cell => own(i);
 
 /**
- * Each straight group's members' common span, per page (the carried tile is out of every group while it's carried).
- * A stack takes one width even when its narrower member sits flush on one side (steam 6 wide over fetch on its right
- * half becomes one 6-wide shape); a row one height. Only a group that joins both ways (a block or a T) keeps its
- * members' own spans, seams and rounded inner corners. A stretched member's shared side is then covered whole, a seam
- * (its face meets the neighbour's on the row line) - its outer edges stay half a gutter in, as a single tile's. The
- * common span never covers another tile and stays inside the grid.
+ * Do cells [a] and [b] merge (M1)? Stacked, the same columns exactly; side by side, the same rows exactly - a shared
+ * edge covered whole on both sides. Touching over part of an edge only (steam 6 wide over fetch 3 wide) isn't a merge.
  */
-const groupSpans = computed(() => {
-  const out = new Map<string, Cell>();
-  if (typeof document !== "undefined" && document.documentElement.dataset.mode === "desktop") return out;
-  const lifted = carry.value?.item?.key;
-  const all = [...home.value.items, ...creationWidgets.value.items].filter((i) => i.cell && i.key !== lifted && !searchHere(i));
-  const lim = { cols: home.value.columns, rows: geometry.value.rows || Infinity };
-  for (const n of new Set(all.map((i) => i.page))) {
-    const on = all.filter((i) => i.page === n);
-    const tiles = on.filter(boxed);
-    const seen = new Set<string>();
-    for (const start of tiles) if (!seen.has(start.key)) stretch(groupOf(start, tiles, seen), on, out, lim);
-  }
-  return out;
-});
-
-/** The merged group [start] is in (boxed tiles reachable edge to edge, marked [seen]) and how its members meet. */
-function groupOf(start: HomeItem, tiles: HomeItem[], seen: Set<string>) {
-  const members: HomeItem[] = [];
-  const ways = new Set<string>();
-  const todo = [start];
-  seen.add(start.key);
-  while (todo.length) {
-    const a = todo.pop()!;
-    members.push(a);
-    for (const [b, t] of touching(a, tiles)) {
-      ways.add(t);
-      if (!seen.has(b.key)) (seen.add(b.key), todo.push(b));
-    }
-  }
-  return { members, ways };
-}
-
-/** The tiles of [tiles] touching [a] edge to edge, and how. */
-const touching = (a: HomeItem, tiles: HomeItem[]) =>
-  tiles.flatMap((b) => {
-    const t = a === b ? null : touch(own(a), own(b));
-    return t ? [[b, t] as const] : [];
-  });
-
-/** A straight stack or row (joined one way only): each member's common span into [out], if one fits beside the page's other tiles. */
-function stretch(g: { members: HomeItem[]; ways: Set<string> }, on: HomeItem[], out: Map<string, Cell>, lim: { cols: number; rows: number }) {
-  if (g.members.length < 2 || g.ways.size !== 1) return;
-  // Along the common side: x/w for a stack, y/h for a row.
-  const [p, s, max] = g.ways.has("v") ? (["x", "w", lim.cols] as const) : (["y", "h", lim.rows] as const);
-  const cells = g.members.map(own);
-  // Groups already stretched count at their common span: two groups never stretch into the same cells.
-  const others = on.filter((i) => !g.members.includes(i)).map((i) => out.get(i.key) ?? own(i));
-  const a = Math.max(0, Math.min(...cells.map((c) => c[p])));
-  const b = Math.min(max, Math.max(...cells.map((c) => c[p] + c[s])));
-  if (b <= a || !cells.every((c) => others.every((o) => !overlaps({ ...c, [p]: a, [s]: b - a }, o)))) return;
-  g.members.forEach((m, k) => out.set(m.key, { ...cells[k], [p]: a, [s]: b - a }));
+function matches(a: Cell, b: Cell): boolean {
+  const stacked = a.x === b.x && a.w === b.w && (a.y + a.h === b.y || b.y + b.h === a.y);
+  const beside = a.y === b.y && a.h === b.h && (a.x + a.w === b.x || b.x + b.w === a.x);
+  return stacked || beside;
 }
 
 type Aim = { group: string; page: number; cell?: undefined } | { cell: Cell; page: number; group?: undefined };
@@ -496,10 +427,10 @@ function coveredCells(at: Map<string, string>, key: string, e: { x: number; y: n
 }
 
 /**
- * Merged per shared span (grid.tsx seams): a side covered WHOLE by neighbours reaches half the gutter towards them
- * (--jX 1); a side touched over part of it keeps its edge where an unjoined one is (the user's steam-over-fetch: the
- * wide tile's free half stays level with its neighbours), and the gutter along just the shared span is filled by a
- * seam piece, with a rounded inner corner where the group turns. Corners are square where a neighbour continues.
+ * Merged per shared side, [at] holding [i] and only its exact-edge neighbours (joins, M1): a side covered WHOLE by
+ * one reaches half the gutter towards it (--jX 1), so the two faces meet as one surface; a side touched over part of
+ * it keeps its edge where an unjoined one is (seams then fill the gutter along the shared span, with a rounded inner
+ * corner where a group turns). Corners are square where a neighbour continues.
  */
 function joinOf(at: Map<string, string>, i: HomeItem): Record<string, number> | null {
   const c = shown(i);
@@ -526,15 +457,15 @@ function joinOf(at: Map<string, string>, i: HomeItem): Record<string, number> | 
 
 /**
  * A page's items and their joins, the very same objects while nothing they come from changed (the items themselves,
- * groupSpans, the mode): Pages re-renders on every page turn, and with a fresh array and Map each time every page's
+ * the mode): Pages re-renders on every page turn, and with a fresh array and Map each time every page's
  * PageGlass, GroupShadow, Seams and Tile rendered again with equal content (render scan, 10-30: about half their
  * renders in a page swipe needless, PageGlass ~9 ms each in the headless unfolded home).
  */
-const pageCache = new Map<number, { items: HomeItem[]; joined: Map<string, Record<string, number>>; mode?: string; spans: unknown }>();
+const pageCache = new Map<number, { items: HomeItem[]; joined: Map<string, Record<string, number>>; mode?: string }>();
 function pageItems(n: number) {
-  const items = itemsOn(n), mode = document.documentElement.dataset.mode, spans = groupSpans.value, c = pageCache.get(n);
-  if (c && c.mode === mode && c.spans === spans && c.items.length === items.length && c.items.every((x, i) => x === items[i])) return c;
-  const next = { items, joined: joins(items), mode, spans };
+  const items = itemsOn(n), mode = document.documentElement.dataset.mode, c = pageCache.get(n);
+  if (c && c.mode === mode && c.items.length === items.length && c.items.every((x, i) => x === items[i])) return c;
+  const next = { items, joined: joins(items), mode };
   pageCache.set(n, next);
   return next;
 }
@@ -542,10 +473,14 @@ function pageItems(n: number) {
 function joins(items: HomeItem[]): Map<string, Record<string, number>> {
   // The desktop's home (powos-shell under Plasma): widgets stay separate surfaces, like plasmoids - never merged.
   if (document.documentElement.dataset.mode === "desktop") return new Map();
-  const at = cellOwners(items);
+  const tiles = items.filter(boxed);
   const out = new Map<string, Record<string, number>>();
-  for (const i of items.filter(boxed)) {
-    const j = joinOf(at, i);
+  for (const i of tiles) {
+    // Only the neighbours whose touching edge matches i's exactly (M1): any other touching tile is a separate one,
+    // the normal gap between them, no seam or square corner towards it.
+    const mates = tiles.filter((o) => o !== i && matches(shown(i), shown(o)));
+    if (!mates.length) continue;
+    const j = joinOf(cellOwners([i, ...mates]), i);
     if (j) out.set(i.key, j);
   }
   return out;
@@ -653,7 +588,7 @@ function seams(items: HomeItem[], joined: Map<string, Record<string, number>>, l
   for (const A of on)
     for (const B of on)
       for (const vertical of [false, true])
-        if (A !== B && meets(shown(A), shown(B), vertical)) out.push(...seamPieces(face.get(A.key)!, face.get(B.key)!, vertical, ctx));
+        if (A !== B && matches(shown(A), shown(B)) && meets(shown(A), shown(B), vertical)) out.push(...seamPieces(face.get(A.key)!, face.get(B.key)!, vertical, ctx));
   return out;
 }
 
@@ -850,15 +785,27 @@ function Tile({ item, join }: { item: HomeItem; join?: Record<string, number> })
       {item.kind === "panel" && item.name === "search" && <SearchPanel />}
       {item.kind === "app" && <AppFace appKey={item.app!} label={item.label} />}
       {item.kind === "folder" && <FolderFace item={item} />}
-      {isSelected && !lifted && <Actions item={item} />}
+      {isSelected && !lifted && <Actions item={item} inside={!roomAbove(item)} />}
       {isSelected && !lifted && item.resizable && <ResizeHandle item={item} />}
     </div>
   );
 }
 
-function Actions({ item }: { item: HomeItem }) {
+/**
+ * Is the row just above [item] free (no tile over any of its columns, and not the page's top row, under the status
+ * bar)? Its edit actions sit there then; otherwise inside its own top edge, so the pill never covers the widget above
+ * (R3, 2026-10-28 "the remove pill covers the widget above").
+ */
+function roomAbove(item: HomeItem): boolean {
+  const c = shown(item);
+  if (c.y === 0) return false;
+  const row = { x: c.x, y: c.y - 1, w: c.w, h: 1 };
+  return !itemsOn(item.page).some((o) => o.key !== item.key && overlaps(shown(o), row));
+}
+
+function Actions({ item, inside }: { item: HomeItem; inside: boolean }) {
   return (
-    <div class="tile-actions tile" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
+    <div class={`tile-actions tile ${inside ? "inside" : ""}`} onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
       {item.appWidget?.reconfigurable && (
         <button
           onClick={() => {
@@ -909,7 +856,7 @@ function appWidgetMin(item: HomeItem): [number, number] {
 /** Drag the corner: the widget grows or shrinks by whole cells, never under its minimum or onto another tile. */
 function ResizeHandle({ item }: { item: HomeItem }) {
   const [size, setSize] = useState<Cell | null>(null);
-  // From the span it shows (a straight group's member: the group's), that's the corner under the finger.
+  // From the span it shows, that's the corner under the finger.
   const cell0 = shown(item);
   // An Android widget: its provider's minimum, and only the sides its resize mode moves.
   const aw = item.appWidget;
