@@ -42,7 +42,9 @@ class WebWindowsReconcileTest {
     fun reconcileListensAndDrops() {
         val src = File("src/main/kotlin/dev/omalauncher/shell/WebWindows.kt").readText()
         assertTrue("no task stack listener", src.contains("FreeformTasks.listen { main.post { scheduleReconcile() } }"))
-        assertTrue("reconcile no longer checks each window", src.substringAfter("private fun reconcile() {").substringBefore("\n    }\n").contains("checkOrphan"))
+        // reconcile() posts its work to [io]: reconcileNow (36cd626e) holds the per-window checks.
+        assertTrue("reconcile no longer hands its windows to reconcileNow", src.substringAfter("private fun reconcile() {").substringBefore("\n    }\n").contains("reconcileNow(ws, tasked)"))
+        assertTrue("reconcile no longer checks each window", src.substringAfter("private fun reconcileNow(").substringBefore("\n    }\n").contains("checkOrphan"))
         val confirm = src.substringAfter("private fun confirmOrphan(w: Win) {").substringBefore("\n    }\n")
         assertTrue("confirmOrphan no longer reads the display's tasks", confirm.contains("tasksOn(w.displayId)"))
         assertTrue("confirmOrphan no longer closes the orphan through drop", confirm.contains("drop(w)"))
@@ -68,7 +70,7 @@ class WebWindowsReconcileTest {
         assertTrue("SystemFloat's hand-over must give a window's own task back to it, never a second window",
             bridge.substringAfter("fun toWebWindow(id: Int): Boolean {").substringBefore("\n    }\n").contains("WebWindows.followTask(id)"))
         val src = File("src/main/kotlin/dev/omalauncher/shell/WebWindows.kt").readText()
-        assertTrue("reconcile no longer follows before the orphan check", src.substringAfter("private fun reconcile() {").substringBefore("\n    }\n").contains("follow(it, running)"))
+        assertTrue("reconcile no longer follows before the orphan check", src.substringAfter("private fun reconcileNow(").substringBefore("\n    }\n").contains("!follow(it, running)) checkOrphan(it)"))
     }
 
     /** MX1 (11-01 15:38: "it's going fullscreen for a sec and then it's back to desktop"): a launch check never pulls a full-screen / minimised app back. */
