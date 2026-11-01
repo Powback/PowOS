@@ -4359,6 +4359,107 @@ async function aiTermsFleet(body) {
 }
 
 /**
+ * The Friction page (ui/aifriction.tsx; the user, 2026-11-01 22:41 / 23:01: "fricticon page is trash" - raw log lines
+ * with hashes, exit codes, file names and kebab tags in one box). With ~20 logged rows: every collapsed row is a plain
+ * line (no path, no "f123" id, no hash, no shell command or flag), the rows and the areas worst first (P0 before P1
+ * before the rest), repeats merged, details only after a tap, nothing past the screen's edge.
+ */
+async function frictionSetup() {
+  const G = window.__gw;
+  const [S, B] = await Promise.all([G.mod("./state.ts"), G.mod("./ui/aiboard.tsx")]);
+  const now = Date.now();
+  const r = ([n, area, kind, title, count, ageMin], more = {}) => ({ id: `f${n}`, area, kind, title, count, status: "open", last: now - ageMin * 6e4, first: now - ageMin * 6e4 - 864e5, details: `${title} - the whole log is in /home/powos/logs/run-${n}.log`, repro: `bin/powos ship --apk --force  # f${n}`, evidence: `/tmp/powos/evidence-${n}.png`, by: "coder", fixCommit: "", fixNote: "", fixedAt: 0, reopened: 0, task: "", ...more });
+  window.__frWas = [B.friction.value, B.board.value, B.boardSeen.value];
+  B.board.value = [{ id: "gate-fr-task", title: "Shell checks: retry when the Mac is busy", owner: "coder", status: "working", note: "", project: "", created: now - 9e5, updated: now - 6e4, done: 0, severity: 2 }];
+  B.friction.value = [
+    r([30, "gate", "flaky-check", "shell gate failed while the Mac's load was high", 543, 0], { task: "gate-fr-task" }),
+    r([41, "permissions", "refused", "Bash refused by the permission system: cd", 14, 1440]),
+    r([42, "permissions", "refused", "Bash refused by the permission system: Run", 3, 2880]),
+    r([51, "ship", "refused", "ship 68221469a (apk) FAILED rc 5: ship-apk: REFUSED - build-app.sh failed (above; whole log...", 9, 2880]),
+    r([52, "ship", "refused", "ship d91d143ff (apps:app-api) FAILED rc 1: install.sh: refused - the gate failed (above). Fix it, or --force to install anyway.", 9, 5760]),
+    r([53, "ship", "broken-tool", "ship 34ef9a7f1 (apk) FAILED rc 6:", 4, 49]),
+    r([54, "ship", "refused", "ship cbeb91c05 (apps:app-api health) FAILED rc 1: install.sh: refused - the gate failed (above).", 4, 5760]),
+    r([55, "ship", "refused", "ship 1d3a80acb (shell) FAILED rc 2: push.sh: refused", 40, 120]),
+    r([61, "verify", "flaky-check", "check e2e-appapi was SKIP: ENV: waiting for ship of apps (live 1d3a80acb, origin 542dbf213)", 3, 180]),
+    r([62, "verify", "flaky-check", "check launcher-scroll FAIL on phone: timeout after 30s", 7, 300]),
+    r([71, "adb", "broken-tool", "adb shell su -c dumpsys window: device offline", 61, 20]),
+    r([72, "adb", "slow", "adb push of the apk took 4 minutes", 2, 600]),
+    r([81, "worktree", "unclear-rule", "tools/agents/worktree.sh new: which base branch?", 5, 900]),
+    r([82, "git", "broken-tool", "git push -u origin HEAD rejected: non-fast-forward", 12, 240]),
+    r([83, "git", "other", "x521 merge conflict in shell/ui/shell.css", 2, 1200]),
+    r([91, "stdb", "slow", "spacetime publish took 9 minutes on agents module", 3, 2000]),
+    r([92, "board", "unclear-rule", "task set --step overwrote the note", 1, 3000]),
+    r([93, "build", "broken-tool", "apps/build.sh: esbuild crashed with SIGKILL (out of memory)", 6, 400]),
+    r([94, "phone", "slow", "the WebView took 40 s to boot after an install", 18, 90]),
+    r([95, "gate", "flaky-check", "design-lint-contrast failed once then passed", 2, 60], { status: "fixed", fixCommit: "abc1234def", fixNote: "the contrast probe waits for fonts", fixedAt: now - 36e5 }),
+  ];
+  B.boardSeen.value = true;
+  S.page.value = -1;
+  S.aiScreen.value = "friction";
+  return !!(await G.until(() => document.querySelectorAll(".afr .afr-row").length >= 8, 4000));
+}
+
+/** In the page: each collapsed row's text, severity, area order, and anything past the screen's right edge. */
+function frictionFacts() {
+  const secs = [...document.querySelectorAll(".afr > .afr-sec")];
+  const areas = secs.map((s) => ({ name: s.getAttribute("aria-label"), sevs: [...s.querySelectorAll(".afr-item")].map((i) => Number(i.dataset.sev)) }));
+  const rows = [...document.querySelectorAll(".afr .afr-row")].map((b) => b.textContent.replace(/\s+/g, " ").trim());
+  const over = [...document.querySelectorAll(".afr, .afr *")].filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.right > innerWidth + 1; }).map((e) => e.className).slice(0, 3);
+  return { areas, rows, over, details: document.querySelectorAll(".afr .afr-detail").length, chips: document.querySelectorAll(".afr .ais-sev").length };
+}
+
+const FR_RAW = [
+  [/\S*\/\S*/, "a path"],
+  [/\bf\d+\b|\bx\d+\b/, "an id"],
+  [/\b[0-9a-f]{7,40}\b/, "a hash"],
+  [/\brc ?\d+\b|(^|\s)--?[a-z]|\.(sh|py|ts|tsx|mjs|log|png)\b|\b(adb|git|bin|powos|sudo|su -c|cd)\s/i, "a shell command"],
+  [/\bnow ago\b/, '"now ago"'],
+];
+
+/** Collapsed rows with raw tokens in them. */
+const frictionRawFails = (rows) => rows.flatMap((t) => FR_RAW.filter(([re]) => re.test(t)).map(([, what]) => `a collapsed row shows ${what}: "${t}"`));
+
+/** Rows and areas not worst first, the P0 not first, the failed updates not merged. */
+function frictionOrderFails(areas) {
+  const open = areas.filter((a) => a.name !== "Fixed recently");
+  const fails = open.filter((a) => a.sevs.some((s, i) => i && s > a.sevs[i - 1])).map((a) => `"${a.name}" isn't worst first (${a.sevs})`);
+  const firsts = open.map((a) => a.sevs[0]);
+  if (firsts.some((s, i) => i && s > firsts[i - 1])) fails.push(`the areas aren't worst first (${open.map((a) => `${a.name} ${a.sevs[0]}`).join(", ")})`);
+  if (open[0]?.sevs[0] !== 2) fails.push("the P0 (543x, its task P0) isn't first");
+  const ship = open.find((a) => a.name === "Updates");
+  if (!ship || ship.sevs.length > 3) fails.push(`the six failed updates aren't merged per app (${ship?.sevs.length ?? 0} rows)`);
+  return fails;
+}
+
+function frictionFails(f, label) {
+  return [
+    ...failsOf([
+      [f.rows.length >= 8, `only ${f.rows.length} rows`],
+      [!f.details, `${f.details} rows show details before a tap`],
+      [!f.over.length, `past the right edge: ${f.over.join(", ")}`],
+    ]),
+    ...frictionRawFails(f.rows),
+    ...frictionOrderFails(f.areas),
+  ].map((x) => `${label}: ${x}`);
+}
+
+async function frictionCheck(page, label) {
+  if (!(await page.evaluate(frictionSetup))) return [`${label}: the Friction page showed no rows`];
+  await page.evaluate(() => window.__gw.frames(20));
+  const fails = frictionFails(await page.evaluate(frictionFacts), label);
+  await page.screenshot({ path: `/cache/friction-${label}.png` });
+  await page.evaluate(() => document.querySelector(".afr .afr-row")?.click());
+  if (!(await page.evaluate(() => window.__gw.until(() => document.querySelector(".afr .afr-detail"), 2000)))) fails.push(`${label}: a tap opened no details`);
+  await page.evaluate(() => window.__gw.frames(20));
+  await page.screenshot({ path: `/cache/friction-${label}-open.png` });
+  await page.evaluate(async () => {
+    const B = await window.__gw.mod("./ui/aiboard.tsx");
+    [B.friction.value, B.board.value, B.boardSeen.value] = window.__frWas;
+  });
+  return fails;
+}
+
+/**
  * The terminals from the AI page (the user, 11-01 16:57: "There's no terminal option anymore"): a session's terminal in
  * at most 2 taps - unfolded via the Devices tab (its device card's sessions) and via the Agents tab (a card's "Open
  * terminal"; the tab also lists every host's sessions), folded via the Agents tab (its host/session list; a third tap
@@ -10263,6 +10364,10 @@ try {
   // The terminals from the AI page in at most 2 taps, both modes (the user, 11-01 16:57: "There's no terminal option anymore").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-terms", { width: 821, height: 883 }).then((r) => whenReady(r, () => aiTermsCheck(r.page))));
+  // The Friction page in plain words per area, worst first, details on a tap (the user, 11-01 22:41: "fricticon page is trash").
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `friction-${label}`, viewport).then((r) => whenReady(r, () => frictionCheck(r.page, label))));
   // An agent's page is its conversation, folded and unfolded (the user, 11-01 16:45 / 17:10; ui/agents.tsx Convo).
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
