@@ -728,6 +728,20 @@ class HygieneCliTest(BoardTest):
         self.assertEqual(len(self.mails_sent()), 1)
         self.assertLessEqual(self.mails_sent()[0].count("\n- "), 3 * cli.TOP_N)
 
+    def test_sweep_never_acts_on_manager_tasks(self):
+        # The manager builds some tasks itself: a PASS, a stalled owner or a twin title never closes/re-owns/merges them.
+        self.run_cli("task", "add", "Progress widget", "--id", "mgr", "--owner", "manager")
+        self.run_cli("check", "set", "mgr", "j1", "PASS", "--name", "mgr-check")
+        FakeStdb.db["work"]["mgr-twin"] = dict(FakeStdb.db["work"]["mgr"], id="mgr-twin", created=FakeStdb.db["work"]["mgr"]["created"] + 5)
+        for w in FakeStdb.db["work"]:
+            self.old(w)
+        self.run_cli("sweep")
+        W = FakeStdb.db["work"]
+        self.assertNotEqual(W["mgr"]["status"], "done", "a manager task is never closed by the sweep")
+        self.assertNotEqual(W["mgr-twin"]["status"], "done", "nor merged")
+        self.assertEqual(W["mgr"]["owner"], "manager", "nor re-owned")
+        self.assertIn("Manager's own (left alone)", "".join(self.mails_sent()))
+
     def test_scheduled_entry_point_runs_the_sweep(self):
         """board-sweep.sh (launchd com.powos.board-sweep, every 10 min) runs `powos agents sweep`: severity, dead-end
         fixes and quiet friction all live in that one verb (sweep -> sweep_decide), so the schedule runs all three."""

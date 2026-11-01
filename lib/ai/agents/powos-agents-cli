@@ -1514,6 +1514,11 @@ def sweep_decide(ws, frictions, checks, asks, now_ms):
     Everything else is "still valid" and only counted/listed (never closed without evidence)."""
     out = []
     open_ = [w for w in ws if w.get("status") != "done"]
+    # The manager's own tasks (it builds some itself, e.g. the progress widget): never re-owned, closed, merged or
+    # trimmed - only listed under "manager" in the mail (the manager, 11-01).
+    mine = [w for w in open_ if (w.get("owner") or "") == "manager"]
+    for w in mine:
+        out.append({"kind": "manager", "id": w["id"], "why": "manager-owned: left alone", "calls": [], "quiet": True})
     by = checks_by_task(checks)
     for w in open_:
         ev = evidence(w["id"], frictions, checks, asks)
@@ -1522,6 +1527,8 @@ def sweep_decide(ws, frictions, checks, asks, now_ms):
         if (ev["score"], ev["user"], sev) != (int(w.get("_score0") or 0), int(w.get("_user0") or 0), int(w.get("_sev0") or 0)):
             out.append({"kind": "score", "id": w["id"], "why": f"score {ev['score']} -> {SEV_NAMES[sev] or 'none'}",
                         "calls": [("work_score", w["id"])], "quiet": True})
+    # Scored above like every task; from here on the manager's own are left alone.
+    open_ = [w for w in open_ if (w.get("owner") or "") != "manager"]
     # leaked plan steps: a planned step that is (exactly) a step of another open task
     texts = {}
     for w in open_:
@@ -1672,6 +1679,9 @@ def sweep(now_ms=None, mail=True, to="coder", full=False):
     if full:
         digest = (digest or digest_text(open_, [], [], [], len(orph), len(seen["asks"]), loud, passes, before, after,
                                         stale_q, sorted(orph, key=rank_key), live_fr, force=True)) + full_text(open_, decided)
+    mgr = [d["id"] for d in decided if d["kind"] == "manager"]
+    if digest and mgr:   # the manager's own tasks: listed, never acted on (the manager, 11-01)
+        digest += f"\n\nManager's own (left alone): {len(mgr)}: " + ", ".join(mgr[:10]) + (" ..." if len(mgr) > 10 else "")
     if digest and mail:
         r = subprocess.run((os.environ.get("POWOS_COMMS_CMD") or "powos comms").split()
                            + ["send", to, "-", "--from", "board-sweep"], input=digest, text=True, capture_output=True)
