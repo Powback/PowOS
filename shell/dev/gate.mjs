@@ -32,6 +32,8 @@ const READY_MS = Number(process.env.READY_MS || 8000);
 /** Every puppeteer-side wait (launch, newPage's target wait, goto, waitFor*): its fixed 30 s defaults scaled with the
  * load like READY_MS (f30) - a starved Mac (load ~15 from training runs) timed out before any case ran. */
 const PUPPETEER_MS = Math.max(30000, READY_MS * 2);
+const RUN_MS = Number(process.env.GATE_RUN_MS) || 900000;
+const SCENE_MS = Math.max(Number(process.env.GATE_SCENE_MS) || 90000, PUPPETEER_MS * 2);
 /** Names the startup call that failed: a bare "Timed out after waiting 30000ms" (rxjs, util.js) says nothing (f30). */
 const step = (name, promise) => promise.catch((e) => { e.message = `[${name}] ${e.message}`; throw e; });
 /** After ready: errors this soon after the first render are boot errors too (an effect throwing, a lazy import). */
@@ -9873,7 +9875,8 @@ const claimTickets = () => opening.splice(0);
 async function releaseTickets(tickets) {
   for (const t of tickets) {
     await t.opened.catch(() => {});
-    if (t.context) await t.context.close().catch(() => {});
+    // Bounded: a wedged renderer's close must not hold its scene slot (every scene queued behind it) forever.
+    if (t.context) await Promise.race([t.context.close().catch(() => {}), new Promise((r) => setTimeout(r, 15000))]);
     if (t.slot) sceneDone();
   }
 }
@@ -10184,6 +10187,20 @@ browser.waitForTarget = (predicate, options = {}) => waitForTarget(predicate, { 
 let failed = 0;
 try {
   const runs = [];
+  // The run's watchdog (11-02 hang): every minute with no scene settled it names the scenes still unsettled (live or
+  // queued for a slot); at GATE_RUN_MS (default 15 min) each unsettled scene is a FAIL by name and the run exits 1 -
+  // never a gate silent for 25 min with its container up.
+  const pending = new Set();
+  let lastSettled = Date.now();
+  setInterval(() => {
+    if (Date.now() - lastSettled < 60000 || !pending.size) return;
+    console.log(`gate: no scene settled for ${Math.round((Date.now() - lastSettled) / 1000)} s; unsettled (${live} live): ${[...pending].slice(0, 12).join(", ")}`);
+  }, 60000).unref();
+  setTimeout(() => {
+    for (const n of pending) console.log(`FAIL ${n}: unsettled at the gate's deadline (${RUN_MS / 1000} s)`);
+    console.log("gate: run deadline - exiting");
+    process.exit(1);
+  }, RUN_MS).unref();
   // A run not in GATE_ONLY: open() throws SKIP before it makes a page; it reports nothing.
   // A scene's pages close (and free their scene slots) once all of what this push brought settled.
   runs.push = (...ps) => {
@@ -10191,8 +10208,17 @@ try {
     // A scene that threw (a protocol timeout out of a step, say) is that scene's FAIL, named by its first page - not
     // the whole run's crash with no scene reported (gate.sh retries it if that was the machine).
     const name = tickets[0]?.name ?? "?";
-    const all = ps.map((p) => p.catch((e) => (e === SKIP ? null : { name, problems: [`run: ${String(e?.message ?? e).split("\n")[0]}`], warnings: [], ms: 0 })));
-    Promise.allSettled(all).then(() => releaseTickets(tickets));
+    const caught = ps.map((p) => p.catch((e) => (e === SKIP ? null : { name, problems: [`run: ${String(e?.message ?? e).split("\n")[0]}`], warnings: [], ms: 0 })));
+    // Per-scene cap (11-02: one scene never settled and the whole gate hung 25 min with the container up, nothing said):
+    // from when the scene's first page got its slot, SCENE_MS (GATE_SCENE_MS, default 90 s, at least 2x the puppeteer
+    // budget) - then it is that scene's FAIL by name and its pages close; the rest of the run goes on.
+    pending.add(name);
+    const all = caught.map((p) => new Promise((done) => {
+      p.then(done);
+      const arm = () => setTimeout(() => done({ name, problems: [`scene timeout: no result in ${SCENE_MS / 1000} s (a wait that never resolves)`], warnings: [], ms: SCENE_MS }), SCENE_MS);
+      (tickets[0]?.opened ?? Promise.resolve()).then(arm, arm);
+    }));
+    Promise.allSettled(all).then(() => (pending.delete(name), (lastSettled = Date.now()), releaseTickets(tickets)));
     return Array.prototype.push.apply(runs, all);
   };
   if (process.env.SHELL_PAGES !== "0") {
@@ -11341,7 +11367,8 @@ try {
     for (const w of r.warnings.slice(0, 3)) console.log(`     ${r.name} console: ${w.slice(0, 200)}`);
   }
 } finally {
-  await browser.close();
+  // A page stuck in a loop can hold close() too: never longer than 15 s, the exit below ends the container either way.
+  await Promise.race([browser.close().catch(() => {}), new Promise((r) => setTimeout(r, 15000).unref())]);
 }
 process.exit(failed ? 1 : 0);
 
