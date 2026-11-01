@@ -1,0 +1,14 @@
+{
+  "id": "terms-cli",
+  "name": "powos terms",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "purpose": "`powos terms`: every linked host's tmux sessions (this host's, the Mac's over its existing ssh link) for the PowOS AI page's terminals, opened view-only unless --write; a command-line tool, nothing running",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (lib/apps/powos-terms)",
+  "files": [
+    "/usr/lib/powos/apps/powos-terms"
+  ],
+  "remove": {
+    "commands": []
+  }
+}

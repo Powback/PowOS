@@ -331,6 +331,10 @@ if [ -d $A ]; then
   install -m 755 $A/powos-glasses $L/powos-glasses
   # `powos pet` (the pet on home, the local.pet app): speaks through the app's module.
   install -m 755 $A/powos-pet $L/powos-pet
+  # `powos terms` (the AI page's terminals: every linked host's tmux sessions, view-first) and `powos transcribe` (speech
+  # to text on stt.pow). bin/powos runs both from here; test-powos-dispatch.py fails on a subcommand whose file no
+  # deploy installs (2026-11-01: `powos terms list` failed on the phone, so the page showed only its own tmux).
+  for f in powos-terms powos-transcribe; do install -m 755 $A/$f $L/$f; done
   # `powos compose` (docs/COMPOSER.md): widgets made from building blocks, and the one module every composition runs
   # (apps/composed: its source, and its build when rooted.sh had one - then nothing builds per composition).
   install -m 755 $A/powos-compose $L/powos-compose

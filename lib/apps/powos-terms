@@ -112,7 +112,9 @@ def parse(text, host):
 
 
 def tmux_list_cmd():
-    return ["tmux", "list-sessions", "-F", FORMAT]
+    # -u: a tmux client without a UTF-8 locale (a command over ssh gets none: the Mac's) prints the tab separators, and
+    # every non-ASCII title, as "_" - the list parsed to no sessions (2026-11-01: the phone saw the Mac with 0).
+    return ["tmux", "-u", "list-sessions", "-F", FORMAT]
 
 
 def read_local():
