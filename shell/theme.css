@@ -135,6 +135,9 @@
    */
   --backdrop-blur-native: 170px;
   --backdrop-tint: rgb(0 0 0 / 55%);
+  /* A menu over the page (PowOS AI's ⋯): THE backdrop's blur, its tint strong enough that the text under it can't be read
+     through (the user, 11-01 17:56: the list underneath read through the menu). The theme's ground, nearly opaque. */
+  --menu-tint: color-mix(in srgb, var(--color-background) 94%, transparent);
   /* One material (docs/DESIGN-LANGUAGE.md): every surface is the reference fill - home's tiles as PowOS AI's cards. */
   --glass-fill: var(--text-fill);
   /*

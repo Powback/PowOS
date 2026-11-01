@@ -1956,40 +1956,83 @@ async function aiChatBroken() {
   return { acts, doActs: [...(doActs ?? [])].map((b) => b.textContent.trim()).join(" / "), got: window.__nyGot.splice(0), said: item()?.querySelector(".try-said")?.textContent.trim() ?? "" };
 }
 
-/** In the page: ⋯, then each screen and back; a fail per screen that didn't open, name itself, or come back. */
-async function aiChatMenu() {
-  const G = window.__gw;
-  // Its name in a header, or (unfolded) the segmented row's open segment ("Agents & terminals": Agents).
-  const seg = (name) => [...document.querySelectorAll(".ai-screen .ai-seg")].find((b) => b.textContent.trim().startsWith(name));
-  const titled = (name) => [...document.querySelectorAll(".ai-screen .ai-top .ai-title")].some((t) => t.textContent.trim() === name) || !!seg(name.split(" ")[0])?.classList.contains("on");
-  const back = () => (document.querySelector(".ai-screen .ai-back") ?? seg("Chat"))?.click();
-  // One screen from ⋯ and back; its fails. Inner (page.evaluate serialises only this function).
-  const screen = async (name) => {
-    const fails = [];
+/**
+ * In the page: ⋯ offers only what no bottom tab does (the user, 11-01 17:56: "this is like a duplicate") - Friction (and
+ * Other projects / Open chat) - each opening with back; its background the --menu-tint token, opaque enough that the list
+ * under it doesn't read through; the Progress tab beside the status column shows only the areas (no second ring, no
+ * Needs you); a fail per miss.
+ */
+async function aiChatMenu(page) {
+  const opened = await page.evaluate(async () => {
     document.querySelector(".ai-screen .ai-more")?.click();
-    const find = () => [...document.querySelectorAll(".ai-screen .ai-menu-item")].find((b) => b.textContent.trim() === name);
-    await G.until(find, 2000);
-    const item = find();
-    if (!item) return [`⋯ has no "${name}"`];
-    item.click();
-    const opened = await G.until(() => titled(name) && document.querySelector(".ai-screen .ai-sub"), 2000);
-    if (!opened) fails.push(`"${name}" didn't open as its own screen`);
-    // No powos-progress app: a summary per area, never the board's rows to answer (the try buttons live in the chat).
-    if (name === "Progress" && !document.querySelector(".ai-screen .ai-sub .aip")) fails.push("Progress (no powos-progress app) shows no ring and areas");
-    if (name === "Progress" && document.querySelector(".ai-screen .ai-sub :is(.ai-work-list, .ai-item-acts)")) fails.push("Progress still shows the board's rows to answer");
-    back();
-    if (!(await G.until(() => document.querySelector(".ai-screen .ai-chat .msg.try"), 2000))) fails.push(`back from "${name}" didn't return to the chat`);
-    return fails;
-  };
-  const fails = [];
-  for (const name of ["Progress", "Agents & terminals", "Devices", "Friction"]) fails.push(...(await screen(name)));
-  // The strip's "Daily driver NN%" (only with powos-progress installed) opens Progress.
-  const dd = [...document.querySelectorAll(".ai-screen .ai-strip-seg")].find((b) => /Daily driver/.test(b.textContent));
-  if (dd) {
-    dd.click();
-    if (!(await G.until(() => titled("Progress"), 2000))) fails.push("the strip's progress didn't open Progress");
-    back();
+    return !!(await window.__gw.until(() => document.querySelector(".ai-screen .ai-menu"), 2000));
+  });
+  if (!opened) return ["⋯ opened no menu"];
+  const fails = [...(await page.evaluate(aiMenuItemFails)), ...(await page.evaluate(aiMenuOpaqueFails))];
+  fails.push(...(await page.evaluate(aiMenuFriction)));
+  return [...fails, ...(await page.evaluate(aiProgressBesideFails))];
+}
+
+/** ⋯'s items: none a tab offers, Friction there. */
+function aiMenuItemFails() {
+  const menu = document.querySelector(".ai-screen .ai-menu");
+  const names = [...menu.querySelectorAll(".ai-menu-item")].map((b) => b.textContent.trim());
+  const tabs = [...document.querySelectorAll(".ai-screen .ai-seg-name")].map((e) => e.textContent.trim());
+  const dup = names.filter((n) => tabs.some((t) => n === t || n.startsWith(`${t} `)) || /^(Progress|Agents|Devices)\b/.test(n));
+  const fails = dup.length ? [`⋯ repeats what a tab offers: ${dup.join(", ")} (⋯: ${names.join(", ")})`] : [];
+  return names.includes("Friction") ? fails : [...fails, `⋯ has no Friction (${names.join(", ")})`];
+}
+
+/** The menu's background: the --menu-tint token, 90% opaque or more, nothing drawn over its middle. */
+function aiMenuOpaqueFails() {
+  const menu = document.querySelector(".ai-screen .ai-menu");
+  const probe = document.createElement("div");
+  probe.style.background = "var(--menu-tint)";
+  menu.appendChild(probe);
+  const want = getComputedStyle(probe).backgroundColor;
+  probe.remove();
+  const bg = getComputedStyle(menu).backgroundColor;
+  const parts = (/\(([^)]+)\)/.exec(bg)?.[1] ?? "").split(/[\s,/]+/).filter(Boolean);
+  const alpha = parts.length >= 4 ? parseFloat(parts.at(-1)) : 1;
+  const r = menu.getBoundingClientRect();
+  const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  const checks = [
+    [bg === want, `the menu's background is ${bg}, not the --menu-tint token (${want})`],
+    [alpha >= 0.9, `the menu's background is ${Math.round(alpha * 100)}% opaque: the list under it reads through`],
+    [menu.contains(top), `the menu's middle is covered by ${top?.className}`],
+  ];
+  return checks.filter(([ok]) => !ok).map(([, why]) => why);
+}
+
+/** ⋯ → Friction opens its own screen; back returns to the chat (no Friction: the menu closed, aiMenuItemFails says). */
+async function aiMenuFriction() {
+  const G = window.__gw;
+  const seg = (name) => [...document.querySelectorAll(".ai-screen .ai-seg")].find((b) => b.textContent.trim().startsWith(name));
+  const item = [...document.querySelectorAll(".ai-screen .ai-menu-item")].find((b) => b.textContent.trim() === "Friction");
+  if (!item) {
+    document.querySelector(".ai-screen .ai-menu-scrim")?.click();
+    return [];
   }
+  const fails = [];
+  item.click();
+  const titled = () => [...document.querySelectorAll(".ai-screen .ai-top .ai-title")].some((t) => t.textContent.trim() === "Friction");
+  if (!(await G.until(() => titled() && document.querySelector(".ai-screen .ai-sub"), 2000))) fails.push('"Friction" didn\'t open as its own screen');
+  (document.querySelector(".ai-screen .ai-back") ?? seg("Chat"))?.click();
+  if (!(await G.until(() => document.querySelector(".ai-screen .ai-chat .msg.try"), 2000))) fails.push('back from "Friction" didn\'t return to the chat');
+  return fails;
+}
+
+/** Unfolded, the Progress tab beside the status column: only the area breakdown (the column has the ring and Needs you). */
+async function aiProgressBesideFails() {
+  const G = window.__gw;
+  const aiSegOf = (name) => [...document.querySelectorAll(".ai-screen .ai-seg")].find((b) => b.textContent.trim().startsWith(name));
+  if (!document.querySelector(".ai-screen > .ai-left .ais-top") || !aiSegOf("Progress")) return [];
+  aiSegOf("Progress").click();
+  await G.until(() => document.querySelector(".ai-screen .ai-right .ai-sub .aip"), 2000);
+  const aip = document.querySelector(".ai-screen .ai-right .ai-sub .aip");
+  const fails = !aip ? ["the Progress tab shows no areas"] : aip.querySelector(".aip-ring, .aip-needs, .aip-need-list") ? ["the Progress tab repeats the ring / Needs you the status column beside it shows"] : [];
+  aiSegOf("Chat")?.click();
+  await G.until(() => document.querySelector(".ai-screen .ai-chat .msg.try"), 2000);
   return fails;
 }
 
@@ -2175,8 +2218,8 @@ function aiColumnsContent() {
     [segs === "Chat / Agents / Progress / Devices", `the right column's row is "${segs}", not Chat / Agents / Progress / Devices`],
     [R.querySelector(".ai-seg.on")?.textContent.includes("Chat"), "the row doesn't mark Chat as open"],
     [R.querySelector(".ai-chat .msg.try"), "the right column has no chat"],
-    [R.querySelector(":scope > .ai-compose"), "the chat has no field at the right column's foot"],
-    [R.querySelector(":scope > .ai-segs + .ai-compose:last-child"), "the segmented row isn't just above the chat's field (the user, 11-01: tabs at the bottom)"],
+    [!document.querySelector(".ai-screen .ai-compose"), "the AI page draws a field of its own (11-01 18:24: home's shared bar is its search)"],
+    [R.querySelector(":scope > .ai-segs + .ai-bar-slot:last-child"), "the segmented row isn't just above the shared bar's room at the column's foot"],
     [L.querySelector(":scope > .ais-top") && L.querySelector(":scope > .ai-scroll.ais"), "the left column isn't the status page (its hero and sections)"],
     [!L.querySelector(".ai-chat, .ai-compose, .ais-open-chat"), 'the status column has a chat, a field or "Open chat" of its own'],
   ];
@@ -2256,7 +2299,7 @@ async function aiChatAt(page, size) {
   await page.evaluate(() => document.querySelector(".ai-screen .ai-more")?.click());
   await page.screenshot({ path: `/cache/ai-page-${size}-menu.png` });
   await page.evaluate(() => document.querySelector(".ai-screen .ai-menu-scrim")?.click());
-  fails.push(...(await page.evaluate(aiChatMenu)).map((f) => `${size}: ${f}`));
+  fails.push(...(await aiChatMenu(page)).map((f) => `${size}: ${f}`));
   fails.push(...(await aiChatOrderFails(page, size)));
   fails.push(...(await aiChatStepsFails(page, size)));
   await page.evaluate(aiChatRestore);
@@ -2267,7 +2310,7 @@ async function aiChatAt(page, size) {
  * The AI page is one chat (the user, 2026-10-31: "a bunch of different boxes ... stacked on top of each other"): folded
  * and unfolded no board boxes, no at-work list, no units; the manager's things to try (```try) render as its message
  * with works / still broken (done / can't on a thing to do), "still broken" + a reply records the user FAIL check and
- * mails the manager; ⋯ opens Progress / Agents & terminals / Devices, each with back; scrolling up loads older messages;
+ * mails the manager; ⋯ offers only what no tab does (Friction), see-through never; scrolling up loads older messages;
  * a ```present card and the ```choices sent after it in one turn show in that order.
  * Renders: /cache/ai-page-<size>-*.png.
  */
@@ -2343,12 +2386,17 @@ function aiProgressAreas() {
   return fails;
 }
 
+/** In the page: Progress's ring, 80 px or more with a percentage - or none beside the status column, which has it (11-01). */
+function aipRingFails() {
+  const ring = document.querySelector(".ai-screen .aip .aip-ring");
+  if (document.querySelector(".ai-screen > .ai-left .ais-top")) return ring ? ["Progress beside the status column draws a second ring"] : [];
+  if (!ring || ring.getBoundingClientRect().width < 80) return ["no ring at the top (80 px or more)"];
+  return /%$/.test(document.querySelector(".ai-screen .aip-ring-pct")?.textContent ?? "") ? [] : ["the ring shows no percentage"];
+}
+
 /** In the page: the ring (80 px or more, a percentage) and each bar's fill done/total of its track. */
 function aiProgressMarks() {
   const fails = [];
-  const ring = document.querySelector(".ai-screen .aip .aip-ring");
-  if (!ring || ring.getBoundingClientRect().width < 80) fails.push("no ring at the top (80 px or more)");
-  else if (!/%$/.test(document.querySelector(".ai-screen .aip-ring-pct")?.textContent ?? "")) fails.push("the ring shows no percentage");
   for (const bar of document.querySelectorAll(".ai-screen .aip .aip-bar")) {
     const { done, total } = bar.dataset;
     const want = Number(total) ? Number(done) / Number(total) : 0;
@@ -2526,11 +2574,15 @@ async function aiNeedsProgress(page, size, screen, calls) {
 async function aiNeedsCheck(page) {
   const fails = [];
   const calls = [];
-  for (const [size, vp, screen] of [["folded", { width: 404, height: 900 }, "progress"], ["unfolded", { width: 821, height: 883 }, "progress"]]) {
+  // Folded only: unfolded, the Progress tab beside the status column shows only the areas - its Needs you is the left
+  // column's stack (ai-status, ai-chat's aiChatMenu check that the tab repeats none of it).
+  for (const [size, vp, screen] of [["folded", { width: 404, height: 900 }, "progress"]]) {
     await page.setViewport(vp);
     await page.evaluate((w) => window.__gw.until(() => innerWidth === w), vp.width);
     fails.push(...(await aiNeedsProgress(page, size, screen, calls)));
   }
+  await page.setViewport({ width: 821, height: 883 });
+  await page.evaluate((w) => window.__gw.until(() => innerWidth === w), 821);
   // Unfolded (the chat is the middle pane's): the chat's present_try card's works on the same task, the same call.
   const chat = await page.evaluate(aiNeedsChatCall);
   for (const [size, got] of calls) if (got.length && JSON.stringify(got) !== JSON.stringify(chat)) fails.push(`${size}: the row's works called ${JSON.stringify(got)}, the chat's try card ${JSON.stringify(chat)}`);
@@ -2724,6 +2776,37 @@ async function aiStackWhy(text) {
 
 const stVerdict = (got, id) => got.find((g) => g[0] === "verdict" && g[1] === id);
 
+/**
+ * In the page: the top card's open answer form laid out in it (the user, 11-01 17:53: "this part looks broken" - the
+ * field shifted right past the card's edge, the card bleeding into the next column): the field and the row inside the
+ * card's text column (its 16 dp padding), the field its full width, add screenshot left, cancel + send right; the card
+ * inside its column.
+ */
+function aiStackFormFails() {
+  const card = document.querySelector(".ai-screen:is(.status, .panes) .ais-card-top");
+  const form = card?.querySelector(".ai-reply");
+  if (!form) return ["no answer form in the top card"];
+  const c = card.getBoundingClientRect(), cs = getComputedStyle(card);
+  const col = [c.left + parseFloat(cs.paddingLeft), c.right - parseFloat(cs.paddingRight)];
+  const px = ([l, r]) => `[${Math.round(l)}, ${Math.round(r)}]`;
+  const span = (e) => { const r = e.getBoundingClientRect(); return [r.left, r.right]; };
+  const outside = ([l, r], [L, R]) => l < L - 1 || r > R + 1;
+  const near = (a, b) => Math.abs(a - b) <= 2;
+  const pill = form.querySelector(".pill");
+  const kids = [...form.querySelectorAll(".ai-reply-foot > *")];
+  const names = kids.map((b) => b.textContent.trim());
+  const boxes = [[form, "the form"], [pill, "the field"], ...kids.map((b) => [b, `"${b.textContent.trim()}"`])].filter(([e]) => e);
+  const fails = boxes.filter(([e]) => outside(span(e), col)).map(([e, name]) => `${name} ${px(span(e))} is outside the card's text column ${px(col)}`);
+  const outer = span(card.closest(".ai-left, .ai-scroll.ais, .ai-screen"));
+  const checks = [
+    [pill && near(span(pill)[0], col[0]) && near(span(pill)[1], col[1]), `the field isn't the card's full text width ${px(col)}`],
+    [/^(add screenshot|taking…|no screen to add)$/.test(names[0]) && names.slice(-2).join(" / ") === "cancel / send", `the row is [${names.join(" / ")}], not add screenshot, then cancel / send`],
+    [kids.length > 0 && near(span(kids[0])[0], col[0]) && near(span(kids.at(-1))[1], col[1]), "add screenshot / send aren't at the text column's left / right"],
+    [!outside([c.left, c.right], outer), `the card ${px([c.left, c.right])} bleeds out of its column ${px(outer)}`],
+  ];
+  return [...fails, ...checks.filter(([ok]) => !ok).map(([, why]) => why)];
+}
+
 /** Right on a try = a user PASS and the next card on top; left = the why field, its words a user FAIL. */
 async function aiStackRightLeft(page) {
   const fails = [];
@@ -2732,6 +2815,8 @@ async function aiStackRightLeft(page) {
   if (r.top !== "st-try2") fails.push(`after a swipe right the top card is ${r.top}, not the next (st-try2)`);
   r = await aiStackSwipe(page, -220, 0);
   if (!r.field) return [...fails, "swipe left didn't open the why field"];
+  fails.push(...(await page.evaluate(aiStackFormFails)));
+  await page.screenshot({ path: "/cache/ai-stack-answer-form.png" });
   const got = await page.evaluate(aiStackWhy, "dock stays grey");
   const w = stVerdict(got, "st-try2");
   if (!(w && w[2] === false && w[3] === "still broken: dock stays grey")) fails.push(`still broken (swipe left + why) recorded no user FAIL with the words (${JSON.stringify(got)})`);
@@ -3225,22 +3310,20 @@ async function aiFoldCollapse(page) {
   ]);
 }
 
-/** In the page: ⋯ has "Open chat"; ⋯ → Agents & terminals opens it over the tabs; the Chat tab comes back. */
+/** In the page: ⋯ has "Open chat" and nothing a tab offers; the Agents tab opens Agents over the tabs; the Chat tab comes back. */
 async function aiFoldMenu() {
   const G = window.__gw;
   const fails = [];
-  const items = async () => {
-    document.querySelector(".ai-screen.status .ai-more")?.click();
-    await G.until(() => document.querySelector(".ai-screen .ai-menu-item"), 2000);
-    return [...document.querySelectorAll(".ai-screen .ai-menu-item")];
-  };
-  let list = await items();
-  if (!list.some((b) => b.textContent.trim() === "Open chat")) fails.push(`⋯ has no "Open chat" (${list.map((b) => b.textContent.trim()).join(", ")})`);
-  const terms = list.find((b) => b.textContent.trim() === "Agents & terminals");
-  if (!terms) return [...fails, "⋯ has no Agents & terminals"];
-  terms.click();
+  document.querySelector(".ai-screen.status .ai-more")?.click();
+  await G.until(() => document.querySelector(".ai-screen .ai-menu-item"), 2000);
+  const list = [...document.querySelectorAll(".ai-screen .ai-menu-item")].map((b) => b.textContent.trim());
+  if (!list.includes("Open chat")) fails.push(`⋯ has no "Open chat" (${list.join(", ")})`);
+  const dup = list.filter((n) => /^(Chat|Progress|Agents|Devices)\b/.test(n));
+  if (dup.length) fails.push(`⋯ repeats what a tab offers: ${dup.join(", ")}`);
+  document.querySelector(".ai-screen .ai-menu-scrim")?.click();
   const seg = (name) => [...document.querySelectorAll(".ai-screen .ai-seg")].find((b) => b.textContent.trim().startsWith(name));
-  if (!(await G.until(() => document.querySelector(".ai-screen.stacked .ai-sub") && seg("Agents")?.classList.contains("on"), 2000))) fails.push("⋯ → Agents & terminals didn't open over the tabs");
+  seg("Agents")?.click();
+  if (!(await G.until(() => document.querySelector(".ai-screen.stacked .ag-scroll") && seg("Agents")?.classList.contains("on"), 2000))) fails.push("the Agents tab didn't open over the tabs");
   seg("Chat")?.click();
   if (!(await G.until(() => document.querySelector(".ai-screen.status.stacked .ais-chat-wrap"), 2000))) fails.push("the Chat tab didn't come back to the stacked page");
   return fails;
@@ -3308,8 +3391,8 @@ async function aiSegsSwitch() {
     const fails = [];
     const kids = [...R.children].filter((e) => e.getClientRects().length && getComputedStyle(e).position !== "absolute");
     const after = kids.slice(kids.indexOf(segs) + 1).map((e) => e.className);
-    if (name === "Chat" ? after.join() !== "ai-compose" : after.length) fails.push(`"${name}": the row is followed by [${after.join(", ")}], not ${name === "Chat" ? "only the field" : "nothing"}`);
-    const r = R.getBoundingClientRect(), b = (name === "Chat" ? R.querySelector(":scope > .ai-compose") : segs).getBoundingClientRect();
+    if (after.join() !== "ai-bar-slot") fails.push(`"${name}": the row is followed by [${after.join(", ")}], not only the shared bar's room`);
+    const r = R.getBoundingClientRect(), b = (R.querySelector(":scope > .ai-bar-slot") ?? segs).getBoundingClientRect();
     const pad = parseFloat(getComputedStyle(R).paddingBottom);
     if (Math.abs(r.bottom - pad - b.bottom) > 2) fails.push(`"${name}": the column's foot is ${Math.round(r.bottom - pad - b.bottom)} px above its bottom`);
     if (!segs.querySelector(".ai-seg-n")) fails.push(`"${name}": the row's live counts are gone`);
@@ -3649,8 +3732,8 @@ async function aiTermsFleet(body) {
 /**
  * The terminals from the AI page (the user, 11-01 16:57: "There's no terminal option anymore"): a session's terminal in
  * at most 2 taps - unfolded via the Devices tab (its device card's sessions) and via the Agents tab (a card's "Open
- * terminal"; the tab also lists every host's sessions, as folded Agents & terminals), folded via ⋯ → Agents & terminals
- * (its host/session list; a third tap opens one). Restored with it: unfolded, a Working now row opens that agent live
+ * terminal"; the tab also lists every host's sessions), folded via the Agents tab (its host/session list; a third tap
+ * opens one) - ⋯ no longer repeats the tabs (11-01 17:56). Restored with it: unfolded, a Working now row opens that agent live
  * in the right column (the old context column's card did).
  */
 async function aiTermsCheck(page) {
@@ -3690,9 +3773,9 @@ async function aiTermsCheck(page) {
   await page.setViewport({ width: 404, height: 900 });
   await page.evaluate(() => window.__gw.until(() => innerWidth === 404, 3000));
   await page.evaluate(aiTermsSetup, "folded");
-  await run("folded ⋯", [".ai-screen .ai-more", [".ai-screen .ai-menu-item", "Agents & terminals"], '.ai-screen .ai-sub .ai-session[data-term="mac:c0"]'], "mac:c0");
-  const both = await page.evaluate(() => document.querySelectorAll('.ai-screen .ai-sub .ai-session[data-term]').length);
-  if (both < 2) fails.push(`folded ⋯ → Agents & terminals: ${both} sessions listed after 2 taps, not both hosts'`);
+  await run("folded Agents", [[".ai-screen .ai-seg", "Agents"], '.ai-screen .ag-scroll .ai-session[data-term="mac:c0"]'], "mac:c0");
+  const both = await page.evaluate(() => document.querySelectorAll('.ai-screen .ag-scroll .ai-session[data-term]').length);
+  if (both < 2) fails.push(`folded Agents tab: ${both} sessions listed after 2 taps, not both hosts'`);
   await page.screenshot({ path: "/cache/ai-terms-folded.png" });
   await chat();
   return fails;
@@ -3739,7 +3822,7 @@ async function aiProgressCheck(page) {
     // The bars fill on a spring: read them once their animations are done, not mid-spring (a loaded full gate read
     // 0.00 of 0.25, 11-01; passes alone).
     await page.evaluate(() => window.__gw.settled(() => document.querySelector(".ai-screen .aip .aip-bar-fill")));
-    const found = [...(await page.evaluate(aiProgressType, AIP_LINES)), ...(await page.evaluate(aiProgressMarks)), ...(await page.evaluate(aiProgressAreas)), ...(await page.evaluate(aiProgressContrast, AIP_LINES))];
+    const found = [...(await page.evaluate(aiProgressType, AIP_LINES)), ...(await page.evaluate(aiProgressMarks)), ...(await page.evaluate(aipRingFails)), ...(await page.evaluate(aiProgressAreas)), ...(await page.evaluate(aiProgressContrast, AIP_LINES))];
     fails.push(...found.map((f) => `${size}: ${f}`));
     await page.screenshot({ path: `/cache/ai-progress-${size}.png` });
   }

@@ -3495,7 +3495,7 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .try-item + .try-item { padding-top: 8px; }
 /* The ⋯ menu over the chat: at the centred column's right edge, near-solid so the messages under it don't read through. */
 .ai-view > .ai-menu { right: max(var(--edge), calc((100% - 680px) / 2)); }
-html:root .ai-view > .ai-menu.tile { background: color-mix(in srgb, var(--color-background) 94%, transparent); }
+html:root .ai-view > .ai-menu.tile { --glass-blur-native: var(--backdrop-blur-native); background: var(--menu-tint); }
 
 /*
  * The AI page reads like a messenger (the user, 2026-10-31 13:03: "It looks complete trash" - text on the bright
@@ -3639,6 +3639,8 @@ html:root .ai-screen .aip-area.tile { --glass-blur-native: var(--backdrop-blur-n
 /* The segmented row: one slim pill track, the open segment lifted on it; each label whole, its live count beside it. */
 /* At the right column's foot (above the field on Chat): margin-top auto keeps it down under a short screen. */
 .ai-right > .ai-segs { margin-top: auto; }
+/* Under the row, the room home's shared bar takes over the page (no field of the page's own, 11-01 18:24). */
+.ai-right > .ai-bar-slot { flex: none; height: calc(var(--pill-height) + var(--pill-foot)); }
 .ai-segs { flex: none; display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: color-mix(in srgb, var(--color-foreground) 9%, transparent); }
 .ai-seg { flex: 1 1 0; min-width: 0; min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 0; border-radius: 999px; background: none; font: inherit; font-size: var(--text-small); font-weight: 600; white-space: nowrap; color: var(--color-foreground); }
 .ai-seg.on { background: var(--ai-bubble); box-shadow: var(--lift); }
@@ -3663,7 +3665,7 @@ html:root .ai-right .ai-chat-in .msg.user { border-radius: 18px 18px 6px 18px; }
 /* The ⋯ menu from the status column's hero: under it, inside the column. */
 .ai-left > .ai-menu-scrim { position: fixed; inset: 0; z-index: 4; }
 .ai-left > .ai-menu { position: absolute; z-index: 5; top: 68px; right: 12px; min-width: 220px; display: flex; flex-direction: column; padding: 6px 0; border-radius: var(--radius); }
-html:root .ai-left > .ai-menu.tile { background: color-mix(in srgb, var(--color-background) 94%, transparent); }
+html:root .ai-left > .ai-menu.tile { --glass-blur-native: var(--backdrop-blur-native); background: var(--menu-tint); }
 /* The status page in the left column: a column of its own (the full-screen page's insets aren't its). */
 .ai-left > .ais-top { position: relative; z-index: 2; display: flex; align-items: center; gap: 14px; min-height: 56px; margin: 12px var(--ais-side) 0; }
 .ai-left > .ai-scroll.ais { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 14px var(--ais-side) 16px; -webkit-mask-image: linear-gradient(to bottom, transparent, black 14px, black calc(100% - 14px), transparent); mask-image: linear-gradient(to bottom, transparent, black 14px, black calc(100% - 14px), transparent); }
@@ -3858,6 +3860,18 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .ais-shot img { display: block; max-width: 100%; max-height: 140px; object-fit: cover; }
 .ais-try { align-self: flex-start; min-height: 36px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--color-accent); color: var(--color-accent-foreground, var(--color-background)); font: inherit; font-weight: 650; }
 .ais-acts { display: flex; gap: 8px; margin-top: auto; padding-top: 8px; }
+/* The stack's one column never wider than the section (a long field must not widen the card past its column). */
+.ais-stack { grid-template-columns: minmax(0, 1fr); }
+.ais-stack > .ais-card-top { min-width: 0; }
+/* The card's answer form (still broken / can't / answer, 17:53 "this part looks broken"): the card's text column, full
+   width - the field, then add screenshot left, cancel + send right. */
+.ais-card-top > .ai-reply { align-self: stretch; min-width: 0; margin: 4px 0 0; gap: 8px; }
+.ais-card-top > .ai-reply > .pill { min-width: 0; width: 100%; margin: 0; box-sizing: border-box; }
+.ais-card-top > .ai-reply > .ai-reply-foot { gap: 8px; }
+.ais-card-top > .ai-reply > .ai-reply-foot > :first-child { margin-right: auto; }
+.ais-card-top > .ai-reply > .ai-reply-foot > .ai-act:last-child { margin-left: 0; }
+.ais-card-top > .ai-reply > .ai-reply-foot > .ai-act.send { color: var(--color-background); background: var(--color-accent); }
+.ais-card-top > .ai-reply > .ai-reply-foot > .ai-act.send:disabled { opacity: 0.5; }
 .ais-more { min-height: 40px; padding: 0 4px; border: 0; background: none; font: inherit; font-size: var(--text-small); font-weight: 600; color: var(--color-foreground); }
 .ais-act { flex: 1; min-height: 44px; padding: 0 10px; border: 0; border-radius: 14px; background: color-mix(in srgb, var(--color-foreground) 12%, transparent); font: inherit; font-weight: 600; color: var(--color-foreground); }
 .ais-act.yes { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
