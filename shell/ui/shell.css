@@ -3934,6 +3934,19 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .ai-screen.stacked > .ai-segs { margin-top: auto; }
 /* Home's shared bar sits under the tabs (its AI-page role is its own task): its room kept, on every tab. */
 .ai-screen.stacked > .ai-bar-slot { flex: none; height: calc(var(--pill-height) + var(--ai-foot)); }
+/*
+ * The keyboard up (the user, 11-01 21:32, P1: "chat screen broken when trying to type"): the host keeps the WebView's
+ * size (ShellActivity adjustNothing), so the page itself ends at the keyboard's top - its padding - and the bar's room
+ * under the tabs is the pill's own (no keyboard in it). It was --ai-foot's keyboard inside the slot: the slot's foot at
+ * the screen's, bar.tsx seatOnAi set the field there, behind the keyboard, and the WebView scrolled the whole page up
+ * to show it (the chat under the status bar, the tabs mid-screen, a keyboard-high gap over the field).
+ */
+.ai-screen.stacked {
+  --ai-foot: calc(max(calc(var(--inset-bottom, 0px) - var(--inset-keyboard, 0px)), var(--pill-foot)) + var(--pill-foot));
+  padding-bottom: var(--inset-keyboard, 0px);
+}
+/* Typing in the page's one field (home's bar, seated here): the tabs give the chat their room (the manager, 11-01). */
+html:has(.home > .bar[data-role="ai"] textarea:focus) .ai-screen.stacked > .ai-segs { display: none; }
 .ai-screen.stacked > .ai-segs:last-child { margin-bottom: calc(var(--pill-height) + var(--ai-foot) + 8px); }
 .ai-screen.stacked > .ag-scroll { flex: 1; min-height: 0; }
 .ai-screen.stacked > .ais-top { flex: none; cursor: pointer; }

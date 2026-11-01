@@ -3548,6 +3548,92 @@ async function aiFoldedCheck(page) {
   return fails.map((f) => `ai-folded: ${f}`);
 }
 
+/**
+ * The folded AI page's Chat with the keyboard up (the user, 11-01 21:32, P1: "chat screen broken when trying to type" -
+ * the conversation under the status bar, the tabs mid-screen, a keyboard-high gap over the field). The host keeps the
+ * WebView's size and reports the keyboard as an inset (ShellActivity adjustNothing); the page fits above it: the strip
+ * put, the tabs hidden while typing, the chat filling to the one field, newest visible, the field right on the keyboard.
+ */
+/** In the page: the field focused with the keyboard [kb] px up, as the phone's host reports it. */
+async function aiKeyboardUp(kb) {
+  const S = await window.__gw.mod("./state.ts");
+  S.aiScreen.value = "chat";
+  S.page.value = -1;
+  window.__mockEvents.emit("system.insets", { top: 45, bottom: 16, left: 0, right: 0, keyboard: kb });
+  document.querySelector(".bar[data-role] textarea")?.focus();
+  await new Promise((r) => setTimeout(r, 900));
+  return true;
+}
+
+/** In the page: the boxes ([top, bottom]) the keyboard case checks. */
+function aiKeyboardFacts(kb) {
+  const scr = document.querySelector(".ai-screen.status");
+  const tb = (e) => { const b = e?.getBoundingClientRect(); return b ? [Math.round(b.top), Math.round(b.bottom)] : null; };
+  const shown = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== "hidden" && Number(getComputedStyle(e).opacity) > 0.05;
+  const chat = scr?.querySelector(".ais-chat-wrap > .ai-chat");
+  const last = [...(chat?.querySelector(".ai-chat-in")?.children ?? [])].filter((e) => !e.matches(".ai-new-pill")).at(-1);
+  const fields = [...document.querySelectorAll("textarea, input:not([type=hidden])")].filter((e) => shown(e) && tb(e)[1] > 0 && tb(e)[0] < innerHeight - kb);
+  return {
+    kbTop: innerHeight - kb, pill: tb(document.querySelector(".bar[data-role] .bar-pill")), segs: shown(scr?.querySelector(":scope > .ai-segs")),
+    chat: tb(chat), last: tb(last), fields: fields.length, scrollY, atNewest: Math.abs(chat?.scrollTop ?? 99) < 2,
+    tops: [...(scr?.querySelectorAll(":scope > .ais-top, .ais-chat-wrap > .ai-chat") ?? [])].map((e) => tb(e)[0]),
+  };
+}
+
+/** In the page: the keyboard down again, the field let go. */
+async function aiKeyboardDown() {
+  window.__mockEvents.emit("system.insets", { top: 45, bottom: 16, left: 0, right: 0, keyboard: 0 });
+  document.activeElement?.blur();
+  await new Promise((r) => setTimeout(r, 400));
+}
+
+/**
+ * In the page: the side button over the AI page (the user, 11-01 21:32: the assist sheet stacked a second input over
+ * the page's): the page tells the host it's up (ai.pageShown, PowosAssistSession then opens no sheet) and the host's
+ * "ai.focus" puts the keys in the page's one field.
+ */
+async function aiSideButton() {
+  const [S, { powos }] = await Promise.all([window.__gw.mod("./state.ts"), window.__gw.mod("./bridge.ts")]);
+  const said = [];
+  powos.ai.pageShown = async (on) => void said.push(on);
+  S.page.value = 0;
+  await window.__gw.frames(3);
+  S.page.value = -1;
+  await window.__gw.frames(3);
+  window.__mockEvents.emit("ai.focus", {});
+  await window.__gw.frames(2);
+  const field = document.querySelector(".bar[data-role=ai] textarea");
+  return { said, focused: !!field && document.activeElement === field, bars: document.querySelectorAll(".bar[data-role]").length };
+}
+
+async function aiKeyboardCheck(page) {
+  if (!(await page.evaluate(aiStatusSetup, [FLEET_SETUP]))) return ["ai-keyboard: no folded status page for the mock fleet"];
+  await page.evaluate(aiFoldSet, [0, false]);
+  const kb = 330;
+  await page.evaluate(aiKeyboardUp, kb);
+  const f = await page.evaluate(aiKeyboardFacts, kb);
+  await page.screenshot({ path: "/cache/ai-keyboard-folded.png" });
+  await page.evaluate(aiKeyboardDown);
+  const side = await page.evaluate(aiSideButton);
+  if (!f.pill || !f.chat || !f.last) return [`ai-keyboard: missing the field, the chat or a message (${JSON.stringify(f)})`];
+  return aiKeyboardFails(f, side).map((x) => `ai-keyboard: ${x}`);
+}
+
+/** [f] the keyboard's facts, [side] the side button's: what's wrong. */
+function aiKeyboardFails(f, side) {
+  const at = JSON.stringify(f);
+  return failsOf([
+    [Math.abs(f.pill[1] + 8 - f.kbTop) <= 12, `the field's foot (${f.pill[1]}) isn't on the keyboard's top (${f.kbTop}): ${at}`],
+    [!f.segs, `the tabs show while typing: ${at}`],
+    [f.fields === 1, `${f.fields} inputs visible above the keyboard, not one`],
+    [f.tops.every((t) => t >= 45 - 1) && f.scrollY === 0, `something sits under the status bar (tops ${f.tops}, scrollY ${f.scrollY})`],
+    [f.chat[1] <= f.pill[0] + 2 && f.chat[1] - f.chat[0] > 100, `the chat (${f.chat}) doesn't fill the room down to the field (${f.pill})`],
+    [f.atNewest && f.last[1] <= f.pill[0] + 2 && f.last[0] >= f.chat[0] - 2, `the newest message (${f.last}) isn't visible over the field (${f.pill}, chat ${f.chat})`],
+    [side.said.at(-1) === true && side.said.includes(false), `the page didn't tell the host it's up/down (ai.pageShown ${JSON.stringify(side.said)})`],
+    [side.focused && side.bars === 1, `"ai.focus" (the side button over the page) didn't focus the page's one field (focused ${side.focused}, ${side.bars} bars)`],
+  ]);
+}
+
 async function aiStatusCheck(page) {
   if (!(await page.evaluate(aiStatusSetup, [FLEET_SETUP]))) return ["folded: the status page shows no Working now rows for the mock fleet"];
   const fails = [];
@@ -9547,6 +9633,9 @@ try {
   // Folded stacked: the strip, Needs you, one summary row, the chat filling the rest, the tabs (the manager's design, 11-01).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-folded", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiFoldedCheck(r.page))));
+  // The folded Chat with the keyboard up (the user, 11-01 21:32, P1: "chat screen broken when trying to type").
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-keyboard", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiKeyboardCheck(r.page))));
   // The terminals from the AI page in at most 2 taps, both modes (the user, 11-01 16:57: "There's no terminal option anymore").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-terms", { width: 821, height: 883 }).then((r) => whenReady(r, () => aiTermsCheck(r.page))));

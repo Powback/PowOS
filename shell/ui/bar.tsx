@@ -393,6 +393,17 @@ function unseat(bar: HTMLElement) {
   bar.style.removeProperty("width");
 }
 
+/**
+ * The side button over PowOS AI's page (ShellBridge.focusAiOnHome; the user, 11-01 21:32: the assist sheet stacked a
+ * second input over the page's): no sheet - the page's one field, this bar, takes the keys.
+ */
+if (homePage)
+  powos.on("ai.focus", () => {
+    if (page.peek() !== -1) return;
+    document.querySelector<HTMLTextAreaElement>(".home > .bar[data-role=ai] textarea")?.focus();
+    void powos.keyboard.show();
+  });
+
 /** Seats the bar on PowOS AI's page while that's the page (and re-seats it as the page's layout changes). */
 function useAiSeat(proxy: boolean) {
   const form = useRef<HTMLFormElement | null>(null);
@@ -413,7 +424,14 @@ function useAiSeat(proxy: boolean) {
     const ro = new ResizeObserver(() => seatOnAi(el));
     if (slot) ro.observe(slot);
     ro.observe(document.documentElement);
-    return () => ro.disconnect();
+    // Home's foot changing under the bar (the keyboard's room, the recents strip coming or going) moves the bar's own
+    // place without resizing it: home's stage, over the bar, resizes then - the seat follows.
+    const stage = el.parentElement?.querySelector(":scope > .stage");
+    if (stage) ro.observe(stage);
+    // The keyboard moves the slot (the page ends at its top, shell.css .ai-screen.stacked) whatever its size does: the
+    // field follows it onto the keyboard, never left where the slot was (P1 11-01: behind the keyboard).
+    const off = powos.on("system.insets", () => requestAnimationFrame(() => seatOnAi(el)));
+    return () => (ro.disconnect(), off());
   }, [at, dragging]);
   return formRef;
 }
