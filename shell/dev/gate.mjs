@@ -9154,6 +9154,16 @@ try {
         if (!fails.length) console.log(`backdrop-${part}-${label}: ${JSON.stringify(read)}`);
         return fails;
       })));
+  // The design language's probe (dev/design-lint.js; docs/DESIGN-LANGUAGE.md §4 monospace, §6 pop-ins): REPORT-ONLY -
+  // it prints what it found and never fails (returns no problems) until the manager turns it on.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      for (const [surface, query] of [["home", ""], ["launcher", ""], ["menu", ""], ["shade", "?mode=shade"], ["control", "?mode=shade"]])
+        runs.push(open(browser, `${ORIGIN}/index.html${query}`, `design-lint-${surface}-${label}`, viewport).then((r) => whenReady(r, async () => {
+          const out = await r.page.evaluate(async (s) => (await importShim("./dev/design-lint.js")).designLint(s), surface).catch((e) => ({ error: e.message.split("\n")[0] }));
+          console.log(`design-lint-${surface}-${label} (report-only): ${JSON.stringify(out)}`);
+          return [];
+        })));
   // The pinned dock never fades (folded: the dock pages to the recent apps; the user, 2026-10-23).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "dock-no-fade", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(dockPinnedNoFade))));
