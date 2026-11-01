@@ -300,7 +300,9 @@ class ShellActivity : Activity() {
         // Home pressed - not a notification's or the app entry's way here (toHome), which carries what it opens.
         // Nor the recents transition's launch of home or the switcher's (Switcher.EXTRA_RECENTS): its layer is coming up.
         val recents = intent.getBooleanExtra(dev.omalauncher.system.Switcher.EXTRA_RECENTS, false)
-        if (intent.hasCategory(Intent.CATEGORY_HOME) && !intent.hasExtra(EXTRA_REDIRECTED) && !recents) homePressed()
+        // Nor a web window's minimise (WebWindows.EXTRA_APP_LEFT: its app's home-gesture lifecycle): home is in front already.
+        val appLeft = intent.getBooleanExtra(WebWindows.EXTRA_APP_LEFT, false)
+        if (intent.hasCategory(Intent.CATEGORY_HOME) && !intent.hasExtra(EXTRA_REDIRECTED) && !recents && !appLeft) homePressed()
         dev.omalauncher.AgentsSpool.opened(intent)
         // An edge gesture's "app drawer": home with its pull-up panel up.
         openPanel(intent)

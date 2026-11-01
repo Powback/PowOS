@@ -159,7 +159,7 @@ class WebWindows(
     private fun listedState(w: Win): String =
         when {
             w.full || w.linuxFull -> "full"
-            w.leftAt != 0L -> "minimised"
+            w.leftAt != 0L || w.minimised -> "minimised"
             else -> "floating"
         }
 
@@ -538,6 +538,12 @@ class WebWindows(
 
         /** Minimised the home gesture's way ([minimise]): its task on display 0 (in PiP, or behind home); uptime then, else 0. */
         @Volatile var leftAt = 0L
+
+        /**
+         * In the dock: the page's minimise ([minimise]) until a way back ([restore], its PiP expanded). The one source of
+         * the window's minimised state - listed ([listedState]) and sent to the page on change ("webwindows.state").
+         */
+        @Volatile var minimised = false
 
         @Volatile var closed = false
 
@@ -2457,9 +2463,24 @@ class WebWindows(
      */
     fun minimise(id: Int): Boolean {
         val w = wins[id] ?: return false
-        if (w.linux != null || w.full || w.leftAt != 0L || w.displayId < 0) return true
+        if (w.full) return true
+        minimisedIs(w, true)
+        if (w.linux != null || w.leftAt != 0L || w.displayId < 0) return true
         io.post { leaveNow(w) }
         return true
+    }
+
+    /**
+     * [w]'s minimised state is [on] now: the page told on change ("webwindows.state" {id, minimised}) - its dock toggle
+     * reads that, never its own guess (e2e round 193: Calculator, no PiP, was "just hidden" and listed "floating").
+     */
+    private fun minimisedIs(
+        w: Win,
+        on: Boolean,
+    ) {
+        if (w.minimised == on) return
+        w.minimised = on
+        main.post { if (!w.closed) emit("webwindows.state", mapOf("id" to w.id, "minimised" to on)) }
     }
 
     /** On [io]: [minimise]'s home gesture for [w]'s task. */
@@ -2482,7 +2503,7 @@ class WebWindows(
             WindowLog.w(TAG, "window ${w.id}: minimise's move to display 0 FAILED: just hidden")
             return
         }
-        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra(EXTRA_APP_LEFT, true)
         val ok = runCatching { context.startActivity(home, ActivityOptions.makeBasic().setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY).toBundle()) }
             .onFailure { WindowLog.w(TAG, "window ${w.id}: home not started for the minimise", it) }.isSuccess
         WindowLog.i(TAG, "window ${w.id}: minimised as a home gesture (${top.flattenToShortString()}, task $task on display 0, home started=$ok)")
@@ -2511,6 +2532,7 @@ class WebWindows(
     /** MN2: the page's way back from minimised (dock, switcher, its page): an app [minimise] moved out, back in window [id]. */
     fun restore(id: Int): Boolean {
         val w = wins[id] ?: return false
+        minimisedIs(w, false)
         if (w.leftAt == 0L) return true
         io.post { backNow(w, "restored") }
         return true
@@ -2523,6 +2545,7 @@ class WebWindows(
     ) {
         if (w.closed || w.leftAt == 0L) return
         w.leftAt = 0L
+        minimisedIs(w, false)
         val task = w.taskId
         val alive = taskDisplay(task) != null
         val ok = if (alive) moveTask(task, w.displayId) else true.also { main.post { if (!w.closed) launch(w) } }
@@ -3298,6 +3321,14 @@ class WebWindows(
 
     companion object {
         private const val TAG = "PowosWebWindows"
+
+        /**
+         * On the HOME intent a minimise starts ([leaveNow]: the app's home-gesture lifecycle): not a Home press. Read as
+         * one (ShellActivity.homePressed), it opened the switcher over home - its layer took the next tap (the search
+         * bar's, e2e round 193 step 06) and showed the minimised app's task, which [checkLeft] then took for "brought to
+         * the front" and put back in its window (step 55).
+         */
+        const val EXTRA_APP_LEFT = "dev.omalauncher.shell.appLeft"
 
         /** A task change's [reconcile] waits this long, and an empty display is read again this long after. */
         private const val RECONCILE_MS = 400L

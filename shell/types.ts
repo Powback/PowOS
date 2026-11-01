@@ -963,6 +963,7 @@ export interface Bridge {
    * native port, frame-synced ("w.f", ui/webwindows.tsx), not through this bridge.
    * "webwindows.closed" (its id) when the host ended it. "webwindows.full" ({ id, on, task }): its app became a real
    * full-screen app on the main display (its bar's full screen button; the window hidden, kept) or is a window again.
+   * "webwindows.state" ({ id, minimised }): the host's minimised state of a window changed - the page's follows it.
    */
   webwindows?: {
     enabled(): Promise<boolean>;

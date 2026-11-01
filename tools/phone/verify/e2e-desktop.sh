@@ -100,7 +100,7 @@ part1_search_kate() {
   case $f in none|off|"") fail "no search on home - neither a bar nor the dock's search button ($f)" ;; *)
     set -- $f; tap "$1" "$2" "home's search (the bar, or the dock's search button)"; sleep 1.2; chk pill
     if [ "$(ev "$SEARCHED")" = yes ] &&
-       sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -q "com.powos.app"; then
+       homefocused; then
       sh_ "input text kate"; sleep 1.5; chk typed
       step search-kate "\"kate\" typed into home's search: the results"
       p=$(pt "document.querySelector('.drawer-list.results .app[data-key=\"l:org.kde.kate\"]')")
@@ -114,7 +114,7 @@ part1_search_kate() {
         [ "$KT" != none ] && put_away l:org.kde.kate l:org.kde.kate Kate kate-away ;;
       esac
     else
-      step search "home's search tapped"; fail "home's search didn't take the focus - nothing typed"; back
+      step search "home's search tapped"; fail "home's search didn't take the focus - nothing typed (field focused: $(ev "$SEARCHED"), $(ime))"; back
     fi ;;
   esac
 }
