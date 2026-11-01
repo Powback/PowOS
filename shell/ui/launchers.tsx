@@ -149,6 +149,10 @@ function Chip({ l, a, shut, remove }: { l: Launcher; a: App; shut: () => void; r
         type="button"
         class={`cc3-t cc3-launch ${pressed.value === l.id ? "on" : ""}`}
         aria-label={editing ? `${l.label}: remove` : `open ${l.label}`}
+        // In edit mode the row's reorder (useReorder) eats a tap on an item as a select; the remove is this chip's own
+        // edit action, so it's let through (the user, 11-02: "Pressing X to remove anything from the quick launch
+        // doesn't work").
+        data-edit-ok={editing || undefined}
         onClick={(e) => (editing ? remove?.() : open(l, a, shut, e.currentTarget))}
       >
         <span class="cc3-chip">
