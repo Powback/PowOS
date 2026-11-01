@@ -39,14 +39,16 @@ while [ $# -gt 0 ]; do
 done
 # Fail closed: a missing tool fails the lint; only GATE_LINT=0 skips it (exit 2), explicitly.
 if [ "${GATE_LINT:-1}" = 0 ]; then echo "     kotlin complexity: skipped (GATE_LINT=0)"; exit 2; fi
-command -v docker >/dev/null || { echo "FAIL kotlin complexity: no docker (GATE_LINT=0 skips it explicitly)"; exit 1; }
-docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "FAIL kotlin complexity: no $IMAGE (build android-app-dev's builder; GATE_LINT=0 skips)"; exit 1; }
+# The Java: the builder image's, else a host JDK (a CI runner has one but not the builder image); neither fails.
+if command -v docker >/dev/null && docker image inspect "$IMAGE" >/dev/null 2>&1; then RUN=docker
+elif command -v java >/dev/null; then RUN=host
+else echo "FAIL kotlin complexity: no $IMAGE (build android-app-dev's builder) and no java (GATE_LINT=0 skips)"; exit 1; fi
 if [ ! -f "$JAR" ]; then
   mkdir -p "$CACHE"
   # DETEKT_MIRROR: another Maven repo (tier-1 points it at nothing to prove a failed fetch fails the lint).
   curl -sfL --max-time 120 -o "$JAR.part" "${DETEKT_MIRROR:-https://repo1.maven.org/maven2}/io/gitlab/arturbosch/detekt/detekt-cli/$VER/detekt-cli-$VER-all.jar" \
     || { echo "FAIL kotlin complexity: couldn't fetch detekt $VER (GATE_LINT=0 skips it explicitly)"; exit 1; }
-  [ "$(shasum -a 256 "$JAR.part" | cut -d' ' -f1)" = "$SHA" ] || { rm -f "$JAR.part"; echo "FAIL kotlin complexity: detekt jar checksum mismatch"; exit 1; }
+  [ "$( { shasum -a 256 "$JAR.part" 2>/dev/null || sha256sum "$JAR.part"; } | cut -d' ' -f1)" = "$SHA" ] || { rm -f "$JAR.part"; echo "FAIL kotlin complexity: detekt jar checksum mismatch"; exit 1; }
   mv "$JAR.part" "$JAR"
 fi
 out=$(mktemp -d "$CACHE/run.XXXXXX"); trap 'rm -rf "$out"' EXIT
@@ -62,18 +64,21 @@ if [ -n "$only" ]; then
   done
   only=$norm; inputs=$only
 fi
+# O: the run's output dir as detekt sees it; S: the sources' root in its report paths.
+if [ $RUN = docker ]; then O=/out S=/src; else O=$out S=$APP; fi
 detekt() {
+  if [ $RUN = host ]; then (cd "$APP" && java -jar "$JAR" --input "$inputs" --config "$CFG" --excludes '**/build/**,**/test/**' "$@"); return; fi
   docker run --rm -v "$CACHE:/lint:ro" -v "$APP:/src:ro" -v "$out:/out" -w /src --entrypoint java "$IMAGE" \
     -jar "/lint/$(basename "$JAR")" --input "$inputs" --config "$CFG" --excludes '**/build/**,**/test/**' "$@"
 }
 
 if [ -n "$report" ]; then
-  detekt --report txt:/out/r.txt >/dev/null 2>&1
-  python3 - "$out/r.txt" "$report" <<'PY'
+  detekt --report "txt:$O/r.txt" >/dev/null 2>&1
+  python3 - "$out/r.txt" "$report" "$S" <<'PY'
 import re, sys
 rows, by = {}, {}
 for l in open(sys.argv[1]):
-    m = re.match(r"(\w+) - (\d+)/\d+ - \[([^\]]+)\] at /src/(\S+?):(\d+)", l)
+    m = re.match(r"(\w+) - (\d+)/\d+ - \[([^\]]+)\] at " + re.escape(sys.argv[3]) + r"/(\S+?):(\d+)", l)
     if not m: continue
     rule, n, fn, path, line = m.group(1), int(m.group(2)), m.group(3), m.group(4), m.group(5)
     by[rule] = by.get(rule, 0) + 1
@@ -94,7 +99,7 @@ if git -C "$ROOT" cat-file -e "HEAD:targets/android/app/$BASE" 2>/dev/null && [ 
   [ -z "$grew" ] || { echo "$grew" | head -20 | sed 's/^/FAIL kotlin complexity baseline grew (it only shrinks): /'; exit 1; }
 fi
 # 2. detekt against the baseline. Stale ids: detekt doesn't report them, so compare with a fresh baseline.
-rc=0; detekt --create-baseline --baseline /out/now.xml >"$out/run.log" 2>&1 || rc=$?
+rc=0; detekt --create-baseline --baseline "$O/now.xml" >"$out/run.log" 2>&1 || rc=$?
 # --only on files with no finding at all: detekt ran fine but writes no baseline.
 [ -n "$only" ] && [ $rc = 0 ] && [ ! -s "$out/now.xml" ] && grep -q 'number of kt files' "$out/run.log" && echo '<SmellBaseline/>' >"$out/now.xml"
 [ -s "$out/now.xml" ] || { echo "FAIL kotlin complexity: detekt didn't run"; tail -5 "$out/run.log"; exit 1; }

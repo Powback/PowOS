@@ -39,6 +39,12 @@ if [ -z "$ALL" ]; then
 fi
 [ -n "$ALL" ] && LT=1 LK=1 LR=1 LB=1
 skipped() { echo "  skip - $1 unchanged vs the merge base (--all runs it)"; }
+# A machine without a language's tool at all (a plain CI runner without docker, no JDK): that lint SKIPs, saying why.
+# Where the tool exists the lint runs, and a lint that then can't get the rest of what it needs fails (fail closed).
+KT_TOOL=""; RS_TOOL=""
+{ command -v docker >/dev/null && docker image inspect "${LINT_IMAGE:-android-app-dev-android-builder:latest}" >/dev/null 2>&1; } \
+  || command -v java >/dev/null || KT_TOOL="no android-app-dev builder image and no java on this machine"
+{ command -v docker >/dev/null && docker version >/dev/null 2>&1; } || RS_TOOL="no reachable docker on this machine (clippy runs in rust:1-bookworm)"
 ok()  { echo "  ok   - $1"; PASS=$((PASS+1)); }
 bad() { echo "  FAIL - $1"; FAIL=$((FAIL+1)); }
 
@@ -76,7 +82,8 @@ out=$(XDG_CACHE_HOME=$neg/c npm_config_cache=$neg/npm npm_config_registry=http:/
       npm_config_fetch_timeout=3000 bash "$ROOT/shell/dev/lint-complexity.sh" 2>&1); rc=$?
 [ $rc = 1 ] && echo "$out" | grep -q "FAIL complexity: npm ci" && ok "TS lint without eslint and no registry: exit 1, says why" \
   || { bad "TS lint without eslint and no registry: exit $rc (must be 1)"; echo "$out" | head -5 | sed 's/^/       /'; }
-if [ $LK = 1 ] && command -v docker >/dev/null; then
+if [ $LK = 1 ] && [ -n "$KT_TOOL" ]; then echo "  SKIP - Kotlin fail-closed probe: $KT_TOOL"
+elif [ $LK = 1 ]; then
   out=$(XDG_CACHE_HOME=$neg/c DETEKT_MIRROR=http://127.0.0.1:9 bash "$ROOT/targets/android/lint-complexity.sh" 2>&1); rc=$?
   [ $rc = 1 ] && echo "$out" | grep -q "couldn't fetch detekt" && ok "Kotlin lint without detekt and no network: exit 1, says why" \
     || { bad "Kotlin lint without detekt and no network: exit $rc (must be 1)"; echo "$out" | head -5 | sed 's/^/       /'; }
@@ -87,7 +94,7 @@ rm -rf "$neg"
 fi
 
 echo "== Kotlin (targets/android/app) =="
-if [ $LK = 0 ]; then skipped Kotlin; else
+if [ $LK = 0 ]; then skipped Kotlin; elif [ -n "$KT_TOOL" ]; then echo "  SKIP - Kotlin complexity: $KT_TOOL"; else
 out=$(bash "$ROOT/targets/android/lint-complexity.sh" 2>&1); rc=$?
 case $rc in
     0) ok "detekt: no function over the limits beyond app/config/detekt-baseline.xml, no stale ids" ;;
@@ -97,7 +104,7 @@ esac
 fi
 
 echo "== Rust (apps/*/module) =="
-if [ $LR = 0 ]; then skipped Rust; else
+if [ $LR = 0 ]; then skipped Rust; elif [ -n "$RS_TOOL" ]; then echo "  SKIP - Rust complexity: $RS_TOOL"; else
 out=$(bash "$ROOT/tools/lint/rust-complexity.sh" 2>&1); rc=$?
 case $rc in
     0) ok "clippy: no count above tools/lint/rust-complexity-baseline.txt, none paid off unpruned" ;;
