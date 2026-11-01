@@ -9633,12 +9633,14 @@ try {
   // and bottom-aligned; a tap on "+4 more" opens that group alone. NS5-NS7 (11-01 16:47: "Let's move the notifications
   // to the top"): unset is top, newest first; bottom opens at its thumb end; a stored bottom moves to top once. NS8
   // (17:04): the single-app notifications first, headless, then the groups by newest; NS9 (17:03): a tap expands a
-  // clamped card in place without opening the app, again folds it. Renders: /cache/notif-stacks-*.png.
+  // clamped card in place without opening the app, again folds it. NS10 (11-01: "There is no icon for these
+  // notifications"): every single has its icon; NS11 ("the show-more thing just pops them in instantly"): "+N more",
+  // fold, dismiss and arrival animate over frames, instant with reduced motion. Renders: /cache/notif-stacks-*.png.
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, `shade-notif-stacks-${label}`, viewport).then((r) => whenReady(r, async () => {
         const call = (fn, ...args) => r.page.evaluate(async (f, a) => (await importShim("./dev/notif-stacks-check.js"))[f](...a), fn, args);
-        const fails = [...(await call("stacksSeed")), ...(await call("stacksDefault", `${label} default`))];
+        const fails = [...(await call("stacksSeed")), ...(await call("stacksDefault", `${label} default`)), ...(await call("stacksIcons", `${label} icons`))];
         for (const align of ["top", "bottom"]) {
           const at = `${label} ${align}`;
           fails.push(...(await call("stacksAt", align, at)));
@@ -9651,6 +9653,11 @@ try {
           await r.page.screenshot({ path: `/cache/notif-stacks-${label}-top-expanded.png` });
           await call("stacksUnoTap");
         }
+        // NS11: nothing appears or vanishes in one frame - then the same with reduced motion: all of it instant.
+        if (!fails.length) fails.push(...(await call("stacksMotion", `${label} motion`)));
+        await r.page.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]);
+        if (!fails.length) fails.push(...(await call("stacksReduced", `${label} reduced motion`)));
+        await r.page.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "no-preference" }]);
         fails.push(...(await call("stacksOpenEnd", `${label} bottom open`)), ...(await call("stacksMigrate", `${label} migrate`)));
         return fails;
       })));

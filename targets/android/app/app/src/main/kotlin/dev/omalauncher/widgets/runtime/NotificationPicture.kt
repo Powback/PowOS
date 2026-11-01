@@ -26,6 +26,39 @@ object NotificationPicture {
     /** The JPEG quality: a photo in a card. */
     const val QUALITY = 80
 
+    /** The small icon's side, in px: the card's 20 dp icon at up to 3x. */
+    const val ICON_PX = 64
+
+    /**
+     * The page's URL of [key]'s small icon (Notification.getSmallIcon: the status bar's monochrome glyph, which the
+     * page tints with [color]) - every Android notification has one; posted at [time], so an update is fetched again.
+     */
+    fun smallUrl(
+        origin: String,
+        key: String,
+        time: Long,
+    ): String = "$origin/_nicon/${URLEncoder.encode(key, "UTF-8")}?t=$time"
+
+    /** Notification.color as the page's CSS ("#rrggbb"), null: the app set none (COLOR_DEFAULT). */
+    fun color(argb: Int): String? = if (argb == Notification.COLOR_DEFAULT) null else String.format("#%06x", argb and 0xffffff)
+
+    /** [sbn]'s small icon as a PNG, [ICON_PX] square (its shape in its alpha: the page masks with it), null: none. */
+    fun smallPng(
+        sbn: StatusBarNotification,
+        context: android.content.Context,
+    ): ByteArray? =
+        runCatching {
+            val d = sbn.notification.smallIcon?.loadDrawable(context) ?: return null
+            val b = Bitmap.createBitmap(ICON_PX, ICON_PX, Bitmap.Config.ARGB_8888)
+            try {
+                d.setBounds(0, 0, ICON_PX, ICON_PX)
+                d.draw(Canvas(b))
+                ByteArrayOutputStream().also { b.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+            } finally {
+                b.recycle()
+            }
+        }.getOrNull()
+
     /** Whether [extras] carry a big picture - a key check, nothing decoded. */
     fun has(extras: Bundle?): Boolean =
         extras != null && (extras.containsKey(Notification.EXTRA_PICTURE) || extras.containsKey(Notification.EXTRA_PICTURE_ICON))

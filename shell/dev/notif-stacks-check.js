@@ -13,7 +13,15 @@
  * NS9 (11-01 17:03: "I should be able to tap them to expand them and see them"): Uno's long text is clamped; a tap on
  *      its body expands it in place (all of it laid out, no clamp) without opening the app, an Open button then
  *      opens it; a tap again folds it.
+ * NS10 (11-01: "There is no icon for these notifications"): every single's card has its icon - the small icon (Solo:
+ *      a mask in its app's color), else the app's icon (Uno) - a non-empty image left of its app name.
+ * NS11 (11-01: "the show-more thing just pops them in instantly"): "+4 more" grows the group over several frames (its
+ *      height between start and end, no one-frame jump) while its new cards' opacity ramps; folding shrinks it the
+ *      same way; a card slid away closes its gap over several frames, and arriving again it fades in; with reduced
+ *      motion all of it is instant.
  */
+/** A change's spring (ui/spring.ts, ~410 ms) and its staggered fades played out. */
+const SETTLE_MS = 650;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const frames = (n) => new Promise((r) => { const f = () => (--n <= 0 ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); });
 const r0 = (v) => Math.round(v);
@@ -26,12 +34,17 @@ const title = (app, i) => `${app} title ${i + 1}`;
 const text = (app, i) =>
   app === "Uno" ? Array.from({ length: LONG }, (_, l) => `Uno ${l ? "line" : "first line"} ${l + 1}`).join("\n") : `${app} first line ${i + 1}\nsecond line`;
 
+/** A small icon (a glyph: its shape in its alpha) and an app icon, as the host's URLs would load them. */
+const GLYPH = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg>')}`;
+const APP_ICON = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="6" fill="#4285f4"/></svg>')}`;
+
 /** The mock's notifications: the groups (the newest app first: Solo, then Trio, then Seven), then the shade open. */
 const seedItems = (now) =>
   GROUPS.flatMap(([app, n], g) =>
     Array.from({ length: n }, (_, i) => ({
       key: `${app}-${i}`, app, pkg: `test.${app.toLowerCase()}`, title: title(app, i), text: text(app, i),
-      time: now - 60 * (g * 10 + i + 1), icon: null, clearable: true, profile: null, conversation: false,
+      time: now - 60 * (g * 10 + i + 1), icon: app === "Uno" ? APP_ICON : null, clearable: true, profile: null, conversation: false,
+      smallIcon: app === "Uno" ? null : GLYPH, color: app === "Uno" ? null : "#3ddc84",
     })),
   );
 export async function stacksSeed() {
@@ -155,7 +168,7 @@ const clamped = (t) => {
 export async function stacksUnoTap() {
   const t = groupOf("Uno").cards[0]?.querySelector(".notif-text");
   if (t) tap(t);
-  await frames(3);
+  await sleep(SETTLE_MS);
   return [];
 }
 
@@ -174,10 +187,10 @@ function expandedOk(card, t, opened, at) {
 async function foldThenOpen(card, t, opened, at) {
   const fails = [];
   tap(t);
-  await frames(3);
+  await sleep(SETTLE_MS);
   if (card.classList.contains("expanded") || !clamped(t)) fails.push(`${at}: a second tap didn't fold Uno back`);
   tap(t);
-  await frames(3);
+  await sleep(SETTLE_MS);
   card.querySelector(".notif-open")?.click();
   if (opened[0] !== "Uno-0") fails.push(`${at}: Uno's Open didn't open it (${opened.join() || "nothing"})`);
   const S = await importShim("./state.ts");
@@ -200,7 +213,7 @@ export async function stacksCardExpand(at, keepOpen) {
     card.scrollIntoView({ block: "nearest" });
     if (!clamped(t)) return [`${at}: Uno's ${LONG}-line text isn't clamped folded (${t.scrollHeight}/${t.clientHeight} px)`];
     tap(t);
-    await frames(3);
+    await sleep(SETTLE_MS);
     const fails = expandedOk(card, t, opened, at);
     return keepOpen ? fails : [...fails, ...(await foldThenOpen(card, t, opened, at))];
   } finally {
@@ -213,14 +226,14 @@ export async function stacksExpand(at) {
   const fails = [];
   const seven = groupOf("Seven"), trio = groupOf("Trio");
   seven.more.click();
-  await sleep(450);
+  await sleep(SETTLE_MS);
   if (!seven.stack.classList.contains("open")) return [`${at}: a tap on Seven's "+4 more" didn't open it`];
   if (trio.stack.classList.contains("open")) fails.push(`${at}: a tap on Seven's "+4 more" opened Trio's too`);
   const all = [...seven.stack.querySelectorAll(".notif")].filter((c) => c.getBoundingClientRect().height > 40 && !c.closest("[inert]"));
   if (all.length !== 7) fails.push(`${at}: Seven open lays out ${all.length} of its 7 cards`);
   if (groupOf("Trio").cards.length !== 3) fails.push(`${at}: Trio shows ${groupOf("Trio").cards.length} cards with Seven open`);
   seven.stack.querySelector(":scope > .notif-group-head").click();
-  await sleep(450);
+  await sleep(SETTLE_MS * 2);
   if (seven.stack.classList.contains("open")) fails.push(`${at}: a tap on Seven's head didn't fold it back`);
   return fails;
 }
@@ -306,4 +319,137 @@ export async function stacksMigrate(at) {
   } finally {
     for (const [k, v] of keep) v == null ? localStorage.removeItem(`powos.${k}`) : localStorage.setItem(`powos.${k}`, v);
   }
+}
+
+/** NS10: every single's card has an icon, left of its app name, with an image (an img's src, or a small icon's mask). */
+export async function stacksIcons(at) {
+  const cards = [...document.querySelectorAll(".notif-panel.shown .notif-singles > .notif")];
+  if (!cards.length) return [`${at}: no singles in the shade`];
+  return cards.flatMap((c) => iconOk(c, at));
+}
+
+/** An icon's image: an img's src, else the small icon's mask ("" for none). */
+function imageOf(icon) {
+  if (icon.tagName === "IMG") return icon.getAttribute("src") ?? "";
+  const cs = getComputedStyle(icon);
+  const m = cs.maskImage || cs.webkitMaskImage || "none";
+  return m === "none" ? "" : m;
+}
+
+/** NS10 for one single's card [c]: the failures. */
+function iconOk(c, at) {
+  const app = c.querySelector(".notif-app"), icon = c.querySelector(".notif-head > .notif-icon");
+  const what = `${at}: ${app?.textContent}'s single`;
+  if (!icon) return [`${what} has no icon`];
+  const b = icon.getBoundingClientRect(), a = app?.getBoundingClientRect();
+  const fails = [];
+  if (!imageOf(icon)) fails.push(`${what}'s icon has no image`);
+  if (b.width < 8 || b.height < 8) fails.push(`${what}'s icon is ${r0(b.width)}x${r0(b.height)} px`);
+  if (a && b.right > a.left + 1) fails.push(`${what}'s icon isn't left of its name`);
+  return fails;
+}
+
+/** [read]() each frame until [ms] have passed: the values, the first taken right after [act]() (same task). */
+async function sample(act, read, ms = SETTLE_MS) {
+  const out = [read()];
+  act();
+  const end = performance.now() + ms;
+  while (performance.now() < end) {
+    await frames(1);
+    out.push(read());
+  }
+  return out;
+}
+
+/** [hs] (a height per frame) moving from its first to its last over several frames - no jump - or the failure. */
+function gradual(hs, what, at) {
+  const a = hs[0], z = hs[hs.length - 1];
+  if (Math.abs(z - a) < 20) return `${at}: ${what} barely changed (${r0(a)} -> ${r0(z)} px)`;
+  const between = hs.filter((h) => (h - a) * (z - h) > 0 && Math.abs(h - a) > 1 && Math.abs(z - h) > 1);
+  const jump = Math.max(...hs.slice(1).map((h, i) => Math.abs(h - hs[i])));
+  if (between.length < 3) return `${at}: ${what} went ${r0(a)} -> ${r0(z)} px in ${between.length} in-between frames (${hs.map(r0).join(",")})`;
+  return jump > Math.abs(z - a) * 0.7 ? `${at}: ${what} jumped ${r0(jump)} of ${r0(Math.abs(z - a))} px in one frame` : null;
+}
+
+const height = (el) => () => el.getBoundingClientRect().height;
+const ramps = (ops) => ops.some((o) => o > 0.05 && o < 0.95);
+
+/** NS11 "+4 more": Seven's group grows over frames, its new cards' opacity ramps; folding shrinks it over frames. */
+async function moreMotion(at) {
+  const seven = groupOf("Seven");
+  if (!seven.more) return [`${at}: no "+4 more" on Seven`];
+  seven.stack.scrollIntoView({ block: "nearest" });
+  const rest = () => seven.stack.querySelector(".notif-rest .notif");
+  const ops = [];
+  const hs = await sample(() => seven.more.click(), () => (rest() && ops.push(+getComputedStyle(rest()).opacity), seven.stack.getBoundingClientRect().height));
+  const fails = [gradual(hs, `Seven's group opening`, at)].filter(Boolean);
+  if (!ramps(ops)) fails.push(`${at}: Seven's new cards didn't fade in (opacity ${[...new Set(ops.map((o) => o.toFixed(2)))].join(",")})`);
+  const head = seven.stack.querySelector(":scope > .notif-group-head");
+  const back = await sample(() => head.click(), height(seven.stack), SETTLE_MS * 1.6);
+  return [...fails, gradual(back, `Seven's group folding`, at)].filter(Boolean);
+}
+
+/** A sideways slide of [card] past the dismiss point (the gesture's pointer capture stubbed: synthetic pointers). */
+function swipe(card) {
+  const b = card.getBoundingClientRect(), y = b.top + 12;
+  const ev = (type, x) => card.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: y, pointerId: 7, isPrimary: true }));
+  ev("pointerdown", b.left + 20);
+  ev("pointermove", b.left + 60);
+  ev("pointermove", b.left + 20 + b.width * 0.6);
+  ev("pointerup", b.left + 20 + b.width * 0.6);
+}
+
+/** NS11 dismiss: Solo slid away, the singles' list closes its gap over frames; seeded again, Solo fades back in. */
+async function dismissMotion(at) {
+  const B = await importShim("./bridge.ts");
+  const real = { dismiss: B.powos.notifications.dismiss, cap: Element.prototype.setPointerCapture };
+  const items = seedItems(Math.floor(Date.now() / 1000));
+  B.powos.notifications.dismiss = async (k) => window.__mockEvents.emit("notifications.changed", { available: true, items: items.filter((n) => n.key !== k) });
+  Element.prototype.setPointerCapture = () => {};
+  try {
+    const singles = document.querySelector(".notif-panel.shown .notif-singles");
+    const solo = groupOf("Solo").cards[0];
+    if (!singles || !solo) return [`${at}: no Solo single to dismiss`];
+    singles.scrollIntoView({ block: "nearest" });
+    // The slide-out (180 ms), then the gap closing on the spring.
+    const hs = await sample(() => swipe(solo), height(singles), 180 + SETTLE_MS);
+    const fails = [gradual(hs, "the singles' gap after a dismiss", at)].filter(Boolean);
+    if (groupOf("Solo").cards.length) fails.push(`${at}: Solo slid away is still listed`);
+    const ops = [];
+    await sample(() => window.__mockEvents.emit("notifications.changed", { available: true, items }), () => {
+      const c = groupOf("Solo").cards[0];
+      if (c) ops.push(+getComputedStyle(c).opacity);
+    });
+    if (!ramps(ops)) fails.push(`${at}: Solo arriving again didn't fade in (opacity ${[...new Set(ops.map((o) => o.toFixed(2)))].join(",")})`);
+    return fails;
+  } finally {
+    B.powos.notifications.dismiss = real.dismiss;
+    Element.prototype.setPointerCapture = real.cap;
+  }
+}
+
+/** NS11, top-aligned. */
+export async function stacksMotion(at) {
+  const A = await importShim("./ui/align.ts");
+  A.alignTry.value = { ...A.alignTry.value, shade: "top" };
+  await sleep(SETTLE_MS);
+  const fails = await moreMotion(at);
+  await sleep(SETTLE_MS);
+  return [...fails, ...(await dismissMotion(at))];
+}
+
+/** NS11 reduced motion (the page emulating it): "+4 more" lays out at once, nothing animates; folded back after. */
+export async function stacksReduced(at) {
+  await sleep(SETTLE_MS);
+  const seven = groupOf("Seven");
+  if (!seven.more) return [`${at}: no "+4 more" on Seven`];
+  const hs = await sample(() => seven.more.click(), height(seven.stack), 300);
+  const fails = [];
+  if (Math.abs(hs[1] - hs[hs.length - 1]) > 1) fails.push(`${at}: with reduced motion Seven's group still grows (${hs.slice(0, 6).map(r0).join(",")})`);
+  const running = document.querySelector(".notif-panel").getAnimations({ subtree: true }).filter((a) => !(a instanceof CSSAnimation) && !(a instanceof CSSTransition));
+  if (running.length) fails.push(`${at}: with reduced motion ${running.length} animations still run`);
+  seven.stack.querySelector(":scope > .notif-group-head").click();
+  await frames(3);
+  if (seven.stack.classList.contains("open")) fails.push(`${at}: with reduced motion the fold didn't take at once`);
+  return fails;
 }

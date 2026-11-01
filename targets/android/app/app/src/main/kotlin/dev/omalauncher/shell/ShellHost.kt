@@ -318,7 +318,7 @@ class ShellHost(
                 val jpeg = ShellWallpaper.jpeg(context) ?: return notFound()
                 return WebResourceResponse("image/jpeg", null, ByteArrayInputStream(jpeg)).apply { responseHeaders = mapOf("Cache-Control" to "max-age=31536000") }
             }
-            if (path.startsWith("_media/") || path.startsWith("_npic/")) return shadeImage(path)
+            if (path.startsWith("_media/") || path.startsWith("_npic/") || path.startsWith("_nicon/")) return shadeImage(path)
             // The assistant's screenshot of the screen it was opened over (PowosAssistSession writes it).
             if (path.startsWith("_assist/")) {
                 val file = File(File(context.cacheDir, "assist"), path.removePrefix("_assist/").substringAfterLast('/'))
@@ -459,9 +459,13 @@ class ShellHost(
     /**
      * The shade's pictures: what's playing's album art, for the control center's media card ("_media/<id>", its id
      * from media.state), and a notification's big picture for its expanded card ("_npic/<key>", NotificationPicture;
-     * ?t= names its post, so it's kept).
+     * ?t= names its post, so it's kept), and its small icon for the singles' cards ("_nicon/<key>", the same).
      */
     private fun shadeImage(path: String): WebResourceResponse {
+        if (path.startsWith("_nicon/")) {
+            val png = runtime.widgets.notifications.smallIcon(URLDecoder.decode(path.removePrefix("_nicon/"), "UTF-8")) ?: return notFound()
+            return WebResourceResponse("image/png", null, ByteArrayInputStream(png)).apply { responseHeaders = mapOf("Cache-Control" to "max-age=3600") }
+        }
         if (path.startsWith("_npic/")) {
             val jpeg = runtime.widgets.notifications.picture(URLDecoder.decode(path.removePrefix("_npic/"), "UTF-8")) ?: return notFound()
             return WebResourceResponse("image/jpeg", null, ByteArrayInputStream(jpeg)).apply { responseHeaders = mapOf("Cache-Control" to "max-age=3600") }
