@@ -332,9 +332,16 @@ function AiBody({ sub, shown, beside = false }: { sub: AiScreen | null; shown: b
       </div>
     );
   }
+  return <PageChat shown={shown} />;
+}
+
+/**
+ * THE chat, styled as one wherever it's held (.ai-page-chat: the page, its panes, the launcher's AI panel and the side
+ * button's assist overlay - the user, 11-01: "same design as the AI page"; shell.css): one component, not a second one.
+ */
+export function PageChat({ shown, cls = "" }: { shown: boolean; cls?: string }) {
   return (
-    // .ai-page-chat: THE chat, styled as one wherever it's held (the page, its panes, the launcher's AI panel: shell.css).
-    <div class="ai-scroll ai-chat ai-page-chat">
+    <div class={`ai-scroll ai-chat ai-page-chat ${cls}`}>
       <ChatPane shown={shown} />
     </div>
   );
