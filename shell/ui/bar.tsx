@@ -284,6 +284,21 @@ function askHere(text: string) {
 }
 
 /**
+ * PT1: a finger's click on the bar whose pointerdown it didn't see is another press's (a hold on the dock button that
+ * brought the launcher up under the finger), never a tap on the bar. A keyboard's or a script's click is the bar's.
+ */
+function useOwnPress(onClick: () => void) {
+  const pressed = useRef(false);
+  const onPointerDown = () => void (pressed.current = true);
+  const click = (e: MouseEvent) => {
+    const seen = pressed.current || !e.isTrusted || !e.detail;
+    pressed.current = false;
+    if (seen) onClick();
+  };
+  return { onPointerDown, onClick: click };
+}
+
+/**
  * The search/ask bar: the pill PowOS AI's page asks in (shell.css .pill - the reference material, the field growing to
  * three rows upward over home without moving anything under it, the mic on its right), the prompt glyph its placeholder.
  */
@@ -310,14 +325,14 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
         else if (searchPending.value) return;
         else askHere(query.value);
       }}
-      onClick={() => {
+      {...useOwnPress(() => {
         openHere();
         if (launcherIsOverlay) return;
         // The search widget on the grid is the pill's face only: the typing is the foot's pill (home.tsx, parked
         // there while the widget is on the grid), which comes up with the drawer as the original did.
         (proxy ? footField() : input.current)?.focus();
         powos.keyboard.show();
-      }}
+      })}
     >
       {/* The pill (shell.css .pill, as PowOS AI's compose): its own box over the bar's place, growing upward - the bar's
           height (home's layout) never changes. */}

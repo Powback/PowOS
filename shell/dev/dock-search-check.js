@@ -547,3 +547,69 @@ export async function searchDragDone() {
   S.dockTry.value = "";
   await sleep(200);
 }
+
+/**
+ * PT1 (the user, 2026-11-01 17:02: "When I hold the launcher mic / push-to-talk, it switches itself off: the launcher
+ * shows up, my finger is now over the input field, the input activates, and that stops the voice"). gate.mjs's
+ * ptt-hold-* cases hold the dock button with a real (CDP) finger for 3 s: pttHoldSetup puts the button in the dock and
+ * counts the recognizer's calls, pttHoldSample is read every 100 ms while held, pttHoldResult after the finger lifts.
+ */
+export async function pttHoldSetup(position) {
+  const S = await importShim("./state.ts");
+  const { powos } = await importShim("./bridge.ts");
+  if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6);
+  S.dockTry.value = position;
+  S.searchTry.value = "dock";
+  await window.__gw.settled(() => document.querySelector(".home > .dock .dock-search"), ".home > .dock");
+  const calls = { start: 0, hold: 0, stop: 0, cancel: 0, focus: [] };
+  for (const k of ["start", "hold", "stop", "cancel"]) {
+    const was = powos.speech[k];
+    powos.speech[k] = async (...a) => (calls[k]++, was(...a));
+  }
+  document.addEventListener("focusin", (e) => calls.focus.push(`${Math.round(performance.now())} ${e.target.tagName}`), true);
+  const r = document.querySelector(".home > .dock .dock-search").getBoundingClientRect();
+  const at = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  window.__pt1 = { calls, samples: [], at };
+  return at;
+}
+
+/** One sample while held: dictating, the field (if any) not focused, the launcher's state. */
+export async function pttHoldSample() {
+  const S = await importShim("./state.ts");
+  const { speech } = await importShim("./ui/dictation.ts");
+  const field = document.querySelector(".home > .bar textarea");
+  const under = window.__pt1.at && document.elementFromPoint(window.__pt1.at.x, window.__pt1.at.y);
+  window.__pt1.samples.push({ listening: speech.value.listening, focused: !!field && document.activeElement === field, open: S.drawer.value, stops: window.__pt1.calls.stop + window.__pt1.calls.cancel, under: under?.tagName });
+}
+
+/** While held (from the 6th sample, 500 ms in): the launcher up, the dictation on, its field never focused, no stop. */
+function heldFails(calls, samples) {
+  const fails = [];
+  const held = samples.slice(5);
+  if (!held.length) fails.push("no samples while held");
+  if (!samples.some((s) => s.open === 1)) fails.push("the launcher never came up while held");
+  const off = held.findIndex((s) => !s.listening);
+  if (off >= 0) fails.push(`the dictation went off while still held (sample ${off + 5} of ${samples.length})`);
+  const foc = samples.findIndex((s) => s.focused);
+  if (foc >= 0) fails.push(`the launcher's field was focused while held (sample ${foc})`);
+  if (held.some((s) => s.stops)) fails.push(`the recognizer was stopped while held: ${JSON.stringify(calls)}`);
+  if (!calls.hold) fails.push("held 3 s: not push-to-talk (no speech.hold)");
+  return fails;
+}
+
+/** After the finger lifted: what held through the 3 s and what the release did (one stop, no focus). */
+export async function pttHoldResult() {
+  const S = await importShim("./state.ts");
+  const { speech } = await importShim("./ui/dictation.ts");
+  const { calls, samples } = window.__pt1;
+  const fails = heldFails(calls, samples);
+  if (calls.stop + calls.cancel !== 1) fails.push(`the release: ${calls.stop} stops + ${calls.cancel} cancels (one stop)`);
+  const field = document.querySelector(".home > .bar textarea");
+  if (field && document.activeElement === field) fails.push("the release focused the launcher's field (read as a tap on it)");
+  if (speech.value.listening) fails.push("still dictating after the release");
+  if (calls.focus.length) fails.push(`focus moved during the press: ${calls.focus.join(", ")}`);
+  S.closeDrawer();
+  S.searchTry.value = "";
+  S.dockTry.value = "";
+  return fails;
+}
