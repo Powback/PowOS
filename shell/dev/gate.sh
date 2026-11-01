@@ -94,7 +94,7 @@ slot_take() { mkdir "$1" 2>/dev/null || return 1; echo $$ > "$1/pid"; slot=$1; }
 reap() { local d; for d in "$slots"/*; do [ -d "$d" ] && ! slot_live "$d" && rm -rf "$d"; done; return 0; }
 running() { local d n=0; for d in "$slots"/*; do [ -d "$d" ] && slot_live "$d" && n=$((n + 1)); done; echo $n; }
 trap 'rm -rf ${slot:+"$slot"}' EXIT
-trap 'exit 130' INT TERM
+trap 'exit 130' INT TERM HUP ALRM
 if [ "${GATE_PRIORITY:-}" = ship ]; then
   rm -rf "$slots/ship.$$"; slot_take "$slots/ship.$$"
   cpu=""
@@ -311,7 +311,12 @@ fi
 # loop (set -e) - the EXIT trap's kill then failed and turned a printed "gate: pass" into exit 1 (f381, 11-01).
 ( while :; do sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}' > "$tx/.hostload.$$.tmp" && mv -f "$tx/.hostload.$$.tmp" "$tx/.hostload" || true; sleep 2; done ) &
 hostload_pid=$!
-trap 'kill $hostload_pid 2>/dev/null || true; gr_cleanup; rm -rf "$work" ${slot:+"$slot"}' EXIT
+# Every local container this gate starts carries its run label, and the exit kills whatever still has it - whatever
+# the exit (a FAIL, ^C, a timeout's kill, set -e): 11-02 a hung scene left the Chromium container up 25 min after
+# its gate was stopped. dev/preview.sh's container takes the label too (GATE_RUN_LABEL).
+export GATE_RUN_LABEL="powos-gate-run=$$-$(date +%s)"
+kill_containers() { local ids; ids=$(docker ps -q --filter "label=$GATE_RUN_LABEL" 2>/dev/null) || ids=""; [ -z "$ids" ] || docker rm -f $ids >/dev/null 2>&1 || true; }
+trap 'kill $hostload_pid 2>/dev/null || true; kill_containers; gr_cleanup; rm -rf "$work" ${slot:+"$slot"}' EXIT
 set +e
 # The Mac-wide build slot (tools/agents/build-slot.sh): booting the pages competes for CPU with
 # compile-check/build-pkgs/warm-builder's docker runs, and a fixed READY_MS can't tell a slow page from a
@@ -334,15 +339,18 @@ browser_run() {
     return
   fi
   ${GATE_BUILD_SLOT:+"$SHELL_DIR/../tools/agents/build-slot.sh" "gate $base" --} \
-  docker run --rm --platform linux/arm64 --shm-size 512m $cpu "${mounts[@]}" "${envs[@]}" \
+  docker run --rm --label "$GATE_RUN_LABEL" --platform linux/arm64 --shm-size 512m $cpu "${mounts[@]}" "${envs[@]}" \
     ${host_load:+-e GATE_HOST_LOAD="$host_load"} ${host_cpus:+-e GATE_HOST_CPUS="$host_cpus"} \
     -w /usr/src/app --entrypoint node "$IMAGE" gate.mjs
 }
 ready_ms=${READY_MS:-$ready_default}
 ts=$(mark)
 browser_log="$work/browser.log"
-browser_run "$ready_ms" "${GATE_ONLY:-}" "${GATE_BOOTS:-}" 2>&1 | tee "$browser_log"
-rc=${PIPESTATUS[0]}
+# In the background + wait: bash runs a signal's trap only once the foreground command ends, so a hung browser run in
+# the foreground kept the gate (and its container) up through a TERM/ALRM; `wait` returns on the signal at once.
+( browser_run "$ready_ms" "${GATE_ONLY:-}" "${GATE_BOOTS:-}" 2>&1; echo $? > "$work/browser.rc" ) | tee "$browser_log" &
+wait $!
+rc=$(cat "$work/browser.rc" 2>/dev/null || echo 2)
 # One retry of the scenes that failed ONLY on the machine, never on an assertion (f30): a page not ready in time, a
 # navigation or protocol timeout, an evaluate whose context or promise was lost - what a starved Mac does (load 8-21,
 # 10-31: a different 1-23 scenes each run that pass alone). Those scenes run once more on their own, two pages booting
@@ -362,8 +370,9 @@ if [ $rc -ne 0 ] && grep -q '^FAIL ' "$browser_log"; then
     echo "gate: retry: $(printf '%s' "$retry_names" | paste -sd' ' -) failed only on load/timeouts at load $load - running them once more alone (2 booting, READY_MS x2)"
     retry=$(( ready_ms * 2 )); [ "$retry" -le 120000 ] || retry=120000
     set +e
-    GATE_SCENES=6 browser_run "$retry" "$names" 2 2>&1 | tee "$work/browser-retry.log"
-    rrc=${PIPESTATUS[0]}
+    ( GATE_SCENES=6 browser_run "$retry" "$names" 2 2>&1; echo $? > "$work/browser-retry.rc" ) | tee "$work/browser-retry.log" &
+    wait $!
+    rrc=$(cat "$work/browser-retry.rc" 2>/dev/null || echo 2)
     set -e
     while IFS= read -r n; do
       [ -n "$n" ] || continue
@@ -414,7 +423,7 @@ if [ -n "$shots" ]; then
   # container can't follow - without it every icon glyph renders as tofu.
   nerd=$(cd "$SHELL_DIR/fonts" && cd "$(dirname "$(readlink nerd_symbols.ttf)")" 2>/dev/null && pwd -P)/nerd_symbols.ttf
   [ -f "$nerd" ] && smounts+=(-v "$nerd:/fonts/nerd_symbols.ttf:ro")
-  docker run --rm --platform linux/arm64 --shm-size 512m $cpu "${smounts[@]}" ${SHOTS_THEME:+-e SHOTS_THEME="$SHOTS_THEME"} \
+  docker run --rm --label "$GATE_RUN_LABEL" --platform linux/arm64 --shm-size 512m $cpu "${smounts[@]}" ${SHOTS_THEME:+-e SHOTS_THEME="$SHOTS_THEME"} \
     ${SHOTS_ONLY:+-e SHOTS_ONLY="$SHOTS_ONLY"} ${SHOTS_SCALE:+-e SHOTS_SCALE="$SHOTS_SCALE"} ${SHOTS_PROBE:+-e SHOTS_PROBE="$SHOTS_PROBE"} ${SHOTS_STRICT:+-e SHOTS_STRICT="$SHOTS_STRICT"} -w /usr/src/app --entrypoint node "$IMAGE" shots.mjs ||
     { echo "     shots: the render run failed$([ "${SHOTS_STRICT:-}" = 1 ] && echo " (strict: overlapping tiles or missing glyphs, report.json)")"
       [ "${SHOTS_STRICT:-}" = 1 ] && fail=1; }

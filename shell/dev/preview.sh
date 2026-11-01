@@ -112,7 +112,7 @@ browser() { # PASS
     -e PREVIEW_LIVE="$live" -e PREVIEW_FAST="$fast" ${only:+-e PREVIEW_ONLY="$only"} ${PREVIEW_EMPTY:+-e PREVIEW_EMPTY="$PREVIEW_EMPTY"} \
     ${PREVIEW_JOBS:+-e PREVIEW_JOBS="$PREVIEW_JOBS"} ${PREVIEW_DEBUG:+-e PREVIEW_DEBUG=1} ${PREVIEW_DEBUG_KEY:+-e PREVIEW_DEBUG_KEY="$PREVIEW_DEBUG_KEY"} ${PREVIEW_BASELINE:+-e PREVIEW_BASELINE="$PREVIEW_BASELINE"})
   if [ -n "$GR_HOST" ]; then browser_remote "$1" "${envs[@]}"; return; fi
-  docker run --rm --platform linux/arm64 --shm-size 1g ${GATE_CPU_SHARES:+--cpu-shares "$GATE_CPU_SHARES"} "${mounts[@]}" "${envs[@]}" \
+  docker run --rm ${GATE_RUN_LABEL:+--label "$GATE_RUN_LABEL"} --platform linux/arm64 --shm-size 1g ${GATE_CPU_SHARES:+--cpu-shares "$GATE_CPU_SHARES"} "${mounts[@]}" "${envs[@]}" \
     -w /usr/src/app --entrypoint node "$IMAGE" preview.mjs
 }
 # GATE_REMOTE (dev/gate-remote.sh): the browser passes on the remote. The OWL trees between them stay here (the JVM
