@@ -30,6 +30,8 @@ export interface NotificationsHost {
 export interface Host {
   openApp?(id: string): void;
   notifications?: NotificationsHost;
+  /** The unread dot on this app's icon (shell/apps/badge.ts): above 0 shows it, 0 hides it. An older shell: none. */
+  badge?(app: string, n: number): void;
 }
 export interface Props {
   host: Host;

@@ -3,7 +3,7 @@
  * (the bar's pill: keyboard, mic, send), a swipe sideways marks it read, a tap on an app icon opens that conversation in
  * its app. Every action is the notification's own (act.ts), on that one gesture.
  */
-import { useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { isMarked, markRead, openEntry, sendReply, stateOf, type Host, type ReplyFieldProps } from "./act";
 import { ago, groups, replyTarget, sourceOf, type Entry, type Group } from "./model";
 
@@ -11,6 +11,16 @@ export type Phase = "old" | "loading" | "no-access" | "ok";
 
 /** The rows now, live: marked-read notifications left out while unchanged. */
 export function useGroups(host: Host, app: string): { phase: Phase; groups: Group[] } {
+  const r = readGroups(host, app);
+  // The icon's dot follows the same count as the widget's header (unread across every row); unknown while loading.
+  const unread = r.phase === "loading" ? -1 : r.groups.reduce((n, g) => n + g.count, 0);
+  useEffect(() => {
+    if (unread >= 0) host.badge?.(app, unread);
+  }, [host, app, unread]);
+  return r;
+}
+
+function readGroups(host: Host, app: string): { phase: Phase; groups: Group[] } {
   const l = host.notifications?.useList(app);
   if (!host.notifications) return { phase: "old", groups: [] };
   if (!l) return { phase: "loading", groups: [] };

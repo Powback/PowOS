@@ -114,7 +114,7 @@ function Card({ f }: { f: LibraryFolder }) {
       <div class="lib-icons">
         {f.apps.slice(0, 4).map((a) => {
           const app = byKey.value.get(a.app);
-          return app ? <AppIcon key={a.key} src={app.icon} label={a.label} /> : <div key={a.key} class="app-icon initials">{a.label[0]}</div>;
+          return app ? <AppIcon key={a.key} src={app.icon} label={a.label} app={app.key} /> : <div key={a.key} class="app-icon initials">{a.label[0]}</div>;
         })}
       </div>
     </div>
