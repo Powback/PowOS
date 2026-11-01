@@ -499,5 +499,7 @@ function AiColumn({ shown, wide, pill }: { shown: boolean; wide: boolean; pill: 
 /** Its page, to the left of home. */
 export function PowAiPage() {
   const shown = page.value === -1;
+  // The host knows the page is up: the side button over it focuses its field, no second chat sheet (bar.tsx "ai.focus").
+  useEffect(() => void powos.ai.pageShown?.(shown).catch(() => {}), [shown]);
   return <AiView shown={shown} cls={`ai-screen ${shown ? "shown" : ""}`} panes />;
 }

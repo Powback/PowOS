@@ -160,6 +160,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       verifyState: () => call("verify.state"),
       verifyStop: (dry = false) => call("verify.stop", dry),
       open: () => call("ai.open"),
+      pageShown: (shown) => call("ai.pageShown", shown),
       newApp: (description) => call<boolean>("ai.newApp", description),
       closeThread: () => call<boolean>("ai.closeThread"),
       mail: () => call<AgentMail[]>("ai.mail"),

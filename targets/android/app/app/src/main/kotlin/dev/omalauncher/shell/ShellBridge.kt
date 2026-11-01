@@ -511,6 +511,11 @@ class ShellBridge(
             }
             "ai.unqueue" -> PowosAiChat.unqueue(a.getLong(0))
             "ai.open" -> PowosAiActivity.open(context, null)
+            // Home's PowOS AI page shown or not: the side button focuses its field instead of a second chat over it.
+            "ai.pageShown" -> {
+                if (activity is ShellActivity) aiPageShown = a.optBoolean(0)
+                Unit
+            }
             // "Create app": PowOS AI in a fresh thread of its own building it (PowosAiChat.newApp); back to the main one.
             "ai.newApp" -> PowosAiChat.newApp(context.applicationContext, a.getString(0))
             "ai.closeThread" -> PowosAiChat.closeThread(context.applicationContext)
@@ -1774,6 +1779,21 @@ class ShellBridge(
             val home = synchronized(live) { live.firstOrNull { it.activity != null } } ?: return false
             if (!WebWindows.on(context)) return false
             home.emit(event, json)
+            return true
+        }
+
+        /** Home's PowOS AI page is its page ("ai.pageShown"); only home's window sets it. */
+        @Volatile private var aiPageShown = false
+
+        /**
+         * The side button over home's PowOS AI page (the user, 11-01 21:32: two inputs, the page's showing through under
+         * the assist sheet): no sheet - home's page gets "ai.focus" (its field takes the keys). False: home isn't in
+         * front on that page, the sheet opens as ever.
+         */
+        fun focusAiOnHome(): Boolean {
+            if (!aiPageShown || !WebWindowLaunch.homeInFront) return false
+            val home = synchronized(live) { live.firstOrNull { it.activity is ShellActivity } } ?: return false
+            home.emit("ai.focus", JSONObject())
             return true
         }
 
