@@ -86,11 +86,12 @@ object NativeSettingsIndex {
      */
     private fun fragmentPage(context: Context, intent: Intent, label: String, anchor: org.json.JSONObject?) {
         intent.setClassName("com.android.settings", "com.android.settings.SubSettings").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        QuickPages.launch(context, intent, label, anchor, start = { openFragment(context, intent, label, it) }) {
+        val popOut = {
             val plain = QuickPages.poppedOut(intent)
             // Web desktop: Settings' window first, the page started on its display (AppWindows.launch).
             dev.omalauncher.system.AppWindows.launch(context, "com.android.settings") { openFragment(context, plain, label, it) }
         }
+        QuickPages.launch(context, QuickPages.Page(intent, label, anchor, { openFragment(context, intent, label, it) }, popOut))
     }
 
     private fun openFragment(context: Context, intent: Intent, title: String, options: android.os.Bundle?) {

@@ -53,41 +53,57 @@ object QuickPages {
     }
 
     /**
-     * [intent] (one settings page) as a quick page on the web desktop; a native panel as Android's own sheet; elsewhere
-     * (folded, web windows off) as any launch. [start] starts it with given options (default: startActivity of [intent]
-     * - a root fragment launch passes its own); [popOut] relaunches it in its app's normal window.
+     * One settings page to open: [intent], its [label], what it springs out of ([anchor], CSS px). [start] starts it
+     * with given options (null: startActivity of [intent]; a root fragment launch passes its own); [popOut] relaunches
+     * it in its app's normal window (null: [intent] without the quick flags).
      */
+    class Page(
+        val intent: Intent,
+        val label: String,
+        val anchor: JSONObject?,
+        val start: ((Bundle?) -> Unit)? = null,
+        val popOut: (() -> Unit)? = null,
+    )
+
+    /** [intent] as [launch] of a plain [Page]. */
     fun launch(
         context: Context,
         intent: Intent,
         label: String,
         anchor: JSONObject?,
-        start: (Bundle?) -> Unit = { context.startActivity(intent, it) },
-        popOut: () -> Unit = { dev.omalauncher.system.AppWindows.startActivity(context, poppedOut(intent)) },
+    ) = launch(context, Page(intent, label, anchor))
+
+    /**
+     * [page] as a quick page on the web desktop; a native panel as Android's own sheet; elsewhere (folded, web windows
+     * off) as any launch.
+     */
+    fun launch(
+        context: Context,
+        page: Page,
     ) {
+        val intent = page.intent
+        val start = page.start ?: { b: Bundle? -> context.startActivity(intent, b) }
         val info = runCatching { context.packageManager.resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo }.getOrNull()
         val component = intent.component ?: info?.let { ComponentName(it.packageName, it.name) }
         val pkg = component?.packageName
         val web = dev.omalauncher.system.AppWindows.webDesktop(context)
         when (QuickPageRoute.decide(QuickPageRoute.kind(pkg, intent.action, component?.className, asApp = false), web)) {
             QuickPageRoute.Route.NATIVE_SHEET -> start(null.also { intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
-            QuickPageRoute.Route.QUICK_WINDOW -> quick(context, intent, component!!, label, anchor, start, popOut)
+            QuickPageRoute.Route.QUICK_WINDOW -> quick(context, page, component!!, start)
             else -> dev.omalauncher.system.AppWindows.launch(context, pkg) { start(it.also { intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }) }
         }
     }
 
     private fun quick(
         context: Context,
-        intent: Intent,
+        page: Page,
         component: ComponentName,
-        label: String,
-        anchor: JSONObject?,
         start: (Bundle?) -> Unit,
-        popOut: () -> Unit,
     ) {
+        val intent = page.intent
         intent.addFlags(QuickPageRoute.flags(component.packageName))
         val token = next.incrementAndGet().toString()
-        entries[token] = Entry(token, component, label, popOut)
+        entries[token] = Entry(token, component, page.label, page.popOut ?: { dev.omalauncher.system.AppWindows.startActivity(context, poppedOut(intent)) })
         // The safety net (QuickPageRoute.afterFailure): full screen, logged - never Tasks.freeformOptions.
         val failed = { why: String ->
             entries.remove(token)
@@ -95,7 +111,7 @@ object QuickPages {
             runCatching { start(dev.omalauncher.system.Tasks.fullScreenOptions().toBundle()) }.onFailure { WindowLog.w(TAG, "quick page $token full screen failed", it) }
             Unit
         }
-        val show = JSONObject().put("token", token).put("pkg", component.packageName).put("label", label).put("anchor", anchor ?: JSONObject.NULL)
+        val show = JSONObject().put("token", token).put("pkg", component.packageName).put("label", page.label).put("anchor", page.anchor ?: JSONObject.NULL)
         val pending = WebWindowLaunch.Pending(null, start) { failed("no quick page display") }
         if (!WebWindowLaunch.routeQuick(context, QuickPageRoute.key(token), pending, show)) failed("no home page")
         else WindowLog.i(TAG, "quick page $token (${component.flattenToShortString()}, flags 0x${Integer.toHexString(intent.flags)}): card asked of home")
