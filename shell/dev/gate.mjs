@@ -7398,9 +7398,10 @@ async function fullStaysScene(r) {
  * never a freeform window; QuickPageRouteTest). Stubbed host: quickpage.open answers with "quickpage.show".
  */
 async function quickPageScene(r, folded) {
-  await r.page.evaluate(QUICK_HELPERS);
+  await r.page.evaluate(QUICK_HELPERS, folded);
   await r.page.evaluate(QUICK_JUDGES);
   await r.page.evaluate(QUICK_BAR_JUDGES);
+  await r.page.evaluate(QUICK_SHEET_JUDGES);
   const shot = async (name) => {
     await r.page.evaluate(() => window.__qp.open({ id: "settings:WIFI_SETTINGS", label: "Wi-Fi" }, "com.oplus.wirelesssettings"));
     await r.page.screenshot({ path: `/cache/quick-page-${name}.png` }).catch(() => {});
@@ -7414,8 +7415,11 @@ async function quickPageScene(r, folded) {
   }
 }
 
-/** QP1's stubbed host (window.__qp): webwindows.open / close, quickpage.open / popout / refused, every call recorded. */
-async function QUICK_HELPERS() {
+/**
+ * QP1's stubbed host (window.__qp): webwindows.open / close, quickpage.open / popout / refused, every call recorded.
+ * [folded]: home as the folded cover really is (wideHome false - the quick page is web windows' first folded user).
+ */
+async function QUICK_HELPERS(folded) {
   const [S, W, H, B, Q] = await Promise.all(["./state.ts", "./ui/webwindows.tsx", "./hosts/wide.ts", "./bridge.ts", "./ui/quickpage.tsx"].map((m) => window.__gw.mod(m)));
   const p = B.powos;
   const was = { ww: p.webwindows, qp: p.quickpage, wide: H.wideHome.value };
@@ -7436,7 +7440,7 @@ async function QUICK_HELPERS() {
   p.apps.list = async () => [...(await list()), { key: "a:com.android.settings/.Settings", label: "Settings", icon: settingsIcon, kind: "android" }];
   window.__mockEvents.emit("apps.changed");
   for (let i = 0; i < 40 && !S.byKey.value.has("a:com.android.settings/.Settings"); i++) await new Promise((ok) => setTimeout(ok, 25));
-  H.wideHome.value = true;
+  H.wideHome.value = !folded;
   S.page.value = 0;
   W.webWins.value = [];
   await window.__gw.settled();
@@ -7477,7 +7481,8 @@ function QUICK_JUDGES() {
     if (!c[0].textContent.includes(label)) out.push(`QP1: ${label}: its card's bar says "${c[0].textContent}"`);
     if (Math.abs(box.width - want) > 2) out.push(`QP1: ${label}: card ${Math.round(box.width)} px wide (want ${want}, ${folded ? "folded: full width minus 16" : "unfolded: ~440"})`);
     if (box.height > innerHeight * 0.7 + 1) out.push(`QP1: ${label}: card ${Math.round(box.height)} px high (want <= 70% of ${innerHeight})`);
-    if (folded !== c[0].classList.contains("sheet")) out.push(`QP1: ${label}: sheet ${!folded} (want ${folded})`);
+    if (folded !== c[0].classList.contains("quick-sheet")) out.push(`QP1: ${label}: sheet ${!folded} (want ${folded})`);
+    if (folded) out.push(...window.__qpsheet.check(c[0], box, label));
     return [...out, ...window.__qpbar.icon(c[0], label), ...window.__qpbar.glass(c[0], label)];
   }
   async function closes() {
@@ -7506,6 +7511,42 @@ function QUICK_JUDGES() {
     return n === 1 && !document.querySelector(".webwindow") ? [] : [`QP1: a forced route failure: ${n} refusals to the host, ${document.querySelectorAll(".webwindow").length} windows (want 1 refusal, none)`];
   }
   window.__qpj = { card, closes, failure };
+  return [];
+}
+
+/**
+ * QP1's folded judges (window.__qpsheet): the sheet full width minus 16, its bottom 16 above the bar; rising on the
+ * shared spring (ui/spring.ts); over home, never hiding it (a ".sheet" class did: html:has(.sheet) - a white screen).
+ */
+function QUICK_SHEET_JUDGES() {
+  function place(box, label) {
+    const out = [];
+    const foot = window.__qp.W.workArea().bottom;
+    const bar = [...document.querySelectorAll(".home > .dock, .home > .bar")].map((b) => b.getBoundingClientRect()).filter((b) => b.height > 0 && b.top > innerHeight / 2);
+    if (!bar.length) out.push(`QP1: ${label}: folded home has no bar to sit above`);
+    if (bar.some((b) => box.bottom > b.top + 0.5) || Math.abs(foot - 16 - box.bottom) > 2) out.push(`QP1: ${label}: sheet bottom ${Math.round(box.bottom)} (want 16 above the bar's top ${Math.round(foot)})`);
+    if (Math.abs(box.left - 16) > 2) out.push(`QP1: ${label}: sheet left ${Math.round(box.left)} (want 16)`);
+    return out;
+  }
+  function motion(el, label) {
+    const probe = document.createElement("div");
+    probe.style.cssText = "animation-timing-function: var(--spring); animation-duration: var(--spring-ms)";
+    document.body.append(probe);
+    const want = getComputedStyle(probe);
+    const got = getComputedStyle(el);
+    const set = /^(linear|cubic-bezier)\(/.test(want.animationTimingFunction);
+    const same = got.animationName === "quickpage-rise" && got.animationTimingFunction === want.animationTimingFunction && got.animationDuration === want.animationDuration;
+    const out = set ? [] : [`QP1: the shared spring isn't set (--spring "${want.animationTimingFunction}")`];
+    if (!same) out.push(`QP1: ${label}: the sheet's ${got.animationName} ${got.animationDuration} isn't a rise on the shared spring (${want.animationDuration})`);
+    probe.remove();
+    return out;
+  }
+  function shown(el, label) {
+    const stage = getComputedStyle(document.querySelector(".home > .stage") ?? document.body).visibility;
+    const card = getComputedStyle(el).visibility;
+    return stage === "visible" && card === "visible" ? [] : [`QP1: ${label}: folded, home or the card is hidden (stage ${stage}, card ${card})`];
+  }
+  window.__qpsheet = { check: (el, box, label) => [...place(box, label), ...motion(el, label), ...shown(el, label)] };
   return [];
 }
 
@@ -7540,6 +7581,60 @@ function QUICK_BAR_JUDGES() {
   }
   window.__qpbar = { icon, glass };
   return [];
+}
+
+/** QP2's helpers: wait for [f] (up to 5 s), the Wi-Fi item's button on the row (not the "add" rows). */
+const QP2_ID = "qp:android.settings.WIFI_SETTINGS";
+async function qp2Wait(f) {
+  const t0 = performance.now();
+  while (!f() && performance.now() - t0 < 5000) await new Promise((ok) => setTimeout(ok, 30));
+  return f();
+}
+const qp2Chip = () => document.querySelector(`.cc3-launchers .cc3-grid:not(.cc3-spare) [data-key="${QP2_ID}"] button`);
+
+/** QP2: edit mode's "add quick page" Wi-Fi: the row gains the item, the store its stable ACTION id. */
+async function qp2Add(p) {
+  const add = await qp2Wait(() => document.querySelector('.cc3-quickpages [aria-label="add quick page Wi-Fi"]'));
+  if (!add) return ["QP2: edit mode has no \"add quick page\" Wi-Fi choice"];
+  add.click();
+  const out = (await qp2Wait(qp2Chip)) ? [] : ["QP2: after \"add quick page Wi-Fi\" the row has no Wi-Fi item"];
+  const stored = (await p.store.get("controls.launchers")) ?? [];
+  return stored.includes(QP2_ID) ? out : [...out, `QP2: the stored row ${JSON.stringify(stored)} lacks ${QP2_ID} (a stable settings ACTION)`];
+}
+
+/** QP2: a tap on the item: ONE quickpage.open ([opened]) with its action, anchored to the item's rect. */
+async function qp2Tap(opened) {
+  const c = qp2Chip();
+  if (!c) return ["QP2: out of edit mode the Wi-Fi item is gone"];
+  const r = c.getBoundingClientRect();
+  c.click();
+  await qp2Wait(() => opened.length);
+  const o = opened[0];
+  if (opened.length !== 1 || o.action !== "android.settings.WIFI_SETTINGS" || o.id) return [`QP2: a tap on the item opened ${JSON.stringify(opened)} (want one quickpage.open with action WIFI_SETTINGS)`];
+  const a = o.anchorRect;
+  const off = !a || [a.left - r.left, a.top - r.top, a.width - r.width, a.height - r.height].some((d) => Math.abs(d) > 1);
+  return off ? [`QP2: the page's anchor ${JSON.stringify(a)} is not the item's rect ${JSON.stringify(r)}`] : [];
+}
+
+/** QP2: the control center's "add quick page" Wi-Fi item: stored as its ACTION, opened anchored to its chip. */
+async function ccQuickPageItem() {
+  const [S, E, B] = await Promise.all(["./state.ts", "./ui/ccexpand.ts", "./bridge.ts"].map((m) => window.__gw.mod(m)));
+  const p = B.powos;
+  const was = { qp: p.quickpage, row: await p.store.get("controls.launchers") };
+  const opened = [];
+  p.quickpage = { open: async (spec) => (opened.push(spec), true), popout: async () => true, refused: async () => true };
+  try {
+    S.notif.value = true;
+    E.ccEditing.value = true;
+    const out = await qp2Add(p);
+    E.ccEditing.value = false;
+    await window.__gw.settled();
+    return [...out, ...(await qp2Tap(opened))];
+  } finally {
+    E.ccEditing.value = false;
+    p.quickpage = was.qp;
+    await p.store.set("controls.launchers", was.row ?? null);
+  }
 }
 
 /** QP1's checks ([folded]: a narrow screen, the card a bottom sheet): hotspot, Display, Bluetooth; closes; failure. */
@@ -9274,7 +9369,7 @@ try {
     );
   // QP1: settings pages as quick pages - one compact card each (unfolded ~440 wide, folded a full-width sheet), pop-out, Back at the root, tap outside, a forced failure refused (quick-page-unfolded / -folded).
   if (process.env.SHELL_PAGES !== "0")
-    for (const [name, size, folded] of [["quick-page-unfolded", { width: 821, height: 883 }, false], ["quick-page-folded", { width: 412, height: 915 }, true]])
+    for (const [name, size, folded] of [["quick-page-unfolded", { width: 821, height: 883 }, false], ["quick-page-folded", { width: 404, height: 900 }, true]])
       runs.push(open(browser, `${ORIGIN}/index.html`, name, size).then((r) => whenReady(r, () => quickPageScene(r, folded))));
   // MX1: full screen stays full screen through ticks (a Linux and an Android window, hostless and host-shaped); restore brings the floating frame back (ww-full-stays-unfolded; the user, 11-01 15:39).
   if (process.env.SHELL_PAGES !== "0")
@@ -9898,6 +9993,20 @@ try {
         fail(await menuStep("remove from quick launch"));
         keys = await row();
         if (!keys || keys.includes(KEY)) fail(`after "remove from quick launch" the shade's row is ${JSON.stringify(keys)}`);
+        return { ...r, ready: true, ms: Date.now() - r.started };
+      }),
+    );
+  // QP2 (quick-page items; the user: "I'd love to use the side launcher to launch e.g. Wi-Fi settings this way"): the
+  // control center's edit mode lists the common settings pages ("add quick page"); a tap adds Wi-Fi as an item that
+  // stores its stable ACTION ("qp:android.settings.WIFI_SETTINGS", never a search index id); out of edit mode a tap
+  // on it is quickpage.open with that action and the chip's rect as its anchor (cc-quick-page, folded).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(
+      open(browser, `${ORIGIN}/index.html?mode=shade`, "cc-quick-page", { width: 404, height: 900 }).then(async (r) => {
+        await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+        // The checks' helpers as page globals (an evaluated function carries no closure).
+        await r.page.evaluate(`window.QP2_ID = ${JSON.stringify(QP2_ID)}; window.qp2Wait = ${qp2Wait}; window.qp2Chip = ${qp2Chip}; window.qp2Add = ${qp2Add}; window.qp2Tap = ${qp2Tap};`);
+        r.problems.push(...((await r.page.evaluate(ccQuickPageItem).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])) ?? []));
         return { ...r, ready: true, ms: Date.now() - r.started };
       }),
     );

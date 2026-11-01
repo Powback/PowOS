@@ -1762,14 +1762,17 @@ class ShellBridge(
          * WebWindowLaunch: home's page asked for [pkg]'s web window ("webwindows.launch", as from the launcher overlay:
          * its frame shows at once; an open one comes up). False: no home page, or [pkg] has no drawer app.
          */
-        /** [event] to home's page (web desktop only): false - no home page there (the caller's safety net runs). */
+        /**
+         * [event] to home's page (web windows on, folded or unfolded: a quick page's card, QuickPageRoute.decide): false -
+         * no home page there, or web windows off (the caller's safety net runs).
+         */
         fun showOnHome(
             context: Context,
             event: String,
             json: JSONObject,
         ): Boolean {
             val home = synchronized(live) { live.firstOrNull { it.activity != null } } ?: return false
-            if (!dev.omalauncher.system.AppWindows.webDesktop(context)) return false
+            if (!WebWindows.on(context)) return false
             home.emit(event, json)
             return true
         }

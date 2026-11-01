@@ -9,13 +9,13 @@ import org.junit.Test
 /** Quick pages: one settings page as a compact card, Settings itself as its full window, panels as native sheets. */
 class QuickPageRouteTest {
     @Test
-    fun aSinglePageFromAnyAppIsAQuickPageOnTheWebDesktop() {
+    fun aSinglePageFromAnyAppIsAQuickPageWithWebWindowsOn() {
         val hotspot = QuickPageRoute.kind("com.oplus.wirelesssettings", "android.settings.OPLUS_WIFI_AP_SETTINGS", "com.android.settings.SettingsActivity", asApp = false)
         val display = QuickPageRoute.kind("com.android.settings", "android.settings.DISPLAY_SETTINGS", null, asApp = false)
         val fragment = QuickPageRoute.kind("com.android.settings", null, "com.android.settings.SubSettings", asApp = false)
         for (k in listOf(hotspot, display, fragment)) {
             assertEquals(Kind.QUICK, k)
-            assertEquals(Route.QUICK_WINDOW, QuickPageRoute.decide(k, webDesktop = true))
+            assertEquals(Route.QUICK_WINDOW, QuickPageRoute.decide(k, webWindows = true))
         }
     }
 
@@ -23,20 +23,34 @@ class QuickPageRouteTest {
     fun settingsOpenedAsAnAppKeepsItsFullWindow() {
         assertEquals(Kind.APP, QuickPageRoute.kind("com.android.settings", "android.intent.action.MAIN", null, asApp = true))
         assertEquals(Kind.APP, QuickPageRoute.kind("com.android.settings", "android.settings.SETTINGS", null, asApp = false))
-        assertEquals(Route.APP_DEFAULT, QuickPageRoute.decide(Kind.APP, webDesktop = true))
+        assertEquals(Route.APP_DEFAULT, QuickPageRoute.decide(Kind.APP, webWindows = true))
     }
 
     @Test
     fun nativePanelsStayNativeSheets() {
         assertEquals(Kind.PANEL, QuickPageRoute.kind("com.android.settings", "android.settings.panel.action.INTERNET_CONNECTIVITY", null, asApp = false))
         assertEquals(Kind.PANEL, QuickPageRoute.kind("com.oplus.sound", null, "com.oplus.VolumePanelActivity", asApp = false))
-        assertEquals(Route.NATIVE_SHEET, QuickPageRoute.decide(Kind.PANEL, webDesktop = true))
-        assertEquals(Route.NATIVE_SHEET, QuickPageRoute.decide(Kind.PANEL, webDesktop = false))
+        assertEquals(Route.NATIVE_SHEET, QuickPageRoute.decide(Kind.PANEL, webWindows = true))
+        assertEquals(Route.NATIVE_SHEET, QuickPageRoute.decide(Kind.PANEL, webWindows = false))
     }
 
     @Test
-    fun offTheWebDesktopAPageLaunchesAsBefore() {
-        assertEquals(Route.APP_DEFAULT, QuickPageRoute.decide(Kind.QUICK, webDesktop = false))
+    fun withWebWindowsOffAPageLaunchesAsBefore() {
+        assertEquals(Route.APP_DEFAULT, QuickPageRoute.decide(Kind.QUICK, webWindows = false))
+    }
+
+    /**
+     * Folded (no floating windows, AppWindows.webDesktop false) a page is still a quick page: the route only asks whether
+     * web windows are on, never the screen's width (the manager, 11-01: "web windows being unfolded-only is no excuse").
+     */
+    @Test
+    fun foldedASinglePageIsStillAQuickPageNeverTheOldFoldedLaunch() {
+        val wifi = QuickPageRoute.kind("com.oplus.wirelesssettings", "android.settings.WIFI_SETTINGS", null, asApp = false)
+        val folded = QuickPageRoute.decide(wifi, webWindows = true)
+        assertEquals(Route.QUICK_WINDOW, folded)
+        assertEquals(Route.FULL_SCREEN, QuickPageRoute.afterFailure(webWindows = true))
+        // Settings opened as an app, folded: its usual launch (the old folded path stays for everything but quick pages).
+        assertEquals(Route.APP_DEFAULT, QuickPageRoute.decide(Kind.APP, webWindows = true))
     }
 
     @Test
@@ -54,9 +68,9 @@ class QuickPageRouteTest {
     }
 
     @Test
-    fun aRouteFailureOnTheWebDesktopIsFullScreenNeverFreeform() {
-        assertEquals(Route.FULL_SCREEN, QuickPageRoute.afterFailure(webDesktop = true))
-        assertEquals(Route.APP_DEFAULT, QuickPageRoute.afterFailure(webDesktop = false))
+    fun aRouteFailureWithWebWindowsOnIsFullScreenNeverFreeform() {
+        assertEquals(Route.FULL_SCREEN, QuickPageRoute.afterFailure(webWindows = true))
+        assertEquals(Route.APP_DEFAULT, QuickPageRoute.afterFailure(webWindows = false))
     }
 
     @Test

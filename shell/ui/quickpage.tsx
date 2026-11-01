@@ -62,6 +62,35 @@ export const TILE_PAGES: Record<string, QuickSpec> = {
   nfc: { action: "android.settings.NFC_SETTINGS", label: "NFC" },
 };
 
+/**
+ * The common settings pages a quick-page item can hold (the control center's "add quick page" row): each a stable
+ * settings ACTION (an Intent action QuickPages.open resolves; never a search index id, those expire).
+ */
+export const QUICK_PAGES: { action: string; label: string }[] = [
+  { action: "android.settings.WIFI_SETTINGS", label: "Wi-Fi" },
+  { action: "android.settings.BLUETOOTH_SETTINGS", label: "Bluetooth" },
+  { action: "android.settings.NFC_SETTINGS", label: "NFC" },
+  { action: "android.settings.DISPLAY_SETTINGS", label: "Display" },
+  { action: "android.settings.SOUND_SETTINGS", label: "Sound" },
+  { action: "android.intent.action.POWER_USAGE_SUMMARY", label: "Battery" },
+  { action: "android.settings.LOCATION_SOURCE_SETTINGS", label: "Location" },
+  { action: "android.settings.APPLICATION_SETTINGS", label: "Apps" },
+  { action: "android.settings.INTERNAL_STORAGE_SETTINGS", label: "Storage" },
+  { action: "android.settings.ACCESSIBILITY_SETTINGS", label: "Accessibility" },
+  { action: "android.settings.DATE_SETTINGS", label: "Date & time" },
+  { action: "android.settings.APPLICATION_DEVELOPMENT_SETTINGS", label: "Developer options" },
+];
+
+/** A quick-page item's stored id ("qp:<ACTION>"), and back: its action, or null (not a quick-page item). */
+export const QUICK_ID = "qp:";
+export const quickAction = (id: string): string | null => (id.startsWith(QUICK_ID) ? id.slice(QUICK_ID.length) : null);
+
+/** An element's rect as a quick page's anchor (viewport CSS px): it springs out of that item. */
+export function rectOf(el: Element): QuickRect {
+  const r = el.getBoundingClientRect();
+  return { left: r.left, top: r.top, width: r.width, height: r.height };
+}
+
 /** The last pressed element's rect (viewport CSS px): a quick page opened by that press springs out of it. */
 let pressed: QuickRect | undefined;
 if (typeof addEventListener === "function") {

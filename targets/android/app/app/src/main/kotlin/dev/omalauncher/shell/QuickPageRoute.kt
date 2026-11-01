@@ -21,7 +21,7 @@ internal object QuickPageRoute {
 
     /** Where it goes. */
     enum class Route {
-        /** A quick page: its own trusted display under a compact card on home's page. */
+        /** A quick page: its own trusted display under home's card (unfolded ~440 dp at its anchor, folded a sheet). */
         QUICK_WINDOW,
 
         /** Android's own sheet, launched plain (a panel). */
@@ -30,7 +30,7 @@ internal object QuickPageRoute {
         /** The safety net: full screen on the main display - never a freeform window. */
         FULL_SCREEN,
 
-        /** As any app launch (folded, web windows off): AppWindows' usual way. */
+        /** As any app launch (web windows off): AppWindows' usual way. */
         APP_DEFAULT,
     }
 
@@ -56,23 +56,28 @@ internal object QuickPageRoute {
             className?.endsWith(".SettingsPanelActivity") == true ||
             className?.endsWith("VolumePanelActivity") == true
 
-    /** [kind]'s route on the web desktop ([webDesktop]: unfolded, web windows on) or not. */
+    /**
+     * [kind]'s route with web windows on ([webWindows]: `powos_web_windows` = 1) or not - folded OR unfolded (the manager,
+     * 11-01: "web windows being unfolded-only is no excuse"). Quick pages are the web-window layer's first folded user:
+     * one card display (folded: full width minus 16 dp, rising above the bar); every other folded launch still goes
+     * AppWindows' way (WebWindowLaunch.route / openOnHome stay on the unfolded web desktop).
+     */
     fun decide(
         kind: Kind,
-        webDesktop: Boolean,
+        webWindows: Boolean,
     ): Route =
         when {
             kind == Kind.PANEL -> Route.NATIVE_SHEET
-            kind == Kind.QUICK && webDesktop -> Route.QUICK_WINDOW
+            kind == Kind.QUICK && webWindows -> Route.QUICK_WINDOW
             else -> Route.APP_DEFAULT
         }
 
     /**
-     * A launch whose web window / quick page couldn't be made (no home page, no display in time, refused): on the web
-     * desktop FULL SCREEN, logged - never Tasks.freeformOptions (the bare OnePlus freeform window with no title bar,
-     * never adopted, 10-31 hotspot). Elsewhere the usual way.
+     * A launch whose web window / quick page couldn't be made (no home page, no display in time, refused): with web
+     * windows on ([webWindows], folded too) FULL SCREEN, logged - never Tasks.freeformOptions (the bare OnePlus freeform
+     * window with no title bar, never adopted, 10-31 hotspot). Elsewhere the usual way.
      */
-    fun afterFailure(webDesktop: Boolean): Route = if (webDesktop) Route.FULL_SCREEN else Route.APP_DEFAULT
+    fun afterFailure(webWindows: Boolean): Route = if (webWindows) Route.FULL_SCREEN else Route.APP_DEFAULT
 
     /**
      * A quick page's intent flags: its own task, not in recents; com.android.settings pages also MULTIPLE_TASK so they
