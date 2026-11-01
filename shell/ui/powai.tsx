@@ -11,7 +11,7 @@
  * segmented row (Chat / Agents / Progress / Devices) that swaps the right column. A wide holder without panes (the
  * panel) keeps the chat centred at reading width, Progress a glass sheet over its side.
  */
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { aiDraft, aiScreen, chat, page } from "../state.ts";
@@ -115,15 +115,79 @@ function useMail(shown: boolean) {
 }
 
 /**
+ * The chat, asked again of the host whenever the page comes back on screen: the page holds the one store (state.ts chat) the
+ * folded status page and the assistant read, but filled only by load() and "ai.changed" - a page that missed those
+ * (the unfolded screen's, asleep while folded) drew yesterday's thread (the user, 11-01: "then why is it still showing").
+ */
+function useChatSync(shown: boolean) {
+  useEffect(() => {
+    if (!shown) return;
+    const ask = () => document.hidden || powos.ai.chat().then((c) => (chat.value = c), () => undefined);
+    document.addEventListener("visibilitychange", ask);
+    return () => document.removeEventListener("visibilitychange", ask);
+  }, [shown]);
+}
+
+/**
  * The conversation: the newest STEP items drawn, older ones as the top comes near (a sentinel, IntersectionObserver on
  * the scroller). The scroller is column-reverse (CSS .ai-chat), so it opens at the newest, stays there as a reply
  * streams in, and holds still when older ones arrive above.
  */
+/** Past this far from the end (px) the user has scrolled up: new messages don't pull the chat down, the pill offers to. */
+const AWAY_PX = 80;
+
+/** The newest item's identity (items carry no id): its place and its text's length while it streams. */
+const lastKey = (items: ChatItem[]) => `${items.length}:${items.at(-1)?.kind ?? ""}:${"text" in (items.at(-1) ?? {}) ? (items.at(-1) as { text: string }).text.length : 0}`;
+
+/**
+ * Opens at the newest and follows it as messages stream in, unless the user scrolled up - then [pill] is up ("New
+ * messages ↓", a tap goes to the end). The scroller is column-reverse: its end is scrollTop 0.
+ */
+function useFollow(top: preact.RefObject<HTMLDivElement>, key: string) {
+  const away = useRef(false);
+  const [pill, setPill] = useState(false);
+  const pane = () => top.current?.closest<HTMLElement>(".ai-chat") ?? null;
+  const toEnd = () => {
+    const el = pane();
+    if (el) el.scrollTop = 0;
+    away.current = false;
+    setPill(false);
+  };
+  useEffect(() => {
+    const el = pane();
+    if (!el) return;
+    el.scrollTop = 0;
+    const onScroll = () => {
+      away.current = Math.abs(el.scrollTop) > AWAY_PX;
+      if (!away.current) setPill(false);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+  useLayoutEffect(() => {
+    const el = pane();
+    if (!el) return;
+    if (away.current) setPill(true);
+    else el.scrollTop = 0;
+  }, [key]);
+  return [pill, toEnd] as const;
+}
+
+/** Up while new messages came in below where the user scrolled to: a tap goes to the newest. */
+function NewPill({ go }: { go: () => void }) {
+  return (
+    <button type="button" class="ai-new-pill" onClick={go}>
+      New messages ↓
+    </button>
+  );
+}
+
 function Conversation() {
   const [count, setCount] = useState(STEP);
   const top = useRef<HTMLDivElement>(null);
   const { busy, items } = chat.value;
   const from = startOf(items, count);
+  const [pill, toEnd] = useFollow(top, lastKey(items));
   useEffect(() => {
     const el = top.current;
     const pane = el?.closest(".ai-chat");
@@ -140,6 +204,7 @@ function Conversation() {
       {busy && items.at(-1)?.kind !== "assistant" && <div class="msg note muted thinking">thinking…</div>}
       <Queued />
       <Unread />
+      {pill && <NewPill go={toEnd} />}
     </div>
   );
 }
@@ -147,6 +212,7 @@ function Conversation() {
 /** The chat pane: "Create app"'s own thread view (steps, the finished app) or the question that starts one, else the conversation. */
 function ChatPane({ shown }: { shown: boolean }) {
   useMail(shown);
+  useChatSync(shown);
   if (chat.value.thread?.kind === "app") return <AppBuild />;
   if (newAppAsk.value) return <NewAppAsk />;
   return <Conversation />;
