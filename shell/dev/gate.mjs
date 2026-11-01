@@ -1197,6 +1197,54 @@ async function switcherBesideTapCheck() {
 }
 
 /**
+ * Board swiping-a-game-or-linux-app-away-in-the-switcher (X1/X3): a Linux window's card ("l:", id LINUX_CARD + its
+ * window id - WebWindows.linuxCards) swiped up asks the host to remove exactly that card (Tasks.remove ->
+ * WebWindows.closeForTask -> its bar's close -> KWin "quit": close, then its process tree after ~3 s); no other card is
+ * removed, nothing opened. An Android card's swipe stays a plain remove of its task.
+ */
+async function switcherSwipeCloseCheck(page) {
+  const LINUX = (1 << 29) + 5;
+  const ANDROID = 905;
+  const setup = await page.evaluate(async ([linux, android]) => {
+    const { powos } = await window.__gw.mod("./bridge.ts");
+    window.__removed = [];
+    window.__opened = [];
+    powos.tasks.remove = async (id) => (window.__removed.push(id), true);
+    powos.tasks.open = async (id) => (window.__opened.push(id), true);
+    const task = (id, label, key) => ({ id, label, key, icon: null, snapshot: "" });
+    window.__mockEvents.emit("recents.show", { open: true, from: linux, tasks: [task(linux, "Dolphin", "l:org.kde.dolphin"), task(android, "Chrome", "a:chrome"), task(906, "Maps", "a:maps")] });
+    await new Promise((ok) => setTimeout(ok, 500));
+    return document.querySelector(".recents")?.classList.contains("shown") ? "" : "the switcher isn't up after recents.show";
+  }, [LINUX, ANDROID]);
+  if (setup) return [`switcher-swipe-close: ${setup}`];
+  const fails = [];
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const swipe = async (id) => {
+    const r = await page.evaluate((id) => {
+      const c = document.querySelector(`.recents .task[data-task="${id}"]`);
+      c?.scrollIntoView({ inline: "center" });
+      const b = c?.getBoundingClientRect();
+      return b && { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    }, id);
+    if (!r) return fails.push(`switcher-swipe-close: no card ${id}`);
+    await sleep(150);
+    await page.mouse.move(r.x, r.y);
+    await page.mouse.down();
+    for (let i = 1; i <= 6; i++) await page.mouse.move(r.x, r.y - i * 60), await sleep(8);
+    await page.mouse.up();
+    await sleep(600);
+  };
+  await swipe(LINUX);
+  let got = await page.evaluate(() => ({ removed: window.__removed.slice(), opened: window.__opened.slice() }));
+  if (got.removed.join() !== String(LINUX)) fails.push(`swiping the Linux card asked the host to remove [${got.removed}], expected only its own card ${LINUX}`);
+  if (got.opened.length) fails.push(`swiping the Linux card opened ${got.opened}`);
+  await swipe(ANDROID);
+  got = await page.evaluate(() => ({ removed: window.__removed.slice() }));
+  if (got.removed.join() !== `${LINUX},${ANDROID}`) fails.push(`swiping the Android card: host removes [${got.removed}], expected ${LINUX},${ANDROID}`);
+  return fails;
+}
+
+/**
  * Back home from an app (the page hidden, then visible: visibilitychange, pageshow, focus, the host's resume - a live
  * wallpaper's picture read again, another frame of it: "system.glass"): the theme as it was - the labels' and widgets'
  * text, the search bar's tint, the wallpaper's tone - on each of the first 10 frames and after (the user, 10-31 20:08:
@@ -7958,6 +8006,9 @@ try {
     if (process.env.SHELL_PAGES !== "0") runs.push(open(browser, `${ORIGIN}/index.html`, name, view).then((r) => whenReady(r, () => switcherHomeSwipeCheck(r.page))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-beside-tap", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(switcherBesideTapCheck))));
+  // Board swiping-a-game-or-linux-app-away-in-the-switcher: a Linux window's card swiped away is that window's close.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-swipe-close", { width: 404, height: 900 }).then((r) => whenReady(r, () => switcherSwipeCloseCheck(r.page))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeCheck))));
   if (process.env.SHELL_PAGES !== "0")
