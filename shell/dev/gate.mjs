@@ -7545,6 +7545,91 @@ async function tileBarsScene(r) {
 }
 
 /**
+ * TF1 (ask 1a1924af639, "I can't interact with this"; Chrome and Discord were full:true on the phone): the switcher's
+ * split of two full-screen apps (tileApps) brings each back into its window first - no host fullScreen on the way (its
+ * late "webwindows.full" took a tile out and the last went full screen too, both with no bar). Then each bar button,
+ * tapped with a finger on a fresh split, acts on its own window: Discord's minimise, Chrome's full screen, Chrome's close.
+ */
+async function tileFullSetup() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  window.__tfHad ??= powos.webwindows;
+  const host = (window.__tfHost = { fullScreens: [], toWindows: [] });
+  const emit = (on) => (id) => setTimeout(() => window.__mockEvents.emit("webwindows.full", { id, on }), on ? 40 : 5);
+  powos.webwindows = {
+    ...window.__tfHad,
+    enabled: () => Promise.resolve(true),
+    fullScreen: (id) => (host.fullScreens.push(id), emit(true)(id), Promise.resolve(true)),
+    toWindow: (id) => (host.toWindows.push(id), emit(false)(id), Promise.resolve(true)),
+  };
+  const page = S.pages.value[0];
+  S.page.value = 0;
+  W.tilings.value = {};
+  await window.__gw.settled();
+  W.webWins.value = [961, 962].map((id, i) => ({ id, key: `a:gate.tf${i}`, label: ["Chrome", "Discord"][i], page, x: 60 + 40 * i, y: 100 + 40 * i, w: 300, h: 260, live: true, full: true }));
+  const ok = await W.tileApps([{ key: "a:gate.tf0", label: "Chrome" }, { key: "a:gate.tf1", label: "Discord" }]);
+  await new Promise((r) => setTimeout(r, 120));
+  await window.__gw.settled();
+  await window.__gw.frames(2);
+  const fails = ok ? [] : ["TF1: the split of Chrome and Discord fell back to Android's split"];
+  if (host.fullScreens.length) fails.push(`TF1: splitting two full-screen apps asked the host for full screen again (${host.fullScreens.join(",")})`);
+  for (const id of [961, 962]) {
+    const w = W.webWins.value.find((v) => v.id === id);
+    if (w?.full) fails.push(`TF1: ${w.label} is still full:true after the split`);
+    if (W.tiledOn(id) == null) fails.push(`TF1: window ${id} isn't tiled after the split`);
+    if (!document.querySelector(`.webwindow[data-wwid="${id}"] .webwindow-title .ww-close`)) fails.push(`TF1: window ${id} has no title bar after the split`);
+  }
+  return [...fails, ...[961, 962].flatMap(window.__ti.buttons).map((f) => f.replace("TI1", "TF1"))];
+}
+
+async function tileFullState() {
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  await window.__gw.settled();
+  const of = (id) => W.webWins.value.find((w) => w.id === id);
+  const a = W.workArea();
+  const big = (w) => !!w && Math.abs(w.w - (a.right - a.left)) <= 1;
+  return {
+    chrome: { open: !!of(961), min: !!of(961)?.minimised, big: big(of(961)), tiled: W.tiledOn(961) != null },
+    discord: { open: !!of(962), min: !!of(962)?.minimised, big: big(of(962)), tiled: W.tiledOn(962) != null },
+    top: W.webWins.value.filter((w) => !w.minimised).at(-1)?.id,
+  };
+}
+
+async function tileFullDone() {
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  W.webWins.value = [];
+  W.tilings.value = {};
+  if (window.__tfHad) powos.webwindows = window.__tfHad;
+  return [];
+}
+
+async function tileFullScene(r) {
+  const f = await fingerOf(r.page);
+  await r.page.evaluate(TI_HELPERS);
+  const fails = [];
+  const round = async (id, label, judge) => {
+    fails.push(...(await r.page.evaluate(tileFullSetup)));
+    const at = await r.page.evaluate((i, l) => window.__ti.centre(i, l), id, label);
+    if (!at) return fails.push(`TF1: window ${id} has no ${label} button`);
+    await f.tap(at);
+    const s = await r.page.evaluate(tileFullState);
+    const why = judge(s);
+    if (why) fails.push(`TF1: a tap on ${id === 961 ? "Chrome" : "Discord"}'s ${label} ${why} (${JSON.stringify(s)})`);
+    await r.page.evaluate(tileFullDone);
+  };
+  try {
+    await round(962, "Minimise", (s) => (!s.discord.min ? "didn't minimise Discord" : s.chrome.min || !s.chrome.open ? "put Chrome away too" : ""));
+    await round(961, "Full screen", (s) => (!s.chrome.big || s.chrome.tiled || s.top !== 961 ? "didn't make Chrome full screen in front" : ""));
+    await round(961, "Close", (s) => (s.chrome.open ? "didn't close Chrome" : !s.discord.open ? "closed Discord too" : ""));
+    return fails;
+  } finally {
+    await r.page.evaluate(tileFullDone);
+  }
+}
+
+/**
  * SB1 (the user, 10-31 15:11: "I should be able to swipe on the search bar to change page"): a finger's sideways swipe
  * from home's bottom search bar pages home as one on empty home does - following the finger, the page index stepping
  * once, never back and forth - with no windows and with two tiled windows (which follow the page in the same frame).
@@ -10272,6 +10357,9 @@ try {
   // TI1: tiled windows' bars, the w.f touch rects, the divider's pill (the user's layout, 10-31 15:08, unfolded).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "tile-bars-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tileBarsScene(r))));
+  // TF1: a split of two full-screen apps (Chrome, Discord full:true): back in windows, each bar button on its own window.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "tile-full-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tileFullScene(r))));
   // SB1: a sideways swipe on the search bar pages home, with and without tiled windows. Folded and unfolded.
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
