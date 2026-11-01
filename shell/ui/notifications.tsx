@@ -115,6 +115,12 @@ const DISMISS = 0.35;
 const FLICK = 0.6;
 const SLOP = 10;
 
+/** PowOS's own: the sender is the group's name already ("PowOS · coder") - not again as its title. */
+function titleIsName(n: PhoneNotification, name?: string): boolean {
+  const t = n.title.trim().toLowerCase();
+  return !!name && (name.toLowerCase().endsWith(`· ${t}`) || (name === UPDATES && t === "deploy"));
+}
+
 interface CardProps {
   n: PhoneNotification;
   /** A tap: its own (opens the notification) unless given (a stack's: expand). */
@@ -202,9 +208,7 @@ function Card({ n, onTap, onDismiss, clearable = n.clearable, name, more = 0, cl
         <span class="notif-time muted">{ago(n.time)}</span>
       </div>
       {/* PowOS's own: the sender is the group's name already ("PowOS · coder") - not again as its title. */}
-      {n.title && !(name && (name.toLowerCase().endsWith(`· ${n.title.trim().toLowerCase()}`) || (name === UPDATES && n.title.trim().toLowerCase() === "deploy"))) && (
-        <div class="notif-title">{n.title}</div>
-      )}
+      {n.title && !titleIsName(n, name) && <div class="notif-title">{n.title}</div>}
       {n.text && <div class={`notif-text${n.text.includes("\n") ? " lines" : ""}`}>{n.text}</div>}
       <Actions n={n} />
       {replying.value?.key === n.key && <Reply n={n} index={replying.value.index} />}
@@ -279,11 +283,43 @@ const toggle = (id: string) => {
   expanded.value = s;
 };
 
+/** A peeking strip's one line: its title (unless it's the group's name) and its text's first line. */
+function firstLine(n: PhoneNotification, name: string): string {
+  const text = (n.text ?? "").trim().split("\n")[0];
+  const title = n.title && !titleIsName(n, name) ? n.title.trim() : "";
+  return title && text ? `${title} · ${text}` : title || text;
+}
+
+/**
+ * The folded stack's layers behind its top card (the user, 11-01: "doesn't show like 3 of each" - two blank slivers
+ * read as one card): the 2nd and 3rd as real strips, each narrower and offset out from under the one in front, their
+ * first line readable, and "+N more" past three. A tap on any opens the group. Bottom-aligned they sit on the side
+ * away from the thumb (shell order flips in notifications.css).
+ */
+function Peeks({ g, open }: { g: Group; open: boolean }) {
+  const peek = g.items.slice(1, 3);
+  const more = g.items.length - 3;
+  return (
+    <div class="notif-peeks" aria-hidden={open} inert={open} onClick={() => toggle(g.id)}>
+      <div>
+        {peek.map((n, i) => (
+          <div key={n.key} class="notif-peek" data-layer={i + 1}>
+            <span class="notif-peek-line">{firstLine(n, g.name)}</span>
+            <span class="notif-time muted">{ago(n.time)}</span>
+          </div>
+        ))}
+        {more > 0 && <div class="notif-peek-more muted">+{more} more</div>}
+      </div>
+    </div>
+  );
+}
+
 /**
  * One group: a single notification is its card. More than one: a stack - its head (the group's name, its count, the
- * fold chevron), its newest card, and under it either two slim cards peeking (folded) or the others (open), unfolding
- * in place. The cards look the same both ways - only the rest's height and the peeking slivers animate (an earlier
- * complaint: a style switch mid-transition). Slid away, a folded stack dismisses the whole group; open, each card.
+ * fold chevron), its newest card in full and, folded, up to two more as layered strips peeking behind it (Peeks) -
+ * every group at once, max 3 shown each; open, the others unfold in place under it. The cards look the same both
+ * ways - only the strips' and the rest's heights animate (an earlier complaint: a style switch mid-transition). Slid
+ * away, a folded stack dismisses the whole group; open, each card.
  */
 function Stack({ g }: { g: Group }) {
   const [top, ...rest] = g.items;
@@ -303,11 +339,12 @@ function Stack({ g }: { g: Group }) {
       <Card
         n={top}
         name={g.name}
-        class="in-group"
+        class="in-group notif-front"
         onTap={open ? undefined : () => toggle(g.id)}
         onDismiss={open ? undefined : clearAll}
         clearable={open ? top.clearable : g.items.some((n) => n.clearable)}
       />
+      <Peeks g={g} open={open} />
       <div class="notif-rest" inert={!open}>
         <div>
           {rest.map((n) => (

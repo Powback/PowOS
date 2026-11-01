@@ -8172,6 +8172,22 @@ try {
           return { ...r, ready: true, ms: Date.now() - r.started };
         }),
       );
+  // NS1-NS4 (dev/notif-stacks-check.js; the user, 11-01 15:43: "doesn't show like 3 of each"): groups of 1, 3 and 7 all
+  // on screen at once, each stack its newest in full with two narrower strips peeking behind it (first lines readable)
+  // and "+4 more" on the 7, top- and bottom-aligned; a tap opens that group alone. Renders: /cache/notif-stacks-*.png.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, `shade-notif-stacks-${label}`, viewport).then((r) => whenReady(r, async () => {
+        const call = (fn, ...args) => r.page.evaluate(async (f, a) => (await importShim("./dev/notif-stacks-check.js"))[f](...a), fn, args);
+        const fails = [...(await call("stacksSeed"))];
+        for (const align of ["top", "bottom"]) {
+          const at = `${label} ${align}`;
+          fails.push(...(await call("stacksAt", align, at)));
+          await r.page.screenshot({ path: `/cache/notif-stacks-${label}-${align}.png` });
+          if (!fails.length) fails.push(...(await call("stacksExpand", at)));
+        }
+        return fails;
+      })));
   // The pet (ui/pet.tsx): home with local.pet installed, driven through what the user does - shown, touched, each
   // state, a talk bubble, a deploy note, a move - so an error in its effects and timers (2026-10-21: a TDZ in the hop
   // timer's effect threw on every show) fails here; the plain home run never mounts it (the mock has no local.pet).
