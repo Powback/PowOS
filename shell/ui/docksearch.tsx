@@ -26,7 +26,7 @@ import { carry, closeDrawer, dockPosition, drawer, editing, homePage, openPanel,
 import { drawerDrag, drawerOpen } from "./gesture.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { dictateBar, focusBar } from "./bar.tsx";
-import { speech } from "./dictation.ts";
+import { micOn } from "./dictation.ts";
 import { morphBegin, morphFrom, morphTo, morphing, reset as resetMorph } from "./launchmorph.ts";
 import { carryingSearch, searchItem } from "./searchwidget.tsx";
 import { geometry, startCarry } from "./grid.tsx";
@@ -277,7 +277,7 @@ function up(p: Press, cancelled: boolean, y: number) {
 /** The button's face: the dock's cell in the centre slot (home.tsx Dock places it). */
 export function DockSearchButton() {
   const press = useRef<Press | null>(null);
-  const listening = speech.value.listening || !!speech.value.elsewhere;
+  const listening = micOn.value;
   const end = (cancelled: boolean, y: number) => {
     const p = press.current;
     press.current = null;

@@ -46,5 +46,6 @@ s = s.replace(a, """      {
 open(sys.argv[2], "w").write(s)
 PY
 docker run --rm --platform linux/arm64 --shm-size 512m -v "$work/shell:/shell:ro" -v "$work/perf.mjs:/usr/src/app/shots.mjs:ro" \
+  -v "$shell/dev/agents-fleet.mjs:/usr/src/app/agents-fleet.mjs:ro" \
   -v "$work/out:/out" -e SHOTS_ONLY="^$scene\$" -e SHOTS_PROBE="$(cat "$probe")" -w /usr/src/app --entrypoint node \
   "${GATE_IMAGE:-zenika/alpine-chrome:with-puppeteer}" shots.mjs 2>&1 | grep '^probe '
