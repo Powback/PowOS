@@ -27,7 +27,20 @@ const onScreen = (sel: string, w: number, h: number) =>
  * in place (home's .adopts drawer; the pull window is not home, never judged), the PowOS AI page (page -1: it slides the
  * dock off), the shade.
  */
-const covered = () => screens.value.length > 0 || editing.value || drawerOpen.value || page.value < 0 || notifOpen.value;
+const covered = () => screens.value.length > 0 || editing.value || drawerOpen.value || page.value < 0 || notifOpen.value || layered();
+
+/**
+ * Any other full-screen layer, generically (11-01 06:13: an App API page, p:<id>, over home folded - not in the list
+ * above): the topmost element in the middle and near the bottom of the screen is not part of .home, so home isn't what
+ * shows. Only a page element counts as a cover: an empty point (html/body) is judged, as a blank home would be.
+ */
+function layered(): boolean {
+  const pts = [[0.5, 0.5], [0.5, 0.92]];
+  return pts.some(([fx, fy]) => {
+    const el = document.elementFromPoint(innerWidth * fx, innerHeight * fy);
+    return !!el && el !== document.body && el !== document.documentElement && !el.closest(".home");
+  });
+}
 
 export function homeBlank(): string {
   if (document.hidden || pullPage || !(screen.width > 0)) return "";

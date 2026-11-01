@@ -1935,6 +1935,15 @@ async function homeBlankCovered() {
     shut();
     await G.frames(2);
   }
+  // Any full-screen layer that isn't home (11-01: an App API page, p:<id>) - generic, not one of the signals above.
+  const layer = Object.assign(document.createElement("div"), { className: "gate-layer" });
+  layer.style.cssText = "position:fixed;inset:0;z-index:9999;background:#123";
+  document.body.append(layer);
+  await G.frames(2);
+  const under = window.__powosHomeBlank();
+  if (under) fails.push(`a full-screen page layer over home: reported blank ("${under}")`);
+  layer.remove();
+  await G.frames(2);
   const bug = window.__powosHomeBlank();
   if (!bug) fails.push("home with its dock and bar gone and nothing over it reports not blank");
   gone.remove();
