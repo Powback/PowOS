@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import unittest
 
@@ -280,13 +281,22 @@ class ManagerTests(Base):
                               os.path.join(self.tmp, "store"), "--json-events"],
                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                              env=self.menv, cwd=self.tmp)
+        # Drain the broker's stdout while we wait, as the phone's chat does: the inbox event (the body, JSON-escaped:
+        # ~6 bytes per non-ASCII char) is bigger than a 64 KB pipe, and the broker emits it before it sends the turn,
+        # so an unread pipe blocks it and the turn never reaches the model.
+        chunks = []
+        reader = threading.Thread(target=lambda: chunks.extend(iter(lambda: p.stdout.read(65536), b"")), daemon=True)
+        reader.start()
         try:
             self.cli("send", "manager", BODY, "--from", "coder")
             deadline = time.time() + 20
             while time.time() < deadline and not (os.path.exists(self.record) and self.turns()):
                 time.sleep(0.1)
         finally:
-            out, _ = p.communicate(b"", timeout=60)
+            p.stdin.close()
+            p.wait(timeout=60)
+            reader.join(timeout=10)
+        out = b"".join(chunks)
         self.assertEqual([t.encode() for t in self.turns()], [self.expected("coder", BODY).encode()])
         # The REPL's own lines (its banner) aren't events.
         inbox = [e for e in (json.loads(line) for line in out.decode().splitlines() if line.startswith("{"))

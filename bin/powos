@@ -41,7 +41,7 @@ experimental_warn() {
 
 # The help text, one function per group of sections (a function stays short enough to read).
 usage() {
-    _usage_core; _usage_sync; _usage_dev; _usage_more
+    _usage_core; _usage_sync; _usage_dev; _usage_ai; _usage_more
 }
 
 _usage_core() {
@@ -193,6 +193,11 @@ Packages, containers & build:
   build image [variant] [--switch]  Build the OS image LOCALLY (no GitHub)
   registry login [host]   Save pull creds for private images (default ghcr.io)
 
+EOF
+}
+
+_usage_ai() {
+    cat << EOF
 Dev & AI:
   dev                 List all dev projects
   dev new <name>      Create new project from scratch
@@ -1147,7 +1152,8 @@ cmd_update() {
 
         powos|self)
             shift   # drop the verb; _update_self parses --from/--pull
-            _update_self_phone "$@"; local _rc=$?
+            # `|| _rc=$?`, not `; _rc=$?`: under set -e the not-a-phone 99 would exit powos before the fallback.
+            local _rc=0; _update_self_phone "$@" || _rc=$?
             if (( _rc == 99 )); then _update_self "$@"; else return "$_rc"; fi
             ;;
 
