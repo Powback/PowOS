@@ -78,7 +78,8 @@ import java.io.OutputStreamWriter
  * andro.marchy.WebWindowSource and ShellBridge's host); the window is the same container, frame, geometry and touches as
  * an Android app's, with KWin's per-window buffers drawn by the consumer into a layer of its own ([LinuxSource]) in the
  * mirror's place. Body touches go natively to KWin ([linuxInput]); the body size is KWin's window size ("size"); close
- * is KWin's quit. Not yet: popups as their own surfaces (S7), the switcher card, the keyboard (SystemIME), title updates.
+ * (its bar's or its switcher card's) is KWin's quit ([linuxGoes]). Not yet: popups as their own surfaces (S7), the
+ * keyboard (SystemIME), title updates.
  *
  * Doesn't touch the freeform windows (system/WindowFrames.kt): with the setting off nothing here runs.
  */
@@ -1160,6 +1161,9 @@ class WebWindows(
             LinuxCard(LINUX_CARD + w.id, w.id, o.key, o.label)
         }
 
+    /** [linuxGoes]: what KWin is told as a Linux web window goes. */
+    enum class LinuxGoes { GONE, HAND_BACK, QUIT }
+
     class LinuxCard(
         val id: Int,
         val window: Int,
@@ -1217,9 +1221,11 @@ class WebWindows(
                 }
             }, ConsumerLane.STOP_MS)
         }
-        if (src.kwinClosed) return
-        if (handBack) andro.marchy.WebWindowSource.fallback(context, src.kwin, src.offer.appId, src.offer.title)
-        else andro.marchy.WebWindowSource.quit(context, src.kwin)
+        when (linuxGoes(src.kwinClosed, handBack)) {
+            LinuxGoes.GONE -> return
+            LinuxGoes.HAND_BACK -> andro.marchy.WebWindowSource.fallback(context, src.kwin, src.offer.appId, src.offer.title)
+            LinuxGoes.QUIT -> andro.marchy.WebWindowSource.quit(context, src.kwin)
+        }
         WindowLog.i(TAG, "close window ${w.id}: KWin window ${src.kwin} ${if (handBack) "handed back as a task" else "quit (KWin closes it, then ends the app)"}")
     }
 
@@ -3729,7 +3735,24 @@ class WebWindows(
         }
 
         /** The Linux web window card [taskId] stands for ([linuxCards]), or null for a real task. */
-        private fun linuxCardWindow(taskId: Int): Int? = (taskId - LINUX_CARD).takeIf { taskId >= LINUX_CARD }
+        fun linuxCardWindow(taskId: Int): Int? = (taskId - LINUX_CARD).takeIf { taskId >= LINUX_CARD }
+
+        /**
+         * What KWin is told as Linux window goes ([dropLinux]): nothing if KWin closed it itself; the task back
+         * ([handBack]: out of the web window, the app stays); else - the user closed it: its bar's close, its switcher
+         * card swiped away ([closeForTask]), the app menu's close - "quit": KWin closes the window (WM_DELETE_WINDOW /
+         * xdg close) and ~3 s later, if its process still runs, ends that process's tree only (kwin 0042 ->
+         * session/powos-app-quit: a Steam game's own launch chain by its AppId, never Steam or another app).
+         */
+        fun linuxGoes(
+            kwinClosed: Boolean,
+            handBack: Boolean,
+        ): LinuxGoes =
+            when {
+                kwinClosed -> LinuxGoes.GONE
+                handBack -> LinuxGoes.HAND_BACK
+                else -> LinuxGoes.QUIT
+            }
         const val SETTING = "powos_web_windows"
 
         /** Home's web windows (the one home page's), or null: what [closeForTask] closes through. */
