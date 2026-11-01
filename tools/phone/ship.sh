@@ -217,7 +217,8 @@ run)
     2>/dev/null | grep -v '^lib/ai/sandbox/node_modules/'; }
   # units_gate: nothing ships to the phone that installs a file no unit claims (DU1: every ship registers what it
   # installs). test-units-registry.py reads every deploy script against units/; a FAIL refuses the rooted deploy.
-  units_gate() { python3 test/tier1/test-units-registry.py > "$1" 2>&1 && return 0
+  # test-powos-dispatch.py: every `powos <subcommand>`'s file is installed by the deploy (powos terms wasn't, 11-01).
+  units_gate() { { python3 test/tier1/test-units-registry.py && python3 test/tier1/test-powos-dispatch.py; } > "$1" 2>&1 && return 0
     grep -E '^ *FAIL' "$1" | head -3 | cut -c1-200; return 1; }
   # units_publish: the phone's units to the PowOS AI page after a ship to it (in the background, one adb call; the
   # rooted deploy publishes itself). tools/units/publish.sh; a failure is in its log, the page then shows "stale".

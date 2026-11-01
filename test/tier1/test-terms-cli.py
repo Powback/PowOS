@@ -52,7 +52,7 @@ def stub(name, body):
 
 
 # tmux: list-sessions prints LOCAL; attach is logged. ssh: logged; a remote list prints REMOTE unless SSH_DOWN.
-stub("tmux", f'echo "tmux $*" >> {LOG}\ncase "$1" in list-sessions) printf "{LOCAL.encode("unicode_escape").decode()}";; esac\n')
+stub("tmux", f'echo "tmux $*" >> {LOG}\ncase "$*" in *list-sessions*) printf "{LOCAL.encode("unicode_escape").decode()}";; esac\n')
 stub("ssh", f'echo "ssh $*" >> {LOG}\n[ -n "$SSH_DOWN" ] && {{ echo "connect refused" >&2; exit 255; }}\n'
      f'case "$*" in *list-sessions*) printf "{REMOTE.encode("unicode_escape").decode()}";; esac\n')
 
@@ -82,6 +82,7 @@ check("local sessions parsed (name, windows, activity)", ph["scratch"]["windows"
 check("claude marked agent, bash not", ph["main"]["agent"] and not ph["scratch"]["agent"])
 mac = hosts["mac"]["sessions"]
 check("mac sessions over ssh, tagged mac", len(mac) == 1 and mac[0]["host"] == "mac" and mac[0]["agent"])
+check("the list is a UTF-8 client (-u: else tmux prints its tab separators as _ over ssh)", "tmux -u list-sessions" in calls())
 check("ssh is BatchMode (never prompts)", "BatchMode=yes" in calls() and "me@10.0.0.9" in calls())
 
 print("== list from cache, link down ==")
