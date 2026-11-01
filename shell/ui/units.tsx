@@ -11,6 +11,7 @@ import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import { useDb, useRows } from "../apps/stdb.ts";
 import { stored } from "../state.ts";
 import { ago } from "./time.ts";
+import { HostSessions } from "./terms.tsx";
 
 /** A `unit` row (u64s arrive as bigint). The `_check` row of a host carries its drift (status clean | drift). */
 interface UnitRow {
@@ -123,7 +124,7 @@ function HostHead({ h, rows, check, shut, onTap }: { h: string; rows: UnitRow[];
   );
 }
 
-/** Per host: a folding group (HostHead), its units orphans-first, then by status. */
+/** Per host: a folding group (HostHead), its terminals (open or folded: one tap into each), its units orphans-first, then by status. */
 export function Units({ shown }: { shown: boolean }) {
   const [tapped, setTapped] = useState<string | null>(null);
   const all = units.value;
@@ -155,6 +156,7 @@ export function Units({ shown }: { shown: boolean }) {
           return (
             <div key={h} class="ai-work-group">
               <HostHead h={h} rows={rows} check={check} shut={shut} onTap={() => toggle(h)} />
+              <HostSessions host={h} />
               {!shut &&
                 rows.map((u) => (
                   <Line key={u.key} u={u} wide={tapped === u.key} onTap={() => setTapped(tapped === u.key ? null : u.key)} />
