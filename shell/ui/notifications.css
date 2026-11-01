@@ -57,64 +57,27 @@
 .ai-mail-x { font: 16px var(--font); color: var(--color-muted); background: none; border: 0; padding: 0 4px; line-height: 1; }
 
 /*
- * Grouped notifications (notifications.tsx Stack): a group is its head (name, count, chevron) over its newest card in
- * full, with the 2nd and 3rd as layered strips behind it (Peeks: each narrower and offset out from under the one in
- * front, its first line readable) and "+N more" past three; open, the strips fold away and the others unfold under it
- * in place (both a grid row from 0fr to 1fr - an animated auto height, nothing jumps). The cards are styled the same
- * folded and open.
+ * Grouped notifications (notifications.tsx Stack): a group is its head (name, count, chevron) over up to three of its
+ * cards in full, one after another, and past three a "+N more" line; open, the rest unfold in place under them (a grid
+ * row from 0fr to 1fr - an animated auto height, nothing jumps). The cards are styled the same folded and open.
  */
 .notif-more { flex: none; padding: 1px 7px; border-radius: 999px; background: var(--soft-fill); font-size: var(--text-small); }
 .notif-stack { position: relative; flex: none; display: flex; flex-direction: column; }
-.notif-stack > .notif, .notif-stack > .notif-rest { position: relative; z-index: 2; }
-/* The strips: tucked 10 px under the card in front (its z above theirs), so only their own line shows past it. */
-.notif-peeks {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-rows: 1fr;
-  margin-top: -10px;
-  transition: grid-template-rows 220ms cubic-bezier(0.2, 0.9, 0.3, 1), margin 220ms cubic-bezier(0.2, 0.9, 0.3, 1), opacity 180ms ease;
-}
-.notif-peeks > div { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
-.notif-stack.open > .notif-peeks { grid-template-rows: 0fr; margin: 0; opacity: 0; }
-.notif-peek {
-  position: relative;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin: 0 10px;
-  padding: 14px 12px 6px;
-  border-radius: 0 0 var(--radius) var(--radius);
-  background: linear-gradient(var(--soft-fill), var(--soft-fill)), linear-gradient(var(--text-fill), var(--text-fill));
-  box-shadow: var(--lift-shadow);
-  font-size: var(--text-small);
-  touch-action: pan-y;
-  /* Its tucked part cut away: the card in front is translucent, a strip under it would show through as a dark band. */
-  clip-path: inset(10px -30px -30px -30px);
-}
-.notif-peek[data-layer="1"] { z-index: 1; }
-.notif-peek[data-layer="2"] { z-index: 0; margin: -10px 20px 0; opacity: 0.85; }
-.notif-peek-line { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: color-mix(in srgb, var(--color-foreground) 80%, transparent); }
-.notif-peek .notif-time { flex: none; }
-.notif-peek-more { align-self: center; padding: 4px 8px 0; font-size: var(--text-small); }
+.notif-shown { display: flex; flex-direction: column; gap: 6px; }
+.notif-show-more { align-self: center; padding: 6px 12px 2px; font: var(--text-small) var(--font); background: none; border: 0; }
 /* The rest: folded to nothing, unfolded to its height. */
 .notif-rest { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 220ms cubic-bezier(0.2, 0.9, 0.3, 1); }
 .notif-rest > div { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 6px; }
 .notif-stack.open .notif-rest { grid-template-rows: 1fr; }
 .notif-rest > div > .notif:first-child { margin-top: 6px; }
 /*
- * Bottom-aligned (ui/align.ts; shell.css flips the list): the newest nearest the thumb - the front card lowest, the
- * strips peeking out above it (away from the thumb), the head on top; open, the others unfold above it, newest lowest.
+ * Bottom-aligned (ui/align.ts; shell.css flips the list): the newest nearest the thumb - the head on top, then "+N
+ * more" (away from the thumb), the rest, and the shown cards lowest, newest last.
  */
 :root[data-align-shade="bottom"] .notif-list > .notif-items .notif-stack > .notif-group-head { order: 0; }
-:root[data-align-shade="bottom"] .notif-list > .notif-items .notif-stack > .notif-rest { order: 1; }
-:root[data-align-shade="bottom"] .notif-list > .notif-items .notif-stack > .notif-peeks { order: 2; margin: 0 0 -10px; }
-:root[data-align-shade="bottom"] .notif-list > .notif-items .notif-stack > .notif-front { order: 3; }
-:root[data-align-shade="bottom"] .notif-list > .notif-items .notif-stack.open > .notif-peeks { margin: 0; }
-:root[data-align-shade="bottom"] .notif-list > .notif-items .notif-peeks > div { flex-direction: column-reverse; }
-:root[data-align-shade="bottom"] .notif-list > .notif-items .notif-peek { padding: 6px 12px 14px; border-radius: var(--radius) var(--radius) 0 0; clip-path: inset(-30px -30px 10px -30px); }
-:root[data-align-shade="bottom"] .notif-list > .notif-items .notif-peek[data-layer="2"] { margin: 0 20px -10px; }
-:root[data-align-shade="bottom"] .notif-list > .notif-items .notif-peek-more { padding: 0 8px 4px; }
+:root[data-align-shade="bottom"] .notif-list > .notif-items .notif-stack > .notif-show-more { order: 1; padding: 2px 12px 6px; }
+:root[data-align-shade="bottom"] .notif-list > .notif-items .notif-stack > .notif-rest { order: 2; }
+:root[data-align-shade="bottom"] .notif-list > .notif-items .notif-stack > .notif-shown { order: 3; flex-direction: column-reverse; }
 :root[data-align-shade="bottom"] .notif-list > .notif-items .notif-rest > div { flex-direction: column-reverse; }
 :root[data-align-shade="bottom"] .notif-list > .notif-items .notif-rest > div > .notif:first-child { margin: 0 0 6px; }
 .notif-group-head {

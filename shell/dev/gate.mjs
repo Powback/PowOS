@@ -8476,9 +8476,9 @@ try {
           return { ...r, ready: true, ms: Date.now() - r.started };
         }),
       );
-  // NS1-NS4 (dev/notif-stacks-check.js; the user, 11-01 15:43: "doesn't show like 3 of each"): groups of 1, 3 and 7 all
-  // on screen at once, each stack its newest in full with two narrower strips peeking behind it (first lines readable)
-  // and "+4 more" on the 7, top- and bottom-aligned; a tap opens that group alone. Renders: /cache/notif-stacks-*.png.
+  // NS1-NS4 (dev/notif-stacks-check.js; the user, 11-01 16:39: "just show like 3 cards and then an 'x more' hint"):
+  // groups of 1, 3 and 7 all on screen at once, each up to 3 full cards one after another and "+4 more" on the 7, top-
+  // and bottom-aligned; a tap on "+4 more" opens that group alone. Renders: /cache/notif-stacks-*.png.
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, `shade-notif-stacks-${label}`, viewport).then((r) => whenReady(r, async () => {

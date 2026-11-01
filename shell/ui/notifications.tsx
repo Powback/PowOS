@@ -123,19 +123,13 @@ function titleIsName(n: PhoneNotification, name?: string): boolean {
 
 interface CardProps {
   n: PhoneNotification;
-  /** A tap: its own (opens the notification) unless given (a stack's: expand). */
-  onTap?: () => void;
-  /** Slid away: its own dismissal unless given (a stack's: the whole group). */
-  onDismiss?: () => void;
-  /** Whether it can be slid away (a stack: if any of its own can). */
-  clearable?: boolean;
   /** Its head's name (a group's, "PowOS · updates") and the count of the others under it. */
   name?: string;
   more?: number;
   class?: string;
 }
 
-function Card({ n, onTap, onDismiss, clearable = n.clearable, name, more = 0, class: cls = "" }: CardProps) {
+function Card({ n, name, more = 0, class: cls = "" }: CardProps) {
   const el = useRef<HTMLDivElement>(null);
   const drag = useRef<{
     x: number;
@@ -170,7 +164,7 @@ function Card({ n, onTap, onDismiss, clearable = n.clearable, name, more = 0, cl
         const dx = e.clientX - d.x;
         const dy = e.clientY - d.y;
         if (d.sideways == null && Math.hypot(dx, dy) > SLOP) {
-          d.sideways = Math.abs(dx) > Math.abs(dy) && clearable;
+          d.sideways = Math.abs(dx) > Math.abs(dy) && n.clearable;
           if (d.sideways) el.current!.setPointerCapture(e.pointerId);
         }
         if (!d.sideways) return;
@@ -187,10 +181,9 @@ function Card({ n, onTap, onDismiss, clearable = n.clearable, name, more = 0, cl
           const v = d.dx / Math.max(1, performance.now() - d.t);
           if (Math.abs(d.dx) > w * DISMISS || Math.abs(v) > FLICK) {
             settle(Math.sign(d.dx) * w);
-            setTimeout(() => (onDismiss ? onDismiss() : powos.notifications.dismiss(n.key)), 180);
+            setTimeout(() => powos.notifications.dismiss(n.key), 180);
           } else settle(0);
         } else if (d.sideways == null && Math.hypot(e.clientX - d.x, e.clientY - d.y) <= SLOP) {
-          if (onTap) return onTap();
           powos.notifications.open(n.key);
           notif.value = false;
         }
@@ -266,11 +259,11 @@ function grouped(items: GroupedNotification[]): Group[] {
 }
 
 /**
- * The groups tapped open: at rest every group with more than one card is a folded stack (its newest on top, two
- * peeking under it, its count in its head), so every app fits on the screen at once - folded or unfolded, whatever the
+ * The groups tapped open: at rest every group shows at most three cards (then "+N more"), so every app fits on the
+ * screen at once - folded or unfolded, whatever the
  * control center shows (the user, 2026-10-30: "Maybe group to notification sold that I can see all the types at once
  * ... Max 3 in one In one stack"; unfolded, ccExpanded opened every stack and PowOS's ten deploy cards pushed every other app off).
- * A tap on a stack opens that one only; a tap on its head folds it again. Shut, the shade starts folded next time.
+ * A tap on a group's "+N more" opens that one only; a tap on its head folds it again. Shut, the shade starts folded next time.
  */
 const expanded = signal<Set<string>>(new Set());
 effect(() => {
@@ -283,75 +276,49 @@ const toggle = (id: string) => {
   expanded.value = s;
 };
 
-/** A peeking strip's one line: its title (unless it's the group's name) and its text's first line. */
-function firstLine(n: PhoneNotification, name: string): string {
-  const text = (n.text ?? "").trim().split("\n")[0];
-  const title = n.title && !titleIsName(n, name) ? n.title.trim() : "";
-  return title && text ? `${title} · ${text}` : title || text;
-}
-
 /**
- * The folded stack's layers behind its top card (the user, 11-01: "doesn't show like 3 of each" - two blank slivers
- * read as one card): the 2nd and 3rd as real strips, each narrower and offset out from under the one in front, their
- * first line readable, and "+N more" past three. A tap on any opens the group. Bottom-aligned they sit on the side
- * away from the thumb (shell order flips in notifications.css).
+ * One group: a single notification is its card. More than one: its head (the group's name, its count) then up to three
+ * of its cards in full, one after another - each readable, with its own actions, dismissal and reply (the user, 11-01
+ * 16:39: "no, just show like 3 cards and then an 'x more' hint") - and past three a "+N more" line: a tap unfolds the
+ * rest of that group in place (a grid row from 0fr to 1fr - an animated auto height), its head folds it again. Every
+ * group shows at once. Bottom-aligned the order flips (notifications.css): the newest nearest the thumb, "+N more"
+ * on the far side.
  */
-function Peeks({ g, open }: { g: Group; open: boolean }) {
-  const peek = g.items.slice(1, 3);
-  const more = g.items.length - 3;
-  return (
-    <div class="notif-peeks" aria-hidden={open} inert={open} onClick={() => toggle(g.id)}>
-      <div>
-        {peek.map((n, i) => (
-          <div key={n.key} class="notif-peek" data-layer={i + 1}>
-            <span class="notif-peek-line">{firstLine(n, g.name)}</span>
-            <span class="notif-time muted">{ago(n.time)}</span>
-          </div>
-        ))}
-        {more > 0 && <div class="notif-peek-more muted">+{more} more</div>}
-      </div>
-    </div>
-  );
-}
-
-/**
- * One group: a single notification is its card. More than one: a stack - its head (the group's name, its count, the
- * fold chevron), its newest card in full and, folded, up to two more as layered strips peeking behind it (Peeks) -
- * every group at once, max 3 shown each; open, the others unfold in place under it. The cards look the same both
- * ways - only the strips' and the rest's heights animate (an earlier complaint: a style switch mid-transition). Slid
- * away, a folded stack dismisses the whole group; open, each card.
- */
+const SHOWN = 3;
 function Stack({ g }: { g: Group }) {
-  const [top, ...rest] = g.items;
-  if (!rest.length) return <Card n={top} name={g.name !== top.app ? g.name : undefined} />;
-  const open = expanded.value.has(g.id);
-  const clearAll = () => g.items.filter((n) => n.clearable).forEach((n) => powos.notifications.dismiss(n.key));
+  const [top, ...others] = g.items;
+  if (!others.length) return <Card n={top} name={g.name !== top.app ? g.name : undefined} />;
+  const more = g.items.length - SHOWN;
+  const open = more > 0 && expanded.value.has(g.id);
   return (
-    <div class={`notif-stack ${open ? "open" : ""}`} data-depth={Math.min(2, rest.length)}>
-      <button type="button" class="notif-group-head" aria-expanded={open} onClick={() => toggle(g.id)}>
+    <div class={`notif-stack ${open ? "open" : ""}`} data-depth={Math.min(2, others.length)}>
+      <button type="button" class="notif-group-head" aria-expanded={open} onClick={() => more > 0 && toggle(g.id)}>
         {notifIconSrc(top) && <img class="notif-icon" src={notifIconSrc(top)!} alt="" />}
         <span class="notif-app">{g.name}</span>
         <span class="notif-more">{g.items.length}</span>
-        <span class="notif-fold" aria-label={open ? "collapse" : "expand"}>
-          ⌃
-        </span>
+        {more > 0 && (
+          <span class="notif-fold" aria-label={open ? "collapse" : "expand"}>
+            ⌃
+          </span>
+        )}
       </button>
-      <Card
-        n={top}
-        name={g.name}
-        class="in-group notif-front"
-        onTap={open ? undefined : () => toggle(g.id)}
-        onDismiss={open ? undefined : clearAll}
-        clearable={open ? top.clearable : g.items.some((n) => n.clearable)}
-      />
-      <Peeks g={g} open={open} />
+      <div class="notif-shown">
+        {g.items.slice(0, SHOWN).map((n) => (
+          <Card key={n.key} n={n} name={g.name} class="in-group" />
+        ))}
+      </div>
       <div class="notif-rest" inert={!open}>
         <div>
-          {rest.map((n) => (
+          {g.items.slice(SHOWN).map((n) => (
             <Card key={n.key} n={n} name={g.name} class="in-group" />
           ))}
         </div>
       </div>
+      {more > 0 && !open && (
+        <button type="button" class="notif-show-more muted" onClick={() => toggle(g.id)}>
+          +{more} more
+        </button>
+      )}
     </div>
   );
 }
