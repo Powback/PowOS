@@ -9254,7 +9254,7 @@ async function webWindowMaskCheck() {
     await g.wwRaise(ww, W);
     await g.wwSwipe(ww, el);
     await g.wwHidden(ww);
-    g.wwMaximise(ww, W);
+    await g.wwMaximise(ww, W);
     return ww.fails;
   } finally {
     ww.restore();
@@ -9400,14 +9400,40 @@ async function wwHidden(ww) {
 }
 
 /** Maximise fills the work area (the pages' box, above the dock) and restores the frame it had. */
-function wwMaximise(ww, W) {
+async function wwMaximise(ww, W) {
   W.toggleMaximise(903);
   const a = W.workArea();
   const m = W.webWins.value.find((w) => w.id === 903);
   ww.expect(!!m?.restore && Math.abs(m.w - (a.right - a.left)) <= 1 && Math.abs(m.h - (a.bottom - a.top)) <= 1, `full screen: ${JSON.stringify(m)} doesn't fill the work area ${JSON.stringify(a)}`);
+  await window.__wwg.wwMergedBar(ww, 903);
   W.toggleMaximise(903);
   const r = W.webWins.value.find((w) => w.id === 903);
   ww.expect(!r?.restore && r?.w === 360 && r?.h === 300, `restore: ${JSON.stringify(r)} isn't back at 360x300`);
+}
+
+/**
+ * MB1 (the user, "Maximised window's top bar takes taps": its buttons, title and drag dead): maximised, the bar's merge
+ * ("w.f" 17-18) is what the status bar strip takes and hands to home's page (ShadeHost.windowClaims, routed by
+ * system/BarHits.kt) - every control of the bar and its title must lie in [frame left, title end) or [controls, frame
+ * right): one outside them is SystemUI's status bar's tap, never the window's.
+ */
+async function wwMergedBar(ww, id) {
+  await ww.frame();
+  const e = ww.sentFor(id);
+  if (!ww.expect(!!e && e[16] === 1, `MB1: window ${id} isn't maximised in w.f (${e?.[16]})`)) return;
+  const [titleEnd, controls] = [e[17], e[18]];
+  if (!ww.expect(titleEnd >= 0 && controls > titleEnd, `MB1: maximised window ${id}'s bar has no merge (title end ${titleEnd}, controls ${controls})`)) return;
+  const [left, right] = [e[0], e[0] + e[2]];
+  const bar = document.querySelector(`.webwindow[data-wwid="${id}"] .webwindow-title`);
+  if (!ww.expect(!!bar, `MB1: maximised window ${id} has no bar`)) return;
+  const parts = [...bar.querySelectorAll("button, [role=button], .ww-title-label")].filter((el) => el.getBoundingClientRect().width > 0);
+  ww.expect(parts.length >= 2, `MB1: the maximised bar shows ${parts.length} controls (want its title and buttons)`);
+  const claims = [[left, titleEnd], [controls, right]];
+  for (const el of parts) {
+    const r = el.getBoundingClientRect();
+    const inside = claims.some(([l, rt]) => r.left >= l - 1 && r.right <= rt + 1);
+    ww.expect(inside, `MB1: ${el.getAttribute("aria-label") || el.className} (${Math.round(r.left)}..${Math.round(r.right)}) is outside the bar's claims ${JSON.stringify(claims)}: the status bar's tap, not the window's`);
+  }
 }
 
 /** In the page: the LW3 run's modules, its mock host's log, its windows' elements by app key. */
@@ -9534,7 +9560,7 @@ async function lw3End() {
 const LW3_HELPERS = `(window.__lw3f = { ${[lw3Env, lw3Launch, lw3Offer, lw3Timeout, lw3Retry, lw3BadExec, lw3HostFailed, lw3End].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
 
 /** [webWindowMaskCheck]'s helpers into the page (window.__wwg); evaluates to [] (no problems) as a gate step. */
-const WW_HELPERS = `(window.__wwg = { ${[wwHelpers, wwFound, wwCuts, wwMenu, wwRaise, wwStacked, wwSwipe, wwHidden, wwMaximise].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
+const WW_HELPERS = `(window.__wwg = { ${[wwHelpers, wwFound, wwCuts, wwMenu, wwRaise, wwStacked, wwSwipe, wwHidden, wwMaximise, wwMergedBar].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
 
 /** In the page, loaded afresh after desktopsCheck: the stored windows go back on their pages (page 2's hidden). */
 async function desktopsReloaded() {
