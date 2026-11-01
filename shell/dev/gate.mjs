@@ -4991,6 +4991,52 @@ async function webDockToggleHost() {
   }
 }
 
+/**
+ * PP1 (the user, 11-01 15:48: "when I press PiP in Calculator, the PowOS title bar still sticks around"): the host
+ * reports the window's app gone to PiP by itself ("webwindows.pip" on) - no .webwindow for it within 300 ms, never
+ * minimised (the host moved nothing); the switcher's card for its task says PiP; reported back (PiP expanded), the
+ * window returns where it was.
+ */
+async function webWindowPipLeave() {
+  // In the page's one evaluate: helpers are its own (page.evaluate sends this function alone).
+  /** PP1's switcher: a web window's task in PiP ("pip" on its card) says PiP; only that card. */
+  async function pipCard(until) {
+    const fails = [];
+    window.__mockEvents.emit("recents.show", { open: true, from: 3071, tasks: [{ id: 3071, label: "Calculator", key: null, icon: null, snapshot: "", webwindow: 971, pip: true }, { id: 3072, label: "Maps", key: null, icon: null, snapshot: "" }] });
+    if ((await until(() => document.querySelector(".recents.shown .task .task-pip"), 1500)) == null) fails.push("PP1: the switcher doesn't list its task as PiP");
+    else if ((document.querySelectorAll(".recents .task-pip").length) !== 1) fails.push("PP1: a card that isn't in PiP says PiP");
+    return fails;
+  }
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const fails = [];
+  const sel = '.webwindow[data-wwid="971"]';
+  const until = async (ok, ms) => {
+    const t0 = performance.now();
+    while (!ok() && performance.now() - t0 < ms) await new Promise((r) => requestAnimationFrame(() => r()));
+    return ok() ? Math.round(performance.now() - t0) : null;
+  };
+  S.page.value = 0;
+  const p = S.pages.value[0];
+  W.webWins.value = [{ id: 971, key: "a:gate.pip/.Calculator", label: "Calculator", page: p, x: 120, y: 160, w: 320, h: 300, live: true, task: 3071 }];
+  if ((await until(() => document.querySelector(sel), 1000)) == null) return ["PP1: the window's .webwindow never showed"];
+  window.__mockEvents.emit("webwindows.pip", { id: 971, on: true });
+  const gone = await until(() => !document.querySelector(sel), 300);
+  if (gone == null) fails.push("PP1: its app went to PiP by itself, its .webwindow (title bar, frame) still there after 300 ms");
+  const w = W.webWins.value.find((v) => v.id === 971);
+  if (!w) fails.push("PP1: the window was forgotten on PiP (it must come back when expanded)");
+  else if (w.minimised) fails.push("PP1: PiP went through the minimise path (minimised=true)");
+  fails.push(...(await pipCard(until)));
+  window.__mockEvents.emit("recents.end", { to: "home" });
+  await new Promise((r) => setTimeout(r, 600));
+  window.__mockEvents.emit("webwindows.pip", { id: 971, on: false });
+  if ((await until(() => document.querySelector(sel), 500)) == null) fails.push("PP1: its PiP expanded (host: pip off), the window didn't come back");
+  const back = W.webWins.value.find((v) => v.id === 971);
+  if (back && (back.x !== 120 || back.y !== 160)) fails.push(`PP1: back from PiP at ${back.x},${back.y}, not where it was (120,160)`);
+  W.webWins.value = [];
+  return fails;
+}
+
 /** TB4: its window on another page - home goes to that page, the window in front. */
 async function webDockTogglePage() {
   const { S, W, P, win, top, tap, step } = window.__dtg;
@@ -7789,6 +7835,10 @@ try {
   // WR1: home shown again shows its windows in that event, at their rects, with no frame or host round trip (ww-resume-instant).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-resume-instant", { width: 900, height: 1000 }).then((r) => whenReady(r, async () => (await r.page.evaluate(webWindowResumeHelpers), r.page.evaluate(webWindowResumeScene)))));
+  // PP1: an app that leaves its window by itself for PiP drops the frame within 300 ms, its card says PiP, and it comes
+  // back when expanded (ww-pip-leave; the user, 11-01 15:48: "the PowOS title bar still sticks around").
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ww-pip-leave", { width: 900, height: 1000 }).then((r) => whenReady(r, () => r.page.evaluate(webWindowPipLeave))));
   // WT-IDLE: the web windows' rAF tick does nothing while no window moves (ww-idle-tick).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-idle-tick", { width: 900, height: 1000 }).then((r) => whenReady(r, async () => {

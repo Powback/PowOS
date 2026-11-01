@@ -41,7 +41,9 @@ class WebWindowsReconcileTest {
     @Test
     fun reconcileListensAndDrops() {
         val src = File("src/main/kotlin/dev/omalauncher/shell/WebWindows.kt").readText()
-        assertTrue("no task stack listener", src.contains("FreeformTasks.listen { main.post { scheduleReconcile() } }"))
+        val listen = src.substringAfter("FreeformTasks.listen {").substringBefore("\n        }\n")
+        assertTrue("no task stack listener", listen.contains("main.post { scheduleReconcile() }"))
+        assertTrue("PP1: the listener no longer checks PiP on the change itself", listen.contains("pipSoon()"))
         // reconcile() posts its work to [io]: reconcileNow (36cd626e) holds the per-window checks.
         assertTrue("reconcile no longer hands its windows to reconcileNow", src.substringAfter("private fun reconcile() {").substringBefore("\n    }\n").contains("reconcileNow(ws, tasked)"))
         assertTrue("reconcile no longer checks each window", src.substringAfter("private fun reconcileNow(").substringBefore("\n    }\n").contains("checkOrphan"))
@@ -85,5 +87,39 @@ class WebWindowsReconcileTest {
         assertTrue("the 0.7 s stray pull must skip a full-screen app", check.contains("!awayByChoice(w) && tasksOn(w.displayId) == 0) pullStrayTask(w)"))
         val fallback = src.substringAfter("private fun landedOrFallback(w: Win) {").substringBefore("\n    }\n")
         assertTrue("the 3 s check must skip a full-screen app", fallback.lines().first { it.isNotBlank() }.contains("awayByChoice(w)) return"))
+    }
+
+    /**
+     * PP1 (the user, 11-01 15:48: "when I press PiP in Calculator, the PowOS title bar still sticks around"): an app that
+     * leaves its window by itself (PiP, its own floating window) drops the window's frame and is tracked as PiP; expanded
+     * back, it returns to the window.
+     */
+    @Test
+    fun anAppLeavingForPipIsTrackedAndComesBack() {
+        val f = WebWindows.Companion
+        val enter = WebWindows.Companion.Pip.ENTER
+        val leave = WebWindows.Companion.Pip.LEAVE
+        val own = WebWindows.Companion.At.OWN
+        val main = WebWindows.Companion.At.MAIN
+        val elsewhere = WebWindows.Companion.At.ELSEWHERE
+        assertEquals("PiP on display 0", enter, f.pipStep(pip = false, at = main, mode = 2, float = false))
+        assertEquals("PiP in its own display", enter, f.pipStep(pip = false, at = own, mode = 2, float = false))
+        assertEquals("the user's own floating window on display 0", enter, f.pipStep(pip = false, at = main, mode = 100, float = true))
+        assertNull("PowOS's own float (SystemFloat's hand-over): follow pulls it back, not PiP", f.pipStep(pip = false, at = main, mode = 5, float = false))
+        assertNull("in PiP still", f.pipStep(pip = true, at = main, mode = 2, float = false))
+        assertEquals("PiP expanded to full screen on display 0", leave, f.pipStep(pip = true, at = main, mode = 1, float = false))
+        assertEquals("back on its own display", leave, f.pipStep(pip = true, at = own, mode = 1, float = false))
+        assertNull("another display: the orphan rule decides", f.pipStep(pip = false, at = elsewhere, mode = 2, float = false))
+        assertNull("full screen in its window: nothing", f.pipStep(pip = false, at = own, mode = 1, float = false))
+        val src = File("src/main/kotlin/dev/omalauncher/shell/WebWindows.kt").readText()
+        val follow = src.substringAfter("    private fun follow(").substringBefore("\n    }\n")
+        assertTrue("follow no longer checks PiP first", follow.contains("if (pipCheck(w, t)) return true"))
+        val enterFn = src.substringAfter("private fun pipEnter(").substringBefore("\n    }\n")
+        assertTrue("pipEnter must hide the frame", enterFn.contains("hideFrame(w)"))
+        assertTrue("pipEnter must tell the page", enterFn.contains("\"webwindows.pip\""))
+        assertTrue("pipEnter must track it for the switcher", enterFn.contains("WebWindowDisplays.pip(task, w.id, true)"))
+        assertTrue("pipEnter must not go through the minimise path", !enterFn.contains("minimise"))
+        val leaveFn = src.substringAfter("private fun pipLeave(").substringBefore("\n    }\n")
+        assertTrue("pipLeave must move the task back into its window", leaveFn.contains("moveTask(task, w.displayId)"))
     }
 }

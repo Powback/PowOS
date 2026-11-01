@@ -43,8 +43,8 @@ class WebWindowsFullScreenSizeTest {
     /** The switcher hides a full-screen window too (it hangs on home's surface, not under the root). */
     @Test
     fun theSwitcherHidesAFullScreenWindow() {
-        val shown = body("private fun rootShown(on: Boolean) {")
-        assertTrue("rootShown hides only the root", shown.contains("if (!w.underRoot && w.container.isValid) t.setVisibility(w.container, on && w.shown)"))
+        val shown = body("private fun rootShown(")
+        assertTrue("rootShown hides only the root", Regex("""if \(!w\.underRoot && w\.container\.isValid\) t\.setVisibility\(w\.container, \w+ && w\.shown\)""").containsMatchIn(shown))
     }
 
     /** Home from the switcher leaves full screen, as Home does. */

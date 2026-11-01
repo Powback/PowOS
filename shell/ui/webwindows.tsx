@@ -41,6 +41,12 @@ export interface WebWin {
   zoom?: number;
   /** Off its page, in the dock (a tap on the dock icon brings it back: openWebWindow). */
   minimised?: boolean;
+  /**
+   * PP1: its app left the window by itself (its own PiP / floating button: Android's PiP or a floating window,
+   * "webwindows.pip"): no frame, no bar - the app is Android's window now; its switcher card says PiP. Expanded back,
+   * the host says so and the window returns where it was.
+   */
+  pip?: boolean;
   /** Filling the work area (above the dock); the frame to go back to. */
   restore?: { x: number; y: number; w: number; h: number };
   /**
@@ -361,12 +367,14 @@ function fromHost(h: HostWebWindow, page: number): WebWin {
     id: h.id, key: h.key, label: h.label, page, x: vx - o.x, y: vy - o.y, w, h: hh,
     task: h.task != null && h.task >= 0 ? h.task : undefined,
     live: h.live || undefined, ownFrame: h.ownFrame || undefined,
-    minimised: h.state === "minimised" || undefined, full: h.state === "full" || undefined,
+    ...stateOf(h),
     zoom: zoomOf(h),
   };
 }
 
 /** TS1: host window [h]'s content zoom, undefined at 1. */
+/** Host window [h]'s state as the page's flags (minimised, full screen, PiP: PP1). */
+const stateOf = (h: HostWebWindow) => ({ minimised: h.state === "minimised" || undefined, full: h.state === "full" || undefined, pip: h.state === "pip" || undefined });
 const zoomOf = (h: HostWebWindow) => (h.zoom != null && h.zoom !== 1 ? h.zoom : undefined);
 void rebuildFromHost();
 
@@ -480,7 +488,7 @@ export function dockToggle(key: string): boolean {
   const mine = webWins.value.filter((w) => w.key === key && !w.full);
   if (!mine.length) return false;
   const here = shownPage();
-  const front = webWins.value.filter((w) => w.page === here && !w.minimised && !w.full && !hiddenTab(w.id)).at(-1);
+  const front = webWins.value.filter((w) => w.page === here && !w.minimised && !w.full && !w.pip && !hiddenTab(w.id)).at(-1);
   if (front?.key === key) {
     if (mine.length === 1) minimise(front.id);
     else bringBack(mine[0].id);
@@ -525,6 +533,15 @@ powos.on("webwindows.state", (m: { id: number; minimised: boolean }) => {
 });
 /** Its switcher card tapped (ShellBridge.openTask): back where it was, floating, on its page. */
 powos.on("webwindows.show", (id: number) => bringBack(id));
+/**
+ * PP1 (the user, 11-01 15:48: "when I press PiP in Calculator, the PowOS title bar still sticks around"): its app went
+ * to Android's PiP / a floating window by itself (WebWindows.kt pipEnter) - its frame and bar go at once; back
+ * ([m.on] false: the PiP expanded) it shows where it was. Never the minimise path: the host already moved nothing.
+ */
+powos.on("webwindows.pip", (m: { id: number; on: boolean }) => {
+  update(m.id, { pip: m.on || undefined });
+  if (!m.on) bringBack(m.id);
+});
 
 // ---- the work area, and the host's events ----------------------------------------------------------------------------
 
@@ -617,7 +634,7 @@ function sameAbove(id: number, list: WebWin[]): WebWin[] {
 }
 
 export function WebWindowsOn({ page }: { page: number }) {
-  const here = webWins.value.filter((w) => w.page === page && !w.minimised && !w.full && !hiddenTab(w.id));
+  const here = webWins.value.filter((w) => w.page === page && !w.minimised && !w.full && !w.pip && !hiddenTab(w.id));
   const strips = parkedOn(page);
   if (!here.length && !strips.length && parkView.value?.page !== page) return null;
   const t = tilings.value[page];

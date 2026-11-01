@@ -225,6 +225,7 @@ const sameHead = (a: { t: RecentTask }, b: { t: RecentTask }) =>
   a.t === b.t ||
   (a.t.icon === b.t.icon &&
     a.t.label === b.t.label &&
+    a.t.pip === b.t.pip &&
     (a.t.split ?? []).length === (b.t.split ?? []).length &&
     (a.t.split ?? []).every((s, i) => s.id === b.t.split![i].id && s.icon === b.t.split![i].icon));
 
@@ -238,6 +239,7 @@ const TaskHead = memo(function TaskHead({ t }: { t: RecentTask }) {
         <Icon src={t.icon} />
       )}
       <span class="task-label">{t.label}</span>
+      {t.pip && <span class="task-pip">PiP</span>}
     </div>
   );
 }, sameHead);

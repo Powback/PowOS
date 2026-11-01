@@ -37,7 +37,7 @@ class WebWindowsBarTest {
     fun thePageButtonAsksTheHost() {
         val page = File("../../../../shell/ui/webwindows.tsx").takeIf { it.exists() } ?: return
         val src = page.readText()
-        assertTrue("the bar's Full screen button no longer calls fullScreen(win.id)", Regex("""aria-label="Full screen" \{\.\.\.press\(\(\) => fullScreen\(win\.id\)\)\}""").containsMatchIn(src))
+        assertTrue("the bar's Full screen button no longer calls fullScreen(win.id)", Regex("""aria-label="Full screen" \{\.\.\.press\(\(\) => fullScreen\((win\.)?id\)\)\}""").containsMatchIn(src))
         val fn = src.substringAfter("function fullScreen(id: number) {").substringBefore("\n}\n")
         assertTrue("fullScreen() no longer asks the host for a full-screen app", fn.contains("powos.webwindows.fullScreen(id)"))
     }

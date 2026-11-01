@@ -159,6 +159,7 @@ class WebWindows(
     private fun listedState(w: Win): String =
         when {
             w.full || w.linuxFull -> "full"
+            w.pip -> "pip"
             w.leftAt != 0L || w.minimised -> "minimised"
             else -> "floating"
         }
@@ -183,7 +184,85 @@ class WebWindows(
     private val reconcileRun = Runnable { reconcile() }
 
     /** Stops the task stack listener ([reconcile]); null where it can't be registered. */
-    private val stopTasks: (() -> Unit)? = dev.omalauncher.system.FreeformTasks.listen { main.post { scheduleReconcile() } }
+    private val stopTasks: (() -> Unit)? =
+        dev.omalauncher.system.FreeformTasks.listen {
+            pipSoon()
+            main.post { scheduleReconcile() }
+        }
+
+    /** One [pipCheck] pass queued on [io] (the listener fires in bursts: one read per burst, never a delay). */
+    private val pipPending = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * PP1 (the user, 11-01 15:48: "when I press PiP in Calculator, the PowOS title bar still sticks around"): on the
+     * task change itself, not [RECONCILE_MS] later - a window whose app went to Android's PiP or a floating window by
+     * itself drops its frame at once ([pipEnter]); one whose PiP was expanded is back in it ([pipLeave]). Any thread.
+     */
+    private fun pipSoon() {
+        if (wins.isEmpty() || !pipPending.compareAndSet(false, true)) return
+        io.post {
+            pipPending.set(false)
+            @Suppress("DEPRECATION")
+            val running = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrNull() ?: return@post
+            runCatching { wins.values.toList() }.getOrNull()?.filter { it.linux == null && it.displayId >= 0 && it.leftAt == 0L }?.forEach { w ->
+                followedTask(w, running)?.let { pipCheck(w, it) }
+            }
+        }
+    }
+
+    /**
+     * On [io]: [w]'s task [t] went to PiP / the user's own floating window on display 0 ([pipStep] ENTER) or came back
+     * from it (LEAVE): acted on; true while [w] is in PiP or just changed ([follow] stops there), false: not PiP's.
+     */
+    private fun pipCheck(
+        w: Win,
+        t: android.app.ActivityManager.RunningTaskInfo,
+    ): Boolean {
+        val display = WebWindowDisplays.displayOf(t)
+        val mode = modeOf(t)
+        val main = display == android.view.Display.DEFAULT_DISPLAY
+        val float = main && (mode == WINDOWING_MODE_FREEFORM || mode == WINDOWING_MODE_ZOOM) && dev.omalauncher.system.FreeformTasks.isNativeFloat(t.taskId, mode)
+        val at = if (display == w.displayId) At.OWN else if (main) At.MAIN else At.ELSEWHERE
+        when (pipStep(w.pip, at, mode, float)) {
+            Pip.ENTER -> pipEnter(w, t.taskId, "display $display mode $mode")
+            Pip.LEAVE -> pipLeave(w, t.taskId, display)
+            null -> return w.pip
+        }
+        return true
+    }
+
+    /** On [io]: [w]'s app is Android's PiP / floating window now: its frame and bar gone at once, its card says PiP. */
+    private fun pipEnter(
+        w: Win,
+        task: Int,
+        where: String,
+    ) {
+        if (w.closed || w.pip) return
+        w.pip = true
+        w.followed = null
+        WebWindowDisplays.pip(task, w.id, true)
+        WindowLog.i(TAG, "window ${w.id} (${w.component.packageName}): its app's task $task left it by itself ($where: PiP / floating): frame dropped, tracked as PiP")
+        main.post {
+            hideFrame(w)
+            if (!w.closed) emit("webwindows.pip", mapOf("id" to w.id, "on" to true))
+        }
+    }
+
+    /** On [io]: [w]'s PiP expanded (full screen on display 0, or back on its display): back in its window, shown. */
+    private fun pipLeave(
+        w: Win,
+        task: Int,
+        display: Int,
+    ) {
+        if (w.closed || !w.pip) return
+        val ok = display == w.displayId || moveTask(task, w.displayId)
+        WindowLog.i(TAG, "window ${w.id}: its PiP (task $task, display $display) expanded: back in its window ($ok)")
+        if (!ok) return
+        w.pip = false
+        w.followed = null
+        WebWindowDisplays.pip(task, w.id, false)
+        main.post { if (!w.closed) emit("webwindows.pip", mapOf("id" to w.id, "on" to false)) }
+    }
 
     /** A task changed (main thread): one [reconcile] [RECONCILE_MS] after the last change of a burst. */
     private fun scheduleReconcile() {
@@ -354,19 +433,12 @@ class WebWindows(
         running: List<android.app.ActivityManager.RunningTaskInfo>,
     ): Boolean {
         val t = followedTask(w, running) ?: return false
+        // PP1: PiP or the user's own floating window (D1: OnePlus' Floating window on display 0, picked on purpose) is
+        // the app leaving its window by itself - tracked as PiP, never pulled back, back in the window when expanded;
+        // never an empty frame left on home.
+        if (pipCheck(w, t)) return true
         val display = WebWindowDisplays.displayOf(t)
         val mode = modeOf(t)
-        // D1: the user made its app an Android floating window on purpose ("..." or the switcher's Floating window): it
-        // stays native. The window lets go of it (false: its display empty, checkOrphan closes it), never pulls it back.
-        // Only a float on the main display: OnePlus' Floating window never puts a task on a window's own display, and a
-        // task PowOS launched or pulled into its window is never the user's native float, whatever mode it reports there.
-        if (display == android.view.Display.DEFAULT_DISPLAY && (mode == WINDOWING_MODE_FREEFORM || mode == WINDOWING_MODE_ZOOM) &&
-            dev.omalauncher.system.FreeformTasks.isNativeFloat(t.taskId, mode)
-        ) {
-            if (w.followed != "native") WindowLog.i(TAG, "window ${w.id} (${w.component.packageName}): its task ${t.taskId} is a floating window the user picked: left native")
-            w.followed = "native"
-            return false
-        }
         val act = followOf(display == w.displayId, display == android.view.Display.DEFAULT_DISPLAY, mode)
         if (act == null) {
             if (display == w.displayId) w.followed = null
@@ -407,12 +479,7 @@ class WebWindows(
                 WebWindowDisplays.fullScreen(task, w.id, true)
                 announce(w, true)
             }
-            Follow.PIP -> main.post {
-                // HACK: the page's own minimise (to the dock) stands for PiP until ww-pip's MN1/MN2 state lands here: the
-                // frame hidden, never empty. Real fix: call its PiP state (the window's dock entry restores from PiP).
-                hideFrame(w)
-                if (!w.closed) emit("webwindows.control", mapOf("id" to w.id, "action" to "minimise"))
-            }
+            Follow.PIP -> pipEnter(w, task, "PiP")
         }
     }
 
@@ -535,6 +602,9 @@ class WebWindows(
 
         /** Its app is a full-screen app on display 0 now ([fullScreen]): the window is hidden, its display empty. */
         @Volatile var full = false
+
+        /** PP1: its app left it by itself for Android's PiP / a floating window ([pipEnter]): no frame until it's back. */
+        @Volatile var pip = false
 
         /** Minimised the home gesture's way ([minimise]): its task on display 0 (in PiP, or behind home); uptime then, else 0. */
         @Volatile var leftAt = 0L
@@ -3460,6 +3530,36 @@ class WebWindows(
 
         /** [follow]'s answer for a window's task. */
         enum class Follow { BACK, FULL, PIP }
+
+        /** [pipStep]'s answer: the app left its window for PiP / a floating window, or came back from it. */
+        enum class Pip { ENTER, LEAVE }
+
+        /** Where a window's task is: its own display, display 0, or another one. */
+        enum class At { OWN, MAIN, ELSEWHERE }
+
+        /**
+         * PP1's rule for a window's task, [pip]: the window tracks it as PiP now; [at]: on the window's display, display 0
+         * or another; [float]: the user's own floating window on display 0 (FreeformTasks.isNativeFloat). PiP (2) or such a
+         * float -> ENTER; tracked and then full screen / a split on display 0, or anything on its own display -> LEAVE
+         * (expanded); another display: null (the orphan rule decides).
+         */
+        fun pipStep(
+            pip: Boolean,
+            at: At,
+            mode: Int,
+            float: Boolean,
+        ): Pip? {
+            if (at == At.ELSEWHERE) return null
+            val away = mode == WINDOWING_MODE_PINNED || float
+            if (!pip) return if (away) Pip.ENTER else null
+            return if (!away && expanded(at, mode)) Pip.LEAVE else null
+        }
+
+        /** [pipStep]: a task out of PiP is back - on its own display, or full screen / a split on display 0. */
+        private fun expanded(
+            at: At,
+            mode: Int,
+        ): Boolean = at == At.OWN || mode == WINDOWING_MODE_FULLSCREEN || mode == WINDOWING_MODE_MULTI_WINDOW
 
         /**
          * [follow]'s rule, by where the task is ([own]: the window's display, [main]: display 0) and its windowing mode:
