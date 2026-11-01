@@ -13,7 +13,7 @@ import { powos } from "../bridge.ts";
 import type { App, PageRect } from "../types.ts";
 import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
-import { DockSearchButton, dockButton, grabPill } from "./docksearch.tsx";
+import { DockSearchButton, buttonMorph, dockButton, grabPill, useButtonMorph } from "./docksearch.tsx";
 import { chromeWay, drawerDragging, drawerOpen, followOpenness, homeGestures, launcherTakesHome, pageDrag, shadeTakesHome, windowGestureActive } from "./gesture.ts";
 import { tick } from "./haptics.ts";
 import { PageDots } from "./pagedots.tsx";
@@ -36,10 +36,10 @@ import { DockGroupCell, groupedKeys, unpinnedGroups } from "./dockgroups.tsx";
 import { Recents } from "./recents.tsx";
 import { appOf, dockTap } from "./desktops.ts";
 import { overWindows } from "./panellift.ts";
-import { carryingSearch, footBelow, searchClasses } from "./searchwidget.tsx";
+import { footBelow, searchClasses } from "./searchwidget.tsx";
 import { wideHome } from "../hosts/wide.ts";
 import { webWins, windowFrame } from "./webwindows.tsx";
-import { byKey, carry, dock, dockPosition, dockAim, dockDrag, drawer, editing, folder, menu, page, pageCount, pullKind, pullPanels, recent, screen, searchInDock, selected, sessionView, setDock, windows } from "../state.ts";
+import { byKey, carry, dock, dockPosition, dockAim, dockDrag, drawer, editing, folder, menu, page, pageCount, pullKind, pullPanels, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
 import { screens } from "../screens.ts";
 import { appView } from "../apps/pages.ts";
 import { remoteOpen } from "../remote.ts";
@@ -648,7 +648,8 @@ function HomeDots() {
 
 /** The foot's pill, unless home's search is the dock's button (docksearch.tsx: it opens the launcher, with the pill). */
 // OB1: on PowOS AI's page too - the button's bar is that page's input (bar.tsx seats it on the page's .ai-bar-slot).
-const HomeSearch = () => ((dockButton.value || (searchInDock.value && carryingSearch())) && !drawerOpen.value && page.value !== -1 ? null : <Bar />);
+// BM1: folded the button grows into it there and in the launcher, and back (docksearch.tsx useButtonMorph).
+const HomeSearch = () => (useButtonMorph() ? <Bar /> : null);
 
 let launcherUsed = false;
 
@@ -678,7 +679,7 @@ function HomeLauncher() {
 }
 
 /** Home's search as the dock's button (docksearch.tsx). */
-const searchDockClasses = () => (dockButton.value ? "search-dock" : "");
+const searchDockClasses = () => `${dockButton.value ? "search-dock" : ""} ${buttonMorph.value ? "button-morph" : ""}`;
 
 export function Home() {
   // data-p: these follow the panel's openness (--p, written by gesture.ts, not through a render).

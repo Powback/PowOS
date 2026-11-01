@@ -3,8 +3,8 @@
  * AI panel (pull.tsx) - one chat, messenger style (the user, 2026-10-31: "it just needs to be like a chat page with some
  * additional integration... streamlined and easy"): the conversation full height, the user's messages right, the
  * manager's left, tool steps folded into one quiet line, images their own shape; older messages load as it's scrolled
- * up. Things to try arrive as the manager's messages with works / still broken (trycard.tsx), mail the agents sent the
- * user as messages under it. The rest - Progress, Agents & terminals, Devices - is behind the header's ⋯, each its own
+ * up. Things to try arrive as the manager's messages with works / still broken (trycard.tsx); the agents' mail stays
+ * in its notifications and inbox, no line of it in the chat (BM2, the user 18:25). The rest - Progress, Agents & terminals, Devices - is behind the header's ⋯, each its own
  * screen with back (aimenu.tsx). Under it the shared field to ask (the mic: hold to talk and send, tap to dictate).
  * Folded, the page (not the launcher's AI panel) is a status page instead of the chat (aistatus.tsx, 2026-10-31).
  * Unfolded the page is two columns (the manager's design, 11-01): that same status page left, the chat right over a
@@ -12,16 +12,13 @@
  * panel) keeps the chat centred at reading width, Progress a glass sheet over its side.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { aiDraft, aiScreen, chat, page } from "../state.ts";
 import { onManagerSend, type MicTarget } from "./bar.tsx";
-import { ago } from "./time.ts";
-import { md } from "./md.ts";
-import type { AgentMail, ChatItem } from "../types.ts";
+import type { ChatItem } from "../types.ts";
 import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { renderItem } from "./chat.tsx";
-import { AgentUpdates, Queued, Thread, onLink, toolLabel } from "./rich.tsx";
+import { Queued, Thread, toolLabel } from "./rich.tsx";
 import { askQueued } from "./assistant.ts";
 import { MenuScreen, SCREENS, TABBED, dailyDriver, type AiScreen } from "./aimenu.tsx";
 import { WorkFeed } from "./aiboard.tsx";
@@ -33,8 +30,6 @@ import { AiStatus, noteAsked, openChat, OtherProjectsItem } from "./aistatus.tsx
 // The board's state, for what reads it from here (perfrec, the gate, the renders): it lives in aiboard.tsx now.
 export { board, boardSeen, checks, type WorkRow } from "./aiboard.tsx";
 
-const mail = signal<AgentMail[]>([]);
-powos.on("ai.mail", (m: AgentMail[]) => (mail.value = m));
 
 // What's typed and not sent yet: kept across reloads (an update mustn't lose it).
 const draft = aiDraft;
@@ -72,52 +67,6 @@ function startOf(items: ChatItem[], count: number) {
   if (!from) return 0;
   const ask = items.findLastIndex((i, at) => at <= from && i.kind === "user");
   return Math.max(0, ask);
-}
-
-/** Read: out of the chat at once (the host's "ai.mail" confirms), its notification and inbox entry gone too. */
-function readMail(m: AgentMail) {
-  mail.value = mail.value.filter((x) => x !== m);
-  // ?.: an APK from before mailRead (the page is hot-pushed ahead of it) has no such call.
-  if (m.id) powos.ai.mailRead?.(m.id);
-}
-
-/** Mail an agent sent the user, unread: one plain line at the chat's end ("2 updates from agents"), a tap opens them; × reads one. */
-function Unread() {
-  const ms = [...mail.value].slice(0, 5).reverse();
-  if (!ms.length) return null;
-  return (
-    <AgentUpdates n={ms.length}>
-      {ms.map((m) => (
-        <div key={m.id ?? `${m.from}-${m.time}`} class="msg assistant ai-mail">
-          <div class="ai-mail-head muted">
-            <span>
-              {m.from} · {ago(m.time)}
-            </span>
-            <button type="button" class="ai-mail-x" aria-label="mark read" onClick={() => readMail(m)}>
-              ×
-            </button>
-          </div>
-          <div class="ai-mail-text md" onClick={onLink} dangerouslySetInnerHTML={{ __html: md(m.text) }} />
-        </div>
-      ))}
-      {ms.length > 1 && (
-        <button type="button" class="ai-mail-clear" onClick={() => ((mail.value = []), powos.ai.mailClear?.())}>
-          mark all read
-        </button>
-      )}
-    </AgentUpdates>
-  );
-}
-
-/** Its mail, read when it comes into view (not while hidden). */
-function useMail(shown: boolean) {
-  useEffect(() => {
-    if (!shown) return;
-    const ask = () => document.hidden || powos.ai.mail().then((m) => (mail.value = m));
-    ask();
-    document.addEventListener("visibilitychange", ask);
-    return () => document.removeEventListener("visibilitychange", ask);
-  }, [shown]);
 }
 
 /**
@@ -209,7 +158,6 @@ function Conversation() {
       <Thread items={items.slice(from)} render={renderItem} />
       {busy && items.at(-1)?.kind !== "assistant" && <div class="msg note muted thinking">thinking…</div>}
       <Queued />
-      <Unread />
       {pill && <NewPill go={toEnd} />}
     </div>
   );
@@ -217,7 +165,6 @@ function Conversation() {
 
 /** The chat pane: "Create app"'s own thread view (steps, the finished app) or the question that starts one, else the conversation. */
 function ChatPane({ shown }: { shown: boolean }) {
-  useMail(shown);
   useChatSync(shown);
   if (chat.value.thread?.kind === "app") return <AppBuild />;
   if (newAppAsk.value) return <NewAppAsk />;
@@ -385,7 +332,8 @@ function AiBody({ sub, shown, beside = false }: { sub: AiScreen | null; shown: b
     );
   }
   return (
-    <div class="ai-scroll ai-chat">
+    // .ai-page-chat: THE chat, styled as one wherever it's held (the page, its panes, the launcher's AI panel: shell.css).
+    <div class="ai-scroll ai-chat ai-page-chat">
       <ChatPane shown={shown} />
     </div>
   );

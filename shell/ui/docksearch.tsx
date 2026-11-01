@@ -18,15 +18,15 @@
  * bar's glass grows out of the button's circle sideways and up into the bar while the panel rises on the launcher
  * swipe's settle; closed, it goes back into the button.
  */
-import { useRef } from "preact/hooks";
+import { useLayoutEffect, useRef } from "preact/hooks";
 import { computed } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { carry, closeDrawer, dockPosition, drawer, editing, homePage, openPanel, pullKind, pullPage, searchInDock } from "../state.ts";
-import { drawerDrag } from "./gesture.ts";
+import { carry, closeDrawer, dockPosition, drawer, editing, homePage, openPanel, page, pullKind, pullPage, searchInDock } from "../state.ts";
+import { drawerDrag, drawerOpen } from "./gesture.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { dictateBar, focusBar } from "./bar.tsx";
 import { speech } from "./dictation.ts";
-import { morphFrom } from "./launchmorph.ts";
+import { morphBegin, morphFrom, morphTo, morphing, reset as resetMorph } from "./launchmorph.ts";
 import { carryingSearch, searchItem } from "./searchwidget.tsx";
 import { geometry, startCarry } from "./grid.tsx";
 
@@ -91,6 +91,50 @@ export const dockButton = computed(() => searchInDock.value && !carryingSearch()
 export function faceRect() {
   const r = document.querySelector(".home .dock .dock-search-face")?.getBoundingClientRect();
   return r && r.width > 0 ? { left: r.left, top: r.top, width: r.width, height: r.height } : undefined;
+}
+
+/** Home's foot is the button (no bar of its own): the dock's button, or the search widget carried off it. */
+export const footIsButton = () => dockButton.value || (searchInDock.value && carryingSearch());
+/** Home's bar is up in the button's place: the launcher open, or PowOS AI's page (the bar is its input: OB1). */
+const barUp = () => drawerOpen.value || page.value === -1;
+
+/**
+ * BM1 (the user, 2026-11-01 18:25: "yeah, but then the launcher also needs the full search bar"): folded, the button
+ * IS home's bar - on the launcher and on PowOS AI's page it grows into the full bar at the foot (launchmorph.ts, the
+ * overlay's morph, here on home's own pill) and on the way home back into the button: one element, never a swap. While
+ * it does (and while the bar is up), .home.button-morph holds the bar where it ends (shell.css): the glass moves, not it.
+ */
+export const buttonMorph = computed(() => homePage && !wideHome.value && footIsButton() && (barUp() || !!morphFrom.value));
+
+/** Home's own pill: what the morph grows into (not the launcher overlay's). */
+const HOME_PILL = ".home:not(.pull-screen) > .bar .bar-pill";
+
+/** Home's own box: the button's rect is kept relative to it (home slides to PowOS AI's page and back meanwhile). */
+const homeBox = () => document.querySelector(".home:not(.pull-screen)")?.getBoundingClientRect();
+let homeWas: { left: number; top: number } | undefined;
+
+/** The button's rect for the morph back: where it was at the open, moved with home since (its dock gave way since). */
+function buttonNow() {
+  const b = morphFrom.peek(), h = homeBox();
+  if (!b || !h || !homeWas) return undefined;
+  return { ...b, left: b.left + h.left - homeWas.left, top: b.top + h.top - homeWas.top };
+}
+
+/** Whether home shows its bar now (home.tsx HomeSearch): up, or still morphing back into the button. */
+export function useButtonMorph(): boolean {
+  const button = footIsButton();
+  const up = button && barUp();
+  const was = useRef(up);
+  // After the bar's own layout effects (bar.tsx useAiSeat seats it first): its rect is where it ends.
+  useLayoutEffect(() => {
+    if (was.current === up) return;
+    was.current = up;
+    if (!homePage || wideHome.peek()) return;
+    const from = faceRect();
+    if (up && from) return void ((homeWas = homeBox()), morphBegin(from, HOME_PILL), morphTo(1));
+    if (!up && morphing()) morphTo(0, { from: buttonNow(), done: resetMorph });
+  }, [up]);
+  return !button || up || (homePage && !!morphFrom.value);
 }
 
 /** Opens the launcher from the button, in place (home's grid adopts its dock and bar; the overlay's own button too). */

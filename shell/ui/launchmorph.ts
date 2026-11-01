@@ -72,8 +72,11 @@ function split(kids: HTMLElement[]) {
   return { prompt, tail, field: kids.filter((k) => k !== prompt && !tail.includes(k)) };
 }
 
+/** The pill the morph grows into: the overlay's (pull.tsx), or home's own (docksearch.tsx useButtonMorph: BM1). */
+let pillAt = ".pull-screen > .bar .bar-pill";
+
 function setup(from: Rect): Parts | null {
-  const pill = document.querySelector<HTMLElement>(".pull-screen > .bar .bar-pill");
+  const pill = document.querySelector<HTMLElement>(pillAt);
   if (!pill || matchMedia("(prefers-reduced-motion: reduce)").matches) return null;
   const q = pill.getBoundingClientRect();
   if (q.width <= 0) return null;
@@ -155,8 +158,9 @@ function run(p: Parts, t0: number, t1: number, ms: number) {
 }
 
 /** pull.begin with a button's rect: the glass on the button (this frame), the overlay's own button away under it. */
-export function morphBegin(from: Rect) {
+export function morphBegin(from: Rect, pill = ".pull-screen > .bar .bar-pill") {
   reset();
+  pillAt = pill;
   const own = document.querySelector(".pull-screen .dock .dock-search-face")?.getBoundingClientRect();
   const b = own && own.width > 0 ? { left: own.left, top: own.top, width: own.width, height: own.height } : from;
   morphFrom.value = b;
@@ -179,16 +183,26 @@ export function morphDrag(p: number) {
   }
 }
 
-/** Settles to the bar (1, then the real pill takes over) or into the button (0, held there until the window goes). */
-export function morphTo(to: 0 | 1) {
-  // Closing an open that finished: the pieces again, from the bar.
-  if (!parts && to === 0 && morphFrom.peek()) ((parts = setup(morphFrom.peek()!)), (at = 1));
+/**
+ * Settles to the bar (1, then the real pill takes over) or into the button (0, held there until the window goes).
+ * [back] (home's own bar, BM1): the button's rect now (home moved since the open: its slide to PowOS AI's page) and what
+ * to do once it's back in the button (home: the bar goes, the button shows).
+ */
+export function morphTo(to: 0 | 1, back?: { from?: Rect; done: () => void }) {
+  if (to === 0) piecesFromBar(back?.from);
   const p = parts;
-  if (!p) return;
+  if (!p) return back?.done();
   const from = at;
   at = to;
   const a = run(p, from, to, SETTLE_MS * Math.max(0.35, Math.abs(to - from)));
-  if (to === 1) a?.finished.then(() => parts === p && at === 1 && finish(), () => {});
+  const then = to === 1 ? finish : back?.done;
+  a?.finished.then(() => parts === p && at === to && then?.(), () => {});
+}
+
+/** Closing an open that finished: the pieces again, from the bar - toward [from] when given (home: the button now). */
+function piecesFromBar(from?: Rect) {
+  if (from) (finish(), (morphFrom.value = from));
+  if (!parts && morphFrom.peek()) ((parts = setup(morphFrom.peek()!)), (at = 1));
 }
 
 /** Open: the pieces go, the pill's own glass is back (the button stays away while the bar is up). */
