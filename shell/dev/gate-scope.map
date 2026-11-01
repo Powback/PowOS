@@ -25,7 +25,8 @@ ui/pet/*                ^pet$
 ui/desktop.css          ^(desktops|dock-position-desktop-.*)$
 ui/desktops.ts          ^(desktops|dock-position-desktop-.*)$
 dev/dock-dragout-check.js  ^dock-dragout-.*$
-ui/notifications.*      ^(shade-.*|cc-reorder)$
+ui/notifications.*      ^(shade-.*|cc-reorder|align-shade)$
+dev/notif-stacks-check.js  ^shade-notif-stacks-.*$
 ui/overpull.ts          ^(shade-.*|cc-reorder)$
 ui/chrome.css           ^(chrome-.*|dock-.*)$
 ui/library*             ^(library-.*|add-app-.*)$
