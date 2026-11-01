@@ -3788,11 +3788,13 @@ async function aiAreasFacts() {
     t("w2", "Windows", "queued"),
     t("k1", "Kernel & system", "waiting", { note: "Plug the phone into the Mac's USB once" }),
     t("h1", "Home & launcher", "working", { step: "writing the fix" }),
+    t("g1", "Games", "queued"),
   ];
   P.boardSeen.value = true;
   const perf = "Perf trace (fps meter, tapped record/stop). Full data: /run/powos-app/powos-ai-shared/perf-1.json\n```json\n" +
     JSON.stringify({ mode: "unfolded", durationMs: 5200, frames: 600, fps: { p50: 119.8, p5: 88.1, min: 40 }, jank: 3, worstFrames: [{ at: 900, ms: 41.5 }] }) + "\n```";
-  S.chat.value = { busy: false, items: [{ kind: "user", text: perf }, { kind: "assistant", text: "Got it." }] };
+  const plan = "```present\n" + JSON.stringify({ title: "Cleanup plan", format: "md", body: "# Cleanup plan\nFrees about **38 GB**.\n## Steps\n1. Stop the idle containers\n2. Prune images\n## Risks\nNone." }) + "\n```";
+  S.chat.value = { busy: false, items: [{ kind: "user", text: perf }, { kind: "assistant", text: "Got it." }, { kind: "user", text: "plan the cleanup" }, { kind: "assistant", text: plan }] };
   S.aiScreen.value = "chat";
   S.page.value = -1;
   await new Promise((r) => setTimeout(r, 1200));
@@ -3803,24 +3805,35 @@ async function aiAreasFacts() {
     left: w(".ai-screen .ai-left"), right: w(".ai-screen .ai-right"),
     areas: rows.map((r) => ({ name: r.dataset.area, h: Math.round(r.getBoundingClientRect().height), words: r.querySelector(".ais-area-words")?.textContent ?? "" })),
     card: card ? { text: card.textContent, h: Math.round(card.getBoundingClientRect().height) } : null,
+    plan: (() => { const c = document.querySelector(".ai-right .present"); return c ? { titles: (c.textContent.match(/Cleanup plan/g) ?? []).length, fade: !!c.querySelector(".present-peek"), foot: c.querySelector(".present-foot")?.textContent ?? "" } : null; })(),
     json: [...document.querySelectorAll(".ai-right .msg.user")].some((m) => m.textContent.includes("```") || m.textContent.includes("worstFrames")),
   };
 }
 
-async function aiAreasCheck(page) {
-  const f = await page.evaluate(aiAreasFacts);
-  await page.screenshot({ path: "/cache/ai-areas-unfolded.png" });
+/** The unfolded facts' failures (aiAreasFacts). */
+function aiAreasFails(f) {
   const first = f.areas[0];
-  const fails = failsOf([
+  return failsOf([
     [f.left > f.right, `the status column (${f.left}) isn't wider than the chat (${f.right})`],
-    [f.areas.length === 3, `By area shows ${f.areas.length} areas, not 3: ${JSON.stringify(f.areas)}`],
+    [f.areas.length >= 2, `By area shows ${f.areas.length} lines: ${JSON.stringify(f.areas)}`],
     [first?.name === "Kernel & system" && /needs you/.test(first.words), `the area that needs the user isn't first: ${JSON.stringify(first)}`],
     [f.areas.every((a) => a.h <= 48), `an area takes more than one line: ${JSON.stringify(f.areas)}`],
     [f.areas.some((a) => a.name === "Windows" && /1 (working|to check)/.test(a.words) && /1 idle/.test(a.words)), `Windows' words aren't plain states: ${JSON.stringify(f.areas)}`],
+  ]).concat(aiChatCardFails(f)).map((x) => `ai-areas: ${x}`);
+}
+
+/** The chat's cards (aiAreasFacts): idle areas folded, the perf trace a card, the plan card's one title and foot. */
+function aiChatCardFails(f) {
+  return failsOf([
+    [f.areas.some((a) => a.name === "rest" && /nothing moving · \d+ idle/.test(a.words)), `idle-only areas aren't one calm line: ${JSON.stringify(f.areas)}`],
     [!!f.card && /120/.test(f.card.text) && /88/.test(f.card.text) && /42 ms worst/.test(f.card.text) && /perf-1\.json/.test(f.card.text), `no perf card with p50 / p5 / worst frame / file: ${JSON.stringify(f.card)}`],
     [!f.json, "the perf trace's JSON shows as text in the chat"],
-  ]).map((x) => `ai-areas: ${x}`);
-  // W5: folded, the status page's scroller starts at the status bar's foot (never behind the clock and battery).
+    [f.plan?.titles === 1 && !f.plan.fade && /Steps · Risks/.test(f.plan.foot) && /open/.test(f.plan.foot), `the plan card: title not once, a faded peek, or no sections + open foot: ${JSON.stringify(f.plan)}`],
+  ]);
+}
+
+/** W5: folded, the AI page's scrollers start at the status bar's foot (never behind the clock and battery). */
+async function aiUnderStatusBar(page) {
   await page.setViewport({ width: 404, height: 900 });
   const top = await page.evaluate(async () => {
     window.__mockEvents.emit("system.insets", { top: 45, bottom: 16, left: 0, right: 0, keyboard: 0 });
@@ -3830,8 +3843,13 @@ async function aiAreasCheck(page) {
     return { inset, tops: sc.map((e) => Math.round(e.getBoundingClientRect().top)) };
   });
   await page.screenshot({ path: "/cache/ai-areas-folded.png" });
-  if (top.inset > 0 && top.tops.some((t) => t < top.inset - 1)) fails.push(`ai-areas W5: a scroller starts at ${top.tops} px, under the status bar (${top.inset} px)`);
-  return fails;
+  return top.inset > 0 && top.tops.some((t) => t < top.inset - 1) ? [`ai-areas W5: a scroller starts at ${top.tops} px, under the status bar (${top.inset} px)`] : [];
+}
+
+async function aiAreasCheck(page) {
+  const f = await page.evaluate(aiAreasFacts);
+  await page.screenshot({ path: "/cache/ai-areas-unfolded.png" });
+  return [...aiAreasFails(f), ...(await aiUnderStatusBar(page))];
 }
 
 async function aiWideClearCheck(page) {

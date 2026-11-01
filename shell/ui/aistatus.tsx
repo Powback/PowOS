@@ -224,12 +224,16 @@ const areaDot = (a: AreaStat, you: Set<string>) => {
  */
 function ByArea() {
   const you = needIds(needsYou());
-  const stats = areaStats(board.value, Date.now(), you).filter((a) => a.open.length > 0);
-  if (!stats.length) return null;
+  const open = areaStats(board.value, Date.now(), you).filter((a) => a.open.length > 0);
+  // Areas where nothing moves (every task idle) don't get a line each: one calm last line counts them.
+  const stats = open.filter((a) => areaDot(a, you) !== "stalled");
+  const rest = open.filter((a) => areaDot(a, you) === "stalled");
+  const idle = rest.reduce((n, a) => n + a.open.length, 0);
+  if (!open.length) return null;
   return (
     <section class="ais-sec" data-sec="areas" aria-label="By area">
       <h3 class="ais-h">
-        By area<span class="ais-n">{stats.length}</span>
+        By area<span class="ais-n">{open.length}</span>
       </h3>
       <ul class="ais-list">
         {stats.map((a) => (
@@ -241,6 +245,15 @@ function ByArea() {
             </button>
           </li>
         ))}
+        {rest.length > 0 && (
+          <li>
+            <button type="button" class="ais-area-row rest" data-area="rest" onClick={() => ((aiAgent.value = null), (aiScreen.value = "progress"))}>
+              <span class="aip-dot stalled" aria-hidden="true" />
+              <span class="ais-area-name">{stats.length ? `${rest.length} more area${rest.length === 1 ? "" : "s"}` : `${rest.length} area${rest.length === 1 ? "" : "s"}`}</span>
+              <span class="ais-area-words">nothing moving · {idle} idle</span>
+            </button>
+          </li>
+        )}
       </ul>
     </section>
   );

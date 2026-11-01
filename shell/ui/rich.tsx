@@ -395,19 +395,51 @@ export function openFull(title: string, body: preact.ComponentChild) {
   );
 }
 
-const openPresented = (p: Presented) => openFull(p.title, <Doc p={p} peek={false} />);
+const openPresented = (p: Presented) => openFull(p.title, <Doc p={untitled(p)} peek={false} />);
 
-/** A presented document in the chat: its title and its beginning; a tap opens it full screen. */
+/** A Markdown document without its own first "# heading" when that is its title (the card and the sheet name it once). */
+export function untitled(p: Presented): Presented {
+  if (p.format === "html") return p;
+  const m = p.body.match(/^\s*#\s+(.+)\n+/);
+  return m && m[1].trim().toLowerCase() === p.title.trim().toLowerCase() ? { ...p, body: p.body.slice(m[0].length) } : p;
+}
+
+/** A Markdown document's peek: its lead (the text before its first heading, plain) and its section names. */
+export function peekOf(body: string): { lead: string; sections: string[] } {
+  const lines = body.split("\n");
+  const at = lines.findIndex((l) => /^#{1,6}\s/.test(l));
+  const lead = (at < 0 ? lines : lines.slice(0, at)).join(" ").replace(/[*_`]/g, "").replace(/\s+/g, " ").trim();
+  const sections = lines.filter((l) => /^#{1,3}\s/.test(l)).map((l) => l.replace(/^#+\s+/, "").trim());
+  return { lead, sections };
+}
+
+/**
+ * A presented document in the chat (design QA 11-02: one title, never a fade cut mid-line): its title once, its lead in
+ * whole lines (at most three, an ellipsis), then its sections and "open" - a tap opens it full screen. An HTML page
+ * keeps its still preview over the same foot.
+ */
 export function PresentCard({ p }: { p: Presented }) {
   const open = () => openPresented(p);
+  const doc = untitled(p);
+  const peek = doc.format === "html" ? null : peekOf(doc.body);
   return (
     <div class="present" role="button" tabIndex={0} onClick={open} onKeyDown={(e) => e.key === "Enter" && open()}>
       <div class="present-head">
-        <Icon name="openInNew" />
         <span class="present-title">{p.title}</span>
       </div>
-      <div class="present-peek" aria-hidden="true">
-        <Doc p={p} peek={true} />
+      {peek ? (
+        peek.lead && <div class="present-lead">{peek.lead}</div>
+      ) : (
+        <div class="present-peek" aria-hidden="true">
+          <Doc p={doc} peek={true} />
+        </div>
+      )}
+      <div class="present-foot">
+        <span class="present-sections">{peek?.sections.join(" · ") ?? ""}</span>
+        <span class="present-open">
+          open
+          <Icon name="openInNew" />
+        </span>
       </div>
     </div>
   );

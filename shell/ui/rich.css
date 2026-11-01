@@ -99,14 +99,19 @@
 }
 .present-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .present-title { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
-/* Its beginning: still, untouchable, faded out at the foot. */
+/* An HTML page's beginning: still, untouchable, its frame's own edge (no fade over half a line). */
 .present-peek {
   height: 140px;
   overflow: hidden;
   pointer-events: none;
-  -webkit-mask: linear-gradient(black 60%, transparent);
-  mask: linear-gradient(black 60%, transparent);
+  border-radius: 8px;
 }
+/* A Markdown document's lead: whole lines, three at most, an ellipsis - never cut mid-line. */
+.present-lead { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; font-size: var(--text-small); }
+/* The foot: what's inside (its sections) and "open" - the card says there's more. */
+.present-foot { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 32px; padding-bottom: 6px; font-size: var(--text-small); color: var(--color-muted); }
+.present-sections { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.present-open { flex: none; display: inline-flex; align-items: center; gap: 4px; color: var(--color-foreground); }
 .present-frame { display: block; width: 100%; height: 100%; border: 0; background: none; }
 .present-peek .present-frame { height: 140px; }
 .present-peek .present-md { font-size: var(--text-small); }
