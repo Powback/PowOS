@@ -3235,6 +3235,9 @@ async function aiUnfoldedFollow() {
 
 async function aiUnfoldedCheck(page) {
   const fails = [];
+  // Folded first, at the folded size whatever the page was left at (a reused page came in at 883 x 821: no status page).
+  await page.setViewport({ width: 404, height: 900 });
+  await page.evaluate(() => window.__gw.until(() => innerWidth === 404 && document.querySelector(".ai-screen.status"), 3000));
   await page.evaluate(aiStackSetup, 5);
   await page.evaluate(async () => { (await window.__gw.mod("./state.ts")).page.value = -1; });
   await page.evaluate(() => window.__gw.until(() => document.querySelector(".ai-screen.status .ais-stack"), 3000));
