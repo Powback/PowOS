@@ -115,7 +115,8 @@ fi
 # The inner screen, unlocked, home in front.
 sh_ "cmd device_state state 3"; sleep 3; chk unfold
 WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1); W=${WH% *}; H=${WH#* }
-[ "${W:-0}" -gt 2000 ] || fail "display 0 is ${W:-?}x${H:-?}, not the unfolded inner screen"
+# Physically folded, the forced state 3 doesn't take (11-01 04:32: 1116x2484, the cover): not now, re-queued - not a FAIL.
+[ "${W:-0}" -gt 2000 ] || { log "display 0 is ${W:-?}x${H:-?}, not the unfolded inner screen (folded?): not now"; exit 3; }
 kg() { sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\""; }
 if kg | grep -q true; then
   sh_ "wm dismiss-keyguard"; sleep 1.5
