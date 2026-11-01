@@ -2041,6 +2041,14 @@ async function aiChatRestore() {
 }
 
 /**
+ * In the page: up to 2 s for the AI page to come to rest at its place (the page strip's slide; read mid-slide its left
+ * column stood at -421 / 8 px, a flaky gutter fail, 11-01). Still off then: aiPanesFails reports it.
+ */
+function aiPanesRest() {
+  return window.__gw.until(() => Math.abs((document.querySelector(".ai-screen > .ai-left")?.getBoundingClientRect().left ?? 0) - 16) <= 1, 2000);
+}
+
+/**
  * In the page, unfolded (the manager's design, 11-01; the user: "the unfolded page is still a bit shit"): two columns at
  * about 42 / 58 with a 16 dp gutter - left the folded status page's own component (its hero and sections' scroller, no
  * field of its own), right the segmented row Chat / Agents / Progress / Devices (Chat on) over the chat; no nav pane, no
@@ -2106,6 +2114,7 @@ async function aiChatLayout(page, size) {
   await page.screenshot({ path: `/cache/ai-page-${size}-chat.png` });
   const width = await page.evaluate(() => Math.round(document.querySelector(".ai-screen .ai-chat").getBoundingClientRect().width));
   if (width > 700) fails.push(`${size}: the chat is ${width} px wide, not centred at reading width`);
+  if (size === "unfolded") await page.evaluate(aiPanesRest);
   if (size === "unfolded") fails.push(...[...(await page.evaluate(aiPanesFails)), ...(await page.evaluate(aiColumnsContent)), ...(await page.evaluate(aiPanesGlassFails))].map((f) => `${size}: ${f}`));
   else {
     const strip = await page.evaluate(() => document.querySelector(".ai-screen .ai-strip")?.textContent ?? "");
@@ -2779,6 +2788,89 @@ async function aiUnfoldedRenders(page, size) {
   return fails;
 }
 
+/** FLEET_SETUP plus one working session in another project (rsi-native), and [stuck] false: its stopped session idle. */
+const fleetVariant = (stuck) => {
+  const body = FLEET_SETUP.replace("const agents = [", "const agents = [ row('mac:x1', 'coder', 'working', { title: 'Coder session in rsi-native', step: 'Bash cargo build', cwd: 'rsi-native', last: now - 30_000 }),");
+  return stuck ? body : body.replace("row('mac:e1', 'coder', 'blocked', { title: '', step: 'model_not_found'", "row('mac:e1', 'coder', 'idle', { title: '', step: ''");
+};
+
+/** In the page: the fleet setup [body] run, the chat in the right column. */
+async function aiFleetRun(body) {
+  const G = window.__gw;
+  const [S, A] = await Promise.all([G.mod("./state.ts"), G.mod("./ui/aipanes.tsx")]);
+  S.aiScreen.value = "chat";
+  A.aiAgent.value = null;
+  const run = (b) => new (Object.getPrototypeOf(async function () {}).constructor)("U", "E", "sleep", b)(G.mod, window.__mockEvents, (ms) => new Promise((r) => setTimeout(r, ms)));
+  await run(body);
+  await G.until(() => document.querySelectorAll(".ai-screen .ai-left .ais-work").length >= 3, 3000);
+}
+
+/** In the page: the Needs attention row tapped opens that agent (mac:e1) in the right column, the status column kept. */
+async function aiAttentionOpen() {
+  const G = window.__gw;
+  const [S, A] = await Promise.all([G.mod("./state.ts"), G.mod("./ui/aipanes.tsx")]);
+  const row = document.querySelector(".ai-screen .ai-left .ais-sec[data-sec=attention] .ais-stuck");
+  if (!row) return [];
+  row.click();
+  const open = await G.until(() => A.aiAgent.value === "mac:e1" && document.querySelector(".ai-screen .ai-right .ag-top .ai-title")?.textContent === "Agent", 2000);
+  const kept = !!document.querySelector(".ai-screen .ai-left > .ais-top");
+  S.aiScreen.value = "chat";
+  A.aiAgent.value = null;
+  return [open ? "" : "tapping the Needs attention row didn't open that agent in the right column", kept ? "" : "opening the stuck agent replaced the status column"].filter(Boolean);
+}
+
+/**
+ * In the page, unfolded: Needs attention (the stuck agents) under the needs-you stack in the left column, a row opening
+ * that agent in the right column's Agents view; with nothing stuck no such section. [body]: the fleet setup to run.
+ */
+async function aiAttentionLeft(stuck) {
+  const q = ".ai-screen .ai-left .ais-sec[data-sec=attention]";
+  if (!stuck) return document.querySelector(q) ? ["with no stuck agent a Needs attention section is drawn"] : [];
+  await window.__gw.until(() => document.querySelector(q), 2000);
+  const sec = document.querySelector(q);
+  if (!sec) return ["no Needs attention section in the left column for the stuck mock agent"];
+  const stack = document.querySelector(".ai-screen .ai-left .ais-stack-sec");
+  const under = !!stack && !!(stack.compareDocumentPosition(sec) & Node.DOCUMENT_POSITION_FOLLOWING);
+  const rows = [...sec.querySelectorAll(".ais-stuck")];
+  const one = rows.length === 1 && /model not found/i.test(rows[0].textContent);
+  const fails = [under ? "" : "Needs attention isn't under the needs-you stack", one ? "" : `Needs attention lists ${rows.length} rows (want 1, "model not found")`].filter(Boolean);
+  return fails;
+}
+
+/** In the page: the left column's ⋯ menu opened, its Other projects item turned [want] (on / off); what went wrong. */
+async function aiOtherToggle(want) {
+  const G = window.__gw;
+  const q = ".ai-screen .ai-left .ai-menu .ai-menu-other";
+  const other = () => [...document.querySelectorAll(".ai-screen .ai-left [data-sec=working] .ais-work")].some((e) => /rsi-native/.test(e.textContent));
+  document.querySelector(".ai-screen .ai-left .ai-more")?.click();
+  await G.until(() => document.querySelector(q), 1500);
+  const item = document.querySelector(q);
+  if (!item) return ["the left column's ⋯ menu has no Other projects item"];
+  const fails = [];
+  if (!/Other projects \(1\)/.test(item.textContent)) fails.push(`the menu item reads "${item.textContent}", not "Other projects (1)"`);
+  if (item.getAttribute("aria-checked") !== String(!want)) fails.push(`Other projects is aria-checked=${item.getAttribute("aria-checked")} before turning it ${want ? "on" : "off"}`);
+  item.click();
+  const ok = await G.until(() => other() === want && !document.querySelector(".ai-screen .ai-left .ai-menu"), 1500);
+  return ok ? fails : [...fails, `Other projects ${want ? "on didn't list" : "off didn't hide"} the rsi-native session under Working now`];
+}
+
+/** In the page, unfolded: Working now without the other project's session (Other projects off at first). */
+function aiOtherHidden() {
+  const has = [...document.querySelectorAll(".ai-screen .ai-left [data-sec=working] .ais-work")].some((e) => /rsi-native/.test(e.textContent));
+  return has ? ["Working now lists the other project's session before Other projects is on"] : [];
+}
+
+/** The unfolded page's restored parts: Needs attention with stuck agents (a row opening one), Other projects, none stuck. */
+async function aiUnfoldedRestored(page) {
+  await page.evaluate(aiFleetRun, fleetVariant(true));
+  const fails = [...(await page.evaluate(aiAttentionLeft, true)), ...(await page.evaluate(aiAttentionOpen)), ...(await page.evaluate(aiOtherHidden))];
+  for (const want of [true, false]) fails.push(...(await page.evaluate(aiOtherToggle, want)));
+  await page.screenshot({ path: "/cache/ai-unfolded-attention.png" });
+  await page.evaluate(aiFleetRun, fleetVariant(false));
+  fails.push(...(await page.evaluate(aiAttentionLeft, false)));
+  return fails.map((f) => `unfolded restored: ${f}`);
+}
+
 /**
  * The unfolded AI page in two columns (the manager's design, 11-01): at 821x883 and the inner screen sideways (883x821)
  * the status page left and the chat right at ~42 / 58 (aiPanesFails), no nav pane, both on the backdrop, no monospace
@@ -2798,11 +2890,13 @@ async function aiUnfoldedCheck(page) {
     const left = await page.evaluate(aiStatusParts, ".ai-screen .ai-left");
     if (JSON.stringify(left) !== JSON.stringify(folded)) fails.push(`${size}: the status column ${JSON.stringify(left)} isn't the folded status page ${JSON.stringify(folded)}`);
     if (!(await page.evaluate(aiChatSetup, [3, `-${size}-uf`]))) { fails.push(`${size}: the chat's try message didn't render`); continue; }
+    await page.evaluate(aiPanesRest);
     fails.push(...[...(await page.evaluate(aiPanesFails)), ...(await page.evaluate(aiColumnsContent)), ...(await page.evaluate(aiPanesGlassFails)), ...(await page.evaluate(aiSegsSwitch))].map((f) => `${size}: ${f}`));
     await page.screenshot({ path: `/cache/ai-unfolded-${size}-chat.png` });
     await page.evaluate(aiChatRestore);
     fails.push(...(await aiUnfoldedRenders(page, size)));
   }
+  fails.push(...(await aiUnfoldedRestored(page)));
   return fails;
 }
 

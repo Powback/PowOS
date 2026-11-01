@@ -3600,6 +3600,7 @@ html:root .ai-screen .aip-area.tile { --glass-blur-native: var(--backdrop-blur-n
 .aip-dot.working { background: var(--color-accent); animation: aip-pulse 1.6s ease-in-out infinite; }
 .aip-dot.check { background: var(--aip-blue); }
 .aip-dot.waiting { background: var(--aip-amber); }
+.aip-dot.stuck { background: var(--color-red); }
 @keyframes aip-pulse { 50% { opacity: 0.45; transform: scale(0.8); } }
 .aip-empty { padding: 16px 4px; font-size: var(--text-body); color: var(--color-foreground); opacity: 0.86; }
 @keyframes aip-fill { from { transform: scaleX(0); } }

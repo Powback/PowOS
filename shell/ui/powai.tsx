@@ -28,7 +28,7 @@ import { WorkFeed } from "./aiboard.tsx";
 import { agent, sessions as agentSessions } from "../agents.ts";
 import { untried } from "./trycard.tsx";
 import { AiSegs, FleetPane, useAgentsInPane } from "./aipanes.tsx";
-import { AiStatus, noteAsked } from "./aistatus.tsx";
+import { AiStatus, noteAsked, OtherProjectsItem } from "./aistatus.tsx";
 
 // The board's state, for what reads it from here (perfrec, the gate, the renders): it lives in aiboard.tsx now.
 export { board, boardSeen, checks, type WorkRow } from "./aiboard.tsx";
@@ -160,7 +160,7 @@ function stateOf() {
 }
 
 /** The ⋯ menu's list: a tap opens that screen. */
-function Menu({ close }: { close: () => void }) {
+function Menu({ close, children }: { close: () => void; children?: preact.ComponentChildren }) {
   return (
     <div class="ai-menu tile" role="menu">
       {SCREENS.map(([s, name]) => (
@@ -168,6 +168,7 @@ function Menu({ close }: { close: () => void }) {
           {name}
         </button>
       ))}
+      {children}
     </div>
   );
 }
@@ -423,7 +424,7 @@ function StatusColumn({ shown, beside = false }: { shown: boolean; beside?: bool
     <>
       <AiStatus shown={shown} more={more} compose={beside ? null : <AiCompose />} mic={pageMic} beside={beside} />
       {menu && <div class="ai-menu-scrim" onClick={() => setMenu(false)} />}
-      {menu && <Menu close={() => setMenu(false)} />}
+      {menu && <Menu close={() => setMenu(false)}>{beside && <OtherProjectsItem close={() => setMenu(false)} />}</Menu>}
     </>
   );
 }
