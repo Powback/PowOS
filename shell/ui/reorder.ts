@@ -21,6 +21,8 @@ import { springFast } from "./spring.ts";
 export const LONG_PRESS_MS = 420;
 /** Moved this far (CSS px) before the hold, it's a scroll or a swipe, not a lift. */
 const SLOP = 10;
+/** A lift's release: its click lands within this (ms) of the pointerup - a touch's is dispatched after it, not with it. */
+const SWALLOW_MS = 300;
 
 interface Press {
   key: string;
@@ -173,9 +175,10 @@ export function useReorder(
       setLive(null);
       return;
     }
-    // The release's own click (if any) is swallowed; one that never comes doesn't eat a later tap.
+    // The release's own click (if any) is swallowed; one that never comes doesn't eat a later tap (the next press
+    // clears it, and so does a moment: a touch's click comes after its pointerup, not always within a task).
     swallow.current = true;
-    window.setTimeout(() => (swallow.current = false), 0);
+    window.setTimeout(() => (swallow.current = false), SWALLOW_MS);
     const final = liveRef.current;
     if (p.moved && final && final.join() !== keys.join()) {
       tick();
@@ -190,10 +193,10 @@ export function useReorder(
     "data-reorder": "",
     onPointerDown: (e: PointerEvent) => {
       if (e.button) return;
+      swallow.current = false;
       const el = (e.target as Element).closest<HTMLElement>("[data-key]");
       if (!el || !ours(el) || (e.target as Element).closest("[data-no-lift]")) return;
       if (opts.onlyEditing && !editing.value) return;
-      swallow.current = false;
       const r = el.getBoundingClientRect();
       const p: Press = {
         key: el.dataset.key!,
@@ -260,11 +263,13 @@ export function useReorder(
     // Carried: the page under it doesn't scroll (and so doesn't cancel the pointer).
     onTouchMove: (e: TouchEvent) => press.current?.lifted && e.cancelable && e.preventDefault(),
     // A lift's release isn't also a tap; in edit mode a tap on an item selects it, it doesn't switch or open.
+    // [data-edit-ok]: an item's own edit action (the quick-launch row's remove) - its tap goes through, but a lift's
+    // release over it is still only the release (else letting go a carried chip removed it).
     onClickCapture: (e: Event) => {
       const t = e.target as Element;
-      if (t.closest?.("[data-edit-ok]")) return;
       const el = t.closest?.<HTMLElement>("[data-key]");
       const lifted = swallow.current;
+      if (!lifted && t.closest?.("[data-edit-ok]")) return;
       if (!lifted && !(editing.value && el && ours(el))) return;
       swallow.current = false;
       e.stopPropagation();

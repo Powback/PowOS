@@ -8280,6 +8280,73 @@ async function ccQuickPageItem() {
   }
 }
 
+/** The cc-ql-x scenes' helpers: the row's keys and the X of item [k] (its middle; whether a finger there hits its chip). */
+const qlxKeys = (page) => page.evaluate(() => [...document.querySelectorAll(".cc3-launchers .cc3-grid:not(.cc3-spare) [data-key]")].map((e) => e.dataset.key));
+const qlxAt = (page, k) =>
+  page.evaluate((k) => {
+    const chip = document.querySelector(`.cc3-launchers .cc3-grid:not(.cc3-spare) [data-key="${k}"]`);
+    const b = chip?.querySelector(".cc3-badge")?.getBoundingClientRect();
+    if (!b) return null;
+    const at = { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    return { ...at, hit: chip.contains(document.elementFromPoint(at.x, at.y)) };
+  }, k);
+/** A finger on [at] for [ms] (CDP touch: the phone's pointerdown/up and its click), then the page settled. */
+async function qlxFinger(page, cdp, at, ms) {
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: at.x, y: at.y }] });
+  await new Promise((ok) => setTimeout(ok, ms));
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await new Promise((ok) => setTimeout(ok, 150));
+  await page.evaluate(() => window.__gw.settled());
+}
+/** The row set to [row] (stored, read again), edit mode [on]. */
+const qlxSet = (page, row, on) =>
+  page.evaluate(
+    async (row, on) => {
+      const [S, E, B, L] = await Promise.all(["./state.ts", "./ui/ccexpand.ts", "./bridge.ts", "./ui/launchers.tsx"].map((m) => window.__gw.mod(m)));
+      await B.powos.store.set("controls.launchers", row);
+      L.loadLaunchers();
+      S.notif.value = true;
+      E.ccEditing.value = on;
+      await window.__gw.settled();
+    },
+    row,
+    on,
+  );
+
+/** [k] is off the row and the store (after a tap on its X). */
+async function qlxGone(page, k) {
+  const row = await qlxKeys(page);
+  const stored = await page.evaluate(async () => (await window.__gw.mod("./bridge.ts")).powos.store.get("controls.launchers"));
+  return row.includes(k) || stored?.includes(k) ? [`quick-launch X: a tap on ${k}'s X left the row ${JSON.stringify(row)}, stored ${JSON.stringify(stored)} (want it removed)`] : [];
+}
+
+/** The quick-launch row's X under a finger (the cc-ql-x scenes): a tap removes the item, a held press let go doesn't. */
+async function quickLaunchX(page) {
+  // Quick-page items: always on the row (Settings' pages need no installed app in the stub).
+  const row = ["qp:android.settings.WIFI_SETTINGS", "qp:android.settings.BLUETOOTH_SETTINGS", "qp:android.settings.DISPLAY_SETTINGS"];
+  const was = await page.evaluate(async () => (await window.__gw.mod("./bridge.ts")).powos.store.get("controls.launchers"));
+  const cdp = await page.target().createCDPSession();
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  const fails = [];
+  try {
+    await qlxSet(page, row, true);
+    const [k1, k2] = row;
+    const a = await qlxAt(page, k1);
+    if (!a?.hit) return [`quick-launch X: the X of ${k1} is ${a ? "covered" : "missing"} at the finger; the row is ${JSON.stringify(await qlxKeys(page))}`];
+    // A tap on the first item's X: it leaves the row and the store.
+    await qlxFinger(page, cdp, a, 60);
+    fails.push(...(await qlxGone(page, k1)));
+    // A long press on the next X let go in place: a lift's release, the item stays.
+    const b = await qlxAt(page, k2);
+    if (b) await qlxFinger(page, cdp, b, 700);
+    if (!b || !(await qlxKeys(page)).includes(k2)) fails.push(`quick-launch X: a held press let go on ${k2}'s X removed it (a lift's release is no remove)`);
+  } finally {
+    await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false }).catch(() => {});
+    await qlxSet(page, was ?? null, false);
+  }
+  return fails;
+}
+
 /** QP1's checks ([folded]: a narrow screen, the card a bottom sheet): hotspot, Display, Bluetooth; closes; failure. */
 async function quickPageChecks(folded) {
   const q = window.__qp;
@@ -10879,6 +10946,19 @@ try {
         return { ...r, ready: true, ms: Date.now() - r.started };
       }),
     );
+  // The quick-launch row's X (launchers.tsx Chip, the user 11-02: "Pressing X to remove anything from the quick launch
+  // doesn't work"): in edit mode a finger's tap (CDP touch: the phone's pointerdown/up + click) on an item's X takes it
+  // off the row and the store - the row's reorder (reorder.ts) used to eat that click as a select; a long press there
+  // let go in place is a lift's release, not a remove. Folded (cover) and unfolded (inner screen).
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [name, view] of [["cc-ql-x-folded", { width: 404, height: 900 }], ["cc-ql-x-unfolded", { width: 821, height: 883 }]])
+      runs.push(
+        open(browser, `${ORIGIN}/index.html?mode=shade`, name, view).then(async (r) => {
+          await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+          r.problems.push(...(await quickLaunchX(r.page).catch((e) => [`quick-launch X: ${e.message.split("\n")[0]}`])));
+          return { ...r, ready: true, ms: Date.now() - r.started };
+        }),
+      );
   // The shade's further pull (ccexpand.ts; the user, 2026-10-22: only "no notifications" moved, the rest stood still):
   // driven through gesture.ts as a finger (a mouse's pointer events on the panel), the whole panel follows it - what's
   // under the control center moves down by the finger's travel and the rest's toggles show under the row, the row
