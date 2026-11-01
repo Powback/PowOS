@@ -9,6 +9,15 @@
   padding: 6px 8px;
 }
 .notif-buttons button:active { background: var(--color-surface); }
+/* Open: a clear pill, not a faint text link (the manager, 11-01) - the one way to open the app from an expanded card. */
+.notif-buttons .notif-open {
+  color: var(--color-foreground);
+  background: color-mix(in srgb, var(--color-accent) 28%, transparent);
+  border-radius: calc(var(--radius) * 4);
+  padding: 6px 14px;
+  font-weight: 600;
+}
+.notif-buttons .notif-open:active { background: color-mix(in srgb, var(--color-accent) 40%, transparent); }
 .notif-reply { display: flex; gap: 6px; margin-top: 6px; }
 .notif-reply input {
   flex: 1;

@@ -1429,12 +1429,13 @@ input.folder-title:focus { background: var(--soft-fill); }
   color: color-mix(in srgb, var(--color-foreground) 80%, transparent);
   font-size: var(--text-small);
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-/* Several lines (an update's changes, one per line: AgentMail's deploy notice): each on its own, up to six. */
-.notif-text.lines { white-space: pre-line; -webkit-line-clamp: 6; }
+/* Several lines (an update's changes, one per line: AgentMail's deploy notice): each on its own. Collapsed = title + 2
+   lines like every card (the manager, 11-01: a 6-line card made expand mean nothing); a tap shows them all. */
+.notif-text.lines { white-space: pre-line; -webkit-line-clamp: 2; }
 .notif-access { font: var(--text-small) var(--font); color: var(--accent-text); text-align: start; }
 .notif-empty { padding: 18px 2px; text-align: center; font-size: var(--text-small); }
 /* Nothing new: the message in the middle of the (now always full-height) panel. */
