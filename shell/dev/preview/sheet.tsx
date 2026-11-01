@@ -370,8 +370,9 @@ const painted = (cs: CSSStyleDeclaration) =>
  * - hard border: a drawn 1px+ line round content (the design language: no lines).
  * An island's shared offline state (.island-offline.alone: the app can't reach its device, nothing to show) and the
  * Agents widget's compact empty line (.ag-idle-line: nobody running, a small tile / the desktop) are sparse by design -
- * one calm muted line was asked for, not a filled tile - so unfilled / small content don't apply to them; everything
- * else (clipped text above all) does.
+ * one calm muted line was asked for, not a filled tile - and so are content that says so ([data-sparse]: the Agents
+ * widget's rows, each at its own height from the top, the room under them empty glass - the manager's QA 11-01 19:20,
+ * "never stretch") - so unfilled / small content don't apply to them; everything else (clipped text above all) does.
  */
 /** How much of each tile its content covered, %, by tile key: the last check()'s. */
 export const fills: Record<string, number> = {};
@@ -496,7 +497,7 @@ export function check(EMPTY = 0.12, COVER = 0.25) {
     if (face.dataset.pvSheet) problems.push(...face.dataset.pvSheet.split("\n"));
     for (const t of clipped) problems.push(`clipped text "${t}"`);
     for (const t of cut) if (!clipped.has(t)) problems.push(`row cut in half "${t}"`);
-    if (face.querySelector(".island-offline.alone, .ag-idle-line")) {
+    if (face.querySelector(".island-offline.alone, .ag-idle-line, [data-sparse]")) {
       if (!(ink.right > ink.left)) problems.push("nothing drawn");
     } else if (ink.right > ink.left) {
       const W = inner.right - inner.left;

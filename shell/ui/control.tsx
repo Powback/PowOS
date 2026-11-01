@@ -15,6 +15,7 @@ import { ccEditing, ccExpanded, expandedByDefault } from "./ccexpand.ts";
 import { useReorder } from "./reorder.ts";
 import { Icon, type IconName } from "./icons.tsx";
 import { openRemote } from "../remote.ts";
+import { openQuickPage, TILE_PAGES } from "./quickpage.tsx";
 import { openGlasses } from "../glasses/open.ts";
 import { useMinuteClock } from "./time.ts";
 import { Launchers, apps } from "./launchers.tsx";
@@ -129,6 +130,9 @@ function usePress(t: QuickTile, hold = true) {
     // The Controller tile's hold is the overlay's layout editor, not a page in Settings.
     if (t.id === PAD_ID) return editPad();
     shut();
+    // Wi-Fi, Bluetooth, hotspot, NFC: their page as a quick page springing out of the tile (ui/quickpage.tsx).
+    const page = TILE_PAGES[t.id];
+    if (page && openQuickPage(page)) return;
     powos.qs.open(t.id).catch((e) => console.warn("qs: no page for", t.id, e));
   };
   const from = useRef<[number, number]>([0, 0]);

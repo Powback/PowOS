@@ -77,11 +77,15 @@ class SettingsSearch(private val context: Context) {
         return "data:image/png;base64," + android.util.Base64.encodeToString(png, android.util.Base64.NO_WRAP)
     }
 
-    fun open(id: String) {
-        if (id.startsWith("indexed:")) return NativeSettingsIndex.open(context, id)
+    /** Search result [id]'s page: a quick page (QuickPages) springing out of [anchor] (the result's row, CSS px). */
+    fun open(
+        id: String,
+        anchor: org.json.JSONObject? = null,
+    ) {
+        if (id.startsWith("indexed:")) return NativeSettingsIndex.open(context, id, anchor)
         val page = pages.firstOrNull { "settings:${it.action}" == id } ?: error("Unknown settings page")
         check(available(page)) { "Settings page unavailable" }
-        dev.omalauncher.system.AppWindows.startActivity(context, intent(page))
+        QuickPages.launch(context, intent(page), page.label, anchor)
     }
 
     private fun intent(page: Page) = Intent("android.settings.${page.action}")

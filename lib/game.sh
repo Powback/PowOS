@@ -554,13 +554,18 @@ _game_descendants() {
 # game's chain, KILL what's left after 2 s; Steam: thawed (a frozen client never answers), asked with -shutdown, KILLed
 # after 6 s; then one more sweep for anything a launcher started meanwhile. Never waits on a client: SIGKILL ends
 # frozen tasks too (cgroup v2), every wait is bounded, the wait loop only stats /proc.
+# _gsc_steam_chain: Steam's client pid and its ancestors, space-separated - kept alive when only the game closes.
+_gsc_steam_chain() {
+    local a; a="$(cat "$HOME/.steam/steam.pid" 2>/dev/null || true)"
+    while [[ -n "$a" && "$a" -gt 1 ]]; do printf '%s ' "$a"; a="$(awk '{print $4}' "/proc/$a/stat" 2>/dev/null || true)"; done
+}
+
 _game_steam_close() {
     local app=$1 all=$2 t0 g s="" left how="" me=" $$ ${BASHPID:-} $PPID "  # me: never kill ourselves (_gsc_set)
     t0=$(date +%s%N)
     # The game alone: Steam's client and its launchers stay, even when one carries the game's SteamAppId (a game that
     # started Steam itself passes its environment on) - powos-app-quit (a swiped game's card) relies on this.
-    [[ $all == 1 ]] || { local a; a="$(cat "$HOME/.steam/steam.pid" 2>/dev/null || true)"
-        while [[ -n "$a" && "$a" -gt 1 ]]; do me+="$a "; a="$(awk '{print $4}' "/proc/$a/stat" 2>/dev/null || true)"; done; }
+    [[ $all == 1 ]] || me+="$(_gsc_steam_chain)"
     g=$(_gsc_set $(_game_launch_pids "$app"))
     [[ -n "$g" ]] && kill -TERM $g 2>/dev/null || true
     if [[ $all == 1 ]]; then

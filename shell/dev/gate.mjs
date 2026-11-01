@@ -442,10 +442,7 @@ async function agentsFleetCheck(setup) {
   const RAW = /<ta|<task|model_not_found|\bidle \d|\(mac\)|Bash /;
   // Helpers are inner: page.evaluate serialises only this function.
   const text = (q, root = document) => root?.querySelector(q)?.textContent ?? "";
-  const rawIn = (where, t) => {
-    const m = t.match(RAW);
-    return m ? [`${where}: a raw label "${m[0]}"`] : [];
-  };
+  const rawIn = (where, t) => (RAW.test(t) ? [`${where}: a raw label "${t.match(RAW)[0]}"`] : []);
   // The screen's groups: 3 working, 1 stopped ("model not found"), "12 idle" folded.
   const screenGroups = () => {
     const fails = [];
@@ -464,16 +461,17 @@ async function agentsFleetCheck(setup) {
     if (!document.querySelector(".ag-screen .fl-card .fl-bar")) fails.push("screen: no progress bar on the working cards");
     return fails;
   };
+  const fitOf = (panel) => panel?.querySelector(".ag-list")?.dataset.fit; // agents.tsx's own account of its layout
   const firstStopped = (tiles) => tiles[0]?.classList.contains("bad") && /^Can.t( start|…)/.test(tiles[0]?.textContent ?? "");
   // The widget at [w]x[h]: [want] tiles, the stopped one first in red (its reason, cut to "Can't…" at 2x2), the head's counts.
   const widgetFails = (panel, w, h, want) => {
     const fails = [];
-    const tiles = [...(panel?.querySelectorAll(".fl-tile") ?? [])];
+    const tiles = [...(panel?.querySelectorAll(".fl-tile:not(.fl-done)") ?? [])];
     const head = text(".ag-head", panel);
-    if (tiles.length !== want) fails.push(`widget ${w}x${h}: ${tiles.length} tiles, not ${want}`);
-    if (!firstStopped(tiles)) fails.push(`widget ${w}x${h}: the first tile isn't the stopped one in red ("${tiles[0]?.textContent ?? ""}")`);
+    if (tiles.length !== want) fails.push(`widget ${w}x${h}: ${tiles.length} tiles, not ${want} (${fitOf(panel)})`);
+    if (!firstStopped(tiles)) fails.push(`widget ${w}x${h}: the first tile isn't the stopped one in red ("${text(".fl-tile", panel)}")`);
     if (!/3 working/.test(head) || !/1 needs you/.test(head) || /\+\d/.test(head)) fails.push(`widget ${w}x${h}: its head says "${head}"`);
-    return fails;
+    return [...fails, ...window.__agRowFails(`widget ${w}x${h}`, tiles, want > 1)];
   };
   // Home holding only the agents widget at [w]x[h]; its fails.
   const widget = async (w, h, want) => {
@@ -495,7 +493,134 @@ async function agentsFleetCheck(setup) {
   await G.frames(2);
   fails.push(...rawIn("screen, idle opened", text(".ag-screen")));
   A.closeAgents();
-  for (const [w, h, want] of [[2, 2, 1], [4, 2, 4]]) fails.push(...(await widget(w, h, want)));
+  for (const [w, h, want] of [[2, 2, 1], [4, 2, 4], [4, 4, 5]]) fails.push(...(await widget(w, h, want)));
+  fails.push(...(await window.__agCountFails()));
+  // Two agents on a tall widget (the manager's QA 11-01 19:20): rows at their own height from the top, the spare ones
+  // the recently done (muted) - none done: empty glass.
+  for (const [w, h] of [[2, 4], [4, 4], [3, 3]]) for (const done of [true, false]) fails.push(...(await window.__agTwo(w, h, done)));
+  return fails;
+}
+
+/** In the page (window.__agTwo): home holding only the agents widget at [w]x[h] with agentTwoSetup([done])'s fleet; its fails. */
+async function agentTwoWidget(w, h, done) {
+  const G = window.__gw;
+  const [{ powos }, S] = [await G.mod("./bridge.ts"), await G.mod("./state.ts")];
+  const home = await powos.home.get();
+  for (const i of home.items) await powos.home.remove(i.key);
+  await powos.home.addPanel("agents", home.pages[0] ?? 1, { x: 0, y: 0, w, h });
+  S.page.value = 0;
+  const panel = () => document.querySelector(".page:not(.away) .ag-panel");
+  await G.until(panel, 3000);
+  const body = window.__agTwoSetup(done);
+  await new (Object.getPrototypeOf(async function () {}).constructor)("E", "sleep", body)(window.__mockEvents, (ms) => new Promise((r) => setTimeout(r, ms)));
+  await G.until(() => /2 working/.test(panel()?.querySelector(".ag-head")?.textContent ?? "") && panel()?.querySelector(".fl-tile"), 3000);
+  await G.frames(4);
+  return window.__agTwoFails(`widget ${w}x${h}, 2 agents${done ? " + done" : ""}`, panel(), done);
+}
+
+/**
+ * In the page (window.__agTwoSetup): two working sessions - one on the board's media-card (FLEET_SETUP's workRows: 3 of
+ * 5, a bar), one with no plan (no bar) - and, with [done], six that finished today; an agentsFleetCheck body.
+ */
+function agentTwoSetup(done) {
+  return `
+    window.__powosMockQuiet = true;
+    const now = Date.now();
+    const row = (id, state, o) => ({ id, host: 'mac', role: 'coder', parent: null, state, title: '', step: '', cwd: 'PowOS', pid: 0, subs: 0, unread: 0, report: '', work: '', started: now - 3_600_000, last: now - 60_000, rev: 1, ...o });
+    const agents = [
+      row('mac:w1', 'working', { title: 'Media card', work: 'media-card', step: 'Bash renders', last: now - 10_000 }),
+      row('mac:w2', 'working', { title: 'Fix the drawer padding', step: 'Edit drawer.tsx', last: now - 20_000 }),
+      ...(${done} ? [0, 1, 2, 3, 4, 5].map((i) => row('mac:g' + i, 'gone', { title: 'Finished job ' + i, report: 'pushed, gate green', last: now - (i + 1) * 600_000 })) : []),
+    ];
+    E.emit('agents.delta', { full: true, agents, tasks: [], messages: [], asks: [] });
+    await sleep(200);`;
+}
+
+/**
+ * In the page (window.__agTwoFails): [panel] holding agentTwoSetup's two at [where]: two working rows, every row as tall
+ * as its content (never stretched) with no background of its own, the first at the list's top; the media-card row a bar
+ * under its title, the planless one none; [done]: muted done rows in the spare room, else none.
+ */
+function agentTwoFails(where, panel, done) {
+  const list = panel?.querySelector(".ag-list");
+  const rows = [...(panel?.querySelectorAll(".fl-tile") ?? [])];
+  const work = rows.filter((t) => !t.classList.contains("fl-done"));
+  const fails = work.length === 2 ? [] : [`${work.length} working rows, not 2 (${list?.dataset.fit})`];
+  // A row as tall as its content plus its padding (never stretched), and no background of its own.
+  const rowFails = (t) => {
+    const cs = getComputedStyle(t);
+    const kids = [...t.children].map((k) => k.getBoundingClientRect());
+    const content = Math.max(...kids.map((k) => k.bottom)) - Math.min(...kids.map((k) => k.top));
+    const want = content + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    const hgt = t.getBoundingClientRect().height;
+    return [
+      ...(Math.abs(hgt - want) > 1.5 ? [`"${t.textContent}" is ${Math.round(hgt)} px tall for ${Math.round(want)} px of content (stretched)`] : []),
+      ...(/^(transparent|rgba\(0, 0, 0, 0\))$/.test(cs.backgroundColor) ? [] : [`"${t.textContent}" has its own background ${cs.backgroundColor} (a box in the box)`]),
+    ];
+  };
+  const topped = rows[0] && list && rows[0].getBoundingClientRect().top - list.getBoundingClientRect().top <= 1.5;
+  return [...fails, ...rows.flatMap(rowFails), ...(topped ? [] : ["the rows aren't top-aligned"]), ...window.__agBarFails(work), ...window.__agDoneFails(rows, done)].map((f) => `${where}: ${f}`);
+}
+
+/** In the page (window.__agBarFails): the media-card row (3 of 5) a bar under its title, the planless "drawer" row none. */
+function agentBarFails(work) {
+  const media = work.find((t) => /Media card/.test(t.textContent));
+  const plain = work.find((t) => /drawer/.test(t.textContent));
+  const [title, bar] = [media?.querySelector(".fl-t1")?.getBoundingClientRect(), media?.querySelector(".fl-bar")?.getBoundingClientRect()];
+  const fails = plain?.querySelector(".fl-bar") ? ["the row with no progress shows a bar"] : [];
+  if (!bar) return [...fails, "the media-card row (3 of 5) has no progress bar"];
+  return bar.top < title.bottom - 0.5 || bar.width < 4 ? [...fails, `the media-card bar isn't under its title (${Math.round(bar.top)} vs ${Math.round(title.bottom)}, ${Math.round(bar.width)} px wide)`] : fails;
+}
+
+/** In the page (window.__agDoneFails): [done] muted done rows in the spare room; none finished, none. */
+function agentDoneFails(rows, done) {
+  const finished = rows.filter((t) => t.classList.contains("fl-done"));
+  if (!done) return finished.length ? [`${finished.length} done rows with none finished`] : [];
+  if (!finished.length) return ["no recently-done rows in the spare room"];
+  return finished.some((t) => !t.classList.contains("muted")) ? ["a done row isn't muted"] : [];
+}
+
+/**
+ * In the page (installed as window.__agRowFails before agentsFleetCheck): the widget's rows [tiles] at [where] (the user,
+ * 11-01 18:26 "this looks bugged"): no line clipped, a row as tall as its text, the bar under the title (never through
+ * it), no tmux letter name ("E: issues"), a proportional font; [bars]: some row must have a bar to check.
+ */
+function agentRowFails(where, tiles, bars) {
+  const box = (el) => el?.getBoundingClientRect();
+  const clipped = (t) => [...t.querySelectorAll(".fl-t1-text, .fl-t2")].filter((el) => el.scrollHeight > el.clientHeight + 1).map((el) => `"${el.textContent}" is clipped (${el.scrollHeight} > ${el.clientHeight} px)`);
+  const barOver = (t) => {
+    const [title, bar] = [box(t.querySelector(".fl-t1")), box(t.querySelector(".fl-bar"))];
+    return title && bar && bar.top < title.bottom - 0.5 ? [`the bar (top ${Math.round(bar.top)}) overlaps the title (bottom ${Math.round(title.bottom)})`] : [];
+  };
+  const short = (t) => (box(t).bottom < box(t.querySelector(".fl-t2") ?? t.querySelector(".fl-t1")).bottom - 0.5 ? ["a row shorter than its text"] : []);
+  const named = (t) => {
+    const name = t.querySelector(".fl-t1-text")?.textContent ?? "";
+    return /^[A-Z]: /.test(name) ? [`a tmux letter name "${name}"`] : [];
+  };
+  const mono = (t) => {
+    const ff = getComputedStyle(t.querySelector(".fl-t1-text") ?? t).fontFamily;
+    return /mono/i.test(ff) ? [`a monospace font (${ff})`] : [];
+  };
+  const fails = tiles.flatMap((t) => [...clipped(t), ...barOver(t), ...short(t), ...named(t), ...mono(t)]);
+  if (bars && !tiles.some((t) => t.querySelector(".fl-bar"))) fails.push("no row has a progress bar to check");
+  return fails.map((f) => `${where}: ${f}`);
+}
+
+/**
+ * In the page (window.__agCountFails): one "working" (fleet.ts workingNow) - the widget's head, the AI page's and the
+ * screen's count one number, the other project's "E: issues" session (FLEET_LETTERED's mac:t1) not in it - and no title
+ * a tmux letter code.
+ */
+async function agentCountFails() {
+  const F = await window.__gw.mod("./fleet.ts");
+  const fl = F.fleet();
+  const n = F.workingNow(fl).length;
+  const head = document.querySelector(".page:not(.away) .ag-panel .ag-head")?.textContent ?? "";
+  const fails = [];
+  if (n !== 3 || fl.working.length !== 4) fails.push(`workingNow says ${n} of fleet().working's ${fl.working.length} (want 3 of 4: mac:t1 is another project's)`);
+  if (!head.includes(`${n} working`)) fails.push(`the widget's head "${head}" isn't workingNow's ${n}`);
+  const t = F.titleOf({ ...fl.working[0].a, id: "mac:t9", title: "E: PowOS", prompt: "", work: "" }, undefined);
+  if (/^[A-Z]: /.test(t)) fails.push(`titleOf names a tmux session "${t}"`);
   return fails;
 }
 
@@ -3502,6 +3627,9 @@ async function aiUnfoldedRenders(page, size) {
   await page.evaluate(async () => { const { powos } = await window.__gw.mod("./bridge.ts"); if (window.__stRestore) [powos.ai.verdict, powos.agents.message] = window.__stRestore; });
   return fails;
 }
+
+/** FLEET_SETUP plus a Mac tmux session in another project, by its window letter (the user's "E: issues", 11-01 18:26). */
+const FLEET_LETTERED = FLEET_SETUP.replace("const agents = [", "const agents = [ row('mac:t1', 'coder', 'working', { title: 'E: issues', step: 'Bash ls', cwd: 'issues', last: now - 30_000 }),");
 
 /** FLEET_SETUP plus one working session in another project (rsi-native), and [stuck] false: its stopped session idle. */
 const fleetVariant = (stuck) => {
@@ -7277,6 +7405,271 @@ async function fullStaysScene(r) {
   }
 }
 
+/**
+ * QP1 (quick pages; the user: "we don't need to open the whole Settings"): hotspot, Display and Bluetooth each open as ONE
+ * compact card (~440 wide unfolded, full width minus 16 folded: a sheet), springing out of the pressed row; pop-out asks
+ * the host for the app's normal window and the card goes; Back at the page's root (the host's "webwindows.closed")
+ * closes it; a tap outside closes it; a card the page can't make is refused to the host (its net: full screen, logged -
+ * never a freeform window; QuickPageRouteTest). Stubbed host: quickpage.open answers with "quickpage.show".
+ */
+async function quickPageScene(r, folded) {
+  await r.page.evaluate(QUICK_HELPERS, folded);
+  await r.page.evaluate(QUICK_JUDGES);
+  await r.page.evaluate(QUICK_BAR_JUDGES);
+  await r.page.evaluate(QUICK_SHEET_JUDGES);
+  const shot = async (name) => {
+    await r.page.evaluate(() => window.__qp.open({ id: "settings:WIFI_SETTINGS", label: "Wi-Fi" }, "com.oplus.wirelesssettings"));
+    await r.page.screenshot({ path: `/cache/quick-page-${name}.png` }).catch(() => {});
+  };
+  try {
+    const out = await r.page.evaluate(quickPageChecks, folded);
+    if (!out.length) await shot(folded ? "folded" : "unfolded");
+    return out;
+  } finally {
+    await r.page.evaluate(() => window.__qp?.done()).catch(() => {});
+  }
+}
+
+/**
+ * QP1's stubbed host (window.__qp): webwindows.open / close, quickpage.open / popout / refused, every call recorded.
+ * [folded]: home as the folded cover really is (wideHome false - the quick page is web windows' first folded user).
+ */
+async function QUICK_HELPERS(folded) {
+  const [S, W, H, B, Q] = await Promise.all(["./state.ts", "./ui/webwindows.tsx", "./hosts/wide.ts", "./bridge.ts", "./ui/quickpage.tsx"].map((m) => window.__gw.mod(m)));
+  const p = B.powos;
+  const was = { ww: p.webwindows, qp: p.quickpage, wide: H.wideHome.value };
+  const calls = { open: [], popout: [], refused: [], closed: [] };
+  let next = 8800;
+  let token = 0;
+  let failOpen = false;
+  p.webwindows = { ...(p.webwindows ?? {}), enabled: async () => true, open: async (k) => (calls.open.push(k), failOpen ? -1 : next++), close: async (id) => (calls.closed.push(id), window.__mockEvents.emit("webwindows.closed", id), true) };
+  let pkgOf = "com.android.settings";
+  p.quickpage = {
+    open: async (spec) => (window.__mockEvents.emit("quickpage.show", { token: String(++token), pkg: pkgOf, label: spec.label ?? spec.action ?? spec.id, anchor: spec.anchorRect }), true),
+    popout: async (t, id) => (calls.popout.push(`${t}:${id}`), window.__mockEvents.emit("webwindows.closed", id), true),
+    refused: async (t) => (calls.refused.push(t), true),
+  };
+  // The Settings app as the real host lists it ("a:<package>/<activity>"): a Settings page's bar shows its icon.
+  const list = p.apps.list.bind(p.apps);
+  const settingsIcon = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect width="48" height="48" rx="12" fill="#4a6"/></svg>');
+  p.apps.list = async () => [...(await list()), { key: "a:com.android.settings/.Settings", label: "Settings", icon: settingsIcon, kind: "android" }];
+  window.__mockEvents.emit("apps.changed");
+  for (let i = 0; i < 40 && !S.byKey.value.has("a:com.android.settings/.Settings"); i++) await new Promise((ok) => setTimeout(ok, 25));
+  H.wideHome.value = !folded;
+  S.page.value = 0;
+  W.webWins.value = [];
+  await window.__gw.settled();
+  const cards = () => [...document.querySelectorAll(".webwindow.quickpage")];
+  const row = { left: 200, top: 300, width: 300, height: 48 };
+  window.__qp = {
+    W, Q, calls, cards, row,
+    fail: (on) => (failOpen = on),
+    async open(spec, pkg = "com.android.settings") {
+      pkgOf = pkg;
+      Q.openQuickPage(spec, row);
+      for (let i = 0; i < 40 && !W.webWins.value.some((w) => w.quick?.token === String(token) || failOpen); i++) await new Promise((ok) => setTimeout(ok, 25));
+      await window.__gw.settled();
+      await new Promise((ok) => setTimeout(ok, 320));
+    },
+    done() {
+      W.webWins.value = [];
+      p.apps.list = list;
+      window.__mockEvents.emit("apps.changed");
+      p.webwindows = was.ww;
+      p.quickpage = was.qp;
+      H.wideHome.value = was.wide;
+    },
+  };
+  return [];
+}
+
+/** QP1's judges (window.__qpj): one card's look, the three ways it closes, a forced failure. */
+function QUICK_JUDGES() {
+  const q = window.__qp;
+  const settle = () => window.__gw.settled();
+  function card(label, folded) {
+    const c = q.cards();
+    if (c.length !== 1) return [`QP1: ${label}: ${c.length} quick page cards (want exactly 1)`];
+    const box = c[0].getBoundingClientRect();
+    const want = folded ? innerWidth - 32 : Math.min(440, innerWidth - 32);
+    const out = [];
+    if (!c[0].textContent.includes(label)) out.push(`QP1: ${label}: its card's bar says "${c[0].textContent}"`);
+    if (Math.abs(box.width - want) > 2) out.push(`QP1: ${label}: card ${Math.round(box.width)} px wide (want ${want}, ${folded ? "folded: full width minus 16" : "unfolded: ~440"})`);
+    if (box.height > innerHeight * 0.7 + 1) out.push(`QP1: ${label}: card ${Math.round(box.height)} px high (want <= 70% of ${innerHeight})`);
+    if (folded !== c[0].classList.contains("quick-sheet")) out.push(`QP1: ${label}: sheet ${!folded} (want ${folded})`);
+    if (folded) out.push(...window.__qpsheet.check(c[0], box, label));
+    return [...out, ...window.__qpbar.icon(c[0], label), ...window.__qpbar.glass(c[0], label)];
+  }
+  async function closes() {
+    const out = [];
+    q.cards()[0]?.querySelector('[aria-label="Open in its app"]')?.click();
+    await settle();
+    if (q.calls.popout.length !== 1 || q.cards().length) out.push(`QP1: pop-out made ${q.calls.popout.length} host pop-outs, ${q.cards().length} cards left (want 1, 0)`);
+    // Back at the page's root: its task ends, the host closes the window.
+    await q.open({ action: "android.settings.DISPLAY_SETTINGS", label: "Display" });
+    window.__mockEvents.emit("webwindows.closed", q.W.webWins.value.find((w) => w.quick)?.id);
+    await settle();
+    if (q.cards().length) out.push("QP1: Back at the root (the host closed its window): the card is still there");
+    await q.open({ action: "android.settings.BLUETOOTH_SETTINGS", label: "Bluetooth" });
+    document.querySelector(".quickpage-scrim")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    await settle();
+    if (q.cards().length) out.push("QP1: a tap outside the card left it open");
+    return out;
+  }
+  // A card the page can't make: refused to the host (its safety net: full screen, logged - never freeform), no window.
+  async function failure() {
+    q.fail(true);
+    const before = q.calls.refused.length;
+    await q.open({ action: "android.settings.DISPLAY_SETTINGS", label: "Display" });
+    q.fail(false);
+    const n = q.calls.refused.length - before;
+    return n === 1 && !document.querySelector(".webwindow") ? [] : [`QP1: a forced route failure: ${n} refusals to the host, ${document.querySelectorAll(".webwindow").length} windows (want 1 refusal, none)`];
+  }
+  window.__qpj = { card, closes, failure };
+  return [];
+}
+
+/**
+ * QP1's folded judges (window.__qpsheet): the sheet full width minus 16, its bottom 16 above the bar; rising on the
+ * shared spring (ui/spring.ts); over home, never hiding it (a ".sheet" class did: html:has(.sheet) - a white screen).
+ */
+function QUICK_SHEET_JUDGES() {
+  function place(box, label) {
+    const out = [];
+    const foot = window.__qp.W.workArea().bottom;
+    const bar = [...document.querySelectorAll(".home > .dock, .home > .bar")].map((b) => b.getBoundingClientRect()).filter((b) => b.height > 0 && b.top > innerHeight / 2);
+    if (!bar.length) out.push(`QP1: ${label}: folded home has no bar to sit above`);
+    if (bar.some((b) => box.bottom > b.top + 0.5) || Math.abs(foot - 16 - box.bottom) > 2) out.push(`QP1: ${label}: sheet bottom ${Math.round(box.bottom)} (want 16 above the bar's top ${Math.round(foot)})`);
+    if (Math.abs(box.left - 16) > 2) out.push(`QP1: ${label}: sheet left ${Math.round(box.left)} (want 16)`);
+    return out;
+  }
+  function motion(el, label) {
+    const probe = document.createElement("div");
+    probe.style.cssText = "animation-timing-function: var(--spring); animation-duration: var(--spring-ms)";
+    document.body.append(probe);
+    const want = getComputedStyle(probe);
+    const got = getComputedStyle(el);
+    const set = /^(linear|cubic-bezier)\(/.test(want.animationTimingFunction);
+    const same = got.animationName === "quickpage-rise" && got.animationTimingFunction === want.animationTimingFunction && got.animationDuration === want.animationDuration;
+    const out = set ? [] : [`QP1: the shared spring isn't set (--spring "${want.animationTimingFunction}")`];
+    if (!same) out.push(`QP1: ${label}: the sheet's ${got.animationName} ${got.animationDuration} isn't a rise on the shared spring (${want.animationDuration})`);
+    probe.remove();
+    return out;
+  }
+  function shown(el, label) {
+    const stage = getComputedStyle(document.querySelector(".home > .stage") ?? document.body).visibility;
+    const card = getComputedStyle(el).visibility;
+    return stage === "visible" && card === "visible" ? [] : [`QP1: ${label}: folded, home or the card is hidden (stage ${stage}, card ${card})`];
+  }
+  window.__qpsheet = { check: (el, box, label) => [...place(box, label), ...motion(el, label), ...shown(el, label)] };
+  return [];
+}
+
+/**
+ * QP1's bar judges (window.__qpbar): its source app's icon (a Settings page: the Settings app's) left of the label, on
+ * the SAME glass as a web window's title bar (the manager's QA: no icon, "a flat grey strip").
+ */
+function QUICK_BAR_JUDGES() {
+  function icon(el, label) {
+    const img = el.querySelector(".quickpage-bar .ww-title-label img.ww-icon");
+    const text = el.querySelector(".quickpage-bar .ww-title-label span");
+    if (!img?.getAttribute("src") || !img.complete || !img.naturalWidth) return [`QP1: ${label}: the bar has no app icon with an image (src "${img?.getAttribute("src") ?? ""}")`];
+    const left = !text || img.getBoundingClientRect().right <= text.getBoundingClientRect().left + 0.5;
+    return left ? [] : [`QP1: ${label}: the bar's icon is not left of its label`];
+  }
+  const KEYS = ["backgroundColor", "backgroundImage", "backdropFilter", "borderTopColor", "borderTopWidth", "color", "font"];
+  const noUrl = (v) => String(v ?? "").replace(/url\([^)]*\)/g, "");
+  // A web window's title bar (TitleBar's classes), measured beside the card, against the card's bar.
+  function glass(el, label) {
+    const b = el.querySelector(".quickpage-bar");
+    if (!b) return [`QP1: ${label}: no bar`];
+    const probe = document.createElement("div");
+    probe.className = "webwindow";
+    probe.style.cssText = "position:absolute;left:-9999px;top:0;width:200px;height:200px";
+    probe.innerHTML = '<div class="webwindow-title tile" style="height:40px"></div>';
+    el.parentElement.append(probe);
+    const want = getComputedStyle(probe.firstChild);
+    const got = getComputedStyle(b);
+    const out = KEYS.filter((k) => noUrl(want[k]) !== noUrl(got[k])).map((k) => `QP1: ${label}: the bar's ${k} "${got[k]}" is not a web window title bar's "${want[k]}"`);
+    probe.remove();
+    return out;
+  }
+  window.__qpbar = { icon, glass };
+  return [];
+}
+
+/** QP2's helpers: wait for [f] (up to 5 s), the Wi-Fi item's button on the row (not the "add" rows). */
+const QP2_ID = "qp:android.settings.WIFI_SETTINGS";
+async function qp2Wait(f) {
+  const t0 = performance.now();
+  while (!f() && performance.now() - t0 < 5000) await new Promise((ok) => setTimeout(ok, 30));
+  return f();
+}
+const qp2Chip = () => document.querySelector(`.cc3-launchers .cc3-grid:not(.cc3-spare) [data-key="${QP2_ID}"] button`);
+
+/** QP2: edit mode's "add quick page" Wi-Fi: the row gains the item, the store its stable ACTION id. */
+async function qp2Add(p) {
+  const add = await qp2Wait(() => document.querySelector('.cc3-quickpages [aria-label="add quick page Wi-Fi"]'));
+  if (!add) return ["QP2: edit mode has no \"add quick page\" Wi-Fi choice"];
+  add.click();
+  const out = (await qp2Wait(qp2Chip)) ? [] : ["QP2: after \"add quick page Wi-Fi\" the row has no Wi-Fi item"];
+  const stored = (await p.store.get("controls.launchers")) ?? [];
+  return stored.includes(QP2_ID) ? out : [...out, `QP2: the stored row ${JSON.stringify(stored)} lacks ${QP2_ID} (a stable settings ACTION)`];
+}
+
+/** QP2: a tap on the item: ONE quickpage.open ([opened]) with its action, anchored to the item's rect. */
+async function qp2Tap(opened) {
+  const c = qp2Chip();
+  if (!c) return ["QP2: out of edit mode the Wi-Fi item is gone"];
+  const r = c.getBoundingClientRect();
+  c.click();
+  await qp2Wait(() => opened.length);
+  const o = opened[0];
+  if (opened.length !== 1 || o.action !== "android.settings.WIFI_SETTINGS" || o.id) return [`QP2: a tap on the item opened ${JSON.stringify(opened)} (want one quickpage.open with action WIFI_SETTINGS)`];
+  const a = o.anchorRect;
+  const off = !a || [a.left - r.left, a.top - r.top, a.width - r.width, a.height - r.height].some((d) => Math.abs(d) > 1);
+  return off ? [`QP2: the page's anchor ${JSON.stringify(a)} is not the item's rect ${JSON.stringify(r)}`] : [];
+}
+
+/** QP2: the control center's "add quick page" Wi-Fi item: stored as its ACTION, opened anchored to its chip. */
+async function ccQuickPageItem() {
+  const [S, E, B] = await Promise.all(["./state.ts", "./ui/ccexpand.ts", "./bridge.ts"].map((m) => window.__gw.mod(m)));
+  const p = B.powos;
+  const was = { qp: p.quickpage, row: await p.store.get("controls.launchers") };
+  const opened = [];
+  p.quickpage = { open: async (spec) => (opened.push(spec), true), popout: async () => true, refused: async () => true };
+  try {
+    S.notif.value = true;
+    E.ccEditing.value = true;
+    const out = await qp2Add(p);
+    E.ccEditing.value = false;
+    await window.__gw.settled();
+    return [...out, ...(await qp2Tap(opened))];
+  } finally {
+    E.ccEditing.value = false;
+    p.quickpage = was.qp;
+    await p.store.set("controls.launchers", was.row ?? null);
+  }
+}
+
+/** QP1's checks ([folded]: a narrow screen, the card a bottom sheet): hotspot, Display, Bluetooth; closes; failure. */
+async function quickPageChecks(folded) {
+  const q = window.__qp;
+  const j = window.__qpj;
+  const fails = [];
+  const pages = [
+    [{ component: "com.android.settings/.TetherSettings", label: "Hotspot & tethering" }, "com.oplus.wirelesssettings"],
+    [{ action: "android.settings.DISPLAY_SETTINGS", label: "Display" }, "com.android.settings"],
+    [{ action: "android.settings.BLUETOOTH_SETTINGS", label: "Bluetooth" }, "com.oplus.wirelesssettings"],
+  ];
+  for (const [spec, pkg] of pages) {
+    await q.open(spec, pkg);
+    fails.push(...j.card(spec.label, folded));
+  }
+  fails.push(...(await j.closes()), ...(await j.failure()));
+  return fails;
+}
+
 /** MX1's two windows (a Linux and an Android one, floating on page 0), their full screen button and checks. */
 async function FULL_STAYS_HELPERS() {
   const S = await window.__gw.mod("./state.ts");
@@ -8960,7 +9353,7 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     // Both home layouts: the default (search docked, no pill row: taller cells) and the bar - the same tiles in each.
     for (const [name, layout] of [["agents-fleet", null], ["agents-fleet-bar", barOnHome]])
-      runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: 412, height: 915 }).then((r) => whenReady(r, () => (layout ? r.page.evaluate(layout) : Promise.resolve()).then(() => r.page.evaluate(agentsFleetCheck, FLEET_SETUP)))));
+      runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: 412, height: 915 }).then((r) => whenReady(r, () => (layout ? r.page.evaluate(layout) : Promise.resolve()).then(() => r.page.evaluate(`window.__agRowFails = ${agentRowFails}; window.__agCountFails = ${agentCountFails}; window.__agTwoSetup = ${agentTwoSetup}; window.__agTwoFails = ${agentTwoFails}; window.__agTwo = ${agentTwoWidget}; window.__agBarFails = ${agentBarFails}; window.__agDoneFails = ${agentDoneFails}`)).then(() => r.page.evaluate(agentsFleetCheck, FLEET_LETTERED)))));
   // Floating windows live on home's pages (ui/desktops.ts; the user's design, 2026-10-22): page switch hides and
   // shows them, and the placement survives the page loading afresh.
   if (process.env.SHELL_PAGES !== "0")
@@ -8989,6 +9382,10 @@ try {
         return whenReady(r, () => r.page.evaluate(desktopsReloaded));
       }),
     );
+  // QP1: settings pages as quick pages - one compact card each (unfolded ~440 wide, folded a full-width sheet), pop-out, Back at the root, tap outside, a forced failure refused (quick-page-unfolded / -folded).
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [name, size, folded] of [["quick-page-unfolded", { width: 821, height: 883 }, false], ["quick-page-folded", { width: 404, height: 900 }, true]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, name, size).then((r) => whenReady(r, () => quickPageScene(r, folded))));
   // MX1: full screen stays full screen through ticks (a Linux and an Android window, hostless and host-shaped); restore brings the floating frame back (ww-full-stays-unfolded; the user, 11-01 15:39).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-full-stays-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => fullStaysScene(r))));
@@ -9614,6 +10011,20 @@ try {
         fail(await menuStep("remove from quick launch"));
         keys = await row();
         if (!keys || keys.includes(KEY)) fail(`after "remove from quick launch" the shade's row is ${JSON.stringify(keys)}`);
+        return { ...r, ready: true, ms: Date.now() - r.started };
+      }),
+    );
+  // QP2 (quick-page items; the user: "I'd love to use the side launcher to launch e.g. Wi-Fi settings this way"): the
+  // control center's edit mode lists the common settings pages ("add quick page"); a tap adds Wi-Fi as an item that
+  // stores its stable ACTION ("qp:android.settings.WIFI_SETTINGS", never a search index id); out of edit mode a tap
+  // on it is quickpage.open with that action and the chip's rect as its anchor (cc-quick-page, folded).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(
+      open(browser, `${ORIGIN}/index.html?mode=shade`, "cc-quick-page", { width: 404, height: 900 }).then(async (r) => {
+        await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+        // The checks' helpers as page globals (an evaluated function carries no closure).
+        await r.page.evaluate(`window.QP2_ID = ${JSON.stringify(QP2_ID)}; window.qp2Wait = ${qp2Wait}; window.qp2Chip = ${qp2Chip}; window.qp2Add = ${qp2Add}; window.qp2Tap = ${qp2Tap};`);
+        r.problems.push(...((await r.page.evaluate(ccQuickPageItem).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])) ?? []));
         return { ...r, ready: true, ms: Date.now() - r.started };
       }),
     );

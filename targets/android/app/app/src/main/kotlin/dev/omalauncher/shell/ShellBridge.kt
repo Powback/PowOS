@@ -69,7 +69,7 @@ class ShellBridge(
     private val widgets = ShellWidgets(runtime, scope, ::emit)
     private val terminals = ShellTerminals(runtime, scope, ::emit)
     private val media = ShellMedia(context, runtime, scope, ::emit)
-    /** Android apps as home elements (off unless Settings.Global powos_web_windows = 1; home's activity only). */
+    /** Android apps as home elements (on unless Settings.Global powos_web_windows = 0; home's activity only). */
     private val webWindows by lazy { WebWindows(context, web, ::emit) }
 
     @Volatile private var webWindowsMade = false
@@ -423,6 +423,10 @@ class ShellBridge(
                 if (activity == null) -1
                 // A Linux window KWin opened ("webwindows.adopt" with its KWin id): its consumer in a web window.
                 else if (a.getString(0).startsWith("l:")) webWindows.also { webWindowsMade = true }.openLinux(a.optInt(3, -1), a.getJSONObject(1))
+                // A quick page's card (QuickPages, "quickpage.show"): its own display, its held page started there.
+                else if (a.getString(0).startsWith("q:")) QuickPages.entry(a.getString(0).removePrefix("q:"))?.let { q ->
+                    webWindows.also { webWindowsMade = true }.openQuick(q.component, a.getJSONObject(1), q.token)
+                } ?: -1
                 else android(a.getString(0))?.let { app ->
                     runtime.usage.record(a.getString(0))
                     webWindows.also { webWindowsMade = true }.open(app.component, a.getJSONObject(1), a.optInt(2, -1))
@@ -521,6 +525,10 @@ class ShellBridge(
             "qs.state" -> quick.state()
             "qs.toggle" -> quick.toggle(a.getString(0)).let { quick.state() }
             "qs.open" -> quick.open(a.getString(0))
+            // Quick pages (QuickPages): one settings page as a compact card; its pop-out; the page couldn't make its card.
+            "quickpage.open" -> QuickPages.open(context, a.getJSONObject(0))
+            "quickpage.popout" -> QuickPages.popOut(a.getString(0)) { if (webWindowsMade) webWindows.close(a.optInt(1, -1)) }
+            "quickpage.refused" -> WebWindowLaunch.refused(QuickPageRoute.key(a.getString(0)))
             "qs.set" -> quick.set(a.getString(0), a.getDouble(1)).let { quick.state() }
             "qs.listening" -> quick.listening(a.getBoolean(0))
             // The touch controller overlay (andro.marchy.GamepadOverlay): the control centre's Controller tile.
@@ -1754,6 +1762,21 @@ class ShellBridge(
          * WebWindowLaunch: home's page asked for [pkg]'s web window ("webwindows.launch", as from the launcher overlay:
          * its frame shows at once; an open one comes up). False: no home page, or [pkg] has no drawer app.
          */
+        /**
+         * [event] to home's page (web windows on, folded or unfolded: a quick page's card, QuickPageRoute.decide): false -
+         * no home page there, or web windows off (the caller's safety net runs).
+         */
+        fun showOnHome(
+            context: Context,
+            event: String,
+            json: JSONObject,
+        ): Boolean {
+            val home = synchronized(live) { live.firstOrNull { it.activity != null } } ?: return false
+            if (!WebWindows.on(context)) return false
+            home.emit(event, json)
+            return true
+        }
+
         fun openOnHome(
             context: Context,
             pkg: String,

@@ -97,12 +97,24 @@ object AppWindows {
         base: ActivityOptions? = null,
         start: (Bundle?) -> Unit,
     ) {
-        if (pkg != null && webDesktop(context) &&
-            dev.omalauncher.shell.WebWindowLaunch.route(context, pkg, dev.omalauncher.shell.WebWindowLaunch.Pending(base, start) { start(bundle(context, base)) })
-        ) {
-            return
-        }
-        start(bundle(context, base))
+        // PowOS's own activities are never web windows (WebWindowLaunch.route): as before.
+        if (!webDesktop(context) || pkg == context.packageName) return start(bundle(context, base))
+        if (pkg != null && dev.omalauncher.shell.WebWindowLaunch.route(context, pkg, dev.omalauncher.shell.WebWindowLaunch.Pending(base, start) { start(safetyNet(pkg, "no web window came", base)) })) return
+        start(safetyNet(pkg, if (pkg == null) "no one app to window" else "not routable (no home page, no drawer app)", base))
+    }
+
+    /**
+     * The web desktop's safety net (shell/QuickPageRoute.afterFailure): a launch whose web window couldn't be made goes
+     * FULL SCREEN, logged - never Tasks.freeformOptions (a bare OnePlus freeform window, no title bar, never adopted:
+     * the 10-31 hotspot page from search). [base]'s other options are kept.
+     */
+    private fun safetyNet(
+        pkg: String?,
+        why: String,
+        base: ActivityOptions?,
+    ): Bundle {
+        dev.omalauncher.shell.WindowLog.w("PowosWebWindows", "launch $pkg: $why: full screen (never a freeform window)")
+        return Tasks.fullScreenOptions(base).toBundle()
     }
 
     /** [launch] of [intent] (a new task) with context.startActivity. */

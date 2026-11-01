@@ -4,6 +4,7 @@ import { apps, chatting, closeDrawer, launch, query } from "./state.ts";
 import { openScreen, type ScreenName } from "./screens.ts";
 import { installedApps, openApp } from "./apps/pages.ts";
 import { powos } from "./bridge.ts";
+import { openQuickPage } from "./ui/quickpage.tsx";
 import type { NativeSetting } from "./types.ts";
 import { net } from "./apps/net.ts";
 
@@ -90,7 +91,8 @@ registerSearchProvider({ id: "android-settings", async search() {
     return {
       id: `android-settings:${entry.id}`, label: entry.label, source: detail ? `${group.label} · ${detail}` : group.label, group, detail,
       keywords: `${entry.keywords} settings preferences android`,
-      open: () => { void powos.qs.open(entry.id); },
+      // A quick page (ui/quickpage.tsx) springing out of the result's row; an older host: its old way.
+      open: () => { if (!openQuickPage({ id: entry.id, label: entry.label })) void powos.qs.open(entry.id); },
     };
   });
 } });

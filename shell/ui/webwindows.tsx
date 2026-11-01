@@ -1,5 +1,5 @@
-// Web windows: an app's window as an ELEMENT of home's page (unfolded; off unless Settings.Global powos_web_windows =
-// 1). docs/WEB_WINDOWS.md "Element model". The user, 2026-10-30: "the whole way we integrate windows is still hacky, it
+// Web windows: an app's window as an ELEMENT of home's page (unfolded; on unless Settings.Global powos_web_windows =
+// 0). docs/WEB_WINDOWS.md "Element model". The user, 2026-10-30: "the whole way we integrate windows is still hacky, it
 // needs to be handled properly fully inside the powos web ui", "The apps were supposed to be working directly in the
 // webview". This file is the window: its model (page, position, size, scale, z-order = list order = DOM order,
 // minimised/maximised, tiles) AND its element - the title bar, buttons, edges, tile menu and dividers are DOM, plain
@@ -11,8 +11,11 @@ import { useRef, useState } from "preact/hooks";
 import { geometryChannel, native, nextFrameId, sendGeometry } from "../apps/port.ts";
 import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
+// The shared spring's CSS vars (--spring / --spring-ms): a folded quick page's sheet rises on it.
+import "./spring.ts";
 import type { HostWebWindow, WebWindowRect } from "../types.ts";
 import { Mark } from "./chrome.tsx";
+import { QuickBar, quickIconKeys, quickPlace, QUICK, type QuickInfo, type QuickRect } from "./quickpage.tsx";
 import { memo } from "./memo.ts";
 import { confirm as hapticConfirm, tick as hapticTick } from "./haptics.ts";
 import { dropAt, dropInto, freeRegion, insertAt, leaves, splitBox, tabAt, treeRects, zoneKey as dropKey, type Bar, type Tree, type Zone } from "./tiledrop.ts";
@@ -75,6 +78,8 @@ export interface WebWin {
    * ("webwindows.moveresize"), a hold on that drag opens the tile menu.
    */
   ownFrame?: boolean;
+  /** A quick page (ui/quickpage.tsx): one settings page as a compact card - no tiles, dock or recents; [QuickEl]. */
+  quick?: QuickInfo;
 }
 
 /** An app's icon URL by its key (state.ts sets it: this file can't import that one), or undefined. */
@@ -264,6 +269,66 @@ async function openFresh(key: string, label: string, page: number): Promise<numb
   return id;
 }
 
+// ---- quick pages (ui/quickpage.tsx; the host: QuickPages.kt) --------------------------------------------------------
+
+// The host started a quick page's launch: its card here, springing out of [anchor]; its page starts on the card's display.
+powos.on("quickpage.show", (m: { token: string; pkg: string; label: string; anchor?: QuickRect | null }) => {
+  void openQuick(m).then((id) => {
+    if (id == null) void powos.quickpage?.refused(m.token);
+  });
+});
+
+/**
+ * Quick page [m]'s card on the page on screen (one at a time: an open one goes): its id, or null (the host's net runs).
+ * Folded too - the web-window layer's first folded user (the manager, 11-01: "web windows being unfolded-only is no
+ * excuse"): one card display, a sheet full width minus 16 rising above the bar. Every other window stays unfolded-only.
+ */
+export async function openQuick(m: { token: string; pkg: string; label: string; anchor?: QuickRect | null }): Promise<number | null> {
+  if (!(await enabled())) return null;
+  for (const w of webWins.value.filter((v) => v.quick)) close(w.id);
+  const sheet = !wideHome.value || innerWidth < QUICK.folded;
+  const p = quickPlace(m.anchor ?? undefined, workArea(), sheet, innerHeight);
+  const key = `q:${m.token}`;
+  const id = await powos.webwindows!.open(key, { left: p.x, top: p.y + TITLE, width: p.w, height: p.h - TITLE }).catch(() => -1);
+  if (id < 0) return null;
+  const o = pageOrigin();
+  hostGave(id);
+  const quick: QuickInfo = { token: m.token, pkg: m.pkg, anchor: m.anchor ?? undefined, sheet: sheet || undefined, origin: p.origin };
+  webWins.value = [...webWins.value, { id, key, label: m.label, page: shownPage(), x: p.x - o.x, y: p.y - o.y, w: p.w, h: p.h, quick }];
+  return id;
+}
+
+// A fold / unfold: an open quick page's card was placed for the other screen (a folded sheet, an unfolded card) - it goes.
+let quickWide = wideHome.peek();
+wideHome.subscribe((wide) => {
+  if (wide === quickWide) return;
+  quickWide = wide;
+  for (const w of webWins.value.filter((v) => v.quick)) close(w.id);
+});
+
+/** Quick page [id] reopened in its app's normal window (the host closes the card and its task, then launches it). */
+function popOut(win: WebWin) {
+  const q = powos.quickpage;
+  if (!q || !win.quick) return close(win.id);
+  void q.popout(win.quick.token, win.id);
+  webWins.value = webWins.value.filter((w) => w.id !== win.id);
+}
+
+/** A quick page's card: a scrim (a tap outside closes), the card on the backdrop glass with its small bar and the page. */
+function QuickEl({ win, z }: { win: WebWin; z: number }) {
+  const body = useRef<HTMLDivElement>(null);
+  const frame = { position: "absolute", left: `${win.x}px`, top: `${win.y}px`, width: `${win.w}px`, height: `${win.h}px`, zIndex: 20 + z, display: "flex", flexDirection: "column", transformOrigin: win.quick?.origin } as const;
+  return (
+    <>
+      <div class="quickpage-scrim" style={{ zIndex: 19 + z }} onPointerDown={(e) => (e.stopPropagation(), close(win.id))} />
+      <div class={`webwindow quickpage${win.quick?.sheet ? " quick-sheet" : ""}${win.live ? " live" : ""}`} data-wwid={win.id} data-z={z} data-quick={win.quick?.token} style={frame}>
+        <QuickBar label={win.label} icon={quickIconKeys(win.quick?.pkg).map(iconOf).find(Boolean) ?? iconOf(win.key)} height={TITLE} onPopOut={() => popOut(win)} onClose={() => close(win.id)} />
+        <Body win={win} body={body} />
+      </div>
+    </>
+  );
+}
+
 /** Window [id] with no task bound (never live) [BOUND] after its launch: removed, logged - never an empty frame. */
 function watchBound(id: number, key: string) {
   setTimeout(() => {
@@ -367,6 +432,7 @@ function fromHost(h: HostWebWindow, page: number): WebWin {
     id: h.id, key: h.key, label: h.label, page, x: vx - o.x, y: vy - o.y, w, h: hh,
     task: h.task != null && h.task >= 0 ? h.task : undefined,
     live: h.live || undefined, ownFrame: h.ownFrame || undefined,
+    quick: h.key.startsWith("q:") ? { token: h.key.slice(2), pkg: "" } : undefined,
     ...stateOf(h),
     zoom: zoomOf(h),
   };
@@ -2952,6 +3018,11 @@ function appDragEnd(id: number, e: PointerEvent, cancelled: boolean): boolean {
  * (the app's pixels are under home's buffer, so DOM there would paint over that app, or show through its bar's glass).
  */
 function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[] }) {
+  if (win.quick) return <QuickEl win={win} z={z} />;
+  return <AppWindowEl win={win} z={z} above={above} />;
+}
+
+function AppWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[] }) {
   const body = useRef<HTMLDivElement>(null);
   const pinch = usePinch(win);
   // SC1: a pinch's scale zooms the whole frame (bar and body); the app keeps its size (sizeOf sends the layout size).

@@ -17,7 +17,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { computed, signal } from "@preact/signals";
 import { useAgents, type BoardCheck } from "../agents.ts";
-import { fleet, isPowOS, projectOf, type Worker } from "../fleet.ts";
+import { fleet, isPowOS, otherProjects, projectOf, workingNow, type Worker } from "../fleet.ts";
 import { aiScreen, chat, openPanel, page } from "../state.ts";
 import { board, boardSeen, checks, list, noteOf, WorkFeed, type WorkRow } from "./aiboard.tsx";
 import { upNext, UpNext } from "./upnext.tsx";
@@ -130,17 +130,12 @@ function WorkRowLive({ x, beside }: { x: Worker; beside: boolean }) {
 }
 
 /**
- * Unfolded, Working now lists PowOS's own agents only; the ⋯ menu's "Other projects (N)" adds the rest, each with its
- * project (the old context column's toggle, closed at first; the user's review 10-31 14:17: other projects' sessions
- * listed as if they were PowOS work). Folded lists both, PowOS's first.
+ * Working now: fleet.ts workingNow (PowOS's own agents; the ⋯ menu's "Other projects (N)" adds the rest, each with its
+ * project - the user's review 10-31 14:17: other projects' sessions listed as if they were PowOS work), up to six.
  */
-export const otherProjects = signal(false);
-
-/** Working now: PowOS's own agents first, then other projects' (unfolded [beside]: only with otherProjects on), up to six. */
-function WorkingNow({ working, beside }: { working: Worker[]; beside: boolean }) {
-  const own = working.filter((x) => isPowOS(x.a));
-  const other = working.filter((x) => !isPowOS(x.a));
-  const shown = !beside ? [...own, ...other] : otherProjects.value ? [...own, ...other.map((x) => ({ ...x, now: x.now ? `${projectOf(x.a)} · ${x.now}` : projectOf(x.a) }))] : own;
+export { otherProjects };
+function WorkingNow({ working }: { working: Worker[] }) {
+  const shown = working.map((x) => (isPowOS(x.a) ? x : { ...x, now: x.now ? `${projectOf(x.a)} · ${x.now}` : projectOf(x.a) }));
   if (!shown.length) return null;
   return (
     <section class="ais-sec" data-sec="working" aria-label="Working now">
@@ -149,7 +144,7 @@ function WorkingNow({ working, beside }: { working: Worker[]; beside: boolean })
       </h3>
       <ul class="ais-list">
         {shown.slice(0, 6).map((x) => (
-          <WorkRowLive key={x.a.id} x={x} beside={beside} />
+          <WorkRowLive key={x.a.id} x={x} beside={false} />
         ))}
       </ul>
     </section>
@@ -415,16 +410,16 @@ function StatusPage(props: { shown: boolean; more: preact.ComponentChildren; com
   const f = fleet();
   const done = recentlyDone();
   const next = upNext();
-  const quiet = !needs.length && !f.working.length && !done.length && !next.length;
+  const quiet = !needs.length && !workingNow(f).length && !done.length && !next.length;
   return (
     <>
       {shown && <WorkFeed />}
-      <Hero needs={needs.length} working={f.working.length} more={more} />
+      <Hero needs={needs.length} working={workingNow(f).length} more={more} />
       <div class="ai-scroll ais">
         <NeedStack needs={needs} />
         {props.beside && <NeedsAttention stuck={f.attention} />}
-        <WorkingNow working={f.working} beside={!!props.beside} />
-        <UpNext rows={next} busy={busyPage(needs.length, f.working.length)} />
+        <WorkingNow working={workingNow(f)} />
+        <UpNext rows={next} busy={busyPage(needs.length, workingNow(f).length)} />
         <RecentlyDone rows={done} />
         {quiet && <div class="ais-empty">Nothing waits on you and no agent is working right now.</div>}
       </div>
@@ -534,19 +529,19 @@ function Stacked(props: { shown: boolean; more: preact.ComponentChildren; compos
   const done = recentlyDone();
   const next = upNext();
   const open = foldOpen.value;
-  const any = f.working.length + done.length + next.length > 0;
+  const any = workingNow(f).length + done.length + next.length > 0;
   return (
     <>
       {shown && <WorkFeed />}
-      <Hero needs={needs.length} working={f.working.length} more={more} onTap={stripTap} />
+      <Hero needs={needs.length} working={workingNow(f).length} more={more} onTap={stripTap} />
       <div class={`ais-fold ${foldShrunk.value ? "shrunk" : ""}`} inert={foldShrunk.value}>
         <div class="ai-scroll ais">
           <NeedStack needs={needs} />
-          {any && <FoldSummary working={f.working.length} done={done} next={next.length} />}
+          {any && <FoldSummary working={workingNow(f).length} done={done} next={next.length} />}
           <div class={`ais-sum-body ${open ? "open" : ""}`} inert={!open}>
             <div class="ais-sum-in">
-              <WorkingNow working={f.working} beside={false} />
-              <UpNext rows={next} busy={busyPage(needs.length, f.working.length)} />
+              <WorkingNow working={workingNow(f)} />
+              <UpNext rows={next} busy={busyPage(needs.length, workingNow(f).length)} />
               <RecentlyDone rows={done} />
             </div>
           </div>

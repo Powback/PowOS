@@ -155,10 +155,7 @@
   },
   "ui/agents.tsx": {
     "complexity": {
-      "count": 3
-    },
-    "sonarjs/cognitive-complexity": {
-      "count": 1
+      "count": 2
     }
   },
   "ui/aiboard.tsx": {

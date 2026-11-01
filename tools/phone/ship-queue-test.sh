@@ -81,7 +81,20 @@ echo "GATE $*" >> "$LOG"
 for f in "$@"; do case "$f" in --*) ;; *) grep -q BROKEN "$f" 2>/dev/null && { echo "FAIL home: $f broken"; exit 1; } ;; esac; done
 echo "ok all pages"
 EOF
-printf '#!/bin/bash\n[ "${1:-}" = --remote-cmd ] && echo true; exit 0\n' > tools/phone/bindings-check.sh
+# bindings-check stub: --needs reports what the fake phone's module lacks ($HOME/device-lacks: "needs x powos-x <what>"
+# lines) until apps/x is installed on it ($HOME/published-x).
+cat > tools/phone/bindings-check.sh <<'EOF'
+#!/bin/bash
+[ "${1:-}" = --remote-cmd ] && { echo true; exit 0; }
+case " $* " in *" --needs "*) [ -f "$HOME/device-lacks" ] && [ ! -e "$HOME/published-x" ] && cat "$HOME/device-lacks" ;; esac
+exit 0
+EOF
+# A vendored app: apps/x/module's bindings are shell/vendor/powos-x.js (VERSIONS "generated"); this tree's vendor.sh,
+# its generator a copy of the committed file (VENDOR_GEN) - $HOME/vendor-bad makes it differ.
+mkdir -p apps/x/module/src shell/vendor; echo 'fn a() {}' > apps/x/module/src/lib.rs; echo 'export const x = 0' > shell/vendor/powos-x.js
+printf 'powos-x.js  generated  apps/x: test bindings\n' > shell/vendor/VERSIONS; cp "$src/apps/vendor.sh" apps/
+printf '#!/bin/bash\n[ -e "$HOME/vendor-bad" ] && exit 1; cp shell/vendor/powos-x.js "$3"\n' > "$T/bin/vendor-gen"; chmod +x "$T/bin/vendor-gen"
+export VENDOR_GEN=$T/bin/vendor-gen
 printf '#!/bin/bash\necho "MAIL $(cat "$1")" >> "$LOG"\n' > tools/phone/user.sh
 printf '.claude/\n' > .gitignore
 echo 'export const a = 0' > shell/ui/a.tsx; echo 'export const b = 0' > shell/ui/b.tsx; echo 'export const old = 0' > shell/ui/old.tsx
@@ -89,10 +102,13 @@ echo 'class Main' > targets/android/app/Main.kt
 # apps tier stubs: build/install just log (an app = apps/<name>/ with a powos-app.json)
 mkdir -p apps/x; echo '{}' > apps/x/powos-app.json; echo 0 > apps/x/f.txt
 printf '#!/bin/bash\necho "APPBUILD $*" >> "$LOG"\n' > apps/build.sh
-printf '#!/bin/bash\necho "APPINSTALL $*" >> "$LOG"\n' > apps/install.sh
+# $HOME/publish-fail: the publish fails; else the fake phone has the app's module now ($HOME/published-<app>).
+printf '#!/bin/bash\n[ -e "$HOME/publish-fail" ] && { echo "APPINSTALL-FAIL $*" >> "$LOG"; echo "publish: module rejected"; exit 5; }\necho "APPINSTALL $*" >> "$LOG"; touch "$HOME/published-$1"\n' > apps/install.sh
 # rooted.sh deploy stub: records its tip + args (an input of it: targets/android/session/*)
 mkdir -p targets/android/rooted targets/android/session; echo 0 > targets/android/session/powos-app-quit
 printf '#!/bin/bash\necho "ROOTED $(git rev-parse HEAD) svc=${POWOS_SHIP_SERVICE:-} $*" >> "$LOG"\n' > targets/android/rooted/rooted.sh
+# units_gate's checks (the real ones read this repo's units/): pass here - the rooted deploy itself is what's tested.
+mkdir -p test/tier1; for t in test-units-registry.py test-powos-dispatch.py; do echo 'print("ok")' > "test/tier1/$t"; done
 chmod +x tools/phone/*.sh shell/dev/gate.sh shell/push.sh apps/*.sh targets/android/rooted/rooted.sh
 git add -A; git commit -qm base; git push -q origin worktree-powos-multiplatform 2>/dev/null
 git rev-parse HEAD > "$HOME/.cache/powos-installed-commit"   # the phone runs base's APK
@@ -297,6 +313,52 @@ grep -q '^APKSTALE' "$LOG" && grep -q 'b = 13' "$PHONE/files/shell/ui/b.tsx" 2>/
 grep -q "the install left the phone's shell at ${tk:0:9}, behind the live ${t13:0:9}" "$Q/runner.log" && ok "runner says why it re-applies" || { bad "re-apply log line"; tail -6 "$Q/runner.log"; }
 drained && [ "$(cat "$Q/live")" = "$t13" ] && ok "live = t13 again, after the re-push (what's on the phone)" || { bad "live record: $(cat "$Q/live")"; tail -6 "$Q/runner.log"; }
 rm -f "$HOME/apk-stale-shell"
+
+# 14. MODULE FIRST (11-01 c615e0f6, f391): a tip with a vendored module change + its regenerated bindings - the module
+#     is published (the apps step for it) BEFORE the shell push, once, and the apps step doesn't publish it again.
+# landm FILE... : one commit of a module + bindings change (and the other files named)
+landm() { git pull -q --rebase 2>/dev/null; echo "fn a$1() {}" > apps/x/module/src/lib.rs; echo "export const x = $1" > shell/vendor/powos-x.js
+  shift; for f in "$@"; do echo "// $RANDOM" >> "$f"; done
+  git add -A; git commit -qm "module x"; git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null; }
+appslive() { for _ in $(seq 150); do [ "$(cat "$Q/apps-live" 2>/dev/null)" = "$1" ] && return 0; sleep 0.2; done; return 1; }
+first2() { grep -E '^(PUSH|APPINSTALL|APK )' "$LOG" | awk '{print $1}' | paste -sd, -; }
+: > "$LOG"; rm -f "$HOME/published-x"
+landm 1; req --note "x module"; t14=$(tip)
+drained && appslive "$t14"
+[ "$(first2)" = "APPINSTALL,PUSH" ] && ok "module published before the shell push, once" || { bad "module first: $(first2)"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+grep -q "${t14:0:9} apps-first (x)" "$Q/shipped.log" && grep -q "${t14:0:9}: apps live (published first: x)" "$Q/runner.log" && grep -q 'x = 1' "$PHONE/files/shell/vendor/powos-x.js" &&
+  ok "apps-first recorded, apps live, bindings on the phone" || { bad "module-first records"; tail -8 "$Q/runner.log"; }
+
+# 14b. The publish fails: the shell is held (nothing pushed), logged + mailed once; a fix on origin ships module first.
+: > "$LOG"; touch "$HOME/publish-fail"
+landm 2; req --note "x module 2"; t14b=$(tip)
+for _ in $(seq 150); do [ "$(cat "$Q/failed" 2>/dev/null)" = "$t14b" ] && break; sleep 0.2; done; sleep 1
+[ "$(cat "$Q/failed" 2>/dev/null)" = "$t14b" ] && ! grep -q '^PUSH' "$LOG" && ! grep -q 'x = 2' "$PHONE/files/shell/vendor/powos-x.js" &&
+  [ "$(grep -c '^MAIL.*shell.*HELD.*modules-first.log' "$LOG")" = 1 ] && grep -q "${t14b:0:9}: shell HELD - module first (x) failed" "$Q/runner.log" &&
+  ok "publish failed: shell held, mailed once" || { bad "publish failure"; cat "$LOG"; tail -6 "$Q/runner.log"; }
+rm -f "$HOME/publish-fail"; landm 3; t14c=$(tip)
+drained && appslive "$t14c"
+[ "$(first2)" = "APPINSTALL-FAIL,APPINSTALL,PUSH" ] && grep -q 'x = 3' "$PHONE/files/shell/vendor/powos-x.js" && ok "the fix: module first, then the shell" || { bad "after the fix: $(first2)"; cat "$LOG"; }
+
+# 14c. History says nothing (a shell-only tip), the DEVICE's module lacks a column the live bindings need: published first.
+: > "$LOG"; rm -f "$HOME/published-x"; echo "needs x powos-x work: + score" > "$HOME/device-lacks"
+land shell/ui/a.tsx 'export const a = 14' "a14"; req --note "a14"; t14d=$(tip)
+drained
+[ "$(first2)" = "APPINSTALL,PUSH" ] && ok "device schema behind: module published before the shell" || { bad "device lacks: $(first2)"; cat "$LOG"; tail -6 "$Q/runner.log"; }
+rm -f "$HOME/device-lacks"
+
+# 14d. An unchanged module: no extra publish.
+: > "$LOG"
+land shell/ui/b.tsx 'export const b = 14' "b14"; req --note "b14"
+drained
+[ "$(first2)" = "PUSH" ] && ok "unchanged module: no publish" || { bad "unchanged module: $(first2)"; cat "$LOG"; }
+
+# 14e. The incident itself: module + bindings + Kotlin in one commit (the shell is held for its APK and goes live with
+#      the install) - the module is published before the APK ships.
+: > "$LOG"; rm -f "$HOME/published-x"
+landm 5 targets/android/app/Main.kt; req --note "x with its APK"; t14e=$(tip)
+drained && appslive "$t14e"
+[ "$(first2)" = "APPINSTALL,APK" ] && ok "module published before the APK that carries its bindings" || { bad "APK path: $(first2)"; cat "$LOG"; tail -8 "$Q/runner.log"; }
 
 for _ in $(seq 75); do [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 0.2; done
 runner_left=$(cat "$Q/runner.lock/pid" 2>/dev/null)
