@@ -84,7 +84,7 @@
   align-items: center;
   gap: 6px;
   align-self: flex-start;
-  font: var(--text-small) var(--font);
+  font: var(--text-small) var(--font-body);
   color: var(--accent-text);
   border: var(--frame) solid var(--line);
   border-radius: 999px;
@@ -120,7 +120,7 @@
 .scr-field input {
   flex: 1;
   min-width: 0;
-  font: var(--text-body) var(--font);
+  font: var(--text-body) var(--font-body);
   color: var(--color-foreground);
   background: none;
   border: 0;
@@ -191,16 +191,16 @@
 .scr-card-pick.on { border-color: var(--color-accent); }
 .scr-card-pick:active { border-color: var(--color-accent); }
 .scr-card-name { font-size: var(--text-body); }
-.scr-shot { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: calc(var(--radius) * 0.6); background: var(--color-surface); display: block; }
+.scr-shot { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; background: var(--color-surface); display: block; }
 .scr-widget { width: 100%; height: 104px; object-fit: contain; display: block; }
-.scr-widget.empty { display: grid; place-items: center; background: var(--color-surface); border-radius: calc(var(--radius) * 0.6); font-size: var(--text-small); }
+.scr-widget.empty { display: grid; place-items: center; background: var(--color-surface); border-radius: 8px; font-size: var(--text-small); }
 .scr-preview { max-width: 100%; max-height: 320px; object-fit: contain; align-self: center; }
 .scr-code {
   margin: 0;
   padding: 6px 8px;
   background: var(--color-surface);
-  border-radius: calc(var(--radius) * 0.5);
-  font: var(--text-small) var(--font);
+  border-radius: 8px;
+  font: var(--text-small) var(--font-body);
   white-space: pre;
   overflow-x: auto;
   touch-action: pan-x pan-y;
@@ -220,7 +220,7 @@
 .scr-stage.running > .icon { color: var(--accent-text); animation: scr-spin 1.2s linear infinite; }
 .scr-stage.failed { color: var(--color-red); }
 .scr-stage.pending { color: var(--color-muted); }
-.scr-bar { height: 4px; border-radius: 2px; background: var(--color-surface); overflow: hidden; }
+.scr-bar { height: 4px; border-radius: 8px; background: var(--color-surface); overflow: hidden; }
 .scr-bar i { display: block; height: 100%; background: var(--color-accent); }
 @keyframes scr-spin { to { transform: rotate(360deg); } }
 

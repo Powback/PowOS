@@ -7,7 +7,7 @@
  * came into view fade and slide in, ~30 ms apart. A group folding plays that in reverse first ([foldAway]); a card
  * slid away closes its gap the same way ([closeGap]). Reduced motion: all of it instant.
  */
-import { spring } from "./spring.ts";
+import { spring, springFast } from "./spring.ts";
 
 /** What grows and shrinks: the cascade's rows, the groups, the singles' list, a group's rest, each card. */
 const BOXES = ".notif-items > .cascade, .notif-stack, .notif-singles, .notif-rest, .notif-items .notif";
@@ -103,7 +103,7 @@ export function foldAway(rest: HTMLElement | null | undefined, done: () => void)
     el.animate([{ opacity: 1 }, { opacity: 0, transform: `translateY(${-SLIDE_PX}px)` }], {
       duration: FADE_MS,
       delay: i * STAGGER_MS,
-      easing: "ease-in",
+      easing: springFast.easing,
       fill: "forwards",
     }),
   );

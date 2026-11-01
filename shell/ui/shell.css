@@ -63,7 +63,7 @@
 [data-p] {
   --p: 0;
   /* Fast out, no slow tail: let go, it's there within 180 ms (the user: "snappier"). */
-  transition: --p 180ms cubic-bezier(0.1, 0.8, 0.2, 1);
+  transition: --p var(--spring-fast-ms) var(--spring-fast);
 }
 .home.dragging [data-p] { transition: none; }
 
@@ -279,8 +279,8 @@
  * grows a little with it. Opacity and transform only; .live (a finger on it) tracks exactly, at rest it eases.
  */
 .page-dots { display: flex; justify-content: center; align-items: center; gap: 7px; height: 14px; pointer-events: none; }
-.page-dots i { --on: 0; position: relative; width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 28%, transparent); transform: scale(calc(1 + var(--on) * 0.25)); transition: transform 220ms cubic-bezier(0.1, 0.8, 0.2, 1); }
-.page-dots i::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: color-mix(in srgb, var(--color-foreground) 85%, transparent); opacity: var(--on); transition: opacity 220ms cubic-bezier(0.1, 0.8, 0.2, 1); }
+.page-dots i { --on: 0; position: relative; width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 28%, transparent); transform: scale(calc(1 + var(--on) * 0.25)); transition: transform var(--spring-ms) var(--spring); }
+.page-dots i::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: color-mix(in srgb, var(--color-foreground) 85%, transparent); opacity: var(--on); transition: opacity var(--spring-ms) var(--spring); }
 .page-dots.live i, .page-dots.live i::after { transition: none; }
 /* Home's: at the stage's foot, in the gap above the pill / dock, over the pages' width only (the stage is already
    clear of a side dock); it fades with the pages as the launcher opens. */
@@ -330,16 +330,16 @@
   position: absolute;
   inset: 0;
   margin: auto;
-  transition: opacity 160ms ease-out, transform 160ms ease-out;
+  transition: opacity var(--spring-fast-ms) var(--spring-fast), transform var(--spring-fast-ms) var(--spring-fast);
 }
-.pill .prompt { display: block; text-align: center; font: calc(var(--text-item) + 3px) / 40px var(--font); }
+.pill .prompt { display: block; text-align: center; font: calc(var(--text-item) + 3px) / 40px var(--font-body); }
 .pill .lead .x { opacity: 0; transform: rotate(-90deg) scale(0.6); }
 .pill .lead .prompt.off { opacity: 0; transform: rotate(90deg) scale(0.6); }
 .pill .lead.filled .x { opacity: 1; transform: none; }
 .pill .lead.filled .prompt { opacity: 0; transform: rotate(90deg) scale(0.6); }
 @media (prefers-reduced-motion: reduce) { .pill .lead > * { transition: none; } }
 .pill.empty .grow { caret-color: transparent; }
-.pill.empty:focus-within .prompt { animation: prompt-blink 1.1s ease-in-out infinite; }
+.pill.empty:focus-within .prompt { animation: prompt-blink 1.1s var(--ambient) infinite; }
 @keyframes prompt-blink { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .pill.empty:focus-within .prompt { animation: none; } }
 .pill .mic {
@@ -374,7 +374,7 @@
   color: var(--color-foreground);
   opacity: 0;
   pointer-events: none;
-  transition: width 160ms ease-out, margin-left 160ms ease-out, opacity 160ms ease-out;
+  transition: width var(--spring-fast-ms) var(--spring-fast), margin-left var(--spring-fast-ms) var(--spring-fast), opacity var(--spring-fast-ms) var(--spring-fast);
 }
 .pill .send.shown { width: 40px; margin-left: 0; opacity: 1; pointer-events: auto; }
 @media (prefers-reduced-motion: reduce) { .pill .send { transition: none; } }
@@ -430,11 +430,11 @@
   margin: 0;
   padding: 10px 0;
   color: var(--color-foreground);
-  font: var(--text-item) var(--font);
+  font: var(--text-item) var(--font-body);
   line-height: 20px;
   overflow: hidden;
   scrollbar-width: none;
-  transition: height 140ms ease;
+  transition: height var(--spring-fast-ms) var(--spring-fast);
 }
 .grow.scrolls { overflow-y: auto; }
 
@@ -582,7 +582,7 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 }
 .heading {
   margin: 12px 0 4px 8px;
-  font: var(--text-body) var(--font);
+  font: var(--text-body) var(--font-body);
   font-weight: normal;
 }
 .grid {
@@ -625,11 +625,11 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 }
 /* The drawer's labels can sit over the brightest part of the wallpaper: the label shadow, as home's. */
 .drawer :is(.app-label, .heading), .letter-bar span { text-shadow: 0 0 2px var(--color-background), 0 0 4px var(--color-background), 0 0 7px var(--color-background), 0 0 12px color-mix(in srgb, var(--color-background) 70%, transparent); }
-.letter-bar span { transition: transform 160ms ease-out, color 160ms; }
+.letter-bar span { transition: transform var(--spring-fast-ms) var(--spring-fast), color 160ms; }
 .letter-bar span.on { color: var(--accent-text); transform: scale(1.5); }
 /* Scrubbing the A-Z bar (drawer.tsx highlight): the letter's cells bright with a soft lift, the rest dim; eased in
    and back. opacity/scale/translate only (composited, no layout), changed per letter, not per pointermove. */
-.grid.az .app { transition: background 120ms, opacity 180ms ease-out, scale 180ms ease-out, translate 180ms ease-out; }
+.grid.az .app { transition: background 120ms, opacity var(--spring-fast-ms) var(--spring-fast), scale var(--spring-fast-ms) var(--spring-fast), translate var(--spring-fast-ms) var(--spring-fast); }
 .grid.az[data-scrub] .app { opacity: 0.4; }
 .grid.az[data-scrub] .app[data-lit] { opacity: 1; scale: 1.05; translate: 0 -2px; }
 /* The letter under the finger, big, beside the bar. */
@@ -646,7 +646,7 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   border-radius: 50%;
   background: var(--color-accent);
   color: var(--color-background);
-  font: bold 28px var(--font);
+  font: bold 28px var(--font-body);
   pointer-events: none;
 }
 
@@ -686,7 +686,7 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   left: 50%;
   width: 10px;
   height: 3px;
-  border-radius: 2px;
+  border-radius: 8px;
   translate: -50% 0;
   background: var(--color-accent);
   /* A hairline of the theme background (the accent's own ground), so it reads on any wallpaper. */
@@ -710,8 +710,8 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   box-shadow: 0 0 0 1px var(--color-background);
   transition: width 150ms, height 150ms, opacity 150ms;
 }
-.dock .app.mark-here .app-icon::after { width: 22px; height: 4px; border-radius: 2px; opacity: 1; }
-.dock .app.mark-away .app-icon::after { width: 4px; height: 4px; border-radius: 2px; opacity: 0.45; }
+.dock .app.mark-here .app-icon::after { width: 22px; height: 4px; border-radius: 8px; opacity: 1; }
+.dock .app.mark-away .app-icon::after { width: 4px; height: 4px; border-radius: 8px; opacity: 0.45; }
 .dock .app:not(.dock-search) .app-icon { transition: opacity 150ms; }
 .dock.page-focus .app:not(.mark-here, .dock-search) .app-icon { opacity: 0.65; }
 /* DG1 (ui/dockgroups.tsx): a window group's cell - its apps' icons together (switcher.tsx SplitIcons), laid out as the
@@ -725,14 +725,14 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 .dock .group-icon .task-icons[data-layout="3r"] > :last-child { grid-row: span 2; }
 .dock .group-icon .task-icons[data-layout="3t"] > :first-child,
 .dock .group-icon .task-icons[data-layout="3b"] > :last-child { grid-column: span 2; }
-.dock .group-icon .task-icon { display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain; border-radius: 4px; }
+.dock .group-icon .task-icon { display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain; border-radius: 8px; }
 .dock .group-icon .task-icon.blank { background: var(--soft-fill); }
 .app-icon img { display: block; width: 100%; height: 100%; object-fit: contain; transition: opacity 160ms; }
 /* Not loaded yet (apps.tsx AppIcon): a pulsing tile in its place, not a broken image. */
 /* Pulses ~10 s, not forever: an app with no icon at all (a Linux app like lstopo) stays "loading", and an endless
    animation kept the compositor drawing 60 frames a second on an idle home (app + renderer ~20% of a core). */
 .app-icon.initials { border-radius: var(--icon-radius); }
-.app-icon.loading { background: var(--color-surface); animation: icon-wait 1.2s ease-in-out 8 alternate; }
+.app-icon.loading { background: var(--color-surface); animation: icon-wait 1.2s var(--ambient) 8 alternate; }
 .app-icon.loading img { opacity: 0; }
 @keyframes icon-wait { from { opacity: 0.35; } to { opacity: 0.8; } }
 .app-label {
@@ -752,7 +752,7 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   display: flex;
   flex-direction: column;
   padding: 4px;
-  animation: menu-in 120ms ease-out;
+  animation: menu-in var(--spring-fast-ms) var(--spring-fast);
 }
 @keyframes menu-in { from { opacity: 0; transform: scale(0.95); } }
 .menu-title {
@@ -777,7 +777,7 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 .page-track {
   display: flex;
   height: 100%;
-  transition: transform 280ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  transition: transform var(--spring-ms) var(--spring);
   will-change: transform;
 }
 /* A finger is sliding the pages: they follow it exactly. */
@@ -789,11 +789,11 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
  * Under a page-sized sheet (any .sheet but a .pop: a widget's screen, an app's page, the picker, settings) home's content steps
  * out - faded, then hidden (the compositor drops its glass regions too) - so only the frosted wallpaper is behind it.
  */
-.stage, .bar, .dock, .ai-screen .ai-scroll { transition: opacity 180ms ease-out, visibility 0s; }
+.stage, .bar, .dock, .ai-screen .ai-scroll { transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s; }
 html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   opacity: 0;
   visibility: hidden;
-  transition: opacity 180ms ease-out, visibility 0s 180ms;
+  transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s var(--spring-fast-ms);
 }
 /* The whole-screen sheets (an app's page, settings and its screens, agents, remote input): no corners, no edge. */
 :is(.app-screen, .scr, .ag-screen, .remote-screen).tile { border: 0; border-radius: 0; box-shadow: none; }
@@ -815,7 +815,7 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   height: var(--glass-h);
   background: var(--glass-image) 0 0 / 100% 100% no-repeat;
   will-change: transform;
-  transition: transform 280ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  transition: transform var(--spring-ms) var(--spring);
 }
 .page-track.dragging .page-glass-img, .page-glass-img.sliding { transition: none; }
 .glass :is(.page .home-tile > .tile, .lib-card.tile) { background: var(--glass-fill); }
@@ -1008,18 +1008,18 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   box-shadow: none;
   --glass-blur-native: var(--frost-blur-native);
   background: color-mix(in srgb, var(--color-background) 30%, transparent);
-  transition: opacity 240ms ease-out;
+  transition: opacity var(--spring-ms) var(--spring);
 }
 .folder-view:not(.open) .folder-focus.tile { opacity: 0; }
 html:has(.folder-view.open) .home :is(.page-track > .page, .bar, .dock, .dock-tray, .edit-sheet) { opacity: 0; pointer-events: none; }
-.page-track > .page { transition: opacity 240ms ease-out; }
+.page-track > .page { transition: opacity var(--spring-ms) var(--spring); }
 .home-tile.opened .folder-face, .lib-card.opened { opacity: 0; }
 .folder-sheet {
   position: relative;
   width: calc(var(--fcols) * var(--fcell-w) + 2 * var(--edge));
   max-width: calc(100% - 2 * var(--edge));
 }
-.folder-sheet .folder-bg.tile { position: absolute; inset: 0; border-radius: calc(var(--radius) * 1.6); transform-origin: 0 0; }
+.folder-sheet .folder-bg.tile { position: absolute; inset: 0; border-radius: 20px; transform-origin: 0 0; }
 .folder-body { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 14px var(--edge) var(--edge); }
 .folder-title {
   font: inherit;
@@ -1028,7 +1028,7 @@ html:has(.folder-view.open) .home :is(.page-track > .page, .bar, .dock, .dock-tr
   color: var(--color-foreground);
   background: transparent;
   border: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 4px 10px;
   outline: none;
 }
@@ -1055,7 +1055,7 @@ input.folder-title:focus { background: var(--soft-fill); }
   gap: 4px;
   overflow: hidden;
   border-radius: inherit;
-  font: 13px var(--font);
+  font: 13px var(--font-body);
   color: var(--color-foreground);
 }
 .owl-box > * { grid-area: 1 / 1; }
@@ -1183,7 +1183,7 @@ input.folder-title:focus { background: var(--soft-fill); }
   will-change: transform;
 }
 .session-head { display: flex; align-items: baseline; gap: 8px; padding: 2px 8px 4px 2px; font-size: var(--text-small); min-width: 0; }
-.session-back { font: 22px var(--font); line-height: 1; width: 36px; height: 32px; background: none; border: 0; color: var(--accent-text); }
+.session-back { font: 22px var(--font-body); line-height: 1; width: 36px; height: 32px; background: none; border: 0; color: var(--accent-text); }
 .session-title { color: var(--color-foreground); white-space: nowrap; }
 .session-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* View-only / taken over (session.tsx TakeOver): at the head's end. */
@@ -1260,11 +1260,11 @@ input.folder-title:focus { background: var(--soft-fill); }
 /* A side dock is a column pinned under the status bar (top: --inset-top): it doesn't rise - risen, its first icon covered
    the status bar's battery (the user's screenshot, 2026-10-30); its foot ends above the risen pill instead. */
 .home > .dock:not(.dock-tray),
-.home > .bar { transition: translate 180ms ease-out; }
+.home > .bar { transition: translate var(--spring-fast-ms) var(--spring-fast); }
 .home.editing:not(.dock-left, .dock-right) > .dock:not(.dock-tray),
 .home.editing > .bar { translate: 0 calc(-1 * var(--edit-rise)); }
 .edit-act {
-  font: var(--text-item) var(--font);
+  font: var(--text-item) var(--font-body);
   color: var(--color-foreground);
   background: var(--soft-fill);
   box-shadow: var(--lift);
@@ -1284,17 +1284,17 @@ input.folder-title:focus { background: var(--soft-fill); }
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px 12px;
-  animation: menu-in 120ms ease-out;
+  animation: menu-in var(--spring-fast-ms) var(--spring-fast);
 }
 .sheet-head, .sheet-row { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-small); }
-.sheet-done { font: var(--text-item) var(--font); color: var(--accent-text); background: none; border: 0; padding: 4px 0 4px 12px; }
+.sheet-done { font: var(--text-item) var(--font-body); color: var(--accent-text); background: none; border: 0; padding: 4px 0 4px 12px; }
 .sheet-items { display: flex; flex-wrap: wrap; gap: 6px; }
 .sheet-item {
-  font: var(--text-small) var(--font);
+  font: var(--text-small) var(--font-body);
   color: var(--color-foreground);
   background: var(--soft-fill);
   border: var(--frame) solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 7px 10px;
   box-shadow: var(--lift);
 }
@@ -1316,7 +1316,7 @@ input.folder-title:focus { background: var(--soft-fill); }
   padding: 10px;
   border: var(--frame) solid var(--line);
   border-radius: 12px;
-  font: var(--text-small) var(--font);
+  font: var(--text-small) var(--font-body);
   text-align: start;
   box-shadow: var(--lift);
 }
@@ -1339,7 +1339,7 @@ input.folder-title:focus { background: var(--soft-fill); }
   inherits: false;
   initial-value: 0;
 }
-[data-q] { --q: 0; transition: --q 280ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+[data-q] { --q: 0; transition: --q var(--spring-ms) var(--spring); }
 .home.dragging [data-q] { transition: none; }
 .notif-scrim {
   position: fixed;
@@ -1382,7 +1382,7 @@ input.folder-title:focus { background: var(--soft-fill); }
 .notif-bar { display: flex; justify-content: space-between; align-items: center; padding: 4px 2px 8px; font-size: var(--text-small); }
 .cc > .notif-bar:first-child, .notif-col > .notif-bar:first-child { min-height: 48px; }
 .notif-actions { display: flex; gap: 4px; }
-.notif-actions button { font: var(--text-small) var(--font); color: var(--accent-text); background: none; border: 0; padding: 6px 6px; }
+.notif-actions button { font: var(--text-small) var(--font-body); color: var(--accent-text); background: none; border: 0; padding: 6px 6px; }
 .notif-list {
   flex: 1;
   min-height: 0;
@@ -1419,7 +1419,7 @@ input.folder-title:focus { background: var(--soft-fill); }
 .notif-list:has(> .notif-items > .notif-empty) .notif-items { flex: 1; justify-content: center; }
 .notif { padding: 9px 12px; touch-action: pan-y; user-select: none; flex: none; }
 .notif-head { display: flex; align-items: center; min-height: 18px; gap: 6px; font-size: var(--text-small); }
-.notif-icon { width: 18px; height: 18px; border-radius: 5px; }
+.notif-icon { width: 18px; height: 18px; border-radius: 8px; }
 .notif-app { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted); }
 .notif-title { margin-top: 5px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* (A card with no title: its text keeps the title's gap under the row - the group look drops that gap, ccexpand.ts headMorph.) */
@@ -1436,7 +1436,7 @@ input.folder-title:focus { background: var(--soft-fill); }
 /* Several lines (an update's changes, one per line: AgentMail's deploy notice): each on its own. Collapsed = title + 2
    lines like every card (the manager, 11-01: a 6-line card made expand mean nothing); a tap shows them all. */
 .notif-text.lines { white-space: pre-line; -webkit-line-clamp: 2; }
-.notif-access { font: var(--text-small) var(--font); color: var(--accent-text); text-align: start; }
+.notif-access { font: var(--text-small) var(--font-body); color: var(--accent-text); text-align: start; }
 .notif-empty { padding: 18px 2px; text-align: center; font-size: var(--text-small); }
 /* Nothing new: the message in the middle of the (now always full-height) panel. */
 .notif-list:has(> .notif-items > .notif-empty) { display: flex; }
@@ -1492,7 +1492,7 @@ input.folder-title:focus { background: var(--soft-fill); }
   flex-direction: column;
   /* Carried up by --cc-ext (a fold), the box is that much taller at its bottom (the negative margin grows the flex item): its bottom stays the screen's. */
   margin-bottom: calc(-1 * var(--cc-ext));
-  border-radius: calc(var(--radius) * 1.5) calc(var(--radius) * 1.5) 0 0;
+  border-radius: 20px 20px 0 0;
 }
 /* The notifications' own panel has no background of its own (the user, 2026-10-28): its cards float on the shade's blur. */
 .notif-own > .notif-list { padding: 10px 10px 16px; overflow-anchor: none; }
@@ -1556,7 +1556,7 @@ input.folder-title:focus { background: var(--soft-fill); }
  * PowOS AI's page (powai.tsx), left of home: it and home slide as one (gesture.ts applyTrack sets both transforms) -
  * home's bar, dock and recent apps go with it. Each its own fixed layer, so what's fixed inside home stays home's.
  */
-.home, .ai-screen { transition: transform 280ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+.home, .ai-screen { transition: transform var(--spring-ms) var(--spring); }
 .home.sliding, .ai-screen.sliding { transition: none; }
 .ai-screen {
   position: fixed;
@@ -1597,7 +1597,7 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .ai-state { flex: 1; font-size: var(--text-small); color: var(--color-muted); }
 .ai-state.busy { color: var(--accent-text); }
 .ai-state.busy::before { content: "● "; }
-.ai-open { font: var(--text-small) var(--font); color: var(--accent-text); }
+.ai-open { font: var(--text-small) var(--font-body); color: var(--accent-text); }
 /* Unfolded, PowOS AI reads as a chat, not a 2268 px line: the one column capped and centred (the folded width is less). */
 .ai-screen > *, .ai-panel > * { width: 100%; max-width: 680px; margin-inline: auto; }
 .ai-scroll {
@@ -1726,14 +1726,14 @@ html:root .ai-board .tile { background: none; box-shadow: none; }
 /* ui/pending.tsx: the shared "being made" building block - app/widget creation placeholders, and the being-built
    view (apps/sheet.ts's popover). Accent for progress, muted for everything secondary; no borders, no raw colors. */
 .pending-ring-track { stroke: var(--color-accent); stroke-opacity: 0.22; }
-.pending-ring-fill { stroke: var(--color-accent); transition: stroke-dashoffset 220ms ease; }
+.pending-ring-fill { stroke: var(--color-accent); transition: stroke-dashoffset var(--spring-ms) var(--spring); }
 /* Indeterminate only (a running build with no step fraction yet): spins while mounted - never on a settled tile. */
 .pending-ring.spin { animation: pending-spin 1.1s linear infinite; }
 @keyframes pending-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .pending-ring.spin { animation: none; } }
-.pending-bar { height: 3px; border-radius: 2px; background: var(--soft-fill); overflow: hidden; }
-.pending-bar-fill { height: 100%; border-radius: inherit; background: var(--color-accent); transition: width 220ms ease; }
-.pending-bar.indeterminate .pending-bar-fill { width: 38%; animation: pending-slide 1.4s ease-in-out infinite; }
+.pending-bar { height: 3px; border-radius: 8px; background: var(--soft-fill); overflow: hidden; }
+.pending-bar-fill { height: 100%; border-radius: inherit; background: var(--color-accent); transition: width var(--spring-ms) var(--spring); }
+.pending-bar.indeterminate .pending-bar-fill { width: 38%; animation: pending-slide 1.4s var(--ambient) infinite; }
 @keyframes pending-slide { 0% { margin-left: -38%; } 100% { margin-left: 100%; } }
 @media (prefers-reduced-motion: reduce) { .pending-bar.indeterminate .pending-bar-fill { animation: none; margin-left: 0; } }
 .pending-steps { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-small); }
@@ -1756,7 +1756,7 @@ html:root .ai-board .tile { background: none; box-shadow: none; }
 /* The home widget placeholder: skeleton rows, a spinner and a progress bar, at the tile's real size. */
 .pending-widget { display: flex; flex-direction: column; justify-content: space-between; gap: 8px; padding: 12px; height: 100%; box-sizing: border-box; }
 .pending-skel-rows { display: flex; flex-direction: column; gap: 7px; }
-.pending-skel-row { height: 0.85em; border-radius: 5px; background: var(--soft-fill); }
+.pending-skel-row { height: 0.85em; border-radius: 8px; background: var(--soft-fill); }
 .pending-widget-foot { display: flex; align-items: center; gap: 8px; font-size: var(--text-small); }
 .pending-widget-step { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pending-widget.failed .pending-ring-fill, .pending-widget.failed .pending-bar-fill { background: var(--color-red); stroke: var(--color-red); }
@@ -1851,12 +1851,12 @@ html[data-mode="aod"], html[data-mode="aod"] body { background: #000; }
   justify-content: center;
   gap: 6px;
   color: color-mix(in srgb, var(--color-foreground) 70%, #000);
-  transition: transform 1.5s ease;
+  transition: transform var(--spring-slow-ms) var(--spring-slow);
 }
-.aod-time { font: 300 76px/1 var(--font); letter-spacing: 2px; color: color-mix(in srgb, var(--color-accent) 75%, #000); }
+.aod-time { font: 300 76px/1 var(--font-body); letter-spacing: 2px; color: color-mix(in srgb, var(--color-accent) 75%, #000); }
 .aod-date, .aod-battery { font-size: var(--text-small); }
 .aod-apps { display: flex; gap: 10px; margin-top: 14px; }
-.aod-apps img { width: 22px; height: 22px; border-radius: 6px; opacity: 0.7; filter: grayscale(0.4); }
+.aod-apps img { width: 22px; height: 22px; border-radius: 8px; opacity: 0.7; filter: grayscale(0.4); }
 
 /*
  * PowOS AI over another app (assist.tsx) - the design language's one exception (docs/DESIGN-LANGUAGE.md): it shows the
@@ -1877,23 +1877,23 @@ html[data-mode="assist"] .assist {
 /* Solid: over another app, what's under it would show through the field. */
 .assist-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px; max-height: 75%; background: var(--color-background); }
 .assist-grip { display: flex; justify-content: center; padding: 2px 0 6px; margin-top: -6px; touch-action: none; }
-.assist-grip span { width: 36px; height: 4px; border-radius: 2px; background: var(--color-border); }
+.assist-grip span { width: 36px; height: 4px; border-radius: 8px; background: var(--color-border); }
 .assist-head { touch-action: none; }
 /* The strip along the bottom edge: a swipe up from it closes the overlay (assist.tsx swipeAway). */
 .assist-edge { position: fixed; left: 0; right: 0; bottom: 0; height: 28px; touch-action: none; z-index: 2; }
 .assist-head { display: flex; align-items: center; gap: 10px; }
-.assist-shot { width: 36px; height: 64px; object-fit: cover; border-radius: 6px; border: var(--frame) solid var(--color-border); }
+.assist-shot { width: 36px; height: 64px; object-fit: cover; border-radius: 8px; border: var(--frame) solid var(--color-border); }
 .assist-shot.blank { background: var(--color-surface); }
 /* The circled part (assist.tsx cut): its own aspect, inside the head's 64px box - never stretched or cropped to the screen's. */
 .assist-shot.crop { width: auto; height: auto; max-width: 64px; max-height: 64px; object-fit: contain; }
 .assist-title { font-weight: bold; }
 .assist-sub { flex: 1; font-size: var(--text-small); }
-.assist-open { font: var(--text-small) var(--font); color: var(--accent-text); }
+.assist-open { font: var(--text-small) var(--font-body); color: var(--accent-text); }
 .assist-panel .ai-card { overflow-y: auto; min-height: 0; }
 /* Its field is the one pill (bar.tsx Pill, .pill above): no styles of its own. */
 .assist-ask { flex: none; }
 .assist-attach { display: flex; gap: 6px; flex-wrap: wrap; }
-.assist-attach .chip { font: var(--text-small) var(--font); padding: 5px 10px; border-radius: 999px; border: var(--frame) solid var(--color-accent); color: var(--accent-text); }
+.assist-attach .chip { font: var(--text-small) var(--font-body); padding: 5px 10px; border-radius: 999px; border: var(--frame) solid var(--color-accent); color: var(--accent-text); }
 .assist-attach .chip.off { border-color: var(--color-border); color: var(--color-muted); }
 /* Circling, always on (assist.tsx Draw): the screen above the panel takes strokes; the panel sits over it. */
 .assist-draw { position: absolute; inset: 0; touch-action: none; }
@@ -1924,10 +1924,10 @@ html:root .assist-panel .tile.pill { background: var(--soft-fill); }
 .crop-stroke { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; }
 /* A stroke under way (assist.tsx drawing): the panel and the edge strip out of the way - unseen, no touches - so the
    screen under them is drawn on too; back when it ends. */
-.assist-panel, .assist-edge { transition: opacity 120ms ease-out; }
+.assist-panel, .assist-edge { transition: opacity var(--spring-fast-ms) var(--spring-fast); }
 .assist.drawing .assist-panel, .assist.drawing .assist-edge { opacity: 0; pointer-events: none; }
 .crop-stroke polyline { fill: none; stroke: var(--color-accent); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.9; }
-.assist-live { font: var(--text-small) var(--font); padding: 4px 10px; border-radius: 999px; border: var(--frame) solid var(--color-border); color: var(--color-foreground); }
+.assist-live { font: var(--text-small) var(--font-body); padding: 4px 10px; border-radius: 999px; border: var(--frame) solid var(--color-border); color: var(--color-foreground); }
 .assist-live.on { border-color: var(--color-red); color: var(--color-red); }
 /* Live mode: the app under it in use - no dimming, nothing but the bar takes touches. */
 html[data-mode="assist"] .assist.live { background: none; pointer-events: none; }
@@ -1938,7 +1938,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 /* The panel's quick settings (notifications.tsx QuickRow). */
 .qs-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 0 10px; }
 .qs-tile {
-  font: var(--text-small) var(--font);
+  font: var(--text-small) var(--font-body);
   padding: 8px 12px;
   border-radius: var(--radius);
   background: var(--control-fill);
@@ -1959,9 +1959,9 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   min-height: 56px;
   padding: 8px 10px;
   text-align: left;
-  font: var(--text-small) var(--font);
+  font: var(--text-small) var(--font-body);
   text-transform: lowercase;
-  border-radius: calc(var(--radius) * 1.5);
+  border-radius: 20px;
   background: var(--control-fill);
   border: var(--frame) solid var(--line);
   color: var(--color-foreground);
@@ -1981,7 +1981,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   display: flex;
   align-items: center;
   height: 36px;
-  border-radius: 18px;
+  border-radius: 20px;
   border: 0;
   background: linear-gradient(90deg, var(--color-accent) calc(var(--v) * 100%), var(--control-fill) 0);
   overflow: hidden;
@@ -1997,11 +1997,11 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 }
 .cc-slider input[type="range"] { appearance: none; -webkit-appearance: none; width: 100%; height: 100%; margin: 0; background: transparent; opacity: 0; touch-action: none; }
 .cc-chip {
-  font: var(--text-small) var(--font);
+  font: var(--text-small) var(--font-body);
   min-width: 64px;
   height: 44px;
   padding: 0 10px;
-  border-radius: calc(var(--radius) * 1.5);
+  border-radius: 20px;
   background: var(--control-fill);
   border: var(--frame) solid var(--line);
   color: var(--color-foreground);
@@ -2022,9 +2022,9 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
  * jumps. The slots carry the gap above each card, the wrapper takes the container's own gap back - an empty one adds none.
  */
 .cc-medias { display: flex; flex-direction: column; margin-top: -10px; }
-.cc-media-slot { display: grid; grid-template-rows: 1fr; animation: cc-media-in 300ms cubic-bezier(0.2, 0.9, 0.3, 1) both; }
+.cc-media-slot { display: grid; grid-template-rows: 1fr; animation: cc-media-in var(--spring-ms) var(--spring) both; }
 .cc-media-slot > div { min-height: 0; overflow: hidden; padding-top: 10px; }
-.cc-media-slot.out { animation: cc-media-out 300ms cubic-bezier(0.2, 0.9, 0.3, 1) both; pointer-events: none; }
+.cc-media-slot.out { animation: cc-media-out var(--spring-ms) var(--spring) both; pointer-events: none; }
 @keyframes cc-media-in { from { grid-template-rows: 0fr; opacity: 0; } }
 @keyframes cc-media-out { to { grid-template-rows: 0fr; opacity: 0; } }
 .cc-media {
@@ -2059,17 +2059,17 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 :root[data-light="true"] .cc-media.has-art::before { filter: blur(32px) saturate(1.3) brightness(1.1); }
 /* No art: the glass keeps its own colour with an accent wash from the art tile's corner (a layer inside, not the tile's background, which the panel's glass rules own). */
 .cc-media.no-art::before { content: ""; position: absolute; z-index: -1; inset: 0; pointer-events: none; background: radial-gradient(90% 140% at 0 0, color-mix(in srgb, var(--color-accent) 20%, transparent), transparent 70%); }
-.cc-art { grid-area: art; width: 44px; height: 44px; border-radius: calc(var(--radius) * 0.75); object-fit: cover; box-shadow: var(--lift-shadow); }
+.cc-art { grid-area: art; width: 44px; height: 44px; border-radius: 8px; object-fit: cover; box-shadow: var(--lift-shadow); }
 .cc-art-none { display: flex; align-items: center; justify-content: center; font-size: 22px; background: var(--soft-fill); color: var(--color-muted); box-shadow: none; }
 .cc-track { grid-area: track; align-self: stretch; width: 100%; display: flex; flex-direction: column; justify-content: center; align-items: stretch; gap: 1px; min-width: 0; text-align: left; background: none; border: 0; padding: 0; font: var(--text-body) / 1.3 var(--font-ui); color: var(--color-foreground); }
 .cc-track > span { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .cc-track .cc-label { font-size: var(--text-item); font-weight: 600; letter-spacing: -0.005em; }
 .cc-track .cc-detail { color: var(--color-muted); }
 .cc-media-app { grid-area: app; align-self: start; justify-self: end; display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; margin: -10px -12px 0 0; padding: 0; border: 0; background: none; color: var(--color-muted); font-size: 18px; }
-.cc-media-app img { width: 20px; height: 20px; border-radius: 5px; }
+.cc-media-app img { width: 20px; height: 20px; border-radius: 8px; }
 .cc-media .cc-transport { grid-area: transport; display: grid; grid-template-columns: minmax(0, 1fr) 44px 44px 44px minmax(0, 1fr); align-items: center; column-gap: 18px; }
 .cc-transport { display: flex; gap: 2px; }
-.cc-transport button { display: flex; align-items: center; justify-content: center; font: 22px var(--font); width: 32px; height: 32px; padding: 0; background: none; border: 0; border-radius: 50%; color: var(--color-foreground); }
+.cc-transport button { display: flex; align-items: center; justify-content: center; font: 22px var(--font-body); width: 32px; height: 32px; padding: 0; background: none; border: 0; border-radius: 50%; color: var(--color-foreground); }
 .cc-media .cc-transport button { width: 44px; height: 44px; font-size: 24px; }
 /* Play/pause: the foreground's filled disc (40 px drawn in its 44 px target), the glyph cut out of it in the background. */
 .cc-media .cc-transport .cc-play { padding: 2px; background: var(--color-foreground) content-box; color: var(--color-background); font-size: 22px; }
@@ -2085,7 +2085,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   height: 12px;
   margin: -2px 0 0;
   background: linear-gradient(var(--color-foreground), var(--color-foreground)) 0 50% / calc(var(--p) * 100%) 3px no-repeat, linear-gradient(color-mix(in srgb, var(--color-foreground) 22%, transparent), color-mix(in srgb, var(--color-foreground) 22%, transparent)) 0 50% / 100% 3px no-repeat;
-  border-radius: 2px;
+  border-radius: 8px;
 }
 /* Playing: the line glides through each of the host's one-second ticks instead of stepping (--p is registered as a number at the top). */
 .cc-seek.live { transition: --p 1s linear; }
@@ -2113,7 +2113,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   gap: 3px;
   border: 0;
   color: var(--color-foreground);
-  transition: background-color 150ms ease, color 150ms ease;
+  transition: background-color var(--spring-fast-ms) var(--spring-fast), color var(--spring-fast-ms) var(--spring-fast);
 }
 .cc-grid .cc-tile .cc-icon { display: flex; align-items: center; width: 100%; font-size: 22px; margin-bottom: 4px; }
 .cc-grid .cc-tile .cc-label { display: block; width: 100%; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2121,11 +2121,11 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .cc-grid .cc-tile.on { background: var(--color-accent); color: var(--color-background); }
 .cc-grid .cc-tile.on .cc-detail { color: var(--color-background); }
 /* A category's chevron: it opens the category in place. */
-.cc-more { margin-left: auto; display: flex; font-size: 18px; opacity: 0.8; padding: 2px; margin-right: -4px; transition: transform 200ms ease; }
+.cc-more { margin-left: auto; display: flex; font-size: 18px; opacity: 0.8; padding: 2px; margin-right: -4px; transition: transform var(--spring-fast-ms) var(--spring-fast); }
 .cc-tile.opened .cc-more { transform: rotate(90deg); }
 .cc-main { display: flex; flex-direction: column; }
 /* A row's unfolding (control.tsx Unfold): the open category's members, its height animated - the grid below moves. */
-.cc-unfold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 220ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+.cc-unfold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--spring-ms) var(--spring); }
 .cc-unfold > div { min-height: 0; overflow: hidden; }
 .cc-unfold.open { grid-template-rows: 1fr; }
 .cc-main > .cc-grid + .cc-unfold + .cc-grid { margin-top: 8px; }
@@ -2145,7 +2145,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   padding: 8px 2px 0;
   justify-items: center;
   opacity: calc(1 + min(0, var(--cc-k, 0)) * 2);
-  animation: cc-subs-in 220ms ease both;
+  animation: cc-subs-in var(--spring-ms) var(--spring) both;
 }
 @keyframes cc-subs-in { from { opacity: 0; transform: translateY(-6px); } }
 .cc-cell-subs .cc-tile { min-height: 0; padding: 0; background: none; box-shadow: none; border: 0; align-items: center; color: var(--color-foreground); }
@@ -2158,7 +2158,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   justify-content: center;
   font-size: 18px;
   background: var(--control-fill);
-  transition: background-color 150ms ease, color 150ms ease;
+  transition: background-color var(--spring-fast-ms) var(--spring-fast), color var(--spring-fast-ms) var(--spring-fast);
 }
 .cc-cell-subs .cc-tile.on { background: none; }
 .cc-cell-subs .cc-tile.on .cc-icon { background: var(--color-accent); color: var(--color-background); }
@@ -2181,7 +2181,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   gap: 6px;
   margin-top: 8px;
   padding: 10px 4px;
-  border-radius: calc(var(--radius) * 1.5);
+  border-radius: 20px;
   background: var(--soft-fill);
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -2217,7 +2217,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   justify-content: center;
   font-size: 20px;
   background: var(--control-fill);
-  transition: background-color 150ms ease, color 150ms ease;
+  transition: background-color var(--spring-fast-ms) var(--spring-fast), color var(--spring-fast-ms) var(--spring-fast);
 }
 .cc-subs .cc-tile.on { background: none; }
 .cc-subs .cc-tile.on .cc-icon { background: var(--color-accent); color: var(--color-background); }
@@ -2232,9 +2232,9 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   right: 6px;
   width: 26px;
   height: 26px;
-  border-radius: 13px;
+  border-radius: 12px;
   border: 0;
-  font: bold 12px var(--font);
+  font: bold 12px var(--font-body);
   color: var(--color-foreground);
   background: var(--soft-fill);
 }
@@ -2243,14 +2243,14 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .cc-transport button { display: flex; align-items: center; justify-content: center; font-size: 22px; }
 /* Remote input's tile held (control.tsx's RemotePick): its side, USB or Bluetooth, picked under the tiles. */
 .cc-grid .cc-tile.picking .cc-icon { border-color: var(--color-accent); }
-.cc-pick { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: calc(var(--radius) * 1.5); background: var(--control-fill); border: var(--frame) solid var(--line); box-shadow: var(--lift); }
+.cc-pick { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 20px; background: var(--control-fill); border: var(--frame) solid var(--line); box-shadow: var(--lift); }
 .cc-pick-head { font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cc-pick-row { display: flex; gap: 8px; }
 .cc-pick-row .cc-chip { flex: 1; gap: 6px; font-size: var(--text-small); }
 .cc-pick-row .cc-chip .icon { font-size: 18px; }
 /* The panel's content: a sideways swipe moves it (gesture.ts), between the notifications and the control center. */
 .notif-panel .panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; transform: translateX(var(--panel-dx, 0px)); }
-.notif-panel .panel-body.settling { transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.notif-panel .panel-body.settling { transition: transform var(--spring-ms) var(--spring); }
 /*
  * The switcher (recents.tsx): a layer of home, the recent tasks side by side over the blurred, dimmed wallpaper (the
  * blur is the host's, behind the window). --rp (0..1) is how far it's up - a swipe up drives it every frame, the
@@ -2300,7 +2300,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   transform: translate(var(--rx), var(--ry)) scale(calc(1 - 0.12 * var(--rh)));
 }
 .recents .task { direction: ltr; width: var(--card-w); max-width: none; }
-.recents .task-head { justify-content: center; gap: 10px; padding: 0 4px 12px; font: 500 var(--text-small) var(--font); color: var(--color-foreground); }
+.recents .task-head { justify-content: center; gap: 10px; padding: 0 4px 12px; font: 500 var(--text-small) var(--font-body); color: var(--color-foreground); }
 .recents .task-icon { width: 28px; height: 28px; border-radius: 8px; }
 /* A split card (Android's split screen): its apps' icons together, its picture the whole split side by side. */
 .recents .task-icons { display: flex; gap: 4px; }
@@ -2334,37 +2334,37 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .recents.settling .task-row,
 .recents.settling .task:not(:first-child),
 .recents.settling .task:first-child .task-head,
-.recents.settling .task-clear { transition: transform var(--spring-ms, 300ms) var(--spring, ease), opacity 240ms ease; }
+.recents.settling .task-clear { transition: transform var(--spring-ms, 300ms) var(--spring, ease), opacity var(--spring-ms) var(--spring); }
 /* Split screen: picking the second app - the first one set apart. */
 .recents.splitting .task.picked { opacity: 0.45; transform: scale(0.94); }
 .recents-banner {
   position: absolute; left: 50%; top: calc(var(--inset-top, 0px) + 24px); transform: translateX(-50%);
-  padding: 10px 18px; border-radius: 999px; font: var(--text-small) var(--font);
+  padding: 10px 18px; border-radius: 999px; font: var(--text-small) var(--font-body);
   background: var(--color-surface); color: var(--color-foreground); border: var(--frame) solid var(--line);
   box-shadow: var(--lift);
 }
 /* PowOS tiles' split (web windows on): the picks so far, and the button that tiles them. */
 .recents-banner-go {
-  margin-left: 10px; padding: 4px 14px; border-radius: 999px; border: none; font: var(--text-small) var(--font);
+  margin-left: 10px; padding: 4px 14px; border-radius: 999px; border: none; font: var(--text-small) var(--font-body);
   background: var(--color-foreground); color: var(--color-surface);
 }
 .recents-menu-scrim { position: fixed; inset: 0; z-index: 1; }
 .recents-menu {
   position: fixed; z-index: 2; width: 220px; display: flex; flex-direction: column; padding: 6px 0;
   border-radius: var(--radius);
-  animation: recents-menu-in 160ms cubic-bezier(0.2, 0.9, 0.2, 1);
+  animation: recents-menu-in var(--spring-fast-ms) var(--spring-fast);
   transform-origin: top left;
 }
-.recents-menu button { text-align: left; padding: 12px 18px; font: var(--text-small) var(--font); color: var(--color-foreground); background: none; border: none; }
+.recents-menu button { text-align: left; padding: 12px 18px; font: var(--text-small) var(--font-body); color: var(--color-foreground); background: none; border: none; }
 .recents-menu button:active { background: color-mix(in srgb, var(--color-foreground) 10%, transparent); }
 @keyframes recents-menu-in { from { opacity: 0; transform: scale(0.92); } }
 /* A card growing to the screen as its app opens (its transform is animated from the card's frame). */
 .recents-expand { position: fixed; left: 0; top: 0; width: var(--screen-w, 100vw); height: var(--screen-h, 100vh); z-index: 3; object-fit: cover; object-position: top; transform-origin: 0 0; pointer-events: none; }
 .recents-note {
   position: absolute; left: 50%; bottom: calc(var(--inset-bottom, 0px) + 24px); transform: translateX(-50%);
-  padding: 10px 16px; border-radius: 999px; font: var(--text-small) var(--font);
+  padding: 10px 16px; border-radius: 999px; font: var(--text-small) var(--font-body);
   background: var(--color-surface); color: var(--color-foreground);
-  animation: recents-note 2.4s ease forwards;
+  animation: recents-note 2.4s var(--ambient) forwards;
 }
 @keyframes recents-note { 0% { opacity: 0; } 8%, 85% { opacity: 1; } 100% { opacity: 0; } }
 .task-row {
@@ -2379,11 +2379,11 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .task-row::-webkit-scrollbar { display: none; }
 .task { flex: none; width: 70vw; max-width: 420px; scroll-snap-align: center; touch-action: pan-x; }
 .task-head { display: flex; align-items: center; gap: 8px; padding: 0 2px 8px; font-size: var(--text-small); }
-.task-icon { width: 22px; height: 22px; border-radius: 6px; flex: none; }
+.task-icon { width: 22px; height: 22px; border-radius: 8px; flex: none; }
 .task-icon.blank { background: var(--color-surface); }
 .task-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 /* PP1: its app went to Android's PiP / a floating window by itself (RecentTask.pip). */
-.task-pip { flex: none; margin-left: 6px; padding: 0 6px; border-radius: 6px; font-size: 11px; border: 1px solid var(--accent-text); color: var(--accent-text); }
+.task-pip { flex: none; margin-left: 6px; padding: 0 6px; border-radius: 8px; font-size: 11px; border: 1px solid var(--accent-text); color: var(--accent-text); }
 .task-shot {
   display: block;
   width: 100%;
@@ -2401,11 +2401,11 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 /* A card with no picture (ui/switcher.tsx ShotPlaceholder): its icon centred on glass tinted by the icon, as a splash. */
 .task-ph { position: relative; overflow: hidden; display: grid; place-items: center; background: var(--color-surface); }
 .task-ph::before { content: ""; position: absolute; inset: -25%; background: var(--ph-icon) center / cover no-repeat; filter: blur(48px) saturate(1.5); opacity: 0.5; }
-.task-ph-icon { position: relative; width: 72px; height: 72px; border-radius: 18px; }
+.task-ph-icon { position: relative; width: 72px; height: 72px; border-radius: 20px; }
 .task-ph-icon.blank { background: var(--soft-fill, var(--color-surface)); }
 .task-split .task-ph-icon { width: 48px; height: 48px; border-radius: 12px; }
 /* "clear all": calm - a quiet text button on the blur, no plate. */
-.task-clear { align-self: center; margin-top: calc(var(--gap) * 4); font: var(--text-small) var(--font); color: var(--color-muted); background: none; border: none; border-radius: 999px; padding: 10px 22px; }
+.task-clear { align-self: center; margin-top: calc(var(--gap) * 4); font: var(--text-small) var(--font-body); color: var(--color-muted); background: none; border: none; border-radius: 999px; padding: 10px 22px; }
 
 /*
  * The lock screen's face (lock.tsx): over the wallpaper, dimmed; the whole of it follows the finger up. --lift (0..1,
@@ -2427,13 +2427,13 @@ html[data-mode="lock"] body { background: none; }
   opacity: calc(1 - var(--lift, 0) * 1.4);
   will-change: transform, opacity;
 }
-html.lock-settling[data-mode="lock"] { transition: background-color 220ms ease-out; }
-html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms ease-out; }
-.lock-time { font: 300 88px/1 var(--font); color: var(--color-foreground); letter-spacing: 2px; }
+html.lock-settling[data-mode="lock"] { transition: background-color var(--spring-ms) var(--spring); }
+html.lock-settling .lock { transition: transform var(--spring-ms) var(--spring), opacity var(--spring-ms) var(--spring); }
+.lock-time { font: 300 88px/1 var(--font-body); color: var(--color-foreground); letter-spacing: 2px; }
 .lock-date { margin-top: 8px; color: var(--color-foreground); font-size: var(--text-body); }
 .lock-notes { margin-top: 28px; width: 100%; display: flex; flex-direction: column; gap: 6px; }
 .lock-note { display: flex; align-items: center; gap: 10px; padding: 9px 12px; }
-.lock-note img { width: 22px; height: 22px; border-radius: 6px; flex: none; }
+.lock-note img { width: 22px; height: 22px; border-radius: 8px; flex: none; }
 .lock-note-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .lock-note-title { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-small); }
 .lock-note-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-small); }
@@ -2462,11 +2462,11 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 }
 .aw-picker { width: 100%; max-height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; }
 .aw-search {
-  font: var(--text-item) var(--font);
+  font: var(--text-item) var(--font-body);
   color: var(--color-foreground);
   background: var(--color-surface);
   border: var(--frame) solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 8px 10px;
   outline: none;
   box-shadow: var(--lift);
@@ -2474,7 +2474,7 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .aw-search:focus { border-color: var(--color-accent); }
 .aw-list { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 14px; overscroll-behavior: contain; }
 .aw-app-head { display: flex; align-items: center; gap: 8px; font-size: var(--text-small); color: var(--color-foreground); margin-bottom: 6px; }
-.aw-app-head img, .aw-app-blank { width: 22px; height: 22px; border-radius: 6px; flex: none; }
+.aw-app-head img, .aw-app-blank { width: 22px; height: 22px; border-radius: 8px; flex: none; }
 .aw-app-blank { background: var(--color-border); }
 .aw-row { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; }
 .aw-provider {
@@ -2484,7 +2484,7 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
   flex-direction: column;
   gap: 4px;
   padding: 6px;
-  font: var(--text-small) var(--font);
+  font: var(--text-small) var(--font-body);
   color: var(--color-foreground);
   text-align: left;
   background: var(--soft-fill);
@@ -2500,7 +2500,7 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .aw-pill-preview { padding: 6px 18px; border-radius: 999px; background: var(--soft-fill); font-size: var(--text-small); color: var(--color-muted); }
 .aw-foot-preview { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .aw-foot-preview.below { flex-direction: column-reverse; }
-.aw-foot-preview i { width: 84px; height: 14px; border-radius: 6px; background: var(--soft-fill); }
+.aw-foot-preview i { width: 84px; height: 14px; border-radius: 8px; background: var(--soft-fill); }
 .aw-glyph { font-size: 18px; letter-spacing: 4px; color: var(--color-muted); }
 .aw-desc { font-size: 11px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
@@ -2517,12 +2517,13 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .ag-head > :last-child { font-size: 0.85em; white-space: normal; }
 .ag-list { flex: 1; min-height: 0; display: grid; gap: 0.4em; overflow: hidden; }
 .ag-card {
-  overflow: hidden; min-width: 0; min-height: 0; box-sizing: border-box; padding: 0.35em 0.6em; border-radius: 0.7em;
+  overflow: hidden; min-width: 0; min-height: 0; box-sizing: border-box; padding: 0.35em 0.6em; border-radius: 8px;
   background: color-mix(in srgb, currentColor 8%, transparent); color: var(--color-foreground);
   display: flex; flex-direction: column; justify-content: center; gap: 0.15em; text-align: start; cursor: pointer;
 }
 .ag-card.gone { opacity: 0.7; }
-.ag-card.needs_you, .ag-card.blocked { background: color-mix(in srgb, var(--color-red) 16%, transparent); }
+.ag-card.needs_you { background: color-mix(in srgb, var(--status-needs) 16%, transparent); }
+.ag-card.blocked { background: color-mix(in srgb, var(--color-red) 16%, transparent); }
 .ag-c1 { display: flex; align-items: center; gap: 0.4em; white-space: nowrap; min-width: 0; }
 .ag-c1 .ag-who { flex: 1; min-width: 0; font-weight: bold; }
 .ag-c1 .ag-act { padding: 0.15em 0.7em; }
@@ -2545,12 +2546,12 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 /* The smallest (a 2x1 on the cover screen): no room for a card beside the head - the head is the widget. */
 @container (max-height: 96px) and (max-width: 150px) {
   .ag-list { display: none; }
-  .ag-head { flex: 1; padding: 0.35em 0.6em; border-radius: 0.7em; background: color-mix(in srgb, currentColor 8%, transparent); }
+  .ag-head { flex: 1; padding: 0.35em 0.6em; border-radius: 8px; background: color-mix(in srgb, currentColor 8%, transparent); }
   .ag-head > :last-child { font-size: 1em; white-space: normal; }
 }
 /* The fleet in plain words (agents.tsx, fleet.ts): widget tiles, the screen's cards, a thin progress bar. */
 .fl-tile {
-  position: relative; overflow: hidden; min-width: 0; min-height: 0; box-sizing: border-box; padding: 0.2em 0.55em; border-radius: 0.6em;
+  position: relative; overflow: hidden; min-width: 0; min-height: 0; box-sizing: border-box; padding: 0.2em 0.55em; border-radius: 8px;
   background: color-mix(in srgb, currentColor 8%, transparent); color: var(--color-foreground);
   display: flex; flex-direction: column; justify-content: center; gap: 0.1em; cursor: pointer;
 }
@@ -2559,12 +2560,12 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .fl-t1 { display: flex; align-items: center; gap: 0.4em; min-width: 0; line-height: 1.25; }
 .fl-t1-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .fl-t2 { font-size: 0.85em; line-height: 1.25; overflow-wrap: anywhere; }
-.fl-icon { flex: none; font: inherit; font-size: 0.85em; line-height: 1.2; padding: 0 0.45em; border-radius: 0.5em; border: 0;
+.fl-icon { flex: none; font: inherit; font-size: 0.85em; line-height: 1.2; padding: 0 0.45em; border-radius: 8px; border: 0;
   color: var(--color-muted); background: var(--soft-fill); cursor: pointer; }
 .fl-icon.danger { color: var(--color-red); font-weight: bold; }
 /* Its progress: a thin line along the tile's foot, taking no line of its own. */
 .fl-tile > .fl-bar { position: absolute; left: 0.55em; right: 0.55em; bottom: 0.12em; height: 2px; }
-.fl-bar { flex: none; height: 0.25em; border-radius: 1em; overflow: hidden; background: color-mix(in srgb, currentColor 14%, transparent); }
+.fl-bar { flex: none; height: 0.25em; border-radius: 999px; overflow: hidden; background: color-mix(in srgb, currentColor 14%, transparent); }
 .fl-bar > i { display: block; height: 100%; border-radius: inherit; background: var(--accent-text); }
 .fl-need { color: var(--ai-danger-text); }
 .fl-head { font-size: var(--text-small); white-space: nowrap; }
@@ -2583,7 +2584,7 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .fl-ago { flex: none; font-size: var(--text-small); }
 .fl-prog { display: flex; align-items: center; gap: 8px; font-size: var(--text-small); }
 .fl-prog > .fl-bar { flex: 1; }
-.fl-chip { flex: none; font-size: 0.75em; padding: 0.05em 0.55em; border-radius: 1em; color: var(--color-muted);
+.fl-chip { flex: none; font-size: 0.75em; padding: 0.05em 0.55em; border-radius: 999px; color: var(--color-muted);
   background: color-mix(in srgb, currentColor 10%, transparent); }
 .fl-mgr { display: flex; align-items: baseline; gap: 8px; width: 100%; box-sizing: border-box; padding: 10px 12px; font: inherit;
   color: var(--color-foreground); text-align: start; cursor: pointer; }
@@ -2620,7 +2621,8 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 }
 .ag-mark { flex: none; width: 1em; text-align: center; color: var(--color-muted); }
 .working > .ag-mark, .ag-mark.working { color: var(--accent-text); }
-.needs_you > .ag-mark, .ag-mark.needs_you, .blocked > .ag-mark, .ag-mark.blocked { color: var(--color-red); font-weight: bold; }
+.needs_you > .ag-mark, .ag-mark.needs_you { color: var(--status-needs); font-weight: bold; }
+.blocked > .ag-mark, .ag-mark.blocked { color: var(--color-red); font-weight: bold; }
 .ag-who { flex: none; }
 .ag-host { flex: none; }
 .ag-what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -2675,14 +2677,14 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .ag-say { flex: 1; min-width: 0; }
 .ag-say input, .ag-ask input {
   width: 100%;
-  font: var(--text-small) var(--font);
+  font: var(--text-small) var(--font-body);
   color: var(--color-foreground);
   background: var(--soft-fill);
   border: var(--frame) solid var(--line);
   border-radius: var(--radius);
   padding: 7px 9px;
 }
-.ag-act { flex: none; font: var(--text-small) var(--font); color: var(--accent-text); background: var(--soft-fill); border: var(--frame) solid var(--line); border-radius: 999px; padding: 6px 12px; box-shadow: var(--lift); }
+.ag-act { flex: none; font: var(--text-small) var(--font-body); color: var(--accent-text); background: var(--soft-fill); border: var(--frame) solid var(--line); border-radius: 999px; padding: 6px 12px; box-shadow: var(--lift); }
 /* Red text on the AI page's frosted panes: --color-red alone falls under 4.5:1 there, so it is lifted toward the text colour
  * (computed per element, so it follows the pane's own --color-foreground). One token for the danger action and the
  * "Needs attention" titles. */
@@ -2703,7 +2705,7 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 
 /* A theme picked (app.tsx applyTheme): its colors fade in over 200 ms - colors and fills only, for a moment. */
 html.theme-fade, html.theme-fade * {
-  transition: color 200ms ease, background-color 200ms ease, border-color 200ms ease, fill 200ms ease, stroke 200ms ease !important;
+  transition: color var(--spring-fast-ms) var(--spring-fast), background-color var(--spring-fast-ms) var(--spring-fast), border-color var(--spring-fast-ms) var(--spring-fast), fill var(--spring-fast-ms) var(--spring-fast), stroke var(--spring-fast-ms) var(--spring-fast) !important;
 }
 /*
  * Quick Tools (quicktools.tsx, mode=quicktools): a small control center by the thumb, over any app. The window is the
@@ -2719,13 +2721,13 @@ html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: tr
   display: flex;
   flex-direction: column;
   gap: 12px;
-  border-radius: calc(var(--radius) * 2);
+  border-radius: 20px;
   opacity: min(1, calc(var(--q) * 2.5));
   will-change: transform, opacity;
 }
 .qt-root.right .qt-card { right: var(--edge); transform: translateX(calc((1 - var(--q)) * 60%)) scale(calc(0.92 + 0.08 * var(--q))); transform-origin: right center; }
 .qt-root.left .qt-card { left: var(--edge); transform: translateX(calc((var(--q) - 1) * 60%)) scale(calc(0.92 + 0.08 * var(--q))); transform-origin: left center; }
-.qt-root.settling .qt-card { transition: transform 240ms cubic-bezier(0.2, 0.9, 0.3, 1.05), opacity 200ms ease-out; }
+.qt-root.settling .qt-card { transition: transform var(--spring-ms) var(--spring), opacity var(--spring-fast-ms) var(--spring-fast); }
 .qt-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 6px; }
 /* The control center's tiles in three narrow columns: they shrink, their labels end in an ellipsis. */
 .qt-grid .cc-tile { min-width: 0; overflow: hidden; }
@@ -2906,7 +2908,7 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
   border: 0;
   background: none;
   color: var(--color-foreground);
-  font: 11px var(--font);
+  font: 11px var(--font-body);
 }
 .cc3-chip {
   display: flex;
@@ -2917,7 +2919,7 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
   border-radius: 50%;
   font-size: 22px;
   background: var(--control-fill);
-  transition: background-color 150ms ease, color 150ms ease;
+  transition: background-color var(--spring-fast-ms) var(--spring-fast), color var(--spring-fast-ms) var(--spring-fast);
 }
 .cc3-t.on .cc3-chip { background: var(--color-accent); color: var(--color-background); }
 .cc3-t:active .cc3-chip { filter: brightness(1.15); }
@@ -2940,8 +2942,8 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
 .cc3-grid.cc-peek > .cc3-cell:nth-child(n + 31) { --j: 4; }
 .cc3-grid.cc-peek > .cc3-cell:nth-child(n + 37) { --j: 5; }
 .cc3-all { display: flex; flex-direction: column; gap: 14px; }
-.cc3-sec { display: flex; flex-direction: column; gap: 8px; animation: cc-subs-in 220ms ease both; }
-.cc3-head { margin: 0; padding: 0 2px; font: var(--text-small) var(--font); font-weight: normal; color: var(--color-muted); }
+.cc3-sec { display: flex; flex-direction: column; gap: 8px; animation: cc-subs-in var(--spring-ms) var(--spring) both; }
+.cc3-head { margin: 0; padding: 0 2px; font: var(--text-small) var(--font-body); font-weight: normal; color: var(--color-muted); }
 .cc3-cell.chosen .cc3-chip { outline: var(--frame) solid var(--color-accent); outline-offset: -2px; }
 /* Calm sliders: the foreground at low alpha for the level, the accent only as a mark at its end. */
 .cc.v3 .cc-slider {
@@ -2955,7 +2957,7 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
   top: 9px;
   width: 4px;
   height: 18px;
-  border-radius: 2px;
+  border-radius: 8px;
   background: var(--color-accent);
   pointer-events: none;
 }
@@ -2972,7 +2974,7 @@ html:root .notif-panel:has(> .panel-body.together) {
   box-shadow: none;
   border-radius: 0;
 }
-.notif-panel .cc.v3 { padding: 10px; border-radius: calc(var(--radius) * 1.5); }
+.notif-panel .cc.v3 { padding: 10px; border-radius: 20px; }
 /* The control center has no card of its own (the user: "we dont need the bg of the control centre"): no fill, edge or
    shadow - its tiles and sliders (their own fills kept) float on the shade's blur, as the notifications do. Its frost
    variables stay (the text colours read them). Same selector as the glass rule above, later: it wins. */
@@ -3032,16 +3034,16 @@ html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; b
 .wsheet-scrim { position: fixed; inset: 0; z-index: 40; }
 .wsheet {
   position: fixed; display: flex; flex-direction: column; box-sizing: border-box; padding: 6px 14px 14px; overflow: hidden;
-  touch-action: none; transition: transform 160ms ease-out; animation: wsheet-in 160ms ease-out both;
+  touch-action: none; transition: transform var(--spring-fast-ms) var(--spring-fast); animation: wsheet-in var(--spring-fast-ms) var(--spring-fast) both;
 }
 @keyframes wsheet-in { from { opacity: 0; transform: scale(0.96); } }
 .wsheet-head { display: flex; flex-direction: column; align-items: center; gap: 6px; padding-bottom: 10px; flex: none; }
-.wsheet-grab { width: 36px; height: 4px; border-radius: 2px; background: var(--soft-fill); }
-.wsheet-title { font: var(--text-item) var(--font); font-weight: bold; color: var(--color-foreground); }
+.wsheet-grab { width: 36px; height: 4px; border-radius: 8px; background: var(--soft-fill); }
+.wsheet-title { font: var(--text-item) var(--font-body); font-weight: bold; color: var(--color-foreground); }
 .wsheet-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 14px; }
 .wsheet-body.scrolls { touch-action: pan-y; }
 /* A coloured slider in a sheet (an island's Range with a track: colour temperature, hue): the gradient is the scale. */
-.wsheet-body input[type="range"][data-track] { -webkit-appearance: none; appearance: none; height: 22px; border-radius: 11px; }
+.wsheet-body input[type="range"][data-track] { -webkit-appearance: none; appearance: none; height: 22px; border-radius: 12px; }
 .wsheet-body input[type="range"][data-track]::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none; width: 24px; height: 24px; border-radius: 50%;
   background: var(--color-foreground); box-shadow: var(--lift);
@@ -3056,7 +3058,7 @@ html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; b
   position: absolute;
   z-index: 7;
   pointer-events: none;
-  border-radius: calc(var(--radius) / 2);
+  border-radius: 8px;
   background: color-mix(in srgb, var(--color-accent) 22%, transparent);
 }
 .home-tile.chosen::after {
@@ -3248,17 +3250,17 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .launcher-search-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--cell), 1fr)); gap: var(--gap); width: 100%; align-content: end; }
 .launcher-search-results .scr-row { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; min-width: 0; }
 .launcher-search-results .scr-row-text { display: block; max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.launcher-search-results .scr-ico { display: grid; place-items: center; width: var(--icon, 52px); height: var(--icon, 52px); border-radius: 30%; background: var(--soft-fill); font-weight: 600; }
+.launcher-search-results .scr-ico { display: grid; place-items: center; width: var(--icon, 52px); height: var(--icon, 52px); border-radius: 50%; background: var(--soft-fill); font-weight: 600; }
 .launcher-search-results .scr-note { grid-column: 1 / -1; }
 .launcher-search-results .scr-sub { display: block; }
 /* Settings and app actions in the search (drawer.tsx .search-group): after the apps' tiles, a full-width list per app
    - its icon and name, then each match's whole name (wrapping, never cut) and where it is in that app. A soft card per
    app, rows told apart by spacing (DESIGN-LANGUAGE: no divider lines). Spans the results grid; leaves its sizing alone. */
-.launcher-search-results .search-group { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 6px; border-radius: var(--radius, 16px); background: var(--soft-fill); }
+.launcher-search-results .search-group { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 6px; border-radius: var(--radius); background: var(--soft-fill); }
 .launcher-search-results .search-group-head { --icon: 28px; display: flex; align-items: center; gap: 10px; padding: 6px 8px 4px; min-width: 0; }
 .launcher-search-results .search-group-head .scr-ico { font-size: 14px; }
 .launcher-search-results .search-group-name { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
-.launcher-search-results .search-group-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-width: 0; padding: 8px 10px 8px 46px; border-radius: calc(var(--radius, 16px) - 6px); text-align: left; }
+.launcher-search-results .search-group-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-width: 0; padding: 8px 10px 8px 46px; border-radius: 8px; text-align: left; }
 .launcher-search-results .search-group-row:active { background: var(--soft-fill); }
 .launcher-search-results .search-group-label { white-space: normal; overflow-wrap: anywhere; }
 .launcher-search-results .search-group-detail { font-size: var(--text-small); line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
@@ -3278,14 +3280,14 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .webwindow-title {
   display: flex; align-items: center; gap: 8px; padding: 0 4px 0 12px; box-sizing: border-box;
   border-radius: 12px 12px 0 0; border-bottom-width: 0;
-  font: var(--text-small) var(--font); color: var(--color-foreground); user-select: none;
+  font: var(--text-small) var(--font-body); color: var(--color-foreground); user-select: none;
 }
 .webwindow-title.merged { background: none; border: 0; border-radius: 0; padding: 0; }
 .webwindow-title.merged > .tile { height: 100%; border-radius: 0; display: flex; align-items: center; }
 .webwindow-title.merged > .ww-title-label { padding: 0 12px; }
 .ww-title-label { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ww-title-label > span { overflow: hidden; text-overflow: ellipsis; }
-.ww-icon { width: 20px; height: 20px; flex: none; border-radius: 6px; }
+.ww-icon { width: 20px; height: 20px; flex: none; border-radius: 8px; }
 /* WT2: a stack's bar is its tab strip (webwindows.tsx Tabs): icon, name, close per tab; the shown one lit. A tab drop
    aimed at a bar lights it and shows a ghost tab where it lands. */
 .ww-tabs { gap: 4px; height: 100%; }
@@ -3297,11 +3299,11 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-tab .ww-icon { width: 18px; height: 18px; }
 .ww-tab.active { opacity: 1; background: color-mix(in srgb, var(--color-foreground) 14%, transparent); }
 .ww-tab.ghost {
-  flex: none; width: 128px; padding-right: 8px; opacity: 1; pointer-events: none; animation: ww-drop-in 120ms ease-out;
+  flex: none; width: 128px; padding-right: 8px; opacity: 1; pointer-events: none; animation: ww-drop-in var(--spring-fast-ms) var(--spring-fast);
   background: color-mix(in srgb, var(--color-accent) 22%, transparent); box-shadow: inset 0 0 0 2px var(--color-accent);
 }
 .ww-tab-close {
-  width: 24px; height: 24px; flex: none; display: grid; place-items: center; border: 0; border-radius: 6px;
+  width: 24px; height: 24px; flex: none; display: grid; place-items: center; border: 0; border-radius: 8px;
   background: none; color: inherit; padding: 0;
 }
 .ww-tab-close:active { background: color-mix(in srgb, var(--color-red) 70%, transparent); }
@@ -3323,9 +3325,9 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 /* Until the app's first frame: a solid placeholder on the theme's surface (never a hole) - its icon and a quiet line. */
 .webwindow-body.placeholder { background: var(--color-surface); }
 .ww-placeholder { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 18px; }
-.ww-placeholder-icon { width: 56px; height: 56px; border-radius: 14px; }
-.ww-progress { width: 72px; height: 3px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--color-foreground) 12%, transparent); }
-.ww-progress::after { content: ""; display: block; width: 40%; height: 100%; border-radius: inherit; background: color-mix(in srgb, var(--color-foreground) 45%, transparent); animation: ww-progress 1.1s ease-in-out infinite; }
+.ww-placeholder-icon { width: 56px; height: 56px; border-radius: 12px; }
+.ww-progress { width: 72px; height: 3px; border-radius: 8px; overflow: hidden; background: color-mix(in srgb, var(--color-foreground) 12%, transparent); }
+.ww-progress::after { content: ""; display: block; width: 40%; height: 100%; border-radius: inherit; background: color-mix(in srgb, var(--color-foreground) 45%, transparent); animation: ww-progress 1.1s var(--ambient) infinite; }
 @keyframes ww-progress { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
 /* LW3: a Linux launch that couldn't start - why, and a close (the bar's close works too). */
 .ww-placeholder.failed .ww-placeholder-icon { opacity: 0.5; }
@@ -3348,7 +3350,7 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
    light stroke; the top ones subtler. They fade in briefly on activation (RZ6), full while it is being resized. */
 .ww-grip {
   position: absolute; width: 22px; height: 22px; overflow: visible; pointer-events: none; opacity: 0;
-  transition: opacity 180ms ease-out;
+  transition: opacity var(--spring-fast-ms) var(--spring-fast);
 }
 .ww-grip path { fill: none; stroke: var(--color-foreground); stroke-width: 4; stroke-linecap: round; }
 .ww-grip-se { right: -8px; bottom: -8px; } .ww-grip-sw { left: -8px; bottom: -8px; transform: scaleX(-1); }
@@ -3363,7 +3365,7 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-swap {
   all: unset; position: absolute; z-index: 3; width: calc(40px / var(--ww-k, 1)); height: calc(40px / var(--ww-k, 1));
   display: grid; place-items: center; border-radius: 50%; clip-path: circle(50%); color: var(--color-foreground);
-  opacity: 0; pointer-events: none; transition: opacity 180ms ease-out; touch-action: none;
+  opacity: 0; pointer-events: none; transition: opacity var(--spring-fast-ms) var(--spring-fast); touch-action: none;
 }
 .ww-swap svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .ww-swap-e { right: 10px; top: 50%; transform: translateY(-50%); } .ww-swap-w { left: 10px; top: 50%; transform: translateY(-50%); }
@@ -3371,11 +3373,11 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .webwindow.ww-grips .ww-swap { transition-duration: 120ms; opacity: 0.9; pointer-events: auto; }
 /* RZ4: the live size outline while a window is resized: a ring in the theme's foreground, the accent on a tile size. */
 .ww-outline {
-  position: absolute; inset: -3px; border-radius: 15px; pointer-events: none; display: grid; place-items: center;
+  position: absolute; inset: -3px; border-radius: 12px; pointer-events: none; display: grid; place-items: center;
   box-shadow: 0 0 0 2px var(--color-foreground); opacity: 0.6;
 }
 .ww-outline.snapped { box-shadow: 0 0 0 3px var(--color-accent); opacity: 1; }
-.ww-outline-size { padding: 6px 12px; border-radius: 999px; font: var(--text-small) var(--font); color: var(--color-foreground); }
+.ww-outline-size { padding: 6px 12px; border-radius: 999px; font: var(--text-small) var(--font-body); color: var(--color-foreground); }
 /* GL1/WG1: every drop's ghost (webwindows.tsx DropPreview, dockout.tsx DockOutGhost) - the exact rect the window takes:
    a tile, an edge snap, the free region between the widgets or where it floats. One look: a ghost of glass (a faint
    frost, a thin accent ring), never a solid slab; a short spring as the target changes. */
@@ -3383,9 +3385,9 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
   position: absolute; pointer-events: none; border-radius: 12px; display: grid; place-items: center; box-sizing: border-box;
   background: color-mix(in srgb, var(--color-foreground) 8%, transparent); backdrop-filter: blur(6px);
   box-shadow: 0 0 0 1px var(--color-accent);
-  transition: left 180ms cubic-bezier(0.34, 1.4, 0.64, 1), top 180ms cubic-bezier(0.34, 1.4, 0.64, 1),
-    width 180ms cubic-bezier(0.34, 1.4, 0.64, 1), height 180ms cubic-bezier(0.34, 1.4, 0.64, 1);
-  animation: ww-drop-in 120ms ease-out;
+  transition: left var(--spring-fast-ms) var(--spring-fast), top var(--spring-fast-ms) var(--spring-fast),
+    width var(--spring-fast-ms) var(--spring-fast), height var(--spring-fast-ms) var(--spring-fast);
+  animation: ww-drop-in var(--spring-fast-ms) var(--spring-fast);
 }
 /* A floating ghost follows the finger 1:1 (no spring lag between it and the drop). */
 .ww-drop.float { transition: none; }
@@ -3397,10 +3399,10 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-park.right { border-radius: 12px 0 0 12px; }
 .ww-park .ww-icon { width: 20px; height: 20px; }
 .ww-park.ww-park-held { box-shadow: 0 0 0 2px var(--color-accent); background-color: color-mix(in srgb, var(--color-accent) 22%, transparent); }
-.ww-drop-label { padding: 6px 14px; border-radius: 999px; font: var(--text-small) var(--font); color: var(--color-foreground); }
+.ww-drop-label { padding: 6px 14px; border-radius: 999px; font: var(--text-small) var(--font-body); color: var(--color-foreground); }
 .webwindow.ww-reflow, .ww-shadow.ww-reflow {
-  transition: left 220ms cubic-bezier(0.2, 0.8, 0.2, 1), top 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    width 220ms cubic-bezier(0.2, 0.8, 0.2, 1), height 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: left var(--spring-ms) var(--spring), top var(--spring-ms) var(--spring),
+    width var(--spring-ms) var(--spring), height var(--spring-ms) var(--spring);
 }
 /* WS1: a window's drop shadow (its own element under the frame: a hole in the frame never cuts it), deeper than a
    widget's lift as a window floats higher; the focused window's stronger. The frame keeps only --lift-edge. */
@@ -3409,9 +3411,9 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-shadow.focused > div { box-shadow: var(--lift-window-focused); }
 .ww-tile-menu {
   position: absolute; top: 40px; right: 8px; z-index: 2; display: flex; flex-direction: column; min-width: 160px;
-  padding: 6px; border-radius: 14px; box-shadow: var(--lift);
+  padding: 6px; border-radius: 12px; box-shadow: var(--lift);
 }
-.ww-tile-item { all: unset; padding: 10px 12px; border-radius: 8px; font: var(--text-small) var(--font); color: var(--color-foreground); }
+.ww-tile-item { all: unset; padding: 10px 12px; border-radius: 8px; font: var(--text-small) var(--font-body); color: var(--color-foreground); }
 .ww-tile-item:active { background: color-mix(in srgb, var(--color-foreground) 12%, transparent); }
 /* TI1 (10-31 15:10): the gap between tiles is the divider's own fill - never the wallpaper or a lower window showing
    between one tile's content and the next one's bar - its pill along the gap (data-axis: "x" a left | right split,
@@ -3419,7 +3421,7 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-divider { touch-action: none; background: var(--color-surface); }
 .ww-divider::after {
   content: ""; position: absolute; left: 50%; top: 50%; width: 5px; height: 56px; transform: translate(-50%, -50%);
-  border-radius: 3px; background: var(--color-foreground); box-shadow: 0 0 0 1.5px var(--color-surface);
+  border-radius: 8px; background: var(--color-foreground); box-shadow: 0 0 0 1.5px var(--color-surface);
 }
 .ww-divider[data-axis="y"]::after { width: 56px; height: 5px; }
 
@@ -3429,7 +3431,7 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
  * bar in place, over the dock's icons (they fade under it), and it folds back into the button when dismissed.
  */
 .home.search-dock:not(.dock-left, .dock-right) .dock-page { gap: 2px; padding: 0 2px; }
-.dock .dock-search { position: relative; display: flex; align-items: center; justify-content: center; touch-action: pan-x; transition: opacity 120ms ease-out; }
+.dock .dock-search { position: relative; display: flex; align-items: center; justify-content: center; touch-action: pan-x; transition: opacity var(--spring-fast-ms) var(--spring-fast); }
 .home:is(.dock-left, .dock-right) .dock .dock-search { touch-action: pan-y; }
 .dock-search-face {
   display: grid;
@@ -3441,7 +3443,7 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
   color: var(--color-foreground);
 }
 .home:is(.dock-left, .dock-right) .dock .dock-search-face { width: min(var(--strip-icon), 48px); }
-.dock-search-glyph { font: 500 calc(var(--text-item) + 7px) / 1 var(--font); translate: 1px -1px; }
+.dock-search-glyph { font: 500 calc(var(--text-item) + 7px) / 1 var(--font-body); translate: 1px -1px; }
 /* The mic: a small badge on the face's lower right - a tap dictates (bar.tsx Mic, as the bar's). */
 .dock-search .mic {
   position: absolute;
@@ -3537,7 +3539,7 @@ html:root .ai-view .ai-chat-in .msg.user {
 }
 .ai-chat-in .msg.user .sent-imgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .ai-chat-in .msg.user .sent-img { padding: 0; border: 0; background: none; line-height: 0; }
-html:root .ai-chat-in .msg.user .sent-img img { width: auto; max-width: 100%; max-height: 120px; border-radius: calc(var(--radius) / 2); }
+html:root .ai-chat-in .msg.user .sent-img img { width: auto; max-width: 100%; max-height: 120px; border-radius: 8px; }
 /* Steps and agents' mail: one quiet line each, no box. */
 html:root .ai-view .ai-chat-in > :is(.tl, .msg.note) { background: none; box-shadow: none; padding-inline: 4px; color: var(--color-muted); }
 /* An opened step list spans the chat like a bubble; "fewer" under its rows, on their edge. */
@@ -3572,11 +3574,10 @@ html:root .ai-view .ai-updates-list :is(.mail, .msg.ai-mail) { background: var(-
  * an accent "N need you" chip, a thin bar (done of the month) and its counts right, all on one line; a tap opens the
  * area's tasks under it, one line each with a state dot. Bars and the opening spring in (transform / opacity only).
  */
-.ai-view { --aip-spring: linear(0, 0.25 8%, 0.68 18%, 1.02 30%, 1.1 38%, 1.04 50%, 0.99 62%, 1.005 78%, 1); }
 :is(.aip, .ai-view:has(> .ai-sub .aip) > .ai-top, .ai-right:has(> .ai-sub .aip) > .ai-top, .ai-aside:has(.aip) > .ai-top) { font-family: var(--font-ui); }
 .aip { display: flex; flex-direction: column; gap: 14px; padding: 4px 0 16px; }
 .aip-ring-wrap { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 18px; padding: 6px 4px 4px; }
-.aip-ring { grid-row: 1; grid-column: 1; width: 112px; height: 112px; animation: aip-pop 520ms var(--aip-spring) both; }
+.aip-ring { grid-row: 1; grid-column: 1; width: 112px; height: 112px; animation: aip-pop var(--spring-slow-ms) var(--spring-slow) both; }
 .aip-ring-track, .aip-ring-fill { fill: none; stroke-width: 10; }
 .aip-ring-track { stroke: color-mix(in srgb, var(--color-foreground) 14%, transparent); }
 .aip-ring-fill { stroke: var(--color-accent); stroke-linecap: round; }
@@ -3586,41 +3587,39 @@ html:root .ai-view .ai-updates-list :is(.mail, .msg.ai-mail) { background: var(-
 .aip-ring-label { font-size: var(--text-item); font-weight: 600; color: var(--color-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .aip-ring-sub { font-size: var(--text-small); color: var(--color-foreground); opacity: 0.86; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .aip-areas { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.aip-area { display: block; width: auto; max-width: none; margin: 0; padding: 0; border-radius: calc(var(--radius) * 0.85); overflow: hidden; }
+.aip-area { display: block; width: auto; max-width: none; margin: 0; padding: 0; border-radius: var(--radius); overflow: hidden; }
 /* The cards wear THE backdrop (theme.css --backdrop-tint / --backdrop-blur-native; design QA 2026-10-31: no solid slab):
    folded each its own glass, unfolded the tint over the pane's glass. */
 html:root .ai-screen .aip-area.tile { --glass-blur-native: var(--backdrop-blur-native); --frost-fill: var(--backdrop-tint); --frost-sheen: transparent; --glass-veil: transparent; background: var(--backdrop-tint); box-shadow: none; }
 .aip-area-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 14px; border: 0; background: none; font: inherit; color: var(--color-foreground); text-align: start; white-space: nowrap; }
 .aip-area-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-body); font-weight: 600; }
-.aip-chip { flex: none; padding: 2px 8px; border-radius: 999px; background: var(--aip-amber); color: var(--aip-on-amber); font-size: 12px; font-weight: 600; }
-.aip-bar { flex: none; position: relative; width: clamp(56px, 18%, 120px); height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--color-foreground) 16%, transparent); overflow: hidden; }
-.aip-bar-fill { position: absolute; inset: 0; border-radius: inherit; background: var(--color-accent); transform-origin: left center; animation: aip-fill 700ms var(--aip-spring) both; }
+.aip-chip { flex: none; padding: 2px 8px; border-radius: 999px; background: var(--status-needs); color: var(--status-on-needs); font-size: 12px; font-weight: 600; }
+.aip-bar { flex: none; position: relative; width: clamp(56px, 18%, 120px); height: 4px; border-radius: 8px; background: color-mix(in srgb, var(--color-foreground) 16%, transparent); overflow: hidden; }
+.aip-bar-fill { position: absolute; inset: 0; border-radius: inherit; background: var(--color-accent); transform-origin: left center; animation: aip-fill var(--spring-slow-ms) var(--spring-slow) both; }
 .aip-count { flex: none; min-width: 3.4em; text-align: end; font-size: var(--text-small); font-variant-numeric: tabular-nums; color: var(--color-foreground); opacity: 0.86; }
 .aip-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 0 4px; font-size: var(--text-small); color: var(--color-foreground); }
 .aip-legend-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.aip-tasks { display: flex; flex-direction: column; margin: 0; padding: 0 14px 10px; list-style: none; animation: aip-open 380ms var(--aip-spring) both; transform-origin: top center; }
+.aip-tasks { display: flex; flex-direction: column; margin: 0; padding: 0 14px 10px; list-style: none; animation: aip-open var(--spring-slow-ms) var(--spring-slow) both; transform-origin: top center; }
 .aip-task { display: flex; align-items: flex-start; gap: 10px; padding: 5px 0; font-size: 13px; line-height: 18px; color: var(--color-foreground); }
 .aip-task > .aip-dot { margin-top: 5px; }
 /* Up to two lines, then the ellipsis (design QA). */
 .aip-task-title { flex: 1; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
-/* The dots by true state (design QA): working the accent, pulsing; awaiting its check blue; needs you amber, filled;
-   stalled / no check grey. The blue and the amber are fixed meanings, not the theme's (dev/style-allow.txt). */
-.aip, .ai-screen.status, .ai-left { --aip-blue: #5aa7e8; --aip-amber: #e3a03c; --aip-on-amber: #1a1206; }
 /* Progress's Needs you card (needsyou.tsx): a row per ask, a tap opens its sentence and its answer controls in place. */
 .aip-needs-head { cursor: default; }
 .aip-need-list { display: flex; flex-direction: column; margin: 0; padding: 0 0 6px; list-style: none; }
 .aip-need-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 0 14px; border: 0; background: none; font: inherit; color: var(--color-foreground); text-align: start; white-space: nowrap; }
 .aip-need-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-item); }
 .aip-need-kind { flex: none; font-size: var(--text-small); color: var(--color-foreground); opacity: 0.86; }
-.aip-need-more { display: flex; flex-direction: column; gap: 8px; padding: 0 14px 12px 32px; animation: aip-open 380ms var(--aip-spring) both; transform-origin: top center; }
+.aip-need-more { display: flex; flex-direction: column; gap: 8px; padding: 0 14px 12px 32px; animation: aip-open var(--spring-slow-ms) var(--spring-slow) both; transform-origin: top center; }
 .aip-need-line { font-size: var(--text-body); line-height: 1.4; color: var(--color-foreground); }
 @media (prefers-reduced-motion: reduce) { .aip-need-more { animation: none; } }
 
-.aip-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 45%, transparent); }
-.aip-dot.working { background: var(--color-accent); animation: aip-pulse 1.6s ease-in-out infinite; }
-.aip-dot.check { background: var(--aip-blue); }
-.aip-dot.waiting { background: var(--aip-amber); }
-.aip-dot.stuck { background: var(--color-red); }
+/* The dots by true state: the status colours (theme.css --status-*), one meaning each. */
+.aip-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--status-stalled); }
+.aip-dot.working { background: var(--status-working); animation: aip-pulse 1.6s var(--ambient) infinite; }
+.aip-dot.check { background: var(--status-check); }
+.aip-dot.waiting { background: var(--status-needs); }
+.aip-dot.stuck { background: var(--status-stalled); }
 @keyframes aip-pulse { 50% { opacity: 0.45; transform: scale(0.8); } }
 .aip-empty { padding: 16px 4px; font-size: var(--text-body); color: var(--color-foreground); opacity: 0.86; }
 @keyframes aip-fill { from { transform: scaleX(0); } }
@@ -3668,8 +3667,8 @@ html:root .ai-screen .aip-area.tile { --glass-blur-native: var(--backdrop-blur-n
   mask-image: linear-gradient(to bottom, transparent, black var(--ai-top-fade), black calc(100% - var(--ai-fade)), transparent);
 }
 /* The chat's bubbles on the shared glass: the manager's the glass lifted (--ai-bubble), the user's the accent tint. */
-html:root .ai-right .ai-chat-in :is(.msg.assistant, .present, .choice-opt) { background: var(--ai-bubble); box-shadow: none; border-radius: 18px 18px 18px 6px; }
-html:root .ai-right .ai-chat-in .msg.user { border-radius: 18px 18px 6px 18px; }
+html:root .ai-right .ai-chat-in :is(.msg.assistant, .present, .choice-opt) { background: var(--ai-bubble); box-shadow: none; border-radius: 20px 20px 20px 8px; }
+html:root .ai-right .ai-chat-in .msg.user { border-radius: 20px 20px 8px 20px; }
 .ai-right .ai-chat-in { gap: 10px; }
 .ai-right .ai-chat-in .msg { line-height: 1.45; }
 /* The ⋯ menu from the status column's hero: under it, inside the column. */
@@ -3778,25 +3777,25 @@ html:root .ai-screen.status > .ai-glass.tile { --glass-blur-native: var(--backdr
 :root:is([data-light="false"][data-wallpaper="light"], [data-light="true"][data-wallpaper="dark"]) .ai-screen.status > .ai-glass.tile {
   background: linear-gradient(var(--backdrop-tint), var(--backdrop-tint)), var(--backdrop-tint);
 }
-:is(.ai-screen.status, .ai-left) { --ais-side: 16px; font-family: var(--font-ui); --ais-spring: linear(0, 0.25 8%, 0.68 18%, 1.02 30%, 1.1 38%, 1.04 50%, 0.99 62%, 1.005 78%, 1); }
+:is(.ai-screen.status, .ai-left) { --ais-side: var(--edge); }
 :is(.ai-screen.status, .ai-left) * { font-family: inherit; }
 .ais-top { gap: 12px; }
 .ais-ring { position: relative; flex: none; width: 56px; height: 56px; display: grid; place-items: center; }
 .ais-ring > svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 .ais-ring .aip-ring-track, .ais-ring .aip-ring-fill { stroke-width: 5; }
-.ais-ring.moving .ais-ring-fill { transition: stroke-dasharray 900ms var(--ais-spring); }
+.ais-ring.moving .ais-ring-fill { transition: stroke-dasharray var(--spring-slow-ms) var(--spring-slow); }
 .ais-ring-pct { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--color-foreground); }
 .ais-status { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
 /* Wraps rather than cut (the user, 11-01: "Done this month…" truncated); the title itself is kept short (aistatus.tsx heroTitle). */
 .ais-title { font-size: calc(var(--text-item) * 1.18); font-weight: 700; color: var(--color-foreground); overflow-wrap: anywhere; }
 .ais-line { font-size: var(--text-small); color: var(--color-foreground); opacity: 0.86; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ai-screen > .ai-scroll.ais { display: flex; flex-direction: column; gap: 12px; padding-inline: var(--ais-side); padding-top: calc(var(--ai-head) + 22px); padding-bottom: calc(var(--ai-tail) + 40px); }
-.ais-sec { display: flex; flex-direction: column; animation: ais-rise 420ms var(--ais-spring) both; }
+.ais-sec { display: flex; flex-direction: column; animation: ais-rise var(--spring-slow-ms) var(--spring-slow) both; }
 .ais-h { display: flex; white-space: nowrap; align-items: center; gap: 8px; margin: 0 0 4px; padding: 0 4px; font-size: var(--text-small); font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-foreground); opacity: 0.9; }
 .ais-n { padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--color-foreground) 14%, transparent); font-size: 11px; letter-spacing: 0; font-variant-numeric: tabular-nums; }
-.ais-sec[data-sec="needs"] .ais-n { background: var(--aip-amber); color: var(--aip-on-amber); }
+.ais-sec[data-sec="needs"] .ais-n { background: var(--status-needs); color: var(--status-on-needs); }
 .ais-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 0; padding: 0; border: 0; background: none; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; }
-.ais-chev::before { content: "›"; display: inline-block; font-size: 15px; line-height: 1; transform: rotate(90deg); transition: transform 260ms var(--ais-spring); }
+.ais-chev::before { content: "›"; display: inline-block; font-size: 15px; line-height: 1; transform: rotate(90deg); transition: transform var(--spring-ms) var(--spring); }
 .ais-toggle[aria-expanded="true"] .ais-chev::before { transform: rotate(-90deg); }
 .ais .aip-need-row { padding: 0 4px; min-height: 44px; }
 .ais .aip-need-more { padding: 0 4px 10px 22px; }
@@ -3808,28 +3807,28 @@ html:root .ai-screen.status > .ai-glass.tile { --glass-blur-native: var(--backdr
 .ais-count, .ais-when { flex: none; font-size: var(--text-small); font-variant-numeric: tabular-nums; color: var(--color-foreground); opacity: 0.86; }
 .ais-step { position: relative; display: block; height: 1.4em; margin-left: 18px; overflow: hidden; font-size: var(--text-small); color: var(--color-foreground); }
 .ais-step-t { position: absolute; inset: 0; opacity: 0.86; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ais-step-t.in { animation: ais-in 360ms var(--ais-spring) both; }
-.ais-step-t.out { animation: ais-out 300ms ease-out both; }
-.ais-bar { position: relative; display: block; height: 3px; margin: 4px 0 0 18px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--color-foreground) 14%, transparent); }
-.ais-bar-fill { position: absolute; inset: 0; border-radius: inherit; background: var(--color-accent); transform-origin: left center; transition: transform 900ms var(--ais-spring); animation: aip-fill 900ms var(--ais-spring) both; }
-.ais-bar.sweep .ais-bar-fill { inset: 0 auto 0 0; width: 32%; transform: translateX(-100%); animation: ais-sweep 1.8s cubic-bezier(0.4, 0, 0.2, 1) 3; }
+.ais-step-t.in { animation: ais-in var(--spring-slow-ms) var(--spring-slow) both; }
+.ais-step-t.out { animation: ais-out var(--spring-ms) var(--spring) both; }
+.ais-bar { position: relative; display: block; height: 3px; margin: 4px 0 0 18px; border-radius: 8px; overflow: hidden; background: color-mix(in srgb, var(--color-foreground) 14%, transparent); }
+.ais-bar-fill { position: absolute; inset: 0; border-radius: inherit; background: var(--color-accent); transform-origin: left center; transition: transform var(--spring-slow-ms) var(--spring-slow); animation: aip-fill var(--spring-slow-ms) var(--spring-slow) both; }
+.ais-bar.sweep .ais-bar-fill { inset: 0 auto 0 0; width: 32%; transform: translateX(-100%); animation: ais-sweep 1.8s var(--ambient) 3; }
 /* A task's severity from evidence (aiboard.tsx SevChip): P0 / P1, small, before the title; infra-only is muted. */
-.ais-sev { flex: none; align-self: center; margin-inline-end: 6px; padding: 0 5px; border-radius: 4px; font-size: 11px; font-weight: 700; line-height: 16px; letter-spacing: 0.02em; color: var(--color-background); background: var(--color-foreground); }
+.ais-sev { flex: none; align-self: center; margin-inline-end: 6px; padding: 0 5px; border-radius: 8px; font-size: 11px; font-weight: 700; line-height: 16px; letter-spacing: 0.02em; color: var(--color-background); background: var(--color-foreground); }
 .ais-sev.p0 { background: var(--color-red); color: var(--color-foreground); }
-.ais-sev.p1 { background: var(--aip-amber); color: var(--aip-on-amber); }
+.ais-sev.p1 { background: color-mix(in srgb, var(--color-foreground) 22%, transparent); color: var(--color-foreground); }
 .ais-sev.infra { opacity: 0.6; }
-.ais-done-item, .ais-next-item { animation: ais-rise 320ms var(--ais-spring) both; }
+.ais-done-item, .ais-next-item { animation: ais-rise var(--spring-ms) var(--spring) both; }
 .ais-done-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 0 4px; border: 0; background: none; font: inherit; text-align: start; white-space: nowrap; font-size: var(--text-body); color: var(--color-foreground); }
 .ais-done-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ais-done-item.open .ais-done-row, .ais-next-item.open .ais-done-row { align-items: baseline; padding-block: 10px 4px; white-space: normal; }
 .ais-done-item.open .ais-done-title, .ais-next-item.open .ais-done-title { overflow: visible; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
-.ais-done-detail { display: flex; flex-direction: column; gap: 4px; padding: 0 4px 10px; font-size: var(--text-small); line-height: 1.35; color: var(--color-foreground); animation: ais-rise 260ms var(--ais-spring) both; }
+.ais-done-detail { display: flex; flex-direction: column; gap: 4px; padding: 0 4px 10px; font-size: var(--text-small); line-height: 1.35; color: var(--color-foreground); animation: ais-rise var(--spring-ms) var(--spring) both; }
 .ais-done-fact, .ais-done-said { opacity: 0.86; white-space: normal; overflow-wrap: anywhere; }
 .ais-done-detail .try-acts { margin-top: 4px; }
 .ais-empty { padding: 16px; text-align: start; font-size: var(--text-body); color: var(--color-foreground); opacity: 0.86; }
 .ai-screen > .ais-foot { position: relative; z-index: 2; margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
 .ais-foot-row { display: flex; align-items: flex-end; justify-content: flex-end; gap: 8px; min-height: 28px; }
-.ais-reply { flex: 1; min-width: 0; max-height: 4.4em; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; padding: 8px 12px; border: 0; border-radius: 16px 16px 16px 4px; background: var(--ai-bubble); box-shadow: var(--lift); font: inherit; font-size: var(--text-body); line-height: 1.35; text-align: start; color: var(--color-foreground); animation: ais-rise 360ms var(--ais-spring) both; }
+.ais-reply { flex: 1; min-width: 0; max-height: 4.4em; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; padding: 8px 12px; border: 0; border-radius: 20px 20px 20px 8px; background: var(--ai-bubble); box-shadow: var(--lift); font: inherit; font-size: var(--text-body); line-height: 1.35; text-align: start; color: var(--color-foreground); animation: ais-rise var(--spring-slow-ms) var(--spring-slow) both; }
 .ais-open-chat { flex: none; min-height: 28px; padding: 0 10px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--color-foreground) 12%, transparent); font: inherit; font-size: var(--text-small); font-weight: 600; color: var(--color-foreground); }
 @keyframes ais-rise { from { opacity: 0; transform: translateY(8px); } }
 @keyframes ais-in { from { opacity: 0; transform: translateY(60%); } }
@@ -3850,7 +3849,7 @@ html:root :is(.ai-screen.status, .ai-left) :is(.ais, .ais-sum-in) > :is(.ais-sec
 /* Needs you: the card stack - the top card, the next ones peeking under it (their count), all of the backdrop's glass. */
 .ais-stack { position: relative; display: grid; padding-bottom: calc(var(--peek, 0) * 8px); }
 /* The peeking cards sit under the top one, their lower edges showing 8 / 16 dp below its own, each a little narrower. */
-html:root :is(.ai-screen.status, .ai-left) .ais-stack > :is(.ais-card-top, .ais-card-peek) { --glass-blur-native: var(--backdrop-blur-native); grid-area: 1 / 1; border-radius: calc(var(--radius) * 1.2); background: var(--backdrop-tint); }
+html:root :is(.ai-screen.status, .ai-left) .ais-stack > :is(.ais-card-top, .ais-card-peek) { --glass-blur-native: var(--backdrop-blur-native); grid-area: 1 / 1; border-radius: var(--radius); background: var(--backdrop-tint); }
 /* The stack's heading is its name for a screen reader only: the top card says what it is and how many are left. */
 .ais-stack-sec > .ais-h { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; overflow: hidden; clip-path: inset(50%); }
 .ais-card-count { position: absolute; top: 16px; right: 16px; font-size: var(--text-small); font-variant-numeric: tabular-nums; color: var(--color-foreground); opacity: 0.86; }
@@ -3859,11 +3858,11 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { backgro
 html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-self: end; height: 8px; margin-inline: calc(var(--i) * 10px); border-radius: 0 0 12px 12px; transform: translateY(calc(100% + (var(--i) - 1) * 8px)); opacity: calc(1 - var(--i) * 0.25); pointer-events: none; }
 .ais-card-top {
   position: relative; z-index: 1; display: flex; flex-direction: column; gap: 6px; min-height: 180px; padding: 16px; touch-action: none; user-select: none;
-  color: var(--color-foreground); box-shadow: var(--lift); transition: transform 420ms var(--ais-spring), opacity 220ms ease-out; animation: ais-card-in 420ms var(--ais-spring) both;
+  color: var(--color-foreground); box-shadow: var(--lift); transition: transform var(--spring-slow-ms) var(--spring-slow), opacity var(--spring-ms) var(--spring); animation: ais-card-in var(--spring-slow-ms) var(--spring-slow) both;
 }
 .ais-card-top.dragging { transition: none; }
 .ais-card-top[data-lean="right"] .ais-act.yes { background: var(--color-accent); color: var(--color-background); }
-.ais-card-top[data-lean="left"] .ais-act.no { background: var(--aip-amber); color: var(--aip-on-amber); }
+.ais-card-top[data-lean="left"] .ais-act.no { background: var(--status-needs); color: var(--status-on-needs); }
 .ais-card-top[data-lean="up"] { opacity: 0.8; }
 .ais-card-top.fly.right { transform: translateX(120%) rotate(12deg); opacity: 0; }
 .ais-card-top.fly.left { transform: translateX(-120%) rotate(-12deg); opacity: 0; }
@@ -3871,7 +3870,7 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .ais-card-kind { font-size: var(--text-small); font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-foreground); }
 .ais-card-title { font-size: calc(var(--text-item) * 1.15); font-weight: 700; line-height: 1.25; }
 .ais-card-line { font-size: var(--text-body); line-height: 1.4; color: var(--color-foreground); opacity: 0.9; }
-.ais-shot { align-self: flex-start; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: none; }
+.ais-shot { align-self: flex-start; padding: 0; border: 0; border-radius: 8px; overflow: hidden; background: none; }
 .ais-shot img { display: block; max-width: 100%; max-height: 140px; object-fit: cover; }
 .ais-try { align-self: flex-start; min-height: 36px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--color-accent); color: var(--color-accent-foreground, var(--color-background)); font: inherit; font-weight: 650; }
 .ais-acts { display: flex; gap: 8px; margin-top: auto; padding-top: 8px; }
@@ -3888,14 +3887,14 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .ais-card-top > .ai-reply > .ai-reply-foot > .ai-act.send { color: var(--color-background); background: var(--color-accent); }
 .ais-card-top > .ai-reply > .ai-reply-foot > .ai-act.send:disabled { opacity: 0.5; }
 .ais-more { min-height: 40px; padding: 0 4px; border: 0; background: none; font: inherit; font-size: var(--text-small); font-weight: 600; color: var(--color-foreground); }
-.ais-act { flex: 1; min-height: 44px; padding: 0 10px; border: 0; border-radius: 14px; background: color-mix(in srgb, var(--color-foreground) 12%, transparent); font: inherit; font-weight: 600; color: var(--color-foreground); }
+.ais-act { flex: 1; min-height: 44px; padding: 0 10px; border: 0; border-radius: 12px; background: color-mix(in srgb, var(--color-foreground) 12%, transparent); font: inherit; font-weight: 600; color: var(--color-foreground); }
 .ais-act.yes { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
-.ais-act.no { background: color-mix(in srgb, var(--aip-amber) 26%, transparent); }
+.ais-act.no { background: color-mix(in srgb, var(--status-needs) 26%, transparent); }
 .ais-act.later { flex: 0 0 auto; }
 /* The foot's mic chip: hold anywhere on the page to talk; while it listens, what it hears. */
 .ais-mic { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; margin-right: auto; padding: 0 10px; border-radius: 999px; background: color-mix(in srgb, var(--color-foreground) 12%, transparent); font-size: var(--text-small); color: var(--color-foreground); max-width: 60%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ais-mic-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--color-foreground); opacity: 0.6; }
-.ais-mic.on .ais-mic-dot { background: var(--color-accent); opacity: 1; animation: aip-pulse 1.2s ease-in-out infinite; }
+.ais-mic.on .ais-mic-dot { background: var(--color-accent); opacity: 1; animation: aip-pulse 1.2s var(--ambient) infinite; }
 .ais-reply + .ais-mic { display: none; }
 /* Off screen, at rest: nothing on the page animates (the idle check; it never paints behind home). */
 .ai-screen.status:not(.shown) * { animation: none !important; transition: none !important; }
@@ -3925,7 +3924,7 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .ais-sum-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent); }
 .ais-sum-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ais-sum[aria-expanded="true"] .ais-chev::before { transform: rotate(-90deg); }
-.ais-sum-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 420ms cubic-bezier(0.22, 0.9, 0.26, 1); }
+.ais-sum-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--spring-slow-ms) var(--spring-slow); }
 .ais-sum-body.open { grid-template-rows: 1fr; }
 .ais-sum-in { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 8px; }
 .ais-chat-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; width: auto; max-width: none; margin-inline: calc(-1 * var(--edge)); }
@@ -3945,7 +3944,8 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .ag-said .ag-paste { display: block; margin-top: 4px; padding: 0; border: 0; background: none; color: var(--color-muted); font: inherit; font-size: var(--text-small); }
 .ag-said .ag-paste-body { max-height: 240px; overflow: auto; margin: 4px 0 0; white-space: pre-wrap; font-size: var(--text-small); }
 .ag-wait { align-self: flex-start; padding: 3px 10px; border-radius: 999px; font-size: var(--text-small); color: var(--color-muted); background: var(--soft-fill); }
-.ag-wait.needs_you, .ag-wait.blocked { color: var(--color-red); }
+.ag-wait.needs_you { color: var(--status-needs); }
+.ag-wait.blocked { color: var(--color-red); }
 .ag-foot { display: flex; flex-direction: column; gap: 8px; }
 .ag-foot > .fl-term-open { align-self: flex-start; }
 
@@ -3955,7 +3955,7 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
  * seatOnAi), moving there on home's own slide curve; while a finger drags the screens, no transition (it rides along).
  * Shown and tappable there whatever home's foot does with it (parked under the search widget, the dock's button).
  */
-.home > .bar.seated { transition: translate 280ms cubic-bezier(0.2, 0.9, 0.3, 1), width 280ms cubic-bezier(0.2, 0.9, 0.3, 1); z-index: 5; }
+.home > .bar.seated { transition: translate var(--spring-ms) var(--spring), width var(--spring-ms) var(--spring); z-index: 5; }
 .home > .bar.seated.sliding { transition: none; }
 .home.search-parked > .bar.seated { opacity: 1; pointer-events: auto; }
 
@@ -3973,7 +3973,7 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
  * dock (and the wide foot's recents) while it's open - they're back on close - and the one bar ("ai" role) is the foot's
  * full width under it.
  */
-.home.adopts.wide.open:has(> .stage .ai-panel) > :is(.dock, .dock-tray) { opacity: 0 !important; pointer-events: none !important; transition: opacity 180ms ease-out; }
+.home.adopts.wide.open:has(> .stage .ai-panel) > :is(.dock, .dock-tray) { opacity: 0 !important; pointer-events: none !important; transition: opacity var(--spring-fast-ms) var(--spring-fast); }
 .home.adopts.wide.open:has(> .stage .ai-panel) > .bar { grid-area: 2 / 1 / 3 / -1; width: auto; justify-self: stretch; }
 /* The folded page's single column (a screen no tab names): the bar's room at its foot. */
 .ai-screen > .ai-bar-slot { flex: none; margin-top: auto; height: calc(var(--pill-height) + var(--ai-foot)); }
@@ -3984,9 +3984,9 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 @keyframes bar-role-search { from { opacity: 0; } to { opacity: 1; } }
 @keyframes bar-role-apps { from { opacity: 0; } to { opacity: 1; } }
 @keyframes bar-role-ai { from { opacity: 0; } to { opacity: 1; } }
-.bar.role-search .bar-pill textarea::placeholder, .bar.role-search .bar-pill .lead > .prompt { animation: bar-role-search 220ms ease-out; }
-.bar.role-apps .bar-pill textarea::placeholder, .bar.role-apps .bar-pill .lead > .prompt { animation: bar-role-apps 220ms ease-out; }
-.bar.role-ai .bar-pill textarea::placeholder, .bar.role-ai .bar-pill .lead > .prompt { animation: bar-role-ai 220ms ease-out; }
+.bar.role-search .bar-pill textarea::placeholder, .bar.role-search .bar-pill .lead > .prompt { animation: bar-role-search var(--spring-ms) var(--spring); }
+.bar.role-apps .bar-pill textarea::placeholder, .bar.role-apps .bar-pill .lead > .prompt { animation: bar-role-apps var(--spring-ms) var(--spring); }
+.bar.role-ai .bar-pill textarea::placeholder, .bar.role-ai .bar-pill .lead > .prompt { animation: bar-role-ai var(--spring-ms) var(--spring); }
 @media (prefers-reduced-motion: reduce) {
   .bar[data-role] .bar-pill textarea::placeholder, .bar[data-role] .bar-pill .lead > .prompt { animation: none; }
 }

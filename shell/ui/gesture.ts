@@ -632,7 +632,7 @@ function listOverBack() {
   const els = overItems;
   overItems = [];
   for (const el of els) {
-    el.style.transition = "transform 200ms cubic-bezier(0.25, 1, 0.5, 1)";
+    el.style.transition = "transform var(--spring-fast-ms) var(--spring-fast)";
     el.style.transform = "";
   }
   window.setTimeout(() => {

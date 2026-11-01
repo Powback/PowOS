@@ -9,10 +9,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { closeSession, sessionView, takeOver } from "../state.ts";
 import { closeTerminal, TerminalView } from "./terminal.tsx";
+import { spring } from "./spring.ts";
 
 /** The grow and the shrink back (ms), as the drawer's settle. */
 const MS = 260;
-const EASE = "cubic-bezier(0.2, 0.8, 0.2, 1)";
+const EASE = spring.easing;
 
 /** Its touches are its own: nothing under it (home's swipes, the page) sees them. */
 const own = {

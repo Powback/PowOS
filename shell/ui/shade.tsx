@@ -161,7 +161,7 @@ function Peek() {
   const settle = (dy: number) => {
     const card = el.current;
     if (!card) return;
-    card.style.transition = "transform 160ms ease, opacity 160ms ease";
+    card.style.transition = "transform var(--spring-fast-ms) var(--spring-fast), opacity var(--spring-fast-ms) var(--spring-fast)";
     card.style.transform = `translateY(${Math.min(0, dy)}px)`;
     card.style.opacity = dy < 0 ? "0" : "";
   };

@@ -1,13 +1,16 @@
 #!/bin/bash
-# The design language's static report (docs/DESIGN-LANGUAGE.md §2-§6), REPORT-ONLY for now: prints what breaks a rule,
-# per file, and always exits 0 (the manager turns it into a failure once the gaps are fixed). Outside theme.css:
+# The design language's static check (docs/DESIGN-LANGUAGE.md §2-§6): prints what breaks a rule, per file. Four rules
+# BLOCK (design wave 1 made them hold: exit 1 on any hit) - monospace, radius, easing, status; the rest report only.
+# Outside theme.css:
 #   - monospace: a rule naming var(--font) (theme.css's monospace) - UI text is --font-ui; code/terminals excepted
 #     (terminal.*, a selector with term/code/pre/kbd/log/id in it);
 #   - blur: a literal blur(Npx) / backdrop-filter radius - surfaces read --backdrop-blur-native / --glass-blur;
 #   - radius: a border-radius off the scale (8px, var(--radius) 12px, 20px, 999px, 50%, inherit, 0, --icon-radius);
-#   - easing: a transition/animation with its own cubic-bezier()/ease instead of var(--spring) (ui/spring.ts).
+#   - easing: a transition/animation with its own cubic-bezier()/ease, or a local spring (--ais-spring, --aip-spring),
+#     instead of the spring set (--spring-fast / --spring / --spring-slow, ui/spring.ts; loops on --ambient);
+#   - status: a status colour of its own (the old --aip-blue / --aip-amber, their hex) instead of theme.css --status-*.
 #
-#   shell/dev/lint-design.sh [DIR]   DIR: the shell (default: this one). Always exit 0.
+#   shell/dev/lint-design.sh [DIR]   DIR: the shell (default: this one). Exit 1: a blocking rule broken.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 S=${1:-$here/..}
@@ -25,10 +28,15 @@ report() { # kind, hits
 mono=$(grep -nE 'var\(--font\)|monospace' $css 2>/dev/null | strip | grep -vE '^ui/terminal|term|code|pre[ ,{.]|kbd|\.log|-id[ ,{]|font-ui' || true)
 blur=$(grep -nE '(backdrop-filter|filter)[^;]*blur\([0-9.]+px\)' $code 2>/dev/null | strip | grep -v '^ui/pet' || true)
 radius=$(grep -noE 'border-radius: *[^;"}]+' $css 2>/dev/null | grep -vE 'border-radius: *(0|8px|12px|20px|999px|50%|inherit|var\(--radius\)|var\(--icon-radius\)|var\(--card-radius\))( |$)' || true)
-easing=$(grep -nE '(transition|animation)[^;]*(cubic-bezier\(|[0-9]m?s +ease)' $css 2>/dev/null | strip | grep -v -- '--spring' || true)
-echo "ok   design lint (report-only: docs/DESIGN-LANGUAGE.md)"
+easing=$( { grep -nE '(transition|animation)[^;]*(cubic-bezier\(|[0-9]m?s +ease)' $css 2>/dev/null | strip | grep -v -- '--spring'
+  grep -nE -- '--ai[sp]-spring' $code 2>/dev/null | strip; } || true)
+status=$(grep -niE -- '--aip-(blue|amber|on-amber)|#5aa7e8|#e3a03c|#1a1206' $code 2>/dev/null | strip || true)
+count() { printf '%s' "$1" | grep -c . || true; }
+bad=$(( $(count "$mono") + $(count "$radius") + $(count "$easing") + $(count "$status") ))
+if [ "$bad" = 0 ]; then echo "ok   design lint (docs/DESIGN-LANGUAGE.md)"; else echo "FAIL design lint: $bad blocking (docs/DESIGN-LANGUAGE.md)"; fi
 report "monospace in UI" "$mono"
-report "hard-coded blur" "$blur"
 report "radius off the scale" "$radius"
 report "easing not the shared spring" "$easing"
-exit 0
+report "status colour not a --status-* token" "$status"
+report "hard-coded blur (report-only)" "$blur"
+[ "$bad" = 0 ]

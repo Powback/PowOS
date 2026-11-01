@@ -8,6 +8,7 @@
  * currentTime, so no style is written per frame (nativeglass.ts's MutationObserver re-measures on style writes).
  */
 import { powos } from "../bridge.ts";
+import { springFast } from "./spring.ts";
 
 /**
  * Finger px past the open place where stage 2 is armed: a quarter of the screen, so an ordinary swipe up (the drawer
@@ -20,8 +21,8 @@ const HYST = 24;
 const MAX = 48;
 const band = (d: number) => MAX * (1 - Math.exp(-Math.max(0, d) / 160));
 const SPAN = 1000;
-const BACK_MS = 180;
-const BACK_EASE = "cubic-bezier(0.1, 0.8, 0.2, 1)";
+const BACK_MS = springFast.ms;
+const BACK_EASE = springFast.easing;
 
 let anim: Animation | null = null;
 let armed = false;

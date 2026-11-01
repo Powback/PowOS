@@ -10,8 +10,9 @@ shell is built is in [`shell/DESIGN.md`](../shell/DESIGN.md).
 Checks:
 
 - `shell/dev/lint-style.sh` fails the gate on raw colours, borders and shadows.
-- `shell/dev/lint-design.sh` and the gate's `design-lint-*` runs report monospace text, hard-coded blur, off-scale
-  radii, literal easings and pop-ins. They are report-only for now.
+- `shell/dev/lint-design.sh` fails the gate on monospace UI text, off-scale radii, literal easings and status
+  colours outside their tokens. It reports hard-coded blur, and the gate's `design-lint-*` runs report pop-ins and
+  monospace text on screen; those are report-only for now.
 - `shell/dev/gate.sh --shots DIR` renders every surface and measures text contrast (`report.json`).
 
 ## 1. Less is more
@@ -46,8 +47,9 @@ Checks:
 
 ## 3. Layout
 
-- **16 dp gutters.** Content sits 16 dp from a surface's edge and from the screen's edge.
-  - Today this is `--ais-side` on the AI page only. `--edge` is 12px, so it should become a shared `--gutter: 16px`.
+- **16 dp gutters.** Content sits 16 dp from a surface's edge and from the screen's edge: `--edge` (16px), on every
+  page. The widget sheet (`widgetsheet.tsx`) and home's grid (`grid.tsx`) read it, and the AI page's `--ais-side` is
+  only an alias of it.
 - **The radius scale.** Use 8px inside a surface, `--radius` (12px) for surfaces, 20px for pills and buttons, and
   999px or 50% for round shapes. No other radius.
 - **Spacing.** `--gap` (8px) goes between surfaces. Hierarchy comes from size and weight, not from boxes.
@@ -58,9 +60,15 @@ Checks:
 
 ## 4. Type and contrast
 
-- **Proportional UI font.** All UI text is `--font-ui`. Monospace (`--font`) is only for code, terminals, ids and
-  logs (`pre`, `code`, `.term`).
-  - Today the body defaults to `--font` (theme.css:223). Only the AI status and progress pages switch to `--font-ui`.
+- **Proportional UI font.** All UI text is `--font-body`, which is the proportional `--font-ui` by default.
+  - The font is a theme setting: Settings › Style › Font, "UI (default)" or "Mono" (`ui/uifont.ts`,
+    `html[data-font]`). A pick applies at once to every page.
+  - Code, terminals (xterm, `TerminalView`) and logs always use the monospace `--font`, whatever the setting
+    (`pre`, `code`, `.term`).
+  - A UI rule never names `--font`, and never measures text by counting monospace characters (`agents.tsx`
+    `charWidth` measures the theme's font).
+  - Known exception: OWL widgets (`owl.tsx` `OWL_FONT`) stay monospace until OWL scripts can measure text. They size
+    their text by counting characters today.
 - **Contrast ≥ 4.5:1.** Text needs 4.5:1 contrast against what is drawn behind it (3:1 for large text). Measure it
   with `gate.sh --shots` (`report.json`).
 - **Secondary text** uses `--color-muted`, never a dimmed opacity. Text on the wallpaper uses `--on-wallpaper` with
@@ -75,26 +83,28 @@ Checks:
 
   | state | colour |
   |---|---|
-  | working | the accent (`--color-accent`, pulsing) |
-  | awaiting check | blue (`--aip-blue`) |
-  | needs you | amber (`--aip-amber`) |
-  | stalled | grey (`--color-muted`) |
+  | working | `--status-working`: the accent, pulsing |
+  | awaiting check | `--status-check`: blue |
+  | needs you | `--status-needs`: amber, with `--status-on-needs` for text on it |
+  | stalled | `--status-stalled`: grey |
 
   - Red (`--color-red`) means only broken or failed.
-  - These should become theme.css tokens (`--status-*`). Today they are scoped to `.aip` (shell.css:3598).
+  - The tokens are in theme.css. No surface names a status colour of its own.
 - **P0/P1 chips.** A task with severity shows one small chip, P0 or P1, before its title, and a task with no severity
   shows none (`aiboard.tsx` `SevChip`, `.ais-sev`).
   - P0 is red.
-  - P1 must not reuse the needs-you amber.
+  - P1 is a neutral chip (the foreground at 22%). It never reuses the needs-you amber.
 
 ## 6. Motion: no pop-ins
 
 - **Nothing pops in.** Every appear, disappear, resize and reorder animates. An element is never there in one frame
   and gone in the next.
-- **Shared springs only.** Motion uses the shared spring: `ui/spring.ts` `spring` (`--spring`, `--spring-ms`) for CSS
-  and WAAPI, and `notifmotion.ts` for lists (arrivals fade and slide in 30 ms apart, a dismissed item closes its gap,
+- **Shared springs only.** Motion uses one spring set in `ui/spring.ts`: `springFast`, `spring` and `springSlow`. In
+  CSS these are `--spring-fast`, `--spring` and `--spring-slow`, each paired with its duration (`--spring-fast-ms`,
+  `--spring-ms`, `--spring-slow-ms`). Use fast for small things (a fade, a chip), the default for a surface moving,
+  and slow for a large or far move. WAAPI uses the same objects (`.easing`, `.ms`). Lists use `notifmotion.ts` (arrivals fade and slide in 30 ms apart, a dismissed item closes its gap,
   "+N more" grows). Do not use a local `cubic-bezier()` or ms value.
-  - notifmotion.ts is on `agent/notif-motion` and is not merged yet.
+  - Loops (a pulse, a sweep, a blink) are not motion between states. They keep their own period on `--ambient`.
 - **Finger-tied.** During a swipe only `--p`, transforms and opacity move, and the spring runs on release. There are
   no reloads, flashes, blank frames or keyboard jumps.
 - **Reduced motion.** Under `prefers-reduced-motion`, everything jumps to its end state. Same code path, no special

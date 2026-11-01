@@ -20,11 +20,25 @@ function make(damping: number, stiffness: number) {
   return { easing: supported ? linear : "cubic-bezier(0.2, 0.9, 0.25, 1.05)", ms: Math.round(end * 1000) };
 }
 
-/** The switcher's spring: brisk, a hint of overshoot (SpringForce DAMPING_RATIO ~0.85, STIFFNESS ~MEDIUM). */
-export const spring = make(0.85, 420);
+/**
+ * THE spring set (docs/DESIGN-LANGUAGE.md §6): every motion in the shell moves on one of these three, CSS and WAAPI
+ * alike - no local cubic-bezier or ms value anywhere else. As CSS: --spring-fast / --spring / --spring-slow (the
+ * easing) with --spring-fast-ms / --spring-ms / --spring-slow-ms (its duration), a pair in every transition or
+ * animation. fast: a small thing (a fade, a chip, a press); default: a surface moving (a page, a sheet, a card);
+ * slow: a large or far move (a group folding, a long drift). [approx] is the close cubic-bezier for a host that
+ * takes one (desktops.ts trackCurve hands it to the native slide). Loops (a pulse, a sweep) are not motion between
+ * states: they keep their own period on --ambient (theme.css).
+ */
+const set = (damping: number, stiffness: number, approx: [number, number, number, number]) => ({ ...make(damping, stiffness), approx });
+export const springFast = set(0.9, 900, [0.2, 0.9, 0.3, 1]);
+/** The default (the switcher's: brisk, a hint of overshoot - SpringForce DAMPING_RATIO ~0.85, STIFFNESS ~MEDIUM). */
+export const spring = set(0.85, 420, [0.2, 0.9, 0.3, 1]);
+export const springSlow = set(0.85, 200, [0.22, 0.9, 0.26, 1]);
 
 if (typeof document !== "undefined") {
   const root = document.documentElement.style;
-  root.setProperty("--spring", spring.easing);
-  root.setProperty("--spring-ms", `${spring.ms}ms`);
+  for (const [name, s] of [["--spring-fast", springFast], ["--spring", spring], ["--spring-slow", springSlow]] as const) {
+    root.setProperty(name, s.easing);
+    root.setProperty(`${name}-ms`, `${s.ms}ms`);
+  }
 }

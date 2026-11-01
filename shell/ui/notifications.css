@@ -1,7 +1,7 @@
 /* The notification panel's actions and inline reply (notifications.tsx), and the shade's heads-up banner (shade.tsx). */
 .notif-buttons { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px -6px -4px; }
 .notif-buttons button {
-  font: var(--text-small) var(--font);
+  font: var(--text-small) var(--font-body);
   color: var(--accent-text);
   background: none;
   border: 0;
@@ -13,7 +13,7 @@
 .notif-buttons .notif-open {
   color: var(--color-foreground);
   background: color-mix(in srgb, var(--color-accent) 28%, transparent);
-  border-radius: calc(var(--radius) * 4);
+  border-radius: 999px;
   padding: 6px 14px;
   font-weight: 600;
 }
@@ -22,7 +22,7 @@
 .notif-reply input {
   flex: 1;
   min-width: 0;
-  font: var(--text-small) var(--font);
+  font: var(--text-small) var(--font-body);
   color: var(--color-foreground);
   background: var(--color-surface);
   border: var(--frame) solid var(--line);
@@ -32,7 +32,7 @@
 }
 .notif-reply button {
   width: 36px;
-  font: 16px var(--font);
+  font: 16px var(--font-body);
   color: var(--color-background);
   background: var(--color-accent);
   border: 0;
@@ -53,7 +53,7 @@
   -webkit-backdrop-filter: blur(var(--glass-blur));
   box-shadow: var(--lift);
   touch-action: none;
-  animation: peek-in 220ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  animation: peek-in var(--spring-ms) var(--spring);
 }
 @keyframes peek-in {
   from { transform: translateY(-120%); opacity: 0; }
@@ -61,9 +61,9 @@
 
 /* PowOS AI page's "from agents" feed (powai.tsx): clear all, and a dismiss on each. */
 .ai-mail-bar { display: flex; justify-content: space-between; align-items: baseline; }
-.ai-mail-clear { font: var(--text-small) var(--font); color: var(--accent-text); background: none; border: 0; padding: 2px 4px; }
+.ai-mail-clear { font: var(--text-small) var(--font-body); color: var(--accent-text); background: none; border: 0; padding: 2px 4px; }
 .ai-mail-head { display: flex; justify-content: space-between; align-items: center; }
-.ai-mail-x { font: 16px var(--font); color: var(--color-muted); background: none; border: 0; padding: 0 4px; line-height: 1; }
+.ai-mail-x { font: 16px var(--font-body); color: var(--color-muted); background: none; border: 0; padding: 0 4px; line-height: 1; }
 
 /*
  * Grouped notifications (notifications.tsx Stack): a group is its head (name, count, chevron) over up to three of its
@@ -73,7 +73,7 @@
 .notif-more { flex: none; padding: 1px 7px; border-radius: 999px; background: var(--soft-fill); font-size: var(--text-small); }
 .notif-stack { position: relative; flex: none; display: flex; flex-direction: column; }
 .notif-shown { display: flex; flex-direction: column; gap: 6px; }
-.notif-show-more { align-self: center; padding: 6px 12px 2px; font: var(--text-small) var(--font); background: none; border: 0; }
+.notif-show-more { align-self: center; padding: 6px 12px 2px; font: var(--text-small) var(--font-body); background: none; border: 0; }
 /* The rest: folded to nothing, unfolded to its height. */
 /* No transition of its own: notifmotion.ts grows it (and the group, and its row) on the shell's spring. */
 .notif-rest { display: grid; grid-template-rows: 0fr; }
@@ -97,14 +97,14 @@
   box-sizing: border-box;
   min-height: 32px;
   padding: 0 4px 4px;
-  font: var(--text-small) var(--font);
+  font: var(--text-small) var(--font-body);
   color: var(--color-foreground);
   background: none;
   border: 0;
   text-align: left;
 }
 .notif-group-head .notif-app { color: var(--color-foreground); }
-.notif-fold { flex: none; color: var(--color-muted); transform: rotate(180deg); transition: transform 220ms ease; }
+.notif-fold { flex: none; color: var(--color-muted); transform: rotate(180deg); transition: transform var(--spring-ms) var(--spring); }
 .notif-stack.open .notif-fold { transform: none; }
 /* In a group the head is the group's: each card keeps only its time. */
 .notif.in-group .notif-icon, .notif.in-group .notif-app { display: none; }

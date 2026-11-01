@@ -90,7 +90,14 @@ powos.on("widget.tree", ({ key, screen, tree: t }: { key: string; screen: boolea
 /** As long as a home tile's long press: a press held this long lifts the tile, it isn't the widget's tap. */
 const TAP_MS = 400;
 const SIZES: Record<string, number> = { huge: 44, title: 20, small: 11, label: 11 };
-const FONTS: Record<string, string> = { sans: "system-ui, sans-serif", serif: "serif", icon: '"Symbols Nerd Font", "JetBrainsMono Nerd Font", monospace' };
+/**
+ * HACK: an OWL widget's text stays in the theme's monospace (--font), not the UI font (--font-body): the widgets size
+ * their text by counting characters at 0.6 em (50-weather.owl, 80-system-info.owl, 86-whats-new.owl...), so in the
+ * proportional face they fall short of their tile (the gate's widget sweep: 13-17% empty sides). The real fix: OWL
+ * gives scripts a text measure (measure(text, size)) and the widgets size by it - then this becomes --font-body.
+ */
+const OWL_FONT = "var(--font)";
+const FONTS: Record<string, string> = { sans: "system-ui, sans-serif", serif: "serif", mono: "var(--font)", icon: '"Symbols Nerd Font", "JetBrainsMono Nerd Font", monospace' };
 const BOX_ALIGN: Record<string, [string, string]> = {
   center: ["center", "center"],
   top: ["center", "start"],
@@ -278,7 +285,7 @@ function Node({ node, ctx, parent }: { node: OwlNode; ctx: Ctx; parent: string }
             // there takes all the room a weighted sibling was meant to share ("8° / 5°" and "21 oct" drawn 0 wide).
             ...(p.width == null && p.weight == null && p.fill == null ? (parent === "Row" ? { flex: "0 1 auto", minWidth: 0 } : { width: "100%" }) : {}),
             color: textColor(p.color, muted ? "var(--color-muted)" : "var(--color-foreground)"),
-            font: `${p.italic ? "italic " : ""}${p.bold ? "bold " : ""}${num(p.fontSize, SIZES[p.style] ?? 13)}px ${FONTS[p.font] ?? "var(--font)"}`,
+            font: `${p.italic ? "italic " : ""}${p.bold ? "bold " : ""}${num(p.fontSize, SIZES[p.style] ?? 13)}px ${FONTS[p.font] ?? OWL_FONT}`,
             textAlign: (({ center: "center", end: "end" } as Record<string, string>)[p.align] ?? "start") as any,
             whiteSpace: lines === 1 ? "nowrap" : "pre-wrap",
             overflow: "hidden",
@@ -301,7 +308,7 @@ function Node({ node, ctx, parent }: { node: OwlNode; ctx: Ctx; parent: string }
             borderRadius: px(num(p.radius, 8)),
             padding: "6px 10px",
             color: textColor(p.color, "var(--accent-text)"),
-            font: "13px var(--font)",
+            font: `13px ${OWL_FONT}`,
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis",
@@ -362,7 +369,7 @@ function Node({ node, ctx, parent }: { node: OwlNode; ctx: Ctx; parent: string }
         />
       );
     case "Input":
-      return <div class="muted" style={{ font: "13px var(--font)", ...style }}>{text(p.placeholder ?? p.text)}</div>;
+      return <div class="muted" style={{ font: `13px ${OWL_FONT}`, ...style }}>{text(p.placeholder ?? p.text)}</div>;
     case "Terminal": {
       // A command still loading (null) waits for its value, rather than starting a shell and restarting it (Render.kt).
       if ("command" in p && p.command == null) return null;
@@ -673,7 +680,7 @@ export const OwlWidget = memo(function OwlWidget({ widget, cells, screen = false
     [widget, screen],
   );
   return (
-    <div ref={el} class="owl" style={{ padding: t ? px(Math.max(0, num(t.padding, 0))) : undefined, background: t?.background ?? undefined }}>
+    <div ref={el} class="owl" style={{ fontFamily: OWL_FONT, padding: t ? px(Math.max(0, num(t.padding, 0))) : undefined, background: t?.background ?? undefined }}>
       {t && <Nodes nodes={t.c} ctx={ctx} parent="Column" />}
     </div>
   );

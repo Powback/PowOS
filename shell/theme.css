@@ -23,6 +23,9 @@
   --font: ui-monospace, "JetBrainsMono Nerd Font", "DejaVu Sans Mono", monospace;
   /* The proportional face, for what reads as prose from elsewhere (a track's title on the media card). */
   --font-ui: system-ui, Roboto, "Noto Sans", "DejaVu Sans", sans-serif;
+  /* THE UI font (docs/DESIGN-LANGUAGE.md §4): every UI text, the theme's choice (Settings > style > font, ui/uifont.ts
+     html[data-font]): proportional by default, monospace on "Mono". Code, terminals and logs name --font regardless. */
+  --font-body: var(--font-ui);
   --text-small: 11px;
   --text-body: 14px;
   --text-item: 15px;
@@ -147,7 +150,9 @@
   --text-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--glass-dim)), transparent);
 
   --gap: 8px;
-  --edge: 12px;
+  /* THE gutter (docs/DESIGN-LANGUAGE.md §3): 16 dp from a surface's edge and from the screen's, every page (the widget
+     sheet's EDGE reads it too). */
+  --edge: 16px;
   --radius: 12px;
   --frame: 2px;
   --cell: 76px;
@@ -166,7 +171,32 @@
   /* The pill's height, empty: one row of its field (home's search - in the foot or as a widget anywhere - the drawer's,
      PowOS AI's compose, the assistant's). It grows only with typed lines, up to 3 (grow.tsx); never with its cell. */
   --pill-height: 40px;
+
+  /*
+   * THE spring set (ui/spring.ts sets the real ones, springs sampled into linear(), at load): an easing and its
+   * duration, a pair in every transition and animation - fast, default, slow. These are only what CSS reads before
+   * the script runs. --ambient: a loop's curve (a pulse, a sweep, a blink), never a motion between states.
+   */
+  --spring-fast: cubic-bezier(0.2, 0.9, 0.3, 1);
+  --spring-fast-ms: 270ms;
+  --spring: cubic-bezier(0.2, 0.9, 0.3, 1);
+  --spring-ms: 410ms;
+  --spring-slow: cubic-bezier(0.22, 0.9, 0.26, 1);
+  --spring-slow-ms: 590ms;
+  --ambient: ease-in-out;
+
+  /*
+   * Status colours (docs/DESIGN-LANGUAGE.md §5), one meaning each on every surface: working the accent (pulsing),
+   * awaiting its check blue, needs you amber (--status-on-needs the text on it), stalled grey. Red (--color-red) is
+   * only broken or failed. The blue and the amber are fixed meanings, the same in every theme.
+   */
+  --status-working: var(--color-accent);
+  --status-check: #5aa7e8;
+  --status-needs: #e3a03c;
+  --status-on-needs: #1a1206;
+  --status-stalled: color-mix(in srgb, var(--color-foreground) 45%, transparent);
 }
+:root[data-font="mono"] { --font-body: var(--font); }
 
 /*
  * A wallpaper of the other tone than the theme (dark glass over a bright picture, light glass over a dark one:
@@ -220,14 +250,15 @@ html, body { margin: 0; height: 100%; }
 body {
   background: transparent;
   color: var(--color-foreground);
-  font: var(--text-body) var(--font);
+  font: var(--text-body) var(--font-body);
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
   touch-action: none;
 }
-button { font: inherit; color: inherit; background: none; border: 0; padding: 0; }
+button, input, textarea, select { font: inherit; }
+button { color: inherit; background: none; border: 0; padding: 0; }
 /* No scrollbars anywhere: the phone's WebView ignores scrollbar-width (CSS.supports false on Chrome 155 WebView) and
    drew an overlay bar as a faint line at the right edge of home. Scrolling stays. */
 ::-webkit-scrollbar { display: none; }

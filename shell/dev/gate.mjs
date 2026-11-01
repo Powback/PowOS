@@ -471,7 +471,7 @@ async function agentsFleetCheck(setup) {
     const tiles = [...(panel?.querySelectorAll(".fl-tile") ?? [])];
     const head = text(".ag-head", panel);
     if (tiles.length !== want) fails.push(`widget ${w}x${h}: ${tiles.length} tiles, not ${want}`);
-    if (!firstStopped(tiles)) fails.push(`widget ${w}x${h}: the first tile isn't the stopped one in red`);
+    if (!firstStopped(tiles)) fails.push(`widget ${w}x${h}: the first tile isn't the stopped one in red ("${tiles[0]?.textContent ?? ""}")`);
     if (!/3 working/.test(head) || !/1 needs you/.test(head) || /\+\d/.test(head)) fails.push(`widget ${w}x${h}: its head says "${head}"`);
     return fails;
   };

@@ -75,7 +75,7 @@ function measure(el: HTMLElement, columns: number) {
   // when home is shown (Pages).
   if (!size.width || !size.height || document.hidden) return;
   const root = getComputedStyle(document.documentElement);
-  const pad = parseFloat(root.getPropertyValue("--edge")) || 12;
+  const pad = parseFloat(root.getPropertyValue("--edge")) || 16;
   // The grid is laid out for home at rest, not for this frame: the dock folding away under the launcher and the
   // keyboard sliding in give the pages more or less height while they animate, and measuring that re-laid-out (and
   // resized) every tile and widget each frame - the flicker as the launcher closes. So the height the dock has

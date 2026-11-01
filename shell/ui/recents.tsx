@@ -130,7 +130,7 @@ function frame(p: number, x = 0, y = 0, home = 0) {
 function settle(on: boolean) {
   settling.value = on;
   const s = screens();
-  if (s) s.style.transition = on ? "opacity 240ms ease" : "none";
+  if (s) s.style.transition = on ? "opacity var(--spring-ms) var(--spring)" : "none";
 }
 
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
@@ -357,9 +357,9 @@ function clearAll() {
     };
     if (!card) return done();
     card.animate([{ transform: "none", opacity: 1 }, { transform: `translateY(-${innerHeight}px)`, opacity: 0 }], {
-      duration: 260,
+      duration: spring.ms,
       delay: Math.min(i, 6) * 30,
-      easing: "cubic-bezier(0.4, 0, 1, 1)",
+      easing: spring.easing,
       fill: "forwards",
     }).onfinish = done;
   });
@@ -581,7 +581,7 @@ function Opening() {
         { transform: `translate(${left}px, ${top}px) scale(${sx}, ${sy})`, borderRadius: `${parseFloat(o.radius) / sx}px` },
         { transform: `translate(${to.left}px, ${to.top}px)`, borderRadius: "0px" },
       ],
-      { duration: Math.min(spring.ms, 320), easing: "cubic-bezier(0.2, 0.9, 0.2, 1)", fill: "forwards" },
+      { duration: spring.ms, easing: spring.easing, fill: "forwards" },
     ).onfinish = () => opened(o.id);
   }, [o?.id]);
   if (!o) return null;

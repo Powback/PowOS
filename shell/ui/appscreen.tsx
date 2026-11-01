@@ -15,6 +15,7 @@ import { appRev, appView, closeApp, installedApps, manifestOf, moduleUrl, openAp
 import { watchRegistry } from "../apps/registry.ts";
 import { host } from "../apps/stdb.ts";
 import { addIsland } from "./apppicker.tsx";
+import { spring } from "./spring.ts";
 
 declare function importShim(url: string): Promise<{ default: ComponentType<any> }>;
 
@@ -25,7 +26,7 @@ declare function importShim(url: string): Promise<{ default: ComponentType<any> 
 (window as any).__powosApps = { openApp, closeApp, addIsland, appView, appRev, installedApps, loaded: null };
 
 const MS = 220;
-const EASE = "cubic-bezier(0.2, 0.8, 0.2, 1)";
+const EASE = spring.easing;
 
 /** Its touches are its own: home's swipes under it don't see them. */
 const own = {

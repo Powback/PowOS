@@ -8,18 +8,18 @@
   overflow: hidden;
   background: #000;
   color: #fff;
-  font-family: "DejaVu Sans Mono", "Roboto Mono", monospace;
+  font-family: var(--font-body);
 }
 .glasses-hud { padding: 0 6px; }
 .glasses-line { white-space: pre; overflow: hidden; text-overflow: clip; }
-.glasses-dev { margin: 0 6px; color: #8a8; font: 12px monospace; }
+.glasses-dev { margin: 0 6px; color: #8a8; font: 12px var(--font-body); }
 
 /* The phone's glasses screen: full screen over home, as remote input's. */
 .glasses-screen { overflow-y: auto; }
 .glasses-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .glasses-preview {
   align-self: center;
-  border-radius: 10px;
+  border-radius: 8px;
   overflow: hidden;
   border: var(--frame, 1px) solid var(--line);
   background: #000;
@@ -33,7 +33,7 @@
   min-width: 0;
   height: 32px;
   padding: 0 10px;
-  border-radius: 16px;
+  border-radius: 20px;
   border: 1px solid var(--line);
   background: var(--soft-fill);
   color: var(--color-foreground);

@@ -41,6 +41,7 @@ import { Mover } from "./petmove.ts";
 import { DbConnection as PetDb } from "../vendor/local-pet.js";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import type { AgentMail } from "../types.ts";
+import { spring, springSlow } from "./spring.ts";
 
 // HACK: the stylesheet is linked from here, not index.html, so the pet ships as files of its own while other agents
 // edit index.html. Real fix: a <link> in index.html next to the others once this settles (data-hot: hot-swapped alike).
@@ -154,7 +155,7 @@ let hopTo: (e: Edge, fx: number, then?: () => void, retries?: number) => void = 
 /** A tap on a tile it stands on (a deploy it brings): a short press of its body and a nudge of the tile. */
 function tapTile(key: string) {
   const tile = document.querySelector<HTMLElement>(`.page:not(.away) .home-tile[data-key="${CSS.escape(key)}"]`);
-  tile?.animate([{ transform: "none" }, { transform: "translateY(2px) scale(0.99)" }, { transform: "none" }], { duration: 260, easing: "ease-out" });
+  tile?.animate([{ transform: "none" }, { transform: "translateY(2px) scale(0.99)" }, { transform: "none" }], { duration: spring.ms, easing: spring.easing });
 }
 
 /**
@@ -950,7 +951,7 @@ function PetLayer() {
       const up = Math.min(r.top, to.top) - r.top - 36;
       a = node.animate(
         [{ transform: "none" }, { transform: `translate(${dx / 2}px, ${up}px)`, offset: 0.45 }, { transform: `translate(${dx}px, ${dy}px)` }],
-        { duration: 560 + Math.min(400, Math.hypot(dx, dy)), easing: "cubic-bezier(0.35, 0, 0.45, 1)" },
+        { duration: 560 + Math.min(400, Math.hypot(dx, dy)), easing: springSlow.easing },
       );
     }
     a.onfinish = () => {

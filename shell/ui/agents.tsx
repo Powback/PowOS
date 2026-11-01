@@ -248,12 +248,12 @@ export function Bar({ done, total }: { done: number; total: number }) {
 }
 const stepLabel = (x: Worker) => (!x.total ? "" : x.done >= x.total ? "all steps done" : `step ${x.done + 1} of ${x.total}`);
 
-/** A tile's inner box (px) and type size: what its lines are fitted to (the font is monospace: ~0.62 em a char). */
+/** A tile's inner box (px) and type size: what its lines are fitted to (~0.62 em a char when it can't be measured). */
 interface Box {
   w: number;
   h: number;
   font: number;
-  /** One character's width at [font], measured (the shell's font is monospace). */
+  /** One character's width at [font], measured: the widest of the theme font's average prose letter and its digit. */
   ch: number;
 }
 const cols = (b: Box, scale = 1) => Math.max(4, Math.floor(b.w / (b.ch * scale)) - 1);
@@ -264,10 +264,14 @@ function charWidth(el: HTMLElement, font: number) {
   const g = document.createElement("canvas").getContext("2d");
   if (!g) return 0.62 * font;
   g.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
-  return g.measureText("0123456789".repeat(4)).width / 40 || 0.62 * font;
+  // The UI font is proportional (theme.css --font-body; "Mono" in Settings > style): a line's width is its letters', so
+  // the count goes by the wider of an average prose letter and a digit (cols() keeps one character spare). Monospace:
+  // both are the one advance, as before.
+  const prose = "Can't start: the model was not found, then 3 steps of 12 done".repeat(2);
+  return Math.max(g.measureText(prose).width / prose.length, g.measureText("0123456789".repeat(4)).width / 40) || 0.62 * font;
 }
 
-/** How many lines [text] takes at [n] characters a line (monospace: word wrapping is counting). */
+/** How many lines [text] takes at [n] characters a line (at the measured average width, word wrapping is counting). */
 function wrapped(text: string, n: number) {
   let lines = 1;
   let used = 0;
@@ -283,9 +287,16 @@ function wrapped(text: string, n: number) {
 /** [text] cut at a word so it fits [lines] lines of [n] characters, never cut by the box. */
 function fit(text: string, n: number, lines: number) {
   let max = n * lines;
-  let t = shorten(text, max);
-  while (max > 4 && wrapped(t, n) > lines) t = shorten(text, (max -= Math.max(1, Math.floor(n / 4))));
+  let t = atWord(text, max);
+  while (max > 4 && wrapped(t, n) > lines) t = atWord(text, (max -= Math.max(1, Math.floor(n / 4))));
   return t;
+}
+
+/** shorten(), but never inside a word while the text has a space before [max] ("Can't…", not "Can't sta…"). */
+function atWord(text: string, max: number) {
+  if (text.length <= max) return text;
+  const at = text.slice(0, Math.max(1, max - 1)).lastIndexOf(" ");
+  return at > 0 ? `${text.slice(0, at).replace(/[\s,.;:-]+$/, "")}…` : shorten(text, max);
 }
 
 const ICON = { restart: "↻", answer: "allow", open: "›" } as const;

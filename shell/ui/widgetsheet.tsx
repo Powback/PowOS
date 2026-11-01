@@ -8,7 +8,8 @@ import { useEffect, useRef } from "preact/hooks";
 import { detailSheet } from "../apps/sheet.ts";
 import { topBack } from "../state.ts";
 
-const EDGE = 12;
+/** The gutter: theme.css --edge (16 dp, docs/DESIGN-LANGUAGE.md §3), read where it is used. */
+const edge = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--edge")) || 16;
 /** A drag this far down closes it. */
 const CLOSE_PX = 70;
 
@@ -19,6 +20,7 @@ const CLOSE_PX = 70;
 function room() {
   const css = getComputedStyle(document.documentElement);
   const inset = (n: string) => parseFloat(css.getPropertyValue(n)) || 0;
+  const EDGE = edge();
   let floor = innerHeight - Math.max(EDGE, inset("--inset-bottom") + EDGE);
   for (const el of document.querySelectorAll<HTMLElement>(".home > .bar .bar-pill, .home .dock")) {
     const r = el.getBoundingClientRect();
@@ -49,6 +51,7 @@ export function WidgetSheet() {
   if (!d) return null;
 
   const vw = innerWidth;
+  const EDGE = edge();
   const a = d.anchor;
   const w = Math.min(vw - 2 * EDGE, Math.max(a.width, 320), 460);
   const left = Math.max(EDGE, Math.min(vw - w - EDGE, a.left + a.width / 2 - w / 2));

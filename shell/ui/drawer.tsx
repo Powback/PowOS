@@ -18,6 +18,7 @@ import { PendingDetailSheet, PendingIconBadge } from "./pending.tsx";
 import type { App } from "../types.ts";
 
 import { searchResults, searchSections, searchPending, openSearchResult, type SearchResult } from "../search.ts";
+import { springFast } from "./spring.ts";
 
 const ALPHABET = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
 const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
@@ -234,7 +235,7 @@ function Pages() {
   const put = (px: number, ms: number) => {
     const el = track.current;
     if (!el) return;
-    el.style.transition = ms ? `transform ${ms}ms cubic-bezier(0.1, 0.8, 0.2, 1)` : "none";
+    el.style.transition = ms ? `transform ${ms}ms ${springFast.easing}` : "none";
     el.style.transform = `translate3d(${px}px, 0, 0)`;
     // The dots under the finger too: where the track is, in pages (ms 0 = a finger on it).
     paintDots(dots.current, Math.max(0, Math.min(1, -px / width())), !ms);

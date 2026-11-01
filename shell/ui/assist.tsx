@@ -328,7 +328,7 @@ function swipeAway(panel: { current: HTMLDivElement | null }) {
     const el = panel.current;
     if (!el) return;
     // At rest (no drag): no inline transition, so the stroke's fade (shell.css .assist.drawing) keeps its own.
-    el.style.transition = animate ? "transform 0.18s ease-out, opacity 0.18s ease-out" : dyPx ? "none" : "";
+    el.style.transition = animate ? "transform var(--spring-fast-ms) var(--spring-fast), opacity var(--spring-fast-ms) var(--spring-fast)" : dyPx ? "none" : "";
     el.style.transform = dyPx ? `translateY(${dyPx}px)` : "";
     el.style.opacity = dyPx ? String(Math.max(0.25, 1 - Math.abs(dyPx) / 400)) : "";
   };

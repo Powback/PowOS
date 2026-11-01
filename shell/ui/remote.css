@@ -16,7 +16,7 @@
   gap: 4px;
   height: 32px;
   padding: 0 10px;
-  border-radius: 16px;
+  border-radius: 20px;
   border: var(--frame) solid var(--line);
   font-size: var(--text-small);
   color: var(--color-muted);
@@ -43,7 +43,7 @@
 .remote-action, .remote-chip {
   height: 28px;
   padding: 0 10px;
-  border-radius: 14px;
+  border-radius: 12px;
   border: 1px solid var(--line);
   color: var(--accent-text);
   white-space: nowrap;
@@ -93,7 +93,7 @@
   box-shadow: var(--lift);
 }
 .remote-key:active { background: color-mix(in srgb, var(--color-accent) 30%, var(--color-surface)); }
-.remote-key.chip { height: 30px; border-radius: 15px; background: none; color: var(--color-muted); }
+.remote-key.chip { height: 30px; border-radius: 12px; background: none; color: var(--color-muted); }
 .remote-key.latched { border-color: var(--color-accent); color: var(--accent-text); }
 .remote-key.locked { background: var(--color-accent); color: var(--color-background); border-color: var(--color-accent); }
 
@@ -108,7 +108,7 @@
   outline: none;
   background: none;
   color: var(--color-foreground);
-  font: var(--text-body) var(--font);
+  font: var(--text-body) var(--font-body);
   line-height: 36px;
   padding: 0;
   overflow: hidden;
@@ -120,11 +120,11 @@
 .remote-layout {
   max-width: 7.5em;
   height: 30px;
-  border-radius: 15px;
+  border-radius: 12px;
   border: 1px solid var(--line);
   background: var(--color-surface);
   color: var(--color-muted);
-  font: var(--text-small) var(--font);
+  font: var(--text-small) var(--font-body);
   padding: 0 6px;
   box-shadow: var(--lift);
 }

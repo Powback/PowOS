@@ -14,6 +14,7 @@
  * Each frame writes two attributes (the path, the eyes' transform) straight to the DOM - no Preact render.
  */
 import { useEffect, useRef } from "preact/hooks";
+import { spring, springFast } from "./spring.ts";
 
 export const BODY = 52;
 const N = 10;
@@ -186,12 +187,12 @@ export function PetBody({ handle }: { handle: { current: BodyHandle | null } }) 
       blink() {
         eyes.current?.firstElementChild?.animate(
           [{ transform: "scaleY(1)" }, { transform: "scaleY(0.1)" }, { transform: "scaleY(1)" }],
-          { duration: 160, easing: "ease-in-out" },
+          { duration: springFast.ms, easing: springFast.easing },
         );
       },
       pulse() {
         for (const e of svg.current?.querySelectorAll(".pet-ear") ?? [])
-          e.animate([{ opacity: 0.35 }, { opacity: 1 }, { opacity: 0.35 }], { duration: 380, easing: "ease-out" });
+          e.animate([{ opacity: 0.35 }, { opacity: 1 }, { opacity: 0.35 }], { duration: spring.ms, easing: spring.easing });
       },
       look(x, y) {
         const r = svg.current?.getBoundingClientRect();
