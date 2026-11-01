@@ -3,7 +3,7 @@
  * the homebar doesn't really show them as docked together"): PowOS's window groups in the dock as one cell each.
  * A group is a tiling (ui/webwindows.tsx tilings, per home page) with 2 or more windows, or a tab stack (stacks) with
  * 2 or more tabs that isn't in such a tiling (a tiled stack's tabs belong to its tiling's group). Its cell shows the
- * group's icons together (switcher.tsx SplitIcons, the split card's) in the group's layout; its apps get no cells of
+ * group's icons together (switcher.tsx GroupIcon, the split card's combined icon) in the group's layout; its apps get no cells of
  * their own; a tap brings every window of the group to the front on its page (webwindows.tsx bringGroup). Its mark
  * (pagemarks.ts) is the group's page against the page on screen. Folded there are no web windows: no groups.
  */
@@ -11,7 +11,7 @@ import { computed } from "@preact/signals";
 import { byKey } from "../state.ts";
 import { usePress } from "./apps.tsx";
 import { pageId } from "./desktops.ts";
-import { SplitIcons } from "./switcher.tsx";
+import { GroupIcon } from "./switcher.tsx";
 import { bringGroup, stacks, tilings, webWins } from "./webwindows.tsx";
 
 export interface DockGroup {
@@ -84,9 +84,7 @@ export function DockGroupCell({ group }: { group: DockGroup }) {
   const state = group.minimised ? "minimised" : "running";
   return (
     <div class={`app group windowed ${state} ${groupMark(group)}`} data-key={`group:${group.ids.join(",")}`} data-group={group.keys.join(",")} {...press}>
-      <div class="app-icon group-icon">
-        <SplitIcons icons={icons} layout={group.layout} />
-      </div>
+      <GroupIcon class="app-icon" icons={icons} layout={group.layout} />
     </div>
   );
 }
