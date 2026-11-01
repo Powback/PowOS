@@ -9,6 +9,7 @@ import { useState } from "preact/hooks";
 import { boardState } from "../agents.ts";
 import { board, boardSeen, checks, WorkFeed, type WorkRow } from "./aiboard.tsx";
 import { needIds, needsYou, NeedsYouCard } from "./needsyou.tsx";
+import { upNext, UpNext } from "./upnext.tsx";
 
 const MONTH_MS = 30 * 24 * 3_600_000;
 
@@ -186,6 +187,7 @@ export function ProgressView({ shown }: { shown: boolean }) {
       {shown && <WorkFeed />}
       {ring && <ProgressRing pct={ring.pct} label={ring.label} sub={subLine(stats)} />}
       <NeedsYouCard needs={needs} />
+      <UpNext rows={upNext()} busy={needs.length > 0} />
       {stats.length > 0 && <DotLegend />}
       <ul class="aip-areas">
         {stats.map((a) => (

@@ -24,7 +24,8 @@ export interface WorkRow {
   id: string;
   title: string;
   owner: string;
-  status: "working" | "blocked" | "waiting" | "done";
+  /** "queued": accepted, not started - waits for an agent slot (the status page's Up next). */
+  status: "working" | "queued" | "blocked" | "waiting" | "done";
   /** One line: for a "waiting" item, what the user is to do ("Plug the phone into the Mac for the kernel test"). */
   note: string;
   created: bigint | number;
@@ -85,6 +86,16 @@ interface FrictionRow {
   last: bigint | number;
 }
 const friction = signal<FrictionRow[]>([]);
+/** One of the user's asks (apps/agents `user_ask`: their words, whole, and the board task it became; "" = none yet). */
+export interface UserAsk {
+  id: string;
+  at: bigint | number;
+  text: string;
+  task: string;
+}
+/** The user's asks (the status page's Up next shows the words a queued task came from). */
+export const userAsks = signal<UserAsk[]>([]);
+const ASKS_QUERY = "SELECT * FROM user_ask";
 const CHECKS_QUERY = "SELECT * FROM work_check";
 const FRICTION_QUERY = "SELECT * FROM friction";
 
@@ -92,12 +103,16 @@ const FRICTION_QUERY = "SELECT * FROM friction";
 function FactsFeed({ db }: { db: ReturnType<typeof useDb> }) {
   const cs = useRows<BoardCheck>(db, "work_check", CHECKS_QUERY);
   const fr = useRows<FrictionRow>(db, "friction", FRICTION_QUERY);
+  const as = useRows<UserAsk>(db, "user_ask", ASKS_QUERY);
   useEffect(() => {
     if (db.status === "connected") checks.value = cs;
   }, [cs, db.status]);
   useEffect(() => {
     if (db.status === "connected") friction.value = fr;
   }, [fr, db.status]);
+  useEffect(() => {
+    if (db.status === "connected") userAsks.value = as;
+  }, [as, db.status]);
   return null;
 }
 

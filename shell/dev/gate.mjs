@@ -2927,6 +2927,83 @@ async function aiDoneRows(page, shot) {
   return fails;
 }
 
+/**
+ * Up next (shell/ui/upnext.tsx; the user, 11-01 17:1x: "I should be able to see the queue on the AI page"): three
+ * queued tasks on the mock board, put there out of order - the section lists them oldest accepted first; a busy page
+ * shows the one-line count "3 up next" until tapped; none of them is in Working now; a tap opens a row in place with
+ * the user's words. Then the rows are taken off again.
+ */
+async function aiNextSetup() {
+  const G = window.__gw;
+  const [P, B] = await Promise.all([G.mod("./ui/powai.tsx"), G.mod("./ui/aiboard.tsx")]);
+  const now = Date.now();
+  const row = (id, title, created) => ({ id, title, owner: "", status: "queued", note: "", project: "AI page", created, updated: now, done: 0, progressDone: 0, progressTotal: 0, step: "", steps: "", commits: "", images: "", activity: now, tryLine: "", parent: "" });
+  P.board.value = [...P.board.value.filter((w) => w.status !== "queued"), row("qn-2", "Second in the queue", now - 2e6), row("qn-3", "Third in the queue", now - 1e6), row("qn-1", "First in the queue", now - 3e6)];
+  window.__qnAsks = B.userAsks.value;
+  B.userAsks.value = [...B.userAsks.value, { id: "ask-qn", at: now - 3e6, text: "I should be able to see the queue on the AI page", by: "manager", task: "qn-1", none: "" }];
+  return !!(await G.until(() => document.querySelector(".ai-screen:is(.status, .panes) [data-sec=next]"), 3000));
+}
+
+/** In the page: Up next as shown - its heading, its rows' titles in order, the Working now titles. */
+function aiNextFacts() {
+  const scr = ".ai-screen:is(.status, .panes)";
+  const sec = `${scr} [data-sec=next]`;
+  const texts = (sel) => [...document.querySelectorAll(sel)].map((t) => t.textContent.trim());
+  const toggle = document.querySelector(`${sec} .ais-toggle`);
+  return {
+    head: texts(`${sec} .ais-toggle`).join(""),
+    open: toggle?.getAttribute("aria-expanded") === "true",
+    rows: texts(`${sec} .ais-next-item .ais-done-title`),
+    working: texts(`${scr} [data-sec=working] .ais-work-title`),
+    ask: texts(`${sec} .ais-next-item.open [data-fact="ask"]`).join(""),
+    line: texts(`${sec} .ais-next-item.open [data-fact="line"]`).join(""),
+  };
+}
+
+async function aiNextTap(sel) {
+  document.querySelector(`.ai-screen:is(.status, .panes) [data-sec=next] ${sel}`)?.click();
+  await window.__gw.frames(3);
+}
+
+async function aiNextRestore() {
+  const G = window.__gw;
+  const [P, B] = await Promise.all([G.mod("./ui/powai.tsx"), G.mod("./ui/aiboard.tsx")]);
+  P.board.value = P.board.value.filter((w) => !w.id.startsWith("qn-"));
+  B.userAsks.value = window.__qnAsks ?? [];
+}
+
+/** Unfolded (the left column): Recently done's rows, then Up next's. */
+async function aiUnfoldedRows(page) {
+  const done = (await aiDoneRows(page, "/cache/ai-unfolded-done.png")).map((f) => `unfolded done: ${f}`);
+  return [...done, ...(await aiNextRows(page, "/cache/ai-unfolded-next.png")).map((f) => `unfolded up next: ${f}`)];
+}
+
+const AIS_NEXT_ORDER = ["First in the queue", "Second in the queue", "Third in the queue"];
+
+/** Up next on the page as it is (folded or unfolded), the open row rendered to [shot]. */
+async function aiNextRows(page, shot) {
+  if (!(await page.evaluate(aiNextSetup))) return ["no Up next section for 3 queued tasks"];
+  let f = await page.evaluate(aiNextFacts);
+  const fails = [];
+  if (!f.open) {
+    if (f.head !== "3 up next") fails.push(`folded to "${f.head}", not "3 up next"`);
+    await page.evaluate(aiNextTap, ".ais-toggle");
+    f = await page.evaluate(aiNextFacts);
+  }
+  fails.push(...failsOf([
+    [f.open, "tapping the Up next line didn't open it"],
+    [JSON.stringify(f.rows) === JSON.stringify(AIS_NEXT_ORDER), `Up next lists ${JSON.stringify(f.rows)}, not ${JSON.stringify(AIS_NEXT_ORDER)} in line`],
+    [!f.working.some((t) => /in the queue/.test(t)), `a queued task is in Working now (${f.working.join(", ")})`],
+  ]));
+  await page.evaluate(aiNextTap, '.ais-next-item[data-task="qn-1"] .ais-done-row');
+  f = await page.evaluate(aiNextFacts);
+  if (!/You asked .*"I should be able to see the queue on the AI page"/.test(f.ask)) fails.push(`the opened row's ask reads "${f.ask}"`);
+  if (!/^Next in line/.test(f.line)) fails.push(`the opened row's place reads "${f.line}"`);
+  await page.screenshot({ path: shot });
+  await page.evaluate(aiNextRestore);
+  return fails;
+}
+
 const AIS_DONE_LONG = "Recently done rows open in place when tapped, showing the whole title instead of cutting it off at the edge";
 
 /** At rest on screen: no endless animation on the page (its own idle check; the AI page shown). */
@@ -3027,6 +3104,7 @@ async function aiStatusCheck(page) {
     await page.screenshot({ path: `/cache/ai-status-folded-${tone}.png` });
   }
   fails.push(...(await aiDoneRows(page, "/cache/ai-status-folded-done.png")).map((f) => `folded done: ${f}`));
+  fails.push(...(await aiNextRows(page, "/cache/ai-status-folded-next.png")).map((f) => `folded up next: ${f}`));
   const left = await page.evaluate(aiStatusEmpty);
   if (left.join() !== "working") fails.push(`folded: with an empty board the sections are [${left.join(", ")}], not only Working now`);
   fails.push(...(await aiStackCheck(page)).map((f) => `folded stack: ${f}`));
@@ -3363,7 +3441,7 @@ async function aiUnfoldedCheck(page) {
     fails.push(...[...(await page.evaluate(aiPanesFails)), ...(await page.evaluate(aiColumnsContent)), ...(await page.evaluate(aiPanesGlassFails)), ...(await page.evaluate(aiSegsSwitch))].map((f) => `${size}: ${f}`));
     await page.screenshot({ path: `/cache/ai-unfolded-${size}-chat.png` });
     await page.evaluate(aiChatRestore);
-    if (size === "unfolded") fails.push(...(await aiDoneRows(page, "/cache/ai-unfolded-done.png")).map((f) => `${size} done: ${f}`));
+    if (size === "unfolded") fails.push(...(await aiUnfoldedRows(page)));
     fails.push(...(await aiUnfoldedRenders(page, size)));
   }
   fails.push(...(await aiUnfoldedRestored(page)));
