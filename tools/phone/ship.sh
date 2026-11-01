@@ -210,10 +210,12 @@ run)
   # rooted-mode part only - its own scripts/session + the small PowOS-side pieces it pushes; the apps-tier pieces
   # it also pushes, lib/apps/bin/powos/the spacetimedb/xwayland/kwin packages, are the "apps" kind above, f105 part
   # 2 - this is part 1). `deploy`, never `install` (which also re-pushes the rootfs tarball - a human step).
+  # lib/apps/powos-terms + powos-transcribe: powos-deploy.sh installs them (e4bc7be0); a change to them alone must deploy
+  # (11-01: the terminals view-only rewrite ec367873 changed only powos-terms and would never have reached the phone).
   rooted_inputs() { git diff --name-only "$1" "$2" -- targets/android/rooted targets/android/session \
     targets/android/pkgs/fex-emu bin/powos-panel-phone desktop/autostart/powos-panel-phone.desktop \
     lib/powos-tmux-shell lib/self-phone.sh config/etc/profile.d/60-powos-picker-key.sh lib/ai/agents lib/ai/comms/comms-mcp.py \
-    tools/app-api lib/ai/manager lib/ai/sandbox desktop/plasmoid units/phone units/phone-android lib/apps/powos-units \
+    tools/app-api lib/ai/manager lib/ai/sandbox desktop/plasmoid units/phone units/phone-android lib/apps/powos-units lib/apps/powos-terms lib/apps/powos-transcribe \
     2>/dev/null | grep -v '^lib/ai/sandbox/node_modules/'; }
   # units_gate: nothing ships to the phone that installs a file no unit claims (DU1: every ship registers what it
   # installs). test-units-registry.py reads every deploy script against units/; a FAIL refuses the rooted deploy.
