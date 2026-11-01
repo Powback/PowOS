@@ -221,8 +221,11 @@ EOF
   S=$(sh_ "dumpsys SurfaceFlinger --display-id" | sed -n "s/^Display \([0-9]*\) (Virtual display): displayName=\"powos-ww-$tag\".*/\1/p")
   [ -n "$S" ] || hfail "display $D isn't in SurfaceFlinger's list (no powos-ww-$tag)"
   log "display $D (SurfaceFlinger $S), never mirrored"
-  # A task of its own even if the user has Calculator open (NEW_TASK | MULTIPLE_TASK): theirs is never pulled over.
-  log "launch: $(sh_ "am start --display $D -f 0x18000000 -n $comp" | grep -v '^Starting' | head -2 | paste -sd' ' -)"
+  # A task of its own even if the user has Calculator open (NEW_TASK | MULTIPLE_TASK): theirs is never pulled over. And
+  # the other way: a document task (NEW_DOCUMENT + its own data URI) no plain launch of the app matches - 11-01 ship
+  # 2a849163, the phone folded: a launch of Calculator at 21:23:28 brought THIS task (2256) to display 0 mid-hold
+  # (wm_task_moved [2256,2256,0]), display 98 went flat black (ff000000) and it read as a window fault.
+  log "launch: $(sh_ "am start --display $D -f 0x18080000 -d powos-window-render://hidden/$tag -n $comp" | grep -v '^Starting' | head -2 | paste -sd' ' -)"
   # (a) its task on that display and its content drawn.
   for _ in $(seq 1 15); do task=$(tasks_on "$D"); [ -n "$task" ] && break; sleep 1; done
   [ -n "$task" ] || hfail "$APP's task never reached display $D"
@@ -291,6 +294,8 @@ EOF
     while :; do
       sleep 5
       asleep && { lc "hold display $D: phone $WAKE - not judged"; hnj "hold $(( $(date +%s) - h0 )) s"; }
+      # Its task first: one moved off the display (a launch elsewhere took it) leaves it flat black - say THAT, not "flat".
+      [ -n "$(tasks_on "$D")" ] || { lc "hold display $D: task gone"; hfail "during the hold $APP's task left display $D (now: $(sh_ "am stack list" | grep -m1 -B1 "taskId=${task%% *}:" | sed -n 's/.*\(displayId=[0-9]*\).*/\1/p' | head -1))"; }
       "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/hold.raw.gz" 2>/dev/null
       hs=$($PY stats "$OUT/hold.raw.gz" 0 0 "$W" "$H" 2>&1)
       hd=$(echo "$hs" | sed -n 's/.*dominant=\([0-9.]*\).*/\1/p'); he=$(echo "$hs" | sed -n 's/.*edges=\([0-9.]*\).*/\1/p')

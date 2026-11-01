@@ -40,4 +40,15 @@ class LaunchReuseTest {
     fun aTaskOnAnUnknownDisplayIsNotMoved() {
         assertEquals(Decision.New, LaunchReuse.decide(pkg, emptyList(), listOf(Task(7, pkg, pkg, -1))))
     }
+
+    @Test
+    fun aTaskOnAnotherToolsDisplayIsNeverTakenButLaunchedBeside() {
+        // 11-01 ship 2a849163: the window-render check's Calculator (task 2256, its own display 98) - a launch of the app
+        // must not move it (the check's display went flat black); a task of the app's own instead.
+        assertEquals(Decision.Apart, LaunchReuse.decide(pkg, emptyList(), listOf(Task(2256, pkg, pkg, 98))))
+        // The user's own task on the main display still wins over the foreign one.
+        assertEquals(Decision.Adopt(7), LaunchReuse.decide(pkg, emptyList(), listOf(Task(2256, pkg, pkg, 98), Task(7, pkg, pkg, 0))))
+        // Another web window's display is still never taken either.
+        assertEquals(Decision.New, LaunchReuse.decide(pkg, listOf(Window(2, "other", 6, 11)), listOf(Task(6, "other", pkg, 11))))
+    }
 }
