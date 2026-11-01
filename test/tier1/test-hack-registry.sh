@@ -12,6 +12,8 @@
 # marker.
 #
 # Usage:  bash test/tier1/test-hack-registry.sh
+#         bash test/tier1/test-hack-registry.sh --files <path>...   (tools/agents/land.sh: only these files, their
+#         working-tree content against the registry as it will be committed; prints the rows to add; fast)
 
 set -u
 
@@ -32,7 +34,7 @@ if ! command -v git >/dev/null 2>&1 || ! git rev-parse --git-dir >/dev/null 2>&1
     exit 0
 fi
 
-echo "== HACK registry ($REG) =="
+[[ "${1:-}" == --files ]] || echo "== HACK registry ($REG) =="
 
 if [[ ! -f "$REG" ]] || ! grep -q '<!-- hack-registry:start -->' "$REG"; then
     bad "$REG has no registry section (<!-- hack-registry:start --> ... end)"
@@ -42,11 +44,54 @@ if [[ ! -f "$REG" ]] || ! grep -q '<!-- hack-registry:start -->' "$REG"; then
 fi
 
 TAG='HACK'':'   # split so this file's own source never looks like a marker
+
+# The one matcher: a "file:line:text" stream in, the marker lines out (a backticked mention isn't a marker).
+markers() { grep -F "$TAG" | grep -v -F "\`$TAG\`"; }
+# Registry rows in, "file count" per named file out.
+reg_counts() { sed -n '/<!-- hack-registry:start -->/,/<!-- hack-registry:end -->/p' \
+        | sed -n 's/^| `\([^`]*\):[0-9][0-9]*` |.*/\1/p' | sort | uniq -c | awk '{print $2" "$1}'; }
+scanned() { case "$1" in targets/web/third_party/*|"$REG"|test/tier1/test-hack-registry.sh) return 1 ;; esac; return 0; }
+
+# --files: land.sh's file-scoped guard. The registry is read as it will be committed: the working tree's when it is
+# one of the landed paths, else HEAD's.
+if [[ "${1:-}" == --files ]]; then
+    shift
+    reg_in=0; for f in "$@"; do [[ "$f" == "$REG" ]] && reg_in=1; done
+    if (( reg_in )); then regtxt=$(cat "$REG"); else regtxt=$(git show "HEAD:$REG" 2>/dev/null); fi
+    listed=$(printf '%s\n' "$regtxt" | reg_counts)
+    rc=0
+    for f in "$@"; do
+        scanned "$f" || continue
+        [[ -f "$f" ]] || continue
+        t=$(grep -n -F "$TAG" -- "$f" 2>/dev/null | sed "s|^|$f:|" | markers | wc -l | tr -d ' ')
+        l=$(echo "$listed" | awk -v f="$f" '$1==f{print $2}'); l=${l:-0}
+        (( t == l )) && continue
+        rc=1
+        if (( t > l )); then
+            echo "hack-registry: $f has $t HACK marker(s), $REG §4 has $l row(s). Add $((t - l)) row(s) (why | real fix) to $REG §4 and land it in the same commit:"
+            # The new markers: added lines of this landing's diff; none found (e.g. a row was dropped) -> every marker.
+            new=$(git diff -U0 HEAD -- "$f" 2>/dev/null \
+                | awk '/^@@ /{split($3,a,","); n=substr(a[1],2)+0; next} /^\+\+\+/{next} /^\+/{print n": "substr($0,2); n++}' \
+                | sed "s|^|$f:|" | markers)
+            if ! git ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then
+                new=$(grep -n -F "$TAG" -- "$f" | sed "s|^|$f:|" | markers)
+            elif [[ -z "$new" ]]; then
+                echo "  (no new marker in this diff - the file's markers; keep the rows that exist, add the missing ones)"
+                new=$(grep -n -F "$TAG" -- "$f" | sed "s|^|$f:|" | markers)
+            fi
+            while IFS=: read -r ff ln _; do
+                [[ -n "$ff" ]] && echo "  | \`$ff:$ln\` | <why: what the workaround does and why> | <the real fix> |"
+            done <<< "$new"
+        else
+            echo "hack-registry: $f has $t HACK marker(s), $REG §4 has $l row(s) - remove the stale row(s) from $REG §4 in the same commit"
+        fi
+    done
+    exit $rc
+fi
 tree=$(git grep -n -F "$TAG" -- . ':(exclude)targets/web/third_party' ":(exclude)$REG" \
         ':(exclude)test/tier1/test-hack-registry.sh' 2>/dev/null \
-        | grep -v -F "\`$TAG\`" | cut -d: -f1 | sort | uniq -c | awk '{print $2" "$1}')
-listed=$(sed -n '/<!-- hack-registry:start -->/,/<!-- hack-registry:end -->/p' "$REG" \
-        | sed -n 's/^| `\([^`]*\):[0-9][0-9]*` |.*/\1/p' | sort | uniq -c | awk '{print $2" "$1}')
+        | markers | cut -d: -f1 | sort | uniq -c | awk '{print $2" "$1}')
+listed=$(reg_counts < "$REG")
 
 n_tree=$(echo "$tree" | awk 'NF{s+=$2} END{print s+0}')
 n_listed=$(echo "$listed" | awk 'NF{s+=$2} END{print s+0}')

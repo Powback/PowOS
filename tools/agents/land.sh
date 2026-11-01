@@ -109,6 +109,17 @@ if [ -x apps/vendor.sh ] && [ -f shell/vendor/VERSIONS ]; then
   done < <(sed -n 's|^\([a-z0-9-]*\)\.js  *generated  *apps/\([a-z0-9-]*\):.*|\1 \2|p' shell/vendor/VERSIONS)
 fi
 
+# 1c. HACK markers (CI's test-hack-registry): a landed file's marker count must equal its rows in docs/REMOTE-POWOS.md
+# §4, else refuse and print the rows to add (11-01: four files reached master with markers and no rows). File-scoped,
+# the test's own matcher (--files).
+if [ -f test/tier1/test-hack-registry.sh ]; then
+  if ! hk=$(perl -e 'alarm 30; exec @ARGV' bash test/tier1/test-hack-registry.sh --files "${paths[@]}" 2>&1); then
+    printf '%s\n' "$hk" >&2
+    echo "land.sh: refused - HACK markers without registry rows: fill in the rows above in docs/REMOTE-POWOS.md §4 and add it to this landing" >&2
+    exit 3
+  fi
+fi
+
 # 2. commit by pathspec only. -f: a path under the gitignored .claude/ that's meant to be tracked (settings.json,
 # hooks, skills) needs it once to enter the index; already-tracked paths are unaffected either way.
 git add -f -- "${paths[@]}" || { echo "land.sh: git add failed" >&2; exit 3; }
