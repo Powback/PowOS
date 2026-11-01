@@ -9272,8 +9272,9 @@ try {
         if (docks.length) out.push(`a dock is visible in the overlay (${docks.map((d) => d.className.trim()).join(", ")})`);
         const pr = panel.getBoundingClientRect(), ps = getComputedStyle(panel);
         const inner = pr.width - parseFloat(ps.paddingLeft) - parseFloat(ps.paddingRight);
+        // Full width: the field spans the panel's padding box (its own 2 px margin each side, as the shared bar's, aside).
         const pill = panel.querySelector(".assist-ask .pill").getBoundingClientRect();
-        if (Math.abs(pill.width - inner) > 2) out.push(`the field is ${Math.round(pill.width)} px wide, not the panel's full ${Math.round(inner)}`);
+        if (Math.abs(pill.width - inner) > 6) out.push(`the field is ${Math.round(pill.width)} px wide, not the panel's full ${Math.round(inner)}`);
         if (/hold anywhere/i.test(document.body.textContent)) out.push('a "Hold anywhere to talk" hint is drawn');
         return out;
       });
