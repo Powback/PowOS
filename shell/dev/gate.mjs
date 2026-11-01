@@ -2791,6 +2791,143 @@ function aiStackLayout() {
   return [...new Set(fails)];
 }
 
+/**
+ * In the page: Recently done (the user, 11-01 16:39: "I can't click these to expand"), folded or as the unfolded left
+ * column. Three done tasks (5 min ago, 3 h ago, yesterday 21:10) show their done time, not "now" (the row's time was
+ * ago() fed the board's ms); a tap opens a row in place - its whole title, when, the closing note, the try line, how it
+ * was verified, "Still broken" - and "Still broken" with words typed goes through the verdict path (a user FAIL with
+ * them); a tap again closes it. One open at a time.
+ */
+async function aiDoneSetup(long) {
+  const G = window.__gw;
+  const [P, { powos }] = await Promise.all([G.mod("./ui/powai.tsx"), G.mod("./bridge.ts")]);
+  const got = [];
+  window.__dn = { got, was: [powos.ai.verdict, powos.agents.message] };
+  powos.ai.verdict = async (...a) => void got.push(["verdict", ...a]);
+  powos.agents.message = async (...a) => void got.push(["message", ...a]);
+  const now = Date.now();
+  const d = new Date(now);
+  const yest = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1, 21, 10).getTime();
+  const row = (id, title, done, extra) => ({ id, title, owner: "coder", status: "done", note: "", project: "Windows", created: done - 9e6, updated: done, done, progressDone: 0, progressTotal: 0, step: "", steps: "", commits: "", images: "", activity: done, tryLine: "", ...extra });
+  const tasks = [
+    row("dn-5m", long, now - 3e5, { note: "Rows open in place on a tap", tryLine: "Tap a Recently done row: it opens", commits: '[{"sha":"abc1234","subject":""}]' }),
+    row("dn-3h", "Page dots centred", now - 3 * 36e5, { note: "Dots centred under the grid" }),
+    row("dn-yd", "Dock size", yest, { note: "Kept the small dock" }),
+  ];
+  P.board.value = [...P.board.value.filter((w) => w.status !== "done"), ...tasks];
+  P.checks.value = [
+    { job: "j1", task: "dn-5m", name: "you", state: "PASS", line: "works: the user tried it", at: now - 2e5, shipped: true },
+    { job: "j2", task: "dn-3h", name: "dots", state: "PASS", line: "", at: now - 3 * 36e5, shipped: true },
+    { job: "j3", task: "dn-yd", name: "dock", state: "none", line: "a choice, nothing to test on the phone", at: yest, shipped: true },
+  ];
+  await G.until(() => document.querySelector('.ai-screen:is(.status, .panes) [data-sec=done] .ais-done-item[data-task="dn-yd"]'), 3000);
+  return tasks.map((t) => [t.id, t.done]);
+}
+
+/** In the page: each done row's time as shown, and what it should read ("16:36" today, "yesterday 21:10"). */
+function aiDoneTimes(tasks) {
+  const now = new Date();
+  const hm = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const want = (d) => `${d.toDateString() === now.toDateString() ? "" : "yesterday "}${hm(d)}`;
+  const shown = (id) => document.querySelector(`.ai-screen:is(.status, .panes) .ais-done-item[data-task="${id}"] .ais-when`)?.textContent.trim();
+  return tasks.map(([id, ms]) => ({ id, got: shown(id), want: want(new Date(ms)) }));
+}
+
+/** In the page: done row [id] tapped; whether it is [open] then. */
+async function aiDoneTap([id, open]) {
+  const item = () => document.querySelector(`.ai-screen:is(.status, .panes) .ais-done-item[data-task="${id}"]`);
+  item()?.querySelector(".ais-done-row").click();
+  return !!(await window.__gw.until(() => !!item()?.querySelector(".ais-done-detail") === open, 1500));
+}
+
+/** In the page: what each done row shows - open or not, its title cut off or not, its facts. */
+function aiDoneFacts() {
+  const items = [...document.querySelectorAll(".ai-screen:is(.status, .panes) .ais-done-item")];
+  const facts = (it) => Object.fromEntries([...it.querySelectorAll(".ais-done-fact")].map((f) => [f.dataset.fact, f.textContent]));
+  const cut = (t) => t.scrollWidth > t.clientWidth + 1;
+  return Object.fromEntries(items.map((it) => [it.dataset.task, { open: !!it.querySelector(".ais-done-detail"), title: it.querySelector(".ais-done-title").textContent, cut: cut(it.querySelector(".ais-done-title")), ...facts(it), said: it.querySelector(".ais-done-said")?.textContent ?? "" }]));
+}
+
+/** In the page: "Still broken" on the open row [id], [words] typed and sent; what the bridge got (null: no reply line). */
+async function aiDoneBroken([id, words]) {
+  const G = window.__gw;
+  const item = () => document.querySelector(`.ai-screen:is(.status, .panes) .ais-done-item[data-task="${id}"]`);
+  item()?.querySelector(".ais-done-broken")?.click();
+  if (!(await G.until(() => item()?.querySelector(".ai-reply textarea"), 2000))) return null;
+  const field = item().querySelector(".ai-reply textarea");
+  field.value = words;
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  await G.frames(2);
+  item().querySelector(".ai-reply").requestSubmit();
+  await G.until(() => window.__dn.got.length >= 2, 2000);
+  return window.__dn.got;
+}
+
+async function aiDoneRestore() {
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  [powos.ai.verdict, powos.agents.message] = window.__dn.was;
+}
+
+/** [checks]: [ok, what went wrong] pairs - the wrong ones. */
+const failsOf = (checks) => checks.filter(([ok]) => !ok).map(([, m]) => m);
+
+/** The opened rows' facts: the whole title, when, the note, the try line, how it was verified; one open at a time. */
+async function aiDoneOpen(page) {
+  const fails = [];
+  if (!(await page.evaluate(aiDoneTap, ["dn-5m", true]))) return ["tapping a done row didn't open it"];
+  const a = (await page.evaluate(aiDoneFacts))["dn-5m"];
+  const t = (await page.evaluate(aiDoneTimes, [["dn-5m", 0]]))[0];
+  fails.push(...failsOf([
+    [a.title === AIS_DONE_LONG && !a.cut, "the opened row's title is cut off"],
+    [a.when === `Done ${t.got}`, `its time reads "${a.when}", not "Done ${t.got}"`],
+    [/Rows open in place/.test(a.note ?? ""), `its note reads "${a.note}"`],
+    [/Tap a Recently done row/.test(a.try ?? ""), `its try line reads "${a.try}"`],
+    [/you said it works/.test(a.verified ?? ""), `its verified line reads "${a.verified}", not "you said it works"`],
+  ]));
+  const second = await page.evaluate(aiDoneTap, ["dn-yd", true]);
+  const b = await page.evaluate(aiDoneFacts);
+  fails.push(...failsOf([
+    [second, "tapping a second row didn't open it"],
+    [!b["dn-5m"].open, "two rows open at once"],
+    [/no device check possible: a choice/.test(b["dn-yd"].verified ?? ""), "the no-check row doesn't say why it had no check"],
+    [await page.evaluate(aiDoneTap, ["dn-yd", false]), "tapping an open row again didn't close it"],
+  ]));
+  return fails;
+}
+
+/** "Still broken" on a phone-checked row: the verdict path with the typed words, the row saying so; then closed. */
+async function aiDoneReopen(page) {
+  await page.evaluate(aiDoneTap, ["dn-3h", true]);
+  const verified = (await page.evaluate(aiDoneFacts))["dn-3h"].verified ?? "";
+  const got = await page.evaluate(aiDoneBroken, ["dn-3h", "dots are off again"]);
+  const v = JSON.stringify(got?.find((g) => g[0] === "verdict"));
+  const said = (await page.evaluate(aiDoneFacts))["dn-3h"].said;
+  const fails = failsOf([
+    [/checked on the phone/.test(verified), `a phone-checked row's verified line reads "${verified}"`],
+    [got, "Still broken didn't open the reply line"],
+    [v === JSON.stringify(["verdict", "dn-3h", false, "still broken: dots are off again"]), `Still broken sent ${v}, not a FAIL with the typed words`],
+    [/dots are off again/.test(said), "after Still broken the row doesn't show what was said"],
+  ]);
+  await page.evaluate(aiDoneTap, ["dn-3h", false]);
+  return fails;
+}
+
+/** Recently done's rows (aiDoneSetup's doc): their times, opened, Still broken; the opened row rendered to [shot]. */
+async function aiDoneRows(page, shot) {
+  const tasks = await page.evaluate(aiDoneSetup, AIS_DONE_LONG);
+  const times = await page.evaluate(aiDoneTimes, tasks);
+  const fails = times.filter((t) => t.got !== t.want).map((t) => `${t.id} shows "${t.got}", not "${t.want}"`);
+  fails.push(...(await aiDoneOpen(page)));
+  await page.evaluate(aiDoneTap, ["dn-5m", true]);
+  await page.screenshot({ path: shot });
+  await page.evaluate(aiDoneTap, ["dn-5m", false]);
+  fails.push(...(await aiDoneReopen(page)));
+  await page.evaluate(aiDoneRestore);
+  return fails;
+}
+
+const AIS_DONE_LONG = "Recently done rows open in place when tapped, showing the whole title instead of cutting it off at the edge";
+
 /** At rest on screen: no endless animation on the page (its own idle check; the AI page shown). */
 function aiStackRest() {
   const scr = document.querySelector(".ai-screen.status");
@@ -2841,6 +2978,7 @@ async function aiStatusCheck(page) {
     fails.push(...(await page.evaluate(aiStatusLook, tone)).map((f) => `folded ${tone}: ${f}`));
     await page.screenshot({ path: `/cache/ai-status-folded-${tone}.png` });
   }
+  fails.push(...(await aiDoneRows(page, "/cache/ai-status-folded-done.png")).map((f) => `folded done: ${f}`));
   const left = await page.evaluate(aiStatusEmpty);
   if (left.join() !== "working") fails.push(`folded: with an empty board the sections are [${left.join(", ")}], not only Working now`);
   fails.push(...(await aiStackCheck(page)).map((f) => `folded stack: ${f}`));
@@ -2992,6 +3130,7 @@ async function aiUnfoldedCheck(page) {
     fails.push(...[...(await page.evaluate(aiPanesFails)), ...(await page.evaluate(aiColumnsContent)), ...(await page.evaluate(aiPanesGlassFails)), ...(await page.evaluate(aiSegsSwitch))].map((f) => `${size}: ${f}`));
     await page.screenshot({ path: `/cache/ai-unfolded-${size}-chat.png` });
     await page.evaluate(aiChatRestore);
+    if (size === "unfolded") fails.push(...(await aiDoneRows(page, "/cache/ai-unfolded-done.png")).map((f) => `${size} done: ${f}`));
     fails.push(...(await aiUnfoldedRenders(page, size)));
   }
   fails.push(...(await aiUnfoldedRestored(page)));
