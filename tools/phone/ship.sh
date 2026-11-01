@@ -305,6 +305,9 @@ run)
     [ "${SHIP_WINDOW_GATE:-1}" = 1 ] && [ -z "${SHIP_DIR:-}" ] || return 0
     local b=$1 t=$2 what=$3 f= wb wl wrc gp wdg
     RW_DONE=
+    # A shell window check superseded while NOT JUDGED (window_wait) left its base here: this check covers that base's
+    # window changes too, so a newer tip shipping past an unjudged one never skips its device check.
+    [ -s "$Q/window-unjudged" ] && b=$(cat "$Q/window-unjudged")
     if [ -n "$b" ] && git cat-file -e "$b^{commit}" 2>/dev/null; then
       f=$(git diff --name-only "$b" "$t" 2>/dev/null | grep -E "$WINDOW_FILES" | sed 's|.*/||' | sort -u | paste -sd' ' -)
     else f="(no base: every window file)"; fi
@@ -333,6 +336,7 @@ run)
       echo "$(date +%T) ${t:0:9}: window check waiting for an awake phone - its requests are kept, retried in ${WINDOW_WAIT_S:-60} s (log $wl)"
       return 2
     fi
+    rm -f "$Q/window-unjudged"   # judged (PASS or FAIL; a FAIL keeps window-failed, which checks every ship)
     if [ $wrc = 0 ]; then
       rm -f "$Q/window-failed"; echo "$(date '+%F %T') ${t:0:9} $what window-render PASS" >> "$Q/shipped.log"
       echo "$(date +%T) ${t:0:9}: device window check PASS"; return 0
@@ -600,6 +604,18 @@ run)
     local ww_at ww_base ww_tip wgr
     [ -s "$Q/window-wait" ] || { [ -f "$Q/apk/window-wait" ] && return 0; return 1; }
     . "$Q/window-wait"
+    # Superseded (ask-latency 11-01: one dozing-phone wait blocked every later ship for 94 min, 5 requests stuck): the
+    # phone is asleep (nobody looking) and origin has a newer tip that changes the shell again and needs no APK - the
+    # loop ships that tip now. Its own window check covers this tip's base too ($Q/window-unjudged, window_gate), and
+    # this tip's requests are ancestors of the new one, so none is done before a check of its window changes passes.
+    local nt; nt=$(git rev-parse HEAD)
+    if [ "$nt" != "$ww_tip" ] && git merge-base --is-ancestor "$ww_tip" "$nt" 2>/dev/null &&
+       ! pending_apk "$nt" && [ -n "$(delta "$ww_tip" "$nt")" ]; then
+      [ -s "$Q/window-unjudged" ] || echo "$ww_base" > "$Q/window-unjudged"
+      rm -f "$Q/window-wait"
+      echo "$(date +%T) ${ww_tip:0:9}: window check still waiting for an awake phone - superseded by ${nt:0:9} (its check covers both)"
+      return 1
+    fi
     [ $(( $(date +%s) - ww_at )) -ge "${WINDOW_WAIT_S:-60}" ] || return 0
     T=$ww_tip; window_gate "$ww_base" "$T" shell; wgr=$?
     if [ $wgr = 2 ]; then sed -i '' "s/^ww_at=.*/ww_at=$(date +%s)/" "$Q/window-wait"; return 0; fi
