@@ -116,8 +116,7 @@ export function closeApp() {
   if (v && !v.closing) {
     // Its look as it goes, taken before anything moves: the picture on its switcher card.
     const el = document.querySelector<HTMLElement>(`.app-screen[data-app="${v.id}"]`);
-    const shot = el && shotOf(el);
-    if (shot) appShots.set(PREFIX + v.id, shot);
+    keepShot(PREFIX + v.id, el);
     appView.value = { ...v, closing: true };
   }
   (document.activeElement as HTMLElement | null)?.blur();
@@ -169,6 +168,9 @@ export function mergeRecent(hostKeys: string[], installed: Set<string>): string[
 export async function initPowosApps() {
   const v = await powos.store.get<Opened>(STORE).catch(() => null);
   if (v && Array.isArray(v.list)) opened.value = { list: v.list, front: v.front ?? null };
+  // Each app's last look, kept across restarts: a card has its picture though its app wasn't opened this time.
+  const shots = await powos.store.get<Record<string, string>>(SHOTS).catch(() => null);
+  for (const [k, u] of Object.entries(shots ?? {})) if (typeof u === "string" && !appShots.has(k)) appShots.set(k, u);
 }
 
 /**
@@ -192,6 +194,24 @@ export const taskApp = (id: number) => (id < 0 ? (taskKeys.get(id)?.slice(PREFIX
 
 /** Each app's page as it last looked (an SVG of its DOM), by launcher key: its switcher card's picture. */
 export const appShots = new Map<string, string>();
+const SHOTS = "powos-apps-shots";
+/** The kept pictures: the newest few, each under this size (a page's DOM can be big; the store holds them all). */
+const SHOTS_KEPT = 6;
+const SHOT_MAX = 400_000;
+
+/** [el]'s look now as [key]'s card picture (on leave, on the switcher opening over it), kept on disk for a restart. */
+let lastKept = { key: "", at: 0 };
+export function keepShot(key: string, el: HTMLElement | null, throttle = 0) {
+  const now = Date.now();
+  if (throttle && lastKept.key === key && now - lastKept.at < throttle) return;
+  lastKept = { key, at: now };
+  const shot = el && shotOf(el);
+  if (!shot) return;
+  appShots.delete(key);
+  appShots.set(key, shot);
+  const kept = [...appShots].filter(([, u]) => u.length <= SHOT_MAX).slice(-SHOTS_KEPT);
+  powos.store.set(SHOTS, Object.fromEntries(kept));
+}
 
 /** [el] (an open app's page) as a picture: its DOM in an SVG foreignObject, the theme's custom properties with it. */
 export function shotOf(el: HTMLElement): string | null {
@@ -210,7 +230,12 @@ export function shotOf(el: HTMLElement): string | null {
     clone.style.position = "absolute";
     const body = getComputedStyle(document.body);
     const xhtml = new XMLSerializer().serializeToString(clone);
-    const style = `${vars}width:${w}px;height:${h}px;position:relative;overflow:hidden;font-family:${body.fontFamily};font-size:${body.fontSize}`.replace(/"/g, "'");
+    // Escaped as an XML attribute: a theme property holding "<" or "&" (an inline SVG url(), a font list) made the
+    // whole picture invalid XML - an <img> that never decoded, the switcher card's broken image (11-01, "Lights").
+    const style = `${vars}width:${w}px;height:${h}px;position:relative;overflow:hidden;font-family:${body.fontFamily};font-size:${body.fontSize}`
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/"/g, "'");
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="${style}">${xhtml}</div></foreignObject></svg>`;
     return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   } catch (e) {
@@ -219,23 +244,16 @@ export function shotOf(el: HTMLElement): string | null {
   }
 }
 
-/** No picture of it yet: its icon and name on the theme's background. */
-function cardFace(label: string, icon: string) {
-  const w = innerWidth;
-  const h = innerHeight;
-  const bg = getComputedStyle(document.documentElement).getPropertyValue("--color-background").trim() || "#222";
-  const fg = getComputedStyle(document.documentElement).getPropertyValue("--color-foreground").trim() || "#ddd";
-  const esc = (s: string) => s.replace(/[<&"]/g, "");
-  const href = icon.startsWith("data:") ? icon : new URL(icon, location.href).href;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}"><rect width="100%" height="100%" fill="${esc(bg)}"/><image href="${esc(href)}" x="${w / 2 - 48}" y="${h / 2 - 96}" width="96" height="96"/><text x="${w / 2}" y="${h / 2 + 40}" fill="${esc(fg)}" font-family="sans-serif" font-size="22" text-anchor="middle">${esc(label)}</text></svg>`;
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-}
-
 /** Forgets [key] from the recents (a swipe up on its card, clear all). */
 export function forgetOpened(key: string) {
   opened.value = { ...opened.value, list: opened.value.list.filter((o) => o.key !== key) };
   appShots.delete(key);
   save();
+}
+
+/** The switcher opening over an open app ([key], null: none): its look now is its card's picture. */
+function keepShowing(key: string | null) {
+  if (key) keepShot(key, document.querySelector<HTMLElement>(`.app-screen[data-app="${key.slice(PREFIX.length)}"]`), 2000);
 }
 
 /**
@@ -253,9 +271,10 @@ export function mergeTasks<T extends { id: number; label: string; key: string | 
   const frontAt = opened.value.front?.at ?? 0;
   const card = (o: { key: string }) => {
     const a = apps.get(o.key)!;
-    return { id: taskId(o.key), label: a.label, key: o.key, icon: a.icon, snapshot: appShots.get(o.key) ?? cardFace(a.label, a.icon) } as T;
+    return { id: taskId(o.key), label: a.label, key: o.key, icon: a.icon, snapshot: appShots.get(o.key) ?? "" } as T;
   };
   const showing = appView.value && !appView.value.closing ? PREFIX + appView.value.id : null;
+  keepShowing(showing);
   const newer = mine.filter((o) => o.key === showing || o.at > frontAt).map(card);
   const older = mine.filter((o) => !(o.key === showing || o.at > frontAt)).map(card);
   const i = over == null ? -1 : host.findIndex((t) => t.id === over);

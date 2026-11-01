@@ -336,14 +336,10 @@ class ShellHost(
             // A recent task's last frame, for the switcher (on the WebView's loader thread: the snapshot is a binder call).
             if (path.startsWith("_task/")) {
                 val id = path.removePrefix("_task/").toIntOrNull() ?: return notFound()
-                // A web window (on its own display): its content now, as any app's card - never an empty card.
-                WebWindows.cardShot(context, id)?.let { return WebResourceResponse("image/jpeg", null, ByteArrayInputStream(it)).apply { responseHeaders = mapOf("Cache-Control" to "max-age=86400") } }
-                // A floating window in sight is never sent to the back, so the system's snapshot of it is from long ago
-                // (its full-screen time, its size before a resize): taken now instead.
-                if (dev.omalauncher.system.AppWindows.floating(context) && dev.omalauncher.system.FreeformTasks.list(context).any { it.id == id && it.visible }) {
-                    dev.omalauncher.system.Tasks.capture(id)
-                }
-                val jpeg = dev.omalauncher.system.Tasks.snapshot(id) ?: return notFound()
+                // Its picture now, else its last good one (ThumbCache: never a black first frame, and a task not opened
+                // since a restart keeps the picture it had); none: the page draws its icon on its glass.
+                dev.omalauncher.system.ThumbCache.init(context.cacheDir)
+                val jpeg = dev.omalauncher.system.ThumbCache.serve(id, liveTaskShot(id)) ?: return notFound()
                 // The URL names the snapshot's version (?v=, the task's last time in front, or a fresh capture's): kept.
                 return WebResourceResponse("image/jpeg", null, ByteArrayInputStream(jpeg)).apply { responseHeaders = mapOf("Cache-Control" to "max-age=86400") }
             }
@@ -406,6 +402,19 @@ class ShellHost(
             view: WebView,
             request: WebResourceRequest,
         ) = "${request.url.scheme}://${request.url.host}" != ORIGIN
+    }
+
+    /** Task / card [id]'s picture as it is now (a web window's content, a floating window captured, the system's snapshot). */
+    private fun liveTaskShot(id: Int): ByteArray? {
+        // A web window (on its own display): its content now, as any app's card.
+        WebWindows.cardShot(context, id)?.let { return it }
+        // A floating window in sight is never sent to the back, so the system's snapshot of it is from long ago
+        // (its full-screen time, its size before a resize): taken now instead.
+        if (dev.omalauncher.system.AppWindows.floating(context) && dev.omalauncher.system.FreeformTasks.list(context).any { it.id == id && it.visible }) {
+            dev.omalauncher.system.Tasks.capture(id)
+        }
+        // The system's: in memory, else the one it persisted (getTaskSnapshot restores it from disk after a restart).
+        return dev.omalauncher.system.Tasks.snapshot(id)
     }
 
     /** One file of an installed PowOS app's UI: "<app id>/<path>", never outside that app's current version. */

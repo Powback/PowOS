@@ -1167,6 +1167,65 @@ async function swipeHomeOneAnimCheck() {
 }
 
 /**
+ * The switcher never shows a broken image or an empty card (11-01 18:26: "sometimes native apps fail to render in the
+ * switcher"): an Android task with no snapshot, a PowOS app page whose picture 404s and one whose SVG doesn't decode get
+ * the icon placeholder; a card with a (cached) picture shows it. And a PowOS app's page picture (apps/pages.ts shotOf)
+ * decodes though a theme property holds "<" / "&" (it was invalid XML: the "Lights" card's broken image).
+ */
+async function switcherThumbsCheck() {
+  const icon = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="#e63"/></svg>');
+  const good = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="90" height="190"><rect width="90" height="190" fill="#36c"/></svg>');
+  const tasks = [
+    { id: 1101, label: "Clock", key: "a:clock", icon, snapshot: "" },
+    { id: 1102, label: "Files", key: "a:files", icon, snapshot: good, webwindow: 41 },
+    { id: 1103, label: "Lights", key: "p:lights", icon, snapshot: `${location.origin}/_task/1103?v=404` },
+    { id: 1104, label: "Notes", key: "p:notes", icon: null, snapshot: "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cdiv%20style%3D%22a%3C%22%3E" },
+  ];
+  window.__mockEvents.emit("recents.show", { open: true, from: 1101, tasks });
+  await new Promise((ok) => setTimeout(ok, 1500));
+  const cards = [...document.querySelectorAll(".recents .task")];
+  if (cards.length < 4) return [`switcher-thumbs: ${cards.length} cards, expected 4`];
+  const fails = cards.flatMap(brokenOnCard);
+  fails.push(...cardPictureFails(cards));
+  window.__mockEvents.emit("recents.end", { to: "home" });
+  if (!(await appShotDecodes())) fails.push("a PowOS app page's picture (shotOf) doesn't decode with '<' / '&' in a theme property");
+  return fails;
+
+  /** switcher-thumbs' cards: placeholders where there's no picture (with the icon), the cached picture where there is. */
+  function cardPictureFails(cards) {
+    const fails = [];
+    const byLabel = (l) => cards.find((c) => c.querySelector(".task-label")?.textContent === l);
+    for (const l of ["Clock", "Lights", "Notes"]) if (!byLabel(l)?.querySelector(".task-shot.task-ph")) fails.push(`${l}: no icon placeholder where it has no picture`);
+    if (!byLabel("Clock")?.querySelector(".task-ph .task-ph-icon[src]")) fails.push("Clock: its placeholder doesn't show its icon");
+    const files = byLabel("Files")?.querySelector(".task-shot");
+    if (!(files instanceof HTMLImageElement) || !files.naturalWidth) fails.push("Files: its (cached) picture isn't shown");
+    return fails;
+  }
+
+  /** [card]'s broken pictures: no shot at all, or an <img> that loaded nothing. */
+  function brokenOnCard(card) {
+    const label = card.querySelector(".task-label")?.textContent;
+    if (!card.querySelector(".task-shot")) return [`${label}: no picture or placeholder`];
+    return [...card.querySelectorAll("img")].filter((img) => img.complete && img.getAttribute("src") && !img.naturalWidth).map((img) => `${label}: a broken <img> (${img.className})`);
+  }
+
+  /** A PowOS app page's picture (apps/pages.ts shotOf) decodes with "<" and "&" in a theme property. */
+  async function appShotDecodes() {
+    const { shotOf } = await window.__gw.mod("./apps/pages.ts");
+    document.documentElement.style.setProperty("--gate-svg", 'url("data:image/svg+xml,<svg xmlns=\'http://www.w3.org/2000/svg\'/>") & more');
+    const el = document.createElement("div");
+    el.textContent = "Lights";
+    document.body.append(el);
+    const url = shotOf(el);
+    el.remove();
+    document.documentElement.style.removeProperty("--gate-svg");
+    const img = new Image();
+    img.src = url ?? "";
+    return img.decode().then(() => true, () => false);
+  }
+}
+
+/**
  * X1: the home swipe (the host's bottom-edge swipe, NavGesture.kt homePlain -> Switcher.close: "recents.end" to: home)
  * with the switcher up closes it to home with the switcher's own closing animation (collapse: the cards and the scrim
  * fade over its settle, frame by frame - never a jump), and ends on home: no switcher layer left, no app opened.
@@ -9114,6 +9173,8 @@ try {
   // side-by-side pages without moving a tile.
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "home-return", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(homeReturnCheck))));
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-thumbs", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(switcherThumbsCheck))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "swipe-home-one-anim", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(swipeHomeOneAnimCheck))));
   // X1/X2 (board one-swipe-up-gesture-for-home-and-over-apps): the home swipe over the switcher, folded and unfolded;

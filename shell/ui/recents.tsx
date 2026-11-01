@@ -221,6 +221,9 @@ function close() {
   powos.recents.closed();
 }
 
+/** [img] decoded (false: none, or its picture failed). */
+const decoded = (img: HTMLImageElement | null) => (img ? img.decode().then(() => true, () => false) : Promise.resolve(false));
+
 /** Held: the window is on the first card. Its fresh snapshot goes on the card; once it shows, the window may go. */
 async function landed(snapshot: string | null) {
   // Home (in sight behind the window the whole swipe) fades out under the cards now.
@@ -238,8 +241,9 @@ async function landed(snapshot: string | null) {
   const shot = row?.querySelector(".task:first-child .task-shot");
   const img = shot instanceof HTMLImageElement ? shot : null;
   if (img && snapshot && img.getAttribute("src") !== snapshot) img.src = snapshot;
-  await img?.decode().catch(() => {});
-  if (img) img.style.visibility = "";
+  // Shown only once it decoded: a picture that failed stays hidden for its card's placeholder (switcher.tsx swaps it
+  // in on the error) - un-hiding a failed one was the broken-image card (the user, 11-01 18:26).
+  if (await decoded(img)) img!.style.visibility = "";
   live.value = false;
   await nextFrame();
   await nextFrame();
@@ -581,7 +585,8 @@ function Opening() {
     ).onfinish = () => opened(o.id);
   }, [o?.id]);
   if (!o) return null;
-  return <img ref={el} class="recents-expand" src={o.src} alt="" />;
+  // (Its picture failing mid-growth: hidden, never a broken image - the app opens all the same.)
+  return <img ref={el} class="recents-expand" src={o.src} alt="" onError={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "hidden")} />;
 }
 
 /**
