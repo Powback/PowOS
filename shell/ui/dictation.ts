@@ -26,7 +26,7 @@ export interface MicTarget {
 }
 
 /** The recognition under way, and whether it sends what's heard; typed is what its field had before it. */
-let pending: { send: boolean; typed: string; target: MicTarget } | null = null;
+let pending: { send: boolean; typed: string; target: MicTarget; at: number; retried?: boolean } | null = null;
 /** It asked for the mic first: the press that asked can't still be held, so a yes dictates. */
 let asked: MicTarget | null = null;
 
@@ -47,12 +47,44 @@ export const hearing = (target: MicTarget) =>
 const logStart = (hold: boolean) =>
   console.info(`dictation start (${hold ? "hold" : "tap"})${pending ? " over this page's own" : ""}${speech.value.elsewhere ? " over another window's" : ""}`);
 
+/**
+ * In logcat: every end, with why (VS1, the user 2026-11-01 18:26: "it activates and then instantly deactivates") - a
+ * stop the user never asked for is visible as its reason, never a silent flicker.
+ */
+const logEnd = (why: string) =>
+  console.info(`dictation end: ${why}${pending ? ` after ${Math.round(performance.now() - pending.at)} ms` : ""}`);
+
+/** A start that ends by itself, nothing heard, this soon (ms) never really listened: one retry, then a message. */
+const STILLBORN_MS = 2000;
+/** What the field shows when the mic couldn't start (after its one retry). */
+const NO_START = "the mic didn't start - tap to try again";
+
+/**
+ * Idempotent (VS1): a second start for the dictation under way (the side button's summoning and its own mic, a double
+ * tap) is a no-op - never a cancel and a restart, which flickered it off. True: it was one (a hold makes it a hold's).
+ */
+function already(hold: boolean, target: MicTarget) {
+  if (pending?.target !== target || !speech.value.listening) return false;
+  console.info(`dictation start (${hold ? "hold" : "tap"}) ignored: already listening for it`);
+  if (hold) makeHold(target);
+  return true;
+}
+
+/** The recognizer didn't start ([r]: asked for the mic, unavailable): the UI lets go of it. */
+function notStarted(r: string, target: MicTarget) {
+  console.info(`dictation start: ${r}`);
+  if (pending?.target === target) pending = null;
+  speech.value = { ...speech.value, listening: false };
+  if (r === "asked") asked = target;
+}
+
 export async function listen(hold: boolean, target: MicTarget) {
+  if (already(hold, target)) return;
   // The recognizer first, then the UI: the call is on its way before anything else runs. One dictation at a time
   // (AO3): this start ends any other, here or in another window (the native side's SessionSlot).
   const starting = powos.speech.start(hold);
   logStart(hold);
-  pending = { send: hold, typed: target.typed(), target };
+  pending = { send: hold, typed: target.typed(), target, at: performance.now() };
   // Listening shows in this frame, not when the recognizer reports it.
   speech.value = { listening: true, text: "", error: null };
   target.started?.();
@@ -60,11 +92,7 @@ export async function listen(hold: boolean, target: MicTarget) {
   powos.keyboard.hide();
   navigator.vibrate?.(10);
   const r = await starting;
-  if (r !== "started") {
-    if (pending?.target === target) pending = null;
-    speech.value = { ...speech.value, listening: false };
-  }
-  if (r === "asked") asked = target;
+  if (r !== "started") notStarted(r, target);
 }
 
 /**
@@ -107,7 +135,7 @@ export function finish(...targets: MicTarget[]): Promise<void> | null {
         pending = null;
         speech.value = { ...speech.value, listening: false };
         // Timed out: the recognizer never ended - let it go.
-        if (text === undefined) powos.speech.cancel();
+        if (text === undefined) (logEnd("send: final words timed out"), powos.speech.cancel());
         p.target.heard(join(p.typed, text?.trim() ? text : speech.value.text || partial), false);
       }
       resolve();
@@ -126,7 +154,7 @@ export function finish(...targets: MicTarget[]): Promise<void> | null {
 export function settle(...targets: MicTarget[]) {
   if (finished) return;
   const p = pending;
-  if (p && targets.includes(p.target)) pending = null;
+  if (p && targets.includes(p.target)) (logEnd("settled: sent from its field"), (pending = null));
   if (!pending && speech.value.listening) stopNow();
   forgetWords();
 }
@@ -145,6 +173,7 @@ function forgetWords() {
 export function drop(...targets: MicTarget[]) {
   const p = pending;
   if (!p || !targets.includes(p.target)) return forgetWords();
+  logEnd("dropped: another window edited the bar");
   pending = null;
   stopNow();
   finished?.end("");
@@ -156,14 +185,14 @@ export const listeningFor = (target: MicTarget) => pending?.target === target;
 
 /** [target]'s dictation becomes a hold's: it goes on until stop(), and its end is a send. */
 export function makeHold(target: MicTarget) {
-  if (pending?.target !== target) return;
+  if (pending?.target !== target) return void console.info("dictation hold: nothing listening for it");
   pending.send = true;
   powos.speech.hold();
 }
 
 /** Forgets [target]'s dictation (it was cancelled): nothing goes to it. */
 export function forget(target: MicTarget) {
-  if (pending?.target === target) pending = null;
+  if (pending?.target === target) (logEnd("forgotten: cancelled"), (pending = null));
   speech.value = { ...speech.value, listening: false };
 }
 
@@ -175,7 +204,7 @@ function stopNow() {
 
 /** A tap on a mic that is listening: it ends now - what's heard goes to its field; a stuck "listening" with nothing pending resets too. */
 export function stopTap() {
-  if (pending) interrupt();
+  if (pending) (logEnd("stop tap"), interrupt(undefined, "stop tap"));
   // Another window's dictation (home's, under the launcher overlay that came up for it): this tap ends it - never a
   // second one (AO3, 2026-10-31 00:11:12: a second tap here started one, superseding home's). Its words go to its field.
   else if (speech.value.elsewhere) (console.info("dictation stop: another window's"), void powos.speech.stop());
@@ -186,8 +215,9 @@ export function stopTap() {
  * Stops listening for [target] (any, without one) without waiting for the end: what's heard so far goes into its field
  * (as a dictation, never sent) - the user started typing, tapped the field, or the field went away.
  */
-export function interrupt(target?: MicTarget) {
+export function interrupt(target?: MicTarget, why = "interrupted") {
   const p = pending;
+  if (p && (!target || p.target === target)) logEnd(why);
   // The mic shows "off" at once, whatever the recognizer reports later (it never reported the end: a stuck button).
   if (!p && !target) return void stopNow();
   if (!p || (target && p.target !== target)) return;
@@ -204,7 +234,8 @@ export function interrupt(target?: MicTarget) {
  */
 export function release(target?: MicTarget) {
   const p = pending;
-  if (!p || (target && p.target !== target)) return;
+  if (!p || (target && p.target !== target)) return void console.info("dictation release: nothing listening for it");
+  logEnd("released (push-to-talk)");
   const now = join(p.typed, speech.value.text);
   pending = null;
   stopNow();
@@ -218,22 +249,61 @@ powos.on("speech.cancelled", ({ why }: { why: string }) => {
   console.info(`dictation cancelled: ${why}`);
   // A send waiting for its final words: what showed is what's sent.
   if (finished) return finished.end(speech.value.text);
+  logEnd(`cancelled by the host: ${why}`);
   const p = pending;
   pending = null;
   speech.value = { ...speech.value, listening: false };
   if (p) p.target.heard(join(p.typed, speech.value.text), false);
 });
+/**
+ * The dictation ended by itself at once, nothing heard (the recognizer busy or refusing - not a stop of ours, which
+ * clears pending first): one retry (VS1), and if that dies too the field says so instead of a silent flicker. True: it
+ * was handled here.
+ */
+function stillborn(text: string) {
+  const p = pending;
+  if (!p || text.trim() || performance.now() - p.at >= STILLBORN_MS) return false;
+  const error = speech.value.error ?? "no error";
+  if (p.retried) {
+    logEnd(`ended by itself at once again (${error}): giving up`);
+    pending = null;
+    speech.value = { ...speech.value, listening: false, error: speech.value.error ?? NO_START };
+    p.target.heard(p.typed, false);
+    return true;
+  }
+  logEnd(`ended by itself at once (${error}): retrying once`);
+  p.retried = true;
+  p.at = performance.now();
+  speech.value = { listening: true, text: "", error: null };
+  void powos.speech.start(p.send).then((r) => {
+    if (r === "started" || pending !== p) return;
+    pending = null;
+    speech.value = { ...speech.value, listening: false, error: NO_START };
+  });
+  return true;
+}
+
 powos.on("speech.done", ({ text }: { text: string }) => {
   if (finished) return finished.end(text);
+  if (stillborn(text)) return;
   const p = pending;
+  logEnd(`done by the recognizer (${text.length} chars)`);
   pending = null;
   speech.value = { ...speech.value, listening: false };
   if (p) p.target.heard(join(p.typed, text), p.send && !!text.trim());
 });
 // The page went away mid-dictation (the assist closed, an app came up over home): a release that never comes would
 // leave the recognizer listening until the native watchdog or cap. What's heard stays in the field; nothing is sent.
+// A grace first (VS1): the side button's panel re-attaches its warm page to a new window on every summoning, and the
+// page can read hidden for a moment while its new window comes up - an at-once interrupt ended the summoning's
+// dictation as it started. Still hidden after the grace: it really went.
+const HIDDEN_GRACE_MS = 800;
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden && (pending || speech.value.listening)) interrupt();
+  if (!document.hidden || !(pending || speech.value.listening)) return;
+  const p = pending;
+  window.setTimeout(() => {
+    if (document.hidden && pending === p && (pending || speech.value.listening)) interrupt(undefined, "the page went hidden");
+  }, HIDDEN_GRACE_MS);
 });
 powos.on("speech.permission",({ granted }: { granted: boolean }) => {
   if (granted && asked) listen(false, asked);

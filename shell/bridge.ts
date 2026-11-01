@@ -1028,7 +1028,8 @@ function mock(): Bridge {
       let timer = 0;
       let heard = "";
       let held = false;
-      const counts = { starts: 0, stops: 0, cancels: 0, superseded: 0, open: 0, maxOpen: 0 };
+      // failNext: the next starts end at once with nothing heard and an error (a busy recognizer, VS1's check).
+      const counts = { starts: 0, stops: 0, cancels: 0, superseded: 0, open: 0, maxOpen: 0, failNext: 0 };
       (window as unknown as { __speechMock: typeof counts }).__speechMock = counts;
       const state = (listening: boolean) => events.emit("speech.state", { listening, text: heard, error: null });
       const close = () => {
@@ -1046,6 +1047,15 @@ function mock(): Bridge {
           counts.starts++;
           if (counts.open) counts.superseded++;
           close();
+          if (counts.failNext > 0) {
+            counts.failNext--;
+            heard = "";
+            window.setTimeout(() => {
+              events.emit("speech.state", { listening: false, text: "", error: "the speech recognizer is busy" });
+              events.emit("speech.done", { text: "" });
+            }, 20);
+            return "started" as const;
+          }
           counts.open = 1;
           counts.maxOpen = Math.max(counts.maxOpen, counts.open);
           held = hold;
