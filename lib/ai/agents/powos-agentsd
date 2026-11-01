@@ -334,6 +334,8 @@ class Spool:
                 "parent": parent,
                 "state": "idle",
                 "title": "",
+                # Its first prompt's first line, kept (title follows the latest prompt / task): the AI page's fallback.
+                "prompt": "",
                 "step": "",
                 "cwd": cwd,
                 "pid": pid,
@@ -514,7 +516,8 @@ class Spool:
             self.touch(a, ts, state="idle" if a["state"] in ("gone", "idle", "blocked") else a["state"])
         elif ev == "UserPromptSubmit":
             self.fails[top] = 0
-            self.touch(a, ts, state="working", step="", title=first_line(rec.get("prompt"), 80) or a["title"])
+            line = first_line(rec.get("prompt"), 80)
+            self.touch(a, ts, state="working", step="", title=line or a["title"], prompt=a.get("prompt") or line)
             self.set_title(a)
             self.event(top, ts, "prompt", "", first_line(rec.get("prompt"), 60))
         elif ev == "PreToolUse":
@@ -568,7 +571,8 @@ class Spool:
                 pick = next((i for i, q in enumerate(queued) if q["type"] and q["type"] == at), 0 if queued else None)
                 q = queued.pop(pick) if pick is not None else {}
                 title = q.get("desc") or q.get("line") or me["title"]
-                self.touch(me, ts, state="working", title=title, role=at or me["role"], work=q.get("slug") or me.get("work", ""))
+                self.touch(me, ts, state="working", title=title, prompt=me.get("prompt") or title,
+                           role=at or me["role"], work=q.get("slug") or me.get("work", ""))
                 self.event(top, ts, "sub_start", rec.get("agent_type") or "agent", clean(title, 60))
                 self.touch(a, ts, state="working")
                 self.recount(top)
