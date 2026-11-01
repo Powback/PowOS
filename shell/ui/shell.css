@@ -2507,7 +2507,7 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 /* The Agents view (agents.tsx): home's widget, a line per agent, and its screen over home. */
 /* The widget fills its tile at every size (shell/dev/preview.sh): a size container, type from the tile (cqmin), the
    agents as cards sharing the height (agents.tsx AgentsPanel picks the columns and rows that fit). */
-.ag-panel { height: 100%; container-type: size; overflow: hidden; }
+.ag-panel { height: 100%; container-type: size; overflow: hidden; font-family: var(--font-ui); }
 .ag-in {
   height: 100%; box-sizing: border-box; padding: 0.55em 0.7em; display: flex; flex-direction: column; gap: 0.4em;
   font-size: clamp(12px, 5.2cqmin, 19px);
@@ -2515,7 +2515,10 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .ag-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0 0.6em; white-space: nowrap; flex: none; }
 .ag-head > :first-child { color: var(--color-foreground); font-weight: bold; }
 .ag-head > :last-child { font-size: 0.85em; white-space: normal; }
-.ag-list { flex: 1; min-height: 0; display: grid; gap: 0.4em; overflow: hidden; }
+.ag-list { flex: 1; min-height: 0; display: grid; gap: 0.35em 0.6em; overflow: hidden; }
+/* Agents' rows (agents.tsx AgentsPanel) at their own height from the top, never stretched to the tile's height (the
+   idle card, alone, still fills it). */
+.ag-list.rows { grid-auto-rows: max-content; align-content: start; }
 .ag-card {
   overflow: hidden; min-width: 0; min-height: 0; box-sizing: border-box; padding: 0.35em 0.6em; border-radius: 0.7em;
   background: color-mix(in srgb, currentColor 8%, transparent); color: var(--color-foreground);
@@ -2549,21 +2552,26 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
   .ag-head > :last-child { font-size: 1em; white-space: normal; }
 }
 /* The fleet in plain words (agents.tsx, fleet.ts): widget tiles, the screen's cards, a thin progress bar. */
+/* A widget row (agents.tsx Tile): the title's line, a thin bar under it, the step's line when there's room - never
+   shorter or taller than its text (AgentsPanel shows only the rows that fit; spare height left as glass or filled with
+   muted "done" rows), each line whole and cut by an ellipsis, never by the row's box. Plain rows on the card's glass
+   apart by the gap alone: no background or line of their own (no boxes in boxes). */
 .fl-tile {
-  position: relative; overflow: hidden; min-width: 0; min-height: 0; box-sizing: border-box; padding: 0.2em 0.55em; border-radius: 0.6em;
-  background: color-mix(in srgb, currentColor 8%, transparent); color: var(--color-foreground);
-  display: flex; flex-direction: column; justify-content: center; gap: 0.1em; cursor: pointer;
+  overflow: hidden; min-width: 0; box-sizing: border-box; padding: 0.25em 0.1em; background: transparent; color: var(--color-foreground);
+  display: flex; flex-direction: column; gap: 0.2em; cursor: pointer;
 }
-.fl-tile.bad { background: color-mix(in srgb, var(--color-red) 18%, transparent); }
+.fl-tile.fl-done { opacity: 0.6; }
+.fl-tile.fl-done .fl-t1-text { font-weight: 500; }
 .fl-tile.bad .fl-t1-text { color: var(--color-red); font-weight: bold; }
-.fl-t1 { display: flex; align-items: center; gap: 0.4em; min-width: 0; line-height: 1.25; }
-.fl-t1-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.fl-t2 { font-size: 0.85em; line-height: 1.25; overflow-wrap: anywhere; }
-.fl-icon { flex: none; font: inherit; font-size: 0.85em; line-height: 1.2; padding: 0 0.45em; border-radius: 0.5em; border: 0;
+.fl-t1 { display: flex; align-items: center; gap: 0.4em; min-width: 0; line-height: 1.35; }
+.fl-t1-text, .fl-t2 { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.35; }
+.fl-t1-text { font-weight: 600; }
+.fl-t2 { flex: none; font-size: 0.85em; }
+.fl-icon { flex: none; font: inherit; font-size: 0.85em; line-height: 1.35; padding: 0 0.45em; border-radius: 0.5em; border: 0;
   color: var(--color-muted); background: var(--soft-fill); cursor: pointer; }
 .fl-icon.danger { color: var(--color-red); font-weight: bold; }
-/* Its progress: a thin line along the tile's foot, taking no line of its own. */
-.fl-tile > .fl-bar { position: absolute; left: 0.55em; right: 0.55em; bottom: 0.12em; height: 2px; }
+/* Its progress: a thin bar under the title, in the row's flow (never over the text); no progress: no bar. */
+.fl-tile > .fl-bar { display: block; flex: none; height: 3px; }
 .fl-bar { flex: none; height: 0.25em; border-radius: 1em; overflow: hidden; background: color-mix(in srgb, currentColor 14%, transparent); }
 .fl-bar > i { display: block; height: 100%; border-radius: inherit; background: var(--accent-text); }
 .fl-need { color: var(--ai-danger-text); }

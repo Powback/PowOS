@@ -1595,6 +1595,10 @@ function mockAgents(
             updated: now,
           },
           { id: "mac:c1#3", agent: "mac:c1", subject: "commit", status: "open", order: 2, updated: now },
+          // A helper's own list (the widget's progress bar under its title; mac:c1/a2 has none: no bar).
+          { id: "mac:c1/a1#1", agent: "mac:c1/a1", subject: "list the watchers", status: "done", order: 0, updated: now },
+          { id: "mac:c1/a1#2", agent: "mac:c1/a1", subject: "check each one", status: "in_progress", order: 1, updated: now },
+          { id: "mac:c1/a1#3", agent: "mac:c1/a1", subject: "report", status: "open", order: 2, updated: now },
         ],
         messages: [
           {

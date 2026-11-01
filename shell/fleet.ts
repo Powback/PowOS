@@ -12,7 +12,7 @@
  * (its own row), and the rest folded: idle sessions, sessions done today, and anything older than a day.
  */
 import { signal } from "@preact/signals";
-import { agent, agentIds, asks, isSub, QUEUED_STEP } from "./agents.ts";
+import { agent, agentIds, asks, isSub, QUEUED_STEP, tasks } from "./agents.ts";
 import type { Agent } from "./types.ts";
 
 /** The board columns the fleet reads (powai.tsx WorkRow's). */
@@ -249,21 +249,34 @@ export function summarise(prompt: string) {
   return plain(shorten(sentence.replace(/[\s.:;,-]+$/, ""), 70));
 }
 
-/** [a]'s task words: its board task's title, else its first prompt (or its label) summarised, else where it works. */
-function titleOf(a: Agent, w: WorkLite | undefined) {
+/** A Mac session's tmux label ("E: issues": its window letter and folder) - a code, not what it works on. */
+const TMUX_LABEL = /^[A-Z]:\s/;
+
+/**
+ * [a]'s task words: its board task's title, else its first prompt (or its label, never a tmux "E: issues" code)
+ * summarised, else where it works. The AI page's cards and the home widget both title by this.
+ */
+export function titleOf(a: Agent, w: WorkLite | undefined) {
   if (w?.title) return plain(w.title);
   const p = projectOf(a);
-  return summarise(a.prompt || "") || summarise(a.title) || (p === "PowOS" ? "PowOS agent" : `Work in ${p}`);
+  const label = TMUX_LABEL.test(a.title || "") ? "" : summarise(a.title);
+  return summarise(a.prompt || "").replace(TMUX_LABEL, "") || label || (p === "PowOS" ? "PowOS agent" : `Work in ${p}`);
 }
 
 /** The board's step for [w] ("" when none or only queued). */
 const boardStepOf = (w: WorkLite | undefined) => (w?.step && w.step !== QUEUED_STEP ? plain(w.step.replace(PATHY, " ")) : "");
 
+/** [a]'s progress [done, total]: its board task's plan, else the session's own task list (items done of all); [0, 0] none. */
+function progressOf(a: Agent, w: WorkLite | undefined): [number, number] {
+  if (w?.progressTotal) return [Math.min(w.progressDone ?? 0, w.progressTotal), w.progressTotal];
+  const own = tasks.value.get(a.id) ?? [];
+  return [own.filter((t) => t.status === "done").length, own.length];
+}
+
 /** [a] as a fleet line: task words, progress and its step now. */
 function workerOf(a: Agent): Worker {
   const w = taskOf(a.work);
-  const total = w?.progressTotal ?? 0;
-  const done = Math.min(w?.progressDone ?? 0, total);
+  const [done, total] = progressOf(a, w);
   // The board's --step first (the agent's own words, the user 11-01); its live tool step only without one.
   const live = a.state === "working" ? stepWords(a.step) : "";
   return { a, title: titleOf(a, w), done, total, now: boardStepOf(w) || live, task: w };
@@ -327,9 +340,25 @@ export function fleet(now = Date.now()): Fleet {
   return out;
 }
 
+/**
+ * Other projects' agents under Working now (the AI page's ⋯ "Other projects (N)", off at first): with it off, "working"
+ * everywhere - the AI page, its strip, the Agents screen and the home widget - is PowOS's own agents.
+ */
+export const otherProjects = signal(false);
+
+/**
+ * The one "working now" (the user, 11-01 18:26: the widget said 11 while the AI page said 3-5): the fleet's working
+ * agents (live, a turn running: fleet() puts one quiet 30 minutes under attention), PowOS's own first, other projects'
+ * only with [otherProjects] on. Every count and list of working agents reads this, never f.working directly.
+ */
+export function workingNow(f: Fleet): Worker[] {
+  const own = f.working.filter((x) => isPowOS(x.a));
+  return otherProjects.value ? [...own, ...f.working.filter((x) => !isPowOS(x.a))] : own;
+}
+
 /** "3 working · 1 needs you", the widget's and the screen's head. */
 export function headline(f: Fleet) {
-  const parts = [`${f.working.length} working`];
+  const parts = [`${workingNow(f).length} working`];
   if (f.attention.length) parts.push(`${f.attention.length} need${f.attention.length === 1 ? "s" : ""} you`);
   return parts.join(" · ");
 }
