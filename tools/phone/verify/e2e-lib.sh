@@ -170,6 +170,10 @@ pt() { ev "(()=>{const e=($1);if(!e)return 'none';const r=e.getBoundingClientRec
 # focused. searchpt: "x y" of what to tap, or none/off. SEARCHED: the field the keyboard is in after it.
 SEARCHPT="(document.querySelector('.home > .bar textarea')&&document.querySelector('.home > .bar').getBoundingClientRect().height>2?document.querySelector('.home > .bar textarea'):document.querySelector('.home .dock .app.dock-search'))"
 SEARCHED="document.activeElement&&document.activeElement.matches('.bar textarea')?'yes':'no'"
+# homefocused: home (com.powos.app) holds the input focus on ANY display. Never `grep -m1 mCurrentFocus`: dumpsys lists a
+# web window's or KWin's virtual display first (its mCurrentFocus=null), so a focused search read as unfocused (e2e
+# round 193, appapi 01/02 folded: the page had the focus and asked for the keyboard).
+homefocused() { sh_ "dumpsys window | grep mCurrentFocus" | grep -q com.powos.app; }
 searchpt() { pt "$SEARCHPT"; }
 # A dock cell by its key prefix (read only).
 dockel() { echo "[...document.querySelectorAll('.home .dock .app[data-key]')].find(a=>a.dataset.key.startsWith('$1'))"; }

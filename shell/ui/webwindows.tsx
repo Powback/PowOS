@@ -506,6 +506,18 @@ powos.on("webwindows.frame", (m: { id: number; own: boolean }) => update(m.id, {
 powos.on("webwindows.moveresize", (m: { id: number; edges: string }) => {
   appDrags.set(m.id, { edges: m.edges, start: null, moved: false, hold: 0 });
 });
+/**
+ * The host's minimised state of window [m.id] (WebWindows.kt minimisedIs: the page's minimise or restore as the host
+ * took it, its PiP expanded): the one source of [WebWin.minimised] - dockToggle reads what this set. Never told back to
+ * the host (it is the host's). e2e round 193: Calculator (no PiP) stayed "floating" in the host's list after its
+ * minimise, and Chrome came back in front behind the page's back.
+ */
+powos.on("webwindows.state", (m: { id: number; minimised: boolean }) => {
+  const w = webWins.value.find((v) => v.id === m.id);
+  if (!w || !!w.minimised === m.minimised) return;
+  webWins.value = webWins.value.map((v) => (v.id === m.id ? { ...v, minimised: m.minimised } : v));
+  if (!m.minimised) raise(m.id);
+});
 /** Its switcher card tapped (ShellBridge.openTask): back where it was, floating, on its page. */
 powos.on("webwindows.show", (id: number) => bringBack(id));
 

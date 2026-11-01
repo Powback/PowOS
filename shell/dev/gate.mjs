@@ -4774,6 +4774,41 @@ async function webDockToggleOne() {
   });
 }
 
+/**
+ * WS1 (e2e round 193 steps 08, 55): dock taps x3 on the window in front - minimised, restored, minimised - each told to
+ * the host (webwindows.minimise / restore) and each state the host's "webwindows.state" event; a host that shows it again
+ * by itself (its PiP expanded) has the page show it, and the next dock tap minimises it again.
+ */
+async function webDockToggleHost() {
+  const { W, win, min, tap, step } = window.__dtg;
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const port = await window.__gw.mod("./apps/port.ts");
+  const calls = [];
+  const was = { ww: powos.webwindows, native: port.native.value };
+  const said = (id, minimised) => setTimeout(() => window.__mockEvents.emit("webwindows.state", { id, minimised }), 20);
+  powos.webwindows = { ...(was.ww ?? {}), minimise: async (id) => (calls.push("min"), said(id, true), true), restore: async (id) => (calls.push("restore"), said(id, false), true) };
+  port.native.value = { postMessage() {}, close() {} };
+  const settle = () => new Promise((ok) => setTimeout(ok, 80));
+  try {
+    return await step(async (fails) => {
+      W.webWins.value = [win(951, "a:gate.ws")];
+      const seen = [];
+      for (let i = 0; i < 3; i++) (await tap("a:gate.ws"), await settle(), seen.push(min(951)));
+      if (seen.join() !== "true,false,true") fails.push(`WS1: three dock taps on the window in front: minimised [${seen}], not [true,false,true]`);
+      if (calls.join() !== "min,restore,min") fails.push(`WS1: the host was told [${calls}], not [min,restore,min]`);
+      window.__mockEvents.emit("webwindows.state", { id: 951, minimised: false });
+      await window.__gw.frames(2);
+      if (min(951) || !document.querySelector('.webwindow[data-wwid="951"]')) fails.push("WS1: the host's state minimised=false didn't show the window");
+      await tap("a:gate.ws");
+      await settle();
+      if (!min(951)) fails.push("WS1: after the host showed it, a dock tap didn't minimise it");
+    });
+  } finally {
+    powos.webwindows = was.ww;
+    port.native.value = was.native;
+  }
+}
+
 /** TB4: its window on another page - home goes to that page, the window in front. */
 async function webDockTogglePage() {
   const { S, W, P, win, top, tap, step } = window.__dtg;
@@ -5240,6 +5275,57 @@ async function aiScrollScene(r) {
  * read them as broken): a plain swipe up from empty home space opens the drawer (search not focused); home's search
  * (the bar, or the dock's search button) tapped takes the focus; a hold on empty space enters edit mode.
  */
+/**
+ * KB1 (e2e round 193, steps 06 and appapi 01): a finger's tap on home's search at [sp] - its field takes the focus AND
+ * the page asks the host for the keyboard (the bridge's keyboard.show: InputMethodManager.showSoftInput on the phone).
+ * The field focused with no keyboard request is no search for the user.
+ */
+async function searchTapKeyboard(r, f, sp, why) {
+  await r.page.evaluate(async () => {
+    const { powos } = await importShim("./bridge.ts");
+    window.__kbShows = 0;
+    window.__kbWas ??= powos.keyboard.show;
+    powos.keyboard.show = (...a) => (window.__kbShows++, window.__kbWas(...a));
+  });
+  await f.tap(sp);
+  const focused = await r.page.waitForFunction(() => document.activeElement?.matches(".bar textarea"), { timeout: READY_MS, polling: 50 }).then(() => true, () => false);
+  const shows = await r.page.evaluate(async () => {
+    const { powos } = await importShim("./bridge.ts");
+    powos.keyboard.show = window.__kbWas;
+    return window.__kbShows;
+  });
+  const fails = [];
+  if (!focused) fails.push(`E2E1: a tap on home's search${why} didn't focus its field`);
+  if (!shows) fails.push(`E2E1: a tap on home's search${why} never asked for the keyboard (keyboard.show)`);
+  return fails;
+}
+
+/**
+ * KB1 + WS1 (e2e round 193 steps 05-06), unfolded only: a web window in front put away by its dock icon (the host's
+ * "webwindows.state" says it's minimised), then a finger's tap on the bar - focused, the keyboard asked for.
+ */
+async function searchAfterDockMinimise(r, f) {
+  const sp = await r.page.evaluate(async () => {
+    const { wideHome } = await importShim("./hosts/wide.ts");
+    if (!wideHome.value) return "folded";
+    const W = await importShim("./ui/webwindows.tsx");
+    const D = await importShim("./ui/desktops.ts");
+    const S = await importShim("./state.ts");
+    W.webWins.value = [{ id: 941, key: "a:gate.kb", label: "kb", page: S.pages.value[0], x: 120, y: 120, w: 300, h: 240, live: true }];
+    await D.dockTap("a:gate.kb");
+    window.__mockEvents.emit("webwindows.state", { id: 941, minimised: true });
+    await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+    const bar = document.querySelector(".home > .bar textarea");
+    const b = bar?.getBoundingClientRect();
+    return b && b.height > 2 && W.webWins.value[0]?.minimised ? [Math.round(b.x + b.width / 2), Math.round(b.y + b.height / 2)] : null;
+  });
+  if (sp === "folded") return [];
+  if (!sp) return ["E2E1: no bar on the unfolded home after a dock minimise (or the window didn't minimise)"];
+  const fails = await searchTapKeyboard(r, f, sp, " after a dock minimise");
+  await r.page.evaluate(async () => ((await importShim("./ui/webwindows.tsx")).webWins.value = []));
+  return fails;
+}
+
 async function homeGesturesScene(r) {
   const f = await fingerOf(r.page);
   const fails = [];
@@ -5273,11 +5359,9 @@ async function homeGesturesScene(r) {
     return [Math.round(b.x + b.width / 2), Math.round(b.y + b.height / 2)];
   });
   if (!sp) fails.push("E2E1: no search on home (neither the bar nor the dock's button)");
-  else {
-    await f.tap(sp);
-    const ok = await until(() => document.activeElement?.matches(".bar textarea"));
-    if (!ok) fails.push("E2E1: a tap on home's search didn't focus its field");
-  }
+  else fails.push(...(await searchTapKeyboard(r, f, sp, "")));
+  await reset(); await f.wait(500);
+  fails.push(...(await searchAfterDockMinimise(r, f)));
   await reset(); await f.wait(500);
   at = await empty();
   if (!at) return [...fails, "E2E1: no empty spot on home to hold"];
@@ -7298,7 +7382,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockToggleHost, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }
