@@ -44,11 +44,23 @@ effect(() => {
 export const replying = signal<{ key: string; index: number } | null>(null);
 
 /** A card's (or the banner's) buttons: a touch on them is theirs, not the card's tap or slide. */
-export function Actions({ n, onDone }: { n: PhoneNotification; onDone?: (reply: boolean) => void }) {
-  if (!n.actions?.length) return null;
+export function Actions({ n, onDone, onOpen }: { n: PhoneNotification; onDone?: (reply: boolean) => void; onOpen?: () => void }) {
+  if (!n.actions?.length && !onOpen) return null;
   return (
     <div class="notif-buttons" onPointerDown={(e) => e.stopPropagation()}>
-      {n.actions.map((a, i) => (
+      {onOpen && (
+        <button
+          type="button"
+          class="notif-open"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen();
+          }}
+        >
+          Open
+        </button>
+      )}
+      {(n.actions ?? []).map((a, i) => (
         <button
           type="button"
           key={i}
@@ -65,6 +77,28 @@ export function Actions({ n, onDone }: { n: PhoneNotification; onDone?: (reply: 
     </div>
   );
 }
+
+/** Opens [n]'s app (its tap action) and shuts the shade: only ever explicit - its icon, or an expanded card's Open. */
+function openNotif(n: PhoneNotification) {
+  powos.notifications.open(n.key);
+  notif.value = false;
+}
+
+/**
+ * The cards tapped open (the user, 11-01 17:03: "I should be able to tap them to expand them and see them"): a tap on
+ * a card's body expands it in place - its whole text, its big picture, an Open button beside its actions - and a tap
+ * again folds it; the body never opens the app (Android's expand-then-open). Shut, the shade starts folded next time.
+ */
+const openCards = signal<Set<string>>(new Set());
+effect(() => {
+  if (!notif.value && openCards.peek().size) openCards.value = new Set();
+});
+const toggleCard = (key: string) => {
+  const s = new Set(openCards.value);
+  if (s.has(key)) s.delete(key);
+  else s.add(key);
+  openCards.value = s;
+};
 
 /** The reply typed in place: sent into the notification's action as its inline reply. */
 function Reply({ n, index }: { n: PhoneNotification; index: number }) {
@@ -129,73 +163,83 @@ interface CardProps {
   class?: string;
 }
 
-function Card({ n, name, more = 0, class: cls = "" }: CardProps) {
+type Drag = { x: number; y: number; t: number; dx: number; sideways: boolean | null };
+
+/** A card's touch: slid sideways (a clearable one) it's dismissed, a tap toggles it expanded. */
+function useCardGesture(n: PhoneNotification) {
   const el = useRef<HTMLDivElement>(null);
-  const drag = useRef<{
-    x: number;
-    y: number;
-    t: number;
-    dx: number;
-    sideways: boolean | null;
-  } | null>(null);
+  const drag = useRef<Drag | null>(null);
   const settle = (dx: number) => {
     const card = el.current!;
     card.style.transition = "transform 180ms ease, opacity 180ms ease";
     card.style.transform = `translateX(${dx}px)`;
     card.style.opacity = dx ? "0" : "";
   };
+  const release = (d: Drag) => {
+    const w = el.current!.clientWidth;
+    const v = d.dx / Math.max(1, performance.now() - d.t);
+    if (Math.abs(d.dx) <= w * DISMISS && Math.abs(v) <= FLICK) return settle(0);
+    settle(Math.sign(d.dx) * w);
+    setTimeout(() => powos.notifications.dismiss(n.key), 180);
+  };
+  const handlers = {
+    onPointerDown: (e: PointerEvent) => {
+      drag.current = { x: e.clientX, y: e.clientY, t: performance.now(), dx: 0, sideways: null };
+      el.current!.style.transition = "none";
+    },
+    onPointerMove: (e: PointerEvent) => {
+      const d = drag.current;
+      if (!d) return;
+      const dx = e.clientX - d.x;
+      const dy = e.clientY - d.y;
+      if (d.sideways == null && Math.hypot(dx, dy) > SLOP) {
+        d.sideways = Math.abs(dx) > Math.abs(dy) && n.clearable;
+        if (d.sideways) el.current!.setPointerCapture(e.pointerId);
+      }
+      if (!d.sideways) return;
+      d.dx = dx;
+      el.current!.style.transform = `translateX(${dx}px)`;
+      el.current!.style.opacity = String(1 - Math.min(1, Math.abs(dx) / el.current!.clientWidth));
+    },
+    onPointerUp: (e: PointerEvent) => {
+      const d = drag.current;
+      drag.current = null;
+      if (!d) return;
+      if (d.sideways) release(d);
+      else if (d.sideways == null && Math.hypot(e.clientX - d.x, e.clientY - d.y) <= SLOP) toggleCard(n.key);
+    },
+    onPointerCancel: () => {
+      drag.current = null;
+      settle(0);
+    },
+  };
+  return { el, handlers };
+}
+
+function Card({ n, name, more = 0, class: cls = "" }: CardProps) {
+  const { el, handlers } = useCardGesture(n);
+  const open = openCards.value.has(n.key);
+  const icon = notifIconSrc(n);
+  const picture = (n as GroupedNotification).picture;
   return (
-    <div
-      ref={el}
-      class={`notif tile ${cls}`}
-      onPointerDown={(e) => {
-        drag.current = {
-          x: e.clientX,
-          y: e.clientY,
-          t: performance.now(),
-          dx: 0,
-          sideways: null,
-        };
-        el.current!.style.transition = "none";
-      }}
-      onPointerMove={(e) => {
-        const d = drag.current;
-        if (!d) return;
-        const dx = e.clientX - d.x;
-        const dy = e.clientY - d.y;
-        if (d.sideways == null && Math.hypot(dx, dy) > SLOP) {
-          d.sideways = Math.abs(dx) > Math.abs(dy) && n.clearable;
-          if (d.sideways) el.current!.setPointerCapture(e.pointerId);
-        }
-        if (!d.sideways) return;
-        d.dx = dx;
-        el.current!.style.transform = `translateX(${dx}px)`;
-        el.current!.style.opacity = String(1 - Math.min(1, Math.abs(dx) / el.current!.clientWidth));
-      }}
-      onPointerUp={(e) => {
-        const d = drag.current;
-        drag.current = null;
-        if (!d) return;
-        if (d.sideways) {
-          const w = el.current!.clientWidth;
-          const v = d.dx / Math.max(1, performance.now() - d.t);
-          if (Math.abs(d.dx) > w * DISMISS || Math.abs(v) > FLICK) {
-            settle(Math.sign(d.dx) * w);
-            setTimeout(() => powos.notifications.dismiss(n.key), 180);
-          } else settle(0);
-        } else if (d.sideways == null && Math.hypot(e.clientX - d.x, e.clientY - d.y) <= SLOP) {
-          powos.notifications.open(n.key);
-          notif.value = false;
-        }
-      }}
-      onPointerCancel={() => {
-        drag.current = null;
-        settle(0);
-      }}
-    >
+    <div ref={el} class={`notif tile ${cls}${open ? " expanded" : ""}`} aria-expanded={open} {...handlers}>
       <div class="notif-head">
         {/* PowOS's own (its app isn't in the drawer, no icon from the host): PowOS's mark; another without one: none. */}
-        {notifIconSrc(n) && <img class="notif-icon" src={notifIconSrc(n)!} alt="" />}
+        {/* The icon opens the app (a tap on the body only expands it). */}
+        {icon && (
+          <img
+            class="notif-icon"
+            src={icon}
+            alt=""
+            role="button"
+            aria-label="open"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              openNotif(n);
+            }}
+          />
+        )}
         <span class="notif-app">{name ?? n.app}</span>
         {more > 0 && <span class="notif-more">+{more}</span>}
         <span class="notif-time muted">{ago(n.time)}</span>
@@ -203,7 +247,8 @@ function Card({ n, name, more = 0, class: cls = "" }: CardProps) {
       {/* PowOS's own: the sender is the group's name already ("PowOS · coder") - not again as its title. */}
       {n.title && !titleIsName(n, name) && <div class="notif-title">{n.title}</div>}
       {n.text && <div class={`notif-text${n.text.includes("\n") ? " lines" : ""}`}>{n.text}</div>}
-      <Actions n={n} />
+      {open && picture && <img class="notif-picture" src={picture} alt="" />}
+      <Actions n={n} onOpen={open ? () => openNotif(n) : undefined} />
       {replying.value?.key === n.key && <Reply n={n} index={replying.value.index} />}
     </div>
   );
@@ -213,7 +258,13 @@ function Card({ n, name, more = 0, class: cls = "" }: CardProps) {
  * What grouping reads besides the basics (types.ts PhoneNotification has them; spelled out here too, so this file
  * type-checks against an installed APK's older types.ts).
  */
-type GroupedNotification = PhoneNotification & { pkg?: string; group?: string | null; conversation?: boolean };
+type GroupedNotification = PhoneNotification & {
+  pkg?: string;
+  group?: string | null;
+  conversation?: boolean;
+  /** Its big picture (BigPictureStyle), shown when the card is expanded - a host that sends none: none. */
+  picture?: string | null;
+};
 
 /** PowOS's deploy notes, one group. */
 const UPDATES = "PowOS · updates";
@@ -231,11 +282,13 @@ interface Group {
 }
 
 /**
- * The list as the panel shows it: conversations each on their own at the top (newest first), then one group per app
- * - Android's group key when it has one (its bundle), PowOS's own per sender (deploy notes: "PowOS · updates") - the
- * groups by their newest.
+ * The list as the panel shows it: conversations each on their own at the top (newest first); then the singles - every
+ * app with just one notification, one compact list newest first, no head of their own (the user, 11-01 17:04: "If
+ * there's just one notification for something, group those together at the top: the single notifications first");
+ * then one group per app with several - Android's group key when it has one (its bundle), PowOS's own per sender
+ * (deploy notes: "PowOS · updates") - the groups by their newest.
  */
-function grouped(items: GroupedNotification[]): Group[] {
+function grouped(items: GroupedNotification[]): { convos: Group[]; singles: Group[]; groups: Group[] } {
   const own = (n: GroupedNotification) => POWOS.has(n.pkg ?? "") || POWOS.has(n.app);
   const convos = items.filter((n) => n.conversation && !own(n)).sort((a, b) => b.time - a.time);
   const map = new Map<string, Group>();
@@ -255,7 +308,31 @@ function grouped(items: GroupedNotification[]): Group[] {
   const groups = [...map.values()];
   for (const g of groups) g.items.sort((a, b) => b.time - a.time);
   groups.sort((a, b) => b.items[0].time - a.items[0].time);
-  return [...convos.map((n) => ({ id: `c:${n.key}`, name: n.app, items: [n] })), ...groups];
+  return {
+    convos: convos.map((n) => ({ id: `c:${n.key}`, name: n.app, items: [n] })),
+    singles: groups.filter((g) => g.items.length === 1),
+    groups: groups.filter((g) => g.items.length > 1),
+  };
+}
+
+/**
+ * The cards as the cascade's rows from --i [from]: the conversations each a row, the singles one row (a compact list of
+ * full cards, each with its app's icon and name), then each group a row. Bottom-aligned the list flips (shell.css), so
+ * the singles sit nearest the thumb, newest lowest.
+ */
+function rows(items: GroupedNotification[], from: number) {
+  const { convos, singles, groups } = grouped(items);
+  const row = (key: string, i: number, body: preact.ComponentChildren) => (
+    <div key={key} class="cascade" data-q ref={followNotif} style={{ "--i": from + i }}>
+      {body}
+    </div>
+  );
+  const one = (g: Group) => <Card key={g.id} n={g.items[0]} name={g.name !== g.items[0].app ? g.name : undefined} />;
+  return [
+    ...convos.map((g, i) => row(g.id, i, <Stack g={g} />)),
+    ...(singles.length ? [row("singles", convos.length, <div class="notif-singles">{singles.map(one)}</div>)] : []),
+    ...groups.map((g, i) => row(g.id, convos.length + (singles.length ? 1 : 0) + i, <Stack g={g} />)),
+  ];
 }
 
 /**
@@ -468,11 +545,7 @@ export function NotificationPanel() {
           allow the launcher to show your notifications here →
         </button>
       ) : items.length ? (
-        grouped(items).map((g, i) => (
-          <div key={g.id} class="cascade" data-q ref={followNotif} style={{ "--i": from + i }}>
-            <Stack g={g} />
-          </div>
-        ))
+        rows(items, from)
       ) : (
         <div class="notif-empty muted cascade" data-q ref={followNotif} style={{ "--i": from }}>
           {together ? "no notifications" : "nothing new"}

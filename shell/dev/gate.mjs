@@ -9176,8 +9176,9 @@ try {
   // NS1-NS4 (dev/notif-stacks-check.js; the user, 11-01 16:39: "just show like 3 cards and then an 'x more' hint"):
   // groups of 1, 3 and 7 all on screen at once, each up to 3 full cards one after another and "+4 more" on the 7, top-
   // and bottom-aligned; a tap on "+4 more" opens that group alone. NS5-NS7 (11-01 16:47: "Let's move the notifications
-  // to the top"): unset is top, newest first; bottom opens at its thumb end; a stored bottom moves to top once.
-  // Renders: /cache/notif-stacks-*.png.
+  // to the top"): unset is top, newest first; bottom opens at its thumb end; a stored bottom moves to top once. NS8
+  // (17:04): the single-app notifications first, headless, then the groups by newest; NS9 (17:03): a tap expands a
+  // clamped card in place without opening the app, again folds it. Renders: /cache/notif-stacks-*.png.
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, `shade-notif-stacks-${label}`, viewport).then((r) => whenReady(r, async () => {
@@ -9188,6 +9189,12 @@ try {
           fails.push(...(await call("stacksAt", align, at)));
           await r.page.screenshot({ path: `/cache/notif-stacks-${label}-${align}.png` });
           if (!fails.length) fails.push(...(await call("stacksExpand", at)));
+          if (!fails.length) fails.push(...(await call("stacksCardExpand", at)));
+          if (align !== "top" || fails.length) continue;
+          // The render of one card tapped open (Uno's long text), then folded again for the bottom-aligned run.
+          fails.push(...(await call("stacksCardExpand", `${at} render`, true)));
+          await r.page.screenshot({ path: `/cache/notif-stacks-${label}-top-expanded.png` });
+          await call("stacksUnoTap");
         }
         fails.push(...(await call("stacksOpenEnd", `${label} bottom open`)), ...(await call("stacksMigrate", `${label} migrate`)));
         return fails;

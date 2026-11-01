@@ -7,14 +7,24 @@
  *      group's full width (no narrower, offset strip), no overlap; newest nearest the thumb.
  * NS3: the 7-group the same 3 full cards plus "+4 more" (on the side away from the thumb).
  * NS4: a tap on "+4 more" opens that group only (all 7 laid out), a tap on its head folds it again.
+ * NS8 (11-01 17:04: "If there's just one notification for something, group those together at the top"): the two
+ *      single-app notifications (Solo, Uno) first, one list without any group head, each card its own app name; then
+ *      the groups by their newest (Trio, Seven); bottom-aligned the same mirrored.
+ * NS9 (11-01 17:03: "I should be able to tap them to expand them and see them"): Uno's long text is clamped; a tap on
+ *      its body expands it in place (all of it laid out, no clamp) without opening the app, an Open button then
+ *      opens it; a tap again folds it.
  */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const frames = (n) => new Promise((r) => { const f = () => (--n <= 0 ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); });
 const r0 = (v) => Math.round(v);
 
-const GROUPS = [["Solo", 1], ["Trio", 3], ["Seven", 7]];
+// Newest app first: Solo, Trio, Seven, then Uno - the oldest, but a single, so above both groups (NS8).
+const GROUPS = [["Solo", 1], ["Trio", 3], ["Seven", 7], ["Uno", 1]];
+const ORDER = ["Solo", "Uno", "Trio", "Seven"];
+const LONG = 12;
 const title = (app, i) => `${app} title ${i + 1}`;
-const text = (app, i) => `${app} first line ${i + 1}\nsecond line`;
+const text = (app, i) =>
+  app === "Uno" ? Array.from({ length: LONG }, (_, l) => `Uno ${l ? "line" : "first line"} ${l + 1}`).join("\n") : `${app} first line ${i + 1}\nsecond line`;
 
 /** The mock's notifications: the groups (the newest app first: Solo, then Trio, then Seven), then the shade open. */
 const seedItems = (now) =>
@@ -108,8 +118,95 @@ function groupOk(app, n, o) {
   return [...fails, ...g.cards.flatMap((c, i) => cardOk(c, i, s)), ...orderOk(g.cards, app, bottom, at), ...moreOk(g, n, { app, bottom, at })];
 }
 
-/** NS1-NS3 at [at], [bottom]-aligned or not. */
-const layered = (bottom, at) => GROUPS.flatMap(([app, n]) => groupOk(app, n, { bottom, at }));
+/** [app]'s lone card: in the singles list, no group head, its own app name - the failure, or null. */
+function single(app, at) {
+  const c = groupOf(app).cards[0];
+  if (!c?.closest(".notif-singles")) return `${at}: ${app}'s lone card isn't in the singles list`;
+  if (c.closest(".notif-stack")) return `${at}: ${app}'s lone card has a group head`;
+  return c.querySelector(".notif-app")?.textContent === app ? null : `${at}: ${app}'s lone card doesn't name its app`;
+}
+
+/** NS8: the singles first in one headless list (each card its own app name), then the groups by newest; mirrored bottom-aligned. */
+function singlesOk(bottom, at) {
+  const fails = ["Solo", "Uno"].map((app) => single(app, at)).filter(Boolean);
+  const tops = ORDER.map((app) => (groupOf(app).stack ?? groupOf(app).cards[0])?.getBoundingClientRect().top ?? NaN);
+  const sign = bottom ? -1 : 1;
+  if (!tops.every((t, i) => !i || sign * (t - tops[i - 1]) > 0))
+    fails.push(`${at}: not ${ORDER.join(", ")} ${bottom ? "from the bottom up" : "from the top down"} (${ORDER.map((a, i) => `${a} ${r0(tops[i])}`).join(", ")})`);
+  return fails;
+}
+
+/** NS1-NS3, NS8 at [at], [bottom]-aligned or not. */
+const layered = (bottom, at) => [...GROUPS.flatMap(([app, n]) => groupOk(app, n, { bottom, at })), ...singlesOk(bottom, at)];
+
+const tap = (el) => {
+  const b = el.getBoundingClientRect();
+  const o = { bubbles: true, clientX: b.left + b.width / 2, clientY: b.top + Math.min(b.height / 2, 12), pointerId: 7, isPrimary: true };
+  el.dispatchEvent(new PointerEvent("pointerdown", o));
+  el.dispatchEvent(new PointerEvent("pointerup", o));
+};
+/** Cut short: its text overflows its box, or a line clamp in force (the "…"). */
+const clamped = (t) => {
+  const cs = getComputedStyle(t);
+  return t.scrollHeight > t.clientHeight + 1 || (cs.display === "-webkit-box" && cs.webkitLineClamp !== "none");
+};
+
+/** A tap on Uno's text (folds the card the render left open). */
+export async function stacksUnoTap() {
+  const t = groupOf("Uno").cards[0]?.querySelector(".notif-text");
+  if (t) tap(t);
+  await frames(3);
+  return [];
+}
+
+/** Uno's card expanded by a tap: whole, not clipped, the app not opened, an Open button - the failures. */
+function expandedOk(card, t, opened, at) {
+  const fails = [];
+  if (!card.classList.contains("expanded")) fails.push(`${at}: a tap on Uno's card didn't expand it`);
+  if (clamped(t) || !t.textContent.includes(`Uno line ${LONG}`)) fails.push(`${at}: Uno expanded is still clamped (${t.scrollHeight}/${t.clientHeight} px, clamp ${getComputedStyle(t).webkitLineClamp})`);
+  if (card.scrollHeight > card.clientHeight + 1) fails.push(`${at}: Uno expanded is clipped (${card.scrollHeight}/${card.clientHeight} px)`);
+  if (opened.length) fails.push(`${at}: a tap on Uno's body opened the app`);
+  if (!card.querySelector(".notif-open")) fails.push(`${at}: Uno expanded has no Open button`);
+  return fails;
+}
+
+/** Folded again by a second tap, then expanded and opened by its Open button: the shade shuts (reopened after). */
+async function foldThenOpen(card, t, opened, at) {
+  const fails = [];
+  tap(t);
+  await frames(3);
+  if (card.classList.contains("expanded") || !clamped(t)) fails.push(`${at}: a second tap didn't fold Uno back`);
+  tap(t);
+  await frames(3);
+  card.querySelector(".notif-open")?.click();
+  if (opened[0] !== "Uno-0") fails.push(`${at}: Uno's Open didn't open it (${opened.join() || "nothing"})`);
+  const S = await importShim("./state.ts");
+  if (S.notif.value) fails.push(`${at}: Open left the shade open`);
+  S.notif.value = true;
+  await sleep(600);
+  return fails;
+}
+
+/** NS9: Uno's long text clamped, a tap expands it whole without opening the app, a tap folds it, Open opens it. */
+export async function stacksCardExpand(at, keepOpen) {
+  const B = await importShim("./bridge.ts");
+  const opened = [];
+  const real = B.powos.notifications.open;
+  B.powos.notifications.open = async (k) => void opened.push(k);
+  try {
+    const card = groupOf("Uno").cards[0];
+    const t = card?.querySelector(".notif-text");
+    if (!t) return [`${at}: no Uno card with its text`];
+    card.scrollIntoView({ block: "nearest" });
+    if (!clamped(t)) return [`${at}: Uno's ${LONG}-line text isn't clamped folded (${t.scrollHeight}/${t.clientHeight} px)`];
+    tap(t);
+    await frames(3);
+    const fails = expandedOk(card, t, opened, at);
+    return keepOpen ? fails : [...fails, ...(await foldThenOpen(card, t, opened, at))];
+  } finally {
+    B.powos.notifications.open = real;
+  }
+}
 
 /** NS4: a tap on Seven's "+4 more" opens it alone, all 7 laid out; its head folds it back. */
 export async function stacksExpand(at) {
@@ -145,14 +242,13 @@ export async function stacksAt(align, at) {
 
 /**
  * NS5 (the user, 11-01 16:47: "Let's move the notifications to the top"): nothing stored, the shade's list is top-
- * aligned folded and unfolded, the newest group first - Solo above Trio above Seven.
+ * aligned folded and unfolded: the singles, then the groups newest first - Solo, Uno, Trio, Seven from the top.
  */
 export async function stacksDefault(at) {
   await frames(2);
   const a = document.documentElement.dataset.alignShade;
   if (a !== "top") return [`${at}: no stored setting, the notifications are ${a}-aligned, not top`];
-  const tops = GROUPS.map(([app]) => groupOf(app).stack ?? groupOf(app).cards[0]).map((el) => el?.getBoundingClientRect().top ?? NaN);
-  return tops[0] < tops[1] && tops[1] < tops[2] ? [] : [`${at}: top-aligned, the groups aren't newest first (Solo ${r0(tops[0])}, Trio ${r0(tops[1])}, Seven ${r0(tops[2])})`];
+  return singlesOk(false, at);
 }
 
 /** NS6: bottom-aligned, an overflowing list opens (shade shut, then opened) scrolled to its thumb end, newest in view. */
