@@ -4,9 +4,11 @@
 # e2e-appapi.sh --round R: the App API app and the Hue widgets used like a user, READ-ONLY, for the manager's review
 # (board manager-end-to-end-user-journeys-on-the-phone-qa; e2e-lib.sh has the rules: screenshots + steps.txt in
 # /home/powos/design-qa/e2e-appapi/<round>/, never the verify pill, only what it opened closed).
-#   App API from the dock (search if it isn't there): the Apps tab, Philips Hue's actions, "List rooms" opened and
-#   "Dry run" (a dry run: nothing is sent, the bridge never contacted), back, the Audit tab (the dry run on top), the
-#   Trackers tab; "+ add app": its three paths, the bundled Open-Meteo OpenAPI sample imported into a draft, a dry run
+#   App API from the dock (search if it isn't there): the app list, Philips Hue's page (since 36db31cd "one clear flow":
+#   "Make a widget", "Live data you can use" = its reads, "Actions" = its writes with what they change, "Recent use" =
+#   its own audit, a Privacy fold = its trackers, a Developer fold = ids/safety/routes), "List rooms" opened and "Dry run"
+#   inline (nothing is sent, the bridge never contacted), back, the list's Developer fold: the Audit tab (the dry run on
+#   top) and the Trackers tab; "+ add app": its three paths, the bundled Open-Meteo OpenAPI sample imported into a draft, a dry run
 #   of it, discarded (nothing sent, nothing added); closed. Lights opened once from search (it hands its pairing to App API: /link?app=hue linked) and
 #   closed - nothing inside it touched. The composed Hue rooms widget (local.hue-rooms*) looked at on home.
 # NEVER: a switch (role=switch), "Send", a field, "Ask PowOS AI", "Add to my apps", a light, a setting - every tap's target is checked over CDP first
@@ -119,7 +121,7 @@ case $p in none|off|"") note "App API isn't in the dock here: from search"; sear
   *) set -- $p; tap "$1" "$2" "App API's dock cell" ;; esac
 sleep 1.5; chk app-api
 if until_js "$SCR&&$SCR.dataset.app==='local.app-api'&&!!($LIST)" 8; then
-  step apps "App API: the Apps tab - every app's spec, its actions and its switch"
+  step apps "App API: the app list - every app, what it offers and its switch"
   n=$(ev "String([...$SCR.querySelectorAll('div')].filter(d=>d.style.cursor==='pointer').length)")
   until_js "$SCR.innerText.includes('Philips Hue')" 6 && pass "the Apps tab lists $n app(s), Philips Hue among them" || fail "no Philips Hue in the Apps tab ($n cards): $(ev "$SCR.innerText.slice(0,1200)")"
 
@@ -128,44 +130,58 @@ if until_js "$SCR&&$SCR.dataset.app==='local.app-api'&&!!($LIST)" 8; then
   HUENAME="[...($HUE||document).querySelectorAll('div')].find(d=>d.textContent==='Philips Hue'&&!d.children.length)"
   reveal "$HUENAME"
   if tapel "$HUENAME" "Philips Hue's name"; then sleep 1.2; chk hue
-    step hue "Philips Hue opened: its actions, by safety"
-    ids=$(ev "['list_rooms','list_scenes','set_room','recall_scene','open_lights_page'].filter(a=>$SCR.innerText.includes(a)).join(' ')")
-    [ "$(wc -w <<<"$ids" | tr -d ' ')" = 5 ] && pass "Hue's 5 actions listed: $ids" || fail "Hue's actions: '$ids' (want 5)"
+    step hue "Philips Hue opened: Make a widget, its live data (reads) and its actions (writes), each with its switch"
+    # Sections by their heading (app-page.tsx Offers); a card's title is title(id) ("List rooms"), the raw id and its
+    # safety sit in the page's Developer fold (`<id> · <safety> · <endpoint>`, textContent: the fold stays closed).
+    SEC() { echo "(([...$SCR.querySelectorAll('h2')].find(h=>h.textContent==='$1')||{}).parentElement)"; }
+    TITLES() { ev "(()=>{const s=$(SEC "$1");return s?[...s.querySelectorAll('div')].filter(d=>!d.children.length&&d.parentElement.parentElement.style.cursor==='pointer'&&d===d.parentElement.firstElementChild).map(d=>d.textContent).join('|'):'none'})()"; }
+    [ "$(ev "!!$SCR.querySelector('[data-make-widget]')")" = true ] && pass "Make a widget is on Hue's page" || fail "no Make a widget on Hue's page"
+    reads=$(TITLES 'Live data you can use'); writes=$(TITLES 'Actions')
+    miss=""
+    for t in "List rooms" "List scenes" "Open lights page"; do grep -qF "|$t|" <<<"|$reads|" || miss="$miss read:$t"; done
+    for t in "Recall scene" "Set room"; do grep -qF "|$t|" <<<"|$writes|" || miss="$miss write:$t"; done
+    [ -z "$miss" ] && pass "Hue's 5 actions by safety - live data: $reads; actions: $writes" || fail "Hue's actions by safety: missing$miss (live data: '$reads', actions: '$writes')"
+    nw=$(ev "(()=>{const s=$(SEC Actions);return s?String(s.innerText.split('changes something, you can undo it').length-1):'0'})()")
+    [ "${nw:-0}" -ge 2 ] && pass "each action says what it changes ($nw x 'changes something, you can undo it')" || fail "the actions don't say what they change ($nw)"
+    DEVF="$SCR.querySelector('details[data-fold=developer]')"
+    ids=$(ev "(()=>{const f=$DEVF;if(!f)return 'none';const t=f.textContent;return [['list_rooms','read'],['list_scenes','read'],['open_lights_page','read'],['set_room','reversible-write'],['recall_scene','reversible-write']].filter(([i,s])=>t.includes(i+' · '+s+' · ')).map(([i,s])=>i+':'+s).join(' ')})()")
+    [ "$(wc -w <<<"$ids" | tr -d ' ')" = 5 ] && pass "the Developer fold lists each id with its safety: $ids" || fail "the Developer fold's ids with safety: '$ids' (want 5)"
 
-    # 2b. The detail is one page: the 5 actions and the app's own Audit section, no extra tap (reveal() scrolls, never taps).
-    AUDH="[...$SCR.querySelectorAll('h2')].find(h=>h.textContent==='Audit')"
+    # 2b. The app's own audit ("Recent use") and its trackers (the Privacy fold) are part of the page: no tab switch.
+    AUDH="[...$SCR.querySelectorAll('h2')].find(h=>h.textContent==='Recent use')"
     reveal "$AUDH"
-    step hue-audit "Philips Hue's detail: the 5 actions still shown, plus its own Audit section below them"
-    [ "$(ev "!!($AUDH)")" = true ] && pass "an Audit section is part of Hue's detail (no tab switch needed)" || fail "no Audit heading in Hue's detail"
+    step hue-audit "Philips Hue's page: its own audit (Recent use) and trackers (Privacy) under the actions"
+    [ "$(ev "!!($AUDH)")" = true ] && pass "a Recent use (audit) section is part of Hue's page" || fail "no Recent use (audit) heading on Hue's page"
     audtxt=$(ev "(()=>{const s=($AUDH)&&($AUDH).parentElement;return s?s.innerText.replace(/\\n/g,' | ').slice(0,160):''})()")
-    [ -n "$audtxt" ] && pass "the Audit section rendered: $audtxt" || fail "the Audit section under Hue never rendered"
-    reveal "$HUENAME"
+    grep -qE 'hue\.|Nothing has used' <<<"$audtxt" && pass "the Recent use section rendered: $audtxt" || fail "the Recent use section under Hue: '$audtxt'"
+    prv=$(ev "(()=>{const f=$SCR.querySelector('details[data-fold=privacy] summary');return f?f.innerText.replace(/\\n/g,' | '):'none'})()")
+    [ "$prv" != none ] && pass "the Privacy fold (Hue's trackers): $prv" || fail "no Privacy fold on Hue's page"
 
-    # 3. list_rooms opened, a dry run.
-    # Titles are plain words, the raw id muted under them (manager's design notes, 2026-10-24).
-    LR="[...$SCR.querySelectorAll('div')].find(d=>d.textContent==='List rooms'&&!d.children.length)"
-    [ "$(ev "!!($LR)&&!![...$SCR.querySelectorAll('div')].find(d=>d.textContent==='list_rooms'&&!d.children.length)")" = true ] &&
-      pass "list_rooms shows as the title 'List rooms', its id muted under it" || fail "no plain 'List rooms' title with the id under it"
-    # The active view tab: the dark foreground on the accent fill (not accent-tinted text on it).
-    tc=$(ev "(()=>{const t=$SCR.querySelector('[role=tab][aria-selected=true][data-tab=Actions]');if(!t)return 'none';const c=getComputedStyle(t),b=getComputedStyle(document.documentElement).getPropertyValue('--color-background').trim();return c.color+' on '+c.backgroundColor+' | bg '+b})()")
-    note "the active Actions tab: $tc"
+    # 3. list_rooms opened, a dry run inline in its card.
+    LR="[...$SCR.querySelectorAll('div')].find(d=>d.textContent==='List rooms'&&!d.children.length&&d.parentElement.parentElement.style.cursor==='pointer')"
+    # Its card: the nearest ancestor holding a Dry run button or not yet opened (the row's parent).
+    LRC="(()=>{let e=($LR);for(let i=0;e&&i<3;i++)e=e.parentElement;return e})()"
+    [ "$(ev "!!($LR)")" = true ] && pass "list_rooms shows as the plain title 'List rooms' (its id in the Developer fold)" || fail "no plain 'List rooms' title"
     reveal "$LR"
     if tapel "$LR" "list_rooms"; then sleep 1; chk list-rooms
-      DRY="[...$SCR.querySelectorAll('button')].find(b=>b.textContent==='Dry run')"
+      DRY="[...(($LRC)||document).querySelectorAll('button')].find(b=>b.textContent==='Dry run')"
       until_js "$DRY" 5 || fail "list_rooms opened no Dry run button"
       reveal "$DRY"
       step list-rooms "list_rooms opened: its endpoint, auth handle and output shape"
       pass "list_rooms opened with its Dry run button"
       if tapel "$DRY" "Dry run"; then
-        until_js "[...$SCR.querySelectorAll('pre')].some(p=>/nothing was sent|refused|couldn/.test(p.textContent))" 8; chk dry
-        out=$(ev "([...$SCR.querySelectorAll('pre')].pop()||{}).textContent||''")
-        reveal "[...$SCR.querySelectorAll('pre')].pop()"
+        # The output is the card's own <pre> (the page's Developer fold has one too: r199 read its "…").
+        PRE="(($LRC)||document).querySelector('pre')"
+        until_js "($PRE)&&/nothing was sent|refused|couldn/.test(($PRE).textContent)" 8; chk dry
+        out=$(ev "(($PRE)||{}).textContent||''")
+        reveal "$PRE"
         step dry-run "Dry run: the exact request list_rooms would make - nothing sent"
         grep -q 'dry run - nothing was sent' <<<"$out" && grep -qE 'GET https://[^ /]+/clip/v2/resource/room' <<<"$out" && grep -q 'secret:hue' <<<"$out" &&
           pass "the dry run shows GET .../clip/v2/resource/room, the key only as secret:hue, nothing sent" || fail "the dry run said: $(head -c 200 <<<"$out")"
       fi
     fi
-    # Back to the list (the header's ‹ in the detail view).
+    # Back to the list (the header's ‹ in the detail view; scrolled back up to it first - r199 found it off screen).
+    reveal "$SCR.querySelector('button[aria-label=back]')"
     tapel "$SCR.querySelector('button[aria-label=back]')" "the detail's back" && sleep 1
     until_js "$LIST" 4 || fail "back from Hue's detail: not on the app list"
   fi
@@ -174,7 +190,8 @@ if until_js "$SCR&&$SCR.dataset.app==='local.app-api'&&!!($LIST)" 8; then
   if dev_tab Audit; then
     sleep 1.5; chk audit
     step audit "the Audit tab: every call, newest first"
-    top=$(ev "(()=>{const c=[...$SCR.querySelectorAll('div')].filter(d=>d.style.borderRadius&&d.textContent.includes('.'))[0];return c?c.innerText.replace(/\\n/g,' | '):$SCR.innerText.slice(0,160)})()")
+    # The fold's first audit row: its "<app>.<action>" id line's card (never the app list's cards above the fold).
+    top=$(ev "(()=>{const f=$SCR.querySelector('details[data-fold=developer]');const d=f&&[...f.querySelectorAll('div')].find(d=>!d.children.length&&/^[\\w-]+\\.[\\w-]+$/.test(d.textContent));return d?d.parentElement.innerText.replace(/\\n/g,' | '):(f?f.innerText.slice(0,160):'no Developer fold')})()")
     grep -q 'hue.list_rooms' <<<"$top" && grep -q 'dry run' <<<"$top" && pass "on top: $top" ||
       { grep -qi 'Nothing has been called' <<<"$top" && fail "the audit log is empty after a dry run" || note "the newest row isn't the dry run: $top"; }
   fi
@@ -182,7 +199,7 @@ if until_js "$SCR&&$SCR.dataset.app==='local.app-api'&&!!($LIST)" 8; then
   if dev_tab Trackers; then
     sleep 1.5; chk trackers
     step trackers "the Trackers tab: what the capture proxy saw each app contact"
-    t=$(ev "$SCR.innerText.replace(/\\n/g,' | ').slice(0,200)")
+    t=$(ev "(($SCR.querySelector('details[data-fold=developer]')||$SCR).innerText).replace(/\\n/g,' | ').slice(0,300)")
     grep -qE 'trackers in|No trackers seen yet' <<<"$t" && pass "the Trackers tab answers: $(cut -c1-120 <<<"${t#*Files | }")" || fail "the Trackers tab: $t"
   fi
   # 6. "+ add app": its three paths; the bundled Open-Meteo OpenAPI sample imported into a draft, one dry run, discarded.
