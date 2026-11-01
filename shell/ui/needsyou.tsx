@@ -34,7 +34,7 @@ const USER_CHECK = "you";
 const DECIDING = new Set(["PASS", "FAIL", "none"]);
 
 /** [w]'s checks that decide, oldest first. */
-const decidingOf = (w: WorkRow, cs: BoardCheck[]) => cs.filter((c) => c.task === w.id && DECIDING.has(c.state)).sort((a, b) => Number(a.at) - Number(b.at));
+export const decidingOf = (w: WorkRow, cs: BoardCheck[]) => cs.filter((c) => c.task === w.id && DECIDING.has(c.state)).sort((a, b) => Number(a.at) - Number(b.at));
 
 /** Asked again since [at] (ms): the row changed after the answer, past the answer's own write. */
 const askedSince = (w: WorkRow, at: number) => Number(w.updated) > at + SLACK_MS;

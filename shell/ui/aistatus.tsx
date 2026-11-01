@@ -5,23 +5,26 @@
  * a slim header (the daily driver's small ring and one status line), Needs you (questions and things to do, answered in
  * place - needsyou.tsx's rows), Ready to try (the latest tries, works / still broken in place), Working now (the fleet's
  * live agents: task, step now, a thin bar that fills smoothly, the step cross-fading when it changes), Recently done
- * (closed). A section with nothing in it isn't drawn. At the foot the shared field to ask the manager (powai.tsx's
+ * (closed, each at the time it was done; the user, 11-01 16:39: "I can't click these to expand" - a tap opens one in
+ * place: the whole title, when, its closing note, its try line, how it was verified, and "Still broken" to reopen it). A section with nothing in it isn't drawn. At the foot the shared field to ask the manager (powai.tsx's
  * send path), its reply as one bubble over the field - never a transcript - and "Open chat": the launcher's AI panel.
  * Unfolded the same component is the page's left column (powai.tsx, [beside]): the chat is its right column, so its foot
  * keeps only the mic chip - no field, reply bubble or "Open chat" of its own.
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { computed, signal } from "@preact/signals";
-import { useAgents } from "../agents.ts";
+import { useAgents, type BoardCheck } from "../agents.ts";
 import { fleet, isPowOS, projectOf, type Worker } from "../fleet.ts";
 import { aiScreen, chat, openPanel, page } from "../state.ts";
-import { board, boardSeen, WorkFeed, type WorkRow } from "./aiboard.tsx";
+import { board, boardSeen, checks, list, noteOf, WorkFeed, type WorkRow } from "./aiboard.tsx";
 import { areaStats, driverPct } from "./aiprogress.tsx";
 import { NeedStack } from "./aistack.tsx";
 import { listen, listeningFor, release, speech, type MicTarget } from "./dictation.ts";
-import { needIds, needsYou } from "./needsyou.tsx";
+import { BrokenReply, clearBroken, type Broken } from "./brokenreply.tsx";
+import { decidingOf, needIds, needsYou } from "./needsyou.tsx";
 import { aiAgent } from "./aipanes.tsx";
-import { ago } from "./time.ts";
+import { clockAt } from "./time.ts";
+import { recordVerdict } from "./trycard.tsx";
 
 /** Done in this window shows under Recently done. */
 const RECENT_MS = 3 * 24 * 3_600_000;
@@ -202,18 +205,85 @@ export function recentlyDone(rows: WorkRow[] = board.value, now = Date.now()) {
 /** Recently done shows this many rows, then a "more" row. */
 const DONE_ROWS = 5;
 
-/** One done task: its title and when. */
-const DoneRow = ({ w }: { w: WorkRow }) => (
-  <li class="ais-done-row">
-    <span class="ais-done-title">{w.title}</span>
-    <span class="ais-when">{ago(Number(w.done || w.updated))}</span>
-  </li>
-);
+/** [s], then ": [line]" when there is one. */
+const withLine = (s: string, line: string) => (line ? `${s}: ${line}` : s);
+
+/** How a done task was verified, in plain words: its last deciding check (the user's own, a phone check, none possible). */
+export function verifiedOf(w: WorkRow, cs: BoardCheck[] = checks.value): string {
+  const last = decidingOf(w, cs).at(-1);
+  if (!last) return list(w.commits).length ? "fix landed, no phone check recorded" : "no check recorded";
+  if (last.name === "you") return last.state === "PASS" ? "you said it works" : "you said it's still broken";
+  if (last.state === "PASS") return "checked on the phone";
+  if (last.state === "none") return withLine("no device check possible", last.line);
+  return withLine("its last check failed", last.line);
+}
+
+/** "Still broken" sent from a done row: id -> the words (shown at once), or the one plain line when it couldn't be saved. */
+const reopened = signal<Record<string, { text: string; failed?: boolean }>>({});
+
+/** "Still broken" on a done task: reopened with the user's words through trycard.tsx's verdict path (a user FAIL). */
+async function reopen(w: WorkRow, b: Broken) {
+  reopened.value = { ...reopened.value, [w.id]: { text: b.text } };
+  const ok = await recordVerdict({ id: w.id, title: w.title }, false, b);
+  if (ok) clearBroken(`done:${w.id}`);
+  else reopened.value = { ...reopened.value, [w.id]: { text: b.text, failed: true } };
+}
+
+/** "Still broken" and its reply line, or what the user said once it was sent. */
+function ReopenActs({ w }: { w: WorkRow }) {
+  const [replying, setReplying] = useState(false);
+  const r = reopened.value[w.id];
+  if (r && !r.failed) return <div class="ais-done-said">reopened - you said: "{r.text}"</div>;
+  return (
+    <>
+      {r?.failed && <div class="ais-done-said error">couldn't save that - try again in a moment</div>}
+      {replying ? (
+        <BrokenReply id={`done:${w.id}`} onSend={(b) => (setReplying(false), void reopen(w, b))} onCancel={() => setReplying(false)} />
+      ) : (
+        <div class="try-acts">
+          <button type="button" class="ai-act ais-done-broken" onClick={() => setReplying(true)}>
+            Still broken
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** A done row opened (its title unclipped above it): when it was done, its closing note, its try line, how it was verified. */
+function DoneDetail({ w, when }: { w: WorkRow; when: string }) {
+  const note = noteOf(w);
+  const tryLine = w.tryLine?.trim();
+  return (
+    <div class="ais-done-detail">
+      <div class="ais-done-fact" data-fact="when">Done {when}</div>
+      {note && <div class="ais-done-fact" data-fact="note">{note}</div>}
+      {tryLine && <div class="ais-done-fact" data-fact="try">Try: {tryLine}</div>}
+      <div class="ais-done-fact" data-fact="verified">Verified: {verifiedOf(w)}</div>
+      <ReopenActs w={w} />
+    </div>
+  );
+}
+
+/** One done task: its title and when it was done (the board's `done`, ms); a tap opens it in place (DoneDetail). */
+function DoneRow({ w, open, onToggle }: { w: WorkRow; open: boolean; onToggle: () => void }) {
+  const when = clockAt(Number(w.done || w.updated));
+  return (
+    <li class={`ais-done-item ${open ? "open" : ""}`} data-task={w.id}>
+      <button type="button" class="ais-done-row" aria-expanded={open} onClick={onToggle}>
+        <span class="ais-done-title">{w.title}</span>
+        <span class="ais-when">{when}</span>
+      </button>
+      {open && <DoneDetail w={w} when={when} />}
+    </li>
+  );
+}
 
 /** Recently done: its heading a toggle, open at first; sized to its rows (DONE_ROWS, then "N more"). */
 function RecentlyDone({ rows }: { rows: WorkRow[] }) {
   const [open, setOpen] = useState(true);
   const [all, setAll] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
   if (!rows.length) return null;
   const shown = all ? rows.slice(0, 20) : rows.slice(0, DONE_ROWS);
   return (
@@ -227,7 +297,7 @@ function RecentlyDone({ rows }: { rows: WorkRow[] }) {
       {open && (
         <ul class="ais-list ais-done">
           {shown.map((w) => (
-            <DoneRow key={w.id} w={w} />
+            <DoneRow key={w.id} w={w} open={openId === w.id} onToggle={() => setOpenId(openId === w.id ? null : w.id)} />
           ))}
           {rows.length > shown.length && (
             <li>

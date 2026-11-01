@@ -3793,8 +3793,14 @@ html:root .ai-screen.status > .ai-glass.tile { --glass-blur-native: var(--backdr
 .ais-bar { position: relative; display: block; height: 3px; margin: 4px 0 0 18px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--color-foreground) 14%, transparent); }
 .ais-bar-fill { position: absolute; inset: 0; border-radius: inherit; background: var(--color-accent); transform-origin: left center; transition: transform 900ms var(--ais-spring); animation: aip-fill 900ms var(--ais-spring) both; }
 .ais-bar.sweep .ais-bar-fill { inset: 0 auto 0 0; width: 32%; transform: translateX(-100%); animation: ais-sweep 1.8s cubic-bezier(0.4, 0, 0.2, 1) 3; }
-.ais-done-row { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 4px; white-space: nowrap; font-size: var(--text-body); color: var(--color-foreground); animation: ais-rise 320ms var(--ais-spring) both; }
+.ais-done-item { animation: ais-rise 320ms var(--ais-spring) both; }
+.ais-done-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 0 4px; border: 0; background: none; font: inherit; text-align: start; white-space: nowrap; font-size: var(--text-body); color: var(--color-foreground); }
 .ais-done-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ais-done-item.open .ais-done-row { align-items: baseline; padding-block: 10px 4px; white-space: normal; }
+.ais-done-item.open .ais-done-title { overflow: visible; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.ais-done-detail { display: flex; flex-direction: column; gap: 4px; padding: 0 4px 10px; font-size: var(--text-small); line-height: 1.35; color: var(--color-foreground); animation: ais-rise 260ms var(--ais-spring) both; }
+.ais-done-fact, .ais-done-said { opacity: 0.86; white-space: normal; overflow-wrap: anywhere; }
+.ais-done-detail .try-acts { margin-top: 4px; }
 .ais-empty { padding: 16px; text-align: start; font-size: var(--text-body); color: var(--color-foreground); opacity: 0.86; }
 .ai-screen > .ais-foot { position: relative; z-index: 2; margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
 .ais-foot-row { display: flex; align-items: flex-end; justify-content: flex-end; gap: 8px; min-height: 28px; }
@@ -3861,7 +3867,7 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 @keyframes ais-card-in { from { opacity: 0; transform: translateY(14px) scale(0.96); } }
 @media (prefers-reduced-motion: reduce) {
   .ais-card-top { animation: none; transition: none; }
-  .ais-sec, .ais-step-t, .ais-bar-fill, .ais-done-row, .ais-reply, .ais-ring-fill, .ais-chev::before { animation: none; transition: none; }
+  .ais-sec, .ais-step-t, .ais-bar-fill, .ais-done-item, .ais-done-detail, .ais-reply, .ais-ring-fill, .ais-chev::before { animation: none; transition: none; }
   .ais-step-t.out { display: none; }
   .ais-bar.sweep .ais-bar-fill { transform: none; }
 }
