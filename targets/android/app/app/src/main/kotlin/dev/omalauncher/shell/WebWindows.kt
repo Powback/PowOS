@@ -751,14 +751,21 @@ class WebWindows(
     /** The switcher is up: every window's layer hidden under it (main thread). */
     private var underSwitcher = false
 
-    /** The windows' root shown ([on]) or hidden, at once (main thread): [switcherOpen]. */
-    private fun rootShown(on: Boolean) {
+    /**
+     * The windows' root shown ([on]) or hidden, at once (main thread): [switcherOpen]. [over]: the windows above home's
+     * buffer too (a full-screen Linux window) - kept hidden during a swipe headed home until it ends ([switcherHome]
+     * then takes it out of full screen), it would cover home.
+     */
+    private fun rootShown(
+        on: Boolean,
+        over: Boolean = on,
+    ) {
         underSwitcher = !on
         val t = SurfaceControl.Transaction()
         // FL3: a full-screen Linux window hangs on home's surface itself, ABOVE home's buffer ([fillScreen]), not under
         // the root: hiding the root left it over the switcher, which opened (NavGesture "gesture: Switcher", 10-30
         // 22:34) under it, unseen - the user, 22:20: "I can't open the switcher now either". Hidden with the root.
-        for (w in wins.values) if (!w.underRoot && w.container.isValid) t.setVisibility(w.container, on && w.shown)
+        for (w in wins.values) if (!w.underRoot && w.container.isValid) t.setVisibility(w.container, over && w.shown)
         val r = root?.takeIf { it.isValid }
         if (r == null) {
             t.apply()
@@ -3635,10 +3642,22 @@ class WebWindows(
          * windows' root is hidden while it's up (each window then is its card: its content as a picture, ShellHost
          * /_task via [cardShot]) and shown again after; a card tapped shows its window where it was.
          */
-        fun switcherOpen(open: Boolean) {
+        fun switcherOpen(
+            open: Boolean,
+            homeBound: Boolean = false,
+        ) {
             val ww = current ?: return
-            ww.main.post { ww.rootShown(!open) }
+            ww.main.post { ww.rootShown(rootShownFor(open, homeBound), !open) }
         }
+
+        /** The windows' root shows unless the switcher is up - or up only as a swipe already at home ([swipeShowsHome]). */
+        fun rootShownFor(
+            switcherOpen: Boolean,
+            homeBound: Boolean,
+        ): Boolean = !switcherOpen || homeBound
+
+        /** A swipe's homeness (0..1, NavGestureClassifier) at which home, not the switcher, is what shows: its home point. */
+        fun swipeShowsHome(homeness: Float): Boolean = homeness >= 1f
 
         /**
          * Home from the switcher (its "recents.end" to home, or its close): a full-screen Linux window leaves full screen

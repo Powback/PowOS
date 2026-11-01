@@ -4493,6 +4493,96 @@ async function webWindowIdleTick() {
   }
 }
 
+/**
+ * WR1 (the user 11-01 15:48, "should be more or less instant"): home hidden and shown again (back from a full-screen
+ * app, the shade, the lock screen) with two windows open: in the visibilitychange itself - no rAF (held), no host
+ * "webwindows.resend" - a "w.f" lists both windows shown with their bodies where they were, and their .webwindow-body
+ * elements are on screen at the same rects with no hidden/blank/placeholder class.
+ */
+/** WR1's helpers in the page (window.__wr): the windows' body rects, a "w.f" line's entries, the judge, hidden on/off. */
+function webWindowResumeHelpers() {
+  const ids = [9931, 9932];
+  const bodies = () => ids.map((id) => document.querySelector(`.webwindow[data-wwid="${id}"] .webwindow-body`));
+  const rect = (b) => (b ? [b.getBoundingClientRect()].map((r) => `${r.left},${r.top},${r.width},${r.height}`)[0] : "none");
+  // Each window's body rect and visible flag in a "w.f" line (entry: id, frame x y w h, body x y w h, clip, radius, visible).
+  const inLine = (line) => {
+    const t = (line ?? "").split(" ");
+    return ids.map((id) => {
+      const i = t.indexOf(String(id), 4);
+      return i < 0 ? null : { body: t.slice(i + 5, i + 9).join(","), visible: t[i + 14] };
+    });
+  };
+  const setHidden = (on) => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => on });
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (on ? "hidden" : "visible") });
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+  /** The first "w.f" after home shows: both windows, shown, bodies where they were. */
+  const judgeLine = (line, before, fails) => {
+    if (!line) return fails.push("WR1: home shown again: no w.f in the visibilitychange itself (the windows wait for a frame or the host)");
+    const after = inLine(line);
+    ids.forEach((id, i) => {
+      if (!after[i]) return fails.push(`WR1: window ${id} missing from the first w.f after home shows (${line})`);
+      if (after[i].visible !== "1") fails.push(`WR1: window ${id} sent hidden in the first w.f after home shows`);
+      if (after[i].body !== before[i].body) fails.push(`WR1: window ${id} body ${after[i].body} in the first w.f, was ${before[i].body}`);
+    });
+  };
+  /** The windows' elements right after: displayed, no hidden/blank class, at their rects. */
+  const judgeDom = (was, fails) => {
+    bodies().forEach((el, i) => {
+      const id = ids[i];
+      if (!el) return fails.push(`WR1: window ${id} has no .webwindow-body after home shows`);
+      const win = el.closest(".webwindow");
+      const cls = `${win.className} ${el.className}`;
+      if (/\b(hidden|blank|pending|placeholder|ww-wait)\b/.test(cls)) fails.push(`WR1: window ${id} has "${cls}" after home shows`);
+      const cs = getComputedStyle(win);
+      if (cs.visibility === "hidden" || cs.display === "none") fails.push(`WR1: window ${id} not displayed after home shows`);
+      if (rect(el) !== was[i]) fails.push(`WR1: window ${id} body at ${rect(el)} after home shows, was ${was[i]}`);
+    });
+  };
+  window.__wr = { ids, rects: () => bodies().map(rect), inLine, setHidden, judgeLine, judgeDom };
+}
+
+/**
+ * WR1 (the user 11-01 15:48, "should be more or less instant"): home hidden and shown again (back from a full-screen
+ * app, the shade, the lock screen) with two windows open: in the visibilitychange itself - no rAF (held), no host
+ * "webwindows.resend" - a "w.f" lists both windows shown with their bodies where they were, and their .webwindow-body
+ * elements are on screen at the same rects with no hidden/blank/placeholder class.
+ */
+async function webWindowResumeScene() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const R = window.__wr;
+  const fails = [];
+  const raf = window.requestAnimationFrame;
+  try {
+    S.page.value = 0;
+    W.webWins.value = R.ids.map((id, i) => ({ id, key: `a:gate.resume${i}`, label: `Resume ${i}`, page: S.pages.value[0], x: 60 + i * 300, y: 160, w: 260, h: 220, live: true }));
+    await window.__gw.settled();
+    await new Promise((ok) => setTimeout(ok, 600)); // open transitions over
+    await window.__gw.frames(5);
+    const was = R.rects();
+    const before = R.inLine(window.__ww.sent.at(-1));
+    if (before.some((e) => !e || e.visible !== "1")) return [`WR1: setup: the windows' last w.f doesn't show both (${window.__ww.sent.at(-1)})`];
+    // No frame from here: what shows must come from the event itself.
+    window.requestAnimationFrame = () => 1;
+    R.setHidden(true);
+    const sentAt = window.__ww.sent.length;
+    R.setHidden(false);
+    // Same task as the event: no rAF, no host round trip has run.
+    R.judgeLine(window.__ww.sent.slice(sentAt).at(-1), before, fails);
+    R.judgeDom(was, fails);
+    return fails;
+  } finally {
+    window.requestAnimationFrame = raf;
+    delete document.hidden;
+    delete document.visibilityState;
+    window.__mockEvents.emit("webwindows.resend", 0);
+    W.webWins.value = [];
+    await window.__gw.settled();
+  }
+}
+
 async function webWindowStallCheck() {
   const S = await window.__gw.mod("./state.ts");
   const W = await window.__gw.mod("./ui/webwindows.tsx");
@@ -7696,6 +7786,9 @@ try {
   // TS1: a pinch on a tiled window's bar zooms its content in place (tile-zoom-unfolded; the user, 10-31 15:31).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "tile-zoom-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tileZoomScene(r))));
+  // WR1: home shown again shows its windows in that event, at their rects, with no frame or host round trip (ww-resume-instant).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ww-resume-instant", { width: 900, height: 1000 }).then((r) => whenReady(r, async () => (await r.page.evaluate(webWindowResumeHelpers), r.page.evaluate(webWindowResumeScene)))));
   // WT-IDLE: the web windows' rAF tick does nothing while no window moves (ww-idle-tick).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-idle-tick", { width: 900, height: 1000 }).then((r) => whenReady(r, async () => {
