@@ -8,7 +8,9 @@
  * - "middle": the content centred in the surface.
  * - "bottom": the content stacks from the surface's foot up - the grid's last row and the A-Z bar's end just over the
  *   search bar, the newest notification nearest the thumb, the control center's tiles low - and scrolls up for more.
- * Unset, unfolded is bottom and folded top (a coded default: stored() never writes it, so a later default can change).
+ * Unset, unfolded is bottom and folded top (a coded default: stored() never writes it, so a later default can change) -
+ * except the notifications: top folded and unfolded, the newest at the top (the user, 11-01 16:47: "Let's move the
+ * notifications to the top"; DEFAULT_OF). Their stored pick moved to top once (shadeMoved), bottom still a choice.
  * Shown as html[data-align-<surface>] - CSS only (shell.css "Alignment"), applied live; the other pages (the shade, the
  * launcher over an app) follow a pick on home through the storage event, no reload.
  */
@@ -28,21 +30,36 @@ export const wideShade = signal(innerWidth >= 700);
 addEventListener("resize", () => (wideShade.value = innerWidth >= 700));
 
 const DEFAULT: Record<AlignMode, Align> = { folded: "top", unfolded: "bottom" };
+/** The notification list's default: top, both modes (the user, 11-01 16:47: "Let's move the notifications to the top"). */
+const DEFAULT_OF: Partial<Record<AlignSurface, Record<AlignMode, Align>>> = { shade: { folded: "top", unfolded: "top" } };
 const key = (s: AlignSurface, m: AlignMode) => `align.${s}.${m}`;
 const own = Object.fromEntries(
   (["launcher", "shade", "control"] as AlignSurface[]).flatMap((s) => (["folded", "unfolded"] as AlignMode[]).map((m) => [key(s, m), stored(key(s, m), "")])),
 );
+/**
+ * The user's ask (11-01 16:47) applied to their own stored pick too, once: a stored non-top choice for the notifications
+ * becomes top, recorded as their pick, and the marker (align.shade-moved-top) keeps it from ever re-applying - a later pick of
+ * bottom sticks. Unset stays unset (the default above is top already). The launcher and control center are untouched.
+ */
+const shadeMoved = stored("align.shade-moved-top", "");
+if (!shadeMoved.peek()) {
+  for (const m of ["folded", "unfolded"] as AlignMode[]) {
+    const v = own[key("shade", m)];
+    if (v.peek() && v.peek() !== "top") v.value = "top";
+  }
+  shadeMoved.value = "1";
+}
 // A pick on another page (Settings is home's): this page's copy at once.
 addEventListener("storage", (e) => {
   const k = e.key?.replace(/^powos\./, "");
   if (k && own[k]) own[k].value = e.newValue ?? "";
 });
 
-const valid = (v: string, m: AlignMode): Align => ((ALIGNS as string[]).includes(v) ? (v as Align) : DEFAULT[m]);
+const valid = (v: string, s: AlignSurface, m: AlignMode): Align => ((ALIGNS as string[]).includes(v) ? (v as Align) : (DEFAULT_OF[s] ?? DEFAULT)[m]);
 /** [s]'s choice for [m], the default while unset (what the settings show and set). */
 export const alignChoice = (s: AlignSurface, m: AlignMode) => ({
   get value(): Align {
-    return valid(own[key(s, m)].value, m);
+    return valid(own[key(s, m)].value, s, m);
   },
   set value(v: Align) {
     own[key(s, m)].value = v;
