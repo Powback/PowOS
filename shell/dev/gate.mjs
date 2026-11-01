@@ -898,6 +898,42 @@ async function shadeLayout() {
 }
 
 /**
+ * Every tile of the user's saved arrangement renders (the user, 11-01 22:14: "fps indicator etc is gone from control
+ * centre" - a tile taken out of the list vanished with no trace): the fps meter, the phone checks and the controller
+ * are in the control center, and a saved arrangement that names them (the fps meter moved first, the rest reversed)
+ * shows the same tiles as before it - the count unchanged, the fps meter first. Folded and unfolded.
+ */
+async function ccEveryTile() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await window.__gw.mod("./state.ts");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const keys = () => [...document.querySelectorAll(".notif-panel.shown .cc3-list .cc3-cell")].map((c) => c.dataset.key);
+  const open = async () => {
+    S.notif.value = false;
+    await sleep(300);
+    S.notif.value = true;
+    await window.__gw.settled(() => document.querySelector(".notif-panel.shown .cc3-list .cc3-cell"), ".notif-panel");
+    await window.__gw.until(() => keys().includes("powos.tests"), 4000);
+  };
+  const fails = [];
+  await powos.store.set("controls.layout", { order: [], hidden: [] });
+  await open();
+  const before = keys();
+  for (const id of ["powos.fps", "powos.tests"]) if (!before.includes(id)) fails.push(`${innerWidth}px: no "${id}" tile in the control center (${before.length} tiles: ${before.join(" ")})`);
+  const saved = ["powos.fps", ...before.filter((id) => id !== "powos.fps").reverse()];
+  await powos.store.set("controls.layout", { order: saved, hidden: [], v3: true });
+  await open();
+  const after = keys();
+  if (after.length !== before.length) fails.push(`${innerWidth}px: the saved arrangement shows ${after.length} tiles, ${before.length} before it (missing: ${before.filter((id) => !after.includes(id)).join(" ") || "-"})`);
+  const lost = saved.filter((id) => !after.includes(id));
+  if (lost.length) fails.push(`${innerWidth}px: saved tiles not rendered: ${lost.join(" ")}`);
+  if (after[0] !== "powos.fps") fails.push(`${innerWidth}px: the saved arrangement's first tile is "${after[0]}", not the fps meter`);
+  await powos.store.set("controls.layout", { order: [], hidden: [] });
+  S.notif.value = false;
+  return fails;
+}
+
+/**
  * Over-pull (the control center is shown whole by default on a phone): a pull further ON THE CARD stretches - the card
  * and the notifications under it follow the finger damped (a subtle rubber band, at most 20 px; from the notifications
  * only their list moves, gesture.ts listOver), the toggles stay as they are; let go,
@@ -10295,6 +10331,7 @@ try {
           await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           await r.page.evaluate(`window.__shadeSeen = ${shadeSeen}`);
           r.problems.push(...((await r.page.evaluate(shadeLayout).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])) ?? []));
+          r.problems.push(...((await r.page.evaluate(ccEveryTile).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])) ?? []));
           return { ...r, ready: true, ms: Date.now() - r.started };
         }),
       );
