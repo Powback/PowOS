@@ -114,6 +114,9 @@ deploy)
   adb push -q "$HERE/../../../desktop/autostart/powos-panel-phone.desktop" /data/local/tmp/powos-panel-phone.desktop
   adb push -q "$HERE/../../../lib/powos-tmux-shell" /data/local/tmp/powos-tmux-shell
   adb push -q "$HERE/../../../config/etc/profile.d/60-powos-picker-key.sh" /data/local/tmp/60-powos-picker-key.sh
+  # A Unity game's Steam launch option runs ~/.local/share/powos/unity-screen (a copy, not the repo file): every deploy
+  # refreshes it, so a change to targets/android/steam/unity-screen reaches the phone without a manual re-copy.
+  adb push -q "$HERE/../steam/unity-screen" /data/local/tmp/unity-screen
   # The Agents view's reporter (lib/ai/agents: the hook, powos-agentsd, the hooks' settings) and comms writing its
   # feed (lib/ai/comms/comms-mcp.py).
   adb shell rm -rf /data/local/tmp/powos-agents
