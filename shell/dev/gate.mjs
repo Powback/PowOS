@@ -2634,6 +2634,9 @@ async function aiProgressCheck(page) {
       continue;
     }
     if (!(await page.evaluate(aiProgressOpen))) fails.push(`${size}: no Progress view (.aip)`);
+    // The bars fill on a spring: read them once their animations are done, not mid-spring (a loaded full gate read
+    // 0.00 of 0.25, 11-01; passes alone).
+    await page.evaluate(() => window.__gw.settled(() => document.querySelector(".ai-screen .aip .aip-bar-fill")));
     const found = [...(await page.evaluate(aiProgressType, AIP_LINES)), ...(await page.evaluate(aiProgressMarks)), ...(await page.evaluate(aiProgressAreas)), ...(await page.evaluate(aiProgressContrast, AIP_LINES))];
     fails.push(...found.map((f) => `${size}: ${f}`));
     await page.screenshot({ path: `/cache/ai-progress-${size}.png` });
