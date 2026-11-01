@@ -6,13 +6,14 @@
 #   1. KWin 6.7.5-3.22+ (pkgs/kwin 0018: "export-new", new windows open as tasks) installed AND running - installed
 #      with pacman -U (rollback tar of the old files, as bf-fold.sh) and a fresh session when the running one is older
 #      (never with a game up);
-#   2. Dolphin opened THROUGH HOME's launch path (apps.launch l:org.kde.dolphin, the bridge call a tap makes) is ONE
-#      floating task (PowosWindowActivity, freeform, smaller than the screen), windows.list names it;
-#      Its window DRAWS: the task's part of the screen isn't black (Kate and Dolphin floated with black content,
-#      2026-10-23) - and so does Kate's, opened the same way;
+#   2. Dolphin opened THROUGH HOME's launch path (state.ts launch('l:org.kde.dolphin'), what a launcher tap runs) is
+#      ONE floating web window (W1, docs/WEB_WINDOWS.md: home's webwindows.list key l:org.kde.dolphin, state floating,
+#      its frame on the unfolded screen and smaller than it) within 30 s; its body DRAWS: live (no placeholder) and
+#      not black (Kate and Dolphin floated with black content, 2026-10-23) - and so does Kate's, opened the same way;
 #   3. Gwenview opened from inside the session (the session's own environment, as Dolphin's "Open With" starts it: a
-#      Wayland window) comes up as exactly ONE more floating task, and closing it closes Gwenview; then again as an X11
-#      window (QT_QPA_PLATFORM=xcb: an Xwayland window gets its wl_surface after KWin adds it - kwin 0019).
+#      Wayland window) comes up as exactly ONE more floating web window, and closing it (its bar's close:
+#      webwindows.close) closes Gwenview; then again as an X11 window (QT_QPA_PLATFORM=xcb: an Xwayland window gets its
+#      wl_surface after KWin adds it - kwin 0019).
 #      Leftover Gwenview windows (six from 2026-10-23's tries) are closed first.
 # Always restores: Gwenview closed, Dolphin closed if this started it, home, `cmd device_state state reset`.
 # Exit: 0 passed; 1 FAIL; 3 a real touch / no free window / not now (re-queued); 5 can't run.
@@ -40,7 +41,7 @@ restore() {
   # The window lines, streamed since the start (LOGPID): a dump at the end lost them - the OnePlus main ring buffer
   # rolls over in ~1 min under system_server's D-level spam (f276: the run's own "open"/"surface" lines missing).
   [ -n "${LOGPID:-}" ] && kill "$LOGPID" 2>/dev/null
-  [ -s "$OUT/logcat.txt" ] || sh_ "logcat -d -v time" | grep -E "WindowTasks|PowosWindow|PowosWindowFrames| runtime" > "$OUT/logcat.txt"
+  [ -s "$OUT/logcat.txt" ] || sh_ "logcat -d -v time" | grep -E "WindowTasks|WebWindowSource|PowosWebWindows|PowosWindow| runtime" > "$OUT/logcat.txt"
   echo "restored"
 }
 . "$here/window-lock.sh"
@@ -51,29 +52,40 @@ chk() { [ "$(irq)" = "$I0" ] || { echo "STOP: a real touch at $1 - restoring"; e
 fail() { echo "FAIL: $*" | tee -a "$OUT/log.txt"; "$T/shot.sh" "$OUT/fail.png" >/dev/null 2>&1; exit 1; }
 pass() { echo "PASS: $*" | tee -a "$OUT/log.txt"; }
 log() { echo "$*" | tee -a "$OUT/log.txt"; }
-# A call on home's bridge exactly as the page makes it (float-windows.sh's hcall).
-hcall() {
-  "$T/cdp.sh" eval home "new Promise(ok=>{const h=window.__powosHost,P=window.PowosHost;if(!h||!P||!P.postMessage)return ok('ERR no bridge');const r=h.resolve,j=h.reject,id=910300+Math.floor(Math.random()*9000);const done=v=>{h.resolve=r;h.reject=j;ok(v)};h.resolve=(i,v)=>i===id?done(v):r(i,v);h.reject=(i,m)=>i===id?done('ERR '+m):j(i,m);setTimeout(()=>done('ERR no answer'),8000);P.postMessage(JSON.stringify([id,'$1',JSON.stringify($2)]))}).then(v=>typeof v==='string'&&v.startsWith('ERR')?v:($3)(v))" 2>&1 | tr -d '"\r' | tail -1
-}
-lin() { sh_ "am stack list | grep PowosWindowActivity" | grep -oE 'taskId=[0-9]+' | tr -dc '0-9\n' | sort -n; }
-mode() { sh_ "dumpsys activity activities" | grep -m1 -E "Task\{[^ ]* #$1 " | grep -oE "mode=[a-z-]+"; }
-bounds() { sh_ "am stack list | grep -E \"taskId=$1:\"" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' '; }
-app_of() { hcall windows.list "[]" "l=>(l.find(w=>w.id===$1)||{app:'none'}).app||'none'"; }
-# Waits up to $1 s for task ids not in $2 (newline list); prints them.
-new_tasks() { local n="" i; for i in $(seq 1 "$1"); do sleep 1; n=$(comm -13 <(echo "$2") <(lin)); [ -n "$n" ] && break; done; echo "$n"; }
-floats() {  # $1 task, $2 name: freeform and smaller than the screen
-  local m b; m=$(mode "$1"); read -r b1 b2 b3 b4 <<<"$(bounds "$1")"; log "$2: task $1 $m bounds $b1,$b2 $b3,$b4"
-  [ "$m" = mode=freeform ] || fail "$2's task $1 is $m, not a floating window"
+# Home's page (ev) and bridge (hcall), and the web-window helpers: ww-lib.sh, shared with e2e-lib.sh.
+. "$here/ww-lib.sh"
+# Linux windows are web windows since 10-30 (docs/WEB_WINDOWS.md S6: no PowosWindowActivity task): ids "w<id>" from
+# home's webwindows.list (key "l:<app>", state), where each is from its .webwindow element on home's page.
+lin() { wwids l:; }
+mode() { wwhost "$1" state; }
+bounds() { wwrect "$1"; }
+app_of() { wwhost "$1" key; }
+# Page calls as a tap makes them: the launcher's (state.ts launch), the dock's (dockToggle), a switcher card's (the
+# host's webwindows.show event, ShellBridge.openTask).
+plaunch() { ev "importShim('./state.ts').then(m=>m.launch('$1')).then(()=>'ok',e=>'ERR '+e)"; }
+pdock() { ev "importShim('./ui/webwindows.tsx').then(m=>String(m.dockToggle('$1')))"; }
+pcard() { ev "(window.__powosHost.emit('webwindows.show', ${1#w}), 'ok')"; }
+# Waits up to $1 s for Linux windows not in $2 (lin's lines); prints them.
+new_tasks() { wwnew "$1" "$2" l:; }
+floats() {  # $1 window, $2 name: floating, its frame on the unfolded screen and smaller than it
+  local m b1 b2 b3 b4; m=$(mode "$1"); read -r b1 b2 b3 b4 <<<"$(bounds "$1")"; log "$2: window $1 $m frame $b1,$b2 $b3,$b4"
+  [ "$m" = floating ] || fail "$2's window $1 is ${m:-?}, not a floating window"
+  [ -n "${b4:-}" ] || fail "$2's window $1 has no frame on the screen"
+  [ "$b1" -ge 0 ] && [ "$b2" -ge 0 ] && [ "$b3" -le "$W" ] && [ "$b4" -le "$H" ] || fail "$2's frame $b1,$b2 $b3,$b4 isn't on the ${W}x$H screen"
   [ $((b3 - b1)) -lt $((W * 9 / 10)) ] || fail "$2's window is $((b3 - b1)) px wide on a $W px screen: full width"
 }
-# draws <task> <name>: a screencap; the task's window (its bounds, inset past the frame's edges) must not be black -
+# draws <window> <name>: live (its app's frames, not the placeholder: that is the theme's surface, never black), then a
+# screencap; its body (inset past the edges) must not be black -
 # at least 20% of its pixels brighter than 24/255 (a light KDE window), or at least 3% brighter than 64/255 (text and
 # icons of a DARK one: the Breeze dark theme since 2026-10-23 drew Dolphin fully at 18% over 24 - read as black), or
 # a dark theme's base colour nearly everywhere (90% over 8: Breeze dark's view is 13/255) with some detail (1% over
 # 64). Dolphin in a near-empty folder (it reopens the last one: sketch/out/ui/pages, one file) was fully drawn at 5%
 # over 24 and 2% over 64 - three false "black" FAILs 2026-10-24 18:27-18:50. A black window has ~0% of all of them.
 draws() {
-  local png="$OUT/$2.png" b1 b2 b3 b4 f; read -r b1 b2 b3 b4 <<<"$(bounds "$1")"
+  local png="$OUT/$2.png" b1 b2 b3 b4 f i lv=""
+  for i in $(seq 1 15); do lv=$(wwel "$1" "e=>e.querySelector('.webwindow-body.live')?'live':'placeholder'"); [ "$lv" = live ] && break; sleep 1; done
+  [ "$lv" = live ] || fail "$2's window $1 is still '${lv:-?}' after 15 s, not its app's content"
+  read -r b1 b2 b3 b4 <<<"$(wwbody "$1")"; [ -n "${b4:-}" ] || fail "$2's window $1 has no body on the screen"
   "$T/shot.sh" "$png" >/dev/null 2>&1 || fail "no screencap for $2 (shot.sh)"
   f=$(ffmpeg -v error -i "$png" -vf "crop=$((b3 - b1 - 40)):$((b4 - b2 - 40)):$((b1 + 20)):$((b2 + 20)),scale=200:-1,format=gray" \
       -f rawvideo - 2>/dev/null | python3 -c 'import sys; d=sys.stdin.buffer.read(); n=max(len(d), 1); print(sum(1 for b in d if b > 24) * 100 // n, sum(1 for b in d if b > 64) * 100 // n, sum(1 for b in d if b > 8) * 100 // n)')
@@ -126,7 +138,7 @@ fi
 sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi PowosLock && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
 sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
 sh_ "logcat -c"
-"$A" shell "su -c 'logcat -v time -s WindowTasks:V PowosWindow:V PowosWindowFrames:V PowosWindowFrame:V LaunchWindows:V AndroidRuntime:E'" 2>/dev/null \
+"$A" shell "su -c 'logcat -v time -s WindowTasks:V WebWindowSource:V PowosWebWindows:V PowosWindow:V PowosWindowFrames:V PowosWindowFrame:V LaunchWindows:V AndroidRuntime:E'" 2>/dev/null \
   | tr -d '\r' > "$OUT/logcat.txt" & LOGPID=$!
 
 # A Gwenview already running may be the user's: never closed (rule) - not now. Only the ones this check starts are
@@ -138,80 +150,80 @@ GWEN_MINE=1
 # 2. Dolphin from the launcher.
 [ "$(us 'pgrep -xc dolphin' | tail -1)" = 0 ] && DOLPHIN_MINE=1
 before=$(lin)
-r=$(hcall apps.launch "['l:org.kde.dolphin']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch l:org.kde.dolphin: $r"
+r=$(ev "importShim('./ui/webwindows.tsx').then(m=>m.webWindowsOn()).then(String)"); [ "$r" = true ] || fail "home's web windows aren't on (webWindowsOn: ${r:-?}): Linux apps would open as tasks"
+r=$(plaunch l:org.kde.dolphin); [ "$r" = ok ] || fail "launch l:org.kde.dolphin: $r"
 DT=$(new_tasks 30 "$before" | tail -1); chk dolphin
 [ -n "$DT" ] || DT=$(lin | while read -r t; do [ "$(app_of "$t")" = l:org.kde.dolphin ] && echo "$t"; done | head -1)
-[ -n "$DT" ] || fail "no window task for Dolphin within 30 s (logcat: $(sh_ "logcat -d -v time" | grep -E "WindowTasks| runtime" | tail -3 | tr '\n' ' '))"
+[ -n "$DT" ] || fail "no web window for Dolphin within 30 s (logcat: $(grep -E "WindowTasks|WebWindowSource|PowosWebWindows" "$OUT/logcat.txt" | tail -3 | tr '\n' ' '))"
 sleep 2; floats "$DT" Dolphin; "$T/shot.sh" "$OUT/dolphin.png"
-[ "$(app_of "$DT")" = l:org.kde.dolphin ] && pass "Dolphin from the launcher floats (task $DT), windows.list names it" ||
-  fail "Dolphin's task $DT is '$(app_of "$DT")' in windows.list"
+[ "$(app_of "$DT")" = l:org.kde.dolphin ] && pass "Dolphin from the launcher floats (window $DT), webwindows.list names it" ||
+  fail "Dolphin's window $DT is '$(app_of "$DT")' in webwindows.list"
 sleep 3; draws "$DT" dolphin; pass "Dolphin's window draws its content"
 
 # 2b. Kate from the launcher: floats and draws (e2e-desktop's 04-kate.png was black).
 [ "$(us 'pgrep -xc kate' | tail -1)" = 0 ] && KATE_MINE=1
 before=$(lin)
-r=$(hcall apps.launch "['l:org.kde.kate']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch l:org.kde.kate: $r"
+r=$(plaunch l:org.kde.kate); [ "$r" = ok ] || fail "launch l:org.kde.kate: $r"
 KT=$(new_tasks 30 "$before" | tail -1); chk kate
-[ -n "$KT" ] || fail "no window task for Kate within 30 s"
-sleep 4; floats "$KT" Kate; draws "$KT" kate; pass "Kate from the launcher floats (task $KT) and draws its content"
+[ -n "$KT" ] || fail "no web window for Kate within 30 s"
+[ "$(app_of "$KT")" = l:org.kde.kate ] || fail "Kate's window $KT is '$(app_of "$KT")' in webwindows.list"
+sleep 4; floats "$KT" Kate; draws "$KT" kate; pass "Kate from the launcher floats (window $KT) and draws its content"
 # 2c. Opening Kate leaves Dolphin as it was (2026-10-24: KWin's second "open" for Kate raised its task from recents,
-# which sent Dolphin's task TO_BACK - Dolphin minimised as Kate showed). Both stay visible, neither minimised.
-vis() { sh_ "dumpsys activity activities" | grep -m1 -E "Task\{[^ ]* #$1 " | grep -oE " visible=[a-z]+" | tr -d ' '; }
-[ "$(vis "$DT")" = visible=true ] || fail "Dolphin's task $DT went $(vis "$DT") when Kate opened: minimised by Kate's launch"
-[ "$(vis "$KT")" = visible=true ] || fail "Kate's task $KT is $(vis "$KT") after opening"
+# which sent Dolphin's task TO_BACK - Dolphin minimised as Kate showed). Both stay visible, neither minimised: a web
+# window is visible = floating in the host's list and its frame on the screen.
+vis() { [ "$(mode "$1")" = floating ] && [ -n "$(bounds "$1")" ] && echo visible=true || echo "visible=false ($(mode "$1"))"; }
+[ "$(vis "$DT")" = visible=true ] || fail "Dolphin's window $DT went $(vis "$DT") when Kate opened: minimised by Kate's launch"
+[ "$(vis "$KT")" = visible=true ] || fail "Kate's window $KT is $(vis "$KT") after opening"
 pass "Dolphin then Kate: both stay visible, neither minimised"
 # 2d. Raising the window behind keeps the other one (2026-10-24, f257: a raise was startActivityFromRecents, a TO_FRONT
-# that sent every other floating task TO_BACK). Through home's bridge as the page calls it: the dock (windows.restore),
-# the switcher's card (tasks.open) and a launcher tap on an app whose window is open (apps.launch).
-both() {  # $1 how: both tasks visible, $2 the raised one on top (windows.list: top-most first)
+# that sent every other floating task TO_BACK). As the page does it now: the dock (dockToggle), the switcher's card
+# (the host's webwindows.show) and a launcher tap on an app whose window is open (launch: linuxWindow raises it).
+both() {  # $1 how: both windows visible, $2 the raised one on top (the page's webWins order)
   sleep 2.5
-  [ "$(vis "$DT")" = visible=true ] || fail "$1: Dolphin's task $DT went $(vis "$DT")"
-  [ "$(vis "$KT")" = visible=true ] || fail "$1: Kate's task $KT went $(vis "$KT")"
-  local top; top=$(hcall windows.list "[]" "l=>String((l.filter(w=>w.id===$DT||w.id===$KT)[0]||{}).id)")
-  log "$1: of Dolphin/Kate, task ${top:-?} is on top"
-  [ "$top" = "$2" ] || fail "$1: task $2 asked for the front, task ${top:-?} is on top"
+  [ "$(vis "$DT")" = visible=true ] || fail "$1: Dolphin's window $DT went $(vis "$DT")"
+  [ "$(vis "$KT")" = visible=true ] || fail "$1: Kate's window $KT went $(vis "$KT")"
+  local top; top=$(wwtop "$DT" "$KT")
+  log "$1: of Dolphin/Kate, window ${top:-?} is on top"
+  [ "$top" = "$2" ] || fail "$1: window $2 asked for the front, window ${top:-?} is on top"
   bars "$1"
-  pass "$1: task $2 raised, Dolphin and Kate both still visible, each with its title bar"
+  pass "$1: window $2 raised, Dolphin and Kate both still visible, each with its title bar"
 }
-# Each showing window keeps its PowOS title bar above its task after a raise (2026-10-24 18:22, "i dont see the
-# titlebars for floating windows anymore": the window left under the raised one lost its bar - a bar partly under the
-# window above was dropped). SurfaceFlinger's composited layers, bottom-most first: the bar's after its task's.
+# Each showing window keeps its PowOS title bar after a raise (2026-10-24 18:22, "i dont see the titlebars for floating
+# windows anymore": the window left under the raised one lost its bar). A web window's bar is its frame's
+# .webwindow-title (it replaced the "PowOS window bar" layer over a task).
 bars() {
-  local sf id t b
-  sf=$(sh_ "dumpsys SurfaceFlinger" | grep -E -- "- Output Layer" | grep -nE "\((Task=[0-9]+|PowOS window bar [0-9]+)#")
+  local id b
   for id in "$DT" "$KT"; do
-    t=$(echo "$sf" | grep -m1 "(Task=$id#" | cut -d: -f1); b=$(echo "$sf" | grep -m1 "(PowOS window bar $id#" | cut -d: -f1)
-    log "$1: task $id layer #${t:-none}, its bar #${b:-none}"
-    [ -n "$b" ] || fail "$1: task $id shows with no PowOS title bar on screen"
-    [ -z "$t" ] || [ "$b" -gt "$t" ] || fail "$1: task $id's title bar (layer #$b) is under its task (#$t)"
+    b=$(wwbar "$id"); log "$1: window $id title bar shown: ${b:-?}"
+    [ "$b" = true ] || fail "$1: window $id shows with no PowOS title bar on screen"
   done
 }
-r=$(hcall windows.restore "[$DT]" "v=>String(v)"); log "windows.restore $DT: $r"; both "dock tap on Dolphin (behind Kate)" "$DT"
-r=$(hcall tasks.open "[$KT,'instant']" "v=>String(v)"); log "tasks.open $KT: $r"; both "switcher card of Kate (behind Dolphin)" "$KT"
-r=$(hcall apps.launch "['l:org.kde.dolphin']" "()=>'ok'"); log "apps.launch dolphin again: $r"; both "launcher tap on open Dolphin (behind Kate)" "$DT"
-# 2e. One task per Linux window, none without its window (2026-10-24 18:33, "i got two kate windows now one black":
-# KWin's second "open 2" came before the adopted launch window registered and started task 2970 for window 2 too).
-# One Dolphin and one Kate window are open: windows.list names exactly one task for each, every PowOS window task is
-# one of the two, and each draws (a task with nothing feeding its surface is black).
+r=$(pdock l:org.kde.dolphin); log "dock: dockToggle dolphin: $r"; both "dock tap on Dolphin (behind Kate)" "$DT"
+r=$(pcard "$KT"); log "switcher card: webwindows.show $KT: $r"; both "switcher card of Kate (behind Dolphin)" "$KT"
+r=$(plaunch l:org.kde.dolphin); log "launch dolphin again: $r"; both "launcher tap on open Dolphin (behind Kate)" "$DT"
+# 2e. One web window per Linux window, none without its window (2026-10-24 18:33, "i got two kate windows now one
+# black": KWin's second "open 2" came before the adopted launch window registered and started task 2970 for window 2
+# too). One Dolphin and one Kate window are open: webwindows.list names exactly one "l:" window for each, every one is
+# one of the two, and each draws (a window with nothing feeding its content is black).
 one_each() {
   local all t a nd=0 nk=0
-  all=$(lin); log "after the launches and raises: window tasks $(echo $all)"
+  all=$(lin); log "after the launches and raises: Linux web windows $(echo $all)"
   for t in $all; do
-    a=$(app_of "$t"); log "task $t: $a"
+    a=$(app_of "$t"); log "window $t: $a"
     case "$a" in
       l:org.kde.dolphin) nd=$((nd + 1)) ;;
       l:org.kde.kate) nk=$((nk + 1)) ;;
-      *) fail "task $t ('$a') is no Dolphin or Kate window: a task without its KWin window" ;;
+      *) fail "web window $t ('$a') is no Dolphin or Kate window: a window without its KWin window" ;;
     esac
     draws "$t" "one-each-$t"
   done
-  [ "$nd" = 1 ] && [ "$nk" = 1 ] || fail "$nd Dolphin and $nk Kate tasks for one window each: duplicates"
-  pass "one task per Linux window (Dolphin $DT, Kate $KT), each drawing"
+  [ "$nd" = 1 ] && [ "$nk" = 1 ] || fail "$nd Dolphin and $nk Kate web windows for one KWin window each: duplicates"
+  pass "one web window per Linux window (Dolphin $DT, Kate $KT), each drawing"
 }
 one_each
 
 # 3. Gwenview started from inside the session (Dolphin's "Open With > Gwenview": another app's window, no launch path
-# of PowOS's): one more floating task, and closing it closes Gwenview. Not through kioclient: KIO opened the PNG in
+# of PowOS's): one more floating web window, and closing it closes Gwenview. Not through kioclient: KIO opened the PNG in
 # Brave (the user's file association - left alone). Once as the session starts it (a Wayland window), once as an X11
 # window (Xwayland: its wl_surface comes after KWin adds it, and export-new looked only then - kwin 0019).
 gwen() {  # $1 label, $2 extra environment
@@ -220,16 +232,17 @@ gwen() {  # $1 label, $2 extra environment
   ses "$2 setsid -f gwenview $IMG >/tmp/linux-float-gwen.log 2>&1 < /dev/null"
   GT=$(new_tasks 25 "$before"); sleep 3; chk "gwenview $1"
   GT=$(comm -13 <(echo "$before") <(lin)); n=$(echo "$GT" | grep -c .)
-  g=$(us 'pgrep -xc gwenview' | tail -1); log "Gwenview ($1): new tasks: $(echo $GT) gwenview processes: $g; it said: $(us 'grep -v -e udisks2 -e locale -e UTF-8 -e "more information" /tmp/linux-float-gwen.log | tail -3' | tr '\n' ' ')"
-  [ "$n" -ge 1 ] || fail "Gwenview ($1) made no window task in 25 s"
-  [ "$n" = 1 ] || fail "one Gwenview ($1) made $n tasks ($(echo $GT)): duplicates"
+  g=$(us 'pgrep -xc gwenview' | tail -1); log "Gwenview ($1): new windows: $(echo $GT) gwenview processes: $g; it said: $(us 'grep -v -e udisks2 -e locale -e UTF-8 -e "more information" /tmp/linux-float-gwen.log | tail -3' | tr '\n' ' ')"
+  [ "$n" -ge 1 ] || fail "Gwenview ($1) made no web window in 25 s"
+  [ "$n" = 1 ] || fail "one Gwenview ($1) made $n web windows ($(echo $GT)): duplicates"
   GT=$(echo "$GT" | tail -1); floats "$GT" "Gwenview ($1)"
-  ga=$(app_of "$GT"); [ "$ga" = l:org.kde.gwenview ] || fail "Gwenview ($1)'s task $GT is '$ga' in windows.list"
+  ga=$(app_of "$GT"); [ "$ga" = l:org.kde.gwenview ] || fail "Gwenview ($1)'s window $GT is '$ga' in webwindows.list"
   [ "$g" = 1 ] || fail "$g Gwenview processes for one image"
-  pass "Gwenview opened from the session ($1) floats as one window (task $GT)"
-  # Its frame's close: the task goes and, with export-new, so does the window.
-  sh_ "am stack remove $GT"; sleep 2.5
-  [ "$(us 'pgrep -xc gwenview' | tail -1)" = 0 ] && pass "closing its task closes Gwenview ($1)" || fail "Gwenview ($1) still runs after its task closed"
+  pass "Gwenview opened from the session ($1) floats as one window ($GT)"
+  # Its bar's close (webwindows.close: KWin's quit, kwin 0041): the window goes and so does Gwenview.
+  r=$(hcall webwindows.close "[${GT#w}]" "v=>String(v)"); log "webwindows.close $GT: $r"; sleep 2.5
+  [ "$(wwhost "$GT" gone)" = true ] || fail "Gwenview ($1)'s window $GT is still listed after its close"
+  [ "$(us 'pgrep -xc gwenview' | tail -1)" = 0 ] && pass "closing its window closes Gwenview ($1)" || fail "Gwenview ($1) still runs after its window closed"
 }
 gwen wayland ""
 gwen x11 "QT_QPA_PLATFORM=xcb"
