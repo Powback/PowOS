@@ -252,6 +252,8 @@ function file(url) {
   let p = decodeURIComponent(u.pathname).replace(/^\/+/, "") || "index.html";
   if (p.split("/").includes("..")) return null;
   if (p === "__gate_app.html") return { virtual: true };
+  // Review images (ShellHost /_qa/, /_shared/): the try cards' before / after stand-ins (try-pair) from dev/media/.
+  if (/^_(qa|shared)\/gate-(before|after)\.png$/.test(p)) p = `dev/media/${path.basename(p)}`;
   let f;
   if (p.startsWith("_app/")) {
     const [, id, ...rest] = p.split("/");
@@ -3610,6 +3612,125 @@ async function aiSegsSwitch() {
     if (!document.querySelector(".ai-screen .ai-left > .ais-top")) fails.push(`with "${name}" the status column is gone`);
     fails.push(...segsAtFoot(name));
   }
+  return fails;
+}
+
+/**
+ * In the page: one try card on the AI page's stack, its report screenshot and, [after], the fix's after shot (`task set
+ * --image P --image-kind after`: an "after:" entry). The user, 2026-11-01: "this is showing the old screenshot that I
+ * took... it should show me a comparison between the old and new with a ss taken from the emu".
+ */
+async function aiTryPairSetup(after) {
+  const G = window.__gw;
+  const [S, P, T, K] = await Promise.all([G.mod("./state.ts"), G.mod("./ui/powai.tsx"), G.mod("./ui/trycard.tsx"), G.mod("./ui/aistack.tsx")]);
+  T.answers.value = {};
+  K.trying.value = null;
+  const now = Date.now();
+  const images = ["/home/powos/design-qa/gate-before.png", ...(after ? ["after:/home/powos/design-qa/gate-after.png"] : [])];
+  P.board.value = [{ id: "tp-raise", title: "Raise a window behind another", owner: "coder", status: "waiting", note: "", project: "Windows", created: now - 9e6, updated: now - 1e4, done: 0, progressDone: 0, progressTotal: 0, step: "", steps: "", commits: '[{"sha":"abc1234","subject":""}]', images: JSON.stringify(images), activity: now - 1e4, tryLine: "Tap a window behind another: it comes to the front" }];
+  P.checks.value = [];
+  S.page.value = -1;
+  const col = ".ai-screen:is(.status, .panes)";
+  const want = after ? "both" : "before";
+  await G.until(() => document.querySelector(`${col} .ais-card-top .ais-pair[data-pair="${want}"]`), 3000);
+  await G.until(() => [...document.querySelectorAll(`${col} .ais-pair img`)].every((i) => i.complete && i.naturalWidth > 0), 3000);
+  const anims = document.getAnimations().filter((a) => document.querySelector(col)?.contains(a.effect?.target) && a.effect.getTiming().iterations !== Infinity);
+  await Promise.race([Promise.all(anims.map((a) => a.finished.catch(() => 0))), new Promise((r) => setTimeout(r, 1200))]);
+}
+
+/** In the page: the try card's picture labels - "before | after", or "what you reported" + "after: coming" - and each loaded. */
+function aiTryPairLabels(after) {
+  const pair = document.querySelector(`.ai-screen:is(.status, .panes) .ais-card-top .ais-pair`);
+  if (!pair) return ["the try card has no picture pair"];
+  const labels = [...pair.querySelectorAll(".ais-pic-label")].map((l) => l.textContent.trim()).join(" | ");
+  const coming = pair.querySelector(".ais-pic-coming")?.textContent.trim() ?? "";
+  const [want, wantComing] = after ? ["before | after", ""] : ["what you reported", "after: coming"];
+  const fails = [...pair.querySelectorAll("img")].filter((i) => !i.naturalWidth).map((i) => `a picture didn't load (${i.getAttribute("src")})`);
+  if (labels !== want) fails.push(`the pictures are labelled [${labels}], not [${want}]`);
+  if (coming !== wantComing) fails.push(`it says "${coming}" for the after, not "${wantComing}"`);
+  return fails;
+}
+
+/** In the page: the card, its pair and the before / after boxes (null: no pair of two). */
+function aiTryPairBoxes() {
+  const card = document.querySelector(".ai-screen:is(.status, .panes) .ais-card-top");
+  const pair = card?.querySelector(".ais-pair");
+  const [b, a] = [...(pair?.querySelectorAll(".ais-pic") ?? [])].map((p) => p.getBoundingClientRect());
+  return a ? { card, pair, b, a } : null;
+}
+
+/** In the page, folded: before and after side by side in a sideways-snapping strip (swiped between when they don't fit). */
+function aiTryPairFolded() {
+  const got = window.__tpBoxes();
+  if (!got) return ["no before and after pictures"];
+  const { pair, b, a } = got, cs = getComputedStyle(pair);
+  const fails = Math.abs(b.top - a.top) > 1 ? [`before and after aren't side by side (tops ${Math.round(b.top)} / ${Math.round(a.top)})`] : [];
+  if (cs.overflowX !== "auto") fails.push("the pair isn't a swipeable strip (it can't scroll sideways)");
+  if (!cs.scrollSnapType.includes("x")) fails.push("the pair doesn't snap to a picture");
+  return fails;
+}
+
+/** In the page, unfolded: before and after side by side, both inside the card, one width. */
+function aiTryPairUnfolded() {
+  const got = window.__tpBoxes();
+  if (!got) return ["no before and after pictures"];
+  const { b, a } = got, c = got.card.getBoundingClientRect();
+  const fails = Math.abs(b.top - a.top) > 1 ? [`before and after aren't side by side (tops ${Math.round(b.top)} / ${Math.round(a.top)})`] : [];
+  if (a.right > c.right - 8 || b.left < c.left + 8) fails.push(`the pair [${Math.round(b.left)}, ${Math.round(a.right)}] isn't inside the card [${Math.round(c.left)}, ${Math.round(c.right)}]`);
+  if (Math.abs(a.width - b.width) > 2) fails.push(`before and after aren't the same width (${Math.round(b.width)} / ${Math.round(a.width)})`);
+  return fails;
+}
+
+/** In the page: the buttons in the --status-* tokens - works the positive one, still broken neutral, later quiet. */
+function aiTryPairActs() {
+  const card = document.querySelector(".ai-screen:is(.status, .panes) .ais-card-top");
+  const bg = (q) => getComputedStyle(card.querySelector(q) ?? card).backgroundColor;
+  const probe = document.createElement("span");
+  probe.style.backgroundColor = "color-mix(in srgb, var(--status-working) 45%, transparent)";
+  card.append(probe);
+  const positive = getComputedStyle(probe).backgroundColor;
+  probe.remove();
+  const [yes, no, later] = [bg(".ais-act.yes"), bg(".ais-act.no"), bg(".ais-act.later")];
+  const fails = yes === positive ? [] : [`"works" is ${yes}, not the positive status ${positive}`];
+  if (no === positive || no === yes) fails.push(`"still broken" isn't neutral (${no})`);
+  if (!/rgba\(0, 0, 0, 0\)|transparent/.test(later)) fails.push(`"later" isn't quiet (filled ${later})`);
+  return fails;
+}
+
+/** In the page: a tap on the last picture opens it full screen under its label ([label]); closed again. */
+async function aiTryPairFull(label) {
+  [...document.querySelectorAll(`.ai-screen:is(.status, .panes) .ais-card-top .ais-pair .ais-shot`)].at(-1)?.click();
+  const full = await window.__gw.until(() => document.querySelector(".present-full img.ai-img-full"), 1500);
+  const title = document.querySelector(".present-full .present-title")?.textContent ?? "";
+  document.querySelector(".present-full .present-close")?.click();
+  if (!full) return ["a tap on the picture didn't open it full screen"];
+  return title.startsWith(label) ? [] : [`full screen is titled "${title}", not the picture's label "${label}"`];
+}
+
+/** One state's checks ([after] shot or not, [folded] or not), named for the gate's line. */
+async function aiTryPairFails(page, after, folded) {
+  const fails = [...(await page.evaluate(aiTryPairLabels, after)), ...(await page.evaluate(aiTryPairActs))];
+  if (after) {
+    await page.evaluate(`window.__tpBoxes = ${aiTryPairBoxes}`);
+    fails.push(...(await page.evaluate(folded ? aiTryPairFolded : aiTryPairUnfolded)));
+  }
+  fails.push(...(await page.evaluate(aiTryPairFull, after ? "after" : "what you reported")));
+  return fails;
+}
+
+/** The try card's before | after, folded and unfolded, with and without the after shot: /cache/try-pair-<size>-<state>.png. */
+async function aiTryPairCheck(page) {
+  const fails = [];
+  for (const [size, vp] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]]) {
+    await page.setViewport(vp);
+    await page.evaluate((w) => window.__gw.until(() => innerWidth === w, 3000), vp.width);
+    for (const after of [true, false]) {
+      await page.evaluate(aiTryPairSetup, after);
+      fails.push(...(await aiTryPairFails(page, after, size === "folded")).map((f) => `${size} ${after ? "with after" : "no after"}: ${f}`));
+      await page.screenshot({ path: `/cache/try-pair-${size}-${after ? "after" : "before"}.png` });
+    }
+  }
+  await page.setViewport({ width: 404, height: 900 });
   return fails;
 }
 
@@ -9544,6 +9665,9 @@ try {
   // The folded AI page is a status page, not a chat (the user, 2026-10-31: "I don't wanna see the chat").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-status", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiStatusCheck(r.page))));
+  // Try cards show before | after, the after an emulator shot of the fix (the user, 2026-11-01).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "try-pair", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiTryPairCheck(r.page))));
   // Folded stacked: the strip, Needs you, one summary row, the chat filling the rest, the tabs (the manager's design, 11-01).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-folded", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiFoldedCheck(r.page))));

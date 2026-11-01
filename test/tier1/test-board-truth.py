@@ -810,7 +810,8 @@ class PassClosesOnlyItsOwnTaskCliTest(unittest.TestCase):
         # The page's "works" on the web-windows epic (2026-10-30): its last slice was ready, two steps still planned.
         # It records the pass, marks that slice done and stays open - never an error; the closer rule holds.
         self.run_cli("task", "add", "Web windows", "--id", "ww", "--plan", "close from switcher; full screen; resize")
-        self.run_cli("task", "set", "ww", "--step", "close from switcher", "--try", "Close a window from the switcher")
+        self.run_cli("task", "set", "ww", "--step", "close from switcher", "--try", "Close a window from the switcher",
+                     "--no-after", "the slice rule only")
         self.assertEqual(FakeStdb.db["work"]["ww"]["try_line"], "Close a window from the switcher")
         self.run_cli("check", "set", "ww", "you-1", "PASS", "--name", "you")
         p = self.run_cli("task", "works", "ww")

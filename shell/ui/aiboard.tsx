@@ -42,7 +42,7 @@ export interface WorkRow {
   steps?: string;
   /** JSON: [{sha, subject}] oldest first ("" = []). */
   commits?: string;
-  /** JSON: [path] - review images, e.g. /home/powos/design-qa/x.png ("" = []). */
+  /** JSON: [path] - review images, e.g. /home/powos/design-qa/x.png ("" = []); an "after:" one shows the fix (reviewImages). */
   images?: string;
   /** When it last moved (ms; 0 on old rows: `updated`). */
   activity?: bigint | number;
@@ -67,6 +67,18 @@ export function SevChip({ w }: { w: WorkRow }) {
       {s >= 2 ? "P0" : "P1"}
     </span>
   );
+}
+
+/** The prefix of an after image's entry (`task set --image P --image-kind after`); a bare path is a report image. */
+const AFTER = "after:";
+/**
+ * A task's review images by kind: before (what the user reported, the pre-fix state) and after (the fixed build in the
+ * same scene, an emulator shot), each in the order added. HACK: the kind rides in the path (the module's images column
+ * is a list of strings; powos-agents-cli AFTER) - the real fix is [{path, kind}] in the module.
+ */
+export function reviewImages(w: Pick<WorkRow, "images">): { before: string[]; after: string[] } {
+  const all = list<unknown>(w.images).filter((p): p is string => typeof p === "string");
+  return { before: all.filter((p) => !p.startsWith(AFTER)), after: all.filter((p) => p.startsWith(AFTER)).map((p) => p.slice(AFTER.length)) };
 }
 
 /** A JSON-array column ("" or bad = none). */
@@ -586,7 +598,8 @@ function Details({ w, g }: { w: WorkRow; g: Group | null }) {
   const steps = list<Step>(w.steps);
   // A change with no subject says nothing to the user ("a change"): only the ones in words.
   const commits = list<Commit>(w.commits).filter((c) => c.subject?.trim());
-  const images = list<string>(w.images).filter((p) => imageUrl(p));
+  const { before, after } = reviewImages(w);
+  const images = [...before, ...after].filter((p) => imageUrl(p));
   return (
     <div class="ai-item-more">
       {w.note && g !== "you" && <p class="ai-item-note">{w.note}</p>}
