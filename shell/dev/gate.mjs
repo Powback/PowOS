@@ -1532,6 +1532,89 @@ async function switcherSwipeCloseCheck(page) {
 }
 
 /**
+ * Board switcher-shows-every-open-window-linux-too (the user, 10-30 19:58: "all the apps should show in a switcher even
+ * the Linux apps that's running Maximized but it's not showing in the switcher"): with a MAXIMISED Linux web window on
+ * home (Dolphin, its bar merged with the status bar) and Android apps open, the switcher has a card for every one of
+ * them - the Linux window's card (id LINUX_CARD + its window id, WebWindows.linuxCards: every Linux window, any state)
+ * shown, labelled, in view. Its card tapped: the switcher closes and the host is asked to open exactly that card
+ * (Tasks.open -> WebWindows.openForTask -> "webwindows.show"), and that show brings the window back on its page as it
+ * was - shown, in front, still maximised.
+ */
+async function switcherLinuxMaxCheck(page) {
+  const WIN = 7;
+  const LINUX = (1 << 29) + WIN;
+  const setup = await page.evaluate(switcherLinuxMaxSetup, [LINUX, WIN]);
+  if (setup) return [`switcher-linux-max: ${setup}`];
+  const fails = await page.evaluate(switcherLinuxMaxCards, LINUX);
+  if (fails.length) return fails;
+  const at = await page.evaluate((id) => {
+    const c = document.querySelector(`.recents .task[data-task="${id}"] .task-shot`);
+    c?.scrollIntoView({ inline: "center" });
+    const b = c?.getBoundingClientRect();
+    return b && { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+  }, LINUX);
+  await new Promise((ok) => setTimeout(ok, 150));
+  await page.mouse.click(at.x, at.y);
+  await new Promise((ok) => setTimeout(ok, 400));
+  const opened = await page.evaluate(() => window.__opened.slice());
+  if (opened.join() !== String(LINUX)) fails.push(`switcher-linux-max: tapping the Linux card asked the host to open [${opened}], want only its card ${LINUX}`);
+  return [...fails, ...(await page.evaluate(switcherLinuxMaxBack, WIN))];
+}
+
+/** [switcherLinuxMaxCheck]'s home: a maximised Linux window (Dolphin), then the switcher up with its card and two apps'. */
+async function switcherLinuxMaxSetup([linux, win]) {
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  window.__opened = [];
+  powos.tasks.open = async (id) => (window.__opened.push(id), true);
+  S.page.value = 0;
+  await window.__gw.settled();
+  // Maximised: the work area, its floating frame kept to go back to (restore).
+  W.webWins.value = [{ id: win, key: "l:org.kde.dolphin", label: "Dolphin", page: S.pages.value[0], x: 0, y: 0, w: innerWidth, h: innerHeight - 120, restore: { x: 40, y: 120, w: 320, h: 400 }, live: true }];
+  await window.__gw.settled();
+  if (!document.querySelector(`.webwindow.maximised[data-wwid="${win}"]`)) return "no maximised .webwindow for the Linux window on home";
+  const c = document.createElement("canvas");
+  [c.width, c.height] = [40, 80];
+  const g = c.getContext("2d");
+  g.fillStyle = "#345";
+  g.fillRect(0, 0, 40, 80);
+  const task = (id, label, key, more = {}) => ({ id, label, key, icon: null, snapshot: c.toDataURL("image/png"), ...more });
+  // As ShellBridge.tasks lists them: the Linux cards first, then Android's recents.
+  window.__mockEvents.emit("recents.show", { open: true, from: null, tasks: [task(linux, "Dolphin", "l:org.kde.dolphin", { webwindow: win }), task(905, "Chrome", "a:chrome"), task(906, "Maps", "a:maps")] });
+  await new Promise((ok) => setTimeout(ok, 500));
+  return document.querySelector(".recents")?.classList.contains("shown") ? "" : "the switcher isn't up after recents.show";
+}
+
+/** [switcherLinuxMaxCheck]'s cards: one for each open window - the maximised Linux one too, labelled as its app. */
+function switcherLinuxMaxCards(linux) {
+  const cards = [...document.querySelectorAll(".recents .task")].map((c) => ({ id: Number(c.dataset.task), label: c.querySelector(".task-label")?.textContent, w: c.getBoundingClientRect().width }));
+  const seen = cards.map((c) => `${c.id} ${c.label}`).join(", ");
+  const fails = [linux, 905, 906].filter((id) => !cards.some((c) => c.id === id && c.w > 0)).map((id) => `switcher-linux-max: no card for ${id === linux ? "the maximised Linux window" : `task ${id}`} (cards: ${seen})`);
+  const label = cards.find((c) => c.id === linux)?.label;
+  if (label && label !== "Dolphin") fails.push(`switcher-linux-max: the Linux card says "${label}", want "Dolphin"`);
+  return fails;
+}
+
+/** [switcherLinuxMaxCheck]'s end: the host's answer to the card's open (WebWindows.openForTask) brings the window back as it was. */
+async function switcherLinuxMaxBack(win) {
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  W.webWins.value = W.webWins.value.map((w) => (w.id === win ? { ...w, minimised: true } : w));
+  await window.__gw.settled();
+  window.__mockEvents.emit("webwindows.show", win);
+  await window.__gw.settled();
+  const w = W.webWins.value.find((v) => v.id === win) ?? {};
+  const el = document.querySelector(`.webwindow[data-wwid="${win}"]`);
+  const shown = el?.getBoundingClientRect().width > 0;
+  const maximised = !!el?.matches(".maximised");
+  const fails = [];
+  if (document.querySelector(".recents.shown")) fails.push("switcher-linux-max: the switcher stayed up after its Linux card was opened");
+  if (w.minimised || !shown) fails.push(`switcher-linux-max: "webwindows.show" for the Linux window left it ${w.minimised ? "minimised" : "not on screen"}`);
+  if (!w.restore || !maximised) fails.push("switcher-linux-max: the Linux window came back from its card no longer maximised");
+  return fails;
+}
+
+/**
  * Back home from an app (the page hidden, then visible: visibilitychange, pageshow, focus, the host's resume - a live
  * wallpaper's picture read again, another frame of it: "system.glass"): the theme as it was - the labels' and widgets'
  * text, the search bar's tint, the wallpaper's tone - on each of the first 10 frames and after (the user, 10-31 20:08:
@@ -10446,6 +10529,9 @@ try {
   // Board swiping-a-game-or-linux-app-away-in-the-switcher: a Linux window's card swiped away is that window's close.
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-swipe-close", { width: 404, height: 900 }).then((r) => whenReady(r, () => switcherSwipeCloseCheck(r.page))));
+  // Board switcher-shows-every-open-window-linux-too: a maximised Linux window has its card; opened, it comes back.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-linux-max", { width: 404, height: 900 }).then((r) => whenReady(r, () => switcherLinuxMaxCheck(r.page))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeCheck))));
     runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme-heal", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeHealCheck))));
