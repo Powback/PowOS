@@ -51,6 +51,10 @@ Don't tune blur strength or tint without a reason you can measure (contrast, a f
 - **No hard borders, ever.** No 1px outlines, no divider lines. Rows are separated by spacing. OWL `border`
   renders as a lifted soft surface, and a coloured border as a soft ring of that colour.
 - **No page-wide dims.** No scrim colour behind sheets, and no darkened page under a panel.
+- A **quick page** (`ui/quickpage.tsx`) is one settings page of any app as a compact card on the same glass,
+  16px round, with a small bar (the app's icon, the page's name, pop-out, close). It springs out of what opened it.
+  **Known exception:** Android's native panels (the internet, NFC and Wi-Fi panels, the volume panel) stay
+  Android's own bottom sheets, not quick pages.
 
 ## 3. Wallpaper behind every page
 

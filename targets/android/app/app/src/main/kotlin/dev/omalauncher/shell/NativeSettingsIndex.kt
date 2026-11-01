@@ -52,7 +52,7 @@ object NativeSettingsIndex {
         return JSONArray(checkNotNull(json) { "Settings index worker returned no data" })
     }
 
-    fun open(context: Context, id: String) {
+    fun open(context: Context, id: String, anchor: org.json.JSONObject? = null) {
         val entry = entries[id] ?: error("Settings result expired; search again")
         val intent = Intent.parseUri(entry.getString("intent"), Intent.URI_INTENT_SCHEME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         // Intent URI serialization drops nested Bundles. Restore Android's preference arguments at launch.
@@ -61,19 +61,37 @@ object NativeSettingsIndex {
             val args = android.os.Bundle().apply { putString(":settings:fragment_args_key", key) }
             intent.putExtra(":settings:show_fragment_args", args)
         }
-        if (!intent.getStringExtra(":settings:show_fragment").isNullOrBlank() && RootMode.enabled() && android.os.Process.myUid() / 100000 == 0) {
-            intent.setClassName("com.android.settings", "com.android.settings.SubSettings")
-            // Web desktop: Settings' window first, the page started on its display (AppWindows.launch).
-            dev.omalauncher.system.AppWindows.launch(context, "com.android.settings") { openFragment(context, intent, entry.getString("label"), it) }
-            return
-        }
+        val label = entry.getString("label")
+        if (!intent.getStringExtra(":settings:show_fragment").isNullOrBlank() && rooted()) return fragmentPage(context, intent, label, anchor)
         try {
-            dev.omalauncher.system.AppWindows.startActivity(context, intent)
+            QuickPages.launch(context, intent, label, anchor)
         } catch (e: SecurityException) {
-            unavailable(context, entry.getString("label"))
+            unavailable(context, label)
         } catch (e: android.content.ActivityNotFoundException) {
-            unavailable(context, entry.getString("label"))
+            unavailable(context, label)
         }
+    }
+
+    private fun rooted() = RootMode.enabled() && android.os.Process.myUid() / 100000 == 0
+
+    /** quickpage.open({fragment}): com.android.settings fragment [fragment] as a quick page (root SubSettings only). */
+    fun openFragmentPage(context: Context, fragment: String, label: String, anchor: org.json.JSONObject?) {
+        check(rooted()) { "Settings fragments need root mode" }
+        fragmentPage(context, Intent().putExtra(":settings:show_fragment", fragment).putExtra(":settings:show_fragment_title", label), label, anchor)
+    }
+
+    /**
+     * [intent]'s fragment through the root SubSettings launcher, as a quick page (its own task: MULTIPLE_TASK, never the
+     * main Settings window's); its pop-out is the same fragment in Settings' window.
+     */
+    private fun fragmentPage(context: Context, intent: Intent, label: String, anchor: org.json.JSONObject?) {
+        intent.setClassName("com.android.settings", "com.android.settings.SubSettings").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val popOut = {
+            val plain = QuickPages.poppedOut(intent)
+            // Web desktop: Settings' window first, the page started on its display (AppWindows.launch).
+            dev.omalauncher.system.AppWindows.launch(context, "com.android.settings") { openFragment(context, plain, label, it) }
+        }
+        QuickPages.launch(context, QuickPages.Page(intent, label, anchor, { openFragment(context, intent, label, it) }, popOut))
     }
 
     private fun openFragment(context: Context, intent: Intent, title: String, options: android.os.Bundle?) {

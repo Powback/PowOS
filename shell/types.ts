@@ -967,6 +967,19 @@ export interface Bridge {
    * full-screen app on the main display (its bar's full screen button; the window hidden, kept) or is a window again.
    * "webwindows.state" ({ id, minimised }): the host's minimised state of a window changed - the page's follows it.
    */
+  /**
+   * Quick pages (ui/quickpage.tsx; QuickPages.kt): one settings page of any app as a compact card on home's page. The
+   * host answers [open] with "quickpage.show" ({ token, pkg, label, anchor }) to home, which makes the card's window
+   * ("webwindows.open" with key "q:<token>"); a host safety net opens the page full screen (never freeform) if no card comes.
+   */
+  quickpage?: {
+    /** [spec]: a search result's id, a settings action, an exported component or a Settings fragment; [anchorRect]: what it springs out of. */
+    open(spec: { id?: string; action?: string; component?: string; fragment?: string; label?: string; anchorRect?: { left: number; top: number; width: number; height: number } | null }): Promise<boolean>;
+    /** Card [id] of quick page [token] closed and the same page reopened in its app's normal window. */
+    popout(token: string, id: number): Promise<boolean>;
+    /** The page couldn't make quick page [token]'s card: the host's safety net (full screen, logged) now. */
+    refused(token: string): Promise<boolean>;
+  };
   webwindows?: {
     enabled(): Promise<boolean>;
     /** Host-optional (RL1): the host's live windows, for a (re)loaded page to rebuild its list (ui/webwindows.tsx). */
