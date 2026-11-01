@@ -647,7 +647,8 @@ function HomeDots() {
 }
 
 /** The foot's pill, unless home's search is the dock's button (docksearch.tsx: it opens the launcher, with the pill). */
-const HomeSearch = () => ((dockButton.value || (searchInDock.value && carryingSearch())) && !drawerOpen.value ? null : <Bar />);
+// OB1: on PowOS AI's page too - the button's bar is that page's input (bar.tsx seats it on the page's .ai-bar-slot).
+const HomeSearch = () => ((dockButton.value || (searchInDock.value && carryingSearch())) && !drawerOpen.value && page.value !== -1 ? null : <Bar />);
 
 let launcherUsed = false;
 

@@ -8733,7 +8733,8 @@ try {
   for (const [name, mode, viewport, form, setup] of [
     ["bar-folded", "pull", { width: 404, height: 900 }, ".bar", "chat"],
     ["bar-unfolded", "pull", { width: 821, height: 883 }, ".bar", "chat"],
-    ["powai-unfolded", "pull", { width: 821, height: 883 }, ".ai-compose", "ai"],
+    // OB1: the AI panel's field is the one bar (its "ai" role), no compose of its own.
+    ["powai-unfolded", "pull", { width: 821, height: 883 }, ".bar", "ai"],
     ["assist-folded", "assist", { width: 404, height: 900 }, ".assist-ask", ""],
     ["assist-unfolded", "assist", { width: 821, height: 883 }, ".assist-ask", ""],
   ]) {
@@ -9184,6 +9185,13 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const label of ["folded", "unfolded"])
       runs.push(open(browser, `${ORIGIN}/index.html`, `e2e-home-gestures-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => homeGesturesScene(r))));
+  // OB1 (dev/one-bar-check.js; the user, 2026-11-01 17:52-18:25): one bar on home, the launcher and PowOS AI's page, its
+  // role the page's, folded and unfolded; on the AI page it's seated under the tabs and its send goes into the chat.
+  if (process.env.SHELL_PAGES !== "0") {
+    for (const label of ["folded", "unfolded"])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `one-bar-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (l) => (await importShim("./dev/one-bar-check.js")).oneBarCheck(l), label))));
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "one-bar-pull", dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/one-bar-check.js")).oneBarPull()))));
+  }
   // Home's search as a dock button (dev/dock-search-check.js; the user, 2026-10-31): no .bar, the button centred in the
   // dock, a tap expands it in place focused (not the launcher), folded and unfolded, bottom and side docks.
   if (process.env.SHELL_PAGES !== "0")

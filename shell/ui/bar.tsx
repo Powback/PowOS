@@ -6,17 +6,53 @@
  * It listens from the moment the finger lands: a press that lasts becomes a hold (speech.hold) - no first words lost
  * to deciding which it is.
  */
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { computed } from "@preact/signals";
 import type { Ref } from "preact";
 import { GrowField } from "./grow.tsx";
 import { Icon } from "./icons.tsx";
 import { searchResults, searchPending, openSearchResult } from "../search.ts";
-import { followOpenness } from "./gesture.ts";
-import { chatting, drawer, launcherIsOverlay, openPanel, pullKind, query, sharesBar } from "../state.ts";
+import { followOpenness, pageDrag } from "./gesture.ts";
+import { chatting, drawer, homePage, launcherIsOverlay, openPanel, page, pullKind, pullPage, query, sharesBar } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
 import { dictate, drop, finish, finishing, forget, hearing, listen, listeningFor, makeHold, release, settle, speech, stopTap, type MicTarget } from "./dictation.ts";
 import { remoteHearing, startBarSync } from "./barsync.ts";
+
+/**
+ * OB1 (the user, 2026-11-01 17:52 / 18:24 / 18:25: "one single search bar that acts differently depending on which page
+ * you're on"): the one bar's role, from the page it's on - home searches everything and asks PowOS AI, the launcher
+ * filters its apps, PowOS AI's page (and the launcher's AI panel) messages the manager: a send goes into the chat thread.
+ */
+export type BarRole = "search" | "apps" | "ai";
+export const barRole = computed<BarRole>(() => {
+  if (drawer.value > 0 || pullPage) return pullKind.value === "ai" ? "ai" : "apps";
+  return homePage && page.value === -1 ? "ai" : "search";
+});
+/** What the role says in the empty field (home's says nothing: the prompt glyph alone, as it always had). */
+const ROLE_HINT: Record<BarRole, string | undefined> = { search: undefined, apps: "Search apps", ai: "Message the manager" };
+const ROLE_LABEL: Record<BarRole, string> = { search: "Search", apps: "Search apps", ai: "Message the manager" };
+
+/** The AI page's send into the chat thread: the one its own field had (powai.tsx registers it: onManagerSend). */
+let managerSend = (text: string) => askQueued(text);
+export const onManagerSend = (fn: (text: string) => void) => void (managerSend = fn);
+function sendToManager(text: string) {
+  const t = text.trim();
+  if (!t) return;
+  query.value = "";
+  managerSend(t);
+}
+
+/** The pill's role-dependent props (hint, glyph, label, Enter's key). */
+function roleProps(role: BarRole) {
+  const sendKey = role === "ai" || (query.value.trim() && !searchResults.value.length && !searchPending.value);
+  return {
+    hint: ROLE_HINT[role],
+    icon: role === "apps" ? ("apps" as const) : role === "ai" ? ("robotOutline" as const) : undefined,
+    "aria-label": ROLE_LABEL[role],
+    enterKeyHint: sendKey ? "send" : "go",
+  };
+}
 
 /** A press longer than this is a hold (talk, then send); shorter, a tap (dictate). */
 const HOLD_MS = 250;
@@ -183,7 +219,7 @@ function PillSend({ targets, value }: { targets: MicTarget[]; value: string }) {
  * the shared bar (barsync.ts) empties the other window's too - and ends a dictation into it without writing its words
  * back (dictation.ts drop). One 40 px slot either way (shell.css .pill .lead): the text never moves as it turns.
  */
-function Lead({ empty, filled, clear }: { empty: boolean; filled: boolean; clear: () => void }) {
+function Lead({ empty, filled, clear, icon }: { empty: boolean; filled: boolean; clear: () => void; icon?: "apps" | "robotOutline" }) {
   return (
     <button
       type="button"
@@ -196,7 +232,13 @@ function Lead({ empty, filled, clear }: { empty: boolean; filled: boolean; clear
       onPointerDown={(e) => e.preventDefault()}
       onClick={(e) => (e.stopPropagation(), filled && clear())}
     >
-      <span class={`prompt ${empty ? "" : "off"}`} aria-hidden="true">&gt;</span>
+      {icon ? (
+        <span class={`prompt role-icon ${empty ? "" : "off"}`} aria-hidden="true">
+          <Icon name={icon} size={18} />
+        </span>
+      ) : (
+        <span class={`prompt ${empty ? "" : "off"}`} aria-hidden="true">&gt;</span>
+      )}
       <Icon name="close" size={20} class="x" />
     </button>
   );
@@ -207,6 +249,8 @@ export function Pill({
   hears = [],
   sending = false,
   send = false,
+  hint,
+  icon,
   class: cls = "",
   ...field
 }: {
@@ -218,6 +262,9 @@ export function Pill({
   sending?: boolean;
   /** A send button right of the mic while there's text (the bar's pill): submits the pill's form, as Enter does. */
   send?: boolean;
+  /** OB1: the role's hint - a placeholder that keeps the leading glyph (the role's [icon]) beside it. */
+  hint?: string;
+  icon?: "apps" | "robotOutline";
   class?: string;
   inputRef?: Ref<HTMLTextAreaElement>;
   [attr: string]: any;
@@ -229,8 +276,8 @@ export function Pill({
   useSubmitFinishes(box, targets);
   return (
     <div ref={box} class={`${cls} pill tile ${sending ? "sending" : ""} ${empty ? "empty" : ""}`}>
-      <Lead empty={empty} filled={!!field.value} clear={() => (drop(...targets), field.onInput(""))} />
-      <GrowField {...(field as { value: string; onInput: (v: string) => void })} />
+      <Lead empty={empty} filled={!!field.value} icon={icon} clear={() => (drop(...targets), field.onInput(""))} />
+      <GrowField {...(field as { value: string; onInput: (v: string) => void })} placeholder={field.placeholder ?? hint} />
       <Mic target={target} />
       {send && <PillSend targets={targets} value={field.value} />}
     </div>
@@ -240,8 +287,9 @@ export function Pill({
 /** The bar's field: a held mic asks PowOS AI, a tap dictates into the search; the drawer comes up to show either. */
 const barMic: MicTarget = {
   typed: () => query.value,
-  heard: (full, send) => (send ? askHere(full) : (query.value = full)),
-  started: () => openHere(),
+  // OB1: on PowOS AI's page a hold is push-to-talk to the manager (the chat thread), never the launcher.
+  heard: (full, send) => (!send ? (query.value = full) : barRole.peek() === "ai" ? sendToManager(full) : askHere(full)),
+  started: () => barRole.peek() !== "ai" && openHere(),
 };
 
 /** DS2: the launcher's bar dictating (home's dock search button held: pull.begin { listen }, or the overlay's own button). */
@@ -298,6 +346,73 @@ function useOwnPress(onClick: () => void) {
   return { onPointerDown, onClick: click };
 }
 
+/** The bar's send (Enter, the send button) in [role]: the manager's chat, a search hit, or asking PowOS AI. */
+function submit(role: BarRole) {
+  if (role === "ai") return sendToManager(query.value);
+  // In a chat, Enter sends the next message - never opens a search hit.
+  const best = pullKind.value === "apps" && !chatting.value ? searchResults.value[0] : null;
+  if (best) openSearchResult(best);
+  else if (searchPending.value) return;
+  else askHere(query.value);
+}
+
+/**
+ * OB1: on PowOS AI's page the bar - still home's own element, inside home, which slid a screen to the right - takes the
+ * page's reserved room (powai.tsx .ai-bar-slot: under the bottom tabs, folded and unfolded) by a translate that counters
+ * home's slide (gesture.ts applyTrack) and lifts/sets it onto the slot, with home's slide curve: it moves from where it
+ * was to the slot as the screens slide (shell.css .home > .bar.seated), and back on the way home.
+ */
+function seatOnAi(bar: HTMLElement) {
+  const home = bar.closest<HTMLElement>(".home");
+  const slot = document.querySelector<HTMLElement>(".ai-screen [data-bar-slot=ai]");
+  const ai = slot?.closest<HTMLElement>(".ai-screen");
+  if (page.peek() !== -1 || !home || !slot || !ai || !slot.getClientRects().length) {
+    bar.classList.remove("seated");
+    bar.style.removeProperty("translate");
+    bar.style.removeProperty("width");
+    return;
+  }
+  const s = slot.getBoundingClientRect(), a = ai.getBoundingClientRect();
+  // Measured at its own place: its width the slot's, no translate (home's transform shifts it and home alike).
+  const was = bar.style.translate;
+  bar.style.translate = "none";
+  bar.style.width = `${s.width}px`;
+  const b = bar.getBoundingClientRect(), h = home.getBoundingClientRect();
+  const x = s.left - a.left - (b.left - h.left) - home.offsetWidth;
+  // Its foot on the slot's, but never its pill over the tabs above the slot (the wide foot's pill sits higher in it).
+  const pill = bar.querySelector(".bar-pill")?.getBoundingClientRect() ?? b;
+  const y = Math.max(s.bottom - a.top - (b.bottom - h.top), s.top - a.top - (pill.top - h.top));
+  bar.style.translate = was;
+  void bar.offsetWidth;
+  bar.classList.add("seated");
+  bar.style.translate = `${Math.round(x)}px ${Math.round(y)}px`;
+}
+
+/** Seats the bar on PowOS AI's page while that's the page (and re-seats it as the page's layout changes). */
+function useAiSeat(proxy: boolean) {
+  const form = useRef<HTMLFormElement | null>(null);
+  // One callback for the element's life (a new one each render re-runs the ref: null, then the element).
+  const formRef = useRef((el: HTMLFormElement | null) => {
+    form.current = el;
+    if (!proxy) followOpenness(el);
+  }).current;
+  const at = homePage && !proxy ? page.value : 0;
+  const dragging = homePage && !proxy && pageDrag.value != null;
+  useLayoutEffect(() => {
+    const el = form.current;
+    if (!el || !homePage || proxy) return;
+    el.classList.toggle("sliding", dragging);
+    seatOnAi(el);
+    if (at !== -1) return;
+    const slot = document.querySelector(".ai-screen [data-bar-slot=ai]");
+    const ro = new ResizeObserver(() => seatOnAi(el));
+    if (slot) ro.observe(slot);
+    ro.observe(document.documentElement);
+    return () => ro.disconnect();
+  }, [at, dragging]);
+  return formRef;
+}
+
 /**
  * The search/ask bar: the pill PowOS AI's page asks in (shell.css .pill - the reference material, the field growing to
  * three rows upward over home without moving anything under it, the mic on its right), the prompt glyph its placeholder.
@@ -312,20 +427,18 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
   // The assistant's dictation (the side button, the pet) writes into this field too.
   const shown = hearing(barMic) ?? hearing(pillTarget) ?? query.value;
   const active = focused || !!shown || s.listening;
+  const role = proxy ? "search" : barRole.value;
+  const formRef = useAiSeat(proxy);
   return (
     <form
-      class={`bar ${active ? "active" : ""}`}
+      class={`bar ${active ? "active" : ""} role-${role}`}
+      data-role={proxy ? undefined : role}
       data-p={!proxy || undefined}
-      ref={proxy ? undefined : followOpenness}
-      onSubmit={(e) => {
-        e.preventDefault();
-        // In a chat, Enter sends the next message - never opens a search hit.
-        const best = pullKind.value === "apps" && !chatting.value ? searchResults.value[0] : null;
-        if (best) openSearchResult(best);
-        else if (searchPending.value) return;
-        else askHere(query.value);
-      }}
+      ref={formRef}
+      onSubmit={(e) => (e.preventDefault(), submit(role))}
       {...useOwnPress(() => {
+        // OB1: PowOS AI's page types here, in place - no launcher over it.
+        if (role === "ai" && !drawer.value) return void (input.current?.focus(), powos.keyboard.show());
         openHere();
         if (launcherIsOverlay) return;
         // The search widget on the grid is the pill's face only: the typing is the foot's pill (home.tsx, parked
@@ -337,7 +450,6 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
       {/* The pill (shell.css .pill, as PowOS AI's compose): its own box over the bar's place, growing upward - the bar's
           height (home's layout) never changes. */}
       <Pill
-        class="bar-pill"
         target={barMic}
         hears={[pillTarget]}
         send
@@ -355,14 +467,15 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
           console.info(`search focus drawer=${drawer.value}`);
           // Home's pill types nowhere: the overlay's pill does (openHere, from the click). The desktop's own launcher
           // (an APK without the overlay forward: state.ts openPanel) is open by the time its pill is focused.
-          if (launcherIsOverlay && drawer.value === 0) return void (e.target as HTMLElement | null)?.blur();
+          if (launcherIsOverlay && drawer.value === 0 && barRole.peek() !== "ai") return void (e.target as HTMLElement | null)?.blur();
           takeOver();
           setFocused(true);
         }}
         onBlur={(e: FocusEvent) => (logBlur(e, input.current), setFocused(false))}
         placeholder={s.listening ? "listening…" : (s.error ?? undefined)}
-        aria-label={pullKind.value === "ai" && drawer.value > 0 ? "Ask PowOS AI" : "Search"}
-        enterKeyHint={query.value.trim() && !searchResults.value.length && !searchPending.value ? "send" : "go"}
+        // The form's role-* class: the hint fades in anew as the page changes the role (shell.css bar-role-*).
+        class="bar-pill"
+        {...roleProps(role)}
         autocomplete="off"
         autoCapitalize="off"
         spellcheck={false}
