@@ -280,11 +280,20 @@ class ShellActivity : Activity() {
         }
     }
 
+    /** The last Forward's DOWN went to a web window ([dispatchKeyEvent]). */
+    private var forwardSent = false
+
     /** Super+Enter opens a terminal, as in Omarchy (the page has the rest of the keys). */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.isMetaPressed && event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_ENTER) {
             runtime.terminal(null, "Terminal")
             return true
+        }
+        // Forward (the keyboard's key, a mouse's forward button) with a web window the user is in: its app's.
+        // The helper presses it whole (down, up) at our DOWN; its UP is ours then too.
+        if (event.keyCode == KeyEvent.KEYCODE_FORWARD && ::host.isInitialized) {
+            if (event.action == KeyEvent.ACTION_DOWN) forwardSent = event.repeatCount == 0 && host.bridge.windowKey(WindowKeys.Key.FORWARD)
+            if (forwardSent) return true
         }
         return super.dispatchKeyEvent(event)
     }
@@ -339,6 +348,8 @@ class ShellActivity : Activity() {
     override fun onBackPressed() {
         // Back from a full-screen Linux web window: it leaves full screen, nothing else (FL3).
         if (host.bridge.leaveFullScreen("back")) return
+        // A web window the user is in (a quick page's card first): Back is its app's - back a page, at its root it closes.
+        if (host.bridge.windowKey(WindowKeys.Key.BACK)) return
         host.bridge.emit("system.back", null)
     }
 

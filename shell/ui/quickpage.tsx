@@ -117,6 +117,42 @@ export function openQuickPage(spec: QuickSpec, anchor: QuickRect | undefined = p
   return true;
 }
 
+/**
+ * Where the user returns when a quick page's card closes (the user, 11-01: "it's closing when returning back" - Back out
+ * of a search result's card landed on bare home): the search it was opened from, as Android's and iOS's settings search
+ * do. [opened] arms it for the next card shown (bound to its token by [quickShown]); its close ([quickGone] "closed": its
+ * page's own back at its root, Back, the bar's swipe down, a tap outside) runs [restore]; the pop-out (↗), home or a
+ * card that never came drop it.
+ */
+let returnTo: { token?: string; at: number; restore: () => void } | null = null;
+/** An armed return no card took within this (a refused card, the host's full-screen net) is stale. */
+const RETURN_MS = 5000;
+
+export function returnAfterQuick(restore: () => void) {
+  returnTo = { at: Date.now(), restore };
+}
+
+/** Quick page [token]'s card is up: an armed return is its. */
+export function quickShown(token: string) {
+  if (returnTo && returnTo.token == null) {
+    if (Date.now() - returnTo.at <= RETURN_MS) returnTo.token = token;
+    else returnTo = null;
+  }
+}
+
+/** Quick page [token]'s card went: [how] "closed" goes back to where it was opened from; "popout" (its app's window) doesn't. */
+export function quickGone(token: string, how: "closed" | "popout") {
+  const r = returnTo;
+  if (!r || r.token !== token) return;
+  returnTo = null;
+  if (how === "closed") r.restore();
+}
+
+/** Home pressed, a card refused: nothing to return to. */
+export function forgetQuickReturn() {
+  returnTo = null;
+}
+
 type Area = { left: number; top: number; right: number; bottom: number };
 
 /**

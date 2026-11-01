@@ -7804,6 +7804,7 @@ async function quickPageScene(r, folded) {
   };
   try {
     const out = await r.page.evaluate(quickPageChecks, folded);
+    out.push(...(await r.page.evaluate(quickSearchReturn)));
     if (!out.length) await shot(folded ? "folded" : "unfolded");
     return out;
   } finally {
@@ -8049,6 +8050,60 @@ async function quickPageChecks(folded) {
   }
   fails.push(...(await j.closes()), ...(await j.failure()));
   return fails;
+}
+
+/**
+ * QP3 (the user, 11-01: "it's closing when returning back"): search "hotspot" -> its settings result opens as a card ->
+ * the card closes (its page's Back at the root: the host's "webwindows.closed") -> the search is back with "hotspot" and
+ * its results; a second Back closes it. The pop-out (↗) leaves the search closed. In the page (the stubbed host of QP1).
+ */
+async function quickSearchReturn() {
+  const q = window.__qp;
+  const [S, B] = await Promise.all(["./state.ts", "./bridge.ts"].map((m) => window.__gw.mod(m)));
+  const was = B.powos.qs.destinations;
+  B.powos.qs.destinations = async () => [{ id: "settings:OPLUS_WIFI_AP_SETTINGS", label: "Personal hotspot", keywords: "hotspot tethering", package: "com.oplus.wirelesssettings", app: "Settings" }];
+  const wait = async (ok) => {
+    for (let i = 0; i < 80 && !ok(); i++) await new Promise((r) => setTimeout(r, 25));
+    await window.__gw.settled();
+    return ok();
+  };
+  const row = () => [...document.querySelectorAll(".drawer.shown [data-search-result]")].find((el) => el.textContent.includes("Personal hotspot"));
+  const card = async () => {
+    S.openPanel("apps");
+    S.query.value = "hotspot";
+    if (!(await wait(row))) return 'QP3: searching "hotspot" shows no "Personal hotspot" result';
+    row().click();
+    return (await wait(() => q.cards().length === 1)) ? "" : `QP3: the hotspot result opened ${q.cards().length} cards (want 1)`;
+  };
+  // The card's page's Back at its root (the host closes its window): the search is back, then a second Back closes it.
+  const closed = async () => {
+    window.__mockEvents.emit("webwindows.closed", q.W.webWins.value.find((w) => w.quick)?.id);
+    await wait(row);
+    const out = [];
+    const back = !q.cards().length && S.drawer.value > 0 && S.query.value === "hotspot" && row();
+    if (!back) out.push(`QP3: after the card closed: ${q.cards().length} cards, drawer ${S.drawer.value}, query "${S.query.value}", hotspot row ${!!row()} (want the search back with "hotspot" and its result)`);
+    S.back();
+    await window.__gw.settled();
+    if (S.drawer.value !== 0) out.push("QP3: a second Back left the search open");
+    return out;
+  };
+  // The pop-out (↗): its app's window - the search stays closed.
+  const popped = async () => {
+    q.cards()[0]?.querySelector('[aria-label="Open in its app"]')?.click();
+    await window.__gw.settled();
+    await new Promise((r) => setTimeout(r, 200));
+    return S.drawer.value === 0 ? [] : ["QP3: the pop-out (↗) reopened the search under the app's window"];
+  };
+  try {
+    const first = await card();
+    if (first) return [first];
+    const out = await closed();
+    const second = await card();
+    return second ? [...out, second] : [...out, ...(await popped())];
+  } finally {
+    B.powos.qs.destinations = was;
+    S.closeDrawer(true);
+  }
 }
 
 /** MX1's two windows (a Linux and an Android one, floating on page 0), their full screen button and checks. */
