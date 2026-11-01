@@ -2,7 +2,7 @@
  * PowOS AI over another app (index.html?mode=assist; PowosAssistSession, the phone's digital assistant: holding the
  * power button). A panel at the bottom: the screen it was opened over (a thumbnail), the question - typed, or the mic
  * (hold to talk and send, tap to dictate) - and, once asked, the one chat (assistant.ts: the pill's conversation and
- * its ChatView, asks through askQueued - not a chat of its own). What's asked goes with the screen's text, so "what's
+ * the AI page's PageChat, asks through askQueued - not a chat of its own). What's asked goes with the screen's text, so "what's
  * this?" means the screen. A tap above the panel puts it away.
  *
  * Summoned (the side button), it listens at once and sends by itself: what's said goes into the field, and when it ends
@@ -29,7 +29,7 @@ import { chat, stored } from "../state.ts";
 import { Pill, dictate, hearing, interrupt, speech, type MicTarget } from "./bar.tsx";
 import { listeningFor, makeHold, release } from "./dictation.ts";
 import { askQueued, setAskContext } from "./assistant.ts";
-import { ChatView } from "./chat.tsx";
+import { PageChat } from "./powai.tsx";
 
 /** The side button is held to talk (assist.held): its release sends at once. */
 let pushToTalk = false;
@@ -436,9 +436,10 @@ export function Assist() {
             )}
           </div>
         )}
-        {/* The one chat (the pill's, chat.tsx): this conversation's newest, once something's asked here or a card is
-            sent to it - until then the screen above stays free to circle. */}
-        {(asked.value || cardSince()) && <ChatView head={false} />}
+        {/* The one chat - the AI page's own (powai.tsx PageChat, the user 11-01: "same design as the AI page"), this
+            conversation's newest, once something's asked here or a card is sent to it - until then the screen above
+            stays free to circle. */}
+        {(asked.value || cardSince()) && <PageChat shown cls="assist-chat" />}
         <form
           class="assist-ask"
           onSubmit={(e) => {

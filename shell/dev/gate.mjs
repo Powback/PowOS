@@ -9512,6 +9512,42 @@ try {
       return ended;
     })));
   }
+  // AI P0 (the user, 11-01: "AI overlay: no dock showing, full bar, same design as the AI page"): the side button's
+  // overlay, once asked, draws the AI page's own chat (powai.tsx PageChat, .ai-page-chat - no chat.tsx ChatView of its
+  // own), no dock anywhere in it, its field the panel's full width, no hold-to-talk hint. Folded and unfolded.
+  for (const [size, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]]) {
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=assist`, `assist-overlay-${size}`, viewport).then((r) => whenReady(r, async () => {
+      await r.page.waitForSelector("form.assist-ask .pill", { timeout: READY_MS });
+      const fails = await r.page.evaluate(async () => {
+        const S = await importShim("./state.ts");
+        window.__mockEvents?.emit?.("assist.context", { text: "Inbox - 3 unread", screenshot: null });
+        const f = document.querySelector(".assist-ask textarea");
+        f.value = "what is this?";
+        f.dispatchEvent(new Event("input", { bubbles: true }));
+        document.querySelector(".assist-ask").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        await window.__gw.until(() => document.querySelector(".assist-panel .ai-page-chat"), 3000);
+        S.chat.value = { busy: false, items: [{ kind: "user", text: "what is this?" }, { kind: "assistant", text: "Your inbox: three unread." }] };
+        await new Promise((res) => setTimeout(res, 300));
+        const out = [];
+        const panel = document.querySelector(".assist-panel");
+        const chats = panel.querySelectorAll(".ai-page-chat");
+        if (chats.length !== 1) out.push(`${chats.length} AI page chats in the overlay, not one`);
+        if (panel.querySelector(".chat")) out.push("the overlay still draws chat.tsx's ChatView (.chat), a second chat component");
+        if (!panel.querySelector(".ai-page-chat .ai-chat-in > .msg.assistant")) out.push("the page chat drew no reply bubble");
+        const docks = [...document.querySelectorAll(".dock, .dock-tray")].filter((d) => { const b = d.getBoundingClientRect(); return b.width > 0 && b.height > 0 && getComputedStyle(d).visibility !== "hidden" && +getComputedStyle(d).opacity > 0; });
+        if (docks.length) out.push(`a dock is visible in the overlay (${docks.map((d) => d.className.trim()).join(", ")})`);
+        const pr = panel.getBoundingClientRect(), ps = getComputedStyle(panel);
+        const inner = pr.width - parseFloat(ps.paddingLeft) - parseFloat(ps.paddingRight);
+        // Full width: the field spans the panel's padding box (its own 2 px margin each side, as the shared bar's, aside).
+        const pill = panel.querySelector(".assist-ask .pill").getBoundingClientRect();
+        if (Math.abs(pill.width - inner) > 6) out.push(`the field is ${Math.round(pill.width)} px wide, not the panel's full ${Math.round(inner)}`);
+        if (/hold anywhere/i.test(document.body.textContent)) out.push('a "Hold anywhere to talk" hint is drawn');
+        return out;
+      });
+      await r.page.screenshot({ path: `/cache/assist-overlay-${size}.png` });
+      return fails.map((f) => `assist-overlay-${size}: ${f}`);
+    })));
+  }
   // AO3 (the user, 2026-10-31: "I'm starting two microphone conversations"): one dictation at a time - start->start
   // leaves one session, a tap on a mic while another window dictates ends that one instead of starting a second, a
   // superseded dictation leaves nothing pending (dev/mic-one-check.js; the mock's speech counts its sessions).
