@@ -1,7 +1,7 @@
 {
   "id": "powos-gate-remote",
   "name": "PowOS shell gate - remote browser runs (.58)",
-  "kind": "job",
+  "kind": "container",
   "host": "desktop",
   "hostNote": "the 9950X3D box (192.168.50.58, Bazzite, 32 threads), idle most of the day",
   "owner": "system:powos-gate",
