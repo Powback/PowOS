@@ -383,6 +383,8 @@ function seatOnAi(bar: HTMLElement) {
   void bar.offsetWidth;
   bar.classList.add("seated");
   bar.style.translate = `${Math.round(x)}px ${Math.round(y)}px`;
+  // The threads under it keep clear of where it lands (powai.tsx useBarClear; its translate's end re-measures).
+  bar.dispatchEvent(new Event("bar-seated", { bubbles: true }));
 }
 
 /** BM1: on the way home from the page the bar stays seated while it morphs back into the button (docksearch.tsx). */
@@ -429,6 +431,9 @@ function useAiSeat(proxy: boolean) {
     // place without resizing it: home's stage, over the bar, resizes then - the seat follows.
     const stage = el.parentElement?.querySelector(":scope > .stage");
     if (stage) ro.observe(stage);
+    // The pill growing (a long ask wraps up to three rows).
+    const pill = el.querySelector(".bar-pill");
+    if (pill) ro.observe(pill);
     // The keyboard moves the slot (the page ends at its top, shell.css .ai-screen.stacked) whatever its size does: the
     // field follows it onto the keyboard, never left where the slot was (P1 11-01: behind the keyboard).
     const off = powos.on("system.insets", () => requestAnimationFrame(() => seatOnAi(el)));
