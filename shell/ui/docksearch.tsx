@@ -199,6 +199,20 @@ function own(id: number, p: Press, on: { move: (e: PointerEvent) => void; end: (
   return off;
 }
 
+/**
+ * MF1 (gate E2E1, 1 in 2 after BM1): a tap's trailing mousedown (the touch's compat event) lands on what is under the
+ * finger by then - the bar's pill morphing out of the button there (useButtonMorph) - and its default action took the
+ * focus the tap had just given the field (focusBar). For QUIET_MS that one mousedown moves no focus (the field's own
+ * still does: a caret placed in it).
+ */
+function keepTapFocus() {
+  const opts = { capture: true };
+  const off = () => (clearTimeout(t), removeEventListener("mousedown", md, opts));
+  const md = (e: MouseEvent) => (off(), editable(e.target) || e.preventDefault());
+  const t = window.setTimeout(off, QUIET_MS);
+  addEventListener("mousedown", md, opts);
+}
+
 const openness = (y: number, p: Press) => Math.max(0, Math.min(1, ((p.y - y) * GAIN) / (innerHeight * TRAVEL)));
 const clear = (p: Press) => (clearTimeout(p.hold), clearTimeout(p.ptt));
 
@@ -277,7 +291,7 @@ export function DockSearchButton() {
       off = () => {};
       end(cancelled, ev.clientY);
       // A tap's release is the button's own (its click lands on it); a hold's trailing events stay kept a moment.
-      if (p.kind === "tap") was();
+      if (p.kind === "tap") (was(), keepTapFocus());
       else window.setTimeout(was, QUIET_MS);
     };
     off = own(e.pointerId, p, {
