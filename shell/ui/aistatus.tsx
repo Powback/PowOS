@@ -105,14 +105,14 @@ function LiveBar({ done, total }: { done: number; total: number }) {
 }
 
 /**
- * One live agent: its task's title, what it's doing now, the bar; a tap opens Agents & terminals (folded) or - [beside],
- * unfolded - that agent live in the right column, as the old context column's card did before the 11-01 redesign.
+ * One live agent: its task's title, what it's doing now, the bar; a tap opens that agent live - its conversation - full
+ * page (folded) or in the right column ([beside], unfolded; the user, 11-01 16:45: "navigate to the chats").
  */
 function WorkRowLive({ x, beside }: { x: Worker; beside: boolean }) {
   const now = x.now || (isPowOS(x.a) ? "Working" : projectOf(x.a));
   return (
     <li class="ais-work">
-      <button type="button" class="ais-work-row" onClick={() => (beside ? ((aiAgent.value = x.a.id), (aiScreen.value = "fleet")) : (aiScreen.value = "agents"))}>
+      <button type="button" class="ais-work-row" onClick={() => ((aiAgent.value = x.a.id), (aiScreen.value = "fleet"))}>
         <span class="ais-work-line">
           <span class="aip-dot working" aria-hidden="true" />
           <span class="ais-work-title">{x.title}</span>

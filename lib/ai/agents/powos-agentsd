@@ -23,8 +23,11 @@ runs - Phase 2's backend, with the spool as the fallback (class Stdb).
 15 s and only when it changed - the Mac's agents on the phone, through powos-rootsh's one long-lived root shell.
 HACK: adb is a dev channel, not a transport; real fix = Phase 2 (the phone subscribes to the Mac's agents module).
 
-Never stored (§3): tool inputs or outputs, file contents, transcripts, env, tokens. Hints come from a fixed whitelist
-and strings that look like secrets are cut.
+Never stored (§3): tool inputs or outputs, file contents, env, tokens. Hints come from a fixed whitelist and strings
+that look like secrets are cut. The one exception is an agent's conversation (convo_of, the user's ask 11-01 17:10 "show
+the chat properly"): what the user and the agent SAID - the session's transcript (the hook payload's transcript_path),
+its last CONVO_ITEMS items, text only, secrets cut - written beside its events (events/<agent>.json "convo") and in the
+mirror. Tool calls in it are the same whitelisted hints as the ring's, never their input or output.
 """
 
 import fcntl
@@ -54,6 +57,12 @@ DROP_GONE_MS = 60 * 60_000
 MIRROR_EVERY_S = 15.0
 MIRROR_EVENTS = 20
 MIRROR_MESSAGES = 50
+# The conversation (convo_of): items kept per agent, characters per item, the transcript's tail read for it.
+CONVO_ITEMS = 60
+CONVO_CHARS = 4000
+CONVO_TAIL = 768 * 1024
+MIRROR_CONVO = 30
+MIRROR_CONVO_CHARS = 1500
 
 
 def _user():
@@ -187,6 +196,89 @@ _SHA = re.compile(r"(?:\b(?:sha|commit|landed|pushed|at)\b[^0-9a-f]{0,12})([0-9a
 _SLUG = re.compile(r"(?:board\s+task|task)[\s:`'\"]+([a-z0-9][a-z0-9-]{10,63})\b", re.I)
 
 
+# ---- the conversation (the session's transcript JSONL) -------------------------------------------------------------
+
+_PASTED = re.compile(r"<pasted_content\b[^>]*>(.*?)(?:</pasted_content>|\Z)", re.S)
+# What Claude Code puts in a user turn that the user never typed: whole turns that start with one of these are hidden.
+_NOT_SAID = re.compile(r"^\s*<(task-notification|local-command-\w+|command-(name|message|args)|bash-(input|stdout|stderr)|user-memory-input)\b")
+# Wrappers inside a turn the user did type: cut, with what's in them.
+_NOISE = re.compile(r"<(system-reminder|ide_\w+|local-command-\w+)\b[^>]*>.*?(?:</\1>|\Z)", re.S)
+
+
+def _blocks(content):
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    return [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+
+
+def _user_item(text):
+    """A user turn as the chat shows it: its words, pasted blocks apart (the view folds them: "pasted text ▸"); None for
+    a turn the user didn't type (a task notification, a slash command's output)."""
+    if not isinstance(text, str) or _NOT_SAID.match(text):
+        return None
+    pasted = [scrub(m.strip())[:CONVO_CHARS] for m in _PASTED.findall(text) if m.strip()]
+    said = _NOISE.sub("", _PASTED.sub("", text))
+    said = scrub(re.sub(r"\n{3,}", "\n\n", said).strip())[:CONVO_CHARS]
+    if not said and not pasted:
+        return None
+    item = {"kind": "user", "text": said}
+    if pasted:
+        item["pasted"] = pasted
+    return item
+
+
+def _fold_line(r, out, tools):
+    """One transcript record onto [out]; [tools]: tool_use_id -> its item (a result marks it ok / failed)."""
+    if not isinstance(r, dict) or r.get("isSidechain") or r.get("isMeta") or r.get("isCompactSummary"):
+        return
+    kind = r.get("type")
+    msg = r.get("message") if isinstance(r.get("message"), dict) else {}
+    for b in _blocks(msg.get("content")):
+        t = b.get("type")
+        if kind == "user" and t == "text":
+            item = _user_item(b.get("text"))
+            if item:
+                out.append(item)
+        elif kind == "user" and t == "tool_result":
+            it = tools.get(b.get("tool_use_id"))
+            if it is not None:
+                it["ok"] = not b.get("is_error")
+        elif kind == "assistant" and t == "text":
+            text = scrub(str(b.get("text") or "")).strip()
+            if text:
+                out.append({"kind": "assistant", "text": text[:CONVO_CHARS]})
+        elif kind == "assistant" and t == "tool_use":
+            name = str(b.get("name") or "")
+            it = {"kind": "tool", "name": name, "hint": hint_of(name, b.get("input")), "ok": None}
+            tools[b.get("id")] = it
+            out.append(it)
+
+
+def convo_of(path, n=CONVO_ITEMS):
+    """The session's conversation, the last [n] items, from its transcript's tail: [{"kind": "user", "text", "pasted"?},
+    {"kind": "assistant", "text"}, {"kind": "tool", "name", "hint", "ok"}] - the chat's own items (shell types.ts
+    ChatItem), so the Agents view draws it with PowOS AI's chat. Thinking, tool inputs and outputs, system reminders and
+    subagents' sidechains are never in it. None when there's no transcript to read."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - CONVO_TAIL))
+            data = f.read()
+    except (OSError, TypeError, ValueError):
+        return None
+    lines = data.split(b"\n")
+    if size > CONVO_TAIL:
+        lines = lines[1:]  # the first is cut
+    out, tools = [], {}
+    for line in lines:
+        try:
+            _fold_line(json.loads(line), out, tools)
+        except ValueError:
+            continue
+    return out[-n:]
+
+
 def sha_of(text):
     """The commit sha a hand-back names ("landed abc1234"), else ""."""
     m = _SHA.search(text) if isinstance(text, str) else None
@@ -294,6 +386,9 @@ class Spool:
         self.fails = {}  # agent id -> failures in a row
         self.described = {}  # session agent id -> [descriptions of Agent tool calls not started yet]
         self.refused = {}  # (role, tool, hint) -> ms last logged as friction (one per hour)
+        self.transcripts = {}  # session agent id -> its transcript's path (the hook payload's transcript_path)
+        self.convos = {}  # session agent id -> its conversation (convo_of), as last written
+        self.dirty_convo = set()  # sessions whose transcript may have grown: re-read at the next flush
         self.dirty_agents = set()
         self.dirty_rings = set()
         self.dirty_messages = False
@@ -318,8 +413,12 @@ class Spool:
         for aid in self.agents:
             try:
                 with open(os.path.join(self.dir, "events", safe_file(aid) + ".json")) as f:
-                    ring = json.load(f).get("events", [])[-RING:]
+                    saved = json.load(f)
+                ring = saved.get("events", [])[-RING:]
                 self.rings[aid] = ring
+                if isinstance(saved.get("transcript"), str):
+                    self.transcripts[aid] = saved["transcript"]
+                    self.convos[aid] = saved.get("convo") or []
                 self.seq[aid] = max((e.get("id", 0) for e in ring), default=0)
             except (OSError, ValueError, AttributeError):
                 pass
@@ -511,6 +610,11 @@ class Spool:
         if sub:
             me = self.agent(f"{top}/{sub}", ts, rec.get("agent_type") or "agent", top, cwd, 0)
         aid = me["id"]
+        tp = rec.get("transcript_path")
+        if isinstance(tp, str) and tp.endswith(".jsonl") and "/subagents/" not in tp:
+            self.transcripts[top] = tp
+        if top in self.transcripts:
+            self.dirty_convo.add(top)
 
         if ev == "SessionStart":
             self.touch(a, ts, state="idle" if a["state"] in ("gone", "idle", "blocked") else a["state"])
@@ -658,6 +762,8 @@ class Spool:
             self.dirty_agents.add(k)
         for a in list(self.agents.values()):
             quiet = now - a["last"]
+            if a["state"] == "working" and a["id"] in self.transcripts:
+                self.dirty_convo.add(a["id"])  # a long reply between tool calls: no hook says it was written
             if a["state"] == "working" and quiet > STALE_WORKING_MS:
                 self.touch(a, a["last"], state="idle", step="")
             elif a["state"] in ("idle", "blocked", "needs_you", "paused") and quiet > QUIET_GONE_MS and not alive(a.get("pid")):
@@ -671,6 +777,9 @@ class Spool:
         self.agents.pop(aid, None)
         self.rings.pop(aid, None)
         self.seq.pop(aid, None)
+        self.transcripts.pop(aid, None)
+        self.convos.pop(aid, None)
+        self.dirty_convo.discard(aid)
         for k in [k for k, t in self.tasks.items() if t["agent"] == aid]:
             del self.tasks[k]
         self.dropped.add(aid)
@@ -704,8 +813,21 @@ class Spool:
             "asks": sorted(self.asks.values(), key=lambda a: a["ts"]),
         }
 
+    def reread_convos(self):
+        """The sessions whose transcript may have grown, read again: the ones whose conversation changed."""
+        changed = set()
+        for aid in self.dirty_convo:
+            items = convo_of(self.transcripts.get(aid))
+            if items is not None and items != self.convos.get(aid):
+                self.convos[aid] = items
+                changed.add(aid)
+        self.dirty_convo.clear()
+        return changed
+
     def flush(self, sink=None):
-        """Writes what changed; True if anything was. [sink] (Stdb) also gets the change, as one batch."""
+        """Writes what changed; True if anything was. [sink] (Stdb) also gets the change, as one batch (the ring's, not
+        the conversation's: that's the spool's and the mirror's only)."""
+        talked = self.reread_convos()
         if sink is not None and (self.dirty_agents or self.dirty_rings or self.dropped or self.dirty_messages or sink.full):
             sink.send(self.batch(full=sink.full))
         wrote = False
@@ -713,12 +835,12 @@ class Spool:
             self.unread()
             write_json(os.path.join(self.dir, "state.json"), self.snapshot())
             wrote = True
-        if self.dirty_rings or self.dropped:
+        if self.dirty_rings or self.dropped or talked:
             ev = os.path.join(self.dir, "events")
             os.makedirs(ev, exist_ok=True)
-            for aid in self.dirty_rings:
-                if aid in self.rings:
-                    write_json(os.path.join(ev, safe_file(aid) + ".json"), {"agent": aid, "events": self.rings[aid]})
+            for aid in self.dirty_rings | talked:
+                if aid in self.rings or aid in self.convos:
+                    write_json(os.path.join(ev, safe_file(aid) + ".json"), self.events_file(aid))
             for aid in self.dropped:
                 try:
                     os.remove(os.path.join(ev, safe_file(aid) + ".json"))
@@ -733,6 +855,14 @@ class Spool:
         self.dropped.clear()
         self.dirty_messages = False
         return wrote
+
+    def events_file(self, aid):
+        """events/<agent>.json: its ring, and - a session with a transcript - its conversation and where it's read from."""
+        out = {"agent": aid, "events": self.rings.get(aid, [])}
+        if aid in self.transcripts:
+            out["transcript"] = self.transcripts[aid]
+            out["convo"] = self.convos.get(aid, [])
+        return out
 
     def batch(self, full=False):
         """What changed, for the powos-agents module's `sync` (apps/agents): §3 rows as the spool has them. [full]:
@@ -753,10 +883,25 @@ class Spool:
         s = self.snapshot()
         s["messages"] = self.messages[-MIRROR_MESSAGES:]
         s["events"] = {aid: ring[-MIRROR_EVENTS:] for aid, ring in self.rings.items() if aid in self.agents}
+        s["convos"] = {
+            aid: [short(i, MIRROR_CONVO_CHARS) for i in items[-MIRROR_CONVO:]]
+            for aid, items in self.convos.items()
+            if aid in self.agents and self.agents[aid]["state"] != "gone"
+        }
         return s
 
     def working(self):
         return any(a["state"] == "working" for a in self.agents.values())
+
+
+def short(item, n):
+    """A conversation item with its text (and pasted blocks) cut to [n] characters: the mirror's smaller copy."""
+    out = dict(item)
+    if isinstance(out.get("text"), str) and len(out["text"]) > n:
+        out["text"] = out["text"][: n - 1] + "…"
+    if out.get("pasted"):
+        out["pasted"] = [p[:n] for p in out["pasted"]]
+    return out
 
 
 def alive(pid):

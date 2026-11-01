@@ -9,7 +9,8 @@
  */
 import { Component, type ComponentType } from "preact";
 import { useEffect, useState } from "preact/hooks";
-import { openAgents } from "../agents.ts";
+import { aiAgent, openAgents } from "../agents.ts";
+import { AgentLive } from "./agents.tsx";
 import { installedApps, manifestOf, moduleUrl } from "../apps/pages.ts";
 import { host as appHost } from "../apps/stdb.ts";
 import type { AgentHost } from "../types.ts";
@@ -177,6 +178,8 @@ function Devices({ shown }: { shown: boolean }) {
 /** The screen [s] (not the chat), [shown]: on screen - its feeds run only then. */
 export function MenuScreen({ s, shown, back }: { s: AiScreen; shown: boolean; back: () => void }) {
   if (s === "progress") return <ProgressScreen shown={shown} back={back} />;
+  // Folded, a Working now row opens its agent here, full page (the user, 11-01 16:45: "navigate to the chats").
+  if (s === "fleet" && aiAgent.value) return <AgentLive id={aiAgent.value} />;
   if (s === "agents" || s === "fleet") return <AgentsScreen shown={shown} />;
   if (s === "devices") return <Devices shown={shown} />;
   if (s === "friction") return <FrictionScreen shown={shown} />;
