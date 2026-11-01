@@ -3,8 +3,8 @@
 # published to the phone before the shell's bindings had the column - home's board subscription stopped decoding).
 #   - apps/vendor.sh --check: the committed shell/vendor/<db>.js must be exactly what apps/<app>/module builds;
 #   - the ship service's apps step refuses a module whose bindings weren't regenerated in it (old: published anyway);
-#   - module + regenerated bindings: the bindings are pushed first, then the module (as the service), checked against
-#     the phone's schemas before the push (--publishing the app) and after the publish;
+#   - module + regenerated bindings: MODULE FIRST (11-01 f391) - the module is published (as the service), then the
+#     bindings pushed; the phone's schemas checked before the publish (--needs) and after it, before the push;
 #   - bindings that wouldn't decode the phone's modules: the whole tip is refused (no push, no publish);
 #   - apps/install.sh refuses a vendored module's publish outside the ship service (--direct: logged).
 # A fake origin (bare repo), an agent's clone, this tree's ship.sh + vendor.sh + install.sh; stubs for the module
@@ -75,7 +75,7 @@ drained 40 && settle
 grep -q '^MAIL.*apps:agents.*FAILED' "$LOG" && ok "A: coder mailed" || { bad "A: no mail"; cat "$LOG"; }
 grep -q "REFUSED - shell/vendor/powos-agents.js isn't what apps/agents/module builds" "$Q"/done/*-apps.log 2>/dev/null && ok "A: the apps log says why (vendor --check)" || bad "A: apps log"
 
-# B. The fix: module + regenerated bindings in ONE commit - bindings pushed first, then the module, as the service.
+# B. The fix: module + regenerated bindings in ONE commit - module first (as the service), then the bindings pushed.
 : > "$LOG"
 "$VENDOR_GEN" agents --out shell/vendor/powos-agents.js
 git commit -qam "agents: powos-agents.js regenerated"; git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null; tB=$(git rev-parse HEAD)
@@ -83,11 +83,13 @@ req --note "AI page: try line, for real"
 drained 40 && settle
 for _ in $(seq 20); do grep -q '^INSTALL' "$LOG" && break; sleep 1; done
 p=$(grep -n '^PUSH .*vendor/powos-agents.js' "$LOG" | head -1 | cut -d: -f1); i=$(grep -n '^INSTALL agents install svc=1' "$LOG" | head -1 | cut -d: -f1)
-[ -n "$p" ] && [ -n "$i" ] && [ "$p" -lt "$i" ] && ok "B: bindings pushed, THEN the module published (by the service)" || { bad "B: order/marks"; cat "$LOG"; tail -8 "$Q/runner.log"; }
-b1=$(grep -n '^BCHECK --no-publish --vendor shell/vendor --publishing agents' "$LOG" | head -1 | cut -d: -f1)
-[ -n "$b1" ] && [ -n "$p" ] && [ "$b1" -lt "$p" ] && ok "B: phone schemas checked before the push (ahead of agents allowed)" || { bad "B: pre-push check"; cat "$LOG"; }
+[ -n "$p" ] && [ -n "$i" ] && [ "$i" -lt "$p" ] && [ "$(grep -c '^INSTALL agents' "$LOG")" = 1 ] &&
+  ok "B: module published (by the service, once), THEN the bindings pushed" || { bad "B: order/marks"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+b1=$(grep -n '^BCHECK --needs --vendor shell/vendor$' "$LOG" | head -1 | cut -d: -f1)
+[ -n "$b1" ] && [ -n "$i" ] && [ "$b1" -lt "$i" ] && ok "B: phone schemas checked before the publish (--needs)" || { bad "B: pre-publish check"; cat "$LOG"; }
 b2=$(grep -n '^BCHECK --no-publish --vendor shell/vendor$' "$LOG" | tail -1 | cut -d: -f1)
-[ -n "$b2" ] && [ -n "$i" ] && [ "$b2" -gt "$i" ] && ok "B: and again after the publish" || { bad "B: post-publish check"; cat "$LOG"; }
+[ -n "$b2" ] && [ -n "$i" ] && [ "$b2" -gt "$i" ] && [ "$b2" -lt "$p" ] && ! grep -q '^BCHECK .*--publishing' "$LOG" &&
+  ok "B: and again after the publish, before the push (must match, no ahead allowed)" || { bad "B: post-publish check"; cat "$LOG"; }
 [ "$(cat "$Q/apps-live" 2>/dev/null)" = "$tB" ] && [ "$(cat "$Q/live" 2>/dev/null)" = "$tB" ] && ok "B: live + apps-live at the tip" || bad "B: records"
 
 # C. Bindings that wouldn't decode the phone's modules: the tip is refused - nothing pushed, nothing published.

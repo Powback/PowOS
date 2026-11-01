@@ -57,7 +57,7 @@ H=$W/home; mkdir -p "$H/bin" "$H/pw/ship-runner/tools/phone"; touch "$H/pw/ship-
 for c in launchctl plutil sleep; do printf '#!/bin/sh\nexit 0\n' > "$H/bin/$c"; chmod +x "$H/bin/$c"; done
 gi() { HOME="$H" POWOS_RUN_ROOT="$H/pw" PATH="$H/bin:$PATH" bash "$REPO/tools/phone/ship-deploy.sh" gate-install 2>&1; }
 o1=$(gi); GS=$H/.config/powos/ship-gate.secret
-[ -s "$GS" ] && [ "$(stat -f %Lp "$GS" 2>/dev/null || stat -c %a "$GS")" = 600 ] && ok "gate-install makes the secret, mode 600" || bad "secret made" "$o1"
+[ -s "$GS" ] && [ "$(stat -c %a "$GS" 2>/dev/null || stat -f %Lp "$GS")" = 600 ] && ok "gate-install makes the secret, mode 600" || bad "secret made" "$o1"
 S1=$(cat "$GS"); o2=$(gi)
 [ "$S1" = "$(cat "$GS")" ] && ok "second gate-install keeps the same secret" || bad "idempotent"
 grep -qF "$S1" <<<"$o1$o2" && bad "provisioned secret printed" || ok "provisioned secret never printed"

@@ -173,6 +173,7 @@ run)
   # Stopped (launchctl bootout, a kill): what's in flight goes with it, whole process trees - unless it's installing:
   # that finishes first (ExitTimeOut 300 in the plist).
   trap 'if installing; then echo "$(date +%T) stopping: the install in flight finishes first"; while installing; do sleep 1; done; fi
+    [ -d "$Q/apk" ] && [ ! -f "$Q/apk/rc" ] && touch "$Q/apk/stopped"
     stop_ships $$; kill "$(cat "$Q/apk/pid" 2>/dev/null)" 2>/dev/null; rm -rf "$L"; exit 143' TERM
   SL=$HOME/.cache/powos-ship.lock VL=$HOME/.cache/powos-verify.lock
   # After every successful ship (shell or APK): a round of the manager's "use the phone like a user" journeys
@@ -481,7 +482,7 @@ run)
   # modules_first WHAT ("shell"/"APK") [lock]: 0 = nothing needed or all published; 1 = held (logged + mailed); 2 = the
   # phone is busy, try again (lock: take the ship lock for the publish - the shell step holds the phone already).
   modules_first() {
-    local need a mlog mrc=0 left mn lk=
+    local need a mlog mrc=0 left mn lk= mm
     if ! need=$(modules_needed 2>"$Q/modules-first.err"); then mrc=11; need="(unreadable)"
     else need=$(for a in $need; do first_done "$a" || echo "$a"; done | paste -sd' ' -); [ -n "$need" ] || return 0; fi
     if [ $mrc = 0 ] && [ "${2:-}" = lock ]; then
@@ -505,6 +506,16 @@ run)
     fi
     [ -z "$lk" ] || { rm -rf "$SL"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"; }
     if [ $mrc = 0 ]; then echo "$(date '+%F %T') ${T:0:9} apps-first ($need) for $who_s: before the $1" >> "$Q/shipped.log"; return 0; fi
+    # The phone WAS read and the bindings wouldn't decode its modules in a way no publish fixes (another shape, or bindings
+    # ahead of a module this commit doesn't build): not "can't be checked" - the tip is REFUSED, as schema_gate refuses it.
+    mm=$( [ $mrc = 11 ] && grep -E '^ *bindings:.*(fix|isn)' "$Q/modules-first.err" 2>/dev/null | sed 's/^ *//' | head -2 | cut -c1-240 | paste -sd' ' - || true)
+    if [ -n "$mm" ]; then
+      echo "$T" > "$Q/failed-apps"; sed 's/^/  /' "$Q/modules-first.err"
+      echo "$(date +%T) ${T:0:9}: $1 ship REFUSED - the bindings and the modules wouldn't match (above; log $mlog)"
+      [ "$(cat "$Q/modules-first-mailed" 2>/dev/null)" = "$T" ] || { echo "$T" > "$Q/modules-first-mailed"
+        mail "ship ${T:0:9} ($1) REFUSED for $who_s: $mm - log $mlog on the Mac; fix it on origin, then ship.sh request again"; }
+      return 1
+    fi
     [ $mrc = 11 ] && echo "modules-first: the phone's module schemas can't be checked against these bindings (above)" >> "$mlog"
     echo "$T" > "$Q/failed-apps"
     echo "$(date +%T) ${T:0:9}: $1 HELD - module first ($need) failed rc $mrc (log $mlog) - waiting for a new origin commit"
@@ -561,6 +572,9 @@ run)
       elif [ "$arc" = 8 ]; then echo "$(date +%T) ${A:0:9}: a newer APK is wanted - the pending one is replaced"
       elif [ "$arc" = 4 ]; then echo "$(date +%T) ${A:0:9}: the user stayed active - the APK goes again"
       elif [ -e "$Q/paused" ]; then echo "$(date +%T) ${A:0:9}: APK ship stopped by pause (rc $arc) - its requests are kept"
+      # Stopped WITH its runner (the TERM trap marked it before killing ship-apk, whose subshell still writes 143): not
+      # a failure of this tip - it goes again, as one whose runner died without an rc does (apk_alive's rc 4).
+      elif [ -e "$Q/apk/stopped" ]; then echo "$(date +%T) ${A:0:9}: APK ship stopped with the runner (rc $arc) - it goes again"
       else
         echo "$A" > "$Q/failed-apk"
         echo "$(date +%T) ${A:0:9}: APK ship FAILED rc $arc (log $alog) - waiting for a new origin commit"

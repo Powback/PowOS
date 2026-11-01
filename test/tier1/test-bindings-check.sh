@@ -15,7 +15,7 @@ T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 # The phone's schemas as the bindings describe them (the server's JSON shape: tables + typespace), through the same SDK.
 sed 's/from"spacetimedb"/from".\/spacetimedb.js"/g' "$ROOT/shell/vendor/local-pet.js" > "$T/local-pet.mjs"
 cp "$ROOT/shell/vendor/spacetimedb.js" "$T/"
-fake() { # fake <out> <js transforming `cols` of table pet>
+fake() { # fake <out> <js transforming `cols` of table pet> [<js transforming the reducer names>]
   (cd "$T" && node --input-type=module -e "
     const dbs = $(sed -n 's|^\([a-z0-9-]*\)\.js  *generated .*|\1|p' "$ROOT/shell/vendor/VERSIONS" | sed 's/.*/"&"/' | paste -sd, - | sed 's/^/[/; s/$/]/');
     const { DbConnection } = await import('./local-pet.mjs');
@@ -26,14 +26,17 @@ fake() { # fake <out> <js transforming `cols` of table pet>
       tables.push({ name: t.sourceName, product_type_ref: types.length });
       types.push({ Product: { elements: cols.map((n) => ({ name: { some: n }, algebraic_type: { String: [] } })) } });
     }
+    // The server reports the module's reducers too (bindings-check.mjs checks the ones the bindings call, f391).
+    const reducers = (${3:-(r) => r})((DbConnection.builder().remoteModule.reducers ?? []).map((r) => r.name).filter(Boolean)).map((name) => ({ name }));
     let out = '';
-    for (const d of dbs) out += '@@' + d + '\n' + (d === 'local-pet' ? JSON.stringify({ typespace: { types }, tables }) : '\`' + d + '\` not found') + '\n';
+    for (const d of dbs) out += '@@' + d + '\n' + (d === 'local-pet' ? JSON.stringify({ typespace: { types }, tables, reducers }) : '\`' + d + '\` not found') + '\n';
     process.stdout.write(out);" > "$1")
 }
 # The other databases come back "not found" (absent: not checked), so each case is about local-pet alone.
 fake "$T/same" "(c) => c"
 fake "$T/ahead" "(c) => c.slice(0, -1)"
 fake "$T/differs" "(c) => [...c, 'extra']"
+fake "$T/noreducer" "(c) => c" "(r) => r.slice(1)"
 export BINDINGS_PUBLISH="$T/publish" BINDINGS_ADB=false
 printf '#!/bin/bash\necho "$@" > %s/published\n' "$T" > "$T/publish"; chmod +x "$T/publish"
 printf '#!/bin/bash\ncp %s "$3"\n' "$ROOT/shell/vendor/local-pet.js" > "$T/vendor-same"
@@ -47,6 +50,11 @@ rm -f "$T/published"
 out=$(BINDINGS_VENDOR="$T/vendor-same" "$CHECK" --schemas "$T/ahead" 2>&1); rc=$?
 [ $rc = 0 ] && grep -q "^pet publish" "$T/published" 2>/dev/null && ok "ahead + this commit's module builds them: published" ||
   bad "ahead + this commit's module builds them: published" "rc=$rc $out"
+
+rm -f "$T/published"
+out=$(BINDINGS_VENDOR="$T/vendor-same" "$CHECK" --schemas "$T/noreducer" 2>&1); rc=$?
+[ $rc = 0 ] && echo "$out" | grep -q "reducers .* not on the phone" && grep -q "^pet publish" "$T/published" 2>/dev/null &&
+  ok "a reducer the phone lacks: ahead, published" || bad "a reducer the phone lacks: ahead, published" "rc=$rc $out"
 
 rm -f "$T/published"
 out=$(BINDINGS_VENDOR="$T/vendor-other" "$CHECK" --schemas "$T/ahead" 2>&1); rc=$?
