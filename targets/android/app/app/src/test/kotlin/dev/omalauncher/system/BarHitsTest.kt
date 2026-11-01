@@ -22,7 +22,7 @@ class BarHitsTest {
         y: Int = 60,
         handles: List<BarRect> = emptyList(),
         windows: List<BarRect> = listOf(title, buttons),
-    ) = BarHits.route(x, y, listOf(clock, icons), handles, windows)
+    ) = BarHits.route(x, y, BarClaims(listOf(clock, icons), handles, windows))
 
     @Test
     fun theMergedBarsTitleAndButtonsAreTheWindows() {

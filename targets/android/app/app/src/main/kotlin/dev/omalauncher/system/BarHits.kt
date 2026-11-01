@@ -13,6 +13,13 @@ data class BarRect(
     ): Boolean = x in l until r && y in t until b
 }
 
+/** What's on the status bar strip now (display px): the page's own controls, Android's app handles, the web windows' bars. */
+data class BarClaims(
+    val controls: List<BarRect>,
+    val handles: List<BarRect>,
+    val windows: List<BarRect>,
+)
+
 /** Whose a finger down on the status bar strip is (spec G-R). */
 enum class BarHit {
     /** Android's app handle ("•••" over split and full-screen apps): SystemUI's own window, the strip leaves it a hole. */
@@ -40,14 +47,12 @@ object BarHits {
     fun route(
         x: Int,
         y: Int,
-        controls: List<BarRect>,
-        handles: List<BarRect>,
-        windows: List<BarRect>,
+        claims: BarClaims,
     ): BarHit =
         when {
-            handles.any { it.contains(x, y) } -> BarHit.HANDLE
-            windows.any { it.contains(x, y) } -> BarHit.WINDOW
-            controls.any { it.contains(x, y) } -> BarHit.CONTROL
+            claims.handles.any { it.contains(x, y) } -> BarHit.HANDLE
+            claims.windows.any { it.contains(x, y) } -> BarHit.WINDOW
+            claims.controls.any { it.contains(x, y) } -> BarHit.CONTROL
             else -> BarHit.BAR
         }
 

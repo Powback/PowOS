@@ -383,7 +383,7 @@ class ShadeHost(
     private fun hitAt(
         x: Float,
         y: Float,
-    ): BarHit = BarHits.route(x.toInt(), y.toInt(), statusChrome?.controls.orEmpty().map { it.bar() }, handles.map { it.bar() }, windowClaims().map { it.bar() })
+    ): BarHit = BarHits.route(x.toInt(), y.toInt(), BarClaims(statusChrome?.controls.orEmpty().map { it.bar() }, handles.map { it.bar() }, windowClaims().map { it.bar() }))
 
     private fun android.graphics.Rect.bar() = BarRect(left, top, right, bottom)
 
