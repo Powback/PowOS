@@ -6,10 +6,10 @@
 #   - NEVER a touch on the verify status pill (VerifyRun.kt "PowOS verify status", top centre): every DOWN is checked
 #     against its window frame (+48 px) right before it is made, and refused (a FAIL line, no touch) inside it;
 #   - only while the user is idle (manager rule): e2e_idle_gate before each journey (part) - the last user input > 120 s
-#     ago and the screen Awake, else "journey <name>: skipped - user active N s ago"; a touch during it (touch IRQs move,
-#     or the last user activity runs > 1 s past the journey's own last injected input - touched(), at every chk and
-#     step) stops it at once: "journey <name>: aborted - the user touched the phone", the restore runs. Both exit 3 (the
-#     runner re-queues it; not a FAIL) and land in the round's skipped.txt, which the last part's mail names;
+#     ago and the screen Awake, else "journey <name>: skipped - user active N s ago"; a touch during it (a hardware
+#     touch-down on a panel's evdev node, which injected input never goes through - e2e_touchwatch/touched(), at every
+#     chk and step) stops it at once: "journey <name>: aborted - the user touched the phone", the restore runs. Both
+#     exit 3 (the runner re-queues it; not a FAIL) and land in the round's skipped.txt, which the last part's mail names;
 #   - only what the journey opened is closed (new tasks of its apps, Linux apps it started); the page, the screen state
 #     and the app in front it started from come back; the layout (home.get + home.wide) must be the same at the end;
 #   - a step's FAIL doesn't end the journey (more screenshots for the manager): exit 0 with FAIL lines = a FAIL.
@@ -25,12 +25,7 @@ L=$HOME/.cache/powos-verify.lock
 TEST_APP=${TEST_APP:-com.oneplus.calculator}
 
 # Command-only calls must not drain a surrounding read loop (cleanup must visit every task).
-# An injecting call (input tap/swipe/motionevent/keyevent/text) also stamps the phone's boot clock at its end into
-# $E2E_INJ, in the same shell: touched() tells the journey's own input from the user's by it.
-E2E_INJ=/data/local/tmp/powos-e2e-lastinj
-sh_() {
-  local m=; case "$*" in *"input tap"*|*"input swipe"*|*"input motionevent"*|*"input keyevent"*|*"input text"*|*"input draganddrop"*) m="; read u r < /proc/uptime; echo \$u > $E2E_INJ" ;; esac
-  "$A" shell "su -c '$*$m'" </dev/null 2>/dev/null | tr -d '\r'; }
+sh_() { "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
 # ash: a script on stdin as Android root (any quoting inside).
 ash() { "$A" shell "su -c 'sh -s'" 2>/dev/null | tr -d '\r'; }
 # device_state_set <state>: set fold state; on emu, state 3 (inner) is a no-op, state 0 (cover) prints SKIP.
@@ -46,31 +41,53 @@ device_state_reset() {
 }
 # us: a script text inside PowOS as the session user (user.sh).
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
-# irq: the touch panels' interrupt count (only a real finger moves it). Read through useract: the old single-quoted awk
-# inside sh_'s su -c '...' came back empty on the phone, so I0 was "" and chk never saw a touch (10-31).
-irq() { useract | sed -nE 's/.*irq=([0-9]*).*/\1/p'; }
 # --- the user's idle time and their touches (manager rule: a journey runs only while the user is idle) ----------------
-# useract: one read-only call -> "idle=<s> wake=<Awake|Dozing|..> since=<ms> irq=<n>". idle: seconds since the user's last
-# input (dumpsys power: the newest of lastUserActivityTime / lastUserActivityTimeNoChangeLights /
-# mLastUserActivityTime(excludingAttention), all SystemClock.uptimeMillis; "now" in that clock = mLastWakeTime + its
-# "ms ago"). /proc/uptime is the boot clock (it also counts deep sleep), read in the same call: the two clocks' offset
-# turns the last activity into boot time, so since = last activity - the journey's own last injected input ($E2E_INJ)
-# in ms (negative/0: nothing after it; empty: no mark). Unreadable -> idle=-1 (not idle). Never wakes the screen.
+# A REAL finger only, told by the touch panels' own evdev nodes: `input tap/swipe/motionevent` goes into InputDispatcher
+# and never through /dev/input, so the journey's injected input can't look like the user. The two old signals both
+# gave false aborts (round 190, 2026-11-01: every part aborted 3-20 s in, nobody at the phone):
+#   - dumpsys power's lastUserActivityTime moves on injected input, app launches, window changes and the setup's wake;
+#   - the touch IRQs (touch-00 / touch-01 in /proc/interrupts) move on a panel's power-up: "touch seen at unfold:
+#     irq=967 (irq at start 963)" with no finger.
+# e2e_touchwatch: one root watcher on the phone (kept across jobs; restarted when gone) runs getevent (it takes one
+# device or all: all, filtered to the panels) and keeps every panel that has ABS_MT_POSITION_X ("touchpanel" event8 inner + "touchpanel1" event11 cover on the Open) and counts each
+# BTN_TOUCH DOWN into $E2E_TW: "<downs> <boot s of the last down, 0 = none> <boot s the watch started>".
+E2E_TW=/data/local/tmp/powos-e2e-touch
+e2e_touchwatch() {
+  [ "${POWOS_DEVICE:-phone}" = emu ] && return 0
+  ash <<EOF
+p=\$(cat $E2E_TW.pid 2>/dev/null)
+[ -n "\$p" ] && kill -0 "\$p" 2>/dev/null && grep -q getevent /proc/\$p/cmdline 2>/dev/null && exit 0
+d=\$(getevent -pl 2>/dev/null | awk '/^add device/{n=\$4} /ABS_MT_POSITION_X/{print n}' | tr '\n' ' ')
+[ -n "\$d" ] || { echo "touchwatch: no touch panel found"; exit 1; }
+read u r < /proc/uptime; echo "0 0 \$u" > $E2E_TW; chmod a+r $E2E_TW
+nohup setsid sh -c "echo \\\$\\\$ > $E2E_TW.pid; getevent -lq | awk -v F=$E2E_TW -v S=\$u -v D='\$d' 'BEGIN{split(D,x,\" \"); for(k in x) P[x[k] \":\"]=1} (\\\$1 in P) && /BTN_TOUCH/ && /DOWN/{getline t < \"/proc/uptime\"; close(\"/proc/uptime\"); split(t,a,\" \"); n++; print n, a[1], S > F; close(F)}'" </dev/null >/dev/null 2>&1 &
+sleep 0.3; echo "touchwatch: started on \$d"
+EOF
+}
+# irq: the hardware touch-down count ("" on the emulator, -1 when the watcher isn't running).
+irq() { useract | sed -nE 's/.*irq=(-?[0-9]*).*/\1/p'; }
+# useract: one read-only call -> "idle=<s> wake=<Awake|Dozing|..> hw=<s> irq=<n>". hw: seconds since the last hardware
+# touch-down (or since the watch started, when none since). idle = the larger of hw and the power idle (seconds since
+# dumpsys power's newest lastUserActivityTime*, "now" in that clock = mLastWakeTime + its "ms ago"): a real touch
+# moves both, so each is a lower bound of the user's real idle time; injected input/wakes only pull the power one down.
+# irq: the watcher's touch-down count (-1: no watcher). Unreadable -> idle=-1 (not idle). Never wakes the screen.
 useract() {
-  [ "${POWOS_DEVICE:-phone}" = emu ] && { echo "idle=86400 wake=Awake since= irq="; return; }
-  sh_ "read b r < /proc/uptime; echo B \$b; [ -s $E2E_INJ ] && echo I \$(cat $E2E_INJ); echo Q \$(awk \"/touch-0/{s+=\\\$2+\\\$3+\\\$4+\\\$5+\\\$6+\\\$7+\\\$8+\\\$9} END{print s}\" /proc/interrupts); dumpsys power | grep -E \"mWakefulness=|mLastWakeTime=|astUserActivityTime\"" | awk '
-    /^B /{b=$2*1000} /^I /{i=$2*1000} /^Q /{q=$2}
+  [ "${POWOS_DEVICE:-phone}" = emu ] && { echo "idle=86400 wake=Awake hw= irq="; return; }
+  sh_ "read b r < /proc/uptime; echo B \$b; p=\$(cat $E2E_TW.pid 2>/dev/null); [ -n \"\$p\" ] && kill -0 \$p 2>/dev/null && grep -q getevent /proc/\$p/cmdline 2>/dev/null && echo H \$(cat $E2E_TW); dumpsys power | grep -E \"mWakefulness=|mLastWakeTime=|astUserActivityTime\"" | awk '
+    /^B /{b=$2} /^H /{hn=$2; ht=($3>0?$3:$4); h=1}
     /mWakefulness=/ && w==""{sub(/.*mWakefulness=/,""); w=$1}
     /mLastWakeTime=/{split($0,a,/[=( ]+/); for(k in a) if(a[k]=="mLastWakeTime") t=a[k+1]; if(match($0,/\(([0-9]+) ms ago/)) now=t+substr($0,RSTART+1,RLENGTH-8)}
     /astUserActivityTime/{v=$0; sub(/^[^=]*=/,"",v); v=v+0; if(v>last) last=v}
-    END{ if(now>0 && last>0){ idle=int((now-last)/1000); s=""; if(i>0) s=int(last+(b-now)-i) } else idle=-1
-      printf "idle=%s wake=%s since=%s irq=%s\n", idle, (w==""?"?":w), s, q }'
+    END{ idle=-1; if(now>0 && last>0) idle=int((now-last)/1000)
+      hw=""; if(h && b>0){ hw=int(b-ht); if(hw>idle) idle=hw }
+      printf "idle=%s wake=%s hw=%s irq=%s\n", idle, (w==""?"?":w), hw, (h?hn:-1) }'
 }
 # e2e_idle_gate: before the journey - the user idle > E2E_IDLE_S (120) s and the screen Awake (asleep()'s rule: the
 # check never wakes it). Not idle: "journey <name>: skipped - user active N s ago" in the log, steps.txt and the round's
 # skipped.txt, and exit 3 - the runner puts it back for the next window (not a FAIL).
 e2e_jname() { echo "e2e-$JOURNEY part $PART/$LAST"; }
 e2e_idle_gate() {
+  e2e_touchwatch | while read -r l; do log "$l"; done
   local r idle wake why=; r=$(useract); idle=$(sed -nE 's/.*idle=(-?[0-9]+).*/\1/p' <<<"$r"); wake=$(sed -nE 's/.*wake=([^ ]*).*/\1/p' <<<"$r")
   log "idle check: $r (need idle > ${E2E_IDLE_S:-120} s, Awake)"
   if [ "${wake:-?}" != Awake ] && [ "$wake" != "?" ]; then why="the screen is $wake (not woken - rule)"
@@ -86,15 +103,16 @@ e2e_skip() {
   [ -n "${PDIR:-}" ] && printf '%s\n' "$(date +%H:%M:%S) $1" | "$A" shell "su -c 'mkdir -p $PDIR; cat >> $PDIR/skipped.txt; chmod a+r $PDIR/skipped.txt'" >/dev/null 2>&1
   echo "SKIP: $1"; exit 3
 }
-# touched [where]: the user touched the phone during the journey - the touch IRQs moved (a real finger only), or the
-# last user activity is more than E2E_TOUCH_SLACK_MS (1000) past the journey's own last injected input. Checked by
-# chk and before every step; the activity half only from the end of setup (E2E_WATCH=1: setup's own unfold and lock-face
-# swipe poke it) to the restore. Then: no more input, the journey's own put-away (e2e_abort -> e2e_restore), exit 3.
+# touched [where]: the user touched the phone during the journey - the hardware touch-down count (e2e_touchwatch) moved
+# from I0, its value at the start. Injected input, wakes, unfolds and app launches don't move it. Checked by chk and
+# before every step. Then: no more input, the journey's own put-away (e2e_abort -> e2e_restore), exit 3. The watcher
+# gone (-1): restarted and counted from there (logged), not taken as a touch.
 touched() {
-  local r s q; r=$(useract); s=$(sed -nE 's/.*since=(-?[0-9]+).*/\1/p' <<<"$r"); q=$(sed -nE 's/.*irq=([0-9]+).*/\1/p' <<<"$r")
-  if { [ -n "$q" ] && [ -n "${I0:-}" ] && [ "$q" != "$I0" ]; } || { [ "${E2E_WATCH:-0}" = 1 ] && [ -n "$s" ] && [ "$s" -gt "${E2E_TOUCH_SLACK_MS:-1000}" ]; }; then
+  local r q; r=$(useract); q=$(sed -nE 's/.*irq=(-?[0-9]+).*/\1/p' <<<"$r")
+  if [ "$q" = -1 ] && [ -n "${I0:-}" ]; then e2e_touchwatch >/dev/null; I0=$(irq); log "touch watch was gone at ${1:-a step} - restarted (count $I0)"; return 0; fi
+  if [ -n "$q" ] && [ -n "${I0:-}" ] && [ "$q" != "$I0" ]; then
     sh_ "input motionevent CANCEL 1 1" >/dev/null 2>&1
-    log "touch seen at ${1:-a step}: $r (irq at start ${I0:-?})"
+    log "touch seen at ${1:-a step}: $r (touch-downs at start ${I0:-?})"
     e2e_skip "journey $(e2e_jname): aborted - the user touched the phone"
   fi
 }
@@ -370,13 +388,11 @@ e2e_setup() {
   # The journey starts on page 1 (PowOS AI's page or another one: back to it at the end).
   hemit system.home null
   log "on: ${W}x${H} @${DENS} dpi, home page $PAGE0, layout $LAY0"
-  # From here a user activity past the journey's own last input is the user: the mark starts now.
-  sh_ "read u r < /proc/uptime; echo \$u > $E2E_INJ"; E2E_WATCH=1
 }
 # Everything the journey opened closed, the start state back (also on an abort: a touch, the budget, a FAIL exit).
 RESTORED=0
 e2e_restore() {
-  [ $RESTORED = 1 ] && return 0; RESTORED=1; E2E_WATCH=0
+  [ $RESTORED = 1 ] && return 0; RESTORED=1
   e2e_logcat_stop
   # Setup never read the start state (the screen asleep, no window): nothing of the journey's to close - without
   # TASKS0 every task looked new and a user's Linux window was closed (resize-probe, 2026-10-23 18:38).
