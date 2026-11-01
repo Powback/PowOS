@@ -821,6 +821,10 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 .glass :is(.page .home-tile > .tile, .lib-card.tile) { background: var(--glass-fill); }
 .home-tile { position: absolute; padding: calc(var(--gap) / 2); touch-action: none; }
 .home-tile.lifted { opacity: 0.25; }
+/* Editing home, a widget's content is a picture: the tile takes every press (pick, lift, drag; its actions and resize
+   handle on top), whatever the widget does with a finger otherwise - an app's island that stops its rows' presses
+   (needs-me: "All widgets are editable, except the Needs me widget", 2026-11-01) included. */
+.home.editing .home-tile:is(.widget, .appwidget, .panel) > :not(.tile-actions, .resize-handle) { pointer-events: none; }
 /*
  * Neighbouring widgets are one surface (grid.tsx joins): no gap on a side that touches another, square corners inside
  * the group, round ones only on its outside; no edge light or shadow between them.

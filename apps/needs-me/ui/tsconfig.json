@@ -7,6 +7,9 @@
     "jsxImportSource": "preact",
     "strict": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    // @powos/shared: apps/build.sh's esbuild alias for shell/ui/shared (friction f179).
+    "baseUrl": ".",
+    "paths": { "@powos/shared/*": ["../../../shell/ui/shared/*"] }
   }
 }

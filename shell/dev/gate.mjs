@@ -10213,10 +10213,12 @@ function overpullInFlow() {
 
 /** The What needs me case (above): mount, then each gesture, every step in the page (window.__nm); its problems. */
 async function settleNeedsMe(r) {
-  const steps = [nmMount, nmRows, nmReply, nmSwipe, nmOpen];
+  const steps = [nmMount, nmRows, nmReply, nmSwipe, nmOpen, nmScale];
   try {
     await r.page.evaluate(() => new Promise((ok) => (window.importShim ? ok() : addEventListener("load", ok))));
     await r.page.evaluate(`window.__nmItems = ${nmItems.toString()}`);
+    // nmScale's helpers, as page globals (each step runs in the page by its source alone).
+    await r.page.evaluate([nmMany, nmAtSize, nmFonts, nmFit].map((f) => `window.${f.name} = ${f}`).join(";\n"));
     for (const step of steps) {
       const out = await r.page.evaluate(step);
       r.problems.push(...out);
@@ -10379,6 +10381,84 @@ function nmItems() {
   ];
 }
 
+/**
+ * The widget at every tile size (2x2 .. 4x6, the 4x3 the user's): every text at the fixed type scale (theme.css
+ * --text-body / --text-small, the Agents/Lights widgets' sizes) - a bigger tile shows more rows, never bigger letters
+ * (the user, 2026-11-01: the 4x3 tile drew "Needs me" and its one row at 26px) - every row whole inside the tile, and a
+ * message's markdown read as plain text ("**⚠️ Friction**" shown literally).
+ */
+async function nmScale() {
+  const css = getComputedStyle(document.documentElement);
+  const t = { body: parseFloat(css.getPropertyValue("--text-body")), small: parseFloat(css.getPropertyValue("--text-small")) };
+  if (!(t.body > 0 && t.small > 0)) return [`the theme's type tokens are missing (--text-body, --text-small)`];
+  window.__nm.list.items = nmMany();
+  const fails = [];
+  let prev = 0;
+  for (const size of [["2x2", 119, 128], ["2x3", 170, 196], ["4x2", 360, 170], ["4x3", 360, 251], ["4x4", 360, 360], ["4x6", 360, 540]]) {
+    const out = await nmAtSize(size, t, prev);
+    fails.push(...out.fails);
+    prev = out.rows;
+  }
+  return fails;
+}
+
+/** 8 Discord conversations, each message markdown (bold, code, italic, a link) long enough to wrap. */
+function nmMany() {
+  const now = Date.now();
+  const base = { icon: null, clearable: true, profile: null, tappable: true, conversation: true, groupConversation: false, actions: [], app: "Discord", pkg: "com.discord", text: "" };
+  return Array.from({ length: 8 }, (_, i) => ({
+    ...base,
+    key: `s${i}`,
+    title: `AgentGateway ${i}`,
+    time: now / 1000 - 60 * (i + 1),
+    messages: [{ sender: `AgentGateway ${i}`, text: `**⚠️ Friction** f${i}: \`gate.sh\` took _long_ - see [the board](https://x.example/b) and more words to wrap`, time: now - 60000 * (i + 1) }],
+  }));
+}
+
+/** The widget on a [w]x[ht] tile: the fonts at the tokens [t], every row whole, no fewer rows than [prev], no marks. */
+async function nmAtSize([name, w, ht], t, prev) {
+  const { mod, h, render, host, sleep, until } = window.__nm;
+  const root = Object.assign(document.createElement("div"), { style: `width:${w}px;height:${ht}px;position:relative` });
+  document.body.append(root);
+  render(h(mod.default, { host, app: "local.needs-me", base: "./_app/local.needs-me/", cells: [Number(name[0]), Number(name[2])] }), root);
+  const fails = [];
+  if (await until(() => root.querySelector(".nm-row"))) {
+    await sleep(150);
+    const rows = [...root.querySelectorAll(".nm-row")];
+    fails.push(...nmFonts(name, root, rows[0], t), ...nmFit(name, root, rows, prev));
+  } else fails.push(`${name}: no rows rendered`);
+  const rows = root.querySelectorAll(".nm-row").length;
+  render(null, root);
+  root.remove();
+  return { fails, rows };
+}
+
+function nmFonts(name, root, r0, t) {
+  const fs = (el) => (el ? parseFloat(getComputedStyle(el).fontSize) : NaN);
+  const got = {
+    title: [fs(root.querySelector(".nm-title")), t.body],
+    who: [fs(r0.querySelector(".nm-who > div")), t.body],
+    line: [fs(r0.querySelector(".nm-who")?.nextElementSibling), t.body],
+  };
+  // The time shows beside the text from 220px wide (rows.tsx Narrow).
+  if (root.offsetWidth >= 220) got.time = [fs(r0.querySelector(".nm-time")), t.small];
+  return Object.entries(got)
+    .filter(([, [v, want]]) => v !== want)
+    .map(([k, [v, want]]) => `${name}: ${k} font-size ${v}px, want the type scale's ${want}px at every tile size`);
+}
+
+function nmFit(name, root, rows, prev) {
+  const fails = [];
+  const ht = root.offsetHeight;
+  const top = root.getBoundingClientRect().top;
+  const cut = rows.map((r) => Math.round(r.getBoundingClientRect().bottom - top)).filter((b) => b > ht + 0.5);
+  if (cut.length) fails.push(`${name}: a row is cut off by the tile's bottom (ends at ${cut[0]} > ${ht}px)`);
+  if (rows.length < prev) fails.push(`${name}: ${rows.length} rows, fewer than the smaller tile's ${prev} - a bigger tile shows more rows`);
+  if (name === "4x3" && rows.length < 3) fails.push(`4x3: ${rows.length} row(s) shown of 8, want at least 3`);
+  if (/\*\*|`|\]\(/.test(root.textContent)) fails.push(`${name}: markdown shown as marks: "${root.textContent.slice(0, 120)}"`);
+  return fails;
+}
+
 /** In the page: the widget on the shell's own host (apps/stdb.ts) over the mock list, every press recorded. */
 async function nmMount() {
   const imp = (p) => window.importShim(p);
@@ -10407,7 +10487,7 @@ async function nmMount() {
   render(h(mod.default, { host, app: "local.needs-me", base: "./_app/local.needs-me/", cells: [4, 4] }), root);
   // By the row's group (a long name is shortened to fit, model.ts groupKey): a person's, or a conversation's.
   const row = (name) => [...root.querySelectorAll(".nm-row")].find((r) => r.dataset.group.endsWith(name.toLowerCase()));
-  window.__nm = { calls, root, sleep, until, row, said: () => JSON.stringify(calls) };
+  window.__nm = { calls, root, sleep, until, row, list, mod, h, render, host, said: () => JSON.stringify(calls) };
   if (!(await until(() => row("Anna Berg") && row(":#powos")))) return [`the rows didn't render: "${root.textContent.slice(0, 200)}"`];
   await sleep(800);
   return [];
