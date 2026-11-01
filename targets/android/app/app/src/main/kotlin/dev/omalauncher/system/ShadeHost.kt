@@ -125,6 +125,9 @@ class ShadeHost(
             edgeLayoutChanged()
         }
 
+    /** Stops the task stack listener that keeps the app handles' holes fresh ([start]). */
+    private var stopTasks: (() -> Unit)? = null
+
     /** The pull under way (from the monitor or the strip). */
     private val pulling = Pull()
 
@@ -199,6 +202,9 @@ class ShadeHost(
         stripHeight = statusBarHeight()
         edgeParams = edgeLayout(stripHeight).also { edgeWm.addView(strip, it) }
         dev.omalauncher.shell.HighRefresh.followers += followHome
+        // The handles' holes as the tasks are, before the first tap on one: a split just made had its handle under the
+        // strip's old region until a finger down re-read them, so that first tap on "•••" was the strip's.
+        stopTasks = FreeformTasks.listen { strip.post { handlesAt = 0L; refreshHandles() } }
         // Out of the way at once if the gesture input already runs.
         edgeLayoutChanged()
         @Suppress("DEPRECATION")
@@ -216,6 +222,8 @@ class ShadeHost(
         MediaListener.posted = null
         runCatching { service.unregisterReceiver(closer) }
         dev.omalauncher.shell.HighRefresh.followers -= followHome
+        stopTasks?.invoke()
+        stopTasks = null
         edge?.let { runCatching { edgeWm.removeView(it) } }
         watchdog?.stop()
         watchdog = null
@@ -362,10 +370,22 @@ class ShadeHost(
      * full-screen apps ([AppWindowAt.handles]) and, while home shows, the web windows' title bars and controls. A tap
      * there reaches them ([edgeRegion] leaves them out), a drag down from there isn't the shade's ([pullable]).
      */
-    private fun barClaims(): List<android.graphics.Rect> {
-        val bars = if (homeShowing()) windowBars.filter { it.top < stripHeight.coerceAtLeast(1) } else emptyList()
-        return handles + bars
-    }
+    private fun barClaims(): List<android.graphics.Rect> = handles + windowClaims()
+
+    /** The web windows' bars and controls on the strip while home shows: the strip takes these and hands them to home. */
+    private fun windowClaims(): List<android.graphics.Rect> =
+        if (homeShowing()) windowBars.filter { it.top < stripHeight.coerceAtLeast(1) } else emptyList()
+
+    /** Home's page takes a touch on a web window's bar ([WebWindows] sets it with the bars; null: no home page). */
+    private var barSink: ((MotionEvent) -> Unit)? = null
+
+    /** Whose a finger down at ([x], [y]) (display px) on the strip is: [BarHits.route] over the claims as they are now. */
+    private fun hitAt(
+        x: Float,
+        y: Float,
+    ): BarHit = BarHits.route(x.toInt(), y.toInt(), BarClaims(statusChrome?.controls.orEmpty().map { it.bar() }, handles.map { it.bar() }, windowClaims().map { it.bar() }))
+
+    private fun android.graphics.Rect.bar() = BarRect(left, top, right, bottom)
 
     /** The app handles as last read ([refreshHandles]): the strip's region is computed on every draw, never a binder call. */
     private var handles: List<android.graphics.Rect> = emptyList()
@@ -391,8 +411,12 @@ class ShadeHost(
     fun windowBars(
         bars: List<android.graphics.Rect>,
         merge: IntArray?,
+        sink: ((MotionEvent) -> Unit)?,
     ) {
-        if (bars == windowBars && merge.contentEquals(windowMerge)) return
+        // The region takes the bars only with a page to hand them to: a sink coming or going redraws it too.
+        val sinkCame = (sink == null) != (barSink == null)
+        barSink = sink
+        if (!sinkCame && bars == windowBars && merge.contentEquals(windowMerge)) return
         windowBars = bars
         windowMerge = merge
         barClaimsChanged()
@@ -409,10 +433,13 @@ class ShadeHost(
     }
 
     /**
-     * The strip's touchable region (display px; it sits at the screen's top left): the status bar page's own controls
-     * (chrome.regions: the clock, the indicators, the FPS meter) less [barClaims] - everything else on the strip is
-     * the app's or window's under it (the shade's pull doesn't need the strip: the input monitor sees every touch).
-     * Without the monitor (the class HACK) the strip takes the pull itself: the whole strip, less the claims.
+     * The strip's touchable region (display px; it sits at the screen's top left), as [BarHits.stripTakes] says: the
+     * status bar page's own controls (chrome.regions: the clock, the indicators, the FPS meter) and the web windows'
+     * bars ([windowClaims]: taken and handed to home's page, [Edge.dispatchTouchEvent] - a hole there reached
+     * SystemUI's StatusBar window under the strip, never home), less the app handles (SystemUI's own window above its
+     * status bar: a hole reaches it). The rest is SystemUI's status bar (the shade's pull doesn't need the strip: the
+     * input monitor sees every touch). Without the monitor (the class HACK) the strip takes the pull itself: the whole
+     * strip, less the handles.
      */
     private fun edgeRegion(region: android.graphics.Region, width: Int, height: Int) {
         val controls = statusChrome?.controls.orEmpty()
@@ -420,7 +447,8 @@ class ShadeHost(
             region.setEmpty()
             for (r in controls) region.op(r, android.graphics.Region.Op.UNION)
         }
-        for (r in barClaims()) region.op(r, android.graphics.Region.Op.DIFFERENCE)
+        if (barSink != null) for (r in windowClaims()) region.op(r, android.graphics.Region.Op.UNION)
+        for (r in handles) region.op(r, android.graphics.Region.Op.DIFFERENCE)
     }
 
     /** An app handle or a web window's bar/controls on the strip at ([x], [y]): the tap or drag is theirs (spec G-R). */
@@ -955,6 +983,17 @@ class ShadeHost(
         }
 
         override fun onInterceptTouchEvent(e: MotionEvent): Boolean = !monitored
+
+        /** This gesture started on a web window's bar: all of it goes to home's page ([barSink]), none to the strip's. */
+        private var forwarding = false
+
+        override fun dispatchTouchEvent(e: MotionEvent): Boolean {
+            if (e.actionMasked == MotionEvent.ACTION_DOWN) forwarding = barSink != null && BarHits.forwards(hitAt(e.rawX, e.rawY))
+            if (!forwarding) return super.dispatchTouchEvent(e)
+            barSink?.invoke(e)
+            if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) forwarding = false
+            return true
+        }
 
         @SuppressLint("ClickableViewAccessibility")
         override fun onTouchEvent(e: MotionEvent): Boolean {

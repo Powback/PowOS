@@ -1622,7 +1622,20 @@ class WebWindows(
         val bars = ArrayList<Rect>()
         var merge: IntArray? = null
         for (win in wins.values.sortedBy { it.geo?.z ?: -1 }) merge = barsOf(win, bars) ?: merge
-        dev.omalauncher.system.ShadeHost.current?.windowBars(bars, merge)
+        dev.omalauncher.system.ShadeHost.current?.windowBars(bars, merge, ::barTouch)
+    }
+
+    /**
+     * A touch the status bar strip took on a window's bar (ShadeHost: SystemUI's StatusBar window is under the strip, so
+     * a hole there never reached home) into home's page, where the bar is: from the strip's window coordinates to the
+     * WebView's (both at the screen's top left on the same display; main thread).
+     */
+    private fun barTouch(ev: MotionEvent) {
+        val at = IntArray(2).also(web::getLocationOnScreen)
+        val e = MotionEvent.obtain(ev)
+        e.offsetLocation(ev.rawX - ev.x - at[0], ev.rawY - ev.y - at[1])
+        web.dispatchTouchEvent(e)
+        e.recycle()
     }
 
     /** [win]'s bar parts on screen into [out]; maximised, its merge (title end, controls start), else null. */
@@ -2478,6 +2491,8 @@ class WebWindows(
     fun closeAll() {
         if (current === this) current = null
         (web as? HomeWebView)?.touchHook = null
+        // Its bars and their touches go with it: the strip hands nothing to a page that's gone.
+        dev.omalauncher.system.ShadeHost.current?.windowBars(emptyList(), null, null)
         homeIme(true)
         gesture?.recycle()
         gesture = null
