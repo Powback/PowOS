@@ -530,6 +530,37 @@ class BoardTest(unittest.TestCase):
         self.assertIn("[stalled] Dry one", self.mails_sent()[2])
 
 
+    def test_queue_up_next(self):
+        """The user, 11-01: "I should be able to see the queue on the AI page". Accepted-not-started work is status
+        queued on the board, in line oldest accepted first, never an orphan; the agent's first --step takes it out."""
+        for t in ("Queue one", "Queue two", "Queue three"):
+            self.run_cli("task", "add", t, "--status", "queued")
+        self.run_cli("task", "add", "Nobody on this")
+        self.run_cli("task", "set", "nobody-on-this", "--status", "up next")   # an alias of queued
+        self.run_cli("task", "set", "nobody-on-this", "--status", "working")
+        for w in FakeStdb.db["work"]:
+            self.old(w)
+        js = {w["id"]: w for w in json.loads(self.run_cli("task", "list", "--json").stdout)}
+        for i, wid in enumerate(("queue-one", "queue-two", "queue-three"), 1):
+            self.assertEqual((js[wid]["status"], js[wid]["truth"]), ("queued", "queued"))
+            self.assertEqual(js[wid]["why"], f"up next (#{i} in the queue)")
+        self.assertIn("queued", self.run_cli("task", "list").stdout)
+        self.run_cli("sweep")
+        m = self.mails_sent()
+        self.assertTrue(m and "Nobody on this" in m[0], m)
+        self.assertNotIn("Queue ", m[0], "a queued task is not an orphan")
+        # Taking it: its first --step sets it working and it leaves the queue; the rest move up.
+        self.run_cli("task", "set", "queue-one", "--step", "reading the code")
+        js = {w["id"]: w for w in json.loads(self.run_cli("task", "list", "--json").stdout)}
+        self.assertEqual(js["queue-one"]["status"], "working")
+        self.assertEqual(js["queue-two"]["why"], "up next (#1 in the queue)")
+        self.assertEqual(js["queue-three"]["why"], "up next (#2 in the queue)")
+        # A note on a queued task keeps it queued (only taking it moves it).
+        self.run_cli("task", "set", "queue-two", "--note", "after the kernel lands")
+        self.assertEqual(FakeStdb.db["work"]["queue-two"]["status"], "queued")
+        self.assertIn("status is one of working | queued", self.run_cli("task", "set", "queue-two", "--status", "nope", ok=False).stderr)
+
+
 class PassClosesOnlyItsOwnTaskCliTest(unittest.TestCase):
     """The same rule through every closer: `task done`, queue.sh's `--close` (it runs `task done`) and the sweeper's
     close_passed (`check sync`), against the stand-in module (BoardTest's harness)."""

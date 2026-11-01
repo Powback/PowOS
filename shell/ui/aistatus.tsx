@@ -4,7 +4,9 @@
  * version of the AI page" isn't any good). Fixed slots top to bottom, live content inside, the order never moves:
  * a slim header (the daily driver's small ring and one status line), Needs you (questions and things to do, answered in
  * place - needsyou.tsx's rows), Ready to try (the latest tries, works / still broken in place), Working now (the fleet's
- * live agents: task, step now, a thin bar that fills smoothly, the step cross-fading when it changes), Recently done
+ * live agents: task, step now, a thin bar that fills smoothly, the step cross-fading when it changes), Up next (the board's
+ * queued tasks in line - accepted, waiting for an agent slot; the user, 11-01 17:1x: "I should be able to see the queue on
+ * the AI page" - a one-line count when the page is busy; a tap opens one in place like Recently done's), Recently done
  * (closed, each at the time it was done; the user, 11-01 16:39: "I can't click these to expand" - a tap opens one in
  * place: the whole title, when, its closing note, its try line, how it was verified, and "Still broken" to reopen it). A section with nothing in it isn't drawn. At the foot the shared field to ask the manager (powai.tsx's
  * send path), its reply as one bubble over the field - never a transcript - and "Open chat": the launcher's AI panel.
@@ -17,6 +19,7 @@ import { useAgents, type BoardCheck } from "../agents.ts";
 import { fleet, isPowOS, projectOf, type Worker } from "../fleet.ts";
 import { aiScreen, chat, openPanel, page } from "../state.ts";
 import { board, boardSeen, checks, list, noteOf, WorkFeed, type WorkRow } from "./aiboard.tsx";
+import { upNext, UpNext } from "./upnext.tsx";
 import { areaStats, driverPct } from "./aiprogress.tsx";
 import { NeedStack } from "./aistack.tsx";
 import { listen, listeningFor, release, speech, type MicTarget } from "./dictation.ts";
@@ -195,6 +198,10 @@ function NeedsAttention({ stuck }: { stuck: Worker[] }) {
     </section>
   );
 }
+
+/** The page is busy (Up next folds to its count): something needs the user, or three or more agents are working. */
+const BUSY_WORKING = 3;
+const busyPage = (needs: number, working: number) => needs > 0 || working >= BUSY_WORKING;
 
 /** The board's tasks done in the last few days, newest first. */
 export function recentlyDone(rows: WorkRow[] = board.value, now = Date.now()) {
@@ -440,7 +447,8 @@ export function AiStatus(props: { shown: boolean; more: preact.ComponentChildren
   const needs = needsYou();
   const f = fleet();
   const done = recentlyDone();
-  const quiet = !needs.length && !f.working.length && !done.length;
+  const next = upNext();
+  const quiet = !needs.length && !f.working.length && !done.length && !next.length;
   return (
     <>
       {shown && <WorkFeed />}
@@ -449,6 +457,7 @@ export function AiStatus(props: { shown: boolean; more: preact.ComponentChildren
         <NeedStack needs={needs} />
         {props.beside && <NeedsAttention stuck={f.attention} />}
         <WorkingNow working={f.working} beside={!!props.beside} />
+        <UpNext rows={next} busy={busyPage(needs.length, f.working.length)} />
         <RecentlyDone rows={done} />
         {quiet && <div class="ais-empty">Nothing waits on you and no agent is working right now.</div>}
       </div>

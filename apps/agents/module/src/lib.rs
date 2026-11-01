@@ -16,7 +16,8 @@ const TASKS_PER_AGENT: usize = 50;
 /// The work board keeps what's open, and what's done for this long (the "done recently" list).
 const WORK_DONE_KEEP_MS: u64 = 7 * 24 * 3600 * 1000;
 const WORK_MAX: usize = 200;
-const WORK_STATES: [&str; 4] = ["working", "blocked", "waiting", "done"];
+/// "queued": accepted, not started - it waits for an agent slot (the AI page's Up next; `task set --status queued`).
+const WORK_STATES: [&str; 5] = ["working", "queued", "blocked", "waiting", "done"];
 
 #[spacetimedb::table(accessor = reporter)]
 pub struct Reporter {
@@ -117,7 +118,7 @@ pub struct Work {
     title: String,
     /// The agent's role ("switcher", "manager"), or "" when nobody has it yet.
     owner: String,
-    /// "working" | "blocked" | "waiting" (on the user) | "done".
+    /// "working" | "queued" (up next, waits for an agent slot) | "blocked" | "waiting" (on the user) | "done".
     status: String,
     /// One line of detail: what it's blocked on, what's next, what landed.
     note: String,

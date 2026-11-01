@@ -21,15 +21,16 @@ import urllib.request
 # the Mac just finished validating for itself, and that parse error reads as a real bug. __cli_version__
 # (below) lets the Mac tell "phone copy is stale" apart from "the command itself is wrong" before passing
 # an error through.
-CLI_VERSION = 3
+CLI_VERSION = 4   # 4: status queued (Up next)
 
 DB = "powos-agents"
 SERVER = os.environ.get("POWOS_STDB", "http://127.0.0.1:3410")
-STATES = ("working", "blocked", "waiting", "done")
+STATES = ("working", "queued", "blocked", "waiting", "done")
 ALIASES = {
     "doing": "working", "in_progress": "working", "in-progress": "working", "active": "working", "wip": "working",
     "wait": "waiting", "waiting-on-user": "waiting", "waiting_on_user": "waiting", "needs_you": "waiting",
     "needs-you": "waiting", "user": "waiting", "stuck": "blocked", "finished": "done", "landed": "done",
+    "queue": "queued", "up-next": "queued", "next": "queued", "accepted": "queued",
 }
 
 HELP = """powos agents - the work board: every task the agents are on, in plain words
@@ -113,7 +114,10 @@ How far along (the page shows a bar, the steps done / now / next, the commits an
   powos agents task infer [--all]  Give every task without a project the inferred one; --all: every open
                                    task whose project is not an area gets its area.
 
-Statuses (what you set): working | blocked | waiting (on the user) | done.
+Statuses (what you set): working | queued | blocked | waiting (on the user) | done.
+  queued: accepted, not started - it waits for a free agent slot. The AI page lists the queue as "Up next",
+  oldest accepted first (`task set <id> --status queued`; `task add ... --status queued` to accept a new one).
+  The agent that takes it moves it (--step/--progress/--plan): that sets it working and it leaves the queue.
 The board shows each task's TRUE state, computed from facts - never from the status alone:
   working         a live agent holds it: its own `task set <id> --step/--progress/--plan/--commit`
                   (an agent claims a task by moving it; assigning --owner claims nothing), or a live
@@ -122,6 +126,7 @@ The board shows each task's TRUE state, computed from facts - never from the sta
   no-check        nobody on it, no check queued, but something to act on: a fix pushed with no check,
                   a check that FAILED / was INVALID or SKIPPED, a pass nobody closed
   stalled         nobody on it and no check at all - it needs an owner
+  queued          up next: accepted, waiting for an agent slot - never an orphan (#N: its place in line)
   blocked         status blocked or waiting (on the user), with the note as the reason
   done            closed (its check passed, or --no-check)
 `powos agents sweep` (every 10 min from the Mac, tools/agents/board-sweep.sh) mails the coordinator ONE
@@ -686,6 +691,9 @@ def task(argv):
             die("usage: powos agents task set <task> [--status S] [--owner ROLE] [--title T] [--note TEXT]")
         w = find(" ".join(rest))
         st = status_of(o.get("status"))
+        # Taking a queued task (an agent moves it): it leaves the queue and is working.
+        if not st and w["status"] == "queued" and any(o.get(k) for k in ("step", "progress", "plan")):
+            st = "working"
         project, tl = project_opt(o), try_line(o)
         if o.get("parent"):
             call("work_parent", w["id"], "" if o["parent"] == "-" else find(o["parent"])["id"])
@@ -837,7 +845,7 @@ def task(argv):
 # only 4 agents run"; the status column is what someone once typed, not what is happening) ---------------------------
 
 # The states, in the order the board lists them.
-TRUTH = ("working", "awaiting-check", "no-check", "stalled", "blocked", "done")
+TRUTH = ("working", "awaiting-check", "no-check", "stalled", "queued", "blocked", "done")
 LIVE_MS = 30 * 60_000          # agentsd's own staleness: an agent heard from in the last 30 min is live
 CHECK_RESULTS = ("PASS", "FAIL", "SKIP", "INVALID", "none")
 QUEUED_STEP = "phone check queued"   # tools/phone/verify/queue.sh's marker (the board's fallback before a sync)
@@ -910,6 +918,11 @@ def truth(w, held, idle_roles, checks, now_ms=None, ws=()):
     status, owner = w.get("status") or "working", (w.get("owner") or "")
     if status == "done":
         return "done", w.get("note") or ""
+    if status == "queued":
+        # Accepted, not started: it waits for an agent slot, so it's nobody's orphan (an owner's idle agent doesn't
+        # hold it either - the agent that takes it moves it, which sets it working; `task set` below).
+        pos = queue_pos(w, ws)
+        return "queued", f"up next{f' (#{pos} in the queue)' if pos else ''}"
     h = held.get(w["id"]) or (idle_roles.get(owner) if owner and owner not in GENERIC_OWNERS else None)
     if h:
         return "working", f"{h} has it"
@@ -947,6 +960,17 @@ def truth(w, held, idle_roles, checks, now_ms=None, ws=()):
         return "no-check", f"fix pushed ({len(commits)} commit{'s' if len(commits) != 1 else ''}), no phone check queued"
     gone = f"; owner {owner} isn't running" if owner and owner not in GENERIC_OWNERS else ""
     return "stalled", f"nobody on it and no check{gone}"
+
+
+def queue_of(ws):
+    """The queue (status queued) in order: oldest accepted onto the board first (the AI page's Up next, same order)."""
+    return sorted((w for w in ws if w.get("status") == "queued"), key=lambda w: (int(w.get("created") or 0), w["id"]))
+
+
+def queue_pos(w, ws):
+    """[w]'s place in the queue, 1-based (0: [ws] not given or [w] not in it)."""
+    ids = [x["id"] for x in queue_of(ws)]
+    return ids.index(w["id"]) + 1 if w["id"] in ids else 0
 
 
 def board_truth(ws=None, checks=None, agents=None, now_ms=None):
