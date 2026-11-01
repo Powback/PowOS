@@ -30,6 +30,8 @@ export const SCREENS: [AiScreen, string][] = [
   ["devices", "Devices"],
   ["friction", "Friction"],
 ];
+/** The screens the bottom tabs offer (Agents & terminals: the Agents tab; its terminals under the Agents and Devices tabs): never in a ⋯ that sits over those tabs. */
+export const TABBED = new Set<AiScreen>(["progress", "agents", "devices"]);
 
 /** A host's line "at work": its name ("installed & running"'s), how many sessions, and when it was read if not now. */
 function hostState(h: AgentHost | undefined, n: number) {
@@ -134,8 +136,9 @@ class Fallback extends Component<{ children?: any }, { failed: boolean }> {
 }
 
 /** Progress: the powos-progress app's page in this screen (its module, as appscreen.tsx renders it), else the board. */
-function ProgressScreen({ shown, back }: { shown: boolean; back: () => void }) {
-  const url = progressUrl();
+function ProgressScreen({ shown, back, beside = false }: { shown: boolean; back: () => void; beside?: boolean }) {
+  // Beside the status column (unfolded): only the areas - the column already shows the ring and Needs you.
+  const url = beside ? null : progressUrl();
   const [mod, setMod] = useState<{ url: string; c: ComponentType<any> } | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -148,7 +151,7 @@ function ProgressScreen({ shown, back }: { shown: boolean; back: () => void }) {
     return () => void (live = false);
   }, [url]);
   const C = mod && mod.url === url ? mod.c : null;
-  if (!url || failed) return <Summary shown={shown} />;
+  if (!url || failed) return <Summary shown={shown} areasOnly={beside} />;
   if (!C) return <div class="ai-empty muted">…</div>;
   return (
     <div class="ai-app-page">
@@ -175,9 +178,9 @@ function Devices({ shown }: { shown: boolean }) {
   return <Units shown={shown} />;
 }
 
-/** The screen [s] (not the chat), [shown]: on screen - its feeds run only then. */
-export function MenuScreen({ s, shown, back }: { s: AiScreen; shown: boolean; back: () => void }) {
-  if (s === "progress") return <ProgressScreen shown={shown} back={back} />;
+/** The screen [s] (not the chat), [shown]: on screen - its feeds run only then; [beside]: next to the status column. */
+export function MenuScreen({ s, shown, back, beside = false }: { s: AiScreen; shown: boolean; back: () => void; beside?: boolean }) {
+  if (s === "progress") return <ProgressScreen shown={shown} back={back} beside={beside} />;
   // Folded, a Working now row opens its agent here, full page (the user, 11-01 16:45: "navigate to the chats").
   if (s === "fleet" && aiAgent.value) return <AgentLive id={aiAgent.value} />;
   if (s === "agents" || s === "fleet") return <AgentsScreen shown={shown} />;

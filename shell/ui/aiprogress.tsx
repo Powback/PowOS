@@ -177,7 +177,7 @@ function subLine(stats: AreaStat[]) {
 }
 
 /** The Progress view: the ring, then every area's card. [shown]: the board's feed runs only then. */
-export function ProgressView({ shown }: { shown: boolean }) {
+export function ProgressView({ shown, areasOnly = false }: { shown: boolean; areasOnly?: boolean }) {
   const [opened, setOpened] = useState<string | null>(null);
   const needs = needsYou();
   const stats = areaStats(board.value, Date.now(), needIds(needs));
@@ -185,9 +185,9 @@ export function ProgressView({ shown }: { shown: boolean }) {
   return (
     <section class="aip">
       {shown && <WorkFeed />}
-      {ring && <ProgressRing pct={ring.pct} label={ring.label} sub={subLine(stats)} />}
-      <NeedsYouCard needs={needs} />
-      <UpNext rows={upNext()} busy={needs.length > 0} />
+      {!areasOnly && ring && <ProgressRing pct={ring.pct} label={ring.label} sub={subLine(stats)} />}
+      {!areasOnly && <NeedsYouCard needs={needs} />}
+      {!areasOnly && <UpNext rows={upNext()} busy={needs.length > 0} />}
       {stats.length > 0 && <DotLegend />}
       <ul class="aip-areas">
         {stats.map((a) => (

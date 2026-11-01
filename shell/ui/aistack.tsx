@@ -206,7 +206,7 @@ function TopCard({ n, count }: { n: Need; count: number }) {
         </button>
       )}
       {why ? (
-        <BrokenReply id={n.w.id} onSend={sendWhy(n)} onCancel={() => setWhy(false)} ask={n.kind === "ask" ? "your answer" : n.kind === "do" ? "what's in the way" : undefined} />
+        <BrokenReply row id={n.w.id} onSend={sendWhy(n)} onCancel={() => setWhy(false)} ask={n.kind === "ask" ? "your answer" : n.kind === "do" ? "what's in the way" : undefined} />
       ) : (
         <Acts n={n} go={go} />
       )}

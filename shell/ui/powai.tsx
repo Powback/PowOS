@@ -23,7 +23,7 @@ import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { renderItem } from "./chat.tsx";
 import { AgentUpdates, Queued, Thread, onLink, toolLabel } from "./rich.tsx";
 import { askQueued } from "./assistant.ts";
-import { MenuScreen, SCREENS, dailyDriver, type AiScreen } from "./aimenu.tsx";
+import { MenuScreen, SCREENS, TABBED, dailyDriver, type AiScreen } from "./aimenu.tsx";
 import { WorkFeed } from "./aiboard.tsx";
 import { agent, sessions as agentSessions } from "../agents.ts";
 import { untried } from "./trycard.tsx";
@@ -225,11 +225,11 @@ function stateOf() {
   return busy ? `working${step && step.kind === "tool" ? ` · ${toolLabel(step)}` : "…"}` : "ready";
 }
 
-/** The ⋯ menu's list: a tap opens that screen. */
-function Menu({ close, children }: { close: () => void; children?: preact.ComponentChildren }) {
+/** The ⋯ menu's list: a tap opens that screen. [tabs]: over the bottom tabs - only what no tab offers (the user, 11-01 17:56: "this is like a duplicate"). */
+function Menu({ close, tabs = false, children }: { close: () => void; tabs?: boolean; children?: preact.ComponentChildren }) {
   return (
     <div class="ai-menu tile" role="menu">
-      {SCREENS.map(([s, name]) => (
+      {SCREENS.filter(([s]) => !tabs || !TABBED.has(s)).map(([s, name]) => (
         <button key={s} type="button" role="menuitem" class="ai-menu-item" onClick={() => ((aiScreen.value = s), close())}>
           {name}
         </button>
@@ -396,11 +396,11 @@ function aiViewClass(cls: string, wide: boolean, split: boolean) {
 }
 
 /** The view's body: a menu screen with back, or the chat. */
-function AiBody({ sub, shown }: { sub: AiScreen | null; shown: boolean }) {
+function AiBody({ sub, shown, beside = false }: { sub: AiScreen | null; shown: boolean; beside?: boolean }) {
   if (sub) {
     return (
       <div class="ai-scroll ai-sub">
-        <MenuScreen s={sub} shown={shown} back={() => (aiScreen.value = "chat")} />
+        <MenuScreen s={sub} shown={shown} back={() => (aiScreen.value = "chat")} beside={beside} />
       </div>
     );
   }
@@ -416,30 +416,29 @@ const SEGMENTED = new Set<AiScreen>(["chat", "fleet", "agents", "progress", "dev
 
 /**
  * The right column: what the segmented row picked, the row itself at the column's foot (the user, 11-01 16:43: "move the
- * tabs to the bottom") - on Chat just above the field, elsewhere the very bottom; a screen no segment names keeps back.
+ * tabs to the bottom"); a screen no segment names keeps back. No field of the page's own (the user, 11-01 18:24: "remove
+ * the search entirely from the AI page: we reuse the main search bar"): unfolded, under the row, the room home's shared
+ * bar takes (.ai-bar-slot, as folded); folded (not [beside]) the row is the screen's foot, the bar's room under it (CSS).
  */
-function RightBody({ s, shown }: { s: AiScreen; shown: boolean }) {
-  const segs = <AiSegs shown={shown} />;
+function RightBody({ s, shown, beside = false }: { s: AiScreen; shown: boolean; beside?: boolean }) {
+  const foot = (
+    <>
+      <AiSegs shown={shown} />
+      {beside && <div class="ai-bar-slot" data-bar-slot="ai" aria-hidden="true" />}
+    </>
+  );
   if (s === "fleet")
     return (
       <>
         <FleetPane />
-        {segs}
-      </>
-    );
-  if (s === "chat")
-    return (
-      <>
-        <AiBody sub={null} shown={shown} />
-        {segs}
-        <AiCompose />
+        {foot}
       </>
     );
   return (
     <>
       {!SEGMENTED.has(s) && <AiHeader sub={s} />}
-      <AiBody sub={s} shown={shown} />
-      {segs}
+      <AiBody sub={s === "chat" ? null : s} shown={shown} beside={beside} />
+      {foot}
     </>
   );
 }
@@ -459,7 +458,7 @@ function AiPanes({ shown }: { shown: boolean }) {
         <StatusColumn shown={shown} beside />
       </section>
       <div class="ai-right tile">
-        <RightBody s={s} shown={shown} />
+        <RightBody s={s} shown={shown} beside />
       </div>
     </>
   );
@@ -506,8 +505,8 @@ export function AiView({ shown, cls, pill = true, panes = false }: { shown: bool
 
 /**
  * The AI page folded: the status page (aistatus.tsx) stacked over the live chat, the bottom tabs and the field under
- * it (the manager's design, 11-01) - its header's ⋯ opens the same screens (Progress, Agents & terminals, Devices,
- * Friction) and "Open chat" (the launcher's AI panel). [beside]: unfolded, the page's left column (the screens open in
+ * it (the manager's design, 11-01) - its header's ⋯ opens what no bottom tab does (Friction;
+ * folded "Open chat" - the launcher's AI panel - unfolded Other projects). [beside]: unfolded, the page's left column (the screens open in
  * the right one, the chat's field is the ask).
  */
 function StatusColumn({ shown, beside = false }: { shown: boolean; beside?: boolean }) {
@@ -521,7 +520,7 @@ function StatusColumn({ shown, beside = false }: { shown: boolean; beside?: bool
     <>
       <AiStatus shown={shown} more={more} compose={beside ? null : <FoldedFoot shown={shown} />} mic={pageMic} beside={beside} chat={beside ? null : <AiBody sub={null} shown={shown} />} />
       {menu && <div class="ai-menu-scrim" onClick={() => setMenu(false)} />}
-      {menu && <Menu close={() => setMenu(false)}>{beside ? <OtherProjectsItem close={() => setMenu(false)} /> : <OpenChatItem close={() => setMenu(false)} />}</Menu>}
+      {menu && <Menu close={() => setMenu(false)} tabs>{beside ? <OtherProjectsItem close={() => setMenu(false)} /> : <OpenChatItem close={() => setMenu(false)} />}</Menu>}
     </>
   );
 }
