@@ -366,12 +366,8 @@ function seatOnAi(bar: HTMLElement) {
   const home = bar.closest<HTMLElement>(".home");
   const slot = document.querySelector<HTMLElement>(".ai-screen [data-bar-slot=ai]");
   const ai = slot?.closest<HTMLElement>(".ai-screen");
-  if (page.peek() !== -1 || !home || !slot || !ai || !slot.getClientRects().length) {
-    bar.classList.remove("seated");
-    bar.style.removeProperty("translate");
-    bar.style.removeProperty("width");
-    return;
-  }
+  if (heldSeated(bar, home)) return;
+  if (page.peek() !== -1 || !home || !slot || !ai || !slot.getClientRects().length) return unseat(bar);
   const s = slot.getBoundingClientRect(), a = ai.getBoundingClientRect();
   // Measured at its own place: its width the slot's, no translate (home's transform shifts it and home alike).
   const was = bar.style.translate;
@@ -386,6 +382,15 @@ function seatOnAi(bar: HTMLElement) {
   void bar.offsetWidth;
   bar.classList.add("seated");
   bar.style.translate = `${Math.round(x)}px ${Math.round(y)}px`;
+}
+
+/** BM1: on the way home from the page the bar stays seated while it morphs back into the button (docksearch.tsx). */
+const heldSeated = (bar: HTMLElement, home: HTMLElement | null) => page.peek() !== -1 && bar.classList.contains("seated") && !!home?.classList.contains("button-morph");
+
+function unseat(bar: HTMLElement) {
+  bar.classList.remove("seated");
+  bar.style.removeProperty("translate");
+  bar.style.removeProperty("width");
 }
 
 /** Seats the bar on PowOS AI's page while that's the page (and re-seats it as the page's layout changes). */

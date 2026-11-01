@@ -1652,9 +1652,13 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 /* No child of a menu screen is wider than its pane: flex items' min-width defaults to their longest word. */
 .ai-scroll > * { min-width: 0; max-width: 100%; }
 /* On the AI page the chat lies on the wallpaper: the manager's bubbles, its quiet step lines and cards carry the text tint. */
-.ai-screen .ai-chat-in :is(.msg.assistant, .msg.note, .tl, .present, .choice-opt) { background: var(--text-fill); box-shadow: var(--lift); }
-.ai-screen .ai-chat-in > .tl { align-self: flex-start; width: fit-content; max-width: 100%; padding: 0 12px; border-radius: var(--radius); }
-.ai-screen .ai-chat-in > .msg.note { align-self: flex-start; width: fit-content; padding: 4px 12px; border-radius: 999px; }
+/* BM2: .ai-page-chat is that chat wherever it's held - the launcher's AI panel too (the user, 18:25: its chat looked like
+   another one) - proportional, glass bubbles, quiet steps. */
+:is(.ai-screen, .ai-page-chat) .ai-chat-in :is(.msg.assistant, .msg.note, .tl, .present, .choice-opt) { background: var(--text-fill); box-shadow: var(--lift); }
+:is(.ai-screen, .ai-page-chat) .ai-chat-in > .tl { align-self: flex-start; width: fit-content; max-width: 100%; padding: 0 12px; border-radius: var(--radius); }
+:is(.ai-screen, .ai-page-chat) .ai-chat-in > .msg.note { align-self: flex-start; width: fit-content; padding: 4px 12px; border-radius: 999px; }
+.ai-page-chat { font-family: var(--font-ui); }
+.ai-page-chat * { font-family: inherit; }
 .ai-chat-in > .tl { color: var(--color-muted); }
 /* Images in their own shape, a size a phone chat shows them at. */
 .ai-chat-in .sent-img img { max-width: min(240px, 60vw); max-height: 300px; }
@@ -3943,6 +3947,23 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .home > .bar.seated { transition: translate 280ms cubic-bezier(0.2, 0.9, 0.3, 1), width 280ms cubic-bezier(0.2, 0.9, 0.3, 1); z-index: 5; }
 .home > .bar.seated.sliding { transition: none; }
 .home.search-parked > .bar.seated { opacity: 1; pointer-events: auto; }
+
+/*
+ * BM1 (the user, 18:25: "the launcher also needs the full search bar"): folded, home's dock button grows into the bar on
+ * the launcher and PowOS AI's page and back into the button home (docksearch.tsx useButtonMorph, launchmorph.ts): the
+ * bar is held where it ends meanwhile - the launcher's foot (the dock gave way) or the page's seat, no slide of its own -
+ * and only its glass moves.
+ */
+.home.button-morph > .bar, .home.button-morph > .bar.seated { transition: none; }
+.home.button-morph:not(.pill-below, .dock-left, .dock-right) > .bar:not(.seated) { transform: translateY(var(--strip-height)); }
+
+/*
+ * BM2 (the user, 18:25: "why is the dock showing in the AI launcher page?"): unfolded, the launcher's AI panel covers the
+ * dock (and the wide foot's recents) while it's open - they're back on close - and the one bar ("ai" role) is the foot's
+ * full width under it.
+ */
+.home.adopts.wide.open:has(> .stage .ai-panel) > :is(.dock, .dock-tray) { opacity: 0 !important; pointer-events: none !important; transition: opacity 180ms ease-out; }
+.home.adopts.wide.open:has(> .stage .ai-panel) > .bar { grid-area: 2 / 1 / 3 / -1; width: auto; justify-self: stretch; }
 /* The folded page's single column (a screen no tab names): the bar's room at its foot. */
 .ai-screen > .ai-bar-slot { flex: none; margin-top: auto; height: calc(var(--pill-height) + var(--ai-foot)); }
 /* The role's glyph (the launcher's apps, the AI page's manager) where home's prompt glyph is. */
