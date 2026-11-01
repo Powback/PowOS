@@ -7272,6 +7272,7 @@ async function fullStaysScene(r) {
 async function quickPageScene(r, folded) {
   await r.page.evaluate(QUICK_HELPERS);
   await r.page.evaluate(QUICK_JUDGES);
+  await r.page.evaluate(QUICK_BAR_JUDGES);
   const shot = async (name) => {
     await r.page.evaluate(() => window.__qp.open({ id: "settings:WIFI_SETTINGS", label: "Wi-Fi" }, "com.oplus.wirelesssettings"));
     await r.page.screenshot({ path: `/cache/quick-page-${name}.png` }).catch(() => {});
@@ -7301,6 +7302,12 @@ async function QUICK_HELPERS() {
     popout: async (t, id) => (calls.popout.push(`${t}:${id}`), window.__mockEvents.emit("webwindows.closed", id), true),
     refused: async (t) => (calls.refused.push(t), true),
   };
+  // The Settings app as the real host lists it ("a:<package>/<activity>"): a Settings page's bar shows its icon.
+  const list = p.apps.list.bind(p.apps);
+  const settingsIcon = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect width="48" height="48" rx="12" fill="#4a6"/></svg>');
+  p.apps.list = async () => [...(await list()), { key: "a:com.android.settings/.Settings", label: "Settings", icon: settingsIcon, kind: "android" }];
+  window.__mockEvents.emit("apps.changed");
+  for (let i = 0; i < 40 && !S.byKey.value.has("a:com.android.settings/.Settings"); i++) await new Promise((ok) => setTimeout(ok, 25));
   H.wideHome.value = true;
   S.page.value = 0;
   W.webWins.value = [];
@@ -7319,6 +7326,8 @@ async function QUICK_HELPERS() {
     },
     done() {
       W.webWins.value = [];
+      p.apps.list = list;
+      window.__mockEvents.emit("apps.changed");
       p.webwindows = was.ww;
       p.quickpage = was.qp;
       H.wideHome.value = was.wide;
@@ -7341,7 +7350,7 @@ function QUICK_JUDGES() {
     if (Math.abs(box.width - want) > 2) out.push(`QP1: ${label}: card ${Math.round(box.width)} px wide (want ${want}, ${folded ? "folded: full width minus 16" : "unfolded: ~440"})`);
     if (box.height > innerHeight * 0.7 + 1) out.push(`QP1: ${label}: card ${Math.round(box.height)} px high (want <= 70% of ${innerHeight})`);
     if (folded !== c[0].classList.contains("sheet")) out.push(`QP1: ${label}: sheet ${!folded} (want ${folded})`);
-    return out;
+    return [...out, ...window.__qpbar.icon(c[0], label), ...window.__qpbar.glass(c[0], label)];
   }
   async function closes() {
     const out = [];
@@ -7369,6 +7378,39 @@ function QUICK_JUDGES() {
     return n === 1 && !document.querySelector(".webwindow") ? [] : [`QP1: a forced route failure: ${n} refusals to the host, ${document.querySelectorAll(".webwindow").length} windows (want 1 refusal, none)`];
   }
   window.__qpj = { card, closes, failure };
+  return [];
+}
+
+/**
+ * QP1's bar judges (window.__qpbar): its source app's icon (a Settings page: the Settings app's) left of the label, on
+ * the SAME glass as a web window's title bar (the manager's QA: no icon, "a flat grey strip").
+ */
+function QUICK_BAR_JUDGES() {
+  function icon(el, label) {
+    const img = el.querySelector(".quickpage-bar .ww-title-label img.ww-icon");
+    const text = el.querySelector(".quickpage-bar .ww-title-label span");
+    if (!img?.getAttribute("src") || !img.complete || !img.naturalWidth) return [`QP1: ${label}: the bar has no app icon with an image (src "${img?.getAttribute("src") ?? ""}")`];
+    const left = !text || img.getBoundingClientRect().right <= text.getBoundingClientRect().left + 0.5;
+    return left ? [] : [`QP1: ${label}: the bar's icon is not left of its label`];
+  }
+  const KEYS = ["backgroundColor", "backgroundImage", "backdropFilter", "borderTopColor", "borderTopWidth", "color", "font"];
+  const noUrl = (v) => String(v ?? "").replace(/url\([^)]*\)/g, "");
+  // A web window's title bar (TitleBar's classes), measured beside the card, against the card's bar.
+  function glass(el, label) {
+    const b = el.querySelector(".quickpage-bar");
+    if (!b) return [`QP1: ${label}: no bar`];
+    const probe = document.createElement("div");
+    probe.className = "webwindow";
+    probe.style.cssText = "position:absolute;left:-9999px;top:0;width:200px;height:200px";
+    probe.innerHTML = '<div class="webwindow-title tile" style="height:40px"></div>';
+    el.parentElement.append(probe);
+    const want = getComputedStyle(probe.firstChild);
+    const got = getComputedStyle(b);
+    const out = KEYS.filter((k) => noUrl(want[k]) !== noUrl(got[k])).map((k) => `QP1: ${label}: the bar's ${k} "${got[k]}" is not a web window title bar's "${want[k]}"`);
+    probe.remove();
+    return out;
+  }
+  window.__qpbar = { icon, glass };
   return [];
 }
 

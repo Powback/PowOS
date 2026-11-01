@@ -13,7 +13,7 @@ import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
 import type { HostWebWindow, WebWindowRect } from "../types.ts";
 import { Mark } from "./chrome.tsx";
-import { QuickBar, quickPlace, QUICK, type QuickInfo, type QuickRect } from "./quickpage.tsx";
+import { QuickBar, quickIconKeys, quickPlace, QUICK, type QuickInfo, type QuickRect } from "./quickpage.tsx";
 import { memo } from "./memo.ts";
 import { confirm as hapticConfirm, tick as hapticTick } from "./haptics.ts";
 import { dropAt, dropInto, freeRegion, insertAt, leaves, splitBox, tabAt, treeRects, zoneKey as dropKey, type Bar, type Tree, type Zone } from "./tiledrop.ts";
@@ -307,8 +307,8 @@ function QuickEl({ win, z }: { win: WebWin; z: number }) {
   return (
     <>
       <div class="quickpage-scrim" style={{ zIndex: 19 + z }} onPointerDown={(e) => (e.stopPropagation(), close(win.id))} />
-      <div class={`webwindow quickpage${win.quick?.sheet ? " sheet" : ""}${win.live ? " live" : ""}`} data-wwid={win.id} data-quick={win.quick?.token} style={frame}>
-        <QuickBar label={win.label} icon={iconOf(`a:${win.quick?.pkg}`) ?? iconOf(win.key)} height={TITLE} onPopOut={() => popOut(win)} onClose={() => close(win.id)} />
+      <div class={`webwindow quickpage${win.quick?.sheet ? " sheet" : ""}${win.live ? " live" : ""}`} data-wwid={win.id} data-z={z} data-quick={win.quick?.token} style={frame}>
+        <QuickBar label={win.label} icon={quickIconKeys(win.quick?.pkg).map(iconOf).find(Boolean) ?? iconOf(win.key)} height={TITLE} onPopOut={() => popOut(win)} onClose={() => close(win.id)} />
         <Body win={win} body={body} />
       </div>
     </>

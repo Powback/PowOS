@@ -35,6 +35,18 @@ export interface QuickSpec {
   label?: string;
 }
 
+/** The packages that own Settings' pages (OxygenOS moves Wi-Fi, Bluetooth and hotspot into its own): Settings' icon. */
+const SETTINGS_PKGS = new Set(["com.android.settings", "com.oplus.wirelesssettings"]);
+
+/**
+ * The app keys whose icon a quick page's bar shows, best first: a Settings page's the Settings app's launcher icon, else
+ * its own package's (an Android key is "a:<package>/<activity>": webwindows' iconOf matches the package's prefix too).
+ */
+export function quickIconKeys(pkg: string | undefined): string[] {
+  if (!pkg) return [];
+  return SETTINGS_PKGS.has(pkg) && pkg !== "com.android.settings" ? ["a:com.android.settings", `a:${pkg}`] : [`a:${pkg}`];
+}
+
 /** The card's sizes (CSS px ~ dp): ~440 wide unfolded, at most 70% of the screen high, 16 from every edge. */
 export const QUICK = { width: 440, share: 0.7, margin: 16, folded: 600 };
 
