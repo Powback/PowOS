@@ -3,8 +3,9 @@
  * side as Android lays them out: the app it was opened over in the middle, the ones used before it to its left (the
  * one just left right next to it), older further left - a sideways swipe scrolls them, with momentum. A tap opens one
  * (its card grows to the screen, then the app is there), a swipe up removes it, "clear all" removes all but the pinned
- * ones, a tap beside the cards or Back closes it (Back goes back to the app it was opened over). A card's icon (or a
- * long press) opens its menu: split screen (then pick the second app), floating window, screenshot, app info, pin.
+ * ones, a tap beside the cards or Back goes back to the app it was opened over (over home: closes it), the home swipe
+ * closes it to home (the host's "recents.end" to: home - the same collapse). A card's icon (or a long press) opens its
+ * menu: split screen (then pick the second app), floating window, screenshot, app info, pin.
  *
  * A swipe up over an app builds it under the finger (system/Switcher.kt, the native side): home comes up behind the
  * app ("recents.begin"), the app's window shrinks onto the first card's slot - where that slot is, the page tells the
@@ -471,6 +472,16 @@ function reportSlot() {
   powos.recents.slot(slot);
 }
 
+/**
+ * A tap beside the cards: out of split screen's pick, else back to the app it was opened over (its card opens, as Back),
+ * over home it closes. Before (X2) it always closed to home, the app it was opened over lost behind it.
+ */
+function beside() {
+  if (splitFirst.value != null) splitFirst.value = null;
+  else if (from.value != null) open(from.value, firstShot() ?? undefined);
+  else close();
+}
+
 /** Back: out of a menu or split screen's pick, else to the app it was opened over, or home. False when it isn't up. */
 export function recentsBack(): boolean {
   if (phase.value === "closed") return false;
@@ -709,7 +720,7 @@ export function Recents() {
       ref={el}
       class={`recents ${p} ${p === "closed" ? "" : "open"} ${live.value ? "live" : ""} ${settling.value ? "settling" : ""} ${first != null ? "splitting" : ""} ${p === "drag" && from.value == null ? "homeswipe" : ""}`}
       style={{ "--screen-ratio": `${w} / ${h}`, "--screen-ratio-n": String(w / h), "--screen-w": `${w}px`, "--screen-h": `${h}px` }}
-      onClick={(e) => e.target === e.currentTarget && (first != null ? (splitFirst.value = null) : close())}
+      onClick={(e) => e.target === e.currentTarget && beside()}
       onTransitionEnd={(e) => {
         if (e.target === row) reportSlot();
         // Collapsed: its snapshots leave the page.
@@ -728,7 +739,7 @@ export function Recents() {
           )}
         </div>
       )}
-      <div class="task-row" ref={rowEl} onClick={(e) => e.target === e.currentTarget && (first != null ? (splitFirst.value = null) : close())}>
+      <div class="task-row" ref={rowEl} onClick={(e) => e.target === e.currentTarget && beside()}>
         {list.length ? (
           list.map((t, i) => (
             <TaskCard

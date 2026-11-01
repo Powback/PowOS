@@ -1117,6 +1117,86 @@ async function swipeHomeOneAnimCheck() {
 }
 
 /**
+ * X1: the home swipe (the host's bottom-edge swipe, NavGesture.kt homePlain -> Switcher.close: "recents.end" to: home)
+ * with the switcher up closes it to home with the switcher's own closing animation (collapse: the cards and the scrim
+ * fade over its settle, frame by frame - never a jump), and ends on home: no switcher layer left, no app opened.
+ */
+async function switcherHomeSwipeCheck(page) {
+  const up = await page.evaluate(switcherUpForHomeSwipe);
+  if (up.length) return up;
+  const mid = await page.evaluate(homeSwipeMidFrames, 700);
+  const fails = await page.evaluate(switcherGoneFails);
+  if (mid < 3) fails.unshift(`the home swipe's close jumped: ${mid} frames mid-collapse (the cards' and scrim's fade), expected >= 3`);
+  return fails;
+}
+
+/** In the page: the switcher up over an app (task 701), task opens recorded in window.__opened. */
+async function switcherUpForHomeSwipe() {
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  window.__opened = [];
+  powos.tasks.open = async (id) => (window.__opened.push(id), true);
+  const task = (id, label) => ({ id, label, key: null, icon: null, snapshot: "" });
+  window.__mockEvents.emit("recents.show", { open: true, from: 701, tasks: [task(701, "Chrome"), task(702, "Camera"), task(703, "Maps")] });
+  await new Promise((ok) => setTimeout(ok, 500));
+  const layer = document.querySelector(".recents");
+  if (!layer?.classList.contains("shown")) return ["switcher-home-swipe: the switcher isn't up after recents.show"];
+  if (!layer.querySelector(".task:not(:first-child)")) return ["switcher-home-swipe: no second card in the switcher"];
+  return [];
+}
+
+/** In the page: the home swipe let go (what Switcher.close sends), then frames over [ms] with the closing fade under way. */
+async function homeSwipeMidFrames(ms) {
+  const other = document.querySelector(".recents .task:not(:first-child)");
+  const scrim = document.querySelector(".recents .recents-scrim");
+  window.__mockEvents.emit("recents.end", { to: "home" });
+  let mid = 0;
+  const t0 = performance.now();
+  while (performance.now() - t0 < ms) {
+    await new Promise((ok) => requestAnimationFrame(() => ok()));
+    const o = parseFloat(getComputedStyle(other).opacity);
+    const so = parseFloat(getComputedStyle(scrim).opacity);
+    if (o > 0.02 && o < 0.98 && so > 0.01 && so < 0.44) mid++;
+  }
+  return mid;
+}
+
+/** In the page: on home after the switcher closed - no layer up or visible, home not faded, no task opened. */
+function switcherGoneFails() {
+  const fails = [];
+  const layer = document.querySelector(".recents");
+  if (layer.classList.contains("open") || !layer.classList.contains("closed")) fails.push(`the switcher is still up after the home swipe (${layer.className})`);
+  if (getComputedStyle(layer).visibility !== "hidden") fails.push("the switcher's layer is still visible after the home swipe");
+  const faded = document.querySelector(".screens")?.style.opacity;
+  if (faded) fails.push(`home is faded (${faded}) after the home swipe`);
+  if (window.__opened.length) fails.push(`the home swipe opened task(s) ${window.__opened.join(",")} instead of going home`);
+  return fails;
+}
+
+/** X2: a tap on empty space in the switcher (beside the cards) returns to the app it was opened over, as Back does. */
+async function switcherBesideTapCheck() {
+  const fails = [];
+  const host = (event, data) => window.__mockEvents.emit(event, data);
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const opened = [];
+  let closed = 0;
+  const [wasOpen, wasClosed] = [powos.tasks.open, powos.recents.closed];
+  powos.tasks.open = async (id) => (opened.push(id), true);
+  powos.recents.closed = async () => void closed++;
+  const task = (id, label) => ({ id, label, key: null, icon: null, snapshot: "" });
+  host("recents.show", { open: true, from: 801, tasks: [task(801, "Chrome"), task(802, "Camera")] });
+  await new Promise((ok) => setTimeout(ok, 500));
+  const layer = document.querySelector(".recents");
+  if (!layer?.classList.contains("shown")) return ["switcher-beside-tap: the switcher isn't up after recents.show"];
+  // Empty space: the layer's own top strip, above the cards (a click whose target is the layer itself).
+  layer.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await new Promise((ok) => setTimeout(ok, 100));
+  if (opened[0] !== 801) fails.push(`a tap beside the cards opened ${opened.length ? opened.join(",") : "nothing"}, expected the app it was opened over (801)`);
+  if (closed) fails.push("a tap beside the cards closed the switcher to home instead of returning to the previous app");
+  [powos.tasks.open, powos.recents.closed] = [wasOpen, wasClosed];
+  return fails;
+}
+
+/**
  * Back home from an app (the page hidden, then visible: visibilitychange, pageshow, focus, the host's resume - a live
  * wallpaper's picture read again, another frame of it: "system.glass"): the theme as it was - the labels' and widgets'
  * text, the search bar's tint, the wallpaper's tone - on each of the first 10 frames and after (the user, 10-31 20:08:
@@ -7669,6 +7749,12 @@ try {
     runs.push(open(browser, `${ORIGIN}/index.html`, "home-return", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(homeReturnCheck))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "swipe-home-one-anim", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(swipeHomeOneAnimCheck))));
+  // X1/X2 (board one-swipe-up-gesture-for-home-and-over-apps): the home swipe over the switcher, folded and unfolded;
+  // a tap beside the cards back to the previous app.
+  for (const [name, view] of [["switcher-home-swipe-folded", { width: 404, height: 900 }], ["switcher-home-swipe-unfolded", { width: 821, height: 883 }]])
+    if (process.env.SHELL_PAGES !== "0") runs.push(open(browser, `${ORIGIN}/index.html`, name, view).then((r) => whenReady(r, () => switcherHomeSwipeCheck(r.page))));
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-beside-tap", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(switcherBesideTapCheck))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeCheck))));
   if (process.env.SHELL_PAGES !== "0")
