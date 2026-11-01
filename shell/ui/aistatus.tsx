@@ -100,12 +100,15 @@ function LiveBar({ done, total }: { done: number; total: number }) {
   );
 }
 
-/** One live agent: its task's title, what it's doing now, the bar; a tap opens Agents & terminals. */
-function WorkRowLive({ x }: { x: Worker }) {
+/**
+ * One live agent: its task's title, what it's doing now, the bar; a tap opens Agents & terminals (folded) or - [beside],
+ * unfolded - that agent live in the right column, as the old context column's card did before the 11-01 redesign.
+ */
+function WorkRowLive({ x, beside }: { x: Worker; beside: boolean }) {
   const now = x.now || (isPowOS(x.a) ? "Working" : projectOf(x.a));
   return (
     <li class="ais-work">
-      <button type="button" class="ais-work-row" onClick={() => (aiScreen.value = "agents")}>
+      <button type="button" class="ais-work-row" onClick={() => (beside ? ((aiAgent.value = x.a.id), (aiScreen.value = "fleet")) : (aiScreen.value = "agents"))}>
         <span class="ais-work-line">
           <span class="aip-dot working" aria-hidden="true" />
           <span class="ais-work-title">{x.title}</span>
@@ -142,7 +145,7 @@ function WorkingNow({ working, beside }: { working: Worker[]; beside: boolean })
       </h3>
       <ul class="ais-list">
         {shown.slice(0, 6).map((x) => (
-          <WorkRowLive key={x.a.id} x={x} />
+          <WorkRowLive key={x.a.id} x={x} beside={beside} />
         ))}
       </ul>
     </section>

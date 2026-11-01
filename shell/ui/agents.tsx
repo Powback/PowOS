@@ -21,6 +21,7 @@ import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import { useDb, useRows } from "../apps/stdb.ts";
 import { takeTap } from "./taps.ts";
 import type { Agent, AgentEvent, AgentTask, HomeItem } from "../types.ts";
+import { TermButton, useSessions } from "./terms.tsx";
 
 /** "4m", "1h 5m": how long [ms] milliseconds took. */
 const took = (ms: number) => {
@@ -422,10 +423,10 @@ const Chip = ({ host }: { host: string }) => <span class="fl-chip">{host}</span>
 /** "running 12m" from its start. */
 const running = (a: Agent) => `running ${since(a.started)}`;
 
-/** A working agent's card: its task, the bar and step N of M, what it's doing now, how long, the device. */
+/** A working agent's card: its task, the bar and step N of M, what it's doing now, how long, the device; its terminal's button. */
 function WorkCard({ x }: { x: Worker }) {
   return (
-    <button type="button" class="fl-card tile" onClick={() => openAgents(x.a.id)}>
+    <div class="fl-card tile" role="button" tabIndex={0} onClick={() => openAgents(x.a.id)}>
       <div class="fl-c1">
         <span class="fl-title">{x.title}</span>
         <Chip host={x.a.host} />
@@ -439,8 +440,9 @@ function WorkCard({ x }: { x: Worker }) {
       <div class="fl-c3">
         <span class="fl-now">{x.now || "Thinking"}</span>
         <span class="muted fl-ago">{running(x.a)}</span>
+        <TermButton a={x.a} />
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -454,6 +456,7 @@ function AttentionCard({ x }: { x: Worker }) {
       </div>
       <div class="fl-c3">
         <span class="fl-now muted">{x.title}</span>
+        <TermButton a={x.a} />
         {x.action && (
           <button type="button" class="ag-act danger" onClick={(e) => (e.stopPropagation(), act(x))}>
             {ACT_LABEL[x.action]}
@@ -521,7 +524,7 @@ function Folded({ f }: { f: Fleet }) {
 }
 
 /** The fleet: the manager, what needs the user, what's being worked on, the rest folded; then the comms. */
-function List({ f }: { f: Fleet }) {
+function List({ f, foot }: { f: Fleet; foot?: preact.ComponentChildren }) {
   return (
     <>
       {f.manager && <ManagerRow x={f.manager} />}
@@ -541,6 +544,7 @@ function List({ f }: { f: Fleet }) {
         ))}
       </section>
       <Folded f={f} />
+      {foot}
       <Comms />
     </>
   );
@@ -589,6 +593,7 @@ function LiveCard({ a, x, title }: { a: Agent; x: Worker | undefined; title: str
       <div class="fl-c3">
         <span class="fl-now">{nowOf(a, x)}</span>
         <span class="muted fl-ago">{a.state === "working" ? running(a) : since(a.last)}</span>
+        <TermButton a={a} />
       </div>
       <LiveAct x={x} />
     </section>
@@ -665,10 +670,12 @@ function LiveView({ id, f }: { id: string; f: Fleet }) {
 
 /**
  * The Agents screen's content - the list, or one agent's live view - with its header. Its own component: PowOS AI (or
- * anything) can show it in place; [onClose] its back from the list.
+ * anything) can show it in place; [onClose] its back from the list; [foot]: under the list (the AI page's Agents tab:
+ * every host's terminals). The sessions are read while it shows, for its cards' "Open terminal".
  */
-export function AgentsView({ id, onClose }: { id: string | null; onClose: () => void }) {
+export function AgentsView({ id, onClose, foot }: { id: string | null; onClose: () => void; foot?: preact.ComponentChildren }) {
   useAgents();
+  useSessions(true);
   const f = fleet();
   const scroller = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => scroller.current?.scrollTo(0, 0), [id]);
@@ -685,7 +692,7 @@ export function AgentsView({ id, onClose }: { id: string | null; onClose: () => 
         <span class={`ag-live ${live.value ? "on" : ""}`}>{live.value ? "● live" : "○"}</span>
       </header>
       <div class="ag-scroll" ref={scroller}>
-        {id ? <LiveView id={id} f={f} /> : <List f={f} />}
+        {id ? <LiveView id={id} f={f} /> : <List f={f} foot={foot} />}
       </div>
     </>
   );

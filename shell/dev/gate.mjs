@@ -3233,6 +3233,115 @@ async function aiUnfoldedFollow() {
   return fails;
 }
 
+/**
+ * In the page: the terminals' mock (`powos terms list`: this phone's own tmux, the Mac's with an agent's session in
+ * PowOS's folder), the Mac's units for Devices, the AI page shown with nothing open; [fleet]: FLEET_SETUP, run once the
+ * Agents view subscribes. Returns the tap helpers' state: nothing (the page keeps them).
+ */
+async function aiTermsSetup(size) {
+  const G = window.__gw;
+  const { powos } = await G.mod("./bridge.ts");
+  const S = await G.mod("./state.ts");
+  const U = await G.mod("./ui/units.tsx");
+  const P = await G.mod("./ui/aipanes.tsx");
+  const now = Math.floor(Date.now() / 1000);
+  const list = [
+    { name: "c0", host: "mac", agent: true, activity: now - 5, attached: true, title: "⠂ Media card redesign", path: "/Users/macback/Projects/PowOS", command: "claude" },
+    { name: "main", host: "phone", activity: now - 900, attached: false, title: "powos@phone:~", path: "/home/powos", command: "bash" },
+  ];
+  const hosts = [{ host: "phone", via: "local", ok: true, seen: now }, { host: "mac", via: "ssh macback@mac", ok: true, seen: now }];
+  powos.ai.sessions = async () => (window.__mockEvents.emit("ai.hosts", hosts), window.__mockEvents.emit("ai.sessions", list));
+  await powos.ai.sessions();
+  const unit = (host, id) => ({ key: `${host}:${id}`, host, id, name: id, kind: "service", owner: "powos", purpose: "", status: "running", memKb: 0, cpuPermille: 0, limits: "", autosleep: "", orphan: false, decide: "", updated: 0 });
+  U.units.value = [unit("mac", "colima"), unit("phone", "powos-agentsd")];
+  S.sessionView.value = null;
+  P.aiAgent.value = null;
+  S.aiScreen.value = "chat";
+  S.page.value = -1;
+  await G.until(() => document.querySelector(size === "folded" ? ".ai-screen.status" : ".ai-screen.panes"), 3000);
+}
+
+/**
+ * In the page: [steps] tapped in turn (each a selector, or [selector, text] for the one whose text starts so), from the
+ * AI page with nothing open, until the terminal of [want] ("host:session") shows; fails with the step that wasn't there.
+ */
+async function aiTermsTaps([steps, want]) {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const find = (q) => (Array.isArray(q) ? [...document.querySelectorAll(q[0])].find((e) => e.textContent.trim().startsWith(q[1])) : document.querySelector(q));
+  for (const [i, q] of steps.entries()) {
+    await G.until(() => find(q), 3000);
+    const el = find(q);
+    if (!el) return [`tap ${i + 1}: no ${JSON.stringify(q)}`];
+    el.click();
+  }
+  const [host, name] = want.split(":");
+  const opened = await G.until(() => S.sessionView.value?.name === name && (S.sessionView.value.host ?? "") === host && document.querySelector(".session-screen"), 3000);
+  const fails = opened ? [] : [`after ${steps.length} taps no terminal of ${want} (open: ${JSON.stringify(S.sessionView.value?.name ?? null)})`];
+  if (opened && S.sessionView.value.write) fails.push(`${want} opened with its keys (it opens view-only until taken over)`);
+  S.sessionView.value = null;
+  await G.until(() => !document.querySelector(".session-screen"), 3000);
+  return fails;
+}
+
+/** In the page: the fleet in place (FLEET_SETUP over the mock's events), once the Agents view subscribed. */
+async function aiTermsFleet(body) {
+  const G = window.__gw;
+  await new (Object.getPrototypeOf(async function () {}).constructor)("U", "E", "sleep", body)(G.mod, window.__mockEvents, (ms) => new Promise((r) => setTimeout(r, ms)));
+}
+
+/**
+ * The terminals from the AI page (the user, 11-01 16:57: "There's no terminal option anymore"): a session's terminal in
+ * at most 2 taps - unfolded via the Devices tab (its device card's sessions) and via the Agents tab (a card's "Open
+ * terminal"; the tab also lists every host's sessions, as folded Agents & terminals), folded via ⋯ → Agents & terminals
+ * (its host/session list; a third tap opens one). Restored with it: unfolded, a Working now row opens that agent live
+ * in the right column (the old context column's card did).
+ */
+async function aiTermsCheck(page) {
+  const fails = [];
+  await page.setViewport({ width: 821, height: 883 });
+  await page.evaluate(() => window.__gw.until(() => innerWidth === 821, 3000));
+  await page.evaluate(aiTermsSetup, "unfolded");
+  // The Agents tab first: it subscribes to the fleet, which FLEET_SETUP then fills.
+  await page.evaluate(() => [...document.querySelectorAll(".ai-screen .ai-seg")].find((b) => b.textContent.trim().startsWith("Agents"))?.click());
+  await page.evaluate(aiTermsFleet, FLEET_SETUP);
+  const seg = (name) => [".ai-screen .ai-right .ai-seg", name];
+  const chat = async () => page.evaluate(async () => { const S = await window.__gw.mod("./state.ts"); S.aiScreen.value = "chat"; });
+  await chat();
+  const run = async (label, steps, want) => fails.push(...(await page.evaluate(aiTermsTaps, [steps, want])).map((f) => `${label}: ${f}`));
+  await run("unfolded Agents", [seg("Agents"), ".ai-screen .ai-right .fl-card .fl-term-open"], "mac:c0");
+  await chat();
+  await run("unfolded Devices", [seg("Devices"), '.ai-screen .ai-right .ai-host-terms .ai-session[data-term="mac:c0"]'], "mac:c0");
+  await chat();
+  await run("unfolded Devices (this host)", [seg("Devices"), '.ai-screen .ai-right .ai-host-terms .ai-session[data-term="phone:main"]'], "phone:main");
+  await chat();
+  // The Agents tab lists every host's sessions too (folded Agents & terminals' "at work", in the right column).
+  const listed = await page.evaluate(async () => {
+    [...document.querySelectorAll(".ai-screen .ai-seg")].find((b) => b.textContent.trim().startsWith("Agents"))?.click();
+    await window.__gw.until(() => document.querySelectorAll(".ai-screen .ai-right .ag-scroll .ai-session[data-term]").length >= 2, 3000);
+    return [...document.querySelectorAll(".ai-screen .ai-right .ag-scroll .ai-session[data-term]")].map((e) => e.dataset.term).sort().join(" ");
+  });
+  if (listed !== "mac:c0 phone:main") fails.push(`unfolded Agents: its session list is [${listed}], not both hosts' (mac:c0 phone:main)`);
+  await page.screenshot({ path: "/cache/ai-terms-unfolded-agents.png" });
+  await chat();
+  // Working now (the left column) opens that agent live in the right column, not the session list.
+  const live = await page.evaluate(async () => {
+    document.querySelector(".ai-screen .ai-left .ais-work-row")?.click();
+    return !!(await window.__gw.until(() => document.querySelector(".ai-screen .ai-right .fl-live"), 3000));
+  });
+  if (!live) fails.push("unfolded: a Working now row didn't open its agent live in the right column");
+  await chat();
+  await page.setViewport({ width: 404, height: 900 });
+  await page.evaluate(() => window.__gw.until(() => innerWidth === 404, 3000));
+  await page.evaluate(aiTermsSetup, "folded");
+  await run("folded ⋯", [".ai-screen .ai-more", [".ai-screen .ai-menu-item", "Agents & terminals"], '.ai-screen .ai-sub .ai-session[data-term="mac:c0"]'], "mac:c0");
+  const both = await page.evaluate(() => document.querySelectorAll('.ai-screen .ai-sub .ai-session[data-term]').length);
+  if (both < 2) fails.push(`folded ⋯ → Agents & terminals: ${both} sessions listed after 2 taps, not both hosts'`);
+  await page.screenshot({ path: "/cache/ai-terms-folded.png" });
+  await chat();
+  return fails;
+}
+
 async function aiUnfoldedCheck(page) {
   const fails = [];
   await page.evaluate(aiStackSetup, 5);
@@ -8521,6 +8630,9 @@ try {
   // The folded AI page is a status page, not a chat (the user, 2026-10-31: "I don't wanna see the chat").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-status", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiStatusCheck(r.page))));
+  // The terminals from the AI page in at most 2 taps, both modes (the user, 11-01 16:57: "There's no terminal option anymore").
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-terms", { width: 821, height: 883 }).then((r) => whenReady(r, () => aiTermsCheck(r.page))));
   // Unfolded two columns: the status page left, the chat right under its segmented row (the manager's design, 11-01).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-unfolded", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiUnfoldedCheck(r.page))));

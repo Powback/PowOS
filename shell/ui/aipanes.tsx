@@ -10,7 +10,7 @@ import { aiScreen, chat } from "../state.ts";
 import { agentsView, closeAgents, useAgents } from "../agents.ts";
 import { fleet, type Fleet } from "../fleet.ts";
 import { AgentsView, BoardFeed, needsBoard } from "./agents.tsx";
-import { areas, dailyDriver, type AiScreen } from "./aimenu.tsx";
+import { AtWork, areas, dailyDriver, type AiScreen } from "./aimenu.tsx";
 import { Feed as UnitsFeed, units } from "./units.tsx";
 
 /** The agent open in the right column's Agents view (null: the list). */
@@ -31,10 +31,10 @@ export function useAgentsInPane(on: boolean) {
   }, [on, v]);
 }
 
-/** The right column's Agents: the fleet list, or one agent live. */
+/** The right column's Agents: the fleet list with every host's terminals under it (as folded Agents & terminals), or one agent live. */
 export function FleetPane() {
   const id = aiAgent.value;
-  return <AgentsView id={id} onClose={() => (aiScreen.value = "chat")} />;
+  return <AgentsView id={id} onClose={() => (aiScreen.value = "chat")} foot={<AtWork />} />;
 }
 
 /** The segments, each with its live count ("" none): Agents counts the working and the stuck ones. */

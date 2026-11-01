@@ -1786,6 +1786,11 @@ html:root .ai-board .tile { background: none; box-shadow: none; }
 .ai-session-host + .ai-session-host { margin-top: 10px; }
 .ai-session-host-head { font-size: var(--text-small); padding: 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-session-agent { color: var(--accent-text); }
+/* A device card's terminals (Devices: terms.tsx HostSessions), under its name, open or folded. */
+.ai-host-terms { display: flex; flex-direction: column; padding: 4px 8px 2px; }
+.ai-host-terms > .ai-session { margin-bottom: 4px; }
+/* An agent card's "Open terminal" (agents.tsx, terms.tsx TermButton), at its line's end. */
+.fl-c3 > .fl-term-open { margin-left: auto; align-self: center; }
 /* Work in progress (powai.tsx Work): one line per task, the detail under it on a tap. */
 .ai-work-box { padding: 4px 0; display: flex; flex-direction: column; gap: 2px; }
 .ai-work { width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 9px 12px; text-align: start; font: inherit; color: inherit; }
