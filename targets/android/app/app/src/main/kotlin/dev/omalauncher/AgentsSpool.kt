@@ -57,6 +57,8 @@ object AgentsSpool {
         val asks: List<JSONObject> = emptyList(),
         /** A mirror carries its agents' recent events; the local ones are files of their own. */
         val events: Map<String, JSONArray> = emptyMap(),
+        /** And their conversations (powos-agentsd convo_of); the local ones are in their events files ("convo"). */
+        val convos: Map<String, JSONArray> = emptyMap(),
     )
 
     private val sources = HashMap<String, Source>()
@@ -239,7 +241,10 @@ object AgentsSpool {
             val ev = o.optJSONObject("events")
             val events = HashMap<String, JSONArray>()
             ev?.keys()?.forEach { k -> ev.optJSONArray(k)?.let { events[k] = it } }
-            sources[source] = Source(rows(o, "agents"), rows(o, "tasks"), rows(o, "messages"), rows(o, "asks"), events)
+            val cv = o.optJSONObject("convos")
+            val convos = HashMap<String, JSONArray>()
+            cv?.keys()?.forEach { k -> cv.optJSONArray(k)?.let { convos[k] = it } }
+            sources[source] = Source(rows(o, "agents"), rows(o, "tasks"), rows(o, "messages"), rows(o, "asks"), events, convos)
         }
     }
 
@@ -305,7 +310,7 @@ object AgentsSpool {
                 .put("messages", JSONArray(feed))
         if (delta.length() > 0) for (v in viewers) if (v.on) v.emit("agents.delta", delta)
         // A mirrored host's events come with its state: a watched agent's, if they changed.
-        val mirrored = sources.filterKeys { it != "local" }.values.flatMapTo(HashSet()) { it.events.keys }
+        val mirrored = sources.filterKeys { it != "local" }.values.flatMapTo(HashSet()) { it.events.keys + it.convos.keys }
         for (v in viewers) v.watching?.let { if (it in mirrored) sendEvents(it) }
         AgentsNotifier.update(app, agents.values.toList())
     }
@@ -322,15 +327,16 @@ object AgentsSpool {
         force: Viewer? = null,
     ) {
         val d = dir ?: return
-        val events =
-            sources.values.firstNotNullOfOrNull { it.events[agent] }
-                ?: readJson(File(d, "events/${safeFile(agent)}.json"))?.optJSONArray("events")
-                ?: JSONArray()
-        val s = events.toString()
+        val file by lazy { readJson(File(d, "events/${safeFile(agent)}.json")) }
+        val events = sources.values.firstNotNullOfOrNull { it.events[agent] } ?: file?.optJSONArray("events") ?: JSONArray()
+        // Its conversation (the Agents view's agent page draws it as a chat): none from an older agentsd.
+        val convo = sources.values.firstNotNullOfOrNull { it.convos[agent] } ?: file?.optJSONArray("convo")
+        val s = events.toString() + (convo?.toString() ?: "")
         val same = eventRows[agent] == s
         eventRows[agent] = s
         if (eventRows.size > 32) eventRows.keys.filter { k -> viewers.none { it.watching == k } }.forEach { eventRows.remove(it) }
         val payload = JSONObject().put("eventsOf", agent).put("events", events)
+        if (convo != null) payload.put("convo", convo)
         for (v in viewers) if (v.watching == agent && (v === force || !same)) v.emit("agents.delta", payload)
     }
 

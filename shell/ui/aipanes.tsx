@@ -5,16 +5,15 @@
  * powai.tsx lays them out.
  */
 import { useEffect } from "preact/hooks";
-import { signal } from "@preact/signals";
 import { aiScreen, chat } from "../state.ts";
-import { agentsView, closeAgents, useAgents } from "../agents.ts";
+import { agentsView, aiAgent, closeAgents, useAgents } from "../agents.ts";
 import { fleet, type Fleet } from "../fleet.ts";
 import { AgentsView, BoardFeed, needsBoard } from "./agents.tsx";
 import { AtWork, areas, dailyDriver, type AiScreen } from "./aimenu.tsx";
 import { Feed as UnitsFeed, units } from "./units.tsx";
 
-/** The agent open in the right column's Agents view (null: the list). */
-export const aiAgent = signal<string | null>(null);
+/** The agent open in the right column's Agents view (null: the list); agents.ts's, so the folded page's screen shares it. */
+export { aiAgent };
 
 /**
  * HACK: the Agents view's rows (agents.tsx) open an agent through the overlay's signal (openAgents), which would put the

@@ -3341,6 +3341,107 @@ async function aiTermsSetup(size) {
 }
 
 /**
+ * In the page: a Working now row tapped opens its agent (folded: full page; unfolded: the right column), then a mock
+ * transcript arrives as powos-agentsd sends it (agents.delta convo: a user turn with a pasted block, a Markdown reply,
+ * 3 tool calls, the agent waiting) - and later one more turn. Returns the opened agent's id or "" (agent-convo-*).
+ */
+async function agentConvoOpen() {
+  const G = window.__gw;
+  const A = await G.mod("./agents.ts");
+  document.querySelector(".ai-screen .ais-sec[data-sec=working] .ais-work-row")?.click();
+  await G.until(() => A.aiAgent.value && document.querySelector(".ai-screen .fl-live"), 3000);
+  return A.aiAgent.value ?? "";
+}
+
+/** The mock transcript as powos-agentsd sends it (convo_of): a pasted block, Markdown, 3 tool calls; [more]: one more turn. */
+const agentConvo = (more) => [
+  { kind: "user", text: "the dock jumps when I drag an app out", pasted: ["<log>\nE/dock: drop at -12\nE/dock: drop at 40\n</log>"] },
+  { kind: "assistant", text: "Looking at **the dock's** drop handler:\n\n- `dockdrop.ts` takes the gap\n- the jump is the lift's spring" },
+  { kind: "tool", name: "Read", hint: "dockdrop.ts", ok: true },
+  { kind: "tool", name: "Edit", hint: "dockdrop.ts", ok: true },
+  { kind: "tool", name: "Bash", hint: "Run the tests", ok: true },
+  { kind: "assistant", text: "Fixed: the gap now opens where the finger is. Want me to land it?" },
+  ...(more ? [{ kind: "user", text: "yes" }, { kind: "assistant", text: "Landed **abc1234**." }] : []),
+];
+
+/** In the page: [id] idle (waiting on the user), then its conversation [convo] sent; resolves once [n] messages show. */
+async function agentConvoSend([id, convo, n]) {
+  const G = window.__gw;
+  const A = await G.mod("./agents.ts");
+  const E = window.__mockEvents;
+  const row = A.agent(id).value;
+  E.emit("agents.delta", { agents: [{ ...row, state: "idle", rev: row.rev + 1 }] });
+  await new Promise((r) => setTimeout(r, 250));
+  E.emit("agents.delta", { eventsOf: id, events: [], convo });
+  await G.until(() => document.querySelectorAll(".ai-screen .ag-convo .msg").length >= n, 3000);
+  await new Promise((r) => setTimeout(r, 150));
+}
+
+/** In the page: what the agent page shows of its conversation. */
+function agentConvoRead() {
+  const box = document.querySelector(".ai-screen .ag-convo") || document.createElement("div");
+  const texts = (q) => [...box.querySelectorAll(q)].map((e) => e.textContent.trim());
+  return {
+    user: box.querySelectorAll(".msg.user").length,
+    paste: texts(".msg.user .ag-paste").join(),
+    md: !!box.querySelector(".msg.assistant b") && !!box.querySelector(".msg.assistant li"),
+    steps: texts(".tl-row"),
+    chips: texts(".ag-wait"),
+    lines: texts(".ai-chat-in > *"),
+    text: document.querySelector(".ai-screen").textContent,
+    message: !!document.querySelector(".ai-screen .ag-foot .ag-say input"),
+    landed: /Landed abc1234/.test(box.textContent),
+  };
+}
+
+/** The bubbles, the paste, the Markdown, the one steps row and the one chip. */
+function agentConvoShape(label, v) {
+  const fails = [];
+  if (v.user !== 1) fails.push(`${label}: ${v.user} user bubbles, not 1`);
+  if (v.paste !== "pasted text ▸") fails.push(`${label}: the pasted block isn't folded ("${v.paste}")`);
+  if (!v.md) fails.push(`${label}: the reply's Markdown isn't rendered (no bold / list)`);
+  if (v.steps.length !== 1 || !/3 steps/.test(v.steps[0])) fails.push(`${label}: steps rows [${v.steps.join(" | ")}], not one "3 steps"`);
+  if (v.chips.join() !== "waiting for your input") fails.push(`${label}: status chips [${v.chips.join(" | ")}]`);
+  if (!v.message) fails.push(`${label}: no "message" field at the bottom`);
+  return fails;
+}
+
+/** No raw tags in the page, no line twice. */
+function agentConvoClean(label, v) {
+  const fails = ["<pasted_content", "<ta", "<log>"].filter((raw) => v.text.includes(raw)).map((raw) => `${label}: "${raw}" in the page's text`);
+  const dup = v.lines.find((l, i) => l && (l === v.lines[i - 1] || v.lines.includes(`asked: ${l}`)));
+  if (dup) fails.push(`${label}: a duplicate line "${dup}"`);
+  return fails;
+}
+
+/**
+ * The agent page shows the real conversation (the user, 11-01 16:45 "navigate to the chats", 17:10 "show the chat
+ * properly"): Working now → that agent; its transcript as PowOS AI's chat - user bubbles (paste folded), Markdown
+ * replies, ONE "3 steps" row, ONE waiting chip, no raw tags, no duplicate lines; a new turn appears without a reload.
+ */
+async function agentConvoCheck(page, label) {
+  await page.evaluate(aiTermsSetup, label);
+  await page.evaluate(aiTermsFleet, FLEET_SETUP);
+  await page.evaluate((l) => window.__gw.until(() => document.querySelector(`.ai-screen ${l === "folded" ? "" : ".ai-left "}.ais-sec[data-sec=working] .ais-work-row`), 3000), label);
+  const id = await page.evaluate(agentConvoOpen);
+  if (!id) return [`${label}: tapping a Working now row didn't open its agent`];
+  // The status page gone, the view subscribes afresh and the mock answers with its own snapshot: the fleet again.
+  await page.evaluate(aiTermsFleet, FLEET_SETUP);
+  const where = await page.evaluate(() => (document.querySelector(".ai-screen .ai-right .fl-live") ? "right" : document.querySelector(".ai-screen .ai-sub .fl-live") ? "page" : "?"));
+  const fails = where === (label === "folded" ? "page" : "right") ? [] : [`${label}: the agent opened in "${where}"`];
+  await page.evaluate(agentConvoSend, [id, agentConvo(false), 3]);
+  const v = await page.evaluate(agentConvoRead);
+  fails.push(...agentConvoShape(label, v), ...agentConvoClean(label, v));
+  await page.screenshot({ path: `/cache/agent-convo-${label}.png` });
+  await page.evaluate(agentConvoSend, [id, agentConvo(true), 5]);
+  const w = await page.evaluate(agentConvoRead);
+  if (!w.landed) fails.push(`${label}: a new turn didn't appear`);
+  if (w.chips.length !== 1) fails.push(`${label}: ${w.chips.length} status chips after the new turn`);
+  await page.evaluate(async () => { const S = await window.__gw.mod("./state.ts"); S.aiScreen.value = "chat"; });
+  return fails;
+}
+
+/**
  * In the page: [steps] tapped in turn (each a selector, or [selector, text] for the one whose text starts so), from the
  * AI page with nothing open, until the terminal of [want] ("host:session") shows; fails with the step that wasn't there.
  */
@@ -8715,6 +8816,10 @@ try {
   // The terminals from the AI page in at most 2 taps, both modes (the user, 11-01 16:57: "There's no terminal option anymore").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-terms", { width: 821, height: 883 }).then((r) => whenReady(r, () => aiTermsCheck(r.page))));
+  // An agent's page is its conversation, folded and unfolded (the user, 11-01 16:45 / 17:10; ui/agents.tsx Convo).
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `agent-convo-${label}`, viewport).then((r) => whenReady(r, () => agentConvoCheck(r.page, label))));
   // Unfolded two columns: the status page left, the chat right under its segmented row (the manager's design, 11-01).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-unfolded", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiUnfoldedCheck(r.page))));

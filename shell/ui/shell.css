@@ -3879,3 +3879,12 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
   .ais-step-t.out { display: none; }
   .ais-bar.sweep .ais-bar-fill { transform: none; }
 }
+
+/* An agent's conversation (agents.tsx Convo): PowOS AI's chat bubbles; pasted blocks folded; one status chip at its end. */
+.ag-convo .ai-chat-in { padding: 4px 0; }
+.ag-said .ag-paste { display: block; margin-top: 4px; padding: 0; border: 0; background: none; color: var(--color-muted); font: inherit; font-size: var(--text-small); }
+.ag-said .ag-paste-body { max-height: 240px; overflow: auto; margin: 4px 0 0; white-space: pre-wrap; font-size: var(--text-small); }
+.ag-wait { align-self: flex-start; padding: 3px 10px; border-radius: 999px; font-size: var(--text-small); color: var(--color-muted); background: var(--soft-fill); }
+.ag-wait.needs_you, .ag-wait.blocked { color: var(--color-red); }
+.ag-foot { display: flex; flex-direction: column; gap: 8px; }
+.ag-foot > .fl-term-open { align-self: flex-start; }

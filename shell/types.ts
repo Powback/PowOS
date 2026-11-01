@@ -1207,6 +1207,11 @@ export interface AgentTask {
   order: number;
   updated: number;
 }
+/**
+ * One item of an agent's conversation (powos-agentsd convo_of): the chat's own items (ChatItem), a user turn's pasted
+ * blocks apart ([pasted]: the agent page folds them, "pasted text ▸").
+ */
+export type AgentConvoItem = Exclude<ChatItem, { kind: "note" }> & { pasted?: string[] };
 export interface AgentEvent {
   id: number;
   agent: string;
@@ -1250,6 +1255,8 @@ export interface AgentsDelta {
   tasksOf?: string[];
   events?: AgentEvent[];
   eventsOf?: string;
+  /** [eventsOf]'s conversation, from its transcript (powos-agentsd convo_of); absent: an older host or none read yet. */
+  convo?: AgentConvoItem[];
   messages?: AgentMessage[];
   asks?: AgentAsk[];
   full?: boolean;

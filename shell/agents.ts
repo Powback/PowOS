@@ -12,7 +12,7 @@
 import { signal, type Signal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import { powos } from "./bridge.ts";
-import type { Agent, AgentAsk, AgentEvent, AgentMessage, AgentTask, AgentsDelta } from "./types.ts";
+import type { Agent, AgentAsk, AgentConvoItem, AgentEvent, AgentMessage, AgentTask, AgentsDelta } from "./types.ts";
 
 /** What a view subscribes to (§4 The backend swap). */
 export interface AgentsSource {
@@ -40,8 +40,8 @@ export const tasks = signal<Map<string, AgentTask[]>>(new Map());
 /** The comms feed, oldest first (the host keeps the last 50). */
 export const messages = signal<AgentMessage[]>([]);
 export const asks = signal<AgentAsk[]>([]);
-/** The watched agent's recent events (useAgentEvents). */
-export const recent = signal<{ agent: string | null; events: AgentEvent[] }>({ agent: null, events: [] });
+/** The watched agent's recent events and its conversation (useAgentEvents); [convo] null: its host sent none. */
+export const recent = signal<{ agent: string | null; events: AgentEvent[]; convo: AgentConvoItem[] | null }>({ agent: null, events: [], convo: null });
 /** Subscribed (the header's "live"). */
 export const live = signal(false);
 /** A slow clock for "12s ago" while subscribed: 30 s, not a frame. */
@@ -101,7 +101,7 @@ function apply(d: AgentsDelta) {
     messages.value = [...messages.value, ...d.messages.filter((m) => !have.has(m.id))].slice(-50);
   }
   if (d.full || d.asks) asks.value = d.asks ?? [];
-  if (d.eventsOf && d.eventsOf === recent.value.agent) recent.value = { agent: d.eventsOf, events: d.events ?? [] };
+  if (d.eventsOf && d.eventsOf === recent.value.agent) recent.value = { agent: d.eventsOf, events: d.events ?? [], convo: d.convo ?? recent.value.convo };
   if (d.full || d.agents || d.gone) order();
 }
 
@@ -139,15 +139,18 @@ export function useAgents() {
 /** [id]'s recent events in `recent` while the calling component shows it (one agent at a time). */
 export function useAgentEvents(id: string | null) {
   useEffect(() => {
-    recent.value = { agent: id, events: [] };
+    recent.value = { agent: id, events: [], convo: null };
     if (!id) return;
     powos.agents.events(id);
     return () => {
-      if (recent.value.agent === id) recent.value = { agent: null, events: [] };
+      if (recent.value.agent === id) recent.value = { agent: null, events: [], convo: null };
       powos.agents.events(null);
     };
   }, [id]);
 }
+
+/** The agent open on the AI page (unfolded: the right column's Agents view; folded: its agent screen); null: the list. */
+export const aiAgent = signal<string | null>(null);
 
 /** The Agents screen: open (on an agent, or none picked) or not. */
 export const agentsView = signal<{ id: string | null } | null>(null);
