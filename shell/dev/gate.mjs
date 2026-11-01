@@ -326,6 +326,56 @@ async function checkOnce(r, check) {
   }
 }
 
+/**
+ * In the page: an "at work" session opened from a small card (session.tsx grows it out of the card under a scale
+ * transform) shows its terminal at the screen's geometry (the user's 2026-11-01 screenshot: an empty band over the
+ * content, lines cut at the right, cursor marks): cols and rows are what the view's size holds in the font's cells, the
+ * first row sits at the top (under a row's height of centering), and a hidden cursor draws nothing.
+ */
+async function termSessionCheck() {
+  // Helpers are inner: page.evaluate serialises only this function.
+  /** termSessionCheck's measures: the grid against the visible box, the first row's place, the cursor. */
+  const termGeometryProblems = (term, holder) => {
+    const scr = holder.querySelector(".xterm-screen");
+    const rowsEl = holder.querySelector(".xterm-rows");
+    const cellW = scr.offsetWidth / term.cols;
+    const cellH = scr.offsetHeight / term.rows;
+    // The visible width: the holder reaches past the view by the fit addon's scrollbar reserve (terminal.tsx HACK).
+    const box = holder.getBoundingClientRect();
+    const visW = holder.closest(".term").getBoundingClientRect().right - box.left - parseFloat(holder.style.top);
+    const first = rowsEl.firstElementChild.getBoundingClientRect();
+    const holds = (n, px, cell) => n * cell <= px + 0.5 && (n + 1) * cell > px;
+    return [
+      [holds(term.cols, visW, cellW), `cols ${term.cols} don't fill the visible ${Math.round(visW)} px (cell ${cellW.toFixed(1)} px)`],
+      [holds(term.rows, holder.clientHeight, cellH), `rows ${term.rows} don't fill ${holder.clientHeight} px (cell ${cellH.toFixed(1)} px)`],
+      [first.top - box.top < cellH, `the first row is ${Math.round(first.top - box.top)} px under the view's top (an empty band over it)`],
+      [/line 1/.test(rowsEl.textContent), "the output isn't shown"],
+      [!rowsEl.querySelector("[class*=xterm-cursor]"), "a cursor drawn while the program hid it"],
+    ].filter(([ok]) => !ok).map(([, msg]) => msg);
+  };
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const T = await G.mod("./ui/terminal.tsx");
+  const { powos } = await G.mod("./bridge.ts");
+  const card = document.createElement("div");
+  Object.assign(card.style, { position: "fixed", left: "20px", top: "300px", width: "160px", height: "90px" });
+  document.body.append(card);
+  S.openSession("powos-scratch-geom", card, undefined, { host: "mac", agent: true });
+  const id = "at-work:mac:powos-scratch-geom";
+  await G.until(() => T.terminalFor(id) && document.querySelector(".session-term .xterm-screen"), 4000);
+  // The grow (260 ms) done and the fit settled; then output that hides the cursor, as the view-only frames do.
+  await new Promise((r) => setTimeout(r, 700));
+  const term = T.terminalFor(id);
+  const st = await powos.term.open(id, null, null, term.cols, term.rows, false);
+  const bytes = new TextEncoder().encode("\x1b[?25l\x1b[H\x1b[2J" + Array.from({ length: 5 }, (_, i) => `line ${i + 1}`).join("\r\n"));
+  window.__mockEvents.emit("term.data", { id, run: st.run, data: btoa(String.fromCharCode(...bytes)), end: st.end + bytes.length });
+  await new Promise((r) => setTimeout(r, 300));
+  const out = termGeometryProblems(term, document.querySelector(".session-term .term-holder"));
+  S.closeSession();
+  card.remove();
+  return out;
+}
+
 /** In the page: steam (6x3) over fetch (3x3, flush right) on home's first page - a straight stack: ONE clean rectangle
  * (the user's 2026-10-28 "looks ugly af if the widgets arent the same width"), fetch shown 6 wide, outer edges on the
  * row and column lines, the shared side a seam, no inner corner. */
@@ -7829,6 +7879,10 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 412, height: 915 }], ["unfolded", { width: 900, height: 1000 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `joins-${label}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(joinsCheck))));
+  // An "at work" session's terminal at the screen's geometry (ui/terminal.tsx, session.tsx): folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `term-session-${label}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(termSessionCheck))));
   // The Agents screen and widget in plain words (ui/agents.tsx, fleet.ts): working / needs attention / folded idle.
   if (process.env.SHELL_PAGES !== "0")
     // Both home layouts: the default (search docked, no pill row: taller cells) and the bar - the same tiles in each.

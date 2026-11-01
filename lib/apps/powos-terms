@@ -6,9 +6,12 @@
                                        them now). Per session: name, windows, last activity, attached, the active
                                        pane's title / folder / command, and whether an agent runs in it.
   powos terms attach <host> <session> [--write]
-                                       opens it in this terminal: view-only (a read-only tmux client: nothing typed
-                                       reaches the session) unless --write. Agents' sessions are live Claude Code
-                                       sessions; --write is only for when the user takes one over.
+                                       opens it in this terminal: view-only unless --write. View-only is no tmux client
+                                       at all: the active pane's text (capture-pane -J, wrapped lines joined) redrawn
+                                       here about once a second, so it wraps to THIS terminal's width and the session's
+                                       window is never resized for (or by) the viewer, and nothing typed reaches it.
+                                       Agents' sessions are live Claude Code sessions; --write (a normal UTF-8 tmux
+                                       client) is only for when the user takes one over.
   powos terms hosts                    the links: host name and how it's reached.
 
 Transport per host: this host's tmux directly; a linked host over the ssh link the host already has (BatchMode, its
@@ -219,6 +222,55 @@ def cmd_list(args):
             print(f"  {s['name']:<16} {s['windows']}w  {mark}{s['command']:<8} {s['title'][:60]}")
 
 
+# View-only: how much of the pane's history each frame carries (this terminal's scrollback), and how often it's read.
+VIEW_LINES = 300
+VIEW_EVERY_S = float(os.environ.get("POWOS_TERMS_VIEW_S", "1.0"))
+# Hide the cursor, home, clear the screen and the scrollback: each frame replaces the last whole.
+VIEW_CLEAR = "\x1b[?25l\x1b[H\x1b[2J\x1b[3J"
+TRAILING = re.compile(r" +((?:\x1b\[[0-9;:]*m)*)$")
+
+
+def capture_cmd(name):
+    # -u: UTF-8 (without it a client over ssh draws Claude's bullets and box lines as "_"); -e colors; -J joins the
+    # lines tmux wrapped at the session's width, so this terminal wraps them at its own.
+    return ["tmux", "-u", "capture-pane", "-p", "-e", "-J", "-S", f"-{VIEW_LINES}", "-t", name]
+
+
+def view_frame(text):
+    """A capture as one frame: trailing blanks off (-J keeps them; they'd wrap into empty rows), CRLF, cursor hidden."""
+    lines = [TRAILING.sub(r"\1", l) for l in text.split("\n")]
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return VIEW_CLEAR + "\r\n".join(lines)
+
+
+def view(capture):
+    """Redraws [capture]()'s pane here while it changes or this terminal resizes; returns when the session is gone."""
+    import signal
+    last = None
+    resized = [False]
+    signal.signal(signal.SIGWINCH, lambda *_: resized.__setitem__(0, True))
+    out = sys.stdout
+    try:
+        while True:
+            r = capture()
+            if r.returncode != 0:
+                out.write("\x1b[?25h\r\n[session ended]\r\n")
+                out.flush()
+                return 0
+            if r.stdout != last or resized[0]:
+                resized[0] = False
+                last = r.stdout
+                out.write(view_frame(r.stdout))
+                out.flush()
+            time.sleep(VIEW_EVERY_S)
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        out.write("\x1b[?25h")
+        out.flush()
+
+
 def cmd_attach(args):
     write = "--write" in args
     rest = [a for a in args if a != "--write"]
@@ -227,12 +279,20 @@ def cmd_attach(args):
     host, name = rest
     if not NAME.match(name):
         die(f"bad session name: {name}")
-    tmux = ["tmux", "attach"] + ([] if write else ["-r"]) + ["-t", name]
-    if host in (this_host(), "local"):
-        os.execvp("tmux", tmux)
-    target = dict(links()).get(host)
-    if not target:
+    local = host in (this_host(), "local")
+    target = None if local else dict(links()).get(host)
+    if not local and not target:
         die(f"no link to {host} (powos terms hosts)")
+    run = lambda argv: subprocess.run(argv, capture_output=True, text=True, timeout=12, stdin=subprocess.DEVNULL)
+    if not write:
+        cap = capture_cmd(name)
+        if local:
+            sys.exit(view(lambda: run(cap)))
+        sys.exit(view(lambda: run(remote_cmd(target, " ".join(shlex.quote(a) for a in cap)))))
+    # Taken over: a normal client (it sizes the window, as any client typing in it does), UTF-8 as the view.
+    tmux = ["tmux", "-u", "attach", "-t", name]
+    if local:
+        os.execvp("tmux", tmux)
     os.makedirs(CACHE, exist_ok=True)
     os.execvp("ssh", SSH[:1] + ["-t"] + SSH[1:] + [target, REMOTE_PATH + "exec " + " ".join(shlex.quote(a) for a in tmux)])
 
