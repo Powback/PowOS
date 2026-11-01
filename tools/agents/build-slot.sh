@@ -49,7 +49,14 @@ while :; do
     fi
     # A dead holder's slot (its process no longer running) is reclaimed instead of waited on forever.
     p=$(cat "$l/pid" 2>/dev/null) || p=""
-    if [ -z "$p" ] || ! kill -0 "$p" 2>/dev/null; then rm -rf "$l" 2>/dev/null; continue 2; fi
+    # No pid yet = a holder between its mkdir and its pid write (microseconds, longer under load): live, not dead.
+    # Reclaiming it let a third quick job steal a held slot (test-build-slot "third waits"). Only a pid-less lock
+    # older than a minute (holder killed in that gap) is reclaimed.
+    if [ -z "$p" ]; then
+      [ -n "$(find "$l" -maxdepth 0 -mmin +1 2>/dev/null)" ] || continue
+      rm -rf "$l" 2>/dev/null; continue 2
+    fi
+    if ! kill -0 "$p" 2>/dev/null; then rm -rf "$l" 2>/dev/null; continue 2; fi
   done
   [ -z "$lock" ] || break
   if [ -z "$said" ]; then

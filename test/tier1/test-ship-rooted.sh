@@ -46,6 +46,9 @@ echo "ROOTED $(git rev-parse HEAD) $*" >> "$LOG"
 grep -q ROOTED_BROKEN targets/android/rooted/powos-run.sh 2>/dev/null && exit 1
 exit 0
 ROOTED
+  # units_gate's checks (6cdd4f82: the real ones read this repo's units/) run before every rooted deploy: they pass
+  # here, as in tools/phone/ship-queue-test.sh - the rooted deploy itself is what's tested.
+  mkdir -p test/tier1; for t in test-units-registry.py test-powos-dispatch.py; do echo 'print("ok")' > "test/tier1/$t"; done
   chmod +x shell/dev/gate.sh tools/phone/*.sh targets/android/rooted/rooted.sh
   echo "x" > NOTES.txt
   echo "guard" > targets/android/rooted/powos-run.sh
