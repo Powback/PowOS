@@ -13,7 +13,7 @@ import { stableRows } from "./apps/stable.ts";
 import { appView, closeApp, initPowosApps, mergeRecent, noteHostRecent, openApp, powosApps, PREFIX } from "./apps/pages.ts";
 import type { App, AppWindow, Chat, Home, HomeItem, WebWindowRect, WidgetScreen } from "./types.ts";
 import { sidewaysHome, wideHome } from "./hosts/wide.ts";
-import { adoptWebWindow, onWebWindowPage, openWebWindow, setIconOf, setShownPage } from "./ui/webwindows.tsx";
+import { adoptWebWindow, onWebWindowPage, openWebWindow, setIconOf, setPageBeside, setShownPage } from "./ui/webwindows.tsx";
 
 /** The host's apps (Android's, Linux's); with the installed PowOS apps that have a page (apps/pages.ts), [apps]. */
 const hostApps = signal<App[]>([]);
@@ -115,6 +115,7 @@ export const pages = computed(() => {
 export const pageCount = computed(() => pages.value.length + 1);
 // The switcher's split screen tiles its apps on the home page on screen (ui/webwindows.tsx can't import this file).
 setShownPage(() => pages.value[page.value] ?? 1);
+setPageBeside((side) => (page.value < 0 ? null : (pages.value[page.value + side] ?? null)));
 setIconOf((key) => byKey.value.get(key)?.icon);
 export const onLibrary = () => page.value === pages.value.length;
 /** A widget's screen open over home (its onTap's screen()); Back closes it first. */

@@ -82,6 +82,11 @@ let shownPage = () => 1;
 export function setShownPage(f: () => number) {
   shownPage = f;
 }
+/** The page number beside the one on screen ([side] -1 left, 1 right), or null: none that way (state.ts sets it). */
+let pageBeside: (side: -1 | 1) => number | null = () => null;
+export function setPageBeside(f: (side: -1 | 1) => number | null) {
+  pageBeside = f;
+}
 
 /** Bottom first: the last one is on top. */
 export const webWins = signal<WebWin[]>([]);
@@ -1204,6 +1209,7 @@ function aimAt(id: number, x: number, y: number, docks: boolean): Aim {
   const none: Aim = { next: null, tab: null, snap: null, park: null, place: null };
   const park = docks ? null : parkAim(id, x);
   if (park) return { ...none, park };
+  if (carryTo(x) != null) return none;
   const tab = tabTarget(id, x, y);
   if (tab) return { ...none, tab };
   const next = docks ? tileDrop(id, x, y) : null;
@@ -1262,6 +1268,8 @@ function release(id: number, x: number, y: number) {
   if (tab?.id === id) return joinStack(tab);
   // GL1: over the tiles, the previewed drop; with none (no tiles yet, a full grid), an edge snap as before.
   if (drop?.id === id) return dock(drop);
+  const to = carryTo(x);
+  if (to != null) return carry(id, to);
   const slot = snapSlot(x, y);
   if (slot) return tile(id, slot);
   landPlace(id, place);
@@ -1279,6 +1287,35 @@ function dock(l: Landing) {
   for (const o of l.out) refloat(o);
   holdAppSizes(l.tiling.ids);
   console.info(`[tiles] window ${l.id} docked: page ${l.page} ${l.tiling.layout} [${l.tiling.ids.join(",")}]`);
+}
+
+// ---- EC1: a window carried to the next page ---------------------------------------------------------------------------
+//
+// A window's bar let go at the screen's very left / right edge - or past the work area, over a side dock's column -
+// goes to the page that way, and home with it (the old floating windows' "windows.edge", desktops.ts toEdge). E2E 194 step 38: the
+// right edge never carried - a finger at the screen's edge was over the unfolded right dock, outside the work area,
+// and only an edge snap (to the half) was ever made there (the left edge's "pass" was home already on page 0: it
+// snapped to the half too). The zone: past the work area (over a side dock's column, from the dock's inner edge) or
+// the screen's last [CARRY_PX] - a finger slid off the screen pins there. The edge snap keeps the strip inside the
+// work area (WG1 drops at a.left/a.right +-4 still snap).
+// No page that way: the edge snap, as before.
+
+/** The finger this near the screen's left/right edge (CSS px), or past the work area's, carries the window that way. */
+const CARRY_PX = 2;
+
+/** The page a bar let go at [x] carries its window to, or null: not at an edge, or no page that way. */
+function carryTo(x: number): number | null {
+  const a = workArea();
+  const side = x < a.left || x <= CARRY_PX ? -1 : x > a.right || x >= innerWidth - CARRY_PX ? 1 : 0;
+  return side ? pageBeside(side) : null;
+}
+
+/** Window [id] onto page [to], floating, on top; home goes there with it. */
+function carry(id: number, to: number) {
+  if (tiledOn(id) != null) untile(id, "keep");
+  cameHere(id, to);
+  console.info(`[windows] window ${id} carried to page ${to}`);
+  toPage(to);
 }
 
 // ---- TG3a: the edge drawer - a tile parked at the screen's edge (the native split's SplitDrawer, FLOAT_PULL) ----------

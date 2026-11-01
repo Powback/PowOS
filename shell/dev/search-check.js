@@ -252,3 +252,61 @@ async function checkAppIcons(state, search, wait) {
     }));
   }
 }
+
+/**
+ * E2E 194: the launcher's search finds the drawer's Linux apps (Kate first for "kate"; an Android app still found by
+ * its name), and orders by the launcher's alignment - bottom: the best match nearest the bar (the app tiles last, under
+ * the settings/action cards, the best card lowest); top: the apps first. Each app result is a
+ * [data-search-result="app:<key>"] button - the e2e journeys' probe (e2e-lib.sh searchresult).
+ */
+export async function launcherSearchOrderCheck() {
+  const s = await importShim('./state.ts');
+  const search = await importShim('./search.ts');
+  const align = await importShim('./ui/align.ts');
+  const old = { query: s.query.value, drawer: s.drawer.value, align: align.alignTry.value };
+  const off = search.registerSearchProvider({ id: 'order-test', search: (q) => q === 'kate' ? ['a', 'b'].map((g) => (
+    { id: `order-test:${g}`, label: `kate card ${g}`, source: 'Test', group: { id: `order-${g}`, label: `Order ${g}` }, open() {} })) : [] });
+  const failures = [];
+  try {
+    const kate = s.apps.value.find(a => a.kind === 'linux' && a.label === 'Kate');
+    const android = s.apps.value.find(a => a.kind === 'android' && /^[a-z]{4,}$/i.test(a.label));
+    if (!kate || !android) return [`E2E194: mock apps lack Kate (linux) or an Android app (${!!kate}/${!!android})`];
+    s.drawer.value = 1;
+    for (const want of ['bottom', 'top']) failures.push(...await searchOrderFor(want, kate, { s, search, align, old }));
+    s.query.value = android.label.toLowerCase();
+    await waitFor(() => document.querySelector(appResult(android.key))).catch(() => failures.push(`E2E194: the Android app ${android.label} is not in the search results`));
+  } catch (e) { failures.push(String(e)); }
+  finally { off(); align.alignTry.value = old.align; s.query.value = old.query; s.drawer.value = old.drawer; }
+  return failures;
+}
+
+const appResult = (key) => `.drawer-list.results [data-search-result="app:${key}"]`;
+async function waitFor(f) {
+  for (let i = 0; i < 60; i++) { if (f()) return; await new Promise(r => setTimeout(r, 50)); }
+  throw Error('timed out');
+}
+
+/** "kate" searched with the launcher aligned [want]: Kate the first app, and where it and the two cards sit. */
+async function searchOrderFor(want, kate, { s, search, align, old }) {
+  align.alignTry.value = { ...old.align, launcher: want };
+  s.query.value = '';
+  await new Promise(r => setTimeout(r, 50));
+  s.query.value = 'kate';
+  await waitFor(() => document.querySelector(appResult(kate.key)) && document.querySelectorAll('.drawer-list.results [data-search-group^="order-"]').length === 2)
+    .catch(() => { throw Error(`E2E194 ${want}: no Kate and 2 cards for "kate"`); });
+  const fails = [];
+  const first = search.searchSections.value.apps[0];
+  if (first?.id !== `app:${kate.key}`) fails.push(`E2E194 ${want}: the first app result for "kate" is ${first?.id}, not Kate`);
+  return [...fails, ...orderFails(want, kate)];
+}
+
+/** Bottom: Kate under the best card, it under the next, the list at its foot; top: the other way round. */
+function orderFails(want, kate) {
+  const [tile, a, b] = [appResult(kate.key), '[data-search-group="order-a"]', '[data-search-group="order-b"]'].map(q => document.querySelector(q).getBoundingClientRect());
+  const where = `Kate ${Math.round(tile.top)}, best card ${Math.round(a.top)}, next ${Math.round(b.top)}`;
+  if (want === 'top') return tile.bottom <= a.top + 1 && a.bottom <= b.top + 1 ? [] : [`E2E194 top: not top-down (${where})`];
+  const fails = tile.top >= a.bottom - 1 && a.top >= b.bottom - 1 ? [] : [`E2E194 bottom: not bottom-up - the best match must sit nearest the bar (${where})`];
+  const list = document.querySelector('.drawer-list.results');
+  if (list.scrollTop + list.clientHeight < list.scrollHeight - 2) fails.push('E2E194 bottom: the results did not open scrolled to their foot (the bar)');
+  return fails;
+}

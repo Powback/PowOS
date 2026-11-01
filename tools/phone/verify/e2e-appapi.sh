@@ -57,7 +57,7 @@ search_open() { # <text> <result key> <name>
     homefocused || { fail "home's search didn't take the focus - nothing typed (field focused: $(ev "$SEARCHED"), $(ime))"; back; return 1; }
   sh_ "input text $1"; sleep 1.5; chk typed
   step "search-$1" "\"$1\" typed into home's search: the results"
-  local p; p=$(pt "document.querySelector('.drawer-list.results .app[data-key=\"$2\"]')")
+  local p; p=$(searchresult "$2")
   case $p in none|off|"") fail "no $3 in the search results ($p)"; back; back; return 1 ;; esac
   # The name first: `set -- $p` replaces $3 (it was unbound under set -u and ended the journey at step 2, 2026-10-23).
   local name=$3; pass "$name in the search results"; set -- $p; tap "$1" "$2" "$name in the results"

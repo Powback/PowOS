@@ -5857,6 +5857,72 @@ async function gridSnapScene(r) {
   }
 }
 
+/**
+ * EC1 (E2E 194 step 38): unfolded with the right sidebar dock, a floating window's bar let go past the work area's
+ * right edge (over the dock, 4 px in from its inner edge) carries it and home to the next page; the screen's left edge
+ * carries it back; 4 px inside the work area's edge is still the edge snap (WG1), no page change.
+ */
+async function edgeCarryScene(r) {
+  const ready = await r.page.evaluate(EDGE_CARRY_HELPERS);
+  if (ready.length) return ready;
+  try {
+    const fails = [];
+    for (const [name, want] of [["dock", 1], ["left", 0], ["inside", 0]]) fails.push(...(await r.page.evaluate(edgeCarryStep, name, want)));
+    return fails;
+  } finally {
+    await r.page.evaluate(() => window.__ec?.done()).catch(() => {});
+  }
+}
+
+/** EC1's window (floating, page 0) and its bar drag; [] ready, else why not. */
+async function EDGE_CARRY_HELPERS() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  S.dockTry.value = "right";
+  S.page.value = 0;
+  await window.__gw.settled();
+  W.webWins.value = [{ id: 971, key: "a:gate.carry", label: "Carry", page: S.pages.value[0], x: 200, y: 160, w: 300, h: 240, live: true }];
+  W.tilings.value = {};
+  const rest = async () => (await new Promise((ok) => setTimeout(ok, 350)), await window.__gw.settled());
+  await rest();
+  const bar = () => document.querySelector('.webwindow[data-wwid="971"] .webwindow-title');
+  const send = (type, x, y) => bar().dispatchEvent(new PointerEvent(type, { pointerId: 52, pointerType: "touch", isPrimary: true, clientX: x, clientY: y, bubbles: true }));
+  const dock = document.querySelector(".home > .dock")?.getBoundingClientRect();
+  window.__ec = {
+    S,
+    win: () => W.webWins.value.find((v) => v.id === 971),
+    /** Where each step lets go: over the dock 4 px in from its inner edge, the screen's left edge, 4 px inside the work area. */
+    at: { dock: dock && dock.left + 4, left: 1, inside: W.tileArea().right - 4 },
+    async drag(tx, ty) {
+      const b = bar().getBoundingClientRect();
+      const [sx, sy] = [b.left + 40, b.top + b.height / 2];
+      send("pointerdown", sx, sy);
+      for (let i = 1; i <= 8; i++) send("pointermove", sx + ((tx - sx) * i) / 8, sy + ((ty - sy) * i) / 8);
+      await window.__gw.frames(2);
+      send("pointerup", tx, ty);
+      await rest();
+    },
+    done() {
+      W.webWins.value = [];
+      W.tilings.value = {};
+      S.dockTry.value = "";
+      S.page.value = 0;
+    },
+  };
+  if (!dock || dock.left < innerWidth / 2) return [`EC1: no right sidebar dock (${dock ? Math.round(dock.left) : "none"})`];
+  return S.pages.value.length < 2 ? [`EC1: one page only (${S.pages.value.join()})`] : [];
+}
+
+/** EC1 step [name]: the bar let go there; home and the window on page index [want] after, the window on screen. */
+async function edgeCarryStep(name, want) {
+  const { S, win, at, drag } = window.__ec;
+  await drag(at[name], innerHeight / 2);
+  const fails = [];
+  if (S.page.value !== want || win()?.page !== S.pages.value[want]) fails.push(`EC1 ${name} (x ${Math.round(at[name])}): home page ${S.page.value}, window page ${win()?.page} (want ${want} / ${S.pages.value[want]})`);
+  if (!document.querySelector('.page:not(.away) .webwindow[data-wwid="971"]')) fails.push(`EC1 ${name}: the window is not on the page on screen`);
+  return fails;
+}
+
 /** WX1's steps in one page, the windows cleared after. */
 /**
  * GR1 (e2e round 193, steps 29-32: a finger on the drawn bottom-right grip, mid-drag, left the window 1135 px wide in
@@ -7167,7 +7233,7 @@ try {
     runs.push(open(browser, `${ORIGIN}/index.html?mode=${mode}`, `launcher-search-${mode}`, {width, height}).then(r => whenReady(r, async () => {
       const failures = await r.page.evaluate(async () => {
         const check = await importShim('./dev/search-check.js');
-        return check.launcherSearchCheck();
+        return [...await check.launcherSearchCheck(), ...await check.launcherSearchOrderCheck()];
       });
       await r.page.evaluate(async () => { const s = await importShim('./state.ts'); s.drawer.value = 1; s.query.value = 'dock position'; });
       await r.page.waitForSelector('[data-search-result^="settings:style:"]');
@@ -7393,6 +7459,9 @@ try {
         return whenReady(r, () => r.page.evaluate(desktopsReloaded));
       }),
     );
+  // EC1: a window let go past the right sidebar dock's inner edge goes to the next page with home (ww-edge-carry-unfolded; E2E 194 step 38).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ww-edge-carry-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => edgeCarryScene(r))));
   // WX1: a tap on a divider / the ⇄ hint swaps the sides (ww-swap-unfolded; the user, 10-31 15:47-15:52).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-swap-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => swapScene(r))));

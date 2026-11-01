@@ -117,7 +117,7 @@ part1_search_kate() {
        homefocused; then
       sh_ "input text kate"; sleep 1.5; chk typed
       step search-kate "\"kate\" typed into home's search: the results"
-      p=$(pt "document.querySelector('.drawer-list.results .app[data-key=\"l:org.kde.kate\"]')")
+      p=$(searchresult l:org.kde.kate)
       case $p in none|off|"") fail "no Kate in the search results ($p)"; back; back ;; *)
         pass "Kate in the search results"
         set -- $p; tap "$1" "$2" "Kate in the results"
@@ -225,7 +225,10 @@ part2() {
   local d=$((W * 35 / 100)) pg0; pg0=$(hpage)
   p=$(freept "$(tbounds "$CT")" -1 "$d")
   if [ "$p" != none ] && [ -n "$p" ]; then set -- $p; x=$1; y=$2; local to=$((x - d)); [ $to -lt 20 ] && to=20
-    [ $((x - to)) -lt $((d * 2 / 3)) ] && fail "the swipe beside the window had only $((x - to)) px of room (want $d): a check limit, not the page swipe"
+    # The room there is what the window leaves (E2E 194: a resized window left 298 px of 793): a shorter swipe is a
+    # flick (250 ms), which the pager takes as well - noted; only a room too short for any page swipe fails.
+    if [ $((x - to)) -lt $(dp 100) ]; then fail "the swipe beside the window had only $((x - to)) px of room (want at least $(dp 100)): a check limit, not the page swipe"
+    elif [ $((x - to)) -lt $((d * 2 / 3)) ]; then note "a short swipe beside the window: $((x - to)) px of room (of $d), a flick"; fi
     swipe $x $y $to $y 250 "beside the window to the next page" && { sleep 1.5; chk page2
       step page2 "a swipe beside the window: the next page (the window stays on its own page)"
       [ "$(hpage)" = $((pg0 + 1)) ] && [ "$(tvis "$CT")" = false ] && pass "page $((pg0 + 2)) shows, Calculator hidden with its page" || fail "after the swipe: page $(hpage) (from $pg0), Calculator visible=$(tvis "$CT")"
@@ -244,8 +247,10 @@ part2() {
     step "$2" "$3"
     [ "$(hpage)" = "$4" ] && [ "$(tvis "$CT")" = true ] && pass "home and the window on page $(($4 + 1)) together" || fail "dropped at the edge: home page $(hpage) (want $4), Calculator visible=$(tvis "$CT")"
   }
-  edge $((W - 12)) to-page2 "Calculator dragged onto the screen's right edge: it and home go to the next page" $((pg0 + 1)) &&
-    edge 12 to-page1 "and onto the left edge: back to the first page" "$pg0"
+  # The screen's last pixel (a finger slid off it pins there; webwindows.tsx EC1 CARRY_PX): 12 px in was the edge
+  # SNAP's strip, so the left edge only "passed" because home was on page 0 already (it snapped to the half, E2E 194).
+  edge $((W - 1)) to-page2 "Calculator dragged onto the screen's right edge: it and home go to the next page" $((pg0 + 1)) &&
+    edge 1 to-page1 "and onto the left edge: back to the first page" "$pg0"
 
   # Reopened from recents (the switcher): a real tap on its card.
   b0=$(tbounds "$CT"); sh_ "input keyevent KEYCODE_APP_SWITCH"; sleep 2; chk switcher

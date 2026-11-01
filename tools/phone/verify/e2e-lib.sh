@@ -175,6 +175,11 @@ SEARCHED="document.activeElement&&document.activeElement.matches('.bar textarea'
 # round 193, appapi 01/02 folded: the page had the focus and asked for the keyboard).
 homefocused() { sh_ "dumpsys window | grep mCurrentFocus" | grep -q com.powos.app; }
 searchpt() { pt "$SEARCHPT"; }
+# searchresult <app key>: "x y" of that app in the launcher's search results, or none/off. The results are buttons
+# [data-search-result="app:<key>"] (drawer.tsx SearchResults, since e7766370) - the old `.app[data-key]` probe found
+# nothing there and failed Kate/App API/Lights though they were on screen (E2E 194). Scrolled into view first: a long
+# list can hold it past the panel's edge.
+searchresult() { pt "(e=>(e&&e.scrollIntoView({block:'nearest'}),e))(document.querySelector('.drawer-list.results [data-search-result=\"app:$1\"]'))"; }
 # A dock cell by its key prefix (read only).
 dockel() { echo "[...document.querySelectorAll('.home .dock .app[data-key]')].find(a=>a.dataset.key.startsWith('$1'))"; }
 # winrects: every window on screen now (windows.list: not minimised, not on another page), "l t r b,l t r b" in device px.
