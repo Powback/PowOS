@@ -3152,7 +3152,7 @@ async function aiStackTry() {
   return fails;
 }
 
-/** The layout: 16 dp side margins, every section on the backdrop's glass token (no text on the bare wash). */
+/** The layout: 16 dp side margins, the sections straight on the page's one glass (no card of their own), the Needs-you card on the backdrop's tint. */
 function aiStackLayout() {
   // [el]'s --backdrop-tint as a colour, resolved where [el] is (the token differs by the wallpaper's tone).
   const tintAt = (el) => {
@@ -3169,12 +3169,12 @@ function aiStackLayout() {
     const b = c.getBoundingClientRect();
     const name = c.className.split(" ")[0];
     if (Math.abs(b.left - 16) > 1.5 || Math.abs(innerWidth - b.right - 16) > 1.5) fails.push(`${name} at ${Math.round(b.left)}/${Math.round(innerWidth - b.right)} px from the sides, not 16`);
-    if (getComputedStyle(c).backgroundColor !== tintAt(c)) fails.push(`${name} is ${getComputedStyle(c).backgroundColor}, not the backdrop's tint ${tintAt(c)}`);
+    const card = c.matches(".ais-card-top");
+    if (card && getComputedStyle(c).backgroundColor !== tintAt(c)) fails.push(`${name} is ${getComputedStyle(c).backgroundColor}, not the backdrop's tint ${tintAt(c)}`);
+    if (!card && getComputedStyle(c).backgroundColor !== "rgba(0, 0, 0, 0)") fails.push(`${name} is a box (${getComputedStyle(c).backgroundColor}) on the page's glass: a box inside a box`);
   }
   const wash = scr.querySelector(".ai-glass");
   if (getComputedStyle(wash).backgroundColor !== tintAt(wash)) fails.push(`the page's wash is ${getComputedStyle(wash).backgroundColor}, not the backdrop's tint ${tintAt(wash)}`);
-  const loose = [...scr.querySelectorAll(".ais .ais-done-title, .ais .ais-work-title, .ais .ais-card-title")].filter((e) => !e.closest(".ais-sec:not(.ais-stack-sec), .ais-card-top"));
-  if (loose.length) fails.push(`${loose.length} texts float on the wash`);
   return [...new Set(fails)];
 }
 
@@ -3398,6 +3398,29 @@ function aiStackRest() {
   return document.getAnimations().filter((a) => scr.contains(a.effect?.target) && a.playState === "running" && a.effect.getComputedTiming().endTime === Infinity).map((a) => `${a.animationName} on .${String(a.effect.target.className).split(" ").join(".")}`);
 }
 
+/**
+ * In the page: no box inside a box on the AI page (the user, 11-01 22:40: "double box the ai page, it wastes a lot of
+ * space"; docs/DESIGN-LANGUAGE.md: a surface gets one container). Under each of [sels] (the page's glass surfaces: the
+ * folded screen, the unfolded columns, the chat wherever it's held), a container - a block at least 40 px tall and 40% of
+ * the surface wide with a fill, a gradient or a border - is a box in the surface's box. Not containers: the content's
+ * own objects (a chat bubble, a step, the Needs-you swipe card), controls (buttons, the segmented row's track), menus.
+ */
+function aiNestedBoxes(sels) {
+  const boxed = (e) => {
+    const s = getComputedStyle(e);
+    const a = (s.backgroundColor.match(/[\d.]+/g) ?? []).map(Number)[3] ?? (s.backgroundColor === "transparent" ? 0 : 1);
+    return a > 0.01 || s.backgroundImage !== "none" || parseFloat(s.borderTopWidth) + parseFloat(s.borderLeftWidth) > 0;
+  };
+  const own = "button, .msg, .present, .choice-opt, .tl, .ais-stack, .ai-segs, .ai-menu, .ai-glass, textarea, input, img, pre";
+  const inner = (root, rb) => [...root.querySelectorAll("*")].filter((e) => {
+    const b = e.getBoundingClientRect();
+    return b.height >= 40 && b.width >= rb.width * 0.4 && !e.closest(own) && boxed(e);
+  });
+  const named = (sel, e) => `${sel}: .${e.className.toString().split(" ").join(".")} is a box inside the page's box`;
+  const roots = sels.flatMap((sel) => [...document.querySelectorAll(sel)].map((r) => [sel, r, r.getBoundingClientRect()]));
+  return [...new Set(roots.filter(([, , rb]) => rb.width).flatMap(([sel, r, rb]) => inner(r, rb).map((e) => named(sel, e))))];
+}
+
 /** One render: [n] needs on the [tone] page - the stack's shape and the layout - to /cache/ai-status-folded-<tone>-<n>.png. */
 async function aiStackRender(page, tone, n) {
   const tops = await page.evaluate(aiStackSetup, n);
@@ -3406,7 +3429,7 @@ async function aiStackRender(page, tone, n) {
   if (tops !== Math.min(1, n)) fails.push(`${tops} top cards, not ${Math.min(1, n)}`);
   if (n && sh.peeks !== Math.min(2, n - 1)) fails.push(`${sh.peeks} cards peek behind, not ${Math.min(2, n - 1)}`);
   if (n && !sh.tryBtn) fails.push("the top card (a try) has no Try");
-  fails.push(...(await page.evaluate(aiStackLayout)));
+  fails.push(...(await page.evaluate(aiStackLayout)), ...(await page.evaluate(aiNestedBoxes, [".ai-screen.status", ".ai-screen .ai-page-chat"])));
   await page.screenshot({ path: `/cache/ai-status-folded-${tone}-${n}.png` });
   return fails.map((f) => `${tone} ${n}: ${f}`);
 }
@@ -3755,6 +3778,7 @@ async function aiWideClearCheck(page) {
     const f = await page.evaluate(aiWideClearFacts, where);
     await page.screenshot({ path: `/cache/ai-keyboard-wide-${where}.png` });
     fails.push(...aiWideClearFails(f).map((x) => `ai-wide-clear ${where}: ${x}`));
+    fails.push(...(await page.evaluate(aiNestedBoxes, [where === "panel" ? ".ai-panel" : ".ai-screen .ai-right"])).map((x) => `ai-wide-clear ${where}: ${x}`));
   }
   return fails;
 }
@@ -4529,7 +4553,7 @@ async function aiUnfoldedCheck(page) {
     if (!(await page.evaluate(aiChatSetup, [3, `-${size}-uf`]))) { fails.push(`${size}: the chat's try message didn't render`); continue; }
     await page.evaluate(aiPanesRest);
     if (size === "unfolded") fails.push(...(await page.evaluate(aiUnfoldedFollow)).map((f) => `${size} follow: ${f}`));
-    fails.push(...[...(await page.evaluate(aiPanesFails)), ...(await page.evaluate(aiColumnsContent)), ...(await page.evaluate(aiPanesGlassFails)), ...(await page.evaluate(aiSegsSwitch))].map((f) => `${size}: ${f}`));
+    fails.push(...[...(await page.evaluate(aiPanesFails)), ...(await page.evaluate(aiColumnsContent)), ...(await page.evaluate(aiPanesGlassFails)), ...(await page.evaluate(aiSegsSwitch)), ...(await page.evaluate(aiNestedBoxes, [".ai-screen .ai-left", ".ai-screen .ai-right"]))].map((f) => `${size}: ${f}`));
     await page.screenshot({ path: `/cache/ai-unfolded-${size}-chat.png` });
     await page.evaluate(aiChatRestore);
     if (size === "unfolded") fails.push(...(await aiUnfoldedRows(page)));
