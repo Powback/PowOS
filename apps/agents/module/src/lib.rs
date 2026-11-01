@@ -161,6 +161,16 @@ pub struct Work {
     /// (work_try); cleared when the user says it works. Last, with a default, so the table migrates in place.
     #[default("")]
     try_line: String,
+    /// Severity from evidence (board_score): 0 none, 1 P1 (score >= 50), 2 P0 (score >= 500). Only ever raised - a
+    /// recompute never lowers it. Last, with defaults, so the table migrates in place.
+    #[default(0u32)]
+    severity: u32,
+    /// The evidence score: linked friction reports x1 + the user's "still broken" verdicts x50 + repeated asks x25.
+    #[default(0u32)]
+    score: u32,
+    /// The user's share of [score] (verdicts + repeated asks): Up next ranks user evidence above infra-only at a level.
+    #[default(0u32)]
+    user_score: u32,
 }
 
 /// The unit registry's fleet view (lib/apps/powos-units, `powos units publish`): every unit on every host - what is
@@ -616,8 +626,10 @@ pub fn work_set(
     if !status.is_empty() && !WORK_STATES.contains(&status.as_str()) {
         return Err(format!("work_set: status is one of {}", WORK_STATES.join("|")));
     }
-    if status == "done" && ctx.db.work().id().find(id.clone()).is_none_or(|o| o.status != "done") {
+    let closing = status == "done" && ctx.db.work().id().find(id.clone()).is_none_or(|o| o.status != "done");
+    if closing {
         may_close(ctx, &id)?;
+        friction_follow(ctx, &id, true);
     }
     let now = now_ms(ctx);
     let old = ctx.db.work().id().find(id.clone());
@@ -644,6 +656,9 @@ pub fn work_set(
                 activity: now,
                 parent: o.parent,
                 try_line: o.try_line,
+                severity: o.severity,
+                score: o.score,
+                user_score: o.user_score,
             }
         }
         None => {
@@ -670,6 +685,9 @@ pub fn work_set(
                 activity: now,
                 parent: String::new(),
                 try_line: String::new(),
+                severity: 0,
+                score: 0,
+                user_score: 0,
             }
         }
     };
@@ -846,7 +864,109 @@ pub fn work_drop(ctx: &ReducerContext, id: String) -> Result<(), String> {
     if ctx.db.reporter().identity().find(ctx.sender()).is_none() {
         return Err("not a reporter".into());
     }
+    // A cancel (the task is dropped, nothing fixed): its linked friction is open again, unlinked.
+    friction_follow(ctx, &id, false);
     ctx.db.work().id().delete(id);
+    Ok(())
+}
+
+// ---- severity from evidence (the CLI's SCORE_* / severity_of hold the same constants) --------------------------
+
+/// Per occurrence: an automated friction report counts 1, the user's "still broken" verdict (a FAIL check named
+/// "you") 50, a repeated user ask (every linked ask past the first) 25 - user evidence outweighs infra noise.
+const SCORE_FRICTION: u32 = 1;
+const SCORE_BROKEN: u32 = 50;
+const SCORE_ASK: u32 = 25;
+const P1_AT: u32 = 50;
+const P0_AT: u32 = 500;
+
+fn severity_of(score: u32) -> u32 {
+    if score >= P0_AT {
+        2
+    } else if score >= P1_AT {
+        1
+    } else {
+        0
+    }
+}
+
+/// [id]'s score and severity from its evidence now: called on every write that adds evidence (friction_add of a linked
+/// one, friction_link, user_ask_link, check_set/check_sync) and by the sweep. Severity only ever rises. Leaves
+/// updated/activity alone (evidence isn't the task moving).
+fn board_score(ctx: &ReducerContext, id: &str) {
+    let Some(o) = ctx.db.work().id().find(id.to_string()) else { return };
+    let fr: u32 = ctx.db.friction().iter().filter(|f| f.task == id).map(|f| f.count).sum();
+    let broken = ctx.db.work_check().task().filter(id).filter(|c| c.name == "you" && c.state == "FAIL").count() as u32;
+    let asks = ctx.db.user_ask().iter().filter(|a| a.task == id).count() as u32;
+    let user = broken * SCORE_BROKEN + asks.saturating_sub(1) * SCORE_ASK;
+    let score = fr * SCORE_FRICTION + user;
+    let severity = o.severity.max(severity_of(score));
+    if (score, user, severity) == (o.score, o.user_score, o.severity) {
+        return;
+    }
+    ctx.db.work().id().delete(id.to_string());
+    ctx.db.work().insert(Work { score, user_score: user, severity, ..o });
+}
+
+/// Recomputes [id]'s severity (the board sweep, each pass, for every task with evidence).
+#[spacetimedb::reducer]
+pub fn work_score(ctx: &ReducerContext, id: String) -> Result<(), String> {
+    is_reporter(ctx)?;
+    board_score(ctx, &id);
+    Ok(())
+}
+
+/// A task's linked friction when it closes ([done]: fixed, "closed with <task>") or is cancelled (dropped: open again,
+/// unlinked). Only a true cancel reopens; a close-as-done marks it fixed.
+fn friction_follow(ctx: &ReducerContext, id: &str, done: bool) {
+    let now = now_ms(ctx);
+    let linked: Vec<Friction> = ctx.db.friction().iter().filter(|f| f.task == id).collect();
+    for f in linked {
+        if done && f.status == "fixed" {
+            continue;
+        }
+        ctx.db.friction().id().delete(f.id.clone());
+        ctx.db.friction().insert(if done {
+            Friction { status: "fixed".into(), fix_note: one_line(format!("closed with task {id}"), 280), fixed_at: now, ..f }
+        } else {
+            Friction { status: "open".into(), task: String::new(), ..f }
+        });
+    }
+}
+
+/// Links a friction to the board task it is evidence for ("" unlinks): `powos friction link`, `friction add --task`,
+/// `task set --friction`. Both tasks' scores follow.
+#[spacetimedb::reducer]
+pub fn friction_link(ctx: &ReducerContext, id: String, task: String) -> Result<(), String> {
+    is_reporter(ctx)?;
+    let Some(o) = ctx.db.friction().id().find(id.clone()) else {
+        return Err(format!("friction_link: no friction '{id}'"));
+    };
+    if !task.is_empty() && ctx.db.work().id().find(task.clone()).is_none() {
+        return Err(format!("friction_link: no task '{task}'"));
+    }
+    let was = o.task.clone();
+    ctx.db.friction().id().delete(id);
+    ctx.db.friction().insert(Friction { task: cut(task.clone(), 64), ..o });
+    for t in [was, task] {
+        if !t.is_empty() {
+            board_score(ctx, &t);
+        }
+    }
+    Ok(())
+}
+
+/// A one-off friction unseen for 7 days leaves the live list (the board sweep); logged again, it is open again.
+#[spacetimedb::reducer]
+pub fn friction_quiet(ctx: &ReducerContext, id: String) -> Result<(), String> {
+    is_reporter(ctx)?;
+    let Some(o) = ctx.db.friction().id().find(id.clone()) else {
+        return Err(format!("friction_quiet: no friction '{id}'"));
+    };
+    if o.status == "open" {
+        ctx.db.friction().id().delete(id);
+        ctx.db.friction().insert(Friction { status: "quiet".into(), ..o });
+    }
     Ok(())
 }
 
@@ -993,8 +1113,13 @@ fn put_check(ctx: &ReducerContext, row: WorkCheck) {
 pub fn check_set(ctx: &ReducerContext, check: String) -> Result<(), String> {
     is_reporter(ctx)?;
     let c: CheckIn = serde_json::from_str(&check).map_err(|e| format!("check: {e}"))?;
-    put_check(ctx, check_row(c, now_ms(ctx))?);
+    let row = check_row(c, now_ms(ctx))?;
+    let (task, you) = (row.task.clone(), row.name == "you");
+    put_check(ctx, row);
     prune_checks(ctx, now_ms(ctx));
+    if you {
+        board_score(ctx, &task);
+    }
     Ok(())
 }
 
@@ -1017,10 +1142,14 @@ pub fn check_sync(ctx: &ReducerContext, checks: String) -> Result<(), String> {
     for j in gone {
         ctx.db.work_check().job().delete(j);
     }
+    let you: std::collections::HashSet<String> = rows.iter().filter(|r| r.name == "you").map(|r| r.task.clone()).collect();
     for r in rows {
         put_check(ctx, r);
     }
     prune_checks(ctx, now);
+    for t in you {
+        board_score(ctx, &t);
+    }
     Ok(())
 }
 
@@ -1087,6 +1216,10 @@ pub struct Friction {
     fixed_at: u64,
     /// Times it came back after a fix.
     reopened: u32,
+    /// The board task it is evidence for ("" = none): `powos friction add|link --task`, `task set --friction`. Its count
+    /// feeds that task's severity (board_score). Last, with a default, so the table migrates in place.
+    #[default("")]
+    task: String,
 }
 
 const FRICTION_KINDS: [&str; 6] = ["refused", "broken-tool", "flaky-check", "unclear-rule", "slow", "other"];
@@ -1127,6 +1260,8 @@ fn friction_key(f: &FrictionIn) -> String {
 
 fn friction_again(ctx: &ReducerContext, o: Friction, f: FrictionIn, now: u64) {
     let back = o.status == "fixed" && f.fixed.is_empty();
+    // A quiet one (one-off, unseen 7 days: the sweep's friction_quiet) is live again when it recurs.
+    let wake = o.status == "quiet";
     ctx.db.friction().id().delete(o.id.clone());
     ctx.db.friction().insert(Friction {
         details: if f.details.trim().is_empty() { o.details } else { cut(f.details, 4000) },
@@ -1135,7 +1270,7 @@ fn friction_again(ctx: &ReducerContext, o: Friction, f: FrictionIn, now: u64) {
         by: if f.by.is_empty() { o.by } else { cut(f.by, 64) },
         count: o.count + 1,
         last: now,
-        status: if back { "open".into() } else { o.status },
+        status: if back || wake { "open".into() } else { o.status },
         reopened: o.reopened + u32::from(back),
         ..o
     });
@@ -1162,6 +1297,7 @@ fn friction_new(ctx: &ReducerContext, f: FrictionIn, key: String, now: u64) {
         fix_note: String::new(),
         fixed_at: if fixed { now } else { 0 },
         reopened: 0,
+        task: String::new(),
     });
 }
 
@@ -1179,9 +1315,13 @@ pub fn friction_add(ctx: &ReducerContext, item: String) -> Result<(), String> {
     let now = now_ms(ctx);
     let key = friction_key(&f);
     let have = ctx.db.friction().key().filter(&key).next();
+    let linked = have.as_ref().map(|o| o.task.clone()).unwrap_or_default();
     match have {
         Some(o) => friction_again(ctx, o, f, now),
         None => friction_new(ctx, f, key, now),
+    }
+    if !linked.is_empty() {
+        board_score(ctx, &linked);
     }
     let mut fixed: Vec<(u64, String)> =
         ctx.db.friction().iter().filter(|r| r.status == "fixed").map(|r| (r.last, r.id)).collect();
@@ -1283,9 +1423,12 @@ pub fn user_ask_link(ctx: &ReducerContext, id: String, task: String, none: Strin
     }
     ctx.db.user_ask().id().delete(id);
     ctx.db.user_ask().insert(UserAsk {
-        task: if task.is_empty() { o.task.clone() } else { cut(task, 64) },
+        task: if task.is_empty() { o.task.clone() } else { cut(task.clone(), 64) },
         none: if none.is_empty() { o.none.clone() } else { one_line(none, 280) },
         ..o
     });
+    if !task.is_empty() {
+        board_score(ctx, &task);
+    }
     Ok(())
 }

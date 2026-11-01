@@ -50,6 +50,23 @@ export interface WorkRow {
   parent?: string;
   /** What the user can try now, one plain sentence (`task set --try`): its Ready-to-try line ("" = none). */
   tryLine?: string;
+  /** Severity from evidence (the CLI's severity_of): 0 none, 1 P1, 2 P0 - only ever raised. Absent on old bindings. */
+  severity?: number;
+  /** The evidence score (friction x1 + still broken x50 + repeated asks x25) and the user's share of it. */
+  score?: number;
+  userScore?: number;
+}
+
+/** The P0/P1 chip on a task with that severity (none: nothing drawn); infra-only (no user evidence) says so. */
+export function SevChip({ w }: { w: WorkRow }) {
+  const s = Number(w.severity || 0);
+  if (!s) return null;
+  const infra = !Number(w.userScore || 0);
+  return (
+    <span class={`ais-sev p${2 - s}${infra ? " infra" : ""}`} title={infra ? "infrastructure: from automated reports" : "from your reports"}>
+      {s >= 2 ? "P0" : "P1"}
+    </span>
+  );
 }
 
 /** A JSON-array column ("" or bad = none). */

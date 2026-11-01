@@ -46,7 +46,8 @@ def load(name, path):
 
 cli = load("powos_agents_cli", CLI)
 WORK_COLS = ["id", "title", "owner", "status", "note", "created", "updated", "done", "project", "progress_done",
-             "progress_total", "step", "steps", "commits", "images", "activity", "parent", "try_line"]
+             "progress_total", "step", "steps", "commits", "images", "activity", "parent", "try_line", "severity", "score",
+             "user_score"]
 
 
 def norm(s):
@@ -96,11 +97,13 @@ class FakeStdb(http.server.BaseHTTPRequestHandler):
         o = self.db["work"].get(wid)
         if status == "done" and (o is None or o["status"] != "done"):
             self.may_close(wid)
+            self.follow(wid, True)
         if o is None:
             if not title:
                 raise ValueError("no title")
             o = {c: "" for c in WORK_COLS} | {"id": wid, "created": now, "done": 0, "progress_done": 0,
-                                                "progress_total": 0, "status": "working"}
+                                                "progress_total": 0, "status": "working", "severity": 0, "score": 0,
+                                                "user_score": 0}
         for k, v in (("title", title), ("owner", owner), ("status", status), ("note", note), ("project", project)):
             if v:
                 o[k] = v
@@ -151,6 +154,8 @@ class FakeStdb(http.server.BaseHTTPRequestHandler):
     def r_check_set(self, check):
         c = self._check(json.loads(check))
         self.db["work_check"][c["job"]] = c
+        if c["name"] == "you":
+            self.score(c["task"])
 
     def r_check_sync(self, checks):
         rows = [self._check(c) for c in json.loads(checks)]
@@ -171,6 +176,7 @@ class FakeStdb(http.server.BaseHTTPRequestHandler):
         a = self.db["user_ask"][aid]
         a["task"] = task or a["task"]
         a["none"] = none or a["none"]
+        self.score(task)
 
     def r_friction_add(self, item):
         f = json.loads(item)
@@ -179,8 +185,9 @@ class FakeStdb(http.server.BaseHTTPRequestHandler):
         o = next((x for x in self.db["friction"].values() if x["key"] == key), None)
         if o:
             back = o["status"] == "fixed" and not f.get("fixed")
-            o.update(count=o["count"] + 1, last=now, status="open" if back else o["status"],
+            o.update(count=o["count"] + 1, last=now, status="open" if back or o["status"] == "quiet" else o["status"],
                      reopened=o["reopened"] + int(back), details=f.get("details") or o["details"])
+            self.score(o.get("task", ""))
             return
         fid = f"f{len(self.db['friction']) + 1}"
         self.db["friction"][fid] = {
@@ -188,7 +195,46 @@ class FakeStdb(http.server.BaseHTTPRequestHandler):
             "details": f.get("details", ""), "repro": f.get("repro", ""), "evidence": f.get("evidence", ""),
             "by": f.get("by", ""), "count": 1, "first": now, "last": now,
             "status": "fixed" if f.get("fixed") else "open", "fix_commit": f.get("fixed", ""), "fix_note": "",
-            "fixed_at": now if f.get("fixed") else 0, "reopened": 0}
+            "fixed_at": now if f.get("fixed") else 0, "reopened": 0, "task": ""}
+
+    # severity from evidence, as the module's board_score / friction_follow / friction_link / friction_quiet
+    def score(self, wid):
+        o = self.db["work"].get(wid)
+        if not o:
+            return
+        fr = sum(f["count"] for f in self.db["friction"].values() if f.get("task") == wid)
+        broken = sum(1 for c in self.db["work_check"].values() if c["task"] == wid and c["name"] == "you" and c["state"] == "FAIL")
+        asks = sum(1 for a in self.db["user_ask"].values() if a["task"] == wid)
+        user = broken * 50 + max(0, asks - 1) * 25
+        sc = fr + user
+        o.update(score=sc, user_score=user, severity=max(o["severity"], 2 if sc >= 500 else 1 if sc >= 50 else 0))
+
+    def follow(self, wid, done):
+        for f in self.db["friction"].values():
+            if f.get("task") == wid:
+                if done and f["status"] != "fixed":
+                    f.update(status="fixed", fix_note=f"closed with task {wid}", fixed_at=self.clock[0])
+                elif not done:
+                    f.update(status="open", task="")
+
+    def r_work_drop(self, wid):
+        self.follow(wid, False)
+        self.db["work"].pop(wid, None)
+
+    def r_work_score(self, wid):
+        self.score(wid)
+
+    def r_friction_link(self, fid, task):
+        if fid not in self.db["friction"] or (task and task not in self.db["work"]):
+            raise ValueError("friction_link: no such friction/task")
+        was = self.db["friction"][fid].get("task", "")
+        self.db["friction"][fid]["task"] = task
+        for t in (was, task):
+            self.score(t)
+
+    def r_friction_quiet(self, fid):
+        if self.db["friction"][fid]["status"] == "open":
+            self.db["friction"][fid]["status"] = "quiet"
 
     def r_friction_fix(self, fid, commit, note):
         self.db["friction"][fid].update(status="fixed", fix_commit=commit, fix_note=note, fixed_at=self.clock[0])
@@ -518,8 +564,9 @@ class BoardTest(unittest.TestCase):
         self.run_cli("sweep")
         m = self.mails_sent()[1]
         self.assertIn("Board sweep: 1 task(s), 0 ask(s), 1 friction", m)
-        self.assertIn("td-launch FAILED", m)
-        self.assertNotIn("Broforce", m)
+        self.assertIn("td-launch FAILED: FAIL no window - nobody on it (new)", m)
+        self.assertIn("[no-check] Broforce folds (broforce-folds) - last check bf-fold FAILED: FAIL timeout - nobody on it\n", m,
+                      "the top 10 by severity lists every orphan; only the changed ones are marked new")
         self.assertIn("f1 x2", m)
         # A dry run prints the digest but mails nothing and remembers nothing: the next real pass still mails it.
         self.run_cli("task", "add", "Dry one")
@@ -559,6 +606,137 @@ class BoardTest(unittest.TestCase):
         self.run_cli("task", "set", "queue-two", "--note", "after the kernel lands")
         self.assertEqual(FakeStdb.db["work"]["queue-two"]["status"], "queued")
         self.assertIn("status is one of working | queued", self.run_cli("task", "set", "queue-two", "--status", "nope", ok=False).stderr)
+
+
+class SeverityMathTest(unittest.TestCase):
+    """Severity from evidence: friction x1 + still-broken x50 + repeated asks x25; P1 >= 50, P0 >= 500; only raised."""
+
+    def test_sum_thresholds_weights(self):
+        fr = [{"task": "t", "count": 30}, {"task": "t", "count": 19}, {"task": "u", "count": 999}]
+        ev = cli.evidence("t", fr, [], [])
+        self.assertEqual((ev["score"], cli.severity_of(ev["score"])), (49, 0))
+        ev = cli.evidence("t", fr + [{"task": "t", "count": 1}], [], [])
+        self.assertEqual((ev["score"], cli.severity_of(ev["score"])), (50, 1))
+        self.assertEqual(cli.severity_of(499), 1)
+        self.assertEqual(cli.severity_of(500), 2)
+        checks = [{"task": "t", "name": "you", "state": "FAIL"}, {"task": "t", "name": "bot", "state": "FAIL"}]
+        asks = [{"task": "t"}, {"task": "t"}, {"task": "t"}]
+        ev = cli.evidence("t", [], checks, asks)
+        self.assertEqual((ev["broken"], ev["asks"], ev["user"], ev["score"]), (1, 3, 100, 100),
+                         "one still-broken (50) + two repeated asks (2x25); a bot's FAIL is not the user's verdict")
+
+    def test_only_raised(self):
+        self.assertEqual(cli.severity({"severity": 2}, {"score": 3}), 2)
+        self.assertEqual(cli.severity({"severity": 0}, {"score": 60}), 1)
+
+    def test_sort_order(self):
+        ws = [{"id": "old-low", "created": 1, "severity": 0, "score": 10},
+              {"id": "p1-more", "created": 5, "severity": 1, "score": 90},
+              {"id": "p1-less", "created": 2, "severity": 1, "score": 60},
+              {"id": "p0", "created": 9, "severity": 2, "score": 600},
+              {"id": "old-zero", "created": 0, "severity": 0, "score": 10}]
+        self.assertEqual([w["id"] for w in sorted(ws, key=cli.rank_key)], ["p0", "p1-more", "p1-less", "old-zero", "old-low"])
+        q = [{"id": "infra-p0", "created": 1, "severity": 2, "score": 900, "user_score": 0, "status": "queued"},
+             {"id": "user-p0", "created": 2, "severity": 2, "score": 500, "user_score": 500, "status": "queued"},
+             {"id": "user-p1", "created": 0, "severity": 1, "score": 50, "user_score": 50, "status": "queued"}]
+        self.assertEqual([w["id"] for w in cli.queue_of(q)], ["user-p0", "infra-p0", "user-p1"],
+                         "at one level the user's evidence ranks above infra-only; infra P0 still above P1")
+
+
+class HygieneCliTest(BoardTest):
+    # BoardTest's own tests run once, under BoardTest
+    for _n in [n for n in dir(BoardTest) if n.startswith("test_")]:
+        locals()[_n] = None
+    del _n
+    """Severity wired into the module's writes, close-done/cancel and friction, quiet friction, the sweep's re-queue."""
+
+    def friction(self, title, n=1, task=None):
+        for _ in range(n):
+            self.run_cli("friction", "add", "--area", "gate", "--kind", "flaky-check", title, "--repro", "gate.sh",
+                         *(("--task", task) if task else ()))
+
+    def test_severity_recomputed_on_friction_and_verdict(self):
+        self.run_cli("task", "add", "Gate robust under Mac load", "--id", "gate-load")
+        self.friction("shell gate failed while the Mac's load was high", 49, task="gate-load")
+        self.assertEqual(FakeStdb.db["work"]["gate-load"]["severity"], 0)
+        self.friction("shell gate failed while the Mac's load was high")   # the 50th report (linked: recomputed)
+        self.assertEqual((FakeStdb.db["work"]["gate-load"]["score"], FakeStdb.db["work"]["gate-load"]["severity"]), (50, 1))
+        self.run_cli("task", "add", "Windows resize")
+        self.run_cli("check", "set", "windows-resize", "v1", "FAIL", "--name", "you")   # the user: still broken
+        self.assertEqual(FakeStdb.db["work"]["windows-resize"]["user_score"], 50)
+        self.assertIn("P1 ", self.run_cli("task", "list").stdout)
+        # task set --friction links too; unlinking never lowers it
+        self.friction("other thing", 3)
+        self.run_cli("task", "set", "windows-resize", "--friction", "f2")
+        self.assertEqual(FakeStdb.db["friction"]["f2"]["task"], "windows-resize")
+        self.run_cli("friction", "link", "f1", "-")
+        self.assertEqual(FakeStdb.db["work"]["gate-load"]["severity"], 1, "severity only ever rises")
+
+    def test_close_done_fixes_friction_cancel_reopens(self):
+        self.run_cli("task", "add", "A fix", "--id", "a-fix")
+        self.run_cli("task", "add", "A cancel", "--id", "a-cancel")
+        self.friction("one", task="a-fix")
+        self.friction("two", task="a-cancel")
+        FakeStdb.db["friction"]["f2"]["status"] = "fixed"
+        self.run_cli("task", "done", "a-fix", "--no-check", "Mac tooling, tier-1 tested")
+        self.assertEqual(FakeStdb.db["friction"]["f1"]["status"], "fixed")
+        self.assertIn("closed with task a-fix", FakeStdb.db["friction"]["f1"]["fix_note"])
+        self.run_cli("task", "rm", "a-cancel")
+        self.assertEqual((FakeStdb.db["friction"]["f2"]["status"], FakeStdb.db["friction"]["f2"]["task"]), ("open", ""))
+
+    def test_quiet_after_7_days_then_reopen(self):
+        self.friction("once only")
+        self.friction("often", 2)
+        for f in FakeStdb.db["friction"].values():
+            f["last"] = int(time.time() * 1000) - 8 * 86400_000
+        self.run_cli("sweep")
+        self.assertEqual(FakeStdb.db["friction"]["f1"]["status"], "quiet")
+        self.assertEqual(FakeStdb.db["friction"]["f2"]["status"], "open", "only one-offs go quiet")
+        self.assertNotIn("once only", self.run_cli("friction", "list").stdout)
+        self.assertIn("once only", self.run_cli("friction", "list", "--all").stdout)
+        self.friction("once only")
+        self.assertEqual(FakeStdb.db["friction"]["f1"]["status"], "open", "logged again: live again")
+
+    def test_sweep_resolves_dead_ends_and_requeues(self):
+        # leaked plan steps + a PASS: the leak is dropped, then the next pass (at once) closes it on the PASS
+        self.run_cli("task", "add", "Owner of the steps", "--id", "own", "--plan", "w1 build it; w2 test it", "--status", "blocked")
+        self.run_cli("task", "add", "Leaky", "--id", "leaky", "--plan", "w1 build it")
+        self.run_cli("check", "set", "leaky", "j1", "PASS", "--name", "leaky-check")
+        self.run_cli("task", "add", "No check reason", "--id", "nc")
+        self.run_cli("check", "set", "nc", "nocheck:nc", "none", "--line", "docs only")
+        self.run_cli("task", "add", "Owned by ghost", "--id", "ghost", "--owner", "powos-ghost")
+        self.run_cli("task", "add", "Real user work", "--id", "real")
+        self.run_cli("task", "add", "Twin title", "--id", "twin-a")
+        FakeStdb.db["work"]["twin-b"] = dict(FakeStdb.db["work"]["twin-a"], id="twin-b", created=FakeStdb.db["work"]["twin-a"]["created"] + 5)
+        for w in FakeStdb.db["work"]:
+            self.old(w)
+        dry = self.run_cli("sweep", "--dry-run", "--full").stdout
+        self.assertIn("leaked  leaky", dry)
+        self.assertIn("== Severity ranking", dry)
+        self.assertEqual(FakeStdb.db["work"]["leaky"]["status"], "working", "a dry run applies nothing")
+        out = self.run_cli("sweep").stdout
+        W = FakeStdb.db["work"]
+        self.assertEqual(W["leaky"]["status"], "done", out)
+        self.assertRegex(out, r"Decided \([2-5] passes\)", "a pass that decided something re-ran at once")
+        self.assertEqual(W["nc"]["status"], "done")
+        self.assertEqual(W["ghost"]["owner"], "coder")
+        self.assertEqual(W["twin-b"]["status"], "done")
+        self.assertIn("merged into twin-a", W["twin-b"]["note"])
+        self.assertNotEqual(W["real"]["status"], "done", "no evidence: never closed")
+        self.assertEqual(W["own"]["status"], "blocked")
+        self.assertIn("w1 build it", W["own"]["steps"], "the other task keeps its steps")
+        self.assertEqual(len(self.mails_sent()), 1)
+        self.assertLessEqual(self.mails_sent()[0].count("\n- "), 3 * cli.TOP_N)
+
+    def test_scheduled_entry_point_runs_the_sweep(self):
+        """board-sweep.sh (launchd com.powos.board-sweep, every 10 min) runs `powos agents sweep`: severity, dead-end
+        fixes and quiet friction all live in that one verb (sweep -> sweep_decide), so the schedule runs all three."""
+        sh = open(os.path.join(ROOT, "tools", "agents", "board-sweep.sh")).read()
+        self.assertIn('echo "powos agents sweep $dry"', sh)
+        src = open(CLI).read()
+        body = src[src.index("def sweep_decide("):src.index("def _board_facts(")]
+        for kind in ('"score"', '"leaked"', '"close"', '"merge"', '"free"', '"quiet"'):
+            self.assertIn(kind, body)
 
 
 class PassClosesOnlyItsOwnTaskCliTest(unittest.TestCase):
