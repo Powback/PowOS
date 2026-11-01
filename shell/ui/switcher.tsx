@@ -5,8 +5,8 @@
  * icon (or a long press) opens its menu. Android's split screen is one card (t.split): every app's icon over the whole
  * split - each side's last frame at its share of the screen, side by side as on the screen.
  */
-import { useRef } from "preact/hooks";
-import type { RecentTask } from "../types.ts";
+import { useRef, useState } from "preact/hooks";
+import type { RecentTask, SplitSide } from "../types.ts";
 import { spring } from "./spring.ts";
 import { memo } from "./memo.ts";
 
@@ -56,7 +56,7 @@ export const TaskCard = memo(function TaskCard({
   onMenu: (id: number, card: HTMLElement) => void;
 }) {
   const el = useRef<HTMLDivElement>(null);
-  const shot = useRef<HTMLImageElement>(null);
+  const shot = useRef<HTMLElement>(null);
   const drag = useRef<{
     x: number;
     y: number;
@@ -182,27 +182,62 @@ export const TaskCard = memo(function TaskCard({
       onContextMenu={(e) => e.preventDefault()}
     >
       <TaskHead t={t} />
-      {t.split ? <SplitShot t={t} load={load} eager={eager || current} /> : <img
-        ref={shot}
-        class="task-shot"
-        src={load ? t.snapshot : undefined}
-        alt=""
-        draggable={false}
-        decoding="async"
-        loading={eager || current ? "eager" : "lazy"}
-        onLoad={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "")}
-        onError={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "hidden")}
-      />}
+      {t.split ? <SplitShot t={t} load={load} eager={eager || current} /> : <CardShot t={t} load={load} eager={eager || current} shotRef={shot} />}
     </div>
   );
 });
+
+/**
+ * A card's picture; none, or one that failed to load (a 404: no snapshot and nothing cached; an SVG that didn't
+ * decode): its placeholder instead - never the browser's broken image, never a hidden (empty) card. Its own component:
+ * a failure re-renders it alone, not its card.
+ */
+function CardShot({ t, load, eager, shotRef }: { t: RecentTask; load: boolean; eager?: boolean; shotRef: { current: HTMLElement | null } }) {
+  const [failed, setFailed] = useState<string | null>(null);
+  const src = load ? t.snapshot : undefined;
+  if (noPicture(load, t.snapshot, failed)) return <ShotPlaceholder shotRef={shotRef} icon={t.icon} class="task-shot" />;
+  return (
+    <img
+      ref={shotRef as { current: HTMLImageElement | null }}
+      class="task-shot"
+      src={src}
+      alt=""
+      draggable={false}
+      decoding="async"
+      loading={eager ? "eager" : "lazy"}
+      onLoad={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "")}
+      onError={(e) => setFailed((e.currentTarget as HTMLImageElement).getAttribute("src"))}
+    />
+  );
+}
+
+/** A card's picture shows its placeholder: it has none (while loaded), or the one it has failed. */
+const noPicture = (load: boolean, snapshot: string, failed: string | null) => load && (!snapshot || failed === snapshot);
+
+/**
+ * No picture of a task (none yet, or it failed to load): its app's icon centred on glass tinted by the icon itself, as
+ * a launch's splash - never the browser's broken image or a black card (11-01: "native apps fail to render in the
+ * switcher"). A <div> as .task-shot: recents.tsx's landing decodes only an <img> shot, opening one opens the app plainly.
+ */
+export function ShotPlaceholder({ icon, class: cls, shotRef, grow }: { icon: string | null; class: string; shotRef?: { current: HTMLElement | null }; grow?: number }) {
+  const [bad, setBad] = useState(false);
+  const ok = !!icon && !bad;
+  const style = { ...(ok && { "--ph-icon": `url("${icon}")` }), ...(grow != null && { flexGrow: grow }) };
+  return (
+    <div ref={shotRef as { current: HTMLDivElement | null } | undefined} class={`${cls} task-ph`} style={style}>
+      {ok ? <img class="task-ph-icon" src={icon} alt="" draggable={false} onError={() => setBad(true)} /> : <span class="task-ph-icon blank" />}
+    </div>
+  );
+}
 
 /**
  * An app's icon, or a blank in its place. Memoised: its card re-renders on every recents update (new onOpen/onMenu),
  * the icon's src the same - 117 of 131 renders needless in perf-1793409569119's render scan.
  */
 const Icon = memo(function Icon({ src }: { src: string | null }) {
-  return src ? <img class="task-icon" src={src} alt="" draggable={false} /> : <span class="task-icon blank" />;
+  // One that fails to load is a blank too, never a broken image.
+  const [bad, setBad] = useState<string | null>(null);
+  return src && bad !== src ? <img class="task-icon" src={src} alt="" draggable={false} onError={() => setBad(src)} /> : <span class="task-icon blank" />;
 });
 
 /**
@@ -252,18 +287,27 @@ function SplitShot({ t, load, eager }: { t: RecentTask; load: boolean; eager?: b
   return (
     <div class="task-shot task-split">
       {t.split!.map((s) => (
-        <img
-          key={s.id}
-          class="task-split-side"
-          style={{ flexGrow: s.share }}
-          src={load ? s.snapshot : undefined}
-          alt=""
-          draggable={false}
-          decoding="async"
-          loading={eager ? "eager" : "lazy"}
-          onError={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "hidden")}
-        />
+        <SplitSideShot key={s.id} s={s} load={load} eager={eager} />
       ))}
     </div>
+  );
+}
+
+/** One side of a split card's picture; none (or it failed): that app's placeholder at its share. */
+function SplitSideShot({ s, load, eager }: { s: SplitSide; load: boolean; eager?: boolean }) {
+  const [failed, setFailed] = useState<string | null>(null);
+  const src = load ? s.snapshot : undefined;
+  if (noPicture(load, s.snapshot, failed)) return <ShotPlaceholder icon={s.icon} class="task-split-side" grow={s.share} />;
+  return (
+    <img
+      class="task-split-side"
+      style={{ flexGrow: s.share }}
+      src={src}
+      alt=""
+      draggable={false}
+      decoding="async"
+      loading={eager ? "eager" : "lazy"}
+      onError={(e) => setFailed((e.currentTarget as HTMLImageElement).getAttribute("src"))}
+    />
   );
 }

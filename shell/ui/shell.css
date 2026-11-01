@@ -2394,6 +2394,12 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   -webkit-user-drag: none;
   box-shadow: var(--lift);
 }
+/* A card with no picture (ui/switcher.tsx ShotPlaceholder): its icon centred on glass tinted by the icon, as a splash. */
+.task-ph { position: relative; overflow: hidden; display: grid; place-items: center; background: var(--color-surface); }
+.task-ph::before { content: ""; position: absolute; inset: -25%; background: var(--ph-icon) center / cover no-repeat; filter: blur(48px) saturate(1.5); opacity: 0.5; }
+.task-ph-icon { position: relative; width: 72px; height: 72px; border-radius: 18px; }
+.task-ph-icon.blank { background: var(--soft-fill, var(--color-surface)); }
+.task-split .task-ph-icon { width: 48px; height: 48px; border-radius: 12px; }
 /* "clear all": calm - a quiet text button on the blur, no plate. */
 .task-clear { align-self: center; margin-top: calc(var(--gap) * 4); font: var(--text-small) var(--font); color: var(--color-muted); background: none; border: none; border-radius: 999px; padding: 10px 22px; }
 

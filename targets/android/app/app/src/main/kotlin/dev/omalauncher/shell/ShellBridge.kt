@@ -1011,6 +1011,7 @@ class ShellBridge(
         if (!webWindowsMade) return emptyList()
         return webWindows.linuxCards().map { c ->
             val key = c.key.takeIf { it.isNotEmpty() }
+            dev.omalauncher.system.ThumbCache.name(c.id, key)
             JSONObject()
                 .put("id", c.id)
                 .put("label", c.label)
@@ -1042,6 +1043,7 @@ class ShellBridge(
     /** Task [t]'s id, label, drawer key and icon. */
     private fun taskBase(t: dev.omalauncher.system.Tasks.Task): JSONObject {
         val (key, name) = taskApp(t)
+        dev.omalauncher.system.ThumbCache.name(t.id, key)
         return JSONObject()
             .put("id", t.id)
             .put("label", t.label ?: name ?: t.component?.packageName ?: "")
