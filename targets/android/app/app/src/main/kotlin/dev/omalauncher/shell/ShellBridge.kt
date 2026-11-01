@@ -991,6 +991,8 @@ class ShellBridge(
         card.remove("floats")
         card.remove("window")
         card.put("label", sides.joinToString(" | ") { it.optString("label") })
+        // Side by side ("2h") or one over the other ("2v", the folded screen's): its combined icon and picture as on screen.
+        card.put("splitLayout", dev.omalauncher.system.SplitDrawer.layout(context))
         card.put(
             "split",
             JSONArray(

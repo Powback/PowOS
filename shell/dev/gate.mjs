@@ -1404,6 +1404,61 @@ async function switcherThumbsCheck() {
 }
 
 /**
+ * Android's native split screen in the switcher (the user, 2026-10-31 03:18: "when two apps are like, docked together...
+ * I don't really see it on the launcher"): the split pair is ONE card - one combined icon (GroupIcon, the dock's DG1 cell's)
+ * holding both apps' icons in the split's layout, and its picture the whole split at each side's share, divided as on
+ * the screen: one over the other folded ("2v"), side by side unfolded ("2h"). Its apps get no cards of their own.
+ */
+async function switcherSplitPairCheck(layout) {
+  const icon = (c) => "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="${c}"/></svg>`);
+  const shot = (c) => "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="90" height="190"><rect width="90" height="190" fill="${c}"/></svg>`);
+  const side = (id, label, c, share) => ({ id, label, icon: icon(c), snapshot: shot(c), share });
+  const split = [side(1201, "Chrome", "#e63", 0.6), side(1202, "Maps", "#3a6", 0.4)];
+  const tasks = [
+    { id: 1201, label: "Chrome | Maps", key: "a:chrome", icon: icon("#e63"), snapshot: shot("#e63"), split, splitLayout: layout },
+    { id: 1203, label: "Clock", key: "a:clock", icon: icon("#36c"), snapshot: shot("#36c") },
+  ];
+  window.__mockEvents.emit("recents.show", { open: true, from: 1201, tasks });
+  await new Promise((ok) => setTimeout(ok, 1500));
+  const cards = [...document.querySelectorAll(".recents .task")];
+  const fails = cards.length === 2 ? [] : [`${cards.length} cards for a split pair and one app, expected 2`];
+  const card = cards.find((c) => c.querySelector(".task-split"));
+  if (card) fails.push(...combinedIconFails(card), ...splitPictureFails(card));
+  else fails.push("no split card");
+  window.__mockEvents.emit("recents.end", { to: "home" });
+  return fails;
+
+  /** [a] then [b] as the split lays them out: one over the other (2v) or side by side (2h). */
+  function inOrder(a, b) {
+    return layout === "2v" ? b.top >= a.bottom - 0.5 : b.left >= a.right - 0.5;
+  }
+
+  /** The card's head: ONE combined tile, both icons inside it, in the split's layout. */
+  function combinedIconFails(card) {
+    const tiles = card.querySelectorAll(".task-head .group-icon");
+    if (tiles.length !== 1) return [`the split card's head has ${tiles.length} combined icons, expected 1`];
+    const tile = tiles[0].getBoundingClientRect();
+    const icons = [...tiles[0].querySelectorAll(".task-icon")].map((e) => e.getBoundingClientRect());
+    if (icons.length !== 2) return [`the combined icon holds ${icons.length} icons, expected 2`];
+    const inside = (r) => r.width > 4 && r.left >= tile.left - 0.5 && r.right <= tile.right + 0.5 && r.top >= tile.top - 0.5 && r.bottom <= tile.bottom + 0.5;
+    const fails = icons.every(inside) ? [] : ["the split's icons aren't inside its one combined tile"];
+    if (!inOrder(icons[0], icons[1])) fails.push(`the combined icon isn't laid out as the split (${layout})`);
+    return fails;
+  }
+
+  /** The card's picture: both sides, divided as on the screen, each at its share (0.6 / 0.4). */
+  function splitPictureFails(card) {
+    const sides = [...card.querySelectorAll(".task-split-side")].map((e) => e.getBoundingClientRect());
+    if (sides.length !== 2) return [`the split's picture has ${sides.length} sides, expected 2`];
+    const [a, b] = sides;
+    const fails = inOrder(a, b) ? [] : [`the split's picture isn't divided as on the screen (${layout})`];
+    const [ea, eb] = layout === "2v" ? [a.height, b.height] : [a.width, b.width];
+    if (Math.abs(ea / (ea + eb) - 0.6) > 0.05) fails.push(`the split's sides aren't at their shares (${Math.round(ea)} / ${Math.round(eb)}, want 0.6 / 0.4)`);
+    return fails;
+  }
+}
+
+/**
  * X1: the home swipe (the host's bottom-edge swipe, NavGesture.kt homePlain -> Switcher.close: "recents.end" to: home)
  * with the switcher up closes it to home with the switcher's own closing animation (collapse: the cards and the scrim
  * fade over its settle, frame by frame - never a jump), and ends on home: no switcher layer left, no app opened.
@@ -10435,6 +10490,8 @@ try {
     runs.push(open(browser, `${ORIGIN}/index.html`, "home-return", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(homeReturnCheck))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-thumbs", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(switcherThumbsCheck))));
+    for (const [name, viewport, layout] of [["folded", { width: 404, height: 900 }, "2v"], ["unfolded", { width: 821, height: 883 }, "2h"]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `switcher-split-pair-${name}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(switcherSplitPairCheck, layout))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "swipe-home-one-anim", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(swipeHomeOneAnimCheck))));
   // X1/X2 (board one-swipe-up-gesture-for-home-and-over-apps): the home swipe over the switcher, folded and unfolded;

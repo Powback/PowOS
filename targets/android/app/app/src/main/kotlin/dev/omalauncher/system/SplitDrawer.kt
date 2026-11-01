@@ -96,6 +96,25 @@ object SplitDrawer {
     /** Task [task]'s screen share in the split (0..1), or null before it was measured. */
     fun splitShare(task: Int): Float? = share[task]
 
+    /** How the split divides the screen as last measured ([layoutOf] of [pair]'s bounds), or null before. */
+    @Volatile private var measured: String? = null
+
+    /**
+     * How the split divides the screen, as ui/webwindows.tsx names a tiling's layout: "2h" side by side, "2v" one over
+     * the other - the switcher's split card lays its combined icon and picture out the same way. Measured from the two
+     * tasks once known; before that the rule WM Shell splits by (a screen wider than tall: side by side).
+     */
+    fun layout(ctx: Context): String =
+        measured ?: screenOf(ctx)?.let { if (it.width() >= it.height()) "2h" else "2v" } ?: "2h"
+
+    /** The split's layout from its two tasks' top-left corners (left / top first): further apart across than down is side by side. */
+    internal fun layoutOf(
+        firstLeft: Int,
+        firstTop: Int,
+        secondLeft: Int,
+        secondTop: Int,
+    ): String = if (kotlin.math.abs(secondLeft - firstLeft) >= kotlin.math.abs(secondTop - firstTop)) "2h" else "2v"
+
     /** [pair] again from [stageOf] and the stages' positions; on [work]. */
     private fun publishPair() {
         val top = stageOf.entries.groupBy { it.value }.mapValues { (_, tasks) -> tasks.last().key }
@@ -249,6 +268,7 @@ object SplitDrawer {
             else -> tuckAfter(gone, recents(ctx))
         }
         share.clear()
+        measured = null
     }
 
     /** The split of [gone] (task -> its side) ended: one visible and the other alive is an edge drag, tucked. */
@@ -287,7 +307,11 @@ object SplitDrawer {
         val ctx = context ?: return
         if (stageOf.size < 2) return
         val screen = screenOf(ctx)
-        if (screen != null) runningTasks(ctx).filter { it.taskId in stageOf }.forEach { t -> shareOf(t, screen)?.let { share[t.taskId] = it } }
+        val running = runningTasks(ctx)
+        if (screen != null) running.filter { it.taskId in stageOf }.forEach { t -> shareOf(t, screen)?.let { share[t.taskId] = it } }
+        val b = pair.map { id -> running.firstOrNull { it.taskId == id }?.let(::bounds) }
+        val (first, second) = (b.getOrNull(0) to b.getOrNull(1))
+        if (first != null && second != null && !first.isEmpty && !second.isEmpty) measured = layoutOf(first.left, first.top, second.left, second.top)
         if (stageOf.size >= 2) work?.postDelayed(sample, SAMPLE_MS)
     }
 

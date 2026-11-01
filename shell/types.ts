@@ -324,6 +324,8 @@ export interface RecentTask {
    * The card's [id] is the first one's; a tap restores the split (tasks.openSplit), a swipe closes them all.
    */
   split?: SplitSide[];
+  /** How the split divides the screen (SplitDrawer.layout): "2h" side by side, "2v" one over the other (folded). */
+  splitLayout?: "2h" | "2v";
 }
 
 /** One app of a split card ([RecentTask.split]). */
