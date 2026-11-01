@@ -7437,6 +7437,60 @@ function QUICK_BAR_JUDGES() {
   return [];
 }
 
+/** QP2's helpers: wait for [f] (up to 5 s), the Wi-Fi item's button on the row (not the "add" rows). */
+const QP2_ID = "qp:android.settings.WIFI_SETTINGS";
+async function qp2Wait(f) {
+  const t0 = performance.now();
+  while (!f() && performance.now() - t0 < 5000) await new Promise((ok) => setTimeout(ok, 30));
+  return f();
+}
+const qp2Chip = () => document.querySelector(`.cc3-launchers .cc3-grid:not(.cc3-spare) [data-key="${QP2_ID}"] button`);
+
+/** QP2: edit mode's "add quick page" Wi-Fi: the row gains the item, the store its stable ACTION id. */
+async function qp2Add(p) {
+  const add = await qp2Wait(() => document.querySelector('.cc3-quickpages [aria-label="add quick page Wi-Fi"]'));
+  if (!add) return ["QP2: edit mode has no \"add quick page\" Wi-Fi choice"];
+  add.click();
+  const out = (await qp2Wait(qp2Chip)) ? [] : ["QP2: after \"add quick page Wi-Fi\" the row has no Wi-Fi item"];
+  const stored = (await p.store.get("controls.launchers")) ?? [];
+  return stored.includes(QP2_ID) ? out : [...out, `QP2: the stored row ${JSON.stringify(stored)} lacks ${QP2_ID} (a stable settings ACTION)`];
+}
+
+/** QP2: a tap on the item: ONE quickpage.open ([opened]) with its action, anchored to the item's rect. */
+async function qp2Tap(opened) {
+  const c = qp2Chip();
+  if (!c) return ["QP2: out of edit mode the Wi-Fi item is gone"];
+  const r = c.getBoundingClientRect();
+  c.click();
+  await qp2Wait(() => opened.length);
+  const o = opened[0];
+  if (opened.length !== 1 || o.action !== "android.settings.WIFI_SETTINGS" || o.id) return [`QP2: a tap on the item opened ${JSON.stringify(opened)} (want one quickpage.open with action WIFI_SETTINGS)`];
+  const a = o.anchorRect;
+  const off = !a || [a.left - r.left, a.top - r.top, a.width - r.width, a.height - r.height].some((d) => Math.abs(d) > 1);
+  return off ? [`QP2: the page's anchor ${JSON.stringify(a)} is not the item's rect ${JSON.stringify(r)}`] : [];
+}
+
+/** QP2: the control center's "add quick page" Wi-Fi item: stored as its ACTION, opened anchored to its chip. */
+async function ccQuickPageItem() {
+  const [S, E, B] = await Promise.all(["./state.ts", "./ui/ccexpand.ts", "./bridge.ts"].map((m) => window.__gw.mod(m)));
+  const p = B.powos;
+  const was = { qp: p.quickpage, row: await p.store.get("controls.launchers") };
+  const opened = [];
+  p.quickpage = { open: async (spec) => (opened.push(spec), true), popout: async () => true, refused: async () => true };
+  try {
+    S.notif.value = true;
+    E.ccEditing.value = true;
+    const out = await qp2Add(p);
+    E.ccEditing.value = false;
+    await window.__gw.settled();
+    return [...out, ...(await qp2Tap(opened))];
+  } finally {
+    E.ccEditing.value = false;
+    p.quickpage = was.qp;
+    await p.store.set("controls.launchers", was.row ?? null);
+  }
+}
+
 /** QP1's checks ([folded]: a narrow screen, the card a bottom sheet): hotspot, Display, Bluetooth; closes; failure. */
 async function quickPageChecks(folded) {
   const q = window.__qp;
@@ -9793,6 +9847,20 @@ try {
         fail(await menuStep("remove from quick launch"));
         keys = await row();
         if (!keys || keys.includes(KEY)) fail(`after "remove from quick launch" the shade's row is ${JSON.stringify(keys)}`);
+        return { ...r, ready: true, ms: Date.now() - r.started };
+      }),
+    );
+  // QP2 (quick-page items; the user: "I'd love to use the side launcher to launch e.g. Wi-Fi settings this way"): the
+  // control center's edit mode lists the common settings pages ("add quick page"); a tap adds Wi-Fi as an item that
+  // stores its stable ACTION ("qp:android.settings.WIFI_SETTINGS", never a search index id); out of edit mode a tap
+  // on it is quickpage.open with that action and the chip's rect as its anchor (cc-quick-page, folded).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(
+      open(browser, `${ORIGIN}/index.html?mode=shade`, "cc-quick-page", { width: 404, height: 900 }).then(async (r) => {
+        await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+        // The checks' helpers as page globals (an evaluated function carries no closure).
+        await r.page.evaluate(`window.QP2_ID = ${JSON.stringify(QP2_ID)}; window.qp2Wait = ${qp2Wait}; window.qp2Chip = ${qp2Chip}; window.qp2Add = ${qp2Add}; window.qp2Tap = ${qp2Tap};`);
+        r.problems.push(...((await r.page.evaluate(ccQuickPageItem).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])) ?? []));
         return { ...r, ready: true, ms: Date.now() - r.started };
       }),
     );
