@@ -7270,7 +7270,7 @@ async function fullStaysScene(r) {
  * never a freeform window; QuickPageRouteTest). Stubbed host: quickpage.open answers with "quickpage.show".
  */
 async function quickPageScene(r, folded) {
-  await r.page.evaluate(QUICK_HELPERS);
+  await r.page.evaluate(QUICK_HELPERS, folded);
   await r.page.evaluate(QUICK_JUDGES);
   await r.page.evaluate(QUICK_BAR_JUDGES);
   const shot = async (name) => {
@@ -7286,8 +7286,11 @@ async function quickPageScene(r, folded) {
   }
 }
 
-/** QP1's stubbed host (window.__qp): webwindows.open / close, quickpage.open / popout / refused, every call recorded. */
-async function QUICK_HELPERS() {
+/**
+ * QP1's stubbed host (window.__qp): webwindows.open / close, quickpage.open / popout / refused, every call recorded.
+ * [folded]: home as the folded cover really is (wideHome false - the quick page is web windows' first folded user).
+ */
+async function QUICK_HELPERS(folded) {
   const [S, W, H, B, Q] = await Promise.all(["./state.ts", "./ui/webwindows.tsx", "./hosts/wide.ts", "./bridge.ts", "./ui/quickpage.tsx"].map((m) => window.__gw.mod(m)));
   const p = B.powos;
   const was = { ww: p.webwindows, qp: p.quickpage, wide: H.wideHome.value };
@@ -7308,7 +7311,7 @@ async function QUICK_HELPERS() {
   p.apps.list = async () => [...(await list()), { key: "a:com.android.settings/.Settings", label: "Settings", icon: settingsIcon, kind: "android" }];
   window.__mockEvents.emit("apps.changed");
   for (let i = 0; i < 40 && !S.byKey.value.has("a:com.android.settings/.Settings"); i++) await new Promise((ok) => setTimeout(ok, 25));
-  H.wideHome.value = true;
+  H.wideHome.value = !folded;
   S.page.value = 0;
   W.webWins.value = [];
   await window.__gw.settled();
@@ -7350,7 +7353,27 @@ function QUICK_JUDGES() {
     if (Math.abs(box.width - want) > 2) out.push(`QP1: ${label}: card ${Math.round(box.width)} px wide (want ${want}, ${folded ? "folded: full width minus 16" : "unfolded: ~440"})`);
     if (box.height > innerHeight * 0.7 + 1) out.push(`QP1: ${label}: card ${Math.round(box.height)} px high (want <= 70% of ${innerHeight})`);
     if (folded !== c[0].classList.contains("sheet")) out.push(`QP1: ${label}: sheet ${!folded} (want ${folded})`);
+    if (folded) out.push(...sheet(c[0], box, label));
     return [...out, ...window.__qpbar.icon(c[0], label), ...window.__qpbar.glass(c[0], label)];
+  }
+  // Folded: its bottom above the bar (16 over the work area's foot), rising on the shared spring (ui/spring.ts).
+  function sheet(el, box, label) {
+    const out = [];
+    const foot = q.W.workArea().bottom;
+    const bar = [...document.querySelectorAll(".home > .dock, .home > .bar")].map((b) => b.getBoundingClientRect()).filter((b) => b.height > 0 && b.top > innerHeight / 2);
+    if (!bar.length) out.push(`QP1: ${label}: folded home has no bar to sit above`);
+    if (bar.some((b) => box.bottom > b.top + 0.5) || Math.abs(foot - 16 - box.bottom) > 2) out.push(`QP1: ${label}: sheet bottom ${Math.round(box.bottom)} (want 16 above the bar's top ${Math.round(foot)})`);
+    if (Math.abs(box.left - 16) > 2) out.push(`QP1: ${label}: sheet left ${Math.round(box.left)} (want 16)`);
+    const probe = document.createElement("div");
+    probe.style.cssText = "animation-timing-function: var(--spring); animation-duration: var(--spring-ms)";
+    document.body.append(probe);
+    const want = getComputedStyle(probe);
+    const got = getComputedStyle(el);
+    if (!want.animationTimingFunction.startsWith("linear(") && !want.animationTimingFunction.startsWith("cubic-bezier(")) out.push(`QP1: the shared spring isn't set (--spring "${want.animationTimingFunction}")`);
+    if (got.animationName !== "quickpage-rise" || got.animationTimingFunction !== want.animationTimingFunction || got.animationDuration !== want.animationDuration)
+      out.push(`QP1: ${label}: the sheet's ${got.animationName} ${got.animationDuration} isn't a rise on the shared spring (${want.animationDuration})`);
+    probe.remove();
+    return out;
   }
   async function closes() {
     const out = [];
@@ -9146,7 +9169,7 @@ try {
     );
   // QP1: settings pages as quick pages - one compact card each (unfolded ~440 wide, folded a full-width sheet), pop-out, Back at the root, tap outside, a forced failure refused (quick-page-unfolded / -folded).
   if (process.env.SHELL_PAGES !== "0")
-    for (const [name, size, folded] of [["quick-page-unfolded", { width: 821, height: 883 }, false], ["quick-page-folded", { width: 412, height: 915 }, true]])
+    for (const [name, size, folded] of [["quick-page-unfolded", { width: 821, height: 883 }, false], ["quick-page-folded", { width: 404, height: 900 }, true]])
       runs.push(open(browser, `${ORIGIN}/index.html`, name, size).then((r) => whenReady(r, () => quickPageScene(r, folded))));
   // MX1: full screen stays full screen through ticks (a Linux and an Android window, hostless and host-shaped); restore brings the floating frame back (ww-full-stays-unfolded; the user, 11-01 15:39).
   if (process.env.SHELL_PAGES !== "0")

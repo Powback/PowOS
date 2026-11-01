@@ -11,6 +11,8 @@ import { useRef, useState } from "preact/hooks";
 import { geometryChannel, native, nextFrameId, sendGeometry } from "../apps/port.ts";
 import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
+// The shared spring's CSS vars (--spring / --spring-ms): a folded quick page's sheet rises on it.
+import "./spring.ts";
 import type { HostWebWindow, WebWindowRect } from "../types.ts";
 import { Mark } from "./chrome.tsx";
 import { QuickBar, quickIconKeys, quickPlace, QUICK, type QuickInfo, type QuickRect } from "./quickpage.tsx";
@@ -276,11 +278,15 @@ powos.on("quickpage.show", (m: { token: string; pkg: string; label: string; anch
   });
 });
 
-/** Quick page [m]'s card on the page on screen (one at a time: an open one goes): its id, or null (the host's net runs). */
+/**
+ * Quick page [m]'s card on the page on screen (one at a time: an open one goes): its id, or null (the host's net runs).
+ * Folded too - the web-window layer's first folded user (the manager, 11-01: "web windows being unfolded-only is no
+ * excuse"): one card display, a sheet full width minus 16 rising above the bar. Every other window stays unfolded-only.
+ */
 export async function openQuick(m: { token: string; pkg: string; label: string; anchor?: QuickRect | null }): Promise<number | null> {
-  if (!wideHome.value || !(await enabled())) return null;
+  if (!(await enabled())) return null;
   for (const w of webWins.value.filter((v) => v.quick)) close(w.id);
-  const sheet = innerWidth < QUICK.folded;
+  const sheet = !wideHome.value || innerWidth < QUICK.folded;
   const p = quickPlace(m.anchor ?? undefined, workArea(), sheet, innerHeight);
   const key = `q:${m.token}`;
   const id = await powos.webwindows!.open(key, { left: p.x, top: p.y + TITLE, width: p.w, height: p.h - TITLE }).catch(() => -1);
@@ -291,6 +297,14 @@ export async function openQuick(m: { token: string; pkg: string; label: string; 
   webWins.value = [...webWins.value, { id, key, label: m.label, page: shownPage(), x: p.x - o.x, y: p.y - o.y, w: p.w, h: p.h, quick }];
   return id;
 }
+
+// A fold / unfold: an open quick page's card was placed for the other screen (a folded sheet, an unfolded card) - it goes.
+let quickWide = wideHome.peek();
+wideHome.subscribe((wide) => {
+  if (wide === quickWide) return;
+  quickWide = wide;
+  for (const w of webWins.value.filter((v) => v.quick)) close(w.id);
+});
 
 /** Quick page [id] reopened in its app's normal window (the host closes the card and its task, then launches it). */
 function popOut(win: WebWin) {

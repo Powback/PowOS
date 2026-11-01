@@ -74,8 +74,8 @@ object QuickPages {
     ) = launch(context, Page(intent, label, anchor))
 
     /**
-     * [page] as a quick page on the web desktop; a native panel as Android's own sheet; elsewhere (folded, web windows
-     * off) as any launch.
+     * [page] as a quick page whenever web windows are on (folded too: QuickPageRoute.decide); a native panel as
+     * Android's own sheet; with web windows off as any launch.
      */
     fun launch(
         context: Context,
@@ -86,7 +86,7 @@ object QuickPages {
         val info = runCatching { context.packageManager.resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo }.getOrNull()
         val component = intent.component ?: info?.let { ComponentName(it.packageName, it.name) }
         val pkg = component?.packageName
-        val web = dev.omalauncher.system.AppWindows.webDesktop(context)
+        val web = WebWindows.on(context)
         when (QuickPageRoute.decide(QuickPageRoute.kind(pkg, intent.action, component?.className, asApp = false), web)) {
             QuickPageRoute.Route.NATIVE_SHEET -> start(null.also { intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
             QuickPageRoute.Route.QUICK_WINDOW -> quick(context, page, component!!, start)
