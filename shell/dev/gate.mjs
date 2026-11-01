@@ -8697,6 +8697,24 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, position] of [["folded", "bottom"], ["unfolded", "bottom"], ["unfolded", "right"], ["unfolded", "left"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `dk1-${label}-${position}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos) => (await importShim("./dev/dock-search-check.js")).dk1Check(pos), position))));
+  // PT1 (dev/dock-search-check.js pttHold*; the user, 2026-11-01 17:02): a real finger holds home's dock button 3 s -
+  // the launcher comes up under it, the dictation stays on the whole hold, its field never focused; the release ends
+  // push-to-talk with one stop, never a tap on the field that appeared under the finger.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, position] of [["folded", "bottom"], ["unfolded", "bottom"]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `ptt-hold-${label}-${position}`, dockOpensView[label]).then((r) => whenReady(r, async () => {
+        const call = (fn, ...args) => r.page.evaluate(async (f, a) => (await importShim("./dev/dock-search-check.js"))[f](...a), fn, args);
+        const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+        const at = await call("pttHoldSetup", position);
+        const cdp = await r.page.target().createCDPSession();
+        await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+        const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+        await touch("touchStart", [{ x: at.x, y: at.y, id: 1 }]);
+        for (let i = 0; i < 30; i++) (await wait(100), await call("pttHoldSample"));
+        await touch("touchEnd", []);
+        await wait(800);
+        return (await call("pttHoldResult")).map((f) => `${position}: ${f}`);
+      })));
   // DS2: the launcher overlay's side - opened from the button, its bar's glass grows out of it (wider, higher, never
   // fading), a tap's open focused, a hold's dictating, push-to-talk's release leaving the words.
   if (process.env.SHELL_PAGES !== "0")

@@ -119,6 +119,42 @@ interface Press {
   last: [number, number];
 }
 
+/** After a held press lifts, its trailing touchend / mouse compat / click are still the press's for this long. */
+const QUIET_MS = 400;
+/** The page's events a held press keeps from what's under the finger (the launcher's field that came up there). */
+const KEPT = ["touchend", "mousedown", "mouseup", "click", "contextmenu"];
+const editable = (t: EventTarget | null) => t instanceof HTMLElement && (t.matches("textarea, input") || t.isContentEditable);
+
+/**
+ * PT1 (the user, 2026-11-01 17:02: "the launcher shows up, my finger is now over the input field, the input activates,
+ * and that stops the voice"): the press owns its pointer for its whole life. The launcher comes up under the held
+ * finger (and home's dock re-renders under it, dropping the button's pointer capture), so the finger's move / up /
+ * cancel are taken at the window, before anything under it sees them, and handed to the press; once it's a hold
+ * nothing under the finger gets its touchend, mouse compat events or click (no focus, no keyboard, no takeOver), and
+ * whatever editable field gets the focus meanwhile gives it back. Released, it stays so for QUIET_MS (the synthetic
+ * click after pointerup). [on] the press's own handlers; returns the press's release of the ownership.
+ */
+function own(id: number, p: Press, on: { move: (e: PointerEvent) => void; end: (cancelled: boolean, e: PointerEvent) => void }) {
+  const opts = { capture: true, passive: false };
+  // A tap (so far) leaves the finger's events to the page too (the dock's sideways scroll takes them from it).
+  const held = () => p.kind !== "tap";
+  const mine = (e: PointerEvent) => e.pointerId === id && (held() && e.stopPropagation(), true);
+  const move = (e: PointerEvent) => mine(e) && on.move(e);
+  const end = (e: PointerEvent) => mine(e) && on.end(e.type === "pointercancel", e);
+  const keep = (e: Event) => held() && (e.preventDefault(), e.stopPropagation());
+  const unfocus = (e: FocusEvent) => held() && editable(e.target) && (e.target as HTMLElement).blur();
+  const pointer = [["pointermove", move], ["pointerup", end], ["pointercancel", end]] as const;
+  for (const [type, fn] of pointer) addEventListener(type, fn, opts);
+  for (const type of KEPT) addEventListener(type, keep, opts);
+  addEventListener("focusin", unfocus, true);
+  const off = () => {
+    for (const [type, fn] of pointer) removeEventListener(type, fn, opts);
+    for (const type of KEPT) removeEventListener(type, keep, opts);
+    removeEventListener("focusin", unfocus, true);
+  };
+  return off;
+}
+
 const openness = (y: number, p: Press) => Math.max(0, Math.min(1, ((p.y - y) * GAIN) / (innerHeight * TRAVEL)));
 const clear = (p: Press) => (clearTimeout(p.hold), clearTimeout(p.ptt));
 
@@ -188,6 +224,25 @@ export function DockSearchButton() {
     press.current = null;
     if (p) up(p, cancelled, y);
   };
+  // The press's pointer, taken at the window (own): its move, its release - never what's under the finger's.
+  const start = (e: PointerEvent) => {
+    const p = down(e);
+    let off = () => {};
+    const end1 = (cancelled: boolean, ev: PointerEvent) => {
+      const was = off;
+      off = () => {};
+      end(cancelled, ev.clientY);
+      // A tap's release is the button's own (its click lands on it); a hold's trailing events stay kept a moment.
+      if (p.kind === "tap") was();
+      else window.setTimeout(was, QUIET_MS);
+    };
+    off = own(e.pointerId, p, {
+      // The dock's own scroll (a sideways move) took the press: the page's events are all its own again.
+      move: (ev) => press.current === p && !move(p, ev) && ((press.current = null), off(), (off = () => {})),
+      end: (cancelled, ev) => press.current === p && end1(cancelled, ev),
+    });
+    return p;
+  };
   return (
     <div
       class={`app dock-search ${morphFrom.value ? "away" : ""} ${listening ? "on" : ""}`}
@@ -196,10 +251,7 @@ export function DockSearchButton() {
       aria-label="search"
       tabIndex={0}
       // Edit mode: the button is the search widget, dragged out onto home or along (searchwidget.tsx grabSearch).
-      onPointerDown={(e) => (press.current = grabSearch(e, e.currentTarget) ? null : down(e))}
-      onPointerMove={(e) => press.current && !move(press.current, e) && (press.current = null)}
-      onPointerUp={(e) => end(false, e.clientY)}
-      onPointerCancel={(e) => end(true, e.clientY)}
+      onPointerDown={(e) => (press.current = grabSearch(e, e.currentTarget) ? null : start(e))}
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), launch(false))}
     >
       <span class="dock-search-face dsb-glass tile">
