@@ -366,6 +366,15 @@ if [ -f $T/powos-src.tar ] && [ -f $T/self-phone.sh ]; then
   [ -e $R/usr/lib/powos/.powos-src-commit ] || cp $T/powos-src.rev $R/usr/lib/powos/.powos-src-commit
 fi
 rm -f $T/powos-src.tar $T/powos-src.rev $T/self-phone.sh
+# unity-screen (targets/android/steam/unity-screen): the copy a Unity game's Steam LaunchOptions run
+# (`~/.local/share/powos/unity-screen %command%`, set by `unity-screen --install <appid>`). Refreshed on every deploy so
+# the launch option always runs the shipped version; the LaunchOptions themselves stay the user's (--install/--remove).
+if [ -f $T/unity-screen ]; then
+  D=$R/home/powos/.local/share/powos
+  mkdir -p $D && chown $U:$U $R/home/powos/.local $R/home/powos/.local/share $D
+  install -m 755 $T/unity-screen $D/unity-screen && chown $U:$U $D/unity-screen
+  rm -f $T/unity-screen
+fi
 # The ship gate's secret + url (rooted.sh deploy pushes them from the Mac when it has them): into powos's
 # ~/.config/powos/ (mode 600, owner powos), only when missing or different. Never echoed; consumed from /data/local/tmp.
 G=$R/home/powos/.config/powos
