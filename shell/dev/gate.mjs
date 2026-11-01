@@ -4150,6 +4150,64 @@ async function agentConvoCheck(page, label) {
   return fails;
 }
 
+/** The raw hook events of the user's 11-01 screenshot: 9 shell calls, the hand-back, 6 log tails (agent-activity). */
+const agentRawEvents = (id, base) => [
+  { kind: "prompt", name: "", hint: "Back gesture goes to the focused window" },
+  ...Array.from({ length: 9 }, () => ({ kind: "tool", name: "Bash", hint: "cd ~/pw/quickpage-back && git status", ok: true, ms: 3000 })),
+  { kind: "tool", name: "SubagentHandback", hint: "SubagentHandback", ok: true },
+  ...Array.from({ length: 6 }, () => ({ kind: "tool", name: "Bash", hint: "tail -3 /tmp/qpb-gate.log", ok: true, ms: 2500 })),
+  { kind: "tool", name: "Read", hint: "shell/ui/agents.tsx", ok: true },
+  { kind: "fail", name: "Bash", hint: "cd ~/pw/x && make" },
+].map((e, i) => ({ id: base + i, agent: id, ts: Date.now() - 60_000 + i * 1000, n: 1, ms: 0, ok: null, ...e }));
+
+/** Its transcript: tool calls with raw hints and output, the hand-back with its summary. */
+const agentRawConvo = () => [
+  { kind: "user", text: "make back go to the focused window" },
+  { kind: "tool", name: "Bash", hint: "cd ~/pw/quickpage-back", ok: true, out: "/Users/macback/pw/quickpage-back" },
+  { kind: "tool", name: "Bash", hint: "tail -3 /tmp/qpb-gate.log", ok: true, out: "gate rc=0" },
+  { kind: "assistant", text: "Back now goes to the focused window." },
+  { kind: "tool", name: "SubagentHandback", hint: "back follows the focused window, gate green", ok: true },
+];
+
+/** In the page: [events] (and [convo] when given) sent for [id]; every row's text of the agent page once it shows. */
+async function agentRawSend([id, events, convo]) {
+  const G = window.__gw;
+  const E = window.__mockEvents;
+  E.emit("agents.delta", { eventsOf: id, events, ...(convo ? { convo } : {}) });
+  await G.until(() => document.querySelector(convo ? ".ai-screen .ag-convo .msg" : ".ai-screen .ag-activity .ag-tool"), 3000);
+  await new Promise((r) => setTimeout(r, 150));
+  for (const b of document.querySelectorAll(".ai-screen .ag-convo .tl-row")) b.click();
+  await new Promise((r) => setTimeout(r, 100));
+  const box = document.querySelector(convo ? ".ai-screen .ag-convo" : ".ai-screen .ag-activity");
+  return box ? box.innerText : "";
+}
+
+/**
+ * An agent's live view never shows the machine's words (the user, 11-01: "wtf is up with the activity of this agent"):
+ * hook events and a transcript full of shell calls read as plain lines - no "cd ", "tail ", "ran:", tool name or path.
+ */
+async function agentActivityCheck(page) {
+  await page.evaluate(aiTermsSetup, "folded");
+  await page.evaluate(aiTermsFleet, FLEET_SETUP);
+  await page.evaluate(() => window.__gw.until(() => document.querySelector(".ai-screen .ais-sec[data-sec=working] .ais-work-row"), 3000));
+  const id = await page.evaluate(agentConvoOpen);
+  if (!id) return ["agent-activity: tapping a Working now row didn't open its agent"];
+  await page.evaluate(aiTermsFleet, FLEET_SETUP);
+  const bad = /\bcd |\btail |SubagentHandback|\bBash\b|ran:|~\/|\/tmp|\/Users|\.log\b|\.tsx?\b/;
+  const fails = [];
+  const acts = await page.evaluate(agentRawSend, [id, agentRawEvents(id, 900000), null]);
+  if (!acts) fails.push("agent-activity: no Activity rows");
+  for (const l of acts.split("\n").filter((x) => bad.test(x))) fails.push(`agent-activity: raw row "${l}"`);
+  if (!/working · 9 steps|worked · 9 steps/.test(acts)) fails.push(`agent-activity: the 9 shell calls aren't one "9 steps" line:\n${acts}`);
+  if (!/handed back/.test(acts)) fails.push("agent-activity: no hand-back line");
+  await page.screenshot({ path: "/cache/agent-activity.png" });
+  const convo = await page.evaluate(agentRawSend, [id, [], agentRawConvo()]);
+  for (const l of convo.split("\n").filter((x) => bad.test(x))) fails.push(`agent-activity convo: raw row "${l}"`);
+  if (!/Handed back: back follows the focused window/.test(convo)) fails.push(`agent-activity convo: the hand-back isn't its summary:\n${convo}`);
+  if (!/Back now goes to the focused window/.test(convo)) fails.push("agent-activity convo: the reply is missing");
+  return fails;
+}
+
 /**
  * In the page: [steps] tapped in turn (each a selector, or [selector, text] for the one whose text starts so), from the
  * AI page with nothing open, until the terminal of [want] ("host:session") shows; fails with the step that wasn't there.
@@ -9919,6 +9977,9 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `agent-convo-${label}`, viewport).then((r) => whenReady(r, () => agentConvoCheck(r.page, label))));
+  // An agent's live view in plain words, never its raw shell calls (the user, 11-01: "wtf is up with the activity").
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "agent-activity", { width: 404, height: 900 }).then((r) => whenReady(r, () => agentActivityCheck(r.page))));
   // Unfolded two columns: the status page left, the chat right under its segmented row (the manager's design, 11-01).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-unfolded", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiUnfoldedCheck(r.page))));

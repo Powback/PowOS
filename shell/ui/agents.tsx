@@ -32,37 +32,31 @@ const took = (ms: number) => {
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ""}`;
 };
 
-/** Plain sentences for the non-tool events, by kind. */
-const KIND_SENTENCE: Record<string, (h: string, name: string) => string> = {
+/**
+ * Words only a machine reads (the user, 11-01: "wtf is up with the activity of this agent" - "ran: cd ~/pw/…" ×9,
+ * "SubagentHandback", "tail -3 /tmp/…"): a path, a shell command, a tool's internal name. Never shown.
+ */
+const TECHNICAL = /(^|[\s"'(])(~\/|\.{0,2}\/[\w.-]+\/|\/tmp\b)|\b[\w-]+\.(tsx?|m?js|py|kt|sh|log|json|md)\b|\b(cd|tail|head|cat|grep|rg|git|ls|rm|sed|awk|perl|bash|sh|npm|npx|make|adb|ssh|curl)\s|__|&&|\|/;
+/** [h] when it's plain words, else "". */
+const plain = (h: string) => (h && !TECHNICAL.test(h) ? h : "");
+const isHandback = (name: string) => /handback/i.test(name);
+
+/** Plain sentences for the non-tool events, by kind; any hint that isn't plain words is left out. */
+const KIND_SENTENCE: Record<string, (h: string) => string> = {
   prompt: (h) => (h ? `asked: ${h}` : "was asked something"),
   stop: () => "finished its turn",
-  sub_start: (h, n) => `started helper: ${h || n}`,
-  sub_stop: (h, n) => `helper done: ${h || n}`,
-  fail: (h) => `failed: ${h}`,
-  compact: () => "compacted its context",
+  sub_start: (h) => (h ? `started a helper: ${h}` : "started a helper"),
+  sub_stop: (h) => (h ? `helper done: ${h}` : "a helper finished"),
+  fail: () => "a step failed",
+  compact: () => "tidied up its notes",
   notify: (h) => h || "notified you",
 };
-/** And for tools, by name. */
-const TOOL_SENTENCE: Record<string, (h: string) => string> = {
-  Read: (h) => `read ${h || "a file"}`,
-  NotebookRead: (h) => `read ${h || "a file"}`,
-  Edit: (h) => `edited ${h || "a file"}`,
-  MultiEdit: (h) => `edited ${h || "a file"}`,
-  NotebookEdit: (h) => `edited ${h || "a file"}`,
-  Write: (h) => `wrote ${h || "a file"}`,
-  Grep: () => "searched the code",
-  Glob: () => "searched the code",
-  Agent: (h) => `started helper: ${h}`,
-  Task: (h) => `started helper: ${h}`,
-  Bash: (h) =>
-    /gate\.sh/.test(h) ? "ran the shell gate" : /land\.sh|push/.test(h) ? "landed the change" : h ? `ran: ${h}` : "ran a command",
-};
 
-/** A tool event as a short plain sentence for the timeline ("edited gesture.ts", "ran a command"). */
+/** A non-tool event (or the hand-back) as a short plain sentence for the timeline. */
 function sentence(e: AgentEvent) {
-  const h = e.hint && e.hint !== e.name ? e.hint : "";
-  if (e.kind !== "tool") return (KIND_SENTENCE[e.kind] ?? (() => e.kind))(h, e.name);
-  return (TOOL_SENTENCE[e.name] ?? ((x: string) => (x ? `${e.name}: ${x}` : e.name)))(h);
+  const h = plain(e.hint && e.hint !== e.name ? e.hint : "");
+  if (e.kind === "tool") return h ? `handed back: ${h}` : "handed back its report";
+  return (KIND_SENTENCE[e.kind] ?? (() => "did something"))(h);
 }
 
 const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
@@ -76,14 +70,36 @@ const tapOnly = (run: () => void) => ({
   },
 });
 
-/** Tool calls as §1.3's "Read×6 · Bash ✗ (2s)": the coalesced rows, latest last. */
-function Tool({ e }: { e: AgentEvent }) {
+/** The timeline's rows: each run of tool calls one quiet "N steps" line, the rest (and the hand-back) a plain sentence. */
+type Row = { key: number; ts: number; text: string; fail?: boolean } | { key: number; ts: number; steps: number; failed: number };
+type Steps = Extract<Row, { steps: number }>;
+const fails = (e: AgentEvent) => (e.ok === false ? 1 : 0);
+/** [e] folded into [last] when that's a steps line; else a new one. */
+function addStep(out: Row[], e: AgentEvent) {
+  const last = out.at(-1);
+  const n = Math.max(1, e.n);
+  if (!last || !("steps" in last)) return void out.push({ key: e.id, ts: e.ts, steps: n, failed: fails(e) });
+  const s: Steps = last;
+  s.steps += n;
+  s.failed += fails(e);
+  s.ts = e.ts;
+}
+function activityRows(events: AgentEvent[]): Row[] {
+  const out: Row[] = [];
+  for (const e of events)
+    if (e.kind === "tool" && !isHandback(e.name)) addStep(out, e);
+    else out.push({ key: e.id, ts: e.ts, text: sentence(e), fail: e.kind === "fail" });
+  return out;
+}
+
+const stepsText = (r: Steps, now: boolean) =>
+  `${now ? "working" : "worked"} · ${r.steps} step${r.steps > 1 ? "s" : ""}${r.failed ? ` · ${r.failed} failed` : ""}`;
+function ActivityRow({ r, now }: { r: Row; now: boolean }) {
+  const steps = "steps" in r;
+  const fail = !steps && r.fail;
   return (
-    <div class={`ag-tool ${e.ok === false ? "fail" : ""}`} title={e.hint}>
-      <span class="muted">{clock(e.ts)}</span> {sentence(e)}
-      {e.n > 1 && ` ×${e.n}`}
-      {e.ok === false && " ✗"}
-      {e.ms >= 2000 && <span class="muted"> ({Math.round(e.ms / 1000)}s)</span>}
+    <div class={`ag-tool ${steps ? "ag-quiet" : ""} ${fail ? "fail" : ""}`}>
+      <span class="muted">{clock(r.ts)}</span> {steps ? stepsText(r, now) : r.text}
     </div>
   );
 }
@@ -732,11 +748,25 @@ function useAtEnd(n: number) {
 }
 
 /**
+ * A transcript as the user reads it: the hand-back as its summary (a reply), the tool calls' raw output dropped (their
+ * folded "N steps" row opens to plain verbs only: never a command, a path or a log).
+ */
+const readable = (items: AgentConvoItem[]): AgentConvoItem[] =>
+  items.map((i) =>
+    i.kind !== "tool"
+      ? i
+      : isHandback(i.name)
+        ? { kind: "assistant", text: plain(i.hint) ? `Handed back: ${i.hint}` : "Handed back its report." }
+        : { kind: "tool", name: i.name, hint: "", ok: i.ok },
+  );
+
+/**
  * An agent's conversation (the user, 11-01 17:10: "Can't I show the chat properly here?"): its transcript (powos-agentsd
  * convo_of) drawn with PowOS AI's chat - the user's turns as bubbles, the agent's replies in Markdown, tool calls folded
  * into one quiet "N steps" row - and one status chip at the end.
  */
-function Convo({ a, items }: { a: Agent; items: AgentConvoItem[] }) {
+function Convo({ a, items: raw }: { a: Agent; items: AgentConvoItem[] }) {
+  const items = readable(raw);
   const ref = useAtEnd(items.length + (items.at(-1)?.kind === "assistant" ? 1 : 0));
   const chip = WAITING[a.state];
   return (
@@ -751,14 +781,15 @@ function Convo({ a, items }: { a: Agent; items: AgentConvoItem[] }) {
 }
 
 /** A host without conversations yet (an older APK): the hook events, as before. */
-function Activity({ events }: { events: AgentEvent[] }) {
+function Activity({ events, working }: { events: AgentEvent[]; working: boolean }) {
+  const rows = activityRows(events);
   return (
     <section class="fl-sec">
       <h3 class="ai-heading muted">Activity</h3>
-      <div class="fl-term tile">
-        {!events.length && <div class="muted">Nothing yet.</div>}
-        {events.map((e) => (
-          <Tool key={e.id} e={e} />
+      <div class="fl-term tile ag-activity">
+        {!rows.length && <div class="muted">Nothing yet.</div>}
+        {rows.map((r, i) => (
+          <ActivityRow key={r.key} r={r} now={working && i === rows.length - 1} />
         ))}
       </div>
     </section>
@@ -784,7 +815,7 @@ function LiveView({ id, f }: { id: string; f: Fleet }) {
       <LiveCard a={a} x={x} title={title} />
       <LiveSteps steps={steps} todo={todo} />
       <Asks only={id} />
-      {r?.convo ? <Convo a={a} items={r.convo} /> : <Activity events={r?.events.slice(-30) ?? []} />}
+      {r?.convo ? <Convo a={a} items={r.convo} /> : <Activity events={r?.events.slice(-60) ?? []} working={a.state === "working"} />}
       {!r?.convo && a.report && (
         <div class="ag-report tile fl-report">
           <span class="muted">Last report </span>
