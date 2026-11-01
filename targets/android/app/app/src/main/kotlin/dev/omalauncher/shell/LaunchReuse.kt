@@ -25,6 +25,14 @@ internal object LaunchReuse {
 
         /** No task of the app anywhere: a new window, launched. */
         object New : Decision()
+
+        /**
+         * The app's only task lives on a display that is neither the main one nor a web window's (another tool's virtual
+         * display: the ship's window-render check, scrcpy --new-display, a cast): never PowOS's to take. A new window,
+         * launched as a task of its own (MULTIPLE_TASK) - a plain NEW_TASK launch makes Android move THAT task over
+         * (11-01 ship 2a849163: the check's Calculator task 2256 left its display 98 mid-hold, which went flat black).
+         */
+        object Apart : Decision()
     }
 
     fun decide(
@@ -35,10 +43,12 @@ internal object LaunchReuse {
         windows.firstOrNull { it.pkg == pkg }?.let { return Decision.Reuse(it.id, it.task) }
         val windowDisplays = windows.map { it.display }.filter { it >= 0 }.toSet()
         val windowTasks = windows.map { it.task }.filter { it >= 0 }.toSet()
-        val t =
-            tasks.firstOrNull {
-                it.display >= 0 && it.display !in windowDisplays && it.id !in windowTasks && (it.basePkg == pkg || it.topPkg == pkg)
-            } ?: return Decision.New
-        return Decision.Adopt(t.id)
+        val its = tasks.filter { it.display >= 0 && it.display !in windowDisplays && it.id !in windowTasks && (it.basePkg == pkg || it.topPkg == pkg) }
+        // Only the main display's tasks (minimised, in a split, full screen) are the user's window to bring in.
+        its.firstOrNull { it.display == MAIN_DISPLAY }?.let { return Decision.Adopt(it.id) }
+        return if (its.isEmpty()) Decision.New else Decision.Apart
     }
+
+    /** android.view.Display.DEFAULT_DISPLAY (pure: no android.jar in the JVM test). */
+    private const val MAIN_DISPLAY = 0
 }

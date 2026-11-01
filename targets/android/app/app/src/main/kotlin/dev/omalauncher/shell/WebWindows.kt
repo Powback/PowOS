@@ -609,6 +609,9 @@ class WebWindows(
         /** A running task to move onto its display instead of a launch (ShellBridge.toWebWindow: an app made a window), or -1. */
         @Volatile var adopt = -1
 
+        /** LaunchReuse.Decision.Apart: its app's task is another tool's (its own virtual display) - launched beside it, MULTIPLE_TASK. */
+        @Volatile var apart = false
+
         /** The task's "display/mode" [follow] last acted on (once per change), null while it's back in its display. */
         @Volatile var followed: String? = null
 
@@ -869,7 +872,7 @@ class WebWindows(
         if (!openable(component, component.packageName)) return -1
         val how = launchDecision(component, task)
         if (how is LaunchReuse.Decision.Reuse) return how.window
-        return make(component, rect, (how as? LaunchReuse.Decision.Adopt)?.task ?: -1, null)
+        return make(component, rect, (how as? LaunchReuse.Decision.Adopt)?.task ?: -1, null, apart = how is LaunchReuse.Decision.Apart)
     }
 
     /**
@@ -902,6 +905,7 @@ class WebWindows(
         rect: JSONObject,
         adopt: Int,
         quick: String?,
+        apart: Boolean = false,
     ): Int {
         val pkg = component.packageName
         val parent = root() ?: return -1
@@ -915,6 +919,7 @@ class WebWindows(
         val win = Win(id, component, container, w, h, windowDpi(component.packageName))
         win.adopt = adopt
         win.quick = quick
+        win.apart = apart
         wins[id] = win
         helper.create(win) { displayId, error ->
             if (displayId < 0) {
@@ -3289,7 +3294,8 @@ class WebWindows(
             Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_LAUNCHER)
                 .setComponent(w.component)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or if (w.apart) Intent.FLAG_ACTIVITY_MULTIPLE_TASK else 0)
+        if (w.apart) WindowLog.i(TAG, "window ${w.id}: ${w.component.packageName}'s task is on another tool's display: launched as a task of its own, that one left alone")
         try {
             val opts = ActivityOptions.makeBasic().setLaunchDisplayId(w.displayId)
             context.startActivity(intent, opts.toBundle())
@@ -3297,7 +3303,7 @@ class WebWindows(
         } catch (e: Exception) {
             WindowLog.w(TAG, "ActivityOptions launch on display ${w.displayId} refused: ${e.message}; trying root am start")
             io.post {
-                val r = runCatching { andro.marchy.RootShell.run("am start --display ${w.displayId} -f 0x10000000 -n ${w.component.flattenToShortString()}") }.getOrNull()
+                val r = runCatching { andro.marchy.RootShell.run("am start --display ${w.displayId} -f ${if (w.apart) "0x18000000" else "0x10000000"} -n ${w.component.flattenToShortString()}") }.getOrNull()
                 WindowLog.i(TAG, "launched ${w.component.flattenToShortString()} on display ${w.displayId} (root am start): code ${r?.code} ${r?.output?.take(200)}")
             }
         }
