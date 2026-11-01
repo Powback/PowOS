@@ -3,7 +3,20 @@
 # the game fullscreen at the CURRENT screen size. Unity keeps the size it saved last time (Broforce: 1116x2440 from the
 # folded cover screen, stored in the Proton prefix's user.reg) and doesn't follow KWin's output when the phone is
 # unfolded/rotated (the output anland-1 follows the Android surface: one mode, resized). So each launch passes
-# `-screen-fullscreen 1 -screen-width W -screen-height H` (Unity player arguments) with W x H = the X root window now.
+# `-screen-fullscreen 0 -popupwindow -screen-width W -screen-height H` (Unity player arguments) with W x H = the
+# container's size now (see "size" below).
+#
+# Live after a rotate/fold (G2, 2026-11-02): a borderless WINDOWED Unity player, not a full-screen one. Unity's
+# full-screen modes keep the render resolution they started with (Screen.width/height) and stretch it to the window:
+# KWin 0032/0037 resize the game's window to its task on every rotate/fold/resize, Wine turns that ConfigureNotify into
+# WM_SIZE, and a full-screen Broforce kept drawing its launch size, scaled. In windowed mode the render resolution IS the
+# client area (Unity's Screen docs: "the render resolution changes when ... the user drags the window to resize it"),
+# so the same resize re-renders at the new size, inside the engine, no restart. -popupwindow = no frame; the window
+# covers Wine's monitor (the X root, never larger than the task), so winex11 still sets _NET_WM_STATE_FULLSCREEN and
+# KWin keeps the task immersive. Fixed size hints (no WS_THICKFRAME) are covered by 0037 (fixed-size steam_app_ window
+# -> full screen in its task). A windowed game also doesn't minimise itself on focus loss the way a full-screen Wine
+# window does (skill: "Minimised game").
+# POWOS_UNITY_SCREEN=fullscreen: the old `-screen-fullscreen 1` launch (render size fixed at launch, scaled after).
 #
 # Runs where Steam puts launch-option prefixes: inside the Steam Linux Runtime container, under FEX (x86). That runtime
 # has no xrandr and only `python3.13`, so the size comes from libX11 through ctypes; outside it the host's python3 does
@@ -106,8 +119,12 @@ PY
 )" 2>/dev/null)
 case $size in
   [1-9]*' '[1-9]*)
-    echo "unity-screen: fullscreen ${size% *}x${size#* }" >&2
-    exec "$@" -screen-fullscreen 1 -screen-width "${size% *}" -screen-height "${size#* }" ;;
+    if [ "${POWOS_UNITY_SCREEN:-window}" = fullscreen ]; then
+      echo "unity-screen: fullscreen ${size% *}x${size#* }" >&2
+      exec "$@" -screen-fullscreen 1 -screen-width "${size% *}" -screen-height "${size#* }"
+    fi
+    echo "unity-screen: borderless window ${size% *}x${size#* } (follows its task live)" >&2
+    exec "$@" -screen-fullscreen 0 -popupwindow -screen-width "${size% *}" -screen-height "${size#* }" ;;
 esac
 echo "unity-screen: no screen size (DISPLAY=${DISPLAY:-unset}, python=${py:-none}) - starting unchanged" >&2
 exec "$@"

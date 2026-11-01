@@ -272,7 +272,12 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   Android screen (daemon at connect, each window task's buffers) as root `_POWOS_SCREEN_SIZE` (CARDINAL[2]);
   unity-screen prefers it. The launch option runs the COPY in ~/.local/share/powos/unity-screen: re-copy after a change.
   Test off-device: Xvfb `-noreset` (else the root property dies with the setter's connection) + XChangeProperty.
-  Still open (G2): Unity keeps its launch size after a rotate/fold; the window follows (0032), the frame is scaled.
+- Live re-res (G2, 2026-11-02): unity-screen launches `-screen-fullscreen 0 -popupwindow` (borderless WINDOWED) at
+  that size, not full screen. Unity's full-screen modes keep the launch render size and stretch it when 0032/0037
+  resize the window; a windowed player's render size = its client area, so the same Wine WM_SIZE re-renders live.
+  The popup covers Wine's monitor (root <= task) -> winex11 still sets _NET_WM_STATE_FULLSCREEN. Old launch:
+  POWOS_UNITY_SCREEN=fullscreen. Test: tier1 test-unity-screen.sh (Xvfb end-to-end when Xvfb is present).
+  Unverified on device: Broforce's Unity honouring an external (WM-driven) resize of a non-resizable window.
 
 - Minimised game (Broforce 2026-10-30: WM_STATE Iconic + _NET_WM_STATE_HIDDEN = isMinimized, since KWin clears
   HIDDEN for a window merely on another desktop): a full-screen Wine/Unity game minimises ITSELF when it loses KWin's
