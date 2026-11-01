@@ -2370,6 +2370,8 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .task-icon { width: 22px; height: 22px; border-radius: 6px; flex: none; }
 .task-icon.blank { background: var(--color-surface); }
 .task-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* PP1: its app went to Android's PiP / a floating window by itself (RecentTask.pip). */
+.task-pip { flex: none; margin-left: 6px; padding: 0 6px; border-radius: 6px; font-size: 11px; border: 1px solid var(--accent-text); color: var(--accent-text); }
 .task-shot {
   display: block;
   width: 100%;

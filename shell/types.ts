@@ -317,6 +317,8 @@ export interface RecentTask {
   webwindow?: number;
   /** A web window's app made a full-screen app (its bar's button): its card offers "Back to window". */
   fullScreen?: boolean;
+  /** PP1: a web window's app that went to Android's PiP / a floating window by itself: its card says PiP. */
+  pip?: boolean;
   /**
    * Android's split screen (WM Shell's) as one card: its apps left / top first, each with its share of the screen.
    * The card's [id] is the first one's; a tap restores the split (tasks.openSplit), a swipe closes them all.
@@ -437,7 +439,7 @@ export interface HostWebWindow {
   id: number;
   key: string;
   label: string;
-  state: "floating" | "minimised" | "full";
+  state: "floating" | "minimised" | "full" | "pip";
   live?: boolean;
   task?: number;
   ownFrame?: boolean;

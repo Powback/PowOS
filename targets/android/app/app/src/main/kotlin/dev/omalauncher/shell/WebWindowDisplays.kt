@@ -59,7 +59,23 @@ object WebWindowDisplays {
     /** [WebWindows]: window [windowId] closed: none of its tasks is a full-screen web window any more. */
     fun windowGone(windowId: Int) {
         full.values.removeAll { it == windowId }
+        pips.values.removeAll { it == windowId }
     }
+
+    /** PP1: task id -> the web window whose app it is, gone to Android's PiP / a floating window by itself. */
+    private val pips = ConcurrentHashMap<Int, Int>()
+
+    /** [WebWindows]: task [taskId] (window [windowId]'s app) is in PiP now ([on]), or back in its window. */
+    fun pip(
+        taskId: Int,
+        windowId: Int,
+        on: Boolean,
+    ) {
+        if (on) pips[taskId] = windowId else pips.remove(taskId)
+    }
+
+    /** The web window whose app task [taskId] is, in PiP (its switcher card says so), or null. */
+    fun pipWindow(taskId: Int): Int? = pips[taskId]
 
     /** The web window task [taskId] came out of while it's a full-screen app, or null. */
     fun fullScreenWindow(taskId: Int): Int? = full[taskId]
@@ -86,6 +102,7 @@ object WebWindowDisplays {
         running: List<ActivityManager.RunningTaskInfo>? = null,
     ): Int? {
         full[taskId]?.let { return it }
+        pips[taskId]?.let { return it }
         if (windows.isEmpty()) return null
         @Suppress("DEPRECATION")
         val tasks = running ?: runCatching { context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())

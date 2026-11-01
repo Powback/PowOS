@@ -1060,6 +1060,7 @@ class ShellBridge(
     ): Long? {
         val ww = WebWindowDisplays.windowOf(context, id, running) ?: return null
         o.put("webwindow", ww)
+        if (WebWindowDisplays.pipWindow(id) != null) return null.also { o.put("pip", true) }
         if (WebWindowDisplays.fullScreenWindow(id) == null) return System.currentTimeMillis()
         o.put("fullScreen", true)
         return null
