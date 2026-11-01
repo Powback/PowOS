@@ -11,7 +11,8 @@
  * place: the whole title, when, its closing note, its try line, how it was verified, and "Still broken" to reopen it). A section with nothing in it isn't drawn. At the foot the shared field to ask the manager (powai.tsx's
  * send path), its reply as one bubble over the field - never a transcript - and "Open chat": the launcher's AI panel.
  * Unfolded the same component is the page's left column (powai.tsx, [beside]): the chat is its right column, so its foot
- * keeps only the mic chip - no field, reply bubble or "Open chat" of its own.
+ * has no field, reply bubble or "Open chat" of its own. No hold to talk anywhere (the user, 11-01 17:53: voice is the
+ * shared bar's mic).
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { computed, signal } from "@preact/signals";
@@ -22,7 +23,7 @@ import { board, boardSeen, checks, list, noteOf, WorkFeed, type WorkRow } from "
 import { upNext, UpNext } from "./upnext.tsx";
 import { areaStats, driverPct } from "./aiprogress.tsx";
 import { NeedStack } from "./aistack.tsx";
-import { listen, listeningFor, release, speech, type MicTarget } from "./dictation.ts";
+import type { MicTarget } from "./dictation.ts";
 import { BrokenReply, clearBroken, type Broken } from "./brokenreply.tsx";
 import { decidingOf, needIds, needsYou } from "./needsyou.tsx";
 import { aiAgent } from "./aipanes.tsx";
@@ -355,62 +356,19 @@ function ReplyBubble() {
   );
 }
 
-/** The existing chat: the launcher's AI panel, over home. */
-function openChat() {
+/** The existing chat: the launcher's AI panel, over home (folded: the ⋯ menu's "Open chat"). */
+export function openChat() {
   asked.value = null;
   page.value = 0;
   openPanel("ai");
 }
 
-/** A hold this long on the page's free space (not a card, a row or a button) talks to the manager. */
-const HOLD_MS = 450;
-const HOLD_SLOP = 10;
-const TAKES_PRESS = "button, a, textarea, input, [data-owns-gesture], .ais-card-top, .ai-reply";
-
-/** Hold anywhere to talk (as the field's mic held): the press starts listening, the release sends what was heard. */
-function useHoldToTalk(mic: MicTarget) {
-  const press = useRef<{ x: number; y: number; timer: number; held: boolean } | null>(null);
-  const cancel = () => {
-    const p = press.current;
-    press.current = null;
-    if (!p) return;
-    clearTimeout(p.timer);
-    if (p.held) release(mic);
-  };
-  return {
-    onPointerDown: (e: PointerEvent) => {
-      if ((e.target as Element).closest(TAKES_PRESS)) return;
-      const p = { x: e.clientX, y: e.clientY, timer: 0, held: false };
-      p.timer = window.setTimeout(() => ((p.held = true), void listen(true, mic)), HOLD_MS);
-      press.current = p;
-    },
-    onPointerMove: (e: PointerEvent) => {
-      const p = press.current;
-      if (p && !p.held && Math.hypot(e.clientX - p.x, e.clientY - p.y) > HOLD_SLOP) cancel();
-    },
-    onPointerUp: cancel,
-    onPointerCancel: cancel,
-  };
-}
-
-/** The foot's chip: "Hold anywhere to talk", "Listening…" while the page's mic is on. */
-function MicChip({ mic }: { mic: MicTarget }) {
-  const on = listeningFor(mic) && speech.value.listening;
-  return (
-    <span class={`ais-mic ${on ? "on" : ""}`} aria-live="polite">
-      <span class="ais-mic-dot" aria-hidden="true" />
-      {on ? speech.value.text || "Listening…" : "Hold anywhere to talk"}
-    </span>
-  );
-}
-
-/** The foot folded: the reply bubble or the mic chip, "Open chat", the field. */
-function Foot({ mic, compose }: { mic: MicTarget; compose: preact.ComponentChildren }) {
+/** The foot without a chat below the status: the reply bubble, "Open chat", the field (no hold to talk: the user, 11-01 17:53). */
+function Foot({ compose }: { compose: preact.ComponentChildren }) {
   return (
     <div class="ais-foot">
       <div class="ais-foot-row">
         <ReplyBubble />
-        <MicChip mic={mic} />
         <button type="button" class="ais-open-chat" onClick={openChat}>
           Open chat
         </button>
@@ -423,11 +381,12 @@ function Foot({ mic, compose }: { mic: MicTarget; compose: preact.ComponentChild
 /** The hero's title, short enough never to be cut: "Daily driver 50%", or "66% this month" (the month's share done). */
 const heroTitle = (r: { pct: number; label: string }) => (/this month/i.test(r.label) ? `${r.pct}% this month` : `${r.label} ${r.pct}%`);
 
-/** The hero: the daily driver's ring and two lines - its name and share, then what's going on. */
-function Hero({ needs, working, more }: { needs: number; working: number; more: preact.ComponentChildren }) {
+/** The hero: the daily driver's ring and two lines - its name and share, then what's going on. [onTap]: folded, the strip's tap. */
+function Hero({ needs, working, more, onTap }: { needs: number; working: number; more: preact.ComponentChildren; onTap?: () => void }) {
   const ring = driverPct(areaStats(board.value, Date.now(), needIds(needsYou())));
+  const tap = onTap && ((e: MouseEvent) => !(e.target as Element).closest(".ai-more") && onTap());
   return (
-    <header class="ais-top">
+    <header class={`ais-top ${onTap ? "ais-strip" : ""}`} onClick={tap}>
       {ring && <HeroRing pct={ring.pct} label={ring.label} />}
       <span class="ais-status">
         <span class="ais-title">{ring ? heroTitle(ring) : "PowOS AI"}</span>
@@ -440,13 +399,18 @@ function Hero({ needs, working, more }: { needs: number; working: number; more: 
 
 /**
  * The status page: hero, sections, foot. [more]: the header's ⋯ (powai.tsx owns its menu); [compose]: its field;
- * [mic]: the field's mic target (a hold anywhere on the page talks into it); [beside]: the chat is beside it (unfolded).
+ * [mic]: the field's mic target (kept for the shared bar's seam, nothing here listens); [beside]: the chat is beside it (unfolded).
  * Off screen ([shown] false) it is at rest.
  */
-export function AiStatus(props: { shown: boolean; more: preact.ComponentChildren; compose?: preact.ComponentChildren; mic: MicTarget; beside?: boolean }) {
-  const { shown, more, mic } = props;
+export function AiStatus(props: { shown: boolean; more: preact.ComponentChildren; compose?: preact.ComponentChildren; mic: MicTarget; beside?: boolean; chat?: preact.ComponentChildren }) {
   useAgents();
-  const hold = useHoldToTalk(mic);
+  if (props.chat) return <Stacked {...props} chat={props.chat} />;
+  return <StatusPage {...props} />;
+}
+
+/** The status page alone (unfolded's left column; folded without a chat below it): hero, sections, foot. */
+function StatusPage(props: { shown: boolean; more: preact.ComponentChildren; compose?: preact.ComponentChildren; mic: MicTarget; beside?: boolean }) {
+  const { shown, more } = props;
   const needs = needsYou();
   const f = fleet();
   const done = recentlyDone();
@@ -456,7 +420,7 @@ export function AiStatus(props: { shown: boolean; more: preact.ComponentChildren
     <>
       {shown && <WorkFeed />}
       <Hero needs={needs.length} working={f.working.length} more={more} />
-      <div class="ai-scroll ais" {...hold}>
+      <div class="ai-scroll ais">
         <NeedStack needs={needs} />
         {props.beside && <NeedsAttention stuck={f.attention} />}
         <WorkingNow working={f.working} beside={!!props.beside} />
@@ -464,13 +428,134 @@ export function AiStatus(props: { shown: boolean; more: preact.ComponentChildren
         <RecentlyDone rows={done} />
         {quiet && <div class="ais-empty">Nothing waits on you and no agent is working right now.</div>}
       </div>
-      {props.beside ? (
-        <div class="ais-foot">
-          <MicChip mic={mic} />
+      {!props.beside && <Foot compose={props.compose} />}
+    </>
+  );
+}
+
+/** Folded (the manager's design, 11-01): Working now / Up next / Recently done folded into one row, open at a tap. */
+export const foldOpen = signal(false);
+/** Folded: the status shrunk to the strip (the chat scrolled up), until a pull down at the chat's top or a tap on the strip. */
+export const foldShrunk = signal(false);
+
+/** The chat scrolled this far from the newest shrinks the status to the strip; a pull this far at its top brings it back. */
+const SHRINK_PX = 60;
+const PULL_PX = 48;
+/** While the status springs back (and the chat's scroll position settles under it), no scroll shrinks it again. */
+const SETTLE_MS = 700;
+let calmUntil = 0;
+const unshrink = () => ((calmUntil = Date.now() + SETTLE_MS), (foldShrunk.value = false));
+
+/** The chat's scroller in [wrap]; at its top (the oldest end of the column-reverse list). */
+const chatIn = (wrap: HTMLElement | null) => wrap?.querySelector<HTMLElement>(".ai-chat") ?? null;
+const atTop = (el: HTMLElement) => el.scrollHeight - el.clientHeight - Math.abs(el.scrollTop) < 2;
+
+/** The chat [at] px from its newest shrinks the status: past SHRINK_PX, not already, not while it springs back. */
+const shrinks = (at: number) => at > SHRINK_PX && !foldShrunk.value && Date.now() > calmUntil;
+
+/** The collapsing header: scrolling the chat up shrinks the status; a pull down (touch or wheel) at its top re-expands. */
+function useCollapse(wrap: preact.RefObject<HTMLDivElement>) {
+  useEffect(() => {
+    const w = wrap.current;
+    if (!w) return;
+    let from: number | null = null;
+    // Only a scroll further from the newest shrinks it (a layout change's own scroll event, e.g. the status coming back, doesn't).
+    // A scroll that comes with a change of the chat's height is the layout's (the status folding), never the user's.
+    let last = 0;
+    let tall = 0;
+    const onScroll = () => {
+      const el = chatIn(w);
+      if (!el) return;
+      const at = Math.abs(el.scrollTop);
+      const same = !tall || el.clientHeight === tall;
+      tall = el.clientHeight;
+      if (same && at > last + 1 && shrinks(at)) foldShrunk.value = true;
+      last = at;
+    };
+    const onStart = (e: TouchEvent) => {
+      const el = chatIn(w);
+      from = el && atTop(el) ? e.touches[0].clientY : null;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (from != null && e.touches[0].clientY - from > PULL_PX) (unshrink(), (from = null));
+    };
+    const onWheel = (e: WheelEvent) => {
+      const el = chatIn(w);
+      if (el && e.deltaY < 0 && atTop(el)) unshrink();
+    };
+    w.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    w.addEventListener("touchstart", onStart, { passive: true });
+    w.addEventListener("touchmove", onMove, { passive: true });
+    w.addEventListener("wheel", onWheel, { passive: true });
+    return () => {
+      w.removeEventListener("scroll", onScroll, { capture: true });
+      w.removeEventListener("touchstart", onStart);
+      w.removeEventListener("touchmove", onMove);
+      w.removeEventListener("wheel", onWheel);
+    };
+  }, []);
+}
+
+/** Done today (local day), of Recently done's rows. */
+const doneToday = (rows: WorkRow[]) => rows.filter((w) => new Date(Number(w.done || w.updated)).toDateString() === new Date().toDateString()).length;
+
+/** The one summary row: "3 working · 12 done today ▾", a tiny dot per working agent; a tap opens the sections in place. */
+function FoldSummary({ working, done, next }: { working: number; done: WorkRow[]; next: number }) {
+  const open = foldOpen.value;
+  const words = [`${working} working`, `${doneToday(done)} done today`, next ? `${next} up next` : ""].filter(Boolean).join(" · ");
+  return (
+    <button type="button" class="ais-sum" aria-expanded={open} onClick={() => (foldOpen.value = !open)}>
+      <span class="ais-sum-dots" aria-hidden="true">
+        {Array.from({ length: Math.min(working, 8) }, (_, i) => (
+          <span key={i} class="ais-sum-dot" />
+        ))}
+      </span>
+      <span class="ais-sum-text">{words}</span>
+      <span class="ais-chev" aria-hidden="true" />
+    </button>
+  );
+}
+
+/** The strip's tap: shrunk, the status back; else the summary opened or closed. */
+const stripTap = () => (foldShrunk.value ? unshrink() : (foldOpen.value = !foldOpen.value));
+
+/**
+ * The folded page (the manager's design, 11-01; the user, 17:05: "collapse working now and recently done and then show
+ * the chat underneath"): the unfolded columns stacked under a collapsing header - the strip (ring + one line), Needs you
+ * when there is any, one summary row over Working now / Up next / Recently done, then the live chat filling the rest
+ * and [compose] (the tabs and the field) at the foot.
+ */
+function Stacked(props: { shown: boolean; more: preact.ComponentChildren; compose?: preact.ComponentChildren; mic: MicTarget; chat: preact.ComponentChildren }) {
+  const { shown, more } = props;
+  const wrap = useRef<HTMLDivElement>(null);
+  useCollapse(wrap);
+  const needs = needsYou();
+  const f = fleet();
+  const done = recentlyDone();
+  const next = upNext();
+  const open = foldOpen.value;
+  const any = f.working.length + done.length + next.length > 0;
+  return (
+    <>
+      {shown && <WorkFeed />}
+      <Hero needs={needs.length} working={f.working.length} more={more} onTap={stripTap} />
+      <div class={`ais-fold ${foldShrunk.value ? "shrunk" : ""}`} inert={foldShrunk.value}>
+        <div class="ai-scroll ais">
+          <NeedStack needs={needs} />
+          {any && <FoldSummary working={f.working.length} done={done} next={next.length} />}
+          <div class={`ais-sum-body ${open ? "open" : ""}`} inert={!open}>
+            <div class="ais-sum-in">
+              <WorkingNow working={f.working} beside={false} />
+              <UpNext rows={next} busy={busyPage(needs.length, f.working.length)} />
+              <RecentlyDone rows={done} />
+            </div>
+          </div>
         </div>
-      ) : (
-        <Foot mic={mic} compose={props.compose} />
-      )}
+      </div>
+      <div ref={wrap} class="ais-chat-wrap">
+        {props.chat}
+      </div>
+      {props.compose}
     </>
   );
 }

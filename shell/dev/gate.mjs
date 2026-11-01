@@ -2573,7 +2573,11 @@ async function aiStatusSetup([fleetSetup]) {
   S.page.value = -1;
   const run = (body) => new (Object.getPrototypeOf(async function () {}).constructor)("U", "E", "sleep", body)(G.mod, window.__mockEvents, (ms) => new Promise((r) => setTimeout(r, ms)));
   await run(fleetSetup);
-  return !!(await G.until(() => document.querySelectorAll(".ai-screen.status .ais-work").length >= 3, 4000));
+  // Folded the sections sit under one summary row (ai-folded checks it closed): opened here for their own checks.
+  const A = await G.mod("./ui/aistatus.tsx");
+  A.foldShrunk.value = false;
+  A.foldOpen.value = true;
+  return !!(await G.until(() => document.querySelectorAll(".ai-screen.status .ais-sum-body.open .ais-work").length >= 3, 4000));
 }
 
 /** In the page: the sections in order, the transcript elements on it, the foot's field and link. */
@@ -2581,8 +2585,10 @@ function aiStatusShape() {
   const scr = document.querySelector(".ai-screen.status");
   if (!scr) return { none: true };
   const secs = [...scr.querySelectorAll(".ais-sec")].map((e) => `${e.dataset.sec}:${e.querySelector(".ais-h")?.textContent.replace(/\d+$/, "").trim()}`);
-  const chat = [".ai-chat", ".ai-chat-in", ".msg", ".ai-strip"].filter((q) => scr.querySelector(q));
-  const foot = !!scr.querySelector(".ais-foot .ai-compose textarea") && /Open chat/.test(scr.querySelector(".ais-foot .ais-open-chat")?.textContent ?? "");
+  // The chat is under the status now (the manager's design, 11-01): never inside it, never the old strip.
+  const chat = [".ais .ai-chat", ".ais .msg", ".ai-strip"].filter((q) => scr.querySelector(q));
+  // No field of its own: home's shared bar mounts under the tabs (the user, 11-01 17:52), its room kept (.ai-bar-slot).
+  const foot = !!scr.querySelector(":scope > .ai-segs + .ai-bar-slot") && !scr.querySelector(".ai-compose");
   return { secs, chat, foot };
 }
 
@@ -2611,7 +2617,7 @@ function aiStatusLook(tone) {
   const over = (under, e) => layers(e).reduce((u, c) => mix(c, c[3] ?? 1, u), under);
   const wall = tone === "light" ? [235, 232, 226] : [16, 20, 24];
   const wash = over(wall, scr.querySelector(".ai-glass"));
-  const backOf = (e) => [...scr.querySelectorAll(".ais-sec, .ais-empty, .ais-card-top")].filter((c) => c.contains(e)).reduce(over, wash);
+  const backOf = (e) => [...scr.querySelectorAll(".ais-sec, .ais-empty, .ais-card-top, .ais-sum")].filter((c) => c.contains(e)).reduce(over, wash);
   const opacity = (e) => { let k = 1; for (let x = e; x && x !== scr; x = x.parentElement) k *= parseFloat(getComputedStyle(x).opacity); return k; };
   const low = texts.filter((e) => e.closest(".ais, .ais-top") && !e.closest(".ais-n, .aip-chip, .try-acts")).map((e) => {
     const fg = rgb(getComputedStyle(e).color);
@@ -2779,7 +2785,7 @@ function aiStackLayout() {
   };
   const scr = document.querySelector(".ai-screen.status");
   const fails = [];
-  const cards = [...scr.querySelectorAll(".ais > .ais-sec:not(.ais-stack-sec), .ais > .ais-empty, .ais-stack > .ais-card-top")];
+  const cards = [...scr.querySelectorAll(":is(.ais, .ais-sum-in) > .ais-sec:not(.ais-stack-sec), .ais > .ais-empty, .ais > .ais-sum, .ais-stack > .ais-card-top")];
   for (const c of cards) {
     const b = c.getBoundingClientRect();
     const name = c.className.split(" ")[0];
@@ -3090,6 +3096,176 @@ function aiStatusHeadWords(head) {
   return fails;
 }
 
+/**
+ * The folded page stacked (the manager's design, 11-01; the user, 17:05: "collapse working now and recently done and
+ * then show the chat underneath"): the strip (ring + one line) on top; Needs you's stack under it only when there is
+ * any (none: no box); one summary row, closed at first, a tap opening Working now and Recently done in place; the chat
+ * filling the rest, newest at its foot; the bottom tabs and the field under it; the chat scrolled up shrinks the status
+ * to the strip, a tap on the strip brings it back; ⋯ still reaches Agents & terminals and "Open chat".
+ * Renders: /cache/ai-folded-v3-<name>.png.
+ */
+async function aiFoldSet([n, open]) {
+  const G = window.__gw;
+  const [S, A] = await Promise.all([G.mod("./state.ts"), G.mod("./ui/aistatus.tsx")]);
+  const items = [];
+  for (let i = 0; i < 30; i++) items.push({ kind: "user", text: `question ${i}` }, { kind: "assistant", text: `Answer ${i}: the agents are on it, the dock fix lands next.` });
+  S.chat.value = { busy: false, items };
+  A.foldShrunk.value = false;
+  A.foldOpen.value = open;
+  await G.until(() => (document.querySelector(".ai-screen.status .ais-stack")?.dataset.count ?? "0") === String(n), 2000);
+  await new Promise((r) => setTimeout(r, 600));
+  return true;
+}
+
+/** In the page: the stacked parts' boxes (a missing one: all 0) and facts. */
+function aiFoldFacts() {
+  const scr = document.querySelector(".ai-screen.status.stacked");
+  if (!scr) return null;
+  const rect = (e) => e?.getBoundingClientRect() ?? { top: 0, bottom: 0, height: 0 };
+  const box = (q) => { const r = rect(scr.querySelector(q)); return { top: Math.round(r.top), bottom: Math.round(r.bottom), h: Math.round(r.height) }; };
+  const chat = scr.querySelector(".ais-chat-wrap > .ai-chat");
+  const last = rect([...(chat?.querySelector(".ai-chat-in")?.children ?? [])].filter((e) => !e.matches(".ai-new-pill")).at(-1));
+  // A section counts as shown only where the summary's body doesn't clip it away.
+  const body = rect(scr.querySelector(".ais-sum-body"));
+  const shown = (q) => { const r = rect(scr.querySelector(q)); return Math.min(r.bottom, body.bottom) - Math.max(r.top, body.top) > 4; };
+  return {
+    strip: box(":scope > .ais-top"), ring: !!scr.querySelector(":scope > .ais-top .ais-ring"), line: scr.querySelector(":scope > .ais-top .ais-line")?.textContent.trim() ?? "",
+    stack: box(".ais-stack"), sum: box(".ais-sum"), sumOpen: scr.querySelector(".ais-sum")?.getAttribute("aria-expanded") === "true",
+    working: shown("[data-sec=working]"), done: shown("[data-sec=done]"), fold: box(":scope > .ais-fold"),
+    chat: box(".ais-chat-wrap > .ai-chat"), atNewest: Math.abs(chat?.scrollTop ?? 99) < 2, lastGap: Math.round(rect(chat).bottom - last.bottom),
+    segs: box(":scope > .ai-segs"), slot: box(":scope > .ai-bar-slot"), own: !!scr.querySelector(".ai-compose"), height: innerHeight,
+  };
+}
+
+/** The layout every state shares: strip on top with ring and line, chat under the status, tabs and field at the foot. */
+function aiFoldLayoutFails(f, name) {
+  const below = (a, b) => a.top >= b.bottom - 2;
+  return failsOf([
+    [f.ring && /working|need|quiet/.test(f.line), `${name}: no strip with the ring and its one line ("${f.line}")`],
+    [f.strip.h > 0 && f.strip.h <= 72, `${name}: the strip is ${f.strip.h} px tall, not ~56`],
+    [f.chat.h > 200, `${name}: the chat is ${f.chat.h} px tall, it should fill the rest`],
+    [f.atNewest && f.lastGap >= 0 && f.lastGap < 40, `${name}: the newest isn't at the chat's foot (gap ${f.lastGap}, at newest ${f.atNewest})`],
+    [below(f.segs, f.chat) && below(f.slot, f.segs) && f.slot.h >= 40, `${name}: the tabs and the shared bar's room (${f.slot.h} px) aren't under the chat`],
+    [!f.own && f.height - f.slot.bottom < 4, `${name}: the page has a field of its own (${f.own}) or the bar's room ends ${f.height - f.slot.bottom} px above the screen's foot`],
+  ]);
+}
+
+async function aiFoldShot(page, name) {
+  await page.screenshot({ path: `/cache/ai-folded-v3-${name}.png` });
+}
+
+/** [n] needs on the board, the summary [open] or not; the facts. */
+async function aiFoldAt(page, n, open) {
+  await page.evaluate(aiStackSetup, n);
+  await page.evaluate(aiFoldSet, [n, open]);
+  return page.evaluate(aiFoldFacts);
+}
+
+/** No needs: no stack box, the summary row closed with nothing under it shown. */
+function aiFoldNoneFails(f) {
+  return failsOf([
+    [f.stack.h === 0, `0 needs: a stack box ${f.stack.h} px tall is drawn`],
+    [f.sum.h > 0 && !f.sumOpen && !f.working && !f.done, `0 needs: the summary row isn't there closed (open ${f.sumOpen}, working ${f.working}, done ${f.done})`],
+  ]);
+}
+
+/** Three needs: the stack right under the strip, the summary row under it. */
+function aiFoldThreeFails(f) {
+  return failsOf([
+    [f.stack.h > 0 && f.stack.top >= f.strip.bottom - 1 && f.stack.top - f.strip.bottom < 40, `3 needs: the stack isn't right under the strip (${JSON.stringify(f.stack)} / strip ${JSON.stringify(f.strip)})`],
+    [f.sum.top >= f.stack.bottom - 1, "3 needs: the summary row is over the stack"],
+  ]);
+}
+
+/** 0 and 3 needs, closed then opened. */
+async function aiFoldStates(page) {
+  let f = await aiFoldAt(page, 0, false);
+  if (!f) return ["folded: the page isn't stacked (.ai-screen.status.stacked)"];
+  const fails = [...aiFoldLayoutFails(f, "0 needs"), ...aiFoldNoneFails(f)];
+  await aiFoldShot(page, "0-collapsed");
+  f = await aiFoldAt(page, 3, false);
+  fails.push(...aiFoldLayoutFails(f, "3 needs"), ...aiFoldThreeFails(f));
+  await aiFoldShot(page, "3-collapsed");
+  await page.evaluate(() => document.querySelector(".ai-screen.status .ais-sum")?.click());
+  await new Promise((r) => setTimeout(r, 700));
+  f = await page.evaluate(aiFoldFacts);
+  fails.push(...failsOf([
+    [f.sumOpen && f.working && f.done, `a tap on the summary row didn't open Working now and Recently done in place (open ${f.sumOpen}, working ${f.working}, done ${f.done})`],
+    [f.chat.h >= 120, `opened, the chat is only ${f.chat.h} px tall`],
+  ]));
+  await aiFoldShot(page, "3-expanded");
+  await aiFoldAt(page, 0, true);
+  await aiFoldShot(page, "0-expanded");
+  return fails;
+}
+
+/** In the page: the chat scrolled up from the newest. */
+async function aiFoldScroll() {
+  const chat = document.querySelector(".ai-screen.status .ais-chat-wrap > .ai-chat");
+  chat.scrollTop = -400;
+  chat.dispatchEvent(new Event("scroll"));
+  await new Promise((r) => setTimeout(r, 700));
+  return true;
+}
+
+/** Scrolled up: the status shrinks to the strip, the chat reaching up to it; the strip's tap brings it back. */
+async function aiFoldCollapse(page) {
+  const before = await aiFoldAt(page, 3, false);
+  await page.evaluate(aiFoldScroll);
+  const f = await page.evaluate(aiFoldFacts);
+  await aiFoldShot(page, "scrolled");
+  await page.evaluate(() => document.querySelector(".ai-screen.status > .ais-top .ais-status")?.click());
+  await new Promise((r) => setTimeout(r, 900));
+  const back = await page.evaluate(aiFoldFacts);
+  return failsOf([
+    [f.fold.h <= 2, `scrolled up, the status under the strip is still ${f.fold.h} px tall`],
+    [f.chat.top - f.strip.bottom < 24, `scrolled up, the chat starts ${f.chat.top - f.strip.bottom} px under the strip`],
+    [f.chat.h > before.chat.h, "scrolled up, the chat didn't grow"],
+    [back.fold.h > 40, `a tap on the strip didn't bring the status back (${back.fold.h} px)`],
+  ]);
+}
+
+/** In the page: ⋯ has "Open chat"; ⋯ → Agents & terminals opens it over the tabs; the Chat tab comes back. */
+async function aiFoldMenu() {
+  const G = window.__gw;
+  const fails = [];
+  const items = async () => {
+    document.querySelector(".ai-screen.status .ai-more")?.click();
+    await G.until(() => document.querySelector(".ai-screen .ai-menu-item"), 2000);
+    return [...document.querySelectorAll(".ai-screen .ai-menu-item")];
+  };
+  let list = await items();
+  if (!list.some((b) => b.textContent.trim() === "Open chat")) fails.push(`⋯ has no "Open chat" (${list.map((b) => b.textContent.trim()).join(", ")})`);
+  const terms = list.find((b) => b.textContent.trim() === "Agents & terminals");
+  if (!terms) return [...fails, "⋯ has no Agents & terminals"];
+  terms.click();
+  const seg = (name) => [...document.querySelectorAll(".ai-screen .ai-seg")].find((b) => b.textContent.trim().startsWith(name));
+  if (!(await G.until(() => document.querySelector(".ai-screen.stacked .ai-sub") && seg("Agents")?.classList.contains("on"), 2000))) fails.push("⋯ → Agents & terminals didn't open over the tabs");
+  seg("Chat")?.click();
+  if (!(await G.until(() => document.querySelector(".ai-screen.status.stacked .ais-chat-wrap"), 2000))) fails.push("the Chat tab didn't come back to the stacked page");
+  return fails;
+}
+
+/** In the page: no hold to talk (the user, 11-01 17:53) - no chip, and a long press on the chat's free space starts nothing. */
+async function aiFoldNoHold() {
+  const D = await window.__gw.mod("./ui/dictation.ts");
+  const fails = document.querySelector(".ai-screen .ais-mic") ? ["a \"Hold anywhere to talk\" chip is still drawn"] : [];
+  const wrap = document.querySelector(".ai-screen.status .ais-chat-wrap .ai-chat-in");
+  const r = wrap.getBoundingClientRect();
+  const at = { bubbles: true, clientX: r.left + 4, clientY: r.top + 4, pointerId: 7 };
+  wrap.dispatchEvent(new PointerEvent("pointerdown", at));
+  await new Promise((res) => setTimeout(res, 800));
+  if (D.speech.value.listening) fails.push("a long press on the chat's free space started listening");
+  wrap.dispatchEvent(new PointerEvent("pointerup", at));
+  return fails;
+}
+
+async function aiFoldedCheck(page) {
+  if (!(await page.evaluate(aiStatusSetup, [FLEET_SETUP]))) return ["folded: no Working now rows for the mock fleet"];
+  const fails = [...(await aiFoldStates(page)), ...(await aiFoldCollapse(page)), ...(await page.evaluate(aiFoldMenu)), ...(await page.evaluate(aiFoldNoHold))];
+  return fails.map((f) => `ai-folded: ${f}`);
+}
+
 async function aiStatusCheck(page) {
   if (!(await page.evaluate(aiStatusSetup, [FLEET_SETUP]))) return ["folded: the status page shows no Working now rows for the mock fleet"];
   const fails = [];
@@ -3097,7 +3273,7 @@ async function aiStatusCheck(page) {
   if (shape.none) return ["folded: the AI page is not the status page (.ai-screen.status)"];
   if (shape.chat.length) fails.push(`folded: the status page has chat transcript elements (${shape.chat.join(", ")})`);
   if (shape.secs.join(" | ") !== AIS_WANT.join(" | ")) fails.push(`folded: the sections are [${shape.secs.join(" | ")}], not [${AIS_WANT.join(" | ")}]`);
-  if (!shape.foot) fails.push("folded: no field to ask and \"Open chat\" at the status page's foot");
+  if (!shape.foot) fails.push("folded: no bottom tabs over the shared bar's room at the page's foot (or a field of its own)");
   for (const [tone, fill] of [["light", "#ebe8e2"], ["dark", "#101418"]]) {
     const got = await page.evaluate(aiStatusTone, fill);
     if (got !== tone) fails.push(`folded: the wallpaper's tone is ${got}, not ${tone}`);
@@ -3118,7 +3294,7 @@ async function aiStatusCheck(page) {
 function aiStatusParts(q) {
   const col = document.querySelector(q);
   if (!col) return null;
-  return { hero: !!col.querySelector(":scope > .ais-top .ais-title"), secs: [...col.querySelectorAll(":scope > .ai-scroll.ais > .ais-sec")].map((e) => e.dataset.sec), stack: !!col.querySelector(".ais-stack") };
+  return { hero: !!col.querySelector(":scope > .ais-top .ais-title"), secs: [...col.querySelectorAll(":is(:scope > .ai-scroll.ais, :scope > .ais-fold > .ai-scroll.ais, .ais-sum-in) > .ais-sec")].map((e) => e.dataset.sec), stack: !!col.querySelector(".ais-stack") };
 }
 
 /** In the page: each segment tapped - what the right column shows then, and the left column still the status page. */
@@ -8712,6 +8888,9 @@ try {
   // The folded AI page is a status page, not a chat (the user, 2026-10-31: "I don't wanna see the chat").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-status", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiStatusCheck(r.page))));
+  // Folded stacked: the strip, Needs you, one summary row, the chat filling the rest, the tabs (the manager's design, 11-01).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-folded", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiFoldedCheck(r.page))));
   // The terminals from the AI page in at most 2 taps, both modes (the user, 11-01 16:57: "There's no terminal option anymore").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-terms", { width: 821, height: 883 }).then((r) => whenReady(r, () => aiTermsCheck(r.page))));

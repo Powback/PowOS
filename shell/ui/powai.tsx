@@ -28,7 +28,7 @@ import { WorkFeed } from "./aiboard.tsx";
 import { agent, sessions as agentSessions } from "../agents.ts";
 import { untried } from "./trycard.tsx";
 import { AiSegs, FleetPane, useAgentsInPane } from "./aipanes.tsx";
-import { AiStatus, noteAsked, OtherProjectsItem } from "./aistatus.tsx";
+import { AiStatus, noteAsked, openChat, OtherProjectsItem } from "./aistatus.tsx";
 
 // The board's state, for what reads it from here (perfrec, the gate, the renders): it lives in aiboard.tsx now.
 export { board, boardSeen, checks, type WorkRow } from "./aiboard.tsx";
@@ -465,8 +465,21 @@ function AiPanes({ shown }: { shown: boolean }) {
   );
 }
 
-/** The folded page's own screen shows the status page (not a holder without panes, not a menu screen). */
-const isStatus = (panes: boolean, wide: boolean) => panes && !wide && aiScreen.value === "chat";
+/**
+ * The folded page (the manager's design, 11-01): on Chat the status stacked over the live chat (StatusColumn), on the
+ * bottom tabs' other screens that screen over the same tabs (RightBody, as unfolded's right column); a screen no tab
+ * names (Friction) the one column with back.
+ */
+function Folded({ shown }: { shown: boolean }) {
+  const s = aiScreen.value;
+  useAgentsInPane(shown && s === "fleet");
+  if (s === "chat") return <StatusColumn shown={shown} />;
+  if (SEGMENTED.has(s)) return <RightBody s={s} shown={shown} />;
+  return <AiColumn shown={shown} wide={false} pill />;
+}
+
+/** The folded page's classes: .status on Chat (the status page), .stacked wherever the bottom tabs lead. */
+const foldedClass = (s: AiScreen) => `${s === "chat" ? "status" : ""} ${SEGMENTED.has(s) ? "stacked" : ""}`;
 
 export function AiView({ shown, cls, pill = true, panes = false }: { shown: boolean; cls: string; pill?: boolean; panes?: boolean }) {
   const [ref, wide, rail] = useWide();
@@ -476,20 +489,26 @@ export function AiView({ shown, cls, pill = true, panes = false }: { shown: bool
         <AiPanes shown={shown} />
       </div>
     );
-  // The page folded: one pane of the backdrop's glass under its header and the status page (shell.css .ai-glass).
-  const status = isStatus(panes, wide);
+  // The page folded: one pane of the backdrop's glass under the stacked status, the chat and the tabs (shell.css .ai-glass).
+  if (panes)
+    return (
+      <div ref={ref} class={`${aiViewClass(cls, false, false)} ${foldedClass(aiScreen.value)}`}>
+        <div class="ai-glass tile" aria-hidden="true" />
+        <Folded shown={shown} />
+      </div>
+    );
   return (
-    <div ref={ref} class={`${aiViewClass(cls, wide, wide && aiScreen.value === "progress")} ${status ? "status" : ""}`}>
-      {panes && <div class="ai-glass tile" aria-hidden="true" />}
-      {status ? <StatusColumn shown={shown} /> : <AiColumn shown={shown} wide={wide} pill={pill} />}
+    <div ref={ref} class={aiViewClass(cls, wide, wide && aiScreen.value === "progress")}>
+      <AiColumn shown={shown} wide={wide} pill={pill} />
     </div>
   );
 }
 
 /**
- * The AI page folded: the status page (aistatus.tsx; the user, 2026-10-31: "I don't wanna see the chat") - its header's
- * ⋯ opens the same screens (Progress, Agents & terminals, Devices, Friction), the field asks the manager. [beside]:
- * unfolded, the page's left column (the screens open in the right one, the chat's field is the ask).
+ * The AI page folded: the status page (aistatus.tsx) stacked over the live chat, the bottom tabs and the field under
+ * it (the manager's design, 11-01) - its header's ⋯ opens the same screens (Progress, Agents & terminals, Devices,
+ * Friction) and "Open chat" (the launcher's AI panel). [beside]: unfolded, the page's left column (the screens open in
+ * the right one, the chat's field is the ask).
  */
 function StatusColumn({ shown, beside = false }: { shown: boolean; beside?: boolean }) {
   const [menu, setMenu] = useState(false);
@@ -500,10 +519,33 @@ function StatusColumn({ shown, beside = false }: { shown: boolean; beside?: bool
   );
   return (
     <>
-      <AiStatus shown={shown} more={more} compose={beside ? null : <AiCompose />} mic={pageMic} beside={beside} />
+      <AiStatus shown={shown} more={more} compose={beside ? null : <FoldedFoot shown={shown} />} mic={pageMic} beside={beside} chat={beside ? null : <AiBody sub={null} shown={shown} />} />
       {menu && <div class="ai-menu-scrim" onClick={() => setMenu(false)} />}
-      {menu && <Menu close={() => setMenu(false)}>{beside && <OtherProjectsItem close={() => setMenu(false)} />}</Menu>}
+      {menu && <Menu close={() => setMenu(false)}>{beside ? <OtherProjectsItem close={() => setMenu(false)} /> : <OpenChatItem close={() => setMenu(false)} />}</Menu>}
     </>
+  );
+}
+
+/**
+ * The folded page's foot: the same bottom tabs as unfolded (Chat the default), then the seam where home's one shared bar
+ * mounts (the user, 11-01 17:52: "The chat here shouldn't have its own search bar: reuse the existing one from home, it
+ * just acts differently on this page") - no field of the page's own; .ai-bar-slot only keeps the bar's room.
+ */
+function FoldedFoot({ shown }: { shown: boolean }) {
+  return (
+    <>
+      <AiSegs shown={shown} />
+      <div class="ai-bar-slot" data-bar-slot="ai" aria-hidden="true" />
+    </>
+  );
+}
+
+/** Folded, the ⋯ menu's "Open chat": the launcher's AI panel over home (the status page's old foot link). */
+function OpenChatItem({ close }: { close: () => void }) {
+  return (
+    <button type="button" role="menuitem" class="ai-menu-item" onClick={() => (close(), openChat())}>
+      Open chat
+    </button>
   );
 }
 

@@ -3825,7 +3825,7 @@ html:root .ai-screen.status > .ai-glass.tile { --glass-blur-native: var(--backdr
 .ai-screen.status > .ais-foot { margin-inline: calc(var(--ais-side) - var(--edge)); }
 .ai-screen.status { --ai-head: calc(var(--ai-head-top) + 56px + 10px); }
 /* Every section on the shared glass card (the backdrop's tint and blur): no text floating on the wash. */
-html:root :is(.ai-screen.status, .ai-left) .ais > :is(.ais-sec:not(.ais-stack-sec), .ais-empty) {
+html:root :is(.ai-screen.status, .ai-left) :is(.ais, .ais-sum-in) > :is(.ais-sec:not(.ais-stack-sec), .ais-empty) {
   --glass-blur-native: var(--backdrop-blur-native);
   padding: 12px 12px 8px; border-radius: var(--radius); background: var(--backdrop-tint);
 }
@@ -3872,6 +3872,37 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .ai-screen.status:not(.shown) * { animation: none !important; transition: none !important; }
 /* At rest on screen too: a working agent's dot is still (its bar and step move when it does). */
 :is(.ai-screen.status, .ai-left) .aip-dot.working { animation-iteration-count: 3; }
+/*
+ * The folded page stacked (the manager's design, 11-01; powai.tsx Folded, aistatus.tsx Stacked): the strip (ring + one
+ * line), Needs you when there is any, one summary row over Working now / Up next / Recently done, the live chat filling
+ * the rest, the bottom tabs and the field. Scrolling the chat up folds everything under the strip away (.shrunk); both
+ * folds are a grid row 0fr <-> 1fr on one easing, so nothing jumps.
+ */
+.ai-screen.stacked { gap: 8px; }
+.ai-screen.stacked > .ai-scroll { position: relative; inset: auto; flex: 1; min-height: 0; padding-top: 0; padding-bottom: 0; scroll-padding-block: 0; --ai-fade-at: 0px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 14px, black calc(100% - var(--ai-fade, 0px)), transparent); mask-image: linear-gradient(to bottom, transparent, black 14px, black calc(100% - var(--ai-fade, 0px)), transparent); }
+.ai-screen.stacked > .ai-segs { margin-top: auto; }
+/* Home's shared bar sits under the tabs (its AI-page role is its own task): its room kept, on every tab. */
+.ai-screen.stacked > .ai-bar-slot { flex: none; height: calc(var(--pill-height) + var(--ai-foot)); }
+.ai-screen.stacked > .ai-segs:last-child { margin-bottom: calc(var(--pill-height) + var(--ai-foot) + 8px); }
+.ai-screen.stacked > .ag-scroll { flex: 1; min-height: 0; }
+.ai-screen.stacked > .ais-top { flex: none; cursor: pointer; }
+.ai-screen.stacked > .ais-fold { --fold-ease: cubic-bezier(0.22, 0.9, 0.26, 1); flex: none; display: grid; grid-template-rows: 1fr; width: auto; max-width: none; margin-inline: calc(-1 * var(--edge)); transition: grid-template-rows 420ms var(--fold-ease), opacity 300ms var(--fold-ease); }
+.ai-screen.stacked > .ais-fold.shrunk { grid-template-rows: 0fr; opacity: 0; }
+.ais-fold > .ai-scroll.ais { min-height: 0; max-height: 56dvh; display: flex; flex-direction: column; gap: 8px; padding: 0 var(--ais-side) 2px; }
+.ais-fold.shrunk > .ai-scroll.ais { overflow: hidden; }
+.ais-sum { flex: none; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 14px; border: 0; border-radius: var(--radius); background: var(--backdrop-tint); font: inherit; font-size: var(--text-small); font-weight: 600; color: var(--color-foreground); text-align: start; }
+.ais-sum-dots { flex: none; display: inline-flex; gap: 4px; }
+.ais-sum-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent); }
+.ais-sum-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ais-sum[aria-expanded="true"] .ais-chev::before { transform: rotate(-90deg); }
+.ais-sum-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 420ms cubic-bezier(0.22, 0.9, 0.26, 1); }
+.ais-sum-body.open { grid-template-rows: 1fr; }
+.ais-sum-in { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 8px; }
+.ais-chat-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; width: auto; max-width: none; margin-inline: calc(-1 * var(--edge)); }
+.ais-chat-wrap > .ai-chat { position: relative; flex: 1; min-height: 0; padding: 0 var(--ais-side) 4px; --ai-fade-at: 0px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 14px, black calc(100% - var(--ai-fade, 0px)), transparent); mask-image: linear-gradient(to bottom, transparent, black 14px, black calc(100% - var(--ai-fade, 0px)), transparent); }
+@media (prefers-reduced-motion: reduce) { .ai-screen.stacked > .ais-fold, .ais-sum-body { transition: none; } }
 @keyframes ais-card-in { from { opacity: 0; transform: translateY(14px) scale(0.96); } }
 @media (prefers-reduced-motion: reduce) {
   .ais-card-top { animation: none; transition: none; }
