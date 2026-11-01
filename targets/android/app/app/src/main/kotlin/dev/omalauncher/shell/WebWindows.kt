@@ -2656,6 +2656,8 @@ class WebWindows(
             return
         }
         win.taskId = task
+        // Its display had its app's task (MX1: the launch checks never see an empty display as "not landed").
+        win.landed = true
         // Known as a full-screen web window BEFORE it lands on display 0: the old path's adopt must never float it.
         WebWindowDisplays.fullScreen(task, win.id, true)
         val ok = moveTask(task, android.view.Display.DEFAULT_DISPLAY)
@@ -3026,13 +3028,22 @@ class WebWindows(
      * (fallback, logged).
      */
     private fun checkLanded(w: Win) {
-        io.postDelayed({ if (!w.closed && tasksOn(w.displayId) == 0) pullStrayTask(w) }, STRAY_CHECK_MS)
+        io.postDelayed({ if (!w.closed && !awayByChoice(w) && tasksOn(w.displayId) == 0) pullStrayTask(w) }, STRAY_CHECK_MS)
         io.postDelayed({ landedOrFallback(w) }, ESCAPE_CHECK_MS)
     }
 
+    /**
+     * MX1 (the user, 11-01 15:39: "it's going fullscreen for a sec and then it's back to desktop"): [w]'s task left its
+     * display because the user put it there - full screen on display 0 ([fullScreen]) or minimised ([minimise]). Its
+     * display is empty on purpose: the launch checks never pull the task back (window 22 went full screen at 2.2 s,
+     * the 3 s check found display 65 empty and moved Chrome back into the window).
+     */
+    private fun awayByChoice(w: Win): Boolean =
+        w.full || w.leftAt != 0L || (w.taskId >= 0 && WebWindowDisplays.fullScreenWindow(w.taskId) == w.id)
+
     /** On [io], [ESCAPE_CHECK_MS] after the launch: landed, the app's stray task pulled in, or the fallback. */
     private fun landedOrFallback(w: Win) {
-        if (w.closed) return
+        if (w.closed || awayByChoice(w)) return
         val n = tasksOn(w.displayId)
         if (n != null && n > 0) w.landed = true
         if (n == null || n > 0 || pullStrayTask(w)) return

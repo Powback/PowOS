@@ -5956,6 +5956,113 @@ async function gridSnapScene(r) {
  * (WG1), no page change. Each carry leaves the frame whole inside the work area, its bar clear of the dock (E2E 197:
  * a frame left past the edge put its bar under the dock, and the next grab opened Chrome).
  */
+/**
+ * MX1 (the user, 11-01 15:39: "it's going fullscreen for a sec and then it's back to desktop"): a Linux (l:) and an
+ * Android (a:) window's full screen button; 3 s later (many geometry ticks) each is still full screen, and the button
+ * again (hostless) / the host's "webwindows.full" off brings back its floating frame. Hostless = the work area; with a
+ * host, the page's model of the real full-screen app (full, hidden) must hold until the host says it is back.
+ */
+async function fullStaysScene(r) {
+  await r.page.evaluate(FULL_STAYS_HELPERS);
+  try {
+    return [...(await r.page.evaluate(fullStaysHostless)), ...(await r.page.evaluate(fullStaysHost))];
+  } finally {
+    await r.page.evaluate(() => window.__mx?.done()).catch(() => {});
+  }
+}
+
+/** MX1's two windows (a Linux and an Android one, floating on page 0), their full screen button and checks. */
+async function FULL_STAYS_HELPERS() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const port = await window.__gw.mod("./apps/port.ts");
+  S.page.value = 0;
+  await window.__gw.settled();
+  const page = S.pages.value[0];
+  const frame = { x: 120, y: 140, w: 320, h: 260 };
+  const wins = [{ id: 981, key: "l:org.kde.dolphin" }, { id: 982, key: "a:gate.full" }];
+  const win = (id) => W.webWins.value.find((v) => v.id === id);
+  const json = (id) => JSON.stringify(win(id));
+  const was = { ww: powos.webwindows, native: port.native.value };
+  window.__mx = {
+    W,
+    powos,
+    port,
+    wins,
+    win,
+    json,
+    wait: (ms) => new Promise((ok) => setTimeout(ok, ms)),
+    async fresh() {
+      W.webWins.value = wins.map((v, i) => ({ ...v, label: v.key, page, ...frame, x: frame.x + i * 40, live: true }));
+      W.tilings.value = {};
+      await new Promise((ok) => setTimeout(ok, 300));
+    },
+    /** Its bar's full screen button (a click: the bar's buttons act on click); false: no button. */
+    press(id) {
+      const b = document.querySelector(`.webwindow[data-wwid="${id}"] .ww-button[aria-label="Full screen"]`);
+      return !!b && (b.click(), true);
+    },
+    /** Each window not at its floating frame (+40 px per window), with [what] in the message. */
+    floatingFails: (what) =>
+      wins.flatMap(({ id, key }, i) => {
+        const w = win(id);
+        const back = w && !w.restore && !w.full && w.w === frame.w && w.h === frame.h && w.x === frame.x + i * 40 && w.y === frame.y;
+        return back ? [] : [`MX1 ${key}: ${what} not at its floating frame (${json(id)})`];
+      }),
+    done() {
+      powos.webwindows = was.ww;
+      port.native.value = was.native;
+      W.webWins.value = [];
+      W.tilings.value = {};
+    },
+    was,
+  };
+}
+
+/** MX1 hostless: the button fills the work area, kept through 3 s of ticks; the button again gives the frame back. */
+async function fullStaysHostless() {
+  const { W, wins, win, json, wait, fresh, press, floatingFails } = window.__mx;
+  const fails = [];
+  await fresh();
+  fails.push(...wins.filter(({ id }) => !press(id)).map(({ id }) => `MX1: window ${id} has no full screen button`));
+  await window.__gw.frames(2);
+  const a = W.workArea();
+  const fills = (w) => !!w?.restore && Math.abs(w.w - (a.right - a.left)) <= 1 && Math.abs(w.h - (a.bottom - a.top)) <= 1;
+  const notFull = (what) => wins.filter(({ id }) => !fills(win(id))).map(({ id, key }) => `MX1 ${key}: ${what} (${json(id)})`);
+  fails.push(...notFull("not full screen after its button"));
+  await wait(3000);
+  await window.__gw.settled();
+  fails.push(...notFull("full screen undone within 3 s"));
+  wins.forEach(({ id }) => press(id));
+  await window.__gw.frames(2);
+  return [...fails, ...floatingFails("restore")];
+}
+
+/** MX1 with a host: a real full-screen app ("webwindows.full" on) - full and hidden 3 s later, until the host's "off". */
+async function fullStaysHost() {
+  const { powos, port, wins, win, json, wait, fresh, press, floatingFails, was } = window.__mx;
+  const fails = [];
+  const asked = [];
+  const say = (id, on) => setTimeout(() => window.__mockEvents.emit("webwindows.full", { id, on, task: 7000 + id }), 20);
+  powos.webwindows = { ...(was.ww ?? {}), fullScreen: async (id) => (asked.push(id), say(id, true), true) };
+  port.native.value = { postMessage() {}, close() {} };
+  await fresh();
+  wins.forEach(({ id }) => press(id));
+  await wait(3000);
+  await window.__gw.settled();
+  if (asked.join() !== "981,982") fails.push(`MX1: the host was asked full screen for [${asked}], not [981,982]`);
+  const shows = (id) => {
+    const el = document.querySelector(`.webwindow[data-wwid="${id}"]`);
+    return !!el && el.getBoundingClientRect().width > 0 && getComputedStyle(el).visibility !== "hidden" && getComputedStyle(el).display !== "none";
+  };
+  fails.push(...wins.filter(({ id }) => !win(id)?.full).map(({ id, key }) => `MX1 ${key}: the host's full screen undone within 3 s (${json(id)})`));
+  fails.push(...wins.filter(({ id }) => shows(id)).map(({ key }) => `MX1 ${key}: a full-screen app's window still shows its frame on the page`));
+  wins.forEach(({ id }) => window.__mockEvents.emit("webwindows.full", { id, on: false }));
+  await window.__gw.frames(2);
+  return [...fails, ...floatingFails("back from the host's full screen")];
+}
+
 async function edgeCarryScene(r) {
   const ready = await r.page.evaluate(EDGE_CARRY_HELPERS);
   if (ready.length) return ready;
@@ -7571,6 +7678,9 @@ try {
         return whenReady(r, () => r.page.evaluate(desktopsReloaded));
       }),
     );
+  // MX1: full screen stays full screen through ticks (a Linux and an Android window, hostless and host-shaped); restore brings the floating frame back (ww-full-stays-unfolded; the user, 11-01 15:39).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ww-full-stays-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => fullStaysScene(r))));
   // EC1: a window let go at the screen's right / left edge (or over the right dock) goes to the next / previous page with home, whole inside the work area (ww-edge-carry-unfolded; E2E 194 step 38, 197 step 39).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-edge-carry-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => edgeCarryScene(r))));
