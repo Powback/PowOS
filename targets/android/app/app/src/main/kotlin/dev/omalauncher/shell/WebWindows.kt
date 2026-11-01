@@ -2320,6 +2320,8 @@ class WebWindows(
         val px = (at.x * density()).toFloat()
         val py = (at.y * density()).toFloat()
         val act = fingerAction(w, action, at.finger, px to py) ?: return true
+        // A press on its body: the window the user is in (Back / Forward go to it: windowKey).
+        if (act == MotionEvent.ACTION_DOWN) focused = w.id
         val pts = fingersSent(w, act, at.finger)
         // The injector: the shell-uid helper (holds INJECT_EVENTS), one line per event over its stdin - no process per
         // touch. The fallbacks below only when it can't be reached.
@@ -2717,16 +2719,25 @@ class WebWindows(
         return true
     }
 
+    /** The window the user is in (last pressed: its body here, its bar via the page's [focus]), -1: home. */
+    @Volatile private var focused = -1
+
+    /** The page: window [id] pressed (its bar or body), -1: home pressed outside every window. */
+    fun focus(id: Int): Boolean {
+        focused = id
+        return true
+    }
+
     /**
-     * Back reached home (ShellActivity.onBackPressed) with a quick page's card on screen: sent to the card's display
-     * ([QuickPageRoute.backDisplay]), so its page goes back one screen, or at its root finishes and the card closes with
-     * its task. False: no card on screen (or no display maker), Back is home's page's. Main thread.
+     * [key] (Back / Forward) that reached PowOS: pressed on the display of the window the user is in
+     * ([WindowKeys.target]) - its app goes back / forward a page, at its root it finishes and the window closes with its
+     * task. False: no window is the user's (or no display maker), home's page has it. Any thread.
      */
-    fun quickBack(): Boolean {
-        val cards = wins.values.filter { it.quick != null && it.linux == null }
-        val display = QuickPageRoute.backDisplay(cards.map { QuickPageRoute.Card(it.displayId, it.closed, it.shown) }) ?: return false
-        val sent = helper.line(QuickPageRoute.backLine(display))
-        WindowLog.i(TAG, "back: to quick page ${cards.first { it.displayId == display }.quick}'s display $display (its page's own back stack): ${if (sent) "sent" else "no display helper"}")
+    fun windowKey(key: WindowKeys.Key): Boolean {
+        val all = runCatching { wins.values.toList() }.getOrNull() ?: return false
+        val t = WindowKeys.target(all.map { WindowKeys.Win(it.id, it.displayId, it.closed, it.shown, it.quick != null, it.linux != null) }, focused) ?: return false
+        val sent = helper.line(WindowKeys.line(t.displayId, key))
+        WindowLog.i(TAG, "${key.name.lowercase()}: to window ${t.id}${if (t.quick) " (a quick page)" else ""} on display ${t.displayId}: ${if (sent) "sent" else "no display helper"}")
         return sent
     }
 
@@ -3842,6 +3853,9 @@ class WebWindows(
 
         /** Home's web windows (the one home page's), or null: what [closeForTask] closes through. */
         @Volatile private var current: WebWindows? = null
+
+        /** [key] to the web window the user is in ([windowKey]), from outside home (PowOS's edge back): false - none. */
+        fun keyToWindow(key: WindowKeys.Key): Boolean = current?.windowKey(key) == true
 
         /**
          * The switcher up ([open]) or down (Switcher.open's setter). It is home's own page, and the windows are a layer

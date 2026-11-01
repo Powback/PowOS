@@ -388,6 +388,8 @@ class EdgeGestures(
 
     /** Back, as SystemUI's back button sends it (the HACK in the class comment). */
     private fun back() {
+        // A web window the user is in (a quick page's card first): its app's Back on its display, never home's page.
+        if (dev.omalauncher.shell.WebWindows.keyToWindow(dev.omalauncher.shell.WindowKeys.Key.BACK)) return
         val sysui = systemUi
         if (sysui == null) {
             Log.w(TAG, "no back: SystemUI isn't connected")

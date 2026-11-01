@@ -1005,6 +1005,8 @@ export interface Bridge {
     restore?(id: number): Promise<boolean>;
     /** Host-optional (TS1): its app at content zoom [k] - its display's size kept, its dpi x [k] (the app reconfigures). */
     zoom?(id: number, k: number): Promise<boolean>;
+    /** Host-optional: window [id] pressed (its bar or body; -1: home outside every window) - Back / Forward go to it (WindowKeys.kt). */
+    focus?(id: number): Promise<boolean>;
   };
   /**
    * The switcher, a layer of home (ui/recents.tsx). The host drives it: "recents.begin" ({ from, tasks }: a swipe up

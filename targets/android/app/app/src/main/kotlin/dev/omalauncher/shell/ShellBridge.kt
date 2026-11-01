@@ -77,8 +77,8 @@ class ShellBridge(
     /** Home / Back (ShellActivity, main thread): a full-screen Linux web window leaves full screen; true if one did. */
     fun leaveFullScreen(why: String): Boolean = webWindowsMade && webWindows.leaveFullScreen(why)
 
-    /** Back with a quick page's card on screen: its page's (WebWindows.quickBack), never home's page's. */
-    fun quickBack(): Boolean = webWindowsMade && webWindows.quickBack()
+    /** Back / Forward to the web window the user is in (WebWindows.windowKey); false: home's page has it. */
+    fun windowKey(key: WindowKeys.Key): Boolean = webWindowsMade && webWindows.windowKey(key)
 
     /**
      * Linux (KWin) windows as web windows (docs/WEB_WINDOWS.md S6): KWin's "open" comes here instead of a
@@ -532,6 +532,8 @@ class ShellBridge(
             "quickpage.open" -> QuickPages.open(context, a.getJSONObject(0))
             "quickpage.popout" -> QuickPages.popOut(a.getString(0)) { if (webWindowsMade) webWindows.close(a.optInt(1, -1)) }
             "quickpage.refused" -> WebWindowLaunch.refused(QuickPageRoute.key(a.getString(0)))
+            // The window the user is in (its bar or body pressed; -1: home): Back / Forward go to it (WindowKeys).
+            "webwindows.focus" -> webWindowsMade && webWindows.focus(a.getInt(0))
             "qs.set" -> quick.set(a.getString(0), a.getDouble(1)).let { quick.state() }
             "qs.listening" -> quick.listening(a.getBoolean(0))
             // The touch controller overlay (andro.marchy.GamepadOverlay): the control centre's Controller tile.

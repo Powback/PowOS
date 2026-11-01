@@ -13,6 +13,7 @@ import { stableRows } from "./apps/stable.ts";
 import { appView, closeApp, initPowosApps, mergeRecent, noteHostRecent, openApp, powosApps, PREFIX } from "./apps/pages.ts";
 import type { App, AppWindow, Chat, Home, HomeItem, WebWindowRect, WidgetScreen } from "./types.ts";
 import { sidewaysHome, wideHome } from "./hosts/wide.ts";
+import { forgetQuickReturn } from "./ui/quickpage.tsx";
 import { adoptWebWindow, onWebWindowPage, openWebWindow, setIconOf, setPageBeside, setShownPage } from "./ui/webwindows.tsx";
 
 /** The host's apps (Android's, Linux's); with the installed PowOS apps that have a page (apps/pages.ts), [apps]. */
@@ -535,6 +536,8 @@ export function back(): boolean {
 /** Home, pressed on home: everything closes, and the first page shows - as a stock launcher does (a full-screen terminal only closes). */
 export function goHome() {
   recentsHome();
+  // Home: a quick page's card closing after this goes back to home, never to the search it came from.
+  forgetQuickReturn();
   // A terminal open full screen (an at work session, a widget's screen): Home puts it away and stays where it was
   // opened from - PowOS AI's page, the widget's page - as swiping up out of an app goes back to the screen it came from.
   if (sessionView.value || screen.value.key || appView.value) {
