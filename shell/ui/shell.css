@@ -905,8 +905,7 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   overflow: hidden;
 }
 .widget-name { color: var(--accent-text); }
-/* Red means broken (§5); small text on a widget face needs 4.5:1 - the red lifted towards the foreground (3.99 plain). */
-.widget-error { color: color-mix(in oklab, var(--color-red) 70%, var(--color-foreground)); font-size: var(--text-small); }
+.widget-error { color: var(--color-red); font-size: var(--text-small); }
 .tile-app {
   height: 100%;
   display: flex;
@@ -1272,7 +1271,7 @@ input.folder-title:focus { background: var(--soft-fill); }
   padding: 8px 14px;
 }
 .edit-act.on { background: color-mix(in srgb, var(--color-accent) 22%, transparent); color: var(--accent-text); }
-.edit-act.done { box-shadow: none; background: none; color: var(--accent-text); padding-right: 0; }
+.edit-act.done { box-shadow: none; background: none; color: var(--accent-text); text-shadow: var(--label-shadow); padding-right: 0; }
 .edit-note { flex: 1; min-width: 0; font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The theme popover, just above the bar. */
 .theme-pop {
