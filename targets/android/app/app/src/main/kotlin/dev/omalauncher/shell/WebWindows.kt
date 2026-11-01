@@ -2320,8 +2320,6 @@ class WebWindows(
         val px = (at.x * density()).toFloat()
         val py = (at.y * density()).toFloat()
         val act = fingerAction(w, action, at.finger, px to py) ?: return true
-        // A press on its body: the window the user is in (Back / Forward go to it: windowKey).
-        if (act == MotionEvent.ACTION_DOWN) focused = w.id
         val pts = fingersSent(w, act, at.finger)
         // The injector: the shell-uid helper (holds INJECT_EVENTS), one line per event over its stdin - no process per
         // touch. The fallbacks below only when it can't be reached.
@@ -2388,6 +2386,8 @@ class WebWindows(
             main.post { homeIme(false) }
         }
         w.fingers[finger] = floatArrayOf(at.first, at.second)
+        // A press on its body: the window the user is in (Back / Forward go to it: windowKey).
+        if (first) focused = w.id
         return if (first) MotionEvent.ACTION_DOWN else null
     }
 
