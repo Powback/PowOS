@@ -410,6 +410,9 @@ function Foot({ mic, compose }: { mic: MicTarget; compose: preact.ComponentChild
   );
 }
 
+/** The hero's title, short enough never to be cut: "Daily driver 50%", or "66% this month" (the month's share done). */
+const heroTitle = (r: { pct: number; label: string }) => (/this month/i.test(r.label) ? `${r.pct}% this month` : `${r.label} ${r.pct}%`);
+
 /** The hero: the daily driver's ring and two lines - its name and share, then what's going on. */
 function Hero({ needs, working, more }: { needs: number; working: number; more: preact.ComponentChildren }) {
   const ring = driverPct(areaStats(board.value, Date.now(), needIds(needsYou())));
@@ -417,7 +420,7 @@ function Hero({ needs, working, more }: { needs: number; working: number; more: 
     <header class="ais-top">
       {ring && <HeroRing pct={ring.pct} label={ring.label} />}
       <span class="ais-status">
-        <span class="ais-title">{ring ? `${ring.label} ${ring.pct}%` : "PowOS AI"}</span>
+        <span class="ais-title">{ring ? heroTitle(ring) : "PowOS AI"}</span>
         <span class="ais-line">{statusLine(working, needs, chat.value.busy)}</span>
       </span>
       {more}

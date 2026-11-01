@@ -123,12 +123,15 @@ export function ownWords(a: Agent) {
   return plain(t);
 }
 
+/** A file's own name, not its path. */
+const baseName = (r: string) => r.split(/\s+/)[0].split("/").pop() || r;
+
 /** Per tool: its words with the step's argument (null: the bare words always), and without one. */
 const TOOL_WORDS: Record<string, [((rest: string) => string) | null, string]> = {
-  Bash: [plain, "Running a command"],
-  Read: [(r) => `Reading ${r}`, "Reading a file"],
-  Edit: [(r) => `Editing ${r}`, "Editing a file"],
-  Write: [(r) => `Editing ${r}`, "Editing a file"],
+  Bash: [commandWords, "Running a command"],
+  Read: [(r) => `Reading ${baseName(r)}`, "Reading a file"],
+  Edit: [(r) => `Editing ${baseName(r)}`, "Editing a file"],
+  Write: [(r) => `Editing ${baseName(r)}`, "Editing a file"],
   Grep: [null, "Searching the code"],
   Glob: [null, "Searching the code"],
   WebFetch: [null, "Looking something up online"],
@@ -137,10 +140,27 @@ const TOOL_WORDS: Record<string, [((rest: string) => string) | null, string]> = 
   Agent: [(r) => `Starting a helper: ${r}`, "Starting a helper"],
 };
 
-/** What the tool step says, as a sentence ("Bash final renders" → "Final renders"; "Grep" → "Searching the code"). */
+/** A path-like token ("/Users/macback/pw/x", "~/pw/x", "shell/ui/a.tsx"): never shown in a row (the user, 11-01). */
+const PATHY = /(^|\s)[~.]?\S*\/\S*/g;
+/** A leading "cd <dir> &&" / "cd <dir>;" (or a bare "cd <dir>"): where it runs, not what. */
+const CD = /^cd\b\s*\S*\s*(&&|;)?\s*/i;
+
+/** A raw command as row words: no leading cd, no paths; nothing left: "Running a command". */
+function commandWords(cmd: string) {
+  const t = cmd.replace(CD, "").replace(PATHY, " ").replace(/\s+/g, " ").trim();
+  return t.length > 2 ? plain(t) : "Running a command";
+}
+
+/** What the tool step says, as a sentence ("Bash final renders" → "Final renders"; "Grep" → "Searching the code"); never a path. */
 export function stepWords(step: string) {
   const s = (step || "").trim();
   if (!s || s.startsWith("<")) return "";
+  if (CD.test(s)) return commandWords(s);
+  const t = toolWords(s).replace(PATHY, " ").replace(/\s+/g, " ").trim();
+  return t.length > 2 ? t : "Working";
+}
+
+function toolWords(s: string) {
   if (/^mcp__comms__send/i.test(s)) return "Messaging another agent";
   if (/^mcp__/i.test(s)) return "Using a tool";
   const m = s.match(/^(Bash|Read|Edit|Write|Grep|Glob|Task|Agent|WebFetch|WebSearch)\b\s*(.*)$/);
@@ -209,24 +229,44 @@ function projectOfDir(cwd: string): string {
 /** [a] works on PowOS (the AI page's own project: its column leads with these). */
 export const isPowOS = (a: Agent) => projectOf(a) === "PowOS";
 
-/** [a]'s task words: its board task's title, else its own plain words, else where it works ("Work in rsi-native"). */
+/** A brief's boilerplate sentences (how to work, not what): skipped when summarising its prompt. */
+const BOILERPLATE = /^(one job|setup|push only|never|scoped|check|gate|hand back|plain commit|another agent)\b|≤\s*\d+\s*min/i;
+
+/**
+ * A prompt as one line of what it asks (the user, 11-01: "General-purpose session" is useless): wrappers, code spans,
+ * paths and URLs out, the brief's boilerplate sentences skipped, its first real sentence at 70 characters ("" if none).
+ */
+export function summarise(prompt: string) {
+  const t = (prompt || "")
+    .replace(WRAPPER, "")
+    .replace(/`[^`]*`?/g, " ")
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(PATHY, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t || t.startsWith("<") || RAW.test(t)) return "";
+  const sentence = t.split(/(?<=[.!?])\s+/).find((x) => x.replace(/[^\p{L}]/gu, "").length > 3 && !BOILERPLATE.test(x)) || "";
+  return plain(shorten(sentence.replace(/[\s.:;,-]+$/, ""), 70));
+}
+
+/** [a]'s task words: its board task's title, else its first prompt (or its label) summarised, else where it works. */
 function titleOf(a: Agent, w: WorkLite | undefined) {
   if (w?.title) return plain(w.title);
   const p = projectOf(a);
-  return ownWords(a) || (p === "PowOS" ? `${plain(a.role)} session` : `Work in ${p}`);
+  return summarise(a.prompt || "") || summarise(a.title) || (p === "PowOS" ? "PowOS agent" : `Work in ${p}`);
 }
 
 /** The board's step for [w] ("" when none or only queued). */
-const boardStepOf = (w: WorkLite | undefined) => (w?.step && w.step !== QUEUED_STEP ? plain(w.step) : "");
+const boardStepOf = (w: WorkLite | undefined) => (w?.step && w.step !== QUEUED_STEP ? plain(w.step.replace(PATHY, " ")) : "");
 
 /** [a] as a fleet line: task words, progress and its step now. */
 function workerOf(a: Agent): Worker {
   const w = taskOf(a.work);
   const total = w?.progressTotal ?? 0;
   const done = Math.min(w?.progressDone ?? 0, total);
-  // Its live tool step while working (what it does this second), the board's step otherwise.
+  // The board's --step first (the agent's own words, the user 11-01); its live tool step only without one.
   const live = a.state === "working" ? stepWords(a.step) : "";
-  return { a, title: titleOf(a, w), done, total, now: live || boardStepOf(w), task: w };
+  return { a, title: titleOf(a, w), done, total, now: boardStepOf(w) || live, task: w };
 }
 
 /** The manager's row: what it is doing, in plain words. */

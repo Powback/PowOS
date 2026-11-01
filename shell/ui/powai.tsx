@@ -7,8 +7,8 @@
  * user as messages under it. The rest - Progress, Agents & terminals, Devices - is behind the header's ⋯, each its own
  * screen with back (aimenu.tsx). Under it the shared field to ask (the mic: hold to talk and send, tap to dictate).
  * Folded, the page (not the launcher's AI panel) is a status page instead of the chat (aistatus.tsx, 2026-10-31).
- * Unfolded the page is two columns (the manager's design, 11-01): that same status page left, the chat right under a
- * segmented row (Chat / Agents / Progress / Devices) that swaps the right column. A wide holder without panes (the
+ * Unfolded the page is two columns (the manager's design, 11-01): that same status page left, the chat right over a
+ * segmented row at its foot (Chat / Agents / Progress / Devices; above the field on Chat) that swaps the right column. A wide holder without panes (the
  * panel) keeps the chat centred at reading width, Progress a glass sheet over its side.
  */
 import { useEffect, useRef, useState } from "preact/hooks";
@@ -348,13 +348,24 @@ function AiBody({ sub, shown }: { sub: AiScreen | null; shown: boolean }) {
 /** The segmented row's screens: shown in the right column with no header of their own (the row names them). */
 const SEGMENTED = new Set<AiScreen>(["chat", "fleet", "agents", "progress", "devices"]);
 
-/** The right column's content: the chat with its field, the Agents view, or a screen ([sub]: with back when no segment names it). */
+/**
+ * The right column: what the segmented row picked, the row itself at the column's foot (the user, 11-01 16:43: "move the
+ * tabs to the bottom") - on Chat just above the field, elsewhere the very bottom; a screen no segment names keeps back.
+ */
 function RightBody({ s, shown }: { s: AiScreen; shown: boolean }) {
-  if (s === "fleet") return <FleetPane />;
+  const segs = <AiSegs shown={shown} />;
+  if (s === "fleet")
+    return (
+      <>
+        <FleetPane />
+        {segs}
+      </>
+    );
   if (s === "chat")
     return (
       <>
         <AiBody sub={null} shown={shown} />
+        {segs}
         <AiCompose />
       </>
     );
@@ -362,14 +373,16 @@ function RightBody({ s, shown }: { s: AiScreen; shown: boolean }) {
     <>
       {!SEGMENTED.has(s) && <AiHeader sub={s} />}
       <AiBody sub={s} shown={shown} />
+      {segs}
     </>
   );
 }
 
 /**
  * The unfolded AI page in two columns (the manager's design, 11-01; the user: "the unfolded page is still a bit shit"):
- * left (~42%) the folded status page itself (StatusColumn, beside the chat: no field of its own), right (~58%) the
- * segmented row and what it picked - the chat (its field at the column's foot) by default. Both on the backdrop's glass.
+ * left (~42%) the folded status page itself (StatusColumn, beside the chat: no field of its own), right (~58%) what the
+ * segmented row picked - the chat (its field at the column's foot) by default - and the row under it. Both on the
+ * backdrop's glass.
  */
 function AiPanes({ shown }: { shown: boolean }) {
   const s = aiScreen.value;
@@ -380,7 +393,6 @@ function AiPanes({ shown }: { shown: boolean }) {
         <StatusColumn shown={shown} beside />
       </section>
       <div class="ai-right tile">
-        <AiSegs shown={shown} />
         <RightBody s={s} shown={shown} />
       </div>
     </>

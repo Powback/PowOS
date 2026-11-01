@@ -1191,6 +1191,8 @@ export interface Agent {
   report: string;
   /** The work board task it holds (`powos agents task set <id> --step ...`; powos-agentsd's `work`), "" or absent: none. */
   work?: string;
+  /** Its first prompt's first line (a helper's: its brief's description), set once (powos-agentsd); absent: an older daemon. */
+  prompt?: string;
   /** A finished subagent's landed commit sha, from its hand-back ("" or absent: none named). */
   sha?: string;
   started: number;

@@ -2176,6 +2176,7 @@ function aiColumnsContent() {
     [R.querySelector(".ai-seg.on")?.textContent.includes("Chat"), "the row doesn't mark Chat as open"],
     [R.querySelector(".ai-chat .msg.try"), "the right column has no chat"],
     [R.querySelector(":scope > .ai-compose"), "the chat has no field at the right column's foot"],
+    [R.querySelector(":scope > .ai-segs + .ai-compose:last-child"), "the segmented row isn't just above the chat's field (the user, 11-01: tabs at the bottom)"],
     [L.querySelector(":scope > .ais-top") && L.querySelector(":scope > .ai-scroll.ais"), "the left column isn't the status page (its hero and sections)"],
     [!L.querySelector(".ai-chat, .ai-compose, .ais-open-chat"), 'the status column has a chat, a field or "Open chat" of its own'],
   ];
@@ -2964,6 +2965,53 @@ async function aiStackCheck(page) {
   return fails;
 }
 
+/**
+ * In the page (the user, 11-01): three working agents - one on a board task (with its --step), one with only a brief as
+ * its first prompt and a raw "Cd /Users/…" step, one with neither - and no daily driver row on the board.
+ */
+async function aiStatusWordsSetup() {
+  const G = window.__gw, E = window.__mockEvents;
+  const [F, P] = await Promise.all([G.mod("./fleet.ts"), G.mod("./ui/powai.tsx")]);
+  const now = Date.now();
+  F.workRows.value = new Map([["tabs-bottom", { id: "tabs-bottom", title: "Move the AI tabs to the bottom", owner: "coder", status: "working", progressDone: 1, progressTotal: 3, step: "moving the row under the chat", steps: "" }]]);
+  const row = (id, o) => ({ id, host: "mac", role: "general-purpose", parent: null, state: "working", title: "", step: "", cwd: "PowOS", pid: 0, subs: 0, unread: 0, report: "", work: "", started: now - 6e5, last: now - 2e3, rev: 1, ...o });
+  E.emit("agents.delta", { full: true, tasks: [], messages: [], asks: [], agents: [
+    row("mac:w1", { work: "tabs-bottom", step: "Bash cd /Users/macback/pw/ai-tabs-bottom && make" }),
+    row("mac:w2", { prompt: "One job, ≤15 minutes. Fix the notification cards' swipe on the lock screen. Setup: `tools/agents/worktree.sh new x`", step: "Cd /Users/macback/pw/notif-cards" }),
+    row("mac:w3", { step: "Bash cd /Users/macback/pw/x && npm test shell/ui/a.tsx" }),
+  ] });
+  P.board.value = P.board.value.filter((w) => !/^daily driver/i.test(w.title));
+  await G.until(() => document.querySelectorAll(".ai-screen.status .ais-work").length >= 3 && /this month/.test(document.querySelector(".ai-screen.status .ais-title")?.textContent ?? ""), 3000);
+  const h = document.querySelector(".ai-screen.status .ais-title");
+  return {
+    rows: [...document.querySelectorAll(".ai-screen.status .ais-work")].map((e) => [e.querySelector(".ais-work-title")?.textContent.trim(), e.querySelector(".ais-step-t.in")?.textContent.trim() ?? ""]),
+    head: h ? { text: h.textContent.trim(), cut: h.scrollWidth > h.clientWidth + 1, ellipsis: getComputedStyle(h).textOverflow === "ellipsis" } : null,
+  };
+}
+
+/** The rows' words: the board task's title and step, the brief summarised, never "<Role> session", a path or "Cd ". */
+function aiStatusRowWords(rows) {
+  const fails = [];
+  const want = [["Move the AI tabs to the bottom", "Moving the row under the chat"], ["Fix the notification cards' swipe on the lock screen", ""]];
+  for (const [title, step] of want) {
+    const r = rows.find(([t]) => t === title);
+    if (!r) fails.push(`no Working now row titled "${title}" (rows: ${rows.map(([t]) => `"${t}"`).join(", ")})`);
+    else if (step && r[1] !== step) fails.push(`"${title}"'s step is "${r[1]}", not its board step "${step}"`);
+  }
+  fails.push(...rows.filter(([t]) => / session$/i.test(t)).map(([t]) => `a row is titled "${t}"`));
+  fails.push(...rows.filter(([, st]) => /\/Users\/|^cd\b|\S\/\S/i.test(st)).map(([t, st]) => `"${t}"'s step line shows a path or cd: "${st}"`));
+  return fails;
+}
+
+/** The hero's title: "N% this month" without a daily driver row, never cut nor ellipsed. */
+function aiStatusHeadWords(head) {
+  if (!head) return ["no hero title"];
+  const fails = /^\d+% this month$/.test(head.text) ? [] : [`the header reads "${head.text}", not "N% this month"`];
+  if (head.cut) fails.push(`the header "${head.text}" is cut`);
+  if (head.ellipsis) fails.push("the header still ends in an ellipsis when long");
+  return fails;
+}
+
 async function aiStatusCheck(page) {
   if (!(await page.evaluate(aiStatusSetup, [FLEET_SETUP]))) return ["folded: the status page shows no Working now rows for the mock fleet"];
   const fails = [];
@@ -2982,6 +3030,8 @@ async function aiStatusCheck(page) {
   const left = await page.evaluate(aiStatusEmpty);
   if (left.join() !== "working") fails.push(`folded: with an empty board the sections are [${left.join(", ")}], not only Working now`);
   fails.push(...(await aiStackCheck(page)).map((f) => `folded stack: ${f}`));
+  const words = await page.evaluate(aiStatusWordsSetup);
+  fails.push(...[...aiStatusRowWords(words.rows), ...aiStatusHeadWords(words.head)].map((f) => `folded words: ${f}`));
   return fails;
 }
 
@@ -2995,6 +3045,22 @@ function aiStatusParts(q) {
 /** In the page: each segment tapped - what the right column shows then, and the left column still the status page. */
 async function aiSegsSwitch() {
   const G = window.__gw;
+  // The segmented row at the right column's foot (the user, 11-01 16:43: "move the tabs to the bottom"): on Chat right
+  // above the field, elsewhere the column's last child, its bottom at the column's padding; its counts kept.
+  function segsAtFoot(name) {
+    const R = document.querySelector(".ai-screen .ai-right"), segs = R?.querySelector(":scope > .ai-segs");
+    if (!segs) return [`"${name}": no segmented row in the right column`];
+    const fails = [];
+    const kids = [...R.children].filter((e) => e.getClientRects().length && getComputedStyle(e).position !== "absolute");
+    const after = kids.slice(kids.indexOf(segs) + 1).map((e) => e.className);
+    if (name === "Chat" ? after.join() !== "ai-compose" : after.length) fails.push(`"${name}": the row is followed by [${after.join(", ")}], not ${name === "Chat" ? "only the field" : "nothing"}`);
+    const r = R.getBoundingClientRect(), b = (name === "Chat" ? R.querySelector(":scope > .ai-compose") : segs).getBoundingClientRect();
+    const pad = parseFloat(getComputedStyle(R).paddingBottom);
+    if (Math.abs(r.bottom - pad - b.bottom) > 2) fails.push(`"${name}": the column's foot is ${Math.round(r.bottom - pad - b.bottom)} px above its bottom`);
+    if (!segs.querySelector(".ai-seg-n")) fails.push(`"${name}": the row's live counts are gone`);
+    return fails;
+  }
+
   const want = { Chat: ".ai-chat", Agents: ".ag-scroll", Progress: ".ai-sub .aip", Devices: ".ai-sub" };
   const fails = [];
   for (const name of ["Progress", "Agents", "Devices", "Chat"]) {
@@ -3005,6 +3071,7 @@ async function aiSegsSwitch() {
     if (!ok) fails.push(`"${name}" didn't swap the right column to its view`);
     if (name !== "Chat" && document.querySelector(".ai-screen .ai-right > .ai-chat")) fails.push(`"${name}" left the chat in the right column`);
     if (!document.querySelector(".ai-screen .ai-left > .ais-top")) fails.push(`with "${name}" the status column is gone`);
+    fails.push(...segsAtFoot(name));
   }
   return fails;
 }

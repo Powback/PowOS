@@ -3629,6 +3629,8 @@ html:root .ai-screen .aip-area.tile { --glass-blur-native: var(--backdrop-blur-n
 .ai-left { flex: 42 1 0; position: relative; display: flex; flex-direction: column; overflow: hidden; --ai-head: 0px; --ai-tail: 0px; }
 .ai-right { flex: 58 1 0; position: relative; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; overflow: hidden; }
 /* The segmented row: one slim pill track, the open segment lifted on it; each label whole, its live count beside it. */
+/* At the right column's foot (above the field on Chat): margin-top auto keeps it down under a short screen. */
+.ai-right > .ai-segs { margin-top: auto; }
 .ai-segs { flex: none; display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: color-mix(in srgb, var(--color-foreground) 9%, transparent); }
 .ai-seg { flex: 1 1 0; min-width: 0; min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 0; border-radius: 999px; background: none; font: inherit; font-size: var(--text-small); font-weight: 600; white-space: nowrap; color: var(--color-foreground); }
 .ai-seg.on { background: var(--ai-bubble); box-shadow: var(--lift); }
@@ -3765,7 +3767,8 @@ html:root .ai-screen.status > .ai-glass.tile { --glass-blur-native: var(--backdr
 .ais-ring.moving .ais-ring-fill { transition: stroke-dasharray 900ms var(--ais-spring); }
 .ais-ring-pct { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--color-foreground); }
 .ais-status { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
-.ais-title { font-size: calc(var(--text-item) * 1.18); font-weight: 700; color: var(--color-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Wraps rather than cut (the user, 11-01: "Done this month…" truncated); the title itself is kept short (aistatus.tsx heroTitle). */
+.ais-title { font-size: calc(var(--text-item) * 1.18); font-weight: 700; color: var(--color-foreground); overflow-wrap: anywhere; }
 .ais-line { font-size: var(--text-small); color: var(--color-foreground); opacity: 0.86; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ai-screen > .ai-scroll.ais { display: flex; flex-direction: column; gap: 12px; padding-inline: var(--ais-side); padding-top: calc(var(--ai-head) + 22px); padding-bottom: calc(var(--ai-tail) + 40px); }
 .ais-sec { display: flex; flex-direction: column; animation: ais-rise 420ms var(--ais-spring) both; }
