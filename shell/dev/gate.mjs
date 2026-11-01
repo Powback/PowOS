@@ -1833,7 +1833,8 @@ async function aiChatSetup([n, tag]) {
 
 /** In the page: what of the old page is still on the chat (board boxes, at work, units, the agents tile, "earlier"). */
 function aiChatBoxes() {
-  const scr = document.querySelector(".ai-screen");
+  // Unfolded the chat is the right column (the left is the status page, its Needs you its own).
+  const scr = document.querySelector(".ai-screen .ai-right") ?? document.querySelector(".ai-screen");
   const left = [".ai-group", ".ai-work-list", ".ai-board", ".ai-session", ".ai-card", ".ai-history", ".ai-fold"].filter((q) => scr.querySelector(q));
   const text = scr.textContent;
   const words = ["Needs you", "Ready to try", "Being worked on", "Waiting for an agent", "installed & running", "earlier ·", "friction ·", "at work"].filter((w) => text.includes(w));
@@ -1860,7 +1861,10 @@ async function aiChatBroken() {
 /** In the page: ⋯, then each screen and back; a fail per screen that didn't open, name itself, or come back. */
 async function aiChatMenu() {
   const G = window.__gw;
-  const titled = (name) => [...document.querySelectorAll(".ai-screen .ai-top .ai-title")].some((t) => t.textContent.trim() === name);
+  // Its name in a header, or (unfolded) the segmented row's open segment ("Agents & terminals": Agents).
+  const seg = (name) => [...document.querySelectorAll(".ai-screen .ai-seg")].find((b) => b.textContent.trim().startsWith(name));
+  const titled = (name) => [...document.querySelectorAll(".ai-screen .ai-top .ai-title")].some((t) => t.textContent.trim() === name) || !!seg(name.split(" ")[0])?.classList.contains("on");
+  const back = () => (document.querySelector(".ai-screen .ai-back") ?? seg("Chat"))?.click();
   // One screen from ⋯ and back; its fails. Inner (page.evaluate serialises only this function).
   const screen = async (name) => {
     const fails = [];
@@ -1875,7 +1879,7 @@ async function aiChatMenu() {
     // No powos-progress app: a summary per area, never the board's rows to answer (the try buttons live in the chat).
     if (name === "Progress" && !document.querySelector(".ai-screen .ai-sub .aip")) fails.push("Progress (no powos-progress app) shows no ring and areas");
     if (name === "Progress" && document.querySelector(".ai-screen .ai-sub :is(.ai-work-list, .ai-item-acts)")) fails.push("Progress still shows the board's rows to answer");
-    document.querySelector(".ai-screen .ai-back")?.click();
+    back();
     if (!(await G.until(() => document.querySelector(".ai-screen .ai-chat .msg.try"), 2000))) fails.push(`back from "${name}" didn't return to the chat`);
     return fails;
   };
@@ -1886,7 +1890,7 @@ async function aiChatMenu() {
   if (dd) {
     dd.click();
     if (!(await G.until(() => titled("Progress"), 2000))) fails.push("the strip's progress didn't open Progress");
-    document.querySelector(".ai-screen .ai-back")?.click();
+    back();
   }
   return fails;
 }
@@ -2037,40 +2041,60 @@ async function aiChatRestore() {
 }
 
 /**
- * In the page, unfolded (the user, 2026-10-31 13:29: three panes, "not a stretched chat"): the nav with Chat / Agents /
- * Progress / Devices (Chat marked), the chat in the middle pane, the right column's "Try this" with the board's open
- * asks (needsyou.tsx: the setup's one, "Plug the phone into the Mac once", with done / can't); no strip (the panes say it).
+ * In the page, unfolded (the manager's design, 11-01; the user: "the unfolded page is still a bit shit"): two columns at
+ * about 42 / 58 with a 16 dp gutter - left the folded status page's own component (its hero and sections' scroller, no
+ * field of its own), right the segmented row Chat / Agents / Progress / Devices (Chat on) over the chat; no nav pane, no
+ * context column, no strip.
  */
 function aiPanesFails() {
   const scr = document.querySelector(".ai-screen");
+  const L = scr.querySelector(":scope > .ai-left"), R = scr.querySelector(":scope > .ai-right");
+  if (!L || !R) return ["not two columns (.ai-left, .ai-right)"];
   const fails = [];
-  const nav = [...scr.querySelectorAll(".ai-nav .ai-nav-name")].map((e) => e.textContent.trim()).join(" / ");
-  if (nav !== "Chat / Agents / Progress / Devices") fails.push(`the nav lists "${nav}", not Chat / Agents / Progress / Devices`);
-  if (!scr.querySelector(".ai-nav .ai-nav-item.on")?.textContent.includes("Chat")) fails.push("the nav doesn't mark Chat as open");
-  if (!scr.querySelector(".ai-mid .ai-chat .msg.try")) fails.push("the middle pane has no chat");
-  const heads = [...scr.querySelectorAll(".ai-ctx .ai-ctx-head")].map((e) => e.textContent.trim());
-  if (!heads.includes("Try this")) fails.push(`the right column has no "Try this" (has ${heads.join(", ") || "nothing"})`);
-  const acts = [...scr.querySelectorAll(".ai-ctx .ai-ctx-try .try-acts")].length;
-  if (acts !== 1) fails.push(`"Try this" offers ${acts} lines with buttons, not the board's 1 open ask`);
-  if (scr.querySelector(".ai-strip")) fails.push("the strip still shows over the panes");
+  if (scr.querySelector(".ai-nav, .ai-ctx")) fails.push("a nav pane or context column is still drawn");
+  if (scr.querySelector(".ai-strip")) fails.push("the strip still shows");
+  const l = L.getBoundingClientRect(), r = R.getBoundingClientRect();
+  const k = l.width / (l.width + r.width);
+  if (Math.abs(k - 0.42) > 0.03) fails.push(`the columns are ${Math.round(k * 100)} / ${Math.round(100 - k * 100)}, not ~42 / 58`);
+  if (Math.abs(r.left - l.right - 16) > 1 || Math.abs(l.left - 16) > 1) fails.push(`the gutters are ${Math.round(l.left)} / ${Math.round(r.left - l.right)} px, not 16`);
   return fails;
 }
 
+/** In the page: the columns' content - the segmented row (Chat on) over the chat and its field; left the status page. */
+function aiColumnsContent() {
+  const L = document.querySelector(".ai-screen > .ai-left"), R = document.querySelector(".ai-screen > .ai-right");
+  if (!L || !R) return [];
+  const segs = [...R.querySelectorAll(":scope > .ai-segs .ai-seg-name")].map((e) => e.textContent.trim()).join(" / ");
+  const checks = [
+    [segs === "Chat / Agents / Progress / Devices", `the right column's row is "${segs}", not Chat / Agents / Progress / Devices`],
+    [R.querySelector(".ai-seg.on")?.textContent.includes("Chat"), "the row doesn't mark Chat as open"],
+    [R.querySelector(".ai-chat .msg.try"), "the right column has no chat"],
+    [R.querySelector(":scope > .ai-compose"), "the chat has no field at the right column's foot"],
+    [L.querySelector(":scope > .ais-top") && L.querySelector(":scope > .ai-scroll.ais"), "the left column isn't the status page (its hero and sections)"],
+    [!L.querySelector(".ai-chat, .ai-compose, .ais-open-chat"), 'the status column has a chat, a field or "Open chat" of its own'],
+  ];
+  return checks.filter(([ok]) => !ok).map(([, why]) => why);
+}
+
 /**
- * In the page, unfolded: the name once, in the nav (UF-5); every nav label whole (UF-6); no page slab, each pane on the
- * widgets' compositor blur (the user, 14:17: "There's actually no transparency on the AI page").
+ * In the page, unfolded: "PowOS AI" never repeated, every segment label whole, no page slab, both columns on THE
+ * backdrop's blur, no monospace text in the chat column.
  */
 function aiPanesGlassFails() {
   const scr = document.querySelector(".ai-screen");
   const fails = [];
-  if (scr.querySelector(".ai-mid .ai-top .ai-title")) fails.push(`the middle pane's header repeats "PowOS AI" (the nav has it)`);
-  const cut = [...scr.querySelectorAll(".ai-nav .ai-nav-name")].filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.textContent.trim());
-  if (cut.length) fails.push(`the nav cuts ${cut.join(", ")}`);
+  const titles = [...scr.querySelectorAll(".ai-title, .ais-title")].filter((e) => e.textContent.trim() === "PowOS AI").length;
+  if (titles > 1) fails.push(`"PowOS AI" is shown ${titles} times`);
+  const cut = [...scr.querySelectorAll(".ai-seg-name")].filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.textContent.trim());
+  if (cut.length) fails.push(`the row cuts ${cut.join(", ")}`);
   const fill = getComputedStyle(scr).backgroundColor;
-  if (!/^rgba\(0, 0, 0, 0\)$|^transparent$/.test(fill)) fails.push(`the page paints ${fill} over the wallpaper (the panes are the glass, not a page slab)`);
-  const want = getComputedStyle(document.documentElement).getPropertyValue("--widget-blur-native").trim();
-  const off = [".ai-nav", ".ai-mid", ".ai-ctx"].filter((q) => getComputedStyle(scr.querySelector(q)).getPropertyValue("--glass-blur-native").trim() !== want);
-  if (off.length) fails.push(`${off.join(", ")} not on the widgets' blur (${want})`);
+  if (!/^rgba\(0, 0, 0, 0\)$|^transparent$/.test(fill)) fails.push(`the page paints ${fill} over the wallpaper (the columns are the glass, not a page slab)`);
+  const want = getComputedStyle(document.documentElement).getPropertyValue("--backdrop-blur-native").trim();
+  const off = [".ai-left", ".ai-right"].filter((q) => getComputedStyle(scr.querySelector(q)).getPropertyValue("--glass-blur-native").trim() !== want);
+  if (off.length) fails.push(`${off.join(", ")} not on the backdrop's blur (${want})`);
+  const texts = [...scr.querySelectorAll(".ai-right *")].filter((e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) || e.matches("textarea"));
+  const mono = texts.filter((e) => /mono/i.test(getComputedStyle(e).fontFamily.split(",")[0]));
+  if (mono.length) fails.push(`monospace in the chat column: ${mono.slice(0, 3).map((e) => `${e.tagName.toLowerCase()}.${e.className} "${e.textContent.trim().slice(0, 20)}"`).join(", ")}`);
   return fails;
 }
 
@@ -2082,7 +2106,7 @@ async function aiChatLayout(page, size) {
   await page.screenshot({ path: `/cache/ai-page-${size}-chat.png` });
   const width = await page.evaluate(() => Math.round(document.querySelector(".ai-screen .ai-chat").getBoundingClientRect().width));
   if (width > 700) fails.push(`${size}: the chat is ${width} px wide, not centred at reading width`);
-  if (size === "unfolded") fails.push(...[...(await page.evaluate(aiPanesFails)), ...(await page.evaluate(aiPanesGlassFails))].map((f) => `${size}: ${f}`));
+  if (size === "unfolded") fails.push(...[...(await page.evaluate(aiPanesFails)), ...(await page.evaluate(aiColumnsContent)), ...(await page.evaluate(aiPanesGlassFails))].map((f) => `${size}: ${f}`));
   else {
     const strip = await page.evaluate(() => document.querySelector(".ai-screen .ai-strip")?.textContent ?? "");
     // "N working · Daily driver NN% · N to try": the try count is the chat's unanswered things to try; the daily driver
@@ -2349,18 +2373,20 @@ async function aiNeedsChatCall() {
   return got.slice();
 }
 
-/** In the page (unfolded, the fleet mocked): the right column's Try this tasks' lines and Working now's cards. */
+/** In the page (unfolded, the fleet mocked): the left status column's Needs you stack and Working now rows. */
 async function aiNeedsPane(setup) {
   const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  S.aiScreen.value = "chat";
   const run = (body) => new (Object.getPrototypeOf(async function () {}).constructor)("U", "E", "sleep", body)(G.mod, window.__mockEvents, (ms) => new Promise((r) => setTimeout(r, ms)));
   await run(setup);
-  await G.until(() => document.querySelector(".ai-screen .ai-ctx .ai-ctx-card"), 3000);
-  const ctx = document.querySelector(".ai-screen .ai-ctx");
-  const heads = [...(ctx?.querySelectorAll(".ai-ctx-head") ?? [])].map((e) => e.textContent.trim());
-  const tries = [...(ctx?.querySelectorAll(".ai-ctx-try .try-line") ?? [])].map((e) => e.textContent.trim());
-  const working = ctx?.querySelectorAll(".ai-ctx-sec .ai-ctx-card:not(.bad)").length ?? 0;
-  const empty = !!ctx?.querySelector(".ai-ctx-empty");
-  return { heads, tries, working, empty };
+  await G.until(() => document.querySelectorAll(".ai-screen .ai-left .ais-work").length >= 3, 3000);
+  const col = document.querySelector(".ai-screen .ai-left");
+  const needs = Number(col?.querySelector(".ais-stack")?.dataset.count ?? 0);
+  const top = col?.querySelector(".ais-card-top")?.dataset.task ?? "";
+  const working = col?.querySelectorAll(".ais-work").length ?? 0;
+  const empty = !!col?.querySelector(".ais-empty");
+  return { needs, top, working, empty };
 }
 
 const NY_WANT = ["ny-try2", "ny-try1", "ny-ask"];
@@ -2402,10 +2428,9 @@ async function aiNeedsCheck(page) {
   // Unfolded: the right column against the same board (re-set: the answer above took one out) and the mock fleet.
   await page.evaluate(aiNeedsSetup);
   const p = await page.evaluate(aiNeedsPane, FLEET_SETUP);
-  if (!p.heads.includes("Try this")) fails.push(`unfolded: the right column has no "Try this" (has ${p.heads.join(", ") || "nothing"})`);
-  if (p.tries.length !== 3) fails.push(`unfolded: Try this lists ${p.tries.length} asks, not Progress's 3 (${p.tries.join(" | ")})`);
+  if (p.needs !== 3 || !NY_WANT.includes(p.top)) fails.push(`unfolded: the status column's Needs you holds ${p.needs} (top ${p.top || "none"}), not Progress's 3`);
   if (p.working < 3) fails.push(`unfolded: Working now shows ${p.working} agents, not the mock fleet's 3 working helpers`);
-  if (p.empty) fails.push(`unfolded: the right column still says "Nothing running and nothing to try"`);
+  if (p.empty) fails.push(`unfolded: the status column still says nothing waits and no agent works`);
   fails.push(...(await page.evaluate(aiNeedsLooks, ".ai-screen")).map((f) => `unfolded: an answer button looks already chosen before a tap: ${f}`));
   await page.screenshot({ path: "/cache/ai-needs-you-pane.png" });
   await page.evaluate(aiChatRestore);
@@ -2542,10 +2567,12 @@ async function aiStackSetup(n) {
   ];
   P.board.value = [...all.slice(0, n), row("st-dd", "Daily driver: everything the phone needs every day", { status: "working", progressDone: 13, progressTotal: 20 }, 6e4), { ...row("st-done1", "Media card redesign", {}, 7e4), status: "done", done: now - 36e5 }];
   P.checks.value = [];
-  await G.until(() => (document.querySelector(".ai-screen.status .ais-stack")?.dataset.count ?? "0") === String(n), 3000);
-  const anims = document.getAnimations().filter((a) => document.querySelector(".ai-screen.status")?.contains(a.effect?.target) && a.effect.getTiming().iterations !== Infinity);
+  // The status page folded, or the unfolded page's left column (the same component).
+  const col = ".ai-screen:is(.status, .panes)";
+  await G.until(() => (document.querySelector(`${col} .ais-stack`)?.dataset.count ?? "0") === String(n), 3000);
+  const anims = document.getAnimations().filter((a) => document.querySelector(col)?.contains(a.effect?.target) && a.effect.getTiming().iterations !== Infinity);
   await Promise.race([Promise.all(anims.map((a) => a.finished.catch(() => 0))), new Promise((r) => setTimeout(r, 1200))]);
-  return document.querySelectorAll(".ai-screen.status .ais-card-top").length;
+  return document.querySelectorAll(`${col} .ais-card-top`).length;
 }
 
 /** In the page: the stack's shape - one top card, the peeking ones, its count, Try, the thumbnail. */
@@ -2710,6 +2737,72 @@ async function aiStatusCheck(page) {
   const left = await page.evaluate(aiStatusEmpty);
   if (left.join() !== "working") fails.push(`folded: with an empty board the sections are [${left.join(", ")}], not only Working now`);
   fails.push(...(await aiStackCheck(page)).map((f) => `folded stack: ${f}`));
+  return fails;
+}
+
+/** In the page: the status page's shape - its hero, its sections in order, its stack - folded or as the left column. */
+function aiStatusParts(q) {
+  const col = document.querySelector(q);
+  if (!col) return null;
+  return { hero: !!col.querySelector(":scope > .ais-top .ais-title"), secs: [...col.querySelectorAll(":scope > .ai-scroll.ais > .ais-sec")].map((e) => e.dataset.sec), stack: !!col.querySelector(".ais-stack") };
+}
+
+/** In the page: each segment tapped - what the right column shows then, and the left column still the status page. */
+async function aiSegsSwitch() {
+  const G = window.__gw;
+  const want = { Chat: ".ai-chat", Agents: ".ag-scroll", Progress: ".ai-sub .aip", Devices: ".ai-sub" };
+  const fails = [];
+  for (const name of ["Progress", "Agents", "Devices", "Chat"]) {
+    const b = [...document.querySelectorAll(".ai-screen .ai-right .ai-seg")].find((x) => x.querySelector(".ai-seg-name")?.textContent.trim() === name);
+    if (!b) { fails.push(`no "${name}" segment`); continue; }
+    b.click();
+    const ok = await G.until(() => b.classList.contains("on") && document.querySelector(`.ai-screen .ai-right > :is(${want[name]}), .ai-screen .ai-right > * :is(${want[name]})`), 2000);
+    if (!ok) fails.push(`"${name}" didn't swap the right column to its view`);
+    if (name !== "Chat" && document.querySelector(".ai-screen .ai-right > .ai-chat")) fails.push(`"${name}" left the chat in the right column`);
+    if (!document.querySelector(".ai-screen .ai-left > .ais-top")) fails.push(`with "${name}" the status column is gone`);
+  }
+  return fails;
+}
+
+/** The unfolded page's renders for design QA: light and dark wallpaper x 0 and 5 needs-you items. */
+async function aiUnfoldedRenders(page, size) {
+  const fails = [];
+  for (const [tone, fill] of [["light", "#ebe8e2"], ["dark", "#101418"]]) {
+    await page.evaluate(aiStatusTone, fill);
+    for (const n of [0, 5]) {
+      const tops = await page.evaluate(aiStackSetup, n);
+      if (tops !== Math.min(1, n)) fails.push(`${size} ${tone} ${n}: the status column shows ${tops} top cards, not ${Math.min(1, n)}`);
+      await page.screenshot({ path: `/cache/ai-unfolded-${size}-${tone}-${n}.png` });
+    }
+  }
+  await page.evaluate(async () => { const { powos } = await window.__gw.mod("./bridge.ts"); if (window.__stRestore) [powos.ai.verdict, powos.agents.message] = window.__stRestore; });
+  return fails;
+}
+
+/**
+ * The unfolded AI page in two columns (the manager's design, 11-01): at 821x883 and the inner screen sideways (883x821)
+ * the status page left and the chat right at ~42 / 58 (aiPanesFails), no nav pane, both on the backdrop, no monospace
+ * in the chat (aiPanesGlassFails), the segmented row swapping the right column, the left column the folded status page's
+ * own component (the same hero, sections and stack as folded). Renders: /cache/ai-unfolded-<size>-<tone>-<n>.png.
+ */
+async function aiUnfoldedCheck(page) {
+  const fails = [];
+  await page.evaluate(aiStackSetup, 5);
+  await page.evaluate(async () => { (await window.__gw.mod("./state.ts")).page.value = -1; });
+  await page.evaluate(() => window.__gw.until(() => document.querySelector(".ai-screen.status .ais-stack"), 3000));
+  const folded = await page.evaluate(aiStatusParts, ".ai-screen.status");
+  if (!folded) fails.push("folded: the AI page isn't the status page");
+  for (const [size, vp] of [["unfolded", { width: 821, height: 883 }], ["unfolded-land", { width: 883, height: 821 }]]) {
+    await page.setViewport(vp);
+    await page.evaluate((w) => window.__gw.until(() => innerWidth === w && document.querySelector(".ai-screen.panes"), 3000), vp.width);
+    const left = await page.evaluate(aiStatusParts, ".ai-screen .ai-left");
+    if (JSON.stringify(left) !== JSON.stringify(folded)) fails.push(`${size}: the status column ${JSON.stringify(left)} isn't the folded status page ${JSON.stringify(folded)}`);
+    if (!(await page.evaluate(aiChatSetup, [3, `-${size}-uf`]))) { fails.push(`${size}: the chat's try message didn't render`); continue; }
+    fails.push(...[...(await page.evaluate(aiPanesFails)), ...(await page.evaluate(aiColumnsContent)), ...(await page.evaluate(aiPanesGlassFails)), ...(await page.evaluate(aiSegsSwitch))].map((f) => `${size}: ${f}`));
+    await page.screenshot({ path: `/cache/ai-unfolded-${size}-chat.png` });
+    await page.evaluate(aiChatRestore);
+    fails.push(...(await aiUnfoldedRenders(page, size)));
+  }
   return fails;
 }
 
@@ -7713,12 +7806,15 @@ try {
   // Progress: a ring, one-line area cards with bars, no monospace, readable (the user, 2026-10-31 15:12).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-progress", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiProgressCheck(r.page))));
-  // Needs you answered in place, one source with the right column's Try this (the user, 2026-10-31 20:12).
+  // Needs you answered in place, one source with the unfolded status column's stack (the user, 2026-10-31 20:12).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-needs-you", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiNeedsCheck(r.page))));
   // The folded AI page is a status page, not a chat (the user, 2026-10-31: "I don't wanna see the chat").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-status", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiStatusCheck(r.page))));
+  // Unfolded two columns: the status page left, the chat right under its segmented row (the manager's design, 11-01).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-unfolded", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiUnfoldedCheck(r.page))));
   // THE backdrop (dev/backdrop-check.js; 2026-10-31 "the launcher ... not using the same dark background"): the widgets,
   // a folder, the shade, the launcher and its PowOS AI panel - one tint, one compositor blur. Both screens.
   if (process.env.SHELL_PAGES !== "0")

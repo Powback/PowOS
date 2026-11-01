@@ -6,8 +6,10 @@
  * up. Things to try arrive as the manager's messages with works / still broken (trycard.tsx), mail the agents sent the
  * user as messages under it. The rest - Progress, Agents & terminals, Devices - is behind the header's ⋯, each its own
  * screen with back (aimenu.tsx). Under it the shared field to ask (the mic: hold to talk and send, tap to dictate).
- * Unfolded the same chat, centred at reading width; Progress (from ⋯ or the strip) a glass sheet over its side.
  * Folded, the page (not the launcher's AI panel) is a status page instead of the chat (aistatus.tsx, 2026-10-31).
+ * Unfolded the page is two columns (the manager's design, 11-01): that same status page left, the chat right under a
+ * segmented row (Chat / Agents / Progress / Devices) that swaps the right column. A wide holder without panes (the
+ * panel) keeps the chat centred at reading width, Progress a glass sheet over its side.
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
@@ -25,7 +27,7 @@ import { MenuScreen, SCREENS, dailyDriver, type AiScreen } from "./aimenu.tsx";
 import { WorkFeed } from "./aiboard.tsx";
 import { agent, sessions as agentSessions } from "../agents.ts";
 import { untried } from "./trycard.tsx";
-import { AiContext, AiNav, FleetPane, useAgentsInPane } from "./aipanes.tsx";
+import { AiSegs, FleetPane, useAgentsInPane } from "./aipanes.tsx";
 import { AiStatus, noteAsked } from "./aistatus.tsx";
 
 // The board's state, for what reads it from here (perfrec, the gate, the renders): it lives in aiboard.tsx now.
@@ -274,7 +276,7 @@ function AiCompose() {
 
 /** The page's width, not the device's, picks the layout: chat + Progress side by side from WIDE_PX (the inner screen). */
 const WIDE_PX = 700;
-/** Under this height, wide is the folded screen turned sideways: the nav as icons, no right column. */
+/** Under this height, wide is the folded screen turned sideways (.rail: the two columns' spacing tighter). */
 const RAIL_H = 600;
 function useWide() {
   const ref = useRef<HTMLDivElement>(null);
@@ -342,29 +344,44 @@ function AiBody({ sub, shown }: { sub: AiScreen | null; shown: boolean }) {
   );
 }
 
-/**
- * The wide AI page in three panes (the user, 2026-10-31 13:29): the nav, the middle pane (the chat at reading width with
- * its field at the pane's foot, or the screen the nav or ⋯ picked, with back), the right context column (not in [rail]).
- */
-function AiPanes({ shown, rail }: { shown: boolean; rail: boolean }) {
-  const s = aiScreen.value;
-  useAgentsInPane(shown);
-  const sub = s === "chat" || s === "fleet" ? null : s;
+/** The segmented row's screens: shown in the right column with no header of their own (the row names them). */
+const SEGMENTED = new Set<AiScreen>(["chat", "fleet", "agents", "progress", "devices"]);
+
+/** The right column's content: the chat with its field, the Agents view, or a screen ([sub]: with back when no segment names it). */
+function RightBody({ s, shown }: { s: AiScreen; shown: boolean }) {
+  if (s === "fleet") return <FleetPane />;
+  if (s === "chat")
+    return (
+      <>
+        <AiBody sub={null} shown={shown} />
+        <AiCompose />
+      </>
+    );
   return (
     <>
-      <AiNav rail={rail} shown={shown} />
-      <div class="ai-mid tile">
-        {s === "fleet" ? (
-          <FleetPane />
-        ) : (
-          <>
-            <AiHeader sub={sub} strip={false} title={false} />
-            <AiBody sub={sub} shown={shown} />
-            {!sub && <AiCompose />}
-          </>
-        )}
+      {!SEGMENTED.has(s) && <AiHeader sub={s} />}
+      <AiBody sub={s} shown={shown} />
+    </>
+  );
+}
+
+/**
+ * The unfolded AI page in two columns (the manager's design, 11-01; the user: "the unfolded page is still a bit shit"):
+ * left (~42%) the folded status page itself (StatusColumn, beside the chat: no field of its own), right (~58%) the
+ * segmented row and what it picked - the chat (its field at the column's foot) by default. Both on the backdrop's glass.
+ */
+function AiPanes({ shown }: { shown: boolean }) {
+  const s = aiScreen.value;
+  useAgentsInPane(shown);
+  return (
+    <>
+      <section class="ai-left tile" aria-label="status">
+        <StatusColumn shown={shown} beside />
+      </section>
+      <div class="ai-right tile">
+        <AiSegs shown={shown} />
+        <RightBody s={s} shown={shown} />
       </div>
-      {!rail && <AiContext />}
     </>
   );
 }
@@ -377,7 +394,7 @@ export function AiView({ shown, cls, pill = true, panes = false }: { shown: bool
   if (panes && wide)
     return (
       <div ref={ref} class={`${aiViewClass(cls, true, false)} panes ${rail ? "rail" : ""}`}>
-        <AiPanes shown={shown} rail={rail} />
+        <AiPanes shown={shown} />
       </div>
     );
   // The page folded: one pane of the backdrop's glass under its header and the status page (shell.css .ai-glass).
@@ -392,9 +409,10 @@ export function AiView({ shown, cls, pill = true, panes = false }: { shown: bool
 
 /**
  * The AI page folded: the status page (aistatus.tsx; the user, 2026-10-31: "I don't wanna see the chat") - its header's
- * ⋯ opens the same screens (Progress, Agents & terminals, Devices, Friction), the field asks the manager.
+ * ⋯ opens the same screens (Progress, Agents & terminals, Devices, Friction), the field asks the manager. [beside]:
+ * unfolded, the page's left column (the screens open in the right one, the chat's field is the ask).
  */
-function StatusColumn({ shown }: { shown: boolean }) {
+function StatusColumn({ shown, beside = false }: { shown: boolean; beside?: boolean }) {
   const [menu, setMenu] = useState(false);
   const more = (
     <button type="button" class="ai-more" aria-label="more" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
@@ -403,7 +421,7 @@ function StatusColumn({ shown }: { shown: boolean }) {
   );
   return (
     <>
-      <AiStatus shown={shown} more={more} compose={<AiCompose />} mic={pageMic} />
+      <AiStatus shown={shown} more={more} compose={beside ? null : <AiCompose />} mic={pageMic} beside={beside} />
       {menu && <div class="ai-menu-scrim" onClick={() => setMenu(false)} />}
       {menu && <Menu close={() => setMenu(false)} />}
     </>

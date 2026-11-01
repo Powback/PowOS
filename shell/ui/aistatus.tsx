@@ -7,7 +7,8 @@
  * live agents: task, step now, a thin bar that fills smoothly, the step cross-fading when it changes), Recently done
  * (closed). A section with nothing in it isn't drawn. At the foot the shared field to ask the manager (powai.tsx's
  * send path), its reply as one bubble over the field - never a transcript - and "Open chat": the launcher's AI panel.
- * The unfolded page (aipanes.tsx) is unchanged.
+ * Unfolded the same component is the page's left column (powai.tsx, [beside]): the chat is its right column, so its foot
+ * keeps only the mic chip - no field, reply bubble or "Open chat" of its own.
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { computed, signal } from "@preact/signals";
@@ -266,6 +267,22 @@ function MicChip({ mic }: { mic: MicTarget }) {
   );
 }
 
+/** The foot folded: the reply bubble or the mic chip, "Open chat", the field. */
+function Foot({ mic, compose }: { mic: MicTarget; compose: preact.ComponentChildren }) {
+  return (
+    <div class="ais-foot">
+      <div class="ais-foot-row">
+        <ReplyBubble />
+        <MicChip mic={mic} />
+        <button type="button" class="ais-open-chat" onClick={openChat}>
+          Open chat
+        </button>
+      </div>
+      {compose}
+    </div>
+  );
+}
+
 /** The hero: the daily driver's ring and two lines - its name and share, then what's going on. */
 function Hero({ needs, working, more }: { needs: number; working: number; more: preact.ComponentChildren }) {
   const ring = driverPct(areaStats(board.value, Date.now(), needIds(needsYou())));
@@ -283,9 +300,11 @@ function Hero({ needs, working, more }: { needs: number; working: number; more: 
 
 /**
  * The status page: hero, sections, foot. [more]: the header's ⋯ (powai.tsx owns its menu); [compose]: its field;
- * [mic]: the field's mic target (a hold anywhere on the page talks into it). Off screen ([shown] false) it is at rest.
+ * [mic]: the field's mic target (a hold anywhere on the page talks into it); [beside]: the chat is beside it (unfolded).
+ * Off screen ([shown] false) it is at rest.
  */
-export function AiStatus({ shown, more, compose, mic }: { shown: boolean; more: preact.ComponentChildren; compose: preact.ComponentChildren; mic: MicTarget }) {
+export function AiStatus(props: { shown: boolean; more: preact.ComponentChildren; compose?: preact.ComponentChildren; mic: MicTarget; beside?: boolean }) {
+  const { shown, more, mic } = props;
   useAgents();
   const hold = useHoldToTalk(mic);
   const needs = needsYou();
@@ -302,16 +321,13 @@ export function AiStatus({ shown, more, compose, mic }: { shown: boolean; more: 
         <RecentlyDone rows={done} />
         {quiet && <div class="ais-empty">Nothing waits on you and no agent is working right now.</div>}
       </div>
-      <div class="ais-foot">
-        <div class="ais-foot-row">
-          <ReplyBubble />
+      {props.beside ? (
+        <div class="ais-foot">
           <MicChip mic={mic} />
-          <button type="button" class="ais-open-chat" onClick={openChat}>
-            Open chat
-          </button>
         </div>
-        {compose}
-      </div>
+      ) : (
+        <Foot mic={mic} compose={props.compose} />
+      )}
     </>
   );
 }

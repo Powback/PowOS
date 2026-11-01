@@ -7,9 +7,10 @@
  * on the page's own rows: its STDB rows carry no truth/why column.
  *
  * ONE selector for every place that says "needs you": Progress's Needs you card and area chips (aiprogress.tsx) and the
- * wide page's Try this column (aipanes.tsx). An answer goes through trycard.tsx's TryLine - the same calls as the chat's
- * present_try card (recordVerdict / doneAsk / sendCantMail / answerMail) and the same answers store, so the row leaves at
- * once and comes back with one plain line when the call failed.
+ * status page's Needs you stack, folded and as the unfolded left column (aistatus.tsx). An answer goes through
+ * trycard.tsx's TryLine - the same calls as the chat's present_try card (recordVerdict / doneAsk / sendCantMail /
+ * answerMail) and the same answers store, so the row leaves at once and comes back with one plain line when the call
+ * failed.
  */
 import { useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
@@ -182,16 +183,5 @@ export function NeedSection({ title, sec, needs }: { title: string; sec: string;
       </h3>
       <NeedList rows={rows} />
     </section>
-  );
-}
-
-/** The wide page's Try this: the same open asks, each with its sentence and controls (its id once, newest first). */
-export function TryThis({ needs }: { needs: Need[] }) {
-  return (
-    <div class="ai-ctx-try">
-      {needs.slice(0, 6).map((n) => (
-        <TryLine key={n.w.id} it={itemOf(n)} at="col" />
-      ))}
-    </div>
   );
 }
