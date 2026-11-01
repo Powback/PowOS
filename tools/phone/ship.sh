@@ -240,6 +240,16 @@ run)
     if [ -n "$rchg" ] && [ "$(cat "$Q/failed-rooted" 2>/dev/null)" != "$h" ]; then
       [ "$(cat "$Q/rooted-pending" 2>/dev/null)" = "$rbase $h" ] || echo "$rbase $h" > "$Q/rooted-pending"; return 0; fi
     rm -f "$Q/rooted-pending"; return 1; }
+  # rooted_after_apk: HEAD has APK inputs the installed build lacks (and its APK didn't fail): the rooted deploy waits
+  # for that install (11-01: a pass that saw the tip before its request - a runner on its way out fetched it, rooted_due
+  # alone kept it in the loop - had no APK to launch, so it could run the rooted deploy FIRST). rooted_go = due and not
+  # waiting: what keeps the runner up and what lets step 4 run. An APK nobody requested
+  # doesn't keep the runner up: the request that brings it restarts the runner, which then runs both in order.
+  rooted_after_apk() { local h i; h=$(git rev-parse HEAD 2>/dev/null) || return 1
+    i=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true); [ -n "$i" ] || return 1
+    git merge-base --is-ancestor "$h" "$i" 2>/dev/null && return 1
+    [ -n "$(apk_inputs "$i" "$h")" ] && [ "$(cat "$Q/failed-apk" 2>/dev/null)" != "$h" ]; }
+  rooted_go() { rooted_due && ! rooted_after_apk; }
   # The APK ship runs BESIDE the loop, in its own checkout (it builds from it for minutes while ship_tree resets $SR),
   # so a shell change never queues behind an APK's build or idle wait (2026-10-23: shell fixes waited 25-30 min behind
   # one APK). State in $Q/apk/: tip, pid, rc (written when it ends).
@@ -252,6 +262,10 @@ run)
     [ -d "$Q/apk" ] && [ ! -f "$Q/apk/rc" ] || return 1
     kill -0 "$(cat "$Q/apk/pid" 2>/dev/null)" 2>/dev/null && return 0
     echo 4 > "$Q/apk/rc"; return 1; }
+  # apk_out: an APK ship out, or ended and not reaped yet. 11-01 (CI "APK then rooted", ~1 in 4): an APK that ended
+  # after this pass's reap_apk read !apk_alive in step 2, which relaunched it - apk_launch's rm -rf $Q/apk threw away
+  # the unreaped rc, so the same tip installed twice (APK,APK,ROOTED). Steps 2-4 start nothing until the loop top reaps.
+  apk_out() { apk_alive || [ -f "$Q/apk/rc" ]; }
   apk_launch() {   # $1 tip, rest: --note/--silent
     local a=$1; shift
     if [ ! -e "$SA/.git" ]; then
@@ -610,7 +624,7 @@ run)
   }
   reap_apk   # runner start: a previous runner's finished APK
   while :; do
-    while ls "$Q"/*.req >/dev/null 2>&1 || rooted_due; do
+    while ls "$Q"/*.req >/dev/null 2>&1 || rooted_go; do
       ship_tree >/dev/null || { sleep "$POLL"; continue; }
       T=$(git rev-parse HEAD)
       inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
@@ -647,8 +661,8 @@ run)
           sreqs+=("$r")
         fi
       done
-      # No request covers this tip: only a pending rooted deploy keeps the loop here (rooted_due above).
-      [ ${#whos[@]} -gt 0 ] || rooted_due || { sleep "$POLL"; continue; }
+      # No request covers this tip: only a pending rooted deploy keeps the loop here (rooted_go above).
+      [ ${#whos[@]} -gt 0 ] || rooted_go || { sleep "$POLL"; continue; }
       who_s=$(printf '%s\n' ${whos[@]+"${whos[@]}"} | sed '/^$/d' | sort -u | paste -sd, -); who_s=${who_s:-"$(cut -c6- "$Q/rooted-note" 2>/dev/null | head -1)"}
       joined() { printf '%s\n' "$@" | sed '/^$/d' | paste -sd';' - | sed 's/;/; /g'; }
       # The apps step's changes (step 3), known up front: a vendored app's module change (vmods: "app db" lines) ties
@@ -780,7 +794,7 @@ run)
         [ ${#sreqs[@]} -gt 0 ] && echo "$(date +%T) ${T:0:9}: nothing differs from what's live - ${#sreqs[@]} request(s) done"
       fi
       # 2. The APK, beside the loop: once origin stayed QUIET s on the tip, one at a time, not again on a tip that failed.
-      if [ ${#areqs[@]} -gt 0 ] && ! apk_alive && [ "$age" -ge "$QUIET" ] && [ "$(cat "$Q/failed-apk" 2>/dev/null)" != "$T" ]; then
+      if [ ${#areqs[@]} -gt 0 ] && ! apk_out && [ "$age" -ge "$QUIET" ] && [ "$(cat "$Q/failed-apk" 2>/dev/null)" != "$T" ]; then
         an=$(joined ${anotes[@]+"${anotes[@]}"})
         if [ -n "$an" ]; then na=(--note "$an"); else na=(--silent); fi
         why="no record of the installed build"; [ -n "$inst" ] && why="APK inputs changed: $(apk_inputs "$inst" "$T" | head -3 | paste -sd' ' -)"
@@ -812,7 +826,7 @@ run)
       if [ -n "$vwait" ] && [ -n "$achg" ]; then
         [ "$(cat "$Q/apps-held" 2>/dev/null)" = "$T" ] || { echo "$T" > "$Q/apps-held"
           echo "$(date +%T) ${T:0:9}: apps held - the shell's bindings for$vwait aren't live yet (the module goes first, with the shell's ship)"; }
-      elif [ -n "$achg" ] && ! apk_alive && [ "$age" -ge "$QS" ] && [ "$(cat "$Q/failed-apps" 2>/dev/null)" != "$T" ]; then
+      elif [ -n "$achg" ] && ! apk_out && [ "$age" -ge "$QS" ] && [ "$(cat "$Q/failed-apps" 2>/dev/null)" != "$T" ]; then
         rm -f "$Q/apps-held"
         if verify_held; then echo $$ > "$Q/wants-phone"
         elif ship_lock; then
@@ -853,7 +867,7 @@ run)
       if rooted_due; then
         [ -z "$rn" ] || printf 'who: %s\n%s\n' "$who_s" "$rn" > "$Q/rooted-note"
       else rchg=; fi
-      if [ -n "$rchg" ] && ! apk_alive && [ "$age" -ge "$QS" ]; then
+      if [ -n "$rchg" ] && ! apk_out && ! rooted_after_apk && [ "$age" -ge "$QS" ]; then
         if verify_held; then echo $$ > "$Q/wants-phone"
         elif ship_lock; then
           echo $$ > "$Q/installing"
@@ -878,13 +892,13 @@ run)
           fi
         fi
       fi
-      ! { ls "$Q"/*.req >/dev/null 2>&1 || rooted_due; } || sleep "$POLL"
+      ! { ls "$Q"/*.req >/dev/null 2>&1 || rooted_go; } || sleep "$POLL"
     done
     # An APK ship still out: stay and reap it (the loop above reaps once its rc exists) before the idle exit.
     apk_alive && { sleep "$POLL"; continue; }
     [ -f "$Q/apk/rc" ] && { reap_apk; continue; }
     # A rooted deploy still due (its APK just installed, say): one more pass, never while paused.
-    [ ! -e "$Q/paused" ] && ship_tree >/dev/null && rooted_due && continue
+    [ ! -e "$Q/paused" ] && ship_tree >/dev/null && rooted_go && continue
     rm -rf "$L"
     [ -e "$Q/paused" ] && break
     # A request written while this runner was on its way out: take the lock again and serve it.

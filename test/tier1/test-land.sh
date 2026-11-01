@@ -285,6 +285,23 @@ for path_prefix in "targets/android" "apps" "lib" "tools/app-api"; do
   grep -q "ship requested" <<<"$out" && ok "$path_prefix/ change triggers automatic ship request" || bad "$path_prefix/ change triggers automatic ship request" "$out"
 done
 
+# == 16. a new HACK marker without a registry row is refused, with the row to add; with the row it lands ======
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+WH="$TMP/w_hack"; new_worktree "$WH"
+mkdir -p "$WH/test/tier1" "$WH/docs"
+cp "$REPO_ROOT/test/tier1/test-hack-registry.sh" "$WH/test/tier1/"
+printf '# reg\n<!-- hack-registry:start -->\n| file | why | fix |\n|---|---|---|\n<!-- hack-registry:end -->\n' > "$WH/docs/REMOTE-POWOS.md"
+git -C "$WH" add test docs && git -C "$WH" commit -q -m "registry" && git -C "$WH" push -q origin "$LAND_BASE"
+printf 'a\n# HACK''%s why. Real fix: later.\n' ':' > "$WH/hacky.sh"
+out=$(cd "$WH" && "$LAND" "add a hack" -- hacky.sh --no-ship 2>&1); rc=$?
+[ $rc -ne 0 ] && grep -q '| `hacky.sh:2` |' <<<"$out" \
+  && ok "a marker without a row is refused with the row to add (hacky.sh:2)" \
+  || bad "a marker without a row is refused with the row to add (hacky.sh:2)" "rc=$rc: $out"
+printf '| `hacky.sh:2` | why | fix |\n' > "$TMP/row"
+sed -i.bak "/^|---|/r $TMP/row" "$WH/docs/REMOTE-POWOS.md" && rm -f "$WH/docs/REMOTE-POWOS.md.bak"
+out=$(cd "$WH" && "$LAND" "add a hack" -- hacky.sh docs/REMOTE-POWOS.md --no-ship 2>&1); rc=$?
+[ $rc -eq 0 ] && ok "the marker with its row in the same landing lands" || bad "the marker with its row in the same landing lands" "rc=$rc: $out"
+
 echo ""
 echo "== Results: $PASS passed, $FAIL failed =="
 [ $FAIL -eq 0 ]
