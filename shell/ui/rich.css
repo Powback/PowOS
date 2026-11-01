@@ -265,3 +265,14 @@
 .try-said { font-size: var(--text-small); }
 .try-said.error { color: var(--color-red); }
 .try-item .ai-reply { margin: 0; }
+
+/* A perf trace the user recorded (rich.tsx PerfCard): the user's bubble, compact - title, the numbers on one line, the file. */
+.msg.user.perf { display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-width: min(260px, 85%); font: inherit; text-align: start; border: 0; cursor: pointer; }
+.perf-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.perf-title { flex: none; font-weight: 600; }
+.perf-sub, .perf-file { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--text-small); color: var(--color-muted); }
+.perf-nums { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: var(--text-small); }
+.perf-num b { font-size: var(--text-body); font-weight: 600; font-variant-numeric: tabular-nums; }
+.perf-full { display: flex; flex-direction: column; gap: 8px; }
+.perf-path { font-size: var(--text-small); color: var(--color-muted); overflow-wrap: anywhere; }
+.perf-json { margin: 0; font-size: var(--text-small); white-space: pre-wrap; overflow-wrap: anywhere; }

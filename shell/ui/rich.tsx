@@ -603,3 +603,77 @@ export function MailCard({ text }: { text: string }) {
     </div>
   );
 }
+
+/** A perf trace's summary (fpsmeter.tsx summarise), the parts the card shows. */
+interface PerfSum {
+  mode?: string;
+  durationMs?: number;
+  frames?: number;
+  jank?: number;
+  fps?: { p50?: number; p5?: number; min?: number };
+  worstFrames?: { at: number; ms: number }[];
+}
+
+/**
+ * The FPS meter's recording as sent (fpsmeter.tsx saveAndSend: "Perf trace (...). Full data: <path>" and a ```json
+ * summary): its file's path and the summary, else null.
+ */
+export function perfOf(text: string): { path: string | null; sum: PerfSum } | null {
+  if (!text.startsWith("Perf trace (")) return null;
+  const j = text.match(/```json\n([\s\S]*?)\n```/);
+  if (!j) return null;
+  try {
+    const sum = JSON.parse(j[1]) as PerfSum;
+    return { path: text.match(/Full data: (\S+)/)?.[1] ?? null, sum };
+  } catch {
+    return null;
+  }
+}
+
+const n1 = (x: number | undefined) => (x == null ? "?" : String(Math.round(x)));
+
+/**
+ * A perf trace the user recorded (the FPS meter's tap): a compact card, not the JSON - fps p50 / p5, the worst frame,
+ * how long and in which mode, and the full file's name; a tap opens the whole summary.
+ */
+export function PerfCard({ text }: { text: string }) {
+  const p = perfOf(text)!;
+  const { sum } = p;
+  const worst = sum.worstFrames?.[0];
+  const file = p.path?.split("/").pop() ?? null;
+  const secs = sum.durationMs != null ? `${(sum.durationMs / 1000).toFixed(1)} s` : "";
+  const open = () =>
+    openFull(file ?? "Perf trace", (
+      <div class="perf-full">
+        {p.path && <div class="perf-path">{p.path}</div>}
+        <pre class="perf-json">{JSON.stringify(sum, null, 2)}</pre>
+      </div>
+    ));
+  return (
+    <button type="button" class="msg user perf" onClick={open} aria-label="perf trace, tap for the summary">
+      <span class="perf-head">
+        <span class="perf-title">Perf trace</span>
+        <span class="perf-sub">{[sum.mode, secs].filter(Boolean).join(" · ")}</span>
+      </span>
+      <span class="perf-nums">
+        <span class="perf-num">
+          <b>{n1(sum.fps?.p50)}</b> fps p50
+        </span>
+        <span class="perf-num">
+          <b>{n1(sum.fps?.p5)}</b> p5
+        </span>
+        {worst && (
+          <span class="perf-num">
+            <b>{n1(worst.ms)}</b> ms worst
+          </span>
+        )}
+        {sum.jank != null && (
+          <span class="perf-num">
+            <b>{sum.jank}</b> janky
+          </span>
+        )}
+      </span>
+      <span class="perf-file">{file ?? "full data not saved"}</span>
+    </button>
+  );
+}

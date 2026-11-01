@@ -6,7 +6,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { chat, query } from "../state.ts";
 import { powos } from "../bridge.ts";
 import type { ChatItem } from "../types.ts";
-import { MailCard, Queued, Said, SentImages, Thread, ToolRun, mailOf } from "./rich.tsx";
+import { MailCard, PerfCard, Queued, Said, SentImages, Thread, ToolRun, mailOf, perfOf } from "./rich.tsx";
 // Its ```try blocks (things to try, with works / still broken): registered with rich.tsx on import.
 import "./trycard.tsx";
 
@@ -17,6 +17,8 @@ const SHOWN = 40;
 export function Item({ item, reply = null }: { item: ChatItem; reply?: string | null }) {
   switch (item.kind) {
     case "user":
+      // A perf trace the FPS meter sent: a compact card, not its JSON.
+      if (perfOf(item.text)) return <PerfCard text={item.text} />;
       // The question only: the screen the side button sent along with it (assist.tsx) isn't part of what was said.
       return (
         <div class="msg user">
