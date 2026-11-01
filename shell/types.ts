@@ -959,7 +959,7 @@ export interface Bridge {
     slide?(op: "start" | "move" | "settle" | "cancel", data?: unknown): Promise<boolean>;
   };
   /**
-   * Web windows (the phone's only; off unless Settings.Global powos_web_windows = 1): an Android app's window as an
+   * Web windows (the phone's only; on unless Settings.Global powos_web_windows = 0): an Android app's window as an
    * element of home (ui/webwindows.tsx) - the page owns its place, page, z-order and title bar; the host composites
    * the app's display under the page at the element (rects are CSS px in the viewport). Geometry and z-order go over the
    * native port, frame-synced ("w.f", ui/webwindows.tsx), not through this bridge.

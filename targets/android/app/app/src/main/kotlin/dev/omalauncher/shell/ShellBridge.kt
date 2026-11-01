@@ -69,7 +69,7 @@ class ShellBridge(
     private val widgets = ShellWidgets(runtime, scope, ::emit)
     private val terminals = ShellTerminals(runtime, scope, ::emit)
     private val media = ShellMedia(context, runtime, scope, ::emit)
-    /** Android apps as home elements (off unless Settings.Global powos_web_windows = 1; home's activity only). */
+    /** Android apps as home elements (on unless Settings.Global powos_web_windows = 0; home's activity only). */
     private val webWindows by lazy { WebWindows(context, web, ::emit) }
 
     @Volatile private var webWindowsMade = false

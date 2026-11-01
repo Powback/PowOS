@@ -27,8 +27,8 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 
 /**
- * Web windows: an Android app's window as an element of PowOS home (unfolded, `Settings.Global powos_web_windows` = 1;
- * off by default). docs/WEB_WINDOWS.md, steps S1-S3.
+ * Web windows: an Android app's window as an element of PowOS home (unfolded; on by default, `Settings.Global
+ * powos_web_windows` = 0 turns it off). docs/WEB_WINDOWS.md, steps S1-S3.
  *
  * Why - the user, 2026-10-29: "its because we arent doing it natively inside powos. like the powos home typescript
  * should deal with the windows and their content", "it should be pinned to a page properly natively", "idk why you do
@@ -173,7 +173,7 @@ class WebWindows(
             else -> "floating"
         }
 
-    /** Off unless `settings put global powos_web_windows 1`. */
+    /** On by default (the board's "switch on", 11-01); `settings put global powos_web_windows 0` turns it off. */
     fun enabled(): Boolean = on(context)
 
     private val displayListener =
@@ -3972,7 +3972,10 @@ class WebWindows(
         private const val HOME_GRACE_MS = 4000L
 
         /** Web windows on: Android apps opened from the wide home are web windows (only those stand the old path down: WebWindowDisplays). */
-        fun on(context: Context): Boolean = runCatching { Settings.Global.getInt(context.contentResolver, SETTING, 0) == 1 }.getOrDefault(false)
+        fun on(context: Context): Boolean = isOn(runCatching { Settings.Global.getInt(context.contentResolver, SETTING) }.getOrNull())
+
+        /** Web windows are THE window path (board "device check, then switch on", 11-01): on unless stored 0; unset = on. */
+        fun isOn(stored: Int?): Boolean = stored != 0
         private const val PLACE_LOG_MS = 1000L
 
         /** RS1: the fill under a resized app stays this long after release (its final relayout's ~100-200 ms). */

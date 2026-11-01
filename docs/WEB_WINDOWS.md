@@ -1,6 +1,6 @@
 # Web windows: THE window architecture (Android + Linux, desktop mode)
 
-Status: **design, 2026-10-30.** Docs only; no code changed with this note. Phone: OnePlus Open CPH2551,
+Status: **design, 2026-10-30; on by default since 2026-11-01** (`powos_web_windows` = 0 turns it off). Docs only; no code changed with this note. Phone: OnePlus Open CPH2551,
 SM8550, SDK 36, OxygenOS 16.
 
 The user, 2026-10-30: **"the whole way we integrate windows is still hacky, it needs to be handled properly fully

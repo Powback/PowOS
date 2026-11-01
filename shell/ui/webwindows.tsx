@@ -1,5 +1,5 @@
-// Web windows: an app's window as an ELEMENT of home's page (unfolded; off unless Settings.Global powos_web_windows =
-// 1). docs/WEB_WINDOWS.md "Element model". The user, 2026-10-30: "the whole way we integrate windows is still hacky, it
+// Web windows: an app's window as an ELEMENT of home's page (unfolded; on unless Settings.Global powos_web_windows =
+// 0). docs/WEB_WINDOWS.md "Element model". The user, 2026-10-30: "the whole way we integrate windows is still hacky, it
 // needs to be handled properly fully inside the powos web ui", "The apps were supposed to be working directly in the
 // webview". This file is the window: its model (page, position, size, scale, z-order = list order = DOM order,
 // minimised/maximised, tiles) AND its element - the title bar, buttons, edges, tile menu and dividers are DOM, plain
