@@ -241,7 +241,7 @@ e2e_args() {
 # a FAIL (the emulator has no Linux session to test it with; the phone run still covers it).
 skip_linux() { step "$1" "$2"; note "skipped: --android-only (no Linux session on this lane)"; }
 e2e_init() {
-  JOURNEY=$1; LO=$(((PART - 1) * 25 + 1)); HI=$((PART * 25)); N=$((LO - 1)); NPASS=0; NFAIL=0; DONE=0
+  JOURNEY=$1; LO=$(((PART - 1) * 25 + 1)); HI=$((PART * 25)); N=$((LO - 1)); NPASS=0; NFAIL=0; NSKIP=0; DONE=0; APID0=
   CUR=setup; CURD=setup; CURX=
   UDIR=/home/powos/design-qa/e2e-$JOURNEY/$ROUND; PDIR=/data/powos/root$UDIR
   OUT=$HOME/.cache/powos-verify/e2e-$JOURNEY-$ROUND; mkdir -p "$OUT"; STEPS=$OUT/steps-$PART.txt; : > "$STEPS"; : > "$OUT/log.txt"
@@ -259,6 +259,7 @@ step() {
   "$T/shot.sh" --phone "$PDIR/$CUR" >/dev/null 2>&1; local rc=$?
   [ $rc = 0 ] || { [ $rc = 4 ] && CURX=" (screenshot came back blank)" || CURX=" (no screenshot, rc $rc)"; }
   [ $rc = 0 ] && CURX=""
+  [ -n "$APID0" ] || APID0=$(apppid)
 }
 # A detail with a newline (a page's innerText) was cut at it in steps.txt and the log: flatten control chars to spaces.
 _res() { local m=${2//[[:cntrl:]]/ }; printf '%s\t%s%s\t%s: %s\n' "$CUR" "$CURD" "$CURX" "$1" "$m" >> "$STEPS"; echo "$1: [${CUR%.png}] $m" | tee -a "$OUT/log.txt"; }
@@ -266,7 +267,7 @@ pass() { NPASS=$((NPASS + 1)); _res PASS "$*"; }
 # Evidence (2026-10-28): the phone's logcat ring wraps in ~1 min, so a FAIL left nothing to diagnose from. The journey keeps
 # its own window/shell log ($PDIR/logcat-<part>.txt, e2e_logcat_start); a FAIL copies its last 400 lines next to the
 # step's screenshot (NN-step.logcat.txt) and names the file in the FAIL line.
-LOGCAT_TAGS="PowosWindowFrames:V WindowTasks:V PowosWindow:V PowosFreeform:V PowosPageSlide:V PowosRunning:V PowosShell:V chromium:D"
+LOGCAT_TAGS="PowosWebWindows:V PowosWindowFrames:V WindowTasks:V PowosWindow:V PowosFreeform:V PowosPageSlide:V PowosRunning:V PowosShell:V chromium:D"
 e2e_logcat_start() {
   [ -n "${PDIR:-}" ] || return 0
   ash <<EOF
@@ -281,7 +282,27 @@ e2e_logcat_stop() {
 f=$PDIR/logcat-$PART.txt; [ -f \$f.pid ] && kill \$(cat \$f.pid) 2>/dev/null; : > \$f.pid; chmod -R a+rX $PDIR
 EOF
 }
+# A step interrupted is not judged (round 203, 11-01: six FAILs from a doze, a user touch and an APK install that
+# restarted PowOS mid-step - "Kate from search: window w3, bounds " was the new process's empty window list). On a
+# failing check, interrupted() says why the step couldn't be judged: the screen not Awake or the keyguard up (asleep()'s
+# rule from window-render.sh, incl. the 11-01 keyguard rule: a locked phone draws no app), its screenshot refused for
+# that (shot.sh rc 3), a real touch-down since the start (the touch guard's count), or PowOS's process not the one the
+# journey started with (an install or a crash: its windows are gone). Never wakes the screen.
+apppid() { sh_ "pidof com.powos.app" | awk '{print $1}'; }
+interrupted() {
+  [ "${POWOS_DEVICE:-phone}" = emu ] && return 1
+  local w q p; w=$("$A" shell "dumpsys power | grep -m1 mWakefulness=" </dev/null 2>/dev/null | tr -d '\r ' | cut -d= -f2)
+  if [ -n "$w" ] && [ "$w" != Awake ]; then echo "the screen is $w"; return 0; fi
+  "$A" shell "dumpsys window | grep -m1 isKeyguardShowing" </dev/null 2>/dev/null | grep -q "isKeyguardShowing=true" && { echo "the phone is locked (keyguard up)"; return 0; }
+  case $CURX in *"rc 3"*) echo "its screenshot was refused: the screen was off/dozing"; return 0 ;; esac
+  q=$(irq); if [ -n "$q" ] && [ "$q" != -1 ] && [ -n "${I0:-}" ] && [ "$q" != "$I0" ]; then echo "the user touched the phone"; return 0; fi
+  p=$(apppid); if [ -n "$APID0" ] && [ "$p" != "$APID0" ]; then echo "PowOS restarted (pid $APID0 -> ${p:-none}: an install or a crash)"; return 0; fi
+  return 1
+}
+# skipped <why> <check>: a step's check not judged - a SKIP line, counted apart from FAILs.
+skipped() { NSKIP=$((NSKIP + 1)); _res SKIP "(interrupted: $1) $2"; }
 fail() {
+  local why; why=$(interrupted) && { skipped "$why" "$*"; return 0; }
   NFAIL=$((NFAIL + 1)); local lc="$PDIR/${CUR%.png}.logcat.txt"
   sh_ "tail -n 400 $PDIR/logcat-$PART.txt > $lc; chmod a+r $lc" >/dev/null 2>&1
   _res FAIL "$* [logcat: $lc]"
@@ -308,13 +329,16 @@ publish() {
 d=$PDIR; mkdir -p \$d; touch \$d/steps.txt
 grep -v '^#' \$d/steps.txt | awk -F- -v lo=$LO -v hi=$HI '!((\$1 + 0) >= lo && (\$1 + 0) <= hi)' > \$d/.s
 cat $tmp >> \$d/.s 2>/dev/null; rm -f $tmp
-{ echo "# e2e-$JOURNEY round $ROUND: one line per screenshot - file, what the user did / saw, PASS / FAIL / NOTE"; sort \$d/.s; } > \$d/steps.txt; rm -f \$d/.s
+{ echo "# e2e-$JOURNEY round $ROUND: one line per screenshot - file, what the user did / saw, PASS / FAIL / SKIP / NOTE"; sort \$d/.s; } > \$d/steps.txt; rm -f \$d/.s
 chown $E2E_UID:$E2E_UID /data/powos/root/home/powos/design-qa; chown -R $E2E_UID:$E2E_UID /data/powos/root/home/powos/design-qa/e2e-$JOURNEY
 chmod -R a+rX /data/powos/root/home/powos/design-qa/e2e-$JOURNEY
 EOF
 }
 mail_manager() {
-  local msg="E2E round $ROUND ready: $UDIR"
+  local msg="E2E round $ROUND ready: $UDIR" n
+  # The round's counts over every part: interrupted steps (SKIP, not judged) apart from FAILs.
+  n=$(sh_ "f=$PDIR/steps.txt; echo \$(grep -c \"PASS: \" \$f) passed, \$(grep -c \"FAIL: \" \$f) failed, \$(grep -c \"SKIP: (interrupted\" \$f) skipped \(interrupted\)")
+  [ -n "$n" ] && msg="$msg - $n"
   # The round's skipped / aborted journeys (user active, a touch): named, so a missing part isn't read as a pass.
   [ -n "${sk:-}" ] && msg="$msg - skipped/aborted (re-queued, not FAILs): $(printf '%s\n' "$sk" | cut -d' ' -f2- | paste -sd';' - | sed 's/;/; /g')"
   printf 'powos comms send manager %q --from e2e\n' "$msg" > "$OUT/mail.sh"
@@ -416,7 +440,7 @@ e2e_abort() {
   local rc=$?
   [ $DONE = 1 ] || { e2e_restore; publish; }
   [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"
-  [ $DONE = 1 ] || echo "e2e-$JOURNEY part $PART ended early (rc $rc) - $NPASS passed, $NFAIL failed; steps so far in $UDIR"
+  [ $DONE = 1 ] || echo "e2e-$JOURNEY part $PART ended early (rc $rc) - $NPASS passed, $NFAIL failed, ${NSKIP:-0} skipped (interrupted); steps so far in $UDIR"
 }
 # e2e_finish: the end step (after the restore: home as it started, nothing of the journey's left, the layout the same),
 # steps.txt published, the manager mailed after the last part; the summary line last (the board's step).
@@ -437,7 +461,7 @@ e2e_finish() {
   [ -n "$sk" ] && log "skipped / aborted in this round so far (not FAILs, re-queued):" && printf '%s\n' "$sk" | sed 's/^/  /' | tee -a "$OUT/log.txt"
   [ "$PART" = "$LAST" ] && mail_manager
   DONE=1
-  local s="e2e-$JOURNEY round $ROUND part $PART/$LAST: $NPASS passed, $NFAIL failed - $UDIR"
+  local s="e2e-$JOURNEY round $ROUND part $PART/$LAST: $NPASS passed, $NFAIL failed, $NSKIP skipped (interrupted) - $UDIR"
   [ $NFAIL = 0 ] && echo "PASS $s" || { echo "FAIL $s ($(grep -c FAIL "$STEPS") FAIL lines in steps.txt)"; print_fails; }
 }
 # print_fails: every FAIL step line of steps.txt, untruncated, so the done log says WHY (not only how many).
