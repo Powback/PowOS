@@ -20,8 +20,10 @@ import { fleet, headline, ownWords, restartNote, shorten, stepsOf, taskOf, workR
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import { useDb, useRows } from "../apps/stdb.ts";
 import { takeTap } from "./taps.ts";
-import type { Agent, AgentEvent, AgentTask, HomeItem } from "../types.ts";
+import type { Agent, AgentConvoItem, AgentEvent, AgentTask, ChatItem, HomeItem } from "../types.ts";
 import { TermButton, useSessions } from "./terms.tsx";
+import { Item } from "./chat.tsx";
+import { Thread } from "./rich.tsx";
 
 /** "4m", "1h 5m": how long [ms] milliseconds took. */
 const took = (ms: number) => {
@@ -593,7 +595,6 @@ function LiveCard({ a, x, title }: { a: Agent; x: Worker | undefined; title: str
       <div class="fl-c3">
         <span class="fl-now">{nowOf(a, x)}</span>
         <span class="muted fl-ago">{a.state === "working" ? running(a) : since(a.last)}</span>
-        <TermButton a={a} />
       </div>
       <LiveAct x={x} />
     </section>
@@ -630,8 +631,87 @@ function LiveSteps({ steps, todo }: { steps: Step[]; todo: AgentTask[] }) {
 }
 
 /**
- * One agent, live: its task and progress, the steps so far (the board's: done, now, next), its open asks, its activity
- * as it happens (read-only), its last report, and message / stop.
+ * A user turn of an agent's conversation: its words as PowOS AI's chat draws them, each pasted block folded to
+ * "pasted text ▸" (a tap opens it).
+ */
+function ConvoUser({ item }: { item: { text: string; pasted?: string[] } }) {
+  const [open, setOpen] = useState(false);
+  const pasted = item.pasted ?? [];
+  return (
+    <div class="msg user ag-said">
+      {item.text}
+      {pasted.length > 0 && (
+        <button type="button" class="ag-paste" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {pasted.length > 1 ? `${pasted.length} pasted texts` : "pasted text"} {open ? "▾" : "▸"}
+        </button>
+      )}
+      {open && pasted.map((t, i) => <pre key={i} class="ag-paste-body">{t}</pre>)}
+    </div>
+  );
+}
+
+/** Thread's [render] for a conversation: one function (rich.tsx EntryView compares it), the user's turns with their pastes folded. */
+const renderConvo = (item: Exclude<ChatItem, { kind: "tool" }>, reply: string | null) =>
+  item.kind === "user" ? <ConvoUser item={item} /> : <Item item={item} reply={reply} />;
+
+/** The one status chip under a conversation: what the agent is waiting on, or that it's at it; gone: none. */
+const WAITING: Partial<Record<Agent["state"], string>> = {
+  idle: "waiting for your input",
+  needs_you: "waiting for your approval",
+  blocked: "stuck - waiting for you",
+  paused: "paused",
+  working: "working…",
+};
+
+/** Kept at the newest as the conversation grows, unless scrolled up to read. */
+function useAtEnd(n: number) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const box = ref.current?.closest<HTMLElement>(".ag-scroll, .ai-scroll");
+    if (!box || !n) return;
+    const near = box.scrollHeight - box.scrollTop - box.clientHeight < 160 || box.scrollTop === 0;
+    if (near) box.scrollTop = box.scrollHeight;
+  }, [n]);
+  return ref;
+}
+
+/**
+ * An agent's conversation (the user, 11-01 17:10: "Can't I show the chat properly here?"): its transcript (powos-agentsd
+ * convo_of) drawn with PowOS AI's chat - the user's turns as bubbles, the agent's replies in Markdown, tool calls folded
+ * into one quiet "N steps" row - and one status chip at the end.
+ */
+function Convo({ a, items }: { a: Agent; items: AgentConvoItem[] }) {
+  const ref = useAtEnd(items.length + (items.at(-1)?.kind === "assistant" ? 1 : 0));
+  const chip = WAITING[a.state];
+  return (
+    <section class="fl-sec ag-convo" aria-label="Conversation">
+      <div class="ai-chat-in" ref={ref}>
+        {!items.length && <div class="muted">Nothing said yet.</div>}
+        <Thread items={items} render={renderConvo} />
+        {chip && <div class={`ag-wait ${a.state}`}>{chip}</div>}
+      </div>
+    </section>
+  );
+}
+
+/** A host without conversations yet (an older APK): the hook events, as before. */
+function Activity({ events }: { events: AgentEvent[] }) {
+  return (
+    <section class="fl-sec">
+      <h3 class="ai-heading muted">Activity</h3>
+      <div class="fl-term tile">
+        {!events.length && <div class="muted">Nothing yet.</div>}
+        {events.map((e) => (
+          <Tool key={e.id} e={e} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * One agent, live: its task and progress, the steps so far (the board's: done, now, next), its open asks, its
+ * conversation as it happens, and message / open terminal / stop at the bottom.
  */
 function LiveView({ id, f }: { id: string; f: Fleet }) {
   useAgentEvents(id);
@@ -642,30 +722,32 @@ function LiveView({ id, f }: { id: string; f: Fleet }) {
   const title = x?.title ?? (w?.title || ownWords(a) || `Session in ${a.cwd || a.host}`);
   const steps = stepsOf(w);
   const todo = tasks.value.get(id) ?? [];
-  const events = recent.value.agent === id ? recent.value.events.slice(-30) : [];
+  const r = recent.value.agent === id ? recent.value : null;
   return (
     <>
       <LiveCard a={a} x={x} title={title} />
       <LiveSteps steps={steps} todo={todo} />
       <Asks only={id} />
-      <section class="fl-sec">
-        <h3 class="ai-heading muted">Activity</h3>
-        <div class="fl-term tile">
-          {!events.length && <div class="muted">Nothing yet.</div>}
-          {events.map((e) => (
-            <Tool key={e.id} e={e} />
-          ))}
-        </div>
-      </section>
-      {a.report && (
+      {r?.convo ? <Convo a={a} items={r.convo} /> : <Activity events={r?.events.slice(-30) ?? []} />}
+      {!r?.convo && a.report && (
         <div class="ag-report tile fl-report">
           <span class="muted">Last report </span>
           {a.report}
         </div>
       )}
-      {a.state !== "gone" && <Actions a={a} />}
+      <div class="ag-foot">
+        {a.state !== "gone" && <Actions a={a} />}
+        <TermButton a={a} />
+      </div>
     </>
   );
+}
+
+/** One agent live with no header of its own (the folded AI page's agent screen: its header is the page's). */
+export function AgentLive({ id }: { id: string }) {
+  useAgents();
+  useSessions(true);
+  return <LiveView id={id} f={fleet()} />;
 }
 
 /**

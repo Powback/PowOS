@@ -239,7 +239,7 @@ function Menu({ close, children }: { close: () => void; children?: preact.Compon
   );
 }
 
-const nameOf = (s: AiScreen) => SCREENS.find(([k]) => k === s)?.[1] ?? "";
+const nameOf = (s: AiScreen) => SCREENS.find(([k]) => k === s)?.[1] ?? (s === "fleet" ? "Agent" : "");
 
 /** Session agents working now (the live hooks, agents.ts). */
 const agentsWorking = () => agentSessions.value.filter((id) => agent(id)?.value.state === "working").length;
