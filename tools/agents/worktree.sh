@@ -10,7 +10,8 @@
 #   worktree.sh list         name, age of HEAD, commits not on origin (patch-id), dirty files; both locations
 #   worktree.sh gc [--dry-run]   remove every worktree (both locations) that's clean, fully merged into
 #                            origin/worktree-powos-multiplatform (ahead=0, as `done` checks) AND untouched for
-#                            30+ min (HEAD commit age - the same "age of HEAD" `list` prints): agents that
+#                            30+ min - no newer HEAD commit, git admin file (checkout/commit/add), changed file
+#                            or process cwd inside it (f400; HEAD commit age alone gc'd live agents): agents that
 #                            finished without `worktree.sh done` (friction f3). Never touches a runner's own
 #                            checkout (its .powos-runner-checkout marker, f57) or the shared base checkouts
 #                            (powos-multiplatform, emu-build) even if they'd otherwise match. --dry-run: lists
@@ -55,6 +56,19 @@ ahead() { git -C "$1" cherry "origin/$BASE" HEAD 2>/dev/null | grep -c '^+' || t
 # The node_modules symlink shows as untracked (.gitignore's node_modules/ doesn't match a link); it is not work.
 dirty() { git -C "$1" status --porcelain | grep -vc '^?? shell/node_modules$' || true; }
 
+# live_cwd <dir>: some process's working directory is <dir> or inside it (Linux /proc, else lsof on the Mac).
+live_cwd() {
+  local d r p c; d=$(cd "$1" && pwd -P) || return 1
+  if [ -d /proc/self/cwd ] || [ -L /proc/self/cwd ]; then
+    for p in /proc/[0-9]*/cwd; do c=$(readlink "$p" 2>/dev/null) || continue
+      case "$c" in "$d"|"$d"/*) return 0 ;; esac; done
+    return 1
+  fi
+  command -v lsof >/dev/null || return 1
+  r=$(lsof -nP -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | grep -E -m1 "^${d//./\\.}(/|\$)" || true)
+  [ -n "$r" ]
+}
+
 # find_wt <name>: echoes the existing worktree's path (new root first, then the legacy $WT location), or nothing.
 find_wt() { [ -e "$WTR/$1/.git" ] && { echo "$WTR/$1"; return; }; [ -e "$WT/$1/.git" ] && echo "$WT/$1"; }
 
@@ -84,6 +98,10 @@ new)
       "$bic" get powos-rootfs.tar.gz.sha256 "$d/targets/android/out/powos-rootfs.tar.gz.sha256"; } >/dev/null 2>&1 || true
     "$bic" get steam-sysvipc-emu.tar.gz "$d/targets/android/pkgs/steam/sysvipc-emu.tar.gz" >/dev/null 2>&1 || true
   fi
+  # The OWL CLI (targets/android/app/owl/build/cli/owl.jar, gitignored): the widget sweep (shell/dev/preview.sh)
+  # needs it and a fresh worktree's offline gradle can't build it (friction f402). owl-jar.sh puts in the one built
+  # from these exact sources - from the shared cache, or seeded from powos-multiplatform's when its sources match.
+  [ ! -x "$d/shell/dev/owl-jar.sh" ] || OWL_JAR_FROM=$PMP "$d/shell/dev/owl-jar.sh" "$d" >/dev/null 2>&1 || true
   echo "$d" ;;
 done)
   n=${2:?name}; d=$(find_wt "$n")
@@ -114,11 +132,27 @@ gc)
     # worktrees to sweep, whatever their ahead/dirty/age happen to read.
     [ -f "$d/.powos-runner-checkout" ] && continue
     case "$name" in powos-multiplatform|emu-build) continue ;; esac
-    a=$(ahead "$d"); x=$(dirty "$d")
-    [ "$a" = 0 ] && [ "$x" = 0 ] || continue
+    # Idle = no sign of the agent for 30+ min. The HEAD commit's age alone isn't that (friction f400): a fresh
+    # worktree, or one an agent has just checked out an older merged commit in (`git checkout --detach <before>` to
+    # render the "before" state - ai-overlay-polish, 11-01 ~23:00, removed "idle 50m" mid-run), is clean, ahead=0
+    # and has an old HEAD commit while its agent works in it. So also: the worktree's own git admin files (HEAD,
+    # index, logs/HEAD: any checkout/commit/reset/add touches them), any file in it changed (gitignored renders and
+    # build output included), and any process whose cwd is inside it.
     last=$(git -C "$d" log -1 --format=%ct 2>/dev/null) || continue
+    gd=$(git -C "$d" rev-parse --path-format=absolute --git-dir 2>/dev/null) || gd=
+    for f in "$gd/HEAD" "$gd/index" "$gd/logs/HEAD"; do
+      [ -e "$f" ] || continue
+      m=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null) || continue
+      [ "$m" -le "$last" ] || last=$m
+    done
     age=$(( now - last ))
     [ "$age" -ge 1800 ] || continue
+    # Only now ahead/dirty: `git status` refreshes (rewrites) the index, which the mtimes above must be read before.
+    a=$(ahead "$d"); x=$(dirty "$d")
+    [ "$a" = 0 ] && [ "$x" = 0 ] || continue
+    recent=$(find "$d" -path "$d/.git" -prune -o -mmin -30 -print 2>/dev/null | head -1 || true)
+    if [ -n "$recent" ]; then [ -z "$dry" ] || echo "kept $name (file changed in the last 30m: ${recent#"$d"/})"; continue; fi
+    if live_cwd "$d"; then [ -z "$dry" ] || echo "kept $name (a process runs in it)"; continue; fi
     if [ -n "$dry" ]; then
       echo "would remove $name (idle $((age / 60))m, ahead=0 dirty=0)"
       continue
@@ -132,5 +166,5 @@ gc)
       echo "gc: couldn't remove $name (left as is)" >&2
     fi
   done ;;
-*) sed -n '2,19p' "$0"; exit 1 ;;
+*) sed -n '2,20p' "$0"; exit 1 ;;
 esac
