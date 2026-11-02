@@ -15,7 +15,8 @@ Checks:
   status colours outside their tokens, literal durations in any rule's motion (loops, reduced-motion overrides and a
   property run linearly as a clock excepted), hard lines drawn at `--frame`, folds or menus on the AI page that
   pop in (`{open && …}` instead of `ui/reveal.tsx` `Reveal` / `usePresence`), and an open folder's or a widget's
-  settings sheet's literal durations or a surface radius other than `--radius`.
+  settings sheet's literal durations or a surface radius other than `--radius`. For PowOS apps' pages (`apps/*/ui`)
+  it fails on inline styles naming the monospace font outside a code style and on transitions with a literal duration.
 - The gate's `design-lint-*` runs find pop-ins, pop-outs (a surface closed in one frame) and monospace text on
   screen. They fail the gate for the launcher, an open folder and a widget's settings sheet
   (`design-lint-{launcher,folder,widget-sheet}-*`), the switcher (`design-lint-switcher-*`: the cards rising, a card's

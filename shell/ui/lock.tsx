@@ -12,11 +12,12 @@
  * Every step is marked (powos.lock.mark: logcat PowosUnlock, with the phone's uptime, next to the native steps):
  * ready (the page shown and painting), swipe start, swipe commit.
  */
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import { ago, useMinuteClock } from "./time.ts";
 import type { NotificationList } from "../types.ts";
 import { NotifGlyph, notifIconSrc, type GroupedNotification } from "./notifications.tsx";
+import { arrive } from "./notifmotion.ts";
 
 /** Lifted this far (of the height) when let go, it unlocks. */
 const UNLOCK = 0.33;
@@ -59,6 +60,15 @@ export function Lock() {
   } | null>(null);
   /** The face on its way out (unlock asked): no new swipe until it is shown again. */
   const going = useRef(false);
+  /** The cards already shown: a new one fades and slides in as every list's arrivals do (notifmotion.ts, §6), never
+   * there in one frame - the first list too (the face shown with what's new). */
+  const notes = useRef<HTMLDivElement>(null);
+  const seen = useRef(new WeakSet<Element>());
+  useLayoutEffect(() => {
+    const cards = [...(notes.current?.children ?? [])];
+    arrive(cards.filter((c) => !seen.current.has(c)));
+    for (const c of cards) seen.current.add(c);
+  });
   useEffect(() => {
     const refresh = () => {
       // Shown again (the screen back on, the PIN pad backed out of): the face whole, wherever it was left.
@@ -133,7 +143,7 @@ export function Lock() {
           .toLowerCase()}
         {battery.level != null && ` · ${battery.charging ? "⚡" : ""}${battery.level}%`}
       </div>
-      <div class="lock-notes">
+      <div class="lock-notes" ref={notes}>
         {list.items.slice(0, SHOWN).map((n) => (
           <div key={n.key} class="lock-note tile">
             {/* K2: the shade's own icon (notifications.tsx SmallIcon's NotifGlyph): the notification's small icon in its app's
