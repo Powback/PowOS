@@ -35,13 +35,18 @@
 #                   (health.status, no prompt); linked -> the Health app's page opened by code (no widget needed) shows
 #                   today's figures or its calm empty line, no grant note; not linked -> NOTE (opening would put the
 #                   system's grant dialog up: the user's to answer).
+#   needs-me        (what-needs-me-discord-whatsapp-gmail-in-one-widg, v2 history): read only - the What needs me widget
+#                   on home (found by its own .nm-title; none placed: its page opened by code instead, closed after)
+#                   renders rows (live or kept past ones, each whole inside the tile, a replied one marked) or its calm
+#                   empty line ("Nothing needs you" / the notification-access note) - never a blank tile or raw marks.
+#                   Nothing tapped, sent, marked read or dismissed.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/e2e-lib.sh"
-CASES="assist-circle ai-overlay-dock search-setting cc-quick-pages rec-light term-remote health-page"
+CASES="assist-circle ai-overlay-dock search-setting cc-quick-pages rec-light term-remote health-page needs-me"
 CASE=${1:-}; shift || true
 case " $CASES " in *" $CASE "*) [ -n "$CASE" ] ;; *) false ;; esac || { echo "usage: board-look-more.sh ${CASES// /|} [--round R]"; exit 2; }
-[ "${POWOS_DEVICE:-phone}" = emu ] && [ "$CASE" != health-page ] && { echo "SKIP: $CASE needs the phone (side button overlay, fold states, camera, hosts)"; exit 3; }
+[ "${POWOS_DEVICE:-phone}" = emu ] && [ "$CASE" != health-page ] && [ "$CASE" != needs-me ] && { echo "SKIP: $CASE needs the phone (side button overlay, fold states, camera, hosts)"; exit 3; }
 e2e_args "$@"
 e2e_init "look-more-$CASE"
 if [ "${POWOS_DEVICE:-phone}" = emu ]; then e2e_setup; else e2e_setup inner; fi
@@ -71,7 +76,7 @@ setfold() {
 }
 
 # What a case changed, put back (idempotent; the EXIT trap runs it before e2e-lib's own restore).
-AOPEN=; ASTUB=; LAI=; SS0=; SCR=; CCED=; CAMT0=; CAMON=; TERMID=; HOPEN=
+AOPEN=; ASTUB=; LAI=; SS0=; SCR=; CCED=; CAMT0=; CAMON=; TERMID=; HOPEN=; NOPEN=
 more_restore() {
   [ -n "$ASTUB" ] && { aev 'importShim("./bridge.ts").then(B=>{if(window.__dcSend){B.powos.ai.send=window.__dcSend;delete window.__dcSend}return "ok"})' >/dev/null; ASTUB=; log "ai.send put back in the overlay"; }
   [ -n "$AOPEN" ] && { ahide; AOPEN=; log "side button overlay hidden"; }
@@ -83,6 +88,7 @@ more_restore() {
   [ -n "$CCED" ] && { sev "importShim('./ui/ccexpand.ts').then(X=>{X.ccEditing.value=false;return 'ok'})" >/dev/null; shut; CCED=; log "CC edit mode left, shade shut"; }
   [ -n "$CAMON" ] && { camclose; CAMON=; }
   [ -n "$TERMID" ] && { ev 'Promise.all([importShim("./state.ts"),importShim("./bridge.ts")]).then(([S,B])=>{S.closeSession();if(window.__dcWrite){B.powos.term.write=window.__dcWrite;delete window.__dcWrite}return "ok"})' >/dev/null; TERMID=; log "terminal view closed, term.write put back"; }
+  [ -n "$NOPEN" ] && { ev 'importShim("./apps/pages.ts").then(P=>{P.closeApp();return "ok"})' >/dev/null; NOPEN=; log "What needs me page closed"; }
   [ -n "$HOPEN" ] && { ev 'importShim("./apps/pages.ts").then(P=>{P.closeApp();return "ok"})' >/dev/null; HOPEN=; log "Health page closed"; }
   return 0
 }
@@ -346,6 +352,28 @@ return "FAIL linked, neither figures nor the empty line"+what})()')
     no:*) step health "Health Connect not linked"; note "Health Connect not linked (${linked#no:}): opening the page puts the system's grant dialog up - the user's to answer, not opened" ;;
     *) step health "Health Connect's state"; fail "health.status unreadable ($st)" ;;
   esac
+  more_restore
+fi
+
+# --- needs-me -------------------------------------------------------------------------------------------------------
+# The rows' check, in the page: each row whole inside [root] (a tile's box, or the page), no markdown marks, a replied
+# row carrying its mark; else the calm empty line. Read only.
+NM_LOOK='(root,where)=>{const t=(root.innerText||"").replace(/\s+/g," ").trim();const rows=[...root.querySelectorAll(".nm-row")];
+const past=rows.filter(r=>r.hasAttribute("data-past")).length,rep=rows.filter(r=>r.hasAttribute("data-replied"));
+const what=" | "+where+": "+rows.length+" rows ("+past+" past, "+rep.length+" replied), text \""+t.slice(0,120)+"\"";
+if(/\*\*|`|\]\(/.test(t))return "FAIL markdown shown as marks"+what;
+if(rep.some(r=>!r.querySelector(".nm-replied")))return "FAIL a replied row without its mark"+what;
+if(rows.length){if(where==="tile"){const b=root.getBoundingClientRect();const cut=rows.filter(r=>r.getBoundingClientRect().bottom>b.bottom+0.5).length;if(cut)return "FAIL "+cut+" row(s) cut by the tile"+what}return "PASS rows shown"+what}
+if(/Nothing needs you|Allow (PowOS )?notification access|Update PowOS/.test(t))return "PASS the calm empty state"+what;
+return "FAIL neither rows nor the empty line"+what}'
+if [ "$CASE" = needs-me ]; then
+  r=$(ev '(()=>{const look='"$NM_LOOK"';const h=document.querySelector(".page:not(.away) .nm-title")||document.querySelector(".nm-title");if(!h)return "none";const tile=h.closest("[data-key]")||h.parentElement.parentElement;return look(tile,"tile")})()')
+  if [ "$r" = none ]; then
+    NOPEN=1; ev 'importShim("./apps/pages.ts").then(P=>{P.openApp("local.needs-me");return "ok"})' >/dev/null; sleep 3; chk needs-me
+    step needs-me "no What needs me widget on home: its page opened by code"
+    r=$(ev '(()=>{const look='"$NM_LOOK"';const e=document.querySelector(".app-screen[data-app=\"local.needs-me\"]");if(!e)return "FAIL the What needs me page did not open (not installed?)";return look(e,"page")})()')
+  else step needs-me "the What needs me widget on home"; fi
+  log "needs-me: $r"; verdict "$r"
   more_restore
 fi
 

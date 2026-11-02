@@ -12662,7 +12662,7 @@ function overpullInFlow() {
 
 /** The What needs me case (above): mount, then each gesture, every step in the page (window.__nm); its problems. */
 async function settleNeedsMe(r) {
-  const steps = [nmMount, nmRows, nmBadge, nmReply, nmSwipe, nmOpen, nmScale];
+  const steps = [nmMount, nmRows, nmBadge, nmReply, nmSwipe, nmPast, nmPastPage, nmForget, nmOpen, nmScale];
   try {
     await r.page.evaluate(() => new Promise((ok) => (window.importShim ? ok() : addEventListener("load", ok))));
     await r.page.evaluate(`window.__nmItems = ${nmItems.toString()}`);
@@ -13073,6 +13073,79 @@ async function nmSwipe() {
   await sleep(400);
   const ok = calls.length === 1 && JSON.stringify(calls[0].slice(0, 3)) === JSON.stringify(["action", "dc", 0]) && calls[0][3] == null;
   return ok ? [] : [`swipe pressed ${said()}, want once ["action","dc",0] (no text)`];
+}
+
+/**
+ * v2 history (apps/needs-me/ui/lib/history.ts): the notifications gone (dismissed in the shade) and the rows stay -
+ * Anna Berg's marked replied with the reply sent above ("You: on my way"), #powos (swiped read) unmarked - the icon's
+ * count 0, the rows in the app's own store; nothing pressed by any of it.
+ */
+async function nmPast() {
+  const { row, calls, until } = window.__nm;
+  const B = await window.importShim("./apps/badge.ts");
+  calls.length = 0;
+  window.__mockEvents.emit("notifications.changed", { available: true, items: [] });
+  const kept = () => row("Anna Berg")?.hasAttribute("data-past") && row(":#powos")?.hasAttribute("data-past");
+  if (!(await until(kept))) return [`the rows went with their notifications (Anna Berg ${row("Anna Berg") ? "kept" : "gone"}, #powos ${row(":#powos") ? "kept" : "gone"})`];
+  const anna = row("Anna Berg");
+  const stored = JSON.parse(localStorage.getItem("local.needs-me:history") || "{}");
+  const want = [
+    [anna.hasAttribute("data-replied") && anna.querySelector(".nm-replied"), "Anna Berg's past row isn't marked replied after the reply was sent"],
+    [/You: on my way/.test(anna.textContent), `Anna Berg's past row doesn't show the reply: "${anna.textContent.slice(0, 80)}"`],
+    [!row(":#powos").hasAttribute("data-replied"), "#powos is marked replied, nobody replied there"],
+    [(B.badges.value["local.needs-me"] ?? 0) === 0, `past rows only, but the icon's count is ${B.badges.value["local.needs-me"]}`],
+    [Object.keys(stored).length >= 2, "the rows aren't in the app's own store (localStorage local.needs-me:history)"],
+  ];
+  return want.filter(([ok]) => !ok).map(([, msg]) => msg);
+}
+
+/** A fresh widget shows the past rows; the page's opened past row lists Anna's history newest first (the reply on top). */
+async function nmPastPage() {
+  const { until, mod, h, render, host, list } = window.__nm;
+  // A fresh mount lists the notifications again (powos.notifications.list): none, as after the dismissal above.
+  const items = list.items;
+  list.items = [];
+  const mount = (m, style, extra) => {
+    const root = Object.assign(document.createElement("div"), { style });
+    document.body.append(root);
+    render(h(m.default, { host, app: "local.needs-me", base: "./_app/local.needs-me/", ...extra }), root);
+    return root;
+  };
+  const fails = [];
+  const w = mount(mod, "width:360px;height:360px;position:relative", { cells: [4, 4] });
+  if (!(await until(() => w.querySelectorAll(".nm-row[data-past]").length >= 2))) fails.push("a second widget doesn't show the past rows");
+  render(null, w);
+  w.remove();
+  const page = mount(await window.importShim("./_app/local.needs-me/pages/main.js"), "width:404px;height:800px;position:relative", { close() {} });
+  const anna = () => [...page.querySelectorAll(".nm-row")].find((r) => r.dataset.group.endsWith("anna berg"));
+  if (await until(anna)) {
+    anna().querySelector("[role=button]").click();
+    await until(() => anna()?.querySelector(".nm-history"));
+    const ls = [...(anna()?.querySelectorAll(".nm-history > div") ?? [])].map((d) => d.textContent);
+    if (!/^You: on my way/.test(ls[0] ?? "") || !ls.some((l) => /Coming tonight\?/.test(l))) fails.push(`the page's opened past row isn't Anna's history newest first: ${JSON.stringify(ls)}`);
+  } else fails.push("the page doesn't list Anna Berg's past row");
+  render(null, page);
+  page.remove();
+  list.items = items;
+  return fails;
+}
+
+/** Swiping a past row forgets it, pressing nothing; the notifications back, the rows are live again. */
+async function nmForget() {
+  const { row, calls, until, sleep, said, list } = window.__nm;
+  const el = row(":#powos").querySelector("[role=button]");
+  const box = el.getBoundingClientRect();
+  const ev = (t, x) => el.dispatchEvent(new PointerEvent(t, { bubbles: true, clientX: box.left + x, clientY: box.top + box.height / 2, pointerId: 4, isPrimary: true }));
+  ev("pointerdown", 20);
+  for (let x = 20; x <= 20 + box.width * 0.6; x += 20) ev("pointermove", x);
+  ev("pointerup", 20 + box.width * 0.6);
+  const fails = [];
+  if (!(await until(() => !row(":#powos")))) fails.push("swiping a past row didn't forget it");
+  await sleep(100);
+  if (calls.length) fails.push(`the past rows pressed something: ${said()}`);
+  window.__mockEvents.emit("notifications.changed", { available: true, items: list.items });
+  if (!(await until(() => row("Anna Berg") && !row("Anna Berg").hasAttribute("data-past")))) fails.push("Anna Berg's row isn't live again with her notifications back");
+  return fails;
 }
 
 /** A tap on an app icon: that notification's own tap action (contentIntent), once. */

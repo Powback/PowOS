@@ -8,6 +8,7 @@
  * last message and the row leaves, model.ts) or cancels it.
  */
 import { signal } from "@preact/signals";
+import { rememberReply } from "./history";
 import { replyTarget, type Entry, type Group, type NotifList } from "./model";
 
 export interface ReplyFieldProps {
@@ -65,6 +66,8 @@ export async function sendReply(host: Host, app: string, g: Group, text: string)
   try {
     await n.action(app, t.n.key, t.reply, text.trim());
     setRow(g.id, { state: "sent", time: g.time });
+    // Kept as the row's last message: once the notification goes, the row stays, marked replied (history.ts).
+    rememberReply(app, g, text.trim());
     return true;
   } catch (e) {
     setRow(g.id, { state: "error", time: g.time, message: say(e) });
