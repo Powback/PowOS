@@ -13,7 +13,9 @@
 #                                                  resize, each hold sample) or when one fails. The hidden display goes
 #                                                  dark with the screen (10-31 889b6cb5, a4dcb83b), so nothing can be
 #                                                  judged; ship.sh window_gate keeps the ship's requests and retries.
-#                                                  Also when the Linux step fails while the user touched the phone (f384).
+#                                                  Also when the Linux step fails while the user touched the phone (f384),
+#                                                  and when the user's page's window list changed during the check (the
+#                                                  user opened/closed a window, 11-03).
 #                                                  Exception (11-02, the ship service deadlocked all night on a dozing
 #                                                  phone): when the USER hasn't touched it for WR_WAKE_IDLE_S (600) s
 #                                                  (idle.sh's touch IRQ idle, not the screen state) the check wakes the
@@ -122,6 +124,15 @@ shot() {   # shot NAME: raw screencap gzipped on the phone -> $OUT/NAME.raw.gz
 # so render_watch sees a live window across its watch. Gone flat or its task gone during the hold: FAIL (exit 1, a
 # "window-render: FAIL" line after the PASS one). The display is the adb-started helper's, never in WebWindows.kt's
 # window list: the app's watchdog (RenderWatch) doesn't count it, and it gets no `w.f` lines (never mirrored).
+# windows_same WL0 WL1: the user's page's window list (count:ids) before and after a hidden check. Changed = the USER
+# opened/closed a window meanwhile (11-03 241478a42: '2:-2,2' -> '1:2' while they closed one; the check's display is
+# the helper's, never in that list) - user activity, not a broken window: NOT JUDGED (exit 2, ship.sh retries), as a
+# dozing phone, never a FAIL.
+windows_same() {
+  [ "$1" = "$2" ] && return 0
+  log "the user's page's window list changed during the check ('${1:-unreadable}' -> '${2:-unreadable}') - the user's own action, not judged"
+  hclean; log "window-render: NOT JUDGED (the user changed their windows) - $OUT"; exit 2
+}
 HOLD=0
 hidden() {
   local tag=wrh$$ dir=/data/local/tmp/powos-wr-hidden-$$ W=${WR_W:-1080} H=${WR_H:-1500} dpi D= S= comp t0 pre task= st dom edg d1 noise fx fy wd
@@ -323,7 +334,7 @@ EOF
   # (d) a Linux window through the host's KWin -> web-window consumer path, offscreen (linux_step below).
   linux_step
   wl1=$(wlist); log "the user's page's windows after: ${wl1:-unreadable}"
-  [ "$wl0" = "$wl1" ] || hfail "the user's page's window list changed during the check ('${wl0:-unreadable}' -> '${wl1:-unreadable}')"
+  windows_same "$wl0" "$wl1"
   if [ "$HOLD" -gt 0 ]; then
     log "window-render: PASS (hidden: task $task on display $D drew the app, the tap reached it; $(( $(date +%s) - t0 )) s; holding $HOLD s) - $OUT"
     # Into logcat: the helper's geometry line for this display, then the content every ~5 s (no quotes in the text).
