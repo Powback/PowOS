@@ -3141,12 +3141,14 @@ async function homeBlankCovered() {
     ["Settings › style", () => (Sc.screens.value = ["settings", "style"]), () => (Sc.screens.value = [])],
     ["edit mode", () => (S.editing.value = true), () => (S.editing.value = false)],
     ["the launcher", () => (S.drawer.value = 1), () => (S.drawer.value = 0)],
-    ["the AI page", () => (S.page.value = -1), () => (S.page.value = 0)],
+    // Judged by its own box since RT1 (ui/homedrawn.ts aiPageOff): once it has slid in.
+    ["the AI page", () => (S.page.value = -1), () => (S.page.value = 0), 700],
     ["the shade", () => (S.notif.value = true), () => (S.notif.value = false)],
   ];
-  for (const [name, show, shut] of sheets) {
+  for (const [name, show, shut, slide] of sheets) {
     show();
     await G.frames(2);
+    if (slide) await G.sleep(slide);
     const why = window.__powosHomeBlank();
     if (why) fails.push(`${name} open over home: reported blank ("${why}")`);
     shut();
@@ -8601,6 +8603,28 @@ async function fingerOf(page) {
 }
 
 /** LN2: a finger drags down over PowOS AI's chat (scrolling back through it); it scrolls, the panel stays open. */
+/**
+ * RT1 (the user, 11-02 21:55, P0: "I rotated my phone and know it's in a bad state", then "I had to restart my phone to
+ * fix it"): the phone turned and folded under home, from home's first page, its second and PowOS AI's page - at each
+ * size the shell lays out at the screen's size and keeps drawing (dev/rotate-check.js turned). window.screen follows
+ * the size, as the WebView's does (CDP screen size).
+ */
+const ROTATIONS = [[899, 404], [404, 899], [821, 883], [883, 821], [821, 883], [404, 899], [899, 404], [404, 899]];
+async function rotateScene(r, start) {
+  const cdp = await r.page.target().createCDPSession();
+  const turn = (width, height) => cdp.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false, screenWidth: width, screenHeight: height });
+  await turn(404, 899);
+  await r.page.evaluate(async (s) => { (await importShim("./state.ts")).page.value = s; }, start);
+  await new Promise((ok) => setTimeout(ok, 800));
+  const fails = [];
+  for (const [w, h] of ROTATIONS) {
+    await turn(w, h);
+    const why = await r.page.evaluate(async (w, h, start) => (await importShim("./dev/rotate-check.js")).turned(w, h, start), w, h, start);
+    if (why) fails.push(`RT1 turned to ${w}x${h} from page ${start}: ${why}`);
+  }
+  return fails;
+}
+
 async function aiScrollScene(r) {
   const f = await fingerOf(r.page);
   const chk = "./dev/launcher-adopt-check.js";
@@ -12076,6 +12100,10 @@ try {
       runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, `launcher-home-gesture-pull-${kind}`, dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async (k) => (await importShim("./dev/launcher-adopt-check.js")).homeGestureCloses(k), kind))));
     }
   }
+  // RT1: turned sideways and back (rotateScene).
+  if (process.env.SHELL_PAGES !== "0")
+    for (const start of [0, -1, 1])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `rotate-${start < 0 ? "ai" : "home" + start}`, dockOpensView.folded).then((r) => whenReady(r, () => rotateScene(r, start))));
   // RO1: home folded/unfolded, the drawer, edit mode and a long query in the bar raise no "ResizeObserver loop completed
   // with undelivered notifications" (grow.tsx fit() in its observer resized the bar in the same loop; phone log 10-31).
   if (process.env.SHELL_PAGES !== "0")
