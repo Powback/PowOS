@@ -59,6 +59,15 @@ floating window over PowOS's home (no RecentsActivity left behind), and Split Vi
    (`ShellBridge.toWebWindow`); a click below it is passed on with the item lifted out so OnePlus's positions hold.
    Floating window also tells PowOS, so that task stays a native floating window.
 
+7. **Split divider menu: Side by side / Top and bottom / Swap** (scope `com.android.systemui`). A tap on the split
+   divider's handle opens OnePlus' own divider popup (`com.oplus.splitscreen.DividerMenu`), which OxygenOS 16 builds but
+   never opens (`StageCoordinatorExt.showDividerMenu` has no caller). Its items become Side by side, Top and bottom (on
+   the unfolded inner screen; the current one greyed), then OnePlus' Swap and Save split combination. OnePlus' own
+   orientation toggle is dropped: it flips `DividerOrientation`, which WM Shell's `SplitLayout` never reads. A pick
+   overrides `SplitScreenUtils.isLeftRightSplit` on a large screen and relayouts the split the way a root task config
+   change does (`StageCoordinator.onTaskInfoChanged`). Double tap still swaps, drag still resizes; the default stays the
+   framework overlay's side by side unfolded.
+
 Build: `targets/android/build-oplus-hook.sh` (android-app-dev). Install: Zygisk on in Magisk, the Vector (LSPosed
 fork, JingMatrix) Magisk module, this APK, then enable it in Vector with scopes `com.android.launcher` and `com.android.systemui` and restart the
 launcher and SystemUI (or reboot). Remove: disable the module in Vector.

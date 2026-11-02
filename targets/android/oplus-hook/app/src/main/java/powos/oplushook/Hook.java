@@ -433,6 +433,7 @@ public class Hook implements IXposedHookLoadPackage {
     private static synchronized void desktopWindowItem(ClassLoader cl, String via) {
         if (desktopWindowHooked)
             return;
+        splitDividerMenu(cl, via);
         try {
             Class<?> menu = XposedHelpers.findClass(CAPTION_MENU_CLASS, cl);
             Class<?> builder = XposedHelpers.findClass("com.coui.appcompat.poplist.PopupListItem$Builder", cl);
@@ -546,6 +547,170 @@ public class Hook implements IXposedHookLoadPackage {
         } catch (Throwable t) {
             log("desktopWindowItem tell", t);
         }
+    }
+
+    private static final String DIVIDER_TAP = "com.android.wm.shell.common.split.DividerView$DoubleTapListener";
+    private static final String DIVIDER_MENU_ADAPTER = "com.oplus.splitscreen.DividerMenuAdapter";
+    /** Side by side, Top and bottom: in front of OnePlus' own items (Swap, [Save split combination]). */
+    private static final int ORIENTATION_ITEMS = 2;
+    private static volatile boolean splitMenuHooked;
+    /** The user's pick from the divider menu: true side by side, false top/bottom; null = WM Shell's own rule. */
+    private static volatile Boolean leftRight;
+    /** The SplitLayout whose divider was tapped last (the menu that's open is its). */
+    private static volatile java.lang.ref.WeakReference<Object> tappedLayout = new java.lang.ref.WeakReference<>(null);
+    /** The open menu has our two orientation items at the top (only on a large screen). */
+    private static volatile boolean orientationItemsShown;
+
+    /**
+     * SystemUI: a tap on the split divider's handle opens a menu - Side by side / Top and bottom / Swap (+ OnePlus' Save
+     * split combination), task split-screen-side-by-side-left-right-on-the-unfo, the user 2026-10-29. Double tap still
+     * swaps (AOSP), drag still resizes.
+     *
+     * OnePlus' SystemUI has the menu already but nothing opens it: StageCoordinatorExt.showDividerMenu() (com.oplus.
+     * splitscreen.DividerMenu, a COUI popup at the divider: Swap / Save split combination / orientation toggle) has no
+     * caller in OxygenOS 16's SystemUI.apk (dexdump, 2026-11-01). And its orientation toggle can't work here: it flips
+     * DividerOrientation.sForceOrientation, which WM Shell's SplitLayout never reads - SplitLayout takes left/right from
+     * SplitScreenUtils.isLeftRightSplit(allowLeftRightSplitInPortrait, configuration) only. So:
+     *  1. the divider's single tap (its GestureDetector listener, DividerView$DoubleTapListener, has no
+     *     onSingleTapConfirmed of its own) shows OnePlus' menu;
+     *  2. its item list gets Side by side / Top and bottom first (on a large screen - the unfolded inner one; the cover
+     *     screen keeps WM Shell's top/bottom and OnePlus' items only), OnePlus' broken toggle is dropped, Swap and Save
+     *     stay OnePlus' own (their click positions shifted back by two);
+     *  3. a pick is the layout rule: isLeftRightSplit gives it on a large screen from then on (this SystemUI run), and the
+     *     split relayouts at once the way WM Shell does on a root task config change (StageCoordinator.onTaskInfoChanged:
+     *     SplitLayout.updateConfiguration, update, onLayoutSizeChanged), on the shell main thread.
+     * Default stays the framework overlay's config_leftRightSplitInPortrait (side by side unfolded).
+     *
+     * HACK: OxygenOS 16 SystemUI internals, checked against the phone's SystemUI.apk 2026-11-01 (DividerView.mSplitLayout,
+     * SplitLayout.mSplitLayoutHandler/mOrientation/mIsLargeScreen, StageCoordinator.getExtImpl/mRootTaskInfo/
+     * mMainExecutor/onTaskInfoChanged, StageCoordinatorExt.mDividerMenu/showDividerMenu, DividerMenuAdapter.mItemList/
+     * mContext, DividerMenu$$ExternalSyntheticLambda1.onItemClick by position, COUI PopupListItem(int, String, boolean)).
+     * Why: OnePlus' menu has no opener and its orientation toggle doesn't reach WM Shell's layout; no resource can add
+     * either. Real fix: WM Shell's own split orientation API (none in AOSP yet) or OnePlus wiring DividerOrientation into
+     * SplitScreenUtils.isLeftRightSplit and the divider tap to showDividerMenu - then this hook goes.
+     */
+    private static void splitDividerMenu(ClassLoader cl, String via) {
+        if (splitMenuHooked)
+            return;
+        try {
+            Class<?> utils = XposedHelpers.findClass("com.android.wm.shell.common.split.SplitScreenUtils", cl);
+            Class<?> popupItem = XposedHelpers.findClass("com.coui.appcompat.poplist.PopupListItem", cl);
+            XposedHelpers.findAndHookMethod(utils, "isLeftRightSplit", boolean.class, android.content.res.Configuration.class, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Boolean lr = leftRight;
+                    android.content.res.Configuration c = (android.content.res.Configuration) param.args[1];
+                    if (lr != null && c != null && c.smallestScreenWidthDp >= 600)
+                        param.setResult(lr);
+                }
+            });
+            XposedHelpers.findAndHookMethod(android.view.GestureDetector.SimpleOnGestureListener.class, "onSingleTapConfirmed",
+                    android.view.MotionEvent.class, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    if (!DIVIDER_TAP.equals(param.thisObject.getClass().getName()))
+                        return;
+                    try {
+                        Object view = XposedHelpers.getObjectField(param.thisObject, "this$0");
+                        Object layout = XposedHelpers.getObjectField(view, "mSplitLayout");
+                        if (layout == null)
+                            return;
+                        Object ext = XposedHelpers.callMethod(XposedHelpers.getObjectField(layout, "mSplitLayoutHandler"), "getExtImpl");
+                        if (XposedHelpers.getObjectField(ext, "mDividerMenu") == null)
+                            return;
+                        tappedLayout = new java.lang.ref.WeakReference<>(layout);
+                        XposedHelpers.callMethod(ext, "showDividerMenu");
+                        param.setResult(true);
+                    } catch (Throwable t) {
+                        log("splitDividerMenu tap", t);
+                    }
+                }
+            });
+            XposedHelpers.findAndHookMethod("com.oplus.splitscreen.DividerMenuPopupListWindow", cl, "setAdapter",
+                    android.widget.BaseAdapter.class, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    orientationItemsShown = false;
+                    Object adapter = param.args[0];
+                    Object layout = tappedLayout.get();
+                    if (adapter == null || layout == null || !DIVIDER_MENU_ADAPTER.equals(adapter.getClass().getName()))
+                        return;
+                    try {
+                        if (!XposedHelpers.getBooleanField(layout, "mIsLargeScreen"))
+                            return;
+                        @SuppressWarnings("unchecked")
+                        java.util.List<Object> items = (java.util.List<Object>) XposedHelpers.getObjectField(adapter, "mItemList");
+                        android.content.Context ctx = (android.content.Context) XposedHelpers.getObjectField(adapter, "mContext");
+                        boolean lr = (Boolean) XposedHelpers.callMethod(layout, "isLeftRightSplit");
+                        boolean pair = XposedHelpers.getBooleanField(
+                                XposedHelpers.callStaticMethod(XposedHelpers.findClass("com.oplus.splitscreen.SplitToggleHelper", cl), "getInstance"),
+                                "mHasSplitPairFeature");
+                        java.util.List<Object> mine = new java.util.ArrayList<>();
+                        // The current arrangement greyed out, the other one offered.
+                        mine.add(XposedHelpers.newInstance(popupItem, drawable(ctx, "split_screen_switch_orientation_vertical"), "Side by side", !lr));
+                        mine.add(XposedHelpers.newInstance(popupItem, drawable(ctx, "split_screen_switch_orientation_horizontal"), "Top and bottom", lr));
+                        // OnePlus' own: Swap at 0, Save split combination at 1 when the feature is on (its orientation
+                        // toggle after them is dropped - see splitDividerMenu).
+                        mine.addAll(items.subList(0, Math.min(items.size(), pair ? 2 : 1)));
+                        XposedHelpers.setObjectField(adapter, "mItemList", mine);
+                        orientationItemsShown = true;
+                    } catch (Throwable t) {
+                        log("splitDividerMenu items", t);
+                    }
+                }
+            });
+            XposedBridge.hookAllMethods(XposedHelpers.findClass("com.oplus.splitscreen.DividerMenu$$ExternalSyntheticLambda1", cl), "onItemClick", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    if (!orientationItemsShown || param.args.length < 3 || !(param.args[2] instanceof Integer))
+                        return;
+                    try {
+                        int pos = (Integer) param.args[2];
+                        if (pos >= ORIENTATION_ITEMS) {
+                            // HACK: OnePlus' handler dispatches by position (0 Swap, 1 Save); ours sit in front.
+                            param.args[2] = pos - ORIENTATION_ITEMS;
+                            return;
+                        }
+                        Object layout = tappedLayout.get();
+                        if (layout != null)
+                            arrange(layout, pos == 0);
+                        XposedHelpers.callMethod(XposedHelpers.getObjectField(param.thisObject, "f$0"), "hideMenuIfNeed");
+                        param.setResult(null);
+                    } catch (Throwable t) {
+                        log("splitDividerMenu click", t);
+                    }
+                }
+            });
+            splitMenuHooked = true;
+            XposedBridge.log(TAG + ": splitDividerMenu: hooks installed (via " + via + ")");
+        } catch (Throwable t) {
+            log("splitDividerMenu", t);
+        }
+    }
+
+    private static int drawable(android.content.Context ctx, String name) {
+        return ctx.getResources().getIdentifier(name, "drawable", ctx.getPackageName());
+    }
+
+    /** Split side by side ([leftRight]) or top/bottom now, and from then on (the isLeftRightSplit hook). */
+    private static void arrange(Object layout, boolean lr) {
+        leftRight = lr;
+        Object coordinator = XposedHelpers.getObjectField(layout, "mSplitLayoutHandler");
+        Runnable relayout = () -> {
+            try {
+                Object root = XposedHelpers.getObjectField(coordinator, "mRootTaskInfo");
+                if (root == null || (Boolean) XposedHelpers.callMethod(layout, "isLeftRightSplit") == lr)
+                    return;
+                // updateConfiguration returns early when orientation/rotation/density/bounds are unchanged - they are;
+                // an orientation it never had makes it recompute (isLeftRightSplit included), as on a real change.
+                XposedHelpers.setIntField(layout, "mOrientation", -1);
+                XposedHelpers.callMethod(coordinator, "onTaskInfoChanged", root);
+                XposedBridge.log(TAG + ": splitDividerMenu: " + (lr ? "side by side" : "top and bottom"));
+            } catch (Throwable t) {
+                log("splitDividerMenu arrange", t);
+            }
+        };
+        XposedHelpers.callMethod(XposedHelpers.getObjectField(coordinator, "mMainExecutor"), "execute", relayout);
     }
 
     private static void log(String what, Throwable t) {
