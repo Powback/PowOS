@@ -120,6 +120,10 @@ export const TaskCard = memo(function TaskCard({
           onMenu(t.id, el.current!);
         }, LONG_PRESS);
         drag.current = { x: e.clientX, y: e.clientY, dy: 0, up: null, samples: [{ y: e.clientY, t: e.timeStamp }], press };
+        // The rest of this press is the card's, wherever it goes (a touch is captured by its target anyway): a mouse's or
+        // pen's quick swipe whose moves came coalesced into one far above the card (11-02, gate under load) went to the
+        // layer beside the cards - its release there "a tap beside the cards", the app it was opened over opened.
+        if (e.pointerType !== "touch") el.current!.setPointerCapture(e.pointerId);
       }}
       onPointerMove={(e) => {
         const d = drag.current;
@@ -131,7 +135,7 @@ export const TaskCard = memo(function TaskCard({
           // Up: the card's (removing it); sideways: the row scrolls (the browser has it, touch-action pan-x).
           d.up = dy < 0 && Math.abs(dy) > Math.abs(dx);
           if (d.up) el.current!.setPointerCapture(e.pointerId);
-          else drag.current = null;
+          else (drag.current = null), el.current!.releasePointerCapture(e.pointerId);
         }
         if (!d.up) return;
         // Down past its place it barely moves (a rubber band), up it follows the finger.

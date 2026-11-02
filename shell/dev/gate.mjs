@@ -302,7 +302,12 @@ async function transpiled(p) {
 }
 
 /** Waits for [r]'s page to be up, then adds what [check] returns to its problems (a timeout said as the pages say it). */
-/** The design-lint probe's runs (dev/design-lint.js), REPORT-ONLY: each prints its findings and returns no problems. */
+/**
+ * The design-lint probe's runs (dev/design-lint.js), REPORT-ONLY: each prints its findings and returns no problems.
+ * Each is a scene of its own (a thunk, opened when pushed): the 10 opened together and pushed as one scene (11-02) made
+ * one scene of 10 pages - its first pages held their slots till all 10 settled while the last ones queued for a slot,
+ * and the per-scene cap then failed 4 of them as "design-lint-home-folded: scene timeout".
+ */
 const DESIGN_LINT = [["home", ""], ["launcher", ""], ["menu", ""], ["shade", "?mode=shade"], ["control", "?mode=shade"]];
 function designLintRuns(browser) {
   const sizes = [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]];
@@ -313,7 +318,7 @@ function designLintRuns(browser) {
       console.log(`${name} (report-only): ${JSON.stringify(out)}`);
       return [];
     };
-    return open(browser, `${ORIGIN}/index.html${query}`, name, viewport).then((r) => whenReady(r, () => probe(r)));
+    return () => open(browser, `${ORIGIN}/index.html${query}`, name, viewport).then((r) => whenReady(r, () => probe(r)));
   }));
 }
 
@@ -1584,9 +1589,14 @@ async function switcherSplitPairCheck(layout) {
 async function switcherHomeSwipeCheck(page) {
   const up = await page.evaluate(switcherUpForHomeSwipe);
   if (up.length) return up;
-  const mid = await page.evaluate(homeSwipeMidFrames, 700);
+  const { mid, gap, dur } = await page.evaluate(homeSwipeMidFrames, 700);
   const fails = await page.evaluate(switcherGoneFails);
-  if (mid < 3) fails.unshift(`the home swipe's close jumped: ${mid} frames mid-collapse (the cards' and scrim's fade), expected >= 3`);
+  // A page starved of frames (11-02: the gate's browser at 721 s, a frame every ~150 ms) can't draw 3 mid-collapse
+  // frames of a ~300 ms fade: there the fade is proven by time - a mid frame drawn and the collapse a real animation of
+  // >= 150 ms - not by a frame count the machine took away. A page drawing normally (median frame < 40 ms) still needs 3.
+  const starved = gap >= 40;
+  if (starved ? mid < 1 || dur < 150 : mid < 3)
+    fails.unshift(`the home swipe's close jumped: ${mid} frames mid-collapse (the cards' and scrim's fade; median frame ${Math.round(gap)} ms, fade ${Math.round(dur)} ms), expected >= ${starved ? "1 and a fade >= 150 ms" : 3}`);
   return fails;
 }
 
@@ -1609,15 +1619,19 @@ async function homeSwipeMidFrames(ms) {
   const other = document.querySelector(".recents .task:not(:first-child)");
   const scrim = document.querySelector(".recents .recents-scrim");
   window.__mockEvents.emit("recents.end", { to: "home" });
-  let mid = 0;
-  const t0 = performance.now();
+  let mid = 0, dur = 0;
+  const t0 = performance.now(), stamps = [t0];
   while (performance.now() - t0 < ms) {
     await new Promise((ok) => requestAnimationFrame(() => ok()));
+    stamps.push(performance.now());
+    // The collapse's own fades (transitions or animations on the cards and the scrim) - their longest, as they run.
+    for (const a of [...other.getAnimations(), ...scrim.getAnimations()]) dur = Math.max(dur, Number(a.effect?.getComputedTiming().endTime) || 0);
     const o = parseFloat(getComputedStyle(other).opacity);
     const so = parseFloat(getComputedStyle(scrim).opacity);
     if (o > 0.02 && o < 0.98 && so > 0.01 && so < 0.44) mid++;
   }
-  return mid;
+  const gaps = stamps.slice(1).map((t, i) => t - stamps[i]).sort((x, y) => x - y);
+  return { mid, gap: gaps[gaps.length >> 1] ?? 0, dur };
 }
 
 /** In the page: on home after the switcher closed - no layer up or visible, home not faded, no task opened. */
@@ -2796,8 +2810,8 @@ function aiPanesRest() {
 }
 
 /**
- * In the page, unfolded (the manager's design, 11-01; the user: "the unfolded page is still a bit shit"): two columns at
- * about 42 / 58 with a 16 dp gutter - left the folded status page's own component (its hero and sections' scroller, no
+ * In the page, unfolded (the manager's design, 11-01; the user: "the unfolded page is still a bit shit"; the work column
+ * made the wide one by the 11-02 redesign): two columns at about 56 / 44 with a 16 dp gutter - left the folded status page's own component (its hero and sections' scroller, no
  * field of its own), right the segmented row Chat / Agents / Progress / Devices (Chat on) over the chat; no nav pane, no
  * context column, no strip.
  */
@@ -2810,7 +2824,9 @@ function aiPanesFails() {
   if (scr.querySelector(".ai-strip")) fails.push("the strip still shows");
   const l = L.getBoundingClientRect(), r = R.getBoundingClientRect();
   const k = l.width / (l.width + r.width);
-  if (Math.abs(k - 0.42) > 0.03) fails.push(`the columns are ${Math.round(k * 100)} / ${Math.round(100 - k * 100)}, not ~42 / 58`);
+  // The AI page redesign (agent/ai-board, 11-02: "complete trash... huge chat"): the work leads - flex 56 : 44, the
+  // chat's own padding taken from its share, so the boxes measure ~54-56 / 46-44.
+  if (Math.abs(k - 0.55) > 0.03) fails.push(`the columns are ${Math.round(k * 100)} / ${Math.round(100 - k * 100)}, not ~56 / 44 (work / chat)`);
   if (Math.abs(r.left - l.right - 16) > 1 || Math.abs(l.left - 16) > 1) fails.push(`the gutters are ${Math.round(l.left)} / ${Math.round(r.left - l.right)} px, not 16`);
   return fails;
 }
@@ -4928,6 +4944,13 @@ async function aiTermsCheck(page) {
   return fails;
 }
 
+/** Unfolded, the status column is the folded status page's component; only unfolded it adds By area (agent/ai-board, 11-02). */
+function aiStatusColumnFails(size, left, folded) {
+  const same = left && folded && { ...left, secs: left.secs.filter((x) => x !== "areas") };
+  if (JSON.stringify(same) === JSON.stringify(folded) && left.secs.includes("areas")) return [];
+  return [`${size}: the status column ${JSON.stringify(left)} isn't the folded status page ${JSON.stringify(folded)} + "areas"`];
+}
+
 async function aiUnfoldedCheck(page) {
   const fails = [];
   // Folded first, at the folded size whatever the page was left at (a reused page came in at 883 x 821: no status page).
@@ -4942,7 +4965,7 @@ async function aiUnfoldedCheck(page) {
     await page.setViewport(vp);
     await page.evaluate((w) => window.__gw.until(() => innerWidth === w && document.querySelector(".ai-screen.panes"), 3000), vp.width);
     const left = await page.evaluate(aiStatusParts, ".ai-screen .ai-left");
-    if (JSON.stringify(left) !== JSON.stringify(folded)) fails.push(`${size}: the status column ${JSON.stringify(left)} isn't the folded status page ${JSON.stringify(folded)}`);
+    fails.push(...aiStatusColumnFails(size, left, folded));
     if (!(await page.evaluate(aiChatSetup, [3, `-${size}-uf`]))) { fails.push(`${size}: the chat's try message didn't render`); continue; }
     await page.evaluate(aiPanesRest);
     if (size === "unfolded") fails.push(...(await page.evaluate(aiUnfoldedFollow)).map((f) => `${size} follow: ${f}`));
@@ -11016,7 +11039,7 @@ try {
       })));
   // The design language's probe (dev/design-lint.js; docs/DESIGN-LANGUAGE.md §4 monospace, §6 pop-ins): REPORT-ONLY -
   // it prints what it found and never fails (returns no problems) until the manager turns it on.
-  if (process.env.SHELL_PAGES !== "0") runs.push(...designLintRuns(browser));
+  if (process.env.SHELL_PAGES !== "0") for (const run of designLintRuns(browser)) runs.push(run());
   // The pinned dock never fades (folded: the dock pages to the recent apps; the user, 2026-10-23).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "dock-no-fade", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(dockPinnedNoFade))));
