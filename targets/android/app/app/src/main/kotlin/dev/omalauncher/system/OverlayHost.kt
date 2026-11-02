@@ -122,7 +122,8 @@ abstract class OverlayHost(
         root = r
         params = layout().also { wm.addView(r, it) }
         // The page's own "boost" (refresh.ts) votes on this window too, beside the gesture's and the finger's.
-        refresh = dev.omalauncher.shell.HighRefresh(h.web, ::windowDisplay, apply = ::preferMode).also { h.highRefresh = it }
+        refresh = dev.omalauncher.shell.HighRefresh(h.web, ::windowDisplay, apply = ::preferMode)
+        h.highRefresh = refresh
         reload =
             OverlayReload(title, wm, { host?.web }, { root?.let { v -> params?.let { v to it } } }, { shown }) {
                 // The pull came while the page reloaded: the new page hears the gesture so far, then the window counts.
