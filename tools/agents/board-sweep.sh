@@ -43,7 +43,10 @@ POWOS_VERIFY_REPO=${POWOS_VERIFY_REPO:-$VR_DEFAULT} \
 { echo 'set -u; f=$(mktemp); cat > "$f" <<'"'"'POWOS_CHECKS_JSON'"'"
   cat "$S/checks.json"; echo; echo 'POWOS_CHECKS_JSON'
   echo 'powos agents check sync "$f"; rm -f "$f"'
-  echo "powos agents sweep $dry"; } > "$S/run.sh"
+  # f417: the verify queue's pause (paused > 1 h: one line, every pass's mail; never resumed here - the user paused
+  # it). It lives on this Mac, the sweep runs on the phone: handed over in the env, single-quoted.
+  ql=$(python3 "$cli" queue paused-line 2>/dev/null); ql=${ql//\'/\'\\\'\'}
+  echo "POWOS_QUEUE_PAUSED_LINE='$ql' powos agents sweep $dry"; } > "$S/run.sh"
 out=$(perl -e 'alarm 180; exec @ARGV' "$R/tools/phone/user.sh" "$S/run.sh" 2>&1); rc=$?
 { echo "== $(date '+%F %T') rc=$rc$([ -n "$dry" ] && echo ' (dry run)')"; printf '%s\n' "$out" | grep -v 'file pushed'; } >> "$S/sweep.log"
 tail -c 2000000 "$S/sweep.log" > "$S/sweep.log.tmp" && mv "$S/sweep.log.tmp" "$S/sweep.log"
