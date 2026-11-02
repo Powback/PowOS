@@ -24,13 +24,17 @@
 #                 forced open): the same split is left/right: WMShell mIsLeftRightSplit=true and the tasks side by side;
 #   term-fill     (phone-terminal-sessions-fill-the-screen-tmux-siz, e47ff321): a PowOS terminal session opened view-only
 #                 (a remote host's: capture-pane, no tmux client, nothing typed): the view fills the screen, the grid
-#                 fills the view, no empty band at the top.
+#                 fills the view, no empty band at the top;
+#   window-page   (a-floating-window-stays-on-its-own-page-when-you, E2E 206 #36): Calculator floating on the page shown,
+#                 placed by code 40 px over its page's right edge (under the dock, as the journey left it); a real
+#                 swipe beside it to the next page -> nothing of it shows (cut to its page: WWON) and the host's
+#                 w.f has it hidden; swiped back -> shown where it was.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/e2e-lib.sh"
 CASE=${1:-}; shift || true
-case "$CASE" in tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill) ;;
-  *) echo "usage: board-look-windows.sh tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill [--round R]"; exit 2 ;; esac
+case "$CASE" in tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page) ;;
+  *) echo "usage: board-look-windows.sh tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page [--round R]"; exit 2 ;; esac
 e2e_args "$@"
 e2e_init "lookw-$CASE"
 CALC=${TEST_APP:-com.oneplus.calculator} CHROME=com.android.chrome
@@ -284,6 +288,36 @@ PY
     r=$(cat "$OUT/term.txt"); case $r in PASS*) pass "${r#PASS }" ;; *) fail "${r#FAIL }" ;; esac
     ev 'importShim("./state.ts").then(s=>{s.closeSession();return "ok"})' >/dev/null; OPENED_TERM=0; sleep 1 ;;
   esac
+fi
+
+# --- window-page -----------------------------------------------------------------------------------------------
+# wfvis <w-id>: the host's view of it - "visible" in the window's w.f entry (webwindows.tsx entry: field 14), 1/0.
+wfvis() { ev "$WW.then(m=>{const w=m.webWins.value.find(v=>v.id===${1#w});const e=w&&m.entry(w);return e?e.split(' ')[14]:'none'})"; }
+if [ "$CASE" = window-page ]; then
+  np=$(ev 'importShim("./state.ts").then(s=>String(s.pages.value.length))'); pg0=$(hpage)
+  if [ "${np:-0}" -lt 2 ] 2>/dev/null || [ "$pg0" -ge $((np - 1)) ] 2>/dev/null; then note "home has $np page(s), on page $((pg0 + 1)): no next page to swipe to - case skipped"
+  else
+    A1=$(wwopen "$CALC"); sleep 3; chk open
+    if [ "$A1" = none ]; then fail "no web window for Calculator"
+    else
+      # Setup by code: 40 px of it over its page's right edge (E2E 206: 553..2127 on a 2087 px page).
+      ev "$WW.then(m=>{const e=document.querySelector('.webwindow[data-wwid=\"${A1#w}\"]'),p=e&&e.closest('.page');if(!p)return 'none';const w=m.webWins.value.find(v=>v.id===${A1#w}),s=w.scale||1;m.update(w.id,{x:p.getBoundingClientRect().width-w.w*s+40});return 'ok'})" >/dev/null; sleep 1.5; chk place
+      step over-edge "Calculator floating, 40 px past its page's right edge"
+      b0=$(tbounds "$A1"); [ "$(tvis "$A1")" = true ] && [ "$(wfvis "$A1")" = 1 ] && pass "shown at $b0 (w.f visible)" || fail "not shown before the swipe: at '$b0', w.f visible=$(wfvis "$A1")"
+      d=$((W * 35 / 100)); p=$(freept "$b0" -1 "$d")
+      if [ "$p" = none ] || [ -z "$p" ]; then fail "no empty spot beside the window to swipe from"
+      else set -- $p; x=$1; y=$2; to=$((x - d)); [ $to -lt 20 ] && to=20
+        swipe $x $y $to $y 250 "beside the window to the next page" && { sleep 1.5; chk page2
+          step page2 "a swipe beside the window: the next page, the window stays on its own"
+          v=$(tvis "$A1"); f=$(wfvis "$A1")
+          [ "$(hpage)" = $((pg0 + 1)) ] && [ "$v" = false ] && [ "$f" = 0 ] && pass "page $((pg0 + 2)) shows, Calculator hidden with its page (w.f visible 0)" || fail "after the swipe: page $(hpage) (from $pg0), Calculator shows=$v, w.f visible=$f"
+          p=$(freept "" 1 "$d"); set -- $p; x=$1; y=$2; to=$((x + d)); [ $to -gt $((W - 20)) ] && to=$((W - 20))
+          swipe $x $y $to $y 250 "back to the window's page" && { sleep 1.5; chk page1
+            step page1 "swiped back: the window's page, the window as it was"
+            [ "$(hpage)" = "$pg0" ] && [ "$(tvis "$A1")" = true ] && [ "$(tbounds "$A1")" = "$b0" ] && pass "back on page $((pg0 + 1)), Calculator at $b0" || fail "back: page $(hpage), shows=$(tvis "$A1"), at $(tbounds "$A1") (was $b0)"; }; }
+      fi
+    fi
+  fi
 fi
 
 e2e_finish
