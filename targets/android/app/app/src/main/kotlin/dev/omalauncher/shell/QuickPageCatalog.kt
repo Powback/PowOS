@@ -95,12 +95,18 @@ object QuickPageCatalog {
         c: Candidate,
     ): Pair<String, Resolved>? {
         val info = runCatching { pm.resolveActivity(Intent(c.action), PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo }.getOrNull() ?: return null
-        if (!openable(context, info)) return null
+        if (!openable(context, info) || chooser(info.packageName, info.name)) return null
         // The activity's own name only (labelRes 0: loadLabel would answer the app's, "Settings").
         val label = if (info.labelRes != 0 || info.nonLocalizedLabel != null) runCatching { info.loadLabel(pm).toString() }.getOrNull() else null
         val drawn = if (info.icon != 0) runCatching { draw(info.loadIcon(pm)) }.getOrNull() else null
         return "${info.packageName}/${info.name}" to Resolved(label, drawn?.first, drawn?.second ?: false)
     }
+
+    /**
+     * The system's "Complete action using" chooser (the phone, 11-02: a "Complete action" item in the list): two apps
+     * answer the action, so a tap would ask which - not a page. Not offered.
+     */
+    fun chooser(pkg: String, name: String) = pkg == "android" && (name.endsWith("ResolverActivity") || name.endsWith("ChooserActivity"))
 
     private fun openable(
         context: Context,
