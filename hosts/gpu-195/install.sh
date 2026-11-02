@@ -6,6 +6,9 @@
 #   GPU1: stt-batch (the same whisper-fast, for files and dictation: http://stt.pow), resident
 #         llm-pool (llama-swap + vLLM: general Qwen3-14B-AWQ / vision Qwen2.5-VL-7B-AWQ / embed bge-m3, http://llm-gpu.pow),
 #         each model loaded on first request, unloaded after 10 idle minutes
+#         powmap-scan (PowMap live room scan, VGGT-SLAM 2.0, :8765, https://powmap.pow/scan): on demand - unloads the
+#         pool for a scan, exits its GPU engine 5 idle minutes later. Code: PowMap repo scanner/, rsynced to
+#         ~/powmap-scanner (POWMAP_SCANNER_DIR); skipped while that directory is missing
 #   CPU:  voice-agent (VoiceAgent backend, /ws) + voice-web (Astro UI)
 #
 # Everything is a rootless podman quadlet (~/.config/containers/systemd -> systemd --user, linger on, so it starts at
@@ -22,11 +25,13 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 VA="${VOICEAGENT_DIR:-$HOME/Projects/VoiceAgent}"
+PM="${POWMAP_SCANNER_DIR:-$HOME/powmap-scanner}"
 QUADLETS="$HOME/.config/containers/systemd"
 CONF="$HOME/.config/voiceagent"
 POOLCONF="$HOME/.config/llm-pool"
 
-mkdir -p "$QUADLETS" "$CONF" "$POOLCONF" /var/lib/powos/models/{hf,torch,vllm} /var/lib/powos/voiceagent
+mkdir -p "$QUADLETS" "$CONF" "$POOLCONF" /var/lib/powos/models/{hf,torch,vllm,powmap} /var/lib/powos/voiceagent \
+    "$HOME/powmap-scan-data"
 install -m 644 "$HERE"/quadlets/* "$QUADLETS"/
 install -m 644 "$HERE/voiceagent.env" "$CONF/voiceagent.env"
 install -m 644 "$HERE/llm-pool/config.yaml" "$POOLCONF/config.yaml"
@@ -43,6 +48,12 @@ if [[ "${1:-}" != "--no-build" ]]; then
     podman build -t localhost/voiceagent-backend:latest "$VA/VoiceAgentWeb/services/voice-agent"
     podman build -t localhost/voiceagent-web:latest "$VA/VoiceAgentWeb"
     podman build -t localhost/llm-pool:latest "$HERE/llm-pool"
+    if [[ -f "$PM/Containerfile" ]]; then
+        podman build -t localhost/powmap-scan:latest "$PM"
+        # weights into /var/lib/powos/models/powmap once (no GPU): VGGT-1B ~5 GB, DINOv2-B, SALAD
+        podman run --rm --security-opt label=disable -v /var/lib/powos/models/powmap:/models \
+            localhost/powmap-scan:latest python /app/worker.py --fetch
+    fi
 fi
 
 loginctl show-user "$USER" -p Linger | grep -q yes || loginctl enable-linger "$USER"
@@ -51,5 +62,8 @@ for m in "$REPO"/units/gpu-195/*.json; do
     python3 "$REPO/lib/apps/powos-units" register "$m"
 done
 systemctl --user start voice-stt.service voice-tts.service voice-llm.service stt-batch.service llm-pool.service
+if podman image exists localhost/powmap-scan:latest; then
+    systemctl --user restart powmap-scan.service
+fi
 systemctl --user restart voice-agent.service voice-web.service
-echo "voice path up: http://voiceagent.pow (Traefik on .100), backend :9000, stt :8000, tts :8880, llm :8100; stt.pow :8001; llm-gpu.pow :9292"
+echo "voice path up: http://voiceagent.pow (Traefik on .100), backend :9000, stt :8000, tts :8880, llm :8100; stt.pow :8001; llm-gpu.pow :9292; powmap-scan :8765"

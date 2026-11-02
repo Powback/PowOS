@@ -1,0 +1,42 @@
+# gpu-195: PowMap live room scan - the phone streams JPEG frames over a WebSocket, VGGT-SLAM 2.0 (MIT-SPARK) builds
+# the room's point cloud live (a PLY snapshot per submap) and a TSDF mesh at the end, for the projector solver.
+# Served as https://powmap.pow/scan/* by Traefik on .100 (path not stripped) -> :8765. Code + Containerfile: the
+# PowMap repo's scanner/ (rsynced to ~/powmap-scanner, image built there by install.sh).
+# GPU1 on demand, never GPU0 (the realtime voice path's, docs/GPU-SERVERS-PLAN.md): only nvidia.com/gpu=1 is
+# passed in, and the worker refuses to start its engine on any GPU but GPU1's UUID. A scan first asks llm-pool's
+# llama-swap to unload (POST /api/models/unload) and waits for POWMAP_NEED_MB free; the engine process (and with it
+# every byte of VRAM, CUDA context included) exits 300 s after the last scan, so the pool loads again on demand.
+# Measured (TUM fr1/room, 146 keyframes): 7.3 GiB peak on GPU1, ~8 keyframes/s SLAM, snapshot 2-5 s behind.
+# CPU: 4 CPUs at cpu-shares 256 (the voice units have the default 1024), so under contention voice wins.
+# Unit: powos units show powmap-scan  (repo units/gpu-195/powmap-scan.json)
+[Unit]
+Description=PowMap live room scan (VGGT-SLAM 2.0, GPU1 on demand) - powmap.pow/scan
+After=network-online.target llm-pool.service
+Wants=network-online.target
+
+[Container]
+ContainerName=powmap-scan
+Image=localhost/powmap-scan:latest
+PublishPort=8765:8765
+AddDevice=nvidia.com/gpu=1
+SecurityLabelDisable=true
+# VGGT-1B (~5 GB, Meta non-commercial licence), DINOv2-B + SALAD: downloaded once by `worker.py --fetch`.
+Volume=/var/lib/powos/models/powmap:/models
+# Per scan: <session>/frames/*.jpg (every frame, for an offline pass), points-<n>.ply, points.ply, mesh.ply,
+# cameras.json, summary.json. Never cleaned automatically.
+Volume=%h/powmap-scan-data:/data
+Environment=POWMAP_GPU_UUID=GPU-1a118f88-9cb5-2316-ddda-1ea80ff0af37
+Environment=POWMAP_NEED_MB=10000
+Environment=POWMAP_IDLE_RELEASE_S=300
+Environment=LLAMA_SWAP_URL=http://host.containers.internal:9292
+Environment=OMP_NUM_THREADS=4
+Label=io.powos.unit=powmap-scan
+PodmanArgs=--memory=16g --memory-swap=16g --cpus=4 --cpu-shares=256 --pids-limit=2048 --shm-size=2g
+
+[Service]
+Restart=always
+RestartSec=10
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target
