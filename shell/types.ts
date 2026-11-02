@@ -1162,6 +1162,8 @@ export interface TermStyle {
   family: string;
   /** The family's file is there (/_font/terminal/<family>); the Nerd Font symbols are at /_font/symbols. */
   font: boolean;
+  /** The family is the user's choice (the setting changed): drawn instead of the system monospace (PowTerm's). */
+  own?: boolean;
 }
 
 /** A widget's node tree (WidgetTree.kt): props evaluated, colors as CSS, a Canvas's drawing as ops. */

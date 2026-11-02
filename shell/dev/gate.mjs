@@ -423,22 +423,26 @@ async function checkOnce(r, check) {
 async function termSessionCheck() {
   // Helpers are inner: page.evaluate serialises only this function.
   /** termSessionCheck's measures: the grid against the visible box, the first row's place, the cursor. */
+  // The renderer's own nodes aren't read (the WebGL renderer draws to a canvas, no .xterm-rows): the cells are the
+  // screen's box over the grid, the text is xterm's buffer, the cursor its state.
   const termGeometryProblems = (term, holder) => {
     const scr = holder.querySelector(".xterm-screen");
-    const rowsEl = holder.querySelector(".xterm-rows");
+    const shown = Array.from({ length: term.rows }, (_, i) => term.buffer.active.getLine(term.buffer.active.viewportY + i)?.translateToString(true) ?? "").join("\n");
     const cellW = scr.offsetWidth / term.cols;
     const cellH = scr.offsetHeight / term.rows;
     // The visible width: the holder reaches past the view by the fit addon's scrollbar reserve (terminal.tsx HACK).
     const box = holder.getBoundingClientRect();
     const visW = holder.closest(".term").getBoundingClientRect().right - box.left - parseFloat(holder.style.top);
-    const first = rowsEl.firstElementChild.getBoundingClientRect();
+    const first = scr.getBoundingClientRect();
     const holds = (n, px, cell) => n * cell <= px + 0.5 && (n + 1) * cell > px;
     return [
       [holds(term.cols, visW, cellW), `cols ${term.cols} don't fill the visible ${Math.round(visW)} px (cell ${cellW.toFixed(1)} px)`],
       [holds(term.rows, holder.clientHeight, cellH), `rows ${term.rows} don't fill ${holder.clientHeight} px (cell ${cellH.toFixed(1)} px)`],
       [first.top - box.top < cellH, `the first row is ${Math.round(first.top - box.top)} px under the view's top (an empty band over it)`],
-      [/line 1/.test(rowsEl.textContent), "the output isn't shown"],
-      [!rowsEl.querySelector("[class*=xterm-cursor]"), "a cursor drawn while the program hid it"],
+      [/line 1/.test(shown), "the output isn't shown"],
+      // HACK: xterm has no public cursor-visibility API (IModes lacks DECTCEM); both renderers skip the cursor on this
+      // flag. Real fix: a public modes.showCursor upstream, or reading the WebGL cursor layer's pixels.
+      [term._core?.coreService?.isCursorHidden === true, "a cursor drawn while the program hid it"],
     ].filter(([ok]) => !ok).map(([, msg]) => msg);
   };
   const G = window.__gw;
@@ -610,6 +614,69 @@ async function termTakeOverKeysCheck() {
   powos.keyboard.show = show;
   S.closeSession();
   return fails;
+}
+
+/**
+ * In the page: a session's text drawn as PowTerm's (the user 11-02: "The terminal still doesn't work half as well as
+ * the Powterm"; Termux's TerminalRenderer draws Typeface.MONOSPACE at 12sp, rows at the font's own spacing, to a
+ * canvas): the WebGL renderer (glyphs to the GPU, not DOM spans), the system monospace at the host's size, rows the
+ * font's ascent + descent, box drawing drawn to the cell. The fixture is htop's borders and bars over a tmux status
+ * line; the scene's screenshot (/cache/term-glyphs.png) shows them.
+ */
+async function termGlyphsCheck() {
+  // Helpers are inner: page.evaluate serialises only this function. Its measures: the drawing, then the rows.
+  const termGlyphsProblems = (term, renderer, style) => {
+    const fails = [];
+    if (renderer !== "webgl") fails.push(`the ${renderer} renderer draws (PowTerm draws to a canvas: the WebGL renderer)`);
+    if (!document.querySelector(".session-term .xterm-screen canvas")) fails.push("no canvas in the terminal's screen");
+    if (document.querySelector(".session-term .xterm-rows")) fails.push("DOM rows drawn (.xterm-rows) beside the WebGL renderer");
+    if (term.options.customGlyphs !== true) fails.push("box drawing from the face's glyphs (customGlyphs off): the borders break between rows");
+    if (!/^monospace\b/.test(term.options.fontFamily)) fails.push(`the face is ${term.options.fontFamily} (PowTerm's: the system monospace)`);
+    if (term.options.fontSize !== style.size) fails.push(`text at ${term.options.fontSize} px, the host's size is ${style.size}`);
+    return [...fails, ...termRowProblems(term)];
+  };
+  const termRowProblems = (term) => {
+    const fails = [];
+    // Rows at the font's own spacing (Termux: ceil of the face's ascent + descent), as xterm's cell measures it.
+    const ctx = document.createElement("canvas").getContext("2d");
+    ctx.font = `${term.options.fontSize}px ${term.options.fontFamily}`;
+    const m = ctx.measureText("W");
+    const own = Math.ceil((m.fontBoundingBoxAscent + m.fontBoundingBoxDescent) * devicePixelRatio) / devicePixelRatio;
+    const cell = document.querySelector(".session-term .xterm-screen").offsetHeight / term.rows;
+    if (Math.abs(cell - own) > 1) fails.push(`rows ${cell.toFixed(2)} px apart; the face's own spacing is ${own.toFixed(2)} px`);
+    const text = term.buffer.active.getLine(term.buffer.active.viewportY)?.translateToString(true) ?? "";
+    if (!text.startsWith("┌─")) fails.push(`the fixture's first row reads ${JSON.stringify(text.slice(0, 8))}`);
+    return fails;
+  };
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const T = await G.mod("./ui/terminal.tsx");
+  const { powos } = await G.mod("./bridge.ts");
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  S.openSession("powos-scratch-glyphs", null, undefined, { host: "mac", agent: true });
+  const id = "at-work:mac:powos-scratch-glyphs";
+  await G.until(() => T.terminalFor(id) && document.querySelector(".session-term .xterm-screen"), 4000);
+  await wait(500);
+  const term = T.terminalFor(id);
+  const st = await powos.term.open(id, null, null, term.cols, term.rows, false);
+  const w = Math.min(term.cols, 60) - 2;
+  const rows = [
+    `\x1b[?25l\x1b[H\x1b[2J┌${"─".repeat(w)}┐`,
+    `│ 1 [\x1b[32m${"|".repeat(18)}\x1b[31m${"|".repeat(12)}\x1b[0m]${" ".repeat(w - 35)}│`,
+    `│${(" Mem " + "█".repeat(12) + "▓".repeat(6) + "▒".repeat(4) + "░".repeat(4)).padEnd(w)}│`,
+    `├${"─".repeat(12)}┬${"─".repeat(w - 13)}┤`,
+    `│${" PID USER".padEnd(12)}│${" Command".padEnd(w - 13)}│`,
+    `│\x1b[7m${" 4242 mats".padEnd(12)}\x1b[0m│${" htop".padEnd(w - 13)}│`,
+    `│${" 17 root".padEnd(12)}│${" tmux new -s powos".padEnd(w - 13)}│`,
+    `└${"─".repeat(12)}┴${"─".repeat(w - 13)}┘`,
+    "╔══╦══╗ ╭──╮ ▀▄▌▐ ⣿⡇ ✓ λ → ≠ fi ffi",
+    "╚══╩══╝ ╰──╯",
+  ];
+  const status = `\x1b[${term.rows};1H\x1b[42;30m${"[powos] 0:zsh* 1:htop-".padEnd(term.cols - 18)}"mac" 12:34 02-Nov\x1b[0m`;
+  const bytes = new TextEncoder().encode(rows.join("\r\n") + status);
+  window.__mockEvents.emit("term.data", { id, run: st.run, data: btoa(String.fromCharCode(...bytes)), end: st.end + bytes.length });
+  await wait(400);
+  return termGlyphsProblems(term, T.rendererFor?.(id) ?? "dom", await powos.term.style(null));
 }
 
 /** In the page: merged widgets M1-M2 (grid.tsx joins; the user's 2026-10-28 "the widget combiner looks ugly af if the
@@ -11294,6 +11361,17 @@ try {
           const fails = await r.page.evaluate(termViewScrollCheck);
           await r.page.screenshot({ path: "/cache/term-view-scroll.png" }).catch(() => {});
           return [...fails, ...(await r.page.evaluate(termTakeOverKeysCheck))];
+        }),
+      ),
+    );
+  // A session's text drawn as PowTerm's (ui/terminal.tsx: the WebGL renderer, the system monospace, the face's rows).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(
+      open(browser, `${ORIGIN}/index.html`, "term-glyphs", { width: 404, height: 900 }).then((r) =>
+        whenReady(r, async () => {
+          const fails = await r.page.evaluate(termGlyphsCheck);
+          await r.page.screenshot({ path: "/cache/term-glyphs.png" }).catch(() => {});
+          return fails;
         }),
       ),
     );

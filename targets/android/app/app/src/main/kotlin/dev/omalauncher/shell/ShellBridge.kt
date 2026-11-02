@@ -25,6 +25,7 @@ import dev.omalauncher.system.RunningApps
 import kotlin.concurrent.thread
 import dev.omalauncher.PowosAiChat
 import dev.omalauncher.Runtime
+import dev.omalauncher.theme.Style
 import dev.omalauncher.ui.Palette
 import dev.omalauncher.widgets.runtime.MediaListener
 import dev.omalauncher.widgets.runtime.NotificationPicture
@@ -1611,15 +1612,20 @@ class ShellBridge(
      * How the launcher's terminals look (PtyTerminal): text of [points] (null: the terminal text size) in CSS px, the
      * pad around it, Android's font scale (for a widget's textSize in sp), and the terminal font family, whose file
      * ShellActivity serves once PowOS's copy is fetched ("font": false until then; "term.style" says when it's there).
+     * The terminal text size is PowTerm's (Termux's TerminalView: an em of the text size in sp, 12 by default), not
+     * foot's rounded point size; "own" is whether the family is the user's choice (not the setting's default): the
+     * page draws the system monospace, as PowTerm does, unless it is.
      */
     private fun terminalStyle(points: Double?): JSONObject {
         val font = runtime.terminalFont
         val metrics = context.resources.displayMetrics
+        val fontScale = context.resources.configuration.fontScale
         val file = PtyTerminal.fontFile(context, font.family) { emit("term.style", null) }
         return JSONObject()
-            .put("size", font.pixels(points ?: font.size) / metrics.density)
+            .put("size", points?.let { font.pixels(it) / metrics.density } ?: (font.em * fontScale).toDouble())
+            .put("own", font.family != Style.TERMINAL_FONT.default)
             .put("pad", font.padPixels / metrics.density)
-            .put("fontScale", context.resources.configuration.fontScale)
+            .put("fontScale", fontScale)
             .put("family", font.family)
             .put("font", file != null)
     }

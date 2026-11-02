@@ -17,6 +17,7 @@ import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import { effect, signal } from "@preact/signals";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { powos } from "../bridge.ts";
 import { tick } from "./haptics.ts";
 import { takeTap } from "./taps.ts";
@@ -91,8 +92,11 @@ function loadFont(name: string, url: string) {
   return loadedFonts.get(url)!;
 }
 async function fontFamily(style: TermStyle) {
-  const fallback = getComputedStyle(document.documentElement).getPropertyValue("--font").trim() || "monospace";
   const symbols = (await loadFont("PowOS Symbols", "/_font/symbols")) ? ', "PowOS Symbols"' : "";
+  // PowTerm's face (Termux's TerminalView: Typeface.MONOSPACE, Droid Sans Mono on Android) unless the user chose a
+  // family of their own: the system monospace, which Chromium resolves to the same face.
+  if (style.own === false) return `monospace${symbols}`;
+  const fallback = getComputedStyle(document.documentElement).getPropertyValue("--font").trim() || "monospace";
   const face = `PowOS Terminal ${style.family}`;
   const own = style.font && (await loadFont(face, `/_font/terminal/${encodeURIComponent(style.family)}`));
   // The symbols last: only the glyphs no monospace face has fall through to it. First in the list (before the
@@ -146,6 +150,8 @@ class Session {
    * view back at the bottom under the finger.
    */
   held: number | null = null;
+  /** "webgl" (PowTerm's canvas drawing: glyphs to a texture atlas, cells on the GPU) or "dom" (no WebGL, or it lost). */
+  renderer: "webgl" | "dom" = "dom";
 
   constructor(
     readonly id: string,
@@ -158,11 +164,19 @@ class Session {
       theme: theme(),
       allowTransparency: true,
       fontFamily: "monospace",
+      // PowTerm's line: Termux's TerminalRenderer spaces rows by the font's own spacing (ascent + descent, rounded
+      // up); xterm's cell at lineHeight 1 is the same measure (fontBoundingBox ascent + descent, ceiled to pixels).
+      lineHeight: 1,
+      letterSpacing: 0,
+      // Box drawing and blocks drawn to the cell (the WebGL renderer's), so tmux's borders and htop's bars join up
+      // row to row as PowTerm's do, whatever the face's own glyphs measure.
+      customGlyphs: true,
       cursorBlink: false,
       allowProposedApi: false,
     });
     this.term.loadAddon(this.fit);
     this.term.open(this.holder);
+    this.renderer = webgl(this.term);
     this.term.onData((d) => this.send(modify(d)));
     // Mouse reports in the X10 encoding: bytes, not text.
     this.term.onBinary((d) => this.sendBytes(Uint8Array.from(d, (c) => c.charCodeAt(0) & 0xff)));
@@ -286,6 +300,27 @@ class Session {
   }
 }
 
+/**
+ * Draws [term] with the WebGL renderer: "webgl", or "dom" where WebGL2 isn't there. A lost context (the GPU process
+ * restarted, or Chromium's per-page context limit took the oldest) hands it back to xterm's DOM renderer, which draws
+ * the same buffer at once; the session keeps its scrollback and size.
+ */
+function webgl(term: Terminal): "webgl" | "dom" {
+  try {
+    const gl = new WebglAddon();
+    term.loadAddon(gl);
+    gl.onContextLoss(() => {
+      gl.dispose();
+      const s = [...sessions.values()].find((x) => x.term === term);
+      if (s) s.renderer = "dom";
+    });
+    return "webgl";
+  } catch (e) {
+    console.warn("term: no WebGL, the DOM renderer draws", e);
+    return "dom";
+  }
+}
+
 /** How long a terminal's size holds before the pty takes it. */
 const RESIZE_SETTLE_MS = 120;
 
@@ -311,6 +346,8 @@ powos.on("files.changed", ({ path }: { path: string }) => {
 /** Ends a terminal that no widget owns (a terminal screen of the shell's own); a widget's end with it on the host. */
 /** The xterm behind a terminal id (dev/gate.mjs's terminal scenes read its cols, rows and cursor). */
 export const terminalFor = (id: string) => sessions.get(id)?.term ?? null;
+/** What draws a terminal id's cells (the gate's terminal scenes check it's the WebGL renderer). */
+export const rendererFor = (id: string) => sessions.get(id)?.renderer ?? null;
 
 export function closeTerminal(id: string) {
   sessions.get(id)?.term.dispose();
