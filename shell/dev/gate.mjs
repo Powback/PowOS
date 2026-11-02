@@ -10990,7 +10990,11 @@ try {
       if (started.length) return started;
       const ended = await r.page.evaluate(async () => (await importShim("./dev/assist-draw-check.js")).assistDrawEnd());
       await r.page.screenshot({ path: `/cache/assist-draw-${name}-after.png` });
-      return ended;
+      if (ended.length) return ended;
+      // AO5 (the user, 11-02: "The circles I draw ... keeps being there after I send a message"): sent, it clears.
+      const sent = await r.page.evaluate(async () => (await importShim("./dev/assist-draw-check.js")).assistDrawSend());
+      await r.page.screenshot({ path: `/cache/assist-draw-${name}-sent.png` });
+      return sent;
     })));
   }
   // AI P0 (the user, 11-01: "AI overlay: no dock showing, full bar, same design as the AI page"): the side button's

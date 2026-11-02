@@ -53,7 +53,9 @@ const cardSince = () => seenCards !== null && cards().some((t) => !seenCards!.ha
 
 /** The part of the screen circled (a PNG cut out of the screenshot), sent with the whole screen; null: just the screen. */
 const region = signal<string | null>(null);
-/** The circle drawn over the screen (px), left showing so it's clear what goes along. */
+/** Each question's circled part (a PNG), taken off the screen when it was sent; cleared on the next summoning. */
+const circledFor = new Map<string, string>();
+/** The circle drawn over the screen (px), left showing so it's clear what goes along - until it's sent (send()). */
 const stroke = signal<[number, number][]>([]);
 /**
  * A stroke under way (AO1, the user 2026-10-30: "It should hide while I'm drawing so that I can draw like under the
@@ -80,6 +82,7 @@ powos.on("assist.reset", () => {
   seenCards = new Set(cards());
   region.value = null;
   stroke.value = [];
+  circledFor.clear();
   summoned();
 });
 powos.on("assist.hidden", () => takeOver());
@@ -146,7 +149,9 @@ async function withScreen(text: string) {
   // all the chat shows of it (powai.tsx). Live: the filmstrip of the last moments instead of the one screenshot.
   const strip = live.value.on ? await powos.assist.filmstrip() : null;
   const shot = !strip && screen.value?.screenshot;
-  const part = shot && region.value ? await powos.assist.attach(region.value) : null;
+  // The circle this question was sent with (send() clears the drawing at once), else what's circled now.
+  const cut = circledFor.get(text) ?? region.value;
+  const part = shot && cut ? await powos.assist.attach(cut) : null;
   const path = shot ? await powos.assist.attach(null) : null;
   const context = [
     strip &&
@@ -169,6 +174,12 @@ function send() {
   if (!text) return;
   draft.value = "";
   asked.value = true;
+  // The circle goes with this question, then the drawing clears (the user 11-02: "The circles I draw on the side
+  // button A.I overlay keeps being there after I send a message"): kept by the question's text, as the screen goes
+  // along when its turn comes (askQueued: maybe after the turn under way, or sent again) - not left drawn for the next.
+  if (region.value) circledFor.set(text, region.value);
+  region.value = null;
+  stroke.value = [];
   askQueued(text);
 }
 

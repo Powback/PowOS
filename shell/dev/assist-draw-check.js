@@ -143,3 +143,32 @@ export async function assistDrawEnd() {
   }
   return fails;
 }
+
+/**
+ * AO5 (the user, 11-02: "The circles I draw on the side button A.I overlay keeps being there after I send a message"):
+ * after assistDrawEnd's circle, a question typed and sent - the circle's part goes with it (ai.send's text names it),
+ * then the drawing is gone (no stroke points, no "circled" chip, the head's thumbnail the whole screen again).
+ */
+export async function assistDrawSend() {
+  const { powos } = await importShim("./bridge.ts");
+  const fails = [];
+  const sent = [];
+  const orig = powos.ai.send;
+  powos.ai.send = (text, ...rest) => (sent.push(text), orig(text, ...rest));
+  try {
+    const f = field();
+    f.value = "what is this?";
+    f.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelector(".assist-ask").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    for (const t0 = Date.now(); !sent.length && Date.now() - t0 < 3000; ) await sleep(30);
+    if (!sent.length) fails.push("send: nothing reached ai.send");
+    else if (!/the part of the screen I circled/.test(sent[0])) fails.push("send: the circled part didn't go with the question");
+    await frame();
+    if (line().length) fails.push(`after send: the circle is still drawn (${line().length} points)`);
+    if (/circled/.test(document.querySelector(".assist-attach")?.textContent ?? "")) fails.push('after send: the "part you circled" chip is still there');
+    if (document.querySelector(".assist-shot.crop")) fails.push("after send: the head still shows the cut-out, not the screen");
+  } finally {
+    powos.ai.send = orig;
+  }
+  return fails;
+}
