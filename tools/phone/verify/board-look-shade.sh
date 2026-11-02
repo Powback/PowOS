@@ -132,12 +132,13 @@ fi
 KEYS='[...document.querySelectorAll(".cc3-launchers .cc3-grid:not(.cc3-spare) [data-key]")].map(e=>e.dataset.key).join(",")'
 STORED='importShim("./bridge.ts").then(B=>B.powos.store.get("controls.launchers")).then(v=>JSON.stringify(v===undefined?null:v))'
 if [ "$CASE" = cc-ql-x ]; then
-  QL0=$(sev "$STORED"); log "quick-launch row stored at the start: $QL0"
-  case $QL0 in null|\[*) ;; *) fail "the stored row couldn't be read ($QL0) - nothing changed"; e2e_finish; exit 0 ;; esac
   case_restore() { [ -n "${QL0:-}" ] || return 0
     sev "Promise.all([importShim('./bridge.ts'),importShim('./ui/launchers.tsx'),importShim('./ui/ccexpand.ts')]).then(async([B,L,X])=>{await B.powos.store.set('controls.launchers',$QL0);L.loadLaunchers();X.ccEditing.value=false;return 'ok'})" >/dev/null
     sleep 0.6; log "row put back: $(sev "$STORED") (was $QL0)"; QL0=; shut; }
+  # The store read only once the shade is up: a hidden shade page's bridge didn't answer (dc1: CDP gave up after 120 s).
   shut; pullbar 85 "status-bar pull on the right: the control center"
+  QL0=$(CDP_TIMEOUT_S=20 sev "$STORED"); log "quick-launch row stored at the start: $QL0"
+  case $QL0 in null|\[*) ;; *) fail "the stored row couldn't be read ($QL0) - nothing changed"; QL0=; shut; e2e_finish; exit 0 ;; esac
   sev "importShim('./ui/ccexpand.ts').then(X=>{X.ccEditing.value=true;return 'ok'})" >/dev/null; sleep 0.8
   k0=$(sev "$KEYS"); log "row in edit mode: $k0"
   IFS=, read -r -a ks <<<"$k0"; n=${#ks[@]}
