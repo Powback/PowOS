@@ -297,6 +297,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 <!-- hack-registry:start -->
 | marker | why | real fix |
 |---|---|---|
+| `.github/workflows/build-test-publish.yml:119` | build-test-publish is pinned to ubuntu-24.04: on ubuntu-26.04 (kernel 7.0) osbuild in bootc-image-builder fails the containers-storage bind mount with EACCES (osbuild/osbuild#2579). | Drop the pin once bootc-image-builder ships an osbuild with #2579 fixed (or apply the 26.04 AppArmor override). |
 | `apps/stickman/ui/workers/sim.ts:10` | The stickman sim and brain are copied from robotsupremacy's stickman.ts: there is no browser core library to import. | robotsupremacy's stickman/web/PLAN.md step 1 (sim + brain as a library); import it. |
 | `docs/AGENTS-VIEW-DESIGN.md:218` | The design's own copy of the mirror's marker: adb used as the cross-host transport (C1). | REMOTE-POWOS.md M2: the phone subscribes to the hub's powos-agents module; delete the mirror. |
 | `docs/AGENTS-VIEW-DESIGN.md:333` | The work board's note of the CLI's own marker: `powos agents task` off the phone runs on the phone over powos-vadb (C4/C7). | Each host's own powos-agents module and the M2 subscription; the hub merges the hosts' boards. |
