@@ -195,6 +195,13 @@
   --status-needs: #e3a03c;
   --status-on-needs: #1a1206;
   --status-stalled: color-mix(in srgb, var(--color-foreground) 45%, transparent);
+  /*
+   * Privacy colours (the recording light, ui/chrome.tsx RecordingRing), fixed in every theme: the camera green
+   * (Android's privacy indicator), the microphone orange, screen capture red - its own red, not --color-red (failed).
+   */
+  --privacy-camera: #3ddc84;
+  --privacy-mic: #f29f05;
+  --privacy-screen: #f0483e;
 }
 :root[data-font="mono"] { --font-body: var(--font); }
 

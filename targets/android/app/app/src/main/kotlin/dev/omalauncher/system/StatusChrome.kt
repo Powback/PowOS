@@ -44,6 +44,8 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
         override fun onCapabilitiesChanged(n: Network, caps: NetworkCapabilities) { web.post { connection() } }
         override fun onLost(n: Network) { web.post { connection() } }
     }
+    /** The recording light (chrome.tsx RecordingRing): "recording" camera|screen|mic|null, "recordingApps". */
+    private val recording = RecordingWatcher(context) { recordingState(it); publish() }
     private val watchdog = PageWatchdog(web, "PowOS status bar", skip = {
         !context.getSystemService(android.os.PowerManager::class.java).isInteractive
     }) { ready = false; web.visibility = View.INVISIBLE; changed() }
@@ -60,6 +62,7 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
         })
         connectivity.registerDefaultNetworkCallback(network)
         connection()
+        recordingState(recording.state())
         scope.launch { MediaListener.changes.collect {
             val count = runCatching { MediaListener.connected?.activeNotifications?.size }.getOrNull()
             data.put("notifications", count ?: JSONObject.NULL)
@@ -144,7 +147,20 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
         // meter "wasn't there" (the user, 2026-10-28). chrome.tsx keeps the meter left of it.
         val hole = cutout?.boundingRects?.filter { it.left >= width / 3 && it.right <= width * 2 / 3 }?.minByOrNull { it.left }
         if (hole != null) data.put("holeLeft", hole.left / d) else data.remove("holeLeft")
+        // The camera's own cutout (the cover's centred punch-hole folded, the inner screen's unfolded): the recording
+        // light rings it. The top edge's cutout, else the smallest one.
+        val camera = cutout?.boundingRectTop?.takeUnless { it.isEmpty }
+            ?: cutout?.boundingRects?.filter { !it.isEmpty }?.minByOrNull { it.width() * it.height() }
+        if (camera != null) {
+            data.put("camera", JSONObject().put("x", camera.left / d).put("y", camera.top / d).put("width", camera.width() / d).put("height", camera.height() / d))
+        } else {
+            data.remove("camera")
+        }
         publish()
+    }
+    private fun recordingState(state: RecordingOps.State) {
+        data.put("recording", state.ring?.key ?: JSONObject.NULL)
+        data.put("recordingApps", org.json.JSONArray(state.apps))
     }
     private fun publish() {
         data.put("clock", android.text.format.DateFormat.getTimeFormat(context).format(java.util.Date()))
@@ -152,6 +168,7 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
     }
     fun destroy() {
         watchdog.stop()
+        recording.stop()
         scope.cancel()
         context.unregisterReceiver(receiver)
         connectivity.unregisterNetworkCallback(network)

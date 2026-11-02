@@ -37,6 +37,13 @@ html:root .chrome-surface { --frost-fill: color-mix(in srgb, var(--frost-base) 8
 /* Over a centred camera hole (chrome.tsx has-hole) the meter sits just left of it, sized to its content (no tap area over the clock). */
 .status-chrome.has-hole { position: relative; }
 .status-chrome.has-hole .fps-meter { position: absolute; top: 50%; translate: 0 -50%; width: auto; right: calc(100% - var(--hole-left) + 8px); }
+/* The recording light (chrome.tsx RecordingRing): a ring on the camera's cutout, coloured by what's in use. */
+.status-rec-ring, .status-rec-dot { --rec: var(--privacy-camera); pointer-events: none; box-sizing: border-box; }
+.status-rec-ring[data-kind="mic"], .status-rec-dot[data-kind="mic"] { --rec: var(--privacy-mic); }
+.status-rec-ring[data-kind="screen"], .status-rec-dot[data-kind="screen"] { --rec: var(--privacy-screen); }
+.status-rec-ring { position: fixed; border: 2px solid var(--rec); border-radius: 50%; animation: status-rec-in var(--spring-fast-ms) var(--spring-fast); }
+.status-rec-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--rec); flex: none; }
+@keyframes status-rec-in { from { opacity: 0; scale: .6; } }
 .fps-meter canvas { width: 45px; height: 16px; display: block; }
 .fps-meter .fps-num { width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
 .fps-meter .fps-unit { font-size: 9px; opacity: .7; }

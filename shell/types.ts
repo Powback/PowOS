@@ -432,6 +432,14 @@ export interface ChromeState {
   /** A maximised web window's bar merged with the status bar: its title's end / its controls' width (CSS px from each side). */
   mergeLeft?: number;
   mergeRight?: number;
+  /** A centred camera hole's left edge (CSS px; the folded cover screen). */
+  holeLeft?: number;
+  /** The camera's cutout on this screen (CSS px, the strip's own coordinates): folded the cover's, unfolded the inner's. */
+  camera?: { x: number; y: number; width: number; height: number };
+  /** The recording light (StatusChrome.kt RecordingWatcher, AppOps active ops): what's in use - camera, screen capture, mic. */
+  recording?: "camera" | "screen" | "mic" | null;
+  /** The apps using it (package names). */
+  recordingApps?: string[];
 }
 export interface ChromeRegion { action: string; x: number; y: number; width: number; height: number }
 
