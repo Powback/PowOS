@@ -44,16 +44,20 @@ const openLive = (id: string) => ((aiAgent.value = id), (aiScreen.value = "fleet
 
 /**
  * One agent as one glass row, the Progress page's (the user, 11-01 16:51: "the chat and the agents and the device page
- * don't follow the same design"): its state dot, its task, a plain state word, its device; [children] between the title
- * and the state (a bar, an action). A tap opens it live.
+ * don't follow the same design"): its state dot, its task, a plain state word, its device; [under] under the title (the
+ * plan's bar, as the left column's Working rows), [children] between the title and the state (an action, the terminal).
+ * A tap opens it live.
  */
-function AgentRow(props: { a: Agent; dot: string; title: preact.ComponentChildren; state: string; children?: preact.ComponentChildren }) {
-  const { a, dot, title, state, children } = props;
+function AgentRow(props: { a: Agent; dot: string; title: preact.ComponentChildren; state: string; under?: preact.ComponentChildren; children?: preact.ComponentChildren }) {
+  const { a, dot, title, state, under, children } = props;
   return (
     <li class="aip-area tile ag-row" data-agent={a.id}>
-      <div class="aip-area-row ag-row-line" role="button" tabIndex={0} onClick={() => openLive(a.id)}>
+      <div class={`aip-area-row ag-row-line ${under ? "two" : ""}`} role="button" tabIndex={0} onClick={() => openLive(a.id)}>
         <span class={`aip-dot ${dot}`} aria-hidden="true" />
-        <span class="aip-area-name ag-row-title">{title}</span>
+        <span class="ag-row-main">
+          <span class="aip-area-name ag-row-title">{title}</span>
+          {under}
+        </span>
         {children}
         {state && <span class="ag-row-state">{state}</span>}
         <span class="fl-chip">{a.host}</span>
@@ -62,11 +66,10 @@ function AgentRow(props: { a: Agent; dot: string; title: preact.ComponentChildre
   );
 }
 
-/** A working agent: its task, the plan's bar and N/M ("working" without one), its terminal. */
+/** A working agent: its task with the plan's bar under it (the title the row's whole width), N/M ("working" without one), its terminal. */
 function WorkingRow({ x }: { x: Worker }) {
   return (
-    <AgentRow a={x.a} dot="working" title={x.title} state={x.total > 0 ? `${x.done}/${x.total}` : "working"}>
-      {x.total > 0 && <ThinBar done={x.done} total={x.total} />}
+    <AgentRow a={x.a} dot="working" title={x.title} state={x.total > 0 ? `${x.done}/${x.total}` : "working"} under={x.total > 0 && <ThinBar done={x.done} total={x.total} />}>
       <TermButton a={x.a} label="terminal" />
     </AgentRow>
   );

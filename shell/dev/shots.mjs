@@ -518,7 +518,9 @@ const SCENES = [
   // Unfolded three panes (the user, 2026-10-31 13:29): nav · Chat / Agents / Progress in the middle · Working now, Try this,
   // Needs attention; folded sideways the nav as icons; folded portrait the chat + strip as before.
   ["ai-panes-chat", "home", LOOK + "{" + FLEET_SETUP + OTHER_PROJECT + "}", "wallpaper", undefined, { ...SIZES, "folded-land": LAND_SIZES["folded-land"] }],
-  ["ai-panes-agents", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'fleet'; await sleep(400);", "wallpaper", undefined, { unfolded: SIZES.unfolded }],
+  // The Chat tab's cards in the Progress design (the user, 11-02): the manager's answer, a plan card, the answer chips.
+  ["ai-panes-chat-cards", "home", LOOK + "{" + FLEET_SETUP + "}" + ` S.chat.value = { busy: false, items: [...${CHAT_SAMPLE}.slice(4), ...${PRESENT_ORDER}] }; await sleep(600);`, "wallpaper"],
+  ["ai-panes-agents", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'fleet'; await sleep(400);", "wallpaper", undefined, { folded: SIZES.folded, unfolded: SIZES.unfolded }],
   ["ai-panes-devices", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'devices'; await sleep(300); {" + UNITS_SCENE.replace(" S.page.value = -1;", "") + "}", "wallpaper", undefined, { unfolded: SIZES.unfolded }],
   ["ai-panes-progress", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'progress'; await sleep(600);", "wallpaper", undefined, { unfolded: SIZES.unfolded }],
   // Progress (aiprogress.tsx, the user 15:12): the ring and the area cards, the first one opened; folded and unfolded.
