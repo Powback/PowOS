@@ -464,6 +464,77 @@ async function termSessionCheck() {
   return out;
 }
 
+/**
+ * In the page: a taken-over session's drag scrolls as PowTerm's (Termux's TerminalView; the user 11-02: "The terminal
+ * still doesn't work half as well as the Powterm"): with tmux's mouse on, a drag of 6 rows is 6 wheel-up reports (it
+ * was 2: one per move, and a finger's small moves counted as a trackpad's); a quick flick goes on after the release,
+ * at most half a screen; without the mouse, a drag of 4 rows moves the scrollback 4 rows.
+ */
+async function termScrollCheck() {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const T = await G.mod("./ui/terminal.tsx");
+  const { powos } = await G.mod("./bridge.ts");
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const fails = [];
+  S.openSession("powos-scratch-scroll", null, undefined, { host: "mac", agent: false });
+  S.takeOver();
+  const id = "at-work:mac:powos-scratch-scroll";
+  await G.until(() => T.terminalFor(id) && document.querySelector(".session-term.focused .xterm-screen"), 4000);
+  await wait(500);
+  const term = T.terminalFor(id);
+  const st = await powos.term.open(id, null, null, term.cols, term.rows, false);
+  // Output past the mock shell's own (its offsets go on from there), so nothing of it is taken as shown already.
+  let end = st.end;
+  const emit = async (text) => {
+    const bytes = new TextEncoder().encode(text);
+    end += bytes.length;
+    window.__mockEvents.emit("term.data", { id, run: st.run, data: btoa(String.fromCharCode(...bytes)), end });
+    await wait(150);
+  };
+  const sent = [];
+  const write = powos.term.write;
+  powos.term.write = (i, data) => (i === id && sent.push(atob(data)), write(i, data));
+  const el = document.querySelector(".session-term");
+  const cell = el.querySelector(".xterm-screen").offsetHeight / term.rows;
+  const { left, width, top, height } = el.getBoundingClientRect();
+  const [x, y0] = [left + width / 2, top + height / 3];
+  const ev = (type, y) => el.dispatchEvent(new PointerEvent(type, { pointerId: 7, pointerType: "touch", clientX: x, clientY: y, bubbles: true, cancelable: true }));
+  const wheels = () => sent.join("").match(/\x1b\[<64;/g)?.length ?? 0;
+  // A drag in moves of [by] rows to [to] rows down, held still before the release (no fling).
+  const slowDrag = async (by, to) => {
+    ev("pointerdown", y0);
+    for (let n = by; n <= to; n += by) ev("pointermove", y0 + n * cell + 1);
+    await wait(250);
+    ev("pointerup", y0 + to * cell + 1);
+    await wait(400);
+  };
+  // tmux's mouse (SGR reports): a slow drag of 6 rows in two moves, held still before the release (no fling).
+  await emit("\x1b[?1049h\x1b[?1000h\x1b[?1006h");
+  await slowDrag(3, 6);
+  if (wheels() !== 6) fails.push(`a drag of 6 rows sent ${wheels()} wheel reports (PowTerm sends 6)`);
+  // A flick: 4 rows in ~50 ms, released at once - it goes on, at most half a screen more.
+  sent.length = 0;
+  ev("pointerdown", y0);
+  for (let i = 1; i <= 4; i++) {
+    await wait(12);
+    ev("pointermove", y0 + i * cell + 1);
+  }
+  const during = wheels();
+  ev("pointerup", y0 + 4 * cell + 1);
+  await wait(900);
+  const after = wheels() - during;
+  if (after < 1 || after > Math.floor(term.rows / 2)) fails.push(`a flick went on ${after} rows after its ${during} (PowTerm: some, at most half the ${term.rows}-row screen)`);
+  // No mouse, the normal screen: the scrollback, a row per row.
+  await emit("\x1b[?1000l\x1b[?1006l\x1b[?1049l" + Array.from({ length: term.rows * 3 }, (_, i) => `scroll line ${i + 1}`).join("\r\n"));
+  const base = term.buffer.active.viewportY;
+  await slowDrag(2, 4);
+  const moved = base - term.buffer.active.viewportY;
+  if (moved !== 4) fails.push(`a drag of 4 rows moved the scrollback ${moved} rows`);
+  powos.term.write = write;
+  return fails;
+}
+
 /** In the page: merged widgets M1-M2 (grid.tsx joins; the user's 2026-10-28 "the widget combiner looks ugly af if the
  * widgets arent the same width"). An equal-width stack (agents 6x3 over recents 6x3) merges: both .joined, one width,
  * the faces meet on the row line (one seamless surface, no gutter or seam strip between). An unequal stack (agents 6x3
@@ -11137,6 +11208,17 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `term-session-${label}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(termSessionCheck))));
+  // A taken-over session scrolls as PowTerm's: a row per row dragged, a fling after (ui/terminal.tsx scrollRows/fling).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(
+      open(browser, `${ORIGIN}/index.html`, "term-scroll", { width: 404, height: 900 }).then((r) =>
+        whenReady(r, async () => {
+          const fails = await r.page.evaluate(termScrollCheck);
+          await r.page.screenshot({ path: "/cache/term-scroll.png" }).catch(() => {});
+          return fails;
+        }),
+      ),
+    );
   // The Agents screen and widget in plain words (ui/agents.tsx, fleet.ts): working / needs attention / folded idle.
   if (process.env.SHELL_PAGES !== "0")
     // Both home layouts: the default (search docked, no pill row: taller cells) and the bar - the same tiles in each.

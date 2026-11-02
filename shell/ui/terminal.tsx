@@ -556,6 +556,89 @@ function mountExtraKeys() {
   render(<ExtraKeys />, extraKeys);
 }
 
+// --- scrolling (PowTerm's: Termux's TerminalView onScroll / doScroll / onFling) ----------------------------------------
+
+/** A finger on a focused terminal: where it is, the part of a row it moved that isn't scrolled yet, its last moves. */
+interface Drag {
+  y: number;
+  y0: number;
+  id: number;
+  rest: number;
+  moves: { y: number; t: number }[];
+}
+
+/** The moves the release velocity is read from (Android's VelocityTracker looks back ~100 ms). */
+const VELOCITY_SAMPLES = 5;
+const VELOCITY_WINDOW_MS = 100;
+/** Termux's onFling: the fling runs in rows at a quarter of the finger's px/s. */
+const FLING_SCALE = 0.25;
+/** The fling's decay (its velocity falls by 1/e every [FLING_TAU_S]) and the speed it stops under (rows/s). */
+const FLING_TAU_S = 0.12;
+const FLING_MIN = 2;
+
+const flings = new WeakMap<Session, number>();
+
+/** The height of one of [s]'s rows (px): the screen's height over its rows, as the fit made them. */
+function cellHeight(s: Session) {
+  const scr = s.holder.querySelector<HTMLElement>(".xterm-screen");
+  return (scr?.offsetHeight || s.holder.clientHeight) / s.term.rows || 16;
+}
+
+/**
+ * Scrolls [rows] rows (positive: the finger went down, toward older lines) as Termux's doScroll, one row at a time:
+ * the program's mouse wheel while it tracks the mouse (tmux's mouse: its history), an arrow key in the alternate screen
+ * (a full-screen program), else the scrollback. A wheel event per row, in lines: xterm reports one wheel click per
+ * event, and in pixels it counted a finger's small moves as a trackpad's (x0.3) - a drag scrolled a third of the way.
+ */
+function scrollRows(s: Session, rows: number, x: number, y: number) {
+  const t = s.term;
+  if (t.modes.mouseTrackingMode === "none" && t.buffer.active.type === "normal") return t.scrollLines(-rows);
+  const target = t.element?.querySelector(".xterm-screen");
+  for (let i = 0; i < Math.abs(rows); i++)
+    target?.dispatchEvent(new WheelEvent("wheel", { deltaY: rows > 0 ? -1 : 1, deltaMode: WheelEvent.DOM_DELTA_LINE, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+}
+
+function stopFling(s: Session) {
+  cancelAnimationFrame(flings.get(s) ?? 0);
+  flings.delete(s);
+}
+
+/**
+ * The release of [d] at [at] goes on scrolling (Termux's onFling): rows at a quarter of the finger's speed, slowing to
+ * a stop; while the program tracks the mouse, at most half a screen (Termux's bound).
+ */
+function fling(s: Session, d: Drag, x: number, at: number) {
+  const recent = d.moves.filter((m) => at - m.t <= VELOCITY_WINDOW_MS);
+  if (recent.length < 2) return;
+  const first = recent[0];
+  const last = recent[recent.length - 1];
+  const dt = (last.t - first.t) / 1000;
+  if (dt <= 0) return;
+  let v = ((last.y - first.y) / dt) * FLING_SCALE;
+  if (Math.abs(v) < FLING_MIN) return;
+  const bound = s.term.modes.mouseTrackingMode === "none" ? Infinity : Math.floor(s.term.rows / 2);
+  let moved = 0;
+  let rest = 0;
+  let prev = performance.now();
+  const step = (now: number) => {
+    const sec = Math.max(0, (now - prev) / 1000);
+    prev = now;
+    rest += v * sec;
+    v *= Math.exp(-sec / FLING_TAU_S);
+    let rows = Math.trunc(rest);
+    rows = Math.sign(rows) * Math.min(Math.abs(rows), bound - Math.abs(moved));
+    if (rows) {
+      rest -= rows;
+      moved += rows;
+      scrollRows(s, rows, x, d.y);
+    }
+    if (Math.abs(v) < FLING_MIN || Math.abs(moved) >= bound) return void flings.delete(s);
+    flings.set(s, requestAnimationFrame(step));
+  };
+  stopFling(s);
+  flings.set(s, requestAnimationFrame(step));
+}
+
 // --- the view ---------------------------------------------------------------------------------------------------------
 
 export interface TerminalProps {
@@ -619,46 +702,44 @@ export function TerminalView({ id, owner = null, command = null, interactive = t
     if (autoFocus && status === "running" && interactive && view.current && focused.value !== view.current) focus(view.current);
   }, [autoFocus, status, interactive]);
 
-  // Focused, its touches are the terminal's: kept from the home screen's swipes. A drag scrolls - the scrollback, or
-  // what the program does with the wheel (tmux's mouse: its history; a full-screen program: arrow keys), which xterm
-  // works out from a wheel event; a tap is a click (the browser's mouse events, which xterm reports to tmux).
-  const drag = useRef<{ y: number; y0: number; id: number; rest: number } | null>(null);
+  // Focused, its touches are the terminal's: kept from the home screen's swipes. A drag scrolls as PowTerm's (Termux's
+  // TerminalView.onScroll/doScroll): a row per row the finger moved, then a fling on release ([scrollRows], [fling]).
+  // A tap is a click (the browser's mouse events, which xterm reports to tmux).
+  const drag = useRef<Drag | null>(null);
   const focusedHandlers = {
     onPointerDown: (e: PointerEvent) => {
       e.stopPropagation();
-      drag.current = { y: e.clientY, y0: e.clientY, id: e.pointerId, rest: 0 };
+      stopFling(session);
+      drag.current = { y: e.clientY, y0: e.clientY, id: e.pointerId, rest: 0, moves: [{ y: e.clientY, t: e.timeStamp }] };
     },
     onPointerMove: (e: PointerEvent) => {
       const d = drag.current;
       if (!d || d.id !== e.pointerId || e.pointerType === "mouse") return;
-      const dy = e.clientY - d.y;
+      d.rest += e.clientY - d.y;
       d.y = e.clientY;
-      const t = session.term;
-      if (t.modes.mouseTrackingMode === "none" && t.buffer.active.type === "normal") {
-        // xterm's own scrolling reads the wheel's legacy wheelDelta, which an event made here doesn't have.
-        const cell = session.holder.clientHeight / t.rows;
-        d.rest += dy;
-        const lines = Math.trunc(d.rest / cell);
-        if (lines) {
-          t.scrollLines(-lines);
-          d.rest -= lines * cell;
-        }
-        return;
+      d.moves.push({ y: e.clientY, t: e.timeStamp });
+      if (d.moves.length > VELOCITY_SAMPLES) d.moves.shift();
+      const cell = cellHeight(session);
+      const rows = Math.trunc(d.rest / cell);
+      if (rows) {
+        d.rest -= rows * cell;
+        scrollRows(session, rows, e.clientX, e.clientY);
       }
-      t.element?.querySelector(".xterm-screen")?.dispatchEvent(
-        new WheelEvent("wheel", { deltaY: -dy, deltaMode: WheelEvent.DOM_DELTA_PIXEL, clientX: e.clientX, clientY: e.clientY, bubbles: true, cancelable: true }),
-      );
     },
     onPointerUp: (e: PointerEvent) => {
       const d = drag.current;
       drag.current = null;
+      if (d && d.id === e.pointerId && e.pointerType !== "mouse") fling(session, d, e.clientX, e.timeStamp);
       // A tap with the keyboard down (Back put it away in a screen) brings it back, as Termux's view does.
       if (d && Math.abs(e.clientY - d.y0) < SLOP && !extraKeysState.peek().keyboard) {
         session.term.focus();
         powos.keyboard.show();
       }
     },
-    onPointerCancel: () => (drag.current = null),
+    onPointerCancel: () => {
+      drag.current = null;
+      stopFling(session);
+    },
   };
 
   // Not focused: a tap focuses an interactive view (or restarts an ended one). The press isn't stopped, so the tile's
