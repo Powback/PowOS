@@ -24,10 +24,10 @@ const onScreen = (sel: string, w: number, h: number) =>
 
 /**
  * What covers home by design, from the signals that open it: Settings (and the screens over it), edit mode, the launcher
- * in place (home's .adopts drawer; the pull window is not home, never judged), the PowOS AI page (page -1: it slides the
- * dock off), the shade.
+ * in place (home's .adopts drawer; the pull window is not home, never judged), the shade. The PowOS AI page (page -1)
+ * slides the dock off: homeBlank judges it by its own box.
  */
-const covered = () => screens.value.length > 0 || editing.value || drawerOpen.value || page.value < 0 || notifOpen.value || layered();
+const covered = () => screens.value.length > 0 || editing.value || drawerOpen.value || notifOpen.value || layered();
 
 /**
  * Any other full-screen layer, generically (11-01 06:13: an App API page, p:<id>, over home folded - not in the list
@@ -42,6 +42,11 @@ function layered(): boolean {
   });
 }
 
+/** PowOS AI's page (page -1) not on the [sw]x[sh] screen: why, or "". */
+function aiPageOff(sw: number, sh: number) {
+  return onScreen(".ai-screen", Math.min(innerWidth, sw), Math.min(innerHeight, sh)) ? "" : `the PowOS AI page is not on the ${sw}x${sh} screen`;
+}
+
 export function homeBlank(): string {
   if (document.hidden || pullPage || !(screen.width > 0)) return "";
   const vw = innerWidth, vh = innerHeight, sw = screen.width, sh = screen.height;
@@ -49,6 +54,10 @@ export function homeBlank(): string {
   if (!document.querySelector(".home")) return "no .home on the page";
   // A full-screen sheet over home hides its dock and bar on purpose (false "blank"s: 10-31 14:14 the AI page, 20:05
   // Settings › style): judged only when home itself shows.
+  // The PowOS AI page (page -1) slides the dock off on purpose: judged by its own box instead. Exempting it outright
+  // hid a blank screen (11-02 21:55, RT1: "I rotated my phone and know it's in a bad state" - only the status bar
+  // showed, home's DOM on the AI page, nothing reported, and the user rebooted).
+  if (page.value < 0) return aiPageOff(sw, sh);
   if (covered()) return "";
   // The dock (or the bar, which the dock's search face replaces on some layouts) inside the screen's own box.
   if (!onScreen(".home .dock:not(.dock-tray), .home .bar", Math.min(vw, sw), Math.min(vh, sh))) return `neither the dock nor the bar on the ${sw}x${sh} screen`;
