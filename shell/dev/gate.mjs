@@ -4954,6 +4954,38 @@ async function frictionCheck(page, label) {
  * opens one) - ⋯ no longer repeats the tabs (11-01 17:56). Restored with it: unfolded, a Working now row opens that agent live
  * in the right column (the old context column's card did).
  */
+/** In the page: the Agents tab's rows under [R] - at least 3 (the manager, a stuck one, the working ones), each a glass row one line tall, no old card. */
+function agentRowsFails(R) {
+  const rows = [...document.querySelectorAll(`${R} .ag-rows .ag-row`)];
+  const fails = rows.length < 3 ? [`Agents: ${rows.length} agent rows, not the manager, the stuck and the working ones`] : [];
+  if (document.querySelector(`${R} .fl-card, ${R} .fl-mgr`)) fails.push("Agents: the old cards are still drawn");
+  const name = (r) => r.textContent.slice(0, 40);
+  rows.filter((r) => !r.matches(".aip-area.tile")).forEach((r) => fails.push(`Agents: "${name(r)}" isn't a glass row`));
+  rows.filter((r) => r.getBoundingClientRect().height > 60).forEach((r) => fails.push(`Agents: "${name(r)}" is ${Math.round(r.getBoundingClientRect().height)}px tall, not one line`));
+  return fails;
+}
+
+/**
+ * In the page, the Agents tab open (the user, 11-01 16:51: "the chat and the agents and the device page don't follow the
+ * same design"): Agents and Devices in the Progress page's design - a glass row (.aip-area.tile) per agent, one line each,
+ * no old card; a working row's tap opens that agent live in the column; Devices a glass card per host, no box around them.
+ */
+async function aiProgressRowsFails() {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const R = ".ai-screen .ai-right";
+  const fails = [];
+  const work = document.querySelector(`${R} .ag-row .aip-dot.working`)?.closest(".ag-row-line");
+  work?.click();
+  if (!(await G.until(() => document.querySelector(`${R} .fl-live`), 3000))) fails.push("Agents: a working agent's row didn't open it live");
+  S.aiScreen.value = "devices";
+  await G.until(() => document.querySelector(`${R} .ai-devices`), 3000);
+  const cards = document.querySelectorAll(`${R} .ai-devices .ai-unit-card.aip-area.tile`).length;
+  if (cards !== 2) fails.push(`Devices: ${cards} host cards in the Progress design, not 2`);
+  if (document.querySelector(`${R} .ai-work-list`)) fails.push("Devices: still the old boxed list");
+  return fails;
+}
+
 async function aiTermsCheck(page) {
   const fails = [];
   await page.setViewport({ width: 821, height: 883 });
@@ -4966,7 +4998,7 @@ async function aiTermsCheck(page) {
   const chat = async () => page.evaluate(async () => { const S = await window.__gw.mod("./state.ts"); S.aiScreen.value = "chat"; });
   await chat();
   const run = async (label, steps, want) => fails.push(...(await page.evaluate(aiTermsTaps, [steps, want])).map((f) => `${label}: ${f}`));
-  await run("unfolded Agents", [seg("Agents"), ".ai-screen .ai-right .fl-card .fl-term-open"], "mac:c0");
+  await run("unfolded Agents", [seg("Agents"), ".ai-screen .ai-right .ag-row .fl-term-open"], "mac:c0");
   await chat();
   await run("unfolded Devices", [seg("Devices"), '.ai-screen .ai-right .ai-host-terms .ai-session[data-term="mac:c0"]'], "mac:c0");
   await chat();
@@ -4980,6 +5012,8 @@ async function aiTermsCheck(page) {
   });
   if (listed !== "mac:c0 phone:main") fails.push(`unfolded Agents: its session list is [${listed}], not both hosts' (mac:c0 phone:main)`);
   await page.screenshot({ path: "/cache/ai-terms-unfolded-agents.png" });
+  fails.push(...(await page.evaluate(agentRowsFails, ".ai-screen .ai-right")).map((f) => `unfolded: ${f}`));
+  fails.push(...(await page.evaluate(aiProgressRowsFails)).map((f) => `unfolded: ${f}`));
   await chat();
   // Working now (the left column) opens that agent live in the right column, not the session list.
   const live = await page.evaluate(async () => {

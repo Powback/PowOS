@@ -52,8 +52,10 @@ export function AtWork() {
   names.sort((a, b) => Number(b === local) - Number(a === local) || rank(a) - rank(b) || a.localeCompare(b));
   if (!sessions.value.length && !hosts.value.some((h) => !h.ok || h.pending)) return null;
   return (
-    <section>
-      <h3 class="ai-heading muted">at work</h3>
+    <section class="ais-sec" aria-label="At work">
+      <h3 class="ais-h">
+        At work<span class="ais-n">{sessions.value.length}</span>
+      </h3>
       {names.map((host) => {
         const list = sessionsOn(host);
         const h = hosts.value.find((x) => x.host === host);
