@@ -30,6 +30,7 @@ import { Pill, dictate, hearing, interrupt, speech, type MicTarget } from "./bar
 import { listeningFor, makeHold, release } from "./dictation.ts";
 import { askQueued, setAskContext } from "./assistant.ts";
 import { PageChat } from "./powai.tsx";
+import { Icon } from "./icons.tsx";
 
 /** The side button is held to talk (assist.held): its release sends at once. */
 let pushToTalk = false;
@@ -432,8 +433,8 @@ export function Assist() {
           <button type="button" class={`assist-live ${on ? "on" : ""}`} onClick={() => powos.assist.live(!on)}>
             {on ? "stop" : "live"}
           </button>
-          <button type="button" class="assist-open" onClick={() => (powos.ai.open(), powos.assist.close())}>
-            open ↗
+          <button type="button" class="assist-open" aria-label="Open in PowOS AI" title="Open in PowOS AI" onClick={() => (powos.ai.open(), powos.assist.close())}>
+            <Icon name="arrowTopRight" size={18} />
           </button>
         </div>
         {!on && s?.screenshot && (

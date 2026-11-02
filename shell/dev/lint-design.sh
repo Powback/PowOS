@@ -3,7 +3,8 @@
 # BLOCK (design wave 1 made them hold: exit 1 on any hit) - monospace, radius, easing, status - and design wave 2 (home)
 # added three more: page dots, haptics, home motion; design wave 3 (launcher) launcher motion; design wave 4 (the shade)
 # made blur block (its last literal blurs gone) and the radius rule read every corner of a shorthand
-# (`0 0 calc(var(--radius) * 2) ...` passed on its leading 0).
+# (`0 0 calc(var(--radius) * 2) ...` passed on its leading 0); design wave 5 (AI page and assistant) hard lines and
+# the AI page's pop-ins.
 # Outside theme.css:
 #   - monospace: a rule naming var(--font) (theme.css's monospace) - UI text is --font-ui; code/terminals excepted
 #     (terminal.*, a selector with term/code/pre/kbd/log/id in it);
@@ -22,6 +23,12 @@
 #     .page, .home-tile, .page-dots, .app-icon) instead of the spring set's --spring*-ms (§6);
 #   - launcher motion (design wave 3): the same for the launcher's pieces (.launcher*, .drawer*, .letter-bar, .az,
 #     .scr-*, .search-group*) - its letter bar's colour (160ms) and A-Z grid's background (120ms) were literal.
+#   - hard line (design wave 5): a solid border drawn in a colour at var(--frame) - lint-style only catches a literal
+#     px width, so the assistant's chips kept 2px borders through it; a chip is the glass's soft fill (§2). Outlines and
+#     dashed borders stay: they are the selection and drop-target marks of edit mode;
+#   - AI page pop-in (design wave 5): a fold or menu shown with `{open && ...}` / `{menu && ...}` in the AI page's files
+#     (powai, aipanes, aiprogress, aistatus, aifriction, aimenu) - there in one frame, gone in the next (§6); use
+#     ui/reveal.tsx Reveal / usePresence. The menu's scrim (invisible, a tap-catcher) is exempt.
 #
 #   shell/dev/lint-design.sh [DIR]   DIR: the shell (default: this one). Exit 1: a blocking rule broken.
 set -uo pipefail
@@ -65,8 +72,10 @@ literal_motion() {
 homemotion=$(literal_motion '\\.(dock|app|home|page|home-tile|page-dots|app-icon)([^a-z-]|$)')
 # The launcher's pieces (design wave 3): the drawer, its A-Z grid and letter bar, the search results, the folders page.
 launchermotion=$(literal_motion '\\.(launcher|launcher-[a-z]+|drawer|drawer-[a-z]+|letter-bar|letter-bubble|az|scr-[a-z]+|search-group|search-group-[a-z]+|launcher-search-results)([^a-z-]|$)')
+hardline=$(grep -HnE 'border(-(top|right|bottom|left))?[[:space:]]*:[^;]*var\(--frame\)[^;]*solid[^;]*(var\(--color|#|rgb|hsl|currentColor)' $css 2>/dev/null | strip || true)
+aipop=$( (cd ui 2>/dev/null && grep -nE '(^|[^=])\{!?(open|menu|expanded) &&' powai.tsx aipanes.tsx aiprogress.tsx aistatus.tsx aifriction.tsx aimenu.tsx 2>/dev/null) | sed 's|^|ui/|' | strip | grep -v 'ai-menu-scrim' || true)
 count() { printf '%s' "$1" | grep -c . || true; }
-bad=$(( $(count "$mono") + $(count "$blur") + $(count "$radius") + $(count "$easing") + $(count "$status") + $(count "$dots") + $(count "$vibrate") + $(count "$homemotion") + $(count "$launchermotion") ))
+bad=$(( $(count "$mono") + $(count "$blur") + $(count "$radius") + $(count "$easing") + $(count "$status") + $(count "$dots") + $(count "$vibrate") + $(count "$homemotion") + $(count "$launchermotion") + $(count "$hardline") + $(count "$aipop") ))
 if [ "$bad" = 0 ]; then echo "ok   design lint (docs/DESIGN-LANGUAGE.md)"; else echo "FAIL design lint: $bad blocking (docs/DESIGN-LANGUAGE.md)"; fi
 report "monospace in UI" "$mono"
 report "hard-coded blur" "$blur"
@@ -77,4 +86,6 @@ report "page dots not ui/pagedots.tsx" "$dots"
 report "haptic not ui/haptics.ts" "$vibrate"
 report "home motion with a literal duration" "$homemotion"
 report "launcher motion with a literal duration" "$launchermotion"
+report "hard line (a --frame border in a colour)" "$hardline"
+report "AI page pop-in (not ui/reveal.tsx)" "$aipop"
 [ "$bad" = 0 ]

@@ -29,6 +29,7 @@ import { decidingOf, needIds, needsYou } from "./needsyou.tsx";
 import { aiAgent } from "./aipanes.tsx";
 import { clockAt } from "./time.ts";
 import { recordVerdict } from "./trycard.tsx";
+import { Reveal } from "./reveal.tsx";
 
 /** Done in this window shows under Recently done. */
 const RECENT_MS = 3 * 24 * 3_600_000;
@@ -151,10 +152,13 @@ function WorkingNow({ working }: { working: Worker[] }) {
   );
 }
 
+/** How many agents of other projects are working now: the ⋯ menu's "Other projects (N)" shows only with some. */
+export const otherProjectsCount = () => fleet().working.filter((x) => !isPowOS(x.a)).length;
+
 /** The ⋯ menu's "Other projects (N)" (unfolded): shows or hides other projects' agents under Working now; none: no item. */
 export function OtherProjectsItem({ close }: { close: () => void }) {
   useAgents();
-  const n = fleet().working.filter((x) => !isPowOS(x.a)).length;
+  const n = otherProjectsCount();
   if (!n) return null;
   const on = otherProjects.value;
   return (
@@ -341,7 +345,9 @@ function DoneRow({ w, open, onToggle }: { w: WorkRow; open: boolean; onToggle: (
         <span class="ais-done-title">{w.title}</span>
         <span class="ais-when">{when}</span>
       </button>
-      {open && <DoneDetail w={w} when={when} />}
+      <Reveal open={open}>
+        <DoneDetail w={w} when={when} />
+      </Reveal>
     </li>
   );
 }
@@ -361,7 +367,7 @@ function RecentlyDone({ rows }: { rows: WorkRow[] }) {
           <span class="ais-chev" aria-hidden="true" />
         </button>
       </h3>
-      {open && (
+      <Reveal open={open}>
         <ul class="ais-list ais-done">
           {shown.map((w) => (
             <DoneRow key={w.id} w={w} open={openId === w.id} onToggle={() => setOpenId(openId === w.id ? null : w.id)} />
@@ -374,7 +380,7 @@ function RecentlyDone({ rows }: { rows: WorkRow[] }) {
             </li>
           )}
         </ul>
-      )}
+      </Reveal>
     </section>
   );
 }

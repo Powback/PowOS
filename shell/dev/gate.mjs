@@ -2862,6 +2862,16 @@ async function aiChatBroken() {
  * Needs you); a fail per miss.
  */
 async function aiChatMenu(page) {
+  // A menu of one is that item (powai.tsx More: unfolded with no other projects, only Friction): a direct button in ⋯'s place.
+  const one = await page.evaluate(() => {
+    const b = document.querySelector(".ai-screen .ai-more.ai-more-one");
+    return b && { label: b.getAttribute("aria-label"), title: b.title, popup: b.hasAttribute("aria-haspopup") };
+  });
+  if (one) {
+    const fails = one.label === "Friction" && one.title === "Friction" && !one.popup ? [] : [`the one-item ⋯ isn't a plain "Friction" button (${JSON.stringify(one)})`];
+    fails.push(...(await page.evaluate(aiMenuFriction, true)));
+    return [...fails, ...(await page.evaluate(aiProgressBesideFails))];
+  }
   const opened = await page.evaluate(async () => {
     document.querySelector(".ai-screen .ai-more")?.click();
     return !!(await window.__gw.until(() => document.querySelector(".ai-screen .ai-menu"), 2000));
@@ -2904,10 +2914,10 @@ function aiMenuOpaqueFails() {
 }
 
 /** ⋯ → Friction opens its own screen; back returns to the chat (no Friction: the menu closed, aiMenuItemFails says). */
-async function aiMenuFriction() {
+async function aiMenuFriction(direct = false) {
   const G = window.__gw;
   const seg = (name) => [...document.querySelectorAll(".ai-screen .ai-seg")].find((b) => b.textContent.trim().startsWith(name));
-  const item = [...document.querySelectorAll(".ai-screen .ai-menu-item")].find((b) => b.textContent.trim() === "Friction");
+  const item = direct ? document.querySelector(".ai-screen .ai-more.ai-more-one") : [...document.querySelectorAll(".ai-screen .ai-menu-item")].find((b) => b.textContent.trim() === "Friction");
   if (!item) {
     document.querySelector(".ai-screen .ai-menu-scrim")?.click();
     return [];
@@ -3831,7 +3841,8 @@ function aiDoneTimes(tasks) {
 async function aiDoneTap([id, open]) {
   const item = () => document.querySelector(`.ai-screen:is(.status, .panes) .ais-done-item[data-task="${id}"]`);
   item()?.querySelector(".ais-done-row").click();
-  return !!(await window.__gw.until(() => !!item()?.querySelector(".ais-done-detail") === open, 1500));
+  // Open: a detail not leaving (ui/reveal.tsx keeps a closing one mounted, inert, while it shrinks away).
+  return !!(await window.__gw.until(() => !!item()?.querySelector(".ais-done-detail:not([inert] *)") === open, 1500));
 }
 
 /** In the page: what each done row shows - open or not, its title cut off or not, its facts. */
@@ -3839,7 +3850,7 @@ function aiDoneFacts() {
   const items = [...document.querySelectorAll(".ai-screen:is(.status, .panes) .ais-done-item")];
   const facts = (it) => Object.fromEntries([...it.querySelectorAll(".ais-done-fact")].map((f) => [f.dataset.fact, f.textContent]));
   const cut = (t) => t.scrollWidth > t.clientWidth + 1;
-  return Object.fromEntries(items.map((it) => [it.dataset.task, { open: !!it.querySelector(".ais-done-detail"), title: it.querySelector(".ais-done-title").textContent, cut: cut(it.querySelector(".ais-done-title")), ...facts(it), said: it.querySelector(".ais-done-said")?.textContent ?? "" }]));
+  return Object.fromEntries(items.map((it) => [it.dataset.task, { open: !!it.querySelector(".ais-done-detail:not([inert] *)"), title: it.querySelector(".ais-done-title").textContent, cut: cut(it.querySelector(".ais-done-title")), ...facts(it), said: it.querySelector(".ais-done-said")?.textContent ?? "" }]));
 }
 
 /** In the page: "Still broken" on the open row [id], [words] typed and sent; what the bridge got (null: no reply line). */
@@ -4478,6 +4489,58 @@ function aiWideClearFails(f) {
     [f.thinking[1] <= f.pill[0], `"thinking…" (${f.thinking}) is under the bar's top (${f.pill[0]})`],
     [!f.over.length, `the thread runs past its right edge: ${f.over.join("; ")}`],
   ]);
+}
+
+/** In the page: Recently done's fold closed then opened again - its rows stay while they shrink away, grow back in. */
+async function aiPopinFold() {
+  const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const moving = (el) => !!el?.getAnimations().some((a) => a.playState === "running");
+  const box = () => document.querySelector('[data-sec="done"] .reveal');
+  const toggle = document.querySelector('[data-sec="done"] .ais-toggle');
+  if (!toggle) return ["no Recently done toggle"];
+  toggle.click();
+  await frame();
+  const closing = box();
+  const out = [
+    [!!closing?.querySelector(".ais-done"), "Recently done's rows left in the frame of the tap (popped out)"],
+    [moving(closing), "Recently done's rows don't animate out"],
+  ];
+  out.push([!!(await window.__gw.until(() => !box(), 3000)), "Recently done's rows never left"]);
+  toggle.click();
+  await frame();
+  out.push([moving(box()), "Recently done's rows came back without animating in (popped in)"]);
+  return out.filter(([ok]) => !ok).map(([, m]) => m);
+}
+
+/** In the page: the ⋯ menu opened then closed - it springs in, and stays (.leaving) while it springs out. */
+async function aiPopinMenu() {
+  const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const menu = () => document.querySelector(".ai-menu");
+  const more = document.querySelector(".ai-more");
+  if (!more) return ["no ⋯ button"];
+  more.click();
+  await frame();
+  const out = [[!!menu()?.getAnimations().some((a) => a.playState === "running"), "the ⋯ menu popped in (no animation)"]];
+  await new Promise((r) => setTimeout(r, 400));
+  document.querySelector(".ai-menu-scrim")?.click();
+  await frame();
+  out.push([!!menu()?.classList.contains("leaving"), "the ⋯ menu left in the frame of the close (no .leaving exit)"]);
+  out.push([!!(await window.__gw.until(() => !menu(), 3000)), "the ⋯ menu never left"]);
+  return out.filter(([ok]) => !ok).map(([, m]) => m);
+}
+
+/** In the page: the overlay's chips (live, the shot, the attach chip) with a border - design wave 5, §2 no hard lines. */
+function assistHardLines() {
+  return [...document.querySelectorAll(".assist-live, .assist-shot, .assist-attach .chip")]
+    .map((el) => [el.className.trim().split(/\s+/)[0], parseFloat(getComputedStyle(el).borderTopWidth)])
+    .filter(([, w]) => w > 0)
+    .map(([c, w]) => `.${c} has a ${w}px border (a hard line; the glass fill instead)`);
+}
+
+async function aiNoPopinCheck(page) {
+  if (!(await page.evaluate(aiStatusSetup, [FLEET_SETUP]))) return ["ai-no-popin: no folded status page for the mock fleet"];
+  const fails = [...(await page.evaluate(aiPopinFold)), ...(await page.evaluate(aiPopinMenu))];
+  return fails.map((x) => `ai-no-popin: ${x}`);
 }
 
 async function aiKeyboardCheck(page) {
@@ -11279,6 +11342,7 @@ try {
         if (/hold anywhere/i.test(document.body.textContent)) out.push('a "Hold anywhere to talk" hint is drawn');
         return out;
       });
+      fails.push(...(await r.page.evaluate(assistHardLines)));
       await r.page.screenshot({ path: `/cache/assist-overlay-${size}.png` });
       return fails.map((f) => `assist-overlay-${size}: ${f}`);
     })));
@@ -11669,6 +11733,10 @@ try {
   // Folded stacked: the strip, Needs you, one summary row, the chat filling the rest, the tabs (the manager's design, 11-01).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-folded", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiFoldedCheck(r.page))));
+  // Design wave 5 (§6 nothing pops in): Recently done's fold and the ⋯ menu close on the spring - still there a frame
+  // after the tap, animating, then gone - and open animating (ui/reveal.tsx). Before: {open && ...} removed them at once.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-no-popin", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiNoPopinCheck(r.page))));
   // The folded Chat with the keyboard up (the user, 11-01 21:32, P1: "chat screen broken when trying to type").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-keyboard", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiKeyboardCheck(r.page))));

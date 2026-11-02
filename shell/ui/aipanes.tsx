@@ -15,6 +15,7 @@ import { ThinBar } from "./aiprogress.tsx";
 import { TermButton } from "./terms.tsx";
 import { AtWork, areas, dailyDriver, type AiScreen } from "./aimenu.tsx";
 import { Feed as UnitsFeed, units } from "./units.tsx";
+import { Reveal } from "./reveal.tsx";
 
 /** The agent open in the right column's Agents view (null: the list); agents.ts's, so the folded page's screen shares it. */
 export { aiAgent };
@@ -131,7 +132,9 @@ function Fold({ line, n, children }: { line: string; n: number; children: preact
           <span class="aip-area-name">{line}</span>
           <span class="ais-chev" aria-hidden="true" />
         </button>
-        {open && <ul class="aip-tasks ag-fold-list">{children}</ul>}
+        <Reveal open={open}>
+          <ul class="aip-tasks ag-fold-list">{children}</ul>
+        </Reveal>
       </li>
     </ul>
   );
@@ -186,7 +189,8 @@ function FleetRows({ f, foot }: { f: Fleet; foot?: preact.ComponentChildren }) {
           <WorkingRow key={x.a.id} x={x} />
         ))}
       </Group>
-      {!working.length && !f.attention.length && <div class="aip-empty">No agent is working right now.</div>}
+      {/* §1: an empty section hides; only a page with nothing on it says so, once (the idle fold already says "N idle"). */}
+      {!m && !working.length && !f.attention.length && !rest.length && <div class="aip-empty">No agent is working right now.</div>}
       <Fold line={[idle ? `${idle} idle` : "", f.doneToday.length ? `${f.doneToday.length} done today` : ""].filter(Boolean).join(" · ")} n={rest.length}>
         {rest.map((a) => (
           <RestLine key={a.id} a={a} />

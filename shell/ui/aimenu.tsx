@@ -33,6 +33,8 @@ export const SCREENS: [AiScreen, string][] = [
 ];
 /** The screens the bottom tabs offer (Agents & terminals: the Agents tab; its terminals under the Agents and Devices tabs): never in a ⋯ that sits over those tabs. */
 export const TABBED = new Set<AiScreen>(["progress", "agents", "devices"]);
+/** The ⋯ menu's screens; [tabs]: over the bottom tabs, so only what no tab offers (Friction). */
+export const menuScreens = (tabs = false) => SCREENS.filter(([s]) => !tabs || !TABBED.has(s));
 
 /** A host's line "at work": its name ("installed & running"'s), how many sessions, and when it was read if not now. */
 function hostState(h: AgentHost | undefined, n: number) {

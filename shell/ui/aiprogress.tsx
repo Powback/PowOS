@@ -11,6 +11,7 @@ import { boardState } from "../agents.ts";
 import { board, boardSeen, checks, SevChip, WorkFeed, type WorkRow } from "./aiboard.tsx";
 import { needIds, needsYou, NeedsYouCard } from "./needsyou.tsx";
 import { upNext, UpNext } from "./upnext.tsx";
+import { Reveal } from "./reveal.tsx";
 
 const MONTH_MS = 30 * 24 * 3_600_000;
 
@@ -174,7 +175,9 @@ export function AreaRow({ a, open, toggle }: { a: AreaStat; open: boolean; toggl
           {a.done}/{a.total}
         </span>
       </button>
-      {open && a.open.length > 0 && <Tasks open={a.open} />}
+      <Reveal open={open && a.open.length > 0}>
+        <Tasks open={a.open} />
+      </Reveal>
     </li>
   );
 }

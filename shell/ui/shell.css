@@ -1742,6 +1742,8 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 /* The header's ⋯ (powai.tsx AiHeader): the menu under it at the right, over the chat; a tap outside closes it. */
 .ai-top > .ai-more, .ai-top > .ai-back { flex: none; min-width: 40px; min-height: 36px; justify-content: center; font: inherit; font-size: 20px; line-height: 1; border: 0; background: none; color: var(--color-foreground); }
 .ai-top > .ai-more { margin-left: auto; }
+/* A menu of one is that item (powai.tsx More): its icon in the ⋯'s place, the same box. */
+.ai-more.ai-more-one { display: inline-flex; align-items: center; justify-content: center; }
 .ai-panel { position: relative; }
 .ai-view > .ai-menu-scrim { position: fixed; inset: 0; z-index: 4; max-width: none; margin: 0; }
 .ai-view > .ai-menu {
@@ -1758,6 +1760,14 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
   padding: 6px 0;
   border-radius: var(--radius);
 }
+/* The ⋯ menu opens and closes on the spring from its corner (reveal.tsx usePresence; §6: it popped in and out). */
+:is(.ai-view, .ai-left) > .ai-menu { transform-origin: top right; animation: ai-menu-in var(--spring-fast-ms) var(--spring-fast) both; }
+:is(.ai-view, .ai-left) > .ai-menu.leaving { animation: ai-menu-out var(--spring-fast-ms) var(--spring-fast) both; pointer-events: none; }
+@keyframes ai-menu-in { from { opacity: 0; transform: scale(0.92); } }
+@keyframes ai-menu-out { to { opacity: 0; transform: scale(0.92); } }
+/* A fold's body grows in (reveal.tsx Reveal): the rows' own arrival animation would play twice. */
+.reveal > .aip-tasks { animation: none; }
+@media (prefers-reduced-motion: reduce) { :is(.ai-view, .ai-left) > .ai-menu { animation: none; } }
 .ai-menu-item { min-height: 44px; padding: 10px 18px; text-align: start; font: inherit; font-size: var(--text-item); color: var(--color-foreground); background: none; border: 0; }
 .ai-app-page { position: relative; min-height: 100%; }
 /* The board (powai.tsx AiContent): one surface - what was a card each is a section on it, parted by spacing. */
@@ -1963,19 +1973,21 @@ html[data-mode="assist"] .assist {
 /* The strip along the bottom edge: a swipe up from it closes the overlay (assist.tsx swipeAway). */
 .assist-edge { position: fixed; left: 0; right: 0; bottom: 0; height: 28px; touch-action: none; z-index: 2; }
 .assist-head { display: flex; align-items: center; gap: 10px; }
-.assist-shot { width: 36px; height: 64px; object-fit: cover; border-radius: 8px; border: var(--frame) solid var(--color-border); }
+.assist-shot { width: 36px; height: 64px; object-fit: cover; border-radius: 8px; }
 .assist-shot.blank { background: var(--color-surface); }
 /* The circled part (assist.tsx cut): its own aspect, inside the head's 64px box - never stretched or cropped to the screen's. */
 .assist-shot.crop { width: auto; height: auto; max-width: 64px; max-height: 64px; object-fit: contain; }
 .assist-title { font-weight: bold; }
 .assist-sub { flex: 1; font-size: var(--text-small); }
-.assist-open { font: var(--text-small) var(--font-body); color: var(--accent-text); }
+/* Open in PowOS AI: the glass's round soft-fill icon button, centred with the live chip (design wave 5, AO gap 3). */
+.assist-open { flex: none; display: inline-flex; align-items: center; justify-content: center; align-self: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%; background: var(--soft-fill); color: var(--accent-text); }
 .assist-panel .ai-card { overflow-y: auto; min-height: 0; }
 /* Its field is the one pill (bar.tsx Pill, .pill above): no styles of its own. */
 .assist-ask { flex: none; }
 .assist-attach { display: flex; gap: 6px; flex-wrap: wrap; }
-.assist-attach .chip { font: var(--text-small) var(--font-body); padding: 5px 10px; border-radius: 999px; border: var(--frame) solid var(--color-accent); color: var(--accent-text); }
-.assist-attach .chip.off { border-color: var(--color-border); color: var(--color-muted); }
+/* Its chips are the glass's soft fill, no hard line (§2; design wave 5 - they kept yesterday's 2px borders). */
+.assist-attach .chip { font: var(--text-small) var(--font-body); padding: 5px 10px; border-radius: 999px; border: 0; background: var(--soft-fill); color: var(--accent-text); }
+.assist-attach .chip.off { color: var(--color-muted); }
 /* Circling, always on (assist.tsx Draw): the screen above the panel takes strokes; the panel sits over it. */
 .assist-draw { position: absolute; inset: 0; touch-action: none; }
 .assist-panel { position: relative; z-index: 1; }
@@ -2008,8 +2020,9 @@ html:root .assist-panel .tile.pill { background: var(--soft-fill); }
 .assist-panel, .assist-edge { transition: opacity var(--spring-fast-ms) var(--spring-fast); }
 .assist.drawing .assist-panel, .assist.drawing .assist-edge { opacity: 0; pointer-events: none; }
 .crop-stroke polyline { fill: none; stroke: var(--color-accent); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.9; }
-.assist-live { font: var(--text-small) var(--font-body); padding: 4px 10px; border-radius: 999px; border: var(--frame) solid var(--color-border); color: var(--color-foreground); }
-.assist-live.on { border-color: var(--color-red); color: var(--color-red); }
+.assist-live { font: var(--text-small) var(--font-body); padding: 4px 10px; border-radius: 999px; border: 0; background: var(--soft-fill); color: var(--color-foreground); }
+/* On: an accent fill (§4: a fill that is on uses the accent) - red means only broken (§5). */
+.assist-live.on { background: color-mix(in srgb, var(--color-accent) 24%, transparent); color: var(--accent-text); }
 /* Live mode: the app under it in use - no dimming, nothing but the bar takes touches. */
 html[data-mode="assist"] .assist.live { background: none; pointer-events: none; }
 .assist.live .assist-panel { pointer-events: auto; max-height: 45%; }
