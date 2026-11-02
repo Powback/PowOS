@@ -1501,11 +1501,12 @@ function mockTerm(events: Events): Bridge["term"] {
     },
     close: async (id) => void shells.delete(id),
     style: async () => ({
-      size: 13,
+      size: 12,
       pad: 6,
       fontScale: 1,
       family: "JetBrainsMono Nerd Font",
       font: false,
+      own: false,
     }),
   };
 }

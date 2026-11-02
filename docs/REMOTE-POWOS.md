@@ -537,6 +537,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `targets/android/rooted/powos-session.sh:33` | Whether KWin can dial a new daemon is read off its package version (pacman's db). | KWin says so itself (a caps line on the control channel, or a run-dir file the backend writes). |
 | `targets/android/rooted/powos-session.sh:103` | desktop-ready is touched a few more times: the new app's SplashScreen may delete it after the session start wrote it. | The splash asks whether the session is up (wayland-0 + KWin connected) instead of trusting a file. |
 | `targets/android/session/powos-android-tasks:282` | A slow safety read for task changes the stamp doesn't bring (an old PowOS app, or one restarting). | The session asks the app for a fresh stamp when it connects, and nothing polls. |
+| `shell/dev/gate.mjs:443` | term-session reads whether the program hid the cursor from xterm's private coreService (the WebGL renderer draws no DOM cursor to look for). | xterm exposes cursor visibility (a public modes field), or the check reads the WebGL cursor layer's pixels. |
 <!-- hack-registry:end -->
 
 ---
