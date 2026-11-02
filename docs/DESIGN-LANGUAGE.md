@@ -13,7 +13,8 @@ Checks:
 - `shell/dev/lint-design.sh` fails the gate on monospace UI text, hard-coded blur, off-scale radii (every corner of
   a shorthand), literal easings, status colours outside their tokens, literal durations in home's and the
   launcher's motion, hard lines drawn at `--frame`, and folds or menus on the AI page that pop in
-  (`{open && …}` instead of `ui/reveal.tsx` `Reveal` / `usePresence`).
+  (`{open && …}` instead of `ui/reveal.tsx` `Reveal` / `usePresence`). For PowOS apps' pages (`apps/*/ui`) it fails
+  on inline styles naming the monospace font outside a code style and on transitions with a literal duration.
 - The gate's `design-lint-*` runs find pop-ins and monospace text on screen. They fail the gate for the launcher
   (`design-lint-launcher-*`) and are report-only for the other surfaces until their design wave.
 - `shell/dev/gate.sh --shots DIR` renders every surface and measures text contrast (`report.json`).

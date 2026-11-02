@@ -72,7 +72,7 @@ export function Recordings({ net, app }: { net?: Net; app: string }) {
       </>
     );
   }
-  if (!recs?.length) return <Muted>No recordings yet. The capture proxy writes a HAR per app here; then you can view, edit and replay its requests.</Muted>;
+  if (!recs?.length) return <Muted>No recordings yet: the capture proxy writes one per app here.</Muted>;
   return (
     <>
       {recs.map((r) => (

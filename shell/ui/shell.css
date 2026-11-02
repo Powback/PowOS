@@ -1946,7 +1946,7 @@ html[data-mode="aod"], html[data-mode="aod"] body { background: #000; }
 }
 .aod-time { font: 300 76px/1 var(--font-body); letter-spacing: 2px; color: color-mix(in srgb, var(--color-accent) 75%, transparent); }
 .aod-date, .aod-battery { font-size: var(--text-small); }
-.aod-apps { display: flex; gap: 10px; margin-top: 14px; }
+.aod-apps { display: flex; gap: var(--gap); margin-top: 14px; }
 .aod-apps img { width: 22px; height: 22px; border-radius: 8px; opacity: 0.7; filter: grayscale(0.4); }
 
 /*
@@ -2524,7 +2524,9 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   inherits: true;
   initial-value: 0;
 }
-html[data-mode="lock"] { background: rgb(0 0 0 / calc(0.55 * (1 - var(--lock-lift)))); }
+/* The dim behind the face is THE backdrop's tint (§2: black 55%, the theme's background in a light theme, so the face's
+   --color-foreground text reads on it in both), fading out as the face lifts. */
+html[data-mode="lock"] { background: color-mix(in srgb, var(--backdrop-tint) calc((1 - var(--lock-lift)) * 100%), transparent); }
 html[data-mode="lock"] body { background: none; }
 .lock {
   position: fixed;
@@ -2542,7 +2544,7 @@ html[data-mode="lock"] body { background: none; }
 html.lock-settling[data-mode="lock"] { transition: --lock-lift var(--spring-ms) var(--spring); }
 .lock-time { font: 300 88px/1 var(--font-body); color: var(--color-foreground); letter-spacing: 2px; }
 .lock-date { margin-top: 8px; color: var(--color-foreground); font-size: var(--text-body); }
-.lock-notes { margin-top: 28px; width: 100%; display: flex; flex-direction: column; gap: 6px; }
+.lock-notes { margin-top: 28px; width: 100%; display: flex; flex-direction: column; gap: var(--gap); }
 .lock-note { display: flex; align-items: center; gap: 10px; padding: 9px 12px; }
 .lock-note .notif-icon { width: 22px; height: 22px; flex: none; }
 /*
@@ -3670,10 +3672,15 @@ html:root .ai-view > .ai-menu.tile { --glass-blur-native: var(--backdrop-blur-na
 .ai-screen > .ai-glass { position: absolute; inset: 0; z-index: -1; width: auto; max-width: none; margin: 0; border: 0; border-radius: 0; pointer-events: none; }
 .ai-screen > .ai-chat, .ai-screen > .ai-sub, .ai-screen > .ais {
   --ai-head-fade: 18px;
-  -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--ai-head) - 4px), black calc(var(--ai-head) + var(--ai-head-fade)), black calc(100% - var(--ai-fade-at, 0px) - var(--ai-fade, 0px)), transparent calc(100% - var(--ai-fade-at, 0px)));
-  mask-image: linear-gradient(to bottom, transparent calc(var(--ai-head) - 4px), black calc(var(--ai-head) + var(--ai-head-fade)), black calc(100% - var(--ai-fade-at, 0px) - var(--ai-fade, 0px)), transparent calc(100% - var(--ai-fade-at, 0px)));
+  /* The mask is drawn in the scroller's own box: a scroller that starts under the status bar (.ai-scroll, W5: inset at
+     --inset-top) counts the header from there, or the fade ran an inset too far down and hid the first card's head
+     (folded Friction, design-audit 11-02). */
+  --ai-head-inset: 0px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--ai-head) - var(--ai-head-inset) - 4px), black calc(var(--ai-head) - var(--ai-head-inset) + var(--ai-head-fade)), black calc(100% - var(--ai-fade-at, 0px) - var(--ai-fade, 0px)), transparent calc(100% - var(--ai-fade-at, 0px)));
+  mask-image: linear-gradient(to bottom, transparent calc(var(--ai-head) - var(--ai-head-inset) - 4px), black calc(var(--ai-head) - var(--ai-head-inset) + var(--ai-head-fade)), black calc(100% - var(--ai-fade-at, 0px) - var(--ai-fade, 0px)), transparent calc(100% - var(--ai-fade-at, 0px)));
 }
 .ai-screen > .ai-sub { --ai-fade-at: 0px; }
+.ai-screen > .ai-scroll { --ai-head-inset: var(--inset-top, 0px); }
 /* The header's words straight on the surface: no chips of their own. */
 html:root .ai-screen .ai-top > :is(.ai-title, .ai-state, .ai-more, .ai-back, .ai-strip) { background: none; box-shadow: none; border-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; text-shadow: none; }
 html:root .ai-screen .ai-top > .ai-state { padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--color-foreground) 10%, transparent); }
@@ -4011,7 +4018,7 @@ html:root .ai-screen.status > .ai-glass.tile { --glass-blur-native: var(--backdr
 .ais-done-item.open .ais-done-row, .ais-next-item.open .ais-done-row { align-items: baseline; padding-block: 10px 4px; white-space: normal; }
 .ais-done-item.open .ais-done-title, .ais-next-item.open .ais-done-title { overflow: visible; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
 .ais-done-detail { display: flex; flex-direction: column; gap: 4px; padding: 0 4px 10px; font-size: var(--text-small); line-height: 1.35; color: var(--color-foreground); animation: ais-rise var(--spring-ms) var(--spring) both; }
-.ais-done-fact, .ais-done-said { opacity: 0.86; white-space: normal; overflow-wrap: anywhere; }
+.ais-done-fact, .ais-done-said { color: var(--color-muted); white-space: normal; overflow-wrap: anywhere; }
 .ais-done-detail .try-acts { margin-top: 4px; }
 .ais-empty { padding: 16px; text-align: start; font-size: var(--text-body); color: var(--color-foreground); opacity: 0.86; }
 .ai-screen > .ais-foot { position: relative; z-index: 2; margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
@@ -4099,7 +4106,7 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .afr-n { flex: none; margin: 0.1em 0 0 auto; }
 .afr-facts { display: flex; align-items: center; gap: 8px; font-size: var(--text-small); color: var(--color-muted); }
 .afr-raw-h { margin-top: 6px; font-weight: 600; }
-.afr-raw { margin: 0; padding-inline-start: 16px; display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; opacity: 0.86; }
+.afr-raw { margin: 0; padding-inline-start: 16px; display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; color: var(--color-muted); }
 .afr-raw-n, .afr-raw-p { color: var(--color-muted); overflow-wrap: anywhere; white-space: pre-line; }
 .afr-ask { align-self: flex-start; margin-top: 6px; }
 .afr-empty { font-size: var(--text-body); color: var(--color-foreground); }

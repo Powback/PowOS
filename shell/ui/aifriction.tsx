@@ -190,10 +190,14 @@ function byArea(ps: Problem[]) {
   return [...m.entries()];
 }
 
+/**
+ * A state's status dot (theme.css --status-*, one meaning each on every surface: §5) and its word. Fixed has no dot:
+ * blue is "awaiting check" (it wore it), and a fixed problem awaits nothing - its word says it.
+ */
 const STATE: Record<Problem["state"], [string, string]> = {
   open: ["stuck", "open"],
   fixing: ["working", "being fixed"],
-  fixed: ["check", "fixed"],
+  fixed: ["", "fixed"],
 };
 
 const when = (ms: number) => {
@@ -282,7 +286,7 @@ function ProblemRow({ p, open, onToggle }: { p: Problem; open: boolean; onToggle
           </span>
         </span>
         <span class="afr-facts">
-          <span class={`aip-dot ${dot}`} aria-hidden="true" />
+          {dot && <span class={`aip-dot ${dot}`} aria-hidden="true" />}
           {label}
           {p.last ? ` · ${p.state === "fixed" ? "" : "last "}${when(p.last)}` : ""}
         </span>

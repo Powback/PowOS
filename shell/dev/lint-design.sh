@@ -29,6 +29,11 @@
 #   - AI page pop-in (design wave 5): a fold or menu shown with `{open && ...}` / `{menu && ...}` in the AI page's files
 #     (powai, aipanes, aiprogress, aistatus, aifriction, aimenu) - there in one frame, gone in the next (§6); use
 #     ui/reveal.tsx Reveal / usePresence. The menu's scrim (invisible, a tap-catcher) is exempt.
+#   - app monospace (design gaps, App API 11-02): a PowOS app's page (apps/*/ui) is a shell page too (§4) - an inline
+#     style naming the monospace font (var(--font...) / monospace) outside a code style (a key named id*, code*, block*,
+#     pre*, mono*, term*). App API's whole page read in monospace that way;
+#   - app motion: an app's inline transition on a literal duration ("transform 160ms") instead of the spring set (§6).
+#   Report-only: an app's inline border radius off the scale (health, pet, needs-me and sketch still have some).
 #
 #   shell/dev/lint-design.sh [DIR]   DIR: the shell (default: this one). Exit 1: a blocking rule broken.
 set -uo pipefail
@@ -74,8 +79,14 @@ homemotion=$(literal_motion '\\.(dock|app|home|page|home-tile|page-dots|app-icon
 launchermotion=$(literal_motion '\\.(launcher|launcher-[a-z]+|drawer|drawer-[a-z]+|letter-bar|letter-bubble|az|scr-[a-z]+|search-group|search-group-[a-z]+|launcher-search-results)([^a-z-]|$)')
 hardline=$(grep -HnE 'border(-(top|right|bottom|left))?[[:space:]]*:[^;]*var\(--frame\)[^;]*solid[^;]*(var\(--color|#|rgb|hsl|currentColor)' $css 2>/dev/null | strip || true)
 aipop=$( (cd ui 2>/dev/null && grep -nE '(^|[^=])\{!?(open|menu|expanded) &&' powai.tsx aipanes.tsx aiprogress.tsx aistatus.tsx aifriction.tsx aimenu.tsx 2>/dev/null) | sed 's|^|ui/|' | strip | grep -v 'ai-menu-scrim' || true)
+# PowOS apps' UIs (apps/*/ui next to this shell; absent in a composed copy without them: nothing to check).
+appui=$( [ -d ../apps ] && find ../apps -path '*/ui/*' -name '*.tsx' -not -path '*/node_modules/*' -not -path '*/out/*' -not -path '*/bindings/*' 2>/dev/null | sort)
+appgrep() { [ -n "$appui" ] && printf '%s\n' "$appui" | xargs grep -nE "$@" 2>/dev/null | sed 's|^\.\./||' | strip; }
+appmono=$(appgrep 'monospace|var\(--font[,)]' | grep -vE ':[[:space:]]*(id|code|block|pre|mono|term)[A-Za-z]*:' || true)
+appmotion=$(appgrep 'transition: *"[^"]*[0-9.]+m?s' | grep -v -- '--spring' || true)
+appradius=$(appgrep 'borderRadius: *"[^"]*"' | grep -vE 'borderRadius: *"(0|8px|12px|20px|999px|50%|inherit|var\(--(radius|icon-radius|card-radius)[^"]*)"' || true)
 count() { printf '%s' "$1" | grep -c . || true; }
-bad=$(( $(count "$mono") + $(count "$blur") + $(count "$radius") + $(count "$easing") + $(count "$status") + $(count "$dots") + $(count "$vibrate") + $(count "$homemotion") + $(count "$launchermotion") + $(count "$hardline") + $(count "$aipop") ))
+bad=$(( $(count "$mono") + $(count "$blur") + $(count "$radius") + $(count "$easing") + $(count "$status") + $(count "$dots") + $(count "$vibrate") + $(count "$homemotion") + $(count "$launchermotion") + $(count "$hardline") + $(count "$aipop") + $(count "$appmono") + $(count "$appmotion") ))
 if [ "$bad" = 0 ]; then echo "ok   design lint (docs/DESIGN-LANGUAGE.md)"; else echo "FAIL design lint: $bad blocking (docs/DESIGN-LANGUAGE.md)"; fi
 report "monospace in UI" "$mono"
 report "hard-coded blur" "$blur"
@@ -88,4 +99,7 @@ report "home motion with a literal duration" "$homemotion"
 report "launcher motion with a literal duration" "$launchermotion"
 report "hard line (a --frame border in a colour)" "$hardline"
 report "AI page pop-in (not ui/reveal.tsx)" "$aipop"
+report "app monospace outside code (apps/*/ui)" "$appmono"
+report "app motion with a literal duration (apps/*/ui)" "$appmotion"
+report "app radius off the scale (apps/*/ui, report-only)" "$appradius"
 [ "$bad" = 0 ]

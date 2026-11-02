@@ -30,7 +30,7 @@ function OverrideEditor({ net, app, owner, path, reload }: { net?: Net; app: str
   const write = (content: string | null) => call(net, app, "/files/override", { app: owner, path, content }).then(() => reload());
   return (
     <div style={{ ...S.card, gap: "8px" }}>
-      <textarea style={{ ...S.field, minHeight: "120px", fontFamily: "var(--font, monospace)" }} value={text ?? ""} onInput={(e) => setText((e.target as HTMLTextAreaElement).value)} />
+      <textarea style={{ ...S.field, minHeight: "120px" }} value={text ?? ""} onInput={(e) => setText((e.target as HTMLTextAreaElement).value)} />
       <div style={S.row}>
         <button type="button" style={{ ...S.btn, ...S.btnOn }} onClick={() => write(text ?? "")}>Save override</button>
         <button type="button" style={S.btn} onClick={() => write(null)}>Remove override</button>
@@ -59,7 +59,7 @@ export function Files({ net, app }: { net?: Net; app: string }) {
   const load = () => call<{ apps: AppFiles[] }>(net, app, "/files").then((d) => (setData(d.apps), setErr(null)), (e) => setErr(String(e?.message ?? e)));
   if (data === null && err === null) load();
   if (err) return <Muted>{err}</Muted>;
-  if (!data?.length) return <Muted>No file access recorded yet. Once the file tracer runs, the files each app reads and writes show up here, and you can override any of them with your own content.</Muted>;
+  if (!data?.length) return <Muted>No file access recorded yet.</Muted>;
   return (
     <>
       <Muted>What each app reads and writes. Open a file to replace what the app sees with your own content.</Muted>

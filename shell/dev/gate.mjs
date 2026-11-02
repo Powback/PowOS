@@ -12453,6 +12453,11 @@ try {
   // up/down scrolls the list and dims nothing, sideways dims, a tap switches (11-01 "I can't scroll": a pill took every drag).
   if (apps().some((a) => a.id === "local.lights"))
     runs.push(open(browser, `${ORIGIN}/__gate_app.html`, "app local.lights pills", { width: 404, height: 900 }).then((r) => settleLightsPills(r)));
+  // App API (apps/app-api, its UI through --app): its page on a mock runtime, on both screens - the list and an app's
+  // page - its text the theme's UI font, only ids/paths/generated views monospace (docs/DESIGN-LANGUAGE.md §4). Its
+  // renders go to /cache/app-api-<screen>-<view>.png (the design review's shots: shots.mjs has no app UIs).
+  if (apps().some((a) => a.id === "local.app-api"))
+    runs.push(open(browser, `${ORIGIN}/__gate_app.html`, "app local.app-api page", { width: 404, height: 899 }).then((r) => settleAppApi(r)));
   if (opening.length) console.log(`gate: ${opening.length} page(s) opened outside runs.push (their scene slots are held to the end)`);
   for (const r of (await Promise.all(runs)).filter(Boolean)) {
     if (r.problems.length) {
@@ -12501,6 +12506,73 @@ async function settleNeedsMe(r) {
   }
   r.problems.push(...r.uncaught);
   return { ...r, ready: true, ms: Date.now() - r.started };
+}
+
+/** App API's page (above): mounted on a mock runtime, checked for its fonts, shot folded and unfolded, list and app. */
+async function settleAppApi(r) {
+  try {
+    await r.page.evaluate(() => new Promise((ok) => (window.importShim ? ok() : addEventListener("load", ok))));
+    for (const [screen, vp] of [["folded", { width: 404, height: 899 }], ["unfolded", { width: 821, height: 883 }]]) {
+      await r.page.setViewport({ ...vp, deviceScaleFactor: 1 });
+      r.problems.push(...(await r.page.evaluate(aaMount)).map((p) => `${screen}: ${p}`));
+      await r.page.screenshot({ path: `/cache/app-api-${screen}-list.png` }).catch(() => {});
+      r.problems.push(...(await r.page.evaluate(aaOpenApp)).map((p) => `${screen}: ${p}`));
+      await r.page.screenshot({ path: `/cache/app-api-${screen}-app.png` }).catch(() => {});
+    }
+  } catch (e) {
+    r.problems.push(`evaluate: ${e.message.split("\n")[0]}`);
+  }
+  r.problems.push(...r.uncaught);
+  return { ...r, ready: true, ms: Date.now() - r.started };
+}
+
+/** App API's page mounted fresh on a mock runtime (two apps, one with actions); its font checks. */
+async function aaMount() {
+  const imp = (p) => window.importShim(p);
+  const { h, render } = await imp("preact");
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const act = (summary, safety, enabled) => ({ summary, safety, origin: "captured", enabled, endpoint: "/api/" + summary.split(" ")[0].toLowerCase(), widget: safety === "read" });
+  const apps = [
+    { app: "lights", name: "Lights", description: "Hue rooms on the LAN", enabled: true, base: "http://192.168.50.20", origin: "official", auth: "hue-key", actions: { list_rooms: act("List rooms", "read", true), set_room: act("Set a room's light", "reversible-write", true), buy_bulb: act("Buy a bulb", "spend", false) }, widgets: [{ provider: "com.philips.lighting.hue2/.Widget", label: "Hue scenes", minWidth: 250, minHeight: 110, targetCellWidth: 4, targetCellHeight: 2, resize: ["horizontal"], categories: ["home_screen"], updatePeriodMs: 0, preview: "layout" }] },
+    { app: "weather", name: "Weather", description: "Forecasts", enabled: false, base: "https://api.weather", origin: "drafted", auth: null, actions: { forecast: act("Forecast for a place", "read", false) } },
+  ];
+  const replies = {
+    "/apps": { apps },
+    "/audit": { rows: [{ ts: "2026-11-02T14:02:11", app: "lights", action: "list_rooms", safety: "read", sent: true, status: 200 }] },
+    "/trackers": { apps: [], total: { apps: 0, trackers: 0, blocked: 0, allowed: 0 } },
+    "/drafts": { drafts: [] },
+    "/views": { api: "GET /api/list", tools: "", cli: "", widgets: "" },
+  };
+  const body = (path) => replies[path.split("?")[0]] ?? {};
+  const host = { net: { fetch: async (_app, url) => ({ status: 200, json: () => body(url.replace(/^https?:\/\/[^/]+/, "")) }) }, addAppWidget: async () => {} };
+  const mod = await imp("./_app/local.app-api/pages/main.js");
+  document.querySelector("#aa-root")?.remove();
+  const root = Object.assign(document.createElement("div"), { id: "aa-root", style: "position:fixed;inset:0;background:var(--color-background);color:var(--color-foreground)" });
+  document.body.append(root);
+  render(h(mod.default, { host, app: "local.app-api", close: () => {} }), root);
+  window.__aa = { root };
+  for (let end = Date.now() + 3000; Date.now() < end && !root.querySelector("[data-app-row]"); ) await sleep(25);
+  if (!root.querySelector("[data-app-row]")) return [`the app list didn't render: "${root.textContent.slice(0, 160)}"`];
+  await sleep(300);
+  const fails = [];
+  const mono = (el) => /mono/i.test(getComputedStyle(el).fontFamily) || getComputedStyle(el).fontFamily === getComputedStyle(document.documentElement).getPropertyValue("--font").trim();
+  const body0 = getComputedStyle(document.documentElement).getPropertyValue("--font-body").trim();
+  const name = root.querySelector("[data-app-row] div div");
+  if (name && mono(name)) fails.push(`an app's name is monospace (${getComputedStyle(name).fontFamily}), not --font-body (${body0})`);
+  return fails;
+}
+
+/** An app's page (a row tapped): its plain text proportional, its ids monospace. */
+async function aaOpenApp() {
+  const { root } = window.__aa;
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  root.querySelector("[data-app-row]").click();
+  await sleep(500);
+  const fails = [];
+  const fam = (el) => getComputedStyle(el).fontFamily;
+  const h1 = root.querySelector("h1, h2");
+  if (h1 && /mono/i.test(fam(h1))) fails.push(`the app page's heading is monospace (${fam(h1)})`);
+  return fails;
 }
 
 /** Lights' widget, 8 rooms on a 4x2-sized tile (a list that scrolls), its pills driven by CDP touches as a finger. */

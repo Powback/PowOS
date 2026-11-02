@@ -26,7 +26,7 @@ export function AuditRows({ rows }: { rows: AuditRow[] }) {
 export function Audit({ net, app }: { net?: Net; app: string }) {
   const [d, err] = useRuntime<{ rows: AuditRow[] }>(net, app, "/audit?n=100");
   if (err) return <Muted>{err}</Muted>;
-  if (!d?.rows.length) return <Muted>Nothing has been called yet. Every call - dry run or sent, from the AI, the CLI, a widget or here - shows up here.</Muted>;
+  if (!d?.rows.length) return <Muted>Nothing has been called yet.</Muted>;
   return <AuditRows rows={d.rows} />;
 }
 
@@ -56,7 +56,7 @@ function TrackerAppRow({ a, net, app, reload }: { a: Trackers["apps"][number]; n
 export function TrackersView({ net, app }: { net?: Net; app: string }) {
   const [d, err, reload] = useRuntime<Trackers>(net, app, "/trackers");
   if (err) return <Muted>{err}</Muted>;
-  if (!d?.apps.length) return <Muted>No trackers seen yet. Once the capture proxy runs, the trackers each app contacts show up here, blocked unless you allow them.</Muted>;
+  if (!d?.apps.length) return <Muted>No trackers seen yet.</Muted>;
   const t = d.total;
   return (
     <>

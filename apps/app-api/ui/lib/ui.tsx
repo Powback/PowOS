@@ -36,7 +36,7 @@ export function Seg({ options, picked, onPick }: { options: string[]; picked: st
   );
 }
 
-/** Generated text (a view, a request): monospace, wrapped - never a sideways scroll. */
+/** Generated text (a view, a request): code, so monospace (--font, §4), wrapped - never a sideways scroll. */
 export const Block = ({ children }: { children: ComponentChildren }) => <pre style={S.block}>{children}</pre>;
 
 /** An action id as a plain title: "list_rooms" -> "List rooms" (the id itself shows muted under it). */
@@ -48,7 +48,9 @@ export const title = (id: string) => {
 export const Muted = ({ children }: { children: ComponentChildren }) => <div style={S.muted}>{children}</div>;
 
 export const S: Record<string, Record<string, string | number>> = {
-  page: { display: "flex", flexDirection: "column", gap: "12px", height: "100%", padding: "8px 16px 24px", boxSizing: "border-box", overflowY: "auto" },
+  // The page's text is the theme's UI font (--font-body, docs/DESIGN-LANGUAGE.md §4): it inherited the host's monospace.
+  // Only code - ids, paths, methods, generated views (S.id, S.idMuted, S.block) - is monospace (--font).
+  page: { display: "flex", flexDirection: "column", gap: "var(--gap, 8px)", height: "100%", padding: "8px var(--edge, 16px) 24px", fontFamily: "var(--font-body)", boxSizing: "border-box", overflowY: "auto" },
   head: { display: "flex", alignItems: "center", gap: "8px", minHeight: "44px" },
   back: { font: "inherit", fontSize: "28px", lineHeight: 1, background: "none", border: 0, color: "inherit", padding: "0 8px 0 0" },
   title: { flex: 1, margin: 0, fontSize: "1.4em", fontWeight: 600 },
@@ -58,21 +60,23 @@ export const S: Record<string, Record<string, string | number>> = {
   name: { fontWeight: 600 },
   // The accent fill carries the dark foreground (the background colour), as the shell's own on-states do
   // (rich.css .choice-opt.on): --accent-text is accent-tinted text for neutral ground, pale on the fill.
-  id: { fontFamily: "var(--font, monospace)", fontWeight: 600, overflowWrap: "anywhere" },
-  idMuted: { fontFamily: "var(--font, monospace)", color: "var(--color-muted)", fontSize: "var(--text-small, 0.85em)", overflowWrap: "anywhere" },
+  id: { fontFamily: "var(--font)", fontWeight: 600, overflowWrap: "anywhere" },
+  idMuted: { fontFamily: "var(--font)", color: "var(--color-muted)", fontSize: "var(--text-small, 0.85em)", overflowWrap: "anywhere" },
   muted: { color: "var(--color-muted)", fontSize: "var(--text-small, 0.9em)" },
   group: { margin: "8px 0 0", fontSize: "1em", fontWeight: 600 },
-  track: { position: "relative", flex: "none", width: "44px", height: "26px", borderRadius: "13px", border: 0, padding: 0 },
-  knob: { position: "absolute", top: "3px", left: "3px", width: "20px", height: "20px", borderRadius: "50%", background: "var(--color-foreground)", transition: "transform 160ms" },
+  track: { position: "relative", flex: "none", width: "44px", height: "26px", borderRadius: "999px", border: 0, padding: 0 },
+  knob: { position: "absolute", top: "3px", left: "3px", width: "20px", height: "20px", borderRadius: "50%", background: "var(--color-foreground)", transition: "transform var(--spring-fast-ms) var(--spring-fast)" },
   seg: { display: "flex", gap: "4px", padding: "4px", borderRadius: "20px", background: "var(--soft-fill)", flexWrap: "wrap" },
-  segBtn: { flex: "1 0 auto", font: "inherit", padding: "8px 12px", borderRadius: "16px", border: 0, background: "none", color: "inherit" },
+  segBtn: { flex: "1 0 auto", font: "inherit", padding: "8px 12px", borderRadius: "20px", border: 0, background: "none", color: "inherit" },
   segOn: { background: "var(--color-accent)", color: "var(--color-background)" },
-  block: { margin: 0, padding: "10px 12px", borderRadius: "8px", background: "var(--soft-fill)", fontFamily: "var(--font, monospace)", fontSize: "var(--text-small, 0.85em)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" },
+  block: { margin: 0, padding: "10px 12px", borderRadius: "8px", background: "var(--soft-fill)", fontFamily: "var(--font)", fontSize: "var(--text-small, 0.85em)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" },
   btn: { font: "inherit", padding: "10px 16px", borderRadius: "20px", border: 0, background: "var(--soft-fill)", color: "inherit" },
   btnOn: { background: "var(--color-accent)", color: "var(--color-background)" },
-  field: { flex: 1, minWidth: 0, font: "inherit", padding: "8px 12px", borderRadius: "8px", border: 0, background: "var(--soft-fill)", color: "inherit" },
+  // As wide as it may be, never taller than its text: flex 1 in the page's column grew the search field to fill the
+  // screen (the list's search, 11-02 shots); in a row it shares the width as before.
+  field: { flex: "0 1 auto", width: "100%", minWidth: 0, boxSizing: "border-box", font: "inherit", padding: "8px 12px", borderRadius: "8px", border: 0, background: "var(--soft-fill)", color: "inherit" },
   fold: { cursor: "pointer", listStyle: "none" },
   foldRow: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "12px" },
-  hero: { font: "inherit", fontWeight: 600, padding: "14px 16px", borderRadius: "var(--radius, 16px)", border: 0, background: "var(--color-accent)", color: "var(--color-background)" },
+  hero: { font: "inherit", fontWeight: 600, padding: "14px 16px", borderRadius: "var(--radius, 12px)", border: 0, background: "var(--color-accent)", color: "var(--color-background)" },
   bad: { color: "var(--color-red)" },
 };

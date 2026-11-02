@@ -345,6 +345,31 @@ const TABS_MAX = (edge, up) =>
   ` ev('pointerdown', x0, y0); for (let k = 1; k <= 8; k++) ev('pointermove', x0 + (tx - x0) * k / 8, y0 + (ty - y0) * k / 8); await sleep(300);` +
   (up ? ` ev('pointerup', tx, ty); await sleep(400);` : "");
 
+/**
+ * What's new for the lock face and the screen-off display (lock.tsx, aod.tsx): three apps, one text of several lines
+ * (an update's changes), each with an icon (the AOD shows one per app).
+ */
+const ICON = (c) => `'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect width="48" height="48" rx="12" fill="${c}"/></svg>')`;
+const LOCK_NOTES =
+  "const now = Math.floor(Date.now() / 1000); E.emit('notifications.changed', { available: true, items: [" +
+  `['Signal', 'Mats', 'are we still on for tonight?', 120, ${ICON("#3a76f0")}], ['Gmail', 'Your order has shipped', 'It arrives Thursday.', 3600, ${ICON("#c5221f")}], ['PowOS', 'Update installed', 'The lock face follows the theme\\nThe shade opens where the finger starts\\nFaster unlock', 7200, ${ICON("#2e7d5b")}]` +
+  "].map(([app, title, text, ago, icon], i) => ({ key: 'l' + i, app, icon, title, text, time: now - ago, clearable: true, profile: null, conversation: false })) });";
+/**
+ * The Friction page (PowOS AI's ⋯ › Friction, aifriction.tsx): open problems in three areas - a P0 by count, a P1, one
+ * being fixed by a board task - and one fixed this week, set after the screen opens (its feed subscribes as it shows).
+ */
+const FRICTION =
+  "const A = await U('./ui/aiboard.tsx'); const now = Date.now(); const H = 3600e3;" +
+  " const f = (id, area, kind, title, count, status, ago, x = {}) => ({ id, area, kind, title, count, status, last: now - ago, first: now - ago * 6, details: '', repro: '', evidence: '', by: 'coder', fixCommit: '', fixNote: '', fixedAt: 0, reopened: 0, task: '', ...x });" +
+  " const rows = [f('f12', 'ship', 'refused', 'ship 68221469a (apk) FAILED rc 5: ship-apk: REFUSED - build-app.sh failed', 540, 'open', 0.4 * H, { details: 'build-app.sh exited 5 while the gradle cache was locked', repro: 'two ships at once' })," +
+  " f('f31', 'permissions', 'refused', 'git push --force: denied by the permission system', 64, 'open', 2 * H)," +
+  " f('f40', 'gate', 'flaky-check', 'gate failed while the Mac\\'s load was high (load 15)', 12, 'open', 5 * H, { task: 't-gate' })," +
+  " f('f44', 'adb', 'broken-tool', 'adb shell input tap: device offline', 3, 'open', 26 * H)," +
+  " f('f09', 'worktree', 'unclear-rule', 'Coordinator briefs: which base branch a worktree starts from', 2, 'fixed', 30 * H, { fixCommit: '86a9f426aa', fixNote: 'worktree.sh new always starts from the tip', fixedAt: now - 20 * H })];" +
+  " A.boardSeen.value = true; S.chat.value = { busy: false, items: [] }; S.page.value = -1; await sleep(400); S.aiScreen.value = 'friction'; await sleep(300);" +
+  " A.board.value = [{ id: 't-gate', title: 'Checks: wait for the Mac to calm down before a gate', status: 'in_progress', owner: 'coder', severity: 1, note: '', project: 'Other' }];" +
+  " A.friction.value = rows; await sleep(600);";
+
 const SCENES = [
   ["chrome-status", "statusbar", "E.emit('chrome.changed', {kind:'status', battery:74, charging:true, network:'wifi', vpn:true, left:44});", "blurred", null, { folded: {width:404,height:46,insets:{top:0,bottom:0}}, unfolded: {width:821,height:46,insets:{top:0,bottom:0}} }],
   // A maximised web window's bar merged under the status bar (StatusChrome.merge): the clock after its title, the icons before its controls.
@@ -688,6 +713,13 @@ const SCENES = [
   ["control", "shade", "S.panel.value = 'control'; S.notif.value = true;", "blurred"],
   ["switcher", "recents", "E.emit('recents.show', { open: true, from: 100, tasks: await (await U('./bridge.ts')).powos.tasks.list() });", "blurred"],
   ["lock", "lock", "", "wallpaper"],
+  // The lock face with what's new (lock.tsx): the cards on THE backdrop over the dimmed wallpaper, the hint at the foot.
+  ["lock-notes", "lock", LOCK_NOTES + " await sleep(600);", "wallpaper"],
+  // The screen-off display (aod.tsx): black, the time and date dimmed in the theme's colours, an icon per app.
+  ["aod", "aod", LOCK_NOTES + " await sleep(400);", "wallpaper"],
+  // The Friction page (aifriction.tsx), and one problem opened (its facts and the logged words).
+  ["ai-friction", "home", FRICTION, "wallpaper"],
+  ["ai-friction-open", "home", FRICTION + " document.querySelector('.afr-row')?.click(); await sleep(800);", "wallpaper"],
   ["quicktools", "quicktools", "E.emit('qt.drag', { side: 'right', y: innerHeight * 0.7, q: 1 }); E.emit('qt.settle', { open: true }); await sleep(400);", "blurred"],
   ["gestures", "home", "(await U('./screens.ts')).openScreen('gestures'); await sleep(300); document.querySelector('.scr-edge-gesture .scr-row')?.click();", "wallpaper"],
 ].filter(([n]) => !ONLY || ONLY.test(n));
