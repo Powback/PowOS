@@ -19,7 +19,7 @@ import { tapTaken } from "./taps.ts";
 import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { computed, signal } from "@preact/signals";
-import { byKey, carry, dockAim, editing, folder, home, launch, page, pages, searchInDock, selected, setDocked, type Carry } from "../state.ts";
+import { byKey, carry, dockAim, editing, folder, heldDuringFold, home, launch, page, pages, searchInDock, selected, setDocked, type Carry } from "../state.ts";
 import { addHome, dropOnDock, hoverDock } from "./dockdrop.ts";
 import { dropOut, hoverOut, outAim } from "./dockout.tsx";
 import { powos } from "../bridge.ts";
@@ -1067,6 +1067,8 @@ function useEmptyPress() {
       else
         p.timer = window.setTimeout(() => {
           p.long = true;
+          // Held with the fold changing (EM2), by the input's clock: the grip, not edit mode - its release is no tap either.
+          if (heldDuringFold(p.down + LONG_PRESS_MS)) return;
           tick();
           selected.value = null;
           editing.value = true;

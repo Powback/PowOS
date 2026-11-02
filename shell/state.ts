@@ -81,6 +81,12 @@ let foldedAt = -Infinity;
  * began with the hinge moving) is the fold's, not the user's - it never enters edit mode.
  */
 export const FOLD_GRIP_MS = 1000;
+/**
+ * A hold whose moment by the input clock ([at]: the press's down event time + the long press) lies within FOLD_GRIP_MS
+ * of the fold change is the fold's grip - however late its timer ran (a busy main thread fired it >1 s after the fold,
+ * past the effect below's performance.now() window, and edit mode stayed on: gate fold-grip under full-gate load).
+ */
+export const heldDuringFold = (at: number) => Math.abs(at - foldedAt) < FOLD_GRIP_MS;
 /** Out of edit mode, the tile a long press picked up dropped where it was (grid.tsx letGo: no carry, nothing moves). */
 function endEditByFold(why: string) {
   console.info(`edit mode ended by the fold (${why})`);

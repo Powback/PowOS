@@ -11324,8 +11324,11 @@ try {
         f.dispatchEvent(new Event("input", { bubbles: true }));
         document.querySelector(".assist-ask").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
         await window.__gw.until(() => document.querySelector(".assist-panel .ai-page-chat"), 3000);
-        S.chat.value = { busy: false, items: [{ kind: "user", text: "what is this?" }, { kind: "assistant", text: "Your inbox: three unread." }] };
-        await new Promise((res) => setTimeout(res, 300));
+        // The mock's turn (bridge.ts ai.send) streams for ~1 s and each of its steps replaces the chat: a reply set by
+        // hand before it ended was overwritten by its 400 ms step (user + tool, busy) whenever the send or the overlay's
+        // render ran 100 ms late (full-gate load) - so wait for the turn's own reply, then for its bubble.
+        await window.__gw.until(() => !S.chat.value.busy && S.chat.value.items.some((i) => i.kind === "assistant"), 5000);
+        await window.__gw.until(() => document.querySelector(".assist-panel .ai-page-chat .ai-chat-in > .msg.assistant"), 2000);
         const out = [];
         const panel = document.querySelector(".assist-panel");
         const chats = panel.querySelectorAll(".ai-page-chat");
