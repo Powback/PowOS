@@ -64,6 +64,9 @@ done
 if [ -z "${GATE_STUB_SLEEP:-}" ]; then
   . "$SHELL_DIR/../tools/lib/need-docker.sh"
   need_docker || { echo "gate: no docker" >&2; exit 2; }
+  # f411: the run label, --init and the in-container cap of every container below; orphans of dead gates go first.
+  . "$SHELL_DIR/dev/gate-containers.sh"
+  gc_reap
 fi
 t0=$(date +%s) slot_wait=0
 # The Mac's 1-min load, measured once up front: a fixed READY_MS can't tell a slow page from a starved one,
@@ -314,8 +317,8 @@ hostload_pid=$!
 # Every local container this gate starts carries its run label, and the exit kills whatever still has it - whatever
 # the exit (a FAIL, ^C, a timeout's kill, set -e): 11-02 a hung scene left the Chromium container up 25 min after
 # its gate was stopped. dev/preview.sh's container takes the label too (GATE_RUN_LABEL).
-export GATE_RUN_LABEL="powos-gate-run=$$-$(date +%s)"
-kill_containers() { local ids; ids=$(docker ps -q --filter "label=$GATE_RUN_LABEL" 2>/dev/null) || ids=""; [ -z "$ids" ] || docker rm -f $ids >/dev/null 2>&1 || true; }
+# (dev/gate-containers.sh: the label, gc_kill, and the reap of a SIGKILLed gate's containers at the next gate's start.)
+kill_containers() { gc_kill; }
 trap 'kill $hostload_pid 2>/dev/null || true; kill_containers; gr_cleanup; rm -rf "$work" ${slot:+"$slot"}' EXIT
 set +e
 # The Mac-wide build slot (tools/agents/build-slot.sh): booting the pages competes for CPU with
@@ -339,9 +342,9 @@ browser_run() {
     return
   fi
   ${GATE_BUILD_SLOT:+"$SHELL_DIR/../tools/agents/build-slot.sh" "gate $base" --} \
-  docker run --rm --label "$GATE_RUN_LABEL" --platform linux/arm64 --shm-size 512m $cpu "${mounts[@]}" "${envs[@]}" \
+  docker run --rm "${gc_flags[@]}" --platform linux/arm64 --shm-size 512m $cpu "${mounts[@]}" "${envs[@]}" \
     ${host_load:+-e GATE_HOST_LOAD="$host_load"} ${host_cpus:+-e GATE_HOST_CPUS="$host_cpus"} \
-    -w /usr/src/app --entrypoint node "$IMAGE" gate.mjs
+    -w /usr/src/app --entrypoint timeout "$IMAGE" "${gc_cap[@]}" node gate.mjs
 }
 ready_ms=${READY_MS:-$ready_default}
 ts=$(mark)
@@ -423,8 +426,8 @@ if [ -n "$shots" ]; then
   # container can't follow - without it every icon glyph renders as tofu.
   nerd=$(cd "$SHELL_DIR/fonts" && cd "$(dirname "$(readlink nerd_symbols.ttf)")" 2>/dev/null && pwd -P)/nerd_symbols.ttf
   [ -f "$nerd" ] && smounts+=(-v "$nerd:/fonts/nerd_symbols.ttf:ro")
-  docker run --rm --label "$GATE_RUN_LABEL" --platform linux/arm64 --shm-size 512m $cpu "${smounts[@]}" ${SHOTS_THEME:+-e SHOTS_THEME="$SHOTS_THEME"} \
-    ${SHOTS_ONLY:+-e SHOTS_ONLY="$SHOTS_ONLY"} ${SHOTS_SCALE:+-e SHOTS_SCALE="$SHOTS_SCALE"} ${SHOTS_PROBE:+-e SHOTS_PROBE="$SHOTS_PROBE"} ${SHOTS_STRICT:+-e SHOTS_STRICT="$SHOTS_STRICT"} -w /usr/src/app --entrypoint node "$IMAGE" shots.mjs ||
+  docker run --rm "${gc_flags[@]}" --platform linux/arm64 --shm-size 512m $cpu "${smounts[@]}" ${SHOTS_THEME:+-e SHOTS_THEME="$SHOTS_THEME"} \
+    ${SHOTS_ONLY:+-e SHOTS_ONLY="$SHOTS_ONLY"} ${SHOTS_SCALE:+-e SHOTS_SCALE="$SHOTS_SCALE"} ${SHOTS_PROBE:+-e SHOTS_PROBE="$SHOTS_PROBE"} ${SHOTS_STRICT:+-e SHOTS_STRICT="$SHOTS_STRICT"} -w /usr/src/app --entrypoint timeout "$IMAGE" "${gc_cap[@]}" node shots.mjs ||
     { echo "     shots: the render run failed$([ "${SHOTS_STRICT:-}" = 1 ] && echo " (strict: overlapping tiles or missing glyphs, report.json)")"
       [ "${SHOTS_STRICT:-}" = 1 ] && fail=1; }
 fi

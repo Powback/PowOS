@@ -48,11 +48,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 command -v docker >/dev/null || { echo "preview: no docker" >&2; exit 2; }
+# f411: --init, the run label and the in-container cap (dev/gate-containers.sh); under a gate, the gate's label and pid.
+. "$SHELL_DIR/dev/gate-containers.sh"
+[ "$GATE_PARENT_PID" != $$ ] || gc_reap
 t0=$(date +%s)
 mkdir -p "$out" "${XDG_CACHE_HOME:-$HOME/.cache}/powos-preview"
 # Under $HOME: Colima's VM mounts the home folder only.
 work=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/powos-preview/run.XXXXXX")
-trap 'rm -rf "$work"' EXIT
+trap '[ "$GATE_PARENT_PID" != $$ ] || gc_kill; rm -rf "$work"' EXIT
 S=${dir:-$SHELL_DIR}
 mkdir -p "$work/owl" "$work/apps" "$work/data" "$work/themes" "$work/trees"
 cp "$SHELL_DIR"/dev/preview/themes/*.toml "$work/themes/"
@@ -86,7 +89,7 @@ jar=$REPO/targets/android/app/owl/build/cli/owl.jar
 src_hash=$(find "$REPO/targets/android/app/owl/src" -name '*.kt' -print0 | sort -z | xargs -0 shasum | shasum | cut -c1-16)
 if [ ! -f "$jar" ] || [ "$(cat "$jar.src" 2>/dev/null)" != "$src_hash" ]; then
   echo "     owl.jar: building (targets/android/app/owl)"
-  if docker run --rm -v "$GRADLE_VOLUME:/root/.gradle" -v "$REPO:$REPO" -w "$REPO/targets/android/app" --entrypoint bash "$JVM_IMAGE" \
+  if docker run --rm "${gc_flags[@]}" -v "$GRADLE_VOLUME:/root/.gradle" -v "$REPO:$REPO" -w "$REPO/targets/android/app" --entrypoint bash "$JVM_IMAGE" \
     -c './gradlew -q --offline --configure-on-demand :owl:owlJar' >/dev/null 2>&1; then
     echo "$src_hash" > "$jar.src"
   elif [ -f "$jar" ]; then
@@ -96,7 +99,7 @@ if [ ! -f "$jar" ] || [ "$(cat "$jar.src" 2>/dev/null)" != "$src_hash" ]; then
   fi
 fi
 owl_trees() {
-  docker run --rm -v "$work:$work" -v "$jar:/owl.jar:ro" --entrypoint java "$JVM_IMAGE" -jar /owl.jar trees --batch "$work/batch.json" ||
+  docker run --rm "${gc_flags[@]}" -v "$work:$work" -v "$jar:/owl.jar:ro" --entrypoint java "$JVM_IMAGE" -jar /owl.jar trees --batch "$work/batch.json" ||
     echo "     owl trees: some widgets didn't evaluate (their errors are in the report)"
 }
 docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull -q "$IMAGE" >/dev/null
@@ -112,8 +115,8 @@ browser() { # PASS
     -e PREVIEW_LIVE="$live" -e PREVIEW_FAST="$fast" ${only:+-e PREVIEW_ONLY="$only"} ${PREVIEW_EMPTY:+-e PREVIEW_EMPTY="$PREVIEW_EMPTY"} \
     ${PREVIEW_JOBS:+-e PREVIEW_JOBS="$PREVIEW_JOBS"} ${PREVIEW_DEBUG:+-e PREVIEW_DEBUG=1} ${PREVIEW_DEBUG_KEY:+-e PREVIEW_DEBUG_KEY="$PREVIEW_DEBUG_KEY"} ${PREVIEW_BASELINE:+-e PREVIEW_BASELINE="$PREVIEW_BASELINE"})
   if [ -n "$GR_HOST" ]; then browser_remote "$1" "${envs[@]}"; return; fi
-  docker run --rm ${GATE_RUN_LABEL:+--label "$GATE_RUN_LABEL"} --platform linux/arm64 --shm-size 1g ${GATE_CPU_SHARES:+--cpu-shares "$GATE_CPU_SHARES"} "${mounts[@]}" "${envs[@]}" \
-    -w /usr/src/app --entrypoint node "$IMAGE" preview.mjs
+  docker run --rm "${gc_flags[@]}" --platform linux/arm64 --shm-size 1g ${GATE_CPU_SHARES:+--cpu-shares "$GATE_CPU_SHARES"} "${mounts[@]}" "${envs[@]}" \
+    -w /usr/src/app --entrypoint timeout "$IMAGE" "${gc_cap[@]}" node preview.mjs
 }
 # GATE_REMOTE (dev/gate-remote.sh): the browser passes on the remote. The OWL trees between them stay here (the JVM
 # image is the Mac's): /work goes up before each pass and comes back after it, with /out. HOST_WORK stays this $work,
@@ -121,7 +124,8 @@ browser() { # PASS
 . "$SHELL_DIR/dev/gate-remote.sh"
 gr_init "$IMAGE"
 GR_PREFIX=powos-preview-$$- gr_dir=run/${GATE_REMOTE_ID:-preview}/pv
-trap 'gr_cleanup; rm -rf "$work"' EXIT
+trap 'exit 130' INT TERM HUP ALRM
+trap '[ "$GATE_PARENT_PID" != $$ ] || gc_kill; gr_cleanup; rm -rf "$work"' EXIT
 browser_remote() { # PASS ENVS...
   local pass=$1 m; shift
   m=(-v "@/$gr_dir/shell:/shell:ro" -v "@/$gr_dir/work:/work" -v "@/$gr_dir/out:/out" -v "@/$gr_dir/preview.mjs:/usr/src/app/preview.mjs:ro"
