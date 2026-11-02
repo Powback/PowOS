@@ -1876,7 +1876,7 @@ async function switcherHomeSwipeCheck(page) {
   if (up.length) return up;
   const { mid, moved, gap, dur } = await page.evaluate(homeSwipeMidFrames, 3000);
   const fails = await page.evaluate(switcherGoneFails);
-  // Owed: a mid-fade frame for every frame the fade drew past its first (whose change can land on the end), up to 3,
+  // Owed: a mid-fade frame for every frame the fade visibly drew past its first (whose change can land on the end), up to 3,
   // at least 1 - and the collapse a real animation of >= 150 ms. A page starved of frames (11-02: the gate's browser at
   // 721 s, a frame every ~150 ms; GATE_THROTTLE=20, 2 mid of a 410 ms fade) can't draw 3 mid-collapse frames of the
   // fade: there the frames it did draw are what's owed, not a count the machine took away. A page drawing normally
@@ -1914,17 +1914,17 @@ async function homeSwipeMidFrames(ms) {
   const scrim = document.querySelector(".recents .recents-scrim");
   await G.settled(() => true, ".recents");
   const fades = () => [...other.getAnimations(), ...scrim.getAnimations()].filter((a) => a.playState !== "finished");
-  let mid = 0, moved = 0, dur = 0, was = "";
+  let mid = 0, moved = 0, dur = 0, was = null;
   const stamps = [];
   const sample = () => {
     for (const a of fades()) dur = Math.max(dur, Number(a.effect?.getComputedTiming().endTime) || 0);
     const o = parseFloat(getComputedStyle(other).opacity);
     const so = parseFloat(getComputedStyle(scrim).opacity);
     if (o > 0.02 && o < 0.98 && so > 0.01 && so < 0.44) mid++;
-    // A frame the fade drew: the opacities changed since the last one (its frames' gaps are the median's).
-    const now = `${o} ${so}`;
-    if (was && now !== was) (moved++, stamps.push(performance.now()));
-    was = now;
+    // A frame the fade drew: the cards' opacity visibly changed since the last one (> 1%: the spring's long tail
+    // under 2% changes nothing anyone sees, and isn't mid-fade either). Its frames' gaps are the median's.
+    if (was != null && Math.abs(o - was) > 0.01) (moved++, stamps.push(performance.now()));
+    was = o;
   };
   window.__mockEvents.emit("recents.end", { to: "home" });
   const t0 = performance.now();
