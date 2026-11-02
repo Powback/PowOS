@@ -57,7 +57,7 @@ internal class RenderWatch {
         if (resting(now, live, homeShown) || answered(lastFrame)) clear()
         if (resting(now, live, homeShown) || now - lastFrame < PROBE_MS) return Act.NONE
         return when {
-            stalledAt != 0L -> due(now, stalledAt, RELOAD_MS) { if (underPressure(now)) Act.STALL.also { stalledAt = now } else reload(now) }
+            stalledAt != 0L -> due(now, stalledAt, RELOAD_MS) { afterStall(now) }
             probedAt != 0L -> due(now, probedAt, REBIND_MS) { Act.STALL.also { stalledAt = now } }
             else -> Act.PROBE.also { probedAt = now }
         }
@@ -81,6 +81,9 @@ internal class RenderWatch {
         after: Long,
         act: () -> Act,
     ): Act = if (now - since >= after) act() else Act.NONE
+
+    /** A stall's rebind unanswered: rebound again under memory pressure, else the page reloaded. */
+    private fun afterStall(now: Long): Act = if (underPressure(now)) Act.STALL.also { stalledAt = now } else reload(now)
 
     private fun reload(now: Long): Act {
         clear()

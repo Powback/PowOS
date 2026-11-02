@@ -344,13 +344,7 @@ class WebWindows(
             // Quiet: the page sends only changed geometry, so an idle second is normal; a working page answers this.
             RenderWatch.Act.PROBE -> emit("webwindows.resend", 0)
             // The rebind: the windows' root onto home's current surface, the WebView's visibility poked, and resent.
-            RenderWatch.Act.STALL -> {
-                val pressure = if (renderWatch.underPressure(now)) " (memory pressure: no reload)" else ""
-                WindowLog.w(TAG, "RENDER STALL: $live live window(s), no geometry for ${stallFor(now)} (last w.f at ${lastFrameText()}): rebind$pressure")
-                pokeVisibility("render stall")
-                for (w in wins.values.toList()) consumerCheck(w, "render stall")
-                if (!reattach(null, "render stall")) resend("render stall")
-            }
+            RenderWatch.Act.STALL -> stallRebind(now, live)
             RenderWatch.Act.RELOAD -> stallReload(now, live)
         }
     }
@@ -376,6 +370,18 @@ class WebWindows(
             @Deprecated("Deprecated in Java")
             override fun onLowMemory() = onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
         }
+
+    /** The rebind: the windows' root onto home's current surface, the WebView's visibility poked, and resent. */
+    private fun stallRebind(
+        now: Long,
+        live: Int,
+    ) {
+        val pressure = if (renderWatch.underPressure(now)) " (memory pressure: no reload)" else ""
+        WindowLog.w(TAG, "RENDER STALL: $live live window(s), no geometry for ${stallFor(now)} (last w.f at ${lastFrameText()}): rebind$pressure")
+        pokeVisibility("render stall")
+        for (w in wins.values.toList()) consumerCheck(w, "render stall")
+        if (!reattach(null, "render stall")) resend("render stall")
+    }
 
     private fun stallFor(now: Long) = if (lastFrameAt == 0L) "ever" else "${(now - lastFrameAt) / 1000}s"
 
