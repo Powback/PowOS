@@ -2926,7 +2926,17 @@ class WebWindows(
             return
         }
         WindowLog.i(TAG, "window ${win.id}: ${if (ok) "its app (task $task) is a full-screen app on display 0" else "full screen FAILED (task $task stays on display ${win.displayId})"}")
+        if (ok) fillsScreen(win, task)
         announce(win, ok)
+    }
+
+    /** On [io]: FS2 ([FullScreenTask]) - [win]'s app on display 0 fills it, now and once the system settled. */
+    private fun fillsScreen(
+        win: Win,
+        task: Int,
+    ) {
+        FullScreenTask.ensure(context, task, win.id, "at the move")
+        io.postDelayed({ if (win.full && !win.closed && win.taskId == task) FullScreenTask.ensure(context, task, win.id, "settled") }, FullScreenTask.SETTLE_MS)
     }
 
     /** On the main thread: [win] is a full-screen app ([full]) or a window again - "webwindows.full" to the page. */
@@ -3171,7 +3181,7 @@ class WebWindows(
                 main.post { toWindow(id) }
                 return@post
             }
-            moveTask(w.taskId, android.view.Display.DEFAULT_DISPLAY)
+            if (moveTask(w.taskId, android.view.Display.DEFAULT_DISPLAY)) fillsScreen(w, w.taskId)
         }
         return true
     }

@@ -541,6 +541,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `targets/android/rooted/powos-session.sh:103` | desktop-ready is touched a few more times: the new app's SplashScreen may delete it after the session start wrote it. | The splash asks whether the session is up (wayland-0 + KWin connected) instead of trusting a file. |
 | `targets/android/session/powos-android-tasks:282` | A slow safety read for task changes the stamp doesn't bring (an old PowOS app, or one restarting). | The session asks the app for a fresh stamp when it connects, and nothing polls. |
 | `shell/dev/gate.mjs:443` | term-session reads whether the program hid the cursor from xterm's private coreService (the WebGL renderer draws no DOM cursor to look for). | xterm exposes cursor visibility (a public modes field), or the check reads the WebGL cursor layer's pixels. |
+| `targets/android/app/app/src/main/kotlin/dev/omalauncher/shell/FullScreenTask.kt:65` | A web window's app made full screen is moved to display 0 and OxygenOS floats it at its old window's size (Chrome 1154x1538 at 0,197, 11-02); PowOS reads the task after the move and makes it full screen with a reflected WindowContainerTransaction. | A platform-signed module moves the task with its windowing mode in one WM call. |
 <!-- hack-registry:end -->
 
 ---

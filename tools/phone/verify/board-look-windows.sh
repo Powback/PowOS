@@ -29,12 +29,17 @@
 #                 placed by code 40 px over its page's right edge (under the dock, as the journey left it); a real
 #                 swipe beside it to the next page -> nothing of it shows (cut to its page: WWON) and the host's
 #                 w.f has it hidden; swiped back -> shown where it was.
+#   chrome-size   (chrome-window-renders-at-half-size-content-in-to, FS2): Chrome as a web window - its app's task fills
+#                 the window's body (am stack list bounds == the body's size), maximised (by code) too; full screen (the
+#                 bar's own host call) -> its task full screen on display 0 at the whole screen's size, never its old
+#                 window's size top-left (11-02 21:45: 1154x1538 at 0,197 on 2268x2440, the rest black); back to a
+#                 window -> it fills the body again.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/e2e-lib.sh"
 CASE=${1:-}; shift || true
-case "$CASE" in tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page) ;;
-  *) echo "usage: board-look-windows.sh tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page [--round R]"; exit 2 ;; esac
+case "$CASE" in tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size) ;;
+  *) echo "usage: board-look-windows.sh tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size [--round R]"; exit 2 ;; esac
 e2e_args "$@"
 e2e_init "lookw-$CASE"
 CALC=${TEST_APP:-com.oneplus.calculator} CHROME=com.android.chrome
@@ -317,6 +322,36 @@ if [ "$CASE" = window-page ]; then
             [ "$(hpage)" = "$pg0" ] && [ "$(tvis "$A1")" = true ] && [ "$(tbounds "$A1")" = "$b0" ] && pass "back on page $((pg0 + 1)), Calculator at $b0" || fail "back: page $(hpage), shows=$(tvis "$A1"), at $(tbounds "$A1") (was $b0)"; }; }
       fi
     fi
+  fi
+fi
+
+# --- chrome-size -----------------------------------------------------------------------------------------------
+# tsize <task>: its bounds' size from am stack list, "w h" px, or "".
+tsize() { sh_ "am stack list" | grep -E "taskId=$1:" | head -1 | sed -nE 's/.*bounds=\[(-?[0-9]+),(-?[0-9]+)\]\[(-?[0-9]+),(-?[0-9]+)\].*/\1 \2 \3 \4/p' | awk '{print $3-$1, $4-$2}'; }
+# tmode <task>: its windowing mode word from dumpsys (fullscreen, freeform, ...), or "".
+tmode() { sh_ "dumpsys activity activities" | grep -m1 -E "Task\{[0-9a-f]+ #$1 " | grep -oE 'mode=[a-z-]+' | cut -d= -f2; }
+# bsize <l t r b>: "w h". near <w h> <w h>: within 3 px each way.
+bsize() { [ -n "$1" ] && { set -- $1; echo "$(($3 - $1)) $(($4 - $2))"; }; }
+near() { set -- $1 $2; local a=$1 b=$2 c=$3 d=$4; [ -n "$a" ] && [ -n "$c" ] && [ $((a - c)) -le 3 ] && [ $((c - a)) -le 3 ] && [ $((b - d)) -le 3 ] && [ $((d - b)) -le 3 ]; }
+# fills <w-id> <what>: its app's task size == its body's size.
+fills() { local t b s; t=$(wwhost "$1" task); b=$(bsize "$(wwbody "$1")"); s=$(tsize "$t")
+  near "$s" "$b" && pass "$2: Chrome's task $t is ${s/ /x}, its body ${b/ /x}" || fail "$2: Chrome's task $t is '${s/ /x}', its body '${b/ /x}' - the app doesn't fill its window"; }
+if [ "$CASE" = chrome-size ]; then
+  A1=$(wwopen "$CHROME"); sleep 4; chk open
+  if [ "$A1" = none ]; then fail "no web window for Chrome"
+  else
+    step window "Chrome as a web window"; fills "$A1" "window"
+    ev "$WW.then(m=>{m.toggleMaximise(${A1#w});return 'ok'})" >/dev/null; sleep 2.5; chk maximise
+    step maximised "Chrome maximised (by code)"; fills "$A1" "maximised"
+    ev "$WW.then(m=>{m.toggleMaximise(${A1#w});return 'ok'})" >/dev/null; sleep 1.5
+    t=$(wwhost "$A1" task); hostfull "$A1" >/dev/null; sleep 3; chk full
+    step full "Chrome full screen (the bar's host call): a full-screen app on display 0"
+    scr=$(sh_ "wm size" | grep -oE '[0-9]+x[0-9]+' | tail -1); s=$(tsize "$t"); m=$(tmode "$t")
+    if [ "$(wwhost "$A1" state)" != full ]; then fail "not full screen: state $(wwhost "$A1" state)"
+    elif [ "$m" = fullscreen ] && { near "$s" "${scr/x/ }" || near "$s" "${scr#*x} ${scr%x*}"; }; then pass "task $t full screen at ${s/ /x} on a $scr screen"
+    else fail "task $t is mode '$m' at '${s/ /x}' on a $scr screen - its old window's size, not the screen"; fi
+    hosttowin "$A1" >/dev/null; sleep 3; chk towin
+    step back "Chrome back in its window"; fills "$A1" "back in its window"
   fi
 fi
 
