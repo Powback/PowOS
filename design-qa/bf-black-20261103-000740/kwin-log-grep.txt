@@ -1,0 +1,199 @@
+/stage/in/2/hl.sh: 1 file pushed, 0 skipped. 0.2 MB/s (243 bytes in 0.002s)
+grep: /run/powos-app/hyprland.log: binary file matches
+209:kwin_backend_anland: window task 1 : lost the display daemon
+1255:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+1256:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+1339:chdir "/home/powos/.local/share/Steam/steamapps/common/Broforce"
+1340:Game Recording - would start recording game 274190, but recording for this game is disabled
+1341:Adding process 32573 for gameID 274190
+1367:Adding process 32574 for gameID 274190
+1368:Adding process 32580 for gameID 274190
+1719:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+1720:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+1726:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "android-com.heytap.pictorial.desktop"
+1727:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "android-com.heytap.pictorial.desktop"
+2390:kwin_backend_anland: window task 1 : lost the display daemon
+3028:kwin_backend_anland: window task 1 : daemon handshake failed
+3494:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+3495:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+4035:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+4036:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+4258:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+4259:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+4446:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+4447:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+4484:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+4485:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+4487:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+4488:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+4696:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+4697:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+4900:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+4901:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+4932:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+4933:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+4934:Xwayland KGSL: last 30s: 9 commits (7 forced past a stale frame callback, 0 held back at 4 buffers), 7 buffers released, up to 3 held by the compositor
+4936:Xwayland KGSL: last 30s: 191 commits (187 forced past a stale frame callback, 0 held back at 4 buffers), 188 buffers released, up to 4 held by the compositor
+4937:Xwayland KGSL: last 30s: 249 commits (249 forced past a stale frame callback, 28 held back at 4 buffers), 249 buffers released, up to 4 held by the compositor
+4938:Xwayland KGSL: last 30s: 93 commits (93 forced past a stale frame callback, 0 held back at 4 buffers), 93 buffers released, up to 4 held by the compositor
+4960:Xwayland KGSL: last 30s: 86 commits (85 forced past a stale frame callback, 0 held back at 4 buffers), 85 buffers released, up to 2 held by the compositor
+4969:Xwayland KGSL: last 30s: 55 commits (55 forced past a stale frame callback, 0 held back at 4 buffers), 55 buffers released, up to 2 held by the compositor
+4986:Xwayland KGSL: last 30s: 54 commits (54 forced past a stale frame callback, 0 held back at 4 buffers), 54 buffers released, up to 2 held by the compositor
+4995:Xwayland KGSL: last 30s: 31 commits (31 forced past a stale frame callback, 0 held back at 4 buffers), 31 buffers released, up to 2 held by the compositor
+4996:Xwayland KGSL: last 30s: 80 commits (80 forced past a stale frame callback, 0 held back at 4 buffers), 79 buffers released, up to 3 held by the compositor
+4997:Xwayland KGSL: last 30s: 49 commits (49 forced past a stale frame callback, 0 held back at 4 buffers), 50 buffers released, up to 3 held by the compositor
+4998:Xwayland KGSL: last 30s: 10 commits (10 forced past a stale frame callback, 0 held back at 4 buffers), 10 buffers released, up to 2 held by the compositor
+4999:Xwayland KGSL: last 30s: 14 commits (14 forced past a stale frame callback, 0 held back at 4 buffers), 14 buffers released, up to 2 held by the compositor
+5000:Xwayland KGSL: last 30s: 8 commits (8 forced past a stale frame callback, 0 held back at 4 buffers), 8 buffers released, up to 2 held by the compositor
+5001:Xwayland KGSL: last 30s: 9 commits (9 forced past a stale frame callback, 0 held back at 4 buffers), 9 buffers released, up to 2 held by the compositor
+5002:Xwayland KGSL: last 30s: 8 commits (8 forced past a stale frame callback, 0 held back at 4 buffers), 8 buffers released, up to 2 held by the compositor
+5003:Xwayland KGSL: last 30s: 9 commits (9 forced past a stale frame callback, 0 held back at 4 buffers), 9 buffers released, up to 2 held by the compositor
+5004:Xwayland KGSL: last 30s: 8 commits (8 forced past a stale frame callback, 0 held back at 4 buffers), 8 buffers released, up to 2 held by the compositor
+5517:org.kde.plasma.taskmanager: Failed to register unity service
+6248:kwin_backend_anland: window task 1 : daemon handshake failed
+12304:kwin_backend_anland: window task 1 : daemon handshake failed
+12305:kwin_backend_anland: window task 2 : lost the display daemon
+15570:kwin_backend_anland: window task 1 : daemon handshake failed
+15987:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+15988:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+16014:Xwayland KGSL: last 30s: 256 commits (11 forced past a stale frame callback, 0 held back at 4 buffers), 254 buffers released, up to 2 held by the compositor
+16083:chdir "/home/powos/.local/share/Steam/steamapps/common/Broforce"
+16084:Game Recording - would start recording game 274190, but recording for this game is disabled
+16085:Adding process 3105 for gameID 274190
+16107:Adding process 3115 for gameID 274190
+16112:Adding process 3133 for gameID 274190
+16715:Xwayland KGSL: last 30s: 1389 commits (1 forced past a stale frame callback, 0 held back at 4 buffers), 1389 buffers released, up to 2 held by the compositor
+16922:Xwayland KGSL: last 30s: 940 commits (4 forced past a stale frame callback, 0 held back at 4 buffers), 940 buffers released, up to 2 held by the compositor
+18704:Xwayland KGSL: last 30s: 19 commits (16 forced past a stale frame callback, 0 held back at 4 buffers), 20 buffers released, up to 3 held by the compositor
+20679:Xwayland KGSL: last 30s: 226 commits (19 forced past a stale frame callback, 0 held back at 4 buffers), 227 buffers released, up to 2 held by the compositor
+20703:Xwayland KGSL: last 30s: 26 commits (19 forced past a stale frame callback, 0 held back at 4 buffers), 26 buffers released, up to 2 held by the compositor
+20707:Game Recording - game stopped [gameid=274190]
+20708:Removing process 3133 for gameID 274190
+20709:Removing process 3115 for gameID 274190
+20710:Removing process 3105 for gameID 274190
+20920:kwin_backend_anland: window task 1 : lost the display daemon
+21773:Xwayland KGSL: last 74s: 3 commits (2 forced past a stale frame callback, 0 held back at 4 buffers), 2 buffers released, up to 2 held by the compositor
+21774:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+21775:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+21777:Xwayland KGSL: last 30s: 8 commits (7 forced past a stale frame callback, 0 held back at 4 buffers), 7 buffers released, up to 2 held by the compositor
+21778:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+21779:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+21780:Xwayland KGSL: last 30s: 22 commits (20 forced past a stale frame callback, 0 held back at 4 buffers), 20 buffers released, up to 3 held by the compositor
+21781:Xwayland KGSL: last 30s: 91 commits (89 forced past a stale frame callback, 0 held back at 4 buffers), 89 buffers released, up to 3 held by the compositor
+21783:Xwayland KGSL: last 30s: 245 commits (245 forced past a stale frame callback, 0 held back at 4 buffers), 245 buffers released, up to 3 held by the compositor
+21784:Xwayland KGSL: last 30s: 127 commits (127 forced past a stale frame callback, 0 held back at 4 buffers), 127 buffers released, up to 3 held by the compositor
+21785:Xwayland KGSL: last 30s: 10 commits (9 forced past a stale frame callback, 0 held back at 4 buffers), 9 buffers released, up to 2 held by the compositor
+21786:Xwayland KGSL: last 30s: 19 commits (19 forced past a stale frame callback, 0 held back at 4 buffers), 19 buffers released, up to 2 held by the compositor
+21787:Xwayland KGSL: last 30s: 6 commits (6 forced past a stale frame callback, 0 held back at 4 buffers), 6 buffers released, up to 2 held by the compositor
+21788:Xwayland KGSL: last 30s: 1 commits (1 forced past a stale frame callback, 0 held back at 4 buffers), 1 buffers released, up to 2 held by the compositor
+21789:Xwayland KGSL: last 30s: 5 commits (3 forced past a stale frame callback, 0 held back at 4 buffers), 3 buffers released, up to 2 held by the compositor
+21790:Xwayland KGSL: last 30s: 16 commits (16 forced past a stale frame callback, 0 held back at 4 buffers), 16 buffers released, up to 2 held by the compositor
+21791:Xwayland KGSL: last 30s: 1 commits (1 forced past a stale frame callback, 0 held back at 4 buffers), 1 buffers released, up to 2 held by the compositor
+21792:Xwayland KGSL: last 30s: 5 commits (3 forced past a stale frame callback, 0 held back at 4 buffers), 3 buffers released, up to 2 held by the compositor
+21793:Xwayland KGSL: last 30s: 4 commits (4 forced past a stale frame callback, 0 held back at 4 buffers), 5 buffers released, up to 2 held by the compositor
+21829:Xwayland KGSL: last 30s: 3 commits (3 forced past a stale frame callback, 0 held back at 4 buffers), 3 buffers released, up to 2 held by the compositor
+21830:Xwayland KGSL: last 30s: 5 commits (4 forced past a stale frame callback, 0 held back at 4 buffers), 5 buffers released, up to 2 held by the compositor
+21831:Xwayland KGSL: last 30s: 5 commits (4 forced past a stale frame callback, 0 held back at 4 buffers), 5 buffers released, up to 2 held by the compositor
+23008:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+23009:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+23092:chdir "/home/powos/.local/share/Steam/steamapps/common/Broforce"
+23093:Game Recording - would start recording game 274190, but recording for this game is disabled
+23094:Adding process 26572 for gameID 274190
+23120:Adding process 26573 for gameID 274190
+23121:Adding process 26574 for gameID 274190
+23342:Xwayland KGSL: last 30s: 1228 commits (3 forced past a stale frame callback, 0 held back at 4 buffers), 1228 buffers released, up to 2 held by the compositor
+23498:Game Recording - game stopped [gameid=274190]
+23499:Removing process 26574 for gameID 274190
+23500:Removing process 26573 for gameID 274190
+23501:Removing process 26572 for gameID 274190
+23517:Xwayland KGSL: last 30s: 24 commits (1 forced past a stale frame callback, 0 held back at 4 buffers), 24 buffers released, up to 2 held by the compositor
+24020:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+24021:org.kde.plasma.taskmanager: Failed to find service for Unity Launcher "gldriverquery.desktop"
+24032:Xwayland KGSL: last 30s: 25 commits (21 forced past a stale frame callback, 0 held back at 4 buffers), 23 buffers released, up to 2 held by the compositor
+24045:Xwayland KGSL: last 30s: 72 commits (71 forced past a stale frame callback, 0 held back at 4 buffers), 70 buffers released, up to 3 held by the compositor
+24054:Xwayland KGSL: last 30s: 46 commits (46 forced past a stale frame callback, 0 held back at 4 buffers), 47 buffers released, up to 3 held by the compositor
+24063:Xwayland KGSL: last 30s: 56 commits (22 forced past a stale frame callback, 0 held back at 4 buffers), 58 buffers released, up to 2 held by the compositor
+24066:Xwayland KGSL: last 30s: 7 commits (7 forced past a stale frame callback, 0 held back at 4 buffers), 7 buffers released, up to 2 held by the compositor
+24279:Xwayland KGSL: last 30s: 2 commits (1 forced past a stale frame callback, 0 held back at 4 buffers), 1 buffers released, up to 1 held by the compositor
+24281:Xwayland KGSL: last 45s: 1 commits (1 forced past a stale frame callback, 0 held back at 4 buffers), 1 buffers released, up to 2 held by the compositor
+== last 80 lines
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+(EE) BUG: triggered 'if (!iclients)'
+(EE) BUG: ../xserver/Xi/exevents.c:1396 in RetrieveTouchDeliveryData()
+(EE) 
+(EE) Backtrace:
+(EE) 0: /usr/local/bin/Xwayland (0x62195d0000+0x1820f4) [0x62197520f4]
+(EE) 1: /usr/local/bin/Xwayland (0x62195d0000+0x135304) [0x6219705304]
+(EE) 2: /usr/local/bin/Xwayland (0x62195d0000+0x136c40) [0x6219706c40]
+(EE) 3: /usr/local/bin/Xwayland (0x62195d0000+0xcc150) [0x621969c150]
+(EE) 4: /usr/local/bin/Xwayland (0x62195d0000+0x13a69c) [0x621970a69c]
+(EE) 5: /usr/local/bin/Xwayland (0x62195d0000+0x167c58) [0x6219737c58]
+(EE) 6: /usr/local/bin/Xwayland (0x62195d0000+0x787ac) [0x62196487ac]
+(EE) 7: /usr/local/bin/Xwayland (0x62195d0000+0xcdb98) [0x621969db98]
+(EE) 8: /usr/local/bin/Xwayland (0x62195d0000+0xb3064) [0x6219683064]
+(EE) 9: /usr/local/bin/Xwayland (0x62195d0000+0xaeb08) [0x621967eb08]
+(EE) 10: /usr/local/bin/Xwayland (0x62195d0000+0xce540) [0x621969e540]
+(EE) 11: /usr/local/bin/Xwayland (0x62195d0000+0xd19d8) [0x62196a19d8]
+(EE) 12: /usr/local/bin/Xwayland (0x62195d0000+0x9821c) [0x621966821c]
+(EE) 13: /usr/local/bin/Xwayland (0x62195d0000+0x9f8f0) [0x621966f8f0]
+(EE) 14: /usr/local/bin/Xwayland (0x62195d0000+0xa45c0) [0x62196745c0]
+(EE) 15: /usr/lib/libc.so.6 (0x71e07f0000+0x22d94) [0x71e0812d94]
+(EE) 16: /usr/lib/libc.so.6 (__libc_start_main+0x98) [0x71e0812ef8]
+(EE) 17: /usr/local/bin/Xwayland (0x62195d0000+0x1e7b0) [0x62195ee7b0]
+(EE) 
+kwin_backend_anland: window task 5 full-screen window keeps minimizing itself: left so until its task takes the focus
+kwin_backend_anland: window task 5 frames: last 5 s 17 commits, 42 drawn (8.4 fps); commit -> drawn median 2 ms, p90 11 ms, max 13 ms
+Xwayland KGSL: last 30s: 98 commits (2 forced past a stale frame callback, 0 held back at 4 buffers), 99 buffers released, up to 2 held by the compositor; 98 fenced, 0 finished on the CPU
+kwin_core: Could not touch down, there's no window under QPointF(991.556,-23.1554)
+kwin_core: Detected a touch that never started, discarding
+kwin_core: Could not touch down, there's no window under QPointF(730.266,1028.36)
+kwin_core: Detected a touch move that never has been down, discarding
+kwin_core: Detected a touch that never started, discarding
+kwin_backend_anland: desktop on screen: false
+kwin_backend_anland: consumer disconnected, entering fallback
+kwin_backend_anland: consumer reconnected
+kwin_backend_anland: desktop buffers pre-rotated by the consumer: 1
+kwin_backend_anland: imported buffer 0 fd 116 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 1 fd 150 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 2 fd 153 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 3 fd 154 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: desktop on screen: true

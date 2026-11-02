@@ -1,0 +1,20 @@
+/stage/in/2/w7.sh: 1 file pushed, 0 skipped. 0.4 MB/s (594 bytes in 0.001s)
+game 22693
+== 0x5400003
+  Absolute upper-left X:  0
+  Absolute upper-left Y:  0
+  Width: 1116
+  Height: 2484
+  Map State: IsViewable
+WM_STATE(WM_STATE):
+		window state: Normal
+		icon window: 0x0
+_NET_WM_STATE(ATOM) = _NET_WM_STATE_FULLSCREEN, _NET_WM_STATE_FOCUSED
+_NET_WM_BYPASS_COMPOSITOR(CARDINAL) = 1
+WM_HINTS(WM_HINTS):
+		Client accepts input or input focus: False
+		Initial state is Normal State.
+		bitmap id # to use for icon: 0x5200028
+		bitmap id # of mask for icon: 0x520002a
+		window id # of group leader: 0x5400003
+_NET_ACTIVE_WINDOW(WINDOW): window id # 0x5400003

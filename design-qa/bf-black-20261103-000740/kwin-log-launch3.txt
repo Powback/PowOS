@@ -1,0 +1,157 @@
+/stage/in/2/h4.sh: 1 file pushed, 0 skipped. 0.3 MB/s (471 bytes in 0.002s)
+[2026-11-03 00:09:54] AppID 274190 no longer tracking PID 9237, exit code -1
+[2026-11-03 00:09:54] AppID 274190 no longer tracking PID 9234, exit code -1
+[2026-11-03 00:09:54] AppID 274190 no longer tracking PID 9232, exit code -1
+[2026-11-03 00:09:54] AppID 274190 no longer tracking PID 9193, exit code 0
+[2026-11-03 00:09:54] Remove 274190 from running list
+[2026-11-03 00:11:27] AppID 274190 adding PID 21005 as a tracked process "/home/powos/.local/share/powos/unity-screen /home/powos/.local/share/Steam/linuxarm64/steam-launch-wrapper -- /home/powos/.local/share/Steam/steamrtarm64/reaper SteamLaunch AppId=274190 -- '/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool waitforexitandrun -- '/home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4'/_v2-entry-point --verb=waitforexitandrun -- '/home/powos/.local/share/Steam/steamapps/common/Proton - Experimental'/proton waitforexitandrun  '/home/powos/.local/share/Steam/steamapps/common/Broforce/Broforce_beta.exe'"
+[2026-11-03 00:11:27] SSGL: InternalUpdateClientGame indicates change to games list
+[2026-11-03 00:11:27] SSGL: persona state flags
+[2026-11-03 00:11:28] AppID 274190 adding PID 21013 as a tracked process
+[2026-11-03 00:11:28] AppID 274190 adding PID 21015 as a tracked process
+[2026-11-03 00:11:28] AppID 274190 adding PID 21016 as a tracked process
+[2026-11-03 00:11:28] AppID 274190 adding PID 21017 as a tracked process
+2026-11-03 00:08:01 steam (18564): thawed in 13.04 ms, 14.0 ms with the request (launched app 274190)
+2026-11-03 00:08:01 steam (18564): app 274190 resumed - thawed in 33.12 ms, window {ec9dfa28-c610-4ff4-ace3-f54634cd9ec6}
+2026-11-03 00:08:01 PowOS on screen (consumers: [5])
+2026-11-03 00:08:01 plasmashell (12651): thawed in 3.15 ms, 5.3 ms with the request (PowOS on screen)
+2026-11-03 00:08:25 PowOS off screen (consumers: -)
+2026-11-03 00:08:25 desktop shell: asleep in 15s unless PowOS comes back on screen
+2026-11-03 00:08:29 PowOS on screen (consumers: [0])
+2026-11-03 00:08:56 steam (18564): not frozen: starting a game (app 274190), 15s ago
+2026-11-03 00:09:38 PowOS off screen (consumers: -)
+2026-11-03 00:09:38 desktop shell: asleep in 15s unless PowOS comes back on screen
+2026-11-03 00:09:39 PowOS on screen (consumers: [0])
+2026-11-03 00:09:44 PowOS off screen (consumers: -)
+2026-11-03 00:09:44 desktop shell: asleep in 15s unless PowOS comes back on screen
+2026-11-03 00:09:46 steam (18564): app 274190 resumed - awake in 8.36 ms, window {34c9ec1c-7e1f-4c92-91ce-f77509c69dba}
+2026-11-03 00:09:46 PowOS on screen (consumers: [7])
+2026-11-02 21:44:38 powos-app-quit 23949: powos game: [0;32m[dev][0m 274190 closed in 2335 ms
+2026-11-02 21:44:38 powos-app-quit 23949: game 274190: done (exit 0)
+2026-11-03 00:05:00 powos-app-quit 24728: ending 24728:foot 
+2026-11-03 00:05:02 powos-app-quit 24728: KILL after 2 s: 24728
+2026-11-03 00:05:02 powos-app-quit 24728: still there: 24728
+2026-11-03 00:09:10 powos-app-quit 11129: ending 11129:foot 
+2026-11-03 00:09:12 powos-app-quit 11129: KILL after 2 s: 11129
+2026-11-03 00:09:13 powos-app-quit 11129: still there: 11129
+== from 101925
+kwin_backend_anland: window task 5 full screen follows its task: QSizeF(1008, 1084) -> QSizeF(504.444, 606.667) for QSize(1135, 1365)
+kwin_backend_anland: window task 5 resized: 1 commits, configure->commit median 5 ms, p90 5 ms, max 5 ms
+kwin_backend_anland: desktop on screen: true
+kwin_backend_anland: consumer reconnected
+kwin_backend_anland: desktop buffers pre-rotated by the consumer: 1
+kwin_backend_anland: imported buffer 0 fd 192 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: desktop buffer pre-rotated by 1 is QSize(2314, 2268) but its width should be the output's height 2440 (output QSize(2268, 2440) )
+kwin_backend_anland: dmabuf size changed, resizing output to QSize(2268, 2314)
+kwin_backend_anland: resizing output to QSize(2268, 2314)
+kwin_backend_anland: imported buffer 1 fd 193 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 2 fd 195 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 3 fd 196 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task 5 full-screen window minimized itself (live true ): restored, a full-screen task's window is never minimized
+kwin_backend_anland: Android keyboard hidden - focus  0
+kwin_backend_anland: window task 5 frames: last 5 s 12 commits, 25 drawn (5.0 fps); commit -> drawn median 8 ms, p90 132 ms, max 132 ms
+kwin_backend_anland: window task 5 full-screen window minimized itself (live true ): restored, a full-screen task's window is never minimized
+kwin_backend_anland: window task 5 full-screen window minimized itself (live true ): restored, a full-screen task's window is never minimized
+kwin_backend_anland: window task 5 full-screen window keeps minimizing itself: left so until its task takes the focus
+kwin_backend_anland: window task 5 frames: last 5 s 17 commits, 42 drawn (8.4 fps); commit -> drawn median 2 ms, p90 11 ms, max 13 ms
+Xwayland KGSL: last 30s: 98 commits (2 forced past a stale frame callback, 0 held back at 4 buffers), 99 buffers released, up to 2 held by the compositor; 98 fenced, 0 finished on the CPU
+kwin_core: Could not touch down, there's no window under QPointF(991.556,-23.1554)
+kwin_core: Detected a touch that never started, discarding
+kwin_core: Could not touch down, there's no window under QPointF(730.266,1028.36)
+kwin_core: Detected a touch move that never has been down, discarding
+kwin_core: Detected a touch that never started, discarding
+kwin_backend_anland: desktop on screen: false
+kwin_backend_anland: consumer disconnected, entering fallback
+kwin_backend_anland: consumer reconnected
+kwin_backend_anland: desktop buffers pre-rotated by the consumer: 1
+kwin_backend_anland: imported buffer 0 fd 116 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 1 fd 150 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 2 fd 153 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 3 fd 154 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: desktop on screen: true
+kwin_backend_anland: new window "Broforce" has its surface now (full screen)
+kwin_backend_anland: window "Broforce" ( "" ) stays on the desktop
+kwin_backend_anland: full-screen window "Broforce" stays on the desktop (Plasma on screen)
+kwin_backend_anland: window "powos@localhost:~" ( "foot" ) stays on the desktop
+kwin_backend_anland: Android keyboard shown - v3 enabled on the desktop 0
+kwin_backend_anland: window task 6 has KWin's title bar
+kwin_backend_anland: window task 6 : KWin's title bar off, the task's frame draws it
+kwin_backend_anland: imported buffer 0 fd 245 QSize(640, 480) stride 2560 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 1 fd 246 QSize(640, 480) stride 2560 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 2 fd 247 QSize(640, 480) stride 2560 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 3 fd 248 QSize(640, 480) stride 2560 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 4 fd 249 QSize(640, 480) stride 2560 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 5 fd 250 QSize(640, 480) stride 2560 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 6 fd 251 QSize(640, 480) stride 2560 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 7 fd 252 QSize(640, 480) stride 2560 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: screen size for full-screen tasks: QSize(640, 480)
+kwin_backend_anland: window task 6 live, QSize(640, 480) pre-rotated 0 for "powos@localhost:~"
+kwin_backend_anland: window task 6 the window took QSizeF(212, 151.111) itself, the task is QSizeF(213.333, 160) : sized back
+kwin_backend_anland: quit 6 : closing "foot" pid 11129
+kwin_backend_anland: window task 6 in the background
+kwin_backend_anland: quit 6 : its window closed
+kwin_backend_anland: Android keyboard hidden - v3 enabled  0
+kwin_backend_anland: Android keyboard shown - x11 focus on the desktop 0
+kwin_backend_anland: full-screen window "Broforce" stays on the desktop (Plasma on screen)
+kwin_backend_anland: quit 6 : pid 11129 still runs without it after 3 s: powos-app-quit 11129
+/usr/local/bin/powos-app-quit: line 35: /proc/11058/cmdline: No such file or directory
+/usr/local/bin/powos-app-quit: line 81: /proc/11129/environ: Permission denied
+2026-11-03 00:09:10 powos-app-quit 11129: ending 11129:foot 
+2026-11-03 00:09:12 powos-app-quit 11129: KILL after 2 s: 11129
+2026-11-03 00:09:13 powos-app-quit 11129: still there: 11129
+kwin_core: Could not touch down, there's no window under QPointF(198.533,1028.36)
+kwin_core: Detected a touch move that never has been down, discarding
+kwin_core: Detected a touch that never started, discarding
+kwin_core: Could not touch down, there's no window under QPointF(424,-56)
+kwin_core: Detected a touch move that never has been down, discarding
+kwin_core: Detected a touch that never started, discarding
+kwin_core: Could not touch down, there's no window under QPointF(992.311,-26.2222)
+kwin_core: Detected a touch move that never has been down, discarding
+kwin_core: Detected a touch that never started, discarding
+kwin_core: Could not touch down, there's no window under QPointF(691.244,1028.36)
+kwin_core: Detected a touch move that never has been down, discarding
+kwin_core: Detected a touch move that never has been down, discarding
+kwin_core: Detected a touch that never started, discarding
+kwin_backend_anland: desktop on screen: false
+kwin_backend_anland: consumer disconnected, entering fallback
+kwin_backend_anland: desktop on screen: true
+kwin_backend_anland: consumer reconnected
+kwin_backend_anland: desktop buffers pre-rotated by the consumer: 1
+kwin_backend_anland: imported buffer 0 fd 116 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 1 fd 150 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 2 fd 153 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 3 fd 154 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: desktop on screen: false
+kwin_backend_anland: consumer disconnected, entering fallback
+kwin_backend_anland: window task 7 : its own Android keyboard true
+kwin_backend_anland: imported buffer 0 fd 153 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+kwin_backend_anland: imported buffer 1 fd 154 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+kwin_backend_anland: imported buffer 2 fd 158 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+kwin_backend_anland: imported buffer 3 fd 159 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+kwin_backend_anland: no desktop consumer: the output follows the window tasks' screen QSize(2268, 2314) -> QSize(2268, 2440)
+kwin_backend_anland: resizing output to QSize(2268, 2440)
+kwin_backend_anland: screen size for full-screen tasks: QSize(2268, 2440)
+kwin_backend_anland: window task 7 live, QSize(2268, 2440) pre-rotated 1 for "Broforce"
+kwin_backend_anland: window task 7 full screen follows its task: QSizeF(1008, 1084.44) -> QSizeF(504.444, 606.667) for QSize(1135, 1365)
+kwin_backend_anland: window task 7 resized: 1 commits, configure->commit median 0 ms, p90 0 ms, max 0 ms
+kwin_backend_anland: window task 7 frames: last 5 s 2 commits, 5 drawn (1.0 fps); commit -> drawn median 11 ms, p90 11 ms, max 11 ms
+kwin_backend_anland: window task 8 has no title bar
+kwin_backend_anland: window task 8 : its own Android keyboard true
+kwin_backend_anland: imported buffer 0 fd 157 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1364 (output QSize(1135, 1364) )
+kwin_backend_anland: imported buffer 1 fd 158 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1364 (output QSize(1135, 1364) )
+kwin_backend_anland: imported buffer 2 fd 159 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1364 (output QSize(1135, 1364) )
+kwin_backend_anland: imported buffer 3 fd 164 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1364 (output QSize(1135, 1364) )
+kwin_backend_anland: window task 8 live, QSize(2268, 2440) pre-rotated 1 for "Steam"
+kwin_backend_anland: window task 8 resized: 1 commits, configure->commit median 0 ms, p90 0 ms, max 0 ms
+kwin_backend_anland: window task 8 frames: last 5 s 6 commits, 23 drawn (4.6 fps); commit -> drawn median 4 ms, p90 8 ms, max 8 ms
+Xwayland KGSL: last 30s: 13 commits (5 forced past a stale frame callback, 0 held back at 4 buffers), 14 buffers released, up to 2 held by the compositor; 13 fenced, 0 finished on the CPU
+kwin_backend_anland: window task 8 frames: last 5 s 18 commits, 54 drawn (10.8 fps); commit -> drawn median 3 ms, p90 26 ms, max 28 ms
+kwin_backend_anland: window task 8 frames: last 5 s 13 commits, 43 drawn (8.6 fps); commit -> drawn median 2 ms, p90 17 ms, max 104 ms

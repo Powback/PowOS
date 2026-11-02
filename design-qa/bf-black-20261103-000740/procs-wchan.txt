@@ -1,0 +1,95 @@
+/stage/in/2/collect.sh: 1 file pushed, 0 skipped. 0.6 MB/s (922 bytes in 0.001s)
+== pacman
+kwin 6.7.5-3.58
+xwayland-kgsl 24.1.13-3
+== procs
+   93     2 S       02:11:56 oom_reaper                     [oom_reaper]
+ 8388  8331 Ssl     02:11:32 do_sys_poll                    startplasma-wayland
+11568  8388 Sl      02:11:19 do_sys_poll                    /usr/bin/plasma_session --no-lockscreen
+11608 11568 Sl      02:11:18 do_sys_poll                    /usr/bin/kwin_wayland_wrapper --xwayland
+11612 11608 Rl      02:11:18 -                              /usr/bin/kwin_wayland --wayland-fd 7 --socket wayland-0 --xwayland-fd 8 --xwayland-fd 9 --xwayland-display :0 --xwayland-xauthority /tmp/runtime-powos/xauth_TsdkcM --xwayland
+11632     1 Sl      02:11:18 do_sys_poll                    /usr/lib/xdg-desktop-portal
+11649     1 Sl      02:11:18 do_sys_poll                    /usr/lib/xdg-desktop-portal-gtk
+12203 11612 Sl      02:11:16 do_epoll_wait                  /usr/local/bin/Xwayland :0 -auth /tmp/runtime-powos/xauth_TsdkcM -listenfd 8 -listenfd 9 -displayfd 73 -wm 75 -rootless
+12221     1 Sl      02:11:16 do_sys_poll                    /usr/lib/xdg-desktop-portal-kde
+12651 11568 Rl      02:11:14 -                              /usr/bin/plasmashell
+12730 11568 S       02:11:14 do_sys_poll                    python3 /usr/local/bin/powos-plasma-bridge
+13060     1 Sl      02:11:12 do_sys_poll                    /usr/lib/ibus/ibus-portal
+18564     1 Ssl     02:10:14 do_sys_poll                    ./steam -cef-disable-gpu-sandbox -silent
+19032 18564 S<sl    02:10:04 do_sys_poll                    /home/powos/.local/share/Steam/steamrtarm64/steamwebhelper -nocrashdialog -lang=en_US -cachedir=/home/powos/.local/share/Steam/config/htmlcache -steampid=18564 -buildid=0 -steamid=0 -logdir=/home/powo
+19048 19032 S       02:10:04 do_sys_poll                    /home/powos/.local/share/Steam/steamrtarm64/steamwebhelper --type=zygote --no-zygote-sandbox --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home
+19049 19032 S       02:10:04 do_wait                        /home/powos/.local/share/Steam/steamrtarm64/steamwebhelper --type=zygote --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/powos/.local/share/
+19052 19049 S       02:10:04 do_sys_poll                    /home/powos/.local/share/Steam/steamrtarm64/steamwebhelper --type=zygote --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/powos/.local/share/
+19071 19032 S<l     02:10:04 do_sys_poll                    /home/powos/.local/share/Steam/steamrtarm64/steamwebhelper --type=gpu-process --disable-gpu-sandbox --enable-crash-reporter=, --disable-breakpad --change-stack-guard-on-fork=enable --enable-chrome-run
+19101 19032 Sl      02:10:04 futex_wait_queue_me            /home/powos/.local/share/Steam/steamrtarm64/steamwebhelper --type=utility --utility-sub-type=network.mojom.NetworkService --lang=en-GB --service-sandbox-type=none --enable-crash-reporter=, --change-st
+19103 19052 Sl      02:10:04 futex_wait_queue_me            /home/powos/.local/share/Steam/steamrtarm64/steamwebhelper --type=zygote --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/powos/.local/share/
+19180 19052 S<l     02:10:03 futex_wait_queue_me            /home/powos/.local/share/Steam/steamrtarm64/steamwebhelper --type=zygote --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/powos/.local/share/
+20116 19052 SNl     02:09:52 futex_wait_queue_me            /home/powos/.local/share/Steam/steamrtarm64/steamwebhelper --type=zygote --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/powos/.local/share/
+24001 19052 SNl        03:24 futex_wait_queue_me            /home/powos/.local/share/Steam/steamrtarm64/steamwebhelper --type=zygote --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/powos/.local/share/
+25142 18564 S          03:09 do_wait                        /home/powos/.local/share/Steam/linuxarm64/pw-audio-namespace -- /home/powos/.local/share/Steam/steamrtarm64/reaper SteamLaunch AppId=274190 -- /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/f
+25785 25142 Ss         03:06 do_sys_poll                    /usr/lib/pressure-vessel/from-host/libexec/steam-runtime-tools-0/pv-adverb --prefix=/usr/lib/pressure-vessel/from-host --emulator=/usr/lib/pressure-vessel/overrides/emulator.json --generate-locales --
+25945 25785 Z<sl       03:00 -                              [winedevice.exe] <defunct>
+== threads of 25142 (/home/powos/.local/share/Steam/linuxarm64/pw-audio-namespace -- /home/powos/.local/share/Steam/steamrtarm64/reaper SteamLaunch AppId=274190 -- /home/p)
+State:	S (sleeping)
+Threads:	1
+1 pw-audio-namesp S do_wait
+-- utime/stime
+utime 4 stime 11
+-- stack 25142
+[<0>] __switch_to+0x234/0x470
+[<0>] do_wait+0x36c/0x614
+[<0>] kernel_wait4+0x118/0x29c
+[<0>] __arm64_sys_wait4+0x6c/0xc4
+[<0>] invoke_syscall+0x64/0x154
+[<0>] el0_svc_common+0x94/0x104
+[<0>] do_el0_svc+0x2c/0x9c
+[<0>] el0_svc+0x24/0x84
+[<0>] el0t_64_sync_handler+0x88/0xec
+[<0>] el0t_64_sync+0x1b8/0x1bc
+== threads of 25785 (/usr/lib/pressure-vessel/from-host/libexec/steam-runtime-tools-0/pv-adverb --prefix=/usr/lib/pressure-vessel/from-host --emulator=/usr/lib/pressure-ve)
+State:	S (sleeping)
+Threads:	1
+1 pv-adverb S do_sys_poll
+-- utime/stime
+utime 0 stime 5
+-- stack 25785
+[<0>] __switch_to+0x234/0x470
+[<0>] do_sys_poll+0x60c/0x98c
+[<0>] __arm64_sys_ppoll+0x8c/0x1a4
+[<0>] invoke_syscall+0x64/0x154
+[<0>] el0_svc_common+0x94/0x104
+[<0>] do_el0_svc+0x2c/0x9c
+[<0>] el0_svc+0x24/0x84
+[<0>] el0t_64_sync_handler+0x88/0xec
+[<0>] el0t_64_sync+0x1b8/0x1bc
+== home logs
+-rw-r--r-- 1 powos powos 304188 Oct 20 22:29 /home/powos/steam-274190.log
+
+/home/powos/.local/share/Steam/logs:
+total 80781
+drwxr-xr-x  2 powos powos    3440 Nov  2 20:03 .
+drwx------ 32 powos powos    3440 Nov  2 23:05 ..
+-rwxr-xr-x  1 powos powos  455993 Nov  2 23:04 appinfo_log.txt
+-rwxr-xr-x  1 powos powos  719955 Nov  2 21:00 bootstrap_log.txt
+-rw-r--r--  1 powos powos 4259929 Nov  2 23:08 cef_log.txt
+-rwxr-xr-x  1 powos powos   64354 Nov  2 20:58 client_networkmanager.txt
+-rwxr-xr-x  1 powos powos 1048577 Oct 30 19:20 cloud_log.previous.txt
+-rwxr-xr-x  1 powos powos  923187 Nov  2 23:08 cloud_log.txt
+-rwxr-xr-x  1 powos powos 8388610 Nov  1 18:22 compat_log.previous.txt
+-rwxr-xr-x  1 powos powos 3477809 Nov  2 23:05 compat_log.txt
+-rwxr-xr-x  1 powos powos  940596 Nov  2 23:05 configstore_log.txt
+-rwxr-xr-x  1 powos powos 2146207 Nov  2 23:04 connection_log.txt
+-rwxr-xr-x  1 powos powos    1361 Oct 30 19:34 connection_log_7777.txt
+-rw-r--r--  1 powos powos 1223078 Oct 16 04:45 console-linux.txt
+-rwxr-xr-x  1 powos powos 5242803 Oct 27 15:26 console_log.previous.txt
+-rwxr-xr-x  1 powos powos  905278 Nov  2 23:08 console_log.txt
+-rwxr-xr-x  1 powos powos 2023174 Nov  2 23:08 content_log.txt
+-rwxr-xr-x  1 powos powos 1190287 Nov  2 23:08 controller.txt
+-rwxr-xr-x  1 powos powos  262056 Oct 23 12:54 controller_ui.previous.txt
+-rwxr-xr-x  1 powos powos  222606 Nov  2 23:08 controller_ui.txt
+-rwxr-xr-x  1 powos powos  373841 Nov  2 23:05 gameprocess_log.txt
+-rwxr-xr-x  1 powos powos 4194304 Oct 31 19:45 parental_log.previous.txt
+-rwxr-xr-x  1 powos powos 1218622 Nov  2 23:04 parental_log.txt
+-rwxr-xr-x  1 powos powos  266589 Nov  2 23:04 remote_connections.txt
+-rwxr-xr-x  1 powos powos 2489313 Nov  2 23:05 shader_log.txt
+-rwxr-xr-x  1 powos powos   22224 Nov  2 23:04 sitelicense_log.txt

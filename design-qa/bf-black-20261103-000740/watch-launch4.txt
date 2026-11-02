@@ -1,0 +1,32 @@
+/stage/in/2/w4.sh: 1 file pushed, 0 skipped. 0.5 MB/s (856 bytes in 0.001s)
+Mon Nov  2 23:11:43 UTC 2026
+23:11:43 game=
+23:11:49 game=
+23:11:55 game=22693 thr=51 cpu:384 dxvk-submit:1/futex_wait_queue_me dxvk-queue:0/futex_wait_queue_me dxvk-cs:2/futex_wait_queue_me UnityGfxDeviceW:11/futex_wait_multiple main:359/do_sys_poll
+23:12:01 game=22693 thr=63 cpu:1022 dxvk-submit:3/futex_wait_queue_me dxvk-queue:2/futex_wait_queue_me dxvk-cs:5/futex_wait_queue_me UnityGfxDeviceW:23/futex_wait_multiple main:771/0
+23:12:07 game=22693 thr=72 cpu:2371 dxvk-submit:36/futex_wait_queue_me dxvk-queue:30/adreno_drawctxt_wait dxvk-cs:102/0 UnityGfxDeviceW:253/0 main:1129/root_cfs_rq_bw
+23:12:14 game=22693 thr=72 cpu:3901 dxvk-submit:85/futex_wait_queue_me dxvk-queue:70/futex_wait_queue_me dxvk-cs:218/futex_wait_queue_me UnityGfxDeviceW:596/futex_wait_multiple main:1504/0
+23:12:20 game=22693 thr=72 cpu:4973 dxvk-submit:124/futex_wait_queue_me dxvk-queue:103/0 dxvk-cs:308/futex_wait_queue_me UnityGfxDeviceW:859/futex_wait_multiple main:1875/0
+23:12:26 game=22693 thr=73 cpu:5924 dxvk-submit:145/futex_wait_queue_me dxvk-queue:120/futex_wait_queue_me dxvk-cs:358/0 UnityGfxDeviceW:1001/0 main:2333/0
+23:12:33 game=22693 thr=73 cpu:7641 dxvk-submit:194/futex_wait_queue_me dxvk-queue:167/adreno_drawctxt_wait dxvk-cs:555/futex_wait_queue_me UnityGfxDeviceW:1394/0 main:2767/0
+23:12:39 game=22693 thr=73 cpu:9376 dxvk-submit:244/futex_wait_queue_me dxvk-queue:211/futex_wait_queue_me dxvk-cs:755/futex_wait_queue_me UnityGfxDeviceW:1787/0 main:3195/0
+== new kwin lines
+kwin_backend_anland: window task 8 frames: last 5 s 11 commits, 43 drawn (8.6 fps); commit -> drawn median 2 ms, p90 13 ms, max 109 ms
+kwin_backend_anland: new windows as tasks: false
+kwin_backend_anland: window task 8 in the background
+kwin_backend_anland: window task 8 live, QSize(2268, 2440) pre-rotated 0 for "Steam"
+kwin_backend_anland: window task 8 frames: last 5 s 3 commits, 16 drawn (3.2 fps); commit -> drawn median 1 ms, p90 16 ms, max 16 ms
+kwin_backend_anland: new window "Broforce" has its surface now (full screen)
+kwin_backend_anland: full-screen window "Broforce" opened as a task
+kwin_backend_anland: no desktop consumer: the output follows the window tasks' screen QSize(2268, 2440) -> QSize(1116, 2484)
+kwin_backend_anland: resizing output to QSize(1116, 2484)
+kwin_backend_anland: screen size for full-screen tasks: QSize(1116, 2484)
+kwin_backend_anland: window task 9 live, QSize(1116, 2484) pre-rotated 0 for "Broforce"
+kwin_backend_anland: window task 8 the window took QSizeF(1008, 606.222) itself, the task is QSizeF(504.444, 606.667) : sized back
+kwin_backend_anland: window task 8 resized: 1 commits, configure->commit median 0 ms, p90 0 ms, max 0 ms
+kwin_backend_anland: window task 8 frames: last 5 s 8 commits, 19 drawn (3.8 fps); commit -> drawn median 16 ms, p90 232 ms, max 232 ms
+kwin_backend_anland: window task 9 frames: last 5 s 3 commits, 16 drawn (3.2 fps); commit -> drawn median 2 ms, p90 4 ms, max 4 ms
+kwin_backend_anland: window task 8 frames: last 5 s 9 commits, 27 drawn (5.4 fps); commit -> drawn median 8 ms, p90 15 ms, max 15 ms
+Xwayland KGSL: last 30s: 24 commits (1 forced past a stale frame callback, 0 held back at 4 buffers), 23 buffers released, up to 2 held by the compositor; 24 fenced, 0 finished on the CPU
+kwin_backend_anland: window task 8 frames: last 5 s 2 commits, 8 drawn (1.6 fps); commit -> drawn median 1 ms, p90 1 ms, max 1 ms
+fails new: 6086

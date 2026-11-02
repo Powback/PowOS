@@ -1,0 +1,70 @@
+/stage/in/2/now.sh: 1 file pushed, 0 skipped. 0.5 MB/s (688 bytes in 0.001s)
+Mon Nov  2 23:09:32 UTC 2026
+ 9193 18564 S          00:50 00:00:00 do_wait                      /home/powos/.local/share/Steam/linuxarm64/pw-audio-namespace -- /home/powos/.local/share/Steam/steamrtarm64/reaper SteamLaunch AppId=274190 -- /home/powo
+ 9237  9193 S          00:50 00:00:00 do_wait                      /home/powos/.local/share/Steam/steamrtarm64/reaper SteamLaunch AppId=274190 -- /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/fex-compat-tool wa
+ 9240  9237 S          00:50 00:00:00 do_wait                      python3 /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/fex-compat-tool waitforexitandrun -- /home/powos/.local/share/Steam/steamapps/common/Stea
+ 9242  9240 S          00:50 00:00:00 do_sys_poll                  /home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4/pressure-vessel-arm64/libexec/steam-runtime-tools-0/srt-bwrap --args 27 /usr/lib/pres
+ 9408  9242 Ss         00:47 00:00:00 do_wait                      /usr/lib/pressure-vessel/from-host/libexec/steam-runtime-tools-0/pv-adverb --prefix=/usr/lib/pressure-vessel/from-host --emulator=/usr/lib/pressure-vesse
+ 9505  9408 S          00:44 00:00:00 do_wait                      /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /usr/bin/python3 /home/powos/.local/share/Steam/steamapps/common/Proton - Experimenta
+ 9508  9505 S<l        00:43 00:00:00 futex_wait_multiple          /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib//wine
+ 9510  9408 Rs         00:43 00:00:04 -                            /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/
+ 9515  9408 S<sl       00:43 00:00:00 futex_wait_multiple          /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/
+ 9522  9408 S<sl       00:42 00:00:00 futex_wait_multiple          /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/
+ 9537  9408 S<sl       00:42 00:00:01 futex_wait_multiple          /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/
+ 9584  9408 S<sl       00:40 00:00:00 futex_wait_multiple          /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/
+ 9631  9408 S<sl       00:39 00:00:03 futex_wait_multiple          /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/
+ 9823  9408 S<sl       00:37 00:00:02 futex_wait_multiple          /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/
+10075  9408 S<sl       00:35 00:00:00 futex_wait_multiple          /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/
+10141  9408 S<sl       00:35 00:00:00 futex_wait_multiple          /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/
+10144  9408 S<sl       00:34 00:00:08 futex_wait_multiple          /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/
+10171  9408 R<sl       00:33 00:00:57 -                            /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/
+== 9242 /home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4/pressure-ves
+State:	S (sleeping)
+Threads:	1
+utime 16 stime 33
+utime+2s 16 stime 33
+      1 srt-bwrap S do_sys_poll
+== 9505 /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /usr/bin/pyt
+State:	S (sleeping)
+Threads:	1
+utime 36 stime 29
+utime+2s 36 stime 29
+      1 exe S do_wait
+== 9508 /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/
+State:	S (sleeping)
+Threads:	3
+utime 55 stime 36
+utime+2s 55 stime 36
+      3 steam.exe S futex_wait_multiple
+== 10171 /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/
+State:	R (running)
+Threads:	229
+utime 2946 stime 3934
+utime+2s 3043 stime 4112
+     70 Worker Thread Thread) futex_wait_multiple
+     38 EnlightenWorker S futex_wait_multiple
+     27 dxvk-shader-n S futex_wait_queue_me
+     19 dxvk-shader-h S futex_wait_queue_me
+     18 dxvk-shader-l S futex_wait_queue_me
+     16 BackgroundWorke S futex_wait_multiple
+     15 Broforce_beta.e S futex_wait_multiple
+      5 Worker Thread Thread) 0
+      2 wine_xinput_hid S futex_wait_multiple
+      2 Broforc:disk$0 S futex_wait_queue_me
+      1 wine_sechost_de S futex_wait_multiple
+      1 wine_mmdevapi_n S futex_wait_multiple
+      1 dxvk-submit S adreno_drawctxt_wait
+      1 dxvk-queue S 0
+      1 dxvk-cs S futex_wait_queue_me
+      1 dxvk-cache S futex_wait_queue_me
+      1 audio_client_ma S do_sys_poll
+      1 Worker Thread Thread) cpu_number
+      1 UnitySubstanceT S futex_wait_multiple
+      1 UnityPreload S futex_wait_multiple
+      1 UnityGfxDeviceW S futex_wait_multiple
+      1 File Notifier Notifier) do_sys_poll
+      1 Broforce_beta.e S do_select
+      1 Broforce_beta.e S 0
+      1 Brofor:traceq0 S futex_wait_queue_me
+      1 BatchDeleteObje S futex_wait_multiple
+      1 AsyncReadManage S futex_wait_multiple

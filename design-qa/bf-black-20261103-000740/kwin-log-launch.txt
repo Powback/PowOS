@@ -1,0 +1,143 @@
+/stage/in/2/hl3.sh: 1 file pushed, 0 skipped. 0.2 MB/s (265 bytes in 0.002s)
+kwin_backend_anland: window task 5 : its own Android keyboard true
+kwin_backend_anland: imported buffer 0 fd 165 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+kwin_backend_anland: imported buffer 1 fd 167 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+kwin_backend_anland: imported buffer 2 fd 168 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+kwin_backend_anland: imported buffer 3 fd 180 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+kwin_backend_anland: no desktop consumer: the output follows the window tasks' screen QSize(2268, 2314) -> QSize(2268, 2440)
+kwin_backend_anland: resizing output to QSize(2268, 2440)
+kwin_backend_anland: window task 5 live, QSize(2268, 2440) pre-rotated 1 for "Broforce"
+kwin_backend_anland: window task 5 full screen follows its task: QSizeF(1008, 1084) -> QSizeF(504.444, 606.667) for QSize(1135, 1365)
+qt.qml.propertyCache.append: Final member StackingOrder is overridden in class QQmlDMAbstractItemModelData. The override won't be used.
+qt.qml.propertyCache.append: Final member StackingOrder is overridden in class QQmlDMAbstractItemModelData. The override won't be used.
+qt.qml.propertyCache.append: Final member StackingOrder is overridden in class QQmlDMAbstractItemModelData. The override won't be used.
+qt.qml.propertyCache.append: Final member StackingOrder is overridden in class QQmlDMAbstractItemModelData. The override won't be used.
+qt.qml.propertyCache.append: Final member StackingOrder is overridden in class QQmlDMAbstractItemModelData. The override won't be used.
+qt.qml.propertyCache.append: Final member StackingOrder is overridden in class QQmlDMAbstractItemModelData. The override won't be used.
+kwin_backend_anland: window task 5 resized: 1 commits, configure->commit median 5 ms, p90 5 ms, max 5 ms
+kwin_backend_anland: desktop on screen: true
+kwin_backend_anland: consumer reconnected
+kwin_backend_anland: desktop buffers pre-rotated by the consumer: 1
+kwin_backend_anland: imported buffer 0 fd 192 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: desktop buffer pre-rotated by 1 is QSize(2314, 2268) but its width should be the output's height 2440 (output QSize(2268, 2440) )
+kwin_backend_anland: dmabuf size changed, resizing output to QSize(2268, 2314)
+kwin_backend_anland: resizing output to QSize(2268, 2314)
+kwin_backend_anland: imported buffer 1 fd 193 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 2 fd 195 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 3 fd 196 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task 5 full-screen window minimized itself (live true ): restored, a full-screen task's window is never minimized
+qt.qml.propertyCache.append: Final member StackingOrder is overridden in class QQmlDMAbstractItemModelData. The override won't be used.
+qt.qml.propertyCache.append: Final member StackingOrder is overridden in class QQmlDMAbstractItemModelData. The override won't be used.
+kwin_backend_anland: Android keyboard hidden - focus  0
+kwin_backend_anland: window task 5 frames: last 5 s 12 commits, 25 drawn (5.0 fps); commit -> drawn median 8 ms, p90 132 ms, max 132 ms
+(EE) BUG: triggered 'if (!iclients)'
+(EE) BUG: ../xserver/Xi/exevents.c:1396 in RetrieveTouchDeliveryData()
+(EE) 
+(EE) Backtrace:
+(EE) 
+kwin_backend_anland: window task 5 full-screen window minimized itself (live true ): restored, a full-screen task's window is never minimized
+(EE) BUG: triggered 'if (!iclients)'
+(EE) BUG: ../xserver/Xi/exevents.c:1396 in RetrieveTouchDeliveryData()
+(EE) 
+(EE) Backtrace:
+(EE) 
+kwin_backend_anland: window task 5 full-screen window minimized itself (live true ): restored, a full-screen task's window is never minimized
+(EE) BUG: triggered 'if (!iclients)'
+(EE) BUG: ../xserver/Xi/exevents.c:1396 in RetrieveTouchDeliveryData()
+(EE) 
+(EE) Backtrace:
+(EE) 
+kwin_backend_anland: window task 5 full-screen window keeps minimizing itself: left so until its task takes the focus
+kwin_backend_anland: window task 5 frames: last 5 s 17 commits, 42 drawn (8.4 fps); commit -> drawn median 2 ms, p90 11 ms, max 13 ms
+Xwayland KGSL: last 30s: 98 commits (2 forced past a stale frame callback, 0 held back at 4 buffers), 99 buffers released, up to 2 held by the compositor; 98 fenced, 0 finished on the CPU
+kwin_core: Could not touch down, there's no window under QPointF(991.556,-23.1554)
+kwin_core: Detected a touch that never started, discarding
+kwin_core: Could not touch down, there's no window under QPointF(730.266,1028.36)
+kwin_core: Detected a touch move that never has been down, discarding
+kwin_core: Detected a touch that never started, discarding
+kwin_backend_anland: desktop on screen: false
+kwin_backend_anland: consumer disconnected, entering fallback
+kwin_backend_anland: consumer reconnected
+kwin_backend_anland: desktop buffers pre-rotated by the consumer: 1
+kwin_backend_anland: imported buffer 0 fd 116 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 1 fd 150 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 2 fd 153 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 3 fd 154 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: desktop on screen: true
+kwin_backend_anland: new window "Broforce" has its surface now (full screen)
+kwin_backend_anland: window "Broforce" ( "" ) stays on the desktop
+kwin_backend_anland: full-screen window "Broforce" stays on the desktop (Plasma on screen)
+kwin_backend_anland: window "powos@localhost:~" ( "foot" ) stays on the desktop
+kwin_backend_anland: Android keyboard shown - v3 enabled on the desktop 0
+kwin_backend_anland: window task 6 has KWin's title bar
+kwin_backend_anland: window task 6 : KWin's title bar off, the task's frame draws it
+kwin_backend_anland: imported buffer 0 fd 245 QSize(640, 480) stride 2560 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 1 fd 246 QSize(640, 480) stride 2560 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 2 fd 247 QSize(640, 480) stride 2560 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 3 fd 248 QSize(640, 480) stride 2560 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 4 fd 249 QSize(640, 480) stride 2560 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 5 fd 250 QSize(640, 480) stride 2560 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 6 fd 251 QSize(640, 480) stride 2560 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 7 fd 252 QSize(640, 480) stride 2560 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: screen size for full-screen tasks: QSize(640, 480)
+kwin_backend_anland: window task 6 live, QSize(640, 480) pre-rotated 0 for "powos@localhost:~"
+qt.qml.propertyCache.append: Final member StackingOrder is overridden in class QQmlDMAbstractItemModelData. The override won't be used.
+qt.qml.propertyCache.append: Final member StackingOrder is overridden in class QQmlDMAbstractItemModelData. The override won't be used.
+qt.qml.propertyCache.append: Final member StackingOrder is overridden in class QQmlDMAbstractItemModelData. The override won't be used.
+qt.qml.propertyCache.append: Final member StackingOrder is overridden in class QQmlDMAbstractItemModelData. The override won't be used.
+kwin_backend_anland: window task 6 the window took QSizeF(212, 151.111) itself, the task is QSizeF(213.333, 160) : sized back
+kwin_backend_anland: quit 6 : closing "foot" pid 11129
+kwin_backend_anland: window task 6 in the background
+kwin_backend_anland: quit 6 : its window closed
+kwin_backend_anland: Android keyboard hidden - v3 enabled  0
+kwin_backend_anland: Android keyboard shown - x11 focus on the desktop 0
+kwin_backend_anland: full-screen window "Broforce" stays on the desktop (Plasma on screen)
+kwin_backend_anland: quit 6 : pid 11129 still runs without it after 3 s: powos-app-quit 11129
+/usr/local/bin/powos-app-quit: line 35: /proc/11058/cmdline: No such file or directory
+/usr/local/bin/powos-app-quit: line 81: /proc/11129/environ: Permission denied
+2026-11-03 00:09:10 powos-app-quit 11129: ending 11129:foot 
+(EE) BUG: triggered 'if (!iclients)'
+(EE) BUG: ../xserver/Xi/exevents.c:1396 in RetrieveTouchDeliveryData()
+(EE) 
+(EE) Backtrace:
+(EE) 
+2026-11-03 00:09:12 powos-app-quit 11129: KILL after 2 s: 11129
+2026-11-03 00:09:13 powos-app-quit 11129: still there: 11129
+(EE) BUG: triggered 'if (!iclients)'
+(EE) BUG: ../xserver/Xi/exevents.c:1396 in RetrieveTouchDeliveryData()
+(EE) 
+(EE) Backtrace:
+(EE) 
+(EE) BUG: triggered 'if (!iclients)'
+(EE) BUG: ../xserver/Xi/exevents.c:1396 in RetrieveTouchDeliveryData()
+(EE) 
+(EE) Backtrace:
+(EE) 
+(EE) BUG: triggered 'if (!iclients)'
+(EE) BUG: ../xserver/Xi/exevents.c:1396 in RetrieveTouchDeliveryData()
+(EE) 
+(EE) Backtrace:
+(EE) 
+(EE) BUG: triggered 'if (!iclients)'
+(EE) BUG: ../xserver/Xi/exevents.c:1396 in RetrieveTouchDeliveryData()
+(EE) 
+(EE) Backtrace:
+(EE) 
+(EE) BUG: triggered 'if (!iclients)'
+(EE) BUG: ../xserver/Xi/exevents.c:1396 in RetrieveTouchDeliveryData()
+(EE) 
+(EE) Backtrace:
+(EE) 
+(EE) BUG: triggered 'if (!iclients)'
+(EE) BUG: ../xserver/Xi/exevents.c:1396 in RetrieveTouchDeliveryData()
+(EE) 
+(EE) Backtrace:
+(EE) 
+kwin_core: Could not touch down, there's no window under QPointF(198.533,1028.36)
+kwin_core: Detected a touch move that never has been down, discarding
+kwin_core: Detected a touch that never started, discarding
+== fails in this range: 1065

@@ -1,0 +1,33 @@
+/stage/in/2/w5.sh: 1 file pushed, 0 skipped. 0.4 MB/s (718 bytes in 0.002s)
+total 12
+drwx------  2 powos powos  100 Nov  2 20:56 .
+drwxrwxrwt 20 root  root  1260 Nov  2 23:13 ..
+-rw-r--r--  1 powos powos   80 Nov  2 20:56 KSMserver__0
+-rw-------  1 powos powos  334 Nov  2 20:56 iceauth_jSamAt
+xauth=/run/powos-app/xauth_glwbgz
+/usr/bin/xprop
+/usr/bin/xwininfo
+/usr/bin/xdotool
+Invalid MIT-MAGIC-COOKIE-1 key
+xprop:  unable to open display ':0'
+151555:kwin_backend_anland: window task 10 live, QSize(2268, 2440) pre-rotated 1 for "Broforce"
+151560:kwin_backend_anland: new window "Broforce" ( "" ) opened as a task
+151571:kwin_backend_anland: window task 11 live, QSize(2268, 2440) pre-rotated 1 for "Broforce"
+151682:2026-11-02 21:44:36 powos-app-quit 23949: Broforce_beta.e is Steam game 274190's: ending its launch chain (powos game 274190 stop; Steam stays)
+151983:kwin_backend_anland: new window "Broforce" has its surface now (full screen)
+151984:kwin_backend_anland: full-screen window "Broforce" opened as a task
+151992:kwin_backend_anland: window task 4 live, QSize(2268, 2440) pre-rotated 1 for "Broforce"
+163474:kwin_backend_anland: window task 4 touch at QPointF(741.556,1084.13) to "\"Broforce\" (steam_app_274190, 1008x1084+0+0)" (outside its input region)
+164123:kwin_backend_anland: full-screen window "Broforce" not a task: normal true popup false skipTaskbar false special false connected false
+164493:kwin_backend_anland: window "Broforce" ( "" ) stays on the desktop
+167394:kwin_backend_anland: window task 5 live, QSize(2268, 2440) pre-rotated 1 for "Broforce"
+168140:kwin_backend_anland: new window "Broforce" has its surface now (full screen)
+168141:kwin_backend_anland: window "Broforce" ( "" ) stays on the desktop
+168142:kwin_backend_anland: full-screen window "Broforce" stays on the desktop (Plasma on screen)
+168173:kwin_backend_anland: full-screen window "Broforce" stays on the desktop (Plasma on screen)
+169682:kwin_backend_anland: window task 7 live, QSize(2268, 2440) pre-rotated 1 for "Broforce"
+169937:kwin_backend_anland: new window "Broforce" has its surface now (full screen)
+169938:kwin_backend_anland: full-screen window "Broforce" opened as a task
+169946:kwin_backend_anland: window task 9 live, QSize(1116, 2484) pre-rotated 0 for "Broforce"
+169954:kwin_backend_anland: window task 9 frames: last 5 s 3 commits, 16 drawn (3.2 fps); commit -> drawn median 2 ms, p90 4 ms, max 4 ms
+game 22693 cpu 19526

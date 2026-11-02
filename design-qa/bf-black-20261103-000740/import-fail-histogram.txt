@@ -1,0 +1,43 @@
+/stage/in/2/h5.sh: 1 file pushed, 0 skipped. 0.2 MB/s (339 bytes in 0.001s)
+5000 fails 0 framelines 0
+10000 fails 0 framelines 0
+15000 fails 0 framelines 0
+20000 fails 3124 framelines 0
+25000 fails 644 framelines 0
+30000 fails 0 framelines 0
+35000 fails 0 framelines 0
+40000 fails 0 framelines 0
+45000 fails 0 framelines 0
+50000 fails 0 framelines 0
+55000 fails 3848 framelines 0
+60000 fails 5000 framelines 0
+65000 fails 4793 framelines 0
+70000 fails 3 framelines 0
+75000 fails 52 framelines 0
+80000 fails 0 framelines 0
+85000 fails 567 framelines 0
+90000 fails 3754 framelines 0
+95000 fails 4743 framelines 0
+100000 fails 2629 framelines 0
+105000 fails 3057 framelines 0
+110000 fails 4989 framelines 0
+115000 fails 4843 framelines 0
+120000 fails 3454 framelines 0
+125000 fails 4516 framelines 0
+130000 fails 0 framelines 122
+135000 fails 0 framelines 66
+140000 fails 3535 framelines 32
+145000 fails 4921 framelines 12
+150000 fails 4933 framelines 20
+155000 fails 4539 framelines 69
+160000 fails 4999 framelines 1
+165000 fails 4610 framelines 1
+170000 fails 4237 framelines 11
+175000 fails 4998 framelines 1
+run 16853 - 20645
+run 51151 - 66257
+run 71013 - 71760
+run 80260 - 80270
+run 84408 - 97639
+run 101944 - 124548
+run 136422 - 178408

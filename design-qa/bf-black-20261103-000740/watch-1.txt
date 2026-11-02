@@ -1,0 +1,144 @@
+/stage/in/2/watch.sh: 1 file pushed, 0 skipped. 0.7 MB/s (1069 bytes in 0.002s)
+game pid 
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+awk: fatal: cannot open file `/proc//task//stat' for reading: No such file or directory
+cat: /proc//task//wchan: No such file or directory
+23:09:57 u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u 6257590 s 0
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s  submit= cs= gfx= main= mainw=
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+awk: fatal: cannot open file `/proc//task//stat' for reading: No such file or directory
+cat: /proc//task//wchan: No such file or directory
+23:10:02 u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u 6266269 s 0
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s  submit= cs= gfx= main= mainw=
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+awk: fatal: cannot open file `/proc//task//stat' for reading: No such file or directory
+cat: /proc//task//wchan: No such file or directory
+23:10:07 u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u 6276427 s 0
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s  submit= cs= gfx= main= mainw=
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+awk: fatal: cannot open file `/proc//task//stat' for reading: No such file or directory
+cat: /proc//task//wchan: No such file or directory
+23:10:12 u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u 6287002 s 0
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s  submit= cs= gfx= main= mainw=
+cat: 23:10:17 u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u 6297342 s 0
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s  submit= cs= gfx= main= mainw=
+'/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+awk: fatal: cannot open file `/proc//task//stat' for reading: No such file or directory
+cat: /proc//task//wchan: No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+awk: 23:10:22 u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u 6306805 s 0
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s  submit= cs= gfx= main= mainw=
+fatal: cannot open file `/proc//task//stat' for reading: No such file or directory
+cat: /proc//task//wchan: No such file or directory
+== new kwin lines
+kwin_backend_anland: window task 8 has no title bar
+kwin_backend_anland: window task 8 : its own Android keyboard true
+kwin_backend_anland: imported buffer 0 fd 157 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1364 (output QSize(1135, 1364) )
+kwin_backend_anland: imported buffer 1 fd 158 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1364 (output QSize(1135, 1364) )
+kwin_backend_anland: imported buffer 2 fd 159 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1364 (output QSize(1135, 1364) )
+kwin_backend_anland: imported buffer 3 fd 164 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1364 (output QSize(1135, 1364) )
+kwin_backend_anland: window task 8 live, QSize(2268, 2440) pre-rotated 1 for "Steam"
+kwin_backend_anland: window task 8 resized: 1 commits, configure->commit median 0 ms, p90 0 ms, max 0 ms
+kwin_backend_anland: window task 8 frames: last 5 s 6 commits, 23 drawn (4.6 fps); commit -> drawn median 4 ms, p90 8 ms, max 8 ms
+Xwayland KGSL: last 30s: 13 commits (5 forced past a stale frame callback, 0 held back at 4 buffers), 14 buffers released, up to 2 held by the compositor; 13 fenced, 0 finished on the CPU
+fails new: 1

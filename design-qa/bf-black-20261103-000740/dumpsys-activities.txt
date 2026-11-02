@@ -1,0 +1,558 @@
+---- TIME 03.11.2026 00:07:44 ----
+ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
+Display #0 (activities from top to bottom):
+  * Task{10ac1fb #2332 type=standard A=10359:.lock U=0 visible=true visibleRequested=false mode=fullscreen translucent=false sz=1}
+    mLastPausedActivity: ActivityRecord{246898476 u0 com.powos.app/dev.omalauncher.shell.PowosLockActivity t2332}
+    mLastNonFullscreenBounds=Rect(565, 249 - 1703, 2271)
+    isSleeping=true
+    * Hist  #0: ActivityRecord{246898476 u0 com.powos.app/dev.omalauncher.shell.PowosLockActivity t2332}
+      packageName=com.powos.app processName=com.powos.app
+      launchedFromUid=10359 launchedFromPackage=com.powos.app launchedFromFeature=null userId=0
+      app=ProcessRecord{9fbe17b 30906:com.powos.app/u0a359}
+      Intent { flg=0x10810000 xflg=0x4 cmp=com.powos.app/dev.omalauncher.shell.PowosLockActivity mCallingUid=10359 }
+      rootOfTask=true task=Task{10ac1fb #2332 type=standard A=10359:.lock}
+      taskAffinity=10359:.lock
+      mActivityComponent=com.powos.app/dev.omalauncher.shell.PowosLockActivity
+      baseDir=/data/app/~~NRy8IlMZeGmdHP-fc_iRwA==/com.powos.app-oQtV8ryhfozQhTsv-ejKTw==/base.apk
+      dataDir=/data/user/0/com.powos.app
+      stateNotNeeded=false componentSpecified=true mActivityType=standard
+      compat={442dpi always-compat} theme=0x7f0d0009
+      mLastReportedConfigurations:
+        mGlobalConfig={1.0 ?mcc??mnc [en_CH] ldltr sw821dp w821dp h821dp 442dpi lrg hdr widecg port night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2268, 2440) mAppBounds=Rect(0, 126 - 2268, 2395) mMaxBounds=Rect(0, 0 - 2268, 2440) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} as.2 s.544 fontWeightAdjustment=0mThemeChanged= 0, mThemeChangedFlags= 0, mFlipFont= 0, mScenario= 0, mAccessibleChanged= -1, mUxIconConfig= 4b151214500121, mMaterialColor= 0, mUserId= 0, mFontUserId= 0, mFontVariationSettings= 1226, mFoldingAngle = -1.0, mIconPackName= , mDarkModeBackgroundMaxL= 0.0, mDarkModeDialogBgMaxL= 27.0, mDarkModeForegroundMinL= 100.0, mOplusConfigType= 1, mOplusChangedConfigs= 0, OpSans= -1, mBurmeseFontFlag= 2, mFlag= 0, mExtraFlag= 0, mFlexibleActivitySuitable= -1, mPuttDisplayFlag= -1}
+        mOverrideConfig={1.0 ?mcc??mnc [en_CH] ldltr sw821dp w821dp h821dp 442dpi lrg hdr widecg port night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2268, 2440) mAppBounds=Rect(0, 126 - 2268, 2395) mMaxBounds=Rect(0, 0 - 2268, 2440) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} as.2 s.3 fontWeightAdjustment=0mThemeChanged= 0, mThemeChangedFlags= 0, mFlipFont= 0, mScenario= 0, mAccessibleChanged= -1, mUxIconConfig= 4b151214500121, mMaterialColor= 0, mUserId= 0, mFontUserId= 0, mFontVariationSettings= 1226, mFoldingAngle = -1.0, mIconPackName= , mDarkModeBackgroundMaxL= 0.0, mDarkModeDialogBgMaxL= 27.0, mDarkModeForegroundMinL= 100.0, mOplusConfigType= 1, mOplusChangedConfigs= 0, OpSans= -1, mBurmeseFontFlag= 2, mFlag= 0, mExtraFlag= 0, mFlexibleActivitySuitable= -1, mPuttDisplayFlag= -1}
+      mLastReportedActivityWindowInfo=ActivityWindowInfo{isEmbedded=false, taskBounds=Rect(0, 0 - 2268, 2440), taskFragmentBounds=Rect(0, 0 - 2268, 2440)}
+      CurrentConfiguration={1.0 ?mcc??mnc [en_CH] ldltr sw821dp w821dp h821dp 442dpi lrg hdr widecg port night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2268, 2440) mAppBounds=Rect(0, 126 - 2268, 2395) mMaxBounds=Rect(0, 0 - 2268, 2440) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} as.2 s.3 fontWeightAdjustment=0mThemeChanged= 0, mThemeChangedFlags= 0, mFlipFont= 0, mScenario= 0, mAccessibleChanged= -1, mUxIconConfig= 4b151214500121, mMaterialColor= 0, mUserId= 0, mFontUserId= 0, mFontVariationSettings= 1226, mFoldingAngle = -1.0, mIconPackName= , mDarkModeBackgroundMaxL= 0.0, mDarkModeDialogBgMaxL= 27.0, mDarkModeForegroundMinL= 100.0, mOplusConfigType= 1, mOplusChangedConfigs= 0, OpSans= -1, mBurmeseFontFlag= 2, mFlag= 0, mExtraFlag= 0, mFlexibleActivitySuitable= -1, mPuttDisplayFlag= -1}
+      RequestedOverrideConfiguration={0.0 ?mcc??mnc ?localeList ?layoutDir ?swdp ?wdp ?hdp ?density ?lsize ?long ?ldr ?wideColorGamut ?orien ?uimode night ?touch ?keyb/?/? ?nav/? winConfig={ mBounds=Rect(0, 0 - 0, 0) mAppBounds=null mMaxBounds=Rect(0, 0 - 0, 0) mDisplayRotation=undefined mWindowingMode=undefined mActivityType=standard mAlwaysOnTop=undefined mRotation=undefined} ?fontWeightAdjustmentmThemeChanged= 0, mThemeChangedFlags= 0, mFlipFont= 0, mScenario= -1, mAccessibleChanged= 0, mUxIconConfig= 0, mMaterialColor= ffffffffffffffff, mUserId= -1, mFontUserId= -1, mFontVariationSettings= ffffffff, mFoldingAngle = -1.0, mIconPackName= , mDarkModeBackgroundMaxL= -1.0, mDarkModeDialogBgMaxL= -1.0, mDarkModeForegroundMinL= -1.0, mOplusConfigType= 0, mOplusChangedConfigs= 0, OpSans= -1, mBurmeseFontFlag= -1, mFlag= 0, mExtraFlag= 0, mFlexibleActivitySuitable= -1, mPuttDisplayFlag= -1}
+      ResolvedOverrideConfiguration={0.0 ?mcc??mnc ?localeList ?layoutDir sw821dp w821dp h821dp ?density ?lsize ?long ?ldr ?wideColorGamut port ?uimode night ?touch ?keyb/?/? ?nav/? winConfig={ mBounds=Rect(0, 0 - 0, 0) mAppBounds=Rect(0, 126 - 2268, 2395) mMaxBounds=Rect(0, 0 - 0, 0) mDisplayRotation=undefined mWindowingMode=undefined mActivityType=standard mAlwaysOnTop=undefined mRotation=undefined} s.3 ?fontWeightAdjustmentmThemeChanged= 0, mThemeChangedFlags= 0, mFlipFont= 0, mScenario= -1, mAccessibleChanged= 0, mUxIconConfig= 0, mMaterialColor= ffffffffffffffff, mUserId= -1, mFontUserId= -1, mFontVariationSettings= ffffffff, mFoldingAngle = -1.0, mIconPackName= , mDarkModeBackgroundMaxL= -1.0, mDarkModeDialogBgMaxL= -1.0, mDarkModeForegroundMinL= -1.0, mOplusConfigType= 0, mOplusChangedConfigs= 0, OpSans= -1, mBurmeseFontFlag= -1, mFlag= 0, mExtraFlag= 0, mFlexibleActivitySuitable= -1, mPuttDisplayFlag= -1}
+      taskDescription: label="null" icon=null iconResource=/0 iconFilename=null primaryColor=ff212121
+        backgroundColor=ff303030 statusBarColor=0 navigationBarColor=0
+       backgroundColorFloating=ff424242
+      launchFailed=false launchCount=0 lastLaunchTime=-1s53ms
+      mHaveState=true mIcicle=Bundle[mParcelledData.dataSize=648]
+      state=STOPPED delayedResume=false finishing=false
+      keysPaused=false inHistory=true idle=true
+      occludesParent=true mNoDisplay=false immersive=false launchMode=2
+      mActivityType=standard
+      isVisibleRequested() =false
+      windows=[Window{df9d38e u0 com.powos.app/dev.omalauncher.shell.PowosLockActivity}]
+      windowType=2
+      providesOrientation=true
+      mOccludesParent=true
+      overrideOrientation=SCREEN_ORIENTATION_UNSPECIFIED
+      requestedOrientation=SCREEN_ORIENTATION_UNSPECIFIED
+      mVisibleRequested=false mVisible=false mClientVisible=false reportedDrawn=false reportedVisible=false
+      mAppStopped=true
+      resizeMode=RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION
+      mLastReportedMultiWindowMode=false mLastReportedPictureInPictureMode=false
+      supportsSizeChanges=SIZE_CHANGES_UNSUPPORTED_METADATA
+      configChanges=0x1ff3
+      neverSandboxDisplayApis=false
+      alwaysSandboxDisplayApis=false
+      isTransparentPolicyRunning=false
+      areBoundsLetterboxed=false
+      isLetterboxRunning=false
+      mRootLockActivity=false
+      mShowWhenLocked=true
+      mLaunchedFromMultiSearch=false
+
+  * Task{8f9709d #1 type=home U=0 visible=false visibleRequested=false mode=fullscreen translucent=true sz=1}
+    * Task{6afbd8c #2329 type=undefined A=10359:com.powos.app.shell U=0 rootTaskId=1 visible=false visibleRequested=false mode=fullscreen translucent=true sz=1}
+      mLastPausedActivity: ActivityRecord{126599390 u0 com.powos.app/andro.marchy.HomeShell t2329}
+      mLastNonFullscreenBounds=Rect(565, 249 - 1703, 2271)
+      isSleeping=true
+      * Hist  #0: ActivityRecord{126599390 u0 com.powos.app/andro.marchy.HomeShell t2329}
+        packageName=com.powos.app processName=com.powos.app
+        launchedFromUid=0 launchedFromPackage=null launchedFromFeature=null userId=0
+        app=ProcessRecord{9fbe17b 30906:com.powos.app/u0a359}
+        Intent { act=android.intent.action.MAIN cat=[android.intent.category.HOME] flg=0x10000100 cmp=com.powos.app/andro.marchy.HomeShell (has extras) mCallingUid=1000 }
+        rootOfTask=true task=Task{6afbd8c #2329 type=undefined A=10359:com.powos.app.shell}
+        taskAffinity=10359:com.powos.app.shell
+        mActivityComponent=com.powos.app/dev.omalauncher.shell.ShellActivity
+        baseDir=/data/app/~~NRy8IlMZeGmdHP-fc_iRwA==/com.powos.app-oQtV8ryhfozQhTsv-ejKTw==/base.apk
+        dataDir=/data/user/0/com.powos.app
+        stateNotNeeded=false componentSpecified=true mActivityType=home
+        compat={442dpi always-compat} theme=0x7f0d0008
+        mLastReportedConfigurations:
+          mGlobalConfig={1.0 ?mcc??mnc [en_CH] ldltr sw821dp w821dp h821dp 442dpi lrg hdr widecg port night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2268, 2440) mAppBounds=Rect(0, 126 - 2268, 2395) mMaxBounds=Rect(0, 0 - 2268, 2440) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} as.2 s.544 fontWeightAdjustment=0mThemeChanged= 0, mThemeChangedFlags= 0, mFlipFont= 0, mScenario= 0, mAccessibleChanged= -1, mUxIconConfig= 4b151214500121, mMaterialColor= 0, mUserId= 0, mFontUserId= 0, mFontVariationSettings= 1226, mFoldingAngle = -1.0, mIconPackName= , mDarkModeBackgroundMaxL= 0.0, mDarkModeDialogBgMaxL= 27.0, mDarkModeForegroundMinL= 100.0, mOplusConfigType= 1, mOplusChangedConfigs= 0, OpSans= -1, mBurmeseFontFlag= 2, mFlag= 0, mExtraFlag= 0, mFlexibleActivitySuitable= -1, mPuttDisplayFlag= -1}
+          mOverrideConfig={1.0 ?mcc??mnc [en_CH] ldltr sw821dp w821dp h821dp 442dpi lrg hdr widecg port night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2268, 2440) mAppBounds=Rect(0, 126 - 2268, 2395) mMaxBounds=Rect(0, 0 - 2268, 2440) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=home mAlwaysOnTop=undefined mRotation=ROTATION_0} as.2 s.3 fontWeightAdjustment=0mThemeChanged= 0, mThemeChangedFlags= 0, mFlipFont= 0, mScenario= 0, mAccessibleChanged= -1, mUxIconConfig= 4b151214500121, mMaterialColor= 0, mUserId= 0, mFontUserId= 0, mFontVariationSettings= 1226, mFoldingAngle = -1.0, mIconPackName= , mDarkModeBackgroundMaxL= 0.0, mDarkModeDialogBgMaxL= 27.0, mDarkModeForegroundMinL= 100.0, mOplusConfigType= 1, mOplusChangedConfigs= 0, OpSans= -1, mBurmeseFontFlag= 2, mFlag= 0, mExtraFlag= 0, mFlexibleActivitySuitable= -1, mPuttDisplayFlag= -1}
+        mLastReportedActivityWindowInfo=ActivityWindowInfo{isEmbedded=false, taskBounds=Rect(0, 0 - 2268, 2440), taskFragmentBounds=Rect(0, 0 - 2268, 2440)}
+        CurrentConfiguration={1.0 ?mcc??mnc [en_CH] ldltr sw821dp w821dp h821dp 442dpi lrg hdr widecg port night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2268, 2440) mAppBounds=Rect(0, 126 - 2268, 2395) mMaxBounds=Rect(0, 0 - 2268, 2440) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=home mAlwaysOnTop=undefined mRotation=ROTATION_0} as.2 s.3 fontWeightAdjustment=0mThemeChanged= 0, mThemeChangedFlags= 0, mFlipFont= 0, mScenario= 0, mAccessibleChanged= -1, mUxIconConfig= 4b151214500121, mMaterialColor= 0, mUserId= 0, mFontUserId= 0, mFontVariationSettings= 1226, mFoldingAngle = -1.0, mIconPackName= , mDarkModeBackgroundMaxL= 0.0, mDarkModeDialogBgMaxL= 27.0, mDarkModeForegroundMinL= 100.0, mOplusConfigType= 1, mOplusChangedConfigs= 0, OpSans= -1, mBurmeseFontFlag= 2, mFlag= 0, mExtraFlag= 0, mFlexibleActivitySuitable= -1, mPuttDisplayFlag= -1}
+        RequestedOverrideConfiguration={0.0 ?mcc??mnc ?localeList ?layoutDir ?swdp ?wdp ?hdp ?density ?lsize ?long ?ldr ?wideColorGamut ?orien ?uimode night ?touch ?keyb/?/? ?nav/? winConfig={ mBounds=Rect(0, 0 - 0, 0) mAppBounds=null mMaxBounds=Rect(0, 0 - 0, 0) mDisplayRotation=undefined mWindowingMode=undefined mActivityType=home mAlwaysOnTop=undefined mRotation=undefined} ?fontWeightAdjustmentmThemeChanged= 0, mThemeChangedFlags= 0, mFlipFont= 0, mScenario= -1, mAccessibleChanged= 0, mUxIconConfig= 0, mMaterialColor= ffffffffffffffff, mUserId= -1, mFontUserId= -1, mFontVariationSettings= ffffffff, mFoldingAngle = -1.0, mIconPackName= , mDarkModeBackgroundMaxL= -1.0, mDarkModeDialogBgMaxL= -1.0, mDarkModeForegroundMinL= -1.0, mOplusConfigType= 0, mOplusChangedConfigs= 0, OpSans= -1, mBurmeseFontFlag= -1, mFlag= 0, mExtraFlag= 0, mFlexibleActivitySuitable= -1, mPuttDisplayFlag= -1}
+        ResolvedOverrideConfiguration={0.0 ?mcc??mnc ?localeList ?layoutDir sw821dp w821dp h821dp ?density ?lsize ?long ?ldr ?wideColorGamut port ?uimode night ?touch ?keyb/?/? ?nav/? winConfig={ mBounds=Rect(0, 0 - 0, 0) mAppBounds=Rect(0, 126 - 2268, 2395) mMaxBounds=Rect(0, 0 - 0, 0) mDisplayRotation=undefined mWindowingMode=undefined mActivityType=home mAlwaysOnTop=undefined mRotation=undefined} s.3 ?fontWeightAdjustmentmThemeChanged= 0, mThemeChangedFlags= 0, mFlipFont= 0, mScenario= -1, mAccessibleChanged= 0, mUxIconConfig= 0, mMaterialColor= ffffffffffffffff, mUserId= -1, mFontUserId= -1, mFontVariationSettings= ffffffff, mFoldingAngle = -1.0, mIconPackName= , mDarkModeBackgroundMaxL= -1.0, mDarkModeDialogBgMaxL= -1.0, mDarkModeForegroundMinL= -1.0, mOplusConfigType= 0, mOplusChangedConfigs= 0, OpSans= -1, mBurmeseFontFlag= -1, mFlag= 0, mExtraFlag= 0, mFlexibleActivitySuitable= -1, mPuttDisplayFlag= -1}
+        taskDescription: label="null" icon=null iconResource=/0 iconFilename=null primaryColor=ff212121
+          backgroundColor=ff303030 statusBarColor=0 navigationBarColor=0
+         backgroundColorFloating=ff424242
+        launchFailed=false launchCount=0 lastLaunchTime=-30s171ms
+        mHaveState=true mIcicle=Bundle[mParcelledData.dataSize=648]
+        state=STOPPED delayedResume=false finishing=false
+        keysPaused=false inHistory=true idle=true
+        occludesParent=true mNoDisplay=false immersive=false launchMode=2
+        mActivityType=home
+        isVisibleRequested() =false
+        windows=[Window{5c4652f u0 com.powos.app/andro.marchy.HomeShell}]
+        windowType=2
+        providesOrientation=true
+        mOccludesParent=true
+        overrideOrientation=SCREEN_ORIENTATION_UNSPECIFIED
+        requestedOrientation=SCREEN_ORIENTATION_UNSPECIFIED
+        mVisibleRequested=false mVisible=false mClientVisible=false reportedDrawn=false reportedVisible=false
+        mAppStopped=true
+        mNumInterestingWindows=1 mNumDrawnWindows=1 allDrawn=false)
+        nowVisible=false lastVisibleTime=-16s128ms
+        resizeMode=RESIZE_MODE_RESIZEABLE
+        mLastReportedMultiWindowMode=false mLastReportedPictureInPictureMode=false
+        supportsSizeChanges=SIZE_CHANGES_UNSUPPORTED_METADATA
+        configChanges=0x8001ff3
+        neverSandboxDisplayApis=false
+        alwaysSandboxDisplayApis=false
+        isTransparentPolicyRunning=false
+        areBoundsLetterboxed=false
+        isLetterboxRunning=false
+        mRootLockActivity=false
+        mShowWhenLocked=false
+        mLaunchedFromMultiSearch=false
+
+  * Task{d938e85 #2330 type=standard A=10359:com.powos.app U=0 visible=false visibleRequested=false mode=fullscreen translucent=true sz=1}
+    mLastPausedActivity: ActivityRecord{206885103 u0 com.powos.app/andro.marchy.MainActivity t2330}
+    mLastNonFullscreenBounds=Rect(565, 249 - 1703, 2271)
+    isSleeping=true
+    * Hist  #0: ActivityRecord{206885103 u0 com.powos.app/andro.marchy.MainActivity t2330}
+      packageName=com.powos.app processName=com.powos.app
+      launchedFromUid=10359 launchedFromPackage=com.powos.app launchedFromFeature=null userId=0
+      app=ProcessRecord{9fbe17b 30906:com.powos.app/u0a359}
+      Intent { flg=0x10000000 xflg=0x4 cmp=com.powos.app/andro.marchy.MainActivity mCallingUid=10359 }
+      rootOfTask=true task=Task{d938e85 #2330 type=standard A=10359:com.powos.app}
+      taskAffinity=10359:com.powos.app
+      mActivityComponent=com.powos.app/andro.marchy.MainActivity
+      baseDir=/data/app/~~NRy8IlMZeGmdHP-fc_iRwA==/com.powos.app-oQtV8ryhfozQhTsv-ejKTw==/base.apk
+      dataDir=/data/user/0/com.powos.app
+      stateNotNeeded=false componentSpecified=true mActivityType=standard
+      compat={442dpi always-compat} theme=0x1030007
+      mLastReportedConfigurations:
+        mGlobalConfig={1.0 ?mcc??mnc [en_CH] ldltr sw821dp w821dp h821dp 442dpi lrg hdr widecg port night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2268, 2440) mAppBounds=Rect(0, 126 - 2268, 2395) mMaxBounds=Rect(0, 0 - 2268, 2440) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} as.2 s.544 fontWeightAdjustment=0mThemeChanged= 0, mThemeChangedFlags= 0, mFlipFont= 0, mScenario= 0, mAccessibleChanged= -1, mUxIconConfig= 4b151214500121, mMaterialColor= 0, mUserId= 0, mFontUserId= 0, mFontVariationSettings= 1226, mFoldingAngle = -1.0, mIconPackName= , mDarkModeBackgroundMaxL= 0.0, mDarkModeDialogBgMaxL= 27.0, mDarkModeForegroundMinL= 100.0, mOplusConfigType= 1, mOplusChangedConfigs= 0, OpSans= -1, mBurmeseFontFlag= 2, mFlag= 0, mExtraFlag= 0, mFlexibleActivitySuitable= -1, mPuttDisplayFlag= -1}
+        mOverrideConfig={1.0 ?mcc??mnc [en_CH] ldltr sw821dp w821dp h821dp 442dpi lrg hdr widecg port night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2268, 2440) mAppBounds=Rect(0, 126 - 2268, 2395) mMaxBounds=Rect(0, 0 - 2268, 2440) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} as.2 s.2 fontWeightAdjustment=0mThemeChanged= 0, mThemeChangedFlags= 0, mFlipFont= 0, mScenario= 0, mAccessibleChanged= -1, mUxIconConfig= 4b151214500121, mMaterialColor= 0, mUserId= 0, mFontUserId= 0, mFontVariationSettings= 1226, mFoldingAngle = -1.0, mIconPackName= , mDarkModeBackgroundMaxL= 0.0, mDarkModeDialogBgMaxL= 27.0, mDarkModeForegroundMinL= 100.0, mOplusConfigType= 1, mOplusChangedConfigs= 0, OpSans= -1, mBurmeseFontFlag= 2, mFlag= 0, mExtraFlag= 0, mFlexibleActivitySuitable= -1, mPuttDisplayFlag= -1}
+      mLastReportedActivityWindowInfo=ActivityWindowInfo{isEmbedded=false, taskBounds=Rect(0, 0 - 2268, 2440), taskFragmentBounds=Rect(0, 0 - 2268, 2440)}
+      CurrentConfiguration={1.0 ?mcc??mnc [en_CH] ldltr sw821dp w821dp h821dp 442dpi lrg hdr widecg port night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2268, 2440) mAppBounds=Rect(0, 126 - 2268, 2395) mMaxBounds=Rect(0, 0 - 2268, 2440) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} as.2 s.2 fontWeightAdjustment=0mThemeChanged= 0, mThemeChangedFlags= 0, mFlipFont= 0, mScenario= 0, mAccessibleChanged= -1, mUxIconConfig= 4b151214500121, mMaterialColor= 0, mUserId= 0, mFontUserId= 0, mFontVariationSettings= 1226, mFoldingAngle = -1.0, mIconPackName= , mDarkModeBackgroundMaxL= 0.0, mDarkModeDialogBgMaxL= 27.0, mDarkModeForegroundMinL= 100.0, mOplusConfigType= 1, mOplusChangedConfigs= 0, OpSans= -1, mBurmeseFontFlag= 2, mFlag= 0, mExtraFlag= 0, mFlexibleActivitySuitable= -1, mPuttDisplayFlag= -1}
+      RequestedOverrideConfiguration={0.0 ?mcc??mnc ?localeList ?layoutDir ?swdp ?wdp ?hdp ?density ?lsize ?long ?ldr ?wideColorGamut ?orien ?uimode night ?touch ?keyb/?/? ?nav/? winConfig={ mBounds=Rect(0, 0 - 0, 0) mAppBounds=null mMaxBounds=Rect(0, 0 - 0, 0) mDisplayRotation=undefined mWindowingMode=undefined mActivityType=standard mAlwaysOnTop=undefined mRotation=undefined} ?fontWeightAdjustmentmThemeChanged= 0, mThemeChangedFlags= 0, mFlipFont= 0, mScenario= -1, mAccessibleChanged= 0, mUxIconConfig= 0, mMaterialColor= ffffffffffffffff, mUserId= -1, mFontUserId= -1, mFontVariationSettings= ffffffff, mFoldingAngle = -1.0, mIconPackName= , mDarkModeBackgroundMaxL= -1.0, mDarkModeDialogBgMaxL= -1.0, mDarkModeForegroundMinL= -1.0, mOplusConfigType= 0, mOplusChangedConfigs= 0, OpSans= -1, mBurmeseFontFlag= -1, mFlag= 0, mExtraFlag= 0, mFlexibleActivitySuitable= -1, mPuttDisplayFlag= -1}
+      ResolvedOverrideConfiguration={0.0 ?mcc??mnc ?localeList ?layoutDir sw821dp w821dp h821dp ?density ?lsize ?long ?ldr ?wideColorGamut port ?uimode night ?touch ?keyb/?/? ?nav/? winConfig={ mBounds=Rect(0, 0 - 0, 0) mAppBounds=Rect(0, 126 - 2268, 2395) mMaxBounds=Rect(0, 0 - 0, 0) mDisplayRotation=undefined mWindowingMode=undefined mActivityType=undefined mAlwaysOnTop=undefined mRotation=undefined} s.2 ?fontWeightAdjustmentmThemeChanged= 0, mThemeChangedFlags= 0, mFlipFont= 0, mScenario= -1, mAccessibleChanged= 0, mUxIconConfig= 0, mMaterialColor= ffffffffffffffff, mUserId= -1, mFontUserId= -1, mFontVariationSettings= ffffffff, mFoldingAngle = -1.0, mIconPackName= , mDarkModeBackgroundMaxL= -1.0, mDarkModeDialogBgMaxL= -1.0, mDarkModeForegroundMinL= -1.0, mOplusConfigType= 0, mOplusChangedConfigs= 0, OpSans= -1, mBurmeseFontFlag= -1, mFlag= 0, mExtraFlag= 0, mFlexibleActivitySuitable= -1, mPuttDisplayFlag= -1}
+      taskDescription: label="null" icon=null iconResource=/0 iconFilename=null primaryColor=ff222222
+        backgroundColor=ff000000 statusBarColor=ff000000 navigationBarColor=0
+       backgroundColorFloating=ff000000
+      launchFailed=false launchCount=0 lastLaunchTime=-23s201ms
+      mHaveState=true mIcicle=Bundle[mParcelledData.dataSize=648]
+      state=STOPPED delayedResume=false finishing=false
+      keysPaused=false inHistory=true idle=true
+      occludesParent=true mNoDisplay=false immersive=false launchMode=2
+      mActivityType=standard
+      isVisibleRequested() =false
+      windows=[Window{78bec89 u0 com.powos.app/andro.marchy.MainActivity}]
+      windowType=2
+      providesOrientation=true
+      mOccludesParent=true
+      overrideOrientation=SCREEN_ORIENTATION_UNSPECIFIED
+      requestedOrientation=SCREEN_ORIENTATION_UNSPECIFIED
+      mVisibleRequested=false mVisible=false mClientVisible=false reportedDrawn=false reportedVisible=false
+      mAppStopped=true
+      mNumInterestingWindows=1 mNumDrawnWindows=1 allDrawn=false)
+      nowVisible=false lastVisibleTime=-22s479ms
+      resizeMode=RESIZE_MODE_RESIZEABLE
+      mLastReportedMultiWindowMode=false mLastReportedPictureInPictureMode=false
+      supportsPictureInPicture=true
+      supportsEnterPipOnTaskSwitch: false
+      mPauseSchedulePendingForPip=false
+      supportsSizeChanges=SIZE_CHANGES_UNSUPPORTED_METADATA
+      configChanges=0xda3
+      neverSandboxDisplayApis=false
+      alwaysSandboxDisplayApis=false
+      isTransparentPolicyRunning=false
+      areBoundsLetterboxed=false
+      isLetterboxRunning=false
+      mRootLockActivity=false
+      mShowWhenLocked=false
+      allowRestrictedResizability() := true 
+      mLaunchedFromMultiSearch=false
+
+  * Task{f51a18e #3 type=undefined U=0 visible=false visibleRequested=false mode=fullscreen translucent=true sz=2}
+    mCreatedByOrganizer=true
+    * Task{bf45466 #5 type=undefined U=0 rootTaskId=3 visible=false visibleRequested=false mode=multi-window translucent=true sz=0}
+      mBounds=Rect(2268, 0 - 3402, 2440)
+      mCreatedByOrganizer=true
+      isSleeping=true
+    * Task{b5a945 #4 type=undefined U=0 rootTaskId=3 visible=false visibleRequested=false mode=multi-window translucent=true sz=0}
+      mCreatedByOrganizer=true
+      isSleeping=true
+
+  Resumed activities in task display areas (from top to bottom):
+    Resumed: ActivityRecord{246898476 u0 com.powos.app/dev.omalauncher.shell.PowosLockActivity t2332}
+
+  ResumedActivity: ActivityRecord{246898476 u0 com.powos.app/dev.omalauncher.shell.PowosLockActivity t2332}
+
+ActivityTaskSupervisor state:
+  topDisplayFocusedRootTask=Task{10ac1fb #2332 type=standard A=10359:.lock}
+  Display: mDisplayId=0 (organized)
+    init=2268x2440 520dpi mMinSizeOfResizeableTaskDp=50 base=2268x2440 442dpi cur=2268x2440 app=2268x2440 rng=2268x2268-2440x2440
+mIsDensityForced=true
+    deferred=false mLayoutNeeded=false
+  mLastOrientationSource=WindowedMagnification:0:64@125262431
+  deepestLastOrientationSource=Window{23a68a8 u0 NotificationShade}
+  overrideConfig={1.0 ?mcc??mnc [en_CH] ldltr sw821dp w821dp h883dp 442dpi lrg hdr widecg port night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2268, 2440) mAppBounds=Rect(0, 0 - 2268, 2440) mMaxBounds=Rect(0, 0 - 2268, 2440) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} as.2 s.410 fontWeightAdjustment=0mThemeChanged= 0, mThemeChangedFlags= 0, mFlipFont= 0, mScenario= 0, mAccessibleChanged= -1, mUxIconConfig= 4b151214500121, mMaterialColor= 0, mUserId= 0, mFontUserId= 0, mFontVariationSettings= 1226, mFoldingAngle = -1.0, mIconPackName= , mDarkModeBackgroundMaxL= 0.0, mDarkModeDialogBgMaxL= 27.0, mDarkModeForegroundMinL= 100.0, mOplusConfigType= 1, mOplusChangedConfigs= 0, OpSans= -1, mBurmeseFontFlag= 2, mFlag= 0, mExtraFlag= 0, mFlexibleActivitySuitable= -1, mPuttDisplayFlag= -1}
+  ignoreOrientationRequest=true
+  mLayoutSeq=1354
+  mCurrentFocus=Window{23a68a8 u0 NotificationShade}
+  mFocusedApp=ActivityRecord{246898476 u0 com.powos.app/dev.omalauncher.shell.PowosLockActivity t2332}
+
+  mHoldScreenWindow=null
+  mObscuringWindow=Window{dce8957 u0 com.android.wallpaper.livepicker.service.video.op.FoldN3OpBlueWallpaper}
+  mLastWakeLockHoldingWindow=null
+  mLastWakeLockObscuringWindow=Window{dce8957 u0 com.android.wallpaper.livepicker.service.video.op.FoldN3OpBlueWallpaper}
+
+  displayId=0
+  mWallpaperTarget=Window{23a68a8 u0 NotificationShade}
+  mLastWallpaperZoomOut=1.0
+  token WallpaperWindowToken{989c42e showWhenLocked=true}:
+    mWallpaperX=NA
+    mWallpaperY=NA
+    mWallpaperXStep=NA
+    mWallpaperYStep=NA
+    mWallpaperDisplayOffsetX=NA
+    mWallpaperDisplayOffsetY=NA
+
+  mSystemGestureExclusion=SkRegion()
+
+  Display areas in top down Z order:
+    * Leaf:100:100
+    * HideDisplayCutout:65:99
+      * OneHanded:67:99
+        * AppZoomOut:67:99
+          * Leaf:67:99
+      * AppZoomOut:66:66
+        * Leaf:66:66
+      * OneHanded:65:65
+        * AppZoomOut:65:65
+          * Leaf:65:65
+    * WindowedMagnification:0:64
+      * HideDisplayCutout:58:64
+        * OneHanded:58:64
+          * AppZoomOut:58:64
+            * Leaf:58:64
+      * Leaf:56:57
+      * HideDisplayCutout:18:55
+        * OneHanded:18:55
+          * Leaf:55:55
+          * AppZoomOut:20:54
+            * Leaf:20:54
+          * Leaf:19:19
+          * AppZoomOut:18:18
+            * Leaf:18:18
+      * OneHanded:17:17
+        * Leaf:17:17
+      * HideDisplayCutout:16:16
+        * OneHanded:16:16
+          * AppZoomOut:16:16
+            * Leaf:16:16
+      * OneHanded:15:15
+        * Leaf:15:15
+      * HideDisplayCutout:0:14
+        * OneHanded:0:14
+          * AppZoomOut:2:14
+            * ImePlaceholder:13:14
+              * ImeContainer
+            * Leaf:3:12
+            * DefaultTaskDisplayArea (organized)
+          * Leaf:1:1
+          * AppZoomOut:0:0
+            * Leaf:0:0
+
+  Task display areas in top down Z order:
+    TaskDisplayArea DefaultTaskDisplayArea
+      overrideConfig={0.0 ?mcc??mnc ?localeList ?layoutDir ?swdp ?wdp ?hdp ?density ?lsize ?long ?ldr ?wideColorGamut ?orien ?uimode ?night ?touch ?keyb/?/? ?nav/? winConfig={ mBounds=Rect(0, 0 - 0, 0) mAppBounds=null mMaxBounds=Rect(0, 0 - 0, 0) mDisplayRotation=undefined mWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=undefined} ?fontWeightAdjustmentmThemeChanged= 0, mThemeChangedFlags= 0, mFlipFont= 0, mScenario= -1, mAccessibleChanged= 0, mUxIconConfig= 0, mMaterialColor= ffffffffffffffff, mUserId= -1, mFontUserId= -1, mFontVariationSettings= ffffffff, mFoldingAngle = -1.0, mIconPackName= , mDarkModeBackgroundMaxL= -1.0, mDarkModeDialogBgMaxL= -1.0, mDarkModeForegroundMinL= -1.0, mOplusConfigType= 0, mOplusChangedConfigs= 0, OpSans= -1, mBurmeseFontFlag= -1, mFlag= 0, mExtraFlag= 0, mFlexibleActivitySuitable= -1, mPuttDisplayFlag= -1}
+      mPreferredTopFocusableRootTask=Task{10ac1fb #2332 type=standard A=10359:.lock}
+      mLastFocusedRootTask=Task{10ac1fb #2332 type=standard A=10359:.lock}
+      Application tokens in top down Z order:
+      * Task{10ac1fb #2332 type=standard A=10359:.lock U=0 visible=true visibleRequested=false mode=fullscreen translucent=false sz=1}
+        bounds=[0,0][2268,2440]
+        * ActivityRecord{246898476 u0 com.powos.app/dev.omalauncher.shell.PowosLockActivity t2332}
+      * Task{8f9709d #1 type=home U=0 visible=false visibleRequested=false mode=fullscreen translucent=true sz=1}
+        bounds=[0,0][2268,2440]
+        * Task{6afbd8c #2329 type=undefined A=10359:com.powos.app.shell U=0 rootTaskId=1 visible=false visibleRequested=false mode=fullscreen translucent=true sz=1}
+          bounds=[0,0][2268,2440]
+          * ActivityRecord{126599390 u0 com.powos.app/andro.marchy.HomeShell t2329}
+      * Task{d938e85 #2330 type=standard A=10359:com.powos.app U=0 visible=false visibleRequested=false mode=fullscreen translucent=true sz=1}
+        bounds=[0,0][2268,2440]
+        * ActivityRecord{206885103 u0 com.powos.app/andro.marchy.MainActivity t2330}
+      * Task{f51a18e #3 type=undefined U=0 visible=false visibleRequested=false mode=fullscreen translucent=true sz=2}
+        bounds=[0,0][2268,2440]
+        * Task{bf45466 #5 type=undefined U=0 rootTaskId=3 visible=false visibleRequested=false mode=multi-window translucent=true sz=0}
+          bounds=[2268,0][3402,2440]
+        * Task{b5a945 #4 type=undefined U=0 rootTaskId=3 visible=false visibleRequested=false mode=multi-window translucent=true sz=0}
+          bounds=[0,0][2268,2440]
+
+  rootHomeTask=Task=1
+
+  PinnedTaskController
+    mIsImeShowing=false
+    mImeHeight=0
+    mMinAspectRatio=0.41841003
+    mMaxAspectRatio=2.39
+
+  DisplayFrames w=2268 h=2440 r=0
+
+  DisplayPolicy
+    mCarDockEnablesAccelerometer=true mDeskDockEnablesAccelerometer=true
+    mDockMode=EXTRA_DOCK_STATE_UNDOCKED mLidState=LID_ABSENT
+    mAwake=false mScreenOnEarly=true mScreenOnFully=true
+    mKeyguardDrawComplete=true mWindowManagerDrawComplete=true
+    mHdmiPlugged=false
+ mPersistentVrModeEnabled=false
+    mLastBehavior=SHOW_TRANSIENT_BARS_BY_SWIPE
+    mShowingDream=false mDreamingLockscreen=false
+    mStatusBar=Window{9092f69 u0 StatusBar}
+    mExpandedPanel=Window{23a68a8 u0 NotificationShade}
+    isKeyguardShowing=true
+    mNavigationBar=Window{ebd7a79 u0 NavigationBar_displayId_0}
+    mNavBarOpacityMode=2
+    mNavigationBarCanMove=false
+    mHasBottomNavigationBar=true
+    mLeftGestureHost=Window{ebd7a79 u0 NavigationBar_displayId_0}
+    mTopGestureHost=Window{9092f69 u0 StatusBar}
+    mRightGestureHost=Window{ebd7a79 u0 NavigationBar_displayId_0}
+    mBottomGestureHost=Window{ebd7a79 u0 NavigationBar_displayId_0}
+    mFocusedWindow=Window{23a68a8 u0 NotificationShade}
+    mLastStatusBarAppearanceRegions=
+    mLastLetterboxDetails=
+    mTopIsFullscreen=false
+    mImeInsetsConsumed=false
+    mForceShowNavigationBarEnabled=false mAllowLockscreenWhenOn=false
+    mRemoteInsetsControllerControlsSystemBars=false
+    mDecorInsetsInfo:
+      ROTATION_0={nonDecorInsets=[0,0][0,0], overrideNonDecorInsets=[0,126][0,45], configInsets=[0,0][0,0], overrideConfigInsets=[0,126][0,45], nonDecorFrame=[0,0][2268,2440], overrideNonDecorFrame=[0,126][2268,2395], configFrame=[0,0][2268,2440], overrideConfigFrame=[0,126][2268,2395]}
+      ROTATION_90={nonDecorInsets=[0,0][0,0], overrideNonDecorInsets=[0,0][0,45], configInsets=[0,0][0,0], overrideConfigInsets=[0,0][0,45], nonDecorFrame=[0,0][2440,2268], overrideNonDecorFrame=[0,0][2440,2223], configFrame=[0,0][2440,2268], overrideConfigFrame=[0,0][2440,2223]}
+      ROTATION_180={nonDecorInsets=[0,0][0,0], overrideNonDecorInsets=[0,0][0,171], configInsets=[0,0][0,0], overrideConfigInsets=[0,0][0,171], nonDecorFrame=[0,0][2268,2440], overrideNonDecorFrame=[0,0][2268,2269], configFrame=[0,0][2268,2440], overrideConfigFrame=[0,0][2268,2269]}
+      ROTATION_270={nonDecorInsets=[0,0][0,0], overrideNonDecorInsets=[0,0][0,45], configInsets=[0,0][0,0], overrideConfigInsets=[0,0][0,45], nonDecorFrame=[0,0][2440,2268], overrideNonDecorFrame=[0,0][2440,2223], configFrame=[0,0][2440,2268], overrideConfigFrame=[0,0][2440,2223]}
+    mCachedDecorInsets:
+      ROTATION_0={nonDecorInsets=[0,0][0,0], overrideNonDecorInsets=[0,126][0,45], configInsets=[0,0][0,0], overrideConfigInsets=[0,126][0,45], nonDecorFrame=[0,0][1116,2484], overrideNonDecorFrame=[0,126][1116,2439], configFrame=[0,0][1116,2484], overrideConfigFrame=[0,126][1116,2439]}
+      ROTATION_90={nonDecorInsets=[0,0][0,0], overrideNonDecorInsets=[126,0][0,45], configInsets=[0,0][0,0], overrideConfigInsets=[126,126][0,45], nonDecorFrame=[0,0][2484,1116], overrideNonDecorFrame=[126,0][2484,1071], configFrame=[0,0][2484,1116], overrideConfigFrame=[126,126][2484,1071]}
+      ROTATION_180={nonDecorInsets=[0,0][0,0], overrideNonDecorInsets=[0,0][0,171], configInsets=[0,0][0,0], overrideConfigInsets=[0,126][0,171], nonDecorFrame=[0,0][1116,2484], overrideNonDecorFrame=[0,0][1116,2313], configFrame=[0,0][1116,2484], overrideConfigFrame=[0,126][1116,2313]}
+      ROTATION_270={nonDecorInsets=[0,0][0,0], overrideNonDecorInsets=[0,0][126,45], configInsets=[0,0][0,0], overrideConfigInsets=[0,126][126,45], nonDecorFrame=[0,0][2484,1116], overrideNonDecorFrame=[0,0][2358,1071], configFrame=[0,0][2484,1116], overrideConfigFrame=[0,126][2358,1071]}
+    SystemGestures:
+      mDisplayCutoutTouchableRegionSize=33
+      mSwipeStartThreshold=Rect(66, 159 - 66, 66)
+      mSwipeDistanceThreshold=66
+
+  DisplayRotation
+    mCurrentAppOrientation=SCREEN_ORIENTATION_NOSENSOR
+    mLastOrientation=5
+    mRotation=0 mDeferredRotationPauseCount=0
+    mLandscapeRotation=ROTATION_90 mSeascapeRotation=ROTATION_270
+    mPortraitRotation=ROTATION_0 mUpsideDownRotation=ROTATION_180
+    mSupportAutoRotation=true
+    mDemoRotationLock=false
+    mDemoRotation=1
+    hookIsWifiDisplayConnected=false
+    hookGetWifiDisplayRotation()=-1
+    mLockRotationTagList={}
+    isRotationFrozen=false
+    currentUserId=0
+    WindowOrientationListener
+      mEnabled=false
+      mCurrentRotation=ROTATION_0
+      mSensorType=null
+      mSensor={Sensor name="device_orient  Non-wakeup", vendor="oplus", version=1, type=27, maxRange=1.0, resolution=1.0, power=0.001, minDelay=0}
+      mRate=2
+      OrientationSensorJudge
+        mDesiredRotation=-1
+        mProposedRotation=-1
+        mTouching=false
+        mTouchEndedTimestampNanos=-9223372036854775808
+        mLastRotationResolution=0
+
+    mCarDockRotation=-1 mDeskDockRotation=-1
+    mUserRotationMode=USER_ROTATION_FREE mUserRotation=ROTATION_0 mCameraRotationMode=0 mAllowAllRotations=unknown
+    mDemoHdmiRotation=ROTATION_90 mDemoHdmiRotationLock=false mUndockedHdmiRotation=-1
+    mLidOpenRotation=-1
+    mFixedToUserRotation=false
+  FoldController
+    mPauseAutorotationDuringUnfolding=false
+    mShouldDisableRotationSensor=false
+    mShouldIgnoreSensorRotation=false
+    mLastDisplaySwitchTime=0
+    mLastHingeAngleEventTime=0
+    mDeviceState=UNKNOWN
+    getSuggestRotationForBracketMode=-1
+    shouldSuggestEnterBracketMode=-1
+    mUserRotationChanging=false
+    mLastReqUserRotationMode=0
+    mLastReqUserRotation=0
+
+    RotationHistory
+      11-02 22:09:00.447 ROTATION_0 to ROTATION_90
+        source=ActivityRecord{168201555 u0 com.powos.app/andro.marchy.HomeShell t6} SCREEN_ORIENTATION_UNSPECIFIED
+        mode=USER_ROTATION_FREE user=ROTATION_0 sensor=ROTATION_90
+       halfFoldSavedRotation=-1 mInHalfFoldTransition=false mFoldState=UNKNOWN
+       reversionSlots= NOSENSOR false, CAMERA false HALF_FOLD false
+      11-02 22:09:01.049 ROTATION_90 to ROTATION_0
+        source=ActivityRecord{168201555 u0 com.powos.app/andro.marchy.HomeShell t6} SCREEN_ORIENTATION_UNSPECIFIED
+        mode=USER_ROTATION_FREE user=ROTATION_0 sensor=ROTATION_0
+       halfFoldSavedRotation=-1 mInHalfFoldTransition=false mFoldState=UNKNOWN
+       reversionSlots= NOSENSOR false, CAMERA false HALF_FOLD false
+
+
+  WindowInsetsStateController
+    InsetsState
+      mDisplayFrame=Rect(0, 0 - 2268, 2440)
+      mDisplayCutout=DisplayCutout{insets=Rect(0, 126 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0} boundingRect={Bounds=[Rect(0, 0 - 0, 0), Rect(2142, 0 - 2268, 126), Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0)]} cutoutPathParserInfo={CutoutPathParserInfo{displayWidth=2268 displayHeight=2440 physicalDisplayWidth=2268 physicalDisplayHeight=2440 density={3.25} cutoutSpec={M 1008,0 L 1008,126 L 1134,126 L 1134,0 Z} rotation={0} scale={1.0} physicalPixelDisplaySizeRatio={1.0}}} sideOverrides={}}
+      mRoundedCorners=RoundedCorners{[RoundedCorner{position=TopLeft, radius=55, center=Point(55, 55)}, RoundedCorner{position=TopRight, radius=55, center=Point(2213, 55)}, RoundedCorner{position=BottomRight, radius=55, center=Point(2213, 2385)}, RoundedCorner{position=BottomLeft, radius=55, center=Point(55, 2385)}]}
+      mRoundedCornerFrame=Rect(0, 0 - 0, 0)
+      mPrivacyIndicatorBounds=PrivacyIndicatorBounds {static bounds=Rect(1921, 0 - 2142, 126) rotation=0}
+      mDisplayShape=DisplayShape{ spec=1406003047 displayWidth=2268 displayHeight=2440 physicalPixelDisplaySizeRatio=1.0 rotation=0 offsetX=0 offsetY=0 scale=1.0}
+        InsetsSource id=c3e40000 type=statusBars frame=[0,0][2268,126] visible=true flags= sideHint=TOP boundingRects=null
+        InsetsSource id=c3e40005 type=mandatorySystemGestures frame=[0,0][2268,159] visible=true flags= sideHint=TOP boundingRects=null
+        InsetsSource id=c3e40006 type=tappableElement frame=[0,0][2268,126] visible=true flags= sideHint=TOP boundingRects=null
+        InsetsSource id=3 type=ime frame=[0,0][0,0] visible=false flags= sideHint=NONE boundingRects=null
+        InsetsSource id=27 type=displayCutout frame=[0,0][2268,126] visible=true flags= sideHint=TOP boundingRects=null
+        InsetsSource id=6b60001 type=navigationBars frame=[0,2395][2268,2440] visible=false flags=SUPPRESS_SCRIM sideHint=BOTTOM boundingRects=null
+        InsetsSource id=6b60004 type=systemGestures frame=[0,0][82,2440] visible=true flags= sideHint=LEFT boundingRects=null
+        InsetsSource id=6b60005 type=mandatorySystemGestures frame=[0,2352][2268,2440] visible=true flags= sideHint=BOTTOM boundingRects=null
+        InsetsSource id=6b60006 type=tappableElement frame=[0,0][0,0] visible=true flags= sideHint=NONE boundingRects=null
+        InsetsSource id=6b60024 type=systemGestures frame=[2186,0][2268,2440] visible=true flags= sideHint=RIGHT boundingRects=null
+    Control map:
+      com.android.server.wm.DisplayContent$RemoteInsetsControlTarget@5c03248:
+        InsetsSourceControl: {3 mType=ime mSurfacePosition=Point(0, 1714) mInsetsHint=Insets{left=0, top=0, right=0, bottom=770}}
+      Window{23a68a8 u0 NotificationShade}:
+        InsetsSourceControl: {c3e40000 mType=statusBars initiallyVisible mSurfacePosition=Point(0, 0) mInsetsHint=Insets{left=0, top=126, right=0, bottom=0}}
+        InsetsSourceControl: {6b60001 mType=navigationBars mSurfacePosition=Point(0, 2318) mInsetsHint=Insets{left=0, top=0, right=0, bottom=45}}
+    InsetsSourceProviders:
+      InsetsSourceProvider
+        mSource=InsetsSource id=6b60024 type=systemGestures frame=[2186,0][2268,2440] visible=true flags= sideHint=RIGHT boundingRects=null
+        mSourceFrame=Rect(2186, 0 - 2268, 2440)
+        mIsLeashInitialized=false mHasPendingPosition=false
+        mWindowContainer=Window{ebd7a79 u0 NavigationBar_displayId_0}
+      InsetsSourceProvider
+        mSource=InsetsSource id=6b60006 type=tappableElement frame=[0,0][0,0] visible=true flags= sideHint=NONE boundingRects=null
+        mSourceFrame=Rect(0, 0 - 0, 0)
+        mIsLeashInitialized=false mHasPendingPosition=false
+        mWindowContainer=Window{ebd7a79 u0 NavigationBar_displayId_0}
+      InsetsSourceProvider
+        mSource=InsetsSource id=6b60005 type=mandatorySystemGestures frame=[0,2352][2268,2440] visible=true flags= sideHint=BOTTOM boundingRects=null
+        mSourceFrame=Rect(0, 2352 - 2268, 2440)
+        mIsLeashInitialized=false mHasPendingPosition=false
+        mWindowContainer=Window{ebd7a79 u0 NavigationBar_displayId_0}
+      InsetsSourceProvider
+        mSource=InsetsSource id=6b60004 type=systemGestures frame=[0,0][82,2440] visible=true flags= sideHint=LEFT boundingRects=null
+        mSourceFrame=Rect(0, 0 - 82, 2440)
+        mIsLeashInitialized=false mHasPendingPosition=false
+        mWindowContainer=Window{ebd7a79 u0 NavigationBar_displayId_0}
+      InsetsSourceProvider
+        mSource=InsetsSource id=6b60001 type=navigationBars frame=[0,2395][2268,2440] visible=false flags=SUPPRESS_SCRIM sideHint=BOTTOM boundingRects=null
+        mSourceFrame=Rect(0, 2395 - 2268, 2440)
+        mControl=InsetsSourceControl mId=6b60001 mType=navigationBars mLeash=Surface(name=Surface(name=ebd7a79 NavigationBar_displayId_0)/@0x6880f1b - animation-leash of insets_animation)/@0xab4194c mInitiallyVisible=false mSurfacePosition=Point(0, 2318) mInsetsHint=Insets{left=0, top=0, right=0, bottom=45} mSkipAnimationOnce=false mImeStatsToken=null
+        mInsetsHint=Insets{left=0, top=0, right=0, bottom=45}
+        mIsLeashInitialized=true mHasPendingPosition=false
+        mWindowContainer=Window{ebd7a79 u0 NavigationBar_displayId_0}
+        mAdapter=ControlAdapter mCapturedLeash=Surface(name=Surface(name=ebd7a79 NavigationBar_displayId_0)/@0x6880f1b - animation-leash of insets_animation)/@0xab4194c
+        mControlTarget=Window{23a68a8 u0 NotificationShade}
+      ImeInsetsSourceProvider
+        mSource=InsetsSource id=3 type=ime frame=[0,0][0,0] visible=false flags= sideHint=NONE boundingRects=null
+        mSourceFrame=Rect(0, 1714 - 1116, 2484)
+        mControl=InsetsSourceControl mId=3 mType=ime mLeash=Surface(name=Surface(name=fc0203a InputMethod)/@0xdd788e1 - animation-leash of insets_animation)/@0x4d3406b mInitiallyVisible=false mSurfacePosition=Point(0, 1714) mInsetsHint=Insets{left=0, top=0, right=0, bottom=770} mSkipAnimationOnce=false mImeStatsToken=null
+        mInsetsHint=Insets{left=0, top=0, right=0, bottom=770} stale
+        mIsLeashInitialized=true mHasPendingPosition=false
+        mWindowContainer=Window{fc0203a u0 InputMethod}
+        mAdapter=ControlAdapter mCapturedLeash=Surface(name=Surface(name=fc0203a InputMethod)/@0xdd788e1 - animation-leash of insets_animation)/@0x4d3406b
+        mControlTarget=com.android.server.wm.DisplayContent$RemoteInsetsControlTarget@5c03248
+        mImeShowing=false mLastDrawn=false        showImePostLayout not scheduled, mImeRequester=null
+
+      InsetsSourceProvider
+        mSource=InsetsSource id=c3e40006 type=tappableElement frame=[0,0][2268,126] visible=true flags= sideHint=TOP boundingRects=null
+        mSourceFrame=Rect(0, 0 - 2268, 126)
+        mIsLeashInitialized=false mHasPendingPosition=false
+        mWindowContainer=Window{9092f69 u0 StatusBar}
+      InsetsSourceProvider
+        mSource=InsetsSource id=c3e40005 type=mandatorySystemGestures frame=[0,0][2268,159] visible=true flags= sideHint=TOP boundingRects=null
+        mSourceFrame=Rect(0, 0 - 2268, 159)
+        mIsLeashInitialized=false mHasPendingPosition=false
+        mWindowContainer=Window{9092f69 u0 StatusBar}
+      InsetsSourceProvider
+        mSource=InsetsSource id=c3e40000 type=statusBars frame=[0,0][2268,126] visible=true flags= sideHint=TOP boundingRects=null
+        mSourceFrame=Rect(0, 0 - 2268, 126)
+        mControl=InsetsSourceControl mId=c3e40000 mType=statusBars mLeash=Surface(name=Surface(name=9092f69 StatusBar)/@0xfd68691 - animation-leash of insets_animation)/@0x90a2eaa mInitiallyVisible=true mSurfacePosition=Point(0, 0) mInsetsHint=Insets{left=0, top=126, right=0, bottom=0} mSkipAnimationOnce=false mImeStatsToken=null
+        mInsetsHint=Insets{left=0, top=126, right=0, bottom=0}
+        mIsLeashInitialized=true mHasPendingPosition=false
+        mWindowContainer=Window{9092f69 u0 StatusBar}
+        mAdapter=ControlAdapter mCapturedLeash=Surface(name=Surface(name=9092f69 StatusBar)/@0xfd68691 - animation-leash of insets_animation)/@0x90a2eaa
+        mControlTarget=Window{23a68a8 u0 NotificationShade}
+  InsetsPolicy
+    status: WINDOW_STATE_SHOWING
+    nav: WINDOW_STATE_HIDDEN
+
+   mAllSleepTokens:
+    {"keyguard", display 0, acquire at 6298252 (9542 ms ago)}
+    TransitionController:
+        mPlayingTransitions:0
+      mWaitingTransitions:0
+    BLASTSyncEngine:
+       hasPendingSyncSets:false
+       mActiveSyncs.size():0
+  flexibleActivityImeAnimationState=AnimationState{mAnimatingBounds=Rect(0, 0 - 0, 0), mRunningAnimation=null, mState=STATE_UNDEFINED, mAppliedCropY=0}
+  FlexibleTaskController:
+    mLayoutInfoMap:0
+    mFlexibleTasks:
+  DisplayType:1
+  DcCreateStack:CREATE, dc=Display{#0 state=UNKNOWN size=2268x2440 ROTATION_0}, hashCode=41536242, time:2026-11-02 20:56:29, callF:java.lang.Throwable
+	at com.android.server.wm.DisplayContentExtImpl.createDisplayPolicy(DisplayContentExtImpl.java:351)
+	at com.android.server.wm.DisplayContent.<init>(DisplayContent.java:1381)
+	at com.android.server.wm.RootWindowContainer.setWindowManager(RootWindowContainer.java:1402)
+	at com.android.server.wm.ActivityTaskManagerService.setWindowManager(ActivityTaskManagerService.java:1185)
+	at com.android.server.am.ActivityManagerService.setWindowManager(ActivityManagerService.java:2257)
+	at com.android.server.SystemServer.startOtherServices(SystemServer.java:1953)
+	at com.android.server.SystemServer.run(SystemServer.java:1083)
+	at com.android.server.SystemServer.main(SystemServer.java:713)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:613)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:1052)
+
+  KeyguardController:
+    mKeyguardShowing=true
+    mAodShowing=true
+    mKeyguardGoingAway=false
+   KeyguardShowing=true AodShowing=true KeyguardGoingAway=false DismissalRequested=false  Occluded=true DismissingKeyguardActivity=null TurnScreenOnActivity=null at display=0 mTopOccludesActivity=ActivityRecord{246898476 u0 com.powos.app/dev.omalauncher.shell.PowosLockActivity t2332}
+    mDismissalRequested=false
+
+  LockTaskController:
+    mLockTaskModeState=NONE
+    mLockTaskModeTasks=
+    mLockTaskPackages (userId:packages)=
+
+    OplusLockTaskController:
+      mLockDeviceMode=false
+  mCurTaskIdForUser={0=2332}
+  mUserRootTaskInFront={}
+  mVisibilityTransactionDepth=0
+  isHomeRecentsComponent=true
+  mNoHistoryActivities=[]
+
+  TaskOrganizerController:
+      android.window.ITaskOrganizer$Stub$Proxy@e02b429 uid=10262 (active):
+        (fullscreen) Task{8f9709d #1 type=home}
+        (fullscreen) Task{f51a18e #3 type=undefined}
+        (multi-window) Task{b5a945 #4 type=undefined}
+        (multi-window) Task{bf45466 #5 type=undefined}
+        (fullscreen) Task{d938e85 #2330 type=standard A=10359:com.powos.app}
+        (fullscreen) Task{10ac1fb #2332 type=standard A=10359:.lock}
+
+  TaskFragmentOrganizerController:
+    TaskFragmentOrganizerState:
+       mOrganizer:android.window.ITaskFragmentOrganizer$Stub$Proxy@ac163ae
+       mOrganizerPid:4620,mOrganizerUid=1001
+    TaskFragmentOrganizerState:
+       mOrganizer:android.window.ITaskFragmentOrganizer$Stub$Proxy@fd19e5f
+       mOrganizerPid:30893,mOrganizerUid=10175
+    TaskFragmentOrganizerState:
+       mOrganizer:android.window.ITaskFragmentOrganizer$Stub$Proxy@74aa54f
+       mOrganizerPid:17006,mOrganizerUid=10369
+    TaskFragmentOrganizerState:
+       mOrganizer:android.window.ITaskFragmentOrganizer$Stub$Proxy@340a4dc
+       mOrganizerPid:11011,mOrganizerUid=1000
+  VisibleActivityProcess:[]
+  NumNonAppVisibleWindowUidMap:[ 10262:3 10245:1]
+  SleepTokens={-1415261878={"keyguard", display 0, acquire at 6298252 (9543 ms ago)}}
