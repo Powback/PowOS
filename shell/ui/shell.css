@@ -1742,6 +1742,8 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 /* The header's ⋯ (powai.tsx AiHeader): the menu under it at the right, over the chat; a tap outside closes it. */
 .ai-top > .ai-more, .ai-top > .ai-back { flex: none; min-width: 40px; min-height: 36px; justify-content: center; font: inherit; font-size: 20px; line-height: 1; border: 0; background: none; color: var(--color-foreground); }
 .ai-top > .ai-more { margin-left: auto; }
+/* A menu of one is that item (powai.tsx More): its icon in the ⋯'s place, the same box. */
+.ai-more.ai-more-one { display: inline-flex; align-items: center; justify-content: center; }
 .ai-panel { position: relative; }
 .ai-view > .ai-menu-scrim { position: fixed; inset: 0; z-index: 4; max-width: none; margin: 0; }
 .ai-view > .ai-menu {
@@ -1977,7 +1979,8 @@ html[data-mode="assist"] .assist {
 .assist-shot.crop { width: auto; height: auto; max-width: 64px; max-height: 64px; object-fit: contain; }
 .assist-title { font-weight: bold; }
 .assist-sub { flex: 1; font-size: var(--text-small); }
-.assist-open { font: var(--text-small) var(--font-body); color: var(--accent-text); }
+/* Open in PowOS AI: the glass's round soft-fill icon button, centred with the live chip (design wave 5, AO gap 3). */
+.assist-open { flex: none; display: inline-flex; align-items: center; justify-content: center; align-self: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%; background: var(--soft-fill); color: var(--accent-text); }
 .assist-panel .ai-card { overflow-y: auto; min-height: 0; }
 /* Its field is the one pill (bar.tsx Pill, .pill above): no styles of its own. */
 .assist-ask { flex: none; }

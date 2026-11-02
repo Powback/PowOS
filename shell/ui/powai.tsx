@@ -20,13 +20,14 @@ import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { renderItem } from "./chat.tsx";
 import { Queued, Thread, toolLabel } from "./rich.tsx";
 import { askQueued } from "./assistant.ts";
-import { MenuScreen, SCREENS, TABBED, dailyDriver, type AiScreen } from "./aimenu.tsx";
+import { MenuScreen, SCREENS, dailyDriver, menuScreens, type AiScreen } from "./aimenu.tsx";
 import { WorkFeed } from "./aiboard.tsx";
 import { aiAgent } from "../agents.ts";
 import { fleet, workingNow } from "../fleet.ts";
 import { untried } from "./trycard.tsx";
 import { AiSegs, FleetPane, useAgentsInPane } from "./aipanes.tsx";
-import { AiStatus, noteAsked, openChat, OtherProjectsItem } from "./aistatus.tsx";
+import { AiStatus, noteAsked, openChat, OtherProjectsItem, otherProjectsCount } from "./aistatus.tsx";
+import { Icon } from "./icons.tsx";
 import { usePresence } from "./reveal.tsx";
 
 // The board's state, for what reads it from here (perfrec, the gate, the renders): it lives in aiboard.tsx now.
@@ -184,13 +185,32 @@ function stateOf() {
 function Menu({ close, tabs = false, leaving = false, children }: { close: () => void; tabs?: boolean; leaving?: boolean; children?: preact.ComponentChildren }) {
   return (
     <div class={`ai-menu tile ${leaving ? "leaving" : ""}`} role="menu" inert={leaving || undefined}>
-      {SCREENS.filter(([s]) => !tabs || !TABBED.has(s)).map(([s, name]) => (
+      {menuScreens(tabs).map(([s, name]) => (
         <button key={s} type="button" role="menuitem" class="ai-menu-item" onClick={() => ((aiScreen.value = s), close())}>
           {name}
         </button>
       ))}
       {children}
     </div>
+  );
+}
+
+/**
+ * The header's ⋯, or - when its menu would hold one item (unfolded with no other projects: only Friction) - that item
+ * as a direct button in the same place and style (the coordinator's design, 11-02: no menu of one). [n]: the menu's items.
+ */
+function More({ n, menu, setMenu }: { n: number; menu: boolean; setMenu: (on: boolean) => void }) {
+  const only = n === 1 ? menuScreens(true)[0] : null;
+  if (only)
+    return (
+      <button type="button" class="ai-more ai-more-one" aria-label={only[1]} title={only[1]} onClick={() => (aiScreen.value = only[0])}>
+        <Icon name="alertCircleOutline" size={20} />
+      </button>
+    );
+  return (
+    <button type="button" class="ai-more" aria-label="more" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
+      ⋯
+    </button>
   );
 }
 
@@ -261,9 +281,7 @@ function AiHeader({ sub, shown = false, strip = true, title = true }: { sub: AiS
       <header class="ai-top">
         {title && <span class="ai-title">PowOS AI</span>}
         <span class={`ai-state ${busy ? "busy" : ""}`}>{stateOf()}</span>
-        <button type="button" class="ai-more" aria-label="more" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
-          ⋯
-        </button>
+        <More n={menuScreens().length} menu={menu} setMenu={setMenu} />
         {strip && <Strip shown={shown} />}
       </header>
       {menu && <div class="ai-menu-scrim" onClick={() => setMenu(false)} />}
@@ -504,11 +522,9 @@ export function AiView({ shown, cls, pill = true, panes = false }: { shown: bool
 function StatusColumn({ shown, beside = false }: { shown: boolean; beside?: boolean }) {
   const [menu, setMenu] = useState(false);
   const pop = usePresence(menu);
-  const more = (
-    <button type="button" class="ai-more" aria-label="more" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
-      ⋯
-    </button>
-  );
+  // Friction, and folded "Open chat" / unfolded "Other projects (N)" while other projects' agents work.
+  const n = menuScreens(true).length + (beside ? Number(otherProjectsCount() > 0) : 1);
+  const more = <More n={n} menu={menu} setMenu={setMenu} />;
   return (
     <>
       <AiStatus shown={shown} more={more} compose={beside ? null : <FoldedFoot shown={shown} />} mic={pageMic} beside={beside} chat={beside ? null : <AiBody sub={null} shown={shown} />} />

@@ -2795,6 +2795,16 @@ async function aiChatBroken() {
  * Needs you); a fail per miss.
  */
 async function aiChatMenu(page) {
+  // A menu of one is that item (powai.tsx More: unfolded with no other projects, only Friction): a direct button in ⋯'s place.
+  const one = await page.evaluate(() => {
+    const b = document.querySelector(".ai-screen .ai-more.ai-more-one");
+    return b && { label: b.getAttribute("aria-label"), title: b.title, popup: b.hasAttribute("aria-haspopup") };
+  });
+  if (one) {
+    const fails = one.label === "Friction" && one.title === "Friction" && !one.popup ? [] : [`the one-item ⋯ isn't a plain "Friction" button (${JSON.stringify(one)})`];
+    fails.push(...(await page.evaluate(aiMenuFriction, true)));
+    return [...fails, ...(await page.evaluate(aiProgressBesideFails))];
+  }
   const opened = await page.evaluate(async () => {
     document.querySelector(".ai-screen .ai-more")?.click();
     return !!(await window.__gw.until(() => document.querySelector(".ai-screen .ai-menu"), 2000));
@@ -2837,10 +2847,10 @@ function aiMenuOpaqueFails() {
 }
 
 /** ⋯ → Friction opens its own screen; back returns to the chat (no Friction: the menu closed, aiMenuItemFails says). */
-async function aiMenuFriction() {
+async function aiMenuFriction(direct = false) {
   const G = window.__gw;
   const seg = (name) => [...document.querySelectorAll(".ai-screen .ai-seg")].find((b) => b.textContent.trim().startsWith(name));
-  const item = [...document.querySelectorAll(".ai-screen .ai-menu-item")].find((b) => b.textContent.trim() === "Friction");
+  const item = direct ? document.querySelector(".ai-screen .ai-more.ai-more-one") : [...document.querySelectorAll(".ai-screen .ai-menu-item")].find((b) => b.textContent.trim() === "Friction");
   if (!item) {
     document.querySelector(".ai-screen .ai-menu-scrim")?.click();
     return [];

@@ -152,10 +152,13 @@ function WorkingNow({ working }: { working: Worker[] }) {
   );
 }
 
+/** How many agents of other projects are working now: the ⋯ menu's "Other projects (N)" shows only with some. */
+export const otherProjectsCount = () => fleet().working.filter((x) => !isPowOS(x.a)).length;
+
 /** The ⋯ menu's "Other projects (N)" (unfolded): shows or hides other projects' agents under Working now; none: no item. */
 export function OtherProjectsItem({ close }: { close: () => void }) {
   useAgents();
-  const n = fleet().working.filter((x) => !isPowOS(x.a)).length;
+  const n = otherProjectsCount();
   if (!n) return null;
   const on = otherProjects.value;
   return (
