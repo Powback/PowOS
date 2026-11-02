@@ -324,6 +324,8 @@ export interface RecentTask {
    * The card's [id] is the first one's; a tap restores the split (tasks.openSplit), a swipe closes them all.
    */
   split?: SplitSide[];
+  /** How the split divides the screen (SplitDrawer.layout): "2h" side by side, "2v" one over the other (folded). */
+  splitLayout?: "2h" | "2v";
 }
 
 /** One app of a split card ([RecentTask.split]). */
@@ -430,6 +432,14 @@ export interface ChromeState {
   /** A maximised web window's bar merged with the status bar: its title's end / its controls' width (CSS px from each side). */
   mergeLeft?: number;
   mergeRight?: number;
+  /** A centred camera hole's left edge (CSS px; the folded cover screen). */
+  holeLeft?: number;
+  /** The camera's cutout on this screen (CSS px, the strip's own coordinates): folded the cover's, unfolded the inner's. */
+  camera?: { x: number; y: number; width: number; height: number };
+  /** The recording light (StatusChrome.kt RecordingWatcher, AppOps active ops): what's in use - camera, screen capture, mic. */
+  recording?: "camera" | "screen" | "mic" | null;
+  /** The apps using it (package names). */
+  recordingApps?: string[];
 }
 export interface ChromeRegion { action: string; x: number; y: number; width: number; height: number }
 
@@ -1025,8 +1035,11 @@ export interface Bridge {
     slot(rect: { left: number; top: number; width: number; height: number; radius: number }): Promise<void>;
     /** After "recents.end" to the switcher: the first card shows the app's snapshot, its window may go. */
     ready(): Promise<void>;
-    /** The page closed it (a tap beside the cards, Back, Home). */
-    closed(): Promise<void>;
+    /**
+     * The page closed it (a tap beside the cards, Back, Home): home is what's left. [opening]: no - its web window
+     * [opening]'s card was tapped, that window comes back as it was (full screen stays full screen).
+     */
+    closed(opening?: number): Promise<void>;
     /** Whether it's up, over what, with the tasks (a page that just loaded). */
     state(): Promise<{ open: boolean; from: number | null; tasks: RecentTask[] }>;
   };

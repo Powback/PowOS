@@ -32,6 +32,8 @@ const READY_MS = Number(process.env.READY_MS || 8000);
 /** Every puppeteer-side wait (launch, newPage's target wait, goto, waitFor*): its fixed 30 s defaults scaled with the
  * load like READY_MS (f30) - a starved Mac (load ~15 from training runs) timed out before any case ran. */
 const PUPPETEER_MS = Math.max(30000, READY_MS * 2);
+const RUN_MS = Number(process.env.GATE_RUN_MS) || 900000;
+const SCENE_MS = Math.max(Number(process.env.GATE_SCENE_MS) || 90000, PUPPETEER_MS * 2);
 /** Names the startup call that failed: a bare "Timed out after waiting 30000ms" (rxjs, util.js) says nothing (f30). */
 const step = (name, promise) => promise.catch((e) => { e.message = `[${name}] ${e.message}`; throw e; });
 /** After ready: errors this soon after the first render are boot errors too (an effect throwing, a lazy import). */
@@ -227,6 +229,61 @@ async function statusChromeCheck() {
   return fail;
 }
 
+/**
+ * The recording light (ui/chrome.tsx RecordingRing, StatusChrome.kt's AppOps watch): with the camera / mic / screen in
+ * use, a ring sits centred on the camera's cutout on this screen - [hole] the cover's centred punch-hole folded, the
+ * inner screen's top-right one unfolded - in that op's colour; gone when nothing records; a dot without a cutout.
+ */
+async function recordingRingCheck(hole) {
+  const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const base = { kind: "status", battery: 74, network: "wifi", left: 8, camera: hole };
+  const show = async (extra) => { window.__mockEvents.emit("chrome.changed", { ...base, ...extra }); await frame(); };
+  const lit = () => document.querySelector(".status-rec-ring, .status-rec-dot");
+  const colour = (name) => {
+    const el = document.createElement("i");
+    el.style.color = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    document.body.append(el);
+    const c = getComputedStyle(el).color;
+    el.remove();
+    return c;
+  };
+  /** The ring's box [r]: centred on the cutout, round, bigger than it. */
+  const placeFails = (kind, r) => {
+    const cx = hole.x + hole.width / 2, cy = hole.y + hole.height / 2;
+    const off = Math.abs(r.x + r.width / 2 - cx) > 1 || Math.abs(r.y + r.height / 2 - cy) > 1;
+    const small = r.width < Math.max(hole.width, hole.height) + 2 || Math.abs(r.width - r.height) > 0.5;
+    return [
+      off ? `${kind}: ring centred at ${r.x + r.width / 2},${r.y + r.height / 2}, the camera at ${cx},${cy}` : "",
+      small ? `${kind}: ring ${r.width}x${r.height} doesn't go round the ${hole.width}x${hole.height} cutout` : "",
+    ];
+  };
+  /** The ring for [kind]: round the cutout, centred on it, in [token], untouchable, saying who records. */
+  const ringFails = (kind, token) => {
+    const ring = document.querySelector(".status-rec-ring");
+    if (!ring) return [`${kind}: no ring`];
+    for (const a of ring.getAnimations()) a.finish(); // its entry (a spring scale-in): measured where it settles
+    const css = getComputedStyle(ring);
+    return [
+      ...placeFails(kind, ring.getBoundingClientRect()),
+      css.borderTopColor === colour(token) ? "" : `${kind}: ring ${css.borderTopColor}, want ${token} ${colour(token)}`,
+      css.pointerEvents === "none" ? "" : `${kind}: the ring takes touches`,
+      ring.getAttribute("aria-label")?.includes("org.example.rec") ? "" : `${kind}: ring doesn't say who uses it`,
+    ].filter(Boolean);
+  };
+  const fail = [];
+  await show({ recording: null });
+  if (lit()) fail.push("a recording light with nothing in use");
+  for (const [kind, token] of [["camera", "--privacy-camera"], ["mic", "--privacy-mic"], ["screen", "--privacy-screen"]]) {
+    await show({ recording: kind, recordingApps: ["org.example.rec"] });
+    fail.push(...ringFails(kind, token));
+  }
+  await show({ camera: undefined, recording: "mic" });
+  if (document.querySelector(".status-rec-ring") || !document.querySelector(".status-rec-dot")) fail.push("no cutout: want the dot, not a ring");
+  await show({ recording: null });
+  if (lit()) fail.push("the light stayed on after the op stopped");
+  return fail;
+}
+
 /** The modes app.tsx renders (`mode === "x"`), home first: a mode added there is checked without touching this. */
 function modes() {
   const src = fs.readFileSync(path.join(ROOT, "app.tsx"), "utf8");
@@ -304,15 +361,15 @@ async function transpiled(p) {
  * The design-lint probe's runs (dev/design-lint.js): each prints its findings. REPORT-ONLY, except the surfaces in
  * DESIGN_LINT_BLOCKING - their design wave made them clean, so a pop-in or a monospace text there fails the gate
  * (design wave 3: the launcher).
+ * Each is a scene of its own (a thunk, opened when pushed): the 10 opened together and pushed as one scene (11-02) made
+ * one scene of 10 pages - its first pages held their slots till all 10 settled while the last ones queued for a slot,
+ * and the per-scene cap then failed 4 of them as "design-lint-home-folded: scene timeout".
  */
 const DESIGN_LINT = [["home", ""], ["launcher", ""], ["launcher-search", ""], ["menu", ""], ["shade", "?mode=shade"], ["control", "?mode=shade"]];
 const DESIGN_LINT_BLOCKING = new Set(["launcher", "launcher-search"]);
-// Each run its own runs.push: a push ties every page opened since the last one to its scene and frees their slots only
-// when all of them settle - the ten runs in one push held ten slots, and under load (6-9 slots) the runs past the
-// limit waited for slots that only their own end would free: the gate hung after the first six (design wave 3).
-function designLintRuns(browser, runs) {
+function designLintRuns(browser) {
   const sizes = [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]];
-  for (const [label, viewport] of sizes) for (const [surface, query] of DESIGN_LINT) {
+  return sizes.flatMap(([label, viewport]) => DESIGN_LINT.map(([surface, query]) => {
     const name = `design-lint-${surface}-${label}`;
     const probe = async (r) => {
       const out = await r.page.evaluate(async (s) => (await importShim("./dev/design-lint.js")).designLint(s), surface).catch((e) => ({ error: e.message.split("\n")[0] }));
@@ -325,8 +382,8 @@ function designLintRuns(browser, runs) {
         ...(out.mono.count ? [`monospace UI text (§4): ${out.mono.count} - ${JSON.stringify(out.mono.where)}`] : []),
       ];
     };
-    runs.push(open(browser, `${ORIGIN}/index.html${query}`, name, viewport).then((r) => whenReady(r, () => probe(r))));
-  }
+    return () => open(browser, `${ORIGIN}/index.html${query}`, name, viewport).then((r) => whenReady(r, () => probe(r)));
+  }));
 }
 
 async function whenReady(r, check) {
@@ -407,39 +464,104 @@ async function termSessionCheck() {
   return out;
 }
 
-/** In the page: steam (6x3) over fetch (3x3, flush right) on home's first page - a straight stack: ONE clean rectangle
- * (the user's 2026-10-28 "looks ugly af if the widgets arent the same width"), fetch shown 6 wide, outer edges on the
- * row and column lines, the shared side a seam, no inner corner. */
+/** In the page: merged widgets M1-M2 (grid.tsx joins; the user's 2026-10-28 "the widget combiner looks ugly af if the
+ * widgets arent the same width"). An equal-width stack (agents 6x3 over recents 6x3) merges: both .joined, one width,
+ * the faces meet on the row line (one seamless surface, no gutter or seam strip between). An unequal stack (agents 6x3
+ * over recents 3x3 flush right) stays separate: neither .joined, each at its own width, the normal gap between, no seam
+ * piece. */
 async function joinsCheck() {
   const S = await window.__gw.mod("./state.ts");
   const { powos } = await window.__gw.mod("./bridge.ts");
+  const G = window.__gw;
+  const w = Math.min(6, (await powos.home.get()).columns || 6);
+  const half = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--gap")) || 8) / 2;
+  const near = (a, b) => Math.abs(a - b) <= 1;
+  const placed = () => [...document.querySelectorAll(".page:not(.away) .home-tile")];
+  const lay = async (lowerX, lowerW) => {
+    const h = await powos.home.get();
+    for (const i of h.items) await powos.home.remove(i.key);
+    const pg = h.pages[0] ?? 1;
+    await powos.home.addPanel("agents", pg, { x: 0, y: 0, w, h: 3 });
+    await powos.home.addPanel("recents", pg, { x: lowerX, y: 3, w: lowerW, h: 3 });
+    S.page.value = 0;
+    await G.until(() => placed().length === 2 && G.still());
+    await G.steady(() => placed().map((t) => t.querySelector(":scope > .tile")?.getBoundingClientRect().toJSON()));
+    return placed()
+      .map((t) => ({ t, cell: t.getBoundingClientRect(), face: t.querySelector(":scope > .tile").getBoundingClientRect() }))
+      .sort((p, q) => p.cell.top - q.cell.top);
+  };
+  const cls = (x) => x.t.classList.contains("joined");
+  const seam = () => !!document.querySelector(".page:not(.away) .seam");
+  // M1/M2 equal: one surface.
+  const equal = ([A, B]) => [
+    cls(A) && cls(B) ? "" : "equal pair: not merged (no .joined)",
+    near(A.face.left, B.face.left) && near(A.face.right, B.face.right) ? "" : "equal pair: faces not one width",
+    near(A.face.bottom, B.face.top) ? "" : `equal pair: ${Math.round(B.face.top - A.face.bottom)} px between the faces (not one seamless surface)`,
+    seam() ? "equal pair: a seam piece between faces that meet" : "",
+  ];
+  // M1 unequal: separate, each its own width, the normal gap.
+  const unequal = ([A, B]) => [
+    cls(A) || cls(B) ? "unequal pair: merged (.joined) though the edges differ" : "",
+    near(B.face.left, A.face.left) ? "unequal pair: the narrow tile stretched to the wide one's width" : "",
+    near(B.face.top - A.face.bottom, 2 * half) ? "" : `unequal pair: ${Math.round(B.face.top - A.face.bottom)} px between the faces, not the normal gap ${2 * half}`,
+    seam() ? "unequal pair: a seam piece joins them" : "",
+  ];
+  const fails = equal(await lay(0, w));
+  fails.push(...unequal(await lay(w - 3, 3)));
+  return fails.filter(Boolean);
+}
+
+/** In the page: edit-mode widget resize R1-R3 (grid.tsx ResizeHandle, Actions). A widget under another one, selected:
+ * R1 its corner handle, dragged two cells right and one down, resizes it; R2 to whole cells (the drop lands off the
+ * line, the span snaps); R3 its actions pill (remove) stays clear of the widget above. */
+async function editResizeCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const G = window.__gw;
   const h = await powos.home.get();
   for (const i of h.items) await powos.home.remove(i.key);
-  const w = Math.min(6, h.columns || 6);
-  // Home's first page (pages are 1-based; the wide layout maps it to the left half).
   const pg = h.pages[0] ?? 1;
-  await powos.home.addPanel("agents", pg, { x: 0, y: 0, w, h: 3 });
-  await powos.home.addPanel("recents", pg, { x: w - 3, y: 3, w: 3, h: 3 });
+  await powos.home.addPanel("agents", pg, { x: 0, y: 0, w: 4, h: 2 });
+  await powos.home.addPanel("recents", pg, { x: 0, y: 2, w: 2, h: 2 });
   S.page.value = 0;
-  // Both laid out and joined, at rest (the tiles' own moves and the seams after them).
-  const placed = () => [...document.querySelectorAll(".page:not(.away) .home-tile")];
-  await window.__gw.until(() => placed().length === 2 && placed().every((t) => t.classList.contains("joined")) && window.__gw.still());
-  await window.__gw.steady(() => placed().map((t) => t.querySelector(":scope > .tile")?.getBoundingClientRect().toJSON()));
-  const half = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--gap")) || 8) / 2;
-  const tiles = [...document.querySelectorAll(".page:not(.away) .home-tile")];
-  if (tiles.length !== 2) return [`${tiles.length} tiles on the page, not the 2 placed`];
-  const [A, B] = tiles.map((t) => ({ t, cell: t.getBoundingClientRect(), face: t.querySelector(":scope > .tile").getBoundingClientRect() })).sort((p, q) => p.cell.top - q.cell.top);
-  const near = (a, b) => Math.abs(a - b) <= 1;
-  // Outer edges: half a gutter in from the cell box, as a single tile's. The shared side: the faces meet (a seam).
-  const inset = (x) => ["top", "right", "bottom", "left"].filter((k) => !near(Math.abs(x.face[k] - x.cell[k]), half));
-  return [
-    !A.t.classList.contains("joined") || !B.t.classList.contains("joined") ? "the two aren't merged (no .joined)" : "",
-    near(A.face.left, B.face.left) && near(A.face.right, B.face.right) ? "" : `not one width: left edges differ by ${Math.round(A.face.left - B.face.left)} px, right by ${Math.round(A.face.right - B.face.right)} px`,
-    ...inset(A).filter((k) => k !== "bottom").map((k) => `the wide tile's ${k} edge is off its grid line`),
-    ...inset(B).filter((k) => k !== "top").map((k) => `the stacked tile's ${k} edge is off its grid line`),
-    near(A.face.bottom, A.cell.bottom) && near(B.face.top, B.cell.top) && near(A.cell.bottom, B.cell.top) ? "" : `the shared side isn't a seam on the row line (${Math.round(B.face.top - A.face.bottom)} px between the faces)`,
-    document.querySelector(".page:not(.away) .seam.fillet") ? "a rounded inner corner in a straight stack (it should be one rectangle)" : "",
-  ].filter(Boolean);
+  const tiles = () => [...document.querySelectorAll(".page:not(.away) .home-tile")].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+  await G.until(() => tiles().length === 2 && G.still());
+  const key = tiles()[1].dataset.key;
+  S.editing.value = true;
+  S.selected.value = key;
+  const lower = () => document.querySelector(`.home-tile[data-key="${CSS.escape(key)}"]`);
+  await G.until(() => lower()?.querySelector(".resize-handle") && lower()?.querySelector(".tile-actions"));
+  // R3: the pill against the widget above.
+  const pillOver = () => {
+    const above = tiles()[0].querySelector(":scope > .tile").getBoundingClientRect();
+    const pill = lower().querySelector(".tile-actions").getBoundingClientRect();
+    const over = pill.top < above.bottom && pill.bottom > above.top && pill.left < above.right && pill.right > above.left;
+    return over ? `R3: the actions pill covers the widget above (pill top ${Math.round(pill.top)}, widget above ends ${Math.round(above.bottom)})` : "";
+  };
+  // R1/R2: drag the handle ~2.4 cells right and ~1.3 down from the tile's corner.
+  const drag = (cw, ch) => {
+    const hd = lower().querySelector(".resize-handle");
+    const hr = hd.getBoundingClientRect();
+    const ev = (type, x, y, buttons) => hd.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 7, clientX: x, clientY: y, buttons, isPrimary: true }));
+    const [x0, y0] = [hr.left + hr.width / 2, hr.top + hr.height / 2];
+    ev("pointerdown", x0, y0, 1);
+    for (let k = 1; k <= 6; k++) ev("pointermove", x0 + (2.4 * cw * k) / 6, y0 + (1.3 * ch * k) / 6, 1);
+    ev("pointerup", x0 + 2.4 * cw, y0 + 1.3 * ch, 0);
+  };
+  const cellOf = async () => (await powos.home.get()).items.find((i) => i.key === key)?.cell;
+  const fails = [pillOver()];
+  const b0 = lower().getBoundingClientRect();
+  drag(b0.width / 2, b0.height / 2);
+  await G.until(async () => (await cellOf())?.w !== 2);
+  const cell = await cellOf();
+  if (cell?.w !== 4 || cell?.h !== 3) fails.push(`R1/R2: dragged the handle +2.4/+1.3 cells; the widget is ${cell?.w}x${cell?.h}, not 4x3`);
+  await G.until(() => G.still());
+  const b1 = lower()?.getBoundingClientRect();
+  const onCells = b1 && Math.abs(b1.width - 2 * b0.width) <= 2 && Math.abs(b1.height - 1.5 * b0.height) <= 2;
+  if (!onCells) fails.push(`R2: the tile is ${Math.round(b1?.width)}x${Math.round(b1?.height)} px, not on whole cells (${Math.round(2 * b0.width)}x${Math.round(1.5 * b0.height)})`);
+  S.selected.value = null;
+  S.editing.value = false;
+  return fails.filter(Boolean);
 }
 
 /**
@@ -1209,6 +1331,57 @@ async function renderScanCheck() {
   return fails;
 }
 
+/**
+ * In a surface's own page (index.html?mode=shade|pull|lock|recents|assist; ui/renderfollow.ts): the meter's "rs" puts
+ * the render scan's overlay up there too and it outlines that page's re-rendering components; a meter recording says
+ * hello, counts this page's renders and sends them to the bar as {rec, surface, recPart, of, data}; off = no hooks.
+ * Poked by host events that re-render the surface's root (a notification, the switcher's tasks, a pull, ...).
+ */
+async function surfaceRenderScan(surface) {
+  const fails = [], KEYS = ["__r", "diffed", "__c", "__e"], G = window.__gw, E = window.__mockEvents;
+  const options = (await window.importShim("preact")).options;
+  const orig = KEYS.map((k) => options[k]), same = () => KEYS.every((k, i) => options[k] === orig[i]);
+  const R = await G.mod("./ui/renderscan.ts"), O = await G.mod("./ui/renderoverlay.ts"), { powos } = await G.mod("./bridge.ts");
+  const sent = [], pub = powos.perf.publish;
+  powos.perf.publish = async (json) => { sent.push(JSON.parse(json)); };
+  let k = 0;
+  const note = () => ({ available: true, items: [{ key: "gate-rs", app: "gate", title: "Render scan", text: `one ${++k}`, when: 1, icon: null, actions: [] }] });
+  const task = (n) => ({ id: n, label: `App ${n}`, key: `app${n}`, icon: null, snapshot: "" });
+  const poke = {
+    shade: () => [["notifications.changed", note()]], lock: () => [["notifications.changed", note()]],
+    recents: () => [["recents.tasks", { tasks: [task(1), task(2 + (++k % 2))] }]],
+    pull: () => [["pull.begin", { kind: "apps" }], ["pull.drag", { p: 0.3 }], ["pull.drag", { p: 0.7 }], ["pull.end", { open: !!(++k % 2) }]],
+    assist: () => [["assist.live", { on: !!(++k % 2), frames: k }]],
+  }[surface];
+  const pokeAll = async () => { for (const [ev, data] of poke()) { E.emit(ev, data); await G.frames(2); } };
+  const want = (ok, msg) => ok || fails.push(`${surface}: ${msg}`);
+  const mine = (m) => m.rec === 4343 && m.surface === surface;
+  const joined = (parts) => { try { return JSON.parse(parts.map((m) => m.data).join("")); } catch (e) { return { error: String(e) }; } };
+  try {
+    // The follower is imported by app.tsx after the root rendered: wait for its listener (the overlay goes on with it).
+    await G.until(() => { E.emit("perf.meter", { on: true, renders: true }); return O.overlayOn(); }, 3000);
+    if (!O.overlayOn()) return [`${surface}: the meter's rs didn't put the render overlay up on this page`];
+    want(document.querySelectorAll("html > canvas").length === 1, "the overlay's canvas isn't up");
+    await pokeAll();
+    await G.until(() => O.overlayOutlined() > 0, 2000);
+    const live = R.topRenders(50).byCount.reduce((n, r) => n + r.renders, 0);
+    want(live > 0, "no renders counted on this page while the overlay was on");
+    want(O.overlayOutlined() > 0, `the overlay outlined nothing (${live} renders counted)`);
+    E.emit("perf.meter", { on: true, renders: true, rec: 4343 });
+    await G.frames(2);
+    want(sent.some((m) => mine(m) && m.hello), `no hello to the bar at the recording's start: ${JSON.stringify(sent).slice(0, 200)}`);
+    await pokeAll();
+    E.emit("perf.meter", { on: true, renders: false, stop: 4343 });
+    await G.frames(2);
+    const parts = sent.filter((m) => mine(m) && "recPart" in m).sort((a, b) => a.recPart - b.recPart);
+    const rep = parts.length && parts.length === parts[0].of ? joined(parts) : { error: `${parts.length} parts` };
+    want(rep.renders > 0, `the recording's renders didn't come back to the bar with renders counted: ${JSON.stringify(rep).slice(0, 200)}`);
+    want(!O.overlayOn() && !document.querySelector("html > canvas"), "the overlay stayed up after rs went off");
+    want(!R.scanning() && same(), "render scan hooks left in place after the recording and overlay stopped");
+  } finally { powos.perf.publish = pub; }
+  return fails;
+}
+
 async function staleWide(page, to) {
   const isWide = () => page.evaluate(() => !!document.querySelector(".home.wide"));
   const desk = { width: 1280, height: 800 };
@@ -1418,6 +1591,61 @@ async function switcherThumbsCheck() {
 }
 
 /**
+ * Android's native split screen in the switcher (the user, 2026-10-31 03:18: "when two apps are like, docked together...
+ * I don't really see it on the launcher"): the split pair is ONE card - one combined icon (GroupIcon, the dock's DG1 cell's)
+ * holding both apps' icons in the split's layout, and its picture the whole split at each side's share, divided as on
+ * the screen: one over the other folded ("2v"), side by side unfolded ("2h"). Its apps get no cards of their own.
+ */
+async function switcherSplitPairCheck(layout) {
+  const icon = (c) => "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="${c}"/></svg>`);
+  const shot = (c) => "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="90" height="190"><rect width="90" height="190" fill="${c}"/></svg>`);
+  const side = (id, label, c, share) => ({ id, label, icon: icon(c), snapshot: shot(c), share });
+  const split = [side(1201, "Chrome", "#e63", 0.6), side(1202, "Maps", "#3a6", 0.4)];
+  const tasks = [
+    { id: 1201, label: "Chrome | Maps", key: "a:chrome", icon: icon("#e63"), snapshot: shot("#e63"), split, splitLayout: layout },
+    { id: 1203, label: "Clock", key: "a:clock", icon: icon("#36c"), snapshot: shot("#36c") },
+  ];
+  window.__mockEvents.emit("recents.show", { open: true, from: 1201, tasks });
+  await new Promise((ok) => setTimeout(ok, 1500));
+  const cards = [...document.querySelectorAll(".recents .task")];
+  const fails = cards.length === 2 ? [] : [`${cards.length} cards for a split pair and one app, expected 2`];
+  const card = cards.find((c) => c.querySelector(".task-split"));
+  if (card) fails.push(...combinedIconFails(card), ...splitPictureFails(card));
+  else fails.push("no split card");
+  window.__mockEvents.emit("recents.end", { to: "home" });
+  return fails;
+
+  /** [a] then [b] as the split lays them out: one over the other (2v) or side by side (2h). */
+  function inOrder(a, b) {
+    return layout === "2v" ? b.top >= a.bottom - 0.5 : b.left >= a.right - 0.5;
+  }
+
+  /** The card's head: ONE combined tile, both icons inside it, in the split's layout. */
+  function combinedIconFails(card) {
+    const tiles = card.querySelectorAll(".task-head .group-icon");
+    if (tiles.length !== 1) return [`the split card's head has ${tiles.length} combined icons, expected 1`];
+    const tile = tiles[0].getBoundingClientRect();
+    const icons = [...tiles[0].querySelectorAll(".task-icon")].map((e) => e.getBoundingClientRect());
+    if (icons.length !== 2) return [`the combined icon holds ${icons.length} icons, expected 2`];
+    const inside = (r) => r.width > 4 && r.left >= tile.left - 0.5 && r.right <= tile.right + 0.5 && r.top >= tile.top - 0.5 && r.bottom <= tile.bottom + 0.5;
+    const fails = icons.every(inside) ? [] : ["the split's icons aren't inside its one combined tile"];
+    if (!inOrder(icons[0], icons[1])) fails.push(`the combined icon isn't laid out as the split (${layout})`);
+    return fails;
+  }
+
+  /** The card's picture: both sides, divided as on the screen, each at its share (0.6 / 0.4). */
+  function splitPictureFails(card) {
+    const sides = [...card.querySelectorAll(".task-split-side")].map((e) => e.getBoundingClientRect());
+    if (sides.length !== 2) return [`the split's picture has ${sides.length} sides, expected 2`];
+    const [a, b] = sides;
+    const fails = inOrder(a, b) ? [] : [`the split's picture isn't divided as on the screen (${layout})`];
+    const [ea, eb] = layout === "2v" ? [a.height, b.height] : [a.width, b.width];
+    if (Math.abs(ea / (ea + eb) - 0.6) > 0.05) fails.push(`the split's sides aren't at their shares (${Math.round(ea)} / ${Math.round(eb)}, want 0.6 / 0.4)`);
+    return fails;
+  }
+}
+
+/**
  * X1: the home swipe (the host's bottom-edge swipe, NavGesture.kt homePlain -> Switcher.close: "recents.end" to: home)
  * with the switcher up closes it to home with the switcher's own closing animation (collapse: the cards and the scrim
  * fade over its settle, frame by frame - never a jump), and ends on home: no switcher layer left, no app opened.
@@ -1425,9 +1653,14 @@ async function switcherThumbsCheck() {
 async function switcherHomeSwipeCheck(page) {
   const up = await page.evaluate(switcherUpForHomeSwipe);
   if (up.length) return up;
-  const mid = await page.evaluate(homeSwipeMidFrames, 700);
+  const { mid, gap, dur } = await page.evaluate(homeSwipeMidFrames, 700);
   const fails = await page.evaluate(switcherGoneFails);
-  if (mid < 3) fails.unshift(`the home swipe's close jumped: ${mid} frames mid-collapse (the cards' and scrim's fade), expected >= 3`);
+  // A page starved of frames (11-02: the gate's browser at 721 s, a frame every ~150 ms) can't draw 3 mid-collapse
+  // frames of a ~300 ms fade: there the fade is proven by time - a mid frame drawn and the collapse a real animation of
+  // >= 150 ms - not by a frame count the machine took away. A page drawing normally (median frame < 40 ms) still needs 3.
+  const starved = gap >= 40;
+  if (starved ? mid < 1 || dur < 150 : mid < 3)
+    fails.unshift(`the home swipe's close jumped: ${mid} frames mid-collapse (the cards' and scrim's fade; median frame ${Math.round(gap)} ms, fade ${Math.round(dur)} ms), expected >= ${starved ? "1 and a fade >= 150 ms" : 3}`);
   return fails;
 }
 
@@ -1450,15 +1683,19 @@ async function homeSwipeMidFrames(ms) {
   const other = document.querySelector(".recents .task:not(:first-child)");
   const scrim = document.querySelector(".recents .recents-scrim");
   window.__mockEvents.emit("recents.end", { to: "home" });
-  let mid = 0;
-  const t0 = performance.now();
+  let mid = 0, dur = 0;
+  const t0 = performance.now(), stamps = [t0];
   while (performance.now() - t0 < ms) {
     await new Promise((ok) => requestAnimationFrame(() => ok()));
+    stamps.push(performance.now());
+    // The collapse's own fades (transitions or animations on the cards and the scrim) - their longest, as they run.
+    for (const a of [...other.getAnimations(), ...scrim.getAnimations()]) dur = Math.max(dur, Number(a.effect?.getComputedTiming().endTime) || 0);
     const o = parseFloat(getComputedStyle(other).opacity);
     const so = parseFloat(getComputedStyle(scrim).opacity);
     if (o > 0.02 && o < 0.98 && so > 0.01 && so < 0.44) mid++;
   }
-  return mid;
+  const gaps = stamps.slice(1).map((t, i) => t - stamps[i]).sort((x, y) => x - y);
+  return { mid, gap: gaps[gaps.length >> 1] ?? 0, dur };
 }
 
 /** In the page: on home after the switcher closed - no layer up or visible, home not faded, no task opened. */
@@ -1542,6 +1779,145 @@ async function switcherSwipeCloseCheck(page) {
   await swipe(ANDROID);
   got = await page.evaluate(() => ({ removed: window.__removed.slice() }));
   if (got.removed.join() !== `${LINUX},${ANDROID}`) fails.push(`swiping the Android card: host removes [${got.removed}], expected ${LINUX},${ANDROID}`);
+  return fails;
+}
+
+/**
+ * Board switcher-shows-every-open-window-linux-too (the user, 10-30 19:58: "all the apps should show in a switcher even
+ * the Linux apps that's running Maximized but it's not showing in the switcher"): with a MAXIMISED Linux web window on
+ * home (Dolphin, its bar merged with the status bar) and Android apps open, the switcher has a card for every one of
+ * them - the Linux window's card (id LINUX_CARD + its window id, WebWindows.linuxCards: every Linux window, any state)
+ * shown, labelled, in view. Its card tapped: the switcher closes and the host is asked to open exactly that card
+ * (Tasks.open -> WebWindows.openForTask -> "webwindows.show"), and that show brings the window back on its page as it
+ * was - shown, in front, still maximised.
+ */
+async function switcherLinuxMaxCheck(page) {
+  const WIN = 7;
+  const LINUX = (1 << 29) + WIN;
+  const setup = await page.evaluate(switcherLinuxMaxSetup, [LINUX, WIN]);
+  if (setup) return [`switcher-linux-max: ${setup}`];
+  const fails = await page.evaluate(switcherLinuxMaxCards, LINUX);
+  if (fails.length) return fails;
+  const at = await page.evaluate((id) => {
+    const c = document.querySelector(`.recents .task[data-task="${id}"] .task-shot`);
+    c?.scrollIntoView({ inline: "center" });
+    const b = c?.getBoundingClientRect();
+    return b && { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+  }, LINUX);
+  await new Promise((ok) => setTimeout(ok, 150));
+  await page.mouse.click(at.x, at.y);
+  await new Promise((ok) => setTimeout(ok, 400));
+  const opened = await page.evaluate(() => window.__opened.slice());
+  if (opened.join() !== String(LINUX)) fails.push(`switcher-linux-max: tapping the Linux card asked the host to open [${opened}], want only its card ${LINUX}`);
+  const closed = await page.evaluate(() => window.__closed.slice());
+  if (closed.join() !== String(WIN)) fails.push(`switcher-linux-max: tapping the Linux card closed the switcher with [${closed}], want to its window ${WIN} (not home)`);
+  fails.push(...(await page.evaluate(switcherLinuxMaxBack, WIN)));
+  return [...fails, ...(await switcherLinuxFullCase(page))];
+}
+
+/**
+ * [switcherLinuxMaxCheck]'s full-screen case (the user's step: a FULL-SCREEN Linux window's card tapped came back as a
+ * plain window - the page's close went "home", WebWindows.switcherHome took it out of full screen before
+ * openForTask showed it): its card tapped closes the switcher TO that window (recents.closed(its id): the host keeps
+ * it full screen) and opens only its card; "webwindows.show" leaves it full screen. Back over home still closes to
+ * home (recents.closed() with no window: a full-screen window leaves full screen, as before).
+ */
+async function switcherLinuxFullCase(page) {
+  const WIN = 8;
+  const LINUX = (1 << 29) + WIN;
+  const setup = await page.evaluate(switcherLinuxMaxSetup, [LINUX, WIN, true]);
+  if (setup) return [`switcher-linux-max (full screen): ${setup}`];
+  const at = await page.evaluate((id) => {
+    const c = document.querySelector(`.recents .task[data-task="${id}"] .task-shot`);
+    c?.scrollIntoView({ inline: "center" });
+    const b = c?.getBoundingClientRect();
+    return b && { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+  }, LINUX);
+  if (!at) return ["switcher-linux-max (full screen): no card for the full-screen Linux window"];
+  await new Promise((ok) => setTimeout(ok, 150));
+  await page.mouse.click(at.x, at.y);
+  await new Promise((ok) => setTimeout(ok, 400));
+  const fails = [];
+  const got = await page.evaluate(async (win) => {
+    const W = await window.__gw.mod("./ui/webwindows.tsx");
+    window.__mockEvents.emit("webwindows.show", win);
+    await window.__gw.settled();
+    return { opened: window.__opened.slice(), closed: window.__closed.slice(), full: !!W.webWins.value.find((v) => v.id === win)?.full };
+  }, WIN);
+  if (got.opened.join() !== String(LINUX)) fails.push(`switcher-linux-max (full screen): tapping the card asked the host to open [${got.opened}], want only ${LINUX}`);
+  if (got.closed.join() !== String(WIN)) fails.push(`switcher-linux-max (full screen): tapping the card closed the switcher with [${got.closed}], want to its window ${WIN} - closed to home, the host takes it out of full screen first`);
+  if (!got.full) fails.push("switcher-linux-max (full screen): the window came back from its card no longer full screen");
+  // Home, not a card: the switcher up again over home, a tap beside its cards - a close to home, no window named.
+  const home = await page.evaluate(async (linux) => {
+    window.__closed = [];
+    const task = (id, label, key, more = {}) => ({ id, label, key, icon: null, snapshot: "", ...more });
+    window.__mockEvents.emit("recents.show", { open: true, from: null, tasks: [task(linux, "Dolphin", "l:org.kde.dolphin", { webwindow: linux - (1 << 29) }), task(905, "Chrome", "a:chrome")] });
+    await new Promise((ok) => setTimeout(ok, 500));
+    if (!document.querySelector(".recents")?.classList.contains("shown")) return "the switcher isn't up again";
+    // A tap beside the cards over home (X2): home.
+    document.querySelector(".recents").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((ok) => setTimeout(ok, 400));
+    return window.__closed.slice();
+  }, LINUX);
+  if (typeof home === "string") fails.push(`switcher-linux-max (full screen): ${home}`);
+  else if (home.length !== 1 || home[0] != null) fails.push(`switcher-linux-max (full screen): closing the switcher to home sent recents.closed with [${home}], want one close naming no window`);
+  return fails;
+}
+
+/** [switcherLinuxMaxCheck]'s home: a maximised Linux window (Dolphin), then the switcher up with its card and two apps'. */
+async function switcherLinuxMaxSetup([linux, win, full]) {
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  window.__opened = [];
+  window.__closed = [];
+  powos.tasks.open = async (id) => (window.__opened.push(id), true);
+  powos.recents.closed = async (opening) => void window.__closed.push(opening ?? null);
+  S.page.value = 0;
+  await window.__gw.settled();
+  // Maximised: the work area, its floating frame kept to go back to (restore). Full screen: the host's "webwindows.full".
+  W.webWins.value = [{ id: win, key: "l:org.kde.dolphin", label: "Dolphin", page: S.pages.value[0], x: 0, y: 0, w: innerWidth, h: innerHeight - 120, restore: { x: 40, y: 120, w: 320, h: 400 }, live: true }];
+  await window.__gw.settled();
+  if (full) window.__mockEvents.emit("webwindows.full", { id: win, on: true });
+  await window.__gw.settled();
+  if (full ? !W.webWins.value.find((v) => v.id === win)?.full : !document.querySelector(`.webwindow.maximised[data-wwid="${win}"]`)) return `no ${full ? "full-screen" : "maximised"} web window for the Linux window on home`;
+  const c = document.createElement("canvas");
+  [c.width, c.height] = [40, 80];
+  const g = c.getContext("2d");
+  g.fillStyle = "#345";
+  g.fillRect(0, 0, 40, 80);
+  const task = (id, label, key, more = {}) => ({ id, label, key, icon: null, snapshot: c.toDataURL("image/png"), ...more });
+  // As ShellBridge.tasks lists them: the Linux cards first, then Android's recents.
+  window.__mockEvents.emit("recents.show", { open: true, from: null, tasks: [task(linux, "Dolphin", "l:org.kde.dolphin", { webwindow: win }), task(905, "Chrome", "a:chrome"), task(906, "Maps", "a:maps")] });
+  await new Promise((ok) => setTimeout(ok, 500));
+  return document.querySelector(".recents")?.classList.contains("shown") ? "" : "the switcher isn't up after recents.show";
+}
+
+/** [switcherLinuxMaxCheck]'s cards: one for each open window - the maximised Linux one too, labelled as its app. */
+function switcherLinuxMaxCards(linux) {
+  const cards = [...document.querySelectorAll(".recents .task")].map((c) => ({ id: Number(c.dataset.task), label: c.querySelector(".task-label")?.textContent, w: c.getBoundingClientRect().width }));
+  const seen = cards.map((c) => `${c.id} ${c.label}`).join(", ");
+  const fails = [linux, 905, 906].filter((id) => !cards.some((c) => c.id === id && c.w > 0)).map((id) => `switcher-linux-max: no card for ${id === linux ? "the maximised Linux window" : `task ${id}`} (cards: ${seen})`);
+  const label = cards.find((c) => c.id === linux)?.label;
+  if (label && label !== "Dolphin") fails.push(`switcher-linux-max: the Linux card says "${label}", want "Dolphin"`);
+  return fails;
+}
+
+/** [switcherLinuxMaxCheck]'s end: the host's answer to the card's open (WebWindows.openForTask) brings the window back as it was. */
+async function switcherLinuxMaxBack(win) {
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  W.webWins.value = W.webWins.value.map((w) => (w.id === win ? { ...w, minimised: true } : w));
+  await window.__gw.settled();
+  window.__mockEvents.emit("webwindows.show", win);
+  await window.__gw.settled();
+  const w = W.webWins.value.find((v) => v.id === win) ?? {};
+  const el = document.querySelector(`.webwindow[data-wwid="${win}"]`);
+  const shown = el?.getBoundingClientRect().width > 0;
+  const maximised = !!el?.matches(".maximised");
+  const fails = [];
+  if (document.querySelector(".recents.shown")) fails.push("switcher-linux-max: the switcher stayed up after its Linux card was opened");
+  if (w.minimised || !shown) fails.push(`switcher-linux-max: "webwindows.show" for the Linux window left it ${w.minimised ? "minimised" : "not on screen"}`);
+  if (!w.restore || !maximised) fails.push("switcher-linux-max: the Linux window came back from its card no longer maximised");
   return fails;
 }
 
@@ -2498,8 +2874,8 @@ function aiPanesRest() {
 }
 
 /**
- * In the page, unfolded (the manager's design, 11-01; the user: "the unfolded page is still a bit shit"): two columns at
- * about 42 / 58 with a 16 dp gutter - left the folded status page's own component (its hero and sections' scroller, no
+ * In the page, unfolded (the manager's design, 11-01; the user: "the unfolded page is still a bit shit"; the work column
+ * made the wide one by the 11-02 redesign): two columns at about 56 / 44 with a 16 dp gutter - left the folded status page's own component (its hero and sections' scroller, no
  * field of its own), right the segmented row Chat / Agents / Progress / Devices (Chat on) over the chat; no nav pane, no
  * context column, no strip.
  */
@@ -2512,7 +2888,9 @@ function aiPanesFails() {
   if (scr.querySelector(".ai-strip")) fails.push("the strip still shows");
   const l = L.getBoundingClientRect(), r = R.getBoundingClientRect();
   const k = l.width / (l.width + r.width);
-  if (Math.abs(k - 0.42) > 0.03) fails.push(`the columns are ${Math.round(k * 100)} / ${Math.round(100 - k * 100)}, not ~42 / 58`);
+  // The AI page redesign (agent/ai-board, 11-02: "complete trash... huge chat"): the work leads - flex 56 : 44, the
+  // chat's own padding taken from its share, so the boxes measure ~54-56 / 46-44.
+  if (Math.abs(k - 0.55) > 0.03) fails.push(`the columns are ${Math.round(k * 100)} / ${Math.round(100 - k * 100)}, not ~56 / 44 (work / chat)`);
   if (Math.abs(r.left - l.right - 16) > 1 || Math.abs(l.left - 16) > 1) fails.push(`the gutters are ${Math.round(l.left)} / ${Math.round(r.left - l.right)} px, not 16`);
   return fails;
 }
@@ -3785,6 +4163,87 @@ async function aiWideClearFacts(where) {
 /** Puts the long answer and the overflow probe in [page] (its evaluated functions reach them on window). */
 const aiThreadProbe = (page) => page.evaluate(`window.__aiLong = ${JSON.stringify(AI_LONG_ANSWER)}; window.__aiOverflow = ${aiThreadOverflow.toString()};`);
 
+/**
+ * The unfolded AI page as a work board, not a huge chat (the user, 11-01: "it's just like a huge chat instead of like a
+ * proper setup"; 10-30 "group the PowOS AI in-progress things"): the status column is the wider one, By area lists every
+ * open area on ONE line in plain state words with the area that needs the user first; a perf trace the user sent is a
+ * compact card, not its JSON (T4); folded, the status page's scroller starts under the status bar (W5).
+ */
+async function aiAreasFacts() {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const P = await G.mod("./ui/powai.tsx");
+  const now = Date.now();
+  const t = (id, project, status, more = {}) => ({ id, title: `${project} task ${id}`, owner: "coder", status, note: "", project, created: now - 9e6, updated: now - 6e4, done: 0, steps: "", commits: "", images: "", step: "", activity: now - 6e4, ...more });
+  P.board.value = [
+    t("w1", "Windows", "working", { step: "phone check queued" }),
+    t("w2", "Windows", "queued"),
+    t("k1", "Kernel & system", "waiting", { note: "Plug the phone into the Mac's USB once" }),
+    t("h1", "Home & launcher", "working", { step: "writing the fix" }),
+    t("g1", "Games", "queued"),
+  ];
+  P.boardSeen.value = true;
+  const perf = "Perf trace (fps meter, tapped record/stop). Full data: /run/powos-app/powos-ai-shared/perf-1.json\n```json\n" +
+    JSON.stringify({ mode: "unfolded", durationMs: 5200, frames: 600, fps: { p50: 119.8, p5: 88.1, min: 40 }, jank: 3, worstFrames: [{ at: 900, ms: 41.5 }] }) + "\n```";
+  const plan = "```present\n" + JSON.stringify({ title: "Cleanup plan", format: "md", body: "# Cleanup plan\nFrees about **38 GB**.\n## Steps\n1. Stop the idle containers\n2. Prune images\n## Risks\nNone." }) + "\n```";
+  S.chat.value = { busy: false, items: [{ kind: "user", text: perf }, { kind: "assistant", text: "Got it." }, { kind: "user", text: "plan the cleanup" }, { kind: "assistant", text: plan }] };
+  S.aiScreen.value = "chat";
+  S.page.value = -1;
+  await new Promise((r) => setTimeout(r, 1200));
+  const w = (q) => Math.round(document.querySelector(q)?.getBoundingClientRect().width ?? 0);
+  const rows = [...document.querySelectorAll(".ai-left .ais-area-row")];
+  const card = document.querySelector(".ai-right .msg.perf");
+  return {
+    left: w(".ai-screen .ai-left"), right: w(".ai-screen .ai-right"),
+    areas: rows.map((r) => ({ name: r.dataset.area, h: Math.round(r.getBoundingClientRect().height), words: r.querySelector(".ais-area-words")?.textContent ?? "" })),
+    card: card ? { text: card.textContent, h: Math.round(card.getBoundingClientRect().height) } : null,
+    plan: (() => { const c = document.querySelector(".ai-right .present"); return c ? { titles: (c.textContent.match(/Cleanup plan/g) ?? []).length, fade: !!c.querySelector(".present-peek"), foot: c.querySelector(".present-foot")?.textContent ?? "" } : null; })(),
+    json: [...document.querySelectorAll(".ai-right .msg.user")].some((m) => m.textContent.includes("```") || m.textContent.includes("worstFrames")),
+  };
+}
+
+/** The unfolded facts' failures (aiAreasFacts). */
+function aiAreasFails(f) {
+  const first = f.areas[0];
+  return failsOf([
+    [f.left > f.right, `the status column (${f.left}) isn't wider than the chat (${f.right})`],
+    [f.areas.length >= 2, `By area shows ${f.areas.length} lines: ${JSON.stringify(f.areas)}`],
+    [first?.name === "Kernel & system" && /needs you/.test(first.words), `the area that needs the user isn't first: ${JSON.stringify(first)}`],
+    [f.areas.every((a) => a.h <= 48), `an area takes more than one line: ${JSON.stringify(f.areas)}`],
+    [f.areas.some((a) => a.name === "Windows" && /1 (working|to check)/.test(a.words) && /1 idle/.test(a.words)), `Windows' words aren't plain states: ${JSON.stringify(f.areas)}`],
+  ]).concat(aiChatCardFails(f)).map((x) => `ai-areas: ${x}`);
+}
+
+/** The chat's cards (aiAreasFacts): idle areas folded, the perf trace a card, the plan card's one title and foot. */
+function aiChatCardFails(f) {
+  return failsOf([
+    [f.areas.some((a) => a.name === "rest" && /nothing moving · \d+ idle/.test(a.words)), `idle-only areas aren't one calm line: ${JSON.stringify(f.areas)}`],
+    [!!f.card && /120/.test(f.card.text) && /88/.test(f.card.text) && /42 ms worst/.test(f.card.text) && /perf-1\.json/.test(f.card.text), `no perf card with p50 / p5 / worst frame / file: ${JSON.stringify(f.card)}`],
+    [!f.json, "the perf trace's JSON shows as text in the chat"],
+    [f.plan?.titles === 1 && !f.plan.fade && /Steps · Risks/.test(f.plan.foot) && /open/.test(f.plan.foot), `the plan card: title not once, a faded peek, or no sections + open foot: ${JSON.stringify(f.plan)}`],
+  ]);
+}
+
+/** W5: folded, the AI page's scrollers start at the status bar's foot (never behind the clock and battery). */
+async function aiUnderStatusBar(page) {
+  await page.setViewport({ width: 404, height: 900 });
+  const top = await page.evaluate(async () => {
+    window.__mockEvents.emit("system.insets", { top: 45, bottom: 16, left: 0, right: 0, keyboard: 0 });
+    await new Promise((r) => setTimeout(r, 800));
+    const inset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--inset-top")) || 0;
+    const sc = [...document.querySelectorAll(".ai-screen > .ai-scroll")].filter((e) => e.getClientRects().length);
+    return { inset, tops: sc.map((e) => Math.round(e.getBoundingClientRect().top)) };
+  });
+  await page.screenshot({ path: "/cache/ai-areas-folded.png" });
+  return top.inset > 0 && top.tops.some((t) => t < top.inset - 1) ? [`ai-areas W5: a scroller starts at ${top.tops} px, under the status bar (${top.inset} px)`] : [];
+}
+
+async function aiAreasCheck(page) {
+  const f = await page.evaluate(aiAreasFacts);
+  await page.screenshot({ path: "/cache/ai-areas-unfolded.png" });
+  return [...aiAreasFails(f), ...(await aiUnderStatusBar(page))];
+}
+
 async function aiWideClearCheck(page) {
   await aiThreadProbe(page);
   const fails = [];
@@ -4504,6 +4963,38 @@ async function frictionCheck(page, label) {
  * opens one) - ⋯ no longer repeats the tabs (11-01 17:56). Restored with it: unfolded, a Working now row opens that agent live
  * in the right column (the old context column's card did).
  */
+/** In the page: the Agents tab's rows under [R] - at least 3 (the manager, a stuck one, the working ones), each a glass row one line tall, no old card. */
+function agentRowsFails(R) {
+  const rows = [...document.querySelectorAll(`${R} .ag-rows .ag-row`)];
+  const fails = rows.length < 3 ? [`Agents: ${rows.length} agent rows, not the manager, the stuck and the working ones`] : [];
+  if (document.querySelector(`${R} .fl-card, ${R} .fl-mgr`)) fails.push("Agents: the old cards are still drawn");
+  const name = (r) => r.textContent.slice(0, 40);
+  rows.filter((r) => !r.matches(".aip-area.tile")).forEach((r) => fails.push(`Agents: "${name(r)}" isn't a glass row`));
+  rows.filter((r) => r.getBoundingClientRect().height > 60).forEach((r) => fails.push(`Agents: "${name(r)}" is ${Math.round(r.getBoundingClientRect().height)}px tall, not one line`));
+  return fails;
+}
+
+/**
+ * In the page, the Agents tab open (the user, 11-01 16:51: "the chat and the agents and the device page don't follow the
+ * same design"): Agents and Devices in the Progress page's design - a glass row (.aip-area.tile) per agent, one line each,
+ * no old card; a working row's tap opens that agent live in the column; Devices a glass card per host, no box around them.
+ */
+async function aiProgressRowsFails() {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const R = ".ai-screen .ai-right";
+  const fails = [];
+  const work = document.querySelector(`${R} .ag-row .aip-dot.working`)?.closest(".ag-row-line");
+  work?.click();
+  if (!(await G.until(() => document.querySelector(`${R} .fl-live`), 3000))) fails.push("Agents: a working agent's row didn't open it live");
+  S.aiScreen.value = "devices";
+  await G.until(() => document.querySelector(`${R} .ai-devices`), 3000);
+  const cards = document.querySelectorAll(`${R} .ai-devices .ai-unit-card.aip-area.tile`).length;
+  if (cards !== 2) fails.push(`Devices: ${cards} host cards in the Progress design, not 2`);
+  if (document.querySelector(`${R} .ai-work-list`)) fails.push("Devices: still the old boxed list");
+  return fails;
+}
+
 async function aiTermsCheck(page) {
   const fails = [];
   await page.setViewport({ width: 821, height: 883 });
@@ -4516,7 +5007,7 @@ async function aiTermsCheck(page) {
   const chat = async () => page.evaluate(async () => { const S = await window.__gw.mod("./state.ts"); S.aiScreen.value = "chat"; });
   await chat();
   const run = async (label, steps, want) => fails.push(...(await page.evaluate(aiTermsTaps, [steps, want])).map((f) => `${label}: ${f}`));
-  await run("unfolded Agents", [seg("Agents"), ".ai-screen .ai-right .fl-card .fl-term-open"], "mac:c0");
+  await run("unfolded Agents", [seg("Agents"), ".ai-screen .ai-right .ag-row .fl-term-open"], "mac:c0");
   await chat();
   await run("unfolded Devices", [seg("Devices"), '.ai-screen .ai-right .ai-host-terms .ai-session[data-term="mac:c0"]'], "mac:c0");
   await chat();
@@ -4530,6 +5021,8 @@ async function aiTermsCheck(page) {
   });
   if (listed !== "mac:c0 phone:main") fails.push(`unfolded Agents: its session list is [${listed}], not both hosts' (mac:c0 phone:main)`);
   await page.screenshot({ path: "/cache/ai-terms-unfolded-agents.png" });
+  fails.push(...(await page.evaluate(agentRowsFails, ".ai-screen .ai-right")).map((f) => `unfolded: ${f}`));
+  fails.push(...(await page.evaluate(aiProgressRowsFails)).map((f) => `unfolded: ${f}`));
   await chat();
   // Working now (the left column) opens that agent live in the right column, not the session list.
   const live = await page.evaluate(async () => {
@@ -4549,6 +5042,13 @@ async function aiTermsCheck(page) {
   return fails;
 }
 
+/** Unfolded, the status column is the folded status page's component; only unfolded it adds By area (agent/ai-board, 11-02). */
+function aiStatusColumnFails(size, left, folded) {
+  const same = left && folded && { ...left, secs: left.secs.filter((x) => x !== "areas") };
+  if (JSON.stringify(same) === JSON.stringify(folded) && left.secs.includes("areas")) return [];
+  return [`${size}: the status column ${JSON.stringify(left)} isn't the folded status page ${JSON.stringify(folded)} + "areas"`];
+}
+
 async function aiUnfoldedCheck(page) {
   const fails = [];
   // Folded first, at the folded size whatever the page was left at (a reused page came in at 883 x 821: no status page).
@@ -4563,7 +5063,7 @@ async function aiUnfoldedCheck(page) {
     await page.setViewport(vp);
     await page.evaluate((w) => window.__gw.until(() => innerWidth === w && document.querySelector(".ai-screen.panes"), 3000), vp.width);
     const left = await page.evaluate(aiStatusParts, ".ai-screen .ai-left");
-    if (JSON.stringify(left) !== JSON.stringify(folded)) fails.push(`${size}: the status column ${JSON.stringify(left)} isn't the folded status page ${JSON.stringify(folded)}`);
+    fails.push(...aiStatusColumnFails(size, left, folded));
     if (!(await page.evaluate(aiChatSetup, [3, `-${size}-uf`]))) { fails.push(`${size}: the chat's try message didn't render`); continue; }
     await page.evaluate(aiPanesRest);
     if (size === "unfolded") fails.push(...(await page.evaluate(aiUnfoldedFollow)).map((f) => `${size} follow: ${f}`));
@@ -6366,6 +6866,187 @@ async function glassFrameLayoutScene() {
   return fails;
 }
 
+/** K4's live glass mocked on: every "b.r"/"b.f" region set the page sends, collected; undo() puts it back. */
+async function lockGlassOn() {
+  const N = await window.__gw.mod("./apps/native.ts");
+  const sent = [];
+  const ch = new MessageChannel();
+  ch.port2.onmessage = (m) => /^b\.[fr] /.test(String(m.data)) && sent.push(String(m.data));
+  const had = N.native.value;
+  N.native.value = ch.port1;
+  for (const f of N.fromNative) f("b.state 1");
+  const undo = () => {
+    for (const f of N.fromNative) f("b.state 0");
+    N.native.value = had;
+  };
+  return { sent, undo };
+}
+
+/** The first region's top in a set ("b.r <dpr> <n> x y ..."), or null for an empty set. */
+function lockTopOf(t) {
+  const p = (t ?? "").split(" ").slice(t?.startsWith("b.f ") ? 2 : 1);
+  return Number(p[1]) > 0 ? Number(p[3]) : null;
+}
+
+/**
+ * K4's swipe on the lock face: up 0.36 of the height (just past the unlock point: the lower cards still on the screen)
+ * in 12 frames, held, let go (past the unlock point, no flick); the
+ * cards' tops (cut at the screen's top, as their regions are) sampled every frame meanwhile, until the face has slid
+ * away. Returns those tops and how many region sets had been sent at the release.
+ */
+async function lockSwipeUp(sent) {
+  const face = document.querySelector(".lock");
+  // A synthetic pointer isn't an active one: capturing it throws (a finger's capture is the page's, unchanged).
+  face.setPointerCapture = () => {};
+  const ev = (type, y) => face.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: innerWidth / 2, clientY: y, pointerId: 41, isPrimary: true, pointerType: "touch" }));
+  const tops = [];
+  let sampling = true;
+  const sample = () => {
+    for (const c of document.querySelectorAll(".lock-note")) tops.push(Math.max(0, c.getBoundingClientRect().top));
+    if (sampling) requestAnimationFrame(sample);
+  };
+  sample();
+  const y0 = innerHeight * 0.8;
+  ev("pointerdown", y0);
+  for (let i = 1; i <= 12; i++) {
+    await window.__gw.frames(1);
+    ev("pointermove", y0 - innerHeight * 0.36 * (i / 12));
+  }
+  await window.__gw.sleep(150);
+  ev("pointerup", y0 - innerHeight * 0.36);
+  const released = sent.length;
+  await window.__gw.until(() => getComputedStyle(face).opacity === "0" && !face.getAnimations().length, 3000);
+  await window.__gw.frames(10);
+  sampling = false;
+  return { tops, released };
+}
+
+/** K4's verdict on the region sets sent over the unlock ([during]) against the card's tops drawn ([tops]). */
+function lockGlassFails(during, tops, last, after) {
+  const fails = [];
+  // A card past the screen's top: its region is cut there (y 0).
+  const stale = during.map(lockTopOf).filter((y) => y != null && !tops.some((t) => Math.abs(t - y) < 1.5));
+  if (stale.length) fails.push(`K4: ${stale.length} region set(s) where no card was drawn (stale blur): tops ${stale.slice(0, 4).join(", ")} vs cards ${tops.slice(0, 3).map(Math.round).join(", ")}...`);
+  const moving = during.filter((t) => lockTopOf(t) != null).length;
+  if (moving < 8) fails.push(`K4: only ${moving} region sets while the cards moved (drag + slide out): the blur didn't follow them`);
+  // Let go, the cards still on the screen slide off it over the settle: their blur with them, frame by frame.
+  const sliding = after.filter((t) => lockTopOf(t) != null).length;
+  if (sliding < 3) fails.push(`K4: only ${sliding} region sets with cards over the slide out: the blur stayed while the cards slid away`);
+  if (lockTopOf(last) != null) fails.push(`K4: blur left behind once the face slid away: last set "${last.slice(0, 80)}"`);
+  return fails;
+}
+
+/**
+ * K4 (lock-screen-no-brown-strip-at-the-bottom-notific: "the blur follows the notification cards on unlock"): on the
+ * lock face with the live glass on, a swipe up past the unlock point - every region set the page sends during the drag
+ * and the slide out is where a card was drawn on some frame (none stale, none left at the start), the regions keep
+ * coming while the face slides, and once it's away the last set is empty (no blur left behind on the screen). The
+ * cards keep the theme's shadow token (the face's lift was --lift too, and wiped it).
+ */
+async function lockUnlockGlassScene() {
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const { sent, undo } = await lockGlassOn();
+  const unlock = powos.lock.unlock;
+  let asked = 0;
+  powos.lock.unlock = async () => void asked++;
+  const now = Date.now();
+  const items = [1, 2, 3, 4, 5].map((i) => ({ key: `gate.k4.${i}`, app: "Gate", pkg: "dev.gate", title: `Card ${i}`, text: "the blur goes with me", time: now - i * 60000 }));
+  window.__mockEvents.emit("notifications.changed", { available: true, items });
+  try {
+    if (!(await window.__gw.until(() => document.querySelectorAll(".lock-note").length === 5, 3000))) return ["K4: the 5 notification cards never showed on the lock face"];
+    await window.__gw.settled();
+    await window.__gw.frames(8);
+    const fails = [];
+    const shadow = getComputedStyle(document.querySelector(".lock-note")).boxShadow;
+    if (shadow === "none") fails.push("K4: the lock cards have no shadow (the theme's --lift overridden by the face's lift)");
+    if (lockTopOf(sent.at(-1)) == null) fails.push(`K4: no glass regions for the cards at rest (last set: ${sent.at(-1) ?? "none"})`);
+    const from = sent.length;
+    const { tops, released } = await lockSwipeUp(sent);
+    if (!asked) fails.push("K4: a swipe up 36% of the screen, held, didn't ask the unlock");
+    const during = sent.slice(from);
+    fails.push(...lockGlassFails(during, tops, sent.at(-1), sent.slice(released)));
+    window.__lockGlass = `${during.length} region sets over the unlock, ${during.filter((t) => lockTopOf(t) != null).length} with cards, ${tops.length} card tops sampled, ${sent.length - released} sets after the release (tops ${sent.slice(released).map(lockTopOf).map((y) => (y == null ? "-" : Math.round(y))).join(" ")}), last "${sent.at(-1)?.split(" ").slice(0, 3).join(" ")}"; shadow ${shadow.slice(0, 40)}`;
+    console.warn(`[gate] lock-unlock-glass: ${window.__lockGlass}`);
+    return fails;
+  } finally {
+    powos.lock.unlock = unlock;
+    undo();
+  }
+}
+
+/** K2 for the small icon [si] (a .notif-small, or null): the failures. */
+function lockSmallIconFails(si) {
+  if (!si) return ["K2: the card with a small icon doesn't show it (no .notif-small)"];
+  const cs = getComputedStyle(si);
+  const mask = cs.maskImage || cs.webkitMaskImage || "";
+  const fails = [];
+  if (!mask.includes("/_nicon/gate.svg")) fails.push(`K2: the small icon isn't its mask (${mask})`);
+  if (cs.backgroundColor !== "rgb(10, 132, 255)") fails.push(`K2: the small icon isn't in its app's color (${cs.backgroundColor})`);
+  if (si.getBoundingClientRect().width < 20) fails.push(`K2: the small icon is ${si.getBoundingClientRect().width}px wide (want 22)`);
+  if (si.hasAttribute("role")) fails.push("K2: the lock card's icon is a button (the face's swipe is its only gesture)");
+  return fails;
+}
+
+/** THE backdrop as resolved here: its tint (a probe painted with it) and its compositor radius. */
+function lockBackdrop() {
+  const probe = document.createElement("div");
+  probe.style.background = "var(--backdrop-tint)";
+  document.body.append(probe);
+  const tint = getComputedStyle(probe).backgroundColor;
+  probe.remove();
+  return { tint, radius: parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--backdrop-blur-native")) };
+}
+
+/** K3 for [cards] and the last region set [last]: each card's fill and radius THE backdrop's, and so its regions'. */
+function lockBackdropFails(cards, last, { tint, radius }) {
+  const fails = [];
+  for (const c of cards) {
+    const cs = getComputedStyle(c);
+    if (cs.backgroundColor !== tint || cs.backgroundImage !== "none") fails.push(`K3: a lock card's fill is ${cs.backgroundColor} ${cs.backgroundImage.slice(0, 40)}, not THE backdrop's ${tint}`);
+    if (parseFloat(cs.getPropertyValue("--glass-blur-native")) !== radius) fails.push(`K3: a lock card's compositor radius is ${cs.getPropertyValue("--glass-blur-native")}, not --backdrop-blur-native ${radius}`);
+  }
+  // "b.r <dpr> <n>" (or "b.f <id> <dpr> <n>"), then n regions of 10: x y w h, 4 corners, alpha, blur.
+  const p = last.split(" ").slice(last.startsWith("b.f ") ? 2 : 1);
+  const n = Number(p[1]) || 0;
+  const blurs = Array.from({ length: n }, (_, i) => Number(p[2 + i * 10 + 9]));
+  if (n < cards.length) fails.push(`K3: ${n} live-glass regions for the ${cards.length} cards (last set "${last.slice(0, 60)}")`);
+  if (blurs.some((b) => b !== radius)) fails.push(`K3: the cards' regions blur by ${blurs.join(",")}, not the one backdrop's ${radius}`);
+  return { fails, regions: `${n} regions blur ${[...new Set(blurs)].join(",")}` };
+}
+
+/**
+ * K2 + K3 (lock-screen-no-brown-strip-at-the-bottom-notific: "real icons, notification cards use the shared glass"): on
+ * the lock face, each card shows the shade's icon (notifications.tsx SmallIcon) - the small icon as a mask in its app's
+ * color, else the app's icon, PowOS's mark for its own - and wears THE backdrop: background --backdrop-tint, its
+ * compositor radius --backdrop-blur-native (every live-glass region the page sends for the cards carries it).
+ */
+async function lockCardsScene() {
+  const { sent, undo } = await lockGlassOn();
+  const now = Date.now();
+  const items = [
+    { key: "gate.k2.small", app: "System UI", pkg: "com.android.systemui", title: "Small", text: "its small icon", time: now - 60000, smallIcon: "/_nicon/gate.svg", color: "rgb(10, 132, 255)" },
+    { key: "gate.k2.app", app: "Gate", pkg: "dev.gate", title: "App", text: "its app icon", time: now - 120000, icon: "./icons/powos.svg" },
+    { key: "gate.k2.powos", app: "PowOS", pkg: "dev.omalauncher", title: "Own", text: "PowOS's mark", time: now - 180000 },
+  ];
+  window.__mockEvents.emit("notifications.changed", { available: true, items });
+  try {
+    if (!(await window.__gw.until(() => document.querySelectorAll(".lock-note").length === 3, 3000))) return ["K2: the 3 notification cards never showed on the lock face"];
+    await window.__gw.settled();
+    await window.__gw.frames(8);
+    const cards = [...document.querySelectorAll(".lock-note")];
+    const fails = lockSmallIconFails(cards[0].querySelector(".notif-icon.notif-small"));
+    if (!cards[1].querySelector("img.notif-icon[src$='powos.svg']")) fails.push("K2: the card with only an app icon doesn't show it");
+    if (!cards[2].querySelector("img.notif-icon[src$='powos.svg']")) fails.push("K2: PowOS's own card doesn't show PowOS's mark");
+    const backdrop = lockBackdrop();
+    const k3 = lockBackdropFails(cards, sent.at(-1) ?? "", backdrop);
+    window.__lockCards = `icons ${fails.length ? "failing" : "ok"}, fill ${getComputedStyle(cards[0]).backgroundColor} (backdrop ${backdrop.tint}), ${k3.regions} (backdrop ${backdrop.radius})`;
+    console.warn(`[gate] lock-cards: ${window.__lockCards}`);
+    return [...fails, ...k3.fails];
+  } finally {
+    undo();
+  }
+}
+
 /**
  * WS1 (10-31 15:37: home's surface re-made, then no "w.f" for ~9 s until the watchdog reloaded home): with the page's
  * rAF held (a WebView that paused it while hidden), a visibilitychange to hidden and back sends the windows' geometry
@@ -7400,21 +8081,26 @@ async function fingerOf(page) {
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
   await page.reload().catch(() => {});
   await page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
-  const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  // [at]: the input's own time (s since the epoch, CDP's timestamp: the page's event.timeStamp). Stamped with when the
+  // finger meant it, a loaded gate delivering it late (2.8 s for a 60 ms tap at load 45) is still the gesture it was -
+  // the shell decides hold vs tap/swipe by the input clock (grid.tsx useEmptyPress, reorder.ts end), as on the phone.
+  const touch = (type, pts, at) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts, ...(at ? { timestamp: at } : {}) });
   const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
   // The lift 50 ms after the press, not after its round trip: under the ship gate's load that took over 420 ms, a hold.
   const tap = async ([x, y]) => {
-    const down = touch("touchStart", [{ x, y }]);
+    const t0 = Date.now() / 1000;
+    const down = touch("touchStart", [{ x, y }], t0);
     await wait(50);
-    await Promise.all([down, touch("touchEnd", [])]);
+    await Promise.all([down, touch("touchEnd", [], t0 + 0.05)]);
     await wait(80);
   };
   // A drag through [pts] on the page's clock, one point every stepMs: each event sent when its time comes, not after the
   // previous one's round trip - awaited one by one, a loaded gate (f30) stretched an 8-step swipe into a slow drag.
   const swipe = async (pts, stepMs = 16) => {
-    const sent = [touch("touchStart", [pts[0]])];
-    for (const p of pts.slice(1)) { await wait(stepMs); sent.push(touch("touchMove", [p])); }
-    sent.push(touch("touchEnd", []));
+    const t0 = Date.now() / 1000, at = (i) => t0 + (i * stepMs) / 1000;
+    const sent = [touch("touchStart", [pts[0]], at(0))];
+    for (const [i, p] of pts.slice(1).entries()) { await wait(stepMs); sent.push(touch("touchMove", [p], at(i + 1))); }
+    sent.push(touch("touchEnd", [], at(pts.length - 1)));
     await Promise.all(sent);
   };
   return { touch, wait, tap, swipe };
@@ -7493,6 +8179,13 @@ async function searchAfterDockMinimise(r, f) {
   return fails;
 }
 
+/** Why a swipe on home didn't open the drawer: the shell's state and its own swipe decisions (gesture.ts logSwipe). */
+const swipeWhy = (r, at) => r.page.evaluate(async (at) => {
+  const S = await importShim("./state.ts");
+  const e = document.elementFromPoint(at[0], at[1]);
+  return JSON.stringify({ drawer: S.drawer.value, editing: S.editing?.value, at, el: e?.className?.toString().slice(0, 60), log: (window.__swipeLog || []).slice(-6) });
+}, at);
+
 async function homeGesturesScene(r) {
   const f = await fingerOf(r.page);
   const fails = [];
@@ -7509,13 +8202,14 @@ async function homeGesturesScene(r) {
   await f.wait(400);
   let at = await empty();
   if (!at) return ["E2E1: no empty spot on home"];
+  await r.page.evaluate(() => { window.__swipeLog = []; window.__ciWas ??= console.info; console.info = (...a) => (window.__swipeLog.push(String(a[0])), window.__ciWas(...a)); });
   await f.swipe(Array.from({ length: 9 }, (_, i) => ({ x: at[0], y: at[1] - i * 30 })));
   // Polled, not a fixed wait: under the full gate's load the drawer's settle took longer than 700 ms (it passed alone).
   // The budget is READY_MS (load-scaled), not a fixed 4000/3000 (f30).
   const until = (fn) => r.page.waitForFunction(fn, { timeout: READY_MS, polling: 50 }).then(() => true, () => false);
   await until(() => !!document.querySelector(".home.open"));
   const st = await r.page.evaluate(() => ({ open: !!document.querySelector(".home.open"), focused: !!document.activeElement?.matches(".bar textarea") }));
-  if (!st.open) fails.push("E2E1: a plain swipe up from empty home space didn't open the drawer");
+  if (!st.open) fails.push(`E2E1: a plain swipe up from empty home space didn't open the drawer (${await swipeWhy(r, at)})`);
   if (st.focused) fails.push("E2E1: a plain swipe up focused the search");
   await reset(); await f.wait(500);
   const sp = await r.page.evaluate(() => {
@@ -7555,6 +8249,91 @@ async function tileBarsScene(r) {
     return fails;
   } finally {
     await r.page.evaluate(tileBarsDone);
+  }
+}
+
+/**
+ * TF1 (ask 1a1924af639, "I can't interact with this"; Chrome and Discord were full:true on the phone): the switcher's
+ * split of two full-screen apps (tileApps) brings each back into its window first - no host fullScreen on the way (its
+ * late "webwindows.full" took a tile out and the last went full screen too, both with no bar). Then each bar button,
+ * tapped with a finger on a fresh split, acts on its own window: Discord's minimise, Chrome's full screen, Chrome's close.
+ */
+async function tileFullSetup() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  window.__tfHad ??= powos.webwindows;
+  const host = (window.__tfHost = { fullScreens: [], toWindows: [] });
+  const emit = (on) => (id) => setTimeout(() => window.__mockEvents.emit("webwindows.full", { id, on }), on ? 40 : 5);
+  powos.webwindows = {
+    ...window.__tfHad,
+    enabled: () => Promise.resolve(true),
+    fullScreen: (id) => (host.fullScreens.push(id), emit(true)(id), Promise.resolve(true)),
+    toWindow: (id) => (host.toWindows.push(id), emit(false)(id), Promise.resolve(true)),
+  };
+  const page = S.pages.value[0];
+  S.page.value = 0;
+  W.tilings.value = {};
+  await window.__gw.settled();
+  W.webWins.value = [961, 962].map((id, i) => ({ id, key: `a:gate.tf${i}`, label: ["Chrome", "Discord"][i], page, x: 60 + 40 * i, y: 100 + 40 * i, w: 300, h: 260, live: true, full: true }));
+  const ok = await W.tileApps([{ key: "a:gate.tf0", label: "Chrome" }, { key: "a:gate.tf1", label: "Discord" }]);
+  await new Promise((r) => setTimeout(r, 120));
+  await window.__gw.settled();
+  await window.__gw.frames(2);
+  const fails = ok ? [] : ["TF1: the split of Chrome and Discord fell back to Android's split"];
+  if (host.fullScreens.length) fails.push(`TF1: splitting two full-screen apps asked the host for full screen again (${host.fullScreens.join(",")})`);
+  for (const id of [961, 962]) {
+    const w = W.webWins.value.find((v) => v.id === id);
+    if (w?.full) fails.push(`TF1: ${w.label} is still full:true after the split`);
+    if (W.tiledOn(id) == null) fails.push(`TF1: window ${id} isn't tiled after the split`);
+    if (!document.querySelector(`.webwindow[data-wwid="${id}"] .webwindow-title .ww-close`)) fails.push(`TF1: window ${id} has no title bar after the split`);
+  }
+  return [...fails, ...[961, 962].flatMap(window.__ti.buttons).map((f) => f.replace("TI1", "TF1"))];
+}
+
+async function tileFullState() {
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  await window.__gw.settled();
+  const of = (id) => W.webWins.value.find((w) => w.id === id);
+  const a = W.workArea();
+  const big = (w) => !!w && Math.abs(w.w - (a.right - a.left)) <= 1;
+  return {
+    chrome: { open: !!of(961), min: !!of(961)?.minimised, big: big(of(961)), tiled: W.tiledOn(961) != null },
+    discord: { open: !!of(962), min: !!of(962)?.minimised, big: big(of(962)), tiled: W.tiledOn(962) != null },
+    top: W.webWins.value.filter((w) => !w.minimised).at(-1)?.id,
+  };
+}
+
+async function tileFullDone() {
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  W.webWins.value = [];
+  W.tilings.value = {};
+  if (window.__tfHad) powos.webwindows = window.__tfHad;
+  return [];
+}
+
+async function tileFullScene(r) {
+  const f = await fingerOf(r.page);
+  await r.page.evaluate(TI_HELPERS);
+  const fails = [];
+  const round = async (id, label, judge) => {
+    fails.push(...(await r.page.evaluate(tileFullSetup)));
+    const at = await r.page.evaluate((i, l) => window.__ti.centre(i, l), id, label);
+    if (!at) return fails.push(`TF1: window ${id} has no ${label} button`);
+    await f.tap(at);
+    const s = await r.page.evaluate(tileFullState);
+    const why = judge(s);
+    if (why) fails.push(`TF1: a tap on ${id === 961 ? "Chrome" : "Discord"}'s ${label} ${why} (${JSON.stringify(s)})`);
+    await r.page.evaluate(tileFullDone);
+  };
+  try {
+    await round(962, "Minimise", (s) => (!s.discord.min ? "didn't minimise Discord" : s.chrome.min || !s.chrome.open ? "put Chrome away too" : ""));
+    await round(961, "Full screen", (s) => (!s.chrome.big || s.chrome.tiled || s.top !== 961 ? "didn't make Chrome full screen in front" : ""));
+    await round(961, "Close", (s) => (s.chrome.open ? "didn't close Chrome" : !s.discord.open ? "closed Discord too" : ""));
+    return fails;
+  } finally {
+    await r.page.evaluate(tileFullDone);
   }
 }
 
@@ -8292,6 +9071,83 @@ async function ccQuickPageItem() {
     p.quickpage = was.qp;
     await p.store.set("controls.launchers", was.row ?? null);
   }
+}
+
+/** The cc-ql-x scenes' helpers: the row's keys and the X of item [k] (its middle; whether a finger there hits its chip). */
+const qlxKeys = (page) => page.evaluate(() => [...document.querySelectorAll(".cc3-launchers .cc3-grid:not(.cc3-spare) [data-key]")].map((e) => e.dataset.key));
+const qlxAt = (page, k) =>
+  page.evaluate((k) => {
+    const chip = document.querySelector(`.cc3-launchers .cc3-grid:not(.cc3-spare) [data-key="${k}"]`);
+    const b = chip?.querySelector(".cc3-badge")?.getBoundingClientRect();
+    if (!b) return null;
+    const at = { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    return { ...at, hit: chip.contains(document.elementFromPoint(at.x, at.y)) };
+  }, k);
+/** A finger on [at] for [ms] (CDP touch: the phone's pointerdown/up and its click), then the page settled. */
+async function qlxFinger(page, cdp, at, ms) {
+  // Stamped on the finger's clock (fingerOf's touch): delivered late under load, a tap is still a tap.
+  const t0 = Date.now() / 1000;
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: at.x, y: at.y }], timestamp: t0 });
+  await new Promise((ok) => setTimeout(ok, ms));
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [], timestamp: t0 + ms / 1000 });
+  await new Promise((ok) => setTimeout(ok, 150));
+  await page.evaluate(() => window.__gw.settled());
+}
+/** The row set to [row] (stored, read again), edit mode [on]. */
+const qlxSet = (page, row, on) =>
+  page.evaluate(
+    async (row, on) => {
+      const [S, E, B, L] = await Promise.all(["./state.ts", "./ui/ccexpand.ts", "./bridge.ts", "./ui/launchers.tsx"].map((m) => window.__gw.mod(m)));
+      await B.powos.store.set("controls.launchers", row);
+      L.loadLaunchers();
+      S.notif.value = true;
+      E.ccEditing.value = on;
+      await window.__gw.settled();
+    },
+    row,
+    on,
+  );
+
+/** [k] is off the row and the store (after a tap on its X). */
+async function qlxGone(page, k) {
+  const row = await qlxKeys(page);
+  const stored = await page.evaluate(async () => (await window.__gw.mod("./bridge.ts")).powos.store.get("controls.launchers"));
+  return row.includes(k) || stored?.includes(k) ? [`quick-launch X: a tap on ${k}'s X left the row ${JSON.stringify(row)}, stored ${JSON.stringify(stored)} (want it removed)`] : [];
+}
+
+/** The quick-launch row's X under a finger (the cc-ql-x scenes): a tap removes the item, a held press let go doesn't. */
+async function quickLaunchX(page) {
+  // Quick-page items: always on the row (Settings' pages need no installed app in the stub).
+  const row = ["qp:android.settings.WIFI_SETTINGS", "qp:android.settings.BLUETOOTH_SETTINGS", "qp:android.settings.DISPLAY_SETTINGS"];
+  const was = await page.evaluate(async () => (await window.__gw.mod("./bridge.ts")).powos.store.get("controls.launchers"));
+  const cdp = await page.target().createCDPSession();
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  const fails = [];
+  try {
+    await qlxSet(page, row, true);
+    const [k1, k2] = row;
+    const a = await qlxAt(page, k1);
+    if (!a?.hit) return [`quick-launch X: the X of ${k1} is ${a ? "covered" : "missing"} at the finger; the row is ${JSON.stringify(await qlxKeys(page))}`];
+    // A tap on the first item's X: it leaves the row and the store.
+    await page.evaluate(() => {
+      window.__qlxLog = [];
+      const t0 = performance.now();
+      for (const ty of ["pointerdown", "pointerup", "pointercancel", "click"])
+        addEventListener(ty, (e) => window.__qlxLog.push(`${ty}@${Math.round(e.timeStamp - t0)}/${Math.round(performance.now() - t0)} ${e.target?.className?.toString?.().slice(0, 24)}`), { capture: true });
+    });
+    await qlxFinger(page, cdp, a, 60);
+    const gone = await qlxGone(page, k1);
+    if (gone.length) gone.push(`  events ${JSON.stringify(await page.evaluate(() => window.__qlxLog))}`);
+    fails.push(...gone);
+    // A long press on the next X let go in place: a lift's release, the item stays.
+    const b = await qlxAt(page, k2);
+    if (b) await qlxFinger(page, cdp, b, 700);
+    if (!b || !(await qlxKeys(page)).includes(k2)) fails.push(`quick-launch X: a held press let go on ${k2}'s X removed it (a lift's release is no remove)`);
+  } finally {
+    await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false }).catch(() => {});
+    await qlxSet(page, was ?? null, false);
+  }
+  return fails;
 }
 
 /** QP1's checks ([folded]: a narrow screen, the card a bottom sheet): hotspot, Display, Bluetooth; closes; failure. */
@@ -9268,7 +10124,7 @@ async function webWindowMaskCheck() {
     await g.wwRaise(ww, W);
     await g.wwSwipe(ww, el);
     await g.wwHidden(ww);
-    g.wwMaximise(ww, W);
+    await g.wwMaximise(ww, W);
     return ww.fails;
   } finally {
     ww.restore();
@@ -9414,14 +10270,40 @@ async function wwHidden(ww) {
 }
 
 /** Maximise fills the work area (the pages' box, above the dock) and restores the frame it had. */
-function wwMaximise(ww, W) {
+async function wwMaximise(ww, W) {
   W.toggleMaximise(903);
   const a = W.workArea();
   const m = W.webWins.value.find((w) => w.id === 903);
   ww.expect(!!m?.restore && Math.abs(m.w - (a.right - a.left)) <= 1 && Math.abs(m.h - (a.bottom - a.top)) <= 1, `full screen: ${JSON.stringify(m)} doesn't fill the work area ${JSON.stringify(a)}`);
+  await window.__wwg.wwMergedBar(ww, 903);
   W.toggleMaximise(903);
   const r = W.webWins.value.find((w) => w.id === 903);
   ww.expect(!r?.restore && r?.w === 360 && r?.h === 300, `restore: ${JSON.stringify(r)} isn't back at 360x300`);
+}
+
+/**
+ * MB1 (the user, "Maximised window's top bar takes taps": its buttons, title and drag dead): maximised, the bar's merge
+ * ("w.f" 17-18) is what the status bar strip takes and hands to home's page (ShadeHost.windowClaims, routed by
+ * system/BarHits.kt) - every control of the bar and its title must lie in [frame left, title end) or [controls, frame
+ * right): one outside them is SystemUI's status bar's tap, never the window's.
+ */
+async function wwMergedBar(ww, id) {
+  await ww.frame();
+  const e = ww.sentFor(id);
+  if (!ww.expect(!!e && e[16] === 1, `MB1: window ${id} isn't maximised in w.f (${e?.[16]})`)) return;
+  const [titleEnd, controls] = [e[17], e[18]];
+  if (!ww.expect(titleEnd >= 0 && controls > titleEnd, `MB1: maximised window ${id}'s bar has no merge (title end ${titleEnd}, controls ${controls})`)) return;
+  const [left, right] = [e[0], e[0] + e[2]];
+  const bar = document.querySelector(`.webwindow[data-wwid="${id}"] .webwindow-title`);
+  if (!ww.expect(!!bar, `MB1: maximised window ${id} has no bar`)) return;
+  const parts = [...bar.querySelectorAll("button, [role=button], .ww-title-label")].filter((el) => el.getBoundingClientRect().width > 0);
+  ww.expect(parts.length >= 2, `MB1: the maximised bar shows ${parts.length} controls (want its title and buttons)`);
+  const claims = [[left, titleEnd], [controls, right]];
+  for (const el of parts) {
+    const r = el.getBoundingClientRect();
+    const inside = claims.some(([l, rt]) => r.left >= l - 1 && r.right <= rt + 1);
+    ww.expect(inside, `MB1: ${el.getAttribute("aria-label") || el.className} (${Math.round(r.left)}..${Math.round(r.right)}) is outside the bar's claims ${JSON.stringify(claims)}: the status bar's tap, not the window's`);
+  }
 }
 
 /** In the page: the LW3 run's modules, its mock host's log, its windows' elements by app key. */
@@ -9548,7 +10430,7 @@ async function lw3End() {
 const LW3_HELPERS = `(window.__lw3f = { ${[lw3Env, lw3Launch, lw3Offer, lw3Timeout, lw3Retry, lw3BadExec, lw3HostFailed, lw3End].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
 
 /** [webWindowMaskCheck]'s helpers into the page (window.__wwg); evaluates to [] (no problems) as a gate step. */
-const WW_HELPERS = `(window.__wwg = { ${[wwHelpers, wwFound, wwCuts, wwMenu, wwRaise, wwStacked, wwSwipe, wwHidden, wwMaximise].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
+const WW_HELPERS = `(window.__wwg = { ${[wwHelpers, wwFound, wwCuts, wwMenu, wwRaise, wwStacked, wwSwipe, wwHidden, wwMaximise, wwMergedBar].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
 
 /** In the page, loaded afresh after desktopsCheck: the stored windows go back on their pages (page 2's hidden). */
 async function desktopsReloaded() {
@@ -9619,7 +10501,8 @@ const claimTickets = () => opening.splice(0);
 async function releaseTickets(tickets) {
   for (const t of tickets) {
     await t.opened.catch(() => {});
-    if (t.context) await t.context.close().catch(() => {});
+    // Bounded: a wedged renderer's close must not hold its scene slot (every scene queued behind it) forever.
+    if (t.context) await Promise.race([t.context.close().catch(() => {}), new Promise((r) => setTimeout(r, 15000))]);
     if (t.slot) sceneDone();
   }
 }
@@ -9930,6 +10813,20 @@ browser.waitForTarget = (predicate, options = {}) => waitForTarget(predicate, { 
 let failed = 0;
 try {
   const runs = [];
+  // The run's watchdog (11-02 hang): every minute with no scene settled it names the scenes still unsettled (live or
+  // queued for a slot); at GATE_RUN_MS (default 15 min) each unsettled scene is a FAIL by name and the run exits 1 -
+  // never a gate silent for 25 min with its container up.
+  const pending = new Set();
+  let lastSettled = Date.now();
+  setInterval(() => {
+    if (Date.now() - lastSettled < 60000 || !pending.size) return;
+    console.log(`gate: no scene settled for ${Math.round((Date.now() - lastSettled) / 1000)} s; unsettled (${live} live): ${[...pending].slice(0, 12).join(", ")}`);
+  }, 60000).unref();
+  setTimeout(() => {
+    for (const n of pending) console.log(`FAIL ${n}: unsettled at the gate's deadline (${RUN_MS / 1000} s)`);
+    console.log("gate: run deadline - exiting");
+    process.exit(1);
+  }, RUN_MS).unref();
   // A run not in GATE_ONLY: open() throws SKIP before it makes a page; it reports nothing.
   // A scene's pages close (and free their scene slots) once all of what this push brought settled.
   runs.push = (...ps) => {
@@ -9937,8 +10834,17 @@ try {
     // A scene that threw (a protocol timeout out of a step, say) is that scene's FAIL, named by its first page - not
     // the whole run's crash with no scene reported (gate.sh retries it if that was the machine).
     const name = tickets[0]?.name ?? "?";
-    const all = ps.map((p) => p.catch((e) => (e === SKIP ? null : { name, problems: [`run: ${String(e?.message ?? e).split("\n")[0]}`], warnings: [], ms: 0 })));
-    Promise.allSettled(all).then(() => releaseTickets(tickets));
+    const caught = ps.map((p) => p.catch((e) => (e === SKIP ? null : { name, problems: [`run: ${String(e?.message ?? e).split("\n")[0]}`], warnings: [], ms: 0 })));
+    // Per-scene cap (11-02: one scene never settled and the whole gate hung 25 min with the container up, nothing said):
+    // from when the scene's first page got its slot, SCENE_MS (GATE_SCENE_MS, default 90 s, at least 2x the puppeteer
+    // budget) - then it is that scene's FAIL by name and its pages close; the rest of the run goes on.
+    pending.add(name);
+    const all = caught.map((p) => new Promise((done) => {
+      p.then(done);
+      const arm = () => setTimeout(() => done({ name, problems: [`scene timeout: no result in ${SCENE_MS / 1000} s (a wait that never resolves)`], warnings: [], ms: SCENE_MS }), SCENE_MS);
+      (tickets[0]?.opened ?? Promise.resolve()).then(arm, arm);
+    }));
+    Promise.allSettled(all).then(() => (pending.delete(name), (lastSettled = Date.now()), releaseTickets(tickets)));
     return Array.prototype.push.apply(runs, all);
   };
   if (process.env.SHELL_PAGES !== "0") {
@@ -10123,6 +11029,9 @@ try {
   }
   for (const [mode, width, height] of [["windowbar", 280, 27], ["statusbar", 404, 46]])
     runs.push(open(browser, `${ORIGIN}/index.html?mode=${mode}`, `chrome-${mode}`, { width, height }).then((r) => whenReady(r, () => r.page.evaluate(mode === "windowbar" ? windowChromeCheck : statusChromeCheck))));
+  // The recording light at the camera folded (the cover's centred hole) and unfolded (the inner screen's, top right).
+  for (const [label, width, hole] of [["folded", 404, { x: 190, y: 10, width: 24, height: 24 }], ["unfolded", 821, { x: 752, y: 9, width: 22, height: 22 }]])
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=statusbar`, `rec-light-${label}`, { width, height: 46 }).then((r) => whenReady(r, () => r.page.evaluate(recordingRingCheck, hole))));
   // The pill (bar.tsx, grow.tsx): every empty pill on home is one --pill-height tall - the foot's, PowOS AI's compose,
   // and the search widget at every size (one row, two rows, narrow), also after it was measured narrow and widened
   // again (2026-10-22: a pill measured narrow kept that height - three rows of placeholder - once wide again).
@@ -10179,12 +11088,14 @@ try {
       }),
     );
   }
-  // Merged tiles in a straight stack (grid.tsx groupSpans/joins; the user's steam-over-fetch, 2026-10-28): a wide widget
-  // over a half-width one shows as ONE rectangle - one width, outer edges on the grid lines, the shared side a seam, no
-  // inner corner. Folded and unfolded.
+  // Merged widgets M1-M2 (grid.tsx joins; the user's 2026-10-28 "looks ugly af if the widgets arent the same width"):
+  // an equal-width stack is one seamless surface, an unequal one two separate tiles with the normal gap. Folded and
+  // unfolded. And edit-mode resize R1-R3 (corner handle resizes, to whole cells, the actions pill clear of the widget above).
   if (process.env.SHELL_PAGES !== "0")
-    for (const [label, viewport] of [["folded", { width: 412, height: 915 }], ["unfolded", { width: 900, height: 1000 }]])
+    for (const [label, viewport] of [["folded", { width: 412, height: 915 }], ["unfolded", { width: 900, height: 1000 }]]) {
       runs.push(open(browser, `${ORIGIN}/index.html`, `joins-${label}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(joinsCheck))));
+      runs.push(open(browser, `${ORIGIN}/index.html`, `edit-resize-${label}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(editResizeCheck))));
+    }
   // An "at work" session's terminal at the screen's geometry (ui/terminal.tsx, session.tsx): folded and unfolded.
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
@@ -10283,9 +11194,31 @@ try {
         return fails;
       })));
   }
+  // K4: the lock cards' live blur goes with them on the unlock swipe, nothing left behind. Folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=lock`, `lock-unlock-glass-${label}`, viewport).then((r) => whenReady(r, async () => {
+        // Its helpers as the page's globals (an evaluated function carries no closure).
+        await r.page.evaluate([lockGlassOn, lockTopOf, lockSwipeUp, lockGlassFails].map(String).join("\n"));
+        const fails = await r.page.evaluate(lockUnlockGlassScene);
+        console.log(`     lock-unlock-glass-${label}: ${await r.page.evaluate(() => window.__lockGlass).catch(() => "?")}`);
+        return fails;
+      })));
+  // K2 + K3: the lock cards show the shade's icons and wear THE backdrop. Folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=lock`, `lock-cards-${label}`, viewport).then((r) => whenReady(r, async () => {
+        await r.page.evaluate([lockGlassOn, lockSmallIconFails, lockBackdrop, lockBackdropFails].map(String).join("\n"));
+        const fails = await r.page.evaluate(lockCardsScene);
+        console.log(`     lock-cards-${label}: ${await r.page.evaluate(() => window.__lockCards).catch(() => "?")}`);
+        return fails;
+      })));
   // TI1: tiled windows' bars, the w.f touch rects, the divider's pill (the user's layout, 10-31 15:08, unfolded).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "tile-bars-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tileBarsScene(r))));
+  // TF1: a split of two full-screen apps (Chrome, Discord full:true): back in windows, each bar button on its own window.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "tile-full-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tileFullScene(r))));
   // SB1: a sideways swipe on the search bar pages home, with and without tiled windows. Folded and unfolded.
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
@@ -10396,6 +11329,9 @@ try {
   // The folded Chat with the keyboard up (the user, 11-01 21:32, P1: "chat screen broken when trying to type").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-keyboard", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiKeyboardCheck(r.page))));
+  // Unfolded as a work board, not a huge chat: By area one line per area, needs-you first; perf trace a card; W5 folded.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-areas", { width: 821, height: 883 }).then((r) => whenReady(r, () => aiAreasCheck(r.page))));
   // Unfolded, no keyboard: the newest message and "thinking…" end over the shared bar (the user, 11-01 22:1x: "smh").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-wide-clear", { width: 821, height: 883 }).then((r) => whenReady(r, () => aiWideClearCheck(r.page))));
@@ -10425,9 +11361,9 @@ try {
         if (!fails.length) console.log(`backdrop-${part}-${label}: ${JSON.stringify(read)}`);
         return fails;
       })));
-  // The design language's probe (dev/design-lint.js; docs/DESIGN-LANGUAGE.md §4 monospace, §6 pop-ins): REPORT-ONLY -
-  // it prints what it found and never fails (returns no problems) until the manager turns it on.
-  if (process.env.SHELL_PAGES !== "0") designLintRuns(browser, runs);
+  // The design language's probe (dev/design-lint.js; docs/DESIGN-LANGUAGE.md §4 monospace, §6 pop-ins): it fails
+  // the gate for DESIGN_LINT_BLOCKING's surfaces (the launcher) and is report-only for the rest.
+  if (process.env.SHELL_PAGES !== "0") for (const run of designLintRuns(browser)) runs.push(run());
   // The pinned dock never fades (folded: the dock pages to the recent apps; the user, 2026-10-23).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "dock-no-fade", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(dockPinnedNoFade))));
@@ -10449,6 +11385,8 @@ try {
     runs.push(open(browser, `${ORIGIN}/index.html`, "home-return", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(homeReturnCheck))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-thumbs", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(switcherThumbsCheck))));
+    for (const [name, viewport, layout] of [["folded", { width: 404, height: 900 }, "2v"], ["unfolded", { width: 821, height: 883 }, "2h"]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `switcher-split-pair-${name}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(switcherSplitPairCheck, layout))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "swipe-home-one-anim", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(swipeHomeOneAnimCheck))));
   // X1/X2 (board one-swipe-up-gesture-for-home-and-over-apps): the home swipe over the switcher, folded and unfolded;
@@ -10460,6 +11398,9 @@ try {
   // Board swiping-a-game-or-linux-app-away-in-the-switcher: a Linux window's card swiped away is that window's close.
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-swipe-close", { width: 404, height: 900 }).then((r) => whenReady(r, () => switcherSwipeCloseCheck(r.page))));
+  // Board switcher-shows-every-open-window-linux-too: a maximised Linux window has its card; opened, it comes back.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-linux-max", { width: 404, height: 900 }).then((r) => whenReady(r, () => switcherLinuxMaxCheck(r.page))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeCheck))));
     runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme-heal", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeHealCheck))));
@@ -10533,6 +11474,15 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, position] of [["folded", "bottom"], ["folded", "right"], ["unfolded", "bottom"], ["unfolded", "right"], ["unfolded", "left"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `dock-search-${label}-${position}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos) => (await importShim("./dev/dock-search-check.js")).dockSearchCheck(pos), position))));
+  // Perf P1 (dev/dock-search-check.js dockSpeechRenders; 02:23 trace): a dictation's words streaming in redraw the dock
+  // button only for its on/off, the dock and its cells never - folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const label of ["folded", "unfolded"])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `dock-speech-renders-${label}`, dockOpensView[label]).then((r) => whenReady(r, async () => {
+        const o = await r.page.evaluate(async () => (await importShim("./dev/dock-search-check.js")).dockSpeechRenders("bottom"));
+        console.log(`dock-speech-renders-${label}: renders over 20 words ${JSON.stringify(o.counts)}`);
+        return o.fails;
+      })));
   // SW1 (dev/dock-search-check.js; the user, 2026-10-31 15:34): edit mode's drag docks home's search and back - the old
   // hidden setting migrates, the defaults, the bar onto the dock (a gap at the separator, then the button, no bar), the
   // button onto home (the bar widget at the drop cell), the spot kept across reloads.
@@ -10651,6 +11601,11 @@ try {
     for (const [name, url, where] of [["folded-launcher-home", "index.html", "home"], ["folded-launcher-pull", "index.html?mode=pull", "pull"]])
       runs.push(open(browser, `${ORIGIN}/${url}`, `align-${name}`, dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async (w, n) => (await importShim("./dev/align-check.js")).alignOpensAtStart(w, n), where, name))));
   }
+  // SA1-SA3 (dev/align-check.js anchorPulls; ask-1a198007bff): "open where the finger starts" - off as before, on the
+  // shade's content around where the pull began (top, middle, near the foot; the left and the right half), folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const label of ["folded", "unfolded"])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, `shade-anchor-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (l) => (await importShim("./dev/align-check.js")).anchorPulls(l), label))));
   // The same in the user's unfolded home: the dock on the right, the pill below it, 821x883 (the phone, 2026-10-28).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-keyboard-side", { width: 821, height: 883 }).then((r) => whenReady(r, () => launcherKeyboardSide(r.page, { width: 821, height: 883 }))));
@@ -10669,6 +11624,12 @@ try {
   // and when the last user stops Preact's options hooks are the originals again - zero cost when off.
   if (process.env.SHELL_PAGES !== "0" && fs.existsSync(path.join(ROOT, "ui/renderscan.ts")))
     runs.push(open(browser, `${ORIGIN}/index.html`, "render-scan").then((r) => whenReady(r, () => r.page.evaluate(renderScanCheck))));
+  // The same on the surfaces' own pages (renderfollow.ts): each surface's overlay and recording count its renders.
+  if (process.env.SHELL_PAGES !== "0" && fs.existsSync(path.join(ROOT, "ui/renderfollow.ts"))) {
+    for (const surface of ["shade", "lock", "recents", "pull", "assist"])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=${surface}`, `render-scan-${surface}`, { width: 404, height: 900 })
+        .then((r) => whenReady(r, () => r.page.evaluate(surfaceRenderScan, surface))));
+  }
   // Fold <-> unfold: home's layout and dock change in the first frame after the resize, the screen object lagging
   // (foldSameFrame); a long press that ends with a fold change leaves edit mode off (foldGrip).
   if (process.env.SHELL_PAGES !== "0") {
@@ -10893,6 +11854,19 @@ try {
         return { ...r, ready: true, ms: Date.now() - r.started };
       }),
     );
+  // The quick-launch row's X (launchers.tsx Chip, the user 11-02: "Pressing X to remove anything from the quick launch
+  // doesn't work"): in edit mode a finger's tap (CDP touch: the phone's pointerdown/up + click) on an item's X takes it
+  // off the row and the store - the row's reorder (reorder.ts) used to eat that click as a select; a long press there
+  // let go in place is a lift's release, not a remove. Folded (cover) and unfolded (inner screen).
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [name, view] of [["cc-ql-x-folded", { width: 404, height: 900 }], ["cc-ql-x-unfolded", { width: 821, height: 883 }]])
+      runs.push(
+        open(browser, `${ORIGIN}/index.html?mode=shade`, name, view).then(async (r) => {
+          await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+          r.problems.push(...(await quickLaunchX(r.page).catch((e) => [`quick-launch X: ${e.message.split("\n")[0]}`])));
+          return { ...r, ready: true, ms: Date.now() - r.started };
+        }),
+      );
   // The shade's further pull (ccexpand.ts; the user, 2026-10-22: only "no notifications" moved, the rest stood still):
   // driven through gesture.ts as a finger (a mouse's pointer events on the panel), the whole panel follows it - what's
   // under the control center moves down by the finger's travel and the rest's toggles show under the row, the row
@@ -10923,6 +11897,17 @@ try {
           return { ...r, ready: true, ms: Date.now() - r.started };
         }),
       );
+  // SD1-SD4 (dev/shade-design-check.js; design wave 4, docs/DESIGN-LANGUAGE.md): the panel on THE backdrop (no blur or
+  // tint of its own, corners on the scale), a notification's picture fades in loaded, a category's members arrive with
+  // their own fade, a long press opening a control's page ticks the haptic once.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, `shade-design-${label}`, viewport).then((r) => whenReady(r, async () => {
+        const call = (fn, ...args) => r.page.evaluate(async (f, a) => (await importShim("./dev/shade-design-check.js"))[f](...a), fn, args);
+        const fails = [];
+        for (const f of ["panelMaterial", "picture", "members", "longPressHaptic"]) fails.push(...(await call(f, label)));
+        return fails;
+      })));
   // NS1-NS4 (dev/notif-stacks-check.js; the user, 11-01 16:39: "just show like 3 cards and then an 'x more' hint"):
   // groups of 1, 3 and 7 all on screen at once, each up to 3 full cards one after another and "+4 more" on the 7, top-
   // and bottom-aligned; a tap on "+4 more" opens that group alone. NS5-NS7 (11-01 16:47: "Let's move the notifications
@@ -11058,7 +12043,8 @@ try {
     for (const w of r.warnings.slice(0, 3)) console.log(`     ${r.name} console: ${w.slice(0, 200)}`);
   }
 } finally {
-  await browser.close();
+  // A page stuck in a loop can hold close() too: never longer than 15 s, the exit below ends the container either way.
+  await Promise.race([browser.close().catch(() => {}), new Promise((r) => setTimeout(r, 15000).unref())]);
 }
 process.exit(failed ? 1 : 0);
 

@@ -17,7 +17,7 @@ import { chatting, drawer, homePage, launcherIsOverlay, openPanel, page, pullKin
 import { powos } from "../bridge.ts";
 import { tick } from "./haptics.ts";
 import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
-import { dictate, drop, finish, finishing, forget, hearing, listen, listeningFor, makeHold, release, settle, speech, stopTap, type MicTarget } from "./dictation.ts";
+import { dictate, drop, finish, finishing, forget, hearing, listen, listeningFor, makeHold, micOn, release, settle, speech, stopTap, type MicTarget } from "./dictation.ts";
 import { remoteHearing, startBarSync } from "./barsync.ts";
 
 /**
@@ -66,7 +66,7 @@ export { dictate, hearing, interrupt, speech, type MicTarget } from "./dictation
 export function Mic({ target }: { target: MicTarget }) {
   const press = useRef<{ x: number; y: number; timer: number; held: boolean; cancelled: boolean } | null>(null);
   // Another window's dictation shows here too (home's, under the launcher overlay): a tap ends it, never a second.
-  const on = speech.value.listening || !!speech.value.elsewhere || listeningFor(target);
+  const on = micOn.value || listeningFor(target);
   // Shown: the recognizer bound and ready (it doesn't listen), so a press starts at once.
   useEffect(() => void powos.speech.warm(), []);
   return (

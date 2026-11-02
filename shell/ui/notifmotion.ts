@@ -46,8 +46,11 @@ const grow = (el: HTMLElement, from: number, to: number) =>
 /** [el]'s size animations from an earlier change, dropped so its new height can be read. */
 const settle = (el: HTMLElement) => el.getAnimations().forEach((a) => a.id === GROW && a.cancel());
 
-/** [els] (in their order) faded and slid in, each [STAGGER_MS] after the one before. */
-function fadeIn(els: Element[]) {
+/**
+ * [els] (in their order) faded and slid in, each [STAGGER_MS] after the one before - the lists' arrival (also the
+ * control center's members as a category unfolds, control.tsx Members).
+ */
+export function fadeIn(els: Element[]) {
   els.forEach((el, i) =>
     el.animate([{ opacity: 0, transform: `translateY(${-SLIDE_PX}px)` }, { opacity: 1, transform: "none" }], {
       duration: FADE_MS,

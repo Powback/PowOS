@@ -59,6 +59,8 @@
 #               a warning for a stride under width x 4 or a 90/270 pre-rotated buffer whose width isn't its output's height
 #   0050        ours: a task the app quit (0042) says "close <id>" once its window really goes (the task was removed
 #               first, so its own close hook never fired: the ship gate's hidden Linux check never saw the close)
+#   0051        ours: the Android screen a full-screen task gets (daemon screen, window task buffers) on Xwayland's
+#               root as _POWOS_SCREEN_SIZE - unity-screen launches a game at its container's size, not KWin's output
 #
 # HACK: same pkgname as Arch's kwin with pkgrel 3.1 (makepkg allows only integer[.integer]; ".1" = ours), so every Plasma package's
 # "depends=(kwin)" is satisfied by ours and pacman sees it as newer than 6.7.5-3. The real fix is
@@ -68,7 +70,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.57
+pkgrel=3.58
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -134,11 +136,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0047-backends-anland-a-full-screen-the-app-asked-for-takes-the-app-s-size.patch
           0048-backends-anland-with-no-desktop-consumer-the-output-follows-the-window-tasks-screen.patch
           0049-backends-anland-a-task-s-window-stays-inside-the-output.patch
-          0050-backends-anland-a-quit-task-s-window-says-close-when-it-goes.patch)
+          0050-backends-anland-a-quit-task-s-window-says-close-when-it-goes.patch
+          0051-backends-anland-the-screen-a-full-screen-task-gets-is-on-Xwayland-s-root.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver

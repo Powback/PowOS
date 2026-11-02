@@ -31,12 +31,57 @@ type Part = { rec?: number; recPart?: number; of?: number; data?: string };
 function validPart(s: Part): s is Part & { of: number; data: string } {
   return s.rec === recId && Number(s.of) > 0 && Number(s.of) <= 400 && typeof s.data === "string";
 }
+type Parts = { parts: string[]; got: number };
+/** One part into [e] (a new count starts it over). */
+function addPart(e: Parts, s: Part & { of: number; data: string }) {
+  if (e.parts.length !== s.of) { e.parts = new Array(s.of).fill(""); e.got = 0; }
+  const i = Number(s.recPart);
+  if (i >= 0 && i < s.of && !e.parts[i]) { e.parts[i] = s.data; e.got++; }
+}
 function onPart(s: Part) {
   if (!validPart(s)) return;
-  if (homeParts.length !== s.of) { homeParts = new Array(s.of).fill(""); homeGot = 0; }
-  const i = Number(s.recPart);
-  if (i >= 0 && i < s.of && !homeParts[i]) { homeParts[i] = s.data; homeGot++; }
-  if (homeGot === s.of) homeDone?.();
+  const e = { parts: homeParts, got: homeGot };
+  addPart(e, s);
+  homeParts = e.parts; homeGot = e.got;
+  if (allIn()) homeDone?.();
+}
+// The surfaces' own pages (renderfollow.ts: shade, pull, lock, recents, assist): each says hello when the recording
+// starts, then sends its render scan's section in parts at the end. The stop waits for every one that said hello.
+const MAX_SURFACES = 12;
+let surfaceParts = new Map<string, Parts>();
+/** The surface's entry (made on its first message: its hello), or null when it isn't this recording's or one too many. */
+function surfaceOf(s: Part & { surface?: unknown }): Parts | null {
+  if (s.rec !== recId || typeof s.surface !== "string") return null;
+  const e = surfaceParts.get(s.surface);
+  if (e || surfaceParts.size >= MAX_SURFACES) return e ?? null;
+  const made = { parts: [], got: 0 };
+  surfaceParts.set(s.surface, made);
+  return made;
+}
+function onSurface(s: Part & { surface?: unknown; hello?: boolean }) {
+  const e = surfaceOf(s);
+  if (!e || s.hello || !validPart(s)) return;
+  addPart(e, s);
+  if (allIn()) homeDone?.();
+}
+const complete = (e: Parts) => e.got > 0 && e.got === e.parts.length;
+/** Home's detail and every surface that said hello are in. */
+function allIn() {
+  return homeGot > 0 && homeGot === homeParts.length && [...surfaceParts.values()].every(complete);
+}
+/** Each surface's renders section (renderscan.ts renderReport), or why there is none. */
+function takeSurfaces() {
+  const out: Record<string, Parameters<typeof rendersSummary>[0]> = {};
+  for (const [name, e] of surfaceParts) {
+    try { out[name] = complete(e) ? JSON.parse(e.parts.join("")) : { error: `${name} said hello but its renders didn't all come (${e.got}/${e.parts.length} parts in 3 s)` }; }
+    catch (err) { out[name] = { error: `${name}'s renders unreadable: ${err}` }; }
+  }
+  surfaceParts = new Map();
+  return Object.keys(out).length ? out : undefined;
+}
+/** The summary's surfaces entry: each surface's renders as rendersSummary puts home's. */
+function surfacesSummary(surfaces: ReturnType<typeof takeSurfaces>) {
+  return surfaces && Object.fromEntries(Object.entries(surfaces).map(([k, r]) => [k, rendersSummary(r)]));
 }
 /** What home's long frames were made of (the summary's few lines; the full list is in `home.loaf`). */
 function attribution(home: { loaf?: Loaf[]; inputs?: unknown[]; state?: unknown[] } | undefined) {
@@ -218,7 +263,7 @@ async function readSetting() {
 /** Turn the meter on/off (persisted). Other windows pick it up within a few seconds. */
 export function setMeter(on: boolean) { setEnabled(on); void powos.store.set(STORE, { on }).catch(() => {}); }
 
-// The render scan's live overlay on home (renderoverlay.ts): {renders} in "perf.meter", flipped by the meter's "rs".
+// The render scan's live overlay on home and the surfaces' pages (renderoverlay.ts; renderfollow.ts): {renders} in "perf.meter", flipped by the meter's "rs".
 let overlay = false;
 function showOverlay(v: unknown) {
   overlay = !!v;
@@ -268,7 +313,7 @@ function beginRecord() {
   recT = new Float32Array(MAX_FRAMES); recDt = new Float32Array(MAX_FRAMES);
   observe(); rec = true;
   settleTimer = window.setTimeout(() => { if (rec) beginMain(); }, SETTLE_MS); // home's frames, from the same point
-  recId = Date.now(); homeParts = []; homeGot = 0;
+  recId = Date.now(); homeParts = []; homeGot = 0; surfaceParts = new Map();
   void powos.store.set(STORE, { on: true, rec: recId, renders: overlay }).catch(() => {});
   void powos.perf?.native?.(true).catch(() => null); // the host's main-thread blocks (MainStallWatch.kt), from now
   if (!raf) start();
@@ -297,17 +342,18 @@ async function endRecord() {
   const mn = endMain(), fromMain = mn.n > 1;
   const native = await stopNative(settleAt);
   void powos.store.set(STORE, { on: true, stop: recId, renders: overlay }).catch(() => {}); // home stops and sends its detail (or why not)
-  await new Promise<void>((r) => { homeDone = r; setTimeout(r, homeGot && homeGot === homeParts.length ? 0 : 3000); });
+  await new Promise<void>((r) => { homeDone = r; setTimeout(r, allIn() ? 0 : 3000); });
   homeDone = null;
   let home: ({ loaf?: Loaf[]; inputs?: unknown[]; state?: unknown[]; missed?: string; error?: string } & Record<string, unknown>) | undefined;
   try { home = homeGot && homeGot === homeParts.length ? JSON.parse(homeParts.join("")) : undefined; } catch { home = undefined; }
   homeParts = []; homeGot = 0;
   const sum = fromMain ? summarise({ ...mn, evs: events, durMs, mode: `main shell (home), ${mode} bar recorded` })
     : summarise({ t: recT, dt: recDt, n, evs: events, durMs, mode: `${mode} window only, main shell not reporting (${powos.host})` });
-  const renders = takeRenders(home);
-  Object.assign(sum, { settle: SETTLE_MS, home: homeLine(home), native: nativeLine(native), renders: rendersSummary(renders) });
+  const renders = takeRenders(home), surfaces = takeSurfaces();
+  Object.assign(sum, { settle: SETTLE_MS, home: homeLine(home), native: nativeLine(native), renders: rendersSummary(renders),
+    surfaces: surfacesSummary(surfaces) });
   const full = { summary: sum, main: fromMain ? { frameDeltas: Array.from(mn.dt, (x) => Math.round(x * 10) / 10) } : undefined, when: new Date().toISOString(), ua: navigator.userAgent, dpr: devicePixelRatio,
-    frameTimes: Array.from(recT.subarray(0, n), (x) => Math.round(x)), frameDeltas: Array.from(recDt.subarray(0, n), (x) => Math.round(x * 10) / 10), events, home, native, renders };
+    frameTimes: Array.from(recT.subarray(0, n), (x) => Math.round(x)), frameDeltas: Array.from(recDt.subarray(0, n), (x) => Math.round(x * 10) / 10), events, home, native, renders, surfaces };
   recT = new Float32Array(0); recDt = new Float32Array(0);
   await saveAndSend(full, sum);
   busy = false;
@@ -329,7 +375,7 @@ export function FpsMeter() {
     ui.root.hidden = !enabled;
     void readSetting();
     const poll = window.setInterval(() => { if (!rec) void readSetting(); }, 30000); // backstop; the host pushes changes
-    const offs = [powos.on("perf.meter", (v: { on?: boolean; renders?: boolean } | null) => { setEnabled(!!v?.on); showOverlay(v?.on && v.renders); }), powos.on("perf.sample", (s: ({ recPart?: number } & Parameters<typeof onSample>[0]) | null) => s && "recPart" in s ? onPart(s) : (onSample(s), follow()))];
+    const offs = [powos.on("perf.meter", (v: { on?: boolean; renders?: boolean } | null) => { setEnabled(!!v?.on); showOverlay(v?.on && v.renders); }), powos.on("perf.sample", (s: ({ recPart?: number } & Parameters<typeof onSample>[0]) | null) => s && "surface" in s ? onSurface(s) : s && "recPart" in s ? onPart(s) : (onSample(s), follow()))];
     return () => { themeChanges.disconnect(); clearInterval(poll); offs.forEach((o) => o()); ui = null; };
   }, []);
   // Rendered always (hidden while off) so the node and canvas are stable; the bar never re-renders it per frame.
@@ -338,6 +384,6 @@ export function FpsMeter() {
     <canvas ref={cv} width={90} height={16} aria-hidden="true" />
     <span class="fps-num" ref={num}>{"   "}</span><span class="fps-unit">fps</span>
     <span class="fps-rec" ref={label} />
-    <span class="fps-rs" ref={rs} role="switch" aria-label="render scan overlay on home" onClick={toggleOverlay}>rs</span>
+    <span class="fps-rs" ref={rs} role="switch" aria-label="render scan overlay on home and every surface" onClick={toggleOverlay}>rs</span>
   </button>;
 }

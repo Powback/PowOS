@@ -178,6 +178,18 @@ verify_tree() {
   [ -d "$nm" ] || nm=$REPO/.claude/worktrees/powos-multiplatform/shell/node_modules
   [ -e "$VR/shell/node_modules" ] || [ ! -d "$nm" ] || ln -s "$nm" "$VR/shell/node_modules"
 }
+# supersede_key <cmd...>: what makes two queued jobs of one task the same check (f317): the command without its
+# --round N (an e2e round number) and, for kwin-install.sh, without its version (only the newest install matters).
+supersede_key() {
+  local a out=() skip=0 kw=0
+  for a in "$@"; do
+    [ $skip = 1 ] && { skip=0; continue; }
+    [ "$a" = --round ] && { skip=1; continue; }
+    [ $kw = 1 ] && continue
+    out+=("$(basename -- "$a")"); [ "$(basename -- "$a")" = kwin-install.sh ] && kw=1
+  done
+  printf '%s\n' "${out[*]}"
+}
 case "${1:-}" in
 add)
   shift; close=0; name=; screen=; budget=300; dev=phone
@@ -310,6 +322,19 @@ except Exception: pass' 2>/dev/null) || ids=
         rm -f "$o"; continue
       fi
       echo "already queued as $(basename "$o" .job) - not added again (QUEUE_DUP=1 to add anyway)"; exit 0
+    done
+    # f317: "test all" replayed 35 jobs, incl. stale ones: e2e part 1 twice (two rounds: only --round differed) and
+    # kwin-install 3.35 AND 3.36 for one task. The same task + the same check (supersede_key: --round dropped; for
+    # kwin-install.sh the script alone, a newer version replaces an older one) waiting: the newest add wins - the
+    # older job goes to done/ as .superseded (it would only test an older build or a round nobody reviews).
+    nk=$(supersede_key "${cmd[@]}")
+    for o in "$qd"/*.job; do
+      [ -f "$o" ] || continue
+      grep -qxF "task=$(printf '%q' "$task")" "$o" || continue
+      ok_=$(cmd=(); eval "$(grep -m1 '^cmd=' "$o")" 2>/dev/null; supersede_key "${cmd[@]}")
+      [ -n "$nk" ] && [ "$ok_" = "$nk" ] || continue
+      mkdir -p "$Q/done"; mv -f "$o" "$Q/done/$(basename "$o" .job).superseded"
+      echo "superseded queued $(basename "$o" .job) (the same check for this task, older) - this add replaces it"
     done
   fi
   qd=$Q; [ "$dev" = emu ] && { qd=$E; mkdir -p "$E"; }
@@ -537,7 +562,9 @@ EOS
       done
       N=${#sel[@]}; k=0; pass=0; fail=0; first=; prev=; results=
       [ $N -gt 0 ] || { status "" '{"done":true}' "rm -f /tmp/powos-verify-go"; [ $held = 0 ] && exit 5; exit 7; }
-      [ -n "$go" ] && echo "$(date +%T) go from the phone: $go ($N checks)"
+      # f317: what a "test all" costs, before it starts: the count and the summed budgets (an upper bound).
+      est=0; for j in "${sel[@]}"; do b=$(sed -n 's/^budget=//p' "$j" | head -1); est=$((est + ${b:-300})); done
+      [ -n "$go" ] && echo "$(date +%T) go from the phone: $go ($N checks, at most ~$(( (est + 59) / 60 )) min)"
       for j in "${sel[@]}"; do
         [ -f "$j" ] || continue
         # f97: a `queue.sh pause` mid-window (its stop flag only reaches a check that's ALREADY running, via beat's
@@ -633,6 +660,13 @@ EOS
         if [ -n "$why" ]; then
           for a in "${cmd[@]}"; do case "$a" in *.sh) b=$(basename "$a" .sh)
             phone_sh "pkill -f '$b-phone.sh' 2>/dev/null; :" >/dev/null 2>&1 ;; esac; done
+        fi
+        # A check that had already stopped for the user (its last verdict line "SKIP:", e.g. e2e's "aborted - the user
+        # touched the phone") and then ran past its budget in its own clean-up (11-01 17:58, round 204 part 1: FAIL
+        # timeout at "SKIP: ... aborted") is what it said it was: rc 3, re-queued for the next window, not a FAIL.
+        if [ "$why" = timeout ] && grep -E '^(PASS|FAIL|SKIP)' "$log" | tail -1 | grep -q '^SKIP:'; then
+          echo "SKIP: past its ${budget}s budget in its clean-up, after it had already stopped for the user" >> "$log"
+          echo "$(date +%T) $n: past its budget after its own SKIP - re-queued, not a FAIL"; why=; rc=3
         fi
         if [ "$why" = timeout ]; then
           rc=124; echo "FAIL timeout: still running after its ${budget}s budget - killed" >> "$log"

@@ -4,12 +4,15 @@
  * navigation inset (or the keyboard), folded and unfolded, whatever side home's dock is on.
  * LT1 (the user, 2026-10-31: "Give them a little breathing space on the top"): the app grid's and the folders page's
  * first row start a row gap (24 px) below the panel's top edge.
+ * LR1 (the user, 2026-10-30 15:1x, L8b: "more vertical spacing between launcher rows too", unfolded): in desktop mode
+ * the app grid's rows sit at least ROW_GAP apart - a tile's foot to the next row's top (shell.css .home.wide row-gap, 24 px since L8b; 16 before).
  */
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const INSETS = { top: 45.6, bottom: 16.3 };
 const KEYBOARD = 330;
 const BREATHING = 24;
+const ROW_GAP = 24;
 
 /** The pill the user types in: the panel's own (wide) or the launcher's bar pill, whichever is shown. */
 function shownPill() {
@@ -59,6 +62,24 @@ function firstRowGap(list, clipTop) {
   return first.getBoundingClientRect().top - clipTop;
 }
 
+/** The space between the app grid's first two rows ([grid]: .drawer-list > .grid): the next row's top less the first row's foot. */
+function rowSpacing(grid) {
+  const tiles = [...grid.querySelectorAll(":scope > .app")].map((el) => el.getBoundingClientRect()).filter((r) => r.height > 0);
+  const top = tiles[0]?.top;
+  const next = tiles.find((r) => r.top > top + 1);
+  if (top == null || !next) return null;
+  return next.top - Math.max(...tiles.filter((r) => Math.abs(r.top - top) < 1).map((r) => r.bottom));
+}
+
+/** LR1: unfolded (desktop mode), the open app grid's rows at least ROW_GAP apart; folded: nothing to check. */
+function rowsSpaced(at) {
+  const grid = document.querySelector(".home.wide.pull-screen .drawer-page > .drawer-list:not(.drawer-folders) > .grid");
+  if (!grid) return [];
+  const rows = rowSpacing(grid);
+  if (rows == null) return [`${at}: the unfolded app grid shows fewer than two rows`];
+  return rows < ROW_GAP - 0.5 ? [`${at}: the unfolded app grid's rows are ${Math.round(rows)} px apart, not ${ROW_GAP}`] : [];
+}
+
 /** The launcher opened for apps: the app grid's and folders page's first rows a row gap under the panel's top. */
 async function gridBreathes(E, at) {
   E.emit("pull.begin", { kind: "apps" });
@@ -73,6 +94,7 @@ async function gridBreathes(E, at) {
     const what = list.classList.contains("drawer-folders") ? "folders page" : "app grid";
     if (gap != null && gap < BREATHING - 0.5) fails.push(`${at}: the ${what}'s first row starts ${Math.round(gap)} px below the panel's top, not ${BREATHING}`);
   }
+  fails.push(...rowsSpaced(at));
   E.emit("pull.end", { open: false });
   await sleep(300);
   return fails;

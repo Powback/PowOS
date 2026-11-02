@@ -2,8 +2,9 @@
  * A task's card in the switcher (recents.tsx, a layer of home): its app's icon and label above its last frame. A tap
  * opens it (the card grows to the screen, then the app is there); flung or pushed up it's removed, carried on at the
  * finger's speed; let go short of that it springs back; sideways the row scrolls (the browser's, with momentum). The
- * icon (or a long press) opens its menu. Android's split screen is one card (t.split): every app's icon over the whole
- * split - each side's last frame at its share of the screen, side by side as on the screen.
+ * icon (or a long press) opens its menu. Android's split screen is one card (t.split): its apps' icons as ONE combined
+ * icon (GroupIcon, the dock's DG1 group cell's) over the whole split - each side's last frame at its share of the
+ * screen, side by side or one over the other as on the screen (t.splitLayout).
  */
 import { useRef, useState } from "preact/hooks";
 import type { RecentTask, SplitSide } from "../types.ts";
@@ -119,6 +120,10 @@ export const TaskCard = memo(function TaskCard({
           onMenu(t.id, el.current!);
         }, LONG_PRESS);
         drag.current = { x: e.clientX, y: e.clientY, dy: 0, up: null, samples: [{ y: e.clientY, t: e.timeStamp }], press };
+        // The rest of this press is the card's, wherever it goes (a touch is captured by its target anyway): a mouse's or
+        // pen's quick swipe whose moves came coalesced into one far above the card (11-02, gate under load) went to the
+        // layer beside the cards - its release there "a tap beside the cards", the app it was opened over opened.
+        if (e.pointerType !== "touch") el.current!.setPointerCapture(e.pointerId);
       }}
       onPointerMove={(e) => {
         const d = drag.current;
@@ -130,7 +135,7 @@ export const TaskCard = memo(function TaskCard({
           // Up: the card's (removing it); sideways: the row scrolls (the browser has it, touch-action pan-x).
           d.up = dy < 0 && Math.abs(dy) > Math.abs(dx);
           if (d.up) el.current!.setPointerCapture(e.pointerId);
-          else drag.current = null;
+          else (drag.current = null), el.current!.releasePointerCapture(e.pointerId);
         }
         if (!d.up) return;
         // Down past its place it barely moves (a rubber band), up it follows the finger.
@@ -256,21 +261,34 @@ export function SplitIcons({ icons, layout }: { icons: (string | null)[]; layout
   );
 }
 
+/**
+ * A group's combined icon: one tile holding its apps' mini icons (SplitIcons) in its layout - the dock's cell for a
+ * PowOS window group (ui/dockgroups.tsx) and a split card's head (Android's split screen), the same component.
+ */
+export function GroupIcon({ icons, layout, class: cls }: { icons: (string | null)[]; layout?: string; class: string }) {
+  return (
+    <div class={`${cls} group-icon`}>
+      <SplitIcons icons={icons} layout={layout} />
+    </div>
+  );
+}
+
 /** What a head shows of [t]: a new task object from each recents update is the same head when these are. */
 const sameHead = (a: { t: RecentTask }, b: { t: RecentTask }) =>
   a.t === b.t ||
   (a.t.icon === b.t.icon &&
     a.t.label === b.t.label &&
     a.t.pip === b.t.pip &&
+    a.t.splitLayout === b.t.splitLayout &&
     (a.t.split ?? []).length === (b.t.split ?? []).length &&
     (a.t.split ?? []).every((s, i) => s.id === b.t.split![i].id && s.icon === b.t.split![i].icon));
 
-/** A card's head: its app's icon (a split's: every app's) and its label. Re-rendered only when those change ([sameHead]). */
+/** A card's head: its app's icon (a split's: every app's, combined) and its label. Re-rendered only when those change ([sameHead]). */
 const TaskHead = memo(function TaskHead({ t }: { t: RecentTask }) {
   return (
     <div class="task-head">
       {t.split ? (
-        <SplitIcons icons={t.split.map((s) => s.icon)} />
+        <GroupIcon class="task-group" icons={t.split.map((s) => s.icon)} layout={t.splitLayout ?? "2h"} />
       ) : (
         <Icon src={t.icon} />
       )}
@@ -281,12 +299,13 @@ const TaskHead = memo(function TaskHead({ t }: { t: RecentTask }) {
 }, sameHead);
 
 /**
- * A split card's picture: the whole split, each side's last frame at its share of the screen, side by side (a <div>
+ * A split card's picture: the whole split, each side's last frame at its share of the screen, as the split divides it
+ * (side by side, or one over the other folded: t.splitLayout) (a <div>
  * as .task-shot: recents.tsx's landing decodes only an <img> shot, and leaves this one as it is).
  */
 function SplitShot({ t, load, eager }: { t: RecentTask; load: boolean; eager?: boolean }) {
   return (
-    <div class="task-shot task-split">
+    <div class="task-shot task-split" data-layout={t.splitLayout ?? "2h"}>
       {t.split!.map((s) => (
         <SplitSideShot key={s.id} s={s} load={load} eager={eager} />
       ))}

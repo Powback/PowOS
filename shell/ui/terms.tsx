@@ -108,8 +108,8 @@ export function termOf(a: Agent): AgentSession | null {
   return cands.find((s) => hostOf(s) === a.host) ?? (cands.length === 1 ? cands[0] : null);
 }
 
-/** An agent card's "Open terminal" (agents.tsx): its session's terminal; no session found: no button. */
-export function TermButton({ a }: { a: Agent }) {
+/** An agent card's "Open terminal" (agents.tsx; [label]: a row's shorter word): its session's terminal; no session found: no button. */
+export function TermButton({ a, label = "Open terminal" }: { a: Agent; label?: string }) {
   const s = termOf(a);
   if (!s) return null;
   return (
@@ -118,10 +118,10 @@ export function TermButton({ a }: { a: Agent }) {
       class="ag-act fl-term-open"
       onClick={(e) => {
         e.stopPropagation();
-        openTerm(s, (e.currentTarget as HTMLElement).closest(".fl-card"));
+        openTerm(s, (e.currentTarget as HTMLElement).closest(".fl-card, .ag-row"));
       }}
     >
-      Open terminal
+      {label}
     </button>
   );
 }

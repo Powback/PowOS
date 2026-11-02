@@ -1013,20 +1013,27 @@ export async function tileApps(apps: { key: string; label: string }[]): Promise<
   const page = shownPage();
   const ids: number[] = [];
   for (const a of apps.slice(0, 4)) {
+    // TF1 (ask 1a1924af639, "I can't interact with this": Chrome and Discord full:true on the phone): a full-screen app
+    // comes back into its window BEFORE openWindow - whose "to the front as its full-screen app" fired the host's
+    // fullScreen again; its late "webwindows.full" on took the tile out, the last tile went full screen too (SC1), and
+    // both apps sat full screen with no PowOS bar.
+    const full = webWins.value.find((w) => w.key === a.key && w.full);
+    if (full) await backInWindow(full.id);
     const id = await openWindow(a.key, a.label, page);
     if (id == null) {
       console.info(`[tiles] ${a.key} can't be a web window: Android's split instead`);
       return false;
     }
-    // A full-screen app out of a window: back into it first, then tiled.
-    if (webWins.value.find((w) => w.id === id)?.full && powos.webwindows?.toWindow) {
-      await powos.webwindows.toWindow(id).catch(() => false);
-      update(id, { full: false });
-    }
     ids.push(id);
   }
   tileWindows(page, ids);
   return true;
+}
+
+/** Full-screen app [id] back in its window (the host's toWindow; with none, the page's flag alone). */
+async function backInWindow(id: number) {
+  if (powos.webwindows?.toWindow) await powos.webwindows.toWindow(id).catch(() => false);
+  update(id, { full: false });
 }
 
 /** "grid": [id] first, then the page's tiled windows, then its floating ones (topmost first), up to 4. */
@@ -1521,10 +1528,7 @@ export async function unpark(id: number) {
   update(id, { page: p.page, minimised: false });
   const l = tilings.value[p.page] && landing(p.page, id, { kind: "outer", tile: -1, side: p.side });
   if (l) return dock(l);
-  for (const f of webWins.value.filter((v) => v.page === p.page && v.full && v.id !== id)) {
-    if (powos.webwindows?.toWindow) await powos.webwindows.toWindow(f.id).catch(() => false);
-    update(f.id, { full: false });
-  }
+  for (const f of webWins.value.filter((v) => v.page === p.page && v.full && v.id !== id)) await backInWindow(f.id);
   tile(id, p.side);
   console.info(`[tiles] window ${id} unparked into page ${p.page}'s ${p.side} side`);
 }

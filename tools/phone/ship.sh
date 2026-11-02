@@ -180,7 +180,7 @@ run)
   # (verify/e2e-queue.sh: e2e-desktop parts 1-3 + e2e-appapi), unless one is still queued. In the background: queueing
   # is a few quick user.sh calls, never a reason to hold the ship loop. SHIP_E2E=0 turns it off (tests).
   e2e_round() { [ "${SHIP_E2E:-1}" = 1 ] && [ -z "${SHIP_DIR:-}" ] && [ -x "$here/verify/e2e-queue.sh" ] || return 0
-    ( "$here/verify/e2e-queue.sh" --if-idle >> "$Q/e2e.log" 2>&1 & ) ; echo "$(date +%T) e2e: a round of user journeys asked for ($Q/e2e.log)"; }
+    ( "$here/verify/e2e-queue.sh" --if-idle >> "$Q/e2e.log" 2>&1 || echo "$(date '+%F %T') e2e: round NOT queued (queue.sh refused) - $Q/e2e.log" >> "$Q/shipped.log" & ) ; echo "$(date +%T) e2e: a round of user journeys asked for ($Q/e2e.log)"; }
   mail() { local s t ev kind; s=$(mktemp "$Q/mail.XXXX")
     printf 'powos comms send %q %q --from ship-queue >/dev/null 2>&1 || true\n' "${SHIP_MAIL_TO:-coder}" "$1" > "$s"
     # A failed/refused ship is friction too (powos friction: counted, so a recurring refusal shows up as the top item).
@@ -217,6 +217,7 @@ run)
     targets/android/pkgs/fex-emu bin/powos-panel-phone desktop/autostart/powos-panel-phone.desktop \
     lib/powos-tmux-shell lib/self-phone.sh config/etc/profile.d/60-powos-picker-key.sh lib/ai/agents lib/ai/comms/comms-mcp.py \
     tools/app-api lib/ai/manager lib/ai/sandbox desktop/plasmoid units/phone units/phone-android lib/apps/powos-units lib/apps/powos-terms lib/apps/powos-transcribe \
+    targets/android/steam/unity-screen \
     2>/dev/null | grep -v '^lib/ai/sandbox/node_modules/'; }
   # units_gate: nothing ships to the phone that installs a file no unit claims (DU1: every ship registers what it
   # installs). test-units-registry.py reads every deploy script against units/; a FAIL refuses the rooted deploy.
@@ -240,6 +241,16 @@ run)
     if [ -n "$rchg" ] && [ "$(cat "$Q/failed-rooted" 2>/dev/null)" != "$h" ]; then
       [ "$(cat "$Q/rooted-pending" 2>/dev/null)" = "$rbase $h" ] || echo "$rbase $h" > "$Q/rooted-pending"; return 0; fi
     rm -f "$Q/rooted-pending"; return 1; }
+  # rooted_after_apk: HEAD has APK inputs the installed build lacks (and its APK didn't fail): the rooted deploy waits
+  # for that install (11-01: a pass that saw the tip before its request - a runner on its way out fetched it, rooted_due
+  # alone kept it in the loop - had no APK to launch, so it could run the rooted deploy FIRST). rooted_go = due and not
+  # waiting: what keeps the runner up and what lets step 4 run. An APK nobody requested
+  # doesn't keep the runner up: the request that brings it restarts the runner, which then runs both in order.
+  rooted_after_apk() { local h i; h=$(git rev-parse HEAD 2>/dev/null) || return 1
+    i=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true); [ -n "$i" ] || return 1
+    git merge-base --is-ancestor "$h" "$i" 2>/dev/null && return 1
+    [ -n "$(apk_inputs "$i" "$h")" ] && [ "$(cat "$Q/failed-apk" 2>/dev/null)" != "$h" ]; }
+  rooted_go() { rooted_due && ! rooted_after_apk; }
   # The APK ship runs BESIDE the loop, in its own checkout (it builds from it for minutes while ship_tree resets $SR),
   # so a shell change never queues behind an APK's build or idle wait (2026-10-23: shell fixes waited 25-30 min behind
   # one APK). State in $Q/apk/: tip, pid, rc (written when it ends).
@@ -252,6 +263,10 @@ run)
     [ -d "$Q/apk" ] && [ ! -f "$Q/apk/rc" ] || return 1
     kill -0 "$(cat "$Q/apk/pid" 2>/dev/null)" 2>/dev/null && return 0
     echo 4 > "$Q/apk/rc"; return 1; }
+  # apk_out: an APK ship out, or ended and not reaped yet. 11-01 (CI "APK then rooted", ~1 in 4): an APK that ended
+  # after this pass's reap_apk read !apk_alive in step 2, which relaunched it - apk_launch's rm -rf $Q/apk threw away
+  # the unreaped rc, so the same tip installed twice (APK,APK,ROOTED). Steps 2-4 start nothing until the loop top reaps.
+  apk_out() { apk_alive || [ -f "$Q/apk/rc" ]; }
   apk_launch() {   # $1 tip, rest: --note/--silent
     local a=$1; shift
     if [ ! -e "$SA/.git" ]; then
@@ -305,6 +320,9 @@ run)
     [ "${SHIP_WINDOW_GATE:-1}" = 1 ] && [ -z "${SHIP_DIR:-}" ] || return 0
     local b=$1 t=$2 what=$3 f= wb wl wrc gp wdg
     RW_DONE=
+    # A shell window check superseded while NOT JUDGED (window_wait) left its base here: this check covers that base's
+    # window changes too, so a newer tip shipping past an unjudged one never skips its device check.
+    [ -s "$Q/window-unjudged" ] && b=$(cat "$Q/window-unjudged")
     if [ -n "$b" ] && git cat-file -e "$b^{commit}" 2>/dev/null; then
       f=$(git diff --name-only "$b" "$t" 2>/dev/null | grep -E "$WINDOW_FILES" | sed 's|.*/||' | sort -u | paste -sd' ' -)
     else f="(no base: every window file)"; fi
@@ -333,6 +351,7 @@ run)
       echo "$(date +%T) ${t:0:9}: window check waiting for an awake phone - its requests are kept, retried in ${WINDOW_WAIT_S:-60} s (log $wl)"
       return 2
     fi
+    rm -f "$Q/window-unjudged"   # judged (PASS or FAIL; a FAIL keeps window-failed, which checks every ship)
     if [ $wrc = 0 ]; then
       rm -f "$Q/window-failed"; echo "$(date '+%F %T') ${t:0:9} $what window-render PASS" >> "$Q/shipped.log"
       echo "$(date +%T) ${t:0:9}: device window check PASS"; return 0
@@ -522,11 +541,51 @@ run)
     [ "$(cat "$Q/modules-first-mailed" 2>/dev/null)" = "$T" ] || { echo "$T" > "$Q/modules-first-mailed"
       mail "ship ${T:0:9} ($1) HELD for $who_s: its bindings need a module publish first ($need), which failed rc $mrc: $(tail -1 "$mlog" | cut -c1-200) - log $mlog on the Mac; fix it on origin, then ship.sh request again"; }
     return 1; }
+  # reap_apk_installed A: reap_apk's installed case (rc 0, or the phone reports A installed): the live record,
+  # the window/shell checks, then its requests done. rc 2 = the window check was NOT JUDGED ($Q/apk stays).
+  reap_apk_installed() {
+    local A=$1 live st wg r n sha ht
+    live=$(cat "$Q/live" 2>/dev/null || true)
+    # The install RESET every override, then re-pushed what origin's tip had differently from the APK: the phone's
+    # shell is what ship-apk says it left there ($Q/apk/shell-tip: the tip it re-applied, or the APK's own build
+    # when that push failed) - never the older "live" record kept as is (2026-10-30: APK f0b895fa installed, the
+    # service went on reporting 49afb819 live). Behind the previous live tip: a silent request re-applies the
+    # newer shell from here (the loop's delta from this live record).
+    st=$(cat "$Q/apk/shell-tip" 2>/dev/null || true)
+    git cat-file -e "${st:-x}^{commit}" 2>/dev/null || st=$A
+    echo "$st" > "$Q/live"
+    if [ -n "$live" ] && [ "$live" != "$st" ] && ! git merge-base --is-ancestor "$live" "$st" 2>/dev/null; then
+      echo "$(date +%T) ${A:0:9}: the install left the phone's shell at ${st:0:9}, behind the live ${live:0:9} - re-applying the newer shell"
+      r=$Q/$(date +%Y%m%d-%H%M%S)-reapply-$$.req
+      printf 'sha=%q\nnote=\nsilent=1\nwho=ship-apk-reapply\nat=%s\n' "$live" "$(date +%s)" > "$r.tmp" && mv "$r.tmp" "$r"
+    fi
+    # The device window check BEFORE its requests are done (the build it replaced: ship-apk's snapshot of the
+    # previous install, ship-guard.sh snapshot DIR/commit): WINDOWS BROKEN keeps them and marks the APK failed.
+    wg=0; window_gate "$(cat "$HOME/.cache/powos-ship-snapshot/commit" 2>/dev/null)" "$st" apk || wg=$?
+    # NOT JUDGED (phone asleep): nothing recorded, its requests kept; the next reap tries again in ~60 s.
+    if [ $wg = 2 ]; then date +%s > "$Q/apk/window-wait"; return 2; fi
+    rm -f "$Q/apk/window-wait"
+    # What the phone RENDERS, not the record: older than the shipped shell = the APK failed, the shell re-applied.
+    [ -n "$live" ] && ! shell_check "$live" "$A" && wg=1
+    if [ $wg = 0 ]; then rm -f "$Q/failed-apk"
+    else echo "$A" > "$Q/failed-apk"; echo "$(date +%T) ${A:0:9}: APK installed but WINDOWS BROKEN - its requests kept, waiting for a new origin commit"; fi
+    # A shell held for this APK came with its install (ship-apk pushes origin's tip shell after it).
+    { read -r ht _ < "$Q/shell-held" && git merge-base --is-ancestor "$ht" "$A"; } 2>/dev/null && rm -f "$Q/shell-held"
+    # The records above first, THEN its requests done: a watcher seeing them done sees the records too.
+    n=0; [ $wg = 0 ] && for r in "$Q"/*.req; do [ -f "$r" ] || continue; sha=; . "$r"
+      git merge-base --is-ancestor "$sha" "$A" 2>/dev/null && { done_req "$r" "shipped:${A:0:9}:apk"; n=$((n+1)); }; done
+    echo "$(date '+%F %T') ${A:0:9} apk $n req: $(grep -h '^note=' "$Q/apk/notes" 2>/dev/null | head -1 | cut -c6- || true)" >> "$Q/shipped.log"
+    units_publish
+    echo "$(date +%T) ${A:0:9}: APK installed ($n request(s) done)"
+    render_watch "$st" apk
+    e2e_round
+    return 0   # its rc is 2 only for NOT JUDGED above, never a trailing command's
+  }
   # reap_apk: an APK ship that ended (rc exists) is recorded + its requests done. Called every loop turn, at the
   # runner start (a previous runner's finished APK) and before it exits (f252: the runner left while the APK was
   # out, so a finished install was never recorded and phone checks kept waiting for their ship).
   reap_apk() {
-    local inst A arc alog n r sha live ht st wg
+    local inst A arc alog
     inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
     # An APK ship that ended: its requests are done (installed is installed - its exit is its last check's: a logcat
     # grep with no match was 1, 2026-10-23), or it's tried again (the user stayed active), or it failed.
@@ -535,46 +594,19 @@ run)
       [ -f "$Q/apk/window-wait" ] && [ $(( $(date +%s) - $(cat "$Q/apk/window-wait") )) -lt "${WINDOW_WAIT_S:-60}" ] && return 0
       A=$(cat "$Q/apk/tip") arc=$(cat "$Q/apk/rc") alog=$(cat "$Q/apk/log")
       if [ "$arc" = 0 ] || [ "$inst" = "$A" ]; then
-        live=$(cat "$Q/live" 2>/dev/null || true)
-        # The install RESET every override, then re-pushed what origin's tip had differently from the APK: the phone's
-        # shell is what ship-apk says it left there ($Q/apk/shell-tip: the tip it re-applied, or the APK's own build
-        # when that push failed) - never the older "live" record kept as is (2026-10-30: APK f0b895fa installed, the
-        # service went on reporting 49afb819 live). Behind the previous live tip: a silent request re-applies the
-        # newer shell from here (the loop's delta from this live record).
-        st=$(cat "$Q/apk/shell-tip" 2>/dev/null || true)
-        git cat-file -e "${st:-x}^{commit}" 2>/dev/null || st=$A
-        echo "$st" > "$Q/live"
-        if [ -n "$live" ] && [ "$live" != "$st" ] && ! git merge-base --is-ancestor "$live" "$st" 2>/dev/null; then
-          echo "$(date +%T) ${A:0:9}: the install left the phone's shell at ${st:0:9}, behind the live ${live:0:9} - re-applying the newer shell"
-          r=$Q/$(date +%Y%m%d-%H%M%S)-reapply-$$.req
-          printf 'sha=%q\nnote=\nsilent=1\nwho=ship-apk-reapply\nat=%s\n' "$live" "$(date +%s)" > "$r.tmp" && mv "$r.tmp" "$r"
-        fi
-        # The device window check BEFORE its requests are done (the build it replaced: ship-apk's snapshot of the
-        # previous install, ship-guard.sh snapshot DIR/commit): WINDOWS BROKEN keeps them and marks the APK failed.
-        wg=0; window_gate "$(cat "$HOME/.cache/powos-ship-snapshot/commit" 2>/dev/null)" "$st" apk || wg=$?
-        # NOT JUDGED (phone asleep): nothing recorded, its requests kept; the next reap tries again in ~60 s.
-        if [ $wg = 2 ]; then date +%s > "$Q/apk/window-wait"; return 0; fi
-        rm -f "$Q/apk/window-wait"
-        # What the phone RENDERS, not the record: older than the shipped shell = the APK failed, the shell re-applied.
-        [ -n "$live" ] && ! shell_check "$live" "$A" && wg=1
-        if [ $wg = 0 ]; then rm -f "$Q/failed-apk"
-        else echo "$A" > "$Q/failed-apk"; echo "$(date +%T) ${A:0:9}: APK installed but WINDOWS BROKEN - its requests kept, waiting for a new origin commit"; fi
-        # A shell held for this APK came with its install (ship-apk pushes origin's tip shell after it).
-        { read -r ht _ < "$Q/shell-held" && git merge-base --is-ancestor "$ht" "$A"; } 2>/dev/null && rm -f "$Q/shell-held"
-        # The records above first, THEN its requests done: a watcher seeing them done sees the records too.
-        n=0; [ $wg = 0 ] && for r in "$Q"/*.req; do [ -f "$r" ] || continue; sha=; . "$r"
-          git merge-base --is-ancestor "$sha" "$A" 2>/dev/null && { done_req "$r" "shipped:${A:0:9}:apk"; n=$((n+1)); }; done
-        echo "$(date '+%F %T') ${A:0:9} apk $n req: $(grep -h '^note=' "$Q/apk/notes" 2>/dev/null | head -1 | cut -c6- || true)" >> "$Q/shipped.log"
-        units_publish
-        echo "$(date +%T) ${A:0:9}: APK installed ($n request(s) done)"
-        render_watch "$st" apk
-        e2e_round
+        reap_apk_installed "$A" || [ $? != 2 ] || return 0
       elif [ "$arc" = 8 ]; then echo "$(date +%T) ${A:0:9}: a newer APK is wanted - the pending one is replaced"
       elif [ "$arc" = 4 ]; then echo "$(date +%T) ${A:0:9}: the user stayed active - the APK goes again"
       elif [ -e "$Q/paused" ]; then echo "$(date +%T) ${A:0:9}: APK ship stopped by pause (rc $arc) - its requests are kept"
       # Stopped WITH its runner (the TERM trap marked it before killing ship-apk, whose subshell still writes 143): not
       # a failure of this tip - it goes again, as one whose runner died without an rc does (apk_alive's rc 4).
       elif [ -e "$Q/apk/stopped" ]; then echo "$(date +%T) ${A:0:9}: APK ship stopped with the runner (rc $arc) - it goes again"
+      # The PHONE LINK dropped, not this tip (11-01 measure: 12 of 36 APK FAILs were "couldn't snapshot" / "phone
+      # unavailable" / "error: closed" / an empty adb install failure; each held every request until an unrelated push,
+      # 293 min in 2 days). Nothing new is on the phone (ship-apk restored the overrides), so the same tip goes again, up
+      # to SHIP_APK_LINK_RETRIES (default 2) times; a code fault (build, shell doesn't load, guard) still fails at once.
+      elif apk_link_fault "$alog" && lr=$(apk_link_retry "$A") && [ "$lr" -le "${SHIP_APK_LINK_RETRIES:-2}" ]; then
+        echo "$(date +%T) ${A:0:9}: APK ship rc $arc: the phone link dropped (log $alog) - it goes again ($lr/${SHIP_APK_LINK_RETRIES:-2})"
       else
         echo "$A" > "$Q/failed-apk"
         echo "$(date +%T) ${A:0:9}: APK ship FAILED rc $arc (log $alog) - waiting for a new origin commit"
@@ -582,6 +614,17 @@ run)
       fi
       rm -rf "$Q/apk"; inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
     fi
+  }
+  # apk_link_fault LOG: the APK ship failed on the adb link to the phone (before or at the install), not on the tip.
+  apk_link_fault() {
+    [ -f "$1" ] || return 1
+    grep -q 'REFUSED - this commit\|build-app.sh failed\|INSTALL_FAILED' "$1" && return 1
+    grep -q "phone unavailable after reconnect\|^error: closed\|couldn't snapshot the phone\|couldn't reset the phone's shell overrides\|failed to install /powos.apk: *\$" "$1"
+  }
+  # apk_link_retry TIP: prints how many link retries TIP has had, this one counted ($Q/apk-link-retry: "tip n").
+  apk_link_retry() {
+    local t="" n=0; [ -s "$Q/apk-link-retry" ] && read -r t n < "$Q/apk-link-retry"; case $n in ''|*[!0-9]*) n=0 ;; esac
+    [ "$t" = "$1" ] || n=0; n=$((n+1)); echo "$1 $n" > "$Q/apk-link-retry"; echo "$n"
   }
   # shell_done: a live shell ship of T whose window check passed (or wasn't needed): its records, then its requests done.
   shell_done() {
@@ -600,6 +643,18 @@ run)
     local ww_at ww_base ww_tip wgr
     [ -s "$Q/window-wait" ] || { [ -f "$Q/apk/window-wait" ] && return 0; return 1; }
     . "$Q/window-wait"
+    # Superseded (ask-latency 11-01: one dozing-phone wait blocked every later ship for 94 min, 5 requests stuck): the
+    # phone is asleep (nobody looking) and origin has a newer tip that changes the shell again and needs no APK - the
+    # loop ships that tip now. Its own window check covers this tip's base too ($Q/window-unjudged, window_gate), and
+    # this tip's requests are ancestors of the new one, so none is done before a check of its window changes passes.
+    local nt; nt=$(git rev-parse HEAD)
+    if [ "$nt" != "$ww_tip" ] && git merge-base --is-ancestor "$ww_tip" "$nt" 2>/dev/null &&
+       ! pending_apk "$nt" && [ -n "$(delta "$ww_tip" "$nt")" ]; then
+      [ -s "$Q/window-unjudged" ] || echo "$ww_base" > "$Q/window-unjudged"
+      rm -f "$Q/window-wait"
+      echo "$(date +%T) ${ww_tip:0:9}: window check still waiting for an awake phone - superseded by ${nt:0:9} (its check covers both)"
+      return 1
+    fi
     [ $(( $(date +%s) - ww_at )) -ge "${WINDOW_WAIT_S:-60}" ] || return 0
     T=$ww_tip; window_gate "$ww_base" "$T" shell; wgr=$?
     if [ $wgr = 2 ]; then sed -i '' "s/^ww_at=.*/ww_at=$(date +%s)/" "$Q/window-wait"; return 0; fi
@@ -610,7 +665,7 @@ run)
   }
   reap_apk   # runner start: a previous runner's finished APK
   while :; do
-    while ls "$Q"/*.req >/dev/null 2>&1 || rooted_due; do
+    while ls "$Q"/*.req >/dev/null 2>&1 || rooted_go; do
       ship_tree >/dev/null || { sleep "$POLL"; continue; }
       T=$(git rev-parse HEAD)
       inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
@@ -647,8 +702,8 @@ run)
           sreqs+=("$r")
         fi
       done
-      # No request covers this tip: only a pending rooted deploy keeps the loop here (rooted_due above).
-      [ ${#whos[@]} -gt 0 ] || rooted_due || { sleep "$POLL"; continue; }
+      # No request covers this tip: only a pending rooted deploy keeps the loop here (rooted_go above).
+      [ ${#whos[@]} -gt 0 ] || rooted_go || { sleep "$POLL"; continue; }
       who_s=$(printf '%s\n' ${whos[@]+"${whos[@]}"} | sed '/^$/d' | sort -u | paste -sd, -); who_s=${who_s:-"$(cut -c6- "$Q/rooted-note" 2>/dev/null | head -1)"}
       joined() { printf '%s\n' "$@" | sed '/^$/d' | paste -sd';' - | sed 's/;/; /g'; }
       # The apps step's changes (step 3), known up front: a vendored app's module change (vmods: "app db" lines) ties
@@ -780,7 +835,7 @@ run)
         [ ${#sreqs[@]} -gt 0 ] && echo "$(date +%T) ${T:0:9}: nothing differs from what's live - ${#sreqs[@]} request(s) done"
       fi
       # 2. The APK, beside the loop: once origin stayed QUIET s on the tip, one at a time, not again on a tip that failed.
-      if [ ${#areqs[@]} -gt 0 ] && ! apk_alive && [ "$age" -ge "$QUIET" ] && [ "$(cat "$Q/failed-apk" 2>/dev/null)" != "$T" ]; then
+      if [ ${#areqs[@]} -gt 0 ] && ! apk_out && [ "$age" -ge "$QUIET" ] && [ "$(cat "$Q/failed-apk" 2>/dev/null)" != "$T" ]; then
         an=$(joined ${anotes[@]+"${anotes[@]}"})
         if [ -n "$an" ]; then na=(--note "$an"); else na=(--silent); fi
         why="no record of the installed build"; [ -n "$inst" ] && why="APK inputs changed: $(apk_inputs "$inst" "$T" | head -3 | paste -sd' ' -)"
@@ -812,7 +867,7 @@ run)
       if [ -n "$vwait" ] && [ -n "$achg" ]; then
         [ "$(cat "$Q/apps-held" 2>/dev/null)" = "$T" ] || { echo "$T" > "$Q/apps-held"
           echo "$(date +%T) ${T:0:9}: apps held - the shell's bindings for$vwait aren't live yet (the module goes first, with the shell's ship)"; }
-      elif [ -n "$achg" ] && ! apk_alive && [ "$age" -ge "$QS" ] && [ "$(cat "$Q/failed-apps" 2>/dev/null)" != "$T" ]; then
+      elif [ -n "$achg" ] && ! apk_out && [ "$age" -ge "$QS" ] && [ "$(cat "$Q/failed-apps" 2>/dev/null)" != "$T" ]; then
         rm -f "$Q/apps-held"
         if verify_held; then echo $$ > "$Q/wants-phone"
         elif ship_lock; then
@@ -853,7 +908,7 @@ run)
       if rooted_due; then
         [ -z "$rn" ] || printf 'who: %s\n%s\n' "$who_s" "$rn" > "$Q/rooted-note"
       else rchg=; fi
-      if [ -n "$rchg" ] && ! apk_alive && [ "$age" -ge "$QS" ]; then
+      if [ -n "$rchg" ] && ! apk_out && ! rooted_after_apk && [ "$age" -ge "$QS" ]; then
         if verify_held; then echo $$ > "$Q/wants-phone"
         elif ship_lock; then
           echo $$ > "$Q/installing"
@@ -878,13 +933,13 @@ run)
           fi
         fi
       fi
-      ! { ls "$Q"/*.req >/dev/null 2>&1 || rooted_due; } || sleep "$POLL"
+      ! { ls "$Q"/*.req >/dev/null 2>&1 || rooted_go; } || sleep "$POLL"
     done
     # An APK ship still out: stay and reap it (the loop above reaps once its rc exists) before the idle exit.
     apk_alive && { sleep "$POLL"; continue; }
     [ -f "$Q/apk/rc" ] && { reap_apk; continue; }
     # A rooted deploy still due (its APK just installed, say): one more pass, never while paused.
-    [ ! -e "$Q/paused" ] && ship_tree >/dev/null && rooted_due && continue
+    [ ! -e "$Q/paused" ] && ship_tree >/dev/null && rooted_go && continue
     rm -rf "$L"
     [ -e "$Q/paused" ] && break
     # A request written while this runner was on its way out: take the lock again and serve it.

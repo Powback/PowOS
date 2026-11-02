@@ -48,6 +48,22 @@ class WebWindowsFullScreenWayOutTest {
         assertTrue(body("fun leaveFullScreen(why: String): Boolean {").contains("toWindow(w.id)"))
     }
 
+    /**
+     * A full-screen Linux window's switcher card tapped: the page's close names the window (recents.closed(id)) and
+     * switcherHome keeps THAT window full screen - only a close to home (no window) or another window leaves it.
+     */
+    @Test
+    fun aCardTappedKeepsItsWindowFullScreen() {
+        val bridge = File("src/main/kotlin/dev/omalauncher/shell/ShellBridge.kt").readText()
+        val switcher = File("src/main/kotlin/dev/omalauncher/system/Switcher.kt").readText()
+        assertTrue("recents.closed no longer passes the opened window", bridge.contains("\"recents.closed\" -> dev.omalauncher.system.Switcher.closed(context, this, a.optInt(0, -1)"))
+        val closed = switcher.substringAfter("fun closed(").substringBefore("\n    }\n")
+        assertTrue("Switcher.closed no longer hands the opened window to switcherHome", closed.contains("opening)"))
+        val home = src.substringAfter("fun switcherHome(").substringBefore("\n        }\n")
+        assertTrue("switcherHome no longer keeps the opened window full screen", home.contains("ww.wins[opening]?.linuxFull == true"))
+        assertTrue("switcherHome no longer leaves full screen on the way home", home.contains("ww.leaveFullScreen(why)"))
+    }
+
     /** Maximise (the page's toggleMaximise; the bar's double tap is full screen since 10-30) fills the work area, never full screen. */
     @Test
     fun maximiseNeverCallsLinuxFullScreen() {

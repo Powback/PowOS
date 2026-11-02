@@ -174,8 +174,8 @@ const UNITS_SCENE =
   "const M = await U('./ui/units.tsx'); const now = Date.now(); const R = []; const hosts = [['phone', 41, 14, 'drift'], ['phone-android', 23, 9, 'clean'], ['mac', 37, 21, 'drift'], ['colima', 58, 44, 'clean'], ['powstation', 12, 7, 'clean']];" +
   " for (const [h, n, run, st] of hosts) { R.push({ key: h + '/_check', host: h, id: '_check', name: '', kind: '', owner: '', purpose: 'powos-cdn-sync', status: st, memKb: 0, cpuPermille: 0, limits: '', autosleep: '', orphan: false, decide: '', updated: now - 6 * 60e3 });" +
   " for (let i = 0; i < n; i++) R.push({ key: h + '/u' + i, host: h, id: 'u' + i, name: 'unit-' + i, kind: 'service', owner: 'powos', purpose: 'sample', status: i < run ? 'running' : i % 3 ? 'stopped' : 'asleep', memKb: 40000 + i * 9000, cpuPermille: i * 3, limits: '', autosleep: '', orphan: i === n - 1 && h === 'mac', decide: '', updated: now }); }" +
-  " M.units.value = R; S.page.value = -1; await sleep(300); [...document.querySelectorAll('.ai-unit-host')].find((b) => b.textContent.startsWith('▸mac'))?.click(); await sleep(200);" +
-  " document.querySelector('.ai-unit-host')?.closest('.ai-work-list').scrollIntoView(); await sleep(100);";
+  " M.units.value = R; S.page.value = -1; await sleep(300); document.querySelector('.ai-unit-card[data-host=mac] .ai-unit-host')?.click(); await sleep(200);" +
+  " document.querySelector('.ai-unit-host')?.closest('.ai-devices').scrollIntoView(); await sleep(100);";
 
 /** The work board as it was live (dev/sample-board.json, ages as offsets), for PowOS AI's page. */
 const BOARD = (() => {
@@ -474,7 +474,7 @@ const SCENES = [
   ["present", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["present-md", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelectorAll('.chat .present')[0]?.click();`, "wallpaper"],
   ["present-html", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelectorAll('.chat .present')[1]?.click(); await sleep(200);`, "wallpaper"],
-  ["present-ai", "home", `S.chat.value = { busy: false, items: ${PRESENT_ORDER} }; S.page.value = -1; await sleep(400);`, "wallpaper"],
+  ["present-ai", "home", board(true).replace(" S.page.value = -1;", "") + ` S.chat.value = { busy: false, items: ${PRESENT_ORDER} }; S.page.value = -1; await sleep(400);`, "wallpaper"],
   ["present-assist", "assist", `await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(800); const f = document.querySelector('.assist-ask textarea'); f.value = 'plan the cleanup'; f.dispatchEvent(new Event('input', { bubbles: true })); await sleep(100); document.querySelector('.assist-ask').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await sleep(2500); S.chat.value = { busy: false, items: ${PRESENT_ORDER} }; await sleep(400);`, "app"],
   ["present-assist-long", "assist", `await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(800); const f = document.querySelector('.assist-ask textarea'); f.value = 'plan the cleanup'; f.dispatchEvent(new Event('input', { bubbles: true })); await sleep(100); document.querySelector('.assist-ask').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await sleep(2500); S.chat.value = { busy: false, items: [...${CHAT_SAMPLE}, ...${CHAT_SAMPLE}, ...${PRESENT_ORDER}] }; await sleep(400);`, "app"],
   ["present-assist-arrive", "assist", `await sleep(2500); E.emit('assist.reset', null); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(300); const B = (await U('./bridge.ts')).powos; await B.speech.cancel(); await sleep(300); const q = document.querySelectorAll('.assist .ai-page-chat').length; window.__chatBefore = q; S.chat.value = { busy: false, items: [...S.chat.value.items, ...${PRESENT_ORDER}] }; await sleep(400);`, "app"],
@@ -519,6 +519,7 @@ const SCENES = [
   // Needs attention; folded sideways the nav as icons; folded portrait the chat + strip as before.
   ["ai-panes-chat", "home", LOOK + "{" + FLEET_SETUP + OTHER_PROJECT + "}", "wallpaper", undefined, { ...SIZES, "folded-land": LAND_SIZES["folded-land"] }],
   ["ai-panes-agents", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'fleet'; await sleep(400);", "wallpaper", undefined, { unfolded: SIZES.unfolded }],
+  ["ai-panes-devices", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'devices'; await sleep(300); {" + UNITS_SCENE.replace(" S.page.value = -1;", "") + "}", "wallpaper", undefined, { unfolded: SIZES.unfolded }],
   ["ai-panes-progress", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'progress'; await sleep(600);", "wallpaper", undefined, { unfolded: SIZES.unfolded }],
   // Progress (aiprogress.tsx, the user 15:12): the ring and the area cards, the first one opened; folded and unfolded.
   ["ai-progress-open", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'progress'; await sleep(700); document.querySelector('.ai-screen .aip-area-row')?.click(); await sleep(700);", "wallpaper"],

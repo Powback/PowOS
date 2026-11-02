@@ -26,7 +26,7 @@ import { Item } from "./chat.tsx";
 import { Thread } from "./rich.tsx";
 
 /** "4m", "1h 5m": how long [ms] milliseconds took. */
-const took = (ms: number) => {
+export const took = (ms: number) => {
   const m = Math.round(ms / 60_000);
   if (m < 1) return `${Math.max(1, Math.round(ms / 1000))}s`;
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ""}`;
@@ -244,14 +244,14 @@ export function BoardFeed() {
 export const needsBoard = (f: Fleet) => [...f.working, ...f.attention, ...(f.manager ? [f.manager] : [])].some((x) => !!x.a.work);
 
 /** The one action of an attention line: restart (the manager does it), allow the open ask, or open its live view. */
-function act(x: Worker) {
+export function act(x: Worker) {
   if (x.action === "restart") powos.agents.message("manager", restartNote(x));
   else if (x.action === "answer") {
     const ask = asks.value.find((k) => k.agent === x.a.id && k.answer == null);
     if (ask) powos.agents.answer(ask.id, "allow");
   } else openAgents(x.a.id);
 }
-const ACT_LABEL = { restart: "restart", answer: "allow", open: "open" } as const;
+export const ACT_LABEL = { restart: "restart", answer: "allow", open: "open" } as const;
 
 /** A thin progress bar: step [done + 1] of [total] (nothing without a plan). */
 export function Bar({ done, total }: { done: number; total: number }) {
@@ -840,9 +840,11 @@ export function AgentLive({ id }: { id: string }) {
 /**
  * The Agents screen's content - the list, or one agent's live view - with its header. Its own component: PowOS AI (or
  * anything) can show it in place; [onClose] its back from the list; [foot]: under the list (the AI page's Agents tab:
- * every host's terminals). The sessions are read while it shows, for its cards' "Open terminal".
+ * every host's terminals); [list]: the list drawn instead of the cards (the AI page's Agents tab: aipanes.tsx's rows in
+ * the Progress design). The sessions are read while it shows, for its cards' "Open terminal".
  */
-export function AgentsView({ id, onClose, foot }: { id: string | null; onClose: () => void; foot?: preact.ComponentChildren }) {
+export function AgentsView(props: { id: string | null; onClose: () => void; foot?: preact.ComponentChildren; list?: (f: Fleet) => preact.ComponentChildren }) {
+  const { id, onClose, foot, list } = props;
   useAgents();
   useSessions(true);
   const f = fleet();
@@ -861,7 +863,7 @@ export function AgentsView({ id, onClose, foot }: { id: string | null; onClose: 
         <span class={`ag-live ${live.value ? "on" : ""}`}>{live.value ? "● live" : "○"}</span>
       </header>
       <div class="ag-scroll" ref={scroller}>
-        {id ? <LiveView id={id} f={f} /> : <List f={f} foot={foot} />}
+        {id ? <LiveView id={id} f={f} /> : list ? list(f) : <List f={f} foot={foot} />}
       </div>
     </>
   );

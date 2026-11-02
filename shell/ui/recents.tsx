@@ -214,11 +214,14 @@ function collapse(animate: boolean) {
   if (!animate) loaded.value = false;
 }
 
-/** The page closes it itself (beside the cards, Back over home, the last card gone, Home). */
-function close() {
+/**
+ * The page closes it itself (beside the cards, Back over home, the last card gone, Home). [opening]: to web window
+ * [opening] (its card tapped), not home - the host keeps it as it was (a full-screen window stays full screen).
+ */
+function close(opening?: number) {
   if (phase.value === "closed") return;
   collapse(true);
-  powos.recents.closed();
+  powos.recents.closed(opening);
 }
 
 /** [img] decoded (false: none, or its picture failed). */
@@ -251,12 +254,14 @@ async function landed(snapshot: string | null) {
 }
 
 /**
- * A web window floating on its display ([t]): back where it was, on its page - the host shows it (ShellBridge.openTask),
- * no card growing to it. False: not one.
+ * A web window floating on its display ([t]), or a Linux web window in any state: back where it was and as it was
+ * (maximised, full screen), on its page - the host shows it (ShellBridge.openTask), no card growing to it. The close
+ * names the window: closed to home, a full-screen Linux window left full screen first (WebWindows.switcherHome).
+ * False: not one.
  */
 function floatingWebWindow(t: RecentTask): boolean {
   if (t.webwindow == null || t.fullScreen) return false;
-  close();
+  close(t.webwindow);
   powos.tasks.open(t.id).then((ok) => void (ok || refresh()));
   return true;
 }

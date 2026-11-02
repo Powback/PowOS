@@ -1,12 +1,16 @@
 #!/bin/bash
 # The design language's static check (docs/DESIGN-LANGUAGE.md §2-§6): prints what breaks a rule, per file. Four rules
 # BLOCK (design wave 1 made them hold: exit 1 on any hit) - monospace, radius, easing, status - and design wave 2 (home)
-# added three more: page dots, haptics, home motion; design wave 3 (launcher) launcher motion; the rest report only.
+# added three more: page dots, haptics, home motion; design wave 3 (launcher) launcher motion; design wave 4 (the shade)
+# made blur block (its last literal blurs gone) and the radius rule read every corner of a shorthand
+# (`0 0 calc(var(--radius) * 2) ...` passed on its leading 0).
 # Outside theme.css:
 #   - monospace: a rule naming var(--font) (theme.css's monospace) - UI text is --font-ui; code/terminals excepted
 #     (terminal.*, a selector with term/code/pre/kbd/log/id in it);
-#   - blur: a literal blur(Npx) / backdrop-filter radius - surfaces read --backdrop-blur-native / --glass-blur;
-#   - radius: a border-radius off the scale (8px, var(--radius) 12px, 20px, 999px, 50%, inherit, 0, --icon-radius);
+#   - blur: a literal blur(Npx) in a filter / backdrop-filter - surfaces read THE backdrop (--backdrop-blur-native,
+#     the host's) or the frost's --glass-blur (a picture blurred in the page: the media art, a card's splash) (§2);
+#   - radius: a border(-corner)-radius with any corner off the scale (8px, var(--radius) 12px, 20px, 999px, 50%,
+#     inherit, 0, --icon-radius, --card-radius) - every value of a shorthand, so no calc() or 24px hides behind a 0;
 #   - easing: a transition/animation with its own cubic-bezier()/ease, or a local spring (--ais-spring, --aip-spring),
 #     instead of the spring set (--spring-fast / --spring / --spring-slow, ui/spring.ts; loops on --ambient);
 #   - status: a status colour of its own (the old --aip-blue / --aip-amber, their hex) instead of theme.css --status-*;
@@ -36,7 +40,10 @@ report() { # kind, hits
 }
 mono=$(grep -nE 'var\(--font\)|monospace' $css 2>/dev/null | strip | grep -vE '^ui/terminal|term|code|pre[ ,{.]|kbd|\.log|-id[ ,{]|font-ui' || true)
 blur=$(grep -nE '(backdrop-filter|filter)[^;]*blur\([0-9.]+px\)' $code 2>/dev/null | strip | grep -v '^ui/pet' || true)
-radius=$(grep -noE 'border-radius: *[^;"}]+' $css 2>/dev/null | grep -vE 'border-radius: *(0|8px|12px|20px|999px|50%|inherit|var\(--radius\)|var\(--icon-radius\)|var\(--card-radius\))( |$)' || true)
+radius=$(grep -HnoE 'border(-[a-z]+)*-radius: *[^;"}]+' $css 2>/dev/null | awk '{
+  v = $0; sub(/^[^:]+:[0-9]+:[^:]+: */, "", v); sub(/ *!important *$/, "", v); n = split(v, t, /[ \t]+/); bad = 0
+  for (i = 1; i <= n; i++) if (t[i] != "" && t[i] != "/" && t[i] !~ /^(0|8px|12px|20px|999px|50%|inherit|var\(--(radius|icon-radius|card-radius)\))$/) bad = 1
+  if (bad) print }' || true)
 easing=$( { grep -nE '(transition|animation)[^;]*(cubic-bezier\(|[0-9]m?s +ease)' $css 2>/dev/null | strip | grep -v -- '--spring'
   grep -nE -- '--ai[sp]-spring' $code 2>/dev/null | strip; } || true)
 status=$(grep -niE -- '--aip-(blue|amber|on-amber)|#5aa7e8|#e3a03c|#1a1206' $code 2>/dev/null | strip || true)
@@ -59,9 +66,10 @@ homemotion=$(literal_motion '\\.(dock|app|home|page|home-tile|page-dots|app-icon
 # The launcher's pieces (design wave 3): the drawer, its A-Z grid and letter bar, the search results, the folders page.
 launchermotion=$(literal_motion '\\.(launcher|launcher-[a-z]+|drawer|drawer-[a-z]+|letter-bar|letter-bubble|az|scr-[a-z]+|search-group|search-group-[a-z]+|launcher-search-results)([^a-z-]|$)')
 count() { printf '%s' "$1" | grep -c . || true; }
-bad=$(( $(count "$mono") + $(count "$radius") + $(count "$easing") + $(count "$status") + $(count "$dots") + $(count "$vibrate") + $(count "$homemotion") + $(count "$launchermotion") ))
+bad=$(( $(count "$mono") + $(count "$blur") + $(count "$radius") + $(count "$easing") + $(count "$status") + $(count "$dots") + $(count "$vibrate") + $(count "$homemotion") + $(count "$launchermotion") ))
 if [ "$bad" = 0 ]; then echo "ok   design lint (docs/DESIGN-LANGUAGE.md)"; else echo "FAIL design lint: $bad blocking (docs/DESIGN-LANGUAGE.md)"; fi
 report "monospace in UI" "$mono"
+report "hard-coded blur" "$blur"
 report "radius off the scale" "$radius"
 report "easing not the shared spring" "$easing"
 report "status colour not a --status-* token" "$status"
@@ -69,5 +77,4 @@ report "page dots not ui/pagedots.tsx" "$dots"
 report "haptic not ui/haptics.ts" "$vibrate"
 report "home motion with a literal duration" "$homemotion"
 report "launcher motion with a literal duration" "$launchermotion"
-report "hard-coded blur (report-only)" "$blur"
 [ "$bad" = 0 ]

@@ -10,6 +10,7 @@ import { effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel, separatePanels } from "../state.ts";
 import { alignOf, wideShade } from "./align.ts";
+import { useAnchoredOpen } from "./shadeanchor.ts";
 import { ControlCenter } from "./control.tsx";
 import { Icon } from "./icons.tsx";
 import { animateLayout, closeGap, foldAway } from "./notifmotion.ts";
@@ -227,15 +228,20 @@ function useCardGesture(n: PhoneNotification) {
  * Android System have no drawer icon): the notification's small icon (the host's URL; a monochrome glyph, so a mask
  * in its app's color), else [fallback] (the app's icon). A tap opens the app, as the icon does on any card.
  */
-function SmallIcon({ n, fallback }: { n: GroupedNotification; fallback: string | null }) {
+export function SmallIcon({ n, fallback }: { n: GroupedNotification; fallback: string | null }) {
   const on = {
     onPointerDown: (e: PointerEvent) => e.stopPropagation(),
     onClick: (e: MouseEvent) => (e.stopPropagation(), openNotif(n)),
   };
-  if (!n.smallIcon) return fallback ? <img class="notif-icon" src={fallback} alt="" role="button" aria-label="open" {...on} /> : null;
+  return <NotifGlyph n={n} fallback={fallback} role="button" aria-label="open" {...on} />;
+}
+
+/** The icon itself, SmallIcon's without its tap: the lock face's cards (lock.tsx), where the face's swipe is the gesture. */
+export function NotifGlyph({ n, fallback, ...attrs }: { n: GroupedNotification; fallback: string | null } & preact.JSX.HTMLAttributes<HTMLElement>) {
+  if (!n.smallIcon) return fallback ? <img class="notif-icon" src={fallback} alt="" {...(attrs as preact.JSX.HTMLAttributes<HTMLImageElement>)} /> : null;
   const mask = `url("${n.smallIcon}") center / contain no-repeat`;
   const style = { ...(n.color ? { "--tint": n.color } : {}), mask, WebkitMask: mask } as preact.JSX.CSSProperties;
-  return <span class="notif-icon notif-small" style={style} role="button" aria-label="open" {...on} />;
+  return <span class="notif-icon notif-small" style={style} {...(attrs as preact.JSX.HTMLAttributes<HTMLSpanElement>)} />;
 }
 
 function Card({ n, name, more = 0, class: cls = "", small = false }: CardProps) {
@@ -271,7 +277,10 @@ function Card({ n, name, more = 0, class: cls = "", small = false }: CardProps) 
       {/* PowOS's own: the sender is the group's name already ("PowOS · coder") - not again as its title. */}
       {n.title && !titleIsName(n, name) && <div class="notif-title">{n.title}</div>}
       {n.text && <div class={`notif-text${n.text.includes("\n") ? " lines" : ""}`}>{n.text}</div>}
-      {open && picture && <img class="notif-picture" src={picture} alt="" />}
+      {/* Drawn (and loaded) while folded, hidden: opened, it is already decoded and its height known, so animateLayout
+          grows the card to it and it fades in (notifications.css) - mounted on open it was 0 tall until it loaded, then
+          popped in (§6). */}
+      {picture && <img class="notif-picture" src={picture} alt="" />}
       <Actions n={n} onOpen={open ? () => openNotif(n) : undefined} />
       {replying.value?.key === n.key && <Reply n={n} index={replying.value.index} />}
     </div>
@@ -282,7 +291,7 @@ function Card({ n, name, more = 0, class: cls = "", small = false }: CardProps) 
  * What grouping reads besides the basics (types.ts PhoneNotification has them; spelled out here too, so this file
  * type-checks against an installed APK's older types.ts).
  */
-type GroupedNotification = PhoneNotification & {
+export type GroupedNotification = PhoneNotification & {
   pkg?: string;
   group?: string | null;
   conversation?: boolean;
@@ -547,6 +556,8 @@ export function NotificationPanel() {
     follow();
     return () => (l.removeEventListener("scroll", follow), off());
   }, [together, two, shown]);
+  // Opened where the finger started (align.ts anchorPull): the content around the pull's start (shadeanchor.ts).
+  useAnchoredOpen(panelEl, together, two);
   // Bottom-aligned (ui/align.ts): the newest card nearest the thumb, so a list taller than its column opens scrolled to
   // its foot (newest in view) and scrolls up for more - folded too (its scroll there compacts the control center's card,
   // the sticky ride above). The cards still lay out after the open (the cascade, a group unfolding, more arriving), so

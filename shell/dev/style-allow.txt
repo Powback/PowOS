@@ -4,8 +4,6 @@ ui/glasses.css #  # the smart glasses' own screen: a monochrome green panel, bla
 ui/terminal.css --term-color  # the terminal's default ANSI palette (a theme's color0-15 replace it, app.tsx)
 ui/terminal.tsx "#00000000"  # xterm's transparent background (it takes no CSS variable)
 ui/shell.css html[data-mode="aod"], html[data-mode="aod"] body { background: #000; }  # the screen-off display: black is an OLED's off pixels
-ui/shell.css var(--color-foreground) 70%, #000)  # the screen-off display: dimmed towards black (OLED burn-in, power)
-ui/shell.css var(--color-accent) 75%, #000)  # the screen-off display: dimmed towards black (OLED burn-in, power)
 ui/grid.tsx fill="#fff"  # an SVG mask's keep-area (mask semantics, not a colour)
 ui/grid.tsx fill="#000" stroke="#000"  # an SVG mask's cut-out (mask semantics, not a colour)
 ui/grid.tsx fill="rgb(0 0 0 / 0.42)"  # a merged group's --lift-shadow drawn in SVG (one outline for the group)

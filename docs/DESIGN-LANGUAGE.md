@@ -10,8 +10,9 @@ shell is built is in [`shell/DESIGN.md`](../shell/DESIGN.md).
 Checks:
 
 - `shell/dev/lint-style.sh` fails the gate on raw colours, borders and shadows.
-- `shell/dev/lint-design.sh` fails the gate on monospace UI text, off-scale radii, literal easings, status
-  colours outside their tokens, and literal durations in home's and the launcher's motion. It reports hard-coded blur.
+- `shell/dev/lint-design.sh` fails the gate on monospace UI text, hard-coded blur, off-scale radii (every corner of
+  a shorthand), literal easings, status colours outside their tokens, and literal durations in home's and the
+  launcher's motion.
 - The gate's `design-lint-*` runs find pop-ins and monospace text on screen. They fail the gate for the launcher
   (`design-lint-launcher-*`) and are report-only for the other surfaces until their design wave.
 - `shell/dev/gate.sh --shots DIR` renders every surface and measures text contrast (`report.json`).
@@ -37,6 +38,7 @@ Checks:
   assistant's panel.
   - `--shade-tint` and `--widget-blur-native` only alias these.
   - No surface names its own blur or tint. See `dev/backdrop-check.js` and commits 3e6e5825 and 160e64ed.
+  - A picture blurred in the page (the media card's art, a card's splash) uses the frost's `--glass-blur`.
 - **Menus are opaque.** A menu over a page (⋯, a long-press menu, a tile menu) is filled with `--menu-tint` (the
   theme's background at 94%), so nothing underneath reads through it.
 - **Sheets hide home.** A page-sized sheet (`.tile.sheet`) fades home's content out, so only the frosted wallpaper

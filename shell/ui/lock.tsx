@@ -4,7 +4,7 @@
  * fingerprint - which keeps the phone's lock; the face only shows it.
  *
  * The swipe follows the finger as home's drawer and notification panel do (gesture.ts): how far the face is lifted,
- * 0..1, goes straight onto the page as --lift on every move, never through a render (a render per move was the
+ * 0..1, goes straight onto the page as --lock-lift on every move, never through a render (a render per move was the
  * stutter); let go past a third of the way, or flicked up, the unlock is asked that moment and the face slides the rest
  * of the way meanwhile, else it falls back. Asking only once the slide had ended (220 ms) was time the user waited for
  * nothing (2026-10-29 "far too long to transition from lock screen to unlocked").
@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import { ago, useMinuteClock } from "./time.ts";
 import type { NotificationList } from "../types.ts";
-import { notifIconSrc } from "./notifications.tsx";
+import { NotifGlyph, notifIconSrc, type GroupedNotification } from "./notifications.tsx";
 
 /** Lifted this far (of the height) when let go, it unlocks. */
 const UNLOCK = 0.33;
@@ -29,11 +29,14 @@ const SHOWN = 5;
 
 const two = (n: number) => String(n).padStart(2, "0");
 
-/** The face's lift, 0..1, on the root (the dimming behind the face fades with it); settling: eased there. */
+/**
+ * The face's lift, 0..1, on the root (the dimming behind the face fades with it); settling: eased there (shell.css: a
+ * transition of --lock-lift itself, so the cards' blur is measured on the frames that move them).
+ */
 function lift(p: number, settling: boolean) {
   const root = document.documentElement;
   root.classList.toggle("lock-settling", settling);
-  root.style.setProperty("--lift", String(p));
+  root.style.setProperty("--lock-lift", String(p));
 }
 
 export function Lock() {
@@ -133,7 +136,9 @@ export function Lock() {
       <div class="lock-notes">
         {list.items.slice(0, SHOWN).map((n) => (
           <div key={n.key} class="lock-note tile">
-            {notifIconSrc(n) && <img src={notifIconSrc(n)!} alt="" />}
+            {/* K2: the shade's own icon (notifications.tsx SmallIcon's NotifGlyph): the notification's small icon in its app's
+                color, else the app's icon - System UI, Play services and the like have no drawer icon, and showed none. */}
+            <NotifGlyph n={n as GroupedNotification} fallback={notifIconSrc(n)} />
             <span class="lock-note-main">
               <span class="lock-note-title">{n.title || n.app}</span>
               <span class={`lock-note-text muted${n.text.includes("\n") ? " lines" : ""}`}>{n.text}</span>

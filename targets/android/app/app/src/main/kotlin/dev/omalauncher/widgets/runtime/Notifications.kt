@@ -218,8 +218,9 @@ class Notifications(
         val action = sbn.notification.actions?.getOrNull(index) ?: return
         val fill = Intent()
         val inputs = action.remoteInputs.orEmpty().filter { it.allowFreeFormInput }.toTypedArray()
-        if (text != null && inputs.isNotEmpty()) {
-            val results = Bundle().apply { inputs.forEach { putCharSequence(it.resultKey, text) } }
+        val typed = replyResults(inputs.map { it.resultKey }, text) ?: return
+        if (typed.isNotEmpty()) {
+            val results = Bundle().apply { typed.forEach { (k, v) -> putCharSequence(k, v) } }
             RemoteInput.addResultsToIntent(inputs, fill, results)
             RemoteInput.setResultsSource(fill, RemoteInput.SOURCE_FREE_FORM_INPUT)
         }
@@ -294,6 +295,22 @@ class Notifications(
     fun askAccess() = media.openAccessSettings()
 
     companion object {
+        /**
+         * What [action] types into the pressed action's free-form RemoteInputs ([keys]: their result keys): [text], trimmed,
+         * under every key; empty for a plain press ([text] null); null when it must not press at all - a reply with nothing
+         * in it (blank), or text for an action with no field to take it (the user's words would be dropped and the app would
+         * get a bare press, while the caller shows "Sent").
+         */
+        internal fun replyResults(
+            keys: List<String>,
+            text: String?,
+        ): Map<String, String>? =
+            when {
+                text == null -> emptyMap()
+                text.isBlank() || keys.isEmpty() -> null
+                else -> keys.associateWith { text.trim() }
+            }
+
         private const val MAX_ITEMS = 50
         private const val MAX_ALERTED = 200
         private const val MAX_MESSAGES = 5
