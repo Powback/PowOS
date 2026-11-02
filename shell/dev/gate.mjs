@@ -1262,6 +1262,57 @@ async function renderScanCheck() {
   return fails;
 }
 
+/**
+ * In a surface's own page (index.html?mode=shade|pull|lock|recents|assist; ui/renderfollow.ts): the meter's "rs" puts
+ * the render scan's overlay up there too and it outlines that page's re-rendering components; a meter recording says
+ * hello, counts this page's renders and sends them to the bar as {rec, surface, recPart, of, data}; off = no hooks.
+ * Poked by host events that re-render the surface's root (a notification, the switcher's tasks, a pull, ...).
+ */
+async function surfaceRenderScan(surface) {
+  const fails = [], KEYS = ["__r", "diffed", "__c", "__e"], G = window.__gw, E = window.__mockEvents;
+  const options = (await window.importShim("preact")).options;
+  const orig = KEYS.map((k) => options[k]), same = () => KEYS.every((k, i) => options[k] === orig[i]);
+  const R = await G.mod("./ui/renderscan.ts"), O = await G.mod("./ui/renderoverlay.ts"), { powos } = await G.mod("./bridge.ts");
+  const sent = [], pub = powos.perf.publish;
+  powos.perf.publish = async (json) => { sent.push(JSON.parse(json)); };
+  let k = 0;
+  const note = () => ({ available: true, items: [{ key: "gate-rs", app: "gate", title: "Render scan", text: `one ${++k}`, when: 1, icon: null, actions: [] }] });
+  const task = (n) => ({ id: n, label: `App ${n}`, key: `app${n}`, icon: null, snapshot: "" });
+  const poke = {
+    shade: () => [["notifications.changed", note()]], lock: () => [["notifications.changed", note()]],
+    recents: () => [["recents.tasks", { tasks: [task(1), task(2 + (++k % 2))] }]],
+    pull: () => [["pull.begin", { kind: "apps" }], ["pull.drag", { p: 0.3 }], ["pull.drag", { p: 0.7 }], ["pull.end", { open: !!(++k % 2) }]],
+    assist: () => [["assist.live", { on: !!(++k % 2), frames: k }]],
+  }[surface];
+  const pokeAll = async () => { for (const [ev, data] of poke()) { E.emit(ev, data); await G.frames(2); } };
+  const want = (ok, msg) => ok || fails.push(`${surface}: ${msg}`);
+  const mine = (m) => m.rec === 4343 && m.surface === surface;
+  const joined = (parts) => { try { return JSON.parse(parts.map((m) => m.data).join("")); } catch (e) { return { error: String(e) }; } };
+  try {
+    // The follower is imported by app.tsx after the root rendered: wait for its listener (the overlay goes on with it).
+    await G.until(() => { E.emit("perf.meter", { on: true, renders: true }); return O.overlayOn(); }, 3000);
+    if (!O.overlayOn()) return [`${surface}: the meter's rs didn't put the render overlay up on this page`];
+    want(document.querySelectorAll("html > canvas").length === 1, "the overlay's canvas isn't up");
+    await pokeAll();
+    await G.until(() => O.overlayOutlined() > 0, 2000);
+    const live = R.topRenders(50).byCount.reduce((n, r) => n + r.renders, 0);
+    want(live > 0, "no renders counted on this page while the overlay was on");
+    want(O.overlayOutlined() > 0, `the overlay outlined nothing (${live} renders counted)`);
+    E.emit("perf.meter", { on: true, renders: true, rec: 4343 });
+    await G.frames(2);
+    want(sent.some((m) => mine(m) && m.hello), `no hello to the bar at the recording's start: ${JSON.stringify(sent).slice(0, 200)}`);
+    await pokeAll();
+    E.emit("perf.meter", { on: true, renders: false, stop: 4343 });
+    await G.frames(2);
+    const parts = sent.filter((m) => mine(m) && "recPart" in m).sort((a, b) => a.recPart - b.recPart);
+    const rep = parts.length && parts.length === parts[0].of ? joined(parts) : { error: `${parts.length} parts` };
+    want(rep.renders > 0, `the recording's renders didn't come back to the bar with renders counted: ${JSON.stringify(rep).slice(0, 200)}`);
+    want(!O.overlayOn() && !document.querySelector("html > canvas"), "the overlay stayed up after rs went off");
+    want(!R.scanning() && same(), "render scan hooks left in place after the recording and overlay stopped");
+  } finally { powos.perf.publish = pub; }
+  return fails;
+}
+
 async function staleWide(page, to) {
   const isWide = () => page.evaluate(() => !!document.querySelector(".home.wide"));
   const desk = { width: 1280, height: 800 };
@@ -11221,6 +11272,12 @@ try {
   // and when the last user stops Preact's options hooks are the originals again - zero cost when off.
   if (process.env.SHELL_PAGES !== "0" && fs.existsSync(path.join(ROOT, "ui/renderscan.ts")))
     runs.push(open(browser, `${ORIGIN}/index.html`, "render-scan").then((r) => whenReady(r, () => r.page.evaluate(renderScanCheck))));
+  // The same on the surfaces' own pages (renderfollow.ts): each surface's overlay and recording count its renders.
+  if (process.env.SHELL_PAGES !== "0" && fs.existsSync(path.join(ROOT, "ui/renderfollow.ts"))) {
+    for (const surface of ["shade", "lock", "recents", "pull", "assist"])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=${surface}`, `render-scan-${surface}`, { width: 404, height: 900 })
+        .then((r) => whenReady(r, () => r.page.evaluate(surfaceRenderScan, surface))));
+  }
   // Fold <-> unfold: home's layout and dock change in the first frame after the resize, the screen object lagging
   // (foldSameFrame); a long press that ends with a fold change leaves edit mode off (foldGrip).
   if (process.env.SHELL_PAGES !== "0") {

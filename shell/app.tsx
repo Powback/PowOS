@@ -36,6 +36,7 @@ await loadTheme();
  * smart glasses' screen, off screen).
  */
 const mode = new URLSearchParams(location.search).get("mode");
+const RENDER_SURFACES = new Set(["shade", "pull", "lock", "recents", "assist"]);
 document.documentElement.dataset.mode = mode ?? "home";
 if (mode === "aod") {
   render(<Aod />, document.body);
@@ -100,6 +101,9 @@ if (mode === "aod") {
   // Alive is not drawn: a home laid out off the screen (a window stuck at the other screen's size) is reported.
   void import("./ui/homedrawn.ts").then((m) => m.watchHomeDrawn());
 }
+// The render scan on the surfaces' own pages (home's is fpssample.ts): the shade, the launcher / AI overlay (pull), the
+// lock face, the switcher alone and PowOS AI over an app - the meter's "rs" overlay and its recordings cover them too.
+if (mode && RENDER_SURFACES.has(mode)) void import("./ui/renderfollow.ts").then((m) => m.followRenders(mode));
 // The page ran and drew its screen: what the native hosts ask before they let a window of theirs cover the screen
 // (shell/PageWatchdog.kt) - a page that never got here (a module that didn't load) has its window taken away.
 (window as unknown as { __powosAlive?: boolean }).__powosAlive = true;
