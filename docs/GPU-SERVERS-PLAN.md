@@ -362,19 +362,6 @@ Noise: a 3090 under the pool's full load runs at 100%, ~300 W, with its fan near
     memory-bound, so it should cost only a few percent.
   - An NVML fan floor, which needs root and is riskier.
 
-**PowMap live room scan on GPU1** (2026-11-02): unit `powmap-scan` (owner powmap), quadlet on :8765, served as
-`https://powmap.pow/scan/*` by Traefik on `.100`. The phone streams JPEG frames over a WebSocket; VGGT-SLAM 2.0
-(VGGT-1B + SALAD) grows a point cloud, and a TSDF mesh comes out at the end. The code and Containerfile live in the
-PowMap repo's `scanner/` (rsynced to `~/powmap-scanner`, built by `install.sh` when present).
-- GPU1 on demand. A scan asks llama-swap to unload (`POST /api/models/unload`, reached as
-  `host.containers.internal:9292`, because the box's own LAN IP is refused from inside a rootless container). It then
-  waits for 10000 MB free. The GPU engine is a child process that exits 300 s after the last scan, freeing all its
-  VRAM; the pool loads again on its next request (embed cold start measured at 36 s).
-- The worker checks GPU1's UUID before loading, so it never runs on GPU0.
-- Measured on TUM fr1/room streamed at 8 fps: GPU1 7.3 GiB peak (9.9 of 24 with stt-batch), 8–8.9 keyframes/s, a
-  snapshot 2.6 s behind the camera (median), container RAM 10.7 GB peak (limit 16g). The GPU0 process set was
-  unchanged before and after.
-
 **Router: `llm.pow`** (2026-10-21, phase 4). LiteLLM v1.106.2, pinned by digest. It runs as the PowStation compose
 service `llm-router` on Colima: `config/litellm/config.yaml` plus a `docker-compose.yaml` block, Traefik labels,
 the `local-only` allowlist, and a Pi-hole entry from pihole-sync. It needs no database, cache or volume, and its limits
