@@ -1368,7 +1368,7 @@ async function overpullTests() {
 
 /**
  * A swipe up on the card folds it to one compact row (no half state): on the way what's under it follows the finger
- * up; folded, only the first six toggles show, no launchers, the notifications' panel right under the card and still
+ * up; folded, only the first six toggles show (the quick launchers under them), the notifications' panel right under the card and still
  * down to the screen's bottom, the row where it was.
  */
 async function overpullFold() {
@@ -1386,8 +1386,9 @@ async function overpullFold() {
   o.h = from - o.under1;
   if (document.querySelector(".cc3-list.whole") || o.n1 !== 6) fails.push(`pulled up 80 px, ${o.n1} toggles shown, not the one compact row of 6`);
   if (o.h < 40) fails.push(`folded, what's under the control center came up only ${Math.round(o.h)} px`);
-  const launch = document.querySelector(".panel-body.together .cc3-launchers");
-  if (launch && launch.getClientRects().length) fails.push("folded, the launchers still show under the row (not compact)");
+  // S3 (f0f0361d, the user 2026-10-28): folded, the quick launchers stay shown under the compact row, never dropped.
+  const launchersWent = (l) => !!l?.querySelector(".cc3-chip") && !l.getClientRects().length;
+  if (launchersWent(document.querySelector(".panel-body.together .cc3-launchers"))) fails.push("folded, the quick launchers went (S3: shown folded and expanded)");
   if (document.querySelector(".panel-body.together .notif-stack.open")) fails.push("folded, notification stacks stay unfolded");
   if (Math.abs(o.seam() - o.seam0) > 2) fails.push(`folded, the seam between the card and the notifications is ${Math.round(o.seam())} px, not ${Math.round(o.seam0)}`);
   if (o.ownBottom() < innerHeight - 1) fails.push(`folded, the notifications' panel ends ${Math.round(innerHeight - o.ownBottom())} px above the screen's bottom`);
@@ -12492,6 +12493,13 @@ try {
         for (const f of ["panelMaterial", "picture", "members", "longPressHaptic"]) fails.push(...(await call(f, label)));
         return fails;
       })));
+  // The shade task's plan steps (dev/shade-steps-check.js): S1 the cover opens the control center folded, the inner
+  // screen expanded; S3 the quick launchers on screen and on top folded and expanded; S4 no card behind the controls,
+  // no panel behind the notifications.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, `shade-steps-${label}`, viewport).then((r) => whenReady(r, () =>
+        r.page.evaluate(async (at) => (await importShim("./dev/shade-steps-check.js")).steps(at), label))));
   // NS1-NS4 (dev/notif-stacks-check.js; the user, 11-01 16:39: "just show like 3 cards and then an 'x more' hint"):
   // groups of 1, 3 and 7 all on screen at once, each up to 3 full cards one after another and "+4 more" on the 7, top-
   // and bottom-aligned; a tap on "+4 more" opens that group alone. NS5-NS7 (11-01 16:47: "Let's move the notifications
