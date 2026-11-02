@@ -250,8 +250,9 @@
  * Content scrolling under chrome: the drawer's apps and the shade's list fade out at an edge where there's more to
  * scroll, never cut (the user, 2026-10-24): one scroll-driven mask on the scroll container, the dock's way, both ends
  * --scroll-fade. Nothing to scroll, or no scroll timelines: no fade, as before.
- * PowOS AI's panes and chat do NOT fade (the user, 2026-10-28): they end in a crisp edge. No scroll-driven shadow or
- * clip radius on them: that animated paint glitched the launcher's previews as it opened.
+ * PowOS AI's panes and chat fade at their foot with their own --ai-fade (below, .ai-chat; the user 11-02 reversed
+ * 10-28's crisp edge). No scroll-driven shadow or clip radius on them: that animated paint glitched the launcher's
+ * previews as it opened.
  */
 @property --scroll-fade-t { syntax: "<length>"; inherits: false; initial-value: 0px; }
 @property --scroll-fade-b { syntax: "<length>"; inherits: false; initial-value: 0px; }
@@ -1666,8 +1667,7 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
   display: flex;
   flex-direction: column;
   gap: 14px;
-  /* No fade at the foot (the user, 2026-10-28): the last card ends on its own rounded corner with room under it, and a
-     cut mid-scroll is the pane's own rounded edge, so a short viewport (keyboard open) never shows a flat clipped card. */
+  /* Room under the last card so it ends on its own rounded corner; the foot's fade (--ai-fade, 11-02) is 0 there. */
   padding-bottom: 12px;
 }
 /*
@@ -3699,6 +3699,21 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
   .ai-chat { animation: ai-fade linear both; animation-timeline: scroll(self y); animation-range: 0 48px; }
 }
 @keyframes ai-fade { from { --ai-fade: 0px; } to { --ai-fade: 48px; } }
+/*
+ * The AI page's lists fade out at their foot as the chat does (the user, 11-02: "the AI pages don't have the fade-out";
+ * this supersedes 10-28's crisp edge): Friction, the status column (By area, Working now), Agents, Progress, Devices -
+ * the same --ai-fade, driven from the other end (a list's scroll origin is its top): full while rows continue below,
+ * 0 at the end, so the last row is never faded; nothing to scroll, no timeline, no fade. A mask, so it fades into
+ * whatever the theme's backdrop is and never eats a touch. A scroll timeline holds no frame-rate vote (hz-vote e4a7f9e2).
+ */
+@supports (animation-timeline: scroll()) {
+  :is(.ai-view, .ai-left, .ai-right) :is(.ai-scroll, .ag-scroll):not(.ai-chat) { animation: ai-fade-end linear both; animation-timeline: scroll(self y); animation-range: calc(100% - 48px) 100%; }
+}
+@keyframes ai-fade-end { from { --ai-fade: 48px; } to { --ai-fade: 0px; } }
+.ai-right > :is(.ai-scroll, .ag-scroll):not(.ai-chat), .ai-screen > .ag-scroll, .ais-fold > .ai-scroll.ais {
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - var(--ai-fade)), transparent);
+  mask-image: linear-gradient(to bottom, black calc(100% - var(--ai-fade)), transparent);
+}
 /* The chat's bubbles keep the screen's side margin (the scroller runs edge to edge under the floating header/pill). */
 .ai-screen > .ai-chat, .ai-screen > .ai-sub { padding-inline: var(--edge); }
 .try-item + .try-item { padding-top: 8px; }
@@ -3725,7 +3740,8 @@ html:root .ai-view > .ai-menu.tile { --glass-blur-native: var(--backdrop-blur-na
   -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--ai-head) - var(--ai-head-inset) - 4px), black calc(var(--ai-head) - var(--ai-head-inset) + var(--ai-head-fade)), black calc(100% - var(--ai-fade-at, 0px) - var(--ai-fade, 0px)), transparent calc(100% - var(--ai-fade-at, 0px)));
   mask-image: linear-gradient(to bottom, transparent calc(var(--ai-head) - var(--ai-head-inset) - 4px), black calc(var(--ai-head) - var(--ai-head-inset) + var(--ai-head-fade)), black calc(100% - var(--ai-fade-at, 0px) - var(--ai-fade, 0px)), transparent calc(100% - var(--ai-fade-at, 0px)));
 }
-.ai-screen > .ai-sub { --ai-fade-at: 0px; }
+/* A menu screen (folded Friction) runs under home's bar as the chat does: its fade ends at the pill's top, not under it. */
+.ai-screen > :is(.ai-sub, .ais) { --ai-fade-at: calc(var(--ai-tail) - 14px); }
 .ai-screen > .ai-scroll { --ai-head-inset: var(--inset-top, 0px); }
 /* The header's words straight on the surface: no chips of their own. */
 html:root .ai-screen .ai-top > :is(.ai-title, .ai-state, .ai-more, .ai-back, .ai-strip) { background: none; box-shadow: none; border-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; text-shadow: none; }
@@ -3902,7 +3918,7 @@ html:root .ai-screen .ai-chat-in .choice-opts > .choice-opt.other.other { backgr
 html:root .ai-left > .ai-menu.tile { --glass-blur-native: var(--backdrop-blur-native); background: var(--menu-tint); }
 /* The status page in the left column: a column of its own (the full-screen page's insets aren't its). */
 .ai-left > .ais-top { position: relative; z-index: 2; display: flex; align-items: center; gap: 14px; min-height: 56px; margin: 12px var(--ais-side) 0; }
-.ai-left > .ai-scroll.ais { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 14px var(--ais-side) 16px; -webkit-mask-image: linear-gradient(to bottom, transparent, black 14px, black calc(100% - 14px), transparent); mask-image: linear-gradient(to bottom, transparent, black 14px, black calc(100% - 14px), transparent); }
+.ai-left > .ai-scroll.ais { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 14px var(--ais-side) 16px; -webkit-mask-image: linear-gradient(to bottom, transparent, black 14px, black calc(100% - var(--ai-fade)), transparent); mask-image: linear-gradient(to bottom, transparent, black 14px, black calc(100% - var(--ai-fade)), transparent); }
 .ai-left > .ais-foot { position: relative; z-index: 2; margin: 0 var(--ais-side) 12px; display: flex; }
 /*
  * Both columns on THE backdrop (--backdrop-tint / --backdrop-blur-native, as the folded status page's pane), the Progress

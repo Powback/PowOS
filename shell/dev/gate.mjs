@@ -5356,6 +5356,21 @@ async function frictionCheck(page, label) {
   return fails;
 }
 
+/** The AI page's foot fade (dev/ai-fade-check.js): on the Friction list, then on a long chat. */
+async function aiFadeCheck(page, label) {
+  if (!(await page.evaluate(frictionSetup))) return [`ai-fade-${label}: the Friction page showed no rows`];
+  const run = (what, want) => page.evaluate(async (l, w) => (await importShim("./dev/ai-fade-check.js")).aiFadeFails(l, w), `ai-fade-${label} ${what}`, want);
+  const list = await run("friction", [".ai-sub"]);
+  await page.evaluate(async () => (await importShim("./dev/ai-fade-check.js")).aiFadeChat());
+  const chat = await run("chat", [".ai-chat"]);
+  console.log(`ai-fade-${label}: ${[...list.facts, ...chat.facts].join("; ")}`);
+  await page.evaluate(async () => {
+    const B = await window.__gw.mod("./ui/aiboard.tsx");
+    [B.friction.value, B.board.value, B.boardSeen.value] = window.__frWas;
+  });
+  return [...list.fails, ...chat.fails];
+}
+
 /**
  * The terminals from the AI page (the user, 11-01 16:57: "There's no terminal option anymore"): a session's terminal in
  * at most 2 taps - unfolded via the Devices tab (its device card's sessions) and via the Agents tab (a card's "Open
@@ -12032,6 +12047,11 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `friction-${label}`, viewport).then((r) => whenReady(r, () => frictionCheck(r.page, label))));
+  // The AI page's chat and lists fade out at their foot while content continues below, none at the end (the user, 11-02:
+  // "the AI pages don't have the fade-out"; dev/ai-fade-check.js).
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `ai-fade-${label}`, viewport).then((r) => whenReady(r, () => aiFadeCheck(r.page, label))));
   // An agent's page is its conversation, folded and unfolded (the user, 11-01 16:45 / 17:10; ui/agents.tsx Convo).
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
