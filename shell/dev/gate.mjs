@@ -227,6 +227,61 @@ async function statusChromeCheck() {
   return fail;
 }
 
+/**
+ * The recording light (ui/chrome.tsx RecordingRing, StatusChrome.kt's AppOps watch): with the camera / mic / screen in
+ * use, a ring sits centred on the camera's cutout on this screen - [hole] the cover's centred punch-hole folded, the
+ * inner screen's top-right one unfolded - in that op's colour; gone when nothing records; a dot without a cutout.
+ */
+async function recordingRingCheck(hole) {
+  const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const base = { kind: "status", battery: 74, network: "wifi", left: 8, camera: hole };
+  const show = async (extra) => { window.__mockEvents.emit("chrome.changed", { ...base, ...extra }); await frame(); };
+  const lit = () => document.querySelector(".status-rec-ring, .status-rec-dot");
+  const colour = (name) => {
+    const el = document.createElement("i");
+    el.style.color = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    document.body.append(el);
+    const c = getComputedStyle(el).color;
+    el.remove();
+    return c;
+  };
+  /** The ring's box [r]: centred on the cutout, round, bigger than it. */
+  const placeFails = (kind, r) => {
+    const cx = hole.x + hole.width / 2, cy = hole.y + hole.height / 2;
+    const off = Math.abs(r.x + r.width / 2 - cx) > 1 || Math.abs(r.y + r.height / 2 - cy) > 1;
+    const small = r.width < Math.max(hole.width, hole.height) + 2 || Math.abs(r.width - r.height) > 0.5;
+    return [
+      off ? `${kind}: ring centred at ${r.x + r.width / 2},${r.y + r.height / 2}, the camera at ${cx},${cy}` : "",
+      small ? `${kind}: ring ${r.width}x${r.height} doesn't go round the ${hole.width}x${hole.height} cutout` : "",
+    ];
+  };
+  /** The ring for [kind]: round the cutout, centred on it, in [token], untouchable, saying who records. */
+  const ringFails = (kind, token) => {
+    const ring = document.querySelector(".status-rec-ring");
+    if (!ring) return [`${kind}: no ring`];
+    for (const a of ring.getAnimations()) a.finish(); // its entry (a spring scale-in): measured where it settles
+    const css = getComputedStyle(ring);
+    return [
+      ...placeFails(kind, ring.getBoundingClientRect()),
+      css.borderTopColor === colour(token) ? "" : `${kind}: ring ${css.borderTopColor}, want ${token} ${colour(token)}`,
+      css.pointerEvents === "none" ? "" : `${kind}: the ring takes touches`,
+      ring.getAttribute("aria-label")?.includes("org.example.rec") ? "" : `${kind}: ring doesn't say who uses it`,
+    ].filter(Boolean);
+  };
+  const fail = [];
+  await show({ recording: null });
+  if (lit()) fail.push("a recording light with nothing in use");
+  for (const [kind, token] of [["camera", "--privacy-camera"], ["mic", "--privacy-mic"], ["screen", "--privacy-screen"]]) {
+    await show({ recording: kind, recordingApps: ["org.example.rec"] });
+    fail.push(...ringFails(kind, token));
+  }
+  await show({ camera: undefined, recording: "mic" });
+  if (document.querySelector(".status-rec-ring") || !document.querySelector(".status-rec-dot")) fail.push("no cutout: want the dot, not a ring");
+  await show({ recording: null });
+  if (lit()) fail.push("the light stayed on after the op stopped");
+  return fail;
+}
+
 /** The modes app.tsx renders (`mode === "x"`), home first: a mode added there is checked without touching this. */
 function modes() {
   const src = fs.readFileSync(path.join(ROOT, "app.tsx"), "utf8");
@@ -10109,6 +10164,9 @@ try {
   }
   for (const [mode, width, height] of [["windowbar", 280, 27], ["statusbar", 404, 46]])
     runs.push(open(browser, `${ORIGIN}/index.html?mode=${mode}`, `chrome-${mode}`, { width, height }).then((r) => whenReady(r, () => r.page.evaluate(mode === "windowbar" ? windowChromeCheck : statusChromeCheck))));
+  // The recording light at the camera folded (the cover's centred hole) and unfolded (the inner screen's, top right).
+  for (const [label, width, hole] of [["folded", 404, { x: 190, y: 10, width: 24, height: 24 }], ["unfolded", 821, { x: 752, y: 9, width: 22, height: 22 }]])
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=statusbar`, `rec-light-${label}`, { width, height: 46 }).then((r) => whenReady(r, () => r.page.evaluate(recordingRingCheck, hole))));
   // The pill (bar.tsx, grow.tsx): every empty pill on home is one --pill-height tall - the foot's, PowOS AI's compose,
   // and the search widget at every size (one row, two rows, narrow), also after it was measured narrow and widened
   // again (2026-10-22: a pill measured narrow kept that height - three rows of placeholder - once wide again).

@@ -60,6 +60,9 @@
          powos-system 29873839). The phone enforces that allowlist: an APK asking for a privileged permission the mounted
          module doesn't list stops the phone at the boot screen - install-app.sh refuses such an APK. -->
     <uses-permission android:name="android.permission.BIND_APPWIDGET" />
+    <!-- The recording light (system/RecordingLight.kt) sees every app's camera/mic use with WATCH_APPOPS
+         (signature|privileged): on privapp-permissions.txt; its uses-permission goes here once a module with that
+         entry is booted on the phone (install-app.sh refuses the APK before). Without it: PowOS's own uid only. -->
 
     <!-- Smart glasses (glasses/, docs/GLASSES.md): BLE links to the arms (BLUETOOTH/BLUETOOTH_ADMIN above), paired through
          Android's companion flow (no location permission: the system scans), which also tells PowOS when they're in

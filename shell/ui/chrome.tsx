@@ -82,7 +82,7 @@ export function StatusBar({ state, action }: { state: ChromeState; action: Chrom
   const time = state.clock ?? now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const battery = state.battery == null ? null : Math.round(Math.max(0, Math.min(100, state.battery)));
   // A camera hole in the middle (folded cover screen, StatusChrome.kt holeLeft): the meter ends left of it, not under it.
-  const hole = (state as { holeLeft?: number }).holeLeft;
+  const hole = state.holeLeft;
   const { merged, left, right } = sides(state);
   return <div class={`status-chrome${hole != null ? " has-hole" : ""}${merged ? " merged" : ""}`} style={{ paddingLeft: `${left}px`, paddingRight: `${right}px`, ...(hole != null ? { "--hole-left": `${hole}px` } : {}) }}>
     {/* data-action: the host makes only these touchable on the strip (chrome.regions -> ShadeHost edgeRegion). */}
@@ -93,11 +93,39 @@ export function StatusBar({ state, action }: { state: ChromeState; action: Chrom
     <button class="status-indicators" data-action="controls" aria-label={statusLabel(state, battery)} onClick={() => action("controls")}>
       <Indicators state={state} battery={battery} />
     </button>
+    <RecordingLight state={state} />
   </div>;
+}
+
+const RECORDING_WORDS = { camera: "Camera", mic: "Microphone", screen: "Screen recording" } as const;
+function recordingLabel(kind: NonNullable<ChromeState["recording"]>, apps?: string[]) {
+  return `${RECORDING_WORDS[kind]} in use${apps?.length ? ` by ${apps.join(", ")}` : ""}`;
+}
+
+/** The recording light on the camera's cutout (none on this screen: [Indicators]' dot). */
+function RecordingLight({ state }: { state: ChromeState }) {
+  return state.recording && state.camera ? <RecordingRing kind={state.recording} camera={state.camera} apps={state.recordingApps} /> : null;
+}
+
+/**
+ * The recording light: a ring around the camera's cutout while an app uses the camera (green), captures the screen
+ * (red) or records audio (orange) - StatusChrome.kt's AppOps watch. Drawn where the camera is on this screen (cover
+ * folded, inner unfolded); never touchable.
+ */
+export function RecordingRing({ kind, camera, apps }: { kind: NonNullable<ChromeState["recording"]>; camera: NonNullable<ChromeState["camera"]>; apps?: string[] }) {
+  const size = Math.max(camera.width, camera.height) + 6;
+  return <span class="status-rec-ring" data-kind={kind} role="img" aria-label={recordingLabel(kind, apps)}
+    style={{ left: `${camera.x + camera.width / 2 - size / 2}px`, top: `${camera.y + camera.height / 2 - size / 2}px`, width: `${size}px`, height: `${size}px` }} />;
+}
+
+/** No camera cutout on this screen (a desktop, a tablet without one): the light as a dot before the status icons. */
+function RecordingDot({ kind, apps }: { kind: NonNullable<ChromeState["recording"]>; apps?: string[] }) {
+  return <span class="status-rec-dot" data-kind={kind} role="img" aria-label={recordingLabel(kind, apps)} />;
 }
 
 function Indicators({ state, battery }: { state: ChromeState; battery: number | null }) {
   return <>
+      {state.recording && !state.camera && <RecordingDot kind={state.recording} apps={state.recordingApps} />}
       {state.vpn && <span title="VPN connected"><Mark kind="vpn" /></span>}
       {state.network && <span title={state.network}><Mark kind={state.network} /></span>}
       {battery != null && <span class="status-battery"><svg viewBox="0 0 28 16" aria-hidden="true"><rect x="1" y="2" width="22" height="12" rx="3" /><path d="M26 6v4" /><rect class="battery-level" x="3" y="4" width={18 * battery / 100} height="8" rx="1" /></svg>{state.charging && <Mark kind="charging" />}<span>{battery}%</span></span>}
