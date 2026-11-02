@@ -49,7 +49,7 @@ put_away() {
   step "$4" "$3 put away: a tap on its dock cell while its window is in front"
   local m; m=$(win "$1" minimised)
   [ "$m" = true ] && { pass "$3 minimised into the dock"; return 0; }
-  fail "$3 after a dock tap on it in front: minimised=$m (windows.list before: $before; after: $after; WindowFrames log: $(sh_ "logcat -d | grep -E \"minimise task|can.t minimise\" | tail -3" | tr "\n" "~"))"
+  fail "$3 after a dock tap on it in front: minimised=$m (windows.list before: $before; after: $after; minimise log: $(sh_ "logcat -d | grep -v adbd | grep -E \"window [0-9]+: (minimis|after its minimise|back in its window|task [0-9]+ (not in front|followed back))|can.t minimise\" | tail -6" | tr "\n" "~"))"
   put_away_fallback "$1" "$3"
 }
 # put_away_fallback <window key> <name>: the dock tap left it up (round 193: Chrome stayed on screen, so steps 56/57
