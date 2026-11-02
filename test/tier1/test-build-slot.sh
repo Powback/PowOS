@@ -15,7 +15,14 @@ finish() {
   echo "Results: $pass passed, $failn failed"; rm -rf "$XDG_CACHE_HOME"
 }
 trap finish EXIT
-ok() { if eval "$2"; then echo "ok   $1"; pass=$((pass+1)); else echo "FAIL $1"; failn=$((failn+1)); fi; }
+ok() { if eval "$2"; then echo "ok   $1"; pass=$((pass+1)); else echo "FAIL $1 [$(diag)]"; failn=$((failn+1)); fi; }
+# diag: what the jobs and locks look like at a failure - who holds (marker), who printed a wait, every lock dir.
+diag() {
+  local f d; printf 'holding:'; for f in "$L".*; do case $f in *.err) ;; *) printf ' %s' "${f##*.}" ;; esac; done
+  printf '; err:'; for f in "$L".*.err; do [ -s "$f" ] && printf ' %s=%s' "$(basename "$f" .err)" "$(tr '\n' '|' < "$f")"; done
+  printf '; locks:'; for d in "$XDG_CACHE_HOME"/powos-build-slot*; do [ -e "$d" ] && printf ' %s(pid=%s label=%s)' \
+    "${d##*/}" "$(cat "$d/pid" 2>/dev/null)" "$(cat "$d/label" 2>/dev/null)"; done
+}
 # waitfor <cond>: poll until <cond> is true, up to $T s. Events, not durations.
 waitfor() { local i=0; while ! eval "$1"; do i=$((i+1)); [ "$i" -le $((T*20)) ] || return 1; sleep 0.05; done; }
 # run <name> <label>: a job that marks "holding" and holds its slot until $R.<name> (or $R.all) exists.
