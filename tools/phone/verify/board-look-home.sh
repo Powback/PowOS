@@ -21,25 +21,31 @@
 #                page only when it answers: never locked by script); each put away after, the meter put back;
 #   launcher-in  (launcher-design-gaps, a7b9ba39): the launcher opened by code animates in from closed (its frame/clip
 #                --p sampled every frame for 300 ms: in-between values, not 0 -> 1 in one frame); no "No folders yet"
-#                page (with no folders, no 2nd page at all).
+#                page (with no folders, no 2nd page at all);
+#   agents-widget (agents-widget-shows-what-each-agent-is-doing-in, 4adac2e4 + 05589a95/0302594a): unfolded, home's
+#                Agents widget when it is on the user's home (else a SKIP with why; never added): each row a plain task
+#                title (no ids, paths, hashes, file names), natural height and top-aligned, a bar only under its title,
+#                the head's state words; then the AI page's Agents tab: each row a plain title, a state word (N/M,
+#                working, ...; a stuck row's title is its reason), and every working row with N/M has its bar under it.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/e2e-lib.sh"
-CASES="home-merge ai-views health-tile render-scan launcher-in"
+CASES="home-merge ai-views health-tile render-scan launcher-in agents-widget"
 CASE=${1:-}; shift || true
 case " $CASES " in *" $CASE "*) [ -n "$CASE" ] ;; *) false ;; esac || { echo "usage: board-look-home.sh ${CASES// /|} [--round R]"; exit 2; }
 e2e_args "$@"
 e2e_init "look-$CASE"
-case $CASE in ai-views) e2e_setup inner ;; *) e2e_setup ;; esac
+case $CASE in ai-views|agents-widget) e2e_setup inner ;; *) e2e_setup ;; esac
 
 # verdict <"PASS ..."|"FAIL ..."|other>: a pass/fail line from a page's answer.
 verdict() { case $1 in PASS*) pass "${1#PASS }" ;; FAIL*) fail "${1#FAIL }" ;; *) fail "no answer from the page: ${1:0:200}" ;; esac; }
 
 # What a case changed, put back (idempotent; the EXIT trap runs it before e2e-lib's own restore).
-EDITING=; AISCR0=; METER0=; LOPEN=; AOPEN=
+EDITING=; AISCR0=; AIAG0=; METER0=; LOPEN=; AOPEN=
 look_restore() {
   [ -n "$EDITING" ] && { ev 'importShim("./state.ts").then(s=>{s.selected.value=null;s.editing.value=false;return "ok"})' >/dev/null; EDITING=; log "edit mode left"; }
   [ -n "$AISCR0" ] && { ev "importShim('./state.ts').then(s=>{s.aiScreen.value='$AISCR0';return 'ok'})" >/dev/null; log "AI page tab back to $AISCR0"; AISCR0=; }
+  [ -n "$AIAG0" ] && { ev "importShim('./agents.ts').then(a=>{a.aiAgent.value='$AIAG0';return 'ok'})" >/dev/null; log "AI page's open agent back to $AIAG0"; AIAG0=; }
   [ -n "$METER0" ] && { ev "importShim('./bridge.ts').then(b=>b.powos.store.set('perf.meter',$METER0)).then(()=>'ok')" >/dev/null; log "perf.meter back to $METER0"; METER0=; }
   [ -n "$AOPEN" ] && { sh_ "cmd voiceinteraction hide" >/dev/null; AOPEN=; log "side button overlay hidden"; }
   [ -n "$LOPEN" ] && { back 1; LOPEN=; log "launcher / switcher closed (Back)"; }
@@ -229,4 +235,45 @@ return (/No folders yet/.test(t)||document.querySelector(".folder-empty")?"FAIL 
 fi
 
 look_restore
+if [ "$CASE" = agents-widget ]; then
+  # Plain words: no board ids (5+ dashed words), no paths, no hashes/uuids, no file names, no session ids.
+  PLAIN='const raw=t=>/(^|\s)[~.]?\/[\w.-]+|\b[0-9a-f]{7,}\b|\b[a-z0-9]+(-[a-z0-9]+){4,}\b|\.(ts|tsx|sh|kt|py|md|json|mjs)\b|\b(sess|agent|task)[-_][0-9a-z]{6,}/i.test(t);'
+  setpage 0; sleep 1.2; chk "home"
+  step agents-widget "home's Agents widget as it is (read only)"
+  r=$(ev "(()=>{$PLAIN const p=document.querySelector('.home .ag-panel');
+if(!p)return 'SKIP no Agents widget on the user\'s home (not added by the check)';
+const head=(p.querySelector('.ag-head')?.textContent||'').trim(),rows=[...p.querySelectorAll('.ag-list .fl-tile')],bad=[];let bars=0,done=0;
+if(!head)bad.push('no head line');
+for(const r of rows){const t=(r.querySelector('.fl-t1-text')?.textContent||'').trim(),b=r.getBoundingClientRect();if(r.matches('.fl-done'))done++;
+ if(!t)bad.push('a row with no title');else if(raw(t))bad.push('raw title: '+t.slice(0,50));
+ const bar=r.querySelector('.fl-bar'),tt=r.querySelector('.fl-t1');if(bar){bars++;if(tt&&bar.getBoundingClientRect().top<tt.getBoundingClientRect().bottom-1)bad.push(t.slice(0,30)+': bar beside the title')}
+ if(getComputedStyle(r).backgroundColor!=='rgba(0, 0, 0, 0)')bad.push(t.slice(0,30)+': a box of its own')}
+const l=p.querySelector('.ag-list.rows');if(l&&rows.length){const top=l.getBoundingClientRect().top,f=rows[0].getBoundingClientRect();if(f.top-top>2)bad.push('rows not top-aligned ('+Math.round(f.top-top)+' px down)');
+ const lh=parseFloat(getComputedStyle(l).fontSize)||12;for(const r of rows)if(r.getBoundingClientRect().height>lh*4.2)bad.push('a row stretched to '+Math.round(r.getBoundingClientRect().height)+' px')}
+const what=rows.length+' rows ('+done+' done, '+bars+' with a bar), head \"'+head.slice(0,60)+'\"';
+if(!rows.length)return (/agent|working|idle|done/i.test(head)?'PASS no agent at work, head says so':'FAIL no rows and no state words')+' | '+what;
+return (bad.length?'FAIL '+bad.join('; '):'PASS')+' | '+what})()")
+  log "widget: $r"
+  case $r in SKIP*) NSKIP=$((NSKIP + 1)); _res SKIP "${r#SKIP }" ;; *) verdict "$r" ;; esac
+  AISCR0=$(ev 'importShim("./state.ts").then(s=>String(s.aiScreen.value))'); [[ $AISCR0 =~ ^[a-z]+$ ]] || AISCR0=chat
+  setpage -1; sleep 1.5; chk "ai page"
+  # One agent open live in the pane hides the rows: closed for the read, opened again by look_restore.
+  AIAG0=$(ev 'importShim("./agents.ts").then(a=>{const v=a.aiAgent.value;a.aiAgent.value=null;return v?String(v):""})'); case $AIAG0 in ERR*|null|undefined|*" "*) AIAG0= ;; esac
+  ev "importShim('./state.ts').then(s=>{s.aiScreen.value='fleet';return 'ok'})" >/dev/null; sleep 1.5
+  step ai-agents-tab "the AI page's Agents tab (read only)"
+  r=$(ev "(()=>{$PLAIN const R='.ai-screen .ai-right',rows=[...document.querySelectorAll(R+' .ag-rows .ag-row')],bad=[];
+if(!rows.length)return document.querySelector(R+' .aip-empty')?'PASS no agent at work: \"'+document.querySelector(R+' .aip-empty').textContent.trim()+'\"':'FAIL the Agents tab drew no rows';
+let work=0,bars=0;
+for(const r of rows){const t=(r.querySelector('.ag-row-title')?.textContent||'').trim(),st=(r.querySelector('.ag-row-state')?.textContent||'').trim(),stuck=!!r.querySelector('.aip-dot.waiting'),n=t.slice(0,30);
+ if(!t)bad.push('a row with no title');else if(raw(t))bad.push('raw title: '+t.slice(0,50));
+ if(!st&&!stuck)bad.push(n+': no state word');
+ if(r.querySelector('.aip-dot.working')&&t!=='Manager'){work++;const bar=r.querySelector('.aip-bar'),tt=r.querySelector('.ag-row-title');
+  if(/^\d+\/\d+$/.test(st)){if(!bar)bad.push(n+': '+st+' but no bar');else{bars++;if(bar.getBoundingClientRect().top<tt.getBoundingClientRect().bottom-1)bad.push(n+': bar beside the title')}}
+  else if(st!=='working')bad.push(n+': working, state \"'+st+'\"')}}
+const rest=[...document.querySelectorAll(R+' .ag-rest .ag-row-title')].map(e=>e.textContent.trim()).filter(raw);
+if(rest.length)bad.push('raw idle/done titles: '+rest.slice(0,3).join(', '));
+return (bad.length?'FAIL '+bad.join('; '):'PASS')+' | '+rows.length+' rows, '+work+' working, '+bars+' with a bar'})()")
+  log "agents tab: $r"; verdict "$r"
+fi
+
 e2e_finish
