@@ -16,8 +16,9 @@
 #                (health.status, no prompt); linked + nothing today -> "Nothing today" filling the tile, figures when
 #                there is data, not linked -> "Connect Health";
 #   render-scan  (render-scanner-react-scan-style-in-the-perf-reco, c920f0f2): the meter's rs on (store perf.meter) ->
-#                the render overlay up on the shade, launcher pull, lock, switcher (when its page is up) and AI overlay
-#                pages, outlining renders; the meter put back;
+#                each surface opened for real (shade.open, pull.open, the switcher key, voiceinteraction show) and its
+#                page's render overlay read while it shows - the shade, launcher pull, switcher, AI overlay (the lock
+#                page only when it answers: never locked by script); each put away after, the meter put back;
 #   launcher-in  (launcher-design-gaps, a7b9ba39): the launcher opened by code animates in from closed (its frame/clip
 #                --p sampled every frame for 300 ms: in-between values, not 0 -> 1 in one frame); no "No folders yet"
 #                page (with no folders, no 2nd page at all).
@@ -35,12 +36,13 @@ case $CASE in ai-views) e2e_setup inner ;; *) e2e_setup ;; esac
 verdict() { case $1 in PASS*) pass "${1#PASS }" ;; FAIL*) fail "${1#FAIL }" ;; *) fail "no answer from the page: ${1:0:200}" ;; esac; }
 
 # What a case changed, put back (idempotent; the EXIT trap runs it before e2e-lib's own restore).
-EDITING=; AISCR0=; METER0=; LOPEN=
+EDITING=; AISCR0=; METER0=; LOPEN=; AOPEN=
 look_restore() {
   [ -n "$EDITING" ] && { ev 'importShim("./state.ts").then(s=>{s.selected.value=null;s.editing.value=false;return "ok"})' >/dev/null; EDITING=; log "edit mode left"; }
   [ -n "$AISCR0" ] && { ev "importShim('./state.ts').then(s=>{s.aiScreen.value='$AISCR0';return 'ok'})" >/dev/null; log "AI page tab back to $AISCR0"; AISCR0=; }
   [ -n "$METER0" ] && { ev "importShim('./bridge.ts').then(b=>b.powos.store.set('perf.meter',$METER0)).then(()=>'ok')" >/dev/null; log "perf.meter back to $METER0"; METER0=; }
-  [ -n "$LOPEN" ] && { back 1; LOPEN=; log "launcher closed (Back)"; }
+  [ -n "$AOPEN" ] && { sh_ "cmd voiceinteraction hide" >/dev/null; AOPEN=; log "side button overlay hidden"; }
+  [ -n "$LOPEN" ] && { back 1; LOPEN=; log "launcher / switcher closed (Back)"; }
   return 0
 }
 trap 'rc=$?; look_restore; (exit $rc); e2e_abort' EXIT
@@ -151,23 +153,40 @@ if [ "$CASE" = render-scan ]; then
   case $METER0 in null|\{*) ;; *) METER0=; fail "perf.meter unreadable - rs not touched"; e2e_finish; exit 0 ;; esac
   log "perf.meter at start: $METER0"
   ev 'importShim("./bridge.ts").then(b=>b.powos.store.set("perf.meter",{on:true,renders:true})).then(()=>"ok")' >/dev/null; sleep 2
-  # A re-render on each surface with its own real data (no made-up items): the shade/lock list again, the launcher opened.
-  ev 'importShim("./bridge.ts").then(b=>b.powos.notifications.list()).then(l=>{window.__powosHost.emit("notifications.changed",l);return "ok"})' shade >/dev/null
-  ev 'importShim("./bridge.ts").then(b=>b.powos.notifications.list()).then(l=>{window.__powosHost.emit("notifications.changed",l);return "ok"})' lock >/dev/null
-  chk launcher; LOPEN=1; ev 'importShim("./state.ts").then(s=>{s.openPanel("apps");return "ok"})' >/dev/null; sleep 1.5
-  step rs-on "rs on (perf.meter {on, renders}): the render overlay on every surface page; the launcher opened by code"
-  pages=$("$T/cdp.sh" pages 2>/dev/null | awk '{print $1}' | tr '\n' ' '); log "pages: $pages"
+  # Each surface opened for real before it is measured (a hidden surface WebView pauses its JS: the probe timed out),
+  # then put away: the shade by the bridge's shade.open, the launcher pull by pull.open, the switcher by its key, the
+  # side button's overlay by voiceinteraction. The lock face isn't shown (that needs the phone locked): measured only
+  # when its page answers. A re-render with each surface's own real data where there is some (no made-up items).
   PROBE='importShim("./ui/renderoverlay.ts").then(O=>"on="+O.overlayOn()+" outlined="+O.overlayOutlined()+" canvas="+document.querySelectorAll("html > canvas").length).catch(e=>"err "+e)'
-  for s in shade pull lock recents assist; do
-    case " $pages " in *" $s "*) ;; *) note "$s: its page isn't up now (opened on demand) - not measured"; continue ;; esac
+  RELIST='importShim("./bridge.ts").then(b=>b.powos.notifications.list()).then(l=>{window.__powosHost.emit("notifications.changed",l);return "ok"})'
+  # rsjudge <surface> <probe answer>
+  rsjudge() { case $2 in "cdp: no answer"*|"no page"*|"") fail "$1: opened, but its page did not answer CDP (${2:-empty})" ;;
+      on=true*canvas=[1-9]*) case $2 in *outlined=0*) pass "$1: overlay up ($2), nothing re-rendered there yet" ;; *) pass "$1: overlay up and outlining ($2)" ;; esac ;;
+      *) fail "$1: no render overlay with rs on ($2)" ;; esac; }
+  for s in shade pull recents assist lock; do
+    chk "$s"
+    case $s in
+      shade) hcall shade.open "[]" "()=>'ok'" >/dev/null; sleep 1.5; ev "$RELIST" shade >/dev/null; sleep 0.6 ;;
+      pull) LOPEN=1; hcall pull.open '["apps",{}]' "v=>String(v)" >/dev/null; sleep 1.6 ;;
+      recents) LOPEN=1; sh_ "input keyevent KEYCODE_APP_SWITCH"; sleep 2 ;;
+      assist) AOPEN=1; sh_ "cmd voiceinteraction show" >/dev/null; sleep 2.2 ;;
+      lock) ev "$RELIST" lock >/dev/null ;;
+    esac
+    chk "$s open"
+    step "rs-$s" "rs on (perf.meter {on, renders}): the $s surface opened for real, its render overlay read"
     v=$(ev "$PROBE" "$s"); log "$s: $v"
-    # A hidden surface WebView (not shown now) may not run the probe at all: not measured, not a FAIL.
-    case $v in "cdp: no answer"*) note "$s: its page did not answer CDP (hidden WebView, JS paused?) - not measured"; continue ;; esac
-    case $v in on=true*canvas=[1-9]*) case $v in *outlined=0*) pass "$s: overlay up ($v), nothing re-rendered there yet" ;; *) pass "$s: overlay up and outlining ($v)" ;; esac ;;
-      *) fail "$s: no render overlay with rs on ($v)" ;; esac
+    if [ "$s" = lock ]; then case $v in on=*) rsjudge lock "$v" ;; *) note "lock: its page didn't answer ($v) - the lock face needs the phone locked, not shown by script" ;; esac
+    else rsjudge "$s" "$v"; fi
+    case $s in
+      shade) sh_ "cmd statusbar collapse"; sleep 1 ;;
+      pull) back 1.2; LOPEN= ;;
+      recents) back 1.5; LOPEN= ;;
+      assist) sh_ "cmd voiceinteraction hide" >/dev/null; sleep 1; AOPEN= ;;
+    esac
   done
   look_restore; sleep 1.5
-  v=$(ev "$PROBE" shade); log "shade after restore: $v"
+  # The shade opened again to read it after the restore (closed, its page wouldn't answer).
+  hcall shade.open "[]" "()=>'ok'" >/dev/null; sleep 1.5; v=$(ev "$PROBE" shade); sh_ "cmd statusbar collapse"; log "shade after restore: $v"
   case $METER0 in *'"on":true'*) note "rs was on at the start: left on" ;; *) case $v in "cdp: no answer"*) note "shade did not answer CDP after the restore - not measured" ;; on=false*) pass "rs back off: shade overlay gone" ;; *) fail "rs restored but the shade overlay is still up ($v)" ;; esac ;; esac
 fi
 
