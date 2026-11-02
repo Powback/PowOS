@@ -6,7 +6,11 @@
 # the phone), the meter clicked again, the new perf-*.json pulled to $OUT/<scenario>.json and its summary printed
 # (fps p50/p5, frames over 33 ms, long tasks, native stalls, top renders). Runs only after the user has left the phone
 # for PERF_IDLE_S (default 600 s). Note: each recording is also posted to PowOS AI as the meter always does.
-#   perf-scenarios.sh [--round R] [--only swipe|launcher|shade] [--reps N]
+# shade-scroll (S8'): the shade opened by the bridge's shade.open, its notification list (.notif-list) scrolled down
+# and up REPS times, the shade put away by shade_shut. The meter's fps is home's frames (the shade is its own page, the
+# meter takes only its renders), so the shade page's own rAF deltas are recorded beside it and gated: FAIL when their
+# fps p5 < 55 or any frame > 33 ms, or when the list didn't scroll (too few notifications to measure).
+#   perf-scenarios.sh [--round R] [--only swipe|launcher|shade|shade-scroll] [--reps N]
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/e2e-lib.sh"
 # The user's finger away >= PERF_IDLE_S (600) by the touch panels' IRQs (idle.sh); e2e's own gate (dumpsys power's
@@ -70,9 +74,42 @@ sc_shade() {
   rec_off shade
   step shade "shade pulled down and closed ($REPS times)"; pass "recorded"
 }
-for s in swipe launcher shade; do
+# The shade page's frames: rAF deltas and the list's scroll range, from ss_on to ss_off (a JSON line).
+SS_ON='(()=>{const l=document.querySelector(".notif-list");const r=window.__ssRec={dt:[],last:0,on:true,lo:l?l.scrollTop:-1,hi:l?l.scrollTop:-1};const f=t=>{if(!r.on)return;if(r.last)r.dt.push(Math.round((t-r.last)*10)/10);r.last=t;requestAnimationFrame(f)};requestAnimationFrame(f);if(l)l.addEventListener("scroll",()=>{r.lo=Math.min(r.lo,l.scrollTop);r.hi=Math.max(r.hi,l.scrollTop)},{passive:true});return "ok"})()'
+SS_OFF='(()=>{const r=window.__ssRec;if(!r)return "{}";r.on=false;return JSON.stringify({dt:r.dt,lo:r.lo,hi:r.hi})})()'
+sc_shade_scroll() {
+  local i o ox=0 oy=0 g x t b
+  hcall shade.open "[]" "()=>'ok'" >/dev/null; sleep 1.5
+  [ "$(shadeup)" = up ] || { fail "shade-scroll: the shade didn't open (shade.open)"; return 1; }
+  o=$(wframe "PowOS shade"); [ -n "$o" ] && { set -- $o; ox=$1; oy=$2; }
+  g=$(ev "(()=>{const l=document.querySelector('.notif-list');if(!l)return 'none';const r=l.getBoundingClientRect(),d=devicePixelRatio;return [Math.round((r.x+r.width/2)*d+$ox),Math.round((r.y+r.height*.3)*d+$oy),Math.round((r.y+r.height*.7)*d+$oy),l.scrollHeight-l.clientHeight,l.children.length].join(' ')})()" shade)
+  log "shade-scroll: list (x y30 y70 scrollable-px rows) $g"
+  set -- $g; [ $# -ge 5 ] || { fail "shade-scroll: no notification list in the shade ($g)"; shade_shut "shade-scroll"; return 1; }
+  x=$1 t=$2 b=$3
+  [ "$4" -gt 0 ] 2>/dev/null || { fail "shade-scroll: the notification list can't scroll ($4 px over, $5 rows) - too few notifications to measure"; shade_shut "shade-scroll"; return 1; }
+  rec_on; ev "$SS_ON" shade >/dev/null
+  for i in $(seq 1 "$REPS"); do
+    # Bottom-aligned: it opens at its foot, so the finger goes down first (older ones), then up again.
+    chk shadescroll$i; swipe "$x" "$t" "$x" "$b" 300 "the notification list scrolled (finger down)" || break; sleep 1
+    chk shadescroll$i-back; swipe "$x" "$b" "$x" "$t" 300 "the notification list scrolled back (finger up)" || break; sleep 1
+  done
+  ev "$SS_OFF" shade > "$OUT/shade-scroll-raf.json"
+  rec_off shade-scroll
+  shade_shut "shade-scroll"
+  step shade-scroll "notification list scrolled down and up ($REPS times)"
+  local r; r=$(python3 -c '
+import json,sys
+d=json.load(open(sys.argv[1])); dt=[x for x in d.get("dt",[]) if x>0]
+if len(dt)<10: print("BAD only %d shade frames recorded" % len(dt)); sys.exit()
+fps=sorted(1000/x for x in dt); p5=fps[int(len(fps)*.05)]; p50=fps[len(fps)//2]; mx=max(dt); n=sum(1 for x in dt if x>33)
+ok=p5>=55 and n==0 and d.get("hi",0)>d.get("lo",0)
+print("%s shade page: %d frames, fps p50 %.1f p5 %.1f, longest %.1f ms, %d over 33 ms, list scrolled %s..%s px" % ("OK" if ok else "BAD",len(dt),p50,p5,mx,n,d.get("lo"),d.get("hi")))' "$OUT/shade-scroll-raf.json")
+  log "$r"
+  case $r in OK*) pass "${r#OK }" ;; *) fail "${r#BAD } (want p5 >= 55 fps, no frame > 33 ms, the list scrolled)" ;; esac
+}
+for s in swipe launcher shade shade-scroll; do
   [ -z "$ONLY" ] || [ "$ONLY" = $s ] || continue
-  sc_$s; hemit system.home null
+  "sc_${s//-/_}"; hemit system.home null
 done
 meter_back
 e2e_finish
