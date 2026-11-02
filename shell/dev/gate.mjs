@@ -360,14 +360,16 @@ async function transpiled(p) {
 /**
  * The design-lint probe's runs (dev/design-lint.js): each prints its findings. REPORT-ONLY, except the surfaces in
  * DESIGN_LINT_BLOCKING - their design wave made them clean, so a pop-in or a monospace text there fails the gate
- * (design wave 3: the launcher).
+ * (design wave 3: the launcher; wave 6: the switcher and web windows).
  * Each is a scene of its own (a thunk, opened when pushed): the 10 opened together and pushed as one scene (11-02) made
  * one scene of 10 pages - its first pages held their slots till all 10 settled while the last ones queued for a slot,
  * and the per-scene cap then failed 4 of them as "design-lint-home-folded: scene timeout".
  */
-const DESIGN_LINT = [["home", ""], ["launcher", ""], ["launcher-search", ""], ["menu", ""], ["shade", "?mode=shade"], ["control", "?mode=shade"], ["folder", ""], ["widget-sheet", ""]];
-// The folder and the widget's settings sheet (design wave: folders and sheets) block too, closing included (pop-outs).
-const DESIGN_LINT_BLOCKING = new Set(["launcher", "launcher-search", "folder", "widget-sheet"]);
+const DESIGN_LINT = [["home", ""], ["launcher", ""], ["launcher-search", ""], ["menu", ""], ["shade", "?mode=shade"], ["control", "?mode=shade"], ["folder", ""], ["widget-sheet", ""],
+  ["switcher", "?mode=recents"], ["switcher-menu", "?mode=recents"], ["windows", ""], ["windows-resize", ""]];
+// The folder and the widget's settings sheet (design wave: folders and sheets) block too, closing included (pop-outs);
+// design wave 6 made the switcher's and web windows' surfaces blocking (their menus, split prompt and resize outline).
+const DESIGN_LINT_BLOCKING = new Set(["launcher", "launcher-search", "folder", "widget-sheet", "switcher", "switcher-menu", "windows", "windows-resize"]);
 function designLintRuns(browser) {
   const sizes = [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]];
   return sizes.flatMap(([label, viewport]) => DESIGN_LINT.map(([surface, query]) => {

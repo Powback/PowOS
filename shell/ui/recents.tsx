@@ -18,6 +18,7 @@
  * The overview button shows it without a swipe ("recents.show"); home going away hides it ("recents.hide").
  */
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
+import { usePresence } from "./reveal.tsx";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import type { RecentTask } from "../types.ts";
@@ -614,8 +615,13 @@ function WindowItem({ t, act }: { t: RecentTask; act: (f: () => void) => () => v
   );
 }
 
+/** The open menu, kept (with what it was opened on) while it leaves on the spring: §6, it vanished in one frame. */
 function Menu() {
-  const m = menu.value;
+  const open = menu.value;
+  const pop = usePresence(open != null);
+  const last = useRef(open);
+  if (open) last.current = open;
+  const m = open ?? (pop.on ? last.current : null);
   if (!m) return null;
   const t = tasks.value.find((x) => x.id === m.id);
   if (!t) return null;
@@ -626,8 +632,8 @@ function Menu() {
   };
   return (
     <>
-      <div class="recents-menu-scrim" onPointerDown={() => (menu.value = null)} />
-      <div class="recents-menu tile sheet pop" style={{ left: `${m.left}px`, top: `${m.top}px` }}>
+      {!pop.leaving && <div class="recents-menu-scrim" onPointerDown={() => (menu.value = null)} />}
+      <div class={`recents-menu tile sheet pop ${pop.leaving ? "leaving" : ""}`} inert={pop.leaving || undefined} style={{ left: `${m.left}px`, top: `${m.top}px` }}>
         {/* A PowOS app's card (negative id) is no Android task: no split, window, screenshot or app info for it. */}
         {t.id >= 0 && (
           <>
@@ -667,6 +673,29 @@ function Menu() {
         )}
       </div>
     </>
+  );
+}
+
+/** Split's prompt while a first app is picked: it fades in and out on the spring (§6: it was there in one frame). */
+function SplitBanner({ picking }: { picking: boolean }) {
+  const pop = usePresence(picking);
+  const last = useRef(splitMore.value);
+  if (picking) last.current = splitMore.value;
+  if (!pop.on) return null;
+  const more = picking ? splitMore.value : last.current;
+  return (
+    <div class={`recents-banner ${pop.leaving ? "leaving" : ""}`} inert={pop.leaving || undefined}>
+      {more == null
+        ? "Pick an app to split the screen with"
+        : more.length
+          ? `${more.length + 1} apps picked - pick up to ${3 - more.length} more, or`
+          : "Pick 1 to 3 more apps to tile with it"}
+      {more != null && more.length > 0 && (
+        <button type="button" class="recents-banner-go" onClick={() => void splitTiles()}>
+          Split
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -738,17 +767,7 @@ export function Recents() {
       }}
     >
       <div class="recents-scrim" />
-      {first != null && splitMore.value == null && <div class="recents-banner">Pick an app to split the screen with</div>}
-      {first != null && splitMore.value != null && (
-        <div class="recents-banner">
-          {splitMore.value.length ? `${splitMore.value.length + 1} apps picked - pick up to ${3 - splitMore.value.length} more, or` : "Pick 1 to 3 more apps to tile with it"}
-          {splitMore.value.length > 0 && (
-            <button type="button" class="recents-banner-go" onClick={() => void splitTiles()}>
-              Split
-            </button>
-          )}
-        </div>
-      )}
+      <SplitBanner picking={first != null} />
       <div class="task-row" ref={rowEl} onClick={(e) => e.target === e.currentTarget && beside()}>
         {list.length ? (
           list.map((t, i) => (

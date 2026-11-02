@@ -2185,7 +2185,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 }
 /* Playing: the line glides through each of the host's one-second ticks instead of stepping (--p is registered as a number at the top). */
 .cc-seek.live { transition: --p 1s linear; }
-.cc-seek::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--color-foreground); border: 0; opacity: 0; transition: opacity 120ms; }
+.cc-seek::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--color-foreground); border: 0; opacity: 0; transition: opacity var(--spring-fast-ms) var(--spring-fast); }
 .cc-seek.dragging::-webkit-slider-thumb, .cc-seek:active::-webkit-slider-thumb { opacity: 1; }
 .cc-seek input[type="range"]:disabled::-webkit-slider-thumb { visibility: hidden; }
 /* Icons (icons.tsx) and the panels drawn with them: the control center's tiles as round icons over a one-line label,
@@ -2369,7 +2369,9 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
    * 404x899 screen) and the cards landed off center, small.
    */
   --card-w: min(calc(0.72 * var(--screen-w, 100vw)), 440px, calc(0.62 * var(--screen-h, 100vh) * var(--screen-ratio-n, 0.45)));
-  --card-radius: max(var(--radius), 22px);
+  /* A card is a surface: the radius scale's --radius (§3; it was max(--radius, 22px), off the scale). recents.tsx and
+     RecentsTransition.kt read it off the card, so the window lands on the same corners. */
+  --card-radius: var(--radius);
   position: fixed;
   left: 0;
   top: 0;
@@ -2386,8 +2388,9 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .recents.open { visibility: visible; }
 .recents.shown { pointer-events: auto; }
 /* Collapsing: it stays visible till the cards are gone. */
-.recents.closed.settling { transition: visibility 0s linear 240ms; }
-.recents-scrim { position: absolute; inset: 0; background: color-mix(in srgb, var(--color-background) 45%, transparent); opacity: calc(var(--rp) * (1 - var(--rh))); pointer-events: none; }
+.recents.closed.settling { transition: visibility 0s linear var(--spring-ms); }
+/* The dim is THE backdrop's tint (§2: no surface names its own; it was the background at 45%), the host's blur under it. */
+.recents-scrim { position: absolute; inset: 0; background: var(--backdrop-tint); opacity: calc(var(--rp) * (1 - var(--rh))); pointer-events: none; }
 .recents .task-row {
   direction: rtl;
   position: relative;
@@ -2431,22 +2434,33 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
  */
 .recents.live .task:first-child .task-head { visibility: hidden; }
 .recents.live .task-row { transform: translate(var(--rx), var(--ry)); }
-/* A swipe up over home has no app window growing into the first card: it rises and fades in with the finger too. */
-.recents.homeswipe .task:first-child .task-shot { opacity: var(--rp); transform: translateY(calc((1 - var(--rp)) * 10vh)) scale(calc(0.92 + 0.08 * var(--rp))); }
+/*
+ * With no app window growing into the first card (a swipe up over home, the switcher opened by a key or a button: not
+ * live) it rises and fades in with --rp too - with the finger, or on the settle's spring; and it goes the same way on
+ * close. It stood there whole in the first frame (design wave 6, gate design-lint-switcher: §6, nothing pops in).
+ */
+.recents:not(.live) .task:first-child .task-shot { opacity: var(--rp); transform: translateY(calc((1 - var(--rp)) * 10vh)) scale(calc(0.92 + 0.08 * var(--rp))); }
 .recents .task[aria-hidden] { visibility: hidden; }
 .recents.settling .recents-scrim,
 .recents.settling .task-row,
 .recents.settling .task:not(:first-child),
 .recents.settling .task:first-child .task-head,
-.recents.settling .task-clear { transition: transform var(--spring-ms, 300ms) var(--spring, ease), opacity var(--spring-ms) var(--spring); }
+.recents.settling:not(.live) .task:first-child .task-shot,
+.recents.settling .task-clear { transition: transform var(--spring-ms) var(--spring), opacity var(--spring-ms) var(--spring); }
 /* Split screen: picking the second app - the first one set apart. */
 .recents.splitting .task.picked { opacity: 0.45; transform: scale(0.94); }
+/* Split's prompt: it fades in and out on the spring (recents.tsx usePresence; §6: it was there in one frame). */
 .recents-banner {
   position: absolute; left: 50%; top: calc(var(--inset-top, 0px) + 24px); transform: translateX(-50%);
   padding: 10px 18px; border-radius: 999px; font: var(--text-small) var(--font-body);
   background: var(--color-surface); color: var(--color-foreground); border: var(--frame) solid var(--line);
   box-shadow: var(--lift);
+  animation: recents-banner-in var(--spring-fast-ms) var(--spring-fast) both;
 }
+.recents-banner.leaving { animation: recents-banner-out var(--spring-fast-ms) var(--spring-fast) both; pointer-events: none; }
+@keyframes recents-banner-in { from { opacity: 0; transform: translate(-50%, -8px); } }
+@keyframes recents-banner-out { to { opacity: 0; transform: translate(-50%, -8px); } }
+@media (prefers-reduced-motion: reduce) { .recents-menu, .recents-banner { animation: none; } }
 /* PowOS tiles' split (web windows on): the picks so far, and the button that tiles them. */
 .recents-banner-go {
   margin-left: 10px; padding: 4px 14px; border-radius: 999px; border: none; font: var(--text-small) var(--font-body);
@@ -2456,12 +2470,16 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .recents-menu {
   position: fixed; z-index: 2; width: 220px; display: flex; flex-direction: column; padding: 6px 0;
   border-radius: var(--radius);
-  animation: recents-menu-in var(--spring-fast-ms) var(--spring-fast);
+  animation: recents-menu-in var(--spring-fast-ms) var(--spring-fast) both;
   transform-origin: top left;
 }
+/* It leaves as it came (recents.tsx usePresence; §6: it vanished in one frame), and it is opaque (§2: menus are). */
+.recents-menu.leaving { animation: recents-menu-out var(--spring-fast-ms) var(--spring-fast) both; pointer-events: none; }
+html:root .recents-menu.tile, html:root .ww-tile-menu.tile { --glass-blur-native: var(--backdrop-blur-native); background: var(--menu-tint); }
 .recents-menu button { text-align: left; padding: 12px 18px; font: var(--text-small) var(--font-body); color: var(--color-foreground); background: none; border: none; }
 .recents-menu button:active { background: color-mix(in srgb, var(--color-foreground) 10%, transparent); }
 @keyframes recents-menu-in { from { opacity: 0; transform: scale(0.92); } }
+@keyframes recents-menu-out { to { opacity: 0; transform: scale(0.92); } }
 /* A card growing to the screen as its app opens (its transform is animated from the card's frame). */
 .recents-expand { position: fixed; left: 0; top: 0; width: var(--screen-w, 100vw); height: var(--screen-h, 100vh); z-index: 3; object-fit: cover; object-position: top; transform-origin: 0 0; pointer-events: none; }
 .recents-note {
@@ -3418,12 +3436,12 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .page-under > :not(.page-glass, .group-shadow, .seam) { pointer-events: auto; }
 .page-windows { overflow: clip; pointer-events: none; }
 .page-windows > * { pointer-events: auto; }
-.webwindow:not(.ww-divider) { border-radius: 12px; box-shadow: var(--lift-edge); }
+.webwindow:not(.ww-divider) { border-radius: var(--radius); box-shadow: var(--lift-edge); }
 .webwindow.maximised { border-radius: 0; box-shadow: none; }
 /* The bar: a home widget's glass (.tile: theme.css's fill and veil, the compositor's blur behind the bar strip only). */
 .webwindow-title {
   display: flex; align-items: center; gap: 8px; padding: 0 4px 0 12px; box-sizing: border-box;
-  border-radius: 12px 12px 0 0; border-bottom-width: 0;
+  border-radius: var(--radius) var(--radius) 0 0; border-bottom-width: 0;
   font: var(--text-small) var(--font-body); color: var(--color-foreground); user-select: none;
 }
 .webwindow-title.merged { background: none; border: 0; border-radius: 0; padding: 0; }
@@ -3458,7 +3476,7 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-tab.active { opacity: 1; background: color-mix(in srgb, var(--color-foreground) 14%, transparent); }
 .ww-tab.ghost {
   flex: none; width: 128px; padding-right: 8px; opacity: 1; pointer-events: none; animation: ww-drop-in var(--spring-fast-ms) var(--spring-fast);
-  background: color-mix(in srgb, var(--color-accent) 22%, transparent); box-shadow: inset 0 0 0 2px var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent); box-shadow: inset 0 0 0 var(--frame) var(--color-accent);
 }
 .ww-tab-close {
   width: 24px; height: 24px; flex: none; display: grid; place-items: center; border: 0; border-radius: 8px;
@@ -3466,7 +3484,7 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 }
 .ww-tab-close:active { background: color-mix(in srgb, var(--color-red) 70%, transparent); }
 .ww-tab-close svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
-.webwindow-title.ww-tab-target { box-shadow: inset 0 0 0 2px var(--color-accent); }
+.webwindow-title.ww-tab-target { box-shadow: inset 0 0 0 var(--frame) var(--color-accent); }
 .ww-spacer { flex: 1; }
 .ww-controls { display: flex; gap: 2px; }
 .ww-button {
@@ -3476,7 +3494,7 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-button:active { background: color-mix(in srgb, var(--color-foreground) 14%, transparent); }
 .ww-button.ww-close:active { background: color-mix(in srgb, var(--color-red) 70%, transparent); }
 .ww-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
-.webwindow-body { position: relative; border-radius: 0 0 12px 12px; }
+.webwindow-body { position: relative; border-radius: 0 0 var(--radius) var(--radius); }
 /* TS1: a tiled window's content-zoom preview (its body scaled) stays inside its tile. */
 .webwindow.ww-zooming { overflow: hidden; }
 .webwindow.maximised .webwindow-body { border-radius: 0; }
@@ -3514,7 +3532,7 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-grip-se { right: -8px; bottom: -8px; } .ww-grip-sw { left: -8px; bottom: -8px; transform: scaleX(-1); }
 .ww-grip-ne { right: -8px; top: -8px; transform: scaleY(-1); } .ww-grip-nw { left: -8px; top: -8px; transform: scale(-1, -1); }
 /* RZ6: shown briefly - for GRIPS_MS (webwindows.tsx) after a window is activated or its edge pressed, then they fade. */
-.webwindow.ww-grips .ww-grip { transition-duration: 120ms; }
+.webwindow.ww-grips .ww-grip { transition-duration: var(--spring-fast-ms); }
 .webwindow.ww-grips .ww-grip-se, .webwindow.ww-grips .ww-grip-sw { opacity: 0.7; }
 .webwindow.ww-grips .ww-grip-ne, .webwindow.ww-grips .ww-grip-nw { opacity: 0.25; }
 .webwindow.ww-resizing .ww-grip { opacity: 0.9; }
@@ -3528,21 +3546,25 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-swap svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .ww-swap-e { right: 10px; top: 50%; transform: translateY(-50%); } .ww-swap-w { left: 10px; top: 50%; transform: translateY(-50%); }
 .ww-swap-s { bottom: 10px; left: 50%; transform: translateX(-50%); } .ww-swap-n { top: 46px; left: 50%; transform: translateX(-50%); }
-.webwindow.ww-grips .ww-swap { transition-duration: 120ms; opacity: 0.9; pointer-events: auto; }
+.webwindow.ww-grips .ww-swap { transition-duration: var(--spring-fast-ms); opacity: 0.9; pointer-events: auto; }
 /* RZ4: the live size outline while a window is resized: a ring in the theme's foreground, the accent on a tile size. */
 .ww-outline {
-  position: absolute; inset: -3px; border-radius: 12px; pointer-events: none; display: grid; place-items: center;
-  box-shadow: 0 0 0 2px var(--color-foreground); opacity: 0.6;
+  position: absolute; inset: calc(-1 * var(--frame)); border-radius: var(--radius); pointer-events: none; display: grid; place-items: center;
+  box-shadow: 0 0 0 var(--frame) var(--color-foreground); opacity: 0.6;
+  animation: ww-drop-in var(--spring-fast-ms) var(--spring-fast);
+  transition: box-shadow var(--spring-fast-ms) var(--spring-fast), opacity var(--spring-fast-ms) var(--spring-fast);
 }
-.ww-outline.snapped { box-shadow: 0 0 0 3px var(--color-accent); opacity: 1; }
+.ww-outline.snapped { box-shadow: 0 0 0 var(--frame) var(--color-accent); opacity: 1; }
+.ww-outline.leaving { opacity: 0; }
 .ww-outline-size { padding: 6px 12px; border-radius: 999px; font: var(--text-small) var(--font-body); color: var(--color-foreground); }
 /* GL1/WG1: every drop's ghost (webwindows.tsx DropPreview, dockout.tsx DockOutGhost) - the exact rect the window takes:
    a tile, an edge snap, the free region between the widgets or where it floats. One look: a ghost of glass (a faint
-   fill, a thin accent ring - no blur of its own, §2), never a solid slab; a short spring as the target changes. */
+   fill, the accent ring - no blur of its own, §2), never a solid slab; a short spring as the target changes. Its fill is
+   the glass's --soft-fill and its ring edit mode's selection mark (--frame in the accent), a surface's --radius. */
 .ww-drop {
-  position: absolute; pointer-events: none; border-radius: 12px; display: grid; place-items: center; box-sizing: border-box;
-  background: color-mix(in srgb, var(--color-foreground) 8%, transparent);
-  box-shadow: 0 0 0 1px var(--color-accent);
+  position: absolute; pointer-events: none; border-radius: var(--radius); display: grid; place-items: center; box-sizing: border-box;
+  background: var(--soft-fill);
+  box-shadow: 0 0 0 var(--frame) var(--color-accent);
   transition: left var(--spring-fast-ms) var(--spring-fast), top var(--spring-fast-ms) var(--spring-fast),
     width var(--spring-fast-ms) var(--spring-fast), height var(--spring-fast-ms) var(--spring-fast);
   animation: ww-drop-in var(--spring-fast-ms) var(--spring-fast);
@@ -3553,10 +3575,10 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 /* TG3a: a parked window's strip on the screen's edge (webwindows.tsx ParkStrip): the shared glass, its app's icon, the
    drop's accent ring while a finger is on it. Rounded on the inner side only. */
 .ww-park { display: grid; place-items: center; box-sizing: border-box; padding: 0; }
-.ww-park.left { border-radius: 0 12px 12px 0; }
-.ww-park.right { border-radius: 12px 0 0 12px; }
+.ww-park.left { border-radius: 0 var(--radius) var(--radius) 0; }
+.ww-park.right { border-radius: var(--radius) 0 0 var(--radius); }
 .ww-park .ww-icon { width: 20px; height: 20px; }
-.ww-park.ww-park-held { box-shadow: 0 0 0 2px var(--color-accent); background-color: color-mix(in srgb, var(--color-accent) 22%, transparent); }
+.ww-park.ww-park-held { box-shadow: 0 0 0 var(--frame) var(--color-accent); background-color: color-mix(in srgb, var(--color-accent) 22%, transparent); }
 .ww-drop-label { padding: 6px 14px; border-radius: 999px; font: var(--text-small) var(--font-body); color: var(--color-foreground); }
 .webwindow.ww-reflow, .ww-shadow.ww-reflow {
   transition: left var(--spring-ms) var(--spring), top var(--spring-ms) var(--spring),
@@ -3565,12 +3587,15 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 /* WS1: a window's drop shadow (its own element under the frame: a hole in the frame never cuts it), deeper than a
    widget's lift as a window floats higher; the focused window's stronger. The frame keeps only --lift-edge. */
 .ww-shadow { position: absolute; pointer-events: none; }
-.ww-shadow > div { position: absolute; border-radius: 12px; box-shadow: var(--lift-window); }
+.ww-shadow > div { position: absolute; border-radius: var(--radius); box-shadow: var(--lift-window); }
 .ww-shadow.focused > div { box-shadow: var(--lift-window-focused); }
 .ww-tile-menu {
   position: absolute; top: 40px; right: 8px; z-index: 2; display: flex; flex-direction: column; min-width: 160px;
-  padding: 6px; border-radius: 12px; box-shadow: var(--lift);
+  padding: 6px; border-radius: var(--radius); box-shadow: var(--lift);
+  transform-origin: top right; animation: recents-menu-in var(--spring-fast-ms) var(--spring-fast) both;
 }
+.ww-tile-menu.leaving { animation: recents-menu-out var(--spring-fast-ms) var(--spring-fast) both; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .ww-tile-menu, .ww-outline { animation: none; } }
 .ww-tile-item { all: unset; padding: 10px 12px; border-radius: 8px; font: var(--text-small) var(--font-body); color: var(--color-foreground); }
 .ww-tile-item:active { background: color-mix(in srgb, var(--color-foreground) 12%, transparent); }
 /* TI1 (10-31 15:10): the gap between tiles is the divider's own fill - never the wallpaper or a lower window showing
@@ -4153,7 +4178,7 @@ html:has(.home > .bar[data-role="ai"] textarea:focus) .ai-screen.stacked > .ai-s
 .ai-screen.stacked > .ai-segs:last-child { margin-bottom: calc(var(--pill-height) + var(--ai-foot) + 8px); }
 .ai-screen.stacked > .ag-scroll { flex: 1; min-height: 0; }
 .ai-screen.stacked > .ais-top { flex: none; cursor: pointer; }
-.ai-screen.stacked > .ais-fold { --fold-ease: cubic-bezier(0.22, 0.9, 0.26, 1); flex: none; display: grid; grid-template-rows: 1fr; width: auto; max-width: none; margin-inline: calc(-1 * var(--edge)); transition: grid-template-rows 420ms var(--fold-ease), opacity 300ms var(--fold-ease); }
+.ai-screen.stacked > .ais-fold { flex: none; display: grid; grid-template-rows: 1fr; width: auto; max-width: none; margin-inline: calc(-1 * var(--edge)); transition: grid-template-rows var(--spring-ms) var(--spring), opacity var(--spring-ms) var(--spring); }
 .ai-screen.stacked > .ais-fold.shrunk { grid-template-rows: 0fr; opacity: 0; }
 .ais-fold > .ai-scroll.ais { min-height: 0; max-height: 56dvh; display: flex; flex-direction: column; gap: 8px; padding: 0 var(--ais-side) 2px; }
 .ais-fold.shrunk > .ai-scroll.ais { overflow: hidden; }

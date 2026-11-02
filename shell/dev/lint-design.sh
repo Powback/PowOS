@@ -36,6 +36,15 @@
 #     a radius other than --radius - the scale's surface value (§3); the folder sheet wore a pill's 20px, before it a
 #     calc(var(--radius) * 1.6).
 #
+#   - motion (design wave 6, the switcher and web windows): the home/launcher rule for EVERY rule of the shell's CSS - a
+#     transition/animation with a literal duration (the switcher's 240ms settle, the window grips' 120ms) instead of
+#     --spring*-ms. Exempt: loops (infinite, --ambient), a reduced-motion override, and a clock - a custom property run
+#     linearly over real time (`--p 1s linear`, the media seek);
+#   - easing, also (design wave 6): a custom property defined as a cubic-bezier() outside theme.css (`--fold-ease:
+#     cubic-bezier(...)` hid a local curve from the easing rule);
+#   - radius, also (design wave 6): a custom property named *radius defined off the scale (`--card-radius: max(var(--radius),
+#     22px)`: the switcher's cards read it, and the radius rule exempted var(--card-radius)).
+#
 #   shell/dev/lint-design.sh [DIR]   DIR: the shell (default: this one). Exit 1: a blocking rule broken.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -57,8 +66,11 @@ radius=$(grep -HnoE 'border(-[a-z]+)*-radius: *[^;"}]+' $css 2>/dev/null | awk '
   v = $0; sub(/^[^:]+:[0-9]+:[^:]+: */, "", v); sub(/ *!important *$/, "", v); n = split(v, t, /[ \t]+/); bad = 0
   for (i = 1; i <= n; i++) if (t[i] != "" && t[i] != "/" && t[i] !~ /^(0|8px|12px|20px|999px|50%|inherit|var\(--(radius|icon-radius|card-radius)\))$/) bad = 1
   if (bad) print }' || true)
+radius=$( { [ -n "$radius" ] && printf '%s\n' "$radius"
+  grep -HnoE -- '--[a-z-]*radius: *[^;"}]+' $css 2>/dev/null | strip | grep -vE -- 'radius: *(0|8px|12px|20px|999px|50%|var\(--(radius|icon-radius|card-radius)\)) *$'; } || true)
 easing=$( { grep -nE '(transition|animation)[^;]*(cubic-bezier\(|[0-9]m?s +ease)' $css 2>/dev/null | strip | grep -v -- '--spring'
-  grep -nE -- '--ai[sp]-spring' $code 2>/dev/null | strip; } || true)
+  grep -nE -- '--ai[sp]-spring' $code 2>/dev/null | strip
+  grep -nE -- '--[a-z-]+: *cubic-bezier\(' $css 2>/dev/null | strip; } || true)
 status=$(grep -niE -- '--aip-(blue|amber|on-amber)|#5aa7e8|#e3a03c|#1a1206' $code 2>/dev/null | strip || true)
 dots=$( { grep -nE '<i class=\{[^}]*\? *"on"' ui/*.tsx 2>/dev/null; grep -nE -- '-dots +i\.on' $css 2>/dev/null | grep -v '\.page-dots'; } | strip || true)
 vibrate=$(grep -nE 'navigator\.vibrate' ui/*.ts ui/*.tsx *.ts *.tsx 2>/dev/null | grep -vE '^(ui/haptics|bridge)\.ts:' | strip || true)
@@ -66,14 +78,15 @@ vibrate=$(grep -nE 'navigator\.vibrate' ui/*.ts ui/*.tsx *.ts *.tsx 2>/dev/null 
 # taking a literal duration (not var(--spring*), not a loop on --ambient, not a 0s switch such as visibility's). Any
 # literal in the declaration counts:
 # "transform var(--spring-fast-ms) var(--spring-fast), color 160ms" breaks it with its color.
-literal_motion() {
-  awk -v want="$1" '
+literal_motion() { # <selector regex> [css files: default ui/shell.css]
+  local want=$1; shift
+  awk -v want="$want" '
   /\{/ { sel = $0; sub(/\{.*/, "", sel); if (sel ~ /^[ \t]*$/) sel = last }
   { d = $0; gsub(/var\(--[a-z-]+\)/, "", d); gsub(/ 0m?s/, "", d)
     if ($0 !~ /^[ \t]*(\/\*|\*)/ && d ~ /(transition|animation)(-duration)?:[^;]*[^a-z-][0-9.]+m?s([ ,;]|$)/ && $0 !~ /infinite|var\(--ambient\)/ && sel ~ want) printf "%s:%d:%s\n", FILENAME, FNR, $0 }
   /\}/ { last = sel = "" }
   { if ($0 ~ /\{/ && $0 !~ /\}/) last = sel }
-  ' ui/shell.css 2>/dev/null || true
+  ' "${@:-ui/shell.css}" 2>/dev/null || true
 }
 homemotion=$(literal_motion '\\.(dock|app|home|page|home-tile|page-dots|app-icon)([^a-z-]|$)')
 # The launcher's pieces (design wave 3): the drawer, its A-Z grid and letter bar, the search results, the folders page.
@@ -81,10 +94,13 @@ launchermotion=$(literal_motion '\\.(launcher|launcher-[a-z]+|drawer|drawer-[a-z
 # Folders and settings sheets (their design wave): the same literal-duration rule.
 sheetmotion=$(literal_motion '\\.(folder-view|folder-[a-z]+|wsheet|wsheet-[a-z]+)([^a-z-]|$)')
 sheetradius=$(grep -HnE '\.(folder-bg|folder-sheet|wsheet)(\.tile)?[ ,][^{]*\{[^}]*border-radius|\.(folder-bg|folder-sheet|wsheet)(\.tile)? *\{[^}]*border-radius: *[^;]+' $css 2>/dev/null | strip | grep -vE 'border-radius: *var\(--radius\) *(!important *)?(;|\})' || true)
+# Every rule of the shell's CSS (design wave 6): the switcher's and the windows' literals went unseen outside home's and
+# the launcher's selectors. A reduced-motion override and a clock (a custom property run linearly) are not motion.
+motion=$(literal_motion '.' $css | grep -vE 'prefers-reduced-motion|(transition|animation): *--[a-z-]+ +[0-9.]+m?s +linear' | grep -vxFf <(printf '%s\n%s\n%s\n' "$homemotion" "$launchermotion" "$sheetmotion" | grep .) || true)
 hardline=$(grep -HnE 'border(-(top|right|bottom|left))?[[:space:]]*:[^;]*var\(--frame\)[^;]*solid[^;]*(var\(--color|#|rgb|hsl|currentColor)' $css 2>/dev/null | strip || true)
 aipop=$( (cd ui 2>/dev/null && grep -nE '(^|[^=])\{!?(open|menu|expanded) &&' powai.tsx aipanes.tsx aiprogress.tsx aistatus.tsx aifriction.tsx aimenu.tsx 2>/dev/null) | sed 's|^|ui/|' | strip | grep -v 'ai-menu-scrim' || true)
 count() { printf '%s' "$1" | grep -c . || true; }
-bad=$(( $(count "$mono") + $(count "$blur") + $(count "$radius") + $(count "$easing") + $(count "$status") + $(count "$dots") + $(count "$vibrate") + $(count "$homemotion") + $(count "$launchermotion") + $(count "$hardline") + $(count "$aipop") + $(count "$sheetmotion") + $(count "$sheetradius") ))
+bad=$(( $(count "$mono") + $(count "$blur") + $(count "$radius") + $(count "$easing") + $(count "$status") + $(count "$dots") + $(count "$vibrate") + $(count "$homemotion") + $(count "$launchermotion") + $(count "$motion") + $(count "$hardline") + $(count "$aipop") + $(count "$sheetmotion") + $(count "$sheetradius") ))
 if [ "$bad" = 0 ]; then echo "ok   design lint (docs/DESIGN-LANGUAGE.md)"; else echo "FAIL design lint: $bad blocking (docs/DESIGN-LANGUAGE.md)"; fi
 report "monospace in UI" "$mono"
 report "hard-coded blur" "$blur"
@@ -95,6 +111,7 @@ report "page dots not ui/pagedots.tsx" "$dots"
 report "haptic not ui/haptics.ts" "$vibrate"
 report "home motion with a literal duration" "$homemotion"
 report "launcher motion with a literal duration" "$launchermotion"
+report "motion with a literal duration (any rule)" "$motion"
 report "hard line (a --frame border in a colour)" "$hardline"
 report "AI page pop-in (not ui/reveal.tsx)" "$aipop"
 report "folder/sheet motion with a literal duration" "$sheetmotion"

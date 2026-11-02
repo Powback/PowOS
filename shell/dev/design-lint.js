@@ -24,11 +24,41 @@ const CODE = "pre, code, kbd, samp, textarea, .term, .terminal, .xterm, [data-co
 
 const label = (el) => `${el.tagName.toLowerCase()}${[...el.classList].slice(0, 2).map((c) => "." + c).join("")}`;
 
+/** The switcher up (?mode=recents), as shots.mjs's "switcher" scene opens it. */
+async function showSwitcher() {
+  const tasks = await (await importShim("./bridge.ts")).powos.tasks.list();
+  window.__mockEvents.emit("recents.show", { open: true, from: 100, tasks });
+}
+
+/** Two web windows on home's first page (shots.mjs WINDOWS): Chrome, Files over it (id 2, focused). */
+async function twoWindows(S) {
+  const W = await importShim("./ui/webwindows.tsx");
+  const p = S.pages.value[0];
+  W.webWins.value = [
+    { id: 1, key: "a:x", label: "Chrome", page: p, x: 20, y: 70, w: Math.round(innerWidth * 0.55), h: 420, live: true },
+    { id: 2, key: "a:y", label: "Files", page: p, x: Math.round(innerWidth * 0.3), y: 260, w: Math.round(innerWidth * 0.5), h: 300, live: true },
+  ];
+  return W;
+}
+
 /** What's already on screen before the surface opens (not watched): the launcher, open and at rest, for its search. */
 const BEFORE = {
   "launcher-search": async (S) => {
     S.drawer.value = 1;
     await sleep(800);
+  },
+  // Design wave 6: the switcher at rest, for its card menu; two web windows, for their tile menu and resize outline.
+  "switcher-menu": async () => {
+    await showSwitcher();
+    await sleep(1000);
+  },
+  windows: async (S) => {
+    await twoWindows(S);
+    await sleep(600);
+  },
+  "windows-resize": async (S) => {
+    await twoWindows(S);
+    await sleep(600);
   },
 };
 
@@ -59,6 +89,18 @@ const OPEN = {
     const kids = h("div", null, h("label", null, "Brightness", h("input", { type: "range", value: 60 })), h("button", null, "Relax"));
     (await window.__gw.mod("./apps/sheet.ts")).detailSheet.value = { id: 1, anchor, title: "Living room", onClose: () => {}, children: kids };
   },
+  // Design wave 6 (the switcher, web windows): the switcher rising, a card's menu (a tap on its icon), a window's tile
+  // menu and its resize outline - each comes in on the spring (§6).
+  switcher: showSwitcher,
+  "switcher-menu": () => {
+    const icon = document.querySelector(".recents .task:first-child .task-icon");
+    const r = icon.getBoundingClientRect();
+    const at = { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, pointerId: 7, pointerType: "touch", isPrimary: true };
+    icon.dispatchEvent(new PointerEvent("pointerdown", at));
+    icon.dispatchEvent(new PointerEvent("pointerup", at));
+  },
+  windows: async () => { (await importShim("./ui/webwindows.tsx")).tileMenu.value = 2; },
+  "windows-resize": async () => { (await importShim("./ui/webwindows.tsx")).resizeView.value = { id: 2, snapped: "w" }; },
 };
 
 /** Closing the surface (what Back, a tap outside or a swipe down end in), and the root that must leave moving. */
