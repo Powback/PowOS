@@ -14,6 +14,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SCALE = new Set(["0px", "8px", "12px", "20px", "999px", "50%"]);
 const PICTURE = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="#4285f4"/></svg>')}`;
 
+/** [el]'s material against THE backdrop: no blur or tint of its own, its corners on the scale. */
+function material(el, what, at) {
+  const cs = getComputedStyle(el);
+  const fails = [];
+  const bf = cs.backdropFilter || cs.webkitBackdropFilter;
+  if (bf && bf !== "none") fails.push(`${at}: SD1: ${what} has its own backdrop-filter ${bf} (§2: the host's blur is THE backdrop)`);
+  if (cs.backgroundColor !== "rgba(0, 0, 0, 0)" || cs.backgroundImage !== "none") fails.push(`${at}: SD1: ${what} paints a tint of its own (${cs.backgroundColor}) over the scrim's`);
+  const corners = ["borderTopLeftRadius", "borderTopRightRadius", "borderBottomLeftRadius", "borderBottomRightRadius"];
+  return [...fails, ...corners.filter((c) => !SCALE.has(cs[c])).map((c) => `${at}: SD1: ${what}'s ${c} ${cs[c]} is off the radius scale`)];
+}
+
 export async function panelMaterial(at) {
   const S = await importShim("./state.ts");
   S.panel.value = "notifications";
@@ -21,25 +32,35 @@ export async function panelMaterial(at) {
   await sleep(500);
   const p = document.querySelector(".notif-panel");
   if (!p) return [`${at}: SD1: no .notif-panel`];
-  const fails = [];
   // The base rule, whatever layout overrides it: a probe panel outside the shade's body.
   const probe = document.createElement("div");
   probe.className = "notif-panel";
   probe.style.visibility = "hidden";
   document.body.append(probe);
-  for (const [what, el] of [["the panel", p], ["the panel's own rule", probe]]) {
-    const cs = getComputedStyle(el);
-    const bf = cs.backdropFilter || cs.webkitBackdropFilter;
-    if (bf && bf !== "none") fails.push(`${at}: SD1: ${what} has its own backdrop-filter ${bf} (§2: the host's blur is THE backdrop)`);
-    if (cs.backgroundColor !== "rgba(0, 0, 0, 0)" || cs.backgroundImage !== "none") fails.push(`${at}: SD1: ${what} paints a tint of its own (${cs.backgroundColor}) over the scrim's`);
-    for (const c of ["borderTopLeftRadius", "borderTopRightRadius", "borderBottomLeftRadius", "borderBottomRightRadius"])
-      if (!SCALE.has(cs[c])) fails.push(`${at}: SD1: ${what}'s ${c} ${cs[c]} is off the radius scale`);
-  }
+  const fails = [...material(p, "the panel", at), ...material(probe, "the panel's own rule", at)];
   probe.remove();
-  const blur = getComputedStyle(document.documentElement).getPropertyValue("--shade-blur-native").trim();
-  const want = getComputedStyle(document.documentElement).getPropertyValue("--backdrop-blur-native").trim();
+  const root = getComputedStyle(document.documentElement);
+  const blur = root.getPropertyValue("--shade-blur-native").trim();
+  const want = root.getPropertyValue("--backdrop-blur-native").trim();
   if (blur !== want) fails.push(`${at}: SD1: --shade-blur-native ${blur} is not THE backdrop's ${want}`);
   return fails;
+}
+
+/** A tap on [card]'s body, as a finger's (notifications.tsx openCards). */
+function tapBody(card) {
+  const body = card.querySelector(".notif-text");
+  const o = { bubbles: true, clientX: 60, clientY: 60, pointerId: 3, isPrimary: true };
+  body.dispatchEvent(new PointerEvent("pointerdown", o));
+  body.dispatchEvent(new PointerEvent("pointerup", o));
+  body.click();
+}
+
+/** The opened card's picture: shown, fading in, its height there. */
+function pictureShown(img, at) {
+  if (getComputedStyle(img).display === "none") return [`${at}: SD2: the opened card's picture isn't shown`];
+  if (!img.getAnimations().some((a) => a.animationName === "notif-picture-in")) return [`${at}: SD2: the picture appears with no fade (a pop-in)`];
+  const h = img.getBoundingClientRect().height;
+  return h < 20 ? [`${at}: SD2: the picture is ${h} px tall on open (not loaded)`] : [];
 }
 
 export async function picture(at) {
@@ -53,20 +74,13 @@ export async function picture(at) {
   if (!card) return [`${at}: SD2: the picture's card isn't in the shade`];
   const img = card.querySelector(".notif-picture");
   if (!img) return [`${at}: SD2: the folded card has no (hidden) picture: it would mount, unloaded, on open`];
-  const fails = [];
-  if (getComputedStyle(img).display !== "none") fails.push(`${at}: SD2: the picture shows on a folded card`);
+  const fails = getComputedStyle(img).display === "none" ? [] : [`${at}: SD2: the picture shows on a folded card`];
   for (let i = 0; i < 50 && !img.complete; i++) await sleep(20);
-  if (!img.complete || !img.naturalWidth) fails.push(`${at}: SD2: the hidden picture isn't loaded before the card opens`);
-  // Open it as a tap on its body does (notifications.tsx openCards).
-  card.querySelector(".notif-text").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 60, clientY: 60, pointerId: 3, isPrimary: true }));
-  card.querySelector(".notif-text").dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: 60, clientY: 60, pointerId: 3, isPrimary: true }));
-  card.querySelector(".notif-text").click();
+  if (!img.naturalWidth) fails.push(`${at}: SD2: the hidden picture isn't loaded before the card opens`);
+  tapBody(card);
   await sleep(30);
   if (!card.classList.contains("expanded")) return [...fails, `${at}: SD2: a tap didn't open the card`];
-  if (getComputedStyle(img).display === "none") fails.push(`${at}: SD2: the opened card's picture isn't shown`);
-  else if (!img.getAnimations().some((a) => a.animationName === "notif-picture-in")) fails.push(`${at}: SD2: the picture appears with no fade (a pop-in)`);
-  else if (img.getBoundingClientRect().height < 20) fails.push(`${at}: SD2: the picture is ${img.getBoundingClientRect().height} px tall on open (not loaded)`);
-  return fails;
+  return [...fails, ...pictureShown(img, at)];
 }
 
 export async function members(at) {
