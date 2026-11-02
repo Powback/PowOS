@@ -62,6 +62,11 @@ tapat() { local p=$1; [[ $p =~ ^-?[0-9]+\ -?[0-9]+$ ]] || { log "no spot for $2 
 switcher() { sh_ "input keyevent KEYCODE_APP_SWITCH"; sleep 2; chk switcher; }
 # card <task id> <part selector>: that switcher card's part, "x y" / none / off.
 card() { pt "document.querySelector('.recents .task[data-task=\"$1\"] $2')"; }
+# inview <card element expr>: that switcher card scrolled into the middle of the row first (setup, not the check). The
+# switcher opens on the app it was opened over and the rest sit off to the side: pt says "off" for a card that IS
+# there (rounds 1102-2003/2005: Chrome's card and maximised Dolphin's both "off", present right of the view). Prints
+# "ok"/"none".
+inview() { ev "(()=>{const c=($1);if(!c)return 'none';c.scrollIntoView({inline:'center',block:'nearest'});return 'ok'})()"; sleep 1.2; }
 wmshell() { local o; o=$(sh_ "dumpsys activity service com.android.systemui WMShell"); [ -n "$o" ] || o=$(sh_ "dumpsys activity service SystemUIService WMShell"); echo "$o"; }
 
 # --- tiled-bars ------------------------------------------------------------------------------------------------
@@ -81,6 +86,7 @@ if [ "$CASE" = tiled-bars ]; then
     step switcher "the switcher over them, Calculator's card in the middle"
     if tapat "$(card "$T1" .task-icon)" "Calculator's card icon (its menu)"; then sleep 1; chk menu
       tapat "$(pt "[...document.querySelectorAll('.recents-menu button')].find(b=>b.textContent.trim()==='Split screen')")" "Split screen" && sleep 1
+      inview "document.querySelector('.recents .task[data-task=\"$T2\"]')" >/dev/null
       tapat "$(card "$T2" .task-shot)" "Chrome's card (the second pick)" && sleep 1
       step picked "Calculator and Chrome picked for the split"
       tapat "$(pt "document.querySelector('.recents-banner-go')")" "the banner's Split" || fail "no Split button after two picks"
@@ -144,7 +150,9 @@ if [ "$CASE" = switcher-linux ]; then
     else
       ev "$WW.then(m=>{m.toggleMaximise(${D#w});return 'ok'})" >/dev/null; sleep 1.5
       switcher; step switcher-max "the switcher with Dolphin maximised"
-      c=$(pt "[...document.querySelectorAll('.recents .task')].find(c=>/Dolphin/.test(c.querySelector('.task-label')?.textContent||''))")
+      cs="[...document.querySelectorAll('.recents .task')].find(c=>/Dolphin/.test(c.querySelector('.task-label')?.textContent||''))"
+      inview "$cs" >/dev/null
+      c=$(pt "$cs")
       case $c in none|off|"") fail "no switcher card for the maximised Linux window ($c)" ;; *) pass "maximised Dolphin has its switcher card" ;; esac
       back 1.5
       ev "$WW.then(m=>{m.toggleMaximise(${D#w});return 'ok'})" >/dev/null; sleep 1
@@ -155,7 +163,7 @@ if [ "$CASE" = switcher-linux ]; then
       if [ "${s:4:1}" != 1 ]; then fail "Dolphin didn't go full screen ($s)"
       else
         switcher; step switcher-full "the switcher over full-screen Dolphin"
-        cs="[...document.querySelectorAll('.recents .task')].find(c=>/Dolphin/.test(c.querySelector('.task-label')?.textContent||''))"
+        inview "$cs" >/dev/null
         if tapat "$(pt "($cs)?.querySelector('.task-shot')")" "Dolphin's card"; then sleep 2.5; chk card
           step back-full "Dolphin's card tapped"; s=$(wwstate "$D")
           [ "${s:4:1}" = 1 ] && pass "Dolphin came back full screen ($s)" || fail "Dolphin came back NOT full screen ($s)"
