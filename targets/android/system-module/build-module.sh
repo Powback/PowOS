@@ -32,6 +32,8 @@
 #   split-orientation.sh: the split screen divider menu's horizontal/vertical item for every app (OxygenOS greys it out
 #   for apps missing from its <vSplit> list, which this phone's configs leave empty): a copy of the stock split config
 #   with the installed apps added, built at post-fs-data and mounted by Magisk over /system_ext/oplus.
+#   post-fs-data.sh also drops the package cache entries of the module's APKs when they change (a stamp of their hashes):
+#   Android otherwise keeps the old parse of a replaced system APK.
 #
 # Output: ~/Projects/android-app-dev/output/powos-system-module.zip (install: magisk --install-module, reboot).
 set -euo pipefail
