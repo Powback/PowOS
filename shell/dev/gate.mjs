@@ -11448,6 +11448,15 @@ try {
       console.log(`ai-hero-renders: hero renders ${JSON.stringify(o.counts)}`);
       return o.fails;
     })));
+  // Perf P1 (dev/ai-hero-check.js; trace perf-1793551432355): a streaming reply redraws the AI page's tab row only for
+  // its Chat "…" (busy on, off), not per chunk.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-segs-renders", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
+      if (!(await r.page.evaluate(aiStatusSetup, [FLEET_SETUP]))) return ["ai-segs-renders: the status page shows no Working now rows for the mock fleet"];
+      const o = await r.page.evaluate(async () => (await importShim("./dev/ai-hero-check.js")).aiSegsRenders());
+      console.log(`ai-segs-renders: tab row renders ${JSON.stringify(o.counts)}`);
+      return o.fails;
+    })));
   // Try cards show before | after, the after an emulator shot of the fix (the user, 2026-11-01).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "try-pair", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiTryPairCheck(r.page))));

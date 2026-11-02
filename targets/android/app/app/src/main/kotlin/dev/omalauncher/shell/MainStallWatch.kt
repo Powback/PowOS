@@ -13,7 +13,7 @@ import org.json.JSONObject
 
 /**
  * The fps meter's native side (perf.native): while a recording runs, every main-thread message that holds the UI thread
- * over [BLOCK_MS], with what it was - the Looper's dispatch line (handler class, callback), the bridge call running or
+ * over [StallRules.MSG_MS], with what it was - the Looper's dispatch line (handler class, callback), the bridge call running or
  * last run, and the main thread's stack sampled [SAMPLE_MS] into it (the binder / file / su call it sat in) - plus the
  * Choreographer's frame gaps over [BLOCK_MS]. The WebView draws on this thread (synchronous compositor), so a block here
  * is a page frame and the page's input stalled with ~0 script time (perf-1793386754351: 333 + 292 ms).
@@ -26,8 +26,32 @@ import org.json.JSONObject
  * D in the kernel), and home's window reports every slow frame's phases (FrameMetrics: input, animation, layout, draw,
  * sync, command issue, swap, GPU), so the next recording names the thread and the phase.
  */
+/**
+ * What the recording keeps, apart from the Android parts so a JVM test checks it. Trace perf-1793551432355 (11-01 17:43):
+ * a frame lost 49.9 ms to "delay" (the UI thread busy before it could start the frame) with no message over 50 ms logged -
+ * a message just under the old threshold - and its gap named "perf.native" as if the recorder had stalled, though that was
+ * only the last bridge call, 4.5 s before. Now every message over [MSG_MS] (two 120 Hz frames' worth of budget is gone by
+ * then) is kept with its dispatch line, and a gap says how long before it the last bridge call ended.
+ */
+object StallRules {
+    /** A main-thread message held the UI thread long enough to cost a 120 Hz frame or more: kept, with what it was. */
+    const val MSG_MS = 24L
+
+    /** A frame gap / slow frame worth a row. */
+    const val GAP_MS = 50L
+
+    fun keepsMessage(ms: Long) = ms > MSG_MS
+
+    /** How long before [at] the last bridge call ended (uptime ms both); null = no bridge call yet this recording. */
+    fun callAgo(lastCallEnd: Long, at: Long): Long? = if (lastCallEnd == 0L) null else at - lastCallEnd
+
+    /** A frame gap's row (the caller adds what the sampler saw during it). */
+    fun gapEntry(atEpoch: Long, ms: Long, lastCall: String?, lastCallAgoMs: Long?): JSONObject =
+        JSONObject().put("at", atEpoch).put("ms", ms).put("lastCall", lastCall ?: JSONObject.NULL).put("lastCallAgoMs", lastCallAgoMs ?: JSONObject.NULL)
+}
+
 object MainStallWatch {
-    private const val BLOCK_MS = 50L
+    private const val BLOCK_MS = StallRules.GAP_MS
     private const val SAMPLE_MS = 40L
     private const val MAX_ENTRIES = 200
     private const val STACK_DEPTH = 24
@@ -59,7 +83,7 @@ object MainStallWatch {
 
     /** What the sampler saw during the gap now open (distinct lines, oldest first), attached to the gap when it closes. */
     private val gapSamples = LinkedHashSet<String>()
-    private var renderTid = -1
+    @Volatile private var renderTid = -1
     private var metricsWindow: Window? = null
     @Volatile private var frameCount = 0
     @Volatile private var missedCount = 0
@@ -114,7 +138,7 @@ object MainStallWatch {
                 if (lastFrame != 0L && now - lastFrame > BLOCK_MS) {
                     val seen = synchronized(gapSamples) { JSONArray(gapSamples.toList()).also { gapSamples.clear() } }
                     synchronized(gaps) {
-                        if (gaps.size < MAX_ENTRIES) gaps += JSONObject().put("at", epoch(lastFrame)).put("ms", now - lastFrame).put("lastCall", lastCall).put("seen", seen)
+                        if (gaps.size < MAX_ENTRIES) gaps += StallRules.gapEntry(epoch(lastFrame), now - lastFrame, lastCall, StallRules.callAgo(lastCallEnd, lastFrame)).put("seen", seen)
                     }
                 } else {
                     synchronized(gapSamples) { gapSamples.clear() }
@@ -139,7 +163,7 @@ object MainStallWatch {
         samplerHandler?.removeCallbacks(sample)
         if (t0 == 0L) return
         val ms = SystemClock.uptimeMillis() - t0
-        if (ms <= BLOCK_MS) return
+        if (!StallRules.keepsMessage(ms)) return
         val e =
             JSONObject().put("at", epoch(t0)).put("ms", ms).put("msg", line?.removePrefix(">>>>> Dispatching to ")?.take(300))
                 .put("bridge", bridgeAtStart ?: call).put("lastCall", lastCall).put("lastCallAgoMs", if (lastCallEnd == 0L) JSONObject.NULL else t0 - lastCallEnd)
@@ -175,7 +199,9 @@ object MainStallWatch {
         frameCount = 0
         missedCount = 0
         sampler = HandlerThread("powos-stallwatch").apply { start() }.also { samplerHandler = Handler(it.looper) }
-        renderTid = findRenderThread()
+        // The /proc scan reads every thread's comm file: on the sampler thread, not the UI thread the page draws on.
+        renderTid = -1
+        samplerHandler?.post { renderTid = findRenderThread() }
         lastFrame = 0L
         lastFrameAt = 0L
         on = true
@@ -201,7 +227,7 @@ object MainStallWatch {
         val b = synchronized(blocks) { JSONArray(blocks.toList()) }
         val g = synchronized(gaps) { JSONArray(gaps.toList()) }
         val f = synchronized(slowFrames) { JSONArray(slowFrames.toList()) }
-        return JSONObject().put("thresholdMs", BLOCK_MS).put("blocks", b).put("frameGaps", g)
+        return JSONObject().put("thresholdMs", BLOCK_MS).put("messageMs", StallRules.MSG_MS).put("blocks", b).put("frameGaps", g)
             .put("frames", JSONObject().put("count", frameCount).put("missed", missedCount).put("slow", f))
     }
 }
