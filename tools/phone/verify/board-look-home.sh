@@ -170,7 +170,10 @@ if [ "$CASE" = render-scan ]; then
       pull) LOPEN=1; hcall pull.open '["apps",{}]' "v=>String(v)" >/dev/null; sleep 1.6 ;;
       recents) LOPEN=1; sh_ "input keyevent KEYCODE_APP_SWITCH"; sleep 2 ;;
       assist) AOPEN=1; sh_ "cmd voiceinteraction show" >/dev/null; sleep 2.2 ;;
-      lock) ev "$RELIST" lock >/dev/null ;;
+      # 11-02: with no lock page up, the RELIST and the probe each waited CDP's 120 s on it and the case ran past its
+      # 300 s budget (killed, though every other surface passed): lock is probed only when cdp lists its page, and briefly.
+      lock) if "$T/cdp.sh" pages 2>/dev/null | grep -q '^lock '; then CDP_TIMEOUT_S=10 ev "$RELIST" lock >/dev/null
+            else note "lock: no lock page up (the lock face needs the phone locked, not shown by script) - not measured"; continue; fi ;;
     esac
     chk "$s open"
     step "rs-$s" "rs on (perf.meter {on, renders}): the $s surface opened for real, its render overlay read"
@@ -178,7 +181,7 @@ if [ "$CASE" = render-scan ]; then
     # The switcher is a layer of home's page while the web home is home (Switcher.kt); its own "recents" page exists
     # only when the engine's desktop is home. 11-02: probing a missing "recents" page answered "]" - a check bug.
     [ "$s" = recents ] && ! "$T/cdp.sh" pages 2>/dev/null | grep -q '^recents ' && pg=home
-    v=$(ev "$PROBE" "$pg"); log "$s ($pg page): $v"
+    if [ "$s" = lock ]; then v=$(CDP_TIMEOUT_S=10 ev "$PROBE" "$pg"); else v=$(ev "$PROBE" "$pg"); fi; log "$s ($pg page): $v"
     if [ "$s" = lock ]; then case $v in on=*) rsjudge lock "$v" ;; *) note "lock: its page didn't answer ($v) - the lock face needs the phone locked, not shown by script" ;; esac
     else rsjudge "$s" "$v"; fi
     case $s in

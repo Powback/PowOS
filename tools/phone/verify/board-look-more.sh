@@ -173,6 +173,20 @@ if [ "$CASE" = search-setting ]; then
       # whether any pointer event reached the page, so a native surface over home tells apart from a dead button.
       hit=$(ev "(()=>{const d=devicePixelRatio,e=document.elementFromPoint($1/d,$2/d);window.__ssHits=0;if(!window.__ssHook){window.__ssHook=1;document.addEventListener('pointerdown',()=>window.__ssHits++,true)}return e?(e.tagName+'.'+String(e.className).slice(0,40)+' '+(e.textContent||'').trim().slice(0,20)):'nothing'})()")
       log "hit at $1,$2: $hit"
+      # 11-02 FAIL (cover-bar): the hit was IMG.task-shot - the switcher layer was up over Settings after the fold, the
+      # tap opened the user's Chrome task, and the next step's tap went to Chrome (a false PASS). The switcher put away
+      # (logged: a fold that leaves it up is worth seeing) and never a tap that isn't on the choice's button.
+      case $hit in BUTTON*) ;; *)
+        sw=$(ev 'importShim("./ui/recents.tsx").then(R=>{const o=!!document.querySelector(".recents.open");R.recentsHome();return String(o)})')
+        note "$label: '$hit' over the '$opt' button (switcher open: $sw) - switcher put away, tap point read again"; sleep 1.2
+        p=$(segpt "$label" "$opt"); set -- $p
+        hit=$(ev "(()=>{const d=devicePixelRatio,e=document.elementFromPoint($1/d,$2/d);window.__ssHits=0;return e?(e.tagName+'.'+String(e.className).slice(0,40)+' '+(e.textContent||'').trim().slice(0,20)):'nothing'})()")
+        log "hit at $1,$2 after: $hit" ;; esac
+      case $hit in BUTTON*) ;; *) step "$fold-$want" "$fold: Settings > style > $label = $opt"; fail "$fold: '$hit' covers the '$opt' button at $1,$2 - not tapped"
+        ev 'importShim("./screens.ts").then(Sc=>{Sc.screens.value=[];return "ok"})' >/dev/null; SCR=; continue ;; esac
+      top=$(sh_ "dumpsys activity activities | grep -m1 topResumedActivity" | grep -oE '[a-zA-Z0-9_.]+/[a-zA-Z0-9_.]+' | head -1)
+      case $top in com.powos.app/*) ;; *) step "$fold-$want" "$fold: Settings > style > $label = $opt"; fail "$fold: $top is on top, not PowOS's home - not tapped"
+        ev 'importShim("./screens.ts").then(Sc=>{Sc.screens.value=[];return "ok"})' >/dev/null; SCR=; continue ;; esac
       tap "$1" "$2" "$label: $opt"; sleep 0.8; chk pick
       log "pointerdowns that reached home's page: $(ev 'String(window.__ssHits)')"
       "$T/shot.sh" --phone "$PDIR/$fold-$want-settings.png" >/dev/null 2>&1 || true   # Settings still open: the evidence
