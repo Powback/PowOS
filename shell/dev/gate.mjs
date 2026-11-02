@@ -4188,7 +4188,9 @@ async function aiFoldSet([n, open]) {
   A.foldShrunk.value = false;
   A.foldOpen.value = open;
   await G.until(() => (document.querySelector(".ai-screen.status .ais-stack")?.dataset.count ?? "0") === String(n), 2000);
-  await new Promise((r) => setTimeout(r, 600));
+  // Settled, not a fixed 600 ms: the states' and the collapse's "before" measure the layout at rest (a loaded gate).
+  await G.settled(() => true, ".ai-screen");
+  await G.steady(() => [...document.querySelectorAll(".ai-screen.status.stacked > *")].map((e) => Math.round(e.getBoundingClientRect().height)));
   return true;
 }
 
@@ -4274,12 +4276,39 @@ async function aiFoldStates(page) {
   return fails;
 }
 
-/** In the page: the chat scrolled up from the newest. */
+/**
+ * In the page: the chat scrolled up from the newest the way a finger does it - several scroll events, a frame apart - then
+ * the collapse settled: .ais-fold.shrunk set and its grid-rows/opacity transition finished, the boxes steady. On a loaded
+ * gate a fixed 700 ms measured the status still 298 px tall (11-02, full parallel runs): the layout of the 3-needs setup
+ * was still moving when the one scroll came, so useCollapse took that one event for the layout's own (the chat's height
+ * changed since its last scroll) and nothing followed it. The wait is on the state, never a time.
+ */
 async function aiFoldScroll() {
-  const chat = document.querySelector(".ai-screen.status .ais-chat-wrap > .ai-chat");
-  chat.scrollTop = -400;
-  chat.dispatchEvent(new Event("scroll"));
-  await new Promise((r) => setTimeout(r, 700));
+  const G = window.__gw;
+  const q = (s) => document.querySelector(`.ai-screen.status ${s}`);
+  const chat = q(".ais-chat-wrap > .ai-chat");
+  const tall = () => [chat.clientHeight, Math.round(q("> .ais-fold")?.getBoundingClientRect().height ?? 0)];
+  await G.settled(() => true, ".ai-screen");
+  await G.steady(tall);
+  for (let y = 100; y <= 400 && !q("> .ais-fold.shrunk"); y += 100) {
+    chat.scrollTop = -y;
+    chat.dispatchEvent(new Event("scroll"));
+    await G.frames(1);
+  }
+  await G.until(() => q("> .ais-fold.shrunk"));
+  await G.settled(() => true, ".ai-screen");
+  await G.steady(tall);
+  return true;
+}
+
+/** In the page: the strip tapped (the status brought back), settled. */
+async function aiFoldUnshrink() {
+  const G = window.__gw;
+  const q = (s) => document.querySelector(`.ai-screen.status ${s}`);
+  q("> .ais-top .ais-status")?.click();
+  await G.until(() => q("> .ais-fold:not(.shrunk)"));
+  await G.settled(() => true, ".ai-screen");
+  await G.steady(() => Math.round(q("> .ais-fold")?.getBoundingClientRect().height ?? 0));
   return true;
 }
 
@@ -4289,8 +4318,7 @@ async function aiFoldCollapse(page) {
   await page.evaluate(aiFoldScroll);
   const f = await page.evaluate(aiFoldFacts);
   await aiFoldShot(page, "scrolled");
-  await page.evaluate(() => document.querySelector(".ai-screen.status > .ais-top .ais-status")?.click());
-  await new Promise((r) => setTimeout(r, 900));
+  await page.evaluate(aiFoldUnshrink);
   const back = await page.evaluate(aiFoldFacts);
   return failsOf([
     [f.fold.h <= 2, `scrolled up, the status under the strip is still ${f.fold.h} px tall`],
