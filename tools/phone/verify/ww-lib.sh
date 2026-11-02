@@ -20,11 +20,16 @@ hcall() { local v i; for i in 1 2 3 4; do v=$(hcall_once "$@"); case $v in ""|"c
 # Web windows (W1, docs/WEB_WINDOWS.md): their ids are "w<id>" here (the page's data-wwid), task ids stay plain numbers.
 # The truth is the host's list (webwindows.list: key "a:<drawer key>"/"l:<app>", state, task) and the page's element
 # (.webwindow[data-wwid]: where it is on screen now, device px). WWRECTS: every web window shown on screen, "l t r b,...".
-WWRECTS="(()=>{const d=devicePixelRatio;return [...document.querySelectorAll('.webwindow[data-wwid]')].map(e=>e.getBoundingClientRect()).filter(r=>r.width>2&&r.height>2&&r.right>0&&r.bottom>0&&r.left<innerWidth&&r.top<innerHeight).map(r=>[r.left,r.top,r.right,r.bottom].map(v=>Math.round(v*d)).join(' ')).join(',')})()"
+# WWON: a JS fn of a window's element -> true when any of it shows: its rect cut to its page's box (.page clips its
+# windows, PS2 - sideways overflow clip) and the screen. Its bare rect isn't enough: a window hanging past its page's
+# right edge (under the dock, E2E 203/206/207: 553..2127 on a 2087 px page) kept 40 px "on screen" after a swipe to the
+# next page, while the page's clip (and the host's w.f, visible 0) hid all of it.
+WWON="(e=>{const r=e.getBoundingClientRect(),p=e.closest('.page'),q=p?p.getBoundingClientRect():{left:-1e9,right:1e9};return Math.min(r.right,q.right,innerWidth)-Math.max(r.left,q.left,0)>=2&&Math.min(r.bottom,innerHeight)-Math.max(r.top,0)>=2})"
+WWRECTS="(()=>{const d=devicePixelRatio,on=$WWON;return [...document.querySelectorAll('.webwindow[data-wwid]')].filter(on).map(e=>e.getBoundingClientRect()).map(r=>[r.left,r.top,r.right,r.bottom].map(v=>Math.round(v*d)).join(' ')).join(',')})()"
 # wwel <w-id> <js fn of the element -> string>: its frame element in home's page ("none" when it has none).
 wwel() { ev "(()=>{const e=document.querySelector('.webwindow[data-wwid=\"${1#w}\"]');return e?String(($2)(e)):'none'})()"; }
-# wwrect <w-id>: its frame on screen, "l t r b" device px ("" when it isn't on screen: minimised, another page).
-wwrect() { local v; v=$(wwel "$1" "e=>{const r=e.getBoundingClientRect(),d=devicePixelRatio;return r.width<2||r.height<2||r.right<1||r.bottom<1||r.left>innerWidth-1||r.top>innerHeight-1?'':[r.left,r.top,r.right,r.bottom].map(v=>Math.round(v*d)).join(' ')}"); [ "$v" = none ] && v=""; echo "$v"; }
+# wwrect <w-id>: its frame, "l t r b" device px (uncut), "" when none of it shows (WWON: minimised, another page).
+wwrect() { local v; v=$(wwel "$1" "e=>{const r=e.getBoundingClientRect(),d=devicePixelRatio;return !($WWON)(e)?'':[r.left,r.top,r.right,r.bottom].map(v=>Math.round(v*d)).join(' ')}"); [ "$v" = none ] && v=""; echo "$v"; }
 # wwhost <w-id> <field>: from the host's webwindows.list - state | task | key | gone (true when it isn't listed).
 wwhost() { hcall webwindows.list "[]" "l=>{const w=l.find(w=>w.id===${1#w});return '$2'==='gone'?String(!w):w?String(w['$2']):'none'}"; }
 # wwbody <w-id>: its body (the app's content, under the title bar) on screen, "l t r b" device px, or "".

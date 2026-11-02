@@ -10781,6 +10781,18 @@ async function wwSwipe(ww, el) {
   await ww.frame();
   const hang = ww.sentFor(903) || [];
   ww.expect(hang[10] <= pr.right + 0.5, `page clip: w.f clip right ${hang[10]} past its page's right ${pr.right}`);
+  // PS3 (E2E 203/206/207 #36: Calculator hung 40 px past its page's right edge, under the dock): swiped ONE page (the
+  // pages' width, not the screen's), the overhang lands on the next page's left - hidden by its own page's clip, in w.f
+  // and on the page (the next page, never the window, at the overhang's spot).
+  ww.track.style.transform = `translateX(${-pr.width}px)`;
+  await ww.frame();
+  const off = ww.sentFor(903) || [];
+  const fr = el.getBoundingClientRect();
+  ww.expect(fr.right > pr.left + 1, `PS3: the check needs the overhang on screen after the swipe (frame right ${fr.right})`);
+  ww.expect(off[13] === 0, `PS3: a window over its page's right edge, swiped one page away: still visible in w.f (clip ${off.slice(8, 12)})`);
+  const hit = document.elementFromPoint(Math.max(pr.left, fr.left) + 2, fr.top + 30);
+  ww.expect(!el.contains(hit), `PS3: its overhang (..${Math.round(fr.right)}) shows on the next page: ${hit?.className}`);
+  ww.restore();
   ww.W.update(903, { x: 400 });
 }
 
