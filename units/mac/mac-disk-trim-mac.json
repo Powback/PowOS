@@ -1,0 +1,26 @@
+{
+  "id": "mac-disk-trim-mac",
+  "name": "Colima disk trim + weekly dead-container removal (Mac launchd agent)",
+  "kind": "service",
+  "owner": "system:powos-disk",
+  "host": "mac",
+  "purpose": "every 20 min (launchd com.powos.mac-disk-trim, tools/agents/mac-disk-trim.sh): `colima ssh -- sudo fstrim /mnt/lima-colima` so space freed inside the VM returns to the Mac's data volume (it ran down to 2 GB free with the VM holding freed blocks); once a week `docker rm` of stopped containers dead over 7 days that are not in a compose project and not labelled powos.autosleep (autosleep's stopped containers stay). Never the Docker build cache, images, volumes or files. Replaces the manager's crontab fstrim line",
+  "installedBy": "tools/agents/mac-disk-trim-deploy.sh install",
+  "files": [
+    "~/Library/LaunchAgents/com.powos.mac-disk-trim.plist",
+    "~/.local/share/powos/mac-disk-trim",
+    "~/.cache/powos-mac-disk-trim"
+  ],
+  "processes": [
+    {
+      "match": "mac-disk-trim/mac-disk-trim\\.sh",
+      "tree": true
+    }
+  ],
+  "unbounded": "macOS has no cgroups; one short bash pass (a colima ssh fstrim capped at 5 min; weekly a docker ps/inspect/rm capped at 2 min) every 20 minutes, niced, low-priority IO",
+  "remove": {
+    "commands": [
+      "tools/agents/mac-disk-trim-deploy.sh remove"
+    ]
+  }
+}

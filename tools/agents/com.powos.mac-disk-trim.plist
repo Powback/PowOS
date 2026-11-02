@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Colima fstrim every 20 min + weekly long-dead container removal (tools/agents/mac-disk-trim.sh; unit
+  units/mac/mac-disk-trim-mac.json). Installed by tools/agents/mac-disk-trim-deploy.sh, which fills in @HOME@ and @BIN@
+  (a copy of the script, so no worktree it might be removed from). LimitLoadToSessionType Background: this Mac is
+  headless (user/<uid> domain, no gui domain).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.powos.mac-disk-trim</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@BIN@/mac-disk-trim.sh</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>1200</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>LimitLoadToSessionType</key>
+  <string>Background</string>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>LowPriorityIO</key>
+  <true/>
+  <key>Nice</key>
+  <integer>10</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@HOME@/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/dev/null</string>
+  <key>StandardErrorPath</key>
+  <string>@HOME@/.cache/powos-mac-disk-trim/launchd.err</string>
+</dict>
+</plist>
