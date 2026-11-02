@@ -140,6 +140,10 @@ function tableOf(el: HTMLElement): Keyframe[] {
     table.push({ offset: p, transform: cs.transform, opacity: cs.opacity });
   }
   st.setProperty("--p", p0);
+  // Styled back at its own --p before its transition returns: else the transition ran from the last sample (--p 1, the
+  // launcher-open look) back to it - built at idle or a touch down (primeFollowers), home's grid shrank and grew back
+  // with nothing touched (gate home-return, ww-swap).
+  void getComputedStyle(el).transform;
   st.transition = t0;
   tables.set(el, { key, table });
   return table;
