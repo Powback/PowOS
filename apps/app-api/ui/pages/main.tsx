@@ -7,7 +7,7 @@
  */
 import { useEffect, useState } from "preact/hooks";
 import { AddApp } from "../lib/add";
-import { Audit, TrackersView } from "../lib/activity";
+import { Audit, Fold, TrackersView } from "../lib/activity";
 import { AppList, remember } from "../lib/app-list";
 import { AppPage } from "../lib/app-page";
 import { call, type AppSpec, type Host, type Net } from "../lib/api";
@@ -40,13 +40,10 @@ function DevTools({ net, app }: { net?: Net; app: string }) {
   const [tab, setTab] = useState("Audit");
   const Body = TAB[tab];
   return (
-    <details style={S.card} data-fold="developer">
-      <summary style={S.fold}><span style={S.foldRow}><span style={S.name}>Developer</span><span style={S.muted}>audit, trackers, rules, recordings, files</span></span></summary>
-      <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "10px" }}>
-        <Seg options={TABS} picked={tab} onPick={setTab} />
-        <Body net={net} app={app} />
-      </div>
-    </details>
+    <Fold id="developer" head={<span style={S.foldRow}><span style={S.name}>Developer</span><span style={S.muted}>audit, trackers, rules, recordings, files</span></span>}>
+      <Seg options={TABS} picked={tab} onPick={setTab} />
+      <Body net={net} app={app} />
+    </Fold>
   );
 }
 

@@ -5,8 +5,9 @@
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { optimistic } from "@powos/shared/pending";
+import { Reveal } from "@powos/shared/reveal";
 import { ActionPanel, Widgets, type DetailProps } from "./action";
-import { AppAudit, Privacy } from "./activity";
+import { AppAudit, Fold, Privacy } from "./activity";
 import { call, type Action, type AppSpec, type Host, type Views } from "./api";
 import { useRuntime } from "./runtime";
 import { offers } from "./app-list";
@@ -39,7 +40,7 @@ function Offer({ p, id, note }: { p: DetailProps; id: string; note?: string }) {
         </div>
         {p.toggle && <Switch on={a.enabled} label={`${title(id)} allowed`} onFlip={(on) => p.toggle!(on, id)} />}
       </div>
-      {open && <ActionPanel net={p.net} app={p.app} spec={p.spec.app} id={id} a={a} draft={p.draft} />}
+      <Reveal open={open}><ActionPanel net={p.net} app={p.app} spec={p.spec.app} id={id} a={a} draft={p.draft} /></Reveal>
     </div>
   );
 }
@@ -87,15 +88,12 @@ function Developer({ p }: { p: DetailProps }) {
   const [views, err] = useRuntime<Views>(p.net, p.app, open ? `/views?app=${encodeURIComponent(p.spec.app)}` : null, Number(p.spec.enabled));
   const s = p.spec;
   return (
-    <details style={S.card} data-fold="developer" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
-      <summary style={S.fold}><span style={S.foldRow}><span style={S.name}>Developer</span><span style={S.muted}>routes, views, ids</span></span></summary>
-      <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "10px" }}>
+    <Fold id="developer" onToggle={setOpen} head={<span style={S.foldRow}><span style={S.name}>Developer</span><span style={S.muted}>routes, views, ids</span></span>}>
         <div style={S.idMuted}>{s.app} · {s.origin}{s.auth ? ` · auth ${s.auth}` : ""}</div>
         <Seg options={VIEWS.map(([v]) => v)} picked={view} onPick={setView} />
         <Block>{err ? `couldn't render: ${err}` : views ? views[which] : "…"}</Block>
         {Object.entries(s.actions).map(([id, a]) => <div key={id} style={S.idMuted}>{`${id} · ${a.safety} · ${a.endpoint}`}</div>)}
-      </div>
-    </details>
+    </Fold>
   );
 }
 

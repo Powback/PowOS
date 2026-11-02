@@ -148,3 +148,20 @@ export function closeGap(card: HTMLElement, done: () => void) {
     setTimeout(() => card.isConnected && (a.cancel(), (card.style.transform = ""), (card.style.opacity = "")), 3000);
   };
 }
+
+/**
+ * A card taken away where nothing slid it (the lock face's list, lock.tsx: dismissed elsewhere, or read on another
+ * device): it fades out while it closes its gap ([closeGap]) on the spring; then [done] drops it. Reduced motion:
+ * [done] at once. Returns a cancel (the card came back before it was gone): it stands whole again.
+ */
+export function leave(card: HTMLElement, done: () => void): () => void {
+  if (reducedMotion() || typeof Element.prototype.animate !== "function") return done(), () => {};
+  const fade = card.animate([{ opacity: 1 }, { opacity: 0 }], { duration: springFast.ms, easing: springFast.easing, fill: "forwards" });
+  let live = true;
+  closeGap(card, () => live && done());
+  return () => {
+    live = false;
+    fade.cancel();
+    card.getAnimations().forEach((a) => a.id.startsWith(GROW) && a.cancel());
+  };
+}

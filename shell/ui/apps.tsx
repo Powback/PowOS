@@ -15,6 +15,7 @@ import { inLaunchers, toggleLauncher } from "./launchers.tsx";
 import { powos } from "../bridge.ts";
 import { memo } from "./memo.ts";
 import type { App, AppWindow } from "../types.ts";
+import { usePresence } from "./reveal.tsx";
 
 const LONG_PRESS_MS = 420;
 const SLOP = 10;
@@ -210,30 +211,48 @@ function listItems(wins: AppWindow[]): Item[] {
   });
 }
 
-/** The open app menu, under (or, near the bottom, over) the app it belongs to. */
-export function AppMenu() {
-  const m = menu.value;
-  if (!m) return null;
-  const { app, at } = m;
+/** What the app menu offers for [app]. */
+function menuItems(app: App): Item[] {
   const docked = dock.value.includes(app.key);
   const quick = inLaunchers(app.key);
-  const items: Item[] = [
+  const android = app.kind === "android";
+  return [
     ...windowItems(app.key),
     [docked ? "unpin from dock" : "pin to dock", () => setDocked(app.key, !docked)],
     // The control center's quick-launch row, at its end (launchers.tsx: the row's own add/remove).
     [quick ? "remove from quick launch" : "add to quick launch", () => void toggleLauncher(app.key)],
     // On the page home shows (also from the launcher overlay's own page: state.ts shownHomePage), in its first free cell.
     ["add to home", () => shownHomePage().then((p) => powos.home.add(app.key, p))],
-    ...(app.kind === "android" ? ([["app info", () => powos.apps.info(app.key)]] as Item[]) : []),
-    ...(app.kind === "android" && !app.system ? ([["uninstall", () => powos.apps.uninstall(app.key)]] as Item[]) : []),
+    ...(android ? ([["app info", () => powos.apps.info(app.key)]] as Item[]) : []),
+    ...(android && !app.system ? ([["uninstall", () => powos.apps.uninstall(app.key)]] as Item[]) : []),
   ];
+}
+
+/** The menu open now, or the one leaving (kept with what it was opened on while it leaves), and whether it's leaving. */
+function useMenuPresence() {
+  const open = menu.value;
+  const pop = usePresence(open != null);
+  const last = useRef(open);
+  if (open) last.current = open;
+  return { m: open ?? (pop.on ? last.current : null), leaving: pop.leaving };
+}
+
+/**
+ * The open app menu, under (or, near the bottom, over) the app it belongs to - kept while it leaves on the spring (§6:
+ * it vanished in one frame), as the switcher's card menu does (recents.tsx Menu).
+ */
+export function AppMenu() {
+  const { m, leaving } = useMenuPresence();
+  if (!m) return null;
+  const { app, at } = m;
+  const items = menuItems(app);
   const below = at.bottom + 48 * items.length + 16 < innerHeight;
   const left = Math.max(8, Math.min(innerWidth - 188, at.left + at.width / 2 - 90));
   const close = () => (menu.value = null);
   return (
     <>
-      <div class="menu-scrim" onPointerDown={close} />
-      <div class="menu tile sheet pop" style={{ left: `${left}px`, ...(below ? { top: `${at.bottom + 4}px` } : { bottom: `${innerHeight - at.top + 4}px` }) }}>
+      {!leaving && <div class="menu-scrim" onPointerDown={close} />}
+      <div class={`menu tile sheet pop${leaving ? " leaving" : ""}`} inert={leaving || undefined} style={{ left: `${left}px`, ...(below ? { top: `${at.bottom + 4}px` } : { bottom: `${innerHeight - at.top + 4}px` }) }}>
         <div class="menu-title">{app.label}</div>
         {items.map(([label, run]) => (
           <button

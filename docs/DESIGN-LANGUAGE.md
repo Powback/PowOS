@@ -20,7 +20,9 @@ Checks:
 - The gate's `design-lint-*` runs find pop-ins, pop-outs (a surface closed in one frame) and monospace text on
   screen. They fail the gate for the launcher, an open folder and a widget's settings sheet
   (`design-lint-{launcher,folder,widget-sheet}-*`), the switcher (`design-lint-switcher-*`: the cards rising, a card's
-  menu) and web windows (`design-lint-windows-*`: the tile menu, the resize outline), and are report-only for the other
+  menu, closing included) and web windows (`design-lint-windows-*`: the tile menu, the resize outline), the long-press
+  app menu (`design-lint-menu-*`, closing included) and the lock face (`design-lint-lock-*`: a card removed must leave
+  on the spring), and are report-only for the other
   surfaces until their design wave.
 - `shell/dev/gate.sh --shots DIR` renders every surface and measures text contrast (`report.json`).
 

@@ -17,7 +17,7 @@ import { powos } from "../bridge.ts";
 import { ago, useMinuteClock } from "./time.ts";
 import type { NotificationList } from "../types.ts";
 import { NotifGlyph, notifIconSrc, type GroupedNotification } from "./notifications.tsx";
-import { arrive } from "./notifmotion.ts";
+import { arrive, leave } from "./notifmotion.ts";
 
 /** Lifted this far (of the height) when let go, it unlocks. */
 const UNLOCK = 0.33;
@@ -29,6 +29,21 @@ const STILL = 80;
 const SHOWN = 5;
 
 const two = (n: number) => String(n).padStart(2, "0");
+
+type Note = NotificationList["items"][number];
+/** A card on the face: shown, or on its way out (gone from the list, fading as its gap closes: §6). */
+type Row = { n: Note; leaving?: boolean };
+
+/**
+ * [prev]'s rows brought to [items]: the new list in its order, and every card that left it kept where it was, leaving -
+ * it was dropped in one frame (the cards under it jumped up).
+ */
+export function lockRows(prev: Row[], items: Note[]): Row[] {
+  const keys = new Set(items.map((n) => n.key));
+  const out: Row[] = items.map((n) => ({ n }));
+  prev.forEach((r, i) => keys.has(r.n.key) || out.splice(Math.min(i, out.length), 0, { n: r.n, leaving: true }));
+  return out;
+}
 
 /**
  * The face's lift, 0..1, on the root (the dimming behind the face fades with it); settling: eased there (shell.css: a
@@ -64,10 +79,24 @@ export function Lock() {
    * there in one frame - the first list too (the face shown with what's new). */
   const notes = useRef<HTMLDivElement>(null);
   const seen = useRef(new WeakSet<Element>());
+  const [rows, setRows] = useState<Row[]>([]);
+  useEffect(() => setRows((prev) => lockRows(prev, list.items.slice(0, SHOWN))), [list]);
+  /** The cards leaving, by key: each one's cancel (it came back before it was gone). */
+  const leaving = useRef(new Map<string, () => void>());
   useLayoutEffect(() => {
-    const cards = [...(notes.current?.children ?? [])];
+    const cards = [...(notes.current?.children ?? [])] as HTMLElement[];
     arrive(cards.filter((c) => !seen.current.has(c)));
     for (const c of cards) seen.current.add(c);
+    const going = new Set(rows.filter((r) => r.leaving).map((r) => r.n.key));
+    for (const [key, cancel] of leaving.current) if (!going.has(key)) (cancel(), leaving.current.delete(key));
+    for (const c of cards) {
+      const key = c.dataset.key!;
+      if (!going.has(key) || leaving.current.has(key)) continue;
+      leaving.current.set(key, leave(c, () => {
+        leaving.current.delete(key);
+        setRows((r) => r.filter((x) => !(x.leaving && x.n.key === key)));
+      }));
+    }
   });
   useEffect(() => {
     const refresh = () => {
@@ -144,8 +173,8 @@ export function Lock() {
         {battery.level != null && ` · ${battery.charging ? "⚡" : ""}${battery.level}%`}
       </div>
       <div class="lock-notes" ref={notes}>
-        {list.items.slice(0, SHOWN).map((n) => (
-          <div key={n.key} class="lock-note tile">
+        {rows.map(({ n, leaving: out }) => (
+          <div key={n.key} data-key={n.key} class={`lock-note tile${out ? " leaving" : ""}`} inert={out || undefined}>
             {/* K2: the shade's own icon (notifications.tsx SmallIcon's NotifGlyph): the notification's small icon in its app's
                 color, else the app's icon - System UI, Play services and the like have no drawer icon, and showed none. */}
             <NotifGlyph n={n as GroupedNotification} fallback={notifIconSrc(n)} />

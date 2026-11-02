@@ -10,7 +10,8 @@
  * - monospace: once the surface is at rest, every visible text whose font's first family is a monospace one, outside
  *   code (pre, code, kbd, samp, a terminal, a textarea), faded-out text and OWL widgets (unseen) - UI text is --font-ui.
  *
- * - pop-outs: a surface with a CLOSE (an open folder, a widget's settings sheet) is closed once at rest; its root (ROOT)
+ * - pop-outs: a surface with a CLOSE (an open folder, a widget's settings sheet, the app and switcher menus, a lock card
+ *   taken away) is closed once at rest; its root (ROOT)
  *   gone from the page, or drawn at full opacity with nothing moving it, on the frame after is a surface that left in
  *   a single frame (§6 "every appear, disappear ... animates").
  *
@@ -41,8 +42,27 @@ async function twoWindows(S) {
   return W;
 }
 
+/** The lock face's list (?mode=lock, lock.tsx): three cards, [drop] of them taken away (dismissed elsewhere). */
+function lockNotes(drop = 0) {
+  const now = Math.floor(Date.now() / 1000);
+  const items = [["Signal", "Mats", "are we still on for tonight?", 120], ["Gmail", "Your order has shipped", "It arrives Thursday.", 3600], ["Calendar", "Dentist", "Tomorrow 09:30", 7200]]
+    .map(([app, title, text, ago], i) => ({ key: "l" + i, app, icon: null, title, text, time: now - ago, clearable: true, profile: null, conversation: false }));
+  window.__mockEvents.emit("notifications.changed", { available: true, items: items.slice(drop) });
+}
+
+/** A tap outside a menu (its scrim): how a menu is put away. */
+const tapOutside = (sel) => () => {
+  const at = { bubbles: true, clientX: 4, clientY: 4, pointerId: 8, pointerType: "touch", isPrimary: true };
+  document.querySelector(sel)?.dispatchEvent(new PointerEvent("pointerdown", at));
+};
+
 /** What's already on screen before the surface opens (not watched): the launcher, open and at rest, for its search. */
 const BEFORE = {
+  // The lock face with its cards at rest, for a card taken away (CLOSE lock).
+  lock: async () => {
+    lockNotes();
+    await sleep(800);
+  },
   "launcher-search": async (S) => {
     S.drawer.value = 1;
     await sleep(800);
@@ -107,8 +127,12 @@ const OPEN = {
 const CLOSE = {
   folder: async (S) => { S.folder.value = null; },
   "widget-sheet": async () => { (await window.__gw.mod("./apps/sheet.ts")).detailSheet.value = null; },
+  // The long-press app menu and the switcher's card menu: a tap outside. The lock face: its first card removed.
+  menu: tapOutside(".menu-scrim"),
+  "switcher-menu": tapOutside(".recents-menu-scrim"),
+  lock: () => lockNotes(1),
 };
-const ROOT = { folder: ".folder-view", "widget-sheet": ".wsheet" };
+const ROOT = { folder: ".folder-view", "widget-sheet": ".wsheet", menu: ".menu", "switcher-menu": ".recents-menu", lock: ".lock-note" };
 
 /** [surface] closed: its root gone at once, or still there at full opacity with nothing moving it, is a pop-out. */
 async function popouts(surface, S) {

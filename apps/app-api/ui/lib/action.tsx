@@ -5,6 +5,7 @@
  * (`draft`: "+ add app" review) has no switches and only ever dry-runs (/call draft:true, appcap_run.py --draft).
  */
 import { useEffect, useRef, useState } from "preact/hooks";
+import { Reveal } from "@powos/shared/reveal";
 import { call, SAFETY, shape, type Action, type AppSpec, type AppWidget, type CallResult, type Net, type Schema } from "./api";
 import { Block, Muted, S, Switch, title } from "./ui";
 
@@ -124,7 +125,8 @@ function ActionRow({ p, id }: { p: DetailProps; id: string }) {
         </div>
         {toggle ? <Switch on={a.enabled} label={`${title(id)} allowed`} onFlip={(on) => toggle(on, id)} /> : <span style={S.muted}>{a.enabled ? "on when added" : "off"}</span>}
       </div>
-      {open && <ActionPanel net={p.net} app={p.app} spec={p.spec.app} id={id} a={a} draft={p.draft} />}
+      {/* Opened on the spring (§6): it popped in with {open && ...}. */}
+      <Reveal open={open}><ActionPanel net={p.net} app={p.app} spec={p.spec.app} id={id} a={a} draft={p.draft} /></Reveal>
     </div>
   );
 }

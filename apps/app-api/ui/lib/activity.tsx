@@ -1,5 +1,6 @@
 /** What an app did lately and what was blocked for it: audit rows and trackers (runtime GET /audit, /trackers). */
 import type { ComponentChildren } from "preact";
+import { Details } from "@powos/shared/reveal";
 import { call, type AuditRow, type Net, type Trackers } from "./api";
 import { useRuntime } from "./runtime";
 import { Muted, S, Switch, title } from "./ui";
@@ -66,13 +67,16 @@ export function TrackersView({ net, app }: { net?: Net; app: string }) {
   );
 }
 
-/** A collapsed card: [head] always shows, [children] on tap (native details: no state, no JS). */
-export function Fold({ head, children, id }: { head: ComponentChildren; children: ComponentChildren; id?: string }) {
+/**
+ * A collapsed card: [head] always shows, [children] on tap - a native details (its summary, `open`, keyboard kept)
+ * whose body grows open and shrinks shut on the spring (@powos/shared/reveal Details; §6: the browser's toggle popped
+ * it in). [onToggle] hears it open (at the tap) and shut (once closed).
+ */
+export function Fold({ head, children, id, onToggle }: { head: ComponentChildren; children: ComponentChildren; id?: string; onToggle?: (open: boolean) => void }) {
   return (
-    <details style={S.card} data-fold={id}>
-      <summary style={S.fold}>{head}</summary>
-      <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "10px" }}>{children}</div>
-    </details>
+    <Details style={S.card} summaryStyle={S.fold} fold={id} onToggle={onToggle} summary={head} bodyStyle={{ display: "flex", flexDirection: "column", gap: "8px", paddingTop: "10px" }}>
+      {children}
+    </Details>
   );
 }
 

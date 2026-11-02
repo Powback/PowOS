@@ -715,6 +715,8 @@ const SCENES = [
   ["control-open-row2", "shade", "S.panel.value = 'control'; S.notif.value = true; await sleep(300); [...document.querySelectorAll('.cc-main .cc-tile')].find((t) => t.textContent.includes('tools'))?.querySelector('.cc-more')?.click(); await sleep(400);", "blurred"],
   ["control", "shade", "S.panel.value = 'control'; S.notif.value = true;", "blurred"],
   ["switcher", "recents", "E.emit('recents.show', { open: true, from: 100, tasks: await (await U('./bridge.ts')).powos.tasks.list() });", "blurred"],
+  // A card's menu (a tap on its icon, recents.tsx Menu): opaque on --menu-tint (§2).
+  ["switcher-menu", "recents", "E.emit('recents.show', { open: true, from: 100, tasks: await (await U('./bridge.ts')).powos.tasks.list() }); await sleep(1000); const i = document.querySelector('.recents .task:first-child .task-icon'); const r = i.getBoundingClientRect(); const at = { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, pointerId: 7, pointerType: 'touch', isPrimary: true }; i.dispatchEvent(new PointerEvent('pointerdown', at)); i.dispatchEvent(new PointerEvent('pointerup', at)); await sleep(500);", "blurred"],
   ["lock", "lock", "", "wallpaper"],
   // The lock face with what's new (lock.tsx): the cards on THE backdrop over the dimmed wallpaper, the hint at the foot.
   ["lock-notes", "lock", LOCK_NOTES + " await sleep(600);", "wallpaper"],

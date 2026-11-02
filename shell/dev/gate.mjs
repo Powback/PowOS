@@ -366,10 +366,11 @@ async function transpiled(p) {
  * and the per-scene cap then failed 4 of them as "design-lint-home-folded: scene timeout".
  */
 const DESIGN_LINT = [["home", ""], ["launcher", ""], ["launcher-search", ""], ["menu", ""], ["shade", "?mode=shade"], ["control", "?mode=shade"], ["folder", ""], ["widget-sheet", ""],
-  ["switcher", "?mode=recents"], ["switcher-menu", "?mode=recents"], ["windows", ""], ["windows-resize", ""]];
+  ["switcher", "?mode=recents"], ["switcher-menu", "?mode=recents"], ["windows", ""], ["windows-resize", ""], ["lock", "?mode=lock"]];
 // The folder and the widget's settings sheet (design wave: folders and sheets) block too, closing included (pop-outs);
 // design wave 6 made the switcher's and web windows' surfaces blocking (their menus, split prompt and resize outline).
-const DESIGN_LINT_BLOCKING = new Set(["launcher", "launcher-search", "folder", "widget-sheet", "switcher", "switcher-menu", "windows", "windows-resize"]);
+// The long-press app menu and the lock face's cards block too (design leftovers): closing a menu, a card removed.
+const DESIGN_LINT_BLOCKING = new Set(["launcher", "launcher-search", "folder", "widget-sheet", "switcher", "switcher-menu", "windows", "windows-resize", "menu", "lock"]);
 function designLintRuns(browser) {
   const sizes = [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]];
   return sizes.flatMap(([label, viewport]) => DESIGN_LINT.map(([surface, query]) => {

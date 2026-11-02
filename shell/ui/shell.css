@@ -778,7 +778,13 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   padding: 4px;
   animation: menu-in var(--spring-fast-ms) var(--spring-fast);
 }
+/* Leaving (apps.tsx AppMenu usePresence): back the way it came, on the spring - never gone in one frame (§6). */
+.menu.leaving { animation: menu-out var(--spring-fast-ms) var(--spring-fast) both; pointer-events: none; }
 @keyframes menu-in { from { opacity: 0; transform: scale(0.95); } }
+@keyframes menu-out { to { opacity: 0; transform: scale(0.95); } }
+@media (prefers-reduced-motion: reduce) { .menu, .menu.leaving { animation: none; } }
+/* Opaque (§2 menus): the menu tint, as the switcher's card menu and a widget's settings sheet - not the see-through glass. */
+html:root .menu.tile { --glass-blur-native: var(--backdrop-blur-native); background: var(--menu-tint); }
 .menu-title {
   padding: 8px 12px 4px;
   color: var(--color-muted);

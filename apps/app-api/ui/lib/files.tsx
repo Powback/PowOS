@@ -5,6 +5,7 @@
  * Empty until the tracer runs.
  */
 import { useState } from "preact/hooks";
+import { Reveal } from "@powos/shared/reveal";
 import { call, type Net } from "./api";
 import { Muted, S } from "./ui";
 
@@ -48,7 +49,7 @@ function FileRowView({ net, app, owner, f, reload }: { net?: Net; app: string; o
         {f.override && <span style={{ ...S.muted, color: "var(--color-accent)" }}>override</span>}
       </div>
       <Muted>{`${f.reads} read, ${f.writes} write${f.last ? ` · ${f.last.replace("T", " ")}` : ""}`}</Muted>
-      {edit && <OverrideEditor net={net} app={app} owner={owner} path={f.path} reload={reload} />}
+      <Reveal open={edit}><OverrideEditor net={net} app={app} owner={owner} path={f.path} reload={reload} /></Reveal>
     </div>
   );
 }
