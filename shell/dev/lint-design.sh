@@ -1,7 +1,7 @@
 #!/bin/bash
 # The design language's static check (docs/DESIGN-LANGUAGE.md §2-§6): prints what breaks a rule, per file. Four rules
 # BLOCK (design wave 1 made them hold: exit 1 on any hit) - monospace, radius, easing, status - and design wave 2 (home)
-# added three more: page dots, haptics, home motion; the rest report only.
+# added three more: page dots, haptics, home motion; design wave 3 (launcher) launcher motion; the rest report only.
 # Outside theme.css:
 #   - monospace: a rule naming var(--font) (theme.css's monospace) - UI text is --font-ui; code/terminals excepted
 #     (terminal.*, a selector with term/code/pre/kbd/log/id in it);
@@ -15,7 +15,9 @@
 #   - haptics: navigator.vibrate() outside ui/haptics.ts - the host's tick()/confirm() are the one feel (§7; the
 #     WebView's vibrate is silent on the phone, home's long presses had no haptic at all);
 #   - home motion: a transition with a literal duration (120ms...) in a rule for home's pieces (.dock, .app, .home,
-#     .page, .home-tile, .page-dots, .app-icon) instead of the spring set's --spring*-ms (§6).
+#     .page, .home-tile, .page-dots, .app-icon) instead of the spring set's --spring*-ms (§6);
+#   - launcher motion (design wave 3): the same for the launcher's pieces (.launcher*, .drawer*, .letter-bar, .az,
+#     .scr-*, .search-group*) - its letter bar's colour (160ms) and A-Z grid's background (120ms) were literal.
 #
 #   shell/dev/lint-design.sh [DIR]   DIR: the shell (default: this one). Exit 1: a blocking rule broken.
 set -uo pipefail
@@ -40,14 +42,24 @@ easing=$( { grep -nE '(transition|animation)[^;]*(cubic-bezier\(|[0-9]m?s +ease)
 status=$(grep -niE -- '--aip-(blue|amber|on-amber)|#5aa7e8|#e3a03c|#1a1206' $code 2>/dev/null | strip || true)
 dots=$( { grep -nE '<i class=\{[^}]*\? *"on"' ui/*.tsx 2>/dev/null; grep -nE -- '-dots +i\.on' $css 2>/dev/null | grep -v '\.page-dots'; } | strip || true)
 vibrate=$(grep -nE 'navigator\.vibrate' ui/*.ts ui/*.tsx *.ts *.tsx 2>/dev/null | grep -vE '^(ui/haptics|bridge)\.ts:' | strip || true)
-homemotion=$(awk '
+# literal_motion <selector regex>: shell.css lines in a rule whose selector matches it with a transition/animation
+# taking a literal duration (not var(--spring*), not a loop on --ambient, not a 0s switch such as visibility's). Any
+# literal in the declaration counts:
+# "transform var(--spring-fast-ms) var(--spring-fast), color 160ms" breaks it with its color.
+literal_motion() {
+  awk -v want="$1" '
   /\{/ { sel = $0; sub(/\{.*/, "", sel); if (sel ~ /^[ \t]*$/) sel = last }
-  { if ($0 !~ /^[ \t]*(\/\*|\*)/ && $0 ~ /(transition|animation)(-duration)?:[^;]*[0-9.]+m?s([ ,;]|$)/ && $0 !~ /var\(--(spring|ambient)/ && $0 !~ /infinite/ && sel ~ /\.(dock|app|home|page|home-tile|page-dots|app-icon)([^a-z-]|$)/) printf "%s:%d:%s\n", FILENAME, FNR, $0 }
+  { d = $0; gsub(/var\(--[a-z-]+\)/, "", d); gsub(/ 0m?s/, "", d)
+    if ($0 !~ /^[ \t]*(\/\*|\*)/ && d ~ /(transition|animation)(-duration)?:[^;]*[^a-z-][0-9.]+m?s([ ,;]|$)/ && $0 !~ /infinite|var\(--ambient\)/ && sel ~ want) printf "%s:%d:%s\n", FILENAME, FNR, $0 }
   /\}/ { last = sel = "" }
   { if ($0 ~ /\{/ && $0 !~ /\}/) last = sel }
-' ui/shell.css 2>/dev/null || true)
+  ' ui/shell.css 2>/dev/null || true
+}
+homemotion=$(literal_motion '\\.(dock|app|home|page|home-tile|page-dots|app-icon)([^a-z-]|$)')
+# The launcher's pieces (design wave 3): the drawer, its A-Z grid and letter bar, the search results, the folders page.
+launchermotion=$(literal_motion '\\.(launcher|launcher-[a-z]+|drawer|drawer-[a-z]+|letter-bar|letter-bubble|az|scr-[a-z]+|search-group|search-group-[a-z]+|launcher-search-results)([^a-z-]|$)')
 count() { printf '%s' "$1" | grep -c . || true; }
-bad=$(( $(count "$mono") + $(count "$radius") + $(count "$easing") + $(count "$status") + $(count "$dots") + $(count "$vibrate") + $(count "$homemotion") ))
+bad=$(( $(count "$mono") + $(count "$radius") + $(count "$easing") + $(count "$status") + $(count "$dots") + $(count "$vibrate") + $(count "$homemotion") + $(count "$launchermotion") ))
 if [ "$bad" = 0 ]; then echo "ok   design lint (docs/DESIGN-LANGUAGE.md)"; else echo "FAIL design lint: $bad blocking (docs/DESIGN-LANGUAGE.md)"; fi
 report "monospace in UI" "$mono"
 report "radius off the scale" "$radius"
@@ -56,5 +68,6 @@ report "status colour not a --status-* token" "$status"
 report "page dots not ui/pagedots.tsx" "$dots"
 report "haptic not ui/haptics.ts" "$vibrate"
 report "home motion with a literal duration" "$homemotion"
+report "launcher motion with a literal duration" "$launchermotion"
 report "hard-coded blur (report-only)" "$blur"
 [ "$bad" = 0 ]

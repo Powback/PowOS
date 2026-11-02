@@ -475,6 +475,16 @@
 }
 /* Over a wallpaper of the other tone (theme.css data-wallpaper): the root's deeper tint, the drawer's too. */
 :root[data-light="false"][data-wallpaper="light"] .home .launcher-frame, :root[data-light="true"][data-wallpaper="dark"] .home .launcher-frame { --glass-dim: 68%; }
+/* The widget and app picker (appwidget.tsx, edit mode's "+"): a page-sized sheet of small labels on cards - at the
+   sheets' reference fill 11-13 of its texts were under 4.5:1, at the drawer's 42% still 10 (design audit, launcher gap
+   7). The deeper tint, whatever the wallpaper: home is hidden under it anyway (DESIGN-LANGUAGE.md §2 sheets hide home).
+   Its cards' descriptions are 11 px on a card's lighter fill: the foreground itself, as a widget's secondary text (their
+   size says they're secondary; the theme's see-through muted measured 4.3:1 there). */
+.aw-picker.tile.sheet {
+  --glass-dim: 68%;
+  --text-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--glass-dim)), transparent);
+  --color-muted: var(--color-foreground);
+}
 /*
  * The chat in the drawer (chat.tsx): a page of text over the frost - the frame takes the theme's background at 84%
  * (as the assistant's panel), so its text keeps 4.5:1 over a bright wallpaper (the reference fill measured 3.7-4.4).
@@ -570,7 +580,6 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 .drawer-track { display: flex; gap: var(--page-gap, 0px); height: 100%; will-change: transform; }
 .drawer-page { flex: 0 0 100%; min-width: 0; min-height: 0; display: grid; grid-template-columns: 1fr var(--letter-bar); grid-template-rows: minmax(0, 1fr); }
 .drawer-page > .drawer-folders { grid-column: 1 / -1; padding-right: 0; }
-.folder-empty { padding: 24px 8px; text-align: center; }
 .drawer-list {
   grid-column: 1;
   /* The A-Z bar's width kept clear: a long name in the last column ran into its letters. */
@@ -625,11 +634,11 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 }
 /* The drawer's labels can sit over the brightest part of the wallpaper: the label shadow, as home's. */
 .drawer :is(.app-label, .heading), .letter-bar span { text-shadow: 0 0 2px var(--color-background), 0 0 4px var(--color-background), 0 0 7px var(--color-background), 0 0 12px color-mix(in srgb, var(--color-background) 70%, transparent); }
-.letter-bar span { transition: transform var(--spring-fast-ms) var(--spring-fast), color 160ms; }
+.letter-bar span { transition: transform var(--spring-fast-ms) var(--spring-fast), color var(--spring-fast-ms) var(--spring-fast); }
 .letter-bar span.on { color: var(--accent-text); transform: scale(1.5); }
 /* Scrubbing the A-Z bar (drawer.tsx highlight): the letter's cells bright with a soft lift, the rest dim; eased in
    and back. opacity/scale/translate only (composited, no layout), changed per letter, not per pointermove. */
-.grid.az .app { transition: background 120ms, opacity var(--spring-fast-ms) var(--spring-fast), scale var(--spring-fast-ms) var(--spring-fast), translate var(--spring-fast-ms) var(--spring-fast); }
+.grid.az .app { transition: background var(--spring-fast-ms) var(--spring-fast), opacity var(--spring-fast-ms) var(--spring-fast), scale var(--spring-fast-ms) var(--spring-fast), translate var(--spring-fast-ms) var(--spring-fast); }
 .grid.az[data-scrub] .app { opacity: 0.4; }
 .grid.az[data-scrub] .app[data-lit] { opacity: 1; scale: 1.05; translate: 0 -2px; }
 /* The letter under the finger, big, beside the bar. */

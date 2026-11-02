@@ -19,6 +19,7 @@ import type { App } from "../types.ts";
 
 import { searchResults, searchSections, searchPending, openSearchResult, type SearchResult } from "../search.ts";
 import { springFast } from "./spring.ts";
+import { arrive } from "./notifmotion.ts";
 import { tick } from "./haptics.ts";
 
 const ALPHABET = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
@@ -200,17 +201,18 @@ function PendingAppCell() {
   );
 }
 
+/** The folders home shows - the user's own, then the app library's (library.tsx, home's last page) - with apps in them. */
+const shownFolders = computed(() => library.value.filter((f) => f.apps.length));
+
 /**
- * The drawer's 2nd page: the folders home shows - the user's own, then the app library's (library.tsx, home's last
- * page) - each with its apps (tap to open). It read only the user's own and said "No folders yet" next to a page full
- * of the library's (the user, 2026-10-28).
+ * The drawer's 2nd page: [shownFolders], each with its apps (tap to open). It read only the user's own and said "No
+ * folders yet" next to a page full of the library's (the user, 2026-10-28). With none there is no 2nd page at all
+ * (Pages), never a "No folders yet" line (DESIGN-LANGUAGE.md §1: empty states hide).
  */
 function FolderView() {
-  const folders = library.value.filter((f) => f.apps.length);
   return (
     <div class="drawer-list drawer-folders">
-      {!folders.length && <div class="muted folder-empty">No folders yet</div>}
-      {folders.map((f) => (
+      {shownFolders.value.map((f) => (
         <section key={f.key}>
           <h3 class="heading">{f.name}</h3>
           <div class="grid">
@@ -234,6 +236,8 @@ function Pages() {
   const track = useRef<HTMLDivElement>(null);
   const dots = useRef<HTMLDivElement>(null);
   const [view, setView] = useState(0);
+  // The folders page only when it has folders (FolderView): one page alone, no dots and no sideways swipe.
+  const last = shownFolders.value.length ? 1 : 0;
   const s = useRef({ x0: 0, y0: 0, lock: "" as "" | "x" | "y", samples: [] as [number, number][], base: 0 });
   const put = (px: number, ms: number) => {
     const el = track.current;
@@ -245,6 +249,8 @@ function Pages() {
   };
   const width = () => (track.current ? track.current.clientWidth + (parseFloat(getComputedStyle(track.current).columnGap) || 0) : 0) || innerWidth;
   useEffect(() => put(-view * width(), 0), []);
+  // The folders went while their page was shown: back to the apps, on the spring.
+  useEffect(() => void (view > last && (setView(last), put(-last * width(), springFast.ms))), [last]);
   const start = (e: TouchEvent) => {
     const t = e.touches[0];
     const st = s.current;
@@ -261,7 +267,7 @@ function Pages() {
     if (st.lock !== "x") return;
     st.samples.push([t.clientX, eventTime(e)]);
     if (st.samples.length > 12) st.samples.shift();
-    const off = (view === 0 && dx > 0) || (view === 1 && dx < 0) ? dx / 3 : dx;
+    const off = (view === 0 && dx > 0) || (view === last && dx < 0) ? dx / 3 : dx;
     put(-view * width() + off, 0);
   };
   const end = (e: TouchEvent) => {
@@ -270,20 +276,20 @@ function Pages() {
     st.lock = "";
     const dx = (e.changedTouches[0]?.clientX ?? st.x0) - st.x0;
     const { dir } = pageDecision(dx, dx, sampleVx(st.samples, eventTime(e)), width());
-    const to = Math.max(0, Math.min(1, view + dir));
+    const to = Math.max(0, Math.min(last, view + dir));
     setView(to);
-    put(-to * width(), 220);
+    put(-to * width(), springFast.ms);
   };
   return (
     <>
       <div class="drawer-pages" data-view={view} onTouchStart={start} onTouchMove={move} onTouchEnd={end} onTouchCancel={end}>
         <div class="drawer-track" ref={track}>
           <div class="drawer-page"><AppList found={null} /></div>
-          <div class="drawer-page"><FolderView /></div>
+          {last > 0 && <div class="drawer-page"><FolderView /></div>}
         </div>
       </div>
       {/* Beside the pages, not in them: their clip-path cut the dots off at the pages' foot. */}
-      <PageDots count={2} dotsRef={dots} />
+      {last > 0 && <PageDots count={2} dotsRef={dots} />}
     </>
   );
 }
@@ -339,10 +345,20 @@ export function Drawer() {
  */
 function SearchResults({ sections, pending }: { sections: typeof searchSections.value; pending: boolean }) {
   const list = useRef<HTMLDivElement>(null);
+  const seen = useRef(new WeakSet<Element>());
   const bottomUp = alignOf("launcher") === "bottom";
   useLayoutEffect(() => {
     if (bottomUp && list.current) list.current.scrollTop = list.current.scrollHeight;
   }, [bottomUp, sections]);
+  // What each keystroke brings in fades and slides in on the spring, nearest the bar first (notifmotion.ts arrive);
+  // rows already there stay put. Never in one frame (DESIGN-LANGUAGE.md §6).
+  useLayoutEffect(() => {
+    const all = [...(list.current?.querySelectorAll(ARRIVALS) ?? [])];
+    const fresh = all.filter((el) => !seen.current.has(el) && !el.parentElement?.closest(".search-group:not([data-seen])"));
+    for (const el of all) seen.current.add(el);
+    arrive(bottomUp ? fresh.reverse() : fresh);
+    for (const g of list.current?.querySelectorAll(".search-group") ?? []) g.setAttribute("data-seen", "");
+  });
   const appTiles = sections.apps.map((result) => <button type="button" class="scr-row" key={result.id} data-search-result={result.id} onClick={() => openSearchResult(result)}><SearchIcon icon={result.icon} label={result.label} /><span class="scr-row-text">{result.label}<span class="scr-sub muted">{result.source}</span></span></button>);
   // Settings and app actions: a list under the app each comes from, each name whole (the user, 2026-10-30: "I should
   // be able to see the whole line like hey this app has these controls").
@@ -357,6 +373,9 @@ function SearchResults({ sections, pending }: { sections: typeof searchSections.
     </div></div>
   );
 }
+
+/** The search results' pieces that arrive: an app's row, a group (with its rows), a group's new row, the note. */
+const ARRIVALS = ".scr-row, .search-group, .search-group-row, .scr-note";
 
 function SearchRow({ result }: { result: SearchResult }) {
   return (

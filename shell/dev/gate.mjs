@@ -300,19 +300,33 @@ async function transpiled(p) {
 }
 
 /** Waits for [r]'s page to be up, then adds what [check] returns to its problems (a timeout said as the pages say it). */
-/** The design-lint probe's runs (dev/design-lint.js), REPORT-ONLY: each prints its findings and returns no problems. */
-const DESIGN_LINT = [["home", ""], ["launcher", ""], ["menu", ""], ["shade", "?mode=shade"], ["control", "?mode=shade"]];
-function designLintRuns(browser) {
+/**
+ * The design-lint probe's runs (dev/design-lint.js): each prints its findings. REPORT-ONLY, except the surfaces in
+ * DESIGN_LINT_BLOCKING - their design wave made them clean, so a pop-in or a monospace text there fails the gate
+ * (design wave 3: the launcher).
+ */
+const DESIGN_LINT = [["home", ""], ["launcher", ""], ["launcher-search", ""], ["menu", ""], ["shade", "?mode=shade"], ["control", "?mode=shade"]];
+const DESIGN_LINT_BLOCKING = new Set(["launcher", "launcher-search"]);
+// Each run its own runs.push: a push ties every page opened since the last one to its scene and frees their slots only
+// when all of them settle - the ten runs in one push held ten slots, and under load (6-9 slots) the runs past the
+// limit waited for slots that only their own end would free: the gate hung after the first six (design wave 3).
+function designLintRuns(browser, runs) {
   const sizes = [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]];
-  return sizes.flatMap(([label, viewport]) => DESIGN_LINT.map(([surface, query]) => {
+  for (const [label, viewport] of sizes) for (const [surface, query] of DESIGN_LINT) {
     const name = `design-lint-${surface}-${label}`;
     const probe = async (r) => {
       const out = await r.page.evaluate(async (s) => (await importShim("./dev/design-lint.js")).designLint(s), surface).catch((e) => ({ error: e.message.split("\n")[0] }));
-      console.log(`${name} (report-only): ${JSON.stringify(out)}`);
-      return [];
+      const blocking = DESIGN_LINT_BLOCKING.has(surface);
+      console.log(`${name}${blocking ? "" : " (report-only)"}: ${JSON.stringify(out)}`);
+      if (!blocking) return [];
+      if (out.error) return [`design-lint: ${out.error}`];
+      return [
+        ...out.popins.map((p) => `pop-in (DESIGN-LANGUAGE.md §6): ${p} appeared in a single frame`),
+        ...(out.mono.count ? [`monospace UI text (§4): ${out.mono.count} - ${JSON.stringify(out.mono.where)}`] : []),
+      ];
     };
-    return open(browser, `${ORIGIN}/index.html${query}`, name, viewport).then((r) => whenReady(r, () => probe(r)));
-  }));
+    runs.push(open(browser, `${ORIGIN}/index.html${query}`, name, viewport).then((r) => whenReady(r, () => probe(r))));
+  }
 }
 
 async function whenReady(r, check) {
@@ -10413,7 +10427,7 @@ try {
       })));
   // The design language's probe (dev/design-lint.js; docs/DESIGN-LANGUAGE.md §4 monospace, §6 pop-ins): REPORT-ONLY -
   // it prints what it found and never fails (returns no problems) until the manager turns it on.
-  if (process.env.SHELL_PAGES !== "0") runs.push(...designLintRuns(browser));
+  if (process.env.SHELL_PAGES !== "0") designLintRuns(browser, runs);
   // The pinned dock never fades (folded: the dock pages to the recent apps; the user, 2026-10-23).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "dock-no-fade", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(dockPinnedNoFade))));

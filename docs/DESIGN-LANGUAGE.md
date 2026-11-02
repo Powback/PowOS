@@ -10,9 +10,10 @@ shell is built is in [`shell/DESIGN.md`](../shell/DESIGN.md).
 Checks:
 
 - `shell/dev/lint-style.sh` fails the gate on raw colours, borders and shadows.
-- `shell/dev/lint-design.sh` fails the gate on monospace UI text, off-scale radii, literal easings and status
-  colours outside their tokens. It reports hard-coded blur, and the gate's `design-lint-*` runs report pop-ins and
-  monospace text on screen; those are report-only for now.
+- `shell/dev/lint-design.sh` fails the gate on monospace UI text, off-scale radii, literal easings, status
+  colours outside their tokens, and literal durations in home's and the launcher's motion. It reports hard-coded blur.
+- The gate's `design-lint-*` runs find pop-ins and monospace text on screen. They fail the gate for the launcher
+  (`design-lint-launcher-*`) and are report-only for the other surfaces until their design wave.
 - `shell/dev/gate.sh --shots DIR` renders every surface and measures text contrast (`report.json`).
 
 ## 1. Less is more

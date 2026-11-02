@@ -214,10 +214,20 @@ function settle(p: number, to: number) {
   }
 }
 
+/**
+ * When the drawer last opened without a finger (a tap, a launch, state), and what it showed before: what mounts with
+ * that open (home.tsx HomeLauncher's frame, clip and panel, mounted on the first open) comes in on --p's own transition
+ * from 0 (followOpenness) - it was drawn at --p 1 in its first frame, there in one frame (DESIGN-LANGUAGE.md §6;
+ * the design audit's launcher pop-in).
+ */
+let openedAt = -Infinity;
+let shownWas = 0;
 effect(() => {
   const drag = drawerDrag.value;
   if (drag != null) return follow(drag);
   const shown = drawer.value > 0 ? 1 : 0;
+  if (shown && !shownWas && !followers) openedAt = performance.now();
+  shownWas = shown;
   if (followers) {
     // The drag's end and the drawer's new state come as two writes (gesture.ts end, pull.tsx): settle once both are in.
     const p = followers[0] ? Number(followers[0].anim.currentTime ?? 0) / SPAN : shown;
@@ -280,12 +290,25 @@ export function applyTrack() {
   });
 }
 
+/**
+ * [el], mounted by an open without a finger (openedAt; no [drag], going [to] 1): styled at --p 0 first (read back, so
+ * the 1 that follows is a transition).
+ */
+function comeIn(el: HTMLElement | null, drag: number | null, to: number) {
+  if (!el?.isConnected || drag != null || to !== 1) return;
+  if (performance.now() - openedAt >= SETTLE_MS || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  el.style.setProperty("--p", "0");
+  void getComputedStyle(el).getPropertyValue("--p");
+}
+
 /** Elements that follow the openness, newly mounted: given its current value. */
 export function followOpenness(el: HTMLElement | null) {
   // peek: a ref callback runs inside its component's render tracking - a read here subscribed Home (and all under it:
   // the pages, their glass, every app cell, the pet) to drawerDrag, a re-render on every move of a drag.
   const drag = drawerDrag.peek();
-  el?.style.setProperty("--p", String(drag ?? (drawer.peek() > 0 ? 1 : 0)));
+  const to = drag ?? (drawer.peek() > 0 ? 1 : 0);
+  comeIn(el, drag, to);
+  el?.style.setProperty("--p", String(to));
   // Mounted while a finger drives the drawer (or before its settle): one of the followers too, or it stays at the --p
   // it mounted with - the launcher's dock, mounted by the render after pull.begin (pull.tsx: kind "apps" after PowOS
   // AI's pull, dockShown), sat at --p 0, invisible, the launcher open over it (the user, 2026-10-30: "the dock is still
