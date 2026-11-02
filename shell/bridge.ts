@@ -366,7 +366,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     },
     keyboard: {
       // Logged like hide: the pull-up panel's search never reached an IME request (2026-10-28).
-      show: () => (console.info("keyboard.show from", new Error().stack?.split("\n").slice(2, 4).join(" <- ")), call("keyboard.show")),
+      show: (mode) => (console.info("keyboard.show from", new Error().stack?.split("\n").slice(2, 4).join(" <- ")), mode ? call("keyboard.show", mode) : call("keyboard.show")),
       // Who took the keyboard down, in logcat (chromium console): desktop-mode search kept closing it (2026-10-28).
       hide: () => (console.info("keyboard.hide from", new Error().stack?.split("\n").slice(2, 5).join(" <- ")), call("keyboard.hide")),
     },

@@ -69,7 +69,7 @@ export function SessionScreen() {
         {s.task && <span class="session-task muted">{s.task}</span>}
         <TakeOver />
       </div>
-      <TerminalView id={id(s)} command={command(s)} focus={!!s.write} class="session-term" />
+      <TerminalView id={id(s)} command={command(s)} focus={!!s.write} scroll class="session-term" />
     </div>
   );
 }
@@ -99,8 +99,16 @@ type Opened = NonNullable<typeof sessionView.value>;
 
 const id = (s: Opened) => `at-work:${s.host ?? "local"}:${s.name}`;
 
-/** A read-only client until taken over; this host's tmux directly, another's over its link (lib/apps/powos-terms). */
+/**
+ * View-only, every host's session is `powos terms attach`'s view (lib/apps/powos-terms): no tmux client at all, the
+ * pane's text redrawn here - its history in this terminal's own scrollback, which a drag scrolls (TerminalView
+ * scroll), so nothing of the scroll ever reaches the session. This host's was a read-only client (`tmux attach -r`),
+ * which drops every mouse report: a drag scrolled nothing. Taken over: this host's tmux directly, another's over its
+ * link.
+ */
 const command = (s: Opened) =>
-  s.local || !s.host
-    ? `tmux attach ${s.write ? "" : "-r "}-t '${s.name}'`
-    : `powos terms attach '${s.host}' '${s.name}'${s.write ? " --write" : ""}`;
+  !s.write
+    ? `powos terms attach '${s.local || !s.host ? "local" : s.host}' '${s.name}'`
+    : s.local || !s.host
+      ? `tmux attach -t '${s.name}'`
+      : `powos terms attach '${s.host}' '${s.name}' --write`;

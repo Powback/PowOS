@@ -1103,7 +1103,8 @@ export interface Bridge {
     quiet(ms: number): Promise<void>;
   };
   keyboard: {
-    show(): Promise<void>;
+    /** "terminal": the field is a terminal's - the IME as Termux's (visible-password, no suggestions, keys at once). */
+    show(mode?: "terminal"): Promise<void>;
     hide(): Promise<void>;
   };
   /**

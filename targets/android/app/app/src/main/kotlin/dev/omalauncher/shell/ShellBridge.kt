@@ -648,7 +648,7 @@ class ShellBridge(
             // A gesture past its commit threshold (the page's ui/haptics.ts): the system's touch feedback, on this page's view.
             "haptics.tick" -> dev.omalauncher.ui.Haptics.tick(web)
             "haptics.confirm" -> dev.omalauncher.ui.Haptics.confirm(web)
-            "keyboard.show" -> keyboard(true)
+            "keyboard.show" -> keyboard(true, a.optString(0) == "terminal")
             "keyboard.hide" -> keyboard(false)
             "system.insets" -> lastInsets
             "system.display" -> display()
@@ -1537,8 +1537,10 @@ class ShellBridge(
         return File(data, "$name.json")
     }
 
-    private fun keyboard(show: Boolean) {
+    private fun keyboard(show: Boolean, terminal: Boolean = false) {
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        // A terminal's keys are Termux's (HomeWebView.terminalInput); any other field's, or none, the page's own.
+        (web as? HomeWebView)?.terminalInput = show && terminal
         // An overlay's page (the pull-up panel over apps/desktop, Quick Tools): its own window must be the IME target -
         // home's focus (homeTyping below) has nothing to do with it, and lifting home's non-focusable flag from here
         // let WM hand the focus to home under the panel (2026-10-28: no keyboard in the pull-up panel's search).
