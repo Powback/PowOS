@@ -51,7 +51,7 @@ sh_ "dumpsys device_state | grep -m1 mCommittedState" | tee -a "$OUT/log.txt" | 
 WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1)
 W=${WH% *}; H=${WH#* }; echo "on: ${W}x${H}"
 [ "${W:-0}" -gt 0 ] && [ "${H:-0}" -gt 0 ] || { echo "ENV: no screen size (wm size) - stopping before any input"; exit 5; }
-[ "$W" -gt 2000 ] || fail "display 0 is ${W}x${H}, not the unfolded inner screen"
+[ "${W:-0}" -gt 2000 ] || { echo "ENV: display 0 is ${W:-?}x${H:-?}, not the unfolded inner screen (folded, or wm size unreadable)"; exit 5; }
 kg() { sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\""; }
 if kg | grep -q true; then
   sh_ "wm dismiss-keyguard"; sleep 1.5

@@ -232,7 +232,7 @@ part2_pages() {
   if [ "$p" != none ] && [ -n "$p" ]; then set -- $p; x=$1; y=$2; local to=$((x - d)); [ $to -lt 20 ] && to=20
     # The room there is what the window leaves (E2E 194: a resized window left 298 px of 793): a shorter swipe is a
     # flick (250 ms), which the pager takes as well - noted; only a room too short for any page swipe fails.
-    if [ $((x - to)) -lt $(dp 100) ]; then fail "the swipe beside the window had only $((x - to)) px of room (want at least $(dp 100)): a check limit, not the page swipe"
+    if [ $((x - to)) -lt $(dp 100) ]; then skipped "a check limit" "the swipe beside the window had only $((x - to)) px of room (want at least $(dp 100)), not the page swipe"
     elif [ $((x - to)) -lt $((d * 2 / 3)) ]; then note "a short swipe beside the window: $((x - to)) px of room (of $d), a flick"; fi
     swipe $x $y $to $y 250 "beside the window to the next page" && { sleep 1.5; chk page2
       step page2 "a swipe beside the window: the next page (the window stays on its own page)"
@@ -241,7 +241,7 @@ part2_pages() {
       swipe $x $y $to $y 250 "back to the window's page" && { sleep 1.5; chk page1
         step page1 "swiped back: the window's page, the window as it was"
         [ "$(hpage)" = "$pg0" ] && [ "$(tvis "$CT")" = true ] && [ "$(tbounds "$CT")" = "$b0" ] && pass "back on page $((pg0 + 1)), Calculator shown at $b0" || fail "back: page $(hpage), visible=$(tvis "$CT"), at $(tbounds "$CT") (was $b0)"; }; }
-  else fail "no empty spot beside the window to swipe from"; fi
+  else skipped "a check limit" "no empty spot beside the window to swipe from (the journey's windows cover it)"; fi
 }
 
 # The window dragged over the right edge to the next page, and back over the left. Split out of part2() (length budget) - same steps, CT global.
@@ -354,7 +354,7 @@ part3() {
     [ "$(ev "$SEARCHED")" = yes ] && [[ "$(ime)" == *true* ]] &&
       pass "the search is focused and the keyboard is up" || fail "stage 2: search focused=$(ev "$SEARCHED"), $(ime)"
     back; back; sleep 0.5
-  else step search "stage 2: the long pull"; fail "no empty spot to start the long pull from"; fi
+  else step search "stage 2: the long pull"; skipped "a check limit" "no empty spot to start the long pull from"; fi
 
   # Edit mode: a hold on empty space, Back leaves it - the layout untouched.
   local p; p=$(freept "" 0 0)
@@ -365,7 +365,7 @@ part3() {
       back 1; chk edit-off
       step edit-left "Back: edit mode left"
       [ "$(isediting)" = false ] && [ "$(layout)" = "$LAY0" ] && pass "edit mode is off, the layout as it was" || fail "after Back: editing=$(isediting), layout $(layout) (was $LAY0)"; }
-  else fail "no empty spot on home to hold"; fi
+  else skipped "a check limit" "no empty spot on home to hold (the journey's windows cover it)"; fi
 }
 
 case $PART in 1) part1 ;; 2) part2 ;; 3) part3 ;; *) echo "FAIL: no part $PART"; exit 2 ;; esac

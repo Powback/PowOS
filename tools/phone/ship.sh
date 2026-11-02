@@ -180,7 +180,7 @@ run)
   # (verify/e2e-queue.sh: e2e-desktop parts 1-3 + e2e-appapi), unless one is still queued. In the background: queueing
   # is a few quick user.sh calls, never a reason to hold the ship loop. SHIP_E2E=0 turns it off (tests).
   e2e_round() { [ "${SHIP_E2E:-1}" = 1 ] && [ -z "${SHIP_DIR:-}" ] && [ -x "$here/verify/e2e-queue.sh" ] || return 0
-    ( "$here/verify/e2e-queue.sh" --if-idle >> "$Q/e2e.log" 2>&1 & ) ; echo "$(date +%T) e2e: a round of user journeys asked for ($Q/e2e.log)"; }
+    ( "$here/verify/e2e-queue.sh" --if-idle >> "$Q/e2e.log" 2>&1 || echo "$(date '+%F %T') e2e: round NOT queued (queue.sh refused) - $Q/e2e.log" >> "$Q/shipped.log" & ) ; echo "$(date +%T) e2e: a round of user journeys asked for ($Q/e2e.log)"; }
   mail() { local s t ev kind; s=$(mktemp "$Q/mail.XXXX")
     printf 'powos comms send %q %q --from ship-queue >/dev/null 2>&1 || true\n' "${SHIP_MAIL_TO:-coder}" "$1" > "$s"
     # A failed/refused ship is friction too (powos friction: counted, so a recurring refusal shows up as the top item).
