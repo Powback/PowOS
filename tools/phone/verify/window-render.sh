@@ -14,7 +14,14 @@
 #                                                  dark with the screen (10-31 889b6cb5, a4dcb83b), so nothing can be
 #                                                  judged; ship.sh window_gate keeps the ship's requests and retries.
 #                                                  Also when the Linux step fails while the user touched the phone (f384).
-#                                                  The check never wakes the screen.
+#                                                  Exception (11-02, the ship service deadlocked all night on a dozing
+#                                                  phone): when the USER hasn't touched it for WR_WAKE_IDLE_S (600) s
+#                                                  (idle.sh's touch IRQ idle, not the screen state) the check wakes the
+#                                                  screen as ship-guard.sh's boot check does (KEYCODE_WAKEUP + dismiss
+#                                                  the swipe lock), keeps it on with a wake key before each judged step,
+#                                                  and puts it back to sleep at the end - unless a real touch came in
+#                                                  meanwhile (then it's the user's: left on, no more wake keys). No
+#                                                  setting is changed. WR_WAKE_IDLE_S=0 turns the wake off.
 # What it does, touching nothing of the user's:
 #   1. waits (idle.sh --wait, AWAKE_ONLY) for the screen on and no touch for WR_IDLE_S (30) s, the keyguard down and the
 #      phone unfolded (web windows only exist there), up to WR_WAIT_S (900) s; else "SKIP: user active" (or folded),
@@ -121,7 +128,27 @@ hidden() {
   t0=$(date +%s)
   # hnj STEP: the phone isn't Awake - nothing on the hidden display can be judged (exit 2, cleaned up as a FAIL is).
   hnj() { log "$1: the phone is $WAKE - not judged"; hclean; log "window-render: NOT JUDGED (the phone is $WAKE) - $OUT"; exit 2; }
-  awake_or_nj() { asleep && hnj "$1"; return 0; }
+  # wake_if_idle: the phone asleep and the user idle >= WR_WAKE_IDLE_S (600) s -> wake it (WOKE=1, WI0 = the touch IRQ
+  # count then). A user touch < WR_WAKE_IDLE_S s ago, or no idle reading: never woken (the check stays NOT JUDGED).
+  WOKE= WI0=
+  wake_if_idle() {
+    local need=${WR_WAKE_IDLE_S:-600} i
+    [ "$need" -gt 0 ] 2>/dev/null && asleep || return 0
+    i=$("$T/idle.sh" 2>/dev/null | sed -n 's/^idle=\([0-9]*\) .*/\1/p')
+    if [ -z "$i" ] || [ "$i" -lt "$need" ]; then log "start: the phone is $WAKE, the user touched it ${i:-?} s ago (< $need s) - not woken"; return 0; fi
+    WI0=$(irq)
+    "$A" shell 'input keyevent KEYCODE_WAKEUP; sleep 1; wm dismiss-keyguard' </dev/null >/dev/null 2>&1
+    WOKE=1; sleep 1
+    log "start: woke the $WAKE screen for the check (the user idle $i s); it sleeps again after"
+  }
+  # keep_awake: the screen this check woke stays on (a wake key resets the screen timeout); a real touch since -> it's
+  # the user's phone again: no more keys, and it isn't put to sleep at the end.
+  keep_awake() {
+    [ -n "$WOKE" ] || return 0
+    [ "$(irq)" = "$WI0" ] || { WOKE=; log "the user touched the phone - it stays on, no more wake keys"; return 0; }
+    "$A" shell 'input keyevent KEYCODE_WAKEUP; wm dismiss-keyguard' </dev/null >/dev/null 2>&1
+  }
+  awake_or_nj() { keep_awake; asleep && hnj "$1"; return 0; }
   # A failed step on a phone that fell asleep is not a window fault (10-31 a4dcb83b: the tap "changed nothing", Dozing).
   hfail() { asleep && hnj "FAIL ($*) while asleep"; log "FAIL: $*"; hclean; log "window-render: FAIL (hidden: $*) - $OUT"; exit 1; }
   hclean() {
@@ -143,6 +170,9 @@ hidden() {
       for _ in 1 2 3 4; do left=$(tasks_on "$D"); [ -z "$left" ] && break; sleep 1; done
       if [ -z "$left" ]; then log "display $D released, no task left on it"; else log "WARNING: tasks still on display $D: $left"; fi
     fi
+    if [ -n "$WOKE" ] && [ "$(irq)" = "$WI0" ]; then
+      "$A" shell 'input keyevent KEYCODE_SLEEP' </dev/null >/dev/null 2>&1; log "the screen this check woke: back to sleep"
+    fi; WOKE=
   }
   # tasks_on DISPLAY: the task ids on a display; app_tasks: every task of $APP (any display).
   tasks_on() { sh_ "am stack list" | awk -v d="$1" '/^RootTask id=/{on=($0 ~ ("displayId=" d " "))} on && /^ *taskId=/{sub(/^ *taskId=/,"");sub(/:.*/,"");print}' | sort -u | paste -sd' ' -; }
@@ -200,6 +230,7 @@ except Exception: print('')"; }
   ( sleep $(( ${WR_TIMEOUT_S:-210} + HOLD )); pkill -P $$ 2>/dev/null; kill -TERM $$ 2>/dev/null ) & wd=$!
 
   "$A" get-state >/dev/null 2>&1 || hfail "no phone (adb get-state)"
+  wake_if_idle
   awake_or_nj "start"
   dpi=$(sh_ "wm density" | sed -n 's/^Override density: //p'); [ -n "$dpi" ] || dpi=$(sh_ "wm density" | sed -n 's/^Physical density: //p')
   apk=$(sh_ "pm path com.powos.app" | sed -n '1s/^package://p'); [ -n "$apk" ] || hfail "PowOS isn't installed (pm path com.powos.app)"
@@ -302,7 +333,7 @@ EOF
     h0=$(date +%s)
     while :; do
       sleep 5
-      asleep && { lc "hold display $D: phone $WAKE - not judged"; hnj "hold $(( $(date +%s) - h0 )) s"; }
+      keep_awake; asleep && { lc "hold display $D: phone $WAKE - not judged"; hnj "hold $(( $(date +%s) - h0 )) s"; }
       # Its task first: one moved off the display (a launch elsewhere took it) leaves it flat black - say THAT, not "flat".
       [ -n "$(tasks_on "$D")" ] || { lc "hold display $D: task gone"; hfail "during the hold $APP's task left display $D (now: $(sh_ "am stack list" | grep -m1 -B1 "taskId=${task%% *}:" | sed -n 's/.*\(displayId=[0-9]*\).*/\1/p' | head -1))"; }
       "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/hold.raw.gz" 2>/dev/null

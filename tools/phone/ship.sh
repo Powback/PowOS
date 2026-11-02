@@ -304,7 +304,7 @@ run)
   # DEVICE once it's live, synchronously: verify/window-render.sh --hidden starts the APK's own window host
   # (WebWindowsHost) on a display nobody sees, launches Calculator there, screencaps THAT display (app content, not a
   # flat fill) and taps it with `input -d` (the app redraws) - nothing on the user's screen, so it never waits for an
-  # idle phone and has no skip: exit 0 PASS, 2 NOT JUDGED (phone asleep: requests kept, retried ~60 s, window_wait), anything else (FAIL, timeout, no phone) is a FAIL. Why (2026-10-31): web
+  # idle phone and has no skip: exit 0 PASS, 2 NOT JUDGED (phone asleep and the user active in the last 10 min - the check wakes an idle phone itself: requests kept, retried ~60 s, window_wait), anything else (FAIL, timeout, no phone) is a FAIL. Why (2026-10-31): web
   # windows shipped as empty frames twice in one night with every headless gate green, and the old idle-waiting check
   # never ran once (the user is always active; manager rule G-1). Returns 1 on a FAIL: WINDOWS BROKEN ($Q/window-failed,
   # status, shipped.log, a mail) and the caller keeps the ship's requests and marks it failed, so nothing later ships as

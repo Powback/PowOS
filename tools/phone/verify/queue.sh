@@ -532,6 +532,18 @@ EOS
     [ $r -gt 0 ] || return 0
     sleep "${WAIT_PILL_S:-10}"
     while :; do phone_sh "umask 022; $(put "{\"done\":true,\"wait\":true,\"n\":$r,\"ttl\":200}")" >/dev/null; sleep 150 & wait $!; done; }
+  # select_jobs GO: this window's jobs in queue order -> sel[]; held = how many wait for their ship. A job waiting for
+  # its ship never blocks the ones behind it (11-02: the head job's "waits for its ship" held the queue while the ship
+  # service waited on a dozing phone): it's skipped here, every runnable job behind it runs, and it's looked at again
+  # next window. A "test now" of exactly its task runs it anyway. Sources each job: call it in a subshell or the window's.
+  select_jobs() { local go=$1 j; sel=(); held=0
+    for j in "$Q"/*.job; do
+      [ -f "$j" ] || continue
+      task=; need=; qt=0; . "$j"
+      [ -z "$go" ] || [ "$go" = all ] || [ "$task" = "$go" ] || continue
+      if [ "$task" != "$go" ] && ! shipped "$need" "$qt"; then held=$((held + 1)); echo "$(date +%T) $(basename "$j" .job): waits for its ship (${need:0:9}) - skipped, the jobs behind it run"; continue; fi
+      sel+=("$j")
+    done; }
   # The runner stays while anything is queued (a "test now" needs one waiting): a window that didn't come is waited for again.
   while ls "$Q"/*.job >/dev/null 2>&1; do
     verify_tree
@@ -543,23 +555,20 @@ EOS
       exec bash "$VR/tools/phone/verify/queue.sh" run
     fi
     # Paused: the wait returns for the go flag only (resume / test all / test now), never for a free window.
+    # Nothing runnable (every queued job waits for its ship): no window taken - the phone isn't woken or locked for
+    # nothing; only a "test now" (the go flag) is waited for, NEED_POLL_S (60) s, then the queue is looked at again.
+    nowin=; wmax=${WAIT_S:-7200}
     if [ -e "$Q/paused" ]; then export GO_ONLY=1 VERIFY_STATE=paused; echo "$(date +%T) paused - waiting for resume on the phone"
+    elif ! ( select_jobs "" >/dev/null; [ ${#sel[@]} -gt 0 ] ); then export GO_ONLY=1 VERIFY_STATE=waiting; nowin=1; wmax=${NEED_POLL_S:-60}
     else unset GO_ONLY; export VERIFY_STATE=waiting; fi
+    w0=$(date +%s)
     wpp=; [ -n "${GO_ONLY:-}" ] || { wait_pill & wpp=$!; }
     ( export VERIFY_GO=1 WL_PHONE=$phone
-      window_lock verify-queue "${QUEUE_IDLE_S:-120}" "${WAIT_S:-7200}" >/dev/null || exit 3
+      window_lock verify-queue "${QUEUE_IDLE_S:-120}" "$wmax" >/dev/null || exit 3
       [ -n "$wpp" ] && endjob "$wpp"
       rm -f "$Q/paused"; RSTATE=running   # a go ends a pause
       go=; case "${WL_GOT:-}" in go=*) go=${WL_GOT#go=}; go=${go%% *} ;; esac
-      sel=(); held=0
-      for j in "$Q"/*.job; do
-        [ -f "$j" ] || continue
-        task=; need=; qt=0; . "$j"
-        [ -z "$go" ] || [ "$go" = all ] || [ "$task" = "$go" ] || continue
-        # Not on the phone yet: it waits for its ship (a "test now" of exactly this task runs it anyway).
-        if [ "$task" != "$go" ] && ! shipped "$need" "$qt"; then held=$((held + 1)); echo "$(date +%T) $(basename "$j" .job): waits for its ship (${need:0:9})"; continue; fi
-        sel+=("$j")
-      done
+      select_jobs "$go"
       N=${#sel[@]}; k=0; pass=0; fail=0; first=; prev=; results=
       [ $N -gt 0 ] || { status "" '{"done":true}' "rm -f /tmp/powos-verify-go"; [ $held = 0 ] && exit 5; exit 7; }
       # f317: what a "test all" costs, before it starts: the count and the summed budgets (an upper bound).
@@ -737,7 +746,10 @@ EOS
       sum="Phone checks: $pass passed"; [ $fail = 0 ] || sum="$sum, $fail failed ($first$([ $fail -gt 1 ] && echo ", ..."))"
       status "" "{\"done\":true,\"summary\":$(jstr "$sum")}" ) & wait $!
     rc=$?; [ -n "$wpp" ] && endjob "$wpp"   # the wait ended without a window (exit 3/6): its pill writes end before pause's
-    [ $rc = 3 ] && echo "$(date +%T) no free window in ${WAIT_S:-7200}s - waiting again"
+    if [ -n "$nowin" ] && [ $rc = 3 ]; then
+      echo "$(date +%T) every queued check waits for its ship - no window taken, looking again in ${NEED_POLL_S:-60} s"
+      w0=$(( ${NEED_POLL_S:-60} - ($(date +%s) - w0) )); [ $w0 -gt 0 ] && sleep $w0   # a wait that returned at once (no phone)
+    elif [ $rc = 3 ]; then echo "$(date +%T) no free window in ${WAIT_S:-7200}s - waiting again"; fi
     [ $rc = 6 ] && { echo "$(date +%T) stopped from the phone - paused"; pause "Phone checks paused"; }
     [ $rc = 7 ] && sleep "${NEED_POLL_S:-60}"
     # Yielded to an APK install: don't take the phone back until it's done (its wants-phone mark goes), 15 min at most.
