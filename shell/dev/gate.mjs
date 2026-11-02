@@ -11357,6 +11357,15 @@ try {
   // The folded AI page is a status page, not a chat (the user, 2026-10-31: "I don't wanna see the chat").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-status", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiStatusCheck(r.page))));
+  // Perf P1 (dev/ai-hero-check.js; trace perf-1793551432355): a streaming reply redraws the status hero only for its
+  // busy word, and the ring's board scan runs once per board change.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-hero-renders", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
+      if (!(await r.page.evaluate(aiStatusSetup, [FLEET_SETUP]))) return ["ai-hero-renders: the status page shows no Working now rows for the mock fleet"];
+      const o = await r.page.evaluate(async () => (await importShim("./dev/ai-hero-check.js")).aiHeroRenders());
+      console.log(`ai-hero-renders: hero renders ${JSON.stringify(o.counts)}`);
+      return o.fails;
+    })));
   // Try cards show before | after, the after an emulator shot of the fix (the user, 2026-11-01).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "try-pair", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiTryPairCheck(r.page))));

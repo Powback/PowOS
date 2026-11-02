@@ -6,6 +6,7 @@
  * Above the areas, the Needs you card (needsyou.tsx): what really waits on the user, each answered in place.
  */
 import { useState } from "preact/hooks";
+import { computed } from "@preact/signals";
 import { boardState } from "../agents.ts";
 import { board, boardSeen, checks, SevChip, WorkFeed, type WorkRow } from "./aiboard.tsx";
 import { needIds, needsYou, NeedsYouCard } from "./needsyou.tsx";
@@ -70,6 +71,14 @@ export function driverPct(stats: AreaStat[], rows: WorkRow[] = board.value): { p
   const total = stats.reduce((n, a) => n + a.total, 0);
   return total ? { pct: Math.round((100 * stats.reduce((n, a) => n + a.done, 0)) / total), label: "Done this month" } : null;
 }
+
+/**
+ * The status hero's ring figure, worked out once per change of the board, its checks or the user's answers - never per
+ * render. Perf trace perf-1793551432355 (11-01 17:43): the hero re-scanned the whole board twice on each render (needsYou,
+ * then areaStats), one 4.7 ms commit on the phone, more than half a 120 Hz frame. The month window's edge is read when
+ * the board changes, which it does many times an hour: a row ageing out of it between two changes waits for the next.
+ */
+export const heroRing = computed(() => driverPct(areaStats(board.value, Date.now(), needIds(needsYou()))));
 
 /** A large progress ring with its percentage in the middle. */
 export function ProgressRing({ pct, label, sub }: { pct: number; label: string; sub?: string }) {

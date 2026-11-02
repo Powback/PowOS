@@ -21,7 +21,7 @@ import { fleet, isPowOS, otherProjects, projectOf, workingNow, type Worker } fro
 import { aiScreen, chat, openPanel, page } from "../state.ts";
 import { board, boardSeen, checks, list, noteOf, WorkFeed, type WorkRow } from "./aiboard.tsx";
 import { upNext, UpNext } from "./upnext.tsx";
-import { areaStats, dotOf, driverPct, type AreaStat } from "./aiprogress.tsx";
+import { areaStats, dotOf, heroRing, type AreaStat } from "./aiprogress.tsx";
 import { NeedStack } from "./aistack.tsx";
 import type { MicTarget } from "./dictation.ts";
 import { BrokenReply, clearBroken, type Broken } from "./brokenreply.tsx";
@@ -434,19 +434,22 @@ function Foot({ compose }: { compose: preact.ComponentChildren }) {
   );
 }
 
+/** The manager is working: only this flips the hero's word, so a reply streaming in (each chunk a new chat) leaves the hero be. */
+const managerBusy = computed(() => chat.value.busy);
+
 /** The hero's title, short enough never to be cut: "Daily driver 50%", or "66% this month" (the month's share done). */
 const heroTitle = (r: { pct: number; label: string }) => (/this month/i.test(r.label) ? `${r.pct}% this month` : `${r.label} ${r.pct}%`);
 
 /** The hero: the daily driver's ring and two lines - its name and share, then what's going on. [onTap]: folded, the strip's tap. */
 function Hero({ needs, working, more, onTap }: { needs: number; working: number; more: preact.ComponentChildren; onTap?: () => void }) {
-  const ring = driverPct(areaStats(board.value, Date.now(), needIds(needsYou())));
+  const ring = heroRing.value;
   const tap = onTap && ((e: MouseEvent) => !(e.target as Element).closest(".ai-more") && onTap());
   return (
     <header class={`ais-top ${onTap ? "ais-strip" : ""}`} onClick={tap}>
       {ring && <HeroRing pct={ring.pct} label={ring.label} />}
       <span class="ais-status">
         <span class="ais-title">{ring ? heroTitle(ring) : "PowOS AI"}</span>
-        <span class="ais-line">{statusLine(working, needs, chat.value.busy)}</span>
+        <span class="ais-line">{statusLine(working, needs, managerBusy.value)}</span>
       </span>
       {more}
     </header>
