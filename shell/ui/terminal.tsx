@@ -140,6 +140,12 @@ class Session {
   private queue: { exit: boolean; e: any }[] | null = null;
   private opening = false;
   private shown: View | null = null;
+  /**
+   * The scrollback line a drag left the view at (null: at the bottom, following the output). Held through output: a
+   * view-only session's frames (powos terms attach) clear and redraw the scrollback about once a second, which put the
+   * view back at the bottom under the finger.
+   */
+  held: number | null = null;
 
   constructor(
     readonly id: string,
@@ -175,6 +181,8 @@ class Session {
   }
 
   private sendBytes(bytes: Uint8Array) {
+    // Typing goes to the bottom (xterm scrolls there on input), and stays there with the output.
+    this.held = null;
     if (this.status.value === "running" && bytes.length) powos.term.write(this.id, b64(bytes));
   }
 
@@ -215,7 +223,10 @@ class Session {
   private output(bytes: Uint8Array, end: number) {
     if (end <= this.seen) return;
     const start = end - bytes.length;
-    this.term.write(start < this.seen ? bytes.subarray(this.seen - start) : bytes);
+    this.term.write(start < this.seen ? bytes.subarray(this.seen - start) : bytes, () => {
+      const b = this.term.buffer.active;
+      if (this.held != null && b.viewportY !== Math.min(this.held, b.baseY)) this.term.scrollToLine(Math.min(this.held, b.baseY));
+    });
     this.seen = end;
   }
 
@@ -328,7 +339,7 @@ function focus(view: View) {
   document.documentElement.classList.add("term-focus");
   mountExtraKeys();
   s.term.focus();
-  powos.keyboard.show();
+  powos.keyboard.show("terminal");
   requestAnimationFrame(lift);
 }
 
@@ -592,7 +603,12 @@ function cellHeight(s: Session) {
  */
 function scrollRows(s: Session, rows: number, x: number, y: number) {
   const t = s.term;
-  if (t.modes.mouseTrackingMode === "none" && t.buffer.active.type === "normal") return t.scrollLines(-rows);
+  if (t.modes.mouseTrackingMode === "none" && t.buffer.active.type === "normal") {
+    t.scrollLines(-rows);
+    const b = t.buffer.active;
+    s.held = b.viewportY < b.baseY ? b.viewportY : null;
+    return;
+  }
   const target = t.element?.querySelector(".xterm-screen");
   for (let i = 0; i < Math.abs(rows); i++)
     target?.dispatchEvent(new WheelEvent("wheel", { deltaY: rows > 0 ? -1 : 1, deltaMode: WheelEvent.DOM_DELTA_LINE, clientX: x, clientY: y, bubbles: true, cancelable: true }));
@@ -653,11 +669,16 @@ export interface TerminalProps {
   textSize?: number | null;
   /** Focused as soon as its shell is up (a screen opened to type in). */
   focus?: boolean;
+  /**
+   * A drag scrolls it while it isn't focused too (a view-only session: its history is the scrollback, session.tsx), as
+   * a focused one's; a tap still focuses it. Off for a home tile, whose drags are home's swipes.
+   */
+  scroll?: boolean;
   class?: string;
   style?: Record<string, string | number | undefined>;
 }
 
-export function TerminalView({ id, owner = null, command = null, interactive = true, fontSize = null, textSize = null, focus: autoFocus = false, class: cls, style }: TerminalProps) {
+export function TerminalView({ id, owner = null, command = null, interactive = true, fontSize = null, textSize = null, focus: autoFocus = false, scroll = false, class: cls, style }: TerminalProps) {
   const el = useRef<HTMLDivElement>(null);
   const screen = useRef<HTMLDivElement>(null);
   const view = useRef<View | null>(null);
@@ -706,34 +727,43 @@ export function TerminalView({ id, owner = null, command = null, interactive = t
   // TerminalView.onScroll/doScroll): a row per row the finger moved, then a fling on release ([scrollRows], [fling]).
   // A tap is a click (the browser's mouse events, which xterm reports to tmux).
   const drag = useRef<Drag | null>(null);
+  const dragStart = (e: PointerEvent) => {
+    stopFling(session);
+    drag.current = { y: e.clientY, y0: e.clientY, id: e.pointerId, rest: 0, moves: [{ y: e.clientY, t: e.timeStamp }] };
+  };
+  const dragMove = (e: PointerEvent) => {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId || e.pointerType === "mouse") return;
+    d.rest += e.clientY - d.y;
+    d.y = e.clientY;
+    d.moves.push({ y: e.clientY, t: e.timeStamp });
+    if (d.moves.length > VELOCITY_SAMPLES) d.moves.shift();
+    const cell = cellHeight(session);
+    const rows = Math.trunc(d.rest / cell);
+    if (rows) {
+      d.rest -= rows * cell;
+      scrollRows(session, rows, e.clientX, e.clientY);
+    }
+  };
+  /** The finger up: a fling if it moved; the drag it was, if any. */
+  const dragEnd = (e: PointerEvent) => {
+    const d = drag.current;
+    drag.current = null;
+    if (d && d.id === e.pointerId && e.pointerType !== "mouse") fling(session, d, e.clientX, e.timeStamp);
+    return d;
+  };
   const focusedHandlers = {
     onPointerDown: (e: PointerEvent) => {
       e.stopPropagation();
-      stopFling(session);
-      drag.current = { y: e.clientY, y0: e.clientY, id: e.pointerId, rest: 0, moves: [{ y: e.clientY, t: e.timeStamp }] };
+      dragStart(e);
     },
-    onPointerMove: (e: PointerEvent) => {
-      const d = drag.current;
-      if (!d || d.id !== e.pointerId || e.pointerType === "mouse") return;
-      d.rest += e.clientY - d.y;
-      d.y = e.clientY;
-      d.moves.push({ y: e.clientY, t: e.timeStamp });
-      if (d.moves.length > VELOCITY_SAMPLES) d.moves.shift();
-      const cell = cellHeight(session);
-      const rows = Math.trunc(d.rest / cell);
-      if (rows) {
-        d.rest -= rows * cell;
-        scrollRows(session, rows, e.clientX, e.clientY);
-      }
-    },
+    onPointerMove: dragMove,
     onPointerUp: (e: PointerEvent) => {
-      const d = drag.current;
-      drag.current = null;
-      if (d && d.id === e.pointerId && e.pointerType !== "mouse") fling(session, d, e.clientX, e.timeStamp);
+      const d = dragEnd(e);
       // A tap with the keyboard down (Back put it away in a screen) brings it back, as Termux's view does.
       if (d && Math.abs(e.clientY - d.y0) < SLOP && !extraKeysState.peek().keyboard) {
         session.term.focus();
-        powos.keyboard.show();
+        powos.keyboard.show("terminal");
       }
     },
     onPointerCancel: () => {
@@ -758,6 +788,26 @@ export function TerminalView({ id, owner = null, command = null, interactive = t
       then();
     },
   });
+  // [scroll]: the cover's drags scroll it as a focused view's do (a view-only session's history, its scrollback).
+  const scrolls = (h: { onPointerDown?: (e: PointerEvent) => void; onPointerUp?: (e: PointerEvent) => void }) =>
+    !scroll
+      ? h
+      : {
+          onPointerDown: (e: PointerEvent) => {
+            e.preventDefault();
+            h.onPointerDown?.(e);
+            dragStart(e);
+          },
+          onPointerMove: dragMove,
+          onPointerUp: (e: PointerEvent) => {
+            dragEnd(e);
+            h.onPointerUp?.(e);
+          },
+          onPointerCancel: () => {
+            drag.current = null;
+            stopFling(session);
+          },
+        };
 
   return (
     <div
@@ -777,7 +827,7 @@ export function TerminalView({ id, owner = null, command = null, interactive = t
       ) : status === "starting" ? (
         <div class="term-cover term-note">starting…</div>
       ) : (
-        !isFocused && <div class="term-cover" {...(interactive ? onTap(() => view.current && focus(view.current)) : {})} />
+        !isFocused && <div class="term-cover" {...scrolls(interactive ? onTap(() => view.current && focus(view.current)) : {})} />
       )}
     </div>
   );

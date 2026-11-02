@@ -535,6 +535,83 @@ async function termScrollCheck() {
   return fails;
 }
 
+/**
+ * In the page: a view-only session scrolls (the coordinator's 11-02 step for "still not at PowTerm quality": `tmux -r`
+ * drops mouse input, so a drag on a view-only session scrolled nothing). Its command is `powos terms attach`'s view on
+ * every host (no tmux client); a drag of 4 rows moves its scrollback 4 rows with nothing written to the session; the
+ * next frame (cleared and redrawn, as powos terms' view does once a second) leaves the view where the drag left it;
+ * taking it over shows the keyboard as a terminal's (Termux's visible-password field: keyboard.show("terminal")).
+ */
+async function termViewScrollCheck() {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const T = await G.mod("./ui/terminal.tsx");
+  const { powos } = await G.mod("./bridge.ts");
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const fails = [];
+  const opened = [];
+  const open = powos.term.open;
+  powos.term.open = (i, o, cmd, ...rest) => (opened.push(cmd), open(i, o, cmd, ...rest));
+  S.openSession("powos-scratch-view", null, undefined, { local: true });
+  const id = "at-work:local:powos-scratch-view";
+  await G.until(() => T.terminalFor(id) && document.querySelector(".session-term .xterm-screen"), 4000);
+  await wait(500);
+  if (!opened.some((c) => /^powos terms attach 'local' 'powos-scratch-view'$/.test(c ?? ""))) fails.push(`this host's view-only session ran ${JSON.stringify(opened)} (a read-only tmux client drops the drag's mouse reports)`);
+  const term = T.terminalFor(id);
+  const st = await open(id, null, null, term.cols, term.rows, false);
+  let end = st.end;
+  const sent = [];
+  const write = powos.term.write;
+  powos.term.write = (i, data) => (i === id && sent.push(atob(data)), write(i, data));
+  const frame = async () => {
+    const text = "\x1b[?25l\x1b[H\x1b[2J\x1b[3J" + Array.from({ length: term.rows * 3 }, (_, i) => `view line ${i + 1}`).join("\r\n");
+    const bytes = new TextEncoder().encode(text);
+    end += bytes.length;
+    window.__mockEvents.emit("term.data", { id, run: st.run, data: btoa(String.fromCharCode(...bytes)), end });
+    await wait(200);
+  };
+  await frame();
+  const el = document.querySelector(".session-term");
+  const cover = el.querySelector(".term-cover");
+  if (!cover) fails.push("no view-only cover (the session opened focused?)");
+  const cell = el.querySelector(".xterm-screen").offsetHeight / term.rows;
+  const { left, width, top, height } = el.getBoundingClientRect();
+  const [x, y0] = [left + width / 2, top + height / 3];
+  const ev = (type, y) => (cover ?? el).dispatchEvent(new PointerEvent(type, { pointerId: 9, pointerType: "touch", clientX: x, clientY: y, bubbles: true, cancelable: true }));
+  const base = term.buffer.active.viewportY;
+  ev("pointerdown", y0);
+  for (let n = 2; n <= 4; n += 2) ev("pointermove", y0 + n * cell + 1);
+  await wait(250);
+  ev("pointerup", y0 + 4 * cell + 1);
+  await wait(400);
+  const moved = base - term.buffer.active.viewportY;
+  if (moved !== 4) fails.push(`a drag of 4 rows on a view-only session moved its scrollback ${moved} rows`);
+  if (sent.length) fails.push(`the drag wrote ${JSON.stringify(sent.join(""))} to the session (a view-only one gets nothing)`);
+  const held = term.buffer.active.viewportY;
+  await frame();
+  if (term.buffer.active.viewportY !== held) fails.push(`the next frame moved the view from line ${held} to ${term.buffer.active.viewportY} (it holds where the drag left it)`);
+  [powos.term.write, powos.term.open] = [write, open];
+  return fails;
+}
+
+/** In the page, after termViewScrollCheck: taking the session over shows the keyboard as a terminal's ("terminal"). */
+async function termTakeOverKeysCheck() {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const { powos } = await G.mod("./bridge.ts");
+  const fails = [];
+  const shows = [];
+  const show = powos.keyboard.show;
+  powos.keyboard.show = (...a) => (shows.push(a[0] ?? null), show(...a));
+  S.takeOver();
+  await G.until(() => document.querySelector(".session-term.focused"), 4000).catch(() => {});
+  await new Promise((r) => setTimeout(r, 200));
+  if (!shows.includes("terminal")) fails.push(`taking over showed the keyboard as ${JSON.stringify(shows)} ("terminal": Termux's field)`);
+  powos.keyboard.show = show;
+  S.closeSession();
+  return fails;
+}
+
 /** In the page: merged widgets M1-M2 (grid.tsx joins; the user's 2026-10-28 "the widget combiner looks ugly af if the
  * widgets arent the same width"). An equal-width stack (agents 6x3 over recents 6x3) merges: both .joined, one width,
  * the faces meet on the row line (one seamless surface, no gutter or seam strip between). An unequal stack (agents 6x3
@@ -11208,6 +11285,18 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `term-session-${label}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(termSessionCheck))));
+  // A view-only session scrolls its history (powos terms' view in the scrollback; nothing reaches the session), held
+  // through the next frame; taken over, the IME is a terminal's (keyboard.show("terminal")).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(
+      open(browser, `${ORIGIN}/index.html`, "term-view-scroll", { width: 404, height: 900 }).then((r) =>
+        whenReady(r, async () => {
+          const fails = await r.page.evaluate(termViewScrollCheck);
+          await r.page.screenshot({ path: "/cache/term-view-scroll.png" }).catch(() => {});
+          return [...fails, ...(await r.page.evaluate(termTakeOverKeysCheck))];
+        }),
+      ),
+    );
   // A taken-over session scrolls as PowTerm's: a row per row dragged, a fling after (ui/terminal.tsx scrollRows/fling).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(

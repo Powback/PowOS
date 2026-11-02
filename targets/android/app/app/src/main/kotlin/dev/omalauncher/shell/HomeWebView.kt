@@ -2,7 +2,12 @@ package dev.omalauncher.shell
 
 import android.content.Context
 import android.view.MotionEvent
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputMethodManager
 import android.webkit.WebView
+import dev.omalauncher.ui.cjkKeyboard
+import dev.omalauncher.ui.terminalEditorInfo
 import dev.omalauncher.system.PageSlide
 
 /**
@@ -41,6 +46,27 @@ class HomeWebView(context: Context) : WebView(context) {
             return true
         }
         return super.dispatchTouchEvent(event)
+    }
+
+    /**
+     * A terminal (shell/ui/terminal.tsx) has the keys: the IME is told the field is Termux's (visible-password, no
+     * suggestions: [terminalEditorInfo]), not the textarea Chromium describes - which Gboard autocorrects, suggests for
+     * and holds each word of until it's done. Set by keyboard.show("terminal"); any other show or a hide clears it.
+     */
+    var terminalInput = false
+        set(value) {
+            if (field == value) return
+            field = value
+            context.getSystemService(InputMethodManager::class.java)?.restartInput(this)
+        }
+
+    override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
+        val connection = super.onCreateInputConnection(outAttrs)
+        if (terminalInput && connection != null) {
+            val imm = context.getSystemService(InputMethodManager::class.java)
+            terminalEditorInfo(outAttrs, imm != null && cjkKeyboard(imm))
+        }
+        return connection
     }
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {

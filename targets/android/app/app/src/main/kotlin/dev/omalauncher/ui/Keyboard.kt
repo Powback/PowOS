@@ -183,16 +183,7 @@ class KeyboardSink(
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
         cjk = cjkKeyboard()
-        // Like Termux: no suggestions or autocorrect, raw keys where the IME allows. Gboard
-        // drops pinyin and the like in such a field, so those get plain text, autocorrect and all.
-        outAttrs.inputType =
-            if (cjk) {
-                InputType.TYPE_CLASS_TEXT
-            } else {
-                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or
-                    InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            }
-        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+        terminalEditorInfo(outAttrs, cjk)
         return object : BaseInputConnection(this, false) {
             /**
              * Text the IME is still composing, like pinyin before a candidate is picked. A window
@@ -245,13 +236,7 @@ class KeyboardSink(
 
     private fun imm() = context.getSystemService(InputMethodManager::class.java)
 
-    /** Whether the keyboard is set to Chinese, Japanese or Korean. */
-    private fun cjkKeyboard(): Boolean {
-        val subtype = imm().currentInputMethodSubtype ?: return false
-        @Suppress("DEPRECATION")
-        val language = subtype.languageTag.ifEmpty { subtype.locale }.substringBefore('-').substringBefore('_')
-        return language in cjkLanguages
-    }
+    private fun cjkKeyboard() = cjkKeyboard(imm())
 
     fun toggle() = if (softKeyboard) hide() else show()
 
@@ -274,5 +259,29 @@ class KeyboardSink(
 }
 
 private val cjkLanguages = setOf("zh", "ja", "ko")
+
+/** Whether the keyboard is set to Chinese, Japanese or Korean. */
+fun cjkKeyboard(imm: InputMethodManager): Boolean {
+    val subtype = imm.currentInputMethodSubtype ?: return false
+    @Suppress("DEPRECATION")
+    val language = subtype.languageTag.ifEmpty { subtype.locale }.substringBefore('-').substringBefore('_')
+    return language in cjkLanguages
+}
+
+/**
+ * A terminal's field, as Termux's TerminalView (PowTerm's): visible-password with no suggestions, so the IME sends each
+ * key at once - no autocorrect, no suggestion strip, no word held back while it's composed. Gboard drops pinyin and the
+ * like in such a field, so a [cjk] keyboard gets plain text, autocorrect and all. Never fullscreen, never extracted.
+ */
+fun terminalEditorInfo(outAttrs: EditorInfo, cjk: Boolean) {
+    outAttrs.inputType =
+        if (cjk) {
+            InputType.TYPE_CLASS_TEXT
+        } else {
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or
+                InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        }
+    outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+}
 
 private val volumeKeys = setOf(KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_VOLUME_MUTE)
