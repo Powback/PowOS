@@ -104,3 +104,5 @@ PY
     [ -z "$k" ] || $E/node_modules/.bin/esbuild $k --bundle --format=esm --target=es2022 --minify --alias:@powos/shared=/shared --outdir=/app/out/ui/workers --log-level=warning
     chown -R $HOST_UID /app/out/ui; ls -la /app/out/ui/widgets /app/out/ui/pages 2>/dev/null || true'
 fi
+# The build's time, for apps/install.sh --no-build (a source newer than this refuses the install).
+touch "$D/out/.built"

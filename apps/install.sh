@@ -1,5 +1,5 @@
 #!/bin/bash
-# Installs a built PowOS app (apps/build.sh) on the phone: the app's manifest and build output pushed into PowOS, then
+# Builds (apps/build.sh, its caches reused) and installs a PowOS app on the phone: the app's manifest and build output pushed into PowOS, then
 # `powos app install` there as the user powos (module published to the device's SpacetimeDB, UI in place, registry).
 #   apps/install.sh <app|dir> [install|publish|ui] --note "what changed, for the user" [--direct]
 #                                    publish = only the module (hot swap); ui = only the UI (hot reload). The note is
@@ -7,11 +7,14 @@
 # Runs adb from wherever adb reaches the phone: ADB="docker exec powos-vadb adb" (the VPN), or plain adb.
 # The UI goes through the shell's gate first (shell/dev/gate.sh --app): each page/widget entry of out/ui imported in a
 # headless Chromium as the shell imports it - one that doesn't load refuses the install. --force installs anyway.
+# The app is built first (friction f413, 11-02: the Lights perf fix installed the 11-01 out/ until apps/build.sh was run
+# by hand). --no-build skips that (the ship service, which just built it) and instead REFUSES when any source (ui/, src/,
+# module/, powos-app.json) is newer than the last build (out/.built, which apps/build.sh writes), naming the newest file.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-NOTE="" ARGS=() FORCE="" DIRECT=""
+NOTE="" ARGS=() FORCE="" DIRECT="" NOBUILD=""
 while [ $# -gt 0 ]; do
-  case "$1" in --force) FORCE=1; shift ;; --direct) DIRECT=1; shift ;; --note) NOTE=${2:-}; shift 2 || shift ;; --note=*) NOTE=${1#--note=}; shift ;; *) ARGS+=("$1"); shift ;; esac
+  case "$1" in --force) FORCE=1; shift ;; --direct) DIRECT=1; shift ;; --no-build) NOBUILD=1; shift ;; --note) NOTE=${2:-}; shift 2 || shift ;; --note=*) NOTE=${1#--note=}; shift ;; *) ARGS+=("$1"); shift ;; esac
 done
 set -- ${ARGS[@]+"${ARGS[@]}"}
 APP=${1:?usage: apps/install.sh <app> [install|publish|ui] --note "what changed, for the user"}
@@ -43,6 +46,34 @@ if [ "$VERB" != ui ] && [ -f "$D/module/Cargo.toml" ] && [ -z "${POWOS_SHIP_SERV
     echo "install.sh: WARNING - publishing apps/$APPNAME's module from $(basename "$(git -C "$HERE" rev-parse --show-toplevel 2>/dev/null || echo "$HERE")"), outside the ship service." >&2
     echo "  A schema change here can break anything reading this database; the ship service publishes origin's tip (tools/phone/ship.sh request)." >&2
   fi
+fi
+# Build it (default), or with --no-build make sure out/ is not older than the source.
+if [ -z "$NOBUILD" ]; then
+  "$HERE/build.sh" "$D" || { echo "install.sh: refused - apps/build.sh $APP failed (above)" >&2; exit 1; }
+else
+  STALE=$(python3 - "$D" <<'PY'
+import os, sys
+d = sys.argv[1]; out = os.path.join(d, "out")
+stamp = os.path.join(out, ".built")
+if os.path.exists(stamp): built = os.path.getmtime(stamp)
+else:
+    ts = [os.path.getmtime(os.path.join(r, f)) for r, _, fs in os.walk(out) for f in fs]
+    built = max(ts) if ts else 0
+newest = None
+def see(p):
+    global newest
+    m = os.path.getmtime(p)
+    if m > built and (newest is None or m > newest[0]): newest = (m, p)
+for sub, skip in (("ui", {"bindings"}), ("src", set()), ("module", {"target"})):
+    top = os.path.join(d, sub)
+    for r, ds, fs in os.walk(top):
+        if r == top: ds[:] = [x for x in ds if x not in skip]
+        for f in fs: see(os.path.join(r, f))
+if os.path.exists(os.path.join(d, "powos-app.json")): see(os.path.join(d, "powos-app.json"))
+if newest: print(os.path.relpath(newest[1], d))
+PY
+)
+  [ -z "$STALE" ] || { echo "install.sh: refused (--no-build) - $STALE is newer than the build in out/: run apps/build.sh $APP, or drop --no-build" >&2; exit 1; }
 fi
 # Built: the module (an app that has one) and the UI.
 [ -f "$D/powos-app.json" ] && { [ -f "$D/out/module.wasm" ] || [ ! -f "$D/module/Cargo.toml" ]; } && [ -d "$D/out" ] ||
