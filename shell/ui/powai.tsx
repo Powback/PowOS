@@ -27,6 +27,7 @@ import { fleet, workingNow } from "../fleet.ts";
 import { untried } from "./trycard.tsx";
 import { AiSegs, FleetPane, useAgentsInPane } from "./aipanes.tsx";
 import { AiStatus, noteAsked, openChat, OtherProjectsItem } from "./aistatus.tsx";
+import { usePresence } from "./reveal.tsx";
 
 // The board's state, for what reads it from here (perfrec, the gate, the renders): it lives in aiboard.tsx now.
 export { board, boardSeen, checks, type WorkRow } from "./aiboard.tsx";
@@ -180,9 +181,9 @@ function stateOf() {
 }
 
 /** The ⋯ menu's list: a tap opens that screen. [tabs]: over the bottom tabs - only what no tab offers (the user, 11-01 17:56: "this is like a duplicate"). */
-function Menu({ close, tabs = false, children }: { close: () => void; tabs?: boolean; children?: preact.ComponentChildren }) {
+function Menu({ close, tabs = false, leaving = false, children }: { close: () => void; tabs?: boolean; leaving?: boolean; children?: preact.ComponentChildren }) {
   return (
-    <div class="ai-menu tile" role="menu">
+    <div class={`ai-menu tile ${leaving ? "leaving" : ""}`} role="menu" inert={leaving || undefined}>
       {SCREENS.filter(([s]) => !tabs || !TABBED.has(s)).map(([s, name]) => (
         <button key={s} type="button" role="menuitem" class="ai-menu-item" onClick={() => ((aiScreen.value = s), close())}>
           {name}
@@ -243,6 +244,8 @@ function Strip({ shown }: { shown: boolean }) {
 /** Its header: the chat's name and what the manager is doing and ⋯, or - on a menu's screen - back and that screen's name. */
 function AiHeader({ sub, shown = false, strip = true, title = true }: { sub: AiScreen | null; shown?: boolean; strip?: boolean; title?: boolean }) {
   const [menu, setMenu] = useState(false);
+  // Opens and closes on the spring (reveal.tsx; §6: the ⋯ menu popped in and out).
+  const pop = usePresence(menu);
   if (sub)
     return (
       <header class="ai-top">
@@ -264,7 +267,7 @@ function AiHeader({ sub, shown = false, strip = true, title = true }: { sub: AiS
         {strip && <Strip shown={shown} />}
       </header>
       {menu && <div class="ai-menu-scrim" onClick={() => setMenu(false)} />}
-      {menu && <Menu close={() => setMenu(false)} />}
+      {pop.on && <Menu close={() => setMenu(false)} leaving={pop.leaving} />}
     </>
   );
 }
@@ -500,6 +503,7 @@ export function AiView({ shown, cls, pill = true, panes = false }: { shown: bool
  */
 function StatusColumn({ shown, beside = false }: { shown: boolean; beside?: boolean }) {
   const [menu, setMenu] = useState(false);
+  const pop = usePresence(menu);
   const more = (
     <button type="button" class="ai-more" aria-label="more" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
       ⋯
@@ -509,7 +513,7 @@ function StatusColumn({ shown, beside = false }: { shown: boolean; beside?: bool
     <>
       <AiStatus shown={shown} more={more} compose={beside ? null : <FoldedFoot shown={shown} />} mic={pageMic} beside={beside} chat={beside ? null : <AiBody sub={null} shown={shown} />} />
       {menu && <div class="ai-menu-scrim" onClick={() => setMenu(false)} />}
-      {menu && <Menu close={() => setMenu(false)} tabs>{beside ? <OtherProjectsItem close={() => setMenu(false)} /> : <OpenChatItem close={() => setMenu(false)} />}</Menu>}
+      {pop.on && <Menu close={() => setMenu(false)} tabs leaving={pop.leaving}>{beside ? <OtherProjectsItem close={() => setMenu(false)} /> : <OpenChatItem close={() => setMenu(false)} />}</Menu>}
     </>
   );
 }

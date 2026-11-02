@@ -11,8 +11,9 @@ Checks:
 
 - `shell/dev/lint-style.sh` fails the gate on raw colours, borders and shadows.
 - `shell/dev/lint-design.sh` fails the gate on monospace UI text, hard-coded blur, off-scale radii (every corner of
-  a shorthand), literal easings, status colours outside their tokens, and literal durations in home's and the
-  launcher's motion.
+  a shorthand), literal easings, status colours outside their tokens, literal durations in home's and the
+  launcher's motion, hard lines drawn at `--frame`, and folds or menus on the AI page that pop in
+  (`{open && …}` instead of `ui/reveal.tsx` `Reveal` / `usePresence`).
 - The gate's `design-lint-*` runs find pop-ins and monospace text on screen. They fail the gate for the launcher
   (`design-lint-launcher-*`) and are report-only for the other surfaces until their design wave.
 - `shell/dev/gate.sh --shots DIR` renders every surface and measures text contrast (`report.json`).
@@ -108,7 +109,8 @@ Checks:
   CSS these are `--spring-fast`, `--spring` and `--spring-slow`, each paired with its duration (`--spring-fast-ms`,
   `--spring-ms`, `--spring-slow-ms`). Use fast for small things (a fade, a chip), the default for a surface moving,
   and slow for a large or far move. WAAPI uses the same objects (`.easing`, `.ms`). Lists use `notifmotion.ts` (arrivals fade and slide in 30 ms apart, a dismissed item closes its gap,
-  "+N more" grows). Do not use a local `cubic-bezier()` or ms value.
+  "+N more" grows). A fold or a menu uses `ui/reveal.tsx`: `Reveal` grows a fold's body in and out, `usePresence`
+  keeps a menu mounted while it leaves. Do not use a local `cubic-bezier()` or ms value.
   - Loops (a pulse, a sweep, a blink) are not motion between states. They keep their own period on `--ambient`.
 - **Finger-tied.** During a swipe only `--p`, transforms and opacity move, and the spring runs on release. There are
   no reloads, flashes, blank frames or keyboard jumps.

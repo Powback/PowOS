@@ -19,6 +19,7 @@ import { useState } from "preact/hooks";
 import { ago } from "./time.ts";
 import { askQueued } from "./assistant.ts";
 import { board, boardSeen, friction, type FrictionRow, type WorkRow } from "./aiboard.tsx";
+import { Reveal } from "./reveal.tsx";
 
 /** The board's severity rule (apps/agents severity_of): one report counts 1, P1 at 50, P0 at 500. */
 const P1_AT = 50;
@@ -286,7 +287,9 @@ function ProblemRow({ p, open, onToggle }: { p: Problem; open: boolean; onToggle
           {p.last ? ` · ${p.state === "fixed" ? "" : "last "}${when(p.last)}` : ""}
         </span>
       </button>
-      {open && <Detail p={p} />}
+      <Reveal open={open}>
+        <Detail p={p} />
+      </Reveal>
     </li>
   );
 }
@@ -305,7 +308,7 @@ function Area({ name, ps, openKey, tap, folded = false }: { name: string; ps: Pr
           <span class="ais-chev" aria-hidden="true" />
         </button>
       </h3>
-      {open && (
+      <Reveal open={open}>
         <ul class="ais-list">
           {shown.map((p) => (
             <ProblemRow key={p.key} p={p} open={openKey === p.key} onToggle={() => tap(p.key)} />
@@ -318,7 +321,7 @@ function Area({ name, ps, openKey, tap, folded = false }: { name: string; ps: Pr
             </li>
           )}
         </ul>
-      )}
+      </Reveal>
     </section>
   );
 }

@@ -772,7 +772,6 @@ function Convo({ a, items: raw }: { a: Agent; items: AgentConvoItem[] }) {
   return (
     <section class="fl-sec ag-convo" aria-label="Conversation">
       <div class="ai-chat-in" ref={ref}>
-        {!items.length && <div class="muted">Nothing said yet.</div>}
         <Thread items={items} render={renderConvo} />
         {chip && <div class={`ag-wait ${a.state}`}>{chip}</div>}
       </div>
@@ -783,11 +782,12 @@ function Convo({ a, items: raw }: { a: Agent; items: AgentConvoItem[] }) {
 /** A host without conversations yet (an older APK): the hook events, as before. */
 function Activity({ events, working }: { events: AgentEvent[]; working: boolean }) {
   const rows = activityRows(events);
+  // §1: an empty section isn't drawn (was "Nothing yet.").
+  if (!rows.length) return null;
   return (
     <section class="fl-sec">
       <h3 class="ai-heading muted">Activity</h3>
       <div class="fl-term tile ag-activity">
-        {!rows.length && <div class="muted">Nothing yet.</div>}
         {rows.map((r, i) => (
           <ActivityRow key={r.key} r={r} now={working && i === rows.length - 1} />
         ))}
