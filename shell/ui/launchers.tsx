@@ -5,8 +5,9 @@
  * of the "add" row to put it on. Launch is the dock's call (powos.apps.launch). A launcher whose app isn't installed is
  * not offered; with none resolved (a mode with no apps list) the row is not drawn. Any other app joins from its long-press
  * menu ("add to quick launch", apps.tsx AppMenu → toggleLauncher): stored by its app key, it rides the same row, order
- * and edit mode as a catalog launcher. A quick-page item ("qp:<ACTION>", ui/quickpage.tsx QUICK_PAGES, added from the
- * edit mode's "quick pages" row) opens that ONE settings page as a quick page springing out of its chip.
+ * and edit mode as a catalog launcher. A quick-page item ("qp:<ACTION>", added from the edit mode's "add quick page" row:
+ * this device's settings pages, ui/quickpage.tsx quickPages) opens that ONE settings page as a quick page springing out
+ * of its chip; its chip shows the page's own picture (QuickFace), never the Settings app's gear.
  */
 import { signal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
@@ -15,7 +16,7 @@ import type { App } from "../types.ts";
 import { ccEditing } from "./ccexpand.ts";
 import { followNotif } from "./gesture.ts";
 import { Icon } from "./icons.tsx";
-import { openQuickPage, QUICK_ID, QUICK_PAGES, quickAction, rectOf } from "./quickpage.tsx";
+import { loadQuickPages, openQuickPage, QUICK_ID, QuickFace, quickAction, quickPages, rectOf, type QuickPageInfo } from "./quickpage.tsx";
 import { useReorder } from "./reorder.ts";
 
 interface Launcher {
@@ -25,7 +26,7 @@ interface Launcher {
   match: RegExp[];
   /** An app added from its menu: exactly this app key (the id), no catalog match. */
   key?: string;
-  /** A quick-page item: the settings ACTION it opens (quickpage.open), the Settings app's icon. */
+  /** A quick-page item: the settings ACTION it opens (quickpage.open); its chip the page's picture (QuickFace). */
   action?: string;
 }
 
@@ -54,6 +55,7 @@ export const loadLaunchers = () => {
     powos.store.get<string[]>("controls.launchers").then((l) => (chosen.value = Array.isArray(l) ? l : DEFAULT)).catch(() => (chosen.value ??= DEFAULT)),
     powos.apps.list().then((a) => (apps.value = a), () => {}),
   ]);
+  loadQuickPages();
 };
 
 /*
@@ -73,7 +75,7 @@ powos.on("shade.settle", ({ open }: { open: boolean }) => {
 /** A stored id: a catalog launcher, or an app key added from the app menu (keys carry a "x:" kind prefix, ids don't). */
 function launcherOf(id: string): Launcher | undefined {
   const action = quickAction(id);
-  if (action) return { id, label: (QUICK_PAGES.find((q) => q.action === action)?.label ?? action.split(".").pop() ?? action).toLowerCase(), match: [], action };
+  if (action) return { id, label: (pageOf(action)?.label ?? action.split(".").pop() ?? action).toLowerCase(), match: [], action };
   const c = CATALOG.find((l) => l.id === id);
   if (c || !id.includes(":")) return c;
   const a = apps.value.find((x) => x.key === id);
@@ -86,10 +88,12 @@ const appOf = (id: string) => {
   return l && resolve(l);
 };
 
-/** The Settings app's icon for a quick-page item (none listed: a blank chip, still the page's item). */
+/** The device's settings page [action] (quickpage.pages), if listed. */
+const pageOf = (action: string) => quickPages.value.find((q) => q.action === action);
+
+/** A quick-page item as the row's app (its chip draws QuickFace, not this icon). */
 function settingsApp(l: Launcher): App {
-  const s = apps.value.find((x) => x.key.startsWith("a:com.android.settings/"));
-  return { key: l.id, label: l.label, icon: s?.icon ?? "", kind: "android" };
+  return { key: l.id, label: l.label, icon: "", kind: "android" };
 }
 
 function resolve(l: Launcher): App | undefined {
@@ -133,7 +137,7 @@ function open(l: Launcher, a: App, shut: () => void, el: Element) {
   if (l.action) {
     const at = rectOf(el);
     shut();
-    if (!openQuickPage({ action: l.action, label: QUICK_PAGES.find((q) => q.action === l.action)?.label ?? l.label }, at)) void powos.apps.launch("a:com.android.settings");
+    if (!openQuickPage({ action: l.action, label: pageOf(l.action)?.label ?? l.label }, at)) void powos.apps.launch("a:com.android.settings");
     return;
   }
   // The panel goes first (the app comes up behind it), as every tile that leaves the panel.
@@ -156,7 +160,7 @@ function Chip({ l, a, shut, remove }: { l: Launcher; a: App; shut: () => void; r
         onClick={(e) => (editing ? remove?.() : open(l, a, shut, e.currentTarget))}
       >
         <span class="cc3-chip">
-          {a.icon ? <img src={a.icon} alt="" draggable={false} /> : <Icon name="tuneVariant" />}
+          {l.action ? <QuickFace action={l.action} /> : a.icon ? <img src={a.icon} alt="" draggable={false} /> : <Icon name="tuneVariant" />}
           {editing && <span class="cc3-badge"><Icon name="close" /></span>}
         </span>
         <span class="cc3-word">{l.label}</span>
@@ -172,7 +176,7 @@ export function Launchers({ hooks, shut }: { hooks: Parameters<typeof useReorder
   const r = useReorder(shown.map((l) => l.id), save, ccEditing, { ...hooks, onlyEditing: true });
   const spare = CATALOG.filter((l) => !ids.includes(l.id) && resolve(l));
   const editing = ccEditing.value;
-  const pages = editing ? QUICK_PAGES.filter((q) => !ids.includes(QUICK_ID + q.action)) : [];
+  const pages = editing ? quickPages.value.filter((q) => !ids.includes(QUICK_ID + q.action)) : [];
   if (!shown.length && !(editing && (spare.length || pages.length))) return null;
   return (
     <div class="cc3-launchers cascade" data-q ref={followNotif} style={{ "--i": 4 }}>
@@ -202,16 +206,18 @@ export function Launchers({ hooks, shut }: { hooks: Parameters<typeof useReorder
   );
 }
 
-/** Edit mode's "add quick page" row: the common settings pages (QUICK_PAGES) not on the row yet; a tap adds one. */
-function QuickPagePicker({ pages, add }: { pages: { action: string; label: string }[]; add: (action: string) => void }) {
-  const icon = apps.value.find((x) => x.key.startsWith("a:com.android.settings/"))?.icon;
+/**
+ * Edit mode's "add quick page" row: this device's settings pages (quickPages) not on the row yet, each with its own
+ * picture; a tap adds one.
+ */
+function QuickPagePicker({ pages, add }: { pages: QuickPageInfo[]; add: (action: string) => void }) {
   return (
     <div class="cc3-grid cc3-spare cc3-quickpages" aria-label="add quick page">
       {pages.map((q) => (
         <div class="cc3-cell" key={q.action}>
           <button type="button" class="cc3-t" aria-label={`add quick page ${q.label}`} onClick={() => add(q.action)}>
             <span class="cc3-chip">
-              {icon ? <img src={icon} alt="" draggable={false} /> : <Icon name="tuneVariant" />}
+              <QuickFace action={q.action} />
               <span class="cc3-badge add"><Icon name="plus" /></span>
             </span>
             <span class="cc3-word">{q.label.toLowerCase()}</span>

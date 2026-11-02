@@ -32,7 +32,7 @@ import {
   useScreen,
 } from "../screens.ts";
 import { Icon, type IconName } from "./icons.tsx";
-import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
+import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, searchSpot, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
 import { iconTint } from "./icontint.ts";
 import { UI_FONTS, uiFont } from "./uifont.ts";
 import { ALIGNS, alignChoice, anchorPull, type AlignMode, type AlignSurface } from "./align.ts";
@@ -41,6 +41,7 @@ import { ALIGNS, alignChoice, anchorPull, type AlignMode, type AlignSurface } fr
 const TINTS = ["hue", "mono"];
 import { drawerRecents } from "./drawer.tsx";
 import { PetToggle } from "./pet.tsx";
+import { pickSearchSpot } from "./searchwidget.tsx";
 
 /** Its touches are its own: home's swipes under it don't see them. */
 const own = {
@@ -220,6 +221,16 @@ function DockOption({ label, placement, fallback }: { label: string; placement: 
   return (
     <Option label={label}>
       <Segmented options={DOCK_SIDES} picked={DOCK_SIDES.indexOf(validDockPosition(placement.value, fallback))} onPick={(i) => (placement.value = DOCK_SIDES[i])} />
+    </Option>
+  );
+}
+
+/** Home's search on [mode]'s screen: the bar, or the dock's round button (searchwidget.tsx pickSearchSpot). */
+const SEARCH_SPOTS = ["dock", "bar"] as const;
+function SearchOption({ label, mode }: { label: string; mode: "mobile" | "unfolded" }) {
+  return (
+    <Option label={label}>
+      <Segmented options={["dock button", "bar"]} picked={SEARCH_SPOTS.indexOf(searchSpot[mode].value === "dock" ? "dock" : "bar")} onPick={(i) => void pickSearchSpot(mode, SEARCH_SPOTS[i])} />
     </Option>
   );
 }
@@ -554,6 +565,8 @@ function StyleScreen() {
         <DockOption label="folded dock position" placement={mobileDockPlacement} fallback="bottom" />
         <DockOption label="unfolded dock position" placement={unfoldedDockPlacement} fallback="bottom" />
         <DockOption label="desktop dock position" placement={desktopDockPlacement} fallback="left" />
+        <SearchOption label="folded search" mode="mobile" />
+        <SearchOption label="unfolded search" mode="unfolded" />
         <Option label="swipe up from the left: PowOS AI">
           <Segmented options={["on", "off"]} picked={pullPanels.value === "on" ? 0 : 1} onPick={(i) => (pullPanels.value = i === 0 ? "on" : "off")} />
         </Option>
