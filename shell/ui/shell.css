@@ -3820,6 +3820,17 @@ html.glass:root:not([data-light="false"][data-wallpaper="light"], [data-light="t
 :root:is([data-align-control="bottom"], [data-align-control="middle"]) .panel-body:not(.together) > .cc > .notif-bar + * { margin-top: auto; }
 :root[data-align-control="middle"] .panel-body:not(.together) > .cc > :last-child:not(.notif-bar) { margin-bottom: auto; }
 /*
+ * Opened where the finger started (ui/align.ts anchorPull; shadeanchor.ts sets --anchor-top once per pull): the one
+ * panel and the two columns start that much lower (the cards float on the scrim, the list still runs to the foot and
+ * scrolls), the panels apart are their own card that much lower - rounded all round, as tall as is left, up to 88%.
+ */
+.notif-panel[data-anchored] > .panel-body.together { padding-top: var(--anchor-top, 0px); }
+.notif-panel[data-anchored]:not(:has(> .panel-body.together)) {
+  top: var(--anchor-top, 0px);
+  height: min(88%, calc(100% - var(--anchor-top, 0px)));
+  border-radius: 20px;
+}
+/*
  * The folded AI page as a status page (aistatus.tsx; the user, 2026-10-31: "it shouldn't just be a chat", "more dynamic
  * and futuristic"): one pane of THE backdrop (--backdrop-tint / --backdrop-blur-native), the UI's proportional font,
  * headed sections and one-line rows straight on it - no card inside the pane. Bars slide to each value on a spring, a

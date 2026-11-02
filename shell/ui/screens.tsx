@@ -35,7 +35,7 @@ import { Icon, type IconName } from "./icons.tsx";
 import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
 import { iconTint } from "./icontint.ts";
 import { UI_FONTS, uiFont } from "./uifont.ts";
-import { ALIGNS, alignChoice, type AlignMode, type AlignSurface } from "./align.ts";
+import { ALIGNS, alignChoice, anchorPull, type AlignMode, type AlignSurface } from "./align.ts";
 
 /** "icon colours" options after "the apps'": theme hues, the accent. */
 const TINTS = ["hue", "mono"];
@@ -585,6 +585,10 @@ function StyleScreen() {
             <AlignOption key={`${sf}.${m}`} label={`${m} ${name}`} surface={sf} mode={m} />
           )),
         )}
+        {/* The shade and control center open around where the pull started (default off: muscle memory, the user 11-01). */}
+        <Option label="open where the finger starts">
+          <Segmented options={["on", "off"]} picked={anchorPull.value === "on" ? 0 : 1} onPick={(i) => (anchorPull.value = i === 0 ? "on" : "")} />
+        </Option>
       </Section>
       {/* The theme's UI font (ui/uifont.ts): every UI text at once; code, terminals and logs stay monospace. */}
       <Section icon="formatFont" title="font">

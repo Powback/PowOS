@@ -22,6 +22,15 @@ object PanelPull {
     /** gesture.ts OPEN_FLICK: the drawer opens on a short flick this fast. */
     const val OPEN_FLICK = 0.2f
 
+    /**
+     * Where a pull started: the finger's [rawY] as a fraction (0 top .. 1 bottom) of a screen [height] px tall, for the
+     * shade's "open where the finger starts" (shell ui/align.ts). No height yet: the top, as the status bar's pull.
+     */
+    fun startFraction(
+        rawY: Float,
+        height: Int,
+    ): Float = if (height > 0) (rawY / height).coerceIn(0f, 1f) else 0f
+
     /** The openness (0..1) for [distance] px of finger towards open in a window [height] px tall. */
     fun openness(
         distance: Float,
