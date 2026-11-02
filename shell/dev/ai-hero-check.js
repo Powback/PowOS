@@ -30,3 +30,31 @@ export async function aiHeroRenders() {
   if (!document.querySelector(".ai-screen.status .ais-top .ais-title")?.textContent?.includes("%")) fails.push("the hero shows no ring figure");
   return { fails, counts };
 }
+
+// Perf P1 (same trace): the AI page's tab row (AiSegs) re-rendered on every reply chunk - it read chat.value whole for
+// its Chat "…". Now it depends only on what it shows (its four counts and whether the board's feed runs): a 20-chunk reply
+// redraws it for the busy flip only, and the "…" still shows while the manager works.
+export async function aiSegsRenders() {
+  const G = window.__gw;
+  const [S, scan] = await Promise.all([G.mod("./state.ts"), G.mod("./ui/renderscan.ts")]);
+  const raf = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(() => ok())));
+  const fails = [];
+  if (!document.querySelector(".ai-segs")) return { fails: ["no .ai-segs row on the AI page"], counts: {} };
+  scan.startScan("gate-ai-segs");
+  scan.reset();
+  const items = [{ kind: "user", text: "how is it going" }];
+  const reply = "Three agents are on it: the dock size, the window raise and the page dots. Two of them land tonight and the third waits on you.".split(" ");
+  let dots = false;
+  for (let i = 1; i <= 20; i++) {
+    S.chat.value = { busy: i < 20, items: [...items, { kind: "assistant", text: reply.slice(0, i).join(" ") }] };
+    await raf();
+    if (i === 10) dots = [...document.querySelectorAll(".ai-segs .ai-seg-n")].some((e) => e.textContent === "…");
+  }
+  const segs = scan.scanStats().filter((x) => x.name === "AiSegs");
+  const counts = { renders: segs.reduce((n, x) => n + x.renders, 0), ms: +segs.reduce((n, x) => n + x.selfMs, 0).toFixed(1) };
+  scan.stopScan("gate-ai-segs");
+  if (counts.renders > 2) fails.push(`the tab row rendered ${counts.renders}x over a 20-chunk reply, expected <= 2 (busy on, off)`);
+  if (!dots) fails.push("the Chat tab shows no … while the manager works");
+  if ([...document.querySelectorAll(".ai-segs .ai-seg-n")].some((e) => e.textContent === "…")) fails.push("the Chat tab keeps its … after the reply ended");
+  return { fails, counts };
+}

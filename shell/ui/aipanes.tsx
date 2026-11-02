@@ -5,6 +5,7 @@
  * powai.tsx lays them out.
  */
 import { useEffect, useState } from "preact/hooks";
+import { computed } from "@preact/signals";
 import { aiScreen, chat } from "../state.ts";
 import { agentsView, aiAgent, closeAgents, messages, since, useAgents } from "../agents.ts";
 import { fleet, ownWords, shorten, taskOf, workingNow, type Fleet, type Worker } from "../fleet.ts";
@@ -197,31 +198,44 @@ function FleetRows({ f, foot }: { f: Fleet; foot?: preact.ComponentChildren }) {
   );
 }
 
-/** The segments, each with its live count ("" none): Agents counts the working and the stuck ones. */
-function segItems(f: Fleet): [AiScreen, string, string][] {
+/** The segments: the screen each opens and its name. */
+const SEGS: [AiScreen, string][] = [
+  ["chat", "Chat"],
+  ["fleet", "Agents"],
+  ["progress", "Progress"],
+  ["devices", "Devices"],
+];
+
+/** The segments' live counts in SEGS's order ("" none): Agents counts the working and the stuck ones. */
+function segCounts(f: Fleet): string[] {
   const dd = dailyDriver();
   const open = areas().reduce((n, [, a, b]) => n + a + b, 0);
   const hosts = new Set(units.value.map((u) => u.host)).size;
   const busy = f.working.length + f.attention.length;
-  return [
-    ["chat", "Chat", chat.value.busy ? "…" : ""],
-    ["fleet", "Agents", busy ? String(busy) : ""],
-    ["progress", "Progress", dd != null ? `${dd}%` : open ? String(open) : ""],
-    ["devices", "Devices", hosts ? String(hosts) : ""],
-  ];
+  return [chat.value.busy ? "…" : "", busy ? String(busy) : "", dd != null ? `${dd}%` : open ? String(open) : "", hosts ? String(hosts) : ""];
 }
+
+/**
+ * What the row shows - its four counts and whether the board's feed is needed - as one string, so it changes (and the
+ * row redraws) only when one of those does. Perf trace perf-1793551432355 (11-01 17:43): the row read chat.value and
+ * the whole fleet itself, so each reply chunk redrew it (3 commits in 0.5 s of the trace).
+ */
+const segShown = computed(() => {
+  const f = fleet();
+  return JSON.stringify({ n: segCounts(f), board: needsBoard(f) });
+});
 
 /** The right column's segmented row. [shown]: the feeds behind its counts run only then (the board's is the status column's, beside it). */
 export function AiSegs({ shown }: { shown: boolean }) {
   useAgents();
-  const f = fleet();
+  const { n, board } = JSON.parse(segShown.value) as { n: string[]; board: boolean };
   const s = aiScreen.value;
   const at = (k: AiScreen) => k === s || (k === "fleet" && s === "agents");
   return (
     <nav class="ai-segs" aria-label="PowOS AI">
       {shown && <UnitsFeed />}
-      {shown && needsBoard(f) && <BoardFeed />}
-      {segItems(f).map(([k, name, n]) => (
+      {shown && board && <BoardFeed />}
+      {SEGS.map(([k, name], i) => (
         <button
           key={k}
           type="button"
@@ -230,7 +244,7 @@ export function AiSegs({ shown }: { shown: boolean }) {
           onClick={() => ((aiAgent.value = null), (aiScreen.value = k))}
         >
           <span class="ai-seg-name">{name}</span>
-          {n && <span class="ai-seg-n">{n}</span>}
+          {n[i] && <span class="ai-seg-n">{n[i]}</span>}
         </button>
       ))}
     </nav>
