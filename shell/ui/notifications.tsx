@@ -228,15 +228,20 @@ function useCardGesture(n: PhoneNotification) {
  * Android System have no drawer icon): the notification's small icon (the host's URL; a monochrome glyph, so a mask
  * in its app's color), else [fallback] (the app's icon). A tap opens the app, as the icon does on any card.
  */
-function SmallIcon({ n, fallback }: { n: GroupedNotification; fallback: string | null }) {
+export function SmallIcon({ n, fallback }: { n: GroupedNotification; fallback: string | null }) {
   const on = {
     onPointerDown: (e: PointerEvent) => e.stopPropagation(),
     onClick: (e: MouseEvent) => (e.stopPropagation(), openNotif(n)),
   };
-  if (!n.smallIcon) return fallback ? <img class="notif-icon" src={fallback} alt="" role="button" aria-label="open" {...on} /> : null;
+  return <NotifGlyph n={n} fallback={fallback} role="button" aria-label="open" {...on} />;
+}
+
+/** The icon itself, SmallIcon's without its tap: the lock face's cards (lock.tsx), where the face's swipe is the gesture. */
+export function NotifGlyph({ n, fallback, ...attrs }: { n: GroupedNotification; fallback: string | null } & preact.JSX.HTMLAttributes<HTMLElement>) {
+  if (!n.smallIcon) return fallback ? <img class="notif-icon" src={fallback} alt="" {...(attrs as preact.JSX.HTMLAttributes<HTMLImageElement>)} /> : null;
   const mask = `url("${n.smallIcon}") center / contain no-repeat`;
   const style = { ...(n.color ? { "--tint": n.color } : {}), mask, WebkitMask: mask } as preact.JSX.CSSProperties;
-  return <span class="notif-icon notif-small" style={style} role="button" aria-label="open" {...on} />;
+  return <span class="notif-icon notif-small" style={style} {...(attrs as preact.JSX.HTMLAttributes<HTMLSpanElement>)} />;
 }
 
 function Card({ n, name, more = 0, class: cls = "", small = false }: CardProps) {
@@ -283,7 +288,7 @@ function Card({ n, name, more = 0, class: cls = "", small = false }: CardProps) 
  * What grouping reads besides the basics (types.ts PhoneNotification has them; spelled out here too, so this file
  * type-checks against an installed APK's older types.ts).
  */
-type GroupedNotification = PhoneNotification & {
+export type GroupedNotification = PhoneNotification & {
   pkg?: string;
   group?: string | null;
   conversation?: boolean;

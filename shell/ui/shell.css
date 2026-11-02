@@ -1888,10 +1888,11 @@ html[data-mode="aod"], html[data-mode="aod"] body { background: #000; }
   align-items: center;
   justify-content: center;
   gap: 6px;
-  color: color-mix(in srgb, var(--color-foreground) 70%, #000);
+  /* Dimmed: 70% of the colour over the black page (an OLED's off pixels) - the theme's colour, no black of its own. */
+  color: color-mix(in srgb, var(--color-foreground) 70%, transparent);
   transition: transform var(--spring-slow-ms) var(--spring-slow);
 }
-.aod-time { font: 300 76px/1 var(--font-body); letter-spacing: 2px; color: color-mix(in srgb, var(--color-accent) 75%, #000); }
+.aod-time { font: 300 76px/1 var(--font-body); letter-spacing: 2px; color: color-mix(in srgb, var(--color-accent) 75%, transparent); }
 .aod-date, .aod-battery { font-size: var(--text-small); }
 .aod-apps { display: flex; gap: 10px; margin-top: 14px; }
 .aod-apps img { width: 22px; height: 22px; border-radius: 8px; opacity: 0.7; filter: grayscale(0.4); }
@@ -2450,11 +2451,20 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .task-clear { align-self: center; margin-top: calc(var(--gap) * 4); font: var(--text-small) var(--font-body); color: var(--color-muted); background: none; border: none; border-radius: 999px; padding: 10px 22px; }
 
 /*
- * The lock screen's face (lock.tsx): over the wallpaper, dimmed; the whole of it follows the finger up. --lift (0..1,
- * set on the root on every move) is how far: the face goes up by that much of the screen, fading, and the dimming
- * with it; lock-settling eases it the rest of the way, or back.
+ * The lock screen's face (lock.tsx): over the wallpaper, dimmed; the whole of it follows the finger up. --lock-lift
+ * (0..1, set on the root on every move) is how far: the face goes up by that much of the screen, fading, and the
+ * dimming with it; lock-settling eases it the rest of the way, or back.
+ * Its own name: it was --lift, the theme's surface shadow (theme.css), which the root's number wiped from every card.
+ * Registered so the settle is a transition of the number itself, run where the page's frames are made: the cards' live
+ * blur (ui/nativeglass.ts) is measured on those frames. A transition of transform and opacity ran on the compositor,
+ * ahead of the frames that measure the blur - the cards slid away from their blur (K4, "static blur" on unlock).
  */
-html[data-mode="lock"] { background: rgb(0 0 0 / calc(0.55 * (1 - var(--lift, 0)))); }
+@property --lock-lift {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+html[data-mode="lock"] { background: rgb(0 0 0 / calc(0.55 * (1 - var(--lock-lift)))); }
 html[data-mode="lock"] body { background: none; }
 .lock {
   position: fixed;
@@ -2465,17 +2475,28 @@ html[data-mode="lock"] body { background: none; }
   padding: calc(var(--inset-top, 0px) + 12vh) var(--edge) calc(var(--inset-bottom, 0px) + 28px);
   touch-action: none;
   user-select: none;
-  transform: translateY(calc(var(--lift, 0) * -100%));
-  opacity: calc(1 - var(--lift, 0) * 1.4);
+  transform: translateY(calc(var(--lock-lift) * -100%));
+  opacity: calc(1 - var(--lock-lift) * 1.4);
   will-change: transform, opacity;
 }
-html.lock-settling[data-mode="lock"] { transition: background-color var(--spring-ms) var(--spring); }
-html.lock-settling .lock { transition: transform var(--spring-ms) var(--spring), opacity var(--spring-ms) var(--spring); }
+html.lock-settling[data-mode="lock"] { transition: --lock-lift var(--spring-ms) var(--spring); }
 .lock-time { font: 300 88px/1 var(--font-body); color: var(--color-foreground); letter-spacing: 2px; }
 .lock-date { margin-top: 8px; color: var(--color-foreground); font-size: var(--text-body); }
 .lock-notes { margin-top: 28px; width: 100%; display: flex; flex-direction: column; gap: 6px; }
 .lock-note { display: flex; align-items: center; gap: 10px; padding: 9px 12px; }
-.lock-note img { width: 22px; height: 22px; border-radius: 8px; flex: none; }
+.lock-note .notif-icon { width: 22px; height: 22px; flex: none; }
+/*
+ * K3: the cards wear THE backdrop (theme.css --backdrop-tint / --backdrop-blur-native), as home's widgets and the open
+ * shade do - one tint, one compositor radius, no veil, no sheen - not the plain .tile reference fill at home's 140.
+ * The shadow stays the tile's (K4).
+ */
+html:root .lock .lock-note.tile { --glass-blur-native: var(--backdrop-blur-native); background: var(--backdrop-tint); }
+/* With CSS glass (no compositor blur, ui/glass.ts): the same tint over the frosted wallpaper. */
+html.glass:root .lock .lock-note.tile {
+  background:
+    linear-gradient(var(--backdrop-tint), var(--backdrop-tint)) border-box,
+    var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
+}
 .lock-note-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .lock-note-title { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-small); }
 .lock-note-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-small); }
