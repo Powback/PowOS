@@ -1,9 +1,13 @@
 {
  "_why": {
+  "45-terminal": "A full session fills every size; at the folded 4x2 (8 rows in a short tile) the tile's padding plus the glyphs' own top bearing reads 12% empty at the top, on the 12% line. Measured since the sweep reads the WebGL renderer's real ink (2026-11-02: the DOM renderer's row boxes started at the cell's top, 2 px higher). Real fix: rows flush with the tile's top inset at short sizes.",
   "45-terminal-short": "A short shell session (one command, then the prompt: bridge.ts mockTranscript 'short') fills a line or two and leaves the rest of the tile empty below the prompt - what a terminal with little in it is. Its full-session variant (45-terminal) fits at every size. Resizing a shell's text to fill would make its size jump with every command, so it's kept as a terminal.",
   "50-weather~extreme": "Its widest values ('-13\u00b0C', 'Heavy snow', no place) on a wide 2-3 row tile: the lines are as big as the height allows and still short of the width (~15% empty each side) - nothing is cut. Tried: the sky beside the temperature (starved the temperature), the place kept (shrank both), bigger sky caps (0.75 of the temperature). A real fix is a different wide layout for short values.",
   "dev.powos.counter.count": "A dev sample, not a user-facing widget: apps/counter is the Tier 0 prototype of the app runtime (a shared count over SpacetimeDB, its connection, latency and version shown for checking the pipeline). Its tiles are a test readout, not designed to fill; listed here so the sweep stays honest for real widgets. Drop this entry if it ever ships as a real widget."
  },
+ "45-terminal": [
+  "folded 4x2: unfilled: top N% empty"
+ ],
  "45-terminal-short": [
   "folded 2x2: unfilled: bottom N% empty",
   "folded 2x3: unfilled: bottom N% empty",
@@ -18,7 +22,8 @@
   "folded 4x2: unfilled: bottom N% empty",
   "folded 4x3: small content: covers N% of the tile",
   "folded 4x3: unfilled: bottom N% empty",
-  "folded 4x4: nothing drawn",
+  "folded 4x4: small content: covers N% of the tile",
+  "folded 4x4: unfilled: bottom N% empty",
   "unfolded 2x2: small content: covers N% of the tile",
   "unfolded 2x2: unfilled: bottom N% empty",
   "unfolded 2x3: small content: covers N% of the tile",
@@ -35,7 +40,8 @@
   "unfolded 4x2: unfilled: right N%, bottom N% empty",
   "unfolded 4x3: small content: covers N% of the tile",
   "unfolded 4x3: unfilled: right N%, bottom N% empty",
-  "unfolded 4x4: nothing drawn"
+  "unfolded 4x4: small content: covers N% of the tile",
+  "unfolded 4x4: unfilled: right N%, bottom N% empty"
  ],
  "50-weather~extreme": [
   "folded 4x2: unfilled: left N%, right N% empty",
