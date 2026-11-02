@@ -13,6 +13,8 @@ import { ccV3, notif, panel } from "../state.ts";
 import { followNotif, held, notifOpen } from "./gesture.ts";
 import { ccEditing, ccExpanded, expandedByDefault } from "./ccexpand.ts";
 import { useReorder } from "./reorder.ts";
+import { fadeIn, reducedMotion } from "./notifmotion.ts";
+import { tick } from "./haptics.ts";
 import { Icon, type IconName } from "./icons.tsx";
 import { openRemote } from "../remote.ts";
 import { openQuickPage, TILE_PAGES } from "./quickpage.tsx";
@@ -127,6 +129,8 @@ function usePress(t: QuickTile, hold = true) {
     // An action with no page of its own (Lock, Screenshot): a hold is nothing - the host has no page to open
     // ("no quick setting lockscreen", 2026-10-21 home rejection).
     if (NO_PAGE.has(t.id)) return;
+    // A long press opening a page is a commit point: the haptic (§7), as home's long presses.
+    tick();
     // The Controller tile's hold is the overlay's layout editor, not a page in Settings.
     if (t.id === PAD_ID) return editPad();
     shut();
@@ -790,6 +794,13 @@ function Unfold({ group, reorder }: { group: { g: Group; ts: QuickTile[] } | und
 function Members({ group, reorder }: { group: { g: Group; ts: QuickTile[] }; reorder: (gid: string, ids: string[]) => void }) {
   const byId = new Map(group.ts.map((t) => [t.id, t]));
   const { order, handlers, carrying } = useReorder(group.ts.map((t) => t.id), (ids) => reorder(group.g.id, ids), ccEditing, editHooks);
+  // Unfolding, the members themselves arrive as a list's do (notifmotion.ts: fade and slide, 30 ms apart) while the
+  // row grows - they were simply there inside the growing row (§6). Once per category opened (keyed on it), never on
+  // a reorder's re-render.
+  const row = handlers.ref as { current: HTMLElement | null };
+  useLayoutEffect(() => {
+    if (row.current && !reducedMotion() && typeof Element.prototype.animate === "function") fadeIn([...row.current.children]);
+  }, []);
   return (
     <div class={`cc-subs ${carrying ? "dragging" : ""}`} {...handlers}>
       {order.map((id) => byId.get(id) && <Sub key={id} t={byId.get(id)!} />)}

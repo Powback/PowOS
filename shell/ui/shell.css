@@ -1388,11 +1388,13 @@ input.folder-title:focus { background: var(--soft-fill); }
   flex-direction: column;
   /* The shade replaces the status bar: its heading occupies that row. */
   padding: 0 var(--edge) 6px;
-  background: color-mix(in srgb, var(--color-background) calc(var(--glass) + 10%), transparent);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  /* THE backdrop (docs/DESIGN-LANGUAGE.md §2): the shade's window is blurred behind by its host at
+     --shade-blur-native (= --backdrop-blur-native, sent by shade.tsx), the page only tints - no blur of its own (it
+     had blur(18px) over the background at --glass + 10%), and the one tint is the scrim's (.notif-scrim, --shade-tint
+     = --backdrop-tint, full screen): none of its own on top of it. A surface's radius. */
+  background: none;
   border-bottom: 0;
-  border-radius: 0 0 calc(var(--radius) * 2) calc(var(--radius) * 2);
+  border-radius: 0 0 var(--radius) var(--radius);
   /*
    * Its open, as the drawer's (d254e58): from just above where it rests - --drop, the one knob (gesture.ts and the
    * host map the finger onto it at 1.5x) - fading in, nearly all there by half of it. Transform and opacity only.
@@ -2079,8 +2081,9 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .cc-media.has-art::before {
   inset: -40px;
   background: var(--art) center / cover no-repeat;
-  filter: blur(32px) saturate(1.5);
-  transition: opacity 300ms;
+  /* The frost's own blur (theme.css --glass-blur: the lock face's copy of the wallpaper), not one of its own (§2). */
+  filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  transition: opacity var(--spring-fast-ms) var(--spring-fast);
 }
 .cc-media.has-art::after {
   inset: 0;
@@ -2088,7 +2091,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 }
 /* Paused: the art a step quieter, so a stopped card reads as stopped at a glance. */
 .cc-media.has-art.paused::before { opacity: 0.6; }
-:root[data-light="true"] .cc-media.has-art::before { filter: blur(32px) saturate(1.3) brightness(1.1); }
+:root[data-light="true"] .cc-media.has-art::before { filter: blur(var(--glass-blur)) saturate(1.3) brightness(1.1); }
 /* No art: the glass keeps its own colour with an accent wash from the art tile's corner (a layer inside, not the tile's background, which the panel's glass rules own). */
 .cc-media.no-art::before { content: ""; position: absolute; z-index: -1; inset: 0; pointer-events: none; background: radial-gradient(90% 140% at 0 0, color-mix(in srgb, var(--color-accent) 20%, transparent), transparent 70%); }
 .cc-art { grid-area: art; width: 44px; height: 44px; border-radius: 8px; object-fit: cover; box-shadow: var(--lift-shadow); }
@@ -2160,6 +2163,10 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .cc-unfold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--spring-ms) var(--spring); }
 .cc-unfold > div { min-height: 0; overflow: hidden; }
 .cc-unfold.open { grid-template-rows: 1fr; }
+/* Folding away, its members fade as the row shuts (they arrive with notifmotion.ts fadeIn, control.tsx Members). */
+.cc-unfold > div > .cc-subs { transition: opacity var(--spring-fast-ms) var(--spring-fast); }
+.cc-unfold:not(.open) > div > .cc-subs { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .cc-unfold, .cc-unfold > div > .cc-subs { transition: none; } }
 .cc-main > .cc-grid + .cc-unfold + .cc-grid { margin-top: 8px; }
 /*
  * A category's cell: its tile, and in the whole view (ccexpand.ts: the one panel pulled further down) its members under
@@ -2432,7 +2439,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 }
 /* A card with no picture (ui/switcher.tsx ShotPlaceholder): its icon centred on glass tinted by the icon, as a splash. */
 .task-ph { position: relative; overflow: hidden; display: grid; place-items: center; background: var(--color-surface); }
-.task-ph::before { content: ""; position: absolute; inset: -25%; background: var(--ph-icon) center / cover no-repeat; filter: blur(48px) saturate(1.5); opacity: 0.5; }
+.task-ph::before { content: ""; position: absolute; inset: -25%; background: var(--ph-icon) center / cover no-repeat; filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)); opacity: 0.5; }
 .task-ph-icon { position: relative; width: 72px; height: 72px; border-radius: 20px; }
 .task-ph-icon.blank { background: var(--soft-fill, var(--color-surface)); }
 .task-split .task-ph-icon { width: 48px; height: 48px; border-radius: 12px; }
@@ -3434,10 +3441,10 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-outline-size { padding: 6px 12px; border-radius: 999px; font: var(--text-small) var(--font-body); color: var(--color-foreground); }
 /* GL1/WG1: every drop's ghost (webwindows.tsx DropPreview, dockout.tsx DockOutGhost) - the exact rect the window takes:
    a tile, an edge snap, the free region between the widgets or where it floats. One look: a ghost of glass (a faint
-   frost, a thin accent ring), never a solid slab; a short spring as the target changes. */
+   fill, a thin accent ring - no blur of its own, §2), never a solid slab; a short spring as the target changes. */
 .ww-drop {
   position: absolute; pointer-events: none; border-radius: 12px; display: grid; place-items: center; box-sizing: border-box;
-  background: color-mix(in srgb, var(--color-foreground) 8%, transparent); backdrop-filter: blur(6px);
+  background: color-mix(in srgb, var(--color-foreground) 8%, transparent);
   box-shadow: 0 0 0 1px var(--color-accent);
   transition: left var(--spring-fast-ms) var(--spring-fast), top var(--spring-fast-ms) var(--spring-fast),
     width var(--spring-fast-ms) var(--spring-fast), height var(--spring-fast-ms) var(--spring-fast);

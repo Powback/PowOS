@@ -271,7 +271,10 @@ function Card({ n, name, more = 0, class: cls = "", small = false }: CardProps) 
       {/* PowOS's own: the sender is the group's name already ("PowOS · coder") - not again as its title. */}
       {n.title && !titleIsName(n, name) && <div class="notif-title">{n.title}</div>}
       {n.text && <div class={`notif-text${n.text.includes("\n") ? " lines" : ""}`}>{n.text}</div>}
-      {open && picture && <img class="notif-picture" src={picture} alt="" />}
+      {/* Drawn (and loaded) while folded, hidden: opened, it is already decoded and its height known, so animateLayout
+          grows the card to it and it fades in (notifications.css) - mounted on open it was 0 tall until it loaded, then
+          popped in (§6). */}
+      {picture && <img class="notif-picture" src={picture} alt="" />}
       <Actions n={n} onOpen={open ? () => openNotif(n) : undefined} />
       {replying.value?.key === n.key && <Reply n={n} index={replying.value.index} />}
     </div>
