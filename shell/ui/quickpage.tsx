@@ -5,8 +5,10 @@
 // Not in recents or the dock; Back inside the page navigates, at its root it closes; a tap outside or a swipe down on
 // its bar closes; the pop-out (↗) reopens the same page in its app's normal window. Native panels (internet, NFC,
 // volume) stay Android's own sheets (docs/DESIGN-LANGUAGE.md).
+import { signal } from "@preact/signals";
 import { useRef } from "preact/hooks";
 import { powos } from "../bridge.ts";
+import { Icon, type IconName } from "./icons.tsx";
 
 export interface QuickRect {
   left: number;
@@ -63,10 +65,12 @@ export const TILE_PAGES: Record<string, QuickSpec> = {
 };
 
 /**
- * The common settings pages a quick-page item can hold (the control center's "add quick page" row): each a stable
- * settings ACTION (an Intent action QuickPages.open resolves; never a search index id, those expire).
+ * The settings pages a quick-page item can hold, as an older host (no quickpage.pages) or the dev page has them: each a
+ * stable settings ACTION (an Intent action QuickPages.open resolves; never a search index id, those expire). On the phone
+ * the list is the device's own ([quickPages], QuickPageCatalog.kt): only the pages it really has, their own names and
+ * pictures.
  */
-export const QUICK_PAGES: { action: string; label: string }[] = [
+export const QUICK_PAGES: QuickPageInfo[] = [
   { action: "android.settings.WIFI_SETTINGS", label: "Wi-Fi" },
   { action: "android.settings.BLUETOOTH_SETTINGS", label: "Bluetooth" },
   { action: "android.settings.NFC_SETTINGS", label: "NFC" },
@@ -80,6 +84,64 @@ export const QUICK_PAGES: { action: string; label: string }[] = [
   { action: "android.settings.DATE_SETTINGS", label: "Date & time" },
   { action: "android.settings.APPLICATION_DEVELOPMENT_SETTINGS", label: "Developer options" },
 ];
+
+/** A settings page for a quick-page item: its ACTION, its name, the page's own picture (a PNG; [mono]: one colour, tinted). */
+export interface QuickPageInfo {
+  action: string;
+  label: string;
+  icon?: string;
+  mono?: boolean;
+}
+
+/** The pages to offer: the host's (quickpage.pages, this device's own), else [QUICK_PAGES]. */
+export const quickPages = signal<QuickPageInfo[]>(QUICK_PAGES);
+let pagesRead = false;
+/** Reads the device's pages once (the control center's edit mode asks); an older host keeps [QUICK_PAGES]. */
+export function loadQuickPages() {
+  const read = powos.quickpage?.pages;
+  if (pagesRead || !read) return;
+  pagesRead = true;
+  read().then((l) => Array.isArray(l) && l.length && (quickPages.value = l), () => (pagesRead = false));
+}
+
+/**
+ * Each page's own glyph (MDI, in the theme's colour) when it has no picture of its own: never the Settings app's gear
+ * for every page (the user, 11-02: "real settings icons, not all the gear").
+ */
+const QUICK_GLYPH: Record<string, IconName> = {
+  "android.settings.WIFI_SETTINGS": "wifi",
+  "android.settings.BLUETOOTH_SETTINGS": "bluetooth",
+  "android.settings.WIRELESS_SETTINGS": "web",
+  "android.settings.DATA_USAGE_SETTINGS": "chartDonut",
+  "android.settings.VPN_SETTINGS": "vpn",
+  "android.settings.NFC_SETTINGS": "nfcVariant",
+  "android.settings.DISPLAY_SETTINGS": "brightnessAuto",
+  "android.settings.SOUND_SETTINGS": "volumeHigh",
+  "android.settings.ZEN_MODE_SETTINGS": "bellOffOutline",
+  "android.intent.action.POWER_USAGE_SUMMARY": "battery",
+  "android.settings.BATTERY_SAVER_SETTINGS": "leaf",
+  "android.settings.LOCATION_SOURCE_SETTINGS": "mapMarker",
+  "android.settings.APPLICATION_SETTINGS": "apps",
+  "android.settings.ALL_APPS_NOTIFICATION_SETTINGS": "bellOutline",
+  "android.settings.INTERNAL_STORAGE_SETTINGS": "harddisk",
+  "android.settings.SECURITY_SETTINGS": "shieldLockOutline",
+  "android.settings.PRIVACY_SETTINGS": "eyeOffOutline",
+  "android.settings.ACCESSIBILITY_SETTINGS": "human",
+  "android.settings.INPUT_METHOD_SETTINGS": "keyboardOutline",
+  "android.settings.LOCALE_SETTINGS": "translate",
+  "android.settings.DATE_SETTINGS": "clockOutline",
+  "android.settings.SYNC_SETTINGS": "accountCircleOutline",
+  "android.settings.DEVICE_INFO_SETTINGS": "informationOutline",
+  "android.settings.APPLICATION_DEVELOPMENT_SETTINGS": "codeBraces",
+};
+
+/** A quick-page item's picture: the page's own (as drawn, or one colour tinted with the theme), else its glyph. */
+export function QuickFace({ action }: { action: string }) {
+  const q = quickPages.value.find((x) => x.action === action);
+  if (q?.icon && !q.mono) return <img src={q.icon} alt="" draggable={false} />;
+  if (q?.icon) return <span class="qp-mono" style={{ "--qp-mask": `url("${q.icon}")` }} />;
+  return <Icon name={QUICK_GLYPH[action] ?? "tuneVariant"} />;
+}
 
 /** A quick-page item's stored id ("qp:<ACTION>"), and back: its action, or null (not a quick-page item). */
 export const QUICK_ID = "qp:";

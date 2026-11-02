@@ -38,7 +38,7 @@ export function putBackInBar(): Promise<unknown> {
   return powos.home.remove(SEARCH_KEY);
 }
 
-/** Sets this mode's search spot (state.ts searchSpot), logged as the old edit-sheet pick was: only edit mode's drag writes it. */
+/** Sets this mode's search spot (state.ts searchSpot), logged: edit mode's drag (here) and the style screen's pick ([pickSearchSpot]). */
 function setSpot(v: "dock" | "bar", how: string) {
   const place = searchPlacement.value;
   if (!place || place.value === v) return;
@@ -55,6 +55,20 @@ export function dockSearch(): Promise<unknown> {
   // One home item for both screens (the host keeps one layout): the other screen's widget stays, hidden on this one
   // (grid.tsx itemsOn), until both are docked.
   return otherSpot() === "dock" ? putBackInBar() : Promise.resolve();
+}
+
+/**
+ * The style screen's "folded search" / "unfolded search" (screens.tsx; the user, 11-02: "the option to have the search
+ * bar as an icon was supposed to be a setting"): [mode]'s search the bar or the dock's button, as edit mode's drag
+ * makes it - docked on both screens, the grid's widget goes (dockSearch); a bar is the foot's pill, or the grid's widget
+ * where it was put.
+ */
+export function pickSearchSpot(mode: "mobile" | "unfolded", v: "dock" | "bar"): Promise<unknown> {
+  const place = searchSpot[mode];
+  if (place.value === v) return Promise.resolve();
+  console.info(`[powos] search placement (${mode}): ${place.value} -> ${v}, picked in settings`);
+  place.value = v;
+  return v === "dock" && searchSpot[mode === "mobile" ? "unfolded" : "mobile"].value === "dock" ? putBackInBar() : Promise.resolve();
 }
 
 /** The search spot of the screen not in use (folded / unfolded). */

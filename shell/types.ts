@@ -994,6 +994,11 @@ export interface Bridge {
     popout(token: string, id: number): Promise<boolean>;
     /** The page couldn't make quick page [token]'s card: the host's safety net (full screen, logged) now. */
     refused(token: string): Promise<boolean>;
+    /**
+     * Host-optional: this device's settings pages for the control center's "add quick page" row (QuickPageCatalog.kt):
+     * only ones it can open, each with its own name and picture (a PNG data URL; [mono]: one colour, tinted).
+     */
+    pages?(): Promise<{ action: string; label: string; icon?: string; mono?: boolean }[]>;
   };
   webwindows?: {
     enabled(): Promise<boolean>;

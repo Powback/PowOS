@@ -537,6 +537,8 @@ class ShellBridge(
             "quickpage.open" -> QuickPages.open(context, a.getJSONObject(0))
             "quickpage.popout" -> QuickPages.popOut(a.getString(0)) { if (webWindowsMade) webWindows.close(a.optInt(1, -1)) }
             "quickpage.refused" -> WebWindowLaunch.refused(QuickPageRoute.key(a.getString(0)))
+            // The control center's "add quick page" list: this device's settings pages, their own names and pictures.
+            "quickpage.pages" -> QuickPageCatalog.pages(context)
             // The window the user is in (its bar or body pressed; -1: home): Back / Forward go to it (WindowKeys).
             "webwindows.focus" -> webWindowsMade && webWindows.focus(a.getInt(0))
             "qs.set" -> quick.set(a.getString(0), a.getDouble(1)).let { quick.state() }
@@ -1827,7 +1829,8 @@ class ShellBridge(
         // speech.warm: the recognizers' package manager / settings lookups (and speech.json) ran on the main thread
         // and a 58 ms frame landed 54 ms after it (perf-1793456386286): looked up here; only the recognizer binding,
         // which Android requires on the main thread, is posted back there (NativeSpeech.warm).
-        private val LOOKUPS = setOf("qs.destinations", "speech.warm")
+        // quickpage.pages: a resolveActivity and an icon drawn per settings page (QuickPageCatalog).
+        private val LOOKUPS = setOf("qs.destinations", "speech.warm", "quickpage.pages")
         private val lookups = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "shell-lookups").apply { isDaemon = true } }
 
         /** One thread for them all, so a page's set then get stay in that order. */

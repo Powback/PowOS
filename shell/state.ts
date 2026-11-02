@@ -259,8 +259,8 @@ export const dockPosition = computed(() => validDockPosition(dockTry.value || si
  * Home's search per mode: where its widget is, folded and unfolded each their own (the user, 2026-10-31 15:34: "grab
  * the search as a widget and put it into the sidebar"). "dock": the round button between the dock's pinned apps and its
  * recent ones (ui/docksearch.tsx); "bar": the pill widget - in home's foot, or on the grid where it was put (the
- * "panel:search" home item, ui/searchwidget.tsx). Written only by edit mode's drag (searchwidget.tsx dockSearch /
- * undockSearch, logged). Defaults: folded docked, unfolded the bar. The desktop shell has its own launcher, the bar.
+ * "panel:search" home item, ui/searchwidget.tsx). Written by edit mode's drag (searchwidget.tsx dockSearch /
+ * undockSearch) and the style screen's "folded search" / "unfolded search" (searchwidget.tsx pickSearchSpot), logged. Defaults: folded docked, unfolded the bar. The desktop shell has its own launcher, the bar.
  * [searchTry]: a check's choice for this page only, never stored (as dockTry).
  */
 migrateSearchPlace();

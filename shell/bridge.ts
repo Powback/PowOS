@@ -306,6 +306,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       open: (spec) => call<boolean>("quickpage.open", spec),
       popout: (token, id) => call<boolean>("quickpage.popout", token, id),
       refused: (token) => call<boolean>("quickpage.refused", token),
+      pages: () => call("quickpage.pages"), // detect: an older APK has none (ui/quickpage.tsx keeps QUICK_PAGES)
     },
     tasks: {
       list: () => call<RecentTask[]>("tasks.list"),

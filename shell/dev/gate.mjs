@@ -9075,6 +9075,35 @@ async function qp2Add(p) {
   return stored.includes(QP2_ID) ? out : [...out, `QP2: the stored row ${JSON.stringify(stored)} lacks ${QP2_ID} (a stable settings ACTION)`];
 }
 
+/**
+ * QP2: the "add quick page" choices are the host's own pages (quickpage.pages, [QP2_PAGES]: NFC is not on this device),
+ * each with ITS picture - as drawn, one-colour tinted (.qp-mono), or the page's glyph when it has none - never one
+ * picture for all (the user, 11-02: "real settings icons, not all the gear").
+ */
+const QP2_PAGES = [
+  { action: "android.settings.WIFI_SETTINGS", label: "Wi-Fi", icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 4'%3E%3Crect width='4' height='4' fill='%2336c'/%3E%3C/svg%3E", mono: false },
+  { action: "android.settings.BLUETOOTH_SETTINGS", label: "Bluetooth", icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 4'%3E%3Ccircle cx='2' cy='2' r='2'/%3E%3C/svg%3E", mono: true },
+  { action: "android.settings.DISPLAY_SETTINGS", label: "Display" },
+];
+/** QP2: the "add quick page" choices on screen, and [label]'s chip. */
+const qp2Choices = () => [...document.querySelectorAll(".cc3-quickpages [aria-label^='add quick page ']")];
+const qp2Face = (label) => document.querySelector(`.cc3-quickpages [aria-label="add quick page ${label}"] .cc3-chip`);
+function qp2Faces() {
+  const shown = qp2Choices();
+  const names = JSON.stringify(shown.map((b) => b.getAttribute("aria-label").slice("add quick page ".length)));
+  const want = JSON.stringify(QP2_PAGES.map((q) => q.label));
+  const display = qp2Face("Display");
+  const imgs = shown.map((b) => b.querySelector(".cc3-chip img")?.getAttribute("src")).filter(Boolean);
+  const checks = [
+    [names === want, `QP2: the "add quick page" row lists ${names}, not the device's ${want}`],
+    [qp2Face("Wi-Fi")?.querySelector("img")?.getAttribute("src") === QP2_PAGES[0].icon, "QP2: Wi-Fi's choice doesn't show the page's own picture"],
+    [!!qp2Face("Bluetooth")?.querySelector(".qp-mono"), "QP2: Bluetooth's one-colour picture isn't drawn tinted (.qp-mono)"],
+    [!!display?.querySelector("svg") && !display.querySelector("img"), "QP2: Display (no picture of its own) doesn't show its glyph"],
+    [new Set(imgs).size === imgs.length, `QP2: choices share one picture: ${imgs.length} images, ${new Set(imgs).size} distinct`],
+  ];
+  return checks.filter(([ok]) => !ok).map(([, why]) => why);
+}
+
 /** QP2: a tap on the item: ONE quickpage.open ([opened]) with its action, anchored to the item's rect. */
 async function qp2Tap(opened) {
   const c = qp2Chip();
@@ -9091,21 +9120,27 @@ async function qp2Tap(opened) {
 
 /** QP2: the control center's "add quick page" Wi-Fi item: stored as its ACTION, opened anchored to its chip. */
 async function ccQuickPageItem() {
-  const [S, E, B] = await Promise.all(["./state.ts", "./ui/ccexpand.ts", "./bridge.ts"].map((m) => window.__gw.mod(m)));
+  const [S, E, B, Q] = await Promise.all(["./state.ts", "./ui/ccexpand.ts", "./bridge.ts", "./ui/quickpage.tsx"].map((m) => window.__gw.mod(m)));
   const p = B.powos;
-  const was = { qp: p.quickpage, row: await p.store.get("controls.launchers") };
+  const was = { qp: p.quickpage, row: await p.store.get("controls.launchers"), pages: Q.quickPages.value };
   const opened = [];
-  p.quickpage = { open: async (spec) => (opened.push(spec), true), popout: async () => true, refused: async () => true };
+  p.quickpage = { open: async (spec) => (opened.push(spec), true), popout: async () => true, refused: async () => true, pages: async () => QP2_PAGES };
   try {
+    Q.loadQuickPages();
+    await qp2Wait(() => Q.quickPages.value === QP2_PAGES || Q.quickPages.value.length === QP2_PAGES.length);
     S.notif.value = true;
     E.ccEditing.value = true;
-    const out = await qp2Add(p);
+    await qp2Wait(() => document.querySelector(".cc3-quickpages"));
+    const faces = qp2Faces();
+    const out = [...faces, ...(await qp2Add(p))];
+    if (qp2Chip()?.querySelector(".cc3-chip img")?.getAttribute("src") !== QP2_PAGES[0].icon) out.push("QP2: the added Wi-Fi item's chip doesn't show the page's own picture");
     E.ccEditing.value = false;
     await window.__gw.settled();
     return [...out, ...(await qp2Tap(opened))];
   } finally {
     E.ccEditing.value = false;
     p.quickpage = was.qp;
+    Q.quickPages.value = was.pages;
     await p.store.set("controls.launchers", was.row ?? null);
   }
 }
@@ -11511,6 +11546,12 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, position] of [["folded", "bottom"], ["folded", "right"], ["unfolded", "bottom"], ["unfolded", "right"], ["unfolded", "left"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `dock-search-${label}-${position}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos) => (await importShim("./dev/dock-search-check.js")).dockSearchCheck(pos), position))));
+  // SS1 (dev/dock-search-check.js searchSettingCheck; the user, 11-02: "the option to have the search bar as an icon
+  // was supposed to be a setting"): Settings › style's "folded search" / "unfolded search" picks dock button | bar, home
+  // follows at once - folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const label of ["folded", "unfolded"])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `search-setting-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/dock-search-check.js")).searchSettingCheck()))));
   // Perf P1 (dev/dock-search-check.js dockSpeechRenders; 02:23 trace): a dictation's words streaming in redraw the dock
   // button only for its on/off, the dock and its cells never - folded and unfolded.
   if (process.env.SHELL_PAGES !== "0")
@@ -11886,7 +11927,7 @@ try {
       open(browser, `${ORIGIN}/index.html?mode=shade`, "cc-quick-page", { width: 404, height: 900 }).then(async (r) => {
         await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
         // The checks' helpers as page globals (an evaluated function carries no closure).
-        await r.page.evaluate(`window.QP2_ID = ${JSON.stringify(QP2_ID)}; window.qp2Wait = ${qp2Wait}; window.qp2Chip = ${qp2Chip}; window.qp2Add = ${qp2Add}; window.qp2Tap = ${qp2Tap};`);
+        await r.page.evaluate(`window.QP2_ID = ${JSON.stringify(QP2_ID)}; window.qp2Wait = ${qp2Wait}; window.qp2Chip = ${qp2Chip}; window.qp2Add = ${qp2Add}; window.qp2Tap = ${qp2Tap}; window.QP2_PAGES = ${JSON.stringify(QP2_PAGES)}; window.qp2Choices = ${qp2Choices}; window.qp2Face = ${qp2Face}; window.qp2Faces = ${qp2Faces};`);
         r.problems.push(...((await r.page.evaluate(ccQuickPageItem).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])) ?? []));
         return { ...r, ready: true, ms: Date.now() - r.started };
       }),

@@ -53,7 +53,7 @@ export const settingDestinations: { screen: ScreenName; label: string; target?: 
   { screen: "store", label: "Widget store", keywords: "home widgets install" },
   { screen: "style", label: "Theme", target: "theme", keywords: "appearance style colors colours" },
   { screen: "style", label: "Wallpaper", target: "background", keywords: "background image" },
-  ...["folded dock position", "unfolded dock position", "desktop dock position", "recent apps in the drawer", "separate notifications & controls", "control center", "pet", "icon colours", "font"].map((label) => ({ screen: "style" as const, label, target: label, keywords: "settings appearance launcher home docking bottom left right" })),
+  ...["folded dock position", "unfolded dock position", "desktop dock position", "folded search", "unfolded search", "recent apps in the drawer", "separate notifications & controls", "control center", "pet", "icon colours", "font"].map((label) => ({ screen: "style" as const, label, target: label, keywords: "settings appearance launcher home docking bottom left right" })),
   { screen: "style", label: "Swipe up panels", target: "swipe up from the left: PowOS AI", keywords: "launcher gestures assistant" },
   ...["swipe up from a bottom corner over apps: apps, PowOS AI", "icon colors", "system colors", "glass", "glass edges", "text"].map((label) => ({ screen: "style" as const, label, target: label, keywords: "settings appearance terminal font size blur liquid gestures" })),
   ...["show handles", "sensitivity"].map((label) => ({ screen: "gestures" as const, label, target: label, keywords: "settings edge gestures swipe" })),

@@ -3357,6 +3357,8 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .cc3-launchers { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--soft-fill); }
 .cc3-launch .cc3-chip { position: relative; }
 .cc3-chip img { width: 30px; height: 30px; border-radius: 8px; pointer-events: none; }
+/* A settings page's one-colour picture (quickpage.tsx QuickFace): its shape, in the theme's text colour. */
+.cc3-chip .qp-mono { width: 26px; height: 26px; background: currentColor; mask: var(--qp-mask) center / contain no-repeat; pointer-events: none; }
 .cc3-launch.on .cc3-chip { background: var(--color-accent); transform: scale(0.94); }
 .cc3-badge {
   position: absolute; top: -3px; right: -3px; display: flex; align-items: center; justify-content: center;

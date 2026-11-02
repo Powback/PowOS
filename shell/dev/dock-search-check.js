@@ -648,3 +648,56 @@ export async function dockSpeechRenders(position) {
   for (const k of ["Dock", "AppCell", "memo(AppCell)"]) if (counts[k]) fails.push(`${position}: ${k} rendered ${counts[k]}x over 20 words, expected 0`);
   return { fails, counts };
 }
+
+/**
+ * SS1 (the user, 11-02: "the option to have the search bar as an icon was supposed to be a setting"): Settings › style
+ * has "folded search" and "unfolded search", each "dock button | bar" - a pick on this screen's own row makes home's
+ * search that, at once (the dock's button and no bar, or the bar and no button), and is stored as the spot; the other
+ * screen's spot is left alone. gate.mjs's search-setting-folded / -unfolded.
+ */
+/** The style screen's [name] choice's [option] button (Settings › style must be open). */
+const searchSeg = (name, option) => [...document.querySelectorAll(`[data-setting="${name}"] .scr-seg button`)].find((b) => b.textContent.trim() === option);
+
+/** One pick of [option] on [c].name: the choice, the spots ([c].was: before), then home with Settings shut. */
+async function searchSettingPick(c, option, want) {
+  const { S, Sc, mode, name, was } = c;
+  const b = searchSeg(name, option);
+  if (!b) return [`"${name}" has no "${option}"`];
+  b.click();
+  await sleep(300);
+  const other = mode === "mobile" ? "unfolded" : "mobile";
+  const at = `"${name}" → "${option}"`;
+  const checks = [
+    [searchSeg(name, option)?.classList.contains("on"), `${at}: not shown picked`],
+    [S.searchSpot[mode].value === want, `${at}: the spot is "${S.searchSpot[mode].value}", not "${want}"`],
+    [S.searchSpot[other].value === was[other], `${at}: the other screen's spot changed to "${S.searchSpot[other].value}"`],
+  ];
+  Sc.screens.value = [];
+  await sleep(400);
+  const docked = !!document.querySelector(".home > .dock .dock-search");
+  const bar = !!document.querySelector(".home > .bar");
+  checks.push([docked === (want === "dock"), `${at}: home's dock button ${docked ? "shown" : "missing"}`], [bar === (want === "bar"), `${at}: home's bar ${bar ? "shown" : "missing"}`]);
+  Sc.screens.value = ["settings", "style"];
+  await sleep(400);
+  return checks.filter(([ok]) => !ok).map(([, why]) => why);
+}
+
+export async function searchSettingCheck() {
+  const S = await importShim("./state.ts");
+  const Sc = await importShim("./screens.ts");
+  const mode = S.dockMode.value === "unfolded" ? "unfolded" : "mobile";
+  const name = mode === "mobile" ? "folded search" : "unfolded search";
+  const was = { mobile: S.searchSpot.mobile.value, unfolded: S.searchSpot.unfolded.value };
+  const fails = [];
+  try {
+    Sc.screens.value = ["settings", "style"];
+    await sleep(400);
+    for (const label of ["folded search", "unfolded search"]) if (!document.querySelector(`[data-setting="${label}"]`)) fails.push(`Settings › style has no "${label}" choice`);
+    for (const [option, want] of [["dock button", "dock"], ["bar", "bar"], ["dock button", "dock"]]) fails.push(...(await searchSettingPick({ S, Sc, mode, name, was }, option, want)));
+  } finally {
+    Sc.screens.value = [];
+    S.searchSpot.mobile.value = was.mobile;
+    S.searchSpot.unfolded.value = was.unfolded;
+  }
+  return fails.map((f) => `${mode}: ${f}`);
+}
