@@ -13,6 +13,7 @@
 #                                                  resize, each hold sample) or when one fails. The hidden display goes
 #                                                  dark with the screen (10-31 889b6cb5, a4dcb83b), so nothing can be
 #                                                  judged; ship.sh window_gate keeps the ship's requests and retries.
+#                                                  Also when the Linux step fails while the user touched the phone (f384).
 #                                                  The check never wakes the screen.
 # What it does, touching nothing of the user's:
 #   1. waits (idle.sh --wait, AWAKE_ONLY) for the screen on and no touch for WR_IDLE_S (30) s, the keyguard down and the
@@ -159,9 +160,16 @@ except Exception: print('')"; }
   # >= 0.1%; the window is resized once after the first, so KWin draws a second); (c) the consumer's stop returned in
   # <= 1 s; (d) the window quit and KWin said closed; the page's window list unchanged (wl0/wl1 below). Not run (logged,
   # not a FAIL) where web windows don't take Linux windows (folded, the setting off): KWin would open a task on screen.
+  # f384 (11-01 16:44/16:48): with the user on the phone, foot drew 8 flat frames (shell.css-only ship) and KWin's
+  # "closed" came after the selftest's fixed 3 s close wait (terminal.tsx ship); 6 min earlier, idle, it passed. So:
+  # KWin's close is WAITED for (kwinClosed is set on the selftest even after "done": WebWindows.linuxClosed), up to
+  # WR_CLOSE_WAIT_S (12) s, and a Linux-step failure while the user touched the phone (touch IRQs moved during the
+  # step: their load, not the window path) is NOT JUDGED (exit 2: ship.sh window_gate keeps the request and retries).
+  lfail() { [ -n "${LI0:-}" ] && [ "$(irq)" != "$LI0" ] && { log "linux: FAIL ($*) while the user touched the phone - not judged"; hclean; log "window-render: NOT JUDGED (the user was using the phone) - $OUT"; exit 2; }; hfail "$@"; }
   linux_step() {
     local app=${WR_LINUX_APP:-foot} lr lj st
     awake_or_nj "linux"
+    LI0=$(irq)
     lr=$(hb webwindows.selftestLinux "['$app']"); log "linux: webwindows.selftestLinux $app: ${lr:-no answer}"
     case $lr in
       started) ;;
@@ -172,15 +180,16 @@ except Exception: print('')"; }
       sleep 1; lj=$(hb webwindows.selftestLinuxResult "[]"); st=$(jf "$lj" state); [ "$st" = done ] && break
     done
     log "linux: $lj"
-    [ "$st" = done ] || hfail "linux: the selftest never finished (${lj:-no answer})"
-    [ "$(jf "$lj" kwin)" -ge 0 ] 2>/dev/null || hfail "linux: no KWin window of $app came ($(jf "$lj" error))"
+    [ "$st" = done ] || lfail "linux: the selftest never finished (${lj:-no answer})"
+    [ "$(jf "$lj" kwin)" -ge 0 ] 2>/dev/null || lfail "linux: no KWin window of $app came ($(jf "$lj" error))"
     log "linux: (a) KWin window $(jf "$lj" kwin) ($(jf "$lj" kwinApp)) taken offscreen, never offered to the page"
-    [ "$(jf "$lj" upMs)" -ge 0 ] 2>/dev/null || hfail "linux: KWin window $(jf "$lj" kwin)'s consumer never came up ($(jf "$lj" error))"
-    [ "$(jf "$lj" content)" -ge 2 ] 2>/dev/null || hfail "linux: KWin window $(jf "$lj" kwin)'s consumer delivered $(jf "$lj" content) frames with content of $(jf "$lj" frames) (want >= 2; best $(jf "$lj" best))"
+    [ "$(jf "$lj" upMs)" -ge 0 ] 2>/dev/null || lfail "linux: KWin window $(jf "$lj" kwin)'s consumer never came up ($(jf "$lj" error))"
+    [ "$(jf "$lj" content)" -ge 2 ] 2>/dev/null || lfail "linux: KWin window $(jf "$lj" kwin)'s consumer delivered $(jf "$lj" content) frames with content of $(jf "$lj" frames) (want >= 2; best $(jf "$lj" best))"
     log "linux: (b) consumer up in $(jf "$lj" upMs) ms, $(jf "$lj" content) of $(jf "$lj" frames) frames with content ($(jf "$lj" best))"
-    st=$(jf "$lj" stopMs); { [ "$st" -ge 0 ] && [ "$st" -le 1000 ]; } 2>/dev/null || hfail "linux: the consumer's stop took ${st} ms (want <= 1000; -1 = still blocked after 3 s)"
+    st=$(jf "$lj" stopMs); { [ "$st" -ge 0 ] && [ "$st" -le 1000 ]; } 2>/dev/null || lfail "linux: the consumer's stop took ${st} ms (want <= 1000; -1 = still blocked after 3 s)"
     log "linux: (c) stop returned in $st ms"
-    [ "$(jf "$lj" kwinClosed)" = True ] || hfail "linux: KWin window $(jf "$lj" kwin) wasn't closed after the quit"
+    for _ in $(seq 1 "${WR_CLOSE_WAIT_S:-12}"); do [ "$(jf "$lj" kwinClosed)" = True ] && break; sleep 1; lj=$(hb webwindows.selftestLinuxResult "[]"); done
+    [ "$(jf "$lj" kwinClosed)" = True ] || lfail "linux: KWin window $(jf "$lj" kwin) wasn't closed after the quit"
     log "linux: (d) KWin closed window $(jf "$lj" kwin)"
   }
   trap 'hclean' EXIT

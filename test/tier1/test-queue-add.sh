@@ -115,6 +115,35 @@ new=$(git -C "$VA" rev-parse HEAD)
 out=$(run_queue add t1 dummy.sh echo dup 2>&1)
 grep -q "already queued" <<<"$out" && ok "f258: newer-need job kept against an older add" || bad "f258: newer-need job kept against an older add" "$out"
 
+# ============================================= f317: the newest add of the same check wins ===
+rm -rf "$VQ"; mkdir -p "$VQ"; echo "up" > "$BOARD_STATE"
+printf '#!/bin/bash\necho VERSION "$1"\nkwin_install\n' > "$VA/kwin-install.sh"; chmod +x "$VA/kwin-install.sh"
+run_queue add t1 dummy.sh --round 7 --part 1 >/dev/null; sleep 1
+run_queue add t1 dummy.sh --round 7 --part 2 >/dev/null; sleep 1
+run_queue add t2 dummy.sh --round 7 --part 1 >/dev/null; sleep 1
+out=$(run_queue add t1 dummy.sh --round 8 --part 1 2>&1)
+n=$(ls "$VQ"/*.job | wc -l | tr -d ' ')
+{ grep -q "superseded queued" <<<"$out" && [ "$n" = 3 ] && ! grep -l 'round 7 --part 1' "$VQ"/*.job | xargs grep -q 'task=t1' \
+  && grep -q 'round 8 --part 1' "$VQ"/*.job && ls "$VQ"/done/*.superseded >/dev/null 2>&1; } \
+  && ok "f317: an e2e part of a newer round replaces the same part of an older one (other parts/tasks kept)" \
+  || bad "f317: an e2e part of a newer round replaces the same part of an older one" "n=$n $out"
+run_queue add t1 kwin-install.sh 3.35 >/dev/null; sleep 1
+out=$(run_queue add t1 kwin-install.sh 3.36 2>&1)
+{ grep -q "superseded queued" <<<"$out" && ! grep -q 'kwin-install.sh 3.35' "$VQ"/*.job && grep -q 'kwin-install.sh 3.36' "$VQ"/*.job; } \
+  && ok "f317: a newer kwin-install version replaces the queued older one" || bad "f317: a newer kwin-install version replaces the queued older one" "$out"
+
+# ============================================= f368: e2e-queue fails loudly on a refused add =
+E="$T/e2e"; mkdir -p "$E/tools/phone/verify"; cp "$src/tools/phone/verify/e2e-queue.sh" "$E/tools/phone/verify/"
+printf '#!/bin/bash\necho "queue.sh: no board task x" >&2; exit 2\n' > "$E/tools/phone/verify/queue.sh"; chmod +x "$E/tools/phone/verify/queue.sh"
+mkdir -p "$HOME/.cache/powos-e2e"; echo 41 > "$HOME/.cache/powos-e2e/round"
+out=$(QUEUE_DIR="$T/eq" bash "$E/tools/phone/verify/e2e-queue.sh" 2>&1); rc=$?
+{ [ $rc != 0 ] && grep -q "NOT queued" <<<"$out" && ! grep -q "round 42 queued" <<<"$out" && [ "$(cat "$HOME/.cache/powos-e2e/round")" = 41 ]; } \
+  && ok "f368: e2e-queue exits non-zero, says NOT queued, gives the round number back" || bad "f368: e2e-queue on refused adds" "rc=$rc $out"
+printf '#!/bin/bash\necho "queued $*"\n' > "$E/tools/phone/verify/queue.sh"
+out=$(QUEUE_DIR="$T/eq" bash "$E/tools/phone/verify/e2e-queue.sh" 2>&1); rc=$?
+{ [ $rc = 0 ] && grep -q "round 42 queued" <<<"$out" && grep -q -- "--budget 450" <<<"$out"; } \
+  && ok "f368: e2e-queue still queues a round (450 s parts) when every add succeeds" || bad "f368: e2e-queue happy path" "rc=$rc $out"
+
 # Final result
 echo ""
 if [ $fails -eq 0 ]; then

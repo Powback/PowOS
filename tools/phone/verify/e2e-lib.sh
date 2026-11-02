@@ -13,7 +13,7 @@
 #   - only what the journey opened is closed (new tasks of its apps, Linux apps it started); the page, the screen state
 #     and the app in front it started from come back; the layout (home.get + home.wide) must be the same at the end;
 #   - a step's FAIL doesn't end the journey (more screenshots for the manager): exit 0 with FAIL lines = a FAIL.
-# A journey longer than the queue's 300 s budget runs as parts (--part K of LAST): each part is its own job, numbers
+# A journey longer than its queue budget (e2e-queue.sh: 450 s) runs as parts (--part K of LAST): each part is its own job, numbers
 # its steps from (K-1)*25+1, replaces only its own files and steps.txt lines; the last part mails the manager.
 #   e2e_args "$@"; e2e_init <journey>; e2e_setup [inner]; ... step/pass/fail ...; e2e_finish
 here=${here:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}; T=$here/..; A="$T/adb.sh"
