@@ -397,8 +397,9 @@ function unseat(bar: HTMLElement) {
 }
 
 /**
- * The side button over PowOS AI's page (ShellBridge.focusAiOnHome; the user, 11-01 21:32: the assist sheet stacked a
- * second input over the page's): no sheet - the page's one field, this bar, takes the keys.
+ * "ai.focus": the page's one field, this bar, takes the keys. Hosts since 11-02 don't send it - the side button opens
+ * the assist overlay over the page too (the user: "I tried to open like the AI overlay with the side button on the AI
+ * page and it doesn't work"); kept for a host that asks the page's field to focus.
  */
 if (homePage)
   powos.on("ai.focus", () => {

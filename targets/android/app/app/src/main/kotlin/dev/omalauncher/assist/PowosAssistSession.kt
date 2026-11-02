@@ -63,18 +63,16 @@ class PowosAssistSession(
         showFlags: Int,
     ) {
         super.onShow(args, showFlags)
-        // Over home's PowOS AI page: that page's own field takes the keys, no second chat sheet over it.
-        if (dev.omalauncher.shell.ShellBridge.focusAiOnHome()) {
-            android.util.Log.i("speech", "assist: over the PowOS AI page - its field focused, no sheet")
-            finish()
-            return
-        }
+        // Over any screen the overlay opens - home's PowOS AI page too (the user, 11-02: "I tried to open like the AI
+        // overlay with the side button on the AI page and it doesn't work"; it used to only focus that page's field).
         // The pet over apps keeps out of the assistant (its crop screen) while it shows.
         dev.omalauncher.system.PetOverlay.assistShowing = true
         // Drawn again (paused while hidden, onHide).
         host?.web?.onResume()
         screenText = ""
         shot = null
+        // The last summoning's screenshot, still encoding, isn't this one's.
+        encoder.cancel()
         // A new summoning: the page forgets the last one (its question, answer view, cut-out) - and listens.
         host?.bridge?.emit("assist.reset", null)
         // Hold to talk: the side button still down, the dictation lasts until it's let go, and then sends (PowerKey
@@ -153,17 +151,24 @@ class PowosAssistSession(
         sendScreen()
     }
 
+    /**
+     * The JPEG is encoded and written on [ShotEncoder]'s thread: on the main thread a full-screen compress stalled the
+     * whole UI for each summoning. The page gets it (assist.context) once it's on disk - the same file, same quality.
+     */
     override fun onHandleScreenshot(screenshot: Bitmap?) {
         screenshot ?: return
         val dir = File(context.cacheDir, "assist").apply { mkdirs() }
-        val file = File(dir, "screen.jpg")
-        file.outputStream().use { screenshot.compress(Bitmap.CompressFormat.JPEG, 85, it) }
-        shot = file
-        sendScreen()
+        encoder.encode(File(dir, "screen.jpg"), { screenshot.compress(Bitmap.CompressFormat.JPEG, 85, it) }) {
+            shot = it
+            sendScreen()
+        }
     }
+
+    private val encoder = ShotEncoder()
 
     override fun onDestroy() {
         watchdog?.stop()
+        encoder.cancel()
         // Live mode ends with the session (the capture would otherwise go on, unseen).
         LiveCapture.stop(context)
         // The page stays warm for the next time (AssistWeb); only this session's window lets go of it.

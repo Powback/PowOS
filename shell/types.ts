@@ -626,8 +626,9 @@ export interface Bridge {
     /** Opens PowOS AI's own app. */
     open(): Promise<void>;
     /**
-     * Home's PowOS AI page shown or not (powai.tsx): while it is, the side button doesn't stack the assist sheet - a
-     * second chat - over it; home gets "ai.focus" and its field takes the keys (PowosAssistSession.onShow). ?: older hosts.
+     * Home's PowOS AI page shown or not (powai.tsx). Hosts since 11-02 take it and drop it: the side button opens the
+     * assist overlay over that page too (the user: "I tried to open like the AI overlay with the side button on the AI
+     * page and it doesn't work"), so no host sends "ai.focus" any more. ?: older hosts.
      */
     pageShown?(shown: boolean): Promise<void>;
     /**
