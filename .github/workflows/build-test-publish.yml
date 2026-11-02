@@ -116,7 +116,14 @@ jobs:
   # red builds — the image only leaves this runner if tests passed.
   build-test-publish:
     needs: lint
-    runs-on: ubuntu-latest
+    # HACK: pinned to ubuntu-24.04 because ubuntu-latest became ubuntu-26.04
+    # (kernel 7.0), where osbuild inside bootc-image-builder dies in
+    # org.osbuild.container-deploy with "mount: /run/osbuild/containers/storage:
+    # permission denied" after fchownat() EPERMs, even with sudo + --privileged
+    # + the root storage bind (osbuild/osbuild#2579: MountGuard's MS_PRIVATE
+    # mount returns EACCES on 7.0). Real fix: drop the pin once bib ships an
+    # osbuild with #2579 fixed (or apply the 26.04 AppArmor override).
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
