@@ -204,6 +204,20 @@ wgone() { case $1 in w*) [ "$(wwhost "$1" gone)" = true ] ;; *) [ -z "$(tasks | 
 # wframe <title text>: that window's frame (a plain substring: "PowOS window bar 12}" - the } ends the title).
 wframe() { sh_ "dumpsys window windows" | awk -v p="$1" '/^ *Window #/{f=(index($0,p)>0)} f' | grep -oE ' frame=\[-?[0-9]+,-?[0-9]+\]\[-?[0-9]+,-?[0-9]+\]' | head -1 | tr -c '0-9\n-' ' ' | xargs; }
 dp() { echo $(($1 * DENS / 160)); }
+# shadeup: "up" while PowOS's shade window shows (open, or a banner), else "down". `cmd statusbar collapse` only reaches
+# SystemUI's panel, never PowOS's shade: 11-02 render-scan closed it that way, left it open (invisible to home's DOM
+# checks), and the next journey's first tap (search-setting 01-inner-dock: 0 pointerdowns on home, the shade's window
+# took focus) went to the shade instead of Settings.
+# Up = shown and touchable (a reload's alpha-0 window takes no touch: not up).
+shadeup() { sh_ "dumpsys window windows" | awk '/^ *Window #/{f=(index($0,"PowOS shade}")>0)} f && / fl=/{nt=(index($0,"NOT_TOUCHABLE")>0)} f && /mViewVisibility=/{print ((index($0,"mViewVisibility=0x0 ")>0 && !nt) ? "up" : "down"); exit}'; }
+# shade_shut [why]: PowOS's shade put away by the user's routes - Back (the open shade has focus), then Home (its
+# CLOSE_SYSTEM_DIALOGS "homekey" settles it shut); logged when it was up.
+shade_shut() {
+  [ "$(shadeup)" = up ] || return 0
+  sh_ "input keyevent 4"; sleep 1.2
+  [ "$(shadeup)" = up ] && { sh_ "input keyevent 3"; sleep 1.5; }
+  log "PowOS's shade was down at ${1:-a step}: put away (Back/Home) - now $(shadeup)"
+}
 # screenrect "l t r b": a SurfaceFlinger HWC rect (Disp Frame: the panel's own orientation) in screen px. The inner
 # screen is mounted at 270 (installOrientation 3): its raw rects are the window's turned (window-rec/window-live read
 # Calculator's content at "437 431 2145 1791" for a task at 477 437 1837 2145, 2026-10-23). Needs W, H (e2e_setup).
@@ -396,6 +410,7 @@ e2e_setup() {
   chk lock
   # Home's page first: going home while home shows turns it to page 1 (state.ts goHome).
   PAGE0=$(hpage); [[ $PAGE0 =~ ^-?[0-9]+$ ]] || PAGE0=0; LAY0=$(layout)
+  shade_shut "the start"
   sh_ "cmd statusbar collapse; am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1.5; chk home
   # The journey starts on page 1 (PowOS AI's page or another one: back to it at the end).
   hemit system.home null
@@ -424,6 +439,8 @@ e2e_restore() {
   done <<<"$(tasks)"
   local p kill=""; for p in $E2E_LINUX; do grep -qx "$p" <<<"$LIN0" || kill="$kill $p"; done
   [ -n "$kill" ] && us "for p in$kill; do pkill -x \$p; done; true" >/dev/null
+  # The journey's shade never left down for the next one (its window over home eats the next tap).
+  SHADE_LEFT=$(shadeup); shade_shut "the restore"
   [ $FORCED = 1 ] && { device_state_reset; sleep 1.5; }
   sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1
   # Once more after home is up: a minimised window (under home) wasn't in the list the first read saw (e2e r3 part 1
@@ -450,6 +467,7 @@ e2e_finish() {
     step end "back where the journey started: home's page $PAGE0, everything it opened closed"
     local pg left; pg=$(hpage); left=$(tasks | while read -r id pkg vis; do grep -q "^$id " <<<"$TASKS0" || { grep -qE "$E2E_APPS" <<<"$pkg" && echo "$id:$pkg"; }; done)
     [ "$pg" = "$PAGE0" ] && [ -z "$left" ] && pass "home on page $pg as at the start, none of the journey's windows left" || fail "at the end: page $pg (started $PAGE0), left open: ${left:-none}"
+    [ "${SHADE_LEFT:-}" = up ] && note "the journey left PowOS's shade down - the restore put it away"
   else
     step end "back where the journey started: the app in front then (task $TOPT) in front again"
     note "the journey started over an app (task $TOPT); it is back in front"

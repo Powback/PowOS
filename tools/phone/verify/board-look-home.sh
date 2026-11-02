@@ -185,7 +185,7 @@ if [ "$CASE" = render-scan ]; then
     if [ "$s" = lock ]; then case $v in on=*) rsjudge lock "$v" ;; *) note "lock: its page didn't answer ($v) - the lock face needs the phone locked, not shown by script" ;; esac
     else rsjudge "$s" "$v"; fi
     case $s in
-      shade) sh_ "cmd statusbar collapse"; sleep 1 ;;
+      shade) shade_shut "the shade's read" ;;
       pull) back 1.2; LOPEN= ;;
       recents) back 1.5; LOPEN= ;;
       assist) sh_ "cmd voiceinteraction hide" >/dev/null; sleep 1; AOPEN= ;;
@@ -193,7 +193,7 @@ if [ "$CASE" = render-scan ]; then
   done
   look_restore; sleep 1.5
   # The shade opened again to read it after the restore (closed, its page wouldn't answer).
-  hcall shade.open "[]" "()=>'ok'" >/dev/null; sleep 1.5; v=$(ev "$PROBE" shade); sh_ "cmd statusbar collapse"; log "shade after restore: $v"
+  hcall shade.open "[]" "()=>'ok'" >/dev/null; sleep 1.5; v=$(ev "$PROBE" shade); shade_shut "the read after the restore"; log "shade after restore: $v"
   case $METER0 in *'"on":true'*) note "rs was on at the start: left on" ;; *) case $v in "cdp: no answer"*) note "shade did not answer CDP after the restore - not measured" ;; on=false*) pass "rs back off: shade overlay gone" ;; *) fail "rs restored but the shade overlay is still up ($v)" ;; esac ;; esac
 fi
 
