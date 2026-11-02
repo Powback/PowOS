@@ -1874,14 +1874,16 @@ async function switcherSplitPairCheck(layout) {
 async function switcherHomeSwipeCheck(page) {
   const up = await page.evaluate(switcherUpForHomeSwipe);
   if (up.length) return up;
-  const { mid, gap, dur } = await page.evaluate(homeSwipeMidFrames, 3000);
+  const { mid, moved, gap, dur } = await page.evaluate(homeSwipeMidFrames, 3000);
   const fails = await page.evaluate(switcherGoneFails);
-  // A page starved of frames (11-02: the gate's browser at 721 s, a frame every ~150 ms) can't draw 3 mid-collapse
-  // frames of a ~300 ms fade: there the fade is proven by time - a mid frame drawn and the collapse a real animation of
-  // >= 150 ms - not by a frame count the machine took away. A page drawing normally (median frame < 40 ms) still needs 3.
-  const starved = gap >= 40;
-  if (starved ? mid < 1 || dur < 150 : mid < 3)
-    fails.unshift(`the home swipe's close jumped: ${mid} frames mid-collapse (the cards' and scrim's fade; median frame ${Math.round(gap)} ms, fade ${Math.round(dur)} ms), expected >= ${starved ? "1 and a fade >= 150 ms" : 3}`);
+  // Owed: a mid-fade frame for every frame the fade drew past its first (whose change can land on the end), up to 3,
+  // at least 1 - and the collapse a real animation of >= 150 ms. A page starved of frames (11-02: the gate's browser at
+  // 721 s, a frame every ~150 ms; GATE_THROTTLE=20, 2 mid of a 410 ms fade) can't draw 3 mid-collapse frames of the
+  // fade: there the frames it did draw are what's owed, not a count the machine took away. A page drawing normally
+  // (a frame every ~16 ms: ~20 over the fade) still owes 3.
+  const owed = Math.min(3, Math.max(1, moved - 1));
+  if (mid < owed || dur < 150)
+    fails.unshift(`the home swipe's close jumped: ${mid} frames mid-collapse of ${moved} the fade drew (the cards' and scrim's fade; median frame ${Math.round(gap)} ms, fade ${Math.round(dur)} ms), expected >= ${owed} and a fade >= 150 ms`);
   return fails;
 }
 
@@ -1902,7 +1904,7 @@ async function switcherUpForHomeSwipe() {
 /**
  * In the page: the home swipe let go (what Switcher.close sends), then the collapse sampled over its own lifetime - from
  * its fades' start (an animation or transition on the cards or the scrim, waited for up to [ms]) to their
- * Animation.finished, every frame between counted. Not a fixed 700 ms from the send: on a loaded gate the fade hadn't
+ * Animation.finished, every frame between counted (mid: mid-fade ones; moved: those the fade changed). Not a fixed 700 ms from the send: on a loaded gate the fade hadn't
  * started by then ("fade 0 ms", 11-02), so a window on the clock saw 0 frames of a fade that ran after it. The switcher
  * settled first, so the open's own fade can't be taken for the close's. No fade started: dur 0 (the close jumped).
  */
@@ -1912,14 +1914,17 @@ async function homeSwipeMidFrames(ms) {
   const scrim = document.querySelector(".recents .recents-scrim");
   await G.settled(() => true, ".recents");
   const fades = () => [...other.getAnimations(), ...scrim.getAnimations()].filter((a) => a.playState !== "finished");
-  let mid = 0, dur = 0;
+  let mid = 0, moved = 0, dur = 0, was = "";
   const stamps = [];
   const sample = () => {
-    stamps.push(performance.now());
     for (const a of fades()) dur = Math.max(dur, Number(a.effect?.getComputedTiming().endTime) || 0);
     const o = parseFloat(getComputedStyle(other).opacity);
     const so = parseFloat(getComputedStyle(scrim).opacity);
     if (o > 0.02 && o < 0.98 && so > 0.01 && so < 0.44) mid++;
+    // A frame the fade drew: the opacities changed since the last one (its frames' gaps are the median's).
+    const now = `${o} ${so}`;
+    if (was && now !== was) (moved++, stamps.push(performance.now()));
+    was = now;
   };
   window.__mockEvents.emit("recents.end", { to: "home" });
   const t0 = performance.now();
@@ -1938,7 +1943,7 @@ async function homeSwipeMidFrames(ms) {
     }
   }
   const gaps = stamps.slice(1).map((t, i) => t - stamps[i]).sort((x, y) => x - y);
-  return { mid, gap: gaps[gaps.length >> 1] ?? 0, dur };
+  return { mid, moved, gap: gaps[gaps.length >> 1] ?? 0, dur };
 }
 
 /** In the page: on home after the switcher closed - no layer up or visible, home not faded, no task opened. */
