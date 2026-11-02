@@ -23,7 +23,7 @@ import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import type { RecentTask } from "../types.ts";
 import { TaskCard, type Rect } from "./switcher.tsx";
-import { tileApps, webWindowsOn } from "./webwindows.tsx";
+import { frontWindow, tileApps, webWindowsOn } from "./webwindows.tsx";
 import { spring } from "./spring.ts";
 import { dropKeyboard } from "./keyboard.ts";
 import { appView, closeApp, forgetOpened, mergeTasks, openApp, taskApp } from "../apps/pages.ts";
@@ -34,6 +34,11 @@ const phase = signal<Phase>("closed");
 const tasks = signal<RecentTask[]>([]);
 /** The task it was opened over (null: home). */
 const from = signal<number | null>(null);
+/**
+ * The first card, centred: the task it was opened over, or over home the web window the user is in (maximised or
+ * full screen - [centreOf]).
+ */
+const lead = signal<number | null>(null);
 /** The first card's frame is under the app's real window (hidden till the window lets go). */
 const live = signal(false);
 /** Animating between states (CSS transitions on), rather than following a finger. */
@@ -154,6 +159,18 @@ function cardOf(id: number | null, list: RecentTask[]): number | null {
   return list.find((t) => t.split?.some((s) => s.id === id))?.id ?? id;
 }
 
+/**
+ * The card to centre: the task [over] it was opened over - over home (null), or over a web window's own task (an
+ * Android app on its window's display counts as visible), the card of the window that fills home's page instead
+ * (ui/webwindows.tsx frontWindow: a Linux window has no task, the host can't name it). Android apps in front unchanged.
+ */
+function centreOf(over: number | null, list: RecentTask[]): number | null {
+  if (over != null && list.find((t) => t.id === over)?.webwindow == null) return over;
+  const w = frontWindow();
+  const card = w && list.find((t) => t.webwindow === w.id && !t.split);
+  return card ? card.id : over;
+}
+
 /** Task [t] closed: a split card's apps all of them (WM Shell's split ends with them). */
 function removeTask(t: RecentTask | undefined, id: number) {
   if (t?.split) t.split.forEach((s) => powos.tasks.remove(s.id));
@@ -176,7 +193,9 @@ function begin(e: { from: number | null; tasks: RecentTask[] }) {
   settle(false);
   reset();
   from.value = e.from;
-  tasks.value = order(e.tasks, e.from);
+  // Over an app the host moves its window onto the first card: that one leads. Over home, the window the user is in.
+  lead.value = e.from ?? centreOf(null, e.tasks);
+  tasks.value = order(e.tasks, lead.value);
   live.value = e.from != null;
   phase.value = "drag";
   toStart();
@@ -188,13 +207,15 @@ async function show(e: { from: number | null; tasks: RecentTask[] }) {
   e = { ...e, from: cardOf(e.from, e.tasks) };
   dropKeyboard();
   // Ordered while a PowOS app open full screen in home still counts as showing: its card comes first.
-  const list = order(e.tasks, e.from);
+  const first = centreOf(e.from, e.tasks);
+  const list = order(e.tasks, first);
   // That app goes into its card (its picture taken as it closes).
   if (appView.value) closeApp();
   loaded.value = true;
   settle(false);
   reset();
   from.value = e.from;
+  lead.value = first;
   tasks.value = list;
   live.value = false;
   phase.value = "shown";
@@ -371,7 +392,7 @@ function clearAll() {
   });
 }
 
-const refresh = () => powos.tasks.list().then((t) => (tasks.value = order(t, from.value)));
+const refresh = () => powos.tasks.list().then((t) => (tasks.value = order(t, lead.value)));
 
 function togglePin(t: RecentTask) {
   const next = new Set(pinned.value);
@@ -523,7 +544,7 @@ powos.on("recents.hide", () => collapse(false));
 // The swipe's list as it is now (the one it began with was laid out ahead): swapped in under the finger.
 powos.on("recents.update", (e: { tasks: RecentTask[] }) => {
   if (phase.value === "closed") return;
-  const next = order(e.tasks, from.value);
+  const next = order(e.tasks, lead.value);
   // A split card has its first app's id: the same id as that app's own card, but not the same card.
   const kin = (a: RecentTask, b: RecentTask) => a.id === b.id && !a.split === !b.split;
   const same = next.length === tasks.value.length && next.every((t, i) => kin(t, tasks.value[i]));
@@ -543,7 +564,7 @@ powos.on("recents.tasks", (e: { tasks: RecentTask[] }) => {
 // The overview button again: the task before the one it was opened over (or the newest, from home), as Android's.
 powos.on("switcher.toggle", () => {
   const list = tasks.value;
-  const next = list[0]?.id === from.value ? list[1] : list[0];
+  const next = list[0]?.id === lead.value ? list[1] : list[0];
   if (next) open(next.id, row?.querySelector<HTMLElement>(`.task[data-task="${next.id}"] .task-shot`) ?? undefined);
   else close();
 });
