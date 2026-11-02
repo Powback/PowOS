@@ -279,6 +279,15 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   POWOS_UNITY_SCREEN=fullscreen. Test: tier1 test-unity-screen.sh (Xvfb end-to-end when Xvfb is present).
   Unverified on device: Broforce's Unity honouring an external (WM-driven) resize of a non-resizable window.
 
+- kwin 0052 (3.59, 2026-11-02, games-p1): (1) "window task N frames: X commits, Y drawn" with Y ~2.7x X = each game
+  frame composited into every consumer buffer in turn (GPU shared with the game; late redraws sample Xwayland's buffer
+  mid-Present = black noise). Now drawn once (m_newestQueued); check `bf-drawn.sh` (drawn <= 1.15x commits; commits/5 =
+  the game's own fps). (2) PowOS full-screen button on a floating game bounced back ("fullscreen 0" ~150 ms later):
+  0047 sized it to the floating task first; an asked full screen now waits for the app's size. (3) X windows with no
+  desktop file are offered by WM_CLASS (Steam "steam", games steam_app_<id> -> RunningApps.linuxAppOf): Steam's window
+  takes its launch placeholder (was two windows). Open: PowOS's full-screen area is below the status bar (2268x2314)
+  while unity-screen launches at _POWOS_SCREEN_SIZE 2268x2440 - the game is resized on full screen (window-log
+  "full screen 2268x2314 at 0,126"); a fixed-size -popupwindow game can't float again (0037), so Back pops it back.
 - Minimised game (Broforce 2026-10-30: WM_STATE Iconic + _NET_WM_STATE_HIDDEN = isMinimized, since KWin clears
   HIDDEN for a window merely on another desktop): a full-screen Wine/Unity game minimises ITSELF when it loses KWin's
   activation. Its task hidden as "off page" (WindowFrames.showOnly -> FreeformTasks.away) or never live was enough.

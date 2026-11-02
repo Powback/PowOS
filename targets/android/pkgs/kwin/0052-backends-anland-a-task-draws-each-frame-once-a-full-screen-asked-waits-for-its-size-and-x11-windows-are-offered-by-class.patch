@@ -1,0 +1,192 @@
+From: PowOS <mats@powback.com>
+Subject: [PATCH] backends/anland: a window task draws each frame once, an asked full screen waits for its size, X11 windows are offered by their class
+
+Three user reports, 2026-11-02, read off hyprland.log and the app's window-log (no game started for it):
+
+1. Broforce "black noise pattern ... flickering in and out" and low fps: "window task 11 frames: last 5 s 110 commits,
+   300 drawn". One commit marked every buffer stale and each offered buffer was drawn again - the same frame composited
+   full screen (2268x2440) ~2.7 times, on the GPU the game renders with, and the later draws sampled Xwayland's window
+   buffer while the next Present copy wrote it (KGSL: no implicit sync). Now a buffer is drawn only while the window's
+   newest content hasn't gone to the consumer yet; the keepalive still draws a stale buffer before it answers, so an
+   older frame is never shown. A rescale (refit, fitFullScreen) marks every buffer stale itself.
+
+2. "Trying to fullscreen Broforce, but it doesn't work" (21:35, five taps): on the app's full-screen request the task
+   was still the floating one, so 0047 configured the window to 504x606 logical for a moment; the borderless game
+   window (covering Wine's monitor) took that as leaving full screen and KWin answered "fullscreen 0". An asked full
+   screen now keeps the window's size until the app's full-screen size arrives.
+
+3. "I opened steam and it shows two windows": Steam's X window names no desktop file, so it was offered as "" and the
+   app's launch placeholder for "steam" never got it. A window with no desktop file is offered by its WM_CLASS class
+   (Steam: "steam"; a Proton game: steam_app_<id>, which the app maps to the entry that starts it).
+---
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index bed0c92..8262afc 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -484,7 +484,7 @@ void AnlandWindowTask::watchWindow(Window *window)
+     Watched watched;
+     watched.window = window;
+     watched.damaged = connect(window, &Window::damaged, this, [this]() {
+-        std::fill(std::begin(m_stale), std::end(m_stale), true);
++        markStale();
+         m_statCommits++;
+         if (!m_damagePending) {
+             m_damagePending = true;
+@@ -505,11 +505,11 @@ void AnlandWindowTask::watchWindow(Window *window)
+                 break;
+             }
+         }
+-        std::fill(std::begin(m_stale), std::end(m_stale), true);
++        markStale();
+         scheduleRender();
+     });
+     m_watched.append(watched);
+-    std::fill(std::begin(m_stale), std::end(m_stale), true);
++    markStale();
+     scheduleRender();
+ }
+ 
+@@ -613,6 +613,7 @@ bool AnlandWindowTask::importBuffers()
+         m_fbos[i] = std::move(imported.fbo);
+         m_stale[i] = true;
+     }
++    m_newestQueued = false;
+     m_bufCount = count;
+     // KWin's screen is the one the windows are on: placed against a smaller one (the cover screen KWin started on),
+     // a client's menus and X11 override-redirect popups landed far from their parent's buttons.
+@@ -798,6 +799,7 @@ void AnlandWindowTask::refit()
+     qCInfo(KWIN_ANLAND) << "window task" << m_id << "the window took" << has << "itself, the task is" << wanted << ": sized back";
+     fitWindow();
+     if (fitsWindow()) {
++        markStale(); // PowOS: every buffer, at the new scale (no longer redrawn by a later offer by itself)
+         scheduleRender(); // full screen keeps its size: drawn again at the task's new scale
+     }
+ }
+@@ -917,6 +919,7 @@ void AnlandWindowTask::fitFullScreen()
+     m_resizeAsked = std::chrono::steady_clock::now();
+     m_resizeWanted = client;
+     m_window->moveResize(RectF(m_window->frameGeometry().topLeft(), contentToFrameSize(client)));
++    markStale(); // PowOS: every buffer, at the new scale (no longer redrawn by a later offer by itself)
+     scheduleRender(); // drawn at the task's scale until the client commits its new size
+ }
+ 
+@@ -934,7 +937,11 @@ QSize AnlandWindowTask::fullScreenTaskSize() const
+     // before KWin's full screen took effect (an xdg toplevel is full screen only once it acks), so it equalled the
+     // "floating" one and Dolphin was laid out at the cover's size, pillarboxed on the 2268x2440 screen (10-30 22:19).
+     if (m_fullScreenAsked) {
+-        return task;
++        // PowOS: until the app's full-screen size comes (it sends it on KWin's "fullscreen 1"), the window keeps its
++        // own: the task was still the floating one, and the window went 504x606 logical for a moment - Broforce
++        // (a borderless window covering Wine's monitor) took that as leaving full screen, KWin said "fullscreen 0",
++        // and every tap of the button bounced straight back into the window (2026-11-02 21:35, five tries).
++        return (m_floatingTaskSize.isEmpty() || task != m_floatingTaskSize) ? task : QSize();
+     }
+     if (!m_appFullScreen || m_floatingTaskSize.isEmpty() || task != m_floatingTaskSize || !m_window) {
+         return task;
+@@ -978,14 +985,27 @@ void AnlandWindowTask::onBufferReady()
+     eventfd_read(get_buffer_ready_fd(m_display), &val);
+     m_offered = true;
+     const int idx = get_selected_idx(m_display);
+-    if (idx >= 0 && idx < m_bufCount && m_stale[idx]) {
++    // PowOS: only while the window's newest content isn't queued yet. A buffer is stale when it doesn't hold the newest
++    // content, but once ANOTHER buffer carried that content to the consumer, drawing this one too shows the same frame
++    // again: one game commit was drawn into every buffer in turn (Broforce 2026-11-02: 110 commits, 300 drawn per 5 s
++    // = a full-screen GPU composition 2.7x per game frame, on the GPU the game renders with, and later redraws sampled
++    // Xwayland's window buffer while it was being written for the next frame - KGSL has no implicit sync).
++    if (idx >= 0 && idx < m_bufCount && m_stale[idx] && !m_newestQueued) {
+         scheduleRender();
+     } else {
+-        // Nothing new for it: hold it until the window changes (no frames while idle), answering in time.
++        // Nothing new for it: hold it until the window changes (no frames while idle), answering in time. The
++        // keepalive's render draws it first when it is stale, so the consumer never shows an older frame.
+         m_keepalive.start();
+     }
+ }
+ 
++void AnlandWindowTask::markStale()
++{
++    // The window changed: no buffer holds its newest content, the next one offered is drawn (onBufferReady).
++    std::fill(std::begin(m_stale), std::end(m_stale), true);
++    m_newestQueued = false;
++}
++
+ void AnlandWindowTask::scheduleRender()
+ {
+     if (!m_offered || m_renderScheduled) {
+@@ -1025,6 +1045,7 @@ void AnlandWindowTask::render(bool keepalive)
+         EGLNativeFence fence{egl->openglContext()->displayObject()};
+         set_render_fence(m_display, fence.takeFileDescriptor().take());
+         m_stale[idx] = false;
++        m_newestQueued = true;
+         m_statFrames++;
+         if (m_damagePending) {
+             m_damagePending = false;
+@@ -1520,10 +1541,21 @@ void AnlandWindowTasks::integrate()
+         if (!task || !m_desktop || VirtualDesktopManager::self()->currentDesktop(window->output()) != m_desktop) {
+             return; // the task's own focus (requestFocus, no desktop switch), or not exported
+         }
+-        send({QStringLiteral("open"), QString::number(task->id()), window->desktopFileName(), window->caption()});
++        send({QStringLiteral("open"), QString::number(task->id()), offeredAppId(window), window->caption()});
+     });
+ }
+ 
++QString AnlandWindowTasks::offeredAppId(const Window *window)
++{
++    // PowOS: who the window is to the app ("open"): its desktop file, else its X11 WM_CLASS class (KWin's
++    // resourceClass, lower case). Steam's and a Proton game's X windows name no desktop file: they were offered as ""
++    // and the app's launch placeholder for "steam" never got its window - Steam showed as two windows, the spinner
++    // and Steam (2026-11-02 21:33). The app matches a class like a desktop id (StartupWMClass, LinuxApp.matches) and
++    // a game's steam_app_<id> to the entry that starts it (RunningApps.isOf).
++    const QString file = window->desktopFileName();
++    return file.isEmpty() ? window->resourceClass() : file;
++}
++
+ bool AnlandWindowTasks::handBackAndroidApp(Window *window)
+ {
+     // An Android app shown as a PowOS window (powos-android-app: scrcpy, app id android-<package>): full screen is the
+@@ -1795,7 +1827,7 @@ bool AnlandWindowTasks::show(Window *window, bool fullScreen)
+         task->focus();
+         // Already a task: to the front - as what it is: a game's own full-screen task stays full screen (the drawer's
+         // launch of a game that KWin already showed full screen made it a floating task, the game scaled into it).
+-        QStringList open{QStringLiteral("open"), QString::number(task->id()), window->desktopFileName(), window->caption()};
++        QStringList open{QStringLiteral("open"), QString::number(task->id()), offeredAppId(window), window->caption()};
+         if (task->fullScreen()) {
+             open.append(QStringLiteral("fullscreen"));
+         }
+@@ -1817,7 +1849,7 @@ bool AnlandWindowTasks::show(Window *window, bool fullScreen)
+                             << "of" << (parent->window() ? parent->window()->caption() : QString()) << ")";
+         send({QStringLiteral("parent"), QString::number(id), QString::number(parent->id())});
+     }
+-    QStringList open{QStringLiteral("open"), QString::number(id), window->desktopFileName(), window->caption()};
++    QStringList open{QStringLiteral("open"), QString::number(id), offeredAppId(window), window->caption()};
+     if (fullScreen) {
+         open.append(QStringLiteral("fullscreen"));
+     }
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 3fda6e7..088ebc5 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -146,6 +146,7 @@ private:
+     void onBufferReady();
+     void onInputReadable();
+     void processInputEvent(const InputEvent &ev);
++    void markStale();
+     void scheduleRender();
+     void render(bool keepalive);
+     void watchWindow(Window *window);
+@@ -207,6 +208,7 @@ private:
+     std::shared_ptr<GLTexture> m_textures[MAX_BUFS];
+     std::unique_ptr<GLFramebuffer> m_fbos[MAX_BUFS];
+     bool m_stale[MAX_BUFS] = {};
++    bool m_newestQueued = false; // PowOS: a buffer with the window's newest content went to the consumer (markStale)
+     QSize m_bufferSize;
+     QSize m_taskSize; // resizeTo's, empty until the app says one
+     QSize m_floatingTaskSize; // the task's size when its window went full screen (setAppFullScreen), until it changes
+@@ -300,6 +302,7 @@ private:
+      */
+     AnlandWindowTask *relatedTask(const Window *window) const;
+     /** An Android app's own window (powos-android-app): back to Android, the app itself in front. */
++    static QString offeredAppId(const Window *window);
+     bool handBackAndroidApp(Window *window);
+     void watchFullScreen(Window *window);
+     void onFullScreenChanged(Window *window);

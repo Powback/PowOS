@@ -130,6 +130,16 @@ object RunningApps {
     }
 
     /**
+     * The app a KWin window offered as [appId] belongs to (WebWindowSource's "open"): its desktop id, or - with no desktop
+     * file (kwin 0052) - its X11 class: Steam's "steam", a Proton game's steam_app_<id> to the entry that starts it. Steam
+     * opened as two windows (2026-11-02): offered as "", its window never took the launch's placeholder for "l:steam".
+     */
+    fun linuxAppOf(
+        apps: List<LinuxApp>,
+        appId: String,
+    ): LinuxApp? = if (appId.isBlank()) null else apps.firstOrNull { isOf(it, appId) }
+
+    /**
      * The page's map, app key -> "running" | "frozen": "a:<key>" for every installed app with a task, "l:<id>" for
      * each Linux app with a window (a running one wins over a frozen one of the same app).
      */

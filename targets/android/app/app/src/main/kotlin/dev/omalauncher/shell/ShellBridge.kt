@@ -94,7 +94,7 @@ class ShellBridge(
                 appId: String,
                 title: String,
             ) {
-                val app = runtime.linuxApps.firstOrNull { it.matches(appId) }
+                val app = RunningApps.linuxAppOf(runtime.linuxApps, appId)
                 val key = "l:${app?.id ?: appId}"
                 val label = runtime.displayName(appId, title)
                 val icon = app?.let { runtime.linuxIcons[it.id] }?.let { android.graphics.drawable.BitmapDrawable(context.resources, it.asAndroidBitmap()) }
