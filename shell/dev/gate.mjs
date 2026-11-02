@@ -10909,6 +10909,17 @@ try {
           return { ...r, ready: true, ms: Date.now() - r.started };
         }),
       );
+  // SD1-SD4 (dev/shade-design-check.js; design wave 4, docs/DESIGN-LANGUAGE.md): the panel on THE backdrop (no blur or
+  // tint of its own, corners on the scale), a notification's picture fades in loaded, a category's members arrive with
+  // their own fade, a long press opening a control's page ticks the haptic once.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, `shade-design-${label}`, viewport).then((r) => whenReady(r, async () => {
+        const call = (fn, ...args) => r.page.evaluate(async (f, a) => (await importShim("./dev/shade-design-check.js"))[f](...a), fn, args);
+        const fails = [];
+        for (const f of ["panelMaterial", "picture", "members", "longPressHaptic"]) fails.push(...(await call(f, label)));
+        return fails;
+      })));
   // NS1-NS4 (dev/notif-stacks-check.js; the user, 11-01 16:39: "just show like 3 cards and then an 'x more' hint"):
   // groups of 1, 3 and 7 all on screen at once, each up to 3 full cards one after another and "+4 more" on the 7, top-
   // and bottom-aligned; a tap on "+4 more" opens that group alone. NS5-NS7 (11-01 16:47: "Let's move the notifications

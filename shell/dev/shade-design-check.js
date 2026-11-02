@@ -6,7 +6,7 @@
  *      the radius scale.
  * SD2 (§6 no pop-ins): a notification's big picture is in the card (loaded) while it's folded, hidden; opened, it is
  *      shown with its fade running - it used to be mounted on open, 0 tall until it loaded.
- * SD3 (§6): a category opened in place (the eight-tile layout) - its members themselves fade in, each with an
+ * SD3 (§6): a category opened in place (the eight-tile layout; unfolded, the whole view's members) - its members fade in, each with an
  *      animation, not just the row growing round them.
  * SD4 (§7): a long press on a control that opens its page fires one haptic tick.
  */
@@ -85,13 +85,23 @@ export async function picture(at) {
 
 export async function members(at) {
   const S = await importShim("./state.ts");
-  const was = S.ccV3.value;
+  const X = await importShim("./ui/ccexpand.ts");
+  const was = S.ccV3.value, whole = X.ccExpanded.value;
   S.ccV3.value = "tiles";
+  // Unfolded the whole view is the default (every member already shown): a category opens in place only folded up.
+  X.ccExpanded.value = false;
   await sleep(500);
   const fails = [];
   try {
     const more = document.querySelector(".notif-panel .cc-tile .cc-more");
-    if (!more) return [`${at}: SD3: no category with members (no .cc-more chevron)`];
+    if (!more) {
+      // The whole view (unfolded's default, ccexpand.ts): every category's members already under it - they arrive
+      // with their own fade (.cc-cell-subs cc-subs-in), nothing to open in place.
+      const cells = [...document.querySelectorAll(".cc-cell.all > .cc-cell-subs")];
+      if (!cells.length) return [`${at}: SD3: no category with members (no .cc-more, no whole view)`];
+      const bare = cells.filter((c) => getComputedStyle(c).animationName !== "cc-subs-in").length;
+      return bare ? [`${at}: SD3: ${bare} of ${cells.length} categories' members appear without their fade`] : [];
+    }
     more.click();
     await sleep(40);
     const subs = [...document.querySelectorAll(".cc-unfold.open .cc-subs > .cc-sub")];
@@ -104,6 +114,7 @@ export async function members(at) {
     if (row && getComputedStyle(row).transitionProperty.indexOf("opacity") < 0) fails.push(`${at}: SD3: folding, the members don't fade (no opacity transition)`);
   } finally {
     S.ccV3.value = was;
+    X.ccExpanded.value = whole;
     await sleep(300);
   }
   return fails;

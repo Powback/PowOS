@@ -37,7 +37,7 @@ async function home({ same, css, want, fails, read }) {
   const scrim = document.createElement("div");
   scrim.className = "notif-scrim";
   document.body.append(scrim);
-  same("shade", scrim, false);
+  same("shade", scrim);
   scrim.remove();
   const shadeBlur = parseFloat(css.getPropertyValue("--shade-blur-native")) || 0;
   read.shadeBlur = shadeBlur;

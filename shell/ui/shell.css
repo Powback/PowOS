@@ -1370,6 +1370,9 @@ input.folder-title:focus { background: var(--soft-fill); }
   position: fixed;
   z-index: 13;
   inset: 0;
+  /* THE backdrop: its tint here, its radius what shade.tsx sends the host (--shade-blur-native) - named on the scrim
+     too, so what reads a surface's radius reads the shade's real one (it read the root's --glass-blur-native, 140). */
+  --glass-blur-native: var(--shade-blur-native);
   background: var(--shade-tint);
   opacity: var(--q);
   pointer-events: none;
