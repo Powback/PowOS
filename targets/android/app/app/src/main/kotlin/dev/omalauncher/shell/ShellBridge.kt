@@ -602,7 +602,7 @@ class ShellBridge(
             // Home's switcher layer (shell/ui/recents.tsx, system/Switcher.kt).
             "recents.slot" -> a.optJSONObject(0)?.let { dev.omalauncher.system.Switcher.slot(this, screenRect(it), it.optDouble("radius", 0.0).toFloat() * density()) }
             "recents.ready" -> dev.omalauncher.system.Switcher.ready(this)
-            "recents.closed" -> dev.omalauncher.system.Switcher.closed(context, this)
+            "recents.closed" -> dev.omalauncher.system.Switcher.closed(context, this, a.optInt(0, -1).takeIf { it >= 0 })
             "recents.state" -> dev.omalauncher.system.Switcher.state()
             "assist.screen" -> assist?.screen()
             "assist.close" -> assist?.close()

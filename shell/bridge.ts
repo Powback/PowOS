@@ -322,7 +322,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     recents: {
       slot: (rect) => call("recents.slot", rect),
       ready: () => call("recents.ready"),
-      closed: () => call("recents.closed"),
+      closed: (opening) => call("recents.closed", opening ?? null),
       state: () => call("recents.state"),
     },
     assist: {
