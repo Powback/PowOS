@@ -10664,6 +10664,21 @@ async function wwHidden(ww) {
 
 /** Maximise fills the work area (the pages' box, above the dock) and restores the frame it had. */
 async function wwMaximise(ww, W) {
+  // MB2: as on the phone, the status bar's inset (45.6 CSS px there): the pages start below it, the maximised bar
+  // above it - the device condition the pages' clip hid the bar in (the gate's own inset was 0).
+  const root = document.documentElement;
+  const was = root.style.getPropertyValue("--inset-top");
+  root.style.setProperty("--inset-top", "46px");
+  await ww.frame();
+  try {
+    await window.__wwg.wwMaximiseAt(ww, W);
+  } finally {
+    if (was) root.style.setProperty("--inset-top", was);
+    else root.style.removeProperty("--inset-top");
+  }
+}
+
+async function wwMaximiseAt(ww, W) {
   W.toggleMaximise(903);
   const a = W.workArea();
   const m = W.webWins.value.find((w) => w.id === 903);
@@ -10696,7 +10711,20 @@ async function wwMergedBar(ww, id) {
     const r = el.getBoundingClientRect();
     const inside = claims.some(([l, rt]) => r.left >= l - 1 && r.right <= rt + 1);
     ww.expect(inside, `MB1: ${el.getAttribute("aria-label") || el.className} (${Math.round(r.left)}..${Math.round(r.right)}) is outside the bar's claims ${JSON.stringify(claims)}: the status bar's tap, not the window's`);
+    window.__wwg.wwBarHit(ww, bar, el);
   }
+}
+
+/**
+ * MB2 (the phone, round 1102-1925: the merged bar neither drawn nor hit): what the status bar strip hands to home's page
+ * at [el]'s centre lands on the bar - not clipped away by the pages, whose box starts below the status bar.
+ */
+function wwBarHit(ww, bar, el) {
+  const r = el.getBoundingClientRect();
+  const [cx, cy] = [(r.left + r.right) / 2, (r.top + r.bottom) / 2];
+  const hit = document.elementFromPoint(cx, cy);
+  const what = hit ? String(hit.className || hit.tagName).trim() : "nothing";
+  ww.expect(!!hit && bar.contains(hit), `MB2: ${el.getAttribute("aria-label") || el.className} at (${Math.round(cx)},${Math.round(cy)}) on the status bar isn't hit (${what}): the pages' clip hides the maximised bar`);
 }
 
 /** In the page: the LW3 run's modules, its mock host's log, its windows' elements by app key. */
@@ -10823,7 +10851,7 @@ async function lw3End() {
 const LW3_HELPERS = `(window.__lw3f = { ${[lw3Env, lw3Launch, lw3Offer, lw3Timeout, lw3Retry, lw3BadExec, lw3HostFailed, lw3End].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
 
 /** [webWindowMaskCheck]'s helpers into the page (window.__wwg); evaluates to [] (no problems) as a gate step. */
-const WW_HELPERS = `(window.__wwg = { ${[wwHelpers, wwFound, wwCuts, wwMenu, wwRaise, wwStacked, wwSwipe, wwHidden, wwMaximise, wwMergedBar].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
+const WW_HELPERS = `(window.__wwg = { ${[wwHelpers, wwFound, wwCuts, wwMenu, wwRaise, wwStacked, wwSwipe, wwHidden, wwMaximise, wwMaximiseAt, wwMergedBar, wwBarHit].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
 
 /** In the page, loaded afresh after desktopsCheck: the stored windows go back on their pages (page 2's hidden). */
 async function desktopsReloaded() {

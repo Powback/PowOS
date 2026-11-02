@@ -267,7 +267,7 @@ pass() { NPASS=$((NPASS + 1)); _res PASS "$*"; }
 # Evidence (2026-10-28): the phone's logcat ring wraps in ~1 min, so a FAIL left nothing to diagnose from. The journey keeps
 # its own window/shell log ($PDIR/logcat-<part>.txt, e2e_logcat_start); a FAIL copies its last 400 lines next to the
 # step's screenshot (NN-step.logcat.txt) and names the file in the FAIL line.
-LOGCAT_TAGS="PowosWebWindows:V PowosWindowFrames:V WindowTasks:V PowosWindow:V PowosFreeform:V PowosPageSlide:V PowosRunning:V PowosShell:V chromium:D"
+LOGCAT_TAGS="PowosShade:V PowosSwitcher:V PowosDock:V PowosWebWindows:V PowosWindowFrames:V WindowTasks:V PowosWindow:V PowosFreeform:V PowosPageSlide:V PowosRunning:V PowosShell:V chromium:D"
 e2e_logcat_start() {
   [ -n "${PDIR:-}" ] || return 0
   ash <<EOF

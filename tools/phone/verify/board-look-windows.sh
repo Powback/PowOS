@@ -118,7 +118,8 @@ if [ "$CASE" = max-bar ]; then
     sleep 1; chk title; step title "the title on the maximised bar tapped"
     h=$(ev 'JSON.stringify(window.__mbHits||null)')
     [ -n "$h" ] && [ "$h" != "[]" ] && [ "$h" != null ] && pass "the title took the tap (page pointerdown: $h)" || fail "the tap on the title never reached the bar ($h): SystemUI's status bar took it"
-    b0=$(wwrect "$A1"); p=$(barpt "$A1")
+    # From the title: a maximised bar's middle is the status bar's (its pull), barpt's quarter point lands there.
+    b0=$(wwrect "$A1"); p=$(wwpt "$A1" .ww-title-label); [ -n "$p" ] || p=$(barpt "$A1")
     if [ -n "$p" ]; then set -- $p; x=$1; y=$2; dy=$(dp 160)
       mdown "$x" "$y" "the maximised bar (a drag)" && { mpath "$x" "$y" "$x" $((y + dy)) 8; sleep 0.3; mup "$x" $((y + dy)); }
       sleep 1.5; chk drag; step drag "the maximised bar dragged down ${dy} px"

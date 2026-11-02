@@ -797,11 +797,16 @@ html:root .menu.tile { --glass-blur-native: var(--backdrop-blur-native); backgro
 .menu-item:active { background: var(--soft-fill); }
 
 /* Home pages: tiles on a grid of square cells (grid.tsx computes the boxes). */
+/* Clipped to their box - but upward to the screen's top: a maximised web window's bar sits on the status bar (above the
+   pages' top, at --inset-top), merged with it (MB2). overflow: hidden there clipped that bar on the phone - not drawn
+   and not hit (elementFromPoint found no bar), so its title, buttons and drag were dead ("Maximised window's top bar
+   takes taps"). Sideways stays overflow's clip (no scroll container: the track's other pages never scroll in). */
 .pages {
   position: relative;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: clip;
+  clip-path: inset(calc(-1 * var(--inset-top, 0px)) 0 0 0);
   touch-action: none;
 }
 .page-track {
@@ -3442,7 +3447,8 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 /* Empty page space stays the page's own (presses, the marquee): the wrappers take no touches, their content does. */
 .page-under { pointer-events: none; }
 .page-under > :not(.page-glass, .group-shadow, .seam) { pointer-events: auto; }
-.page-windows { overflow: clip; pointer-events: none; }
+/* Clipped to its page (PS2), upward to the screen's top: a maximised window's bar merged with the status bar (MB2). */
+.page-windows { overflow-x: clip; clip-path: inset(calc(-1 * var(--inset-top, 0px)) 0 0 0); pointer-events: none; }
 .page-windows > * { pointer-events: auto; }
 .webwindow:not(.ww-divider) { border-radius: var(--radius); box-shadow: var(--lift-edge); }
 .webwindow.maximised { border-radius: 0; box-shadow: none; }
