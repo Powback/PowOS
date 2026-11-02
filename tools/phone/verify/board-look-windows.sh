@@ -12,7 +12,7 @@
 #   max-bar       (maximised-window-s-top-bar-takes-taps, f5d74bb9/7b512860): a maximised Calculator - its merged bar's
 #                 title takes a tap (a page pointerdown on it), its minimise button minimises it, a drag on it moves it;
 #   switcher-linux (switcher-shows-every-open-window-linux-too, 83159b3d/1e143c8d): maximised Dolphin has a switcher card;
-#                 Dolphin full screen (its own Ctrl+Shift+F), its card tapped -> back full screen; Home from the switcher
+#                 Dolphin full screen (by code), its card tapped -> back full screen; Home from the switcher
 #                 -> it leaves full screen;
 #   split-pair    (multitasking-split-pairs-as-one-app-combined-ico, 9db906b9): Android's split of Calculator + Chrome by
 #                 the bridge's tasks.split (the switcher's own call): the switcher shows ONE card for them, one combined
@@ -31,6 +31,8 @@ case "$CASE" in tiled-bars|max-bar|switcher-linux|split-pair|split-lr|term-fill)
 e2e_args "$@"
 e2e_init "lookw-$CASE"
 CALC=${TEST_APP:-com.oneplus.calculator} CHROME=com.android.chrome
+# The split cases' second app when Chrome is the user's (already has a task); closed on exit like Chrome.
+SPLIT_ALT="com.oneplus.note com.oneplus.deskclock"; E2E_APPS="$E2E_APPS|${SPLIT_ALT// /|}"
 # The split cases run in the fold the phone is in (split-lr SKIPs folded); the window cases need the unfolded home.
 case $CASE in split-pair|split-lr) e2e_setup ;; *) e2e_setup inner ;; esac
 # Closed on any exit, on top of e2e_restore: the session view, Linux full screen, the switcher.
@@ -72,7 +74,11 @@ if [ "$CASE" = tiled-bars ]; then
     step full "Calculator and Chrome both full screen (set by code)"
     note "full flags: Calculator $(wwstate "$A1"), Chrome $(wwstate "$A2") (open min full max tiled)"
     T1=$(wwhost "$A1" task); T2=$(wwhost "$A2" task)
-    switcher; step switcher "the switcher over them"
+    switcher
+    # The switcher opens on the last app's card, centred; Calculator's card sits off to the side with its icon off
+    # screen (round 1102-1924). Scrolled into the middle by code (setup: the task is the bars, not the scroll).
+    ev "(()=>{const c=document.querySelector('.recents .task[data-task=\"$T1\"]');if(!c)return 'none';c.scrollIntoView({inline:'center',block:'nearest'});return 'ok'})()" >/dev/null; sleep 1.2
+    step switcher "the switcher over them, Calculator's card in the middle"
     if tapat "$(card "$T1" .task-icon)" "Calculator's card icon (its menu)"; then sleep 1; chk menu
       tapat "$(pt "[...document.querySelectorAll('.recents-menu button')].find(b=>b.textContent.trim()==='Split screen')")" "Split screen" && sleep 1
       tapat "$(card "$T2" .task-shot)" "Chrome's card (the second pick)" && sleep 1
@@ -141,8 +147,10 @@ if [ "$CASE" = switcher-linux ]; then
       case $c in none|off|"") fail "no switcher card for the maximised Linux window ($c)" ;; *) pass "maximised Dolphin has its switcher card" ;; esac
       back 1.5
       ev "$WW.then(m=>{m.toggleMaximise(${D#w});return 'ok'})" >/dev/null; sleep 1
-      sh_ "input keycombination KEYCODE_CTRL_LEFT KEYCODE_SHIFT_LEFT KEYCODE_F"; sleep 2.5; chk full
-      s=$(wwstate "$D"); step full "Dolphin full screen (its own Ctrl+Shift+F)"
+      # Full screen by code (the host's webwindows.fullScreen, as the other cases' setup): an injected Ctrl+Shift+F
+      # goes to the focused window - home's page, not Dolphin's surface in it (round 1102-1927: "1 0 0 0 0").
+      hostfull "$D" >/dev/null; sleep 2.5; chk full
+      s=$(wwstate "$D"); step full "Dolphin full screen (set by code)"
       if [ "${s:4:1}" != 1 ]; then fail "Dolphin didn't go full screen ($s)"
       else
         switcher; step switcher-full "the switcher over full-screen Dolphin"
@@ -155,7 +163,7 @@ if [ "$CASE" = switcher-linux ]; then
           [ "${s:4:1}" = 0 ] && pass "Home left full screen ($s)" || fail "after Home Dolphin is still full screen ($s)"
         else fail "no card for full-screen Dolphin"; back 1; fi
       fi
-      [ "$(wwstate "$D" | cut -c5)" = 1 ] && { sh_ "input keycombination KEYCODE_CTRL_LEFT KEYCODE_SHIFT_LEFT KEYCODE_F"; sleep 1.5; }
+      [ "$(wwstate "$D" | cut -c5)" = 1 ] && { hosttowin "$D" >/dev/null; sleep 1.5; }
     fi
   fi
 fi
@@ -170,12 +178,16 @@ if [ "$CASE" = split-lr ] && [ "$W" -le 2000 ]; then
   step folded "the phone is folded (${W}x${H})"
   note "SKIP: folded - left/right split is the unfolded screen's (not forced open); re-run unfolded"
 elif [ "$CASE" = split-pair ] || [ "$CASE" = split-lr ]; then
-  T1=$(startfull "$CALC"); T2=$(startfull "$CHROME"); chk start
-  log "tasks: Calculator $T1, Chrome $T2"
-  if [ "$T1" = none ] || [ "$T2" = none ]; then fail "no full-screen tasks for Calculator ($T1) / Chrome ($T2)"
+  # The second app: Chrome unless it already has a task (the user's - am start only brings that one up, no new task,
+  # and splitting it would move the user's window), else the first of Notes / Clock with none.
+  SECOND=""; for p in $CHROME $SPLIT_ALT; do grep -q " $p/" <<<"$TASKS0" || { SECOND=$p; break; }; done
+  [ "$SECOND" = "$CHROME" ] || note "Chrome has the user's task: split with ${SECOND:-nothing} instead"
+  T1=$(startfull "$CALC"); T2=none; [ -n "$SECOND" ] && T2=$(startfull "$SECOND"); chk start
+  log "tasks: Calculator $T1, ${SECOND:-second app} $T2"
+  if [ "$T1" = none ] || [ "$T2" = none ]; then fail "no full-screen tasks for Calculator ($T1) / ${SECOND:-a second app with no task} ($T2)"
   else
     r=$(hcall tasks.split "[$T1,$T2]" "v=>String(v)"); sleep 3; chk split
-    step split "Calculator + Chrome split by Android (tasks.split $T1,$T2: $r)"
+    step split "Calculator + $SECOND split by Android (tasks.split $T1,$T2: $r)"
     b1=$(tbounds "$T1"); b2=$(tbounds "$T2"); log "bounds: $b1 / $b2"
     shl=$(wmshell | grep -m1 -oE "mIsLeftRightSplit=[a-z]+"); log "WMShell: ${shl:-no mIsLeftRightSplit line}"
     set -- $b1 $b2
@@ -220,7 +232,9 @@ if [ "$CASE" = term-fill ]; then
   case $s in none*|ERR*|"") step none "no session to open"; note "SKIP: no remote-host session listed (${s:-?}) - a local one would attach a tmux client; not opened" ;; *)
     ev 'importShim("./ui/terms.tsx").then(t=>{t.openTerm(window.__tfS,null);return "ok"})' >/dev/null; OPENED_TERM=1; sleep 4; chk term
     step term "the terminal session $s, view-only"
-    g=$(ev '(()=>{const v=document.querySelector(".session-screen"),h=document.querySelector(".session-term .term-holder"),scr=h&&h.querySelector(".xterm-screen"),rows=h&&h.querySelector(".xterm-rows");if(!v||!scr||!rows)return JSON.stringify({view:!!v,screen:!!scr});const r=v.getBoundingClientRect(),b=h.getBoundingClientRect(),n=rows.children.length,cellH=scr.offsetHeight/n,first=rows.firstElementChild.getBoundingClientRect();return JSON.stringify({vw:Math.round(r.width),vh:Math.round(r.height),iw:innerWidth,ih:innerHeight,top:Math.round(r.top),rows:n,cellH:Math.round(cellH*10)/10,gridH:scr.offsetHeight,holdH:h.clientHeight,gap:Math.round(first.top-b.top),sw:scr.offsetWidth,hw:Math.round(b.width)})})()')
+    # Rows from the xterm itself (terminal.tsx's terminalFor, as the gate's terminal scenes read them): the WebGL
+    # renderer (the default) draws to a canvas and has no .xterm-rows DOM; the first row starts at the screen's top.
+    g=$(ev 'importShim("./ui/terminal.tsx").then(m=>{const S=window.__tfS,t=m.terminalFor("at-work:"+(S.host??"local")+":"+S.name),v=document.querySelector(".session-screen"),h=document.querySelector(".session-term .term-holder"),scr=h&&h.querySelector(".xterm-screen"),dom=h&&h.querySelector(".xterm-rows");if(!v||!scr||!(t||dom))return JSON.stringify({view:!!v,screen:!!scr,term:!!t});const r=v.getBoundingClientRect(),b=h.getBoundingClientRect(),n=t?t.rows:dom.children.length,cellH=scr.offsetHeight/n,first=(dom&&dom.firstElementChild||scr).getBoundingClientRect();return JSON.stringify({vw:Math.round(r.width),vh:Math.round(r.height),iw:innerWidth,ih:innerHeight,top:Math.round(r.top),rows:n,cellH:Math.round(cellH*10)/10,gridH:scr.offsetHeight,holdH:h.clientHeight,gap:Math.round(first.top-b.top),sw:scr.offsetWidth,hw:Math.round(b.width),renderer:m.rendererFor("at-work:"+(S.host??"local")+":"+S.name)})})')
     log "geometry: $g"
     python3 - "$g" <<'PY' > "$OUT/term.txt"
 import json, sys
