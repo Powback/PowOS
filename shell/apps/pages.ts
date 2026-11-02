@@ -256,6 +256,9 @@ function keepShowing(key: string | null) {
   if (key) keepShot(key, document.querySelector<HTMLElement>(`.app-screen[data-app="${key.slice(PREFIX.length)}"]`), 2000);
 }
 
+/** [list] without its [i]th item. */
+const without = <T,>(list: T[], i: number) => [...list.slice(0, i), ...list.slice(i + 1)];
+
 /**
  * Android's task list with the PowOS apps' cards in it. The task the switcher was opened over stays first (a swiped-up
  * window lands on the first card); then, as in [mergeRecent], PowOS apps opened since Android's front app changed,
@@ -267,7 +270,10 @@ export function mergeTasks<T extends { id: number; label: string; key: string | 
 ): T[] {
   const apps = new Map(powosApps.value.map((a) => [a.key, a]));
   const mine = opened.value.list.filter((o) => apps.has(o.key));
-  if (!mine.length) return host;
+  const i = over == null ? -1 : host.findIndex((t) => t.id === over);
+  // No PowOS app open: the host's list as it is, [over] still first (a web window's card over home is not the host's
+  // newest - ui/recents.tsx centreOf).
+  if (!mine.length) return i > 0 ? [host[i], ...without(host, i)] : host;
   const frontAt = opened.value.front?.at ?? 0;
   const card = (o: { key: string }) => {
     const a = apps.get(o.key)!;
@@ -277,8 +283,6 @@ export function mergeTasks<T extends { id: number; label: string; key: string | 
   keepShowing(showing);
   const newer = mine.filter((o) => o.key === showing || o.at > frontAt).map(card);
   const older = mine.filter((o) => !(o.key === showing || o.at > frontAt)).map(card);
-  const i = over == null ? -1 : host.findIndex((t) => t.id === over);
-  const first = i >= 0 ? [host[i]] : [];
-  const rest = i >= 0 ? [...host.slice(0, i), ...host.slice(i + 1)] : host;
-  return first.length ? [...first, ...newer, ...older, ...rest] : [...newer, ...rest.slice(0, 1), ...older, ...rest.slice(1)];
+  if (i >= 0) return [host[i], ...newer, ...older, ...without(host, i)];
+  return [...newer, ...host.slice(0, 1), ...older, ...host.slice(1)];
 }

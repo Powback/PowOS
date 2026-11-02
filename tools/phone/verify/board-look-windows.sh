@@ -14,6 +14,9 @@
 #   switcher-linux (switcher-shows-every-open-window-linux-too, 83159b3d/1e143c8d): maximised Dolphin has a switcher card;
 #                 Dolphin full screen (by code), its card tapped -> back full screen; Home from the switcher
 #                 -> it leaves full screen;
+#   switcher-centre (switcher-opened-over-a-maximised-linux-window-ce): maximised Dolphin, the switcher opened over it
+#                 (the overview key): Dolphin's card is the first one and the one in the middle of the screen (it had
+#                 centred on Lights, 11-02);
 #   split-pair    (multitasking-split-pairs-as-one-app-combined-ico, 9db906b9): Android's split of Calculator + Chrome by
 #                 the bridge's tasks.split (the switcher's own call): the switcher shows ONE card for them, one combined
 #                 icon holding both icons, stacked folded / side by side unfolded; neither app has its own card;
@@ -26,8 +29,8 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/e2e-lib.sh"
 CASE=${1:-}; shift || true
-case "$CASE" in tiled-bars|max-bar|switcher-linux|split-pair|split-lr|term-fill) ;;
-  *) echo "usage: board-look-windows.sh tiled-bars|max-bar|switcher-linux|split-pair|split-lr|term-fill [--round R]"; exit 2 ;; esac
+case "$CASE" in tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill) ;;
+  *) echo "usage: board-look-windows.sh tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill [--round R]"; exit 2 ;; esac
 e2e_args "$@"
 e2e_init "lookw-$CASE"
 CALC=${TEST_APP:-com.oneplus.calculator} CHROME=com.android.chrome
@@ -173,6 +176,27 @@ if [ "$CASE" = switcher-linux ]; then
         else fail "no card for full-screen Dolphin"; back 1; fi
       fi
       [ "$(wwstate "$D" | cut -c5)" = 1 ] && { hosttowin "$D" >/dev/null; sleep 1.5; }
+    fi
+  fi
+fi
+
+# --- switcher-centre -------------------------------------------------------------------------------------------
+if [ "$CASE" = switcher-centre ]; then
+  if grep -qx dolphin <<<"$LIN0"; then note "Dolphin was already running (the user's): case skipped"
+  else
+    hcall apps.launch "['l:org.kde.dolphin']" "()=>'ok'" >/dev/null
+    D=$(waitwin l:org.kde.dolphin 30); chk dolphin; sleep 2
+    if [ "$D" = none ]; then fail "Dolphin's window didn't come"
+    else
+      ev "$WW.then(m=>{m.toggleMaximise(${D#w});return 'ok'})" >/dev/null; sleep 1.5
+      s=$(wwstate "$D"); [ "${s:6:1}" = 1 ] || note "Dolphin not maximised after the toggle ($s)"
+      switcher; step switcher "the switcher opened over maximised Dolphin"
+      # No scroll: what the switcher opened on. The first card, and the card whose middle is nearest the screen's.
+      c=$(ev "(()=>{const cs=[...document.querySelectorAll('.recents .task')];const lab=c=>c?.querySelector('.task-label')?.textContent||'?';const mid=cs.map(c=>[c,c.getBoundingClientRect()]).filter(([,b])=>b.width>0).sort((a,b)=>Math.abs(a[1].left+a[1].width/2-innerWidth/2)-Math.abs(b[1].left+b[1].width/2-innerWidth/2))[0];return lab(cs[0])+'|'+(mid?lab(mid[0]):'none')})()")
+      log "switcher cards: first|centred = $c"
+      case $c in Dolphin*\|Dolphin*) pass "Dolphin's card is first and centred ($c)" ;; *) fail "the switcher opened over maximised Dolphin centred on another card (first|centred: $c)" ;; esac
+      back 1.5
+      ev "$WW.then(m=>{const w=m.webWins.value.find(v=>v.id===${D#w});w&&w.restore&&m.toggleMaximise(w.id);return 'ok'})" >/dev/null; sleep 1
     fi
   fi
 fi

@@ -708,6 +708,18 @@ export function toggleMaximise(id: number) {
   raise(id);
 }
 
+/**
+ * The window the user is in on home: the top one on the page on screen when it fills it (maximised, or its app full
+ * screen) - or null (home, or a floating window over it). Over home the host names no task (a Linux window has none):
+ * the switcher centres this one's card (ui/recents.tsx). The device, 11-02: opened over a maximised Dolphin, the
+ * switcher centred on Lights.
+ */
+export function frontWindow(): WebWin | null {
+  const page = shownPage();
+  const top = webWins.value.findLast((w) => w.page === page && !w.minimised && !w.pip && !w.pending && !w.quick && !hiddenTab(w.id));
+  return top && (top.restore || top.full) ? top : null;
+}
+
 export function minimise(id: number) {
   if (tiledOn(id) != null) return untile(id, "minimise");
   update(id, { minimised: true });

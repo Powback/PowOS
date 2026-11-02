@@ -2142,6 +2142,56 @@ async function switcherLinuxMaxBack(win) {
 }
 
 /**
+ * Board switcher-opened-over-a-maximised-linux-window-ce (device 11-02: opened over a maximised Dolphin, the switcher
+ * centred on Lights): over home (the host names no task: a Linux window has none) with a maximised Linux web window on
+ * the page, the centred first card is that window's - shown (the overview button) and swiped up from home alike - even
+ * where Android's newest task comes first in the host's list. Over an Android app the host names, that app leads still.
+ */
+async function switcherCentreCheck() {
+  const WIN = 9;
+  const LINUX = (1 << 29) + WIN;
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const host = (event, data) => window.__mockEvents.emit(event, data);
+  const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  S.page.value = 0;
+  await window.__gw.settled();
+  W.webWins.value = [{ id: WIN, key: "l:org.kde.dolphin", label: "Dolphin", page: S.pages.value[0], x: 0, y: 0, w: innerWidth, h: innerHeight - 120, restore: { x: 40, y: 120, w: 320, h: 400 }, live: true }];
+  await window.__gw.settled();
+  if (!document.querySelector(`.webwindow.maximised[data-wwid="${WIN}"]`)) return ["switcher-centre: no maximised web window for Dolphin on home"];
+  const task = (id, label, key, more = {}) => ({ id, label, key, icon: null, snapshot: "", ...more });
+  // Android's newest first (as on the device, where another app led): the Linux card second.
+  const tasks = [task(905, "Chrome", "a:chrome"), task(LINUX, "Dolphin", "l:org.kde.dolphin", { webwindow: WIN }), task(906, "Maps", "a:maps")];
+  const centred = () => {
+    const cards = [...document.querySelectorAll(".recents .task")];
+    const first = cards[0];
+    const mid = cards.map((c) => [c, c.getBoundingClientRect()]).filter(([, b]) => b.width > 0).sort((a, b) => Math.abs(a[1].left + a[1].width / 2 - innerWidth / 2) - Math.abs(b[1].left + b[1].width / 2 - innerWidth / 2))[0]?.[0];
+    return { first: Number(first?.dataset.task), mid: Number(mid?.dataset.task), label: mid?.querySelector(".task-label")?.textContent ?? "" };
+  };
+  const fails = [];
+  host("recents.show", { open: true, from: null, tasks });
+  await wait(600);
+  let got = centred();
+  if (got.first !== LINUX || got.mid !== LINUX) fails.push(`switcher-centre (shown over home): first card ${got.first}, centred ${got.mid} "${got.label}" - want the maximised Dolphin's ${LINUX}`);
+  host("recents.hide", null);
+  await wait(500);
+  host("recents.begin", { from: null, tasks });
+  await wait(300);
+  got = centred();
+  if (got.first !== LINUX) fails.push(`switcher-centre (swiped up from home): first card ${got.first} - want the maximised Dolphin's ${LINUX}`);
+  host("recents.end", { to: "home" });
+  await wait(500);
+  // An Android app in front (the host names it): it leads, never the window behind it on home.
+  host("recents.show", { open: true, from: 906, tasks });
+  await wait(600);
+  got = centred();
+  if (got.first !== 906) fails.push(`switcher-centre (over Android's Maps): first card ${got.first} - want Maps (906), the app it was opened over`);
+  host("recents.hide", null);
+  await wait(400);
+  return fails;
+}
+
+/**
  * Back home from an app (the page hidden, then visible: visibilitychange, pageshow, focus, the host's resume - a live
  * wallpaper's picture read again, another frame of it: "system.glass"): the theme as it was - the labels' and widgets'
  * text, the search bar's tint, the wallpaper's tone - on each of the first 10 frames and after (the user, 10-31 20:08:
@@ -11898,6 +11948,9 @@ try {
   // Board switcher-shows-every-open-window-linux-too: a maximised Linux window has its card; opened, it comes back.
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-linux-max", { width: 404, height: 900 }).then((r) => whenReady(r, () => switcherLinuxMaxCheck(r.page))));
+  // Board switcher-opened-over-a-maximised-linux-window-ce: over home, the maximised web window's card is the centred one.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-centre", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(switcherCentreCheck))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeCheck))));
     runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme-heal", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeHealCheck))));
