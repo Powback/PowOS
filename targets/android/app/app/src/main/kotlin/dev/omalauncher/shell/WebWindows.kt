@@ -677,6 +677,13 @@ class WebWindows(
         /** Its Linux window is full screen ([linuxFullScreen], kwin 0043): the whole screen, no bar, the page's place kept. */
         var linuxFull = false
 
+        /**
+         * Its full screen is IMMERSIVE ([LinuxOffer.game], the coordinator's rule 11-02): home's window hides the status
+         * bar (Android's immersive: SystemUI's bar and PowOS's strip over it both go), so the game has the whole screen at
+         * 1:1 - the 2268x2440 it launched at (_POWOS_SCREEN_SIZE, kwin 0051), no resize to the 2268x2314 below the bar.
+         */
+        var immersive = false
+
         /** When [linuxFull] last went on (uptime ms), and since when the page's "w.f" lists it as a plain window anyway (0: not): IR1. */
         var linuxFullAt = 0L
         var fullListedAt = 0L
@@ -748,6 +755,8 @@ class WebWindows(
         val title: String,
         val label: String,
         val icon: android.graphics.drawable.Drawable?,
+        /** A game ([isGame]): its full screen is IMMERSIVE - the status bar hidden, the whole screen the game's. */
+        val game: Boolean = false,
     ) {
         /** Its app's drawer key ("l:<desktop id>", [linuxOpened]): the app menu's close and its switcher card find it. */
         var key = ""
@@ -1286,6 +1295,11 @@ class WebWindows(
         handBack: Boolean,
     ) {
         if (linuxTouch === w) linuxTouch = null
+        // A game closed in its immersive full screen (it quit, KWin closed it): the status bar comes back with it.
+        if (w.immersive) {
+            w.immersive = false
+            statusBar(w, true)
+        }
         val src = w.linux ?: return
         // On the window's own thread, bounded (native_consumer.c times its dequeue out): never another window's wait.
         val lane = src.lane
@@ -2294,8 +2308,8 @@ class WebWindows(
         val src = win.linux ?: return true
         val at = IntArray(2).also(web::getLocationInWindow)
         if (win.linuxFull) {
-            // Full screen: the window is at its full-screen place (below the status bar, [fullScreenArea]), 1:1.
-            val area = fullScreenArea()
+            // Full screen: the window is at its full-screen place (below the status bar, or all of it immersive), 1:1.
+            val area = fullScreenArea(win.immersive)
             andro.marchy.WebWindowSource.touch(src.handle, ev, at[0] - area.left.toFloat(), at[1] - area.top.toFloat(), 1f)
             return true
         }
@@ -2964,6 +2978,7 @@ class WebWindows(
         if (win.closed || win.linuxFull == on) return
         markLinuxFull(win, on)
         if (!on) win.fullAsked = false
+        immersive(win, src, on)
         // Covers every web window now: a new window of its app opens as a task in front of it (WindowTasks.open).
         andro.marchy.WebWindowSource.shownFullScreen(src.kwin, on)
         val t = SurfaceControl.Transaction()
@@ -3004,7 +3019,7 @@ class WebWindows(
         src: LinuxSource,
     ) {
         if (linuxTouch !== win) linuxTouch = null
-        val area = fullScreenArea()
+        val area = fullScreenArea(win.immersive)
         win.container.takeIf { it.isValid }?.let { c ->
             // Full screen is not an element of the page: ABOVE home's buffer (a child of home's surface itself, as the
             // windows' root is), so nothing of the page paints over it; the root's own layer is -1, under home.
@@ -3030,13 +3045,47 @@ class WebWindows(
         }
     }
 
-    /** A full-screen Linux window's place: the whole screen less the status bar on top (display px = home's window px). */
-    private fun fullScreenArea(): Rect {
+    /**
+     * A full-screen Linux window's place: the whole screen less the status bar on top, or - [immersive], a game - the
+     * whole screen (display px = home's window px).
+     */
+    private fun fullScreenArea(immersive: Boolean): Rect {
         val b = context.getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
         val insets = web.rootWindowInsets
         val bar = insets?.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.statusBars())?.top ?: 0
         val cut = insets?.getInsets(android.view.WindowInsets.Type.displayCutout())?.top ?: 0
-        return Rect(0, fullScreenTop(b.height(), maxOf(bar, cut)), b.width(), b.height())
+        return Rect(0, fullScreenTop(b.height(), maxOf(bar, cut), immersive), b.width(), b.height())
+    }
+
+    /** A game goes immersive ([on]) before its area is measured (the whole screen); back in its window the bar comes back. */
+    private fun immersive(
+        win: Win,
+        src: LinuxSource,
+        on: Boolean,
+    ) {
+        if (on) win.immersive = src.offer.game
+        if (!win.immersive) return
+        if (!on) win.immersive = false
+        statusBar(win, !on)
+    }
+
+    /**
+     * Home's window's status bar [shown] or hidden for immersive [win] (Android's immersive mode: a swipe from the top
+     * shows the bars over the game for a moment, never resizes it). ShadeHost's strip reads the bar hidden from its
+     * insets and hides PowOS's status chrome with it (its flags()); the shade's pull stays off while the bar is hidden.
+     */
+    private fun statusBar(
+        win: Win,
+        shown: Boolean,
+    ) {
+        val c = web.windowInsetsController ?: return
+        if (shown) {
+            c.show(android.view.WindowInsets.Type.statusBars())
+        } else {
+            c.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            c.hide(android.view.WindowInsets.Type.statusBars())
+        }
+        WindowLog.i(TAG, "window ${win.id}: a game's full screen: status bar ${if (shown) "back" else "hidden (immersive)"}")
     }
 
     /**
@@ -3053,7 +3102,7 @@ class WebWindows(
         win.fullAsked = false
         val src = win.linux ?: return
         if (win.closed || !win.linuxFull) return
-        val area = fullScreenArea()
+        val area = fullScreenArea(win.immersive)
         WindowLog.i(TAG, "window ${win.id}: KWin window ${src.kwin} full screen ($why): sized ${area.width()}x${area.height()}")
         linuxResize(win, src, area.width(), area.height())
     }
@@ -3814,11 +3863,32 @@ class WebWindows(
         /** How far in from an edge strip (dp) a pull leaves full screen. */
         private const val EDGE_PULL_DP = 24
 
-        /** A full-screen Linux window's top on an [h] px tall screen whose status bar is [bar] px: below the bar. */
+        /**
+         * A full-screen Linux window's top on an [h] px tall screen whose status bar is [bar] px: below the bar, or the
+         * screen's top when it is [immersive] (a game: the bar hidden).
+         */
         fun fullScreenTop(
             h: Int,
             bar: Int,
-        ): Int = bar.coerceIn(0, h / 4)
+            immersive: Boolean = false,
+        ): Int = if (immersive) 0 else bar.coerceIn(0, h / 4)
+
+        private val STEAM_GAME_CLASS = Regex("steam_app_\\d+")
+
+        /**
+         * Whether a Linux window offered as [appId] (its desktop id, or its X11 class: kwin 0052) is a game's, whose full
+         * screen is immersive: a Proton game (steam_app_<id>), or an app whose desktop file says Game in [categories] -
+         * but never Steam itself (its desktop file says Game too; its windows are a launcher's, with the bar).
+         */
+        fun isGame(
+            appId: String,
+            categories: String?,
+        ): Boolean {
+            val id = appId.lowercase()
+            if (STEAM_GAME_CLASS.matches(id)) return true
+            if (id == "steam" || id.endsWith(".steam")) return false
+            return categories?.split(';')?.any { it.trim().equals("Game", ignoreCase = true) } == true
+        }
 
         /** Which edge strip [y] is in on an [h] px tall screen: -1 the top ([top] px), 1 the bottom ([bottom] px), 0 neither. */
         /**

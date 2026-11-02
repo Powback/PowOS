@@ -21,7 +21,7 @@ class WebWindowsFullScreenSizeTest {
         assertEquals(126, WebWindows.fullScreenTop(2440, 126))
         assertEquals(0, WebWindows.fullScreenTop(2440, 0))
         assertEquals(610, WebWindows.fullScreenTop(2440, 5000))
-        assertTrue("the area is not the full width from the bar down", src.contains("Rect(0, fullScreenTop(b.height(), maxOf(bar, cut)), b.width(), b.height())"))
+        assertTrue("the area is not the full width from the bar down", src.contains("Rect(0, fullScreenTop(b.height(), maxOf(bar, cut), immersive), b.width(), b.height())"))
     }
 
     /**

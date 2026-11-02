@@ -98,7 +98,7 @@ class ShellBridge(
                 val key = "l:${app?.id ?: appId}"
                 val label = runtime.displayName(appId, title)
                 val icon = app?.let { runtime.linuxIcons[it.id] }?.let { android.graphics.drawable.BitmapDrawable(context.resources, it.asAndroidBitmap()) }
-                val offer = WebWindows.LinuxOffer(appId, title, label, icon)
+                val offer = WebWindows.LinuxOffer(appId, title, label, icon, WebWindows.isGame(appId, app?.categories))
                 main.post { webWindows.also { webWindowsMade = true }.linuxOpened(id, key, offer) }
             }
 
