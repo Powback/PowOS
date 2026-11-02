@@ -294,7 +294,9 @@ st=$(bash tools/phone/ship.sh status)
 grep -q "rooted deploy pending since" <<<"$st" && ok "status: rooted deploy pending" || { bad "status rooted pending"; echo "$st"; }
 ! grep -q '^ROOTED' "$LOG" && ok "no rooted deploy while the APK ship is out" || bad "rooted deploy beside the APK"
 rm -f "$HOME/hold-apk"
-for _ in $(seq 100); do grep -q '^ROOTED' "$LOG" && break; sleep 0.2; done
+# Until the runner logs the deploy done - its LAST record (rooted-live and pending are written before it); the stub's
+# ROOTED line is written at the deploy's start, so checking the records on it raced the runner (CI's slower runner).
+for _ in $(seq 150); do grep -q "${t12:0:9}: rooted deploy done" "$Q/runner.log" 2>/dev/null && break; sleep 0.2; done
 [ "$(grep -E '^(APK |ROOTED)' "$LOG" | awk '{print $1}' | paste -sd, -)" = "APK,ROOTED" ] && ok "APK installed, then the rooted deploy" || { bad "APK then rooted"; cat "$LOG"; tail -8 "$Q/runner.log"; }
 grep -q "^ROOTED $t12 svc=1 deploy --note swipe closes it\$" "$LOG" && ok "rooted deploy from the tip, with the request's note" || { bad "rooted args"; grep ROOTED "$LOG"; }
 [ "$(cat "$Q/rooted-live" 2>/dev/null)" = "$t12" ] && [ ! -e "$Q/rooted-pending" ] && grep -q "${t12:0:9}: rooted deploy done" "$Q/runner.log" &&
@@ -373,7 +375,8 @@ grep -q '^APKLINKDROP' "$LOG" && grep -q "^APK $t15" "$LOG" && ! grep -q '^MAIL.
   grep -q "${t15:0:9}: APK ship rc 3: the phone link dropped" "$Q/runner.log" && ok "link drop: the same tip goes again and installs" || { bad "link drop retry"; cat "$LOG"; tail -8 "$Q/runner.log"; }
 : > "$LOG"; echo 9 > "$HOME/apk-link-drop"
 land targets/android/app/Main.kt 'class Main15b' "kt15b"; req --note "fifteen b"; t15b=$(tip)
-for _ in $(seq 300); do [ "$(cat "$Q/failed-apk" 2>/dev/null)" = "$t15b" ] && break; sleep 0.2; done
+# Until the FAILED mail - written after failed-apk (the record first, then the mail): waiting on failed-apk alone raced it.
+for _ in $(seq 300); do [ "$(cat "$Q/failed-apk" 2>/dev/null)" = "$t15b" ] && grep -q '^MAIL.*FAILED' "$LOG" && break; sleep 0.2; done
 [ "$(cat "$Q/failed-apk" 2>/dev/null)" = "$t15b" ] && [ "$(grep -c '^APKLINKDROP' "$LOG")" = 3 ] && [ "$(grep -c '^MAIL.*FAILED' "$LOG")" = 1 ] &&
   ok "a link that keeps dropping: FAILED after 2 retries, mailed once" || { bad "link drop cap: $(grep -c '^APKLINKDROP' "$LOG") drops"; cat "$LOG"; tail -8 "$Q/runner.log"; }
 rm -f "$HOME/apk-link-drop"; land targets/android/app/Main.kt 'class Main15c' "kt15c"; drained 60 && ok "the next tip ships" || bad "after link-drop cap"
