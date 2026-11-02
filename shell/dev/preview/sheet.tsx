@@ -17,6 +17,19 @@ import type { HomeItem } from "../../types.ts";
 
 declare function importShim(url: string): Promise<any>;
 
+/**
+ * Every WebGL canvas the sheet's tiles open keeps its drawing buffer, so the fit checks can read what it shows. By
+ * default (preserveDrawingBuffer false) a WebGL canvas's buffer is cleared once the frame is presented: the page shows
+ * the frame (a screenshot has it), but a later drawImage/toDataURL - inked() and stable() below, in their own task -
+ * reads blank. A terminal tile (ui/terminal.tsx: xterm's WebGL renderer) measured "nothing drawn" at every size while
+ * drawing its session. Measured 2026-11-02 in the gate's Chromium: red cleared, read in-task 255,0,0,255, after a
+ * frame 0,0,0,0, the screenshot 255,0,0,255. Only the sheet's page: the shell itself keeps the cheaper default.
+ */
+const getContext = HTMLCanvasElement.prototype.getContext as (this: HTMLCanvasElement, id: string, o?: any) => any;
+HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, id: string, o?: any) {
+  return getContext.call(this, id, /^(webgl2?|experimental-webgl)$/.test(id) ? { ...o, preserveDrawingBuffer: true } : o);
+} as typeof HTMLCanvasElement.prototype.getContext;
+
 export interface Cell {
   /** Unique: the OWL key the trees are served under, or a DOM id. */
   key: string;
@@ -295,7 +308,24 @@ export async function mount(spec: Spec, settleMs = 900) {
     root,
   );
   await new Promise((r) => setTimeout(r, settleMs));
+  await onScreenOnce(root);
   await stable(root);
+}
+
+/**
+ * Brings every tile into the viewport for a couple of frames, then back to the top: a tile that draws only while it's
+ * on screen (xterm pauses a terminal its IntersectionObserver sees off screen, as on home) drew nothing below the
+ * page's first 900 px - the terminal's 4x4 tiles, last on the sheet, measured "nothing drawn" with a full buffer
+ * (renderer paused, a full refresh pending). What it drew stays when scrolled away (pausing stops new frames only).
+ */
+async function onScreenOnce(root: HTMLElement) {
+  const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  for (const cell of root.querySelectorAll<HTMLElement>(".pv-cell")) {
+    cell.scrollIntoView({ block: "center" });
+    await frame();
+  }
+  window.scrollTo(0, 0);
+  await frame();
 }
 
 /** What the sheet shows, as a number: its markup and every canvas's drawn pixels. */

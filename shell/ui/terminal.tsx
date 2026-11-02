@@ -309,11 +309,21 @@ function webgl(term: Terminal): "webgl" | "dom" {
   try {
     const gl = new WebglAddon();
     term.loadAddon(gl);
-    gl.onContextLoss(() => {
+    let lost = false;
+    const toDom = () => {
+      if (lost) return;
+      lost = true;
       gl.dispose();
       const s = [...sessions.values()].find((x) => x.term === term);
       if (s) s.renderer = "dom";
-    });
+    };
+    gl.onContextLoss(toDom);
+    // At once, not after the addon's 3 s wait for a restore: the loss Chromium deals most (its per-page context limit
+    // taking the oldest, when a home of terminal tiles and other WebGL widgets passes 16) never restores, and the tile
+    // drew nothing for those 3 s - the widget sweep measured terminal tiles blank. The DOM renderer draws the buffer
+    // the next frame. Caught on the way down (the event doesn't bubble) and disposed a task later, after the addon's own
+    // listener has armed its timer; that timer then fires on a disposed addon, a no-op.
+    term.element?.addEventListener("webglcontextlost", () => setTimeout(toDom), { capture: true, once: true });
     return "webgl";
   } catch (e) {
     console.warn("term: no WebGL, the DOM renderer draws", e);
