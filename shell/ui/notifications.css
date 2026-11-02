@@ -124,7 +124,12 @@
  */
 .notif.expanded .notif-title { white-space: normal; overflow-wrap: anywhere; }
 .notif.expanded .notif-text, .notif.expanded .notif-text.lines { display: block; -webkit-line-clamp: unset; overflow: visible; white-space: pre-line; overflow-wrap: anywhere; }
-.notif-picture { display: block; width: 100%; max-height: 240px; object-fit: cover; margin-top: 8px; border-radius: var(--radius); }
+/* The big picture: only an opened card's (notifications.tsx draws it folded too, hidden, so it is loaded by then); it
+   fades in as the card grows to it - never there in one frame (§6). */
+.notif-picture { display: none; width: 100%; max-height: 240px; object-fit: cover; margin-top: 8px; border-radius: var(--radius); }
+.notif.expanded > .notif-picture { display: block; animation: notif-picture-in var(--spring-ms) var(--spring) both; }
+@keyframes notif-picture-in { from { opacity: 0; transform: scale(0.98); } }
+@media (prefers-reduced-motion: reduce) { .notif.expanded > .notif-picture { animation: none; } }
 .notif-head > .notif-icon[role="button"] { cursor: pointer; }
 /* A single's small icon (notifications.tsx SmallIcon): the status bar's glyph as a mask, in its app's color. */
 .notif-icon.notif-small { flex: none; display: inline-block; border-radius: 0; background: var(--tint, var(--color-foreground)); }
