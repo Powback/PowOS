@@ -6964,6 +6964,44 @@ async function aiEntryMemoScene() {
 }
 
 /**
+ * PERF-P4 (perf-scenarios round before, 11-02: the shade's 3 pulls re-rendered Toggle 258x, 233 needless, and its Icons
+ * 373x): with the shade open, two qs updates with the same content (as the host sends them: a fresh object each time)
+ * re-render no control tile - only a tile whose content changed renders again.
+ */
+async function ccToggleMemoScene() {
+  const S = await window.__gw.mod("./state.ts");
+  const C = await window.__gw.mod("./ui/control.tsx");
+  const fails = [];
+  S.ccV3.value = "v3";
+  const tile = (id, label, on) => ({ id, label, on, detail: null });
+  const base = { torch: false, dnd: false, brightness: { value: 0.5, auto: false }, volume: { value: 0.5, ringer: 2 },
+    tiles: [tile("wifi", "Wi-Fi", true), tile("bt", "Bluetooth", false), tile("dnd", "Do not disturb", false), tile("torch", "Torch", false)] };
+  C.quick.value = { ...base, tiles: base.tiles.map((t) => ({ ...t })) };
+  S.notif.value = true;
+  await window.__gw.until(() => document.querySelector(".cc3-list .cc3-cell"));
+  await window.__gw.settled();
+  await window.__gw.frames(10);
+  const count = async (q) => {
+    window.__powosRenders.start();
+    window.__powosRenders.reset();
+    C.quick.value = q;
+    await window.__gw.frames(4);
+    const rows = window.__powosRenders.top(500).byCount;
+    window.__powosRenders.stop();
+    return rows.filter((r) => r.name === "Toggle").reduce((n, r) => n + r.renders, 0);
+  };
+  const same = await count({ ...base, tiles: base.tiles.map((t) => ({ ...t })) });
+  const changed = await count({ ...base, tiles: base.tiles.map((t) => (t.id === "bt" ? { ...t, on: true } : { ...t })) });
+  window.__ccMemo = `Toggle renders: ${same} for an equal qs update, ${changed} for one tile changed`;
+  console.warn(`[gate] cc-toggle-memo: ${window.__ccMemo}`);
+  if (same > 0) fails.push(`PERF-P4: an equal qs update re-rendered ${same} control tiles (want 0)`);
+  if (changed < 1 || changed > 1) fails.push(`PERF-P4: one tile changed rendered ${changed} tiles (want exactly 1)`);
+  if (!document.querySelector('.cc3-cell[data-key="bt"] .cc3-t.on')) fails.push("PERF-P4: Bluetooth's tile didn't turn on after its change");
+  S.notif.value = false;
+  return fails;
+}
+
+/**
  * HP2 (perf-1793458232732: a 133 ms frame on the pet's switch, PetSwitch + the lights island "Ct"): the pet switched
  * on and off renders PetSwitch at most twice per switch, and nothing else on home (no island, no tile) re-renders.
  */
@@ -11581,6 +11619,12 @@ try {
     runs.push(open(browser, `${ORIGIN}/index.html`, "pet-switch", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
       const fails = await r.page.evaluate(petSwitchScene);
       console.log(`     pet-switch: ${await r.page.evaluate(() => window.__petSwitch).catch(() => "?")}`);
+      return fails;
+    })));
+    // PERF-P4 (perf-scenarios 11-02): an equal qs update re-renders no control tile in the shade (cc-toggle-memo).
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, "cc-toggle-memo", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
+      const fails = await r.page.evaluate(ccToggleMemoScene);
+      console.log(`     cc-toggle-memo: ${await r.page.evaluate(() => window.__ccMemo).catch(() => "?")}`);
       return fails;
     })));
     // PERF5 (perf-1793474464493): no pet.overlay with the pet off, stable registry rows, the glass measure after layout.

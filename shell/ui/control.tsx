@@ -13,6 +13,7 @@ import { ccV3, notif, panel } from "../state.ts";
 import { followNotif, held, notifOpen } from "./gesture.ts";
 import { ccEditing, ccExpanded, expandedByDefault } from "./ccexpand.ts";
 import { useReorder } from "./reorder.ts";
+import { memo, sameProps } from "./memo.ts";
 import { fadeIn, reducedMotion } from "./notifmotion.ts";
 import { tick } from "./haptics.ts";
 import { Icon, type IconName } from "./icons.tsx";
@@ -993,8 +994,13 @@ function tapOf(t: QuickTile, own: () => void): () => void {
   return open ? () => (shut(), open()) : own;
 }
 
-/** One control: its icon on a chip (the accent when on), its word under it. A long press opens its page. */
-function Toggle({ t }: { t: QuickTile }) {
+/**
+ * One control: its icon on a chip (the accent when on), its word under it. A long press opens its page.
+ * Re-rendered only when its tile's content changes: Controls rebuilds every tile on each qs update (the shade's
+ * listening, the 3 s remote/tests/pad asks), the same content in a new object - the shade's 3 pulls re-rendered
+ * Toggle 258x (233 needless, t~) and its Icons 373x (343 needless) in perf-scenarios round before, 11-02.
+ */
+const Toggle = memo(function Toggle({ t }: { t: QuickTile }) {
   const press = usePress(t, !ccEditing.value);
   const click = tapOf(t, press.onClick);
   return (
@@ -1015,7 +1021,7 @@ function Toggle({ t }: { t: QuickTile }) {
       </button>
     </div>
   );
-}
+}, (a, b) => sameProps(a.t, b.t));
 
 /** A row or a section of toggles, rearranged in edit mode; [save] gets its new order. */
 function ToggleGrid({ ts, save, class: c = "" }: { ts: QuickTile[]; save: (ids: string[]) => void; class?: string }) {
