@@ -345,7 +345,8 @@ class WebWindows(
             RenderWatch.Act.PROBE -> emit("webwindows.resend", 0)
             // The rebind: the windows' root onto home's current surface, the WebView's visibility poked, and resent.
             RenderWatch.Act.STALL -> {
-                WindowLog.w(TAG, "RENDER STALL: $live live window(s), no geometry for ${stallFor(now)} (last w.f at ${lastFrameText()}): rebind")
+                val pressure = if (renderWatch.underPressure(now)) " (memory pressure: no reload)" else ""
+                WindowLog.w(TAG, "RENDER STALL: $live live window(s), no geometry for ${stallFor(now)} (last w.f at ${lastFrameText()}): rebind$pressure")
                 pokeVisibility("render stall")
                 for (w in wins.values.toList()) consumerCheck(w, "render stall")
                 if (!reattach(null, "render stall")) resend("render stall")
@@ -353,6 +354,28 @@ class WebWindows(
             RenderWatch.Act.RELOAD -> stallReload(now, live)
         }
     }
+
+    /**
+     * Memory pressure (11-02 05:07: the idle phone at ~49 MB free, the low-memory killer firing; the page slowed, the
+     * watchdog reloaded it, the reload allocated a new page - the next stall): the watch rebinds but never reloads for
+     * [RenderWatch.PRESSURE_MS] ([RenderWatch.trimmed]); the windows keep their layers and last geometry, and the
+     * page's own buffers are Chromium's to release (the WebView gets the same callback). UI_HIDDEN is not pressure.
+     */
+    private val trimWatch =
+        object : android.content.ComponentCallbacks2 {
+            override fun onTrimMemory(level: Int) {
+                if (!RenderWatch.isPressure(level)) return
+                main.post {
+                    renderWatch.trimmed(SystemClock.uptimeMillis())
+                    if (wins.isNotEmpty()) WindowLog.w(TAG, "memory trim (level $level): ${wins.size} window(s) keep their geometry; no page reload for ${RenderWatch.PRESSURE_MS / 1000}s")
+                }
+            }
+
+            override fun onConfigurationChanged(newConfig: android.content.res.Configuration) = Unit
+
+            @Deprecated("Deprecated in Java")
+            override fun onLowMemory() = onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+        }
 
     private fun stallFor(now: Long) = if (lastFrameAt == 0L) "ever" else "${(now - lastFrameAt) / 1000}s"
 
@@ -550,6 +573,7 @@ class WebWindows(
     init {
         current = this
         runCatching { dm.registerDisplayListener(displayListener, main) }
+        context.applicationContext.registerComponentCallbacks(trimWatch)
         // Every touch on home, watched (never taken): a Linux body the page pressed gets the whole gesture natively.
         (web as? HomeWebView)?.touchHook = ::onTouch
     }
@@ -2501,6 +2525,7 @@ class WebWindows(
         wins.values.toList().forEach { drop(it, handBack = it.linux != null) }
         pendingLinux.keys.toList().forEach { kwin -> pendingLinux.remove(kwin)?.let { andro.marchy.WebWindowSource.fallback(context, kwin, it.appId, it.title) } }
         runCatching { dm.unregisterDisplayListener(displayListener) }
+        runCatching { context.applicationContext.unregisterComponentCallbacks(trimWatch) }
         main.removeCallbacks(reconcileRun)
         stopTasks?.invoke()
         helper.stop()

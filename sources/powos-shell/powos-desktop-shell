@@ -59,7 +59,10 @@ desktop_apply() {
     1|on) : >"$DESKTOP"; meta_key on ;;
     *) rm -f "$DESKTOP"; meta_key off ;;
   esac
-  if desktop_mode; then rm -f "$OFF"; plasma_panels_off; else plasma_panels_on; fi
+  # The user's pause ($OFF, 2026-10-22) outlives desktop mode: on, the shell runs for the mode whatever it says (start
+  # --auto, desktop on); off, it is paused again. 11-02: desktop mode on once deleted it, so after mode off the paused
+  # shell autostarted with every session (~1 GB with its renderer and GPU) on the idle phone that ran out of memory.
+  if desktop_mode; then plasma_panels_off; else plasma_panels_on; fi
 }
 pids() { pgrep -u "$(id -u)" -f "^$BIN( |$)"; }
 start() {
