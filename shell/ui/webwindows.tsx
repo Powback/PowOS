@@ -17,6 +17,7 @@ import type { HostWebWindow, WebWindowRect } from "../types.ts";
 import { Mark } from "./chrome.tsx";
 import { forgetQuickReturn, QuickBar, quickGone, quickIconKeys, quickPlace, quickShown, QUICK, type QuickInfo, type QuickRect } from "./quickpage.tsx";
 import { memo } from "./memo.ts";
+import { usePresence } from "./reveal.tsx";
 import { confirm as hapticConfirm, tick as hapticTick } from "./haptics.ts";
 import { dropAt, dropInto, freeRegion, insertAt, leaves, splitBox, tabAt, treeRects, zoneKey as dropKey, type Bar, type Tree, type Zone } from "./tiledrop.ts";
 
@@ -2329,12 +2330,12 @@ function close(id: number) {
 }
 
 /** The tile menu, under the tile button: DOM over the window's body (it takes its taps by DOM order). */
-function TileMenu({ win }: { win: WebWin }) {
+function TileMenu({ win, leaving }: { win: WebWin; leaving: boolean }) {
   const tiled = tiledOn(win.id) != null;
   const items: [Slot, string][] = [["left", "Left half"], ["right", "Right half"], ["top", "Top half"], ["bottom", "Bottom half"], ["grid", "Grid"]];
   if (tiled) items.push(["float", "Float"]);
   return (
-    <div class="ww-tile-menu tile sheet pop" onPointerDown={(e) => e.stopPropagation()}>
+    <div class={`ww-tile-menu tile sheet pop ${leaving ? "leaving" : ""}`} inert={leaving || undefined} onPointerDown={(e) => e.stopPropagation()}>
       {items.map(([slot, label]) => (
         <button
           key={slot}
@@ -2884,11 +2885,11 @@ const Handles = memo(function Handles({ id, zones }: { id: number; zones: string
 });
 
 /** RZ4: the live size outline round a frame being resized, its size (screen px) in it; brighter on a snapped tile size. */
-function ResizeOutline({ win }: { win: WebWin }) {
+function ResizeOutline({ win, leaving }: { win: WebWin; leaving: boolean }) {
   const k = win.scale ?? 1;
   const v = resizeView.value;
   return (
-    <div class={`ww-outline ${v?.snapped ? "snapped" : ""}`}>
+    <div class={`ww-outline ${v?.snapped ? "snapped" : ""} ${leaving ? "leaving" : ""}`}>
       <span class="ww-outline-size tile">
         {Math.round(win.w * k)} × {Math.round(win.h * k)}
       </span>
@@ -3085,6 +3086,9 @@ function AppWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[
   const free = !win.restore && tiledOn(win.id) == null;
   const focused = !above.length;
   const sizing = resizeView.value?.id === win.id;
+  // The outline and the tile menu leave on the spring (§6: both were gone in one frame).
+  const outline = usePresence(sizing);
+  const menu = usePresence(tileMenu.value === win.id);
   const cls = frameClass(win, focused, sizing);
   return (
     <>
@@ -3094,8 +3098,8 @@ function AppWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[
         <Body win={win} body={body} />
         {free && <Handles id={win.id} zones={zoneKey(win)} />}
         <SwapHint win={win} />
-        {sizing && <ResizeOutline win={win} />}
-        {tileMenu.value === win.id && <TileMenu win={win} />}
+        {outline.on && <ResizeOutline win={win} leaving={outline.leaving} />}
+        {menu.on && <TileMenu win={win} leaving={menu.leaving} />}
       </div>
     </>
   );

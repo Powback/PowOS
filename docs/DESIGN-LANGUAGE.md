@@ -11,11 +11,14 @@ Checks:
 
 - `shell/dev/lint-style.sh` fails the gate on raw colours, borders and shadows.
 - `shell/dev/lint-design.sh` fails the gate on monospace UI text, hard-coded blur, off-scale radii (every corner of
-  a shorthand), literal easings, status colours outside their tokens, literal durations in home's and the
-  launcher's motion, hard lines drawn at `--frame`, and folds or menus on the AI page that pop in
-  (`{open && …}` instead of `ui/reveal.tsx` `Reveal` / `usePresence`).
+  a shorthand, and a `--*radius` property defined off the scale), literal easings (a `--x: cubic-bezier()` too),
+  status colours outside their tokens, literal durations in any rule's motion (loops, reduced-motion overrides and a
+  property run linearly as a clock excepted), hard lines drawn at `--frame`, and folds or menus on the AI page that
+  pop in (`{open && …}` instead of `ui/reveal.tsx` `Reveal` / `usePresence`).
 - The gate's `design-lint-*` runs find pop-ins and monospace text on screen. They fail the gate for the launcher
-  (`design-lint-launcher-*`) and are report-only for the other surfaces until their design wave.
+  (`design-lint-launcher-*`), the switcher (`design-lint-switcher-*`: the cards rising, a card's menu) and web windows
+  (`design-lint-windows-*`: the tile menu, the resize outline), and are report-only for the other surfaces until
+  their design wave.
 - `shell/dev/gate.sh --shots DIR` renders every surface and measures text contrast (`report.json`).
 
 ## 1. Less is more
@@ -40,8 +43,10 @@ Checks:
   - `--shade-tint` and `--widget-blur-native` only alias these.
   - No surface names its own blur or tint. See `dev/backdrop-check.js` and commits 3e6e5825 and 160e64ed.
   - A picture blurred in the page (the media card's art, a card's splash) uses the frost's `--glass-blur`.
-- **Menus are opaque.** A menu over a page (⋯, a long-press menu, a tile menu) is filled with `--menu-tint` (the
-  theme's background at 94%), so nothing underneath reads through it.
+- **Menus are opaque.** A menu over a page (⋯, a long-press menu, a tile menu, a switcher card's menu) is filled with
+  `--menu-tint` (the theme's background at 94%), so nothing underneath reads through it.
+- **Drop targets and selection** are one mark: a `--frame` ring in the accent, over `--soft-fill` at most (edit
+  mode's selection, a window's drop ghost and resize outline, a tab target). No 1px or 3px rings, no blur of their own.
 - **Sheets hide home.** A page-sized sheet (`.tile.sheet`) fades home's content out, so only the frosted wallpaper
   is behind it. There are no page-wide dims or scrims. See shell.css `html:has(...)`.
 - **No hard lines.** Rows are separated by spacing, never by 1px borders or dividers. `--line` is transparent and
