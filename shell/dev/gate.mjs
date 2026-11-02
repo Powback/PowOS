@@ -11791,6 +11791,18 @@ try {
       console.log(`     drawer-drag-renders: ${await r.page.evaluate(() => window.__drawerDrag).catch(() => "?")}`);
       return fails;
     })));
+    // HZ-VOTE (perf-1793639664326): the drawer's Web Animation settle holds the host's 120 Hz vote, given back after (drawer-settle-refresh).
+    runs.push(open(browser, `${ORIGIN}/index.html`, "drawer-settle-refresh", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
+      await r.page.evaluateOnNewDocument(() => {
+        window.__nativeMsgs = [];
+        window.PowosNative = { postMessage: (m) => window.__nativeMsgs.push([performance.now(), String(m)]) };
+      });
+      await r.page.reload();
+      await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS });
+      const fails = await r.page.evaluate(async () => (await importShim("./dev/drawer-drag-check.js")).drawerSettleHoldsRefresh());
+      console.log(`     drawer-settle-refresh: ${await r.page.evaluate(() => window.__hzVote).catch(() => "?")}`);
+      return fails;
+    })));
     // PERF-P4 (perf-scenarios 11-02): an equal qs update re-renders no control tile in the shade (cc-toggle-memo).
     runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, "cc-toggle-memo", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
       const fails = await r.page.evaluate(ccToggleMemoScene);

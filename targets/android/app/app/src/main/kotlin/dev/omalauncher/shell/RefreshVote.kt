@@ -13,7 +13,9 @@ internal class RefreshVote(
     private val idleMs: Long = IDLE_MS,
 ) {
     private val holders = mutableSetOf<String>()
-    private var touching = false
+    /** A finger is down on the window (its down seen, no up/cancel since). */
+    var touching = false
+        private set
 
     /** When the vote goes idle unless something new comes (uptime ms; 0: not counting down). */
     var releaseAt = 0L
@@ -30,6 +32,14 @@ internal class RefreshVote(
         touching = down
         return settle(now)
     }
+
+    /**
+     * A finger moving on the window: touching again if a cancel ended the touch under a finger still down. WebWindows
+     * takes a Linux window's drag mid-gesture (HomeWebView.touchHook): the page gets one ACTION_CANCEL, which our
+     * listener saw as the finger's up, and the drag's moves only reach [HighRefresh] through stolenWatch - so the vote
+     * went idle a second into the drag, under the finger (60 Hz while a window followed it).
+     */
+    fun move(now: Long): Boolean = if (touching) high else touch(true, now)
 
     /** [by] holds the vote ([on]) or lets go of it; one letting go keeps the others'. */
     fun hold(

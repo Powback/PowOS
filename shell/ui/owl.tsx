@@ -639,6 +639,20 @@ function sprite(g: CanvasRenderingContext2D, a: any[], n: Props, fill: Paint) {
  * [cells]: the tile's size in grid cells, for the widget's cols and rows.
  */
 type OwlProps = { widget: string; cells?: Cell | null; screen?: boolean };
+/**
+ * The size last told the host per mounted widget: a tile re-observed at the same size (its observer re-made as the
+ * page swap or the launcher's pull re-renders it) isn't another bridge call on the host's UI thread (perf-1793639664326:
+ * widgets.size the last call before 25-44 ms native frames around page swaps). Forgotten at unmount: the host may drop
+ * the instance with its watch, and a new one needs the size again.
+ */
+const toldSize = new Map<string, string>();
+function sizeTile(widget: string, cells: Cell | null | undefined, r: DOMRect) {
+  const [cols, rows] = [cells?.w ?? 0, cells?.h ?? 0];
+  const k = `${cols} ${rows} ${Math.round(r.width)} ${Math.round(r.height)}`;
+  if (toldSize.get(widget) === k) return;
+  toldSize.set(widget, k);
+  powos.widgets.size(widget, cols, rows, r.width, r.height);
+}
 const sameCell = (a?: Cell | null, b?: Cell | null) => a === b || (!!a && !!b && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h);
 /** The grid hands a new cells object (the same cell) on each of its renders: the widget re-renders when its tile changes. */
 const sameOwl = (a: OwlProps, b: OwlProps) => a.widget === b.widget && a.screen === b.screen && sameCell(a.cells, b.cells);
@@ -649,14 +663,16 @@ export const OwlWidget = memo(function OwlWidget({ widget, cells, screen = false
   const images = useRef(new Map<string, HTMLImageElement>());
   useEffect(() => {
     powos.widgets.watch(widget, screen);
-    return () => void powos.widgets.unwatch(widget, screen);
+    return () => {
+      if (!screen) toldSize.delete(widget);
+      void powos.widgets.unwatch(widget, screen);
+    };
   }, [widget, screen]);
   useLayoutEffect(() => {
     // The tile's size (its cells and dp): a screen drawn full size isn't the tile.
     if (screen) return;
     const ro = new ResizeObserver(() => {
-      const r = el.current!.getBoundingClientRect();
-      powos.widgets.size(widget, cells?.w ?? 0, cells?.h ?? 0, r.width, r.height);
+      sizeTile(widget, cells, el.current!.getBoundingClientRect());
     });
     ro.observe(el.current!);
     return () => ro.disconnect();

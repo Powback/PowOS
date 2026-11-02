@@ -85,8 +85,12 @@ class ShellHost(
 
     val bridge = ShellBridge(context, activity, runtime, web)
 
-    /** An activity's page (home) at the panel's fastest rate while touched - or while a swipe up shows its switcher. */
-    internal val highRefresh: HighRefresh? = activity?.window?.let { HighRefresh(it, web) }
+    /**
+     * An activity's page (home) at the panel's fastest rate while touched - or while a swipe up shows its switcher. A
+     * window's owner sets its own (OverlayHost: the launcher/assist panel's window), so its page's "boost" (refresh.ts:
+     * its settles and transitions) reaches that window's vote instead of nowhere.
+     */
+    internal var highRefresh: HighRefresh? = activity?.window?.let { HighRefresh(it, web) }
 
     /** The page's boot: its errors and its ready (index.html's boot guard), watched by [checkBoot]. */
     private val boot = Boot()
