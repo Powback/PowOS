@@ -25,7 +25,7 @@ lib/ai/agent.sh:_ai_resume_picker 20
 lib/ai/agent.sh:ai_interactive 30
 lib/ai/helpers.sh:ai_parse_files_to_dir 16
 lib/ai/helpers.sh:ai_parse_markdown_to_dir 24
-lib/android.sh:cmd_android 32
+lib/android.sh:cmd_android 20
 lib/backup.sh:cmd_backup 16
 lib/backup.sh:sync_from_working_dirs 18
 lib/backup.sh:sync_pull 22

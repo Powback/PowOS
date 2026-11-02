@@ -28,7 +28,6 @@ lib/ai/agent.sh:ai_interactive 126
 lib/ai/clients/claude.sh:client_call 74
 lib/ai/helpers.sh:ai_parse_markdown_to_dir 79
 lib/ai/manager/manager.sh:manager_run 68
-lib/android.sh:cmd_android 73
 lib/backup.sh:cmd_backup 81
 lib/backup.sh:create_default_syncignore 156
 lib/backup.sh:sync_pull 91

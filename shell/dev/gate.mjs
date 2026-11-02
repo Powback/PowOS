@@ -8072,21 +8072,26 @@ async function fingerOf(page) {
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
   await page.reload().catch(() => {});
   await page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
-  const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  // [at]: the input's own time (s since the epoch, CDP's timestamp: the page's event.timeStamp). Stamped with when the
+  // finger meant it, a loaded gate delivering it late (2.8 s for a 60 ms tap at load 45) is still the gesture it was -
+  // the shell decides hold vs tap/swipe by the input clock (grid.tsx useEmptyPress, reorder.ts end), as on the phone.
+  const touch = (type, pts, at) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts, ...(at ? { timestamp: at } : {}) });
   const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
   // The lift 50 ms after the press, not after its round trip: under the ship gate's load that took over 420 ms, a hold.
   const tap = async ([x, y]) => {
-    const down = touch("touchStart", [{ x, y }]);
+    const t0 = Date.now() / 1000;
+    const down = touch("touchStart", [{ x, y }], t0);
     await wait(50);
-    await Promise.all([down, touch("touchEnd", [])]);
+    await Promise.all([down, touch("touchEnd", [], t0 + 0.05)]);
     await wait(80);
   };
   // A drag through [pts] on the page's clock, one point every stepMs: each event sent when its time comes, not after the
   // previous one's round trip - awaited one by one, a loaded gate (f30) stretched an 8-step swipe into a slow drag.
   const swipe = async (pts, stepMs = 16) => {
-    const sent = [touch("touchStart", [pts[0]])];
-    for (const p of pts.slice(1)) { await wait(stepMs); sent.push(touch("touchMove", [p])); }
-    sent.push(touch("touchEnd", []));
+    const t0 = Date.now() / 1000, at = (i) => t0 + (i * stepMs) / 1000;
+    const sent = [touch("touchStart", [pts[0]], at(0))];
+    for (const [i, p] of pts.slice(1).entries()) { await wait(stepMs); sent.push(touch("touchMove", [p], at(i + 1))); }
+    sent.push(touch("touchEnd", [], at(pts.length - 1)));
     await Promise.all(sent);
   };
   return { touch, wait, tap, swipe };
@@ -8165,6 +8170,13 @@ async function searchAfterDockMinimise(r, f) {
   return fails;
 }
 
+/** Why a swipe on home didn't open the drawer: the shell's state and its own swipe decisions (gesture.ts logSwipe). */
+const swipeWhy = (r, at) => r.page.evaluate(async (at) => {
+  const S = await importShim("./state.ts");
+  const e = document.elementFromPoint(at[0], at[1]);
+  return JSON.stringify({ drawer: S.drawer.value, editing: S.editing?.value, at, el: e?.className?.toString().slice(0, 60), log: (window.__swipeLog || []).slice(-6) });
+}, at);
+
 async function homeGesturesScene(r) {
   const f = await fingerOf(r.page);
   const fails = [];
@@ -8181,13 +8193,14 @@ async function homeGesturesScene(r) {
   await f.wait(400);
   let at = await empty();
   if (!at) return ["E2E1: no empty spot on home"];
+  await r.page.evaluate(() => { window.__swipeLog = []; window.__ciWas ??= console.info; console.info = (...a) => (window.__swipeLog.push(String(a[0])), window.__ciWas(...a)); });
   await f.swipe(Array.from({ length: 9 }, (_, i) => ({ x: at[0], y: at[1] - i * 30 })));
   // Polled, not a fixed wait: under the full gate's load the drawer's settle took longer than 700 ms (it passed alone).
   // The budget is READY_MS (load-scaled), not a fixed 4000/3000 (f30).
   const until = (fn) => r.page.waitForFunction(fn, { timeout: READY_MS, polling: 50 }).then(() => true, () => false);
   await until(() => !!document.querySelector(".home.open"));
   const st = await r.page.evaluate(() => ({ open: !!document.querySelector(".home.open"), focused: !!document.activeElement?.matches(".bar textarea") }));
-  if (!st.open) fails.push("E2E1: a plain swipe up from empty home space didn't open the drawer");
+  if (!st.open) fails.push(`E2E1: a plain swipe up from empty home space didn't open the drawer (${await swipeWhy(r, at)})`);
   if (st.focused) fails.push("E2E1: a plain swipe up focused the search");
   await reset(); await f.wait(500);
   const sp = await r.page.evaluate(() => {
@@ -9063,9 +9076,11 @@ const qlxAt = (page, k) =>
   }, k);
 /** A finger on [at] for [ms] (CDP touch: the phone's pointerdown/up and its click), then the page settled. */
 async function qlxFinger(page, cdp, at, ms) {
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: at.x, y: at.y }] });
+  // Stamped on the finger's clock (fingerOf's touch): delivered late under load, a tap is still a tap.
+  const t0 = Date.now() / 1000;
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: at.x, y: at.y }], timestamp: t0 });
   await new Promise((ok) => setTimeout(ok, ms));
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [], timestamp: t0 + ms / 1000 });
   await new Promise((ok) => setTimeout(ok, 150));
   await page.evaluate(() => window.__gw.settled());
 }
@@ -9105,8 +9120,16 @@ async function quickLaunchX(page) {
     const a = await qlxAt(page, k1);
     if (!a?.hit) return [`quick-launch X: the X of ${k1} is ${a ? "covered" : "missing"} at the finger; the row is ${JSON.stringify(await qlxKeys(page))}`];
     // A tap on the first item's X: it leaves the row and the store.
+    await page.evaluate(() => {
+      window.__qlxLog = [];
+      const t0 = performance.now();
+      for (const ty of ["pointerdown", "pointerup", "pointercancel", "click"])
+        addEventListener(ty, (e) => window.__qlxLog.push(`${ty}@${Math.round(e.timeStamp - t0)}/${Math.round(performance.now() - t0)} ${e.target?.className?.toString?.().slice(0, 24)}`), { capture: true });
+    });
     await qlxFinger(page, cdp, a, 60);
-    fails.push(...(await qlxGone(page, k1)));
+    const gone = await qlxGone(page, k1);
+    if (gone.length) gone.push(`  events ${JSON.stringify(await page.evaluate(() => window.__qlxLog))}`);
+    fails.push(...gone);
     // A long press on the next X let go in place: a lift's release, the item stays.
     const b = await qlxAt(page, k2);
     if (b) await qlxFinger(page, cdp, b, 700);

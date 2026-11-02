@@ -23,7 +23,7 @@ import { byKey, carry, dockAim, editing, folder, home, launch, page, pages, sear
 import { addHome, dropOnDock, hoverDock } from "./dockdrop.ts";
 import { dropOut, hoverOut, outAim } from "./dockout.tsx";
 import { powos } from "../bridge.ts";
-import { applyTrack, drawerOpen, held } from "./gesture.ts";
+import { applyTrack, drawerOpen, eventTime, held } from "./gesture.ts";
 import { LibraryPage } from "./library.tsx";
 import { provideHomeGrid, underWindows, WebWindowsOn } from "./webwindows.tsx";
 import { FolderView } from "./folderview.tsx";
@@ -1032,7 +1032,8 @@ const onEmpty = (e: Event) => {
  * Home's empty space: held, it's edit mode (state.ts editing - the home menu's sheet, an empty page to fill); a tap
  * ends a tile's edit, then edit mode, as on a stock launcher.
  */
-type EmptyPress = { x: number; y: number; timer: number; long: boolean; at: number; armed: number };
+/** [down]: the press's input timestamp (the event clock: a hold's timer can run late, the finger's events don't). */
+type EmptyPress = { x: number; y: number; timer: number; long: boolean; at: number; armed: number; down: number };
 
 /**
  * Editing, a finger moved on empty space draws the selection rectangle (homeselect.ts) when it was held still first
@@ -1060,7 +1061,7 @@ function useEmptyPress() {
   return {
     onPointerDown: (e: PointerEvent) => {
       if (e.button || !onEmpty(e) || drawerOpen.value) return;
-      const p = { x: e.clientX, y: e.clientY, timer: 0, long: false, at: performance.now(), armed: 0 };
+      const p = { x: e.clientX, y: e.clientY, timer: 0, long: false, at: performance.now(), armed: 0, down: eventTime(e) };
       // Already editing: a hold arms the rectangle instead (nothing more to start).
       if (editing.value) p.armed = window.setTimeout(() => (held.value = true), MARQUEE_DWELL);
       else
@@ -1074,8 +1075,12 @@ function useEmptyPress() {
     },
     onPointerMove: (e: PointerEvent) => {
       const p = s.current;
+      if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) <= SLOP) return;
+      // The hold's timer ran late (a busy main thread: the moves were queued behind it) - by the input's own clock the
+      // finger moved before the hold, so it's the swipe it was, not edit mode (E2E1: a swipe up opened edit mode).
+      if (p.long && eventTime(e) - p.down < LONG_PRESS_MS) (editing.value = false), (p.long = false);
       // Moved: a swipe (pages, the drawer), not a hold - or, editing, the rectangle.
-      if (!p || p.long || Math.hypot(e.clientX - p.x, e.clientY - p.y) <= SLOP) return;
+      if (p.long) return;
       marqueeFrom(p, e);
       cancel();
     },

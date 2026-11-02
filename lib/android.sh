@@ -102,6 +102,47 @@ on an Android app's window it hands the app back to Android, full screen.
 EOF
 }
 
+# powos android <verb> handlers, apart from the dispatcher so each stays small.
+_android_open() {
+    local app="" full=0
+    for a in "$@"; do
+        case "$a" in
+            --full) full=1 ;;
+            *) app=$a ;;
+        esac
+    done
+    [[ -n "$app" ]] || { echo "usage: powos android open <app> [--full]" >&2; return 2; }
+    local pkg; pkg=$(_android_resolve "$app") || return 1
+    if (( full )); then
+        _android_need || return 1
+        _android_sh monkey -p "$pkg" -c android.intent.category.LAUNCHER 1 >/dev/null
+    else
+        local name; name=$(awk -F'\t' -v p="$pkg" '$1 == p { print $2 }' <<<"$(_android_apps)")
+        setsid -f powos-android-app "$pkg" "${name:-$pkg}" >/dev/null 2>&1 </dev/null
+    fi
+}
+
+_android_notify() {
+    _android_need || return 1
+    local title=${1:-} text=${2:-}
+    [[ -n "$title" ]] || { echo "usage: powos android notify <title> [text]" >&2; return 2; }
+    [[ -n "$text" ]] || { text=$title; title="PowOS"; }
+    # cmd notification posts as Android's shell; the tag keeps one entry per title.
+    local q_title q_text
+    printf -v q_title '%q' "$title"; printf -v q_text '%q' "$text"
+    _android_sh "cmd notification post -S bigtext -t $q_title powos-$RANDOM $q_text" >/dev/null
+}
+
+_android_screenshot() {
+    _android_need || return 1
+    local file=${1:-./android-$(date +%Y%m%d-%H%M%S).png} pick
+    # The display that is on and in use - `screencap` alone takes the FIRST display, which on a foldable
+    # (the OnePlus Open: inner + cover) is the inner one, black whenever the phone is folded.
+    pick=$(_android_display) || return 1
+    [[ "$pick" == off* ]] && { echo "powos android: the screen is off (${pick#off }) - nothing to capture" >&2; return 1; }
+    adb -s "$_ANDROID_DEV" exec-out screencap -d "$pick" -p > "$file" && echo "$file"
+}
+
 cmd_android() {
     local verb=${1:-help}
     shift || true
@@ -110,22 +151,7 @@ cmd_android() {
             _android_apps | awk -F'\t' '{ printf "%-40s %s\n", $1, $2 }'
             ;;
         open)
-            local app="" full=0
-            for a in "$@"; do
-                case "$a" in
-                    --full) full=1 ;;
-                    *) app=$a ;;
-                esac
-            done
-            [[ -n "$app" ]] || { echo "usage: powos android open <app> [--full]" >&2; return 2; }
-            local pkg; pkg=$(_android_resolve "$app") || return 1
-            if (( full )); then
-                _android_need || return 1
-                _android_sh monkey -p "$pkg" -c android.intent.category.LAUNCHER 1 >/dev/null
-            else
-                local name; name=$(awk -F'\t' -v p="$pkg" '$1 == p { print $2 }' <<<"$(_android_apps)")
-                setsid -f powos-android-app "$pkg" "${name:-$pkg}" >/dev/null 2>&1 </dev/null
-            fi
+            _android_open "$@"
             ;;
         running)
             _android_need || return 1
@@ -151,23 +177,10 @@ cmd_android() {
                 awk -F'\t' '$2 != "" || $3 != "" { printf "%-32s %s%s%s\n", $1, $2, ($2 != "" && $3 != "") ? " - " : "", $3 }'
             ;;
         notify)
-            _android_need || return 1
-            local title=${1:-} text=${2:-}
-            [[ -n "$title" ]] || { echo "usage: powos android notify <title> [text]" >&2; return 2; }
-            [[ -n "$text" ]] || { text=$title; title="PowOS"; }
-            # cmd notification posts as Android's shell; the tag keeps one entry per title.
-            local q_title q_text
-            printf -v q_title '%q' "$title"; printf -v q_text '%q' "$text"
-            _android_sh "cmd notification post -S bigtext -t $q_title powos-$RANDOM $q_text" >/dev/null
+            _android_notify "$@"
             ;;
         screenshot)
-            _android_need || return 1
-            local file=${1:-./android-$(date +%Y%m%d-%H%M%S).png} pick
-            # The display that is on and in use - `screencap` alone takes the FIRST display, which on a foldable
-            # (the OnePlus Open: inner + cover) is the inner one, black whenever the phone is folded.
-            pick=$(_android_display) || return 1
-            [[ "$pick" == off* ]] && { echo "powos android: the screen is off (${pick#off }) - nothing to capture" >&2; return 1; }
-            adb -s "$_ANDROID_DEV" exec-out screencap -d "$pick" -p > "$file" && echo "$file"
+            _android_screenshot "$@"
             ;;
         help|--help|-h)
             android_help

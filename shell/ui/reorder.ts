@@ -38,6 +38,8 @@ interface Press {
   moved: boolean;
   timer: number;
   ghost: HTMLElement | null;
+  /** The press's input timestamp: whether it was let go before the hold is the input clock's call, not the timer's. */
+  down: number;
 }
 
 export interface Reorder {
@@ -162,7 +164,7 @@ export function useReorder(
   };
 
   /** Let go ([cancel]: the system took the pointer, the panel went - the lift is dropped, the order as it was). */
-  const end = (cancel = false) => {
+  const end = (cancel = false, up?: number) => {
     const p = press.current;
     press.current = null;
     if (!p) return;
@@ -170,7 +172,10 @@ export function useReorder(
     if (!p.lifted) return;
     p.ghost?.remove();
     item(p.key)?.classList.remove("lifted");
-    if (cancel) {
+    // Let go in place before the hold by the input's own clock - the lift's timer ran late (a busy main thread): a tap
+    // (its click goes through: the quick-launch X removes, cc-ql-x), not a lift's release.
+    const tapped = !cancel && !p.moved && up != null && up - p.down < LONG_PRESS_MS;
+    if (cancel || tapped) {
       opts.onLand?.();
       setLive(null);
       return;
@@ -211,6 +216,7 @@ export function useReorder(
         moved: false,
         timer: 0,
         ghost: null,
+        down: e.timeStamp,
       };
       p.timer = window.setTimeout(() => press.current === p && lift(p), LONG_PRESS_MS);
       press.current = p;
@@ -258,7 +264,7 @@ export function useReorder(
         setLive(next);
       } else follow();
     },
-    onPointerUp: () => end(),
+    onPointerUp: (e: PointerEvent) => end(false, e.timeStamp),
     onPointerCancel: () => end(true),
     // Carried: the page under it doesn't scroll (and so doesn't cancel the pointer).
     onTouchMove: (e: TouchEvent) => press.current?.lifted && e.cancelable && e.preventDefault(),
