@@ -4490,14 +4490,24 @@ async function frictionCheck(page, label) {
  * opens one) - ⋯ no longer repeats the tabs (11-01 17:56). Restored with it: unfolded, a Working now row opens that agent live
  * in the right column (the old context column's card did).
  */
-/** In the page: the Agents tab's rows under [R] - at least 3 (the manager, a stuck one, the working ones), each a glass row one line tall, no old card. */
+/**
+ * In the page: the Agents tab's rows under [R] - at least 3 (the manager, a stuck one, the working ones), each a glass row
+ * no taller than two lines, no old card; a working one's plan bar under its title, the title the row's room (the user,
+ * 11-02: "Phone stutters: main t…" - the bar beside it ate the title).
+ */
 function agentRowsFails(R) {
   const rows = [...document.querySelectorAll(`${R} .ag-rows .ag-row`)];
   const fails = rows.length < 3 ? [`Agents: ${rows.length} agent rows, not the manager, the stuck and the working ones`] : [];
   if (document.querySelector(`${R} .fl-card, ${R} .fl-mgr`)) fails.push("Agents: the old cards are still drawn");
   const name = (r) => r.textContent.slice(0, 40);
   rows.filter((r) => !r.matches(".aip-area.tile")).forEach((r) => fails.push(`Agents: "${name(r)}" isn't a glass row`));
-  rows.filter((r) => r.getBoundingClientRect().height > 60).forEach((r) => fails.push(`Agents: "${name(r)}" is ${Math.round(r.getBoundingClientRect().height)}px tall, not one line`));
+  rows.filter((r) => r.getBoundingClientRect().height > 84).forEach((r) => fails.push(`Agents: "${name(r)}" is ${Math.round(r.getBoundingClientRect().height)}px tall, more than two lines`));
+  for (const r of rows.filter((x) => x.querySelector(".aip-bar"))) {
+    const t = r.querySelector(".ag-row-title").getBoundingClientRect();
+    const b = r.querySelector(".aip-bar").getBoundingClientRect();
+    if (b.top < t.bottom - 1) fails.push(`Agents: "${name(r)}"'s bar is beside its title, not under it`);
+    if (t.width < r.getBoundingClientRect().width * 0.45) fails.push(`Agents: "${name(r)}"'s title gets ${Math.round(t.width)}px of the row's ${Math.round(r.getBoundingClientRect().width)}`);
+  }
   return fails;
 }
 
@@ -4519,6 +4529,30 @@ async function aiProgressRowsFails() {
   const cards = document.querySelectorAll(`${R} .ai-devices .ai-unit-card.aip-area.tile`).length;
   if (cards !== 2) fails.push(`Devices: ${cards} host cards in the Progress design, not 2`);
   if (document.querySelector(`${R} .ai-work-list`)) fails.push("Devices: still the old boxed list");
+  return fails;
+}
+
+/**
+ * In the page, the Chat tab open (the user, 11-02: the Chat view in the Progress design): the manager's bubble and a plan
+ * card on the Agents rows' glass, the answer chips the status card's buttons (12px corners).
+ */
+async function aiChatDesignFails() {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const R = ".ai-screen .ai-right";
+  const rowBg = getComputedStyle(document.querySelector(`${R} .ag-row`) ?? document.body).backgroundColor;
+  const plan = "```present\n" + JSON.stringify({ title: "Plan", format: "md", body: "# Plan\n1. a" }) + "\n```";
+  const ask = "```choices\n" + JSON.stringify({ question: "Go ahead?", options: ["Yes", "Not now"] }) + "\n```";
+  S.chat.value = { busy: false, items: [{ kind: "user", text: "plan it" }, { kind: "assistant", text: "Here it is." }, { kind: "assistant", text: plan }, { kind: "assistant", text: ask }] };
+  S.aiScreen.value = "chat";
+  if (!(await G.until(() => document.querySelector(`${R} .choice-opt`), 3000))) return ["Chat: the answer chips never drew"];
+  const fails = [];
+  for (const sel of [".msg.assistant", ".present"]) {
+    const bg = getComputedStyle(document.querySelector(`${R} .ai-chat-in ${sel}`)).backgroundColor;
+    if (bg !== rowBg) fails.push(`Chat: ${sel} is ${bg}, not the Agents rows' glass ${rowBg}`);
+  }
+  const chip = getComputedStyle(document.querySelector(`${R} .choice-opt`));
+  if (chip.borderTopLeftRadius !== "12px") fails.push(`Chat: an answer chip's corners are ${chip.borderTopLeftRadius}, not the status card buttons' 12px`);
   return fails;
 }
 
@@ -4550,6 +4584,9 @@ async function aiTermsCheck(page) {
   await page.screenshot({ path: "/cache/ai-terms-unfolded-agents.png" });
   fails.push(...(await page.evaluate(agentRowsFails, ".ai-screen .ai-right")).map((f) => `unfolded: ${f}`));
   fails.push(...(await page.evaluate(aiProgressRowsFails)).map((f) => `unfolded: ${f}`));
+  await page.evaluate(async () => { (await window.__gw.mod("./agents.ts")).aiAgent.value = null; (await window.__gw.mod("./state.ts")).aiScreen.value = "fleet"; });
+  await page.evaluate(() => window.__gw.until(() => document.querySelector(".ai-screen .ai-right .ag-row"), 3000));
+  fails.push(...(await page.evaluate(aiChatDesignFails)).map((f) => `unfolded: ${f}`));
   await chat();
   // Working now (the left column) opens that agent live in the right column, not the session list.
   const live = await page.evaluate(async () => {

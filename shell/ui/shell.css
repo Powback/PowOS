@@ -1852,6 +1852,12 @@ html:root .ai-screen .ai-unit-card .ai-session.tile { --frost-fill: transparent;
 /* The AI page's Agents tab (aipanes.tsx FleetRows), the Progress page's design: a glass row per agent - its dot, task,
    plain state word, device - the idle / done ones and the agents' mail folded to one row each. */
 .ag-row-line { cursor: default; }
+/* The task over its bar, as the left column's Working rows (the user, 11-02: "Phone stutters: main t…" - the bar beside
+   it ate the title): the title the row's room, two lines at most; terminal, N/M and device stay right. */
+.ag-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.ag-row-line.two { align-items: center; padding-block: 10px; }
+.ag-row-line.two .ag-row-title { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.3; }
+.ag-row-main > .aip-bar { width: 100%; }
 .ag-row-title, .ag-row .ag-row-title { flex: 1; min-width: 6em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ag-row-state, .ag-row-ago { flex: 0 1 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-small); font-variant-numeric: tabular-nums; color: var(--color-foreground); opacity: 0.86; }
 .ag-row-ago { flex: none; order: 9; }
@@ -3739,6 +3745,29 @@ html:root .ai-right .ai-chat-in :is(.msg.assistant, .present, .choice-opt) { bac
 html:root .ai-right .ai-chat-in .msg.user { border-radius: 20px 20px 8px 20px; }
 .ai-right .ai-chat-in { gap: 10px; }
 .ai-right .ai-chat-in .msg { line-height: 1.45; }
+/*
+ * The Chat tab in the Progress design (the user, 11-02: Chat, Agents and Devices "don't follow the same design"): on the
+ * AI page, folded and unfolded, the manager's bubbles, its plan / document cards and things to try are the Agents and
+ * Progress rows' glass (THE backdrop, no lift), the user's that glass tinted with the accent; the answer chips are the
+ * status column's card buttons (.ais-act: 12px, the foreground's veil, 600; none looks chosen before a tap, gate
+ * ai-needs-you; a picked one the working green); a card's
+ * title is the rows' (body, 600) and a things-to-try title the card label's ("TO DO"). Text stays the body size.
+ */
+html:root .ai-screen .ai-chat-in :is(.msg.assistant, .present) { background: var(--backdrop-tint); border: 0; box-shadow: none; }
+html:root .ai-screen .ai-chat-in .msg.user:not(.queued) { background: color-mix(in srgb, var(--color-accent) 22%, var(--backdrop-tint)); }
+html:root .ai-screen .ai-chat-in :is(.present, .msg.try) { border-radius: var(--radius); }
+.ai-screen .ai-chat-in .msg { font-size: var(--text-body); }
+.ai-screen .ai-chat-in .present { gap: 4px; padding: 0 14px; }
+.ai-screen .ai-chat-in .present-head { min-height: 44px; }
+.ai-screen .ai-chat-in .present-title { font-size: var(--text-body); font-weight: 600; }
+/* The document's own first heading (md.ts: "#" is an h3) repeats the card's title in its peek (it stays in the opened document). */
+.ai-screen .ai-chat-in .present-peek .present-md > h3:first-child { display: none; }
+.ai-screen .ai-chat-in .msg.try { padding: 12px 14px; }
+.ai-screen .ai-chat-in .try-title { font-size: var(--text-small); font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
+.ai-screen .ai-chat-in .choice-opts, .ai-screen .ai-chat-in .try-acts { gap: 8px; }
+html:root .ai-screen .ai-chat-in :is(.choice-opt, .try-acts > .ai-act:not(.quiet)) { min-height: 40px; padding: 0 16px; border-radius: 12px; background: color-mix(in srgb, var(--color-foreground) 12%, var(--backdrop-tint)); box-shadow: none; font-size: var(--text-body); font-weight: 600; color: var(--color-foreground); }
+html:root .ai-screen .ai-chat-in .choice-opt.on { background: color-mix(in srgb, var(--status-working) 45%, var(--backdrop-tint)); }
+html:root .ai-screen .ai-chat-in .choice-opts > .choice-opt.other.other { background: none; opacity: 0.75; }
 /* The ⋯ menu from the status column's hero: under it, inside the column. */
 .ai-left > .ai-menu-scrim { position: fixed; inset: 0; z-index: 4; }
 .ai-left > .ai-menu { position: absolute; z-index: 5; top: 68px; right: 12px; min-width: 220px; display: flex; flex-direction: column; padding: 6px 0; border-radius: var(--radius); }
