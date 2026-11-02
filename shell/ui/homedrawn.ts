@@ -64,8 +64,23 @@ export function homeBlank(): string {
   return "";
 }
 
+const rect = (q: string) => {
+  const r = document.querySelector(q)?.getBoundingClientRect();
+  return r ? [r.left, r.top, r.right, r.bottom].map(Math.round).join(",") : "none";
+};
+
+/**
+ * What home's page looks like now, for the evidence of a blank (RT1, 11-02 21:55: the user rebooted, logcat was gone):
+ * the viewport, window.screen, the page, the AI page's and home's boxes. In the blank report (the host's BlankCapture
+ * writes it with logcat into powos-ai-shared/blank-<ts>.txt) and window.__powosHomeState (tools/phone/verify/rotate-repro.sh).
+ */
+export function homeState() {
+  return { w: innerWidth, h: innerHeight, sw: screen.width, sh: screen.height, dpr: devicePixelRatio, o: screen.orientation?.type ?? "", page: page.value, hidden: document.hidden, ai: rect(".ai-screen"), home: rect(".home") };
+}
+
 export function watchHomeDrawn() {
   (window as unknown as { __powosHomeBlank?: () => string }).__powosHomeBlank = homeBlank;
+  (window as unknown as { __powosHomeState?: () => ReturnType<typeof homeState> }).__powosHomeState = homeState;
   let prev = "", told = "";
   setInterval(() => {
     const why = homeBlank();
@@ -73,7 +88,7 @@ export function watchHomeDrawn() {
     if (why && prev && why !== told) {
       told = why;
       const boot = (window as unknown as { __powosBoot?: { report: (kind: string, err: unknown) => void } }).__powosBoot;
-      boot?.report("blank", new Error(`home is blank: ${why}`));
+      boot?.report("blank", new Error(`home is blank: ${why} | state ${JSON.stringify(homeState())}`));
     }
     if (!why) told = "";
     prev = why;

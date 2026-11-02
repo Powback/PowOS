@@ -3119,6 +3119,14 @@ async function aiChatStepsFails(page, size) {
   return fails;
 }
 
+/** RT1: window.__powosHomeState (ui/homedrawn.ts) is the page's own state: what a blank's evidence file records. */
+async function homeStateWrong() {
+  const pg = (await window.__gw.mod("./state.ts")).page.value;
+  const st = window.__powosHomeState?.();
+  const right = st && st.w === innerWidth && st.h === innerHeight && st.page === pg && /^-?\d+,/.test(st.home);
+  return right ? [] : [`window.__powosHomeState is not the page's state: ${JSON.stringify(st)}`];
+}
+
 /**
  * In the page: home's dock and bar hidden (as a sheet over them, or a bug, would), then each full-screen sheet opened
  * over it through its own signal - Settings, Settings › style, edit mode, the launcher in place, the AI page, the shade:
@@ -3165,6 +3173,7 @@ async function homeBlankCovered() {
   await G.frames(2);
   const bug = window.__powosHomeBlank();
   if (!bug) fails.push("home with its dock and bar gone and nothing over it reports not blank");
+  // RT1: the blank's report carries the page's state (the host's BlankCapture writes it with logcat to blank-<ts>.txt).
   gone.remove();
   return fails;
 }
@@ -11935,7 +11944,7 @@ try {
   // The blank-home detector (ui/homedrawn.ts) quiet under every full-screen sheet over home (false "home is blank": 10-31
   // 14:14 the AI page, 20:05 Settings › style), still loud for a home whose dock and bar are gone; the pull window never.
   if (process.env.SHELL_PAGES !== "0") {
-    runs.push(open(browser, `${ORIGIN}/index.html`, "home-blank-covered", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(homeBlankCovered))));
+    runs.push(open(browser, `${ORIGIN}/index.html`, "home-blank-covered", { width: 404, height: 900 }).then((r) => whenReady(r, async () => [...(await r.page.evaluate(homeBlankCovered)), ...(await r.page.evaluate(homeStateWrong))])));
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "home-blank-pull", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
       const why = await r.page.evaluate(async () => (await window.__gw.mod("./ui/homedrawn.ts")).homeBlank());
       return why ? [`the pull window reports home blank: "${why}"`] : [];

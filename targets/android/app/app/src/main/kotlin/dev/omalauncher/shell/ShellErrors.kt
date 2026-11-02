@@ -61,6 +61,8 @@ object ShellErrors {
         val line = e.optInt("line")
         val where = if (file.isNotEmpty()) " ($file${if (line > 0) ":$line" else ""})" else ""
         val phase = if (e.optBoolean("ready")) "" else " [before ready]"
+        // A blank home: its evidence (logcat, rotation, the page's state) on disk now, before a reboot takes it.
+        BlankCapture.onReport(context, mode, kind, message)
         record(context, "$kind$where: $message", signature = "${if (mode == GateTest.MODE) "test|" else ""}$kind|${normalize(message)}|$file:$line", mode = mode, detail = phase)
     }
 
