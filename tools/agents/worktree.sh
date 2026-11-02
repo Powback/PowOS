@@ -10,7 +10,8 @@
 #   worktree.sh list         name, age of HEAD, commits not on origin (patch-id), dirty files; both locations
 #   worktree.sh gc [--dry-run]   remove every worktree (both locations) that's clean, fully merged into
 #                            origin/worktree-powos-multiplatform (ahead=0, as `done` checks) AND untouched for
-#                            30+ min (HEAD commit age - the same "age of HEAD" `list` prints): agents that
+#                            30+ min (HEAD commit age AND no file/index/reflog mtime in it, f405) with no live
+#                            process in it (cwd or command line, f405); logs each removal to $RMLOG: agents that
 #                            finished without `worktree.sh done` (friction f3). Never touches a runner's own
 #                            checkout (its .powos-runner-checkout marker, f57) or the shared base checkouts
 #                            (powos-multiplatform, emu-build) even if they'd otherwise match. --dry-run: lists
@@ -54,6 +55,39 @@ here_top=$(git -C "$(dirname "$0")" rev-parse --show-toplevel 2>/dev/null) || he
 ahead() { git -C "$1" cherry "origin/$BASE" HEAD 2>/dev/null | grep -c '^+' || true; }
 # The node_modules symlink shows as untracked (.gitignore's node_modules/ doesn't match a link); it is not work.
 dirty() { git -C "$1" status --porcelain | grep -vc '^?? shell/node_modules$' || true; }
+# live <dir>: why <dir> is in use right now, or nothing. gc removed ~/pw/tile-bar-btns mid-task (f405) because its
+# only liveness signal was HEAD's commit age: an agent that landed its commit (ahead=0), was clean, and kept
+# working for 30+ min without a new commit looked abandoned. Now any of these keeps a worktree:
+#   - a process whose cwd is inside it (lsof), or whose command line names a path in it (ps)
+#   - any file in it, or its HEAD/reflog, modified in the last 30 min (agents' edits, builds, commits, resets).
+#     Not its index: dirty()'s own `git status` (this gc, `list`) refreshes it, so it'd keep everything forever.
+live() {
+  local d gd p
+  d=$(cd "$1" && pwd -P) || d=$1   # lsof prints resolved paths (/private/var/..., symlinked roots)
+  p=$(lsof -a -d cwd -Fpn 2>/dev/null | awk -v d="$d" '/^p/{pid=substr($0,2)} /^n/{n=substr($0,2); if (n==d || index(n, d"/")==1) {print pid; exit}}')
+  [ -z "$p" ] || { echo "process $p has its cwd in it"; return; }
+  p=$(ps -axo pid=,command= 2>/dev/null | grep -F -e "$d/" -e "$d " | grep -v -e 'worktree.sh' -e 'grep -F' | head -1 | awk '{print $1}')
+  [ -z "$p" ] || { echo "process $p names it on its command line"; return; }
+  gd=$(git -C "$d" rev-parse --absolute-git-dir 2>/dev/null) || gd=
+  p=$({ [ -z "$gd" ] || find "$gd/HEAD" "$gd/logs/HEAD" -mmin -30 2>/dev/null
+        find "$d" \( -name .git -o -name node_modules \) -prune -o -mmin -30 -print -quit 2>/dev/null; } | head -1)
+  [ -z "$p" ] || echo "modified in the last 30 min: ${p#$d/}"
+}
+# created <dir>: when the worktree was made (epoch). f407: gc aged a brand-new worktree from its base tip's COMMIT
+# time, so `new` on a tip older than 30 min was gc-able before its first edit. `new` stamps powos-created in the
+# worktree's admin dir (.git/worktrees/<name>); older worktrees fall back to that dir's commondir file, which
+# `git worktree add` writes once and nothing rewrites.
+mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
+created() {
+  local gd; gd=$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null) || return 0
+  cat "$gd/powos-created" 2>/dev/null || mtime "$gd/commondir" || true
+}
+# rmlog <name> <dir> <reason>: every removal is logged with what and why (f405), outside any worktree.
+RMLOG=${POWOS_WT_RMLOG:-$HOME/.cache/powos-worktree-removals.log}
+rmlog() {
+  mkdir -p "$(dirname "$RMLOG")"
+  echo "$(date '+%F %T') removed $1 ($2) branch=$(git -C "$2" symbolic-ref --short -q HEAD || echo detached) head=$(git -C "$2" rev-parse --short HEAD 2>/dev/null) by=${3%% *} why: ${3#* }" >> "$RMLOG"
+}
 
 # find_wt <name>: echoes the existing worktree's path (new root first, then the legacy $WT location), or nothing.
 find_wt() { [ -e "$WTR/$1/.git" ] && { echo "$WTR/$1"; return; }; [ -e "$WT/$1/.git" ] && echo "$WT/$1"; }
@@ -65,6 +99,7 @@ new)
   mkdir -p "$WTR"
   git -C "$REPO" fetch -q origin "$BASE"
   git -C "$REPO" worktree add -q --track -b "agent/$n" "$d" "origin/$BASE"
+  date +%s > "$(git -C "$d" rev-parse --absolute-git-dir)/powos-created"   # gc's age floor (f407)
   # Absolute symlink target: $d is no longer a fixed two-levels-deep sibling of powos-multiplatform (it can be
   # anywhere under $WTR), so the old relative "../../powos-multiplatform/..." target would resolve wrong.
   # powos-multiplatform itself is moving to $POWOS_RUN_ROOT/powos-multiplatform (wt-move-rest); prefer that,
@@ -95,6 +130,7 @@ done)
   q=$(grep -lE "${d//./\\.}([/ )']|\$)" "$HOME"/.cache/powos-verify-queue/*.job 2>/dev/null || true)
   [ -z "$q" ] || echo "queued phone checks from $n (they run from the verify checkout): $(for f in $q; do basename "$f" .job; done | tr '\n' ' ')"
   [ -L "$d/shell/node_modules" ] && rm "$d/shell/node_modules"
+  rmlog "$n" "$d" "done explicit worktree.sh done (pid $$ ppid $PPID), ahead=0 dirty=0"
   git -C "$REPO" worktree remove "$d"
   [ -n "$br" ] && git -C "$REPO" branch -D "$br" >/dev/null
   echo "removed $n" ;;
@@ -117,16 +153,20 @@ gc)
     a=$(ahead "$d"); x=$(dirty "$d")
     [ "$a" = 0 ] && [ "$x" = 0 ] || continue
     last=$(git -C "$d" log -1 --format=%ct 2>/dev/null) || continue
+    born=$(created "$d"); [ -n "$born" ] && [ "$born" -gt "$last" ] && last=$born   # f407: never older than itself
     age=$(( now - last ))
     [ "$age" -ge 1800 ] || continue
+    why=$(live "$d")
+    if [ -n "$why" ]; then echo "$(date '+%F %T') kept $name (in use: $why)"; continue; fi
     if [ -n "$dry" ]; then
       echo "would remove $name (idle $((age / 60))m, ahead=0 dirty=0)"
       continue
     fi
     br=$(git -C "$d" symbolic-ref --short -q HEAD || true)
     [ -L "$d/shell/node_modules" ] && rm "$d/shell/node_modules"
+    rmlog "$name" "$d" "gc ahead=0 dirty=0, HEAD idle $((age / 60))m, no process in it, nothing modified for 30+ min"
     if git -C "$REPO" worktree remove "$d" 2>&1; then
-      echo "removed $name (idle $((age / 60))m)"
+      echo "$(date '+%F %T') removed $name (idle $((age / 60))m)"
       [ -z "$br" ] || git -C "$REPO" branch -D "$br" >/dev/null 2>&1 || true
     else
       echo "gc: couldn't remove $name (left as is)" >&2
