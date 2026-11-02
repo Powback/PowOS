@@ -124,7 +124,9 @@ else bad "bash CC ratchet"; echo "$out" | tail -15 | sed 's/^/       /'; fi
 files=()
 while IFS= read -r f; do files+=("$f"); done < <( { git ls-files '*.sh' | grep -vE 'third_party|/reference/|/vendor/|node_modules'; grep -lE '^#!\s*(/usr)?/bin/(env +)?(ba)?sh\b' bin/* 2>/dev/null; } | sort -u)
 if out=$(python3 build/complexity.py --check-length "${files[@]}" 2>&1); then ok "shell function length <= 60 for new functions (build/function-length-budget.txt)"
-else bad "shell function length"; echo "$out" | grep -v "lower it" | tail -15 | sed 's/^/       /'; fi
+# The offending functions themselves (FILE:FUNCTION N lines > cap), never cut off: "lower it" drift lines are noise.
+else bad "shell function length: $(echo "$out" | grep -E ' lines > ' | awk '{print $1}' | paste -sd' ' -)"
+  echo "$out" | grep -v "lower it" | sed 's/^/       /'; fi
 fi
 
 echo ""

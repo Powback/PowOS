@@ -541,11 +541,51 @@ run)
     [ "$(cat "$Q/modules-first-mailed" 2>/dev/null)" = "$T" ] || { echo "$T" > "$Q/modules-first-mailed"
       mail "ship ${T:0:9} ($1) HELD for $who_s: its bindings need a module publish first ($need), which failed rc $mrc: $(tail -1 "$mlog" | cut -c1-200) - log $mlog on the Mac; fix it on origin, then ship.sh request again"; }
     return 1; }
+  # reap_apk_installed A: reap_apk's installed case (rc 0, or the phone reports A installed): the live record,
+  # the window/shell checks, then its requests done. rc 2 = the window check was NOT JUDGED ($Q/apk stays).
+  reap_apk_installed() {
+    local A=$1 live st wg r n sha ht
+    live=$(cat "$Q/live" 2>/dev/null || true)
+    # The install RESET every override, then re-pushed what origin's tip had differently from the APK: the phone's
+    # shell is what ship-apk says it left there ($Q/apk/shell-tip: the tip it re-applied, or the APK's own build
+    # when that push failed) - never the older "live" record kept as is (2026-10-30: APK f0b895fa installed, the
+    # service went on reporting 49afb819 live). Behind the previous live tip: a silent request re-applies the
+    # newer shell from here (the loop's delta from this live record).
+    st=$(cat "$Q/apk/shell-tip" 2>/dev/null || true)
+    git cat-file -e "${st:-x}^{commit}" 2>/dev/null || st=$A
+    echo "$st" > "$Q/live"
+    if [ -n "$live" ] && [ "$live" != "$st" ] && ! git merge-base --is-ancestor "$live" "$st" 2>/dev/null; then
+      echo "$(date +%T) ${A:0:9}: the install left the phone's shell at ${st:0:9}, behind the live ${live:0:9} - re-applying the newer shell"
+      r=$Q/$(date +%Y%m%d-%H%M%S)-reapply-$$.req
+      printf 'sha=%q\nnote=\nsilent=1\nwho=ship-apk-reapply\nat=%s\n' "$live" "$(date +%s)" > "$r.tmp" && mv "$r.tmp" "$r"
+    fi
+    # The device window check BEFORE its requests are done (the build it replaced: ship-apk's snapshot of the
+    # previous install, ship-guard.sh snapshot DIR/commit): WINDOWS BROKEN keeps them and marks the APK failed.
+    wg=0; window_gate "$(cat "$HOME/.cache/powos-ship-snapshot/commit" 2>/dev/null)" "$st" apk || wg=$?
+    # NOT JUDGED (phone asleep): nothing recorded, its requests kept; the next reap tries again in ~60 s.
+    if [ $wg = 2 ]; then date +%s > "$Q/apk/window-wait"; return 2; fi
+    rm -f "$Q/apk/window-wait"
+    # What the phone RENDERS, not the record: older than the shipped shell = the APK failed, the shell re-applied.
+    [ -n "$live" ] && ! shell_check "$live" "$A" && wg=1
+    if [ $wg = 0 ]; then rm -f "$Q/failed-apk"
+    else echo "$A" > "$Q/failed-apk"; echo "$(date +%T) ${A:0:9}: APK installed but WINDOWS BROKEN - its requests kept, waiting for a new origin commit"; fi
+    # A shell held for this APK came with its install (ship-apk pushes origin's tip shell after it).
+    { read -r ht _ < "$Q/shell-held" && git merge-base --is-ancestor "$ht" "$A"; } 2>/dev/null && rm -f "$Q/shell-held"
+    # The records above first, THEN its requests done: a watcher seeing them done sees the records too.
+    n=0; [ $wg = 0 ] && for r in "$Q"/*.req; do [ -f "$r" ] || continue; sha=; . "$r"
+      git merge-base --is-ancestor "$sha" "$A" 2>/dev/null && { done_req "$r" "shipped:${A:0:9}:apk"; n=$((n+1)); }; done
+    echo "$(date '+%F %T') ${A:0:9} apk $n req: $(grep -h '^note=' "$Q/apk/notes" 2>/dev/null | head -1 | cut -c6- || true)" >> "$Q/shipped.log"
+    units_publish
+    echo "$(date +%T) ${A:0:9}: APK installed ($n request(s) done)"
+    render_watch "$st" apk
+    e2e_round
+    return 0   # its rc is 2 only for NOT JUDGED above, never a trailing command's
+  }
   # reap_apk: an APK ship that ended (rc exists) is recorded + its requests done. Called every loop turn, at the
   # runner start (a previous runner's finished APK) and before it exits (f252: the runner left while the APK was
   # out, so a finished install was never recorded and phone checks kept waiting for their ship).
   reap_apk() {
-    local inst A arc alog n r sha live ht st wg
+    local inst A arc alog
     inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
     # An APK ship that ended: its requests are done (installed is installed - its exit is its last check's: a logcat
     # grep with no match was 1, 2026-10-23), or it's tried again (the user stayed active), or it failed.
@@ -554,40 +594,7 @@ run)
       [ -f "$Q/apk/window-wait" ] && [ $(( $(date +%s) - $(cat "$Q/apk/window-wait") )) -lt "${WINDOW_WAIT_S:-60}" ] && return 0
       A=$(cat "$Q/apk/tip") arc=$(cat "$Q/apk/rc") alog=$(cat "$Q/apk/log")
       if [ "$arc" = 0 ] || [ "$inst" = "$A" ]; then
-        live=$(cat "$Q/live" 2>/dev/null || true)
-        # The install RESET every override, then re-pushed what origin's tip had differently from the APK: the phone's
-        # shell is what ship-apk says it left there ($Q/apk/shell-tip: the tip it re-applied, or the APK's own build
-        # when that push failed) - never the older "live" record kept as is (2026-10-30: APK f0b895fa installed, the
-        # service went on reporting 49afb819 live). Behind the previous live tip: a silent request re-applies the
-        # newer shell from here (the loop's delta from this live record).
-        st=$(cat "$Q/apk/shell-tip" 2>/dev/null || true)
-        git cat-file -e "${st:-x}^{commit}" 2>/dev/null || st=$A
-        echo "$st" > "$Q/live"
-        if [ -n "$live" ] && [ "$live" != "$st" ] && ! git merge-base --is-ancestor "$live" "$st" 2>/dev/null; then
-          echo "$(date +%T) ${A:0:9}: the install left the phone's shell at ${st:0:9}, behind the live ${live:0:9} - re-applying the newer shell"
-          r=$Q/$(date +%Y%m%d-%H%M%S)-reapply-$$.req
-          printf 'sha=%q\nnote=\nsilent=1\nwho=ship-apk-reapply\nat=%s\n' "$live" "$(date +%s)" > "$r.tmp" && mv "$r.tmp" "$r"
-        fi
-        # The device window check BEFORE its requests are done (the build it replaced: ship-apk's snapshot of the
-        # previous install, ship-guard.sh snapshot DIR/commit): WINDOWS BROKEN keeps them and marks the APK failed.
-        wg=0; window_gate "$(cat "$HOME/.cache/powos-ship-snapshot/commit" 2>/dev/null)" "$st" apk || wg=$?
-        # NOT JUDGED (phone asleep): nothing recorded, its requests kept; the next reap tries again in ~60 s.
-        if [ $wg = 2 ]; then date +%s > "$Q/apk/window-wait"; return 0; fi
-        rm -f "$Q/apk/window-wait"
-        # What the phone RENDERS, not the record: older than the shipped shell = the APK failed, the shell re-applied.
-        [ -n "$live" ] && ! shell_check "$live" "$A" && wg=1
-        if [ $wg = 0 ]; then rm -f "$Q/failed-apk"
-        else echo "$A" > "$Q/failed-apk"; echo "$(date +%T) ${A:0:9}: APK installed but WINDOWS BROKEN - its requests kept, waiting for a new origin commit"; fi
-        # A shell held for this APK came with its install (ship-apk pushes origin's tip shell after it).
-        { read -r ht _ < "$Q/shell-held" && git merge-base --is-ancestor "$ht" "$A"; } 2>/dev/null && rm -f "$Q/shell-held"
-        # The records above first, THEN its requests done: a watcher seeing them done sees the records too.
-        n=0; [ $wg = 0 ] && for r in "$Q"/*.req; do [ -f "$r" ] || continue; sha=; . "$r"
-          git merge-base --is-ancestor "$sha" "$A" 2>/dev/null && { done_req "$r" "shipped:${A:0:9}:apk"; n=$((n+1)); }; done
-        echo "$(date '+%F %T') ${A:0:9} apk $n req: $(grep -h '^note=' "$Q/apk/notes" 2>/dev/null | head -1 | cut -c6- || true)" >> "$Q/shipped.log"
-        units_publish
-        echo "$(date +%T) ${A:0:9}: APK installed ($n request(s) done)"
-        render_watch "$st" apk
-        e2e_round
+        reap_apk_installed "$A" || [ $? != 2 ] || return 0
       elif [ "$arc" = 8 ]; then echo "$(date +%T) ${A:0:9}: a newer APK is wanted - the pending one is replaced"
       elif [ "$arc" = 4 ]; then echo "$(date +%T) ${A:0:9}: the user stayed active - the APK goes again"
       elif [ -e "$Q/paused" ]; then echo "$(date +%T) ${A:0:9}: APK ship stopped by pause (rc $arc) - its requests are kept"
