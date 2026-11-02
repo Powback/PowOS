@@ -13,9 +13,11 @@ Checks:
 - `shell/dev/lint-design.sh` fails the gate on monospace UI text, hard-coded blur, off-scale radii (every corner of
   a shorthand), literal easings, status colours outside their tokens, literal durations in home's and the
   launcher's motion, hard lines drawn at `--frame`, and folds or menus on the AI page that pop in
-  (`{open && …}` instead of `ui/reveal.tsx` `Reveal` / `usePresence`).
-- The gate's `design-lint-*` runs find pop-ins and monospace text on screen. They fail the gate for the launcher
-  (`design-lint-launcher-*`) and are report-only for the other surfaces until their design wave.
+  (`{open && …}` instead of `ui/reveal.tsx` `Reveal` / `usePresence`), and an open folder's or a widget's settings
+  sheet's literal durations or a surface radius other than `--radius`.
+- The gate's `design-lint-*` runs find pop-ins, pop-outs (a surface closed in one frame) and monospace text on
+  screen. They fail the gate for the launcher, an open folder and a widget's settings sheet
+  (`design-lint-{launcher,folder,widget-sheet}-*`) and are report-only for the other surfaces until their design wave.
 - `shell/dev/gate.sh --shots DIR` renders every surface and measures text contrast (`report.json`).
 
 ## 1. Less is more

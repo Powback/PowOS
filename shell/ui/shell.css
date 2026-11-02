@@ -1049,8 +1049,9 @@ html:has(.folder-view.open) .home :is(.page-track > .page, .bar, .dock, .dock-tr
   width: calc(var(--fcols) * var(--fcell-w) + 2 * var(--edge));
   max-width: calc(100% - 2 * var(--edge));
 }
-.folder-sheet .folder-bg.tile { position: absolute; inset: 0; border-radius: 20px; transform-origin: 0 0; }
-.folder-body { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 14px var(--edge) var(--edge); }
+/* A surface: --radius (§3's scale; 20px is a pill's). Its content sits --edge in, the title and grid --gap apart. */
+.folder-sheet .folder-bg.tile { position: absolute; inset: 0; border-radius: var(--radius); transform-origin: 0 0; }
+.folder-body { position: relative; display: flex; flex-direction: column; gap: var(--gap); padding: var(--edge); }
 .folder-title {
   font: inherit;
   font-size: var(--text-item);
@@ -3166,10 +3167,18 @@ html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; b
  */
 .wsheet-scrim { position: fixed; inset: 0; z-index: 40; }
 .wsheet {
-  position: fixed; display: flex; flex-direction: column; box-sizing: border-box; padding: 6px 14px 14px; overflow: hidden;
-  touch-action: none; transition: transform var(--spring-fast-ms) var(--spring-fast); animation: wsheet-in var(--spring-fast-ms) var(--spring-fast) both;
+  position: fixed; display: flex; flex-direction: column; box-sizing: border-box; padding: 6px var(--edge) var(--edge); overflow: hidden;
+  touch-action: none; transition: translate var(--spring-fast-ms) var(--spring-fast); animation: wsheet-in var(--spring-fast-ms) var(--spring-fast) both;
 }
+/* A swipe down moves it by `translate` (finger-tied, no transition under the finger); the in/out play on transform. */
+.wsheet.dragging { transition: none; }
 @keyframes wsheet-in { from { opacity: 0; transform: scale(0.96); } }
+/* Closing never pops out (§6): it fades and shrinks on --spring-fast while still mounted (ui/reveal.tsx usePresence). */
+.wsheet.leaving { animation: wsheet-out var(--spring-fast-ms) var(--spring-fast) both; pointer-events: none; }
+.wsheet-scrim.leaving { pointer-events: none; }
+@keyframes wsheet-out { to { opacity: 0; transform: scale(0.96); } }
+/* A menu over a page is opaque (§2 "Menus are opaque"): the widget it came from never reads through it. */
+html:root .wsheet.tile { --glass-blur-native: var(--backdrop-blur-native); background: var(--menu-tint); }
 .wsheet-head { display: flex; flex-direction: column; align-items: center; gap: 6px; padding-bottom: 10px; flex: none; }
 .wsheet-grab { width: 36px; height: 4px; border-radius: 8px; background: var(--soft-fill); }
 .wsheet-title { font: var(--text-item) var(--font-body); font-weight: bold; color: var(--color-foreground); }

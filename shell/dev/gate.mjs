@@ -365,8 +365,9 @@ async function transpiled(p) {
  * one scene of 10 pages - its first pages held their slots till all 10 settled while the last ones queued for a slot,
  * and the per-scene cap then failed 4 of them as "design-lint-home-folded: scene timeout".
  */
-const DESIGN_LINT = [["home", ""], ["launcher", ""], ["launcher-search", ""], ["menu", ""], ["shade", "?mode=shade"], ["control", "?mode=shade"]];
-const DESIGN_LINT_BLOCKING = new Set(["launcher", "launcher-search"]);
+const DESIGN_LINT = [["home", ""], ["launcher", ""], ["launcher-search", ""], ["menu", ""], ["shade", "?mode=shade"], ["control", "?mode=shade"], ["folder", ""], ["widget-sheet", ""]];
+// The folder and the widget's settings sheet (design wave: folders and sheets) block too, closing included (pop-outs).
+const DESIGN_LINT_BLOCKING = new Set(["launcher", "launcher-search", "folder", "widget-sheet"]);
 function designLintRuns(browser) {
   const sizes = [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]];
   return sizes.flatMap(([label, viewport]) => DESIGN_LINT.map(([surface, query]) => {
@@ -379,6 +380,7 @@ function designLintRuns(browser) {
       if (out.error) return [`design-lint: ${out.error}`];
       return [
         ...out.popins.map((p) => `pop-in (DESIGN-LANGUAGE.md §6): ${p} appeared in a single frame`),
+        ...(out.popouts ?? []).map((p) => `pop-out (DESIGN-LANGUAGE.md §6): ${p} left in a single frame`),
         ...(out.mono.count ? [`monospace UI text (§4): ${out.mono.count} - ${JSON.stringify(out.mono.where)}`] : []),
       ];
     };

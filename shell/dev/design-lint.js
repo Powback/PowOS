@@ -10,7 +10,11 @@
  * - monospace: once the surface is at rest, every visible text whose font's first family is a monospace one, outside
  *   code (pre, code, kbd, samp, a terminal, a textarea), faded-out text and OWL widgets (unseen) - UI text is --font-ui.
  *
- * Returns { popins: [label...], mono: { count, where: [[label, n]...] } }.
+ * - pop-outs: a surface with a CLOSE (an open folder, a widget's settings sheet) is closed once at rest; its root (ROOT)
+ *   gone from the page, or drawn at full opacity with nothing moving it, on the frame after is a surface that left in
+ *   a single frame (§6 "every appear, disappear ... animates").
+ *
+ * Returns { popins: [label...], popouts: [label...], mono: { count, where: [[label, n]...] } }.
  */
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -40,7 +44,43 @@ const OPEN = {
     S.menu.value = { app: a, at: new DOMRect(innerWidth / 2 - 30, innerHeight * 0.35, 60, 60) };
   },
   home: () => {},
+  // An open folder (ui/folderview.tsx): the app library's first category - its sheet morphs out of the card.
+  folder: async (S) => {
+    S.page.value = S.pages.value.length;
+    await sleep(400);
+    const L = await window.__gw.mod("./ui/library.tsx");
+    S.folder.value = L.library.value[0]?.key ?? null;
+  },
+  // A widget's settings sheet (ui/widgetsheet.tsx; apps/sheet.ts DetailSheet): under home's first widget.
+  "widget-sheet": async () => {
+    const { h } = await window.__gw.mod("preact");
+    const w = document.querySelector(".page .home-tile > .tile");
+    const anchor = w ? w.getBoundingClientRect() : new DOMRect(16, 120, 200, 100);
+    const kids = h("div", null, h("label", null, "Brightness", h("input", { type: "range", value: 60 })), h("button", null, "Relax"));
+    (await window.__gw.mod("./apps/sheet.ts")).detailSheet.value = { id: 1, anchor, title: "Living room", onClose: () => {}, children: kids };
+  },
 };
+
+/** Closing the surface (what Back, a tap outside or a swipe down end in), and the root that must leave moving. */
+const CLOSE = {
+  folder: async (S) => { S.folder.value = null; },
+  "widget-sheet": async () => { (await window.__gw.mod("./apps/sheet.ts")).detailSheet.value = null; },
+};
+const ROOT = { folder: ".folder-view", "widget-sheet": ".wsheet" };
+
+/** [surface] closed: its root gone at once, or still there at full opacity with nothing moving it, is a pop-out. */
+async function popouts(surface, S) {
+  const el = ROOT[surface] && document.querySelector(ROOT[surface]);
+  if (!CLOSE[surface]) return [];
+  if (!el) return [`${ROOT[surface]} (never shown)`];
+  await CLOSE[surface](S);
+  await frame();
+  await frame();
+  if (!el.isConnected) return [label(el)];
+  const anims = document.getAnimations().filter(timed).filter((a) => a.playState === "running");
+  const goes = anims.some((a) => { const t = a.effect?.target; return t && (t === el || el.contains(t) || t.contains(el)); });
+  return goes || Number(getComputedStyle(el).opacity) < 0.99 ? [] : [label(el)];
+}
 
 function drawn(el) {
   if (!el.isConnected) return false;
@@ -136,5 +176,6 @@ export async function designLint(surface) {
   await BEFORE[surface]?.(S);
   const p = await popins(OPEN[surface] ?? OPEN.home, S);
   await sleep(600);
-  return { popins: p, mono: mono() };
+  const m = mono();
+  return { popins: p, popouts: await popouts(surface, S), mono: m };
 }

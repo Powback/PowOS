@@ -45,8 +45,13 @@ function from(a: DOMRect, b: DOMRect) {
   return `translate(${a.left - b.left}px, ${a.top - b.top}px) scale(${a.width / (b.width || 1)}, ${a.height / (b.height || 1)})`;
 }
 
-/** Sets where each moving part is at the far end ([out]: at the tile) - with no transition, or easing to it. */
+/**
+ * Sets where each moving part is at the far end ([out]: at the tile) - with no transition, or easing to it. A sheet a
+ * swipe down left under the finger (root's data-dy, dragSheet) is measured where it rests and springs back from the
+ * finger with the rest, so the morph starts where the finger let go.
+ */
 function place(root: HTMLElement, out: boolean, ease: boolean) {
+  const dy = measureUndragged(root);
   const bg = root.querySelector<HTMLElement>(".folder-bg")!;
   const focus = root.querySelector<HTMLElement>(".folder-focus")!;
   const tile = tileOf(root.dataset.key!);
@@ -65,13 +70,46 @@ function place(root: HTMLElement, out: boolean, ease: boolean) {
     icon.style.opacity = out && !(m && i < 4) ? "0" : "";
   });
   for (const el of fades) el.style.opacity = out ? "0" : "";
+  if (dy) springFromFinger(root, dy, ease);
+}
+
+/** The sheet put where it rests for measuring (no transition): the swipe's offset, 0 when none. */
+function measureUndragged(root: HTMLElement) {
+  const dy = Number(root.dataset.dy) || 0;
+  const sheet = root.querySelector<HTMLElement>(".folder-sheet");
+  if (dy && sheet) ((sheet.style.transition = "none"), (sheet.style.translate = ""));
+  return dy;
+}
+
+/** Back under the finger at [dy], then springing to where it rests - with the morph's own curve. */
+function springFromFinger(root: HTMLElement, dy: number, ease: boolean) {
+  const sheet = root.querySelector<HTMLElement>(".folder-sheet")!;
+  sheet.style.translate = `0 ${dy}px`;
+  void sheet.offsetWidth;
+  sheet.style.transition = ease ? `translate ${MORPH_MS}ms ${EASE}` : "none";
+  sheet.style.translate = "";
+  delete root.dataset.dy;
+}
+
+/**
+ * A swipe down, finger-tied (docs/DESIGN-LANGUAGE.md §6): the sheet follows the finger 1:1 by `translate` alone, and
+ * on release springs back ([dy] 0) - or, past SWIPE_CLOSE, the close morph takes it from there (place).
+ */
+function dragSheet(root: HTMLElement | null, dy: number, settle = false) {
+  const sheet = root?.querySelector<HTMLElement>(".folder-sheet");
+  if (!root || !sheet) return;
+  sheet.style.transition = settle ? `translate ${MORPH_MS}ms ${EASE}` : "none";
+  sheet.style.translate = dy ? `0 ${dy}px` : "";
+  if (dy) root.dataset.dy = String(dy);
+  else delete root.dataset.dy;
 }
 
 /** Clears what the morph left inline: at rest the sheet is as its CSS says. */
 function rest(root: HTMLElement) {
-  for (const el of root.querySelectorAll<HTMLElement>(".folder-bg, .folder-focus, .app-icon, .folder-title, .app-label")) {
+  for (const el of root.querySelectorAll<HTMLElement>(".folder-sheet, .folder-bg, .folder-focus, .app-icon, .folder-title, .app-label")) {
     el.style.transition = "";
     el.style.transform = "";
+    el.style.translate = "";
     el.style.opacity = "";
   }
 }
@@ -138,10 +176,23 @@ function Sheet({ s, closing, onHold, done }: { s: Shown; closing: boolean; onHol
       style={{ "--fcell-w": `${g.cellW || 76}px`, "--fcell-h": `${Math.max(g.cellH, g.cellW) || 86}px`, "--fcols": cols }}
       onClick={close}
       onPointerDown={(e) => (swipe.current = e.clientY)}
+      onPointerMove={(e) => {
+        // The sheet follows a swipe down under the finger; a few px of slop leave a tap a tap.
+        if (closing || swipe.current == null) return;
+        const dy = e.clientY - swipe.current;
+        dragSheet(root.current, dy > 8 ? dy : 0);
+      }}
       onPointerUp={(e) => {
-        // Swiped down: it closes (as a tap outside does).
-        if (swipe.current != null && e.clientY - swipe.current > SWIPE_CLOSE) close();
+        // Swiped down: it closes (as a tap outside does) from where the finger left it; short of it, springs back.
+        const dy = swipe.current == null ? 0 : e.clientY - swipe.current;
         swipe.current = null;
+        if (closing) return;
+        if (dy > SWIPE_CLOSE) close();
+        else if (root.current?.dataset.dy) dragSheet(root.current, 0, true);
+      }}
+      onPointerCancel={() => {
+        swipe.current = null;
+        if (!closing && root.current?.dataset.dy) dragSheet(root.current, 0, true);
       }}
     >
       <div class="folder-focus tile" />

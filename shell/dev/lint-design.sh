@@ -29,6 +29,12 @@
 #   - AI page pop-in (design wave 5): a fold or menu shown with `{open && ...}` / `{menu && ...}` in the AI page's files
 #     (powai, aipanes, aiprogress, aistatus, aifriction, aimenu) - there in one frame, gone in the next (§6); use
 #     ui/reveal.tsx Reveal / usePresence. The menu's scrim (invisible, a tap-catcher) is exempt.
+#   - folder/sheet motion (design wave: folders and settings sheets): a literal duration in a rule for an open folder
+#     (.folder-view, .folder-*) or a widget's settings sheet (.wsheet*) - the folder morph's 280ms and the sheet's own
+#     curves were literal; they move on the spring set;
+#   - sheet radius (same wave): an open folder's or a settings sheet's surface (.folder-bg, .folder-sheet, .wsheet) on
+#     a radius other than --radius - the scale's surface value (§3); the folder sheet wore a pill's 20px, before it a
+#     calc(var(--radius) * 1.6).
 #
 #   shell/dev/lint-design.sh [DIR]   DIR: the shell (default: this one). Exit 1: a blocking rule broken.
 set -uo pipefail
@@ -72,10 +78,13 @@ literal_motion() {
 homemotion=$(literal_motion '\\.(dock|app|home|page|home-tile|page-dots|app-icon)([^a-z-]|$)')
 # The launcher's pieces (design wave 3): the drawer, its A-Z grid and letter bar, the search results, the folders page.
 launchermotion=$(literal_motion '\\.(launcher|launcher-[a-z]+|drawer|drawer-[a-z]+|letter-bar|letter-bubble|az|scr-[a-z]+|search-group|search-group-[a-z]+|launcher-search-results)([^a-z-]|$)')
+# Folders and settings sheets (their design wave): the same literal-duration rule.
+sheetmotion=$(literal_motion '\\.(folder-view|folder-[a-z]+|wsheet|wsheet-[a-z]+)([^a-z-]|$)')
+sheetradius=$(grep -HnE '\.(folder-bg|folder-sheet|wsheet)(\.tile)?[ ,][^{]*\{[^}]*border-radius|\.(folder-bg|folder-sheet|wsheet)(\.tile)? *\{[^}]*border-radius: *[^;]+' $css 2>/dev/null | strip | grep -vE 'border-radius: *var\(--radius\) *(!important *)?(;|\})' || true)
 hardline=$(grep -HnE 'border(-(top|right|bottom|left))?[[:space:]]*:[^;]*var\(--frame\)[^;]*solid[^;]*(var\(--color|#|rgb|hsl|currentColor)' $css 2>/dev/null | strip || true)
 aipop=$( (cd ui 2>/dev/null && grep -nE '(^|[^=])\{!?(open|menu|expanded) &&' powai.tsx aipanes.tsx aiprogress.tsx aistatus.tsx aifriction.tsx aimenu.tsx 2>/dev/null) | sed 's|^|ui/|' | strip | grep -v 'ai-menu-scrim' || true)
 count() { printf '%s' "$1" | grep -c . || true; }
-bad=$(( $(count "$mono") + $(count "$blur") + $(count "$radius") + $(count "$easing") + $(count "$status") + $(count "$dots") + $(count "$vibrate") + $(count "$homemotion") + $(count "$launchermotion") + $(count "$hardline") + $(count "$aipop") ))
+bad=$(( $(count "$mono") + $(count "$blur") + $(count "$radius") + $(count "$easing") + $(count "$status") + $(count "$dots") + $(count "$vibrate") + $(count "$homemotion") + $(count "$launchermotion") + $(count "$hardline") + $(count "$aipop") + $(count "$sheetmotion") + $(count "$sheetradius") ))
 if [ "$bad" = 0 ]; then echo "ok   design lint (docs/DESIGN-LANGUAGE.md)"; else echo "FAIL design lint: $bad blocking (docs/DESIGN-LANGUAGE.md)"; fi
 report "monospace in UI" "$mono"
 report "hard-coded blur" "$blur"
@@ -88,4 +97,6 @@ report "home motion with a literal duration" "$homemotion"
 report "launcher motion with a literal duration" "$launchermotion"
 report "hard line (a --frame border in a colour)" "$hardline"
 report "AI page pop-in (not ui/reveal.tsx)" "$aipop"
+report "folder/sheet motion with a literal duration" "$sheetmotion"
+report "folder/sheet surface radius not --radius" "$sheetradius"
 [ "$bad" = 0 ]

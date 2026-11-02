@@ -3,9 +3,12 @@
  * (.tile.sheet.pop: the menus' material, home stays in place under it) anchored to the widget - under it when there's
  * room, else over it. A tap outside, a swipe down on it (not on a slider: those own their drags) or Back closes it.
  * The scrim takes every touch outside, so nothing reaches home (no page swipe, no edit mode) while it's open.
+ * Closing never pops out (docs/DESIGN-LANGUAGE.md §6): the last sheet stays mounted, `.leaving`, while it fades and
+ * shrinks (ui/reveal.tsx usePresence); a swipe down follows the finger (`translate`) and closes from where it let go.
  */
 import { useEffect, useRef } from "preact/hooks";
-import { detailSheet } from "../apps/sheet.ts";
+import { detailSheet, type OpenSheet } from "../apps/sheet.ts";
+import { usePresence } from "./reveal.tsx";
 import { topBack } from "../state.ts";
 
 /** The gutter: theme.css --edge (16 dp, docs/DESIGN-LANGUAGE.md §3), read where it is used. */
@@ -29,20 +32,29 @@ function room() {
   return { top: Math.max(EDGE, inset("--inset-top") + EDGE), floor };
 }
 
+/** The open sheet ([live]), else the last one while it leaves ([leaving]), else null. */
+function useShown() {
+  const live = detailSheet.value;
+  const last = useRef<OpenSheet | null>(null);
+  if (live) last.current = live;
+  const { on, leaving } = usePresence(!!live);
+  return { live, leaving, d: live ?? (on ? last.current : null) };
+}
+
 export function WidgetSheet() {
-  const d = detailSheet.value;
+  const { live, leaving, d } = useShown();
   const close = useRef(() => {});
-  close.current = () => d?.onClose();
+  close.current = () => live?.onClose();
   const panel = useRef<HTMLDivElement>(null);
   const drag = useRef<{ y: number; id: number; dy: number } | null>(null);
   useEffect(() => {
-    if (!d) return;
+    if (!live) return;
     const back = () => close.current();
     topBack.value = back;
     return () => {
       if (topBack.peek() === back) topBack.value = null;
     };
-  }, [d?.id]);
+  }, [live?.id]);
   // The body scrolls up and down only when it's longer than the sheet; else a vertical drag anywhere is the swipe down.
   useEffect(() => {
     const b = panel.current?.querySelector<HTMLElement>(".wsheet-body");
@@ -66,14 +78,17 @@ export function WidgetSheet() {
     : { bottom: `${Math.round(innerHeight - a.top + 8)}px`, maxHeight: `${Math.round(above)}px` };
 
   const mine = (t: EventTarget | null) => !(t instanceof Element && t.closest("input, [role=slider], .wsheet-body [data-owns-gesture]"));
-  const move = (dy: number) => {
+  // Finger-tied: `translate` under the finger (no transition while .dragging), the spring back on release.
+  const move = (dy: number, held = false) => {
     const el = panel.current;
-    if (el) el.style.transform = dy > 0 ? `translateY(${dy}px)` : "";
+    if (!el) return;
+    el.classList.toggle("dragging", held);
+    el.style.translate = dy > 0 ? `0 ${dy}px` : "";
   };
 
   return (
     <div
-      class="wsheet-scrim"
+      class={`wsheet-scrim${leaving ? " leaving" : ""}`}
       data-owns-gesture
       onPointerDown={(e) => e.stopPropagation()}
       onTouchStart={(e) => e.stopPropagation()}
@@ -83,7 +98,8 @@ export function WidgetSheet() {
     >
       <div
         ref={panel}
-        class="wsheet tile sheet pop"
+        key={d.id}
+        class={`wsheet tile sheet pop${leaving ? " leaving" : ""}`}
         role="dialog"
         aria-label={d.title}
         style={{ left: `${Math.round(left)}px`, width: `${Math.round(w)}px`, ...place }}
@@ -96,13 +112,14 @@ export function WidgetSheet() {
           const g = drag.current;
           if (!g || g.id !== e.pointerId) return;
           g.dy = e.clientY - g.y;
-          if (g.dy > 8) move(g.dy);
+          if (g.dy > 8) move(g.dy, true);
         }}
         onPointerUp={() => {
           const g = drag.current;
           drag.current = null;
-          move(0);
-          if (g && g.dy > CLOSE_PX) close.current();
+          // Past the line it leaves from where the finger let go; short of it, springs back.
+          if (g && g.dy > CLOSE_PX) (panel.current?.classList.remove("dragging"), close.current());
+          else move(0);
         }}
         onPointerCancel={() => ((drag.current = null), move(0))}
       >
