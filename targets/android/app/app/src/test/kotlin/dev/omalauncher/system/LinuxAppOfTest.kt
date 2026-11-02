@@ -1,0 +1,32 @@
+package dev.omalauncher.system
+
+import dev.omalauncher.linux.LinuxApp
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+/** KWin's "open" names a window by its desktop file, or (kwin 0052) its X11 class: which drawer app it is. */
+class LinuxAppOfTest {
+    private val steam = LinuxApp("Steam", "/usr/bin/steam %U", false, "steam", null)
+    private val broforce = LinuxApp("Broforce", "steam steam://rungameid/274190", false, "Broforce", null)
+    private val dolphin = LinuxApp("Dolphin", "dolphin", false, "org.kde.dolphin", null)
+    private val apps = listOf(dolphin, broforce, steam)
+
+    @Test fun steamsWindowIsSteamsSoItTakesItsLaunchPlaceholder() {
+        // Steam opened as two windows (2026-11-02): offered as "", the "l:steam" placeholder never got its window.
+        assertEquals(steam, RunningApps.linuxAppOf(apps, "steam"))
+    }
+
+    @Test fun aProtonGamesClassIsTheEntryThatStartsIt() {
+        assertEquals(broforce, RunningApps.linuxAppOf(apps, "steam_app_274190"))
+    }
+
+    @Test fun aDesktopIdStillMatches() {
+        assertEquals(dolphin, RunningApps.linuxAppOf(apps, "org.kde.dolphin"))
+    }
+
+    @Test fun noNameIsNoApp() {
+        assertNull(RunningApps.linuxAppOf(apps, ""))
+        assertNull(RunningApps.linuxAppOf(apps, "steam_app_1"))
+    }
+}

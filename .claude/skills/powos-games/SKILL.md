@@ -279,6 +279,20 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   POWOS_UNITY_SCREEN=fullscreen. Test: tier1 test-unity-screen.sh (Xvfb end-to-end when Xvfb is present).
   Unverified on device: Broforce's Unity honouring an external (WM-driven) resize of a non-resizable window.
 
+- kwin 0052 (3.59, 2026-11-02, games-p1): (1) "window task N frames: X commits, Y drawn" with Y ~2.7x X = each game
+  frame composited into every consumer buffer in turn (GPU shared with the game; late redraws sample Xwayland's buffer
+  mid-Present = black noise). Now drawn once (m_newestQueued); check `bf-drawn.sh` (drawn <= 1.15x commits; commits/5 =
+  the game's own fps). (2) PowOS full-screen button on a floating game bounced back ("fullscreen 0" ~150 ms later):
+  0047 sized it to the floating task first; an asked full screen now waits for the app's size. (3) X windows with no
+  desktop file are offered by WM_CLASS (Steam "steam", games steam_app_<id> -> RunningApps.linuxAppOf): Steam's window
+  takes its launch placeholder (was two windows). Full screen of a GAME is immersive (kwin-359, coordinator 11-02):
+  WebWindows.isGame (steam_app_<id> class, or a Game desktop category; never Steam itself) -> LinuxOffer.game -> its
+  linuxFullScreen hides home's status bar (BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE; ShadeHost's strip hides PowOS's
+  chrome from the insets) and the area is the whole 2268x2440 = _POWOS_SCREEN_SIZE (no re-res); window-log "a game's
+  full screen: status bar hidden (immersive)". Back / leave / the game closing brings it back. Test:
+  WebWindowsImmersiveTest. A fixed-size -popupwindow game can't float again (0037), so Back pops it back.
+  Game checks needing the user's "you may launch games for tests" (never queued without it): bf-drawn.sh,
+  steam-one-window.sh (one Steam tap -> one window, no second/unnamed window, live body).
 - Minimised game (Broforce 2026-10-30: WM_STATE Iconic + _NET_WM_STATE_HIDDEN = isMinimized, since KWin clears
   HIDDEN for a window merely on another desktop): a full-screen Wine/Unity game minimises ITSELF when it loses KWin's
   activation. Its task hidden as "off page" (WindowFrames.showOnly -> FreeformTasks.away) or never live was enough.
