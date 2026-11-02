@@ -5,13 +5,22 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { isMarked, markRead, openEntry, sendReply, stateOf, type Host, type ReplyFieldProps } from "./act";
+import { forget, lineOf, remember, store, withHistory, type Convo } from "./history";
 import { ago, groups, replyTarget, sourceOf, type Entry, type Group } from "./model";
 
 export type Phase = "old" | "loading" | "no-access" | "ok";
 
-/** The rows now, live: marked-read notifications left out while unchanged. */
+/**
+ * The rows now: the live ones (marked-read notifications left out while unchanged) and, after them in time order, the
+ * conversations whose notifications went (history.ts) - so a row never vanishes with its notification.
+ */
 export function useGroups(host: Host, app: string): { phase: Phase; groups: Group[] } {
-  const r = readGroups(host, app);
+  const l = host.notifications?.useList(app);
+  useEffect(() => {
+    if (l?.available) remember(app, l.items);
+  }, [app, l]);
+  const live = readGroups(host, app, l);
+  const r = { ...live, groups: withHistory(live.groups, store(app).value) };
   // The icon's dot follows the same count as the widget's header (unread across every row); unknown while loading.
   const unread = r.phase === "loading" ? -1 : r.groups.reduce((n, g) => n + g.count, 0);
   useEffect(() => {
@@ -20,8 +29,7 @@ export function useGroups(host: Host, app: string): { phase: Phase; groups: Grou
   return r;
 }
 
-function readGroups(host: Host, app: string): { phase: Phase; groups: Group[] } {
-  const l = host.notifications?.useList(app);
+function readGroups(host: Host, app: string, l: ReturnType<NonNullable<Host["notifications"]>["useList"]> | undefined): { phase: Phase; groups: Group[] } {
   if (!host.notifications) return { phase: "old", groups: [] };
   if (!l) return { phase: "loading", groups: [] };
   if (!l.available) return { phase: "no-access", groups: [] };
@@ -119,6 +127,7 @@ const soft = "color-mix(in srgb, currentColor 10%, transparent)";
 
 /** One app icon per app in the row (newest first): its tap opens that app's conversation. */
 function Icons({ g, host, app }: { g: Group; host: Host; app: string }) {
+  if (!g.entries.length && g.history) return <PastIcons c={g.history} />;
   const seen = new Map<string, Entry>();
   for (const e of g.entries) if (!seen.has(sourceOf(e.n))) seen.set(sourceOf(e.n), e);
   return (
@@ -137,6 +146,19 @@ function Icons({ g, host, app }: { g: Group; host: Host; app: string }) {
         >
           {e.n.icon ? <img src={e.n.icon} alt="" style={{ width: "100%", height: "100%", borderRadius: "50%" }} /> : sourceOf(e.n).slice(0, 1)}
         </button>
+      ))}
+    </div>
+  );
+}
+
+/** A past row's app(s): no notification left to open, so not buttons - its picture, else the app's letter. */
+function PastIcons({ c }: { c: Convo }) {
+  return (
+    <div style={{ display: "flex", flex: "none" }}>
+      {c.apps.slice(0, 2).map((a, i) => (
+        <span key={a} aria-label={a} style={{ ...S.icon, marginLeft: i ? "-0.6em" : 0, opacity: 0.7 }}>
+          {c.icon && !i ? <img src={c.icon} alt="" style={{ width: "100%", height: "100%", borderRadius: "50%" }} /> : a.slice(0, 1)}
+        </span>
       ))}
     </div>
   );
@@ -182,9 +204,16 @@ function useSwipe(onSwipe: () => void) {
   return { dx, moved, handlers };
 }
 
+/** A row's newest line: its live notification's, else the history's last message. */
+function newest(g: Group): string {
+  if (g.entries.length) return g.entries[0].line;
+  const c = g.history;
+  return c?.said.length ? lineOf(c, c.said[c.said.length - 1]) : "";
+}
+
 function Line({ g, lines }: { g: Group; lines: number }) {
   const s = stateOf(g);
-  const text = s?.state === "sending" ? "Sending…" : s?.state === "sent" ? "Sent" : s?.state === "error" ? `Didn't go: ${s.message}` : g.entries[0].line;
+  const text = s?.state === "sending" ? "Sending…" : s?.state === "sent" ? "Sent" : s?.state === "error" ? `Didn't go: ${s.message}` : newest(g);
   return <Clamp text={text} lines={lines} style={{ ...S.line, color: s?.state === "error" ? "var(--color-red)" : undefined }} />;
 }
 
@@ -194,11 +223,29 @@ function Line({ g, lines }: { g: Group; lines: number }) {
  */
 export type Narrow = "no" | "time" | "text";
 
-export function Row(p: { g: Group; host: Host; app: string; open: boolean; onToggle(): void; lines?: number; narrow?: Narrow }) {
-  const { g, host, app, open, onToggle, lines = 2, narrow = "no" } = p;
-  const { dx, moved, handlers } = useSwipe(() => void markRead(host, app, g));
+/** A row's name line: who, the waiting count, and a replied row's mark; a past row's muted. */
+function Who({ g }: { g: Group }) {
   return (
-    <div class="nm-row" data-group={g.id} style={{ display: "flex", flexDirection: "column", gap: "0.35em", flex: "none" }}>
+    <div class="nm-who" style={{ ...S.who, ...(g.entries.length ? null : S.pastWho) }}>
+      <Clamp text={g.who} lines={1} style={{ flex: 1, minWidth: 0, lineHeight: LINE }} />
+      {g.count > 1 && <span style={S.badge}>{g.count}</span>}
+      {g.replied && <span class="nm-replied" style={S.replied}>✓ Replied</span>}
+    </div>
+  );
+}
+
+/** A row's swipe: a live row marked read (its notifications' own buttons), a past one forgotten (history.ts). */
+const swipeOf = (host: Host, app: string, g: Group) => () => void (g.entries.length ? markRead(host, app, g) : forget(app, g.id));
+
+/**
+ * [history]: an open row lists what was said there lately, newest first (the page; the widget's tile has no room).
+ * A past row (no live notification): its swipe forgets it, its who line muted, a replied one marked.
+ */
+export function Row(p: { g: Group; host: Host; app: string; open: boolean; onToggle(): void; lines?: number; narrow?: Narrow; history?: boolean }) {
+  const { g, host, app, open, onToggle, lines = 2, narrow = "no" } = p;
+  const { dx, moved, handlers } = useSwipe(swipeOf(host, app, g));
+  return (
+    <div class="nm-row" {...marks(g)} style={{ display: "flex", flexDirection: "column", gap: "0.35em", flex: "none" }}>
       <div
         {...handlers}
         role="button"
@@ -208,15 +255,39 @@ export function Row(p: { g: Group; host: Host; app: string; open: boolean; onTog
       >
         {narrow !== "text" && <Icons g={g} host={host} app={app} />}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div class="nm-who" style={S.who}>
-            <Clamp text={g.who} lines={1} style={{ flex: 1, minWidth: 0, lineHeight: LINE }} />
-            {g.count > 1 && <span style={S.badge}>{g.count}</span>}
-          </div>
+          <Who g={g} />
           <Line g={g} lines={lines} />
         </div>
         {narrow === "no" && <div class="nm-time" style={S.time}>{ago(g.time)}</div>}
       </div>
-      {open && <Reply g={g} host={host} app={app} done={onToggle} />}
+      {open && <Opened g={g} host={host} app={app} done={onToggle} history={p.history} />}
+    </div>
+  );
+}
+
+/** A row's data-* marks: its group, past (no live notification), replied - what checks and the device look read. */
+const marks = (g: Group) => ({ "data-group": g.id, "data-past": g.entries.length ? undefined : "", "data-replied": g.replied ? "" : undefined });
+
+/** Under an opened row: its history (the page only), then its reply field. */
+function Opened({ g, host, app, done, history }: { g: Group; host: Host; app: string; done(): void; history?: boolean }) {
+  return (
+    <>
+      {history && g.history && <History c={g.history} />}
+      <Reply g={g} host={host} app={app} done={done} />
+    </>
+  );
+}
+
+/** What was said in [c] lately, newest first; the user's own lines marked "You:". */
+function History({ c }: { c: Convo }) {
+  return (
+    <div class="nm-history" style={{ display: "flex", flexDirection: "column", gap: "0.25em", paddingLeft: `${ICON_EM + 0.6}em` }} onPointerDown={stop}>
+      {[...c.said].reverse().map((m) => (
+        <div key={`${m.time}:${m.from}`} data-mine={m.from === "" ? "" : undefined} style={{ display: "flex", gap: "0.6em", ...S.line, color: m.from === "" ? "var(--color-foreground)" : S.line.color }}>
+          <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{lineOf(c, m)}</span>
+          <span style={{ ...S.time, marginTop: 0 }}>{ago(m.time)}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -246,6 +317,14 @@ function Reply({ g, host, app, done }: { g: Group; host: Host; app: string; done
   const [sending, setSending] = useState(false);
   const going = useRef(false);
   const t = replyTarget(g);
+  if (!t && !g.entries.length) {
+    const a = g.history?.apps[0] ?? "the app";
+    return (
+      <div style={S.line} onPointerDown={stop}>
+        {`Its notification is gone: reply in ${a}`}
+      </div>
+    );
+  }
   if (!t) {
     const e = g.entries[0];
     return (
@@ -293,6 +372,8 @@ export const S = {
   },
   who: { display: "flex", alignItems: "center", gap: "0.4em", fontSize: "var(--text-body)", fontWeight: 600, position: "relative" },
   line: { fontSize: "var(--text-body)", color: "var(--color-muted)", lineHeight: LINE },
+  pastWho: { fontWeight: 500, color: "var(--color-muted)" },
+  replied: { flex: "none", fontSize: "var(--text-small)", fontWeight: 500, color: "var(--color-muted)" },
   time: { fontSize: "var(--text-small)", color: "var(--color-muted)", flex: "none", alignSelf: "flex-start", marginTop: "0.2em" },
   badge: { fontSize: "var(--text-small)", fontWeight: 600, padding: "0 0.5em", borderRadius: "1em", background: "var(--color-accent)", color: "var(--color-background)", lineHeight: 1.5 },
   input: { flex: 1, minWidth: 0, font: "inherit", padding: "0.5em 0.8em", borderRadius: "1.2em", border: 0, background: soft, color: "var(--color-foreground)" },

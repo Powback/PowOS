@@ -8,7 +8,7 @@ import { sourceOf, type Group } from "../lib/model";
 import { Row, S as R, useGroups } from "../lib/rows";
 
 const APPS = ["Discord", "WhatsApp", "Gmail"];
-const has = (g: Group, app: string) => g.entries.some((e) => sourceOf(e.n) === app);
+const has = (g: Group, app: string) => g.entries.some((e) => sourceOf(e.n) === app) || !!g.history?.apps.includes(app);
 
 function Filters({ groups, filter, set }: { groups: Group[]; filter: string | null; set(f: string | null): void }) {
   const chip = (label: string, value: string | null, n: number) => (
@@ -42,7 +42,7 @@ export default function Main({ host, app, close }: Props) {
           ‹
         </button>
         <h1 style={{ flex: 1, fontSize: "1.3em", margin: 0 }}>What needs me</h1>
-        <button style={R.pillButton} disabled={!shown.length || busy} onClick={all}>
+        <button style={R.pillButton} disabled={!shown.some((g) => g.entries.length) || busy} onClick={all}>
           {busy ? "Marking…" : "Mark all read"}
         </button>
       </header>
@@ -55,12 +55,12 @@ export default function Main({ host, app, close }: Props) {
       {phase === "old" && <p style={R.line}>This PowOS can't read notifications for apps yet: update PowOS.</p>}
       <div style={S.list}>
         {shown.map((g) => (
-          <Row key={g.id} g={g} host={host} app={app} open={open === g.id} onToggle={() => setOpen(open === g.id ? null : g.id)} />
+          <Row key={g.id} g={g} host={host} app={app} open={open === g.id} history onToggle={() => setOpen(open === g.id ? null : g.id)} />
         ))}
         {phase === "ok" && !shown.length && <p style={{ ...R.line, textAlign: "center" }}>Nothing needs you</p>}
       </div>
       <p style={{ ...R.line, fontSize: "0.75em", whiteSpace: "normal" }}>
-        Read from the notifications these apps post on this phone; replies and mark-as-read are their own buttons.
+        Read from the notifications these apps post on this phone, the last few per conversation kept here after they go; replies and mark-as-read are their own buttons.
       </p>
     </div>
   );

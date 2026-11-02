@@ -7,6 +7,7 @@
  * app marks SEMANTIC_ACTION_REPLY first), mark-as-read is SEMANTIC_ACTION_MARK_AS_READ (or a button so named).
  */
 import { mdPlain } from "@powos/shared/mdplain";
+import type { Convo } from "./history";
 
 export interface Message {
   sender: string;
@@ -64,13 +65,19 @@ export interface Entry {
   answered: boolean;
 }
 
-/** A row: one person or conversation, newest first inside. */
+/**
+ * A row: one person or conversation, newest first inside. [entries]: its live notifications (none: a past row, kept by
+ * history.ts after its notifications went); [history]: what was said there lately; [replied]: the user's own message is
+ * its last.
+ */
 export interface Group {
   id: string;
   who: string;
   entries: Entry[];
   time: number;
   count: number;
+  history?: Convo | null;
+  replied?: boolean;
 }
 
 export function replyIndex(n: Notif): number {
@@ -131,7 +138,8 @@ export const sameName = (s: string) =>
     .trim()
     .toLowerCase();
 
-const groupKey = (e: Entry) => (e.n.groupConversation ? `c:${e.n.pkg}:${e.who}` : `p:${sameName(e.who)}`);
+/** The conversation a notification belongs to: the row (and history.ts) id. */
+export const groupKey = (e: Entry) => (e.n.groupConversation ? `c:${e.n.pkg}:${e.who}` : `p:${sameName(e.who)}`);
 
 /** The rows, newest first: notifications the user already answered left out. */
 export function groups(items: Notif[]): Group[] {

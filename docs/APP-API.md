@@ -126,6 +126,10 @@ absent, which was accurate.
 - Permissions in `powos-app.json` (`"appApi": ["discord.read","discord.reply", ...]`), granted once by the
   user; enforced in the runtime's consumer check.
 - `powos app help` + this doc as the authoring reference, with `needs-me` as the worked example (AA3).
+- History: none of the three has an App API data source with message history yet, so What needs me v2
+  (`apps/needs-me/ui/lib/history.ts`) keeps its own per-conversation history of the notifications it was shown
+  (the app's localStorage, last 6 messages per conversation, 40 conversations, 7 days; the user's own replies
+  marked). A provider added here should merge into it by the same conversation id (`model.ts` `groupKey`).
 
 **File list / step plan for AA2 (next agent):**
 1. `shell/apps/app-api.ts` (new) + `ui/lib/app.ts`: typed `host.appApi.query/subscribe/act` over `/call`
