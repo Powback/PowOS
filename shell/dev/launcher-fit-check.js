@@ -56,7 +56,7 @@ async function aiPillFits(E, keyboard, at) {
 
 /** How far under the panel's top ([clipTop]) [list]'s first row starts, scrolled to its top; null when it's empty. */
 function firstRowGap(list, clipTop) {
-  const first = list.querySelector(".app, .heading, .folder-empty, :scope > *");
+  const first = list.querySelector(".app, .heading, :scope > *");
   if (!first) return null;
   list.scrollTop = 0;
   return first.getBoundingClientRect().top - clipTop;

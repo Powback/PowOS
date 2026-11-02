@@ -61,6 +61,15 @@ export function fadeIn(els: Element[]) {
   );
 }
 
+/**
+ * A list's arrivals (any list, not only the shade's: the launcher's search results, drawer.tsx): [els], in the order
+ * they should come, fade and slide in [STAGGER_MS] apart. Reduced motion: they're just there.
+ */
+export function arrive(els: Element[]) {
+  if (!els.length || reducedMotion() || typeof Element.prototype.animate !== "function") return;
+  fadeIn(els);
+}
+
 /** Each box's height, and the items in view, under [root]. */
 function snapshot(root: ParentNode) {
   const heights = new Map<HTMLElement, number>();

@@ -1,12 +1,14 @@
 /**
- * The design language's page probe (docs/DESIGN-LANGUAGE.md §4, §6), gate.mjs's design-lint-* runs: REPORT-ONLY - it
- * returns what it found, the gate prints it and never fails on it (yet).
+ * The design language's page probe (docs/DESIGN-LANGUAGE.md §4, §6), gate.mjs's design-lint-* runs: it returns what it
+ * found and the gate prints it - failing on it for the surfaces in gate.mjs DESIGN_LINT_BLOCKING (the launcher), report-only
+ * for the rest.
  *
  * - pop-ins: a surface is opened from state (as shots.mjs's scenes do) under a MutationObserver; every element added
  *   while it opens is read on its first frame - drawn (a box, visible, not transparent) with no animation running on
- *   it or an ancestor and no ancestor mid-fade is an element that appeared in a single frame.
+ *   it or an ancestor and no ancestor mid-fade is an element that appeared in a single frame, unless it paints nothing
+ *   itself and all that's drawn in it comes in moving (comesIn).
  * - monospace: once the surface is at rest, every visible text whose font's first family is a monospace one, outside
- *   code (pre, code, kbd, samp, a terminal, a textarea) - UI text is --font-ui.
+ *   code (pre, code, kbd, samp, a terminal, a textarea), faded-out text and OWL widgets (unseen) - UI text is --font-ui.
  *
  * Returns { popins: [label...], mono: { count, where: [[label, n]...] } }.
  */
@@ -18,9 +20,19 @@ const CODE = "pre, code, kbd, samp, textarea, .term, .terminal, .xterm, [data-co
 
 const label = (el) => `${el.tagName.toLowerCase()}${[...el.classList].slice(0, 2).map((c) => "." + c).join("")}`;
 
+/** What's already on screen before the surface opens (not watched): the launcher, open and at rest, for its search. */
+const BEFORE = {
+  "launcher-search": async (S) => {
+    S.drawer.value = 1;
+    await sleep(800);
+  },
+};
+
 /** The surface's opening, from the state the shots scenes use. */
 const OPEN = {
   launcher: (S) => { S.drawer.value = 1; },
+  // The launcher's search as it's typed (drawer.tsx SearchResults): its rows arrive on the spring, never in one frame.
+  "launcher-search": (S) => { S.query.value = "s"; },
   shade: (S) => { S.panel.value = "notifications"; S.notif.value = true; },
   control: (S) => { S.panel.value = "control"; S.notif.value = true; },
   menu: async (S) => {
@@ -38,14 +50,36 @@ function drawn(el) {
   return cs.visibility !== "hidden" && cs.display !== "none";
 }
 
+/** Motion in time: not a scroll-driven one (the drawer list's edge fades, scroll-fade-t/-b: always "running", never moving it in). */
+const timed = (a) => !a.timeline || a.timeline instanceof DocumentTimeline;
+
 /** An animation running on [el] or around it, or an ancestor not yet at full opacity (a fade carrying it in). */
 function moving(el, anims) {
-  for (const a of anims) {
+  for (const a of anims.filter(timed)) {
     const t = a.effect?.target;
     if (t && (t === el || t.contains(el)) && a.playState !== "finished") return true;
   }
   for (let e = el; e && e !== document.documentElement; e = e.parentElement) if (Number(getComputedStyle(e).opacity) < 0.99) return true;
   return false;
+}
+
+/** [el] draws something of its own: a fill, an image, an edge, a shadow, a blur, or a text of its own. */
+function paints(el) {
+  const cs = getComputedStyle(el);
+  const fill = !/^(transparent|rgba\(.*, 0\))$/.test(cs.backgroundColor);
+  const edge = ["Top", "Right", "Bottom", "Left"].some((s) => parseFloat(cs[`border${s}Width`]) > 0 && !/^(transparent|rgba\(.*, 0\))$/.test(cs[`border${s}Color`]));
+  const text = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+  return fill || edge || text || cs.backgroundImage !== "none" || cs.boxShadow !== "none" || (cs.backdropFilter ?? "none") !== "none";
+}
+
+/**
+ * [el] comes in moving: animated itself (or carried by an ancestor's animation or fade) - or it draws nothing of its
+ * own and everything drawn in it comes in moving (a bar whose glass and content are each animated: launchmorph.ts).
+ */
+function comesIn(el, anims) {
+  if (moving(el, anims)) return true;
+  if (paints(el)) return false;
+  return [...el.children].filter(drawn).every((c) => comesIn(c, anims));
 }
 
 async function popins(open, S) {
@@ -64,11 +98,21 @@ async function popins(open, S) {
       // Only the root of what was added: its descendants appear with it.
       if (seen.has(el) || [...seen].some((s) => s.contains(el))) continue;
       seen.add(el);
-      if (drawn(el) && !moving(el, anims)) found.push(label(el));
+      if (drawn(el) && !comesIn(el, anims)) found.push(label(el));
     }
   }
   mo.disconnect();
   return [...new Set(found)];
+}
+
+/**
+ * Text not seen: faded out (an ancestor at opacity ~0: home's pages under the open launcher) - or an OWL widget's, the
+ * known exception (ui/owl.tsx OWL_FONT: they size text by counting characters until OWL can measure it; §4).
+ */
+function unseen(el) {
+  if (el.closest(".owl")) return true;
+  for (let e = el; e && e !== document.documentElement; e = e.parentElement) if (Number(getComputedStyle(e).opacity) < 0.05) return true;
+  return false;
 }
 
 function mono() {
@@ -77,7 +121,7 @@ function mono() {
   const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   for (let n = walk.nextNode(); n; n = walk.nextNode()) {
     const el = n.parentElement;
-    if (!el || !n.textContent.trim() || el.closest(CODE) || !drawn(el)) continue;
+    if (!el || !n.textContent.trim() || el.closest(CODE) || !drawn(el) || unseen(el)) continue;
     const first = getComputedStyle(el).fontFamily.split(",")[0];
     if (!MONO.test(first)) continue;
     count++;
@@ -89,6 +133,7 @@ function mono() {
 export async function designLint(surface) {
   const S = await window.__gw.mod("./state.ts");
   await sleep(300);
+  await BEFORE[surface]?.(S);
   const p = await popins(OPEN[surface] ?? OPEN.home, S);
   await sleep(600);
   return { popins: p, mono: mono() };
