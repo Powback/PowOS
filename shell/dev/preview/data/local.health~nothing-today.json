@@ -1,0 +1,8 @@
+{
+ "rows": {
+  "cursor": [{ "token": "{\"types\":[\"steps\"],\"t\":\"preview\"}", "newest": 0, "synced": 0 }],
+  "daily": [
+   { "id": "steps-fit-1", "kind": "steps", "source": "com.google.android.apps.fitness", "day": { "$daysAgo": 1 }, "sum": 5480, "count": 30, "min": 0, "max": 800, "last": 90, "lastAt": { "$daysAgo": 1 } }
+  ]
+ }
+}
