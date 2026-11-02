@@ -146,6 +146,8 @@ duplicates, an owner role that isn't running, one-off friction unseen 7 days -> 
 something and orphans remain runs the next pass at once (up to 5). Then ONE mail to the coordinator when
 something is new or changed: counts + the top 10 by severity (P0 >= 500, P1 >= 50: powos friction help).
 --dry-run applies and mails nothing; --full adds the whole ranking with each score and every decision.
+A verify queue paused over 1 h is a dead end too: every pass's mail carries "phone checks paused N h by WHO (WHY) ·
+M waiting - resume: queue.sh resume" (never auto-resumed: the user paused it; `task list` shows it too, f417).
 Lists are bounded: task/friction list show live items, at most 100 rows, bodies cut at 600 chars (--all/--full).
 
 Phone checks (the board's facts, written by the verify queue and the sweeper):
@@ -1282,6 +1284,50 @@ def _result_of(log):
     return state, line, at
 
 
+QUEUE_PAUSED_LOUD_S = 3600   # f417: a pause older than this is a dead end the sweep flags every pass
+
+
+def queue_paused_line(qdir=None, now_s=None, min_s=QUEUE_PAUSED_LOUD_S):
+    """The verify queue's pause as ONE line ("" when not paused, or paused under [min_s]): who, why, how long, how
+    many checks wait. Friction f417: the pill's tap paused it for 19 h with 29 checks waiting and nothing said so.
+    Reads the Mac's queue dir (queue.sh pause / the pill's tap write $Q/paused: who=, why=, until=, at= lines, shell
+    %q-quoted; a bare touch has none - its mtime is the when). Never resumes anything: the user paused it."""
+    import shlex
+    q = qdir or os.environ.get("QUEUE_DIR") or os.path.expanduser("~/.cache/powos-verify-queue")
+    pf = os.path.join(q, "paused")
+    try:
+        with open(pf) as f:
+            text = f.read()
+        mtime = os.path.getmtime(pf)
+    except OSError:
+        return ""
+    kv = {}
+    for ln in text.splitlines():
+        k, sep, v = ln.partition("=")
+        if not sep:
+            continue
+        try:
+            v = " ".join(shlex.split(v)) if v.strip() else ""
+        except ValueError:
+            pass
+        kv[k.strip()] = v
+    try:
+        at = int(kv.get("at") or 0) or int(mtime)
+    except ValueError:
+        at = int(mtime)
+    age = (now_s if now_s is not None else time.time()) - at
+    if age < min_s:
+        return ""
+    try:
+        waiting = len([n for n in os.listdir(q) if n.endswith(".job")])
+    except OSError:
+        waiting = 0
+    why = f" ({kv['why']})" if kv.get("why") else ""
+    until = f", until {kv['until']}" if kv.get("until") else ""
+    return (f"phone checks paused {int(age // 3600)} h by {kv.get('who') or 'unknown'}{why}{until} · {waiting} waiting"
+            f" - resume: queue.sh resume")
+
+
 def scan_queue(qdir=None, repo=None, days=7):
     """The verify queue as check rows (check_sync's input): every queued job (running: the one the runner's status
     names), and every finished one of the last [days] days with its result. Run on the Mac (the queue's host)."""
@@ -1768,11 +1814,15 @@ def sweep(now_ms=None, mail=True, to="coder", full=False):
         after = (before[0] - len(gone), len([w for w in orph if w["id"] not in moved]),
                  before[2] - sum(1 for d in decided if d["kind"] == "quiet"))
     stale_q = [w for w in open_ if w.get("status") == "queued" and now_ms - int(w.get("created") or now_ms) >= STALE_QUEUE_MS]
+    # f417: the verify queue lives on the Mac - board-sweep.sh reads it there and hands the line over in the env (set,
+    # even empty, wins); run on the Mac itself, read it directly. Not a "new or changed" item: in EVERY pass's mail.
+    qline = os.environ["POWOS_QUEUE_PAUSED_LINE"] if "POWOS_QUEUE_PAUSED_LINE" in os.environ else queue_paused_line(
+        now_s=now_ms / 1000)
     digest = digest_text(open_, new_tasks, new_asks, new_fr, len(orph), len(seen["asks"]), loud, passes, before, after,
-                         stale_q, sorted(orph0, key=rank_key), live_fr)
+                         stale_q, sorted(orph0, key=rank_key), live_fr, qline=qline)
     if full:
         digest = (digest or digest_text(open_, [], [], [], len(orph), len(seen["asks"]), loud, passes, before, after,
-                                        stale_q, sorted(orph0, key=rank_key), live_fr, force=True)) + full_text(open_, decided)
+                                        stale_q, sorted(orph0, key=rank_key), live_fr, force=True, qline=qline)) + full_text(open_, decided)
     mgr = [d["id"] for d in decided if d["kind"] == "manager"]
     if digest and mgr:   # the manager's own tasks: listed, never acted on (the manager, 11-01)
         digest += f"\n\nManager's own (left alone): {len(mgr)}: " + ", ".join(mgr[:10]) + (" ..." if len(mgr) > 10 else "")
@@ -1796,14 +1846,16 @@ def _sev_tag(w):
 
 
 def digest_text(open_, tasks, asks, fr, n_orphans, n_asks, decided=(), passes=1, before=None, after=None, stale_q=(),
-                ranked=(), live_fr=(), force=False):
-    if not (tasks or asks or fr or decided or force):
+                ranked=(), live_fr=(), force=False, qline=""):
+    if not (tasks or asks or fr or decided or force or qline):
         return ""
     c = counts(open_)
     head = ", ".join(f"{c[s]} {s}" for s in TRUTH if s != "done" and c[s])
     out = [f"Board sweep: {len(tasks)} task(s), {len(asks)} ask(s), {len(fr)} friction new or changed "
            f"(open {len(open_)}: {head}; orphans {n_orphans}, asks without a task {n_asks}). Staff them: "
            f"`powos agents task set <id> --owner <expert>` + a fresh agent that claims it with --step."]
+    if qline:   # f417: a dead end - every "working" task waiting on a phone check is stuck behind it
+        out.append(f"Dead end: {qline}")
     if decided or before:
         kinds = {}
         for d in decided:
@@ -2078,12 +2130,19 @@ def main(argv):
             print(HELP, end="")
             return 0
         argv = argv[:1] + resolve_commits(argv[1:])
+        if argv[1:2] in (["list"], ["ls"], []) and "--json" not in argv:
+            ql = queue_paused_line(min_s=0)   # f417: the Mac's verify queue, before the board (local or the phone's)
+            if ql:
+                print(ql, flush=True)
         try:
             task(argv[1:])
         except Down as e:
             if os.environ.get("POWOS_AGENTS_REMOTE", "1") == "0":
                 die(f"the powos-agents module isn't reachable at {SERVER} ({e})")
             return handle_down(argv)
+        return 0
+    if argv[:2] == ["queue", "paused-line"]:   # local (board-sweep.sh, on the Mac): the line, "" if not paused 1 h
+        print(queue_paused_line())
         return 0
     argv = inline_stdin(argv)
     sub = {"check": check_cmd, "checks": check_cmd, "ask": ask_cmd, "asks": ask_cmd, "friction": friction_cmd}

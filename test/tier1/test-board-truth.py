@@ -580,6 +580,43 @@ class BoardTest(unittest.TestCase):
         self.assertIn("[stalled] Dry one", self.mails_sent()[2])
 
 
+    def paused_queue(self, age_s, jobs=2, why="Phone checks paused: 3 passed, 0 failed, 2 still queued"):
+        """A fixture verify queue dir: the pill's pause file [age_s] old and [jobs] queued checks."""
+        q = os.path.join(self.tmp, "vq")
+        os.makedirs(q, exist_ok=True)
+        for i in range(jobs):
+            open(os.path.join(q, f"20261101-2313{i:02d}-t{i}.job"), "w").write("x\n")
+        why_q = subprocess.run(["bash", "-c", 'printf %q "$1"', "_", why], capture_output=True, text=True).stdout
+        open(os.path.join(q, "paused"), "w").write(f"who=the phone\nwhy={why_q}\nuntil=\nat={int(time.time() - age_s)}\n")
+        self.env["QUEUE_DIR"] = q
+        return q
+
+    def test_sweep_flags_a_long_paused_queue(self):
+        """f417: the queue sat paused 19 h by the pill's tap with 29 checks waiting and nothing flagged it. Past 1 h the
+        sweep's mail carries one line every pass (a dead end; never resumed); a fresh pause carries none."""
+        self.paused_queue(2 * 3600 + 60)
+        line = ("phone checks paused 2 h by the phone (Phone checks paused: 3 passed, 0 failed, 2 still queued)"
+                " · 2 waiting - resume: queue.sh resume")
+        self.run_cli("sweep")
+        self.run_cli("sweep")   # nothing else new: still mailed, every pass
+        mails = self.mails_sent()
+        self.assertEqual(len(mails), 2, mails)
+        for m in mails:
+            self.assertIn("Dead end: " + line, m)
+        self.assertTrue(os.path.exists(os.path.join(self.env["QUEUE_DIR"], "paused")), "never auto-resumed")
+        self.assertEqual(self.run_cli("queue", "paused-line").stdout.strip(), line)
+        self.assertEqual(self.run_cli("task", "list").stdout.splitlines()[0], line)
+        # board-sweep.sh hands the Mac's line over in the env: that wins over the local dir (set, even empty).
+        self.env["POWOS_QUEUE_PAUSED_LINE"] = ""
+        self.assertIn("nothing new", self.run_cli("sweep").stdout)
+        del self.env["POWOS_QUEUE_PAUSED_LINE"]
+        # A fresh pause (< 1 h): no line in the sweep (task list still says it is paused).
+        self.paused_queue(10 * 60)
+        self.assertIn("nothing new", self.run_cli("sweep").stdout)
+        self.assertEqual(len(self.mails_sent()), 2)
+        self.assertEqual(self.run_cli("queue", "paused-line").stdout.strip(), "")
+        self.assertIn("phone checks paused 0 h", self.run_cli("task", "list").stdout)
+
     def test_queue_up_next(self):
         """The user, 11-01: "I should be able to see the queue on the AI page". Accepted-not-started work is status
         queued on the board, in line oldest accepted first, never an orphan; the agent's first --step takes it out."""
@@ -791,7 +828,8 @@ class HygieneCliTest(BoardTest):
         """board-sweep.sh (launchd com.powos.board-sweep, every 10 min) runs `powos agents sweep`: severity, dead-end
         fixes and quiet friction all live in that one verb (sweep -> sweep_decide), so the schedule runs all three."""
         sh = open(os.path.join(ROOT, "tools", "agents", "board-sweep.sh")).read()
-        self.assertIn('echo "powos agents sweep $dry"', sh)
+        self.assertIn('''echo "POWOS_QUEUE_PAUSED_LINE='$ql' powos agents sweep $dry"''', sh)
+        self.assertIn('python3 "$cli" queue paused-line', sh, "f417: the Mac's paused queue handed to the phone's sweep")
         src = open(CLI).read()
         body = src[src.index("def sweep_decide("):src.index("def _board_facts(")]
         for kind in ('"score"', '"leaked"', '"close"', '"merge"', '"dead-owner"', '"plan"', '"failed"', '"requeue"', '"quiet"'):
