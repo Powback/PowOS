@@ -19,10 +19,13 @@
 # - overlays/<slot>/: one resource overlay per system UI slot (config_dozeComponent, ...). Static, as the system server
 #   only takes immutable framework overlays: each is on while the module is (off: disable it in Magisk, reboot).
 #   Signed with a key of their own (~/.local/share/powos/overlay.jks, made once; not the app's).
-#   overlays/split (config_leftRightSplitInPortrait: Android's split screen left | right unfolded) ships. overlays-disabled/
-#   keeps slots that aren't shipped: doze (PowOS as the screen-off display) felt laggy on the phone and was reverted.
-#   --slot NAME ships one of those too, for trying it on the phone before it moves to overlays/. The recents slot
-#   (PowOS as the recents provider: switcher, shade) needs --priv-app: SystemUI binds only a system package's service.
+#   overlays/split (config_leftRightSplitInPortrait: Android's split screen left | right unfolded) and overlays/recents
+#   (PowOS as the recents provider: switcher, shade, gestures) ship. The recents slot needs --priv-app: SystemUI binds
+#   only a system package's service. It lived in overlays-disabled/ (shipped only with --slot recents) until 11-02: a
+#   module built without that flag (05:43, for WATCH_APPOPS) and the reboot after it left OnePlus's launcher as the
+#   recents provider - no PowOS shade, and the ship guard rolled back every APK since ("not booted: shade").
+#   overlays-disabled/ keeps slots that aren't shipped: doze (PowOS as the screen-off display) felt laggy on the phone
+#   and was reverted. --slot NAME ships one of those too, for trying it on the phone before it moves to overlays/.
 # - module/: the boot watchdog (post-fs-data.sh counts boots, service.sh clears the count once Android is up; two
 #   that never finish and the module disables itself), and load-kernel-modules.sh: the containers kernel's nftables
 #   modules (kernel/out/modules, when built), insmodded at boot in the background (docs/PHONE-KERNEL-CONTAINERS.md §9).
@@ -52,6 +55,8 @@ while [ $# -gt 0 ]; do
     shift
 done
 for slot in ${slots[@]+"${slots[@]}"}; do
+    # Already shipped (overlays/): nothing extra (the older recipes still pass --slot recents).
+    [ -d "$HERE/overlays/$slot" ] && continue
     [ -d "$HERE/overlays-disabled/$slot" ] || { echo "build-module.sh: no slot $slot in overlays-disabled/" >&2; exit 2; }
 done
 if [ $priv = 0 ] && { [ -d "$HERE/overlays/recents" ] || [[ " ${slots[*]-} " == *" recents "* ]]; }; then
@@ -131,7 +136,7 @@ mkdir -p "$KEYS" "$M/system/product/overlay" "$WORK/overlays"
 shopt -s nullglob  # no overlays at all is fine: the module is then the priv-app (or just the watchdog)
 # No trailing slash - BSD cp -R dir/ copies the contents, not the dir
 for dir in "$HERE"/overlays/*/; do cp -R "${dir%/}" "$WORK/overlays/"; done
-for slot in ${slots[@]+"${slots[@]}"}; do cp -R "$HERE/overlays-disabled/$slot" "$WORK/overlays/"; done
+for slot in ${slots[@]+"${slots[@]}"}; do [ -d "$HERE/overlays/$slot" ] || cp -R "$HERE/overlays-disabled/$slot" "$WORK/overlays/"; done
 [ -f "$KEYS/overlay.jks" ] || {
     sdk keytool -genkeypair -keystore /t/overlay.jks -storepass powos-overlay -keypass powos-overlay -alias overlay \
         -keyalg RSA -keysize 2048 -validity 36500 -dname "CN=PowOS system overlays" >/dev/null 2>&1

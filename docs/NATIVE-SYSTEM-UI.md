@@ -342,8 +342,8 @@ doze component. With `isStatic="true"` it switched. OnePlus also gates the doze 
 
 ## Recents slot and shade: built (2026-10-19), not yet tried on the phone
 
-What's in the tree, all live only with the module built `--priv-app --slot recents` (the overlay sits in
-`system-module/overlays-disabled/recents/` until it's verified; then it moves to `overlays/`):
+What's in the tree, all live only with the module built `--priv-app` (the overlay is `system-module/overlays/recents/`, shipped by
+default since 2026-11-02: a module built without it dropped the shade and the gestures after the 11-02 05:44 reboot):
 
 - `system/PowosRecentsService.kt`: the `QUICKSTEP_SERVICE` (guarded by `STATUS_BAR_SERVICE`) returning
   `ILauncherProxy` (`src/main/aidl`, AOSP's interface with this device's ids, only the calls PowOS takes; the rest,
@@ -429,7 +429,7 @@ was run on the phone.
 **Phone test** (in order; each step needs the one before):
 
 1. Build the module with this APK as the priv-app and the recents slot: `targets/android/system-module/build-module.sh
-   --priv-app --slot recents --check-signer`, install it (`targets/android/rooted/rooted.sh module
+   --priv-app --check-signer` (the recents slot is in `overlays/`, so it always ships), install it (`targets/android/rooted/rooted.sh module
    ~/Projects/android-app-dev/output/powos-system-module.zip --note "..."`: push, `magisk --install-module`, and the zip
    deleted again), reboot. The
    priv-app copy must be this build: `MONITOR_INPUT` and `MANAGE_ACTIVITY_TASKS` are new in the manifest.
@@ -450,7 +450,7 @@ was run on the phone.
 
 **Rollback**, least to most: the animation off as in step 6; three-button navigation (Settings → System → Navigation,
 or `adb shell cmd overlay enable-exclusive --category com.android.internal.systemui.navbar.threebutton`), where PowOS
-only gets the overview button; the recents slot off - rebuild the module without `--slot recents` and reinstall it, or
+only gets the overview button; the recents slot off - move `overlays/recents` back to `overlays-disabled/`, rebuild the module and reinstall it, or
 disable the module in Magisk, then reboot (OnePlus's launcher is the recents provider again and its gestures come back).
 
 ## 4. Safety
