@@ -174,7 +174,11 @@ if [ "$CASE" = render-scan ]; then
     esac
     chk "$s open"
     step "rs-$s" "rs on (perf.meter {on, renders}): the $s surface opened for real, its render overlay read"
-    v=$(ev "$PROBE" "$s"); log "$s: $v"
+    pg=$s
+    # The switcher is a layer of home's page while the web home is home (Switcher.kt); its own "recents" page exists
+    # only when the engine's desktop is home. 11-02: probing a missing "recents" page answered "]" - a check bug.
+    [ "$s" = recents ] && ! "$T/cdp.sh" pages 2>/dev/null | grep -q '^recents ' && pg=home
+    v=$(ev "$PROBE" "$pg"); log "$s ($pg page): $v"
     if [ "$s" = lock ]; then case $v in on=*) rsjudge lock "$v" ;; *) note "lock: its page didn't answer ($v) - the lock face needs the phone locked, not shown by script" ;; esac
     else rsjudge "$s" "$v"; fi
     case $s in

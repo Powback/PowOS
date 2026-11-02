@@ -9,7 +9,8 @@
 #   ai-board       (ai-page-work-board-adhd-friendly-grouped-by-what, 9b5162fc): the unfolded AI page has the work
 #                  column left (.ai-left: ring, To do, By area, Working now, Recently done - in that order, whichever
 #                  have content) and the chat right at ~44% (.ai-right); a plan card in the chat shows its title once
-#                  and no faded peek.
+#                  and no faded peek. Headings are matched case-blind: .ais-h is text-transform: uppercase, so
+#                  innerText reads "WORKING NOW" (the 11-02 FAIL).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/e2e-lib.sh"
@@ -43,8 +44,8 @@ if [ "$CASE" = ai-board ]; then
   setpage -1; sleep 1.5; chk "ai page"
   step ai-page "the unfolded PowOS AI page: the work board left, the chat right"
   f=$(ev '(()=>{const l=document.querySelector(".ai-left"),r=document.querySelector(".ai-right");if(!l||!r)return JSON.stringify({l:!!l,r:!!r});
-  const a=l.getBoundingClientRect(),b=r.getBoundingClientRect(),txt=l.innerText||"";
-  const at=["To do","By area","Working now","Recently done"].map(w=>[w,txt.indexOf(w)]);
+  const a=l.getBoundingClientRect(),b=r.getBoundingClientRect(),txt=(l.innerText||"").toLowerCase();
+  const at=["To do","By area","Working now","Recently done"].map(w=>[w,txt.indexOf(w.toLowerCase())]);
   const c=r.querySelector(".present");
   return JSON.stringify({l:true,r:true,left:a.left<b.left,share:Math.round(b.width/(a.width+b.width)*100),ring:!!l.querySelector("svg circle, .ring, [class*=ring]"),at,
   plan:c?{titles:(c.querySelector("h1,h2,h3,.present-title")?1:0)+0,dup:(()=>{const h=c.querySelector("h1,.present-title");return h?(c.textContent.split(h.textContent.trim()).length-1):0})(),fade:!!c.querySelector(".present-peek")}:null})})()')

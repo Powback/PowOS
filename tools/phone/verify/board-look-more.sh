@@ -168,7 +168,14 @@ if [ "$CASE" = search-setting ]; then
       SCR=1; ev 'importShim("./screens.ts").then(Sc=>{Sc.screens.value=["settings","style"];return "ok"})' >/dev/null; sleep 1.5; chk settings
       p=$(segpt "$label" "$opt"); sleep 0.6; p=$(segpt "$label" "$opt")
       case $p in none|off|"") step "pick-$fold" "Settings > style: $label"; fail "no '$opt' on '$label' ($p) - not shipped?"; break ;; esac
-      set -- $p; tap "$1" "$2" "$label: $opt"; sleep 0.8; chk pick
+      set -- $p
+      # Where the tap goes (11-02 FAIL: taps changed nothing, no 'search placement' log): the DOM hit at the point and
+      # whether any pointer event reached the page, so a native surface over home tells apart from a dead button.
+      hit=$(ev "(()=>{const d=devicePixelRatio,e=document.elementFromPoint($1/d,$2/d);window.__ssHits=0;if(!window.__ssHook){window.__ssHook=1;document.addEventListener('pointerdown',()=>window.__ssHits++,true)}return e?(e.tagName+'.'+String(e.className).slice(0,40)+' '+(e.textContent||'').trim().slice(0,20)):'nothing'})()")
+      log "hit at $1,$2: $hit"
+      tap "$1" "$2" "$label: $opt"; sleep 0.8; chk pick
+      log "pointerdowns that reached home's page: $(ev 'String(window.__ssHits)')"
+      "$T/shot.sh" --phone "$PDIR/$fold-$want-settings.png" >/dev/null 2>&1 || true   # Settings still open: the evidence
       after=$(ev "$SPOTS"); ev 'importShim("./screens.ts").then(Sc=>{Sc.screens.value=[];return "ok"})' >/dev/null; SCR=; sleep 1.2
       step "$fold-$want" "$fold: Settings > style > $label = $opt, then home"
       hs=$(ev "$HOMESEARCH"); log "$label=$opt: spots $now -> $after, home $hs"
@@ -210,11 +217,16 @@ want = [p[1].lower() for p in pages if p[0] not in on]
 got = [i[0].lower() for i in row["items"]]
 bad = []
 if sorted(want) != sorted(got): bad.append(f"the row lists {got[:12]}, the device's pages not on the row are {want[:12]}")
+# A page with no icon of its own gets its MDI glyph (quickpage.tsx QUICK_GLYPH - the spec's "its page's picture or
+# glyph, never the Settings gear"): a glyph counts (11-02 FAIL counted it as none). Only no face at all fails.
 own = [i for i in row["items"] if i[1] in ("img", "mono")]
-if len(own) < len(row["items"]): bad.append(f"{len(row['items']) - len(own)} of {len(row['items'])} items without their own picture: {[i[0] for i in row['items'] if i[1] not in ('img','mono')][:8]}")
+faced = [i for i in row["items"] if i[1] in ("img", "mono", "glyph")]
+if len(faced) < len(row["items"]): bad.append(f"{len(row['items']) - len(faced)} of {len(row['items'])} items without a picture or glyph: {[i[0] for i in row['items'] if i[1] not in ('img','mono','glyph')][:8]}")
+ch = [i[0] for i in row["items"] if i[0].lower().startswith("complete action") or i[0].lower().startswith("open with")]
+if ch: bad.append(f"the system chooser offered as a page: {ch} (QuickPageCatalog.chooser)")
 pics = {i[2] for i in own}
 if len(own) > 2 and len(pics) <= 1: bad.append("every item shows the same picture")
-print(("FAIL " + "; ".join(bad)) if bad else f"PASS {len(got)} of the device's {len(pages)} pages offered ({len(on)} on the row), each its own picture ({len(pics)} different)")
+print(("FAIL " + "; ".join(bad)) if bad else f"PASS {len(got)} of the device's {len(pages)} pages offered ({len(on)} on the row), {len(own)} with their own picture ({len(pics)} different), {len(faced) - len(own)} with their glyph")
 PY
 )
     verdict "$r"

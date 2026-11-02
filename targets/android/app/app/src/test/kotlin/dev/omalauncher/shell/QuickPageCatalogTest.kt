@@ -49,4 +49,11 @@ class QuickPageCatalogTest {
         assertFalse(QuickPageCatalog.monochrome(intArrayOf(black, blue)))
         assertFalse(QuickPageCatalog.monochrome(intArrayOf(clear, clear)))
     }
+
+    @Test
+    fun theSystemChooserIsNotAPage() {
+        assertTrue(QuickPageCatalog.chooser("android", "com.android.internal.app.ResolverActivity"))
+        assertTrue(QuickPageCatalog.chooser("android", "com.android.internal.app.ChooserActivity"))
+        assertFalse(QuickPageCatalog.chooser("com.android.settings", "com.android.settings.Settings\$DataUsageSummaryActivity"))
+    }
 }

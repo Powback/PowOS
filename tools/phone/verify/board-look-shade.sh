@@ -44,7 +44,12 @@ spt() { local o ox=0 oy=0; o=$(wframe "PowOS shade"); [ -n "$o" ] && { set -- "$
   ev "(()=>{const e=($1);if(!e)return 'none';const r=e.getBoundingClientRect(),d=devicePixelRatio;if(r.width<2||r.height<2)return 'off';return Math.round((r.x+r.width/2)*d+$ox)+' '+Math.round((r.y+r.height/2)*d+$oy)})()" shade; }
 # mark <n>: a line in logcat to read this step's gesture lines after (logs <n>: NavGesture / CornerPull / Shade since it).
 mark() { sh_ "log -t PowosVerify look-shade-$1" >/dev/null; }
-logs() { sh_ "logcat -d -t 800 -s PowosVerify:I PowosNavGesture:I PowosCornerPull:I PowosShade:I" | sed -n "/look-shade-$1\$/,\$p" | tail -n +2; }
+# The whole ring, filtered (11-02: "-t 800" counted unfiltered lines; the phone's ring is busy, the mark had scrolled
+# out of the last 800 before the read and every navone read an empty log). Read straight after the gesture (navone).
+logs() { sh_ "logcat -d -s PowosVerify:I PowosNavGesture:I PowosCornerPull:I PowosShade:I" | sed -n "/look-shade-$1\$/,\$p" | tail -n +2; }
+# underpill <x> <y>: 0 when the verify status pill (bottom-left on this build) covers the spot - the gesture is skipped.
+underpill() { local r; r=$(pillrect); [ -n "$(echo $r)" ] || return 1; set -- "$1" "$2" $r
+  [ "$1" -ge $(($3 - 48)) ] && [ "$1" -le $(($5 + 48)) ] && [ "$2" -ge $(($4 - 48)) ] && [ "$2" -le $(($6 + 48)) ]; }
 # pullbar <x fraction> <what>: a status-bar pull down at that x; waits for the shade.
 pullbar() { swipe $((W * $1 / 100)) 6 $((W * $1 / 100)) $((H / 2)) 280 "$2" || return 1; sleep 1.4; chk "$2"; }
 shut() { [ "$(shown)" = true ] && { back 1.2; [ "$(shown)" = true ] && { sh_ "cmd statusbar collapse"; sleep 1; }; }; true; }
@@ -68,11 +73,13 @@ setfold() {
 navstate() { echo "page=$(hpage) open=$(isopen) top=$(sh_ "dumpsys activity activities | grep -m1 topResumedActivity" | grep -oE '[a-zA-Z0-9_.]+/[a-zA-Z0-9_.]+' | head -1) pull=$(ev 'String(!!document.querySelector(".pull.shown, .pull-panel.shown, .launcher.shown"))' pull)"; }
 navone() { # navone <slug> <what> <gesture fn>
   local s0 s1 lg
+  # A gesture whose start the verify pill covers is skipped, not failed (11-02: offpill's refusals read as FAILs).
+  if [ -n "${4:-}" ] && underpill $4; then step "$1" "$2"; NSKIP=$((NSKIP + 1)); _res SKIP "its start ($4) is under the verify status pill - not swiped"; return; fi
   shut; pullbar 30 "the shade, pulled from the status bar" || return
   [ "$(shown)" = true ] || { step "$1" "$2"; fail "the shade didn't open from the status bar - the swipe not tried"; return; }
-  s0=$(navstate); mark "$1"; "$3"; sleep 1.6; chk "$1"
+  s0=$(navstate); mark "$1"; "$3"; sleep 1.6; lg=$(logs "$1"); chk "$1"
   step "$1" "$2"
-  s1=$(navstate); lg=$(logs "$1"); log "before: $s0 | after: $s1"; log "logs: $(echo "$lg" | tr '\n' '|' | cut -c1-600)"
+  s1=$(navstate); log "before: $s0 | after: $s1"; log "logs: $(echo "$lg" | tr '\n' '|' | cut -c1-600)"
   local bad=""
   [ "$(shown)" = false ] || bad="$bad; the shade is still down"
   [ "$s0" = "$s1" ] || bad="$bad; under it changed ($s0 -> $s1)"
@@ -82,7 +89,7 @@ navone() { # navone <slug> <what> <gesture fn>
 }
 g_home() { swipe $((W / 2)) $((H - 3)) $((W / 2)) $((H * 55 / 100)) 180 "home swipe over the shade"; }
 g_switch() { mdown $((W / 2)) $((H - 3)) "switcher swipe" || return; mpath $((W / 2)) $((H - 3)) $((W / 2)) $((H * 72 / 100)) 12; sleep 0.7; mup $((W / 2)) $((H * 72 / 100)); }
-g_side() { swipe $((W * 30 / 100)) $((H - 3)) $((W * 72 / 100)) $((H - 5)) 220 "sideways along the bar over the shade"; }
+g_side() { swipe $((W * 50 / 100)) $((H - 3)) $((W * 85 / 100)) $((H - 5)) 220 "sideways along the bar over the shade"; }
 g_cornl() { swipe $((W * 4 / 100)) $((H - 3)) $((W * 14 / 100)) $((H * 60 / 100)) 320 "bottom-left corner swipe over the shade"; }
 g_cornr() { swipe $((W * 96 / 100)) $((H - 3)) $((W * 86 / 100)) $((H * 60 / 100)) 320 "bottom-right corner swipe over the shade"; }
 if [ "$CASE" = shade-nav ]; then
@@ -91,7 +98,7 @@ if [ "$CASE" = shade-nav ]; then
     navone "home-$fold" "$fold: the shade down, a home swipe from the bar: it shuts, home stays as it was" g_home
     navone "switch-$fold" "$fold: the shade down, a held switcher swipe: it shuts, no switcher under it" g_switch
     navone "side-$fold" "$fold: the shade down, a sideways swipe along the bar: it shuts, no quick switch" g_side
-    navone "cornerl-$fold" "$fold: the shade down, a bottom-left corner swipe: no PowOS AI panel over it" g_cornl
+    navone "cornerl-$fold" "$fold: the shade down, a bottom-left corner swipe: no PowOS AI panel over it" g_cornl "$((W * 4 / 100)) $((H - 3))"
     navone "cornerr-$fold" "$fold: the shade down, a bottom-right corner swipe: no apps panel over it" g_cornr
   done
   shut
@@ -167,11 +174,17 @@ fi
 
 # --- lock-strip -----------------------------------------------------------------------------------------------------
 if [ "$CASE" = lock-strip ]; then
-  step lock "read-only: the lock page (rendered under home while unlocked) - its cards' material"
-  f=$(ev '(()=>{const r=document.documentElement,cs=getComputedStyle(r),n=[...document.querySelectorAll(".lock-note")];
+  step lock "read-only: the lock page (kept warm once the phone has locked) - its cards' material"
+  # The lock page is made on the first lock after the app starts (LockFace.kt host(), lazy) - not "under home while
+  # unlocked". 11-02: no lock page listed answered "]" and failed; without one it is a SKIP, the gate's lock scenes judge.
+  if ! "$T/cdp.sh" pages 2>/dev/null | grep -q '^lock '; then
+    NSKIP=$((NSKIP + 1)); _res SKIP "no lock page yet (LockFace makes it on the first lock since the app started) - not judged; gate lock-cards-*/lock-unlock-glass-*"
+    f=none
+  else f=$(ev '(()=>{const r=document.documentElement,cs=getComputedStyle(r),n=[...document.querySelectorAll(".lock-note")];
   return JSON.stringify({n:n.length,lift:cs.getPropertyValue("--lock-lift").trim(),oldLift:r.style.getPropertyValue("--lift"),
   cards:n.map(c=>{const s=getComputedStyle(c);return {shadow:s.boxShadow,icon:!!c.querySelector("img,svg,.notif-glyph,[class*=glyph],[class*=icon]")}})})})()' lock)
-  log "lock facts: $f"
+  fi
+  [ "$f" != none ] && { log "lock facts: $f"
   python3 - "$f" <<'PY' > "$OUT/lock.txt"
 import json, sys
 try: f = json.loads(sys.argv[1])
@@ -186,7 +199,7 @@ ni = [i for i, c in enumerate(f["cards"]) if not c["icon"]]
 if ni: bad.append(f"cards {ni} have no icon")
 print(("FAIL " + "; ".join(bad)) if bad else f"PASS {f['n']} cards, each with a shadow and an icon; --lock-lift registered")
 PY
-  r=$(cat "$OUT/lock.txt"); case $r in PASS*) pass "${r#PASS }" ;; ENV*) note "${r#ENV }"; NSKIP=$((NSKIP + 1)); _res SKIP "${r#ENV }" ;; *) fail "${r#FAIL }" ;; esac
+  r=$(cat "$OUT/lock.txt"); case $r in PASS*) pass "${r#PASS }" ;; ENV*) note "${r#ENV }"; NSKIP=$((NSKIP + 1)); _res SKIP "${r#ENV }" ;; *) fail "${r#FAIL }" ;; esac; }
   NSKIP=$((NSKIP + 1)); _res SKIP "unlock slide (blur stays with the cards, no strip) and AOD not driven: the lock face only shows on a locked phone, and locking + waking it by script breaks the never-wake rule on the live phone - see the gate's lock-unlock-glass-folded/unfolded"
 fi
 
