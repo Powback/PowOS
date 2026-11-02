@@ -5,7 +5,8 @@
  * the recent apps bar (home.tsx); always mounted, so it follows the finger without rebuilding.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { computed } from "@preact/signals";
+import { computed, effect } from "@preact/signals";
+import { memo } from "./memo.ts";
 import { alignOf } from "./align.ts";
 import { AppCell, AppIcon } from "./apps.tsx";
 import { ChatView } from "./chat.tsx";
@@ -162,10 +163,20 @@ export function AppList({ found, onTap }: { found: App[] | null; onTap?: (app: A
   // alignment places a grid shorter than the panel at its foot (shell.css "Alignment"), near the thumb; it never means
   // scrolled to the last app - opening at Z every time was the bug (the user, 11-01: "Why is the launcher always
   // scrolled to bottom when I open it?"). Search results keep their own bottom-up start (Results below).
-  const open = drawerOpen.value;
+  // Watched, not read in render: a read re-rendered the list (and its every cell's comparison) on each drag's start - the
+  // drawer shows (drawerOpen) at the first touchmove (device 11-02 18:13: that move 107 ms of script).
+  const showsAll = useRef(!found);
+  showsAll.current = !found;
+  useEffect(
+    () =>
+      effect(() => {
+        if (drawerOpen.value && showsAll.current && list.current) list.current.scrollTop = 0;
+      }),
+    [],
+  );
   useLayoutEffect(() => {
-    if (open && !found && list.current) list.current.scrollTop = 0;
-  }, [open, !found]);
+    if (drawerOpen.peek() && !found && list.current) list.current.scrollTop = 0;
+  }, [!found]);
   const cell = (app: App) => <AppCell key={app.key} app={app} draggable={!onTap} onTap={onTap} />;
   return (
     <>
@@ -232,7 +243,7 @@ function FolderView() {
  * pageDecision: 30% or a flick, release velocity over the last 50 ms). Transform only (translate3d). Home's own gesture
  * drops sideways moves while the drawer is open, so these touch events are the drawer's alone.
  */
-function Pages() {
+const Pages = memo(function Pages() {
   const track = useRef<HTMLDivElement>(null);
   const dots = useRef<HTMLDivElement>(null);
   const [view, setView] = useState(0);
@@ -292,7 +303,7 @@ function Pages() {
       {last > 0 && <PageDots count={2} dotsRef={dots} />}
     </>
   );
-}
+});
 
 /** How long a closing drawer keeps what it showed: the close's fade (shell.css [data-p] and gesture.ts SETTLE_MS, 180 ms) and a frame. */
 const CLOSE_HOLD_MS = 200;

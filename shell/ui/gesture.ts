@@ -145,6 +145,41 @@ function tableOf(el: HTMLElement): Keyframe[] {
   return table;
 }
 
+/**
+ * Every follower's keyframes built ahead of the drag, so its first move only sets currentTime: built there, at the first
+ * touchmove (follow), each element's 41 samples restyled its whole subtree (--p is inherited) and its size read forced a
+ * layout right after the move's writes - on the device 107 / 49 / 31 ms of script + 52 / 32 / 23 ms of forced layout on
+ * the first move of each drag (11-02 18:13). Built while nothing animates (a --p transition must not be cut short:
+ * tableOf sets transition none for its samples), when idle after a follower mounts or the window resizes, and again on a
+ * touch down (startGesture: before any write of the gesture, so its size reads cost no forced layout; cached, nearly free).
+ */
+/** Whether the tables were all built at this touch's down: the drag then takes them as they are, no size read at all. */
+let primed = false;
+export function primeFollowers(atDown = false) {
+  primed = false;
+  if (followers || drawerDrag.peek() != null) return false;
+  let all = true;
+  for (const el of document.querySelectorAll<HTMLElement>("[data-p]")) {
+    if (el.getAnimations().some((a) => a.playState === "running")) all = false;
+    else tableOf(el);
+  }
+  primed = atDown && all;
+  return all;
+}
+let primeQueued = false;
+function primeWhenIdle() {
+  if (primeQueued) return;
+  primeQueued = true;
+  const later = (fn: () => void) => ("requestIdleCallback" in window ? requestIdleCallback(fn, { timeout: 1000 }) : setTimeout(fn, 200));
+  let tries = 0;
+  const run = () => {
+    if (primeFollowers() || ++tries >= 8) primeQueued = false;
+    else setTimeout(() => later(run), 250);
+  };
+  later(run);
+}
+addEventListener("resize", primeWhenIdle);
+
 /** The settle curve's progress at time fraction t (a CSS cubic-bezier with these control points). */
 function bezier(t: number) {
   const [x1, y1, x2, y2] = SETTLE_CURVE;
@@ -171,8 +206,8 @@ function settleAt(f: number) {
   return (lo + hi) / 2;
 }
 
-function followerOf(el: HTMLElement): Follower {
-  const table = tableOf(el);
+function followerOf(el: HTMLElement, ready = false): Follower {
+  const table = (ready && tables.get(el)?.table) || tableOf(el);
   const anim = el.animate(table, { duration: SPAN, fill: "both", easing: "linear", id: "drawer" });
   anim.pause();
   return { el, table, anim };
@@ -181,7 +216,9 @@ function followerOf(el: HTMLElement): Follower {
 function follow(p: number) {
   if (!followers) {
     for (const el of document.querySelectorAll<HTMLElement>("[data-p]")) el.getAnimations().forEach((a) => a.id === "drawer" && a.cancel());
-    followers = [...document.querySelectorAll<HTMLElement>("[data-p]")].map(followerOf);
+    const ready = primed;
+    primed = false;
+    followers = [...document.querySelectorAll<HTMLElement>("[data-p]")].map((el) => followerOf(el, ready));
   }
   for (const f of followers) f.anim.currentTime = p * SPAN;
 }
@@ -309,6 +346,7 @@ export function followOpenness(el: HTMLElement | null) {
   const to = drag ?? (drawer.peek() > 0 ? 1 : 0);
   comeIn(el, drag, to);
   el?.style.setProperty("--p", String(to));
+  primeWhenIdle();
   // Mounted while a finger drives the drawer (or before its settle): one of the followers too, or it stays at the --p
   // it mounted with - the launcher's dock, mounted by the render after pull.begin (pull.tsx: kind "apps" after PowOS
   // AI's pull, dockShown), sat at --p 0, invisible, the launcher open over it (the user, 2026-10-30: "the dock is still
@@ -444,6 +482,7 @@ function startGesture(x: number, y: number, target: Element, t: number) {
     travel: travelOf(),
     chrome,
   };
+  primeFollowers(true);
 }
 
 /**

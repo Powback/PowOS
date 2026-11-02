@@ -11621,6 +11621,12 @@ try {
       console.log(`     pet-switch: ${await r.page.evaluate(() => window.__petSwitch).catch(() => "?")}`);
       return fails;
     })));
+    // PERF-P5 (perf-scenarios 11-02): a drawer drag renders no app cell, tile or Home and forces no layout (drawer-drag-renders).
+    runs.push(open(browser, `${ORIGIN}/index.html`, "drawer-drag-renders", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
+      const fails = await r.page.evaluate(async () => (await importShim("./dev/drawer-drag-check.js")).drawerDragRenders());
+      console.log(`     drawer-drag-renders: ${await r.page.evaluate(() => window.__drawerDrag).catch(() => "?")}`);
+      return fails;
+    })));
     // PERF-P4 (perf-scenarios 11-02): an equal qs update re-renders no control tile in the shade (cc-toggle-memo).
     runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, "cc-toggle-memo", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
       const fails = await r.page.evaluate(ccToggleMemoScene);
