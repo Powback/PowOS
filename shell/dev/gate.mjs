@@ -6352,6 +6352,114 @@ async function glassFrameLayoutScene() {
   return fails;
 }
 
+/** K4's live glass mocked on: every "b.r"/"b.f" region set the page sends, collected; undo() puts it back. */
+async function lockGlassOn() {
+  const N = await window.__gw.mod("./apps/native.ts");
+  const sent = [];
+  const ch = new MessageChannel();
+  ch.port2.onmessage = (m) => /^b\.[fr] /.test(String(m.data)) && sent.push(String(m.data));
+  const had = N.native.value;
+  N.native.value = ch.port1;
+  for (const f of N.fromNative) f("b.state 1");
+  const undo = () => {
+    for (const f of N.fromNative) f("b.state 0");
+    N.native.value = had;
+  };
+  return { sent, undo };
+}
+
+/** The first region's top in a set ("b.r <dpr> <n> x y ..."), or null for an empty set. */
+function lockTopOf(t) {
+  const p = (t ?? "").split(" ").slice(t?.startsWith("b.f ") ? 2 : 1);
+  return Number(p[1]) > 0 ? Number(p[3]) : null;
+}
+
+/**
+ * K4's swipe on the lock face: up 0.36 of the height (just past the unlock point: the lower cards still on the screen)
+ * in 12 frames, held, let go (past the unlock point, no flick); the
+ * cards' tops (cut at the screen's top, as their regions are) sampled every frame meanwhile, until the face has slid
+ * away. Returns those tops and how many region sets had been sent at the release.
+ */
+async function lockSwipeUp(sent) {
+  const face = document.querySelector(".lock");
+  // A synthetic pointer isn't an active one: capturing it throws (a finger's capture is the page's, unchanged).
+  face.setPointerCapture = () => {};
+  const ev = (type, y) => face.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: innerWidth / 2, clientY: y, pointerId: 41, isPrimary: true, pointerType: "touch" }));
+  const tops = [];
+  let sampling = true;
+  const sample = () => {
+    for (const c of document.querySelectorAll(".lock-note")) tops.push(Math.max(0, c.getBoundingClientRect().top));
+    if (sampling) requestAnimationFrame(sample);
+  };
+  sample();
+  const y0 = innerHeight * 0.8;
+  ev("pointerdown", y0);
+  for (let i = 1; i <= 12; i++) {
+    await window.__gw.frames(1);
+    ev("pointermove", y0 - innerHeight * 0.36 * (i / 12));
+  }
+  await window.__gw.sleep(150);
+  ev("pointerup", y0 - innerHeight * 0.36);
+  const released = sent.length;
+  await window.__gw.until(() => getComputedStyle(face).opacity === "0" && !face.getAnimations().length, 3000);
+  await window.__gw.frames(10);
+  sampling = false;
+  return { tops, released };
+}
+
+/** K4's verdict on the region sets sent over the unlock ([during]) against the card's tops drawn ([tops]). */
+function lockGlassFails(during, tops, last, after) {
+  const fails = [];
+  // A card past the screen's top: its region is cut there (y 0).
+  const stale = during.map(lockTopOf).filter((y) => y != null && !tops.some((t) => Math.abs(t - y) < 1.5));
+  if (stale.length) fails.push(`K4: ${stale.length} region set(s) where no card was drawn (stale blur): tops ${stale.slice(0, 4).join(", ")} vs cards ${tops.slice(0, 3).map(Math.round).join(", ")}...`);
+  const moving = during.filter((t) => lockTopOf(t) != null).length;
+  if (moving < 8) fails.push(`K4: only ${moving} region sets while the cards moved (drag + slide out): the blur didn't follow them`);
+  // Let go, the cards still on the screen slide off it over the settle: their blur with them, frame by frame.
+  const sliding = after.filter((t) => lockTopOf(t) != null).length;
+  if (sliding < 3) fails.push(`K4: only ${sliding} region sets with cards over the slide out: the blur stayed while the cards slid away`);
+  if (lockTopOf(last) != null) fails.push(`K4: blur left behind once the face slid away: last set "${last.slice(0, 80)}"`);
+  return fails;
+}
+
+/**
+ * K4 (lock-screen-no-brown-strip-at-the-bottom-notific: "the blur follows the notification cards on unlock"): on the
+ * lock face with the live glass on, a swipe up past the unlock point - every region set the page sends during the drag
+ * and the slide out is where a card was drawn on some frame (none stale, none left at the start), the regions keep
+ * coming while the face slides, and once it's away the last set is empty (no blur left behind on the screen). The
+ * cards keep the theme's shadow token (the face's lift was --lift too, and wiped it).
+ */
+async function lockUnlockGlassScene() {
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const { sent, undo } = await lockGlassOn();
+  const unlock = powos.lock.unlock;
+  let asked = 0;
+  powos.lock.unlock = async () => void asked++;
+  const now = Date.now();
+  const items = [1, 2, 3, 4, 5].map((i) => ({ key: `gate.k4.${i}`, app: "Gate", pkg: "dev.gate", title: `Card ${i}`, text: "the blur goes with me", time: now - i * 60000 }));
+  window.__mockEvents.emit("notifications.changed", { available: true, items });
+  try {
+    if (!(await window.__gw.until(() => document.querySelectorAll(".lock-note").length === 5, 3000))) return ["K4: the 5 notification cards never showed on the lock face"];
+    await window.__gw.settled();
+    await window.__gw.frames(8);
+    const fails = [];
+    const shadow = getComputedStyle(document.querySelector(".lock-note")).boxShadow;
+    if (shadow === "none") fails.push("K4: the lock cards have no shadow (the theme's --lift overridden by the face's lift)");
+    if (lockTopOf(sent.at(-1)) == null) fails.push(`K4: no glass regions for the cards at rest (last set: ${sent.at(-1) ?? "none"})`);
+    const from = sent.length;
+    const { tops, released } = await lockSwipeUp(sent);
+    if (!asked) fails.push("K4: a swipe up 36% of the screen, held, didn't ask the unlock");
+    const during = sent.slice(from);
+    fails.push(...lockGlassFails(during, tops, sent.at(-1), sent.slice(released)));
+    window.__lockGlass = `${during.length} region sets over the unlock, ${during.filter((t) => lockTopOf(t) != null).length} with cards, ${tops.length} card tops sampled, ${sent.length - released} sets after the release (tops ${sent.slice(released).map(lockTopOf).map((y) => (y == null ? "-" : Math.round(y))).join(" ")}), last "${sent.at(-1)?.split(" ").slice(0, 3).join(" ")}"; shadow ${shadow.slice(0, 40)}`;
+    console.warn(`[gate] lock-unlock-glass: ${window.__lockGlass}`);
+    return fails;
+  } finally {
+    powos.lock.unlock = unlock;
+    undo();
+  }
+}
+
 /**
  * WS1 (10-31 15:37: home's surface re-made, then no "w.f" for ~9 s until the watchdog reloaded home): with the page's
  * rAF held (a WebView that paused it while hidden), a visibilitychange to hidden and back sends the windows' geometry
@@ -10269,6 +10377,16 @@ try {
         return fails;
       })));
   }
+  // K4: the lock cards' live blur goes with them on the unlock swipe, nothing left behind. Folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=lock`, `lock-unlock-glass-${label}`, viewport).then((r) => whenReady(r, async () => {
+        // Its helpers as the page's globals (an evaluated function carries no closure).
+        await r.page.evaluate([lockGlassOn, lockTopOf, lockSwipeUp, lockGlassFails].map(String).join("\n"));
+        const fails = await r.page.evaluate(lockUnlockGlassScene);
+        console.log(`     lock-unlock-glass-${label}: ${await r.page.evaluate(() => window.__lockGlass).catch(() => "?")}`);
+        return fails;
+      })));
   // TI1: tiled windows' bars, the w.f touch rects, the divider's pill (the user's layout, 10-31 15:08, unfolded).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "tile-bars-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tileBarsScene(r))));
