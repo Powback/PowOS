@@ -15,6 +15,12 @@ package dev.omalauncher.shell
  * [RELOAD_MS] after that, the page is reloaded ([Act.RELOAD]: reported, the sender starts again) and the watch backs
  * off [BACKOFF_MS] - once per stall, never a reload loop. 10-31 15:37 (the old 2 s steps on a 2 s heartbeat): ~9 s
  * from the stall to windows back; now a rebind at 1.5 s, a reload no sooner than 4 s.
+ *
+ * Under memory pressure ([trimmed]: the system's onTrimMemory, 11-02 05:07-05:23 the idle phone at ~49 MB free, the
+ * low-memory killer firing) a slow page is not a broken one: Chromium is trimming and swapping, and a reload throws the
+ * page away and allocates a new one - more pressure, the next stall, another reload. Within [PRESSURE_MS] of a trim a
+ * stall that is due a reload is rebound again instead ([Act.STALL] every [RELOAD_MS]): the windows keep their last
+ * geometry and come back with the page's next "w.f"; a page still silent once the pressure passed is reloaded as before.
  */
 internal class RenderWatch {
     enum class Act { NONE, PROBE, STALL, RELOAD }
@@ -25,6 +31,17 @@ internal class RenderWatch {
     var stalledAt = 0L
         private set
     private var backoffUntil = 0L
+
+    /** The last memory trim (uptime ms; 0: none). */
+    private var trimmedAt = 0L
+
+    /** The system asked the app to trim memory at [now] (uptime ms): no reload for [PRESSURE_MS] from here. */
+    fun trimmed(now: Long) {
+        trimmedAt = now
+    }
+
+    /** Whether [now] is within [PRESSURE_MS] of the last trim. */
+    fun underPressure(now: Long) = trimmedAt != 0L && now - trimmedAt < PRESSURE_MS
 
     /**
      * One look at [now] (uptime ms): [live] windows showing their app (not full screen), [homeShown] (home's page on a
@@ -40,7 +57,7 @@ internal class RenderWatch {
         if (resting(now, live, homeShown) || answered(lastFrame)) clear()
         if (resting(now, live, homeShown) || now - lastFrame < PROBE_MS) return Act.NONE
         return when {
-            stalledAt != 0L -> due(now, stalledAt, RELOAD_MS) { reload(now) }
+            stalledAt != 0L -> due(now, stalledAt, RELOAD_MS) { afterStall(now) }
             probedAt != 0L -> due(now, probedAt, REBIND_MS) { Act.STALL.also { stalledAt = now } }
             else -> Act.PROBE.also { probedAt = now }
         }
@@ -64,6 +81,9 @@ internal class RenderWatch {
         after: Long,
         act: () -> Act,
     ): Act = if (now - since >= after) act() else Act.NONE
+
+    /** A stall's rebind unanswered: rebound again under memory pressure, else the page reloaded. */
+    private fun afterStall(now: Long): Act = if (underPressure(now)) Act.STALL.also { stalledAt = now } else reload(now)
 
     private fun reload(now: Long): Act {
         clear()
@@ -91,6 +111,21 @@ internal class RenderWatch {
 
         /** After a reload, no look for this long: the page boots and its sender starts. */
         const val BACKOFF_MS = 30_000L
+
+        /** After a memory trim, this long with no reload: a stall is rebound (geometry kept), never the page dropped. */
+        const val PRESSURE_MS = 60_000L
+
+        /**
+         * Whether onTrimMemory's [level] means memory is short: RUNNING_LOW / RUNNING_CRITICAL (the app in front, the
+         * system killing others) or BACKGROUND and up; not RUNNING_MODERATE or UI_HIDDEN (only "your UI went away").
+         */
+        fun isPressure(level: Int) = level == TRIM_RUNNING_LOW || level == TRIM_RUNNING_CRITICAL || level >= TRIM_BACKGROUND
+
+        // android.content.ComponentCallbacks2's levels (constants, so the JVM test needs no Android).
+        const val TRIM_RUNNING_LOW = 10
+        const val TRIM_RUNNING_CRITICAL = 15
+        const val TRIM_UI_HIDDEN = 20
+        const val TRIM_BACKGROUND = 40
     }
 }
 

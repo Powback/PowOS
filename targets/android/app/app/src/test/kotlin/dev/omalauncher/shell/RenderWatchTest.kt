@@ -90,4 +90,52 @@ class RenderWatchTest {
         assertEquals(ConsumerCheck.Act.REBIND, ConsumerCheck.step(closed = false, handle = 0, starting = false))
         assertEquals(ConsumerCheck.Act.STARTING, ConsumerCheck.step(closed = false, handle = 0, starting = true))
     }
+
+    @Test
+    fun underMemoryPressureAStallIsReboundNotReloaded() {
+        // 11-02 05:07: the low-memory killer firing, the page slow; a reload would allocate a whole new page.
+        val w = RenderWatch()
+        w.trimmed(9_000)
+        assertEquals(Act.PROBE, w.step(10_000, 1, true, 0))
+        assertEquals(Act.STALL, w.step(10_000 + REBIND_MS, 1, true, 0))
+        var t = 10_000 + REBIND_MS
+        val end = 9_000 + RenderWatch.PRESSURE_MS
+        var stalls = 0
+        while (t + RenderWatch.WATCH_MS < end) {
+            t += RenderWatch.WATCH_MS
+            val a = w.step(t, 1, true, 0)
+            assertTrue("no reload under pressure at $t", a != Act.RELOAD)
+            if (a == Act.STALL) stalls++
+        }
+        // Rebound every RELOAD_MS meanwhile (the windows keep their geometry, the page asked again).
+        assertTrue(stalls >= 10)
+        // The page answers: a new watch, nothing to do.
+        assertEquals(Act.NONE, w.step(t + 1, 1, true, t))
+    }
+
+    @Test
+    fun aPageStillSilentAfterThePressurePassedIsReloadedOnce() {
+        val w = RenderWatch()
+        w.trimmed(1)
+        var t = 1_000L
+        var reloads = 0
+        while (t < RenderWatch.PRESSURE_MS + 10_000) {
+            if (w.step(t, 1, true, 0) == Act.RELOAD) {
+                reloads++
+                assertTrue(t >= 1 + RenderWatch.PRESSURE_MS)
+            }
+            t += RenderWatch.WATCH_MS
+        }
+        assertEquals(1, reloads)
+    }
+
+    @Test
+    fun onlyRealPressureLevelsCount() {
+        assertTrue(RenderWatch.isPressure(RenderWatch.TRIM_RUNNING_LOW))
+        assertTrue(RenderWatch.isPressure(RenderWatch.TRIM_RUNNING_CRITICAL))
+        assertTrue(RenderWatch.isPressure(RenderWatch.TRIM_BACKGROUND))
+        assertTrue(RenderWatch.isPressure(80))
+        assertTrue(!RenderWatch.isPressure(5))
+        assertTrue(!RenderWatch.isPressure(RenderWatch.TRIM_UI_HIDDEN))
+    }
 }
