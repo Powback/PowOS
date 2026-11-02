@@ -344,10 +344,11 @@ run)
       [ $wrc -ge 128 ] && echo "window-render: FAIL (killed after ${WINDOW_GATE_TIMEOUT_S:-240} s, rc $wrc)" >> "$wl"
     else wrc=1; echo "window-render: FAIL (verify/window-render.sh missing or not copied)" >> "$wl"; fi
     grep -q '^window-render: ' "$wl" || echo "window-render: FAIL (no verdict, rc $wrc)" >> "$wl"
-    # rc 2 = NOT JUDGED (the phone isn't Awake: the hidden display goes dark with the screen). Neither a pass nor a skip
+    # rc 2 = NOT JUDGED (the phone isn't Awake: the hidden display goes dark with the screen; or the user acted -
+    # touched it during the Linux step, opened/closed a window). Neither a pass nor a skip
     # that lets the ship through: the caller keeps its requests and retries every WINDOW_WAIT_S (60) s, no cap.
     if [ $wrc = 2 ]; then
-      echo "$(date '+%F %T') ${t:0:9} $what window check waiting for an awake phone ($(grep -m1 '^window-render: NOT JUDGED' "$wl" | cut -c17-80))" >> "$Q/shipped.log"
+      echo "$(date '+%F %T') ${t:0:9} $what window check waiting for an awake, idle phone ($(grep -m1 '^window-render: NOT JUDGED' "$wl" | cut -c17-80))" >> "$Q/shipped.log"
       echo "$(date +%T) ${t:0:9}: window check waiting for an awake phone - its requests are kept, retried in ${WINDOW_WAIT_S:-60} s (log $wl)"
       return 2
     fi
