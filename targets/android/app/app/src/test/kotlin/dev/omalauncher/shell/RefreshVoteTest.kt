@@ -81,4 +81,57 @@ class RefreshVoteTest {
         assertFalse(v.touch(false, 0))
         assertEquals(0L, v.releaseAt)
     }
+
+    /**
+     * A shell gesture end to end (page swipe, launcher pull, shade pull, switcher): 120 from the finger's down, held
+     * through the fling/settle the page animates after the up (refresh.ts "boost" while its transition runs), given
+     * back IDLE_MS after the settle lands - not at the up, not before the settle ends.
+     */
+    @Test
+    fun aGestureIsHighFromItsDownThroughItsSettle() {
+        val v = RefreshVote()
+        assertTrue(v.touch(true, 0))
+        assertTrue(v.move(16))
+        assertTrue(v.move(400))
+        // The up starts the settle (a 600 ms transition): the page holds while it runs.
+        assertTrue(v.touch(false, 450))
+        assertTrue(v.hold("page", true, 452))
+        assertEquals(0L, v.releaseAt)
+        assertTrue(v.poll(450 + IDLE_MS))
+        assertTrue(v.poll(1_050))
+        // Landed: the tail, then idle.
+        assertTrue(v.hold("page", false, 1_050))
+        assertTrue(v.poll(1_050 + IDLE_MS - 1))
+        assertFalse(v.poll(1_050 + IDLE_MS))
+    }
+
+    /** A gesture the host takes mid-way (WebWindows' window drag): its cancel isn't the finger's up - the moves keep it high. */
+    @Test
+    fun aTakenGestureStaysHighUnderTheFinger() {
+        val v = RefreshVote()
+        v.touch(true, 0)
+        // The page's cancel when the host took the gesture.
+        v.touch(false, 100)
+        assertFalse(v.touching)
+        assertTrue(v.move(116))
+        assertTrue(v.touching)
+        assertEquals(0L, v.releaseAt)
+        // Seconds of drag: still high, nothing counting down.
+        for (t in 132L..5_000L step 16) assertTrue(v.move(t))
+        assertTrue(v.poll(5_000))
+        v.touch(false, 5_010)
+        assertTrue(v.poll(5_010 + IDLE_MS - 1))
+        assertFalse(v.poll(5_010 + IDLE_MS))
+    }
+
+    /** Moves under a finger already counted change nothing (no re-arming, no release). */
+    @Test
+    fun movesAloneNeverReleaseOrRestartTheCount() {
+        val v = RefreshVote()
+        v.touch(true, 0)
+        v.move(10)
+        assertEquals(0L, v.releaseAt)
+        v.touch(false, 20)
+        assertEquals(20 + IDLE_MS, v.releaseAt)
+    }
 }

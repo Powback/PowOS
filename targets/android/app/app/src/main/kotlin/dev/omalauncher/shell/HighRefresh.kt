@@ -62,6 +62,8 @@ internal class HighRefresh(
     private fun touched(e: MotionEvent) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> set(vote.touch(true, SystemClock.uptimeMillis()))
+            // A move after a cancel the finger didn't make (a gesture the host took, RefreshVote.move); free otherwise.
+            MotionEvent.ACTION_MOVE -> if (!vote.touching) set(vote.move(SystemClock.uptimeMillis()))
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> set(vote.touch(false, SystemClock.uptimeMillis()))
         }
     }

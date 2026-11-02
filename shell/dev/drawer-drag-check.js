@@ -79,3 +79,55 @@ export async function drawerDragRenders() {
   return fails;
 }
 
+
+/**
+ * HZ-VOTE (perf-1793639664326, 11-02: the 120 Hz vote must hold from a gesture's touchstart through its settle): the
+ * launcher's drawer settle after the finger lets go is a Web Animation (gesture.ts "drawer"), which fires no
+ * transition/animation event - refresh.ts must still tell the host ("boost 1" to PowosNative) while it plays and give
+ * it back ("boost 0") after it lands plus its tail. The scene's page has a recording PowosNative (gate.mjs).
+ */
+export async function drawerSettleHoldsRefresh() {
+  const S = await window.__gw.mod("./state.ts");
+  const G = await window.__gw.mod("./ui/gesture.ts");
+  const log = window.__nativeMsgs;
+  const fails = [];
+  if (!log) return ["HZ-VOTE: no recording PowosNative on the page (gate.mjs evaluateOnNewDocument)"];
+  await window.__gw.settled();
+  await drawerDrag();
+  await window.__gw.sleep(800);
+  const { H, fire } = drawerDragTouch();
+  const last = (t) => log.filter(([at]) => at <= t).at(-1)?.[1] ?? "none";
+  let y = H * 0.7;
+  fire("touchstart", y);
+  await window.__gw.frames(1);
+  for (let i = 0; i < 16; i++) {
+    y -= 8;
+    fire("touchmove", y);
+    await window.__gw.frames(1);
+  }
+  const before = performance.now();
+  const idleBefore = last(before);
+  const busy = document.getAnimations().filter((a) => a.playState === "running").map((a) => `${a.id || a.animationName || a.transitionProperty}:${a.effect?.target?.className?.toString().slice(0, 24)}`);
+  // Back down part way, slowly (no fling): the release settles the drawer shut from there, on its Web Animation.
+  for (let i = 0; i < 8; i++) {
+    y += 8;
+    fire("touchmove", y);
+    await window.__gw.frames(1);
+  }
+  fire("touchend", y);
+  const end = performance.now();
+  await window.__gw.sleep(G.SETTLE_MS / 3);
+  const mid = performance.now();
+  const drawerAnims = document.getAnimations().filter((a) => a.id === "drawer").map((a) => `${a.playState}@${Math.round(a.currentTime ?? -1)}/${Math.round(Number(a.effect?.getComputedTiming().endTime))}`);
+  const settling = drawerAnims.some((x) => x.startsWith("running"));
+  const during = last(mid);
+  await window.__gw.sleep(G.SETTLE_MS + 300 + 400);
+  const after = last(performance.now());
+  window.__hzVote = `before release: ${idleBefore}; settle running ${settling} at +${Math.round(mid - end)} ms: ${during}; landed + tail: ${after}; msgs ${JSON.stringify(log.map(([t, m]) => [Math.round(t - end), m]).slice(-6))}; running at release ${JSON.stringify(busy.slice(0, 8))}; drawer anims after ${JSON.stringify(drawerAnims.slice(0, 4))}; drawer ${S.drawer.value}`;
+  console.warn(`[gate] drawer-settle-refresh: ${window.__hzVote}`);
+  if (!settling) fails.push(`HZ-VOTE: no running "drawer" Web Animation after the release - the scene didn't drive a settle (${window.__hzVote})`);
+  else if (during !== "boost 1") fails.push(`HZ-VOTE: the drawer's settle ran with the 120 Hz vote off (${window.__hzVote})`);
+  if (after !== "boost 0") fails.push(`HZ-VOTE: the vote wasn't given back after the settle landed (${window.__hzVote})`);
+  if (S.drawer.value !== 0) S.drawer.value = 0;
+  return fails;
+}
