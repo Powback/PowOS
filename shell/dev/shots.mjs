@@ -174,8 +174,8 @@ const UNITS_SCENE =
   "const M = await U('./ui/units.tsx'); const now = Date.now(); const R = []; const hosts = [['phone', 41, 14, 'drift'], ['phone-android', 23, 9, 'clean'], ['mac', 37, 21, 'drift'], ['colima', 58, 44, 'clean'], ['powstation', 12, 7, 'clean']];" +
   " for (const [h, n, run, st] of hosts) { R.push({ key: h + '/_check', host: h, id: '_check', name: '', kind: '', owner: '', purpose: 'powos-cdn-sync', status: st, memKb: 0, cpuPermille: 0, limits: '', autosleep: '', orphan: false, decide: '', updated: now - 6 * 60e3 });" +
   " for (let i = 0; i < n; i++) R.push({ key: h + '/u' + i, host: h, id: 'u' + i, name: 'unit-' + i, kind: 'service', owner: 'powos', purpose: 'sample', status: i < run ? 'running' : i % 3 ? 'stopped' : 'asleep', memKb: 40000 + i * 9000, cpuPermille: i * 3, limits: '', autosleep: '', orphan: i === n - 1 && h === 'mac', decide: '', updated: now }); }" +
-  " M.units.value = R; S.page.value = -1; await sleep(300); [...document.querySelectorAll('.ai-unit-host')].find((b) => b.textContent.startsWith('▸mac'))?.click(); await sleep(200);" +
-  " document.querySelector('.ai-unit-host')?.closest('.ai-work-list').scrollIntoView(); await sleep(100);";
+  " M.units.value = R; S.page.value = -1; await sleep(300); document.querySelector('.ai-unit-card[data-host=mac] .ai-unit-host')?.click(); await sleep(200);" +
+  " document.querySelector('.ai-unit-host')?.closest('.ai-devices').scrollIntoView(); await sleep(100);";
 
 /** The work board as it was live (dev/sample-board.json, ages as offsets), for PowOS AI's page. */
 const BOARD = (() => {
@@ -519,6 +519,7 @@ const SCENES = [
   // Needs attention; folded sideways the nav as icons; folded portrait the chat + strip as before.
   ["ai-panes-chat", "home", LOOK + "{" + FLEET_SETUP + OTHER_PROJECT + "}", "wallpaper", undefined, { ...SIZES, "folded-land": LAND_SIZES["folded-land"] }],
   ["ai-panes-agents", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'fleet'; await sleep(400);", "wallpaper", undefined, { unfolded: SIZES.unfolded }],
+  ["ai-panes-devices", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'devices'; await sleep(300); {" + UNITS_SCENE.replace(" S.page.value = -1;", "") + "}", "wallpaper", undefined, { unfolded: SIZES.unfolded }],
   ["ai-panes-progress", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'progress'; await sleep(600);", "wallpaper", undefined, { unfolded: SIZES.unfolded }],
   // Progress (aiprogress.tsx, the user 15:12): the ring and the area cards, the first one opened; folded and unfolded.
   ["ai-progress-open", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'progress'; await sleep(700); document.querySelector('.ai-screen .aip-area-row')?.click(); await sleep(700);", "wallpaper"],
