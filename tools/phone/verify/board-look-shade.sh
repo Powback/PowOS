@@ -190,15 +190,26 @@ PY
 fi
 
 # --- cc-design ------------------------------------------------------------------------------------------------------
-if [ "$CASE" = cc-design ]; then
-  shut; pullbar 85 "status-bar pull on the right: the control center"
-  # Read at once: the categories' entry animations are running now.
-  f=$(sev '(()=>{const p=document.querySelector(".notif-panel.shown");if(!p)return JSON.stringify({p:false});const cs=getComputedStyle(p),rc=getComputedStyle(document.documentElement);
+CCJS='(()=>{const p=document.querySelector(".notif-panel.shown");if(!p)return JSON.stringify({p:false});const cs=getComputedStyle(p),rc=getComputedStyle(document.documentElement);
   const cats=[...p.querySelectorAll(".cc3-sec, .cc-cell-subs, .cc-subs > .cc-sub")].filter(e=>e.getBoundingClientRect().height>0);
   return JSON.stringify({p:true,bf:cs.backdropFilter||cs.webkitBackdropFilter||"none",bg:cs.backgroundColor,bgi:cs.backgroundImage,
   shade:rc.getPropertyValue("--shade-blur-native").trim(),back:rc.getPropertyValue("--backdrop-blur-native").trim(),
   cats:cats.length,anim:cats.filter(e=>getComputedStyle(e).animationName==="cc-subs-in").length,
-  running:cats.filter(e=>e.getAnimations().some(a=>a.playState==="running"||a.playState==="pending")).length})})()')
+  running:cats.filter(e=>e.getAnimations().some(a=>a.playState==="running"||a.playState==="pending")).length})})()'
+if [ "$CASE" = cc-design ]; then
+  shut; pullbar 85 "status-bar pull on the right: the control center"
+  # Read at once: the categories' entry animations are running now.
+  f=$(sev "$CCJS")
+  if grep -q '"cats":0' <<<"$f"; then
+    # The user's layout (v3's flat grid) has no categories: the categories layout ("tiles") for this read only, put back.
+    CCL0=$(sev 'importShim("./state.ts").then(S=>S.ccV3.value+"|"+localStorage.getItem("powos.ccLayout"))'); log "no categories in the CC layout '$CCL0' - 'tiles' for this read"
+    case_restore() { [ -n "${CCL0:-}" ] || return 0; local v=${CCL0%%|*} st=${CCL0#*|}
+      sev "importShim('./state.ts').then(S=>{S.ccV3.value='$v';if('$st'==='null')localStorage.removeItem('powos.ccLayout');return 'ok'})" >/dev/null
+      log "CC layout back: $(sev 'importShim("./state.ts").then(S=>S.ccV3.value+"|"+localStorage.getItem("powos.ccLayout"))') (was $CCL0)"; CCL0=; }
+    note "the CC layout in use ('${CCL0%%|*}') shows no categories; read with the categories layout ('tiles'), restored after"
+    shut; sev "importShim('./state.ts').then(S=>{S.ccV3.value='tiles';return 'ok'})" >/dev/null; sleep 0.5
+    pullbar 85 "status-bar pull on the right: the control center (categories layout)"; f=$(sev "$CCJS")
+  fi
   step cc "the control center just opened: its categories arriving, the panel on THE backdrop"
   log "cc facts: $f"
   python3 - "$f" <<'PY' > "$OUT/cc.txt"
@@ -215,7 +226,7 @@ if f["shade"] != f["back"]: bad.append(f"--shade-blur-native {f['shade']} isn't 
 print(("FAIL " + "; ".join(bad)) if bad else f"PASS {f['cats']} categories with cc-subs-in ({f['running']} still animating at the read); one backdrop ({f['back']}), no panel blur/tint")
 PY
   r=$(cat "$OUT/cc.txt"); case $r in PASS*) pass "${r#PASS }" ;; *) fail "${r#FAIL }" ;; esac
-  shut
+  shut; case_restore
 fi
 
 # --- ai-keyboard ----------------------------------------------------------------------------------------------------
