@@ -12,7 +12,7 @@ import { setOnRendered, startScan, stopScan, topRenders } from "./renderscan.ts"
 const FLASH_MS = 700, MAX_FLASHES = 400, LIST_MS = 500;
 type Flash = { x: number; y: number; w: number; h: number; name: string; count: number; needless: boolean; born: number };
 let cv: HTMLCanvasElement | null = null, ctx: CanvasRenderingContext2D | null = null, list: HTMLElement | null = null;
-let io: IntersectionObserver | null = null, raf = 0, listTimer = 0, on = false;
+let io: IntersectionObserver | null = null, raf = 0, listTimer = 0, on = false, outlined = 0;
 const flashes = new Map<Element, Flash>(), waiting = new Map<Element, { name: string; count: number; needless: boolean }>();
 let colors = { ok: "", bad: "", text: "", bg: "" };
 
@@ -47,6 +47,7 @@ function onRects(entries: IntersectionObserverEntry[]) {
     waiting.delete(e.target);
     const r = e.boundingClientRect;
     if (!w || !r.width || !r.height) continue;
+    outlined++;
     flashes.set(e.target, { x: r.x, y: r.y, w: r.width, h: r.height, name: w.name, count: w.count, needless: w.needless, born: now });
   }
   if (!raf && flashes.size) raf = requestAnimationFrame(draw);
@@ -111,7 +112,9 @@ function unmount() {
 export function setOverlay(v: boolean) {
   if (v === on) return;
   on = v;
-  if (v) { startScan("overlay"); mount(); setOnRendered(rendered); }
+  if (v) { outlined = 0; startScan("overlay"); mount(); setOnRendered(rendered); }
   else { setOnRendered(null); unmount(); stopScan("overlay"); }
 }
 export function overlayOn() { return on; }
+/** How many outlines this page's overlay has drawn since it went on (the gate's proof it highlights renders here). */
+export function overlayOutlined() { return outlined; }
