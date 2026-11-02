@@ -197,13 +197,13 @@ priv() {
   a push "$apk" /system/priv-app/PowOS/PowOS.apk >/dev/null 2>&1 && a push "$x" /system/etc/permissions/privapp-permissions-com.powos.app.xml >/dev/null 2>&1 || die "push to /system failed"
   a shell 'chmod 644 /system/priv-app/PowOS/PowOS.apk /system/etc/permissions/privapp-permissions-com.powos.app.xml; chcon u:object_r:system_file:s0 /system/priv-app/PowOS /system/priv-app/PowOS/PowOS.apk /system/etc/permissions/privapp-permissions-com.powos.app.xml'
 }
-# The recents slot (targets/android/system-module/overlays-disabled/recents, the static framework RRO naming PowOS
+# The recents slot (targets/android/system-module/overlays/recents, the static framework RRO naming PowOS
 # config_recentsComponentName): with it PowOS holds the recents role's permissions (MANAGE_ACTIVITY_TASKS: every
 # task's window, READ_FRAME_BUFFER ...) as on the phone. Compiled and signed as build-module.sh does (its overlay key).
 recents_overlay() {
   local o=$STATE/overlay keys=$HOME/.local/share/powos
   [ -f "$keys/overlay.jks" ] || die "no $keys/overlay.jks (build-module.sh makes it once)"
-  rm -rf "$o"; mkdir -p "$o"; cp -R "$ROOT/targets/android/system-module/overlays-disabled/recents" "$o/recents"; cp "$keys/overlay.jks" "$o/"
+  rm -rf "$o"; mkdir -p "$o"; cp -R "$ROOT/targets/android/system-module/overlays/recents" "$o/recents"; cp "$keys/overlay.jks" "$o/"
   docker run --rm -v "$o:/t" --entrypoint bash "$IMAGE" -c 'set -e; B=/opt/android-sdk/build-tools/35.0.0; o=/t/recents
     $B/aapt2 compile --dir $o/res -o $o/res.zip
     $B/aapt2 link -o $o/unsigned.apk -I /opt/android-sdk/platforms/android-36/android.jar --manifest $o/AndroidManifest.xml $o/res.zip
