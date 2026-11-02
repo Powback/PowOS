@@ -1874,7 +1874,7 @@ async function switcherSplitPairCheck(layout) {
 async function switcherHomeSwipeCheck(page) {
   const up = await page.evaluate(switcherUpForHomeSwipe);
   if (up.length) return up;
-  const { mid, gap, dur } = await page.evaluate(homeSwipeMidFrames, 700);
+  const { mid, gap, dur } = await page.evaluate(homeSwipeMidFrames, 3000);
   const fails = await page.evaluate(switcherGoneFails);
   // A page starved of frames (11-02: the gate's browser at 721 s, a frame every ~150 ms) can't draw 3 mid-collapse
   // frames of a ~300 ms fade: there the fade is proven by time - a mid frame drawn and the collapse a real animation of
@@ -1899,21 +1899,43 @@ async function switcherUpForHomeSwipe() {
   return [];
 }
 
-/** In the page: the home swipe let go (what Switcher.close sends), then frames over [ms] with the closing fade under way. */
+/**
+ * In the page: the home swipe let go (what Switcher.close sends), then the collapse sampled over its own lifetime - from
+ * its fades' start (an animation or transition on the cards or the scrim, waited for up to [ms]) to their
+ * Animation.finished, every frame between counted. Not a fixed 700 ms from the send: on a loaded gate the fade hadn't
+ * started by then ("fade 0 ms", 11-02), so a window on the clock saw 0 frames of a fade that ran after it. The switcher
+ * settled first, so the open's own fade can't be taken for the close's. No fade started: dur 0 (the close jumped).
+ */
 async function homeSwipeMidFrames(ms) {
+  const G = window.__gw;
   const other = document.querySelector(".recents .task:not(:first-child)");
   const scrim = document.querySelector(".recents .recents-scrim");
-  window.__mockEvents.emit("recents.end", { to: "home" });
+  await G.settled(() => true, ".recents");
+  const fades = () => [...other.getAnimations(), ...scrim.getAnimations()].filter((a) => a.playState !== "finished");
   let mid = 0, dur = 0;
-  const t0 = performance.now(), stamps = [t0];
-  while (performance.now() - t0 < ms) {
-    await new Promise((ok) => requestAnimationFrame(() => ok()));
+  const stamps = [];
+  const sample = () => {
     stamps.push(performance.now());
-    // The collapse's own fades (transitions or animations on the cards and the scrim) - their longest, as they run.
-    for (const a of [...other.getAnimations(), ...scrim.getAnimations()]) dur = Math.max(dur, Number(a.effect?.getComputedTiming().endTime) || 0);
+    for (const a of fades()) dur = Math.max(dur, Number(a.effect?.getComputedTiming().endTime) || 0);
     const o = parseFloat(getComputedStyle(other).opacity);
     const so = parseFloat(getComputedStyle(scrim).opacity);
     if (o > 0.02 && o < 0.98 && so > 0.01 && so < 0.44) mid++;
+  };
+  window.__mockEvents.emit("recents.end", { to: "home" });
+  const t0 = performance.now();
+  // Every frame from the send on: a mid-fade frame before the wait sees the fade still counts.
+  while (!fades().length && performance.now() - t0 < ms) {
+    await G.frames(1);
+    sample();
+  }
+  for (let running = fades(); running.length; running = fades()) {
+    const over = Promise.all(running.map((a) => a.finished.catch(() => {})));
+    let done = false;
+    over.then(() => (done = true));
+    while (!done) {
+      await G.frames(1);
+      sample();
+    }
   }
   const gaps = stamps.slice(1).map((t, i) => t - stamps[i]).sort((x, y) => x - y);
   return { mid, gap: gaps[gaps.length >> 1] ?? 0, dur };
@@ -7329,7 +7351,7 @@ function lockTopOf(t) {
  * K4's swipe on the lock face: up 0.36 of the height (just past the unlock point: the lower cards still on the screen)
  * in 12 frames, held, let go (past the unlock point, no flick); the
  * cards' tops (cut at the screen's top, as their regions are) sampled every frame meanwhile, until the face has slid
- * away. Returns those tops and how many region sets had been sent at the release.
+ * away. Returns those tops, how many region sets had been sent at the release, and the slide out's frames (lockSlideFrames).
  */
 async function lockSwipeUp(sent) {
   const face = document.querySelector(".lock");
@@ -7352,14 +7374,41 @@ async function lockSwipeUp(sent) {
   await window.__gw.sleep(150);
   ev("pointerup", y0 - innerHeight * 0.36);
   const released = sent.length;
+  const slide = await lockSlideFrames(sent);
   await window.__gw.until(() => getComputedStyle(face).opacity === "0" && !face.getAnimations().length, 3000);
   await window.__gw.frames(10);
   sampling = false;
-  return { tops, released };
+  return { tops, released, ...slide };
 }
 
-/** K4's verdict on the region sets sent over the unlock ([during]) against the card's tops drawn ([tops]). */
-function lockGlassFails(during, tops, last, after) {
+/**
+ * The slide out after the release, over its own lifetime: the --lock-lift transition (lock-settling) from its start to
+ * its Animation.finished - the frames drawn meanwhile that moved a card still on the screen: each owes a region set with
+ * cards (lockGlassFails). Not a time: on a loaded gate
+ * (GATE_THROTTLE=20) the ~300 ms slide drew 2-3 frames, so a count from the release to a timer saw 0-2 sets though the
+ * blur followed every frame there was (11-02). No transition at all (slideMs -1): the face jumped away, a failure.
+ */
+async function lockSlideFrames(sent) {
+  const G = window.__gw;
+  const lift = () => document.documentElement.getAnimations().find((a) => a.transitionProperty === "--lock-lift");
+  await G.until(lift, 2000);
+  const anim = lift();
+  // The cards' boxes on the screen (cut at its top, as their regions are): a frame owes a set when they moved in it.
+  const boxes = () => [...document.querySelectorAll(".lock-note")].map((c) => c.getBoundingClientRect()).filter((r) => r.bottom > 0).map((r) => Math.round(Math.max(0, r.top))).join();
+  let frames = 0, done = !anim, was = boxes();
+  anim?.finished.then(() => (done = true), () => (done = true));
+  while (!done) {
+    await G.frames(1);
+    const now = boxes();
+    if (!done && now && now !== was) frames++;
+    was = now;
+  }
+  await G.frames(2);
+  return { slideFrames: frames, slideMs: anim ? Number(anim.effect?.getComputedTiming().endTime) || 0 : -1 };
+}
+
+/** K4's verdict on the region sets sent over the unlock ([during]) against the card's tops drawn ([tops]); [after] the release, [last] at the end. */
+function lockGlassFails(during, tops, { last, after, slideFrames, slideMs }) {
   const fails = [];
   // A card past the screen's top: its region is cut there (y 0).
   const stale = during.map(lockTopOf).filter((y) => y != null && !tops.some((t) => Math.abs(t - y) < 1.5));
@@ -7368,7 +7417,10 @@ function lockGlassFails(during, tops, last, after) {
   if (moving < 8) fails.push(`K4: only ${moving} region sets while the cards moved (drag + slide out): the blur didn't follow them`);
   // Let go, the cards still on the screen slide off it over the settle: their blur with them, frame by frame.
   const sliding = after.filter((t) => lockTopOf(t) != null).length;
-  if (sliding < 3) fails.push(`K4: only ${sliding} region sets with cards over the slide out: the blur stayed while the cards slid away`);
+  // One per frame of the slide that moved a card on the screen, up to 3: a starved page's 2-frame slide owes 2, not 3.
+  if (slideMs < 0) fails.push("K4: no slide out after the release (no --lock-lift transition): the face jumped away");
+  const owed = Math.min(3, slideFrames);
+  if (sliding < owed) fails.push(`K4: only ${sliding} region sets with cards over the slide out (${slideFrames} frames moved cards on the screen, ${owed} owed): the blur stayed while the cards slid away`);
   if (lockTopOf(last) != null) fails.push(`K4: blur left behind once the face slid away: last set "${last.slice(0, 80)}"`);
   return fails;
 }
@@ -7398,11 +7450,11 @@ async function lockUnlockGlassScene() {
     if (shadow === "none") fails.push("K4: the lock cards have no shadow (the theme's --lift overridden by the face's lift)");
     if (lockTopOf(sent.at(-1)) == null) fails.push(`K4: no glass regions for the cards at rest (last set: ${sent.at(-1) ?? "none"})`);
     const from = sent.length;
-    const { tops, released } = await lockSwipeUp(sent);
+    const { tops, released, slideFrames, slideMs } = await lockSwipeUp(sent);
     if (!asked) fails.push("K4: a swipe up 36% of the screen, held, didn't ask the unlock");
     const during = sent.slice(from);
-    fails.push(...lockGlassFails(during, tops, sent.at(-1), sent.slice(released)));
-    window.__lockGlass = `${during.length} region sets over the unlock, ${during.filter((t) => lockTopOf(t) != null).length} with cards, ${tops.length} card tops sampled, ${sent.length - released} sets after the release (tops ${sent.slice(released).map(lockTopOf).map((y) => (y == null ? "-" : Math.round(y))).join(" ")}), last "${sent.at(-1)?.split(" ").slice(0, 3).join(" ")}"; shadow ${shadow.slice(0, 40)}`;
+    fails.push(...lockGlassFails(during, tops, { last: sent.at(-1), after: sent.slice(released), slideFrames, slideMs }));
+    window.__lockGlass = `${during.length} region sets over the unlock, ${during.filter((t) => lockTopOf(t) != null).length} with cards, ${tops.length} card tops sampled, ${sent.length - released} sets after the release over a ${Math.round(slideMs)} ms slide of ${slideFrames} frames moving cards (tops ${sent.slice(released).map(lockTopOf).map((y) => (y == null ? "-" : Math.round(y))).join(" ")}), last "${sent.at(-1)?.split(" ").slice(0, 3).join(" ")}"; shadow ${shadow.slice(0, 40)}`;
     console.warn(`[gate] lock-unlock-glass: ${window.__lockGlass}`);
     return fails;
   } finally {
@@ -11753,7 +11805,7 @@ try {
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html?mode=lock`, `lock-unlock-glass-${label}`, viewport).then((r) => whenReady(r, async () => {
         // Its helpers as the page's globals (an evaluated function carries no closure).
-        await r.page.evaluate([lockGlassOn, lockTopOf, lockSwipeUp, lockGlassFails].map(String).join("\n"));
+        await r.page.evaluate([lockGlassOn, lockTopOf, lockSwipeUp, lockSlideFrames, lockGlassFails].map(String).join("\n"));
         const fails = await r.page.evaluate(lockUnlockGlassScene);
         console.log(`     lock-unlock-glass-${label}: ${await r.page.evaluate(() => window.__lockGlass).catch(() => "?")}`);
         return fails;
