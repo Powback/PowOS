@@ -49,10 +49,36 @@ if (!shadeMoved.peek()) {
   }
   shadeMoved.value = "1";
 }
+/**
+ * "Open where the finger starts" (the user, 11-01: "What if we make it like position itself based on where it got
+ * activated ... if I'm on the homepage and I open it by swiping ... close to the bottom, then the notification center
+ * shows up close to the bottom where I like opened it" - then "Or do you think that will break muscle memory? maybe it
+ * should be an option, like a toggle"): "on", or unset = off (the default: the panels where their alignment puts them).
+ * On, the shade and the control center open placed around the height the pull started at (pullAt, the host's
+ * "shade.panel" { y }); a pull from the status bar is at the top, so it opens as before.
+ */
+export const anchorPull = stored("align.anchor", "");
+/**
+ * Where this pull started: the finger's height as a fraction of the screen (0 top .. 1 bottom), or null - a pull with
+ * no start (Settings, a tile's open, an older host) or the toggle off. Set by the shade's page per pull (shade.tsx).
+ */
+export const pullAt = signal<number | null>(null);
+/** The fraction of the screen the anchored content may span at most: a long list still opens near the finger, scrolling. */
+const ANCHOR_SPAN = 0.55;
+/**
+ * The anchored content's top (CSS px from the surface's top): [h] tall, centred on the finger [at] (0..1) in a surface
+ * [height] tall, kept on screen - the status bar's pull (at ~0) opens at the top, one near the foot ends at the foot.
+ */
+export function anchorTop(at: number, h: number, height: number): number {
+  const span = Math.min(h, height * ANCHOR_SPAN);
+  return Math.round(Math.max(0, Math.min(at * height - span / 2, height - span)));
+}
+const toggles: Record<string, { value: string }> = { "align.anchor": anchorPull };
 // A pick on another page (Settings is home's): this page's copy at once.
 addEventListener("storage", (e) => {
   const k = e.key?.replace(/^powos\./, "");
   if (k && own[k]) own[k].value = e.newValue ?? "";
+  else if (k && toggles[k]) toggles[k].value = e.newValue ?? "";
 });
 
 const valid = (v: string, s: AlignSurface, m: AlignMode): Align => ((ALIGNS as string[]).includes(v) ? (v as Align) : (DEFAULT_OF[s] ?? DEFAULT)[m]);

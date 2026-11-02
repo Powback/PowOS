@@ -498,9 +498,10 @@ class ShadeHost(
                 val from = pullable(e.rawX, e.rawY) ?: return false
                 // The status bar's right half pulls the control center, the rest the notifications - as on OnePlus's.
                 // Down on home's body: the notifications, as a stock launcher's.
-                val control = from == From.STATUS_BAR && e.rawX > shadeWm.currentWindowMetrics.bounds.width() * CONTROL_SPLIT
+                val bounds = shadeWm.currentWindowMetrics.bounds
+                val control = from == From.STATUS_BAR && e.rawX > bounds.width() * CONTROL_SPLIT
                 pulling.fromHome = from == From.HOME
-                tell("shade.panel", JSONObject().put("panel", if (control) "control" else "notifications"))
+                tell("shade.panel", panelStart(control, e.rawY, bounds.height()))
                 pulling.down(e)
                 return true
             }
@@ -579,6 +580,19 @@ class ShadeHost(
         behind = amount
         blur.set(if (reload?.reloading == true) 0f else amount)
     }
+
+    /**
+     * "shade.panel" for a pull: which panel, and [y] where the finger went down as a fraction of the screen's height -
+     * the page opens the panel around it when "open where the finger starts" is on (shell ui/align.ts anchorPull).
+     */
+    private fun panelStart(
+        control: Boolean,
+        rawY: Float,
+        height: Int,
+    ): JSONObject =
+        JSONObject()
+            .put("panel", if (control) "control" else "notifications")
+            .put("y", PanelPull.startFraction(rawY, height).toDouble())
 
     /** To the page, kept for a reload's new page while the window shows. */
     private fun tell(

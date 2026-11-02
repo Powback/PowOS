@@ -11277,6 +11277,11 @@ try {
     for (const [name, url, where] of [["folded-launcher-home", "index.html", "home"], ["folded-launcher-pull", "index.html?mode=pull", "pull"]])
       runs.push(open(browser, `${ORIGIN}/${url}`, `align-${name}`, dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async (w, n) => (await importShim("./dev/align-check.js")).alignOpensAtStart(w, n), where, name))));
   }
+  // SA1-SA3 (dev/align-check.js anchorPulls; ask-1a198007bff): "open where the finger starts" - off as before, on the
+  // shade's content around where the pull began (top, middle, near the foot; the left and the right half), folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const label of ["folded", "unfolded"])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, `shade-anchor-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (l) => (await importShim("./dev/align-check.js")).anchorPulls(l), label))));
   // The same in the user's unfolded home: the dock on the right, the pill below it, 821x883 (the phone, 2026-10-28).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-keyboard-side", { width: 821, height: 883 }).then((r) => whenReady(r, () => launcherKeyboardSide(r.page, { width: 821, height: 883 }))));

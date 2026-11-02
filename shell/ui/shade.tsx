@@ -14,17 +14,19 @@ import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import { notif, panel, separatePanels } from "../state.ts";
 import type { PhoneNotification } from "../types.ts";
+import { anchorPull, pullAt } from "./align.ts";
 import { homeGestures, notifDrag, notifOpen, notifShown } from "./gesture.ts";
 import { Actions, NotificationPanel, wideShade } from "./notifications.tsx";
 
 // Which panel the pull brings: the status bar's right half the control center, the rest the notifications - when
 // they're apart (settings); together, it's the one panel wherever the pull starts. Unfolded both show side by side;
 // the half it came from cascades first.
-powos.on(
-  "shade.panel",
-  ({ panel: p }: { panel: "notifications" | "control" }) =>
-    (panel.value = separatePanels.value === "on" || wideShade.value ? p : "notifications"),
-);
+// [y]: where the pull started, a fraction of the screen's height (ShadeHost's finger down) - the panel opens around it
+// when "open where the finger starts" is on (align.ts anchorPull); none (an older host, a tile's open): as aligned.
+powos.on("shade.panel", ({ panel: p, y }: { panel: "notifications" | "control"; y?: number }) => {
+  pullAt.value = anchorPull.value === "on" && typeof y === "number" && Number.isFinite(y) ? Math.max(0, Math.min(1, y)) : null;
+  panel.value = separatePanels.value === "on" || wideShade.value ? p : "notifications";
+});
 powos.on(
   "shade.drag",
   ({ q }: { q: number }) => (notifDrag.value = Math.max(0, Math.min(1, q))),

@@ -10,6 +10,7 @@ import { effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel, separatePanels } from "../state.ts";
 import { alignOf, wideShade } from "./align.ts";
+import { useAnchoredOpen } from "./shadeanchor.ts";
 import { ControlCenter } from "./control.tsx";
 import { Icon } from "./icons.tsx";
 import { animateLayout, closeGap, foldAway } from "./notifmotion.ts";
@@ -547,6 +548,8 @@ export function NotificationPanel() {
     follow();
     return () => (l.removeEventListener("scroll", follow), off());
   }, [together, two, shown]);
+  // Opened where the finger started (align.ts anchorPull): the content around the pull's start (shadeanchor.ts).
+  useAnchoredOpen(panelEl, together, two);
   // Bottom-aligned (ui/align.ts): the newest card nearest the thumb, so a list taller than its column opens scrolled to
   // its foot (newest in view) and scrolls up for more - folded too (its scroll there compacts the control center's card,
   // the sticky ride above). The cards still lay out after the open (the cascade, a group unfolding, more arriving), so

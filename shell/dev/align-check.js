@@ -159,3 +159,65 @@ export async function alignOpensAtStart(where, at) {
   A.alignTry.value = {};
   return fails;
 }
+
+/**
+ * SA1-SA3 (ask-1a198007bff / ask-1a198016ae4, the user 11-01: "position itself based on where it got activated ... if
+ * I open it by swiping ... close to the bottom, then the notification center shows up close to the bottom" - "maybe it
+ * should be an option, like a toggle"): on the shade's page, a pull's start ("shade.panel" { panel, y }) places the
+ * panel's content. SA1: off (the default), a pull near the foot opens where it always did. SA2: on, a pull from the
+ * status bar (the top) opens there too; one from the middle and one near the foot open with the finger's height inside
+ * the content, lower each time, the content on screen. SA3: the same from the left half (notifications) and the right
+ * (the control center). [at]: the run's label.
+ */
+/** The shade shut, then pulled from [panel]'s half at height [y] (0..1) and open: its content's top, or undefined. */
+async function pulledTop(S, panel, y) {
+  S.notif.value = false;
+  await sleep(450);
+  window.__mockEvents.emit("shade.panel", { panel, y });
+  S.notif.value = true;
+  await sleep(700);
+  return document.querySelector(".notif-panel.shown > .panel-body > *")?.getBoundingClientRect().top;
+}
+
+/** A pull from height [y] opened with its content from [ty], after one that opened at [last] ([top0]: off's top): the failures. */
+function aroundFinger({ ty, y, last, top0 }, at) {
+  const H = innerHeight, finger = y * H;
+  const fails = [];
+  if (ty < last + 40) fails.push(`${at}: on, the content starts at ${r0(ty)} - not lower than ${r0(last)}`);
+  if (ty > finger + TOL || finger > ty + H * 0.55 + TOL) fails.push(`${at}: the finger at ${r0(finger)} isn't by the content (from ${r0(ty)})`);
+  if (ty > H * 0.45 + top0 + TOL) fails.push(`${at}: the content starts at ${r0(ty)}, partly off the screen's foot (${H})`);
+  return fails;
+}
+
+/** SA2/SA3 for one half ([panel]): from the top as before ([top0]), then the middle and near the foot, lower each time. */
+async function anchoredHalf(S, panel, top0, at) {
+  const t = await pulledTop(S, panel, 0.01);
+  const fails = Math.abs(t - top0) > 2 ? [`${at}: on, a pull from the top opens at ${r0(t)}, not ${r0(top0)} as before`] : [];
+  let last = t;
+  for (const y of [0.5, 0.9]) {
+    const ty = await pulledTop(S, panel, y);
+    fails.push(...aroundFinger({ ty, y, last, top0 }, `${at} ${y}`));
+    last = ty;
+  }
+  return fails;
+}
+
+export async function anchorPulls(at) {
+  const A = await importShim("./ui/align.ts");
+  const S = await importShim("./state.ts");
+  const was = A.anchorPull.value;
+  const fails = [];
+  A.anchorPull.value = "";
+  if (localStorage.getItem("powos.align.anchor")) fails.push(`${at}: the toggle's off is stored, not unset`);
+  const top0 = await pulledTop(S, "notifications", 0.02);
+  if (top0 == null) return [`${at}: the shade's panel isn't shown`];
+  const off = await pulledTop(S, "notifications", 0.9);
+  if (Math.abs(off - top0) > 2) fails.push(`${at}: off, a pull near the foot moved the panel to ${r0(off)} (from ${r0(top0)})`);
+  A.anchorPull.value = "on";
+  fails.push(...(await anchoredHalf(S, "notifications", top0, `${at} left`)));
+  fails.push(...(await anchoredHalf(S, "control", top0, `${at} right`)));
+  A.anchorPull.value = was;
+  S.notif.value = false;
+  await frames(2);
+  return fails;
+}
