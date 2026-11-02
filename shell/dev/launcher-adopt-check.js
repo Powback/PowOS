@@ -190,6 +190,9 @@ export async function adoptsHome(position, opts = {}) {
   await sleep(300);
   const fails = await openedAdopting(S, opts.button);
   if (S.drawer.value !== 1) fails.push("the launcher didn't open in place");
+  // The frame's open (--p's transition from 0, gesture.ts comeIn) at rest before its rect is measured, not a fixed
+  // sleep: under load the transition starts late and a fixed wait caught it mid-rise (frame top 4-12 px, p ~0.9).
+  await window.__gw.settled(() => document.querySelector(".home > .stage > .launcher-frame"), ".home > .stage");
   fails.push(...backdropFails());
   if (asked.length) fails.push("asked the host's overlay over home");
   if (document.querySelector(".pull-screen")) fails.push("a launcher copy (.pull-screen) on home's page");
