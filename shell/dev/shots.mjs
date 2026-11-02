@@ -369,6 +369,8 @@ const FRICTION =
   " A.boardSeen.value = true; S.chat.value = { busy: false, items: [] }; S.page.value = -1; await sleep(400); S.aiScreen.value = 'friction'; await sleep(300);" +
   " A.board.value = [{ id: 't-gate', title: 'Checks: wait for the Mac to calm down before a gate', status: 'in_progress', owner: 'coder', severity: 1, note: '', project: 'Other' }];" +
   " A.friction.value = rows; await sleep(600);";
+/** The Friction page with more rows than a screen holds (the foot fade's scenes). */
+const FRICTION_LONG = FRICTION.replace(" A.friction.value = rows;", " for (let i = 0; i < 12; i++) rows.push(f('fl' + i, ['ship', 'gate', 'adb', 'git'][i % 4], 'flaky-check', `Check ${i} failed once while the phone was busy`, 12 - i, 'open', (i + 1) * H)); A.friction.value = rows;");
 
 const SCENES = [
   ["chrome-status", "statusbar", "E.emit('chrome.changed', {kind:'status', battery:74, charging:true, network:'wifi', vpn:true, left:44});", "blurred", null, { folded: {width:404,height:46,insets:{top:0,bottom:0}}, unfolded: {width:821,height:46,insets:{top:0,bottom:0}} }],
@@ -551,6 +553,11 @@ const SCENES = [
   ["ai-panes-agents", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'fleet'; await sleep(400);", "wallpaper", undefined, { folded: SIZES.folded, unfolded: SIZES.unfolded }],
   ["ai-panes-devices", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'devices'; await sleep(300); {" + UNITS_SCENE.replace(" S.page.value = -1;", "") + "}", "wallpaper", undefined, { unfolded: SIZES.unfolded }],
   ["ai-panes-progress", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'progress'; await sleep(600);", "wallpaper", undefined, { unfolded: SIZES.unfolded }],
+  // The foot fade (the user, 11-02: "the AI pages don't have the fade-out"; dev/ai-fade-check.js): a long Friction list
+  // at its top (rows fade into the bar / pane edge), the same list at its end (nothing faded), a long chat scrolled up.
+  ["ai-panes-fade-list", "home", FRICTION_LONG, "wallpaper", undefined, { folded: SIZES.folded, unfolded: SIZES.unfolded }],
+  ["ai-panes-fade-end", "home", FRICTION_LONG + " document.querySelectorAll('.ai-sub').forEach((e) => { e.scrollTop = e.scrollHeight; }); await sleep(300);", "wallpaper", undefined, { folded: SIZES.folded, unfolded: SIZES.unfolded }],
+  ["ai-panes-fade-chat", "home", LOOK + "{" + FLEET_SETUP + "}" + ` S.chat.value = { busy: false, items: [...${CHAT_SAMPLE}, ...${CHAT_SAMPLE}, ...${CHAT_SAMPLE}] }; await sleep(500); document.querySelectorAll('.ai-chat').forEach((t) => { t.scrollTop = -(t.scrollHeight - t.clientHeight) / 2; }); await sleep(300);`, "wallpaper", undefined, { folded: SIZES.folded, unfolded: SIZES.unfolded }],
   // Progress (aiprogress.tsx, the user 15:12): the ring and the area cards, the first one opened; folded and unfolded.
   ["ai-progress-open", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'progress'; await sleep(700); document.querySelector('.ai-screen .aip-area-row')?.click(); await sleep(700);", "wallpaper"],
   ["ai-msgr-menu", "home", MSGR + " document.querySelector('.ai-screen .ai-more').click(); await sleep(300);", "wallpaper"],
