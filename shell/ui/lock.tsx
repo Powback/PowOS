@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import { ago, useMinuteClock } from "./time.ts";
 import type { NotificationList } from "../types.ts";
-import { notifIconSrc } from "./notifications.tsx";
+import { NotifGlyph, notifIconSrc, type GroupedNotification } from "./notifications.tsx";
 
 /** Lifted this far (of the height) when let go, it unlocks. */
 const UNLOCK = 0.33;
@@ -136,7 +136,9 @@ export function Lock() {
       <div class="lock-notes">
         {list.items.slice(0, SHOWN).map((n) => (
           <div key={n.key} class="lock-note tile">
-            {notifIconSrc(n) && <img src={notifIconSrc(n)!} alt="" />}
+            {/* K2: the shade's own icon (notifications.tsx SmallIcon's NotifGlyph): the notification's small icon in its app's
+                color, else the app's icon - System UI, Play services and the like have no drawer icon, and showed none. */}
+            <NotifGlyph n={n as GroupedNotification} fallback={notifIconSrc(n)} />
             <span class="lock-note-main">
               <span class="lock-note-title">{n.title || n.app}</span>
               <span class={`lock-note-text muted${n.text.includes("\n") ? " lines" : ""}`}>{n.text}</span>

@@ -6460,6 +6460,79 @@ async function lockUnlockGlassScene() {
   }
 }
 
+/** K2 for the small icon [si] (a .notif-small, or null): the failures. */
+function lockSmallIconFails(si) {
+  if (!si) return ["K2: the card with a small icon doesn't show it (no .notif-small)"];
+  const cs = getComputedStyle(si);
+  const mask = cs.maskImage || cs.webkitMaskImage || "";
+  const fails = [];
+  if (!mask.includes("/_nicon/gate.svg")) fails.push(`K2: the small icon isn't its mask (${mask})`);
+  if (cs.backgroundColor !== "rgb(10, 132, 255)") fails.push(`K2: the small icon isn't in its app's color (${cs.backgroundColor})`);
+  if (si.getBoundingClientRect().width < 20) fails.push(`K2: the small icon is ${si.getBoundingClientRect().width}px wide (want 22)`);
+  if (si.hasAttribute("role")) fails.push("K2: the lock card's icon is a button (the face's swipe is its only gesture)");
+  return fails;
+}
+
+/** THE backdrop as resolved here: its tint (a probe painted with it) and its compositor radius. */
+function lockBackdrop() {
+  const probe = document.createElement("div");
+  probe.style.background = "var(--backdrop-tint)";
+  document.body.append(probe);
+  const tint = getComputedStyle(probe).backgroundColor;
+  probe.remove();
+  return { tint, radius: parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--backdrop-blur-native")) };
+}
+
+/** K3 for [cards] and the last region set [last]: each card's fill and radius THE backdrop's, and so its regions'. */
+function lockBackdropFails(cards, last, { tint, radius }) {
+  const fails = [];
+  for (const c of cards) {
+    const cs = getComputedStyle(c);
+    if (cs.backgroundColor !== tint || cs.backgroundImage !== "none") fails.push(`K3: a lock card's fill is ${cs.backgroundColor} ${cs.backgroundImage.slice(0, 40)}, not THE backdrop's ${tint}`);
+    if (parseFloat(cs.getPropertyValue("--glass-blur-native")) !== radius) fails.push(`K3: a lock card's compositor radius is ${cs.getPropertyValue("--glass-blur-native")}, not --backdrop-blur-native ${radius}`);
+  }
+  // "b.r <dpr> <n>" (or "b.f <id> <dpr> <n>"), then n regions of 10: x y w h, 4 corners, alpha, blur.
+  const p = last.split(" ").slice(last.startsWith("b.f ") ? 2 : 1);
+  const n = Number(p[1]) || 0;
+  const blurs = Array.from({ length: n }, (_, i) => Number(p[2 + i * 10 + 9]));
+  if (n < cards.length) fails.push(`K3: ${n} live-glass regions for the ${cards.length} cards (last set "${last.slice(0, 60)}")`);
+  if (blurs.some((b) => b !== radius)) fails.push(`K3: the cards' regions blur by ${blurs.join(",")}, not the one backdrop's ${radius}`);
+  return { fails, regions: `${n} regions blur ${[...new Set(blurs)].join(",")}` };
+}
+
+/**
+ * K2 + K3 (lock-screen-no-brown-strip-at-the-bottom-notific: "real icons, notification cards use the shared glass"): on
+ * the lock face, each card shows the shade's icon (notifications.tsx SmallIcon) - the small icon as a mask in its app's
+ * color, else the app's icon, PowOS's mark for its own - and wears THE backdrop: background --backdrop-tint, its
+ * compositor radius --backdrop-blur-native (every live-glass region the page sends for the cards carries it).
+ */
+async function lockCardsScene() {
+  const { sent, undo } = await lockGlassOn();
+  const now = Date.now();
+  const items = [
+    { key: "gate.k2.small", app: "System UI", pkg: "com.android.systemui", title: "Small", text: "its small icon", time: now - 60000, smallIcon: "/_nicon/gate.svg", color: "rgb(10, 132, 255)" },
+    { key: "gate.k2.app", app: "Gate", pkg: "dev.gate", title: "App", text: "its app icon", time: now - 120000, icon: "./icons/powos.svg" },
+    { key: "gate.k2.powos", app: "PowOS", pkg: "dev.omalauncher", title: "Own", text: "PowOS's mark", time: now - 180000 },
+  ];
+  window.__mockEvents.emit("notifications.changed", { available: true, items });
+  try {
+    if (!(await window.__gw.until(() => document.querySelectorAll(".lock-note").length === 3, 3000))) return ["K2: the 3 notification cards never showed on the lock face"];
+    await window.__gw.settled();
+    await window.__gw.frames(8);
+    const cards = [...document.querySelectorAll(".lock-note")];
+    const fails = lockSmallIconFails(cards[0].querySelector(".notif-icon.notif-small"));
+    if (!cards[1].querySelector("img.notif-icon[src$='powos.svg']")) fails.push("K2: the card with only an app icon doesn't show it");
+    if (!cards[2].querySelector("img.notif-icon[src$='powos.svg']")) fails.push("K2: PowOS's own card doesn't show PowOS's mark");
+    const backdrop = lockBackdrop();
+    const k3 = lockBackdropFails(cards, sent.at(-1) ?? "", backdrop);
+    window.__lockCards = `icons ${fails.length ? "failing" : "ok"}, fill ${getComputedStyle(cards[0]).backgroundColor} (backdrop ${backdrop.tint}), ${k3.regions} (backdrop ${backdrop.radius})`;
+    console.warn(`[gate] lock-cards: ${window.__lockCards}`);
+    return [...fails, ...k3.fails];
+  } finally {
+    undo();
+  }
+}
+
 /**
  * WS1 (10-31 15:37: home's surface re-made, then no "w.f" for ~9 s until the watchdog reloaded home): with the page's
  * rAF held (a WebView that paused it while hidden), a visibilitychange to hidden and back sends the windows' geometry
@@ -10385,6 +10458,15 @@ try {
         await r.page.evaluate([lockGlassOn, lockTopOf, lockSwipeUp, lockGlassFails].map(String).join("\n"));
         const fails = await r.page.evaluate(lockUnlockGlassScene);
         console.log(`     lock-unlock-glass-${label}: ${await r.page.evaluate(() => window.__lockGlass).catch(() => "?")}`);
+        return fails;
+      })));
+  // K2 + K3: the lock cards show the shade's icons and wear THE backdrop. Folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=lock`, `lock-cards-${label}`, viewport).then((r) => whenReady(r, async () => {
+        await r.page.evaluate([lockGlassOn, lockSmallIconFails, lockBackdrop, lockBackdropFails].map(String).join("\n"));
+        const fails = await r.page.evaluate(lockCardsScene);
+        console.log(`     lock-cards-${label}: ${await r.page.evaluate(() => window.__lockCards).catch(() => "?")}`);
         return fails;
       })));
   // TI1: tiled windows' bars, the w.f touch rects, the divider's pill (the user's layout, 10-31 15:08, unfolded).

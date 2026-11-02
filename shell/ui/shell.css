@@ -2474,7 +2474,19 @@ html.lock-settling[data-mode="lock"] { transition: --lock-lift var(--spring-ms) 
 .lock-date { margin-top: 8px; color: var(--color-foreground); font-size: var(--text-body); }
 .lock-notes { margin-top: 28px; width: 100%; display: flex; flex-direction: column; gap: 6px; }
 .lock-note { display: flex; align-items: center; gap: 10px; padding: 9px 12px; }
-.lock-note img { width: 22px; height: 22px; border-radius: 8px; flex: none; }
+.lock-note .notif-icon { width: 22px; height: 22px; flex: none; }
+/*
+ * K3: the cards wear THE backdrop (theme.css --backdrop-tint / --backdrop-blur-native), as home's widgets and the open
+ * shade do - one tint, one compositor radius, no veil, no sheen - not the plain .tile reference fill at home's 140.
+ * The shadow stays the tile's (K4).
+ */
+html:root .lock .lock-note.tile { --glass-blur-native: var(--backdrop-blur-native); background: var(--backdrop-tint); }
+/* With CSS glass (no compositor blur, ui/glass.ts): the same tint over the frosted wallpaper. */
+html.glass:root .lock .lock-note.tile {
+  background:
+    linear-gradient(var(--backdrop-tint), var(--backdrop-tint)) border-box,
+    var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
+}
 .lock-note-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .lock-note-title { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-small); }
 .lock-note-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-small); }
