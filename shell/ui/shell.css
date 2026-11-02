@@ -1875,7 +1875,15 @@ html:root .ai-screen .ai-unit-card .ai-session.tile { --frost-fill: transparent;
 /* The task over its bar, as the left column's Working rows (the user, 11-02: "Phone stutters: main t…" - the bar beside
    it ate the title): the title the row's room, two lines at most; terminal, N/M and device stay right. */
 .ag-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.ag-row-line.two { align-items: center; padding-block: 10px; }
+/* Two lines: the title across the whole row (the status column took 56% of the unfolded page, c8c7045e - beside the
+   terminal, N/M and device it got 133px of 326), and under it the bar with those three at its right. */
+.ag-row-line.two { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; column-gap: 10px; row-gap: 4px; align-items: center; padding-block: 6px; }
+.ag-row-line.two .ag-act { padding-block: 2px; }
+.ag-row-line.two > .ag-row-main { display: contents; }
+.ag-row-line.two > .aip-dot { grid-row: 1 / span 2; }
+.ag-row-line.two .ag-row-title { grid-column: 2 / -1; grid-row: 1; }
+.ag-row-line.two .ag-row-main > .aip-bar { grid-column: 2; grid-row: 2; }
+.ag-row-line.two > :not(.aip-dot, .ag-row-main) { grid-row: 2; }
 .ag-row-line.two .ag-row-title { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.3; }
 .ag-row-main > .aip-bar { width: 100%; }
 .ag-row-title, .ag-row .ag-row-title { flex: 1; min-width: 6em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

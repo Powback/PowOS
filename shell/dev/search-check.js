@@ -286,6 +286,12 @@ async function waitFor(f) {
   throw Error('timed out');
 }
 
+/** Every finite animation under [el] finished (the arrivals start in the render's layout effect, so they're running). */
+async function settled(el) {
+  const finite = (el?.getAnimations({ subtree: true }) ?? []).filter(a => Number.isFinite(a.effect?.getComputedTiming().endTime));
+  await Promise.all(finite.map(a => a.finished.catch(() => {})));
+}
+
 /** "kate" searched with the launcher aligned [want]: Kate the first app, and where it and the two cards sit. */
 async function searchOrderFor(want, kate, { s, search, align, old }) {
   align.alignTry.value = { ...old.align, launcher: want };
@@ -294,6 +300,8 @@ async function searchOrderFor(want, kate, { s, search, align, old }) {
   s.query.value = 'kate';
   await waitFor(() => document.querySelector(appResult(kate.key)) && document.querySelectorAll('.drawer-list.results [data-search-group^="order-"]').length === 2)
     .catch(() => { throw Error(`E2E194 ${want}: no Kate and 2 cards for "kate"`); });
+  // The rows slide in on the spring (notifmotion.ts arrive): measure where they settle, once their animations end.
+  await settled(document.querySelector('.drawer-list.results'));
   const fails = [];
   const first = search.searchSections.value.apps[0];
   if (first?.id !== `app:${kate.key}`) fails.push(`E2E194 ${want}: the first app result for "kate" is ${first?.id}, not Kate`);
