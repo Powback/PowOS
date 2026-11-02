@@ -81,7 +81,7 @@ function measure(el: HTMLElement, columns: number) {
   // keyboard sliding in give the pages more or less height while they animate, and measuring that re-laid-out (and
   // resized) every tile and widget each frame - the flicker as the launcher closes. So the height the dock has
   // folded away and the room the keyboard takes are counted back in: the same grid in every frame of either.
-  const height = size.height - dockFolded(root) + keyboardRoom(root);
+  const height = size.height - dockFolded(root) + keyboardRoom(root) + barRoom();
   const across = size.width - 2 * pad;
   const down = height - 2 * pad;
   const square = Math.max(1, Math.min(MAX_SQUARE_ROWS, Math.floor(down / (across / columns))));
@@ -117,6 +117,19 @@ function keyboardRoom(root: CSSStyleDeclaration) {
   const kb = parseFloat(root.getPropertyValue("--inset-keyboard")) || 0;
   const nav = parseFloat(root.getPropertyValue("--inset-bottom")) || 0;
   return Math.max(0, kb - nav);
+}
+
+/**
+ * The height home's bar takes while it is up in the dock button's place (docksearch.tsx buttonMorph: the launcher open,
+ * PowOS AI's page): at rest the button is home's foot and the bar has no room. Counted back in as the folded dock is: a
+ * drag up re-laid home 12 -> 11 rows under the launcher, every tile re-rendered at its start and again at its end
+ * (gate drawer-drag-renders; device 11-02 18:13: Tile 102 renders in a launcher open).
+ */
+function barRoom() {
+  const bar = document.querySelector<HTMLElement>(".home.button-morph > .bar");
+  if (!bar) return 0;
+  const cs = getComputedStyle(bar);
+  return bar.offsetHeight + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
 }
 
 /** A cell's box, in the page's coordinates. */

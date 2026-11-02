@@ -642,7 +642,9 @@ let launcherUsed = false;
  */
 function HomeLauncher() {
   // Mounted on its first open (a finger's pull or a tap) and kept: home's page doesn't carry the grid until it's used.
-  if (drawerOpen.value || drawerDragging.value) launcherUsed = true;
+  // Read only until then: once mounted, a drag's start and end (drawerDragging, drawerOpen) re-rendered the launcher and
+  // with it the drawer's every app (device 11-02 18:13: the first touchmove of a drag 107 ms, AppCell 211 renders).
+  if (!launcherUsed && (drawerOpen.value || drawerDragging.value)) launcherUsed = true;
   if (!launcherUsed) return null;
   return (
     <>
@@ -663,6 +665,22 @@ function HomeLauncher() {
 /** Home's search as the dock's button (docksearch.tsx). */
 const searchDockClasses = () => `${dockButton.value ? "search-dock" : ""} ${buttonMorph.value ? "button-morph" : ""}`;
 
+/**
+ * Home's own element and its state classes. Its own component, so only it re-renders when one changes: the drag's start
+ * and end (dragging, open) re-rendered Home and all under it - the pages, every tile, the dock (device 11-02 18:13: Node
+ * 315, Tile 102 renders in a launcher open). Its [children] come from Home's last render, the same vnodes: Preact skips them.
+ */
+function HomeFrame({ children }: { children: preact.ComponentChildren }) {
+  return (
+    <div
+      onPointerDownCapture={grabPill}
+      class={`home adopts dock-${dockPosition.value} ${wideHome.value ? "wide" : ""} ${footBelow.value ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${overWindows.value ? "over-windows" : ""} ${carriedApp(carry.value) ? "carry-app" : ""} ${searchDockClasses()}`}
+    >
+      {children}
+    </div>
+  );
+}
+
 export function Home() {
   // data-p: these follow the panel's openness (--p, written by gesture.ts, not through a render).
   return (
@@ -670,10 +688,7 @@ export function Home() {
       {/* PowOS AI's page beside home: the two slide as one, so home's bar and dock go with it (gesture.ts applyScreens). */}
       <div class="screens" {...homeGestures()}>
         <PowAiPage />
-        <div
-          onPointerDownCapture={grabPill}
-          class={`home adopts dock-${dockPosition.value} ${wideHome.value ? "wide" : ""} ${footBelow.value ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${overWindows.value ? "over-windows" : ""} ${carriedApp(carry.value) ? "carry-app" : ""} ${searchDockClasses()}`}
-        >
+        <HomeFrame>
           <div class="stage">
             <div class="home-content" data-p ref={followOpenness}>
               <Pages />
@@ -691,7 +706,7 @@ export function Home() {
           {wideHome.value && <DockTray />}
           <AppMenu />
           <EditSheet />
-        </div>
+        </HomeFrame>
       </div>
       {/* The pet (the agents' face): over home and PowOS AI's page, outside their swipes; the screens below cover it. */}
       <Pet />
