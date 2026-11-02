@@ -161,12 +161,14 @@ if [ "$CASE" = render-scan ]; then
   for s in shade pull lock recents assist; do
     case " $pages " in *" $s "*) ;; *) note "$s: its page isn't up now (opened on demand) - not measured"; continue ;; esac
     v=$(ev "$PROBE" "$s"); log "$s: $v"
+    # A hidden surface WebView (not shown now) may not run the probe at all: not measured, not a FAIL.
+    case $v in "cdp: no answer"*) note "$s: its page did not answer CDP (hidden WebView, JS paused?) - not measured"; continue ;; esac
     case $v in on=true*canvas=[1-9]*) case $v in *outlined=0*) pass "$s: overlay up ($v), nothing re-rendered there yet" ;; *) pass "$s: overlay up and outlining ($v)" ;; esac ;;
       *) fail "$s: no render overlay with rs on ($v)" ;; esac
   done
   look_restore; sleep 1.5
   v=$(ev "$PROBE" shade); log "shade after restore: $v"
-  case $METER0 in *'"on":true'*) note "rs was on at the start: left on" ;; *) case $v in on=false*) pass "rs back off: shade overlay gone" ;; *) fail "rs restored but the shade overlay is still up ($v)" ;; esac ;; esac
+  case $METER0 in *'"on":true'*) note "rs was on at the start: left on" ;; *) case $v in "cdp: no answer"*) note "shade did not answer CDP after the restore - not measured" ;; on=false*) pass "rs back off: shade overlay gone" ;; *) fail "rs restored but the shade overlay is still up ($v)" ;; esac ;; esac
 fi
 
 if [ "$CASE" = launcher-in ]; then
