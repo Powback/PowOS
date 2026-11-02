@@ -3,7 +3,7 @@
 // Fills its tile at every size: 2x1/3x1 the steps figure + an icon, taller adds types, from 3 rows a 7-day steps chart.
 import { useApp, type Props } from "../lib/app";
 import { LABEL, UNIT, show, today, week, weekQuery, type Day, type DailyRow } from "../lib/stats";
-import { useHealthSync, type CursorRow } from "../lib/sync";
+import { useHealthSync, type CursorRow, type Phase } from "../lib/sync";
 
 const HEART = "M12 21s-7.5-4.6-9.6-9.2C.9 8.4 2.7 4.8 6.2 4.8c2.1 0 3.6 1.1 5.8 3.4 2.2-2.3 3.7-3.4 5.8-3.4 3.5 0 5.3 3.6 3.8 7C19.5 16.4 12 21 12 21z";
 const SHORT: Record<string, string> = { active_calories: "Calories" };
@@ -35,13 +35,16 @@ function Small({ tile }: { tile: Tile }) {
   );
 }
 
+/** A figure's tile that fills a share of a chartless widget: its text scales with that tile (never below the small size). */
+const GROWN = { label: "max(0.7em, min(18cqh, 9cqw))", figure: "max(1.3em, min(40cqh, 17cqw))" };
+
 function Tiles({ tiles, grow, narrow }: { tiles: Tile[]; grow: boolean; narrow: boolean }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: "0.5em", flex: grow ? 1 : "none", minHeight: 0, alignContent: "stretch" }}>
       {tiles.map((tile) => (
-        <div key={tile.kind} style={{ background: soft, borderRadius: "0.7em", padding: "0.4em 0.6em", display: "flex", flexDirection: "column", justifyContent: "center", minWidth: 0 }}>
-          <div style={{ fontSize: "0.7em", opacity: 0.7, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{SHORT[tile.kind] ?? LABEL[tile.kind]}</div>
-          <div style={{ fontSize: "1.3em", fontWeight: 600, lineHeight: 1.15, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+        <div key={tile.kind} style={{ background: soft, borderRadius: "0.7em", padding: "0.4em 0.6em", display: "flex", flexDirection: "column", justifyContent: "center", minWidth: 0, containerType: grow ? "size" : "normal" }}>
+          <div style={{ fontSize: grow ? GROWN.label : "0.7em", opacity: 0.7, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{SHORT[tile.kind] ?? LABEL[tile.kind]}</div>
+          <div style={{ fontSize: grow ? GROWN.figure : "1.3em", fontWeight: 600, lineHeight: 1.15, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
             <Figure tile={tile} />
           </div>
         </div>
@@ -73,23 +76,30 @@ function emptyBox(row: boolean, tall: boolean) {
   return { flexDirection: "column" as const, alignItems: "center", justifyContent: tall ? "space-between" : "center", padding: tall ? "4cqh 0" : 0, boxSizing: "border-box" as const, gap: "3cqh" };
 }
 
-/** Nothing to show yet: a big heart + "Connect Health", scaled to the tile (container units), one line, centred. */
-function Empty({ row, tall }: { row: boolean; tall: boolean }) {
+/** Nothing to show: a big heart + its two words ("Connect Health" before a grant, "Nothing today" once connected), scaled to the tile (container units), centred. */
+function Empty({ row, tall, words }: { row: boolean; tall: boolean; words: Words }) {
   // Row (one-cell-high tiles): heart then text across the width. Column: the text spans the width, the heart takes the height left.
-  const size = row ? "min(96cqh, 40cqw)" : tall ? "max(10cqmin, min(92cqh - 58.8cqw, 98cqw))" : "max(10cqmin, min(84cqh - 16.7cqw, 88cqw))";
-  const text = row ? "calc((88cqw - min(96cqh, 40cqw) - 3cqw) / 7.4)" : tall ? "24.5cqw" : "11.9cqw";
+  // One line: the text spans 88% of the width (words.em = its width in ems); the heart takes the height the text leaves.
+  const line = `${(88 / words.em).toFixed(2)}cqw`;
+  const size = row ? "min(96cqh, 40cqw)" : tall ? "max(10cqmin, min(92cqh - 58.8cqw, 98cqw))" : `max(10cqmin, min(90cqh - 1.15 * ${line}, 88cqw))`;
+  const text = row ? `calc((88cqw - min(96cqh, 40cqw) - 3cqw) / ${words.em})` : tall ? "24.5cqw" : line;
   return (
     <div style={{ position: "absolute", inset: 0, display: "flex", ...emptyBox(row, tall), fontWeight: 600 }}>
       <svg viewBox="0 0 24 24" style={{ height: size, width: size, flex: "none" }} aria-hidden="true">
         <path d={HEART} fill="currentColor" opacity="0.85" />
       </svg>
-      <div style={{ fontSize: text, whiteSpace: "nowrap", lineHeight: 1.1, textAlign: "center", opacity: 0.9 }}>{tall ? <>Connect<br />Health</> : "Connect Health"}</div>
+      <div style={{ fontSize: text, whiteSpace: "nowrap", lineHeight: 1.1, textAlign: "center", opacity: 0.9 }}>{tall ? <>{words.lines[0]}<br />{words.lines[1]}</> : words.lines.join(" ")}</div>
     </div>
   );
 }
 
-function Body({ shown, nrows, cols, chart }: { shown: Tile[]; nrows: number; cols: number; chart: Day[] }) {
-  if (!shown.length) return <Empty row={nrows < 2} tall={nrows >= 3 && cols < nrows} />;
+/** Empty's two words, one per line on tall tiles (both first words are ~7 letters wide: the tall sizes fit either); [em]: the one-line text's width in ems (measured by the widget preview's fit check). */
+interface Words { lines: [string, string]; em: number }
+const CONNECT: Words = { lines: ["Connect", "Health"], em: 7.4 };
+const QUIET: Words = { lines: ["Nothing", "today"], em: 5.9 };
+
+function Body({ shown, nrows, cols, chart, linked }: { shown: Tile[]; nrows: number; cols: number; chart: Day[]; linked: boolean }) {
+  if (!shown.length) return <Empty row={nrows < 2} tall={nrows >= 3 && cols < nrows} words={linked ? QUIET : CONNECT} />;
   if (nrows < 2) return <Small tile={shown[0]} />;
   return (
     <>
@@ -102,6 +112,10 @@ function Body({ shown, nrows, cols, chart }: { shown: Tile[]; nrows: number; col
 /** How many figures beyond steps a tile of this size holds. */
 const extra = (cols: number, nrows: number) => (nrows < 2 ? 0 : cols < 3 ? Math.min(nrows, 3) - 1 : 3);
 
+/** Health Connect is linked: this pass synced, or an earlier one did (its token is kept) and nothing says the grant is gone. */
+const linked = (phase: Phase, cursor: CursorRow | undefined) => phase === "ok" || (!!cursor?.token && !LOST.includes(phase));
+const LOST: Phase[] = ["needs-grant", "none", "update"];
+
 const pad = (has: boolean, nrows: number) => (!has ? 0 : nrows < 2 ? "3px 8px" : "8px 12px");
 
 export default function Today({ host, cells, app: id }: Props) {
@@ -109,13 +123,13 @@ export default function Today({ host, cells, app: id }: Props) {
   const rows = app.useTable<DailyRow>("daily", weekQuery());
   const cursor = app.useTable<CursorRow>("cursor")[0];
   const ingest = app.useReducer<any>("ingest");
-  useHealthSync(host, { cursor, ready: app.db.status === "connected", ingest, ask: false });
+  const { state } = useHealthSync(host, { cursor, ready: app.db.status === "connected", ingest, ask: false });
   const t = today(rows);
   const [cols, nrows] = cells ?? [2, 2];
   const steps = t.find((x) => x.kind === "steps") ?? t[0];
   const shown = steps ? [steps, ...t.filter((x) => x !== steps).slice(0, extra(cols, nrows))] : [];
   const chart = nrows >= (cols < 3 ? 4 : 3) ? week(rows, "steps") : [];
-  const body = <Body shown={shown} nrows={nrows} cols={cols} chart={chart} />;
+  const body = <Body shown={shown} nrows={nrows} cols={cols} chart={chart} linked={linked(state.phase, cursor)} />;
   return (
     <div style={{ width: "100%", height: "100%", containerType: "size" }} onClick={() => host.openApp?.(id)}>
       <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", padding: pad(shown.length > 0, nrows), position: "relative", boxSizing: "border-box", gap: "0.5em", fontSize: "clamp(13px, 6cqmin, 22px)" }}>{body}</div>
