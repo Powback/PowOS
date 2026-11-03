@@ -53,3 +53,17 @@ would not change anything: no hop uses UBWC.
   time; ~0.23 s per mapping). freedreno-kgsl submits carry no memobj list, so KGSL may unmap a buffer while a glamor
   copy still reads it. No kgsl_mmu_pagefault in a 15 s trace though. Next: why Xwayland drops/re-creates the DRI3
   pixmap's bo per present (bo cache / 0011 import path), and keep one import per dmabuf.
+
+## Import cache (xwayland-kgsl 24.1.13-7, patch 0012, agent/xw-import-cache)
+- Cause of the ~40 imports/s: lfdevs's 0003 `xwl_glamor_kgsl_refresh_dri3_pixmap` re-created the DRI3 pixmap's
+  EGLImage before every Present copy and destroyed the previous one at once (its reason: stale sampling of a
+  long-lived EGLImage on the proot path). 0012 keeps one import per client dma-buf (keyed by plane 0's st_dev+st_ino
+  and the shape, shared across pixmaps, reused per present), freed only with its last pixmap and after glFinish.
+- New 30 s line: `Xwayland KGSL: last 30s: client dma-buf imports N / reuses N / frees N`. Expect imports ~4 per
+  swapchain, reuses ~ presents. Unit test: pkgs/xwayland-kgsl/test/run.sh (import-cache-test).
+- Not claimed as the column fix: it removes the per-present map/unmap and the unmap under a running copy, which is
+  one candidate. Check after install: the line's counts + the checkered-frame rate (bf-overlay-watch.sh). If frames
+  freeze/stale (lfdevs's old symptom), the GL driver is not invalidating its caches between submits.
+- Stronger lead in parallel (coordinator, 2026-11-03): dmesg of the same run has 738x `kgsl kgsl-3d0: CP: AHB bus
+  error, CP_RL_ERROR_DETAILS_0:0x10008e07 CP_RL_ERROR_DETAILS_1:0x12144` - a protected register write in some
+  command stream (Turnip or freedreno); agent cp-fault is decoding it. Count those per run next to 0012's line.
