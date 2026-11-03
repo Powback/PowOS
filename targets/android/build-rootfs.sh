@@ -98,6 +98,16 @@ docker run --rm --privileged --platform linux/arm64 --cpus 8 --memory 16g \
   "${work[@]}" -v powos-android-cache:/cache -v "$W:/in:ro" -v "$OUT:/out" -v "$HERE/rootfs-in-container.sh:/rootfs-in-container.sh:ro" \
   "$IMAGE" bash -c "$inner"
 echo "built: $OUT/powos-rootfs.tar.gz"
+# KWin is ours at a pinned Plasma version (pkgs/kwin, IgnorePkg); the Plasma libraries it links come from today's Arch
+# Linux ARM. When those move a minor version KWin can't start at all: the 11-04 rootfs had kscreenlocker/libplasma/
+# plasma-workspace 6.8.1 under kwin 6.7.5 ("undefined symbol ScreenLocker::KSldApp::lock" - no desktop, no Linux app
+# window on any phone that installs it). Refused here, before it is split, pinned or published.
+plasma_ver() { tar -tzf "$1" | sed -n "s#^\(\./\)\{0,1\}var/lib/pacman/local/$2-\([0-9][0-9]*\.[0-9][0-9]*\)\..*#\2#p" | head -n 1; }
+kw=$(plasma_ver "$OUT/powos-rootfs.tar.gz" kwin) sl=$(plasma_ver "$OUT/powos-rootfs.tar.gz" kscreenlocker)
+[ -n "$kw" ] && [ "$kw" = "$sl" ] || {
+  echo "build-rootfs: kwin is Plasma ${kw:-?} but kscreenlocker is ${sl:-?}: KWin won't start in this rootfs." >&2
+  echo "  Pin the Plasma libraries to kwin's version in install-powos-android.sh, or move pkgs/kwin to ${sl:-theirs}." >&2
+  exit 1; }
 # The same rootfs split for phones without root (rootfs-packs.conf): a base image they download first and the packs
 # the app adds on demand (gaming, languages). Read from the full tarball, so it never changes what rooted installs get.
 python3 -I "$HERE/tools/split-rootfs.py" "$OUT/powos-rootfs.tar.gz" "$HERE/rootfs-packs.conf" "$OUT"
