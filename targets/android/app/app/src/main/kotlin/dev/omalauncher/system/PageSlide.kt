@@ -203,7 +203,9 @@ object PageSlide {
                         // Shown in WM (hidden there at rest, off its page) in this same transition, so it slides in.
                         TaskLeash.setHidden(wct, tok, false)
                         TaskLeash.setFocusable(wct, tok, false)
-                        TaskLeash.reorder(wct, tok, true)
+                        // Only one that left under home comes up (OffPage): the others are above home already, and a
+                        // reorder was a TO_FRONT on every touch on home (Plasma raised/hidden per swipe, 11-03).
+                        if (OffPage.raiseAtSlideStart(win.rel, WindowFrames.isUnderHome(win.id))) TaskLeash.reorder(wct, tok, true)
                     }
                     TaskLeash.setBounds(wct, tok, at(win))
                 }
