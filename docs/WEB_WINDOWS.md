@@ -210,6 +210,11 @@ An older KWin sends no cap, so the app sends no `ime` and the desktop path stays
 KWin keeps the desktop path. The full-screen button sends `fullscreen <id> 1`; KWin calls `setFullScreen`, and its
 `fullscreen <id> 1|0` confirms or reverts the window. The host lays the container over the whole screen, with no bar.
 "Back to window" (`toWindow`) or the app's own F11/Esc brings the window back.
+A window that goes full screen by itself (an unrequested `fullscreen <id> 1`) covers the screen only when it is the
+user's window: the one last pressed or opened, or the newest open window while home has the user
+(`WebWindows.selfFullScreenNow`). If it is not, the host holds it (`fullHeld`) until the user presses that window.
+This was added on 11-03 after e2e round 213. Broforce (Proton) re-asserted full screen in the background when Kate
+opened, covered the screen, and took the dock taps.
 
 Keyboard cover: when the IME's inset covers the focused body, the page lifts that window above the inset, and the
 lift is ordinary geometry in `w.f`. Plasma does not do this, but on a phone it is needed.
