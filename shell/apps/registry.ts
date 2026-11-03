@@ -4,9 +4,11 @@
  * and each placed island's entry (ui/island.tsx). Bindings: vendor/powos-registry.js (generated, see vendor/VERSIONS).
  */
 import { signal } from "@preact/signals";
+import { useMemo } from "preact/hooks";
 import { DbConnection } from "../vendor/powos-registry.js";
 import { installedApps } from "./pages.ts";
 import { useDb, useRows, watchRows } from "./stdb.ts";
+import { localApps, localWidgets, watchLocalApps, withLocal } from "./localapps.ts";
 
 export const REGISTRY = "powos-registry";
 
@@ -80,9 +82,15 @@ export const cells = (s: string): [number, number] => {
 /** The registry, live while a component using it is shown. */
 export function useRegistry() {
   const db = useDb(REGISTRY, DbConnection);
-  const apps = useRows<RegistryApp>(db, "app", "SELECT * FROM app");
-  const widgets = useRows<RegistryWidget>(db, "widget", "SELECT * FROM widget");
-  return { status: db.status, error: db.error, apps, widgets };
+  watchLocalApps();
+  const rows = useRows<RegistryApp>(db, "app", "SELECT * FROM app");
+  const widgetRows = useRows<RegistryWidget>(db, "widget", "SELECT * FROM widget");
+  // No root: the launcher's own apps too (apps/localapps.ts) - the APK's and the installed ones - whether the registry
+  // answers or not. Rooted (or a host without them): the registry's rows, as they are.
+  const local = localApps.value?.apps ?? [];
+  const apps = useMemo(() => withLocal(rows, local, (a) => a.id), [rows, local]);
+  const widgets = useMemo(() => withLocal(widgetRows, localWidgets(local), (w) => w.key), [widgetRows, local]);
+  return { status: db.status, error: db.error, apps, widgets, local: localApps.value };
 }
 
 /** The registry's apps into apps/pages.ts installedApps (the drawer, search, recents), live while home shows. */
@@ -90,7 +98,14 @@ let watching = false;
 export function watchRegistry() {
   if (watching) return;
   watching = true;
-  watchRows<RegistryApp>(REGISTRY, DbConnection, "app", "SELECT * FROM app", (rows) => (installedApps.value = rows));
+  watchLocalApps();
+  // The drawer's PowOS apps: the registry's, and without root the launcher's own (apps/localapps.ts) - again whenever
+  // either changes.
+  let rows: RegistryApp[] = [];
+  const show = () => (installedApps.value = withLocal(rows, localApps.value?.apps ?? [], (a) => a.id));
+  let first = true;
+  localApps.subscribe(() => (first ? (first = false) : show()));
+  watchRows<RegistryApp>(REGISTRY, DbConnection, "app", "SELECT * FROM app", (r) => ((rows = r), show()));
 }
 
 /** Every creation row, kept live without a hook (ui/creationwidgets.tsx: home's widget placeholders are plain functions). */

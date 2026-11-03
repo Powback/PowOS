@@ -24,7 +24,7 @@ feature calls `RootedGuest` - `su`, which isn't there.
 | # | feature | rooted | no root | why | fix |
 |---|---|---|---|---|---|
 | 1 | Home widgets with commands (fetch, games, performance, any store widget with `cmd`/`stream`) | works | **was broken (empty tile)** - fixed 11-03 | nothing called `widgets.linuxChanged(true)`; GuestShell/Streams ran proot on a rootfs that isn't there; the web home got no "waits for Linux" state and drew an empty tile | DONE (this change): `EngineGuest` runs them in the image via lotfix; `Runtime.onEngineReady`; tile says "needs the PowOS Linux image - Download (N MB)" (tap opens the download) or "starting PowOS Linux..." |
-| 2 | PowOS app islands on home: Agents, What needs me, Lights, Pet, Sketch, Health, Counter | works | **broken** | bundles live in `files/apps/<id>/current`, put there only by `powos app install` inside the rooted session (bind mount in `powos-session.sh`); their databases are SpacetimeDB at `127.0.0.1:3410`, started only by the rooted session (`powos-start.sh`) | a) module-less apps (needs-me, its notifications are Android's): ship their built UI in the APK (or fetch from PowApps) into `files/apps` - no Linux needed; b) STDB apps: start SpacetimeDB + the App API runtime in the engine session (lotfix), same ports, or on the phone side |
+| 2 | PowOS app islands on home: Agents, What needs me, Lights, Pet, Sketch, Health, Counter | works | **broken** | bundles live in `files/apps/<id>/current`, put there only by `powos app install` inside the rooted session (bind mount in `powos-session.sh`); their databases are SpacetimeDB at `127.0.0.1:3410`, started only by the rooted session (`powos-start.sh`) | PARTLY DONE 11-04 (nonroot-islands): the repo's apps (`apps/bundled.list`: What needs me, Pet, Health, Counter, Sketch, App API) ship built in the APK and show without the registry; What needs me needs no Linux; STDB apps' islands say "starting PowOS Linux…" / "needs the PowOS Linux image - Download" while `EngineServices` starts SpacetimeDB + the App API in the image and publishes the APK's modules. Left: Lights (own repo `~/Projects/lights`, DB `local-lights` for its pairing/prefs - bundle it + keep that state Android-side), Agents (needs powos-agentsd), check on an unrooted device |
 | 3 | PowOS Linux image download | n/a | heavy (one big tarball) | `powos-rootfs.tar.gz` is the whole desktop + gaming | task `powos-image-for-non-rooted-devices-is-too-heavy` (image-slim: base/gaming split) |
 | 4 | Linux apps in drawer/search, Linux app windows (web windows), Steam/games | works | **broken from the launcher** | the PowOS app list is exported by the rooted session (`run/powos-apps`, `powos-apps-export`); `ShellActivity` starts `SessionService` only when rooted; launches go through `RootedGuest.openAsTask` | start `SessionService` from the launcher when the image is installed; app export + launch through `EngineGuest` (powos-apps-export in the image session); windows through the engine's display daemon |
 | 5 | Terminals (terminal tiles, Terminal app, `terms`/tmux list) | works | **broken** | `ShellTerminals`/`TerminalTiles` run `su -c powos-run.sh`; Omalauncher's foot-on-Wayland path is off with `onLinuxReady` | PtyTerminal on `liblotfixrun.so -c powos-tmux-shell` (EngineGuest) |
@@ -45,3 +45,20 @@ feature calls `RootedGuest` - `su`, which isn't there.
   on resume).
 - `shell/ShellHome.kt` + `ShellWidgets.kt`: widget items carry `linux: {state, mb}`; a tap on an "image" tile opens the
   download. `shell/ui/grid.tsx` `LinuxWait` draws it. Gate scene `nonroot-widgets` (NR1).
+
+## What changed 11-04 (nonroot-islands)
+
+- `apps/bundled.list`: the apps the APK ships. `targets/android/build-app.sh` builds each (`apps/build.sh`) before the
+  APK, refusing when one fails; `app/build.gradle.kts` `copyApps` puts `powos-app.json`, `out/ui/` and
+  `out/module.wasm` in `assets/apps/<app id>/`, plus `lib/apps/powos-noroot-services`.
+- `shell/LocalApps.kt`: the APK's + installed apps as registry rows (`apps.local`, with `rooted` and where SpacetimeDB
+  stands); `ShellHost.appFile` serves the installed UI, else the APK's. `apps.getLinux` opens the image download.
+- `linux/EngineServices.kt` + `lib/apps/powos-noroot-services`: no root, the image installed - SpacetimeDB (3410) and
+  the App API (3411) started from the image's service manifests through EngineGuest (no supervisor: HACK, REMOTE-POWOS
+  §4), the APK's modules published when their wasm changed. Kicked by `Runtime.onEngineReady` and by each
+  `apps.local` while SpacetimeDB is down (every 30 s at most).
+- `shell/apps/localapps.ts`: the page polls `apps.local` (every 3 s until SpacetimeDB is up); `useRegistry` /
+  `watchRegistry` add the local apps when not rooted (a registry row wins); `ui/island.tsx` `IslandWait`. Rooted:
+  `apps.local` says `rooted: true` and nothing changes. Gate scene `nonroot-islands` (NI1), JVM `LocalAppsTest`.
+- Open: without root 127.0.0.1:3410/3411 are not locked to PowOS's uid (the rooted path's iptables rule needs root) -
+  any app on the phone can reach them. Needs SpacetimeDB auth (a token the launcher holds) before this is sold.

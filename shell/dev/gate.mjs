@@ -384,6 +384,9 @@ function apps() {
   });
 }
 
+/** An app's UI file (./_app/<id>/<rest>); gate.<name>: the scenes' stand-in island (dev/gate-island), no app build needed (NI1). */
+const appUiFile = (id, rest) => (id.startsWith("gate.") ? path.join(ROOT, "dev/gate-island", rest) : path.join(APPS, id, "ui", rest));
+
 /** The file a shell URL names (ShellHost.open, without the override folder: /shell is already composed), or null. */
 function file(url) {
   const u = new URL(url);
@@ -395,7 +398,7 @@ function file(url) {
   let f;
   if (p.startsWith("_app/")) {
     const [, id, ...rest] = p.split("/");
-    f = path.join(APPS, id, "ui", rest.join("/"));
+    f = appUiFile(id, rest.join("/"));
   } else f = p === "dev/search-check.js" ? new URL("./search-check.js", import.meta.url) : path.join(ROOT, p);
   return fs.existsSync(f) && fs.statSync(f).isFile() ? { path: f, name: p } : null;
 }
@@ -9842,6 +9845,53 @@ async function nonrootWidgetsCheck() {
   }
 }
 
+/**
+ * NI1 (nonroot-islands; docs/research/nonroot-parity.md #2): without root the registry has nothing, so islands come from
+ * the launcher's own apps (apps.local -> apps/localapps.ts). An island whose app keeps its data in SpacetimeDB says
+ * what it waits for ("starting PowOS Linux…", or the image's download), never an empty "…"; one without a database
+ * (What needs me) is found and loads its module; a rooted host's answer changes nothing.
+ */
+async function nonrootIslandsCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const L = await window.__gw.mod("./apps/localapps.ts");
+  S.page.value = 0;
+  await window.__gw.settled();
+  const page = S.pages.value[0];
+  const had = S.home.value;
+  const hadLocal = L.localApps.value;
+  const man = (id, db) => JSON.stringify({ id, name: id, version: "1", module: db ? { database: db } : null, widgets: [{ id: "main", name: `${id} island`, kind: "island", entry: "widgets/main.js", size: "2x2" }] });
+  const app = (id, db) => ({ id, name: id, version: "1+apk1", database: db, tier: 0, manifest: man(id, db) });
+  const isl = (id, x, y) => ({ key: `panel:app:${id}/main`, kind: "panel", name: `app:${id}/main`, page, cell: { x, y, w: 2, h: 2 }, resizable: true, minSize: [2, 1], size: [2, 2] });
+  const set = (stdb, rooted = false) => (L.localApps.value = { rooted, stdb, mb: 300, apps: [app("gate.db", "gate-db"), app("gate.nodb", "")] });
+  S.home.value = { ...had, items: [isl("gate.db", 0, 0), isl("gate.nodb", 2, 0)] };
+  const tile = (id) => document.querySelector(`.home-tile[data-key="panel:app:${id}/main"]`);
+  const text = (id) => tile(id)?.textContent.replace(/\s+/g, " ").trim() ?? "(no tile)";
+  const fails = [];
+  const step = async (stdb, rooted, rules) => {
+    set(stdb, rooted);
+    await new Promise((ok) => setTimeout(ok, 300));
+    await window.__gw.settled();
+    for (const [ok, line] of rules()) if (!ok) fails.push(`NI1 (${rooted ? "rooted" : stdb}): ${line}`);
+  };
+  try {
+    // Rooted (first: a loaded island keeps its module): the registry only, as before - no local apps, nothing waits.
+    await step("starting", true, () => [[!/starting PowOS Linux|gate\.db island|gate\.db live/.test(text("gate.db")), `rooted, the local apps were used: "${text("gate.db")}"`]]);
+    await step("starting", false, () => [
+      [/gate\.db island/.test(text("gate.db")) && /starting PowOS Linux/.test(text("gate.db")), `the database island doesn't say it's starting: "${text("gate.db")}"`],
+      [/gate\.nodb live/.test(text("gate.nodb")), `the island without a database isn't found / loaded: "${text("gate.nodb")}"`],
+    ]);
+    await step("image", false, () => [
+      [/needs the PowOS Linux image/.test(text("gate.db")) && /Download \(300 MB\)/.test(text("gate.db")), `the image state doesn't offer the download: "${text("gate.db")}"`],
+    ]);
+    await step("missing", false, () => [[/needs a newer PowOS Linux image/.test(text("gate.db")), `the image without SpacetimeDB: "${text("gate.db")}"`]]);
+    await step("up", false, () => [[/gate\.db live/.test(text("gate.db")), `SpacetimeDB up, the island isn't loaded: "${text("gate.db")}"`]]);
+    return fails;
+  } finally {
+    S.home.value = had;
+    L.localApps.value = hadLocal;
+  }
+}
+
 /** WG1's steps in one page, the windows and home restored after. */
 async function gridSnapScene(r) {
   try {
@@ -12337,6 +12387,9 @@ try {
   // NR1: on a phone without root, widgets needing Linux say what they need (nonroot-widgets; the user, 11-03).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "nonroot-widgets", { width: 412, height: 915 }).then((r) => whenReady(r, () => r.page.evaluate(nonrootWidgetsCheck))));
+  // NI1: on a phone without root, the launcher's own apps' islands are on home and say what they wait for (nonroot-islands).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "nonroot-islands", { width: 412, height: 915 }).then((r) => whenReady(r, () => r.page.evaluate(nonrootIslandsCheck))));
   // WG1: a window dragged on home snaps into the free cells beside the widgets (ww-gridsnap-unfolded; the user, 10-31 15:49).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-gridsnap-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => gridSnapScene(r))));

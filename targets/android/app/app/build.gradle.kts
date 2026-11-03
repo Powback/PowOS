@@ -90,6 +90,34 @@ val copyShell by tasks.registering(Sync::class) {
 android.sourceSets.getByName("main").assets.srcDir(shellAssets)
 tasks.named("preBuild") { dependsOn(copyShell) }
 
+// PowOS apps the APK ships (the repo's apps/bundled.list), built by build-app.sh (apps/build.sh) just before: each as
+// assets/apps/<app id>/{powos-app.json, ui/, module.wasm} - the launcher's own apps on a phone without root, where no
+// `powos app install` runs (shell/LocalApps.kt). Versioned with the APK. Also the no-root services' starter
+// (lib/apps/powos-noroot-services, run in the PowOS image by linux/EngineServices.kt).
+val appsDir = rootProject.file("../../../apps")
+val appsAssets = layout.buildDirectory.dir("generated/apps-assets").get().asFile
+val bundledApps =
+    appsDir.resolve("bundled.list").takeIf { it.isFile }?.readLines().orEmpty()
+        .map { it.substringBefore('#').trim() }
+        .filter { it.isNotEmpty() }
+val copyApps by tasks.registering(Sync::class) {
+    for (app in bundledApps) {
+        val dir = appsDir.resolve(app)
+        @Suppress("UNCHECKED_CAST")
+        val id = (groovy.json.JsonSlurper().parse(dir.resolve("powos-app.json")) as Map<String, Any?>)["id"] as String
+        from(dir.resolve("powos-app.json")) { into("apps/$id") }
+        from(dir.resolve("out/ui")) { into("apps/$id/ui") }
+        from(dir.resolve("out")) {
+            include("module.wasm")
+            into("apps/$id")
+        }
+    }
+    from(rootProject.file("../../../lib/apps/powos-noroot-services"))
+    into(appsAssets)
+}
+android.sourceSets.getByName("main").assets.srcDir(appsAssets)
+tasks.named("preBuild") { dependsOn(copyApps) }
+
 composeCompiler {
     stabilityConfigurationFiles.add(rootProject.layout.projectDirectory.file("app/compose-stability.conf"))
 }

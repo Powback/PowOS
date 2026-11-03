@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""powos-noroot-services - PowOS's system services on a phone WITHOUT root: SpacetimeDB (127.0.0.1:3410) and the App
+API runtime (127.0.0.1:3411), started inside the PowOS Linux image the engine installed (lotfix, no proot), and the
+APK's own apps' modules published to it (docs/research/nonroot-parity.md #2).
+
+On a rooted phone powos-start.sh runs powos-supervisor as root in PowOS's own mount namespace; without root there is
+no root, no `powos` user and no namespace, so the launcher (linux/EngineServices.kt) runs this - shipped in the APK,
+the same version as it - through EngineGuest each time the PowOS image is ready and SpacetimeDB doesn't answer.
+It reads the same service manifests (/usr/lib/powos/apps/services/<id>.json: exec, data, prepare, env) and starts
+each one that isn't listening, detached, logging to /var/log/powos/<id>.log. Idempotent: a service already listening
+is left alone.
+
+HACK: no budgets, restarts or idle unload here (powos-supervisor's job): the supervisor needs root (STATE in /run,
+user switches through powos-runtime). Real fix: powos-supervisor gets a no-root mode (its own uid, no user switch,
+state under XDG_RUNTIME_DIR) and the launcher runs that instead; then this goes.
+
+  powos-noroot-services [BUNDLED_DIR]   BUNDLED_DIR: <database>.wasm files to publish (the APK's apps' modules)
+"""
+import hashlib
+import json
+import os
+import socket
+import subprocess
+import sys
+import time
+import urllib.request
+
+SERVICES = os.environ.get("POWOS_SERVICES", "/usr/lib/powos/apps/services")
+STDB = "http://127.0.0.1:3410"
+LOGS = "/var/log/powos"
+# Which services, in order: SpacetimeDB first (the apps' modules publish to it).
+WANTED = ("spacetimedb", "app-api")
+# The App API's files where the rooted deploy puts them, else the image's baked source tree (lib/self-phone.sh).
+FALLBACK = {"/usr/lib/powos/app-api/appcap_serve.py": "/usr/lib/powos/src/tools/app-api/appcap_serve.py"}
+
+
+def listening(addr, timeout=0.3):
+    host, port = addr.rsplit(":", 1)
+    try:
+        socket.create_connection((host, int(port)), timeout).close()
+        return True
+    except OSError:
+        return False
+
+
+def command(manifest):
+    """The service's exec with ${data} filled in, its program found (FALLBACK), or None when the image hasn't it."""
+    b = manifest["backend"]
+    exe = [x.replace("${data}", b.get("data", "")) for x in b["exec"]]
+    exe = [FALLBACK.get(x, x) if not os.path.exists(x) else x for x in exe]
+    return exe if all(os.path.exists(x) for x in exe if x.startswith("/usr/")) else None
+
+
+def start(name):
+    path = os.path.join(SERVICES, f"{name}.json")
+    if not os.path.exists(path):
+        return f"{name}: no manifest ({path})"
+    m = json.load(open(path))
+    listen = m.get("needs", {}).get("listen", [])
+    if listen and listening(listen[0]):
+        return f"{m['id']}: up"
+    exe = command(m)
+    if not exe:
+        return f"{m['id']}: not in this image"
+    b = m["backend"]
+    data = b.get("data")
+    if data:
+        os.makedirs(data, exist_ok=True)
+        for step in b.get("prepare", []):
+            subprocess.run(["sh", "-c", step], cwd=data, check=False)
+    env = dict(os.environ)
+    env.update(b.get("env", {}))
+    env.update(m.get("budget", {}).get("phone", {}).get("env", {}))
+    if not os.path.isdir(env.get("HOME", "/")):
+        env["HOME"] = os.environ.get("HOME", "/root")
+    os.makedirs(LOGS, exist_ok=True)
+    log = open(os.path.join(LOGS, f"{m['id']}.log"), "ab")
+    subprocess.Popen(exe, cwd=data or "/", env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+    return f"{m['id']}: started"
+
+
+def exists(db):
+    try:
+        with urllib.request.urlopen(f"{STDB}/v1/database/{db}", timeout=2) as r:
+            return r.status == 200
+    except OSError:
+        return False
+
+
+def publish(bundled):
+    """Each <database>.wasm the APK ships, published when it isn't the one last published from it (its sha)."""
+    if not bundled or not os.path.isdir(bundled):
+        return []
+    for _ in range(60):
+        if listening("127.0.0.1:3410"):
+            break
+        time.sleep(0.5)
+    else:
+        return ["publish: SpacetimeDB didn't come up"]
+    stamps = "/var/lib/powos/stdb/bundled"
+    os.makedirs(stamps, exist_ok=True)
+    out = []
+    for f in sorted(os.listdir(bundled)):
+        if not f.endswith(".wasm"):
+            continue
+        db, wasm = f[: -len(".wasm")], os.path.join(bundled, f)
+        sha = hashlib.sha256(open(wasm, "rb").read()).hexdigest()
+        stamp = os.path.join(stamps, f"{db}.sha")
+        same = os.path.exists(stamp) and open(stamp).read().strip() == sha
+        if same and exists(db):
+            continue
+        r = subprocess.run(["spacetime", "publish", "-y", "-s", STDB, "--bin-path", wasm, db], capture_output=True, text=True)
+        if r.returncode == 0:
+            open(stamp, "w").write(sha)
+            out.append(f"{db}: published")
+        else:
+            out.append(f"{db}: publish failed: {(r.stdout + r.stderr).strip()[-300:]}")
+    return out
+
+
+def main():
+    for line in [start(s) for s in WANTED] + publish(sys.argv[1] if len(sys.argv) > 1 else ""):
+        print(line, flush=True)
+
+
+if __name__ == "__main__":
+    main()
