@@ -32,6 +32,11 @@ export const barRole = computed<BarRole>(() => {
 });
 /** What the role says in the empty field (home's says nothing: the prompt glyph alone, as it always had). */
 const ROLE_HINT: Record<BarRole, string | undefined> = { search: undefined, apps: "Search apps", ai: "Message the manager" };
+/**
+ * HF1 (the coordinator, 11-03: "the hint is clipped mid-word"): each hint's shorter forms, longest first - the pill shows
+ * the longest that fits its field's width (useFittedHint), never a word cut off.
+ */
+const HINT_FORMS: Record<string, string[]> = { "Message the manager": ["Message the manager", "Message manager", "Message"], "Search apps": ["Search apps", "Search"] };
 const ROLE_LABEL: Record<BarRole, string> = { search: "Search", apps: "Search apps", ai: "Message the manager" };
 
 /** The AI page's send into the chat thread: the one its own field had (powai.tsx registers it: onManagerSend). */
@@ -275,14 +280,38 @@ export function Pill({
   const box = useRef<HTMLDivElement>(null);
   const targets = [target, ...hears];
   useSubmitFinishes(box, targets);
+  const fitted = useFittedHint(box, hint);
   return (
     <div ref={box} class={`${cls} pill tile ${sending ? "sending" : ""} ${empty ? "empty" : ""}`}>
       <Lead empty={empty} filled={!!field.value} icon={icon} clear={() => (drop(...targets), field.onInput(""))} />
-      <GrowField {...(field as { value: string; onInput: (v: string) => void })} placeholder={field.placeholder ?? hint} />
+      <GrowField {...(field as { value: string; onInput: (v: string) => void })} placeholder={field.placeholder ?? fitted} />
       <Mic target={target} />
       {send && <PillSend targets={targets} value={field.value} />}
     </div>
   );
+}
+
+/** HF1: the longest of [hint]'s forms (HINT_FORMS) whose text fits the pill's field, re-picked as the field resizes. */
+function useFittedHint(box: { current: HTMLElement | null }, hint: string | undefined) {
+  const [fit, setFit] = useState(hint);
+  useLayoutEffect(() => {
+    const field = box.current?.querySelector("textarea");
+    if (!field || !hint) return setFit(hint);
+    const forms = HINT_FORMS[hint] ?? [hint];
+    const ctx = document.createElement("canvas").getContext("2d");
+    const pick = () => {
+      const cs = getComputedStyle(field);
+      const room = field.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+      if (!ctx || room <= 0) return setFit(forms[forms.length - 1]);
+      ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+      setFit(forms.find((f) => ctx.measureText(f).width <= room) ?? forms[forms.length - 1]);
+    };
+    pick();
+    const ro = new ResizeObserver(pick);
+    ro.observe(field);
+    return () => ro.disconnect();
+  }, [hint]);
+  return fit;
 }
 
 /** The bar's field: a held mic asks PowOS AI, a tap dictates into the search; the drawer comes up to show either. */

@@ -783,10 +783,12 @@ export async function barFootSame(below = "1") {
   // OE1 (the user, 11-03 21:14: "Why is the search [bar] just under the chat here?"): on every tab of the AI page the
   // pill is home's own rect - x, width, foot and height - never fitted to the chat column.
   const tabs = {};
-  for (const t of ["chat", "fleet", "progress", "devices"]) tabs[`ai-${t}`] = await bfAiTab(S, t);
+  const hints = [];
+  for (const t of ["chat", "fleet", "progress", "devices"]) (tabs[`ai-${t}`] = await bfAiTab(S, t)), hints.push(...bfHintWhole(`${mode} AI ${t}`));
   S.aiScreen.value = "chat";
   await bfPill(S, 0, 0);
   const launcher = await bfPill(S, 0, 1);
+  hints.push(...bfHintWhole(`${mode} launcher`));
   await bfPill(S, 0, 0);
   const at = `${mode}, pill ${below ? "under" : "over"} the dock`;
   const gap = below ? await bfDockGap() : [];
@@ -794,7 +796,22 @@ export async function barFootSame(below = "1") {
   console.info(`[barFootSame] ${at}: home ${JSON.stringify(home)} ${JSON.stringify(tabs)} launcher ${JSON.stringify(launcher)}`);
   // Over the dock, home's own pill sits above it (the launcher's comes down to the foot, the dock gone): there the
   // launcher keeps the bottom/height check against the AI page's foot only.
-  return [...bfCompare(at, home, tabs), ...(below ? bfCompare(at, home, { launcher }) : []), ...bfGapFails(at, gap)];
+  return [...bfCompare(at, home, tabs), ...(below ? bfCompare(at, home, { launcher }) : []), ...bfGapFails(at, gap), ...hints];
+}
+
+/** HF1: the pill's hint whole in its field - never a word cut off at the field's edge (a text span of its font measures it). */
+function bfHintWhole(where) {
+  const f = document.querySelector(".home > .bar .bar-pill textarea");
+  if (!f || !f.placeholder || f.value) return [];
+  const cs = getComputedStyle(f);
+  const room = f.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const span = document.createElement("span");
+  span.textContent = f.placeholder;
+  span.style.cssText = `position:fixed;visibility:hidden;white-space:nowrap;font:${cs.font};letter-spacing:${cs.letterSpacing}`;
+  document.body.append(span);
+  const w = span.getBoundingClientRect().width;
+  span.remove();
+  return w <= room + 0.5 ? [] : [`${where}: the hint "${f.placeholder}" (${Math.round(w)} px) is cut in its ${Math.round(room)} px field`];
 }
 
 /**

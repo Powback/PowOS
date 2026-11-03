@@ -320,7 +320,7 @@
   border-radius: 20px;
 }
 .pill .grow::placeholder { color: var(--color-muted); }
-/* OE1: one row whatever the role's hint ("Message the manager" in home's narrow wide-foot pill wrapped to two). */
+/* OE1/HF1: one row whatever the role's hint (bar.tsx useFittedHint picks a form that fits; the ellipsis is the last net). */
 .pill .grow::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The leading slot (bar.tsx Lead, SB5): empty, the prompt glyph - not words (its name is the field's aria-label), blinking
    in place of the caret while focused; with text, an × that clears it. One 40 px slot (the touch target, as the mic's)

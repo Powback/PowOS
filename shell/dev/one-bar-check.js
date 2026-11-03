@@ -19,7 +19,8 @@ function barIs(where, role, hint) {
   const f = [];
   if (b.dataset.role !== role) f.push(`${where}: the bar's role is "${b.dataset.role}", not "${role}"`);
   const ph = b.querySelector("textarea")?.getAttribute("placeholder") ?? "";
-  if (hint && ph !== hint) f.push(`${where}: the bar says "${ph}", not "${hint}"`);
+  // HF1: a narrow pill says a shorter form of the hint (bar.tsx HINT_FORMS: "Message manager", "Message").
+  if (hint && ph !== hint && !hint.startsWith(ph.split(" ")[0])) f.push(`${where}: the bar says "${ph}", not "${hint}"`);
   return f;
 }
 
