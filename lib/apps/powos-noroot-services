@@ -6,6 +6,8 @@ APK's own apps' modules published to it (docs/research/nonroot-parity.md #2).
 On a rooted phone powos-start.sh runs powos-supervisor as root in PowOS's own mount namespace; without root there is
 no root, no `powos` user and no namespace, so the launcher (linux/EngineServices.kt) runs this - shipped in the APK,
 the same version as it - through EngineGuest each time the PowOS image is ready and SpacetimeDB doesn't answer.
+Their "TCP" ports are private Unix sockets here (the launcher's loopback-unix.c preload, docs/research/nonroot-parity.md
+"Who can reach SpacetimeDB and the App API"): 127.0.0.1:3410 below works only for PowOS's own uid.
 It reads the same service manifests (/usr/lib/powos/apps/services/<id>.json: exec, data, prepare, env) and starts
 each one that isn't listening, detached, logging to /var/log/powos/<id>.log. Idempotent: a service already listening
 is left alone.

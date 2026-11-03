@@ -399,9 +399,34 @@ public class SessionService extends Service {
             env.put("TERMUX_VA_GPU_BACKEND", "kgsl");
             env.put("TERMUX_VA_SOCKET", new File(run, "termux-va.sock").getPath());
         }
+        // No root: PowOS's service ports (SpacetimeDB, the App API) are private Unix sockets in loopbackDir, not TCP
+        // ports every app on the phone could reach (lotfix-run preloads loopback-unix.c; docs/research/nonroot-parity.md).
+        // Rooted: powos-start.sh locks the TCP ports to this uid instead, so nothing here.
+        if (!RootMode.enabled()) {
+            env.put("POWOS_LOOPBACK_DIR", loopbackDir(ctx).getPath());
+            env.put("POWOS_LOOPBACK_PORTS", LOOPBACK_PORTS);
+            env.put("POWOS_LOOPBACK_PRELOAD", ctx.getApplicationInfo().nativeLibraryDir + "/libpowosloopback.so");
+        }
         env.remove("WAYLAND_DISPLAY");
         env.remove("DISPLAY");
         return env;
+    }
+
+    /** The no-root PowOS image's service ports, which loopback-unix.c turns into Unix sockets. */
+    public static final String LOOPBACK_PORTS = "3410,3411";
+
+    /** Where those sockets are (<port>.sock): the app's private files, 0700, so only this app's uid opens them. */
+    public static File loopbackDir(Context ctx) {
+        File d = new File(runDir(ctx), "loopback");
+        if (d.mkdirs() || d.isDirectory()) {
+            d.setReadable(false, false);
+            d.setWritable(false, false);
+            d.setExecutable(false, false);
+            d.setReadable(true, true);
+            d.setWritable(true, true);
+            d.setExecutable(true, true);
+        }
+        return d;
     }
 
     /** Android's default network -> run/network ("wifi <strength> <ssid>" | "wired" | "none"), read by android-nm. */

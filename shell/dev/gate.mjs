@@ -9849,7 +9849,8 @@ async function nonrootWidgetsCheck() {
  * NI1 (nonroot-islands; docs/research/nonroot-parity.md #2): without root the registry has nothing, so islands come from
  * the launcher's own apps (apps.local -> apps/localapps.ts). An island whose app keeps its data in SpacetimeDB says
  * what it waits for ("starting PowOS Linux…", or the image's download), never an empty "…"; one without a database
- * (What needs me) is found and loads its module; a rooted host's answer changes nothing.
+ * (What needs me) is found and loads its module; a rooted host's answer changes nothing. Without root the page reaches
+ * SpacetimeDB through the launcher's token gate's URL (apps.local stdbUrl), rooted through ws://127.0.0.1:3410.
  */
 async function nonrootIslandsCheck() {
   const S = await window.__gw.mod("./state.ts");
@@ -9885,6 +9886,14 @@ async function nonrootIslandsCheck() {
     ]);
     await step("missing", false, () => [[/needs a newer PowOS Linux image/.test(text("gate.db")), `the image without SpacetimeDB: "${text("gate.db")}"`]]);
     await step("up", false, () => [[/gate\.db live/.test(text("gate.db")), `SpacetimeDB up, the island isn't loaded: "${text("gate.db")}"`]]);
+    // No root, SpacetimeDB only through the launcher's token gate (nonroot-auth): the page connects to the gate's URL,
+    // never the bare port; rooted, the gate URL is ignored.
+    const D = await window.__gw.mod("./apps/stdb.ts");
+    const gateUrl = "ws://127.0.0.1:40123/_powos/" + "ab".repeat(32) + "/";
+    L.localApps.value = { rooted: false, stdb: "up", mb: null, stdbUrl: gateUrl, apps: [] };
+    if (D.stdbUri() !== gateUrl) fails.push(`NI1 (gate): no root, the page uses ${D.stdbUri()}, not the gate's URL`);
+    L.localApps.value = { rooted: true, stdb: "up", mb: null, stdbUrl: gateUrl, apps: [] };
+    if (D.stdbUri() !== "ws://127.0.0.1:3410/") fails.push(`NI1 (gate): rooted, the page uses ${D.stdbUri()}, not ws://127.0.0.1:3410/`);
     return fails;
   } finally {
     S.home.value = had;

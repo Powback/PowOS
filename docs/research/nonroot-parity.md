@@ -60,5 +60,44 @@ feature calls `RootedGuest` - `su`, which isn't there.
 - `shell/apps/localapps.ts`: the page polls `apps.local` (every 3 s until SpacetimeDB is up); `useRegistry` /
   `watchRegistry` add the local apps when not rooted (a registry row wins); `ui/island.tsx` `IslandWait`. Rooted:
   `apps.local` says `rooted: true` and nothing changes. Gate scene `nonroot-islands` (NI1), JVM `LocalAppsTest`.
-- Open: without root 127.0.0.1:3410/3411 are not locked to PowOS's uid (the rooted path's iptables rule needs root) -
-  any app on the phone can reach them. Needs SpacetimeDB auth (a token the launcher holds) before this is sold.
+- Was open, fixed 11-04 (nonroot-auth): who can reach 3410/3411 without root - next section.
+
+## Who can reach SpacetimeDB and the App API (no root; 11-04, nonroot-auth)
+
+**Threat.** Android's loopback is one network for every app. A TCP port PowOS listens on (SpacetimeDB 3410: every
+PowOS app's database and the agents' board; the App API 3411: app actions with injected credentials) answers any
+installed app, which could then read and write PowOS's databases and call the App API as PowOS. Rooted phones lock
+the ports to the PowOS uid (`rooted/powos-start.sh`, an iptables owner match); without root nothing can filter by uid,
+and SpacetimeDB has no "require a token" mode (anonymous connections get a fresh identity; modules don't check
+`ctx.sender`).
+
+**Fix: no TCP port at all.** In the no-root image the services' binds become Unix sockets in the app's private files:
+- `targets/android/app/engine/native-src/launcher/loopback-unix.c` (`libpowosloopback.so`, freestanding so the NDK
+  builds a library glibc programs can load): `bind()` of a TCP socket to a port in `POWOS_LOOPBACK_PORTS` (3410,3411,
+  any address) binds `$POWOS_LOOPBACK_DIR/<port>.sock` (mode 0600) instead; `connect()` to 127/8 or ::1 on those
+  ports connects there (no socket file = `ECONNREFUSED`); `accept()` drops a peer of another uid (`SO_PEERCRED`,
+  defence in depth); addresses and TCP-only socket options are faked so SpacetimeDB, Python's http.server/urllib, curl
+  and the spacetime CLI run unchanged. Everything else passes to the next definition (android-compat, fakechroot).
+- `lotfix-run.c` preloads it first when `POWOS_LOOPBACK_PRELOAD`/`_DIR` are set; `SessionService.archEnv` sets them
+  only when not rooted (dir `files/run/loopback`, 0700). So every program of the image - the services, the starter
+  (`powos-noroot-services`), the agents' tools (`powos agents`, `powos-agentsd`), `powos app`, `appcap_add` - reaches
+  `127.0.0.1:3410/3411` exactly as before, over the private socket. App data dirs are per-app (0700 + SELinux
+  categories), so no other app can open the sockets.
+- The WebView can't open a Unix socket: `linux/LoopbackGate.kt` listens on a random 127.0.0.1 port per service and
+  forwards to the socket only requests whose path starts with `/_powos/<token>/` (each request on a connection is
+  checked; constant-time compare; stripped before the service sees it); anything else gets 403 and never opens the
+  socket. The token is per install, random (32 bytes), in `files/powos-loopback.token`. The page gets its SpacetimeDB
+  URL from `apps.local` (`stdbUrl`, `shell/apps/stdb.ts stdbUri()` - the SDK resolves `v1/...` against it, so the
+  prefix survives, CORS preflights included); `ShellNet` routes `http://127.0.0.1:3410|3411` (`net.fetch` from the
+  App API app, search, composed widgets) through the gate itself, so apps never see the token. A random port can't be
+  squatted by another app to phish the token, and the token alone opens nothing but the gate.
+- `EngineServices.state` checks the socket (`LoopbackGate.up`), not a TCP connect.
+- Rooted: unchanged (no env, no preload, no gate; `apps.local` says rooted and the page keeps `ws://127.0.0.1:3410`).
+
+Left: a statically linked guest program (Go) bypasses the preload and simply can't connect (fails closed). The page's
+JS holds the token; PowOS apps' islands run in that page and already have full access through the host.
+
+Tests: `test/tier1/test-loopback-unix.sh` (real programs under the preload in gcc:14: no TCP listener, same uid
+works, another uid refused by the file and by `SO_PEERCRED`, other ports untouched; the NDK-built library loads under
+glibc too); JVM `LoopbackGateTest` (no token / wrong token / a later token-less request on the same connection:
+403 and nothing reaches the service; PowOS's own requests forwarded with the token stripped).

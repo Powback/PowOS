@@ -20,6 +20,11 @@ export type StdbState = "up" | "starting" | "image" | "missing";
 export interface LocalApps {
   rooted: boolean;
   stdb: StdbState;
+  /**
+   * No root: SpacetimeDB for this page, through the launcher's token gate (linux/LoopbackGate.kt) - the image's
+   * SpacetimeDB listens on no TCP port any other app could reach. Absent: the default ws://127.0.0.1:3410.
+   */
+  stdbUrl?: string;
   /** The image's download size, MB, when known (stdb "image"). */
   mb: number | null;
   apps: RegistryApp[];

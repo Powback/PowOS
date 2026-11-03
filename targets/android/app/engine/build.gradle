@@ -57,6 +57,10 @@ def executables = [
     // termux-va (lfdevs, GPL-3.0): MediaCodec hardware video for the VA-API of Mesa's termuxva bridge
     "libtermuxva.so"   : ["native-src/third_party/termux-va/daemon/termux-va.c", "-std=c11",
                           "-Inative-src/third_party/termux-va/common", "-lmediandk", "-llog", "-landroid"],
+    // Preloaded into the no-root PowOS image's glibc programs by lotfix-run (not run by Android): PowOS's service
+    // ports as private Unix sockets. Freestanding, for aarch64-linux-gnu: no Bionic in a glibc process.
+    "libpowosloopback.so": ["native-src/launcher/loopback-unix.c", "-shared", "-fPIC", "-nostdlib", "-ffreestanding",
+                            "-fno-stack-protector", "--target=aarch64-linux-gnu", "-fuse-ld=lld"],
 ]
 // Paths resolved here, at configuration time: the PowOS build runs with Gradle's configuration cache
 // (Omalauncher's gradle.properties), which forbids calling the script's file() while the task executes.
@@ -76,7 +80,7 @@ tasks.register("buildExecutables") {
                     (host == "windows-x86_64" ? ".cmd" : "")
         jniOut.mkdirs()
         resolvedExecutables.each { name, args ->
-            def proc = ([clang, "-O2", "-Wall", "-pie", "-Wl,-z,max-page-size=16384",
+            def proc = ([clang, "-O2", "-Wall"] + (args.contains("-shared") ? [] : ["-pie"]) + ["-Wl,-z,max-page-size=16384",
                          "-o", new File(jniOut, name).path] + args).execute()
             proc.waitForProcessOutput(System.out, System.err)
             if (proc.exitValue() != 0)

@@ -59,6 +59,8 @@ object LocalApps {
     fun json(ctx: Context): JSONObject {
         val rooted = RootedGuest.enabled
         val o = JSONObject().put("rooted", rooted).put("stdb", if (rooted) "up" else EngineServices.state(ctx)).put("mb", JSONObject.NULL)
+        // No root: SpacetimeDB for the page only through the token gate (the TCP port 3410 isn't there).
+        if (!rooted) dev.omalauncher.linux.LoopbackGate.url(3410)?.let { o.put("stdbUrl", "ws" + it.removePrefix("http")) }
         val apps = JSONArray()
         if (!rooted) {
             for (id in (installed(ctx) + bundled(ctx)).distinct()) {

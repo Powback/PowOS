@@ -3,8 +3,6 @@ package dev.omalauncher.linux
 import android.content.Context
 import android.util.Log
 import java.io.File
-import java.net.InetSocketAddress
-import java.net.Socket
 import java.nio.file.Files
 import java.nio.file.LinkOption
 
@@ -30,12 +28,14 @@ object EngineServices {
     /**
      * Where SpacetimeDB stands without root (shell/apps/localapps.ts StdbState): "image" - the PowOS image isn't on the
      * phone; "missing" - it is, without SpacetimeDB; "up" - it answers; "starting" otherwise (and a start is kicked).
-     * Blocking (a loopback connect, 300 ms at most): never on the main thread.
+     * Blocking (a Unix socket connect): never on the main thread.
      */
     fun state(ctx: Context): String {
         val image = andro.marchy.SessionService.rootfsReady(ctx)
         val has = image && present(andro.marchy.SessionService.rootfs(ctx), "usr/bin/spacetimedb-standalone")
-        val up = has && listening(STDB_PORT)
+        // SpacetimeDB's socket (no TCP port without root: LoopbackGate), and the gate the page reaches it through.
+        if (has) LoopbackGate.ensure(ctx)
+        val up = has && LoopbackGate.up(ctx, STDB_PORT)
         val s = stateOf(image, has, up)
         if (s == "starting") start(ctx)
         return s
@@ -91,7 +91,4 @@ object EngineServices {
         root: File,
         path: String,
     ) = Files.exists(File(root, path).toPath(), LinkOption.NOFOLLOW_LINKS)
-
-    private fun listening(port: Int) =
-        runCatching { Socket().use { it.connect(InetSocketAddress("127.0.0.1", port), 300) } }.isSuccess
 }
