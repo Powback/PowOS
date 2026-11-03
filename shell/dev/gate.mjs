@@ -1603,6 +1603,35 @@ async function surfaceRenderScan(surface) {
   return fails;
 }
 
+/**
+ * f428: a recording a check started (perf-scenarios.sh sets window.__perfSource = "verify" with its click on the meter)
+ * is saved with source "verify" (ShellBridge's perf.save then mails no one: PerfTrace.kt) and sent to PowOS AI as no
+ * ask; a user's own tap (no mark) is saved with source "user" and sent as the "Perf trace (fps meter ..." ask, as before.
+ */
+async function perfSourceCheck() {
+  const G = window.__gw;
+  const M = await G.mod("./ui/fpsmeter.tsx"), { powos } = await G.mod("./bridge.ts");
+  const saved = [], asked = [], save = powos.perf.save, send = powos.ai.send;
+  powos.perf.save = async (json) => { saved.push(JSON.parse(json)); return "/run/powos-app/powos-ai-shared/perf-gate.json"; };
+  powos.ai.send = async (text) => { asked.push(text); };
+  try {
+    window.__perfSource = "verify";
+    const a = M.takeSource(), cleared = !("__perfSource" in window), b = M.takeSource();
+    await M.saveAndSend({ summary: { fps: 1 } }, { fps: 1 }, a);
+    const checkAsked = asked.length;
+    await M.saveAndSend({ summary: { fps: 2 } }, { fps: 2 }, b);
+    return [
+      [a === "verify", `a check's mark read as "${a}"`],
+      [cleared, "the check's mark not cleared at the record's start (the next user tap would be a check's)"],
+      [b === "user", `no mark read as "${b}", not a user's recording`],
+      [saved[0]?.source === "verify", `a check's trace not saved with source verify: ${JSON.stringify(saved[0])}`],
+      [checkAsked === 0, `a check's recording filed a PowOS AI ask: ${String(asked[0]).slice(0, 80)}`],
+      [saved[1]?.source === "user", `a user's trace not saved with source user: ${JSON.stringify(saved[1])}`],
+      [asked.length === 1 && /^Perf trace \(fps meter, tapped record\/stop\)/.test(asked[0]), `a user's recording didn't file its ask: ${JSON.stringify(asked)}`],
+    ].filter(([ok]) => !ok).map(([, m]) => `perf-source: ${m}`);
+  } finally { powos.perf.save = save; powos.ai.send = send; delete window.__perfSource; }
+}
+
 async function staleWide(page, to) {
   const isWide = () => page.evaluate(() => !!document.querySelector(".home.wide"));
   const desk = { width: 1280, height: 800 };
@@ -12395,6 +12424,9 @@ try {
   // and when the last user stops Preact's options hooks are the originals again - zero cost when off.
   if (process.env.SHELL_PAGES !== "0" && fs.existsSync(path.join(ROOT, "ui/renderscan.ts")))
     runs.push(open(browser, `${ORIGIN}/index.html`, "render-scan").then((r) => whenReady(r, () => r.page.evaluate(renderScanCheck))));
+  // f428: a check's fps-meter recording files no ask and no mail; a user's still does (perfSourceCheck).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "perf-source").then((r) => whenReady(r, () => r.page.evaluate(perfSourceCheck))));
   // The same on the surfaces' own pages (renderfollow.ts): each surface's overlay and recording count its renders.
   if (process.env.SHELL_PAGES !== "0" && fs.existsSync(path.join(ROOT, "ui/renderfollow.ts"))) {
     for (const surface of ["shade", "lock", "recents", "pull", "assist"])

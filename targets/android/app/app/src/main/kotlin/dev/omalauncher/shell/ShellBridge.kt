@@ -501,7 +501,8 @@ class ShellBridge(
                 val json = a.getString(0)
                 java.io.File(dir, name).writeText(json)
                 val path = "/run/powos-app/powos-ai-shared/$name"
-                sendPerfToCoordinator(json, path)
+                // A check's recording (source "verify": perf-scenarios.sh) is saved for the check but mailed to no one (f428).
+                if (perfMailWanted(json)) sendPerfToCoordinator(json, path)
                 path
             }
             "ai.chat" -> aiChat()

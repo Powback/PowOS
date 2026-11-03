@@ -308,7 +308,22 @@ export function summarise({ t, dt, n, evs, durMs, mode }: { t: Float32Array; dt:
   };
 }
 
+/**
+ * Who started this recording: "verify" when a check started it (tools/phone/verify/perf-scenarios.sh sets
+ * window.__perfSource = "verify" on the bar's page in the same CDP eval as its click on the meter; a finger can't), else
+ * "user". One-shot: read and cleared at the record's start. A check's trace is saved as before (the check reads it) but
+ * filed nowhere - no PowOS AI ask, no mail (f428: perf-scenarios' recordings came in as the user's perf reports).
+ */
+export function takeSource(): "verify" | "user" {
+  const w = window as { __perfSource?: string };
+  const s = w.__perfSource === "verify" ? "verify" : "user";
+  delete w.__perfSource;
+  return s;
+}
+let recSource: "verify" | "user" = "user";
+
 function beginRecord() {
+  recSource = takeSource();
   recStart = performance.now(); settleAt = recStart + SETTLE_MS; recN = 0;
   recT = new Float32Array(MAX_FRAMES); recDt = new Float32Array(MAX_FRAMES);
   observe(); rec = true;
@@ -320,12 +335,15 @@ function beginRecord() {
   stopTimer = window.setTimeout(() => void toggleRecord(), MAX_REC_MS);
 }
 
-async function saveAndSend(full: object, sum: object) {
+/** The trace saved (perf.save, which mails the coordinator unless source is "verify") and, for a user's, sent to PowOS AI. */
+export async function saveAndSend(full: object, sum: object, source: "verify" | "user" = "user") {
   let path: string | null = null;
-  try { path = (await powos.perf?.save?.(JSON.stringify(full))) ?? null; } catch { path = null; }
+  try { path = (await powos.perf?.save?.(JSON.stringify({ ...full, source }))) ?? null; } catch { path = null; }
+  if (source === "verify") return path;
   const text = `Perf trace (fps meter, tapped record/stop). ${path ? `Full data: ${path}` : "Full data could not be saved (host has no perf.save yet)."}\n` +
     "```json\n" + JSON.stringify(sum) + "\n```";
   try { await powos.ai.send(text, false); } catch (e) { console.error("perf send failed", e); }
+  return path;
 }
 
 /** Home's render scan (renderscan.ts) out of its detail: the trace's own "renders" section, not there twice. */
@@ -355,7 +373,7 @@ async function endRecord() {
   const full = { summary: sum, main: fromMain ? { frameDeltas: Array.from(mn.dt, (x) => Math.round(x * 10) / 10) } : undefined, when: new Date().toISOString(), ua: navigator.userAgent, dpr: devicePixelRatio,
     frameTimes: Array.from(recT.subarray(0, n), (x) => Math.round(x)), frameDeltas: Array.from(recDt.subarray(0, n), (x) => Math.round(x * 10) / 10), events, home, native, renders, surfaces };
   recT = new Float32Array(0); recDt = new Float32Array(0);
-  await saveAndSend(full, sum);
+  await saveAndSend(full, sum, recSource);
   busy = false;
   if (ui && !raf) drawText(ui); // the loop may sleep (home idle): clear the SEND label
 }

@@ -5,7 +5,8 @@
 # a DOM click on the bar's own page), the gesture N times by injected input (e2e-lib.sh: aborts when the user touches
 # the phone), the meter clicked again, the new perf-*.json pulled to $OUT/<scenario>.json and its summary printed
 # (fps p50/p5, frames over 33 ms, long tasks, native stalls, top renders). Runs only after the user has left the phone
-# for PERF_IDLE_S (default 600 s). Note: each recording is also posted to PowOS AI as the meter always does.
+# for PERF_IDLE_S (default 600 s). Each recording is marked a check's (window.__perfSource = "verify" with the start
+# click): saved as always, but filed as no PowOS AI ask and no coordinator mail (f428; a user's own tap still files both).
 # shade-scroll (S8'): the shade opened by the bridge's shade.open, its notification list (.notif-list) scrolled down
 # and up REPS times, the shade put away by shade_shut. The meter's fps is home's frames (the shade is its own page, the
 # meter takes only its renders), so the shade page's own rAF deltas are recorded beside it and gated: FAIL when their
@@ -32,7 +33,7 @@ case $METER0 in null|\{*) ;; *) METER0= ;; esac
 log "perf.meter at start: ${METER0:-unreadable}"
 
 # rec_on / rec_off <scenario>: the meter's record button, clicked on the status bar's page.
-rec_on() { BEFORE=$(newest); ev "(document.querySelector('.fps-meter').click(),'ok')" statusbar >/dev/null; sleep 0.8; }
+rec_on() { BEFORE=$(newest); ev "(window.__perfSource='verify',document.querySelector('.fps-meter').click(),'ok')" statusbar >/dev/null; sleep 0.8; }
 rec_off() {
   ev "(document.querySelector('.fps-meter').click(),'ok')" statusbar >/dev/null
   local f= i; for i in $(seq 1 20); do sleep 1; f=$(newest); [ -n "$f" ] && [ "$f" != "$BEFORE" ] && break; f=; done
