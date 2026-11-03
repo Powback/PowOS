@@ -9,8 +9,8 @@ gives the kernel's stub: the client's WSI attached nothing) or with one that alr
 silently. Nothing said which of these the game's copies hit.
 
 - Each copy from a KGSL DRI3 client buffer is counted by what the check found: waited (pending fence, with the
-  wait's duration on its end), already drawn (the client's own fence, signalled), stub (no client fence: copied
-  unsynchronized), export failed. The stub test reads the sync_file's first fence driver (SYNC_IOC_FILE_INFO).
+  wait's duration on its end), already drawn (the client's own fence, signalled), stub (the fence already signalled
+  or none: kernel 0005 returns the stub for signalled fences), export failed. The stub test reads the sync_file's first fence driver (SYNC_IOC_FILE_INFO).
 - One "Xwayland KGSL: last 30s: N Present copies from client buffers: ..." line per 30 s with copies, beside the
   existing KGSL stats line. The counting is xwayland-kgsl-copy-wait.h (unit test: test/copy-wait-test.c, run.sh).
 Reading it: stubs while checkered frames show -> the game's WSI doesn't attach its rendering fence (fix on the
@@ -58,7 +58,7 @@ index db76a0e..bbfccc0 100644
 +    xwl_kgsl_copy_wait_done(&xwl_kgsl_copy_waits, waited_us);
 +}
 +
-+/* A sync_file whose first fence is the kernel's stub: the dma-buf carried no fence (the client attached none). */
++/* A sync_file whose first fence is the kernel's stub: the dma-buf's fence had already signalled, or it had none. */
 +static Bool
 +xwl_glamor_kgsl_sync_file_is_stub(int fd)
 +{

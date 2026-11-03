@@ -1,0 +1,182 @@
+From: PowOS
+Subject: xwayland/kgsl: one GPU import per client dma-buf, reused on every present, freed after the GPU is done
+
+Broforce on the OnePlus Open (2026-11-03 22:32, kgsl tracefs, ~/.cache/powos-verify/bfo-2026-11-03_2232/): Xwayland
+re-imported the game's 4 swapchain dma-bufs ~40x/s - 1219 GPUOBJ_IMPORT + 1239 GPUOBJ_FREE in 30 s, a new GPU
+address each time. lfdevs's 0003 (xwl_glamor_kgsl_refresh_dri3_pixmap) re-created the DRI3 pixmap's EGLImage before
+every Present copy and destroyed the previous one at once. freedreno-kgsl submits carry no memobj list, so the kernel
+can't keep a bo mapped for a copy that is still reading it.
+
+- A client dma-buf is imported once: the EGLImage is keyed by plane 0's inode (fstat st_dev + st_ino) and the
+  import's shape, shared by every DRI3 pixmap of that buffer, and reused on every present (no re-import in
+  refresh_dri3_pixmap while the pixmap has its import).
+- It is released when the last pixmap of it is freed, after glFinish (the copies reading it have retired).
+- One "Xwayland KGSL: last 30s: client dma-buf imports N / reuses N / frees N" line per 30 s, beside 0011's line.
+  The table is xwayland-kgsl-import-cache.h (unit test: test/import-cache-test.c, run.sh).
+Reading it: imports ~ the number of swapchain images per swapchain, reuses ~ presents; imports ~ reuses means the
+client itself makes a new pixmap per frame.
+---
+diff --git a/hw/xwayland/xwayland-glamor-gbm.c b/hw/xwayland/xwayland-glamor-gbm.c
+index 90691c8..3a5304b 100644
+--- a/hw/xwayland/xwayland-glamor-gbm.c
++++ b/hw/xwayland/xwayland-glamor-gbm.c
+@@ -66,6 +66,7 @@
+ #include "xwayland-window-buffers.h"
+ #include "xwayland-kgsl-import-check.h"
+ #include "xwayland-kgsl-copy-wait.h"
++#include "xwayland-kgsl-import-cache.h"
+ 
+ #include "linux-dmabuf-unstable-v1-client-protocol.h"
+ #include "linux-drm-syncobj-v1-client-protocol.h"
+@@ -141,6 +142,9 @@ struct xwl_pixmap {
+     CARD32 kgsl_offsets[4];
+     uint64_t kgsl_modifier;
+ #endif /* DRI3 */
++    /* PowOS (0012): image is the shared import of this client dma-buf (xwayland-kgsl-import-cache.h), released
++     * through xwl_glamor_kgsl_release_image, never destroyed directly. */
++    Bool kgsl_image_cached;
+ };
+ 
+ static DevPrivateKeyRec xwl_gbm_private_key;
+@@ -730,6 +734,53 @@ xwl_glamor_kgsl_log_import_failure(const char *what, CARD16 width, CARD16 height
+            rule ? rule : "parameters fit the import rules, so the KGSL bo import was refused");
+ }
+ 
++/* PowOS (patch 0012): one GPU import per client dma-buf, shared by every DRI3 pixmap of it and reused on every
++ * present (xwayland-kgsl-import-cache.h), with one "imports / reuses / frees" line per 30 s. */
++static struct xwl_kgsl_import_cache xwl_kgsl_imports;
++
++static void
++xwl_glamor_kgsl_import_cache_log(void)
++{
++    char line[256];
++
++    if (xwl_kgsl_import_cache_line(&xwl_kgsl_imports, GetTimeInMicros(), line, sizeof(line)))
++        ErrorF("%s", line);
++}
++
++/* The import's key from plane 0's inode; FALSE if the fd can't be stat'ed (then the import isn't shared). */
++static Bool
++xwl_glamor_kgsl_import_key(struct xwl_kgsl_import_key *key, const int *fds, CARD8 num_fds, CARD16 width,
++                           CARD16 height, uint32_t format, const CARD32 *strides, const CARD32 *offsets,
++                           uint64_t modifier)
++{
++    struct stat st;
++
++    if (fstat(fds[0], &st) != 0)
++        return FALSE;
++    xwl_kgsl_import_key_make(key, st.st_dev, st.st_ino, width, height, format, num_fds, strides, offsets,
++                             modifier);
++    return TRUE;
++}
++
++/* A pixmap lets go of its import. The last holder destroys it only once the GPU work reading it has retired:
++ * freedreno-kgsl submits don't list the bos they use, so the kernel would unmap the bo under a running copy. */
++static void
++xwl_glamor_kgsl_release_image(struct xwl_screen *xwl_screen, struct xwl_pixmap *xwl_pixmap)
++{
++    if (xwl_pixmap->image == EGL_NO_IMAGE_KHR)
++        return;
++    if (!xwl_pixmap->kgsl_image_cached)
++        xwl_kgsl_imports.frees++;   /* an uncached import: this pixmap's alone */
++    if (!xwl_pixmap->kgsl_image_cached || xwl_kgsl_import_cache_put(&xwl_kgsl_imports, xwl_pixmap->image) != 0) {
++        xwl_glamor_egl_make_current(xwl_screen);
++        glFinish();
++        eglDestroyImageKHR(xwl_screen->egl_display, xwl_pixmap->image);
++    }
++    xwl_pixmap->image = EGL_NO_IMAGE_KHR;
++    xwl_pixmap->kgsl_image_cached = FALSE;
++    xwl_glamor_kgsl_import_cache_log();
++}
++
+ static PixmapPtr
+ xwl_glamor_kgsl_create_pixmap_from_fds(ScreenPtr screen, CARD8 num_fds,
+                                        const int *fds, CARD16 width,
+@@ -747,6 +798,8 @@ xwl_glamor_kgsl_create_pixmap_from_fds(ScreenPtr screen, CARD8 num_fds,
+ #endif /* DRI3 */
+     EGLint egl_error;
+     uint32_t format = gbm_format_for_depth(depth, xwl_gbm->glamor_gles);
++    struct xwl_kgsl_import_key key;
++    Bool have_key;
+ 
+     if (num_fds == 0 || num_fds > 4)
+         return NULL;
+@@ -778,12 +831,21 @@ xwl_glamor_kgsl_create_pixmap_from_fds(ScreenPtr screen, CARD8 num_fds,
+         goto error;
+ 
+     xwl_glamor_egl_make_current(xwl_screen);
+-    xwl_pixmap->image = xwl_glamor_kgsl_create_dma_buf_image(xwl_screen,
+-                                                             num_fds, fds,
+-                                                             width, height,
+-                                                             format,
+-                                                             strides, offsets,
+-                                                             modifier);
++    have_key = xwl_glamor_kgsl_import_key(&key, fds, num_fds, width, height, format, strides, offsets, modifier);
++    xwl_pixmap->image = have_key ? xwl_kgsl_import_cache_get(&xwl_kgsl_imports, &key, GetTimeInMicros()) : NULL;
++    if (xwl_pixmap->image) {
++        xwl_pixmap->kgsl_image_cached = TRUE;
++    } else {
++        xwl_pixmap->image = xwl_glamor_kgsl_create_dma_buf_image(xwl_screen,
++                                                                 num_fds, fds,
++                                                                 width, height,
++                                                                 format,
++                                                                 strides, offsets,
++                                                                 modifier);
++        if (xwl_pixmap->image != EGL_NO_IMAGE_KHR && have_key)
++            xwl_pixmap->kgsl_image_cached =
++                xwl_kgsl_import_cache_add(&xwl_kgsl_imports, &key, xwl_pixmap->image, GetTimeInMicros());
++    }
+     if (xwl_pixmap->image == EGL_NO_IMAGE_KHR) {
+         egl_error = eglGetError();
+         xwl_glamor_kgsl_log_import_failure("import", width, height, depth, format, modifier, num_fds, fds,
+@@ -810,8 +872,7 @@ error:
+ #ifdef DRI3
+     xwl_glamor_kgsl_close_import_fds(xwl_pixmap);
+ #endif /* DRI3 */
+-    if (xwl_pixmap->image != EGL_NO_IMAGE_KHR)
+-        eglDestroyImageKHR(xwl_screen->egl_display, xwl_pixmap->image);
++    xwl_glamor_kgsl_release_image(xwl_screen, xwl_pixmap);
+     if (xwl_pixmap->texture)
+         glDeleteTextures(1, &xwl_pixmap->texture);
+     if (pixmap)
+@@ -932,6 +993,17 @@ xwl_glamor_kgsl_refresh_dri3_pixmap(PixmapPtr pixmap)
+         !xwl_pixmap || !xwl_pixmap->kgsl_dri3_import)
+         return TRUE;
+ 
++    /* PowOS (0012): the pixmap keeps its one import of the client's dma-buf for its whole life. lfdevs's 0003
++     * re-imported it here before every copy (against stale sampling of a long-lived EGLImage on the proot path)
++     * and destroyed the old import at once: on KGSL that is a new GPU mapping ~40x/s per game and an unmap the
++     * kernel can't defer for the copy still reading it (Broforce's black columns). The GL driver invalidates its
++     * caches at the start of each submit, and 0008/0009 order the copy after the client's write. */
++    if (xwl_pixmap->image != EGL_NO_IMAGE_KHR) {
++        xwl_kgsl_import_cache_note_reuse(&xwl_kgsl_imports, GetTimeInMicros());
++        xwl_glamor_kgsl_import_cache_log();
++        return TRUE;
++    }
++
+     xwl_glamor_egl_make_current(xwl_screen);
+     image = xwl_glamor_kgsl_create_dma_buf_image(xwl_screen,
+                                                  xwl_pixmap->kgsl_num_fds,
+@@ -964,8 +1036,9 @@ xwl_glamor_kgsl_refresh_dri3_pixmap(PixmapPtr pixmap)
+         return FALSE;
+     }
+ 
+-    if (xwl_pixmap->image != EGL_NO_IMAGE_KHR)
+-        eglDestroyImageKHR(xwl_screen->egl_display, xwl_pixmap->image);
++    xwl_glamor_kgsl_release_image(xwl_screen, xwl_pixmap);
++    xwl_kgsl_import_cache_start(&xwl_kgsl_imports, GetTimeInMicros());
++    xwl_kgsl_imports.imports++;   /* an uncached import (released as one) */
+ 
+     xwl_pixmap->image = image;
+     xwl_pixmap->texture = texture;
+@@ -1144,6 +1217,10 @@ xwl_glamor_gbm_destroy_pixmap(PixmapPtr pixmap)
+         if (xwl_pixmap->buffer)
+             wl_buffer_destroy(xwl_pixmap->buffer);
+ 
++#ifdef DRI3
++        if (xwl_pixmap->kgsl_image_cached || xwl_pixmap->kgsl_dri3_import)
++            xwl_glamor_kgsl_release_image(xwl_screen, xwl_pixmap);  /* PowOS 0012: shared, GPU-retired */
++#endif /* DRI3 */
+         if (xwl_pixmap->image != EGL_NO_IMAGE_KHR)
+             eglDestroyImageKHR(xwl_screen->egl_display, xwl_pixmap->image);
+         if (xwl_pixmap->bo)

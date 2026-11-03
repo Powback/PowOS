@@ -235,6 +235,10 @@ class ShellBridge(
     /** The wallpaper's picture another one (ShellWallpaper): the page frosts it again. */
     private val wallpaperChanged: () -> Unit = { emit("system.glass", ShellWallpaper.info(context, blurBehind = shade != null || overlay != null, look = false)) }
 
+    /** Who uses the mic / camera / location (the recording light's AppOps watch, one for the app): the shade's privacy row. */
+    private val privacy = dev.omalauncher.system.RecordingWatcher.shared(context)
+    private val privacyChanged: () -> Unit = { emit("privacy.changed", privacyList()) }
+
     /** Android's wallpaper changed (its colors are recomputed for every change), or the theme's background did. */
     private val wallpaperColors = android.app.WallpaperManager.OnColorsChangedListener { _, _ -> ShellWallpaper.refresh(context) }
     private val themeChanged: () -> Unit = { ShellWallpaper.refresh(context) }
@@ -252,6 +256,8 @@ class ShellBridge(
         dev.omalauncher.assist.LiveCapture.onChange = { main.post { emit("assist.live", liveState()) } }
         // An agent told the user something: the PowOS AI page lists it.
         scope.launch { snapshotFlow { AgentMail.recent.toList() }.drop(1).collect { emit("ai.mail", aiMail()) } }
+        // An app started or stopped using the mic / camera / location: the shade's privacy row (ui/privacy.tsx) follows.
+        privacy.watch(privacyChanged)
         // A notification posted or gone: the panel lists them again.
         scope.launch { MediaListener.changes.collect { emit("notifications.changed", notificationList()) } }
         // The terminal font or text size changed (the Style screen, a pinch on a page terminal, style.toml edited): the
@@ -589,6 +595,9 @@ class ShellBridge(
             "apps.running" -> running()
             // The app menu's close (shell/ui/desktops.ts closeApp): a Steam game or Steam itself closed cleanly.
             "apps.close" -> closeApp(a.getString(0))
+            // The switcher's "Running in background" (ui/recents.tsx): apps with a live process and no card, and their stop.
+            "apps.background" -> backgroundApps()
+            "apps.stopBackground" -> stopBackground(a.getString(0))
             "windows.restore" -> (dev.omalauncher.system.WindowFrames.current?.restore(a.getInt(0)) ?: false).also { if (it) emit("windows.raised", a.getInt(0)) }
             // The dock's tap on the focused window's app (ui/desktops.ts dockTap): it goes, as its minimise button does.
             "windows.minimise" -> dev.omalauncher.system.WindowFrames.current?.let { f -> main.post { f.minimise(a.getInt(0)) }; true } ?: false
@@ -668,6 +677,8 @@ class ShellBridge(
             "pet.overlay" -> dev.omalauncher.system.PetOverlay.enabled(context, if (a.length() == 0 || a.isNull(0)) null else a.optBoolean(0))
             // The shade's window blurs what's behind it itself (ShadeHost): its page only tints.
             "system.glass" -> ShellWallpaper.info(context, blurBehind = shade != null || overlay != null)
+            "privacy.list" -> privacyList()
+            "privacy.open" -> openPermissions(a.getString(0))
             "notifications.list" -> notificationList()
             "notifications.open" -> runtime.widgets.notifications.control("open", a.getString(0))
             "notifications.dismiss" -> runtime.widgets.notifications.control("dismiss", a.getString(0))
@@ -1489,6 +1500,41 @@ class ShellBridge(
 
     private fun android(key: String) = runtime.androidApps.apps.firstOrNull { "a:${it.key}" == key }
 
+    /**
+     * Apps running with no task of their own, for the switcher's "Running in background" (ui/recents.tsx): [{ key,
+     * label, icon, frozen? }] - Android apps whose processes do work (BackgroundApps: Termux's session, a player), then
+     * the PowOS session's Linux apps the sleep watcher tracks (RunningApps.linux: Steam in its tray). The page leaves out
+     * those with a card (a Linux window's task is one). The owner's profile only: a work profile's app has its own stop.
+     */
+    private fun backgroundApps(): JSONArray {
+        val own = runtime.androidApps.apps.filter { it.profile == null }
+        val pkgs = dev.omalauncher.system.BackgroundApps.list(context, own.map { it.component.packageName }.toSet())
+        val android = pkgs.mapNotNull { p -> own.firstOrNull { it.component.packageName == p } }.distinctBy { it.component.packageName }
+        val out = android.map { JSONObject().put("key", "a:${it.key}").put("label", it.label).put("icon", icon("a:${it.key}")) }.toMutableList()
+        val linux = RunningApps.shellMap(emptyList(), runtime.linuxApps)
+        for (key in linux.keys()) {
+            val app = runtime.linuxApps.firstOrNull { "l:${it.id}" == key } ?: continue
+            out += JSONObject().put("key", key).put("label", app.name).put("icon", icon(key)).put("frozen", linux.optString(key) == "frozen")
+        }
+        return JSONArray(out)
+    }
+
+    /**
+     * Stops background app [key]: an Android app force-stopped (BackgroundApps.stop), a Linux one closed as the app
+     * menu's close does ([closeApp]: Steam asked to shut down, a game's launch chain ended). Only an app the list shows
+     * now (BackgroundApps.filter: never PowOS, a system or persistent app), Steam's helpers or the session (powos-app-quit's list).
+     */
+    private fun stopBackground(key: String): Boolean =
+        when {
+            key.startsWith("l:") -> closeApp(key)
+            key.startsWith("a:") ->
+                // Only one the list shows now: never anything the filter keeps out, whatever the page asks.
+                android(key)?.takeIf { it.profile == null }?.component?.packageName?.takeIf { p ->
+                    p in dev.omalauncher.system.BackgroundApps.list(context, setOf(p))
+                }?.let { dev.omalauncher.system.BackgroundApps.stop(context, it) } ?: false
+            else -> false
+        }
+
     private fun launch(
         key: String,
         fullScreen: Boolean = false,
@@ -1757,6 +1803,7 @@ class ShellBridge(
         if (webWindowsMade) webWindows.closeAll()
         runCatching { context.getSystemService(android.hardware.display.DisplayManager::class.java).unregisterDisplayListener(displayListener) }
         ShellWallpaper.onChange.remove(wallpaperChanged)
+        privacy.unwatch(privacyChanged)
         runCatching { android.app.WallpaperManager.getInstance(context).removeOnColorsChangedListener(wallpaperColors) }
         dev.omalauncher.theme.ThemeStore.changeListeners.remove(themeChanged)
         screens.close()
@@ -1771,6 +1818,54 @@ class ShellBridge(
         terminals.closeAll()
         scope.cancel()
     }
+
+    /**
+     * The shade's privacy row (ui/privacy.tsx): { now, items: [{ pkg, uid, app, icon, kinds: ["camera"|"screen"|"mic"|
+     * "location"], active, ended, own }] } - one per app using one now, or that stopped within RecordingOps.GRACE_MS
+     * (ended: when, epoch ms). app: its drawer label (else the package's label, else the package); icon: its drawer
+     * icon or null; own: PowOS itself (dictation) - its chip stops it rather than opening a permission page.
+     */
+    private fun privacyList(): JSONObject {
+        val items = JSONArray()
+        for (chip in privacy.chips()) items.put(privacyItem(chip))
+        return JSONObject().put("now", System.currentTimeMillis()).put("items", items)
+    }
+
+    private fun privacyItem(chip: dev.omalauncher.system.RecordingOps.Chip): JSONObject {
+        val own = chip.pkg == context.packageName
+        val user = android.os.UserHandle.getUserHandleForUid(chip.uid)
+        val apps = runtime.androidApps.apps.filter { it.component.packageName == chip.pkg }
+        val app = apps.firstOrNull { it.user == user } ?: apps.firstOrNull()
+        val label = if (own) "PowOS" else app?.label ?: packageLabel(chip.pkg)
+        return JSONObject()
+            .put("pkg", chip.pkg)
+            .put("uid", chip.uid)
+            .put("app", label)
+            .put("icon", app?.takeIf { !own }?.let { icon("a:${it.key}") } ?: JSONObject.NULL)
+            .put("kinds", JSONArray(chip.kinds.map { it.key }))
+            .put("active", chip.active)
+            .put("ended", chip.ended ?: JSONObject.NULL)
+            .put("own", own)
+    }
+
+    /** A package with no drawer entry (a system service): its own label, else its name. */
+    private fun packageLabel(pkg: String): String {
+        val pm = context.packageManager
+        return runCatching { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
+    }
+
+    /**
+     * [pkg]'s page where its camera / mic / location permissions are (a privacy chip's tap): Android's app info, whose
+     * Permissions entry is one tap on. The permission controller's own MANAGE_APP_PERMISSIONS screen would be the page
+     * itself, but it takes GRANT_RUNTIME_PERMISSIONS, which PowOS isn't granted.
+     */
+    private fun openPermissions(pkg: String): Boolean =
+        runCatching {
+            context.startActivity(
+                android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", pkg, null))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }.onFailure { Log.w(TAG, "can't open $pkg's permissions", it) }.isSuccess
 
     /** Stored JSON, passed through as it is. */
     private class RawJson(
@@ -1833,7 +1928,7 @@ class ShellBridge(
         // and a 58 ms frame landed 54 ms after it (perf-1793456386286): looked up here; only the recognizer binding,
         // which Android requires on the main thread, is posted back there (NativeSpeech.warm).
         // quickpage.pages: a resolveActivity and an icon drawn per settings page (QuickPageCatalog).
-        private val LOOKUPS = setOf("qs.destinations", "speech.warm", "quickpage.pages")
+        private val LOOKUPS = setOf("qs.destinations", "speech.warm", "quickpage.pages", "apps.background", "apps.stopBackground")
         private val lookups = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "shell-lookups").apply { isDaemon = true } }
 
         /** One thread for them all, so a page's set then get stay in that order. */

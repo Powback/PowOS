@@ -133,3 +133,37 @@
 .notif-head > .notif-icon[role="button"] { cursor: pointer; }
 /* A single's small icon (notifications.tsx SmallIcon): the status bar's glyph as a mask, in its app's color. */
 .notif-icon.notif-small { flex: none; display: inline-block; border-radius: 0; background: var(--tint, var(--color-foreground)); }
+
+/*
+ * The privacy row (privacy.tsx), under the control center: a chip per app using the mic / camera / screen / location -
+ * its icon, name and what it uses; its op's glyph in the recording light's colour (theme.css --privacy-*). Stopped (the
+ * last 15 s): greyed, glyphs muted.
+ */
+.privacy-row { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0; }
+.privacy-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 180px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 6px 12px 6px 8px;
+  font: var(--text-body) var(--font-body);
+  color: var(--color-foreground);
+  text-align: start;
+  transition: opacity var(--spring-ms) var(--spring);
+}
+.privacy-chip:active { background: var(--soft-fill); }
+.privacy-chip:not([data-active]) { opacity: 0.55; }
+.privacy-icon { flex: none; width: 32px; height: 32px; border-radius: var(--icon-radius); object-fit: contain; }
+.privacy-icon-none { display: grid; place-items: center; font-size: 20px; color: var(--color-muted); background: var(--soft-fill); }
+.privacy-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.privacy-app, .privacy-what { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.privacy-app { font-weight: 600; }
+.privacy-what { font-size: var(--text-small); color: var(--color-muted); }
+.privacy-kinds { display: flex; gap: 4px; flex: none; font-size: 18px; }
+.privacy-kind { display: grid; place-items: center; color: var(--privacy-camera); }
+.privacy-kind[data-kind="mic"] { color: var(--privacy-mic); }
+.privacy-kind[data-kind="screen"] { color: var(--privacy-screen); }
+.privacy-kind[data-kind="location"] { color: var(--color-accent); }
+.privacy-chip:not([data-active]) .privacy-kind { color: var(--color-muted); }

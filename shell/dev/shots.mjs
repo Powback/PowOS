@@ -499,6 +499,10 @@ const SCENES = [
   ["send-launcher", "home", "S.openPanel('apps', { search: true }); await sleep(400); S.query.value = 'weather'; await sleep(300);", "wallpaper"],
   ["send-ai", "home", "S.page.value = -1; await sleep(400); const f = document.querySelector('.ai-compose textarea'); if (f) { f.value = 'what is on tonight'; f.dispatchEvent(new Event('input', { bubbles: true })); } await sleep(300);", "wallpaper"],
   ["ai", "home", "S.page.value = -1;", "wallpaper"],
+  // OE1 (the user, 11-03 21:14: "Why is the search [bar] just under the chat here?"): every tab, the bar where home's is.
+  ["ai-tab-agents", "home", "S.page.value = -1; await sleep(400); S.aiScreen.value = 'fleet';", "wallpaper"],
+  ["ai-tab-progress", "home", "S.page.value = -1; await sleep(400); S.aiScreen.value = 'progress';", "wallpaper"],
+  ["ai-tab-devices", "home", "S.page.value = -1; await sleep(400); S.aiScreen.value = 'devices';", "wallpaper"],
   ["chat", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["chat-open", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelector('.chat .tl-row')?.click(); await sleep(100); document.querySelectorAll('.chat .tl-row.has-out')[0]?.click(); document.querySelectorAll('.chat .tl-row.has-out')[2]?.click();`, "wallpaper"],
   ["present", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],

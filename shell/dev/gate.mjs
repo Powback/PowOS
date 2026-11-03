@@ -284,6 +284,87 @@ async function recordingRingCheck(hole) {
   return fail;
 }
 
+/**
+ * The shade's privacy row (ui/privacy.tsx, the user 11-03: "I should be able to see where my microphone is used in the
+ * notification center, like under the control center"), from a mocked AppOps feed ("privacy.changed", as
+ * RecordingLight.kt's watch pushes it): nothing in use - no row; an app on the mic and one on location - a chip each,
+ * its name, what it uses and "now", directly under the control center (folded: atop the notifications under the card;
+ * unfolded: in the controls' column under them); stopped - greyed, "Xs ago", gone once the 15 s grace is up; PowOS's own
+ * dictation's chip stops it.
+ */
+async function privacyKit() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  (await window.__gw.mod("./state.ts")).notif.value = true;
+  await window.__gw.settled(() => document.querySelector(".notif-panel.shown .cc"), ".notif-panel");
+  window.__privacy = {
+    sleep,
+    // The row's Reveal runs --spring-ms; a little over it.
+    feed: async (items) => (window.__mockEvents.emit("privacy.changed", { now: Date.now(), items }), await sleep(600)),
+    use: (pkg, app, kinds, extra = {}) => ({ pkg, uid: 10100, app, icon: null, kinds, active: true, ended: null, own: false, ...extra }),
+    chips: () => [...document.querySelectorAll(".notif-panel.shown .privacy-chip")],
+    chip: (pkg) => document.querySelector(`.notif-panel.shown .privacy-chip[data-pkg="${pkg}"]`),
+    text: (pkg) => window.__privacy.chip(pkg)?.textContent ?? "",
+  };
+  return document.querySelector(".privacy-row") ? ["a privacy row with nothing in use"] : [];
+}
+
+/** A recorder on the mic and a map on location: a chip each, its name, what it uses, "now". */
+async function privacyShows() {
+  const P = window.__privacy;
+  await P.feed([P.use("org.example.recorder", "Recorder", ["mic"]), P.use("org.example.maps", "Maps", ["location"], { uid: 10200 })]);
+  return [
+    [P.chips().length === 2, `want 2 chips, got ${P.chips().length}`],
+    [P.text("org.example.recorder").includes("Recorder"), `the mic chip doesn't name its app: "${P.text("org.example.recorder")}"`],
+    [P.text("org.example.recorder").includes("Microphone · now"), `the mic chip reads "${P.text("org.example.recorder")}"`],
+    [P.chip("org.example.recorder")?.querySelector('.privacy-kind[data-kind="mic"]'), "the mic chip has no mic glyph"],
+    [P.text("org.example.maps").includes("Location · now"), `the location chip reads "${P.text("org.example.maps")}"`],
+    [P.chips().every((el) => el.getBoundingClientRect().height >= 44), "a chip under 44 px (a touch target)"],
+  ].filter(([ok]) => !ok).map(([, why]) => why);
+}
+
+/** Directly under the control center: folded atop the notifications under its card, unfolded in its column. */
+function privacyPlace() {
+  const row = document.querySelector(".notif-panel.shown .privacy-row");
+  const body = document.querySelector(".notif-panel .panel-body");
+  if (!row || !body) return ["no privacy row with the mic in use"];
+  const two = body.classList.contains("two");
+  const card = (two ? body.querySelector(".cc-col") : body)?.querySelector(".cc");
+  if (!card) return ["no control center card"];
+  const r = row.getBoundingClientRect(), c = card.getBoundingClientRect();
+  return [
+    [two ? row.closest(".cc-col") : row.closest(".notif-own"), two ? "unfolded: the row isn't in the controls' column" : "folded: the row isn't atop the notifications under the card"],
+    [r.top >= c.bottom - 1 && r.top - c.bottom <= 32, `the row isn't directly under the control center (row ${Math.round(r.top)}, card bottom ${Math.round(c.bottom)})`],
+    [r.left >= 0 && r.right <= innerWidth, "the row runs off the screen"],
+  ].filter(([ok]) => !ok).map(([, why]) => why);
+}
+
+/** The recorder stops (13 s ago): greyed, "13s ago"; once the 15 s grace is up it's gone, the map's chip stays. */
+async function privacyGrace() {
+  const P = window.__privacy;
+  await P.feed([P.use("org.example.recorder", "Recorder", ["mic"], { active: false, ended: Date.now() - 13_000 }), P.use("org.example.maps", "Maps", ["location"], { uid: 10200 })]);
+  const stopped = P.chip("org.example.recorder");
+  const fails = [
+    [stopped && !stopped.hasAttribute("data-active"), "a stopped use isn't marked stopped"],
+    [/1[34]s ago/.test(P.text("org.example.recorder")), `a stopped use reads "${P.text("org.example.recorder")}", want "13s ago"`],
+    [stopped && Number(getComputedStyle(stopped).opacity) <= 0.8, "a stopped chip isn't greyed out"],
+  ];
+  await P.sleep(3000);
+  fails.push([!P.chip("org.example.recorder"), "the stopped use stayed past the 15 s grace"], [P.chip("org.example.maps"), "the location chip went with it"]);
+  await P.feed([]);
+  fails.push([!document.querySelector(".privacy-row"), "the row stayed with nothing in use"]);
+  return fails.filter(([ok]) => !ok).map(([, why]) => why);
+}
+
+/** PowOS's own dictation on the mic: its chip stops it (no permission page). */
+async function privacyOwnStop() {
+  const P = window.__privacy;
+  await P.feed([P.use("com.powos.app", "PowOS", ["mic"], { own: true })]);
+  const stops = window.__speechMock.stops;
+  P.chip("com.powos.app")?.click();
+  await P.sleep(50);
+  return window.__speechMock.stops === stops + 1 ? [] : ["a tap on PowOS's own mic chip didn't stop the dictation"];
+}
+
 /** The modes app.tsx renders (`mode === "x"`), home first: a mode added there is checked without touching this. */
 function modes() {
   const src = fs.readFileSync(path.join(ROOT, "app.tsx"), "utf8");
@@ -1939,6 +2020,88 @@ async function switcherThumbsCheck() {
     img.src = url ?? "";
     return img.decode().then(() => true, () => false);
   }
+}
+
+/**
+ * The switcher with no cards says "No open apps", and the apps running with no card are behind "N running in
+ * background" (the user, 2026-11-03: "I actually do have open apps, they're just running in the background ... like
+ * Termux"): collapsed at first; an app with a card isn't counted; opened, each row has its icon, name and a Stop that
+ * calls the host's apps.stopBackground and takes the row off at once. Folded and unfolded.
+ */
+async function switcherBackgroundCheck(page) {
+  await page.evaluate(switcherBackgroundHelpers);
+  const fails = await page.evaluate(switcherBackgroundEmpty);
+  fails.push(...(await page.evaluate(switcherBackgroundList)));
+  fails.push(...(await page.evaluate(switcherBackgroundRows)));
+  fails.push(...(await page.evaluate(switcherBackgroundStop)));
+  await page.evaluate(() => window.__mockEvents.emit("recents.end", { to: "home" }));
+  return fails;
+}
+/** switcher-background's helpers, in the page (each step runs there on its own: page.evaluate). */
+function switcherBackgroundHelpers() {
+  const visible = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden" && Number(getComputedStyle(el).opacity) > 0.5;
+  const inView = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.left >= 0 && r.right <= innerWidth + 0.5 && r.top >= 0 && r.bottom <= innerHeight + 0.5;
+  };
+  const text = (sel) => document.querySelector(sel)?.textContent ?? "none";
+  window.__bgGate = { wait: (ms) => new Promise((ok) => setTimeout(ok, ms)), visible, inView, text };
+}
+/** switcher-background, no cards: "No open apps" on screen, the toggle counting all 3, the list collapsed. */
+async function switcherBackgroundEmpty() {
+  const { wait, visible, inView, text } = window.__bgGate;
+  const fails = [];
+  window.__mockEvents.emit("recents.show", { open: true, from: null, tasks: [] });
+  await wait(1200);
+  const empty = document.querySelector(".recents-empty");
+  if (text(".recents-empty") !== "No open apps" || !visible(empty)) fails.push(`no cards: "No open apps" not shown (${text(".recents-empty")})`);
+  else if (!inView(empty)) fails.push("no cards: the empty message is off the screen");
+  const toggle = text(".recents-bg-toggle");
+  if (toggle !== "3 running in background" || !visible(document.querySelector(".recents-bg-toggle"))) fails.push(`no cards: toggle says "${toggle}", expected "3 running in background"`);
+  if (document.querySelector(".recents-bg")) fails.push("the background list is open before it was asked for (collapsed by default)");
+  window.__mockEvents.emit("recents.end", { to: "home" });
+  await wait(600);
+  return fails;
+}
+/** switcher-background with Spotify's card: no empty message, Spotify not counted; the toggle opens the list. */
+async function switcherBackgroundList() {
+  const { wait, visible, text } = window.__bgGate;
+  const icon = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="#3a6"/></svg>');
+  window.__mockEvents.emit("recents.show", { open: true, from: null, tasks: [{ id: 1301, label: "Spotify", key: "a:spotify", icon, snapshot: "" }] });
+  await wait(1200);
+  const fails = visible(document.querySelector(".recents-empty")) ? ["with a card: the empty message still shows"] : [];
+  const toggle = text(".recents-bg-toggle");
+  if (toggle !== "2 running in background") return [...fails, `with Spotify's card: toggle says "${toggle}", expected 2`];
+  document.querySelector(".recents-bg-toggle").click();
+  await wait(500);
+  return fails;
+}
+/** The opened list: on screen, Termux's row with icon and name, Steam's marked asleep. */
+function switcherBackgroundRows() {
+  const { visible, inView } = window.__bgGate;
+  const sheet = document.querySelector(".recents-bg");
+  const rows = [...document.querySelectorAll(".recents-bg-app")];
+  if (!visible(sheet) || rows.length !== 2) return [`opened: ${rows.length} rows, expected 2 (Termux, Steam)`];
+  const fails = inView(sheet) ? [] : ["opened: the background list is off the screen"];
+  const termux = rows.find((r) => r.dataset.key === "a:termux");
+  if (!termux?.querySelector("img.recents-bg-icon[src]") || termux.querySelector(".recents-bg-name")?.textContent !== "Termux") fails.push("Termux's row: no icon or name");
+  if (!rows.find((r) => r.dataset.key === "l:steam")?.querySelector(".recents-bg-state")) fails.push("Steam (frozen): no Asleep mark");
+  return fails;
+}
+/** Stop on Termux's row: the row goes at once, the host's stopBackground ran, the count drops. */
+async function switcherBackgroundStop() {
+  const { wait, text } = window.__bgGate;
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const stop = document.querySelector('.recents-bg-app[data-key="a:termux"] .recents-bg-stop');
+  if (!stop) return ["Stop: Termux's row has no Stop button"];
+  stop.click();
+  await wait(50);
+  // It leaves at once: marked leaving (fading out on the spring, §6), then gone.
+  const fails = document.querySelector('.recents-bg-app[data-key="a:termux"]:not(.leaving)') ? ["Stop: Termux's row didn't go at once"] : [];
+  await wait(400);
+  if ((await powos.apps.background()).some((b) => b.key === "a:termux")) fails.push("Stop: the host's stopBackground wasn't called for a:termux");
+  if (text(".recents-bg-toggle") !== "1 running in background") fails.push("after Stop: the count didn't drop to 1");
+  return fails;
 }
 
 /**
@@ -12418,6 +12581,9 @@ try {
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-thumbs", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(switcherThumbsCheck))));
     for (const [name, viewport, layout] of [["folded", { width: 404, height: 900 }, "2v"], ["unfolded", { width: 821, height: 883 }, "2h"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `switcher-split-pair-${name}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(switcherSplitPairCheck, layout))));
+  for (const [name, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+    if (process.env.SHELL_PAGES !== "0")
+      runs.push(open(browser, `${ORIGIN}/index.html`, `switcher-background-${name}`, viewport).then((r) => whenReady(r, () => switcherBackgroundCheck(r.page))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "swipe-home-one-anim", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(swipeHomeOneAnimCheck))));
   // X1/X2 (board one-swipe-up-gesture-for-home-and-over-apps): the home swipe over the switcher, folded and unfolded;
@@ -12974,6 +13140,19 @@ try {
         return { ...r, ready: true, ms: Date.now() - r.started };
       }),
     );
+  // The shade's privacy row (ui/privacy.tsx) under the control center, folded and unfolded, from a mocked AppOps feed.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(
+        open(browser, `${ORIGIN}/index.html?mode=shade`, `privacy-row-${label}`, viewport).then(async (r) => {
+          await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+          for (const step of [privacyKit, privacyShows, privacyPlace, privacyGrace, privacyOwnStop]) {
+            r.problems.push(...((await r.page.evaluate(step).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])) ?? []));
+            if (r.problems.length) break;
+          }
+          return { ...r, ready: true, ms: Date.now() - r.started };
+        }),
+      );
   // The shade folded (one stacked list) and unfolded (two columns: notifications left, controls right).
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])

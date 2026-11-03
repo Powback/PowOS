@@ -1,0 +1,2 @@
+Turnip is built against the rootfs's own libraries and its Mesa build deps (the same ones build-inside.sh built
+lfdevs's Mesa with), so the library it replaces and this one link the same things.
