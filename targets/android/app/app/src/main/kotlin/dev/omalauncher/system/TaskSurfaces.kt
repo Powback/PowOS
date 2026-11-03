@@ -56,10 +56,15 @@ object TaskSurfaces {
         }.also { none -> if (ids.isNotEmpty()) Log.i(TAG, "${if (on) "shown" else "hidden"} ${ids - none}, no leash $none") }
 
     /**
-     * Task leash [leash] hidden ([off]) or shown in [t]: the picture only, at once. Out of touch and kept hidden is
-     * WM's job - the caller also hides the task in WM (FreeformTasks.away, PageSlide's finish: WCT.setHidden), so its
-     * input windows are NOT_VISIBLE and WM Shell's decor, which re-shows a VISIBLE task's surface on each relayout,
-     * hides it instead. Shown sets alpha 1 too: builds before WM hiding left alpha 0 on hidden leashes.
+     * Task leash [leash] hidden ([off]) or shown in [t]. Hidden: its visibility off AND its scale shrunk to nothing
+     * (OffPage.AWAY_SCALE); the task itself stays visible in WM so the app keeps its surfaces (WM hiding destroyed
+     * them and each page swipe rebuilt them: Plasma reconnected, 450-560 ms freezes, perf-1793735444160).
+     * HACK: WM Shell's window decoration re-shows a task's surface on every relayout (WindowDecoration.relayout:
+     * startT.show(taskSurface)), on each task-info change - Chrome/Brave change theirs all the time - and an alpha-0
+     * layer still took touches (the user, 2026-10-29). The decor never sets the scale: shrunk, a re-shown leash is
+     * a sub-pixel at the window's corner, nothing to see or touch. Real fix: a WM Shell-side hook that hides a task's
+     * surface without making the app invisible (none for an app). Shown: visibility, alpha 1 and scale 1
+     * (earlier builds left alpha 0).
      */
     fun hide(
         t: SurfaceControl.Transaction,
@@ -67,6 +72,11 @@ object TaskSurfaces {
         off: Boolean,
     ) {
         t.setVisibility(leash, !off)
+        // Transaction.setScale is API 33 (WM Shell decor as on every PowOS phone); older: visibility only.
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            val k = if (off) OffPage.AWAY_SCALE else 1f
+            t.setScale(leash, k, k)
+        }
         if (!off) t.setAlpha(leash, 1f)
     }
 
