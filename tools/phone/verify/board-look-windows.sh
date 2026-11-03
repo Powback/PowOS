@@ -46,12 +46,17 @@
 #                 there - a drop opens a window, never unpins); home turned to that page by code; Chrome's dock icon
 #                 held and dragged to the page's middle (input motionevent) -> TWO Chrome windows, one per page, one
 #                 more Chrome task (a second instance, not the first window moved).
+#   calc-density  (calculator-mis-lays-out-at-certain-window-sizes, ask 1a1a369a6fa): Calculator as a web window (by
+#                 code) at its default size, then resized smaller (by code): its activity's reported configuration is
+#                 at the screen's density (WindowDpi.SCREEN_DENSITY_APPS: at 294 it sized its text by display 0's 442,
+#                 "/ / /" digits and clipped keys) and its sw is the window's width at that density (+-2 dp), each
+#                 size's screenshot for the readable digits.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/e2e-lib.sh"
 CASE=${1:-}; shift || true
-case "$CASE" in tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size|relaunch|snap-fill|multi-instance) ;;
-  *) echo "usage: board-look-windows.sh tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size|relaunch|snap-fill|multi-instance [--round R]"; exit 2 ;; esac
+case "$CASE" in tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size|relaunch|snap-fill|multi-instance|calc-density) ;;
+  *) echo "usage: board-look-windows.sh tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size|relaunch|snap-fill|multi-instance|calc-density [--round R]"; exit 2 ;; esac
 e2e_args "$@"
 e2e_init "lookw-$CASE"
 CALC=${TEST_APP:-com.oneplus.calculator} CHROME=com.android.chrome
@@ -460,6 +465,32 @@ if [ "$CASE" = multi-instance ]; then
       [ "$pg" = "$want" ] && [ "$n1" -gt "$n0" ] && pass "two Chrome windows (pages $pg), $n1 Chrome tasks (had $n0): a second instance" ||
         fail "after the drag-out: Chrome windows on pages '$pg' (want '$want'), Chrome tasks $n1 (had $n0)" ;;
     esac
+  fi
+fi
+
+# --- calc-density ----------------------------------------------------------------------------------------------
+# calccfg: Calculator's activity's last reported configuration, "<dpi> <sw dp> <w dp>" or "none".
+calccfg() { sh_ "dumpsys activity activities" | awk -v p="$CALC/" 'index($0,"ActivityRecord{") && index($0,p){f=1}
+  f && /mLastReportedConfiguration/ {match($0,/ [0-9]+dpi/); dpi=substr($0,RSTART+1,RLENGTH-4)
+    match($0,/ sw[0-9]+dp/); sw=substr($0,RSTART+3,RLENGTH-5); match($0,/ w[0-9]+dp/); w=substr($0,RSTART+2,RLENGTH-4)
+    print dpi, sw, w; exit}' | grep . || echo none; }
+# calcfits <what>: PASS when Calculator's configuration is the screen's density and its width the window display's.
+calcfits() { local c scr px; c=$(calccfg); scr=$(sh_ "wm density" | grep -oE '[0-9]+' | tail -1)
+  px=$(wwbody "$A1"); [ -n "$px" ] && { set -- $px; px=$(( $3 - $1 )); }; set -- $c
+  if [ "$c" = none ]; then fail "$what: no Calculator activity configuration in dumpsys"; return; fi
+  if [ "$1" != "$scr" ]; then fail "$what: Calculator at ${1}dpi, the screen's is ${scr}dpi (sw${2}dp w${3}dp) - mixed density, garbled text"
+  elif [ -n "$px" ] && [ $(( ${3} - px * 160 / scr )) -gt 2 -o $(( px * 160 / scr - ${3} )) -gt 2 ]; then
+    fail "$what: Calculator w${3}dp, its window display is ${px}px = $((px * 160 / scr))dp at ${scr}dpi"
+  else pass "$what: Calculator at the screen's ${1}dpi, sw${2}dp w${3}dp (display ${px:-?}px)"; fi; }
+if [ "$CASE" = calc-density ]; then
+  A1=$(wwopen "$CALC"); sleep 4; chk open
+  if [ "$A1" = none ]; then fail "no web window for Calculator"
+  else
+    step window "Calculator as a web window at its default size"; what="default size" calcfits
+    r=$(ev "$WW.then(m=>{const w=m.webWins.value.find(v=>v.id===${A1#w});if(!w)return 'none';const k=w.scale??1;m.placeWindow(w.id,{x:120,y:160,w:Math.round(w.w*k*0.75),h:Math.round(w.h*k*0.8)});return 'ok'})")
+    sleep 3; chk resized
+    if [ "$r" = ok ]; then step small "Calculator's window resized smaller (by code)"; what="smaller" calcfits
+    else fail "Calculator's window $A1 not resized ($r)"; fi
   fi
 fi
 
