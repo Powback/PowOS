@@ -1,6 +1,10 @@
 package dev.omalauncher.shell
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import dev.omalauncher.Runtime
+import dev.omalauncher.linux.LinuxState
 import dev.omalauncher.widgets.Cell
 import dev.omalauncher.widgets.Folder
 import dev.omalauncher.widgets.GRID_COLUMNS
@@ -60,6 +64,7 @@ class ShellHome(
                     .put("kind", "widget")
                     .put("name", item.spec.name)
                     .putOpt("error", item.spec.error)
+                    .putOpt("linux", linuxNeed(item))
             is Shortcut -> o.put("kind", "app").put("label", item.label).put("app", appKey(item))
             is Folder ->
                 o
@@ -67,6 +72,39 @@ class ShellHome(
                     .put("apps", JSONArray(item.apps.map { JSONObject().put("key", it.key).put("label", it.label).put("app", appKey(it)) }))
         }
         return o
+    }
+
+    /**
+     * Why [item] isn't running, when it waits for Linux (its commands need it): "image" - the PowOS Linux image isn't
+     * on this phone (no root: the engine downloads it; the tile offers that, with [imageMb]) - or "starting" - it is,
+     * and the widgets' Linux is on its way up. Null when it runs or needs no Linux. Before this the page got nothing and
+     * drew an empty tile (2026-11-03: "widgets etc. don't work" on a non-rooted phone).
+     */
+    private fun linuxNeed(item: WidgetItem): JSONObject? {
+        val need = linuxNeed(engine.waitsForLinux(item.spec), runtime.bootstrap.state.value) ?: return null
+        val image = need == IMAGE
+        if (image && imageMb == null) fetchImageSize()
+        return JSONObject().put("state", need).put("mb", if (image) imageMb ?: JSONObject.NULL else JSONObject.NULL)
+    }
+
+    /** The PowOS image's download size in MB, once asked for (a HEAD of the engine's download URL); null until known. */
+    private var imageMb by mutableStateOf<Long?>(null)
+    private var sizing = false
+
+    private fun fetchImageSize() {
+        if (sizing) return
+        sizing = true
+        Thread({
+            runCatching {
+                val c = java.net.URL(andro.marchy.InstallActivity.ROOTFS_URL).openConnection() as java.net.HttpURLConnection
+                c.requestMethod = "HEAD"
+                c.connectTimeout = 5000
+                c.readTimeout = 5000
+                val len = c.contentLengthLong.also { c.disconnect() }
+                // Back on the main thread: a snapshot write the home's snapshotFlow sees (the tile's text gets the size).
+                if (len > 0) android.os.Handler(android.os.Looper.getMainLooper()).post { imageMb = (len + (1 shl 20) - 1) shr 20 }
+            }
+        }, "image-size").start()
     }
 
     private fun cell(c: Cell) = JSONObject().put("x", c.x).put("y", c.y).put("w", c.w).put("h", c.h)
@@ -133,5 +171,25 @@ class ShellHome(
     ): String? {
         val app = find(key) as? Shortcut ?: return null
         return engine.shortcuts.group(app, find(target) ?: return null)
+    }
+
+    companion object {
+        /** A widget's tile offers the PowOS Linux image's download (see [linuxNeed]). */
+        const val IMAGE = "image"
+
+        /**
+         * What a widget that [waits] for Linux needs, by where Linux stands: [IMAGE] when the image isn't on the phone
+         * (never installed, or its install failed), "starting" otherwise (installed or being checked/installed: it's on
+         * its way); null when it doesn't wait.
+         */
+        fun linuxNeed(
+            waits: Boolean,
+            state: LinuxState,
+        ): String? =
+            when {
+                !waits -> null
+                state is LinuxState.NotInstalled || state is LinuxState.Failed -> IMAGE
+                else -> "starting"
+            }
     }
 }

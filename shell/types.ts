@@ -84,6 +84,11 @@ export interface HomeItem {
   /** widget; panel: which of the shell's own (ui/agents.tsx's "agents") */
   name?: string;
   error?: string;
+  /**
+   * widget: why it isn't running, when its commands need Linux - "image": the PowOS Linux image isn't on this phone (no
+   * root; a tap downloads it, [mb] its size once known) - or "starting": it is, and the widgets' Linux is coming up.
+   */
+  linux?: { state: "image" | "starting"; mb: number | null };
   /** app: its label and the drawer's key for it */
   label?: string;
   app?: string;

@@ -23,6 +23,7 @@ import dev.omalauncher.linux.AgentStore
 import dev.omalauncher.linux.POWOS
 import dev.omalauncher.linux.AudioBridge
 import dev.omalauncher.linux.Bootstrap
+import dev.omalauncher.linux.EngineGuest
 import dev.omalauncher.linux.FILES_COMMAND
 import dev.omalauncher.linux.PLASMA_COMMAND
 import dev.omalauncher.linux.Gpu
@@ -30,6 +31,7 @@ import dev.omalauncher.linux.LinuxApp
 import dev.omalauncher.linux.OpenBridge
 import dev.omalauncher.linux.Pacman
 import dev.omalauncher.linux.Proot
+import dev.omalauncher.linux.Guest
 import dev.omalauncher.linux.RootedGuest
 import dev.omalauncher.linux.LinuxState
 import dev.omalauncher.linux.SystemUpdates
@@ -154,6 +156,8 @@ class Runtime(
     var linuxWanted by mutableStateOf(false)
 
     init {
+        // No-root PowOS: widgets' commands run in the engine's PowOS image (linux/EngineGuest.kt).
+        EngineGuest.init(context)
         // Saved, so removing Linux later doesn't bring the first-run screen back.
         if (launcherReady) prefs.edit().putBoolean(SETUP_DONE, true).apply()
         themes.loadPalette()
@@ -236,7 +240,8 @@ class Runtime(
             // On the first-run screen the download is the screen's job, with progress.
             if (launcherReady) scope.launch { themes.ensureRelease() }
             // Rooted PowOS: the terminal tiles' services start too (onRootedReady).
-            if (bootstrap.wanted || RootedGuest.enabled) runLinux { bootstrap.run() } else bootstrap.run()
+            // No root: the PowOS image the engine installed is the widgets' Linux (onEngineReady).
+            if (bootstrap.wanted || RootedGuest.enabled || EngineGuest.enabled) runLinux { bootstrap.run() } else bootstrap.run()
         }
     }
 
@@ -261,7 +266,11 @@ class Runtime(
      */
     fun refreshLinuxState() {
         if (linuxJob?.isActive == true) return
-        scope.launch { bootstrap.run() }
+        scope.launch {
+            bootstrap.run()
+            // No root: the engine just installed the PowOS image - its widgets start now, not at the next app start.
+            if (EngineGuest.enabled) onEngineReady()
+        }
     }
 
     /** Runs [work] with the foreground service up, so it goes on outside the app; then starts Linux if it's installed. */
@@ -282,6 +291,7 @@ class Runtime(
                     bootstrap.isInstalled && !POWOS -> onLinuxReady()
                     // The engine's SessionService keeps the process alive then; no second notification.
                     RootedGuest.enabled -> onRootedReady().also { setService(false) }
+                    EngineGuest.enabled -> onEngineReady().also { setService(false) }
                     else -> setService(false)
                 }
             }
@@ -422,6 +432,25 @@ class Runtime(
         watchPowosApps()
     }
 
+    /**
+     * PowOS without root, its image installed: the widgets' commands, streams and actions run in it ([EngineGuest]).
+     * Only that - Omalauncher's own Linux services (onLinuxReady: its Wayland server, pacman, provisioner) target its
+     * proot Arch, which PowOS never installs. Before this nothing called linuxChanged on a non-rooted phone, so every
+     * widget with a command stayed an empty tile.
+     */
+    private fun onEngineReady() {
+        widgets.linuxChanged(true)
+        if (rootedTerminals) return
+        // The rest as rooted (onRootedReady), through Guest: terminal tiles and the Terminal app on a pty in the image
+        // (PtyTerminal: no Wayland server needed), PowOS's apps in the drawer (powos-apps-export in the image writes
+        // run/powos-apps, the same dir the rooted session does), app and game launches as tasks or on the desktop.
+        rootedTerminals = true
+        RootedGuest.runDir = File(context.filesDir, "run")
+        widgets.terminalsChanged(true)
+        scope.launch { refreshApps() }
+        watchPowosApps()
+    }
+
     private var appsWatch: android.os.FileObserver? = null
 
     /**
@@ -532,7 +561,7 @@ class Runtime(
         export: Boolean,
     ): List<LinuxApp> {
         if (!powos) return loadLinuxApps(proot)
-        if (export) RootedGuest.run("powos-apps-export")
+        if (export) Guest.run("powos-apps-export")
         return loadPowosApps(File(RootedGuest.runDir ?: return emptyList(), "powos-apps"))
     }
 
@@ -663,7 +692,7 @@ class Runtime(
                 andro.marchy.LaunchWindows.done(app.id)
                 showDesktop()
             }
-            val code = runCatching { RootedGuest.openAsTask(app.id, app.wmClass, app.exec, desktop, log) }.getOrElse { e -> outcome.error(e); -1 }
+            val code = runCatching { Guest.openAsTask(Guest.TaskApp(app.id, app.wmClass, app.exec), desktop, log) }.getOrElse { e -> outcome.error(e); -1 }
             Log.i(TAG, "exited $code: ${app.exec}")
             outcome.failure(code)?.let { why ->
                 Log.w(TAG, "launch failed: ${app.id}: $why")
@@ -740,8 +769,8 @@ class Runtime(
             val code =
                 runCatching {
                     when {
-                        game != null -> RootedGuest.openAsTask("steam_app_$game", null, command, ::showDesktop, log)
-                        rooted -> RootedGuest.launch(command, command, log) // runs on: never the app's pipe
+                        game != null -> Guest.openAsTask(Guest.TaskApp("steam_app_$game", null, command), ::showDesktop, log)
+                        rooted -> Guest.launch(command, command, log) // runs on: never the app's pipe
                         else -> proot.run("exec $command", log)
                     }
                 }.getOrElse { -1 }

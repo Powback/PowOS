@@ -39,7 +39,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.omalauncher.Runtime
 import dev.omalauncher.linux.TerminalFont
-import dev.omalauncher.linux.RootedGuest
+import dev.omalauncher.linux.Guest
 import dev.omalauncher.linux.shellQuote
 import dev.omalauncher.wayland.WindowRenderer
 import dev.omalauncher.wayland.XdgToplevel
@@ -181,7 +181,7 @@ class TerminalTiles(
         onExit: () -> Unit,
     ) = PtyTerminal(
         runtime.appContext,
-        term.command ?: RootedGuest.TERMINAL_SHELL,
+        term.command ?: Guest.terminalShell,
         textPixels = { runtime.terminalFont.pixels(term.fontSize ?: runtime.terminalFont.size) },
         fontFamily = { runtime.terminalFont.family },
         // A tap on the active terminal is the terminal's (tmux's mouse); the soft keyboard has its own button.
@@ -245,7 +245,7 @@ class EmbeddedTerminal internal constructor(
     fun start() {
         if (running || closed) return
         running = true
-        if (RootedGuest.enabled) {
+        if (Guest.enabled) {
             pty =
                 tiles.pty(this) {
                     running = false

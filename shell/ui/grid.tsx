@@ -793,6 +793,8 @@ function Tile({ item, join }: { item: HomeItem; join?: Record<string, number> })
               <div class="widget-name">{item.name}</div>
               <div class="widget-error">{item.error}</div>
             </>
+          ) : item.linux ? (
+            <LinuxWait item={item} />
           ) : (
             <OwlWidget widget={item.key} cells={shown(item)} />
           )}
@@ -1141,6 +1143,28 @@ function useMeasured(el: { current: HTMLDivElement | null }) {
 }
 
 /** An Android widget's tile body: the placeholder while it's being added, its error, or its frames. */
+/**
+ * A widget whose commands need Linux while it isn't there: what it needs, never an empty tile (2026-11-03: on a phone
+ * without root every such widget drew nothing). "image": the PowOS Linux image isn't downloaded - the tile's tap
+ * (powos.widgets.tap) opens the download; "starting": it's installed and on its way up.
+ */
+function LinuxWait({ item }: { item: HomeItem }) {
+  const l = item.linux!;
+  return (
+    <div class="widget-linux">
+      <div class="widget-name">{item.name}</div>
+      {l.state === "image" ? (
+        <>
+          <div class="muted">needs the PowOS Linux image</div>
+          <div class="widget-linux-get">{l.mb ? `Download (${l.mb} MB)` : "Download"}</div>
+        </>
+      ) : (
+        <div class="muted">starting PowOS Linux…</div>
+      )}
+    </div>
+  );
+}
+
 function AppWidgetBody({ item }: { item: HomeItem }) {
   if (item.pending) {
     return (
