@@ -11,6 +11,8 @@
 #   0009       a window buffer carries its rendering's GPU fence (dma-buf IMPORT_SYNC_FILE) instead of a glFinish per commit
 #   0010       a failed DRI3 dma-buf import logs its width/height/stride/offset/fd size and the import rule it breaks,
 #              once per shape (xwayland-kgsl-import-check.h, unit test: test/run.sh)
+#   0011       each Present copy's fence check counted (waited / already drawn / no client fence) - one line per 30 s
+#              (xwayland-kgsl-copy-wait.h, unit test: test/run.sh)
 # Was built inside the rootfs only (build-inside.sh); a package so a fix reaches phones without a new rootfs:
 # rooted.sh deploy installs it (powos-deploy.sh), the rootfs build installs it with our other packages.
 #
@@ -20,7 +22,7 @@
 
 pkgname=xwayland-kgsl
 pkgver=24.1.13
-pkgrel=4
+pkgrel=5
 pkgdesc='Xwayland with glamor/DRI3 on KGSL surfaceless (PowOS Android: Turnip without /dev/dri)'
 arch=(aarch64)
 url='https://gitlab.freedesktop.org/xorg/xserver'
@@ -38,17 +40,19 @@ _patches=(0005-present-fence-callback-fires-once.patch
           0007-xwayland-kgsl-window-buffers-come-back.patch
           0008-xwayland-kgsl-wait-for-client-rendering.patch
           0009-xwayland-kgsl-window-buffers-carry-their-gpu-fence.patch
-          0010-xwayland-kgsl-import-failure-says-its-shape.patch)
+          0010-xwayland-kgsl-import-failure-says-its-shape.patch
+          0011-xwayland-kgsl-copy-fence-check-counted.patch)
 source=("xserver::git+https://gitlab.freedesktop.org/xorg/xserver.git#tag=xwayland-$pkgver"
         "${_lfdevs[@]/#/https://raw.githubusercontent.com/lotfibennour/andromarchy/$_andromarchy/patches/xwayland/}"
         "${_patches[@]}"
-        xwayland-kgsl-import-check.h)
+        xwayland-kgsl-import-check.h
+        xwayland-kgsl-copy-wait.h)
 sha256sums=(SKIP
             4ecf3951e92f2ab35644e4e67969cd2ede125ccb6ddd65bb170ad63848979aff
             88f40f91416cc76d3ed3588fc93d4a892e414442938e25b2555e50dfcdf88f97
             652094faa7e89ff05726d9b7c2c3f5631b1c3e6a0e5460ebf4afe52612e07a2f
             d175913cbbd23e80c6bb7fd17565f1fad9ccf247171bf5a939fb157117f05b88
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   for p in "${_lfdevs[@]}" "${_patches[@]}"; do
@@ -56,6 +60,7 @@ prepare() {
     git -C xserver apply "$srcdir/$p"
   done
   cp "$srcdir"/xwayland-kgsl-import-check.h xserver/hw/xwayland/  # 0010's shared import rules
+  cp "$srcdir"/xwayland-kgsl-copy-wait.h xserver/hw/xwayland/     # 0011's copy fence counts
 }
 
 build() {

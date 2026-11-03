@@ -1,0 +1,157 @@
+From: PowOS
+Subject: xwayland/kgsl: count what each Present copy's fence check found (waited, drawn, no client fence)
+
+Broforce on the OnePlus Open (2026-11-03 19:02, tools/phone/verify/bf-overlay-watch.sh): 7 of 90 of Xwayland's
+OWN copies of the game window (XGetImage of its window pixmap) came out checkered black (1.4-2.1 %, clean 0.06 %),
+with 0008's wait in place: the Present copy read the game's swapchain image before the game's GPU write was done.
+0008 waits only when the client's dma-buf carries a PENDING fence; a buffer with no client fence (EXPORT_SYNC_FILE
+gives the kernel's stub: the client's WSI attached nothing) or with one that already signalled is copied at once,
+silently. Nothing said which of these the game's copies hit.
+
+- Each copy from a KGSL DRI3 client buffer is counted by what the check found: waited (pending fence, with the
+  wait's duration on its end), already drawn (the client's own fence, signalled), stub (no client fence: copied
+  unsynchronized), export failed. The stub test reads the sync_file's first fence driver (SYNC_IOC_FILE_INFO).
+- One "Xwayland KGSL: last 30s: N Present copies from client buffers: ..." line per 30 s with copies, beside the
+  existing KGSL stats line. The counting is xwayland-kgsl-copy-wait.h (unit test: test/copy-wait-test.c, run.sh).
+Reading it: stubs while checkered frames show -> the game's WSI doesn't attach its rendering fence (fix on the
+client's side of the handoff); all "already drawn"/"waited" -> the fence signals before the game's writes are
+visible (the writer's cache flush, Turnip).
+---
+diff --git a/hw/xwayland/xwayland-glamor-gbm.c b/hw/xwayland/xwayland-glamor-gbm.c
+index db76a0e..bbfccc0 100644
+--- a/hw/xwayland/xwayland-glamor-gbm.c
++++ b/hw/xwayland/xwayland-glamor-gbm.c
+@@ -65,6 +65,7 @@
+ #include "xwayland-screen.h"
+ #include "xwayland-window-buffers.h"
+ #include "xwayland-kgsl-import-check.h"
++#include "xwayland-kgsl-copy-wait.h"
+ 
+ #include "linux-dmabuf-unstable-v1-client-protocol.h"
+ #include "linux-drm-syncobj-v1-client-protocol.h"
+@@ -819,6 +820,49 @@ error:
+     return NULL;
+ }
+ 
++/* PowOS (patch 0011): what each Present copy's fence check found (xwayland-kgsl-copy-wait.h), one line per 30 s. */
++static struct xwl_kgsl_copy_wait_stats xwl_kgsl_copy_waits;
++
++static void
++xwl_glamor_kgsl_copy_wait_log(void)
++{
++    char line[512];
++
++    if (xwl_kgsl_copy_wait_line(&xwl_kgsl_copy_waits, GetTimeInMicros(), line, sizeof(line)))
++        ErrorF("%s", line);
++}
++
++void
++xwl_glamor_kgsl_copy_wait_note(int what)
++{
++    xwl_kgsl_copy_wait_note(&xwl_kgsl_copy_waits, (enum xwl_kgsl_copy_fence) what, GetTimeInMicros());
++    xwl_glamor_kgsl_copy_wait_log();
++}
++
++void
++xwl_glamor_kgsl_copy_wait_ended(uint64_t waited_us)
++{
++    xwl_kgsl_copy_wait_done(&xwl_kgsl_copy_waits, waited_us);
++}
++
++/* A sync_file whose first fence is the kernel's stub: the dma-buf carried no fence (the client attached none). */
++static Bool
++xwl_glamor_kgsl_sync_file_is_stub(int fd)
++{
++    struct sync_fence_info fence = { 0 };
++    struct sync_file_info info = { 0 };
++
++    if (ioctl(fd, SYNC_IOC_FILE_INFO, &info) != 0)
++        return FALSE;
++    if (info.num_fences == 0)
++        return TRUE;
++    info.num_fences = 1;
++    info.sync_fence_info = (uint64_t) (uintptr_t) &fence;
++    if (ioctl(fd, SYNC_IOC_FILE_INFO, &info) != 0)
++        return FALSE;
++    return xwl_kgsl_copy_fence_is_stub(fence.driver_name, info.num_fences);
++}
++
+ /*
+  * PowOS: the fence of whatever is still drawing into a client's DRI3 buffer, as a sync_file to wait on before
+  * reading it (a Present copy), or -1 when there is nothing to wait for.
+@@ -852,6 +896,8 @@ xwl_glamor_kgsl_export_read_fence(PixmapPtr pixmap)
+             unsupported = TRUE;
+             ErrorF("Xwayland glamor: the kernel has no DMA_BUF_IOCTL_EXPORT_SYNC_FILE: "
+                    "client buffers are copied without waiting for their rendering\n");
++        } else {
++            xwl_glamor_kgsl_copy_wait_note(XWL_KGSL_COPY_FAILED);
+         }
+         return -1;
+     }
+@@ -860,9 +906,12 @@ xwl_glamor_kgsl_export_read_fence(PixmapPtr pixmap)
+     pfd.fd = args.fd;
+     pfd.events = POLLIN;
+     if (poll(&pfd, 1, 0) == 1) {
++        xwl_glamor_kgsl_copy_wait_note(xwl_glamor_kgsl_sync_file_is_stub(args.fd) ? XWL_KGSL_COPY_STUB
++                                                                                   : XWL_KGSL_COPY_DRAWN);
+         close(args.fd);
+         return -1;
+     }
++    xwl_glamor_kgsl_copy_wait_note(XWL_KGSL_COPY_WAITED);
+     return args.fd;
+ #else
+     return -1;
+diff --git a/hw/xwayland/xwayland-glamor-gbm.h b/hw/xwayland/xwayland-glamor-gbm.h
+index 8a59421..e332b40 100644
+--- a/hw/xwayland/xwayland-glamor-gbm.h
++++ b/hw/xwayland/xwayland-glamor-gbm.h
+@@ -46,6 +46,8 @@ void xwl_glamor_kgsl_refresh_wl_buffer(PixmapPtr pixmap);
+ void xwl_glamor_kgsl_sync_stats(unsigned int *fenced, unsigned int *finished);
+ Bool xwl_glamor_kgsl_refresh_dri3_pixmap(PixmapPtr pixmap);
+ int xwl_glamor_kgsl_export_read_fence(PixmapPtr pixmap);
++void xwl_glamor_kgsl_copy_wait_note(int what);
++void xwl_glamor_kgsl_copy_wait_ended(uint64_t waited_us);
+ 
+ /* Explicit buffer synchronization points */
+ Bool xwl_glamor_gbm_set_syncpts(struct xwl_window *xwl_window, PixmapPtr pixmap);
+diff --git a/hw/xwayland/xwayland-present.c b/hw/xwayland/xwayland-present.c
+index 4591d4c..b0a3a7a 100644
+--- a/hw/xwayland/xwayland-present.c
++++ b/hw/xwayland/xwayland-present.c
+@@ -976,11 +976,18 @@ xwl_present_flip(present_vblank_ptr vblank, RegionPtr damage)
+ }
+ 
+ #if defined(XWL_HAS_GLAMOR) && defined(DRI3)
++/* PowOS (patch 0011): when each KGSL copy's wait on the client's fence began, by fd (for its duration). */
++static uint64_t xwl_present_kgsl_wait_start[1024];
++
+ static void
+ xwl_present_acquire_fence_avail(int fd, int xevents, void *data)
+ {
+     present_vblank_ptr vblank = data;
+ 
++    if (fd >= 0 && fd < 1024 && xwl_present_kgsl_wait_start[fd]) {
++        xwl_glamor_kgsl_copy_wait_ended(GetTimeInMicros() - xwl_present_kgsl_wait_start[fd]);
++        xwl_present_kgsl_wait_start[fd] = 0;
++    }
+     SetNotifyFd(fd, NULL, 0, NULL);
+     close(fd);
+     vblank->efd = -1;
+@@ -1001,6 +1008,8 @@ xwl_present_wait_acquire_fence_avail(struct xwl_screen *xwl_screen,
+         !vblank->acquire_syncobj->has_fence(vblank->acquire_syncobj,
+                                             vblank->acquire_point)) {
+         vblank->efd = eventfd(0, EFD_CLOEXEC);
++        if (vblank->efd >= 0 && vblank->efd < 1024)
++            xwl_present_kgsl_wait_start[vblank->efd] = 0;   /* PowOS 0011: not a copy's fence wait */
+         SetNotifyFd(vblank->efd, xwl_present_acquire_fence_avail, X_NOTIFY_READ, vblank);
+         vblank->acquire_syncobj->submitted_eventfd(vblank->acquire_syncobj,
+                                                    vblank->acquire_point,
+@@ -1015,6 +1024,8 @@ xwl_present_wait_acquire_fence_avail(struct xwl_screen *xwl_screen,
+         int fence_fd = xwl_glamor_kgsl_export_read_fence(vblank->pixmap);
+ 
+         if (fence_fd >= 0) {
++            if (fence_fd < 1024)
++                xwl_present_kgsl_wait_start[fence_fd] = GetTimeInMicros();
+             vblank->efd = fence_fd;
+             SetNotifyFd(vblank->efd, xwl_present_acquire_fence_avail, X_NOTIFY_READ, vblank);
+             return TRUE;
