@@ -8369,6 +8369,54 @@ async function webWindowOneLauncher() {
   return fails;
 }
 
+/**
+ * RL1 (the user 11-03: tapping Steam "launches a SECOND Steam instead of focusing the running one"): a launch of an app
+ * that has a window - Android minimised under another, a Linux one minimised, a Linux one full screen - fronts THAT
+ * window (not minimised, on top), with no window open, no placeholder, no plain launch: the window count is unchanged.
+ */
+async function webWindowRelaunch() {
+  const fails = [];
+  const h = await window.__oneg.oneInstanceHost();
+  const B = await window.__gw.mod("./bridge.ts");
+  const seen = { plain: [], fulls: [] };
+  const was = { launch: B.powos.apps.launch, full: B.powos.webwindows.fullScreen };
+  B.powos.apps.launch = async (k) => void seen.plain.push(k);
+  B.powos.webwindows.fullScreen = async (id) => (seen.fulls.push(id), true);
+  try {
+    for (const c of [
+      ["an Android app minimised under another window", "a:gate.relaunch/.Main", { minimised: true }],
+      ["a Linux app minimised", "l:gate.relaunch", { minimised: true }],
+      ["a Linux app full screen", "l:gate.relaunch.full", { full: true }],
+    ])
+      fails.push(...(await relaunchCase(h, seen, c)));
+  } finally {
+    B.powos.apps.launch = was.launch;
+    B.powos.webwindows.fullScreen = was.full;
+    h.restore();
+  }
+  return fails;
+
+  /** RL1's one case: [key]'s window 9901 ([more]) under window 9902, then a launch of [key]. */
+  async function relaunchCase({ W, calls, p }, { plain, fulls }, [what, key, more]) {
+    const S = await window.__gw.mod("./state.ts");
+    const win = (id, k, m) => ({ id, key: k, label: k, page: p, x: 60, y: 120, w: 300, h: 260, live: true, ...m });
+    W.webWins.value = [win(9901, key, more), win(9902, "a:gate.other/.Main")];
+    await window.__gw.settled();
+    calls.length = plain.length = fulls.length = 0;
+    await S.launch(key);
+    await window.__gw.settled();
+    const all = W.webWins.value;
+    const mine = all.filter((w) => w.key === key);
+    const top = all.at(-1);
+    const fronted = more.full ? fulls.includes(9901) : top?.id === 9901 && !top.minimised;
+    return [
+      (mine.length !== 1 || all.length !== 2 || calls.length + plain.length > 0) &&
+        `RL1 ${what}: a relaunch left ${mine.length} windows of it, ${all.length} windows (had 2), opens [${calls}], plain launches [${plain}] (want 1, 2, none, none)`,
+      !fronted && `RL1 ${what}: its window was not brought to the front (top ${top?.id} minimised ${top?.minimised}, fullScreen calls [${fulls}])`,
+    ].filter(Boolean);
+  }
+}
+
 async function webWindowOneInstance() {
   const { oneInstanceHost, oneInstanceTwice, oneInstanceUnbound } = window.__oneg;
   const h = await oneInstanceHost();
@@ -11781,7 +11829,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockToggleHost, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockToggleHost, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, webWindowRelaunch, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }

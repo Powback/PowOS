@@ -34,12 +34,15 @@
 #                 bar's own host call) -> its task full screen on display 0 at the whole screen's size, never its old
 #                 window's size top-left (11-02 21:45: 1154x1538 at 0,197 on 2268x2440, the rest black); back to a
 #                 window -> it fills the body again.
+#   relaunch      (launching-an-app-that-s-already-running-opens-it): Calculator as a web window, Home pressed, then
+#                 Calculator launched again from home's search (a launch, not the dock's taskbar toggle) -> the SAME
+#                 window fronts (not minimised, on top), no second window, no second Calculator task.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/e2e-lib.sh"
 CASE=${1:-}; shift || true
-case "$CASE" in tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size) ;;
-  *) echo "usage: board-look-windows.sh tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size [--round R]"; exit 2 ;; esac
+case "$CASE" in tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size|relaunch) ;;
+  *) echo "usage: board-look-windows.sh tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size|relaunch [--round R]"; exit 2 ;; esac
 e2e_args "$@"
 e2e_init "lookw-$CASE"
 CALC=${TEST_APP:-com.oneplus.calculator} CHROME=com.android.chrome
@@ -352,6 +355,37 @@ if [ "$CASE" = chrome-size ]; then
     else fail "task $t is mode '$m' at '${s/ /x}' on a $scr screen - its old window's size, not the screen"; fi
     hosttowin "$A1" >/dev/null; sleep 3; chk towin
     step back "Chrome back in its window"; fills "$A1" "back in its window"
+  fi
+fi
+
+# --- relaunch --------------------------------------------------------------------------------------------------
+# wwof <key>: the page's windows of app [key] and whether the first is the top-most, "<n> <id> <top 1/0> <min 1/0>".
+wwof() { ev "$WW.then(m=>{const l=m.webWins.value,mine=l.filter(w=>w.key==='$1'),w=mine[0];return w?[mine.length,'w'+w.id,l.at(-1)?.id===w.id?1:0,w.minimised?1:0].join(' '):'0'})"; }
+ntasks() { tasks | awk -v p="$1" 'index($2,p)==1' | wc -l | tr -d ' '; }
+if [ "$CASE" = relaunch ]; then
+  K=$(appkey "$CALC"); A1=$(wwopen "$CALC"); sleep 3; chk open
+  if [ "$A1" = none ] || [ "$K" = none ]; then fail "no web window for Calculator ($A1, key $K)"
+  else
+    KEY=${K%%|*}; LABEL=${K#*|}; n0=$(ntasks "$CALC")
+    step window "Calculator as a web window ($A1, $n0 Calculator task(s))"
+    sh_ "input keyevent KEYCODE_HOME"; sleep 2; chk home
+    step home "Home pressed"
+    f=$(searchpt)
+    case $f in none|off|"") fail "no search on home ($f)" ;; *)
+      set -- $f; tap "$1" "$2" "home's search"; sleep 1.2; chk search
+      if [ "$(ev "$SEARCHED")" = yes ] && homefocused; then
+        q=$(tr 'A-Z' 'a-z' <<<"${LABEL%% *}" | tr -cd 'a-z0-9'); sh_ "input text ${q:-calc}"; sleep 1.5; chk typed
+        p=$(searchresult "$KEY")
+        case $p in none|off|"") fail "no Calculator in the search results ($p)"; back; back ;; *)
+          set -- $p; tap "$1" "$2" "Calculator in the results (launched again)"; sleep 3; chk relaunch
+          step relaunch "Calculator launched again while its window is open"
+          o=$(wwof "$KEY"); n1=$(ntasks "$CALC"); set -- $o
+          [ "${1:-0}" = 1 ] && [ "${2:-}" = "$A1" ] && [ "${3:-}" = 1 ] && [ "${4:-}" = 0 ] && [ "$n1" = "$n0" ] &&
+            pass "the same window $A1 fronts (top, not minimised), one window, $n1 Calculator task(s)" ||
+            fail "after the relaunch: windows of it '$o' (want '1 $A1 1 0': count id top minimised), Calculator tasks $n1 (had $n0)" ;;
+        esac
+      else step search "home's search tapped"; fail "home's search didn't take the focus ($(ev "$SEARCHED"), $(ime))"; back; fi ;;
+    esac
   fi
 fi
 

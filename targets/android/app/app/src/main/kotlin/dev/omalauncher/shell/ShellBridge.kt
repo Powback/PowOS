@@ -1433,7 +1433,10 @@ class ShellBridge(
     ): dev.omalauncher.linux.LinuxApp? {
         if (pkg != context.packageName) return null
         val appId = andro.marchy.WindowTasks.appIdOfTask(id) ?: return null
-        return runtime.linuxApps.firstOrNull { appId.isNotEmpty() && it.matches(appId) } ?: byCaption(caption)
+        // The same app-of-window rule as web windows' (RunningApps.linuxAppOf: desktop id, else X11 class - Steam's
+        // "steam", a Proton game's steam_app_<id>): a desktop-id-only match missed Steam's window, so a dock tap on
+        // Steam (folded / web windows off: restoreLinux) started a SECOND Steam (the user 11-03).
+        return RunningApps.linuxAppOf(runtime.linuxApps, appId) ?: byCaption(caption)
     }
 
     /** The PowOS app a window's [caption] names: all of it, or its last " — " / " - " part (Plasma itself left out). */
