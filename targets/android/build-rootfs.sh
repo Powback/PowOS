@@ -114,9 +114,12 @@ if [ -d "$PUBLISH" ]; then
   cut -d' ' -f1 "$OUT/powos-rootfs.tar.gz.sha256" > "$PIN"
   echo "pinned: $(cat "$PIN") in ${PIN#$HERE/} - rebuild the app (build-app.sh) and commit the pin"
   # Base + packs beside it, pinned the same way (InstallActivity uses the base once it and every pack are pinned).
-  for f in powos-rootfs-base $(cut -f1 "$OUT/powos-packs.tsv" | grep -vx base | sed 's/^/powos-pack-/'); do
-    ln -f "$OUT/$f.tar.gz" "$PUBLISH/$f.tar.gz"
-    cut -d' ' -f1 "$OUT/$f.tar.gz.sha256" > "$HERE/app/engine/src/main/assets/$f.sha256"
-    echo "published + pinned: http://android.pow/apk/$f.tar.gz"
-  done
+  # Opt-in (POWOS_PUBLISH_PACKS=1) until the base is the approved first install for phones without root.
+  if [ "${POWOS_PUBLISH_PACKS:-0}" = 1 ]; then
+    for f in powos-rootfs-base $(cut -f1 "$OUT/powos-packs.tsv" | grep -vx base | sed 's/^/powos-pack-/'); do
+      ln -f "$OUT/$f.tar.gz" "$PUBLISH/$f.tar.gz"
+      cut -d' ' -f1 "$OUT/$f.tar.gz.sha256" > "$HERE/app/engine/src/main/assets/$f.sha256"
+      echo "published + pinned: http://android.pow/apk/$f.tar.gz"
+    done
+  fi
 fi

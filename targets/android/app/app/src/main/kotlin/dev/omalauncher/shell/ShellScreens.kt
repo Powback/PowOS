@@ -79,6 +79,13 @@ class ShellScreens(
     /** The Linux system's size on disk, measured when its screen opens. */
     private var linuxSize by mutableStateOf<Long?>(null)
 
+    /** Bumped whenever a pack's install/removal moves (andro.marchy.Packs.listener): the storage screen re-reads. */
+    private var packsTick by mutableStateOf(0)
+
+    init {
+        andro.marchy.Packs.listener = Runnable { android.os.Handler(android.os.Looper.getMainLooper()).post { packsTick++ } }
+    }
+
     /** What the last store install said went wrong (by widget id). */
     private var storeMessage by mutableStateOf<Pair<String, String>?>(null)
 
@@ -93,6 +100,7 @@ class ShellScreens(
             AGENTS_SCREEN -> agents()
             AUR -> packages()
             LICENSES -> licenses()
+            STORAGE -> storage()
             else -> throw IllegalArgumentException("no screen $name")
         }
 
@@ -182,6 +190,9 @@ class ShellScreens(
             // New or removed .desktop files show up in the drawer right away; the list is read again.
             "aur.install" -> pkg(text)?.let { p -> scope.launch { if (runtime.pacman.install(p)) runtime.refreshApps(); query(packageQuery) } }.let { null }
             "aur.remove" -> scope.launch { if (runtime.pacman.remove(text)) runtime.refreshApps(); query(packageQuery) }.let { null }
+            "storage.add" -> andro.marchy.Packs.installAsync(context, text)
+            "storage.remove" -> andro.marchy.Packs.removeAsync(context, text)
+            "storage.dismiss" -> andro.marchy.Packs.clearFailure(text).also { packsTick++ }
             "licenses.text" -> licenseText(text)
             "licenses.open" -> start(Intent(Intent.ACTION_VIEW, Uri.parse(text)))
             else -> throw IllegalArgumentException("no such action: $name.$action")
@@ -215,6 +226,34 @@ class ShellScreens(
             .put("packages", JSONArray(pending?.packages.orEmpty()))
             .put("tools", JSONArray(pending?.tools.orEmpty().map { "${it.name} ${it.current} → ${it.latest}" }))
             .put("job", job(u.job))
+    }
+
+    // --- storage
+
+    /**
+     * The parts of PowOS the base image (phones without root) leaves out, as Settings > Storage and the library's
+     * "add gaming" show them: [{ name, download, unpacked, installed, job }], job null or { phase, done, total } /
+     * { phase: "failed", message }. Empty on a full rootfs (rooted phones have everything).
+     */
+    private fun storage(): JSONObject {
+        packsTick // read: a pack's change re-sends this
+        val packs = JSONArray()
+        for (p in andro.marchy.Packs.list(context)) {
+            val s = andro.marchy.Packs.state(p.name)
+            val job: Any =
+                when {
+                    s == null -> JSONObject.NULL
+                    s.startsWith("failed") -> JSONObject().put("phase", "failed").put("message", s.removePrefix("failed").trim())
+                    else -> s.split(" ").let { w ->
+                        JSONObject().put("phase", w[0]).put("done", w.getOrNull(1)?.toLongOrNull() ?: 0L).put("total", w.getOrNull(2)?.toLongOrNull() ?: 0L)
+                    }
+                }
+            packs.put(
+                JSONObject().put("name", p.name).put("download", p.download).put("unpacked", p.unpacked)
+                    .put("installed", p.installed).put("job", job),
+            )
+        }
+        return JSONObject().put("packs", packs)
     }
 
     // --- linux
@@ -622,6 +661,7 @@ class ShellScreens(
         const val AGENTS_SCREEN = "coding"
         const val AUR = "aur"
         const val LICENSES = "licenses"
+        const val STORAGE = "storage"
 
         /** ShellActivity's request codes: the photo picker's, the notification permission's. */
         const val PICK_IMAGE_REQUEST = 42

@@ -135,12 +135,41 @@ export function mockScreens(events: Emitter): Bridge["screens"] {
         { name: "bash", version: "5.2-1", description: "The GNU Bourne Again shell", repo: null, installed: true, core: true, job: null },
       ],
     },
+    // A base install (no root): what rootfs-packs.conf leaves out, sized as the 11-03 split measured.
+    storage: {
+      packs: [
+        { name: "gaming", download: 2.75e9, unpacked: 5.0 * 2 ** 30, installed: false, job: null },
+        { name: "apps", download: 2.2e9, unpacked: 5.2 * 2 ** 30, installed: false, job: null },
+        { name: "dev", download: 0.23e9, unpacked: 0.8 * 2 ** 30, installed: false, job: null },
+        { name: "languages", download: 0.59e9, unpacked: 1.55 * 2 ** 30, installed: true, job: null },
+      ],
+    },
     licenses: {
       version: "0.1.0-dev",
       components: [{ name: "Nerd Fonts", use: "symbol font", license: "mit", notice: "Copyright (c) 2014 Ryan L McIntyre", url: "https://www.nerdfonts.com", source: null }],
     },
   };
   const changed = (name: string) => events.emit("screens.state", { name, state: state[name] });
+  // A pack's add: a few seconds of download, then unpack, as the host reports them; a removal at once.
+  const packJob = (name: string, action: string) => {
+    const packs = state.storage.packs as { name: string; download: number; installed: boolean; job: unknown }[];
+    const set = (job: unknown, installed?: boolean) => {
+      state.storage = { packs: packs.map((p) => (p.name === name ? { ...p, job, installed: installed ?? p.installed } : p)) };
+      changed("storage");
+    };
+    const total = packs.find((p) => p.name === name)?.download ?? 0;
+    if (action === "remove") return setTimeout(() => set(null, false), 600);
+    let step = 0;
+    const tick = setInterval(() => {
+      step++;
+      if (step <= 8) set({ phase: "downloading", done: (total * step) / 8, total });
+      else if (step <= 10) set({ phase: "installing", done: (total * (step - 8)) / 2, total });
+      else {
+        clearInterval(tick);
+        set(null, true);
+      }
+    }, 400);
+  };
   return {
     watch: async (name) => state[name],
     unwatch: async () => {},
@@ -163,6 +192,8 @@ export function mockScreens(events: Emitter): Bridge["screens"] {
       } else if (name === "aur" && action === "query") {
         state.aur.query = arg;
         changed("aur");
+      } else if (name === "storage" && (action === "add" || action === "remove")) {
+        packJob(arg as string, action);
       } else if (name === "licenses" && action === "text") {
         return "MIT License\n\nPermission is hereby granted, free of charge, …";
       }

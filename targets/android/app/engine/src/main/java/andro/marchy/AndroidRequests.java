@@ -165,7 +165,7 @@ public final class AndroidRequests implements DirWatch.Listener {
             return;
         }
         if (req[0].equals("pack") && req.length == 2) { // e.g. powos-steam on a base install: "pack gaming"
-            Packs.installAsync(ctx, req[1].trim(), file.getParentFile());
+            Packs.installAsync(ctx, req[1].trim());
             return;
         }
         if (req[0].equals("power") && req.length == 2) { // Omarchy's shutdown / reboot / log out / suspend

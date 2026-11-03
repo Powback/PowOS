@@ -92,14 +92,26 @@ the shared Docker disk has under 25 GB free (or with `POWOS_SCRATCH=image`), in 
 
 **Base image + packs (phones without root).** build-rootfs.sh then splits the full rootfs by
 [rootfs-packs.conf](rootfs-packs.conf) ([tools/split-rootfs.py](tools/split-rootfs.py), ~6 min, streams the tarball:
-also runs alone on an existing `out/powos-rootfs.tar.gz`): `out/powos-rootfs-base.tar.gz`, which the app's first
-install downloads, and `out/powos-pack-<name>.tar.gz` packs it adds on demand (engine `Packs.java`, request
-`pack <name>`): **gaming** (FEX + its x86 rootfs, box64, Steam's bootstrap and launchers; `powos-steam`/`powos-play`
-ask for it on first use through `play/powos-pack need gaming`) and **languages** (non-English translations and
-glibc locales; added right after the install when Android's language isn't English). Docs/man/help are dropped from
-the base and kept out by pacman's NoExtract. The app uses the base only when it pins the base and every pack
-(`assets/powos-rootfs-base.sha256`, `assets/powos-pack-*.sha256`, written on publish); otherwise, and on rooted
-phones, the full rootfs as before. Measured on the 10-26 build: full 7.07 GB download / 15.9 GiB unpacked.
+also runs alone on an existing `out/powos-rootfs.tar.gz`; `--plan` prints the split from a `tar -tv` listing in
+seconds): `out/powos-rootfs-base.tar.gz`, which the app's first install downloads, and `out/powos-pack-<name>.tar.gz`
+packs the app adds on demand (engine `Packs.java`). The base is the dependency closure of the day-one packages
+(`roots`: the Plasma session on Android, the PowOS widgets' QML, the PowOS CLI, terminal, sound, pacman); the packs:
+**gaming** (FEX + its x86 rootfs, box64, Steam's bootstrap and launchers, with their own dependencies), **apps**
+(Brave, MariaDB, SpacetimeDB, wallpapers, Homebrew's archive and every other package of the image), **dev**
+(compilers, build tools, debuggers), **languages** (non-English translations, glibc locales, Noto CJK). Docs/man/help
+are dropped from the base and kept out by pacman's NoExtract. Added from Settings > Storage (installed / size / add /
+remove, live progress), the library's "add gaming" card, `powos-steam`/`powos-play` (`play/powos-pack need gaming`:
+request `pack gaming`), or right after the install for languages when Android's language isn't English.
+
+Measured on the 10-26 build (7.07 GB download, 15.9 GiB unpacked): base 1.03 GB / 2.8 GiB, gaming 2.75 GB / 5.0 GiB,
+apps 2.20 GB / 5.2 GiB, dev 0.23 GB / 0.8 GiB, languages 0.59 GB / 1.6 GiB, docs dropped 0.5 GiB.
+
+Publishing: build-rootfs.sh hard-links the full rootfs into `$POWOS_PUBLISH_DIR` (default
+`~/Projects/android-app-dev/output`, served on the LAN/VPN as `http://android.pow/apk/`) and pins its sha256 in
+`app/engine/src/main/assets/`. Base + packs go there too only with `POWOS_PUBLISH_PACKS=1` (same directory, same
+pins: `powos-rootfs-base.sha256`, `powos-pack-*.sha256`); the app installs the base only when it pins the base and
+every pack, otherwise (and on rooted phones) the full rootfs as before. Packages whose files sit in a pack stay
+registered with pacman; a package update re-extracts them.
 
 ## Install on a phone (test path)
 

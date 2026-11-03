@@ -48,12 +48,12 @@ public class InstallActivity extends Activity {
      *  when it publishes the tarball (so the APK built after a publish pins exactly that file). Both the download and
      *  a local copy are checked against it before anything is unpacked; a mismatch refuses the install. */
     static final String PIN_ASSET = "powos-rootfs.sha256";
-    /** The base image (tools/split-rootfs.py: the full rootfs minus the packs and docs, a third of the download), used
+    /** The base image (tools/split-rootfs.py: the full rootfs minus the packs and docs: ~1 GB of the 7 GB), used
      *  instead whenever this APK pins it and every pack it leaves out ([Packs]): gaming is added from the app on first
      *  use, languages right after the install when Android's language isn't English. Rooted installs keep the full one. */
     static final String BASE_URL = "http://android.pow/apk/powos-rootfs-base.tar.gz";
     static final String BASE_PIN_ASSET = "powos-rootfs-base.sha256";
-    static final String[] PACKS = {"gaming", "languages"};
+    static final String[] PACKS = {"gaming", "apps", "dev", "languages"};
     private static final long NEEDED_BYTES = 12L << 30; // archive + extracted rootfs, with room for apps
 
     // {xkb layout, label}: the common ones; the first selected is the physical keyboard's.
@@ -130,8 +130,8 @@ public class InstallActivity extends Activity {
             try {
                 boolean base = installRootfs(conf);
                 if (base && !Locale.getDefault().getLanguage().equals("en"))
-                    Packs.install(this, "languages", (done, total) -> call("progress", total > 0 ? done * 1000 / total : -1,
-                            "Adding " + Locale.getDefault().getDisplayLanguage() + " (" + (done >> 20)
+                    Packs.install(this, "languages", (phase, done, total) -> call("progress", total > 0 ? done * 1000 / total : -1,
+                            (phase.equals("installing") ? "Installing " : "Downloading ") + Locale.getDefault().getDisplayLanguage() + " (" + (done >> 20)
                                     + (total > 0 ? " / " + (total >> 20) : "") + " MB)"));
                 runOnUiThread(() -> {
                     startActivity(new Intent(this, MainActivity.class));

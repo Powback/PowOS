@@ -8,7 +8,7 @@ import { signal } from "@preact/signals";
 import { useEffect, useState } from "preact/hooks";
 import { powos } from "./bridge.ts";
 
-export type ScreenName = "settings" | "style" | "themes" | "store" | "linux" | "coding" | "aur" | "licenses" | "gestures";
+export type ScreenName = "settings" | "style" | "themes" | "store" | "linux" | "coding" | "aur" | "licenses" | "gestures" | "storage";
 
 /** The open screens, bottom first; the last one shows. */
 export const screens = signal<ScreenName[]>([]);
