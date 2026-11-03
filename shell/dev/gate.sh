@@ -360,7 +360,19 @@ rc=$(cat "$work/browser.rc" 2>/dev/null || echo 2)
 # at once and twice the budget, logged as a retry. A scene with any other failure is never retried, and a retried scene
 # passes only if the retry printed its "ok" (a scene the retry's GATE_ONLY skipped is not a pass).
 infra='not ready \(window\.__powosAlive\)|navigation: |Navigation timeout|protocolTimeout|callFunctionOn timed out|Promise was collected|Execution context was destroyed|Cannot find context with specified id|Target closed|Session closed|Connection closed'
-if [ $rc -ne 0 ] && grep -q '^FAIL ' "$browser_log"; then
+# The rerun policy (dev/gate-rerun.sh, the default): every failed scene rerun alone up to GATE_RERUN (2) times; one
+# that passes alone every time is FLAKY - not a FAIL, written to the flake ledger. GATE_RERUN=0: the load-only retry
+# below instead.
+. "$SHELL_DIR/dev/gate-rerun.sh"
+gate_rerun_run() { local r; ( GATE_SCENES=6 browser_run "$ready_ms" "$1" 2 > "$2" 2>&1 ); r=$?; return $r; }
+if [ $rc -ne 0 ] && [ "${GATE_RERUN:-2}" != 0 ] && grep -q '^FAIL ' "$browser_log"; then
+  set +e
+  GR_HEAD=$(git -C "$SHELL_DIR" rev-parse --short HEAD 2>/dev/null) GR_LOAD=$load GR_TREE=$cache_key
+  export GR_HEAD GR_LOAD GR_TREE
+  gate_rerun "$browser_log" "$work"
+  rc=$?
+  set -e
+elif [ $rc -ne 0 ] && grep -q '^FAIL ' "$browser_log"; then
   failing=$(grep '^FAIL ' "$browser_log" | sed 's/^FAIL \([^:]*\):.*/\1/' | sort -u)
   assert_fail="" retry_names=""
   while IFS= read -r n; do
@@ -436,9 +448,11 @@ fi
 n_ok=$(cat "$browser_log" "$work/browser-retry.log" 2>/dev/null | grep -c '^ok   ' || true)
 # A scene that passed its retry (above) is not a FAIL; it is counted once, as the retry's ok.
 bad_scenes=$(grep -h '^FAIL ' "$browser_log" 2>/dev/null | sed 's/^FAIL \([^:]*\):.*/\1/' | sort -u | while IFS= read -r n; do
-  grep -qF "ok   $n (" "$work/browser-retry.log" 2>/dev/null || echo "$n"; done | paste -sd' ' - || true)
+  grep -qF "ok   $n (" "$work/browser-retry.log" 2>/dev/null || grep -qxF "$n" "$work/flaky.txt" 2>/dev/null || echo "$n"; done | paste -sd' ' - || true)
+# A FLAKY scene (dev/gate-rerun.sh: failed in the full run, passed alone every rerun) is neither a PASS nor a FAIL.
+flaky=$(paste -sd' ' - < "$work/flaky.txt" 2>/dev/null || true) n_flaky=$(grep -c . "$work/flaky.txt" 2>/dev/null || true)
 n_retried=$(grep -c '^ok   ' "$work/browser-retry.log" 2>/dev/null || true); [ "${n_retried:-0}" != 0 ] || n_retried=
-echo "gate: summary: scenes $n_ok PASS${n_retried:+ ($n_retried on a retry)}, $(echo "$bad_scenes" | wc -w | tr -d ' ') FAIL${bad_scenes:+ ($bad_scenes)}; slot wait ${slot_wait} s; tsc ${t_tsc} s, lints ${t_lint} s, browser ${t_browser} s, widgets ${t_widgets} s"
+echo "gate: summary: scenes $n_ok PASS${n_retried:+ ($n_retried on a retry)}, $(echo "$bad_scenes" | wc -w | tr -d ' ') FAIL${bad_scenes:+ ($bad_scenes)}, ${n_flaky:-0} flaky${flaky:+ ($flaky)}; slot wait ${slot_wait} s; tsc ${t_tsc} s, lints ${t_lint} s, browser ${t_browser} s, widgets ${t_widgets} s"
 [ $fail = 0 ] && [ -z "$shots" ] && echo "$(date +%F\ %T) $scope_note" > "$cache_dir/$cache_key"
 echo "gate: $([ $fail = 0 ] && echo pass || echo FAIL) in $(($(date +%s) - t0)) s ($base$([ -n "$overrides" ] && echo " + phone overrides")$([ ${#files[@]} -gt 0 ] && echo " + ${#files[@]} pushed file(s)"))"
 # A failure while the Mac is loaded (1-min load >= GATE_LOAD_FRICTION, 12) is friction: the gate may have failed for
