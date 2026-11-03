@@ -18,7 +18,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import androidx.compose.runtime.mutableStateListOf
-import dev.omalauncher.linux.RootedGuest
+import dev.omalauncher.linux.Guest
 import dev.omalauncher.linux.shellQuote
 import org.json.JSONArray
 import org.json.JSONObject
@@ -114,7 +114,7 @@ class AgentMail private constructor(
                 val ok =
                     runCatching {
                         // "--": a reply that starts with "-" is still the message, not an option.
-                        RootedGuest.run("powos comms send ${shellQuote(agent)} -- ${shellQuote(text)}") == 0
+                        Guest.run("powos comms send ${shellQuote(agent)} -- ${shellQuote(text)}") == 0
                     }.getOrDefault(false)
                 if (ok) {
                     read(app, id)
@@ -523,10 +523,10 @@ class AgentMail private constructor(
             }
             if (newly.isEmpty()) return
             changed()
-            if (fromComms || !RootedGuest.enabled) return
+            if (fromComms || !Guest.enabled) return
             // Out of the user's inbox too (comms ids: the ones it sent; others aren't there and are ignored).
             Thread({
-                runCatching { RootedGuest.run("powos comms read --agent user ${newly.joinToString(" ") { shellQuote(it) }}") }
+                runCatching { Guest.run("powos comms read --agent user ${newly.joinToString(" ") { shellQuote(it) }}") }
                     .onFailure { Log.w(TAG, "can't mark ${newly.size} read in comms", it) }
             }, "agent-mail-read").start()
         }

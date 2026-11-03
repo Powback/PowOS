@@ -121,18 +121,25 @@ object RootedGuest {
         showDesktop: () -> Unit,
         onLine: (String) -> Unit = {},
     ): Int {
-        val ids = listOfNotNull(appId, wmClass).filter { it.isNotBlank() }.joinToString("") { " --app-id " + shellQuote(it) }
-        val command =
-            "if command -v powos-open-task >/dev/null; then exec powos-open-task$ids -- ${shellQuote(exec)}; " +
-                "else echo '$OPEN_DESKTOP'; ${launchCommand(appId, exec)}; fi"
-        return runOwn(command) { line ->
+        return runOwn(openTaskCommand(appId, wmClass, exec)) { line ->
             if (line == OPEN_DESKTOP) showDesktop()
             onLine(line)
         }
     }
 
+    /** The shell line [openAsTask] runs in the session (also the no-root [Guest]'s, in the PowOS image). */
+    fun openTaskCommand(
+        appId: String,
+        wmClass: String?,
+        exec: String,
+    ): String {
+        val ids = listOfNotNull(appId, wmClass).filter { it.isNotBlank() }.joinToString("") { " --app-id " + shellQuote(it) }
+        return "if command -v powos-open-task >/dev/null; then exec powos-open-task$ids -- ${shellQuote(exec)}; " +
+            "else echo '$OPEN_DESKTOP'; ${launchCommand(appId, exec)}; fi"
+    }
+
     /** powos-open-task's status line: the app opens on the desktop, not as a task. */
-    private const val OPEN_DESKTOP = "powos-open-task: desktop"
+    const val OPEN_DESKTOP = "powos-open-task: desktop"
 
     /** The session's LANG (SessionService.androidLocale; the session's first boot compiled that locale). */
     private fun locale() = java.util.Locale.getDefault().let { if (it.country.isEmpty()) "C.UTF-8" else "${it.language}_${it.country}.UTF-8" }

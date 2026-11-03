@@ -9,8 +9,7 @@ import android.util.Base64
 import android.util.Log
 import androidx.compose.runtime.snapshotFlow
 import dev.omalauncher.Runtime
-import dev.omalauncher.linux.RootedGuest
-import dev.omalauncher.linux.shellQuote
+import dev.omalauncher.linux.Guest
 import dev.omalauncher.widgets.runtime.WidgetInstance
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -107,9 +106,10 @@ class ShellTerminals(
 
     /** What runs: argv and environment of PtyTerminal's shell (rooted mode), or the app's Linux's. */
     private fun process(command: String?): Pair<List<String>, Map<String, String>> {
-        if (RootedGuest.enabled) {
-            val argv = listOf("/system/bin/sh", "-c", "exec su -c " + shellQuote(RootedGuest.rootCommand(command ?: RootedGuest.TERMINAL_SHELL)))
-            return argv to System.getenv() + TERMINAL_ENV
+        // PowOS (rooted: the session through su; no root: the image through lotfix-run): Guest picks.
+        if (Guest.enabled) {
+            val t = Guest.terminal(command, TERMINAL_ENV)
+            return listOf(t.executable) + t.argv.drop(1) to t.env
         }
         val pb = runtime.proot.process(command ?: "exec bash -l")
         return pb.command() to pb.environment() + TERMINAL_ENV
