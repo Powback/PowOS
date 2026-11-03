@@ -164,6 +164,11 @@ SEARCHED="document.activeElement&&document.activeElement.matches('.bar textarea'
 # round 193, appapi 01/02 folded: the page had the focus and asked for the keyboard).
 homefocused() { sh_ "dumpsys window | grep mCurrentFocus" | grep -q com.powos.app; }
 searchpt() { ev "$SEARCHPT"; }
+# recentsdown: waits (<= ~3 s) till the switcher's layer neither shows nor takes touches; "up" when it still does.
+# RC1 (e2e-lookw-relaunch 1103-1805 [02-home] "off (under div.recents)"): Home over home's main page opens the switcher
+# (ShellActivity.homePressed, home-repeat.sh) - a web window on home is home in front - so searchpt hit-tested its layer.
+RECENTSDOWN="new Promise(ok=>{let n=0;const go=()=>{const l=document.querySelector('.recents');const up=l&&(l.classList.contains('shown')||getComputedStyle(l).visibility!=='hidden');if(!up)return ok('down');if(n++>180)return ok('up');requestAnimationFrame(go)};go()})"
+recentsdown() { ev "$RECENTSDOWN"; }
 # searchresult <app key>: "x y" of that app in the launcher's search results, or none/off. The results are buttons
 # [data-search-result="app:<key>"] (drawer.tsx SearchResults, since e7766370) - the old `.app[data-key]` probe found
 # nothing there and failed Kate/App API/Lights though they were on screen (E2E 194). Scrolled into view first: a long

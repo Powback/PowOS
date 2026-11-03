@@ -8987,6 +8987,29 @@ async function searchTaps(r, f, reset) {
 }
 
 /**
+ * RC1 (e2e-lookw-relaunch 11-03 [02-home] "no search on home (off (under div.recents))"): Home over home's main page
+ * opens the switcher (ShellActivity.homePressed); Home again closes it. The moment it starts closing it takes no touch
+ * (.recents' pointer-events follow .shown, which goes with the phase, not with the collapse's visibility hold): a tap on
+ * home's bar 50 ms into the close focuses it and asks for the keyboard.
+ */
+async function searchDuringRecentsClose(r, f) {
+  const sp = await searchAtRest(r);
+  if (!sp || typeof sp === "string") return [`RC1: home's search before the switcher ${sp ?? "is gone"}`];
+  const up = await r.page.evaluate(async () => {
+    const task = (id, label) => ({ id, label, key: null, icon: null, snapshot: "" });
+    window.__mockEvents.emit("recents.show", { open: true, from: null, tasks: [task(951, "Calculator"), task(952, "Camera")] });
+    await new Promise((ok) => setTimeout(ok, 500));
+    const l = document.querySelector(".recents");
+    if (!l?.classList.contains("shown")) return "the switcher isn't up after recents.show";
+    window.__mockEvents.emit("system.home", null);
+    await new Promise((ok) => setTimeout(ok, 50));
+    return l.classList.contains("open") || l.classList.contains("settling") ? "" : "closed at once (no close to tap through)";
+  });
+  if (up && up.startsWith("the switcher")) return [`RC1: ${up}`];
+  return (await searchTapKeyboard(r, f, sp.at, " 50 ms after Home closed the switcher")).map((m) => m.replace("E2E1:", "RC1:"));
+}
+
+/**
  * KB1 + WS1 (e2e round 193 steps 05-06), unfolded only: a web window in front put away by its dock icon (the host's
  * "webwindows.state" says it's minimised), then a finger's tap on the bar - focused, the keyboard asked for.
  */
@@ -9048,6 +9071,8 @@ async function homeGesturesScene(r) {
   fails.push(...(await searchTaps(r, f, reset)));
   await reset(); await f.wait(500);
   fails.push(...(await searchAfterDockMinimise(r, f)));
+  await reset(); await f.wait(500);
+  fails.push(...(await searchDuringRecentsClose(r, f)));
   await reset(); await f.wait(500);
   at = await empty();
   if (!at) return [...fails, "E2E1: no empty spot on home to hold"];
