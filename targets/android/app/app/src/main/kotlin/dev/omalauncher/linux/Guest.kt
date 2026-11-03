@@ -81,18 +81,23 @@ object Guest {
             else -> own(RootedGuest.launchCommand(name, command), onLine)
         }
 
+    /** What [openAsTask] opens: the app's id, its window class if known, its command line. */
+    data class TaskApp(
+        val appId: String,
+        val wmClass: String?,
+        val exec: String,
+    )
+
     /** A PowOS app as its own Android task, or on the desktop ([showDesktop]); see [RootedGuest.openAsTask]. */
     fun openAsTask(
-        appId: String,
-        wmClass: String?,
-        exec: String,
+        app: TaskApp,
         showDesktop: () -> Unit,
         onLine: (String) -> Unit = {},
     ): Int =
         when (kind) {
-            Kind.ROOTED -> RootedGuest.openAsTask(appId, wmClass, exec, showDesktop, onLine)
+            Kind.ROOTED -> RootedGuest.openAsTask(app.appId, app.wmClass, app.exec, showDesktop, onLine)
             else ->
-                own(RootedGuest.openTaskCommand(appId, wmClass, exec)) { line ->
+                own(RootedGuest.openTaskCommand(app.appId, app.wmClass, app.exec)) { line ->
                     if (line == RootedGuest.OPEN_DESKTOP) showDesktop()
                     onLine(line)
                 }

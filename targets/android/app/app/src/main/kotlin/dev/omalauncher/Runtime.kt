@@ -692,7 +692,7 @@ class Runtime(
                 andro.marchy.LaunchWindows.done(app.id)
                 showDesktop()
             }
-            val code = runCatching { Guest.openAsTask(app.id, app.wmClass, app.exec, desktop, log) }.getOrElse { e -> outcome.error(e); -1 }
+            val code = runCatching { Guest.openAsTask(Guest.TaskApp(app.id, app.wmClass, app.exec), desktop, log) }.getOrElse { e -> outcome.error(e); -1 }
             Log.i(TAG, "exited $code: ${app.exec}")
             outcome.failure(code)?.let { why ->
                 Log.w(TAG, "launch failed: ${app.id}: $why")
@@ -769,7 +769,7 @@ class Runtime(
             val code =
                 runCatching {
                     when {
-                        game != null -> Guest.openAsTask("steam_app_$game", null, command, ::showDesktop, log)
+                        game != null -> Guest.openAsTask(Guest.TaskApp("steam_app_$game", null, command), ::showDesktop, log)
                         rooted -> Guest.launch(command, command, log) // runs on: never the app's pipe
                         else -> proot.run("exec $command", log)
                     }
