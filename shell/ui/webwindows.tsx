@@ -136,15 +136,9 @@ export async function openWebWindow(key: string, label: string, page: number): P
  */
 async function linuxWindow(key: string, label: string, page: number): Promise<number | null> {
   if (!wideHome.value || !(await enabled())) return null;
-  const open = webWins.value.find((w) => w.key === key && !w.full && !w.failed);
-  if (open) {
-    update(open.id, { page, minimised: false });
-    raise(open.id);
-    return open.id;
-  }
   // One that couldn't start goes: a tap is a new try (a stuck one never blocks the app: Dolphin, 2026-10-30 21:01).
   for (const w of webWins.value.filter((v) => v.key === key && v.failed)) close(w.id);
-  return linuxPlaceholder(key, label, page);
+  return existingWindow(key, page) ?? linuxPlaceholder(key, label, page);
 }
 
 /** How long a Linux launch's window may take to show (LW3): then "couldn't start". The gate shortens it. */
@@ -207,10 +201,16 @@ async function takePlaceholder(ph: WebWin, kwin: number, ownFrame?: boolean): Pr
   return true;
 }
 
-/** App [key]'s window already (its id, brought to [page] - or to the front as its full-screen app), or null: none. */
+/**
+ * App [key]'s window already (its id, brought to [page] - or to the front as its full-screen app), or null: none. The
+ * ONE running-window lookup of every launch (dock, drawer, home icon, search, assist, overlays -> state.ts launch ->
+ * openWebWindow), Android and Linux alike (the user 11-03: tapping Steam "launches a SECOND Steam instead of focusing the
+ * running one"): a full-screen Linux window was skipped here, so a tap made a placeholder and a second launch.
+ */
 function existingWindow(key: string, page: number): number | null {
   // Already a window: it comes to this page, on top - never a second display for the same app (its task would move).
-  const open = webWins.value.find((w) => w.key === key);
+  // One that couldn't start is no running window (linuxWindow closes it and tries again).
+  const open = webWins.value.find((w) => w.key === key && !w.failed);
   if (!open) return null;
   // A full-screen app now: it comes to the front as one (never a second window).
   if (open.full && powos.webwindows?.fullScreen) {
