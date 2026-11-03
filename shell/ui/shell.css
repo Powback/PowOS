@@ -674,6 +674,40 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   font: bold 28px var(--font-body);
   pointer-events: none;
 }
+/* Experimental A-Z list (drawer.tsx AzOverlay, Settings > style > experimental): the letter's apps as rows, centred over
+   the drawer page (not by the bar), every name whole - wrapped, never cut. Touch stays on the bar (pointer capture): the
+   list takes none. It and each letter's rows fade in on the spring; it fades out (usePresence). */
+.drawer, .drawer-page { position: relative; }
+.az-list {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px calc(var(--letter-bar) + 16px) 16px 16px;
+  pointer-events: none;
+  animation: az-list-in var(--spring-fast-ms) var(--spring-fast);
+}
+.az-list.leaving { animation: az-list-out var(--spring-fast-ms) var(--spring-fast) both; }
+.az-list-card { width: min(100%, 420px); max-height: 100%; overflow: hidden; padding: 8px; border-radius: var(--radius); }
+.az-list-rows { display: flex; flex-direction: column; gap: 2px; animation: az-list-swap var(--spring-fast-ms) var(--spring-fast); }
+.az-list-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font: var(--text-body) var(--font-body);
+  transition: background var(--spring-fast-ms) var(--spring-fast), color var(--spring-fast-ms) var(--spring-fast);
+}
+.az-list-row .app-icon { flex: 0 0 auto; width: 36px; height: 36px; }
+.az-list-name { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+.az-list-row.on { background: var(--soft-fill); color: var(--accent-text); }
+@keyframes az-list-in { from { opacity: 0; transform: scale(0.97); } }
+@keyframes az-list-out { to { opacity: 0; transform: scale(0.97); } }
+@keyframes az-list-swap { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .az-list, .az-list.leaving, .az-list-rows { animation: none; } }
 
 .app {
   position: relative;

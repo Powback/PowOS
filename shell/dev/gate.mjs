@@ -12335,6 +12335,13 @@ try {
       console.log(`     drawer-drag-renders: ${await r.page.evaluate(() => window.__drawerDrag).catch(() => "?")}`);
       return fails;
     })));
+    // AZL1 (ask-1a1a3856299/-da60): the experimental A-Z list - off: as before; on: centred, whole names, lift on a row opens it.
+    for (const [w, h, name] of [[404, 900, "az-list"], [821, 883, "az-list-unfolded"]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: w, height: h }).then((r) => whenReady(r, async () => {
+        const fails = await r.page.evaluate(async () => (await importShim("./dev/az-list-check.js")).azListScene());
+        console.log(`     ${name}: ${await r.page.evaluate(() => window.__azList).catch(() => "?")}`);
+        return fails;
+      })));
     // HZ-VOTE (perf-1793639664326): the drawer's Web Animation settle holds the host's 120 Hz vote, given back after (drawer-settle-refresh).
     runs.push(open(browser, `${ORIGIN}/index.html`, "drawer-settle-refresh", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
       await r.page.evaluateOnNewDocument(() => {
