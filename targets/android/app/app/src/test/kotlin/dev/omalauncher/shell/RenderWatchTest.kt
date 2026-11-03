@@ -5,6 +5,7 @@ import dev.omalauncher.shell.RenderWatch.Companion.PROBE_MS
 import dev.omalauncher.shell.RenderWatch.Companion.REBIND_MS
 import dev.omalauncher.shell.RenderWatch.Companion.RELOAD_MS
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -79,6 +80,21 @@ class RenderWatchTest {
         // Home hidden (an app full screen, the screen off): its frames don't run - the watch starts over.
         assertEquals(Act.NONE, w.step(14_000, 1, false, 0))
         assertEquals(Act.PROBE, w.step(16_000, 1, true, 0))
+    }
+
+    @Test
+    fun aMinimisedOrPipWindowWithNoFramesIsNeverAStall() {
+        // 11-03 22:50 (ship 9b16c2ce7's render-watch): one minimised Linux window, the page busy coming back to front,
+        // no "w.f" for 1.6 s - a RENDER STALL + rebind for a window on display 0 the page never draws.
+        val counted = { offHome: Boolean -> if (RenderWatch.owesGeometry(live = true, closed = false, offHome = offHome)) 1 else 0 }
+        assertEquals(0, counted(true))
+        assertEquals(1, counted(false))
+        assertFalse(RenderWatch.owesGeometry(live = false, closed = false, offHome = false))
+        assertFalse(RenderWatch.owesGeometry(live = true, closed = true, offHome = false))
+        val w = RenderWatch()
+        for (t in 0L..10_000L step RenderWatch.WATCH_MS) assertEquals(Act.NONE, w.step(26_000 + t, counted(true), true, 26_000))
+        // Restored onto home: watched again (probe at 1 s with no frame).
+        assertEquals(Act.PROBE, w.step(36_250, counted(false), true, 26_000))
     }
 
     @Test

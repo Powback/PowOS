@@ -97,6 +97,19 @@ internal class RenderWatch {
     }
 
     companion object {
+        /**
+         * Whether a window owes the page's geometry - counted in [step]'s live: its content shows ([live]), not [closed],
+         * and not [offHome] (full screen, in PiP, or minimised to the dock / left by the home gesture: on display 0,
+         * never in a "w.f"). 11-03 22:50 (ship 9b16c2ce7) a minimised Linux window (Broforce) kept the watch probing
+         * every second for ever, and the one probe a page busy coming back to front answered late was a "RENDER STALL"
+         * + rebind (its consumer and root re-bound) for a window nobody could see.
+         */
+        fun owesGeometry(
+            live: Boolean,
+            closed: Boolean,
+            offHome: Boolean,
+        ) = live && !closed && !offHome
+
         /** No geometry for this long: probed (a working page answers at once). */
         const val PROBE_MS = 1_000L
 

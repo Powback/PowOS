@@ -338,7 +338,8 @@ class WebWindows(
     /** Main thread, every [RenderWatch.WATCH_MS] while there are windows ([watcher]): [RenderWatch]'s step, acted on. */
     private fun watch() {
         val now = SystemClock.uptimeMillis()
-        val live = wins.values.count { it.live && !it.closed && !it.full && !it.linuxFull }
+        // Only windows the page draws: a minimised (dock, or left by the home gesture) or PiP one gets no "w.f".
+        val live = wins.values.count { RenderWatch.owesGeometry(it.live, it.closed, it.full || it.linuxFull || it.pip || it.minimised || it.leftAt != 0L) }
         when (renderWatch.step(now, live, homeShown(), lastFrameAt)) {
             RenderWatch.Act.NONE -> Unit
             // Quiet: the page sends only changed geometry, so an idle second is normal; a working page answers this.
