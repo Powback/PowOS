@@ -763,7 +763,13 @@ async function bfPill(S, page, drawer) {
   S.drawer.value = drawer;
   await sleep(900);
   const b = document.querySelector(".home > .bar .bar-pill")?.getBoundingClientRect();
-  return b ? { bottom: Math.round(innerHeight - b.bottom), height: Math.round(b.height) } : null;
+  return b ? { left: Math.round(b.left), width: Math.round(b.width), bottom: Math.round(innerHeight - b.bottom), height: Math.round(b.height) } : null;
+}
+
+/** OE1: the pill on PowOS AI's page with its [tab] open (Chat, Agents, Progress, Devices). */
+async function bfAiTab(S, tab) {
+  S.aiScreen.value = tab;
+  return bfPill(S, -1, 0);
 }
 
 export async function barFootSame(below = "1") {
@@ -774,14 +780,19 @@ export async function barFootSame(below = "1") {
   await W.pickSearchSpot(mode, "bar");
   W.footBelow.value = below;
   const home = await bfPill(S, 0, 0);
-  const ai = await bfPill(S, -1, 0);
+  // OE1 (the user, 11-03 21:14: "Why is the search [bar] just under the chat here?"): on every tab of the AI page the
+  // pill is home's own rect - x, width, foot and height - never fitted to the chat column.
+  const tabs = {};
+  for (const t of ["chat", "fleet", "progress", "devices"]) tabs[`ai-${t}`] = await bfAiTab(S, t);
+  S.aiScreen.value = "chat";
   await bfPill(S, 0, 0);
   const launcher = await bfPill(S, 0, 1);
   await bfPill(S, 0, 0);
   const at = `${mode}, pill ${below ? "under" : "over"} the dock`;
-  console.info(`[barFootSame] ${at}: home ${JSON.stringify(home)} ai ${JSON.stringify(ai)} launcher ${JSON.stringify(launcher)}`);
-  // Over the dock, home's own pill sits above it (only the launcher's comes down to the foot).
-  return bfCompare(at, ai, below ? { launcher, home } : { launcher });
+  console.info(`[barFootSame] ${at}: home ${JSON.stringify(home)} ${JSON.stringify(tabs)} launcher ${JSON.stringify(launcher)}`);
+  // Over the dock, home's own pill sits above it (the launcher's comes down to the foot, the dock gone): there the
+  // launcher keeps the bottom/height check against the AI page's foot only.
+  return [...bfCompare(at, home, tabs), ...(below ? bfCompare(at, home, { launcher }) : [])];
 }
 
 /** Each of [pills] at the AI page's [ai] bottom and height (±1 px), else what's off. */
@@ -790,8 +801,8 @@ function bfCompare(at, ai, pills) {
   const none = Object.keys(all).filter((k) => !all[k]);
   if (none.length) return [`${at}: no pill on ${none.join(", ")}`];
   return Object.entries(pills)
-    .filter(([, r]) => Math.abs(r.bottom - ai.bottom) > 1 || Math.abs(r.height - ai.height) > 1)
-    .map(([name, r]) => `${at}: ${name}'s pill ${r.bottom} px off the bottom, ${r.height} px high; the AI page's ${ai.bottom} px, ${ai.height} px`);
+    .filter(([, r]) => ["left", "width", "bottom", "height"].some((k) => Math.abs(r[k] - ai[k]) > 1))
+    .map(([name, r]) => `${at}: ${name}'s pill ${JSON.stringify(r)}; home's ${JSON.stringify(ai)}`);
 }
 
 /** SF1 (the user, 11-03 11:49: "Where is that setting? I couldn't find it in a setting."): a typed [query] in search. */

@@ -4263,7 +4263,7 @@ html:has(.home > .bar[data-role="ai"] textarea:focus) .ai-screen.stacked > .ai-s
  * seatOnAi), moving there on home's own slide curve; while a finger drags the screens, no transition (it rides along).
  * Shown and tappable there whatever home's foot does with it (parked under the search widget, the dock's button).
  */
-.home > .bar.seated { transition: translate var(--spring-ms) var(--spring), width var(--spring-ms) var(--spring); z-index: 5; }
+.home > .bar.seated { transition: translate var(--spring-ms) var(--spring); z-index: 5; }
 .home > .bar.seated.sliding { transition: none; }
 .home.search-parked > .bar.seated { opacity: 1; pointer-events: auto; }
 
@@ -4285,6 +4285,15 @@ html:has(.home > .bar[data-role="ai"] textarea:focus) .ai-screen.stacked > .ai-s
 .home.adopts.wide.open:has(> .stage .ai-panel) > .bar { grid-area: 2 / 1 / 3 / -1; width: auto; justify-self: stretch; }
 /* The folded page's single column (a screen no tab names): the bar's room at its foot. */
 .ai-screen > .ai-bar-slot { flex: none; margin-top: auto; height: calc(var(--pill-height) + var(--ai-foot)); }
+/*
+ * OE1 (the user, 11-03 21:14: "Why is the search [bar] just under the chat here?"): the bar stays exactly where home's is
+ * (bar.tsx seatOnAi); the page keeps its room - --bar-room, the pill's top to the page's content foot - under the tabs
+ * (the slot) and, unfolded, under both columns (the bar spans the screen's width, the tabs directly above it).
+ */
+.ai-screen[data-bar-room] .ai-bar-slot { height: var(--bar-room); }
+.ai-screen.panes[data-bar-room] .ai-bar-slot { height: 0; margin-top: -8px; }
+.ai-screen.panes[data-bar-room] > :is(.ai-left, .ai-right) { margin-bottom: calc(var(--bar-room) + var(--ai-gut)); }
+.ai-screen.panes[data-bar-room] > .ai-left { max-height: calc(100% - var(--bar-room) - var(--ai-gut)); }
 /* The role's glyph (the launcher's apps, the AI page's manager) where home's prompt glyph is. */
 .pill .prompt.role-icon { display: flex; align-items: center; justify-content: center; height: 40px; }
 /* Switching pages changes the role in place: its hint and glyph fade in anew (one animation name per role, so a

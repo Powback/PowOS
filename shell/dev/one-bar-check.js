@@ -25,19 +25,20 @@ function barIs(where, role, hint) {
 
 const box = (r) => `${Math.round(r.left)}..${Math.round(r.right)}, ${Math.round(r.top)}..${Math.round(r.bottom)}`;
 const onScreen = (p) => p.left >= -1 && p.right <= innerWidth + 1 && p.bottom <= innerHeight + 1 && p.top >= 0;
-const onSlot = (p, s) => Math.abs(p.left - s.left) <= 24 && Math.abs(p.right - s.right) <= 24 && p.top >= s.top - 24 && p.bottom <= s.bottom + 8;
+/** OE1: the page's columns (unfolded) end above the pill - the bar keeps home's place, the page lays out over it. */
+const clearOfColumns = (p) => [...document.querySelectorAll(".ai-screen.panes > :is(.ai-left, .ai-right)")].every((c) => c.getBoundingClientRect().bottom <= p.top + 1);
 
-/** The AI page: the bar's pill on the slot (under the tabs: the slot's row before it), fully on screen. */
+/** The AI page: the bar's pill fully on screen, the tabs directly above it, the columns clear of it (its rect home's: barFootSame). */
 function seated(where) {
   const slot = document.querySelector(".ai-screen [data-bar-slot=ai]");
   const pill = document.querySelector(`${BAR} .bar-pill`);
   if (!slot || !pill) return [`${where}: no slot (${!!slot}) or no pill (${!!pill})`];
-  const s = slot.getBoundingClientRect(), p = pill.getBoundingClientRect();
+  const p = pill.getBoundingClientRect();
   const tabs = slot.previousElementSibling?.matches(".ai-segs") ? slot.previousElementSibling.getBoundingClientRect() : null;
   return [
     [onScreen(p), `${where}: the bar is off screen (${box(p)})`],
-    [onSlot(p, s), `${where}: the bar (${box(p)}) isn't on the slot (${box(s)})`],
-    [!tabs || tabs.bottom <= p.top + 4, `${where}: the tabs (${tabs && box(tabs)}) aren't just above the bar (${box(p)})`],
+    [clearOfColumns(p), `${where}: a column runs under the bar (${box(p)})`],
+    [!tabs || (tabs.bottom <= p.top + 4 && p.top - tabs.bottom <= 40), `${where}: the tabs (${tabs && box(tabs)}) aren't just above the bar (${box(p)})`],
   ].filter(([ok]) => !ok).map(([, why]) => why);
 }
 

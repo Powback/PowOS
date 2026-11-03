@@ -358,51 +358,58 @@ function submit(role: BarRole) {
 }
 
 /**
- * OB1: on PowOS AI's page the bar - still home's own element, inside home, which slid a screen to the right - takes the
- * page's reserved room (powai.tsx .ai-bar-slot: under the bottom tabs, folded and unfolded) by a translate that counters
- * home's slide (gesture.ts applyTrack) and lifts/sets it onto the slot, with home's slide curve: it moves from where it
- * was to the slot as the screens slide (shell.css .home > .bar.seated), and back on the way home.
+ * OB1: on PowOS AI's page the bar - still home's own element, inside home, which slid a screen to the right - is held
+ * where it is on home by a translate that counters home's slide (gesture.ts applyTrack), with home's slide curve.
+ * OE1 (the user, 11-03 21:14: "we need to reuse the search [bar] on all pages. Why is the search [bar] just under the
+ * chat here?"): the bar never moves or resizes between pages - same x, width, height and foot as home's, folded and
+ * unfolded (the keyboard up, it sits on the keyboard: keyboardY) - the pages lay out around it. It was
+ * fitted to the page's .ai-bar-slot (the chat column unfolded). Now the page reserves the bar's room: --bar-room (the
+ * pill's top to the page's content foot) sizes the slot under the tabs and keeps the unfolded columns above it (shell.css).
+ * dev/dock-search-check.js barFootSame proves the rect identical on home, the AI page (every tab) and the launcher.
  */
 function seatOnAi(bar: HTMLElement) {
   const home = bar.closest<HTMLElement>(".home");
-  const slot = document.querySelector<HTMLElement>(".ai-screen [data-bar-slot=ai]");
-  const ai = slot?.closest<HTMLElement>(".ai-screen");
+  // The page, whichever tab or screen it shows (a screen with no slot - Friction - still has the bar where home's is).
+  const ai = document.querySelector<HTMLElement>(".ai-screen");
   if (heldSeated(bar, home)) return;
-  if (page.peek() !== -1 || !home || !slot || !ai || !slot.getClientRects().length) return unseat(bar);
-  const s = slot.getBoundingClientRect(), a = ai.getBoundingClientRect();
-  // Measured at its own place: its width the slot's, no translate (home's transform shifts it and home alike). With no
-  // transition while measured: a bar already seated (home's search the bar, mounted all along) has .seated's translate
-  // transition, so dropping the translate kept its old one in the rect and the re-seat landed off the slot (11-03,
-  // ai-keyboard: the field 88 px over the keyboard, and off-screen sideways).
+  if (page.peek() !== -1 || !home || !ai) return unseat(bar);
+  bar.style.removeProperty("width");
+  // Measured at home's place (no translate, no transition: a running one would keep its old translate in the rect).
   const was = bar.style.translate;
   bar.style.transition = "none";
   bar.style.translate = "none";
-  bar.style.width = `${s.width}px`;
-  const b = bar.getBoundingClientRect(), h = home.getBoundingClientRect();
-  const x = s.left - a.left - (b.left - h.left) - home.offsetWidth;
-  const y = seatY(bar, home, { s, a, b, h });
+  const pill = (bar.querySelector(".bar-pill") ?? bar).getBoundingClientRect();
   bar.style.translate = was;
   void bar.offsetWidth;
   bar.style.removeProperty("transition");
+  const y = keyboardY(home, pill);
   bar.classList.add("seated");
-  bar.style.translate = `${Math.round(x)}px ${Math.round(y)}px`;
-  // The threads under it keep clear of where it lands (powai.tsx useBarClear; its translate's end re-measures).
+  bar.style.translate = `${-home.offsetWidth}px ${Math.round(y)}px`;
+  barRoom(ai, pill.top + y);
+  // The threads under it keep clear of it (powai.tsx useBarClear; its translate's end re-measures).
   bar.dispatchEvent(new Event("bar-seated", { bubbles: true }));
 }
 
 /** The keyboard up (the host's --inset-keyboard, app.tsx). */
-const keyboardUp = () => (parseFloat(document.documentElement.style.getPropertyValue("--inset-keyboard")) || 0) > 0;
+const keyboardPx = () => parseFloat(document.documentElement.style.getPropertyValue("--inset-keyboard")) || 0;
 
 /**
- * The seat's vertical move: its foot on the slot's, but never its pill over the tabs above the slot (the wide foot's pill
- * sits higher in it). BF1 (the user, 11-03 11:49: "the same height as the manager search bar"): a bar at home's foot
- * (under the dock, or wide home's one-row foot) keeps its height - the seat moves it sideways only (shell.css --bar-drop).
- * The keyboard up, the slot (the page ends at the keyboard) says where: the field follows it onto the keyboard.
+ * The keyboard up, the field sits on it (--pill-foot over its top: P1 11-01, never behind it, never 88 px over it -
+ * folded home's own bar is the dock's button then, parked off its foot); down, 0: home's own place, never moved.
  */
-function seatY(bar: HTMLElement, home: HTMLElement, { s, a, b, h }: { s: DOMRect; a: DOMRect; b: DOMRect; h: DOMRect }) {
-  if (!keyboardUp() && (home.classList.contains("wide") || home.classList.contains("pill-below"))) return 0;
-  const pill = bar.querySelector(".bar-pill")?.getBoundingClientRect() ?? b;
-  return Math.max(s.bottom - a.top - (b.bottom - h.top), s.top - a.top - (pill.top - h.top));
+function keyboardY(home: HTMLElement, pill: DOMRect) {
+  const kb = keyboardPx();
+  if (kb <= 0) return 0;
+  const foot = parseFloat(getComputedStyle(home).getPropertyValue("--pill-foot")) || 0;
+  return innerHeight - kb - foot - pill.bottom;
+}
+
+/** The page's room for the bar: from the pill's top (where it's held) to the page's content foot. */
+function barRoom(ai: HTMLElement, pillTop: number) {
+  const a = ai.getBoundingClientRect();
+  const foot = a.bottom - (parseFloat(getComputedStyle(ai).paddingBottom) || 0);
+  ai.style.setProperty("--bar-room", `${Math.max(0, Math.ceil(foot - pillTop))}px`);
+  ai.dataset.barRoom = "";
 }
 
 /** BM1: on the way home from the page the bar stays seated while it morphs back into the button (docksearch.tsx). */
@@ -442,9 +449,9 @@ function useAiSeat(proxy: boolean) {
     el.classList.toggle("sliding", dragging);
     seatOnAi(el);
     if (at !== -1) return;
-    const slot = document.querySelector(".ai-screen [data-bar-slot=ai]");
+    const ai = document.querySelector(".ai-screen");
     const ro = new ResizeObserver(() => seatOnAi(el));
-    if (slot) ro.observe(slot);
+    if (ai) ro.observe(ai);
     ro.observe(document.documentElement);
     // Home's foot changing under the bar (the keyboard's room, the recents strip coming or going) moves the bar's own
     // place without resizing it: home's stage, over the bar, resizes then - the seat follows.
@@ -453,8 +460,8 @@ function useAiSeat(proxy: boolean) {
     // The pill growing (a long ask wraps up to three rows).
     const pill = el.querySelector(".bar-pill");
     if (pill) ro.observe(pill);
-    // The keyboard moves the slot (the page ends at its top, shell.css .ai-screen.stacked) whatever its size does: the
-    // field follows it onto the keyboard, never left where the slot was (P1 11-01: behind the keyboard).
+    // The keyboard lifts home's bar (home's padding) and ends the page at its top (shell.css .ai-screen.stacked): the
+    // page's room for the bar is measured again (P1 11-01: never the field behind the keyboard).
     const off = powos.on("system.insets", () => requestAnimationFrame(() => seatOnAi(el)));
     return () => (ro.disconnect(), off());
   }, [at, dragging]);
