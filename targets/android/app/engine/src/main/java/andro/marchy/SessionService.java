@@ -346,20 +346,40 @@ public class SessionService extends Service {
 
     /** Environment for programs of the rootfs; lotfix-run sets the rest (loader, fakechroot, GPU...). */
     private Map<String, String> archEnv(File run, String sock) {
+        return archEnv(this, run, sock);
+    }
+
+    /**
+     * No-root PowOS: a process running {@code sh -c command} in the rootfs (lotfix-run, the same way in as the
+     * session's own programs), with the session's environment - for the launcher's widget commands and streams
+     * (dev.omalauncher.linux.EngineGuest). Needs no running session: a command that only reads files and runs tools
+     * works without it; one that talks to the session's D-Bus needs the session up.
+     */
+    public static ProcessBuilder guestProcess(Context ctx, String command) {
+        ProcessBuilder pb = new ProcessBuilder(ctx.getApplicationInfo().nativeLibraryDir + "/liblotfixrun.so", "-c", command);
+        File run = runDir(ctx);
+        run.mkdirs();
+        pb.environment().clear();
+        pb.environment().putAll(archEnv(ctx, run, daemonSocket(ctx)));
+        pb.environment().put("TERM", "xterm-256color");
+        return pb;
+    }
+
+    static Map<String, String> archEnv(Context ctx, File run, String sock) {
         Map<String, String> env = new java.util.HashMap<>(System.getenv());
-        env.put("ARCH_ROOTFS", rootfs(this).getPath());
+        env.put("ARCH_ROOTFS", rootfs(ctx).getPath());
         // sockets: real paths, not rewritten into the rootfs. PowOS: also the phone's shared storage (/storage,
         // /sdcard), so PowOS's file manager and apps see the phone's files (storage permission: MainActivity).
         env.put("ARCH_EXCLUDE_EXTRA", run.getPath() + ":/storage:/sdcard");
         env.put("XDG_RUNTIME_DIR", run.getPath());
         env.put("TZ", java.util.TimeZone.getDefault().getID()); // glibc only knows /etc/localtime otherwise: UTC
-        env.put("LANG", androidLocale(this)); // Android's language (first-boot.sh compiles its locale)
+        env.put("LANG", androidLocale(ctx)); // Android's language (first-boot.sh compiles its locale)
         env.put("ANDROMARCHY_UID", String.valueOf(android.os.Process.myUid()));
         env.put("ANDROMARCHY_GID", String.valueOf(android.os.Process.myUid()));
         env.put("ANDROMARCHY_SOCKET", sock);
         // The display's physical size (landscape, mm) for the compositor's output: clients size themselves from it
         android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
-        ((android.view.WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay().getRealMetrics(dm);
+        ((android.view.WindowManager) ctx.getSystemService(WINDOW_SERVICE)).getDefaultDisplay().getRealMetrics(dm);
         int wmm = Math.round(Math.max(dm.widthPixels / dm.xdpi, dm.heightPixels / dm.ydpi) * 25.4f);
         int hmm = Math.round(Math.min(dm.widthPixels / dm.xdpi, dm.heightPixels / dm.ydpi) * 25.4f);
         env.put("ANDROMARCHY_PHYSICAL_MM", wmm + "x" + hmm);
@@ -373,7 +393,7 @@ public class SessionService extends Service {
         env.put("DBUS_SYSTEM_BUS_ADDRESS", "unix:path=" + new File(run, "system_bus").getPath());
         // Hardware video: VA-API through Mesa's termuxva bridge to the termux-va daemon (MediaCodec), when the
         // rootfs's Mesa has the bridge.
-        if (new File(rootfs(this), "usr/lib/dri/termuxva_drv_video.so").exists()) {
+        if (new File(rootfs(ctx), "usr/lib/dri/termuxva_drv_video.so").exists()) {
             env.put("LIBVA_DRIVER_NAME", "termuxva");
             env.put("TERMUX_VA_BRIDGE", "1");
             env.put("TERMUX_VA_GPU_BACKEND", "kgsl");

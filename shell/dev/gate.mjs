@@ -9803,6 +9803,45 @@ async function gridDropAt([name, x, y]) {
   return fails;
 }
 
+/**
+ * NR1 (the user, 11-03: "when I launch the Pow launchers the widgets etc. don't work"): home as a phone WITHOUT root
+ * sends it - widgets whose commands need Linux carry `linux` (ShellHome.linuxNeed) while the PowOS Linux image isn't
+ * downloaded ("image") or is coming up ("starting"). Each such tile says what it needs - the image one with its
+ * download and size - never an empty tile; a widget needing no Linux (weather: http only) still draws its own face.
+ */
+async function nonrootWidgetsCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  S.page.value = 0;
+  await window.__gw.settled();
+  const page = S.pages.value[0];
+  const had = S.home.value;
+  const wid = (k, x, y, linux) => ({ key: `widget:gate.nr${k}`, kind: "widget", name: `gate-nr${k}`, page, cell: { x, y, w: 2, h: 2 }, resizable: true, minSize: [1, 1], size: [2, 2], ...linux });
+  const image = (mb) => ({ linux: { state: "image", mb } });
+  S.home.value = { ...had, items: [wid(1, 0, 0, image(412)), wid(2, 2, 0, { linux: { state: "starting", mb: null } }), wid(3, 0, 2, image(null)), wid(4, 2, 2, {})] };
+  try {
+    await new Promise((ok) => setTimeout(ok, 300));
+    await window.__gw.settled();
+    const tile = (k) => document.querySelector(`.home-tile[data-key="widget:gate.nr${k}"]`);
+    const text = (k) => [...(tile(k)?.querySelectorAll(".widget-linux > div") ?? [])].map((d) => d.textContent.trim()).join(" ");
+    const drawn = (k) => {
+      const r = tile(k)?.querySelector(".widget-linux")?.getBoundingClientRect();
+      return !!r && r.width >= 20 && r.height >= 20;
+    };
+    // [what must hold, the failure line]
+    const rules = [
+      [/needs the PowOS Linux image/.test(text(1)), `the image tile doesn't say it needs the PowOS Linux image: "${text(1)}"`],
+      [/Download \(412 MB\)/.test(text(1)), `the image tile doesn't offer "Download (412 MB)": "${text(1)}"`],
+      [text(3) === "gate-nr3 needs the PowOS Linux image Download", `the image tile without a known size: "${text(3)}"`],
+      [/starting PowOS Linux/.test(text(2)) && !/Download/.test(text(2)), `the starting tile: "${text(2)}"`],
+      [!tile(4)?.querySelector(".widget-linux") && !!tile(4)?.querySelector(".owl"), "a widget that needs no Linux doesn't draw its own face"],
+      [drawn(1) && drawn(2) && drawn(3), "a Linux placeholder isn't drawn (an empty tile)"],
+    ];
+    return rules.filter(([ok]) => !ok).map(([, line]) => `NR1: ${line}`);
+  } finally {
+    S.home.value = had;
+  }
+}
+
 /** WG1's steps in one page, the windows and home restored after. */
 async function gridSnapScene(r) {
   try {
@@ -12295,6 +12334,9 @@ try {
   // GR1: a real finger on the journey's grip point resizes live, every step (ww-grip-drag; e2e round 193 steps 29-32).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-grip-drag", { width: 821, height: 883 }).then((r) => whenReady(r, () => gripDragScene(r))));
+  // NR1: on a phone without root, widgets needing Linux say what they need (nonroot-widgets; the user, 11-03).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "nonroot-widgets", { width: 412, height: 915 }).then((r) => whenReady(r, () => r.page.evaluate(nonrootWidgetsCheck))));
   // WG1: a window dragged on home snaps into the free cells beside the widgets (ww-gridsnap-unfolded; the user, 10-31 15:49).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-gridsnap-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => gridSnapScene(r))));

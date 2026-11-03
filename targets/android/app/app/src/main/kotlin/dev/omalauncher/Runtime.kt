@@ -23,6 +23,7 @@ import dev.omalauncher.linux.AgentStore
 import dev.omalauncher.linux.POWOS
 import dev.omalauncher.linux.AudioBridge
 import dev.omalauncher.linux.Bootstrap
+import dev.omalauncher.linux.EngineGuest
 import dev.omalauncher.linux.FILES_COMMAND
 import dev.omalauncher.linux.PLASMA_COMMAND
 import dev.omalauncher.linux.Gpu
@@ -154,6 +155,8 @@ class Runtime(
     var linuxWanted by mutableStateOf(false)
 
     init {
+        // No-root PowOS: widgets' commands run in the engine's PowOS image (linux/EngineGuest.kt).
+        EngineGuest.init(context)
         // Saved, so removing Linux later doesn't bring the first-run screen back.
         if (launcherReady) prefs.edit().putBoolean(SETUP_DONE, true).apply()
         themes.loadPalette()
@@ -236,7 +239,8 @@ class Runtime(
             // On the first-run screen the download is the screen's job, with progress.
             if (launcherReady) scope.launch { themes.ensureRelease() }
             // Rooted PowOS: the terminal tiles' services start too (onRootedReady).
-            if (bootstrap.wanted || RootedGuest.enabled) runLinux { bootstrap.run() } else bootstrap.run()
+            // No root: the PowOS image the engine installed is the widgets' Linux (onEngineReady).
+            if (bootstrap.wanted || RootedGuest.enabled || EngineGuest.enabled) runLinux { bootstrap.run() } else bootstrap.run()
         }
     }
 
@@ -261,7 +265,11 @@ class Runtime(
      */
     fun refreshLinuxState() {
         if (linuxJob?.isActive == true) return
-        scope.launch { bootstrap.run() }
+        scope.launch {
+            bootstrap.run()
+            // No root: the engine just installed the PowOS image - its widgets start now, not at the next app start.
+            if (EngineGuest.enabled) onEngineReady()
+        }
     }
 
     /** Runs [work] with the foreground service up, so it goes on outside the app; then starts Linux if it's installed. */
@@ -282,6 +290,7 @@ class Runtime(
                     bootstrap.isInstalled && !POWOS -> onLinuxReady()
                     // The engine's SessionService keeps the process alive then; no second notification.
                     RootedGuest.enabled -> onRootedReady().also { setService(false) }
+                    EngineGuest.enabled -> onEngineReady().also { setService(false) }
                     else -> setService(false)
                 }
             }
@@ -420,6 +429,16 @@ class Runtime(
         // PowOS's apps in the drawer, search and Android's shortcuts.
         refreshApps()
         watchPowosApps()
+    }
+
+    /**
+     * PowOS without root, its image installed: the widgets' commands, streams and actions run in it ([EngineGuest]).
+     * Only that - Omalauncher's own Linux services (onLinuxReady: its Wayland server, pacman, provisioner) target its
+     * proot Arch, which PowOS never installs. Before this nothing called linuxChanged on a non-rooted phone, so every
+     * widget with a command stayed an empty tile.
+     */
+    private fun onEngineReady() {
+        widgets.linuxChanged(true)
     }
 
     private var appsWatch: android.os.FileObserver? = null
