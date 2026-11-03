@@ -12349,6 +12349,11 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, position] of [["folded", "bottom"], ["unfolded", "bottom"], ["unfolded", "right"], ["unfolded", "left"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `dk1-${label}-${position}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos) => (await importShim("./dev/dock-search-check.js")).dk1Check(pos), position))));
+  // PD1 (dev/dock-search-check.js pd1Check; the user, 2026-11-03): folded the dock is the pinned apps only, the open
+  // ones lead its recents; unfolded keeps them in the pinned row.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const label of ["folded", "unfolded"])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `pd1-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (l) => (await importShim("./dev/dock-search-check.js")).pd1Check(l), label))));
   // PT1 (dev/dock-search-check.js pttHold*; the user, 2026-11-01 17:02): a real finger holds home's dock button 3 s -
   // the launcher comes up under it, the dictation stays on the whole hold, its field never focused; the release ends
   // push-to-talk with one stop, never a tap on the field that appeared under the finger.

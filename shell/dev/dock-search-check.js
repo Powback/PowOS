@@ -706,3 +706,38 @@ export async function searchSettingCheck() {
   }
   return fails.map((f) => `${mode}: ${f}`);
 }
+
+/**
+ * PD1 (the user, 2026-11-03: "the active windows should not show in the dock in mobile ... the dock should always just
+ * show the pinned ones. The open ones should just show at the front of the recent ones"): with home's search as the
+ * bar, two open apps that aren't pinned leave the folded dock's pinned row as it was (same cells, none of theirs) and
+ * lead its recent section, top-most first; unfolded keeps them in the pinned row (that dock is unchanged).
+ */
+export async function pd1Check(label) {
+  const S = await importShim("./state.ts");
+  const was = { dock: S.dock.value, windows: S.windows.value };
+  S.dock.value = S.recent.value.slice(0, 4);
+  S.searchTry.value = "bar";
+  await sleep(300);
+  const row = () => document.querySelector(".home > .dock:not(.dock-tray) .dock-pages > .dock-page:not(.dock-recent)");
+  const keys = (el) => [...(el?.querySelectorAll(".app[data-key]") ?? [])].map((c) => c.dataset.key);
+  const before = keys(row());
+  const fails = [];
+  if (before.length !== 4) fails.push(`pinned row has ${before.length} apps, not the 4 pinned`);
+  const extra = [...S.byKey.value.keys()].filter((k) => !S.dock.value.includes(k) && !S.recent.value.includes(k)).slice(0, 2);
+  if (extra.length !== 2) fails.push("no 2 unpinned apps to open");
+  // Top-most first: extra[1] is the one in front, used last.
+  S.windows.value = [extra[1], extra[0]].map((k, i) => ({ id: 910 + i, pkg: k, label: k, minimised: false, app: k }));
+  await sleep(300);
+  const after = keys(row());
+  const recent = keys(document.querySelector(".home .dock .dock-recent"));
+  if (label === "folded") {
+    if (after.join() !== before.join()) fails.push(`pinned row went [${before}] -> [${after}]`);
+    if (recent.slice(0, 2).join() !== [extra[1], extra[0]].join()) fails.push(`recents start [${recent.slice(0, 2)}], not the open [${extra[1]},${extra[0]}]`);
+    if (new Set(recent).size !== recent.length) fails.push(`an app twice in the recents: ${recent}`);
+  } else if (!extra.every((k) => after.includes(k))) fails.push(`unfolded pinned row [${after}] lost the open apps [${extra}]`);
+  S.windows.value = was.windows;
+  S.searchTry.value = "";
+  S.dock.value = was.dock;
+  return fails.map((f) => `pd1 ${label}: ${f}`);
+}

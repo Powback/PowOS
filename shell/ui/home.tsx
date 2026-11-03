@@ -459,7 +459,10 @@ function heldStyle(row: HTMLElement, i: number, slots: number, x: number) {
  * window that aren't pinned go with the recent ones (their page folded, their section below a separator in a side
  * column, the tray unfolded), never into the pinned row where they narrowed its slots.
  */
-const pinnedOnly = () => dockButton.value;
+// PD1 (the user, 2026-11-03: "the active windows should not show in the dock in mobile ... the dock should always
+// just show the pinned ones. The open ones should just show at the front of the recent ones"): folded the dock is
+// always the pinned apps (and the button, if home's search is one) - its open apps lead the recent section.
+const pinnedOnly = () => dockButton.value || !wideHome.value;
 
 /** Any recent app or (DK1) unpinned window to show in the dock's recent section. */
 function hasRecents(): boolean {
@@ -500,7 +503,8 @@ export function Dock() {
   // Nothing pinned AND no floating window either (not just the one carried out of it): no pinned page, only the drop
   // zone while carrying. A window with nothing pinned (possible with an empty dock, e.g. a fresh install - 2026-10-24
   // emulator FAIL "no dock cell for Calculator") still needs the pinned page: it's the only place DockWindows renders.
-  const ghost = !dock.value.some((k) => byKey.value.has(k)) && windowed.value.size === 0;
+  // PD1: folded (pinnedOnly) a window is in the recent section, never the pinned page: nothing pinned is the ghost.
+  const ghost = !dock.value.some((k) => byKey.value.has(k)) && (pinnedOnly() || windowed.value.size === 0);
   // Wide (unfolded), the recent apps are the bar's right end (DockTray): the dock is its pinned apps only.
   const wide = wideHome.value;
   const recents = (!wide || vertical) && hasRecents();
