@@ -1,0 +1,110 @@
+== main thread cpu placement 10 Hz x 100
+     22 3
+     22 4
+     17 5
+     18 6
+     21 7
+== 15577 UnityGfxDeviceW
+      6 0
+      2 1
+      1 2
+      5 3
+      3 4
+      8 5
+      5 6
+== 15567 dxvk-cs
+      5 0
+      1 1
+      5 2
+      7 3
+      3 4
+      5 5
+      4 6
+== freq caps sources
+policy0 min=672000 max=1459200 affected_cpus cpuinfo_cur_freq cpuinfo_max_freq cpuinfo_min_freq cpuinfo_transition_latency related_cpus scaling_available_frequencies scaling_available_governors scaling_boost_frequencies scaling_cur
+policy3 min=614400 max=1920000 affected_cpus cpuinfo_cur_freq cpuinfo_max_freq cpuinfo_min_freq cpuinfo_transition_latency related_cpus scaling_available_frequencies scaling_available_governors scaling_boost_frequencies scaling_cur
+policy7 min=864000 max=1708800 affected_cpus cpuinfo_cur_freq cpuinfo_max_freq cpuinfo_min_freq cpuinfo_transition_latency related_cpus scaling_available_frequencies scaling_available_governors scaling_boost_frequencies scaling_cur
+20
+0
+1000
+1728000
+90
+5
+1
+95
+70
+4
+break_freq_margin
+cobuck_enable
+down_rate_limit_us
+hispeed_freq
+hispeed_load
+max_stall_reduce_of_util
+multi_tl_enable
+multi_tl_sys
+reduce_pct_of_stall
+report_policy
+soft_limit_enable
+soft_limit_freq
+stall_aware
+target_loads
+up_rate_limit_us
+[dalvik.vm.dexopt.thermal-cutoff]: [2]
+[debug.hwui.skia_use_perfetto_track_events]: [false]
+[debug.perfetto.sdk_sysprop_guard_generation]: [0]
+[debug.renderengine.skia_use_perfetto_track_events]: [false]
+[init.svc.android.thermal-hal]: [running]
+[init.svc.gameopt_hal_service-1-0]: [running]
+[init.svc.oplus.performance.hal.service-1-0]: [running]
+[init.svc.perf-hal-2-3]: [running]
+[init.svc.perfetto_labmode_sys_ostats_trigger_trace]: [stopped]
+[init.svc.perfetto_persistent_sysui_tracing_for_bugreport]: [stopped]
+[init.svc.thermal-engine]: [running]
+[init.svc.traced_perf]: [stopped]
+[init.svc.vendor.perfservice]: [running]
+[init.svc_debug_pid.android.thermal-hal]: [1667]
+[init.svc_debug_pid.gameopt_hal_service-1-0]: [1896]
+[init.svc_debug_pid.oplus.performance.hal.service-1-0]: [1816]
+[init.svc_debug_pid.perf-hal-2-3]: [1717]
+[init.svc_debug_pid.perfetto_labmode_sys_ostats_trigger_trace]: []
+[init.svc_debug_pid.perfetto_persistent_sysui_tracing_for_bugreport]: []
+[init.svc_debug_pid.thermal-engine]: [6476]
+0-7
+0-2
+0-7
+uclamp.min                                   :                    0
+uclamp.max                                   :                 1024
+effective uclamp.min                         :                    0
+effective uclamp.max                         :                 1024
+se.nr_migrations                             :               129781
+se.statistics.nr_migrations_cold             :                    0
+uclamp.min                                   :                    0
+uclamp.max                                   :                 1024
+effective uclamp.min                         :                    0
+effective uclamp.max                         :                 1024
+prio                                         :                  118
+IsStatusOverride: false
+ThermalEventListeners:
+	callbacks: 3
+	killed: false
+	broadcasts count: -1
+ThermalStatusListeners:
+	callbacks: 10
+	killed: false
+	broadcasts count: -1
+Thermal Status: 0
+Cached temperatures:
+	Temperature{mValue=31.3, mType=2, mName=battery, mStatus=0}
+	Temperature{mValue=75.3, mType=0, mName=CPU0, mStatus=0}
+	Temperature{mValue=68.1, mType=0, mName=CPU1, mStatus=0}
+	Temperature{mValue=71.7, mType=0, mName=CPU2, mStatus=0}
+	Temperature{mValue=30.0, mType=0, mName=CPU3, mStatus=0}
+	Temperature{mValue=80.4, mType=0, mName=CPU4, mStatus=0}
+	Temperature{mValue=81.2, mType=0, mName=CPU5, mStatus=0}
+	Temperature{mValue=69.6, mType=0, mName=CPU6, mStatus=0}
+	Temperature{mValue=66.8, mType=0, mName=CPU7, mStatus=0}
+	Temperature{mValue=56.8, mType=1, mName=GPU0, mStatus=0}
+	Temperature{mValue=56.0, mType=1, mName=GPU1, mStatus=0}
+	Temperature{mValue=57.2, mType=1, mName=GPU2, mStatus=0}
+	Temperature{mValue=55.2, mType=1, mName=GPU3, mStatus=0}
+	Temperature{mValue=62.7, mType=1, mName=GPU4, mStatus=0}

@@ -1,0 +1,131 @@
+game_pid=15454
+/home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/i386-unix/wine64-preloader /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/i386-unix/wine64 S:\steamapps\commo
+
+Cpus_allowed_list:	0-7
+== static
+avail=680000000 615000000 550000000 475000000 401000000 348000000 295000000 220000000 124800000
+gov=msm-adreno-tz dfmax=680000000 dfmin=124800000
+policy0 cpus=0 1 2 gov=uag cur=1459200 max=1459200 hwmax=2016000
+policy3 cpus=3 4 5 6 gov=uag cur=1920000 max=1920000 hwmax=2803200
+policy7 cpus=7 gov=uag cur=864000 max=1708800 hwmax=3187200
+== gpu samples (1/s for 30 s) + cpu cur freqs
+busy=58 % clk=295000000 devfreq=295000000 max=680000000 pwr=0,7,0, temp=54000 cpu=1459 1920 1708 
+busy=55 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=52800 cpu=1459 1920 1708 
+busy=67 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=52100 cpu=1459 1920 1593 
+busy=55 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=50500 cpu=1459 1920 1708 
+busy=65 % clk=295000000 devfreq=295000000 max=680000000 pwr=0,7,0, temp=52400 cpu=1459 1785 1708 
+busy=53 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=50900 cpu=1459 1920 1708 
+busy=63 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=50900 cpu=1459 1920 864 
+busy=58 % clk=295000000 devfreq=295000000 max=680000000 pwr=0,7,0, temp=50500 cpu=1459 1920 864 
+busy=64 % clk=295000000 devfreq=295000000 max=680000000 pwr=0,7,0, temp=51700 cpu=1459 1920 864 
+busy=56 % clk=348000000 devfreq=348000000 max=680000000 pwr=0,7,0, temp=52400 cpu=1459 1920 1708 
+busy=58 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=52800 cpu=1459 1920 1708 
+busy=60 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=50500 cpu=1459 1920 1708 
+busy=59 % clk=295000000 devfreq=295000000 max=680000000 pwr=0,7,0, temp=50900 cpu=1344 1785 864 
+busy=58 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=52400 cpu=1459 1651 1708 
+busy=61 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=50500 cpu=1459 1286 864 
+busy=55 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=49300 cpu=1459 1920 864 
+busy=60 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=50500 cpu=1459 1286 864 
+busy=67 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=49700 cpu=1459 1920 864 
+busy=54 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=49300 cpu=1459 1920 864 
+busy=61 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=48900 cpu=1459 1401 1593 
+busy=61 % clk=295000000 devfreq=295000000 max=680000000 pwr=0,7,0, temp=50900 cpu=1459 1920 1708 
+busy=64 % clk=348000000 devfreq=348000000 max=680000000 pwr=0,7,0, temp=51700 cpu=1459 1920 1708 
+busy=64 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=49700 cpu=1459 1920 864 
+busy=54 % clk=295000000 devfreq=295000000 max=680000000 pwr=0,7,0, temp=50100 cpu=1459 1536 864 
+busy=52 % clk=295000000 devfreq=295000000 max=680000000 pwr=0,7,0, temp=50500 cpu=1459 1920 1708 
+busy=59 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=49300 cpu=1344 1171 1708 
+busy=60 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=49300 cpu=1459 1920 1708 
+busy=50 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=48500 cpu=1459 1920 864 
+busy=55 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=49300 cpu=1459 1920 1708 
+busy=64 % clk=220000000 devfreq=220000000 max=680000000 pwr=0,7,0, temp=48100 cpu=1459 1920 1708 
+== per-thread %core over 30 s (tid pct lastcpu comm)
+15454 9483% cpu7 Broforce_beta.e
+15577 4753% cpu3 UnityGfxDeviceW
+15567 2630% cpu6 dxvk-cs
+15582 1787% cpu1 Worker_Thread
+15581 1787% cpu3 Worker_Thread
+15580 1773% cpu2 Worker_Thread
+15579 1770% cpu6 Worker_Thread
+15585 1763% cpu2 Worker_Thread
+15584 1760% cpu2 Worker_Thread
+15578 1760% cpu3 Worker_Thread
+15626 893% cpu1 audio_client_ma
+15659 680% cpu0 Broforce_beta.e
+15566 487% cpu1 dxvk-queue
+7805 460% cpu1 Broforce_beta.e
+15967 417% cpu1 Broforce_beta.e
+7804 357% cpu0 Broforce_beta.e
+15565 293% cpu2 dxvk-submit
+17938 133% cpu1 Broforce_beta.e
+17940 43% cpu1 Broforce_beta.e
+== per-cpu busy over 30 s
+cpu 62%
+cpu0 90%
+cpu1 89%
+cpu2 89%
+cpu3 54%
+cpu4 54%
+cpu5 45%
+cpu6 45%
+cpu7 29%
+== affinity of hot threads
+     18 Broforce_beta.e 0-7
+     16 BackgroundWorke 0-7
+      8 Worker Thread 0-7
+      4 EnlightenWorker 0-7
+      3 dxvk-shader-n 0-7
+      3 dxvk-shader-h 0-7
+      2 wine_xinput_hid 0-7
+      2 dxvk-shader-l 0-7
+      2 Broforc:disk$0 0-7
+      1 wine_sechost_de 0-7
+/
+5:freezer:/
+4:memory:/apps
+3:cpuset:/
+2:cpu:/
+1:blkio:/
+== thermal
+battery 31500
+cpu-1-0 60000
+cpu-1-1 60400
+cpu-1-2 58400
+cpu-1-3 58800
+cpu-1-4 58800
+cpu-1-5 60400
+cpu-1-6 55200
+cpu-1-7 55200
+cpu-1-8 58800
+cpu-1-9 57600
+cpu-1-10 56000
+gpuss-0 51300
+gpuss-1 50900
+gpuss-2 51300
+gpuss-3 50500
+gpuss-4 52800
+gpuss-5 52100
+gpuss-6 51300
+gpuss-7 51300
+skin-msm-therm 37375
+xo-therm 40876
+cool cpufreq-cpu0 0/15
+cool cpufreq-cpu3 0/19
+cool pause-cpu5 0/1
+cool pause-cpu7 0/1
+cool pause-cpu6 0/1
+cool cpufreq-cpu7 0/20
+cool cpu-hotplug1 0/1
+cool cpu-hotplug2 0/1
+cool cpu-hotplug3 0/1
+cool cpu-hotplug4 0/1
+cool cpu-hotplug5 0/1
+cool cpu-hotplug6 0/1
+cool cpu-hotplug7 0/1
+cool pause-cpu1 0/1
+cool cpu-cluster0 0/15
+cool cpu-cluster1 0/19
+cool cpu-cluster2 0/20
+cool devfreq-3d00000.qcom,kgsl-3d0 0/8
+cool gpu 0/8
+cool pause-cpu2 0/1
