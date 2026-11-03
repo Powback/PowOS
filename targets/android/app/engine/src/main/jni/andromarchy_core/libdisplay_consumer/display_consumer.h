@@ -1,6 +1,7 @@
 #ifndef DISPLAY_CONSUMER_H
 #define DISPLAY_CONSUMER_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include "../common/protocol.h"
 
@@ -26,6 +27,9 @@ int  set_fallback_callback(display_ctx *ctx, void (*on_fallback)(void *), void *
 int  poll_output_event(display_ctx *ctx, struct OutputEvent *event, int timeout_ms);
 int  poll_output_event_extend_data(display_ctx *ctx, void* payload, size_t size, int timeout_ms);
 int  set_exit_fallback_callback(display_ctx *ctx, void (*on_exit_fallback)(void *), void *userdata);
+/* PowOS: [fd] (an eventfd the caller owns; -1 none) made readable = the caller is stopping: refresh_done_tagged returns
+ * -1 and poll_output_event 0 at once (no fallback), instead of waiting for the producer's next frame / event. */
+void set_wake_fd(display_ctx *ctx, int fd);
 int  get_data_fd(display_ctx *ctx);
 int  get_audio_fd(display_ctx *ctx);
 void handle_unhandled_event(display_ctx *ctx, const struct OutputEvent *event);

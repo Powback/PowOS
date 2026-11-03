@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/eventfd.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -55,6 +56,11 @@ struct consumer_state {
     display_ctx *ctx;
     pthread_t render_thread;
     volatile bool running;
+    /* PowOS: readable once the consumer is stopping (nativeStopWindow): every wait of its threads - the producer's next
+     * frame (refresh_done_tagged, up to 5 s), the output-event poll (500 ms), a reconnect's back-off - watches it, so
+     * the stop's joins return at once (11-03: a stop waited 2135 ms for an idle KWin window's next frame). -1: none
+     * (the desktop, g_state, never stopped this way). */
+    int wake_efd;
 
     //Note: it is Deamon's Reconnect, not Fallback Flag
     //Fallback is maintained by display lib, and the consumer should not care about it.
@@ -111,6 +117,7 @@ struct consumer_state {
 static struct consumer_state g_state = {
     .lock = PTHREAD_MUTEX_INITIALIZER,
     .primary = true,
+    .wake_efd = -1,
 };
 
 /* Connection config, set from Java via nativeConfigure() and read on each
@@ -725,6 +732,7 @@ static int do_connect(struct consumer_state *s)
         return -1;
     }
 
+    set_wake_fd(s->ctx, s->wake_efd);
     set_screen_info(s->ctx, s->screen_w, s->screen_h,
                     PIXEL_FORMAT_RGBA_8888, s->refresh_mhz);
     set_buffers_transform(s->ctx, (uint32_t)s->pretransform);
@@ -859,7 +867,13 @@ static void *render_thread_func(void *arg)
         if (s->need_reconnect) {
             LOGI("reconnecting...");
             if (do_connect(s) < 0) {
-                usleep(500000);
+                /* The back-off ends early on a stop (wake_efd). */
+                if (s->wake_efd >= 0) {
+                    struct pollfd wp = { .fd = s->wake_efd, .events = POLLIN };
+                    poll(&wp, 1, 500);
+                } else {
+                    usleep(500000);
+                }
                 continue;
             }
         }
@@ -1373,6 +1387,9 @@ Java_andro_marchy_Native_nativeStartWindow(
     if (!s)
         return 0;
     pthread_mutex_init(&s->lock, NULL);
+    s->wake_efd = eventfd(0, EFD_CLOEXEC);
+    if (s->wake_efd < 0)
+        LOGE("window consumer: no stop eventfd (%s): a stop waits for the producer's next frame", strerror(errno));
     s->surface_id = (uint32_t)surfaceId;
     s->buffers_w = buffersWidth > 0 ? buffersWidth : 0;
     s->buffers_h = buffersHeight > 0 ? buffersHeight : 0;
@@ -1383,6 +1400,8 @@ Java_andro_marchy_Native_nativeStartWindow(
         LOGE("window consumer: no surface or id");
         if (s->window)
             ANativeWindow_release(s->window);
+        if (s->wake_efd >= 0)
+            close(s->wake_efd);
         pthread_mutex_destroy(&s->lock);
         free(s);
         return 0;
@@ -1405,6 +1424,8 @@ Java_andro_marchy_Native_nativeStartWindow(
     s->need_reconnect = true;
     if (pthread_create(&s->render_thread, NULL, render_thread_func, s) != 0) {
         ANativeWindow_release(s->window);
+        if (s->wake_efd >= 0)
+            close(s->wake_efd);
         pthread_mutex_destroy(&s->lock);
         free(s);
         return 0;
@@ -1422,6 +1443,11 @@ Java_andro_marchy_Native_nativeStopWindow(
     if (!s)
         return;
     s->running = false;
+    /* The event thread stops with it (its loop re-checks event_running when its poll returns), and the wake makes every
+     * wait of both threads return now (wake_efd): the joins below take a loop turn, not the producer's next frame. */
+    s->event_running = false;
+    if (s->wake_efd >= 0)
+        eventfd_write(s->wake_efd, 1);
     pthread_join(s->render_thread, NULL);
     if (s->ctx) {
         stop_event_thread(s);
@@ -1432,6 +1458,8 @@ Java_andro_marchy_Native_nativeStopWindow(
     cleanup_dmabufs(s);
     if (s->window)
         ANativeWindow_release(s->window);
+    if (s->wake_efd >= 0)
+        close(s->wake_efd);
     LOGI("window consumer stopped for surface %u", s->surface_id);
     forget_presents(s->surface_id);
     pthread_mutex_destroy(&s->lock);

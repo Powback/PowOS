@@ -24,6 +24,7 @@ struct display_ctx {
     uint32_t screen_w, screen_h;
     uint32_t pixel_format;
     uint32_t surface_id;      /* PowOS: which surface this is (0 = the desktop; see protocol.h) */
+    int      wake_fd;         /* PowOS: the owner's stop eventfd (set_wake_fd; -1 none, never closed here) */
     bool     fallback;
     bool     buffer_pending;
 
@@ -332,6 +333,7 @@ int connect_to_deamon_surface(display_ctx **out, int ctrl_fd, uint32_t surface_i
     ctx->fence_fd = -1;
     ctx->shm_fd = -1;
     ctx->audio_fd = -1;
+    ctx->wake_fd = -1;
     ctx->shm_ptr = NULL;
     ctx->fallback = true;
 
@@ -469,8 +471,13 @@ int refresh_done_tagged(display_ctx *ctx, int *fence_out, uint8_t *tag_out)
     /* Block (with a 5s safety timeout) on the fence channel: the arrival of the
      * producer's per-frame message is the render-done signal. Timeout / no POLLIN
      * (producer stalled or gone) -> fall back so the render thread never hangs. */
-    struct pollfd pfd = { .fd = ctx->fence_fd, .events = POLLIN };
-    int ret = poll(&pfd, 1, 5000);
+    struct pollfd pfds[2] = { { .fd = ctx->fence_fd, .events = POLLIN }, { .fd = ctx->wake_fd, .events = POLLIN } };
+    int ret = poll(pfds, ctx->wake_fd >= 0 ? 2 : 1, 5000);
+    /* PowOS: the owner is stopping (set_wake_fd): no frame, no fallback - the render loop sees its stop now, not after
+     * the producer's next frame (an idle KWin window sends none for seconds: 11-03 the ship check's stop took 2135 ms). */
+    if (ret > 0 && ctx->wake_fd >= 0 && (pfds[1].revents & POLLIN))
+        return -1;
+    struct pollfd pfd = pfds[0];
     if (ret <= 0 || !(pfd.revents & POLLIN)) {
         enter_fallback(ctx);
         return -1;
@@ -572,10 +579,14 @@ int poll_output_event(display_ctx *ctx, struct OutputEvent *event, int timeout_m
     if (ctx->fallback)
         return 0;
 
-    struct pollfd pfd = { .fd = ctx->data_fd, .events = POLLIN };
-    int ret = poll(&pfd, 1, timeout_ms);
+    struct pollfd pfds[2] = { { .fd = ctx->data_fd, .events = POLLIN }, { .fd = ctx->wake_fd, .events = POLLIN } };
+    int ret = poll(pfds, ctx->wake_fd >= 0 ? 2 : 1, timeout_ms);
     if (ret <= 0)
         return 0;
+    /* PowOS: the owner is stopping (set_wake_fd): the event thread's loop sees it now, not after timeout_ms. */
+    if (ctx->wake_fd >= 0 && (pfds[1].revents & POLLIN))
+        return 0;
+    struct pollfd pfd = pfds[0];
 
     if (pfd.revents & (POLLHUP | POLLERR)) {
         enter_fallback(ctx);
@@ -628,6 +639,11 @@ int set_exit_fallback_callback(display_ctx *ctx, void (*on_exit_fallback)(void *
     ctx->exit_fallback_userdata = userdata;
     return 0;
 }
+void set_wake_fd(display_ctx *ctx, int fd)
+{
+    ctx->wake_fd = fd;
+}
+
 int get_data_fd(display_ctx *ctx)
 {
     return ctx->data_fd;
