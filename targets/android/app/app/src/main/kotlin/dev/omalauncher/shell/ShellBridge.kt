@@ -440,7 +440,7 @@ class ShellBridge(
                 } ?: -1
                 else android(a.getString(0))?.let { app ->
                     runtime.usage.record(a.getString(0))
-                    webWindows.also { webWindowsMade = true }.open(app.component, a.getJSONObject(1), a.optInt(2, -1))
+                    webWindows.also { webWindowsMade = true }.open(app.component, a.getJSONObject(1), a.optInt(2, -1), a.optBoolean(4, false))
                 } ?: -1
             "webwindows.input" -> webWindowsMade && webWindows.input(a.getInt(0), a.getString(1), WebWindows.BodyTouch(a.getDouble(2), a.getDouble(3), a.optInt(4, 0)))
             // RL1: a (re)loaded page's window list rebuilt from the host's live windows.

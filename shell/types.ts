@@ -1011,6 +1011,11 @@ export interface Bridge {
      */
     open(key: string, rect: WebWindowRect, task?: number, kwin?: number): Promise<number>;
     /**
+     * Host-optional: [open] of a NEW window of an app that has one (drag-out, "new window"): a second instance of it,
+     * forced for every app Android lets run twice; a singleTask / singleInstance one answers with its running window.
+     */
+    openAnother?(key: string, rect: WebWindowRect): Promise<number>;
+    /**
      * A touch on its body at [at] (CSS px from the body's top-left); [at].finger: which finger (PZ1: every finger of a
      * gesture that started on the body, one multi-touch gesture for the app; omitted: 0).
      */
