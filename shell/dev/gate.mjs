@@ -1874,16 +1874,15 @@ async function switcherSplitPairCheck(layout) {
 async function switcherHomeSwipeCheck(page) {
   const up = await page.evaluate(switcherUpForHomeSwipe);
   if (up.length) return up;
-  const { mid, moved, gap, dur } = await page.evaluate(homeSwipeMidFrames, 3000);
+  const { mid, samples, dur, fade } = await page.evaluate(homeSwipeFadeSamples);
   const fails = await page.evaluate(switcherGoneFails);
-  // Owed: a mid-fade frame for every frame the fade visibly drew past its first (whose change can land on the end), up to 3,
-  // at least 1 - and the collapse a real animation of >= 150 ms. A page starved of frames (11-02: the gate's browser at
-  // 721 s, a frame every ~150 ms; GATE_THROTTLE=20, 2 mid of a 410 ms fade) can't draw 3 mid-collapse frames of the
-  // fade: there the frames it did draw are what's owed, not a count the machine took away. A page drawing normally
-  // (a frame every ~16 ms: ~20 over the fade) still owes 3.
-  const owed = Math.min(3, Math.max(1, moved - 1));
-  if (mid < owed || dur < 150)
-    fails.unshift(`the home swipe's close jumped: ${mid} frames mid-collapse of ${moved} the fade drew (the cards' and scrim's fade; median frame ${Math.round(gap)} ms, fade ${Math.round(dur)} ms), expected >= ${owed} and a fade >= 150 ms`);
+  // The fade read on its own timeline (homeSwipeFadeSamples), not by the frames a page happened to draw: a starved gate
+  // (11-02/11-03: the full gate at load 7-10, a frame every 50-900 ms) drew 0-2 frames of a 410 ms fade though the fade
+  // was whole. Owed: a real animation of >= 150 ms on the cards and the scrim, mid-way (both partly faded) at >= 4 of
+  // its 15 inner points (the spring's fade is mostly in its first half: 0.70 0.32 0.10 0.02 at 1/8..4/8) - a jump (no
+  // animation, or one of 0 ms) has none.
+  if (mid < 4 || dur < 150)
+    fails.unshift(`the home swipe's close jumped: ${mid} of ${samples} points of the collapse mid-fade (the cards' and scrim's fade${fade ? `: ${fade}` : ""}; fade ${Math.round(dur)} ms), expected >= 4 and a fade >= 150 ms`);
   return fails;
 }
 
@@ -1902,48 +1901,45 @@ async function switcherUpForHomeSwipe() {
 }
 
 /**
- * In the page: the home swipe let go (what Switcher.close sends), then the collapse sampled over its own lifetime - from
- * its fades' start (an animation or transition on the cards or the scrim, waited for up to [ms]) to their
- * Animation.finished, every frame between counted (mid: mid-fade ones; moved: those the fade changed). Not a fixed 700 ms from the send: on a loaded gate the fade hadn't
- * started by then ("fade 0 ms", 11-02), so a window on the clock saw 0 frames of a fade that ran after it. The switcher
- * settled first, so the open's own fade can't be taken for the close's. No fade started: dur 0 (the close jumped).
+ * In the page: the home swipe let go (what Switcher.close sends), then the collapse read on its own clock - its fades
+ * (the animations or transitions on the cards and the scrim) caught as they start, paused, and set to 1/8 .. 7/8 of
+ * their length, each point's opacities read (mid: both partly faded). Then played on to their end. Not counted by the
+ * frames drawn: a starved page (the full gate) drew 0-2 frames of a whole 410 ms fade (11-02/11-03). The style is
+ * read straight after the send (getAnimations() flushes it: the transitions start there, at 0), so even a page whose
+ * next frame is 900 ms off sees the fade before it ends. No fade started: dur 0 (the close jumped).
  */
-async function homeSwipeMidFrames(ms) {
+async function homeSwipeFadeSamples() {
   const G = window.__gw;
   const other = document.querySelector(".recents .task:not(:first-child)");
   const scrim = document.querySelector(".recents .recents-scrim");
   await G.settled(() => true, ".recents");
   const fades = () => [...other.getAnimations(), ...scrim.getAnimations()].filter((a) => a.playState !== "finished");
-  let mid = 0, moved = 0, dur = 0, was = null;
-  const stamps = [];
-  const sample = () => {
-    for (const a of fades()) dur = Math.max(dur, Number(a.effect?.getComputedTiming().endTime) || 0);
-    const o = parseFloat(getComputedStyle(other).opacity);
-    const so = parseFloat(getComputedStyle(scrim).opacity);
-    if (o > 0.02 && o < 0.98 && so > 0.01 && so < 0.44) mid++;
-    // A frame the fade drew: the cards' opacity visibly changed since the last one (> 1%: the spring's long tail
-    // under 2% changes nothing anyone sees, and isn't mid-fade either). Its frames' gaps are the median's.
-    if (was != null && Math.abs(o - was) > 0.01) (moved++, stamps.push(performance.now()));
-    was = o;
-  };
+  // Where the fade starts from (the switcher at rest): mid-fade is below it and above gone, for the cards and the scrim.
+  const from = [parseFloat(getComputedStyle(other).opacity), parseFloat(getComputedStyle(scrim).opacity)];
   window.__mockEvents.emit("recents.end", { to: "home" });
-  const t0 = performance.now();
-  // Every frame from the send on: a mid-fade frame before the wait sees the fade still counts.
-  while (!fades().length && performance.now() - t0 < ms) {
-    await G.frames(1);
-    sample();
-  }
-  for (let running = fades(); running.length; running = fades()) {
-    const over = Promise.all(running.map((a) => a.finished.catch(() => {})));
-    let done = false;
-    over.then(() => (done = true));
-    while (!done) {
-      await G.frames(1);
-      sample();
+  // The send's own task first (a render on a microtask), then the state - a fade or the layer closed without one.
+  for (let k = 0; k < 20 && !fades().length; k++) await Promise.resolve();
+  if (!fades().length) await G.until(() => fades().length || document.querySelector(".recents.closed"));
+  const running = fades();
+  const result = fadePoints(running, from);
+  for (const a of running) a.play();
+  await Promise.all(running.map((a) => a.finished.catch(() => {})));
+  await G.settled(() => true, ".recents");
+  return result;
+  /** [running] (the collapse's fades) paused and set to 1/16 .. 15/16 of their length, the cards' and scrim's opacities read at each. */
+  function fadePoints(running, [o0, so0]) {
+    const end = (a) => Number(a.effect?.getComputedTiming().endTime) || 0;
+    const dur = Math.max(0, ...running.map(end));
+    for (const a of running) a.pause();
+    const fade = running.map((a) => `${a.transitionProperty ?? a.animationName ?? "animation"} ${Math.round(end(a))} ms`).join(", ");
+    const samples = 15, seen = [];
+    for (let k = 1; k <= samples && dur; k++) {
+      for (const a of running) a.currentTime = Math.min(end(a), (dur * k) / (samples + 1));
+      seen.push([parseFloat(getComputedStyle(other).opacity), parseFloat(getComputedStyle(scrim).opacity)]);
     }
+    const mid = seen.filter(([o, so]) => o > 0.02 && o < o0 - 0.02 && so > 0.01 && so < so0 - 0.01).length;
+    return { mid, samples: seen.length, dur, fade: `${fade}; ${seen.map((p) => p.map((v) => v.toFixed(2)).join("/")).join(" ")}` };
   }
-  const gaps = stamps.slice(1).map((t, i) => t - stamps[i]).sort((x, y) => x - y);
-  return { mid, moved, gap: gaps[gaps.length >> 1] ?? 0, dur };
 }
 
 /** In the page: on home after the switcher closed - no layer up or visible, home not faded, no task opened. */
@@ -6505,7 +6501,11 @@ async function desktopReleaseCheck() {
     S.page.value = 0;
     S.notif.value = false;
     S.drawer.value = 0;
-    await sleep(350);
+    // From rest on page 0, not a fixed 350 ms: the last case's commit to page 1 is still settling back on a starved
+    // page (11-03, the full gate), and a touch then catches the track mid-flight (gesture.ts trackBase: base -143/-211),
+    // so a 60 px drag let go past the threshold (total -203, "commit why=distance"). Where the track rests is the case.
+    const pages = document.querySelector(".pages");
+    await window.__gw.settled(() => Math.abs(target.getBoundingClientRect().left - pages.getBoundingClientRect().left) < 1, ".pages");
     const x0 = width * 0.8;
     // Each event carries its own time (timeStamp = start + the step's ms): the gesture's real timing, however late the
     // page gets to run the handlers (GATE_THROTTLE, a loaded host).

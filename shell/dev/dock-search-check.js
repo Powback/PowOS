@@ -491,12 +491,17 @@ export async function searchDragOut() {
   const G = await importShim("./ui/grid.tsx");
   const btn = document.querySelector(".home > .dock .dock-search");
   if (!btn) return ["out: no dock button to drag"];
+  // The drop cell from the grid as it rests: the dock's drop just took the bar out of the foot, and on a starved gate
+  // (11-03, the full gate at load 7-10) the grid was still re-laid out from it - a cell taken from the old geometry
+  // was a row off ("at y 8, not the drop cell y 7"). Its geometry and the button the same over frames, nothing moving.
+  await window.__gw.settled(() => true, ".home");
+  await window.__gw.steady(() => [G.geometry.value, btn.getBoundingClientRect().toJSON()]);
   const spot = G.placeNewCells(S.home.value.columns, 1);
   const g = G.geometry.value;
   const x = g.left + g.pad + (spot.cell.w * g.cellW) / 2 + spot.cell.x * g.cellW;
   const y = g.top + g.pad + (spot.cell.h * g.cellH) / 2 + spot.cell.y * g.cellH;
   await drag(btn, x, y);
-  await sleep(200);
+  await window.__gw.until(() => S.home.value.items.some((i) => i.key === "panel:search"));
   const fails = [];
   const item = S.home.value.items.find((i) => i.key === "panel:search");
   if (!item) fails.push("no bar widget on home after the drop");

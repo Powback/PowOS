@@ -263,11 +263,15 @@ export async function ownDock() {
   if (S.dock.value.length < 4) S.dock.value = S.recent.value.slice(0, 4);
   E.emit("pull.begin", { kind: "apps" });
   E.emit("pull.end", { open: true });
-  await sleep(450);
+  // Open and at rest - its bar drawn, nothing under .pull-screen still moving - not a fixed 450 ms: a starved gate
+  // (11-03, the full gate at load 7-10) hadn't drawn the open by then ("0 bars, 0 docks").
+  await window.__gw.settled(() => document.querySelector(".pull-screen.open") && foot().bars > 0, ".pull-screen");
   const f = foot();
   const fails = f.docks === 0 && f.bars === 1 ? [] : [`over an app: ${f.bars} bars, ${f.docks} docks (folded: one bar, no dock)`];
   E.emit("pull.end", { open: false });
-  await sleep(500);
+  // Shut and settled before the next open, not a fixed 500 ms.
+  await window.__gw.frames(2);
+  await window.__gw.settled(() => !document.querySelector(".pull-screen.open"), ".pull-screen");
   return [...fails, ...(await fromButtonDock(E))];
 }
 
