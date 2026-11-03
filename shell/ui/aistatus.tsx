@@ -21,14 +21,14 @@ import { fleet, isPowOS, otherProjects, projectOf, workingNow, type Worker } fro
 import { aiScreen, chat, openPanel, page } from "../state.ts";
 import { board, boardSeen, checks, list, noteOf, WorkFeed, type WorkRow } from "./aiboard.tsx";
 import { upNext, UpNext } from "./upnext.tsx";
-import { areaStats, dotOf, heroRing, type AreaStat } from "./aiprogress.tsx";
+import { areaOf, areaStats, dotOf, heroRing, progressFocus, waitsOn, type AreaStat, type Dot } from "./aiprogress.tsx";
 import { NeedStack } from "./aistack.tsx";
 import type { MicTarget } from "./dictation.ts";
 import { BrokenReply, clearBroken, type Broken } from "./brokenreply.tsx";
 import { decidingOf, needIds, needsYou } from "./needsyou.tsx";
 import { aiAgent } from "./aipanes.tsx";
 import { clockAt } from "./time.ts";
-import { recordVerdict } from "./trycard.tsx";
+import { recordVerdict, TryLine } from "./trycard.tsx";
 import { Reveal } from "./reveal.tsx";
 
 /** Done in this window shows under Recently done. */
@@ -202,29 +202,100 @@ function NeedsAttention({ stuck }: { stuck: Worker[] }) {
   );
 }
 
-/** An area's open tasks in plain words, what needs the user first: "1 needs you · 2 working · 3 waiting for a check". */
+/** An area's open tasks by state, in the order that matters to the user: needs you, working, to check, idle. */
+const STATE_ORDER = ["waiting", "working", "check", "stalled"] as const;
+function byState(a: AreaStat, you: Set<string>): Record<Dot, WorkRow[]> {
+  const n: Record<Dot, WorkRow[]> = { waiting: [], working: [], check: [], stalled: [] };
+  for (const w of a.open) n[dotOf(w, you)].push(w);
+  return n;
+}
+
+/** One state's words: "2 working"; one task needing the user or waiting for a check is named ("to check: <title>"). */
+function stateWords(d: Dot, rows: WorkRow[]): string {
+  const k = rows.length;
+  if (d === "waiting") return k === 1 ? `needs you: ${rows[0].title}` : `${k} need you`;
+  if (d === "check") return k === 1 ? `to check: ${rows[0].title}` : `${k} to check`;
+  return d === "working" ? `${k} working` : `${k} idle`;
+}
+
+/** An area's open tasks in plain words, what needs the user first: "1 needs you · 2 working · to check: <title>". */
 export function areaWords(a: AreaStat, you: Set<string>): string {
-  const n = { waiting: 0, working: 0, check: 0, stalled: 0 };
-  for (const w of a.open) n[dotOf(w, you)]++;
-  const parts: [number, string][] = [
-    [n.waiting, `${n.waiting} need${n.waiting === 1 ? "s" : ""} you`],
-    [n.working, `${n.working} working`],
-    [n.check, `${n.check} to check`],
-    [n.stalled, `${n.stalled} idle`],
-  ];
-  return parts.filter(([k]) => k > 0).map(([, t]) => t).join(" · ");
+  const n = byState(a, you);
+  return STATE_ORDER.filter((d) => n[d].length > 0).map((d) => stateWords(d, n[d])).join(" · ");
 }
 
 /** An area's dot: the state that matters most to the user in it (needs you, then working, a check, idle). */
 const areaDot = (a: AreaStat, you: Set<string>) => {
   const d = a.open.map((w) => dotOf(w, you));
-  return (["waiting", "working", "check", "stalled"] as const).find((k) => d.includes(k)) ?? "stalled";
+  return STATE_ORDER.find((k) => d.includes(k)) ?? "stalled";
 };
+
+/** The task itself in Progress (the right column unfolded, the page folded): its area open, the row marked. */
+const openTask = (w: WorkRow) => ((progressFocus.value = { area: areaOf(w), id: w.id }), (aiAgent.value = null), (aiScreen.value = "progress"));
+
+/** Each opened state's heading. */
+const STATE_HEAD: Record<Dot, string> = { waiting: "Needs you", check: "To check", working: "Working", stalled: "Idle" };
+
+/**
+ * One task behind a count: its title, what it waits on (what to try on the phone, the phone check it waits for, what
+ * the user is asked), the Try it line's works / still broken when it has one, and "Open task".
+ */
+function CountItem({ w, d }: { w: WorkRow; d: Dot }) {
+  const why = waitsOn(w, d);
+  const tryLine = w.tryLine?.trim();
+  return (
+    <li class="ais-ck-item" data-task={w.id} data-dot={d}>
+      <span class="ais-ck-line">
+        <span class={`aip-dot ${d}`} aria-hidden="true" />
+        <span class="ais-ck-title">{w.title}</span>
+      </span>
+      {why.what && <span class="ais-ck-what">{why.what}</span>}
+      {why.check && <span class="ais-ck-check">{why.check}</span>}
+      <div class="ais-ck-acts">
+        {tryLine && d !== "working" && <TryLine it={{ id: w.id, line: tryLine }} at="board" bare />}
+        <button type="button" class="ai-act ais-ck-open" onClick={() => openTask(w)}>
+          Open task
+        </button>
+      </div>
+    </li>
+  );
+}
+
+/** An area opened: the tasks behind its counts, needs you and to check first; its idle ones as one line to Progress. */
+function AreaDetail({ a, you }: { a: AreaStat; you: Set<string> }) {
+  const n = byState(a, you);
+  const shown = (["waiting", "check", "working"] as const).filter((d) => n[d].length > 0);
+  return (
+    <div class="ais-ck" data-area-detail={a.name}>
+      {shown.map((d) => (
+        <section key={d} class="ais-ck-group" data-state={d} aria-label={STATE_HEAD[d]}>
+          <h4 class="ais-ck-h">
+            {STATE_HEAD[d]}
+            <span class="ais-n">{n[d].length}</span>
+          </h4>
+          <ul class="ais-ck-list">
+            {n[d].map((w) => (
+              <CountItem key={w.id} w={w} d={d} />
+            ))}
+          </ul>
+        </section>
+      ))}
+      <button type="button" class="ais-more ais-ck-all" onClick={() => ((progressFocus.value = null), (aiAgent.value = null), (aiScreen.value = "progress"))}>
+        {n.stalled.length ? `${n.stalled.length} idle · all of ${a.name} in Progress` : `All of ${a.name} in Progress`}
+      </button>
+    </div>
+  );
+}
+
+/** The area opened in By area (one at a time; kept while the page re-renders). */
+const areaOpen = signal<string | null>(null);
 
 /**
  * By area (unfolded; the user, 10-30 "let's group the PowOS AI in-progress things", 10-31 "categorizing them", 11-01
  * "just like a huge chat instead of a proper setup"): every open area on ONE line - its dot, its name, its open tasks in
- * plain state words - the areas that need the user first. A tap opens Progress (the area's tasks) in the right column.
+ * plain state words - the areas that need the user first. A tap opens the area in place (the user, 11-03 22:56: "says 1
+ * to check but which one???"): the tasks behind each count - what to check, its Try it, "Open task" - and a way to
+ * Progress (the area's whole list). A single task needing the user or waiting for a check is named in the row itself.
  */
 function ByArea() {
   const you = needIds(needsYou());
@@ -234,6 +305,7 @@ function ByArea() {
   const rest = open.filter((a) => areaDot(a, you) === "stalled");
   const idle = rest.reduce((n, a) => n + a.open.length, 0);
   if (!open.length) return null;
+  const opened = areaOpen.value;
   return (
     <section class="ais-sec" data-sec="areas" aria-label="By area">
       <h3 class="ais-h">
@@ -241,17 +313,21 @@ function ByArea() {
       </h3>
       <ul class="ais-list">
         {stats.map((a) => (
-          <li key={a.name}>
-            <button type="button" class="ais-area-row" data-area={a.name} onClick={() => ((aiAgent.value = null), (aiScreen.value = "progress"))}>
+          <li key={a.name} class={`ais-area-item ${opened === a.name ? "open" : ""}`}>
+            <button type="button" class="ais-area-row" data-area={a.name} aria-expanded={opened === a.name} onClick={() => (areaOpen.value = opened === a.name ? null : a.name)}>
               <span class={`aip-dot ${areaDot(a, you)}`} aria-hidden="true" />
               <span class="ais-area-name">{a.name}</span>
               <span class="ais-area-words">{areaWords(a, you)}</span>
+              <span class="ais-chev" aria-hidden="true" />
             </button>
+            <Reveal open={opened === a.name}>
+              <AreaDetail a={a} you={you} />
+            </Reveal>
           </li>
         ))}
         {rest.length > 0 && (
           <li>
-            <button type="button" class="ais-area-row rest" data-area="rest" onClick={() => ((aiAgent.value = null), (aiScreen.value = "progress"))}>
+            <button type="button" class="ais-area-row rest" data-area="rest" onClick={() => ((progressFocus.value = null), (aiAgent.value = null), (aiScreen.value = "progress"))}>
               <span class="aip-dot stalled" aria-hidden="true" />
               <span class="ais-area-name">{stats.length ? `${rest.length} more area${rest.length === 1 ? "" : "s"}` : `${rest.length} area${rest.length === 1 ? "" : "s"}`}</span>
               <span class="ais-area-words">nothing moving · {idle} idle</span>
