@@ -18,6 +18,16 @@ class VdWatchTest {
         assertEquals(442, WindowDpi.of(442, 2268, "com.discord"))
     }
 
+    @Test fun calculatorKeepsTheScreenDensityInAWindow() {
+        // 11-03 22:54 (ask 1a1a369a6fa): Calculator launched into a 1135x1364 window at 294 dpi drew "/ / /" digits
+        // and clipped keys; at the screen's 442 the window is 410 dp, its phone layout.
+        val dpi = WindowDpi.of(442, 2268, "com.oneplus.calculator")
+        assertEquals(442, dpi)
+        assertTrue(1135 * 160 / dpi < WindowDpi.SW_LARGE) // 410 dp
+        // Every other app still takes the desktop density.
+        assertEquals(294, WindowDpi.of(442, 2268, "com.android.chrome"))
+    }
+
     @Test fun contentZoomScalesTheBaseDensityClamped() {
         assertEquals(294, WindowDpi.zoomed(294, 1.0))
         assertEquals(441, WindowDpi.zoomed(294, 1.5)) // bigger content, less fits
