@@ -441,6 +441,24 @@ export interface ChromeState {
   /** The apps using it (package names). */
   recordingApps?: string[];
 }
+/** What an app uses that the shade's privacy row names (RecordingOps.Kind). */
+export type PrivacyKind = "camera" | "screen" | "mic" | "location";
+/** One app in the shade's privacy row (ShellBridge privacyList). */
+export interface PrivacyUse {
+  pkg: string;
+  uid: number;
+  /** Its name, as the drawer shows it. */
+  app: string;
+  /** Its drawer icon's URL, or null (a system service, PowOS itself). */
+  icon: string | null;
+  kinds: PrivacyKind[];
+  /** Still using it; else [ended] says when the last of it stopped (epoch ms). */
+  active: boolean;
+  ended: number | null;
+  /** PowOS itself (its dictation): the chip stops it rather than opening a permission page. */
+  own: boolean;
+}
+export interface PrivacyList { now: number; items: PrivacyUse[] }
 export interface ChromeRegion { action: string; x: number; y: number; width: number; height: number }
 
 /** A web window's element rect (CSS px, the viewport). */
@@ -749,6 +767,15 @@ export interface Bridge {
     changes(types: HealthType[], token: string): Promise<{ token: string; records: HealthRecord[]; deleted: string[]; expired: boolean }>;
   };
   /** The phone's notifications, for the launcher's own panel; "notifications.changed" brings the list again. */
+  /**
+   * Who uses the mic / camera / location (RecordingLight.kt's AppOps watch, the recording light's source): list() now,
+   * "privacy.changed" ({@link PrivacyList}) on every start and stop, and once more when a stopped use's grace is up.
+   */
+  privacy: {
+    list(): Promise<PrivacyList>;
+    /** Opens [pkg]'s permissions (its Android app info page). */
+    open(pkg: string): Promise<boolean>;
+  };
   notifications: {
     list(): Promise<NotificationList>;
     open(key: string): Promise<void>;

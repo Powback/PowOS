@@ -284,6 +284,87 @@ async function recordingRingCheck(hole) {
   return fail;
 }
 
+/**
+ * The shade's privacy row (ui/privacy.tsx, the user 11-03: "I should be able to see where my microphone is used in the
+ * notification center, like under the control center"), from a mocked AppOps feed ("privacy.changed", as
+ * RecordingLight.kt's watch pushes it): nothing in use - no row; an app on the mic and one on location - a chip each,
+ * its name, what it uses and "now", directly under the control center (folded: atop the notifications under the card;
+ * unfolded: in the controls' column under them); stopped - greyed, "Xs ago", gone once the 15 s grace is up; PowOS's own
+ * dictation's chip stops it.
+ */
+async function privacyKit() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  (await window.__gw.mod("./state.ts")).notif.value = true;
+  await window.__gw.settled(() => document.querySelector(".notif-panel.shown .cc"), ".notif-panel");
+  window.__privacy = {
+    sleep,
+    // The row's Reveal runs --spring-ms; a little over it.
+    feed: async (items) => (window.__mockEvents.emit("privacy.changed", { now: Date.now(), items }), await sleep(600)),
+    use: (pkg, app, kinds, extra = {}) => ({ pkg, uid: 10100, app, icon: null, kinds, active: true, ended: null, own: false, ...extra }),
+    chips: () => [...document.querySelectorAll(".notif-panel.shown .privacy-chip")],
+    chip: (pkg) => document.querySelector(`.notif-panel.shown .privacy-chip[data-pkg="${pkg}"]`),
+    text: (pkg) => window.__privacy.chip(pkg)?.textContent ?? "",
+  };
+  return document.querySelector(".privacy-row") ? ["a privacy row with nothing in use"] : [];
+}
+
+/** A recorder on the mic and a map on location: a chip each, its name, what it uses, "now". */
+async function privacyShows() {
+  const P = window.__privacy;
+  await P.feed([P.use("org.example.recorder", "Recorder", ["mic"]), P.use("org.example.maps", "Maps", ["location"], { uid: 10200 })]);
+  return [
+    [P.chips().length === 2, `want 2 chips, got ${P.chips().length}`],
+    [P.text("org.example.recorder").includes("Recorder"), `the mic chip doesn't name its app: "${P.text("org.example.recorder")}"`],
+    [P.text("org.example.recorder").includes("Microphone · now"), `the mic chip reads "${P.text("org.example.recorder")}"`],
+    [P.chip("org.example.recorder")?.querySelector('.privacy-kind[data-kind="mic"]'), "the mic chip has no mic glyph"],
+    [P.text("org.example.maps").includes("Location · now"), `the location chip reads "${P.text("org.example.maps")}"`],
+    [P.chips().every((el) => el.getBoundingClientRect().height >= 44), "a chip under 44 px (a touch target)"],
+  ].filter(([ok]) => !ok).map(([, why]) => why);
+}
+
+/** Directly under the control center: folded atop the notifications under its card, unfolded in its column. */
+function privacyPlace() {
+  const row = document.querySelector(".notif-panel.shown .privacy-row");
+  const body = document.querySelector(".notif-panel .panel-body");
+  if (!row || !body) return ["no privacy row with the mic in use"];
+  const two = body.classList.contains("two");
+  const card = (two ? body.querySelector(".cc-col") : body)?.querySelector(".cc");
+  if (!card) return ["no control center card"];
+  const r = row.getBoundingClientRect(), c = card.getBoundingClientRect();
+  return [
+    [two ? row.closest(".cc-col") : row.closest(".notif-own"), two ? "unfolded: the row isn't in the controls' column" : "folded: the row isn't atop the notifications under the card"],
+    [r.top >= c.bottom - 1 && r.top - c.bottom <= 32, `the row isn't directly under the control center (row ${Math.round(r.top)}, card bottom ${Math.round(c.bottom)})`],
+    [r.left >= 0 && r.right <= innerWidth, "the row runs off the screen"],
+  ].filter(([ok]) => !ok).map(([, why]) => why);
+}
+
+/** The recorder stops (13 s ago): greyed, "13s ago"; once the 15 s grace is up it's gone, the map's chip stays. */
+async function privacyGrace() {
+  const P = window.__privacy;
+  await P.feed([P.use("org.example.recorder", "Recorder", ["mic"], { active: false, ended: Date.now() - 13_000 }), P.use("org.example.maps", "Maps", ["location"], { uid: 10200 })]);
+  const stopped = P.chip("org.example.recorder");
+  const fails = [
+    [stopped && !stopped.hasAttribute("data-active"), "a stopped use isn't marked stopped"],
+    [/1[34]s ago/.test(P.text("org.example.recorder")), `a stopped use reads "${P.text("org.example.recorder")}", want "13s ago"`],
+    [stopped && Number(getComputedStyle(stopped).opacity) <= 0.8, "a stopped chip isn't greyed out"],
+  ];
+  await P.sleep(3000);
+  fails.push([!P.chip("org.example.recorder"), "the stopped use stayed past the 15 s grace"], [P.chip("org.example.maps"), "the location chip went with it"]);
+  await P.feed([]);
+  fails.push([!document.querySelector(".privacy-row"), "the row stayed with nothing in use"]);
+  return fails.filter(([ok]) => !ok).map(([, why]) => why);
+}
+
+/** PowOS's own dictation on the mic: its chip stops it (no permission page). */
+async function privacyOwnStop() {
+  const P = window.__privacy;
+  await P.feed([P.use("com.powos.app", "PowOS", ["mic"], { own: true })]);
+  const stops = window.__speechMock.stops;
+  P.chip("com.powos.app")?.click();
+  await P.sleep(50);
+  return window.__speechMock.stops === stops + 1 ? [] : ["a tap on PowOS's own mic chip didn't stop the dictation"];
+}
+
 /** The modes app.tsx renders (`mode === "x"`), home first: a mode added there is checked without touching this. */
 function modes() {
   const src = fs.readFileSync(path.join(ROOT, "app.tsx"), "utf8");
@@ -12974,6 +13055,19 @@ try {
         return { ...r, ready: true, ms: Date.now() - r.started };
       }),
     );
+  // The shade's privacy row (ui/privacy.tsx) under the control center, folded and unfolded, from a mocked AppOps feed.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(
+        open(browser, `${ORIGIN}/index.html?mode=shade`, `privacy-row-${label}`, viewport).then(async (r) => {
+          await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+          for (const step of [privacyKit, privacyShows, privacyPlace, privacyGrace, privacyOwnStop]) {
+            r.problems.push(...((await r.page.evaluate(step).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])) ?? []));
+            if (r.problems.length) break;
+          }
+          return { ...r, ready: true, ms: Date.now() - r.started };
+        }),
+      );
   // The shade folded (one stacked list) and unfolded (two columns: notifications left, controls right).
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])

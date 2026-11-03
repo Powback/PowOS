@@ -19,15 +19,20 @@ class RecordingOpsTest {
         assertEquals(Kind.MIC, RecordingOps.kind(OP_RECORD_AUDIO))
         assertEquals(Kind.MIC, RecordingOps.kind(OP_PHONE_CALL_MICROPHONE))
         assertEquals(Kind.SCREEN, RecordingOps.kind(OP_PROJECT_MEDIA))
-        assertNull(RecordingOps.kind("android:coarse_location"))
+        assertEquals(Kind.LOCATION, RecordingOps.kind("android:coarse_location"))
+        assertNull(RecordingOps.kind("android:read_contacts"))
         assertTrue(RecordingOps.WATCHED.all { RecordingOps.kind(it) != null })
     }
 
     @Test fun offUntilAnOpStarts() {
         val ops = RecordingOps()
         assertNull(ops.state().ring)
-        assertFalse(ops.changed("android:coarse_location", 10100, "maps", true))
+        assertFalse(ops.changed("android:read_contacts", 10100, "contacts", true))
         assertNull(ops.state().ring)
+        // Location is the shade's row only: it lights no ring and names no one there.
+        assertTrue(ops.changed("android:coarse_location", 10100, "maps", true))
+        assertNull(ops.state().ring)
+        assertEquals(emptyList<String>(), ops.state().apps)
     }
 
     @Test fun micIsOrangeCameraWinsAndItEndsWhenTheLastStops() {
@@ -36,7 +41,8 @@ class RecordingOpsTest {
         assertEquals(Kind.MIC, ops.state().ring)
         // A video call: camera and mic - the camera's colour.
         assertTrue(ops.changed(OP_CAMERA, 10200, "meet", true))
-        assertFalse(ops.changed(OP_RECORD_AUDIO, 10200, "meet", true)) // meet is on the list already, the camera wins
+        // The ring keeps the camera's colour, but the shade's privacy row now names meet's mic too: a change.
+        assertTrue(ops.changed(OP_RECORD_AUDIO, 10200, "meet", true))
         assertEquals(Kind.CAMERA, ops.state().ring)
         assertEquals(listOf("recorder", "meet"), ops.state().apps)
         assertTrue(ops.changed(OP_CAMERA, 10200, "meet", false))
