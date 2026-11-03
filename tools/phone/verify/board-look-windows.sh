@@ -37,12 +37,17 @@
 #   relaunch      (launching-an-app-that-s-already-running-opens-it): Calculator as a web window, Home pressed, then
 #                 Calculator launched again from home's search (a launch, not the dock's taskbar toggle) -> the SAME
 #                 window fronts (not minimised, on top), no second window, no second Calculator task.
+#   multi-instance (decide-support-multi-instance-windows-where-the + dragging-an-already-open-app-s-icon-out-breaks-t):
+#                 Chrome as a web window on the page shown, Calculator's on the next page (so the dock is a taskbar
+#                 there - a drop opens a window, never unpins); home turned to that page by code; Chrome's dock icon
+#                 held and dragged to the page's middle (input motionevent) -> TWO Chrome windows, one per page, one
+#                 more Chrome task (a second instance, not the first window moved).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/e2e-lib.sh"
 CASE=${1:-}; shift || true
-case "$CASE" in tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size|relaunch) ;;
-  *) echo "usage: board-look-windows.sh tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size|relaunch [--round R]"; exit 2 ;; esac
+case "$CASE" in tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size|relaunch|multi-instance) ;;
+  *) echo "usage: board-look-windows.sh tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size|relaunch|multi-instance [--round R]"; exit 2 ;; esac
 e2e_args "$@"
 e2e_init "lookw-$CASE"
 CALC=${TEST_APP:-com.oneplus.calculator} CHROME=com.android.chrome
@@ -385,6 +390,32 @@ if [ "$CASE" = relaunch ]; then
             fail "after the relaunch: windows of it '$o' (want '1 $A1 1 0': count id top minimised), Calculator tasks $n1 (had $n0)" ;;
         esac
       else step search "home's search tapped"; fail "home's search didn't take the focus ($(ev "$SEARCHED"), $(ime))"; back; fi ;;
+    esac
+  fi
+fi
+
+# --- multi-instance -------------------------------------------------------------------------------------------
+# wwpages <key>: the pages of app [key]'s windows, sorted, comma separated.
+wwpages() { ev "$WW.then(m=>m.webWins.value.filter(w=>w.key==='$1').map(w=>w.page).sort().join(','))"; }
+if [ "$CASE" = multi-instance ]; then
+  K=$(appkey "$CHROME"); A1=$(wwopen "$CHROME"); sleep 3; chk open
+  P1=$(ev 'importShim("./state.ts").then(s=>String(s.pages.value[s.page.value]))')
+  ok=$(ev 'importShim("./state.ts").then(s=>{if(s.page.value+1>=s.pages.value.length)return "no";s.page.value+=1;return "yes"})'); sleep 1.5
+  A2=$(wwopen "$CALC"); sleep 3; chk page2
+  if [ "$A1" = none ] || [ "$K" = none ] || [ "$ok" != yes ] || [ "$A2" = none ]; then fail "setup: Chrome window $A1 (key $K), next page $ok, Calculator window $A2"
+  else
+    KEY=${K%%|*}; n0=$(ntasks "$CHROME")
+    step setup "Chrome's window $A1 on page $P1, Calculator's $A2 on the next page ($n0 Chrome task(s))"
+    d=$(pt "$(dockel "$KEY")")
+    case $d in none|off|"") fail "Chrome isn't on the dock ($d)" ;; *)
+      set -- $d; X=$1; Y=$2; MX=$(ev 'String(Math.round(innerWidth*devicePixelRatio/2))'); MY=$(ev 'String(Math.round(innerHeight*devicePixelRatio/2))')
+      c="input motionevent DOWN $X $Y; sleep 0.9; "; for i in 1 2 3 4 5 6 7 8; do c+="input motionevent MOVE $((X + (MX - X) * i / 8)) $((Y + (MY - Y) * i / 8)); "; done
+      log "drag Chrome's dock icon $X,$Y -> $MX,$MY (held 0.9 s)"; sh_ "$c sleep 0.5; input motionevent UP $MX $MY"; sleep 4; chk dragged
+      step drag "Chrome's dock icon dragged out onto this page"
+      pg=$(wwpages "$KEY"); n1=$(ntasks "$CHROME"); P2=$(ev 'importShim("./state.ts").then(s=>String(s.pages.value[s.page.value]))')
+      want=$(printf '%s\n%s\n' "$P1" "$P2" | sort | paste -sd, -)
+      [ "$pg" = "$want" ] && [ "$n1" -gt "$n0" ] && pass "two Chrome windows (pages $pg), $n1 Chrome tasks (had $n0): a second instance" ||
+        fail "after the drag-out: Chrome windows on pages '$pg' (want '$want'), Chrome tasks $n1 (had $n0)" ;;
     esac
   fi
 fi

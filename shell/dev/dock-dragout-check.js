@@ -10,6 +10,10 @@
  * - "place" (home unfolded, two widgets, a window open): let go at the top, bottom, left, right, in a free region and
  *   over a widget - a web window opens exactly on the last ghost (+-1 px): the free region there (touching no widget)
  *   or, over a widget, floating centred under the finger; no home drop spot meanwhile.
+ * - "instance" (home unfolded, Chrome running tiled on another page): a second Chrome window here, the first untouched;
+ *   a tap then fronts one, never a third.
+ * - "grid" (the same, the host answering with Chrome's running window: a singleTask app): that window moves here and its
+ *   old page's tiling closes up - no empty half (11-03 "It moved the old one and it broke the grid").
  * - "home" (home folded, no app in front): onto home's grid - unpinned and placed there as before, no ghost, no split
  *   or float; back onto the dock - neither split nor float.
  */
@@ -187,10 +191,68 @@ async function placeDrop({ G, W }, widgets, dockAt, d) {
   return fails;
 }
 
+/**
+ * Chrome runs in a window tiled on another page (beside two others) and its icon is dragged out onto this page (the user
+ * 11-03: "if I want to open up another chrome instance on this page I could ... It moved the old one and it broke the
+ * grid"). [multi]: the host makes a second instance; else (a singleTask app) it answers with the running window.
+ * Returns the stub's open calls and the ids.
+ */
+async function runningSetup({ S, W, H, powos }, multi) {
+  H.wideHome.value = true;
+  const here = S.pages.value[S.page.value];
+  const there = S.pages.value.find((p) => p !== here) ?? here + 1;
+  W.tilings.value = {};
+  const win = (id, key) => ({ id, key, label: key, page: there, x: 40, y: 80, w: 300, h: 240, live: true });
+  // A window on this page too: the dock is a taskbar over it (dockout.tsx overApps), so a drop opens a window.
+  W.webWins.value = [win(961, "a:chrome"), win(962, "a:gate.settings"), win(963, "a:gate.gmail"), { ...win(951, "a:gate.open"), page: here }];
+  W.tileWindows(there, [961, 962, 963]);
+  const opens = [];
+  let next = 800;
+  const open = (k, another) => (opens.push({ k, another }), another && multi ? ++next : 961);
+  powos.webwindows = { enabled: async () => true, open: async (k) => open(k, false), openAnother: async (k) => open(k, true), close: async () => true, input: async () => true, minimise: async () => true, restore: async () => true };
+  await window.__gw.settled();
+  return { here, there, opens };
+}
+
+/** "instance": a second Chrome window on this page, the first one untouched on its page and tiling; a tap fronts one. */
+async function instanceCase(e, fails, dockAt) {
+  const { W } = e;
+  const { here, there, opens } = await runningSetup(e, true);
+  await drag(e.G, "a:chrome", dockAt, [{ x: innerWidth / 2, y: innerHeight - 200 }, { x: innerWidth / 2, y: innerHeight / 2 }]);
+  if (!(await until(() => W.webWins.value.filter((w) => w.key === "a:chrome").length === 2))) return void fails.push(`drag-out of a running Chrome: ${W.webWins.value.filter((w) => w.key === "a:chrome").length} Chrome windows, want 2 (opens ${JSON.stringify(opens)})`);
+  if (!opens.some((o) => o.another)) fails.push(`the drag-out asked the host for no second instance: ${JSON.stringify(opens)}`);
+  const pages = W.webWins.value.filter((w) => w.key === "a:chrome").map((w) => w.page).sort();
+  if (String(pages) !== String([here, there].sort())) fails.push(`the two Chrome windows are on pages ${pages}, want one on ${there} and one on ${here}`);
+  if (String(W.tilings.value[there]?.ids) !== "961,962,963") fails.push(`page ${there}'s tiling changed: ${JSON.stringify(W.tilings.value[there]?.ids)}`);
+  // A tap fronts a window, never a third one.
+  const n = opens.length;
+  await W.openWebWindow("a:chrome", "Chrome", here);
+  if (W.webWins.value.filter((w) => w.key === "a:chrome").length !== 2 || opens.slice(n).some((o) => o.another)) fails.push(`a tap after the drag-out made another window (opens ${JSON.stringify(opens.slice(n))})`);
+}
+
+/** "grid": an app that can't run twice moves here, and the page it left closes up its tiles (no empty half). */
+async function gridCase(e, fails, dockAt) {
+  const { W } = e;
+  const { here, there } = await runningSetup(e, false);
+  await drag(e.G, "a:chrome", dockAt, [{ x: innerWidth / 2, y: innerHeight - 200 }, { x: innerWidth / 2, y: innerHeight / 2 }]);
+  if (!(await until(() => W.webWins.value.find((w) => w.id === 961)?.page === here))) return void fails.push(`a single-instance drag-out didn't move its window here (page ${W.webWins.value.find((w) => w.id === 961)?.page}, want ${here})`);
+  if (W.webWins.value.filter((w) => w.key === "a:chrome").length !== 1) fails.push("a single-instance drag-out made a second window");
+  const t = W.tilings.value[there];
+  if (!t || t.ids.includes(961) || t.ids.includes(null) || t.ids.length !== 2) fails.push(`page ${there}'s tiling after the move: ${JSON.stringify(t)} (want the two others closed up, no gap)`);
+  else {
+    // The two left fill the whole tile area between them (no half left empty).
+    const a = W.tileArea();
+    const area = W.tileRects(t, a).reduce((sum, r) => sum + r.w * r.h, 0);
+    const want = W.tileRects({ layout: "2h", ids: [1, 2], rx: 0.5, ry: 0.5 }, a).reduce((sum, r) => sum + r.w * r.h, 0);
+    if (Math.abs(area - want) > want * 0.02) fails.push(`page ${there}'s two tiles cover ${Math.round(area)} px2, a full split ${Math.round(want)}`);
+  }
+  if (W.tiledOn(961) === there) fails.push("the moved window is still in its old page's tiling");
+}
+
 export async function dockDragOut(kind) {
   const e = await env();
   e.O.TASK_WAIT.ms = 3000;
   const fails = [];
-  await { split: splitCase, float: floatCase, window: windowCase, home: homeCase, place: placeCase }[kind](e, fails, { x: innerWidth / 2, y: innerHeight - 30 });
+  await { split: splitCase, float: floatCase, window: windowCase, home: homeCase, place: placeCase, instance: instanceCase, grid: gridCase }[kind](e, fails, { x: innerWidth / 2, y: innerHeight - 30 });
   return fails;
 }

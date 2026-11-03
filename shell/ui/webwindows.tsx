@@ -223,9 +223,23 @@ function existingWindow(key: string, page: number): number | null {
 /** Window [id] to [page], not minimised, on top: its id. */
 function cameHere(id: number, page: number): number {
   showTab(id);
-  update(id, { page, minimised: false });
+  toPageOf(id, page);
+  update(id, { minimised: false });
   raise(id);
   return id;
+}
+
+/**
+ * Window [id] onto [page]: tiled on ANOTHER page, it leaves that tiling first (the others close up) - never a tile kept
+ * for a window that is gone (the user 11-03, Chrome dragged out onto another page: "It moved the old one and it broke the
+ * grid" - its half stayed empty). On [page] it floats at its own frame, or takes an empty tile there.
+ */
+function toPageOf(id: number, page: number) {
+  const was = webWins.value.find((w) => w.id === id)?.page;
+  const tiled = tiledOn(id);
+  if (tiled != null && tiled !== page) untile(id, "float");
+  update(id, { page });
+  if (was !== page) fillEmptyTile(page, id);
 }
 
 /**
@@ -256,9 +270,20 @@ async function openFresh(key: string, label: string, page: number): Promise<numb
   if (!wideHome.value || !key.startsWith("a:") || !(await enabled())) return null;
   const had = existingWindow(key, page);
   if (had != null) return had;
+  return openHost(key, label, page, false);
+}
+
+/**
+ * The host's window for Android app [key] on [page]: a new one, or (one display per app task) the app's existing one,
+ * which comes here. [another]: a second instance of an app that has a window (the host forces it for every app Android
+ * lets run twice; a singleTask / singleInstance one answers with its existing window).
+ */
+async function openHost(key: string, label: string, page: number, another: boolean): Promise<number | null> {
   const { x, y, w, h } = cascade();
   // Its first rect is a guess; the element reports its real one on its first frame.
-  const id = await powos.webwindows!.open(key, { left: x, top: y + TITLE, width: w, height: h - TITLE }).catch(() => -1);
+  const ww = powos.webwindows!;
+  const rect = { left: x, top: y + TITLE, width: w, height: h - TITLE };
+  const id = await (another && ww.openAnother ? ww.openAnother(key, rect) : ww.open(key, rect)).catch(() => -1);
   if (id < 0) return null;
   // The host's window for this app already (its task on another display or page, minimised, split): that one comes
   // here, never a second entry or display.
@@ -1079,7 +1104,7 @@ export function tileWindows(page: number, ids: number[]) {
   const list = ids.slice(0, 4);
   if (!list.length) return;
   const layout = layoutFor(Math.max(2, list.length), tileArea());
-  for (const id of list) update(id, { page });
+  for (const id of list) toPageOf(id, page);
   setTiling(page, { layout, ids: SLOTS[layout].map((_, i) => list[i] ?? null), rx: 0.5, ry: 0.5 });
   console.info(`[tiles] page ${page}: ${layout} [${list.join(",")}] (split screen)`);
 }
@@ -1258,9 +1283,23 @@ export function placeWindow(id: number, rect: Box) {
   console.info(`[place] window ${id} at ${Math.round(rect.x)},${Math.round(rect.y)} ${Math.round(rect.w)}x${Math.round(rect.h)}`);
 }
 
+/**
+ * A NEW window of app [key] on [page] (the dock's drag-out, an icon's "new window"; the user 11-03: "if I want to open up
+ * another chrome instance on this page I could"), where a tap fronts its window: with no window yet, as a tap; with one,
+ * a second instance - Android: the host forces one for every app that can run twice (else the app's window moves here);
+ * Linux: a second process with its own placeholder (a new toplevel takes only a waiting placeholder, never the running
+ * window). Its id, or null (not a web window).
+ */
+export async function openNewWindow(key: string, label: string, page: number): Promise<number | null> {
+  if (!webWins.value.some((w) => w.key === key && !w.failed)) return key.startsWith("l:") ? linuxWindow(key, label, page) : openWindow(key, label, page);
+  if (!wideHome.value || !(await enabled())) return null;
+  if (key.startsWith("l:")) return linuxPlaceholder(key, label, page);
+  return key.startsWith("a:") ? openHost(key, label, page, true) : null;
+}
+
 /** A new window for app [key] on [page] at [p] (the dock's drag-out): false when it can't be a web window. */
 export async function openWindowAt(key: string, label: string, p: Place): Promise<boolean> {
-  const id = key.startsWith("l:") ? await linuxWindow(key, label, p.page) : await openWindow(key, label, p.page);
+  const id = await openNewWindow(key, label, p.page);
   if (id == null) return false;
   if (tiledOn(id) == null) placeWindow(id, p.rect);
   return true;

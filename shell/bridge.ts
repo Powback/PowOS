@@ -292,6 +292,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       enabled: () => call<boolean>("webwindows.enabled"),
       list: () => call<HostWebWindow[]>("webwindows.list"),
       open: (key, rect, task, kwin) => call<number>("webwindows.open", key, rect, task ?? -1, kwin ?? -1),
+      openAnother: (key, rect) => call<number>("webwindows.open", key, rect, -1, -1, true),
       input: (id, action, at) => call<boolean>("webwindows.input", id, action, at.x, at.y, at.finger ?? 0),
       close: (id) => call<boolean>("webwindows.close", id),
       fullScreen: (id) => call<boolean>("webwindows.fullScreen", id),

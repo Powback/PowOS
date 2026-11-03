@@ -51,4 +51,21 @@ class LaunchReuseTest {
         // Another web window's display is still never taken either.
         assertEquals(Decision.New, LaunchReuse.decide(pkg, listOf(Window(2, "other", 6, 11)), listOf(Task(6, "other", pkg, 11))))
     }
+
+    @Test
+    fun aNewWindowOfARunningAppIsASecondInstanceForEveryAppThatCanRunTwice() {
+        val ws = listOf(Window(3, pkg, 9, 12))
+        // Chrome (standard / singleTop launcher, the user 11-03): a second window, not the first one moved.
+        assertEquals(Decision.Another, LaunchReuse.decideNew(pkg, LaunchReuse.multiInstance(0), ws, emptyList()))
+        assertEquals(Decision.Another, LaunchReuse.decideNew(pkg, LaunchReuse.multiInstance(1), ws, emptyList()))
+        // singleTask / singleInstance: Android puts it back in its one task - its window is reused (the page moves it).
+        assertEquals(Decision.Reuse(3, 9), LaunchReuse.decideNew(pkg, LaunchReuse.multiInstance(LaunchReuse.LAUNCH_SINGLE_TASK), ws, emptyList()))
+        assertEquals(Decision.Reuse(3, 9), LaunchReuse.decideNew(pkg, LaunchReuse.multiInstance(LaunchReuse.LAUNCH_SINGLE_INSTANCE), ws, emptyList()))
+    }
+
+    @Test
+    fun aNewWindowOfAnAppWithNoWindowIsAnOrdinaryLaunch() {
+        assertEquals(Decision.New, LaunchReuse.decideNew(pkg, true, emptyList(), emptyList()))
+        assertEquals(Decision.Adopt(7), LaunchReuse.decideNew(pkg, true, emptyList(), listOf(Task(7, pkg, pkg, 0))))
+    }
 }

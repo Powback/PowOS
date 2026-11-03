@@ -642,6 +642,9 @@ class WebWindows(
         /** LaunchReuse.Decision.Apart: its app's task is another tool's (its own virtual display) - launched beside it, MULTIPLE_TASK. */
         @Volatile var apart = false
 
+        /** LaunchReuse.Decision.Another: a second instance of its app - launched NEW_TASK | MULTIPLE_TASK | NEW_DOCUMENT. */
+        @Volatile var another = false
+
         /** The task's "display/mode" [follow] last acted on (once per change), null while it's back in its display. */
         @Volatile var followed: String? = null
 
@@ -907,9 +910,10 @@ class WebWindows(
         component: ComponentName,
         rect: JSONObject,
         task: Int = -1,
+        another: Boolean = false,
     ): Int {
         if (!openable(component, component.packageName)) return -1
-        val how = launchDecision(component, task)
+        val how = if (another && task < 0) anotherDecision(component) else launchDecision(component, task)
         if (how is LaunchReuse.Decision.Reuse) return how.window
         return make(component, rect, how, null)
     }
@@ -959,6 +963,7 @@ class WebWindows(
         win.adopt = adopt
         win.quick = quick
         win.apart = how is LaunchReuse.Decision.Apart
+        win.another = how is LaunchReuse.Decision.Another
         wins[id] = win
         helper.create(win) { displayId, error ->
             if (displayId < 0) {
@@ -1015,6 +1020,20 @@ class WebWindows(
             WindowLog.i(TAG, "launch $pkg: reused window ${d.window} (task ${d.task})")
             emit("webwindows.show", d.window)
         }
+        return d
+    }
+
+    /**
+     * [open] of a NEW window (the dock's drag-out, an icon's "new window"; [another]): a second instance of an app that
+     * has a window, forced for every app that can run twice ([LaunchReuse.multiInstance]); else [launchDecision]'s.
+     */
+    private fun anotherDecision(component: ComponentName): LaunchReuse.Decision {
+        val pkg = component.packageName
+        val mode = runCatching { context.packageManager.getActivityInfo(component, 0).launchMode }.getOrDefault(0)
+        val d = LaunchReuse.decideNew(pkg, LaunchReuse.multiInstance(mode), liveWindows(), if (pkg == context.packageName) emptyList() else runningTasks())
+        if (d is LaunchReuse.Decision.Another) return d.also { WindowLog.i(TAG, "new window of $pkg (launchMode $mode): a second instance") }
+        WindowLog.i(TAG, "new window of $pkg: launchMode $mode keeps one task (singleTask/singleInstance): its window moves instead")
+        if (d is LaunchReuse.Decision.Reuse) emit("webwindows.show", d.window)
         return d
     }
 
@@ -3408,6 +3427,14 @@ class WebWindows(
             (atm.javaClass.getMethod("getAllRootTaskInfosOnDisplay", Int::class.javaPrimitiveType).invoke(atm, displayId) as List<*>).size
         }.getOrNull()
 
+    /** [launch]'s flags beside NEW_TASK: a task of its own for Apart, a new document task for a second instance. */
+    private fun launchFlags(w: Win): Int =
+        when {
+            w.another -> Intent.FLAG_ACTIVITY_MULTIPLE_TASK or Intent.FLAG_ACTIVITY_NEW_DOCUMENT
+            w.apart -> Intent.FLAG_ACTIVITY_MULTIPLE_TASK
+            else -> 0
+        }
+
     private fun launch(w: Win) {
         w.landed = false
         checkLanded(w)
@@ -3423,7 +3450,8 @@ class WebWindows(
             Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_LAUNCHER)
                 .setComponent(w.component)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or if (w.apart) Intent.FLAG_ACTIVITY_MULTIPLE_TASK else 0)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or launchFlags(w))
+        if (w.another) WindowLog.i(TAG, "window ${w.id}: a second instance of ${w.component.packageName}: launched as a new document task")
         if (w.apart) WindowLog.i(TAG, "window ${w.id}: ${w.component.packageName}'s task is on another tool's display: launched as a task of its own, that one left alone")
         try {
             val opts = ActivityOptions.makeBasic().setLaunchDisplayId(w.displayId)
@@ -3432,7 +3460,8 @@ class WebWindows(
         } catch (e: Exception) {
             WindowLog.w(TAG, "ActivityOptions launch on display ${w.displayId} refused: ${e.message}; trying root am start")
             io.post {
-                val r = runCatching { andro.marchy.RootShell.run("am start --display ${w.displayId} -f ${if (w.apart) "0x18000000" else "0x10000000"} -n ${w.component.flattenToShortString()}") }.getOrNull()
+                val flags = "0x" + Integer.toHexString(Intent.FLAG_ACTIVITY_NEW_TASK or launchFlags(w))
+                val r = runCatching { andro.marchy.RootShell.run("am start --display ${w.displayId} -f $flags -n ${w.component.flattenToShortString()}") }.getOrNull()
                 WindowLog.i(TAG, "launched ${w.component.flattenToShortString()} on display ${w.displayId} (root am start): code ${r?.code} ${r?.output?.take(200)}")
             }
         }
