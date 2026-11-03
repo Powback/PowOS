@@ -41,6 +41,11 @@
 struct audio_bridge {
     volatile bool running;
     volatile bool mic_enabled;
+    /* A Linux app is reading the virtual mic right now (AUDIO_MSG_MIC_WANTED from the producer). The Android mic opens
+     * only while this AND mic_enabled hold: 2026-11-03 the bridge held VOICE_RECOGNITION open (recording light on) with
+     * anland-mic SUSPENDED and no Linux source-output - "always on while the socket is up" recorded for nobody.
+     * False on every (re)connect: an older producer that never sends it gets no mic (privacy over a silent mic). */
+    volatile bool linux_wants_mic;
 
     /* The live connection. Set by audio_set_ctx() from the render thread, read by
      * the audio threads -- same lightweight convention as the event thread's
@@ -531,6 +536,7 @@ static void *play_thread_func(void *arg)
 
         int fd = current_fd(b);
         if (fd != last_fd) {
+            b->linux_wants_mic = false;   /* the new producer says when it wants the mic */
             pthread_mutex_lock(&b->play_lock);
             play_ring_reset_locked(b);
             pthread_mutex_unlock(&b->play_lock);
@@ -563,6 +569,7 @@ static void *play_thread_func(void *arg)
         if (poll_result < 0)
             continue;
         if (pfd.revents & (POLLHUP | POLLERR)) {
+            b->linux_wants_mic = false;
             pthread_mutex_lock(&b->play_lock);
             play_ring_reset_locked(b);
             pthread_mutex_unlock(&b->play_lock);
@@ -578,8 +585,17 @@ static void *play_thread_func(void *arg)
 
         struct audio_msg h;
         memcpy(&h, b->rx, sizeof(h));
+        if (h.type == AUDIO_MSG_MIC_WANTED) {
+            uint32_t want = 0;
+            if ((size_t)n >= sizeof(struct audio_msg) + sizeof(want))
+                memcpy(&want, b->rx + sizeof(struct audio_msg), sizeof(want));
+            if (b->linux_wants_mic != (want != 0))
+                LOGI("linux mic %s", want ? "wanted" : "idle");
+            b->linux_wants_mic = want != 0;
+            continue;
+        }
         if (h.type != AUDIO_MSG_PCM)
-            continue;   /* the producer only sends PCM back; formats flow upstream */
+            continue;   /* the producer sends PCM + mic demand back; formats flow upstream */
 
         size_t avail = (size_t)n - sizeof(struct audio_msg);
         size_t bytes = h.size < avail ? h.size : avail;
@@ -599,6 +615,12 @@ static void *play_thread_func(void *arg)
 }
 
 /* ---- capture: mic -> socket ---- */
+
+/* The one rule for the Android mic: open only while permitted, connected AND a Linux app reads the virtual mic. */
+static bool mic_should_record(bool enabled, bool linux_wants, int fd)
+{
+    return enabled && linux_wants && fd >= 0;
+}
 
 static void *cap_thread_func(void *arg)
 {
@@ -621,7 +643,7 @@ static void *cap_thread_func(void *arg)
 
     while (b->running) {
         int fd = current_fd(b);
-        if (!b->mic_enabled || fd < 0) {
+        if (!mic_should_record(b->mic_enabled, b->linux_wants_mic, fd)) {
             if (started && b->rec) {
                 AAudioStream_requestStop(b->rec);
                 started = false;

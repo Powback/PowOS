@@ -31,7 +31,7 @@ diff -ruN s0/src/backends/anland/CMakeLists.txt s1/src/backends/anland/CMakeList
 diff -ruN s0/src/backends/anland/anland_audio.c s1/src/backends/anland/anland_audio.c
 --- a/src/backends/anland/anland_audio.c	1970-01-01 01:00:00
 +++ b/src/backends/anland/anland_audio.c	2026-10-13 00:52:59
-@@ -0,0 +1,541 @@
+@@ -0,0 +1,576 @@
 +#define _GNU_SOURCE
 +#include "anland_audio.h"
 +#include "protocol.h"
@@ -85,6 +85,7 @@ diff -ruN s0/src/backends/anland/anland_audio.c s1/src/backends/anland/anland_au
 +    uint32_t               play_quantum, cap_quantum;
 +
 +    int                    audio_fd;  /* borrowed; -1 when detached */
++    bool                   mic_wanted; /* the virtual mic source is streaming (a Linux app reads it) */
 +    struct spa_source     *io;        /* loop io source watching audio_fd for reads */
 +
 +    /* Mic ring buffer. Only ever touched from the loop thread (the io read callback
@@ -200,9 +201,42 @@ diff -ruN s0/src/backends/anland/anland_audio.c s1/src/backends/anland/anland_au
 +    .process = on_capture_process,
 +};
 +
++/* Tell the consumer whether a Linux app reads the virtual mic: it opens the Android mic only while one does
++ * (AUDIO_MSG_MIC_WANTED). The source streams only while linked to a reader; idle, it pauses/suspends. */
++#ifndef AUDIO_MSG_MIC_WANTED
++#define AUDIO_MSG_MIC_WANTED 3
++#endif
++static void send_mic_wanted(struct anland_audio *a)
++{
++    if (a->audio_fd < 0)
++        return;
++    uint32_t want = a->mic_wanted ? 1 : 0;
++    struct audio_msg h = { .type = AUDIO_MSG_MIC_WANTED, .size = sizeof(want) };
++    struct iovec iov[2] = {
++        { .iov_base = &h, .iov_len = sizeof(h) },
++        { .iov_base = &want, .iov_len = sizeof(want) },
++    };
++    struct msghdr m = { .msg_iov = iov, .msg_iovlen = 2 };
++    sendmsg(a->audio_fd, &m, MSG_DONTWAIT | MSG_NOSIGNAL);
++}
++
++static void on_source_state_changed(void *data, enum pw_stream_state old,
++                                    enum pw_stream_state state, const char *error)
++{
++    struct anland_audio *a = data;
++    (void)old;
++    (void)error;
++    bool want = state == PW_STREAM_STATE_STREAMING;
++    if (want == a->mic_wanted)
++        return;
++    a->mic_wanted = want;
++    send_mic_wanted(a);
++}
++
 +static const struct pw_stream_events source_events = {
 +    PW_VERSION_STREAM_EVENTS,
 +    .process = on_source_process,
++    .state_changed = on_source_state_changed,
 +};
 +
 +/* Apply a consumer-announced format. The virtual device stays continuously online
@@ -484,6 +518,7 @@ diff -ruN s0/src/backends/anland/anland_audio.c s1/src/backends/anland/anland_au
 +         * this socket comes up; on_audio_readable applies them and reconfigures the
 +         * PipeWire streams, so we don't dictate any format here. */
 +        a->io = pw_loop_add_io(loop, audio_fd, SPA_IO_IN, false, on_audio_readable, a);
++        send_mic_wanted(a);   /* the new consumer starts with the mic off: tell it if a reader is already there */
 +    }
 +
 +    pw_thread_loop_unlock(a->loop);
