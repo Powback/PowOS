@@ -1022,7 +1022,7 @@ function mock(): Bridge {
         },
       };
     })(),
-    screens: mockScreens(events),
+    screens: withTerminalText(mockScreens(events), events),
     agents: {
       default: async () => "Claude",
       newWidget: async () => (console.log("[mock] new widget with claude"), "started" as const),
@@ -1409,6 +1409,22 @@ function mockTranscript(kind: string) {
   return lines.join("\r\n");
 }
 
+/** The mock's terminal text size (sp at font scale 1: CSS px), the host's terminal.text setting. */
+let mockTerminalText = 12;
+
+/** The mock's Style screen sets the terminal text size (style.text: the chips, a pinch) and says so, as the host does. */
+function withTerminalText(screens: Bridge["screens"], events: Events): Bridge["screens"] {
+  return {
+    ...screens,
+    act: async (name, action, arg) => {
+      if (name !== "style" || action !== "text") return screens.act(name, action, arg);
+      mockTerminalText = arg as number;
+      events.emit("term.style", null);
+      return null;
+    },
+  };
+}
+
 function mockTerm(events: Events): Bridge["term"] {
   const utf8 = new TextEncoder();
   const b64 = (bytes: Uint8Array) => btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join(""));
@@ -1501,8 +1517,9 @@ function mockTerm(events: Events): Bridge["term"] {
       if (sh) Object.assign(sh, { cols, rows });
     },
     close: async (id) => void shells.delete(id),
+    // The terminal text size the Style screen's mock holds (sp at font scale 1: CSS px), as the host's style.text.
     style: async () => ({
-      size: 12,
+      size: mockTerminalText,
       pad: 6,
       fontScale: 1,
       family: "JetBrainsMono Nerd Font",
