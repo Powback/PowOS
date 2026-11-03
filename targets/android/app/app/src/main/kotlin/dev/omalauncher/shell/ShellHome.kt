@@ -96,7 +96,7 @@ class ShellHome(
         sizing = true
         Thread({
             runCatching {
-                val c = java.net.URL(andro.marchy.InstallActivity.ROOTFS_URL).openConnection() as java.net.HttpURLConnection
+                val c = java.net.URL(andro.marchy.InstallActivity.downloadUrl(runtime.appContext)).openConnection() as java.net.HttpURLConnection
                 c.requestMethod = "HEAD"
                 c.connectTimeout = 5000
                 c.readTimeout = 5000
