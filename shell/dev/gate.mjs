@@ -2015,7 +2015,8 @@ async function switcherBackgroundStop() {
   if (!stop) return ["Stop: Termux's row has no Stop button"];
   stop.click();
   await wait(50);
-  const fails = document.querySelector('.recents-bg-app[data-key="a:termux"]') ? ["Stop: Termux's row didn't go at once"] : [];
+  // It leaves at once: marked leaving (fading out on the spring, §6), then gone.
+  const fails = document.querySelector('.recents-bg-app[data-key="a:termux"]:not(.leaving)') ? ["Stop: Termux's row didn't go at once"] : [];
   await wait(400);
   if ((await powos.apps.background()).some((b) => b.key === "a:termux")) fails.push("Stop: the host's stopBackground wasn't called for a:termux");
   if (text(".recents-bg-toggle") !== "1 running in background") fails.push("after Stop: the count didn't drop to 1");
