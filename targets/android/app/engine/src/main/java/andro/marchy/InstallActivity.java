@@ -153,12 +153,22 @@ public class InstallActivity extends Activity {
 
     /** Whether this APK can install the base image: it pins the base and every pack (see [BASE_URL]). */
     private boolean useBase() {
-        if (pinnedSha256(BASE_PIN_ASSET) == null)
+        return useBase(this);
+    }
+
+    static boolean useBase(android.content.Context ctx) {
+        if (pinnedSha256(ctx, BASE_PIN_ASSET) == null)
             return false;
         for (String p : PACKS)
-            if (!Packs.available(this, p))
+            if (!Packs.available(ctx, p))
                 return false;
         return true;
+    }
+
+    /** What a first install downloads from this APK: the base image when it can ([useBase]), the full rootfs otherwise
+     *  (the home's install tile shows its size). */
+    public static String downloadUrl(android.content.Context ctx) {
+        return useBase(ctx) ? BASE_URL : ROOTFS_URL;
     }
 
     /** Installs the base image when this APK can ([useBase]), the full rootfs otherwise; true for the base. */
@@ -251,8 +261,12 @@ public class InstallActivity extends Activity {
 
     /** The sha256 pinned in an asset (64 lowercase hex), or null when the asset is missing or holds none. */
     private String pinnedSha256(String asset) {
+        return pinnedSha256(this, asset);
+    }
+
+    static String pinnedSha256(android.content.Context ctx, String asset) {
         String line = null;
-        try (BufferedReader r = new BufferedReader(new InputStreamReader(getAssets().open(asset),
+        try (BufferedReader r = new BufferedReader(new InputStreamReader(ctx.getAssets().open(asset),
                 StandardCharsets.US_ASCII))) {
             line = r.readLine();
         } catch (IOException e) {
