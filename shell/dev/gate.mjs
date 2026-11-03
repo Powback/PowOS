@@ -8937,17 +8937,52 @@ async function searchTapKeyboard(r, f, sp, why) {
     window.__kbShows = 0;
     window.__kbWas ??= powos.keyboard.show;
     powos.keyboard.show = (...a) => (window.__kbShows++, window.__kbWas(...a));
+    (await importShim("./dev/search-tap-check.js")).watchTap();
   });
   await f.tap(sp);
   const focused = await r.page.waitForFunction(() => document.activeElement?.matches(".bar textarea"), { timeout: READY_MS, polling: 50 }).then(() => true, () => false);
   const shows = await r.page.evaluate(async () => {
     const { powos } = await importShim("./bridge.ts");
     powos.keyboard.show = window.__kbWas;
-    return window.__kbShows;
+    return { n: window.__kbShows, log: (await importShim("./dev/search-tap-check.js")).tapLog() };
   });
   const fails = [];
-  if (!focused) fails.push(`E2E1: a tap on home's search${why} didn't focus its field`);
-  if (!shows) fails.push(`E2E1: a tap on home's search${why} never asked for the keyboard (keyboard.show)`);
+  // ST1: what the tap did (its events, their targets) - a full run's flake says where the tap went.
+  const at = `at ${sp} (${shows.log})`;
+  if (!focused) fails.push(`E2E1: a tap on home's search${why} didn't focus its field ${at}`);
+  if (!shows.n) fails.push(`E2E1: a tap on home's search${why} never asked for the keyboard (keyboard.show) ${at}`);
+  return fails;
+}
+
+/** ST1 (dev/search-tap-check.js): home's search at rest, hit-tested - {at, bar}, null or why it can't be tapped. */
+const searchAtRest = (r, where = "middle") => r.page.evaluate(async (m, w) => (await importShim(m)).searchAt(w), "./dev/search-tap-check.js", where);
+
+/** ST1: the bar tapped after its seat move onto PowOS AI's page, and on home again after its way back (the same bar). */
+async function searchAfterSeat(r, f, reset) {
+  const fails = [];
+  for (const [page, why] of [[-1, " seated on PowOS AI's page"], [0, " back on home after the seat"]]) {
+    await r.page.evaluate(async (m, p) => (await importShim(m)).toPage(p), "./dev/search-tap-check.js", page);
+    const sp = await searchAtRest(r);
+    if (typeof sp === "string" || !sp) fails.push(`E2E1: home's search${why} ${sp ?? "is gone"}`);
+    else fails.push(...(await searchTapKeyboard(r, f, sp.at, why)));
+    await reset(); await f.wait(500);
+  }
+  return fails;
+}
+
+/** E2E1's search taps (ST1): in its middle, at its pill's left end, seated on PowOS AI's page and back on home. [reset]: home at rest. */
+async function searchTaps(r, f, reset) {
+  const sp = await searchAtRest(r);
+  if (!sp) return ["E2E1: no search on home (neither the bar nor the dock's button)"];
+  if (typeof sp === "string") return [`E2E1: home's search ${sp}`];
+  const fails = await searchTapKeyboard(r, f, sp.at, "");
+  if (!sp.bar) return fails;
+  await reset(); await f.wait(500);
+  const edge = await searchAtRest(r, "edge");
+  if (typeof edge === "string") fails.push(`E2E1: home's search (its pill's left end) ${edge}`);
+  else if (edge) fails.push(...(await searchTapKeyboard(r, f, edge.at, " (its pill's left end)")));
+  await reset(); await f.wait(500);
+  fails.push(...(await searchAfterSeat(r, f, reset)));
   return fails;
 }
 
@@ -9010,15 +9045,7 @@ async function homeGesturesScene(r) {
   if (!st.open) fails.push(`E2E1: a plain swipe up from empty home space didn't open the drawer (${await swipeWhy(r, at)})`);
   if (st.focused) fails.push("E2E1: a plain swipe up focused the search");
   await reset(); await f.wait(500);
-  const sp = await r.page.evaluate(() => {
-    const bar = document.querySelector(".home > .bar textarea"), btn = document.querySelector(".home .dock .app.dock-search");
-    const e = bar && bar.getBoundingClientRect().height > 2 ? bar : btn;
-    if (!e) return null;
-    const b = e.getBoundingClientRect();
-    return [Math.round(b.x + b.width / 2), Math.round(b.y + b.height / 2)];
-  });
-  if (!sp) fails.push("E2E1: no search on home (neither the bar nor the dock's button)");
-  else fails.push(...(await searchTapKeyboard(r, f, sp, "")));
+  fails.push(...(await searchTaps(r, f, reset)));
   await reset(); await f.wait(500);
   fails.push(...(await searchAfterDockMinimise(r, f)));
   await reset(); await f.wait(500);

@@ -111,7 +111,7 @@ part1_search_kate() {
     return
   fi
   local f; f=$(searchpt)
-  case $f in none|off|"") fail "no search on home - neither a bar nor the dock's search button ($f)" ;; *)
+  case $f in none|off*|"") fail "no search on home - neither a bar nor the dock's search button ($f)" ;; *)
     set -- $f; tap "$1" "$2" "home's search (the bar, or the dock's search button)"; sleep 1.2; chk pill
     if [ "$(ev "$SEARCHED")" = yes ] &&
        homefocused; then

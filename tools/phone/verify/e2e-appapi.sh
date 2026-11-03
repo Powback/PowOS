@@ -53,7 +53,7 @@ reveal() {
 # Search: the pill focused (never typed into anything else), the text, the result for key tapped.
 search_open() { # <text> <result key> <name>
   local f; f=$(searchpt)
-  case $f in none|off|"") fail "no search on home - neither a bar nor the dock's search button ($f)"; return 1 ;; esac
+  case $f in none|off*|"") fail "no search on home - neither a bar nor the dock's search button ($f)"; return 1 ;; esac
   set -- "$@" $f; tap "$4" "$5" "home's search (the bar, or the dock's search button)" || return 1; sleep 1.2; chk pill
   [ "$(ev "$SEARCHED")" = yes ] &&
     homefocused || { fail "home's search didn't take the focus - nothing typed (field focused: $(ev "$SEARCHED"), $(ime))"; back; return 1; }
