@@ -10,6 +10,17 @@ package dev.omalauncher.system
  *   x 2136..3496 on a 2268-wide screen, its page shown but the window out of reach) is moved onto it.
  */
 object OffPage {
+    /**
+     * Whether a window away on another page is hidden in WM (WCT.setHidden). Never: that made the app invisible, its
+     * surfaces were destroyed and every page swipe's start (which shows it to slide it in) rebuilt them - Plasma's
+     * desktop reconnected per swipe, 450-560 ms main-thread freezes (11-03, perf-1793735444160). Its leash keeps it
+     * out of sight and touch instead ([AWAY_SCALE], TaskSurfaces.hide); its surfaces stay alive.
+     */
+    const val WM_HIDDEN_AWAY = false
+
+    /** An away window's leash scale: even a window 9999 px wide maps under one pixel - no touch lands on it. */
+    const val AWAY_SCALE = 1e-4f
+
     /** At a page slide's start: whether the window on page offset [rel] is reordered to the top in its transition. */
     fun raiseAtSlideStart(
         rel: Int,

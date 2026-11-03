@@ -33,4 +33,28 @@ class OffPageTest {
         assertTrue(OffPage.mostlyOff(-1300, 100, 0, 2268))
         assertFalse(OffPage.mostlyOff(0, 0, 0, 2268))
     }
+
+    @Test
+    fun aSlideOverAPageWithAnOffPageWindowDestroysNoSurface() {
+        // perf-1793735444160: each land WM-hid Plasma (left on the other page), each swipe start showed it in WM to
+        // slide it in - the app went invisible/visible, its SurfaceView surfaceDestroyed + surfaceChanged, and the
+        // desktop reconnected on the main thread (450-560 ms) once per swipe. A window's surfaces go only when WM
+        // makes it invisible: count those over 10 slides (land: it stays on the other page; start: it slides in).
+        var wmVisible = true
+        var surfaceDestroyed = 0
+        repeat(10) {
+            val atLand = !OffPage.WM_HIDDEN_AWAY // PageSlide.restore / FreeformTasks.away for a window left away
+            if (wmVisible && !atLand) surfaceDestroyed++
+            wmVisible = atLand
+            wmVisible = true // the next slide's start: TaskLeash.setHidden(false) so it slides in
+        }
+        assertEquals(0, surfaceDestroyed)
+    }
+
+    @Test
+    fun anAwayLeashIsTooSmallToTouchOrSee() {
+        // Its leash stays a live surface; shrunk, even the widest window is under a pixel (decor re-shows aside).
+        assertTrue(9999 * OffPage.AWAY_SCALE < 1f)
+        assertTrue(OffPage.AWAY_SCALE > 0f) // invertible: a valid scale, 1 again on show
+    }
 }

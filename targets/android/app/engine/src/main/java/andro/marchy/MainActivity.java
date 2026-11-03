@@ -398,49 +398,41 @@ public class MainActivity extends Activity
     private boolean inFront;
 
     /**
-     * Native.nativeStop joins the render and event threads and tears the connection down: 577 ms on the UI thread
-     * in a recorded surfaceDestroyed (perf-1793409569119). It runs on this one serial thread instead; the native
-     * window is held by its own reference (ANativeWindow_fromSurface), so the teardown finishing after
-     * surfaceDestroyed has returned only finds an abandoned buffer queue. A start waits for a pending stop first
-     * (awaitPendingStop), so a stop and the start after it never overlap in the native state.
+     * The connection's stop/start, off the main thread (NativeStarter): a start never waits there for the stop before
+     * it - that froze the main thread (home's too: same process) 450-560 ms on every page swipe (perf-1793735444160).
+     * The native window is held by its own reference (ANativeWindow_fromSurface), so a teardown finishing after
+     * surfaceDestroyed has returned only finds an abandoned buffer queue; stop and start never overlap in the native
+     * state (one serial thread, the start after its stop).
      */
     private static final java.util.concurrent.ExecutorService NATIVE_STOP =
         java.util.concurrent.Executors.newSingleThreadExecutor(r -> new Thread(r, "native-stop"));
-    private static java.util.concurrent.Future<?> pendingStop;
+    private static final android.os.Handler MAIN = new android.os.Handler(android.os.Looper.getMainLooper());
+    private static final NativeStarter NATIVE = new NativeStarter(NATIVE_STOP, MAIN::post, Native::nativeStop);
 
     private static void awaitPendingStop() {
-        java.util.concurrent.Future<?> f = pendingStop;
-        if (f == null)
-            return;
-        try {
-            f.get();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        } catch (java.util.concurrent.ExecutionException e) {
-            Log.w(TAG, "async nativeStop failed", e.getCause());
-        }
-        if (pendingStop == f)
-            pendingStop = null;
+        NATIVE.await();
     }
 
-    private void startNative(Surface surface) {
-        awaitPendingStop(); // normally long done: a start follows a stop by a surface round trip
-        Native.nativeStop();
-        nativeOwner = null;
+    /** Connects to [surface] (replacing any connection); returns at once, the start runs once the stop is done. */
+    private void startNative(Surface surface, Object key) {
+        nativeOwner = this; // starting: onResume doesn't start it twice, surfaceDestroyed stops (and drops) it
         compatibleFdReady = false;
-        applyConnectionConfig();
-        Native.nativeStart(surface, clipboard);
-        nativeOwner = this;
-        pushRefreshRate();
-        applyMicState();
-        applyAudioLatency();
-        applyAudioKeepalive();
+        NATIVE.start(key, () -> {
+            if (nativeOwner != this || !surface.isValid())
+                return;
+            applyConnectionConfig();
+            Native.nativeStart(surface, clipboard);
+            pushRefreshRate();
+            applyMicState();
+            applyAudioLatency();
+            applyAudioKeepalive();
+        });
     }
 
     private void stopNative() {
         nativeOwner = null;
         compatibleFdReady = false;
-        pendingStop = NATIVE_STOP.submit(Native::nativeStop);
+        NATIVE.stop();
     }
 
     /** Disconnects only if this instance holds the connection (see nativeOwner). */
@@ -1037,7 +1029,7 @@ public class MainActivity extends Activity
         // later reconnect. Idempotent, so safe to call on every resume.
         applyCameraState();
         if (surfaceReady && !nativeRunning()) {
-            startNative(surfaceView.getHolder().getSurface());
+            startNative(surfaceView.getHolder().getSurface(), null);
         }
 
         // ===== 重新读取触摸板设置 =====
@@ -1366,9 +1358,15 @@ public class MainActivity extends Activity
             Log.i(TAG, "surfaceChanged in the background: the connection stays with the instance in front");
             return;
         }
+        Object key = NativeStarter.key(holder.getSurface(), width, height, format);
+        if (nativeOwner == this && NATIVE.unchanged(key)) {
+            // The very surface already connected, same size and format: nothing to reconnect.
+            Log.i(TAG, "surfaceChanged: unchanged, the connection stays");
+            return;
+        }
         // Same ordering guarantee as onResume: camera service settled before connect.
         applyCameraState();
-        startNative(holder.getSurface());
+        startNative(holder.getSurface(), key);
 
         // ===== 更新屏幕尺寸并重置平滑状态 =====
         virtualTouchpad.onSurfaceChanged();
