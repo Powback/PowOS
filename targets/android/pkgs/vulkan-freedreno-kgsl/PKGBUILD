@@ -1,0 +1,57 @@
+# PowOS Android: Turnip (Mesa's Vulkan driver for Adreno) on KGSL - /usr/lib/libvulkan_freedreno.so and its ICD, the
+# library every Vulkan program on the phone runs (DXVK games through FEX's thunk, Zink).
+#
+# The same Mesa Andromarchy's build-inside.sh builds into the rootfs (lfdevs/mesa-for-android-container @ ef25369b,
+# rootfs-in-container.sh's MESA_SRC_URL) with its options, only the Vulkan driver, plus ours:
+#   0001  A7XX: RB_CCU_CNTL and the RB_* magic regs are written on the BR pipe only. tu_init_hw emits the static
+#         regs under CP_SET_THREAD_BOTH, so BV executed the RB non-context write too and the Adreno 740's CP faulted
+#         on every command buffer start: dmesg "kgsl kgsl-3d0: CP: AHB bus error, CP_RL_ERROR_DETAILS_0:0x10008e07"
+#         (0x8e07 = RB_CCU_CNTL), ~300/s while Broforce ran (= its KGSL submit rate; 11-03 22:4x).
+# A package so a Turnip fix reaches phones without a new rootfs: rooted.sh deploy installs it (powos-deploy.sh),
+# replacing Arch's vulkan-freedreno (whose files the rootfs build had already overwritten with this same source).
+# Gallium freedreno (KWin, Xwayland's glamor) stays the rootfs's build: it writes RB_CCU_CNTL on BR only already
+# (fd6_emit_restore sets CP_SET_THREAD_BR first).
+
+pkgname=vulkan-freedreno-kgsl
+pkgver=26.3.0
+pkgrel=1
+pkgdesc='Turnip Vulkan driver on KGSL (lfdevs Mesa) with PowOS fixes (PowOS Android)'
+arch=(aarch64)
+url='https://github.com/lfdevs/mesa-for-android-container'
+license=(MIT)
+depends=(libdrm libx11 libxcb libxshmfence wayland zstd expat libelf vulkan-icd-loader)
+makedepends=(meson ninja python-mako python-yaml python-packaging python-ply glslang byacc bison flex
+             wayland-protocols libxrandr)
+provides=(vulkan-freedreno vulkan-driver)
+conflicts=(vulkan-freedreno)
+replaces=(vulkan-freedreno)
+_commit=ef25369b9cef72589e164010bea7af3745e92c7b
+_patches=(0001-turnip-a7xx-rb-ccu-cntl-br-only.patch)
+source=("mesa-$_commit.tar.gz::https://github.com/lfdevs/mesa-for-android-container/archive/$_commit.tar.gz"
+        "${_patches[@]}")
+sha256sums=(825f6126e54ec5e14f3ad1b4cf62b51d43b065c7cf4bc2841ec23a4bcfb831d1
+            SKIP)
+
+prepare() {
+  cd mesa-for-android-container-$_commit
+  for p in "${_patches[@]}"; do
+    echo "Applying $p"
+    patch -Np1 -i "$srcdir/$p"
+  done
+}
+
+build() {
+  # build-inside.sh's options that apply to the Vulkan driver (no Gallium drivers: they stay the rootfs's).
+  meson setup build mesa-for-android-container-$_commit --prefix=/usr --buildtype=release -Dplatforms=x11,wayland \
+    -Dgallium-drivers= -Dvulkan-drivers=freedreno -Dfreedreno-kmds=kgsl -Dvideo-codecs=all \
+    -Degl=disabled -Dglx=disabled -Dgbm=disabled -Dopengl=false -Dgles1=disabled -Dgles2=disabled \
+    -Dllvm=disabled -Dintel-rt=disabled -Dmicrosoft-clc=disabled -Dvalgrind=disabled -Dlibunwind=disabled
+  ninja -C build src/freedreno/vulkan/libvulkan_freedreno.so src/freedreno/vulkan/freedreno_icd.aarch64.json
+}
+
+package() {
+  install -Dm755 build/src/freedreno/vulkan/libvulkan_freedreno.so "$pkgdir"/usr/lib/libvulkan_freedreno.so
+  install -Dm644 build/src/freedreno/vulkan/freedreno_icd.aarch64.json \
+    "$pkgdir"/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json
+  install -Dm644 mesa-for-android-container-$_commit/docs/license.rst "$pkgdir"/usr/share/licenses/$pkgname/license.rst
+}

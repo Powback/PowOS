@@ -23,7 +23,8 @@ pacman -S --noconfirm --needed plasma-workspace xdg-desktop-portal-kde kscreen p
 
 # ── Our packages (build-pkgs.sh): KWin with the Anland backend, FEX, and PowOS packages Arch Linux ARM doesn't
 # build (recipes.list: upstream recipes built for aarch64). First, so the mapping below finds them.
-pacman -U --noconfirm "$P"/pkgs/*.pkg.tar.*
+# --ask 4: a package of ours that replaces an Arch one (vulkan-freedreno-kgsl -> vulkan-freedreno) removes it.
+pacman -U --noconfirm --ask 4 "$P"/pkgs/*.pkg.tar.*
 
 # ── PowOS's packages: EVERY RPM in the image, mapped to Arch by phone-rules.conf ───────────────────────
 # Not only the top-level ones: Fedora and Arch split dependencies differently, so Arch's dependency closure of

@@ -1,0 +1,43 @@
+--- a/src/freedreno/vulkan/tu_cmd_buffer.cc
++++ b/src/freedreno/vulkan/tu_cmd_buffer.cc
+@@ -2141,12 +2141,24 @@
+       if (TU_DEBUG(NO_CONCURRENT_UNRESOLVES))
+          unresolve_mode = CONCURRENT_UNRESOLVE_MODE_DISABLED;
+ 
++      /* PowOS: RB_CCU_CNTL is an RB (render backend) non-context register that
++       * only the BR pipe reaches. tu_init_hw emits the static regs under
++       * CP_SET_THREAD_BOTH, so BV executed this write too and the CP faulted on
++       * every command buffer start ("CP: AHB bus error,
++       * CP_RL_ERROR_DETAILS_0:0x10008e07" from KGSL, ~300/s under DXVK on
++       * Adreno 740). The bin restore preamble already keeps the other CCU
++       * state off BV (emit_rb_ccu_cntl is !bv only); this does the same for
++       * the static half. Same for the RB_* magic regs below.
++       */
++      tu_cond_exec_start(cs, CP_COND_REG_EXEC_0_MODE(THREAD_MODE) |
++                             CP_COND_REG_EXEC_0_BR);
+       tu_cs_emit_regs(cs, RB_CCU_CNTL(A7XX,
+          .gmem_fast_clear_disable =
+            !dev->physical_device->info->props.has_gmem_fast_clear,
+          .concurrent_resolve_mode = resolve_mode,
+          .concurrent_unresolve_mode = unresolve_mode,
+       ));
++      tu_cond_exec_end(cs);
+    }
+ 
+    for (size_t i = 0; i < ARRAY_SIZE(phys_dev->info->magic_raw); i++) {
+@@ -2176,7 +2188,15 @@
+             break;
+       }
+ 
++      /* PowOS: an RB non-context magic reg (0x8e00-0x8fff, e.g.
++       * RB_CCU_DBG_ECO_CNTL) is BR-only on A7XX, see RB_CCU_CNTL above. */
++      bool br_only = CHIP >= A7XX && magic_reg.reg >= 0x8e00 && magic_reg.reg < 0x9000;
++      if (br_only)
++         tu_cond_exec_start(cs, CP_COND_REG_EXEC_0_MODE(THREAD_MODE) |
++                                CP_COND_REG_EXEC_0_BR);
+       tu_cs_emit_write_reg(cs, magic_reg.reg, value);
++      if (br_only)
++         tu_cond_exec_end(cs);
+    }
+ 
+    if (dev->physical_device->info->props.has_attachment_shading_rate) {
