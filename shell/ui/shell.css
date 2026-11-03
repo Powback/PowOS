@@ -4278,7 +4278,11 @@ html:has(.home > .bar[data-role="ai"] textarea:focus) .ai-screen.stacked > .ai-s
  * bar is held where it ends meanwhile - the launcher's foot (the dock gave way) or the page's seat, no slide of its own -
  * and only its glass moves.
  */
-.home.button-morph > .bar, .home.button-morph > .bar.seated { transition: none; }
+.home.button-morph > .bar { transition: none; }
+/* OE1: on the way to PowOS AI's page the seated bar's translate still counters home's slide as it goes (the bar stays on
+   screen where it is, the glass growing there from the button's place); the way back holds its translate (bar.tsx
+   heldSeated), so this changes nothing there. */
+.home.button-morph > .bar.seated:not(.sliding) { transition: translate var(--spring-ms) var(--spring); }
 .home.button-morph:not(.pill-below, .dock-left, .dock-right) > .bar:not(.seated) { transform: translateY(calc(var(--strip-height) + var(--bar-drop))); }
 
 /*

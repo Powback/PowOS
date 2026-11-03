@@ -403,14 +403,12 @@ function seatOnAi(bar: HTMLElement) {
   if (heldSeated(bar, home)) return;
   if (page.peek() !== -1 || !home || !ai) return unseat(bar);
   bar.style.removeProperty("width");
-  // Measured at home's place (no translate, no transition: a running one would keep its old translate in the rect).
-  const was = bar.style.translate;
-  bar.style.transition = "none";
-  bar.style.translate = "none";
-  const pill = (bar.querySelector(".bar-pill") ?? bar).getBoundingClientRect();
-  bar.style.translate = was;
-  void bar.offsetWidth;
-  bar.style.removeProperty("transition");
+  // Home's place: the pill's rect less the translate's vertical part as it is now (mid-transition too). Never reset to
+  // measure: dropping the translate cut a running slide short (the bar jumped to its end with the page, BM1's morph
+  // starting off the button: one-bar-folded, 11-03).
+  const at = (bar.querySelector(".bar-pill") ?? bar).getBoundingClientRect();
+  const dy = parseFloat(getComputedStyle(bar).translate.split(" ")[1] ?? "0") || 0;
+  const pill = { top: at.top - dy, bottom: at.bottom - dy };
   const y = keyboardY(home, pill);
   bar.classList.add("seated");
   bar.style.translate = `${-home.offsetWidth}px ${Math.round(y)}px`;
@@ -426,7 +424,7 @@ const keyboardPx = () => parseFloat(document.documentElement.style.getPropertyVa
  * The keyboard up, the field sits on it (--pill-foot over its top: P1 11-01, never behind it, never 88 px over it -
  * folded home's own bar is the dock's button then, parked off its foot); down, 0: home's own place, never moved.
  */
-function keyboardY(home: HTMLElement, pill: DOMRect) {
+function keyboardY(home: HTMLElement, pill: { bottom: number }) {
   const kb = keyboardPx();
   if (kb <= 0) return 0;
   const foot = parseFloat(getComputedStyle(home).getPropertyValue("--pill-foot")) || 0;
