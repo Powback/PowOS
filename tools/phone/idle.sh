@@ -35,7 +35,6 @@ if [ "${1:-}" != "--wait" ] && ! "$here/adb.sh" --vpn-state >/dev/null; then ech
 if [ "${1:-}" = "--wait" ]; then
   need=${2:-60}; max=${3:-600}; awake=${AWAKE_ONLY:-0}; go=${VERIFY_GO:-0}; only=${GO_ONLY:-0}
   st=$(printf %s "${VERIFY_STATE:-}" | tr -cd 'a-z'); hb=/data/local/tmp/powos-verify-runner
-  "$0" >/dev/null   # starts the touch watcher if it isn't running
   # Awake counts only once the screen has been ON for IDLE_S too: after a long sleep the last touch is hours old, so
   # "no touch for IDLE_S" alone said free the moment the user woke the phone to use it.
   # The held connection can drop (the VPN's adb, ~8 min in): it's held again for what's left, not given up on - an
@@ -46,11 +45,20 @@ if [ "${1:-}" = "--wait" ]; then
   [ $left -gt 0 ] || { out=${off:-timeout}; break; }
   "$here/adb.sh" --transport-state >/dev/null || { echo transport-error; exit 70; }
   if ! "$here/adb.sh" --vpn-state >/dev/null; then off=offline; sleep $(( left < 30 ? left : 30 )); continue; fi; off=
+  # (Re)starts the touch watcher before every held connection, not once: a connection dropped by a phone reboot comes
+  # back to a phone whose watcher is gone (11-02 21:57 reboot: nothing restarted it and idle read 0 until 00:46).
+  "$0" >/dev/null
   out=$("$here/adb.sh" shell "end=\$(( \$(date +%s) + $left )); on=0; [ -n '$st' ] && printf %s '$st' > $hb
     while [ \$(date +%s) -lt \$end ]; do
       touch /data/local/tmp/powos-touchmon.ask; [ -n '$st' ] && touch $hb
       w=\$(dumpsys power | grep -m1 mWakefulness= | cut -d= -f2)
-      t=\$(( \$(date +%s) - \$(cat /data/local/tmp/powos-lasttouch 2>/dev/null || date +%s) ))
+      # An empty/missing/garbled lasttouch is NOT \"touched now\" (an empty file read as 0 s idle forever, 11-02): this
+      # sample falls back to lastUserActivityTime (never longer than the real touch idle); the next connection restarts
+      # the watcher (powos-touchmon.sh --ensure).
+      l=\$(cat /data/local/tmp/powos-lasttouch 2>/dev/null)
+      case x\$l in x|x*[!0-9]*) ms=\$(dumpsys power | sed -n 's/.*lastUserActivityTime=[^(]*(\\([0-9]*\\) ms ago).*/\\1/p' | head -1)
+        l=\$(( \$(date +%s) - \${ms:-0} / 1000 )) ;; esac
+      t=\$(( \$(date +%s) - l ))
       [ \$w = Awake ] && { [ \$on = 0 ] && on=\$(date +%s); } || on=0
       a=\$(( \$(date +%s) - on ))
       [ "$go" = 1 ] && { [ "$awake" != 1 ] || [ \$w = Awake ]; } && [ -s /data/powos/root/tmp/powos-verify-go ] && { echo go=\$(head -c 64 /data/powos/root/tmp/powos-verify-go | tr -cd 'A-Za-z0-9_.:-') screen=\$w; exit 0; }
@@ -73,18 +81,41 @@ fi
 "$here/adb.sh" shell 'cat > /data/local/tmp/powos-touchmon.sh' <<'EOF'
 # powos-touchmon.sh: every 2 s, the epoch of the last touch-panel IRQ count change -> /data/local/tmp/powos-lasttouch
 # (started by tools/phone/idle.sh on the Mac; stop: pkill -f powos-touchmon.sh)
-echo $$ > /data/local/tmp/powos-touchmon.pid
+# sh powos-touchmon.sh --ensure (as root): restart the watcher unless it is really running, then print touch=<s>, or
+# touch=unknown when the last-touch file can't be trusted (the caller then uses lastUserActivityTime for that sample).
+# "Running" = the pid file is from this boot AND /proc/<pid>/cmdline is this script: `kill -0` alone passed for a
+# reused pid after a reboot (11-02 21:57: the 21:27 pid file named com.google.android.youtube), so the watcher never
+# restarted, powos-lasttouch stayed empty and idle read 0 s forever - the verify queue ran nothing for 4 h.
+d=/data/local/tmp
+if [ "${1:-}" = --ensure ]; then
+  now=$(date +%s); boot=$(( now - $(cut -d. -f1 /proc/uptime) ))
+  p=$(cat $d/powos-touchmon.pid 2>/dev/null)
+  [ -e $d/powos-touchmon.pid ] && [ "$(stat -c %Y $d/powos-touchmon.pid)" -lt $boot ] && { rm -f $d/powos-touchmon.pid; p=; }
+  live=0
+  case x$p in x|x*[!0-9]*) ;; *) tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null | grep -v -e --ensure | grep -q powos-touchmon.sh && live=1 ;; esac
+  l=$(cat $d/powos-lasttouch 2>/dev/null); case x$l in x|x*[!0-9]*) l= ;; esac
+  if [ $live = 0 ] || [ -z "$l" ]; then
+    # A watcher that wasn't running didn't see the touches since: its old lasttouch is untrusted as well.
+    [ $live = 1 ] && kill $p 2>/dev/null
+    rm -f $d/powos-touchmon.pid $d/powos-lasttouch; l=
+    nohup sh $d/powos-touchmon.sh >/dev/null 2>&1 &
+    echo touchmon=restarted
+  fi
+  [ -n "$l" ] && echo touch=$(( now - l )) || echo touch=unknown
+  exit 0
+fi
+echo $$ > $d/powos-touchmon.pid
 prev=""
-while [ $(( $(date +%s) - $(stat -c %Y /data/local/tmp/powos-touchmon.ask 2>/dev/null || echo 0) )) -lt 1800 ]; do
+while [ $(( $(date +%s) - $(stat -c %Y $d/powos-touchmon.ask 2>/dev/null || echo 0) )) -lt 1800 ]; do
   c=$(awk '/touch-0/{for(i=2;i<=NF;i++) if($i ~ /^[0-9]+$/) s+=$i; else break} END{print s}' /proc/interrupts)
-  [ "$c" != "$prev" ] && { date +%s > /data/local/tmp/powos-lasttouch; prev=$c; }
+  [ "$c" != "$prev" ] && { date +%s > $d/powos-lasttouch; prev=$c; }
   sleep 2
 done
-rm -f /data/local/tmp/powos-touchmon.pid
+rm -f $d/powos-touchmon.pid
 EOF
-"$here/adb.sh" shell 'touch /data/local/tmp/powos-touchmon.ask; su -c "kill -0 \$(cat /data/local/tmp/powos-touchmon.pid 2>/dev/null) 2>/dev/null || { nohup sh /data/local/tmp/powos-touchmon.sh >/dev/null 2>&1 & sleep 1; }";
-  echo touch=$(( $(date +%s) - $(cat /data/local/tmp/powos-lasttouch 2>/dev/null || date +%s) ));
+"$here/adb.sh" shell 'touch /data/local/tmp/powos-touchmon.ask; su -c "sh /data/local/tmp/powos-touchmon.sh --ensure";
   dumpsys power | grep -m1 -E "^ *lastUserActivityTime="; dumpsys power | grep -m1 mWakefulness=' 2>/dev/null | tr -d '\r' |
   awk '/^touch=/{split($0,t,"="); idle=t[2]}
        /lastUserActivityTime=/{ if (match($0, /\(([0-9]+) ms ago\)/)) { s=substr($0, RSTART+1, RLENGTH-9); act=int(s/1000) } }
-       /mWakefulness=/{split($0,b,"="); w=b[2]} END{ printf "idle=%d screen=%s act=%d\n", idle, w, act }'
+       /mWakefulness=/{split($0,b,"="); w=b[2]}
+       END{ if (idle == "" || idle == "unknown") idle = act; printf "idle=%d screen=%s act=%d\n", idle, w, act }'
