@@ -12,6 +12,12 @@
 # PASS: a holder boosts a game, every boosted policy's max == its hw max (under a userspace thermal controller -
 # OxygenOS' horae - its cap kept: min == max, no "set back by someone else" fights), the main thread is pinned to one cpu and ran
 # there in >= 90 % of the samples. The fps lines are the evidence (>= 45 fps = docs/research/broforce-fps.md's goal).
+# The vendor's game class (under a thermal controller; needs the oplus-hook module with scope com.oplus.battery):
+# "boost vendor_game <app id> since <epoch>" set, and the vendor's last ThermalControllHandler evaluation after that
+# epoch ("vendor_thermal ... appType=4 ... configItemName=category_4", measured 11-03 without: appType=-1
+# ... configItemName=common_config) classes com.powos.app as a game - FAIL if it
+# still says appType=-1 / common_config; none since (no temperature gear change yet) is only a note. With appType 4
+# the cap lifts: at gear <= 4 the boosted policies' max is the hw max again (category_4: no cpu level until gear 5).
 # Exit 3: no game boosted now (nothing to check - the user isn't playing, or the app isn't the new one); 1 FAIL.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); A=$here/../adb.sh
@@ -36,7 +42,8 @@ while [ \$(date +%s) -lt \$end ]; do
 done
 r=\$(cat /proc/\$m/stat 2>/dev/null); r=\${r##*) }; set -- \$r; echo "main_busy \$(( (\${12} + \${13} - t0) / $SECS ))"
 tail -n +\$((n0 + 1)) \$LOGF 2>/dev/null | grep 'window task .* frames:' | sed 's/^/fps /'
-logcat -d -b all 2>/dev/null | grep 'ThermalControllHandler: tempLevel' | tail -n 1 | sed 's/.*tempLevel=/vendor_thermal tempLevel=/; s/, *envTempType.*full=/ full=/'
+logcat -d -b all -v epoch 2>/dev/null | grep 'Battery *: ThermalControllHandler: tempLevel' | tail -n 1 |
+  sed 's/^ *\([0-9]*\)[.0-9]* .*tempLevel=/vendor_thermal at \1 tempLevel=/; s/, *envTempType.*full=/ full=/'
 EOF
 "$A" push "$OUT/probe.sh" /data/local/tmp/powos-game-boost-probe.sh > /dev/null || { echo "ENV: can't push the probe"; exit 5; }
 perl -e "alarm $((SECS + 60)); exec @ARGV" "$A" shell "su -c 'sh /data/local/tmp/powos-game-boost-probe.sh; rm -f /data/local/tmp/powos-game-boost-probe.sh'" |
@@ -65,6 +72,19 @@ for p in $(grep -o 'policy[0-9]* [0-9]* [0-9]*;' <<< "$(grep '^boost saved' "$R"
   fi
 done
 awk '/^boost .*: boost \(policies/ { f = 0 } /^boost .*set back to .* by someone else/ { f = 1 } END { exit !f }' "$R" && [ -n "$thermal" ] && { echo "FAIL: the boost still fights $thermal's cap"; fail=1; }
+# The vendor's game class: an evaluation since it went on must class com.powos.app as a game (appType 4).
+vg=$(awk '$1 == "boost" && $2 == "vendor_game" && $3 != "null" && $3 != "" { print $5 }' "$R")
+if [ -n "$thermal" ] && [ -n "$vg" ] && [ "$vg" != - ]; then
+  at=$(awk '$1 == "vendor_thermal" { print $3 }' "$R")
+  if [ -n "$at" ] && [ "$at" -ge "$vg" ]; then
+    grep -q '^vendor_thermal .*appType=4 ' "$R" ||
+      { echo "FAIL: the vendor still classes com.powos.app as $(grep -o 'configItemName=[a-z_0-9]*' "$R" | tail -n 1) (oplus-hook scope com.oplus.battery?)"; fail=1; }
+  else
+    echo "note: no vendor thermal evaluation since the game class went on (next temperature gear change)" | tee -a "$OUT/report.txt"
+  fi
+elif [ -n "$thermal" ]; then
+  echo "FAIL: boosted under $thermal but no vendor game class set"; fail=1
+fi
 mask=$(awk '/^main tid/ { for (i = 1; i <= NF; i++) if ($i == "mask") print $(i + 1) }' "$R")
 case "$mask" in 1|2|4|8|10|20|40|80|100|200|400|800) ;; *) echo "FAIL: main thread mask $mask is not one cpu"; fail=1 ;; esac
 top=$(awk '/^main ran on/ { print $5 + 0; exit }' "$OUT/report.txt"); top=${top:-0}
