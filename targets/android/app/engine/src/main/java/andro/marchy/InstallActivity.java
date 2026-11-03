@@ -40,7 +40,7 @@ import java.util.Locale;
 public class InstallActivity extends Activity {
     /** PowOS: the PowOS rootfs (targets/android/build-rootfs.sh), served by android-app-dev's web server on the LAN/VPN
      *  (android.pow/apk = ~/Projects/android-app-dev/output). Was Andromarchy's Omarchy rootfs on GitHub. */
-    static final String ROOTFS_URL = "http://android.pow/apk/powos-rootfs.tar.gz";
+    public static final String ROOTFS_URL = "http://android.pow/apk/powos-rootfs.tar.gz";
     /** A local copy in the app's external files dir (Android/data/andro.marchy/files/, no permission needed) is used
      *  instead when present: offline installs and tests. */
     static final String LOCAL_NAME = "powos-rootfs.tar.gz";

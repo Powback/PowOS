@@ -52,7 +52,14 @@ class ShellWidgets(
 
     /** A tap on the tile itself, not on an element with its own onTap: the widget's onTap (screen(), say). */
     fun tap(key: String) {
-        engine.specs.firstOrNull { it.file.name == key }?.let(engine::tap)
+        val spec = engine.specs.firstOrNull { it.file.name == key } ?: return
+        // A widget waiting for the PowOS Linux image that isn't on the phone: its tile says so, a tap downloads it (the
+        // engine's install screen), as the Compose home's placeholder did.
+        if (ShellHome.linuxNeed(engine.waitsForLinux(spec), runtime.bootstrap.state.value) == ShellHome.IMAGE) {
+            runtime.installLinux(emptyList())
+            return
+        }
+        engine.tap(spec)
     }
 
     fun closeScreen() {

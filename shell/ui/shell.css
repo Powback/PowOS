@@ -1001,6 +1001,18 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 }
 .widget-name { color: var(--accent-text); }
 .widget-error { color: var(--color-red); font-size: var(--text-small); }
+/* A widget waiting for Linux (grid.tsx LinuxWait): its name, what it needs, the download as a chip. */
+.widget-linux { height: 100%; display: flex; flex-direction: column; gap: 4px; padding: 12px; font-family: var(--font-body); }
+.widget-linux .muted { font-size: var(--text-small); }
+.widget-linux-get {
+  margin-top: auto;
+  align-self: flex-start;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--status-working);
+  color: var(--color-background);
+  font-size: var(--text-small);
+}
 .tile-app {
   height: 100%;
   display: flex;

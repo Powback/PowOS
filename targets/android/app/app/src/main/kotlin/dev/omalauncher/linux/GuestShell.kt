@@ -95,9 +95,10 @@ class GuestShell(
         if (RootedGuest.enabled && process != null && session != RootedGuest.session()) stop()
         if (process?.isAlive == true) return
         if (RootedGuest.enabled) session = RootedGuest.session()
-        // PowOS rooted mode: the shell runs in the PowOS session (as its terminals do), there is no proot system.
+        // PowOS: the shell runs in the PowOS session (rooted, as its terminals do) or the PowOS image (no root,
+        // EngineGuest); there is no proot system.
         val shell = "exec bash --noprofile --norc"
-        val p = (if (RootedGuest.enabled) RootedGuest.process(shell, mergeErrors = false) else proot.process(shell)).start()
+        val p = guestProcess(proot, shell, mergeErrors = false).start()
         process = p
         stdin = p.outputStream.bufferedWriter()
         stdout = p.inputStream.bufferedReader()
