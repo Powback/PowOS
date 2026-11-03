@@ -81,17 +81,25 @@ class LoopbackGateTest {
             val r = BufferedReader(InputStreamReader(s.getInputStream()))
             requests.map { path ->
                 s.getOutputStream().write("GET $path HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".toByteArray())
-                val status = r.readLine() ?: return@map "closed"
-                var length = 0
-                while (true) {
-                    val h = r.readLine() ?: break
-                    if (h.isEmpty()) break
-                    if (h.lowercase().startsWith("content-length:")) length = h.substringAfter(':').trim().toInt()
-                }
-                val body = CharArray(length).also { var n = 0; while (n < length) n += r.read(it, n, length - n) }
-                "$status|${String(body)}"
+                response(r)
             }
         }
+
+    /** One response: "<status line>|<body>", or "closed". */
+    private fun response(r: BufferedReader): String {
+        val status = r.readLine() ?: return "closed"
+        val length = contentLength(r)
+        val body = CharArray(length)
+        var n = 0
+        while (n < length) n += r.read(body, n, length - n)
+        return "$status|${String(body)}"
+    }
+
+    /** Reads the headers up to the blank line; their Content-Length (0 without one). */
+    private fun contentLength(r: BufferedReader): Int =
+        generateSequence { r.readLine()?.takeIf { it.isNotEmpty() } }
+            .lastOrNull { it.lowercase().startsWith("content-length:") }
+            ?.substringAfter(':')?.trim()?.toInt() ?: 0
 
     @Test
     fun withoutTheTokenNothingReachesTheService() {
