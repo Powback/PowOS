@@ -2552,6 +2552,43 @@ html:root .recents-menu.tile, html:root .ww-tile-menu.tile { --glass-blur-native
 .task-ph-icon { position: relative; width: 72px; height: 72px; border-radius: 20px; }
 .task-ph-icon.blank { background: var(--soft-fill, var(--color-surface)); }
 .task-split .task-ph-icon { width: 48px; height: 48px; border-radius: 12px; }
+/* No cards: the switcher says so, centred where the cards would be, rising with them (--rp, §6). */
+.recents-empty {
+  position: absolute; left: var(--edge); right: var(--edge); top: 50%; transform: translateY(-50%);
+  text-align: center; font: 500 var(--text-body) var(--font-body); color: var(--color-muted);
+  opacity: var(--rp); pointer-events: none;
+}
+.recents.settling .recents-empty { transition: opacity var(--spring-ms) var(--spring); }
+/* "N running in background" (recents.tsx Background): a quiet text button like clear all; opened, its list as a sheet
+   over the bottom of the screen, folded and unfolded the same width as a card at most. */
+.recents-bg-toggle {
+  align-self: center; margin-top: var(--gap); font: var(--text-small) var(--font-body); color: var(--color-muted);
+  background: var(--soft-fill); border: none; border-radius: 999px; padding: 8px 18px; opacity: var(--rp);
+}
+.recents-bg-toggle[aria-expanded="true"] { color: var(--color-foreground); }
+.recents-bg {
+  position: absolute; z-index: 2; left: 50%; bottom: calc(var(--inset-bottom, 0px) + var(--edge));
+  width: min(calc(100% - 2 * var(--edge)), 440px); max-height: 50%; overflow-y: auto; transform: translateX(-50%);
+  display: flex; flex-direction: column; padding: 6px 0; border-radius: var(--radius);
+  animation: recents-bg-in var(--spring-fast-ms) var(--spring-fast) both;
+}
+.recents-bg.leaving { animation: recents-bg-out var(--spring-fast-ms) var(--spring-fast) both; pointer-events: none; }
+html:root .recents-bg.tile { --glass-blur-native: var(--backdrop-blur-native); background: var(--menu-tint); }
+@keyframes recents-bg-in { from { opacity: 0; transform: translate(-50%, 16px); } }
+@keyframes recents-bg-out { to { opacity: 0; transform: translate(-50%, 16px); } }
+@media (prefers-reduced-motion: reduce) { .recents-bg { animation: none; } }
+.recents-bg-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px 6px 18px; font: 500 var(--text-small) var(--font-body); color: var(--color-muted); }
+.recents-bg-app { display: flex; align-items: center; gap: 12px; padding: 8px 10px 8px 18px; font: var(--text-small) var(--font-body); color: var(--color-foreground); }
+.recents-bg-icon { width: 28px; height: 28px; border-radius: 8px; flex: none; }
+.recents-bg-icon.blank { background: var(--soft-fill); }
+.recents-bg-name { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.recents-bg-state { flex: none; font-size: 11px; color: var(--color-muted); }
+.recents-bg-hide, .recents-bg-stop {
+  flex: none; padding: 6px 14px; border-radius: 999px; border: none; font: var(--text-small) var(--font-body);
+  background: var(--soft-fill); color: var(--color-foreground);
+}
+.recents-bg-hide { background: none; color: var(--color-muted); }
+.recents-bg-stop:active, .recents-bg-hide:active { background: color-mix(in srgb, var(--color-foreground) 14%, transparent); }
 /* "clear all": calm - a quiet text button on the blur, no plate. */
 .task-clear { align-self: center; margin-top: calc(var(--gap) * 4); font: var(--text-small) var(--font-body); color: var(--color-muted); background: none; border: none; border-radius: 999px; padding: 10px 22px; }
 

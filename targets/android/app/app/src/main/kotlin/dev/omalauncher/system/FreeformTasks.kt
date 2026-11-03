@@ -249,8 +249,8 @@ object FreeformTasks {
         val on = window == null
         modeAndBounds(wct, token, if (on) UNDEFINED else FREEFORM, window ?: Rect())
         captionFor(wct, token, id, window)
-        // A window of a page off the screen was made hidden and not focusable (WindowFrames.showOnly, [away]): full
-        // screen it is the app in front again, shown and taking the keys.
+        // A window of a page off the screen was made not focusable (WindowFrames.showOnly, [away]; WM-hidden by older
+        // builds): full screen it is the app in front again, shown and taking the keys.
         if (on) {
             TaskLeash.setHidden(wct, token, false)
             TaskLeash.setFocusable(wct, token, true)
@@ -337,9 +337,11 @@ object FreeformTasks {
             .onFailure { WindowLog.w(TAG, "can't set task $id focusable=$on", it) }.isSuccess
 
     /**
-     * Task [id]'s window on a page off the screen ([on]) or back on the shown one: hidden in WM and not focusable
-     * (TaskLeash.setHidden), so it takes no touch and no key focus - a swipe where it sat goes to the page - and
-     * shown and focusable again when its page shows. One WCT, the path [focusable] uses. HACK: hidden, reflected.
+     * Task [id]'s window on a page off the screen ([on]) or back on the shown one: not focusable while away, so it
+     * takes no key focus. It stays VISIBLE in WM (OffPage.WM_HIDDEN_AWAY): WM hiding made the app invisible, which
+     * destroyed its surfaces and every page swipe rebuilt them (Plasma's desktop reconnected per swipe, 450-560 ms
+     * main-thread freezes, perf-1793735444160); out of sight and out of touch is its leash's job (TaskSurfaces.hide).
+     * Always shown in WM here, so a window an older build WM-hid comes back. One WCT. HACK: hidden, reflected.
      */
     fun away(
         context: Context,
@@ -347,10 +349,10 @@ object FreeformTasks {
         on: Boolean,
     ): Boolean =
         transact(context, id) { wct, token ->
-            TaskLeash.setHidden(wct, token, on)
+            TaskLeash.setHidden(wct, token, on && OffPage.WM_HIDDEN_AWAY)
             TaskLeash.setFocusable(wct, token, !on)
         }.onFailure { WindowLog.w(TAG, "can't set task $id away=$on", it) }.isSuccess
-            .also { WindowLog.i(TAG, "task $id ${if (on) "hidden in WM (off page, no input)" else "shown in WM (its page)"}: ok=$it") }
+            .also { WindowLog.i(TAG, "task $id ${if (on) "away (off page: leash hidden, not focusable, live)" else "on its page (focusable)"}: ok=$it") }
 
     /**
      * Task [id]'s content drawn at [dpi] (0: the screen's own again): a real per-task density, the app lays itself out

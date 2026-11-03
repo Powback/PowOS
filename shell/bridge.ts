@@ -5,6 +5,7 @@
  * the phone, so the shell still runs.
  */
 import type {
+  BackgroundApp,
   HostWebWindow,
   BarInput,
   Agent,
@@ -27,6 +28,7 @@ import type {
   Home,
   HomeItem,
   NotificationList,
+  PrivacyList,
   PhoneNotification,
   RecentTask,
   RunState,
@@ -111,6 +113,9 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       running: () => call<Record<string, RunState>>("apps.running"),
       links: (pkg) => call<AppLinks>("apps.links", pkg),
       close: (key) => call<boolean>("apps.close", key),
+      // The phone's only: another host (or an older APK) rejects them ("no such call") and the switcher lists none.
+      background: () => call<BackgroundApp[]>("apps.background"),
+      stopBackground: (key) => call<boolean>("apps.stopBackground", key),
     },
     usage: { recent: (limit) => call<string[]>("usage.recent", limit) },
     home: {
@@ -213,6 +218,10 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       token: (types) => call<{ token: string }>("health.token", types), // detect
       changes: (types, token) =>
         call<{ token: string; records: HealthRecord[]; deleted: string[]; expired: boolean }>("health.changes", types, token), // detect
+    },
+    privacy: {
+      list: () => call<PrivacyList>("privacy.list"),
+      open: (pkg) => call<boolean>("privacy.open", pkg),
     },
     notifications: {
       list: () => call<NotificationList>("notifications.list"),
@@ -563,6 +572,7 @@ function mock(): Bridge {
       // A few running, Steam frozen (a game asleep with it) and Dolphin frozen (powos-sleep-gui).
       running: async () => ({ "a:chrome": "running", "l:konsole": "running", "a:spotify": "running", "a:signal": "running", "l:dolphin": "frozen", "l:steam": "frozen" }),
       links: async (pkg) => ({ pkg, label: pkg, links: [{ uri: `https://${pkg}.example/item/.*`, activity: ".ItemActivity" }] }),
+      ...mockBackground(icon),
     },
     usage: { recent: async (limit) => recent.slice(0, limit) },
     home: homeLayout(home, homeChanged, () => apps),
@@ -890,6 +900,11 @@ function mock(): Bridge {
       liveState: async () => liveMock,
       filmstrip: async () => "/run/powos-app/powos-ai-shared/live-mock.jpg",
       touchable: async (rect) => console.log("[mock] touchable", rect),
+    },
+    // Nothing in use: a check feeds uses by hand (__mockEvents.emit("privacy.changed", ...), gate.mjs privacyRowCheck).
+    privacy: {
+      list: async () => ({ now: Date.now(), items: [] }),
+      open: async (pkg) => (console.log("[mock] permissions of", pkg), true),
     },
     // A few made-up notifications; dismissing and clearing work on them.
     notifications: (() => {
@@ -1317,6 +1332,28 @@ function mockWindows(events: Events, icon: (name: string) => string): Bridge["wi
       list.splice(i, 1);
       changed();
       return true;
+    },
+  };
+}
+
+/**
+ * The switcher's background list for the mock (ui/recents.tsx): Termux's session and a player's service running with no
+ * task, Steam in its tray (frozen); a gate scene may set its own (window.__mockBackground).
+ */
+function mockBackground(icon: (name: string) => string): Pick<Bridge["apps"], "background" | "stopBackground"> {
+  const preset = (window as { __mockBackground?: BackgroundApp[] }).__mockBackground;
+  let list: BackgroundApp[] = preset ?? [
+    { key: "a:termux", label: "Termux", icon: icon("Termux") },
+    { key: "a:spotify", label: "Spotify", icon: icon("Spotify") },
+    { key: "l:steam", label: "Steam", icon: icon("Steam"), frozen: true },
+  ];
+  return {
+    background: async () => list.slice(),
+    stopBackground: async (key) => {
+      console.log("[mock] stop background", key);
+      const was = list.length;
+      list = list.filter((b) => b.key !== key);
+      return list.length < was;
     },
   };
 }

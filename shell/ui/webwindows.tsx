@@ -224,7 +224,10 @@ function existingWindow(key: string, page: number): number | null {
 function cameHere(id: number, page: number): number {
   showTab(id);
   toPageOf(id, page);
-  update(id, { minimised: false });
+  // On its page and reachable: a window left outside every page (an x off by a page width) comes onto this one.
+  const w = webWins.value.find((v) => v.id === id);
+  const at = w && !w.full ? clampPlace(w.x, w.y, w.w) : null;
+  update(id, { minimised: false, ...(at && (at.x !== w!.x || at.y !== w!.y) ? at : {}) });
   raise(id);
   return id;
 }
@@ -699,9 +702,15 @@ export function tileArea(): Area {
   return { ...a, top: Math.max(a.top, inset), bottom: a.bottom - TILE_GAP };
 }
 
-/** The page element's top left on screen (windows are page-local): the page on screen's. */
-function pageOrigin(): { x: number; y: number } {
-  const r = document.querySelector(".page:not(.away)")?.getBoundingClientRect();
+/**
+ * The page on screen's top left AT REST (windows are page-local): its pages' box, never the page's own rect - that one
+ * moves with the track's transform, so a window placed while the track slid (a page switch's spring: open from the
+ * dock or switcher, cameHere + toPage) got up to a page width added to its x (11-03: Steam "on the very right side so
+ * I can't work with it", Plasma's task at x 2136 on a 2268-wide screen).
+ */
+export function pageOrigin(): { x: number; y: number } {
+  const page = document.querySelector(".page:not(.away)");
+  const r = (page?.closest(".pages") ?? page)?.getBoundingClientRect();
   return r ? { x: r.left, y: r.top } : { x: 0, y: 0 };
 }
 

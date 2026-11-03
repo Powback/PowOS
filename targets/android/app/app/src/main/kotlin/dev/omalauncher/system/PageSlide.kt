@@ -17,7 +17,7 @@ import android.view.SurfaceControl
  * the settle runs the page track's own curve here, frame by frame ([settle]: its duration and cubic-bezier, read from
  * the track's CSS transition). Their title bars and grips (their own overlay windows, [WindowFrame]) move in the same
  * transaction. At the end the transition finishes with every window at its real bounds: the ones the page left behind
- * hidden there (their leash hidden; the task stays live and drawn above home, not focusable - never reordered under
+ * hidden there (their leash hidden; the task stays live, visible in WM and drawn above home, not focusable - never reordered under
  * home, which stopped the app and it came back blank; the next slide shows its leash in its start transaction) and
  * the page change committed ([WindowFrames.desktop]), after the slide has landed instead of during it.
  *
@@ -203,7 +203,9 @@ object PageSlide {
                         // Shown in WM (hidden there at rest, off its page) in this same transition, so it slides in.
                         TaskLeash.setHidden(wct, tok, false)
                         TaskLeash.setFocusable(wct, tok, false)
-                        TaskLeash.reorder(wct, tok, true)
+                        // Only one that left under home comes up (OffPage): the others are above home already, and a
+                        // reorder was a TO_FRONT on every touch on home (Plasma raised/hidden per swipe, 11-03).
+                        if (OffPage.raiseAtSlideStart(win.rel, WindowFrames.isUnderHome(win.id))) TaskLeash.reorder(wct, tok, true)
                     }
                     TaskLeash.setBounds(wct, tok, at(win))
                 }
@@ -366,8 +368,10 @@ object PageSlide {
             // reorder under home stopped the app and it came back blank until touched.
             if (w.rel != 0 || w.id in gone) {
                 TaskLeash.setFocusable(wct, tok, w.id !in gone)
-                // At rest a window off the shown page is hidden in WM too: no touch lands on it (the user, 2026-10-29).
-                TaskLeash.setHidden(wct, tok, w.id in gone)
+                // At rest a window off the shown page takes no touch (the user, 2026-10-29) by its leash (s.hidden:
+                // hidden and shrunk to nothing, TaskSurfaces.hide), never by WM hiding: that destroyed the app's
+                // surfaces and the next slide's start rebuilt them (OffPage.WM_HIDDEN_AWAY).
+                TaskLeash.setHidden(wct, tok, w.id in gone && OffPage.WM_HIDDEN_AWAY)
             }
         }
     }

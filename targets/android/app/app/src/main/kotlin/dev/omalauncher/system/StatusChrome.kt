@@ -45,7 +45,8 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
         override fun onLost(n: Network) { web.post { connection() } }
     }
     /** The recording light (chrome.tsx RecordingRing): "recording" camera|screen|mic|null, "recordingApps". */
-    private val recording = RecordingWatcher(context) { recordingState(it); publish() }
+    private val recording = RecordingWatcher.shared(context)
+    private val recordingChanged: () -> Unit = { recordingState(recording.state()); publish() }
     private val watchdog = PageWatchdog(web, "PowOS status bar", skip = {
         !context.getSystemService(android.os.PowerManager::class.java).isInteractive
     }) { ready = false; web.visibility = View.INVISIBLE; changed() }
@@ -63,6 +64,7 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
         connectivity.registerDefaultNetworkCallback(network)
         connection()
         recordingState(recording.state())
+        recording.watch(recordingChanged)
         scope.launch { MediaListener.changes.collect {
             val count = runCatching { MediaListener.connected?.activeNotifications?.size }.getOrNull()
             data.put("notifications", count ?: JSONObject.NULL)
@@ -168,7 +170,7 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
     }
     fun destroy() {
         watchdog.stop()
-        recording.stop()
+        recording.unwatch(recordingChanged)
         scope.cancel()
         context.unregisterReceiver(receiver)
         connectivity.unregisterNetworkCallback(network)

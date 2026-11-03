@@ -12,6 +12,7 @@ import { notif, panel, separatePanels } from "../state.ts";
 import { alignOf, wideShade } from "./align.ts";
 import { useAnchoredOpen } from "./shadeanchor.ts";
 import { ControlCenter } from "./control.tsx";
+import { PrivacyRow } from "./privacy.tsx";
 import { Icon } from "./icons.tsx";
 import { animateLayout, closeGap, foldAway } from "./notifmotion.ts";
 import { followNotif, notifOpen, notifShown } from "./gesture.ts";
@@ -621,6 +622,7 @@ export function NotificationPanel() {
               </div>
               <div class="notif-list cc-col">
                 <ControlCenter />
+                <PrivacyRow i={2} />
               </div>
             </>
           ) : together ? (
@@ -630,6 +632,8 @@ export function NotificationPanel() {
               <ControlCenter />
               <div class="notif-own">
                 <div class="notif-list" ref={listEl}>
+                  {/* Directly under the control center's card: who uses the mic / camera / location (privacy.tsx). */}
+                  <PrivacyRow i={5} />
                   {available && items.length > 0 && (
                     <div class="notif-bar cascade" data-q ref={followNotif} style={{ "--i": 5 }}>
                       <span class="muted">{`${items.length} notification${items.length > 1 ? "s" : ""}`}</span>
@@ -647,7 +651,10 @@ export function NotificationPanel() {
               </div>
             </>
           ) : panel.value === "control" ? (
-            <ControlCenter />
+            <>
+              <ControlCenter />
+              <PrivacyRow i={2} />
+            </>
           ) : (
             <>
               <div class="notif-bar" data-q ref={followNotif}>
@@ -666,6 +673,7 @@ export function NotificationPanel() {
                 </span>
               </div>
               <div class="notif-list" ref={listEl}>
+                <PrivacyRow i={1} />
                 {items$(1)}
               </div>
             </>

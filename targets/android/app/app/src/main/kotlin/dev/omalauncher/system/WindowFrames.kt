@@ -950,8 +950,24 @@ class WindowFrames(
         returning.filter { it in noLeashBack || it in underHome }.forEach { FreeformTasks.raise(context, it) }
         underHome.removeAll(back.toSet())
         underHome.addAll(noLeashHide)
+        onItsPage(hide)
         main.removeCallbacks(refreshNow)
         main.postDelayed(refreshNow, SETTLE_MS)
+    }
+
+    /**
+     * The shown page's windows (all but [hide] and the minimised) that sit mostly off the glass are moved onto it
+     * (OffPage.mostlyOff): on its page a window takes input where the user can reach it. 11-03: Plasma's task 2429 at
+     * x 2136..3496 on a 2268-wide screen - its page shown, the window out of reach, every touch a page swipe.
+     */
+    private fun onItsPage(hide: Set<Int>) {
+        val a = AppWindows.area(context)
+        for (t in FreeformTasks.cached(context)) {
+            val b = t.bounds
+            if (t.id in hide || t.id in minimised || !OffPage.mostlyOff(b.left, b.right, a.left, a.right)) continue
+            val to = AppWindows.onScreen(context, b)
+            Log.i(TAG, "task ${t.id} on its page but off the screen (${b.toShortString()}): to ${to.toShortString()} ok=${FreeformTasks.moveTo(context, t.id, to)}")
+        }
     }
 
     /** Task [id]'s window is out of sight because it lives on another home page ([desktop]'s hide list). */
@@ -1126,6 +1142,9 @@ class WindowFrames(
 
         /** Of [away]: the ones that left under home (no leash to hide - HACK in showOnly), brought back by a raise. */
         private val underHome = mutableSetOf<Int>()
+
+        /** Task [id] left under home ([underHome]): a page slide brings it up by a reorder (OffPage.raiseAtSlideStart). */
+        fun isUnderHome(id: Int): Boolean = id in underHome
 
         /** The floating windows, top-most first, for the dock (home's page reads it: windows.list / windows.changed). */
         val running = mutableStateOf<List<Running>>(emptyList())
