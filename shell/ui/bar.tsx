@@ -388,7 +388,9 @@ function submit(role: BarRole) {
 
 /**
  * OB1: on PowOS AI's page the bar - still home's own element, inside home, which slid a screen to the right - is held
- * where it is on home by a translate that counters home's slide (gesture.ts applyTrack), with home's slide curve.
+ * where it is on home by a translate that counters home's slide: gesture.ts applyTrack's --track-counter, in the same
+ * frame as home's own transform - at rest, on the slide's curve, and under a finger mid-swipe (FX1, the user 11-03
+ * 22:53: "there's still some page block for the search bar on the last page" - the seat's fixed -W rode the drag).
  * OE1 (the user, 11-03 21:14: "we need to reuse the search [bar] on all pages. Why is the search [bar] just under the
  * chat here?"): the bar never moves or resizes between pages - same x, width, height and foot as home's, folded and
  * unfolded (the keyboard up, it sits on the keyboard: keyboardY) - the pages lay out around it. It was
@@ -407,11 +409,12 @@ function seatOnAi(bar: HTMLElement) {
   // measure: dropping the translate cut a running slide short (the bar jumped to its end with the page, BM1's morph
   // starting off the button: one-bar-folded, 11-03).
   const at = (bar.querySelector(".bar-pill") ?? bar).getBoundingClientRect();
+  // The translate as it is now (animated mid-transition), not --bar-lift's end value.
   const dy = parseFloat(getComputedStyle(bar).translate.split(" ")[1] ?? "0") || 0;
   const pill = { top: at.top - dy, bottom: at.bottom - dy };
   const y = keyboardY(home, pill);
   bar.classList.add("seated");
-  bar.style.translate = `${-home.offsetWidth}px ${Math.round(y)}px`;
+  bar.style.setProperty("--bar-lift", `${Math.round(y)}px`);
   barRoom(ai, pill.top + y);
   // The threads under it keep clear of it (powai.tsx useBarClear; its translate's end re-measures).
   bar.dispatchEvent(new Event("bar-seated", { bubbles: true }));
@@ -444,7 +447,7 @@ const heldSeated = (bar: HTMLElement, home: HTMLElement | null) => page.peek() !
 
 function unseat(bar: HTMLElement) {
   bar.classList.remove("seated");
-  bar.style.removeProperty("translate");
+  bar.style.removeProperty("--bar-lift");
   bar.style.removeProperty("width");
 }
 
@@ -460,6 +463,22 @@ if (homePage)
     void powos.keyboard.show();
   });
 
+/**
+ * FX1: a bar mounted mid-slide (folded home's button grows into it as the page goes) starts countering home where home
+ * is now, then eases on with it - a new element has no transition from before, so --track-counter's end would be its
+ * first frame and it would ride home's remaining slide (one-bar-folded: the morph's glass off the button).
+ */
+function startCountered(bar: HTMLElement) {
+  const home = bar.closest<HTMLElement>(".home");
+  if (!home) return;
+  const now = new DOMMatrixReadOnly(getComputedStyle(home).transform).m41;
+  bar.style.transition = "none";
+  bar.style.translate = `${-now}px var(--bar-lift, 0px)`;
+  void bar.offsetWidth;
+  bar.style.removeProperty("translate");
+  bar.style.removeProperty("transition");
+}
+
 /** Seats the bar on PowOS AI's page while that's the page (and re-seats it as the page's layout changes). */
 function useAiSeat(proxy: boolean) {
   const form = useRef<HTMLFormElement | null>(null);
@@ -467,6 +486,7 @@ function useAiSeat(proxy: boolean) {
   const formRef = useRef((el: HTMLFormElement | null) => {
     form.current = el;
     if (!proxy) followOpenness(el);
+    if (el && !proxy) startCountered(el);
   }).current;
   const at = homePage && !proxy ? page.value : 0;
   const dragging = homePage && !proxy && pageDrag.value != null;

@@ -124,7 +124,9 @@ let homeWas: { left: number; top: number } | undefined;
 function buttonNow() {
   const b = morphFrom.peek(), h = homeBox();
   if (!b || !h || !homeWas) return undefined;
-  return { ...b, left: b.left + h.left - homeWas.left, top: b.top + h.top - homeWas.top };
+  // FX1: the bar stays put on screen as home slides (gesture.ts --track-counter): the button's place sideways is where it
+  // was at the open - home comes back there with it; only home's vertical move (its dock gave way) counts.
+  return { ...b, top: b.top + h.top - homeWas.top };
 }
 
 /** Whether home shows its bar now (home.tsx HomeSearch): up, or still morphing back into the button. */

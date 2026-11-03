@@ -766,6 +766,38 @@ async function bfPill(S, page, drawer) {
   return b ? { left: Math.round(b.left), width: Math.round(b.width), bottom: Math.round(innerHeight - b.bottom), height: Math.round(b.height) } : null;
 }
 
+/**
+ * FX1 (the user, 11-03 22:53: "there's still some page block for the search bar on the last page"): a finger mid-swipe
+ * between home and PowOS AI's page (both ways, several points) - the pill's rect never moves (±1 px): it never rides a page.
+ */
+export async function barSwipeFixed() {
+  const S = await importShim("./state.ts");
+  const G = await importShim("./ui/gesture.ts");
+  const W = await importShim("./ui/searchwidget.tsx");
+  const mode = S.dockMode.value === "unfolded" ? "unfolded" : "mobile";
+  window.__mockEvents?.emit("system.insets", { top: 45, bottom: 16, left: 0, right: 0, keyboard: 0 });
+  await W.pickSearchSpot(mode, "bar");
+  W.footBelow.value = "1";
+  const rest = await bfPill(S, 0, 0);
+  const fails = [];
+  const at = async (pg, dx) => {
+    S.page.value = pg;
+    G.pageDrag.value = dx;
+    await sleep(dx == null ? 900 : 120);
+    const b = document.querySelector(".home > .bar .bar-pill")?.getBoundingClientRect();
+    const r = b && { left: Math.round(b.left), width: Math.round(b.width), bottom: Math.round(innerHeight - b.bottom), height: Math.round(b.height) };
+    if (!r || ["left", "width", "bottom", "height"].some((k) => Math.abs(r[k] - rest[k]) > 1)) fails.push(`${mode}: page ${pg} dragged ${dx}: pill ${JSON.stringify(r)}, at rest ${JSON.stringify(rest)}`);
+  };
+  for (const k of [0.25, 0.5, 0.75]) await at(0, Math.round(innerWidth * k));
+  await at(0, null);
+  await at(-1, null);
+  for (const k of [0.25, 0.5, 0.75]) await at(-1, -Math.round(innerWidth * k));
+  G.pageDrag.value = null;
+  S.page.value = 0;
+  await sleep(600);
+  return rest ? fails : [`${mode}: no pill at rest`];
+}
+
 /** OE1: the pill on PowOS AI's page with its [tab] open (Chat, Agents, Progress, Devices). */
 async function bfAiTab(S, tab) {
   S.aiScreen.value = tab;
