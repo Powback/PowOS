@@ -266,11 +266,14 @@ export const dockPosition = computed(() => validDockPosition(dockTry.value || si
  * the search as a widget and put it into the sidebar"). "dock": the round button between the dock's pinned apps and its
  * recent ones (ui/docksearch.tsx); "bar": the pill widget - in home's foot, or on the grid where it was put (the
  * "panel:search" home item, ui/searchwidget.tsx). Written by edit mode's drag (searchwidget.tsx dockSearch /
- * undockSearch) and the style screen's "folded search" / "unfolded search" (searchwidget.tsx pickSearchSpot), logged. Defaults: folded docked, unfolded the bar. The desktop shell has its own launcher, the bar.
+ * undockSearch) and the style screen's "folded search" / "unfolded search" (searchwidget.tsx pickSearchSpot), logged. Defaults: the bar,
+ * folded and unfolded (the user, 11-03, asked three times: "search bar" back on the cover screen "like it was"; the dock
+ * button stays a choice in Settings). The desktop shell has its own launcher, the bar.
  * [searchTry]: a check's choice for this page only, never stored (as dockTry).
  */
 migrateSearchPlace();
-export const searchSpot = { mobile: stored("search.spot.mobile", "dock"), unfolded: stored("search.spot.unfolded", "bar") };
+migrateSearchBarBack();
+export const searchSpot = { mobile: stored("search.spot.mobile", "bar"), unfolded: stored("search.spot.unfolded", "bar") };
 /**
  * Once: the old hidden setting (powos.search.place.mobile / .unfolded, the edit sheet's "bar | dock button" picker)
  * becomes the widget's spot - "dock" docked, "bar" the pill at today's place (the foot). An unset one keeps the default.
@@ -285,6 +288,21 @@ function migrateSearchPlace() {
     }
     localStorage.removeItem("powos.search.place.migrated");
     localStorage.setItem("powos.search.spot.migrated", "1");
+  } catch {}
+}
+/**
+ * Once (powos.search.spot.v2): a folded "dock" stored while it was the default becomes the bar again - the user, 11-03,
+ * angry after asking three times for the search bar back on the cover screen. A "dock" picked in Settings after this ran
+ * stays (the flag is set, this never runs again).
+ */
+function migrateSearchBarBack() {
+  try {
+    if (localStorage.getItem("powos.search.spot.v2") === "1") return;
+    if (localStorage.getItem("powos.search.spot.mobile") === "dock") {
+      localStorage.setItem("powos.search.spot.mobile", "bar");
+      console.info("[powos] search placement (mobile): dock -> bar, the bar back (search.spot.v2)");
+    }
+    localStorage.setItem("powos.search.spot.v2", "1");
   } catch {}
 }
 export const searchTry = signal("");

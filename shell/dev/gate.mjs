@@ -12274,6 +12274,33 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const label of ["folded", "unfolded"])
       runs.push(open(browser, `${ORIGIN}/index.html`, `search-setting-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/dock-search-check.js")).searchSettingCheck()))));
+  // SB2 (dev/dock-search-check.js sbIs; the user, 11-03, asked three times: the search bar back on the folded screen):
+  // a fresh install the bar; a folded "dock" stored before powos.search.spot.v2 the bar; a dock pick after it sticks
+  // across a reload; unfolded "dock" (belowDock on, as on the device) the dock's button and no bar.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const label of ["folded", "unfolded"])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `search-bar-back-${label}`, dockOpensView[label]).then((r) => whenReady(r, async () => {
+        const call = (fn, ...args) => r.page.evaluate(async (f, a) => (await importShim("./dev/dock-search-check.js"))[f](...a), fn, args);
+        const reload = async () => {
+          await r.page.reload();
+          await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: 20000, polling: 50 });
+        };
+        const fails = [];
+        await call("sbFresh");
+        await reload();
+        fails.push(...(await call("sbIs", "bar", "fresh install")));
+        await call("sbOldDock");
+        await reload();
+        fails.push(...(await call("sbIs", "bar", "stored folded dock, migrated")));
+        await call("sbPick", "dock");
+        fails.push(...(await call("sbIs", "dock", "picked dock")));
+        await reload();
+        fails.push(...(await call("sbIs", "dock", "picked dock, reloaded")));
+        await call("sbPick", "bar");
+        fails.push(...(await call("sbIs", "bar", "picked bar again")));
+        await call("sbFresh");
+        return fails;
+      })));
   // Perf P1 (dev/dock-search-check.js dockSpeechRenders; 02:23 trace): a dictation's words streaming in redraw the dock
   // button only for its on/off, the dock and its cells never - folded and unfolded.
   if (process.env.SHELL_PAGES !== "0")

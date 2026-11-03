@@ -407,16 +407,15 @@ export async function searchSpotMigrates(mobile, unfolded) {
   return fails.map((f) => `migrate: ${f}`);
 }
 
-/** A fresh device: folded docked, unfolded the bar - on screen too. */
+/** A fresh device: the bar, folded and unfolded (the user, 11-03: the search bar back) - on screen too. */
 export async function searchSpotDefaults() {
   const S = await importShim("./state.ts");
   const fails = [];
-  if (S.searchSpot.mobile.value !== "dock") fails.push(`folded default "${S.searchSpot.mobile.value}", not "dock"`);
+  if (S.searchSpot.mobile.value !== "bar") fails.push(`folded default "${S.searchSpot.mobile.value}", not "bar"`);
   if (S.searchSpot.unfolded.value !== "bar") fails.push(`unfolded default "${S.searchSpot.unfolded.value}", not "bar"`);
-  const docked = S.dockMode.value === "mobile";
   await sleep(200);
-  if (!!document.querySelector(".home > .dock .dock-search") !== docked) fails.push(`${S.dockMode.value} default: dock button ${docked ? "missing" : "shown"}`);
-  if (!!document.querySelector(".home > .bar") === docked) fails.push(`${S.dockMode.value} default: bar ${docked ? "shown" : "missing"}`);
+  if (document.querySelector(".home > .dock .dock-search")) fails.push(`${S.dockMode.value} default: dock button shown`);
+  if (!document.querySelector(".home > .bar")) fails.push(`${S.dockMode.value} default: bar missing`);
   return fails.map((f) => `defaults: ${f}`);
 }
 
@@ -705,4 +704,49 @@ export async function searchSettingCheck() {
     S.searchSpot.unfolded.value = was.unfolded;
   }
   return fails.map((f) => `${mode}: ${f}`);
+}
+
+/*
+ * SB2 (the user, 11-03, asked three times: "search bar" back on the folded screen; ask-1a19e12d892: "a toggle in the
+ * settings, so that I can use the bar if I want to"). gate.mjs's search-bar-back-* cases, reloads between:
+ * sbFresh (nothing stored) -> sbIs("bar"); sbOldDock (a folded "dock" stored, no powos.search.spot.v2) -> sbIs("bar");
+ * sbPick(mode, "dock") -> sbIs("dock") after a reload (the migration ran once, the pick sticks); unfolded the same plus
+ * belowDock "1" (the device's state) - the dock button and no bar.
+ */
+export function sbFresh() {
+  for (const k of ["mobile", "unfolded", "migrated", "v2"]) localStorage.removeItem(`powos.search.spot.${k}`);
+}
+export function sbOldDock() {
+  localStorage.setItem("powos.search.spot.mobile", "dock");
+  localStorage.setItem("powos.search.spot.unfolded", "bar");
+  localStorage.setItem("powos.search.spot.migrated", "1");
+  localStorage.setItem("powos.search.belowDock", "1");
+  localStorage.removeItem("powos.search.spot.v2");
+}
+export async function sbPick(v) {
+  const S = await importShim("./state.ts");
+  const W = await importShim("./ui/searchwidget.tsx");
+  await W.pickSearchSpot(S.dockMode.value === "unfolded" ? "unfolded" : "mobile", v);
+  await sleep(400);
+}
+/** Shown on screen: a box bigger than a speck, not hidden. */
+const sbShown = (e) => {
+  const b = e?.getBoundingClientRect();
+  return !!b && b.width > 2 && b.height > 2 && getComputedStyle(e).visibility !== "hidden";
+};
+/** This screen's spot is [want], stored so (or unset for the bar), and home shows it: the dock's button and no bar, or the bar and no button. */
+export async function sbIs(want, at) {
+  const S = await importShim("./state.ts");
+  const mode = S.dockMode.value === "unfolded" ? "unfolded" : "mobile";
+  await sleep(400);
+  const dock = sbShown(document.querySelector(".home > .dock .dock-search, .home .dock .app.dock-search"));
+  const bar = sbShown(document.querySelector(".home > .bar"));
+  const kept = localStorage.getItem(`powos.search.spot.${mode}`) ?? "bar";
+  const checks = [
+    [S.searchSpot[mode].value === want, `spot "${S.searchSpot[mode].value}", not "${want}"`],
+    [kept === want, `stored "${kept}"`],
+    [dock === (want === "dock"), `home's dock button ${dock ? "shown" : "missing"}`],
+    [bar === (want === "bar"), `home's bar ${bar ? "shown" : "missing"}`],
+  ];
+  return checks.filter(([ok]) => !ok).map(([, why]) => `${mode} ${at}: ${why}`);
 }
