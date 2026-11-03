@@ -376,15 +376,28 @@ function seatOnAi(bar: HTMLElement) {
   bar.style.width = `${s.width}px`;
   const b = bar.getBoundingClientRect(), h = home.getBoundingClientRect();
   const x = s.left - a.left - (b.left - h.left) - home.offsetWidth;
-  // Its foot on the slot's, but never its pill over the tabs above the slot (the wide foot's pill sits higher in it).
-  const pill = bar.querySelector(".bar-pill")?.getBoundingClientRect() ?? b;
-  const y = Math.max(s.bottom - a.top - (b.bottom - h.top), s.top - a.top - (pill.top - h.top));
+  const y = seatY(bar, home, { s, a, b, h });
   bar.style.translate = was;
   void bar.offsetWidth;
   bar.classList.add("seated");
   bar.style.translate = `${Math.round(x)}px ${Math.round(y)}px`;
   // The threads under it keep clear of where it lands (powai.tsx useBarClear; its translate's end re-measures).
   bar.dispatchEvent(new Event("bar-seated", { bubbles: true }));
+}
+
+/** The keyboard up (the host's --inset-keyboard, app.tsx). */
+const keyboardUp = () => (parseFloat(document.documentElement.style.getPropertyValue("--inset-keyboard")) || 0) > 0;
+
+/**
+ * The seat's vertical move: its foot on the slot's, but never its pill over the tabs above the slot (the wide foot's pill
+ * sits higher in it). BF1 (the user, 11-03 11:49: "the same height as the manager search bar"): a bar at home's foot
+ * (under the dock, or wide home's one-row foot) keeps its height - the seat moves it sideways only (shell.css --bar-drop).
+ * The keyboard up, the slot (the page ends at the keyboard) says where: the field follows it onto the keyboard.
+ */
+function seatY(bar: HTMLElement, home: HTMLElement, { s, a, b, h }: { s: DOMRect; a: DOMRect; b: DOMRect; h: DOMRect }) {
+  if (!keyboardUp() && (home.classList.contains("wide") || home.classList.contains("pill-below"))) return 0;
+  const pill = bar.querySelector(".bar-pill")?.getBoundingClientRect() ?? b;
+  return Math.max(s.bottom - a.top - (b.bottom - h.top), s.top - a.top - (pill.top - h.top));
 }
 
 /** BM1: on the way home from the page the bar stays seated while it morphs back into the button (docksearch.tsx). */

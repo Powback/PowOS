@@ -53,7 +53,12 @@ export const settingDestinations: { screen: ScreenName; label: string; target?: 
   { screen: "store", label: "Widget store", keywords: "home widgets install" },
   { screen: "style", label: "Theme", target: "theme", keywords: "appearance style colors colours" },
   { screen: "style", label: "Wallpaper", target: "background", keywords: "background image" },
-  ...["folded dock position", "unfolded dock position", "desktop dock position", "folded search", "unfolded search", "recent apps in the drawer", "separate notifications & controls", "control center", "pet", "icon colours", "font"].map((label) => ({ screen: "style" as const, label, target: label, keywords: "settings appearance launcher home docking bottom left right" })),
+  ...["folded dock position", "unfolded dock position", "desktop dock position", "recent apps in the drawer", "separate notifications & controls", "control center", "pet", "icon colours", "font"].map((label) => ({ screen: "style" as const, label, target: label, keywords: "settings appearance launcher home docking bottom left right" })),
+  // The search's spot (the user, 11-03 11:49: "Where is that setting? I couldn't find it"): found by what it is - the
+  // search bar, the dock's button - and opened on its row (screens.tsx SearchOption), highlighted.
+  { screen: "style", label: "Folded search: bar / dock button", target: "folded search", keywords: "search bar dock button icon home launcher folded cover" },
+  { screen: "style", label: "Unfolded search: bar / dock button", target: "unfolded search", keywords: "search bar dock button icon home launcher unfolded inner" },
+  { screen: "style", label: "Home", target: "home", keywords: "dock search bar launcher" },
   { screen: "style", label: "Swipe up panels", target: "swipe up from the left: PowOS AI", keywords: "launcher gestures assistant" },
   ...["swipe up from a bottom corner over apps: apps, PowOS AI", "icon colors", "system colors", "glass", "glass edges", "text"].map((label) => ({ screen: "style" as const, label, target: label, keywords: "settings appearance terminal font size blur liquid gestures" })),
   ...["show handles", "sensitivity"].map((label) => ({ screen: "gestures" as const, label, target: label, keywords: "settings edge gestures swipe" })),

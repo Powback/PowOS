@@ -14,6 +14,8 @@ import { wideHome } from "../hosts/wide.ts";
 import { powos } from "../bridge.ts";
 import { tick } from "./haptics.ts";
 import { Bar } from "./bar.tsx";
+import { usePresence } from "./reveal.tsx";
+import { useRef } from "preact/hooks";
 
 /** The search widget on this screen's grid (not where this screen has the search docked: dockSearch). */
 export const hasSearchWidget = () => !searchInDock.value && onHome();
@@ -179,5 +181,53 @@ export function SearchPanel() {
     <div class="search-face">
       <Bar proxy />
     </div>
+  );
+}
+
+/**
+ * The search's own menu (the user, 2026-11-03 11:49: "Where is that setting? I couldn't find it in a setting."): the
+ * bar / dock-button choice on the thing itself - a long press on home's bar, or in edit mode a tap on the bar or the
+ * dock's button (a hold on the button stays its dictation: docksearch.tsx DS2). The same setter as Settings › style ›
+ * home's "folded search" / "unfolded search" ([pickSearchSpot]), for the screen in use.
+ */
+type SpotAt = { left: number; top: number; bottom: number; width: number };
+export const spotMenu = signal<SpotAt | null>(null);
+
+/** Opens the search's menu by [el] (the bar's pill or the dock's button); false off folded/unfolded (the desktop's). */
+export function openSpotMenu(el: Element): boolean {
+  if (dockMode.value !== "mobile" && dockMode.value !== "unfolded") return false;
+  const r = el.getBoundingClientRect();
+  tick();
+  spotMenu.value = { left: r.left, top: r.top, bottom: r.bottom, width: r.width };
+  return true;
+}
+
+
+/** The menu open now, or the one leaving (kept where it was while it leaves on the spring, as apps.tsx's). */
+function useSpotPresence() {
+  const open = spotMenu.value;
+  const pop = usePresence(open != null);
+  const last = useRef<SpotAt | null>(open);
+  if (open) last.current = open;
+  return { at: open ?? (pop.on ? last.current : null), leaving: pop.leaving };
+}
+
+export function SearchSpotMenu() {
+  const { at, leaving } = useSpotPresence();
+  if (!at) return null;
+  const mode = dockMode.value === "unfolded" ? "unfolded" : "mobile";
+  const next = searchSpot[mode].value === "dock" ? "bar" : "dock";
+  const close = () => (spotMenu.value = null);
+  const left = Math.max(8, Math.min(innerWidth - 188, at.left + at.width / 2 - 90));
+  return (
+    <>
+      {!leaving && <div class="menu-scrim" onPointerDown={close} />}
+      <div class={`menu tile sheet pop search-spot-menu${leaving ? " leaving" : ""}`} inert={leaving || undefined} style={{ left: `${left}px`, bottom: `${innerHeight - at.top + 4}px` }}>
+        <div class="menu-title">{mode === "unfolded" ? "unfolded search" : "folded search"}</div>
+        <button type="button" class="menu-item" data-spot={next} onClick={() => (close(), void pickSearchSpot(mode, next))}>
+          {next === "bar" ? "Show as bar" : "Show as dock button"}
+        </button>
+      </div>
+    </>
   );
 }
