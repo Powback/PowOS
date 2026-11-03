@@ -90,19 +90,21 @@ class ShellScreens(
     private var storeMessage by mutableStateOf<Pair<String, String>?>(null)
 
     /** What the page shows of [name] now. */
-    fun state(name: String): JSONObject =
-        when (name) {
-            SETTINGS -> settings()
-            STYLE -> style()
-            THEMES -> themes()
-            STORE -> store()
-            LINUX -> linux()
-            AGENTS_SCREEN -> agents()
-            AUR -> packages()
-            LICENSES -> licenses()
-            STORAGE -> storage()
-            else -> throw IllegalArgumentException("no screen $name")
-        }
+    fun state(name: String): JSONObject = (states[name] ?: throw IllegalArgumentException("no screen $name"))()
+
+    /** Each screen's state, by name. */
+    private val states: Map<String, () -> JSONObject> =
+        mapOf(
+            SETTINGS to ::settings,
+            STYLE to ::style,
+            THEMES to ::themes,
+            STORE to ::store,
+            LINUX to ::linux,
+            AGENTS_SCREEN to ::agents,
+            AUR to ::packages,
+            LICENSES to ::licenses,
+            STORAGE to ::storage,
+        )
 
     /** The page shows [name]: its state now, and again on every change until [unwatch]. Opening also refreshes it. */
     fun watch(name: String): JSONObject {
