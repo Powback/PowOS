@@ -16,6 +16,7 @@ import { powos } from "../bridge.ts";
 import { memo } from "./memo.ts";
 import type { App, AppWindow } from "../types.ts";
 import { usePresence } from "./reveal.tsx";
+import { openNewWindow, webWins } from "./webwindows.tsx";
 
 const LONG_PRESS_MS = 420;
 const SLOP = 10;
@@ -211,6 +212,15 @@ function listItems(wins: AppWindow[]): Item[] {
   });
 }
 
+/**
+ * "new window" for an app with a web window here (the user 11-03: "if I want to open up another chrome instance on this
+ * page I could"): a second instance on the page on screen, as the dock's drag-out (a tap fronts the one it has).
+ */
+function newWindowItem(app: App): Item[] {
+  if (!webWins.value.some((w) => w.key === app.key && !w.failed)) return [];
+  return [["new window", () => void shownHomePage().then((p) => openNewWindow(app.key, app.label, p))]];
+}
+
 /** What the app menu offers for [app]. */
 function menuItems(app: App): Item[] {
   const docked = dock.value.includes(app.key);
@@ -218,6 +228,7 @@ function menuItems(app: App): Item[] {
   const android = app.kind === "android";
   return [
     ...windowItems(app.key),
+    ...newWindowItem(app),
     [docked ? "unpin from dock" : "pin to dock", () => setDocked(app.key, !docked)],
     // The control center's quick-launch row, at its end (launchers.tsx: the row's own add/remove).
     [quick ? "remove from quick launch" : "add to quick launch", () => void toggleLauncher(app.key)],

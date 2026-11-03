@@ -12350,7 +12350,7 @@ try {
   // front, the middle = a window (unfolded a web window, folded Android's floating one); on home with no app in front it's
   // unpinned onto the grid as before; back on the dock = the dock's.
   if (process.env.SHELL_PAGES !== "0")
-    for (const [kind, query, width, height] of [["split", "?mode=pull", 900, 600], ["float", "?mode=pull", 404, 900], ["window", "", 821, 883], ["place", "", 821, 883], ["home", "", 404, 900]])
+    for (const [kind, query, width, height] of [["split", "?mode=pull", 900, 600], ["float", "?mode=pull", 404, 900], ["window", "", 821, 883], ["place", "", 821, 883], ["instance", "", 821, 883], ["grid", "", 821, 883], ["home", "", 404, 900]])
       runs.push(open(browser, `${ORIGIN}/index.html${query}`, `dock-dragout-${kind}`, { width, height }).then((r) => whenReady(r, () => r.page.evaluate(async (k) => (await importShim("./dev/dock-dragout-check.js")).dockDragOut(k), kind))));
   // The drawer's list fades at an edge with more to scroll (2026-10-24): a short screen, so the mock's apps scroll.
   if (process.env.SHELL_PAGES !== "0")
