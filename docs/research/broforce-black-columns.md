@@ -34,8 +34,8 @@ ef25369b attaches a real KGSL fence on every present; Xwayland 0011's "stub" = f
 - Not proven: needs the sync ioctls' return codes on the device during play (below).
 
 ## Next run (one game launch, read-only otherwise)
-Start Xwayland and the game with DMD_VA_LOG=1 (freedreno kgsl prints "sync-to-gpu ... cache=rc/errno obj=rc/errno"
-and "dma-buf GPU cache sync failed"; Turnip's KGSL path logs its import syncs the same way), run
+Start Xwayland with DMD_VA_LOG=1 (freedreno kgsl, Xwayland: "sync-to-gpu ... cache=rc/errno obj=rc/errno"
+and "dma-buf GPU cache sync failed") and the game with TU_KGSL_DEBUG_IMPORT=1 (Turnip's import path), run
 bf-overlay-watch.sh while the user opens overlays. Failing syncs + checkered frames on fresh buffers = fix in the
 allocator (uncached/IO-coherent allocation or DMA_BUF_IOCTL_SYNC before the GPU's first write). TU_DEBUG=noubwc
 would not change anything: no hop uses UBWC.
