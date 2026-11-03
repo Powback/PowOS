@@ -1,0 +1,23 @@
+[Unit]
+Description=PowOS GPU fan curve + power cap (NVML; vBIOS curve on any failure)
+Documentation=file:///var/home/powos/Projects/PowOS/hosts/gpu-195/gpu-fan/README.md
+After=nvidia-persistenced.service
+Wants=nvidia-persistenced.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/powos-gpu-fan run
+# Belt and braces: whatever happened to the daemon, the fans go back to the cards' own curve.
+ExecStopPost=-/usr/bin/python3 /usr/local/bin/powos-gpu-fan reset
+Restart=always
+RestartSec=5
+MemoryMax=64M
+CPUQuota=5%
+TasksMax=4
+Nice=-5
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

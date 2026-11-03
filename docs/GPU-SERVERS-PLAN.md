@@ -357,10 +357,14 @@ Noise: a 3090 under the pool's full load runs at 100%, ~300 W, with its fan near
 (subsystem 1043:87B3). The user stopped the load test because the box was loud.
 - Idle, they still run their fans at 56-77% at P8 (GPU0 36 W at 58 °C, with the voice path and the desktop on it;
   GPU1 22 W at 50 °C). That is the vBIOS fan curve.
-- Setting a power cap or the fan speed needs root. Proposed for the user:
-  - `sudo nvidia-smi -i 0,1 -pl 250`, a cap for load noise, made persistent as a oneshot unit. Decode is
-    memory-bound, so it should cost only a few percent.
-  - An NVML fan floor, which needs root and is riskier.
+- 2026-11-03: they DO stop their fans when cool (0% at 46-50 C, both cards, steady for minutes). The noise is the
+  vBIOS holding 53-77% for minutes after load ends, plus ~100% under load. NVML's settable range is 30-100%, so a
+  fixed floor would be louder than the fan-stop.
+- Fix (user asked "permanently", 2026-11-03): unit `gpu-fan`, `hosts/gpu-195/gpu-fan/` (README there). A root
+  systemd service, NVML through ctypes (no packages): leaves the vBIOS fan-stop alone; takes over at >= 52 C or when
+  the vBIOS spins > 15 points above its curve (30% at 50 C ... 100% at 83 C, fast up, 2%/tick down); hands back at
+  <= 47 C; 250 W power cap per card (default 350). Every failure path returns the cards to the vBIOS curve and the
+  default power limit. Install: `sudo bash hosts/gpu-195/gpu-fan/install.sh`.
 
 **Router: `llm.pow`** (2026-10-21, phase 4). LiteLLM v1.106.2, pinned by digest. It runs as the PowStation compose
 service `llm-router` on Colima: `config/litellm/config.yaml` plus a `docker-compose.yaml` block, Traefik labels,
