@@ -895,3 +895,105 @@ export async function pd1Check(label) {
   S.dock.value = was.dock;
   return fails.map((f) => `pd1 ${label}: ${f}`);
 }
+
+/**
+ * OR1 (the user, 11-03 12:20: "The AI page is still not reusing the search bar" / "It should be on the bottom, like a
+ * normal"): with home's search the bar (or the dock's button), PowOS AI's page's field IS home's bar - the same node,
+ * seated at the page's foot (the last thing at the bottom, the tabs over it), at home's bar's bottom and height - on every
+ * tab, typed in with the keyboard and sent, a turn under way; no field of the page's own; back home it's home's again.
+ * [side]: the dock's placement (the phone's unfolded dock is on the right). Failures, empty when it holds.
+ */
+const orInsets = (keyboard) => window.__mockEvents?.emit("system.insets", { top: 45, bottom: 16, left: 0, right: 0, keyboard });
+const orDock = (S) => (S.dockMode.value === "unfolded" ? S.unfoldedDockPlacement : S.mobileDockPlacement);
+
+export async function oneBarReuse(spot = "bar", side = "bottom") {
+  const S = await importShim("./state.ts");
+  const W = await importShim("./ui/searchwidget.tsx");
+  const mode = S.dockMode.value === "unfolded" ? "unfolded" : "mobile";
+  orInsets(0);
+  await W.pickSearchSpot(mode, "bar");
+  W.footBelow.value = "1";
+  orDock(S).value = side;
+  S.page.value = 0;
+  await sleep(800);
+  // Home's bar's place (with the dock's button, where the bar would be: the page's field is as low).
+  const homeRect = orRect(document.querySelector(".home > .bar"));
+  await W.pickSearchSpot(mode, spot);
+  await sleep(800);
+  const at = `${mode} (search: ${spot}, dock ${side}) AI page`;
+  const fails = homeRect ? [] : [`${mode}: no bar on home`];
+  const check = (what) => fails.push(...orOnPage(`${at}, ${what}`, homeRect));
+  let node = null;
+  for (const tab of ["chat", "agents", "progress", "devices"]) {
+    S.aiScreen.value = tab;
+    S.page.value = -1;
+    await sleep(900);
+    node ??= document.querySelector(".home > .bar");
+    check(tab);
+  }
+  S.aiScreen.value = "chat";
+  await sleep(600);
+  await orSend(S);
+  check("sent");
+  S.chat.value = { ...S.chat.value, busy: true, items: [...S.chat.value.items, { kind: "user", text: "The AI page is still not reusing the search bar." }] };
+  await sleep(900);
+  check("a turn under way");
+  S.chat.value = { ...S.chat.value, busy: false };
+  S.page.value = 0;
+  await sleep(900);
+  fails.push(...orBack(mode, spot, node));
+  await W.pickSearchSpot(mode, "bar");
+  orDock(S).value = "bottom";
+  return fails;
+}
+
+/** Typed with the keyboard up, then sent (the form's submit, as Enter): the keyboard goes, the field back at the foot. */
+async function orSend(S) {
+  document.querySelector(".home > .bar textarea")?.focus();
+  orInsets(330);
+  await sleep(700);
+  S.query.value = "The AI page is still not reusing the search bar.";
+  await sleep(100);
+  document.querySelector(".home > .bar")?.requestSubmit?.();
+  await sleep(300);
+  document.activeElement?.blur();
+  orInsets(0);
+  await sleep(900);
+}
+
+/** Back home: the same node (the bar's spot), not left seated on the page. */
+function orBack(mode, spot, node) {
+  const back = document.querySelector(".home > .bar");
+  if (spot === "bar" && back !== node) return [`${mode}: back home, a different bar node`];
+  return back?.classList.contains("seated") ? [`${mode}: back home, the bar still seated on the page`] : [];
+}
+
+const orRect = (e) => {
+  const b = e?.querySelector(".bar-pill")?.getBoundingClientRect();
+  return b && b.width > 2 ? { bottom: Math.round(innerHeight - b.bottom), height: Math.round(b.height), left: b.left, right: b.right, top: b.top } : null;
+};
+
+const orShown = (e) => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== "hidden" && !e.closest(".search-face");
+
+/** On the page: home's bar is the one visible field, the "ai" role, at the foot (nothing of the page under it), as low as home's. */
+function orOnPage(at, home) {
+  const node = document.querySelector(".home > .bar");
+  const r = orRect(node);
+  if (!r || Number(getComputedStyle(node).opacity) < 0.5) return [`${at}: home's bar isn't shown on the page`];
+  const own = [...document.querySelectorAll(".bar, .ai-compose, .ai-screen textarea")].filter((e) => orShown(e) && e !== node && !node.contains(e));
+  const fails = own.length ? [`${at}: a field of the page's own (${own.map((e) => e.className).join(", ")})`] : [];
+  if (node.dataset.role !== "ai") fails.push(`${at}: the bar's role "${node.dataset.role}", not "ai"`);
+  if (Math.abs(r.bottom - home.bottom) > 1 || Math.abs(r.height - home.height) > 1) fails.push(`${at}: the bar ${r.bottom} px off the foot, ${r.height} px high; home's ${home.bottom}, ${home.height}`);
+  return [...fails, ...orUnder(at, r)];
+}
+
+/** The page's parts under the bar or over its top (the tabs): the bar must be the last thing at the bottom. */
+function orUnder(at, r) {
+  const over = (b) => b.width > 2 && b.left < r.right && b.right > r.left;
+  const parts = [...document.querySelectorAll(".ai-screen :is(.ai-segs, .ai-scroll, .ag-scroll)")].filter(orShown);
+  const under = parts.filter((e) => over(e.getBoundingClientRect()) && e.getBoundingClientRect().top >= r.top + r.height / 2);
+  const fails = under.length ? [`${at}: under the bar: ${under.map((e) => e.className).join(", ")}`] : [];
+  const segs = [...document.querySelectorAll(".ai-screen .ai-segs")].filter(orShown).map((e) => e.getBoundingClientRect()).find(over);
+  if (segs && segs.bottom > r.top + 1) fails.push(`${at}: the tabs (${Math.round(segs.top)}..${Math.round(segs.bottom)}) over the bar's top ${Math.round(r.top)}`);
+  return fails;
+}

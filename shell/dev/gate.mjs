@@ -12498,6 +12498,11 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, below] of [["folded", "1"], ["folded", ""], ["unfolded", "1"], ["unfolded", ""]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `bar-foot-same-${label}${below ? "-below" : ""}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (b) => (await importShim("./dev/dock-search-check.js")).barFootSame(b), below))));
+  // OR1 (dev/dock-search-check.js oneBarReuse; the user, 11-03 12:20: "The AI page is still not reusing the search bar",
+  // "It should be on the bottom, like a normal"): home's bar node is the page's field on every tab, at the foot.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, spot, side] of [["folded", "bar", "bottom"], ["unfolded", "bar", "bottom"], ["folded", "dock", "bottom"], ["unfolded", "dock", "bottom"], ["unfolded", "bar", "right"], ["unfolded", "bar", "left"]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `one-bar-reuse-${label}-${spot}-${side}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (v, d) => (await importShim("./dev/dock-search-check.js")).oneBarReuse(v, d), spot, side))));
   // SF1 (dev/dock-search-check.js searchFindable; the user, 11-03 11:49: "Where is that setting?"): Settings search
   // finds the search's spot and opens its row highlighted; a long press on the bar / edit mode's tap on the button flips it.
   if (process.env.SHELL_PAGES !== "0")
