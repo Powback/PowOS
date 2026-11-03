@@ -700,6 +700,12 @@ class WebWindows(
         var fullAsked = false
 
         /**
+         * Its app put it full screen by itself while another window was the user's ([selfFullScreenNow] false): held
+         * here, applied when the user comes to it ([focus]); KWin's "fullscreen <id> 0" drops it.
+         */
+        var fullHeld = false
+
+        /**
          * Its container hangs under [root], ordered among the page's windows by [Geo.z]. False while [fillScreen] hangs
          * it on home's surface itself (above home's buffer, at [FULL_LAYER]); [place] puts it back under the root.
          */
@@ -1187,6 +1193,9 @@ class WebWindows(
         andro.marchy.WebWindowSource.size(kwin, w, h)
         // KWin focused the new window (its task's start): a touch back on the window it came from focuses that again.
         linuxFocused = kwin
+        // ...and it is in front of every window: the user's now (Back / Forward, and another window's own full screen
+        // waits for the user instead of covering it: selfFullScreenNow).
+        focused = id
         WindowLog.i(TAG, "window $id: KWin window $kwin (${p.appId}) as a web window, ${w}x$h")
         return id
     }
@@ -2811,6 +2820,14 @@ class WebWindows(
     /** The page: window [id] pressed (its bar or body), -1: home pressed outside every window. */
     fun focus(id: Int): Boolean {
         focused = id
+        wins[id]?.takeIf { it.fullHeld }?.let { w ->
+            main.post {
+                if (!w.fullHeld || w.closed) return@post
+                w.fullHeld = false
+                WindowLog.i(TAG, "window ${w.id}: the user came to it: its own full screen now")
+                linuxFullScreen(w, true)
+            }
+        }
         return true
     }
 
@@ -3150,7 +3167,24 @@ class WebWindows(
     ) {
         val w = wins.values.firstOrNull { it.linux?.kwin == kwin } ?: return
         if (on && w.linuxFull) fullScreenConfirmed(w, "KWin's answer")
+        if (!on) w.fullHeld = false
+        if (on && heldFullScreen(w)) return
         linuxFullScreen(w, on)
+    }
+
+    /**
+     * KWin's own full screen for [w] (its app's, not the bar's button) while another window is the user's: held
+     * ([Win.fullHeld], [selfFullScreenNow]) instead of covering it. True: held. 11-03 e2e round 213: Broforce (Proton)
+     * re-asserts its full screen whenever Wine recomputes its states (another window opening, a fold): it covered Kate
+     * just opened in front - every tap the game's, the dock's minimise and Calculator's launch never reached the page.
+     */
+    private fun heldFullScreen(w: Win): Boolean {
+        if (w.linuxFull || w.fullAsked) return false
+        val open = wins.values.filter { !it.closed && !it.minimised && it.leftAt == 0L }.map { it.id }
+        if (selfFullScreenNow(w.id, focused, open, pendingLinux.isNotEmpty())) return false
+        w.fullHeld = true
+        WindowLog.i(TAG, "window ${w.id}: KWin window ${w.linux?.kwin} went full screen by itself behind window $focused: held until the user comes to it")
+        return true
     }
 
     // ---- Linux windows that draw their own frame (CSD: Brave, Chrome, Steam, GTK header bars; kwin 0046) -------------
@@ -3918,6 +3952,25 @@ class WebWindows(
             bar: Int,
             immersive: Boolean = false,
         ): Int = if (immersive) 0 else bar.coerceIn(0, h / 4)
+
+        /**
+         * KWin says window [id]'s app put it full screen by itself (not the bar's button): cover the screen now only
+         * when it is the user's window - [focused] (the last pressed or newest-opened window, -1: home) is it, or home
+         * has the user and it is the newest of the [open] windows (not minimised) with no new one [coming] (offered by
+         * KWin, not open yet). A window in the background - a game Wine re-asserts full screen for whenever another
+         * window opens or the screen folds - waits for the user instead ([Win.fullHeld]).
+         */
+        fun selfFullScreenNow(
+            id: Int,
+            focused: Int,
+            open: List<Int>,
+            coming: Boolean = false,
+        ): Boolean {
+            if (id !in open) return false
+            if (focused == id) return true
+            if (focused in open) return false
+            return !coming && open.max() == id
+        }
 
         private val STEAM_GAME_CLASS = Regex("steam_app_\\d+")
 
