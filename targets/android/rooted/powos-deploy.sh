@@ -305,6 +305,14 @@ if [ -d $A ]; then
     cp "$p" $R/tmp/ && chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/sh -c "pacman -U --noconfirm --needed --overwrite /usr/local/bin/Xwayland /tmp/${p##*/} >/dev/null && rm -f /tmp/${p##*/}" &&
       echo "xwayland-kgsl: $(chroot $R /usr/bin/pacman -Q xwayland-kgsl 2>/dev/null)"
   done
+  # Turnip, our package (pkgs/vulkan-freedreno-kgsl): --ask 4 replaces Arch's vulkan-freedreno (whose files the rootfs
+  # build had overwritten with the same lfdevs Mesa). New Vulkan processes load it; a running game keeps its copy.
+  # powos-units: pkg:vulkan-freedreno-kgsl
+  for p in $A/vulkan-freedreno-kgsl-*.pkg.tar.*; do
+    [ -e "$p" ] || continue; older vulkan-freedreno-kgsl "$p" && continue
+    cp "$p" $R/tmp/ && chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/sh -c "pacman -U --noconfirm --ask 4 --needed /tmp/${p##*/} >/dev/null && rm -f /tmp/${p##*/}" &&
+      echo "vulkan-freedreno-kgsl: $(chroot $R /usr/bin/pacman -Q vulkan-freedreno-kgsl 2>/dev/null)"
+  done
   # KWin, our package (pkgs/kwin: the Anland backend). The running session keeps its KWin until it restarts.
   # powos-units: pkg:kwin
   for p in $A/kwin-*.pkg.tar.*; do

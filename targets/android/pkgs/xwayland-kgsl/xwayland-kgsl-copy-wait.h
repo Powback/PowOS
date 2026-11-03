@@ -5,11 +5,13 @@
  * Why: Broforce on KGSL (2026-11-03 19:02, bf-overlay-watch.sh) left 7 of 90 of Xwayland's OWN copies of the game
  * window checkered black (1.4-2.1 %, clean 0.06 %): the copy read the game's swapchain image before the game's GPU
  * had finished writing it, with 0008's wait in place. The wait only waits when the dma-buf carries a pending
- * client fence: a buffer that carries none (a stub - the client's WSI attached nothing) or one that had already
- * signalled is copied at once. These counts say which happens on the device, per copy:
+ * client fence: a buffer whose fence had already signalled, or that carries none, is copied at once. These counts
+ * say which happens on the device, per copy:
  *   waited  the fence was pending: the copy waited for it (how long: sum/max)
  *   drawn   the client's own fence was there and had signalled
- *   stub    no client fence on the buffer (EXPORT_SYNC_FILE gave a stub): nothing to wait on
+ *   stub    EXPORT_SYNC_FILE gave the kernel's stub: the fence had already signalled or there was none. Not "no
+ *           fence attached": kernel patch 0005 (dma_buf_resv_fence, __dma_fence_unwrap_merge) drops signalled fences
+ *           and returns the stub, and Mesa attaches a real KGSL fence on every present (kgsl-fence, 2026-11-03).
  *   failed  the export failed (errno other than ENOTTY)
  * Included by xwayland-glamor-gbm.c / xwayland-present.c (patch 0011) and test/copy-wait-test.c.
  */
@@ -32,7 +34,7 @@ struct xwl_kgsl_copy_wait_stats {
 };
 
 /* The kind of a sync_file's first fence from its driver name (SYNC_IOC_FILE_INFO's sync_fence_info.driver_name):
- * the kernel's stub fence ("stub") means nothing was attached to the buffer. */
+ * the kernel's stub fence ("stub") means nothing unsignalled was on the buffer (signalled, or none). */
 static inline int
 xwl_kgsl_copy_fence_is_stub(const char *driver_name, uint32_t num_fences)
 {
@@ -71,7 +73,7 @@ xwl_kgsl_copy_wait_line(struct xwl_kgsl_copy_wait_stats *s, uint64_t now_us, cha
         return 0;
     snprintf(buf, len,
              "Xwayland KGSL: last %us: %u Present copies from client buffers: %u waited for the client's GPU fence "
-             "(avg %.1f ms, max %.1f ms), %u already drawn, %u with no client fence (stub: copied unsynchronized), "
+             "(avg %.1f ms, max %.1f ms), %u already drawn, %u with the fence already signalled or none (stub), "
              "%u export failures\n",
              (unsigned) ((now_us - s->period_start_us) / 1000000), copies, s->waited,
              s->waits_done ? s->wait_sum_us / 1000.0 / s->waits_done : 0.0, s->wait_max_us / 1000.0,

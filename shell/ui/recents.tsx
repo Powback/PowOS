@@ -23,8 +23,8 @@
  * do have open apps, they're just running in the background ... some button to show the background ones so we can
  * close them as well".
  */
-import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
-import { usePresence } from "./reveal.tsx";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { reducedMotion, springToken, usePresence } from "./reveal.tsx";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import type { BackgroundApp, RecentTask } from "../types.ts";
@@ -745,7 +745,33 @@ function Menu() {
 
 /** No cards: the switcher says so (not a blank screen over home). */
 function Empty({ count, phase }: { count: number; phase: Phase }) {
-  return count || phase === "closed" ? null : <div class="recents-empty">No open apps</div>;
+  // It fades in and out on the spring (§6): the last card cleared, or the first one arriving, swapped it in one frame.
+  const pop = usePresence(!count && phase !== "closed");
+  return pop.on ? <div class={`recents-empty ${pop.leaving ? "leaving" : ""}`}>No open apps</div> : null;
+}
+
+/** [items] by key with the ones just taken out kept while they leave on the spring (§6): a stopped app's row went in one frame. */
+function useLeaving<T extends { key: string }>(items: T[]): { item: T; leaving: boolean }[] {
+  const gone = useRef(new Map<string, { item: T; at: number }>());
+  const last = useRef<T[]>(items);
+  const [, tick] = useState(0);
+  const keys = new Set(items.map((i) => i.key));
+  last.current.forEach((i, at) => {
+    if (!keys.has(i.key) && !gone.current.has(i.key)) gone.current.set(i.key, { item: i, at });
+  });
+  for (const k of keys) gone.current.delete(k);
+  last.current = items;
+  useEffect(() => {
+    if (!gone.current.size) return;
+    const t = setTimeout(() => {
+      gone.current.clear();
+      tick((n) => n + 1);
+    }, reducedMotion() ? 0 : springToken("spring-fast").ms);
+    return () => clearTimeout(t);
+  });
+  const out = items.map((item) => ({ item, leaving: false }));
+  for (const { item, at } of gone.current.values()) out.splice(Math.min(at, out.length), 0, { item, leaving: true });
+  return out;
 }
 
 /**
@@ -756,14 +782,10 @@ function Background({ list }: { list: RecentTask[] }) {
   const apps = backgroundShown(list);
   const open = backgroundOpen.value && apps.length > 0;
   const pop = usePresence(open);
-  if (!apps.length && !pop.on) return null;
+  const rows = useLeaving(apps);
   return (
     <>
-      {apps.length > 0 && (
-        <button type="button" class="recents-bg-toggle" aria-expanded={open} onClick={() => (backgroundOpen.value = !backgroundOpen.value)}>
-          {apps.length} running in background
-        </button>
-      )}
+      <BackgroundToggle count={apps.length} open={open} />
       {pop.on && (
         <div class={`recents-bg tile sheet ${pop.leaving ? "leaving" : ""}`} inert={pop.leaving || undefined} role="list" aria-label="Running in background">
           <div class="recents-bg-head">
@@ -772,8 +794,8 @@ function Background({ list }: { list: RecentTask[] }) {
               Hide
             </button>
           </div>
-          {apps.map((b) => (
-            <div class="recents-bg-app" role="listitem" key={b.key} data-key={b.key}>
+          {rows.map(({ item: b, leaving }) => (
+            <div class={`recents-bg-app ${leaving ? "leaving" : ""}`} inert={leaving || undefined} role="listitem" key={b.key} data-key={b.key}>
               {b.icon ? <img class="recents-bg-icon" src={b.icon} alt="" /> : <span class="recents-bg-icon blank" />}
               <span class="recents-bg-name">{b.label}</span>
               {b.frozen && <span class="recents-bg-state">Asleep</span>}
@@ -785,6 +807,25 @@ function Background({ list }: { list: RecentTask[] }) {
         </div>
       )}
     </>
+  );
+}
+
+/** "N running in background": it comes and goes on the spring (§6) - the list is read after the switcher is up, so it was drawn in one frame. */
+function BackgroundToggle({ count, open }: { count: number; open: boolean }) {
+  const shown = usePresence(count > 0);
+  const last = useRef(count);
+  if (count) last.current = count;
+  if (!shown.on) return null;
+  return (
+    <button
+      type="button"
+      class={`recents-bg-toggle ${shown.leaving ? "leaving" : ""}`}
+      inert={shown.leaving || undefined}
+      aria-expanded={open}
+      onClick={() => (backgroundOpen.value = !backgroundOpen.value)}
+    >
+      {last.current} running in background
+    </button>
   );
 }
 
