@@ -24,6 +24,9 @@ class App : Application() {
         if (Application.getProcessName() == packageName) dev.omalauncher.system.RunningApps.start(this, File(filesDir, "run").takeIf { RootedGuest.enabled })
         // PowOS AI's agents reach the user whenever the app runs (the PowOS session keeps it alive), not only once the
         // launcher has been opened: their notifications with inline replies (AgentMail).
+        // No root, the PowOS image installed: agent mail, the manager's wake and the agents' spool from the image's
+        // session the same way (its XDG_RUNTIME_DIR is the same run/ dir); the rooted-only bridges below stay rooted.
+        startEngineWatchers()
         if (RootedGuest.enabled) {
             AgentMail.start(this, File(filesDir, "run"))
             // Desktop mode switched while the session runs: powos-shell's roles, Plasma's panels and Meta follow at once.
@@ -43,6 +46,15 @@ class App : Application() {
             // The verify queue's status pill while it tests on the phone (tools/phone/verify/queue.sh).
             dev.omalauncher.shell.VerifyRun.start(this, File(filesDir, "run"))
         }
+    }
+
+    /** No root, the image installed: mail, the manager's wake and the agents' spool, as rooted (see onCreate). */
+    private fun startEngineWatchers() {
+        dev.omalauncher.linux.EngineGuest.init(this)
+        if (RootedGuest.enabled || !dev.omalauncher.linux.Guest.enabled) return
+        AgentMail.start(this, File(filesDir, "run"))
+        PowosAiChat.startWake(this, File(filesDir, "run"))
+        AgentsSpool.start(this, File(filesDir, "run"))
     }
 
     /** `powos-desktop-shell desktop on|off` in the PowOS session, off the caller's thread, one at a time; logged. */

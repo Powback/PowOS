@@ -27,7 +27,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import dev.omalauncher.linux.RootedGuest
+import dev.omalauncher.linux.Guest
 import dev.omalauncher.ui.ExtraKeys
 import dev.omalauncher.ui.KeyboardBridge
 import dev.omalauncher.ui.KeyboardSink
@@ -55,7 +55,7 @@ class PowosTerminalActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val command = intent.getStringExtra(EXTRA_COMMAND) ?: RootedGuest.TERMINAL_SHELL
+        val command = intent.getStringExtra(EXTRA_COMMAND) ?: Guest.terminalShell
         val title = intent.getStringExtra(EXTRA_TITLE) ?: "Terminal"
         applySystemBars(this, Palette.isLight)
         @Suppress("DEPRECATION")

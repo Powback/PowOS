@@ -6,7 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import dev.omalauncher.linux.RootedGuest
+import dev.omalauncher.linux.Guest
 import org.json.JSONObject
 import java.io.File
 
@@ -118,7 +118,7 @@ object PowosAiChat {
         description: String,
     ): Boolean {
         load(context)
-        if (busy || description.isBlank() || !RootedGuest.enabled) return false
+        if (busy || description.isBlank() || !Guest.enabled) return false
         val stamp = java.text.SimpleDateFormat("yyMMdd-HHmmss", java.util.Locale.ROOT).format(java.util.Date())
         open(context, Thread("Projects/new-app-$stamp", "New app", "app"))
         send(context, description.trim(), dev.omalauncher.linux.newAppPrompt(description.trim()))
@@ -167,8 +167,8 @@ object PowosAiChat {
             return
         }
         add(Item.User(shown))
-        if (!RootedGuest.enabled) {
-            add(Item.Note("PowOS AI runs in the PowOS session (rooted mode), which isn't set up on this phone.", error = true))
+        if (!Guest.enabled) {
+            add(Item.Note("PowOS AI runs in PowOS Linux, which ${Guest.NEEDS_IMAGE}.", error = true))
             return
         }
         busy = true
@@ -197,7 +197,7 @@ object PowosAiChat {
      */
     fun inboxArrived(context: Context) {
         load(context)
-        if (!RootedGuest.enabled) return
+        if (!Guest.enabled) return
         // A thread is open: the inbox's turn is the main conversation's, once the thread is closed.
         if (busy || thread != null) {
             inboxWaiting = true
@@ -233,7 +233,7 @@ object PowosAiChat {
                 val mode = if (prompt == null) "--once-inbox" else "--once-stdin"
                 // The open thread's own directory (a fresh one, a fresh manager session), else home's.
                 val cd = thread?.dir?.let { "mkdir -p ~/$it && cd ~/$it" } ?: "cd ~"
-                val process = RootedGuest.process("$cd && exec powos manager $mode --json-events", mergeErrors = false).start()
+                val process = Guest.process("$cd && exec powos manager $mode --json-events", mergeErrors = false).start()
                 Thread({
                     process.errorStream.bufferedReader().forEachLine {
                         synchronized(errors) {
