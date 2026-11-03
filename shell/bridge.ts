@@ -27,6 +27,7 @@ import type {
   Home,
   HomeItem,
   NotificationList,
+  PrivacyList,
   PhoneNotification,
   RecentTask,
   RunState,
@@ -213,6 +214,10 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       token: (types) => call<{ token: string }>("health.token", types), // detect
       changes: (types, token) =>
         call<{ token: string; records: HealthRecord[]; deleted: string[]; expired: boolean }>("health.changes", types, token), // detect
+    },
+    privacy: {
+      list: () => call<PrivacyList>("privacy.list"),
+      open: (pkg) => call<boolean>("privacy.open", pkg),
     },
     notifications: {
       list: () => call<NotificationList>("notifications.list"),
@@ -890,6 +895,11 @@ function mock(): Bridge {
       liveState: async () => liveMock,
       filmstrip: async () => "/run/powos-app/powos-ai-shared/live-mock.jpg",
       touchable: async (rect) => console.log("[mock] touchable", rect),
+    },
+    // Nothing in use: a check feeds uses by hand (__mockEvents.emit("privacy.changed", ...), gate.mjs privacyRowCheck).
+    privacy: {
+      list: async () => ({ now: Date.now(), items: [] }),
+      open: async (pkg) => (console.log("[mock] permissions of", pkg), true),
     },
     // A few made-up notifications; dismissing and clearing work on them.
     notifications: (() => {

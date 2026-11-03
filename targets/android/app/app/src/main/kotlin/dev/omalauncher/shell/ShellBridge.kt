@@ -235,6 +235,10 @@ class ShellBridge(
     /** The wallpaper's picture another one (ShellWallpaper): the page frosts it again. */
     private val wallpaperChanged: () -> Unit = { emit("system.glass", ShellWallpaper.info(context, blurBehind = shade != null || overlay != null, look = false)) }
 
+    /** Who uses the mic / camera / location (the recording light's AppOps watch, one for the app): the shade's privacy row. */
+    private val privacy = dev.omalauncher.system.RecordingWatcher.shared(context)
+    private val privacyChanged: () -> Unit = { emit("privacy.changed", privacyList()) }
+
     /** Android's wallpaper changed (its colors are recomputed for every change), or the theme's background did. */
     private val wallpaperColors = android.app.WallpaperManager.OnColorsChangedListener { _, _ -> ShellWallpaper.refresh(context) }
     private val themeChanged: () -> Unit = { ShellWallpaper.refresh(context) }
@@ -252,6 +256,8 @@ class ShellBridge(
         dev.omalauncher.assist.LiveCapture.onChange = { main.post { emit("assist.live", liveState()) } }
         // An agent told the user something: the PowOS AI page lists it.
         scope.launch { snapshotFlow { AgentMail.recent.toList() }.drop(1).collect { emit("ai.mail", aiMail()) } }
+        // An app started or stopped using the mic / camera / location: the shade's privacy row (ui/privacy.tsx) follows.
+        privacy.watch(privacyChanged)
         // A notification posted or gone: the panel lists them again.
         scope.launch { MediaListener.changes.collect { emit("notifications.changed", notificationList()) } }
         // The terminal font or text size changed (the Style screen, a pinch on a page terminal, style.toml edited): the
@@ -668,6 +674,8 @@ class ShellBridge(
             "pet.overlay" -> dev.omalauncher.system.PetOverlay.enabled(context, if (a.length() == 0 || a.isNull(0)) null else a.optBoolean(0))
             // The shade's window blurs what's behind it itself (ShadeHost): its page only tints.
             "system.glass" -> ShellWallpaper.info(context, blurBehind = shade != null || overlay != null)
+            "privacy.list" -> privacyList()
+            "privacy.open" -> openPermissions(a.getString(0))
             "notifications.list" -> notificationList()
             "notifications.open" -> runtime.widgets.notifications.control("open", a.getString(0))
             "notifications.dismiss" -> runtime.widgets.notifications.control("dismiss", a.getString(0))
@@ -1757,6 +1765,7 @@ class ShellBridge(
         if (webWindowsMade) webWindows.closeAll()
         runCatching { context.getSystemService(android.hardware.display.DisplayManager::class.java).unregisterDisplayListener(displayListener) }
         ShellWallpaper.onChange.remove(wallpaperChanged)
+        privacy.unwatch(privacyChanged)
         runCatching { android.app.WallpaperManager.getInstance(context).removeOnColorsChangedListener(wallpaperColors) }
         dev.omalauncher.theme.ThemeStore.changeListeners.remove(themeChanged)
         screens.close()
@@ -1771,6 +1780,54 @@ class ShellBridge(
         terminals.closeAll()
         scope.cancel()
     }
+
+    /**
+     * The shade's privacy row (ui/privacy.tsx): { now, items: [{ pkg, uid, app, icon, kinds: ["camera"|"screen"|"mic"|
+     * "location"], active, ended, own }] } - one per app using one now, or that stopped within RecordingOps.GRACE_MS
+     * (ended: when, epoch ms). app: its drawer label (else the package's label, else the package); icon: its drawer
+     * icon or null; own: PowOS itself (dictation) - its chip stops it rather than opening a permission page.
+     */
+    private fun privacyList(): JSONObject {
+        val items = JSONArray()
+        for (chip in privacy.chips()) items.put(privacyItem(chip))
+        return JSONObject().put("now", System.currentTimeMillis()).put("items", items)
+    }
+
+    private fun privacyItem(chip: dev.omalauncher.system.RecordingOps.Chip): JSONObject {
+        val own = chip.pkg == context.packageName
+        val user = android.os.UserHandle.getUserHandleForUid(chip.uid)
+        val apps = runtime.androidApps.apps.filter { it.component.packageName == chip.pkg }
+        val app = apps.firstOrNull { it.user == user } ?: apps.firstOrNull()
+        val label = if (own) "PowOS" else app?.label ?: packageLabel(chip.pkg)
+        return JSONObject()
+            .put("pkg", chip.pkg)
+            .put("uid", chip.uid)
+            .put("app", label)
+            .put("icon", app?.takeIf { !own }?.let { icon("a:${it.key}") } ?: JSONObject.NULL)
+            .put("kinds", JSONArray(chip.kinds.map { it.key }))
+            .put("active", chip.active)
+            .put("ended", chip.ended ?: JSONObject.NULL)
+            .put("own", own)
+    }
+
+    /** A package with no drawer entry (a system service): its own label, else its name. */
+    private fun packageLabel(pkg: String): String {
+        val pm = context.packageManager
+        return runCatching { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
+    }
+
+    /**
+     * [pkg]'s page where its camera / mic / location permissions are (a privacy chip's tap): Android's app info, whose
+     * Permissions entry is one tap on. The permission controller's own MANAGE_APP_PERMISSIONS screen would be the page
+     * itself, but it takes GRANT_RUNTIME_PERMISSIONS, which PowOS isn't granted.
+     */
+    private fun openPermissions(pkg: String): Boolean =
+        runCatching {
+            context.startActivity(
+                android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", pkg, null))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }.onFailure { Log.w(TAG, "can't open $pkg's permissions", it) }.isSuccess
 
     /** Stored JSON, passed through as it is. */
     private class RawJson(
