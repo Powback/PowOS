@@ -1,0 +1,37 @@
+{
+  "id": "gpu-fan",
+  "name": "GPU fan curve + power cap (powos-gpu-fan)",
+  "kind": "service",
+  "host": "desktop",
+  "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 nvidia-open, 2x ASUS RTX 3090 blowers 1043:87b3)",
+  "owner": "system:gpu-195",
+  "purpose": "Quiet the blower 3090s: the vBIOS curve holds 53-77% fan at idle. Leaves the vBIOS fan-stop (0% when cool) alone; takes over at >=52 C, or when the vBIOS spins >15 points above the curve (the post-load linger), with an NVML (ctypes, no extra packages) curve 30% at 50 C up to 100% at 83 C, immediate up, 2%/tick down with 3 C hysteresis; hands back at <=47 C for 30 s; 250 W power cap per card (default 350). Any NVML error, exit, or >=87 C hands the card back to its vBIOS curve; stop restores default power limits.",
+  "installedBy": "sudo bash hosts/gpu-195/gpu-fan/install.sh (remove: --remove)",
+  "files": [
+    "/usr/local/bin/powos-gpu-fan",
+    "/etc/systemd/system/powos-gpu-fan.service",
+    "/etc/powos/units.d/gpu-fan.json",
+    "/etc/powos/gpu-fan.json"
+  ],
+  "processes": [
+    {
+      "systemd": "powos-gpu-fan.service"
+    }
+  ],
+  "limits": {
+    "memory": "64m",
+    "cpus": 0.05,
+    "pids": 4
+  },
+  "autosleep": "never",
+  "remove": {
+    "stop": [
+      "sudo systemctl disable --now powos-gpu-fan.service"
+    ],
+    "commands": [
+      "sudo bash hosts/gpu-195/gpu-fan/install.sh --remove"
+    ],
+    "keep": []
+  },
+  "decide": "Tune with /etc/powos/gpu-fan.json (curve, power_limit_w, panic_c), then sudo systemctl restart powos-gpu-fan. Status without root: python3 /usr/local/bin/powos-gpu-fan status."
+}

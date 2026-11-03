@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+"""powos-gpu-fan - temperature fan curve + power cap for NVIDIA GPUs, through NVML (libnvidia-ml, ctypes only).
+
+The ASUS RTX 3090 blowers on gpu-195 stop their fans when cool (0% at 46-50 C, measured 2026-11-03), but after any
+load the vBIOS curve holds 53-77% for minutes at 49-58 C, and runs near 100% under load (docs/GPU-SERVERS-PLAN.md,
+"Noise"). NVML cannot set below the cards' 30% minimum, so this daemon never replaces the silent fan-stop: it leaves a
+card on its vBIOS curve while that is quiet, and takes over with a gentler curve when the card is warm (>= take_c) or
+the vBIOS spins well above the curve (`slack` points). It hands back once the card is cool (<= release_c) for
+`release_hold_s`; if the vBIOS then spins up again, it takes over and waits `retry_s` before the next try. A power
+cap keeps load quieter too.
+
+Safety: the cards' own automatic curve is the fallback for every failure. On exit, SIGTERM, any NVML error on a card,
+or a temperature at/above `panic_c`, that card goes back to the driver default (nvmlDeviceSetDefaultFanSpeed_v2), and
+on panic its fans go to 100%. The power cap is restored to the card's default on stop.
+
+  powos-gpu-fan run              the daemon (root; powos-gpu-fan.service)
+  powos-gpu-fan status           temps, fans, power, limits (no root needed)
+  powos-gpu-fan reset            give every fan back to the vBIOS curve, restore default power limits (root)
+
+Config: /etc/powos/gpu-fan.json (optional) overrides DEFAULTS below, e.g. {"power_limit_w": 280}.
+"""
+import ctypes as C
+import json
+import signal
+import sys
+import time
+from pathlib import Path
+
+CONFIG = Path('/etc/powos/gpu-fan.json')
+DEFAULTS = {
+    # (temperature C, fan %). Below the first point: the first point's fan; above the last: 100%.
+    'curve': [[50, 30], [58, 35], [65, 50], [72, 65], [78, 80], [83, 100]],
+    'take_c': 52,           # control the fans at/above this temperature
+    'release_c': 47,        # hand back to the vBIOS curve (fan-stop) at/below this ...
+    'release_hold_s': 30,   # ... once it has stayed there this long
+    'slack': 15,            # below take_c: take over when the vBIOS fan is this many points above the curve
+    'retry_s': 120,         # after the vBIOS spun up on a hand-back, wait this long before handing back again
+    'panic_c': 87,          # at/above: fans 100% and hand back to the vBIOS curve until it cools below panic-10
+    'down_step': 2,         # max % the fan drops per tick (up is immediate)
+    'hysteresis_c': 3,      # the fan only drops once the temp is this far below the temp that set the current speed
+    'interval_s': 2.0,
+    'power_limit_w': 250,   # per card; null = leave the driver's limit alone
+}
+
+NVML_TEMPERATURE_GPU = 0
+OK = 0
+nv = None
+
+
+def load_config():
+    cfg = dict(DEFAULTS)
+    if CONFIG.is_file():
+        cfg.update(json.loads(CONFIG.read_text()))
+    cfg['curve'] = sorted((float(t), float(f)) for t, f in cfg['curve'])
+    return cfg
+
+
+def nvml():
+    global nv
+    if nv is None:
+        nv = C.CDLL('libnvidia-ml.so.1')
+        check(nv.nvmlInit_v2(), 'nvmlInit_v2')
+    return nv
+
+
+def check(rc, what):
+    if rc != OK:
+        nv.nvmlErrorString.restype = C.c_char_p
+        raise RuntimeError(f'{what}: {nv.nvmlErrorString(rc).decode()} ({rc})')
+
+
+def u(fn, *args):
+    out = C.c_uint()
+    check(getattr(nvml(), fn)(*args, C.byref(out)), fn)
+    return out.value
+
+
+class Gpu:
+    def __init__(self, index):
+        self.index = index
+        self.h = C.c_void_p()
+        check(nvml().nvmlDeviceGetHandleByIndex_v2(index, C.byref(self.h)), 'GetHandleByIndex')
+        self.fans = u('nvmlDeviceGetNumFans', self.h)
+        lo, hi = C.c_uint(), C.c_uint()
+        check(nv.nvmlDeviceGetMinMaxFanSpeed(self.h, C.byref(lo), C.byref(hi)), 'GetMinMaxFanSpeed')
+        self.fan_min, self.fan_max = lo.value, hi.value
+        self.default_pl = u('nvmlDeviceGetPowerManagementDefaultLimit', self.h)
+        self.set_fan = None      # last speed we set; None = vBIOS curve
+        self.set_at_c = None     # temperature that set it
+        self.panicked = False
+        self.cool_since = None   # when the temp first sat at/below release_c while we controlled the fans
+        self.no_release_until = 0.0
+        self.released_at = None  # when we last handed back (to catch the vBIOS spinning straight up)
+
+    def temp(self):
+        return u('nvmlDeviceGetTemperature', self.h, NVML_TEMPERATURE_GPU)
+
+    def fan(self, i):
+        return u('nvmlDeviceGetFanSpeed_v2', self.h, i)
+
+    def power_w(self):
+        return u('nvmlDeviceGetPowerUsage', self.h) / 1000
+
+    def limit_w(self):
+        return u('nvmlDeviceGetPowerManagementLimit', self.h) / 1000
+
+    def apply(self, pct):
+        pct = int(max(self.fan_min, min(self.fan_max, round(pct))))
+        for i in range(self.fans):
+            check(nv.nvmlDeviceSetFanSpeed_v2(self.h, i, pct), 'SetFanSpeed_v2')
+        self.set_fan = pct
+
+    def to_default(self):
+        for i in range(self.fans):
+            nvml().nvmlDeviceSetDefaultFanSpeed_v2(self.h, i)   # best effort: this IS the failure path
+        self.set_fan = None
+        self.set_at_c = None
+
+    def cap(self, watts):
+        check(nv.nvmlDeviceSetPowerManagementLimit(self.h, int(watts * 1000)), 'SetPowerManagementLimit')
+
+    def uncap(self):
+        nvml().nvmlDeviceSetPowerManagementLimit(self.h, self.default_pl)
+
+
+def curve_at(curve, t):
+    if t <= curve[0][0]:
+        return curve[0][1]
+    for (t0, f0), (t1, f1) in zip(curve, curve[1:]):
+        if t <= t1:
+            return f0 + (f1 - f0) * (t - t0) / (t1 - t0)
+    return 100.0
+
+
+def gpus():
+    return [Gpu(i) for i in range(u('nvmlDeviceGetCount_v2'))]
+
+
+def log(*a):
+    print(*a, flush=True)
+
+
+def run():
+    cfg = load_config()
+    cards = gpus()
+    stop = []
+
+    def bye(*_):
+        stop.append(1)
+    signal.signal(signal.SIGTERM, bye)
+    signal.signal(signal.SIGINT, bye)
+
+    for g in cards:
+        log(f'gpu{g.index}: {g.fans} fans, range {g.fan_min}-{g.fan_max}%, default power {g.default_pl / 1000:.0f} W')
+        if cfg['power_limit_w']:
+            try:
+                g.cap(cfg['power_limit_w'])
+                log(f'gpu{g.index}: power limit {cfg["power_limit_w"]} W')
+            except RuntimeError as e:
+                log(f'gpu{g.index}: power cap not set: {e}')
+    try:
+        while not stop:
+            for g in cards:
+                try:
+                    tick(g, cfg)
+                except RuntimeError as e:
+                    log(f'gpu{g.index}: {e}; back to the vBIOS curve')
+                    g.to_default()
+            time.sleep(cfg['interval_s'])
+    finally:
+        for g in cards:
+            g.to_default()
+            if cfg['power_limit_w']:
+                g.uncap()
+        log('stopped: fans on the vBIOS curve, default power limits')
+
+
+def tick(g, cfg):
+    t = g.temp()
+    if t >= cfg['panic_c']:
+        if not g.panicked:
+            log(f'gpu{g.index}: {t} C >= {cfg["panic_c"]} C: fans 100%, then the vBIOS curve')
+            g.apply(100)
+            g.to_default()
+            g.panicked = True
+        return
+    if g.panicked:
+        if t > cfg['panic_c'] - 10:
+            return
+        log(f'gpu{g.index}: cooled to {t} C, curve back on')
+        g.panicked = False
+    now = time.monotonic()
+    want = curve_at(cfg['curve'], t)
+    cur = g.set_fan
+    if cur is None:
+        # vBIOS curve: leave it while quiet; take over when warm, or when it is much louder than the curve.
+        vbios = g.fan(0)
+        if t >= cfg['take_c'] or vbios > want + cfg['slack']:
+            if g.released_at is not None and now - g.released_at < 30:
+                g.no_release_until = now + cfg['retry_s']   # handing back just made it spin up: back off
+            log(f'gpu{g.index}: {t} C, vBIOS fan {vbios}%: curve {want:.0f}%')
+            g.apply(want)
+            g.set_at_c = t
+            g.cool_since = None
+        return
+    if t <= cfg['release_c'] and now >= g.no_release_until:
+        g.cool_since = g.cool_since or now
+        if now - g.cool_since >= cfg['release_hold_s']:
+            log(f'gpu{g.index}: {t} C: back to the vBIOS curve (fan-stop)')
+            g.to_default()
+            g.released_at = now
+            return
+    else:
+        g.cool_since = None
+    if want > cur:
+        g.apply(want)
+        g.set_at_c = t
+    elif want < cur and t <= g.set_at_c - cfg['hysteresis_c']:
+        g.apply(max(want, cur - cfg['down_step']))
+        if g.set_fan <= want + 0.5:
+            g.set_at_c = t
+
+def status():
+    for g in gpus():
+        fans = []
+        for i in range(g.fans):
+            try:
+                fans.append(f'{g.fan(i)}%')
+            except RuntimeError:
+                fans.append(f'{u("nvmlDeviceGetFanSpeed", g.h)}%')
+        print(f'gpu{g.index}: {g.temp()} C, fans {" ".join(fans)}, {g.power_w():.0f} W of {g.limit_w():.0f} W '
+              f'(default {g.default_pl / 1000:.0f} W)')
+
+
+def reset():
+    for g in gpus():
+        g.to_default()
+        g.uncap()
+    print('fans on the vBIOS curve, default power limits')
+
+
+if __name__ == '__main__':
+    cmd = sys.argv[1] if len(sys.argv) > 1 else 'status'
+    {'run': run, 'status': status, 'reset': reset}.get(cmd, lambda: sys.exit(__doc__))()
