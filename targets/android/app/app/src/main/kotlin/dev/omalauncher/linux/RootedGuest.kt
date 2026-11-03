@@ -75,7 +75,7 @@ object RootedGuest {
      * the app's pipes: stdin from /dev/null, stdout and stderr appended to `$XDG_RUNTIME_DIR/launch/<name>.log`
      * (restarted past 4 MB). While it runs its new output is relayed to [onLine]; returns its exit code, like [runOwn].
      *
-     * Never `runOwn("exec <program>")`: the program would hold the app's pipe, and once the app restarts (an APK update)
+     * Never `runOwn("exec <program>")`: the program would hold the app's pipe; once the app restarts (an APK update)
      * that pipe has no reader - whatever the program, and every child it hands its fds to, writes next gets SIGPIPE.
      * Steam passed it on to every game it started: Broforce 2026-11-03 ended ~10 s after each launch (7decee44 fixed it
      * in powos-open-task; targets/android/docs/powos-window-tasks.md "Output" has the rule). Short commands whose
