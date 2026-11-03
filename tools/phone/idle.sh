@@ -12,12 +12,16 @@
 # epoch of the last counter change to /data/local/tmp/powos-lasttouch. Right after it starts, idle counts from then
 # (conservative). The watcher is ephemeral, not a service: it exits by itself when idle.sh hasn't asked for 30 min
 # (each call touches /data/local/tmp/powos-touchmon.ask), so nothing stays running on the phone between sessions.
-# Not covered: a Bluetooth gamepad (no IRQ of its own) - check act= too if a pad is connected.
+# Pads and keyboards (USB, Bluetooth via uhid, the app's padd pad Steam reads) count too: the watcher also reads every
+# /dev/input device's events (getevent) - all but uinput-made virtual ones (injected input) other than pads/keyboards,
+# and the haptics motor.
 #
 #   tools/phone/idle.sh --wait IDLE_S MAX_S   one call that RETURNS when the phone is free: the screen off
 #        (Asleep/Dozing), or Awake with no touch for IDLE_S; exit 1 after MAX_S without that. The waiting runs ON THE
 #        PHONE (a local 5 s check) over one held adb connection - no VPN round trip per check. Agents never poll the
 #        phone in loops (docs/AGENT-HANDBOOK.md); this is what to call instead.
+#        A Steam game running with the screen on is the user playing: not free until GAME_IDLE_S (900) s without any
+#        input; then it is, and the answer ends in " game=away" (queue.sh skips jobs that would close the game).
 #        AWAKE_ONLY=1: return only for Awake + idle (a check that needs the screen on waits through doze; never wakes it).
 #        VERIFY_GO=1: also return "go=<task|all> screen=<..>" (respecting AWAKE_ONLY) when the AI page's "test now" wrote PowOS's
 #        /tmp/powos-verify-go (the user hands the phone over; tools/phone/verify/queue.sh's runner clears it), and
@@ -33,7 +37,7 @@ if [ "${POWOS_DEVICE:-phone}" = emu ]; then echo "idle=86400 screen=Awake act=86
 # that reads as busy or free. --wait keeps waiting for it to come back (checked every 30 s on the Mac, no adb call).
 if [ "${1:-}" != "--wait" ] && ! "$here/adb.sh" --vpn-state >/dev/null; then echo "offline"; exit 69; fi
 if [ "${1:-}" = "--wait" ]; then
-  need=${2:-60}; max=${3:-600}; awake=${AWAKE_ONLY:-0}; go=${VERIFY_GO:-0}; only=${GO_ONLY:-0}
+  need=${2:-60}; max=${3:-600}; gidle=$(( ${GAME_IDLE_S:-900} + 0 )); awake=${AWAKE_ONLY:-0}; go=${VERIFY_GO:-0}; only=${GO_ONLY:-0}
   st=$(printf %s "${VERIFY_STATE:-}" | tr -cd 'a-z'); hb=/data/local/tmp/powos-verify-runner
   # Awake counts only once the screen has been ON for IDLE_S too: after a long sleep the last touch is hours old, so
   # "no touch for IDLE_S" alone said free the moment the user woke the phone to use it.
@@ -68,8 +72,13 @@ if [ "${1:-}" = "--wait" ]; then
       # [r]: the pattern must not match this loop's own command line (it did, so nothing was ever free, 00:3x 2026-10-24).
       # Screen on only: with the screen off nobody is playing, and an APK install keeps the Linux session and its game
       # (2026-10-29: Broforce left running in the background held every install back for an hour, screen dozing).
-      [ \$w = Awake ] && pgrep -f '[r]eaper SteamLaunch' >/dev/null 2>&1 && { on=0; sleep 5; continue; }
-      [ "$only" = 1 ] || case \$w in Asleep|Dozing) [ "$awake" = 1 ] || { echo idle=\$t screen=\$w; exit 0; } ;; Awake) [ \$t -ge $need ] && [ \$a -ge $need ] && { echo idle=\$t screen=\$w; exit 0; } ;; esac
+      # But only while someone is there: no touch/pad/key input for GAME_IDLE_S (900) means the user left it (11-03:
+      # Broforce went black at 00:05 and was left running, the screen kept Awake, and no window came all night - 15 checks
+      # and installs blocked). That window says game=away: the runner then skips every job that would close the game or
+      # Steam (queue.sh, closes_game); the rest may cover it, it stays running.
+      g=; [ \$w = Awake ] && pgrep -f '[r]eaper SteamLaunch' >/dev/null 2>&1 && g=' game=away'
+      [ -n \"\$g\" ] && [ \$t -lt $gidle ] && { on=0; sleep 5; continue; }
+      [ "$only" = 1 ] || case \$w in Asleep|Dozing) [ "$awake" = 1 ] || { echo idle=\$t screen=\$w; exit 0; } ;; Awake) [ \$t -ge $need ] && [ \$a -ge $need ] && { echo idle=\$t screen=\$w\$g; exit 0; } ;; esac
       sleep 5
     done; echo timeout" 2>/dev/null | tr -d '\r' | tail -1)
   [ -n "$out" ] && break
@@ -97,7 +106,9 @@ if [ "${1:-}" = --ensure ]; then
   if [ $live = 0 ] || [ -z "$l" ]; then
     # A watcher that wasn't running didn't see the touches since: its old lasttouch is untrusted as well.
     [ $live = 1 ] && kill $p 2>/dev/null
-    rm -f $d/powos-touchmon.pid $d/powos-lasttouch; l=
+    # Its getevent reader too (a reused pid is only killed if it really is getevent).
+    g=$(cat $d/powos-touchmon.gpid 2>/dev/null); case x$g in x|x*[!0-9]*) ;; *) tr '\0' ' ' < /proc/$g/cmdline 2>/dev/null | grep -q '^getevent' && kill $g 2>/dev/null ;; esac
+    rm -f $d/powos-touchmon.pid $d/powos-touchmon.gpid $d/powos-lasttouch; l=
     nohup sh $d/powos-touchmon.sh >/dev/null 2>&1 &
     echo touchmon=restarted
   fi
@@ -105,13 +116,28 @@ if [ "${1:-}" = --ensure ]; then
   exit 0
 fi
 echo $$ > $d/powos-touchmon.pid
-prev=""
+# Every input device, not only the panels: a pad or keyboard game is played without a touch (11-03). getevent appends
+# "/dev/input/eventN: type code value" lines to powos-input.ev; each 2 s look keeps the devices that are a person's
+# (powos-input.devs: real hardware, or a virtual pad/keyboard - uinput-made touch/nav devices are injected input) and
+# empties the file. getevent missing or dead: the panel IRQ counters still work alone (restarted on the next look).
+devs() { for e in /sys/class/input/event*; do
+    [ -e "$e" ] || continue; n=$(cat $e/device/name 2>/dev/null)
+    case "$n" in *[Hh]aptic*) continue ;; esac
+    case "$(readlink -f $e)" in */devices/virtual/input/*) echo "$n" | grep -qiE 'pad|controller|joystick|keyboard|mouse' || continue ;; esac
+    echo "/dev/input/${e##*/}: "
+  done > $d/powos-input.devs; }
+gp=; prev=""; i=0
 while [ $(( $(date +%s) - $(stat -c %Y $d/powos-touchmon.ask 2>/dev/null || echo 0) )) -lt 1800 ]; do
+  [ $(( i % 30 )) = 0 ] && devs; i=$(( i + 1 ))
+  { [ -n "$gp" ] && kill -0 $gp 2>/dev/null; } || { : > $d/powos-input.ev; getevent -q >> $d/powos-input.ev 2>/dev/null & gp=$!; echo $gp > $d/powos-touchmon.gpid; }
   c=$(awk '/touch-0/{for(i=2;i<=NF;i++) if($i ~ /^[0-9]+$/) s+=$i; else break} END{print s}' /proc/interrupts)
-  [ "$c" != "$prev" ] && { date +%s > $d/powos-lasttouch; prev=$c; }
+  ev=0; [ -s $d/powos-input.ev ] && [ -s $d/powos-input.devs ] && grep -qF -f $d/powos-input.devs $d/powos-input.ev && ev=1
+  : > $d/powos-input.ev
+  { [ "$c" != "$prev" ] || [ $ev = 1 ]; } && { date +%s > $d/powos-lasttouch; prev=$c; }
   sleep 2
 done
-rm -f $d/powos-touchmon.pid
+[ -n "$gp" ] && kill $gp 2>/dev/null
+rm -f $d/powos-touchmon.pid $d/powos-touchmon.gpid $d/powos-input.ev
 EOF
 "$here/adb.sh" shell 'touch /data/local/tmp/powos-touchmon.ask; su -c "sh /data/local/tmp/powos-touchmon.sh --ensure";
   dumpsys power | grep -m1 -E "^ *lastUserActivityTime="; dumpsys power | grep -m1 mWakefulness=' 2>/dev/null | tr -d '\r' |

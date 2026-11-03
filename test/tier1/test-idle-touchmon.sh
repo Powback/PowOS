@@ -78,5 +78,29 @@ if [ $rc = 0 ] && grep -q '^idle=4[5-9] screen=Awake$' <<<"$out"; then
   ok "--wait with an empty lasttouch: the sample reads act ($out), not 0 / an arithmetic error"
 else bad "--wait with an empty lasttouch" "rc=$rc out=$out"; fi
 
+# 5./6. A game running with the screen on (2026-10-23: a check closed My Friend Pedro after 2 min without a touch;
+# 11-03: Broforce left frozen and running held every window all night). The real watcher is live (777), so idle comes
+# from lasttouch. A pgrep stub stands in for `reaper SteamLaunch`.
+cat > "$T/bin/pgrep" <<'EOF2'
+#!/bin/sh
+case "$*" in *SteamLaunch*) [ -e "${GAME_FLAG:-/nonexistent}" ] ;; *) exit 1 ;; esac
+EOF2
+chmod +x "$T/bin/pgrep"; : > "$T/game"; export GAME_FLAG=$T/game
+echo 777 > "$T/dlt/powos-touchmon.pid"; echo $(( $(date +%s) - 60 )) > "$T/dlt/powos-lasttouch"
+run --wait 0 12
+if [ $rc = 1 ] && [ "$out" = timeout ]; then
+  ok "game running + a touch 60 s ago: not free ($out)"
+else bad "game running + a touch 60 s ago" "rc=$rc out=$out"; fi
+echo 777 > "$T/dlt/powos-touchmon.pid"; echo $(( $(date +%s) - 1000 )) > "$T/dlt/powos-lasttouch"
+run --wait 0 12
+if [ $rc = 0 ] && grep -q '^idle=10[0-9][0-9] screen=Awake game=away$' <<<"$out"; then
+  ok "game running + no input for 1000 s: free, marked game=away ($out)"
+else bad "game running + no input for 1000 s" "rc=$rc out=$out"; fi
+# The watcher reads every input device, not only the touch panels' IRQs (a pad/keyboard game has no touch).
+if grep -q 'getevent -q' "$src/tools/phone/idle.sh" && grep -q 'powos-input.devs' "$src/tools/phone/idle.sh"; then
+  ok "the watcher counts /dev/input events (pads, keyboards) too"
+else bad "the watcher counts only the touch panels"; fi
+rm -f "$T/game"
+
 [ $fails = 0 ] && echo "all passed" || echo "$fails failed"
 exit $(( fails > 0 ))

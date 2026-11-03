@@ -536,11 +536,24 @@ EOS
   # its ship never blocks the ones behind it (11-02: the head job's "waits for its ship" held the queue while the ship
   # service waited on a dozing phone): it's skipped here, every runnable job behind it runs, and it's looked at again
   # next window. A "test now" of exactly its task runs it anyway. Sources each job: call it in a subshell or the window's.
+  # AWAY=1 (the window came with " game=away": a game left running, nobody's input for GAME_IDLE_S, idle.sh): a job that
+  # would close the game or Steam (closes_game) is skipped and stays queued - counted as held; covering it is fine.
+  # A "test now" (go) runs everything: the user handed the phone over.
+  # closes_game <cmd...>: a games/Steam check by name (HW_ONLY's games part), or a script that stops the game, Steam or
+  # the session (bf-stop, pkill steam/reaper, kwin_restart / kwin_up, power logout).
+  closes_game() { local a f
+    for a in "$@"; do
+      basename -- "$a" 2>/dev/null | grep -qiE '^(bf-|steam-|td-launch|mc-launch|games?-)' && return 0
+      f=$a; [ -f "$f" ] || f=$VR/$a; [ -f "$f" ] || continue
+      grep -qE "bf-stop|kwin_restart|kwin_up|power logout|pkill[^|;]*(steam|reaper|SteamLaunch)|killall[^|;]*steam|force-stop[^|;]*steam" "$f" 2>/dev/null && return 0
+    done; return 1; }
   select_jobs() { local go=$1 j; sel=(); held=0
     for j in "$Q"/*.job; do
       [ -f "$j" ] || continue
-      task=; need=; qt=0; . "$j"
+      task=; need=; qt=0; cwd=; rel=0; cmd=(); . "$j"
       [ -z "$go" ] || [ "$go" = all ] || [ "$task" = "$go" ] || continue
+      if [ -z "$go" ] && [ "${AWAY:-0}" = 1 ] && ( [ "$rel" = 1 ] && cd "$VR/$cwd" 2>/dev/null || cd "$cwd" 2>/dev/null; closes_game "${cmd[@]}" ); then
+        held=$((held + 1)); echo "$(date +%T) $(basename "$j" .job): would close the game left running (nobody playing) - skipped, stays queued"; continue; fi
       if [ "$task" != "$go" ] && ! shipped "$need" "$qt"; then held=$((held + 1)); echo "$(date +%T) $(basename "$j" .job): waits for its ship (${need:0:9}) - skipped, the jobs behind it run"; continue; fi
       sel+=("$j")
     done; }
@@ -568,6 +581,7 @@ EOS
       [ -n "$wpp" ] && endjob "$wpp"
       rm -f "$Q/paused"; RSTATE=running   # a go ends a pause
       go=; case "${WL_GOT:-}" in go=*) go=${WL_GOT#go=}; go=${go%% *} ;; esac
+      AWAY=0; case "${WL_GOT:-}" in *game=away*) AWAY=1; echo "$(date +%T) a game is running with nobody playing: checks leave it alone" ;; esac
       select_jobs "$go"
       N=${#sel[@]}; k=0; pass=0; fail=0; first=; prev=; results=
       [ $N -gt 0 ] || { status "" '{"done":true}' "rm -f /tmp/powos-verify-go"; [ $held = 0 ] && exit 5; exit 7; }
