@@ -127,8 +127,11 @@ export function usePresence(open: boolean, ms?: number) {
   useLayoutEffect(() => {
     if (open) return void setOn(true);
     if (reducedMotion()) return void setOn(false);
-    const t = setTimeout(() => setOn(false), ms ?? springToken("spring-fast").ms);
-    return () => clearTimeout(t);
+    // The exit's time counts from its first painted frames, not the close: under load the frames came later than the
+    // timer and the element left unseen in the frame of the close (gate ai-no-popin, 11-03: a pop-out).
+    let t = 0, f = 0;
+    f = requestAnimationFrame(() => (f = requestAnimationFrame(() => (t = window.setTimeout(() => setOn(false), ms ?? springToken("spring-fast").ms)))));
+    return () => (cancelAnimationFrame(f), clearTimeout(t));
   }, [open, ms]);
   return { on: open || on, leaving: !open && on };
 }
