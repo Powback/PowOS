@@ -1144,14 +1144,39 @@ function lastOfSplit(id: number) {
   fullScreen(id);
 }
 
-/** A new window on [page] takes the first empty tile of its tiling. */
+/**
+ * A new window on [page] takes the first empty tile of its tiling - or, with no tiling there, the free half beside the
+ * page's one window snapped to a left or right half (SF1, ask 1a1a1004151, 11-03: "When one window is docked to the
+ * side and I open another window. It should be docked to other side."): the two become a real 2-split.
+ */
 function fillEmptyTile(page: number, id: number) {
   const t = tilings.value[page];
-  const i = t?.ids.indexOf(null) ?? -1;
-  if (!t || i < 0) return;
+  if (!t) return fillOtherHalf(page, id);
+  const i = t.ids.indexOf(null);
+  if (i < 0) return;
   const ids = [...t.ids];
   ids[i] = id;
   setTiling(page, { ...t, ids });
+}
+
+/**
+ * SF1: new window [id] on [page] (no tiling there) docked to the free side: when exactly one other shown window there
+ * is snapped alone to a left or right half ([aloneHalf]), the two tile as a 2h split, the snapped one keeping its side
+ * (its frame unchanged: a half of a 2h split at 0.5 is the same rect). A floating or maximised window, top/bottom
+ * halves, or both halves taken (two lone halves): the new window floats as before.
+ */
+function fillOtherHalf(page: number, id: number) {
+  const halves = floatingOn(page, [id]).flatMap((o) => {
+    const w = webWins.value.find((v) => v.id === o);
+    const half = w && aloneHalf(w);
+    return half?.layout === "2h" ? [{ id: o, i: half.i }] : [];
+  });
+  if (halves.length !== 1) return;
+  const [a] = halves;
+  const ids = a.i === 0 ? [a.id, id] : [id, a.id];
+  setTiling(page, { layout: "2h", ids, rx: 0.5, ry: 0.5 });
+  raise(id);
+  console.info(`[tiles] page ${page}: window ${id} opened beside window ${a.id}'s ${a.i ? "right" : "left"} half -> 2h [${ids.join(",")}]`);
 }
 
 // ---- GL1: a dragged window docked into the tiles (Golden Layout's model; the zones: ui/tiledrop.ts) -------------------
