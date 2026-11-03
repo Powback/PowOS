@@ -50,6 +50,13 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   "changes" use it (both got no frame before). td-launch-phone.sh's window.png still uses x11grab. Half-drawn = dark px
   `c<30 && min4nb>c+50`.
 - Budget 300 s per job (never raised): one bf-checker variant (~4 min) or one bf-pacing mode per job.
+- Overlay flicker (2026-11-03 18:44, user: "flickering black ... when I use an overlay like the volume button or the gamepad"):
+  their screenshots score 1.3-16.7 % black checker (bf-checker.py --frames; clean < 0.5 %), worst with the volume panel
+  up; black 16x4 blocks / 16-px columns every 48 px in the X window's orientation (task buffers are pre-rotated 90 deg)
+  = a buffer read mid-GPU-write upstream of KWin's task render, not a resize/black frame. bufinfo: the game's swapchain
+  dma-bufs DO carry its kgsl write fence (0008's wait is live). Decider, read-only while the user plays: `bf-overlay-watch.sh
+  [secs]` (X frames checker vs overlay timeline + dma-buf writers + session log): X frames checkered -> game->glamor copy;
+  clean -> KWin sampling Xwayland's buffer / SurfaceFlinger.
 - Render bisect: `bf-checker.sh [variant]...` (~4 min each; TU_DEBUG via Proton user_settings.py / dxvk.conf): black-checker score, menu fps, DXVK log.
 - Unity prefs: pfx `user.reg` `[Software\\Free Lives\\Broforce]`. Steam login: a session crash can set loginusers.vdf
   AutoLogin 0 ("Service Unavailable") -> 1 with Steam off.

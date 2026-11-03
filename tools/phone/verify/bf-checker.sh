@@ -79,4 +79,4 @@ for v in "$@"; do
 done
 echo "== done $(date +%T)"; restore
 pill "scoring the black checker: $(echo "${done_v[*]}" | sed 's/ / vs /g')"
-python3 "$here/bf-checker.py" "$OUT" "${done_v[@]}"
+uv run --quiet --with numpy python3 "$here/bf-checker.py" "$OUT" "${done_v[@]}"

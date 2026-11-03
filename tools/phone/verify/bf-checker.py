@@ -45,7 +45,44 @@ def score(g):
     return best[0], best[1], 100.0 * b.mean()
 
 
+def frame_times(xd):
+    """h<n>.png -> seconds of the day: grab.log stamps every 10th frame ("<n//10+1> HH:MM:SS ..."); the grab is 1 fps."""
+    stamps, log = {}, os.path.join(xd, "grab.log")
+    for line in open(log) if os.path.exists(log) else []:
+        p = line.split()
+        if len(p) > 1 and p[0].isdigit():
+            h, m, s = map(int, p[1].split(":"))
+            stamps[int(p[0]) - 1] = h * 3600 + m * 60 + s
+    return lambda n: (stamps[n // 10] + n % 10) if n // 10 in stamps else None
+
+
+def frames(xd, timeline):
+    """--frames <x dir> <timeline.txt> (bf-overlay-watch.sh): each X frame's checker score, and whether an overlay
+    was up within 1 s of it (timeline lines "HH:MM:SS overlay=<layers|none> ...")."""
+    up = {}
+    for line in open(timeline):
+        p = line.split()
+        if len(p) > 1 and p[1].startswith("overlay="):
+            h, m, s = map(int, p[0].split(":"))
+            up[h * 3600 + m * 60 + s] = p[1] != "overlay=none"
+    at, rows = frame_times(xd), []
+    for f, g in sorted(decode(xd).items()):
+        if f[0] != "h":
+            continue
+        t = at(int(f[1:-4]))
+        near = [up[u] for u in (t - 1, t, t + 1) if u in up] if t is not None else []
+        rows.append((f, score(g)[0], any(near) if near else None))
+        print("%s %.2f%% overlay=%s" % (f, rows[-1][1], {True: "up", False: "none", None: "?"}[rows[-1][2]]))
+    on = [r for r in rows if r[2]]
+    off = [r for r in rows if not r[2]]
+    print("X frames %d: overlay up %d (checkered >=0.5%%: %d), no overlay %d (checkered %d)"
+          % (len(rows), len(on), sum(r[1] >= 0.5 for r in on), len(off), sum(r[1] >= 0.5 for r in off)))
+
+
 def main():
+    if sys.argv[1:2] == ["--frames"]:
+        frames(sys.argv[2], sys.argv[3])
+        return
     d, vs = sys.argv[1], sys.argv[2:]
     res, lines = {}, []
     for v in vs:
