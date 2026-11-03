@@ -378,6 +378,11 @@ if [ "$CASE" = relaunch ]; then
     KEY=${K%%|*}; LABEL=${K#*|}; n0=$(ntasks "$CALC")
     step window "Calculator as a web window ($A1, $n0 Calculator task(s))"
     sh_ "input keyevent KEYCODE_HOME"; sleep 2; chk home
+    # RC1: the window is on home, so home is in front already and Home on its main page opens the switcher (by design,
+    # home-repeat.sh); Home again closes it. Measured once its layer is down, not through it.
+    if [ "$(ev "document.querySelector('.recents')?.classList.contains('shown')?'up':'no'")" = up ]; then
+      log "Home on home opened the switcher: Home again"; sh_ "input keyevent KEYCODE_HOME"; sleep 0.5; fi
+    [ "$(recentsdown)" = down ] || log "the switcher's layer is still up after ~3 s"
     step home "Home pressed"
     f=$(searchpt)
     case $f in none|off*|"") fail "no search on home ($f)" ;; *)
