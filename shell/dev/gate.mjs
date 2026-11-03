@@ -684,6 +684,107 @@ async function termGlyphsCheck() {
   return termGlyphsProblems(term, T.rendererFor?.(id) ?? "dom", await powos.term.style(null));
 }
 
+/**
+ * In the page: a session terminal looks as PowTerm's at every moment (the user 11-03, side by side: "This is how the
+ * terminal looks currently." / "And this is how it looks in PowTerm." - PowTerm pinched to 8 sp, ours stuck at 12 with
+ * fewer, coarser columns). A lost WebGL context draws DOM rows in the same face, size and row spacing, and the session
+ * shown again is back on WebGL; a pinch steps the text size as PowTerm's (one per 10% of scale), every step shown at
+ * once, then saved to the terminal text setting (style.text) the host's style answers with.
+ */
+/**
+ * In the page: a session terminal looks as PowTerm's at every moment (the user 11-03, side by side: "This is how the
+ * terminal looks currently." / "And this is how it looks in PowTerm." - PowTerm pinched to 8 sp, ours stuck at 12 with
+ * fewer, coarser columns). A lost WebGL context draws DOM rows in the same face, size and row spacing, and the session
+ * shown again is back on WebGL; a pinch steps the text size as PowTerm's (one per 10% of scale), every step shown at
+ * once, then saved to the terminal text setting (style.text) the host's style answers with.
+ */
+/** In the page: a session's output, bold numbers, box drawing and a Claude line, as the screenshot's. */
+async function feed(id, term) {
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const st = await powos.term.open(id, null, null, term.cols, term.rows, false);
+  const text = "\x1b[H\x1b[2J" + Array.from({ length: 12 }, (_, i) => `\x1b[1m${i}\x1b[0m ┌──┐ Read 1 file, ran 2 shell commands · the quick brown fox`).join("\r\n");
+  const bytes = new TextEncoder().encode(text);
+  window.__mockEvents.emit("term.data", { id, run: st.run, data: btoa(String.fromCharCode(...bytes)), end: st.end + bytes.length });
+  await new Promise((r) => setTimeout(r, 300));
+}
+
+/** In the page, before termPinchCheck: a session open with output (bold numbers, box drawing, a Claude line). */
+async function termPinchSetup() {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const T = await G.mod("./ui/terminal.tsx");
+  const { powos } = await G.mod("./bridge.ts");
+  S.openSession("powos-scratch-pinch", null, undefined, { host: "mac", agent: true });
+  const id = "at-work:mac:powos-scratch-pinch";
+  await G.until(() => T.terminalFor(id) && document.querySelector(".session-term .xterm-screen"), 4000);
+  await new Promise((r) => setTimeout(r, 500));
+  const term = T.terminalFor(id);
+  const st = await powos.term.open(id, null, null, term.cols, term.rows, false);
+  const text = "\x1b[H\x1b[2J" + Array.from({ length: 12 }, (_, i) => `\x1b[1m${i}\x1b[0m ┌──┐ Read 1 file, ran 2 shell commands · the quick brown fox`).join("\r\n");
+  const bytes = new TextEncoder().encode(text);
+  window.__mockEvents.emit("term.data", { id, run: st.run, data: btoa(String.fromCharCode(...bytes)), end: st.end + bytes.length });
+  await new Promise((r) => setTimeout(r, 300));
+}
+
+async function termPinchCheck() {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const T = await G.mod("./ui/terminal.tsx");
+  const { powos } = await G.mod("./bridge.ts");
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  // The DOM rows the fallback draws: the terminal's own face, size and row spacing.
+  const domProblems = (term) => {
+    const rows = document.querySelector(".session-term .xterm-rows");
+    if (!rows) return ["a lost context drew no DOM rows"];
+    const cs = getComputedStyle(rows);
+    const fails = [];
+    if (cs.fontFamily.replace(/\s/g, "") !== term.options.fontFamily.replace(/\s/g, "")) fails.push(`DOM rows in ${cs.fontFamily}, the terminal's face is ${term.options.fontFamily}`);
+    if (parseFloat(cs.fontSize) !== term.options.fontSize) fails.push(`DOM rows at ${cs.fontSize}, the terminal's size is ${term.options.fontSize}px`);
+    if (term.options.lineHeight !== 1 || term.options.letterSpacing !== 0) fails.push(`lineHeight ${term.options.lineHeight}, letterSpacing ${term.options.letterSpacing} (the face's own: 1, 0)`);
+    return fails;
+  };
+  // Two fingers close in: 200 px apart, then 168, 140, 116, 96 - each 15-17% closer, four steps down.
+  const pinchIn = async (term, size0) => {
+    const cover = document.querySelector(".session-term .term-cover");
+    const r = cover.getBoundingClientRect();
+    const y = r.top + r.height / 2;
+    const fire = (type, pid, x) => cover.dispatchEvent(new PointerEvent(type, { pointerId: pid, pointerType: "touch", clientX: x, clientY: y, bubbles: true, cancelable: true, isPrimary: pid === 1 }));
+    fire("pointerdown", 1, 100);
+    fire("pointerdown", 2, 300);
+    for (const x of [268, 240, 216, 196]) {
+      fire("pointermove", 2, x);
+      await wait(60);
+    }
+    const mid = term.options.fontSize;
+    fire("pointerup", 2, 196);
+    fire("pointerup", 1, 100);
+    await wait(900);
+    return mid === size0 - 4 ? [] : [`mid-pinch the text is ${mid}px (four steps down from ${size0}: ${size0 - 4}, shown at once)`];
+  };
+  const fails = [];
+  const id = "at-work:mac:powos-scratch-pinch";
+  const renderer = (want, when) => T.rendererFor(id) === want || fails.push(`${when}: the ${T.rendererFor(id)} renderer draws (${want})`);
+  const term = T.terminalFor(id);
+  renderer("webgl", "opened");
+  // The context lost (Chromium's per-page limit takes the oldest): DOM rows in the terminal's own face and metrics.
+  document.querySelectorAll(".session-term canvas").forEach((c) => c.getContext("webgl2")?.getExtension("WEBGL_lose_context")?.loseContext());
+  await G.until(() => T.rendererFor(id) === "dom", 2000).catch(() => {});
+  renderer("dom", "the context lost");
+  fails.push(...domProblems(term));
+  // Shown again (the style asked again, as on reopening): back to WebGL.
+  window.__mockEvents.emit("term.style", null);
+  await G.until(() => T.rendererFor(id) === "webgl", 2000).catch(() => {});
+  renderer("webgl", "shown again after the loss");
+  const [size0, cols0] = [term.options.fontSize, term.cols];
+  fails.push(...(await pinchIn(term, size0)));
+  const saved = await powos.term.style(null);
+  if (saved.size !== size0 - 4 || term.options.fontSize !== saved.size) fails.push(`after the pinch: host ${saved.size}, shown ${term.options.fontSize}px (saved and shown: ${size0 - 4})`);
+  if (term.cols <= cols0) fails.push(`${term.cols} columns after pinching smaller (were ${cols0})`);
+  if (S.sessionView.value?.write) fails.push("the pinch's fingers took the session over");
+  renderer("webgl", "after the pinch");
+  return fails;
+}
+
 /** In the page: merged widgets M1-M2 (grid.tsx joins; the user's 2026-10-28 "the widget combiner looks ugly af if the
  * widgets arent the same width"). An equal-width stack (agents 6x3 over recents 6x3) merges: both .joined, one width,
  * the faces meet on the row line (one seamless surface, no gutter or seam strip between). An unequal stack (agents 6x3
@@ -8373,6 +8474,84 @@ function ONE_HELPERS() {
   return [];
 }
 
+/** SF1's helpers into the page (each step is evaluated on its own: they go on window.__sf). */
+function SF_HELPERS() {
+  /** SF1: window A (9601) on [p] docked to [side] as the user did it (ask 1a1a10147ea: "by just grabbing the title bar and
+   * dragging it to the side"): its bar dragged to the edge's middle, the snap ghost shown, let go there. */
+  async function sfBarDock(W, p, side, fails) {
+    const g = window.__dockg;
+    const ta = W.tileArea();
+    const at = [side === "left" ? ta.left + 4 : ta.right - 4, (ta.top + ta.bottom) / 2];
+    await g.hold(9601, at);
+    if (!document.querySelector(".ww-drop")) fails.push(`SF1: A's bar held at the ${side} edge shows no snap ghost`);
+    await g.release(9601, at);
+    if (W.tilings.value[p]) fails.push(`SF1: A alone snapped ${side} made a tiling`);
+  }
+
+  /** SF1: window [id]'s frame as "x,y wxh". */
+  const sfRect = (W, id) => {
+    const w = W.webWins.value.find((v) => v.id === id);
+    return w && `${w.x},${w.y} ${w.w}x${w.h}`;
+  };
+
+  /** SF1: A ([side]: bar-docked there; null: floating; "pair": A + 9602 tiled) set up on [h.p]. */
+  async function sfSetup({ W, p }, side, fails) {
+    const a = (id) => ({ id, key: `a:gate.sfa${id}`, label: "A", page: p, x: 90, y: 150, w: 320, h: 260, live: true });
+    W.webWins.value = side === "pair" ? [a(9601), a(9602)] : [a(9601)];
+    W.tilings.value = {};
+    if (side === "pair") W.tileWindows(p, [9601, 9602]);
+    await window.__gw.settled();
+    if (side === "left" || side === "right") await sfBarDock(W, p, side, fails);
+  }
+
+  /** SF1: [sfSetup] then a launcher launch of B: B's id, the page's tiling, whether A moved. */
+  async function sfRun(h, side, fails) {
+    const { W, calls } = h;
+    const S = await window.__gw.mod("./state.ts");
+    await sfSetup(h, side, fails);
+    const before = sfRect(W, 9601);
+    const n = calls.length;
+    await S.launch(`a:gate.sfb${side}/.Main`);
+    await window.__gw.settled();
+    const b = calls.length > n ? W.webWins.value.find((w) => w.key.startsWith("a:gate.sfb"))?.id : undefined;
+    const t = W.tilings.value[h.p] ?? { layout: "none", ids: null };
+    const after = sfRect(W, 9601);
+    return { b, got: `${t.layout} ${JSON.stringify(t.ids)}`, moved: before !== after && `${before} -> ${after}` };
+  }
+  window.__sf = { sfRun };
+  return [];
+}
+
+/**
+ * SF1 (ask 1a1a1004151, 11-03: "When one window is docked to the side and I open another window. It should be docked to
+ * other side."): window A dragged by its bar to the left edge (snapped alone to the half), a launcher launch of B - B
+ * tiled on the right, A's rect unchanged; A on the right: B on the left; A floating: B floats (no tiling); a full
+ * 2-split: B floats over it.
+ */
+async function webWindowSnapFill() {
+  const fails = [];
+  const h = await window.__oneg.oneInstanceHost();
+  h.W.BOUND.ms = 60_000;
+  const cases = [
+    ["left", (b) => `2h [9601,${b}]`],
+    ["right", (b) => `2h [${b},9601]`],
+    [null, () => "none null"],
+    ["pair", () => "2h [9601,9602]"],
+  ];
+  try {
+    for (const [side, want] of cases) {
+      const r = await window.__sf.sfRun(h, side, fails);
+      if (r.b == null) fails.push(`SF1 ${side}: the launch of B opened no web window`);
+      else if (r.got !== want(r.b)) fails.push(`SF1 ${side}: B opened, tiling ${r.got} (want ${want(r.b)})`);
+      if (r.moved) fails.push(`SF1 ${side}: A moved when B opened (${r.moved})`);
+    }
+  } finally {
+    h.W.tilings.value = {};
+    h.restore();
+  }
+  return fails;
+}
+
 /** OI2 (15:16 "full screen and then they show desktop mode"): a launcher launch that windows it is ONE window open, no plain (full-screen) launch. */
 async function webWindowOneLauncher() {
   const fails = [];
@@ -11825,6 +12004,19 @@ try {
         }),
       ),
     );
+  // A session terminal as PowTerm's: the DOM fallback in the same face and metrics, back to WebGL, a pinch's text size.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(
+      open(browser, `${ORIGIN}/index.html`, "term-pinch", { width: 404, height: 900 }).then((r) =>
+        whenReady(r, async () => {
+          await r.page.evaluate(termPinchSetup);
+          await r.page.screenshot({ path: "/cache/term-pinch-before.png" }).catch(() => {});
+          const fails = await r.page.evaluate(termPinchCheck);
+          await r.page.screenshot({ path: "/cache/term-pinch.png" }).catch(() => {});
+          return fails;
+        }),
+      ),
+    );
   // A taken-over session scrolls as PowTerm's: a row per row dragged, a fling after (ui/terminal.tsx scrollRows/fling).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(
@@ -11858,7 +12050,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockToggleHost, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, webWindowRelaunch, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockToggleHost, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, SF_HELPERS, webWindowSnapFill, webWindowRelaunch, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }
@@ -12301,6 +12493,16 @@ try {
         await call("sbFresh");
         return fails;
       })));
+  // BF1 (dev/dock-search-check.js barFootSame; the user, 11-03 11:49: "the same height as the manager search bar"): the
+  // one bar's pill at the same bottom and height on home (under the dock), the launcher and PowOS AI's page.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, below] of [["folded", "1"], ["folded", ""], ["unfolded", "1"], ["unfolded", ""]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `bar-foot-same-${label}${below ? "-below" : ""}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (b) => (await importShim("./dev/dock-search-check.js")).barFootSame(b), below))));
+  // SF1 (dev/dock-search-check.js searchFindable; the user, 11-03 11:49: "Where is that setting?"): Settings search
+  // finds the search's spot and opens its row highlighted; a long press on the bar / edit mode's tap on the button flips it.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const label of ["folded", "unfolded"])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `search-findable-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/dock-search-check.js")).searchFindable()))));
   // Perf P1 (dev/dock-search-check.js dockSpeechRenders; 02:23 trace): a dictation's words streaming in redraw the dock
   // button only for its on/off, the dock and its cells never - folded and unfolded.
   if (process.env.SHELL_PAGES !== "0")

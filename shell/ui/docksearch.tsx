@@ -28,7 +28,7 @@ import { wideHome } from "../hosts/wide.ts";
 import { dictateBar, focusBar } from "./bar.tsx";
 import { micOn } from "./dictation.ts";
 import { morphBegin, morphFrom, morphTo, morphing, reset as resetMorph } from "./launchmorph.ts";
-import { carryingSearch, searchItem } from "./searchwidget.tsx";
+import { carryingSearch, openSpotMenu, searchItem } from "./searchwidget.tsx";
 import { geometry, startCarry } from "./grid.tsx";
 
 /** A press on the button held this long dictates (shorter: a tap, which opens the launcher to type). */
@@ -46,7 +46,13 @@ const GRAB_SLOP = 10;
 export function grabSearch(e: PointerEvent, el: Element): boolean {
   if (!editing.value || e.button || carry.value) return false;
   const from = el.getBoundingClientRect();
-  const done = () => (removeEventListener("pointermove", move), removeEventListener("pointerup", done), removeEventListener("pointercancel", done));
+  const done = () => (removeEventListener("pointermove", move), removeEventListener("pointerup", up), removeEventListener("pointercancel", done));
+  // Let go without moving: the search's menu (bar | dock button) by it - searchwidget.tsx openSpotMenu.
+  const up = (ev: PointerEvent) => {
+    if (ev.pointerId !== e.pointerId) return;
+    done();
+    openSpotMenu(el);
+  };
   const move = (ev: PointerEvent) => {
     if (ev.pointerId !== e.pointerId || Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) <= GRAB_SLOP) return;
     done();
@@ -59,7 +65,7 @@ export function grabSearch(e: PointerEvent, el: Element): boolean {
     startCarry({ item }, ev, grab);
   };
   addEventListener("pointermove", move);
-  addEventListener("pointerup", done);
+  addEventListener("pointerup", up);
   addEventListener("pointercancel", done);
   return true;
 }

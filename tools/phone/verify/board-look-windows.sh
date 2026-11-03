@@ -37,12 +37,16 @@
 #   relaunch      (launching-an-app-that-s-already-running-opens-it): Calculator as a web window, Home pressed, then
 #                 Calculator launched again from home's search (a launch, not the dock's taskbar toggle) -> the SAME
 #                 window fronts (not minimised, on top), no second window, no second Calculator task.
+#   snap-fill     (open-a-window-while-one-is-side-docked-it-takes, asks 1a1a1004151/1a1a10147ea): Calculator as a web
+#                 window docked to the left half the user's way - a real drag of its title bar to the screen's left
+#                 edge -> it is a lone left half; then Chrome launched (state.launch, the dock/drawer/search path, by
+#                 code) -> Chrome opens tiled in the right half: the page's tiling is 2h [Calculator, Chrome].
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/e2e-lib.sh"
 CASE=${1:-}; shift || true
-case "$CASE" in tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size|relaunch) ;;
-  *) echo "usage: board-look-windows.sh tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size|relaunch [--round R]"; exit 2 ;; esac
+case "$CASE" in tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size|relaunch|snap-fill) ;;
+  *) echo "usage: board-look-windows.sh tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size|relaunch|snap-fill [--round R]"; exit 2 ;; esac
 e2e_args "$@"
 e2e_init "lookw-$CASE"
 CALC=${TEST_APP:-com.oneplus.calculator} CHROME=com.android.chrome
@@ -386,6 +390,40 @@ if [ "$CASE" = relaunch ]; then
         esac
       else step search "home's search tapped"; fail "home's search didn't take the focus ($(ev "$SEARCHED"), $(ime))"; back; fi ;;
     esac
+  fi
+fi
+
+# --- snap-fill -------------------------------------------------------------------------------------------------
+# edgept <side>: the tile area's left/right edge middle (device px), where a bar let go snaps to that half.
+edgept() { ev "$WW.then(m=>{const a=m.tileArea(),d=devicePixelRatio;return Math.round(('$1'==='left'?a.left+6:a.right-6)*d)+' '+Math.round((a.top+a.bottom)/2*d)})"; }
+# wwhalf <w-id>: "e" a lone left half / tiled left, "w" right, "none" otherwise (the ⇄ hint's edge).
+wwhalf() { ev "$WW.then(m=>{const w=m.webWins.value.find(v=>v.id===${1#w});return w?String(m.swapEdge(w)):'gone'})"; }
+if [ "$CASE" = snap-fill ]; then
+  KC=$(appkey "$CHROME")
+  if [ "$(ev "$WW.then(m=>String(m.webWins.value.some(w=>w.key.startsWith('a:$CHROME/'))))")" = true ]; then
+    note "SKIP: Chrome already has a web window (the user's) - a launch would front it, not open a new one"
+  elif [ "$KC" = none ]; then fail "no Chrome in the drawer"
+  else
+    A1=$(wwopen "$CALC"); sleep 3; chk open
+    if [ "$A1" = none ]; then fail "no web window for Calculator ($A1)"
+    else
+      step window "Calculator as a web window ($A1)"
+      b=$(barpt "$A1"); e=$(edgept left)
+      if [[ ! $b =~ ^[0-9]+\ [0-9]+$ ]] || [[ ! $e =~ ^[0-9]+\ [0-9]+$ ]]; then fail "no bar ($b) / edge ($e) to drag"
+      else
+        set -- $b $e; swipe "$1" "$2" "$3" "$4" 900 "Calculator's title bar to the left edge"; sleep 1.5; chk docked
+        h=$(wwhalf "$A1"); step docked "Calculator's bar dragged to the left edge (half: $h)"
+        if [ "$h" != e ]; then fail "Calculator's bar let go at the left edge is not docked to the left half ($h, state $(wwstate "$A1"))"
+        else
+          ev "importShim('./state.ts').then(s=>s.launch('${KC%%|*}')).then(()=>'ok')" >/dev/null; sleep 4; chk chrome
+          step chrome "Chrome launched with Calculator docked left"
+          t=$(ev "Promise.all([importShim('./state.ts'),$WW]).then(([s,m])=>{const p=s.pages.value[Math.max(0,s.page.value)],t=m.tilings.value[p],c=m.webWins.value.find(w=>w.key.startsWith('a:$CHROME/'));return (t?t.layout+' '+t.ids.join(','):'none')+' | '+(c?c.id:'nochrome')})")
+          set -- $t
+          [ "${1:-}" = 2h ] && [ "${2:-}" = "${A1#w},${4:-x}" ] && pass "Chrome opened tiled in the right half beside Calculator ($t)" ||
+            fail "Chrome opened with Calculator docked left: tiling '$t' (want '2h ${A1#w},<chrome> | <chrome>')"
+        fi
+      fi
+    fi
   fi
 fi
 

@@ -34,6 +34,8 @@
   border-radius: inherit;
 }
 .term-screen { position: absolute; inset: 0; }
+/* The page takes a focused or scrolling terminal's fingers (drag, fling, pinch): no browser pan or zoom under them. */
+.term.focused, .session-term { touch-action: none; }
 /* xterm's parent: inset by the pad (set from the host's terminal style), its bottom cut while the keyboard needs it. */
 .term-holder { position: absolute; inset: 0; }
 .term-holder .xterm { height: 100%; }
