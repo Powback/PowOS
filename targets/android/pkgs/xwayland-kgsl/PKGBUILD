@@ -11,7 +11,7 @@
 #   0009       a window buffer carries its rendering's GPU fence (dma-buf IMPORT_SYNC_FILE) instead of a glFinish per commit
 #   0010       a failed DRI3 dma-buf import logs its width/height/stride/offset/fd size and the import rule it breaks,
 #              once per shape (xwayland-kgsl-import-check.h, unit test: test/run.sh)
-#   0011       each Present copy's fence check counted (waited / already drawn / no client fence) - one line per 30 s
+#   0011       each Present copy's fence check counted (waited / already drawn / signalled or none) - one line per 30 s
 #              (xwayland-kgsl-copy-wait.h, unit test: test/run.sh)
 # Was built inside the rootfs only (build-inside.sh); a package so a fix reaches phones without a new rootfs:
 # rooted.sh deploy installs it (powos-deploy.sh), the rootfs build installs it with our other packages.
@@ -22,7 +22,7 @@
 
 pkgname=xwayland-kgsl
 pkgver=24.1.13
-pkgrel=5
+pkgrel=6
 pkgdesc='Xwayland with glamor/DRI3 on KGSL surfaceless (PowOS Android: Turnip without /dev/dri)'
 arch=(aarch64)
 url='https://gitlab.freedesktop.org/xorg/xserver'

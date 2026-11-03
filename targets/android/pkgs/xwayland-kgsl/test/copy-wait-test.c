@@ -7,7 +7,7 @@ static int fails;
 
 int main(void)
 {
-    /* The kernel's stub fence (EXPORT_SYNC_FILE with nothing attached) vs a client's KGSL timeline fence. */
+    /* The kernel's stub fence (EXPORT_SYNC_FILE: signalled or nothing attached) vs a client's KGSL timeline fence. */
     EXPECT(xwl_kgsl_copy_fence_is_stub("stub", 1));
     EXPECT(xwl_kgsl_copy_fence_is_stub("kgsl-timeline", 0));
     EXPECT(!xwl_kgsl_copy_fence_is_stub("kgsl-timeline", 1));
@@ -31,7 +31,7 @@ int main(void)
     EXPECT(strstr(line, "last 30s: 700 Present copies"));
     EXPECT(strstr(line, "10 waited for the client's GPU fence (avg 8.0 ms, max 12.0 ms)"));
     EXPECT(strstr(line, "687 already drawn"));
-    EXPECT(strstr(line, "2 with no client fence"));
+    EXPECT(strstr(line, "2 with the fence already signalled or none (stub)"));
     EXPECT(strstr(line, "1 export failures"));
     EXPECT(s.drawn == 0 && s.waited == 0 && s.period_start_us == t0 + 30000000);
     /* A quiet period says nothing. */
