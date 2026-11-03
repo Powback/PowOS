@@ -38,7 +38,12 @@ ShowInterstitials" and starts nothing until it is answered. It is shown in front
 home and the launch waited forever: ABZU and Desk Job 2026-10-23, no game in 265 s), and once it closes the helper
 waits WAIT_GAME_S again for the game's window.
 
-Prints one status line for the caller, then exits (COMMAND keeps running; its output goes on to ours):
+COMMAND's output goes to $XDG_RUNTIME_DIR/open-task/<app>.log, never to the caller's pipe; while this helper runs it
+relays that output to its own (the caller's "couldn't start: <why>" reads it). COMMAND outlives the helper and the
+caller: on the caller's pipe it would write into a pipe nobody reads once the caller goes (the PowOS app restarting for
+an update), and a Steam client cold-started here passes its output on to every game it launches after - Broforce
+2026-11-03 19:22-19:24: four launches after the 19:07 APK update each ended ~10 s in, with no window.
+Prints one status line for the caller, then exits (COMMAND keeps running):
     powos-open-task: task       shown as its own task
     powos-open-task: desktop    not as a task - no window tasks (the PowOS app isn't connected to KWin, KWin not up),
                                 a window KWin doesn't export, or no window in time: the caller shows the desktop
@@ -109,6 +114,51 @@ callDBus("org.kde.KWin", "/org/powos/WindowTasks", "org.powos.WindowTasks", "sho
 
 
 _said = set()
+
+
+OUTPUT_KEEP = 4 << 20  # bytes: a COMMAND's log past this is restarted at its next launch
+
+
+def output_log(key):
+    """COMMAND's output file (O_APPEND: a Steam client still writing to it from an earlier launch keeps appending at the
+    end), restarted when it grew past OUTPUT_KEEP. Returns (fd, path), or (None, None) when it can't be made."""
+    d = os.path.join(RUN, "open-task")
+    path = os.path.join(d, (re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(key))[:64] or "command") + ".log")
+    try:
+        os.makedirs(d, exist_ok=True)
+        if os.path.exists(path) and os.path.getsize(path) > OUTPUT_KEEP:
+            os.truncate(path, 0)
+        return os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644), path
+    except OSError:
+        return None, None
+
+
+class OutputRelay:
+    """Copies what COMMAND writes to its log onto our stdout while we run: the caller still gets its output."""
+
+    def __init__(self, path):
+        self.path = path
+        try:
+            self.pos = os.path.getsize(path)
+        except OSError:
+            self.pos = 0
+
+    def pump(self):
+        try:
+            with open(self.path, "rb") as f:
+                if os.fstat(f.fileno()).st_size < self.pos:
+                    self.pos = 0  # restarted meanwhile
+                f.seek(self.pos)
+                data = f.read(1 << 20)
+        except OSError:
+            return
+        if data:
+            self.pos += len(data)
+            try:
+                sys.stdout.buffer.write(data)
+                sys.stdout.buffer.flush()
+            except (OSError, ValueError):
+                pass
 
 
 def status(what):
@@ -248,7 +298,17 @@ def main():
     def start_command():
         if game:
             state["launch"] = LaunchRecord(game)
-        state["child"] = subprocess.Popen(["/bin/bash", "-c", "exec " + command], start_new_session=True)
+        # Its own output file, not our stdout (the caller's pipe): see the top. Relayed to us while we run.
+        fd, path = output_log(f"steam_app_{game}" if game else min(ids, default="") or command.split()[0])
+        relay = OutputRelay(path) if fd is not None else None  # from here on: what this launch writes
+        state["child"] = subprocess.Popen(["/bin/bash", "-c", "exec " + command], start_new_session=True,
+                                          stdout=fd, stderr=fd)
+        if relay:
+            os.close(fd)
+            state["relay"] = relay
+            pump = QTimer(app)
+            pump.timeout.connect(relay.pump)
+            pump.start(250)
         if not game and not steam_client:
             QTimer.singleShot(500, watch_child)
 
@@ -295,6 +355,8 @@ def main():
         if state["done"]:
             return
         state["done"] = True
+        if state.get("relay"):
+            state["relay"].pump()  # COMMAND's last words before the status ("failed": the caller shows them)
         status(what)
         for plugin, path in scripts:
             kwin("unloadScript", plugin)
