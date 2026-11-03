@@ -16,12 +16,18 @@
  *   shows it the host lets the window go (powos.recents.ready) - the layer is simply up, it's home's own page.
  * - flung up (to: home), or early (to: app): the layer collapses back into home.
  * The overview button shows it without a swipe ("recents.show"); home going away hides it ("recents.hide").
+ *
+ * With no cards it says so ("No open apps"). Apps that run with no card - an Android app's foreground service
+ * (Termux's session), Steam in its tray - are behind "N running in background" (collapsed): each with a stop button
+ * (the host's apps.stopBackground: Android's force stop, a Linux app's clean close). The user, 2026-11-03: "I actually
+ * do have open apps, they're just running in the background ... some button to show the background ones so we can
+ * close them as well".
  */
-import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
-import { usePresence } from "./reveal.tsx";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { reducedMotion, springToken, usePresence } from "./reveal.tsx";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import type { RecentTask } from "../types.ts";
+import type { BackgroundApp, RecentTask } from "../types.ts";
 import { TaskCard, type Rect } from "./switcher.tsx";
 import { frontWindow, tileApps, webWindowsOn } from "./webwindows.tsx";
 import { spring } from "./spring.ts";
@@ -75,6 +81,42 @@ const pinned = signal<Set<string>>(new Set());
 const loaded = signal(false);
 /** A short note (a screenshot saved). */
 const note = signal<string | null>(null);
+/** Apps running with no card (the host's apps.background), as last asked; those with a card are left out on render. */
+const background = signal<BackgroundApp[]>([]);
+/** The background list is open (collapsed each time the switcher comes up). */
+const backgroundOpen = signal(false);
+/** Background apps being stopped: gone from the list at once, back if the stop fails. */
+const stopping = signal<Set<string>>(new Set());
+
+/** The background list asked again (the switcher coming up, a stop done). An older host has none: nothing shown. */
+function askBackground() {
+  powos.apps.background?.().then(
+    (list) => (background.value = list ?? []),
+    () => (background.value = []),
+  );
+}
+
+/** The background apps without a card of their own (a Linux window's task is one) and not being stopped. */
+function backgroundShown(list: RecentTask[]): BackgroundApp[] {
+  const cards = new Set(list.map((t) => t.key).filter((k): k is string => !!k));
+  return background.value.filter((b) => !cards.has(b.key) && !stopping.value.has(b.key));
+}
+
+/** Stops background app [b]: off the list at once; back, with a note, if it didn't stop. */
+function stopBackground(b: BackgroundApp) {
+  const stop = powos.apps.stopBackground;
+  if (!stop) return;
+  stopping.value = new Set(stopping.value).add(b.key);
+  const done = (ok: boolean) => {
+    const next = new Set(stopping.value);
+    next.delete(b.key);
+    if (ok) background.value = background.value.filter((x) => x.key !== b.key);
+    stopping.value = next;
+    if (!ok) showNote(`Couldn't stop ${b.label}`);
+    else askBackground();
+  };
+  stop(b.key).then((ok) => done(!!ok), () => done(false));
+}
 
 powos.store
   .get<string[]>("recents.pinned")
@@ -143,6 +185,7 @@ const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()
 
 function reset() {
   menu.value = null;
+  backgroundOpen.value = false;
   splitFirst.value = null;
   splitMore.value = null;
   opening.value = null;
@@ -200,6 +243,7 @@ function begin(e: { from: number | null; tasks: RecentTask[] }) {
   phase.value = "drag";
   toStart();
   frame(0);
+  askBackground();
 }
 
 /** Shown without a swipe (the overview button, up and hold over home): it comes up over home. */
@@ -221,6 +265,7 @@ async function show(e: { from: number | null; tasks: RecentTask[] }) {
   phase.value = "shown";
   toStart();
   frame(0);
+  askBackground();
   await nextFrame();
   settle(true);
   frame(1);
@@ -517,6 +562,7 @@ function beside() {
 export function recentsBack(): boolean {
   if (phase.value === "closed") return false;
   if (menu.value) menu.value = null;
+  else if (backgroundOpen.value) backgroundOpen.value = false;
   else if (splitFirst.value != null) splitFirst.value = null;
   else if (from.value != null) open(from.value, firstShot() ?? undefined);
   else close();
@@ -697,6 +743,92 @@ function Menu() {
   );
 }
 
+/** No cards: the switcher says so (not a blank screen over home). */
+function Empty({ count, phase }: { count: number; phase: Phase }) {
+  // It fades in and out on the spring (§6): the last card cleared, or the first one arriving, swapped it in one frame.
+  const pop = usePresence(!count && phase !== "closed");
+  return pop.on ? <div class={`recents-empty ${pop.leaving ? "leaving" : ""}`}>No open apps</div> : null;
+}
+
+/** [items] by key with the ones just taken out kept while they leave on the spring (§6): a stopped app's row went in one frame. */
+function useLeaving<T extends { key: string }>(items: T[]): { item: T; leaving: boolean }[] {
+  const gone = useRef(new Map<string, { item: T; at: number }>());
+  const last = useRef<T[]>(items);
+  const [, tick] = useState(0);
+  const keys = new Set(items.map((i) => i.key));
+  last.current.forEach((i, at) => {
+    if (!keys.has(i.key) && !gone.current.has(i.key)) gone.current.set(i.key, { item: i, at });
+  });
+  for (const k of keys) gone.current.delete(k);
+  last.current = items;
+  useEffect(() => {
+    if (!gone.current.size) return;
+    const t = setTimeout(() => {
+      gone.current.clear();
+      tick((n) => n + 1);
+    }, reducedMotion() ? 0 : springToken("spring-fast").ms);
+    return () => clearTimeout(t);
+  });
+  const out = items.map((item) => ({ item, leaving: false }));
+  for (const { item, at } of gone.current.values()) out.splice(Math.min(at, out.length), 0, { item, leaving: true });
+  return out;
+}
+
+/**
+ * "N running in background" and, opened, its list: each app's icon, name and a stop button. Shown only when there are
+ * some; the list comes and goes on the spring (§6).
+ */
+function Background({ list }: { list: RecentTask[] }) {
+  const apps = backgroundShown(list);
+  const open = backgroundOpen.value && apps.length > 0;
+  const pop = usePresence(open);
+  const rows = useLeaving(apps);
+  return (
+    <>
+      <BackgroundToggle count={apps.length} open={open} />
+      {pop.on && (
+        <div class={`recents-bg tile sheet ${pop.leaving ? "leaving" : ""}`} inert={pop.leaving || undefined} role="list" aria-label="Running in background">
+          <div class="recents-bg-head">
+            <span>Running in background</span>
+            <button type="button" class="recents-bg-hide" onClick={() => (backgroundOpen.value = false)}>
+              Hide
+            </button>
+          </div>
+          {rows.map(({ item: b, leaving }) => (
+            <div class={`recents-bg-app ${leaving ? "leaving" : ""}`} inert={leaving || undefined} role="listitem" key={b.key} data-key={b.key}>
+              {b.icon ? <img class="recents-bg-icon" src={b.icon} alt="" /> : <span class="recents-bg-icon blank" />}
+              <span class="recents-bg-name">{b.label}</span>
+              {b.frozen && <span class="recents-bg-state">Asleep</span>}
+              <button type="button" class="recents-bg-stop" aria-label={`Stop ${b.label}`} onClick={() => stopBackground(b)}>
+                Stop
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** "N running in background": it comes and goes on the spring (§6) - the list is read after the switcher is up, so it was drawn in one frame. */
+function BackgroundToggle({ count, open }: { count: number; open: boolean }) {
+  const shown = usePresence(count > 0);
+  const last = useRef(count);
+  if (count) last.current = count;
+  if (!shown.on) return null;
+  return (
+    <button
+      type="button"
+      class={`recents-bg-toggle ${shown.leaving ? "leaving" : ""}`}
+      inert={shown.leaving || undefined}
+      aria-expanded={open}
+      onClick={() => (backgroundOpen.value = !backgroundOpen.value)}
+    >
+      {last.current} running in background
+    </button>
+  );
+}
+
 /** Split's prompt while a first app is picked: it fades in and out on the spring (§6: it was there in one frame). */
 function SplitBanner({ picking }: { picking: boolean }) {
   const pop = usePresence(picking);
@@ -809,9 +941,11 @@ export function Recents() {
           <Placeholder />
         )}
       </div>
+      <Empty count={list.length} phase={p} />
       <button type="button" class="task-clear" style={{ visibility: list.length ? undefined : "hidden" }} onClick={clearAll}>
         Clear all
       </button>
+      <Background list={list} />
       {note.value && (
         <div class="recents-note" key={note.value} onAnimationEnd={() => (note.value = null)}>
           {note.value}

@@ -595,6 +595,9 @@ class ShellBridge(
             "apps.running" -> running()
             // The app menu's close (shell/ui/desktops.ts closeApp): a Steam game or Steam itself closed cleanly.
             "apps.close" -> closeApp(a.getString(0))
+            // The switcher's "Running in background" (ui/recents.tsx): apps with a live process and no card, and their stop.
+            "apps.background" -> backgroundApps()
+            "apps.stopBackground" -> stopBackground(a.getString(0))
             "windows.restore" -> (dev.omalauncher.system.WindowFrames.current?.restore(a.getInt(0)) ?: false).also { if (it) emit("windows.raised", a.getInt(0)) }
             // The dock's tap on the focused window's app (ui/desktops.ts dockTap): it goes, as its minimise button does.
             "windows.minimise" -> dev.omalauncher.system.WindowFrames.current?.let { f -> main.post { f.minimise(a.getInt(0)) }; true } ?: false
@@ -1497,6 +1500,41 @@ class ShellBridge(
 
     private fun android(key: String) = runtime.androidApps.apps.firstOrNull { "a:${it.key}" == key }
 
+    /**
+     * Apps running with no task of their own, for the switcher's "Running in background" (ui/recents.tsx): [{ key,
+     * label, icon, frozen? }] - Android apps whose processes do work (BackgroundApps: Termux's session, a player), then
+     * the PowOS session's Linux apps the sleep watcher tracks (RunningApps.linux: Steam in its tray). The page leaves out
+     * those with a card (a Linux window's task is one). The owner's profile only: a work profile's app has its own stop.
+     */
+    private fun backgroundApps(): JSONArray {
+        val own = runtime.androidApps.apps.filter { it.profile == null }
+        val pkgs = dev.omalauncher.system.BackgroundApps.list(context, own.map { it.component.packageName }.toSet())
+        val android = pkgs.mapNotNull { p -> own.firstOrNull { it.component.packageName == p } }.distinctBy { it.component.packageName }
+        val out = android.map { JSONObject().put("key", "a:${it.key}").put("label", it.label).put("icon", icon("a:${it.key}")) }.toMutableList()
+        val linux = RunningApps.shellMap(emptyList(), runtime.linuxApps)
+        for (key in linux.keys()) {
+            val app = runtime.linuxApps.firstOrNull { "l:${it.id}" == key } ?: continue
+            out += JSONObject().put("key", key).put("label", app.name).put("icon", icon(key)).put("frozen", linux.optString(key) == "frozen")
+        }
+        return JSONArray(out)
+    }
+
+    /**
+     * Stops background app [key]: an Android app force-stopped (BackgroundApps.stop), a Linux one closed as the app
+     * menu's close does ([closeApp]: Steam asked to shut down, a game's launch chain ended). Only an app the list shows
+     * now (BackgroundApps.filter: never PowOS, a system or persistent app), Steam's helpers or the session (powos-app-quit's list).
+     */
+    private fun stopBackground(key: String): Boolean =
+        when {
+            key.startsWith("l:") -> closeApp(key)
+            key.startsWith("a:") ->
+                // Only one the list shows now: never anything the filter keeps out, whatever the page asks.
+                android(key)?.takeIf { it.profile == null }?.component?.packageName?.takeIf { p ->
+                    p in dev.omalauncher.system.BackgroundApps.list(context, setOf(p))
+                }?.let { dev.omalauncher.system.BackgroundApps.stop(context, it) } ?: false
+            else -> false
+        }
+
     private fun launch(
         key: String,
         fullScreen: Boolean = false,
@@ -1890,7 +1928,7 @@ class ShellBridge(
         // and a 58 ms frame landed 54 ms after it (perf-1793456386286): looked up here; only the recognizer binding,
         // which Android requires on the main thread, is posted back there (NativeSpeech.warm).
         // quickpage.pages: a resolveActivity and an icon drawn per settings page (QuickPageCatalog).
-        private val LOOKUPS = setOf("qs.destinations", "speech.warm", "quickpage.pages")
+        private val LOOKUPS = setOf("qs.destinations", "speech.warm", "quickpage.pages", "apps.background", "apps.stopBackground")
         private val lookups = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "shell-lookups").apply { isDaemon = true } }
 
         /** One thread for them all, so a page's set then get stay in that order. */

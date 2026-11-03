@@ -2023,6 +2023,88 @@ async function switcherThumbsCheck() {
 }
 
 /**
+ * The switcher with no cards says "No open apps", and the apps running with no card are behind "N running in
+ * background" (the user, 2026-11-03: "I actually do have open apps, they're just running in the background ... like
+ * Termux"): collapsed at first; an app with a card isn't counted; opened, each row has its icon, name and a Stop that
+ * calls the host's apps.stopBackground and takes the row off at once. Folded and unfolded.
+ */
+async function switcherBackgroundCheck(page) {
+  await page.evaluate(switcherBackgroundHelpers);
+  const fails = await page.evaluate(switcherBackgroundEmpty);
+  fails.push(...(await page.evaluate(switcherBackgroundList)));
+  fails.push(...(await page.evaluate(switcherBackgroundRows)));
+  fails.push(...(await page.evaluate(switcherBackgroundStop)));
+  await page.evaluate(() => window.__mockEvents.emit("recents.end", { to: "home" }));
+  return fails;
+}
+/** switcher-background's helpers, in the page (each step runs there on its own: page.evaluate). */
+function switcherBackgroundHelpers() {
+  const visible = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden" && Number(getComputedStyle(el).opacity) > 0.5;
+  const inView = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.left >= 0 && r.right <= innerWidth + 0.5 && r.top >= 0 && r.bottom <= innerHeight + 0.5;
+  };
+  const text = (sel) => document.querySelector(sel)?.textContent ?? "none";
+  window.__bgGate = { wait: (ms) => new Promise((ok) => setTimeout(ok, ms)), visible, inView, text };
+}
+/** switcher-background, no cards: "No open apps" on screen, the toggle counting all 3, the list collapsed. */
+async function switcherBackgroundEmpty() {
+  const { wait, visible, inView, text } = window.__bgGate;
+  const fails = [];
+  window.__mockEvents.emit("recents.show", { open: true, from: null, tasks: [] });
+  await wait(1200);
+  const empty = document.querySelector(".recents-empty");
+  if (text(".recents-empty") !== "No open apps" || !visible(empty)) fails.push(`no cards: "No open apps" not shown (${text(".recents-empty")})`);
+  else if (!inView(empty)) fails.push("no cards: the empty message is off the screen");
+  const toggle = text(".recents-bg-toggle");
+  if (toggle !== "3 running in background" || !visible(document.querySelector(".recents-bg-toggle"))) fails.push(`no cards: toggle says "${toggle}", expected "3 running in background"`);
+  if (document.querySelector(".recents-bg")) fails.push("the background list is open before it was asked for (collapsed by default)");
+  window.__mockEvents.emit("recents.end", { to: "home" });
+  await wait(600);
+  return fails;
+}
+/** switcher-background with Spotify's card: no empty message, Spotify not counted; the toggle opens the list. */
+async function switcherBackgroundList() {
+  const { wait, visible, text } = window.__bgGate;
+  const icon = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="#3a6"/></svg>');
+  window.__mockEvents.emit("recents.show", { open: true, from: null, tasks: [{ id: 1301, label: "Spotify", key: "a:spotify", icon, snapshot: "" }] });
+  await wait(1200);
+  const fails = visible(document.querySelector(".recents-empty")) ? ["with a card: the empty message still shows"] : [];
+  const toggle = text(".recents-bg-toggle");
+  if (toggle !== "2 running in background") return [...fails, `with Spotify's card: toggle says "${toggle}", expected 2`];
+  document.querySelector(".recents-bg-toggle").click();
+  await wait(500);
+  return fails;
+}
+/** The opened list: on screen, Termux's row with icon and name, Steam's marked asleep. */
+function switcherBackgroundRows() {
+  const { visible, inView } = window.__bgGate;
+  const sheet = document.querySelector(".recents-bg");
+  const rows = [...document.querySelectorAll(".recents-bg-app")];
+  if (!visible(sheet) || rows.length !== 2) return [`opened: ${rows.length} rows, expected 2 (Termux, Steam)`];
+  const fails = inView(sheet) ? [] : ["opened: the background list is off the screen"];
+  const termux = rows.find((r) => r.dataset.key === "a:termux");
+  if (!termux?.querySelector("img.recents-bg-icon[src]") || termux.querySelector(".recents-bg-name")?.textContent !== "Termux") fails.push("Termux's row: no icon or name");
+  if (!rows.find((r) => r.dataset.key === "l:steam")?.querySelector(".recents-bg-state")) fails.push("Steam (frozen): no Asleep mark");
+  return fails;
+}
+/** Stop on Termux's row: the row goes at once, the host's stopBackground ran, the count drops. */
+async function switcherBackgroundStop() {
+  const { wait, text } = window.__bgGate;
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const stop = document.querySelector('.recents-bg-app[data-key="a:termux"] .recents-bg-stop');
+  if (!stop) return ["Stop: Termux's row has no Stop button"];
+  stop.click();
+  await wait(50);
+  // It leaves at once: marked leaving (fading out on the spring, §6), then gone.
+  const fails = document.querySelector('.recents-bg-app[data-key="a:termux"]:not(.leaving)') ? ["Stop: Termux's row didn't go at once"] : [];
+  await wait(400);
+  if ((await powos.apps.background()).some((b) => b.key === "a:termux")) fails.push("Stop: the host's stopBackground wasn't called for a:termux");
+  if (text(".recents-bg-toggle") !== "1 running in background") fails.push("after Stop: the count didn't drop to 1");
+  return fails;
+}
+
+/**
  * Android's native split screen in the switcher (the user, 2026-10-31 03:18: "when two apps are like, docked together...
  * I don't really see it on the launcher"): the split pair is ONE card - one combined icon (GroupIcon, the dock's DG1 cell's)
  * holding both apps' icons in the split's layout, and its picture the whole split at each side's share, divided as on
@@ -12499,6 +12581,9 @@ try {
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-thumbs", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(switcherThumbsCheck))));
     for (const [name, viewport, layout] of [["folded", { width: 404, height: 900 }, "2v"], ["unfolded", { width: 821, height: 883 }, "2h"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `switcher-split-pair-${name}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(switcherSplitPairCheck, layout))));
+  for (const [name, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+    if (process.env.SHELL_PAGES !== "0")
+      runs.push(open(browser, `${ORIGIN}/index.html`, `switcher-background-${name}`, viewport).then((r) => whenReady(r, () => switcherBackgroundCheck(r.page))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "swipe-home-one-anim", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(swipeHomeOneAnimCheck))));
   // X1/X2 (board one-swipe-up-gesture-for-home-and-over-apps): the home swipe over the switcher, folded and unfolded;
