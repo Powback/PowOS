@@ -30,8 +30,11 @@ L0=$("$A" shell "su -c 'wc -l < /data/powos/root/run/powos-app/hyprland.log'" | 
 echo "watching ${SECS}s from $(date +%T) (log line ${L0:-?}); open the volume panel / gamepad as you play"
 asuser bf-checker-phone.sh grab "$SECS" /var/tmp/bfo/x >/dev/null
 "$A" shell "su -c 'rm -rf /data/local/tmp/bfo-p; nohup sh /data/local/tmp/powos-bf-present.sh $SECS \"PowosWindowActivity|powos-ww-[0-9]+-linux\" /data/local/tmp/bfo-p 0 >/dev/null 2>&1 &'"
-# One adb call per second: overlay layers + the big dma-bufs' last writers (count per writer).
-PROBE='t=$(date +%T); o=$(dumpsys SurfaceFlinger --list | grep -oiE "VolumeDialog[A-Za-z]*|PowOS gamepad[A-Za-z ]*|Gamepad[A-Za-z]*" | sort -u | tr "\n" ","); b=$(awk "/^[0-9]+\t/{if(s>15000000)print w; s=\$1; w=\"none\"} /Exclusive fence/{w=\$4} END{if(s>15000000)print w}" /sys/kernel/debug/dma_buf/bufinfo | sed -E "s/kgsl-3d0_[0-9]+-//; s/\(.*//" | sort | uniq -c | awk "{printf \"%s=%s \", \$2, \$1}"); echo "$t overlay=${o:-none} bufs: $b"'
+# One adb call per second: the overlays ON SCREEN (the active display's HWC layer list = what is composited; the
+# --list of 19:02 named every layer, shown or not, and matched none: 0 of 88), whether any layer went to GPU (CLIENT)
+# composition, and the big dma-bufs' last writers. Overlays: Android's volume panel (VolumeDialog*/ty VOLUME), the
+# PowOS controller (ControllerPad.kt "PowOS controller") and PowOS overlay windows (shade, quick tools, pull-up panel).
+PROBE='t=$(date +%T); h=$(dumpsys SurfaceFlinger | awk "/\(active\) HWC layers/{a=1; next} a && /^Display|^Virtual Display/{a=0} a && /^ [^ -]/{n=\$0; sub(/^ /, \"\", n)} a && /\|/ && n != \"Layer name\" {split(\$0, f, \"|\"); gsub(/ /, \"\", f[4]); print n\":\"f[4]}"); o=$(echo "$h" | grep -iE "volume|PowOS (controller|shade|quick tools|pull-up panel|pet)" | sed "s/#[0-9]*//" | sort -u | tr "\n" ","); c=$(echo "$h" | grep -c ":CLIENT"); b=$(awk "/^[0-9]+\t/{if(s>15000000)print w; s=\$1; w=\"none\"} /Exclusive fence/{w=\$4} END{if(s>15000000)print w}" /sys/kernel/debug/dma_buf/bufinfo | sed -E "s/kgsl-3d0_[0-9]+-//; s/\(.*//" | sort | uniq -c | awk "{printf \"%s=%s \", \$2, \$1}"); echo "$t overlay=${o:-none} client-comp=$c bufs: $b"'
 printf '%s\n' "$PROBE" > "$OUT/probe.sh"; "$A" push "$OUT/probe.sh" /data/local/tmp/powos-bfo-probe.sh >/dev/null
 t0=$(date +%s)
 while [ $(( $(date +%s) - t0 )) -lt "$SECS" ]; do
@@ -42,9 +45,9 @@ sleep 3
 "$A" pull /data/local/tmp/bfo-x "$OUT/" >/dev/null && mv "$OUT/bfo-x" "$OUT/x"
 "$A" pull /data/local/tmp/bfo-p "$OUT/" >/dev/null && mv "$OUT/bfo-p" "$OUT/present"
 "$A" shell "su -c 'tail -n +$((${L0:-0} + 1)) /data/powos/root/run/powos-app/hyprland.log'" | tr -d '\r' \
-  | grep -aE "Xwayland KGSL|Xwayland glamor|window task [0-9]+ (frames|resized|full screen)|imported buffer" > "$OUT/session.txt"
+  | grep -aE "Xwayland KGSL|Present copies|Xwayland glamor|window task [0-9]+ (frames|resized|full screen)|imported buffer" > "$OUT/session.txt"
 "$A" shell "su -c 'rm -rf /data/local/tmp/bfo-x /data/local/tmp/bfo-p /data/local/tmp/powos-bfo-probe.sh /data/local/tmp/powos-bf-*.sh /data/local/tmp/powos-bf-xframes.py /data/powos/root/var/tmp/bfo /data/powos/root/var/tmp/powos-bf-*.sh'"
 up=$(grep -vc "overlay=none" "$OUT/timeline.txt")
-echo "overlay up $up of $(wc -l < "$OUT/timeline.txt") probes; buffer writers: $(awk '{$1=$2=""; print}' "$OUT/timeline.txt" | sort | uniq -c | sort -rn | head -3 | tr -s ' ' | tr '\n' ';')"
+echo "overlay up $up of $(wc -l < "$OUT/timeline.txt") probes, GPU composition in $(grep -vc "client-comp=0" "$OUT/timeline.txt"); buffer writers: $(awk '{$1=$2=$3=""; print}' "$OUT/timeline.txt" | sort | uniq -c | sort -rn | head -3 | tr -s ' ' | tr '\n' ';')"
 uv run --quiet --with numpy python3 "$here/bf-checker.py" --frames "$OUT/x" "$OUT/timeline.txt" | tee "$OUT/result.txt"
 echo "session: $(grep -c 'Xwayland KGSL' "$OUT/session.txt") KGSL stat lines, $(grep -c imported "$OUT/session.txt") buffer imports, $(grep -c resized "$OUT/session.txt") task resizes; out=$OUT"
