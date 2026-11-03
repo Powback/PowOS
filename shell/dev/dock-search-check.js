@@ -789,11 +789,37 @@ export async function barFootSame(below = "1") {
   const launcher = await bfPill(S, 0, 1);
   await bfPill(S, 0, 0);
   const at = `${mode}, pill ${below ? "under" : "over"} the dock`;
+  const gap = below ? await bfDockGap() : [];
+  console.info(`[barFootSame] ${at}: dock gap ${JSON.stringify(gap)}`);
   console.info(`[barFootSame] ${at}: home ${JSON.stringify(home)} ${JSON.stringify(tabs)} launcher ${JSON.stringify(launcher)}`);
   // Over the dock, home's own pill sits above it (the launcher's comes down to the foot, the dock gone): there the
   // launcher keeps the bottom/height check against the AI page's foot only.
-  return [...bfCompare(at, home, tabs), ...(below ? bfCompare(at, home, { launcher }) : [])];
+  return [...bfCompare(at, home, tabs), ...(below ? bfCompare(at, home, { launcher }) : []), ...bfGapFails(at, gap)];
 }
+
+/**
+ * DG1 (the user, 11-03 21:30: "Now the icons are floating too far up over the search bar"): the pill under the dock, the
+ * dock's foot to the pill's top is the design's gap - the same as with the bar not dropped to the foot (--bar-drop 0).
+ */
+async function bfDockGap() {
+  const home = document.querySelector(".home");
+  // Wide home's one-row foot sets dock and pill side by side (--bar-drop 0 there): no gap over the pill to keep.
+  if (home.classList.contains("wide")) return [];
+  const one = () => {
+    const d = document.querySelector(".home > .dock:not(.dock-tray)")?.getBoundingClientRect();
+    const p = document.querySelector(".home > .bar .bar-pill")?.getBoundingClientRect();
+    return d && p ? Math.round(p.top - d.bottom) : null;
+  };
+  const now = one();
+  home.style.setProperty("--bar-drop", "0px");
+  await sleep(100);
+  const design = one();
+  home.style.removeProperty("--bar-drop");
+  await sleep(100);
+  return [now, design];
+}
+
+const bfGapFails = (at, g) => (g.length && (g[0] == null || Math.abs(g[0] - g[1]) > 1) ? [`${at}: dock-to-pill gap ${g[0]} px, the design's ${g[1]} px`] : []);
 
 /** Each of [pills] at the AI page's [ai] bottom and height (±1 px), else what's off. */
 function bfCompare(at, ai, pills) {

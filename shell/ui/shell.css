@@ -166,6 +166,9 @@
 .home { --bar-drop: max(0px, calc(var(--inset-bottom, env(safe-area-inset-bottom)) - var(--inset-keyboard, 0px))); }
 .home.wide, .pull-screen { --bar-drop: 0px; }
 .home.pill-below > .bar { top: var(--bar-drop); }
+/* DG1 (the user, 11-03 21:30: "Now the icons are floating too far up over the search bar"): the dock over the pill comes
+   down with it, so the gap between them stays the design's own (dev/dock-search-check.js barFootSame). */
+.home.pill-below > .dock { top: var(--bar-drop); }
 /* The search bar goes down to the screen's foot as the dock gives way (under the dock already: it stays). */
 .home > .bar { transform: translateY(calc(var(--p) * (var(--strip-height) + var(--bar-drop)))); }
 /* SB1: a finger on the bar is home's to page with (gesture.ts chromeWay): the WebView never pans it, nor moves the
@@ -317,6 +320,8 @@
   border-radius: 20px;
 }
 .pill .grow::placeholder { color: var(--color-muted); }
+/* OE1: one row whatever the role's hint ("Message the manager" in home's narrow wide-foot pill wrapped to two). */
+.pill .grow::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The leading slot (bar.tsx Lead, SB5): empty, the prompt glyph - not words (its name is the field's aria-label), blinking
    in place of the caret while focused; with text, an × that clears it. One 40 px slot (the touch target, as the mic's)
    in both states, so the text never moves as it turns: the two cross-fade and turn in place. Empty, taps pass through
