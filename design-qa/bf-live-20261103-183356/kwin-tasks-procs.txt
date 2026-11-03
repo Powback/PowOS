@@ -1,0 +1,115 @@
+/stage/in/2/b.sh: 1 file pushed, 0 skipped. 0.5 MB/s (766 bytes in 0.001s)
+Tue Nov  3 17:34:02 UTC 2026
+Xwayland pid 31793 start
+Tue Nov  3 17:05:00 2026
+== new-format import lines since Xwayland start
+602274:Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003, 2268x2439 depth 24 stride 9216 offset 0 fd-size 22478848 (needs 22477824), stride % 64 = 0, failures of this shape 1): parameters fit the import rules, so the KGSL bo import was refused
+602275:Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003, 1135x1365 depth 24 stride 4608 offset 0 fd-size 6291456 (needs 6289920), stride % 64 = 0, failures of this shape 1): parameters fit the import rules, so the KGSL bo import was refused
+== old-format count after line 602000
+2
+== Xwayland KGSL stats + window task lines (last 80 from tail 600)
+kwin_backend_anland: window task 11 frames: last 5 s 187 commits, 188 drawn (37.6 fps); commit -> drawn median 1 ms, p90 3 ms, max 12 ms
+kwin_backend_anland: window task 11 frames: last 5 s 189 commits, 189 drawn (37.8 fps); commit -> drawn median 1 ms, p90 3 ms, max 106 ms
+kwin_backend_anland: window task 11 frames: last 5 s 175 commits, 175 drawn (35.0 fps); commit -> drawn median 1 ms, p90 3 ms, max 115 ms
+kwin_backend_anland: window task 11 frames: last 5 s 91 commits, 91 drawn (18.2 fps); commit -> drawn median 1 ms, p90 4 ms, max 106 ms
+kwin_backend_anland: window task 5 frames: last 5 s 21 commits, 23 drawn (4.6 fps); commit -> drawn median 1 ms, p90 1 ms, max 5 ms
+kwin_backend_anland: window task 11 frames: last 5 s 144 commits, 145 drawn (29.0 fps); commit -> drawn median 1 ms, p90 4 ms, max 106 ms
+kwin_backend_anland: window task 5 frames: last 5 s 0 commits, 1 drawn (0.2 fps); commit -> drawn median 0 ms, p90 0 ms, max 0 ms
+kwin_backend_anland: window task 11 frames: last 5 s 182 commits, 182 drawn (36.4 fps); commit -> drawn median 1 ms, p90 3 ms, max 112 ms
+kwin_backend_anland: window task 11 frames: last 5 s 196 commits, 195 drawn (39.0 fps); commit -> drawn median 1 ms, p90 4 ms, max 109 ms
+kwin_backend_anland: window task 11 frames: last 5 s 180 commits, 181 drawn (36.2 fps); commit -> drawn median 1 ms, p90 4 ms, max 108 ms
+kwin_backend_anland: window task 7 frames: last 5 s 1 commits, 3 drawn (0.6 fps); commit -> drawn median 3 ms, p90 3 ms, max 3 ms
+kwin_backend_anland: window task 11 frames: last 5 s 185 commits, 185 drawn (37.0 fps); commit -> drawn median 1 ms, p90 4 ms, max 105 ms
+kwin_backend_anland: window task 7 frames: last 5 s 1 commits, 3 drawn (0.6 fps); commit -> drawn median 1 ms, p90 1 ms, max 1 ms
+kwin_backend_anland: window task 11 frames: last 5 s 188 commits, 187 drawn (37.4 fps); commit -> drawn median 1 ms, p90 4 ms, max 108 ms
+kwin_backend_anland: window task 7 frames: last 5 s 0 commits, 1 drawn (0.2 fps); commit -> drawn median 0 ms, p90 0 ms, max 0 ms
+kwin_backend_anland: window task 11 frames: last 5 s 174 commits, 174 drawn (34.8 fps); commit -> drawn median 1 ms, p90 2 ms, max 102 ms
+kwin_backend_anland: window task 11 frames: last 5 s 184 commits, 185 drawn (37.0 fps); commit -> drawn median 1 ms, p90 3 ms, max 109 ms
+kwin_backend_anland: window task 11 in the background
+kwin_backend_anland: window task 11 live, QSize(2268, 2440) pre-rotated 2 for "Broforce"
+kwin_backend_anland: window task 11 frames: last 5 s 167 commits, 166 drawn (33.2 fps); commit -> drawn median 1 ms, p90 3 ms, max 298 ms
+kwin_backend_anland: window task 11 in the background
+kwin_backend_anland: window task 11 live, QSize(2268, 2440) pre-rotated 1 for "Broforce"
+kwin_backend_anland: window task 11 frames: last 5 s 111 commits, 110 drawn (22.0 fps); commit -> drawn median 1 ms, p90 4 ms, max 217 ms
+kwin_backend_anland: window task 11 frames: last 5 s 141 commits, 141 drawn (28.2 fps); commit -> drawn median 1 ms, p90 2 ms, max 102 ms
+kwin_backend_anland: window task 11 frames: last 5 s 116 commits, 116 drawn (23.2 fps); commit -> drawn median 1 ms, p90 3 ms, max 102 ms
+kwin_backend_anland: window task 11 frames: last 5 s 133 commits, 133 drawn (26.6 fps); commit -> drawn median 1 ms, p90 3 ms, max 101 ms
+Xwayland KGSL: last 30s: 783 commits (3 forced past a stale frame callback, 0 held back at 4 buffers), 783 buffers released, up to 2 held by the compositor; 783 fenced, 0 finished on the CPU
+kwin_backend_anland: window task 11 frames: last 5 s 81 commits, 81 drawn (16.2 fps); commit -> drawn median 1 ms, p90 2 ms, max 4 ms
+kwin_backend_anland: window task 11 frames: last 5 s 112 commits, 112 drawn (22.4 fps); commit -> drawn median 1 ms, p90 3 ms, max 8 ms
+kwin_backend_anland: window task 11 in the background
+kwin_backend_anland: window task 11 live, QSize(2268, 2440) pre-rotated 2 for "Broforce"
+kwin_backend_anland: window task 11 in the background
+kwin_backend_anland: window task 11 live, QSize(2268, 2440) pre-rotated 1 for "Broforce"
+kwin_backend_anland: window task 11 frames: last 5 s 64 commits, 63 drawn (12.6 fps); commit -> drawn median 1 ms, p90 5 ms, max 341 ms
+kwin_backend_anland: window task 11 frames: last 5 s 116 commits, 116 drawn (23.2 fps); commit -> drawn median 1 ms, p90 3 ms, max 10 ms
+kwin_backend_anland: window task 11 frames: last 5 s 116 commits, 116 drawn (23.2 fps); commit -> drawn median 1 ms, p90 3 ms, max 20 ms
+kwin_backend_anland: window task 11 frames: last 5 s 114 commits, 114 drawn (22.8 fps); commit -> drawn median 1 ms, p90 3 ms, max 12 ms
+Xwayland KGSL: last 30s: 626 commits (1 forced past a stale frame callback, 0 held back at 4 buffers), 626 buffers released, up to 2 held by the compositor; 626 fenced, 0 finished on the CPU
+kwin_backend_anland: window task 11 frames: last 5 s 104 commits, 104 drawn (20.8 fps); commit -> drawn median 1 ms, p90 3 ms, max 101 ms
+kwin_backend_anland: window task 11 frames: last 5 s 115 commits, 115 drawn (23.0 fps); commit -> drawn median 1 ms, p90 3 ms, max 101 ms
+kwin_backend_anland: window task 11 frames: last 5 s 159 commits, 159 drawn (31.8 fps); commit -> drawn median 1 ms, p90 4 ms, max 110 ms
+kwin_backend_anland: window task 7 frames: last 5 s 1 commits, 3 drawn (0.6 fps); commit -> drawn median 3 ms, p90 3 ms, max 3 ms
+kwin_backend_anland: window task 11 frames: last 5 s 43 commits, 44 drawn (8.8 fps); commit -> drawn median 1 ms, p90 2 ms, max 3 ms
+kwin_backend_anland: window task 7 frames: last 5 s 0 commits, 1 drawn (0.2 fps); commit -> drawn median 0 ms, p90 0 ms, max 0 ms
+kwin_backend_anland: window task 11 frames: last 5 s 80 commits, 81 drawn (16.2 fps); commit -> drawn median 1 ms, p90 3 ms, max 6 ms
+kwin_backend_anland: window task 11 frames: last 5 s 96 commits, 96 drawn (19.2 fps); commit -> drawn median 1 ms, p90 2 ms, max 5 ms
+kwin_backend_anland: window task 11 frames: last 5 s 100 commits, 100 drawn (20.0 fps); commit -> drawn median 1 ms, p90 3 ms, max 6 ms
+kwin_backend_anland: window task 11 frames: last 5 s 71 commits, 71 drawn (14.2 fps); commit -> drawn median 1 ms, p90 3 ms, max 24 ms
+kwin_backend_anland: window task 11 frames: last 5 s 117 commits, 117 drawn (23.4 fps); commit -> drawn median 1 ms, p90 4 ms, max 101 ms
+kwin_backend_anland: window task 11 frames: last 5 s 123 commits, 123 drawn (24.6 fps); commit -> drawn median 1 ms, p90 2 ms, max 5 ms
+kwin_backend_anland: window task 11 frames: last 5 s 118 commits, 118 drawn (23.6 fps); commit -> drawn median 1 ms, p90 3 ms, max 102 ms
+kwin_backend_anland: window task 11 frames: last 5 s 99 commits, 99 drawn (19.8 fps); commit -> drawn median 1 ms, p90 3 ms, max 9 ms
+kwin_backend_anland: window task 11 frames: last 5 s 101 commits, 101 drawn (20.2 fps); commit -> drawn median 1 ms, p90 3 ms, max 11 ms
+kwin_backend_anland: window task 11 frames: last 5 s 107 commits, 107 drawn (21.4 fps); commit -> drawn median 1 ms, p90 3 ms, max 8 ms
+kwin_backend_anland: window task 11 frames: last 5 s 100 commits, 100 drawn (20.0 fps); commit -> drawn median 1 ms, p90 3 ms, max 15 ms
+kwin_backend_anland: window task 11 frames: last 5 s 96 commits, 96 drawn (19.2 fps); commit -> drawn median 1 ms, p90 3 ms, max 13 ms
+kwin_backend_anland: window task 11 frames: last 5 s 116 commits, 116 drawn (23.2 fps); commit -> drawn median 1 ms, p90 3 ms, max 103 ms
+kwin_backend_anland: window task 11 frames: last 5 s 112 commits, 112 drawn (22.4 fps); commit -> drawn median 1 ms, p90 3 ms, max 106 ms
+kwin_backend_anland: window task 11 frames: last 5 s 99 commits, 99 drawn (19.8 fps); commit -> drawn median 1 ms, p90 3 ms, max 102 ms
+kwin_backend_anland: window task 11 frames: last 5 s 123 commits, 123 drawn (24.6 fps); commit -> drawn median 1 ms, p90 3 ms, max 101 ms
+kwin_backend_anland: window task 11 frames: last 5 s 120 commits, 120 drawn (24.0 fps); commit -> drawn median 1 ms, p90 4 ms, max 101 ms
+kwin_backend_anland: window task 11 frames: last 5 s 120 commits, 120 drawn (24.0 fps); commit -> drawn median 1 ms, p90 3 ms, max 101 ms
+kwin_backend_anland: window task 11 frames: last 5 s 112 commits, 112 drawn (22.4 fps); commit -> drawn median 1 ms, p90 3 ms, max 12 ms
+kwin_backend_anland: window task 11 frames: last 5 s 108 commits, 108 drawn (21.6 fps); commit -> drawn median 1 ms, p90 3 ms, max 101 ms
+kwin_backend_anland: window task 11 frames: last 5 s 116 commits, 116 drawn (23.2 fps); commit -> drawn median 1 ms, p90 4 ms, max 9 ms
+kwin_backend_anland: window task 11 frames: last 5 s 104 commits, 104 drawn (20.8 fps); commit -> drawn median 1 ms, p90 3 ms, max 101 ms
+kwin_backend_anland: window task 11 frames: last 5 s 109 commits, 109 drawn (21.8 fps); commit -> drawn median 1 ms, p90 2 ms, max 6 ms
+kwin_backend_anland: window task 11 : full screen false asked by the app
+kwin_backend_anland: window task 11 floating again KWin::RectF(0,0 504.444x606.667)
+kwin_backend_anland: window task 11 the window took QSizeF(1008, 1038.22) itself, the task is QSizeF(504.444, 606.667) : sized back
+kwin_backend_anland: window task 11 full screen (the app's own) KWin::RectF(0,0 1008x1084)
+kwin_backend_anland: window task 11 resized: 3 commits, configure->commit median 0 ms, p90 1 ms, max 1 ms
+kwin_backend_anland: window task 11 frames: last 5 s 104 commits, 105 drawn (21.0 fps); commit -> drawn median 1 ms, p90 3 ms, max 11 ms
+kwin_backend_anland: window task 11 frames: last 5 s 93 commits, 93 drawn (18.6 fps); commit -> drawn median 1 ms, p90 2 ms, max 6 ms
+kwin_backend_anland: window task 11 frames: last 5 s 91 commits, 91 drawn (18.2 fps); commit -> drawn median 1 ms, p90 3 ms, max 8 ms
+kwin_backend_anland: window task 11 : full screen false asked by the app
+kwin_backend_anland: window task 11 floating again KWin::RectF(0,0 504.444x606.667)
+kwin_backend_anland: window task 11 full screen (the app's own) KWin::RectF(0,0 1008x1084)
+kwin_backend_anland: window task 11 resized: 2 commits, configure->commit median 0 ms, p90 0 ms, max 0 ms
+Xwayland KGSL: last 30s: 605 commits (1 forced past a stale frame callback, 0 held back at 4 buffers), 605 buffers released, up to 3 held by the compositor; 605 fenced, 0 finished on the CPU
+== game
+matching pids: 12879 12891 12892 12897 13040 13287 13375 15454 
+12879    1       05:05 00:00:00  0.0 /home/powos/.local/share/Steam/linuxarm64/pw-audio-namespace -- /home/powos/.local/share/Steam/steamrtarm64/reaper SteamLaunch AppId=274190 -- /home/powos/.loca
+12891    1       05:04 00:00:00  0.0 /home/powos/.local/share/Steam/steamrtarm64/reaper SteamLaunch AppId=274190 -- /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/fex-compat-tool waitforex
+12892    1       05:04 00:00:00  0.0 python3 /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/fex-compat-tool waitforexitandrun -- /home/powos/.local/share/Steam/steamapps/common/SteamLinuxR
+12897    1       05:04 00:00:00  0.2 /home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4/pressure-vessel-arm64/libexec/steam-runtime-tools-0/srt-bwrap --args 27 /usr/lib/pressure-ve
+13040    1       05:01 00:00:00  0.0 /usr/lib/pressure-vessel/from-host/libexec/steam-runtime-tools-0/pv-adverb --prefix=/usr/lib/pressure-vessel/from-host --emulator=/usr/lib/pressure-vessel/overr
+13287    1       04:57 00:00:00  0.2 /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /usr/bin/python3 /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/proto
+13375    3       04:56 00:00:01  0.3 /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib//wine/x86_64
+15454   78       04:44 00:08:15  174 /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/i386-un
+  PID NLWP     ELAPSED     TIME %CPU COMMAND
+15454   78       04:44 00:08:15  174 /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/i386-unix/
+15343   55       04:45 00:00:50 17.7 /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/i386-unix/
+11216   12       05:37 00:00:56 16.7 /home/powos/.local/share/Steam/steamrtarm64/steamwebhelper --type=zygote --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --us
+26483  131       22:41 00:03:34 15.7 com.powos.app
+ 8842   61       05:59 00:00:55 15.3 ./steam -cef-disable-gpu-sandbox steam://rungameid/274190
+13394    1       04:56 00:00:39 13.1 /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/../../bin/
+26913   29       22:40 00:02:26 10.7 com.google.android.webview:sandboxed_process0:org.chromium.content.app.SandboxedProcessService0:0
+14198   13       04:52 00:00:29 10.0 /home/powos/.local/share/Steam/steamapps/common/FEX-Emu/usr/bin/FEX /home/powos/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/i386-unix/
+10348   12       05:48 00:00:20  5.8 /home/powos/.local/share/Steam/steamrtarm64/steamwebhelper --type=zygote --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --us
+10179   20       05:49 00:00:17  4.9 /home/powos/.local/share/Steam/steamrtarm64/steamwebhelper --type=gpu-process --disable-gpu-sandbox --enable-crash-reporter=, --disable-breakpad --change-stack-gua
+ 2904  435    20:37:38 01:00:50  4.9 system_server
+10113   65       05:49 00:00:15  4.5 /home/powos/.local/share/Steam/steamrtarm64/steamwebhelper -nocrashdialog -lang=en_US -cachedir=/home/powos/.local/share/Steam/config/htmlcache -steampid=8842 -bui
+32206    1       00:00 00:00:00  3.9 bash /tmp/powos-root-28813.sh
+ 2037   55    20:37:39 00:47:19  3.8 /system/bin/surfaceflinger

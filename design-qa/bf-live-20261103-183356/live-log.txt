@@ -1,0 +1,107 @@
+/stage/in/2/d.sh: 1 file pushed, 0 skipped. 0.4 MB/s (618 bytes in 0.001s)
+Tue Nov  3 17:33:59 UTC 2026
+== new-format (patch 0010) lines
+602274:Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003, 2268x2439 depth 24 stride 9216 offset 0 fd-size 22478848 (needs 22477824), stride % 64 = 0, failures of this shape 1): parameters fit the import rules, so the KGSL bo import was refused
+602275:Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003, 1135x1365 depth 24 stride 4608 offset 0 fd-size 6291456 (needs 6289920), stride % 64 = 0, failures of this shape 1): parameters fit the import rules, so the KGSL bo import was refused
+== context around them
+kwin_backend_anland: window task 5 resized: 1 commits, configure->commit median 0 ms, p90 0 ms, max 0 ms
+kwin_backend_anland: window task 7 resized: 1 commits, configure->commit median 0 ms, p90 0 ms, max 0 ms
+kwin_backend_anland: window task 7 frames: last 5 s 13 commits, 13 drawn (2.6 fps); commit -> drawn median 1 ms, p90 11 ms, max 26 ms
+kwin_backend_anland: quit 9 : pid 15450 still runs without it after 3 s: powos-app-quit 15450
+/usr/local/bin/powos-app-quit: line 35: /proc/15357/cmdline: No such file or directory
+/usr/local/bin/powos-app-quit: line 81: /proc/15450/environ: Permission denied
+2026-11-03 18:29:23 powos-app-quit 15450: ending 15450:foot 
+kwin_backend_anland: new window "Broforce" has its surface now (full screen)
+kwin_backend_anland: full-screen window "Broforce" opened as a task
+kwin_backend_anland: window task 5 frames: last 5 s 14 commits, 13 drawn (2.6 fps); commit -> drawn median 2 ms, p90 26 ms, max 101 ms
+kwin_backend_anland: imported buffer 0 fd 206 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 1 fd 207 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 2 fd 208 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 3 fd 209 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: no desktop consumer: the output follows the window tasks' screen QSize(640, 480) -> QSize(2268, 2440)
+kwin_backend_anland: resizing output to QSize(2268, 2440)
+kwin_backend_anland: screen size for full-screen tasks: QSize(2268, 2440)
+kwin_backend_anland: window task 10 live, QSize(2268, 2440) pre-rotated 1 for "Broforce"
+qt.qml.propertyCache.append: Final member StackingOrder is overridden in class QQmlDMAbstractItemModelData. The override won't be used.
+2026-11-03 18:29:25 powos-app-quit 15450: KILL after 2 s: 15450
+2026-11-03 18:29:26 powos-app-quit 15450: still there: 15450
+kwin_backend_anland: window task 7 frames: last 5 s 2 commits, 4 drawn (0.8 fps); commit -> drawn median 101 ms, p90 101 ms, max 101 ms
+kwin_backend_anland: window task 11 has no title bar
+kwin_backend_anland: new window "Broforce" ( "" ) opened as a task
+qt.qml.propertyCache.append: Final member StackingOrder is overridden in class QQmlDMAbstractItemModelData. The override won't be used.
+kwin_backend_anland: window task 11 : its own Android keyboard true
+kwin_backend_anland: imported buffer 0 fd 208 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+kwin_backend_anland: imported buffer 1 fd 209 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+kwin_backend_anland: imported buffer 2 fd 211 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+kwin_backend_anland: imported buffer 3 fd 212 QSize(2440, 2268) stride 9984 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+kwin_backend_anland: window task 11 live, QSize(2268, 2440) pre-rotated 1 for "Broforce"
+kwin_backend_anland: window task 11 resized: 1 commits, configure->commit median 0 ms, p90 0 ms, max 0 ms
+kwin_backend_anland: window task 11 fixed-size game window "Broforce" QSizeF(921.778, 1084.44) goes full screen: the task's size, at its resolution
+kwin_backend_anland: window task 11 full screen (the app's own) KWin::RectF(0,0 1008x1084.44)
+kwin_backend_anland: window task 5 frames: last 5 s 13 commits, 13 drawn (2.6 fps); commit -> drawn median 1 ms, p90 7 ms, max 127 ms
+kwin_backend_anland: window task 11 floating again KWin::RectF(0,0 1008x1084)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003, 2268x2439 depth 24 stride 9216 offset 0 fd-size 22478848 (needs 22477824), stride % 64 = 0, failures of this shape 1): parameters fit the import rules, so the KGSL bo import
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003, 1135x1365 depth 24 stride 4608 offset 0 fd-size 6291456 (needs 6289920), stride % 64 = 0, failures of this shape 1): parameters fit the import rules, so the KGSL bo import w
+kwin_backend_anland: window task 11 full screen (the app's own) KWin::RectF(0,0 1008x1084)
+kwin_backend_anland: window task 11 resized: 1 commits, configure->commit median 0 ms, p90 0 ms, max 0 ms
+Xwayland KGSL: last 30s: 95 commits (6 forced past a stale frame callback, 0 held back at 4 buffers), 94 buffers released, up to 3 held by the compositor; 95 fenced, 0 finished on the CPU
+kwin_backend_anland: window task 7 frames: last 5 s 1 commits, 3 drawn (0.6 fps); commit -> drawn median 1 ms, p90 1 ms, max 1 ms
+kwin_backend_anland: window task 11 frames: last 5 s 63 commits, 65 drawn (13.0 fps); commit -> drawn median 1 ms, p90 6 ms, max 101 ms
+kwin_backend_anland: window task 5 frames: last 5 s 0 commits, 3 drawn (0.6 fps); commit -> drawn median 0 ms, p90 0 ms, max 0 ms
+kwin_backend_anland: window task 7 frames: last 5 s 0 commits, 1 drawn (0.2 fps); commit -> drawn median 0 ms, p90 0 ms, max 0 ms
+kwin_backend_anland: window task 11 frames: last 5 s 187 commits, 188 drawn (37.6 fps); commit -> drawn median 1 ms, p90 3 ms, max 12 ms
+kwin_backend_anland: window task 11 frames: last 5 s 189 commits, 189 drawn (37.8 fps); commit -> drawn median 1 ms, p90 3 ms, max 106 ms
+kwin_backend_anland: window task 11 frames: last 5 s 175 commits, 175 drawn (35.0 fps); commit -> drawn median 1 ms, p90 3 ms, max 115 ms
+kwin_backend_anland: window task 11 frames: last 5 s 91 commits, 91 drawn (18.2 fps); commit -> drawn median 1 ms, p90 4 ms, max 106 ms
+kwin_backend_anland: window task 5 frames: last 5 s 21 commits, 23 drawn (4.6 fps); commit -> drawn median 1 ms, p90 1 ms, max 5 ms
+kwin_backend_anland: window task 11 frames: last 5 s 144 commits, 145 drawn (29.0 fps); commit -> drawn median 1 ms, p90 4 ms, max 106 ms
+kwin_backend_anland: window task 5 frames: last 5 s 0 commits, 1 drawn (0.2 fps); commit -> drawn median 0 ms, p90 0 ms, max 0 ms
+== latest window task 11 + KGSL stats
+kwin_backend_anland: window task 11 frames: last 5 s 120 commits, 120 drawn (24.0 fps); commit -> drawn median 1 ms, p90 4 ms, max 101 ms
+kwin_backend_anland: window task 11 frames: last 5 s 120 commits, 120 drawn (24.0 fps); commit -> drawn median 1 ms, p90 3 ms, max 101 ms
+kwin_backend_anland: window task 11 frames: last 5 s 112 commits, 112 drawn (22.4 fps); commit -> drawn median 1 ms, p90 3 ms, max 12 ms
+kwin_backend_anland: window task 11 frames: last 5 s 108 commits, 108 drawn (21.6 fps); commit -> drawn median 1 ms, p90 3 ms, max 101 ms
+kwin_backend_anland: window task 11 frames: last 5 s 116 commits, 116 drawn (23.2 fps); commit -> drawn median 1 ms, p90 4 ms, max 9 ms
+kwin_backend_anland: window task 11 frames: last 5 s 104 commits, 104 drawn (20.8 fps); commit -> drawn median 1 ms, p90 3 ms, max 101 ms
+kwin_backend_anland: window task 11 frames: last 5 s 109 commits, 109 drawn (21.8 fps); commit -> drawn median 1 ms, p90 2 ms, max 6 ms
+kwin_backend_anland: window task 11 : full screen false asked by the app
+kwin_backend_anland: window task 11 floating again KWin::RectF(0,0 504.444x606.667)
+kwin_backend_anland: window task 11 the window took QSizeF(1008, 1038.22) itself, the task is QSizeF(504.444, 606.667) : sized back
+kwin_backend_anland: window task 11 full screen (the app's own) KWin::RectF(0,0 1008x1084)
+kwin_backend_anland: window task 11 resized: 3 commits, configure->commit median 0 ms, p90 1 ms, max 1 ms
+kwin_backend_anland: window task 11 frames: last 5 s 104 commits, 105 drawn (21.0 fps); commit -> drawn median 1 ms, p90 3 ms, max 11 ms
+kwin_backend_anland: window task 11 frames: last 5 s 93 commits, 93 drawn (18.6 fps); commit -> drawn median 1 ms, p90 2 ms, max 6 ms
+kwin_backend_anland: window task 11 frames: last 5 s 91 commits, 91 drawn (18.2 fps); commit -> drawn median 1 ms, p90 3 ms, max 8 ms
+== game threads
+  PID NLWP     ELAPSED     TIME %CPU
+15454   78       04:41 00:08:10  174
+cat: /proc/15454/task/31122/comm: No such file or directory
+awk: fatal: cannot open file `/proc/15454/task/31122/stat' for reading: No such file or directory
+cat: /proc/15454/task/31122/wchan: No such file or directory
+cat: /proc/15454/task/31123/comm: No such file or directory
+awk: fatal: cannot open file `/proc/15454/task/31123/stat' for reading: No such file or directory
+cat: /proc/15454/task/31123/wchan: No such file or directory
+Broforce_beta.e 15981 0
+UnityGfxDeviceW 5065 futex_wait_queue_me
+dxvk-cs 3424 0
+dxvk-submit 2142 adreno_drawctxt_wait
+audio_client_ma 2009 do_sys_poll
+Broforce_beta.e 1379 0
+dxvk-queue 1237 futex_wait_queue_me
+Broforce_beta.e 1144 futex_wait_multiple
+UnityPreload 1073 futex_wait_multiple
+Broforce_beta.e 1013 futex_wait_multiple
+Broforce_beta.e 867 0
+Broforce_beta.e 246 do_select
+AsyncReadManage 217 futex_wait_multiple
+wine_xinput_hid 214 futex_wait_multiple
+wine_xinput_hid 209 futex_wait_multiple
+dxvk-frame 148 futex_wait_queue_me
+dxvk-shader-n 119 futex_wait_queue_me
+Broforce_beta.e 99 do_epoll_wait
+dxvk-shader-l 67 futex_wait_queue_me
+dxvk-shader-l 59 futex_wait_queue_me

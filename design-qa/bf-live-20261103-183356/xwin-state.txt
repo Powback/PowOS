@@ -1,0 +1,19 @@
+/stage/in/2/c.sh: 1 file pushed, 0 skipped. 0.2 MB/s (356 bytes in 0.001s)
+Tue Nov  3 17:34:02 UTC 2026
+active 0x4400001
+  Absolute upper-left X:  0
+  Absolute upper-left Y:  0
+  Relative upper-left X:  0
+  Relative upper-left Y:  0
+  Width: 2268
+  Height: 2439
+  Map State: IsViewable
+WM_NAME(STRING) = "Broforce"
+WM_CLASS(STRING) = "steam_app_274190", "steam_app_274190"
+_NET_WM_STATE(ATOM) = _NET_WM_STATE_FULLSCREEN, _NET_WM_STATE_FOCUSED
+_NET_WM_BYPASS_COMPOSITOR(CARDINAL) = 1
+WM_NORMAL_HINTS(WM_SIZE_HINTS):
+		program specified location: 0, 0
+		window gravity: Static
+== Broforce windows
+     0x4400001 "Broforce": ("steam_app_274190" "steam_app_274190")  2268x2439+0+0  +0+0
