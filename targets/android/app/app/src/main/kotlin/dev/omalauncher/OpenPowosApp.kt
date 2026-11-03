@@ -26,7 +26,7 @@ class OpenPowosApp : Activity() {
                 if (exec == dev.omalauncher.linux.PLASMA_COMMAND) return finish()
                 // powos-run waits for the session if the desktop is still starting it.
                 thread(name = "powos-open", isDaemon = true) {
-                    val code = runCatching { RootedGuest.runOwn("exec $exec") }.getOrElse { -1 }
+                    val code = runCatching { RootedGuest.launch(exec, exec) }.getOrElse { -1 }
                     Log.i("OpenPowosApp", "$name exited $code")
                 }
             }

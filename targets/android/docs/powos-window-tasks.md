@@ -99,6 +99,20 @@ PowOS without the script. KWin itself only comes up once the desktop's task has 
 handshake waits for the screen info): right after a session start the desktop comes up first, and the app opens as
 its own task over it once KWin is there.
 
+### Output: never the app's pipe
+
+A program the PowOS app starts that runs on (an app, a game, a Steam client, a session daemon) gets none of the app's
+pipes: stdin from `/dev/null`, stdout and stderr appended to a log of its own, restarted past 4 MB -
+`$XDG_RUNTIME_DIR/open-task/<app>.log` (powos-open-task) or `$XDG_RUNTIME_DIR/launch/<name>.log`
+(`RootedGuest.launch`: `Runtime.launch`, `OpenPowosApp`, `openAsTask`'s fallback). While the launching helper runs it
+relays the new output to the app (the "couldn't start: <why>" line reads it); the program never holds the pipe itself.
+Why: the app restarts on every APK update, and a pipe whose reader is gone kills whatever writes to it next (SIGPIPE /
+EPIPE) - the program and every child it hands its fds to. A Steam client started that way handed it to every game:
+Broforce 2026-11-03 ended ~10 s after each launch (7decee44). Short commands whose output the app reads and that end
+(`RootedGuest.run`, `runOwn`: `powos game stop`, `steam -shutdown`, queries) keep their pipe, as do the app's own helpers
+that should end with it (the power-key reader, the web-windows display helper). Tests: `RootedGuestLaunchTest`
+(JVM: the command line, and a program outliving a closed caller pipe), `test/tier1/test-open-task-output.py`.
+
 ## Then
 
 - Every new window opens as its own task (a setting), and a PowOS app launched from Android's own shortcuts

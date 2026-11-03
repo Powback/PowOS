@@ -741,7 +741,7 @@ class Runtime(
                 runCatching {
                     when {
                         game != null -> RootedGuest.openAsTask("steam_app_$game", null, command, ::showDesktop, log)
-                        rooted -> RootedGuest.runOwn("exec $command", log)
+                        rooted -> RootedGuest.launch(command, command, log) // runs on: never the app's pipe
                         else -> proot.run("exec $command", log)
                     }
                 }.getOrElse { -1 }

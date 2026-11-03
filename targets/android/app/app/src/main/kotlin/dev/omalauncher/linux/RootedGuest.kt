@@ -57,7 +57,10 @@ object RootedGuest {
         onLine: (String) -> Unit = {},
     ): Int = andro.marchy.RootShell.run(rootCommand(command)) { onLine(it) }
 
-    /** Like [run], in a root process of its own: for what runs as long as an app does (it'd hold the shared shell). */
+    /**
+     * Like [run], in a root process of its own: for a command that runs a while (it'd hold the shared shell) and ends,
+     * its output on the app's pipe. A program that runs on (an app, a game) is [launch]: never this pipe.
+     */
     fun runOwn(
         command: String,
         onLine: (String) -> Unit = {},
@@ -66,6 +69,44 @@ object RootedGuest {
         process.inputStream.bufferedReader().forEachLine(onLine)
         return process.waitFor()
     }
+
+    /**
+     * Starts [command] (a shell command line) as a program that runs on - an app, a game, a Steam client - with none of
+     * the app's pipes: stdin from /dev/null, stdout and stderr appended to `$XDG_RUNTIME_DIR/launch/<name>.log`
+     * (restarted past 4 MB). While it runs its new output is relayed to [onLine]; returns its exit code, like [runOwn].
+     *
+     * Never `runOwn("exec <program>")`: the program would hold the app's pipe, and once the app restarts (an APK update)
+     * that pipe has no reader - whatever the program, and every child it hands its fds to, writes next gets SIGPIPE.
+     * Steam passed it on to every game it started: Broforce 2026-11-03 ended ~10 s after each launch (7decee44 fixed it
+     * in powos-open-task; targets/android/docs/powos-window-tasks.md "Output" has the rule). Short commands whose
+     * output the app reads, which finish, keep the pipe ([run], [runOwn]).
+     */
+    fun launch(
+        name: String,
+        command: String,
+        onLine: (String) -> Unit = {},
+    ): Int = runOwn(launchCommand(name, command), onLine)
+
+    /** The shell line [launch] runs in the session: [command] off the caller's fds, its log relayed while it runs. */
+    fun launchCommand(
+        name: String,
+        command: String,
+    ): String {
+        val log = "\"\${XDG_RUNTIME_DIR:-/tmp}/launch/${logName(name)}.log\""
+        return "f=$log; mkdir -p \"\${f%/*}\"; " +
+            "[ \"\$(stat -c %s \"\$f\" 2>/dev/null || echo 0)\" -gt $LAUNCH_LOG_KEEP ] && : >\"\$f\"; " +
+            "s=\$(stat -c %s \"\$f\" 2>/dev/null || echo 0); " +
+            "(exec $command) </dev/null >>\"\$f\" 2>&1 & p=\$!; " +
+            "tail -c +\$((s + 1)) -s 0.25 --pid=\$p -f \"\$f\" 2>/dev/null; wait \$p"
+    }
+
+    /** A launch log's file name: [name]'s last path part, only [A-Za-z0-9._-], at most 64 characters. */
+    fun logName(name: String): String =
+        name.trim().substringBefore(' ').substringAfterLast('/').replace(Regex("[^A-Za-z0-9._-]"), "_").take(64)
+            .ifEmpty { "command" }
+
+    /** Bytes: a launch log past this is restarted at the program's next launch (it appends: O_APPEND, `>>`). */
+    private const val LAUNCH_LOG_KEEP = 4 shl 20
 
     /**
      * Opens a PowOS app like a phone app: its window as its own Android task (session/powos-open-task - KWin exports
@@ -83,7 +124,7 @@ object RootedGuest {
         val ids = listOfNotNull(appId, wmClass).filter { it.isNotBlank() }.joinToString("") { " --app-id " + shellQuote(it) }
         val command =
             "if command -v powos-open-task >/dev/null; then exec powos-open-task$ids -- ${shellQuote(exec)}; " +
-                "else echo '$OPEN_DESKTOP'; exec $exec; fi"
+                "else echo '$OPEN_DESKTOP'; ${launchCommand(appId, exec)}; fi"
         return runOwn(command) { line ->
             if (line == OPEN_DESKTOP) showDesktop()
             onLine(line)

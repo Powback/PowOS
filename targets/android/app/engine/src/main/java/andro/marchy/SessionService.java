@@ -486,7 +486,10 @@ public class SessionService extends Service {
             pb.environment().putAll(env);
         }
         File log = new File(runDir(this), name + ".log");
-        pb.redirectErrorStream(true).redirectOutput(log);
+        // Runs on as long as the session: none of this app's pipes (docs/powos-window-tasks.md "Output"):
+        // stdin /dev/null, output its log (made anew each start).
+        pb.redirectErrorStream(true).redirectOutput(log)
+                .redirectInput(new File("/dev/null"));
         processes.add(pb.start());
         Log.i(TAG, "started " + name + " (log: " + log + ")");
     }
