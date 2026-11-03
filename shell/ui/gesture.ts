@@ -315,6 +315,9 @@ export function applyTrack() {
     if (!el) continue;
     el.classList.toggle("sliding", dx != null);
     el.style.transform = `translateX(calc(${base}% + ${shift}px))`;
+    // FX1: home's one bar counters home's slide (shell.css .home > .bar translate) - it stays put on screen while the
+    // pages slide under it, at rest, on the slide's curve and under a finger (bar.tsx seatOnAi).
+    if (sel === ".home") el.style.setProperty("--track-counter", `${-((base / 100) * el.offsetWidth + shift)}px`);
   }
   if (!track) return;
   track.classList.toggle("dragging", dx != null);

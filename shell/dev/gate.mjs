@@ -12715,6 +12715,11 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, below] of [["folded", "1"], ["folded", ""], ["unfolded", "1"], ["unfolded", ""]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `bar-foot-same-${label}${below ? "-below" : ""}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (b) => (await importShim("./dev/dock-search-check.js")).barFootSame(b), below))));
+  // FX1 (dev/dock-search-check.js barSwipeFixed; the user, 11-03 22:53: "some page block for the search bar"): mid-swipe
+  // home <-> PowOS AI's page, the bar's rect constant - it never rides a page.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const label of ["folded", "unfolded"])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `bar-swipe-fixed-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/dock-search-check.js")).barSwipeFixed()))));
   // SF1 (dev/dock-search-check.js searchFindable; the user, 11-03 11:49: "Where is that setting?"): Settings search
   // finds the search's spot and opens its row highlighted; a long press on the bar / edit mode's tap on the button flips it.
   if (process.env.SHELL_PAGES !== "0")

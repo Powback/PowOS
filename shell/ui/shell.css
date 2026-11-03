@@ -4305,8 +4305,12 @@ html:has(.home > .bar[data-role="ai"] textarea:focus) .ai-screen.stacked > .ai-s
  * seatOnAi), moving there on home's own slide curve; while a finger drags the screens, no transition (it rides along).
  * Shown and tappable there whatever home's foot does with it (parked under the search widget, the dock's button).
  */
-.home > .bar.seated { transition: translate var(--spring-ms) var(--spring); z-index: 5; }
-.home > .bar.seated.sliding { transition: none; }
+.home > .bar.seated { z-index: 5; }
+/* FX1 (the user, 11-03 22:53: "there's still some page block for the search bar on the last page"): the bar never rides
+   a page - --track-counter (gesture.ts applyTrack) undoes home's slide in the same frame, on its curve; under a finger
+   (.sliding) it follows at once. --bar-lift: the keyboard's lift on PowOS AI's page (bar.tsx seatOnAi). */
+.home:not(.pull-screen) > .bar { translate: var(--track-counter, 0px) var(--bar-lift, 0px); transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s, translate var(--spring-ms) var(--spring); }
+.home:not(.pull-screen).sliding > .bar, .home:not(.pull-screen) > .bar.sliding { transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s; }
 .home.search-parked > .bar.seated { opacity: 1; pointer-events: auto; }
 
 /*
@@ -4316,10 +4320,7 @@ html:has(.home > .bar[data-role="ai"] textarea:focus) .ai-screen.stacked > .ai-s
  * and only its glass moves.
  */
 .home.button-morph > .bar { transition: none; }
-/* OE1: on the way to PowOS AI's page the seated bar's translate still counters home's slide as it goes (the bar stays on
-   screen where it is, the glass growing there from the button's place); the way back holds its translate (bar.tsx
-   heldSeated), so this changes nothing there. */
-.home.button-morph > .bar.seated:not(.sliding) { transition: translate var(--spring-ms) var(--spring); }
+.home.button-morph:not(.sliding) > .bar:not(.sliding) { transition: translate var(--spring-ms) var(--spring); }
 .home.button-morph:not(.pill-below, .dock-left, .dock-right) > .bar:not(.seated) { transform: translateY(calc(var(--strip-height) + var(--bar-drop))); }
 
 /*
