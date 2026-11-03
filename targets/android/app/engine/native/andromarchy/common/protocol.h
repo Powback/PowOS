@@ -175,6 +175,8 @@ struct OutputEvent{
  */
 #define AUDIO_MSG_FORMAT 1
 #define AUDIO_MSG_PCM    2
+/* producer -> consumer: one uint32, 1 while a Linux app reads the virtual mic; the consumer records only then. */
+#define AUDIO_MSG_MIC_WANTED 3
 
 /* PCM sample format codes for struct audio_format.format. */
 #define AUDIO_FORMAT_S16LE 0

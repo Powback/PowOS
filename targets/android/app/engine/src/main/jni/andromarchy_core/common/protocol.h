@@ -198,6 +198,9 @@ struct OutputEvent{
  */
 #define AUDIO_MSG_FORMAT 1
 #define AUDIO_MSG_PCM    2
+/* producer -> consumer: payload one uint32, 1 while a Linux app reads the virtual mic (its PipeWire source is
+ * streaming), 0 when none does. The consumer records the Android mic only while it is 1 (PowOS 2026-11-03). */
+#define AUDIO_MSG_MIC_WANTED 3
 
 /* PCM sample format codes for struct audio_format.format. */
 #define AUDIO_FORMAT_S16LE 0
