@@ -39,3 +39,17 @@ and "dma-buf GPU cache sync failed") and the game with TU_KGSL_DEBUG_IMPORT=1 (T
 bf-overlay-watch.sh while the user opens overlays. Failing syncs + checkered frames on fresh buffers = fix in the
 allocator (uncached/IO-coherent allocation or DMA_BUF_IOCTL_SYNC before the GPU's first write). TU_DEBUG=noubwc
 would not change anything: no hop uses UBWC.
+
+## Live run 22:32 (read-only, game running; ~/.cache/powos-verify/bfo-2026-11-03_2232/)
+- Xwayland's own copy (XGetImage) checkered in 10 of 120 frames: 3 of 53 with an overlay up, 7 of 67 without ->
+  not overlay-bound; the damage is in the game buffer / Xwayland pixmap, upstream of KWin.
+- kgsl tracefs, 30 s (kgsl-trace.txt): cache syncs are NOT missing. Xwayland 4135 kgsl_mem_sync_cache op=ci on the
+  game's 22487040-B (9216 x 2440) imports, KWin 1341 on its own; the game issued none in the window (Turnip cleans
+  once at import/alloc, kgsl_bo_init_dmabuf). Both import with flags=0 (no KGSL_MEMFLAGS_IOCOHERENT), cachemode
+  writeback ('b'); gfx3d_user context bank is not dma-coherent in DT (kgsl-smmu is) -> the syncs do real work.
+- Nobody CPU-writes those buffers (useraddr N on both sides), so a CPU-cache clean has nothing dirty to write back:
+  CPU-cache coherency is now an unlikely cause.
+- New: Xwayland re-imports the game's buffers ~40x/s (1219 GPUOBJ_IMPORT + 1239 GPUOBJ_FREE in 30 s, new gpuaddr each
+  time; ~0.23 s per mapping). freedreno-kgsl submits carry no memobj list, so KGSL may unmap a buffer while a glamor
+  copy still reads it. No kgsl_mmu_pagefault in a 15 s trace though. Next: why Xwayland drops/re-creates the DRI3
+  pixmap's bo per present (bo cache / 0011 import path), and keep one import per dmabuf.
