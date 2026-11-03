@@ -539,6 +539,7 @@ widened first; out of scope here. `tools/emu/emu.sh` otherwise needed no change 
 | `journey.sh` | phone only | runs gest.sh - cover-screen gesture journeys, a second physical display the emulator doesn't have |
 | `keyboard.sh` | phone only | the keyboard over a Linux (Wayland) text field - needs the session |
 | `kwin-install.sh` | phone only | installs/restarts KWin alone - needs the session (queue it first, same task, so a check after it in the same window doesn't pay for the install inside its own budget - friction f121) |
+| `xwayland-install.sh` | phone only | kwin-install.sh's twin for the xwayland-kgsl package (/usr/local/bin/Xwayland): installs if newer, restarts the session only if the running Xwayland is the replaced binary |
 | `launch-front.sh` | phone only | a PowOS (Linux) app's window coming to front - needs the session |
 | `launch-window.sh` | phone only | stage 1 is Steam's cold-start launch window - phone hardware/GPU driver (not caught by the filename-based HW_ONLY check; its own marker is) |
 | `lib-install.sh` | phone only | deploys lib/ files onto the phone's Linux rootfs - not on the emulator |

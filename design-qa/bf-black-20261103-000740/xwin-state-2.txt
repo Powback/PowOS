@@ -1,0 +1,35 @@
+/stage/in/2/w6.sh: 1 file pushed, 0 skipped. 0.6 MB/s (897 bytes in 0.001s)
+range 151400,151700 fails 139
+range 169900,170100 fails 156
+range 170100,183876 fails 13775
+1:Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+2:Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+3:Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+/tmp/powos-root-21324.sh: line 5: export: `-': not a valid identifier
+/tmp/powos-root-21324.sh: line 5: export: `Experimental/files/lib/vkd3d:/home/powos/.local/share/Steam/steamapps/common/Proton': not a valid identifier
+/tmp/powos-root-21324.sh: line 5: export: `-': not a valid identifier
+/tmp/powos-root-21324.sh: line 5: export: `Experimental/files/lib/wine': not a valid identifier
+ls: cannot access '/run/pressure-vessel/Xauthority': No such file or directory
+WINE_GST_REGISTRY_DIR=/home/powos/.local/share/Steam/steamapps/compatdata/274190/gstreamer-1.0/
+WINEDLLPATH=/home/powos/.local/share/Steam/steamapps/common/Proton
+XAUTHORITY=/run/pressure-vessel/Xauthority
+WINEPREFIX=/home/powos/.local/share/Steam/steamapps/compatdata/274190/pfx/
+WINESERVERSOCKET=28
+DXVK_LOG_LEVEL=none
+WINEDLLOVERRIDES=steam.exe=b;dotnetfx35.exe=b;dotnetfx35setup.exe=b;beclient.dll=b,n;beclient_x64.dll=b,n;winebth.sys=d;opencl=n,d;d3d11=n;d3d10core=n;d3d9=n;dxgi=n;d3d12=n;d3d12core=n
+WINE_CRASH_REPORT_DIR=/tmp/proton_crashreports
+WINEPRELOADRESERVE=140000000-1400a4000
+WINE_LARGE_ADDRESS_AWARE=1
+WINELOADERNOEXEC=1
+WINEDEBUG=-all
+PROTON_CRASH_REPORT_DIR=/tmp/proton_crashreports
+DXVK_STATE_CACHE_PATH=/home/powos/.local/share/Steam/steamapps/shadercache/274190/DXVK_state_cache
+PROTON_USE_XALIA=1
+WINEFSYNC=1
+Authorization required, but no authorization protocol specified
+
+xprop:  unable to open display ':0'
+324
+131
+VmSize:	  976496 kB
+VmRSS:	   49108 kB

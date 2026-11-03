@@ -1,0 +1,131 @@
+/stage/in/2/watch.sh: 1 file pushed, 0 skipped. 0.7 MB/s (1213 bytes in 0.002s)
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+awk: fatal: cannot open file `/proc//task//stat' for reading: No such file or directory
+cat: /proc//task//wchan: No such file or directory
+23:10:36 u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u 6343113 s 0
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s  submit= cs= gfx= main= mainw=
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+awk: fatal: cannot open file `/proc//task//stat' for reading: No such file or directory
+cat: /proc//task//wchan: No such file or directory
+23:10:41 u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u 6350573 s 0
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s  submit= cs= gfx= main= mainw=
+cat: 23:10:46 u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u 6357329 s 0
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s  submit= cs= gfx= main= mainw=
+'/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+awk: fatal: cannot open file `/proc//task//stat' for reading: No such file or directory
+cat: /proc//task//wchan: No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+awk: fatal: cannot open file `/proc//task//stat' for reading: No such file or directory
+23:10:51 u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u 6367050 s 0
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s  submit= cs= gfx= main= mainw=
+cat: /proc//task//wchan: No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+awk: fatal: cannot open file `/proc//task//stat' for reading: No such file or directory
+cat: /proc//task//wchan: No such file or directory
+23:10:57 u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u 6378174 s 0
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s  submit= cs= gfx= main= mainw=
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+cat: '/proc//task/*/comm': No such file or directory
+awk: fatal: cannot open file `/proc//task//stat' for reading: No such file or directory
+cat: /proc//task//wchan: No such file or directory
+23:11:02 u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u 6393431 s 0
+u  s 
+u  s 
+u  s 
+u  s 
+u  s 
+u  s  submit= cs= gfx= main= mainw=
+== new kwin lines
+sed: -e expression #1, char 1: unknown command: ','
+sed: -e expression #1, char 1: unknown command: ','
+fails new: 0

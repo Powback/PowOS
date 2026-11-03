@@ -1,0 +1,98 @@
+/stage/in/2/logs.sh: 1 file pushed, 0 skipped. 0.1 MB/s (212 bytes in 0.002s)
+== app-quit
+2026-10-31 02:19:30 powos-app-quit 29549: still there: 29549
+2026-10-31 03:06:32 powos-app-quit 28435: ending 28435:dolphin 
+2026-10-31 03:06:34 powos-app-quit 28435: KILL after 2 s: 28435
+2026-10-31 03:06:34 powos-app-quit 28435: still there: 28435
+2026-11-01 16:42:38 powos-app-quit 14128: ending 14128:dolphin 
+2026-11-01 16:42:38 powos-app-quit 14128: ended on TERM
+2026-11-01 16:48:19 powos-app-quit 10284: ending 10284:foot 
+2026-11-01 16:48:21 powos-app-quit 10284: KILL after 2 s: 10284
+2026-11-01 16:48:22 powos-app-quit 10284: still there: 10284
+2026-11-01 16:55:36 powos-app-quit 23415: ending 23415:foot 
+2026-11-01 16:55:38 powos-app-quit 23415: KILL after 2 s: 23415
+2026-11-01 16:55:38 powos-app-quit 23415: still there: 23415
+2026-11-01 17:12:37 powos-app-quit 31538: ending 31538:foot 
+2026-11-01 17:12:40 powos-app-quit 31538: KILL after 2 s: 31538
+2026-11-01 17:12:40 powos-app-quit 31538: still there: 31538
+2026-11-01 17:51:46 powos-app-quit 13172: ending 13172:foot 
+2026-11-01 17:51:48 powos-app-quit 13172: KILL after 2 s: 13172
+2026-11-01 17:51:49 powos-app-quit 13172: still there: 13172
+2026-11-02 21:35:44 powos-app-quit 3502: Broforce_beta.e is Steam game 274190's: ending its launch chain (powos game 274190 stop; Steam stays)
+2026-11-02 21:35:47 powos-app-quit 3502: powos game: [0;32m[dev][0m 274190 closed in 2303 ms
+2026-11-02 21:35:47 powos-app-quit 3502: game 274190: done (exit 0)
+2026-11-02 21:39:48 powos-app-quit 17413: Broforce_beta.e is Steam game 274190's: ending its launch chain (powos game 274190 stop; Steam stays)
+2026-11-02 21:39:51 powos-app-quit 17413: powos game: [0;32m[dev][0m 274190 closed in 2259 ms
+2026-11-02 21:39:51 powos-app-quit 17413: game 274190: done (exit 0)
+2026-11-02 21:44:36 powos-app-quit 23949: Broforce_beta.e is Steam game 274190's: ending its launch chain (powos game 274190 stop; Steam stays)
+2026-11-02 21:44:38 powos-app-quit 23949: powos game: [0;32m[dev][0m 274190 closed in 2335 ms
+2026-11-02 21:44:38 powos-app-quit 23949: game 274190: done (exit 0)
+2026-11-03 00:05:00 powos-app-quit 24728: ending 24728:foot 
+2026-11-03 00:05:02 powos-app-quit 24728: KILL after 2 s: 24728
+2026-11-03 00:05:02 powos-app-quit 24728: still there: 24728
+== sleep-gui
+2026-11-02 22:40:08 plasmashell (12651): thawed in 1.86 ms, 6.1 ms with the request (draining its socket)
+2026-11-02 22:40:08 powos-shell (12861): thawed in 4.29 ms, 6.0 ms with the request (draining its socket)
+2026-11-02 22:40:10 plasmashell (12651): frozen in 145.58 ms, 1 process(es) (PowOS off screen), thaws on screen or on D-Bus to :1.123, :1.34, org.freedesktop.Notifications, org.kde.klipper, org.freedesktop.impl.portal.desktop.plasmanotify, org.kde.plasmashell, com.canonical.Unity, org.kde.StatusNotifierHost-12651, org.kde.kuiserver, org.kde.JobViewServer
+2026-11-02 22:40:11 powos-shell (12861): frozen in 185.09 ms, 5 process(es) (PowOS off screen), thaws on screen or on D-Bus to :1.60
+2026-11-02 22:45:11 plasmashell (12651): thawed in 2.92 ms, 6.7 ms with the request (draining its socket)
+2026-11-02 22:45:11 powos-shell (12861): thawed in 6.14 ms, 7.4 ms with the request (draining its socket)
+2026-11-02 22:45:13 plasmashell (12651): frozen in 55.63 ms, 1 process(es) (PowOS off screen), thaws on screen or on D-Bus to :1.123, :1.34, org.freedesktop.Notifications, org.kde.klipper, org.freedesktop.impl.portal.desktop.plasmanotify, org.kde.plasmashell, com.canonical.Unity, org.kde.StatusNotifierHost-12651, org.kde.kuiserver, org.kde.JobViewServer
+2026-11-02 22:45:13 powos-shell (12861): frozen in 97.48 ms, 5 process(es) (PowOS off screen), thaws on screen or on D-Bus to :1.60
+2026-11-02 22:50:13 plasmashell (12651): thawed in 2.11 ms, 6.2 ms with the request (draining its socket)
+2026-11-02 22:50:13 powos-shell (12861): thawed in 3.88 ms, 5.8 ms with the request (draining its socket)
+2026-11-02 22:50:15 plasmashell (12651): frozen in 139.8 ms, 1 process(es) (PowOS off screen), thaws on screen or on D-Bus to :1.123, :1.34, org.freedesktop.Notifications, org.kde.klipper, org.freedesktop.impl.portal.desktop.plasmanotify, org.kde.plasmashell, com.canonical.Unity, org.kde.StatusNotifierHost-12651, org.kde.kuiserver, org.kde.JobViewServer
+2026-11-02 22:50:16 powos-shell (12861): frozen in 180.57 ms, 5 process(es) (PowOS off screen), thaws on screen or on D-Bus to :1.60
+2026-11-02 22:53:28 powos-shell (12861): thawed in 0.71 ms, 1.5 ms with the request (D-Bus NameLost from org.freedesktop.DBus (dbus-daemon 11294, from ? 11287: ))
+2026-11-02 22:55:16 plasmashell (12651): thawed in 2.21 ms, 6.6 ms with the request (draining its socket)
+2026-11-02 22:55:18 plasmashell (12651): frozen in 60.82 ms, 1 process(es) (PowOS off screen), thaws on screen or on D-Bus to :1.123, :1.34, org.freedesktop.Notifications, org.kde.klipper, org.freedesktop.impl.portal.desktop.plasmanotify, org.kde.plasmashell, com.canonical.Unity, org.kde.StatusNotifierHost-12651, org.kde.kuiserver, org.kde.JobViewServer
+2026-11-02 23:00:18 plasmashell (12651): thawed in 2.08 ms, 6.3 ms with the request (draining its socket)
+2026-11-02 23:00:20 plasmashell (12651): frozen in 118.06 ms, 1 process(es) (PowOS off screen), thaws on screen or on D-Bus to :1.123, :1.34, org.freedesktop.Notifications, org.kde.klipper, org.freedesktop.impl.portal.desktop.plasmanotify, org.kde.plasmashell, com.canonical.Unity, org.kde.StatusNotifierHost-12651, org.kde.kuiserver, org.kde.JobViewServer
+2026-11-02 23:05:20 plasmashell (12651): thawed in 2.26 ms, 6.0 ms with the request (draining its socket)
+2026-11-02 23:05:22 plasmashell (12651): frozen in 129.39 ms, 1 process(es) (PowOS off screen), thaws on screen or on D-Bus to :1.123, :1.34, org.freedesktop.Notifications, org.kde.klipper, org.freedesktop.impl.portal.desktop.plasmanotify, org.kde.plasmashell, com.canonical.Unity, org.kde.StatusNotifierHost-12651, org.kde.kuiserver, org.kde.JobViewServer
+2026-11-02 23:10:21 plasmashell (12651): thawed in 0.44 ms, 1.0 ms with the request (D-Bus GetServerInformation from :1.174 (notify-send 20067, from python3 20062: python3 /usr/lib/powos/ai/comms/comms-mcp.py notify --from deploy --priority low))
+2026-11-02 23:11:21 plasmashell (12651): frozen in 147.59 ms, 1 process(es) (PowOS off screen), thaws on screen or on D-Bus to :1.123, :1.34, org.freedesktop.Notifications, org.kde.klipper, org.freedesktop.impl.portal.desktop.plasmanotify, org.kde.plasmashell, com.canonical.Unity, org.kde.StatusNotifierHost-12651, org.kde.kuiserver, org.kde.JobViewServer
+2026-11-02 23:17:14 plasmashell (12651): thawed in 1.48 ms, 238.5 ms with the request (draining its socket)
+2026-11-02 23:17:27 plasmashell (12651): frozen in 422.09 ms, 1 process(es) (PowOS off screen), thaws on screen or on D-Bus to :1.123, :1.34, org.freedesktop.Notifications, org.kde.klipper, org.freedesktop.impl.portal.desktop.plasmanotify, org.kde.plasmashell, com.canonical.Unity, org.kde.StatusNotifierHost-12651, org.kde.kuiserver, org.kde.JobViewServer
+2026-11-02 23:28:51 plasmashell (12651): thawed in 1.88 ms, 4.4 ms with the request (draining its socket)
+2026-11-02 23:29:02 plasmashell (12651): frozen in 384.09 ms, 1 process(es) (PowOS off screen), thaws on screen or on D-Bus to :1.123, :1.34, org.freedesktop.Notifications, org.kde.klipper, org.freedesktop.impl.portal.desktop.plasmanotify, org.kde.plasmashell, com.canonical.Unity, org.kde.StatusNotifierHost-12651, org.kde.kuiserver, org.kde.JobViewServer
+2026-11-02 23:40:26 plasmashell (12651): thawed in 0.87 ms, 1.8 ms with the request (draining its socket)
+2026-11-02 23:40:39 plasmashell (12651): frozen in 65.74 ms, 1 process(es) (PowOS off screen), thaws on screen or on D-Bus to :1.123, :1.34, org.freedesktop.Notifications, org.kde.klipper, org.freedesktop.impl.portal.desktop.plasmanotify, org.kde.plasmashell, com.canonical.Unity, org.kde.StatusNotifierHost-12651, org.kde.kuiserver, org.kde.JobViewServer
+2026-11-02 23:52:35 plasmashell (12651): thawed in 1.57 ms, 4.7 ms with the request (draining its socket)
+2026-11-02 23:52:43 plasmashell (12651): frozen in 48.68 ms, 1 process(es) (PowOS off screen), thaws on screen or on D-Bus to :1.123, :1.34, org.freedesktop.Notifications, org.kde.klipper, org.freedesktop.impl.portal.desktop.plasmanotify, org.kde.plasmashell, com.canonical.Unity, org.kde.StatusNotifierHost-12651, org.kde.kuiserver, org.kde.JobViewServer
+2026-11-03 00:04:01 plasmashell (12651): thawed in 2.52 ms, 6.4 ms with the request (draining its socket)
+2026-11-03 00:04:03 plasmashell (12651): frozen in 54.92 ms, 1 process(es) (PowOS off screen), thaws on screen or on D-Bus to :1.123, :1.34, org.freedesktop.Notifications, org.kde.klipper, org.freedesktop.impl.portal.desktop.plasmanotify, org.kde.plasmashell, com.canonical.Unity, org.kde.StatusNotifierHost-12651, org.kde.kuiserver, org.kde.JobViewServer
+2026-11-03 00:04:11 steam (18564): thawed in 12.97 ms, 15.4 ms with the request (launched)
+2026-11-03 00:04:23 steam (18564): window {04b4d5eb-9c34-4c29-a177-ad3753709662} (focused) 7585.4s after its start
+2026-11-03 00:04:23 PowOS on screen (consumers: [1])
+2026-11-03 00:04:23 plasmashell (12651): thawed in 0.64 ms, 2.5 ms with the request (PowOS on screen)
+2026-11-03 00:04:24 PowOS off screen (consumers: -)
+2026-11-03 00:04:24 desktop shell: asleep in 15s unless PowOS comes back on screen
+2026-11-03 00:04:24 PowOS on screen (consumers: [1])
+2026-11-03 00:04:35 PowOS off screen (consumers: -)
+2026-11-03 00:04:35 desktop shell: asleep in 15s unless PowOS comes back on screen
+2026-11-03 00:04:41 steam (18564): window {1fc46889-da19-4faf-9e21-9a46d05fceb7} (focused) 7603.4s after its start
+2026-11-03 00:04:41 PowOS on screen (consumers: [2])
+2026-11-03 00:05:10 steam (18564): not frozen: starting a game (app 274190), 8s ago
+2026-11-03 00:07:15 PowOS off screen (consumers: -)
+2026-11-03 00:07:15 desktop shell: asleep in 15s unless PowOS comes back on screen
+2026-11-03 00:07:21 PowOS on screen (consumers: [0])
+2026-11-03 00:07:22 PowOS off screen (consumers: -)
+2026-11-03 00:07:22 desktop shell: asleep in 15s unless PowOS comes back on screen
+2026-11-03 00:07:22 PowOS on screen (consumers: [0])
+2026-11-03 00:07:29 PowOS off screen (consumers: -)
+2026-11-03 00:07:29 desktop shell: asleep in 15s unless PowOS comes back on screen
+2026-11-03 00:07:44 plasmashell (12651): frozen in 39.78 ms, 1 process(es) (PowOS off screen), thaws on screen or on D-Bus to :1.123, :1.34, org.freedesktop.Notifications, org.kde.klipper, org.freedesktop.impl.portal.desktop.plasmanotify, org.kde.plasmashell, com.canonical.Unity, org.kde.StatusNotifierHost-12651, org.kde.kuiserver, org.kde.JobViewServer
+2026-11-03 00:07:49 steam (18564): frozen in 114.97 ms (was 303.7% CPU), thaws on focus or D-Bus to :1.125, :1.126, :1.127, :1.128, :1.130, :1.133, :1.190, :1.200
+2026-11-03 00:08:01 steam (18564): thawed in 13.04 ms, 14.0 ms with the request (launched app 274190)
+2026-11-03 00:08:01 steam (18564): app 274190 resumed - thawed in 33.12 ms, window {ec9dfa28-c610-4ff4-ace3-f54634cd9ec6}
+2026-11-03 00:08:01 PowOS on screen (consumers: [5])
+2026-11-03 00:08:01 plasmashell (12651): thawed in 3.15 ms, 5.3 ms with the request (PowOS on screen)
+2026-11-03 00:08:25 PowOS off screen (consumers: -)
+2026-11-03 00:08:25 desktop shell: asleep in 15s unless PowOS comes back on screen
+2026-11-03 00:08:29 PowOS on screen (consumers: [0])
+== hyprland lines w/ timestamps
+Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+167875

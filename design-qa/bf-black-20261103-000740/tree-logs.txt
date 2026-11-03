@@ -1,0 +1,203 @@
+/stage/in/2/tree.sh: 1 file pushed, 0 skipped. 0.5 MB/s (732 bytes in 0.001s)
+Mon Nov  2 23:08:23 UTC 2026
+== subtree of reaper
+ 7343  7328 S          00:00 00:00:00 pipe_read                     |           \_ awk /pw-audio-namespace/{f=1} f
+ 7344  7328 S          00:00 00:00:00 pipe_read                     |           \_ cut -c1-300
+ 7345  7328 S          00:00 00:00:00 pipe_read                     |           \_ head -60
+ 1523     1 Sl      02:12:01 00:00:01 futex_wait_queue_me           \_ /vendor/bin/time_daemon
+ 1574     1 Sl      02:12:00 00:00:16 binder_wait_for_work          \_ /system/bin/netd
+16101  1574 S       02:11:14 00:00:00 pipe_read                     |   \_ /system/bin/iptables-restore --noflush -w -v
+16106  1574 S       02:11:14 00:00:00 pipe_read                     |   \_ /system/bin/ip6tables-restore --noflush -w -v
+ 1576     1 Sl      02:12:00 00:00:08 do_epoll_wait                 \_ /apex/com.android.os.statsd/bin/statsd
+ 1577     1 S       02:12:00 00:00:04 do_sys_poll                   \_ zygote64
+ 2904  1577 S<Ll    02:11:58 00:08:21 do_epoll_wait                 |   \_ system_server
+ 4376  1577 Sl      02:11:52 00:00:04 do_epoll_wait                 |   \_ com.oplus.exsystemservice
+ 4455  1577 Sl      02:11:52 00:00:10 do_epoll_wait                 |   \_ com.android.wallpaper.livepicker:wallpaperService
+ 4528  1577 Sl      02:11:51 00:00:00 do_epoll_wait                 |   \_ com.oplus.gesture
+ 4564  1577 S       02:11:51 00:00:00 do_sys_poll                   |   \_ webview_zygote
+31134  4564 S<l        01:08 00:00:25 do_epoll_wait                 |   |   \_ com.google.android.webview:sandboxed_process0:org.chromium.content.app.SandboxedProcessService0:0
+ 4577  1577 Sl      02:11:51 00:00:00 do_epoll_wait                 |   \_ com.qualcomm.location
+ 4620  1577 Sl      02:11:51 00:00:07 do_epoll_wait                 |   \_ com.android.phone
+ 4659  1577 Sl      02:11:51 00:00:07 do_epoll_wait                 |   \_ com.android.networkstack.process
+ 4661  1577 Sl      02:11:51 00:00:01 do_epoll_wait                 |   \_ .qtidataservices
+ 4673  1577 Sl      02:11:51 00:00:00 do_epoll_wait                 |   \_ com.qti.phone
+ 4678  1577 Sl      02:11:51 00:00:08 do_epoll_wait                 |   \_ com.oplus.nas
+ 4694  1577 Sl      02:11:51 00:00:01 do_epoll_wait                 |   \_ com.oplus.nhs
+ 4702  1577 Sl      02:11:51 00:00:00 do_epoll_wait                 |   \_ org.codeaurora.ims
+ 4711  1577 Sl      02:11:51 00:00:00 do_epoll_wait                 |   \_ com.android.se
+ 4728  1577 Sl      02:11:51 00:00:03 do_epoll_wait                 |   \_ vendor.qti.frameworks.utils
+ 4740  1577 Sl      02:11:51 00:00:00 do_epoll_wait                 |   \_ .dataservices
+ 4762  1577 Sl      02:11:51 00:00:02 do_epoll_wait                 |   \_ com.oplus.athena
+ 4782  1577 Sl      02:11:51 00:00:54 do_epoll_wait                 |   \_ com.android.systemui
+ 4812  1577 Sl      02:11:51 00:00:00 do_epoll_wait                 |   \_ com.qti.qcc
+ 4831  1577 Rl      02:11:51 00:00:39 -                             |   \_ com.oplus.subsys
+ 4910  1577 Sl      02:11:51 00:00:07 do_epoll_wait                 |   \_ com.android.bluetooth
+ 4918  1577 Sl      02:11:50 00:00:05 do_epoll_wait                 |   \_ com.oplus.statistics.rom
+ 4925  1577 Sl      02:11:50 00:00:00 do_epoll_wait                 |   \_ com.google.android.ext.services
+ 5213  1577 Sl      02:11:50 00:00:39 do_epoll_wait                 |   \_ com.google.android.gms
+ 5324  1577 Sl      02:11:50 00:00:00 do_epoll_wait                 |   \_ com.oplus.appplatform
+ 5489  1577 Sl      02:11:49 00:00:03 do_epoll_wait                 |   \_ com.oplus.battery
+ 5686  1577 Sl      02:11:49 00:00:01 do_epoll_wait                 |   \_ com.oplus.framework.network.drs
+ 5722  1577 Sl      02:11:49 00:00:01 do_epoll_wait                 |   \_ android.process.acore
+ 5932  1577 Sl      02:11:48 00:00:00 do_epoll_wait                 |   \_ com.oplus.blur
+ 6278  1577 Sl      02:11:47 00:00:03 do_epoll_wait                 |   \_ com.oplus.persist.multimedia
+ 6434  1577 Sl      02:11:47 00:00:01 do_epoll_wait                 |   \_ com.google.android.as
+ 6446  1577 Sl      02:11:47 00:00:02 do_epoll_wait                 |   \_ com.google.android.providers.media.module
+ 6458  1577 Sl      02:11:47 00:00:01 do_epoll_wait                 |   \_ com.google.android.apps.messaging:rcs
+ 6484  1577 Sl      02:11:47 00:00:01 do_epoll_wait                 |   \_ com.oplus.olc
+ 6503  1577 Sl      02:11:47 00:00:02 do_epoll_wait                 |   \_ com.android.nfc
+ 6518  1577 Sl      02:11:47 00:00:00 do_epoll_wait                 |   \_ com.oplus.location
+ 6532  1577 Sl      02:11:46 00:00:04 do_epoll_wait                 |   \_ com.heytap.accessory
+ 6547  1577 Sl      02:11:46 00:02:43 do_epoll_wait                 |   \_ com.wireguard.android
+ 6551  1577 Sl      02:11:46 00:00:03 do_epoll_wait                 |   \_ com.heytap.htms:ovads
+ 6554  1577 Sl      02:11:46 00:00:00 do_epoll_wait                 |   \_ com.heytap.mcs
+ 6557  1577 Sl      02:11:46 00:00:01 do_epoll_wait                 |   \_ com.coloros.smartsidebar:edgepanel
+ 6915  1577 SLl     02:11:46 00:00:02 do_epoll_wait                 |   \_ com.oplus.deepthinker
+ 7569  1577 S<l     02:11:45 00:00:01 do_epoll_wait                 |   \_ com.coloros.smartsidebar:ui
+ 8053  1577 Sl      02:11:44 00:00:02 do_epoll_wait                 |   \_ com.android.launcher
+ 8162  1577 Sl      02:11:43 00:00:00 do_epoll_wait                 |   \_ com.coloros.assistantscreen
+ 8490  1577 S<l     02:11:42 00:00:14 do_epoll_wait                 |   \_ com.swipekeyboard
+ 8494  1577 Sl      02:11:42 00:00:03 do_epoll_wait                 |   \_ com.google.android.apps.messaging
+ 8955  1577 Sl      02:11:41 00:00:01 do_epoll_wait                 |   \_ com.google.android.tts
+11839  1577 Sl      02:11:28 00:00:00 do_epoll_wait                 |   \_ android.process.media
+13724  1577 Sl      02:11:21 00:00:06 do_epoll_wait                 |   \_ com.google.android.gm
+== all FEX / wine
+== tail gameprocess
+[2026-11-03 00:04:35] AppID 274190 adding PID 22565 as a tracked process
+[2026-11-03 00:04:35] SSGL: persona state flags
+[2026-11-03 00:04:35] AppID 274190 adding PID 22568 as a tracked process
+[2026-11-03 00:04:35] AppID 274190 adding PID 22569 as a tracked process
+[2026-11-03 00:04:52] AppID 274190 no longer tracking PID 22569, exit code -1
+[2026-11-03 00:04:52] AppID 274190 no longer tracking PID 22568, exit code -1
+[2026-11-03 00:04:52] AppID 274190 no longer tracking PID 22565, exit code -1
+[2026-11-03 00:04:52] AppID 274190 no longer tracking PID 22564, exit code -1
+[2026-11-03 00:04:52] AppID 274190 no longer tracking PID 22557, exit code 0
+[2026-11-03 00:04:52] Remove 274190 from running list
+[2026-11-03 00:05:03] AppID 274190 adding PID 25142 as a tracked process "/home/powos/.local/share/powos/unity-screen /home/powos/.local/share/Steam/linuxarm64/steam-launch-wrapper -- /home/powos/.local/share/Steam/steamrtarm64/reaper SteamLaunch AppId=274190 -- '/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool waitforexitandrun -- '/home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4'/_v2-entry-point --verb=waitforexitandrun -- '/home/powos/.local/share/Steam/steamapps/common/Proton - Experimental'/proton waitforexitandrun  '/home/powos/.local/share/Steam/steamapps/common/Broforce/Broforce_beta.exe'"
+[2026-11-03 00:05:03] SSGL: InternalUpdateClientGame indicates change to games list
+[2026-11-03 00:05:03] SSGL: persona state flags
+[2026-11-03 00:05:03] AppID 274190 adding PID 25148 as a tracked process
+[2026-11-03 00:05:03] AppID 274190 adding PID 25149 as a tracked process
+[2026-11-03 00:05:03] AppID 274190 adding PID 25150 as a tracked process
+[2026-11-03 00:05:03] AppID 274190 adding PID 25151 as a tracked process
+[2026-11-03 00:05:18] AppID 274190 adding PID 25859 as a tracked process
+[2026-11-03 00:05:18] SSGL: InternalUpdateClientGame indicates change to games list
+[2026-11-03 00:05:35] SSGL: change [274190] LCT 35->0
+[2026-11-03 00:05:49] AppID 274190 adding PID 26062 as a tracked process
+[2026-11-03 00:05:49] SSGL: InternalUpdateClientGame indicates change to games list
+[2026-11-03 00:08:13] AppID 274190 no longer tracking PID 26062, exit code -1
+[2026-11-03 00:08:13] AppID 274190 no longer tracking PID 25859, exit code -1
+[2026-11-03 00:08:13] AppID 274190 no longer tracking PID 25151, exit code -1
+[2026-11-03 00:08:13] AppID 274190 no longer tracking PID 25150, exit code -1
+[2026-11-03 00:08:13] AppID 274190 no longer tracking PID 25149, exit code -1
+[2026-11-03 00:08:13] AppID 274190 no longer tracking PID 25148, exit code -1
+[2026-11-03 00:08:13] AppID 274190 no longer tracking PID 25142, exit code 0
+[2026-11-03 00:08:13] Remove 274190 from running list
+== tail compat
+[2026-11-03 00:04:54] StartSession: appID 274190 added secondary session d4e5afce6b325a7f to session 427d3615d302bb47
+[2026-11-03 00:04:54] Tool 1493710 "Proton Experimental" has a dependency on tool 4183110.
+[2026-11-03 00:04:54] Tool 4183110 "Steam Linux Runtime 4.0" has a dependency on tool 3127680.
+[2026-11-03 00:04:54] Command prefix for tool 3127680 "fex" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool run -- ".
+[2026-11-03 00:04:54] Command prefix for tool 4183110 "Steam Linux Runtime 4.0" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool run -- '/home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4'/_v2-entry-point --verb=run -- ".
+[2026-11-03 00:04:54] Command prefix for tool 1493710 "Proton Experimental" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool run -- '/home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4'/_v2-entry-point --verb=run -- '/home/powos/.local/share/Steam/st
+[2026-11-03 00:04:54] DEBUG: setting env var: STEAM_COMPAT_FEX_CONFIG = 
+[2026-11-03 00:04:54] ReleaseSession: appID 274190 session d4e5afce6b325a7f released, 1 left
+[2026-11-03 00:05:03] Tool 1493710 "Proton Experimental" has a dependency on tool 4183110.
+[2026-11-03 00:05:03] Tool 4183110 "Steam Linux Runtime 4.0" has a dependency on tool 3127680.
+[2026-11-03 00:05:03] Command prefix for tool 3127680 "fex" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool waitforexitandrun -- ".
+[2026-11-03 00:05:03] Command prefix for tool 4183110 "Steam Linux Runtime 4.0" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool waitforexitandrun -- '/home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4'/_v2-entry-point --verb=waitforexitandrun -- ".
+[2026-11-03 00:05:03] Command prefix for tool 1493710 "Proton Experimental" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool waitforexitandrun -- '/home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4'/_v2-entry-point --verb=waitforexitandrun -- '/home
+[2026-11-03 00:05:03] DEBUG: setting env var: STEAM_COMPAT_FEX_CONFIG = 
+[2026-11-03 00:05:03] Tool 1493710 "Proton Experimental" has a dependency on tool 4183110.
+[2026-11-03 00:05:03] Tool 4183110 "Steam Linux Runtime 4.0" has a dependency on tool 3127680.
+[2026-11-03 00:05:03] Command prefix for tool 3127680 "fex" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool run -- ".
+[2026-11-03 00:05:03] Command prefix for tool 4183110 "Steam Linux Runtime 4.0" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool run -- '/home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4'/_v2-entry-point --verb=run -- ".
+[2026-11-03 00:05:03] Command prefix for tool 1493710 "Proton Experimental" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool run -- '/home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4'/_v2-entry-point --verb=run -- '/home/powos/.local/share/Steam/st
+[2026-11-03 00:05:03] Tool 1493710 "Proton Experimental" has a dependency on tool 4183110.
+[2026-11-03 00:05:03] Tool 4183110 "Steam Linux Runtime 4.0" has a dependency on tool 3127680.
+[2026-11-03 00:05:03] Command prefix for tool 3127680 "fex" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool run -- ".
+[2026-11-03 00:05:03] Command prefix for tool 4183110 "Steam Linux Runtime 4.0" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool run -- '/home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4'/_v2-entry-point --verb=run -- ".
+[2026-11-03 00:05:03] Command prefix for tool 1493710 "Proton Experimental" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool run -- '/home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4'/_v2-entry-point --verb=run -- '/home/powos/.local/share/Steam/st
+[2026-11-03 00:05:18] Tool 1493710 "Proton Experimental" has a dependency on tool 4183110.
+[2026-11-03 00:05:18] Tool 4183110 "Steam Linux Runtime 4.0" has a dependency on tool 3127680.
+[2026-11-03 00:05:18] Command prefix for tool 3127680 "fex" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool run -- ".
+[2026-11-03 00:05:18] Command prefix for tool 4183110 "Steam Linux Runtime 4.0" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool run -- '/home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4'/_v2-entry-point --verb=run -- ".
+[2026-11-03 00:05:18] Command prefix for tool 1493710 "Proton Experimental" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool run -- '/home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4'/_v2-entry-point --verb=run -- '/home/powos/.local/share/Steam/st
+[2026-11-03 00:05:35] Tool 1493710 "Proton Experimental" has a dependency on tool 4183110.
+[2026-11-03 00:05:35] Tool 4183110 "Steam Linux Runtime 4.0" has a dependency on tool 3127680.
+[2026-11-03 00:05:35] Command prefix for tool 3127680 "fex" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool run -- ".
+[2026-11-03 00:05:35] Command prefix for tool 4183110 "Steam Linux Runtime 4.0" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool run -- '/home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4'/_v2-entry-point --verb=run -- ".
+[2026-11-03 00:05:35] Command prefix for tool 1493710 "Proton Experimental" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool run -- '/home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4'/_v2-entry-point --verb=run -- '/home/powos/.local/share/Steam/st
+[2026-11-03 00:05:49] Tool 1493710 "Proton Experimental" has a dependency on tool 4183110.
+[2026-11-03 00:05:49] Tool 4183110 "Steam Linux Runtime 4.0" has a dependency on tool 3127680.
+[2026-11-03 00:05:49] Command prefix for tool 3127680 "fex" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool run -- ".
+[2026-11-03 00:05:49] Command prefix for tool 4183110 "Steam Linux Runtime 4.0" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool run -- '/home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4'/_v2-entry-point --verb=run -- ".
+[2026-11-03 00:05:49] Command prefix for tool 1493710 "Proton Experimental" set to: "'/home/powos/.local/share/Steam/steamapps/common/FEX-Emu'/fex-compat-tool run -- '/home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4'/_v2-entry-point --verb=run -- '/home/powos/.local/share/Steam/st
+[2026-11-03 00:08:13] OnAppLifetimeNotification: release session(s) for appID 274190
+== fex logs
+-rwxr-xr-x 1 powos powos 3641 Nov  2 23:04 /tmp/fex-compat-tool-21705.log
+-rwxr-xr-x 1 powos powos 6333 Nov  2 23:04 /tmp/fex-compat-tool-22569.log
+-rwxr-xr-x 1 powos powos 3641 Nov  2 23:04 /tmp/fex-compat-tool-24630.log
+-rwxr-xr-x 1 powos powos 6333 Nov  2 23:05 /tmp/fex-compat-tool-25151.log
+EnableConfiguratorSupport=4096
+KDE_SESSION_UID=10359
+ENABLE_VK_LAYER_VALVE_steam_fossilize_1=1
+EGL_PLATFORM=surfaceless
+SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1
+MESA_SHADER_CACHE_MAX_SIZE=5G
+POWOS_SESSION_MODE=rooted
+IBUS_ADDRESS_FILE=/run/powos-app/ibus-address
+USER=powos
+STEAM_COMPAT_DATA_PATH=/home/powos/.local/share/Steam/steamapps/compatdata/274190
+AMD_VK_PIPELINE_CACHE_PATH=/home/powos/.local/share/Steam/steamapps/shadercache/274190/AMDv1
+QT_WAYLAND_RECONNECT=1
+KDE_SESSION_VERSION=6
+STEAM_COMPAT_TRANSCODED_MEDIA_PATH=/home/powos/.local/share/Steam/steamapps/shadercache/274190
+SUDO_ASKPASS=/usr/bin/powos-askpass
+STEAM_COMPAT_FEX_CONFIG=
+DISPLAY=:0
+SteamClientLaunch=1
+TERMUX_VA_SOCKET=/run/powos-app/termux-va.sock
+SHLVL=1
+STEAM_COMPAT_MOUNTS=/home/powos/.local/share/Steam/steamapps/common/Steamworks Shared:/home/powos/.local/share/Steam/steamapps/common/Proton - Experimental:/home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4:/home/powos/.local/share/Steam/steamapps/common/FEX-Emu
+SteamVirtualGamepadInfo_Proton=/home/powos/.local/share/Steam/config/virtualgamepadinfo.txt
+STEAM_COMPAT_PROTON=1
+STEAM_COMPAT_TOOL_PATHS=/home/powos/.local/share/Steam/steamapps/common/Proton - Experimental:/home/powos/.local/share/Steam/steamapps/common/SteamLinuxRuntime_4:/home/powos/.local/share/Steam/steamapps/common/FEX-Emu
+STEAM_FOSSILIZE_DUMP_PATH_READ_ONLY=$bucketdir/steam_pipeline_cache.foz;$bucketdir/steamapp_pipeline_cache.foz
+LD_LIBRARY_PATH=/home/powos/.local/share/Steam/steamapps/common/Broforce:/home/powos/.local/share/Steam/linuxarm64
+POWOS_DESKTOP_MODE=0
+XDG_RUNTIME_DIR=/run/powos-app
+PROTON_CRASH_REPORT_DIR=/tmp/proton_crashreports
+DXVK_STATE_CACHE_PATH=/home/powos/.local/share/Steam/steamapps/shadercache/274190/DXVK_state_cache
+DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/powos-app/system_bus
+QT_FORCE_STDERR_LOGGING=1
+MESA_DISK_CACHE_READ_ONLY_FOZ_DBS=steam_cache,steam_precompiled
+LC_ALL=C
+ANLAND_SOCKET=@powos.display
+FD_FORCE_KGSL=1
+XDG_DATA_DIRS=/run/powos-app/share:/home/powos/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/usr/local/share:/usr/share
+KDE_FULL_SESSION=true
+PATH=/home/powos/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin
+XWAYLAND_FORCE_KGSL_SURFACELESS=1
+STEAM_COMPAT_FLAGS=search-cwd
+DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus
+SteamOverlayGameId=274190
+KDE_APPLICATIONS_AS_SCOPE=1
+__GL_SHADER_DISK_CACHE_APP_NAME=steamapp_shader_cache
+MESA_SHADER_CACHE_DIR=/home/powos/.local/share/Steam/steamapps/shadercache/274190
+ANDROMARCHY_SOCKET=@powos.display
+POWOS_SESSION_GROUP=1
+SteamEnv=1
+SDL_JOYSTICK_HIDAPI_STEAMXBOX=0
+STEAM_COMPAT_LIBRARY_PATHS=/home/powos/.local/share/Steam/steamapps
+SteamUser=matsinator
+OLDPWD=/home/powos
+VK_INSTANCE_LAYERS=VK_LAYER_VALVE_rpo:VK_LAYER_VALVE_fdm_injection
+TU_DEBUG_FILE=/tmp/tu_debug_file.txt
+FEX_PORTABLE=1
+tu_override_uncached_as_cache_coherent=true
+STEAM_COMPAT_MACHINE_ARCHITECTURE=aarch64-linux-gnu
+STEAM_COMPAT_EMULATOR=/home/powos/.local/share/Steam/steamapps/common/FEX-Emu/emulator.json
+fex compat fixups
+== proton settings
+cat: /home/powos/.config/powos/proton-settings.json: No such file or directory

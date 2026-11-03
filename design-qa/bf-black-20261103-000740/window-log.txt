@@ -1,0 +1,1523 @@
+11-01 22:18:05.519 I PowosWebWindows: display helper: log touch display 112 action 261 fingers 2 at 314,18: ok
+11-01 22:18:06.224 I PowosWebWindows: input: window 11 up finger 0 of 2 at 300,-15 -> display 112 (helper)
+11-01 22:18:06.231 I PowosWebWindows: display helper: log touch display 112 action 6 fingers 2 at 300,-15: ok
+11-01 22:18:06.239 I PowosWebWindows: input: window 11 up finger 1 of 1 at 884,89 -> display 112 (helper)
+11-01 22:18:06.244 I PowosWebWindows: display helper: log touch display 112 action 1 fingers 1 at 884,89: ok
+11-01 22:18:06.761 I PowosWebWindows: input: window 11 down finger 0 of 1 at 257,29 -> display 112 (helper)
+11-01 22:18:06.762 I PowosWebWindows: input: window 11 down finger 1 of 2 at 571,-66 -> display 112 (helper)
+11-01 22:18:06.765 I PowosWebWindows: display helper: log touch display 112 action 0 fingers 1 at 257,29: ok
+11-01 22:18:06.765 I PowosWebWindows: display helper: log touch display 112 action 261 fingers 2 at 257,29: ok
+11-01 22:18:07.207 I PowosWebWindows: input: window 11 up finger 1 of 2 at 777,-3 -> display 112 (helper)
+11-01 22:18:07.210 I PowosWebWindows: display helper: log touch display 112 action 262 fingers 2 at 225,-81: ok
+11-01 22:18:07.214 I PowosWebWindows: input: window 11 up finger 0 of 1 at 221,-85 -> display 112 (helper)
+11-01 22:18:07.215 I PowosWebWindows: display helper: log touch display 112 action 1 fingers 1 at 221,-85: ok
+11-01 22:18:09.311 I PowosWebWindows: home's window takes the keyboard again
+11-01 22:18:10.214 I PowosWebWindows: display helper: log window 11: resize: 6 relayouts for 10 steps, settled 714 ms after release (display 112 1365x1403)
+11-01 22:18:17.401 I PowosWebWindows: display helper: log window 11: resize: 8 relayouts for 17 steps, settled 2994 ms after release (display 112 2456x3506)
+11-01 22:18:19.507 I PowosWebWindows: input: window 11 down finger 0 of 1 at 1908,35 -> display 112 (helper)
+11-01 22:18:19.508 I PowosWebWindows: home's window leaves the keyboard to the web window's app
+11-01 22:18:19.517 I PowosWebWindows: display helper: log touch display 112 action 0 fingers 1 at 1908,35: ok
+11-01 22:18:19.523 I PowosWebWindows: input: window 11 down finger 1 of 2 at 684,-8 -> display 112 (helper)
+11-01 22:18:19.529 I PowosWebWindows: display helper: log touch display 112 action 261 fingers 2 at 1908,35: ok
+11-01 22:18:19.920 I PowosWebWindows: input: window 11 up finger 1 of 2 at 425,-42 -> display 112 (helper)
+11-01 22:18:19.923 I PowosWebWindows: display helper: log touch display 112 action 262 fingers 2 at 2243,65: ok
+11-01 22:18:19.929 I PowosWebWindows: input: window 11 up finger 0 of 1 at 2243,65 -> display 112 (helper)
+11-01 22:18:19.932 I PowosWebWindows: display helper: log touch display 112 action 1 fingers 1 at 2243,65: ok
+11-01 22:18:20.469 I PowosWebWindows: home's window takes the keyboard again
+11-01 22:18:20.492 I PowosWebWindows: close window 11 (com.android.chrome, display 112, task 2276): 1/4 layers off
+11-01 22:18:20.493 I PowosWebWindows: close window 11: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-01 22:18:20.509 I PowosWebWindows: display 112: task 2276 removed=true
+11-01 22:18:20.510 I PowosWebWindows: close window 11: 3/4 display 112 released
+11-01 22:18:20.680 I PowosWebWindows: display helper: log window 11: resize: 5 relayouts for 13 steps, settled 2715 ms after release (display 112 2456x3506)
+11-01 22:20:19.646 I PowosWebWindows: windows hidden under the switcher (each is its card): 0 window(s)
+11-01 22:20:20.664 I PowosWebWindows: windows shown again (switcher down): 0 window(s)
+11-01 22:20:21.159 I PowosWebWindows: windows hidden under the switcher (each is its card): 0 window(s)
+11-01 22:20:21.729 I PowosWebWindows: windows shown again (switcher down): 0 window(s)
+11-01 22:20:27.789 I PowosWebWindows: launch com.wireguard.android: new window 12 (running task moved in: -1; -1: launched)
+11-01 22:20:28.157 I PowosWebWindows: display helper: log display 113: touch device up (port powos-ww-113 -> virtual:com.android.shell,2000,powos-ww-12,102)
+11-01 22:20:28.157 I PowosWebWindows: window 12: trusted display 113 1221x1262 dpi 294 (screen 442) (com.wireguard.android)
+11-01 22:20:28.157 I PowosWebWindows: display helper: log display 113 1221x1262 dpi 294: sw 664dp
+11-01 22:20:28.161 I PowosWebWindows: window 12: display 113 mirrored after 3 ms (PowOS uid)
+11-01 22:20:28.165 I PowosWebWindows: window 12 (com.wireguard.android): shown 375 ms after open (display after 367 ms)
+11-01 22:20:28.167 I PowosWebWindows: IME policy of display 113: fallback to default display (ok)
+11-01 22:20:28.196 I PowosWebWindows: launched com.wireguard.android/.activity.MainActivity on display 113 (ActivityOptions)
+11-01 22:20:29.104 I PowosWebWindows: window 12: live (its content shows; the page drops the placeholder)
+11-01 22:20:31.231 I PowosWebWindows: window 12: minimised (com.wireguard.android/.activity.MainActivity has no picture-in-picture: just hidden)
+11-01 22:20:50.150 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-01 22:20:50.187 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-01 22:23:11.253 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-01 22:23:11.562 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-01 22:23:37.685 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-01 22:23:37.986 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-01 22:24:44.986 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-01 22:24:45.022 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-01 22:26:00.047 I PowosWebWindows: launch com.google.android.youtube: new window 13 (running task moved in: -1; -1: launched)
+11-01 22:26:00.402 I PowosWebWindows: display helper: log display 114: touch device up (port powos-ww-114 -> virtual:com.android.shell,2000,powos-ww-13,103)
+11-01 22:26:00.403 I PowosWebWindows: window 13: trusted display 114 1221x1262 dpi 294 (screen 442) (com.google.android.youtube)
+11-01 22:26:00.403 I PowosWebWindows: display helper: log display 114 1221x1262 dpi 294: sw 664dp
+11-01 22:26:00.405 I PowosWebWindows: window 13: display 114 mirrored after 2 ms (PowOS uid)
+11-01 22:26:00.406 I PowosWebWindows: window 13 (com.google.android.youtube): shown 359 ms after open (display after 356 ms)
+11-01 22:26:00.411 I PowosWebWindows: IME policy of display 114: fallback to default display (ok)
+11-01 22:26:00.434 I PowosWebWindows: launched com.google.android.youtube/.app.honeycomb.Shell$HomeActivity on display 114 (ActivityOptions)
+11-01 22:26:00.697 I PowosWebWindows: window 13: live (its content shows; the page drops the placeholder)
+11-01 22:26:54.458 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-01 22:26:54.465 I PowosWebWindows: task 2279 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-01 22:26:54.465 I PowosWebWindows: window 13: its app (task 2279) is a full-screen app on display 0
+11-01 22:26:56.047 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-01 22:26:56.094 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:26:56.094 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 12@d113, 13@d114)
+11-01 22:26:56.094 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:26:56.118 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-01 22:26:57.597 W PowosWebWindows: moveRootTaskToDisplay(2279, 0) refused: java.lang.IllegalArgumentException: Trying to move rootTask=Task{65c73f9 #2279 type=standard A=10209:com.google.android.youtube} to its current taskDisplayArea=DefaultTaskDisplayArea@247215692
+11-01 22:26:57.611 I PowosWebWindows: task 2279 to display 0: moveRootTaskToDisplay=false startActivityFromRecents=true, now on display 0
+11-01 22:26:58.115 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-01 22:26:59.332 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-01 22:26:59.370 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:26:59.370 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 12@d113, 13@d114)
+11-01 22:26:59.370 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:27:03.585 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-01 22:27:03.651 I PowosWebWindows: task 2279 to display 114: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 114
+11-01 22:27:03.651 I PowosWebWindows: window 13: back to a window (task 2279 moved back to display 114: true)
+11-01 22:27:03.651 I PowosWebWindows: geometry resend asked: window 13 back from full screen
+11-01 22:27:20.016 I PowosWebWindows: task 2279 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-01 22:27:20.016 I PowosWebWindows: window 13: its app (task 2279) is a full-screen app on display 0
+11-01 22:27:20.033 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-01 22:27:28.767 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-01 22:27:28.815 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:27:28.815 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 12@d113, 13@d114)
+11-01 22:27:28.815 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:27:28.826 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-01 22:27:31.410 I PowosWebWindows: launch com.android.chrome: new window 14 (running task moved in: -1; -1: launched)
+11-01 22:27:31.725 I PowosWebWindows: display helper: log display 115: touch device up (port powos-ww-115 -> virtual:com.android.shell,2000,powos-ww-14,104)
+11-01 22:27:31.726 I PowosWebWindows: window 14: trusted display 115 1221x1262 dpi 294 (screen 442) (com.android.chrome)
+11-01 22:27:31.726 I PowosWebWindows: display helper: log display 115 1221x1262 dpi 294: sw 664dp
+11-01 22:27:31.730 I PowosWebWindows: window 14: display 115 mirrored after 4 ms (PowOS uid)
+11-01 22:27:31.730 I PowosWebWindows: window 14 (com.android.chrome): shown 319 ms after open (display after 314 ms)
+11-01 22:27:31.733 I PowosWebWindows: IME policy of display 115: fallback to default display (ok)
+11-01 22:27:31.751 I PowosWebWindows: launched com.android.chrome/com.google.android.apps.chrome.Main on display 115 (ActivityOptions)
+11-01 22:27:32.071 I PowosWebWindows: window 14: live (its content shows; the page drops the placeholder)
+11-01 22:27:34.125 I PowosWebWindows: input: window 14 down finger 0 of 1 at 155,302 -> display 115 (helper)
+11-01 22:27:34.125 I PowosWebWindows: home's window leaves the keyboard to the web window's app
+11-01 22:27:34.141 I PowosWebWindows: display helper: log touch display 115 action 0 fingers 1 at 155,302: ok
+11-01 22:27:34.291 I PowosWebWindows: input: window 14 up finger 0 of 1 at 3,-27 -> display 115 (helper)
+11-01 22:27:34.299 I PowosWebWindows: display helper: log touch display 115 action 1 fingers 1 at 3,-27: ok
+11-01 22:27:34.836 I PowosWebWindows: input: window 14 down finger 0 of 1 at 187,341 -> display 115 (helper)
+11-01 22:27:34.847 I PowosWebWindows: display helper: log touch display 115 action 0 fingers 1 at 187,341: ok
+11-01 22:27:34.950 I PowosWebWindows: input: window 14 up finger 0 of 1 at 83,66 -> display 115 (helper)
+11-01 22:27:34.957 I PowosWebWindows: display helper: log touch display 115 action 1 fingers 1 at 83,66: ok
+11-01 22:27:35.930 I PowosWebWindows: input: window 14 down finger 0 of 1 at 165,328 -> display 115 (helper)
+11-01 22:27:35.936 I PowosWebWindows: display helper: log touch display 115 action 0 fingers 1 at 165,328: ok
+11-01 22:27:36.124 I PowosWebWindows: input: window 14 up finger 0 of 1 at 49,35 -> display 115 (helper)
+11-01 22:27:36.132 I PowosWebWindows: display helper: log touch display 115 action 1 fingers 1 at 49,35: ok
+11-01 22:27:37.527 I PowosWebWindows: home's window takes the keyboard again
+11-01 22:27:38.415 I PowosWebWindows: task 2280 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-01 22:27:38.415 I PowosWebWindows: window 14: its app (task 2280) is a full-screen app on display 0
+11-01 22:27:38.486 I PowosWebWindows: home's surface destroyed: 3 window(s) wait for the next one
+11-01 22:27:38.550 I PowosWebWindows: display helper: log window 14: resize: 5 relayouts for 14 steps, settled 989 ms after release (display 115 1122x1262)
+11-01 22:27:49.652 I PowosWebWindows: windows hidden under the switcher (each is its card): 3 window(s)
+11-01 22:27:49.726 I PowosWebWindows: windows shown again (switcher down): 3 window(s)
+11-01 22:27:49.771 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:27:49.771 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (3 window(s): 12@d113, 13@d114, 14@d115)
+11-01 22:27:49.771 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:27:50.293 I PowosWebWindows: home's surface destroyed: 3 window(s) wait for the next one
+11-01 22:27:56.677 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:27:56.677 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (3 window(s): 12@d113, 13@d114, 14@d115)
+11-01 22:27:56.677 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:28:26.861 I PowosWebWindows: windows hidden under the switcher (each is its card): 3 window(s)
+11-01 22:28:26.975 I PowosWebWindows: windows shown again (switcher down): 3 window(s)
+11-01 22:28:32.194 I PowosWebWindows: windows hidden under the switcher (each is its card): 3 window(s)
+11-01 22:28:32.343 I PowosWebWindows: windows shown again (switcher down): 3 window(s)
+11-01 22:28:32.374 I PowosWebWindows: windows hidden under the switcher (each is its card): 3 window(s)
+11-01 22:28:33.061 I PowosWebWindows: windows shown again (switcher down): 3 window(s)
+11-01 22:29:14.867 I PowosWebWindows: home's surface destroyed: 3 window(s) wait for the next one
+11-01 22:29:16.309 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:29:16.309 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (3 window(s): 12@d113, 13@d114, 14@d115)
+11-01 22:29:16.309 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:29:30.386 I PowosWebWindows: windows hidden under the switcher (each is its card): 3 window(s)
+11-01 22:29:30.538 I PowosWebWindows: windows shown again (switcher down): 3 window(s)
+11-01 22:30:00.483 I PowosWebWindows: windows hidden under the switcher (each is its card): 3 window(s)
+11-01 22:30:00.535 I PowosWebWindows: windows shown again (switcher down): 3 window(s)
+11-01 22:30:05.386 I PowosWebWindows: windows hidden under the switcher (each is its card): 3 window(s)
+11-01 22:30:05.480 I PowosWebWindows: windows shown again (switcher down): 3 window(s)
+11-01 22:30:13.900 I PowosWebWindows: home's surface destroyed: 3 window(s) wait for the next one
+11-01 22:30:52.224 I PowosFreeform: task stack listener on
+11-01 22:30:54.400 I PowosFreeform: task stack listener on
+11-01 22:31:00.031 I PowosFreeform: task stack listener on
+11-01 22:31:00.712 I PowosFreeform: task stack listener on
+11-01 22:31:00.712 I PowosFreeform: task stack listener on
+11-01 22:31:01.044 I PowosFreeform: home task 2281 focusable
+11-01 22:31:59.865 I PowosFreeform: task stack listener on
+11-01 22:32:02.308 I PowosWebWindows: KWin window 1 (org.kde.dolphin, "Home — Dolphin"): offered to the page as l:org.kde.dolphin
+11-01 22:32:02.329 I PowosWebWindows: windows' root under home's buffer (made)
+11-01 22:32:02.334 I PowosWebWindows: window 1: KWin window 1 (org.kde.dolphin) as a web window, 1135x1364
+11-01 22:32:02.342 I PowosWebWindows: window 1: KWin window 1 (org.kde.dolphin) consumer up, buffers 2268x2440, body 1135x1364
+11-01 22:32:02.352 I PowosWebWindows: window 1 (org.kde.dolphin): shown 18 ms after open (no display (KWin))
+11-01 22:32:02.433 I PowosWebWindows: KWin window 1 (org.kde.dolphin) again: web window 1 shown where it was
+11-01 22:32:02.637 I PowosWebWindows: window 1: live (its content shows; the page drops the placeholder)
+11-01 22:32:02.691 I PowosWebWindows: layer order check: SurfaceFlinger refuses the app's uid, read as root
+11-01 22:32:02.834 I PowosWebWindows: layer order check: ok - page (bottom first) 1 at output layers [1], home's buffer at 2 (logged once)
+11-01 22:32:04.901 I PowosWebWindows: window 1: resize: 11 relayouts for 30 steps (Linux: no settle measure)
+11-01 22:32:12.222 I PowosWebWindows: launch com.twitter.android: new window 2 (running task moved in: -1; -1: launched)
+11-01 22:32:12.227 I PowosWebWindows: display helper started (shell uid, app_process)
+11-01 22:32:13.034 I PowosWebWindows: display helper ready
+11-01 22:32:13.459 I PowosWebWindows: display helper: log display 11: touch device up (port powos-ww-11 -> virtual:com.android.shell,2000,powos-ww-2,0)
+11-01 22:32:13.459 I PowosWebWindows: window 2: trusted display 11 1135x1364 dpi 294 (screen 442) (com.twitter.android)
+11-01 22:32:13.460 I PowosWebWindows: display helper: log display 11 1135x1364 dpi 294: sw 617dp
+11-01 22:32:13.464 I PowosWebWindows: window 2: display 11 mirrored after 4 ms (PowOS uid)
+11-01 22:32:13.471 W PowosWebWindows: window 2 (com.twitter.android): shown 1249 ms after open (display after 1237 ms) - slow, over 1000 ms
+11-01 22:32:13.475 I PowosWebWindows: IME policy of display 11: fallback to default display (ok)
+11-01 22:32:13.514 I PowosWebWindows: launched com.twitter.android/com.x.android.main.MainActivity on display 11 (ActivityOptions)
+11-01 22:32:13.913 I PowosWebWindows: window 2: live (its content shows; the page drops the placeholder)
+11-01 22:32:14.565 I PowosWebWindows: KWin window 2 (, "Steam"): offered to the page as l:
+11-01 22:32:14.612 I PowosWebWindows: window 3: KWin window 2 () as a web window, 1135x1364
+11-01 22:32:14.628 I PowosWebWindows: window 3: KWin window 2 () consumer up, buffers 2268x2440, body 1135x1364
+11-01 22:32:14.672 I PowosWebWindows: window 3 (): shown 61 ms after open (no display (KWin))
+11-01 22:32:14.898 I PowosWebWindows: window 3: live (its content shows; the page drops the placeholder)
+11-01 22:32:23.474 I PowosWebWindows: KWin closed window 2: web window 3 goes
+11-01 22:32:23.476 I PowosWebWindows: close window 3 (com.powos.app, display -1, task -1): 1/4 layers off
+11-01 22:32:23.477 I PowosWebWindows: close window 3: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-01 22:32:29.230 I PowosWebWindows: input: window 2 down finger 0 of 1 at 1529,1626 -> display 11 (helper)
+11-01 22:32:29.231 I PowosWebWindows: home's window leaves the keyboard to the web window's app
+11-01 22:32:29.238 I PowosWebWindows: display helper: log touch display 11 action 0 fingers 1 at 1529,1626: ok
+11-01 22:32:29.295 I PowosWebWindows: input: window 2 up finger 0 of 1 at 1529,1626 -> display 11 (helper)
+11-01 22:32:29.297 I PowosWebWindows: display helper: log touch display 11 action 1 fingers 1 at 1529,1626: ok
+11-01 22:32:33.567 I PowosWebWindows: home's window takes the keyboard again
+11-01 22:32:36.395 I PowosWebWindows: close window 2 (com.twitter.android, display 11, task 2283): 1/4 layers off
+11-01 22:32:36.396 I PowosWebWindows: close window 2: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-01 22:32:36.417 I PowosWebWindows: display 11: task 2283 removed=true
+11-01 22:32:36.417 I PowosWebWindows: close window 2: 3/4 display 11 released
+11-01 22:32:38.960 I PowosWebWindows: launch com.twitter.android: new window 4 (running task moved in: -1; -1: launched)
+11-01 22:32:39.349 I PowosWebWindows: display helper: log display 12: touch device up (port powos-ww-12 -> virtual:com.android.shell,2000,powos-ww-4,1)
+11-01 22:32:39.349 I PowosWebWindows: window 4: trusted display 12 1135x1364 dpi 294 (screen 442) (com.twitter.android)
+11-01 22:32:39.349 I PowosWebWindows: display helper: log display 12 1135x1364 dpi 294: sw 617dp
+11-01 22:32:39.351 I PowosWebWindows: window 4: display 12 mirrored after 1 ms (PowOS uid)
+11-01 22:32:39.351 I PowosWebWindows: window 4 (com.twitter.android): shown 391 ms after open (display after 388 ms)
+11-01 22:32:39.355 I PowosWebWindows: IME policy of display 12: fallback to default display (ok)
+11-01 22:32:39.377 I PowosWebWindows: launched com.twitter.android/com.x.android.main.MainActivity on display 12 (ActivityOptions)
+11-01 22:32:39.659 I PowosWebWindows: window 4: live (its content shows; the page drops the placeholder)
+11-01 22:34:00.973 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-01 22:34:01.014 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-01 22:34:01.352 I PowosWebWindows: launch com.android.chrome: new window 5 (running task moved in: 2280; -1: launched)
+11-01 22:34:01.663 I PowosWebWindows: home's surface destroyed: 3 window(s) wait for the next one
+11-01 22:34:02.130 I PowosWebWindows: display helper: log display 13: touch device up (port powos-ww-13 -> virtual:com.android.shell,2000,powos-ww-5,2)
+11-01 22:34:02.132 I PowosWebWindows: window 5: trusted display 13 1154x1538 dpi 294 (screen 442) (com.android.chrome)
+11-01 22:34:02.133 I PowosWebWindows: display helper: log display 13 1154x1538 dpi 294: sw 628dp
+11-01 22:34:02.135 I PowosWebWindows: window 5: display 13 mirrored after 3 ms (PowOS uid)
+11-01 22:34:02.136 I PowosWebWindows: window 5 (com.android.chrome): shown 783 ms after open (display after 780 ms)
+11-01 22:34:02.141 I PowosWebWindows: IME policy of display 13: fallback to default display (ok)
+11-01 22:34:02.242 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:34:02.242 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (3 window(s): 1@d-1, 4@d12, 5@d13)
+11-01 22:34:02.242 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:34:02.258 I PowosWebWindows: task 2280 to display 13: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 13
+11-01 22:34:02.258 I PowosWebWindows: window 5: app's task 2280 moved onto display 13
+11-01 22:34:02.481 I PowosWebWindows: windows hidden under the switcher (each is its card): 3 window(s)
+11-01 22:34:02.588 I PowosWebWindows: window 5: live (its content shows; the page drops the placeholder)
+11-01 22:34:02.589 I PowosWebWindows: windows shown again (switcher down): 3 window(s)
+11-01 22:34:04.925 I PowosWebWindows: input: window 4 down finger 0 of 1 at 1542,1599 -> display 12 (helper)
+11-01 22:34:04.925 I PowosWebWindows: home's window leaves the keyboard to the web window's app
+11-01 22:34:04.926 I PowosWebWindows: display helper: log touch display 12 action 0 fingers 1 at 1542,1599: ok
+11-01 22:34:05.000 I PowosWebWindows: input: window 4 up finger 0 of 1 at 1542,1599 -> display 12 (helper)
+11-01 22:34:05.001 I PowosWebWindows: display helper: log touch display 12 action 1 fingers 1 at 1542,1599: ok
+11-01 22:34:08.458 I PowosWebWindows: home's window takes the keyboard again
+11-01 22:34:08.517 I PowosWebWindows: window 1: resize: 10 relayouts for 22 steps (Linux: no settle measure)
+11-01 22:34:08.900 I PowosWebWindows: display helper: log window 4: resize: 10 relayouts for 22 steps, settled 220 ms after release (display 12 2047x1765)
+11-01 22:34:16.661 I PowosWebWindows: input: window 5 down finger 0 of 1 at 95,221 -> display 13 (helper)
+11-01 22:34:16.661 I PowosWebWindows: home's window leaves the keyboard to the web window's app
+11-01 22:34:16.664 I PowosWebWindows: display helper: log touch display 13 action 0 fingers 1 at 95,221: ok
+11-01 22:34:16.743 I PowosWebWindows: input: window 5 up finger 0 of 1 at 95,221 -> display 13 (helper)
+11-01 22:34:16.744 I PowosWebWindows: display helper: log touch display 13 action 1 fingers 1 at 95,221: ok
+11-01 22:34:18.484 I PowosWebWindows: home's window takes the keyboard again
+11-01 22:34:18.493 I PowosWebWindows: close window 5 (com.android.chrome, display 13, task 2280): 1/4 layers off
+11-01 22:34:18.494 I PowosWebWindows: close window 5: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-01 22:34:18.513 I PowosWebWindows: display 13: task 2280 removed=true
+11-01 22:34:18.513 I PowosWebWindows: close window 5: 3/4 display 13 released
+11-01 22:34:19.927 I PowosWebWindows: task 2284 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-01 22:34:19.927 I PowosWebWindows: window 4: its app (task 2284) is a full-screen app on display 0
+11-01 22:34:19.929 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-01 22:34:24.966 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-01 22:34:25.011 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:34:25.011 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 1@d-1, 4@d12)
+11-01 22:34:25.011 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:34:25.214 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-01 22:34:30.065 I PowosWebWindows: launch com.android.chrome: new window 6 (running task moved in: -1; -1: launched)
+11-01 22:34:30.427 I PowosWebWindows: display helper: log display 14: touch device up (port powos-ww-14 -> virtual:com.android.shell,2000,powos-ww-6,3)
+11-01 22:34:30.427 I PowosWebWindows: window 6: trusted display 14 1135x1364 dpi 294 (screen 442) (com.android.chrome)
+11-01 22:34:30.428 I PowosWebWindows: display helper: log display 14 1135x1364 dpi 294: sw 617dp
+11-01 22:34:30.429 I PowosWebWindows: window 6: display 14 mirrored after 1 ms (PowOS uid)
+11-01 22:34:30.430 I PowosWebWindows: window 6 (com.android.chrome): shown 363 ms after open (display after 361 ms)
+11-01 22:34:30.438 I PowosWebWindows: IME policy of display 14: fallback to default display (ok)
+11-01 22:34:30.476 I PowosWebWindows: launched com.android.chrome/com.google.android.apps.chrome.Main on display 14 (ActivityOptions)
+11-01 22:34:30.735 I PowosWebWindows: window 6: live (its content shows; the page drops the placeholder)
+11-01 22:34:30.873 I PowosWebWindows: launch com.termux: new window 7 (running task moved in: -1; -1: launched)
+11-01 22:34:31.684 I PowosWebWindows: display helper: log display 15: touch device up (port powos-ww-15 -> virtual:com.android.shell,2000,powos-ww-7,4)
+11-01 22:34:31.689 I PowosWebWindows: window 7: trusted display 15 1135x1364 dpi 294 (screen 442) (com.termux)
+11-01 22:34:31.691 I PowosWebWindows: display helper: log display 15 1135x1364 dpi 294: sw 617dp
+11-01 22:34:31.703 I PowosWebWindows: window 7: display 15 mirrored after 12 ms (PowOS uid)
+11-01 22:34:31.704 I PowosWebWindows: window 7 (com.termux): shown 831 ms after open (display after 815 ms)
+11-01 22:34:31.709 I PowosWebWindows: IME policy of display 15: fallback to default display (ok)
+11-01 22:34:31.770 I PowosWebWindows: launched com.termux/.app.TermuxActivity on display 15 (ActivityOptions)
+11-01 22:34:32.245 I PowosWebWindows: window 7: live (its content shows; the page drops the placeholder)
+11-01 22:34:34.691 I PowosWebWindows: task 2286 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-01 22:34:34.692 I PowosWebWindows: window 7: its app (task 2286) is a full-screen app on display 0
+11-01 22:34:34.728 I PowosWebWindows: home's surface destroyed: 4 window(s) wait for the next one
+11-01 22:34:37.215 I PowosWebWindows: windows hidden under the switcher (each is its card): 4 window(s)
+11-01 22:34:37.216 I PowosWebWindows: windows shown again (switcher down): 4 window(s)
+11-01 22:34:37.264 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:34:37.265 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (4 window(s): 1@d-1, 4@d12, 6@d14, 7@d15)
+11-01 22:34:37.265 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:34:37.761 I PowosWebWindows: home's surface destroyed: 4 window(s) wait for the next one
+11-01 22:34:55.990 I PowosWebWindows: windows hidden under the switcher (each is its card): 4 window(s)
+11-01 22:34:56.037 I PowosWebWindows: windows shown again (switcher down): 4 window(s)
+11-01 22:34:56.045 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:34:56.046 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (4 window(s): 1@d-1, 4@d12, 6@d14, 7@d15)
+11-01 22:34:56.046 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:34:56.518 I PowosWebWindows: home's surface destroyed: 4 window(s) wait for the next one
+11-01 22:34:57.053 I PowosWebWindows: windows hidden under the switcher (each is its card): 4 window(s)
+11-01 22:34:57.109 I PowosWebWindows: windows shown again (switcher down): 4 window(s)
+11-01 22:34:57.119 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:34:57.119 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (4 window(s): 1@d-1, 4@d12, 6@d14, 7@d15)
+11-01 22:34:57.119 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:34:57.569 I PowosWebWindows: home's surface destroyed: 4 window(s) wait for the next one
+11-01 22:34:57.697 I PowosWebWindows: windows hidden under the switcher (each is its card): 4 window(s)
+11-01 22:34:57.739 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:34:57.740 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (4 window(s): 1@d-1, 4@d12, 6@d14, 7@d15)
+11-01 22:34:57.740 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:34:57.857 I PowosWebWindows: windows shown again (switcher down): 4 window(s)
+11-01 22:34:58.449 I PowosWebWindows: windows hidden under the switcher (each is its card): 4 window(s)
+11-01 22:34:58.821 I PowosWebWindows: windows shown again (switcher down): 4 window(s)
+11-01 22:34:58.858 I PowosWebWindows: windows hidden under the switcher (each is its card): 4 window(s)
+11-01 22:35:02.103 I PowosWebWindows: card 536870913 removed (switcher / Tasks.remove): Linux web window 1 - closing it (the bar's close path)
+11-01 22:35:02.108 I PowosWebWindows: close window 1: KWin window 1 quit (KWin closes it, then ends the app)
+11-01 22:35:02.108 I PowosWebWindows: close window 1 (com.powos.app, display -1, task -1): 1/4 layers off
+11-01 22:35:02.111 I PowosWebWindows: close window 1: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-01 22:35:02.130 I PowosWebWindows: task 2286 removed (switcher / Tasks.remove): it is web window 7 - closing the window (the bar's close path)
+11-01 22:35:02.131 I PowosWebWindows: close window 7 (com.termux, display 15, task 2286, full screen): 1/4 layers off
+11-01 22:35:02.132 I PowosWebWindows: close window 7: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-01 22:35:02.137 I PowosWebWindows: task 2286 removed=true (full screen / minimised (PiP) app of window 7)
+11-01 22:35:02.140 I PowosWebWindows: close window 7: 3/4 display 15 released
+11-01 22:35:02.172 I PowosWebWindows: task 2285 removed (switcher / Tasks.remove): it is web window 6 - closing the window (the bar's close path)
+11-01 22:35:02.176 I PowosWebWindows: close window 6 (com.android.chrome, display 14, task 2285): 1/4 layers off
+11-01 22:35:02.177 I PowosWebWindows: close window 6: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-01 22:35:02.188 I PowosWebWindows: task 2284 removed (switcher / Tasks.remove): it is web window 4 - closing the window (the bar's close path)
+11-01 22:35:02.189 I PowosWebWindows: close window 4 (com.twitter.android, display 12, task 2284, full screen): 1/4 layers off
+11-01 22:35:02.190 I PowosWebWindows: close window 4: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-01 22:35:02.193 I PowosWebWindows: display 14: task 2285 removed=true
+11-01 22:35:02.193 I PowosWebWindows: close window 6: 3/4 display 14 released
+11-01 22:35:02.223 I PowosWebWindows: task 2284 removed=true (full screen / minimised (PiP) app of window 4)
+11-01 22:35:02.226 I PowosWebWindows: close window 4: 3/4 display 12 released
+11-01 22:35:02.419 I PowosWebWindows: windows shown again (switcher down): 0 window(s)
+11-01 22:35:53.466 I PowosWebWindows: launch com.termux: new window 8 (running task moved in: -1; -1: launched)
+11-01 22:35:53.816 I PowosWebWindows: display helper: log display 16: touch device up (port powos-ww-16 -> virtual:com.android.shell,2000,powos-ww-8,5)
+11-01 22:35:53.816 I PowosWebWindows: window 8: trusted display 16 1135x1364 dpi 294 (screen 442) (com.termux)
+11-01 22:35:53.817 I PowosWebWindows: display helper: log display 16 1135x1364 dpi 294: sw 617dp
+11-01 22:35:53.818 I PowosWebWindows: window 8: display 16 mirrored after 1 ms (PowOS uid)
+11-01 22:35:53.819 I PowosWebWindows: window 8 (com.termux): shown 352 ms after open (display after 350 ms)
+11-01 22:35:53.823 I PowosWebWindows: IME policy of display 16: fallback to default display (ok)
+11-01 22:35:53.856 I PowosWebWindows: launched com.termux/.app.TermuxActivity on display 16 (ActivityOptions)
+11-01 22:35:54.132 I PowosWebWindows: window 8: live (its content shows; the page drops the placeholder)
+11-01 22:35:56.100 I PowosWebWindows: input: window 8 down finger 0 of 1 at 255,523 -> display 16 (helper)
+11-01 22:35:56.101 I PowosWebWindows: home's window leaves the keyboard to the web window's app
+11-01 22:35:56.103 I PowosWebWindows: display helper: log touch display 16 action 0 fingers 1 at 255,523: ok
+11-01 22:35:56.172 I PowosWebWindows: input: window 8 up finger 0 of 1 at 255,523 -> display 16 (helper)
+11-01 22:35:56.174 I PowosWebWindows: display helper: log touch display 16 action 1 fingers 1 at 255,523: ok
+11-01 22:35:57.865 I PowosWebWindows: home's window takes the keyboard again
+11-01 22:35:58.267 I PowosWebWindows: display helper: log window 8: resize: 3 relayouts for 4 steps, settled 188 ms after release (display 16 859x1365)
+11-01 22:35:59.377 I PowosWebWindows: task 2287 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-01 22:35:59.377 I PowosWebWindows: window 8: its app (task 2287) is a full-screen app on display 0
+11-01 22:35:59.510 I PowosWebWindows: home's surface destroyed: 1 window(s) wait for the next one
+11-01 22:36:06.794 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-01 22:36:06.829 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:36:06.829 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (1 window(s): 8@d16)
+11-01 22:36:06.829 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:36:06.906 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-01 22:36:08.483 I PowosWebWindows: launch com.powterm: new window 9 (running task moved in: -1; -1: launched)
+11-01 22:36:08.898 I PowosWebWindows: display helper: log display 17: touch device up (port powos-ww-17 -> virtual:com.android.shell,2000,powos-ww-9,6)
+11-01 22:36:08.900 I PowosWebWindows: window 9: trusted display 17 1135x1364 dpi 294 (screen 442) (com.powterm)
+11-01 22:36:08.900 I PowosWebWindows: display helper: log display 17 1135x1364 dpi 294: sw 617dp
+11-01 22:36:08.905 I PowosWebWindows: window 9: display 17 mirrored after 4 ms (PowOS uid)
+11-01 22:36:08.911 I PowosWebWindows: window 9 (com.powterm): shown 427 ms after open (display after 416 ms)
+11-01 22:36:08.918 I PowosWebWindows: IME policy of display 17: fallback to default display (ok)
+11-01 22:36:08.962 I PowosWebWindows: launched com.powterm/.MainActivity on display 17 (ActivityOptions)
+11-01 22:36:09.217 I PowosWebWindows: window 9: live (its content shows; the page drops the placeholder)
+11-01 22:36:10.462 I PowosWebWindows: input: window 9 down finger 0 of 1 at 106,179 -> display 17 (helper)
+11-01 22:36:10.463 I PowosWebWindows: home's window leaves the keyboard to the web window's app
+11-01 22:36:10.468 I PowosWebWindows: display helper: log touch display 17 action 0 fingers 1 at 106,179: ok
+11-01 22:36:10.492 I PowosWebWindows: input: window 9 up finger 0 of 1 at 106,179 -> display 17 (helper)
+11-01 22:36:10.493 I PowosWebWindows: display helper: log touch display 17 action 1 fingers 1 at 106,179: ok
+11-01 22:36:13.289 I PowosWebWindows: input: window 9 down finger 0 of 1 at 189,745 -> display 17 (helper)
+11-01 22:36:13.290 I PowosWebWindows: display helper: log touch display 17 action 0 fingers 1 at 189,745: ok
+11-01 22:36:13.341 I PowosWebWindows: input: window 9 up finger 0 of 1 at 189,745 -> display 17 (helper)
+11-01 22:36:13.343 I PowosWebWindows: display helper: log touch display 17 action 1 fingers 1 at 189,745: ok
+11-01 22:36:18.507 I PowosWebWindows: input: window 9 down finger 0 of 1 at 973,806 -> display 17 (helper)
+11-01 22:36:18.510 I PowosWebWindows: display helper: log touch display 17 action 0 fingers 1 at 973,806: ok
+11-01 22:36:18.591 I PowosWebWindows: input: window 9 up finger 0 of 1 at 973,806 -> display 17 (helper)
+11-01 22:36:18.593 I PowosWebWindows: display helper: log touch display 17 action 1 fingers 1 at 973,806: ok
+11-01 22:36:20.328 I PowosWebWindows: home's window takes the keyboard again
+11-01 22:36:20.535 I PowosWebWindows: task 2288 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-01 22:36:20.535 I PowosWebWindows: window 9: its app (task 2288) is a full-screen app on display 0
+11-01 22:36:20.550 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-01 22:36:25.788 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-01 22:36:25.830 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:36:25.830 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 8@d16, 9@d17)
+11-01 22:36:25.830 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:36:25.856 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-01 22:36:26.295 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-01 22:38:32.312 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-01 22:38:32.350 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:38:32.350 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 8@d16, 9@d17)
+11-01 22:38:32.350 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:38:32.421 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-01 22:41:34.097 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-01 22:41:36.305 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:41:36.305 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 8@d16, 9@d17)
+11-01 22:41:36.305 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:41:36.779 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-01 22:41:52.891 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:41:52.891 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 8@d16, 9@d17)
+11-01 22:41:52.891 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:41:52.933 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-01 22:47:19.073 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:47:19.073 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 8@d16, 9@d17)
+11-01 22:47:19.073 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:48:43.452 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-01 22:59:09.170 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 22:59:09.170 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 8@d16, 9@d17)
+11-01 22:59:09.170 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 22:59:25.129 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-01 23:00:36.179 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-01 23:00:36.231 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 23:00:36.231 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 8@d16, 9@d17)
+11-01 23:00:36.231 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 23:00:36.251 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-01 23:00:36.707 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-01 23:01:05.595 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-01 23:01:05.626 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-01 23:01:05.626 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 8@d16, 9@d17)
+11-01 23:01:05.626 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-01 23:01:05.677 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-01 23:01:57.923 I PowosFreeform: task stack listener on
+11-01 23:01:58.374 I PowosFreeform: task stack listener on
+11-01 23:01:58.924 I PowosFreeform: task stack listener on
+11-01 23:01:59.258 I PowosFreeform: task stack listener on
+11-01 23:01:59.260 I PowosFreeform: task stack listener on
+11-01 23:01:59.424 I PowosFreeform: home task 2295 focusable
+11-01 23:03:00.727 I PowosFreeform: task stack listener on
+11-01 23:10:22.533 W PowosWebWindows: home's surface refused a child
+11-01 23:16:04.266 I PowosFreeform: task stack listener on
+11-01 23:16:04.804 I PowosFreeform: task stack listener on
+11-01 23:16:05.642 I PowosFreeform: task stack listener on
+11-01 23:16:06.069 I PowosFreeform: task stack listener on
+11-01 23:16:06.069 I PowosFreeform: task stack listener on
+11-01 23:16:06.590 I PowosFreeform: home task 2304 focusable
+11-01 23:16:59.665 I PowosFreeform: task stack listener on
+11-02 03:32:12.882 I PowosFreeform: task stack listener on
+11-02 03:32:13.400 I PowosFreeform: task stack listener on
+11-02 03:32:19.895 I PowosFreeform: task stack listener on
+11-02 03:32:20.000 I PowosFreeform: task stack listener on
+11-02 03:32:20.059 I PowosFreeform: task stack listener on
+11-02 03:32:20.059 I PowosFreeform: task stack listener on
+11-02 03:32:20.201 I PowosFreeform: home task 2323 focusable
+11-02 03:41:28.951 I PowosFreeform: task stack listener on
+11-02 03:52:06.733 I PowosWebWindows: KWin window 4 (org.kde.dolphin, "Home — Dolphin"): offered to the page as l:org.kde.dolphin
+11-02 03:52:06.855 I PowosWebWindows: windows' root under home's buffer (made)
+11-02 03:52:06.858 I PowosWebWindows: window 1: KWin window 4 (org.kde.dolphin) as a web window, 1135x1364
+11-02 03:52:06.889 I PowosWebWindows: window 1: KWin window 4 (org.kde.dolphin) consumer up, buffers 2268x2440, body 1135x1364
+11-02 03:52:07.307 I PowosWebWindows: window 1: live (its content shows; the page drops the placeholder)
+11-02 03:52:15.893 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 03:52:15.959 W PowosWebWindows: window 1 (org.kde.dolphin): shown 9101 ms after open (no display (KWin)) - slow, over 1000 ms
+11-02 03:52:16.277 I PowosWebWindows: layer order check: SurfaceFlinger refuses the app's uid, read as root
+11-02 03:52:16.361 I PowosWebWindows: layer order check: ok - page (bottom first) 1 at output layers [2], home's buffer at 3 (logged once)
+11-02 03:52:24.287 I PowosWebWindows: launch com.oneplus.calculator: new window 2 (running task moved in: -1; -1: launched)
+11-02 03:52:24.300 I PowosWebWindows: display helper started (shell uid, app_process)
+11-02 03:52:24.856 I PowosWebWindows: display helper ready
+11-02 03:52:25.114 I PowosWebWindows: display helper: log display 25: touch device up (port powos-ww-25 -> virtual:com.android.shell,2000,powos-ww-2,14)
+11-02 03:52:25.114 I PowosWebWindows: window 2: trusted display 25 1135x1364 dpi 294 (screen 442) (com.oneplus.calculator)
+11-02 03:52:25.114 I PowosWebWindows: display helper: log display 25 1135x1364 dpi 294: sw 617dp
+11-02 03:52:25.115 I PowosWebWindows: window 2: display 25 mirrored after 1 ms (PowOS uid)
+11-02 03:52:25.115 I PowosWebWindows: window 2 (com.oneplus.calculator): shown 827 ms after open (display after 825 ms)
+11-02 03:52:25.118 I PowosWebWindows: IME policy of display 25: fallback to default display (ok)
+11-02 03:52:25.143 I PowosWebWindows: launched com.oneplus.calculator/com.android.calculator2.Calculator on display 25 (ActivityOptions)
+11-02 03:52:25.405 I PowosWebWindows: window 2: live (its content shows; the page drops the placeholder)
+11-02 03:52:28.469 I PowosWebWindows: launch com.android.chrome: new window 3 (running task moved in: 2311; -1: launched)
+11-02 03:52:28.724 I PowosWebWindows: display helper: log display 26: touch device up (port powos-ww-26 -> virtual:com.android.shell,2000,powos-ww-3,15)
+11-02 03:52:28.725 I PowosWebWindows: window 3: trusted display 26 1135x1364 dpi 294 (screen 442) (com.android.chrome)
+11-02 03:52:28.725 I PowosWebWindows: display helper: log display 26 1135x1364 dpi 294: sw 617dp
+11-02 03:52:28.727 I PowosWebWindows: window 3: display 26 mirrored after 2 ms (PowOS uid)
+11-02 03:52:28.729 I PowosWebWindows: window 3 (com.android.chrome): shown 260 ms after open (display after 255 ms)
+11-02 03:52:28.733 I PowosWebWindows: IME policy of display 26: fallback to default display (ok)
+11-02 03:52:28.783 I PowosWebWindows: task 2311 to display 26: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 26
+11-02 03:52:28.783 I PowosWebWindows: window 3: app's task 2311 moved onto display 26
+11-02 03:52:29.050 I PowosWebWindows: window 3: live (its content shows; the page drops the placeholder)
+11-02 03:52:33.128 I PowosWebWindows: task 2326 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-02 03:52:33.128 I PowosWebWindows: window 2: its app (task 2326) is a full-screen app on display 0
+11-02 03:52:33.140 I PowosWebWindows: home's surface destroyed: 3 window(s) wait for the next one
+11-02 03:52:36.530 I PowosWebWindows: task 2311 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-02 03:52:36.530 I PowosWebWindows: window 3: its app (task 2311) is a full-screen app on display 0
+11-02 03:52:47.549 I PowosWebWindows: windows hidden under the switcher (each is its card): 3 window(s)
+11-02 03:52:47.578 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 03:52:47.578 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (3 window(s): 1@d-1, 2@d25, 3@d26)
+11-02 03:52:47.578 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 03:52:56.945 I PowosWebWindows: windows shown again (switcher down): 3 window(s)
+11-02 03:52:57.292 I PowosWebWindows: home's surface destroyed: 3 window(s) wait for the next one
+11-02 03:53:04.702 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 03:53:04.702 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (3 window(s): 1@d-1, 2@d25, 3@d26)
+11-02 03:53:04.702 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 03:53:08.151 I PowosWebWindows: windows hidden under the switcher (each is its card): 3 window(s)
+11-02 03:53:10.517 I PowosWebWindows: window 2 (com.oneplus.calculator, full screen): its app's task 2326 is gone (removed by not PowOS (no PowOS removal of it logged)): window closed
+11-02 03:53:10.520 I PowosWebWindows: close window 2 (com.oneplus.calculator, display 25, task 2326): 1/4 layers off
+11-02 03:53:10.526 I PowosWebWindows: close window 2: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 03:53:10.526 I PowosWebWindows: close window 2: 3/4 display 25 released
+11-02 03:53:45.986 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 03:55:24.178 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 03:55:27.261 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 03:56:10.860 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 03:58:25.787 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 03:58:42.157 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 04:01:02.281 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 04:01:34.615 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 04:03:52.901 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 04:04:08.698 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 04:04:48.505 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 04:05:24.862 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 04:07:36.744 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 04:20:47.368 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 04:21:31.119 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 04:22:08.529 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 04:23:24.307 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 04:24:59.240 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 04:27:23.997 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 04:29:52.313 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 05:00:08.439 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-02 05:00:08.489 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 05:05:01.144 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 05:05:01.144 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 1@d-1, 3@d26)
+11-02 05:05:01.144 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 05:06:20.585 W PowosWebWindows: RENDER STALL: 1 live window(s), no geometry for 1s (last w.f at 05:06:18.958): rebind
+11-02 05:06:20.588 I PowosWebWindows: home's page visibility poked: render stall
+11-02 05:06:20.590 I PowosWebWindows: home's surface render stall: windows' root re-attached (2 window(s): 1@d-1, 3@d26)
+11-02 05:06:20.590 I PowosWebWindows: geometry resend asked: home's surface render stall
+11-02 05:07:54.303 W PowosWebWindows: RENDER STALL: 1 live window(s), no geometry for 1s (last w.f at 05:07:52.654): rebind
+11-02 05:07:54.310 I PowosWebWindows: home's page visibility poked: render stall
+11-02 05:07:54.311 I PowosWebWindows: home's surface render stall: windows' root re-attached (2 window(s): 1@d-1, 3@d26)
+11-02 05:07:54.311 I PowosWebWindows: geometry resend asked: home's surface render stall
+11-02 05:07:56.816 E PowosWebWindows: RENDER STALL: web windows render empty: 1 live window(s), no geometry for 4s (last w.f at 05:07:52.654), a resend unanswered: home reloaded
+11-02 05:08:02.841 I PowosWebWindows: page (re)loaded: 2 window(s) wait for the page to claim them ([1, 3])
+11-02 05:08:04.838 I PowosWebWindows: window 1: claimed by the reloaded page (its frame and bar are back)
+11-02 05:08:05.846 W PowosWebWindows: page reload: window(s) [3] not claimed in 3000 ms: hidden until the page claims them
+11-02 05:11:43.593 I PowosWebWindows: page (re)loaded: 2 window(s) wait for the page to claim them ([1, 3])
+11-02 05:11:44.096 W PowosWebWindows: RENDER STALL: 1 live window(s), no geometry for 1s (last w.f at 05:11:42.282): rebind
+11-02 05:11:44.096 I PowosWebWindows: home's page visibility poked: render stall
+11-02 05:11:44.097 I PowosWebWindows: home's surface render stall: windows' root re-attached (2 window(s): 1@d-1, 3@d26)
+11-02 05:11:44.097 I PowosWebWindows: geometry resend asked: home's surface render stall
+11-02 05:11:46.595 W PowosWebWindows: page reload: window(s) [1, 3] not claimed in 3000 ms: hidden until the page claims them
+11-02 05:11:46.611 E PowosWebWindows: RENDER STALL: web windows render empty: 1 live window(s), no geometry for 4s (last w.f at 05:11:42.282), a resend unanswered: home reloaded
+11-02 05:11:46.697 I PowosWebWindows: page (re)loaded: 2 window(s) wait for the page to claim them ([1, 3])
+11-02 05:11:49.699 W PowosWebWindows: page reload: window(s) [1, 3] not claimed in 3000 ms: hidden until the page claims them
+11-02 05:12:17.177 W PowosWebWindows: RENDER STALL: 1 live window(s), no geometry for 34s (last w.f at 05:11:42.282): rebind
+11-02 05:12:17.189 I PowosWebWindows: home's page visibility poked: render stall
+11-02 05:12:17.191 I PowosWebWindows: home's surface render stall: windows' root re-attached (2 window(s): 1@d-1, 3@d26)
+11-02 05:12:17.191 I PowosWebWindows: geometry resend asked: home's surface render stall
+11-02 05:12:19.695 E PowosWebWindows: RENDER STALL: web windows render empty: 1 live window(s), no geometry for 37s (last w.f at 05:11:42.282), a resend unanswered: home reloaded
+11-02 05:12:19.907 I PowosWebWindows: page (re)loaded: 2 window(s) wait for the page to claim them ([1, 3])
+11-02 05:12:22.910 W PowosWebWindows: page reload: window(s) [1, 3] not claimed in 3000 ms: hidden until the page claims them
+11-02 05:12:34.413 I PowosWebWindows: page (re)loaded: 2 window(s) wait for the page to claim them ([1, 3])
+11-02 05:12:37.415 W PowosWebWindows: page reload: window(s) [1, 3] not claimed in 3000 ms: hidden until the page claims them
+11-02 05:12:40.056 I PowosWebWindows: window 1: claimed by the reloaded page (its frame and bar are back)
+11-02 05:22:50.635 W PowosWebWindows: RENDER STALL: 1 live window(s), no geometry for 1s (last w.f at 05:22:48.877): rebind
+11-02 05:22:50.638 I PowosWebWindows: home's page visibility poked: render stall
+11-02 05:22:50.640 I PowosWebWindows: home's surface render stall: windows' root re-attached (2 window(s): 1@d-1, 3@d26)
+11-02 05:22:50.640 I PowosWebWindows: geometry resend asked: home's surface render stall
+11-02 05:22:53.148 E PowosWebWindows: RENDER STALL: web windows render empty: 1 live window(s), no geometry for 4s (last w.f at 05:22:48.877), a resend unanswered: home reloaded
+11-02 05:22:54.121 I PowosWebWindows: page (re)loaded: 2 window(s) wait for the page to claim them ([1, 3])
+11-02 05:22:55.998 I PowosWebWindows: window 1: claimed by the reloaded page (its frame and bar are back)
+11-02 05:22:57.122 W PowosWebWindows: page reload: window(s) [3] not claimed in 3000 ms: hidden until the page claims them
+11-02 05:23:25.027 W PowosWebWindows: RENDER STALL: 1 live window(s), no geometry for 1s (last w.f at 05:23:23.274): rebind
+11-02 05:23:25.028 I PowosWebWindows: home's page visibility poked: render stall
+11-02 05:23:25.030 I PowosWebWindows: home's surface render stall: windows' root re-attached (2 window(s): 1@d-1, 3@d26)
+11-02 05:23:25.030 I PowosWebWindows: geometry resend asked: home's surface render stall
+11-02 05:34:00.788 W PowosWebWindows: RENDER STALL: 1 live window(s), no geometry for 1s (last w.f at 05:33:59.042): rebind
+11-02 05:34:00.790 I PowosWebWindows: home's page visibility poked: render stall
+11-02 05:34:00.797 I PowosWebWindows: home's surface render stall: windows' root re-attached (2 window(s): 1@d-1, 3@d26)
+11-02 05:34:00.797 I PowosWebWindows: geometry resend asked: home's surface render stall
+11-02 05:44:26.598 W PowosFreeform: no task stack listener: java.lang.reflect.InvocationTargetException
+11-02 05:44:27.121 W PowosFreeform: no task stack listener: java.lang.reflect.InvocationTargetException
+11-02 05:56:35.071 W PowosFreeform: no task stack listener: java.lang.reflect.InvocationTargetException
+11-02 05:56:35.867 W PowosFreeform: no task stack listener: java.lang.reflect.InvocationTargetException
+11-02 05:59:00.155 W PowosFreeform: no task stack listener: java.lang.reflect.InvocationTargetException
+11-02 05:59:00.632 W PowosFreeform: no task stack listener: java.lang.reflect.InvocationTargetException
+11-02 06:47:59.279 W PowosFreeform: no task stack listener: java.lang.reflect.InvocationTargetException
+11-02 06:47:59.697 W PowosFreeform: no task stack listener: java.lang.reflect.InvocationTargetException
+11-02 06:50:22.132 W PowosFreeform: no task stack listener: java.lang.reflect.InvocationTargetException
+11-02 06:50:22.685 W PowosFreeform: no task stack listener: java.lang.reflect.InvocationTargetException
+11-02 07:14:59.902 I PowosFreeform: task stack listener on
+11-02 07:15:02.487 I PowosFreeform: task stack listener on
+11-02 07:15:04.953 I PowosFreeform: task stack listener on
+11-02 07:15:05.144 I PowosFreeform: task stack listener on
+11-02 07:15:05.334 I PowosFreeform: task stack listener on
+11-02 07:15:05.335 I PowosFreeform: task stack listener on
+11-02 07:15:05.622 I PowosFreeform: home task 2312 focusable
+11-02 08:05:11.195 I PowosFreeform: task stack listener on
+11-02 08:05:11.690 I PowosFreeform: task stack listener on
+11-02 08:05:19.164 I PowosFreeform: task stack listener on
+11-02 08:05:19.253 I PowosFreeform: task stack listener on
+11-02 08:05:19.329 I PowosFreeform: task stack listener on
+11-02 08:05:19.329 I PowosFreeform: task stack listener on
+11-02 08:05:19.458 I PowosFreeform: home task 2316 focusable
+11-02 08:05:25.348 I PowosFreeform: task stack listener on
+11-02 08:05:25.405 I PowosFreeform: task stack listener on
+11-02 08:12:30.871 I PowosFreeform: task stack listener on
+11-02 15:04:13.805 I PowosFreeform: task stack listener on
+11-02 15:04:15.573 I PowosFreeform: task stack listener on
+11-02 15:04:21.407 I PowosFreeform: task stack listener on
+11-02 15:04:21.709 I PowosFreeform: task stack listener on
+11-02 15:04:22.195 I PowosFreeform: task stack listener on
+11-02 15:04:22.196 I PowosFreeform: task stack listener on
+11-02 15:04:22.449 I PowosFreeform: home task 2312 focusable
+11-02 18:03:15.839 I PowosFreeform: task stack listener on
+11-02 19:14:35.545 I PowosWebWindows: windows' root under home's buffer (made)
+11-02 19:14:35.546 I PowosWebWindows: launch com.android.chrome: new window 1 (running task moved in: 2314; -1: launched)
+11-02 19:14:35.549 I PowosWebWindows: display helper started (shell uid, app_process)
+11-02 19:14:36.095 I PowosWebWindows: display helper ready
+11-02 19:14:36.344 I PowosWebWindows: display helper: log display 12: touch device up (port powos-ww-12 -> virtual:com.android.shell,2000,powos-ww-1,1)
+11-02 19:14:36.344 I PowosWebWindows: window 1: trusted display 12 1135x1364 dpi 294 (screen 442) (com.android.chrome)
+11-02 19:14:36.344 I PowosWebWindows: display helper: log display 12 1135x1364 dpi 294: sw 617dp
+11-02 19:14:36.345 I PowosWebWindows: window 1: display 12 mirrored after 1 ms (PowOS uid)
+11-02 19:14:36.352 I PowosWebWindows: window 1 (com.android.chrome): shown 806 ms after open (display after 797 ms)
+11-02 19:14:36.359 I PowosWebWindows: IME policy of display 12: fallback to default display (ok)
+11-02 19:14:36.423 I PowosWebWindows: task 2314 to display 12: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 12
+11-02 19:14:36.423 I PowosWebWindows: window 1: app's task 2314 moved onto display 12
+11-02 19:14:36.681 I PowosWebWindows: window 1: live (its content shows; the page drops the placeholder)
+11-02 19:14:37.864 I PowosWebWindows: layer order check: SurfaceFlinger refuses the app's uid, read as root
+11-02 19:14:37.944 I PowosWebWindows: layer order check: ok - page (bottom first) 1 at output layers [2], home's buffer at 4 (logged once)
+11-02 19:14:46.997 I PowosWebWindows: task 2314 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-02 19:14:47.092 I PowosWebWindows: home's surface destroyed: 1 window(s) wait for the next one
+11-02 19:14:47.438 I PowosWebWindows: window 1: minimised as a home gesture (com.android.chrome/org.chromium.chrome.browser.ChromeTabbedActivity, task 2314 in front on display 0 after 414 ms, home started=true)
+11-02 19:14:47.467 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 19:14:47.467 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (1 window(s): 1@d12)
+11-02 19:14:47.467 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 19:14:49.445 I PowosWebWindows: window 1: after its minimise task 2314 is mode 1 visible false on display 0
+11-02 19:15:07.380 I PowosWebWindows: KWin window 1 (org.kde.kate, "Welcome — Kate"): offered to the page as l:org.kde.kate
+11-02 19:15:07.404 I PowosWebWindows: window 2: KWin window 1 (org.kde.kate) as a web window, 1135x1364
+11-02 19:15:07.407 I PowosWebWindows: window 2: KWin window 1 (org.kde.kate) consumer up, buffers 2268x2440, body 1135x1364
+11-02 19:15:07.413 I PowosWebWindows: window 2 (org.kde.kate): shown 10 ms after open (no display (KWin))
+11-02 19:15:07.658 I PowosWebWindows: window 2: live (its content shows; the page drops the placeholder)
+11-02 19:15:07.740 I PowosWebWindows: KWin window 1 (org.kde.kate) again: web window 2 shown where it was
+11-02 19:15:26.871 I PowosWebWindows: launch com.oneplus.calculator: new window 3 (running task moved in: -1; -1: launched)
+11-02 19:15:27.110 I PowosWebWindows: display helper: log display 13: touch device up (port powos-ww-13 -> virtual:com.android.shell,2000,powos-ww-3,2)
+11-02 19:15:27.110 I PowosWebWindows: window 3: trusted display 13 1135x1364 dpi 294 (screen 442) (com.oneplus.calculator)
+11-02 19:15:27.110 I PowosWebWindows: display helper: log display 13 1135x1364 dpi 294: sw 617dp
+11-02 19:15:27.112 I PowosWebWindows: window 3: display 13 mirrored after 1 ms (PowOS uid)
+11-02 19:15:27.124 I PowosWebWindows: window 3 (com.oneplus.calculator): shown 251 ms after open (display after 238 ms)
+11-02 19:15:27.127 I PowosWebWindows: IME policy of display 13: fallback to default display (ok)
+11-02 19:15:27.162 I PowosWebWindows: launched com.oneplus.calculator/com.android.calculator2.Calculator on display 13 (ActivityOptions)
+11-02 19:15:27.430 I PowosWebWindows: window 3: live (its content shows; the page drops the placeholder)
+11-02 19:15:36.605 I PowosWebWindows: window 3: minimised (com.oneplus.calculator/com.android.calculator2.Calculator has no picture-in-picture: just hidden)
+11-02 19:15:46.774 I PowosWebWindows: KWin window 2 (org.kde.dolphin, "Home — Dolphin"): offered to the page as l:org.kde.dolphin
+11-02 19:15:46.786 I PowosWebWindows: window 4: KWin window 2 (org.kde.dolphin) as a web window, 1135x1364
+11-02 19:15:46.787 I PowosWebWindows: window 4: KWin window 2 (org.kde.dolphin) consumer up, buffers 2268x2440, body 1135x1364
+11-02 19:15:46.800 I PowosWebWindows: window 4 (org.kde.dolphin): shown 14 ms after open (no display (KWin))
+11-02 19:15:47.045 I PowosWebWindows: window 4: live (its content shows; the page drops the placeholder)
+11-02 19:15:56.921 I PowosWebWindows: KWin window 3 (org.kde.gwenview, "1440x2960.png - 1440x2960 - 39% — Gwenview"): offered to the page as l:org.kde.gwenview
+11-02 19:15:56.933 I PowosWebWindows: window 5: KWin window 3 (org.kde.gwenview) as a web window, 1135x1364
+11-02 19:15:56.934 I PowosWebWindows: window 5: KWin window 3 (org.kde.gwenview) consumer up, buffers 2268x2440, body 1135x1364
+11-02 19:15:56.948 I PowosWebWindows: window 5 (org.kde.gwenview): shown 16 ms after open (no display (KWin))
+11-02 19:15:57.196 I PowosWebWindows: window 5: live (its content shows; the page drops the placeholder)
+11-02 19:16:07.734 I PowosWebWindows: close window 5: KWin window 3 quit (KWin closes it, then ends the app)
+11-02 19:16:07.734 I PowosWebWindows: close window 5 (com.powos.app, display -1, task -1): 1/4 layers off
+11-02 19:16:07.735 I PowosWebWindows: close window 5: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 19:16:15.073 I PowosWebWindows: close window 4: KWin window 2 quit (KWin closes it, then ends the app)
+11-02 19:16:15.073 I PowosWebWindows: close window 4 (com.powos.app, display -1, task -1): 1/4 layers off
+11-02 19:16:15.073 I PowosWebWindows: close window 4: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 19:16:16.088 E PowosWebWindows: close window 4: KWin window 2's consumer stop still blocked after 1000 ms: its thread left (no other window waits on it)
+11-02 19:16:27.904 I PowosWebWindows: window 3 (com.oneplus.calculator): its app's task 2319 is gone (removed by not PowOS (no PowOS removal of it logged)): window closed
+11-02 19:16:27.905 I PowosWebWindows: close window 3 (com.oneplus.calculator, display 13, task 2319): 1/4 layers off
+11-02 19:16:27.906 I PowosWebWindows: close window 3: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 19:16:27.906 I PowosWebWindows: close window 3: 3/4 display 13 released
+11-02 19:16:28.325 I PowosWebWindows: KWin closed window 1: web window 2 goes
+11-02 19:16:28.325 I PowosWebWindows: close window 2 (com.powos.app, display -1, task -1): 1/4 layers off
+11-02 19:16:28.327 I PowosWebWindows: close window 2: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 19:16:30.471 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:16:53.690 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:17:02.504 I PowosWebWindows: launch com.oneplus.calculator: new window 6 (running task moved in: -1; -1: launched)
+11-02 19:17:02.769 I PowosWebWindows: display helper: log display 14: touch device up (port powos-ww-14 -> virtual:com.android.shell,2000,powos-ww-6,3)
+11-02 19:17:02.769 I PowosWebWindows: window 6: trusted display 14 1135x1364 dpi 294 (screen 442) (com.oneplus.calculator)
+11-02 19:17:02.770 I PowosWebWindows: display helper: log display 14 1135x1364 dpi 294: sw 617dp
+11-02 19:17:02.773 I PowosWebWindows: window 6: display 14 mirrored after 1 ms (PowOS uid)
+11-02 19:17:02.783 I PowosWebWindows: window 6 (com.oneplus.calculator): shown 279 ms after open (display after 265 ms)
+11-02 19:17:02.786 I PowosWebWindows: IME policy of display 14: fallback to default display (ok)
+11-02 19:17:02.802 I PowosWebWindows: launched com.oneplus.calculator/com.android.calculator2.Calculator on display 14 (ActivityOptions)
+11-02 19:17:03.063 I PowosWebWindows: window 6: live (its content shows; the page drops the placeholder)
+11-02 19:17:41.346 I PowosWebWindows: display helper: log window 6: resize: 4 relayouts for 4 steps, settled no frame after release (display 14 1575x1693)
+11-02 19:17:48.504 I PowosWebWindows: window 6: minimised (com.oneplus.calculator/com.android.calculator2.Calculator has no picture-in-picture: just hidden)
+11-02 19:19:16.827 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 19:19:24.261 I PowosWebWindows: task 2320 opened from the switcher: web window 6 shown where it was, on its page
+11-02 19:19:24.262 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 19:19:50.460 I PowosWebWindows: close window 6 (com.oneplus.calculator, display 14, task 2320): 1/4 layers off
+11-02 19:19:50.461 I PowosWebWindows: close window 6: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 19:19:50.479 I PowosWebWindows: display 14: task 2320 removed=true
+11-02 19:19:50.479 I PowosWebWindows: close window 6: 3/4 display 14 released
+11-02 19:20:05.577 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:20:36.906 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:20:46.241 I PowosWebWindows: task 2314 to display 12: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 12
+11-02 19:20:46.241 I PowosWebWindows: window 1: back in its window (restored; task 2314 moved back to display 12: true)
+11-02 19:20:58.591 I PowosWebWindows: input: window 1 down finger 0 of 1 at 567,1071 -> display 12 (helper)
+11-02 19:20:58.591 I PowosWebWindows: home's window leaves the keyboard to the web window's app
+11-02 19:20:58.596 I PowosWebWindows: display helper: log touch display 12 action 0 fingers 1 at 567,1071: ok
+11-02 19:20:58.981 I PowosWebWindows: input: window 1 up finger 0 of 1 at 567,412 -> display 12 (helper)
+11-02 19:20:58.987 I PowosWebWindows: display helper: log touch display 12 action 1 fingers 1 at 567,412: ok
+11-02 19:21:09.040 I PowosWebWindows: input: window 1 down finger 0 of 1 at 567,412 -> display 12 (helper)
+11-02 19:21:09.041 I PowosWebWindows: display helper: log touch display 12 action 0 fingers 1 at 567,412: ok
+11-02 19:21:09.419 I PowosWebWindows: input: window 1 up finger 0 of 1 at 567,1071 -> display 12 (helper)
+11-02 19:21:09.426 I PowosWebWindows: display helper: log touch display 12 action 1 fingers 1 at 567,1071: ok
+11-02 19:21:21.250 I PowosWebWindows: home's window takes the keyboard again
+11-02 19:21:21.353 I PowosWebWindows: task 2314 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-02 19:21:21.413 I PowosWebWindows: home's surface destroyed: 1 window(s) wait for the next one
+11-02 19:21:21.799 I PowosWebWindows: window 1: minimised as a home gesture (com.android.chrome/org.chromium.chrome.browser.ChromeTabbedActivity, task 2314 in front on display 0 after 430 ms, home started=true)
+11-02 19:21:21.825 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 19:21:21.826 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (1 window(s): 1@d12)
+11-02 19:21:21.826 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 19:21:23.807 I PowosWebWindows: window 1: after its minimise task 2314 is mode 1 visible false on display 0
+11-02 19:22:40.867 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:23:19.687 I PowosFreeform: task stack listener on
+11-02 19:23:19.938 I PowosFreeform: task stack listener on
+11-02 19:23:20.761 I PowosFreeform: task stack listener on
+11-02 19:23:20.852 I PowosFreeform: task stack listener on
+11-02 19:23:20.852 I PowosFreeform: task stack listener on
+11-02 19:23:21.034 I PowosFreeform: task stack listener on
+11-02 19:23:21.113 I PowosFreeform: home task 2323 focusable
+11-02 19:24:31.154 I PowosFreeform: task stack listener on
+11-02 19:24:31.155 I PowosWebWindows: KWin window 1 (, "Steam"): offered to the page as l:
+11-02 19:24:31.160 I PowosWebWindows: windows' root under home's buffer (made)
+11-02 19:24:31.165 I PowosWebWindows: window 1: KWin window 1 () as a web window, 1135x1364
+11-02 19:24:31.179 I PowosWebWindows: window 1: KWin window 1 () consumer up, buffers 2268x2440, body 1135x1364
+11-02 19:24:31.432 I PowosWebWindows: window 1: live (its content shows; the page drops the placeholder)
+11-02 19:24:32.579 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:24:32.645 W PowosWebWindows: window 1 (): shown 1480 ms after open (no display (KWin)) - slow, over 1000 ms
+11-02 19:24:32.959 I PowosWebWindows: layer order check: SurfaceFlinger refuses the app's uid, read as root
+11-02 19:24:33.025 I PowosWebWindows: layer order check: ok - page (bottom first) 1 at output layers [2], home's buffer at 3 (logged once)
+11-02 19:24:35.265 I PowosWebWindows: KWin closed window 1: web window 1 goes
+11-02 19:24:35.267 I PowosWebWindows: close window 1 (com.powos.app, display -1, task -1): 1/4 layers off
+11-02 19:24:35.269 I PowosWebWindows: close window 1: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 19:24:36.268 E PowosWebWindows: close window 1: KWin window 1's consumer stop still blocked after 1000 ms: its thread left (no other window waits on it)
+11-02 19:24:39.373 I PowosWebWindows: launch com.oneplus.calculator: new window 2 (running task moved in: -1; -1: launched)
+11-02 19:24:39.381 I PowosWebWindows: display helper started (shell uid, app_process)
+11-02 19:24:39.901 I PowosWebWindows: display helper ready
+11-02 19:24:40.160 I PowosWebWindows: display helper: log display 15: touch device up (port powos-ww-15 -> virtual:com.android.shell,2000,powos-ww-2,4)
+11-02 19:24:40.160 I PowosWebWindows: window 2: trusted display 15 1135x1364 dpi 294 (screen 442) (com.oneplus.calculator)
+11-02 19:24:40.160 I PowosWebWindows: display helper: log display 15 1135x1364 dpi 294: sw 617dp
+11-02 19:24:40.163 I PowosWebWindows: window 2: display 15 mirrored after 2 ms (PowOS uid)
+11-02 19:24:40.180 I PowosWebWindows: window 2 (com.oneplus.calculator): shown 806 ms after open (display after 785 ms)
+11-02 19:24:40.184 I PowosWebWindows: IME policy of display 15: fallback to default display (ok)
+11-02 19:24:40.204 I PowosWebWindows: launched com.oneplus.calculator/com.android.calculator2.Calculator on display 15 (ActivityOptions)
+11-02 19:24:40.467 I PowosWebWindows: window 2: live (its content shows; the page drops the placeholder)
+11-02 19:24:43.406 I PowosWebWindows: launch com.android.chrome: new window 3 (running task moved in: 2314; -1: launched)
+11-02 19:24:43.642 I PowosWebWindows: display helper: log display 16: touch device up (port powos-ww-16 -> virtual:com.android.shell,2000,powos-ww-3,5)
+11-02 19:24:43.642 I PowosWebWindows: window 3: trusted display 16 1135x1364 dpi 294 (screen 442) (com.android.chrome)
+11-02 19:24:43.642 I PowosWebWindows: display helper: log display 16 1135x1364 dpi 294: sw 617dp
+11-02 19:24:43.647 I PowosWebWindows: window 3: display 16 mirrored after 2 ms (PowOS uid)
+11-02 19:24:43.647 I PowosWebWindows: window 3 (com.android.chrome): shown 241 ms after open (display after 236 ms)
+11-02 19:24:43.650 I PowosWebWindows: IME policy of display 16: fallback to default display (ok)
+11-02 19:24:43.682 I PowosWebWindows: task 2314 to display 16: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 16
+11-02 19:24:43.682 I PowosWebWindows: window 3: app's task 2314 moved onto display 16
+11-02 19:24:43.936 I PowosWebWindows: window 3: live (its content shows; the page drops the placeholder)
+11-02 19:24:47.965 I PowosWebWindows: task 2324 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-02 19:24:47.965 I PowosWebWindows: window 2: its app (task 2324) is a full-screen app on display 0
+11-02 19:24:47.966 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-02 19:24:51.010 I PowosWebWindows: task 2314 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-02 19:24:51.010 I PowosWebWindows: window 3: its app (task 2314) is a full-screen app on display 0
+11-02 19:25:02.512 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 19:25:02.543 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 19:25:02.544 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 2@d15, 3@d16)
+11-02 19:25:02.544 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 19:25:12.199 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 19:25:12.553 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-02 19:25:19.852 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 19:25:19.852 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 2@d15, 3@d16)
+11-02 19:25:19.852 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 19:25:23.076 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 19:25:25.806 I PowosWebWindows: window 2 (com.oneplus.calculator, full screen): its app's task 2324 is gone (removed by not PowOS (no PowOS removal of it logged)): window closed
+11-02 19:25:25.810 I PowosWebWindows: close window 2 (com.oneplus.calculator, display 15, task 2324): 1/4 layers off
+11-02 19:25:25.815 I PowosWebWindows: close window 2: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 19:25:25.820 I PowosWebWindows: close window 2: 3/4 display 15 released
+11-02 19:25:39.236 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:26:08.993 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:26:11.873 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:26:15.592 I PowosWebWindows: launch com.oneplus.calculator: new window 4 (running task moved in: -1; -1: launched)
+11-02 19:26:15.822 I PowosWebWindows: display helper: log display 17: touch device up (port powos-ww-17 -> virtual:com.android.shell,2000,powos-ww-4,6)
+11-02 19:26:15.822 I PowosWebWindows: window 4: trusted display 17 1135x1364 dpi 294 (screen 442) (com.oneplus.calculator)
+11-02 19:26:15.822 I PowosWebWindows: display helper: log display 17 1135x1364 dpi 294: sw 617dp
+11-02 19:26:15.823 I PowosWebWindows: window 4: display 17 mirrored after 0 ms (PowOS uid)
+11-02 19:26:15.829 I PowosWebWindows: window 4 (com.oneplus.calculator): shown 235 ms after open (display after 228 ms)
+11-02 19:26:15.831 I PowosWebWindows: IME policy of display 17: fallback to default display (ok)
+11-02 19:26:15.847 I PowosWebWindows: launched com.oneplus.calculator/com.android.calculator2.Calculator on display 17 (ActivityOptions)
+11-02 19:26:16.118 I PowosWebWindows: window 4: live (its content shows; the page drops the placeholder)
+11-02 19:27:06.602 I PowosWebWindows: window 4 (com.oneplus.calculator): its app's task 2325 is gone (removed by not PowOS (no PowOS removal of it logged)): window closed
+11-02 19:27:06.604 I PowosWebWindows: close window 4 (com.oneplus.calculator, display 17, task 2325): 1/4 layers off
+11-02 19:27:06.605 I PowosWebWindows: close window 4: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 19:27:06.606 I PowosWebWindows: close window 4: 3/4 display 17 released
+11-02 19:27:09.268 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:27:25.642 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:27:52.729 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:27:55.612 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:28:00.085 I PowosWebWindows: KWin window 2 (org.kde.dolphin, "Home — Dolphin"): offered to the page as l:org.kde.dolphin
+11-02 19:28:00.097 I PowosWebWindows: window 5: KWin window 2 (org.kde.dolphin) as a web window, 1135x1364
+11-02 19:28:00.097 I PowosWebWindows: window 5: KWin window 2 (org.kde.dolphin) consumer up, buffers 2268x2440, body 1135x1364
+11-02 19:28:00.114 I PowosWebWindows: window 5 (org.kde.dolphin): shown 18 ms after open (no display (KWin))
+11-02 19:28:00.389 I PowosWebWindows: window 5: live (its content shows; the page drops the placeholder)
+11-02 19:28:07.437 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 19:28:15.921 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 19:28:37.677 I PowosWebWindows: KWin closed window 2: web window 5 goes
+11-02 19:28:37.679 I PowosWebWindows: close window 5 (com.powos.app, display -1, task -1): 1/4 layers off
+11-02 19:28:37.681 I PowosWebWindows: close window 5: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 19:28:39.948 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:28:52.808 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:29:10.438 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:29:13.297 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:29:16.283 I PowosWebWindows: home's surface destroyed: 1 window(s) wait for the next one
+11-02 19:29:33.069 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 19:29:33.069 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (1 window(s): 3@d16)
+11-02 19:29:33.069 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 19:29:33.113 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:29:49.217 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:30:10.132 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:30:12.741 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:30:23.449 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:30:36.313 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:30:59.007 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:31:02.057 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:31:31.151 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:31:44.184 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:32:06.457 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:32:08.961 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:32:50.086 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:33:16.512 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:33:41.128 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:34:08.854 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:34:43.022 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:35:55.444 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:36:23.578 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:37:34.175 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:37:41.813 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:38:13.845 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:39:09.069 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:39:38.599 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:40:22.182 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:40:52.972 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:41:34.992 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:42:06.277 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:42:37.354 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:43:05.148 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:43:12.471 I PowosWebWindows: launch com.oplus.camera: new window 6 (running task moved in: 2327; -1: launched)
+11-02 19:43:12.746 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-02 19:43:13.156 I PowosWebWindows: display helper: log display 18: touch device up (port powos-ww-18 -> virtual:com.android.shell,2000,powos-ww-6,7)
+11-02 19:43:13.156 I PowosWebWindows: window 6: trusted display 18 1135x1364 dpi 294 (screen 442) (com.oplus.camera)
+11-02 19:43:13.156 I PowosWebWindows: display helper: log display 18 1135x1364 dpi 294: sw 617dp
+11-02 19:43:13.157 I PowosWebWindows: window 6: display 18 mirrored after 1 ms (PowOS uid)
+11-02 19:43:13.167 I PowosWebWindows: window 6 (com.oplus.camera): shown 695 ms after open (display after 684 ms)
+11-02 19:43:13.170 I PowosWebWindows: IME policy of display 18: fallback to default display (ok)
+11-02 19:43:13.256 I PowosWebWindows: task 2327 to display 18: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 18
+11-02 19:43:13.258 I PowosWebWindows: window 6: app's task 2327 moved onto display 18
+11-02 19:43:13.268 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 19:43:13.268 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 3@d16, 6@d18)
+11-02 19:43:13.268 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 19:43:13.544 I PowosWebWindows: window 6: live (its content shows; the page drops the placeholder)
+11-02 19:43:26.428 I PowosWebWindows: window 6 (com.oplus.camera): its app's task 2327 is gone (removed by not PowOS (no PowOS removal of it logged)): window closed
+11-02 19:43:26.429 I PowosWebWindows: close window 6 (com.oplus.camera, display 18, task 2327): 1/4 layers off
+11-02 19:43:26.431 I PowosWebWindows: close window 6: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 19:43:26.431 I PowosWebWindows: close window 6: 3/4 display 18 released
+11-02 19:43:39.617 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:43:44.712 I PowosWebWindows: home's surface destroyed: 1 window(s) wait for the next one
+11-02 19:43:44.728 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:43:57.377 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 19:43:57.377 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (1 window(s): 3@d16)
+11-02 19:43:57.377 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 19:44:16.468 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:44:47.960 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:45:18.944 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:45:55.092 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:46:01.784 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:46:42.463 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:47:35.557 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:47:48.041 I PowosWebWindows: home's surface destroyed: 1 window(s) wait for the next one
+11-02 19:47:48.087 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:48:21.714 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 19:48:21.715 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (1 window(s): 3@d16)
+11-02 19:48:21.715 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 19:48:26.464 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:48:50.367 I PowosWebWindows: page (re)loaded: 1 window(s) wait for the page to claim them ([3])
+11-02 19:48:53.369 W PowosWebWindows: page reload: window(s) [3] not claimed in 3000 ms: hidden until the page claims them
+11-02 19:51:08.672 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:51:37.029 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:52:04.704 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:52:29.338 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:52:52.812 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:53:15.710 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:53:40.538 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:53:57.804 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:54:22.256 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:54:53.604 W PowosWebWindows: moveRootTaskToDisplay(2314, 0) refused: java.lang.IllegalArgumentException: Trying to move rootTask=Task{4af5a6 #2314 type=standard A=10194:com.android.chrome} to its current taskDisplayArea=DefaultTaskDisplayArea@163453609
+11-02 19:54:53.632 I PowosWebWindows: task 2314 to display 0: moveRootTaskToDisplay=false startActivityFromRecents=true, now on display 0
+11-02 19:54:54.149 I PowosWebWindows: home's surface destroyed: 1 window(s) wait for the next one
+11-02 19:55:24.916 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 19:55:24.916 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (1 window(s): 3@d16)
+11-02 19:55:24.916 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 19:55:26.781 I PowosWebWindows: launch com.oneplus.calculator: new window 7 (running task moved in: -1; -1: launched)
+11-02 19:55:27.146 I PowosWebWindows: display helper: log display 20: touch device up (port powos-ww-20 -> virtual:com.android.shell,2000,powos-ww-7,9)
+11-02 19:55:27.147 I PowosWebWindows: window 7: trusted display 20 1135x1364 dpi 294 (screen 442) (com.oneplus.calculator)
+11-02 19:55:27.147 I PowosWebWindows: display helper: log display 20 1135x1364 dpi 294: sw 617dp
+11-02 19:55:27.150 I PowosWebWindows: window 7: display 20 mirrored after 1 ms (PowOS uid)
+11-02 19:55:27.150 I PowosWebWindows: window 7 (com.oneplus.calculator): shown 368 ms after open (display after 365 ms)
+11-02 19:55:27.153 I PowosWebWindows: IME policy of display 20: fallback to default display (ok)
+11-02 19:55:27.185 I PowosWebWindows: launched com.oneplus.calculator/com.android.calculator2.Calculator on display 20 (ActivityOptions)
+11-02 19:55:27.450 I PowosWebWindows: window 7: live (its content shows; the page drops the placeholder)
+11-02 19:55:36.349 I PowosWebWindows: window 7: minimised (com.oneplus.calculator/com.android.calculator2.Calculator has no picture-in-picture: just hidden)
+11-02 19:55:47.135 I PowosWebWindows: KWin window 3 (org.kde.dolphin, "Home — Dolphin"): offered to the page as l:org.kde.dolphin
+11-02 19:55:47.148 I PowosWebWindows: window 8: KWin window 3 (org.kde.dolphin) as a web window, 1135x1364
+11-02 19:55:47.150 I PowosWebWindows: window 8: KWin window 3 (org.kde.dolphin) consumer up, buffers 2268x2440, body 1135x1364
+11-02 19:55:47.161 I PowosWebWindows: window 8 (org.kde.dolphin): shown 14 ms after open (no display (KWin))
+11-02 19:55:47.171 I PowosWebWindows: KWin window 3 (org.kde.dolphin) again: web window 8 shown where it was
+11-02 19:55:47.418 I PowosWebWindows: window 8: live (its content shows; the page drops the placeholder)
+11-02 19:55:55.943 I PowosWebWindows: KWin window 4 (org.kde.gwenview, "Gwenview"): offered to the page as l:org.kde.gwenview
+11-02 19:55:55.957 I PowosWebWindows: window 9: KWin window 4 (org.kde.gwenview) as a web window, 1135x1364
+11-02 19:55:55.958 I PowosWebWindows: window 9: KWin window 4 (org.kde.gwenview) consumer up, buffers 2268x2440, body 1135x1364
+11-02 19:55:55.980 I PowosWebWindows: window 9 (org.kde.gwenview): shown 24 ms after open (no display (KWin))
+11-02 19:55:56.210 I PowosWebWindows: window 9: live (its content shows; the page drops the placeholder)
+11-02 19:56:05.186 I PowosWebWindows: close window 9: KWin window 4 quit (KWin closes it, then ends the app)
+11-02 19:56:05.186 I PowosWebWindows: close window 9 (com.powos.app, display -1, task -1): 1/4 layers off
+11-02 19:56:05.187 I PowosWebWindows: close window 9: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 19:56:12.332 I PowosWebWindows: close window 8: KWin window 3 quit (KWin closes it, then ends the app)
+11-02 19:56:12.332 I PowosWebWindows: close window 8 (com.powos.app, display -1, task -1): 1/4 layers off
+11-02 19:56:12.332 I PowosWebWindows: close window 8: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 19:56:25.444 I PowosWebWindows: window 7 (com.oneplus.calculator): its app's task 2330 is gone (removed by not PowOS (no PowOS removal of it logged)): window closed
+11-02 19:56:25.444 I PowosWebWindows: close window 7 (com.oneplus.calculator, display 20, task 2330): 1/4 layers off
+11-02 19:56:25.445 I PowosWebWindows: close window 7: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 19:56:25.445 I PowosWebWindows: close window 7: 3/4 display 20 released
+11-02 19:56:26.603 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 19:56:53.783 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 19:57:02.548 I PowosWebWindows: launch com.oneplus.calculator: new window 10 (running task moved in: -1; -1: launched)
+11-02 19:57:02.908 I PowosWebWindows: display helper: log display 21: touch device up (port powos-ww-21 -> virtual:com.android.shell,2000,powos-ww-10,10)
+11-02 19:57:02.909 I PowosWebWindows: window 10: trusted display 21 1135x1364 dpi 294 (screen 442) (com.oneplus.calculator)
+11-02 19:57:02.909 I PowosWebWindows: display helper: log display 21 1135x1364 dpi 294: sw 617dp
+11-02 19:57:02.917 I PowosWebWindows: window 10: display 21 mirrored after 2 ms (PowOS uid)
+11-02 19:57:02.920 I PowosWebWindows: window 10 (com.oneplus.calculator): shown 370 ms after open (display after 359 ms)
+11-02 19:57:02.923 I PowosWebWindows: IME policy of display 21: fallback to default display (ok)
+11-02 19:57:02.950 I PowosWebWindows: launched com.oneplus.calculator/com.android.calculator2.Calculator on display 21 (ActivityOptions)
+11-02 19:57:03.226 I PowosWebWindows: window 10: live (its content shows; the page drops the placeholder)
+11-02 19:57:38.336 I PowosWebWindows: display helper: log window 10: resize: 4 relayouts for 4 steps, settled no frame after release (display 21 1575x1693)
+11-02 19:57:45.384 I PowosWebWindows: window 10: minimised (com.oneplus.calculator/com.android.calculator2.Calculator has no picture-in-picture: just hidden)
+11-02 19:59:04.647 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 19:59:12.125 I PowosWebWindows: task 2331 opened from the switcher: web window 10 shown where it was, on its page
+11-02 19:59:12.126 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 19:59:37.842 I PowosWebWindows: close window 10 (com.oneplus.calculator, display 21, task 2331): 1/4 layers off
+11-02 19:59:37.843 I PowosWebWindows: close window 10: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 19:59:37.871 I PowosWebWindows: display 21: task 2331 removed=true
+11-02 19:59:37.871 I PowosWebWindows: close window 10: 3/4 display 21 released
+11-02 19:59:51.901 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 20:00:14.594 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 20:00:23.435 W PowosWebWindows: moveRootTaskToDisplay(2314, 0) refused: java.lang.IllegalArgumentException: Trying to move rootTask=Task{4af5a6 #2314 type=standard A=10194:com.android.chrome} to its current taskDisplayArea=DefaultTaskDisplayArea@163453609
+11-02 20:00:23.457 I PowosWebWindows: task 2314 to display 0: moveRootTaskToDisplay=false startActivityFromRecents=true, now on display 0
+11-02 20:00:23.944 I PowosWebWindows: home's surface destroyed: 1 window(s) wait for the next one
+11-02 20:00:37.415 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 20:00:37.415 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (1 window(s): 3@d16)
+11-02 20:00:37.415 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 20:00:40.235 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 20:00:58.474 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 20:03:27.320 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 20:03:58.500 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 20:04:03.436 I PowosWebWindows: launch com.oneplus.calculator: new window 11 (running task moved in: -1; -1: launched)
+11-02 20:04:03.775 I PowosWebWindows: display helper: log display 22: touch device up (port powos-ww-22 -> virtual:com.android.shell,2000,powos-ww-11,11)
+11-02 20:04:03.776 I PowosWebWindows: window 11: trusted display 22 1135x1364 dpi 294 (screen 442) (com.oneplus.calculator)
+11-02 20:04:03.776 I PowosWebWindows: display helper: log display 22 1135x1364 dpi 294: sw 617dp
+11-02 20:04:03.777 I PowosWebWindows: window 11: display 22 mirrored after 1 ms (PowOS uid)
+11-02 20:04:03.779 I PowosWebWindows: window 11 (com.oneplus.calculator): shown 341 ms after open (display after 338 ms)
+11-02 20:04:03.784 I PowosWebWindows: IME policy of display 22: fallback to default display (ok)
+11-02 20:04:03.804 I PowosWebWindows: launched com.oneplus.calculator/com.android.calculator2.Calculator on display 22 (ActivityOptions)
+11-02 20:04:04.067 I PowosWebWindows: window 11: live (its content shows; the page drops the placeholder)
+11-02 20:04:06.565 W PowosWebWindows: moveRootTaskToDisplay(2314, 0) refused: java.lang.IllegalArgumentException: Trying to move rootTask=Task{4af5a6 #2314 type=standard A=10194:com.android.chrome} to its current taskDisplayArea=DefaultTaskDisplayArea@163453609
+11-02 20:04:06.594 I PowosWebWindows: task 2314 to display 0: moveRootTaskToDisplay=false startActivityFromRecents=true, now on display 0
+11-02 20:04:07.134 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-02 20:04:10.588 I PowosWebWindows: task 2332 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-02 20:04:10.588 I PowosWebWindows: window 11: its app (task 2332) is a full-screen app on display 0
+11-02 20:04:13.052 W PowosWebWindows: moveRootTaskToDisplay(2314, 0) refused: java.lang.IllegalArgumentException: Trying to move rootTask=Task{4af5a6 #2314 type=standard A=10194:com.android.chrome} to its current taskDisplayArea=DefaultTaskDisplayArea@163453609
+11-02 20:04:13.076 I PowosWebWindows: task 2314 to display 0: moveRootTaskToDisplay=false startActivityFromRecents=true, now on display 0
+11-02 20:04:21.232 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 20:04:21.277 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 20:04:21.277 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 3@d16, 11@d22)
+11-02 20:04:21.277 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 20:04:52.264 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 20:04:57.049 I PowosWebWindows: window 11 (com.oneplus.calculator, full screen): its app's task 2332 is gone (removed by not PowOS (no PowOS removal of it logged)): window closed
+11-02 20:04:57.051 I PowosWebWindows: close window 11 (com.oneplus.calculator, display 22, task 2332): 1/4 layers off
+11-02 20:04:57.052 I PowosWebWindows: close window 11: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 20:04:57.054 I PowosWebWindows: close window 11: 3/4 display 22 released
+11-02 20:04:59.306 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 20:05:10.353 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 20:05:31.786 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 20:05:34.404 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 20:05:37.731 I PowosWebWindows: KWin window 5 (org.kde.dolphin, "Home — Dolphin"): offered to the page as l:org.kde.dolphin
+11-02 20:05:37.748 I PowosWebWindows: window 12: KWin window 5 (org.kde.dolphin) as a web window, 1135x1364
+11-02 20:05:37.749 I PowosWebWindows: window 12: KWin window 5 (org.kde.dolphin) consumer up, buffers 2268x2440, body 1135x1364
+11-02 20:05:37.760 I PowosWebWindows: window 12 (org.kde.dolphin): shown 14 ms after open (no display (KWin))
+11-02 20:05:37.999 I PowosWebWindows: window 12: live (its content shows; the page drops the placeholder)
+11-02 20:05:43.947 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 20:05:51.380 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 20:05:54.995 I PowosWebWindows: window 12: KWin window 5 full screen asked
+11-02 20:05:54.998 I PowosWebWindows: window 12: full screen 2268x2314 at 0,126: sized on KWin's answer
+11-02 20:05:54.999 I PowosWebWindows: window 12: KWin window 5 full screen
+11-02 20:05:55.168 I PowosWebWindows: window 12: KWin window 5 full screen (KWin's answer): sized 2268x2314
+11-02 20:06:00.950 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 20:06:08.378 I PowosWebWindows: window 12: back: leaves full screen
+11-02 20:06:08.379 W PowosWebWindows: window 12: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 20:06:08.379 I PowosWebWindows: window 12: KWin window 5 back in its window
+11-02 20:06:08.380 I PowosWebWindows: geometry resend asked: window 12 back from full screen
+11-02 20:06:11.139 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 20:06:15.877 I PowosWebWindows: KWin closed window 5: web window 12 goes
+11-02 20:06:15.880 I PowosWebWindows: close window 12 (com.powos.app, display -1, task -1): 1/4 layers off
+11-02 20:06:15.883 I PowosWebWindows: close window 12: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 20:06:16.881 E PowosWebWindows: close window 12: KWin window 5's consumer stop still blocked after 1000 ms: its thread left (no other window waits on it)
+11-02 20:06:18.278 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 20:06:28.808 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 20:06:45.665 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 20:06:49.909 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 20:06:52.438 I PowosWebWindows: home's surface destroyed: 1 window(s) wait for the next one
+11-02 20:07:06.165 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 20:07:06.205 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 20:07:06.205 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (1 window(s): 3@d16)
+11-02 20:07:06.205 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 20:07:12.368 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 20:07:12.876 I PowosWebWindows: home's surface destroyed: 1 window(s) wait for the next one
+11-02 20:07:20.790 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 20:07:20.790 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (1 window(s): 3@d16)
+11-02 20:07:20.790 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 20:07:20.845 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 20:07:32.172 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 20:07:46.978 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 20:07:49.421 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 20:08:12.785 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 20:08:23.399 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 20:18:02.882 I PowosFreeform: task stack listener on
+11-02 20:18:03.543 I PowosFreeform: task stack listener on
+11-02 20:18:10.843 I PowosFreeform: task stack listener on
+11-02 20:18:10.926 I PowosFreeform: task stack listener on
+11-02 20:18:10.988 I PowosFreeform: task stack listener on
+11-02 20:18:10.988 I PowosFreeform: task stack listener on
+11-02 20:18:11.120 I PowosFreeform: home task 2336 focusable
+11-02 20:18:17.173 I PowosFreeform: task stack listener on
+11-02 20:18:17.237 I PowosFreeform: task stack listener on
+11-02 20:22:06.680 I PowosFreeform: task stack listener on
+11-02 20:37:44.877 I PowosWebWindows: windows' root under home's buffer (made)
+11-02 20:37:44.879 I PowosWebWindows: launch com.oneplus.calculator: new window 1 (running task moved in: -1; -1: launched)
+11-02 20:37:44.883 I PowosWebWindows: display helper started (shell uid, app_process)
+11-02 20:37:45.428 I PowosWebWindows: display helper ready
+11-02 20:37:45.714 I PowosWebWindows: display helper: log display 25: touch device up (port powos-ww-25 -> virtual:com.android.shell,2000,powos-ww-1,14)
+11-02 20:37:45.718 I PowosWebWindows: window 1: trusted display 25 1135x1364 dpi 294 (screen 442) (com.oneplus.calculator)
+11-02 20:37:45.718 I PowosWebWindows: display helper: log display 25 1135x1364 dpi 294: sw 617dp
+11-02 20:37:45.720 I PowosWebWindows: window 1: display 25 mirrored after 1 ms (PowOS uid)
+11-02 20:37:45.729 I PowosWebWindows: window 1 (com.oneplus.calculator): shown 850 ms after open (display after 838 ms)
+11-02 20:37:45.734 I PowosWebWindows: IME policy of display 25: fallback to default display (ok)
+11-02 20:37:45.756 I PowosWebWindows: launched com.oneplus.calculator/com.android.calculator2.Calculator on display 25 (ActivityOptions)
+11-02 20:37:46.023 I PowosWebWindows: window 1: live (its content shows; the page drops the placeholder)
+11-02 20:37:46.857 I PowosWebWindows: layer order check: SurfaceFlinger refuses the app's uid, read as root
+11-02 20:37:46.938 I PowosWebWindows: layer order check: ok - page (bottom first) 1 at output layers [2], home's buffer at 3 (logged once)
+11-02 20:38:12.168 I PowosWebWindows: window 1: minimised (com.oneplus.calculator/com.android.calculator2.Calculator has no picture-in-picture: just hidden)
+11-02 20:38:24.627 I PowosWebWindows: window 1 (com.oneplus.calculator): its app's task 2340 is gone (removed by not PowOS (no PowOS removal of it logged)): window closed
+11-02 20:38:24.628 I PowosWebWindows: close window 1 (com.oneplus.calculator, display 25, task 2340): 1/4 layers off
+11-02 20:38:24.632 I PowosWebWindows: close window 1: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 20:38:24.634 I PowosWebWindows: close window 1: 3/4 display 25 released
+11-02 20:38:26.903 I PowosWebWindows: windows hidden under the switcher (each is its card): 0 window(s)
+11-02 20:38:37.498 I PowosWebWindows: windows shown again (switcher down): 0 window(s)
+11-02 20:40:39.025 I PowosWebWindows: windows hidden under the switcher (each is its card): 0 window(s)
+11-02 20:40:41.570 I PowosWebWindows: windows shown again (switcher down): 0 window(s)
+11-02 20:40:44.038 I PowosWebWindows: launch com.oneplus.calculator: new window 2 (running task moved in: -1; -1: launched)
+11-02 20:40:44.288 I PowosWebWindows: display helper: log display 26: touch device up (port powos-ww-26 -> virtual:com.android.shell,2000,powos-ww-2,15)
+11-02 20:40:44.292 I PowosWebWindows: window 2: trusted display 26 1135x1364 dpi 294 (screen 442) (com.oneplus.calculator)
+11-02 20:40:44.292 I PowosWebWindows: display helper: log display 26 1135x1364 dpi 294: sw 617dp
+11-02 20:40:44.295 I PowosWebWindows: window 2: display 26 mirrored after 2 ms (PowOS uid)
+11-02 20:40:44.300 I PowosWebWindows: window 2 (com.oneplus.calculator): shown 261 ms after open (display after 253 ms)
+11-02 20:40:44.302 I PowosWebWindows: IME policy of display 26: fallback to default display (ok)
+11-02 20:40:44.320 I PowosWebWindows: launched com.oneplus.calculator/com.android.calculator2.Calculator on display 26 (ActivityOptions)
+11-02 20:40:44.577 I PowosWebWindows: window 2: live (its content shows; the page drops the placeholder)
+11-02 20:40:47.057 I PowosWebWindows: launch com.android.chrome: new window 3 (running task moved in: 2314; -1: launched)
+11-02 20:40:47.374 I PowosWebWindows: display helper: log display 27: touch device up (port powos-ww-27 -> virtual:com.android.shell,2000,powos-ww-3,16)
+11-02 20:40:47.374 I PowosWebWindows: window 3: trusted display 27 1135x1364 dpi 294 (screen 442) (com.android.chrome)
+11-02 20:40:47.374 I PowosWebWindows: display helper: log display 27 1135x1364 dpi 294: sw 617dp
+11-02 20:40:47.375 I PowosWebWindows: window 3: display 27 mirrored after 1 ms (PowOS uid)
+11-02 20:40:47.383 I PowosWebWindows: window 3 (com.android.chrome): shown 325 ms after open (display after 316 ms)
+11-02 20:40:47.387 I PowosWebWindows: IME policy of display 27: fallback to default display (ok)
+11-02 20:40:47.440 I PowosWebWindows: task 2314 to display 27: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 27
+11-02 20:40:47.441 I PowosWebWindows: window 3: app's task 2314 moved onto display 27
+11-02 20:40:47.714 I PowosWebWindows: window 3: live (its content shows; the page drops the placeholder)
+11-02 20:40:50.973 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-02 20:40:51.016 I PowosWebWindows: task 2341 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-02 20:40:51.017 I PowosWebWindows: window 2: its app (task 2341) is a full-screen app on display 0
+11-02 20:40:53.717 I PowosWebWindows: task 2314 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-02 20:40:53.717 I PowosWebWindows: window 3: its app (task 2314) is a full-screen app on display 0
+11-02 20:41:02.222 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 20:41:02.256 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 20:41:02.256 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 2@d26, 3@d27)
+11-02 20:41:02.256 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 20:41:23.283 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 20:41:23.335 I PowosWebWindows: task 2341 to display 26: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 26
+11-02 20:41:23.335 I PowosWebWindows: window 2: back to a window (task 2341 moved back to display 26: true)
+11-02 20:41:23.348 I PowosWebWindows: geometry resend asked: window 2 back from full screen
+11-02 20:41:23.446 I PowosWebWindows: task 2314 to display 27: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 27
+11-02 20:41:23.446 I PowosWebWindows: window 3: back to a window (task 2314 moved back to display 27: true)
+11-02 20:41:23.482 I PowosWebWindows: geometry resend asked: window 3 back from full screen
+11-02 20:41:32.363 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-02 20:41:32.369 I PowosWebWindows: task 2314 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-02 20:41:32.479 I PowosWebWindows: task 2341 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-02 20:41:32.479 I PowosWebWindows: window 2: its app (task 2341) is a full-screen app on display 0
+11-02 20:41:32.812 I PowosWebWindows: window 3: minimised as a home gesture (com.android.chrome/org.chromium.chrome.browser.ChromeTabbedActivity, task 2314 in front on display 0 after 425 ms, home started=true)
+11-02 20:41:32.919 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 20:41:32.919 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 2@d26, 3@d27)
+11-02 20:41:32.919 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 20:41:34.817 I PowosWebWindows: window 3: after its minimise task 2314 is mode 1 visible false on display 0
+11-02 20:41:44.945 I PowosWebWindows: window 2 (com.oneplus.calculator, full screen): its app's task 2341 is gone (removed by not PowOS (no PowOS removal of it logged)): window closed
+11-02 20:41:44.947 I PowosWebWindows: close window 2 (com.oneplus.calculator, display 26, task 2341): 1/4 layers off
+11-02 20:41:44.948 I PowosWebWindows: close window 2: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 20:41:44.949 I PowosWebWindows: close window 2: 3/4 display 26 released
+11-02 20:41:47.256 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 20:41:57.902 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 20:42:13.244 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 20:42:16.454 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 20:42:20.968 I PowosWebWindows: KWin window 6 (org.kde.dolphin, "Home — Dolphin"): offered to the page as l:org.kde.dolphin
+11-02 20:42:20.991 I PowosWebWindows: window 4: KWin window 6 (org.kde.dolphin) as a web window, 1135x1364
+11-02 20:42:20.993 I PowosWebWindows: window 4: KWin window 6 (org.kde.dolphin) consumer up, buffers 2268x2440, body 1135x1364
+11-02 20:42:21.008 I PowosWebWindows: window 4 (org.kde.dolphin): shown 17 ms after open (no display (KWin))
+11-02 20:42:21.114 I PowosWebWindows: KWin window 6 (org.kde.dolphin) again: web window 4 shown where it was
+11-02 20:42:21.246 I PowosWebWindows: window 4: live (its content shows; the page drops the placeholder)
+11-02 20:42:30.485 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 20:42:38.994 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 20:42:42.737 I PowosWebWindows: window 4: KWin window 6 full screen asked
+11-02 20:42:42.740 I PowosWebWindows: window 4: full screen 2268x2314 at 0,126: sized on KWin's answer
+11-02 20:42:42.740 I PowosWebWindows: window 4: KWin window 6 full screen
+11-02 20:42:42.901 I PowosWebWindows: window 4: KWin window 6 full screen (KWin's answer): sized 2268x2314
+11-02 20:42:49.527 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 20:42:58.433 I PowosWebWindows: card 536870916 opened from the switcher: Linux web window 4 shown where it was, on its page
+11-02 20:42:58.435 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 20:43:04.384 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 20:43:07.268 I PowosWebWindows: window 4: home: leaves full screen
+11-02 20:43:07.269 W PowosWebWindows: window 4: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 20:43:07.269 I PowosWebWindows: window 4: KWin window 6 back in its window
+11-02 20:43:07.270 I PowosWebWindows: geometry resend asked: window 4 back from full screen
+11-02 20:43:07.301 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 20:43:21.491 I PowosWebWindows: KWin closed window 6: web window 4 goes
+11-02 20:43:21.492 I PowosWebWindows: close window 4 (com.powos.app, display -1, task -1): 1/4 layers off
+11-02 20:43:21.493 I PowosWebWindows: close window 4: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 20:43:22.682 E PowosWebWindows: close window 4: KWin window 6's consumer stop still blocked after 1000 ms: its thread left (no other window waits on it)
+11-02 20:43:23.760 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 20:43:37.659 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 20:43:55.354 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 20:43:58.010 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 20:44:21.528 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 20:45:11.732 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 20:45:17.001 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 20:45:45.842 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 20:46:33.782 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 20:46:42.748 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 20:47:22.548 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 21:02:07.712 I PowosFreeform: task stack listener on
+11-02 21:02:09.058 I PowosFreeform: task stack listener on
+11-02 21:02:14.488 I PowosFreeform: task stack listener on
+11-02 21:02:14.808 I PowosFreeform: task stack listener on
+11-02 21:02:15.044 I PowosFreeform: task stack listener on
+11-02 21:02:15.052 I PowosFreeform: task stack listener on
+11-02 21:02:15.632 I PowosFreeform: home task 2315 focusable
+11-02 21:07:20.881 I PowosFreeform: task stack listener on
+11-02 21:07:21.169 I PowosFreeform: task stack listener on
+11-02 21:07:22.158 I PowosFreeform: task stack listener on
+11-02 21:07:22.365 I PowosFreeform: task stack listener on
+11-02 21:07:22.366 I PowosFreeform: task stack listener on
+11-02 21:07:22.537 I PowosFreeform: task stack listener on
+11-02 21:07:22.963 I PowosFreeform: home task 2315 focusable
+11-02 21:27:20.200 I PowosFreeform: task stack listener on
+11-02 21:27:22.277 I PowosFreeform: task stack listener on
+11-02 21:27:27.256 I PowosFreeform: task stack listener on
+11-02 21:27:27.641 I PowosFreeform: task stack listener on
+11-02 21:27:27.815 I PowosFreeform: task stack listener on
+11-02 21:27:27.818 I PowosFreeform: task stack listener on
+11-02 21:27:27.975 I PowosFreeform: home task 2315 focusable
+11-02 21:30:26.957 I PowosFreeform: task stack listener on
+11-02 21:32:45.992 I PowosWebWindows: KWin window 1 (org.kde.dolphin, "Home — Dolphin"): offered to the page as l:org.kde.dolphin
+11-02 21:32:46.002 I PowosWebWindows: windows' root under home's buffer (made)
+11-02 21:32:46.005 I PowosWebWindows: window 1: KWin window 1 (org.kde.dolphin) as a web window, 1135x1364
+11-02 21:32:46.010 I PowosWebWindows: window 1: KWin window 1 (org.kde.dolphin) consumer up, buffers 2268x2440, body 1135x1364
+11-02 21:32:46.022 I PowosWebWindows: KWin window 1 (org.kde.dolphin) again: web window 1 shown where it was
+11-02 21:32:46.027 I PowosWebWindows: window 1 (org.kde.dolphin): shown 23 ms after open (no display (KWin))
+11-02 21:32:46.269 I PowosWebWindows: window 1: live (its content shows; the page drops the placeholder)
+11-02 21:32:46.430 I PowosWebWindows: layer order check: SurfaceFlinger refuses the app's uid, read as root
+11-02 21:32:46.627 I PowosWebWindows: layer order check: ok - page (bottom first) 1 at output layers [2], home's buffer at 3 (logged once)
+11-02 21:32:47.991 I PowosWebWindows: window 1: gesture to KWin window 1 (body [133,424][1268,1789] x1.0)
+11-02 21:32:50.731 I PowosWebWindows: window 1: gesture to KWin window 1 (body [133,424][1268,1789] x1.0)
+11-02 21:32:52.598 I PowosWebWindows: window 1: gesture to KWin window 1 (body [133,424][1268,1789] x1.0)
+11-02 21:32:54.645 I PowosWebWindows: window 1: gesture to KWin window 1 (body [133,424][1268,1789] x1.0)
+11-02 21:32:55.346 I PowosWebWindows: window 1: gesture to KWin window 1 (body [133,424][1268,1789] x1.0)
+11-02 21:32:58.719 I PowosWebWindows: window 1: resize: 46 relayouts for 108 steps (Linux: no settle measure)
+11-02 21:33:08.238 I PowosWebWindows: KWin window 2 (, "Steam"): offered to the page as l:
+11-02 21:33:08.285 I PowosWebWindows: window 2: KWin window 2 () as a web window, 1135x1364
+11-02 21:33:08.290 I PowosWebWindows: window 2: KWin window 2 () consumer up, buffers 2268x2440, body 1135x1364
+11-02 21:33:08.332 I PowosWebWindows: window 2 (): shown 48 ms after open (no display (KWin))
+11-02 21:33:08.557 I PowosWebWindows: window 2: live (its content shows; the page drops the placeholder)
+11-02 21:33:20.116 I PowosWebWindows: window 2: gesture to KWin window 2 (body [870,696][2005,2061] x1.0)
+11-02 21:33:23.299 I PowosWebWindows: window 2: gesture to KWin window 2 (body [870,696][2005,2061] x1.0)
+11-02 21:33:24.652 I PowosWebWindows: window 2: gesture to KWin window 2 (body [870,696][2005,2061] x1.0)
+11-02 21:33:26.576 I PowosWebWindows: window 2: gesture to KWin window 2 (body [870,696][2005,2061] x1.0)
+11-02 21:34:44.230 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 21:34:46.696 I PowosWebWindows: card 536870914 opened from the switcher: Linux web window 2 shown where it was, on its page
+11-02 21:34:46.698 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 21:34:48.269 I PowosWebWindows: window 2: KWin window 2 full screen asked
+11-02 21:34:48.271 I PowosWebWindows: window 2: full screen 2268x2314 at 0,126: sized on KWin's answer
+11-02 21:34:48.271 I PowosWebWindows: window 2: KWin window 2 full screen
+11-02 21:34:48.294 I PowosWebWindows: window 2: KWin window 2 full screen (KWin's answer): sized 2268x2314
+11-02 21:34:52.036 I PowosWebWindows: window 2: home swipe: leaves full screen
+11-02 21:34:52.037 W PowosWebWindows: window 2: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 21:34:52.038 I PowosWebWindows: window 2: KWin window 2 back in its window
+11-02 21:34:52.038 I PowosWebWindows: geometry resend asked: window 2 back from full screen
+11-02 21:34:53.018 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-02 21:34:56.008 I PowosWebWindows: KWin window 4 (, "Broforce"): offered to the page as l:
+11-02 21:34:56.033 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 21:34:56.034 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 1@d-1, 2@d-1)
+11-02 21:34:56.034 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 21:34:56.128 I PowosWebWindows: window 3: KWin window 4 () as a web window, 1135x1364
+11-02 21:34:56.133 I PowosWebWindows: window 3: KWin window 4 () consumer up, buffers 2268x2440, body 1135x1364
+11-02 21:34:56.238 I PowosWebWindows: window 3 (): shown 111 ms after open (no display (KWin))
+11-02 21:34:56.397 I PowosWebWindows: window 3: live (its content shows; the page drops the placeholder)
+11-02 21:35:01.060 I PowosWebWindows: window 3: KWin window 4 full screen asked
+11-02 21:35:01.063 I PowosWebWindows: window 3: full screen 2268x2314 at 0,126: sized on KWin's answer
+11-02 21:35:01.063 I PowosWebWindows: window 3: KWin window 4 full screen
+11-02 21:35:01.075 I PowosWebWindows: window 3: KWin window 4 full screen (KWin's answer): sized 2268x2314
+11-02 21:35:01.221 W PowosWebWindows: window 3: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 21:35:01.223 I PowosWebWindows: window 3: KWin window 4 back in its window
+11-02 21:35:01.224 I PowosWebWindows: geometry resend asked: window 3 back from full screen
+11-02 21:35:02.453 I PowosWebWindows: window 3: KWin window 4 full screen asked
+11-02 21:35:02.454 I PowosWebWindows: window 3: full screen 2268x2314 at 0,126: sized on KWin's answer
+11-02 21:35:02.454 I PowosWebWindows: window 3: KWin window 4 full screen
+11-02 21:35:02.461 I PowosWebWindows: window 3: KWin window 4 full screen (KWin's answer): sized 2268x2314
+11-02 21:35:02.593 W PowosWebWindows: window 3: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 21:35:02.596 I PowosWebWindows: window 3: KWin window 4 back in its window
+11-02 21:35:02.596 I PowosWebWindows: geometry resend asked: window 3 back from full screen
+11-02 21:35:03.184 I PowosWebWindows: window 3: KWin window 4 full screen asked
+11-02 21:35:03.187 I PowosWebWindows: window 3: full screen 2268x2314 at 0,126: sized on KWin's answer
+11-02 21:35:03.187 I PowosWebWindows: window 3: KWin window 4 full screen
+11-02 21:35:03.192 I PowosWebWindows: window 3: KWin window 4 full screen (KWin's answer): sized 2268x2314
+11-02 21:35:03.229 W PowosWebWindows: window 3: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 21:35:03.231 I PowosWebWindows: window 3: KWin window 4 back in its window
+11-02 21:35:03.231 I PowosWebWindows: geometry resend asked: window 3 back from full screen
+11-02 21:35:03.833 I PowosWebWindows: window 3: KWin window 4 full screen asked
+11-02 21:35:03.834 I PowosWebWindows: window 3: full screen 2268x2314 at 0,126: sized on KWin's answer
+11-02 21:35:03.834 I PowosWebWindows: window 3: KWin window 4 full screen
+11-02 21:35:03.856 I PowosWebWindows: window 3: KWin window 4 full screen (KWin's answer): sized 2268x2314
+11-02 21:35:03.890 W PowosWebWindows: window 3: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 21:35:03.891 I PowosWebWindows: window 3: KWin window 4 back in its window
+11-02 21:35:03.892 I PowosWebWindows: geometry resend asked: window 3 back from full screen
+11-02 21:35:13.573 I PowosWebWindows: window 3: gesture to KWin window 4 (body [478,497][1613,1862] x1.0)
+11-02 21:35:13.955 I PowosWebWindows: window 3: gesture to KWin window 4 (body [478,497][1613,1862] x1.0)
+11-02 21:35:16.533 I PowosWebWindows: window 3: KWin window 4 full screen asked
+11-02 21:35:16.534 I PowosWebWindows: window 3: full screen 2268x2314 at 0,126: sized on KWin's answer
+11-02 21:35:16.534 I PowosWebWindows: window 3: KWin window 4 full screen
+11-02 21:35:16.598 I PowosWebWindows: window 3: KWin window 4 full screen (KWin's answer): sized 2268x2314
+11-02 21:35:17.596 W PowosWebWindows: window 3: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 21:35:17.599 I PowosWebWindows: window 3: KWin window 4 back in its window
+11-02 21:35:17.600 I PowosWebWindows: geometry resend asked: window 3 back from full screen
+11-02 21:35:18.488 I PowosWebWindows: window 3: KWin window 4 full screen asked
+11-02 21:35:18.490 I PowosWebWindows: window 3: full screen 2268x2314 at 0,126: sized on KWin's answer
+11-02 21:35:18.490 I PowosWebWindows: window 3: KWin window 4 full screen
+11-02 21:35:18.602 I PowosWebWindows: window 3: KWin window 4 full screen (KWin's answer): sized 2268x2314
+11-02 21:35:18.645 W PowosWebWindows: window 3: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 21:35:18.646 I PowosWebWindows: window 3: KWin window 4 back in its window
+11-02 21:35:18.647 I PowosWebWindows: geometry resend asked: window 3 back from full screen
+11-02 21:35:19.540 I PowosWebWindows: window 3: KWin window 4 full screen asked
+11-02 21:35:19.541 I PowosWebWindows: window 3: full screen 2268x2314 at 0,126: sized on KWin's answer
+11-02 21:35:19.541 I PowosWebWindows: window 3: KWin window 4 full screen
+11-02 21:35:19.591 I PowosWebWindows: window 3: KWin window 4 full screen (KWin's answer): sized 2268x2314
+11-02 21:35:19.625 W PowosWebWindows: window 3: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 21:35:19.628 I PowosWebWindows: window 3: KWin window 4 back in its window
+11-02 21:35:19.629 I PowosWebWindows: geometry resend asked: window 3 back from full screen
+11-02 21:35:41.654 I PowosWebWindows: close window 3: KWin window 4 quit (KWin closes it, then ends the app)
+11-02 21:35:41.654 I PowosWebWindows: close window 3 (com.powos.app, display -1, task -1): 1/4 layers off
+11-02 21:35:41.655 I PowosWebWindows: close window 3: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 21:35:43.222 I PowosWebWindows: KWin window 5 (, "Broforce"): offered to the page as l:
+11-02 21:35:43.272 I PowosWebWindows: window 4: KWin window 5 () as a web window, 1135x1364
+11-02 21:35:43.273 I PowosWebWindows: window 4: KWin window 5 () consumer up, buffers 2268x2440, body 1135x1364
+11-02 21:35:43.302 I PowosWebWindows: window 4 (): shown 31 ms after open (no display (KWin))
+11-02 21:35:43.545 I PowosWebWindows: window 4: live (its content shows; the page drops the placeholder)
+11-02 21:35:43.683 I PowosWebWindows: KWin window 2 () again: web window 2 shown where it was
+11-02 21:35:45.299 I PowosWebWindows: KWin closed window 5: web window 4 goes
+11-02 21:35:45.300 I PowosWebWindows: close window 4 (com.powos.app, display -1, task -1): 1/4 layers off
+11-02 21:35:45.301 I PowosWebWindows: close window 4: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 21:35:45.306 I PowosWebWindows: window 2: gesture to KWin window 2 (body [870,696][2005,2061] x1.0)
+11-02 21:35:46.314 E PowosWebWindows: close window 4: KWin window 5's consumer stop still blocked after 1000 ms: its thread left (no other window waits on it)
+11-02 21:35:47.055 I PowosWebWindows: window 2: gesture to KWin window 2 (body [870,696][2005,2061] x1.0)
+11-02 21:35:47.631 I PowosWebWindows: window 2: gesture to KWin window 2 (body [870,696][2005,2061] x1.0)
+11-02 21:35:48.868 I PowosWebWindows: window 2: gesture to KWin window 2 (body [870,696][2005,2061] x1.0)
+11-02 21:36:07.661 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-02 21:36:11.484 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 21:36:11.583 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 21:36:11.583 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 1@d-1, 2@d-1)
+11-02 21:36:11.583 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 21:36:11.597 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 21:36:14.260 I PowosWebWindows: window 2: gesture to KWin window 2 (body [426,626][1561,1991] x1.0)
+11-02 21:36:21.664 I PowosWebWindows: window 2: gesture to KWin window 2 (body [426,626][1561,1991] x1.0)
+11-02 21:36:24.590 I PowosWebWindows: window 2: KWin window 2 full screen asked
+11-02 21:36:24.593 I PowosWebWindows: window 2: full screen 2268x2314 at 0,126: sized on KWin's answer
+11-02 21:36:24.593 I PowosWebWindows: window 2: KWin window 2 full screen
+11-02 21:36:24.600 I PowosWebWindows: window 2: KWin window 2 full screen (KWin's answer): sized 2268x2314
+11-02 21:36:29.763 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-02 21:37:34.505 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 21:37:34.505 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 1@d-1, 2@d-1)
+11-02 21:37:34.505 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 21:37:45.503 I PowosWebWindows: window 2: home swipe: leaves full screen
+11-02 21:37:45.505 W PowosWebWindows: window 2: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 21:37:45.508 I PowosWebWindows: window 2: KWin window 2 back in its window
+11-02 21:37:45.508 I PowosWebWindows: geometry resend asked: window 2 back from full screen
+11-02 21:37:46.537 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 21:37:48.045 I PowosWebWindows: card 536870914 opened from the switcher: Linux web window 2 shown where it was, on its page
+11-02 21:37:48.047 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 21:37:50.043 I PowosWebWindows: close window 1: KWin window 1 quit (KWin closes it, then ends the app)
+11-02 21:37:50.043 I PowosWebWindows: close window 1 (com.powos.app, display -1, task -1): 1/4 layers off
+11-02 21:37:50.045 I PowosWebWindows: close window 1: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 21:37:52.486 I PowosWebWindows: window 2: gesture to KWin window 2 (body [166,497][1301,1862] x1.0)
+11-02 21:37:54.021 I PowosWebWindows: window 2: gesture to KWin window 2 (body [166,497][1301,1862] x1.0)
+11-02 21:37:55.126 I PowosWebWindows: window 2: gesture to KWin window 2 (body [166,497][1301,1862] x1.0)
+11-02 21:37:58.320 I PowosWebWindows: window 2: KWin window 2 full screen asked
+11-02 21:37:58.322 I PowosWebWindows: window 2: full screen 2268x2314 at 0,126: sized on KWin's answer
+11-02 21:37:58.322 I PowosWebWindows: window 2: KWin window 2 full screen
+11-02 21:37:58.390 I PowosWebWindows: window 2: KWin window 2 full screen (KWin's answer): sized 2268x2314
+11-02 21:38:29.064 I PowosWebWindows: window 2: home swipe: leaves full screen
+11-02 21:38:29.064 W PowosWebWindows: window 2: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 21:38:29.066 I PowosWebWindows: window 2: KWin window 2 back in its window
+11-02 21:38:29.067 I PowosWebWindows: geometry resend asked: window 2 back from full screen
+11-02 21:38:30.589 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-02 21:38:33.215 I PowosWebWindows: card 536870914 opened from the switcher: Linux web window 2 shown where it was, on its page
+11-02 21:38:33.217 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-02 21:38:36.018 I PowosWebWindows: KWin window 2 () again: web window 2 shown where it was
+11-02 21:38:36.390 I PowosWebWindows: home's surface destroyed: 1 window(s) wait for the next one
+11-02 21:38:39.244 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 21:38:39.244 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (1 window(s): 2@d-1)
+11-02 21:38:39.244 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 21:38:39.255 I PowosWebWindows: KWin window 8 (, "Broforce"): offered to the page as l:
+11-02 21:38:39.318 I PowosWebWindows: window 5: KWin window 8 () as a web window, 1135x1364
+11-02 21:38:39.320 I PowosWebWindows: window 5: KWin window 8 () consumer up, buffers 2268x2440, body 1135x1364
+11-02 21:38:39.558 I PowosWebWindows: window 5 (): shown 241 ms after open (no display (KWin))
+11-02 21:38:39.604 I PowosWebWindows: window 5: live (its content shows; the page drops the placeholder)
+11-02 21:38:40.770 I PowosWebWindows: window 5: gesture to KWin window 8 (body [478,497][1613,1862] x1.0)
+11-02 21:38:41.055 I PowosWebWindows: window 5: gesture to KWin window 8 (body [478,497][1613,1862] x1.0)
+11-02 21:38:41.622 I PowosWebWindows: window 5: gesture to KWin window 8 (body [478,497][1613,1862] x1.0)
+11-02 21:38:42.143 I PowosWebWindows: window 5: gesture to KWin window 8 (body [478,497][1613,1862] x1.0)
+11-02 21:38:46.386 I PowosWebWindows: window 5: gesture to KWin window 8 (body [478,497][1613,1862] x1.0)
+11-02 21:38:46.578 I PowosWebWindows: window 5: gesture to KWin window 8 (body [478,497][1613,1862] x1.0)
+11-02 21:38:46.770 I PowosWebWindows: window 5: gesture to KWin window 8 (body [478,497][1613,1862] x1.0)
+11-02 21:39:22.004 I PowosWebWindows: window 5: gesture to KWin window 8 (body [478,497][1613,1862] x1.0)
+11-02 21:39:23.105 I PowosWebWindows: window 5: KWin window 8 full screen asked
+11-02 21:39:23.106 I PowosWebWindows: window 5: full screen 2268x2314 at 0,126: sized on KWin's answer
+11-02 21:39:23.106 I PowosWebWindows: window 5: KWin window 8 full screen
+11-02 21:39:23.205 I PowosWebWindows: window 5: KWin window 8 full screen (KWin's answer): sized 2268x2314
+11-02 21:39:23.388 W PowosWebWindows: window 5: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 21:39:23.389 I PowosWebWindows: window 5: KWin window 8 back in its window
+11-02 21:39:23.390 I PowosWebWindows: geometry resend asked: window 5 back from full screen
+11-02 21:39:45.709 I PowosWebWindows: close window 5: KWin window 8 quit (KWin closes it, then ends the app)
+11-02 21:39:45.709 I PowosWebWindows: close window 5 (com.powos.app, display -1, task -1): 1/4 layers off
+11-02 21:39:45.709 I PowosWebWindows: close window 5: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 21:39:47.390 I PowosWebWindows: window 2: gesture to KWin window 2 (body [166,497][1301,1862] x1.0)
+11-02 21:39:47.414 I PowosWebWindows: KWin window 9 (, "Broforce"): offered to the page as l:
+11-02 21:39:47.444 I PowosWebWindows: window 6: KWin window 9 () as a web window, 1135x1364
+11-02 21:39:47.451 I PowosWebWindows: window 6: KWin window 9 () consumer up, buffers 2268x2440, body 1135x1364
+11-02 21:39:47.500 I PowosWebWindows: window 6 (): shown 56 ms after open (no display (KWin))
+11-02 21:39:47.780 I PowosWebWindows: window 6: live (its content shows; the page drops the placeholder)
+11-02 21:39:49.195 I PowosWebWindows: KWin closed window 9: web window 6 goes
+11-02 21:39:49.196 I PowosWebWindows: close window 6 (com.powos.app, display -1, task -1): 1/4 layers off
+11-02 21:39:49.197 I PowosWebWindows: close window 6: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 21:39:50.244 E PowosWebWindows: close window 6: KWin window 9's consumer stop still blocked after 1000 ms: its thread left (no other window waits on it)
+11-02 21:39:50.525 I PowosWebWindows: window 2: gesture to KWin window 2 (body [166,497][1301,1862] x1.0)
+11-02 21:39:52.715 I PowosWebWindows: window 2: KWin window 2 full screen asked
+11-02 21:39:52.716 I PowosWebWindows: window 2: full screen 2268x2314 at 0,126: sized on KWin's answer
+11-02 21:39:52.716 I PowosWebWindows: window 2: KWin window 2 full screen
+11-02 21:39:52.792 I PowosWebWindows: window 2: KWin window 2 full screen (KWin's answer): sized 2268x2314
+11-02 21:40:37.982 I PowosWebWindows: home's surface destroyed: 1 window(s) wait for the next one
+11-02 21:40:40.712 I PowosWebWindows: KWin window 11 (, "Broforce"): offered to the page as l:
+11-02 21:40:40.751 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 21:40:40.751 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (1 window(s): 2@d-1)
+11-02 21:40:40.751 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 21:40:40.980 I PowosWebWindows: window 7: KWin window 11 () as a web window, 1135x1364
+11-02 21:40:41.000 I PowosWebWindows: window 7: KWin window 11 () consumer up, buffers 2268x2440, body 1135x1364
+11-02 21:40:41.210 I PowosWebWindows: window 2: home: leaves full screen
+11-02 21:40:41.211 W PowosWebWindows: window 2: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 21:40:41.212 I PowosWebWindows: window 2: KWin window 2 back in its window
+11-02 21:40:41.212 I PowosWebWindows: geometry resend asked: window 2 back from full screen
+11-02 21:40:41.331 I PowosWebWindows: window 7: live (its content shows; the page drops the placeholder)
+11-02 21:40:41.442 I PowosWebWindows: window 7 (): shown 463 ms after open (no display (KWin))
+11-02 21:40:50.891 I PowosWebWindows: window 7: gesture to KWin window 11 (body [436,454][1571,1819] x1.0)
+11-02 21:40:51.613 I PowosWebWindows: window 7: gesture to KWin window 11 (body [436,454][1571,1819] x1.0)
+11-02 21:40:52.142 I PowosWebWindows: window 7: gesture to KWin window 11 (body [436,454][1571,1819] x1.0)
+11-02 21:40:52.321 I PowosWebWindows: window 7: gesture to KWin window 11 (body [436,454][1571,1819] x1.0)
+11-02 21:40:52.476 I PowosWebWindows: window 7: gesture to KWin window 11 (body [436,454][1571,1819] x1.0)
+11-02 21:40:52.589 I PowosWebWindows: window 7: gesture to KWin window 11 (body [436,454][1571,1819] x1.0)
+11-02 21:40:52.850 I PowosWebWindows: window 7: gesture to KWin window 11 (body [436,454][1571,1819] x1.0)
+11-02 21:40:52.963 I PowosWebWindows: window 7: gesture to KWin window 11 (body [436,454][1571,1819] x1.0)
+11-02 21:40:53.128 I PowosWebWindows: window 7: gesture to KWin window 11 (body [436,454][1571,1819] x1.0)
+11-02 21:40:53.296 I PowosWebWindows: window 7: gesture to KWin window 11 (body [436,454][1571,1819] x1.0)
+11-02 21:40:53.479 I PowosWebWindows: window 7: gesture to KWin window 11 (body [436,454][1571,1819] x1.0)
+11-02 21:41:12.599 I PowosWebWindows: window 7: KWin window 11 full screen
+11-02 21:41:28.736 I PowosWebWindows: window 7: back: leaves full screen
+11-02 21:41:28.737 W PowosWebWindows: window 7: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 21:41:28.738 I PowosWebWindows: window 7: KWin window 11 back in its window
+11-02 21:41:28.739 I PowosWebWindows: geometry resend asked: window 7 back from full screen
+11-02 21:41:28.900 I PowosWebWindows: window 7: KWin window 11 full screen
+11-02 21:41:29.157 W PowosWebWindows: layer order != page order: window(s) 7 drawn OVER home's buffer (layer 3): the page's DOM over them is covered; page (bottom first) 2(powos-ww-2-linux), 7(powos-ww-7-linux), SurfaceFlinger's output: 0 Wallpaper BBQ wrapper#73, 1 powos-glass-under#745, 2 [BBQ] powos-ww-2-linux#760#761, 3 com.powos.app/andro.marchy.HomeShell#1216, 4 [BBQ] powos-ww-7-linux#1224#1225, 5 PowOS panel anchor#149, 6 PowOS controller#1314, 7 OplusOSEdgeFloatBar#294, 8 StatusBar#108, 9 PowOS status bar#137, 10 NavigationBar_displayId_0#104, 11 PowOS edge handle right#180 (home's buffer at 3)
+11-02 21:41:30.568 I PowosWebWindows: window 7: back: leaves full screen
+11-02 21:41:30.568 W PowosWebWindows: window 7: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 21:41:30.571 I PowosWebWindows: window 7: KWin window 11 back in its window
+11-02 21:41:30.571 I PowosWebWindows: geometry resend asked: window 7 back from full screen
+11-02 21:41:30.793 I PowosWebWindows: window 7: KWin window 11 full screen
+11-02 21:41:31.000 W PowosWebWindows: layer order != page order: window(s) 7 drawn OVER home's buffer (layer 3): the page's DOM over them is covered; page (bottom first) 2(powos-ww-2-linux), 7(powos-ww-7-linux), SurfaceFlinger's output: 0 Wallpaper BBQ wrapper#73, 1 powos-glass-under#745, 2 [BBQ] powos-ww-2-linux#760#761, 3 com.powos.app/andro.marchy.HomeShell#1216, 4 [BBQ] powos-ww-7-linux#1224#1225, 5 PowOS panel anchor#149, 6 PowOS controller#1314, 7 OplusOSEdgeFloatBar#294, 8 StatusBar#108, 9 PowOS status bar#137, 10 NavigationBar_displayId_0#104, 11 PowOS edge handle right#180 (home's buffer at 3)
+11-02 21:42:28.538 I PowosWebWindows: window 7: back: leaves full screen
+11-02 21:42:28.539 W PowosWebWindows: window 7: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 21:42:28.540 I PowosWebWindows: window 7: KWin window 11 back in its window
+11-02 21:42:28.540 I PowosWebWindows: geometry resend asked: window 7 back from full screen
+11-02 21:42:28.678 I PowosWebWindows: window 7: KWin window 11 full screen
+11-02 21:42:29.005 W PowosWebWindows: layer order != page order: window(s) 7 drawn OVER home's buffer (layer 3): the page's DOM over them is covered; page (bottom first) 2(powos-ww-2-linux), 7(powos-ww-7-linux), SurfaceFlinger's output: 0 Wallpaper BBQ wrapper#73, 1 powos-glass-under#745, 2 [BBQ] powos-ww-2-linux#760#761, 3 com.powos.app/andro.marchy.HomeShell#1216, 4 [BBQ] powos-ww-7-linux#1224#1225, 5 PowOS panel anchor#149, 6 PowOS controller#1314, 7 OplusOSEdgeFloatBar#294, 8 StatusBar#108, 9 PowOS status bar#137, 10 NavigationBar_displayId_0#104, 11 PowOS edge handle right#180 (home's buffer at 3)
+11-02 21:43:53.772 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 21:44:05.461 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 21:44:05.793 I PowosWebWindows: launch com.android.chrome: new window 8 (running task moved in: 2314; -1: launched)
+11-02 21:44:05.817 I PowosWebWindows: display helper started (shell uid, app_process)
+11-02 21:44:08.190 I PowosWebWindows: display helper ready
+11-02 21:44:08.850 I PowosWebWindows: display helper: log display 12: touch device up (port powos-ww-12 -> virtual:com.android.shell,2000,powos-ww-8,1)
+11-02 21:44:08.863 I PowosWebWindows: window 8: trusted display 12 1154x1538 dpi 294 (screen 442) (com.android.chrome)
+11-02 21:44:08.871 I PowosWebWindows: display helper: log display 12 1154x1538 dpi 294: sw 628dp
+11-02 21:44:08.873 I PowosWebWindows: window 8: display 12 mirrored after 2 ms (PowOS uid)
+11-02 21:44:08.879 I PowosWebWindows: IME policy of display 12: fallback to default display (ok)
+11-02 21:44:09.029 I PowosWebWindows: task 2314 to display 12: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 12
+11-02 21:44:09.029 I PowosWebWindows: window 8: app's task 2314 moved onto display 12
+11-02 21:44:09.298 I PowosWebWindows: window 8: live (its content shows; the page drops the placeholder)
+11-02 21:44:10.320 I PowosWebWindows: windows hidden under the switcher (each is its card): 3 window(s)
+11-02 21:44:10.620 I PowosWebWindows: windows shown again (switcher down): 3 window(s)
+11-02 21:44:11.106 I PowosWebWindows: window 7: switcher to home: leaves full screen
+11-02 21:44:11.107 W PowosWebWindows: window 7: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 21:44:11.109 I PowosWebWindows: window 7: KWin window 11 back in its window
+11-02 21:44:11.109 I PowosWebWindows: geometry resend asked: window 7 back from full screen
+11-02 21:44:11.536 W PowosWebWindows: window 8 (com.android.chrome): shown 5743 ms after open (display after 3068 ms) - slow, over 1000 ms
+11-02 21:44:11.538 I PowosWebWindows: window 7: KWin window 11 full screen
+11-02 21:44:12.003 W PowosWebWindows: layer order != page order: window(s) 7 drawn OVER home's buffer (layer 6): the page's DOM over them is covered; page (bottom first) 2(powos-ww-2-linux), 8(com.android.chrome/), 7(powos-ww-7-linux), SurfaceFlinger's output: 0 Wallpaper BBQ wrapper#73, 1 powos-glass-under#745, 2 [BBQ] powos-ww-2-linux#760#761, 3 Task=2314#1345, 4 com.android.chrome/ChromeChildSurface#1382, 5 com.android.chrome/com.google.android.apps.chrome.Main#1367, 6 com.powos.app/andro.marchy.HomeShell#1216, 7 [BBQ] powos-ww-7-linux#1224#1225, 8 PowOS panel anchor#149, 9 OplusOSEdgeFloatBar#294, 10 StatusBar#108, 11 PowOS status bar#137, 12 NavigationBar_displayId_0#104, 13 PowOS edge handle right#180 (home's buffer at 6)
+11-02 21:44:24.706 I PowosWebWindows: windows hidden under the switcher (each is its card): 3 window(s)
+11-02 21:44:24.767 I PowosWebWindows: windows shown again (switcher down): 3 window(s)
+11-02 21:44:26.383 I PowosWebWindows: windows hidden under the switcher (each is its card): 3 window(s)
+11-02 21:44:26.449 I PowosWebWindows: windows shown again (switcher down): 3 window(s)
+11-02 21:44:28.200 I PowosWebWindows: windows hidden under the switcher (each is its card): 3 window(s)
+11-02 21:44:28.255 I PowosWebWindows: windows shown again (switcher down): 3 window(s)
+11-02 21:44:30.924 I PowosWebWindows: windows hidden under the switcher (each is its card): 3 window(s)
+11-02 21:44:31.318 I PowosWebWindows: windows shown again (switcher down): 3 window(s)
+11-02 21:44:31.318 I PowosWebWindows: window 7: switcher to home: leaves full screen
+11-02 21:44:31.318 W PowosWebWindows: window 7: its layer was outside the windows' root (left by full screen): back under it, at the page's z
+11-02 21:44:31.319 I PowosWebWindows: window 7: KWin window 11 back in its window
+11-02 21:44:31.319 I PowosWebWindows: geometry resend asked: window 7 back from full screen
+11-02 21:44:31.372 I PowosWebWindows: windows hidden under the switcher (each is its card): 3 window(s)
+11-02 21:44:31.544 I PowosWebWindows: window 7: KWin window 11 full screen
+11-02 21:44:32.887 I PowosWebWindows: card 536870919 removed (switcher / Tasks.remove): Linux web window 7 - closing it (the bar's close path)
+11-02 21:44:32.889 I PowosWebWindows: close window 7: KWin window 11 quit (KWin closes it, then ends the app)
+11-02 21:44:32.889 I PowosWebWindows: close window 7 (com.powos.app, display -1, task -1, full screen): 1/4 layers off
+11-02 21:44:32.890 I PowosWebWindows: close window 7: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-02 21:44:34.400 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 21:44:38.689 I PowosWebWindows: task 2314 to display 0: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 0
+11-02 21:44:38.689 I PowosWebWindows: window 8: its app (task 2314) is a full-screen app on display 0
+11-02 21:44:40.110 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-02 21:44:47.249 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 21:44:47.287 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 21:44:47.287 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 2@d-1, 8@d12)
+11-02 21:44:47.287 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 21:44:49.498 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 21:44:49.855 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-02 21:45:39.596 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 21:45:39.644 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-02 21:45:39.644 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (2 window(s): 2@d-1, 8@d12)
+11-02 21:45:39.644 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-02 21:45:39.721 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 21:55:21.074 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 21:55:21.850 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 21:55:25.720 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 21:55:45.820 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 21:55:46.719 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 21:55:48.072 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 21:55:48.796 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-02 21:55:59.016 I PowosWebWindows: home's surface destroyed: 2 window(s) wait for the next one
+11-02 21:55:59.035 I PowosWebWindows: windows shown again (switcher down): 2 window(s)
+11-02 21:56:37.404 I PowosFreeform: task stack listener on
+11-02 21:56:38.846 I PowosFreeform: task stack listener on
+11-02 21:56:45.005 I PowosFreeform: task stack listener on
+11-02 21:56:45.582 I PowosFreeform: task stack listener on
+11-02 21:56:46.398 I PowosFreeform: task stack listener on
+11-02 21:56:46.405 I PowosFreeform: task stack listener on
+11-02 21:56:46.834 I PowosFreeform: home task 6 focusable
+11-02 22:09:13.758 I PowosFreeform: task stack listener on
+11-02 23:10:16.673 I PowosFreeform: task stack listener on
+11-02 23:10:17.298 I PowosFreeform: task stack listener on
+11-02 23:10:23.630 I PowosFreeform: task stack listener on
+11-02 23:10:23.709 I PowosFreeform: task stack listener on
+11-02 23:10:23.780 I PowosFreeform: task stack listener on
+11-02 23:10:23.780 I PowosFreeform: task stack listener on
+11-02 23:10:23.918 I PowosFreeform: home task 2323 focusable
+11-03 00:04:10.134 I PowosFreeform: task stack listener on
+11-03 00:04:23.751 I PowosWebWindows: KWin window 1 (, "Launching..."): offered to the page as l:
+11-03 00:04:23.754 I PowosWebWindows: windows' root under home's buffer (made)
+11-03 00:04:23.758 I PowosWebWindows: window 1: KWin window 1 () as a web window, 1135x1364
+11-03 00:04:23.764 I PowosWebWindows: window 1: KWin window 1 () consumer up, buffers 2268x2440, body 1135x1364
+11-03 00:04:23.777 I PowosWebWindows: window 1 (): shown 20 ms after open (no display (KWin))
+11-03 00:04:24.015 I PowosWebWindows: window 1: live (its content shows; the page drops the placeholder)
+11-03 00:04:24.101 I PowosWebWindows: layer order check: SurfaceFlinger refuses the app's uid, read as root
+11-03 00:04:24.210 I PowosWebWindows: layer order check: ok - page (bottom first) 1 at output layers [2], home's buffer at 3 (logged once)
+11-03 00:04:35.158 I PowosWebWindows: KWin closed window 1: web window 1 goes
+11-03 00:04:35.160 I PowosWebWindows: close window 1 (com.powos.app, display -1, task -1): 1/4 layers off
+11-03 00:04:35.161 I PowosWebWindows: close window 1: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4
+11-03 00:04:41.743 I PowosWebWindows: KWin window 2 (, "Steam"): offered to the page as l:
+11-03 00:04:41.752 I PowosWebWindows: window 2: KWin window 2 () as a web window, 1135x1364
+11-03 00:04:41.765 I PowosWebWindows: window 2: KWin window 2 () consumer up, buffers 2268x2440, body 1135x1364
+11-03 00:04:41.766 I PowosWebWindows: KWin window 2 () again: web window 2 shown where it was
+11-03 00:04:41.780 I PowosWebWindows: window 2 (): shown 28 ms after open (no display (KWin))
+11-03 00:04:42.019 I PowosWebWindows: window 2: live (its content shows; the page drops the placeholder)
+11-03 00:04:45.435 I PowosWebWindows: window 2: gesture to KWin window 2 (body [478,497][1613,1862] x1.0)
+11-03 00:04:47.755 I PowosWebWindows: window 2: gesture to KWin window 2 (body [478,497][1613,1862] x1.0)
+11-03 00:04:51.098 I PowosWebWindows: window 2: gesture to KWin window 2 (body [478,497][1613,1862] x1.0)
+11-03 00:04:52.483 I PowosWebWindows: window 2: gesture to KWin window 2 (body [478,497][1613,1862] x1.0)
+11-03 00:04:53.894 I PowosWebWindows: window 2: gesture to KWin window 2 (body [478,497][1613,1862] x1.0)
+11-03 00:04:54.597 I PowosWebWindows: selftest: armed for foot's next KWin window
+11-03 00:04:55.678 I PowosWebWindows: selftest: KWin window 3 (foot) taken offscreen, 640x480
+11-03 00:04:55.682 I PowosWebWindows: selftest: KWin window 3 consumer up
+11-03 00:04:55.693 I PowosWebWindows: selftest: KWin window 3 again: kept offscreen
+11-03 00:04:56.518 I PowosWebWindows: selftest: ending (measured): 11 frames, 2 with content
+11-03 00:04:56.889 I PowosWebWindows: selftest: KWin closed window 3
+11-03 00:04:59.794 I PowosWebWindows: selftest: done {"state":"done","app":"foot","kwin":3,"kwinApp":"foot","upMs":1085,"frames":16,"content":7,"best":"dominant=0.9863 edges=0.0146","stopMs":273,"kwinClosed":true,"error":"","ageMs":5196}
+11-03 00:05:24.239 I PowosWebWindows: home's surface destroyed: 1 window(s) wait for the next one
+11-03 00:06:55.237 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-03 00:06:55.290 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-03 00:06:55.290 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (1 window(s): 2@d-1)
+11-03 00:06:55.290 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-03 00:06:55.471 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-03 00:06:57.749 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-03 00:06:58.964 I PowosWebWindows: card 536870914 opened from the switcher: Linux web window 2 shown where it was, on its page
+11-03 00:06:58.965 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-03 00:07:00.990 I PowosWebWindows: home's surface destroyed: 1 window(s) wait for the next one
+11-03 00:07:05.142 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-03 00:07:05.192 I PowosWebWindows: home's page visibility poked: surfaceCreated
+11-03 00:07:05.192 I PowosWebWindows: home's surface surfaceCreated: windows' root re-attached (1 window(s): 2@d-1)
+11-03 00:07:05.192 I PowosWebWindows: geometry resend asked: home's surface surfaceCreated
+11-03 00:07:05.503 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-03 00:07:06.421 I PowosWebWindows: windows hidden under the switcher (each is its card): 1 window(s)
+11-03 00:07:09.447 I PowosWebWindows: windows shown again (switcher down): 1 window(s)
+11-03 00:07:09.622 I PowosWebWindows: launch com.android.chrome: new window 3 (running task moved in: 2314; -1: launched)
+11-03 00:07:09.669 I PowosWebWindows: display helper started (shell uid, app_process)
+11-03 00:07:10.721 I PowosWebWindows: display helper ready
+11-03 00:07:11.199 I PowosWebWindows: display helper: log display 13: touch device up (port powos-ww-13 -> virtual:com.android.shell,2000,powos-ww-3,2)
+11-03 00:07:11.201 I PowosWebWindows: window 3: trusted display 13 1154x1538 dpi 294 (screen 442) (com.android.chrome)
+11-03 00:07:11.202 I PowosWebWindows: display helper: log display 13 1154x1538 dpi 294: sw 628dp
+11-03 00:07:11.209 I PowosWebWindows: window 3: display 13 mirrored after 4 ms (PowOS uid)
+11-03 00:07:11.211 W PowosWebWindows: window 3 (com.android.chrome): shown 1588 ms after open (display after 1578 ms) - slow, over 1000 ms
+11-03 00:07:11.219 I PowosWebWindows: IME policy of display 13: fallback to default display (ok)
+11-03 00:07:11.386 I PowosWebWindows: task 2314 to display 13: moveRootTaskToDisplay=true startActivityFromRecents=true, now on display 13
+11-03 00:07:11.386 I PowosWebWindows: window 3: app's task 2314 moved onto display 13
+11-03 00:07:11.650 I PowosWebWindows: window 3: live (its content shows; the page drops the placeholder)
+11-03 00:07:13.121 I PowosWebWindows: windows hidden under the switcher (each is its card): 2 window(s)
+11-03 00:07:14.303 I PowosFreeform: task stack listener on
+11-03 00:07:14.908 I PowosFreeform: task stack listener on
+11-03 00:07:20.625 I PowosFreeform: task stack listener on
+11-03 00:07:21.321 I PowosFreeform: home task 2329 focusable
+11-03 00:07:22.108 I PowosFreeform: task stack listener on
+11-03 00:07:22.391 I PowosFreeform: task stack listener on
+11-03 00:07:22.556 I PowosFreeform: task stack listener on

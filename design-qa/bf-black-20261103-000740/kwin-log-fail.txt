@@ -1,0 +1,250 @@
+/stage/in/2/hl2.sh: 1 file pushed, 0 skipped. 0.5 MB/s (685 bytes in 0.001s)
+total 167878
+import fails: 80568
+first fail line 16853
+151655:kwin_backend_anland: window task 11 frames: last 5 s 130 commits, 316 drawn (63.2 fps); commit -> drawn median 4 ms, p90 12 ms, max 112 ms
+151656:kwin_backend_anland: window task 11 frames: last 5 s 89 commits, 220 drawn (44.0 fps); commit -> drawn median 3 ms, p90 11 ms, max 112 ms
+151657:kwin_backend_anland: window task 11 frames: last 5 s 130 commits, 325 drawn (65.0 fps); commit -> drawn median 3 ms, p90 10 ms, max 111 ms
+151658:kwin_backend_anland: window task 11 frames: last 5 s 123 commits, 330 drawn (66.0 fps); commit -> drawn median 3 ms, p90 12 ms, max 109 ms
+151659:kwin_backend_anland: window task 11 frames: last 5 s 86 commits, 206 drawn (41.2 fps); commit -> drawn median 6 ms, p90 105 ms, max 134 ms
+151660:kwin_backend_anland: window task 11 : full screen false asked by the app
+151661:kwin_backend_anland: window task 11 floating again KWin::RectF(0,0 504.444x606.667)
+151662:kwin_backend_anland: window task 11 the window took QSizeF(1008, 1038.22) itself, the task is QSizeF(504.444, 606.667) : sized back
+151663:kwin_backend_anland: window task 11 full screen (the app's own) KWin::RectF(0,0 1008x1084)
+151664:kwin_backend_anland: window task 11 full screen follows its task: QSizeF(1008, 1084) -> QSizeF(1008, 1028.44) for QSize(2268, 2314)
+151665:kwin_backend_anland: window task 11 resized: 4 commits, configure->commit median 0 ms, p90 15 ms, max 15 ms
+151666:kwin_backend_anland: window task 11 frames: last 5 s 91 commits, 271 drawn (54.2 fps); commit -> drawn median 3 ms, p90 14 ms, max 110 ms
+151670:kwin_backend_anland: window task 11 frames: last 5 s 96 commits, 299 drawn (59.8 fps); commit -> drawn median 2 ms, p90 9 ms, max 16 ms
+151672:kwin_backend_anland: window task 11 frames: last 5 s 80 commits, 270 drawn (54.0 fps); commit -> drawn median 1 ms, p90 10 ms, max 120 ms
+151673:kwin_backend_anland: window task 11 frames: last 5 s 93 commits, 288 drawn (57.6 fps); commit -> drawn median 1 ms, p90 12 ms, max 16 ms
+151674:kwin_backend_anland: window task 11 : full screen false asked by the app
+151675:kwin_backend_anland: window task 11 floating again KWin::RectF(0,0 504.444x606.667)
+151676:kwin_backend_anland: window task 11 the window took QSizeF(1008, 1038.22) itself, the task is QSizeF(504.444, 606.667) : sized back
+151677:kwin_backend_anland: window task 11 full screen (the app's own) KWin::RectF(0,0 1008x1084)
+151678:kwin_backend_anland: window task 11 full screen follows its task: QSizeF(1008, 1084) -> QSizeF(1008, 1028.44) for QSize(2268, 2314)
+151679:kwin_backend_anland: window task 11 resized: 4 commits, configure->commit median 0 ms, p90 0 ms, max 0 ms
+151680:kwin_backend_anland: quit 11 : closing "steam_app_274190" pid 23949
+151682:2026-11-02 21:44:36 powos-app-quit 23949: Broforce_beta.e is Steam game 274190's: ending its launch chain (powos game 274190 stop; Steam stays)
+151685:2026-11-02 21:44:38 powos-app-quit 23949: powos game: [0;32m[dev][0m 274190 closed in 2335 ms
+151686:2026-11-02 21:44:38 powos-app-quit 23949: game 274190: done (exit 0)
+151687:kwin_backend_anland: window task 2 frames: last 5 s 34 commits, 102 drawn (20.4 fps); commit -> drawn median 3 ms, p90 8 ms, max 102 ms
+151688:Xwayland KGSL: last 30s: 312 commits (1 forced past a stale frame callback, 0 held back at 4 buffers), 313 buffers released, up to 2 held by the compositor; 312 fenced, 0 finished on the CPU
+151690:Xwayland KGSL: last 30s: 4 commits (3 forced past a stale frame callback, 0 held back at 4 buffers), 4 buffers released, up to 2 held by the compositor; 4 fenced, 0 finished on the CPU
+151691:Xwayland KGSL: last 30s: 5 commits (4 forced past a stale frame callback, 0 held back at 4 buffers), 5 buffers released, up to 2 held by the compositor; 5 fenced, 0 finished on the CPU
+151692:kwin_backend_anland: window task 2 frames: last 5 s 1 commits, 4 drawn (0.8 fps); commit -> drawn median 4 ms, p90 4 ms, max 4 ms
+151693:Xwayland KGSL: last 30s: 5 commits (4 forced past a stale frame callback, 0 held back at 4 buffers), 5 buffers released, up to 2 held by the compositor; 5 fenced, 0 finished on the CPU
+151696:kwin_backend_anland: window task 2 in the background
+151697:kwin_backend_anland: window task 2 : lost the display daemon
+151745:kwin_backend_anland: screen size for full-screen tasks: QSize(2268, 2440)
+151893:kwin_backend_anland: new window "Launching..." has its surface now 
+151894:kwin_backend_anland: window task 1 has no title bar
+151896:kwin_backend_anland: window task 1 : its own Android keyboard true
+151902:kwin_backend_anland: window task 1 live, QSize(2268, 2440) pre-rotated 0 for "Launching..."
+151907:kwin_backend_anland: window task 1 in the background
+151908:kwin_backend_anland: window task 1 resized: 1 commits, configure->commit median 0 ms, p90 0 ms, max 0 ms
+151910:kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+151912:kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+151914:kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+151916:kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+151917:kwin_backend_anland: window task 1 live, QSize(2268, 2440) pre-rotated 1 for "Launching..."
+151918:kwin_backend_anland: window task 1 frames: last 5 s 5 commits, 12 drawn (2.4 fps); commit -> drawn median 106 ms, p90 537 ms, max 537 ms
+151920:Xwayland KGSL: last 30s: 11 commits (1 forced past a stale frame callback, 0 held back at 4 buffers), 10 buffers released, up to 2 held by the compositor; 11 fenced, 0 finished on the CPU
+151921:kwin_backend_anland: new window "Steam" has its surface now 
+151922:kwin_backend_anland: window task 2 has no title bar
+151924:kwin_backend_anland: window task 2 : its own Android keyboard true
+151927:kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+151929:kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+151931:kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+151933:kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+151934:kwin_backend_anland: window task 2 live, QSize(2268, 2440) pre-rotated 1 for "Steam"
+151939:kwin_backend_anland: window task 2 resized: 1 commits, configure->commit median 0 ms, p90 0 ms, max 0 ms
+151940:kwin_backend_anland: window task 2 frames: last 5 s 53 commits, 149 drawn (29.8 fps); commit -> drawn median 2 ms, p90 9 ms, max 105 ms
+151941:kwin_backend_anland: window task 2 frames: last 5 s 63 commits, 184 drawn (36.8 fps); commit -> drawn median 1 ms, p90 12 ms, max 108 ms
+151943:kwin_backend_anland: window task 3 has KWin's title bar
+151946:kwin_backend_anland: window task 3 : KWin's title bar off, the task's frame draws it
+151955:kwin_backend_anland: no desktop consumer: the output follows the window tasks' screen QSize(2268, 2440) -> QSize(640, 480)
+151957:kwin_backend_anland: screen size for full-screen tasks: QSize(640, 480)
+151958:kwin_backend_anland: window task 3 live, QSize(640, 480) pre-rotated 0 for "powos@localhost:~"
+151959:kwin_backend_anland: window task 2 the window took QSizeF(1008, 600) itself, the task is QSizeF(504.444, 606.667) : sized back
+151961:kwin_backend_anland: window task 3 the window took QSizeF(280, 227.111) itself, the task is QSizeF(284.444, 213.333) : sized back
+151962:kwin_backend_anland: window task 3 the window took QSizeF(212, 151.111) itself, the task is QSizeF(213.333, 160) : sized back
+151963:kwin_backend_anland: window task 3 in the background
+151965:kwin_backend_anland: window task 2 resized: 1 commits, configure->commit median 0 ms, p90 0 ms, max 0 ms
+151969:kwin_backend_anland: window task 2 frames: last 5 s 54 commits, 157 drawn (31.4 fps); commit -> drawn median 7 ms, p90 20 ms, max 103 ms
+151975:kwin_backend_anland: window task 2 frames: last 5 s 39 commits, 75 drawn (15.0 fps); commit -> drawn median 11 ms, p90 104 ms, max 113 ms
+151978:kwin_backend_anland: window task 2 frames: last 5 s 44 commits, 84 drawn (16.8 fps); commit -> drawn median 12 ms, p90 101 ms, max 115 ms
+151979:Xwayland KGSL: last 30s: 281 commits (3 forced past a stale frame callback, 0 held back at 4 buffers), 278 buffers released, up to 2 held by the compositor; 281 fenced, 0 finished on the CPU
+151980:kwin_backend_anland: window task 2 frames: last 5 s 39 commits, 75 drawn (15.0 fps); commit -> drawn median 13 ms, p90 102 ms, max 108 ms
+151981:kwin_backend_anland: window task 2 frames: last 5 s 44 commits, 75 drawn (15.0 fps); commit -> drawn median 13 ms, p90 101 ms, max 107 ms
+151982:kwin_backend_anland: window task 2 frames: last 5 s 40 commits, 84 drawn (16.8 fps); commit -> drawn median 11 ms, p90 104 ms, max 108 ms
+151983:kwin_backend_anland: new window "Broforce" has its surface now (full screen)
+151984:kwin_backend_anland: full-screen window "Broforce" opened as a task
+151989:kwin_backend_anland: no desktop consumer: the output follows the window tasks' screen QSize(640, 480) -> QSize(2268, 2440)
+151991:kwin_backend_anland: screen size for full-screen tasks: QSize(2268, 2440)
+151992:kwin_backend_anland: window task 4 live, QSize(2268, 2440) pre-rotated 1 for "Broforce"
+151996:kwin_backend_anland: window task 2 frames: last 5 s 51 commits, 92 drawn (18.4 fps); commit -> drawn median 10 ms, p90 16 ms, max 109 ms
+152026:kwin_backend_anland: window task 4 frames: last 5 s 5 commits, 21 drawn (4.2 fps); commit -> drawn median 2 ms, p90 8 ms, max 8 ms
+152546:kwin_backend_anland: window task 2 frames: last 5 s 47 commits, 75 drawn (15.0 fps); commit -> drawn median 8 ms, p90 15 ms, max 108 ms
+153346:kwin_backend_anland: window task 2 frames: last 5 s 46 commits, 76 drawn (15.2 fps); commit -> drawn median 7 ms, p90 15 ms, max 107 ms
+154044:kwin_backend_anland: window task 2 frames: last 5 s 29 commits, 50 drawn (10.0 fps); commit -> drawn median 4 ms, p90 13 ms, max 15 ms
+155306:kwin_backend_anland: window task 2 frames: last 5 s 2 commits, 8 drawn (1.6 fps); commit -> drawn median 9 ms, p90 9 ms, max 9 ms
+163474:kwin_backend_anland: window task 4 touch at QPointF(741.556,1084.13) to "\"Broforce\" (steam_app_274190, 1008x1084+0+0)" (outside its input region)
+163664:kwin_backend_anland: window task 4 in the background
+164098:kwin_backend_anland: window task 2 the window took QSizeF(1008, 606.667) itself, the task is QSizeF(504.444, 606.667) : sized back
+164109:kwin_backend_anland: window task 2 resized: 1 commits, configure->commit median 0 ms, p90 0 ms, max 0 ms
+164110:kwin_backend_anland: window task 4 full-screen window minimized itself (live true ): restored, a full-screen task's window is never minimized
+164111:kwin_backend_anland: window task 4 full-screen window minimized itself (live true ): restored, a full-screen task's window is never minimized
+164112:kwin_backend_anland: window task 4 full-screen window minimized itself (live true ): restored, a full-screen task's window is never minimized
+164113:kwin_backend_anland: window task 4 full-screen window keeps minimizing itself: left so until its task takes the focus
+164115:kwin_backend_anland: window task 2 frames: last 5 s 12 commits, 33 drawn (6.6 fps); commit -> drawn median 4 ms, p90 40 ms, max 57 ms
+164118:kwin_backend_anland: window task 2 in the background
+164119:kwin_backend_anland: window task 2 : lost the display daemon
+164122:kwin_backend_anland: window task 4 : lost the display daemon
+164123:kwin_backend_anland: full-screen window "Broforce" not a task: normal true popup false skipTaskbar false special false connected false
+164493:kwin_backend_anland: window "Broforce" ( "" ) stays on the desktop
+166244:Xwayland KGSL: last 30s: 10 commits (8 forced past a stale frame callback, 0 held back at 4 buffers), 10 buffers released, up to 2 held by the compositor; 10 fenced, 0 finished on the CPU
+167379:kwin_backend_anland: window task 5 : its own Android keyboard true
+167383:kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+167385:kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+167387:kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+167389:kwin_backend_anland: window task buffer pre-rotated by 1 is QSize(2440, 2268) but its width should be the output's height 1365 (output QSize(1135, 1365) )
+167390:kwin_backend_anland: no desktop consumer: the output follows the window tasks' screen QSize(2268, 2314) -> QSize(2268, 2440)
+167394:kwin_backend_anland: window task 5 live, QSize(2268, 2440) pre-rotated 1 for "Broforce"
+167395:kwin_backend_anland: window task 5 full screen follows its task: QSizeF(1008, 1084) -> QSizeF(504.444, 606.667) for QSize(1135, 1365)
+167420:kwin_backend_anland: window task 5 resized: 1 commits, configure->commit median 5 ms, p90 5 ms, max 5 ms
+167807:kwin_backend_anland: window task 5 full-screen window minimized itself (live true ): restored, a full-screen task's window is never minimized
+167850:kwin_backend_anland: window task 5 frames: last 5 s 12 commits, 25 drawn (5.0 fps); commit -> drawn median 8 ms, p90 132 ms, max 132 ms
+167883:kwin_backend_anland: window task 5 full-screen window minimized itself (live true ): restored, a full-screen task's window is never minimized
+168037:kwin_backend_anland: window task 5 full-screen window minimized itself (live true ): restored, a full-screen task's window is never minimized
+168123:kwin_backend_anland: window task 5 full-screen window keeps minimizing itself: left so until its task takes the focus
+168124:kwin_backend_anland: window task 5 frames: last 5 s 17 commits, 42 drawn (8.4 fps); commit -> drawn median 2 ms, p90 11 ms, max 13 ms
+168125:Xwayland KGSL: last 30s: 98 commits (2 forced past a stale frame callback, 0 held back at 4 buffers), 99 buffers released, up to 2 held by the compositor; 98 fenced, 0 finished on the CPU
+168140:kwin_backend_anland: new window "Broforce" has its surface now (full screen)
+168141:kwin_backend_anland: window "Broforce" ( "" ) stays on the desktop
+168142:kwin_backend_anland: full-screen window "Broforce" stays on the desktop (Plasma on screen)
+== 60 lines before first fail
+[2026-10-22 17:32:35] Downloading update (408,764 of 468,737 KB)...
+[2026-10-22 17:32:36] Downloading update (410,370 of 468,737 KB)...
+[2026-10-22 17:32:36] Downloading update (413,611 of 468,737 KB)...
+[2026-10-22 17:32:36] Downloading update (415,580 of 468,737 KB)...
+[2026-10-22 17:32:36] Downloading update (418,391 of 468,737 KB)...
+[2026-10-22 17:32:37] Downloading update (420,821 of 468,737 KB)...
+[2026-10-22 17:32:37] Downloading update (422,562 of 468,737 KB)...
+[2026-10-22 17:32:37] Downloading update (425,362 of 468,737 KB)...
+[2026-10-22 17:32:37] Downloading update (427,402 of 468,737 KB)...
+[2026-10-22 17:32:38] Downloading update (429,641 of 468,737 KB)...
+[2026-10-22 17:32:38] Downloading update (432,436 of 468,737 KB)...
+[2026-10-22 17:32:38] Downloading update (434,464 of 468,737 KB)...
+[2026-10-22 17:32:38] Downloading update (436,532 of 468,737 KB)...
+[2026-10-22 17:32:39] Downloading update (439,729 of 468,737 KB)...
+[2026-10-22 17:32:39] Downloading update (442,082 of 468,737 KB)...
+[2026-10-22 17:32:39] Downloading update (444,053 of 468,737 KB)...
+[2026-10-22 17:32:39] Downloading update (446,576 of 468,737 KB)...
+[2026-10-22 17:32:40] Downloading update (449,805 of 468,737 KB)...
+[2026-10-22 17:32:40] Downloading update (452,421 of 468,737 KB)...
+[2026-10-22 17:32:40] Downloading update (454,206 of 468,737 KB)...
+[2026-10-22 17:32:41] Downloading update (456,246 of 468,737 KB)...
+[2026-10-22 17:32:41] Downloading update (456,986 of 468,737 KB)...
+[2026-10-22 17:32:41] Downloading update (458,274 of 468,737 KB)...
+[2026-10-22 17:32:41] Downloading update (459,332 of 468,737 KB)...
+[2026-10-22 17:32:42] Downloading update (460,748 of 468,737 KB)...
+[2026-10-22 17:32:42] Downloading update (461,937 of 468,737 KB)...
+[2026-10-22 17:32:42] Downloading update (463,191 of 468,737 KB)...
+[2026-10-22 17:32:43] Downloading update (463,911 of 468,737 KB)...
+[2026-10-22 17:32:43] Downloading update (464,849 of 468,737 KB)...
+[2026-10-22 17:32:43] Downloading update (465,625 of 468,737 KB)...
+[2026-10-22 17:32:43] Downloading update (466,754 of 468,737 KB)...
+[2026-10-22 17:32:44] Downloading update (467,868 of 468,737 KB)...
+[2026-10-22 17:32:44] Downloading update (468,737 of 468,737 KB)...
+[2026-10-22 17:32:44] Download complete.
+[2026-10-22 17:32:44] Saving metrics to disk (/home/powos/.local/share/Steam/package/steam_client_metrics.bin)
+(EE) BUG: triggered 'if (!iclients)'
+(EE) BUG: ../xserver/Xi/exevents.c:1396 in RetrieveTouchDeliveryData()
+(EE) 
+(EE) Backtrace:
+(EE) 0: /usr/local/bin/Xwayland (0x6208f10000+0x181b94) [0x6209091b94]
+(EE) 1: /usr/local/bin/Xwayland (0x6208f10000+0x134da4) [0x6209044da4]
+(EE) 2: /usr/local/bin/Xwayland (0x6208f10000+0x1366e0) [0x62090466e0]
+(EE) 3: /usr/local/bin/Xwayland (0x6208f10000+0xcbbf0) [0x6208fdbbf0]
+(EE) 4: /usr/local/bin/Xwayland (0x6208f10000+0x13a13c) [0x620904a13c]
+(EE) 5: /usr/local/bin/Xwayland (0x6208f10000+0x7824c) [0x6208f8824c]
+(EE) 6: /usr/local/bin/Xwayland (0x6208f10000+0xcd638) [0x6208fdd638]
+(EE) 7: /usr/local/bin/Xwayland (0x6208f10000+0x136f78) [0x6209046f78]
+(EE) 8: /usr/local/bin/Xwayland (0x6208f10000+0x1368c4) [0x62090468c4]
+(EE) 9: /usr/local/bin/Xwayland (0x6208f10000+0x13a3b0) [0x620904a3b0]
+(EE) 10: /usr/local/bin/Xwayland (0x6208f10000+0x1676f8) [0x62090776f8]
+(EE) 11: /usr/local/bin/Xwayland (0x6208f10000+0x78140) [0x6208f88140]
+(EE) 12: /usr/local/bin/Xwayland (0x6208f10000+0x78380) [0x6208f88380]
+(EE) 13: /usr/local/bin/Xwayland (0x6208f10000+0x9f08c) [0x6208faf08c]
+(EE) 14: /usr/local/bin/Xwayland (0x6208f10000+0xa4060) [0x6208fb4060]
+(EE) 15: /usr/lib/libc.so.6 (0x7cf9460000+0x22d94) [0x7cf9482d94]
+(EE) 16: /usr/lib/libc.so.6 (__libc_start_main+0x98) [0x7cf9482ef8]
+(EE) 17: /usr/local/bin/Xwayland (0x6208f10000+0x1e7b0) [0x6208f2e7b0]
+(EE) 
+kwin_backend_anland: consumer disconnected, entering fallback
+kwin_backend_anland: consumer disconnected, entering fallback
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+Xwayland glamor: failed to import KGSL DRI3 dma-buf (format=0x34325258, modifier=0xffffffffffffff, planes=1, egl_error=0x3003)
+== distinct non-fail lines after first fail
+(EE) 3: /usr/local/bin/Xwayland (0x62195d0000+0xcc150) [0x621969c150]
+(EE) 4: /usr/local/bin/Xwayland (0x62195d0000+0x13a69c) [0x621970a69c]
+(EE) 5: /usr/local/bin/Xwayland (0x62195d0000+0x167c58) [0x6219737c58]
+(EE) 6: /usr/local/bin/Xwayland (0x62195d0000+0x787ac) [0x62196487ac]
+(EE) 7: /usr/local/bin/Xwayland (0x62195d0000+0xcdb98) [0x621969db98]
+(EE) 8: /usr/local/bin/Xwayland (0x62195d0000+0xb3064) [0x6219683064]
+(EE) 9: /usr/local/bin/Xwayland (0x62195d0000+0xaeb08) [0x621967eb08]
+(EE) 10: /usr/local/bin/Xwayland (0x62195d0000+0xce540) [0x621969e540]
+(EE) 11: /usr/local/bin/Xwayland (0x62195d0000+0xd19d8) [0x62196a19d8]
+(EE) 12: /usr/local/bin/Xwayland (0x62195d0000+0x9821c) [0x621966821c]
+(EE) 13: /usr/local/bin/Xwayland (0x62195d0000+0x9f8f0) [0x621966f8f0]
+(EE) 14: /usr/local/bin/Xwayland (0x62195d0000+0xa45c0) [0x62196745c0]
+(EE) 15: /usr/lib/libc.so.6 (0x71e07f0000+0x22d94) [0x71e0812d94]
+(EE) 16: /usr/lib/libc.so.6 (__libc_start_main+0x98) [0x71e0812ef8]
+(EE) 17: /usr/local/bin/Xwayland (0x62195d0000+0x1e7b0) [0x62195ee7b0]
+(EE) 
+kwin_backend_anland: window task 5 full-screen window minimized itself (live true ): restored, a full-screen task's window is never minimized
+(EE) BUG: triggered 'if (!iclients)'
+(EE) BUG: ../xserver/Xi/exevents.c:1396 in RetrieveTouchDeliveryData()
+(EE) 
+(EE) Backtrace:
+(EE) 0: /usr/local/bin/Xwayland (0x62195d0000+0x1820f4) [0x62197520f4]
+(EE) 1: /usr/local/bin/Xwayland (0x62195d0000+0x135304) [0x6219705304]
+(EE) 2: /usr/local/bin/Xwayland (0x62195d0000+0x136c40) [0x6219706c40]
+(EE) 3: /usr/local/bin/Xwayland (0x62195d0000+0xcc150) [0x621969c150]
+(EE) 4: /usr/local/bin/Xwayland (0x62195d0000+0x13a69c) [0x621970a69c]
+(EE) 5: /usr/local/bin/Xwayland (0x62195d0000+0x167c58) [0x6219737c58]
+(EE) 6: /usr/local/bin/Xwayland (0x62195d0000+0x787ac) [0x62196487ac]
+(EE) 7: /usr/local/bin/Xwayland (0x62195d0000+0xcdb98) [0x621969db98]
+(EE) 8: /usr/local/bin/Xwayland (0x62195d0000+0xb3064) [0x6219683064]
+(EE) 9: /usr/local/bin/Xwayland (0x62195d0000+0xaeb08) [0x621967eb08]
+(EE) 10: /usr/local/bin/Xwayland (0x62195d0000+0xce540) [0x621969e540]
+(EE) 11: /usr/local/bin/Xwayland (0x62195d0000+0xd19d8) [0x62196a19d8]
+(EE) 12: /usr/local/bin/Xwayland (0x62195d0000+0x9821c) [0x621966821c]
+(EE) 13: /usr/local/bin/Xwayland (0x62195d0000+0x9f8f0) [0x621966f8f0]
+(EE) 14: /usr/local/bin/Xwayland (0x62195d0000+0xa45c0) [0x62196745c0]
+(EE) 15: /usr/lib/libc.so.6 (0x71e07f0000+0x22d94) [0x71e0812d94]
+(EE) 16: /usr/lib/libc.so.6 (__libc_start_main+0x98) [0x71e0812ef8]
+(EE) 17: /usr/local/bin/Xwayland (0x62195d0000+0x1e7b0) [0x62195ee7b0]
+(EE) 
+kwin_backend_anland: window task 5 full-screen window keeps minimizing itself: left so until its task takes the focus
+kwin_backend_anland: window task 5 frames: last 5 s 17 commits, 42 drawn (8.4 fps); commit -> drawn median 2 ms, p90 11 ms, max 13 ms
+Xwayland KGSL: last 30s: 98 commits (2 forced past a stale frame callback, 0 held back at 4 buffers), 99 buffers released, up to 2 held by the compositor; 98 fenced, 0 finished on the CPU
+kwin_core: Could not touch down, there's no window under QPointF(991.556,-23.1554)
+kwin_core: Detected a touch that never started, discarding
+kwin_core: Could not touch down, there's no window under QPointF(730.266,1028.36)
+kwin_core: Detected a touch move that never has been down, discarding
+kwin_core: Detected a touch that never started, discarding
+kwin_backend_anland: desktop on screen: false
+kwin_backend_anland: consumer disconnected, entering fallback
+kwin_backend_anland: consumer reconnected
+kwin_backend_anland: desktop buffers pre-rotated by the consumer: 1
+kwin_backend_anland: imported buffer 0 fd 116 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 1 fd 150 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 2 fd 153 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: imported buffer 3 fd 154 QSize(2314, 2268) stride 9472 offset 0 fmt 34324241 mod 0
+kwin_backend_anland: desktop on screen: true
+kwin_backend_anland: new window "Broforce" has its surface now (full screen)
+kwin_backend_anland: window "Broforce" ( "" ) stays on the desktop
+kwin_backend_anland: full-screen window "Broforce" stays on the desktop (Plasma on screen)
