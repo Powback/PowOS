@@ -4,8 +4,8 @@
 The ASUS RTX 3090 blowers on gpu-195 stop their fans when cool (0% at 46-50 C, measured 2026-11-03), but after any
 load the vBIOS curve holds 53-77% for minutes at 49-58 C, and runs near 100% under load (docs/GPU-SERVERS-PLAN.md,
 "Noise"). NVML cannot set below the cards' 30% minimum, so this daemon never replaces the silent fan-stop: it leaves a
-card on its vBIOS curve while that is quiet, and takes over with a gentler curve when the card is warm (>= take_c) or
-the vBIOS spins well above the curve (`slack` points). It hands back once the card is cool (<= release_c) for
+card on its vBIOS curve while that is quiet (never taking over a stopped fan), and takes over with a gentler curve
+when the vBIOS spins faster than the curve while warm (>= take_c), or well above it (`slack` points) at any temp. It hands back once the card is cool (<= release_c) for
 `release_hold_s`; if the vBIOS then spins up again, it takes over and waits `retry_s` before the next try. A power
 cap keeps load quieter too.
 
@@ -193,9 +193,11 @@ def tick(g, cfg):
     want = curve_at(cfg['curve'], t)
     cur = g.set_fan
     if cur is None:
-        # vBIOS curve: leave it while quiet; take over when warm, or when it is much louder than the curve.
+        # vBIOS curve: leave it while quiet. Never wake a fan the vBIOS has stopped (it reads 0% with a 30% target;
+        # a blower needs ~50% to start, so taking over a stopped fan only adds noise). Take over when the vBIOS
+        # spins faster than the curve: warm (>= take_c), or far above it (the post-load linger).
         vbios = g.fan(0)
-        if t >= cfg['take_c'] or vbios > want + cfg['slack']:
+        if vbios > want and (t >= cfg['take_c'] or vbios > want + cfg['slack']):
             if g.released_at is not None and now - g.released_at < 30:
                 g.no_release_until = now + cfg['retry_s']   # handing back just made it spin up: back off
             log(f'gpu{g.index}: {t} C, vBIOS fan {vbios}%: curve {want:.0f}%')

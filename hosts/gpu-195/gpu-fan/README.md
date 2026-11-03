@@ -7,7 +7,7 @@ silent fan-stop. It only takes over when the stock curve is louder than it needs
 | state | fans |
 |---|---|
 | cool, vBIOS fans off | left alone (0%) |
-| >= 52 C, or vBIOS > 15 points above the curve | curve: 30% at 50 C, 35% at 58, 50% at 65, 65% at 72, 80% at 78, 100% at 83 C; up at once, down 2%/tick with 3 C hysteresis |
+| vBIOS fan faster than the curve at >= 52 C, or > 15 points above it (a stopped fan is never taken over) | curve: 30% at 50 C, 35% at 58, 50% at 65, 65% at 72, 80% at 78, 100% at 83 C; up at once, down 2%/tick with 3 C hysteresis |
 | <= 47 C for 30 s | handed back to the vBIOS (fan-stop); if it spins straight up, taken back and retried after 120 s |
 | >= 87 C | 100%, then the vBIOS curve until it is below 77 C |
 | any NVML error, stop, crash | vBIOS curve, default power limit (also `ExecStopPost=... reset`) |
