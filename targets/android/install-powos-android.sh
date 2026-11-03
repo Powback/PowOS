@@ -81,6 +81,7 @@ printf '{"Config":{"RootFS":"%s"}}\n' "${fexroot%/}" > /usr/share/fex-emu/Config
 pacman -S --noconfirm --needed vulkan-icd-loader vulkan-tools libxinerama libxcomposite libxrandr libxcursor \
   libxi libxkbcommon sdl2-compat gnutls freetype2 fontconfig gst-plugins-base-libs
 install -m 755 "$P/play/powos-play" /usr/bin/powos-play
+install -m 755 "$P/play/powos-pack" /usr/bin/powos-pack   # packs the base image leaves out (rootfs-packs.conf)
 # Steam: Valve's native ARM64 client (play/powos-steam bootstraps it on first use, ~110 MB + its own update).
 # What it links that Valve's Steam Runtime would otherwise provide (gtk2 is ours, recipes.list).
 pacman -S --noconfirm --needed alsa-lib libasyncns at-spi2-core libcups gdk-pixbuf2 libibus libnm nspr \

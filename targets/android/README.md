@@ -90,6 +90,17 @@ services. The rootfs is assembled on a Docker volume, not a macOS folder (Linux 
 the shared Docker disk has under 25 GB free (or with `POWOS_SCRATCH=image`), in a sparse ext4 image under
 `out/work/` on the Mac's disk instead, loop-mounted in the build container.
 
+**Base image + packs (phones without root).** build-rootfs.sh then splits the full rootfs by
+[rootfs-packs.conf](rootfs-packs.conf) ([tools/split-rootfs.py](tools/split-rootfs.py), ~6 min, streams the tarball:
+also runs alone on an existing `out/powos-rootfs.tar.gz`): `out/powos-rootfs-base.tar.gz`, which the app's first
+install downloads, and `out/powos-pack-<name>.tar.gz` packs it adds on demand (engine `Packs.java`, request
+`pack <name>`): **gaming** (FEX + its x86 rootfs, box64, Steam's bootstrap and launchers; `powos-steam`/`powos-play`
+ask for it on first use through `play/powos-pack need gaming`) and **languages** (non-English translations and
+glibc locales; added right after the install when Android's language isn't English). Docs/man/help are dropped from
+the base and kept out by pacman's NoExtract. The app uses the base only when it pins the base and every pack
+(`assets/powos-rootfs-base.sha256`, `assets/powos-pack-*.sha256`, written on publish); otherwise, and on rooted
+phones, the full rootfs as before. Measured on the 10-26 build: full 7.07 GB download / 15.9 GiB unpacked.
+
 ## Install on a phone (test path)
 
 1. Install the stock Andromarchy APK from its GitHub releases. Don't open it yet.

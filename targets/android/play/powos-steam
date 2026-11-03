@@ -12,6 +12,8 @@
 # web helper directly, without a container. Games then run through Proton's aarch64 build (powos-play
 # --register-steam adds it as a compatibility tool without the runtime requirement).
 set -euo pipefail
+# A base install (no root) adds the gaming pack (FEX + its x86 rootfs, box64, Steam's parts) on first use: Steam and its games need it.
+powos-pack need gaming
 S=${STEAM_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/Steam}
 CDN=https://client-update.steamstatic.com
 

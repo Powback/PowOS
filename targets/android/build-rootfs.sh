@@ -98,6 +98,9 @@ docker run --rm --privileged --platform linux/arm64 --cpus 8 --memory 16g \
   "${work[@]}" -v powos-android-cache:/cache -v "$W:/in:ro" -v "$OUT:/out" -v "$HERE/rootfs-in-container.sh:/rootfs-in-container.sh:ro" \
   "$IMAGE" bash -c "$inner"
 echo "built: $OUT/powos-rootfs.tar.gz"
+# The same rootfs split for phones without root (rootfs-packs.conf): a base image they download first and the packs
+# the app adds on demand (gaming, languages). Read from the full tarball, so it never changes what rooted installs get.
+python3 -I "$HERE/tools/split-rootfs.py" "$OUT/powos-rootfs.tar.gz" "$HERE/rootfs-packs.conf" "$OUT"
 
 # Serve it to the PowOS app (engine InstallActivity.ROOTFS_URL = http://android.pow/apk/powos-rootfs.tar.gz):
 # android-app-dev's web server serves its output/ there. A hard link, not a copy (same disk, ~2 GB).
@@ -110,4 +113,10 @@ if [ -d "$PUBLISH" ]; then
   PIN=$HERE/app/engine/src/main/assets/powos-rootfs.sha256
   cut -d' ' -f1 "$OUT/powos-rootfs.tar.gz.sha256" > "$PIN"
   echo "pinned: $(cat "$PIN") in ${PIN#$HERE/} - rebuild the app (build-app.sh) and commit the pin"
+  # Base + packs beside it, pinned the same way (InstallActivity uses the base once it and every pack are pinned).
+  for f in powos-rootfs-base $(cut -f1 "$OUT/powos-packs.tsv" | grep -vx base | sed 's/^/powos-pack-/'); do
+    ln -f "$OUT/$f.tar.gz" "$PUBLISH/$f.tar.gz"
+    cut -d' ' -f1 "$OUT/$f.tar.gz.sha256" > "$HERE/app/engine/src/main/assets/$f.sha256"
+    echo "published + pinned: http://android.pow/apk/$f.tar.gz"
+  done
 fi
