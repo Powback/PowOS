@@ -217,6 +217,13 @@ class Runtime(
         started = true
         // The lock screen's face: PowOS's, over Android's (shell/LockFace.kt).
         dev.omalauncher.shell.LockFace.start(context)
+        // Rooted PowOS: a game in front gets the big cores' full clocks, a uclamp floor and the prime core for its frame
+        // loop (shell/GameBoost.kt), back as it was when it leaves the front.
+        if (RootedGuest.enabled) {
+            dev.omalauncher.shell.GameBoost.start(context) { id ->
+                runCatching { dev.omalauncher.system.RunningApps.linuxAppOf(linuxApps.toList(), id)?.categories }.getOrNull()
+            }
+        }
         scope.launch {
             withContext(Dispatchers.IO) {
                 LauncherData.migrate(context)

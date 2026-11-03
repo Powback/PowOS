@@ -2801,6 +2801,13 @@ class WebWindows(
     /** The window the user is in (last pressed: its body here, its bar via the page's [focus]), -1: home. */
     @Volatile private var focused = -1
 
+    /** [GameBoost]'s game in front among these windows (its app id), null: none. Any thread. */
+    private fun frontGame(): String? {
+        val all = runCatching { wins.values.toList() }.getOrNull() ?: return null
+        val ws = all.mapNotNull { w -> w.linux?.let { GameBoost.WebWin(w.id, it.offer.appId, it.offer.game, w.closed, w.minimised, w.linuxFull || w.immersive) } }
+        return GameBoost.webFront(WebWindowLaunch.homeInFront, ws, focused)
+    }
+
     /** The page: window [id] pressed (its bar or body), -1: home pressed outside every window. */
     fun focus(id: Int): Boolean {
         focused = id
@@ -4008,6 +4015,9 @@ class WebWindows(
 
         /** Home's web windows (the one home page's), or null: what [closeForTask] closes through. */
         @Volatile private var current: WebWindows? = null
+
+        /** The game whose web window the user plays now ([GameBoost.webFront]), null: none, or no home. Any thread. */
+        fun frontGame(): String? = current?.frontGame()
 
         /** [key] to the web window the user is in ([windowKey]), from outside home (PowOS's edge back): false - none. */
         fun keyToWindow(key: WindowKeys.Key): Boolean = current?.windowKey(key) == true

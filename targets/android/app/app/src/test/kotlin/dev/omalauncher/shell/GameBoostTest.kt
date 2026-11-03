@@ -1,0 +1,90 @@
+package dev.omalauncher.shell
+
+import dev.omalauncher.shell.GameBoost.Action
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.io.File
+
+/**
+ * The game CPU boost (board broforce-games-black-noise-flicker-artifacts-ove): a game in front -> boost, the same game
+ * -> the lease renewed, it leaves the front / closes / the screen turns off -> everything restored; one game at a time.
+ */
+class GameBoostTest {
+    private val bf = "steam_app_274190"
+
+    @Test
+    fun focusBoostsBlurRestores() {
+        val m = GameBoost.Machine()
+        assertEquals(Action.Idle, m.step(null, true))
+        assertEquals(Action.Engage(bf), m.step(bf, true))
+        assertEquals(Action.Renew, m.step(bf, true))
+        assertEquals(Action.Restore("no game in front"), m.step(null, true))
+        assertNull(m.engaged)
+        assertEquals(Action.Idle, m.step(null, true))
+    }
+
+    @Test
+    fun screenOffRestoresAndScreenOnBoostsAgain() {
+        val m = GameBoost.Machine()
+        m.step(bf, true)
+        assertEquals(Action.Restore("screen off"), m.step(bf, false))
+        assertEquals("nothing boosted while off", Action.Idle, m.step(bf, false))
+        assertEquals(Action.Engage(bf), m.step(bf, true))
+    }
+
+    @Test
+    fun anotherGameTakesItsPlace() {
+        val m = GameBoost.Machine()
+        m.step(bf, true)
+        assertEquals(Action.Engage("supertuxkart"), m.step("supertuxkart", true))
+        assertEquals("supertuxkart", m.engaged)
+    }
+
+    @Test
+    fun aWebWindowGameIsInFrontWhenFullScreenOrLastPressed() {
+        val game = GameBoost.WebWin(3, bf, game = true, closed = false, minimised = false, full = false)
+        val kate = GameBoost.WebWin(4, "org.kde.kate", game = false, closed = false, minimised = false, full = true)
+        assertEquals(bf, GameBoost.webFront(true, listOf(game, kate), focused = 3))
+        assertNull("pressed elsewhere: not the one played", GameBoost.webFront(true, listOf(game, kate), focused = 4))
+        assertEquals(bf, GameBoost.webFront(true, listOf(game.copy(full = true)), focused = -1))
+        assertNull("home not in front (another app over it)", GameBoost.webFront(false, listOf(game.copy(full = true)), 3))
+        assertNull("minimised", GameBoost.webFront(true, listOf(game.copy(minimised = true)), 3))
+        assertNull("closed", GameBoost.webFront(true, listOf(game.copy(closed = true, full = true)), 3))
+    }
+
+    @Test
+    fun aWindowTaskIsAGameByItsClassOrCategories() {
+        val cats = mapOf("supertuxkart" to "Game;ArcadeGame;", "steam" to "Network;Game;", "org.kde.kate" to "Utility;")
+        assertEquals(bf, GameBoost.front(null, bf) { cats[it] })
+        assertEquals("supertuxkart", GameBoost.front(null, "supertuxkart") { cats[it] })
+        assertNull("Steam itself is a launcher", GameBoost.front(null, "steam") { cats[it] })
+        assertNull(GameBoost.front(null, "org.kde.kate") { cats[it] })
+        assertNull(GameBoost.front(null, null) { cats[it] })
+        assertEquals("the web window's game first", bf, GameBoost.front(bf, "supertuxkart") { cats[it] })
+    }
+
+    @Test
+    fun onlyEngageAndRestoreCallRoot() {
+        val s = "/data/user/0/com.powos.app/files/game-boost.sh"
+        val l = "/data/user/0/com.powos.app/files/game-boost.lease"
+        assertEquals("sh $s engage '$bf' $l", GameBoost.command(s, l, Action.Engage(bf)))
+        assertEquals("sh $s engage 'a'\\''b' $l", GameBoost.command(s, l, Action.Engage("a'b")))
+        assertEquals("sh $s restore", GameBoost.command(s, l, Action.Restore("screen off")))
+        assertNull(GameBoost.command(s, l, Action.Renew))
+        assertNull(GameBoost.command(s, l, Action.Idle))
+    }
+
+    @Test
+    fun theScriptRestoresOnEveryWayOutAndKeepsThermalAlone() {
+        val sh = File("src/main/assets/game-boost.sh").readText()
+        assertTrue("SIGTERM restores", sh.contains("trap 'log \"\$APP: restore asked\"; restore_all; exit 0' TERM INT HUP"))
+        assertTrue("a stale lease restores", sh.contains("the app's lease is"))
+        assertTrue("the game gone restores", sh.contains("the game's processes are gone"))
+        assertTrue("the lease age matches", sh.contains("LEASE_S=\${LEASE_S:-${GameBoost.LEASE_S}}"))
+        assertTrue("a killed holder's originals are kept", sh.contains("[ -s \"\$S/freqs\" ] && return"))
+        assertTrue("a top-level uclamp group", sh.contains("CPUCTL=\${GAME_BOOST_CPUCTL:-/dev/cpuctl}\nCG=\$CPUCTL/powos-game"))
+        assertTrue("never a cooling device or thermal-engine", !Regex("cooling_device|thermal-engine|thermal_zone").containsMatchIn(sh.substringAfter("mkdir -p \"\$S\"")))
+    }
+}

@@ -467,6 +467,15 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         return p == null ? null : new long[] {w.id, p[0], p[1]};
     }
 
+    /**
+     * The front window's app id (KWin's: its desktop id, or an X11 class such as a Proton game's steam_app_<id>), null
+     * when no PowOS window is in front. The app's GameBoost reads it once a second. Any thread.
+     */
+    public static String frontAppId() {
+        PowosWindowActivity w = frontWindow;
+        return w == null || w.isFinishing() ? null : w.getIntent().getStringExtra(EXTRA_APP_ID);
+    }
+
     @Override
     public void onTopResumedActivityChanged(boolean isTop) {
         super.onTopResumedActivityChanged(isTop);

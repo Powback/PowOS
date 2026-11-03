@@ -1,0 +1,29 @@
+{
+  "id": "game-boost",
+  "name": "Game CPU boost",
+  "kind": "service",
+  "owner": "system:powos-app",
+  "host": "phone-android",
+  "purpose": "while a game window is the one the user plays (GameBoost.kt: its window task in front, or its web window full screen / last pressed, screen on), one sh holder as Android root (the app's root shell starts it: files/game-boost.sh engage) lifts the big clusters' scaling_max_freq to hw max and scaling_min_freq to ~80 %, puts the game's threads in /dev/cpuctl/powos-game (cpu.uclamp.min 75), its hottest thread on the prime core and the rest on the other big cores; all saved first and put back when the game leaves the front, closes, the screen turns off, or the app's lease is 4 s old (the app died). Thermal limits and cooling devices are never touched",
+  "installedBy": "the PowOS APK (targets/android/app: shell/GameBoost.kt, assets/game-boost.sh copied to the app's files)",
+  "files": [
+    "/data/user/0/com.powos.app/files/game-boost.sh",
+    "/data/user/0/com.powos.app/files/game-boost.lease",
+    "/data/powos/state/game-boost",
+    "/dev/cpuctl/powos-game"
+  ],
+  "processes": [
+    {
+      "match": "game-boost\\.sh hold"
+    }
+  ],
+  "unbounded": "one sh loop, 1 s ticks, only while a game is in front; a /proc scan for the game's threads every 5 s; its log capped at 64 KB (+ one .1)",
+  "remove": {
+    "stop": [
+      "sh /data/user/0/com.powos.app/files/game-boost.sh restore"
+    ],
+    "commands": [
+      "rm -rf /data/powos/state/game-boost /data/user/0/com.powos.app/files/game-boost.sh /data/user/0/com.powos.app/files/game-boost.lease"
+    ]
+  }
+}

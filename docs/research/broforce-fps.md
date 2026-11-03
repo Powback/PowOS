@@ -45,6 +45,19 @@ Secondary (smaller, try after): FEX settings for the main thread's cost - `FEX_T
 `FEX_SMC_CHECKS=mtrack` per-app config for Broforce (TSO emulation is the big one for x86 Unity games; ~10-30 %),
 and fewer Unity job workers (7 spinning workers fill cpu0-2 and steal gold time from main).
 
+## Status (2026-11-03): the boost is built (agent/game-boost)
+
+Generic, in the PowOS app's game-window path: `shell/GameBoost.kt` ticks once a second; while a game (WebWindows.isGame)
+is in front - its window task Android's top activity (`PowosWindowActivity.frontAppId`) or its web window full screen /
+last pressed while home is in front - and the screen is on, `assets/game-boost.sh engage <app id>` (Android root) runs a
+holder that lifts every big policy to hw max (min ~80 %), moves the game's threads (Steam: SteamAppId/SteamGameId in
+their environment; others: the desktop file's Exec program) into `/dev/cpuctl/powos-game` (uclamp.min 75), pins the
+hottest thread to the prime core and the rest to the other big cores, and restores everything (saved originals) on
+blur / close / screen off / a 4 s stale lease (app crash) / the game exiting. Thermal untouched. Unit `game-boost`.
+Not yet measured: the boost engages only while the user plays - run `tools/phone/verify/game-boost.sh` then (PASS =
+policies at hw max, main pinned; its fps lines are the gain). Unknown until then: whether the vendor HAL fights the caps
+(the holder logs each re-assert as a "HAL fight" in /data/powos/state/game-boost/log).
+
 ## Option evaluated (coordinator ask): gamescope at a lower internal resolution + FSR
 
 Idea: run the game nested in gamescope inside KWin, e.g. `gamescope -w 1134 -h 1220 -W 2268 -H 2440 -F fsr -- %command%`.
