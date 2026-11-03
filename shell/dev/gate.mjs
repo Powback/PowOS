@@ -684,6 +684,107 @@ async function termGlyphsCheck() {
   return termGlyphsProblems(term, T.rendererFor?.(id) ?? "dom", await powos.term.style(null));
 }
 
+/**
+ * In the page: a session terminal looks as PowTerm's at every moment (the user 11-03, side by side: "This is how the
+ * terminal looks currently." / "And this is how it looks in PowTerm." - PowTerm pinched to 8 sp, ours stuck at 12 with
+ * fewer, coarser columns). A lost WebGL context draws DOM rows in the same face, size and row spacing, and the session
+ * shown again is back on WebGL; a pinch steps the text size as PowTerm's (one per 10% of scale), every step shown at
+ * once, then saved to the terminal text setting (style.text) the host's style answers with.
+ */
+/**
+ * In the page: a session terminal looks as PowTerm's at every moment (the user 11-03, side by side: "This is how the
+ * terminal looks currently." / "And this is how it looks in PowTerm." - PowTerm pinched to 8 sp, ours stuck at 12 with
+ * fewer, coarser columns). A lost WebGL context draws DOM rows in the same face, size and row spacing, and the session
+ * shown again is back on WebGL; a pinch steps the text size as PowTerm's (one per 10% of scale), every step shown at
+ * once, then saved to the terminal text setting (style.text) the host's style answers with.
+ */
+/** In the page: a session's output, bold numbers, box drawing and a Claude line, as the screenshot's. */
+async function feed(id, term) {
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const st = await powos.term.open(id, null, null, term.cols, term.rows, false);
+  const text = "\x1b[H\x1b[2J" + Array.from({ length: 12 }, (_, i) => `\x1b[1m${i}\x1b[0m ┌──┐ Read 1 file, ran 2 shell commands · the quick brown fox`).join("\r\n");
+  const bytes = new TextEncoder().encode(text);
+  window.__mockEvents.emit("term.data", { id, run: st.run, data: btoa(String.fromCharCode(...bytes)), end: st.end + bytes.length });
+  await new Promise((r) => setTimeout(r, 300));
+}
+
+/** In the page, before termPinchCheck: a session open with output (bold numbers, box drawing, a Claude line). */
+async function termPinchSetup() {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const T = await G.mod("./ui/terminal.tsx");
+  const { powos } = await G.mod("./bridge.ts");
+  S.openSession("powos-scratch-pinch", null, undefined, { host: "mac", agent: true });
+  const id = "at-work:mac:powos-scratch-pinch";
+  await G.until(() => T.terminalFor(id) && document.querySelector(".session-term .xterm-screen"), 4000);
+  await new Promise((r) => setTimeout(r, 500));
+  const term = T.terminalFor(id);
+  const st = await powos.term.open(id, null, null, term.cols, term.rows, false);
+  const text = "\x1b[H\x1b[2J" + Array.from({ length: 12 }, (_, i) => `\x1b[1m${i}\x1b[0m ┌──┐ Read 1 file, ran 2 shell commands · the quick brown fox`).join("\r\n");
+  const bytes = new TextEncoder().encode(text);
+  window.__mockEvents.emit("term.data", { id, run: st.run, data: btoa(String.fromCharCode(...bytes)), end: st.end + bytes.length });
+  await new Promise((r) => setTimeout(r, 300));
+}
+
+async function termPinchCheck() {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const T = await G.mod("./ui/terminal.tsx");
+  const { powos } = await G.mod("./bridge.ts");
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  // The DOM rows the fallback draws: the terminal's own face, size and row spacing.
+  const domProblems = (term) => {
+    const rows = document.querySelector(".session-term .xterm-rows");
+    if (!rows) return ["a lost context drew no DOM rows"];
+    const cs = getComputedStyle(rows);
+    const fails = [];
+    if (cs.fontFamily.replace(/\s/g, "") !== term.options.fontFamily.replace(/\s/g, "")) fails.push(`DOM rows in ${cs.fontFamily}, the terminal's face is ${term.options.fontFamily}`);
+    if (parseFloat(cs.fontSize) !== term.options.fontSize) fails.push(`DOM rows at ${cs.fontSize}, the terminal's size is ${term.options.fontSize}px`);
+    if (term.options.lineHeight !== 1 || term.options.letterSpacing !== 0) fails.push(`lineHeight ${term.options.lineHeight}, letterSpacing ${term.options.letterSpacing} (the face's own: 1, 0)`);
+    return fails;
+  };
+  // Two fingers close in: 200 px apart, then 168, 140, 116, 96 - each 15-17% closer, four steps down.
+  const pinchIn = async (term, size0) => {
+    const cover = document.querySelector(".session-term .term-cover");
+    const r = cover.getBoundingClientRect();
+    const y = r.top + r.height / 2;
+    const fire = (type, pid, x) => cover.dispatchEvent(new PointerEvent(type, { pointerId: pid, pointerType: "touch", clientX: x, clientY: y, bubbles: true, cancelable: true, isPrimary: pid === 1 }));
+    fire("pointerdown", 1, 100);
+    fire("pointerdown", 2, 300);
+    for (const x of [268, 240, 216, 196]) {
+      fire("pointermove", 2, x);
+      await wait(60);
+    }
+    const mid = term.options.fontSize;
+    fire("pointerup", 2, 196);
+    fire("pointerup", 1, 100);
+    await wait(900);
+    return mid === size0 - 4 ? [] : [`mid-pinch the text is ${mid}px (four steps down from ${size0}: ${size0 - 4}, shown at once)`];
+  };
+  const fails = [];
+  const id = "at-work:mac:powos-scratch-pinch";
+  const renderer = (want, when) => T.rendererFor(id) === want || fails.push(`${when}: the ${T.rendererFor(id)} renderer draws (${want})`);
+  const term = T.terminalFor(id);
+  renderer("webgl", "opened");
+  // The context lost (Chromium's per-page limit takes the oldest): DOM rows in the terminal's own face and metrics.
+  document.querySelectorAll(".session-term canvas").forEach((c) => c.getContext("webgl2")?.getExtension("WEBGL_lose_context")?.loseContext());
+  await G.until(() => T.rendererFor(id) === "dom", 2000).catch(() => {});
+  renderer("dom", "the context lost");
+  fails.push(...domProblems(term));
+  // Shown again (the style asked again, as on reopening): back to WebGL.
+  window.__mockEvents.emit("term.style", null);
+  await G.until(() => T.rendererFor(id) === "webgl", 2000).catch(() => {});
+  renderer("webgl", "shown again after the loss");
+  const [size0, cols0] = [term.options.fontSize, term.cols];
+  fails.push(...(await pinchIn(term, size0)));
+  const saved = await powos.term.style(null);
+  if (saved.size !== size0 - 4 || term.options.fontSize !== saved.size) fails.push(`after the pinch: host ${saved.size}, shown ${term.options.fontSize}px (saved and shown: ${size0 - 4})`);
+  if (term.cols <= cols0) fails.push(`${term.cols} columns after pinching smaller (were ${cols0})`);
+  if (S.sessionView.value?.write) fails.push("the pinch's fingers took the session over");
+  renderer("webgl", "after the pinch");
+  return fails;
+}
+
 /** In the page: merged widgets M1-M2 (grid.tsx joins; the user's 2026-10-28 "the widget combiner looks ugly af if the
  * widgets arent the same width"). An equal-width stack (agents 6x3 over recents 6x3) merges: both .joined, one width,
  * the faces meet on the row line (one seamless surface, no gutter or seam strip between). An unequal stack (agents 6x3
@@ -11899,6 +12000,19 @@ try {
         whenReady(r, async () => {
           const fails = await r.page.evaluate(termGlyphsCheck);
           await r.page.screenshot({ path: "/cache/term-glyphs.png" }).catch(() => {});
+          return fails;
+        }),
+      ),
+    );
+  // A session terminal as PowTerm's: the DOM fallback in the same face and metrics, back to WebGL, a pinch's text size.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(
+      open(browser, `${ORIGIN}/index.html`, "term-pinch", { width: 404, height: 900 }).then((r) =>
+        whenReady(r, async () => {
+          await r.page.evaluate(termPinchSetup);
+          await r.page.screenshot({ path: "/cache/term-pinch-before.png" }).catch(() => {});
+          const fails = await r.page.evaluate(termPinchCheck);
+          await r.page.screenshot({ path: "/cache/term-pinch.png" }).catch(() => {});
           return fails;
         }),
       ),

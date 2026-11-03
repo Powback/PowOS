@@ -254,6 +254,13 @@ class ShellBridge(
         scope.launch { snapshotFlow { AgentMail.recent.toList() }.drop(1).collect { emit("ai.mail", aiMail()) } }
         // A notification posted or gone: the panel lists them again.
         scope.launch { MediaListener.changes.collect { emit("notifications.changed", notificationList()) } }
+        // The terminal font or text size changed (the Style screen, a pinch on a page terminal, style.toml edited): the
+        // page's terminals ask for their style again.
+        scope.launch {
+            snapshotFlow { runtime.style.style[Style.TERMINAL_FONT] to runtime.style.style[Style.TERMINAL_TEXT] }
+                .drop(1)
+                .collect { emit("term.style", null) }
+        }
         // The theme picked or recolored (here, in the Compose launcher, a theme file edited): the page recolors.
         scope.launch { snapshotFlow { theme().toString() }.drop(1).collect { emit("theme.changed", JSONObject(it)) } }
         // What's heard so far, while listening (and why it failed).

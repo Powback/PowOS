@@ -152,6 +152,8 @@ class Session {
   held: number | null = null;
   /** "webgl" (PowTerm's canvas drawing: glyphs to a texture atlas, cells on the GPU) or "dom" (no WebGL, or it lost). */
   renderer: "webgl" | "dom" = "dom";
+  /** Its WebGL context was lost (WebGL is there): a full-screen view showing it again asks for a new one ([show]). */
+  webglLost = false;
 
   constructor(
     readonly id: string,
@@ -271,8 +273,10 @@ class Session {
     // it), so the columns fill the width as the Compose terminal's do. Real fix: an addon option for the reserve (or
     // fitting from the renderer's cell size ourselves once xterm exposes it).
     this.holder.style.right = `${style.pad - FIT_SCROLLBAR}px`;
-    this.term.options.fontSize = view.textSize != null ? view.textSize * style.fontScale : style.size;
+    const sp = viewText(view);
+    this.term.options.fontSize = sp != null ? sp * style.fontScale : style.size;
     this.term.options.fontFamily = await fontFamily(style);
+    this.backToWebgl(view);
     this.refit();
   }
 
@@ -292,6 +296,15 @@ class Session {
       const left = Math.min(this.holder.clientHeight - scr.offsetHeight, this.holder.clientHeight / this.term.rows);
       xt.style.transform = left > 1 ? `translateY(${Math.floor(left / 2)}px)` : "";
     });
+  }
+
+  /**
+   * Back to WebGL after a lost context, where the user looks at it (a session or terminal screen, not a home tile): the
+   * DOM renderer draws the same font and metrics, but WebGL is PowTerm's drawing (crisp cells, box drawing joined). A
+   * tile doesn't ask: each new context takes the oldest of Chromium's 16, another tile's.
+   */
+  private backToWebgl(view: View) {
+    if (this.webglLost && this.renderer === "dom" && atTerminalText(view)) this.renderer = webgl(this.term);
   }
 
   restyle() {
@@ -315,7 +328,7 @@ function webgl(term: Terminal): "webgl" | "dom" {
       lost = true;
       gl.dispose();
       const s = [...sessions.values()].find((x) => x.term === term);
-      if (s) s.renderer = "dom";
+      if (s) Object.assign(s, { renderer: "dom", webglLost: true });
     };
     gl.onContextLoss(toDom);
     // At once, not after the addon's 3 s wait for a restore: the loss Chromium deals most (its per-page context limit
@@ -329,6 +342,47 @@ function webgl(term: Terminal): "webgl" | "dom" {
     console.warn("term: no WebGL, the DOM renderer draws", e);
     return "dom";
   }
+}
+
+// --- text size: a pinch, as PowTerm's (Termux's onScale) -------------------------------------------------------------
+
+/** The terminal text size's range (sp: Style's terminal.text, PowTerm's pinch range 6..32). */
+const TEXT_MIN = 6;
+const TEXT_MAX = 32;
+/** A pinch steps the size by 1 once its scale leaves 0.9..1.1, then measures from there (PowTerm's onScale). */
+const PINCH_STEP = 0.1;
+/** How long the pinched size holds before it's saved (one save per pinch, not per step). */
+const PINCH_SAVE_MS = 400;
+
+/** The text size a pinch has shown and not saved yet (sp), else null. */
+let pinchSp: number | null = null;
+let pinchSave = 0;
+
+/** [v] has no size of its own (a tile's fontSize or textSize): it's at the terminal text size, and pinches it. */
+const atTerminalText = (v: View) => v.fontSize == null && v.textSize == null;
+/** The size [v] shows (sp), else null for the host's: its own, or one a pinch has shown ([pinchText]) before it's saved. */
+const viewText = (v: View) => v.textSize ?? (v.fontSize == null ? pinchSp : null);
+
+/**
+ * Steps the terminal text size by [dir] (sp), as PowTerm's pinch: every terminal without a size of its own shows it at
+ * once, then it's saved to the terminal text setting (style.text, which the launcher's terminals share) and the host's
+ * style asked again. A failed save shows the size the host has again.
+ */
+export async function pinchText(dir: 1 | -1) {
+  const st = await styleFor(null);
+  const now = pinchSp ?? Math.round(st.size / st.fontScale);
+  const next = Math.min(TEXT_MAX, Math.max(TEXT_MIN, now + dir));
+  if (next === now) return;
+  pinchSp = next;
+  sessions.forEach((s) => s.show());
+  clearTimeout(pinchSave);
+  pinchSave = window.setTimeout(async () => {
+    await powos.screens.act("style", "text", next).catch((e) => console.warn("term: text size not saved", e));
+    if (pinchSp !== next) return;
+    pinchSp = null;
+    styles.clear();
+    sessions.forEach((s) => s.show());
+  }, PINCH_SAVE_MS);
 }
 
 /** How long a terminal's size holds before the pty takes it. */
@@ -774,11 +828,37 @@ export function TerminalView({ id, owner = null, command = null, interactive = t
   // TerminalView.onScroll/doScroll): a row per row the finger moved, then a fling on release ([scrollRows], [fling]).
   // A tap is a click (the browser's mouse events, which xterm reports to tmux).
   const drag = useRef<Drag | null>(null);
+  // Two fingers pinch the text size (PowTerm's): a view at the terminal text size, not a tile's own.
+  const fingers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<number | null>(null);
+  const spread = () => {
+    const [a, b] = [...fingers.current.values()];
+    return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
+  };
   const dragStart = (e: PointerEvent) => {
     stopFling(session);
+    if (e.pointerType !== "mouse") fingers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (fingers.current.size === 2 && view.current && atTerminalText(view.current)) {
+      drag.current = null;
+      pinch.current = spread();
+      return;
+    }
     drag.current = { y: e.clientY, y0: e.clientY, id: e.pointerId, rest: 0, moves: [{ y: e.clientY, t: e.timeStamp }] };
   };
+  /** A finger of a pinch moved: a step of text size per 10% of scale. False: no pinch. */
+  const pinchMove = (e: PointerEvent) => {
+    if (fingers.current.has(e.pointerId)) fingers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch.current == null) return false;
+    const d = spread();
+    const scale = pinch.current ? d / pinch.current : 1;
+    if (Math.abs(scale - 1) > PINCH_STEP) {
+      pinch.current = d;
+      void pinchText(scale > 1 ? 1 : -1);
+    }
+    return true;
+  };
   const dragMove = (e: PointerEvent) => {
+    if (pinchMove(e)) return;
     const d = drag.current;
     if (!d || d.id !== e.pointerId || e.pointerType === "mouse") return;
     d.rest += e.clientY - d.y;
@@ -794,6 +874,13 @@ export function TerminalView({ id, owner = null, command = null, interactive = t
   };
   /** The finger up: a fling if it moved; the drag it was, if any. */
   const dragEnd = (e: PointerEvent) => {
+    fingers.current.delete(e.pointerId);
+    if (pinch.current != null) {
+      // The pinch ends with its last finger: neither finger is a tap or a fling.
+      if (!fingers.current.size) pinch.current = null;
+      drag.current = null;
+      return null;
+    }
     const d = drag.current;
     drag.current = null;
     if (d && d.id === e.pointerId && e.pointerType !== "mouse") fling(session, d, e.clientX, e.timeStamp);
@@ -815,6 +902,8 @@ export function TerminalView({ id, owner = null, command = null, interactive = t
     },
     onPointerCancel: () => {
       drag.current = null;
+      fingers.current.clear();
+      pinch.current = null;
       stopFling(session);
     },
   };
@@ -852,6 +941,8 @@ export function TerminalView({ id, owner = null, command = null, interactive = t
           },
           onPointerCancel: () => {
             drag.current = null;
+            fingers.current.clear();
+            pinch.current = null;
             stopFling(session);
           },
         };
