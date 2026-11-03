@@ -8373,6 +8373,84 @@ function ONE_HELPERS() {
   return [];
 }
 
+/** SF1's helpers into the page (each step is evaluated on its own: they go on window.__sf). */
+function SF_HELPERS() {
+  /** SF1: window A (9601) on [p] docked to [side] as the user did it (ask 1a1a10147ea: "by just grabbing the title bar and
+   * dragging it to the side"): its bar dragged to the edge's middle, the snap ghost shown, let go there. */
+  async function sfBarDock(W, p, side, fails) {
+    const g = window.__dockg;
+    const ta = W.tileArea();
+    const at = [side === "left" ? ta.left + 4 : ta.right - 4, (ta.top + ta.bottom) / 2];
+    await g.hold(9601, at);
+    if (!document.querySelector(".ww-drop")) fails.push(`SF1: A's bar held at the ${side} edge shows no snap ghost`);
+    await g.release(9601, at);
+    if (W.tilings.value[p]) fails.push(`SF1: A alone snapped ${side} made a tiling`);
+  }
+
+  /** SF1: window [id]'s frame as "x,y wxh". */
+  const sfRect = (W, id) => {
+    const w = W.webWins.value.find((v) => v.id === id);
+    return w && `${w.x},${w.y} ${w.w}x${w.h}`;
+  };
+
+  /** SF1: A ([side]: bar-docked there; null: floating; "pair": A + 9602 tiled) set up on [h.p]. */
+  async function sfSetup({ W, p }, side, fails) {
+    const a = (id) => ({ id, key: `a:gate.sfa${id}`, label: "A", page: p, x: 90, y: 150, w: 320, h: 260, live: true });
+    W.webWins.value = side === "pair" ? [a(9601), a(9602)] : [a(9601)];
+    W.tilings.value = {};
+    if (side === "pair") W.tileWindows(p, [9601, 9602]);
+    await window.__gw.settled();
+    if (side === "left" || side === "right") await sfBarDock(W, p, side, fails);
+  }
+
+  /** SF1: [sfSetup] then a launcher launch of B: B's id, the page's tiling, whether A moved. */
+  async function sfRun(h, side, fails) {
+    const { W, calls } = h;
+    const S = await window.__gw.mod("./state.ts");
+    await sfSetup(h, side, fails);
+    const before = sfRect(W, 9601);
+    const n = calls.length;
+    await S.launch(`a:gate.sfb${side}/.Main`);
+    await window.__gw.settled();
+    const b = calls.length > n ? W.webWins.value.find((w) => w.key.startsWith("a:gate.sfb"))?.id : undefined;
+    const t = W.tilings.value[h.p] ?? { layout: "none", ids: null };
+    const after = sfRect(W, 9601);
+    return { b, got: `${t.layout} ${JSON.stringify(t.ids)}`, moved: before !== after && `${before} -> ${after}` };
+  }
+  window.__sf = { sfRun };
+  return [];
+}
+
+/**
+ * SF1 (ask 1a1a1004151, 11-03: "When one window is docked to the side and I open another window. It should be docked to
+ * other side."): window A dragged by its bar to the left edge (snapped alone to the half), a launcher launch of B - B
+ * tiled on the right, A's rect unchanged; A on the right: B on the left; A floating: B floats (no tiling); a full
+ * 2-split: B floats over it.
+ */
+async function webWindowSnapFill() {
+  const fails = [];
+  const h = await window.__oneg.oneInstanceHost();
+  h.W.BOUND.ms = 60_000;
+  const cases = [
+    ["left", (b) => `2h [9601,${b}]`],
+    ["right", (b) => `2h [${b},9601]`],
+    [null, () => "none null"],
+    ["pair", () => "2h [9601,9602]"],
+  ];
+  try {
+    for (const [side, want] of cases) {
+      const r = await window.__sf.sfRun(h, side, fails);
+      if (r.b == null) fails.push(`SF1 ${side}: the launch of B opened no web window`);
+      else if (r.got !== want(r.b)) fails.push(`SF1 ${side}: B opened, tiling ${r.got} (want ${want(r.b)})`);
+      if (r.moved) fails.push(`SF1 ${side}: A moved when B opened (${r.moved})`);
+    }
+  } finally {
+    h.W.tilings.value = {};
+    h.restore();
+  }
+  return fails;
+}
+
 /** OI2 (15:16 "full screen and then they show desktop mode"): a launcher launch that windows it is ONE window open, no plain (full-screen) launch. */
 async function webWindowOneLauncher() {
   const fails = [];
@@ -11858,7 +11936,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockToggleHost, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, webWindowRelaunch, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockToggleHost, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, SF_HELPERS, webWindowSnapFill, webWindowRelaunch, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }
