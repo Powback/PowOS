@@ -12,7 +12,7 @@ import { AppCell, AppIcon } from "./apps.tsx";
 import { ChatView } from "./chat.tsx";
 import { drawerOpen, eventTime, pageDecision, sampleVx } from "./gesture.ts";
 import { PageDots, paintDots } from "./pagedots.tsx";
-import { apps, byKey, chatting, query, recent, stored } from "../state.ts";
+import { apps, byKey, chatting, launch, query, recent, stored } from "../state.ts";
 import { library } from "./library.tsx";
 import { pendingApp } from "./appbuild.tsx";
 import { PendingDetailSheet, PendingIconBadge } from "./pending.tsx";
@@ -22,6 +22,7 @@ import { searchResults, searchSections, searchPending, openSearchResult, type Se
 import { springFast } from "./spring.ts";
 import { arrive } from "./notifmotion.ts";
 import { tick } from "./haptics.ts";
+import { usePresence } from "./reveal.tsx";
 
 const ALPHABET = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
 const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
@@ -107,12 +108,91 @@ function highlight(grid: Element | null | undefined, letter: string | null) {
   for (const el of lit) el.setAttribute("data-lit", "");
 }
 
-/** Tap a letter or slide along the bar: the list jumps there at once, every letter the finger crosses. */
-function LetterBar({ onPick }: { onPick: (letter: string | null) => void }) {
+/** [letter]'s apps' letter: its own, else the next letter's, else the last letter's (null: no apps at all). */
+function resolve(letter: string | null) {
+  const { first } = sorted.value;
+  const i = letter == null ? -1 : ALPHABET.indexOf(letter);
+  return i < 0 ? null : (ALPHABET.slice(i).find((x) => first.has(x)) ?? ALPHABET.findLast((x) => first.has(x)) ?? null);
+}
+
+/** The apps under [letter] (after [resolve]), A to Z. */
+function appsOf(letter: string | null) {
+  const { list, first } = sorted.value;
+  if (letter == null || !first.has(letter)) return [];
+  const start = first.get(letter)!;
+  return list.slice(start, Math.min(...[...first.values(), list.length].filter((i) => i > start)));
+}
+
+/**
+ * Experimental (Settings > style > experimental; the user, 11-03: "show the list results when using the alphabet so
+ * we can see the full app titles with the results centered on the screen"): while the finger is on the A-Z bar, the
+ * letter's apps as a centred list of rows - icon and the whole name, wrapped, never cut. Off by default: off, the bar
+ * is as before.
+ */
+export const azList = stored("drawer.azList", "");
+
+/**
+ * The letter's apps, centred over the drawer (not by the bar). [row]: the one at the finger's height once it slid off
+ * the bar into the list, lit. A new letter fades its rows in (keyed); it fades in and out itself (usePresence, §6).
+ */
+function AzOverlay({ letter, row, rows }: { letter: string | null; row: number; rows: { current: HTMLDivElement | null } }) {
+  const { on, leaving } = usePresence(letter != null);
+  const last = useRef(letter);
+  if (letter != null) last.current = letter;
+  if (!on || last.current == null) return null;
+  const l = last.current;
+  return (
+    <div class={`az-list${leaving ? " leaving" : ""}`} aria-hidden="true">
+      <div class="az-list-card tile sheet">
+        <div class="az-list-rows" key={l} ref={rows}>
+          {appsOf(l).map((app, i) => (
+            <div key={app.key} class={`az-list-row${i === row ? " on" : ""}`} data-key={app.key}>
+              <AppIcon src={app.icon} label={app.label} app={app.key} />
+              <span class="az-list-name">{app.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The A-Z list's row under the finger. [at]: off the bar ([off]) while the list shows ([active]), lights the row at
+ * height [y] (a tick on each new one) and takes the move (true); on the bar it lets go of the row (false: the bar's).
+ */
+function useRowPick(active: boolean) {
+  const [row, setRow] = useState(-1);
+  const ref = useRef<HTMLDivElement>(null);
+  const at = (off: boolean, y: number) => {
+    if (!active || !off) {
+      if (row !== -1) setRow(-1);
+      return false;
+    }
+    const i = [...(ref.current?.children ?? [])].findIndex((el) => {
+      const b = el.getBoundingClientRect();
+      return y >= b.top && y < b.bottom;
+    });
+    if (i !== row) {
+      setRow(i);
+      if (i >= 0) tick();
+    }
+    return true;
+  };
+  return { row, ref, at, clear: () => setRow(-1) };
+}
+
+/**
+ * Tap a letter or slide along the bar: the list jumps there at once, every letter the finger crosses. With [azList]
+ * on, the letter's apps show centred (AzOverlay); sliding left off the bar lights the row at the finger's height, and
+ * lifting there opens that app ([onOpen]); lifting anywhere else leaves the grid at the letter, as before.
+ */
+function LetterBar({ onPick, onOpen }: { onPick: (letter: string | null) => void; onOpen: (app: App) => void }) {
   // "#" only when some name doesn't start with a letter: a "#" with nothing under it would do nothing.
   const letters = sorted.value.first.has("#") ? ALPHABET : ALPHABET.slice(1);
   const [current, setCurrent] = useState<string | null>(null);
   const bar = useRef<HTMLDivElement>(null);
+  const listOn = azList.value === "on";
   const pick = (y: number) => {
     const r = bar.current!.getBoundingClientRect();
     const i = Math.max(0, Math.min(letters.length - 1, Math.floor(((y - r.top) / r.height) * letters.length)));
@@ -121,27 +201,45 @@ function LetterBar({ onPick }: { onPick: (letter: string | null) => void }) {
     tick();
     onPick(letters[i]);
   };
+  const rows = useRowPick(listOn && current != null);
+  const move = (x: number, y: number) => {
+    // Off the bar (left of it) with the list showing: the letter holds, the finger picks a row by its height.
+    if (!rows.at(x < bar.current!.getBoundingClientRect().left, y)) pick(y);
+  };
+  const end = (open: boolean) => {
+    const app = open && rows.row >= 0 ? appsOf(resolve(current))[rows.row] : null;
+    setCurrent(null);
+    rows.clear();
+    onPick(null);
+    if (app) onOpen(app);
+  };
   return (
-    <div
-      class="letter-bar"
-      ref={bar}
-      style={{ "--letters": letters.length }}
-      onPointerDown={(e) => {
-        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-        e.stopPropagation();
-        pick(e.clientY);
-      }}
-      onPointerMove={(e) => e.buttons && pick(e.clientY)}
-      onPointerUp={() => (setCurrent(null), onPick(null))}
-      onPointerCancel={() => (setCurrent(null), onPick(null))}
-    >
-      {letters.map((l) => (
-        <span class={l === current ? "on" : ""}>{l}</span>
-      ))}
-      {current && <div class="letter-bubble">{current}</div>}
-    </div>
+    <>
+      <div
+        class="letter-bar"
+        ref={bar}
+        style={{ "--letters": letters.length }}
+        onPointerDown={(e) => {
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          e.stopPropagation();
+          pick(e.clientY);
+        }}
+        onPointerMove={(e) => e.buttons && move(e.clientX, e.clientY)}
+        onPointerUp={() => end(true)}
+        onPointerCancel={() => end(false)}
+      >
+        {letters.map((l) => (
+          <span class={l === current ? "on" : ""}>{l}</span>
+        ))}
+        {current && <div class="letter-bubble">{current}</div>}
+      </div>
+      {listOn && <AzOverlay letter={resolve(current)} row={rows.row} rows={rows.ref} />}
+    </>
   );
 }
+
+/** A lift on a row of the A-Z list: the app, opened as a tap on its cell does (AppCell). */
+const openApp = (app: App) => void launch(app.key);
 
 /**
  * The drawer's list: every app A to Z with its A-Z bar, or [found] (what's typed matched), best by the pill. The drawer's
@@ -153,9 +251,8 @@ export function AppList({ found, onTap }: { found: App[] | null; onTap?: (app: A
     // Its first app, else the next letter's, else the last letter's. At once: a smooth scroll restarted for every
     // letter a sliding finger crosses lagged behind it.
     const { first } = sorted.value;
-    const i = letter == null ? -1 : ALPHABET.indexOf(letter);
-    const l = i < 0 ? null : (ALPHABET.slice(i).find((x) => first.has(x)) ?? ALPHABET.findLast((x) => first.has(x)));
-    highlight(list.current?.querySelector(".az"), l ?? null);
+    const l = resolve(letter);
+    highlight(list.current?.querySelector(".az"), l);
     const el = l != null ? list.current?.querySelector<HTMLElement>(`.az > :nth-child(${first.get(l)! + 1})`) : null;
     if (el) list.current!.scrollTop += el.getBoundingClientRect().top - list.current!.getBoundingClientRect().top;
   };
@@ -188,7 +285,7 @@ export function AppList({ found, onTap }: { found: App[] | null; onTap?: (app: A
         {!found && pendingApp.value && pendingApp.value.status !== "done" && <PendingAppCell />}
         <div class={found ? "grid" : "grid az"}>{(found ?? sorted.value.list).map(cell)}</div>
       </div>
-      {!found && <LetterBar onPick={jump} />}
+      {!found && <LetterBar onPick={jump} onOpen={onTap ?? openApp} />}
     </>
   );
 }

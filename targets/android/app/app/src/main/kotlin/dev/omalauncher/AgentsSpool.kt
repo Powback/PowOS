@@ -181,7 +181,7 @@ object AgentsSpool {
     ) {
         require(role.matches(Regex("[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}"))) { "bad role $role" }
         Thread({
-            runCatching { dev.omalauncher.linux.RootedGuest.run("powos comms send ${dev.omalauncher.linux.shellQuote(role)} ${dev.omalauncher.linux.shellQuote(text)} --from user") }
+            runCatching { dev.omalauncher.linux.Guest.run("powos comms send ${dev.omalauncher.linux.shellQuote(role)} ${dev.omalauncher.linux.shellQuote(text)} --from user") }
                 .onFailure { Log.w(TAG, "can't send to $role", it) }
         }, "agents-message").start()
     }
@@ -195,7 +195,7 @@ object AgentsSpool {
             val a = sources["local"]?.agents?.firstOrNull { it.optString("id") == agent } ?: return@post
             val pid = a.optInt("pid")
             if (pid <= 1 || '/' in agent) return@post
-            Thread({ runCatching { dev.omalauncher.linux.RootedGuest.run("kill -INT $pid") } }, "agents-interrupt").start()
+            Thread({ runCatching { dev.omalauncher.linux.Guest.run("kill -INT $pid") } }, "agents-interrupt").start()
         }
     }
 

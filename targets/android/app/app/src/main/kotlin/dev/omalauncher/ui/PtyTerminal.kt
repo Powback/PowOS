@@ -20,7 +20,7 @@ import com.termux.terminal.TextStyle
 import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
 import dev.omalauncher.R
-import dev.omalauncher.linux.RootedGuest
+import dev.omalauncher.linux.Guest
 import dev.omalauncher.linux.shellQuote
 import dev.omalauncher.wayland.Keys
 
@@ -124,12 +124,15 @@ class PtyTerminal(
         }
 
     /** Starts its process once a view first lays it out (Termux: the pty gets the view's columns and rows). */
+    // Rooted: su into the PowOS session; no root: lotfix-run into the PowOS image (Guest picks, as everywhere).
+    private val guest = Guest.terminal(command, mapOf("TERM" to "xterm-256color"))
+
     private val session =
         TerminalSession(
-            "/system/bin/sh",
+            guest.executable,
             "/",
-            arrayOf("sh", "-c", "exec su -c " + shellQuote(RootedGuest.rootCommand(command))),
-            (System.getenv() + ("TERM" to "xterm-256color")).map { (k, v) -> "$k=$v" }.toTypedArray(),
+            guest.argv.toTypedArray(),
+            guest.env.map { (k, v) -> "$k=$v" }.toTypedArray(),
             TRANSCRIPT_ROWS,
             sessionClient,
         )
@@ -357,15 +360,20 @@ class PtyTerminal(
         ): java.io.File? {
             val file = java.io.File(context.filesDir, "fonts/" + family.replace(Regex("[^A-Za-z0-9]+"), "-") + ".font")
             if (file.length() > 0) return file
-            if (RootedGuest.enabled && fetching.add(family)) {
+            if (Guest.enabled && fetching.add(family)) {
                 val main = android.os.Handler(android.os.Looper.getMainLooper())
                 Thread {
                     val path = StringBuilder()
-                    RootedGuest.run("fc-match -f '%{file}' " + shellQuote("$family:style=Regular")) { path.append(it.trim()) }
+                    Guest.run("fc-match -f '%{file}' " + shellQuote("$family:style=Regular")) { path.append(it.trim()) }
                     if (path.startsWith("/")) {
                         file.parentFile?.mkdirs()
-                        val copy = "cp ${shellQuote("/data/powos/root$path")} ${shellQuote(file.path)} && chmod 644 ${shellQuote(file.path)}"
-                        runCatching { andro.marchy.RootShell.run(copy) }
+                        if (Guest.kind == Guest.Kind.ROOTED) {
+                            val copy = "cp ${shellQuote("/data/powos/root$path")} ${shellQuote(file.path)} && chmod 644 ${shellQuote(file.path)}"
+                            runCatching { andro.marchy.RootShell.run(copy) }
+                        } else {
+                            // No root: the image is the app's own files; the font is readable in place.
+                            runCatching { java.io.File(andro.marchy.SessionService.rootfs(context), path.toString()).copyTo(file, overwrite = true) }
+                        }
                     }
                     main.post {
                         fetching -= family

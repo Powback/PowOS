@@ -5,9 +5,9 @@
  * one line each, a state dot (working / waiting on you / no check). The parts are exported for the folded status page.
  * Above the areas, the Needs you card (needsyou.tsx): what really waits on the user, each answered in place.
  */
-import { useState } from "preact/hooks";
-import { computed } from "@preact/signals";
-import { boardState } from "../agents.ts";
+import { useEffect, useState } from "preact/hooks";
+import { computed, signal } from "@preact/signals";
+import { boardState, QUEUED_STEP, type BoardCheck } from "../agents.ts";
 import { board, boardSeen, checks, SevChip, WorkFeed, type WorkRow } from "./aiboard.tsx";
 import { needIds, needsYou, NeedsYouCard } from "./needsyou.tsx";
 import { upNext, UpNext } from "./upnext.tsx";
@@ -113,7 +113,7 @@ export function ThinBar({ done, total }: { done: number; total: number }) {
   );
 }
 
-type Dot = "working" | "check" | "waiting" | "stalled";
+export type Dot = "working" | "check" | "waiting" | "stalled";
 /** Each dot's words, in the legend's order. */
 export const DOTS: [Dot, string][] = [
   ["working", "working"],
@@ -144,18 +144,51 @@ export function DotLegend() {
   );
 }
 
-/** An area's open tasks, up to two lines each. */
+/**
+ * What an open task waits on, in plain words (the user, 11-03 22:56: "says 1 to check but which one???" - a count alone
+ * never says what to look at): [what] - the user's own try ("Try it on the phone: ...", the task's try line), else its
+ * step or, waiting on the user, its note; [check] - the phone check it waits for, queued or running, with its line.
+ */
+export function waitsOn(w: WorkRow, d: Dot, cs: BoardCheck[] = checks.value): { what: string; check: string } {
+  return { what: whatOf(w, d), check: d === "check" ? checkOf(w, cs) : "" };
+}
+
+/** What the user can do about it: try it on the phone (its try line), else its step; waiting on the user: its note first. */
+function whatOf(w: WorkRow, d: Dot): string {
+  const tryLine = w.tryLine?.trim();
+  const step = w.step?.trim();
+  const tryIt = tryLine ? `Try it on the phone: ${tryLine}` : "";
+  const now = step && step !== QUEUED_STEP ? step : "";
+  return (d === "waiting" && w.note?.trim()) || tryIt || now;
+}
+
+/** The phone check it waits for: the newest queued or running one, with its line. */
+function checkOf(w: WorkRow, cs: BoardCheck[]): string {
+  const c = cs.filter((x) => x.task === w.id && (x.state === "queued" || x.state === "running")).at(-1);
+  if (!c) return "Phone check queued";
+  return c.line ? `Phone check ${c.state}: ${c.line}` : `Phone check ${c.state}`;
+}
+
+/** Another page asked to show one task (By area's "Open task"): Progress opens its area and marks the row. */
+export const progressFocus = signal<{ area: string; id: string } | null>(null);
+
+/** An area's open tasks, up to two lines each; one waiting for a check says what to check under it. */
 function Tasks({ open }: { open: WorkRow[] }) {
   const you = needIds();
+  const focus = progressFocus.value?.id;
   return (
     <ul class="aip-tasks">
       {open.map((w) => {
         const d = dotOf(w, you);
+        const why = d === "check" ? waitsOn(w, d) : null;
         return (
-          <li key={w.id} class="aip-task">
+          <li key={w.id} class={`aip-task ${focus === w.id ? "focus" : ""}`} data-task={w.id}>
             <span class={`aip-dot ${d}`} role="img" aria-label={DOT_WORDS[d]} />
             <SevChip w={w} />
-            <span class="aip-task-title">{w.title}</span>
+            <span class="aip-task-text">
+              <span class="aip-task-title">{w.title}</span>
+              {why && <span class="aip-task-why">{[why.what, why.check].filter(Boolean).join(" · ")}</span>}
+            </span>
           </li>
         );
       })}
@@ -189,9 +222,24 @@ function subLine(stats: AreaStat[]) {
   return [you ? `${you} need you` : "", `${open} open`].filter(Boolean).join(" · ");
 }
 
+/** The area By area's "Open task" asked for (null: none). */
+const focusArea = () => progressFocus.value?.area ?? null;
+
+/** By area's "Open task" ([progressFocus]): its area opened, the row brought into view once the area has opened. */
+function useFocus(setOpened: (area: string) => void) {
+  const focus = progressFocus.value;
+  useEffect(() => {
+    if (!focus) return;
+    setOpened(focus.area);
+    const t = window.setTimeout(() => document.querySelector(`.aip-task[data-task="${CSS.escape(focus.id)}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" }), 120);
+    return () => clearTimeout(t);
+  }, [focus]);
+}
+
 /** The Progress view: the ring, then every area's card. [shown]: the board's feed runs only then. */
 export function ProgressView({ shown, areasOnly = false }: { shown: boolean; areasOnly?: boolean }) {
-  const [opened, setOpened] = useState<string | null>(null);
+  const [opened, setOpened] = useState<string | null>(focusArea);
+  useFocus(setOpened);
   const needs = needsYou();
   const stats = areaStats(board.value, Date.now(), needIds(needs));
   const ring = driverPct(stats);
@@ -204,7 +252,7 @@ export function ProgressView({ shown, areasOnly = false }: { shown: boolean; are
       {stats.length > 0 && <DotLegend />}
       <ul class="aip-areas">
         {stats.map((a) => (
-          <AreaRow key={a.name} a={a} open={opened === a.name} toggle={() => setOpened(opened === a.name ? null : a.name)} />
+          <AreaRow key={a.name} a={a} open={opened === a.name} toggle={() => ((progressFocus.value = null), setOpened(opened === a.name ? null : a.name))} />
         ))}
       </ul>
       {!stats.length && <div class="aip-empty">{boardSeen.value ? "Nothing in progress" : "…"}</div>}

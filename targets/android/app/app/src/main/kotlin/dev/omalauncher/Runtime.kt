@@ -32,6 +32,7 @@ import dev.omalauncher.linux.LinuxApp
 import dev.omalauncher.linux.OpenBridge
 import dev.omalauncher.linux.Pacman
 import dev.omalauncher.linux.Proot
+import dev.omalauncher.linux.Guest
 import dev.omalauncher.linux.RootedGuest
 import dev.omalauncher.linux.LinuxState
 import dev.omalauncher.linux.SystemUpdates
@@ -442,6 +443,15 @@ class Runtime(
         widgets.linuxChanged(true)
         // SpacetimeDB + the App API in the image, the APK's apps' modules published: the islands' data (EngineServices).
         EngineServices.start(context)
+        if (rootedTerminals) return
+        // The rest as rooted (onRootedReady), through Guest: terminal tiles and the Terminal app on a pty in the image
+        // (PtyTerminal: no Wayland server needed), PowOS's apps in the drawer (powos-apps-export in the image writes
+        // run/powos-apps, the same dir the rooted session does), app and game launches as tasks or on the desktop.
+        rootedTerminals = true
+        RootedGuest.runDir = File(context.filesDir, "run")
+        widgets.terminalsChanged(true)
+        scope.launch { refreshApps() }
+        watchPowosApps()
     }
 
     private var appsWatch: android.os.FileObserver? = null
@@ -554,7 +564,7 @@ class Runtime(
         export: Boolean,
     ): List<LinuxApp> {
         if (!powos) return loadLinuxApps(proot)
-        if (export) RootedGuest.run("powos-apps-export")
+        if (export) Guest.run("powos-apps-export")
         return loadPowosApps(File(RootedGuest.runDir ?: return emptyList(), "powos-apps"))
     }
 
@@ -685,7 +695,7 @@ class Runtime(
                 andro.marchy.LaunchWindows.done(app.id)
                 showDesktop()
             }
-            val code = runCatching { RootedGuest.openAsTask(app.id, app.wmClass, app.exec, desktop, log) }.getOrElse { e -> outcome.error(e); -1 }
+            val code = runCatching { Guest.openAsTask(Guest.TaskApp(app.id, app.wmClass, app.exec), desktop, log) }.getOrElse { e -> outcome.error(e); -1 }
             Log.i(TAG, "exited $code: ${app.exec}")
             outcome.failure(code)?.let { why ->
                 Log.w(TAG, "launch failed: ${app.id}: $why")
@@ -762,8 +772,8 @@ class Runtime(
             val code =
                 runCatching {
                     when {
-                        game != null -> RootedGuest.openAsTask("steam_app_$game", null, command, ::showDesktop, log)
-                        rooted -> RootedGuest.launch(command, command, log) // runs on: never the app's pipe
+                        game != null -> Guest.openAsTask(Guest.TaskApp("steam_app_$game", null, command), ::showDesktop, log)
+                        rooted -> Guest.launch(command, command, log) // runs on: never the app's pipe
                         else -> proot.run("exec $command", log)
                     }
                 }.getOrElse { -1 }

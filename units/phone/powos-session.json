@@ -4,7 +4,7 @@
   "kind": "system",
   "owner": "system:powos-deploy",
   "purpose": "the phone's KDE desktop session (kwin, plasmashell, Xwayland, pipewire) the PowOS app starts, the user's terminals and programs in it, and the desktop's PowOS layer (wallpaper, KWin script, widgets, launcher, picker key)",
-  "installedBy": "targets/android/rooted/powos-deploy.sh (Xwayland and KWin: our packages, targets/android/pkgs/xwayland-kgsl and pkgs/kwin)",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (Xwayland, KWin and Turnip: our packages, targets/android/pkgs/xwayland-kgsl, pkgs/kwin and pkgs/vulkan-freedreno-kgsl, the patched Turnip Vulkan driver that replaces Arch's vulkan-freedreno)",
   "packages": [
     "foot",
     "fzf",
@@ -13,6 +13,7 @@
     "openal",
     "pipewire-pulse",
     "qmltermwidget",
+    "vulkan-freedreno-kgsl",
     "xwayland-kgsl"
   ],
   "files": [

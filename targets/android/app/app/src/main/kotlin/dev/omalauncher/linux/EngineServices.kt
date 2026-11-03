@@ -8,7 +8,7 @@ import java.nio.file.LinkOption
 
 /**
  * PowOS's system services on a phone without root: SpacetimeDB (127.0.0.1:3410, every PowOS app's database) and the
- * App API runtime (127.0.0.1:3411), started in the PowOS image through [EngineGuest] - on a rooted phone the rooted
+ * App API runtime (127.0.0.1:3411), started in the PowOS image through [Guest] (the engine kind) - on a rooted phone the rooted
  * session's powos-supervisor runs them (rooted/powos-start.sh), and without root nothing did, so every island whose app
  * keeps its data in SpacetimeDB had none (docs/research/nonroot-parity.md #2). The starter is the APK's
  * assets/powos-noroot-services (lib/apps/powos-noroot-services, the same version as the APK): it reads the image's
@@ -56,7 +56,7 @@ object EngineServices {
 
     /** Starts the services in the image (a background thread; once at a time, at most every [RETRY_MS]). */
     fun start(ctx: Context) {
-        if (!EngineGuest.enabled || running) return
+        if (Guest.kind != Guest.Kind.ENGINE || running) return
         val now = System.currentTimeMillis()
         if (now - lastStart < RETRY_MS) return
         lastStart = now
@@ -81,7 +81,7 @@ object EngineServices {
         for ((db, asset) in want) ctx.assets.open(asset).use { i -> File(bundled, "$db.wasm").outputStream().use { i.copyTo(it) } }
         val script = File(andro.marchy.SessionService.runDir(ctx), "powos-noroot-services")
         ctx.assets.open("powos-noroot-services").use { i -> script.outputStream().use { i.copyTo(it) } }
-        val p = EngineGuest.process("PATH=/usr/bin:/usr/sbin:/bin exec /usr/bin/python3 '${script.path}' '${bundled.path}'").start()
+        val p = Guest.process("PATH=/usr/bin:/usr/sbin:/bin exec /usr/bin/python3 '${script.path}' '${bundled.path}'").start()
         val out = p.inputStream.bufferedReader().readText()
         Log.i(TAG, "services (rc ${p.waitFor()}): ${out.trim().replace('\n', ';')}")
     }

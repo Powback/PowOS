@@ -19,7 +19,7 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.graphics.asAndroidBitmap
 import dev.omalauncher.AgentMail
 import dev.omalauncher.PowosAiActivity
-import dev.omalauncher.linux.RootedGuest
+import dev.omalauncher.linux.Guest
 import dev.omalauncher.linux.matches
 import dev.omalauncher.system.RunningApps
 import kotlin.concurrent.thread
@@ -360,7 +360,7 @@ class ShellBridge(
             val err =
                 runCatching {
                     require(VERDICT_TASK.matches(task)) { "bad task id: $task" }
-                    check(RootedGuest.enabled) { "PowOS isn't running" }
+                    check(Guest.enabled) { "PowOS Linux ${Guest.NEEDS_IMAGE}" }
                     val t = dev.omalauncher.linux.shellQuote(task)
                     val job = dev.omalauncher.linux.shellQuote("you-$task-${System.currentTimeMillis()}")
                     // HACK: an older phone CLI copy has no `task works` (unknown verb): the PASS above is the record and
@@ -369,7 +369,7 @@ class ShellBridge(
                         if (works) "powos agents check set $t $job PASS --name you --line 'works: the user tried it' --shipped 1 && { powos agents task works $t || ! powos agents help 2>/dev/null | grep -q 'agents task works'; }"
                         else "powos agents check set $t $job FAIL --name you --line ${dev.omalauncher.linux.shellQuote(failLine)} --shipped 1 && powos agents task set $t --status working"
                     val out = ArrayList<String>()
-                    val code = RootedGuest.run(command) { out += it }
+                    val code = Guest.run(command) { out += it }
                     check(code == 0) { out.lastOrNull { it.isNotBlank() } ?: "powos agents failed ($code)" }
                 }.exceptionOrNull()
             main.post { if (err == null) respond(id, null) else js(reply("reject($id, ${JSONObject.quote(err.message ?: err.toString())})")) }
@@ -1285,7 +1285,7 @@ class ShellBridge(
             "/data/user/0/${context.packageName}/files/run/powos-ai-shared/${path.substringAfterLast('/')}). Summary: $summary"
         Thread({
             runCatching {
-                dev.omalauncher.linux.RootedGuest.run(
+                dev.omalauncher.linux.Guest.run(
                     "powos comms send coordinator ${dev.omalauncher.linux.shellQuote(text)} --from shell --priority high",
                 )
             }.onFailure { android.util.Log.w("ShellBridge", "perf: can't mail the coordinator", it) }
@@ -1358,7 +1358,7 @@ class ShellBridge(
     /** `powos terms list --json`'s hosts, or null from a PowOS without it. */
     private fun termsHosts(): JSONArray? {
         val out = StringBuilder()
-        runCatching { RootedGuest.run("powos terms list --json 2>/dev/null") { out.append(it).append('\n') } }
+        runCatching { Guest.run("powos terms list --json 2>/dev/null") { out.append(it).append('\n') } }
         return runCatching { JSONObject(out.toString().trim()).getJSONArray("hosts") }.getOrNull()
     }
 
@@ -1380,7 +1380,7 @@ class ShellBridge(
     private fun ownTmuxSessions(): JSONArray {
         val format = listOf("session_name", "session_activity", "session_attached", "pane_title", "pane_current_path", "pane_current_command").joinToString("\t") { "#{$it}" }
         val lines = ArrayList<String>()
-        runCatching { RootedGuest.run("tmux list-sessions -F '$format' 2>/dev/null") { lines += it } }
+        runCatching { Guest.run("tmux list-sessions -F '$format' 2>/dev/null") { lines += it } }
         return JSONArray(
             lines.mapNotNull { line ->
                 val f = line.split('\t')
@@ -1482,7 +1482,7 @@ class ShellBridge(
      * window's close button does. Runs in the PowOS session off the main thread; its result goes to logcat.
      */
     private fun closeApp(key: String): Boolean {
-        if (!RootedGuest.enabled) return false
+        if (!Guest.enabled) return false
         val app = runtime.linuxApps.firstOrNull { "l:${it.id}" == key } ?: return false
         val game = Regex("""rungameid/(\d+)""").find(app.exec)?.groupValues?.get(1)
         val steam = app.exec.trim().substringBefore(' ').substringAfterLast('/') == "steam"
@@ -1495,7 +1495,7 @@ class ShellBridge(
                 else -> return false
             }
         thread(name = "app-close", isDaemon = true) {
-            val code = runCatching { RootedGuest.runOwn(command) { Log.i("PowosShell", "close $key: $it") } }.getOrElse { -1 }
+            val code = runCatching { Guest.runOwn(command) { Log.i("PowosShell", "close $key: $it") } }.getOrElse { -1 }
             Log.i("PowosShell", "close $key: exit $code")
         }
         return true

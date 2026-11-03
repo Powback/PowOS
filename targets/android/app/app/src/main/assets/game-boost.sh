@@ -17,7 +17,12 @@
 #   affinity the hottest thread of the game (its frame loop) on the highest-capacity core (cpu7, the X3 prime), every
 #            other thread of the game on the other big cores (cpu3-6); each thread's own mask and cpu group saved
 # Thermal limits stay as they are: thermal-engine's caps are cpufreq QoS requests of their own, which a sysfs
-# scaling_max_freq never overrides (the effective max is the lowest request), and no cooling device is touched.
+# scaling_max_freq never overrides (the effective max is the lowest request), and no cooling device is touched. A
+# userspace thermal controller that writes scaling_min/max_freq itself (OxygenOS: horae, holding them open, applies
+# com.oplus.battery's ThermalController gear - skin temperature -> a cpu level from
+# /odm/etc/temperature_profile/sys_thermal_control_config*.xml; measured 11-03: gear 3-8 at 35-39 C put
+# 1.79-2.05 / 1.59-1.71 GHz on gold/prime) owns that policy's max: the boost never raises it (it did, every second,
+# and horae wrote its cap back - the "set back by someone else" fights), only holds the min up to its cap.
 #
 # A crash-safe lease: the app touches <lease file> every second while the game is in front; the holder restores
 # everything when it is older than LEASE_S (the app died, froze or was killed), when the game's processes are gone, or
@@ -97,18 +102,39 @@ ticks() {
   done; done
 }
 
+# The userspace thermal controller writing the cpufreq limits, if any: the comm of a process (not this one) holding
+# a policy's scaling_max_freq open, when it is a thermal daemon (horae = OxygenOS' skin-temperature controller,
+# thermal*). Looked up once per hold (a /proc fd scan).
+thermal_owner() {
+  for d in /proc/[0-9]*; do
+    [ "${d#/proc/}" = $$ ] && continue
+    ls -l $d/fd 2>/dev/null | grep -q "cpufreq/policy[0-9]*/scaling_max_freq" || continue
+    c=$(cat $d/comm 2>/dev/null)
+    case "$c" in horae*|thermal*) echo "$c"; return ;; esac
+  done
+}
+
 freqs_save() {
   [ -s "$S/freqs" ] && return   # a killed holder's: those are the originals, not what it set
   for p in $BOOSTED; do echo "$p $(cat $P/$p/scaling_min_freq) $(cat $P/$p/scaling_max_freq)"; done > "$S/freqs"
 }
 # Lift - max first, the min then fits under it - and re-assert each second.
-# HACK: raw cpufreq sysfs writes, re-asserted every second, because OxygenOS' performance HALs (perf-hal-2-3,
-# oplus.performance.hal, gameopt_hal) own these caps and may write theirs back; their game hint is a vendor binder API
-# with no shell entry (cmd power has only low-power / fixed-performance modes). Real fix: ask the vendor HAL for its
-# game-mode boost through its binder interface (or Android's PowerHAL Mode.GAME from a privileged module), then drop this.
+# HACK: raw cpufreq sysfs writes, re-asserted every second, where no thermal controller owns the limits. On OxygenOS
+# the owner is horae (thermal_owner): it applies com.oplus.battery's skin-temperature gear through the app's thermal
+# category, and the PowOS app is "common_config" (appType -1) - a game package (e.g. com.tencent.tmgp.sgame's section)
+# gets no cpu cap until gear 10, the default table caps from gear 3. Real fix: have the vendor class the game as a game
+# (its Game Space / app category, or a section for the game in its thermal profile) so its own table lifts the cap.
 freqs_lift() {
   for p in $BOOSTED; do
     hw=$(cat $P/$p/cpuinfo_max_freq); lo=$(boost_min $p)
+    if [ -n "$THERMAL" ]; then
+      # The thermal controller's cap stands; the min goes up to it (never past: a min above the max is refused).
+      cap=$(cat $P/$p/scaling_max_freq); [ "$lo" -gt "$cap" ] && lo=$cap
+      eval was=\${CAP_$p:-}
+      [ "$was" != "$cap" ] && eval CAP_$p=$cap && log "$p: thermal cap $cap of hw $hw by $THERMAL - kept"
+      [ "$(cat $P/$p/scaling_min_freq)" -lt "$lo" ] && echo $lo > $P/$p/scaling_min_freq
+      continue
+    fi
     if [ "$(cat $P/$p/scaling_max_freq)" != "$hw" ]; then
       [ "$LIFTED" = 1 ] && FIGHTS=$((FIGHTS + 1)) && log "$p: max set back to $(cat $P/$p/scaling_max_freq) by someone else: $hw again"
       echo $hw > $P/$p/scaling_max_freq
@@ -121,7 +147,12 @@ freqs_lift() {
 restore_all() {
   if [ -s "$S/freqs" ]; then
     # Min first (the saved min is below the lifted max), then the saved max.
-    while read -r p lo hi; do echo $lo > $P/$p/scaling_min_freq; echo $hi > $P/$p/scaling_max_freq; done < "$S/freqs"
+    # Under a thermal controller its max is live (it may be lower now): only the min goes back, never above that max.
+    th=$(cat "$S/thermal" 2>/dev/null)
+    while read -r p lo hi; do
+      if [ -n "$th" ]; then cap=$(cat $P/$p/scaling_max_freq); [ "$lo" -gt "$cap" ] && lo=$cap; echo $lo > $P/$p/scaling_min_freq
+      else echo $lo > $P/$p/scaling_min_freq; echo $hi > $P/$p/scaling_max_freq; fi
+    done < "$S/freqs"
     log "clocks restored: $(tr '\n' ';' < "$S/freqs")"
   fi
   if [ -s "$S/tids" ]; then
@@ -136,7 +167,7 @@ restore_all() {
   # Anything that joined the group without a row (a thread the game made since: it inherits the group) to the root.
   [ -f $CG/tasks ] && for t in $(cat $CG/tasks); do echo $t > $CPUCTL/tasks 2>/dev/null; done
   rmdir $CG 2>/dev/null
-  rm -f "$S/freqs" "$S/tids" "$S/ticks" "$S/main" "$S/app" "$S/holder.pid"
+  rm -f "$S/freqs" "$S/tids" "$S/ticks" "$S/main" "$S/app" "$S/holder.pid" "$S/thermal"
 }
 
 hold() {
@@ -145,8 +176,9 @@ hold() {
   trap 'log "$APP: restore asked"; restore_all; exit 0' TERM INT HUP
   topology || { log "$APP: no cpufreq policies"; restore_all; exit 1; }
   freqs_save
+  THERMAL=$(thermal_owner); echo "$THERMAL" > "$S/thermal"
   mkdir -p $CG && echo $BOOST_UCLAMP > $CG/cpu.uclamp.min 2>/dev/null
-  log "$APP: boost (policies $(echo $BOOSTED | tr '\n' ' '), prime cpu$PRIME, rest mask ${REST_MASK:-none}, uclamp.min $(cat $CG/cpu.uclamp.min 2>/dev/null))"
+  log "$APP: boost (policies $(echo $BOOSTED | tr '\n' ' '), prime cpu$PRIME, rest mask ${REST_MASK:-none}, uclamp.min $(cat $CG/cpu.uclamp.min 2>/dev/null), thermal controller ${THERMAL:-none})"
   LIFTED=0 FIGHTS=0 i=0 seen=0 why=
   while :; do
     now=$(date +%s); at=$(stat -c %Y "$LEASE" 2>/dev/null || echo 0)
@@ -209,6 +241,7 @@ case "$1" in
     h=$(cat "$S/holder.pid" 2>/dev/null)
     alive "$h" && echo "holder $h app $(cat "$S/app" 2>/dev/null) main $(cat "$S/main" 2>/dev/null) threads $({ wc -l < "$S/tids"; } 2>/dev/null)" || echo "holder none"
     for p in $P/policy*; do echo "policy ${p##*/} min $(cat $p/scaling_min_freq) max $(cat $p/scaling_max_freq) hw $(cat $p/cpuinfo_max_freq) cur $(cat $p/scaling_cur_freq)"; done
+    [ -s "$S/thermal" ] && echo "thermal $(cat "$S/thermal")"
     echo "uclamp.min $(cat $CG/cpu.uclamp.min 2>/dev/null || echo none) tasks $({ wc -l < $CG/tasks; } 2>/dev/null || echo 0)"
     [ -s "$S/freqs" ] && echo "saved $(tr '\n' ';' < "$S/freqs")"
     tail -n 5 "$S/log" 2>/dev/null ;;

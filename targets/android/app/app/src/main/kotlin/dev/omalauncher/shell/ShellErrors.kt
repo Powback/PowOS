@@ -2,7 +2,7 @@ package dev.omalauncher.shell
 
 import android.content.Context
 import android.util.Log
-import dev.omalauncher.linux.RootedGuest
+import dev.omalauncher.linux.Guest
 import dev.omalauncher.linux.shellQuote
 import org.json.JSONObject
 import java.io.File
@@ -237,7 +237,7 @@ object ShellErrors {
         force: Boolean = false,
     ) {
         Log.w(TAG, if (test) "[test] $text" else text)
-        if (!RootedGuest.enabled) return
+        if (!Guest.enabled) return
         val message = (if (test) "[test] $text" else text).take(3000)
         val priority = if (test) "low" else "high"
         val to = if (test) testRole(context) else "manager"
@@ -245,14 +245,14 @@ object ShellErrors {
             val out = StringBuilder()
             val code =
                 runCatching {
-                    RootedGuest.run("powos comms send --from shell --priority $priority ${shellQuote(to)} ${shellQuote(message)}") { out.appendLine(it) }
+                    Guest.run("powos comms send --from shell --priority $priority ${shellQuote(to)} ${shellQuote(message)}") { out.appendLine(it) }
                 }.getOrElse { -1 }
             if (code != 0) Log.w(TAG, "powos comms send failed ($code${if (force) ", a rollback report" else ""}): ${out.toString().take(300)}")
             // "Sent to 'manager' (id <id>)": read again once the test is over.
             val id = Regex("\\(id ([0-9a-f]+)\\)").find(out)?.groupValues?.get(1)
             if (test && id != null) {
                 cleanup.schedule({
-                    runCatching { RootedGuest.run("powos comms read --agent ${shellQuote(to)} $id") }
+                    runCatching { Guest.run("powos comms read --agent ${shellQuote(to)} $id") }
                         .onFailure { Log.w(TAG, "can't mark test mail $id read", it) }
                 }, TEST_READ_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
             }

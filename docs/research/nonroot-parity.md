@@ -26,9 +26,9 @@ feature calls `RootedGuest` - `su`, which isn't there.
 | 1 | Home widgets with commands (fetch, games, performance, any store widget with `cmd`/`stream`) | works | **was broken (empty tile)** - fixed 11-03 | nothing called `widgets.linuxChanged(true)`; GuestShell/Streams ran proot on a rootfs that isn't there; the web home got no "waits for Linux" state and drew an empty tile | DONE (this change): `EngineGuest` runs them in the image via lotfix; `Runtime.onEngineReady`; tile says "needs the PowOS Linux image - Download (N MB)" (tap opens the download) or "starting PowOS Linux..." |
 | 2 | PowOS app islands on home: Agents, What needs me, Lights, Pet, Sketch, Health, Counter | works | **broken** | bundles live in `files/apps/<id>/current`, put there only by `powos app install` inside the rooted session (bind mount in `powos-session.sh`); their databases are SpacetimeDB at `127.0.0.1:3410`, started only by the rooted session (`powos-start.sh`) | PARTLY DONE 11-04 (nonroot-islands): the repo's apps (`apps/bundled.list`: What needs me, Pet, Health, Counter, Sketch, App API) ship built in the APK and show without the registry; What needs me needs no Linux; STDB apps' islands say "starting PowOS Linux…" / "needs the PowOS Linux image - Download" while `EngineServices` starts SpacetimeDB + the App API in the image and publishes the APK's modules. Left: Lights (own repo `~/Projects/lights`, DB `local-lights` for its pairing/prefs - bundle it + keep that state Android-side), Agents (needs powos-agentsd), check on an unrooted device |
 | 3 | PowOS Linux image download | n/a | heavy (one big tarball) | `powos-rootfs.tar.gz` is the whole desktop + gaming | task `powos-image-for-non-rooted-devices-is-too-heavy` (image-slim: base/gaming split) |
-| 4 | Linux apps in drawer/search, Linux app windows (web windows), Steam/games | works | **broken from the launcher** | the PowOS app list is exported by the rooted session (`run/powos-apps`, `powos-apps-export`); `ShellActivity` starts `SessionService` only when rooted; launches go through `RootedGuest.openAsTask` | start `SessionService` from the launcher when the image is installed; app export + launch through `EngineGuest` (powos-apps-export in the image session); windows through the engine's display daemon |
-| 5 | Terminals (terminal tiles, Terminal app, `terms`/tmux list) | works | **broken** | `ShellTerminals`/`TerminalTiles` run `su -c powos-run.sh`; Omalauncher's foot-on-Wayland path is off with `onLinuxReady` | PtyTerminal on `liblotfixrun.so -c powos-tmux-shell` (EngineGuest) |
-| 6 | PowOS AI page chat / manager, agent mail, comms, "send to coordinator" | works | **broken** ("PowOS isn't running") | `PowosAiChat`, `AgentMail`, `AgentsSpool`, `ShellBridge` call `RootedGuest` only | the same calls through EngineGuest once the image is installed; a clear "needs the PowOS Linux image" state before |
+| 4 | Linux apps in drawer/search, Linux app windows (web windows), Steam/games | works | via Guest (11-03 nonroot-session) | the PowOS app list is exported by the rooted session (`run/powos-apps`, `powos-apps-export`); `ShellActivity` starts `SessionService` only when rooted; launches go through `RootedGuest.openAsTask` | start `SessionService` from the launcher when the image is installed; app export + launch through `EngineGuest` (powos-apps-export in the image session); windows through the engine's display daemon |
+| 5 | Terminals (terminal tiles, Terminal app, `terms`/tmux list) | works | via Guest (11-03 nonroot-session) | `ShellTerminals`/`TerminalTiles` run `su -c powos-run.sh`; Omalauncher's foot-on-Wayland path is off with `onLinuxReady` | PtyTerminal on `liblotfixrun.so -c powos-tmux-shell` (EngineGuest) |
+| 6 | PowOS AI page chat / manager, agent mail, comms, "send to coordinator" | works | via Guest (11-03 nonroot-session) | `PowosAiChat`, `AgentMail`, `AgentsSpool`, `ShellBridge` call `RootedGuest` only | the same calls through EngineGuest once the image is installed; a clear "needs the PowOS Linux image" state before |
 | 7 | Android app web windows (floating/tiled Android apps on virtual displays) | works | degraded | `WebWindows` uses `RootShell` for `am start --display`, `move-stack`, input injection, SurfaceFlinger dumps | partly needs-root-by-nature (launching other apps on our virtual display); fallback: open as a normal Android task / Android's own freeform, say so |
 | 8 | Performance widget numbers (GPU busy, thermal, /proc/stat) | works | degraded (zeros) | untrusted apps can't read `/proc/stat`, kgsl or thermal zones (SELinux), root or not inside fakechroot | Android APIs where they exist (`HardwarePropertiesManager` is system-only; `PowerManager.getThermalHeadroom`, `BatteryManager`); mark the rest "needs root" in the tile |
 | 9 | Game boost (big-core clocks, uclamp), system float overlay, force-stop background apps, Android settings writes (web window tiles), Android system colours from the theme, wallpaper root shot, native settings index | works | needs root by nature | `RootShell` for sysfs/cgroups/`cmd overlay`/`am force-stop`/`settings put` | keep off without root; where a `pm grant WRITE_SECURE_SETTINGS` (one adb line) would do, offer it |
@@ -45,6 +45,22 @@ feature calls `RootedGuest` - `su`, which isn't there.
   on resume).
 - `shell/ShellHome.kt` + `ShellWidgets.kt`: widget items carry `linux: {state, mb}`; a tap on an "image" tile opens the
   download. `shell/ui/grid.tsx` `LinuxWait` draws it. Gate scene `nonroot-widgets` (NR1).
+
+## What changed 11-03 (nonroot-session): one Guest for every PowOS Linux call
+
+- `linux/Guest.kt`: the one pick - rooted (`RootedGuest`, every call delegated unchanged) / the PowOS image without
+  root (`EngineGuest`, lotfix-run) / none (`Guest.NEEDS_IMAGE`, shown instead of failing). `run`, `runOwn`, `process`,
+  `launch`, `openAsTask`, `terminal`, `terminalShell`. Widgets keep `guestProcess` (its third choice is proot).
+- Gap 4 (apps, windows, Steam): `ShellActivity` starts the image's `SessionService` without root once the image is
+  installed; `Runtime.onEngineReady` turns on the PowOS session paths (`powosSession`): `powos-apps-export` in the image
+  fills the drawer (same `run/powos-apps`), drawer/game launches go through `Guest.openAsTask` / `Guest.launch`.
+- Gap 5 (terminals): `PtyTerminal`, `ShellTerminals`, terminal tiles and `PowosTerminalActivity` run `Guest.terminal`
+  - lotfix-run into the image, `powos-tmux-shell` where the image has it, else `bash -l`; tmux list via `Guest.run`.
+- Gap 6 (AI page, mail, comms): `PowosAiChat`, `AgentMail`, `AgentsSpool`, `ShellErrors`, `ShellBridge` through
+  `Guest`; `App` starts mail/wake/agents watchers for the image's run dir; without Linux the chat says what's needed.
+- Still rooted-only by nature: the system theme, game boost, the desktop-shell hook, Plasma bridge, verify queue.
+- Test: `GuestTest` (pick, rooted terminal line byte-for-byte, open-task line unchanged, a source scan that no PowOS
+  Linux call skips Guest).
 
 ## What changed 11-04 (nonroot-islands)
 

@@ -37,6 +37,19 @@ class ShellActivity : Activity() {
 
     private val runtime get() = (application as App).runtime
 
+    /**
+     * Rooted: the PowOS session. No root: the same for the PowOS image's session (lotfix-run: D-Bus, PipeWire, the
+     * compositor, agentsd), once the engine installed the image - apps, their windows, Steam, terminals and agents run
+     * in it (Guest). Already running: nothing.
+     */
+    private fun startPowosSession() {
+        if (andro.marchy.RootMode.enabled()) {
+            andro.marchy.SessionService.start(this)
+        } else if (dev.omalauncher.linux.POWOS && andro.marchy.SessionService.rootfsReady(this)) {
+            andro.marchy.SessionService.startAsync(this)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Each home made, and why (the manager saw home's task change: an app update, a recreation, a second home).
@@ -50,7 +63,7 @@ class ShellActivity : Activity() {
         if (!runtime.launcherReady) runtime.finishWelcome()
         // Rooted mode: the PowOS session with it (terminals, PowOS apps, folding run in it), as the desktop starts it -
         // after a reboot or an update the launcher is often the first thing that runs. Already running: nothing.
-        if (andro.marchy.RootMode.enabled()) andro.marchy.SessionService.start(this)
+        startPowosSession()
         window.setDecorFitsSystemWindows(false)
         // Edge to edge for real: the page (and the wallpaper behind it) fills the whole screen, the bars draw nothing.
         // Theme.Material's defaults left the decor's navigationBarBackground black over the gesture-nav strip (a black

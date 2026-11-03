@@ -169,6 +169,9 @@
 /* DG1 (the user, 11-03 21:30: "Now the icons are floating too far up over the search bar"): the dock over the pill comes
    down with it, so the gap between them stays the design's own (dev/dock-search-check.js barFootSame). */
 .home.pill-below > .dock { top: var(--bar-drop); }
+/* Edit mode: the foot's row rises over the edit bar (--edit-rise, measured from the inset, so undropped first) - the
+   screen-fixed bar's translate carries the rise (--bar-edit-rise: its translate is --track-counter's, FX1). */
+.home.editing { --bar-drop: 0px; --bar-edit-rise: var(--edit-rise); }
 /* The search bar goes down to the screen's foot as the dock gives way (under the dock already: it stays). */
 .home > .bar { transform: translateY(calc(var(--p) * (var(--strip-height) + var(--bar-drop)))); }
 /* SB1: a finger on the bar is home's to page with (gesture.ts chromeWay): the WebView never pans it, nor moves the
@@ -674,6 +677,40 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   font: bold 28px var(--font-body);
   pointer-events: none;
 }
+/* Experimental A-Z list (drawer.tsx AzOverlay, Settings > style > experimental): the letter's apps as rows, centred over
+   the drawer page (not by the bar), every name whole - wrapped, never cut. Touch stays on the bar (pointer capture): the
+   list takes none. It and each letter's rows fade in on the spring; it fades out (usePresence). */
+.drawer, .drawer-page { position: relative; }
+.az-list {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px calc(var(--letter-bar) + 16px) 16px 16px;
+  pointer-events: none;
+  animation: az-list-in var(--spring-fast-ms) var(--spring-fast);
+}
+.az-list.leaving { animation: az-list-out var(--spring-fast-ms) var(--spring-fast) both; }
+.az-list-card { width: min(100%, 420px); max-height: 100%; overflow: hidden; padding: 8px; border-radius: var(--radius); }
+.az-list-rows { display: flex; flex-direction: column; gap: 2px; animation: az-list-swap var(--spring-fast-ms) var(--spring-fast); }
+.az-list-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font: var(--text-body) var(--font-body);
+  transition: background var(--spring-fast-ms) var(--spring-fast), color var(--spring-fast-ms) var(--spring-fast);
+}
+.az-list-row .app-icon { flex: 0 0 auto; width: 36px; height: 36px; }
+.az-list-name { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+.az-list-row.on { background: var(--soft-fill); color: var(--accent-text); }
+@keyframes az-list-in { from { opacity: 0; transform: scale(0.97); } }
+@keyframes az-list-out { to { opacity: 0; transform: scale(0.97); } }
+@keyframes az-list-swap { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .az-list, .az-list.leaving, .az-list-rows { animation: none; } }
 
 .app {
   position: relative;
@@ -4154,6 +4191,28 @@ html:root .ai-screen.status > .ai-glass.tile { --glass-blur-native: var(--backdr
 .ais-area-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 0 4px; border: 0; background: none; font: inherit; text-align: start; white-space: nowrap; color: var(--color-foreground); }
 .ais-area-name { flex: none; font-size: var(--text-body); }
 .ais-area-words { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: end; font-size: var(--text-small); color: var(--color-muted); }
+/* By area opened in place (aistatus.tsx AreaDetail; the user, 11-03 22:56: "says 1 to check but which one???"): the tasks
+   behind each count, what to check, Try it and "Open task". A row's chevron turns as the shared toggles' do. */
+.ais-area-row > .ais-chev { flex: none; color: var(--color-muted); }
+.ais-area-row[aria-expanded="true"] .ais-chev::before { transform: rotate(-90deg); }
+.ais-ck { display: flex; flex-direction: column; gap: 8px; padding: 2px 4px 10px 22px; animation: ais-rise var(--spring-ms) var(--spring) both; }
+.ais-ck-group { display: flex; flex-direction: column; gap: 4px; }
+.ais-ck-h { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--text-small); font-weight: 650; color: var(--color-muted); }
+.ais-ck-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ais-ck-item { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: 12px; background: color-mix(in srgb, var(--color-foreground) 6%, transparent); font-size: var(--text-small); line-height: 1.35; }
+.ais-ck-line { display: flex; align-items: baseline; gap: 8px; }
+.ais-ck-line > .aip-dot { flex: none; transform: translateY(-1px); }
+.ais-ck-title { flex: 1; min-width: 0; font-size: var(--text-body); font-weight: 600; color: var(--color-foreground); overflow-wrap: anywhere; }
+.ais-ck-what, .ais-ck-check { color: var(--color-muted); white-space: normal; overflow-wrap: anywhere; }
+.ais-ck-item[data-dot="check"] .ais-ck-check { color: var(--status-check); }
+.ais-ck-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
+.ais-ck-acts > .try-item { display: contents; }
+.ais-ck-open { min-height: 32px; padding: 0 12px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--color-foreground) 12%, transparent); font: inherit; font-size: var(--text-small); font-weight: 600; color: var(--color-foreground); }
+.ais-ck-all { align-self: flex-start; min-height: 32px; color: var(--color-muted); }
+/* Progress: a task waiting for a check says what under its title; the one By area's "Open task" asked for is marked. */
+.aip-task-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.aip-task-why { font-size: var(--text-small); color: var(--color-muted); overflow-wrap: anywhere; }
+.aip-task.focus { margin-inline: -8px; padding-inline: 8px; border-radius: 8px; background: color-mix(in srgb, var(--color-accent) 14%, transparent); }
 .ais-done-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 0 4px; border: 0; background: none; font: inherit; text-align: start; white-space: nowrap; font-size: var(--text-body); color: var(--color-foreground); }
 .ais-done-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ais-done-item.open .ais-done-row, .ais-next-item.open .ais-done-row { align-items: baseline; padding-block: 10px 4px; white-space: normal; }
@@ -4332,8 +4391,12 @@ html:has(.home > .bar[data-role="ai"] textarea:focus) .ai-screen.stacked > .ai-s
  * seatOnAi), moving there on home's own slide curve; while a finger drags the screens, no transition (it rides along).
  * Shown and tappable there whatever home's foot does with it (parked under the search widget, the dock's button).
  */
-.home > .bar.seated { transition: translate var(--spring-ms) var(--spring); z-index: 5; }
-.home > .bar.seated.sliding { transition: none; }
+.home > .bar.seated { z-index: 5; }
+/* FX1 (the user, 11-03 22:53: "there's still some page block for the search bar on the last page"): the bar never rides
+   a page - --track-counter (gesture.ts applyTrack) undoes home's slide in the same frame, on its curve; under a finger
+   (.sliding) it follows at once. --bar-lift: the keyboard's lift on PowOS AI's page (bar.tsx seatOnAi). */
+.home:not(.pull-screen) > .bar { translate: var(--track-counter, 0px) calc(var(--bar-lift, 0px) - var(--bar-edit-rise, 0px)); transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s, translate var(--spring-ms) var(--spring); }
+.home:not(.pull-screen).sliding > .bar, .home:not(.pull-screen) > .bar.sliding { transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s; }
 .home.search-parked > .bar.seated { opacity: 1; pointer-events: auto; }
 
 /*
@@ -4343,10 +4406,7 @@ html:has(.home > .bar[data-role="ai"] textarea:focus) .ai-screen.stacked > .ai-s
  * and only its glass moves.
  */
 .home.button-morph > .bar { transition: none; }
-/* OE1: on the way to PowOS AI's page the seated bar's translate still counters home's slide as it goes (the bar stays on
-   screen where it is, the glass growing there from the button's place); the way back holds its translate (bar.tsx
-   heldSeated), so this changes nothing there. */
-.home.button-morph > .bar.seated:not(.sliding) { transition: translate var(--spring-ms) var(--spring); }
+.home.button-morph:not(.sliding) > .bar:not(.sliding) { transition: translate var(--spring-ms) var(--spring); }
 .home.button-morph:not(.pill-below, .dock-left, .dock-right) > .bar:not(.seated) { transform: translateY(calc(var(--strip-height) + var(--bar-drop))); }
 
 /*

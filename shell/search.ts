@@ -65,6 +65,8 @@ export const settingDestinations: { screen: ScreenName; label: string; target?: 
   ...["left", "right"].flatMap((side) => ["handle", "where", "width", "swipe in", "swipe in and up", "swipe in and down", "swipe in and hold", "in and up, hold", "in and down, hold"].map((control) => ({
     screen: "gestures" as const, label: `${side} edge ${control}`, target: `${side} edge/${control}`, keywords: "settings gestures quick tools swipe position size action",
   }))),
+  { screen: "style", label: "Experimental", target: "experimental", keywords: "experiments labs beta preview try options" },
+  { screen: "style", label: "A-Z bar: the letter's apps as a list", target: "A-Z bar: the letter's apps as a list", keywords: "experimental alphabet letters drawer launcher scrub index full names titles centred centered" },
   { screen: "gestures", label: "Edge gestures", target: "edge gestures", keywords: "back swipe sensitivity handles" },
   { screen: "linux", label: "Linux", keywords: "install gpu driver" },
   { screen: "coding", label: "Coding agents", keywords: "assistant development" },
