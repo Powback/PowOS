@@ -169,6 +169,9 @@
 /* DG1 (the user, 11-03 21:30: "Now the icons are floating too far up over the search bar"): the dock over the pill comes
    down with it, so the gap between them stays the design's own (dev/dock-search-check.js barFootSame). */
 .home.pill-below > .dock { top: var(--bar-drop); }
+/* Edit mode: the foot's row rises over the edit bar (--edit-rise, measured from the inset, so undropped first) - the
+   screen-fixed bar's translate carries the rise (--bar-edit-rise: its translate is --track-counter's, FX1). */
+.home.editing { --bar-drop: 0px; --bar-edit-rise: var(--edit-rise); }
 /* The search bar goes down to the screen's foot as the dock gives way (under the dock already: it stays). */
 .home > .bar { transform: translateY(calc(var(--p) * (var(--strip-height) + var(--bar-drop)))); }
 /* SB1: a finger on the bar is home's to page with (gesture.ts chromeWay): the WebView never pans it, nor moves the
@@ -4324,7 +4327,7 @@ html:has(.home > .bar[data-role="ai"] textarea:focus) .ai-screen.stacked > .ai-s
 /* FX1 (the user, 11-03 22:53: "there's still some page block for the search bar on the last page"): the bar never rides
    a page - --track-counter (gesture.ts applyTrack) undoes home's slide in the same frame, on its curve; under a finger
    (.sliding) it follows at once. --bar-lift: the keyboard's lift on PowOS AI's page (bar.tsx seatOnAi). */
-.home:not(.pull-screen) > .bar { translate: var(--track-counter, 0px) var(--bar-lift, 0px); transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s, translate var(--spring-ms) var(--spring); }
+.home:not(.pull-screen) > .bar { translate: var(--track-counter, 0px) calc(var(--bar-lift, 0px) - var(--bar-edit-rise, 0px)); transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s, translate var(--spring-ms) var(--spring); }
 .home:not(.pull-screen).sliding > .bar, .home:not(.pull-screen) > .bar.sliding { transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s; }
 .home.search-parked > .bar.seated { opacity: 1; pointer-events: auto; }
 
