@@ -4090,6 +4090,28 @@ html:root .ai-screen.status > .ai-glass.tile { --glass-blur-native: var(--backdr
 .ais-area-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 0 4px; border: 0; background: none; font: inherit; text-align: start; white-space: nowrap; color: var(--color-foreground); }
 .ais-area-name { flex: none; font-size: var(--text-body); }
 .ais-area-words { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: end; font-size: var(--text-small); color: var(--color-muted); }
+/* By area opened in place (aistatus.tsx AreaDetail; the user, 11-03 22:56: "says 1 to check but which one???"): the tasks
+   behind each count, what to check, Try it and "Open task". A row's chevron turns as the shared toggles' do. */
+.ais-area-row > .ais-chev { flex: none; color: var(--color-muted); }
+.ais-area-row[aria-expanded="true"] .ais-chev::before { transform: rotate(-90deg); }
+.ais-ck { display: flex; flex-direction: column; gap: 8px; padding: 2px 4px 10px 22px; animation: ais-rise var(--spring-ms) var(--spring) both; }
+.ais-ck-group { display: flex; flex-direction: column; gap: 4px; }
+.ais-ck-h { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--text-small); font-weight: 650; color: var(--color-muted); }
+.ais-ck-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ais-ck-item { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: 12px; background: color-mix(in srgb, var(--color-foreground) 6%, transparent); font-size: var(--text-small); line-height: 1.35; }
+.ais-ck-line { display: flex; align-items: baseline; gap: 8px; }
+.ais-ck-line > .aip-dot { flex: none; transform: translateY(-1px); }
+.ais-ck-title { flex: 1; min-width: 0; font-size: var(--text-body); font-weight: 600; color: var(--color-foreground); overflow-wrap: anywhere; }
+.ais-ck-what, .ais-ck-check { color: var(--color-muted); white-space: normal; overflow-wrap: anywhere; }
+.ais-ck-item[data-dot="check"] .ais-ck-check { color: var(--status-check); }
+.ais-ck-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
+.ais-ck-acts > .try-item { display: contents; }
+.ais-ck-open { min-height: 32px; padding: 0 12px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--color-foreground) 12%, transparent); font: inherit; font-size: var(--text-small); font-weight: 600; color: var(--color-foreground); }
+.ais-ck-all { align-self: flex-start; min-height: 32px; color: var(--color-muted); }
+/* Progress: a task waiting for a check says what under its title; the one By area's "Open task" asked for is marked. */
+.aip-task-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.aip-task-why { font-size: var(--text-small); color: var(--color-muted); overflow-wrap: anywhere; }
+.aip-task.focus { margin-inline: -8px; padding-inline: 8px; border-radius: 8px; background: color-mix(in srgb, var(--color-accent) 14%, transparent); }
 .ais-done-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 0 4px; border: 0; background: none; font: inherit; text-align: start; white-space: nowrap; font-size: var(--text-body); color: var(--color-foreground); }
 .ais-done-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ais-done-item.open .ais-done-row, .ais-next-item.open .ais-done-row { align-items: baseline; padding-block: 10px 4px; white-space: normal; }
