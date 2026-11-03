@@ -10,10 +10,13 @@
  *   at the screen's side). Tap a folder's free space for all of it, in the folder popover.
  */
 import { computed } from "@preact/signals";
+import { Fragment } from "preact";
 import { apps, byKey, folder, home } from "../state.ts";
 import { AppIcon } from "./apps.tsx";
 import { folderName, morphing } from "./folders.tsx";
 import type { App } from "../types.ts";
+import { Icon } from "./icons.tsx";
+import { PackBar, packAction, packDownload, packStatus, usePacks } from "./packs.tsx";
 
 /** ApplicationInfo.CATEGORY_* (0..8) -> the library's category. */
 const ANDROID = ["games", "music", "video", "photos", "social", "news", "travel", "productivity", "utilities"];
@@ -122,6 +125,28 @@ function Card({ f }: { f: LibraryFolder }) {
 }
 
 /**
+ * "Add gaming", beside the Games folder, while a phone without root hasn't got the gaming pack (packs.tsx): a tap adds
+ * it, and the card shows the download and unpack live until Steam and the games' runtimes are there.
+ */
+function AddGamingCard() {
+  const gaming = usePacks()?.find((p) => p.name === "gaming");
+  if (!gaming || (gaming.installed && !gaming.job)) return null;
+  const st = packStatus(gaming);
+  return (
+    <div class="lib-card tile lib-pack" data-key="pack:gaming" onClick={() => !st.busy && packAction("gaming", "add")}>
+      <div class="lib-name">
+        <span>{st.busy ? "adding gaming" : "add gaming"}</span>
+      </div>
+      <div class="lib-pack-body">
+        <Icon name="gamepad" size={28} />
+        <div class="lib-pack-text">{st.busy || st.failed ? st.text : `Steam, Proton, x86 apps · ${packDownload(gaming)}`}</div>
+        {st.busy && <PackBar progress={st.progress} />}
+      </div>
+    </div>
+  );
+}
+
+/**
  * Home's last page: the folders. No search field of its own (the user, 2026-10-29: "We don't need that search apps bar
  * on top of the folder page") - the launcher's pill finds apps.
  */
@@ -131,8 +156,12 @@ export function LibraryPage({ here }: { here: boolean }) {
       <div class="library-scroll">
         <div class="lib-grid">
           {library.value.map((f) => (
-            <Card key={f.key} f={f} />
+            <Fragment key={f.key}>
+              <Card f={f} />
+              {f.key === "lib:games" && <AddGamingCard />}
+            </Fragment>
           ))}
+          {!library.value.some((f) => f.key === "lib:games") && <AddGamingCard />}
         </div>
       </div>
     </div>

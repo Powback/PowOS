@@ -32,6 +32,7 @@ import {
   useScreen,
 } from "../screens.ts";
 import { Icon, type IconName } from "./icons.tsx";
+import { PACK_INFO, PackBar, packAction, packFrees, packSize, packStatus, usePacks, type Pack, type PackStatus } from "./packs.tsx";
 import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, searchSpot, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
 import { iconTint } from "./icontint.ts";
 import { UI_FONTS, uiFont } from "./uifont.ts";
@@ -388,6 +389,7 @@ function SettingsScreen() {
     ["penguin", "linux", linuxLine(s?.linux, s?.powos ?? false), () => openScreen("linux")],
     ["robotOutline", "coding agents", installed ? (s?.agent ? `default: ${s.agent}` : "Claude Code, OpenCode, …") : "needs linux", needs("coding")],
     ["packageVariant", "packages", installed ? "pacman and the AUR" : "needs linux", needs("aur")],
+    ["harddisk", "storage", "PowOS parts: gaming, apps, languages", () => openScreen("storage")],
     ["cellphoneCog", "android settings", "the phone's own", () => act("settings", "android")],
     ["arrowLeft", "gestures", "edge gestures, quick tools", () => openScreen("gestures")],
     // Dictation's engine: a tap cycles it - streamed to the GPU voice agent (the default), stt.pow's requests, the
@@ -1195,6 +1197,76 @@ function License({ c }: { c: LicensesState["components"][number] }) {
   );
 }
 
+// --- storage
+
+/** A pack's line under its name: the live state while something happens, else installed-or-not and its size. */
+function packLine(p: Pack, st: PackStatus) {
+  const tone = st.failed ? "danger" : st.busy ? "accent" : p.installed ? "green" : "muted";
+  return <div class={`scr-sub ${tone}`}>{st.busy || st.failed ? st.text : `${st.text} · ${packSize(p)}`}</div>;
+}
+
+/** Add (or try again) / remove, none while something happens. */
+function PackButton({ p, st, onRemove }: { p: Pack; st: PackStatus; onRemove: () => void }) {
+  if (st.busy) return null;
+  if (p.installed) return <Action icon="deleteOutline" label="remove" tone="danger" onClick={onRemove} />;
+  return <Action icon={st.failed ? "refresh" : "trayArrowDown"} label={st.failed ? "try again" : "add"} tone="primary" onClick={() => packAction(p.name, "add")} />;
+}
+
+/** One pack: what it is, its size, its live state, add / remove. */
+function PackRow({ p }: { p: Pack }) {
+  const [title, what] = PACK_INFO[p.name] ?? [p.name, ""];
+  const st = packStatus(p);
+  const [confirm, setConfirm] = useState(false);
+  return (
+    <div class="scr-card tile">
+      <div class="scr-row">
+        <Icon name={p.name === "gaming" ? "gamepad" : "harddisk"} size={22} class="scr-row-icon" />
+        <div class="scr-row-text">
+          <div>{title}</div>
+          <div class="scr-sub muted">{what}</div>
+          {packLine(p, st)}
+          {st.busy && <PackBar progress={st.progress} />}
+        </div>
+        <PackButton p={p} st={st} onRemove={() => setConfirm(true)} />
+      </div>
+      {confirm && (
+        <Confirm
+          title={`remove ${title}?`}
+          text={`Frees about ${packFrees(p)}. You can add it again here.`}
+          yes="remove"
+          icon="deleteOutline"
+          danger
+          onYes={() => {
+            setConfirm(false);
+            packAction(p.name, "remove");
+          }}
+          onNo={() => setConfirm(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function StorageScreen() {
+  const packs = usePacks();
+  return (
+    <Frame icon="harddisk" title="storage">
+      {packs == null ? (
+        <Loading />
+      ) : packs.length ? (
+        <>
+          <div class="scr-note muted">PowOS starts small; add the parts you want. Each one downloads once and can be removed again.</div>
+          {packs.map((p) => (
+            <PackRow key={p.name} p={p} />
+          ))}
+        </>
+      ) : (
+        <div class="scr-note muted">Everything of PowOS is installed on this phone.</div>
+      )}
+    </Frame>
+  );
+}
+
 function LicensesScreen() {
   const s = useScreen<LicensesState>("licenses");
   return (
@@ -1421,6 +1493,7 @@ const SCREENS: Record<ScreenName, FunctionComponent> = {
   aur: PackagesScreen,
   licenses: LicensesScreen,
   gestures: GesturesScreen,
+  storage: StorageScreen,
 };
 
 /** The top screen, over home; those under it wait (unwatched) until it closes. */

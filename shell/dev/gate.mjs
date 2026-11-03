@@ -6319,7 +6319,30 @@ async function libraryCheck() {
   const names = new Set(L.library.value.flatMap((f) => f.apps.map((a) => a.label.trim().toLowerCase())));
   const missing = S.apps.value.filter((a) => !seen.includes(a.key) && !names.has(a.label.trim().toLowerCase())).map((a) => a.key);
   if (twice.length || missing.length) fails.push(`the library: ${missing.length} apps in no folder (${missing.slice(0, 3)}), ${twice.length} in two (${twice.slice(0, 3)})`);
-  if (lib.querySelectorAll(".lib-card").length !== L.library.value.length) fails.push("the library shows a different number of folders than it has");
+  if (lib.querySelectorAll(".lib-card:not(.lib-pack)").length !== L.library.value.length) fails.push("the library shows a different number of folders than it has");
+  return fails;
+}
+
+/**
+ * In the page, on the app library (after libraryCheck): a base install (the mock's storage: gaming not added) shows "add gaming" right
+ * after the Games folder, and a tap shows its pending state at once, then the host's live progress (ui/packs.tsx).
+ */
+async function addGamingCheck() {
+  const lib = document.querySelector(".page-track > .page.library");
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const until = async (ok, ms) => {
+    for (const t0 = performance.now(); !ok() && performance.now() - t0 < ms; ) await sleep(20);
+    return ok();
+  };
+  const add = (await until(() => lib.querySelector(".lib-pack"), 2000)) && lib.querySelector(".lib-pack");
+  if (!add) return ['no "add gaming" card in the library while the gaming pack is missing'];
+  const shows = (re) => re.test(add.textContent ?? "");
+  const games = lib.querySelector('.lib-card[data-key="lib:games"]');
+  const fails = games && games.nextElementSibling !== add ? ['"add gaming" isn\'t beside the Games folder'] : [];
+  add.click();
+  await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+  if (!shows(/adding gaming/) || !add.querySelector(".scr-bar")) fails.push(`a tap on "add gaming" shows nothing pending at once: "${add.textContent}"`);
+  if (!(await until(() => shows(/downloading/), 3000))) fails.push(`"add gaming" shows no download progress: "${add.textContent}"`);
   return fails;
 }
 
@@ -12553,7 +12576,7 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `library-${label}`, viewport).then((r) => whenReady(r, async () => {
-        for (const check of [libraryCheck, libraryLiveCheck, folderMorphCheck, folderCloseCheck, libraryDragCheck]) {
+        for (const check of [libraryCheck, addGamingCheck, libraryLiveCheck, folderMorphCheck, folderCloseCheck, libraryDragCheck]) {
           const fails = await r.page.evaluate(check);
           if (fails.length) return fails;
         }

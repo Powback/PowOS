@@ -1,0 +1,35 @@
+#!/bin/bash
+# powos-pack: the parts of PowOS a phone without root adds on demand (targets/android/rootfs-packs.conf): the base
+# image leaves them out, the PowOS app downloads and unpacks them (engine Packs.java, "pack <name>" request).
+#
+#   powos-pack status <name>   installed | missing (exit 1)
+#   powos-pack need <name>     returns once the pack is there: asks the app to add it and shows its progress
+#
+# A full rootfs (rooted phones, or a base-less build) has no /etc/powos/packs and every pack counts as installed.
+set -euo pipefail
+cmd=${1:-}; name=${2:-}
+[[ $name =~ ^[a-z0-9-]+$ ]] || { echo "usage: powos-pack status|need <name>" >&2; exit 2; }
+installed() { [ ! -e /etc/powos/packs ] || [ -e "/var/lib/powos/packs/$name" ]; }
+case $cmd in
+  status) if installed; then echo installed; else echo missing; exit 1; fi ;;
+  need)
+    installed && exit 0
+    state=${XDG_RUNTIME_DIR:-/tmp}/pack-$name.state
+    rm -f "$state"
+    size=$(awk -v n="$name" '$1 == n {printf "%.1f GB", $2 / 1e9}' /etc/powos/packs)
+    echo "powos: adding $name (${size:-a download}) from the PowOS app" >&2
+    android-request pack "$name"
+    last=
+    while :; do
+      s=$(cat "$state" 2>/dev/null || true)
+      case $s in
+        done) installed && { echo "powos: $name added" >&2; exit 0; } ;;
+        failed*) echo "powos: adding $name failed: ${s#failed }" >&2; exit 1 ;;
+        downloading*) read -r _ d t <<< "$s"
+          [ "$s" != "$last" ] && printf '\rpowos: %s: %d / %d MB ' "$name" $((d >> 20)) $((t >> 20)) >&2 ;;
+      esac
+      last=$s
+      sleep 1
+    done ;;
+  *) echo "usage: powos-pack status|need <name>" >&2; exit 2 ;;
+esac

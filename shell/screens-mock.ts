@@ -10,12 +10,22 @@ type Emitter = { emit(event: string, data: unknown): void };
 const svg = (bg: string, fg: string, text: string) =>
   `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200"><rect width="320" height="200" fill="${bg}"/><text x="20" y="110" font-family="monospace" font-size="28" fill="${fg}">${text}</text></svg>`)}`;
 
-const THEMES = [
-  { name: "kanagawa", title: "Kanagawa", colors: { background: "#1f1f28", foreground: "#dcd7ba", accent: "#7e9cd8", red: "#e82424", green: "#76946a", yellow: "#c0a36e" } },
-  { name: "tokyo-night", title: "Tokyo Night", colors: { background: "#1a1b26", foreground: "#a9b1d6", accent: "#7aa2f7", red: "#f7768e", green: "#9ece6a", yellow: "#e0af68" } },
-  { name: "gruvbox", title: "Gruvbox", colors: { background: "#282828", foreground: "#ebdbb2", accent: "#d79921", red: "#cc241d", green: "#98971a", yellow: "#d79921" } },
-  { name: "catppuccin-latte", title: "Catppuccin Latte", colors: { background: "#eff1f5", foreground: "#4c4f69", accent: "#1e66f5", red: "#d20f39", green: "#40a02b", yellow: "#df8e1d" } },
-].map((t) => ({ ...t, preview: svg(t.colors.background, t.colors.accent, t.title) }));
+/** Sample theme data (dev/sample-themes.json): theme palettes and preview colours, data rather than UI colour. */
+type Palette = Record<"background" | "foreground" | "accent" | "red" | "green" | "yellow", string>;
+interface Fixture {
+  themes: { name: string; title: string; colors: Palette }[];
+  backgrounds: string[];
+  backgroundInk: string;
+  catalog: string[];
+  catalogInk: string;
+  widgetPreview: [string, string];
+}
+/** Without the file (a host serving no dev/), the samples draw unpainted. */
+const NO_FIXTURE: Fixture = { themes: [], backgrounds: ["", ""], backgroundInk: "", catalog: ["", "", "", ""], catalogInk: "", widgetPreview: ["", ""] };
+const fixture = (): Promise<Fixture> =>
+  fetch("./dev/sample-themes.json")
+    .then((r) => r.json() as Promise<Fixture>)
+    .catch(() => NO_FIXTURE);
 
 const AGENTS = [
   { bin: "claude", name: "Claude Code", description: "Anthropic's coding agent", installed: true, job: null },
@@ -24,8 +34,71 @@ const AGENTS = [
 ];
 
 export function mockScreens(events: Emitter): Bridge["screens"] {
+  let state: Record<string, any> = {};
+  const ready = fixture().then((f) => (state = sampleState(f)));
+
+  const changed = (name: string) => events.emit("screens.state", { name, state: state[name] });
+  // A pack's add: a few seconds of download, then unpack, as the host reports them; a removal at once.
+  const packJob = (name: string, action: string) => {
+    const packs = state.storage.packs as { name: string; download: number; installed: boolean; job: unknown }[];
+    const set = (job: unknown, installed?: boolean) => {
+      state.storage = { packs: packs.map((p) => (p.name === name ? { ...p, job, installed: installed ?? p.installed } : p)) };
+      changed("storage");
+    };
+    const total = packs.find((p) => p.name === name)?.download ?? 0;
+    if (action === "remove") return setTimeout(() => set(null, false), 600);
+    let step = 0;
+    const tick = setInterval(() => {
+      step++;
+      if (step <= 8) set({ phase: "downloading", done: (total * step) / 8, total });
+      else if (step <= 10) set({ phase: "installing", done: (total * (step - 8)) / 2, total });
+      else {
+        clearInterval(tick);
+        set(null, true);
+      }
+    }, 400);
+  };
+  return {
+    watch: async (name) => {
+      await ready;
+      return state[name];
+    },
+    unwatch: async () => {},
+    act: async (name, action, arg) => {
+      await ready;
+      console.log("[mock] screens", name, action, arg);
+      if (name === "style" && action === "apply") {
+        state.style.current = arg;
+        state.settings.theme = (state.style.themes as { name: string; title: string }[]).find((t) => t.name === arg)?.title ?? null;
+        changed("style");
+      } else if (name === "style" && action === "flag") {
+        const [key, on] = arg as [string, boolean];
+        state.style.flags = state.style.flags.map((f: { key: string }) => (f.key === key ? { ...f, value: on } : f));
+        changed("style");
+      } else if (name === "style" && action === "background") {
+        state.style.background = arg;
+        changed("style");
+      } else if (name === "coding" && action === "choose") {
+        state.coding.default = arg;
+        changed("coding");
+      } else if (name === "aur" && action === "query") {
+        state.aur.query = arg;
+        changed("aur");
+      } else if (name === "storage" && (action === "add" || action === "remove")) {
+        packJob(arg as string, action);
+      } else if (name === "licenses" && action === "text") {
+        return "MIT License\n\nPermission is hereby granted, free of charge, …";
+      }
+      return null;
+    },
+  };
+}
+
+/** The screens' sample states, painted from the fixture. */
+function sampleState(f: Fixture): Record<string, any> {
   const linux = { state: "installed" as const };
-  const state: Record<string, any> = {
+  const themes = f.themes.map((t) => ({ ...t, preview: svg(t.colors.background, t.colors.accent, t.title) }));
+  return {
     settings: {
       theme: "Kanagawa",
       linux,
@@ -37,7 +110,7 @@ export function mockScreens(events: Emitter): Bridge["screens"] {
     },
     style: {
       current: "kanagawa",
-      themes: THEMES,
+      themes,
       complete: true,
       download: { state: "idle", partial: true },
       installing: null,
@@ -45,7 +118,7 @@ export function mockScreens(events: Emitter): Bridge["screens"] {
       own: false,
       builtIn: false,
       background: "1-kanagawa.jpg",
-      backgrounds: ["1-kanagawa.jpg", "2-wave.jpg"].map((n, i) => ({ name: n, image: svg(i ? "#223249" : "#16161d", "#dcd7ba", n) })),
+      backgrounds: ["1-kanagawa.jpg", "2-wave.jpg"].map((n, i) => ({ name: n, image: svg(f.backgrounds[i], f.backgroundInk, n) })),
       liveWallpaper: false,
       flags: [
         { key: "icons.monochrome", label: "icons", on: "monochrome", off: "colored", value: false },
@@ -74,7 +147,7 @@ export function mockScreens(events: Emitter): Bridge["screens"] {
         title,
         repo: `github.com/someone/omarchy-${title.toLowerCase().replace(/ /g, "-")}-theme`,
         url: `https://github.com/someone/omarchy-${title.toLowerCase().replace(/ /g, "-")}-theme`,
-        image: svg(["#faf4ed", "#2d353b", "#2e3440", "#121212"][i], "#888", title),
+        image: svg(f.catalog[i], f.catalogInk, title),
         installedAs: i === 2 ? "nord" : null,
         inUse: false,
         running: false,
@@ -113,7 +186,7 @@ export function mockScreens(events: Emitter): Bridge["screens"] {
         busy: null,
         requires: i === 3 ? "pacman: btop" : "",
         commands: i === 3 ? ["btop --utf-force"] : ["http GET https://example.com/feed.json"],
-        preview: svg("#1f1f28", "#7e9cd8", name),
+        preview: svg(f.widgetPreview[0], f.widgetPreview[1], name),
       })),
     },
     linux: {
@@ -135,38 +208,17 @@ export function mockScreens(events: Emitter): Bridge["screens"] {
         { name: "bash", version: "5.2-1", description: "The GNU Bourne Again shell", repo: null, installed: true, core: true, job: null },
       ],
     },
+    // A base install (no root): what rootfs-packs.conf leaves out, sized as the 11-03 split measured.
+    storage: {
+      packs: [
+        { name: "gaming", download: 2.75e9, unpacked: 5.0 * 2 ** 30, installed: false, job: null },
+        { name: "apps", download: 2.2e9, unpacked: 5.2 * 2 ** 30, installed: false, job: null },
+        { name: "dev", download: 0.23e9, unpacked: 0.8 * 2 ** 30, installed: false, job: null },
+        { name: "languages", download: 0.59e9, unpacked: 1.55 * 2 ** 30, installed: true, job: null },
+      ],
+    },
     licenses: {
       version: "0.1.0-dev",
       components: [{ name: "Nerd Fonts", use: "symbol font", license: "mit", notice: "Copyright (c) 2014 Ryan L McIntyre", url: "https://www.nerdfonts.com", source: null }],
     },
-  };
-  const changed = (name: string) => events.emit("screens.state", { name, state: state[name] });
-  return {
-    watch: async (name) => state[name],
-    unwatch: async () => {},
-    act: async (name, action, arg) => {
-      console.log("[mock] screens", name, action, arg);
-      if (name === "style" && action === "apply") {
-        state.style.current = arg;
-        state.settings.theme = THEMES.find((t) => t.name === arg)?.title ?? null;
-        changed("style");
-      } else if (name === "style" && action === "flag") {
-        const [key, on] = arg as [string, boolean];
-        state.style.flags = state.style.flags.map((f: { key: string }) => (f.key === key ? { ...f, value: on } : f));
-        changed("style");
-      } else if (name === "style" && action === "background") {
-        state.style.background = arg;
-        changed("style");
-      } else if (name === "coding" && action === "choose") {
-        state.coding.default = arg;
-        changed("coding");
-      } else if (name === "aur" && action === "query") {
-        state.aur.query = arg;
-        changed("aur");
-      } else if (name === "licenses" && action === "text") {
-        return "MIT License\n\nPermission is hereby granted, free of charge, …";
-      }
-      return null;
-    },
-  };
-}
+  };}

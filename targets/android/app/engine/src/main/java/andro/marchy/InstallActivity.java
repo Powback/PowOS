@@ -48,7 +48,16 @@ public class InstallActivity extends Activity {
      *  when it publishes the tarball (so the APK built after a publish pins exactly that file). Both the download and
      *  a local copy are checked against it before anything is unpacked; a mismatch refuses the install. */
     static final String PIN_ASSET = "powos-rootfs.sha256";
+    /** The base image (tools/split-rootfs.py: the full rootfs minus the packs and docs: ~1 GB of the 7 GB), used
+     *  instead whenever this APK pins it and every pack it leaves out ([Packs]): gaming is added from the app on first
+     *  use, languages right after the install when Android's language isn't English. Rooted installs keep the full one. */
+    static final String BASE_URL = "http://android.pow/apk/powos-rootfs-base.tar.gz";
+    static final String BASE_PIN_ASSET = "powos-rootfs-base.sha256";
+    static final String[] PACKS = {"gaming", "apps", "dev", "languages"};
     private static final long NEEDED_BYTES = 12L << 30; // archive + extracted rootfs, with room for apps
+    /** The base's need: its archive (1.04 GB) + unpacked (2.8 GiB) + room. Not the full rootfs's 12 GB: that refused
+     *  the slim install on exactly the phones it is for (the 6 GB emulator, 4.3 GiB free). Packs are added later. */
+    private static final long BASE_NEEDED_BYTES = 4L << 30;
 
     // {xkb layout, label}: the common ones; the first selected is the physical keyboard's.
     private static final String[][] LAYOUTS = {
@@ -114,15 +123,20 @@ public class InstallActivity extends Activity {
 
     private void start(String name, String email, String layouts) {
         File files = getFilesDir();
-        if (new StatFs(files.getPath()).getAvailableBytes() < NEEDED_BYTES) {
-            call("failed", "not enough free space: about " + (NEEDED_BYTES >> 30) + " GB are needed");
+        long needed = useBase() ? BASE_NEEDED_BYTES : NEEDED_BYTES;
+        if (new StatFs(files.getPath()).getAvailableBytes() < needed) {
+            call("failed", "not enough free space: about " + (needed >> 30) + " GB are needed");
             return;
         }
         String conf = "KB_LAYOUTS=" + layouts.replaceAll("[^a-z,]", "") + "\nFULL_NAME=" + quote(name)
                 + "\nEMAIL=" + quote(email) + "\n";
         new Thread(() -> {
             try {
-                installRootfs(conf);
+                boolean base = installRootfs(conf);
+                if (base && !Locale.getDefault().getLanguage().equals("en"))
+                    Packs.install(this, "languages", (phase, done, total) -> call("progress", total > 0 ? done * 1000 / total : -1,
+                            (phase.equals("installing") ? "Installing " : "Downloading ") + Locale.getDefault().getDisplayLanguage() + " (" + (done >> 20)
+                                    + (total > 0 ? " / " + (total >> 20) : "") + " MB)"));
                 runOnUiThread(() -> {
                     startActivity(new Intent(this, MainActivity.class));
                     finish();
@@ -137,18 +151,42 @@ public class InstallActivity extends Activity {
         return "'" + s.trim().replace("'", "'\\''") + "'";
     }
 
-    private void installRootfs(String conf) throws IOException {
+    /** Whether this APK can install the base image: it pins the base and every pack (see [BASE_URL]). */
+    private boolean useBase() {
+        return useBase(this);
+    }
+
+    static boolean useBase(android.content.Context ctx) {
+        if (pinnedSha256(ctx, BASE_PIN_ASSET) == null)
+            return false;
+        for (String p : PACKS)
+            if (!Packs.available(ctx, p))
+                return false;
+        return true;
+    }
+
+    /** What a first install downloads from this APK: the base image when it can ([useBase]), the full rootfs otherwise
+     *  (the home's install tile shows its size). */
+    public static String downloadUrl(android.content.Context ctx) {
+        return useBase(ctx) ? BASE_URL : ROOTFS_URL;
+    }
+
+    /** Installs the base image when this APK can ([useBase]), the full rootfs otherwise; true for the base. */
+    private boolean installRootfs(String conf) throws IOException {
         File rootfs = SessionService.rootfs(this);
         File partial = new File(rootfs.getPath() + ".partial");
         deleteTree(partial); // a previous attempt that stopped halfway
-        String pin = pinnedSha256();
-        File external = new File(getExternalFilesDir(null), LOCAL_NAME);
+        final boolean base = useBase();
+        final String url = base ? BASE_URL : ROOTFS_URL;
+        String pin = base ? pinnedSha256(BASE_PIN_ASSET) : pinnedSha256();
+        final String localName = base ? "powos-rootfs-base.tar.gz" : LOCAL_NAME;
+        File external = new File(getExternalFilesDir(null), localName);
         // or in files/ (adb run-as, or a rootfs build on the device)
-        final File local = external.canRead() ? external : new File(getFilesDir(), LOCAL_NAME);
+        final File local = external.canRead() ? external : new File(getFilesDir(), localName);
         // The download goes to a file first and is checked whole before a single entry is unpacked: nothing from an
         // archive that doesn't match the pin ever lands in the rootfs. Not named LOCAL_NAME, so a leftover is never
         // mistaken for a local copy.
-        File download = new File(getFilesDir(), LOCAL_NAME + ".download");
+        File download = new File(getFilesDir(), localName + ".download");
         download.delete();
         try {
             File archive;
@@ -157,7 +195,7 @@ public class InstallActivity extends Activity {
                 archive = local;
                 got = sha256(new FileInputStream(local), local.length(), null, "Checking the rootfs");
             } else {
-                HttpURLConnection c = (HttpURLConnection) new URL(ROOTFS_URL).openConnection();
+                HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
                 c.setInstanceFollowRedirects(true); // GitHub release assets redirect to their storage host
                 c.connect();
                 if (c.getResponseCode() != 200)
@@ -170,7 +208,7 @@ public class InstallActivity extends Activity {
             if (!got.equals(pin))
                 throw new IOException("the rootfs's checksum doesn't match this app's (expected sha256 "
                         + pin.substring(0, 16) + "…, got " + got.substring(0, 16) + "…): refusing to install it. "
-                        + (archive == local ? "Remove " + local + ", or" : "The published rootfs (" + ROOTFS_URL
+                        + (archive == local ? "Remove " + local + ", or" : "The published rootfs (" + url
                         + ") is not the one this app was built for:") + " rebuild the app after the rootfs is published");
             extract(archive, partial);
         } finally {
@@ -183,6 +221,7 @@ public class InstallActivity extends Activity {
         }
         if (!partial.renameTo(rootfs))
             throw new IOException("could not move the rootfs into place");
+        return base;
     }
 
     /** Unpacks the (already checked) archive into partial, with progress. */
@@ -213,18 +252,28 @@ public class InstallActivity extends Activity {
 
     /** The pinned sha256 (64 lowercase hex), or an error saying this APK has none. */
     private String pinnedSha256() throws IOException {
-        String line = null;
-        try (BufferedReader r = new BufferedReader(new InputStreamReader(getAssets().open(PIN_ASSET),
-                StandardCharsets.US_ASCII))) {
-            line = r.readLine();
-        } catch (IOException e) {
-            // no asset: handled below
-        }
-        String hex = line == null ? "" : line.trim().split("\\s+")[0].toLowerCase(Locale.ROOT);
-        if (!hex.matches("[0-9a-f]{64}"))
+        String hex = pinnedSha256(PIN_ASSET);
+        if (hex == null)
             throw new IOException("this app has no rootfs checksum pinned (assets/" + PIN_ASSET
                     + "): rebuild it after targets/android/build-rootfs.sh publishes the rootfs");
         return hex;
+    }
+
+    /** The sha256 pinned in an asset (64 lowercase hex), or null when the asset is missing or holds none. */
+    private String pinnedSha256(String asset) {
+        return pinnedSha256(this, asset);
+    }
+
+    static String pinnedSha256(android.content.Context ctx, String asset) {
+        String line = null;
+        try (BufferedReader r = new BufferedReader(new InputStreamReader(ctx.getAssets().open(asset),
+                StandardCharsets.US_ASCII))) {
+            line = r.readLine();
+        } catch (IOException e) {
+            return null;
+        }
+        String hex = line == null ? "" : line.trim().split("\\s+")[0].toLowerCase(Locale.ROOT);
+        return hex.matches("[0-9a-f]{64}") ? hex : null;
     }
 
     /** sha256 of a stream (closed afterwards), copied to out when given, with progress under label. */

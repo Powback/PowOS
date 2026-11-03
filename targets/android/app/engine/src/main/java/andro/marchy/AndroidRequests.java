@@ -12,7 +12,8 @@ import java.nio.file.Files;
 /**
  * Requests from the Linux session for things only Android can do, written to run/android-request by the
  * android-request helper (atomically, by rename): "wifi-panel", "open <package>" (full screen; a floating window on the unfolded home, [openOptions]), "split <package>" (beside Andromarchy), "float <package>" (floating window),
- * "launcher <apps|ai> [how json]" (PowOS's one launcher, [launcher]).
+ * "launcher <apps|ai> [how json]" (PowOS's one launcher, [launcher]), "pack <name>" (add a part of PowOS the base image
+ * left out, [Packs]; progress in run/pack-NAME.state).
  */
 public final class AndroidRequests implements DirWatch.Listener {
     private static final String TAG = "AndroidRequests";
@@ -44,7 +45,7 @@ public final class AndroidRequests implements DirWatch.Listener {
      * Linux piece that lands before the APK keeps its own fallback instead of writing a request nobody serves.
      */
     private void writeVerbs() {
-        StringBuilder v = new StringBuilder("wifi-panel\nopen\nsplit\nfloat\npower\n");
+        StringBuilder v = new StringBuilder("wifi-panel\nopen\nsplit\nfloat\npower\npack\n");
         if (launcher != null)
             v.append("launcher\n");
         File out = new File(file.getParentFile(), "android-request.verbs");
@@ -161,6 +162,10 @@ public final class AndroidRequests implements DirWatch.Listener {
                 Log.w(TAG, "no launcher host for: " + line);
             else
                 host.accept(arg[0], arg.length == 2 ? arg[1] : "");
+            return;
+        }
+        if (req[0].equals("pack") && req.length == 2) { // e.g. powos-steam on a base install: "pack gaming"
+            Packs.installAsync(ctx, req[1].trim());
             return;
         }
         if (req[0].equals("power") && req.length == 2) { // Omarchy's shutdown / reboot / log out / suspend

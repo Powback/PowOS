@@ -20,6 +20,8 @@
 # does not need the container: its own script sets up the prefix and environment, and the rootfs is a full Arch
 # system. This is what umu-launcher does with UMU_NO_RUNTIME; here without the runtime download at all.
 set -euo pipefail
+# A base install (no root) adds the gaming pack (FEX + its x86 rootfs, box64, Steam's parts) on first use: Windows/x86 games need it.
+powos-pack need gaming
 
 DATA=${XDG_DATA_HOME:-$HOME/.local/share}
 STATE=${XDG_STATE_HOME:-$HOME/.local/state}/powos/play

@@ -1,0 +1,69 @@
+{
+ "_why": "Sample theme data for screens-mock.ts (the screens' host in a desktop browser): palettes and preview colours of themes, not UI colours - fetched at run time like dev/sample-trees.json, so no colour literal sits in the shell's code.",
+ "themes": [
+  {
+   "name": "kanagawa",
+   "title": "Kanagawa",
+   "colors": {
+    "background": "#1f1f28",
+    "foreground": "#dcd7ba",
+    "accent": "#7e9cd8",
+    "red": "#e82424",
+    "green": "#76946a",
+    "yellow": "#c0a36e"
+   }
+  },
+  {
+   "name": "tokyo-night",
+   "title": "Tokyo Night",
+   "colors": {
+    "background": "#1a1b26",
+    "foreground": "#a9b1d6",
+    "accent": "#7aa2f7",
+    "red": "#f7768e",
+    "green": "#9ece6a",
+    "yellow": "#e0af68"
+   }
+  },
+  {
+   "name": "gruvbox",
+   "title": "Gruvbox",
+   "colors": {
+    "background": "#282828",
+    "foreground": "#ebdbb2",
+    "accent": "#d79921",
+    "red": "#cc241d",
+    "green": "#98971a",
+    "yellow": "#d79921"
+   }
+  },
+  {
+   "name": "catppuccin-latte",
+   "title": "Catppuccin Latte",
+   "colors": {
+    "background": "#eff1f5",
+    "foreground": "#4c4f69",
+    "accent": "#1e66f5",
+    "red": "#d20f39",
+    "green": "#40a02b",
+    "yellow": "#df8e1d"
+   }
+  }
+ ],
+ "backgrounds": [
+  "#16161d",
+  "#223249"
+ ],
+ "backgroundInk": "#dcd7ba",
+ "catalog": [
+  "#faf4ed",
+  "#2d353b",
+  "#2e3440",
+  "#121212"
+ ],
+ "catalogInk": "#888",
+ "widgetPreview": [
+  "#1f1f28",
+  "#7e9cd8"
+ ]
+}

@@ -3394,6 +3394,11 @@ html:root .wsheet.tile { --glass-blur-native: var(--backdrop-blur-native); backg
 /* Up to four apps, small, in a uniform 2x2 - the whole card is the tap (it opens the folder). */
 .lib-icons { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 8px; aspect-ratio: 1; padding: 4px; pointer-events: none; }
 .lib-icons > .app-icon { width: 100%; height: auto; aspect-ratio: 1; }
+/* "Add gaming" (library.tsx AddGamingCard): a folder-sized card with the pack's state and its live progress bar. */
+.lib-pack-body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; aspect-ratio: 1; padding: 4px; text-align: center; color: var(--color-foreground); }
+.lib-pack-text { font-size: var(--text-small); opacity: 0.75; overflow-wrap: anywhere; }
+.lib-pack .scr-bar { align-self: stretch; height: 4px; border-radius: var(--radius); background: var(--color-surface); overflow: hidden; }
+.lib-pack .scr-bar i { display: block; height: 100%; background: var(--color-accent); }
 /* The edit bar's "+ app" picker (editsheet.tsx AppPicker): the drawer's list and pill in the picker's sheet. */
 .aw-picker.app-picker { height: min(100%, 720px); }
 .app-picker .drawer { padding: 0; max-width: none; width: 100%; }
