@@ -38,6 +38,9 @@ import java.util.Locale;
  * first-boot.sh, which applies the answers (setup.conf).
  */
 public class InstallActivity extends Activity {
+    /** The image is being installed (download, unpack, packs): the no-root session waits for it (SessionPlan). */
+    static volatile boolean installing;
+
     /** PowOS: the PowOS rootfs (targets/android/build-rootfs.sh), served by android-app-dev's web server on the LAN/VPN
      *  (android.pow/apk = ~/Projects/android-app-dev/output). Was Andromarchy's Omarchy rootfs on GitHub. */
     public static final String ROOTFS_URL = "http://android.pow/apk/powos-rootfs.tar.gz";
@@ -130,6 +133,7 @@ public class InstallActivity extends Activity {
         }
         String conf = "KB_LAYOUTS=" + layouts.replaceAll("[^a-z,]", "") + "\nFULL_NAME=" + quote(name)
                 + "\nEMAIL=" + quote(email) + "\n";
+        installing = true;
         new Thread(() -> {
             try {
                 boolean base = installRootfs(conf);
@@ -137,11 +141,14 @@ public class InstallActivity extends Activity {
                     Packs.install(this, "languages", (phase, done, total) -> call("progress", total > 0 ? done * 1000 / total : -1,
                             (phase.equals("installing") ? "Installing " : "Downloading ") + Locale.getDefault().getDisplayLanguage() + " (" + (done >> 20)
                                     + (total > 0 ? " / " + (total >> 20) : "") + " MB)"));
+                installing = false;
+                SessionService.start(this); // the session waited for this (SessionPlan.WAIT_IMAGE)
                 runOnUiThread(() -> {
                     startActivity(new Intent(this, MainActivity.class));
                     finish();
                 });
             } catch (Throwable e) { // shown, never a crash: the user can retry
+                installing = false;
                 call("failed", String.valueOf(e.getMessage()));
             }
         }).start();

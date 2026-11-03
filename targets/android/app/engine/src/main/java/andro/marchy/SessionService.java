@@ -162,18 +162,110 @@ public class SessionService extends Service {
         fold = new FoldWatcher(this);
         fold.start();
 
-        try {
-            startSession();
-        } catch (IOException e) {
-            Log.e(TAG, "session start failed", e);
-        }
+        if (RootMode.enabled()) {
+            // Rooted: started once, here, as always (nothing in it waits: su runs the session on its own).
+            try {
+                startSession();
+            } catch (IOException e) {
+                Log.e(TAG, "session start failed", e);
+            }
+        } else
+            kick(); // no root: on the session thread, once the image is complete, with retries (SessionPlan)
         // PowOS: PowOS windows as their own Android tasks - the control channel to KWin (through the daemon).
         WindowTasks.start(this);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        return START_STICKY; // the processes belong to this service: started once, in onCreate
+        // The processes belong to this service. No root: each start request (InstallActivity done, the app opened
+        // again after a give-up) looks again whether the session must start or retry.
+        if (!RootMode.enabled())
+            kick();
+        return START_STICKY;
+    }
+
+    /** The splash's line while the session waits for the image, retries or gave up (SessionPlan.status); else null. */
+    static volatile String status;
+
+    /**
+     * The no-root session's own thread: startSession runs first-boot.sh and waits for it, which held the MAIN thread
+     * in onCreate (11-04 emulator: the home stopped drawing - its WebView never came alive - while the session
+     * started; a foreground service's onCreate is also an ANR past 20 s).
+     */
+    private final android.os.Handler session = newSessionThread();
+    private int attempts;
+    private long startedAt = -1; // uptime of the current start, -1: none running
+
+    private static android.os.Handler newSessionThread() {
+        android.os.HandlerThread t = new android.os.HandlerThread("powos-session");
+        t.start();
+        return new android.os.Handler(t.getLooper());
+    }
+
+    private void kick() {
+        session.removeCallbacks(step);
+        session.post(step);
+    }
+
+    /** One look at the no-root session (SessionPlan): wait, start, watch, end and retry, or give up. */
+    private final Runnable step = new Runnable() {
+        @Override
+        public void run() {
+            File run = runDir(SessionService.this);
+            long now = android.os.SystemClock.uptimeMillis();
+            File[] wl = run.listFiles((d, n) -> n.startsWith("wayland-") && !n.endsWith(".lock"));
+            SessionPlan.Health h = SessionPlan.health(startedAt >= 0, new File(run, "bus").exists(),
+                    wl != null && wl.length > 0, now - startedAt);
+            SessionPlan.Action a = SessionPlan.next(false, rootfsReady(SessionService.this), InstallActivity.installing,
+                    h, attempts);
+            long delay = SessionPlan.retryDelayMs(attempts);
+            status = SessionPlan.status(a, attempts, delay);
+            switch (a) {
+                case WAIT_IMAGE: // InstallActivity starts this service again once the image is complete
+                    Log.i(TAG, "session: waiting for the PowOS image to finish installing");
+                    return;
+                case START:
+                    attempts++;
+                    startedAt = now;
+                    Log.i(TAG, "session: starting (try " + attempts + ")");
+                    try {
+                        startSession();
+                    } catch (IOException e) {
+                        Log.e(TAG, "session start failed", e);
+                    }
+                    session.postDelayed(this, 2000);
+                    return;
+                case UP:
+                    if (h == SessionPlan.Health.UP) {
+                        if (attempts > 0)
+                            Log.i(TAG, "session: up (try " + attempts + ")");
+                        attempts = 0;
+                    } else
+                        session.postDelayed(this, 2000); // still coming up
+                    return;
+                case RETRY:
+                    Log.w(TAG, "session: no D-Bus or compositor " + (now - startedAt) / 1000 + " s after try "
+                            + attempts + ", ending it and trying again in " + delay / 1000 + " s");
+                    endSession();
+                    session.postDelayed(this, delay);
+                    return;
+                default:
+                    Log.e(TAG, "session: gave up after " + attempts + " tries");
+                    endSession();
+                    attempts = 0; // the next start request (the app opened again) begins anew
+            }
+        }
+    };
+
+    /** Ends the processes of a failed start, so the next one begins clean. */
+    private void endSession() {
+        synchronized (processes) {
+            for (Process p : processes)
+                p.destroyForcibly();
+            processes.clear();
+        }
+        endLeftovers("libandromarchy.so");
+        startedAt = -1;
     }
 
     private void startSession() throws IOException {
@@ -239,10 +331,8 @@ public class SessionService extends Service {
             w.write("[options]\nArchitecture = auto\nDisableSandbox\nSigLevel = Optional TrustAll\n\n"
                     + "[powos]\nServer = http://android.pow/apk/repo\n");
         }
-        spawn("powos-packages", List.of(launcher, "-c", "C=/etc/pacman.d/powos-repo.conf; exec >\"$XDG_RUNTIME_DIR/"
-                + "powos-packages.log\" 2>&1; sudo pacman --config $C -Sy --noconfirm || exit 0;"
-                + " P=$(pacman --config $C -Slq powos); sudo pacman --config $C -S --noconfirm --needed $P"
-                + " || for p in $P; do sudo pacman --config $C -S --noconfirm --needed $p; done"), archEnv(run, sock));
+        // Upgrades only, never a downgrade (SessionPlan.packagesCommand: a stale repo's KWin broke the session).
+        spawn("powos-packages", List.of(launcher, "-c", SessionPlan.packagesCommand()), archEnv(run, sock));
 
         // 1. Display daemon: relays buffers and input between this app's display and Hyprland.
         spawn("andromarchy", List.of(libDir + "/libandromarchy.so", sock), null);
@@ -510,7 +600,9 @@ public class SessionService extends Service {
         // stdin /dev/null, output its log (made anew each start).
         pb.redirectErrorStream(true).redirectOutput(log)
                 .redirectInput(new File("/dev/null"));
-        processes.add(pb.start());
+        synchronized (processes) {
+            processes.add(pb.start());
+        }
         Log.i(TAG, "started " + name + " (log: " + log + ")");
     }
 
@@ -521,8 +613,12 @@ public class SessionService extends Service {
         requests.stopWatching();
         unregisterReceiver(apps);
         fold.stop();
-        for (Process p : processes)
-            p.destroy();
+        session.removeCallbacksAndMessages(null);
+        session.getLooper().quitSafely();
+        synchronized (processes) {
+            for (Process p : processes)
+                p.destroy();
+        }
         if (wakeLock != null && wakeLock.isHeld())
             wakeLock.release();
         super.onDestroy();

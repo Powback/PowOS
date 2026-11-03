@@ -41,6 +41,9 @@ STATE=$HOME/.cache/powos-emu
 BUILD_TREE=$REPO/.claude/worktrees/emu-build
 IMAGE=android-app-dev-android-builder:latest
 SNAP=powos-ready
+# DNS: Pi-hole on PowStation, so the LAN's names (android.pow: the APK, base image, packs and [powos] repo) resolve
+# in the emulator as on the phone - the emulator's default (the Mac's resolver via slirp) didn't give them.
+EMU_DNS=${EMU_DNS:-192.168.50.100}
 COMMIT_FILE=/data/local/tmp/powos-emu-commit
 mkdir -p "$STATE"
 a() { "$ADB" -s "$SERIAL" "$@"; }
@@ -136,7 +139,8 @@ boot() {
   say "booting $AVD on $SERIAL"
   "$ADB" start-server >/dev/null 2>&1
   nohup "$EMU" -avd "$AVD" -port "$PORT" -no-window -no-audio -no-boot-anim -writable-system \
-    -gpu "${EMU_GPU:-swiftshader_indirect}" -camera-back none -camera-front none "$@" > "$STATE/emulator.log" 2>&1 &
+    -gpu "${EMU_GPU:-swiftshader_indirect}" -camera-back none -camera-front none -dns-server "$EMU_DNS" "$@" \
+    > "$STATE/emulator.log" 2>&1 &
   echo $! > "$STATE/emulator.pid"
   local i; for i in $(seq 120); do running && break; kill -0 "$(cat "$STATE/emulator.pid")" 2>/dev/null || die "the emulator exited: $(tail -5 "$STATE/emulator.log")"; sleep 1; done
   wait_boot 400

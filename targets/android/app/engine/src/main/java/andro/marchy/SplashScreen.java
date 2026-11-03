@@ -17,8 +17,8 @@ import java.io.File;
  */
 final class SplashScreen {
     private static final String[] MSGS = {
-        "Starting the display bridge...", "Starting D-Bus...", "Starting PipeWire...", "Starting Hyprland...",
-        "Opening the Wayland socket...", "Starting Omarchy's shell...", "Ready.",
+        "Starting the display bridge...", "Starting D-Bus...", "Starting PipeWire...", "Starting the desktop (KWin)...",
+        "Starting Plasma...", "Ready.",
     };
 
     /** Shown at least this long, even when the session is up sooner: time to see it (touch still skips it). */
@@ -53,13 +53,17 @@ final class SplashScreen {
                 File[] wl = run.listFiles((d, n) -> n.startsWith("wayland-") && !n.endsWith(".lock"));
                 boolean[] done = {
                     SessionService.daemonListening(a), new File(run, "bus").exists(),
-                    new File(run, "pipewire-0").exists(), new File(run, "hypr").isDirectory(),
-                    wl != null && wl.length > 0, new File(run, "desktop-ready").exists(),
+                    // KWin's Wayland socket (there is no Hyprland: run/hypr never appeared, the splash sat at
+                    // "Starting Hyprland..." 50% however far the session got)
+                    new File(run, "pipewire-0").exists(), wl != null && wl.length > 0,
+                    new File(run, "desktop-ready").exists(),
                 };
                 int step = 0;
                 while (step < done.length && done[step])
                     step++;
-                return "{\"step\":" + step + ",\"steps\":" + done.length + ",\"msg\":\"" + MSGS[step] + "\"}";
+                String waiting = SessionService.status; // waiting for the image, retrying, gave up (SessionPlan)
+                return new org.json.JSONObject(java.util.Map.of("step", step, "steps", done.length,
+                        "msg", waiting != null ? waiting : MSGS[step])).toString();
             }
 
             @JavascriptInterface
