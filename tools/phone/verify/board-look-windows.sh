@@ -380,7 +380,7 @@ if [ "$CASE" = relaunch ]; then
     sh_ "input keyevent KEYCODE_HOME"; sleep 2; chk home
     step home "Home pressed"
     f=$(searchpt)
-    case $f in none|off|"") fail "no search on home ($f)" ;; *)
+    case $f in none|off*|"") fail "no search on home ($f)" ;; *)
       set -- $f; tap "$1" "$2" "home's search"; sleep 1.2; chk search
       if [ "$(ev "$SEARCHED")" = yes ] && homefocused; then
         q=$(tr 'A-Z' 'a-z' <<<"${LABEL%% *}" | tr -cd 'a-z0-9'); sh_ "input text ${q:-calc}"; sleep 1.5; chk typed

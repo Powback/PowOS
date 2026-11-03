@@ -151,15 +151,19 @@ back() { sh_ "input keyevent 4"; sleep "${1:-0.8}"; }
 # pt <js expression of an element>: its centre in device px "x y", "none" (no element) or "off" (off screen / hidden).
 pt() { ev "(()=>{const e=($1);if(!e)return 'none';const r=e.getBoundingClientRect(),d=devicePixelRatio;if(r.width<2||r.height<2||r.bottom<1||r.top>innerHeight-1||r.right<1||r.left>innerWidth-1)return 'off';return Math.round((r.x+r.width/2)*d)+' '+Math.round((r.y+r.height/2)*d)})()"; }
 # Home's search, by the current rules (26e5c496/a481983d SW1): a bar on home (unfolded by default) is tapped in its
-# field; a search docked as the dock's button (folded by default) is tapped and opens the launcher with the bar
-# focused. searchpt: "x y" of what to tap, or none/off. SEARCHED: the field the keyboard is in after it.
-SEARCHPT="(document.querySelector('.home > .bar textarea')&&document.querySelector('.home > .bar').getBoundingClientRect().height>2?document.querySelector('.home > .bar textarea'):document.querySelector('.home .dock .app.dock-search'))"
+# pill; a search docked as the dock's button (folded by default) is tapped and opens the launcher with the bar focused.
+# searchpt: "x y" of what to tap (device px, from the page's own rects - never fixed coordinates), none (no search) or
+# "off <why>". ST1 (e2e-lookw-relaunch 11-03, "home's search didn't take the focus" at 1128,2329): measured once at rest
+# - its rect still for 3 frames with no animation on it or what carries it (home's slide, the seat's translate, the
+# drawer's settle; up to ~3 s) - and hit-tested: the point must land on the search itself, not on something over it (a
+# bar parked under the grid's search widget has a rect but takes no touch). Same rules as the gate (dev/search-tap-check.js).
+SEARCHPT="new Promise(ok=>{const pick=()=>{const b=document.querySelector('.home > .bar');if(b&&b.getBoundingClientRect().height>2&&getComputedStyle(b).pointerEvents!=='none')return b;return document.querySelector('.home .dock .app.dock-search')};const mv=e=>document.getAnimations().some(a=>a.playState==='running'&&a.effect&&a.effect.target instanceof Element&&(a.effect.target.contains(e)||e.contains(a.effect.target)));let last='',still=0,n=0;const go=()=>{const e=pick();const k=e?JSON.stringify(e.getBoundingClientRect()):'';still=e&&k===last&&!mv(e)?still+1:0;last=k;if(still<3&&n++<180)return requestAnimationFrame(go);if(!e)return ok('none');const f=e.querySelector('.bar-pill')||e,r=f.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;if(r.width<2||r.height<2||r.bottom<1||r.top>innerHeight-1)return ok('off (not on screen)');const h=document.elementFromPoint(x,y);if(!h||!e.contains(h))return ok('off (under '+(h?h.tagName.toLowerCase()+'.'+String(h.className).split(' ')[0]:'nothing')+')');const d=devicePixelRatio;ok(Math.round(x*d)+' '+Math.round(y*d))};requestAnimationFrame(go)})"
 SEARCHED="document.activeElement&&document.activeElement.matches('.bar textarea')?'yes':'no'"
 # homefocused: home (com.powos.app) holds the input focus on ANY display. Never `grep -m1 mCurrentFocus`: dumpsys lists a
 # web window's or KWin's virtual display first (its mCurrentFocus=null), so a focused search read as unfocused (e2e
 # round 193, appapi 01/02 folded: the page had the focus and asked for the keyboard).
 homefocused() { sh_ "dumpsys window | grep mCurrentFocus" | grep -q com.powos.app; }
-searchpt() { pt "$SEARCHPT"; }
+searchpt() { ev "$SEARCHPT"; }
 # searchresult <app key>: "x y" of that app in the launcher's search results, or none/off. The results are buttons
 # [data-search-result="app:<key>"] (drawer.tsx SearchResults, since e7766370) - the old `.app[data-key]` probe found
 # nothing there and failed Kate/App API/Lights though they were on screen (E2E 194). Scrolled into view first: a long
