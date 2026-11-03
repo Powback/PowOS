@@ -328,6 +328,14 @@ export interface RecentTask {
   splitLayout?: "2h" | "2v";
 }
 
+/** An app running with no card ([Bridge.apps.background]): its key ("a:" / "l:"), name, icon; [frozen]: asleep. */
+export interface BackgroundApp {
+  key: string;
+  label: string;
+  icon: string | null;
+  frozen?: boolean;
+}
+
 /** One app of a split card ([RecentTask.split]). */
 export interface SplitSide {
   id: number;
@@ -499,6 +507,14 @@ export interface Bridge {
      * those, or nothing to close - the caller removes its tasks. An older host rejects it ("no such call").
      */
     close?(key: string): Promise<boolean>;
+    /**
+     * Apps running with no task of their own (the switcher's "Running in background", ui/recents.tsx): Android apps
+     * whose processes do work (a foreground service: Termux's session), the session's tracked Linux apps (Steam in its
+     * tray). Never PowOS, system or persistent apps. The phone's only; an older APK rejects it ("no such call").
+     */
+    background?(): Promise<BackgroundApp[]>;
+    /** Stops background app [key] (Android: force-stopped; Linux: [close]'s clean close). False: not stopped. */
+    stopBackground?(key: string): Promise<boolean>;
   };
   usage: {
     /** Keys, last opened first. */
