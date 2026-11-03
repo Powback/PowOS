@@ -73,6 +73,15 @@ function glassBox() {
 }
 
 const faceBox = () => document.querySelector(".home .dock .dock-search-face")?.getBoundingClientRect() ?? null;
+/**
+ * The button's box once home's foot is at rest: with the bar the default (11-03) the button comes into the dock as the
+ * check starts, and the dock settles down into the room the bar left - a loaded gate measured it 78 px early.
+ */
+async function faceAtRest(G) {
+  await G.settled(() => true, ".home > .dock");
+  await G.steady(() => (({ left, top }) => [Math.round(left), Math.round(top)])(faceBox() ?? { left: 0, top: 0 }), 10);
+  return faceBox();
+}
 
 /**
  * [go] starts it; the morph's frames sampled (its animations paused at 0 and half way): the glass starts as the
@@ -105,7 +114,7 @@ function buttonBack(where) {
 
 async function launcherIs(G, S, folded) {
   S.pullKind.value = "apps";
-  const button = faceBox();
+  const button = folded ? await faceAtRest(G) : null;
   const f = folded && button ? await morphs("launcher", G, () => (S.drawer.value = 1), button) : ((S.drawer.value = 1), []);
   await G.until(() => document.querySelector(`${BAR}[data-role=apps]`), 3000);
   await sleep(350);
@@ -117,7 +126,7 @@ async function launcherIs(G, S, folded) {
 }
 
 async function aiPageIs(G, S, powos, folded) {
-  const button = faceBox();
+  const button = folded ? await faceAtRest(G) : null;
   const f = folded && button ? await morphs("AI page", G, () => (S.page.value = -1), button) : ((S.page.value = -1), []);
   await G.until(() => document.querySelector(`${BAR}.seated`), 3000);
   // The screens' slide settles before the seat is judged: a fixed 450 ms read the slot mid-slide under a loaded Mac
@@ -180,6 +189,9 @@ export async function oneBarCheck(label) {
     S.searchTry.value = "dock";
   }
   await G.settled(() => document.querySelector(".home > .dock"), ".home > .dock");
+  // Home's search the bar by default since 11-03 (state.ts searchSpot): the button just came into the dock, the dock
+  // still springing it in and settling into the foot the bar left - measured once it's at rest.
+  if (folded) await faceAtRest(G);
   if (!folded) S.chat.value = { busy: false, items: [{ kind: "user", text: "hi" }, { kind: "assistant", text: "Hello - `code` here." }] };
   const fails = [...homeIs("home", folded), ...(await launcherIs(G, S, folded)), ...(folded ? [] : await aiPanelIs(G, S)), ...(await aiPageIs(G, S, powos, folded))];
   // Back home: the role goes back, the bar off the AI page (folded: morphing back into the button).

@@ -370,8 +370,12 @@ function seatOnAi(bar: HTMLElement) {
   if (heldSeated(bar, home)) return;
   if (page.peek() !== -1 || !home || !slot || !ai || !slot.getClientRects().length) return unseat(bar);
   const s = slot.getBoundingClientRect(), a = ai.getBoundingClientRect();
-  // Measured at its own place: its width the slot's, no translate (home's transform shifts it and home alike).
+  // Measured at its own place: its width the slot's, no translate (home's transform shifts it and home alike). With no
+  // transition while measured: a bar already seated (home's search the bar, mounted all along) has .seated's translate
+  // transition, so dropping the translate kept its old one in the rect and the re-seat landed off the slot (11-03,
+  // ai-keyboard: the field 88 px over the keyboard, and off-screen sideways).
   const was = bar.style.translate;
+  bar.style.transition = "none";
   bar.style.translate = "none";
   bar.style.width = `${s.width}px`;
   const b = bar.getBoundingClientRect(), h = home.getBoundingClientRect();
@@ -381,6 +385,7 @@ function seatOnAi(bar: HTMLElement) {
   const y = Math.max(s.bottom - a.top - (b.bottom - h.top), s.top - a.top - (pill.top - h.top));
   bar.style.translate = was;
   void bar.offsetWidth;
+  bar.style.removeProperty("transition");
   bar.classList.add("seated");
   bar.style.translate = `${Math.round(x)}px ${Math.round(y)}px`;
   // The threads under it keep clear of where it lands (powai.tsx useBarClear; its translate's end re-measures).
