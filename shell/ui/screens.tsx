@@ -382,6 +382,8 @@ function SettingsScreen() {
   const needs = (name: ScreenName) => () => openScreen(installed ? name : "linux");
   const tiles: [IconName, string, string, () => void][] = [
     ["palette", "style", s?.theme ?? "theme, background, icons", () => openScreen("style")],
+    // Home's own choices (style screen's "home" section): where the dock and the search sit - found from here too.
+    ["apps", "home", "dock and search: bar or dock button", () => openScreen("style", "home")],
     ["storefrontOutline", "widget store", "widgets for home", () => openScreen("store")],
     ["penguin", "linux", linuxLine(s?.linux, s?.powos ?? false), () => openScreen("linux")],
     ["robotOutline", "coding agents", installed ? (s?.agent ? `default: ${s.agent}` : "Claude Code, OpenCode, …") : "needs linux", needs("coding")],

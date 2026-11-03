@@ -750,3 +750,113 @@ export async function sbIs(want, at) {
   ];
   return checks.filter(([ok]) => !ok).map(([, why]) => `${mode} ${at}: ${why}`);
 }
+
+/**
+ * BF1 (the user, 11-03 11:49: "Move the search bar so that it's at the same height as the manager search bar"): the one
+ * bar's pill on home (spot "bar", under the dock: belowDock), on the launcher and on PowOS AI's page - the same bottom
+ * and height (±1 px; --bar-foot, shell.css), so swiping home <-> the AI page or opening the launcher it doesn't move.
+ * [below]: the pill under the dock ("1") or over it (""). Failures, empty when it holds; with the rects measured.
+ */
+/** The one bar's pill at [page] with the launcher [drawer] open (1) or not: its bottom off the screen's foot and height. */
+async function bfPill(S, page, drawer) {
+  S.page.value = page;
+  S.drawer.value = drawer;
+  await sleep(900);
+  const b = document.querySelector(".home > .bar .bar-pill")?.getBoundingClientRect();
+  return b ? { bottom: Math.round(innerHeight - b.bottom), height: Math.round(b.height) } : null;
+}
+
+export async function barFootSame(below = "1") {
+  const S = await importShim("./state.ts");
+  const W = await importShim("./ui/searchwidget.tsx");
+  const mode = S.dockMode.value === "unfolded" ? "unfolded" : "mobile";
+  window.__mockEvents?.emit("system.insets", { top: 45, bottom: 16, left: 0, right: 0, keyboard: 0 });
+  await W.pickSearchSpot(mode, "bar");
+  W.footBelow.value = below;
+  const home = await bfPill(S, 0, 0);
+  const ai = await bfPill(S, -1, 0);
+  await bfPill(S, 0, 0);
+  const launcher = await bfPill(S, 0, 1);
+  await bfPill(S, 0, 0);
+  const at = `${mode}, pill ${below ? "under" : "over"} the dock`;
+  console.info(`[barFootSame] ${at}: home ${JSON.stringify(home)} ai ${JSON.stringify(ai)} launcher ${JSON.stringify(launcher)}`);
+  // Over the dock, home's own pill sits above it (only the launcher's comes down to the foot).
+  return bfCompare(at, ai, below ? { launcher, home } : { launcher });
+}
+
+/** Each of [pills] at the AI page's [ai] bottom and height (±1 px), else what's off. */
+function bfCompare(at, ai, pills) {
+  const all = { ai, ...pills };
+  const none = Object.keys(all).filter((k) => !all[k]);
+  if (none.length) return [`${at}: no pill on ${none.join(", ")}`];
+  return Object.entries(pills)
+    .filter(([, r]) => Math.abs(r.bottom - ai.bottom) > 1 || Math.abs(r.height - ai.height) > 1)
+    .map(([name, r]) => `${at}: ${name}'s pill ${r.bottom} px off the bottom, ${r.height} px high; the AI page's ${ai.bottom} px, ${ai.height} px`);
+}
+
+/** SF1 (the user, 11-03 11:49: "Where is that setting? I couldn't find it in a setting."): a typed [query] in search. */
+async function sfFinds(query, label) {
+  const Q = await importShim("./search.ts");
+  const hit = Q.settingDestinations.find((d) => d.label === label && Q.searchRank(query, d.label, d.keywords) >= 0);
+  return hit ? [] : [`search "${query}" doesn't list "${label}"`];
+}
+
+/** [target] opened on the style screen: its row there, highlighted, in the scroller's view. */
+async function sfOpens(target) {
+  const R = await importShim("./screens.ts");
+  const Q = await importShim("./search.ts");
+  const d = Q.settingDestinations.find((x) => x.target === target && x.screen === "style");
+  R.openScreen(d.screen, d.target);
+  await sleep(900);
+  const row = [...document.querySelectorAll("[data-setting]")].find((e) => e.dataset.setting === target);
+  const b = row?.getBoundingClientRect();
+  const fails = [];
+  if (!row) fails.push(`"${target}": no row on the style screen`);
+  else if (row.dataset.searchHighlight !== "true") fails.push(`"${target}": row not highlighted`);
+  else if (b.top < 0 || b.bottom > innerHeight) fails.push(`"${target}": row off screen (${Math.round(b.top)}..${Math.round(b.bottom)})`);
+  R.closeScreens();
+  await sleep(400);
+  return fails;
+}
+
+/** The search's own menu flips its spot at once: [open] opens it, its one item picked; [want] the spot after. */
+async function sfMenuFlips(open, want, at) {
+  const S = await importShim("./state.ts");
+  const mode = S.dockMode.value === "unfolded" ? "unfolded" : "mobile";
+  open();
+  await sleep(400);
+  const item = document.querySelector(".search-spot-menu .menu-item");
+  if (!item) return [`${at}: no menu`];
+  const label = want === "dock" ? "Show as dock button" : "Show as bar";
+  if (item.textContent.trim() !== label) return [`${at}: menu says "${item.textContent.trim()}", not "${label}"`];
+  item.click();
+  const now = S.searchSpot[mode].value;
+  await sleep(500);
+  return now === want ? [] : [`${at}: picked "${label}", spot "${now}" (not at once)`];
+}
+
+/** SF1: the search's spot is found where the user looks - Settings search, the settings list, the bar/button itself. */
+export async function searchFindable() {
+  const S = await importShim("./state.ts");
+  const W = await importShim("./ui/searchwidget.tsx");
+  const mode = S.dockMode.value === "unfolded" ? "unfolded" : "mobile";
+  const prefix = mode === "unfolded" ? "Unfolded" : "Folded";
+  const fails = [];
+  for (const q of ["search", "search bar", "dock button", "bar"]) fails.push(...(await sfFinds(q, `${prefix} search: bar / dock button`)));
+  fails.push(...(await sfFinds("dock", "folded dock position")));
+  fails.push(...(await sfOpens(mode === "unfolded" ? "unfolded search" : "folded search")));
+  fails.push(...(await sfOpens("home")));
+  await W.pickSearchSpot(mode, "bar");
+  await sleep(400);
+  // A long press on home's bar (the WebView's contextmenu).
+  const pill = () => document.querySelector(".home > .bar .bar-pill");
+  fails.push(...(await sfMenuFlips(() => pill()?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })), "dock", "long press on the bar")));
+  // Edit mode's tap on the dock's button (its hold outside edit mode stays dictation).
+  S.editing.value = true;
+  await sleep(400);
+  const btn = document.querySelector(".home .dock .dock-search");
+  fails.push(...(await sfMenuFlips(() => btn && (fire(btn, "pointerdown"), fire(btn, "pointerup")), "bar", "edit mode tap on the dock button")));
+  S.editing.value = false;
+  await sleep(300);
+  return fails;
+}

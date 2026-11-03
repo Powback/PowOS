@@ -12301,6 +12301,16 @@ try {
         await call("sbFresh");
         return fails;
       })));
+  // BF1 (dev/dock-search-check.js barFootSame; the user, 11-03 11:49: "the same height as the manager search bar"): the
+  // one bar's pill at the same bottom and height on home (under the dock), the launcher and PowOS AI's page.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, below] of [["folded", "1"], ["folded", ""], ["unfolded", "1"], ["unfolded", ""]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `bar-foot-same-${label}${below ? "-below" : ""}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (b) => (await importShim("./dev/dock-search-check.js")).barFootSame(b), below))));
+  // SF1 (dev/dock-search-check.js searchFindable; the user, 11-03 11:49: "Where is that setting?"): Settings search
+  // finds the search's spot and opens its row highlighted; a long press on the bar / edit mode's tap on the button flips it.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const label of ["folded", "unfolded"])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `search-findable-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/dock-search-check.js")).searchFindable()))));
   // Perf P1 (dev/dock-search-check.js dockSpeechRenders; 02:23 trace): a dictation's words streaming in redraw the dock
   // button only for its on/off, the dock and its cells never - folded and unfolded.
   if (process.env.SHELL_PAGES !== "0")

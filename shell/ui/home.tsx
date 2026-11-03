@@ -36,7 +36,7 @@ import { DockGroupCell, groupedKeys, unpinnedGroups } from "./dockgroups.tsx";
 import { Recents } from "./recents.tsx";
 import { appOf, dockTap } from "./desktops.ts";
 import { overWindows } from "./panellift.ts";
-import { footBelow, searchClasses } from "./searchwidget.tsx";
+import { SearchSpotMenu, footBelow, openSpotMenu, searchClasses } from "./searchwidget.tsx";
 import { wideHome } from "../hosts/wide.ts";
 import { webWins, windowFrame } from "./webwindows.tsx";
 import { byKey, carry, dock, dockPosition, dockAim, dockDrag, drawer, editing, folder, menu, page, pageCount, pullKind, pullPanels, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
@@ -665,6 +665,14 @@ function HomeLauncher() {
 /** Home's search as the dock's button (docksearch.tsx). */
 const searchDockClasses = () => `${dockButton.value ? "search-dock" : ""} ${buttonMorph.value ? "button-morph" : ""}`;
 
+/** A long press on home's own bar (not its mic: hold to talk): the search's menu - bar | dock button (searchwidget.tsx). */
+function pillMenu(e: MouseEvent) {
+  const t = e.target as HTMLElement;
+  const pill = t.closest?.(".home > .bar");
+  if (!pill || t.closest(".mic") || !openSpotMenu(pill)) return;
+  e.preventDefault();
+}
+
 /**
  * Home's own element and its state classes. Its own component, so only it re-renders when one changes: the drag's start
  * and end (dragging, open) re-rendered Home and all under it - the pages, every tile, the dock (device 11-02 18:13: Node
@@ -674,6 +682,7 @@ function HomeFrame({ children }: { children: preact.ComponentChildren }) {
   return (
     <div
       onPointerDownCapture={grabPill}
+      onContextMenu={pillMenu}
       class={`home adopts dock-${dockPosition.value} ${wideHome.value ? "wide" : ""} ${footBelow.value ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${overWindows.value ? "over-windows" : ""} ${carriedApp(carry.value) ? "carry-app" : ""} ${searchDockClasses()}`}
     >
       {children}
@@ -705,6 +714,7 @@ export function Home() {
           <Dock />
           {wideHome.value && <DockTray />}
           <AppMenu />
+          <SearchSpotMenu />
           <EditSheet />
         </HomeFrame>
       </div>
