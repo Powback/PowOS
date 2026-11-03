@@ -567,7 +567,7 @@ function AiColumn({ shown, wide, pill }: { shown: boolean; wide: boolean; pill: 
       <AiHeader sub={sub} shown={shown && !sub} />
       <AiBody sub={sub} shown={shown} />
       {/* OB1: no field of its own - the one shared bar (bar.tsx, its "ai" role) takes this room. */}
-      {!sub && (pill || wide) && <div class="ai-bar-slot" data-bar-slot="ai" aria-hidden="true" />}
+      {(pill || wide) && <div class="ai-bar-slot" data-bar-slot="ai" aria-hidden="true" />}
       {split && <Sheet s={s} shown={shown} />}
     </>
   );

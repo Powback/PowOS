@@ -763,7 +763,13 @@ async function bfPill(S, page, drawer) {
   S.drawer.value = drawer;
   await sleep(900);
   const b = document.querySelector(".home > .bar .bar-pill")?.getBoundingClientRect();
-  return b ? { bottom: Math.round(innerHeight - b.bottom), height: Math.round(b.height) } : null;
+  return b ? { left: Math.round(b.left), width: Math.round(b.width), bottom: Math.round(innerHeight - b.bottom), height: Math.round(b.height) } : null;
+}
+
+/** OE1: the pill on PowOS AI's page with its [tab] open (Chat, Agents, Progress, Devices). */
+async function bfAiTab(S, tab) {
+  S.aiScreen.value = tab;
+  return bfPill(S, -1, 0);
 }
 
 export async function barFootSame(below = "1") {
@@ -774,15 +780,63 @@ export async function barFootSame(below = "1") {
   await W.pickSearchSpot(mode, "bar");
   W.footBelow.value = below;
   const home = await bfPill(S, 0, 0);
-  const ai = await bfPill(S, -1, 0);
+  // OE1 (the user, 11-03 21:14: "Why is the search [bar] just under the chat here?"): on every tab of the AI page the
+  // pill is home's own rect - x, width, foot and height - never fitted to the chat column.
+  const tabs = {};
+  const hints = [];
+  for (const t of ["chat", "fleet", "progress", "devices"]) (tabs[`ai-${t}`] = await bfAiTab(S, t)), hints.push(...bfHintWhole(`${mode} AI ${t}`));
+  S.aiScreen.value = "chat";
   await bfPill(S, 0, 0);
   const launcher = await bfPill(S, 0, 1);
+  hints.push(...bfHintWhole(`${mode} launcher`));
   await bfPill(S, 0, 0);
   const at = `${mode}, pill ${below ? "under" : "over"} the dock`;
-  console.info(`[barFootSame] ${at}: home ${JSON.stringify(home)} ai ${JSON.stringify(ai)} launcher ${JSON.stringify(launcher)}`);
-  // Over the dock, home's own pill sits above it (only the launcher's comes down to the foot).
-  return bfCompare(at, ai, below ? { launcher, home } : { launcher });
+  const gap = below ? await bfDockGap() : [];
+  console.info(`[barFootSame] ${at}: dock gap ${JSON.stringify(gap)}`);
+  console.info(`[barFootSame] ${at}: home ${JSON.stringify(home)} ${JSON.stringify(tabs)} launcher ${JSON.stringify(launcher)}`);
+  // Over the dock, home's own pill sits above it (the launcher's comes down to the foot, the dock gone): there the
+  // launcher keeps the bottom/height check against the AI page's foot only.
+  return [...bfCompare(at, home, tabs), ...(below ? bfCompare(at, home, { launcher }) : []), ...bfGapFails(at, gap), ...hints];
 }
+
+/** HF1: the pill's hint whole in its field - never a word cut off at the field's edge (a text span of its font measures it). */
+function bfHintWhole(where) {
+  const f = document.querySelector(".home > .bar .bar-pill textarea");
+  if (!f || !f.placeholder || f.value) return [];
+  const cs = getComputedStyle(f);
+  const room = f.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const span = document.createElement("span");
+  span.textContent = f.placeholder;
+  span.style.cssText = `position:fixed;visibility:hidden;white-space:nowrap;font:${cs.font};letter-spacing:${cs.letterSpacing}`;
+  document.body.append(span);
+  const w = span.getBoundingClientRect().width;
+  span.remove();
+  return w <= room + 0.5 ? [] : [`${where}: the hint "${f.placeholder}" (${Math.round(w)} px) is cut in its ${Math.round(room)} px field`];
+}
+
+/**
+ * DG1 (the user, 11-03 21:30: "Now the icons are floating too far up over the search bar"): the pill under the dock, the
+ * dock's foot to the pill's top is the design's gap - the same as with the bar not dropped to the foot (--bar-drop 0).
+ */
+async function bfDockGap() {
+  const home = document.querySelector(".home");
+  // Wide home's one-row foot sets dock and pill side by side (--bar-drop 0 there): no gap over the pill to keep.
+  if (home.classList.contains("wide")) return [];
+  const one = () => {
+    const d = document.querySelector(".home > .dock:not(.dock-tray)")?.getBoundingClientRect();
+    const p = document.querySelector(".home > .bar .bar-pill")?.getBoundingClientRect();
+    return d && p ? Math.round(p.top - d.bottom) : null;
+  };
+  const now = one();
+  home.style.setProperty("--bar-drop", "0px");
+  await sleep(100);
+  const design = one();
+  home.style.removeProperty("--bar-drop");
+  await sleep(100);
+  return [now, design];
+}
+
+const bfGapFails = (at, g) => (g.length && (g[0] == null || Math.abs(g[0] - g[1]) > 1) ? [`${at}: dock-to-pill gap ${g[0]} px, the design's ${g[1]} px`] : []);
 
 /** Each of [pills] at the AI page's [ai] bottom and height (±1 px), else what's off. */
 function bfCompare(at, ai, pills) {
@@ -790,8 +844,8 @@ function bfCompare(at, ai, pills) {
   const none = Object.keys(all).filter((k) => !all[k]);
   if (none.length) return [`${at}: no pill on ${none.join(", ")}`];
   return Object.entries(pills)
-    .filter(([, r]) => Math.abs(r.bottom - ai.bottom) > 1 || Math.abs(r.height - ai.height) > 1)
-    .map(([name, r]) => `${at}: ${name}'s pill ${r.bottom} px off the bottom, ${r.height} px high; the AI page's ${ai.bottom} px, ${ai.height} px`);
+    .filter(([, r]) => ["left", "width", "bottom", "height"].some((k) => Math.abs(r[k] - ai[k]) > 1))
+    .map(([name, r]) => `${at}: ${name}'s pill ${JSON.stringify(r)}; home's ${JSON.stringify(ai)}`);
 }
 
 /** SF1 (the user, 11-03 11:49: "Where is that setting? I couldn't find it in a setting."): a typed [query] in search. */

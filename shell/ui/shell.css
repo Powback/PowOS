@@ -166,6 +166,9 @@
 .home { --bar-drop: max(0px, calc(var(--inset-bottom, env(safe-area-inset-bottom)) - var(--inset-keyboard, 0px))); }
 .home.wide, .pull-screen { --bar-drop: 0px; }
 .home.pill-below > .bar { top: var(--bar-drop); }
+/* DG1 (the user, 11-03 21:30: "Now the icons are floating too far up over the search bar"): the dock over the pill comes
+   down with it, so the gap between them stays the design's own (dev/dock-search-check.js barFootSame). */
+.home.pill-below > .dock { top: var(--bar-drop); }
 /* The search bar goes down to the screen's foot as the dock gives way (under the dock already: it stays). */
 .home > .bar { transform: translateY(calc(var(--p) * (var(--strip-height) + var(--bar-drop)))); }
 /* SB1: a finger on the bar is home's to page with (gesture.ts chromeWay): the WebView never pans it, nor moves the
@@ -317,6 +320,8 @@
   border-radius: 20px;
 }
 .pill .grow::placeholder { color: var(--color-muted); }
+/* OE1/HF1: one row whatever the role's hint (bar.tsx useFittedHint picks a form that fits; the ellipsis is the last net). */
+.pill .grow::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The leading slot (bar.tsx Lead, SB5): empty, the prompt glyph - not words (its name is the field's aria-label), blinking
    in place of the caret while focused; with text, an × that clears it. One 40 px slot (the touch target, as the mic's)
    in both states, so the text never moves as it turns: the two cross-fade and turn in place. Empty, taps pass through
@@ -4263,7 +4268,7 @@ html:has(.home > .bar[data-role="ai"] textarea:focus) .ai-screen.stacked > .ai-s
  * seatOnAi), moving there on home's own slide curve; while a finger drags the screens, no transition (it rides along).
  * Shown and tappable there whatever home's foot does with it (parked under the search widget, the dock's button).
  */
-.home > .bar.seated { transition: translate var(--spring-ms) var(--spring), width var(--spring-ms) var(--spring); z-index: 5; }
+.home > .bar.seated { transition: translate var(--spring-ms) var(--spring); z-index: 5; }
 .home > .bar.seated.sliding { transition: none; }
 .home.search-parked > .bar.seated { opacity: 1; pointer-events: auto; }
 
@@ -4273,7 +4278,11 @@ html:has(.home > .bar[data-role="ai"] textarea:focus) .ai-screen.stacked > .ai-s
  * bar is held where it ends meanwhile - the launcher's foot (the dock gave way) or the page's seat, no slide of its own -
  * and only its glass moves.
  */
-.home.button-morph > .bar, .home.button-morph > .bar.seated { transition: none; }
+.home.button-morph > .bar { transition: none; }
+/* OE1: on the way to PowOS AI's page the seated bar's translate still counters home's slide as it goes (the bar stays on
+   screen where it is, the glass growing there from the button's place); the way back holds its translate (bar.tsx
+   heldSeated), so this changes nothing there. */
+.home.button-morph > .bar.seated:not(.sliding) { transition: translate var(--spring-ms) var(--spring); }
 .home.button-morph:not(.pill-below, .dock-left, .dock-right) > .bar:not(.seated) { transform: translateY(calc(var(--strip-height) + var(--bar-drop))); }
 
 /*
@@ -4285,6 +4294,15 @@ html:has(.home > .bar[data-role="ai"] textarea:focus) .ai-screen.stacked > .ai-s
 .home.adopts.wide.open:has(> .stage .ai-panel) > .bar { grid-area: 2 / 1 / 3 / -1; width: auto; justify-self: stretch; }
 /* The folded page's single column (a screen no tab names): the bar's room at its foot. */
 .ai-screen > .ai-bar-slot { flex: none; margin-top: auto; height: calc(var(--pill-height) + var(--ai-foot)); }
+/*
+ * OE1 (the user, 11-03 21:14: "Why is the search [bar] just under the chat here?"): the bar stays exactly where home's is
+ * (bar.tsx seatOnAi); the page keeps its room - --bar-room, the pill's top to the page's content foot - under the tabs
+ * (the slot) and, unfolded, under both columns (the bar spans the screen's width, the tabs directly above it).
+ */
+.ai-screen[data-bar-room] .ai-bar-slot { height: var(--bar-room); }
+.ai-screen.panes[data-bar-room] .ai-bar-slot { height: 0; margin-top: -8px; }
+.ai-screen.panes[data-bar-room] > :is(.ai-left, .ai-right) { margin-bottom: calc(var(--bar-room) + var(--ai-gut)); }
+.ai-screen.panes[data-bar-room] > .ai-left { max-height: calc(100% - var(--bar-room) - var(--ai-gut)); }
 /* The role's glyph (the launcher's apps, the AI page's manager) where home's prompt glyph is. */
 .pill .prompt.role-icon { display: flex; align-items: center; justify-content: center; height: 40px; }
 /* Switching pages changes the role in place: its hint and glyph fade in anew (one animation name per role, so a
