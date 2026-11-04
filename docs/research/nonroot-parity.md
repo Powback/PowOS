@@ -61,3 +61,53 @@ feature calls `RootedGuest` - `su`, which isn't there.
 - Still rooted-only by nature: the system theme, game boost, the desktop-shell hook, Plasma bridge, verify queue.
 - Test: `GuestTest` (pick, rooted terminal line byte-for-byte, open-task line unchanged, a source scan that no PowOS
   Linux call skips Guest).
+
+## 11-04 (nonroot-checks): emulator checks without root, and the plan for Linux windows on GPU-less devices
+
+Checked on the emulator (`persist.powos.root=0`, APK of agent/nonroot-shell-up 02b6a1cc, the downloaded base image):
+
+| check | result | fix |
+|---|---|---|
+| AI page: chat sends, a reply arrives | **failed**: "PowOS AI didn't answer: FileNotFoundError: 'claude'" - the image has no Claude Code (the rooted phone's was installed by hand into `~/.local/bin`) | `lib/ai/manager/manager.sh` `_manager_ensure_claude`: installs it on first use (vendor installer, ~20 s, runs fine under lotfix). Then a reply arrives (shot `02-ai-chat.png`). The endpoint (`/etc/powos/ai/endpoint.conf`, the fleet authority + its routing tag) is still per-device setup as on the rooted phone (`powos config claude-endpoint`/`claude-token`): without it, "401 Invalid bearer token" |
+| Settings > Storage lists the packs with sizes | works (more apps 1.7 GB / 4.7 GB, developer tools, gaming 2.6 GB / 5.0 GB, languages) | - |
+| "Add gaming": live progress + cancel | **failed**: the download ran (470 MB in 6 s) but the row stayed on "starting..." - `Packs.listener` was ONE static, the last `ShellScreens` built (every page host has one) - and there was no cancel at all | `Packs.listeners` (a set, removed on `ShellScreens.close`); `Packs.cancel` + "storage.cancel": the job stops at its next read, deletes what landed (the `.partial` list), the pack is as before; "cancel" on the Storage row and on the library's "add gaming" card; gate `addGamingCheck` taps it |
+
+### Linux windows blank on GPU-less devices: a CPU-copy path in KWin's anland backend
+
+**Cause.** KWin renders each consumer surface (the desktop, every window task) straight INTO the Android side's
+buffers: `native_consumer.c collect_dmabufs` dequeues the `ANativeWindow`'s gralloc buffers (connected with
+`ANW_API_CPU`, RGBA_8888) and sends their fds; `AnlandEglBackend::importConsumerBuffer` (patch 0013, used by
+`AnlandEglLayer::importBuffers` and `AnlandWindowTask::importBuffers`) wraps each as `DmaBufAttributes` and calls
+`EglBackend::importDmaBufAsTexture` -> an EGLImage -> GLTexture -> GLFramebuffer. With llvmpipe (no
+`/dev/kgsl-3d0`, the emulator, any GPU-less phone) Mesa's swrast can't make an EGLImage of a gralloc buffer fd
+("Error creating EGLImageKHR: EGL_BAD_ACCESS" -> "failed to import dmabuf 0 as texture"), so no buffer is imported and
+nothing is ever drawn into the consumer: the window shows blank. Clients themselves are fine (llvmpipe clients
+attach wl_shm buffers, which KWin uploads).
+
+**Plan: render offscreen, copy the frame into the mapped buffer (no protocol change, no Android-side change).**
+
+1. `anland_egl_backend.{h,cpp}` `AnlandEglBackend::importConsumerBuffer` (~35 lines): when `importDmaBufAsTexture`
+   returns null, `mmap(fd, offset + stride*height, PROT_READ|PROT_WRITE, MAP_SHARED)`; on success allocate a plain
+   `GLTexture::allocate(GL_RGBA8, size)` + `GLFramebuffer` as the render target and return them with the mapping
+   (`ImportedBuffer` gains `uint8_t *cpu; size_t cpuLen; uint32_t stride, format;` + a `munmap` owner). Log once
+   "consumer buffers: CPU copy (no EGL dma-buf import)". Same content transform (FlipY + rotation) as the GPU path:
+   `glReadPixels` row 0 is the texture's row 0, which the consumer reads top-down, exactly as the imported buffer.
+2. `AnlandEglBackend::copyToConsumer(const ImportedBuffer &, const Region &damage)` (~35 lines): bind the FBO,
+   `glPixelStorei(GL_PACK_ROW_LENGTH, stride/4)`, `DMA_BUF_IOCTL_SYNC` START|WRITE, `glReadPixels(GL_RGBA,
+   GL_UNSIGNED_BYTE)` of the damaged rows' bounding band straight into the mapping (ABGR8888 = RGBA bytes: no swizzle;
+   XRGB8888 would need `GL_BGRA_EXT`, llvmpipe has `EXT_read_format_bgra`), SYNC END. Synchronous, so the render fence
+   is -1 (llvmpipe has no `EGL_ANDROID_native_fence_sync`; `set_render_fence(-1)` = "ready now").
+3. Call sites (~15 lines): `AnlandEglLayer::doEndFrame` (desktop: keep the `ImportedBuffer`'s mapping in the layer
+   beside `m_textures/m_fbos`, copy the accumulated damage of `m_currentIndex`) and both renders in
+   `AnlandWindowTask::render` (patch 0013/0052: after `endFrame()`, before `set_render_fence`; a task copies the whole
+   buffer, it redraws it whole).
+4. Order of fallbacks: GPU import (unchanged on every phone with a GPU) -> CPU mapping -> if the buffer can't be
+   mapped either (a gralloc whose CPU access needs `AHardwareBuffer_lock`), a protocol extension: the consumer sends
+   memfd buffers it copies with `ANativeWindow_lock` (`native_consumer.c render loop`, ~120 lines both sides) - only
+   if step 1's mmap fails on a real device; ranchu's CPU-usage buffers and Qualcomm's ION/dmabuf heaps are mmap-able.
+
+**Size**: ~90 lines in one new patch `0053-backends-anland-CPU-copy-when-EGL-can-t-import-the-consumer-s-buffers.patch`
+(`targets/android/pkgs/kwin/src-tree.sh` for the tree, `targets/android/build-pkgs.sh kwin`). Cost: a 2268x2440
+RGBA readback is ~22 MB/frame; damage-banded copies keep idle windows free, full-screen animation on llvmpipe will be
+CPU-bound anyway. Not implemented in this change: the kwin build (~30+ min) and the emulator proof didn't fit its
+hour; it is the task's next step.
