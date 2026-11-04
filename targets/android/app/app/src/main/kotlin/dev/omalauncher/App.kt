@@ -26,6 +26,11 @@ class App : Application() {
         // launcher has been opened: their notifications with inline replies (AgentMail).
         // No root, the PowOS image installed: agent mail, the manager's wake and the agents' spool from the image's
         // session the same way (its XDG_RUNTIME_DIR is the same run/ dir); the rooted-only bridges below stay rooted.
+        // Links from PowOS Linux (xdg-open, $BROWSER, powos-android-open) open in Android's default browser - rooted
+        // (the session's /run/powos-app is files/run) and no root alike (the image's XDG_RUNTIME_DIR is files/run too):
+        // the no-root Sign in to Claude's `claude auth login` opens claude.ai's login through it. Started whether or not
+        // the image is installed yet (the first install's sign-in runs in this same process); an idle FileObserver.
+        if (Application.getProcessName() == packageName) dev.omalauncher.linux.OpenSpool.start(this, File(filesDir, "run"))
         startEngineWatchers()
         if (RootedGuest.enabled) {
             AgentMail.start(this, File(filesDir, "run"))
@@ -35,8 +40,6 @@ class App : Application() {
             PowosAiChat.startWake(this, File(filesDir, "run"))
             // Which agents run and what they do (the Agents view): the spool PowOS's agentsd writes, and the notification.
             AgentsSpool.start(this, File(filesDir, "run"))
-            // Links from the PowOS session (xdg-open, $BROWSER, powos-android-open) open in Android's default browser.
-            if (Application.getProcessName() == packageName) dev.omalauncher.linux.OpenSpool.start(this, File(filesDir, "run"))
             // The Plasma session's notifications in PowOS's shade and its clipboard both ways (powos-plasma-bridge);
             // the main process only (one reader of its spool; the engine's ":restart" runs this too).
             if (Application.getProcessName() == packageName) {
