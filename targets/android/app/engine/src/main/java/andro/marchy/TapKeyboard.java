@@ -6,6 +6,7 @@ package andro.marchy;
  * field and KWin asked at once (Qt enables text input on the focus), so the keyboard came up over a window nobody had
  * tapped yet (11-04 emulator, no root; the rooted path is the same consumer). An ask with no touch behind it is kept; the
  * user's next tap in that window raises it (the field had the focus already, so KWin asks nothing new), a hide drops it.
+ * While KWin's ask stands, every tap raises it again (the user put it away with Android's back: KWin still counts it up).
  * PowOS's own text fields keep showing it on their tap: this only gates asks that no touch came before.
  *
  * HACK: "a tap in the window" stands in for "a tap on the text field" - with a field focused, a tap anywhere else in that
@@ -25,9 +26,12 @@ public final class TapKeyboard {
     private long downAt = Long.MIN_VALUE / 2;
     private float downX, downY;
     private boolean pending;
+    /** KWin's keyboard is asked for (show .. hide): a tap raises it, also after the user put it away. */
+    private boolean asked;
 
     /** KWin asked for the keyboard at [now] (uptime ms): true = raise it now; false = held for the next tap. */
     public boolean show(long now) {
+        asked = true;
         if (now - downAt <= TOUCH_ASK_MS) {
             pending = false;
             return true;
@@ -39,6 +43,7 @@ public final class TapKeyboard {
     /** KWin hid it (the field lost the focus): a held ask goes. */
     public void hide() {
         pending = false;
+        asked = false;
     }
 
     public void down(long now, float x, float y) {
@@ -47,15 +52,17 @@ public final class TapKeyboard {
         downY = y;
     }
 
-    /** The touch ended: true when it was a tap and an ask is held - raise the keyboard (unless a hide comes first). */
+    /** The touch ended: true when it was a tap and KWin's ask stands - raise the keyboard (unless a hide comes first). */
     public boolean up(long now, float x, float y) {
         boolean tap = now - downAt <= TAP_MS && Math.abs(x - downX) <= TAP_SLOP && Math.abs(y - downY) <= TAP_SLOP;
-        return tap && pending;
+        if (tap && asked)
+            pending = true;
+        return tap && asked;
     }
 
-    /** A held ask is still there (the tap's delayed raise checks it: KWin's hide for a focus the tap moved wins). */
+    /** The tap's raise is still wanted (its delayed raise checks it: KWin's hide for a focus the tap moved wins). */
     public boolean held() {
-        return pending;
+        return pending && asked;
     }
 
     /** The delayed raise happened. */

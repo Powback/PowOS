@@ -476,7 +476,14 @@ public final class WebWindowSource {
                 if (a == null || !t.held() || taps.get(handle) != t)
                     return;
                 t.shown();
-                Log.i(TAG, "keyboard ask held for a web window: raised by the user's tap");
+                SystemIME up = ime;
+                boolean bound;
+                synchronized (IME_LOCK) {
+                    bound = imeHandle == handle;
+                }
+                if (bound && up != null && up.ownsKeyboard() && up.isImeVisible())
+                    return; // already up for this window: the tap only typed into it
+                Log.i(TAG, "keyboard ask for a web window: raised by the user's tap");
                 raise(a, handle);
             }, TAP_RAISE_DELAY_MS);
         }

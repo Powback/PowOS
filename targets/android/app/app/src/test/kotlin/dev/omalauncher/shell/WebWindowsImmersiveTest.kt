@@ -39,7 +39,7 @@ class WebWindowsImmersiveTest {
 
     @Test
     fun theOfferCarriesWhetherItIsAGame() {
-        assertTrue(bridge.contains("WebWindows.LinuxOffer(appId, title, label, icon, WebWindows.isGame(appId, app?.categories))"))
+        assertTrue(bridge.contains("WebWindows.LinuxOffer(appId, title, label, icon, WebWindows.isGame(appId, app?.categories), alts)"))
     }
 
     /** On: immersive from the offer, the bar hidden BEFORE the area is measured; off: the bar back. */

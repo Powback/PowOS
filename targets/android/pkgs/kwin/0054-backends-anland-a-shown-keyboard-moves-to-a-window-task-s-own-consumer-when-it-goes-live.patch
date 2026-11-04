@@ -1,0 +1,24 @@
+From: PowOS <noreply@powback.com>
+Subject: [PATCH] backends/anland: a keyboard already up moves to a window task's own consumer when it goes live
+
+The task's "ime" arrives before it is live (ownKeyboard() needs Live), so a keyboard its text field asked for as
+the window opened (System Settings' search) stayed on the desktop's consumer and KWin counted it shown: tapping
+the field raised nothing. goLive() decides the keyboard's place again.
+---
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index d5b6142..c4fd226 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -433,6 +433,12 @@ void AnlandWindowTask::goLive()
+         ev.keyboard.visible = 1;
+         push_output_event(m_display, &ev);
+     }
++    // PowOS (kwin 0054): a keyboard already up goes to this task's own consumer now that it is live. Its "ime" came
++    // before (ownKeyboard() needs Live), so the keyboard System Settings' search asked for as it opened stayed on the
++    // desktop's consumer (often none behind a web window) and KWin counted it shown: a tap on the field raised nothing.
++    if (m_ownKeyboard && m_tasks && m_tasks->backend()) {
++        m_tasks->backend()->refreshConsumerKeyboard("task live");
++    }
+ 
+     if (!m_window) {
+         return;

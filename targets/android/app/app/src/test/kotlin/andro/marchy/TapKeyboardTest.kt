@@ -36,4 +36,15 @@ class TapKeyboardTest {
         assertFalse(t.up(3_050, 0f, 0f))
         assertFalse(TapKeyboard().up(100, 0f, 0f)) // no ask held: a tap alone raises nothing
     }
+
+    @Test
+    fun aTapRaisesItAgainWhileKwinsAskStands() {
+        val t = TapKeyboard()
+        t.down(1_000, 5f, 5f)
+        assertTrue(t.show(1_100)) // up at once: the user's tap focused the field
+        t.shown() // the user put it away with back; KWin still counts it up and asks nothing new
+        t.down(9_000, 5f, 5f)
+        assertTrue(t.up(9_050, 5f, 5f))
+        assertTrue(t.held())
+    }
 }
