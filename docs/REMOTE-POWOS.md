@@ -558,6 +558,23 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `targets/android/pkgs/vulkan-freedreno-kgsl/vulkan-freedreno-kgsl.install:11` | Andromarchy's andromarchy-protect pacman hook put the rootfs's own 10-13 Turnip back after every install of this package (libvulkan_freedreno.so is in its protected list), so the package's post_install/upgrade writes its own library into andromarchy-protect's manifest + store. | andromarchy-protect skips paths owned by a package that replaces the Arch owner it guards against, or the rootfs drops libvulkan_freedreno.so from its protected PATHS. |
 <!-- hack-registry:end -->
 
+### 4.1 Device deploys and their undo
+
+**2026-11-04 17:21, oplus-hook with scope `com.oplus.battery` (vendor-game, user OK 11-04).** Installed
+`powos-oplus-hook.apk` 2026.11.04-1610 (built by `targets/android/build-oplus-hook.sh` from b05e2a6a) over
+2026.11.02-0414; `vector-cli scope add com.powos.oplushook com.oplus.battery/0`; `am force-stop com.oplus.battery`
+(it restarted itself; log "PowOS-oplushook: gameClass: hooked G"). Scope before: `com.android.systemui/0` only
+(`com.android.launcher` was NOT in it, and it was not added). Checked by hand: `settings put global
+powos_game_front <id>` + restart gave `appType=4 ... configItemName=category_4`, deleting it gave `appType=-1 ...
+common_config` (marker deleted afterwards). Undo, as root on the phone:
+
+```sh
+/data/adb/lspd/cli scope rm com.powos.oplushook com.oplus.battery/0
+settings delete global powos_game_front
+pm install -r -d /data/local/tmp/powos-oplus-hook-2026.11.02-0414.apk   # old APK (Mac copy: ~/pw/vendor-game-deploy-backup/)
+am force-stop com.oplus.battery
+```
+
 ---
 
 ## 5. Open questions
