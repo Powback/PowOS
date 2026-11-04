@@ -373,7 +373,8 @@ run)
   # window that covers it is window_gate's hidden display, held across this watch (window-render.sh --hold, its
   # `PowosWrHidden: hold display ...` lines): that display is the adb-started helper's, not in WebWindows.kt's list, so
   # it has no `live`/`w.f` lines and the app's watchdog doesn't count it - judged by WebWindows' watchdog only (no
-  # `RENDER STALL` from the app's process). SHIP_RENDER_WATCH=0 turns it off; off in tests (SHIP_DIR).
+  # `RENDER STALL` from the app's process). The user's minimised/PiP web windows aren't counted by it either
+  # (RenderWatch.owesGeometry: 9b16c2ce7's false stall was a minimised Linux window probed during a slow page). SHIP_RENDER_WATCH=0 turns it off; off in tests (SHIP_DIR).
   # Synchronous (20 s): the service is a launchd job that exits when idle, and launchd kills what it leaves running -
   # a backgrounded check died mid-sleep (10-31 14:46, 38fdae87: only its first log line).
   render_watch() {

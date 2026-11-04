@@ -9,7 +9,8 @@
 #   clocks   each policy's cur freq, averaged over the samples
 #   fps      KWin's "window task N frames: last 5 s C commits, D drawn (F fps)" lines written during the run (commits / 5
 #            = the game's own fps)
-# PASS: a holder boosts a game, every boosted policy's max == its hw max, the main thread is pinned to one cpu and ran
+# PASS: a holder boosts a game, every boosted policy's max == its hw max (under a userspace thermal controller -
+# OxygenOS' horae - its cap kept: min == max, no "set back by someone else" fights), the main thread is pinned to one cpu and ran
 # there in >= 90 % of the samples. The fps lines are the evidence (>= 45 fps = docs/research/broforce-fps.md's goal).
 # Exit 3: no game boosted now (nothing to check - the user isn't playing, or the app isn't the new one); 1 FAIL.
 set -uo pipefail
@@ -35,6 +36,7 @@ while [ \$(date +%s) -lt \$end ]; do
 done
 r=\$(cat /proc/\$m/stat 2>/dev/null); r=\${r##*) }; set -- \$r; echo "main_busy \$(( (\${12} + \${13} - t0) / $SECS ))"
 tail -n +\$((n0 + 1)) \$LOGF 2>/dev/null | grep 'window task .* frames:' | sed 's/^/fps /'
+logcat -d -b all 2>/dev/null | grep 'ThermalControllHandler: tempLevel' | tail -n 1 | sed 's/.*tempLevel=/vendor_thermal tempLevel=/; s/, *envTempType.*full=/ full=/'
 EOF
 "$A" push "$OUT/probe.sh" /data/local/tmp/powos-game-boost-probe.sh > /dev/null || { echo "ENV: can't push the probe"; exit 5; }
 perl -e "alarm $((SECS + 60)); exec @ARGV" "$A" shell "su -c 'sh /data/local/tmp/powos-game-boost-probe.sh; rm -f /data/local/tmp/powos-game-boost-probe.sh'" |
@@ -49,11 +51,20 @@ awk '$1 == "main_on" { n++; c[$2]++ } END { for (k in c) printf "main ran on %s 
 awk '$1 == "main_busy" { printf "main busy %d%% of one core\n", $2 }' "$R" | tee -a "$OUT/report.txt"
 awk '$1 == "clock" { n[$2]++; s[$2] += $3 } END { for (p in n) printf "clock %s avg %d MHz\n", p, s[p] / n[p] / 1000 }' "$R" | sort | tee -a "$OUT/report.txt"
 grep '^fps ' "$R" | sed 's/^fps //' | tail -n 8 | tee -a "$OUT/report.txt"
+grep '^vendor_thermal ' "$R" | tee -a "$OUT/report.txt"
 fail=0
-# Every boosted policy (those with a saved original) at its hw max.
+# Every boosted policy (those with a saved original) at its hw max - or, under a userspace thermal controller ("boost
+# thermal <comm>": OxygenOS' horae), at that controller's cap: min == max (the boost holds the min up to it, never
+# raises the max past it).
+thermal=$(awk '$1 == "boost" && $2 == "thermal" { print $3 }' "$R")
 for p in $(grep -o 'policy[0-9]* [0-9]* [0-9]*;' <<< "$(grep '^boost saved' "$R")" | awk '{print $1}'); do
-  grep -q "^boost policy $p min [0-9]* max \([0-9]*\) hw \1 " "$R" || { echo "FAIL: $p not at its hw max"; fail=1; }
+  if [ -n "$thermal" ]; then
+    grep -q "^boost policy $p min \([0-9]*\) max \1 " "$R" || { echo "FAIL: $p min not held at $thermal's cap"; fail=1; }
+  else
+    grep -q "^boost policy $p min [0-9]* max \([0-9]*\) hw \1 " "$R" || { echo "FAIL: $p not at its hw max"; fail=1; }
+  fi
 done
+awk '/^boost .*: boost \(policies/ { f = 0 } /^boost .*set back to .* by someone else/ { f = 1 } END { exit !f }' "$R" && [ -n "$thermal" ] && { echo "FAIL: the boost still fights $thermal's cap"; fail=1; }
 mask=$(awk '/^main tid/ { for (i = 1; i <= NF; i++) if ($i == "mask") print $(i + 1) }' "$R")
 case "$mask" in 1|2|4|8|10|20|40|80|100|200|400|800) ;; *) echo "FAIL: main thread mask $mask is not one cpu"; fail=1 ;; esac
 top=$(awk '/^main ran on/ { print $5 + 0; exit }' "$OUT/report.txt"); top=${top:-0}

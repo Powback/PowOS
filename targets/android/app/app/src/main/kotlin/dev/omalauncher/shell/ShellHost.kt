@@ -421,15 +421,14 @@ class ShellHost(
         return dev.omalauncher.system.Tasks.snapshot(id)
     }
 
-    /** One file of an installed PowOS app's UI: "<app id>/<path>", never outside that app's current version. */
+    /** One file of a PowOS app's UI: "<app id>/<path>", never outside that app's current version (or the APK's copy). */
     private fun appFile(rest: String): WebResourceResponse {
         val id = rest.substringBefore('/')
         val name = rest.substringAfter('/', "")
         if (!APP_ID.matches(id) || name.isEmpty()) return notFound()
-        val ui = File(context.filesDir, "apps/$id/current/ui")
-        val file = File(ui, name)
-        if (!file.isFile || !file.canonicalPath.startsWith(ui.canonicalPath + "/")) return notFound()
-        return WebResourceResponse(mime(name), "utf-8", file.inputStream()).apply { responseHeaders = mapOf("Cache-Control" to "no-store") }
+        // The installed copy, else the APK's own (LocalApps: no root, no `powos app install`).
+        val stream = LocalApps.open(context, id, name) ?: return notFound()
+        return WebResourceResponse(mime(name), "utf-8", stream).apply { responseHeaders = mapOf("Cache-Control" to "no-store") }
     }
 
     /** The override folder's file while that layer is the newer shell ([ShellSource]), else the APK's own. */

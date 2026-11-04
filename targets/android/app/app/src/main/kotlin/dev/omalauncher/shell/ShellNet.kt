@@ -187,7 +187,8 @@ class ShellNet(
         u: URL,
         headers: Map<String, String>,
     ): HttpURLConnection {
-        val c = u.openConnection() as HttpURLConnection
+        // No root: PowOS's own services (127.0.0.1:3410/3411) through the launcher's token gate.
+        val c = dev.omalauncher.linux.LoopbackGate.route(context, u).openConnection() as HttpURLConnection
         if (c is HttpsURLConnection && private(u.host.lowercase().trim('[', ']'))) {
             val pinKey = "$app\u0000${u.host.lowercase()}:${if (u.port > 0) u.port else 443}"
             // One factory per app+host:port, and one verifier for all: the connection pool keys sockets on both (by

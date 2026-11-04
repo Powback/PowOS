@@ -384,6 +384,9 @@ function apps() {
   });
 }
 
+/** An app's UI file (./_app/<id>/<rest>); gate.<name>: the scenes' stand-in island (dev/gate-island), no app build needed (NI1). */
+const appUiFile = (id, rest) => (id.startsWith("gate.") ? path.join(ROOT, "dev/gate-island", rest) : path.join(APPS, id, "ui", rest));
+
 /** The file a shell URL names (ShellHost.open, without the override folder: /shell is already composed), or null. */
 function file(url) {
   const u = new URL(url);
@@ -395,7 +398,7 @@ function file(url) {
   let f;
   if (p.startsWith("_app/")) {
     const [, id, ...rest] = p.split("/");
-    f = path.join(APPS, id, "ui", rest.join("/"));
+    f = appUiFile(id, rest.join("/"));
   } else f = p === "dev/search-check.js" ? new URL("./search-check.js", import.meta.url) : path.join(ROOT, p);
   return fs.existsSync(f) && fs.statSync(f).isFile() ? { path: f, name: p } : null;
 }
@@ -4847,7 +4850,7 @@ function aiAreasFails(f) {
     [f.areas.length >= 2, `By area shows ${f.areas.length} lines: ${JSON.stringify(f.areas)}`],
     [first?.name === "Kernel & system" && /needs you/.test(first.words), `the area that needs the user isn't first: ${JSON.stringify(first)}`],
     [f.areas.every((a) => a.h <= 48), `an area takes more than one line: ${JSON.stringify(f.areas)}`],
-    [f.areas.some((a) => a.name === "Windows" && /1 (working|to check)/.test(a.words) && /1 idle/.test(a.words)), `Windows' words aren't plain states: ${JSON.stringify(f.areas)}`],
+    [f.areas.some((a) => a.name === "Windows" && /1 working|to check: Windows task w1/.test(a.words) && /1 idle/.test(a.words)), `Windows' words aren't plain states: ${JSON.stringify(f.areas)}`],
   ]).concat(aiChatCardFails(f)).map((x) => `ai-areas: ${x}`);
 }
 
@@ -4879,6 +4882,88 @@ async function aiAreasCheck(page) {
   const f = await page.evaluate(aiAreasFacts);
   await page.screenshot({ path: "/cache/ai-areas-unfolded.png" });
   return [...aiAreasFails(f), ...(await aiUnderStatusBar(page))];
+}
+
+/**
+ * "N to check" says which (the user, 11-03 22:56: "says 1 to check but which one???"): a mocked board with ONE task
+ * waiting for its phone check. Unfolded, By area's row names it ("to check: <title>"); a tap opens the area in place -
+ * the task, what to try on the phone, the phone check it waits for, its works / still broken and "Open task"; "Open
+ * task" lands on Progress with that task marked and its what-to-check line. Folded, Progress (the page's Progress tab)
+ * names what to check under the task too.
+ */
+async function aiToCheckFacts(label) {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const P = await G.mod("./ui/powai.tsx");
+  const A = await G.mod("./ui/aiprogress.tsx");
+  const now = Date.now();
+  const t = (id, title, more) => ({ id, title, owner: "coder", status: "working", note: "", project: "Windows", created: now - 9e6, updated: now - 6e4, done: 0, steps: "", commits: "", images: "", step: "", activity: now - 6e4, ...more });
+  P.board.value = [
+    t("tc1", "Snap a window to the left half", { step: "phone check queued" }),
+    t("tc4", "Window shadows on the wallpaper", { tryLine: "open two windows; each has a soft shadow" }),
+    t("tc2", "Window title bar font", { status: "queued" }),
+    t("tc3", "Dock bounce", { project: "Home & launcher", step: "writing the fix" }),
+  ];
+  P.checks.value = [{ job: "jc1", task: "tc1", name: "snap-left", state: "running", line: "snap-left on the phone", at: now - 3e4, shipped: true }];
+  P.boardSeen.value = true;
+  A.progressFocus.value = null;
+  S.page.value = -1;
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const txt = (e, q) => (q ? e?.querySelector(q) : e)?.textContent?.trim() ?? "";
+  const tall = (e) => (e?.getBoundingClientRect().height ?? 0) > 0;
+  const progressRow = () => {
+    const row = document.querySelector('.aip-task[data-task="tc1"]');
+    return { focus: !!row?.classList.contains("focus"), why: txt(row, ".aip-task-why"), shown: tall(row) };
+  };
+  const wide = async () => {
+    const rowOf = () => document.querySelector('.ai-left .ais-area-row[data-area="Windows"]');
+    const words = txt(rowOf(), ".ais-area-words");
+    rowOf()?.click();
+    await wait(900);
+    const itemOf = (id) => document.querySelector(`.ai-left [data-area-detail="Windows"] .ais-ck-item[data-task="${id}"]`);
+    const item = itemOf("tc1");
+    const tryItem = itemOf("tc4");
+    const detail = { title: txt(item, ".ais-ck-title"), check: txt(item, ".ais-ck-check"), open: !!item?.querySelector(".ais-ck-open"), visible: tall(item) };
+    const tried = { what: txt(tryItem, ".ais-ck-what"), works: !!tryItem?.querySelector(".try-acts .ai-act") };
+    const expanded = rowOf()?.getAttribute("aria-expanded");
+    item?.querySelector(".ais-ck-open")?.click();
+    await wait(1200);
+    return { words, expanded, detail, tried };
+  };
+  if (label === "folded") {
+    A.progressFocus.value = { area: "Windows", id: "tc1" };
+    S.aiScreen.value = "progress";
+    await wait(1200);
+    return { label, ...progressRow() };
+  }
+  S.aiScreen.value = "chat";
+  await wait(1200);
+  const f = await wide();
+  return { label, ...f, screen: S.aiScreen.value, ...progressRow() };
+}
+
+/** Folded: Progress marks the task and names what to check under it. */
+const aiToCheckFoldedFails = (f) => failsOf([
+  [f.shown && f.focus, `Progress doesn't show the task marked: ${JSON.stringify(f)}`],
+  [/Phone check running: snap-left on the phone/.test(f.why), `Progress doesn't say what to check: ${JSON.stringify(f)}`],
+]);
+
+/** Unfolded: the row names its one to-check and one needs-you task; a tap lists them; "Open task" lands on it. */
+const aiToCheckWideFails = (f) => failsOf([
+  [/to check: Snap a window to the left half/.test(f.words), `the row doesn't name its one to-check task: "${f.words}"`],
+  [/needs you: Window shadows on the wallpaper/.test(f.words), `the row doesn't name its one needs-you task: "${f.words}"`],
+  [f.expanded === "true" && f.detail.visible && f.detail.title === "Snap a window to the left half", `a tap doesn't list the area's tasks: ${JSON.stringify(f)}`],
+  [/Phone check running: snap-left on the phone/.test(f.detail.check) && f.detail.open, `no phone-check line or "Open task": ${JSON.stringify(f.detail)}`],
+  [/^Try it on the phone: open two windows/.test(f.tried.what) && f.tried.works, `the needs-you task has no "Try it on the phone" with works / still broken: ${JSON.stringify(f.tried)}`],
+  [f.screen === "progress" && f.focus, `"Open task" doesn't land on the task in Progress: ${JSON.stringify(f)}`],
+]);
+
+const aiToCheckFails = (f) => (f.label === "folded" ? aiToCheckFoldedFails(f) : aiToCheckWideFails(f)).map((x) => `ai-to-check ${f.label}: ${x}`);
+
+async function aiToCheckCheck(page, label) {
+  const f = await page.evaluate(aiToCheckFacts, label);
+  await page.screenshot({ path: `/cache/ai-to-check-${label}.png` });
+  return aiToCheckFails(f);
 }
 
 async function aiWideClearCheck(page) {
@@ -9870,6 +9955,62 @@ async function nonrootWidgetsCheck() {
   }
 }
 
+/**
+ * NI1 (nonroot-islands; docs/research/nonroot-parity.md #2): without root the registry has nothing, so islands come from
+ * the launcher's own apps (apps.local -> apps/localapps.ts). An island whose app keeps its data in SpacetimeDB says
+ * what it waits for ("starting PowOS Linux…", or the image's download), never an empty "…"; one without a database
+ * (What needs me) is found and loads its module; a rooted host's answer changes nothing. Without root the page reaches
+ * SpacetimeDB through the launcher's token gate's URL (apps.local stdbUrl), rooted through ws://127.0.0.1:3410.
+ */
+async function nonrootIslandsCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const L = await window.__gw.mod("./apps/localapps.ts");
+  S.page.value = 0;
+  await window.__gw.settled();
+  const page = S.pages.value[0];
+  const had = S.home.value;
+  const hadLocal = L.localApps.value;
+  const man = (id, db) => JSON.stringify({ id, name: id, version: "1", module: db ? { database: db } : null, widgets: [{ id: "main", name: `${id} island`, kind: "island", entry: "widgets/main.js", size: "2x2" }] });
+  const app = (id, db) => ({ id, name: id, version: "1+apk1", database: db, tier: 0, manifest: man(id, db) });
+  const isl = (id, x, y) => ({ key: `panel:app:${id}/main`, kind: "panel", name: `app:${id}/main`, page, cell: { x, y, w: 2, h: 2 }, resizable: true, minSize: [2, 1], size: [2, 2] });
+  const set = (stdb, rooted = false) => (L.localApps.value = { rooted, stdb, mb: 300, apps: [app("gate.db", "gate-db"), app("gate.nodb", "")] });
+  S.home.value = { ...had, items: [isl("gate.db", 0, 0), isl("gate.nodb", 2, 0)] };
+  const tile = (id) => document.querySelector(`.home-tile[data-key="panel:app:${id}/main"]`);
+  const text = (id) => tile(id)?.textContent.replace(/\s+/g, " ").trim() ?? "(no tile)";
+  const fails = [];
+  const step = async (stdb, rooted, rules) => {
+    set(stdb, rooted);
+    await new Promise((ok) => setTimeout(ok, 300));
+    await window.__gw.settled();
+    for (const [ok, line] of rules()) if (!ok) fails.push(`NI1 (${rooted ? "rooted" : stdb}): ${line}`);
+  };
+  try {
+    // Rooted (first: a loaded island keeps its module): the registry only, as before - no local apps, nothing waits.
+    await step("starting", true, () => [[!/starting PowOS Linux|gate\.db island|gate\.db live/.test(text("gate.db")), `rooted, the local apps were used: "${text("gate.db")}"`]]);
+    await step("starting", false, () => [
+      [/gate\.db island/.test(text("gate.db")) && /starting PowOS Linux/.test(text("gate.db")), `the database island doesn't say it's starting: "${text("gate.db")}"`],
+      [/gate\.nodb live/.test(text("gate.nodb")), `the island without a database isn't found / loaded: "${text("gate.nodb")}"`],
+    ]);
+    await step("image", false, () => [
+      [/needs the PowOS Linux image/.test(text("gate.db")) && /Download \(300 MB\)/.test(text("gate.db")), `the image state doesn't offer the download: "${text("gate.db")}"`],
+    ]);
+    await step("missing", false, () => [[/needs a newer PowOS Linux image/.test(text("gate.db")), `the image without SpacetimeDB: "${text("gate.db")}"`]]);
+    await step("up", false, () => [[/gate\.db live/.test(text("gate.db")), `SpacetimeDB up, the island isn't loaded: "${text("gate.db")}"`]]);
+    // No root, SpacetimeDB only through the launcher's token gate (nonroot-auth): the page connects to the gate's URL,
+    // never the bare port; rooted, the gate URL is ignored.
+    const D = await window.__gw.mod("./apps/stdb.ts");
+    const gateUrl = "ws://127.0.0.1:40123/_powos/" + "ab".repeat(32) + "/";
+    L.localApps.value = { rooted: false, stdb: "up", mb: null, stdbUrl: gateUrl, apps: [] };
+    if (D.stdbUri() !== gateUrl) fails.push(`NI1 (gate): no root, the page uses ${D.stdbUri()}, not the gate's URL`);
+    L.localApps.value = { rooted: true, stdb: "up", mb: null, stdbUrl: gateUrl, apps: [] };
+    if (D.stdbUri() !== "ws://127.0.0.1:3410/") fails.push(`NI1 (gate): rooted, the page uses ${D.stdbUri()}, not ws://127.0.0.1:3410/`);
+    return fails;
+  } finally {
+    S.home.value = had;
+    L.localApps.value = hadLocal;
+  }
+}
+
 /** WG1's steps in one page, the windows and home restored after. */
 async function gridSnapScene(r) {
   try {
@@ -12365,6 +12506,9 @@ try {
   // NR1: on a phone without root, widgets needing Linux say what they need (nonroot-widgets; the user, 11-03).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "nonroot-widgets", { width: 412, height: 915 }).then((r) => whenReady(r, () => r.page.evaluate(nonrootWidgetsCheck))));
+  // NI1: on a phone without root, the launcher's own apps' islands are on home and say what they wait for (nonroot-islands).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "nonroot-islands", { width: 412, height: 915 }).then((r) => whenReady(r, () => r.page.evaluate(nonrootIslandsCheck))));
   // WG1: a window dragged on home snaps into the free cells beside the widgets (ww-gridsnap-unfolded; the user, 10-31 15:49).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-gridsnap-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => gridSnapScene(r))));
@@ -12405,6 +12549,13 @@ try {
       console.log(`     drawer-drag-renders: ${await r.page.evaluate(() => window.__drawerDrag).catch(() => "?")}`);
       return fails;
     })));
+    // AZL1 (ask-1a1a3856299/-da60): the experimental A-Z list - off: as before; on: centred, whole names, lift on a row opens it.
+    for (const [w, h, name] of [[404, 900, "az-list"], [821, 883, "az-list-unfolded"]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: w, height: h }).then((r) => whenReady(r, async () => {
+        const fails = await r.page.evaluate(async () => (await importShim("./dev/az-list-check.js")).azListScene());
+        console.log(`     ${name}: ${await r.page.evaluate(() => window.__azList).catch(() => "?")}`);
+        return fails;
+      })));
     // HZ-VOTE (perf-1793639664326): the drawer's Web Animation settle holds the host's 120 Hz vote, given back after (drawer-settle-refresh).
     runs.push(open(browser, `${ORIGIN}/index.html`, "drawer-settle-refresh", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
       await r.page.evaluateOnNewDocument(() => {
@@ -12591,6 +12742,10 @@ try {
   // Unfolded as a work board, not a huge chat: By area one line per area, needs-you first; perf trace a card; W5 folded.
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-areas", { width: 821, height: 883 }).then((r) => whenReady(r, () => aiAreasCheck(r.page))));
+  // "N to check" names its task and opens to the list (the user, 11-03 22:56: "says 1 to check but which one???").
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["unfolded", { width: 821, height: 883 }], ["folded", { width: 404, height: 900 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `ai-to-check-${label}`, viewport).then((r) => whenReady(r, () => aiToCheckCheck(r.page, label))));
   // Unfolded, no keyboard: the newest message and "thinking…" end over the shared bar (the user, 11-01 22:1x: "smh").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-wide-clear", { width: 821, height: 883 }).then((r) => whenReady(r, () => aiWideClearCheck(r.page))));
@@ -12786,6 +12941,11 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, below] of [["folded", "1"], ["folded", ""], ["unfolded", "1"], ["unfolded", ""]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `bar-foot-same-${label}${below ? "-below" : ""}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (b) => (await importShim("./dev/dock-search-check.js")).barFootSame(b), below))));
+  // FX1 (dev/dock-search-check.js barSwipeFixed; the user, 11-03 22:53: "some page block for the search bar"): mid-swipe
+  // home <-> PowOS AI's page, the bar's rect constant - it never rides a page.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const label of ["folded", "unfolded"])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `bar-swipe-fixed-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/dock-search-check.js")).barSwipeFixed()))));
   // SF1 (dev/dock-search-check.js searchFindable; the user, 11-03 11:49: "Where is that setting?"): Settings search
   // finds the search's spot and opens its row highlighted; a long press on the bar / edit mode's tap on the button flips it.
   if (process.env.SHELL_PAGES !== "0")

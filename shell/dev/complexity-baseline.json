@@ -260,9 +260,6 @@
   "ui/island.tsx": {
     "complexity": {
       "count": 1
-    },
-    "sonarjs/cognitive-complexity": {
-      "count": 1
     }
   },
   "ui/lock.tsx": {

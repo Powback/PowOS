@@ -24,6 +24,7 @@ import dev.omalauncher.linux.POWOS
 import dev.omalauncher.linux.AudioBridge
 import dev.omalauncher.linux.Bootstrap
 import dev.omalauncher.linux.EngineGuest
+import dev.omalauncher.linux.EngineServices
 import dev.omalauncher.linux.FILES_COMMAND
 import dev.omalauncher.linux.PLASMA_COMMAND
 import dev.omalauncher.linux.Gpu
@@ -440,6 +441,8 @@ class Runtime(
      */
     private fun onEngineReady() {
         widgets.linuxChanged(true)
+        // SpacetimeDB + the App API in the image, the APK's apps' modules published: the islands' data (EngineServices).
+        EngineServices.start(context)
         if (rootedTerminals) return
         // The rest as rooted (onRootedReady), through Guest: terminal tiles and the Terminal app on a pty in the image
         // (PtyTerminal: no Wayland server needed), PowOS's apps in the drawer (powos-apps-export in the image writes

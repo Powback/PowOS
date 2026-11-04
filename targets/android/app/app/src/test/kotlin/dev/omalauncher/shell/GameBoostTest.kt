@@ -85,6 +85,9 @@ class GameBoostTest {
         assertTrue("the lease age matches", sh.contains("LEASE_S=\${LEASE_S:-${GameBoost.LEASE_S}}"))
         assertTrue("a killed holder's originals are kept", sh.contains("[ -s \"\$S/freqs\" ] && return"))
         assertTrue("a top-level uclamp group", sh.contains("CPUCTL=\${GAME_BOOST_CPUCTL:-/dev/cpuctl}\nCG=\$CPUCTL/powos-game"))
+        assertTrue("a thermal controller's cap is found", sh.contains("horae*|thermal*) echo \"\$c\"; return"))
+        assertTrue("its cap is kept, only the min held up to it", sh.contains("[ \"\$lo\" -gt \"\$cap\" ] && lo=\$cap") && sh.contains("- kept\""))
+        assertTrue("restore never writes a stale max under it", sh.contains("if [ -n \"\$th\" ]; then cap=\$(cat \$P/\$p/scaling_max_freq)"))
         assertTrue("never a cooling device or thermal-engine", !Regex("cooling_device|thermal-engine|thermal_zone").containsMatchIn(sh.substringAfter("mkdir -p \"\$S\"")))
     }
 }

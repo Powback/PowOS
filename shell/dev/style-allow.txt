@@ -16,7 +16,3 @@ ui/shell.css .ai-unit.orphan { box-shadow: inset 3px 0 0 var(--color-accent); } 
 ui/shell.css background: rgb(0 0 0 / 0.25);  # AUDIT: the assistant's dim over the app
 ui/shell.css transparent calc(var(--fr) - 0.5px), #000 var(--fr));  # a CSS mask's keep-area (mask semantics, not a colour): the seam fillet's quarter-circle cut
 dev/preview/sheet.tsx .pv-cell.bad .home-tile { outline: 2px solid var(--color-red);  # the widget-fit sheet's marker on a tile with problems: dev tooling, never on the phone
-screens-mock.ts colors: { background: "#  # the dev mock's sample themes: their own palettes, the data a host sends (not the page's styling)
-screens-mock.ts image: svg(["#  # the dev mock's sample theme previews: the themes' own colours as data
-screens-mock.ts preview: svg("#  # the dev mock's sample theme previews: the themes' own colours as data
-screens-mock.ts image: svg(i ? "#  # the dev mock's sample backgrounds: the themes' own colours as data

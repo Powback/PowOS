@@ -521,6 +521,13 @@ export interface Bridge {
      */
     running?(): Promise<Record<string, RunState>>;
     /**
+     * The phone's own PowOS apps (apps/localapps.ts): the ones its APK ships and the ones in its files, and whether it
+     * is rooted and SpacetimeDB is up. Android only; an older APK rejects it ("no such call").
+     */
+    local?(): Promise<import("./apps/localapps.ts").LocalApps>;
+    /** No root: opens the PowOS Linux image's download (the engine's install screen). Android only. */
+    getLinux?(): Promise<void>;
+    /**
      * An Android app's deep links (App API's "+ add app"): the URIs its exported VIEW/BROWSABLE intent filters open,
      * read from its manifest - nothing is fired. Android only; an older APK rejects it ("no such call").
      */

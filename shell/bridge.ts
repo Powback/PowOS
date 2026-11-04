@@ -111,6 +111,8 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       info: (key) => call("apps.info", key),
       uninstall: (key) => call("apps.uninstall", key),
       running: () => call<Record<string, RunState>>("apps.running"),
+      local: () => call("apps.local"),
+      getLinux: () => call("apps.getLinux"),
       links: (pkg) => call<AppLinks>("apps.links", pkg),
       close: (key) => call<boolean>("apps.close", key),
       // The phone's only: another host (or an older APK) rejects them ("no such call") and the switcher lists none.

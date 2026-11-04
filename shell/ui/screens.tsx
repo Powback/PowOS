@@ -40,7 +40,7 @@ import { ALIGNS, alignChoice, anchorPull, type AlignMode, type AlignSurface } fr
 
 /** "icon colours" options after "the apps'": theme hues, the accent. */
 const TINTS = ["hue", "mono"];
-import { drawerRecents } from "./drawer.tsx";
+import { azList, drawerRecents } from "./drawer.tsx";
 import { PetToggle } from "./pet.tsx";
 import { pickSearchSpot } from "./searchwidget.tsx";
 
@@ -623,6 +623,12 @@ function StyleScreen() {
             <Segmented options={[f.on, f.off]} picked={f.value ? 0 : 1} onPick={(i) => act("style", "flag", [f.key, i === 0])} />
           </Option>
         ))}
+      </Section>
+      {/* Tried out before they're defaults: each off until turned on here (search: "experimental"). */}
+      <Section icon="tuneVariant" title="experimental">
+        <Option label="A-Z bar: the letter's apps as a list">
+          <Segmented options={["on", "off"]} picked={azList.value === "on" ? 0 : 1} onPick={(i) => (azList.value = i === 0 ? "on" : "")} />
+        </Option>
       </Section>
       {s.terminal && (
         <Section icon="console" title="terminal">

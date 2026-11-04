@@ -9,12 +9,20 @@ internal object WindowDpi {
     const val SW_LARGE = 600
 
     /**
-     * HACK: apps that keep the metrics of the density they started at (React Native: Discord drew avatars and labels
-     * at 0.68 of their size, cut, after moving between a window and full screen - 83fcef17, measured 2026-10-30) stay
-     * at the screen's density. Real fix: such an app's activity relaunched (not just reconfigured) when its density
-     * changes, so every app can take the desktop density.
+     * HACK: apps that size things by a density other than their window display's stay at the screen's density:
+     * - React Native keeps the metrics of the density it started at (Discord drew avatars and labels at 0.68 of their
+     *   size, cut, after moving between a window and full screen - 83fcef17, measured 2026-10-30);
+     * - OnePlus Calculator (ColorOS COUI, configChanges incl. density|screenSize) sizes its text by the process's
+     *   display-0 metrics (442) while its views are laid out at the window's 294: a FRESH launch into a 1135x1364
+     *   window (window-log 11-03 22:54:22, no density change at all) drew its result as "/ / / /" slivers and its
+     *   scientific keys clipped to "ra" "de" "in" "lo" "ln" (sin/cos/tan blank) - text 1.5x its keys (ask
+     *   1a1a369a6fa, "calc issue at some res"). At 442 the window is 410 dp: its phone layout, the folded one that
+     *   renders right.
+     * Real fix: the window's display density applied to the app's process resources too (a platform-signed module
+     * giving the task's process its display's configuration), or such an app's activity relaunched (not just
+     * reconfigured) when its density differs, so every app can take the desktop density.
      */
-    val SCREEN_DENSITY_APPS = setOf("com.discord")
+    val SCREEN_DENSITY_APPS = setOf("com.discord", "com.oneplus.calculator")
 
     /**
      * The dpi of a window's display, fixed for the window's life (never changed by a resize, a page reload or a
