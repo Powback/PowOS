@@ -256,3 +256,11 @@ hour; it is the task's next step.
   POWOS_PUBLISH_PACKS=1, Plasma pinned 6.7.5, KWin/Plasma check passed), published and re-pinned. The new full rootfs is
   kept as out/powos-rootfs-1104-363-full.tar.gz and the Oct-13 rootfs linked back as out/powos-rootfs.tar.gz (the
   sudo-in-the-build-container friction above).
+- **Emulator proof, kwin 3.63 base** (pm clear com.powos.app, persist.powos.root=0, APK cea8dfde via emu.sh install; the
+  published base downloaded 995 MB, its pacman db has kwin-6.7.5-3.63, KWin caps include `keyboard-live`): System
+  Settings from the home dock opens in a PowOS window with no keyboard ("held for the user's tap", mInputShown=false);
+  `input swipe 307 398 307 398 150` on its search raises it ("raised by the user's tap", mInputShown=true) and `wifi`
+  lands in the field (~/pw/kwin-363-shots/10-12). Seen on the way: right after the first install the app shows the
+  Plasma desktop; System Settings launched while the desktop is in front opens maximized inside the desktop (desktop
+  consumer, "v2 show on the desktop 0"), and a tap on its search raised no keyboard there (shots 07-08) - a separate
+  desktop-consumer keyboard case.
