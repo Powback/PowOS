@@ -264,3 +264,10 @@ hour; it is the task's next step.
   Plasma desktop; System Settings launched while the desktop is in front opens maximized inside the desktop (desktop
   consumer, "v2 show on the desktop 0"), and a tap on its search raised no keyboard there (shots 07-08) - a separate
   desktop-consumer keyboard case.
+- **Fixed: a launch while the Plasma desktop covers home** (a4a99353, emulator, persist.powos.root=0, APK a4a99353): the
+  cause was home's stopped window - no surface, so the web window had nowhere to hang ("home's surface refused a
+  child") and KWin's window fell back to a bare PowosWindowActivity task over the desktop (maximized, no PowOS frame,
+  no TapKeyboard). Runtime.openRooted now brings home to the front first when web windows take the window and the desktop
+  covers home outside desktop mode (WindowTasks.desktopCoversHome; same path rooted). MainActivity in front ->
+  apps.launch l:systemsettings: "home to the front", "desktop 0", web window 1 shown 89 ms after open, keyboard "held for
+  the user's tap", the tap on its search "raised by the user's tap", `wifi` lands (~/pw/nonroot-desktop-front-shots/03-05).
