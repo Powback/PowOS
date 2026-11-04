@@ -204,3 +204,21 @@ hour; it is the task's next step.
   the env + cache off) KWin, Xwayland and plasmashell stayed up with no SIGILL (shot `03-nosve-home.png`); a
   systemsettings window was not proven yet: `powos-open-task` from an adb guest shell answered "desktop" (no task),
   so the next step is opening it from the launcher (drawer) and checking the window draws.
+
+### 11-04 (nonroot-window-proof): a Linux window draws without root (emulator)
+
+- **Branch** agent/nonroot-window-proof = kwin-shm-copy (kwin 6.7.5-3.61, patch 0053 CPU copy + memfd shadows) +
+  emu-no-sve (session/Hyprland) + the tip; `lotfix-run.c` now gives every program the app starts in the guest the same
+  `GALLIVM_EXTRA_MATTRS=-sve,-sve2` + `MESA_SHADER_CACHE_DIR=/root/.cache/mesa-nosve` (only without /dev/kgsl-3d0 and
+  only when /proc/cpuinfo lists sve2 without sve; Hyprland no longer adds them twice).
+- **Proof** (persist.powos.root=0, kwin 3.61 in the image, the branch's Hyprland + powos-apps-export copied into the
+  image): the dock's System Settings tile -> KWin's window is the PowOS web window with its content drawn (Quick
+  Settings, sidebar, theme previews), live 435 ms after KWin's open (shots ~/pw/nonroot-window-shots/03..05).
+- **Found + fixed**: the window said app id `kdesystemsettings` (KDE's second .desktop for System Settings, NotShowIn=KDE,
+  same `Exec=systemsettings`), the tile launched `l:systemsettings`: the placeholder stayed beside the window and later
+  said "Couldn't open". Now `powos-apps-export` writes each app's hidden same-command entries (apps.tsv column 7,
+  aliases), `LinuxApp.matches` takes them (and open-task's ids), and the adopt offer carries `alts` (the other shown
+  entries with the same Exec) which a placeholder under any of them takes (gate LW3 `lw3Alts`, JVM LinuxAliasTest /
+  LinuxSameCommandTest). powos-open-task itself answered "task" (no 30 s fallback to "desktop").
+- **Left**: the base image must be rebuilt for the new Hyprland / powos-apps-export to reach installs (the emulator ran
+  hand-copied ones); the window's search field takes focus and raises the Android keyboard on open.
