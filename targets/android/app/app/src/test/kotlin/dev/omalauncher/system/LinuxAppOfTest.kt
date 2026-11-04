@@ -47,3 +47,27 @@ class LinuxAppOfTest {
         assertEquals(steam, RunningApps.linuxAppOf(apps, "steam"))
     }
 }
+
+/** System Settings' two .desktop files (the window says "kdesystemsettings", the tile launched "systemsettings"). */
+class LinuxSameCommandTest {
+    private val ss = LinuxApp("System Settings", "systemsettings", false, "systemsettings", null)
+    private val kss = LinuxApp("KDE System Settings", "systemsettings", false, "kdesystemsettings", null)
+    private val dolphin = LinuxApp("Dolphin", "dolphin", false, "org.kde.dolphin", null)
+    private val apps = listOf(dolphin, kss, ss)
+
+    @Test fun theWindowsEntryNamesTheOtherEntryWithItsCommand() {
+        assertEquals(kss, RunningApps.linuxAppOf(apps, "kdesystemsettings"))
+        assertEquals(listOf(ss), RunningApps.linuxSameCommand(apps, kss))
+    }
+
+    @Test fun anAppWithItsOwnCommandHasNoOthers() {
+        assertEquals(emptyList<LinuxApp>(), RunningApps.linuxSameCommand(apps, dolphin))
+    }
+
+    @Test fun theOfferCarriesThem() {
+        val src = File("src/main/kotlin/dev/omalauncher/shell/ShellBridge.kt").readText()
+        assertTrue(src.contains("RunningApps.linuxSameCommand(runtime.linuxApps, a)"))
+        val ww = File("src/main/kotlin/dev/omalauncher/shell/WebWindows.kt").readText()
+        assertTrue(ww.contains(".put(\"alts\", org.json.JSONArray(offer.alts))"))
+    }
+}

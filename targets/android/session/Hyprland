@@ -47,7 +47,8 @@ if [ ! -e /dev/kgsl-3d0 ]; then
   # "arm64: Filter out SVE hwcaps when FEAT_SVE isn't implemented" (6.6.7x stable) or an emulator that hides SME.
   _feat=" $(grep -m1 '^Features' /proc/cpuinfo 2>/dev/null | cut -d: -f2) "
   case "$_feat" in *" sve2 "*) case "$_feat" in *" sve "*) ;; *)
-    export GALLIVM_EXTRA_MATTRS="-sve,-sve2${GALLIVM_EXTRA_MATTRS:+,$GALLIVM_EXTRA_MATTRS}"
+    # (lotfix-run.c, the engine's launcher, set it for the session already; once is enough)
+    case ",${GALLIVM_EXTRA_MATTRS:-}," in *,-sve2,*) ;; *) export GALLIVM_EXTRA_MATTRS="-sve,-sve2${GALLIVM_EXTRA_MATTRS:+,$GALLIVM_EXTRA_MATTRS}" ;; esac
     export MESA_SHADER_CACHE_DIR="$HOME/.cache/mesa-nosve"
     echo "powos-session: CPU lists sve2 without sve, llvmpipe without SVE" >&2 ;; esac ;; esac
   unset _feat

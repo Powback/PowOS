@@ -11658,6 +11658,31 @@ async function lw3Offer() {
   return fails;
 }
 
+/**
+ * LW3: a window offered under another entry with the same command ([alts]) takes the placeholder - System Settings'
+ * two .desktop files: the tile launched "l:systemsettings", the window said "kdesystemsettings" (emulator 2026-11-04:
+ * the placeholder stayed and said "Couldn't open" beside the window).
+ */
+async function lw3Alts() {
+  const { S, W, g, els } = await window.__lw3f.lw3Env();
+  W.webWins.value = [];
+  W.LINUX_START.ms = 600_000;
+  await S.launch("l:systemsettings");
+  await window.__gw.settled();
+  const el = els("l:systemsettings")[0];
+  window.__mockEvents.emit("webwindows.adopt", { kwin: 51, key: "l:kdesystemsettings", label: "System Settings", alts: ["l:systemsettings"] });
+  await window.__gw.settled();
+  const w = W.webWins.value;
+  const fails = [
+    !(w.length === 1 && w[0].id === 77 && !w[0].pending) && `the kdesystemsettings window did not take the systemsettings placeholder: ${JSON.stringify(w)}`,
+    els("l:systemsettings")[0] !== el && "the offered window is a new element, not the placeholder's",
+    g.opened.find((o) => o.kwin === 51)?.key !== "l:systemsettings" && "the host opened no window for KWin's 51 under the launch's key",
+  ].filter(Boolean);
+  window.__mockEvents.emit("webwindows.live", 77);
+  W.webWins.value = [];
+  return fails;
+}
+
 /** LW3: no window in LINUX_START - "couldn't start" with a close; a tap again is a new try. */
 async function lw3Timeout() {
   const { S, W, g, els, wait } = await window.__lw3f.lw3Env();
@@ -11723,7 +11748,7 @@ async function lw3End() {
 }
 
 /** The LW3 run's steps into the page (window.__lw3f); evaluates to []. */
-const LW3_HELPERS = `(window.__lw3f = { ${[lw3Env, lw3Launch, lw3Offer, lw3Timeout, lw3Retry, lw3BadExec, lw3HostFailed, lw3End].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
+const LW3_HELPERS = `(window.__lw3f = { ${[lw3Env, lw3Launch, lw3Offer, lw3Alts, lw3Timeout, lw3Retry, lw3BadExec, lw3HostFailed, lw3End].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
 
 /** [webWindowMaskCheck]'s helpers into the page (window.__wwg); evaluates to [] (no problems) as a gate step. */
 const WW_HELPERS = `(window.__wwg = { ${[wwHelpers, wwFound, wwCuts, wwMenu, wwRaise, wwStacked, wwSwipe, wwHidden, wwMaximise, wwMaximiseAt, wwMergedBar, wwBarHit].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
@@ -12178,6 +12203,7 @@ try {
     await shot("1-placeholder");
     fails.push(...(await step("lw3Offer")));
     await shot("2-taken");
+    fails.push(...(await step("lw3Alts")));
     fails.push(...(await step("lw3Timeout")));
     await shot("3-couldnt-start");
     fails.push(...(await step("lw3Retry")));

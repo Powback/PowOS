@@ -425,7 +425,7 @@ function adoptPlace(body: WebWindowRect | undefined, bar: number): { vx: number;
 const ANDROID_STAND_IN = "l:android-";
 
 export async function adoptWebWindow(
-  m: { task?: number; kwin?: number; key: string; label: string; body?: WebWindowRect; ownFrame?: boolean },
+  m: { task?: number; kwin?: number; key: string; label: string; body?: WebWindowRect; ownFrame?: boolean; alts?: string[] },
   page: number,
 ): Promise<boolean> {
   // KWin's stand-in for an Android app ("l:android-<package>", the Linux session's powos-android-tasks / scrcpy
@@ -435,8 +435,9 @@ export async function adoptWebWindow(
   const bar = m.ownFrame ? 0 : TITLE;
   const ww = powos.webwindows;
   if (!ww) return false;
-  // A Linux launch's placeholder waiting for this app (LW3; by its key - the host matched app_id to the .desktop): taken.
-  const ph = m.kwin != null ? webWins.value.find((w) => w.pending && w.key === m.key) : undefined;
+  // A Linux launch's placeholder waiting for this app (LW3; by its key - the host matched app_id to the .desktop - or
+  // the key of an entry starting the same command, [alts]: System Settings' two .desktop files): taken.
+  const ph = m.kwin != null ? webWins.value.find((w) => w.pending && (w.key === m.key || !!m.alts?.includes(w.key))) : undefined;
   if (ph) return takePlaceholder(ph, m.kwin!, m.ownFrame);
   const o = pageOrigin();
   const { vx, vy, w, h } = adoptPlace(m.body, bar);

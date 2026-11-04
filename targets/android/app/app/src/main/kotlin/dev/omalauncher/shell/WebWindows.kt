@@ -767,6 +767,8 @@ class WebWindows(
         val icon: android.graphics.drawable.Drawable?,
         /** A game ([isGame]): its full screen is IMMERSIVE - the status bar hidden, the whole screen the game's. */
         val game: Boolean = false,
+        /** The keys of the entries that start the same command ([RunningApps.linuxSameCommand]): a launch's placeholder under any of them takes it. */
+        val alts: List<String> = emptyList(),
     ) {
         /** Its app's drawer key ("l:<desktop id>", [linuxOpened]): the app menu's close and its switcher card find it. */
         var key = ""
@@ -1146,7 +1148,7 @@ class WebWindows(
         WindowLog.i(TAG, "KWin window $kwin (${offer.appId}, \"${offer.title}\"): offered to the page as $key")
         // "ownFrame": it draws its own complete frame (Brave, Steam, GTK CSD; kwin 0046) - the page shows no bar over it.
         val own = andro.marchy.WebWindowSource.ownFrame(kwin)
-        emit("webwindows.adopt", JSONObject().put("kwin", kwin).put("key", key).put("label", offer.label).put("ownFrame", own))
+        emit("webwindows.adopt", JSONObject().put("kwin", kwin).put("key", key).put("label", offer.label).put("ownFrame", own).put("alts", org.json.JSONArray(offer.alts)))
         main.postDelayed({
             pendingLinux.remove(kwin)?.let { p ->
                 WindowLog.w(TAG, "fallback: KWin window $kwin (${p.appId}): the page made no web window in $LINUX_ADOPT_MS ms, a task instead")

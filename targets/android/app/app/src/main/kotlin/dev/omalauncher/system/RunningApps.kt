@@ -140,6 +140,22 @@ object RunningApps {
     ): LinuxApp? = if (appId.isBlank()) null else apps.firstOrNull { isOf(it, appId) }
 
     /**
+     * The other entries that start the same command as [app] (the Exec line, field codes aside): a window is any of
+     * theirs too. KDE ships System Settings twice - systemsettings.desktop and kdesystemsettings.desktop, both
+     * `Exec=systemsettings` - and outside a Plasma login the window names itself "kdesystemsettings": a launch from the
+     * "System Settings" tile ("l:systemsettings") kept its placeholder, which then said "Couldn't open", while the
+     * window opened beside it as "l:kdesystemsettings" (emulator, no root, 2026-11-04).
+     */
+    fun linuxSameCommand(
+        apps: List<LinuxApp>,
+        app: LinuxApp,
+    ): List<LinuxApp> {
+        val cmd = app.exec.trim()
+        if (cmd.isEmpty()) return emptyList()
+        return apps.filter { it.id != app.id && it.exec.trim() == cmd }
+    }
+
+    /**
      * The page's map, app key -> "running" | "frozen": "a:<key>" for every installed app with a task, "l:<id>" for
      * each Linux app with a window (a running one wins over a frozen one of the same app).
      */
