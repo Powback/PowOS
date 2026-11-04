@@ -189,3 +189,24 @@ Make x86 games use our Turnip. Two ways, the first preferred:
 Or move Broforce to `powos-steam-compat set 274190 arm64` (native Wine, aarch64 winevulkan -> our driver) - a
 per-game workaround; x86-Proton games still need 1 or 2.
 Check: `queue.sh add <task> tools/phone/verify/bf-driver.sh` - PASS needs the game's map inode = the package's.
+
+## ARM64 A/B + FEX Vulkan thunk (fex-vulkan-thunk, 2026-11-04)
+- **A/B, Proton ARM64 (native Wine + our Turnip):** `bf-coldstart.sh cfg:arm64 keep cold` (window 43.5 s, first frame
+  52.9 s), bf-driver.sh: Broforce_beta.exe/explorer/xalia (exe = wine-preloader aarch64) map
+  `/run/host/usr/lib/libvulkan_freedreno.so` inode 414382 = OUR package; **CP AHB bus errors 0 in 20 s** (x86 runs:
+  40/20 s = the ratelimit cap). bf-checker base: **X 7.87% / S 1.03%** (x86: 6.82-7.44%, same day 7.95%). So the AHB
+  errors were FEX RootFS's unpatched x86 Turnip 26.2.0 (0001's RB_CCU_CNTL fix works once the game runs ours), but
+  **the black checker is not the game's Turnip**: same % on our patched native driver. Restored to the user's
+  pinned x86 (not clearly better on the checker; the arm64 prefix stays as compatdata/274190.powos-arm64).
+- **Why x86 games never got the thunk (two causes):**
+  1. Steam's client sets `STEAM_COMPAT_FEX_CONFIG` itself per game (its own FEX setting: empty), over /usr/bin/steam's
+     export - fex-compat-tool's printenv log `/tmp/fex-compat-tool-<pid>.log` shows `STEAM_COMPAT_FEX_CONFIG=` while
+     the client's own environ has `...ThunksDB_Vulkan:1`; so the generated FEX_APP_CONFIG had an empty ThunksDB.
+     Fix: steam-env `FEX_THUNKCONFIG=/usr/lib/powos-steam/fex-thunks.json` (FEX option from the environment; FEX maps
+     it to /run/host/... in pressure-vessel). Alone it did NOT help (16:01 run: env present, inode 270485, AHB 40).
+  2. Valve's FEX-2607 builds overlay paths from `@PREFIX_LIB@` with a multiarch test on its RootFS, which is empty in
+     the container -> Fedora layout (`/usr/lib/pressure-vessel/overrides/lib64/...`), while pressure-vessel's x86_64
+     loader is `/usr/lib/pressure-vessel/overrides/lib/x86_64-linux-gnu/libvulkan.so.1`. FEX-2610 adds those prefixes
+     under FEX_STEAM_SUPPORT (diff of FileManagement.cpp 37265b10 vs FEX-2610). Fix: our ThunksDB.json with the
+     container paths, in each compatdata/<id>/fex-emu/ (FEX's user config dir = FEX_APP_CONFIG_LOCATION), written by
+     /usr/bin/steam at start (steam 1.0.0.87-31).

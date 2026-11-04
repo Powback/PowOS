@@ -1,0 +1,16 @@
+{
+  "DB": {
+    "Vulkan": {
+      "Library": "libvulkan-guest.so",
+      "Overlay": [
+        "@PREFIX_LIB@/libvulkan.so",
+        "@PREFIX_LIB@/libvulkan.so.1",
+        "@HOME@/.local/share/Steam/ubuntu12_32/steam-runtime/pinned_libs_64/libvulkan.so.1",
+        "/usr/lib/pressure-vessel/overrides/lib/x86_64-linux-gnu/libvulkan.so.1",
+        "/usr/lib/pressure-vessel/overrides/lib/x86_64-linux-gnu/libvulkan.so",
+        "/run/gfx/main/usr/lib64/libvulkan.so.1",
+        "/run/gfx/main/usr/lib/x86_64-linux-gnu/libvulkan.so.1"
+      ]
+    }
+  }
+}
