@@ -47,6 +47,8 @@ else
   "$HERE/tools/fetch-manifest.sh" "$S/manifest" "${POWOS_MANIFEST:-ghcr.io/powback/powos-phone:deck}"
 fi
 cp $("$HERE/tools/newest-pkgs.sh" "$OUT/pkgs") "$S/pkgs/"   # ours: kwin, fex-emu, recipes.list builds (newest of each)
+# Plasma at our KWin's version, from the rootfs KWin builds on (tools/plasma-pin.sh: Arch Linux ARM moved Plasma past it).
+"$HERE/tools/plasma-pin.sh" && cp -a "$OUT/plasma-pin" "$S/plasma-pin"
 cp -a "$HERE/session" "$HERE/shims" "$HERE/play" "$HERE/phone-rules.conf" "$HERE/tools/resolve-packages.py" "$HERE/tools/phone-parity.py" "$S/"
 install -m 755 "$HERE/install-powos-android.sh" "$S/"
 # The PowOS desktop widgets from this checkout (install-powos-android.sh puts them over the image content's).
@@ -102,12 +104,16 @@ echo "built: $OUT/powos-rootfs.tar.gz"
 # Linux ARM. When those move a minor version KWin can't start at all: the 11-04 rootfs had kscreenlocker/libplasma/
 # plasma-workspace 6.8.1 under kwin 6.7.5 ("undefined symbol ScreenLocker::KSldApp::lock" - no desktop, no Linux app
 # window on any phone that installs it). Refused here, before it is split, pinned or published.
-plasma_ver() { tar -tzf "$1" | sed -n "s#^\(\./\)\{0,1\}var/lib/pacman/local/$2-\([0-9][0-9]*\.[0-9][0-9]*\)\..*#\2#p" | head -n 1; }
-kw=$(plasma_ver "$OUT/powos-rootfs.tar.gz" kwin) sl=$(plasma_ver "$OUT/powos-rootfs.tar.gz" kscreenlocker)
-[ -n "$kw" ] && [ "$kw" = "$sl" ] || {
-  echo "build-rootfs: kwin is Plasma ${kw:-?} but kscreenlocker is ${sl:-?}: KWin won't start in this rootfs." >&2
-  echo "  Pin the Plasma libraries to kwin's version in install-powos-android.sh, or move pkgs/kwin to ${sl:-theirs}." >&2
-  exit 1; }
+tar -tzf "$OUT/powos-rootfs.tar.gz" ./var/lib/pacman/local 2>/dev/null > "$W/rootfs-pacdb.lst" || tar -tzf "$OUT/powos-rootfs.tar.gz" > "$W/rootfs-pacdb.lst"
+plasma_ver() { sed -n "s#^\(\./\)\{0,1\}var/lib/pacman/local/$2-\([0-9][0-9]*\.[0-9][0-9]*\)\..*#\2#p" "$W/rootfs-pacdb.lst" | head -n 1; }
+kw=$(plasma_ver "$OUT/powos-rootfs.tar.gz" kwin)
+for lib in kscreenlocker libplasma plasma-workspace kdecoration; do
+  sl=$(plasma_ver "$OUT/powos-rootfs.tar.gz" $lib)
+  [ -n "$kw" ] && [ "$kw" = "$sl" ] || {
+    echo "build-rootfs: kwin is Plasma ${kw:-?} but $lib is ${sl:-?}: KWin won't start in this rootfs." >&2
+    echo "  tools/plasma-pin.sh pins Plasma to kwin's version (install-powos-android.sh), or move pkgs/kwin to ${sl:-theirs}." >&2
+    exit 1; }
+done
 # The same rootfs split for phones without root (rootfs-packs.conf): a base image they download first and the packs
 # the app adds on demand (gaming, languages). Read from the full tarball, so it never changes what rooted installs get.
 python3 -I "$HERE/tools/split-rootfs.py" "$OUT/powos-rootfs.tar.gz" "$HERE/rootfs-packs.conf" "$OUT"

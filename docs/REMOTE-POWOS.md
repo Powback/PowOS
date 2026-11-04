@@ -402,7 +402,9 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `targets/android/build-oplus-hook.sh:15` | Same `make build` exit-status bug as build-app.sh. | Same as build-app.sh. |
 | `targets/android/build-pkgs.sh:57` | pacman 7's Landlock download sandbox is not permitted in Docker: DisableSandbox. | A container runtime that allows Landlock. |
 | `targets/android/build-rootfs.sh:11` | The rootfs is named lotfix-rootfs.tar.gz because Andromarchy's app looks for that file. | Our own app's download name. |
-| `targets/android/install-powos-android.sh:57` | kwin is held with IgnorePkg; Plasma updates need a matching rebuild. | The Anland backend upstream in KWin. |
+| `targets/android/install-powos-android.sh:27` | Plasma held at kwin's 6.7.5 (repo ahead of [core] + IgnorePkg); 6.8-only Plasma packages left out. | pkgs/kwin's patches ported to Arch's current Plasma, or Plasma built from source at our version. |
+| `targets/android/install-powos-android.sh:88` | kwin is held with IgnorePkg; Plasma updates need a matching rebuild. | The Anland backend upstream in KWin. |
+| `targets/android/tools/plasma-pin.sh:11` | Plasma 6.7.5 repackaged from the installed rootfs kwin builds on (Arch Linux ARM keeps no old builds). | Plasma built at kwin's version by build-pkgs.sh, or kwin ported to 6.8. |
 | `targets/android/install-powos-android.sh:105` | bun is fetched by curl (outside any package) for aarch64; the manifest can't carry it. | The manifest lists unpackaged binaries too. |
 | `targets/android/install-powos-android.sh:134` | Installs the session launcher as /usr/bin/Hyprland (see session/Hyprland). | See session/Hyprland #1. |
 | `targets/android/install-powos-android.sh:163` | Installs Omarchy command names the engine calls (shims). | Neutral command names in the engine. |

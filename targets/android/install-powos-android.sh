@@ -18,6 +18,31 @@ L=/tmp/lotfix
 C=/etc/pacman.conf
 echo "powos: from $(cat $P/manifest/image.txt)"
 
+# ── Plasma at our KWin's version (tools/plasma-pin.sh, staged by build-rootfs.sh as plasma-pin/) ───────────────
+# KWin links Plasma's libraries; Arch Linux ARM's current Plasma (6.8.1 since 2026-10) under our kwin 6.7.5 stops KWin
+# from starting at all ("undefined symbol ScreenLocker::KSldApp::lock", the 11-04 base). A repo ahead of [core]: pacman
+# takes a package from the first repo that has it, so every pinned name comes from here and none is upgraded past it.
+# Plasma packages of the newer release with no build at our version (POWOS_PLASMA_HELD: added to PowOS after the rootfs
+# the pin comes from) are not installed. Both stay in IgnorePkg, so a later -Syu on the phone can't move them either.
+# HACK: Plasma held back (and the held ones left out) because KWin is ours at 6.7.5; the real fix is pkgs/kwin's
+# patches ported to Arch's current Plasma, or Plasma built at our version (see tools/plasma-pin.sh).
+POWOS_PLASMA_PIN= POWOS_PLASMA_HELD=
+if [ -s "$P/plasma-pin/powos-plasma.db.tar.gz" ]; then
+  POWOS_PLASMA_PIN=$(cat "$P/plasma-pin/pinned.txt")
+  grep -q '^\[powos-plasma\]' $C ||
+    sed -i "0,/^\[core\]/s##[powos-plasma]\nSigLevel = Optional TrustAll\nServer = file://$P/plasma-pin\n\n[core]#" $C
+  pacman -Sy
+  plasma_ver() { LC_ALL=C pacman -Si "$1" | awk '/^Version/ {print $3}' | sed 's/^[0-9]*://; s/-[^-]*$//'; }
+  pin_ver=$(plasma_ver powos-plasma/kscreenlocker) new_ver=$(plasma_ver extra/kscreenlocker)
+  if [ "$new_ver" != "$pin_ver" ]; then
+    POWOS_PLASMA_HELD=$(pacman -Sl extra | awk -v v="$new_ver" '{x = $3; sub(/^[0-9]+:/, "", x); sub(/-[^-]*$/, "", x)} x == v {print $2}' |
+      grep -vxF -f <(tr ' ' '\n' <<< "$POWOS_PLASMA_PIN" | grep .) | tr '\n' ' ' || true)
+  fi
+  echo "powos: Plasma pinned at $pin_ver (Arch Linux ARM: $new_ver); held out: ${POWOS_PLASMA_HELD:-none}"
+  grep -q '^IgnorePkg' $C || sed -i '/^\[options\]/a IgnorePkg =' $C
+  sed -i "/^IgnorePkg/ s/$/ $POWOS_PLASMA_PIN $POWOS_PLASMA_HELD/" $C
+fi
+
 # ── What the phone session itself needs (not PowOS content: the Plasma session on Android) ─────────────
 pacman -S --noconfirm --needed plasma-workspace xdg-desktop-portal-kde kscreen python zstd
 
@@ -42,6 +67,11 @@ POWOS_TARGET=$POWOS_TARGET python3 $P/resolve-packages.py $P/manifest/packages.t
 # Ours are installed already (and in no repo, so pacman -S would not find them).
 pacman -Qq | sort -u > /tmp/installed.txt
 sort -u /tmp/powos-install.txt | comm -23 - /tmp/installed.txt > /tmp/r && mv /tmp/r /tmp/powos-install.txt
+# Plasma held out above (no build at our KWin's version): listed in the report instead of installed.
+for p in $POWOS_PLASMA_HELD; do
+  grep -qxF "$p" /tmp/powos-install.txt && echo "HELD     $p  Plasma $new_ver only (KWin is ours at $pin_ver: tools/plasma-pin.sh)" >> /tmp/powos-held.txt
+done
+[ -z "$POWOS_PLASMA_HELD" ] || { grep -vxF -f <(tr ' ' '\n' <<< "$POWOS_PLASMA_HELD" | grep .) /tmp/powos-install.txt > /tmp/r || true; mv /tmp/r /tmp/powos-install.txt; }
 # PowOS's choice among alternative providers first (PipeWire for JACK and PulseAudio, as Fedora/PowOS does):
 # otherwise a dependency pulls in pacman's default provider (jack2) and pipewire-jack then conflicts with it.
 pacman -S --noconfirm --needed --ask 4 pipewire-jack pipewire-pulse
@@ -267,5 +297,14 @@ install -Dm 644 $P/manifest/index.tsv /usr/share/powos/phone-index.tsv
 install -Dm 755 $P/phone-parity.py /usr/lib/powos/phone/phone-parity.py
 python3 /usr/lib/powos/phone/phone-parity.py /usr/share/powos/phone-index.tsv > /usr/share/powos/phone-parity.txt || true
 
+[ -s /tmp/powos-held.txt ] && { cat /tmp/powos-held.txt /usr/share/powos/phone-report.txt > /tmp/r && mv /tmp/r /usr/share/powos/phone-report.txt; }
+# Plasma pin (top): nothing at the newer Plasma release got in as a dependency, then the build-time repo goes (its
+# directory is staged input, gone from the image; the names stay in IgnorePkg).
+if [ -n "$POWOS_PLASMA_PIN" ]; then
+  late=$(for p in $POWOS_PLASMA_HELD; do pacman -Q "$p" 2>/dev/null || true; done
+         for p in $POWOS_PLASMA_PIN; do pacman -Q "$p" 2>/dev/null | awk -v v="$pin_ver" '{x = $2; sub(/^[0-9]+:/, "", x); sub(/-[^-]*$/, "", x)} x != v' || true; done)
+  [ -z "$late" ] || { echo "powos: Plasma past our KWin's $pin_ver got in: $(echo $late) - KWin would not start" >&2; exit 1; }
+  sed -i '/^\[powos-plasma\]/,/^$/d' $C
+fi
 echo "powos installed: $(head -1 /usr/share/powos/phone-report.txt)"
 sed -n '2,7p' /usr/share/powos/phone-parity.txt
