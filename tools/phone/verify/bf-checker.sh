@@ -30,6 +30,10 @@ front=$("$A" shell "dumpsys activity activities | grep -m1 topResumedActivity" |
 steam_before=$("$A" shell "pgrep -f 'steam -cef'" | tr -d '\r')
 fold=$("$A" shell "dumpsys device_state | grep -m1 mCommittedState" | sed -nE "s/.*name='([A-Z_]+)'.*/\1/p")
 echo "front=${front:-?} steam_before=${steam_before:+yes} fold=$fold out=$OUT"
+# A steam-env (pkgs/steam) newer than the running Steam reaches no game until Steam restarts (/usr/bin/steam exports
+# it at start): base right after a steam install would measure the OLD env. Stale -> Steam closed, the first variant
+# starts it cold (restore() brings it back as before).
+stale=$("$A" shell "su -c 'p=\$(pgrep -f \"steam -cef\" | head -1); [ -n \"\$p\" ] && [ /data/powos/root/usr/lib/powos-steam/steam-env -nt /proc/\$p ] && echo stale'" | tr -d '\r')
 for f in bf-start.sh bf-stop.sh bf-window.sh bf-present.sh bf-checker-phone.sh bf-lib.sh bf-xframes.py; do "$A" push "$here/$f" /data/local/tmp/powos-$f >/dev/null || { echo "ENV: can't push $f to the phone (a stale /data/local/tmp copy would run instead)"; exit 5; }; done
 # bf-checker-phone.sh's grab sources bf-lib.sh (xframes grab: Xlib frames; x11grab gets none on Android, no MIT-SHM) -
 # xframes' body is bf-xframes.py (split out for test-complexity.sh's length budget), also pushed here.
@@ -42,6 +46,7 @@ restore() {
   [ -n "$front" ] && "$A" shell "am start -n $front >/dev/null 2>&1"
   "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfc-* /data/local/tmp/powos-bf-*.sh /data/powos/root/var/tmp/powos-bf-*.sh /data/powos/root/var/tmp/bfc'"
 }
+[ "$stale" = stale ] && { pill "Steam predates its steam-env: restarting it"; echo "steam-env newer than Steam: restarting Steam"; asuser bf-stop.sh --steam | tail -1; }
 i0=$(irq); touched() { [ "$(irq)" != "$i0" ]; }
 abort() { echo "touch $(date +%T) - abort, restoring"; restore; exit 3; }
 nap() { local i; for i in $(seq "$1"); do sleep 5; touched && abort; done; }
