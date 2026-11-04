@@ -7,6 +7,13 @@
 #         regs under CP_SET_THREAD_BOTH, so BV executed the RB non-context write too and the Adreno 740's CP faulted
 #         on every command buffer start: dmesg "kgsl kgsl-3d0: CP: AHB bus error, CP_RL_ERROR_DETAILS_0:0x10008e07"
 #         (0x8e07 = RB_CCU_CNTL), ~300/s while Broforce ran (= its KGSL submit rate; 11-03 22:4x).
+#   0002  KGSL: IOCOHERENT is trusted only when the device tree marks the gfx3d_user context bank dma-coherent
+#         (no readable DT: distrusted on Adreno 740). The phone's kgsl-smmu is dma-coherent, gfx3d_user isn't, yet
+#         KGSL accepts IOCOHERENT; FEX sets tu_override_uncached_as_cache_coherent in every Proton-ARM64 game, so
+#         DXVK's uncached memory became cached+IOCOHERENT (suspected 16 px black columns, docs/research/
+#         broforce-black-columns.md "Coherency override"). Now the same as TU_KGSL_FORCE_NONCOHERENT=1: no
+#         cached-coherent type, the override is a no-op; one "turnip: KGSL accepts IOCOHERENT but ..." warning.
+#         TU_KGSL_TRUST_IOCOHERENT=1 restores the kernel's answer.
 # A package so a Turnip fix reaches phones without a new rootfs: rooted.sh deploy installs it (powos-deploy.sh),
 # replacing Arch's vulkan-freedreno (whose files the rootfs build had already overwritten with this same source).
 # Gallium freedreno (KWin, Xwayland's glamor) stays the rootfs's build: it writes RB_CCU_CNTL on BR only already
@@ -14,7 +21,7 @@
 
 pkgname=vulkan-freedreno-kgsl
 pkgver=26.3.0
-pkgrel=1
+pkgrel=2
 pkgdesc='Turnip Vulkan driver on KGSL (lfdevs Mesa) with PowOS fixes (PowOS Android)'
 arch=(aarch64)
 url='https://github.com/lfdevs/mesa-for-android-container'
@@ -26,10 +33,12 @@ provides=(vulkan-freedreno vulkan-driver)
 conflicts=(vulkan-freedreno)
 replaces=(vulkan-freedreno)
 _commit=ef25369b9cef72589e164010bea7af3745e92c7b
-_patches=(0001-turnip-a7xx-rb-ccu-cntl-br-only.patch)
+_patches=(0001-turnip-a7xx-rb-ccu-cntl-br-only.patch
+          0002-turnip-kgsl-iocoherent-needs-coherent-user-cb.patch)
 source=("mesa-$_commit.tar.gz::https://github.com/lfdevs/mesa-for-android-container/archive/$_commit.tar.gz"
         "${_patches[@]}")
 sha256sums=(825f6126e54ec5e14f3ad1b4cf62b51d43b065c7cf4bc2841ec23a4bcfb831d1
+            SKIP
             SKIP)
 
 prepare() {

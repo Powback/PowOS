@@ -3,7 +3,8 @@
 # bf-checker.sh [variant...]: (Mac; queue it: queue.sh add <task> bf-checker.sh) bisect Broforce's black checkerboard
 # on the loading + menu screens over render variants, ~4 min of screen each. Variants (bf-checker-phone.sh set):
 # base, TU_DEBUG = noubwc | sysmem | flushall | nolrz (Proton user_settings.py), dxvk.conf = nomsaa (d3d11.disableMsaa)
-# | zeromem (dxvk.zeroMappedMemory) | zerowg (d3d11.zeroInitWorkgroupMemory) | relaxed (d3d11.relaxedBarriers).
+# | zeromem (dxvk.zeroMappedMemory) | zerowg (d3d11.zeroInitWorkgroupMemory) | relaxed (d3d11.relaxedBarriers),
+# noncoherent (TU_KGSL_FORCE_NONCOHERENT=1: FEX's tu_override_uncached_as_cache_coherent becomes a no-op).
 # Per variant: cold start (game killed between variants, Steam kept), from the game window on 75 s of Xwayland's copy
 # (bf-lib xframes grab, 1 fps), a screencap every ~10 s (shot.sh) and the menu's SurfaceFlinger presents from 45 s (fps), then the
 # DXVK + Unity logs. bf-checker.py scores the black checker per frame; its last line = the board result (which variant
@@ -11,7 +12,7 @@
 # Exit 3 on a real touch (re-queued), 5 when the game doesn't start. Artefacts: OUT (~/.cache/powos-verify/bfc-*).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
-[ $# -gt 0 ] || set -- base noubwc sysmem nomsaa zeromem flushall nolrz zerowg relaxed
+[ $# -gt 0 ] || set -- base noncoherent noubwc sysmem nomsaa zeromem flushall nolrz zerowg relaxed
 OUT=${OUT:-$HOME/.cache/powos-verify/bfc-$(date +%F_%H%M)}; mkdir -p "$OUT"
 BF_ADB=$A . "$here/bf-lib.sh"   # pill <step>: the status pill's sub-step
 irq() { "$A" shell "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts" | tr -d '\r'; }

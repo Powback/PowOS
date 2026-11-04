@@ -67,3 +67,40 @@ would not change anything: no hop uses UBWC.
 - Stronger lead in parallel (coordinator, 2026-11-03): dmesg of the same run has 738x `kgsl kgsl-3d0: CP: AHB bus
   error, CP_RL_ERROR_DETAILS_0:0x10008e07 CP_RL_ERROR_DETAILS_1:0x12144` - a protected register write in some
   command stream (Turnip or freedreno); agent cp-fault is decoding it. Count those per run next to 0012's line.
+
+## Coherency override (bf-coherent, 2026-11-04)
+- Origin of `tu_override_uncached_as_cache_coherent=true` in the game's environ and Mesa's "default value of option
+  tu_override_uncached_as_cache_coherent overridden by environment": **FEX's WoW64 module**, not PowOS and not the
+  user. Only `Proton Experimental (ARM64)/files/lib/wine/aarch64-windows/libwow64fex.dll` (and libarm64ecfex.dll)
+  carry the string, next to `__wine_set_unix_env`: FEX sets it inside every Proton-ARM64 game process at start, so
+  no PowOS env file can unset it (Mesa's env beats drirc too). Searched with no hit (2026-11-04, read-only):
+  /etc, /usr/lib/environment.d, ~/.config (environment.d, powos/steam-env, proton-settings.json), Steam userdata
+  launch options (274190 = only `unity-screen %command%`), Proton user_settings.py, pkgs/steam/steam-env,
+  /usr/share/drirc.d, every branch of this repo (`git log -S tu_override_uncached --all`: only the evidence log).
+  RimWorld's native Player.log (2026-10-17) prints it too: FEX sets it for x86 guests generally.
+- Why FEX sets it (upstream FEX's reason, not measured here): x86 code expects normal cacheable memory; unaligned
+  and atomic accesses that FEX emits on Arm fault or crawl on write-combined (Normal-NC) mappings of GPU memory.
+- What it does (Mesa ef25369b tu_device.cc:1820-1830, tu_knl.cc:57-65): only when KGSL accepts IOCOHERENT
+  (tu_knl_kgsl.cc:2020 probe; this phone's kgsl-smmu@3da0000 has `dma-coherent`), every HOST_VISIBLE|HOST_COHERENT
+  uncached allocation becomes a WRITEBACK + KGSL_MEMFLAGS_IOCOHERENT BO (tu_knl_kgsl.cc:348-355). Coherency then
+  rests on the SMMU snooping CPU caches; lfdevs's own comment (tu_device.cc:1802) says some Android KGSL kernels
+  report IOCOHERENT while mappings still need cache maintenance, and the gfx3d_user context bank here carries only
+  `qcom,iommu-dma` (no `dma-coherent`). If that is this phone, DXVK's CPU-written upload/constant buffers reach the
+  GPU stale in 64-B lines = the 16-px black columns, and stale command data could explain the CP AHB bus errors.
+  Not proven: no launch was made (games are not started by agents).
+- Still exported with the new Turnip (vulkan-freedreno-kgsl 26.3.0-1 patched): yes - FEX sets it independently of
+  the driver, and the installed /usr/lib/libvulkan_freedreno.so still has the option (and TU_KGSL_FORCE_NONCOHERENT).
+- Measurement: `bf-checker.sh base noncoherent` (variant `noncoherent` = Proton env TU_KGSL_FORCE_NONCOHERENT=1:
+  no cached-coherent type -> the override is a no-op, readback memory becomes cached non-coherent with explicit
+  invalidates). Count black-column frames + `CP: AHB bus error` per variant. If noncoherent removes them: the real
+  fix is in our Turnip (pkgs/vulkan-freedreno-kgsl) - treat KGSL's IOCOHERENT as unusable unless the user context
+  bank is dma-coherent (or keep the cached BOs but clean/invalidate around submits), so FEX's override falls back to
+  write-combined memory; not by unsetting FEX's flag, which FEX needs.
+- Fix (turnip-noncoherent, vulkan-freedreno-kgsl 26.3.0-2, patch 0002): Turnip's KGSL backend trusts the IOCOHERENT
+  probe only when `/sys/firmware/devicetree/base/soc/qcom,kgsl-iommu@*/gfx3d_user/dma-coherent` exists (no readable DT:
+  distrusted on `gpu_model` Adreno740*). On this phone it doesn't, so the physical device takes the
+  TU_KGSL_FORCE_NONCOHERENT path: no cached-coherent type, FEX's override is a no-op, and Turnip's own internal BOs
+  (command streams, tu_bo_init_new: cached-coherent whenever the probe passed, override or not) are write-combined
+  too - the second suspect for the CP AHB bus errors. Each process logs one `turnip: KGSL accepts IOCOHERENT but the
+  gfx3d_user context bank isn't dma-coherent` warning. `TU_KGSL_TRUST_IOCOHERENT=1` restores the kernel's answer for
+  an A/B. Still to measure on a game run: black-column frames + AHB errors with 26.3.0-2 vs `TU_KGSL_TRUST_IOCOHERENT=1`.
