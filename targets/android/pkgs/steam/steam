@@ -148,6 +148,8 @@ fi
 # Games: Valve's FEX compat tool (steamapps/common/FEX-Emu) with GL + Vulkan thunks - the game's x86 graphics calls go
 # to PowOS's native Mesa (Turnip/freedreno on the Adreno; x86 Mesa can't reach Android's KGSL GPU driver). Its x86
 # system (RootFS) is /usr/share/guestos/fex-mesa, which steam.install points at FEX's RootFS.
+# The client overwrites STEAM_COMPAT_FEX_CONFIG per game (its own FEX setting, empty), so this export only reaches what
+# Steam starts outside a game; the games' Vulkan thunk comes from steam-env's FEX_THUNKCONFIG.
 export STEAM_COMPAT_FEX_CONFIG=${STEAM_COMPAT_FEX_CONFIG:-TSOEnabled:1,Multiblock:1,ThunksDB_GL:1,ThunksDB_Vulkan:1}
 
 # The ~/.steam links Valve's launcher script makes, for the native client: games start through
