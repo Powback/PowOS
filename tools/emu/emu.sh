@@ -242,8 +242,11 @@ su_access() {
 # children do what they do; the emulator has no Magisk).
 # persist.powos.root=1: the flag rooted.sh sets on the phone (RootMode.java: home made Android's default through su, ...).
 # Freeform support is read at boot: set before create's last reboot.
+# settings_enable_monitor_phantom_procs false: "Disable child process restrictions" (developer options), the engine's
+# documented requirement (targets/android/tools/device-test.sh push-rootfs) - without it Android's phantom process
+# killer ("Trimming phantom processes", past 32 children) ends KWin and the session bus as Plasma starts, no root.
 settings_like_phone() {
-  a shell 'setprop persist.powos.root 1; settings put global enable_freeform_support 1; settings put global force_resizable_activities 1; settings put global development_settings_enabled 1;
+  a shell 'setprop persist.powos.root 1; settings put global settings_enable_monitor_phantom_procs false; settings put global enable_freeform_support 1; settings put global force_resizable_activities 1; settings put global development_settings_enabled 1;
     settings put global window_animation_scale 1; settings put system screen_off_timeout 2147483647; svc power stayon true; locksettings set-disabled true 2>/dev/null; true'
 }
 # HACK: SELinux permissive on the emulator: its policy has no rules for the PowOS app's su children (the phone's Magisk

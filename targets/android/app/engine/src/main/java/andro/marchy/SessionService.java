@@ -334,8 +334,11 @@ public class SessionService extends Service {
         // Upgrades only, never a downgrade (SessionPlan.packagesCommand: a stale repo's KWin broke the session).
         spawn("powos-packages", List.of(launcher, "-c", SessionPlan.packagesCommand()), archEnv(run, sock));
 
-        // 1. Display daemon: relays buffers and input between this app's display and Hyprland.
-        spawn("andromarchy", List.of(libDir + "/libandromarchy.so", sock), null);
+        // 1. Display daemon: relays buffers and input between this app's display and the compositor. With the
+        //    screen the desktop will get, as in rooted mode (andromarchy.c, provisional_screen): without it KWin's
+        //    handshake waited for the desktop to be on screen, so a session started behind home never got as far as
+        //    org.kde.KWin - every app launch from home (powos-open-task) said "desktop" (exit 2) and no window came.
+        spawn("andromarchy", List.of(libDir + "/libandromarchy.so", sock, "--screen", screenArg()), null);
 
         // 2. Session D-Bus (systemd provides it on a normal Linux login). Browsers, file dialogs, portals and tray
         //    apps need it; archEnv() gives every program its address.

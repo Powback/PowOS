@@ -42,6 +42,19 @@ class RootedGuestLaunchTest {
         run.deleteRecursively()
     }
 
+    /** No root: the run dir is an Android path whose parents the image can't create; only launch/ is made. */
+    @Test fun makesOnlyTheLogsLeafDir() {
+        assertFalse("mkdir -p walks into /data in the no-root image: $line", "mkdir -p" in line)
+        val run = Files.createTempDirectory("launch").toFile()
+        val p = ProcessBuilder("bash", "-c", RootedGuest.launchCommand("app", "echo hi")).redirectErrorStream(true)
+        p.environment()["XDG_RUNTIME_DIR"] = run.path
+        val process = p.start()
+        assertTrue(process.waitFor(10, TimeUnit.SECONDS))
+        assertEquals(0, process.exitValue())
+        assertEquals("hi\n", run.resolve("launch/app.log").readText())
+        run.deleteRecursively()
+    }
+
     @Test fun logNames() {
         assertEquals("steam", RootedGuest.logName("/usr/bin/steam -silent"))
         assertEquals("org.kde.dolphin", RootedGuest.logName("org.kde.dolphin"))
