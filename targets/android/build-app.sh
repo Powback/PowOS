@@ -28,6 +28,18 @@ if [ "${POWOS_SKIP_COMPLEXITY:-}" != 1 ]; then
   cx=0; "$HERE/lint-complexity.sh" || cx=$?
   if [ "$cx" = 1 ]; then echo "build-app: refusing - the complexity lint failed (above)" >&2; exit 4; fi
 fi
+# The PowOS apps the APK ships (apps/bundled.list; app/build.gradle.kts copyApps): built now from this commit, so the
+# APK carries their UIs and modules at its own version - a phone without root has no `powos app install`
+# (docs/research/nonroot-parity.md #2). apps/build.sh's caches make an unchanged app quick. POWOS_SKIP_APPS=1 for a
+# deliberate local experiment (the APK then ships whatever apps/*/out holds).
+if [ "${POWOS_SKIP_APPS:-}" != 1 ]; then
+  alog=$(mktemp)
+  for a in $(sed 's/#.*//' "$ROOT/apps/bundled.list"); do
+    "$ROOT/apps/build.sh" "$a" > "$alog" 2>&1 && [ -d "$ROOT/apps/$a/out/ui" ] ||
+      { tail -20 "$alog" >&2; rm -f "$alog"; echo "build-app: refusing - apps/build.sh $a failed (above): the APK would ship without it" >&2; exit 6; }
+  done
+  rm -f "$alog"
+fi
 AAD=${ANDROID_APP_DEV:-$HOME/Projects/android-app-dev}
 # android-app-dev's builder mounts only ~/Projects (as /Projects): a checkout elsewhere (~/pw) can't build there.
 case "$HERE/" in "$HOME/Projects/"*) ;; *)

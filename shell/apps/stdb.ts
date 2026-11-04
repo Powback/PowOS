@@ -1,7 +1,8 @@
 /**
  * The device's SpacetimeDB, for the shell and the PowOS apps' islands it hosts (docs/POWOS-APPS-FEASIBILITY.md
  * section 3): a direct WebSocket to ws://127.0.0.1:3410 - loopback is a secure context, so an https page may open it,
- * and the port is locked to the PowOS uid (rooted/powos-start.sh), which this WebView runs as.
+ * and the port is locked to the PowOS uid (rooted/powos-start.sh), which this WebView runs as. Without root there is
+ * no such lock and no TCP port: the launcher's token gate's URL (apps.local stdbUrl, [stdbUri]).
  *
  * One connection per database for the whole page, however many islands use it, opened on first use and closed
  * 5 s after the last user lets go - or after the page has been hidden (home off screen, screen off) for 5 s, so a
@@ -20,12 +21,20 @@ import { powos } from "../bridge.ts";
 import type { AppLinks, AppWidgetData, Bridge } from "../types.ts";
 import { net, type Net } from "./net.ts";
 import { stableRows } from "./stable.ts";
+import { localApps } from "./localapps.ts";
 import { DetailSheet, type DetailSheetProps } from "./sheet.ts";
 import { notifications, type AppNotifications } from "./notify.tsx";
 import { setBadge } from "./badge.ts";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 
 export const STDB_URL = "ws://127.0.0.1:3410";
+
+/** Where this page reaches SpacetimeDB: the no-root token gate when the host gave one, else [STDB_URL]. Ends in "/". */
+export function stdbUri(): string {
+  const l = localApps.value;
+  const u = l && !l.rooted && l.stdbUrl ? l.stdbUrl : STDB_URL;
+  return u.endsWith("/") ? u : `${u}/`;
+}
 const GRACE_MS = 5000;
 
 export type Status = "connecting" | "connected" | "disconnected" | "error";
@@ -245,7 +254,7 @@ async function undecodable(e: Entry, conn: unknown, err: unknown) {
   changed(e);
   const stale: string[] = [];
   try {
-    const s = await (await fetch(`${STDB_URL.replace("ws", "http")}/v1/database/${e.database}/schema?version=9`)).json();
+    const s = await (await fetch(`${stdbUri().replace("ws", "http")}v1/database/${e.database}/schema?version=9`)).json();
     for (const t of Object.values<any>(e.make.builder().remoteModule.tables)) {
       const live = s.tables.find((x: any) => x.name === t.sourceName);
       const want = live ? s.typespace.types[live.product_type_ref].Product.elements.map((c: any) => c.name.some) : [];
@@ -314,7 +323,7 @@ function connect(e: Entry) {
   e.status = "connecting";
   const mine = (c: unknown) => c === e.conn;
   e.conn = guarded(e.make.builder(), e)
-    .withUri(STDB_URL)
+    .withUri(stdbUri())
     .withDatabaseName(e.database)
     .withToken(token)
     // A dropped socket (the screen off, Doze, a server restart - the supervisor's idle unload) comes back by itself,

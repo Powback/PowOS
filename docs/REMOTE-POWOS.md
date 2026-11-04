@@ -295,6 +295,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 146 markers on 2026-10-24.
 
 <!-- hack-registry:start -->
+| `lib/apps/powos-noroot-services:13` | Without root the launcher starts SpacetimeDB and the App API itself in the PowOS image with no budgets, restarts or idle unload: powos-supervisor needs root (state in /run, user switches through powos-runtime). | powos-supervisor gets a no-root mode (its own uid, no user switch, state under XDG_RUNTIME_DIR) and EngineServices runs that instead. |
 | marker | why | real fix |
 |---|---|---|
 | `.github/workflows/build-test-publish.yml:119` | build-test-publish is pinned to ubuntu-24.04: on ubuntu-26.04 (kernel 7.0) osbuild in bootc-image-builder fails the containers-storage bind mount with EACCES (osbuild/osbuild#2579). | Drop the pin once bootc-image-builder ships an osbuild with #2579 fixed (or apply the 26.04 AppArmor override). |

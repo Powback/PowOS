@@ -434,6 +434,9 @@ class ShellBridge(
     ): Any? =
         when (method) {
             "apps.list" -> apps()
+            // No root: the launcher's own PowOS apps and where SpacetimeDB stands (LocalApps; off the main thread: LOOKUPS).
+            "apps.local" -> LocalApps.json(context)
+            "apps.getLinux" -> runtime.installLinux(emptyList()).let { null }
             "apps.launch" -> launch(a.getString(0), a.optJSONObject(1)?.optBoolean("fullScreen") == true)
             "webwindows.enabled" -> activity != null && webWindows.also { webWindowsMade = true }.enabled()
             "webwindows.open" ->
@@ -1928,7 +1931,7 @@ class ShellBridge(
         // and a 58 ms frame landed 54 ms after it (perf-1793456386286): looked up here; only the recognizer binding,
         // which Android requires on the main thread, is posted back there (NativeSpeech.warm).
         // quickpage.pages: a resolveActivity and an icon drawn per settings page (QuickPageCatalog).
-        private val LOOKUPS = setOf("qs.destinations", "speech.warm", "quickpage.pages", "apps.background", "apps.stopBackground")
+        private val LOOKUPS = setOf("apps.local", "qs.destinations", "speech.warm", "quickpage.pages", "apps.background", "apps.stopBackground")
         private val lookups = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "shell-lookups").apply { isDaemon = true } }
 
         /** One thread for them all, so a page's set then get stay in that order. */

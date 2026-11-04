@@ -17,6 +17,8 @@ import { useOnScreen } from "../apps/onscreen.ts";
 import { useSleepReport } from "../apps/sleepreport.ts";
 import { useRegistry } from "../apps/registry.ts";
 import { moduleUrl, retryDelay, retryUrl } from "../apps/pages.ts";
+import { islandWait, type StdbState } from "../apps/localapps.ts";
+import { powos } from "../bridge.ts";
 import type { HomeItem } from "../types.ts";
 
 declare function importShim(url: string): Promise<{ default: ComponentType<any> }>;
@@ -56,6 +58,13 @@ function Face({ id, name, children }: { id: string; name: string; children?: any
       {children}
     </div>
   );
+}
+
+/** Why an island has no module yet: not on this phone (no root, none of the launcher's apps), the registry's error, not installed, or loading. */
+function notYet(reg: ReturnType<typeof useRegistry>, found: boolean) {
+  if (reg.local && !reg.local.rooted && !found) return "not on this phone";
+  if (reg.status === "error") return `SpacetimeDB: ${reg.error}`;
+  return reg.status === "connected" && !found ? "not installed" : "…";
 }
 
 export function Island({ item }: { item: HomeItem }) {
@@ -101,11 +110,11 @@ export function Island({ item }: { item: HomeItem }) {
     };
   }, [url]);
   const name = widget?.name ?? key;
+  // No root: its data lives in SpacetimeDB and that isn't up yet - say what it waits for, never an empty tile.
+  const wait = islandWait(app);
+  if (wait) return <IslandWait name={name} state={wait} mb={reg.local?.mb ?? null} />;
   if (error && !mod) return <Fault name={name} error={`${error} - trying again`} />;
-  if (!mod) {
-    const why = reg.status === "error" ? `SpacetimeDB: ${reg.error}` : reg.status === "connected" && !widget ? "not installed" : "…";
-    return <Fault name={name} error={why} />;
-  }
+  if (!mod) return <Fault name={name} error={notYet(reg, !!widget)} />;
   const C = Shown!;
   return (
     <Boundary key={base ?? ""} name={name}>
@@ -113,5 +122,28 @@ export function Island({ item }: { item: HomeItem }) {
         <C host={host} app={appId} cells={cells} base={`./_app/${appId}/`} />
       </Face>
     </Boundary>
+  );
+}
+
+/**
+ * An island waiting for its data on a phone without root (apps/localapps.ts islandWait): "image" - the PowOS Linux
+ * image (where SpacetimeDB runs) isn't on the phone, a tap opens its download; "starting" - it is, SpacetimeDB is on
+ * its way up; "missing" - the image is one without SpacetimeDB. The same face as a widget waiting for Linux
+ * (grid.tsx LinuxWait).
+ */
+function IslandWait({ name, state, mb }: { name: string; state: StdbState; mb: number | null }) {
+  const get = state === "image" || state === "missing";
+  return (
+    <div class="tile widget-face widget-linux" onClick={get ? () => powos.apps.getLinux?.() : undefined}>
+      <div class="widget-name">{name}</div>
+      {state === "image" ? (
+        <div class="muted">needs the PowOS Linux image</div>
+      ) : state === "missing" ? (
+        <div class="muted">needs a newer PowOS Linux image</div>
+      ) : (
+        <div class="muted">starting PowOS Linux…</div>
+      )}
+      {get && <div class="widget-linux-get">{mb ? `Download (${mb} MB)` : "Download"}</div>}
+    </div>
   );
 }

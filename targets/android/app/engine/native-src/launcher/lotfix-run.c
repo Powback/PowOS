@@ -225,6 +225,16 @@ int main(int argc, char **argv)
         snprintf(preload, sizeof preload, "%s:%s", compat, fc);
         snprintf(preload_args, sizeof preload_args, "%s %s", compat, fc);
     }
+    // No root: PowOS's service ports become private Unix sockets in every program (loopback-unix.c), first so its
+    // bind/connect see the programs' calls before fakechroot's. SessionService sets these only without root.
+    const char *lb = getenv("POWOS_LOOPBACK_PRELOAD");
+    if (lb && *lb && getenv("POWOS_LOOPBACK_DIR") && access(lb, R_OK) == 0) {
+        char p2[LIST_SZ], a2[LIST_SZ];
+        snprintf(p2, sizeof p2, "%s:%s", lb, preload);
+        snprintf(a2, sizeof a2, "%s %s", lb, preload_args);
+        snprintf(preload, sizeof preload, "%s", p2);
+        snprintf(preload_args, sizeof preload_args, "%s", a2);
+    }
     setenv("LD_PRELOAD", preload, 1);
 
     // loader --library-path <libpath> --preload <libs> <rootfs>/usr/bin/bash <args...>

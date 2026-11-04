@@ -73,14 +73,15 @@ if [ "$GCD" != "$TOPLEVEL/.git" ]; then
 fi
 
 # Most tier-1 tests never touch docker; mount the Colima socket only when the selected test(s) need it
-# (currently just test-complexity.sh - its Kotlin/Rust lints run clippy/detekt via `docker run`). Full-suite
+# (test-complexity.sh - its Kotlin/Rust lints run clippy/detekt via `docker run`; test-loopback-unix.sh - builds
+# and runs the no-root loopback preload in gcc:14). Full-suite
 # runs (no filter) include it, so they need the socket too. TIER1_DOCKER=1/0 overrides the auto-detect.
 NEED_DOCKER=false
 if [ "${#ARGS[@]}" -eq 0 ]; then
   NEED_DOCKER=true
 else
   for a in "${ARGS[@]}"; do
-    case "$a" in *complexity*) NEED_DOCKER=true ;; esac
+    case "$a" in *complexity* | *loopback*) NEED_DOCKER=true ;; esac
   done
 fi
 case "${TIER1_DOCKER:-}" in 1) NEED_DOCKER=true ;; 0) NEED_DOCKER=false ;; esac
