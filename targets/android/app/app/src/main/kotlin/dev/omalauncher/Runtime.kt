@@ -696,7 +696,13 @@ class Runtime(
         // Its launch window at once, where its window will be (LaunchWindows): the app's first window becomes it.
         val ids = (listOfNotNull(app.id, app.wmClass) + app.aliases).filter { it.isNotBlank() }.toTypedArray()
         // Web windows on (docs/WEB_WINDOWS.md S6): the window opens as home's web window when KWin opens it - no task.
-        if (!andro.marchy.WebWindowSource.wanted() && !andro.marchy.WindowTasks.hasWindow(ids)) andro.marchy.LaunchWindows.open(context, app.id, ids, app.name)
+        val web = andro.marchy.WebWindowSource.wanted()
+        if (!web && !andro.marchy.WindowTasks.hasWindow(ids)) andro.marchy.LaunchWindows.open(context, app.id, ids, app.name)
+        // The Plasma desktop covers home (the first install ends on it; a launch from the dock/search/bridge while it is
+        // in front): home's window has no surface while stopped, so its web window had nowhere to hang ("home's surface
+        // refused a child") and KWin's window fell back to a bare task over the desktop - maximized, no PowOS frame, no
+        // tap keyboard (emulator 11-04, no root and rooted alike). Home comes to the front first: the window opens in it.
+        if (homeFirst(web, andro.marchy.WindowTasks.desktopCoversHome())) showHome()
         thread(name = "guest-open", isDaemon = true) {
             val outcome = LaunchOutcome()
             val log: (String) -> Unit = { line ->
@@ -748,6 +754,19 @@ class Runtime(
 
     /** The drawer icon of the app called [name] (an agent's logo, say); null until loaded, or if it has none. */
     fun iconNamed(name: String): ImageBitmap? = linuxApps.firstOrNull { it.name == name }?.let { linuxIcons[it.id] }
+
+    /** Brings PowOS home (the web shell, .HomeShell) to the front: where web windows live. */
+    private fun showHome() {
+        Log.i(TAG, "home to the front: the desktop covered it, the window opens as home's web window")
+        runCatching {
+            context.startActivity(
+                // The launcher's alias itself (as ShellActivity.toHome): rooted, a package HOME intent may open the desktop's alias.
+                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+                    .setComponent(android.content.ComponentName(context, "andro.marchy.HomeShell"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }.onFailure { Log.w(TAG, "home to the front failed: $it") }
+    }
 
     /** Brings the PowOS desktop to the front, also folded (on the cover screen), to show an app just opened there. */
     fun showDesktop() = andro.marchy.MainActivity.show(context)
@@ -828,6 +847,15 @@ class Runtime(
     companion object {
         private const val TAG = "runtime"
         private const val LAUNCH_GRACE_MS = 3000L
+
+        /**
+         * A PowOS launch brings home to the front first: web windows take the app's window ([webWindows]) and the
+         * Plasma desktop covers home ([desktopCoversHome]; not desktop mode, where KWin's desktop holds every window).
+         */
+        internal fun homeFirst(
+            webWindows: Boolean,
+            desktopCoversHome: Boolean,
+        ) = webWindows && desktopCoversHome
 
         /** powos-open-task's status for a command that ended with no window (session/powos-open-task). */
         private const val OPEN_FAILED = "powos-open-task: failed"

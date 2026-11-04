@@ -196,6 +196,15 @@ public final class WindowTasks {
     }
 
     /**
+     * The Plasma app is on screen over home outside desktop mode: a PowOS launch (home's dock, search, drawer) whose
+     * window opens as home's web window brings home to the front first (Runtime.openRooted) - home's window has no
+     * surface while the desktop covers it. Desktop mode: KWin's desktop holds every window, nothing moves.
+     */
+    public static boolean desktopCoversHome() {
+        return desktopOnScreen() && !FoldWatcher.desktopModeActive();
+    }
+
+    /**
      * Desktop mode (FoldWatcher.desktopModeActive: the setting on, the phone open): KWin's desktop holds every Linux
      * window for the whole mode - "desktop 1" whether or not the Plasma app is started, and "export-new 0" - so a
      * window opened from anywhere (the launcher, a terminal, Steam) stays a KWin window. Folded, its windows stay the
