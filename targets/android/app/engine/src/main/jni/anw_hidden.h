@@ -103,6 +103,10 @@ typedef int (*pfn_ANativeWindow_dequeueBuffer)(ANativeWindow *, ANativeWindowBuf
 typedef int (*pfn_ANativeWindow_queueBuffer)(ANativeWindow *, ANativeWindowBuffer *, int fenceFd);
 typedef int (*pfn_ANativeWindow_cancelBuffer)(ANativeWindow *, ANativeWindowBuffer *, int fenceFd);
 typedef int (*pfn_ANativeWindow_setDequeueTimeout)(ANativeWindow *, int64_t timeoutNs);
+/* PowOS: optional, for the CPU shadow (native_consumer.c, GPU-less devices): a dequeued buffer as an AHardwareBuffer to
+ * lock for CPU writes, and the producer usage that makes its buffers CPU-writable. */
+typedef struct AHardwareBuffer *(*pfn_ANativeWindowBuffer_getHardwareBuffer)(ANativeWindowBuffer *);
+typedef int32_t (*pfn_ANativeWindow_setUsage)(ANativeWindow *, uint64_t usage);
 
 struct anw_api {
     pfn_ANativeWindow_setBufferCount setBufferCount;
@@ -112,6 +116,8 @@ struct anw_api {
     pfn_ANativeWindow_cancelBuffer   cancelBuffer;
     /* PowOS: optional (API 30+; NULL before): a dequeue that waits at most this long, so a stop never joins forever. */
     pfn_ANativeWindow_setDequeueTimeout setDequeueTimeout;
+    pfn_ANativeWindowBuffer_getHardwareBuffer getHardwareBuffer; /* PowOS: optional */
+    pfn_ANativeWindow_setUsage setUsage;                         /* PowOS: optional */
 };
 
 static inline int anw_api_load(struct anw_api *api)
@@ -126,6 +132,8 @@ static inline int anw_api_load(struct anw_api *api)
     api->queueBuffer    = (pfn_ANativeWindow_queueBuffer)    dlsym(lib, "ANativeWindow_queueBuffer");
     api->cancelBuffer   = (pfn_ANativeWindow_cancelBuffer)   dlsym(lib, "ANativeWindow_cancelBuffer");
     api->setDequeueTimeout = (pfn_ANativeWindow_setDequeueTimeout) dlsym(lib, "ANativeWindow_setDequeueTimeout");
+    api->getHardwareBuffer = (pfn_ANativeWindowBuffer_getHardwareBuffer) dlsym(lib, "ANativeWindowBuffer_getHardwareBuffer");
+    api->setUsage = (pfn_ANativeWindow_setUsage) dlsym(lib, "ANativeWindow_setUsage");
 
     if (!api->setBufferCount || !api->query ||
         !api->dequeueBuffer || !api->queueBuffer || !api->cancelBuffer)

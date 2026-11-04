@@ -167,3 +167,24 @@ attach wl_shm buffers, which KWin uploads).
 RGBA readback is ~22 MB/frame; damage-banded copies keep idle windows free, full-screen animation on llvmpipe will be
 CPU-bound anyway. Not implemented in this change: the kwin build (~30+ min) and the emulator proof didn't fit its
 hour; it is the task's next step.
+
+### 11-04 (kwin-shm-copy): the CPU copy implemented - kwin 6.7.5-3.61 (patch 0053) + the consumer's CPU shadow
+
+- **KWin (0053)**: `importConsumerBuffer` falls back to `importForCpuCopy` when `importDmaBufAsTexture` fails: mmap of the
+  buffer's fd, an offscreen RGBA texture + FBO with the same content transform, `copyToConsumer` (glReadPixels of the
+  damaged rows' band into the mapping, DMA_BUF_IOCTL_SYNC around it, render fence -1) from `AnlandEglLayer::doEndFrame`
+  (the buffer's accumulated damage) and `AnlandWindowTask::render` (whole buffer). A memfd (F_GET_SEALS answers) goes
+  straight to the CPU copy; a buffer with stride 0 is taken as tight rows. On a successful import nothing changes.
+- **Consumer (native_consumer.c)**: without `/dev/kgsl-3d0` the window's buffers get CPU usage, and a buffer the app
+  can't mmap either (the emulator: ranchu's host-memory gralloc, `/dev/goldfish_address_space` fds - KWin's mmap gave
+  EPERM) is replaced for the producer by a memfd shadow, copied into the window's buffer with `AHardwareBuffer_lock`
+  before it is queued. With `/dev/kgsl-3d0` (every Snapdragon phone) nothing changes.
+- **Emulator result**: the path runs end to end up to KWin's first frame (log: "consumer buffers: CPU copy", "mapped
+  buffer 0..2 ... for a CPU copy", "window task 1 live"), then KWin dies with SIGILL: llvmpipe's JIT emits SVE
+  (`dupm`, insn 05c248c1 in an anonymous r-x page, caught with LP_NUM_THREADS=0) and this emulator (Apple M4 host)
+  advertises `sve2` in /proc/cpuinfo but traps it. `GALLIVM_EXTRA_MATTRS=-sve,-sve2,...` did not change the code. Clients
+  are unaffected (they draw with Qt's software path, no libgallium), so KWin had never drawn a frame on the emulator -
+  before 0053 every import failed first. The window stays blank there (shot: ~/pw/kwin-shm-shots/). **Next**: make
+  llvmpipe stop emitting SVE on a CPU that lies about it (find where Mesa 26.3 builds its LLVM features for aarch64 and
+  why the extra mattrs don't apply; or run the emulator with a CPU model without SVE), then re-check systemsettings.
+

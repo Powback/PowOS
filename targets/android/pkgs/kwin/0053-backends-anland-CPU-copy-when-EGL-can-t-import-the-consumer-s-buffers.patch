@@ -1,0 +1,367 @@
+From: PowOS <mats@powback.com>
+Subject: [PATCH] backends/anland: a CPU copy when EGL can't import the consumer's buffers
+
+No root, no GPU (the emulator, a GPU-less phone: llvmpipe, no /dev/kgsl-3d0): Mesa's swrast can't make an EGLImage of
+the consumer's gralloc buffers ("Error creating EGLImageKHR: EGL_BAD_ACCESS" -> "failed to import dmabuf 0 as
+texture"), so nothing was ever drawn into them and every Linux window (systemsettings) showed blank.
+
+When importDmaBufAsTexture fails, importConsumerBuffer now maps the buffer (mmap of its fd, MAP_SHARED), renders into a
+plain offscreen texture with the same content transform, and copyToConsumer reads each frame back into the mapping with
+glReadPixels (the damaged rows' band; DMA_BUF_IOCTL_SYNC around it for a dma-buf). The copy is synchronous, so the
+render fence is -1 ("ready now"). Called from AnlandEglLayer::doEndFrame (the desktop: the buffer's accumulated damage)
+and AnlandWindowTask::render (a task: the whole buffer, it redraws it whole). When the import succeeds (every phone with
+a GPU) nothing changes: no mapping is made and the fence path is the same as before.
+
+A buffer the consumer can't share at all (the emulator: ranchu's host-memory gralloc, mmap EPERM) comes as a memfd CPU
+shadow (native_consumer.c make_shadow), recognised by F_GET_SEALS and copied the same way; a buffer with no stride (the
+emulator reports 0) is taken as tight rows.
+
+docs/research/nonroot-parity.md (Linux windows blank on GPU-less devices) has the plan and the next fallback (memfd
+buffers the consumer copies in) for a gralloc whose buffers can't be mapped.
+---
+diff --git a/src/backends/anland/anland_egl_backend.cpp b/src/backends/anland/anland_egl_backend.cpp
+index 9dd6437..90e1470 100644
+--- a/src/backends/anland/anland_egl_backend.cpp
++++ b/src/backends/anland/anland_egl_backend.cpp
+@@ -18,7 +18,13 @@
+ #include "opengl/glutils.h"
+ #include "utils/filedescriptor.h"
+ 
++#include <cerrno>
++#include <cstring>
+ #include <drm_fourcc.h>
++#include <fcntl.h>
++#include <linux/dma-buf.h>
++#include <sys/ioctl.h>
++#include <sys/mman.h>
+ #include <unistd.h>
+ 
+ #ifndef EGL_PLATFORM_SURFACELESS_MESA
+@@ -79,6 +85,7 @@ void AnlandEglLayer::releaseBuffers()
+         m_textures[i].reset();
+         m_renderTargets[i].reset();
+         m_accumDamage[i] = Region();
++        m_cpu[i].reset();
+     }
+     m_damageFlags = 0;
+     m_damageMask = 0;
+@@ -144,6 +151,7 @@ bool AnlandEglLayer::importBuffers(int count)
+ 
+         m_textures[i] = std::move(imported.texture);
+         m_fbos[i] = std::move(imported.fbo);
++        m_cpu[i] = std::move(imported.cpu);
+         m_renderTargets[i].emplace(m_fbos[i].get());
+         // Freshly imported dmabuf has undefined contents: owe it a full repaint.
+         m_accumDamage[i] = Region::infinite();
+@@ -198,6 +206,13 @@ std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
+ bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region &damagedDeviceRegion, OutputFrame *frame)
+ {
+     glFlush(); // flush pending rendering commands into the dmabuf.
++    // PowOS: no EGL import (GPU-less device): the frame went to an offscreen texture; copy what this buffer was asked to
++    // repaint (its accumulated damage, cleared below) into the mapped consumer buffer.
++    AnlandCpuMapping *cpu = m_cpu[m_currentIndex].get();
++    if (cpu) {
++        m_backend->copyToConsumer(*cpu, m_fbos[m_currentIndex].get(), m_textures[m_currentIndex]->contentTransform(),
++                                  m_accumDamage[m_currentIndex] | renderedDeviceRegion | damagedDeviceRegion);
++    }
+     for (int i = 0; i < m_bufCount; i++)
+         m_accumDamage[i] = m_accumDamage[i] + damagedDeviceRegion;
+ 
+@@ -210,6 +225,13 @@ bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region
+     if (m_damageFlags != 0)
+         scheduleRepaint(nullptr);
+ 
++    if (cpu) {
++        // PowOS: the copy was synchronous, the buffer is ready now (no fence: llvmpipe has no native fence sync).
++        set_render_fence(m_display, -1);
++        m_traceNextFrame = false;
++        return true;
++    }
++
+     // Instead of CPU-blocking on glFinish, create a fence for the just-submitted
+     // GPU work and hand it to the consumer (via the transport). The consumer passes
+     // it to ANativeWindow_queueBuffer, so SurfaceFlinger waits on it GPU-side before
+@@ -274,6 +296,17 @@ AnlandEglBackend::ImportedBuffer AnlandEglBackend::importConsumerBuffer(display_
+     }
+     const QSize size(info.width, info.height);
+ 
++    // PowOS: a memfd is the consumer's CPU shadow of a buffer it can't share (native_consumer.c make_shadow: a GPU-less
++    // device whose window buffers can't be mapped, the emulator) - no dma-buf, so straight to the CPU copy rather than
++    // depending on whether this Mesa happens to take a memfd as one. Only memfds answer F_GET_SEALS.
++    if (fcntl(fd, F_GET_SEALS) >= 0) {
++        ImportedBuffer copied = importForCpuCopy(fd, index, info, contentTransform);
++        if (!copied.texture) {
++            qCWarning(KWIN_ANLAND) << "failed to map the CPU shadow" << index;
++        }
++        return copied;
++    }
++
+     DmaBufAttributes attrs;
+     attrs.planeCount = 1;
+     attrs.width = size.width();
+@@ -291,8 +324,13 @@ AnlandEglBackend::ImportedBuffer AnlandEglBackend::importConsumerBuffer(display_
+     // EGLImageTexture(...) dance is gone in 6.x).
+     std::shared_ptr<GLTexture> texture = importDmaBufAsTexture(attrs);
+     if (!texture) {
+-        qCWarning(KWIN_ANLAND) << "failed to import dmabuf" << index << "as texture";
+-        return {};
++        // PowOS: llvmpipe (no GPU: the emulator, a GPU-less phone) can't make an EGLImage of a gralloc buffer
++        // (EGL_BAD_ACCESS): render offscreen and copy each frame into the buffer, mapped, instead.
++        ImportedBuffer copied = importForCpuCopy(fd, index, info, contentTransform);
++        if (!copied.texture) {
++            qCWarning(KWIN_ANLAND) << "failed to import dmabuf" << index << "as texture";
++        }
++        return copied;
+     }
+     texture->setContentTransform(contentTransform);
+     auto fbo = std::make_unique<GLFramebuffer>(texture.get());
+@@ -312,6 +350,127 @@ AnlandEglBackend::ImportedBuffer AnlandEglBackend::importConsumerBuffer(display_
+     return ImportedBuffer{.texture = std::move(texture), .fbo = std::move(fbo), .size = size};
+ }
+ 
++namespace
++{
++/** PowOS: the CPU copy's render target, stored as RGBA bytes like the consumer's ABGR8888 buffer (GLTexture::allocate
++ *  makes a BGRA one on GLES), so glReadPixels is a straight copy with no swizzle. */
++class AnlandCpuTexture : public GLTexture
++{
++public:
++    AnlandCpuTexture(GLuint texture, const QSize &size)
++        : GLTexture(GL_TEXTURE_2D, texture, GL_RGBA8, size, 1, true, OutputTransform())
++    {
++    }
++};
++
++std::shared_ptr<GLTexture> allocateRgba(const QSize &size)
++{
++    GLuint texture = 0;
++    glGenTextures(1, &texture);
++    if (!texture) {
++        return nullptr;
++    }
++    glBindTexture(GL_TEXTURE_2D, texture);
++    const bool gles = EglContext::currentContext()->isOpenGLES();
++    glTexImage2D(GL_TEXTURE_2D, 0, gles ? GL_RGBA : GL_RGBA8, size.width(), size.height(), 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
++    glBindTexture(GL_TEXTURE_2D, 0);
++    return std::make_shared<AnlandCpuTexture>(texture, size);
++}
++}
++
++AnlandCpuMapping::~AnlandCpuMapping()
++{
++    if (base) {
++        munmap(base, length);
++    }
++}
++
++AnlandEglBackend::ImportedBuffer AnlandEglBackend::importForCpuCopy(int fd, int index, const buf_info &info, OutputTransform contentTransform)
++{
++    const QSize size(info.width, info.height);
++    // The emulator's gralloc (ranchu) reports no stride (ANativeWindowBuffer.stride 0): its CPU buffers are tightly
++    // packed rows.
++    const uint32_t stride = info.stride ? info.stride : uint32_t(size.width()) * 4;
++    if (size.isEmpty() || stride < uint64_t(size.width()) * 4 || stride % 4 != 0) {
++        qCWarning(KWIN_ANLAND) << "buffer" << index << "can't be copied to: size" << size << "stride" << info.stride;
++        return {};
++    }
++    auto cpu = std::make_shared<AnlandCpuMapping>();
++    cpu->length = size_t(info.offset) + size_t(stride) * size_t(size.height());
++    // A buffer smaller than its rows (a wrong stride guess) would fault on the copy: refuse it.
++    const off_t fdSize = lseek(fd, 0, SEEK_END);
++    if (fdSize > 0 && size_t(fdSize) < cpu->length) {
++        qCWarning(KWIN_ANLAND) << "buffer" << index << "is" << fdSize << "bytes, its rows need" << cpu->length;
++        return {};
++    }
++    void *mapped = mmap(nullptr, cpu->length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
++    if (mapped == MAP_FAILED) {
++        // The next fallback (docs/research/nonroot-parity.md): memfd buffers the consumer copies in.
++        qCWarning(KWIN_ANLAND) << "buffer" << index << "can't be mapped for a CPU copy either:" << strerror(errno);
++        return {};
++    }
++    cpu->base = static_cast<uint8_t *>(mapped);
++    cpu->fd = FileDescriptor(dup(fd));
++    cpu->offset = info.offset;
++    cpu->stride = stride;
++    cpu->drmFormat = protocol_format_to_drm(info.format);
++    cpu->size = size;
++
++    std::shared_ptr<GLTexture> texture = allocateRgba(size);
++    if (!texture) {
++        qCWarning(KWIN_ANLAND) << "no offscreen texture" << size << "for buffer" << index;
++        return {};
++    }
++    // The same transform as an imported buffer: glReadPixels' row 0 is the texture's row 0, which the consumer reads
++    // as its top row, exactly as it reads an imported buffer's.
++    texture->setContentTransform(contentTransform);
++    auto fbo = std::make_unique<GLFramebuffer>(texture.get());
++    if (!fbo->valid()) {
++        qCWarning(KWIN_ANLAND) << "offscreen framebuffer for buffer" << index << "is not complete";
++        return {};
++    }
++    static bool logged = false;
++    if (!logged) {
++        logged = true;
++        qCInfo(KWIN_ANLAND) << "consumer buffers: CPU copy (no EGL dma-buf import)";
++    }
++    qCInfo(KWIN_ANLAND) << "mapped buffer" << index << "fd" << fd << size << "stride" << stride << "offset"
++                        << info.offset << "fmt" << Qt::hex << cpu->drmFormat << "for a CPU copy";
++    return ImportedBuffer{.texture = std::move(texture), .fbo = std::move(fbo), .size = size, .cpu = std::move(cpu)};
++}
++
++void AnlandEglBackend::copyToConsumer(const AnlandCpuMapping &cpu, GLFramebuffer *fbo, OutputTransform contentTransform, const Region &deviceDamage)
++{
++    // Device damage to buffer rows, as the DRM backend's copy maps it (EglGbmLayerSurface::importWithCopy).
++    const QSize orientedSize = contentTransform.map(cpu.size);
++    const Region damage = contentTransform.map(deviceDamage.intersected(Rect(QPoint(), orientedSize)), orientedSize)
++                              .intersected(Rect(QPoint(), cpu.size));
++    if (damage.isEmpty()) {
++        return;
++    }
++    // Whole rows of the damage's bounding band: one read, straight into the mapping.
++    const Rect band = damage.boundingRect();
++    GLenum format = GL_RGBA; // ABGR8888 = R,G,B,A bytes
++    if (cpu.drmFormat != DRM_FORMAT_ABGR8888) {
++        static const bool bgra = !openglContext()->isOpenGLES() || openglContext()->hasOpenglExtension(QByteArrayLiteral("GL_EXT_read_format_bgra"));
++        format = bgra ? GL_BGRA_EXT : GL_RGBA; // XRGB8888 = B,G,R,X bytes
++    }
++    GLFramebuffer::pushFramebuffer(fbo);
++    glPixelStorei(GL_PACK_ALIGNMENT, 4);
++    glPixelStorei(GL_PACK_ROW_LENGTH, int(cpu.stride / 4));
++    // A dma-buf wants its CPU access bracketed (cache maintenance); any other fd just refuses the ioctl.
++    struct dma_buf_sync sync = {.flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE};
++    const bool synced = ioctl(cpu.fd.get(), DMA_BUF_IOCTL_SYNC, &sync) == 0;
++    glReadPixels(0, band.y(), cpu.size.width(), band.height(), format, GL_UNSIGNED_BYTE,
++                 cpu.base + cpu.offset + size_t(band.y()) * cpu.stride);
++    if (synced) {
++        sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE;
++        (void)ioctl(cpu.fd.get(), DMA_BUF_IOCTL_SYNC, &sync);
++    }
++    glPixelStorei(GL_PACK_ROW_LENGTH, 0);
++    GLFramebuffer::popFramebuffer();
++}
++
+ DrmDevice *AnlandEglBackend::drmDevice() const
+ {
+     return m_backend->drmDevice();
+diff --git a/src/backends/anland/anland_egl_backend.h b/src/backends/anland/anland_egl_backend.h
+index 2b69325..20033d7 100644
+--- a/src/backends/anland/anland_egl_backend.h
++++ b/src/backends/anland/anland_egl_backend.h
+@@ -18,6 +18,7 @@
+ #include "core/outputlayer.h"
+ #include "core/region.h"
+ #include "opengl/eglbackend.h"
++#include "utils/filedescriptor.h"
+ 
+ #include <array>
+ #include <map>
+@@ -40,6 +41,21 @@ class AnlandBackend;
+ class AnlandEglBackend;
+ class AnlandOutput;
+ 
++/** PowOS: a consumer buffer mapped for the CPU copy, when EGL can't import it (llvmpipe on a GPU-less device:
++ *  EGL_BAD_ACCESS). KWin renders into a plain offscreen texture and AnlandEglBackend::copyToConsumer reads each
++ *  frame back into this mapping. Unmapped (and its fd dup closed) when the last owner goes. */
++struct AnlandCpuMapping
++{
++    ~AnlandCpuMapping();
++    uint8_t *base = nullptr; // the mmap, from offset 0 of the fd
++    size_t length = 0;
++    FileDescriptor fd; // a dup of the consumer's fd, for DMA_BUF_IOCTL_SYNC
++    size_t offset = 0; // of the image in the mapping
++    uint32_t stride = 0;
++    uint32_t drmFormat = 0;
++    QSize size;
++};
++
+ class AnlandEglLayer : public OutputLayer
+ {
+ public:
+@@ -70,6 +86,8 @@ private:
+     std::array<std::unique_ptr<GLFramebuffer>, MAX_BUFS> m_fbos;
+     std::array<std::optional<RenderTarget>, MAX_BUFS> m_renderTargets;
+     std::array<Region, MAX_BUFS> m_accumDamage;
++    // PowOS: each buffer's CPU mapping when EGL couldn't import them (null on the GPU path).
++    std::array<std::shared_ptr<AnlandCpuMapping>, MAX_BUFS> m_cpu;
+ };
+ 
+ class AnlandEglBackend : public EglBackend
+@@ -97,13 +115,18 @@ public:
+         std::shared_ptr<GLTexture> texture;
+         std::unique_ptr<GLFramebuffer> fbo;
+         QSize size;
++        std::shared_ptr<AnlandCpuMapping> cpu; // PowOS: set only when the buffer could not be imported (CPU copy)
+     };
+     ImportedBuffer importConsumerBuffer(display_ctx *display, int index, OutputTransform contentTransform);
++    /** PowOS: reads [deviceDamage] of [fbo] (the frame's rendered region, in device coordinates; infinite = all) back
++     *  into the mapped consumer buffer. Synchronous: the frame is ready when this returns (render fence -1). */
++    void copyToConsumer(const AnlandCpuMapping &cpu, GLFramebuffer *fbo, OutputTransform contentTransform, const Region &deviceDamage);
+     // PowOS: warns when a 90/270 pre-rotated consumer buffer's width isn't its output's (logical) height.
+     static void warnPreRotatedWidth(const char *what, OutputTransform preTransform, const QSize &buffer, const QSize &logical);
+ 
+ private:
+     bool initializeEgl();
++    ImportedBuffer importForCpuCopy(int fd, int index, const buf_info &info, OutputTransform contentTransform);
+ 
+     void addOutput(BackendOutput *output);
+     void removeOutput(BackendOutput *output);
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 8262afc..d5b6142 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -611,6 +611,7 @@ bool AnlandWindowTask::importBuffers()
+         m_bufferSize = preTransform.map(imported.size);
+         m_textures[i] = std::move(imported.texture);
+         m_fbos[i] = std::move(imported.fbo);
++        m_cpu[i] = std::move(imported.cpu);
+         m_stale[i] = true;
+     }
+     m_newestQueued = false;
+@@ -634,6 +635,7 @@ void AnlandWindowTask::releaseBuffers()
+     for (int i = 0; i < MAX_BUFS; i++) {
+         m_fbos[i].reset();
+         m_textures[i].reset();
++        m_cpu[i].reset();
+     }
+     m_bufCount = 0;
+ }
+@@ -1041,9 +1043,16 @@ void AnlandWindowTask::render(bool keepalive)
+         }
+         scene->renderer()->endFrame();
+         glFlush();
+-        // As the desktop: the consumer hands the render-done fence to queueBuffer, SurfaceFlinger waits GPU-side.
+-        EGLNativeFence fence{egl->openglContext()->displayObject()};
+-        set_render_fence(m_display, fence.takeFileDescriptor().take());
++        if (m_cpu[idx]) {
++            // PowOS: no EGL import (GPU-less device): the whole frame into the mapped buffer (a task redraws it whole);
++            // synchronous, so no fence.
++            egl->copyToConsumer(*m_cpu[idx], m_fbos[idx].get(), m_textures[idx]->contentTransform(), Region::infinite());
++            set_render_fence(m_display, -1);
++        } else {
++            // As the desktop: the consumer hands the render-done fence to queueBuffer, SurfaceFlinger waits GPU-side.
++            EGLNativeFence fence{egl->openglContext()->displayObject()};
++            set_render_fence(m_display, fence.takeFileDescriptor().take());
++        }
+         m_stale[idx] = false;
+         m_newestQueued = true;
+         m_statFrames++;
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 088ebc5..1ef2fda 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -42,6 +42,7 @@ namespace KWin
+ {
+ 
+ class AnlandBackend;
++struct AnlandCpuMapping;
+ class AnlandWindowTasks;
+ class GLFramebuffer;
+ class GLTexture;
+@@ -207,6 +208,7 @@ private:
+     int m_bufCount = 0;
+     std::shared_ptr<GLTexture> m_textures[MAX_BUFS];
+     std::unique_ptr<GLFramebuffer> m_fbos[MAX_BUFS];
++    std::shared_ptr<AnlandCpuMapping> m_cpu[MAX_BUFS]; // PowOS: the CPU copy's mappings when EGL couldn't import them
+     bool m_stale[MAX_BUFS] = {};
+     bool m_newestQueued = false; // PowOS: a buffer with the window's newest content went to the consumer (markStale)
+     QSize m_bufferSize;
