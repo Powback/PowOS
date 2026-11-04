@@ -74,10 +74,13 @@ export const packCancellable = (p: Pack) => {
   return p.job?.phase === "downloading" || p.job?.phase === "installing";
 };
 
+/** What a tap reads as until the host answers it. */
+const WAITING = { add: "starting…", remove: "removing…", cancel: "cancelling…" } as const;
+
 /** The pack as the page shows it now: the tap still waiting for the host, else the host's job, else installed or not. */
 export function packStatus(p: Pack): PackStatus {
   const wait = pending.value[p.name];
-  if (wait && !answered(p, wait)) return status(wait === "add" ? "starting…" : wait === "cancel" ? "cancelling…" : "removing…", true);
+  if (wait && !answered(p, wait)) return status(WAITING[wait], true);
   if (wait) {
     const { [p.name]: _, ...rest } = pending.value;
     queueMicrotask(() => (pending.value = rest));
