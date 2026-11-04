@@ -250,3 +250,9 @@ hour; it is the task's next step.
 - **Build friction**: build-rootfs.sh renames the new full rootfs over out/powos-rootfs.tar.gz, and that is the tree
   BUILD_ON_ROOTFS (kwin) and plasma-pin.sh build on. In the 11-04 rootfs, sudo fails in the build container
   (`pam_open_session: Permission denied`), so build-pkgs.sh kwin failed until the Oct-13 rootfs was linked back.
+- **11-04 kwin-363-rollout**: kwin 6.7.5-3.63 published to the [powos] repo (publish-repo.sh: android.pow/apk/repo, every
+  package at or above what the repo had - the repo still served kwin 3.3 from 10-13); the rooted phone's install queued
+  (verify queue, kwin-install.sh 6.7.5-3.63, idle window). Base + packs rebuilt with kwin 3.63 (build-rootfs.sh,
+  POWOS_PUBLISH_PACKS=1, Plasma pinned 6.7.5, KWin/Plasma check passed), published and re-pinned. The new full rootfs is
+  kept as out/powos-rootfs-1104-363-full.tar.gz and the Oct-13 rootfs linked back as out/powos-rootfs.tar.gz (the
+  sudo-in-the-build-container friction above).
