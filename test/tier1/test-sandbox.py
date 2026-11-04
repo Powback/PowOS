@@ -120,7 +120,10 @@ class ManagerWiring(unittest.TestCase):
                      'comms_export_identity() { export COMMS_AGENT_ID=$1; }; '
                      'comms_mcp_config_json() { echo \'{"mcpServers":{"comms":{"command":"python3","args":["c.py"]}}}\'; }; ')
             stubs += 'comms_enabled() { return 0; }; ' if comms else 'comms_enabled() { return 1; }; '
-            env = dict(os.environ, MANAGER_SERVER=broker, MANAGER_SANDBOX=sandbox, AI_STATE_DIR=d, TMPDIR=d)
+            # Signed in (a fixture variable, no real key): the launcher's sign-in gate (no endpoint, no Claude login ->
+            # status 4, test-manager-auth.sh) is not what's under test here.
+            env = dict(os.environ, MANAGER_SERVER=broker, MANAGER_SANDBOX=sandbox, AI_STATE_DIR=d, TMPDIR=d,
+                       ANTHROPIC_API_KEY="test-fixture")
             env.pop("POWOS_SANDBOX_ENABLED", None)
             env.pop("COMMS_AGENT_ID", None)
             r = sh(f'{stubs} source "{MANAGER_SH}"; manager_run {" ".join(flags)} --once hi', env=env)

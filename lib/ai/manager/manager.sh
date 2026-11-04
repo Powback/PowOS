@@ -158,14 +158,24 @@ manager_run() {
     # manager's claude uses it wherever it's started - not only from a session whose environment.d already has it
     # (a phone's PowOS session doesn't).
     _manager_load || return 1
-    # No endpoint and no Claude login in the image (the non-root build before its user signs in): no claude run that
-    # only answers 401 - the page's event ("signin": its Sign in to Claude state) and status 4.
-    if [[ "$(_manager_auth)" == signin ]]; then
-        [[ " ${passthru[*]} " == *" --json-events "* ]] && echo '{"kind": "signin"}'
-        echo "manager: not signed in to Claude (powos manager --signin)" >&2
-        return 4
-    fi
+    _manager_signed_in "${passthru[@]}" || return 4
+    _manager_chat "$store" "${passthru[@]}"
+}
 
+# No endpoint and no Claude login in the image (the non-root build before its user signs in): no claude run that only
+# answers 401 - the page's event ("signin": its Sign in to Claude state) and status 1 (manager_run returns 4). $@: the
+# broker's flags.
+_manager_signed_in() {
+    [[ "$(_manager_auth)" != signin ]] && return 0
+    [[ " $* " == *" --json-events "* ]] && echo '{"kind": "signin"}'
+    echo "manager: not signed in to Claude (powos manager --signin)" >&2
+    return 1
+}
+
+# The chat itself: its MCP config and system prompt as temp files, the broker (manager.py) with them; $1 the session
+# store, the rest the broker's flags. Its status.
+_manager_chat() {
+    local store="$1"; shift
     local mcp_file spf rc=0
     mcp_file="$(mktemp "${TMPDIR:-/tmp}/powos-manager-mcp.XXXXXX")"
     _manager_mcp_config "$mcp_file" || rc=$?
@@ -182,7 +192,7 @@ manager_run() {
         --system-prompt-file "$spf" \
         ${mcp_file:+--mcp-config-file "$mcp_file"} \
         --session-store "$store" \
-        "${passthru[@]}" || rc=$?
+        "$@" || rc=$?
 
     rm -f "$spf" "$mcp_file" 2>/dev/null
     return $rc
