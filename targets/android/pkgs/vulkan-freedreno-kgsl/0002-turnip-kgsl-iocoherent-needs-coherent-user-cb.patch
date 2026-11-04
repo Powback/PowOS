@@ -1,0 +1,133 @@
+--- a/src/freedreno/vulkan/tu_device.cc	2026-11-04 13:19:10
++++ b/src/freedreno/vulkan/tu_device.cc	2026-11-04 13:19:36
+@@ -1805,7 +1805,7 @@
+     * switch while diagnosing such stacks.  This makes Vulkan expose a cached
+     * non-coherent memory type and routes map readback through the invalidate
+     * path instead of relying on the (incorrect) HOST_COHERENT declaration. */
+-   if (getenv("TU_KGSL_FORCE_NONCOHERENT")) {
++   if (getenv("TU_KGSL_FORCE_NONCOHERENT") || device->kgsl_iocoherent_unusable) {
+       device->has_cached_coherent_memory = false;
+       device->has_cached_non_coherent_memory = device->level1_dcache_size > 0;
+    }
+--- a/src/freedreno/vulkan/tu_device.h	2026-11-04 13:19:10
++++ b/src/freedreno/vulkan/tu_device.h	2026-11-04 13:19:36
+@@ -136,6 +136,11 @@
+ 
+    bool has_cached_coherent_memory;
+    bool has_cached_non_coherent_memory;
++   /* PowOS: the KMD accepted IOCOHERENT but the GPU's user context bank isn't
++    * IO-coherent, so cached memory must be non-coherent (set by the KGSL
++    * backend; tu_physical_device_init handles it like
++    * TU_KGSL_FORCE_NONCOHERENT). */
++   bool kgsl_iocoherent_unusable;
+    /* Index for device local, host-coherent, host-cached memory.
+     * Only set to positive index when overwriting device-local, uncached memory
+     */
+--- a/src/freedreno/vulkan/tu_knl_kgsl.cc	2026-11-04 13:19:10
++++ b/src/freedreno/vulkan/tu_knl_kgsl.cc	2026-11-04 13:19:52
+@@ -3,6 +3,7 @@
+  * SPDX-License-Identifier: MIT
+  */
+ 
++#include <dirent.h>
+ #include <errno.h>
+ #include <fcntl.h>
+ #include <linux/dma-heap.h>
+@@ -13,6 +14,7 @@
+ #include <string.h>
+ #include <sys/ioctl.h>
+ #include <sys/mman.h>
++#include <unistd.h>
+ 
+ #define __user
+ #include "ion/ion.h"
+@@ -695,7 +697,77 @@
+    return supported;
+ }
+ 
++/* PowOS: KGSL accepts KGSL_MEMFLAGS_IOCOHERENT whenever its SMMU node is
++ * dma-coherent, but what the GPU's own accesses go through is the user
++ * context bank (gfx3d_user). On the OnePlus Open (SM8550, Adreno 740)
++ * kgsl-smmu@3da0000 is dma-coherent and gfx3d_user is not, yet the probe
++ * passes: every HOST_COHERENT uncached BO then becomes WRITEBACK+IOCOHERENT
++ * once tu_override_uncached_as_cache_coherent is set (FEX sets it in every
++ * Proton-ARM64 game process), and the internal BOs (command streams) are
++ * cached-coherent regardless. CPU writes sitting in the CPU cache reach the
++ * GPU stale: the 16 px black columns in DXVK games and stale command data.
++ * Trust IOCOHERENT only when the device tree marks gfx3d_user dma-coherent;
++ * without a readable device tree, distrust it on Adreno 740 (the SoC this
++ * was seen on) and keep the kernel's answer elsewhere.
++ * TU_KGSL_TRUST_IOCOHERENT=1 restores the kernel's answer (to measure).
++ */
+ static bool
++kgsl_user_context_bank_is_coherent(void)
++{
++   if (debug_get_bool_option("TU_KGSL_TRUST_IOCOHERENT", false))
++      return true;
++
++   static const char *const roots[] = {
++      "/sys/firmware/devicetree/base/soc",
++      "/proc/device-tree/soc",
++   };
++   for (unsigned r = 0; r < ARRAY_SIZE(roots); r++) {
++      DIR *soc = opendir(roots[r]);
++      if (!soc)
++         continue;
++      struct dirent *e;
++      int found = -1;
++      char path[512];
++      while (found < 0 && (e = readdir(soc))) {
++         if (strncmp(e->d_name, "qcom,kgsl-iommu", 15) != 0 &&
++             strncmp(e->d_name, "kgsl-smmu", 9) != 0)
++            continue;
++         snprintf(path, sizeof(path), "%s/%s/gfx3d_user", roots[r], e->d_name);
++         if (access(path, F_OK) != 0)
++            continue;
++         snprintf(path, sizeof(path), "%s/%s/gfx3d_user/dma-coherent",
++                  roots[r], e->d_name);
++         found = access(path, F_OK) == 0;
++      }
++      closedir(soc);
++      if (found >= 0) {
++         if (!found)
++            mesa_logw("turnip: KGSL accepts IOCOHERENT but the gfx3d_user "
++                      "context bank isn't dma-coherent (%s): cached memory is "
++                      "non-coherent, tu_override_uncached_as_cache_coherent "
++                      "is a no-op", roots[r]);
++         return found;
++      }
++   }
++
++   char model[64] = "";
++   FILE *f = fopen("/sys/class/kgsl/kgsl-3d0/gpu_model", "r");
++   if (f) {
++      if (!fgets(model, sizeof(model), f))
++         model[0] = 0;
++      fclose(f);
++   }
++   if (strncmp(model, "Adreno740", 9) == 0) {
++      mesa_logw("turnip: no device tree to check KGSL's IOCOHERENT against; "
++                "Adreno 740's gfx3d_user isn't coherent: cached memory is "
++                "non-coherent, tu_override_uncached_as_cache_coherent is a "
++                "no-op");
++      return false;
++   }
++   return true;
++}
++
++static bool
+ kgsl_is_virtual_bo_supported(int fd)
+ {
+    bool supported = false;
+@@ -2020,6 +2092,11 @@
+    device->has_cached_coherent_memory = kgsl_is_memory_type_supported(
+       fd, KGSL_MEMFLAGS_IOCOHERENT |
+              (KGSL_CACHEMODE_WRITEBACK << KGSL_CACHEMODE_SHIFT));
++   if (device->has_cached_coherent_memory &&
++       !kgsl_user_context_bank_is_coherent()) {
++      device->has_cached_coherent_memory = false;
++      device->kgsl_iocoherent_unusable = true;
++   }
+ 
+    device->has_sparse = kgsl_is_virtual_bo_supported(fd);
+    device->has_sparse_prr = device->has_sparse;

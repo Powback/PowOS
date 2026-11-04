@@ -96,3 +96,11 @@ would not change anything: no hop uses UBWC.
   fix is in our Turnip (pkgs/vulkan-freedreno-kgsl) - treat KGSL's IOCOHERENT as unusable unless the user context
   bank is dma-coherent (or keep the cached BOs but clean/invalidate around submits), so FEX's override falls back to
   write-combined memory; not by unsetting FEX's flag, which FEX needs.
+- Fix (turnip-noncoherent, vulkan-freedreno-kgsl 26.3.0-2, patch 0002): Turnip's KGSL backend trusts the IOCOHERENT
+  probe only when `/sys/firmware/devicetree/base/soc/qcom,kgsl-iommu@*/gfx3d_user/dma-coherent` exists (no readable DT:
+  distrusted on `gpu_model` Adreno740*). On this phone it doesn't, so the physical device takes the
+  TU_KGSL_FORCE_NONCOHERENT path: no cached-coherent type, FEX's override is a no-op, and Turnip's own internal BOs
+  (command streams, tu_bo_init_new: cached-coherent whenever the probe passed, override or not) are write-combined
+  too - the second suspect for the CP AHB bus errors. Each process logs one `turnip: KGSL accepts IOCOHERENT but the
+  gfx3d_user context bank isn't dma-coherent` warning. `TU_KGSL_TRUST_IOCOHERENT=1` restores the kernel's answer for
+  an A/B. Still to measure on a game run: black-column frames + AHB errors with 26.3.0-2 vs `TU_KGSL_TRUST_IOCOHERENT=1`.
