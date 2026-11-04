@@ -2159,9 +2159,9 @@ class WebWindows(
             // A full-screen Linux window's top / bottom edge strip stays home's (FL2): the status bar's pull-down and
             // the home gesture reach the page, and pulling in from there leaves full screen.
             fullEdgeAt(ev)?.let { e ->
-                fullEdge = e
                 // GQ1: the page runs again before this gesture's first event reaches it.
-                quietCheck("edge gesture")
+                quietCheck("edge gesture", edge = true)
+                fullEdge = e
                 return false
             }
         }
@@ -2246,9 +2246,12 @@ class WebWindows(
      * show or take a gesture ([GameBoost.pageQuiet]); [why]: the log's. Main thread; called on every change of what
      * it reads (full screen on/off, a window closed, the switcher up/down, an edge gesture's start/end).
      */
-    private fun quietCheck(why: String) {
+    private fun quietCheck(
+        why: String,
+        edge: Boolean = fullEdge != null,
+    ) {
         val gameFull = wins.values.any { it.linuxFull && it.immersive && !it.closed && it.linux != null }
-        val want = GameBoost.pageQuiet(gameFull, underSwitcher || fullHidden || dev.omalauncher.system.Switcher.open, fullEdge != null)
+        val want = GameBoost.pageQuiet(gameFull, underSwitcher || fullHidden || dev.omalauncher.system.Switcher.open, edge)
         if (want == pageQuiet) return
         pageQuiet = want
         runCatching { if (want) web.onPause() else web.onResume() }.onFailure { WindowLog.w(TAG, "GQ1: home's page pause/resume failed", it) }
