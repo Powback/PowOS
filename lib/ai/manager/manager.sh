@@ -71,6 +71,42 @@ _manager_ensure_claude() {
     return 1
 }
 
+# How the manager's claude is signed in, one word on stdout (sign-in for the non-root build, 11-04 decision: the buyer's
+# own Claude account inside the app; the fleet endpoint stays the owner's devices'):
+#   endpoint  the machine's Anthropic endpoint (/etc/powos/ai/endpoint.conf, or ANTHROPIC_BASE_URL exported): the
+#             owner's devices, the fleet authority - unchanged, nothing else is looked at
+#   login     Claude Code's own login in this image (its credentials file, or a key/token the environment exports)
+#   signin    neither: the AI page asks to sign in (powos manager --signin)
+# Only file presence and variable names are looked at - never a credential's contents.
+_manager_auth() {
+    declare -f _ai_ensure_config &>/dev/null && _ai_ensure_config
+    if [[ -r "${POWOS_AI_ENDPOINT_FILE:-/etc/powos/ai/endpoint.conf}" || -n "${ANTHROPIC_BASE_URL:-}" ]]; then
+        echo endpoint
+    elif [[ -s "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json" || -n "${ANTHROPIC_API_KEY:-}" \
+            || -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" || -n "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
+        echo login
+    else
+        echo signin
+    fi
+}
+
+# powos manager --signin: Claude Code's own login (`claude auth login`, the Claude subscription), run in the AI page's
+# terminal. Its browser step opens in Android's browser (BROWSER / xdg-open -> the app's open bridge) and comes back to
+# claude's localhost listener, or the code is pasted into the terminal. Claude Code keeps the credentials in this image
+# only (~/.claude, the app's private storage); nothing here reads, copies, logs or prints them.
+_manager_signin() {
+    _manager_ensure_claude || return 1
+    if command -v powos-android-open &>/dev/null; then export BROWSER=powos-android-open; fi
+    claude auth login --claudeai
+}
+
+# powos manager --signout: Claude Code's own logout (its credentials leave the image). Never the endpoint's.
+_manager_signout() {
+    command -v claude &>/dev/null || PATH="$HOME/.local/bin:$PATH"
+    command -v claude &>/dev/null || return 0
+    claude auth logout
+}
+
 # Its CLI (installed on first use), the AI config and the manager persona.
 _manager_load() {
     _manager_ensure_claude || return 1
@@ -94,6 +130,10 @@ manager_run() {
             --no-sandbox) export POWOS_SANDBOX_ENABLED=0 ;;
             # --help: the broker's own (manager.py), without the persona load below.
             -h|--help) python3 "$MANAGER_SERVER" --help; return ;;
+            # How it's signed in (one word: endpoint / login / signin), Claude Code's login, its logout.
+            --auth) _manager_auth; return ;;
+            --signin) _manager_signin; return ;;
+            --signout) _manager_signout; return ;;
             *) passthru+=("$1") ;;
         esac
         shift
@@ -118,6 +158,13 @@ manager_run() {
     # manager's claude uses it wherever it's started - not only from a session whose environment.d already has it
     # (a phone's PowOS session doesn't).
     _manager_load || return 1
+    # No endpoint and no Claude login in the image (the non-root build before its user signs in): no claude run that
+    # only answers 401 - the page's event ("signin": its Sign in to Claude state) and status 4.
+    if [[ "$(_manager_auth)" == signin ]]; then
+        [[ " ${passthru[*]} " == *" --json-events "* ]] && echo '{"kind": "signin"}'
+        echo "manager: not signed in to Claude (powos manager --signin)" >&2
+        return 4
+    fi
 
     local mcp_file spf rc=0
     mcp_file="$(mktemp "${TMPDIR:-/tmp}/powos-manager-mcp.XXXXXX")"

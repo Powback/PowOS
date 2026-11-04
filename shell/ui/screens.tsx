@@ -12,6 +12,7 @@ import { powos } from "../bridge.ts";
 import {
   act,
   closeScreen,
+  closeScreens,
   type CodingAgent,
   type CodingState,
   type Job,
@@ -33,7 +34,7 @@ import {
 } from "../screens.ts";
 import { Icon, type IconName } from "./icons.tsx";
 import { PACK_INFO, PackBar, packAction, packCancellable, packFrees, packSize, packStatus, usePacks, type Pack, type PackStatus } from "./packs.tsx";
-import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, searchSpot, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
+import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, searchSpot, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine, chat, openPanel } from "../state.ts";
 import { iconTint } from "./icontint.ts";
 import { UI_FONTS, uiFont } from "./uifont.ts";
 import { ALIGNS, alignChoice, anchorPull, type AlignMode, type AlignSurface } from "./align.ts";
@@ -377,8 +378,28 @@ function Updates({ u }: { u: NonNullable<SettingsState["updates"]> }) {
   );
 }
 
+/**
+ * Settings' "AI" tile: how PowOS AI is signed in (Chat.auth). The user's own Claude login: Sign out (a second tap
+ * confirms; Claude Code's own logout in the image). Not signed in: to the AI page's Sign in to Claude. The owner's fleet
+ * endpoint: said, nothing to do here.
+ */
+function useAiTile(): [IconName, string, string, () => void] {
+  const [confirm, setConfirm] = useState(false);
+  useEffect(() => {
+    if (!confirm) return;
+    const t = window.setTimeout(() => setConfirm(false), 3000);
+    return () => clearTimeout(t);
+  }, [confirm]);
+  const auth = chat.value.auth;
+  if (auth === "login")
+    return ["accountCircleOutline", "AI", confirm ? "tap again to sign out of Claude" : "signed in to Claude · sign out", () => (confirm ? (setConfirm(false), void powos.ai.signOut?.()) : setConfirm(true))];
+  if (auth === "signin") return ["accountCircleOutline", "AI", "not signed in · sign in to Claude", () => (closeScreens(), openPanel("ai"))];
+  return ["accountCircleOutline", "AI", auth === "endpoint" ? "this device's Claude endpoint" : "PowOS AI's Claude account", () => (closeScreens(), openPanel("ai"))];
+}
+
 function SettingsScreen() {
   const s = useScreen<SettingsState>("settings");
+  const ai = useAiTile();
   const installed = s?.linux.state === "installed";
   const needs = (name: ScreenName) => () => openScreen(installed ? name : "linux");
   const tiles: [IconName, string, string, () => void][] = [
@@ -387,6 +408,7 @@ function SettingsScreen() {
     ["apps", "home", "dock and search: bar or dock button", () => openScreen("style", "home")],
     ["storefrontOutline", "widget store", "widgets for home", () => openScreen("store")],
     ["penguin", "linux", linuxLine(s?.linux, s?.powos ?? false), () => openScreen("linux")],
+    ai,
     ["robotOutline", "coding agents", installed ? (s?.agent ? `default: ${s.agent}` : "Claude Code, OpenCode, …") : "needs linux", needs("coding")],
     ["packageVariant", "packages", installed ? "pacman and the AUR" : "needs linux", needs("aur")],
     ["harddisk", "storage", "PowOS parts: gaming, apps, languages", () => openScreen("storage")],

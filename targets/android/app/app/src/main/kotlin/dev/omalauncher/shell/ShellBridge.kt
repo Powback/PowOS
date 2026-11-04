@@ -532,6 +532,9 @@ class ShellBridge(
                 if (a.optBoolean(1, true)) PowosAiActivity.keepInRecents(context) else Unit
             }
             "ai.unqueue" -> PowosAiChat.unqueue(a.getLong(0))
+            // How it's signed in, asked again (after the sign-in terminal ends); Settings > AI's Sign out.
+            "ai.auth" -> PowosAiChat.checkAuth()
+            "ai.signOut" -> PowosAiChat.signOut()
             "ai.open" -> PowosAiActivity.open(context, null)
             // Home's PowOS AI page shown or not. Taken and dropped: the side button opens the assist overlay over that page
             // too (the user, 11-02: "I tried to open like the AI overlay with the side button on the AI page and it
@@ -1409,6 +1412,7 @@ class ShellBridge(
             .put("items", JSONArray(PowosAiChat.items.map { it.json() }))
             .put("thread", PowosAiChat.thread?.json() ?: JSONObject.NULL)
             .put("queued", JSONArray(PowosAiChat.queued.map { it.json() }))
+            .put("auth", PowosAiChat.auth)
 
     /**
      * [key]'s icon ("a:<key>" / "l:<id>"): its file's URL (ShellIcons), the same until the icon changes. One never

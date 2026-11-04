@@ -170,6 +170,8 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       pageShown: (shown) => call("ai.pageShown", shown),
       newApp: (description) => call<boolean>("ai.newApp", description),
       closeThread: () => call<boolean>("ai.closeThread"),
+      auth: () => call("ai.auth"),
+      signOut: () => call("ai.signOut"),
       mail: () => call<AgentMail[]>("ai.mail"),
       mailRead: (id) => call("ai.mailRead", id),
       mailClear: () => call("ai.mailClear"),
@@ -676,6 +678,12 @@ function mock(): Bridge {
         return true;
       },
       closeThread: async () => (events.emit("ai.changed", (chat = { busy: false, items: [], thread: null })), true),
+      // The mock's sign-in (window.__aiAuthAsked counts the asks: the gate's ai-signin scene); it stays as the page set it.
+      auth: async () => {
+        const w = window as unknown as { __aiAuthAsked?: number };
+        w.__aiAuthAsked = (w.__aiAuthAsked ?? 0) + 1;
+      },
+      signOut: async () => void events.emit("ai.changed", (chat = { ...chat, auth: "signin" })),
       mailRead: async (id) => console.log("[mock] mail read", id),
       mailClear: async () => console.log("[mock] all mail read"),
       mail: async () => {

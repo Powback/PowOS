@@ -411,6 +411,12 @@ export interface Chat {
    * host that doesn't queue (an older APK): the page queues itself (assistant.ts).
    */
   queued?: { id: number; text: string }[];
+  /**
+   * How PowOS AI is signed in (`powos manager --auth`): "endpoint" the machine's fleet endpoint (the owner's devices),
+   * "login" Claude Code's own login in the image (the user's own Claude account), "signin" neither - the page shows
+   * Sign in to Claude (powai.tsx SignIn). "" or absent: not known yet (an older host).
+   */
+  auth?: "endpoint" | "login" | "signin" | "";
 }
 
 /** An app that runs, or one frozen (asleep in RAM: powos-sleep-gui, a game frozen with Steam). */
@@ -684,6 +690,10 @@ export interface Bridge {
     newApp(description: string): Promise<boolean>;
     /** Back from a thread to the main conversation. False while a turn is under way. */
     closeThread(): Promise<boolean>;
+    /** Asks again how it's signed in (Chat.auth, as "ai.changed"): after the sign-in terminal ends. ?: older hosts. */
+    auth?(): Promise<void>;
+    /** Settings > AI's Sign out: Claude Code's own logout in the image (never the endpoint's). ?: older hosts. */
+    signOut?(): Promise<void>;
     /** What agents told the user and is unread, newest first ("ai.mail" brings it again). */
     mail(): Promise<AgentMail[]>;
     /**

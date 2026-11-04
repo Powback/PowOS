@@ -12787,6 +12787,10 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `ai-fade-${label}`, viewport).then((r) => whenReady(r, () => aiFadeCheck(r.page, label))));
+  // The non-root build's AI page before its user signs in: Sign in to Claude, Claude Code's own login (11-04; aiSigninInPage).
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `ai-signin-${label}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(async (l) => (await importShim("./dev/ai-signin-check.js")).aiSigninFails(l), `ai-signin-${label}`))));
   // An agent's page is its conversation, folded and unfolded (the user, 11-01 16:45 / 17:10; ui/agents.tsx Convo).
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])

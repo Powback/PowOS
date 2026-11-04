@@ -21,6 +21,9 @@ object PowosAiChat {
     private const val TAG = "PowosAiChat"
     private const val KEEP = 300
 
+    /** `powos manager`'s status when it isn't signed in (lib/ai/manager/manager.sh). */
+    private const val SIGNIN_EXIT = 4
+
     sealed class Item {
         abstract fun json(): JSONObject
 
@@ -67,6 +70,16 @@ object PowosAiChat {
     private var queuedId = 0L
     var busy by mutableStateOf(false)
         private set
+
+    /**
+     * How the manager's claude is signed in (`powos manager --auth`): "endpoint" (the owner's devices: the machine's
+     * fleet endpoint, unchanged), "login" (Claude Code's own login in the image: the buyer's account), "signin" (neither:
+     * the page shows Sign in to Claude, whose terminal runs `powos manager --signin`), "" not known yet. The credentials
+     * stay in the image; this only ever sees the word.
+     */
+    var auth by mutableStateOf("")
+        private set
+    private var authAsking = false
     private var file: File? = null
     private var appContext: Context? = null
 
@@ -94,7 +107,46 @@ object PowosAiChat {
                 JSONObject(threadFile(context).readText()).let { Thread(it.getString("dir"), it.getString("title"), it.optString("kind")) }
             }.getOrNull()
         show(context)
+        checkAuth()
     }
+
+    /** Asks the image how the manager is signed in, into [auth] (a background thread; once at a time). */
+    fun checkAuth() {
+        if (!Guest.enabled || authAsking) return
+        authAsking = true
+        Thread({
+            val word =
+                runCatching {
+                    val p = Guest.process("exec powos manager --auth", mergeErrors = false).start()
+                    p.outputStream.close()
+                    val out = p.inputStream.bufferedReader().readText()
+                    p.waitFor()
+                    authWord(out)
+                }.getOrElse {
+                    Log.w(TAG, "auth check failed", it)
+                    ""
+                }
+            post {
+                authAsking = false
+                if (word.isNotEmpty()) auth = word
+            }
+        }, "powos-ai-auth").start()
+    }
+
+    /** Settings > AI's Sign out: Claude Code's own logout in the image (never the endpoint's), then [auth] again. */
+    fun signOut() {
+        if (!Guest.enabled) return
+        Thread({
+            runCatching { Guest.process("exec powos manager --signout", mergeErrors = true).start().apply { outputStream.close() }.waitFor() }
+                .onFailure { Log.w(TAG, "sign out failed", it) }
+            post { checkAuth() }
+        }, "powos-ai-signout").start()
+    }
+
+    /** `powos manager --auth`'s word from its output; "" for anything else (an older image without the flag). */
+    fun authWord(out: String): String = out.lineSequence().map { it.trim() }.lastOrNull { it.isNotEmpty() }?.takeIf { it in AUTH_WORDS } ?: ""
+
+    private val AUTH_WORDS = setOf("endpoint", "login", "signin")
 
     private fun threadFile(context: Context) = File(context.filesDir, "powos-ai/thread.json")
 
@@ -254,6 +306,8 @@ object PowosAiChat {
                         "tool_result" -> post { finishTool(ev.optBoolean("ok", true), ev.optString("out").take(2000)) }
                         // The mail the turn answers: who it's from, as a line in the chat.
                         "inbox" -> post { add(Item.Note(inboxLine(ev.optString("text")))) }
+                        // Not signed in (no endpoint, no Claude login in the image): the page's Sign in to Claude.
+                        "signin" -> post { auth = "signin" }
                     }
                 }
                 process.waitFor()
@@ -263,7 +317,9 @@ object PowosAiChat {
             }
         post {
             // The inbox's turn with nothing waiting (already read): nothing to say.
-            val quiet = prompt == null && exit == 0 && !answered
+            // Not signed in (status 4, its "signin" event): the page shows Sign in to Claude, not an error line.
+            val quiet = (prompt == null && exit == 0 && !answered) || exit == SIGNIN_EXIT
+            if (exit == SIGNIN_EXIT) auth = "signin"
             if (!quiet && (exit != 0 || !answered)) {
                 val why = synchronized(errors) { errors.lastOrNull { it.isNotBlank() } }
                 add(Item.Note("PowOS AI didn't answer" + (why?.let { ": $it" } ?: " (exit $exit)"), error = true))

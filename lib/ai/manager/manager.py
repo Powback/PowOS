@@ -515,6 +515,9 @@ def main():
         epilog="""launcher flags (powos ai manager, lib/ai/manager/manager.sh):
   --safe          claude asks before acting (no --dangerously-skip-permissions)
   --no-sandbox    start without the TypeScript sandbox (same as POWOS_SANDBOX_ENABLED=0)
+  --auth          how its claude is signed in: endpoint (the machine's endpoint.conf), login (Claude Code's
+                  own login in this image) or signin (neither: a turn prints {"kind": "signin"}, status 4)
+  --signin        Claude Code's own login (claude auth login), in a terminal; --signout its logout
 
 MCP servers the launcher gives it (--mcp-config-file):
   comms     mail, the board's handoffs, present/present_choices (powos comms help)
