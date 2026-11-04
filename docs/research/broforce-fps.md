@@ -72,6 +72,28 @@ Idea: run the game nested in gamescope inside KWin, e.g. `gamescope -w 1134 -h 1
   with KWin as the nested parent - untested on the phone (install-powos-android.sh:237/258).
 - Worth it later for a game that *is* fill-bound (GPU busy ~100 % at max clock); re-run `sample.sh` first.
 
+## Non-game load (2026-11-04, agent/game-quiet)
+
+Goal: while a game is the focused full-screen window, everything else goes quiet (cooler phone, higher thermal cap,
+more CPU for the game). Live snapshot 17:25, user 48 min into Broforce: skin 42.7-45.5 C -> OxygenOS ThermalController
+tempLevel 10 -> policy0/3/7 capped at 1.02/1.17/1.25 GHz of 3.19. Besides FEX wine64 (112-165 %): surfaceflinger
+19-27 %, the WebView renderer 13-17 %, com.powos.app 13-14 %, `steam` 13-14 %, Xwayland 6-14 %, kwin 6-10 %,
+system_server 7-19 %, pipewire-pulse 6-7 %. Measured read-only while the user played (top, `cdp.sh idle 15`,
+`dumpsys SurfaceFlinger`, framework.jar disassembled with build-tools dexdump).
+
+| load | cause found | fix |
+|---|---|---|
+| surfaceflinger 19-27 % (+ GPU) | **every layer GPU-composed each frame**: HWC list wallpaper, HomeShell, the game's `[BBQ] powos-ww-1-linux`, panel anchor, `PowOS controller`, EdgeFloatBar, `PowOS status bar` all `CLIENT`, `forceClientComposition=true clientType=BLUR`. The status-bar strip's layer carries `blurRegions.size()=1 {radius=0 rect=[0,0,0,0]}` - a region that blurs nothing, but any blur region makes SF client-compose every layer under it. Origin: GlassBlur's encoder drawable. `ViewRootImpl.createBackgroundBlurDrawable` calls `setBlurRadius(default)`, which **adds** the drawable to the window's `BackgroundBlurDrawable.Aggregator.mDrawables`; the encoder then only wrote fields (`mVisible=false`, zeroed after the probe), so it stayed in the aggregate and went out as that window's region. | `GlassBlur.Codec` init calls `setVisible(false, false)`, the aggregate's own removal path (`onBlurDrawableUpdated`: not drawn -> removed). Generic: every window with a page glass (home, status bar, shade, pull, switcher). Expect the game, home, wallpaper and controller layers back on DEVICE (HWC overlays), SF's per-frame GPU pass gone. |
+| WebView renderer 13-17 % + app main/RenderThread ~10 % | home's page under the full-screen game: **rAF 60/s, 120 BeginFrames/s, 37 ms/s script**, all from `tick@ui/webwindows.tsx:2208` (the window-geometry loop runs every frame while any window exists, even with nothing moving). Other pages (shade, pull, quicktools, statusbar, assist) were idle (0 frames). | GQ1: `WebWindows.quietCheck` pauses home's WebView (`onPause`: page hidden, no rAF/frames) while a game's immersive full screen covers it (`GameBoost.pageQuiet`), and resumes it on full screen off, the window closed, the switcher up / a swipe headed home, or an edge-strip gesture's DOWN (before the page gets the event). RenderWatch doesn't count a paused page as a stall (`homeShown`). |
+| `steam` 13-14 % | not the CEF UI (steamwebhelper ~3 %): `CSteamController` (Steam Input, polling the controller) and `IPC:CSteamEngine`. | none: Steam Input is the game's input path; never stopped. |
+| Xwayland 6-14 %, kwin 6-10 % | the game frame's path Xwayland -> KWin -> the web window consumer (a copy per frame into an RGBA_8888 BBQ buffer, `isOpaque=false`). | next: the consumer's buffers RGBX (opaque) for a full-screen game, so SF also drops home + wallpaper from the HWC list (occlusion); then direct scanout. Needs native_consumer.c. |
+| com.powos.app other | powos-ww-linux consumer ~3 % (needed), powos-game-boost tick ~3 % (1/s, cheap: cached front window). | none |
+
+After-numbers: pending a ship (same method: `top -b -n2 -d 60`, `cdp.sh idle 15` (home: 0 rAF/s expected), SF HWC list
+(`dumpsys SurfaceFlinger | grep -A2 "HWC layers"`: DEVICE expected), skin temp over 10 min, policy caps). Not measured
+in this run: the Mac's Docker VM (Colima) hit input/output errors mid-run (`mkdir /tmp/containerd-mount...: input/output
+error`), which also took down adb and the JVM test.
+
 ## How to re-measure
 
 `tools/phone/adb.sh shell "su -c 'sh -s'" < design-qa/bf-fps-20261103/sample.sh` (30 s, read-only; divide the

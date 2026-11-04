@@ -26,6 +26,14 @@ class GameBoostTest {
     }
 
     @Test
+    fun homesPageQuietOnlyUnderAGamesFullScreen() {
+        assertTrue("a game's full screen covers the page", GameBoost.pageQuiet(gameFull = true, switcher = false, edge = false))
+        assertEquals("no game full screen: the page runs", false, GameBoost.pageQuiet(gameFull = false, switcher = false, edge = false))
+        assertEquals("the switcher is home's page", false, GameBoost.pageQuiet(gameFull = true, switcher = true, edge = false))
+        assertEquals("an edge gesture reaches the page", false, GameBoost.pageQuiet(gameFull = true, switcher = false, edge = true))
+    }
+
+    @Test
     fun screenOffRestoresAndScreenOnBoostsAgain() {
         val m = GameBoost.Machine()
         m.step(bf, true)

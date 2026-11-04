@@ -733,7 +733,17 @@ internal class GlassBlur(
         private val toFloatArray = region.getDeclaredMethod("toFloatArray").apply { isAccessible = true }
 
         init {
-            // Never one of the window's own drawn blur drawables, whatever touches it.
+            // Out of the window's own blur aggregate, through the one call that tells it: ViewRootImpl's
+            // createBackgroundBlurDrawable calls setBlurRadius(default) on the new drawable, which ADDS it to the
+            // aggregate (BackgroundBlurDrawable.Aggregator.mDrawables, OxygenOS 16's framework.jar) - the field write
+            // below never removed it. The aggregate then sent it as the window's blur region on every frame it had
+            // updates: after the probe's zeroing a radius-0, 0x0 region (SurfaceFlinger's dump, 11-04: "PowOS status
+            // bar ... blurRegions.size()=1 {radius=0u rect=[0,0,0,0]}"), which blurs nothing but makes SurfaceFlinger
+            // GPU-compose every layer under that window (forceClientComposition, clientType=BLUR) - the wallpaper,
+            // home, a full-screen game, the controller - each frame (surfaceflinger ~27 % of a core under Broforce).
+            // setVisible(false) is the aggregate's own removal (onBlurDrawableUpdated: not drawn -> removed); never
+            // visible again, no later setter can put it back.
+            runCatching { (drawable as android.graphics.drawable.Drawable).setVisible(false, false) }
             runCatching { field("mVisible").setBoolean(drawable, false) }
         }
 

@@ -314,7 +314,7 @@ class WebWindows(
 
     /** Home's page on a lit screen: its frames run, so a live window with no geometry is a stall, not a pause. */
     private fun homeShown(): Boolean =
-        web.isShown && web.windowVisibility == android.view.View.VISIBLE && !underSwitcher &&
+        web.isShown && web.windowVisibility == android.view.View.VISIBLE && !underSwitcher && !pageQuiet &&
             context.getSystemService(android.os.PowerManager::class.java).isInteractive
 
     /**
@@ -869,6 +869,7 @@ class WebWindows(
         val switcher = dev.omalauncher.system.Switcher.open
         if (underSwitcher && !switcher) WindowLog.w(TAG, "windows' root was still hidden for a switcher that is gone: shown again")
         underSwitcher = switcher
+        quietCheck("open")
         val t = underHome(r, "open") ?: return WindowLog.w(TAG, "windows' root: home has no surface to hang it on at open").let { }
         t.setVisibility(r, !underSwitcher).apply()
     }
@@ -897,6 +898,8 @@ class WebWindows(
         over: Boolean = on,
     ) {
         underSwitcher = !on
+        fullHidden = !over
+        quietCheck("windows${if (on) "" else " under the switcher"}${if (over) "" else ", full screen hidden"}")
         val t = SurfaceControl.Transaction()
         // FL3: a full-screen Linux window hangs on home's surface itself, ABOVE home's buffer ([fillScreen]), not under
         // the root: hiding the root left it over the switcher, which opened (NavGesture "gesture: Switcher", 10-30
@@ -1331,6 +1334,7 @@ class WebWindows(
             w.immersive = false
             statusBar(w, true)
         }
+        main.post { quietCheck("window ${w.id} closed") }
         val src = w.linux ?: return
         // On the window's own thread, bounded (native_consumer.c times its dequeue out): never another window's wait.
         val lane = src.lane
@@ -2156,6 +2160,8 @@ class WebWindows(
             // the home gesture reach the page, and pulling in from there leaves full screen.
             fullEdgeAt(ev)?.let { e ->
                 fullEdge = e
+                // GQ1: the page runs again before this gesture's first event reaches it.
+                quietCheck("edge gesture")
                 return false
             }
         }
@@ -2204,7 +2210,10 @@ class WebWindows(
         ev: MotionEvent,
     ) {
         when (ev.actionMasked) {
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> fullEdge = null
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                fullEdge = null
+                quietCheck("edge gesture over")
+            }
             MotionEvent.ACTION_MOVE -> {
                 val dy = yOf(ev) - e.y0
                 if (dy * -e.side > EDGE_PULL_DP * density()) {
@@ -2224,6 +2233,26 @@ class WebWindows(
         val w = wins.values.firstOrNull { it.linuxFull } ?: return false
         WindowLog.i(TAG, "window ${w.id}: $why: leaves full screen")
         return toWindow(w.id)
+    }
+
+    /** GQ1: home's page paused ([GameBoost.pageQuiet]) - by [quietCheck] only, which also resumes it. Main thread. */
+    private var pageQuiet = false
+
+    /** [rootShown]'s full-screen windows hidden (a swipe headed home: home's page shows through) - GQ1 runs the page. */
+    private var fullHidden = false
+
+    /**
+     * GQ1: home's page paused while a game's immersive full screen covers it, running again the moment any of it can
+     * show or take a gesture ([GameBoost.pageQuiet]); [why]: the log's. Main thread; called on every change of what
+     * it reads (full screen on/off, a window closed, the switcher up/down, an edge gesture's start/end).
+     */
+    private fun quietCheck(why: String) {
+        val gameFull = wins.values.any { it.linuxFull && it.immersive && !it.closed && it.linux != null }
+        val want = GameBoost.pageQuiet(gameFull, underSwitcher || fullHidden || dev.omalauncher.system.Switcher.open, fullEdge != null)
+        if (want == pageQuiet) return
+        pageQuiet = want
+        runCatching { if (want) web.onPause() else web.onResume() }.onFailure { WindowLog.w(TAG, "GQ1: home's page pause/resume failed", it) }
+        WindowLog.i(TAG, "GQ1: home's page ${if (want) "paused under a game's full screen" else "running again"} ($why)")
     }
 
     /** The full-screen Linux window, unless the switcher is up, else null. */
@@ -3052,6 +3081,7 @@ class WebWindows(
         emit("webwindows.full", mapOf("id" to win.id, "on" to on))
         if (!on) resend("window ${win.id} back from full screen")
         publishBars()
+        quietCheck("window ${win.id} ${if (on) "full screen" else "back in its window"}")
     }
 
     /** [win]'s [Win.linuxFull] set to [on], its IR1 marks reset. */

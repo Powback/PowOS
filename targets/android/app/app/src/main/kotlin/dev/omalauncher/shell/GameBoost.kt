@@ -110,6 +110,22 @@ object GameBoost {
         categories: (String) -> String?,
     ): String? = web ?: task?.takeIf { it.isNotBlank() && WebWindows.isGame(it, categories(it)) }
 
+    /**
+     * GQ1 (board broforce-fps-low-cpu-bound-under-fex, docs/research/broforce-fps.md "Non-game load"): home's page is
+     * paused (WebView.onPause: the page hidden, no rAF, no compositor frames) while a game's immersive full screen
+     * ([gameFull]) covers all of it - nothing of the page is on screen then, yet its window-geometry rAF loop
+     * (ui/webwindows.tsx tick) woke the renderer, the browser side and RenderThread 60x a second (11-04 under Broforce:
+     * 120 BeginFrames/s, 37 ms/s of script; the WebView renderer ~14-17 % and com.powos.app's main thread ~10 % of a
+     * core). Running whenever any of the page can show or takes a gesture: the switcher (home's own page) up
+     * ([switcher]), or a gesture from the full screen's edge strip under way ([edge]: the status bar's pull and the
+     * home gesture reach the page).
+     */
+    fun pageQuiet(
+        gameFull: Boolean,
+        switcher: Boolean,
+        edge: Boolean,
+    ): Boolean = gameFull && !switcher && !edge
+
     /** The script's command line for [action] (null: no root call). */
     fun command(
         script: String,
