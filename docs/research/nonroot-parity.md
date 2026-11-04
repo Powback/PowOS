@@ -240,3 +240,13 @@ hour; it is the task's next step.
   on the desktop, show on the window's, so TapKeyboard holds it for the tap) - kwin rebuild + base republish.
 - Seen once after `pm clear`: LinuxService ForegroundServiceDidNotStartInTimeException (main thread busy at the
   first download tap; the app restarted and the second tap worked).
+- **Fixed (kwin 6.7.5-3.62, patch 0054 + TapKeyboard)**: goLive() places the keyboard again, so the request made as the
+  window opened moves to the window's own consumer ("Android keyboard shown - task live on window task 1"). The app
+  holds it ("no touch behind it: held for the user's tap"), and a tap on the search field raises it ("raised by the
+  user's tap"), and typed text lands in the field. Emulator, root=0, kwin 3.62's files put into the installed image by
+  hand (the base on android.pow still has 3.61; republish it once 3.62 ships). Shots: nonroot-base-refresh-shots/06-08.
+  The check uses `input swipe x y x y 150`: a 0 ms `input tap` lets the UP arrive before the page claims the gesture
+  (the linuxClaim HACK in WebWindows.kt), so neither KWin nor TapKeyboard sees a tap.
+- **Build friction**: build-rootfs.sh renames the new full rootfs over out/powos-rootfs.tar.gz, and that is the tree
+  BUILD_ON_ROOTFS (kwin) and plasma-pin.sh build on. In the 11-04 rootfs, sudo fails in the build container
+  (`pam_open_session: Permission denied`), so build-pkgs.sh kwin failed until the Oct-13 rootfs was linked back.
