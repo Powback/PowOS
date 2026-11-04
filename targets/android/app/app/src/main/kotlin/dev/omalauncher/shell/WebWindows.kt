@@ -899,7 +899,7 @@ class WebWindows(
     ) {
         underSwitcher = !on
         fullHidden = !over
-        quietCheck("windows${if (on) "" else " under the switcher"}${if (over) "" else ", full screen hidden"}")
+        quietCheck("windows root shown=$on, full screen shown=$over")
         val t = SurfaceControl.Transaction()
         // FL3: a full-screen Linux window hangs on home's surface itself, ABOVE home's buffer ([fillScreen]), not under
         // the root: hiding the root left it over the switcher, which opened (NavGesture "gesture: Switcher", 10-30
@@ -3081,7 +3081,7 @@ class WebWindows(
         emit("webwindows.full", mapOf("id" to win.id, "on" to on))
         if (!on) resend("window ${win.id} back from full screen")
         publishBars()
-        quietCheck("window ${win.id} ${if (on) "full screen" else "back in its window"}")
+        quietCheck("window ${win.id} full screen=$on")
     }
 
     /** [win]'s [Win.linuxFull] set to [on], its IR1 marks reset. */
