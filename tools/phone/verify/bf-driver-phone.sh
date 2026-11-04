@@ -18,6 +18,8 @@ for m in /proc/[0-9]*/maps; do p=${m#/proc/}; p=${p%/maps}
   echo "$hits" | sed 's/^/   map /'
   tr '\0' '\n' < /proc/$p/environ 2>/dev/null | grep -E '^(VK_|FEX_|TU_|tu_|MESA|PRESSURE_VESSEL_GRAPHICS|LD_LIBRARY_PATH|STEAM_COMPAT_TOOL_PATHS)' | cut -c1-300 | sed 's/^/   env /'
   echo "   stderr -> $(readlink /proc/$p/fd/2)"
+  # Where it sits (a hang in the thunk / loader shows here): the main thread's state + kernel wait channel.
+  echo "   state $(awk '/^State/ {print $2, $3}' /proc/$p/status) wchan $(cat /proc/$p/wchan 2>/dev/null) threads $(ls /proc/$p/task | wc -l)"
   # The game's processes (FEX-run x86 or native Wine, not KWin/Xwayland): whose Turnip they really map, by inode.
   case $(readlink /proc/$p/exe) in *FEX* | *wine*)
     for i in $(echo "$hits" | awk '$2 ~ /vulkan_freedreno/ {print $1}'); do

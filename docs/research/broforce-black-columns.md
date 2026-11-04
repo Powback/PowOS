@@ -210,3 +210,13 @@ Check: `queue.sh add <task> tools/phone/verify/bf-driver.sh` - PASS needs the ga
      under FEX_STEAM_SUPPORT (diff of FileManagement.cpp 37265b10 vs FEX-2610). Fix: our ThunksDB.json with the
      container paths, in each compatdata/<id>/fex-emu/ (FEX's user config dir = FEX_APP_CONFIG_LOCATION), written by
      /usr/bin/steam at start (steam 1.0.0.87-31).
+- **Result (16:11, steam -31):** the thunk WORKS in the container - explorer.exe/steam.exe (exe = FEX) map
+  FEX-Emu's libvulkan-guest.so + HostThunks/libvulkan-host.so + `/run/host/usr/lib/libvulkan.so.1.4.363` + OUR
+  `/run/host/usr/lib/libvulkan_freedreno.so` inode 414382, and our 0002 warning prints in steam_app_274190.log. But
+  Broforce never started: 3 explorer.exe (one R, two sleeping), no Broforce_beta.exe, no window in 4 min (twice).
+  Phone put back: steam -29 reinstalled, every compatdata/*/fex-emu/ThunksDB.json removed. steam -32 keeps the
+  code behind `POWOS_FEX_VULKAN_THUNK=1` (default off; off removes stale copies).
+- **Next:** why Wine stalls with the thunk - likely explorer.exe's winevulkan/DXVK init through the thunk (an
+  unsupported call / a callback the 2607 thunk doesn't wrap) or wine's display driver; get a Proton log
+  (`PROTON_LOG=1`) + `cat /proc/<explorer>/task/*/wchan` with `bf-coldstart.sh env:POWOS_FEX_VULKAN_THUNK=1 cold`.
+  Per-game alternative that works today: Proton ARM64 (our Turnip, AHB 0).

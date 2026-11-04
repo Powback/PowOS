@@ -19,9 +19,10 @@ restore() { pill "closing the game, putting Steam back"; asuser bf-stop.sh >/dev
   [ -n "$front" ] && "$A" shell "am start -n $front >/dev/null 2>&1"; }
 i0=$(irq)
 pill "bf-driver: launching Broforce"; asuser bf-start.sh >/dev/null
-win=""; for i in $(seq 48); do sleep 5; [ "$(irq)" != "$i0" ] && { echo "touch - abort"; restore; exit 3; }
+win=""; for i in $(seq "${BF_WIN_TRIES:-48}"); do sleep 5; [ "$(irq)" != "$i0" ] && { echo "touch - abort"; restore; exit 3; }
   win=$(asuser bf-window.sh | tail -1); case $win in win=[0-9]*) break ;; esac; done
-case $win in win=[0-9]*) ;; *) echo "FAIL: no game window in 4 min"; restore; exit 1 ;; esac
+case $win in win=[0-9]*) ;; *) echo "FAIL: no game window in 4 min - the maps/env of what runs:"
+  perl -e 'alarm 120; exec @ARGV' "$W/root.sh" "$here/bf-driver-phone.sh" 2>&1 | grep -v pushed | tee "$OUT/driver.txt"; restore; exit 1 ;; esac
 echo "window after $((i * 5)) s: $win"; sleep 15
 pill "bf-driver: reading the game's mapped Vulkan driver"
 perl -e 'alarm 120; exec @ARGV' "$W/root.sh" "$here/bf-driver-phone.sh" 2>&1 | grep -v pushed | tee "$OUT/driver.txt"
