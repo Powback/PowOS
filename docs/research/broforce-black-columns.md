@@ -146,3 +146,46 @@ would not change anything: no hop uses UBWC.
   release), 0001-0003; rootfs-in-container.sh MESA_SRC_COMMIT = the same eb3e7fd4 (Gallium freedreno matches; its
   source cache is now keyed by commit - the old fixed `mesa-src.tar.gz` name would have kept serving ef25369b).
   How to move the pin next time: the PKGBUILD header.
+
+## Which driver the game runs (bf-which-driver, 2026-11-04) - NOT ours
+- **Broforce runs on x86 Proton, not Proton ARM64.** config.vdf CompatToolMapping 274190 = `proton_experimental`;
+  compatdata/274190/config_info = `Proton - Experimental` 11.0-100 (powos-steam-compat mode "kept": the prefix predates
+  arm64). All of Wine runs under Valve's FEX compat tool (steamapps/common/FEX-Emu) inside SteamLinuxRuntime_4 (x86).
+- **Live maps (tools/phone/verify/bf-driver.sh, job 20261104-154019-5508, ~/.cache/powos-verify/bfd-2026-11-04_1540/):**
+  Broforce_beta.exe, explorer.exe and xalia.exe (exe = FEX) all map `/run/gfx/main/usr/lib64/libvulkan_freedreno.so`
+  inode **270485** = `/usr/share/fex-emu/RootFS/Fedora_44/usr/lib64/libvulkan_freedreno.so` (FEX's fetched x86_64
+  RootFS, Mesa 26.2.0 git-9f0a761020, 2026-08-12, KGSL-capable, owned by no package) plus its x86 loader
+  libvulkan.so.1.4.341 (270478). Our package's file is inode 414382 - mapped by nothing. No libvulkan-guest/host.so:
+  FEX's Vulkan thunk is NOT active (ThunksDB overlays only `@PREFIX_LIB@/libvulkan.so.1`; inside pressure-vessel the
+  guest loads the loader from `/usr/lib/pressure-vessel/overrides/lib/x86_64-linux-gnu/` -> `/run/gfx/main/...`).
+- How: pressure-vessel's graphics provider for x86 is FEX's RootFS (`/usr/share/guestos/fex-mesa` -> Fedora_44, set by
+  pkgs/steam/steam.install), mounted at /run/gfx/main; its x86_64 ICD jsons go into VK_ICD_FILENAMES/VK_DRIVER_FILES.
+  The aarch64 json (`/run/host/usr/lib/libvulkan_freedreno.so` = ours) is listed too but an x86_64 loader skips it.
+- So every Turnip change so far (26.3.0-1/-2, 27.0.0 -1/-2: 0001 RB_CCU_CNTL, 0002 IOCOHERENT distrust, 0003
+  varyings) never reached this game; X7.44% vs 6.82% is noise between two runs of the SAME x86 Turnip 26.2.0. It
+  also runs Turnip itself emulated under FEX (CPU cost on the CPU-bound main thread). Our 0002 warning can't appear:
+  `tu_override_uncached_as_cache_coherent=true` is in the env and 26.2.0 honours it.
+- Side finding: KWin (pid 11413, started before the 14:23 install) maps `/usr/lib/libvulkan_freedreno.so (deleted)`,
+  inode 719257 - the pre-install Turnip, until KWin restarts. Not the game's path.
+
+## Who emits the CP AHB bus errors (same day)
+- dmesg since boot (12:09 UTC): the first error at 8182 s = 14:25:32 UTC, the last at 8283 s = 14:27:13 - exactly the
+  15:24 checker's game window (15:25:34-15:27:14 local); none in the 2h16m of KWin + Xwayland (rootfs gallium
+  freedreno) before it, 0 in 10 s idle after. During the bf-driver run: 40 in 20 s = the printk ratelimit's cap
+  (10 per 5 s, "N callbacks suppressed"), so the true rate is higher. KGSL doesn't name the context; the errors come
+  and go with the game's process, whose Turnip is FEX's unpatched 26.2.0 (no RB_CCU_CNTL-on-BR fix) - consistent
+  with 0001's diagnosis. Rootfs gallium (KWin/Xwayland) is not the source.
+
+## Fix at the cause (next step)
+Make x86 games use our Turnip. Two ways, the first preferred:
+1. **FEX Vulkan thunk inside pressure-vessel**: the guest's libvulkan.so.1 becomes FEX's libvulkan-guest.so, Vulkan
+   goes to the host aarch64 loader -> /run/host/usr/lib/libvulkan_freedreno.so (ours, patched, native - no emulated
+   driver on the CPU-bound main thread). Needs the ThunksDB overlay to match the pressure-vessel override path
+   (`/usr/lib/pressure-vessel/overrides/lib/x86_64-linux-gnu/libvulkan.so.1`) or the x86 provider's
+   `/run/gfx/main/usr/lib64/libvulkan.so.1*`, and check what FEX_APP_CONFIG (/tmp/fex-app-config-*.json in the
+   container) sets for thunks.
+2. Or our x86_64 Turnip (the same eb3e7fd4 + 0001-0003, cross-built) installed into the FEX RootFS over Fedora's
+   (a package owning those files, so the RootFS fetcher / protect hook can't silently swap it back).
+Or move Broforce to `powos-steam-compat set 274190 arm64` (native Wine, aarch64 winevulkan -> our driver) - a
+per-game workaround; x86-Proton games still need 1 or 2.
+Check: `queue.sh add <task> tools/phone/verify/bf-driver.sh` - PASS needs the game's map inode = the package's.
