@@ -132,3 +132,19 @@ hour; it is the task's next step.
   llvmpipe stop emitting SVE on a CPU that lies about it (find where Mesa 26.3 builds its LLVM features for aarch64 and
   why the extra mattrs don't apply; or run the emulator with a CPU model without SVE), then re-check systemsettings.
 
+
+### 11-04 (emu-no-sve): llvmpipe without SVE on the emulator
+
+- **Cause**: the emulator (37.2.12, Apple M4, hvf) passes the host's ID_AA64ZFR0 through (M4 is SME-only); the guest
+  kernel 6.6.66 predates "arm64: Filter out SVE hwcaps when FEAT_SVE isn't implemented", so /proc/cpuinfo lists
+  `sve2 svei8mm svebf16` but not `sve`. Arch's Mesa 26.3.0 pushes `+sve2` from that hwcap, then appends
+  `GALLIVM_EXTRA_MATTRS` (comma-split, after the host features - read from the binary), so `-sve,-sve2` does apply;
+  the earlier try most likely kept running SVE code from `~/.cache/mesa_shader_cache` (its key has no mattrs).
+- **(a) emulator CPU model: not available.** The emulator's qemu (2.12-era fork, target/arm/hvf.c) has no CPU feature
+  properties (`-cpu host,sve=off`/`sme=off` don't exist in the binary), and the kernel's `arm64.nosve/nosme`
+  overrides don't touch ZFR0 in 6.6.
+- **(b) done**: `session/Hyprland` - when the CPU lists sve2 without sve: `GALLIVM_EXTRA_MATTRS=-sve,-sve2` and
+  `MESA_SHADER_CACHE_DIR=~/.cache/mesa-nosve`. On the emulator (persist.powos.root=0, the script patched in place with
+  the env + cache off) KWin, Xwayland and plasmashell stayed up with no SIGILL (shot `03-nosve-home.png`); a
+  systemsettings window was not proven yet: `powos-open-task` from an adb guest shell answered "desktop" (no task),
+  so the next step is opening it from the launcher (drawer) and checking the window draws.

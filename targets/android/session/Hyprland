@@ -40,6 +40,17 @@ if [ ! -e /dev/kgsl-3d0 ]; then
   unset MESA_LOADER_DRIVER_OVERRIDE TURNIP_KMD FD_FORCE_KGSL XWAYLAND_FORCE_KGSL_SURFACELESS
   export GALLIUM_DRIVER=llvmpipe LIBGL_ALWAYS_SOFTWARE=1 POWOS_GPU=software
   echo "powos-session: no /dev/kgsl-3d0, using llvmpipe (software rendering)" >&2
+  # HACK: a CPU that lists sve2 but not sve (the Android emulator on Apple M4: its 6.6.66 kernel derives the sve2 hwcap
+  # from ID_AA64ZFR0 although SVE itself is absent - SME-only; Mesa 26.3 then adds +sve2 and llvmpipe's JIT emits SVE,
+  # KWin SIGILLs on its first frame). Turn SVE off for gallivm, and use a cache of its own so objects compiled with
+  # SVE before aren't reused (the disk cache key doesn't include the mattrs). Real fix: a guest kernel with
+  # "arm64: Filter out SVE hwcaps when FEAT_SVE isn't implemented" (6.6.7x stable) or an emulator that hides SME.
+  _feat=" $(grep -m1 '^Features' /proc/cpuinfo 2>/dev/null | cut -d: -f2) "
+  case "$_feat" in *" sve2 "*) case "$_feat" in *" sve "*) ;; *)
+    export GALLIVM_EXTRA_MATTRS="-sve,-sve2${GALLIVM_EXTRA_MATTRS:+,$GALLIVM_EXTRA_MATTRS}"
+    export MESA_SHADER_CACHE_DIR="$HOME/.cache/mesa-nosve"
+    echo "powos-session: CPU lists sve2 without sve, llvmpipe without SVE" >&2 ;; esac ;; esac
+  unset _feat
 fi
 # HACK: freedreno's UBWC (compressed textures) on KGSL left Plasma's SVG textures (panel, widgets, theme previews)
 # as noise blocks (OnePlus Open, Adreno 740, Mesa 26.3). Real fix: find and report the UBWC bug in Mesa's KGSL path.
