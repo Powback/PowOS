@@ -42,7 +42,7 @@
 
 pkgname=vulkan-freedreno-kgsl
 pkgver=27.0.0_devel.20261029.geb3e7fd4
-pkgrel=1
+pkgrel=2
 pkgdesc='Turnip Vulkan driver on KGSL (lfdevs Mesa) with PowOS fixes (PowOS Android)'
 arch=(aarch64)
 url='https://github.com/lfdevs/mesa-for-android-container'
@@ -53,6 +53,8 @@ makedepends=(meson ninja python-mako python-yaml python-packaging python-ply gls
 provides=(vulkan-freedreno vulkan-driver)
 conflicts=(vulkan-freedreno)
 replaces=(vulkan-freedreno)
+# -2: andromarchy-protect put the rootfs's 10-13 Turnip back after every install of -1 (see the .install).
+install=vulkan-freedreno-kgsl.install
 _commit=eb3e7fd4f009cab04b1482aad4843c0bde28a786
 _patches=(0001-turnip-a7xx-rb-ccu-cntl-br-only.patch
           0002-turnip-kgsl-iocoherent-needs-coherent-user-cb.patch

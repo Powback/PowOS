@@ -1,0 +1,26 @@
+# Andromarchy's rootfs keeps its own builds in place across pacman transactions: /usr/local/bin/andromarchy-protect
+# (pacman hooks 00-andromarchy-protect-save before, zz-andromarchy-protect after every transaction) puts back any file
+# in /opt/lotfix/protect/manifest whose sha256 changed, from its copy in /opt/lotfix/protect/store. Its list includes
+# /usr/lib/libvulkan_freedreno.so (the rootfs's own 10-13 Turnip build, "Mesa 26.3.0-devel", sha 53b39528...), so
+# every install of this package was undone one second later ("andromarchy-protect: restored Andromarchy's own version
+# of: /usr/lib/libvulkan_freedreno.so" in /var/log/pacman.log; 26.3.0-1 on 11-03 and 27.0.0_devel...-1 on 11-04 never
+# ran - pacman -Qkk: size + SHA256 mismatch, no 0002 IOCOHERENT string in the file).
+# This package IS our build of that file now, so it records its own library as the protected version: the
+# PostTransaction check (after this scriptlet) then finds the file as recorded and keeps it, and protection goes on
+# guarding it against Arch's vulkan-freedreno. Only paths already in the manifest are touched.
+# HACK: we write andromarchy-protect's private store. Real fix: andromarchy-protect leaves a path alone once a package
+# that isn't the Arch one it guards against owns it (e.g. skip paths owned by a package with Replaces= on the Arch
+# owner), or PowOS's rootfs drops libvulkan_freedreno.so from its PATHS now that this package ships it.
+_adopt_protected() {
+  local m=/opt/lotfix/protect/manifest s=/opt/lotfix/protect/store f h
+  [ -f "$m" ] || return 0
+  for f in /usr/lib/libvulkan_freedreno.so; do
+    [ -f "$f" ] && grep -q "^$f	" "$m" || continue
+    h=$(sha256sum "$f" | cut -d' ' -f1)
+    mkdir -p "$s${f%/*}" && cp -p "$f" "$s$f" && sed -i "s|^$f	.*|$f	$h|" "$m" &&
+      echo "vulkan-freedreno-kgsl: andromarchy-protect now keeps this package's $f"
+  done
+}
+
+post_install() { _adopt_protected; }
+post_upgrade() { _adopt_protected; }

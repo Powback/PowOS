@@ -13,7 +13,7 @@
 # Also prints the KGSL CP AHB bus error rate ("CP_RL_ERROR_DETAILS_0:0x10008e07", BV writing RB_CCU_CNTL, fixed in
 # the package's 0001) over the last 10 s - informational: it is 0 when no Vulkan game is drawing either.
 # Queue it first against the board task, then the game check that needs the new Turnip:
-#   queue.sh add <task> tools/phone/verify/vulkan-freedreno-install.sh 26.3.0-1
+#   queue.sh add <task> tools/phone/verify/vulkan-freedreno-install.sh 27.0.0_devel.20261029.geb3e7fd4-2
 # Exit: 0 passed; 1 FAIL; 3 a real touch / no free window / not now (re-queued); 5 can't run.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); T=${VF_TOOLS:-$here/..}
@@ -46,7 +46,12 @@ v=$(vf_installed)
 rb="(rollback: tar -xf /var/cache/powos/vulkan-freedreno-before-$v.tar -C /)"
 k=$(_kw_rs "pacman -Qkk $name 2>&1 | tail -1")
 log "files: $k"
-[[ $k == *" 0 altered files"* ]] || fail "the files on disk aren't the package's ($k) $rb"
+if [[ $k != *" 0 altered files"* ]]; then
+  # Andromarchy's andromarchy-protect hook puts its protected files back after every transaction (the package's
+  # .install adopts the library from 27.0.0_devel...-2 on); name it when it was the one that replaced the file.
+  ap=$(_kw_rs "tail -40 /var/log/pacman.log | grep -A3 'andromarchy-protect: restored' | grep -o '/usr/[^ ]*freedreno[^ ]*' | tail -1" | tail -1)
+  fail "the files on disk aren't the package's ($k${ap:+; andromarchy-protect restored its own $ap after the install}) $rb"
+fi
 # A trivial Vulkan client as the session user: the loader picks the ICD, Turnip opens /dev/kgsl-3d0.
 vi=$(_kw_us 'timeout 20 vulkaninfo --summary 2>&1 | grep -E "deviceName|driverName|driverInfo|ERROR|IOCOHERENT" | tr -s " " | tr "\n" ";"' | tail -1)
 log "vulkaninfo: $vi"
