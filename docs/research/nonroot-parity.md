@@ -222,3 +222,31 @@ hour; it is the task's next step.
   LinuxSameCommandTest). powos-open-task itself answered "task" (no 30 s fallback to "desktop").
 - **Left**: the base image must be rebuilt for the new Hyprland / powos-apps-export to reach installs (the emulator ran
   hand-copied ones); the window's search field takes focus and raises the Android keyboard on open.
+
+### 11-04 (nonroot-base-refresh): the base carries kwin 3.61 + the new session scripts; keyboard on a window's first focus
+
+- **Base rebuilt** (build-rootfs.sh, POWOS_PUBLISH_PACKS=1, Plasma pinned 6.7.5, the KWin/Plasma check passed): kwin
+  6.7.5-3.61 and this tree's session/Hyprland + powos-apps-export are in powos-rootfs-base (byte-identical), published on
+  android.pow/apk and pinned. split-rootfs.py now writes beside its hard-linked outputs and renames over.
+- **Emulator** (fresh app data: `pm clear com.powos.app`, persist.powos.root=0, APK 7b8fcb48 via emu.sh install): the
+  base downloads (995 MB) and installs (kwin 6.7.5-3.61 in its pacman db), KWin + plasmashell start, System Settings from
+  the launcher draws in one PowOS window, no hand-copied files, and no Android keyboard comes up as it opens
+  (~/pw/nonroot-base-refresh-shots/03..05).
+- **Keyboard**: WebWindowSource now holds a window consumer's keyboard ask that no touch came before (TapKeyboard; a tap
+  in that window raises it). But KWin's log shows the ask on open went to the DESKTOP consumer, before the window had its
+  own keyboard: `Android keyboard shown - v2 show on the desktop 0`, then `window task 1 : its own Android keyboard true`.
+  KWin then counts the keyboard as shown, so tapping the already-focused search field raises nothing (05).
+  **Next (kwin 0043)**: when a window task takes its own keyboard, move the current shown state to that consumer (hide
+  on the desktop, show on the window's, so TapKeyboard holds it for the tap) - kwin rebuild + base republish.
+- Seen once after `pm clear`: LinuxService ForegroundServiceDidNotStartInTimeException (main thread busy at the
+  first download tap; the app restarted and the second tap worked).
+- **Fixed (kwin 6.7.5-3.62, patch 0054 + TapKeyboard; 3.63 adds cap "keyboard-live", and the app holds asks only when KWin advertises it, so an older KWin keeps the old keyboard)**: goLive() places the keyboard again, so the request made as the
+  window opened moves to the window's own consumer ("Android keyboard shown - task live on window task 1"). The app
+  holds it ("no touch behind it: held for the user's tap"), and a tap on the search field raises it ("raised by the
+  user's tap"), and typed text lands in the field. Emulator, root=0, kwin 3.62's files put into the installed image by
+  hand (the base on android.pow still has 3.61; republish it once 3.62 ships). Shots: nonroot-base-refresh-shots/06-08.
+  The check uses `input swipe x y x y 150`: a 0 ms `input tap` lets the UP arrive before the page claims the gesture
+  (the linuxClaim HACK in WebWindows.kt), so neither KWin nor TapKeyboard sees a tap.
+- **Build friction**: build-rootfs.sh renames the new full rootfs over out/powos-rootfs.tar.gz, and that is the tree
+  BUILD_ON_ROOTFS (kwin) and plasma-pin.sh build on. In the 11-04 rootfs, sudo fails in the build container
+  (`pam_open_session: Permission denied`), so build-pkgs.sh kwin failed until the Oct-13 rootfs was linked back.

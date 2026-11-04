@@ -327,7 +327,19 @@ class Runtime(
     private fun setService(on: Boolean) {
         val intent = Intent(context, LinuxService::class.java)
         // Android 12+ refuses a foreground service started from the background; the work then goes on without it.
-        if (on) runCatching { context.startForegroundService(intent) }.onFailure { Log.w(TAG, "cannot start the service", it) } else context.stopService(intent)
+        if (on) startService(intent) else context.stopService(intent)
+    }
+
+    /**
+     * A plain start while the app may (it is in front: the launcher, the install page), and the service makes itself
+     * foreground in onStartCommand: startForegroundService's 5-10 s deadline killed the process when the main thread
+     * was busy at the first start after `pm clear` (emulator 11-04: ForegroundServiceDidNotStartInTimeException, twice).
+     * From the background a plain start throws, and the foreground start is the only one allowed.
+     */
+    private fun startService(intent: Intent) {
+        runCatching { context.startService(intent) }
+            .recoverCatching { context.startForegroundService(intent) }
+            .onFailure { Log.w(TAG, "cannot start the service", it) }
     }
 
     /** Guest configs follow the theme and the installed agents; only while there is a guest. */
