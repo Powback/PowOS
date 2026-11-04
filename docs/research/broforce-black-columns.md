@@ -146,3 +146,38 @@ would not change anything: no hop uses UBWC.
   release), 0001-0003; rootfs-in-container.sh MESA_SRC_COMMIT = the same eb3e7fd4 (Gallium freedreno matches; its
   source cache is now keyed by commit - the old fixed `mesa-src.tar.gz` name would have kept serving ef25369b).
   How to move the pin next time: the PKGBUILD header.
+
+## The scorer was wrong; the game's UBWC is the cause (bf-xwayland-side, 2026-11-04)
+- **bf-checker.py's old score was a false positive.** It counted 2x2 black checkers of cell 1..32 px; the loading screen's
+  sunburst (thin bright rays on black) scores 6-8 % by itself, so every variant read "X 6.8-8.5 %" whether or not a
+  single dash was on screen (e.g. sysmem's worst "X 8.49 %" frame h032 is a clean sunburst). All of today's "the checker
+  is not the game's driver / renderer" conclusions rested on that number.
+- **What the artefact is** (zoom of sysmem s05.png, full res): black dashes 4-16 px wide in 2-row steps, all inside
+  16-px column windows, in bright areas - a 16x4 block grid at 32 bpp = the UBWC block size for RGBA8 on a6xx/a7xx.
+  The same dashes are in Xwayland's copy (XGetImage of the game window: sysmem h026 = the "24 GAMES" splash fully
+  dashed) and on the screen (SurfaceFlinger screencap), so the grabber is not the artefact, and the screen just
+  shows what is already in the game's frames.
+- **New score** (bf-checker.py, same files): black runs <= 16 px (8 at half res) between bright pixels with a bright
+  pixel 2 rows away, per 10k px; clean frames 0-3, dashed 30-800, checkered at > 20; a variant = share of its frames.
+  Rescored (~/.cache/powos-verify/bfc-2026-11-04_*):
+
+  | run | game's Turnip | variant | X frames checkered | screenshots |
+  |---|---|---|---|---|
+  | 1514 | x86 FEX RootFS 26.2.0 | base | 26/78 (33 %) | 4/9 |
+  | 1524 | x86 26.2.0 | base | 16/88 (18 %) | 2/9 |
+  | 1550 | ours, Proton ARM64 | base | 15/88 (17 %) | 2/9 |
+  | 1556 | x86 26.2.0 | base | 37/84 (44 %) | 4/9 |
+  | 1620 | x86 26.2.0 | TU_DEBUG=sysmem | 31/86 (36 %) | 2/9 |
+  | 1617 | x86 26.2.0 | **TU_DEBUG=noubwc** | **0/84** | **0/9** |
+
+  noubwc frames are complete and normal (splashes, menu); one run, but 0 of 93 frames against 17-44 % in five base runs.
+- **So the layer is the game's own rendering with UBWC** (Unity renders to UBWC render targets, then blits them into
+  the linear swapchain image): both Turnips (FEX's x86 26.2.0 and our eb3e7fd4), GMEM and sysmem alike. Xwayland,
+  KWin and the grabber only pass it on. Black 16x4 blocks = blocks read as "clear/zero": a UBWC flag read stale (the
+  render's flag writes not flushed from CCU / not invalidated in UCHE before the blit samples them) or flag/data
+  addressing that differs between the writer (RB) and the reader (TP) (UBWC config: highest bank bit, macrotile mode,
+  bank swizzle - Turnip takes them from KGSL_PROP_HIGHEST_BANK_BIT / KGSL_PROP_UBWC_MODE, tu_knl_kgsl.cc).
+- **Discriminating run queued:** `bf-checker.sh flushall` (TU_DEBUG=flushall: flush + invalidate every cache around
+  every draw/blit). Fixes it -> a missing flush/invalidate in Turnip's a7xx UBWC path (fix in pkgs/vulkan-freedreno-kgsl
+  barriers); doesn't -> writer/reader UBWC config mismatch (compare KGSL's props with what the kernel programs into
+  RB/TPL1 *_NC_MODE_CNTL on this a740).
