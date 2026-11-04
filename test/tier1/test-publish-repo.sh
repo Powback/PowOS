@@ -68,6 +68,13 @@ vulkan-freedreno-kgsl 27.0.0_devel.20261029.geb3e7fd4-1" ] || fail "newer kwin d
 [ "$(sha256sum < "$W/link")" = "$sum" ] || fail "hard-linked source package changed"
 [ "$(stat -c %h "$W/repo/kwin-6.7.5-3.64-aarch64.pkg.tar.gz")" = 1 ] || fail "repo file shares an inode with the source"
 
+# --remove takes a package out; its file is held beside the repo, not deleted; the rest stays.
+bash "$MERGE" "$W/repo" --remove kwin >/dev/null
+got=$(db)
+[ "$got" = "vulkan-freedreno-kgsl 27.0.0_devel.20261029.geb3e7fd4-1" ] || fail "--remove kwin: $got"
+[ -e "$W/repo-held/kwin-6.7.5-3.64-aarch64.pkg.tar.gz" ] && [ ! -e "$W/repo/kwin-6.7.5-3.64-aarch64.pkg.tar.gz" ] ||
+  fail "--remove: kwin's file not moved to repo-held"
+
 for f in powos.db powos.files; do
   [ -f "$W/repo/$f" ] && [ ! -L "$W/repo/$f" ] || fail "$f isn't a plain file"
 done

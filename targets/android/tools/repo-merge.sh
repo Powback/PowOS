@@ -2,6 +2,8 @@
 # Merges a directory of built packages into the [powos] pacman repo (publish-repo.sh runs it in an Arch Linux ARM
 # container: it needs repo-add, vercmp and bsdtar).
 #   repo-merge.sh <repo-dir> <pkgs-dir>
+#   repo-merge.sh <repo-dir> --remove <name>...   take packages out of the repo (atomically, same lock); their files
+#                                                 move to <repo-dir>/../repo-held/, never deleted
 # ADDS, never replaces the repo: every agent worktree has its own out/pkgs, and the old publish (rm -f the repo,
 # copy in out/pkgs) left the phone's repo holding one worktree's single package (2026-11-04: just
 # vulkan-freedreno-kgsl; kwin, xwayland-kgsl and every other PowOS package were gone). Rules:
@@ -30,6 +32,12 @@ done
 stage=$(mktemp -d "$REPO/.stage.XXXXXX")
 trap 'rm -rf "$stage" "$lock"' EXIT
 
+if [ "$PKGS" = --remove ]; then
+  shift 2
+  [ "$#" -gt 0 ] || { echo "repo-merge: --remove needs package names" >&2; exit 1; }
+  [ -e "$REPO/$DB" ] || { echo "repo-merge: no $DB in $REPO" >&2; exit 1; }
+fi
+
 # What the repo holds now, from its database (the files on disk may include leftovers): name -> version, filename.
 declare -A have_ver have_file
 if [ -e "$REPO/$DB" ]; then
@@ -45,6 +53,24 @@ if [ -e "$REPO/$DB" ]; then
       END { out() }')
   cp "$REPO/$DB" "$stage/$DB"
   [ -e "$REPO/$FILES" ] && cp "$REPO/$FILES" "$stage/$FILES"
+fi
+
+if [ "$PKGS" = --remove ]; then
+  held=$(dirname "$REPO")/repo-held
+  out=()
+  for n in "$@"; do
+    [ -n "${have_ver[$n]:-}" ] || { echo "not in repo: $n"; continue; }
+    out+=("$n"); echo "remove $n ${have_ver[$n]} (file kept in $held)"
+  done
+  if [ "${#out[@]}" -gt 0 ]; then
+    (cd "$stage" && repo-remove -q "$DB" "${out[@]}")
+    for l in powos.db powos.files; do rm -f "$stage/$l"; cp "$stage/$l.tar.gz" "$stage/$l"; done
+    for f in "$DB" powos.db "$FILES" powos.files; do mv -f "$stage/$f" "$REPO/$f"; done
+    mkdir -p "$held"
+    for n in "${out[@]}"; do [ -e "$REPO/${have_file[$n]}" ] && mv -f "$REPO/${have_file[$n]}" "$held/"; done
+  fi
+  echo "repo: $(bsdtar -tf "$REPO/$DB" 2>/dev/null | grep -c '/$' || true) packages"
+  exit 0
 fi
 
 # The newest build of each package in <pkgs-dir>, by pacman's own version order.
