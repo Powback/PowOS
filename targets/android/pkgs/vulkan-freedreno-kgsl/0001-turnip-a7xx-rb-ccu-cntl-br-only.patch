@@ -1,6 +1,6 @@
 --- a/src/freedreno/vulkan/tu_cmd_buffer.cc
 +++ b/src/freedreno/vulkan/tu_cmd_buffer.cc
-@@ -2141,12 +2141,24 @@
+@@ -2193,12 +2193,24 @@
        if (TU_DEBUG(NO_CONCURRENT_UNRESOLVES))
           unresolve_mode = CONCURRENT_UNRESOLVE_MODE_DISABLED;
  
@@ -25,7 +25,7 @@
     }
  
     for (size_t i = 0; i < ARRAY_SIZE(phys_dev->info->magic_raw); i++) {
-@@ -2176,7 +2188,15 @@
+@@ -2233,7 +2245,15 @@
              break;
        }
  

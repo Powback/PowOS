@@ -104,3 +104,45 @@ would not change anything: no hop uses UBWC.
   too - the second suspect for the CP AHB bus errors. Each process logs one `turnip: KGSL accepts IOCOHERENT but the
   gfx3d_user context bank isn't dma-coherent` warning. `TU_KGSL_TRUST_IOCOHERENT=1` restores the kernel's answer for
   an A/B. Still to measure on a game run: black-column frames + AHB errors with 26.3.0-2 vs `TU_KGSL_TRUST_IOCOHERENT=1`.
+
+## Turnip pin (turnip-latest, 2026-11-04)
+- **Why it was old:** ef25369b (2026-10-04) was Andromarchy's validated Mesa: the tip of lfdevs's termux-va topic
+  branch `test/add-va-bridge`, 32 VA-bridge commits on a ~2026-09-29 upstream merge. 56007a05 (10-13) pinned it as a
+  commit archive because lfdevs rewrote that branch and `clone -b ... && checkout ef25369b9c` broke - a pin for
+  reproducibility, never meant as "current". Nothing ever moved it: no task owned "keep Turnip current", and the
+  26.3.0 pkgver (from the tree's 26.3.0-devel VERSION) read like a release, so it didn't look stale.
+- **adreno-main is not the code branch.** `compare ef25369b...adreno-main` = diverged, 45 ahead / 8938 behind: the 45
+  are all README/CI/workflow/FUNDING commits (2026-04-04..10-30) on a 26.1.0-devel tree from 2026-04-04 - moving
+  there would have been a 6-month DOWNGRADE. None of the 45 touches turnip, kgsl, a7xx, coherency, caches or BV/BR.
+  lfdevs's Mesa source lives on **dev/adreno-main** (VERSION 27.0.0-devel; release mesa-27.0.0-devel-20261025-r1 is
+  built from it): eb3e7fd4 (2026-10-29), 4031 commits ahead of ef25369b, 32 behind (the old termux-va commits,
+  re-landed there in rewritten form: src/termux-va, tva_bridge.c and TU_KGSL_FORCE_NONCOHERENT are all present).
+- **Relevant fixes between ef25369b and eb3e7fd4** (159 commits in src/freedreno/vulkan, 57 common/registers, 83 gallium
+  freedreno). Nothing for the CP AHB bus error (no commit touches RB_CCU_CNTL emission or CP_SET_THREAD in
+  tu_init_hw) and nothing for uncached/IOCOHERENT memory (only the fork's own debug env + TU_KGSL_FORCE_NONCOHERENT,
+  which we already had). Worth having:
+  - KGSL sync/fence correctness (09-30..10-01): `tu/kgsl: Correctly merge timestamps and sync files` 1da50a1b,
+    `Handle FD-only waits in wait_any` 2e30bbd3, `Select the earliest timestamp for wait-any` 59c291f6,
+    `Correctly interpret poll result` 9dea49d1, `Prevent indefinite wait times for 0 timeout waits` e984ef29,
+    `Always round up the wait timeout` 6cb65e61, `Prevent overflow in kgsl_queue_wait_fence` b889ab52,
+    syncobj error propagation 7e0a2b88/11b1a235, OOB in kgsl_syncobj_foreach_state 9a6269f6 - the present/acquire
+    fence path every DXVK frame goes through.
+  - `tu/kgsl: Fix BDA capture/replay failures due to deferred VA frees` a1e9f888 (10-21); dmabuf import / user-map
+    error handling + missing munmap c4aa23ef/d498e083 (09-14).
+  - Cache/flush: `tu: Use SUBPASS(_SLICE)_FENCE for GMEM invalidation` 99200197 + by-region deps cc1cf17c + SLICE_FENCE
+    flush 10b1ef46 + `Don't hardcode feedback_invalidate flushes` b280f888 (09-04); `tu: Fix bindless descriptor
+    invalidate sequence` c88b6ebd (10-05); `tu/a6xx: Invalidate shared consts before disabling them` cadc7e42;
+    `CopyQueryPoolResult should wait for mem writes` 3a35704e, XFB query writes 48614ecf.
+  - `tu: Workaround 32B rollover bug in GPU firmware` 118ec7f4 (08-24); `freedreno/registers: Sync xml from kernel`
+    81fae858; `tu: Make CmdClearAttachments record TU_ACCESS_BLIT_WRITE_GMEM access` a995eaed; LRZ fixes ea3bfc00,
+    1f8c5d43, 0cd184e9.
+- **Upstream Mesa main after the fork's last merge** (gitlab, src/freedreno/vulkan since 10-20): `tu: Add
+  QCTDD08049535_numnonposvar_alignment for a7xx gen1/gen2` 2fae1d0d (10-27, Adreno 740 = gen2: odd FS varying slot
+  counts give garbage varyings, "Fixes rendering corruption in Devil May Cry 5") - cherry-picked as our 0003. The
+  rest is other GPUs (A635 macrotile, a630 binning, A8xx draws) or query/CTS behaviour.
+- **Our patches:** 0001 (RB_CCU_CNTL + RB magic regs on BR only) and 0002 (distrust IOCOHERENT unless gfx3d_user is
+  dma-coherent) are in neither the fork nor Mesa main; both applied to eb3e7fd4 with offsets only (regenerated).
+- **New:** vulkan-freedreno-kgsl 27.0.0_devel.20261029.geb3e7fd4-1 (pkgver = VERSION + commit date + sha, not a
+  release), 0001-0003; rootfs-in-container.sh MESA_SRC_COMMIT = the same eb3e7fd4 (Gallium freedreno matches; its
+  source cache is now keyed by commit - the old fixed `mesa-src.tar.gz` name would have kept serving ef25369b).
+  How to move the pin next time: the PKGBUILD header.

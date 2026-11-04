@@ -1,7 +1,7 @@
 # PowOS Android: Turnip (Mesa's Vulkan driver for Adreno) on KGSL - /usr/lib/libvulkan_freedreno.so and its ICD, the
 # library every Vulkan program on the phone runs (DXVK games through FEX's thunk, Zink).
 #
-# The same Mesa Andromarchy's build-inside.sh builds into the rootfs (lfdevs/mesa-for-android-container @ ef25369b,
+# The same Mesa Andromarchy's build-inside.sh builds into the rootfs (lfdevs/mesa-for-android-container @ eb3e7fd4,
 # rootfs-in-container.sh's MESA_SRC_URL) with its options, only the Vulkan driver, plus ours:
 #   0001  A7XX: RB_CCU_CNTL and the RB_* magic regs are written on the BR pipe only. tu_init_hw emits the static
 #         regs under CP_SET_THREAD_BOTH, so BV executed the RB non-context write too and the Adreno 740's CP faulted
@@ -14,14 +14,35 @@
 #         broforce-black-columns.md "Coherency override"). Now the same as TU_KGSL_FORCE_NONCOHERENT=1: no
 #         cached-coherent type, the override is a no-op; one "turnip: KGSL accepts IOCOHERENT but ..." warning.
 #         TU_KGSL_TRUST_IOCOHERENT=1 restores the kernel's answer.
+#   0003  upstream Mesa 2fae1d0d (main 2026-10-27, after the pin's last upstream merge; drop on the next pin move if
+#         the fork has it): a7xx gen1/gen2 (Adreno 740 is gen2) pad VPC_PS_CNTL::NUMNONPOSVAR by one vec4 when the
+#         FS varyings take an odd number of slots, as Qualcomm's driver does - else garbage in loaded varyings
+#         ("Fixes rendering corruption in Devil May Cry 5").
 # A package so a Turnip fix reaches phones without a new rootfs: rooted.sh deploy installs it (powos-deploy.sh),
 # replacing Arch's vulkan-freedreno (whose files the rootfs build had already overwritten with this same source).
 # Gallium freedreno (KWin, Xwayland's glamor) stays the rootfs's build: it writes RB_CCU_CNTL on BR only already
 # (fd6_emit_restore sets CP_SET_THREAD_BR first).
+#
+# Version = what the source is: Mesa's own VERSION (27.0.0-devel) + the pinned commit's date + its sha, e.g.
+# 27.0.0_devel.20261029.geb3e7fd4 (pacman forbids '-' in pkgver). Not a Mesa release: lfdevs's dev/adreno-main is Mesa
+# main + the fork's KGSL/termux-va work, merged from upstream main roughly weekly.
+# Moving the pin (do it on purpose, with a reason - the source never moves on its own):
+#   1. pick the commit: the fork's DEVELOPMENT branch is dev/adreno-main (Mesa source). NOT adreno-main: that one is
+#      docs/CI only on a 26.1.0-devel (2026-04) tree - "45 commits ahead" there are README/workflow edits.
+#      gh api repos/lfdevs/mesa-for-android-container/commits/dev/adreno-main --jq '.sha, .commit.committer.date'
+#   2. _commit=<full sha>, pkgver=<its VERSION with _>.<committer date YYYYMMDD>.g<sha:8>, pkgrel=1; sha256sums[0] =
+#      shasum -a 256 of https://github.com/lfdevs/mesa-for-android-container/archive/<sha>.tar.gz
+#   3. rebase 0001-0003: extract the archive, `patch -Np1 --dry-run` each; regenerate with diff -u when offsets moved;
+#      drop a patch the source already has (grep the fix's symbol: RB_CCU_CNTL guard in tu_cmd_buffer.cc's
+#      tu_init_hw path, IOCOHERENT in tu_knl_kgsl.cc).
+#   4. the SAME sha in targets/android/rootfs-in-container.sh MESA_SRC_URL (Gallium freedreno must match Turnip).
+#   5. record why + what changed in docs/research/broforce-black-columns.md ("Turnip pin").
+# Pin history: ef25369b (2026-10-04, termux-va topic branch test/add-va-bridge, pinned 10-13 in 56007a05) ->
+#   eb3e7fd4 (2026-10-29, dev/adreno-main, 11-04).
 
 pkgname=vulkan-freedreno-kgsl
-pkgver=26.3.0
-pkgrel=2
+pkgver=27.0.0_devel.20261029.geb3e7fd4
+pkgrel=1
 pkgdesc='Turnip Vulkan driver on KGSL (lfdevs Mesa) with PowOS fixes (PowOS Android)'
 arch=(aarch64)
 url='https://github.com/lfdevs/mesa-for-android-container'
@@ -32,12 +53,14 @@ makedepends=(meson ninja python-mako python-yaml python-packaging python-ply gls
 provides=(vulkan-freedreno vulkan-driver)
 conflicts=(vulkan-freedreno)
 replaces=(vulkan-freedreno)
-_commit=ef25369b9cef72589e164010bea7af3745e92c7b
+_commit=eb3e7fd4f009cab04b1482aad4843c0bde28a786
 _patches=(0001-turnip-a7xx-rb-ccu-cntl-br-only.patch
-          0002-turnip-kgsl-iocoherent-needs-coherent-user-cb.patch)
+          0002-turnip-kgsl-iocoherent-needs-coherent-user-cb.patch
+          0003-turnip-a7xx-gen1-gen2-numnonposvar-alignment.patch)
 source=("mesa-$_commit.tar.gz::https://github.com/lfdevs/mesa-for-android-container/archive/$_commit.tar.gz"
         "${_patches[@]}")
-sha256sums=(825f6126e54ec5e14f3ad1b4cf62b51d43b065c7cf4bc2841ec23a4bcfb831d1
+sha256sums=(123af0b3b2f7c83273a51f28367a64054201d524cbfa52f99ba76696e619927a
+            SKIP
             SKIP
             SKIP)
 

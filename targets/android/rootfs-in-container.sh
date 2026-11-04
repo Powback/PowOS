@@ -6,9 +6,11 @@ set -euo pipefail
 ALARM_URL=http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz
 MESA_URL=https://github.com/lfdevs/mesa-for-android-container/releases/download/mesa-26.3.0-devel-20260824/mesa-for-android-container_26.3.0-devel-20260824_archlinux_arm64.tar
 FAKEROOT_URL=https://deb.debian.org/debian/pool/main/f/fakeroot/fakeroot_1.37.1.1.orig.tar.gz
-# Andromarchy's Mesa source pin (lfdevs, termux-va bridge), as a commit archive: the branch it was
-# cloned from has since been rewritten.
-MESA_SRC_URL=https://github.com/lfdevs/mesa-for-android-container/archive/ef25369b9cef72589e164010bea7af3745e92c7b.tar.gz
+# Mesa source pin (lfdevs dev/adreno-main = Mesa main + KGSL/termux-va), as a commit archive: branches there get
+# rewritten. The SAME commit as pkgs/vulkan-freedreno-kgsl's _commit (Gallium freedreno matches Turnip); its
+# PKGBUILD header says how to move it. Was ef25369b (2026-10-04, test/add-va-bridge) until 11-04.
+MESA_SRC_COMMIT=eb3e7fd4f009cab04b1482aad4843c0bde28a786  # 2026-10-29, Mesa 27.0.0-devel
+MESA_SRC_URL=https://github.com/lfdevs/mesa-for-android-container/archive/$MESA_SRC_COMMIT.tar.gz
 R=/work/rootfs
 A=/in/andromarchy
 
@@ -43,8 +45,9 @@ cp -r /in/powos "$R/tmp/lotfix/powos"
 mkdir -p /cache/dl /cache/pkg
 curl -fsSL -o /cache/dl/mesa.tar -z /cache/dl/mesa.tar "$MESA_URL" && cp /cache/dl/mesa.tar "$R/tmp/lotfix/mesa.tar"
 curl -fsSL -o /cache/dl/fakeroot.tar.gz -z /cache/dl/fakeroot.tar.gz "$FAKEROOT_URL" && cp /cache/dl/fakeroot.tar.gz "$R/tmp/lotfix/fakeroot.tar.gz"
-[ -s /cache/dl/mesa-src.tar.gz ] || curl -fsSL -o /cache/dl/mesa-src.tar.gz "$MESA_SRC_URL"  # immutable: fetch once
-cp /cache/dl/mesa-src.tar.gz "$R/tmp/lotfix/mesa-src.tar.gz"
+# Cached under the commit's name: immutable, fetched once per pin (a fixed name kept serving the old pin).
+[ -s /cache/dl/mesa-src-$MESA_SRC_COMMIT.tar.gz ] || curl -fsSL -o /cache/dl/mesa-src-$MESA_SRC_COMMIT.tar.gz "$MESA_SRC_URL"
+cp /cache/dl/mesa-src-$MESA_SRC_COMMIT.tar.gz "$R/tmp/lotfix/mesa-src.tar.gz"
 cp "$A/build/build-inside.sh" "$R/tmp/lotfix/build-inside.sh"
 
 # pacman's package cache lives on the persistent cache volume (/cache/pkg), so rebuilds reuse the

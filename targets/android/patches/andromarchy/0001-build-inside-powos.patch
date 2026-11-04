@@ -92,9 +92,9 @@ hyprgrass, no Omarchy, no Squeekboard (Android's keyboard types into KWin via th
  pacman -S --noconfirm --needed llvm clang libclc spirv-llvm-translator glslang cbindgen python-mako python-yaml   python-packaging python-ply byacc bison flex libva wayland-protocols libxrandr libxshmfence libxxf86vm libglvnd
 -rm -rf /tmp/mesa-src && git clone -q -b test/add-va-bridge https://github.com/lfdevs/mesa-for-android-container /tmp/mesa-src
 -git -C /tmp/mesa-src checkout -q ef25369b9c
-+# PowOS: the same commit, from its source archive (staged by rootfs-in-container.sh as $L/mesa-src.tar.gz):
-+# lfdevs rewrote test/add-va-bridge after 2026-10-07, so `clone -b test/add-va-bridge && checkout
-+# ef25369b9c` no longer finds the commit. A commit archive can't move.
++# PowOS: rootfs-in-container.sh's MESA_SRC_COMMIT (lfdevs dev/adreno-main), from its source archive (staged
++# as $L/mesa-src.tar.gz): lfdevs rewrites branches (test/add-va-bridge after 2026-10-07 lost ef25369b9c, the
++# old pin), so no clone -b + checkout. A commit archive can't move.
 +rm -rf /tmp/mesa-src && mkdir -p /tmp/mesa-src && tar -xzf $L/mesa-src.tar.gz -C /tmp/mesa-src --strip-components=1
  # The validated build's options, every one that differs from Mesa's defaults (termux-va: hardware video).
  (cd /tmp/mesa-src && meson setup build --prefix=/usr --buildtype=release -Dplatforms=x11,wayland \

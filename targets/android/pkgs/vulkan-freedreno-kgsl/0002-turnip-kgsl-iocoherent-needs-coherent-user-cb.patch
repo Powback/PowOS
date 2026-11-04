@@ -1,6 +1,6 @@
---- a/src/freedreno/vulkan/tu_device.cc	2026-11-04 13:19:10
-+++ b/src/freedreno/vulkan/tu_device.cc	2026-11-04 13:19:36
-@@ -1805,7 +1805,7 @@
+--- a/src/freedreno/vulkan/tu_device.cc
++++ b/src/freedreno/vulkan/tu_device.cc
+@@ -1793,7 +1793,7 @@
      * switch while diagnosing such stacks.  This makes Vulkan expose a cached
      * non-coherent memory type and routes map readback through the invalidate
      * path instead of relying on the (incorrect) HOST_COHERENT declaration. */
@@ -9,9 +9,9 @@
        device->has_cached_coherent_memory = false;
        device->has_cached_non_coherent_memory = device->level1_dcache_size > 0;
     }
---- a/src/freedreno/vulkan/tu_device.h	2026-11-04 13:19:10
-+++ b/src/freedreno/vulkan/tu_device.h	2026-11-04 13:19:36
-@@ -136,6 +136,11 @@
+--- a/src/freedreno/vulkan/tu_device.h
++++ b/src/freedreno/vulkan/tu_device.h
+@@ -144,6 +144,11 @@
  
     bool has_cached_coherent_memory;
     bool has_cached_non_coherent_memory;
@@ -23,8 +23,8 @@
     /* Index for device local, host-coherent, host-cached memory.
      * Only set to positive index when overwriting device-local, uncached memory
      */
---- a/src/freedreno/vulkan/tu_knl_kgsl.cc	2026-11-04 13:19:10
-+++ b/src/freedreno/vulkan/tu_knl_kgsl.cc	2026-11-04 13:19:52
+--- a/src/freedreno/vulkan/tu_knl_kgsl.cc
++++ b/src/freedreno/vulkan/tu_knl_kgsl.cc
 @@ -3,6 +3,7 @@
   * SPDX-License-Identifier: MIT
   */
@@ -41,7 +41,7 @@
  
  #define __user
  #include "ion/ion.h"
-@@ -695,7 +697,77 @@
+@@ -757,7 +759,77 @@
     return supported;
  }
  
@@ -119,7 +119,7 @@
  kgsl_is_virtual_bo_supported(int fd)
  {
     bool supported = false;
-@@ -2020,6 +2092,11 @@
+@@ -2144,6 +2216,11 @@
     device->has_cached_coherent_memory = kgsl_is_memory_type_supported(
        fd, KGSL_MEMFLAGS_IOCOHERENT |
               (KGSL_CACHEMODE_WRITEBACK << KGSL_CACHEMODE_SHIFT));
