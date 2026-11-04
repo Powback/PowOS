@@ -6,7 +6,7 @@ the window opened (System Settings' search) stayed on the desktop's consumer and
 the field raised nothing. goLive() decides the keyboard's place again.
 ---
 diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
-index d5b6142..c4fd226 100644
+index d5b6142..f8c02a2 100644
 --- a/src/backends/anland/anland_window_task.cpp
 +++ b/src/backends/anland/anland_window_task.cpp
 @@ -433,6 +433,12 @@ void AnlandWindowTask::goLive()
@@ -22,3 +22,14 @@ index d5b6142..c4fd226 100644
  
      if (!m_window) {
          return;
+@@ -1255,7 +1261,9 @@ void AnlandWindowTasks::announce()
+ {
+     // What this KWin understands beyond "closed"/"focus": the app only sends it then (an older KWin, buffers of the
+     // task's size as before).
+-    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize nodecor quit window-ime fullscreen-request parent moveresize ownframe")});
++    // keyboard-live (kwin 0054): a keyboard asked for before a task went live moves to its consumer, so the app may
++    // hold an ask no touch came before (TapKeyboard) - an older KWin never re-sends it and a tap would raise nothing.
++    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize nodecor quit window-ime fullscreen-request parent moveresize ownframe keyboard-live")});
+     // Which KWin this is and the tasks it shows now (window ids restart at 1 with each KWin): the app finishes every
+     // window task of an earlier KWin, or one this KWin no longer has, instead of showing a new window in it (after a
+     // session restart, Kate's launcher tap raised the old session's dead Kate task).

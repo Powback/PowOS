@@ -65,7 +65,7 @@
 #               flicker); an asked full screen waits for the app's size (no bounce); X11 windows offered by WM_CLASS
 #   0053        ours: no GPU (llvmpipe: EGL can't import gralloc buffers, EGL_BAD_ACCESS) - the desktop and window tasks
 #               render offscreen and each frame is copied into the mapped consumer buffer (glReadPixels); GPU path unchanged
-#   0054        ours: a keyboard already up moves to a window task's own consumer when the task goes live (its "ime" came
+#   0054        ours (3.63): a keyboard already up moves to a window task's own consumer when the task goes live (its "ime" came
 #               first: System Settings' search asked as it opened, the keyboard stayed on the desktop's consumer)
 #
 # HACK: same pkgname as Arch's kwin with pkgrel 3.1 (makepkg allows only integer[.integer]; ".1" = ours), so every Plasma package's
@@ -76,7 +76,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.62
+pkgrel=3.63
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'

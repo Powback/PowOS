@@ -240,7 +240,7 @@ hour; it is the task's next step.
   on the desktop, show on the window's, so TapKeyboard holds it for the tap) - kwin rebuild + base republish.
 - Seen once after `pm clear`: LinuxService ForegroundServiceDidNotStartInTimeException (main thread busy at the
   first download tap; the app restarted and the second tap worked).
-- **Fixed (kwin 6.7.5-3.62, patch 0054 + TapKeyboard)**: goLive() places the keyboard again, so the request made as the
+- **Fixed (kwin 6.7.5-3.62, patch 0054 + TapKeyboard; 3.63 adds cap "keyboard-live", and the app holds asks only when KWin advertises it, so an older KWin keeps the old keyboard)**: goLive() places the keyboard again, so the request made as the
   window opened moves to the window's own consumer ("Android keyboard shown - task live on window task 1"). The app
   holds it ("no touch behind it: held for the user's tap"), and a tap on the search field raises it ("raised by the
   user's tap"), and typed text lands in the field. Emulator, root=0, kwin 3.62's files put into the installed image by

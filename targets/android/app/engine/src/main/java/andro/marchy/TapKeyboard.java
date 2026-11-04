@@ -13,6 +13,10 @@ package andro.marchy;
  * window that leaves the focus there raises the keyboard too. Real fix: KWin sends the field's text-input cursor
  * rectangle with the ask (kwin anland backend) and only a tap inside it counts. docs/REMOTE-POWOS.md S4.
  *
+ * Only with a KWin that moves a keyboard asked for before the window went live to its consumer (cap "keyboard-live",
+ * kwin 0054): an older one never asks again, so holding its ask would leave a tap raising nothing - there every ask
+ * raises the keyboard at once, as before.
+ *
  * Plain state, no Android: WebWindowSource keeps one per window consumer, on the main thread.
  */
 public final class TapKeyboard {
@@ -23,6 +27,8 @@ public final class TapKeyboard {
     /** ... and this close to it (window px). */
     public static final float TAP_SLOP = 32f;
 
+    /** KWin has "keyboard-live": asks are held for a tap. Without it, the old behaviour (every ask raises it). */
+    private final boolean gate;
     private long downAt = Long.MIN_VALUE / 2;
     private float downX, downY;
     private boolean pending;
@@ -30,7 +36,13 @@ public final class TapKeyboard {
     private boolean asked;
 
     /** KWin asked for the keyboard at [now] (uptime ms): true = raise it now; false = held for the next tap. */
+    public TapKeyboard(boolean gate) {
+        this.gate = gate;
+    }
+
     public boolean show(long now) {
+        if (!gate)
+            return true;
         asked = true;
         if (now - downAt <= TOUCH_ASK_MS) {
             pending = false;
@@ -54,6 +66,8 @@ public final class TapKeyboard {
 
     /** The touch ended: true when it was a tap and KWin's ask stands - raise the keyboard (unless a hide comes first). */
     public boolean up(long now, float x, float y) {
+        if (!gate)
+            return false;
         boolean tap = now - downAt <= TAP_MS && Math.abs(x - downX) <= TAP_SLOP && Math.abs(y - downY) <= TAP_SLOP;
         if (tap && asked)
             pending = true;

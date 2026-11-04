@@ -312,7 +312,7 @@ public final class WebWindowSource {
     private static final long TAP_RAISE_DELAY_MS = 250;
 
     private static TapKeyboard tapsOf(long handle) {
-        return taps.computeIfAbsent(handle, h -> new TapKeyboard());
+        return taps.computeIfAbsent(handle, h -> new TapKeyboard(WindowTasks.kwinCan("keyboard-live")));
     }
 
     /** Main thread: [nativeKeyboard]'s show or hide. */
