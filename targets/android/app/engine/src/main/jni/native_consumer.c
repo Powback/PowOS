@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include <android/log.h>
+#include <android/hardware_buffer.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
 #include <errno.h>
@@ -11,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/eventfd.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -71,6 +73,11 @@ struct consumer_state {
     int dmabuf_fds[MAX_COLLECT_BUFS];
     struct buf_info dmabuf_infos[MAX_COLLECT_BUFS];
     ANativeWindowBuffer *buf_anb[MAX_COLLECT_BUFS];
+    /* PowOS: CPU shadows (GPU-less device whose window buffers can't be mapped - the emulator's host-memory gralloc):
+     * the producer gets a memfd per buffer instead, draws into it with the CPU (KWin patch 0053), and each frame is
+     * copied into the window's buffer here before it is queued. NULL: the producer has the buffer itself. */
+    uint8_t *shadow[MAX_COLLECT_BUFS];
+    size_t shadow_len[MAX_COLLECT_BUFS];
 
     int screen_w;
     int screen_h;
@@ -140,6 +147,77 @@ static bool motion_has_last = false;
 static float motion_last_x = 0.0f;
 static float motion_last_y = 0.0f;
 
+/* PowOS: no GPU for the producer (KWin falls back to llvmpipe without /dev/kgsl-3d0, targets/android/session/Hyprland),
+ * so it can't import a window buffer and must write it with the CPU (KWin patch 0053). */
+static bool producer_gpu_less(void)
+{
+    return access("/dev/kgsl-3d0", F_OK) != 0;
+}
+
+/* The buffer can be mapped for CPU writes (a dma-buf heap's can; the emulator's ranchu buffers can't). */
+static bool buffer_mappable(int fd, int stride_px, int height)
+{
+    size_t len = (size_t)(stride_px > 0 ? stride_px : 1) * 4 * (size_t)height;
+    void *p = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (p == MAP_FAILED)
+        return false;
+    munmap(p, len);
+    return true;
+}
+
+/* A memfd of a buffer's size (tight rows) the producer draws into instead; mapped here for the copy. -1 on failure. */
+static int make_shadow(struct consumer_state *s, int i, int width, int height)
+{
+    size_t len = (size_t)width * 4 * (size_t)height;
+    int fd = memfd_create("powos-cpu-shadow", MFD_CLOEXEC);
+    if (fd < 0)
+        return -1;
+    void *p = MAP_FAILED;
+    if (ftruncate(fd, (off_t)len) == 0)
+        p = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (p == MAP_FAILED) {
+        close(fd);
+        return -1;
+    }
+    s->shadow[i] = p;
+    s->shadow_len[i] = len;
+    return fd;
+}
+
+static void free_shadow(struct consumer_state *s, int i)
+{
+    if (s->shadow[i])
+        munmap(s->shadow[i], s->shadow_len[i]);
+    s->shadow[i] = NULL;
+    s->shadow_len[i] = 0;
+}
+
+/* The producer's frame from buffer [idx]'s shadow into the dequeued window buffer. Returns the release fence of the
+ * CPU write (-1: done) for queueBuffer, or -2 when it couldn't be written. */
+static int copy_shadow(struct consumer_state *s, int idx, ANativeWindowBuffer *anb)
+{
+    AHardwareBuffer *ahb = api.getHardwareBuffer ? api.getHardwareBuffer(anb) : NULL;
+    if (!ahb)
+        return -2;
+    AHardwareBuffer_Desc desc;
+    AHardwareBuffer_describe(ahb, &desc);
+    void *dst = NULL;
+    if (AHardwareBuffer_lock(ahb, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, NULL, &dst) != 0 || !dst)
+        return -2;
+    const struct buf_info *bi = &s->dmabuf_infos[idx];
+    size_t row = (size_t)bi->width * 4;
+    uint32_t rows = bi->height < desc.height ? bi->height : desc.height;
+    if (desc.stride == bi->width) {
+        memcpy(dst, s->shadow[idx], row * rows);
+    } else {
+        for (uint32_t y = 0; y < rows; y++)
+            memcpy((uint8_t *)dst + (size_t)y * desc.stride * 4, s->shadow[idx] + y * row, row);
+    }
+    int fence = -1;
+    AHardwareBuffer_unlock(ahb, &fence);
+    return fence;
+}
+
 static int collect_dmabufs(struct consumer_state *s)
 {
     ANativeWindow *win = s->window;
@@ -184,9 +262,15 @@ static int collect_dmabufs(struct consumer_state *s)
         if (dup_found)
             continue;
 
-        int dup_fd = dup(fd);
+        /* PowOS: a GPU-less producer that can't map this buffer either draws into a CPU shadow (make_shadow). */
+        bool shadowed = producer_gpu_less() && api.getHardwareBuffer && !buffer_mappable(fd, stride, height);
+        int dup_fd = shadowed ? make_shadow(s, found, width, height) : dup(fd);
         if (dup_fd < 0)
             continue;
+        if (shadowed) {
+            stride = width;
+            LOGI("  buf[%d]: not mappable, the producer draws into a CPU shadow", found);
+        }
 
         s->buf_anb[found] = anb;
         s->dmabuf_fds[found] = dup_fd;
@@ -206,6 +290,7 @@ static int collect_dmabufs(struct consumer_state *s)
         for (int i = 0; i < found; i++) {
             close(s->dmabuf_fds[i]);
             s->dmabuf_fds[i] = -1;
+            free_shadow(s, i);
         }
         return -1;
     }
@@ -222,6 +307,7 @@ static void cleanup_dmabufs(struct consumer_state *s)
             close(s->dmabuf_fds[i]);
             s->dmabuf_fds[i] = -1;
         }
+        free_shadow(s, i);
     }
     s->buf_count = 0;
 }
@@ -684,6 +770,9 @@ static int do_connect(struct consumer_state *s)
         int bh = (kind & 1) ? s->screen_w : s->screen_h;
         ANativeWindow_setBuffersGeometry(win, bw, bh, AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM);
         ANativeWindow_setBuffersTransform(win, anw_transform_for_kind(kind));
+        /* PowOS: a GPU-less producer may need CPU shadows (collect_dmabufs): buffers this side can lock for writing. */
+        if (producer_gpu_less() && api.setUsage)
+            api.setUsage(win, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN | AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN);
 
         api.setBufferCount(win, total);
 
@@ -973,6 +1062,21 @@ static void *render_thread_func(void *arg)
             continue;
         }
         s->mismatch_reconnects = 0;
+
+        if (s->shadow[idx]) {
+            /* PowOS: the producer drew into the CPU shadow (synchronously: rfence -1); into the window's buffer now. */
+            if (rfence >= 0) {
+                struct pollfd rp = { .fd = rfence, .events = POLLIN };
+                poll(&rp, 1, 1000);
+                close(rfence);
+            }
+            rfence = copy_shadow(s, idx, anb);
+            if (rfence == -2) {
+                api.cancelBuffer(s->window, anb, -1);
+                note_undrawn(s, "the CPU shadow couldn't be copied in");
+                continue;
+            }
+        }
 
         apply_crop(s);
         api.queueBuffer(s->window, anb, rfence);

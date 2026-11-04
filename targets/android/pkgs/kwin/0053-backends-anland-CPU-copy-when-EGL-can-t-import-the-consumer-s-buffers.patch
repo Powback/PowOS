@@ -16,7 +16,7 @@ docs/research/nonroot-parity.md (Linux windows blank on GPU-less devices) has th
 buffers the consumer copies in) for a gralloc whose buffers can't be mapped.
 ---
 diff --git a/src/backends/anland/anland_egl_backend.cpp b/src/backends/anland/anland_egl_backend.cpp
-index 9dd6437..093635e 100644
+index 9dd6437..5fc77a3 100644
 --- a/src/backends/anland/anland_egl_backend.cpp
 +++ b/src/backends/anland/anland_egl_backend.cpp
 @@ -18,7 +18,12 @@
@@ -92,7 +92,7 @@ index 9dd6437..093635e 100644
      }
      texture->setContentTransform(contentTransform);
      auto fbo = std::make_unique<GLFramebuffer>(texture.get());
-@@ -312,6 +338,89 @@ AnlandEglBackend::ImportedBuffer AnlandEglBackend::importConsumerBuffer(display_
+@@ -312,6 +338,99 @@ AnlandEglBackend::ImportedBuffer AnlandEglBackend::importConsumerBuffer(display_
      return ImportedBuffer{.texture = std::move(texture), .fbo = std::move(fbo), .size = size};
  }
  
@@ -106,11 +106,21 @@ index 9dd6437..093635e 100644
 +AnlandEglBackend::ImportedBuffer AnlandEglBackend::importForCpuCopy(int fd, int index, const buf_info &info, OutputTransform contentTransform)
 +{
 +    const QSize size(info.width, info.height);
-+    if (size.isEmpty() || info.stride < uint64_t(size.width()) * 4 || info.stride % 4 != 0) {
++    // The emulator's gralloc (ranchu) reports no stride (ANativeWindowBuffer.stride 0): its CPU buffers are tightly
++    // packed rows.
++    const uint32_t stride = info.stride ? info.stride : uint32_t(size.width()) * 4;
++    if (size.isEmpty() || stride < uint64_t(size.width()) * 4 || stride % 4 != 0) {
++        qCWarning(KWIN_ANLAND) << "buffer" << index << "can't be copied to: size" << size << "stride" << info.stride;
 +        return {};
 +    }
 +    auto cpu = std::make_shared<AnlandCpuMapping>();
-+    cpu->length = size_t(info.offset) + size_t(info.stride) * size_t(size.height());
++    cpu->length = size_t(info.offset) + size_t(stride) * size_t(size.height());
++    // A buffer smaller than its rows (a wrong stride guess) would fault on the copy: refuse it.
++    const off_t fdSize = lseek(fd, 0, SEEK_END);
++    if (fdSize > 0 && size_t(fdSize) < cpu->length) {
++        qCWarning(KWIN_ANLAND) << "buffer" << index << "is" << fdSize << "bytes, its rows need" << cpu->length;
++        return {};
++    }
 +    void *mapped = mmap(nullptr, cpu->length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 +    if (mapped == MAP_FAILED) {
 +        // The next fallback (docs/research/nonroot-parity.md): memfd buffers the consumer copies in.
@@ -120,7 +130,7 @@ index 9dd6437..093635e 100644
 +    cpu->base = static_cast<uint8_t *>(mapped);
 +    cpu->fd = FileDescriptor(dup(fd));
 +    cpu->offset = info.offset;
-+    cpu->stride = info.stride;
++    cpu->stride = stride;
 +    cpu->drmFormat = protocol_format_to_drm(info.format);
 +    cpu->size = size;
 +
@@ -142,7 +152,7 @@ index 9dd6437..093635e 100644
 +        logged = true;
 +        qCInfo(KWIN_ANLAND) << "consumer buffers: CPU copy (no EGL dma-buf import)";
 +    }
-+    qCInfo(KWIN_ANLAND) << "mapped buffer" << index << "fd" << fd << size << "stride" << info.stride << "offset"
++    qCInfo(KWIN_ANLAND) << "mapped buffer" << index << "fd" << fd << size << "stride" << stride << "offset"
 +                        << info.offset << "fmt" << Qt::hex << cpu->drmFormat << "for a CPU copy";
 +    return ImportedBuffer{.texture = std::move(texture), .fbo = std::move(fbo), .size = size, .cpu = std::move(cpu)};
 +}
