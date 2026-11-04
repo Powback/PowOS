@@ -271,3 +271,11 @@ hour; it is the task's next step.
   covers home outside desktop mode (WindowTasks.desktopCoversHome; same path rooted). MainActivity in front ->
   apps.launch l:systemsettings: "home to the front", "desktop 0", web window 1 shown 89 ms after open, keyboard "held for
   the user's tap", the tap on its search "raised by the user's tap", `wifi` lands (~/pw/nonroot-desktop-front-shots/03-05).
+- **11-04 nonroot-base-signin**: base + packs rebuilt with the AI sign-in in the image (`lib/ai/manager/manager.sh`
+  --auth/--signin, exit 4 without a login; kwin 6.7.5-3.63, Plasma 6.7.5, KWin/Plasma check passed), published and
+  re-pinned (6ed9d044); Oct-13 rootfs linked back as out/powos-rootfs.tar.gz again (new full rootfs kept as
+  out/powos-rootfs-1104-signin-full.tar.gz). Emulator (pm clear, persist.powos.root=0): base 995 MB downloads, AI page
+  shows Sign in to Claude; its terminal ran `claude auth login` ("Opening browser...") but no browser came up: OpenSpool
+  (files/run/open, powos-android-open's spool) was started only when rooted. Fixed (07df518a, App.kt): started in every
+  main process. Then Chrome opens claude.ai/login ("Sign in - Claude"), shots ~/pw/nonroot-base-signin-shots/08-11.
+  Account entry is the user's (not done by agents).
