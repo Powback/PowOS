@@ -81,7 +81,7 @@ if [ "${#ARGS[@]}" -eq 0 ]; then
   NEED_DOCKER=true
 else
   for a in "${ARGS[@]}"; do
-    case "$a" in *complexity* | *loopback*) NEED_DOCKER=true ;; esac
+    case "$a" in *complexity* | *loopback* | *publish-repo*) NEED_DOCKER=true ;; esac
   done
 fi
 case "${TIER1_DOCKER:-}" in 1) NEED_DOCKER=true ;; 0) NEED_DOCKER=false ;; esac
