@@ -71,6 +71,13 @@ _manager_ensure_claude() {
     return 1
 }
 
+# Its CLI (installed on first use), the AI config and the manager persona.
+_manager_load() {
+    _manager_ensure_claude || return 1
+    _ai_ensure_config
+    _ai_load_agent manager
+}
+
 # powos ai manager [--safe] [--no-sandbox]  — start / resume the persistent manager session (--help: its flags).
 manager_run() {
     command -v python3 &>/dev/null || { echo "manager needs python3" >&2; return 1; }
@@ -101,7 +108,6 @@ manager_run() {
     fi
 
     _manager_use_own_cli
-    _manager_ensure_claude || return 1
 
     # Load the manager persona. _ai_load_agent expands the !cmd lines, so the
     # system prompt carries the CURRENT `powos help` / `powos comms help`.
@@ -111,8 +117,7 @@ manager_run() {
     # The AI config, the Anthropic endpoint included (/etc/powos/ai/endpoint.conf: the fleet's auth authority), so the
     # manager's claude uses it wherever it's started - not only from a session whose environment.d already has it
     # (a phone's PowOS session doesn't).
-    _ai_ensure_config
-    _ai_load_agent manager || return 1
+    _manager_load || return 1
 
     local mcp_file spf rc=0
     mcp_file="$(mktemp "${TMPDIR:-/tmp}/powos-manager-mcp.XXXXXX")"
