@@ -22,6 +22,9 @@ set)
     # (docs/research/broforce-black-columns.md, 'Coherency override').
     noncoherent) nc=1 ;;
     sysmem) tu=sysmem ;; flushall) tu=flushall ;; nolrz) tu=nolrz ;;
+    # ubwc: steam-env's TU_DEBUG=noubwc (the dash fix, 2026-11-04) back off - any TU_DEBUG value replaces it; startup
+    # only logs. syncdraw / gmem / 3dload: which UBWC path dashes (flushall does NOT fix it: not a missing flush).
+    ubwc) tu=startup ;; syncdraw) tu=syncdraw ;; gmem) tu=gmem ;; 3dload) tu=3d_load ;;
     nomsaa) conf='d3d11.disableMsaa = True' ;; zeromem) conf='dxvk.zeroMappedMemory = True' ;;
     zerowg) conf='d3d11.zeroInitWorkgroupMemory = True' ;; relaxed) conf='d3d11.relaxedBarriers = True' ;;
     *) echo "unknown variant $2"; exit 2 ;;

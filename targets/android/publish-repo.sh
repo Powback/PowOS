@@ -20,6 +20,9 @@ if [ "${1:-}" = --remove ]; then
 fi
 STORE=${1:-$HOME/Projects/android-app-dev/output}
 PKGS=$(cd "${PUBLISH_PKGS:-$HERE/out/pkgs}" && pwd)
+# Colima shares only $HOME with Docker: a PUBLISH_PKGS under /tmp mounts as an empty dir and published nothing,
+# silently ("repo: N packages", 2026-11-04).
+case $PKGS/ in "$HOME"/*) ;; *) echo "publish-repo: $PKGS is outside $HOME - Docker (Colima) can't see it; use a dir under $HOME" >&2; exit 2 ;; esac
 REPO=$STORE/repo
 mkdir -p "$REPO"
 docker run --rm --platform linux/arm64 -v "$PKGS:/pkgs:ro" -v "$HERE/tools/repo-merge.sh:/repo-merge.sh:ro" \
