@@ -217,6 +217,7 @@ public final class WebWindowSource {
         boolean bound;
         synchronized (IME_LOCK) {
             liveHandles.remove(handle);
+            taps.remove(handle);
             bound = imeHandle == handle;
             if (bound)
                 imeHandle = 0;
@@ -304,21 +305,45 @@ public final class WebWindowSource {
         a.runOnUiThread(() -> keyboard(a, handle, visible));
     }
 
+    /** Each window consumer's keyboard asks vs the user's touches ([TapKeyboard]): main thread. */
+    private static final java.util.Map<Long, TapKeyboard> taps = new ConcurrentHashMap<>();
+    private static final android.os.Handler MAIN = new android.os.Handler(android.os.Looper.getMainLooper());
+    /** A held ask's tap raises the keyboard this long after the up, unless KWin's hide (the tap moved the focus) came. */
+    private static final long TAP_RAISE_DELAY_MS = 250;
+
+    private static TapKeyboard tapsOf(long handle) {
+        return taps.computeIfAbsent(handle, h -> new TapKeyboard());
+    }
+
     /** Main thread: [nativeKeyboard]'s show or hide. */
     private static void keyboard(Activity a, long handle, boolean visible) {
-        if (visible) {
-            SystemIME i = imeFor(a);
-            if (i == null)
-                return;
-            synchronized (IME_LOCK) {
-                if (!liveHandles.contains(handle))
-                    return;
-                imeHandle = handle;
-            }
-            Log.i(TAG, "keyboard up for a web window (its consumer types)");
-            i.showKeyboard();
-            return;
+        TapKeyboard t = tapsOf(handle);
+        if (!visible) {
+            t.hide();
+            lower(handle);
+        } else if (t.show(android.os.SystemClock.uptimeMillis())) {
+            raise(a, handle);
+        } else {
+            Log.i(TAG, "keyboard asked for a web window with no touch behind it: held for the user's tap");
         }
+    }
+
+    /** Main thread: the keyboard up, typing into window consumer [handle]. */
+    private static void raise(Activity a, long handle) {
+        SystemIME i = imeFor(a);
+        if (i == null)
+            return;
+        synchronized (IME_LOCK) {
+            if (!liveHandles.contains(handle))
+                return;
+            imeHandle = handle;
+        }
+        Log.i(TAG, "keyboard up for a web window (its consumer types)");
+        i.showKeyboard();
+    }
+
+    /** Main thread: the keyboard down if it types into [handle]. */
+    private static void lower(long handle) {
         boolean bound;
         synchronized (IME_LOCK) {
             bound = imeHandle == handle;
@@ -435,5 +460,25 @@ public final class WebWindowSource {
             Native.nativeSendWindowTouch(handle, action, (e.getX(i) + dx) / scale, (e.getY(i) + dy) / scale, id);
         }
         Native.nativeSendWindowTouchFrame(handle);
+        userTouch(handle, masked, e);
+    }
+
+    /** The user's touch on window [handle]: what lets KWin's keyboard ask raise the keyboard ([TapKeyboard]). */
+    private static void userTouch(long handle, int masked, MotionEvent e) {
+        TapKeyboard t = tapsOf(handle);
+        long now = e.getEventTime();
+        if (masked == MotionEvent.ACTION_DOWN) {
+            t.down(now, e.getX(), e.getY());
+        } else if (masked == MotionEvent.ACTION_UP && t.up(now, e.getX(), e.getY())) {
+            MAIN.postDelayed(() -> {
+                WeakReference<Activity> ref = imeHome;
+                Activity a = ref == null ? null : ref.get();
+                if (a == null || !t.held() || taps.get(handle) != t)
+                    return;
+                t.shown();
+                Log.i(TAG, "keyboard ask held for a web window: raised by the user's tap");
+                raise(a, handle);
+            }, TAP_RAISE_DELAY_MS);
+        }
     }
 }

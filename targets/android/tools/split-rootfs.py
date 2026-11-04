@@ -144,7 +144,10 @@ def plan_text(by_pkg, totals):
 class Out:
     def __init__(self, path):
         self.path, self.unpacked, self.files = path, 0, 0
-        self.f = open(path, 'wb')
+        # Written beside and renamed over (as rootfs-in-container.sh): out/ files are hard links (the published copy
+        # in android-app-dev/output, other worktrees' out/), and writing one in place would change every link mid-build.
+        self.tmp = os.path.join(os.path.dirname(path), '.' + os.path.basename(path) + '.new')
+        self.f = open(self.tmp, 'wb')
         self.gz = subprocess.Popen(['gzip', '-6'], stdin=subprocess.PIPE, stdout=self.f)
         self.tar = tarfile.open(fileobj=self.gz.stdin, mode='w|', format=tarfile.GNU_FORMAT)
 
@@ -160,11 +163,13 @@ class Out:
             sys.exit(f'gzip failed for {self.path}')
         self.f.close()
         h = hashlib.sha256()
-        with open(self.path, 'rb') as f:
+        with open(self.tmp, 'rb') as f:
             for b in iter(lambda: f.read(1 << 20), b''):
                 h.update(b)
-        with open(self.path + '.sha256', 'w') as f:
+        with open(self.tmp + '.sha256', 'w') as f:
             f.write(f'{h.hexdigest()}  {os.path.basename(self.path)}\n')
+        os.replace(self.tmp, self.path)
+        os.replace(self.tmp + '.sha256', self.path + '.sha256')
         return os.path.getsize(self.path)
 
 
