@@ -22,7 +22,9 @@
 # com.oplus.battery's ThermalController gear - skin temperature -> a cpu level from
 # /odm/etc/temperature_profile/sys_thermal_control_config*.xml; measured 11-03: gear 3-8 at 35-39 C put
 # 1.79-2.05 / 1.59-1.71 GHz on gold/prime) owns that policy's max: the boost never raises it (it did, every second,
-# and horae wrote its cap back - the "set back by someone else" fights), only holds the min up to its cap.
+# and horae wrote its cap back - the "set back by someone else" fights), only holds the min up to its cap. While it
+# holds under such a controller the vendor classes the front app as a game (vendor_game_class), so the controller's
+# own game table applies; normal PowOS use stays on its default table.
 #
 # A crash-safe lease: the app touches <lease file> every second while the game is in front; the holder restores
 # everything when it is older than LEASE_S (the app died, froze or was killed), when the game's processes are gone, or
@@ -34,6 +36,10 @@ P=${GAME_BOOST_CPUFREQ:-/sys/devices/system/cpu/cpufreq}
 LEASE_S=${LEASE_S:-4}
 BOOST_MIN_PCT=${BOOST_MIN_PCT:-80}
 BOOST_UCLAMP=${BOOST_UCLAMP:-75}
+SETTINGS=${GAME_BOOST_SETTINGS:-settings}
+# The vendor's game class (Settings.Global; GameBoost.VENDOR_GAME_KEY, read by targets/android/oplus-hook): the boosted
+# game's app id while the boost holds under a vendor thermal controller, deleted on every restore.
+VENDOR_GAME_KEY=powos_game_front
 mkdir -p "$S"
 
 log() {
@@ -114,6 +120,22 @@ thermal_owner() {
   done
 }
 
+# HACK: the vendor's thermal table is picked per front Android package and the PowOS app is "common_config" (appType -1,
+# caps from gear 3), while a game (appType 4 -> category_4 of sys_thermal_control_config*.xml) keeps full clocks to gear
+# 5. com.oplus.battery's appType comes from DeepThinker, else OifaceManager.getInstalledGameList(), and a positive
+# answer is cached until the package is uninstalled - so registering com.powos.app as a game (Game Space / oiface)
+# would keep every later PowOS use on the game table. Instead this marks the game in front in Settings.Global and the
+# PowOS Vector module (oplus-hook, scope com.oplus.battery) answers appType 4 for com.powos.app only while it is set.
+# Real fix: a vendor API that classes a running game per window/process (or the Linux game as its own Android task
+# whose package the vendor knows as a game), then drop the marker and the hook.
+vendor_game_class() {
+  if [ -n "$1" ]; then
+    $SETTINGS put global $VENDOR_GAME_KEY "$1" > /dev/null 2>&1 && date +%s > "$S/vendor_game" && log "vendor game class on: $1"
+  elif [ -n "$($SETTINGS get global $VENDOR_GAME_KEY 2>/dev/null | grep -v '^null$')" ]; then
+    $SETTINGS delete global $VENDOR_GAME_KEY > /dev/null 2>&1; log "vendor game class off"
+  fi
+}
+
 freqs_save() {
   [ -s "$S/freqs" ] && return   # a killed holder's: those are the originals, not what it set
   for p in $BOOSTED; do echo "$p $(cat $P/$p/scaling_min_freq) $(cat $P/$p/scaling_max_freq)"; done > "$S/freqs"
@@ -167,7 +189,8 @@ restore_all() {
   # Anything that joined the group without a row (a thread the game made since: it inherits the group) to the root.
   [ -f $CG/tasks ] && for t in $(cat $CG/tasks); do echo $t > $CPUCTL/tasks 2>/dev/null; done
   rmdir $CG 2>/dev/null
-  rm -f "$S/freqs" "$S/tids" "$S/ticks" "$S/main" "$S/app" "$S/holder.pid" "$S/thermal"
+  vendor_game_class ""
+  rm -f "$S/vendor_game" "$S/freqs" "$S/tids" "$S/ticks" "$S/main" "$S/app" "$S/holder.pid" "$S/thermal"
 }
 
 hold() {
@@ -177,6 +200,7 @@ hold() {
   topology || { log "$APP: no cpufreq policies"; restore_all; exit 1; }
   freqs_save
   THERMAL=$(thermal_owner); echo "$THERMAL" > "$S/thermal"
+  [ -n "$THERMAL" ] && vendor_game_class "$APP"
   mkdir -p $CG && echo $BOOST_UCLAMP > $CG/cpu.uclamp.min 2>/dev/null
   log "$APP: boost (policies $(echo $BOOSTED | tr '\n' ' '), prime cpu$PRIME, rest mask ${REST_MASK:-none}, uclamp.min $(cat $CG/cpu.uclamp.min 2>/dev/null), thermal controller ${THERMAL:-none})"
   LIFTED=0 FIGHTS=0 i=0 seen=0 why=
@@ -242,6 +266,7 @@ case "$1" in
     alive "$h" && echo "holder $h app $(cat "$S/app" 2>/dev/null) main $(cat "$S/main" 2>/dev/null) threads $({ wc -l < "$S/tids"; } 2>/dev/null)" || echo "holder none"
     for p in $P/policy*; do echo "policy ${p##*/} min $(cat $p/scaling_min_freq) max $(cat $p/scaling_max_freq) hw $(cat $p/cpuinfo_max_freq) cur $(cat $p/scaling_cur_freq)"; done
     [ -s "$S/thermal" ] && echo "thermal $(cat "$S/thermal")"
+    echo "vendor_game $($SETTINGS get global $VENDOR_GAME_KEY 2>/dev/null) since $(cat "$S/vendor_game" 2>/dev/null || echo -)"
     echo "uclamp.min $(cat $CG/cpu.uclamp.min 2>/dev/null || echo none) tasks $({ wc -l < $CG/tasks; } 2>/dev/null || echo 0)"
     [ -s "$S/freqs" ] && echo "saved $(tr '\n' ';' < "$S/freqs")"
     tail -n 5 "$S/log" 2>/dev/null ;;

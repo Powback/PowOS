@@ -25,11 +25,20 @@ public class Hook implements IXposedHookLoadPackage {
     private static final String TAG = "PowOS-oplushook";
     private static final String LAUNCHER = "com.android.launcher";
     private static final String SYSTEMUI = "com.android.systemui";
+    private static final String BATTERY = "com.oplus.battery";
+    /** Settings.Global key game-boost.sh sets to the boosted game's app id (GameBoost.VENDOR_GAME_KEY). */
+    static final String VENDOR_GAME_KEY = "powos_game_front";
+    /** com.oplus.battery's appType for a game (StateManager: an OifaceManager game -> 4; category_4 of its table). */
+    static final int APP_TYPE_GAME = 4;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (SYSTEMUI.equals(lp.packageName)) {
             desktopWindowItemWhenLoaded(lp.classLoader);
+            return;
+        }
+        if (BATTERY.equals(lp.packageName)) {
+            gameClassWhileBoosted(lp.classLoader);
             return;
         }
         if (!LAUNCHER.equals(lp.packageName))
@@ -711,6 +720,69 @@ public class Hook implements IXposedHookLoadPackage {
             }
         };
         XposedHelpers.callMethod(XposedHelpers.getObjectField(coordinator, "mMainExecutor"), "execute", relayout);
+    }
+
+    /**
+     * The vendor's thermal table for a PowOS game (scope com.oplus.battery). OxygenOS' skin-temperature controller
+     * (com.oplus.battery's ThermalControllHandler, applied by horae) picks its table by the front package's appType:
+     * com.powos.app is -1, "common_config", which caps the big cores from gear 3 (35 C); a game is 4, category_4, full
+     * clocks to gear 5. While game-boost.sh holds a boost it sets Settings.Global powos_game_front; only then, and only
+     * for com.powos.app, the appType lookup answers 4. Home and every other app keep the vendor's own answer.
+     *
+     * HACK: the lookup is ThermalControlUtils' one (String)int method (obfuscated "G": the app_type config, else
+     * StateManager -> DeepThinker / OifaceManager's game list); found by that signature, so a rename only logs. It is
+     * not done through the game list itself because StateManager caches a positive appType until the package is
+     * uninstalled - every later PowOS use would stay on the game table. The table switches on the controller's next
+     * evaluation (a temperature gear change or a front app change). Real fix: a vendor API that classes a running
+     * game per window/process, then drop this hook and game-boost.sh's marker.
+     */
+    private static void gameClassWhileBoosted(ClassLoader cl) {
+        try {
+            Class<?> utils = XposedHelpers.findClass("com.oplus.thermalcontrol.ThermalControlUtils", cl);
+            java.lang.reflect.Method lookup = null;
+            for (java.lang.reflect.Method m : utils.getDeclaredMethods()) {
+                Class<?>[] p = m.getParameterTypes();
+                if (m.getReturnType() == int.class && p.length == 1 && p[0] == String.class) {
+                    if (lookup != null) {
+                        XposedBridge.log(TAG + ": gameClass: two (String)int methods in ThermalControlUtils, not hooked");
+                        return;
+                    }
+                    lookup = m;
+                }
+            }
+            if (lookup == null) {
+                XposedBridge.log(TAG + ": gameClass: no (String)int method in ThermalControlUtils");
+                return;
+            }
+            XposedBridge.hookMethod(lookup, new XC_MethodHook() {
+                private String last = "";
+
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    try {
+                        if (!POWOS.equals(param.args[0]) || !(param.getResult() instanceof Integer))
+                            return;
+                        android.app.Application app = android.app.AndroidAppHelper.currentApplication();
+                        String game = app == null ? null
+                            : android.provider.Settings.Global.getString(app.getContentResolver(), VENDOR_GAME_KEY);
+                        boolean on = game != null && !game.isEmpty() && (Integer) param.getResult() <= 0;
+                        if (on)
+                            param.setResult(APP_TYPE_GAME);
+                        String now = on ? game : "";
+                        if (!now.equals(last)) {
+                            last = now;
+                            XposedBridge.log(TAG + ": gameClass: " + POWOS + " appType "
+                                + (on ? APP_TYPE_GAME + " (" + game + " boosted)" : "the vendor's"));
+                        }
+                    } catch (Throwable t) {
+                        log("gameClass", t);
+                    }
+                }
+            });
+            XposedBridge.log(TAG + ": gameClass: hooked " + lookup.getName());
+        } catch (Throwable t) {
+            log("gameClass", t);
+        }
     }
 
     private static void log(String what, Throwable t) {

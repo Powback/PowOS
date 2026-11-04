@@ -68,6 +68,13 @@ floating window over PowOS's home (no RecentsActivity left behind), and Split Vi
    change does (`StageCoordinator.onTaskInfoChanged`). Double tap still swaps, drag still resizes; the default stays the
    framework overlay's side by side unfolded.
 
+8. **A boosted game gets the vendor's game thermal table** (scope `com.oplus.battery`). OxygenOS' skin-temperature
+   controller (`ThermalControllHandler`, applied to cpufreq by `horae`) picks its table by the front package's appType;
+   `com.powos.app` is -1 (`common_config`: big cores capped from gear 3), a game is 4 (`category_4`: full clocks to
+   gear 5). While `game-boost.sh` holds a boost it sets `Settings.Global powos_game_front` to the game's app id; only
+   then, and only for `com.powos.app`, `ThermalControlUtils`' appType lookup (its one `(String)int` method) answers 4.
+   Not through the vendor's game list: `StateManager` caches a positive appType until the package is uninstalled.
+
 Build: `targets/android/build-oplus-hook.sh` (android-app-dev). Install: Zygisk on in Magisk, the Vector (LSPosed
-fork, JingMatrix) Magisk module, this APK, then enable it in Vector with scopes `com.android.launcher` and `com.android.systemui` and restart the
-launcher and SystemUI (or reboot). Remove: disable the module in Vector.
+fork, JingMatrix) Magisk module, this APK, then enable it in Vector with scopes `com.android.launcher`, `com.android.systemui` and `com.oplus.battery` and restart the
+launcher, SystemUI and `com.oplus.battery` (or reboot). Remove: disable the module in Vector.

@@ -18,7 +18,8 @@ import java.io.File
  * file) is the one in front - its window task Android's top activity, or its web window in home full screen or the
  * one last pressed - assets/game-boost.sh (as root) lifts the big clusters' clocks, puts the game's threads in a
  * uclamp.min 75 % group, its hottest thread on the prime core and the rest on the other big cores; everything goes back
- * when the game leaves the front, closes, or the screen turns off. Thermal limits are never touched.
+ * when the game leaves the front, closes, or the screen turns off. Thermal limits are never touched; under the
+ * vendor's thermal controller the boost marks the game in front ([VENDOR_GAME_KEY]) so the vendor applies its game table.
  *
  * Crash-safe: once a second, while boosted, the app renews a lease file; the root holder restores on its own when the
  * lease is [LEASE_S] s old (the app died, froze or was killed) or the game's processes are gone.
@@ -29,6 +30,18 @@ object GameBoost {
 
     /** The holder restores this long after the lease's last renewal (game-boost.sh LEASE_S). */
     const val LEASE_S = 4
+
+    /**
+     * The vendor's game class: game-boost.sh sets this Settings.Global key to the boosted game's app id when it holds
+     * a boost under a vendor thermal controller (OxygenOS' horae) and deletes it on every restore (the lease going
+     * stale, the game exiting, `restore`, a killed holder's next engage/restore); the PowOS Vector module
+     * (targets/android/oplus-hook, scope com.oplus.battery) then answers appType [VENDOR_APP_TYPE_GAME] for
+     * com.powos.app, so the vendor's own game thermal table applies. Unset - home, every other use - the vendor's own.
+     */
+    const val VENDOR_GAME_KEY = "powos_game_front"
+
+    /** com.oplus.battery's appType for a game: category_4 of /odm/etc/temperature_profile/sys_thermal_control_config*.xml. */
+    const val VENDOR_APP_TYPE_GAME = 4
 
     /** What a tick does. */
     sealed class Action {
