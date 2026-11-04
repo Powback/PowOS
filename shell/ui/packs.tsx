@@ -2,7 +2,8 @@
  * The parts of PowOS a phone without root adds later (targets/android/rootfs-packs.conf; the host's Packs.java):
  * gaming, apps, dev tools, languages. Settings > Storage lists them; the library offers "add gaming" while that one
  * is missing. A tap shows its result at once (pending until the host's first progress comes), then the host's live
- * download/unpack progress (ShellScreens.kt storage()).
+ * download/unpack progress (ShellScreens.kt storage()), and "cancel" while it downloads or unpacks (Packs.cancel: what
+ * landed so far is deleted).
  */
 import { signal } from "@preact/signals";
 import { act, useScreen } from "../screens.ts";
@@ -27,10 +28,10 @@ export const PACK_INFO: Record<string, [string, string]> = {
   languages: ["languages", "translations and fonts beyond English"],
 };
 
-/** Taps waiting for the host's first answer: name -> "add" | "remove". */
-const pending = signal<Record<string, "add" | "remove">>({});
+/** Taps waiting for the host's first answer: name -> "add" | "remove" | "cancel". */
+const pending = signal<Record<string, "add" | "remove" | "cancel">>({});
 
-export function packAction(name: string, what: "add" | "remove" | "dismiss") {
+export function packAction(name: string, what: "add" | "remove" | "cancel" | "dismiss") {
   if (what !== "dismiss") pending.value = { ...pending.value, [name]: what };
   void act("storage", what, name);
 }
@@ -61,13 +62,22 @@ const JOB: { [K in NonNullable<PackJob>["phase"]]: (j: Extract<NonNullable<PackJ
   failed: (j) => status(`didn't finish: ${j.message}`, false, null, true),
 };
 
-/** Whether the host has answered the tap waiting on [p]: a job of its own, or the pack already where the tap wanted. */
-const answered = (p: Pack, wait: "add" | "remove") => (p.job != null && p.job.phase !== "failed") || (p.job == null && (wait === "add") === p.installed);
+/** Whether the host has answered the tap waiting on [p]: a job of its own, or the pack already where the tap wanted (a cancel: no job left). */
+const answered = (p: Pack, wait: "add" | "remove" | "cancel") =>
+  wait === "cancel" ? p.job == null || p.job.phase === "failed" : (p.job != null && p.job.phase !== "failed") || (p.job == null && (wait === "add") === p.installed);
+
+/** Whether [p]'s install can be cancelled now: downloading or unpacking (or the add tap still waiting for the host). */
+export const packCancellable = (p: Pack) => {
+  const wait = pending.value[p.name];
+  if (wait === "cancel") return false;
+  if (wait === "add" && !answered(p, wait)) return true;
+  return p.job?.phase === "downloading" || p.job?.phase === "installing";
+};
 
 /** The pack as the page shows it now: the tap still waiting for the host, else the host's job, else installed or not. */
 export function packStatus(p: Pack): PackStatus {
   const wait = pending.value[p.name];
-  if (wait && !answered(p, wait)) return status(wait === "add" ? "starting…" : "removing…", true);
+  if (wait && !answered(p, wait)) return status(wait === "add" ? "starting…" : wait === "cancel" ? "cancelling…" : "removing…", true);
   if (wait) {
     const { [p.name]: _, ...rest } = pending.value;
     queueMicrotask(() => (pending.value = rest));

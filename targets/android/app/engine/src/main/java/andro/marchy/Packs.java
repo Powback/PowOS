@@ -42,8 +42,14 @@ public final class Packs {
     private static final String TAG = "Packs";
     static final String URL_BASE = "http://android.pow/apk/";
     private static final ConcurrentHashMap<String, String> states = new ConcurrentHashMap<>();
-    /** Called (on a worker thread) whenever a pack's [state] changes; the app's screens re-read the list. */
-    public static volatile Runnable listener = null;
+    /**
+     * Called (on a worker thread) whenever a pack's [state] changes; the app's screens re-read the list. A set: every
+     * page host (home, the shade, the overlays) has its own ShellScreens - one static listener was the last one's, and
+     * home's Settings > Storage sat on "starting..." while its download ran (11-04, emulator, no root).
+     */
+    public static final java.util.Set<Runnable> listeners = new java.util.concurrent.CopyOnWriteArraySet<>();
+    /** Packs whose install the user cancelled: the running job stops at its next read, cleans up and reports nothing. */
+    private static final java.util.Set<String> cancelled = ConcurrentHashMap.newKeySet();
 
     private Packs() {}
 
@@ -124,8 +130,7 @@ public final class Packs {
             // no run dir yet (no session): only the app's screens see the progress
         }
         tmp.renameTo(f);
-        Runnable l = listener;
-        if (l != null)
+        for (Runnable l : listeners)
             l.run();
     }
 
@@ -139,6 +144,25 @@ public final class Packs {
         start(ctx, name, "removing", () -> remove(ctx, name));
     }
 
+    /** Stops a running install of the pack: what it downloaded or unpacked so far is deleted, the pack is as before. */
+    public static void cancel(String name) {
+        String s = states.get(name);
+        if (s != null && (s.startsWith("downloading") || s.startsWith("installing")))
+            cancelled.add(name);
+    }
+
+    /** An install the user stopped ([cancel]). */
+    static final class Cancelled extends IOException {
+        Cancelled(String name) {
+            super("the " + name + " pack's install was cancelled");
+        }
+    }
+
+    private static void checkCancelled(String name) throws Cancelled {
+        if (cancelled.contains(name))
+            throw new Cancelled(name);
+    }
+
     private interface Work {
         void run() throws IOException;
     }
@@ -149,10 +173,20 @@ public final class Packs {
         clearFailure(name);
         if (states.putIfAbsent(name, first) != null)
             return;
+        cancelled.remove(name);
         set(ctx, name, first);
         new Thread(() -> {
             try {
                 work.run();
+                set(ctx, name, null);
+            } catch (Cancelled e) {
+                // What landed is listed in the .partial record: remove() deletes it, so the pack is as before the tap.
+                try {
+                    remove(ctx, name);
+                } catch (IOException ignored) {
+                    // nothing unpacked yet
+                }
+                cancelled.remove(name);
                 set(ctx, name, null);
             } catch (Throwable e) {
                 Log.w(TAG, "pack " + name + " failed", e);
@@ -189,7 +223,7 @@ public final class Packs {
             String got;
             if (local.canRead()) {
                 archive = local;
-                got = sha256(new FileInputStream(local), local.length(), null, (d, t) -> progress.on("downloading", d, t));
+                got = sha256(name, new FileInputStream(local), local.length(), null, (d, t) -> progress.on("downloading", d, t));
             } else {
                 HttpURLConnection c = (HttpURLConnection) new URL(URL_BASE + file).openConnection();
                 c.setInstanceFollowRedirects(true);
@@ -197,7 +231,7 @@ public final class Packs {
                 if (c.getResponseCode() != 200)
                     throw new IOException("download: HTTP " + c.getResponseCode());
                 try (OutputStream out = new FileOutputStream(download)) {
-                    got = sha256(c.getInputStream(), c.getContentLengthLong(), out, (d, t) -> progress.on("downloading", d, t));
+                    got = sha256(name, c.getInputStream(), c.getContentLengthLong(), out, (d, t) -> progress.on("downloading", d, t));
                 }
                 archive = download;
             }
@@ -214,6 +248,7 @@ public final class Packs {
                  InputStream in = new GZIPInputStream(new FilterInputStream(new BufferedInputStream(new FileInputStream(archive), 1 << 20)) {
                      @Override
                      public int read(byte[] b, int off, int len) throws IOException {
+                         checkCancelled(name);
                          int n = super.read(b, off, len);
                          if (n > 0)
                              read[0] += n;
@@ -266,7 +301,7 @@ public final class Packs {
         void on(long done, long total);
     }
 
-    private static String sha256(InputStream raw, long size, OutputStream out, Bytes progress) throws IOException {
+    private static String sha256(String name, InputStream raw, long size, OutputStream out, Bytes progress) throws IOException {
         MessageDigest md;
         try {
             md = MessageDigest.getInstance("SHA-256");
@@ -277,6 +312,7 @@ public final class Packs {
         long read = 0, shown = 0;
         try (InputStream in = raw) {
             for (int n; (n = in.read(buf)) > 0; ) {
+                checkCancelled(name);
                 md.update(buf, 0, n);
                 if (out != null)
                     out.write(buf, 0, n);

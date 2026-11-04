@@ -32,7 +32,7 @@ import {
   useScreen,
 } from "../screens.ts";
 import { Icon, type IconName } from "./icons.tsx";
-import { PACK_INFO, PackBar, packAction, packFrees, packSize, packStatus, usePacks, type Pack, type PackStatus } from "./packs.tsx";
+import { PACK_INFO, PackBar, packAction, packCancellable, packFrees, packSize, packStatus, usePacks, type Pack, type PackStatus } from "./packs.tsx";
 import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, searchSpot, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
 import { iconTint } from "./icontint.ts";
 import { UI_FONTS, uiFont } from "./uifont.ts";
@@ -1199,8 +1199,9 @@ function packLine(p: Pack, st: PackStatus) {
   return <div class={`scr-sub ${tone}`}>{st.busy || st.failed ? st.text : `${st.text} · ${packSize(p)}`}</div>;
 }
 
-/** Add (or try again) / remove, none while something happens. */
+/** Add (or try again) / remove; cancel while it downloads or unpacks, none while it's removed. */
 function PackButton({ p, st, onRemove }: { p: Pack; st: PackStatus; onRemove: () => void }) {
+  if (packCancellable(p)) return <Action icon="close" label="cancel" tone="muted" onClick={() => packAction(p.name, "cancel")} />;
   if (st.busy) return null;
   if (p.installed) return <Action icon="deleteOutline" label="remove" tone="danger" onClick={onRemove} />;
   return <Action icon={st.failed ? "refresh" : "trayArrowDown"} label={st.failed ? "try again" : "add"} tone="primary" onClick={() => packAction(p.name, "add")} />;

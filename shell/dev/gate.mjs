@@ -6243,7 +6243,8 @@ async function libraryCheck() {
 
 /**
  * In the page, on the app library (after libraryCheck): a base install (the mock's storage: gaming not added) shows "add gaming" right
- * after the Games folder, and a tap shows its pending state at once, then the host's live progress (ui/packs.tsx).
+ * after the Games folder, and a tap shows its pending state at once, then the host's live progress (ui/packs.tsx); its
+ * "cancel" stops it and the card offers "add gaming" again (11-04: a phone without root had no way to stop a 2.6 GB add).
  */
 async function addGamingCheck() {
   const lib = document.querySelector(".page-track > .page.library");
@@ -6261,6 +6262,10 @@ async function addGamingCheck() {
   await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
   if (!shows(/adding gaming/) || !add.querySelector(".scr-bar")) fails.push(`a tap on "add gaming" shows nothing pending at once: "${add.textContent}"`);
   if (!(await until(() => shows(/downloading/), 3000))) fails.push(`"add gaming" shows no download progress: "${add.textContent}"`);
+  const cancel = add.querySelector(".lib-pack-cancel");
+  if (!cancel) return [...fails, `"add gaming" has no cancel while it downloads: "${add.textContent}"`];
+  cancel.click();
+  if (!(await until(() => shows(/add gaming/) && !shows(/adding/) && !add.querySelector(".scr-bar"), 3000))) fails.push(`"cancel" didn't stop adding gaming: "${add.textContent}"`);
   return fails;
 }
 

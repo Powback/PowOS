@@ -79,11 +79,12 @@ class ShellScreens(
     /** The Linux system's size on disk, measured when its screen opens. */
     private var linuxSize by mutableStateOf<Long?>(null)
 
-    /** Bumped whenever a pack's install/removal moves (andro.marchy.Packs.listener): the storage screen re-reads. */
+    /** Bumped whenever a pack's install/removal moves (andro.marchy.Packs.listeners): the storage screen re-reads. */
     private var packsTick by mutableStateOf(0)
+    private val packsListener = Runnable { android.os.Handler(android.os.Looper.getMainLooper()).post { packsTick++ } }
 
     init {
-        andro.marchy.Packs.listener = Runnable { android.os.Handler(android.os.Looper.getMainLooper()).post { packsTick++ } }
+        andro.marchy.Packs.listeners.add(packsListener)
     }
 
     /** What the last store install said went wrong (by widget id). */
@@ -194,6 +195,7 @@ class ShellScreens(
             "aur.remove" -> scope.launch { if (runtime.pacman.remove(text)) runtime.refreshApps(); query(packageQuery) }.let { null }
             "storage.add" -> andro.marchy.Packs.installAsync(context, text)
             "storage.remove" -> andro.marchy.Packs.removeAsync(context, text)
+            "storage.cancel" -> andro.marchy.Packs.cancel(text)
             "storage.dismiss" -> andro.marchy.Packs.clearFailure(text).also { packsTick++ }
             "licenses.text" -> licenseText(text)
             "licenses.open" -> start(Intent(Intent.ACTION_VIEW, Uri.parse(text)))
@@ -648,6 +650,7 @@ class ShellScreens(
     }
 
     fun close() {
+        andro.marchy.Packs.listeners.remove(packsListener)
         watching.values.forEach { it.cancel() }
         watching.clear()
         search?.cancel()

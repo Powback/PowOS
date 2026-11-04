@@ -54,6 +54,23 @@ _manager_use_own_cli() {
     if command -v powos-android-open &>/dev/null; then export BROWSER=powos-android-open; fi
 }
 
+# The manager's CLI (claude, or MANAGER_CLAUDE_CMD's first word), installed on first use when it's missing: the PowOS
+# image a phone without root downloads has no claude (the rooted phone's was installed by hand, `powos ai install
+# claude`), and the AI page's first message answered "FileNotFoundError: 'claude'" (11-04, emulator, no root). The
+# vendor's native installer into ~/.local/bin (on the session's PATH), ~20 s; its output on stderr, never into the
+# --json-events stream on stdout; in a subshell, as install.sh sets -uo pipefail.
+_manager_ensure_claude() {
+    local bin="${MANAGER_CLAUDE_CMD:-claude}"; bin="${bin%% *}"
+    command -v "$bin" &>/dev/null && return 0
+    [[ "$bin" == claude ]] || { echo "manager: $bin not found (MANAGER_CLAUDE_CMD)" >&2; return 1; }
+    PATH="$HOME/.local/bin:$PATH"; export PATH
+    command -v claude &>/dev/null && return 0
+    echo "manager: installing Claude Code (first use)" >&2
+    ( source "$_MANAGER_DIR/../install.sh" && ai_install_cmd claude ) >&2 && command -v claude &>/dev/null && return 0
+    echo "manager: Claude Code isn't installed and its installer failed (powos ai install claude)" >&2
+    return 1
+}
+
 # powos ai manager [--safe] [--no-sandbox]  — start / resume the persistent manager session (--help: its flags).
 manager_run() {
     command -v python3 &>/dev/null || { echo "manager needs python3" >&2; return 1; }
@@ -84,6 +101,7 @@ manager_run() {
     fi
 
     _manager_use_own_cli
+    _manager_ensure_claude || return 1
 
     # Load the manager persona. _ai_load_agent expands the !cmd lines, so the
     # system prompt carries the CURRENT `powos help` / `powos comms help`.

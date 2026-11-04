@@ -16,7 +16,7 @@ import { AppIcon } from "./apps.tsx";
 import { folderName, morphing } from "./folders.tsx";
 import type { App } from "../types.ts";
 import { Icon } from "./icons.tsx";
-import { PackBar, packAction, packDownload, packStatus, usePacks } from "./packs.tsx";
+import { PackBar, packAction, packCancellable, packDownload, packStatus, usePacks } from "./packs.tsx";
 
 /** ApplicationInfo.CATEGORY_* (0..8) -> the library's category. */
 const ANDROID = ["games", "music", "video", "photos", "social", "news", "travel", "productivity", "utilities"];
@@ -126,7 +126,7 @@ function Card({ f }: { f: LibraryFolder }) {
 
 /**
  * "Add gaming", beside the Games folder, while a phone without root hasn't got the gaming pack (packs.tsx): a tap adds
- * it, and the card shows the download and unpack live until Steam and the games' runtimes are there.
+ * it, and the card shows the download and unpack live until Steam and the games' runtimes are there; "cancel" stops it.
  */
 function AddGamingCard() {
   const gaming = usePacks()?.find((p) => p.name === "gaming");
@@ -141,6 +141,18 @@ function AddGamingCard() {
         <Icon name="gamepad" size={28} />
         <div class="lib-pack-text">{st.busy || st.failed ? st.text : `Steam, Proton, x86 apps · ${packDownload(gaming)}`}</div>
         {st.busy && <PackBar progress={st.progress} />}
+        {packCancellable(gaming) && (
+          <button
+            type="button"
+            class="lib-pack-cancel"
+            onClick={(e) => {
+              e.stopPropagation();
+              packAction("gaming", "cancel");
+            }}
+          >
+            cancel
+          </button>
+        )}
       </div>
     </div>
   );

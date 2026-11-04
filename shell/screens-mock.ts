@@ -150,7 +150,8 @@ export function mockScreens(events: Emitter): Bridge["screens"] {
     },
   };
   const changed = (name: string) => events.emit("screens.state", { name, state: state[name] });
-  // A pack's add: a few seconds of download, then unpack, as the host reports them; a removal at once.
+  // A pack's add: a few seconds of download, then unpack, as the host reports them; a removal at once; a cancel stops it.
+  const packTicks: Record<string, ReturnType<typeof setInterval>> = {};
   const packJob = (name: string, action: string) => {
     const packs = state.storage.packs as { name: string; download: number; installed: boolean; job: unknown }[];
     const set = (job: unknown, installed?: boolean) => {
@@ -159,8 +160,12 @@ export function mockScreens(events: Emitter): Bridge["screens"] {
     };
     const total = packs.find((p) => p.name === name)?.download ?? 0;
     if (action === "remove") return setTimeout(() => set(null, false), 600);
+    if (action === "cancel") {
+      clearInterval(packTicks[name]);
+      return setTimeout(() => set(null), 300);
+    }
     let step = 0;
-    const tick = setInterval(() => {
+    const tick = (packTicks[name] = setInterval(() => {
       step++;
       if (step <= 8) set({ phase: "downloading", done: (total * step) / 8, total });
       else if (step <= 10) set({ phase: "installing", done: (total * (step - 8)) / 2, total });
@@ -168,7 +173,7 @@ export function mockScreens(events: Emitter): Bridge["screens"] {
         clearInterval(tick);
         set(null, true);
       }
-    }, 400);
+    }, 400));
   };
   return {
     watch: async (name) => state[name],
@@ -192,7 +197,7 @@ export function mockScreens(events: Emitter): Bridge["screens"] {
       } else if (name === "aur" && action === "query") {
         state.aur.query = arg;
         changed("aur");
-      } else if (name === "storage" && (action === "add" || action === "remove")) {
+      } else if (name === "storage" && (action === "add" || action === "remove" || action === "cancel")) {
         packJob(arg as string, action);
       } else if (name === "licenses" && action === "text") {
         return "MIT License\n\nPermission is hereby granted, free of charge, …";
