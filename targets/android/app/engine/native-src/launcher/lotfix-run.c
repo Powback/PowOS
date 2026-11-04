@@ -56,6 +56,26 @@ static int env_is(const char *name, const char *value)
 
 // We never use /etc/ld.so.cache (ldconfig is a no-op here), so the absolute dirs listed in /etc/ld.so.conf.d/*.conf
 // (e.g. /usr/lib/libproxy for quickshell, RUNPATH dirs from setup-rootfs.sh) go on the search path explicitly.
+// The first "Features" line of /proc/cpuinfo lists sve2 but not sve (see the llvmpipe HACK in main).
+static int cpu_sve2_without_sve(void)
+{
+    FILE *f = fopen("/proc/cpuinfo", "r");
+    if (!f) return 0;
+    char line[2048];
+    int sve = 0, sve2 = 0, found = 0;
+    while (!found && fgets(line, sizeof line, f)) {
+        if (strncmp(line, "Features", 8) != 0) continue;
+        found = 1;
+        char *c = strchr(line, ':');
+        for (char *t = strtok(c ? c + 1 : line, " \t\n"); t; t = strtok(NULL, " \t\n")) {
+            if (!strcmp(t, "sve")) sve = 1;
+            else if (!strcmp(t, "sve2")) sve2 = 1;
+        }
+    }
+    fclose(f);
+    return sve2 && !sve;
+}
+
 static void add_ld_conf_dirs(const char *R, char *libdirs, size_t len)
 {
     char d[PATH_SZ];
@@ -207,6 +227,16 @@ int main(int argc, char **argv)
         setenv("GALLIUM_DRIVER", "llvmpipe", 1);
         setenv("LIBGL_ALWAYS_SOFTWARE", "1", 1);
         setenv("POWOS_GPU", "software", 1);
+        // HACK: the CPU lists sve2 but not sve (the emulator on Apple M4, kernel 6.6.66 derives sve2 from ZFR0 on an
+        // SME-only CPU): Mesa adds +sve2 and llvmpipe's JIT emits SVE - every GL app the guest starts SIGILLs. Same
+        // switch session/Hyprland makes for the session; its own cache because the disk cache key has no mattrs.
+        // Real fix: a guest kernel with "arm64: Filter out SVE hwcaps when FEAT_SVE isn't implemented".
+        if (cpu_sve2_without_sve()) {
+            const char *m = getenv("GALLIVM_EXTRA_MATTRS");
+            if (m && *m) setf("GALLIVM_EXTRA_MATTRS", "-sve,-sve2,%s", m);
+            else setenv("GALLIVM_EXTRA_MATTRS", "-sve,-sve2", 1);
+            setenv("MESA_SHADER_CACHE_DIR", "/root/.cache/mesa-nosve", 1);
+        }
     }
 
     // Firefox's sandbox broker checks fakechroot-rewritten paths against its allow list and denies them (every tab
