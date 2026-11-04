@@ -37,3 +37,11 @@ MONO_DISABLE_SHM=1
 # (/usr/lib/pressure-vessel/overrides/lib/x86_64-linux-gnu). A per-game Steam FEX setting, when set, still wins.
 # Real fix: the client honouring STEAM_COMPAT_FEX_CONFIG from its environment (Valve), then this line goes.
 FEX_THUNKCONFIG=/usr/lib/powos-steam/fex-thunks.json
+
+# HACK: black 16x4-block dashes in every Unity/DXVK frame (Broforce: 17-44 % of frames, Xwayland's copy and the screen)
+# come from the game's own UBWC render targets on Adreno 740 - both FEX's x86 Turnip 26.2.0 and ours (eb3e7fd4), GMEM
+# and sysmem; TU_DEBUG=flushall doesn't help (not a missing flush). TU_DEBUG=noubwc: 0 of 93 frames
+# (bf-checker.sh, docs/research/broforce-black-columns.md, 2026-11-04). Costs GPU bandwidth; Broforce is CPU-bound.
+# Real fix: find which UBWC path dashes (bf-checker.sh ubwc syncdraw gmem 3dload) and fix it in
+# pkgs/vulkan-freedreno-kgsl (and FEX's x86 Turnip via the Vulkan thunk), then this line goes.
+TU_DEBUG=noubwc

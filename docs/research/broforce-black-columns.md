@@ -220,3 +220,44 @@ Check: `queue.sh add <task> tools/phone/verify/bf-driver.sh` - PASS needs the ga
   unsupported call / a callback the 2607 thunk doesn't wrap) or wine's display driver; get a Proton log
   (`PROTON_LOG=1`) + `cat /proc/<explorer>/task/*/wchan` with `bf-coldstart.sh env:POWOS_FEX_VULKAN_THUNK=1 cold`.
   Per-game alternative that works today: Proton ARM64 (our Turnip, AHB 0).
+
+## The scorer was wrong; the game's UBWC is the cause (bf-xwayland-side, 2026-11-04)
+- **bf-checker.py's old score was a false positive.** It counted 2x2 black checkers of cell 1..32 px; the loading screen's
+  sunburst (thin bright rays on black) scores 6-8 % by itself, so every variant read "X 6.8-8.5 %" whether or not a
+  single dash was on screen (e.g. sysmem's worst "X 8.49 %" frame h032 is a clean sunburst). All of today's "the checker
+  is not the game's driver / renderer" conclusions rested on that number.
+- **What the artefact is** (zoom of sysmem s05.png, full res): black dashes 4-16 px wide in 2-row steps, all inside
+  16-px column windows, in bright areas - a 16x4 block grid at 32 bpp = the UBWC block size for RGBA8 on a6xx/a7xx.
+  The same dashes are in Xwayland's copy (XGetImage of the game window: sysmem h026 = the "24 GAMES" splash fully
+  dashed) and on the screen (SurfaceFlinger screencap), so the grabber is not the artefact, and the screen just
+  shows what is already in the game's frames.
+- **New score** (bf-checker.py, same files): black runs <= 16 px (8 at half res) between bright pixels with a bright
+  pixel 2 rows away, per 10k px; clean frames 0-3, dashed 30-800, checkered at > 20; a variant = share of its frames.
+  Rescored (~/.cache/powos-verify/bfc-2026-11-04_*):
+
+  | run | game's Turnip | variant | X frames checkered | screenshots |
+  |---|---|---|---|---|
+  | 1514 | x86 FEX RootFS 26.2.0 | base | 26/85 (31 %) | 4/9 |
+  | 1524 | x86 26.2.0 | base | 17/88 (19 %) | 2/9 |
+  | 1550 | ours, Proton ARM64 | base | 15/88 (17 %) | 2/9 |
+  | 1556 | x86 26.2.0 | base | 37/84 (44 %) | 4/9 |
+  | 1620 | x86 26.2.0 | TU_DEBUG=sysmem | 31/86 (36 %) | 2/9 |
+| 1631 | x86 26.2.0 | TU_DEBUG=flushall | 13/84 (15 %) | 2/9 |
+  | 1617 | x86 26.2.0 | **TU_DEBUG=noubwc** | **0/84** | **0/9** |
+
+  noubwc frames are complete and normal (splashes, menu); one run, but 0 of 93 frames against 17-44 % in five base runs.
+  (The 1550 base "17 %" row: 15/88.)
+- **So the layer is the game's own rendering with UBWC** (Unity renders to UBWC render targets, then blits them into
+  the linear swapchain image): both Turnips (FEX's x86 26.2.0 and our eb3e7fd4), GMEM and sysmem alike. Xwayland,
+  KWin and the grabber only pass it on. Black 16x4 blocks = blocks read as "clear/zero": a UBWC flag read stale (the
+  render's flag writes not flushed from CCU / not invalidated in UCHE before the blit samples them) or flag/data
+  addressing that differs between the writer (RB) and the reader (TP) (UBWC config: highest bank bit, macrotile mode,
+  bank swizzle - Turnip takes them from KGSL_PROP_HIGHEST_BANK_BIT / KGSL_PROP_UBWC_MODE, tu_knl_kgsl.cc).
+- **flushall (job 20261104-163101, bfc-2026-11-04_1631): does NOT fix it** (13/84 X, 2/9 screen) -> not a missing
+  cache flush/invalidate between draws. Left: a UBWC path that writes or reads 16x4 blocks wrong on this a740 (on a7xx
+  the kernel, not Turnip, programs RB/TPL1/SP *_NC_MODE_CNTL; Turnip only reads KGSL_PROP_HIGHEST_BANK_BIT /
+  KGSL_PROP_UBWC_MODE for its layouts) - a format/fast-clear/blit-engine path, or a hw quirk Mesa has no workaround for.
+- **Shipped as a HACK (steam-env:29, TU_DEBUG=noubwc for every Steam game)**: dashes gone at a bandwidth cost (Broforce is
+  CPU-bound). Next to find the path: `bf-checker.sh base ubwc syncdraw gmem 3dload` (ubwc = TU_DEBUG=startup: noubwc
+  off again; after the steam package with this line is installed, `base` should be 0 %), then a DXVK/Unity format
+  survey (DXVK log: which formats the render targets use) and a TU_DEBUG=rd capture of one dashed frame.
