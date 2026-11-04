@@ -2,7 +2,8 @@
 # lanes: phone
 # bf-checker.sh [variant...]: (Mac; queue it: queue.sh add <task> bf-checker.sh) bisect Broforce's black checkerboard
 # on the loading + menu screens over render variants, ~4 min of screen each. Variants (bf-checker-phone.sh set):
-# base, TU_DEBUG = noubwc | sysmem | flushall | nolrz (Proton user_settings.py), dxvk.conf = nomsaa (d3d11.disableMsaa)
+# base, TU_DEBUG = noubwc | sysmem | flushall | nolrz | syncdraw | gmem | 3dload, ubwc (TU_DEBUG=startup: steam-env's
+# noubwc off) (Proton user_settings.py), dxvk.conf = nomsaa (d3d11.disableMsaa)
 # | zeromem (dxvk.zeroMappedMemory) | zerowg (d3d11.zeroInitWorkgroupMemory) | relaxed (d3d11.relaxedBarriers),
 # noncoherent (TU_KGSL_FORCE_NONCOHERENT=1: FEX's tu_override_uncached_as_cache_coherent becomes a no-op).
 # Per variant: cold start (game killed between variants, Steam kept), from the game window on 75 s of Xwayland's copy

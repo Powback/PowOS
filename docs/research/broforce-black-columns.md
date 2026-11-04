@@ -163,21 +163,27 @@ would not change anything: no hop uses UBWC.
 
   | run | game's Turnip | variant | X frames checkered | screenshots |
   |---|---|---|---|---|
-  | 1514 | x86 FEX RootFS 26.2.0 | base | 26/78 (33 %) | 4/9 |
-  | 1524 | x86 26.2.0 | base | 16/88 (18 %) | 2/9 |
+  | 1514 | x86 FEX RootFS 26.2.0 | base | 26/85 (31 %) | 4/9 |
+  | 1524 | x86 26.2.0 | base | 17/88 (19 %) | 2/9 |
   | 1550 | ours, Proton ARM64 | base | 15/88 (17 %) | 2/9 |
   | 1556 | x86 26.2.0 | base | 37/84 (44 %) | 4/9 |
   | 1620 | x86 26.2.0 | TU_DEBUG=sysmem | 31/86 (36 %) | 2/9 |
+| 1631 | x86 26.2.0 | TU_DEBUG=flushall | 13/84 (15 %) | 2/9 |
   | 1617 | x86 26.2.0 | **TU_DEBUG=noubwc** | **0/84** | **0/9** |
 
   noubwc frames are complete and normal (splashes, menu); one run, but 0 of 93 frames against 17-44 % in five base runs.
+  (The 1550 base "17 %" row: 15/88.)
 - **So the layer is the game's own rendering with UBWC** (Unity renders to UBWC render targets, then blits them into
   the linear swapchain image): both Turnips (FEX's x86 26.2.0 and our eb3e7fd4), GMEM and sysmem alike. Xwayland,
   KWin and the grabber only pass it on. Black 16x4 blocks = blocks read as "clear/zero": a UBWC flag read stale (the
   render's flag writes not flushed from CCU / not invalidated in UCHE before the blit samples them) or flag/data
   addressing that differs between the writer (RB) and the reader (TP) (UBWC config: highest bank bit, macrotile mode,
   bank swizzle - Turnip takes them from KGSL_PROP_HIGHEST_BANK_BIT / KGSL_PROP_UBWC_MODE, tu_knl_kgsl.cc).
-- **Discriminating run queued:** `bf-checker.sh flushall` (TU_DEBUG=flushall: flush + invalidate every cache around
-  every draw/blit). Fixes it -> a missing flush/invalidate in Turnip's a7xx UBWC path (fix in pkgs/vulkan-freedreno-kgsl
-  barriers); doesn't -> writer/reader UBWC config mismatch (compare KGSL's props with what the kernel programs into
-  RB/TPL1 *_NC_MODE_CNTL on this a740).
+- **flushall (job 20261104-163101, bfc-2026-11-04_1631): does NOT fix it** (13/84 X, 2/9 screen) -> not a missing
+  cache flush/invalidate between draws. Left: a UBWC path that writes or reads 16x4 blocks wrong on this a740 (on a7xx
+  the kernel, not Turnip, programs RB/TPL1/SP *_NC_MODE_CNTL; Turnip only reads KGSL_PROP_HIGHEST_BANK_BIT /
+  KGSL_PROP_UBWC_MODE for its layouts) - a format/fast-clear/blit-engine path, or a hw quirk Mesa has no workaround for.
+- **Shipped as a HACK (steam-env:29, TU_DEBUG=noubwc for every Steam game)**: dashes gone at a bandwidth cost (Broforce is
+  CPU-bound). Next to find the path: `bf-checker.sh base ubwc syncdraw gmem 3dload` (ubwc = TU_DEBUG=startup: noubwc
+  off again; after the steam package with this line is installed, `base` should be 0 %), then a DXVK/Unity format
+  survey (DXVK log: which formats the render targets use) and a TU_DEBUG=rd capture of one dashed frame.
