@@ -261,3 +261,20 @@ Check: `queue.sh add <task> tools/phone/verify/bf-driver.sh` - PASS needs the ga
   CPU-bound). Next to find the path: `bf-checker.sh base ubwc syncdraw gmem 3dload` (ubwc = TU_DEBUG=startup: noubwc
   off again; after the steam package with this line is installed, `base` should be 0 %), then a DXVK/Unity format
   survey (DXVK log: which formats the render targets use) and a TU_DEBUG=rd capture of one dashed frame.
+
+## steam 1.0.0.87-33 on the phone (steam-noubwc, 2026-11-04 16:41-16:55)
+- steam -33 (= -32 + `TU_DEBUG=noubwc` in steam-env) built, published, installed (job 20261104-164054-22169: -29 -> -33).
+- **steam-env only reaches games after Steam restarts** (/usr/bin/steam exports it at start). The first base run
+  (job ...-164055-22326, bfc-2026-11-04_1644) ran on a Steam started 16:33, before the install: the game's environ had
+  no TU_DEBUG -> **33/88 X frames dashed (38 %), 2/9 screenshots** (dash scorer). The user saw lines too.
+- Steam closed (job ...-164056-31261), next launch cold: every Broforce_beta.exe process has `TU_DEBUG=noubwc` in
+  /proc/<pid>/environ -> **0/84 X frames, 0/9 screenshots** (job ...-164057-22567, bfc-2026-11-04_1649), and 0/5
+  screenshots in the next (touch-aborted) run, bfc-2026-11-04_1652. The user, playing it right after: "there were no
+  columns".
+- **The ubwc / syncdraw / gmem / 3dload variants did NOT run**: the verify runner uses origin's
+  worktree-powos-multiplatform, whose bf-checker-phone.sh doesn't know them yet ("unknown variant ubwc") - the two
+  jobs above therefore ran with steam-env's noubwc, not their variant. They also score with the old (sunburst) checker
+  score; the numbers here are bf-checker.py from this branch run on the same files. Re-queue
+  `bf-checker.sh base ubwc syncdraw gmem 3dload` once agent/steam-noubwc is merged.
+- bf-checker.sh now restarts a Steam that is older than its steam-env before the first variant, so `base` right after
+  a steam install measures the new env.
