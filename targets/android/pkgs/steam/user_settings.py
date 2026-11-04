@@ -32,9 +32,13 @@ except (OSError, ValueError, AttributeError):
 # the next launch with the same input exits 0 here at once, before Wine starts. Anything changed - Steam wrote a new
 # script, a Proton update, a new prefix, /usr/bin/steam's reg_guard restored or rebuilt the registry (it deletes the
 # record) - and the evaluator runs as always. Every decision goes to compatdata/<appid>/powos-iscript.log.
+# For x86 Proton (Valve's FEX compat tool layer first) the skip happens even earlier, in that layer's own Python, before
+# FEX, the Steam Runtime container and Proton's Python (under FEX) start: /usr/lib/powos-steam/py/sitecustomize.py
+# calls iscript_skip_early() with the same key - that container alone took 7-33 s per launch (Broforce, 2026-11-04).
 # Real fix: Valve's client skipping an evaluator run whose script it already ran in this prefix (as it does on Windows,
 # where it reads the registry itself), or running it inside the game's own Wine session.
-def _iscript_key(argv, data):
+def _iscript_key(argv, data, proton_dir=None):
+    # argv: [proton, "run", <iscriptevaluator.exe>, <script>...]; proton_dir: that Proton's directory.
     steam = os.environ.get("STEAM_COMPAT_CLIENT_INSTALL_PATH", "")
     h = hashlib.sha256()
     found = False
@@ -52,7 +56,7 @@ def _iscript_key(argv, data):
     if not found:
         return None  # no script to compare: can't tell whether it changed
     try:
-        with open(os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "version"), "rb") as f:
+        with open(os.path.join(proton_dir or os.path.dirname(os.path.abspath(argv[0])), "version"), "rb") as f:
             h.update(f.read())
         st = os.stat(os.path.join(data, "pfx"))
         h.update(("%d:%d" % (st.st_dev, st.st_ino)).encode())
@@ -63,28 +67,56 @@ def _iscript_key(argv, data):
     return h.hexdigest()
 
 
-def _iscript():
-    argv = sys.argv
-    if len(argv) < 4 or argv[1] != "run" or os.path.basename(argv[2]).lower() != "iscriptevaluator.exe":
-        return
+def _is_evaluator(argv):
+    return len(argv) >= 4 and argv[1] == "run" and os.path.basename(argv[2]).lower() == "iscriptevaluator.exe"
+
+
+def _iscript_log(data, msg):
+    try:
+        with open(os.path.join(data, "powos-iscript.log"), "a") as f:
+            f.write("%s %s\n" % (time.strftime("%F %T"), msg))
+    except OSError:
+        pass
+
+
+def _iscript_state(argv, proton_dir=None):
+    """(compatdata dir, this run's key or None, the last good run's key or "") - argv as _iscript_key's."""
     data = os.environ.get("STEAM_COMPAT_DATA_PATH", "")
     if not data:
-        return
-    done, logf = os.path.join(data, "powos-iscript.done"), os.path.join(data, "powos-iscript.log")
-
-    def log(msg):
-        try:
-            with open(logf, "a") as f:
-                f.write("%s %s\n" % (time.strftime("%F %T"), msg))
-        except OSError:
-            pass
-
-    key = _iscript_key(argv, data)
+        return "", None, ""
     try:
-        with open(done) as f:
+        with open(os.path.join(data, "powos-iscript.done")) as f:
             last = f.read().strip()
     except OSError:
         last = ""
+    return data, _iscript_key(argv, data, proton_dir), last
+
+
+def iscript_skip_early(argv, proton_dir, where):
+    """True (logged) when this evaluator run's input matches its last good run: the caller exits 0 at once, before
+    the Steam Runtime container, FEX and Proton start (sitecustomize.py, in Valve's FEX compat tool). Never records -
+    only a real run inside Proton does."""
+    if not _is_evaluator(argv):
+        return False
+    data, key, last = _iscript_state(argv, proton_dir)
+    if data and key and key == last:
+        _iscript_log(data, "skipped %s: script, Proton and prefix as at its last good run (%s)" % (where, key[:12]))
+        return True
+    return False
+
+
+def _iscript():
+    argv = sys.argv
+    if not _is_evaluator(argv):
+        return
+    data, key, last = _iscript_state(argv)
+    if not data:
+        return
+    done = os.path.join(data, "powos-iscript.done")
+
+    def log(msg):
+        _iscript_log(data, msg)
+
     if key and key == last:
         log("skipped: script, Proton and prefix as at its last good run (%s)" % key[:12])
         sys.stdout.flush()
@@ -110,7 +142,8 @@ def _iscript():
     sys.exit = exit_and_record
 
 
-try:
-    _iscript()
-except Exception as e:  # never break a launch over this
-    sys.stderr.write("PowOS user_settings: %s\n" % e)
+if __name__ == "user_settings":  # Proton's own import (sitecustomize.py loads it under another name, for its functions)
+    try:
+        _iscript()
+    except Exception as e:  # never break a launch over this
+        sys.stderr.write("PowOS user_settings: %s\n" % e)

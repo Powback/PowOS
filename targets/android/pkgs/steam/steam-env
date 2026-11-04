@@ -37,3 +37,11 @@ MONO_DISABLE_SHM=1
 # (/usr/lib/pressure-vessel/overrides/lib/x86_64-linux-gnu). A per-game Steam FEX setting, when set, still wins.
 # Real fix: the client honouring STEAM_COMPAT_FEX_CONFIG from its environment (Valve), then this line goes.
 FEX_THUNKCONFIG=/usr/lib/powos-steam/fex-thunks.json
+
+# HACK: PowOS's sitecustomize.py (pkgs/steam/sitecustomize.py, in /usr/lib/powos-steam/py) for Valve's FEX compat
+# tool, the first layer of every x86 Proton launch: it skips the install script evaluator Steam runs before EVERY
+# launch when it has nothing to do, before FEX, the Steam Runtime container and Proton start (7-33 s a launch,
+# Broforce 2026-11-04; see that file and user_settings.py). Any other Python under Steam imports it too and it
+# returns at once. Real fix: Valve's client skipping an evaluator run it already ran in this prefix, then this line
+# and sitecustomize.py go.
+PYTHONPATH=/usr/lib/powos-steam/py
