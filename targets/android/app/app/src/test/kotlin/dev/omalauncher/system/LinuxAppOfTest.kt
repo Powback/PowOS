@@ -71,3 +71,15 @@ class LinuxSameCommandTest {
         assertTrue(ww.contains(".put(\"alts\", org.json.JSONArray(offer.alts))"))
     }
 }
+
+/** apps.tsv's aliases column: the menu's System Settings also owns the hidden "kdesystemsettings" entry's windows. */
+class LinuxAliasTest {
+    @Test fun aWindowNamedByAHiddenAliasIsTheShownApp() {
+        val dir = kotlin.io.path.createTempDirectory("apps").toFile()
+        File(dir, "apps.tsv").writeText("systemsettings\tSystem Settings\tsystemsettings\t0\t\tQt;KDE;Settings;\tkdesystemsettings\norg.kde.dolphin\tDolphin\tdolphin\t0\t\t\n")
+        val apps = dev.omalauncher.linux.loadPowosApps(dir)
+        assertEquals("systemsettings", RunningApps.linuxAppOf(apps, "kdesystemsettings")?.id)
+        assertEquals("org.kde.dolphin", RunningApps.linuxAppOf(apps, "org.kde.dolphin")?.id)
+        assertEquals(emptyList<String>(), apps.first { it.id == "org.kde.dolphin" }.aliases)
+    }
+}

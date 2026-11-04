@@ -2,7 +2,9 @@
 """powos-apps-export: PowOS's apps, for Android (the PowOS app's drawer, search and Android shortcuts).
 
 Writes $XDG_RUNTIME_DIR/powos-apps/ (the PowOS app's run dir, which it reads directly):
-  apps.tsv       one app per line: id, name, exec, terminal (0/1), StartupWMClass, categories (;-separated)
+  apps.tsv       one app per line: id, name, exec, terminal (0/1), StartupWMClass, categories (;-separated),
+                 aliases (,-separated desktop ids of hidden entries that run the same Exec: a window may name itself
+                 by one - System Settings outside a Plasma login is "kdesystemsettings", NotShowIn=KDE)
   icons/<id>.png its icon from PowOS's icon theme (as Plasma shows it), 192 px - every app has one: an Icon= the
                  theme lacks (lstopo's "hwloc"), or none at all, gets Plasma's generic application icon, else a tile
                  with the app's initial, so the drawer never waits on an icon that will never come
@@ -82,7 +84,13 @@ def apps():
             except OSError:
                 continue
             found[desktop_id] = fields if shown(fields, desktop_id) else None
+            if not found[desktop_id] and fields.get("Type") == "Application" and fields.get("Exec"):
+                HIDDEN.setdefault(FIELD_CODE.sub("", fields["Exec"]).strip(), []).append(desktop_id)
     return sorted(((i, f) for i, f in found.items() if f), key=lambda e: e[1]["Name"].lower())
+
+
+# Exec line -> the desktop ids of entries the menu doesn't show that run it (apps()), for apps.tsv's aliases column.
+HIDDEN = {}
 
 
 def clean(value):
@@ -184,6 +192,7 @@ def main():
         lines.append("\t".join(clean(v) for v in [
             desktop_id, f["Name"], exec_line, "1" if f.get("Terminal") == "true" else "0",
             f.get("StartupWMClass", ""), f.get("Categories", ""),
+            ",".join(a for a in HIDDEN.get(exec_line, []) if a != desktop_id),
         ]) + "\n")
     tmp = os.path.join(OUT, f"apps.tsv.{os.getpid()}.tmp")  # the app and powos-apps-watch may run at once
     with open(tmp, "w") as f:

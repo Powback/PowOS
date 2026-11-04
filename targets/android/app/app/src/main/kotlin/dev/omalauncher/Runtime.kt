@@ -682,7 +682,7 @@ class Runtime(
     ) {
         Log.i(TAG, "open as task: ${app.id}")
         // Its launch window at once, where its window will be (LaunchWindows): the app's first window becomes it.
-        val ids = listOfNotNull(app.id, app.wmClass).filter { it.isNotBlank() }.toTypedArray()
+        val ids = (listOfNotNull(app.id, app.wmClass) + app.aliases).filter { it.isNotBlank() }.toTypedArray()
         // Web windows on (docs/WEB_WINDOWS.md S6): the window opens as home's web window when KWin opens it - no task.
         if (!andro.marchy.WebWindowSource.wanted() && !andro.marchy.WindowTasks.hasWindow(ids)) andro.marchy.LaunchWindows.open(context, app.id, ids, app.name)
         thread(name = "guest-open", isDaemon = true) {

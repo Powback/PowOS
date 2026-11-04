@@ -14,12 +14,19 @@ data class LinuxApp(
     val icon: String? = null,
     /** Categories= value ("Network;WebBrowser;"): the shell's app library sorts by it. */
     val categories: String? = null,
+    /**
+     * Desktop ids of hidden entries that run the same command (apps.tsv's aliases, session/powos-apps-export): a window
+     * may name itself by one - System Settings outside a Plasma login says "kdesystemsettings" (NotShowIn=KDE), and
+     * its launch's placeholder stayed and said "Couldn't open" beside the window (emulator, no root, 2026-11-04).
+     */
+    val aliases: List<String> = emptyList(),
 )
 
 /** Whether a window with Wayland [appId] belongs to this app: by desktop id, StartupWMClass, or reverse-DNS tail. */
 fun LinuxApp.matches(appId: String): Boolean {
     val id = appId.lowercase()
-    return this.id.lowercase() == id || wmClass?.lowercase() == id || this.id.substringAfterLast('.').lowercase() == id
+    return this.id.lowercase() == id || wmClass?.lowercase() == id || this.id.substringAfterLast('.').lowercase() == id ||
+        aliases.any { it.lowercase() == id }
 }
 
 private val FIELD_CODE = Regex("%[fFuUdDnNickvm]")
@@ -51,7 +58,8 @@ fun loadPowosApps(dir: File): List<LinuxApp> {
         val f = line.split('\t')
         if (f.size < 4 || f[0].isEmpty() || f[2].isEmpty()) return@mapNotNull null
         val icon = File(icons, "${f[0]}.png").takeIf { it.isFile }?.path
-        LinuxApp(f[1], f[2], f[3] == "1", f[0], f.getOrNull(4)?.ifEmpty { null }, icon, f.getOrNull(5)?.ifEmpty { null })
+        val aliases = f.getOrNull(6).orEmpty().split(',').filter { it.isNotBlank() }
+        LinuxApp(f[1], f[2], f[3] == "1", f[0], f.getOrNull(4)?.ifEmpty { null }, icon, f.getOrNull(5)?.ifEmpty { null }, aliases)
     }
 }
 
