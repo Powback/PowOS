@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- LSPosed scope: OnePlus's launcher (also the recents/gesture provider); SystemUI (the "..." menu's Desktop window). -->
+    <!-- LSPosed scope: OnePlus's launcher (also the recents/gesture provider); SystemUI (the "..." menu's Desktop window); com.oplus.battery (a boosted game's thermal table). -->
     <string-array name="xposed_scope">
         <item>com.android.launcher</item>
         <item>com.android.systemui</item>
+        <item>com.oplus.battery</item>
     </string-array>
 </resources>

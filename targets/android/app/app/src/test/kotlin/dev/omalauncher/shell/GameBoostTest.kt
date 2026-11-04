@@ -90,4 +90,32 @@ class GameBoostTest {
         assertTrue("restore never writes a stale max under it", sh.contains("if [ -n \"\$th\" ]; then cap=\$(cat \$P/\$p/scaling_max_freq)"))
         assertTrue("never a cooling device or thermal-engine", !Regex("cooling_device|thermal-engine|thermal_zone").containsMatchIn(sh.substringAfter("mkdir -p \"\$S\"")))
     }
+
+    /**
+     * The vendor's game class lives exactly as long as the boost: set when a holder boosts under the vendor's thermal
+     * controller, cleared in restore_all (the one exit every way out takes: SIGTERM, a stale lease, the game gone, a
+     * killed holder's next engage/restore); the hook reads the same key, answers the game type for com.powos.app only.
+     */
+    @Test
+    fun theVendorGameClassFollowsTheBoost() {
+        val sh = File("src/main/assets/game-boost.sh").readText()
+        assertTrue("the key matches", sh.contains("VENDOR_GAME_KEY=${GameBoost.VENDOR_GAME_KEY}\n"))
+        val hold = sh.substringAfter("\nhold() {").substringBefore("\n}\n")
+        assertTrue("on with the boost, under a thermal controller only", hold.contains("[ -n \"\$THERMAL\" ] && vendor_game_class \"\$APP\""))
+        assertTrue("every way out of hold restores", hold.contains("restore_all; exit 0' TERM") && hold.trimEnd().endsWith("restore_all"))
+        val restore = sh.substringAfter("\nrestore_all() {").substringBefore("\n}\n")
+        assertTrue("off on every restore", restore.contains("vendor_game_class \"\""))
+        val engage = sh.substringAfter("\n  engage)").substringBefore(";;")
+        assertTrue("a killed holder's class is cleared before the next", engage.indexOf("restore_all") in 0 until engage.indexOf("setsid"))
+        val off = sh.substringAfter("vendor_game_class() {").substringBefore("\n}\n")
+        assertTrue("off deletes the key", off.contains("delete global \$VENDOR_GAME_KEY"))
+
+        val hook = File("../../oplus-hook/app/src/main/java/powos/oplushook/Hook.java").readText()
+        assertTrue("the hook reads the same key", hook.contains("VENDOR_GAME_KEY = \"${GameBoost.VENDOR_GAME_KEY}\""))
+        assertTrue("the vendor's game type", hook.contains("APP_TYPE_GAME = ${GameBoost.VENDOR_APP_TYPE_GAME};"))
+        val body = hook.substringAfter("private static void gameClassWhileBoosted").substringBefore("private static void log(")
+        assertTrue("only com.powos.app", body.contains("if (!POWOS.equals(param.args[0])"))
+        assertTrue("only while the key is set, never re-classing a classed app", body.contains("game != null && !game.isEmpty() && (Integer) param.getResult() <= 0"))
+        assertTrue("scoped to com.oplus.battery", File("../../oplus-hook/app/src/main/res/values/arrays.xml").readText().contains("<item>com.oplus.battery</item>"))
+    }
 }
