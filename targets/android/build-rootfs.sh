@@ -3,11 +3,12 @@
 # layer) as powos-rootfs.tar.gz, natively on an aarch64 Docker host (Apple Silicon Colima: no qemu).
 #
 # Usage: targets/android/build-rootfs.sh [path/to/kwin-*.pkg.tar.zst]
-#   Output: targets/android/out/powos-rootfs.tar.gz (+ .sha256, also pinned into the app when published). Default kwin package:
+#   Output: $POWOS_IMAGES/powos-rootfs.tar.gz (+ .sha256, base + packs; also pinned into the app when published) - on the
+#   NAS, /mnt/nas/cdn/powos/android/images/<checkout> by default (tools/data-root.sh). Default kwin package:
 #   targets/android/out/pkgs/kwin-*.pkg.tar.* (build it with targets/android/build-pkgs.sh).
 #
 # Install on a phone running the stock Andromarchy app (offline install path of its InstallActivity):
-#   adb push out/powos-rootfs.tar.gz /sdcard/Android/data/andro.marchy/files/lotfix-rootfs.tar.gz
+#   adb push $POWOS_IMAGES/powos-rootfs.tar.gz /sdcard/Android/data/andro.marchy/files/lotfix-rootfs.tar.gz
 # HACK: the lotfix-rootfs.tar.gz name is Andromarchy's; their app looks for exactly that file.
 set -euo pipefail
 
@@ -15,6 +16,9 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 OUT=$HERE/out
 W=$OUT/work
 mkdir -p "$OUT" "$W"
+. "$HERE/tools/data-root.sh"
+# The images are write-once bulk (~13 GB per build): they go on the NAS, not the Mac disk (PowCDN).
+mkdir -p "$POWOS_IMAGES" || { echo "build-rootfs: can't create $POWOS_IMAGES (NAS mounted? POWOS_DATA_ROOT)" >&2; exit 1; }
 
 # Pinned inputs. Bump deliberately: our patch and the KWin port target these.
 ANDROMARCHY_URL=https://github.com/lotfibennour/andromarchy
@@ -97,18 +101,18 @@ fi
 # powos-android-cache is the opposite of scratch: kept between builds (Arch base tarball, pacman
 # packages, Mesa/fakeroot sources) so dev rebuilds don't re-download ~3 GB. A few GB; never pruned here.
 docker run --rm --privileged --platform linux/arm64 --cpus 8 --memory 16g \
-  "${work[@]}" -v powos-android-cache:/cache -v "$W:/in:ro" -v "$OUT:/out" -v "$HERE/rootfs-in-container.sh:/rootfs-in-container.sh:ro" \
+  "${work[@]}" -v powos-android-cache:/cache -v "$W:/in:ro" -v "$POWOS_IMAGES:/out" -v "$HERE/rootfs-in-container.sh:/rootfs-in-container.sh:ro" \
   "$IMAGE" bash -c "$inner"
-echo "built: $OUT/powos-rootfs.tar.gz"
+echo "built: $POWOS_IMAGES/powos-rootfs.tar.gz"
 # KWin is ours at a pinned Plasma version (pkgs/kwin, IgnorePkg); the Plasma libraries it links come from today's Arch
 # Linux ARM. When those move a minor version KWin can't start at all: the 11-04 rootfs had kscreenlocker/libplasma/
 # plasma-workspace 6.8.1 under kwin 6.7.5 ("undefined symbol ScreenLocker::KSldApp::lock" - no desktop, no Linux app
 # window on any phone that installs it). Refused here, before it is split, pinned or published.
-tar -tzf "$OUT/powos-rootfs.tar.gz" ./var/lib/pacman/local 2>/dev/null > "$W/rootfs-pacdb.lst" || tar -tzf "$OUT/powos-rootfs.tar.gz" > "$W/rootfs-pacdb.lst"
+tar -tzf "$POWOS_IMAGES/powos-rootfs.tar.gz" ./var/lib/pacman/local 2>/dev/null > "$W/rootfs-pacdb.lst" || tar -tzf "$POWOS_IMAGES/powos-rootfs.tar.gz" > "$W/rootfs-pacdb.lst"
 plasma_ver() { sed -n "s#^\(\./\)\{0,1\}var/lib/pacman/local/$2-\([0-9][0-9]*\.[0-9][0-9]*\)\..*#\2#p" "$W/rootfs-pacdb.lst" | head -n 1; }
-kw=$(plasma_ver "$OUT/powos-rootfs.tar.gz" kwin)
+kw=$(plasma_ver "$POWOS_IMAGES/powos-rootfs.tar.gz" kwin)
 for lib in kscreenlocker libplasma plasma-workspace kdecoration; do
-  sl=$(plasma_ver "$OUT/powos-rootfs.tar.gz" $lib)
+  sl=$(plasma_ver "$POWOS_IMAGES/powos-rootfs.tar.gz" $lib)
   [ -n "$kw" ] && [ "$kw" = "$sl" ] || {
     echo "build-rootfs: kwin is Plasma ${kw:-?} but $lib is ${sl:-?}: KWin won't start in this rootfs." >&2
     echo "  tools/plasma-pin.sh pins Plasma to kwin's version (install-powos-android.sh), or move pkgs/kwin to ${sl:-theirs}." >&2
@@ -116,25 +120,27 @@ for lib in kscreenlocker libplasma plasma-workspace kdecoration; do
 done
 # The same rootfs split for phones without root (rootfs-packs.conf): a base image they download first and the packs
 # the app adds on demand (gaming, languages). Read from the full tarball, so it never changes what rooted installs get.
-python3 -I "$HERE/tools/split-rootfs.py" "$OUT/powos-rootfs.tar.gz" "$HERE/rootfs-packs.conf" "$OUT"
+python3 -I "$HERE/tools/split-rootfs.py" "$POWOS_IMAGES/powos-rootfs.tar.gz" "$HERE/rootfs-packs.conf" "$POWOS_IMAGES"
 
 # Serve it to the PowOS app (engine InstallActivity.ROOTFS_URL = http://android.pow/apk/powos-rootfs.tar.gz):
-# android-app-dev's web server serves its output/ there. A hard link, not a copy (same disk, ~2 GB).
-PUBLISH=${POWOS_PUBLISH_DIR:-$HOME/Projects/android-app-dev/output}
+# android-app-dev's web server serves the rootfs/base/pack names from $POWOS_PUBLISHED (its nginx.conf), the rest of
+# /apk/ from its output/. Same NAS as the build, so publishing is a hard link (publish_file copies if it can't link).
+PUBLISH=${POWOS_PUBLISH_DIR:-$POWOS_PUBLISHED}
+[ -n "${POWOS_PUBLISH_DIR:-}" ] || mkdir -p "$PUBLISH"
 if [ -d "$PUBLISH" ]; then
-  ln -f "$OUT/powos-rootfs.tar.gz" "$PUBLISH/powos-rootfs.tar.gz" && echo "published: http://android.pow/apk/powos-rootfs.tar.gz"
+  publish_file "$POWOS_IMAGES/powos-rootfs.tar.gz" "$PUBLISH/powos-rootfs.tar.gz" && echo "published: http://android.pow/apk/powos-rootfs.tar.gz"
   # The app refuses a rootfs whose sha256 isn't the one pinned in its assets (InstallActivity.PIN_ASSET): pin what
   # was just published, so the next build-app.sh ships the matching pin. Commit the pin with the rebuild; until the new
   # APK is out, first installs with the old APK refuse this tarball (by design: the pin is what makes it trusted).
   PIN=$HERE/app/engine/src/main/assets/powos-rootfs.sha256
-  cut -d' ' -f1 "$OUT/powos-rootfs.tar.gz.sha256" > "$PIN"
+  cut -d' ' -f1 "$POWOS_IMAGES/powos-rootfs.tar.gz.sha256" > "$PIN"
   echo "pinned: $(cat "$PIN") in ${PIN#$HERE/} - rebuild the app (build-app.sh) and commit the pin"
   # Base + packs beside it, pinned the same way (InstallActivity uses the base once it and every pack are pinned).
   # Opt-in (POWOS_PUBLISH_PACKS=1) until the base is the approved first install for phones without root.
   if [ "${POWOS_PUBLISH_PACKS:-0}" = 1 ]; then
-    for f in powos-rootfs-base $(cut -f1 "$OUT/powos-packs.tsv" | grep -vx base | sed 's/^/powos-pack-/'); do
-      ln -f "$OUT/$f.tar.gz" "$PUBLISH/$f.tar.gz"
-      cut -d' ' -f1 "$OUT/$f.tar.gz.sha256" > "$HERE/app/engine/src/main/assets/$f.sha256"
+    for f in powos-rootfs-base $(cut -f1 "$POWOS_IMAGES/powos-packs.tsv" | grep -vx base | sed 's/^/powos-pack-/'); do
+      publish_file "$POWOS_IMAGES/$f.tar.gz" "$PUBLISH/$f.tar.gz"
+      cut -d' ' -f1 "$POWOS_IMAGES/$f.tar.gz.sha256" > "$HERE/app/engine/src/main/assets/$f.sha256"
       echo "published + pinned: http://android.pow/apk/$f.tar.gz"
     done
   fi

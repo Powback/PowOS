@@ -300,7 +300,7 @@ Device in use: OnePlus Open (foldable, SM8550, Adreno 740), Android 16 / OxygenO
 | System slots (priv-app, recents, overlays) | `targets/android/system-module/` | `build-module.sh --priv-app` (recents ships from overlays/) → `rooted.sh module <zip> --note "<what changed>"` + reboot | `touch /data/adb/modules/powos-system/disable` + reboot |
 | Rooted scripts | `targets/android/rooted/*` | `targets/android/rooted/rooted.sh deploy --note "<what changed>"` | redeploy the previous version |
 | KWin / packages | `targets/android/pkgs/` | `build-pkgs.sh` (ccache) → rootfs | previous package |
-| Rootfs | `build-rootfs.sh` → `out/powos-rootfs.tar.gz` | `rooted.sh install --note "<what changed>"` (replaces `/data/powos/root`) | reinstall the old tarball |
+| Rootfs | `build-rootfs.sh` → `$POWOS_IMAGES/powos-rootfs.tar.gz` (NAS, tools/data-root.sh) | `rooted.sh install --note "<what changed>"` (replaces `/data/powos/root`) | reinstall the old tarball |
 | PowOS layer (`lib/`, `bin/`, `config/`) | repo | copy into `/data/powos/root/usr/lib/powos/…` (or `/etc/powos/…`) as root, then `targets/android/tools/deploy-note.sh "<what changed>"` | copy back the old file |
 Built centrally and shipped whole. Never `pacman -Syu` on the phone.
 **Never `pm uninstall-system-updates com.powos.app` (nor `pm clear`, nor a downgrade) without the backup step: it

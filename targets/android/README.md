@@ -82,8 +82,15 @@ targets/android/tools/device-test.sh test --steam [--box64] [--exe <url>]
 
 ```bash
 targets/android/build-pkgs.sh         # our KWin (Anland backend) -> out/pkgs/   (~20-40 min)
-targets/android/build-rootfs.sh       # rootfs -> out/powos-rootfs.tar.gz         (~1-2 h, mostly Mesa)
+targets/android/build-rootfs.sh       # rootfs -> $POWOS_IMAGES/powos-rootfs.tar.gz (~1-2 h, mostly Mesa)
 ```
+
+**Images live on the NAS** (PowCDN, `~/Projects/CLAUDE.md` "Big files"): [tools/data-root.sh](tools/data-root.sh) sets
+`POWOS_DATA_ROOT` (default `/mnt/nas/cdn/powos`, the same path on the Mac and in containers); the full rootfs, the
+base and the packs (+ `.sha256`, `powos-packs.tsv`) go to `$POWOS_IMAGES` = `$POWOS_DATA_ROOT/android/images/<checkout>`,
+~13 GB a build. Build caches stay local: `out/pkgs`, `out/work` (scratch), the `powos-android-cache` volume.
+`out/powos-rootfs.tar.gz` is only the build-base rootfs BUILD_ON_ROOTFS packages and plasma-pin.sh build in (from the
+build-inputs cache); build-rootfs.sh no longer replaces it. NAS down: the build stops before it starts.
 
 Both run in containers capped at 8 CPUs / 16 GB, because the Colima VM also serves the live PowStation
 services. The rootfs is assembled on a Docker volume, not a macOS folder (Linux ownership, devices, links); when
@@ -92,8 +99,8 @@ the shared Docker disk has under 25 GB free (or with `POWOS_SCRATCH=image`), in 
 
 **Base image + packs (phones without root).** build-rootfs.sh then splits the full rootfs by
 [rootfs-packs.conf](rootfs-packs.conf) ([tools/split-rootfs.py](tools/split-rootfs.py), ~6 min, streams the tarball:
-also runs alone on an existing `out/powos-rootfs.tar.gz`; `--plan` prints the split from a `tar -tv` listing in
-seconds): `out/powos-rootfs-base.tar.gz`, which the app's first install downloads, and `out/powos-pack-<name>.tar.gz`
+also runs alone on an existing `$POWOS_IMAGES/powos-rootfs.tar.gz`; `--plan` prints the split from a `tar -tv` listing in
+seconds): `powos-rootfs-base.tar.gz`, which the app's first install downloads, and `powos-pack-<name>.tar.gz`
 packs the app adds on demand (engine `Packs.java`). The base is the dependency closure of the day-one packages
 (`roots`: the Plasma session on Android, the PowOS widgets' QML, the PowOS CLI, terminal, sound, pacman); the packs:
 **gaming** (FEX + its x86 rootfs, box64, Steam's bootstrap and launchers, with their own dependencies), **apps**
@@ -106,8 +113,9 @@ request `pack gaming`), or right after the install for languages when Android's 
 Measured on the 10-26 build (7.07 GB download, 15.9 GiB unpacked): base 1.03 GB / 2.8 GiB, gaming 2.75 GB / 5.0 GiB,
 apps 2.20 GB / 5.2 GiB, dev 0.23 GB / 0.8 GiB, languages 0.59 GB / 1.6 GiB, docs dropped 0.5 GiB.
 
-Publishing: build-rootfs.sh hard-links the full rootfs into `$POWOS_PUBLISH_DIR` (default
-`~/Projects/android-app-dev/output`, served on the LAN/VPN as `http://android.pow/apk/`) and pins its sha256 in
+Publishing: build-rootfs.sh hard-links the full rootfs into `$POWOS_PUBLISH_DIR` (default `$POWOS_PUBLISHED` =
+`/mnt/nas/cdn/powos/android/published`, on the NAS beside the images; android-app-dev's nginx serves those names on
+the LAN/VPN as `http://android.pow/apk/`, the APKs still from its `output/`) and pins its sha256 in
 `app/engine/src/main/assets/`. Base + packs go there too only with `POWOS_PUBLISH_PACKS=1` (same directory, same
 pins: `powos-rootfs-base.sha256`, `powos-pack-*.sha256`); the app installs the base only when it pins the base and
 every pack, otherwise (and on rooted phones) the full rootfs as before. Packages whose files sit in a pack stay
@@ -118,7 +126,7 @@ registered with pacman; a package update re-extracts them.
 1. Install the stock Andromarchy APK from its GitHub releases. Don't open it yet.
 2. Push the rootfs where its installer looks for an offline copy:
    ```bash
-   adb push targets/android/out/powos-rootfs.tar.gz \
+   adb push /mnt/nas/cdn/powos/android/images/<checkout>/powos-rootfs.tar.gz \
      /sdcard/Android/data/andro.marchy/files/lotfix-rootfs.tar.gz
    ```
    (Open the app once first if `Android/data/andro.marchy` doesn't exist yet, then back out at the form.)

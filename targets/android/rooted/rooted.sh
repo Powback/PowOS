@@ -1,7 +1,7 @@
 #!/bin/bash
 # PowOS alongside Android on a ROOTED phone (Magisk), driven from the Mac over adb. Not the no-root app: PowOS's
 # own Linux system runs with root on the phone's kernel, with the real GPU (Turnip on KGSL).
-#   install   push targets/android/out/powos-rootfs.tar.gz, unpack to /data/powos/root, install the boot service
+#   install   push $POWOS_IMAGES/powos-rootfs.tar.gz (NAS), unpack to /data/powos/root, install the boot service
 #   deploy    (re)install the rooted-mode scripts + the app's rooted-mode flag (part of install; rerun after
 #             changing rooted/*): boot service, desktop session (powos-session.sh, powos-rooted-session)
 #   start     mount + start PowOS now (rooted/powos-start.sh; also runs at every boot via Magisk)
@@ -33,7 +33,9 @@ case "${1:-}" in
 esac
 # After a deploy: the phone's "update applied" notification (batched: install's own deploy makes the same one).
 noted() { ADB=adb "$HERE/../tools/deploy-note.sh" ${SILENT:+--silent} "${NOTE:-rooted deploy}"; }
-ROOTFS=${ROOTFS:-$HERE/../out/powos-rootfs.tar.gz}
+# The built image is on the NAS (tools/data-root.sh: $POWOS_IMAGES), not in out/.
+. "$HERE/../tools/data-root.sh"
+ROOTFS=${ROOTFS:-$POWOS_IMAGES/powos-rootfs.tar.gz}
 
 # The sandbox's tarball for the phone (deploy, below): lib/ai/sandbox without its local node_modules, plus the deps
 # from its lock, built once per lock hash under ~/.cache/powos-sandbox (under $HOME: tools/phone/bin/adb pushes only
