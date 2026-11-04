@@ -12,27 +12,32 @@ render fence is -1 ("ready now"). Called from AnlandEglLayer::doEndFrame (the de
 and AnlandWindowTask::render (a task: the whole buffer, it redraws it whole). When the import succeeds (every phone with
 a GPU) nothing changes: no mapping is made and the fence path is the same as before.
 
+A buffer the consumer can't share at all (the emulator: ranchu's host-memory gralloc, mmap EPERM) comes as a memfd CPU
+shadow (native_consumer.c make_shadow), recognised by F_GET_SEALS and copied the same way; a buffer with no stride (the
+emulator reports 0) is taken as tight rows.
+
 docs/research/nonroot-parity.md (Linux windows blank on GPU-less devices) has the plan and the next fallback (memfd
 buffers the consumer copies in) for a gralloc whose buffers can't be mapped.
 ---
 diff --git a/src/backends/anland/anland_egl_backend.cpp b/src/backends/anland/anland_egl_backend.cpp
-index 9dd6437..5fc77a3 100644
+index 9dd6437..90e1470 100644
 --- a/src/backends/anland/anland_egl_backend.cpp
 +++ b/src/backends/anland/anland_egl_backend.cpp
-@@ -18,7 +18,12 @@
+@@ -18,7 +18,13 @@
  #include "opengl/glutils.h"
  #include "utils/filedescriptor.h"
  
 +#include <cerrno>
 +#include <cstring>
  #include <drm_fourcc.h>
++#include <fcntl.h>
 +#include <linux/dma-buf.h>
 +#include <sys/ioctl.h>
 +#include <sys/mman.h>
  #include <unistd.h>
  
  #ifndef EGL_PLATFORM_SURFACELESS_MESA
-@@ -79,6 +84,7 @@ void AnlandEglLayer::releaseBuffers()
+@@ -79,6 +85,7 @@ void AnlandEglLayer::releaseBuffers()
          m_textures[i].reset();
          m_renderTargets[i].reset();
          m_accumDamage[i] = Region();
@@ -40,7 +45,7 @@ index 9dd6437..5fc77a3 100644
      }
      m_damageFlags = 0;
      m_damageMask = 0;
-@@ -144,6 +150,7 @@ bool AnlandEglLayer::importBuffers(int count)
+@@ -144,6 +151,7 @@ bool AnlandEglLayer::importBuffers(int count)
  
          m_textures[i] = std::move(imported.texture);
          m_fbos[i] = std::move(imported.fbo);
@@ -48,7 +53,7 @@ index 9dd6437..5fc77a3 100644
          m_renderTargets[i].emplace(m_fbos[i].get());
          // Freshly imported dmabuf has undefined contents: owe it a full repaint.
          m_accumDamage[i] = Region::infinite();
-@@ -198,6 +205,13 @@ std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
+@@ -198,6 +206,13 @@ std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
  bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region &damagedDeviceRegion, OutputFrame *frame)
  {
      glFlush(); // flush pending rendering commands into the dmabuf.
@@ -62,7 +67,7 @@ index 9dd6437..5fc77a3 100644
      for (int i = 0; i < m_bufCount; i++)
          m_accumDamage[i] = m_accumDamage[i] + damagedDeviceRegion;
  
-@@ -210,6 +224,13 @@ bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region
+@@ -210,6 +225,13 @@ bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region
      if (m_damageFlags != 0)
          scheduleRepaint(nullptr);
  
@@ -76,7 +81,25 @@ index 9dd6437..5fc77a3 100644
      // Instead of CPU-blocking on glFinish, create a fence for the just-submitted
      // GPU work and hand it to the consumer (via the transport). The consumer passes
      // it to ANativeWindow_queueBuffer, so SurfaceFlinger waits on it GPU-side before
-@@ -291,8 +312,13 @@ AnlandEglBackend::ImportedBuffer AnlandEglBackend::importConsumerBuffer(display_
+@@ -274,6 +296,17 @@ AnlandEglBackend::ImportedBuffer AnlandEglBackend::importConsumerBuffer(display_
+     }
+     const QSize size(info.width, info.height);
+ 
++    // PowOS: a memfd is the consumer's CPU shadow of a buffer it can't share (native_consumer.c make_shadow: a GPU-less
++    // device whose window buffers can't be mapped, the emulator) - no dma-buf, so straight to the CPU copy rather than
++    // depending on whether this Mesa happens to take a memfd as one. Only memfds answer F_GET_SEALS.
++    if (fcntl(fd, F_GET_SEALS) >= 0) {
++        ImportedBuffer copied = importForCpuCopy(fd, index, info, contentTransform);
++        if (!copied.texture) {
++            qCWarning(KWIN_ANLAND) << "failed to map the CPU shadow" << index;
++        }
++        return copied;
++    }
++
+     DmaBufAttributes attrs;
+     attrs.planeCount = 1;
+     attrs.width = size.width();
+@@ -291,8 +324,13 @@ AnlandEglBackend::ImportedBuffer AnlandEglBackend::importConsumerBuffer(display_
      // EGLImageTexture(...) dance is gone in 6.x).
      std::shared_ptr<GLTexture> texture = importDmaBufAsTexture(attrs);
      if (!texture) {
@@ -92,10 +115,38 @@ index 9dd6437..5fc77a3 100644
      }
      texture->setContentTransform(contentTransform);
      auto fbo = std::make_unique<GLFramebuffer>(texture.get());
-@@ -312,6 +338,99 @@ AnlandEglBackend::ImportedBuffer AnlandEglBackend::importConsumerBuffer(display_
+@@ -312,6 +350,127 @@ AnlandEglBackend::ImportedBuffer AnlandEglBackend::importConsumerBuffer(display_
      return ImportedBuffer{.texture = std::move(texture), .fbo = std::move(fbo), .size = size};
  }
  
++namespace
++{
++/** PowOS: the CPU copy's render target, stored as RGBA bytes like the consumer's ABGR8888 buffer (GLTexture::allocate
++ *  makes a BGRA one on GLES), so glReadPixels is a straight copy with no swizzle. */
++class AnlandCpuTexture : public GLTexture
++{
++public:
++    AnlandCpuTexture(GLuint texture, const QSize &size)
++        : GLTexture(GL_TEXTURE_2D, texture, GL_RGBA8, size, 1, true, OutputTransform())
++    {
++    }
++};
++
++std::shared_ptr<GLTexture> allocateRgba(const QSize &size)
++{
++    GLuint texture = 0;
++    glGenTextures(1, &texture);
++    if (!texture) {
++        return nullptr;
++    }
++    glBindTexture(GL_TEXTURE_2D, texture);
++    const bool gles = EglContext::currentContext()->isOpenGLES();
++    glTexImage2D(GL_TEXTURE_2D, 0, gles ? GL_RGBA : GL_RGBA8, size.width(), size.height(), 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
++    glBindTexture(GL_TEXTURE_2D, 0);
++    return std::make_shared<AnlandCpuTexture>(texture, size);
++}
++}
++
 +AnlandCpuMapping::~AnlandCpuMapping()
 +{
 +    if (base) {
@@ -134,7 +185,7 @@ index 9dd6437..5fc77a3 100644
 +    cpu->drmFormat = protocol_format_to_drm(info.format);
 +    cpu->size = size;
 +
-+    std::shared_ptr<GLTexture> texture = GLTexture::allocate(GL_RGBA8, size);
++    std::shared_ptr<GLTexture> texture = allocateRgba(size);
 +    if (!texture) {
 +        qCWarning(KWIN_ANLAND) << "no offscreen texture" << size << "for buffer" << index;
 +        return {};

@@ -27,6 +27,9 @@ export KDE_FULL_SESSION=true
 # Qt's messages to stderr (this session's log, hyprland.log), not to a journal: there is no journald here, so every
 # Plasma message - and plasmashell's last words before KCrash restarts it - went nowhere.
 export QT_FORCE_STDERR_LOGGING=1
+# KWin's Android-task backend at info, as powos-rooted-session has it: which buffers it imported or maps for the CPU copy
+# (kwin 0053), which windows became tasks - without it only warnings showed on a device without root.
+export QT_LOGGING_RULES="kwin_backend_anland.info=true"
 # PowOS knows it is the phone build (the powos CLI gates boot/bootc/systemd commands on this).
 export POWOS_PLATFORM=phone
 
