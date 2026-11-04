@@ -730,6 +730,49 @@ public final class GamepadOverlay extends View {
 
     private final List<Module> modules = new ArrayList<>();
     private final SparseArray<Module> owner = new SparseArray<>();
+    /** Fingers on plain (non-toggle) buttons: they slide between buttons and press two on a border, like a real
+     *  pad; every other module keeps the finger that landed on it (owner). */
+    private final SlideButtons slide = new SlideButtons();
+    private final List<ButtonModule> slideButtons = new ArrayList<>();
+    private boolean slidePressed;
+    private final SlideButtons.Sink slideSink = new SlideButtons.Sink() {
+        @Override public void press(int i) {
+            ButtonModule b = slideButtons.get(i);
+            b.pressed = true;
+            state.buttons |= b.bit;
+            slidePressed = true;
+        }
+
+        @Override public void release(int i) {
+            ButtonModule b = slideButtons.get(i);
+            b.pressed = false;
+            state.buttons &= ~b.bit;
+        }
+    };
+
+    private static boolean slides(Module m) {
+        return m instanceof ButtonModule && !"toggle".equals(m.mode);
+    }
+
+    /** The slide buttons' circles as drawn (zone centre, min half-side); only taken while no finger is on one. */
+    private void syncSlideButtons() {
+        List<ButtonModule> list = new ArrayList<>();
+        for (Module m : modules) if (slides(m)) list.add((ButtonModule) m);
+        float[] c = new float[Math.min(64, list.size()) * 3];
+        for (int i = 0; i < c.length / 3; i++) {
+            RectF z = list.get(i).zone;
+            c[i * 3] = z.centerX();
+            c[i * 3 + 1] = z.centerY();
+            c[i * 3 + 2] = Math.min(z.width(), z.height()) / 2f;
+        }
+        // A fingertip's contact patch is about 8 mm across: a finger centred on the gap between two adjacent face
+        // buttons overlaps both.
+        slide.slop = 4f / 25.4f * 160f * getResources().getDisplayMetrics().density;
+        if (slide.setButtons(c)) {
+            slideButtons.clear();
+            slideButtons.addAll(list.subList(0, c.length / 3));
+        }
+    }
     private final PadState state = new PadState();
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final PadHub hub;
@@ -884,6 +927,7 @@ public final class GamepadOverlay extends View {
 
     private void releaseAll() {
         owner.clear();
+        slide.clear();
         for (Module m : modules) m.reset();
         state.buttons = 0;
         state.lx = state.ly = state.rx = state.ry = state.lt = state.rt = 0;
@@ -967,6 +1011,14 @@ public final class GamepadOverlay extends View {
             case MotionEvent.ACTION_POINTER_DOWN: {
                 int i = e.getActionIndex();
                 Module m = moduleAt(e.getX(i), e.getY(i));
+                syncSlideButtons();
+                if ((m == null || slides(m)) && slide.down(e.getPointerId(i), e.getX(i), e.getY(i), slideSink)) {
+                    if (action == MotionEvent.ACTION_DOWN && android.os.Build.VERSION.SDK_INT >= 30)
+                        requestUnbufferedDispatch(e);
+                    changed = true;
+                    if (Log.isLoggable(TAG, Log.DEBUG)) Log.d(TAG, "down button t=" + e.getEventTime());
+                    break;
+                }
                 if (m == null) {
                     // Not a control: the first finger's gesture goes to the desktop instead.
                     return action != MotionEvent.ACTION_DOWN;
@@ -987,13 +1039,24 @@ public final class GamepadOverlay extends View {
             }
             case MotionEvent.ACTION_MOVE:
                 for (int i = 0; i < e.getPointerCount(); i++) {
-                    Module m = owner.get(e.getPointerId(i));
+                    int id = e.getPointerId(i);
+                    if (slide.tracks(id)) {
+                        int before = state.buttons;
+                        slide.move(id, e.getX(i), e.getY(i), slideSink);
+                        changed |= state.buttons != before;
+                        continue;
+                    }
+                    Module m = owner.get(id);
                     if (m != null) changed |= m.move(e.getPointerId(i), e.getX(i), e.getY(i), state);
                 }
                 break;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_POINTER_UP: {
                 int id = e.getPointerId(e.getActionIndex());
+                if (slide.tracks(id)) {
+                    slide.up(id, slideSink);
+                    changed = true;
+                }
                 Module m = owner.get(id);
                 if (m != null) {
                     changed = m.up(id, state);
@@ -1006,6 +1069,9 @@ public final class GamepadOverlay extends View {
                 return true;
         }
         if (changed) send();
+        // A button pressed by this event (tapped or slid onto) buzzes once, however many it pressed.
+        if (slidePressed) performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        slidePressed = false;
         // Always redraw: a dynamic stick appears (and follows the thumb) before its output leaves the deadzone.
         invalidate();
         return true;

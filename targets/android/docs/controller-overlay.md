@@ -51,6 +51,11 @@ Every module has: `id`, `type`, `zone` (rect in screen fractions, so one layout 
 | `layer` | press/hold | `hold` or `toggle` target layer | switch layer |
 | `group` | container | moves/resizes its children together | — |
 
+Plain (non-toggle) buttons behave like a real pad: a finger is not pinned to the button it landed on. Sliding
+onto another button presses it and releases the one it left; a finger on the border of two adjacent buttons (its
+~8 mm contact patch overlaps both) holds both; each finger is tracked on its own (`SlideButtons.java`,
+`SlideButtonsTest`).
+
 Dynamic sticks are the default for the two thumb halves of the screen: a stick zone is a large invisible
 area; the stick appears under the thumb, and fading in a ring shows its centre.
 
