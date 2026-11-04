@@ -39,6 +39,8 @@ public class SessionService extends Service {
     private static final String TAG = "Andromarchy";
     private static final String CHANNEL = "session";
     private static final int NOTIFICATION_ID = 1;
+    private static final String SETUP_CHANNEL = "setup";
+    private static final int SETUP_NOTIFICATION_ID = 2;
 
     private final List<Process> processes = new ArrayList<>();
     private PowerManager.WakeLock wakeLock;
@@ -240,6 +242,8 @@ public class SessionService extends Service {
                         if (attempts > 0)
                             Log.i(TAG, "session: up (try " + attempts + ")");
                         attempts = 0;
+                        // The whole session runs by now (Plasma is what pushes it past the limit): look again then.
+                        session.postDelayed(limitCheck, 60_000);
                     } else
                         session.postDelayed(this, 2000); // still coming up
                     return;
@@ -387,10 +391,9 @@ public class SessionService extends Service {
         env.put("OMARCHY_PATH", "/usr/share/omarchy");
         spawn("hyprland", List.of(launcher, "-c", "export PATH=/usr/share/omarchy/bin:$PATH; exec /usr/bin/Hyprland"), env);
 
-        // 5. desktop-ready (ends the splash, SplashScreen): Omarchy's shell runs, plus a second to draw the bar.
-        spawn("desktop-ready", List.of(launcher, "-c", "for i in $(seq 600); do pgrep -x quickshell >/dev/null"
-                + " || pgrep -x qs >/dev/null && break; sleep 0.2; done; sleep 1; touch \"$XDG_RUNTIME_DIR/desktop-ready\""),
-                archEnv(run, sock));
+        // 5. desktop-ready (ends the splash, SplashScreen): the session launcher touches it once plasmashell runs
+        //    (session/Hyprland). The app's own waiter for Omarchy's quickshell is gone: PowOS has no quickshell, so it
+        //    only polled pgrep for 2 minutes - a process and ~600 more against Android 12+'s child process limit.
     }
 
     /**
@@ -617,10 +620,97 @@ public class SessionService extends Service {
         // stdin /dev/null, output its log (made anew each start).
         pb.redirectErrorStream(true).redirectOutput(log)
                 .redirectInput(new File("/dev/null"));
+        Process p = pb.start();
         synchronized (processes) {
-            processes.add(pb.start());
+            processes.add(p);
         }
         Log.i(TAG, "started " + name + " (log: " + log + ")");
+        watch(name, p);
+    }
+
+    /**
+     * Notices a session process Android ended (PhantomLimit.killedByAndroid): SIGKILL while still one of this
+     * session's - endSession/onDestroy take theirs out of `processes` in the same step as they end them.
+     */
+    private void watch(String name, Process p) {
+        Thread t = new Thread(() -> {
+            int code;
+            try {
+                code = p.waitFor();
+            } catch (InterruptedException e) {
+                return;
+            }
+            boolean ours;
+            synchronized (processes) {
+                ours = processes.remove(p);
+            }
+            if (PhantomLimit.killedByAndroid(code, !ours)) {
+                Log.w(TAG, "session: " + name + " was killed (signal 9) - Android's child process limit?");
+                phantomNotice(true);
+            }
+        }, "watch-" + name);
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** The guest at or over Android's child process limit while the limit is on: the setup step, before a kill. */
+    private final Runnable limitCheck = () -> {
+        int n = guestProcesses();
+        Log.i(TAG, "session: " + n + " guest processes (Android 12+ limit " + PhantomLimit.ANDROID_LIMIT + ")");
+        if (PhantomLimit.atLimit(n))
+            phantomNotice(false, n);
+    };
+
+    /** This app's processes other than its own Android ones (the app, :restart): the Linux session's. */
+    private int guestProcesses() {
+        File[] procs = new File("/proc").listFiles((d, n) -> n.chars().allMatch(Character::isDigit));
+        if (procs == null)
+            return 0;
+        int uid = android.os.Process.myUid(), n = 0;
+        for (File p : procs) {
+            try {
+                if (android.system.Os.stat(p.getPath()).st_uid != uid)
+                    continue;
+                byte[] b = java.nio.file.Files.readAllBytes(new File(p, "cmdline").toPath());
+                if (!new String(b, java.nio.charset.StandardCharsets.UTF_8).startsWith(getPackageName()))
+                    n++;
+            } catch (Exception e) {
+                // gone meanwhile, or not ours
+            }
+        }
+        return n;
+    }
+
+    private static volatile boolean phantomNoticeShown; // once per app process: a setup step, not an alarm
+
+    private void phantomNotice(boolean killed) {
+        phantomNotice(killed, guestProcesses());
+    }
+
+    /** The one-time setup step (ChildProcessSetupActivity), as a notification, when this phone still has the limit. */
+    private void phantomNotice(boolean killed, int processes) {
+        PhantomLimit.Fix fix = PhantomLimit.fix(android.os.Build.VERSION.SDK_INT,
+                android.provider.Settings.Global.getString(getContentResolver(), PhantomLimit.MONITOR_SETTING));
+        if (fix == PhantomLimit.Fix.NONE)
+            return;
+        if (phantomNoticeShown)
+            return;
+        phantomNoticeShown = true;
+        Intent open = new Intent(this, ChildProcessSetupActivity.class)
+                .putExtra(ChildProcessSetupActivity.EXTRA_KILLED, killed)
+                .putExtra(ChildProcessSetupActivity.EXTRA_PROCESSES, processes)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        nm.createNotificationChannel(new NotificationChannel(SETUP_CHANNEL, "Setup", NotificationManager.IMPORTANCE_HIGH));
+        nm.notify(SETUP_NOTIFICATION_ID, new Notification.Builder(this, SETUP_CHANNEL)
+                .setSmallIcon(android.R.drawable.stat_sys_warning)
+                .setContentTitle("Linux apps: one setup step")
+                .setContentText(killed ? "Android stopped part of the desktop. Turn off child process restrictions."
+                        : "Turn off Android's child process restrictions, or Linux apps may close.")
+                .setContentIntent(PendingIntent.getActivity(this, 1, open,
+                        PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT))
+                .setAutoCancel(true)
+                .build());
     }
 
     @Override
@@ -635,6 +725,7 @@ public class SessionService extends Service {
         synchronized (processes) {
             for (Process p : processes)
                 p.destroy();
+            processes.clear(); // ended by the app, not by Android (watch)
         }
         if (wakeLock != null && wakeLock.isHeld())
             wakeLock.release();

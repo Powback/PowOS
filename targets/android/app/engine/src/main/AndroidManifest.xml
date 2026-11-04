@@ -108,6 +108,11 @@
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
         <activity
+            android:name=".ChildProcessSetupActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.DeviceDefault.Dialog" />
+        <activity
             android:name=".Restarter"
             android:exported="false"
             android:excludeFromRecents="true"
