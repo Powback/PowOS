@@ -222,3 +222,21 @@ hour; it is the task's next step.
   LinuxSameCommandTest). powos-open-task itself answered "task" (no 30 s fallback to "desktop").
 - **Left**: the base image must be rebuilt for the new Hyprland / powos-apps-export to reach installs (the emulator ran
   hand-copied ones); the window's search field takes focus and raises the Android keyboard on open.
+
+### 11-04 (nonroot-base-refresh): the base carries kwin 3.61 + the new session scripts; keyboard on a window's first focus
+
+- **Base rebuilt** (build-rootfs.sh, POWOS_PUBLISH_PACKS=1, Plasma pinned 6.7.5, the KWin/Plasma check passed): kwin
+  6.7.5-3.61 and this tree's session/Hyprland + powos-apps-export are in powos-rootfs-base (byte-identical), published on
+  android.pow/apk and pinned. split-rootfs.py now writes beside its hard-linked outputs and renames over.
+- **Emulator** (fresh app data: `pm clear com.powos.app`, persist.powos.root=0, APK 7b8fcb48 via emu.sh install): the
+  base downloads (995 MB) and installs (kwin 6.7.5-3.61 in its pacman db), KWin + plasmashell start, System Settings from
+  the launcher draws in one PowOS window, no hand-copied files, and no Android keyboard comes up as it opens
+  (~/pw/nonroot-base-refresh-shots/03..05).
+- **Keyboard**: WebWindowSource now holds a window consumer's keyboard ask that no touch came before (TapKeyboard; a tap
+  in that window raises it). But KWin's log shows the ask on open went to the DESKTOP consumer, before the window had its
+  own keyboard: `Android keyboard shown - v2 show on the desktop 0`, then `window task 1 : its own Android keyboard true`.
+  KWin then counts the keyboard as shown, so tapping the already-focused search field raises nothing (05).
+  **Next (kwin 0043)**: when a window task takes its own keyboard, move the current shown state to that consumer (hide
+  on the desktop, show on the window's, so TapKeyboard holds it for the tap) - kwin rebuild + base republish.
+- Seen once after `pm clear`: LinuxService ForegroundServiceDidNotStartInTimeException (main thread busy at the
+  first download tap; the app restarted and the second tap worked).
