@@ -1,7 +1,8 @@
 #!/bin/bash
 # lanes: phone
 # bf-driver.sh (Mac; queued) start Broforce cold, wait for its window, run bf-driver-phone.sh (root, read-only) while
-# it is up, close it and put Steam + the front activity back. Exit 3 on a touch.
+# it is up, close it and put Steam + the front activity back. PASS = the game maps OUR Turnip (the package's inode),
+# FAIL = another one (FEX RootFS's x86_64 Turnip, emulated). Exit 3 on a touch.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); W=$here/..; A=$W/adb.sh
 OUT=$HOME/.cache/powos-verify/bfd-$(date +%F_%H%M); mkdir -p "$OUT"
@@ -18,11 +19,15 @@ restore() { pill "closing the game, putting Steam back"; asuser bf-stop.sh >/dev
   [ -n "$front" ] && "$A" shell "am start -n $front >/dev/null 2>&1"; }
 i0=$(irq)
 pill "bf-driver: launching Broforce"; asuser bf-start.sh >/dev/null
-win=""; for i in $(seq 48); do sleep 5; [ "$(irq)" != "$i0" ] && { echo "touch - abort"; restore; exit 3; }
+win=""; for i in $(seq "${BF_WIN_TRIES:-48}"); do sleep 5; [ "$(irq)" != "$i0" ] && { echo "touch - abort"; restore; exit 3; }
   win=$(asuser bf-window.sh | tail -1); case $win in win=[0-9]*) break ;; esac; done
-case $win in win=[0-9]*) ;; *) echo "FAIL: no game window in 4 min"; restore; exit 1 ;; esac
+case $win in win=[0-9]*) ;; *) echo "FAIL: no game window in 4 min - the maps/env of what runs:"
+  perl -e 'alarm 120; exec @ARGV' "$W/root.sh" "$here/bf-driver-phone.sh" 2>&1 | grep -v pushed | tee "$OUT/driver.txt"; restore; exit 1 ;; esac
 echo "window after $((i * 5)) s: $win"; sleep 15
 pill "bf-driver: reading the game's mapped Vulkan driver"
 perl -e 'alarm 120; exec @ARGV' "$W/root.sh" "$here/bf-driver-phone.sh" 2>&1 | grep -v pushed | tee "$OUT/driver.txt"
 restore
-grep -q '^   map .*vulkan_freedreno' "$OUT/driver.txt" && echo "PASS: driver map captured ($OUT/driver.txt)" || { echo "FAIL: no Vulkan driver mapping seen ($OUT/driver.txt)"; exit 1; }
+grep -q '^   map .*vulkan_freedreno' "$OUT/driver.txt" || { echo "FAIL: no Vulkan driver mapping seen ($OUT/driver.txt)"; exit 1; }
+v=$(grep -m1 '^== verdict:' "$OUT/driver.txt"); ahb=$(grep -m1 'AHB bus errors' "$OUT/driver.txt" | sed 's/.*: //')
+case $v in "== verdict: OURS "*) echo "PASS: ${v#== verdict: }; AHB/20 s $ahb ($OUT/driver.txt)" ;;
+  *) echo "FAIL: ${v#== verdict: }; AHB/20 s $ahb ($OUT/driver.txt)"; exit 1 ;; esac

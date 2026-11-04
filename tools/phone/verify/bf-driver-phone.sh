@@ -9,6 +9,7 @@ echo "== candidates (inode size path)"
 for f in /usr/lib/libvulkan_freedreno.so /usr/share/fex-emu/RootFS/Fedora_44/usr/lib64/libvulkan_freedreno.so \
   /usr/share/fex-emu/RootFS/Fedora_44/usr/lib/libvulkan_freedreno.so; do echo "$(stat -Lc '%i %s' "$f") $f $(pacman -Qoq "$f" 2>/dev/null)"; done
 echo "== processes mapping Vulkan"
+ours=$(stat -Lc %i /usr/lib/libvulkan_freedreno.so); game_ours=0 game_other=""
 for m in /proc/[0-9]*/maps; do p=${m#/proc/}; p=${p%/maps}
   case $(readlink /proc/$p/exe) in /system/*|/data/*) continue ;; esac   # Android's own apps: their own libvulkan
   hits=$(awk '$6 ~ /freedreno|libvulkan|vulkan-(host|guest)/ {print $5, $6, $7}' "$m" 2>/dev/null | sort -u)
@@ -17,7 +18,17 @@ for m in /proc/[0-9]*/maps; do p=${m#/proc/}; p=${p%/maps}
   echo "$hits" | sed 's/^/   map /'
   tr '\0' '\n' < /proc/$p/environ 2>/dev/null | grep -E '^(VK_|FEX_|TU_|tu_|MESA|PRESSURE_VESSEL_GRAPHICS|LD_LIBRARY_PATH|STEAM_COMPAT_TOOL_PATHS)' | cut -c1-300 | sed 's/^/   env /'
   echo "   stderr -> $(readlink /proc/$p/fd/2)"
+  # Where it sits (a hang in the thunk / loader shows here): the main thread's state + kernel wait channel.
+  echo "   state $(awk '/^State/ {print $2, $3}' /proc/$p/status) wchan $(cat /proc/$p/wchan 2>/dev/null) threads $(ls /proc/$p/task | wc -l)"
+  # The game's processes (FEX-run x86 or native Wine, not KWin/Xwayland): whose Turnip they really map, by inode.
+  case $(readlink /proc/$p/exe) in *FEX* | *wine*)
+    for i in $(echo "$hits" | awk '$2 ~ /vulkan_freedreno/ {print $1}'); do
+      [ "$i" = "$ours" ] && game_ours=1 || game_other="$game_other $i"; done ;; esac
 done
+# bf-driver.sh's verdict: PASS only when the game maps OUR package's Turnip (native aarch64, via FEX's Vulkan thunk
+# or ARM64 Proton), not FEX RootFS's emulated x86_64 one.
+if [ $game_ours = 1 ]; then echo "== verdict: OURS - the game maps /usr/lib/libvulkan_freedreno.so inode $ours${game_other:+ (also:$game_other)}"
+else echo "== verdict: NOT OURS - the game maps inode(s)${game_other:- none} (ours: $ours)"; fi
 echo "== KGSL GPU memory owners"
 for d in /sys/kernel/debug/kgsl/proc/[0-9]*; do [ -e "$d" ] || { echo "(no kgsl debugfs)"; break; }; p=${d##*/}; [ -d /proc/$p ] && echo "$p $(cat /proc/$p/comm) $(wc -l < $d/mem 2>/dev/null) bos"; done
 c() { dmesg | grep -c 'AHB bus error'; }

@@ -118,7 +118,29 @@ case $(readlink "/proc/${steam_pid:-0}/exe" 2>/dev/null) in
         cmp -s /usr/lib/powos-steam/user_settings.py "$d/user_settings.py" \
           || install -m644 /usr/lib/powos-steam/user_settings.py "$d/user_settings.py"
       fi
-    done ;;
+    done
+    # HACK: FEX's Vulkan thunk inside pressure-vessel. Valve's FEX compat tool (FEX-2607) builds its thunk overlay paths
+    # from @PREFIX_LIB@ with a multiarch test on its RootFS - empty inside the container, so it takes the Fedora
+    # layout (.../overrides/lib64) while pressure-vessel puts the x86_64 loader at
+    # /usr/lib/pressure-vessel/overrides/lib/x86_64-linux-gnu/libvulkan.so.1: the thunk never matched and x86 games
+    # ran FEX RootFS's x86_64 Turnip emulated (bf-driver.sh, 2026-11-04). FEX also reads a ThunksDB.json from its
+    # user config dir (FEX_APP_CONFIG_LOCATION = compatdata/<id>/fex-emu/, the compat tool leaves it alone): ours
+    # names the container's paths explicitly. Real fix: FEX-2610's FEX_STEAM_SUPPORT prefixes (Valve's next FEX),
+    # then this goes. Off until x86 Proton launches on it: on 2026-11-04 16:11 the thunk worked (explorer.exe mapped
+    # libvulkan-guest/-host + our Turnip inode, natively) but Broforce never started (3 explorer.exe, no game exe, no
+    # window in 4 min). POWOS_FEX_VULKAN_THUNK=1 in ~/.config/powos/steam-env (or a check's env:) turns it on; off,
+    # the copies are removed again so a game never keeps a stale one.
+    if [ "${POWOS_FEX_VULKAN_THUNK:-0}" = 1 ] && [ -f /usr/lib/powos-steam/fex-ThunksDB.json ]; then
+      for d in "${XDG_DATA_HOME:-$HOME/.local/share}"/Steam/steamapps/compatdata/[0-9]*/; do
+        [ -d "$d" ] || continue; mkdir -p "$d/fex-emu"
+        cmp -s /usr/lib/powos-steam/fex-ThunksDB.json "$d/fex-emu/ThunksDB.json" \
+          || install -m644 /usr/lib/powos-steam/fex-ThunksDB.json "$d/fex-emu/ThunksDB.json"
+      done
+    else
+      for f in "${XDG_DATA_HOME:-$HOME/.local/share}"/Steam/steamapps/compatdata/*/fex-emu/ThunksDB.json; do
+        [ -f "$f" ] && cmp -s /usr/lib/powos-steam/fex-ThunksDB.json "$f" && rm -f "$f"
+      done
+    fi ;;
 esac
 
 # Environment for Steam and every game it starts (/usr/lib/powos-steam/steam-env, then the user's
@@ -148,6 +170,8 @@ fi
 # Games: Valve's FEX compat tool (steamapps/common/FEX-Emu) with GL + Vulkan thunks - the game's x86 graphics calls go
 # to PowOS's native Mesa (Turnip/freedreno on the Adreno; x86 Mesa can't reach Android's KGSL GPU driver). Its x86
 # system (RootFS) is /usr/share/guestos/fex-mesa, which steam.install points at FEX's RootFS.
+# The client overwrites STEAM_COMPAT_FEX_CONFIG per game (its own FEX setting, empty), so this export only reaches what
+# Steam starts outside a game; the games' Vulkan thunk comes from steam-env's FEX_THUNKCONFIG.
 export STEAM_COMPAT_FEX_CONFIG=${STEAM_COMPAT_FEX_CONFIG:-TSOEnabled:1,Multiblock:1,ThunksDB_GL:1,ThunksDB_Vulkan:1}
 
 # The ~/.steam links Valve's launcher script makes, for the native client: games start through

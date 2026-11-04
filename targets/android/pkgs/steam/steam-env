@@ -25,3 +25,15 @@ MESA_EXTENSION_OVERRIDE=+GL_ARB_buffer_storage
 # its shared-handle segment needs no semaphores. Measured 10:31: Broforce native window 36.6 s, first frame 44.9 s.
 # Real fix: the x86_64 shim inside native games (pass it through the FEX compat tool / pressure-vessel), then this goes.
 MONO_DISABLE_SHM=1
+
+# HACK: FEX's Vulkan thunk for x86 games (x86 Proton, native Linux builds): their Vulkan calls go to PowOS's own
+# aarch64 loader + Turnip (vulkan-freedreno-kgsl, patched, native) instead of FEX RootFS's x86_64 Turnip run under
+# emulation. /usr/bin/steam's STEAM_COMPAT_FEX_CONFIG (ThunksDB_Vulkan:1) never reaches a game: the client sets that
+# variable itself, to its per-game FEX setting (empty), for every launch (fex-compat-tool's printenv log,
+# /tmp/fex-compat-tool-<pid>.log: STEAM_COMPAT_FEX_CONFIG=, 2026-11-04), so Valve's FEX compat tool wrote an empty
+# ThunksDB and Broforce mapped the RootFS Turnip (bf-driver.sh). FEX_THUNKCONFIG (FEX's ThunkConfig option, read from
+# the environment) is a layer the client doesn't touch; FEX resolves /usr/... to /run/host/usr/... inside
+# pressure-vessel itself. ThunksDB.json's overlays already cover the container's loader paths
+# (/usr/lib/pressure-vessel/overrides/lib/x86_64-linux-gnu). A per-game Steam FEX setting, when set, still wins.
+# Real fix: the client honouring STEAM_COMPAT_FEX_CONFIG from its environment (Valve), then this line goes.
+FEX_THUNKCONFIG=/usr/lib/powos-steam/fex-thunks.json
