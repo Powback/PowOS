@@ -64,5 +64,9 @@ chroot "$R" /bin/bash /tmp/lotfix/build-inside.sh
 bash "$A/native/relativize-symlinks.sh" "$R" 2>/dev/null || true
 cleanup; trap - EXIT
 rm -rf "$R/tmp/lotfix" "$R/var/cache/pacman/pkg/"* "$R/etc/resolv.conf"
-tar --numeric-owner --hard-dereference -C "$R" -I 'gzip -6' -cf /out/powos-rootfs.tar.gz .
-(cd /out && sha256sum powos-rootfs.tar.gz | tee powos-rootfs.tar.gz.sha256)
+# Written beside and renamed over: out/powos-rootfs.tar.gz is often a hard link (the build-inputs cache, the published
+# copy, other worktrees' out/ - 100+ links), and writing it in place would replace every one of them mid-build.
+tar --numeric-owner --hard-dereference -C "$R" -I 'gzip -6' -cf /out/.powos-rootfs.tar.gz.new .
+(cd /out && sha256sum .powos-rootfs.tar.gz.new | sed 's/\.powos-rootfs\.tar\.gz\.new$/powos-rootfs.tar.gz/' > .powos-rootfs.tar.gz.sha256.new &&
+  mv -f .powos-rootfs.tar.gz.new powos-rootfs.tar.gz && mv -f .powos-rootfs.tar.gz.sha256.new powos-rootfs.tar.gz.sha256 &&
+  cat powos-rootfs.tar.gz.sha256)

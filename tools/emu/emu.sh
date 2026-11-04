@@ -41,6 +41,9 @@ STATE=$HOME/.cache/powos-emu
 BUILD_TREE=$REPO/.claude/worktrees/emu-build
 IMAGE=android-app-dev-android-builder:latest
 SNAP=powos-ready
+# DNS: Pi-hole on PowStation, so the LAN's names (android.pow: the APK, base image, packs and [powos] repo) resolve
+# in the emulator as on the phone - the emulator's default (the Mac's resolver via slirp) didn't give them.
+EMU_DNS=${EMU_DNS:-192.168.50.100}
 COMMIT_FILE=/data/local/tmp/powos-emu-commit
 mkdir -p "$STATE"
 a() { "$ADB" -s "$SERIAL" "$@"; }
@@ -136,7 +139,8 @@ boot() {
   say "booting $AVD on $SERIAL"
   "$ADB" start-server >/dev/null 2>&1
   nohup "$EMU" -avd "$AVD" -port "$PORT" -no-window -no-audio -no-boot-anim -writable-system \
-    -gpu "${EMU_GPU:-swiftshader_indirect}" -camera-back none -camera-front none "$@" > "$STATE/emulator.log" 2>&1 &
+    -gpu "${EMU_GPU:-swiftshader_indirect}" -camera-back none -camera-front none -dns-server "$EMU_DNS" "$@" \
+    > "$STATE/emulator.log" 2>&1 &
   echo $! > "$STATE/emulator.pid"
   local i; for i in $(seq 120); do running && break; kill -0 "$(cat "$STATE/emulator.pid")" 2>/dev/null || die "the emulator exited: $(tail -5 "$STATE/emulator.log")"; sleep 1; done
   wait_boot 400
@@ -238,8 +242,11 @@ su_access() {
 # children do what they do; the emulator has no Magisk).
 # persist.powos.root=1: the flag rooted.sh sets on the phone (RootMode.java: home made Android's default through su, ...).
 # Freeform support is read at boot: set before create's last reboot.
+# settings_enable_monitor_phantom_procs false: "Disable child process restrictions" (developer options), the engine's
+# documented requirement (targets/android/tools/device-test.sh push-rootfs) - without it Android's phantom process
+# killer ("Trimming phantom processes", past 32 children) ends KWin and the session bus as Plasma starts, no root.
 settings_like_phone() {
-  a shell 'setprop persist.powos.root 1; settings put global enable_freeform_support 1; settings put global force_resizable_activities 1; settings put global development_settings_enabled 1;
+  a shell 'setprop persist.powos.root 1; settings put global settings_enable_monitor_phantom_procs false; settings put global enable_freeform_support 1; settings put global force_resizable_activities 1; settings put global development_settings_enabled 1;
     settings put global window_animation_scale 1; settings put system screen_off_timeout 2147483647; svc power stayon true; locksettings set-disabled true 2>/dev/null; true'
 }
 # HACK: SELinux permissive on the emulator: its policy has no rules for the PowOS app's su children (the phone's Magisk

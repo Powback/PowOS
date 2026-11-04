@@ -24,6 +24,9 @@ export ANLAND_NO_DRM_DEVICE=1
 export EGL_PLATFORM=surfaceless
 export XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=KDE XDG_SESSION_DESKTOP=KDE
 export KDE_FULL_SESSION=true
+# Qt's messages to stderr (this session's log, hyprland.log), not to a journal: there is no journald here, so every
+# Plasma message - and plasmashell's last words before KCrash restarts it - went nowhere.
+export QT_FORCE_STDERR_LOGGING=1
 # PowOS knows it is the phone build (the powos CLI gates boot/bootc/systemd commands on this).
 export POWOS_PLATFORM=phone
 
@@ -39,25 +42,22 @@ fi
 # as noise blocks (OnePlus Open, Adreno 740, Mesa 26.3). Real fix: find and report the UBWC bug in Mesa's KGSL path.
 export FD_MESA_DEBUG=${FD_MESA_DEBUG:-noubwc}
 
-# HACK: the app ends its splash screen only when it sees Omarchy's shell process (`quickshell`/`qs`);
-# otherwise it waits out a 2-minute timeout. Tell it directly once plasmashell is up. Real fix: the
-# app waits for $XDG_RUNTIME_DIR/desktop-ready alone (same planned app change as above).
+# One helper (fewer guest processes: Android 12+ stops an app's child processes past 32, docs/REMOTE-POWOS.md) waits
+# for plasmashell, then:
+# - desktop-ready: ends the app's splash (SplashScreen), which waits for this file alone;
+# - the initial output scale from the display's density, FIRST START ONLY: Anland reports pixels only, so
+#   KWin starts at 1x and a 500+ dpi phone gets a tiny desktop and a huge cursor. The app passes the
+#   physical size (ANDROMARCHY_PHYSICAL_MM, "<long>x<short>" mm); scale = dpi / 270 in quarter steps,
+#   clamped 1..4 (2x on a 6.9" 1440p phone, 1x on an 8-10" 1280p tablet; dpi/180 = 2.75x was too big).
+#   After that the user's choice in System Settings > Display & Monitor (kscreen; KWin saves it in
+#   kwinoutputconfig.json) is never overridden. POWOS_SCALE forces a scale on every start instead.
+#   Rooted mode (POWOS_SESSION_MODE=rooted): Linux apps are windows beside Android apps there, so
+#   powos-rooted-session's powos-output-scale matches Android's window density instead.
 (
   for _ in $(seq 600); do pgrep -x plasmashell >/dev/null && break; sleep 0.2; done
   sleep 1
   touch "$XDG_RUNTIME_DIR/desktop-ready"
-) &
-
-# Initial output scale from the display's density, FIRST START ONLY: Anland reports pixels only, so
-# KWin starts at 1x and a 500+ dpi phone gets a tiny desktop and a huge cursor. The app passes the
-# physical size (ANDROMARCHY_PHYSICAL_MM, "<long>x<short>" mm); scale = dpi / 270 in quarter steps,
-# clamped 1..4 (2x on a 6.9" 1440p phone, 1x on an 8-10" 1280p tablet; dpi/180 = 2.75x was too big).
-# After that the user's choice in System Settings > Display & Monitor (kscreen; KWin saves it in
-# kwinoutputconfig.json) is never overridden. POWOS_SCALE forces a scale on every start instead.
-# Rooted mode (POWOS_SESSION_MODE=rooted): Linux apps are windows beside Android apps there, so powos-rooted-session's
-# powos-output-scale matches Android's window density instead.
-[ "${POWOS_SESSION_MODE:-}" = rooted ] || (
-  for _ in $(seq 600); do pgrep -x plasmashell >/dev/null && break; sleep 0.2; done
+  [ "${POWOS_SESSION_MODE:-}" = rooted ] && exit 0
   done_mark=$HOME/.local/state/powos/output-scale.done
   [ -z "${POWOS_SCALE:-}" ] && [ -e "$done_mark" ] && exit 0
   scale=${POWOS_SCALE:-}

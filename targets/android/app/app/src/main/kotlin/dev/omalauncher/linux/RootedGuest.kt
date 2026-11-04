@@ -93,7 +93,10 @@ object RootedGuest {
         command: String,
     ): String {
         val log = "\"\${XDG_RUNTIME_DIR:-/tmp}/launch/${logName(name)}.log\""
-        return "f=$log; mkdir -p \"\${f%/*}\"; " +
+        // Only the leaf (launch/): `mkdir -p` walks from / and, in the no-root image, the run dir is an Android path
+        // (/data/user/0/<app>/files/run, passed through by fakechroot) whose parents aren't - "cannot create directory
+        // '/data'", and the launch never started. XDG_RUNTIME_DIR itself always exists (the session's run dir).
+        return "f=$log; [ -d \"\${f%/*}\" ] || mkdir \"\${f%/*}\"; " +
             "[ \"\$(stat -c %s \"\$f\" 2>/dev/null || echo 0)\" -gt $LAUNCH_LOG_KEEP ] && : >\"\$f\"; " +
             "s=\$(stat -c %s \"\$f\" 2>/dev/null || echo 0); " +
             "(exec $command) </dev/null >>\"\$f\" 2>&1 & p=\$!; " +

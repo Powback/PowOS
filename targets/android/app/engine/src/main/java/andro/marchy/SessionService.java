@@ -39,6 +39,8 @@ public class SessionService extends Service {
     private static final String TAG = "Andromarchy";
     private static final String CHANNEL = "session";
     private static final int NOTIFICATION_ID = 1;
+    private static final String SETUP_CHANNEL = "setup";
+    private static final int SETUP_NOTIFICATION_ID = 2;
 
     private final List<Process> processes = new ArrayList<>();
     private PowerManager.WakeLock wakeLock;
@@ -162,18 +164,112 @@ public class SessionService extends Service {
         fold = new FoldWatcher(this);
         fold.start();
 
-        try {
-            startSession();
-        } catch (IOException e) {
-            Log.e(TAG, "session start failed", e);
-        }
+        if (RootMode.enabled()) {
+            // Rooted: started once, here, as always (nothing in it waits: su runs the session on its own).
+            try {
+                startSession();
+            } catch (IOException e) {
+                Log.e(TAG, "session start failed", e);
+            }
+        } else
+            kick(); // no root: on the session thread, once the image is complete, with retries (SessionPlan)
         // PowOS: PowOS windows as their own Android tasks - the control channel to KWin (through the daemon).
         WindowTasks.start(this);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        return START_STICKY; // the processes belong to this service: started once, in onCreate
+        // The processes belong to this service. No root: each start request (InstallActivity done, the app opened
+        // again after a give-up) looks again whether the session must start or retry.
+        if (!RootMode.enabled())
+            kick();
+        return START_STICKY;
+    }
+
+    /** The splash's line while the session waits for the image, retries or gave up (SessionPlan.status); else null. */
+    static volatile String status;
+
+    /**
+     * The no-root session's own thread: startSession runs first-boot.sh and waits for it, which held the MAIN thread
+     * in onCreate (11-04 emulator: the home stopped drawing - its WebView never came alive - while the session
+     * started; a foreground service's onCreate is also an ANR past 20 s).
+     */
+    private final android.os.Handler session = newSessionThread();
+    private int attempts;
+    private long startedAt = -1; // uptime of the current start, -1: none running
+
+    private static android.os.Handler newSessionThread() {
+        android.os.HandlerThread t = new android.os.HandlerThread("powos-session");
+        t.start();
+        return new android.os.Handler(t.getLooper());
+    }
+
+    private void kick() {
+        session.removeCallbacks(step);
+        session.post(step);
+    }
+
+    /** One look at the no-root session (SessionPlan): wait, start, watch, end and retry, or give up. */
+    private final Runnable step = new Runnable() {
+        @Override
+        public void run() {
+            File run = runDir(SessionService.this);
+            long now = android.os.SystemClock.uptimeMillis();
+            File[] wl = run.listFiles((d, n) -> n.startsWith("wayland-") && !n.endsWith(".lock"));
+            SessionPlan.Health h = SessionPlan.health(startedAt >= 0, new File(run, "bus").exists(),
+                    wl != null && wl.length > 0, now - startedAt);
+            SessionPlan.Action a = SessionPlan.next(false, rootfsReady(SessionService.this), InstallActivity.installing,
+                    h, attempts);
+            long delay = SessionPlan.retryDelayMs(attempts);
+            status = SessionPlan.status(a, attempts, delay);
+            switch (a) {
+                case WAIT_IMAGE: // InstallActivity starts this service again once the image is complete
+                    Log.i(TAG, "session: waiting for the PowOS image to finish installing");
+                    return;
+                case START:
+                    attempts++;
+                    startedAt = now;
+                    Log.i(TAG, "session: starting (try " + attempts + ")");
+                    try {
+                        startSession();
+                    } catch (IOException e) {
+                        Log.e(TAG, "session start failed", e);
+                    }
+                    session.postDelayed(this, 2000);
+                    return;
+                case UP:
+                    if (h == SessionPlan.Health.UP) {
+                        if (attempts > 0)
+                            Log.i(TAG, "session: up (try " + attempts + ")");
+                        attempts = 0;
+                        // The whole session runs by now (Plasma is what pushes it past the limit): look again then.
+                        session.postDelayed(limitCheck, 60_000);
+                    } else
+                        session.postDelayed(this, 2000); // still coming up
+                    return;
+                case RETRY:
+                    Log.w(TAG, "session: no D-Bus or compositor " + (now - startedAt) / 1000 + " s after try "
+                            + attempts + ", ending it and trying again in " + delay / 1000 + " s");
+                    endSession();
+                    session.postDelayed(this, delay);
+                    return;
+                default:
+                    Log.e(TAG, "session: gave up after " + attempts + " tries");
+                    endSession();
+                    attempts = 0; // the next start request (the app opened again) begins anew
+            }
+        }
+    };
+
+    /** Ends the processes of a failed start, so the next one begins clean. */
+    private void endSession() {
+        synchronized (processes) {
+            for (Process p : processes)
+                p.destroyForcibly();
+            processes.clear();
+        }
+        endLeftovers("libandromarchy.so");
+        startedAt = -1;
     }
 
     private void startSession() throws IOException {
@@ -239,13 +335,14 @@ public class SessionService extends Service {
             w.write("[options]\nArchitecture = auto\nDisableSandbox\nSigLevel = Optional TrustAll\n\n"
                     + "[powos]\nServer = http://android.pow/apk/repo\n");
         }
-        spawn("powos-packages", List.of(launcher, "-c", "C=/etc/pacman.d/powos-repo.conf; exec >\"$XDG_RUNTIME_DIR/"
-                + "powos-packages.log\" 2>&1; sudo pacman --config $C -Sy --noconfirm || exit 0;"
-                + " P=$(pacman --config $C -Slq powos); sudo pacman --config $C -S --noconfirm --needed $P"
-                + " || for p in $P; do sudo pacman --config $C -S --noconfirm --needed $p; done"), archEnv(run, sock));
+        // Upgrades only, never a downgrade (SessionPlan.packagesCommand: a stale repo's KWin broke the session).
+        spawn("powos-packages", List.of(launcher, "-c", SessionPlan.packagesCommand()), archEnv(run, sock));
 
-        // 1. Display daemon: relays buffers and input between this app's display and Hyprland.
-        spawn("andromarchy", List.of(libDir + "/libandromarchy.so", sock), null);
+        // 1. Display daemon: relays buffers and input between this app's display and the compositor. With the
+        //    screen the desktop will get, as in rooted mode (andromarchy.c, provisional_screen): without it KWin's
+        //    handshake waited for the desktop to be on screen, so a session started behind home never got as far as
+        //    org.kde.KWin - every app launch from home (powos-open-task) said "desktop" (exit 2) and no window came.
+        spawn("andromarchy", List.of(libDir + "/libandromarchy.so", sock, "--screen", screenArg()), null);
 
         // 2. Session D-Bus (systemd provides it on a normal Linux login). Browsers, file dialogs, portals and tray
         //    apps need it; archEnv() gives every program its address.
@@ -294,10 +391,9 @@ public class SessionService extends Service {
         env.put("OMARCHY_PATH", "/usr/share/omarchy");
         spawn("hyprland", List.of(launcher, "-c", "export PATH=/usr/share/omarchy/bin:$PATH; exec /usr/bin/Hyprland"), env);
 
-        // 5. desktop-ready (ends the splash, SplashScreen): Omarchy's shell runs, plus a second to draw the bar.
-        spawn("desktop-ready", List.of(launcher, "-c", "for i in $(seq 600); do pgrep -x quickshell >/dev/null"
-                + " || pgrep -x qs >/dev/null && break; sleep 0.2; done; sleep 1; touch \"$XDG_RUNTIME_DIR/desktop-ready\""),
-                archEnv(run, sock));
+        // 5. desktop-ready (ends the splash, SplashScreen): the session launcher touches it once plasmashell runs
+        //    (session/Hyprland). The app's own waiter for Omarchy's quickshell is gone: PowOS has no quickshell, so it
+        //    only polled pgrep for 2 minutes - a process and ~600 more against Android 12+'s child process limit.
     }
 
     /**
@@ -360,9 +456,23 @@ public class SessionService extends Service {
         File run = runDir(ctx);
         run.mkdirs();
         pb.environment().clear();
-        pb.environment().putAll(archEnv(ctx, run, daemonSocket(ctx)));
-        pb.environment().put("TERM", "xterm-256color");
+        pb.environment().putAll(guestEnv(ctx, run));
         return pb;
+    }
+
+    /**
+     * The environment of everything the app starts in the running session (Guest/EngineGuest: app launches,
+     * powos-open-task, terminals, widgets, AI chat): the session programs' own (archEnv: its bus, run dir) plus the
+     * desktop's display, as a program the desktop started has it. archEnv drops WAYLAND_DISPLAY (KWin itself must not
+     * get one, it'd start nested); without it every app the launcher opened died at once (Qt: no display, abort -6)
+     * and powos-open-task said "failed: exited -6". KWin's socket in XDG_RUNTIME_DIR, as rooted mode's
+     * (RootedGuest.WAYLAND_DISPLAY).
+     */
+    static Map<String, String> guestEnv(Context ctx, File run) {
+        Map<String, String> env = archEnv(ctx, run, daemonSocket(ctx));
+        env.put("WAYLAND_DISPLAY", "wayland-0");
+        env.put("TERM", "xterm-256color");
+        return env;
     }
 
     static Map<String, String> archEnv(Context ctx, File run, String sock) {
@@ -535,8 +645,97 @@ public class SessionService extends Service {
         // stdin /dev/null, output its log (made anew each start).
         pb.redirectErrorStream(true).redirectOutput(log)
                 .redirectInput(new File("/dev/null"));
-        processes.add(pb.start());
+        Process p = pb.start();
+        synchronized (processes) {
+            processes.add(p);
+        }
         Log.i(TAG, "started " + name + " (log: " + log + ")");
+        watch(name, p);
+    }
+
+    /**
+     * Notices a session process Android ended (PhantomLimit.killedByAndroid): SIGKILL while still one of this
+     * session's - endSession/onDestroy take theirs out of `processes` in the same step as they end them.
+     */
+    private void watch(String name, Process p) {
+        Thread t = new Thread(() -> {
+            int code;
+            try {
+                code = p.waitFor();
+            } catch (InterruptedException e) {
+                return;
+            }
+            boolean ours;
+            synchronized (processes) {
+                ours = processes.remove(p);
+            }
+            if (PhantomLimit.killedByAndroid(code, !ours)) {
+                Log.w(TAG, "session: " + name + " was killed (signal 9) - Android's child process limit?");
+                phantomNotice(true);
+            }
+        }, "watch-" + name);
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** The guest at or over Android's child process limit while the limit is on: the setup step, before a kill. */
+    private final Runnable limitCheck = () -> {
+        int n = guestProcesses();
+        Log.i(TAG, "session: " + n + " guest processes (Android 12+ limit " + PhantomLimit.ANDROID_LIMIT + ")");
+        if (PhantomLimit.atLimit(n))
+            phantomNotice(false, n);
+    };
+
+    /** This app's processes other than its own Android ones (the app, :restart): the Linux session's. */
+    private int guestProcesses() {
+        File[] procs = new File("/proc").listFiles((d, n) -> n.chars().allMatch(Character::isDigit));
+        if (procs == null)
+            return 0;
+        int uid = android.os.Process.myUid(), n = 0;
+        for (File p : procs) {
+            try {
+                if (android.system.Os.stat(p.getPath()).st_uid != uid)
+                    continue;
+                byte[] b = java.nio.file.Files.readAllBytes(new File(p, "cmdline").toPath());
+                if (!new String(b, java.nio.charset.StandardCharsets.UTF_8).startsWith(getPackageName()))
+                    n++;
+            } catch (Exception e) {
+                // gone meanwhile, or not ours
+            }
+        }
+        return n;
+    }
+
+    private static volatile boolean phantomNoticeShown; // once per app process: a setup step, not an alarm
+
+    private void phantomNotice(boolean killed) {
+        phantomNotice(killed, guestProcesses());
+    }
+
+    /** The one-time setup step (ChildProcessSetupActivity), as a notification, when this phone still has the limit. */
+    private void phantomNotice(boolean killed, int processes) {
+        PhantomLimit.Fix fix = PhantomLimit.fix(android.os.Build.VERSION.SDK_INT,
+                android.provider.Settings.Global.getString(getContentResolver(), PhantomLimit.MONITOR_SETTING));
+        if (fix == PhantomLimit.Fix.NONE)
+            return;
+        if (phantomNoticeShown)
+            return;
+        phantomNoticeShown = true;
+        Intent open = new Intent(this, ChildProcessSetupActivity.class)
+                .putExtra(ChildProcessSetupActivity.EXTRA_KILLED, killed)
+                .putExtra(ChildProcessSetupActivity.EXTRA_PROCESSES, processes)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        nm.createNotificationChannel(new NotificationChannel(SETUP_CHANNEL, "Setup", NotificationManager.IMPORTANCE_HIGH));
+        nm.notify(SETUP_NOTIFICATION_ID, new Notification.Builder(this, SETUP_CHANNEL)
+                .setSmallIcon(android.R.drawable.stat_sys_warning)
+                .setContentTitle("Linux apps: one setup step")
+                .setContentText(killed ? "Android stopped part of the desktop. Turn off child process restrictions."
+                        : "Turn off Android's child process restrictions, or Linux apps may close.")
+                .setContentIntent(PendingIntent.getActivity(this, 1, open,
+                        PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT))
+                .setAutoCancel(true)
+                .build());
     }
 
     @Override
@@ -546,8 +745,13 @@ public class SessionService extends Service {
         requests.stopWatching();
         unregisterReceiver(apps);
         fold.stop();
-        for (Process p : processes)
-            p.destroy();
+        session.removeCallbacksAndMessages(null);
+        session.getLooper().quitSafely();
+        synchronized (processes) {
+            for (Process p : processes)
+                p.destroy();
+            processes.clear(); // ended by the app, not by Android (watch)
+        }
         if (wakeLock != null && wakeLock.isHeld())
             wakeLock.release();
         super.onDestroy();

@@ -403,7 +403,9 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `targets/android/build-oplus-hook.sh:15` | Same `make build` exit-status bug as build-app.sh. | Same as build-app.sh. |
 | `targets/android/build-pkgs.sh:57` | pacman 7's Landlock download sandbox is not permitted in Docker: DisableSandbox. | A container runtime that allows Landlock. |
 | `targets/android/build-rootfs.sh:11` | The rootfs is named lotfix-rootfs.tar.gz because Andromarchy's app looks for that file. | Our own app's download name. |
-| `targets/android/install-powos-android.sh:57` | kwin is held with IgnorePkg; Plasma updates need a matching rebuild. | The Anland backend upstream in KWin. |
+| `targets/android/install-powos-android.sh:27` | Plasma held at kwin's 6.7.5 (repo ahead of [core] + IgnorePkg); 6.8-only Plasma packages left out. | pkgs/kwin's patches ported to Arch's current Plasma, or Plasma built from source at our version. |
+| `targets/android/install-powos-android.sh:88` | kwin is held with IgnorePkg; Plasma updates need a matching rebuild. | The Anland backend upstream in KWin. |
+| `targets/android/tools/plasma-pin.sh:11` | Plasma 6.7.5 repackaged from the installed rootfs kwin builds on (Arch Linux ARM keeps no old builds). | Plasma built at kwin's version by build-pkgs.sh, or kwin ported to 6.8. |
 | `targets/android/install-powos-android.sh:105` | bun is fetched by curl (outside any package) for aarch64; the manifest can't carry it. | The manifest lists unpackaged binaries too. |
 | `targets/android/install-powos-android.sh:134` | Installs the session launcher as /usr/bin/Hyprland (see session/Hyprland). | See session/Hyprland #1. |
 | `targets/android/install-powos-android.sh:163` | Installs Omarchy command names the engine calls (shims). | Neutral command names in the engine. |
@@ -422,8 +424,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `targets/android/rooted/powos-rooted-session:41` | FD_MESA_DEBUG=noubwc: UBWC on KGSL corrupts Plasma's SVG textures. | Find and report the UBWC bug in Mesa's KGSL path. |
 | `targets/android/rootfs-in-container.sh:15` | Same pacman Landlock-sandbox workaround as the build container. | Same as build-pkgs.sh. |
 | `targets/android/session/Hyprland:4` | The session launcher is named Hyprland because Andromarchy's app hardcodes it. | The app reads the session command from the rootfs (our own app). |
-| `targets/android/session/Hyprland:38` | FD_MESA_DEBUG=noubwc (as powos-rooted-session), for the no-root app. | Same Mesa fix. |
-| `targets/android/session/Hyprland:42` | Touches desktop-ready itself: the app ends its splash only on seeing Omarchy's quickshell. | The app waits for $XDG_RUNTIME_DIR/desktop-ready alone. |
+| `targets/android/session/Hyprland:41` | FD_MESA_DEBUG=noubwc (as powos-rooted-session), for the no-root app. | Same Mesa fix. |
 | `targets/android/session/Hyprland:100` | Starts powos-devtest-agent, adb's way into the no-root session for tools/device-test.sh (see session/powos-devtest-agent). | The PowOS app's own adb-reachable command service (com.powos.app). |
 | `targets/android/session/powos-devtest-agent:10` | A debugging channel into the app's session over an abstract socket (peer uid 2000/0 only): the Andromarchy app has no command entry point and isn't debuggable (no run-as). | The PowOS app's own adb-reachable command service (com.powos.app), with the same peer check. |
 | `targets/android/patches/andromarchy/0004-steam-semaphores-robust-list-dlmopen.patch:74` | android-compat.so emulates what Steam's client needs and Android's app sandbox denies: SysV semaphores in shared files (seccomp kills them), POSIX sem_open without /dev/shm, get_robust_list against the neutralized set_robust_list, and dlmopen namespaces seeded with nsroot.so so fakechroot applies there. | A real (root) chroot instead of the no-root fakechroot runtime removes all four; (a)-(c) are otherwise Android's seccomp/app policy. |

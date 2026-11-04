@@ -188,12 +188,26 @@ int main(int argc, char **argv)
     // dmabuf import/export, which Wayland GPU clients need. ARCH_GPU=zink: OpenGL on Vulkan/Turnip.
     setenv("ANDROMARCHY", "1", 1);
     setenv("ANDROMARCHY_NO_DRM_DEVICE", "1", 1);
-    setenv("TURNIP_KMD", "kgsl", 1);
-    setenv("FD_FORCE_KGSL", "1", 1);
-    setenv("XWAYLAND_FORCE_KGSL_SURFACELESS", "1", 1);
-    int zink = env_is("ARCH_GPU", "zink");
-    setenv("MESA_LOADER_DRIVER_OVERRIDE", zink ? "zink" : "kgsl", 1);
-    setenv("GALLIUM_DRIVER", zink ? "zink" : "freedreno", 1);
+    if (access("/dev/kgsl-3d0", F_OK) == 0) {
+        setenv("TURNIP_KMD", "kgsl", 1);
+        setenv("FD_FORCE_KGSL", "1", 1);
+        setenv("XWAYLAND_FORCE_KGSL_SURFACELESS", "1", 1);
+        int zink = env_is("ARCH_GPU", "zink");
+        setenv("MESA_LOADER_DRIVER_OVERRIDE", zink ? "zink" : "kgsl", 1);
+        setenv("GALLIUM_DRIVER", zink ? "zink" : "freedreno", 1);
+    } else {
+        // No Adreno (the emulator, a non-Snapdragon phone): Mesa's llvmpipe for every program, the same switch
+        // session/Hyprland makes for the desktop. Only the session's own processes had it: everything the app started
+        // in the running session (app launches, terminals, widgets: SessionService.guestProcess) came through here and
+        // got the KGSL driver back - "egl: failed to create dri2 screen", no GL context, Qt Quick apps without content.
+        unsetenv("TURNIP_KMD");
+        unsetenv("FD_FORCE_KGSL");
+        unsetenv("XWAYLAND_FORCE_KGSL_SURFACELESS");
+        unsetenv("MESA_LOADER_DRIVER_OVERRIDE");
+        setenv("GALLIUM_DRIVER", "llvmpipe", 1);
+        setenv("LIBGL_ALWAYS_SOFTWARE", "1", 1);
+        setenv("POWOS_GPU", "software", 1);
+    }
 
     // Firefox's sandbox broker checks fakechroot-rewritten paths against its allow list and denies them (every tab
     // crashes with "no fonts"). Trade-off: web content runs without Firefox's process sandbox.
