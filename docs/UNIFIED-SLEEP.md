@@ -67,6 +67,7 @@ Thawing comes before showing, on every way in:
 - `powos game <name> freeze|thaw|status` (lib/game.sh, any installed Steam game by name or appid): the watcher's `Sleep` (its focused windows minimized first, then frozen at once) and `Resume`; status = running/frozen and its tree's CPU.
 - `powos-open-task` (an app tapped in the PowOS app's launcher): the existing window's process is woken before KWin exports it as a task.
 - Focus (the taskbar, a task brought back from Recents, PowOS coming back on screen) thaws it as for any GUI app.
+- A thawed game's input comes with its task's focus: KWin's anland backend makes the task's window active itself (kwin 6.7.5-3.64, patch 0056). Proton's Wine 11 takes the focus through WM_TAKE_FOCUS only, ignores it during a WM_STATE change (just thawed, just un-minimized), and follows `_NET_ACTIVE_WINDOW` for its foreground: before, `_NET_ACTIVE_WINDOW` stayed on the desktop's window, the full-screen Unity game minimized itself and no touch reached it (bf-return 2026-11-05 13:07, 13:12).
 - `powos sleep wake steam` thaws through powos-sleepd, which names the app to the watcher in its next reply (`"woken"`), so the watcher counts it as awake and lets it sleep again when idle.
 
 **SpacetimeDB.** Unloading single databases is not possible in 2.12, so it is skipped:

@@ -1095,8 +1095,10 @@ class Gui(dbus.service.Object):
 # focus (anland focus(): un-minimize + requestFocus, the path every app switch takes) gives it KWin's activation.
 # Activating it from here as well (workspace.activeWindow) was what lost it: KWin's focus went to none on every try,
 # the thawed full-screen Unity game, never active, minimized itself again and again (resume trace 2026-11-05 12:46:
-# 6 minimize/restore rounds, "KWin focus -> none" after each). Still open: without it the task's focus() doesn't
-# activate the thawed game either (12:55, 13:06: no activation at all) - the KWin side (anland focus/requestFocus).
+# 6 minimize/restore rounds, "KWin focus -> none" after each): KWin switched to the tasks desktop for it. Without it the
+# task's focus() didn't activate the thawed game either (12:55, 13:06: no activation at all): Proton's Wine 11 takes the
+# focus through WM_TAKE_FOCUS only and ignores it during a WM_STATE change. Both fixed in KWin 6.7.5-3.64 (anland 0056):
+# a task's focus makes its window active itself, and a task-shown window's activation never switches desktop.
 RAISE_JS = """
 for (const w of workspace.windowList()) {
     if (w.internalId.toString() === "%(window)s"
