@@ -167,3 +167,45 @@ evaluator log "skipped: script, Proton and prefix as at its last good run") but 
 An earlier skip needs a PowOS layer in front of the ARM64 runtime (a compatibilitytools.d tool whose entry point runs
 the check and then execs `_v2-entry-point --verb=... -- <Proton ARM64>/proton ...`), which changes the tool
 powos-steam-compat pins - not done here.
+
+## Window -> first frame, ~8 s (2026-11-05, agent/unity-load, ARM64 Proton + DRI3 Turnip)
+
+Before: steam#1 09:23 (job 20261105-091504-97682) reaper 3.6, pv 4.3, wineserver 4.3, exe 6.8, window 7.7, frame 15.6 s.
+New instrument: bf-coldstart's launch profile (`tools/phone/verify/bf-lprof.py`, run by every bf-coldstart run from the tap
+to the first frame, "LPROF" lines): the game process's threads' CPU at 4 Hz, its file reads (rchar vs read_bytes = from
+storage), the whole phone's busy share and each cpufreq policy's clock. Run 09:37 (job 20261105-093023-48404), seconds
+from the tap:
+
+| span | game CPU (cores) | busiest threads | file reads | clocks gold / gold2 / prime (MHz) |
+|---|---|---|---|---|
+| 6.4-7.4 (exe -> window) | 0.3-1.0 | main | 6 -> 21 MB | 1785-2016 / 1785-2457 / 1977-2956 |
+| 7.7-11.5 (Unity player init) | ~1.0 | **main 70-97 %** (one thread), UnityPreload | 21 -> 48 MB | 1459-2016 / 1785-2803 / 1977-2592 |
+| 11.5-16 (first scene load) | 1.1-2.0 | UnityPreload 30-60 %, main 20-40 %, AsyncReadManager, UnityGfxDevice, dxvk-submit | 48 -> 309 MB | 1785-2016 / 1785-2803 / 1977-3187 |
+
+Sum, exe -> frame: 10.8 core-s in 9.8 s (main 5.4, UnityPreload 2.1, UnityGfxDevice 0.9, audio 0.4, dxvk-cs/submit
+0.6); the phone 45-75 % busy overall.
+
+What it rules out:
+- **Disk I/O**: 309 MB read, **0 MB from storage** (read_bytes) - every asset already in the page cache. Prefetching
+  (vmtouch at the tap) can't win anything on a warm launch.
+- **Shader compiles**: the Mesa cache (`shadercache/274190/mesa_shader_cache_sf`, Steam's per-game dir, Proton points
+  Mesa there) wasn't written by the 09:23 launch (files from 09:08) - every pipeline a hit; dxvk-shader threads <20 %
+  for under 0.5 s. DXVK v3.1.1 has no state cache any more (`DXVK_state_cache` empty, by design); nothing to persist.
+- **FEX JIT cache**: ARM64 Proton's arm64ec FEX already keeps a disk cache per game
+  (`shadercache/274190/fex-emu/DiskCache/<hash>/RWCacheDB_*.foz`, 47 MB, updated by every launch) - unlike the x86
+  FEX-2607 code cache (above), this one works and is on.
+
+What is left is CPU: one thread (Unity's main: Mono runtime init + managed code JIT - Mono JITs x86-64 code every
+launch, which FEX then translates; no cache can hold Mono's output) and then the preload thread, **at 1.5-2.0 GHz on
+the gold cores and 2.0-2.5 GHz on prime, of 2.80 / 3.19 GHz hw**. The game boost (GameBoost.kt, game-boost.sh: clocks
+min 80 %, uclamp.min 75 %, hottest thread on the prime core, the vendor's game thermal table) wasn't on during any of
+it: its log shows the engage 09:23:50 for a 09:23:18 tap (frame at 09:23:33) and 09:37:33 for the 09:37 run - the boost
+starts only once the game's window is Android's front task, and came 17-23 s after the window, after the first frame.
+
+Fix: boost from the tap. `powos-open-task` (the drawer's / widget's launch path, and bf-coldstart's) writes
+`$XDG_RUNTIME_DIR/game-launch/<app id>` (= the app's files/run/game-launch) when it starts a launch, removes it when the
+launch failed; GameBoost's tick takes the newest such mark younger than `LAUNCH_S` (60 s) whose id is a game's
+(`WebWindows.isGame`) as the game in front when no game window is (`GameBoost.launching` / `front(web, task, launch)`),
+so the boost holds through Wine's boot and the game's load and the window task takes over without a gap. Generic: every
+game launched through powos-open-task. game-boost.sh's holder already copes with a game whose processes don't exist
+yet (it adopts threads as they appear, every 5 s).
