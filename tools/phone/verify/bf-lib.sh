@@ -49,7 +49,11 @@ ms() { awk -v a="$1" -v b="$2" 'BEGIN {printf "%d", (b - a) * 1000}'; }
 irq() { awk '/touch-0/{s+=$2+$3+$4+$5+$6+$7+$8+$9} END{print s}' /proc/interrupts; }
 I0=$(irq)
 close_mine() { eval "${ON_CLOSE:-:}";  # eval: ON_CLOSE="fexcache_off; restore" ran as one word ("command not found"), restore never ran
-  [ $mine = 1 ] && { pill "closing $GAME (this check started it)"; echo "== closing what this check started"; bash /var/tmp/powos-bf-stop.sh | head -1; mine=0; }; rm -rf "$T" /tmp/powos-verify-step; }
+  [ $mine = 1 ] && { pill "closing $GAME (this check started it)"; echo "== closing what this check started"; bash /var/tmp/powos-bf-stop.sh | head -1; mine=0
+    # A diagnosis' second hand-off (handoff_diag) can start the game a few s AFTER this close: bf-return 2026-11-05
+    # 12:10 left Broforce running 23 min (reaper 12:10:52, closed 12:10:50) - so watch for it and close it too.
+    [ "${RETRIED:-0}" = 1 ] && for _ in $(seq 20); do [ -n "$(reaper)" ] && { echo "   the retried launch came after: $(bash /var/tmp/powos-bf-stop.sh | head -1)"; break; }; sleep 1; done; }
+  rm -rf "$T" /tmp/powos-verify-step; }
 touched() { [ "$(irq)" != "$I0" ] || return 1; echo "user input $(date +%T) - stopping"; close_mine; exit 3; }
 # HACK: the Mac side (queue.sh's budget kill) ends adb first, so this script's stdout is a dead pipe before its TERM comes:
 # the next pill/echo got SIGPIPE and bash died WITHOUT running this trap, leaving the game it started running
@@ -223,6 +227,7 @@ fd=os.open(sys.argv[1],os.O_RDONLY|os.O_NONBLOCK); print(struct.unpack("i",fcntl
   echo "handoff: semaphores before: $(sems)"
   cl0=$(wc -l < "$HOME/.local/share/Steam/logs/console_log.txt")
   # Y700_SYSV_DEBUG: the shim logs the forwarder's semget/semop (pkgs/steam's sysvipc-emu): does it post the client's?
+  RETRIED=1  # close_mine watches for the game this may start late
   ( cd ~ && Y700_SYSV_DEBUG=1 timeout 20 steam "steam://rungameid/$APP" > "$T/retry.out" 2>&1 < /dev/null )
   echo "handoff: semaphores after the second hand-off: $(sems); forwarder's IPC: $(grep -a 'sysvipc-emu' "$T/retry.out" | sed 's/^\[sysvipc-emu [0-9]*\] //' | tail -8 | cut -c1-90 | tr '\n' '|')"
   for _ in $(seq 20); do tail -n +$((cl0 + 1)) "$HOME/.local/share/Steam/logs/console_log.txt" | grep -q "rungameid/$APP" && break; sleep 0.5; done

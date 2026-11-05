@@ -66,6 +66,9 @@ SOCK = f"{common.STATE_DIR}/sleepd.sock"
 IDLE = common.seconds(os.environ.get("POWOS_SLEEP_GUI_IDLE", "10m"))
 GRACE = 60  # woken by D-Bus but still unfocused: asleep again after this
 SAMPLE = 5  # seconds of CPU/IO measured before freezing
+RESUME_TRACE_S = 6  # KWin focus changes logged this long after a game's Resume
+LAUNCH_URL = "://rungameid/"  # a launcher's game-launch URL in a process outside its client's tree: a launch pending
+LAUNCH_HOLD_S = 60  # an app a launch path woke (Gui.Wake) stays awake this long: the launch reaches it
 GAME_WINDOW_S = 600  # a game still without a window this long after its launch (hung) sleeps all the same
 # A unit's app running without a window (Steam -silent) is adopted at most this long after it started (Gui.adopt)
 ADOPT_S = 30
@@ -236,18 +239,24 @@ class Screen:
     """Is PowOS on screen? (phone only; elsewhere always yes.) The PowOS app's display daemon pairs one consumer per
     visible surface - the desktop (surface 0) and each window task - and logs each connect and disconnect: an Activity
     whose surface goes away (Android's home, another app, Recents, the screen off) disconnects. Watched with inotify,
-    no polling: on screen = some consumer connected.
+    no polling: on screen = some surface with both its consumer and its producer connected.
+
+    The producer counts too (2026-11-05): a window task whose window closed (its producer, KWin's export, gone) can keep
+    its consumer connected with nothing of PowOS's on it (surfaces 53 and 56: producer disconnected 10:49 / 10:56, the
+    consumer never). Counted as on screen, it held PowOS "on screen" all session, so a game the user left for home
+    stayed "focused" and was never frozen (bf-return 11:47: not frozen 150 s out of sight).
 
     HACK: the daemon's log (andromarchy.log, its stderr) is the signal - no state of its own is published. Real fix: the
     display daemon (or SessionService) writes the connected surfaces to a state file in the run dir, or KWin's anland
     backend exposes them (D-Bus / a KWin script property); then read that instead."""
 
     IN_MODIFY, IN_ATTRIB, IN_DELETE_SELF, IN_MOVE_SELF = 0x2, 0x4, 0x400, 0x800
-    LINE = re.compile(rb"surface (\d+): consumer (connected|disconnected)|daemon: (listening) on")
+    LINE = re.compile(rb"surface (\d+): (consumer|producer) (connected|disconnected)|daemon: (listening) on")
 
     def __init__(self, path, on_change):
         self.path, self.on_change = path, on_change
-        self.pos, self.ino, self.surfaces, self.known = 0, None, set(), False
+        self.pos, self.ino, self.known = 0, None, False
+        self.consumers, self.producers = set(), set()
         self.started = False
         self.libc = ctypes.CDLL(None, use_errno=True)
         self.fd = self.libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
@@ -258,8 +267,16 @@ class Screen:
         self.started = True
 
     @property
+    def surfaces(self):
+        """The surfaces showing something: a consumer (an Activity on screen) and a producer (what it shows)."""
+        return self.consumers & self.producers
+
+    @property
     def on(self):
         return bool(self.surfaces) or not self.known
+
+    def clear(self):
+        self.consumers, self.producers = set(), set()
 
     def watch(self):
         if self.fd < 0:
@@ -269,7 +286,8 @@ class Screen:
         self.wd = self.libc.inotify_add_watch(self.fd, self.path.encode(),
                                               self.IN_MODIFY | self.IN_ATTRIB | self.IN_DELETE_SELF | self.IN_MOVE_SELF)
         if self.wd < 0:  # no log (yet): not a phone, or the app's daemon not started - look again in a minute
-            self.known, self.surfaces = False, set()
+            self.known = False
+            self.clear()
             GLib.timeout_add_seconds(60, self.watch)
             return False
         self.read()
@@ -296,22 +314,25 @@ class Screen:
         try:
             st = os.stat(self.path)
             if st.st_ino != self.ino or st.st_size < self.pos:  # a new daemon's log (the app restarted)
-                self.ino, self.pos, self.surfaces = st.st_ino, 0, set()
+                self.ino, self.pos = st.st_ino, 0
+                self.clear()
             with open(self.path, "rb") as f:
                 f.seek(self.pos)
                 data = f.read()
         except OSError:
-            self.known, self.surfaces = False, set()
+            self.known = False
+            self.clear()
             data = b""
         else:
             self.known = True
         end = data.rfind(b"\n") + 1
         self.pos += end
         for m in self.LINE.finditer(data[:end]):
-            if m.group(3):  # a new daemon (the app restarted; its log is truncated and written again)
-                self.surfaces = set()
+            if m.group(4):  # a new daemon (the app restarted; its log is truncated and written again)
+                self.clear()
             else:
-                (self.surfaces.add if m.group(2) == b"connected" else self.surfaces.discard)(int(m.group(1)))
+                side = self.consumers if m.group(2) == b"consumer" else self.producers
+                (side.add if m.group(3) == b"connected" else side.discard)(int(m.group(1)))
         if self.on != was and self.started:
             self.on_change(self.on)
 
@@ -397,6 +418,7 @@ class Gui(dbus.service.Object):
         super().__init__(bus, "/Gui")
         self.bus = bus
         self.sleepd = Sleepd(self.reset, self.woken)
+        self.resumed_at = -1e9  # the last game Resume (monotonic), for the resume trace
         self.wins = {}  # wid -> {pid, cls, active, minimized} (pid: the app's - its unit's root process, if it has one)
         self.idle_since = {}  # pid -> when it last lost focus
         self.frozen = {}  # pid -> {"names": [...], "cls", "pids"}
@@ -478,6 +500,9 @@ class Gui(dbus.service.Object):
         if str(wid) not in self.wins and self.units_class(str(cls)):
             # A unit's app's new window: when it showed up after its start (a cold start's length, in the log).
             log(f"{cls} ({pid}): window {wid} {'(focused) ' if active else ''}{age(pid):.1f}s after its start")
+        if time.monotonic() - self.resumed_at < RESUME_TRACE_S:
+            log(f"resume trace +{(time.monotonic() - self.resumed_at) * 1000:.0f} ms: window {wid} {cls} "
+                f"active={bool(active)} minimized={bool(minimized)}")
         self.wins[str(wid)] = {"pid": pid, "raw": raw, "cls": str(cls), "active": bool(active),
                                "minimized": bool(minimized)}
         if self.pid_active(pid):
@@ -518,12 +543,32 @@ class Gui(dbus.service.Object):
                 pid = p
                 break
         if pid is None:
+            # Awake already: still held for the launch (a resident Steam, awake, was frozen 8 s into a launch that
+            # waited on its logon: the forward never reached it - bf-return 2026-11-05 12:10:33).
+            awake = next((p for p in self.app_pids() if (what.isdigit() and int(what) == p)
+                          or what.lower() == self.cls(p).lower() or (self.unit_of(p) or {}).get("id") == what), None)
+            if awake is not None:
+                self.hold(awake)
             return json.dumps({"ok": True, "awake": True})
         r = self.thaw(pid, "launched")
         if not self.pid_active(pid):
             self.idle_since[pid] = time.time()
+        self.hold(pid)
         self.schedule()
         return json.dumps({**r, "totalMs": round((time.monotonic() - t) * 1000, 2)})
+
+    def hold(self, pid):
+        """A launch path woke [pid] (Gui.Wake): not frozen for LAUNCH_HOLD_S - the launch it carries (Steam's forward
+        waits up to 30 s for its logon, then the game's own start grace) must reach it awake."""
+        self.refused[pid] = (max(self.refused.get(pid, (0, ""))[0], time.time() + LAUNCH_HOLD_S), "launching")
+        self.schedule()
+
+    @dbus.service.method("dev.powos.Sleep.Gui", in_signature="s")
+    def Activated(self, what):
+        """KWin's focus moved (any window; "" = none). Logged for RESUME_TRACE_S after a game's Resume: what takes the
+        focus from a thawed game."""
+        if time.monotonic() - self.resumed_at < RESUME_TRACE_S:
+            log(f"resume trace +{(time.monotonic() - self.resumed_at) * 1000:.0f} ms: KWin focus -> {what or 'none'}")
 
     @dbus.service.method("dev.powos.Sleep.Gui", in_signature="s", out_signature="s")
     def Resume(self, appid):
@@ -531,6 +576,7 @@ class Gui(dbus.service.Object):
         and the game, if frozen) and bring the game's window up - instead of handing the launch to Steam, which has
         nothing to start. {"running": false} when no unit's app runs that game (the launch then goes to Steam)."""
         t = time.monotonic()
+        self.resumed_at = t
         appid = str(appid).strip()
         for u in self.rules():
             if not game_launcher(u) or not appid.isdigit():
@@ -834,6 +880,15 @@ class Gui(dbus.service.Object):
             # Starting: updating itself, logging in, and doing what it was started for (Steam started by a game's
             # launch hands the game over only once it's logged in - frozen before that, the launch waits).
             return self.refuse(pid, f"started {age(pid):.0f}s ago", grace - age(pid) + 1)
+        if u and game_launcher(u):
+            # A game launch on its way to the client (/usr/bin/steam's forward waits up to 30 s for its logon over a
+            # live link): the client stays awake for it. Frozen meanwhile, the forward never reached it (bf-return
+            # 2026-11-05 12:10:33: Steam frozen 8 s into the launch, no game in 20 s).
+            mine = set(pids)
+            pending = next((q for q in map(int, filter(str.isdigit, os.listdir("/proc")))
+                            if q not in mine and LAUNCH_URL in cmdline(q)), None)
+            if pending:
+                return self.refuse(pid, f"a launch on its way ({pending}: {cmdline(pending)[:60]})", 10)
         names = [(stat(p) or {}).get("comm") for p in pids]
         if cls.startswith("android-"):
             # powos-android-tasks' stand-ins for Android apps: its watcher signals them when the app goes away, and
@@ -1036,9 +1091,18 @@ class Gui(dbus.service.Object):
 
 # One-shot KWin scripts (Gui.kwin_run): a game's window up (un-minimized and focused) on Resume; an app's windows
 # minimized before Sleep freezes it.
+# Only a window on the current desktop: a window an Android task shows lives on the tasks desktop, and its task's own
+# focus (anland focus(): un-minimize + requestFocus, the path every app switch takes) gives it KWin's activation.
+# Activating it from here as well (workspace.activeWindow) was what lost it: KWin's focus went to none on every try,
+# the thawed full-screen Unity game, never active, minimized itself again and again (resume trace 2026-11-05 12:46:
+# 6 minimize/restore rounds, "KWin focus -> none" after each): KWin switched to the tasks desktop for it. Without it the
+# task's focus() didn't activate the thawed game either (12:55, 13:06: no activation at all): Proton's Wine 11 takes the
+# focus through WM_TAKE_FOCUS only and ignores it during a WM_STATE change. Both fixed in KWin 6.7.5-3.64 (anland 0056):
+# a task's focus makes its window active itself, and a task-shown window's activation never switches desktop.
 RAISE_JS = """
 for (const w of workspace.windowList()) {
-    if (w.internalId.toString() === "%(window)s") {
+    if (w.internalId.toString() === "%(window)s"
+            && (w.onAllDesktops || w.desktops.indexOf(workspace.currentDesktop) >= 0)) {
         w.minimized = false;
         workspace.activeWindow = w;
     }

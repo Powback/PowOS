@@ -1,0 +1,93 @@
+From: PowOS <mats@powback.com>
+Subject: [PATCH] backends/anland: a task's window is made active on its task's focus; its activation never switches desktop
+
+A thawed Proton game (unified sleep's resume) came back to its task without KWin's activation: _NET_ACTIVE_WINDOW
+stayed on the Plasma desktop's window (0x200000, KWin's null-focus window for a Wayland window), so touches never
+reached the game (bf-return 2026-11-05 13:07, 13:12). Wine/Proton windows take the focus through WM_TAKE_FOCUS
+only (input hint off): requestFocus() only asks, and the window is active once the client sets the X focus. A Wine
+11 just thawed, or whose window KWin has just un-minimized, ignores WM_TAKE_FOCUS "during WM_STATE change" - and its
+foreground follows _NET_ACTIVE_WINDOW, so it stays inactive and the full-screen Unity game minimizes itself.
+
+- AnlandWindowTask::focus(): a WM_TAKE_FOCUS-only X11 window is made active (setActiveWindow) and given the X focus
+  directly; the task in front is the user's choice. Normal launches take the same path (goLive -> focus()).
+- handOverMinimize: a full-screen window's own minimize, undone while its task is live, gets the activation back
+  too (restored only, it stayed inactive and minimized again).
+- Workspace::activateWindow: a window a task shows (powosShownByTask) takes the focus where it is - no switch to the
+  tasks desktop / activity. Wine 11 asks for every foreground change (_NET_ACTIVE_WINDOW, FromApplication), as did
+  powos-sleep-gui's workspace.activeWindow: the desktop switch lost KWin's focus and the game minimized in a loop
+  (resume trace 2026-11-05 12:46).
+---
+diff --git a/src/activation.cpp b/src/activation.cpp
+index e78050c..6205372 100644
+--- a/src/activation.cpp
++++ b/src/activation.cpp
+@@ -306,7 +306,13 @@ void Workspace::activateWindow(Window *window, bool force)
+         --block_focus;
+     }
+     raiseWindow(window);
+-    if (!window->isOnCurrentDesktop()) {
++    // PowOS (backends/anland, kwin 0056): a window an Android task shows lives on the tasks desktop, which is never
++    // made current - its task is what's on screen. Activated (an app's own _NET_ACTIVE_WINDOW request: Wine 11 asks
++    // for every foreground change; a script's workspace.activeWindow), it takes the focus where it is: switching to
++    // its desktop moved the Plasma desktop away under the user, KWin's focus went to none and a thawed full-screen
++    // Unity game minimized itself in a loop (resume trace 2026-11-05 12:46).
++    const bool shownByTask = window->property("powosShownByTask").toBool();
++    if (!window->isOnCurrentDesktop() && !shownByTask) {
+         ++block_focus;
+         switch (options->activationDesktopPolicy()) {
+         case Options::ActivationDesktopPolicy::SwitchToOtherDesktop:
+@@ -321,7 +327,7 @@ void Workspace::activateWindow(Window *window, bool force)
+         --block_focus;
+     }
+ #if KWIN_BUILD_ACTIVITIES
+-    if (!window->isOnCurrentActivity()) {
++    if (!window->isOnCurrentActivity() && !shownByTask) {
+         ++block_focus;
+         // DBUS!
+         // first isn't necessarily best, but it's easiest
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index f8c02a2..250b31d 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -231,9 +231,15 @@ void AnlandWindowTask::handOverMinimize()
+             return;
+         }
+         qCInfo(KWIN_ANLAND) << "window task" << m_id << "full-screen window minimized itself (live" << m_exported << "): restored, a full-screen task's window is never minimized";
+-        QMetaObject::invokeMethod(this, [w = m_window]() {
++        QMetaObject::invokeMethod(this, [this, w = m_window]() {
+             if (w && !w->isDeleted() && w->isMinimized()) {
+                 w->setMinimized(false);
++                // PowOS (kwin 0056): its task on screen (live) - the activation its minimize gave away comes back
++                // with the restore. Restored only, it stayed inactive (KWin had moved on to the desktop's window) and
++                // minimized itself again: a thawed game came back to a task it never got the input of.
++                if (m_state == State::Live) {
++                    focus();
++                }
+             }
+         }, Qt::QueuedConnection);
+         return;
+@@ -373,6 +379,24 @@ void AnlandWindowTask::focus()
+         // on top at its root coordinates - KWin's stacking follows the task in front (raising switches nothing).
+         workspace()->raiseWindow(m_window);
+         workspace()->requestFocus(m_window, true);
++#if KWIN_BUILD_X11
++        // PowOS (kwin 0056): the task in front is the user's own choice, so its window is made active here, not
++        // after the client answers. A window that takes the focus only through WM_TAKE_FOCUS (Wine/Proton: input
++        // hint off) is otherwise active only once the app sets the X focus itself - and a Wine just thawed (unified
++        // sleep) or one whose window KWin has just un-minimized ignores WM_TAKE_FOCUS "during WM_STATE change", so it
++        // never came: _NET_ACTIVE_WINDOW stayed on the desktop's window, Wine 11 (whose foreground follows
++        // _NET_ACTIVE_WINDOW) kept the game inactive, the full-screen Unity game minimized itself and no touch reached
++        // it (bf-return 2026-11-05 13:07, 13:12: "active 2097152"). KWin's active window (and _NET_ACTIVE_WINDOW) is
++        // the game now, and the X focus its client: Wine takes the foreground from it.
++        if (auto *x11 = qobject_cast<X11Window *>(m_window.data()); x11 && x11->takesAsyncFocus()
++            && workspace()->activeWindow() != m_window) {
++            const xcb_void_cookie_t cookie = xcb_set_input_focus(kwinApp()->x11Connection(), XCB_INPUT_FOCUS_POINTER_ROOT,
++                                                                 x11->window(), XCB_TIME_CURRENT_TIME);
++            workspace()->setX11FocusSerial(cookie.sequence);
++            workspace()->setActiveWindow(m_window);
++            qCInfo(KWIN_ANLAND) << "window task" << m_id << ": its window made active (it takes the focus through WM_TAKE_FOCUS only)";
++        }
++#endif
+     }
+ }
+ 

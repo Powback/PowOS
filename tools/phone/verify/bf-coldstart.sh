@@ -6,20 +6,27 @@
 # -> the game's exe -> its window -> its Android task (+ a screenshot) -> its first new frame, Steam's state at the tap and the shader/FEX cache sizes
 # (bf-coldstart-phone.sh). Default: cold steam fexcache fexcache (~15 min). Closes Steam + the game after. Exit 3 on a
 # real touch.
+#   resume    the instant path for a game the user already played (tap -> first frame < 10 s needs it: a cold launch is
+#             ~16 s): launch, home, frozen by unified sleep, its tile again -> first new frame (goal < 2 s). It runs
+#             bf-return.sh after the other variants (alone: `bf-coldstart.sh resume`), same APP; the game it started is
+#             closed after (harness-started: never left frozen). "TIMES resume N ms" + RESULT bf-return.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
-envs="" args=()
+envs="" args=() resume=0 app=""
 for a in "$@"; do case $a in
   win:*) ;;   # a window title may hold spaces (handled below)
   # Before app: (its glob takes the space too). Several words in one argument ("app:557340 steam": zsh doesn't split $var when queueing) - every run would be
   # wasted (env: 'cold': No such file, 22:38, 2026-10-23, friction f46): refuse it plainly instead.
   *[[:space:]]*) echo "INVALID setup: one argument holds several words: '$a' - pass each token separately"; exit 2 ;;
   esac; case $a in
-  app:[0-9]*) envs="$envs APP=${a#app:}" ;;
+  app:[0-9]*) envs="$envs APP=${a#app:}" app=${a#app:} ;;
+  resume) resume=1 ;;
   # Base64: a title with spaces ("RimWorld by Ludeon Studios") through su -c and powos-run.sh's quoting.
   win:*) envs="$envs WIN_B64=$(printf %s "${a#win:}" | base64 | tr -d '\n')" ;;
   *) args+=("$a") ;; esac; done
 set -- "${args[@]+"${args[@]}"}"
+# resume alone: only bf-return (no coldstart default variants first).
+[ $resume = 1 ] && [ $# = 0 ] && exec env ${app:+APP=$app} "$here/bf-return.sh"
 OUT=${OUT:-$HOME/.cache/powos-verify/bf-coldstart-$(date +%F_%H%M)}; mkdir -p "$OUT"
 # adb.sh mounts each pushed file's directory into its container: the path must be resolved (no "..": it pushed
 # nothing, so the phone ran an old powos-open-task, 2026-10-22).
@@ -56,5 +63,6 @@ trap stop_phone TERM INT HUP; wait "$job"; trap - TERM INT HUP; kill "$shooter" 
 echo "artefacts: $OUT/run.txt"; cat "$OUT/shots.txt" 2>/dev/null
 grep -q "^RESULT" "$OUT/run.txt" || { grep -q "^user input\|^stopped from outside\|^not ready" "$OUT/run.txt" && exit 3; echo "FAIL run: no RESULT line"; exit 1; }
 grep "^RESULT" "$OUT/run.txt" | tail -1
-grep -q "^RESULT.*FAIL" "$OUT/run.txt" && exit 1
-exit 0
+rc=0; grep -q "^RESULT.*FAIL" "$OUT/run.txt" && rc=1
+if [ $resume = 1 ]; then env ${app:+APP=$app} "$here/bf-return.sh"; r=$?; [ $r = 3 ] && exit 3; [ $r = 0 ] || rc=1; fi
+exit $rc
