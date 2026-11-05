@@ -175,14 +175,17 @@ class LinkWatch(unittest.TestCase):
         import contextlib
         st = contextlib.ExitStack()
         for name, f in (("unit_root", lambda u: 100), ("tree", lambda p: [100, 101]),
-                        ("cmdline", lambda p: cmd if p == 100 else "steamwebhelper"), ("steam_link", lambda path: link)):
+                        ("cmdline", lambda p: cmd if p == 100 else "steamwebhelper"), ("steam_link", lambda path: link),
+                        ("display_on", lambda: self.lit)):
             st.enter_context(mock.patch.object(GUI, name, f))
         st.enter_context(mock.patch.object(GUI.GLib, "timeout_add", lambda ms, f, *a: self.timers.append((ms, f, a)),
                                            create=True))
         return st
 
-    def run_watch(self, on=True, frozen=True, link=1, cmd="./steam -silent", frozen_for=0.0):
-        self.timers = []
+    lit = False
+
+    def run_watch(self, on=True, frozen=True, link=1, cmd="./steam -silent", frozen_for=0.0, lit=False):
+        self.timers, self.lit = [], lit
         g = self.gui(on, frozen, frozen_for)
         with self.patched(link, cmd):
             self.assertTrue(g.link_watch())  # the GLib timer keeps running
@@ -197,6 +200,18 @@ class LinkWatch(unittest.TestCase):
 
     def test_off_screen_waits_for_screen_on(self):
         self.assertEqual(self.run_watch(on=False), [])
+
+    def test_android_home_lit_counts(self):  # the games widget on Android's home: PowOS off screen, display on
+        self.assertEqual(self.run_watch(on=False, lit=True), ["link dropped while frozen"])
+
+    def test_display_on_reads_the_backlights(self):
+        with tempfile.TemporaryDirectory() as d:
+            for name, v in (("panel0", "0"), ("panel1", "0")):
+                Path(d, name).mkdir(); Path(d, name, "brightness").write_text(v)
+            self.assertFalse(GUI.display_on(d + "/*/brightness"))
+            Path(d, "panel1", "brightness").write_text("412\n")
+            self.assertTrue(GUI.display_on(d + "/*/brightness"))
+            self.assertTrue(GUI.display_on(d + "/none/*/brightness"))  # no backlight: a desktop
 
     def test_awake_or_running_a_game_is_left_alone(self):
         self.assertEqual(self.run_watch(frozen=False), [])

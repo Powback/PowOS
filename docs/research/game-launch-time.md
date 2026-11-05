@@ -315,11 +315,13 @@ in PowOS: its CM server drops the silent client **79 s into the freeze** (job 14
 /proc/net/tcp, no thaw needed to see it), the client only notices at the thaw = the tap, then Steam's own reconnect
 backoff ("StartAutoReconnect() will start in 11.0 seconds (attempt 1)") and only then the launch: handoff 12.7 s,
 tap -> frame 30.3 s. reconnect_ahead (2026-10-24) covered only PowOS coming back on screen.
-Fix (lib/apps/powos-sleep-gui `link_watch`, every 10 s while PowOS is on screen, generic for any `games: pause`
+Fix (lib/apps/powos-sleep-gui `link_watch`, every 5 s while a display is lit, generic for any `games: pause`
 launcher): a frozen launcher running no game is thawed for 1.5 s every 50 s (its overdue heartbeat goes out, then
 frozen again, not logged), and thawed to reconnect at once when the kernel shows its link closed anyway (the backoff
-then runs off the tap's path; reconnect_poll puts it back to sleep once logged on). Off screen: no pulses (battery),
-reconnect_ahead at screen on as before. Test: test/tier1/test-sleep-gui-screen.py LinkWatch. HACK row: REMOTE-POWOS §4.
+then runs off the tap's path; reconnect_poll puts it back to sleep once logged on). Screen off: no pulses (battery);
+a link dropped meanwhile is found within 5 s of the screen coming on. First cut keyed on "PowOS on screen" only: the
+`frozen` check (job 145940, PowOS off screen, Android's home lit - the games-widget path) still waited: link closed at
+the tap, handoff 17.0 s, frame 33.3 s; now any lit backlight counts. Test: test/tier1/test-sleep-gui-screen.py LinkWatch. HACK row: REMOTE-POWOS §4.
 Pulse checked on the phone (job 144859, the same timings by hand: Sleep, then Wake 1.5 s / Sleep every 50 s): the link stayed ESTABLISHED through 200 s frozen (it died at 79 s without), no disconnect in connection_log. Expected: the frozen case back to the awake numbers (-11.7 s: 30.3 -> ~16 s); end-to-end check `bf-coldstart.sh frozen` (new variant: Steam frozen FROZEN_S=100 s before the tap, its link state printed) after the sleep-gui install.
 
 **Clocks (ruled out).** The vendor's oiface (thread `horaeCb`) holds cpufreq caps of 2054 MHz (A715) / 1708 MHz (X3 prime,

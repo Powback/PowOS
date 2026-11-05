@@ -74,7 +74,7 @@ GAME_WINDOW_S = 600  # a game still without a window this long after its launch 
 ADOPT_S = 30
 # A game launcher (Steam) frozen while PowOS is on screen: its CM link checked this often from the kernel's socket
 # table (no thaw); the server dropped it -> thawed to reconnect at once, off the tap's path (Gui.link_watch).
-LINK_S = int(os.environ.get("POWOS_SLEEP_LINK_S", "10"))
+LINK_S = int(os.environ.get("POWOS_SLEEP_LINK_S", "5"))
 # ... and kept alive meanwhile: thawed for LINK_PULSE_MS every LINK_PULSE_S, its overdue CM heartbeat goes out, frozen
 # again. Measured 2026-11-05 14:47: the server drops a frozen client's link 79 s after the freeze.
 LINK_PULSE_S = int(os.environ.get("POWOS_SLEEP_LINK_PULSE_S", "50"))
@@ -205,6 +205,20 @@ def steam_link(path):
         except OSError:
             pass
     return 1
+
+
+def display_on(pattern="/sys/class/backlight/*/brightness"):
+    """Is a display lit? Any backlight above 0 (the phone's inner and cover panels: 0 while the screen is off, also
+    when PowOS is on screen behind it); no backlight at all (a desktop, a monitor over DRM) counts as on."""
+    found = False
+    for f in glob.glob(pattern):
+        found = True
+        try:
+            if int(open(f).read().strip() or 0) > 0:
+                return True
+        except (OSError, ValueError):
+            pass
+    return not found
 
 
 def game_launcher(u):
@@ -749,13 +763,15 @@ class Gui(dbus.service.Object):
         which was the next game tap: 11-12 s of Steam's reconnect backoff before the launch even started (bf-coldstart
         14:34, Steam frozen 52 min: handoff 12.7 s, tap -> frame 30.3 s against 14.8 s with a live link). Checked here
         every LINK_S from the kernel (no thaw, nothing read from the client): a dropped link -> thawed now, the backoff
-        runs off the tap's path, asleep again once logged on (reconnect_poll). Only while PowOS is on screen: off
-        screen, reconnect_ahead does it when PowOS comes back. A link that is still live costs one /proc read."""
+        runs off the tap's path, asleep again once logged on (reconnect_poll). While a display is lit (PowOS on
+        screen, or Android's home with the games widget: bf-coldstart frozen 15:06, PowOS off screen, handoff 17 s);
+        screen off: nothing (battery), the dropped link is found within LINK_S of the screen coming on. A link that is
+        still live costs one /proc read."""
         # HACK: a frozen Steam can't answer its CM server (dropped 79 s into a freeze, 2026-11-05 14:47), so it is thawed
-        # for LINK_PULSE_MS every LINK_PULSE_S while PowOS is on screen (its overdue heartbeat goes out) and thawed to
+        # for LINK_PULSE_MS every LINK_PULSE_S while a display is lit (its overdue heartbeat goes out) and thawed to
         # reconnect when the link died anyway. Real fix: Steam's client keeping its link from a small process of its
         # own (or a resume that skips the reconnect backoff), so the client could stay frozen.
-        if self.screen.on:
+        if self.screen.on or display_on():
             cl = os.path.expanduser("~/.local/share/Steam/logs/connection_log.txt")
             now = time.monotonic()
             for u in self.rules():
