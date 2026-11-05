@@ -865,10 +865,8 @@ static int do_connect(struct consumer_state *s)
             s->direct = direct_new();
         else
             direct_reset(s->direct);   /* the new connection sends every buffer's fd again */
-        if (s->direct) {
-            send_direct_caps(s, DIRECT_CAP_XR24_LINEAR);
-            LOGI("surface %u: direct scanout offered", s->surface_id);
-        }
+        /* The offer itself goes in on_exit_fallback: until the producer picks the connection up the ctx is in
+         * fallback and push_input_event drops every event (an offer sent here never reached KWin, 11-05 19:01). */
     }
 
     s->need_reconnect = false;
@@ -917,6 +915,13 @@ static void on_exit_fallback(void *userdata)
     LOGI("exit fallback triggered (surface %u)", s->surface_id);
 
     send_refresh_rate(s);
+    /* PowOS: direct scanout offered on every hand-over to KWin (each one is a new goLive there: it forgot every id, so
+     * this side forgets them too). Render thread (select_dmabuf -> try_exit_fallback), as direct_present. */
+    if (s->direct_on && s->direct) {
+        direct_reset(s->direct);
+        send_direct_caps(s, DIRECT_CAP_XR24_LINEAR);
+        LOGI("surface %u: direct scanout offered", s->surface_id);
+    }
     /* Clipboard and resource requests are the desktop's. A window's event thread carries only its keyboard's show/hide
      * (kwin 0043: a web window of home; an older KWin sends nothing on it). */
     if (!s->primary) {

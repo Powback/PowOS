@@ -188,8 +188,10 @@ static void forget(struct direct_state *d, struct slot *s)
 int direct_present(struct direct_state *d, ANativeWindow *win, const struct direct_frame *f, int fence, int dmabuf)
 {
     int rc = -1;
-    if (d->dead)
+    if (d->dead) {
+        rc = -2;   /* refused for good earlier (a reconnect offered again): the caller turns direct off again */
         goto out;
+    }
     if (f->flags & DIRECT_FLAG_FORGET) {
         struct slot *s = slot_of(d, f->id);
         if (s) forget(d, s);
