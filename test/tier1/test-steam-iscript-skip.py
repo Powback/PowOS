@@ -160,6 +160,49 @@ class Arm64Gate(IscriptSkip):
         pass  # Proton's own import: covered by IscriptSkip
 
 
+class Arm64GateOverlay(Arm64Gate):
+    """arm64-gate-entry OVERLAY: our kernelbase.dll goes into exactly the Valve Proton build it was made from."""
+
+    VALVE, OURS = b"valve kernelbase", b"powos kernelbase, longer"
+
+    def setUp(self):
+        super().setUp()
+        self.dll = self.proton / "files/lib/wine/aarch64-windows/kernelbase.dll"
+        self.dll.parent.mkdir(parents=True)
+        self.dll.write_bytes(self.VALVE)
+        tool = self.steam / "compatibilitytools.d/powos-proton-arm64"
+        tool.mkdir(parents=True)
+        (tool / "overlay-kernelbase.dll").write_bytes(self.OURS)
+        src = (PKG / "arm64-gate-entry").read_text()
+        for old, new in zip(Arm64GateOverlay.shas_in(src), (self.VALVE, self.OURS)):
+            src = src.replace(old, hashlib.sha256(new).hexdigest())
+        self.gate = tool / "powos-entry"
+        self.gate.write_text(src)
+
+    @staticmethod
+    def shas_in(src):
+        block = src[src.index("OVERLAY = {"):]
+        return [w.strip('",') for w in block.split() if len(w.strip('",')) == 64][:2]
+
+    def launch(self):
+        return self.run_chain(self.chain("waitforexitandrun", ["proton", "waitforexitandrun", "S:\\Broforce.exe"]))
+
+    def test_valve_build_gets_ours(self):
+        r = self.launch()
+        self.assertEqual(r.returncode, 7)
+        self.assertEqual(self.dll.read_bytes(), self.OURS)
+        self.assertEqual(Path(str(self.dll) + ".valve").read_bytes(), self.VALVE)
+        self.launch()  # in place: left alone
+        self.assertEqual(self.dll.read_bytes(), self.OURS)
+
+    def test_other_proton_build_untouched(self):
+        self.dll.write_bytes(b"a newer Valve build")
+        r = self.launch()
+        self.assertEqual(r.returncode, 7)
+        self.assertEqual(self.dll.read_bytes(), b"a newer Valve build")
+        self.assertFalse(Path(str(self.dll) + ".valve").exists())
+
+
 class MonoAnonCache(unittest.TestCase):
     """user_settings.py: FEX's anonymous-code disk cache off for Mono games only."""
 

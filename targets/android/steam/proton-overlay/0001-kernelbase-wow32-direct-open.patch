@@ -1,0 +1,116 @@
+diff --git a/dlls/kernelbase/registry.c b/dlls/kernelbase/registry.c
+index 9369024..3bf7741 100644
+--- a/dlls/kernelbase/registry.c
++++ b/dlls/kernelbase/registry.c
+@@ -341,6 +341,99 @@ static NTSTATUS open_wow6432node_parent( HKEY *retkey, HKEY root, DWORD options,
+     return status;
+ }
+ 
++/* \Registry\User\<user>\Software, by name (is_wow6432_shared() without the server call) */
++static BOOL is_user_software( const WCHAR *path, DWORD len )
++{
++    static const WCHAR users_root[] = L"\\Registry\\User\\";
++    DWORD i = ARRAY_SIZE( users_root ) - 1;
++
++    if (len <= i || wcsnicmp( path, users_root, i )) return FALSE;
++    while (i < len && path[i] != '\\') i++;
++    return len - i == 9 && !wcsnicmp( path + i, L"\\Software", 9 );
++}
++
++/* The 32-bit view (KEY_WOW64_32KEY) of a key for a 64-bit caller in a few server calls.
++ * open_key()'s general walk opens each component of the key's full path in turn and probes it for a
++ * Wow6432Node child: ~3 server calls per component, 19 for HKCU\Software\Valve\Steam\ActiveProcess,
++ * which steam_api64's SteamAPI_IsSteamRunning reads on every call (Unity games poll it 80-150 times a
++ * second). When no component has a Wow6432Node child - the common case - the walk ends at the key at the
++ * plain path, so probe each prefix's Wow6432Node by absolute name (one call each, no handle to close) and
++ * open the full path once: 7 calls for that key. Anything else (a Wow6432Node found or named, a name the
++ * walk parses specially, a failed open) returns STATUS_MORE_PROCESSING_REQUIRED and takes the walk. */
++static NTSTATUS open_key_wow32_direct( HKEY *retkey, HKEY root, const UNICODE_STRING *name, DWORD options,
++                                       ACCESS_MASK access )
++{
++    static const WCHAR wow6432node[] = L"\\Wow6432Node";
++    const DWORD wow_len = ARRAY_SIZE( wow6432node ) - 1;
++    DWORD name_len = name->Length / sizeof(WCHAR), root_len, len, start, end, i;
++    NTSTATUS status = STATUS_MORE_PROCESSING_REQUIRED;
++    KEY_NAME_INFORMATION *info;
++    OBJECT_ATTRIBUTES attr;
++    UNICODE_STRING str;
++    WCHAR *path = NULL, *probe;
++    char buffer[256];
++    HANDLE key;
++
++    if (!name_len || (options & REG_OPTION_OPEN_LINK)) return status;
++    if (name->Buffer[0] == '\\' || name->Buffer[name_len - 1] == '\\') return status;
++    for (i = 1; i < name_len; i++) if (name->Buffer[i] == '\\' && name->Buffer[i - 1] == '\\') return status;
++
++    if (!(info = get_key_name( root, buffer, sizeof(buffer) ))) return status;
++    root_len = info->NameLength / sizeof(WCHAR);
++    len = root_len + 1 + name_len;
++    if (root_len <= 10 || wcsnicmp( info->Name, L"\\Registry\\", 10 )) goto done;
++    if (!(path = HeapAlloc( GetProcessHeap(), 0, (2 * len + wow_len) * sizeof(WCHAR) ))) goto done;
++    memcpy( path, info->Name, root_len * sizeof(WCHAR) );
++    path[root_len] = '\\';
++    memcpy( path + root_len + 1, name->Buffer, name_len * sizeof(WCHAR) );
++    probe = path + len;
++
++    /* the walk's components: "\Registry\<hive>" first, then one per backslash */
++    for (end = 10; end < len && path[end] != '\\'; end++) ;
++    start = 0;
++    for (;;)
++    {
++        str.Buffer = path + start + 1;
++        str.Length = (end - start - 1) * sizeof(WCHAR);
++        if (str.Length == (wow_len - 1) * sizeof(WCHAR) && !wcsnicmp( str.Buffer, wow6432node + 1, wow_len - 1 ))
++            goto done;  /* the walk treats an explicit Wow6432Node specially */
++
++        /* open_wow6432node() ignores \Registry\User\<user>\Software\Wow6432Node (is_wow6432_shared) */
++        if (!is_user_software( path, end ))
++        {
++            memcpy( probe, path, end * sizeof(WCHAR) );
++            memcpy( probe + end, wow6432node, wow_len * sizeof(WCHAR) );
++            str.Buffer = probe;
++            str.Length = (end + wow_len) * sizeof(WCHAR);
++            InitializeObjectAttributes( &attr, &str, 0, 0, NULL );
++            if (!NtOpenKeyEx( &key, MAXIMUM_ALLOWED | KEY_WOW64_64KEY, &attr, 0 ))
++            {
++                NtClose( key );
++                goto done;  /* redirected: the walk resolves it */
++            }
++        }
++        if (end == len) break;
++        start = end;
++        for (end++; end < len && path[end] != '\\'; end++) ;
++    }
++
++    str.Buffer = path;
++    str.Length = len * sizeof(WCHAR);
++    InitializeObjectAttributes( &attr, &str, 0, 0, NULL );
++    status = NtOpenKeyEx( (HANDLE *)retkey, (access & ~KEY_WOW64_32KEY) | KEY_WOW64_64KEY, &attr, options );
++    if (status == STATUS_PREDEFINED_HANDLE)
++    {
++        *retkey = get_perflib_key( *retkey );
++        status = STATUS_SUCCESS;
++    }
++    if (status) status = STATUS_MORE_PROCESSING_REQUIRED;  /* the walk returns its own error */
++
++done:
++    HeapFree( GetProcessHeap(), 0, path );
++    if ((char *)info != buffer) HeapFree( GetProcessHeap(), 0, info );
++    return status;
++}
++
+ /* wrapper for NtOpenKeyEx to handle Wow6432 nodes */
+ static NTSTATUS open_key( HKEY *retkey, HKEY root, UNICODE_STRING *name, DWORD options, ACCESS_MASK access, BOOL create )
+ {
+@@ -366,6 +459,11 @@ static NTSTATUS open_key( HKEY *retkey, HKEY root, UNICODE_STRING *name, DWORD o
+         return status;
+     }
+ 
++    if (is_win64 && (access & KEY_WOW64_32KEY) && !create && root &&
++        (status = open_key_wow32_direct( retkey, root, name, options, access )) != STATUS_MORE_PROCESSING_REQUIRED)
++        return status;
++    status = STATUS_SUCCESS;
++
+     if (root && (access & KEY_WOW64_32KEY) && !is_wow6432node( name ))
+         status = open_wow6432node_parent( &subkey_root, root, options, access );
+     else if (root && is_wow64 && !(access & KEY_WOW64_64KEY) && !is_wow6432node( name ))

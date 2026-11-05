@@ -118,6 +118,7 @@ new)
     { "$bic" get powos-rootfs.tar.gz "$d/targets/android/out/powos-rootfs.tar.gz" &&
       "$bic" get powos-rootfs.tar.gz.sha256 "$d/targets/android/out/powos-rootfs.tar.gz.sha256"; } >/dev/null 2>&1 || true
     "$bic" get steam-sysvipc-emu.tar.gz "$d/targets/android/pkgs/steam/sysvipc-emu.tar.gz" >/dev/null 2>&1 || true
+    "$bic" get steam-proton-arm64-kernelbase.dll "$d/targets/android/pkgs/steam/proton-arm64-kernelbase.dll" >/dev/null 2>&1 || true
   fi
   echo "$d" ;;
 done)

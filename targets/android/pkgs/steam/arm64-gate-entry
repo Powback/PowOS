@@ -30,6 +30,49 @@ def skip_evaluator(verb, cmd):
                                   "before the container (PowOS ARM64 entry)")
 
 
+# HACK: Proton ARM64's kernelbase.dll opens a key's 32-bit view (KEY_WOW64_32KEY) from a 64-bit process with ~3
+# wineserver calls per path component; steam_api64's SteamAPI_IsSteamRunning does that for
+# HKCU\Software\Valve\Steam\ActiveProcess on every call and Broforce calls it 80-150 times a second (19 of the 24
+# calls per poll, ~0.4 s of the load). targets/android/steam/proton-overlay builds Valve's own wine tag with
+# 0001-kernelbase-wow32-direct-open.patch (7 calls); it replaces Proton's file only while that file is the exact Valve
+# build it was made from (a Proton update brings a new file: left alone until rebuilt). Valve's is kept as .valve.
+# Real fix: the patch upstream (Wine kernelbase), then Valve's next Proton has it - drop this table and the overlay.
+OVERLAY = {  # Proton-relative path: (sha256 of Valve's file, sha256 of ours, our file next to this script)
+    "files/lib/wine/aarch64-windows/kernelbase.dll": (
+        "21ab141457dc3a360d34540b362ee21bf3edb69d629a29a820b0344652a4a8a0",
+        "a3f08252c4ce37840ba7bd67d0041dae0adc8d6c29aacadfee459361694ba736", "overlay-kernelbase.dll"),
+}
+
+
+def sha256(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def apply_overlay():
+    here = os.path.dirname(os.path.realpath(__file__))
+    for rel, (valve, ours, name) in OVERLAY.items():
+        dst, src = os.path.join(PROTON, rel), os.path.join(here, name)
+        try:
+            if not os.path.isfile(src) or os.path.getsize(src) == os.path.getsize(dst) and sha256(dst) == ours:
+                continue  # not packaged, or in place already
+            if sha256(dst) != valve or sha256(src) != ours:
+                continue  # another Proton build (or a damaged copy): Valve's file stays
+            import shutil
+            if not os.path.exists(dst + ".valve"):
+                shutil.copy2(dst, dst + ".valve")
+            shutil.copyfile(src, dst + ".powos-tmp")
+            os.chmod(dst + ".powos-tmp", 0o555)
+            os.replace(dst + ".powos-tmp", dst)  # atomic: a running game keeps the file it mapped
+            sys.stderr.write("powos-entry: %s -> PowOS build\n" % rel)
+        except OSError as e:
+            sys.stderr.write("powos-entry: overlay %s: %s\n" % (rel, e))
+
+
 def main():
     verb, cmd = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("waitforexitandrun", [])
     try:
@@ -38,6 +81,10 @@ def main():
             os._exit(0)
     except Exception as e:  # never break a launch over the skip
         sys.stderr.write("powos-entry: %s\n" % e)
+    try:
+        apply_overlay()
+    except Exception as e:  # never break a launch over the overlay
+        sys.stderr.write("powos-entry: overlay: %s\n" % e)
     # Steam sets STEAM_COMPAT_TOOL_PATHS to the tools of the chain it built (this one); pressure-vessel and Proton
     # read it to find Proton and the runtime, as when Steam layers them itself.
     paths = [PROTON, SLR] + [p for p in os.environ.get("STEAM_COMPAT_TOOL_PATHS", "").split(":") if p]

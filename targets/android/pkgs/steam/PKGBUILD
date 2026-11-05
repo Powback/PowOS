@@ -3,7 +3,7 @@
 # Arch's steam PKGBUILD) stays as the STEAM_X86=1 fallback, through FEX.
 pkgname=steam
 pkgver=1.0.0.87
-pkgrel=36
+pkgrel=37
 pkgdesc="Steam: Valve's native ARM64 client (games through FEX) - PowOS phone build"
 arch=(any)
 url=https://steampowered.com/
@@ -14,11 +14,13 @@ install=steam.install
 # sysvipc-emu.tar.gz: System V IPC for the native client and x86 programs (targets/android/steam/sysvipc/build.sh puts it here).
 source=("https://repo.steampowered.com/steam/archive/stable/steam_$pkgver.tar.gz" steam sysvipc-emu.tar.gz
         user_settings.py powos-steam-resident powos-steam-resident.desktop powos-steam-compat steam-env fex-thunks.json fex-ThunksDB.json
-        sitecustomize.py arm64-gate-entry arm64-gate-toolmanifest.vdf arm64-gate-compatibilitytool.vdf)
+        sitecustomize.py arm64-gate-entry arm64-gate-toolmanifest.vdf arm64-gate-compatibilitytool.vdf
+        proton-arm64-kernelbase.dll)
 noextract=(sysvipc-emu.tar.gz)
 sha256sums=('649375d2f9377f8009aaf3e2ff09978041eb9114897d9c5a3886f1d82e27ba1f' SKIP
             '7dab8e01dac972b2ca7b78d34b9386217218ba76cc8e25b1abe73cb65fd61c34' SKIP SKIP SKIP SKIP SKIP SKIP SKIP
-            SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP
+            'a3f08252c4ce37840ba7bd67d0041dae0adc8d6c29aacadfee459361694ba736')
 
 package() {
   mkdir -p "$pkgdir/usr/lib/powos-sysvipc"
@@ -39,6 +41,9 @@ package() {
   install -Dm755 "$srcdir/arm64-gate-entry" "$pkgdir/usr/lib/powos-steam/compat/powos-proton-arm64/powos-entry"
   install -Dm644 "$srcdir/arm64-gate-toolmanifest.vdf" "$pkgdir/usr/lib/powos-steam/compat/powos-proton-arm64/toolmanifest.vdf"
   install -Dm644 "$srcdir/arm64-gate-compatibilitytool.vdf" "$pkgdir/usr/lib/powos-steam/compat/powos-proton-arm64/compatibilitytool.vdf"
+  # Proton ARM64's kernelbase.dll with the KEY_WOW64_32KEY direct open (targets/android/steam/proton-overlay/build.sh puts
+  # it here, gitignored); the gate puts it into that exact Valve Proton build only (see arm64-gate-entry OVERLAY).
+  install -Dm644 "$srcdir/proton-arm64-kernelbase.dll" "$pkgdir/usr/lib/powos-steam/compat/powos-proton-arm64/overlay-kernelbase.dll"
   # Which way each game runs (native Linux build / ARM64 Proton / x86 Proton), per game, measured (see the file);
   # /usr/bin/steam applies it before each Steam start.
   install -Dm755 "$srcdir/powos-steam-compat" "$pkgdir/usr/bin/powos-steam-compat"

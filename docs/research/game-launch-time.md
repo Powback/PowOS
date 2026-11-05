@@ -347,3 +347,37 @@ alone is 8 s, so a FRESH launch of this Unity game can't reach 10 s from the Pow
 return-to-a-left-game path (freeze/resume, 0.6-0.8 s). Not done (evaluated): a pre-warmed container + wineserver per
 prefix (saves at most ~2 s of reaper -> exe; a wineserver outside Steam's reaper makes Steam show the game running,
 and the game-resume freeze keys on Steam's tree); unity-screen's Python (55 ms, not worth it).
+
+## steam_api's IsSteamRunning polls: Wine's 32-bit-view registry walk (2026-11-05, agent/steam-poll)
+
+Follow-up to agent/fex-mono-start's finding (~35k of main's 58k server requests before the first frame are
+`SteamAPI_IsSteamRunning`). Who polls: the game. Broforce's `SteamController.IsSteamEnabled` calls
+`SteamAPI.IsSteamRunning()` every time and is called from per-frame/per-string paths (LanguageManager,
+SteamControllerUser.get_Name, DesktopPlatform, FileIO; found by IL scan of Assembly-CSharp.dll). Steam IS seen as running
+(ActiveProcess pid 0x20 = steam.exe, exit_code 259 = STILL_ACTIVE in the +server log of job 104344), so nothing on the
+Steam side makes the game poll less - (b) has no lever.
+
+Why each poll costs 24 requests: steam_api64 reads `HKCU\Software\Valve\Steam\ActiveProcess` with KEY_WOW64_32KEY. For a
+64-bit process Wine's **kernelbase** (not the server: it strips KEY_WOW64_32KEY for non-WoW64 processes) emulates the
+32-bit view itself: `open_wow6432node_parent` queries the root's name, then `open_subkey` opens every component of
+`\REGISTRY\User\<sid>\Software\Valve\Steam\ActiveProcess` from the top and probes each for a `Wow6432Node` child
+(open + probe + close = 3 calls per component), then `is_classes_wow6432node` queries the name again: 19 calls, + value,
+close, open_process, get_process_info, close. Same code in upstream Wine master (2026-11-04) and Valve's
+experimental_11.0 (which adds `is_wow6432_shared` for HKCU\Software) - not fixed anywhere.
+
+Fix (Wine side, `targets/android/steam/proton-overlay/0001-kernelbase-wow32-direct-open.patch`): `open_key_wow32_direct`
+- when no component has a Wow6432Node child (the common case) the walk's result is just the key at the plain path, so
+probe each prefix's `Wow6432Node` by absolute name (1 call each, no handle to close; HKCU\Software skipped exactly as
+`is_wow6432_shared` ignores it) and open the full path once: **7 calls instead of 19** (12 instead of 24 per poll).
+Anything else (a Wow6432Node found or named, leading/trailing/double backslashes, OPEN_LINK, a failed open) falls back to
+the unchanged walk, so results are identical. Shipping: kernelbase is a PE (ARM64X) dll and Wine loads builtins from
+Proton's lib dir, not the prefix's system32 symlink, so the file in Proton itself is replaced: `build.sh` builds Valve's
+own tag `experimental-wine-11.0-20261027b` (llvm-mingw 20261006, arm64ec+aarch64, tools + dlls/kernelbase only, ~10 min
+first time, docker volume powos-steam-poll-wine) -> pkgs/steam/proton-arm64-kernelbase.dll (gitignored, build-inputs
+cache); steam -37 ships it in the powos-proton-arm64 tool dir and `arm64-gate-entry` swaps it in only while Proton's file
+is that exact Valve build (sha256; Valve's kept as `.valve`; a Proton update is left alone until rebuilt). A full Proton
+rebuild was not needed. Re-basing on a new Proton: bump TAG, rebuild, update the two hashes (~15 min).
+
+A/B queued (jobs 20261105-183239..183312: bf-pacing base on Valve's dll, then the PowOS dll: bf-coldstart steam x2,
+bf-pacing base, bf-checker base, Valve's restored). Expected: ~1800 fewer wineserver requests/s in play (150 polls/s x
+12), ~0.2 s of main-thread load time.
