@@ -16,6 +16,7 @@ here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
 [ $# -gt 0 ] || set -- base noncoherent noubwc sysmem nomsaa zeromem flushall nolrz zerowg relaxed
 OUT=${OUT:-$HOME/.cache/powos-verify/bfc-$(date +%F_%H%M)}; mkdir -p "$OUT"
 BF_ADB=$A . "$here/bf-lib.sh"   # pill <step>: the status pill's sub-step
+cfg_take "$@"; set -- "${CFG_ARGS[@]}"; [ $# -gt 0 ] || set -- base  # cfg:<x86|arm64> first: bf-lib.sh cfg_take
 irq() { "$A" shell "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts" | tr -d '\r'; }
 asuser() { local n=$1; shift
   "$A" shell "su -c 'cp /data/local/tmp/powos-$n /data/powos/root/var/tmp/powos-$n; chmod 644 /data/powos/root/var/tmp/powos-$n; sh /data/powos/powos-run.sh \"sh /var/tmp/powos-$n $*\"'" 2>&1 | grep -v sysvipc | tr -d '\r'; }
@@ -42,11 +43,13 @@ restore() {
   pill "closing the game, putting Steam + settings back"
   "$A" shell "su -c 'pkill -f powos-bf-present.sh; pkill -f \"powos-bf-checker-phone.sh grabloop\"; pkill -f \"bf-xframes.py grab Broforce\"'" >/dev/null 2>&1
   asuser bf-checker-phone.sh clean >/dev/null; asuser bf-stop.sh >/dev/null
+  cfg_restore
   [ -n "$steam_before" ] && "$A" shell "su -c 'sh /data/powos/powos-run.sh \"cd /home/powos; setsid -f steam -silent </dev/null >/dev/null 2>&1\"'" >/dev/null 2>&1
   [ -n "$front" ] && "$A" shell "am start -n $front >/dev/null 2>&1"
   "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfc-* /data/local/tmp/powos-bf-*.sh /data/powos/root/var/tmp/powos-bf-*.sh /data/powos/root/var/tmp/bfc'"
 }
 [ "$stale" = stale ] && { pill "Steam predates its steam-env: restarting it"; echo "steam-env newer than Steam: restarting Steam"; asuser bf-stop.sh --steam | tail -1; }
+cfg_set || exit 5
 i0=$(irq); touched() { [ "$(irq)" != "$i0" ]; }
 abort() { echo "touch $(date +%T) - abort, restoring"; restore; exit 3; }
 nap() { local i; for i in $(seq "$1"); do sleep 5; touched && abort; done; }

@@ -12,6 +12,18 @@ if [ -n "${BF_ADB:-}" ]; then
   pill() { local b; b=$(printf '%s\n' "$1" | base64 | tr -d '\n')
     perl -e 'alarm shift; exec @ARGV' 15 "$BF_ADB_PATH" shell "su -c 'sh /data/powos/powos-run.sh \"umask 022; echo $b | base64 -d > /tmp/powos-verify-step\"'" >/dev/null 2>&1
     echo "-- $(date +%T) $1"; }
+  # cfg:<x86|arm64> as a check's FIRST argument (bf-pacing.sh, bf-checker.sh): the game runs under that compat tool
+  # for this check only (bf-cfg-phone.sh), the user's choice back at the end. cfg_take "$@" sets CFG_TO (empty = as
+  # installed) and CFG_ARGS (the rest); cfg_set before the first launch, cfg_restore in the check's restore().
+  cfg_take() { CFG_TO=; case ${1:-} in cfg:*) CFG_TO=${1#cfg:}; shift ;; esac; CFG_ARGS=("$@"); }
+  cfg_run() { local here_; here_=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    "$BF_ADB_PATH" push "$here_/bf-cfg-phone.sh" /data/local/tmp/powos-bf-cfg-phone.sh >/dev/null \
+      && "$BF_ADB_PATH" push "$here_/bf-stop.sh" /data/local/tmp/powos-bf-stop.sh >/dev/null \
+      && "$BF_ADB_PATH" push "$here_/../../../targets/android/pkgs/steam/powos-steam-compat" /data/local/tmp/powos-steam-compat >/dev/null \
+      || { echo "ENV: can't push bf-cfg-phone.sh"; return 5; }
+    "$BF_ADB_PATH" shell "su -c 'cp /data/local/tmp/powos-bf-cfg-phone.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-steam-compat /data/powos/root/var/tmp/; chmod 644 /data/powos/root/var/tmp/powos-bf-cfg-phone.sh /data/powos/root/var/tmp/powos-steam-compat; sh /data/powos/powos-run.sh \"APP=${APP:-274190} bash /var/tmp/powos-bf-cfg-phone.sh $*\"'" 2>&1 | grep -v sysvipc | tr -d '\r'; }
+  cfg_set() { [ -n "$CFG_TO" ] || return 0; pill "setup cfg:$CFG_TO (closing Steam)"; cfg_run set "$CFG_TO"; }
+  cfg_restore() { [ -n "$CFG_TO" ] || return 0; cfg_run restore; }
   return 0
 fi
 # APP / GAME / WIN_NAME: the game under test - any Steam app id (default 274190, Broforce, the test case); GAME =

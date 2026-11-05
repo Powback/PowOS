@@ -118,3 +118,52 @@ pkgs/steam only covers the FEX compat tool) - worth adding.
 Verdict: ARM64 launches ~2x faster and draws clean, but runs at half the frame rate - Broforce stays on the
 user's pinned x86 (restored 07:25 with the x86 prefix, `powos-steam-compat mode 274190` = pinned:x86). Next for
 ARM64: why the game's frames halve there (where the frame time goes under arm64ec/wow64fex), then re-run this A/B.
+
+### Why ARM64 Proton halves Broforce's frame rate (2026-11-05, agent/arm64-fps)
+
+Measured live during four `bf-coldstart.sh` runs (jobs 20261105-074525/-074527/-074528/-074530; per-thread CPU over
+5 s from /proc, gdb stacks of the busiest thread, the game's environment, Proton log with `PROTON_LOG=1`).
+
+| | ARM64 (Wine native, game code via FEX arm64ec) | x86 (Wine under FEX, Vulkan thunked to host Mesa) |
+|---|---|---|
+| busiest thread | **`WSI swapchain queue` 61-76 %** (Mesa's x11 present thread) | game main thread 51-55 % |
+| game main thread | 19 % (~10 ms CPU per frame: not the limit) | 51-55 % (~13 ms per frame) |
+| WSI swapchain queue | running, every sample in `xcb_put_image` <- libvulkan_freedreno+0x1c6840 | idle (futex), never in the top 25 |
+| Xwayland | 23 % | 11-12 % |
+| DXVK swapchain | IMMEDIATE, 1116x2484, 4 images, created once (no recreate loop) | same DXVK v3.1.1-97 |
+| Xwayland KGSL stats | 277/30 s commits forced past a stale frame callback, up to 16854 held back at 4 buffers | 2 forced, 0 held back |
+
+The cause is the present path, not FEX: on ARM64 every frame goes to Xwayland through Mesa's **software** X11 present
+(`x11_present_to_x11_sw`: one `xcb_put_image` Z_PIXMAP of the whole 1116x2484x4 = 11 MB image over the X socket,
+disassembly of the installed libvulkan_freedreno 27.0.0_devel.20261029.geb3e7fd4-2 at 0x1c67fc-0x1c6840 confirms
+the call), while the x86 run presents the same swapchain through DRI3 dma-buf (WSI thread idle). The 11 MB copy per
+frame on the WSI thread + Xwayland's upload is the ~33 ms p50 frame (19 fps); FEX / arm64ec settings don't matter here
+(the game's own threads are faster per frame on ARM64). Ruled out: present mode (IMMEDIATE already; FIFO quantization
+is not it), swapchain recreation (one swapchain in the log), device access (/dev/kgsl-3d0 and /dev/dma_heap/system are
+open in the game), `MESA_VK_WSI_DEBUG=sw` (not in the game's environment, not in Proton ARM64's files).
+In wsi_device_init, `wsi->sw` (byte 0x348) = `sw_device || WSI_DEBUG & sw`; Turnip passes `sw_device=false`. The
+branch taken in the present thread instead tests a pointer (`[[[[chain+0x50]+0x70]+0x50]+0x2c8]`, null -> CPU path,
+set -> 0x1c655c DRI3 path) - next: identify that field in the eb3e7fd4 source (wsi_common_x11.c x11_present_to_x11 /
+image init, likely the image's DRM/pixmap state) and why it is unset only in the native ARM64 container process
+(candidate: Wine's own Xlib/xcb in the container - the process maps BOTH pressure-vessel's libxcb.so.1 and
+/run/host/usr/lib/libxcb.so.1.1.0, so Mesa's host libxcb-dri3/-present may not talk to Wine's connection), then fix
+there and re-measure with bf-pacing. Until then ARM64 stays at ~19 fps and Broforce stays pinned x86.
+
+**Cause found + fix (same day):** the pointer test above is irrelevant - the installed Turnip has no DRI3 path at all.
+Its NEEDED list has libxcb-shm but no libxcb-dri3 / libxcb-present / libdrm: with `-Dfreedreno-kmds=kgsl` alone and
+Turnip as the only driver, Mesa's meson sets `system_has_kms_drm = false`, so `with_dri_platform` isn't drm and
+`HAVE_X11_DRM` is never defined - the X11 WSI is software-only (`x11_present_to_x11_sw` is the only present). The
+ARM64 game maps ours (/run/host/usr/lib/libvulkan_freedreno.so via pressure-vessel); the x86 game runs the FEX RootFS's
+own x86 Turnip (Fedora 44, DRM build) and so presents through DRI3. Fix: vulkan-freedreno-kgsl 27.0.0_devel.20261029.
+geb3e7fd4-3 builds `-Dfreedreno-kmds=kgsl,msm` (links libdrm, xcb-dri3/-present/-sync, xshmfence, libdisplay-info,
+libudev; /dev/kgsl-3d0 still enumerated first). Published; queued: vulkan-freedreno-install.sh, then
+`bf-pacing.sh cfg:arm64 base`, `bf-checker.sh cfg:arm64 base` (cfg: now a first argument of both, bf-cfg-phone.sh) and
+an x86 `bf-pacing.sh base` for no regression. After-numbers: pending those jobs.
+
+Install-script evaluator skip on ARM64: not extendable the x86 way. ARM64's chain before the container is
+pw-audio-namespace -> reaper -> SteamLinuxRuntime_4-arm64/_v2-entry-point (/bin/sh) -> pressure-vessel-wrap - no Python
+runs before pressure-vessel, so sitecustomize.py has nowhere to hook; the skip already happens (user_settings.py,
+evaluator log "skipped: script, Proton and prefix as at its last good run") but only after the container (1.0-1.5 s).
+An earlier skip needs a PowOS layer in front of the ARM64 runtime (a compatibilitytools.d tool whose entry point runs
+the check and then execs `_v2-entry-point --verb=... -- <Proton ARM64>/proton ...`), which changes the tool
+powos-steam-compat pins - not done here.
