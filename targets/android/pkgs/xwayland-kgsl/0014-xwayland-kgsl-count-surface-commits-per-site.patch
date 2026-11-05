@@ -1,0 +1,242 @@
+From: PowOS <powos@localhost>
+Subject: [PATCH] xwayland: KGSL counts every surface commit per site
+
+KWin's window task counted ~2 damaged commits per drawn Broforce frame once 0013 flipped the game's buffers (kwin
+3.65 probe: 368-430 commits / 5 s for 200 drawn; kwin_wayland 14 %, its composite only ~4 %), while Xwayland's own
+lines showed ~30 flips/s and ~0.2 window-buffer commits/s - the second commit per frame had no name. Every
+wl_surface.commit now goes through XWL_KGSL_SURFACE_COMMIT(site): flip, post-damage, pointer-hint (a locked
+pointer's cursor position hint), input-shape, surface-id, configure, cursor; with how many carried damage (KWin
+redraws only for those), the frame callbacks that came back and the Present frame timers that fired instead (0013's
+100 ms KGSL timeout). One "surface commits" line per 30 s on KGSL (xwayland-kgsl-commit-stats.h,
+test/commit-stats-test.c).
+---
+diff --git a/hw/xwayland/xwayland-cursor.c b/hw/xwayland/xwayland-cursor.c
+index fa77f6d..3711ccd 100644
+--- a/hw/xwayland/xwayland-cursor.c
++++ b/hw/xwayland/xwayland-cursor.c
+@@ -33,6 +33,7 @@
+ #include "mipointer.h"
+ 
+ #include "xwayland-cursor.h"
++#include "xwayland-kgsl-commit-stats.h"
+ #include "xwayland-input.h"
+ #include "xwayland-pixmap.h"
+ #include "xwayland-screen.h"
+@@ -164,7 +165,7 @@ xwl_cursor_attach_pixmap(struct xwl_seat *xwl_seat,
+                                      xwl_cursor_buffer_release_callback,
+                                      pixmap);
+ 
+-    wl_surface_commit(xwl_cursor->surface);
++    XWL_KGSL_SURFACE_COMMIT(XWL_COMMIT_CURSOR, xwl_cursor->surface);  /* PowOS 0014 */
+ }
+ 
+ Bool
+diff --git a/hw/xwayland/xwayland-input.c b/hw/xwayland/xwayland-input.c
+index 8231c10..1b0e055 100644
+--- a/hw/xwayland/xwayland-input.c
++++ b/hw/xwayland/xwayland-input.c
+@@ -42,6 +42,7 @@
+ 
+ #include "xwayland-cursor.h"
+ #include "xwayland-input.h"
++#include "xwayland-kgsl-commit-stats.h"
+ #include "xwayland-window.h"
+ #include "xwayland-screen.h"
+ 
+@@ -3308,7 +3309,7 @@ xwl_pointer_warp_emulator_set_fake_pos(struct xwl_pointer_warp_emulator *warp_em
+         zwp_locked_pointer_v1_set_cursor_position_hint(locked_pointer,
+                                                        wl_fixed_from_int(sx),
+                                                        wl_fixed_from_int(sy));
+-        wl_surface_commit(focus_window->surface);
++        XWL_KGSL_SURFACE_COMMIT(XWL_COMMIT_POINTER_HINT, focus_window->surface);  /* PowOS 0014 */
+     }
+ }
+ 
+diff --git a/hw/xwayland/xwayland-present.c b/hw/xwayland/xwayland-present.c
+index a412c87..b72cc1e 100644
+--- a/hw/xwayland/xwayland-present.c
++++ b/hw/xwayland/xwayland-present.c
+@@ -45,6 +45,7 @@
+ #include "xwayland-window-buffers.h"
+ #include "xwayland-pixmap.h"
+ #include "xwayland-kgsl-flip-stats.h"
++#include "xwayland-kgsl-commit-stats.h"
+ 
+ #include "tearing-control-v1-client-protocol.h"
+ #include "linux-drm-syncobj-v1-client-protocol.h"
+@@ -577,6 +578,8 @@ xwl_present_timer_callback(OsTimerPtr timer,
+     /* If we were expecting a frame callback for this window, it didn't arrive
+      * in a second. Stop listening to it to avoid double-bumping the MSC
+      */
++    if (!xorg_list_is_empty(&xwl_present_window->frame_callback_list))  /* PowOS 0014: a callback was due */
++        xwl_kgsl_commit_note_frame(&xwl_kgsl_commits, 1, GetTimeInMicros());
+     xorg_list_del(&xwl_present_window->frame_callback_list);
+ 
+     xwl_present_msc_bump(xwl_present_window);
+@@ -1011,7 +1014,7 @@ xwl_present_flip(present_vblank_ptr vblank, RegionPtr damage)
+         wp_tearing_control_v1_set_presentation_hint(xwl_window->tearing_control, hint);
+     }
+ 
+-    wl_surface_commit(xwl_window->surface);
++    XWL_KGSL_SURFACE_COMMIT(XWL_COMMIT_FLIP, xwl_window->surface);  /* PowOS 0014 */
+ 
+     if (!vblank->sync_flip) {
+         xwl_present_window->sync_callback =
+diff --git a/hw/xwayland/xwayland-screen.c b/hw/xwayland/xwayland-screen.c
+index b49ee05..8cad4fb 100644
+--- a/hw/xwayland/xwayland-screen.c
++++ b/hw/xwayland/xwayland-screen.c
+@@ -49,6 +49,7 @@
+ 
+ #include "xwayland-cursor.h"
+ #include "xwayland-screen.h"
++#include "xwayland-kgsl-commit-stats.h"
+ #include "xwayland-window.h"
+ #include "xwayland-window-buffers.h"
+ #include "xwayland-input.h"
+@@ -357,8 +358,10 @@ xwl_set_shape(WindowPtr window,
+ 
+     if (kind == ShapeInput) {
+         xwl_window_set_input_region(xwl_window, wInputShape(window));
+-        if (xwl_window->allow_commits)
++        if (xwl_window->allow_commits) {
++            xwl_kgsl_commit_note(&xwl_kgsl_commits, XWL_COMMIT_INPUT_SHAPE, xwl_window->surface, GetTimeInMicros());  /* PowOS 0014 */
+             wl_surface_commit(xwl_window->surface);
++        }
+     }
+ }
+ 
+@@ -485,6 +488,9 @@ kgsl_stats_report(void)
+ }
+ #endif
+ 
++/* PowOS 0014: what each wl_surface.commit was for (xwayland-kgsl-commit-stats.h) */
++struct xwl_kgsl_commit_stats xwl_kgsl_commits;
++
+ void
+ xwl_screen_post_damage(struct xwl_screen *xwl_screen)
+ {
+@@ -549,8 +555,14 @@ xwl_screen_post_damage(struct xwl_screen *xwl_screen)
+     }
+ 
+ #ifdef XWL_HAS_GLAMOR
+-    if (kgsl)
++    if (kgsl) {
++        char line[512];
++
+         kgsl_stats_report();
++        /* PowOS 0014: every commit per site, one line per 30 s */
++        if (xwl_kgsl_commit_line(&xwl_kgsl_commits, GetTimeInMicros(), line, sizeof(line)))
++            ErrorF("%s", line);
++    }
+ #endif
+ 
+     if (xorg_list_is_empty(&commit_window_list))
+@@ -563,6 +575,7 @@ xwl_screen_post_damage(struct xwl_screen *xwl_screen)
+ 
+     xorg_list_for_each_entry_safe(xwl_window, next_xwl_window,
+                                   &commit_window_list, link_damage) {
++        xwl_kgsl_commit_note(&xwl_kgsl_commits, XWL_COMMIT_POST_DAMAGE, xwl_window->surface, GetTimeInMicros());  /* PowOS 0014 */
+         wl_surface_commit(xwl_window->surface);
+         xorg_list_del(&xwl_window->link_damage);
+     }
+@@ -817,6 +830,7 @@ void xwl_surface_damage(struct xwl_screen *xwl_screen,
+                         struct wl_surface *surface,
+                         int32_t x, int32_t y, int32_t width, int32_t height)
+ {
++    xwl_kgsl_commit_note_damage(&xwl_kgsl_commits, surface);  /* PowOS 0014 */
+     if (wl_surface_get_version(surface) >= WL_SURFACE_DAMAGE_BUFFER_SINCE_VERSION)
+         wl_surface_damage_buffer(surface, x, y, width, height);
+     else
+diff --git a/hw/xwayland/xwayland-window.c b/hw/xwayland/xwayland-window.c
+index 9b40dfa..f70fa0b 100644
+--- a/hw/xwayland/xwayland-window.c
++++ b/hw/xwayland/xwayland-window.c
+@@ -45,6 +45,7 @@
+ #include "xwayland-present.h"
+ #include "xwayland-screen.h"
+ #include "xwayland-window.h"
++#include "xwayland-kgsl-commit-stats.h"
+ #include "xwayland-window-buffers.h"
+ #include "xwayland-shm.h"
+ #include "xwayland-dmabuf.h"
+@@ -768,7 +769,7 @@ send_surface_id_event_serial(struct xwl_window *xwl_window)
+     send_window_client_message(xwl_window, type_atom, serial);
+     xwayland_surface_v1_set_serial(xwl_window->xwayland_surface,
+         serial_lo(serial), serial_hi(serial));
+-    wl_surface_commit(xwl_window->surface);
++    XWL_KGSL_SURFACE_COMMIT(XWL_COMMIT_SURFACE_ID, xwl_window->surface);  /* PowOS 0014 */
+ 
+     /* Flush wayland display *after* commit in the new path. */
+     wl_display_flush(xwl_window->xwl_screen->display);
+@@ -819,7 +820,7 @@ xwl_window_set_fullscreen(struct xwl_window *xwl_window)
+ 
+     xdg_toplevel_set_fullscreen(xwl_window->xdg_toplevel, wl_output);
+     xwl_window_check_resolution_change_emulation(xwl_window);
+-    wl_surface_commit(xwl_window->surface);
++    XWL_KGSL_SURFACE_COMMIT(XWL_COMMIT_CONFIGURE, xwl_window->surface);  /* PowOS 0014 */
+ 
+     xwl_window->wl_output_fullscreen = wl_output;
+ 
+@@ -999,7 +1000,7 @@ handle_libdecor_configure(struct libdecor_frame *frame,
+ 
+     xwl_window_update_libdecor_size(xwl_window, configuration,
+                                     round(new_width), round(new_height));
+-    wl_surface_commit(xwl_window->surface);
++    XWL_KGSL_SURFACE_COMMIT(XWL_COMMIT_CONFIGURE, xwl_window->surface);  /* PowOS 0014 */
+ }
+ 
+ static void
+@@ -1015,7 +1016,7 @@ handle_libdecor_commit(struct libdecor_frame *frame,
+                        void *data)
+ {
+     struct xwl_window *xwl_window = data;
+-    wl_surface_commit(xwl_window->surface);
++    XWL_KGSL_SURFACE_COMMIT(XWL_COMMIT_CONFIGURE, xwl_window->surface);  /* PowOS 0014 */
+ }
+ 
+ static void
+@@ -1045,7 +1046,7 @@ xdg_surface_handle_configure(void *data,
+         xwl_window_set_fullscreen(xwl_window);
+ 
+     xdg_surface_ack_configure(xdg_surface, serial);
+-    wl_surface_commit(xwl_window->surface);
++    XWL_KGSL_SURFACE_COMMIT(XWL_COMMIT_CONFIGURE, xwl_window->surface);  /* PowOS 0014 */
+ }
+ 
+ static const struct xdg_surface_listener xdg_surface_listener = {
+@@ -1086,7 +1087,7 @@ xwl_window_update_surface_scale(struct xwl_window *xwl_window)
+         }
+         else
+ #endif
+-            wl_surface_commit(xwl_window->surface);
++            XWL_KGSL_SURFACE_COMMIT(XWL_COMMIT_CONFIGURE, xwl_window->surface);  /* PowOS 0014 */
+     }
+ }
+ 
+@@ -1271,7 +1272,7 @@ xwl_window_update_rootful_scale(struct xwl_window *xwl_window, double previous_s
+     }
+     else
+ #endif
+-        wl_surface_commit(xwl_window->surface);
++        XWL_KGSL_SURFACE_COMMIT(XWL_COMMIT_CONFIGURE, xwl_window->surface);  /* PowOS 0014 */
+ }
+ 
+ static void
+@@ -1350,7 +1351,7 @@ xwl_create_root_surface(struct xwl_window *xwl_window)
+ 
+     xwl_window_rootful_update_title(xwl_window);
+     xwl_window_rootful_set_app_id(xwl_window);
+-    wl_surface_commit(xwl_window->surface);
++    XWL_KGSL_SURFACE_COMMIT(XWL_COMMIT_CONFIGURE, xwl_window->surface);  /* PowOS 0014 */
+ 
+     region = wl_compositor_create_region(xwl_screen->compositor);
+     if (region == NULL) {
+@@ -1974,6 +1975,7 @@ frame_callback(void *data,
+     wl_callback_destroy (xwl_window->frame_callback);
+     xwl_window->frame_callback = NULL;
+     xwl_window->blocked_frame_callback_count = 0;
++    xwl_kgsl_commit_note_frame(&xwl_kgsl_commits, 0, GetTimeInMicros());  /* PowOS 0014 */
+ 
+     if (xwl_window->xwl_screen->present) {
+         xwl_present_for_each_frame_callback(xwl_window, xwl_present_frame_callback);
