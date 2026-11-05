@@ -69,7 +69,6 @@ SAMPLE = 5  # seconds of CPU/IO measured before freezing
 RESUME_TRACE_S = 6  # KWin focus changes logged this long after a game's Resume
 LAUNCH_URL = "://rungameid/"  # a launcher's game-launch URL in a process outside its client's tree: a launch pending
 LAUNCH_HOLD_S = 60  # an app a launch path woke (Gui.Wake) stays awake this long: the launch reaches it
-RERAISE_MS = (800, 2000)  # a resumed game's window raised again this long after the thaw (Gui.Resume's HACK)
 GAME_WINDOW_S = 600  # a game still without a window this long after its launch (hung) sleeps all the same
 # A unit's app running without a window (Steam -silent) is adopted at most this long after it started (Gui.adopt)
 ADOPT_S = 30
@@ -571,11 +570,6 @@ class Gui(dbus.service.Object):
         if time.monotonic() - self.resumed_at < RESUME_TRACE_S:
             log(f"resume trace +{(time.monotonic() - self.resumed_at) * 1000:.0f} ms: KWin focus -> {what or 'none'}")
 
-    def reraise(self, wid):
-        if wid in self.wins:
-            self.kwin_run("raise", RAISE_JS % {"window": wid})
-        return False
-
     @dbus.service.method("dev.powos.Sleep.Gui", in_signature="s", out_signature="s")
     def Resume(self, appid):
         """A game's launch (Steam's steam://rungameid/<appid>) while that game already runs: thaw its app (the client
@@ -600,13 +594,6 @@ class Gui(dbus.service.Object):
             wins = [w for w, v in self.wins.items() if v.get("raw") in gpids]
             if wins:
                 self.kwin_run("raise", RAISE_JS % {"window": wins[-1]})
-                # HACK: a just-thawed full-screen Wine/Unity game minimizes itself again right after its task goes live
-                # (bf-return 2026-11-05 12:02: KWin's "keeps minimizing itself: left so until its task takes the
-                # focus" - the task had already taken it, so it stayed minimized: no frame, input to nobody). Raised
-                # again once the thawed game has worked through its queued events. Real fix: find what takes KWin's
-                # activation from it after the thaw (anland focus() vs plasmashell's thaw) and stop that.
-                for ms in RERAISE_MS:
-                    GLib.timeout_add(ms, self.reraise, wins[-1])
             self.schedule()
             log(f"{u['id']} ({root}): app {appid} resumed - "
                 f"{'thawed' if not r.get('already') else 'awake'} in {thawed} ms, window {wins[-1] if wins else 'none yet'}")
@@ -1104,9 +1091,15 @@ class Gui(dbus.service.Object):
 
 # One-shot KWin scripts (Gui.kwin_run): a game's window up (un-minimized and focused) on Resume; an app's windows
 # minimized before Sleep freezes it.
+# Only a window on the current desktop: a window an Android task shows lives on the tasks desktop, and its task's own
+# focus (anland focus(): un-minimize + requestFocus, the path every app switch takes) gives it KWin's activation.
+# Activating it from here as well (workspace.activeWindow) was what lost it: KWin's focus went to none on every try,
+# the thawed full-screen Unity game, never active, minimized itself again and again (resume trace 2026-11-05 12:46:
+# 6 minimize/restore rounds, "KWin focus -> none" after each) - no input reached it.
 RAISE_JS = """
 for (const w of workspace.windowList()) {
-    if (w.internalId.toString() === "%(window)s") {
+    if (w.internalId.toString() === "%(window)s"
+            && (w.onAllDesktops || w.desktops.indexOf(workspace.currentDesktop) >= 0)) {
         w.minimized = false;
         workspace.activeWindow = w;
     }
