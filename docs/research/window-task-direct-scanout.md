@@ -162,3 +162,9 @@ drops every event then, so KWin never logged "direct scanout offered" (draw: lin
 sent 0`). Fix (app): the offer goes in `on_exit_fallback` (with `send_refresh_rate`, the other producer-bound event),
 on every hand-over, with `direct_reset` (each hand-over is a new goLive in KWin: ids forgotten both sides); a surface
 whose direct path was refused earlier answers -2 again instead of silently showing nothing after a reconnect.
+
+**11-05 19:44 second step-5 run: direct frames flowed but the game stalled at 2-3 fps** (KWin `direct sent 10, held 4`,
+bf-pacing "no game presents"). The app queued each DIRECT_RELEASE for its render thread, which sends them only at the
+top of its loop - i.e. after the NEXT frame came; that frame needs a free client buffer, and with all 4 of Xwayland's
+held by KWin it came only past Xwayland's stale-frame timer. Fix: `direct_set_release_cb` - the release goes to KWin
+from SurfaceFlinger's OnComplete callback (after the replaced buffer's release fence) at once.
