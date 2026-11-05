@@ -35,7 +35,11 @@ asuser() { local n=$1; shift
 irq() { "$A" shell "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts" | tr -d '\r'; }
 hwc() { "$A" shell "su -c 'dumpsys SurfaceFlinger'" | tr -d '\r' > "$OUT/sf-$1.txt"
   awk '/\(active\) HWC layers/{p=1;next} p&&/^Display .*HWC layers/{p=0} p&&/^ [^ -]/{n=$0} p&&/\|/&&n{split($0,c,"|"); gsub(/ /,"",c[4]); print "hwc", c[4], n; n=""}' "$OUT/sf-$1.txt"
-  grep -E 'blurRegions|backgroundBlurRadius=[1-9]|clientType=BLUR' "$OUT/sf-$1.txt" | sed 's/^ *//' | sort | uniq -c | sed 's/^ */blur /' | head -8
+  # Blur only on the powered display: a folded phone's off inner display keeps its last composition state (the same
+  # 7 clientType=BLUR output layers, same pointers, in the 04:19 and 08:02 soaks of 11-05) and read as a regression.
+  local act; act=$(awk '/\(active\) HWC layers/{print $2; exit}' "$OUT/sf-$1.txt")
+  awk -v a="$act" '/^Display [0-9]+ \(physical/{p=($2==a); next} /^[^ ]/{p=0} /blurRegions/||(p&&/backgroundBlurRadius=[1-9]|clientType=BLUR/)' "$OUT/sf-$1.txt" \
+    | sed 's/^ *//' | sort | uniq -c | sed 's/^ */blur /' | head -8
   # Who owns each blur region (any one makes SF GPU-compose every layer under it: the verify pill's glass, 11-05).
   awk '/^ *Layer \[/{n=$0; sub(/^ *Layer \[[0-9]+\] /,"",n)} /blurRegions.size\(\)=[1-9]/&&n{print "blurowner", n; n=""}' "$OUT/sf-$1.txt" | sort -u; }
 home() { "$T/cdp.sh" idle 15 home 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); [print("home", p["page"], "hidden=%s" % p["hidden"], " ".join("%s=%s" % kv for kv in p["perSec"].items())) for p in d["pages"]]' || echo "home: cdp failed"; }
