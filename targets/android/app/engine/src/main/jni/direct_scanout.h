@@ -19,6 +19,9 @@ struct direct_state *direct_new(void);
 int direct_present(struct direct_state *d, ANativeWindow *win, const struct direct_frame *f, int fence, int dmabuf);
 /* A composited frame was queued: hide the child so the window's own buffer shows. */
 void direct_hide(struct direct_state *d);
+/* Send each release from SurfaceFlinger's callback thread as it comes (cb(ud, id)) instead of queueing it for
+ * direct_take_release. */
+void direct_set_release_cb(struct direct_state *d, void (*cb)(void *ud, uint32_t id), void *ud);
 /* The next client buffer SurfaceFlinger let go of (send INPUT_TYPE_DIRECT_RELEASE): 1 + *id, 0 none. */
 int direct_take_release(struct direct_state *d, uint32_t *id);
 /* A new connection: every id is forgotten (the producer sends the fds again), the child hidden. */

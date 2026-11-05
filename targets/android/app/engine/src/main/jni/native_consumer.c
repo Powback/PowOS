@@ -689,6 +689,17 @@ static void send_direct_caps(struct consumer_state *s, uint32_t caps)
     push_input_event(s->ctx, &ev);
 }
 
+/* PowOS: a client buffer SurfaceFlinger let go of goes back to the producer at once (direct_scanout.c on_complete,
+ * a binder thread) - the same unlocked s->ctx use as the JNI input threads' push_to. */
+static void send_direct_release(void *ud, uint32_t id)
+{
+    struct consumer_state *s = ud;
+    struct InputEvent ev = { .type = INPUT_TYPE_DIRECT_RELEASE };
+    ev.input_action.action = id;
+    if (s->ctx)
+        push_input_event(s->ctx, &ev);
+}
+
 static int do_connect(struct consumer_state *s)
 {
     /* Snapshot the connection config for this attempt. */
@@ -861,8 +872,10 @@ static int do_connect(struct consumer_state *s)
 
     s->direct_on = !s->primary && direct_flag();
     if (s->direct_on) {
-        if (!s->direct)
+        if (!s->direct) {
             s->direct = direct_new();
+            direct_set_release_cb(s->direct, send_direct_release, s);
+        }
         else
             direct_reset(s->direct);   /* the new connection sends every buffer's fd again */
         /* The offer itself goes in on_exit_fallback: until the producer picks the connection up the ctx is in

@@ -46,6 +46,8 @@ struct direct_state {
     int rel_n;
     int pending;          /* transactions whose OnComplete hasn't run */
     uint32_t on_screen;   /* the id SurfaceFlinger shows (0 none) */
+    void (*release_cb)(void *, uint32_t);   /* direct_set_release_cb: releases sent from the callback at once */
+    void *release_ud;
     bool has_on_screen;
 };
 
@@ -56,6 +58,16 @@ bool direct_flag(void)
     char v[PROP_VALUE_MAX] = "";
     __system_property_get("debug.powos.direct_scanout", v);
     return v[0] == '1';
+}
+
+void direct_set_release_cb(struct direct_state *d, void (*cb)(void *ud, uint32_t id), void *ud)
+{
+    if (!d)
+        return;
+    pthread_mutex_lock(&d->lock);
+    d->release_ud = ud;
+    d->release_cb = cb;
+    pthread_mutex_unlock(&d->lock);
 }
 
 struct direct_state *direct_new(void)
@@ -86,8 +98,12 @@ static void on_complete(void *c, ASurfaceTransactionStats *st)
             close(f);
         }
     }
+    /* At once, from here: queued for the render thread, a release waited for its NEXT frame - which needs a client
+     * buffer free, so with Xwayland's 4 all held (KWin "held 4") the game ran at 2-3 fps (step 5, 11-05 19:44). */
+    if (x->has_prev && d->release_cb)
+        d->release_cb(d->release_ud, x->prev);
     pthread_mutex_lock(&d->lock);
-    if (x->has_prev)
+    if (x->has_prev && !d->release_cb)
         push_release(d, x->prev);
     d->pending--;
     pthread_mutex_unlock(&d->lock);
