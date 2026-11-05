@@ -509,14 +509,26 @@ EOS
   # shell/dev and shell/test never reach the phone (ship.sh's delta skips them): a preview-data commit held every check
   # queued after it for 2 h, waiting for a ship that never comes (2026-10-23, local.hue-rooms.json).
   ship_paths() { git -C "$VR" diff --name-only "$1" "$2" -- "$3" 2>/dev/null | grep -vE 'app/version.properties$|^shell/(dev|test)/'; }
+  # The APK test diffs from the merge base of the installed build and the commit - what the commit brings that the
+  # APK lacks - never the two trees: inst..c also listed the installed build's own newer changes, so a docs commit
+  # branched before the last APK waited for an APK ship that never comes (11-05: a9f1dca32 vs installed 7f594c115's
+  # VerifyRun.kt, "waits for its ship" forever). A held/failed APK ship leaves inst behind, so a commit WITH APK
+  # inputs keeps waiting (11-04: APK ships held while the phone was offline).
+  # The shell test also passes when the ship service PROCESSED an origin tip containing the commit and found
+  # nothing to push (its <ship dir>/processed, written on "nothing differs from what's live" and on a live push) -
+  # a held/failed shell ship never writes it.
   shipped() {
-    local c=$1 live inst; [ -n "$c" ] || return 0
+    local c=$1 live inst done_tip sd=${SHIP_DIR:-$HOME/.cache/powos-ship-queue}; [ -n "$c" ] || return 0
     [ $(( $(date +%s) - ${2:-0} )) -lt "${NEED_MAX_S:-7200}" ] || return 0
     git -C "$VR" cat-file -e "$c^{commit}" 2>/dev/null || return 0
-    live=$(cat "${SHIP_DIR:-$HOME/.cache/powos-ship-queue}/live" 2>/dev/null); inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null)
-    if [ -n "$inst" ] && ! git -C "$VR" merge-base --is-ancestor "$c" "$inst" 2>/dev/null \
-       && [ -n "$(ship_paths "$inst" "$c" targets/android/app; ship_paths "$inst" "$c" targets/android/build-app.sh)" ]; then return 1; fi
+    live=$(cat "$sd/live" 2>/dev/null); inst=$(cat "${INSTALLED_FILE:-$HOME/.cache/powos-installed-commit}" 2>/dev/null)
+    done_tip=$(cat "$sd/processed" 2>/dev/null)
+    if [ -n "$inst" ] && ! git -C "$VR" merge-base --is-ancestor "$c" "$inst" 2>/dev/null; then
+      local ib; ib=$(git -C "$VR" merge-base "$inst" "$c" 2>/dev/null) || ib=$inst
+      [ -z "$(ship_paths "$ib" "$c" targets/android/app; ship_paths "$ib" "$c" targets/android/build-app.sh)" ] || return 1
+    fi
     [ -z "$live" ] || git -C "$VR" merge-base --is-ancestor "$c" "$live" 2>/dev/null \
+      || { [ -n "$done_tip" ] && git -C "$VR" merge-base --is-ancestor "$c" "$done_tip" 2>/dev/null; } \
       || [ -z "$(ship_paths "$(git -C "$VR" merge-base "$live" "$c" 2>/dev/null)" "$c" shell)" ]; }
   # pause <summary>: the user's stop - recorded (the runner stays, runs nothing until the phone's go flag), the pill gone.
   # who=the phone: this pause comes from the status pill's tap, not a CLI caller - still gets a why (friction f114:

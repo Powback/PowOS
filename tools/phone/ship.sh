@@ -804,7 +804,7 @@ run)
         fi
         rm -rf "$held"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"
         if [ $rc = 0 ]; then
-          echo "$T" > "$Q/live"; rm -f "$Q/failed"
+          echo "$T" > "$Q/live"; echo "$T" > "$Q/processed"; rm -f "$Q/failed"
           post_gate "$T" "$log" $add
           # A shell whose tip also has APK inputs not yet installed is checked by that APK's ship, on the build it needs:
           # checked here it ran on the OLD APK, failed, marked the ship broken, and the APK carrying the fix never
@@ -833,6 +833,9 @@ run)
           continue
         fi
       elif [ -z "$d" ] && [ -n "$base" ] && [ -z "$cpl" ]; then
+        # processed: the newest tip whose shell part is on the phone (nothing to push) - verify/queue.sh's shipped()
+        # counts a commit it contains as shipped (11-05: a docs commit's checks waited for a ship that never comes).
+        [ "$(cat "$Q/processed" 2>/dev/null)" = "$T" ] || echo "$T" > "$Q/processed"
         for r in ${sreqs[@]+"${sreqs[@]}"}; do done_req "$r" "shipped:${T:0:9}:none"; done
         [ ${#sreqs[@]} -gt 0 ] && echo "$(date +%T) ${T:0:9}: nothing differs from what's live - ${#sreqs[@]} request(s) done"
       fi
