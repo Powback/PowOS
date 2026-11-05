@@ -8,7 +8,7 @@ only needed for Xwayland's own pixmaps (EGL image export); a client's DRI3 buffe
 its planes), so it goes to the compositor as is (linux-dmabuf, the pixmap's depth format) and Present flips it
 when upstream's rules allow (full-size toplevel, unclipped, not redirected). No Xwayland fence on it: the client's
 own GPU fence is on the dma-buf and KWin waits on it before sampling.
-A flip whose frame callback never comes ends after 100 ms on KGSL (HACK, 0004's stale callbacks), not 1 s.
+A flip whose frame callback never comes ends after 100 ms on KGSL (a workaround for 0004's stale callbacks), not 1 s.
 One "Present flips / copies (why)" line per 30 s (xwayland-kgsl-flip-stats.h, test/flip-stats-test.c).
 ---
 diff --git a/hw/xwayland/xwayland-glamor-gbm.c b/hw/xwayland/xwayland-glamor-gbm.c
@@ -161,7 +161,7 @@ index b0a3a7a..29a9af1 100644
   */
  #define TIMER_LEN_COPY      17  // ~60fps
  #define TIMER_LEN_FLIP    1000  // 1fps
-+/* HACK (PowOS 0013): on KGSL a flip whose frame callback never comes ends after 100 ms, not 1 s - lfdevs's 0004 saw
++/* HACK: (PowOS 0013) on KGSL a flip whose frame callback never comes ends after 100 ms, not 1 s - lfdevs's 0004 saw
 + * KGSL surfaces' frame callbacks go stale, and a stale one under upstream's 1 fps timer would freeze a flipping game
 + * for a second. Real fix: the compositor answers every frame callback of a shown surface (KWin anland window tasks
 + * do on every draw); then this goes back to TIMER_LEN_FLIP. */
