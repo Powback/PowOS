@@ -49,9 +49,10 @@ not_ready() { local f fl busy=""
 not_ready && { rm -rf "$T"; exit 3; }
 S=$HOME/.local/share/Steam P="$S/steamapps/common/Proton - Experimental" F=$S/steamapps/common/FEX-Emu
 CD=$S/steamapps/compatdata/$APP
+FC=$S/steamapps/shadercache/$APP/fex-emu  # FEX code cache (codemap/ + cache/), see the fexcache variant
 # The game's install dir: its own process is the one that runs a file from there (Wine's preloader / the native player).
 IDIR=$(sed -n 's/^[[:space:]]*"installdir"[[:space:]]*"\(.*\)"$/\1/p' "$S/steamapps/appmanifest_$APP.acf" 2>/dev/null | head -1)
-sizes() { echo "steam shadercache $(du -sk "$S/steamapps/shadercache/$APP" 2>/dev/null | cut -f1) KB, mesa $(du -sk ~/.cache/mesa_shader_cache 2>/dev/null | cut -f1) KB, fex $(du -sk "$CD/fex-emu" ~/.local/share/fex-emu 2>/dev/null | awk '{s+=$1} END{print s}') KB"; }
+sizes() { echo "steam shadercache $(du -sk "$S/steamapps/shadercache/$APP" 2>/dev/null | cut -f1) KB, mesa $(du -sk ~/.cache/mesa_shader_cache 2>/dev/null | cut -f1) KB, fex $(du -sk "$CD/fex-emu" ~/.local/share/fex-emu 2>/dev/null | awk '{s+=$1} END{print s}') KB, fex code cache $(du -sk "$FC/cache" 2>/dev/null | cut -f1) KB"; }
 first() { [ -n "${seen[$1]:-}" ] || seen[$1]=$2; }
 close_game() { echo "   close: $(powos game $APP stop 2>&1 | tail -1 | sed "s/\x1b\[[0-9;]*m//g")"; }
 ours() { head -1 "$P/user_settings.py" 2>/dev/null | grep -q 'PowOS user_settings'; }  # pkgs/steam/user_settings.py
@@ -336,7 +337,9 @@ run() {  # run <variant> <n>
   echo "   after: $(sizes); evaluator: $(tail -1 "$CD/powos-iscript.log" 2>/dev/null | cut -c1-160)"
   RES_="$RES_ $v#$2 window ${seen[window]:--} frame ${seen[frame]:--};"
   cs_record_policy "$v" "$st"
-  [ $v = fexcache ] && { echo "   FEX wrote: $(find "$CD/fex-emu" ~/.local/share/fex-emu ~/.cache -newer /tmp/bf-cold-mark -type f 2>/dev/null | grep -vi telemetry | head -8 | tr '\n' ' ')"; fexcache_off; }
+  # FEX's code cache lives in Steam's per-game shader cache (FEX::Config::GetCacheDirectory: STEAM_COMPAT_SHADER_PATH/
+  # fex-emu/ under Steam): codemap/new (what each process ran), codemap/ready (merged), cache/ (compiled).
+  [ $v = fexcache ] && { echo "   FEX wrote: $(find "$FC" -newer /tmp/bf-cold-mark -type f 2>/dev/null | wc -l) files in $FC: codemap/new $(ls "$FC/codemap/new" 2>/dev/null | wc -l), ready $(ls "$FC/codemap/ready" 2>/dev/null | wc -l), cache $(ls "$FC/cache" 2>/dev/null | wc -l) ($(du -sk "$FC/cache" 2>/dev/null | cut -f1) KB)"; fexcache_off; }
   sleep 5
 }
 # fetch: what the setup needs from Steam's servers (a depot swap after cfg:native/back, a runtime), untimed: a launch,
@@ -365,7 +368,7 @@ for v in "$@"; do
   n=$((n + 1)); run "$v" "$n"
   if [ "$v" = fexcache ]; then
     pill "FEX: compiling the code cache"
-    close_game; ( cd "$CD" && FEX_PORTABLE=1 FEX_APP_CONFIG_LOCATION="$CD/fex-emu/" timeout 300 "$F/usr/bin/FEXOfflineCompiler" process-all 2>&1 | tail -3 )
+    close_game; ( cd "$CD" && FEX_APP_CACHE_LOCATION="$FC/" FEX_APP_CONFIG_LOCATION="$CD/fex-emu/" timeout 300 "$F/usr/bin/FEXOfflineCompiler" process-all 2>&1 | tail -3 )
   fi
 done
 close_mine; restore; rm -f /tmp/bf-cold-mark
