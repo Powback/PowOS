@@ -21,6 +21,9 @@ int  refresh_done(display_ctx *ctx);
 int  refresh_done_tagged(display_ctx *ctx, int *fence_out, uint8_t *tag_out);
 /* PowOS: the pre-rotation (OutputTransform kind 0-3, struct bufs_ext) to ask for with the next push_dmabufs. */
 int  set_buffers_transform(display_ctx *ctx, uint32_t transform);
+/* PowOS: the direct part (protocol.h FRAME_TAG_DIRECT) of the frame refresh_done_tagged returned: 1 + the caller owns
+ * *fence_out / *dmabuf_out (-1 = none); 0 = none. */
+int  take_direct_frame(display_ctx *ctx, struct direct_frame *out, int *fence_out, int *dmabuf_out);
 int  push_input_event(display_ctx *ctx, const struct InputEvent *event);
 int  push_input_event_with_length(display_ctx *ctx, const struct InputEvent *event, void* payload, size_t size);
 int  set_fallback_callback(display_ctx *ctx, void (*on_fallback)(void *), void *userdata);

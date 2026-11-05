@@ -23,6 +23,7 @@
 
 #include "anw_hidden.h"
 #include "camera_service.h"
+#include "direct_scanout.h"
 #include "display_consumer.h"
 #include "native_audio.h"
 #include "protocol.h"
@@ -106,6 +107,11 @@ struct consumer_state {
     unsigned undrawn;
     unsigned undrawn_logged;
     int64_t undrawn_log_ms;
+
+    /* PowOS: direct scanout (direct_scanout.h, protocol.h FRAME_TAG_DIRECT) - window tasks only, and only while the
+     * property debug.powos.direct_scanout is 1 at connect: direct_on false = this file behaves exactly as without it. */
+    bool direct_on;
+    struct direct_state *direct;
 
     // Latest display refresh rate (milli-Hz) reported from Java. Read on
     // (re)connect to seed the producer; updated live by nativeSetRefreshRate.
@@ -675,6 +681,14 @@ static void note_undrawn(struct consumer_state *s, const char *why)
     s->undrawn_log_ms = now;
 }
 
+/* PowOS: tell the producer whether this consumer shows direct frames (protocol.h INPUT_TYPE_DIRECT_CAPS). */
+static void send_direct_caps(struct consumer_state *s, uint32_t caps)
+{
+    struct InputEvent ev = { .type = INPUT_TYPE_DIRECT_CAPS };
+    ev.input_action.action = caps;
+    push_input_event(s->ctx, &ev);
+}
+
 static int do_connect(struct consumer_state *s)
 {
     /* Snapshot the connection config for this attempt. */
@@ -845,6 +859,18 @@ static int do_connect(struct consumer_state *s)
     if (s->primary)
         audio_set_ctx(s->ctx);   /* audio fd is now live; threads pick it up via get_audio_fd */
 
+    s->direct_on = !s->primary && direct_flag();
+    if (s->direct_on) {
+        if (!s->direct)
+            s->direct = direct_new();
+        else
+            direct_reset(s->direct);   /* the new connection sends every buffer's fd again */
+        if (s->direct) {
+            send_direct_caps(s, DIRECT_CAP_XR24_LINEAR);
+            LOGI("surface %u: direct scanout offered", s->surface_id);
+        }
+    }
+
     s->need_reconnect = false;
     LOGI("connected");
     return 0;
@@ -967,6 +993,14 @@ static void *render_thread_func(void *arg)
             }
         }
 
+        /* PowOS: client buffers SurfaceFlinger let go of (direct scanout) go back to the producer. */
+        uint32_t rel_id;
+        while (s->direct && direct_take_release(s->direct, &rel_id)) {
+            struct InputEvent rev = { .type = INPUT_TYPE_DIRECT_RELEASE };
+            rev.input_action.action = rel_id;
+            push_input_event(s->ctx, &rev);
+        }
+
         ANativeWindowBuffer *anb = NULL;
         int acqfence = -1;
         if (api.dequeueBuffer(s->window, &anb, &acqfence) != 0 || !anb) {
@@ -1038,6 +1072,32 @@ static void *render_thread_func(void *arg)
             continue;
         }
 
+        /* PowOS: a direct frame (protocol.h FRAME_TAG_DIRECT): the producer drew nothing into this buffer - it sent
+         * its client's buffer, shown on the child surface; the window's buffer goes back unqueued. */
+        if (tag & FRAME_TAG_DIRECT) {
+            struct direct_frame df;
+            int dfence = -1, dbuf = -1;
+            api.cancelBuffer(s->window, anb, -1);
+            if (rfence >= 0)
+                close(rfence);
+            if (take_direct_frame(s->ctx, &df, &dfence, &dbuf) == 1) {
+                int r = (s->direct_on && s->direct) ? direct_present(s->direct, s->window, &df, dfence, dbuf) : -2;
+                if (r == -2 && !s->direct_on) {
+                    if (dfence >= 0) close(dfence);
+                    if (dbuf >= 0) close(dbuf);
+                }
+                if (r == -2) {
+                    LOGE("surface %u: direct scanout refused, composited from now on", s->surface_id);
+                    s->direct_on = false;
+                    send_direct_caps(s, 0);
+                    note_undrawn(s, "direct frame refused");
+                } else {
+                    count_present(s, r == 0);
+                }
+            }
+            continue;
+        }
+
         /* PowOS: the rotation the producer drew with (protocol.h FRAME_TAG_PRETRANSFORM; 0 from an older KWin). */
         if ((tag & FRAME_TAG_PRETRANSFORM) && !g_producer_prerotates) {
             LOGI("surface %u: the producer pre-rotates", s->surface_id);
@@ -1081,6 +1141,8 @@ static void *render_thread_func(void *arg)
         apply_crop(s);
         api.queueBuffer(s->window, anb, rfence);
         count_present(s, true);
+        if (s->direct)
+            direct_hide(s->direct);   /* a composited frame: the window's own buffer shows again */
 
         /* Follow the transform hint (rotation, fold to the other screen): buffers for the new one. A queue is when
          * the window learns a new hint, so look right after it. */
@@ -1560,6 +1622,8 @@ Java_andro_marchy_Native_nativeStopWindow(
         s->ctx = NULL;
     }
     cleanup_dmabufs(s);
+    direct_free(s->direct);   /* before the window: its child surface is the window's */
+    s->direct = NULL;
     if (s->window)
         ANativeWindow_release(s->window);
     if (s->wake_efd >= 0)
