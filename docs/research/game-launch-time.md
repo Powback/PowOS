@@ -273,7 +273,11 @@ storm during gameplay (it ran all session), which should show in arm64 fps (not 
 
 What is left on the critical path is the emulated Mono/Unity code itself (~3 s on main + UnityPreload 2 s) and kernel
 time (page faults, wakeups). Knobs left: FEX TSO (`TSOEnabled` 1 from Proton's Config.json; diagnostic run with
-TSO off queued as job 105916 - not a candidate default, Unity/Mono is multi-threaded), Multiblock already 1.
+TSO off, job 105916: worse, exe -> frame 10.2 s - TSO is part of FEX's cache key, so every block missed, was
+recompiled (main FEX 1.8 s) and stored again (the lock storm back, wineserver 2.4 core-s); not a candidate default
+either, Unity/Mono is multi-threaded), Multiblock already 1. Next: the emulated code's own cost (Mono's JIT + Unity
+init) - FEX's AOT/precompile of mono.dll/UnityPlayer.dll is already what the file-backed cache gives; past that,
+reducing kernel time on main (1.6 s: page faults/clear_page, wakeups) or a Unity-side option.
 
 **Install script evaluator on ARM64: gate before the container.** New compat tool `powos-proton-arm64`
 (`pkgs/steam/arm64-gate-entry` + manifests, installed by /usr/bin/steam into compatibilitytools.d): Steam runs it
