@@ -18,6 +18,14 @@
 #         the fork has it): a7xx gen1/gen2 (Adreno 740 is gen2) pad VPC_PS_CNTL::NUMNONPOSVAR by one vec4 when the
 #         FS varyings take an odd number of slots, as Qualcomm's driver does - else garbage in loaded varyings
 #         ("Fixes rendering corruption in Devil May Cry 5").
+# Build option -Dfreedreno-kmds=kgsl,msm (not kgsl alone): with ONLY kgsl and only Turnip, Mesa's meson drops
+#   system_has_kms_drm, so with_dri_platform isn't 'drm', HAVE_X11_DRM is never defined and the X11 WSI is built
+#   software-only: every vkQueuePresentKHR to an X window became one xcb_put_image of the whole image on the
+#   "WSI swapchain queue" thread (Broforce on Proton ARM64, 1116x2484: 11 MB/frame, that thread 61-76 % CPU, 19 fps vs
+#   38-39 fps under FEX, whose x86 Turnip from the FEX RootFS presents through DRI3; 2026-11-05, docs/research/
+#   game-launch-time.md "Why ARM64 Proton halves"). Adding msm keeps DRM in the build (DRI3/Present, dma-buf images,
+#   libdrm linked - already a dependency); /dev/kgsl-3d0 is still enumerated first (tu_enumerate_devices), msm is
+#   only tried when there is no KGSL device.
 # A package so a Turnip fix reaches phones without a new rootfs: rooted.sh deploy installs it (powos-deploy.sh),
 # replacing Arch's vulkan-freedreno (whose files the rootfs build had already overwritten with this same source).
 # Gallium freedreno (KWin, Xwayland's glamor) stays the rootfs's build: it writes RB_CCU_CNTL on BR only already
@@ -42,7 +50,7 @@
 
 pkgname=vulkan-freedreno-kgsl
 pkgver=27.0.0_devel.20261029.geb3e7fd4
-pkgrel=2
+pkgrel=3
 pkgdesc='Turnip Vulkan driver on KGSL (lfdevs Mesa) with PowOS fixes (PowOS Android)'
 arch=(aarch64)
 url='https://github.com/lfdevs/mesa-for-android-container'
@@ -53,6 +61,7 @@ makedepends=(meson ninja python-mako python-yaml python-packaging python-ply gls
 provides=(vulkan-freedreno vulkan-driver)
 conflicts=(vulkan-freedreno)
 replaces=(vulkan-freedreno)
+# -3: freedreno-kmds=kgsl,msm (X11 WSI presents through DRI3, see above).
 # -2: andromarchy-protect put the rootfs's 10-13 Turnip back after every install of -1 (see the .install).
 install=vulkan-freedreno-kgsl.install
 _commit=eb3e7fd4f009cab04b1482aad4843c0bde28a786
@@ -77,7 +86,7 @@ prepare() {
 build() {
   # build-inside.sh's options that apply to the Vulkan driver (no Gallium drivers: they stay the rootfs's).
   meson setup build mesa-for-android-container-$_commit --prefix=/usr --buildtype=release -Dplatforms=x11,wayland \
-    -Dgallium-drivers= -Dvulkan-drivers=freedreno -Dfreedreno-kmds=kgsl -Dvideo-codecs=all \
+    -Dgallium-drivers= -Dvulkan-drivers=freedreno -Dfreedreno-kmds=kgsl,msm -Dvideo-codecs=all \
     -Degl=disabled -Dglx=disabled -Dgbm=disabled -Dopengl=false -Dgles1=disabled -Dgles2=disabled \
     -Dllvm=disabled -Dintel-rt=disabled -Dmicrosoft-clc=disabled -Dvalgrind=disabled -Dlibunwind=disabled
   ninja -C build src/freedreno/vulkan/libvulkan_freedreno.so src/freedreno/vulkan/freedreno_icd.aarch64.json
