@@ -75,4 +75,20 @@ Z is what the direct path removes from kwin_wayland at most (the composite's CPU
 goes). A/B is how many of Broforce's frames it could take. Measure: `bf-quiet.sh 600`, then
 `journalctl --user -u plasma-kwin_wayland | grep -E 'draw:|client buffer:'` (or the kwin log bf-quiet keeps).
 
-Results: (pending the first soak with kwin 3.65)
+## Results (kwin 3.65 on the phone, Broforce soak 2026-11-05 16:06, cover screen)
+
+    window task 1 draw: 0.92-1.07 ms CPU, 1.56-1.85 ms wall per frame (3.8-4.2 % of a core); direct-eligible 193/193 .. 208/208
+    window task 1 client buffer: 1116x2484 fourcc XR24 modifier 0xffffffffffffff (implicit) planes 1 pitch 4608 offset 0 transform 0, task buffers 1116x2484
+    window task 1 frames: last 5 s 368-430 commits, 200-202 drawn (40.0-40.4 fps)
+
+- **Every frame is eligible** (100 %, no blocker): one full-screen window, single-plane linear XRGB8888, exactly the
+  task's size, no rotation. pitch 4608 = 1152 px (64-px aligned), the same alignment QTI gralloc gives linear RGBA
+  - the template splice needs no stride override.
+- **The composite is ~4 % of a core, not 12.8 %.** The direct path removes that plus a ~1.6 ms GPU pass per frame
+  (the game's own GPU) - worth doing, but it is a third of kwin_wayland's cost. The rest is per-commit work: KWin
+  sees **~80 commits/s for 40 drawn frames** (2 Xwayland commits per game frame - 0013's flips plus another commit
+  per frame, e.g. the 100 ms KGSL flip timer or a damage-only commit). Halving those commits is likely the bigger,
+  cheaper kwin win (an Xwayland-side change) and should go before steps 1-5 above.
+- Same soak (`bf-quiet-2026-11-05_16xx`, PASS 600 s): kwin_wayland 14.0-14.8 %, surfaceflinger 17.7-18.3 %, all 7 HWC
+  layers DEVICE, game 107-111 %, 40 fps, skin 35.1 -> 38.3 C. (kwin 12.8 % / game 79 % at 08:02; the probe itself is a
+  clock read per frame - the difference is the session's state, not 0057.)
