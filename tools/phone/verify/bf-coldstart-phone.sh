@@ -16,6 +16,7 @@
 #             (ARM64: Wine native, only the game's code through FEX) | none = the game's native Linux build (Steam swaps
 #             the depot at the next launch: stage "update")
 #   opt:vk | opt:gl | opt:base         launch options: unity-screen + -force-vulkan | + -force-glcore | as installed
+#   opt:log   + -logFile /tmp/powos-unity.log (a Unity game's own log; its lines stamped by the launch profile)
 #   env:K=V   K=V in the environment of the Steam this check starts (all it launches inherits it), e.g.
 #             env:PRESSURE_VESSEL_GENERATE_LOCALES=0
 #   keep      leave the last setup in place at the end (default: the compat tool + launch options as they were)
@@ -75,6 +76,7 @@ setup() {  # setup <token>
     cfg:auto) $CFG set $APP auto ;;
     opt:vk) $CFG opts $APP "$(plus_opts -force-vulkan)" ;; opt:gl) $CFG opts $APP "$(plus_opts -force-glcore)" ;;
     opt:base) $CFG opts $APP "$(base_opts)" ;;
+    opt:log) $CFG opts $APP "$(plus_opts "-logFile Z:$ULOG")" ;;  # a Unity game's log at $ULOG (bf-lprof.py stamps its lines)
     *) fail setup "unknown setup token $1"; return 1 ;;
   esac
   CHANGED=1; echo "== setup $1: $($CFG get $APP), mode $($CFG mode $APP)"
@@ -98,6 +100,11 @@ restore() {
   CHANGED=0; bash /var/tmp/powos-bf-stop.sh --steam >/dev/null 2>&1
   $CFG set $APP "$ORIG_MODE" >/dev/null && $CFG opts $APP "$ORIG_OPTS" >/dev/null && echo "== restored: $($CFG get $APP), mode $($CFG mode $APP)"
 }
+# The launch profile (bf-lprof.py): the game's threads' CPU, its file reads, the clocks and the Unity log (opt:log) from
+# the tap to its first frame - where the window -> frame time goes. Printed once the frame is in (or not).
+ULOG=/tmp/powos-unity.log
+lprof_start() { rm -f "$T/lprof.stop" "$ULOG"; python3 /var/tmp/powos-bf-lprof.py "$IDIR" "$1" "$T/lprof.stop" "$ULOG" > "$T/lprof.txt" 2>&1 & LPROF=$!; }
+lprof_end() { [ -n "${LPROF:-}" ] || return 0; touch "$T/lprof.stop"; wait "$LPROF" 2>/dev/null; LPROF=; sed 's/^/   /' "$T/lprof.txt"; }
 # The renderer the game reported: the newest Unity Player.log / output_log.txt written since this check began (Proton's
 # prefix or the native build's ~/.config/unity3d).
 renderer() { local l; l=$(find "$CD/pfx/drive_c/users" "$HOME/.config/unity3d" \( -name Player.log -o -name output_log.txt \) -newer /tmp/bf-cold-mark 2>/dev/null | head -1)
@@ -297,6 +304,7 @@ run() {  # run <variant> <n>
   local cb; cb=$(stat -c %s "$S/logs/console_log.txt" 2>/dev/null || echo 0)
   local up=; [ $v != cold ] && [ -d "/proc/$(steam_pid)" ] && up=1
   mine=1; pill "cold start timing: $v #$2 - tap"; t0=$(now)
+  lprof_start "$t0"
   local hl; hl=$(wc -l < "$HYPR" 2>/dev/null || echo 0)
   if [ "${VIA:-drawer}" = steam ]; then
     ( setsid -f steam "steam://rungameid/$APP" >"$T/open.out" 2>&1 </dev/null; echo "none (Steam's own launch, the Library's path)" > "$T/open.status" ) &
@@ -310,7 +318,7 @@ run() {  # run <variant> <n>
     exported "$v" "$hl" "$W"
     pill "cold start timing: $v - first frame"
     window_evidence
-    x=$(first_frame 90)
+    x=$(first_frame 90); lprof_end
     if [[ "$x" =~ ^[0-9]+([.][0-9]+)?$ ]] && [ "$(ms "$t0" "$x")" -ge 0 ]; then
       seen[frame]=$(ms "$t0" "$x")
       pill "checking the visible game after its first frame"
@@ -327,6 +335,7 @@ run() {  # run <variant> <n>
   else
     cs_no_window_evidence
     fail "start-$v" "no window in $([ $v = cold ] && echo $((${COLD_WAIT_MS:-265000} / 1000)) || echo 150) s:$(for k in steam reaper container wineserver exe; do printf '%s=%s ' $k "${seen[$k]:--}"; done)"; fi
+  lprof_end
   local hv=${seen[handoff_ms]:-${seen[restart]:+restart@${seen[restart]}}}
   echo "STAGES $v #$2 (ms from the tap):$([ $v != cold ] && echo " handoff ${hv:--}") steam-ui ${seen[steam]:--} update ${seen[update]:--}-${seen[update_end]:--} iscript ${seen[iscript]:--}-${seen[iscript_end]:--} reaper ${seen[reaper]:--} pv ${seen[container]:--} wineserver ${seen[wineserver]:--} exe ${seen[exe]:--} window ${seen[window]:--} frame ${seen[frame]:--}; open-task: $(cat "$T/open.status" 2>/dev/null)"
   echo "   timeline (ms from the tap, first sight of each process under the launch; 4 Hz):"
