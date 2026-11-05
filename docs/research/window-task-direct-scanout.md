@@ -129,3 +129,29 @@ direct frame and the render loop is the composited one unchanged (the only diffe
 buffer has room for 2 fds). Next: KWin side (step 4, ~1 d: send the client dma-buf on `FRAME_TAG_DIRECT` when
 `directBlocker()` is empty and caps were offered, hold it until `DIRECT_RELEASE`), then step 5 device proof with
 the property on. Step 3's single-transaction switch is a HACK row for now (direct_scanout.c, direct_hide).
+
+## Step 4 (KWin side): kwin 3.66, patch 0058 (agent direct-scanout-4)
+
+`anland_window_task.cpp` `render()`: when the consumer offered direct frames (`INPUT_TYPE_DIRECT_CAPS`, the app with
+`debug.powos.direct_scanout=1`) and 0057's `directBlocker()` is empty, the offered buffer is answered with the client's
+own buffer (`sendDirect` -> `display_producer.c send_direct_frame`: `FRAME_TAG_DIRECT` byte + `struct direct_frame` in
+one sendmsg, the dma-buf as SCM_RIGHTS the first time an id is sent, no acquire fence - KWin applies a commit only once
+its buffer is ready), frame callbacks as for a drawn frame. Anything else - a blocker, a format the consumer doesn't
+show (only XR24/AR24 go: one refused layout turns the consumer's direct path off for good), more than 8 live client
+buffers, a full channel - composites that frame exactly as before. With no caps (flag off, older APK) nothing changes.
+
+- **Buffer lifetime**: each send of an id that isn't the one on screen takes one `GraphicsBufferRef` count, each
+  `INPUT_TYPE_DIRECT_RELEASE` drops one (the consumer releases a buffer once per replacement, after its release fence);
+  the client gets `wl_buffer.release` only when the count is 0 - never while SurfaceFlinger can scan it.
+- **Destroyed client buffers** (swapchain recreated: resize, fold): their ids are FORGET-ed on the consumer before more
+  frames go direct (one offer answered with `DIRECT_FLAG_FORGET`, the consumer offers again at once).
+- **Keepalive** (no new commit for 2 s) while a direct frame shows: answered "nothing new" (`FORGET` of id 0) instead
+  of the undrawn consumer buffer, which would have shown an old composite over the newest frame.
+- New connection, fallback, caps 0, task gone: every id and hold dropped (`resetDirect`; HACK row: a refusal mid-stream
+  may hand the last direct buffer back a frame early).
+- Log: the 5 s `draw:` line ends `direct sent N, held H`; `direct scanout offered/refused by the consumer` per connect.
+
+Step 3's one-transaction switch (direct -> composited) is still the app's HACK (direct_hide). Step 5:
+`tools/phone/verify/direct-scanout-on.sh <check> [args]` runs a check with the property on and resets it on exit; it
+FAILs a run where no frame went direct. Needs an APK with agent/direct-scanout-1's app side (the phone's 2026.11.05-0920
+had none) and kwin 3.66.

@@ -74,6 +74,11 @@
 #               frame and how many frames could have gone to the consumer as the client's buffer (fullscreen, one window,
 #               linear 1-plane 32-bit dma-buf of the task's size), with the blockers; logs the client buffer's layout
 #               (docs/research/window-task-direct-scanout.md). No behaviour change.
+#   0058        ours (3.66): direct scanout, step 4 - a window task whose consumer offered it (the app's
+#               debug.powos.direct_scanout=1: INPUT_TYPE_DIRECT_CAPS) answers a frame nothing blocks (0057's directBlocker:
+#               full screen, one window, linear XR24/AR24 of the task's size) with the client's own dma-buf
+#               (FRAME_TAG_DIRECT, fd once per buffer) instead of compositing, holds that buffer until DIRECT_RELEASE,
+#               forgets destroyed buffers, composites any other frame. Without the consumer's caps: unchanged.
 #
 # HACK: same pkgname as Arch's kwin with pkgrel 3.1 (makepkg allows only integer[.integer]; ".1" = ours), so every Plasma package's
 # "depends=(kwin)" is satisfied by ours and pacman sees it as newer than 6.7.5-3. The real fix is
@@ -83,7 +88,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.65
+pkgrel=3.66
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -155,11 +160,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0053-backends-anland-CPU-copy-when-EGL-can-t-import-the-consumer-s-buffers.patch
           0054-backends-anland-a-shown-keyboard-moves-to-a-window-task-s-own-consumer-when-it-goes-live.patch
           0056-backends-anland-a-task-s-window-is-made-active-on-its-task-s-focus-and-activation-stays-off-the-tasks-desktop.patch
-          0057-backends-anland-a-window-task-measures-its-composite-and-how-often-the-client-s-buffer-could-go-direct.patch)
+          0057-backends-anland-a-window-task-measures-its-composite-and-how-often-the-client-s-buffer-could-go-direct.patch
+          0058-backends-anland-a-full-screen-window-task-sends-the-client-s-buffer-direct-when-the-consumer-shows-it.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver

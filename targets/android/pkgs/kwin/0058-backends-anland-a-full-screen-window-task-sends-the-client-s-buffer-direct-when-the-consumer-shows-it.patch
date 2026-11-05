@@ -1,0 +1,408 @@
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 968247d..3e30626 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -329,6 +329,7 @@ AnlandWindowTask::~AnlandWindowTask()
+     if (m_noBorderHeld && m_window && !m_window->isDeleted()) {
+         m_window->setNoBorder(m_noBorderBefore);
+     }
++    resetDirect(); // PowOS (0058): the client's buffers back to it
+     releaseBuffers();
+     if (m_display) {
+         ::disconnect(m_display); // C producer API, not QObject::disconnect
+@@ -440,6 +441,7 @@ void AnlandWindowTask::requestConsumer()
+ 
+ void AnlandWindowTask::goLive()
+ {
++    resetDirect(); // PowOS (0058): a new connection - the consumer offers direct frames again if it shows them
+     if (!importBuffers()) {
+         // try_exit_fallback()'s contract: back to fallback, then ask again.
+         enterFallback();
+@@ -604,6 +606,7 @@ void AnlandWindowTask::enterFallback()
+     }
+     m_keepalive.stop();
+     m_offered = false;
++    resetDirect(); // PowOS (0058): the consumer forgets every id on its next connection too
+     releaseBuffers();
+     // Not rendering meanwhile: let the window be suspended like any unseen one.
+     unwatchAll();
+@@ -796,16 +799,20 @@ void AnlandWindowTask::noteFrameStats()
+             why.append(QStringLiteral("%1=%2").arg(it.key()).arg(it.value()));
+         }
+         why.sort();
+-        qCInfo(KWIN_ANLAND).noquote() << QStringLiteral("window task %1 draw: %2 ms CPU, %3 ms wall per frame (%4 % of a core); direct-eligible %5/%6%7")
++        // PowOS (0058): "direct sent" = frames that went to the consumer as the client's buffer (no draw: their CPU is
++        // in the per-frame figures as ~0, the direct path's own cost is the send).
++        qCInfo(KWIN_ANLAND).noquote() << QStringLiteral("window task %1 draw: %2 ms CPU, %3 ms wall per frame (%4 % of a core); direct-eligible %5/%6%7; direct sent %8, held %9")
+                                              .arg(m_id).arg(m_statDrawCpuUs / 1000.0 / m_statFrames, 0, 'f', 2)
+                                              .arg(m_statDrawWallUs / 1000.0 / m_statFrames, 0, 'f', 2)
+                                              .arg(m_statDrawCpuUs / 50000.0, 0, 'f', 1)
+                                              .arg(m_statDirect).arg(m_statFrames)
+-                                             .arg(why.isEmpty() ? QString() : QStringLiteral(", composited: ") + why.join(QLatin1Char(' ')));
++                                             .arg(why.isEmpty() ? QString() : QStringLiteral(", composited: ") + why.join(QLatin1Char(' ')))
++                                             .arg(m_statDirectSent).arg(m_directHolds.size());
+     }
+     m_statDrawCpuUs = 0;
+     m_statDrawWallUs = 0;
+     m_statDirect = 0;
++    m_statDirectSent = 0;
+     m_statBlockers.clear();
+     m_statCommits = 0;
+     m_statFrames = 0;
+@@ -876,6 +883,104 @@ QString AnlandWindowTask::directBlocker(int idx)
+     return QString();
+ }
+ 
++bool AnlandWindowTask::sendDirect()
++{
++    // PowOS (0058): directBlocker() said the client's buffer is the frame. The consumer shows XR24/AR24 (its
++    // DIRECT_CAP_XR24_LINEAR); anything else is composited, never sent (the consumer gives direct up for good on one).
++    SurfaceInterface *surface = m_window ? m_window->surface() : nullptr;
++    GraphicsBuffer *buffer = surface ? surface->buffer() : nullptr;
++    const DmaBufAttributes *attrs = buffer ? buffer->dmabufAttributes() : nullptr;
++    if (!attrs || !(m_directCaps & DIRECT_CAP_XR24_LINEAR) || (attrs->format != 0x34325258 && attrs->format != 0x34325241)) {
++        m_statBlockers[QStringLiteral("consumer-format")]++;
++        return false;
++    }
++    uint32_t id = m_directIds.value(buffer, 0);
++    if (!id) {
++        if (m_directIds.size() >= 8) { // the consumer keeps 8 (direct_scanout.c MAX_IDS); more = it refuses for good
++            m_statBlockers[QStringLiteral("too-many-buffers")]++;
++            return false;
++        }
++        id = m_directNextId++;
++        if (!m_directNextId) {
++            m_directNextId = 1;
++        }
++        m_directIds.insert(buffer, id);
++        // The client destroyed it: its id is forgotten on the consumer before more buffers go (render()). Never
++        // while held - a held buffer isn't destroyed (GraphicsBufferRef).
++        connect(buffer, &QObject::destroyed, this, [this, buffer]() {
++            const uint32_t gone = m_directIds.take(buffer);
++            if (gone && m_directFdSent.remove(gone)) {
++                m_directForget.append(gone);
++            }
++        });
++    }
++    const bool newFd = !m_directFdSent.contains(id);
++    struct direct_frame df = {};
++    df.id = id;
++    df.width = attrs->width;
++    df.height = attrs->height;
++    df.pitch = attrs->pitch[0];
++    df.fourcc = attrs->format;
++    df.offset = attrs->offset[0];
++    df.modifier = attrs->modifier;
++    // No acquire fence: KWin applies a commit only once the client's dma-buf is ready (implicit fence / its acquire
++    // point, the transaction), so the buffer is complete when it is surface->buffer().
++    df.flags = newFd ? DIRECT_FLAG_NEW_FD : 0;
++    if (send_direct_frame(m_display, &df, -1, newFd ? attrs->fd[0].get() : -1) != 0) {
++        return false;
++    }
++    if (newFd) {
++        m_directFdSent.insert(id);
++    }
++    if (id != m_directLast) {
++        // On screen in place of another: one DIRECT_RELEASE comes for it when something else replaces it.
++        DirectHold &hold = m_directHolds[id];
++        hold.ref = buffer;
++        hold.count++;
++    }
++    m_directLast = id;
++    m_directShowing = true;
++    return true;
++}
++
++bool AnlandWindowTask::sendDirectNoFrame(uint32_t id)
++{
++    struct direct_frame df = {};
++    df.id = id;
++    df.flags = DIRECT_FLAG_FORGET;
++    return send_direct_frame(m_display, &df, -1, -1) == 0;
++}
++
++void AnlandWindowTask::directReleased(uint32_t id)
++{
++    // SurfaceFlinger no longer reads it: the client may have it back (its wl_buffer.release once nothing else holds it).
++    auto it = m_directHolds.find(id);
++    if (it == m_directHolds.end()) {
++        return;
++    }
++    if (--it->count <= 0) {
++        m_directHolds.erase(it);
++    }
++}
++
++void AnlandWindowTask::resetDirect()
++{
++    m_directCaps = 0;
++    m_directLast = 0;
++    m_directShowing = false;
++    for (auto it = m_directIds.cbegin(); it != m_directIds.cend(); ++it) {
++        QObject::disconnect(it.key(), &QObject::destroyed, this, nullptr);
++    }
++    m_directIds.clear();
++    m_directFdSent.clear();
++    m_directForget.clear();
++    // HACK: a buffer the consumer's (hidden) child may still hold goes back to the client here - fine after a
++    // disconnect (its surface is gone), but after a mid-stream refusal (caps 0) SurfaceFlinger could still read it for
++    // a frame. Real fix: the consumer sends the releases for what it holds before caps 0.
++    m_directHolds.clear();
++    markStale(); // every consumer buffer holds an old composite at best: the next offer is drawn (or sent) fresh
++}
++
+ static bool sameSize(const QSizeF &a, const QSizeF &b)
+ {
+     // Within half a logical pixel: X11 geometry goes through X's integer pixels (Xcb::toXNative) and back.
+@@ -1145,13 +1250,51 @@ void AnlandWindowTask::render(bool keepalive)
+     m_keepalive.stop();
+     const int idx = get_selected_idx(m_display);
+     AnlandEglBackend *egl = m_tasks->backend()->eglBackend();
+-    if (idx >= 0 && idx < m_bufCount && m_stale[idx] && egl && egl->openglContext()->makeCurrent()) {
+-        const QString blocker = directBlocker(idx);
++    const bool valid = idx >= 0 && idx < m_bufCount;
++    // PowOS (0058): direct scanout. A frame nothing blocks (directBlocker) goes to a consumer that offered it as the
++    // client's own buffer - no composite, no GPU pass. Any blocker, any frame: composited as before, per frame.
++    const QString blocker = (valid && m_stale[idx]) ? directBlocker(idx) : QString();
++    const auto countFrame = [this, &blocker]() { // 0057's eligibility, per frame drawn or sent
+         if (blocker.isEmpty()) {
+             m_statDirect++;
+         } else {
+             m_statBlockers[blocker]++;
+         }
++    };
++    if (valid && m_stale[idx] && m_directCaps) {
++        if (m_directShowing && m_newestQueued) {
++            // The keepalive with nothing new while the consumer shows the client's buffer: answering with this
++            // (undrawn) buffer would show it - an old composite - over the newest frame. "Nothing new" instead.
++            if (sendDirectNoFrame(0)) {
++                m_offered = false;
++                return;
++            }
++        } else if (blocker.isEmpty() && !m_directForget.isEmpty()) {
++            // The consumer frees the slots of buffers the client destroyed before new ones come: this offer answers
++            // with one FORGET (the consumer offers again at once), the frame goes on the next one.
++            if (sendDirectNoFrame(m_directForget.first())) {
++                m_directForget.removeFirst();
++                m_offered = false;
++                return;
++            }
++        } else if (blocker.isEmpty() && sendDirect()) {
++            countFrame();
++            m_newestQueued = true; // m_stale[idx] stays: that buffer still holds an older composite
++            m_statFrames++;
++            m_statDirectSent++;
++            if (m_damagePending) {
++                m_damagePending = false;
++                m_statWaitBuffer.append(int(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - m_damagedAt).count()));
++            }
++            m_offered = false;
++            for (Window *w : paintedWindows()) {
++                w->windowItem()->framePainted(nullptr, w->output(), nullptr, now());
++            }
++            return;
++        }
++    }
++    if (valid && m_stale[idx] && egl && egl->openglContext()->makeCurrent()) {
++        countFrame();
+         timespec cpu0, cpu1;
+         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu0);
+         const auto wall0 = std::chrono::steady_clock::now();
+@@ -1189,6 +1332,7 @@ void AnlandWindowTask::render(bool keepalive)
+             m_statWaitBuffer.append(int(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - m_damagedAt).count()));
+         }
+     }
++    m_directShowing = false; // PowOS (0058): a plain frame - the consumer queues its buffer and hides its direct child
+     trigger_refresh(m_display);
+     m_offered = false;
+     // Frame callbacks: the client draws its next frame at the task's pace.
+@@ -1262,6 +1406,19 @@ void AnlandWindowTask::processInputEvent(const InputEvent &ev)
+     case INPUT_TYPE_TOUCH_FRAME:
+         seat->notifyTouchFrame();
+         break;
++    case INPUT_TYPE_DIRECT_CAPS: // PowOS (0058): the consumer shows direct frames (or, 0, no longer)
++        if (ev.input_action.action != m_directCaps) {
++            qCInfo(KWIN_ANLAND) << "window task" << m_id << "direct scanout" << (ev.input_action.action ? "offered" : "refused")
++                                << "by the consumer, caps" << ev.input_action.action;
++        }
++        if (!ev.input_action.action) {
++            resetDirect();
++        }
++        m_directCaps = ev.input_action.action;
++        break;
++    case INPUT_TYPE_DIRECT_RELEASE:
++        directReleased(ev.input_action.action);
++        break;
+     case INPUT_TYPE_TEXT_INPUT: {
+         // The task's own Android keyboard committed text (window-ime): into KWin's input method, as the desktop's
+         // (AnlandBackend::sendTextInputToKWin) - to the focused text field, this window's while its task has the focus.
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index a1c16aa..5d699cf 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -13,6 +13,7 @@
+ */
+ #pragma once
+ 
++#include "core/graphicsbuffer.h"
+ #include "core/output.h"
+ #include "effect/globals.h"
+ #include "core/rect.h"
+@@ -159,6 +160,12 @@ private:
+     RectF viewport() const;
+     qreal scale() const;
+     QString directBlocker(int idx); // PowOS (0057): why this frame can't be the client's buffer as is (empty: it can)
++    // PowOS (0058): direct scanout (docs/research/window-task-direct-scanout.md step 4). The offered buffer answered with
++    // the client's own buffer (FRAME_TAG_DIRECT) instead of a composite: true sent; false = composite this frame.
++    bool sendDirect();
++    bool sendDirectNoFrame(uint32_t id); // a FORGET answer (id 0: "nothing new", the consumer keeps what it shows)
++    void directReleased(uint32_t id);
++    void resetDirect(); // a new connection, a refusal, the task gone: every id and hold dropped
+     bool fitsWindow() const;
+     QSize taskSize() const;
+     void fitWindow();
+@@ -239,6 +246,24 @@ private:
+     int m_statDirect = 0;
+     QHash<QString, int> m_statBlockers;
+     QString m_lastClientBuffer; // the client buffer's layout, logged when it changes
++    // PowOS (0058): direct scanout state. The consumer offered it (INPUT_TYPE_DIRECT_CAPS, per connection); each client
++    // buffer sent gets an id (its dma-buf goes once); a buffer the consumer may still show is held (no release to the
++    // client) until it says DIRECT_RELEASE - one release per time a buffer went on screen in place of another, so
++    // holds count those; ids of buffers the client destroyed are forgotten on the consumer before more go direct.
++    struct DirectHold
++    {
++        GraphicsBufferRef ref;
++        int count = 0;
++    };
++    uint32_t m_directCaps = 0;
++    uint32_t m_directNextId = 1; // 0 is the "nothing new" answer
++    uint32_t m_directLast = 0; // the id the consumer shows (or its hidden child keeps) - 0 none
++    bool m_directShowing = false; // the last frame answered went direct (a composited one shows the window's buffer)
++    QHash<GraphicsBuffer *, uint32_t> m_directIds;
++    QSet<uint32_t> m_directFdSent;
++    QHash<uint32_t, DirectHold> m_directHolds;
++    QList<uint32_t> m_directForget;
++    int m_statDirectSent = 0;
+     std::chrono::steady_clock::time_point m_damagedAt; // the first commit not yet drawn (or epoch)
+     bool m_damagePending = false;
+     bool m_renderScheduled = false;
+diff --git a/src/backends/anland/display_producer.c b/src/backends/anland/display_producer.c
+index 3c5b26a..176c414 100644
+--- a/src/backends/anland/display_producer.c
++++ b/src/backends/anland/display_producer.c
+@@ -363,6 +363,58 @@ int trigger_refresh(display_ctx *ctx)
+     return 0;
+ }
+ 
++int send_direct_frame(display_ctx *ctx, const struct direct_frame *df, int fence_fd, int dmabuf_fd)
++{
++    if (ctx->fallback)
++        return -1;
++    char b = (char)(FRAME_TAG_DIRECT | FRAME_TAG_PRETRANSFORM | (ctx->buf_transform & 3));
++    struct iovec iov[2] = {
++        { .iov_base = &b, .iov_len = 1 },
++        { .iov_base = (void *)df, .iov_len = sizeof(*df) },
++    };
++    int fds[2], n = 0;
++    if (fence_fd >= 0)
++        fds[n++] = fence_fd;
++    if (dmabuf_fd >= 0)
++        fds[n++] = dmabuf_fd;
++    union {
++        char buf[CMSG_SPACE(2 * sizeof(int))];
++        struct cmsghdr align;
++    } cmsg;
++    struct msghdr msg = {
++        .msg_iov = iov,
++        .msg_iovlen = 2,
++    };
++    if (n > 0) {
++        msg.msg_control = cmsg.buf;
++        msg.msg_controllen = CMSG_SPACE(n * sizeof(int));
++        struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
++        c->cmsg_level = SOL_SOCKET;
++        c->cmsg_type = SCM_RIGHTS;
++        c->cmsg_len = CMSG_LEN(n * sizeof(int));
++        memcpy(CMSG_DATA(c), fds, n * sizeof(int));
++    }
++    /* Non-blocking as trigger_refresh. In lockstep the channel is empty here; a short write (never seen) would split
++     * the struct, which the consumer reads with a 1 s poll, so it still arrives whole. */
++    ssize_t r = sendmsg(ctx->fence_fd, &msg, MSG_NOSIGNAL | MSG_DONTWAIT);
++    if (r <= 0)
++        return -1;
++    if ((size_t)r < 1 + sizeof(*df)) {
++        size_t off = (size_t)r - 1;
++        while (off < sizeof(*df)) {
++            ssize_t w = send(ctx->fence_fd, (const char *)df + off, sizeof(*df) - off, MSG_NOSIGNAL);
++            if (w <= 0)
++                break;
++            off += (size_t)w;
++        }
++    }
++    if (ctx->pending_render_fence >= 0) {
++        close(ctx->pending_render_fence);
++        ctx->pending_render_fence = -1;
++    }
++    return 0;
++}
++
+ int poll_input_event(display_ctx *ctx, struct InputEvent *event, int timeout_ms)
+ {
+     if (ctx->fallback)
+diff --git a/src/backends/anland/display_producer.h b/src/backends/anland/display_producer.h
+index cace4be..7109be7 100644
+--- a/src/backends/anland/display_producer.h
++++ b/src/backends/anland/display_producer.h
+@@ -50,6 +50,12 @@ void set_render_fence(display_ctx *ctx, int fence_fd);
+  * the render fence, if any) on the dedicated fence channel. No-op in fallback. */
+ int  trigger_refresh(display_ctx *ctx);
+ 
++/* PowOS (kwin 0058): answer the offered buffer with a direct frame instead (protocol.h FRAME_TAG_DIRECT): the byte, then
++ * *df on the same sendmsg, SCM_RIGHTS = fence_fd (df->flags DIRECT_FLAG_FENCE) then dmabuf_fd (DIRECT_FLAG_NEW_FD); -1 =
++ * none. Neither fd is closed (the dma-buf is the client's). Drops a stashed render fence. 0 sent, -1 not (fallback, a
++ * full channel): nothing went, answer with trigger_refresh. */
++int  send_direct_frame(display_ctx *ctx, const struct direct_frame *df, int fence_fd, int dmabuf_fd);
++
+ /* Pull one pending input event. Returns 1 if an event was written, 0 if none was
+  * available, -1 on consumer loss. No-op (returns 0) in fallback. */
+ int  poll_input_event(display_ctx *ctx, struct InputEvent *event, int timeout_ms);
+diff --git a/src/backends/anland/protocol.h b/src/backends/anland/protocol.h
+index 81dd6dc..73f4d06 100644
+--- a/src/backends/anland/protocol.h
++++ b/src/backends/anland/protocol.h
+@@ -73,6 +73,35 @@ struct bufs_ext {
+ } __attribute__((packed));
+ #define FRAME_TAG_PRETRANSFORM 0x80
+ 
++/* PowOS: direct scanout of a full-screen window task (docs/research/window-task-direct-scanout.md). Off unless the
++ * consumer offers it (property debug.powos.direct_scanout=1 in the app; kwin 0058 sends them):
++ *  - consumer -> producer: INPUT_TYPE_DIRECT_CAPS (input_action.action = DIRECT_CAP_* bits, 0 = stop sending direct
++ *    frames) after every connect, and again with 0 when its self-test refuses the path.
++ *  - producer -> consumer: instead of drawing into the selected buffer, a frame whose fence-channel byte has
++ *    FRAME_TAG_DIRECT is followed (same sendmsg, stream) by a struct direct_frame; SCM_RIGHTS on that sendmsg: the
++ *    acquire fence (DIRECT_FLAG_FENCE) then the client buffer's dma-buf (DIRECT_FLAG_NEW_FD, the first time an id is
++ *    sent or after DIRECT_FORGET). The consumer shows it on its own child surface and drops the selected buffer.
++ *  - consumer -> producer: INPUT_TYPE_DIRECT_RELEASE (input_action.action = id) once SurfaceFlinger no longer reads
++ *    that buffer: the producer may let the client reuse it.
++ * HACK: capability as an input event (an older producer ignores unknown input types) - no versioned handshake yet. */
++#define FRAME_TAG_DIRECT 0x40
++#define INPUT_TYPE_DIRECT_CAPS 12
++#define INPUT_TYPE_DIRECT_RELEASE 13
++#define DIRECT_CAP_XR24_LINEAR 1u
++#define DIRECT_FLAG_NEW_FD 1u
++#define DIRECT_FLAG_FENCE 2u
++#define DIRECT_FLAG_FORGET 4u   /* the producer dropped this id: the consumer frees its buffer (no frame) */
++struct direct_frame {
++    uint32_t id;
++    uint32_t width;
++    uint32_t height;
++    uint32_t pitch;
++    uint32_t fourcc;
++    uint32_t offset;
++    uint64_t modifier;
++    uint32_t flags;
++} __attribute__((packed));
++
+ #define INPUT_TYPE_TOUCH          1
+ #define INPUT_TYPE_KEY            2
+ #define INPUT_TYPE_POINTER_MOTION 3
