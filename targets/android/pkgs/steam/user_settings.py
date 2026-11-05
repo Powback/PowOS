@@ -16,6 +16,30 @@ import time
 # applies this before its own default ("PROTON_USE_XALIA" not in env). proton-settings.json {"PROTON_USE_XALIA": "1"}
 # turns it back on for a check.
 user_settings = {"PROTON_USE_XALIA": "0"}
+
+
+# HACK: FEX's disk cache (FEX_DISKCACHE=1, Proton ARM64's arm64ec FEX) also caches ANONYMOUS code by default
+# (DiskCacheAnonCaching). A Mono game's anonymous code is Mono's own JIT output, different every launch, so it never
+# hits - FEX only stores it again: Broforce, 2026-11-05, ~37k stores per launch, each locking both RWCacheDB files
+# through LockFileEx = 4 wineserver round trips from the FEX:DiskCache thread, for the whole session (wineserver 3.3
+# core-s + that thread 3.7 core-s in the 10 s load; main thread 7.8 s CPU). Off for Mono games: wineserver 0.8 core-s,
+# main thread 6.0 s, exe -> first frame 10.3 -> 9.5 s. File-backed code (the game's and Mono's own DLLs) stays cached.
+# Real fix: FEX not re-storing anon blocks that already missed (or batching a store's file locks), upstream.
+def _mono_game():
+    import glob
+    p = os.environ.get("STEAM_COMPAT_INSTALL_PATH", "")
+    if not p:
+        return False
+    p = glob.escape(p)
+    return bool(glob.glob(os.path.join(p, "*_Data/Mono/EmbedRuntime/mono*.dll"))
+                or glob.glob(os.path.join(p, "MonoBleedingEdge/EmbedRuntime/mono*.dll")))
+
+
+try:
+    if _mono_game():
+        user_settings["FEX_DISKCACHEANONCACHING"] = "0"
+except OSError:
+    pass
 try:
     with open(os.path.expanduser("~/.config/powos/proton-settings.json")) as _f:
         user_settings.update({str(k): str(v) for k, v in json.load(_f).items()})

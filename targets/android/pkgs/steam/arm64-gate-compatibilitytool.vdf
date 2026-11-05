@@ -1,0 +1,13 @@
+"compatibilitytools"
+{
+  "compat_tools"
+  {
+    "powos-proton-arm64"
+    {
+      "install_path" "."
+      "display_name" "Proton Experimental (ARM64) + PowOS launch gate"
+      "from_oslist" "windows"
+      "to_oslist" "linux"
+    }
+  }
+}

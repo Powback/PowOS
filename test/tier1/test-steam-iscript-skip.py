@@ -127,5 +127,62 @@ class IscriptSkip(unittest.TestCase):
         self.assertIn("skipped: script, Proton and prefix", self.log())
 
 
+class Arm64Gate(IscriptSkip):
+    """arm64-gate-entry: the compat tool "powos-proton-arm64" Steam runs instead of Valve's chain for ARM64 Proton."""
+
+    def setUp(self):
+        super().setUp()
+        self.proton = self.steam / "steamapps/common/Proton Experimental (ARM64)"
+        self.proton.mkdir(parents=True)
+        (self.proton / "version").write_text("1793301884 experimental-11.0-arm64\n")
+        shutil.copy(PKG / "user_settings.py", self.proton / "user_settings.py")
+        slr = self.steam / "steamapps/common/SteamLinuxRuntime_4-arm64"
+        slr.mkdir(parents=True)
+        # Stand-in for Valve's _v2-entry-point: prints what it was given, as the container chain would start.
+        self.entry = slr / "_v2-entry-point"
+        self.entry.write_text("#!/bin/sh\necho CHAIN STARTED \"$@\"\necho TOOLS=$STEAM_COMPAT_TOOL_PATHS\nexit 7\n")
+        self.entry.chmod(0o755)
+        self.gate = PKG / "arm64-gate-entry"
+        self.env["STEAM_COMPAT_TOOL_PATHS"] = str(self.steam / "compatibilitytools.d/powos-proton-arm64")
+
+    def chain(self, verb="run", inner=None):
+        return [sys.executable, str(self.gate), verb] + (inner or self.evaluator_argv())[2:]
+
+    def test_game_launch_untouched(self):
+        self.record()
+        r = self.run_chain(self.chain("waitforexitandrun", ["proton", "waitforexitandrun", "S:\\Broforce.exe"]))
+        self.assertEqual(r.returncode, 7)
+        self.assertIn("CHAIN STARTED --verb=waitforexitandrun -- %s waitforexitandrun S:\\Broforce.exe"
+                      % (self.proton / "proton"), r.stdout)
+        self.assertIn("TOOLS=%s:%s" % (self.proton, self.entry.parent), r.stdout)
+
+    def test_proton_import_still_skips_and_records(self):
+        pass  # Proton's own import: covered by IscriptSkip
+
+
+class MonoAnonCache(unittest.TestCase):
+    """user_settings.py: FEX's anonymous-code disk cache off for Mono games only."""
+
+    def settings(self, layout):
+        t = Path(tempfile.mkdtemp())
+        try:
+            for f in layout:
+                (t / f).parent.mkdir(parents=True, exist_ok=True)
+                (t / f).write_text("x")
+            code = "import runpy; print(runpy.run_path(%r)['user_settings'].get('FEX_DISKCACHEANONCACHING'))" % str(PKG / "user_settings.py")
+            r = subprocess.run([sys.executable, "-c", code], env=dict(os.environ, STEAM_COMPAT_INSTALL_PATH=str(t), HOME=str(t)),
+                               capture_output=True, text=True, timeout=30)
+            return r.stdout.strip()
+        finally:
+            shutil.rmtree(t)
+
+    def test_unity_mono(self):
+        self.assertEqual(self.settings(["Broforce_beta_Data/Mono/EmbedRuntime/mono.dll"]), "0")
+        self.assertEqual(self.settings(["MonoBleedingEdge/EmbedRuntime/mono-2.0-bdwgc.dll"]), "0")
+
+    def test_other_games_keep_fex_default(self):
+        self.assertEqual(self.settings(["Game.exe", "GameAssembly.dll"]), "None")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -71,6 +71,16 @@ check "native pin removes the mapping"             '[ "$(C get 200)" = "tool=- o
 C set 200 x86 >/dev/null; C set 100 kept:x86 >/dev/null
 check "config.vdf otherwise byte-identical"        'cmp -s <(grep -v "\"200\"" "$T/orig.vdf") <(grep -v "\"200\"" "$St/config/config.vdf") || diff <(sed "/\"200\"/,/}/d" "$St/config/config.vdf") "$T/orig.vdf" >/dev/null'
 check "backups kept"                               'ls "$St/config/" | grep -q powos-bak'
+# PowOS's ARM64 launch gate (compatibilitytools.d/powos-proton-arm64): "arm64" maps to it once it and Valve's runtime are there.
+mkdir -p "$St/compatibilitytools.d/powos-proton-arm64" "$St/steamapps/common/SteamLinuxRuntime_4-arm64"
+touch "$St/compatibilitytools.d/powos-proton-arm64/powos-entry"
+C set 200 arm64 >/dev/null
+check "arm64 without the runtime -> Valve's tool"  '[ "$(C get 200)" = "tool=proton-experimental-arm64 opts=-" ]'
+touch "$St/steamapps/common/SteamLinuxRuntime_4-arm64/_v2-entry-point"; C apply >/dev/null
+check "arm64 with the gate installed -> the gate"  '[ "$(C get 200)" = "tool=powos-proton-arm64 opts=-" ] && [ "$(C mode 200)" = pinned:arm64 ]'
+check "the gate counts as the arm64 prefix family" '[ "$(cat "$CD/200/powos-family" 2>/dev/null || echo arm64)" = arm64 ]'
+rm -rf "$St/compatibilitytools.d/powos-proton-arm64"; C apply >/dev/null
+check "gate gone -> back to Valve's ARM64 tool"    '[ "$(C get 200)" = "tool=proton-experimental-arm64 opts=-" ]'
 
 echo; echo "== Results: $PASS passed, $FAIL failed =="
 [ $FAIL = 0 ]

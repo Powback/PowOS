@@ -232,3 +232,56 @@ steam 0.9, winedevice.exe 0.5), while the game's two busiest Wine threads run 40
 Wine server calls, so the lead is wineserver round trips: next, check whether Proton ARM64 uses fsync/ntsync here
 (`PROTON_LOG=1`: "fsync: up and running" / ntsync, `/dev/ntsync` in the kernel, `PROTON_NO_FSYNC` unset) and which
 requests dominate (`WINEDEBUG=+server` counts over the load).
+
+## Main thread split, wineserver requests, ARM64 evaluator gate (2026-11-05, agent/unity-mainthread)
+
+Broforce 274190 on Proton Experimental (ARM64) (Wine native, game code via arm64ec FEX, DiskCache on). Instruments
+(scratch wrappers around `bf-coldstart.sh steam`): `simpleperf record -a -e cpu-clock -f 1000` for 13 s from the game
+exe's start, reported per thread by DSO (`unknown` = anonymous executable memory = FEX's JIT output, i.e. emulated x86
+code running; `libarm64ecfex.dll` = FEX's frontend/compiler/dispatcher; `aarch64-unix|windows` = Wine), and a run with
+`WINEDEBUG=+server PROTON_LOG=1` (via `~/.config/powos/proton-settings.json`) counting wineserver requests.
+
+**Main thread (CPU s in the 13 s window, exe -> ~2 s past the first frame)**
+
+| run | main total | emulated code (JIT out) | FEX compile/dispatch | kernel | Wine | wineserver | exe -> frame |
+|---|---|---|---|---|---|---|---|
+| as shipped (job 103601) | 7.8 | 4.1 | 1.15 | 1.9 | 0.4 | 3.3 | 10.5 s |
+| FEX_DISKCACHEANONCACHING=0 #1 (104915) | 6.0 | 2.9 | 0.8 | 1.6 | 0.4 | 1.0 | 9.9 s |
+| FEX_DISKCACHEANONCACHING=0 #2 (104916) | 6.0 | 2.9 | 0.85 | 1.6 | 0.4 | 0.85 | 9.2 s |
+| FEX_DISKCACHE=0 (104917) | 7.0 | 2.7 | 1.8 | 1.75 | 0.45 | 0.8 | 9.9 s |
+
+So the main thread is **executing emulated code**, not compiling: FEX compile is 0.8-1.15 s (1.8 s with no disk
+cache: the RWCacheDB does save ~1 s of compile for file-backed code), Wine 0.4 s. esync/fsync is not the issue:
+`WINEFSYNC=1`, "fsync: up and running", `/dev/shm/wine-*-fsync` mapped (the GKI 5.15 kernel has futex_waitv);
+`select` was only ~2k requests.
+
+**wineserver 3.3 core-s = FEX's disk cache thread.** Requests over one launch (+server; each counted once):
+`lock_file` 74k + `unlock_file` 74k, open_key 45k, close_handle 31k, enum_key/enum_key_value 15k, get_window_tree 7k.
+All 148k lock/unlock come from ONE thread, `FEX:DiskCache` (Windows tid 014c, created by FEX right after opening
+`shadercache/274190/fex-emu/DiskCache/<hash>/RWCacheDB_*.foz` + `_idx.foz`): `lock_file(offset=0x4000000000000000,
+count=1)` on both files, unlock both, ~37k times, for the whole session (first lock at log line 64k of 662k, last at
+656k). That is FEX's `CacheStoreWorkItem` -> `StoreCacheBlob`, which locks both FOZ files per stored block (LockFileEx
+= a wineserver round trip each). The RWCacheDB doesn't grow (48.15 -> 48.14 MB): these are anonymous blocks - Mono's
+JIT output, different every launch - which FEX caches by default (`DiskCacheAnonCaching`, default true) but never hits.
+In the profile the thread is 90 % kernel (3.4 s) and wineserver 35 % `finish_task_switch`: the pair burns ~2 cores.
+
+Fix (pkgs/steam user_settings.py, steam pkgrel 36): `FEX_DISKCACHEANONCACHING=0` for Mono games (Unity's
+`*_Data/Mono/EmbedRuntime/mono*.dll` or `MonoBleedingEdge/EmbedRuntime/`); file-backed code stays cached; a
+proton-settings.json value still wins. Result above: wineserver 3.3 -> 0.9 core-s, the DiskCache thread gone from the
+top, main thread 7.8 -> 6.0 s CPU, exe -> first frame 10.3 (10.0-10.5 today) -> 9.2-9.9 s. It also stops the same
+storm during gameplay (it ran all session), which should show in arm64 fps (not measured here).
+
+What is left on the critical path is the emulated Mono/Unity code itself (~3 s on main + UnityPreload 2 s) and kernel
+time (page faults, wakeups). Knobs left: FEX TSO (`TSOEnabled` 1 from Proton's Config.json; diagnostic run with
+TSO off queued as job 105916 - not a candidate default, Unity/Mono is multi-threaded), Multiblock already 1.
+
+**Install script evaluator on ARM64: gate before the container.** New compat tool `powos-proton-arm64`
+(`pkgs/steam/arm64-gate-entry` + manifests, installed by /usr/bin/steam into compatibilitytools.d): Steam runs it
+instead of Valve's layered chain; it runs `iscript_skip_early` (same key/record as the x86 FEX-tool hook) and otherwise
+execs exactly `SteamLinuxRuntime_4-arm64/_v2-entry-point --verb=<verb> -- <Proton ARM64>/proton <verb> ...` with
+STEAM_COMPAT_TOOL_PATHS = Proton:runtime (what Steam sets itself). powos-steam-compat maps mode `arm64` to it when the
+gate, Proton ARM64 and the arm64 runtime are installed (else Valve's tool, so Steam still fetches the runtime). Device
+check (job 104137, scratch install of the same files, pinned, then restored to pinned:arm64): two launches fine,
+evaluator log "skipped before the container (PowOS ARM64 entry)"; evaluator stage 0.4-1.2 s -> under one 250 ms sample;
+tap -> reaper 3.0-3.4 s (today without it 3.1-6.3), window 7.6-7.9 s, frame 15.7-16.6 s. The ARM64 evaluator was
+never the 1-5 s it was on x86 (no FEX/Python-under-FEX here): the win is ~0.5-1 s.

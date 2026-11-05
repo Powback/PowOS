@@ -1,0 +1,7 @@
+"manifest"
+{
+  "version" "2"
+  "commandline" "/powos-entry %verb%"
+  "use_tool_subprocess_reaper" "1"
+  "use_sessions" "1"
+}

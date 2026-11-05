@@ -106,6 +106,12 @@ case $(readlink "/proc/${steam_pid:-0}/exe" 2>/dev/null) in
       [ -e "$f" ] && [ ! -d "/proc/$pid" ] && rm -f "$f"
     done
     reg_guard
+    # PowOS's launch gate in front of ARM64 Proton (/usr/lib/powos-steam/compat/powos-proton-arm64, see its
+    # powos-entry): into Steam's compatibilitytools.d before the policy below maps "arm64" games to it.
+    g=/usr/lib/powos-steam/compat/powos-proton-arm64 gd="${XDG_DATA_HOME:-$HOME/.local/share}"/Steam/compatibilitytools.d/powos-proton-arm64
+    if [ -d "$g" ]; then
+      mkdir -p "$gd" && for f in "$g"/*; do cmp -s "$f" "$gd/${f##*/}" || install -m"$([ -x "$f" ] && echo 755 || echo 644)" "$f" "$gd/${f##*/}"; done
+    fi
     # Which way each game runs - its native Linux build, ARM64 Proton or x86 Proton, the fastest that worked
     # (powos-steam-compat: per-game policy, measured launches): written into config.vdf now, while no Steam runs.
     command -v powos-steam-compat >/dev/null && timeout 20 powos-steam-compat apply 2>&1 | sed 's/^/steam: /' >&2

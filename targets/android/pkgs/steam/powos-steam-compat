@@ -50,6 +50,11 @@ TOOLS_PATH = ["installconfigstore", "software", "valve", "steam", "compattoolmap
 APPS_PATH = ["userlocalconfigstore", "software", "valve", "steam", "apps"]
 TOOL = {"native": "-", "arm64": "proton-experimental-arm64", "x86": "proton_experimental"}
 NAME = {v: k for k, v in TOOL.items()}
+# PowOS's launch gate in front of ARM64 Proton (compatibilitytools.d, installed by /usr/bin/steam from
+# /usr/lib/powos-steam/compat): Valve's Proton ARM64 in Valve's runtime, the install script evaluator skipped before the
+# container (arm64-gate-entry). Mode "arm64" maps to it once it and both Valve tools are installed; else to Valve's.
+ARM64_GATE = "powos-proton-arm64"
+NAME[ARM64_GATE] = "arm64"
 ORDER = ["native", "arm64", "x86"]
 ARM64_DIR = "Proton Experimental (ARM64)"
 KEEP = 6  # results kept per tool
@@ -335,6 +340,15 @@ def arm64_proton():
     return os.path.isfile(os.path.join(S, "steamapps/common", ARM64_DIR, "proton"))
 
 
+def tool_name(want):
+    """The CompatToolMapping name for a policy choice (native/arm64/x86 or a raw tool name)."""
+    if want == "arm64" and arm64_proton() \
+            and os.path.isfile(os.path.join(S, "compatibilitytools.d", ARM64_GATE, "powos-entry")) \
+            and os.path.isfile(os.path.join(S, "steamapps/common/SteamLinuxRuntime_4-arm64/_v2-entry-point")):
+        return ARM64_GATE
+    return TOOL.get(want, want)
+
+
 # ---- state + policy ----
 def load():
     try:
@@ -418,13 +432,13 @@ def cmd_apply(dry):
         a = app_entry(s, appid, t)
         want, why = choose(appid, a, oses.get(appid, set()))
         cur = get_tool(appid, t)
-        if TOOL.get(want, want) != cur:
+        if tool_name(want) != cur:
             print("%s %s: %s -> %s (%s)" % ("would set" if dry else "set", "%s %s" % (appid, name), short(cur), want, why))
             if not dry:
-                sw = swap_prefix(appid, family(TOOL.get(want, want)))
+                sw = swap_prefix(appid, family(tool_name(want)))
                 if sw:
                     print("   %s: %s" % (appid, sw))
-                set_tool(appid, TOOL.get(want, want)); t = read(CONFIG)
+                set_tool(appid, tool_name(want)); t = read(CONFIG)
                 a["applied"] = time.strftime("%F %T")
         a["why"] = why
     if not dry:

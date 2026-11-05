@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+# PowOS compat tool "powos-proton-arm64" (package steam, /usr/bin/steam installs it into Steam's compatibilitytools.d):
+# Proton Experimental (ARM64) in Valve's Steam Linux Runtime 4.0 arm64 container, exactly as Steam runs it itself
+# (`SteamLinuxRuntime_4-arm64/_v2-entry-point --verb=<verb> -- <Proton ARM64>/proton <verb> <command>`), with one
+# step in front: the install script evaluator's skip (PowOS user_settings.py iscript_skip_early, the same key/record
+# Proton's in-container skip uses) before the container starts.
+# HACK: ARM64 Proton's chain has no native Python before pressure-vessel (sitecustomize.py's hook for x86 Proton is in
+# Valve's FEX compat tool), so the skip only happened inside the container: ~0.8-1.5 s every launch for nothing.
+# Real fix: Valve's client skipping an evaluator run whose script it already ran in this prefix.
+import os
+import sys
+
+STEAM = os.environ.get("STEAM_COMPAT_CLIENT_INSTALL_PATH") or os.path.expanduser("~/.local/share/Steam")
+PROTON = os.environ.get("POWOS_ARM64_PROTON") or os.path.join(STEAM, "steamapps/common/Proton Experimental (ARM64)")
+SLR = os.environ.get("POWOS_ARM64_RUNTIME") or os.path.join(STEAM, "steamapps/common/SteamLinuxRuntime_4-arm64")
+
+
+def skip_evaluator(verb, cmd):
+    if verb != "run" or not cmd or os.path.basename(cmd[0].replace("\\", "/")).lower() != "iscriptevaluator.exe":
+        return False
+    us = os.path.join(PROTON, "user_settings.py")
+    with open(us) as f:
+        if not f.readline().startswith("# PowOS user_settings"):
+            return False
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("powos_user_settings", us)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.iscript_skip_early([os.path.join(PROTON, "proton"), "run"] + cmd, PROTON,
+                                  "before the container (PowOS ARM64 entry)")
+
+
+def main():
+    verb, cmd = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("waitforexitandrun", [])
+    try:
+        if skip_evaluator(verb, cmd):
+            sys.stdout.flush()
+            os._exit(0)
+    except Exception as e:  # never break a launch over the skip
+        sys.stderr.write("powos-entry: %s\n" % e)
+    # Steam sets STEAM_COMPAT_TOOL_PATHS to the tools of the chain it built (this one); pressure-vessel and Proton
+    # read it to find Proton and the runtime, as when Steam layers them itself.
+    paths = [PROTON, SLR] + [p for p in os.environ.get("STEAM_COMPAT_TOOL_PATHS", "").split(":") if p]
+    os.environ["STEAM_COMPAT_TOOL_PATHS"] = ":".join(dict.fromkeys(paths))
+    entry = os.path.join(SLR, "_v2-entry-point")
+    os.execv(entry, [entry, "--verb=" + verb, "--", os.path.join(PROTON, "proton"), verb] + cmd)
+
+
+main()
