@@ -1,0 +1,182 @@
+From 779919519141924654d5bd936e63af317cb26ad8 Mon Sep 17 00:00:00 2001
+From: Mats Bakken <mats@powback.com>
+Date: Thu, 5 Nov 2026 15:39:57 +0100
+Subject: [PATCH] backends/anland: window task direct-scanout probe
+
+---
+ src/backends/anland/anland_window_task.cpp | 98 ++++++++++++++++++++++
+ src/backends/anland/anland_window_task.h   |  9 ++
+ 2 files changed, 107 insertions(+)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 250b31d..968247d 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -29,6 +29,8 @@
+ #include "x11window.h"
+ #include "xdgshellwindow.h"
+ #include "wayland/seat.h"
++#include "wayland/surface.h"
++#include "core/graphicsbuffer.h"
+ #include "wayland_server.h"
+ #include "window.h"
+ #include "workspace.h"
+@@ -47,6 +49,7 @@
+ #include <algorithm>
+ #include <cmath>
+ #include <chrono>
++#include <ctime>
+ #include <sys/eventfd.h>
+ #include <sys/socket.h>
+ #include <unistd.h>
+@@ -785,11 +788,94 @@ void AnlandWindowTask::noteFrameStats()
+     qCInfo(KWIN_ANLAND).noquote() << QStringLiteral("window task %1 frames: last 5 s %2 commits, %3 drawn (%4 fps); commit -> drawn median %5 ms, p90 %6 ms, max %7 ms")
+                                          .arg(m_id).arg(m_statCommits).arg(m_statFrames).arg(m_statFrames / 5.0, 0, 'f', 1)
+                                          .arg(pct(50)).arg(pct(90)).arg(w.isEmpty() ? 0 : w.last());
++    if (m_statFrames > 0) {
++        // PowOS (0057): the composite's own cost (KWin's thread, per drawn frame) and how many of these frames a direct
++        // path (the client's buffer to the consumer, no draw) could have taken, with what kept the others composited.
++        QStringList why;
++        for (auto it = m_statBlockers.cbegin(); it != m_statBlockers.cend(); ++it) {
++            why.append(QStringLiteral("%1=%2").arg(it.key()).arg(it.value()));
++        }
++        why.sort();
++        qCInfo(KWIN_ANLAND).noquote() << QStringLiteral("window task %1 draw: %2 ms CPU, %3 ms wall per frame (%4 % of a core); direct-eligible %5/%6%7")
++                                             .arg(m_id).arg(m_statDrawCpuUs / 1000.0 / m_statFrames, 0, 'f', 2)
++                                             .arg(m_statDrawWallUs / 1000.0 / m_statFrames, 0, 'f', 2)
++                                             .arg(m_statDrawCpuUs / 50000.0, 0, 'f', 1)
++                                             .arg(m_statDirect).arg(m_statFrames)
++                                             .arg(why.isEmpty() ? QString() : QStringLiteral(", composited: ") + why.join(QLatin1Char(' ')));
++    }
++    m_statDrawCpuUs = 0;
++    m_statDrawWallUs = 0;
++    m_statDirect = 0;
++    m_statBlockers.clear();
+     m_statCommits = 0;
+     m_statFrames = 0;
+     m_statWaitBuffer.clear();
+ }
+ 
++QString AnlandWindowTask::directBlocker(int idx)
++{
++    // PowOS (0057): the direct-scanout probe. A frame can skip the composite and go to the consumer as the client's own
++    // buffer only when that buffer IS the frame: one full-screen window and nothing over it, a single-plane linear
++    // 32-bit dma-buf of exactly the task's buffer size, no rotation either side, the GPU path (not the CPU copy).
++    // Measures how often the real path (docs/research/window-task-direct-scanout.md) could take Broforce's frames.
++    if (!m_window || !m_window->isFullScreen()) {
++        return QStringLiteral("not-fullscreen");
++    }
++    if (paintedWindows().size() != 1) {
++        return QStringLiteral("popups");
++    }
++    if (m_cpu[idx]) {
++        return QStringLiteral("cpu-copy");
++    }
++    if (get_buffer_transform(m_display) & 3) {
++        return QStringLiteral("pre-rotated");
++    }
++    SurfaceInterface *surface = m_window->surface();
++    GraphicsBuffer *buffer = surface ? surface->buffer() : nullptr;
++    if (!buffer) {
++        return QStringLiteral("no-buffer");
++    }
++    if (!surface->below().isEmpty() || !surface->above().isEmpty()) {
++        return QStringLiteral("subsurfaces");
++    }
++    const DmaBufAttributes *attrs = buffer->dmabufAttributes();
++    if (!attrs) {
++        return buffer->shmAttributes() ? QStringLiteral("shm") : QStringLiteral("not-dmabuf");
++    }
++    const QString layout = QStringLiteral("%1x%2 fourcc %3 modifier 0x%4 planes %5 pitch %6 offset %7 transform %8")
++                               .arg(attrs->width).arg(attrs->height)
++                               .arg(QString::fromLatin1(QByteArray(reinterpret_cast<const char *>(&attrs->format), 4)))
++                               .arg(attrs->modifier, 0, 16).arg(attrs->planeCount).arg(attrs->pitch[0]).arg(attrs->offset[0])
++                               .arg(int(surface->bufferTransform().kind()));
++    if (layout != m_lastClientBuffer) {
++        m_lastClientBuffer = layout;
++        qCInfo(KWIN_ANLAND).noquote() << QStringLiteral("window task %1 client buffer: %2, task buffers %3x%4")
++                                             .arg(m_id).arg(layout).arg(m_bufferSize.width()).arg(m_bufferSize.height());
++    }
++    if (attrs->planeCount != 1) {
++        return QStringLiteral("planes");
++    }
++    if (attrs->modifier != 0 && attrs->modifier != 0x00ffffffffffffffULL) { // DRM_FORMAT_MOD_LINEAR / _INVALID (implicit)
++        return QStringLiteral("tiled");
++    }
++    switch (attrs->format) {
++    case 0x34325258: // XR24 (XRGB8888)
++    case 0x34325241: // AR24 (ARGB8888)
++    case 0x34324258: // XB24 (XBGR8888)
++    case 0x34324241: // AB24 (ABGR8888)
++        break;
++    default:
++        return QStringLiteral("format");
++    }
++    if (surface->bufferTransform() != OutputTransform::Normal) {
++        return QStringLiteral("client-transform");
++    }
++    if (QSize(attrs->width, attrs->height) != m_bufferSize) {
++        return QStringLiteral("size");
++    }
++    return QString();
++}
++
+ static bool sameSize(const QSizeF &a, const QSizeF &b)
+ {
+     // Within half a logical pixel: X11 geometry goes through X's integer pixels (Xcb::toXNative) and back.
+@@ -1060,6 +1146,15 @@ void AnlandWindowTask::render(bool keepalive)
+     const int idx = get_selected_idx(m_display);
+     AnlandEglBackend *egl = m_tasks->backend()->eglBackend();
+     if (idx >= 0 && idx < m_bufCount && m_stale[idx] && egl && egl->openglContext()->makeCurrent()) {
++        const QString blocker = directBlocker(idx);
++        if (blocker.isEmpty()) {
++            m_statDirect++;
++        } else {
++            m_statBlockers[blocker]++;
++        }
++        timespec cpu0, cpu1;
++        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu0);
++        const auto wall0 = std::chrono::steady_clock::now();
+         RenderTarget renderTarget(m_fbos[idx].get());
+         RenderViewport renderViewport(viewport(), scale(), renderTarget, QPoint());
+         WorkspaceScene *scene = kwinApp()->scene();
+@@ -1083,6 +1178,9 @@ void AnlandWindowTask::render(bool keepalive)
+             EGLNativeFence fence{egl->openglContext()->displayObject()};
+             set_render_fence(m_display, fence.takeFileDescriptor().take());
+         }
++        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu1);
++        m_statDrawCpuUs += (cpu1.tv_sec - cpu0.tv_sec) * 1000000LL + (cpu1.tv_nsec - cpu0.tv_nsec) / 1000;
++        m_statDrawWallUs += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - wall0).count();
+         m_stale[idx] = false;
+         m_newestQueued = true;
+         m_statFrames++;
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 1ef2fda..a1c16aa 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -158,6 +158,7 @@ private:
+     QPointF mapToGlobal(const QPointF &taskPoint) const;
+     RectF viewport() const;
+     qreal scale() const;
++    QString directBlocker(int idx); // PowOS (0057): why this frame can't be the client's buffer as is (empty: it can)
+     bool fitsWindow() const;
+     QSize taskSize() const;
+     void fitWindow();
+@@ -230,6 +231,14 @@ private:
+     int m_statCommits = 0;
+     int m_statFrames = 0;
+     QList<int> m_statWaitBuffer; // commit -> render, ms: the client's frame held for want of a buffer
++    // PowOS (0057, direct-scanout probe, docs/research/window-task-direct-scanout.md): what each drawn frame cost KWin's
++    // thread (CPU and wall time of the composite into the consumer buffer) and whether the frame could have gone to the
++    // consumer as the client's own buffer instead (directBlocker() empty), per 5 s report.
++    qint64 m_statDrawCpuUs = 0;
++    qint64 m_statDrawWallUs = 0;
++    int m_statDirect = 0;
++    QHash<QString, int> m_statBlockers;
++    QString m_lastClientBuffer; // the client buffer's layout, logged when it changes
+     std::chrono::steady_clock::time_point m_damagedAt; // the first commit not yet drawn (or epoch)
+     bool m_damagePending = false;
+     bool m_renderScheduled = false;
+-- 
+2.50.1 (Apple Git-155)
+

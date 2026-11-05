@@ -10,7 +10,9 @@
 #   gamecpu  the game's processes (FEX wine64 running Broforce_beta.exe) over the sample, % of one core
 #   top      the top processes over that 60 s (top -n2 -d 60, the second frame)
 #   therm    skin-msm-therm (C) and policy0/3/7 scaling_max_freq (the thermal caps)
-#   fps      KWin's "window task N frames:" lines of that minute (commits / 5 = the game's fps)
+#   fps      KWin's "window task N frames:" lines of that minute (commits / 5 = the game's fps), with kwin 3.65+ its
+#            "draw:" lines (the composite's CPU ms/frame + how many frames could go direct) and "client buffer:" layout
+#            (docs/research/window-task-direct-scanout.md, probe 0057)
 # once at the start and the end:
 #   app      com.powos.app's versionName (the build the HWC/blur evidence belongs to)
 #   hwc      SurfaceFlinger's HWC list: each layer's composition (DEVICE = overlay, CLIENT = GPU-composed), and any
@@ -81,7 +83,7 @@ while [ $(( $(date +%s) - t0 )) -lt "$SECS" ]; do
   # The verdict's own rule, early: the game out of front or not running ends the soak at once (FAIL below).
   python3 "$here/bf-quiet-verdict.py" "$OUT/samples.txt" 0 "$MIN_CPU" >/dev/null || break
   k1=$("$A" shell "su -c 'wc -l < $LOG'" | tr -d '\r ')
-  [ -n "$k0" ] && [ -n "$k1" ] && "$A" shell "su -c 'sed -n \"$((k0 + 1)),${k1}p\" $LOG'" | tr -d '\r' | grep 'window task .* frames:' | tail -3 | sed 's/^/fps /'
+  [ -n "$k0" ] && [ -n "$k1" ] && "$A" shell "su -c 'sed -n \"$((k0 + 1)),${k1}p\" $LOG'" | tr -d '\r' | grep -E 'window task .* (frames|draw|client buffer):' | tail -7 | sed 's/^/fps /'
   k0=$k1
   if [ -z "$boosted" ] && [ $(( $(date +%s) - t0 )) -ge $(( SECS / 2 )) ]; then boosted=1; "$here/game-boost.sh" 20 2>&1 | sed 's/^/boost /' | tail -25; fi
 done
