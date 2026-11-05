@@ -55,7 +55,7 @@ pkgdesc='Turnip Vulkan driver on KGSL (lfdevs Mesa) with PowOS fixes (PowOS Andr
 arch=(aarch64)
 url='https://github.com/lfdevs/mesa-for-android-container'
 license=(MIT)
-depends=(libdrm libx11 libxcb libxshmfence wayland zstd expat libelf vulkan-icd-loader)
+depends=(libdrm libx11 libxcb libxshmfence wayland zstd expat libelf vulkan-icd-loader libdisplay-info systemd-libs)
 makedepends=(meson ninja python-mako python-yaml python-packaging python-ply glslang byacc bison flex
              wayland-protocols libxrandr)
 provides=(vulkan-freedreno vulkan-driver)

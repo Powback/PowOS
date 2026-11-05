@@ -21,6 +21,7 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
 [ $# -gt 0 ] || set -- base
 BF_ADB=$A . "$here/bf-lib.sh"   # pill <step>: the status pill's sub-step
+cfg_take "$@"; set -- "${CFG_ARGS[@]}"; [ $# -gt 0 ] || set -- base  # cfg:<x86|arm64> first: bf-lib.sh cfg_take
 OUT=${OUT:-$HOME/.cache/powos-verify/bfp-$(date +%F_%H%M)}; mkdir -p "$OUT"
 APP_GIVEN=${APP:+1}; APP=${APP:-274190} WIN_NAME=${WIN_NAME:-}  # any Steam game; default the test case. WIN_NAME
 # (one word) only when its window isn't titled like Steam's name for it (bf-window.sh reads that name from the appmanifest).
@@ -53,7 +54,8 @@ gs=$(asuser bf-game.sh state | tail -1); users=0
 G=$(asuser bf-game.sh dir | tail -1); [ -n "$G" ] || { echo "ENV: app $APP isn't installed (no Steam appmanifest)"; exit 5; }
 case $gs in
   game=awake) echo "the user's $NAME is up and awake (they play it?) - skip"; exit 3 ;;
-  game=frozen) users=1; echo "the user's $NAME, left frozen: measured as it is (base only), frozen again after"
+  game=frozen) [ -z "$CFG_TO" ] || { echo "the user's $NAME is left frozen: cfg:$CFG_TO needs a fresh start - skip"; exit 3; }
+    users=1; echo "the user's $NAME, left frozen: measured as it is (base only), frozen again after"
     [ "$*" = base ] || echo "modes other than base need a fresh start: skipped (${*})"; set -- base ;;
 esac
 ph=$("$A" shell "dumpsys activity activities | grep -m1 topResumedActivity; echo; echo steam=\$(pgrep -f 'steam -cef' | head -1); dumpsys device_state | grep -m1 mCommittedState" | tr -d '\r')
@@ -67,9 +69,11 @@ restore() {
   settings ''
   if [ $users = 1 ]; then echo "the user's $NAME: $(asuser bf-game.sh freeze | tail -1)"; else asuser bf-stop.sh >/dev/null; fi
   "$A" shell "su -c 'rm -f /data/powos/root$G/dxvk.conf'"
+  cfg_restore
   [ -n "$steam_before" ] && "$A" shell "su -c 'sh /data/powos/powos-run.sh \"cd /home/powos; setsid -f steam -silent </dev/null >/dev/null 2>&1\"'" >/dev/null 2>&1
   "$A" shell "${front:+am start -n $front >/dev/null 2>&1; }su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof /data/local/tmp/powos-bf-*.sh /data/powos/root/var/tmp/powos-bf-*.sh'"
 }
+cfg_set || exit 5
 i0=$(irq); touched() { [ "$(irq)" != "$i0" ]; }
 abort() { echo "touch $(date +%T) - abort, restoring"; restore; exit 3; }
 # nap <secs>: one phone-side wait that returns early on a touch (bf-nap.sh).
