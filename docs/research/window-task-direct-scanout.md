@@ -155,3 +155,10 @@ Step 3's one-transaction switch (direct -> composited) is still the app's HACK (
 `tools/phone/verify/direct-scanout-on.sh <check> [args]` runs a check with the property on and resets it on exit; it
 FAILs a run where no frame went direct. Needs an APK with agent/direct-scanout-1's app side (the phone's 2026.11.05-0920
 had none) and kwin 3.66.
+
+**11-05 19:01 first step-5 run: 0 frames direct.** The app's offer (`INPUT_TYPE_DIRECT_CAPS`) was pushed at the end of
+`do_connect`, while the consumer's ctx is still in fallback (until KWin picks the connection up) - `push_input_event`
+drops every event then, so KWin never logged "direct scanout offered" (draw: lines `direct-eligible 203/203; direct
+sent 0`). Fix (app): the offer goes in `on_exit_fallback` (with `send_refresh_rate`, the other producer-bound event),
+on every hand-over, with `direct_reset` (each hand-over is a new goLive in KWin: ids forgotten both sides); a surface
+whose direct path was refused earlier answers -2 again instead of silently showing nothing after a reconnect.
