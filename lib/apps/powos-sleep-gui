@@ -66,6 +66,7 @@ SOCK = f"{common.STATE_DIR}/sleepd.sock"
 IDLE = common.seconds(os.environ.get("POWOS_SLEEP_GUI_IDLE", "10m"))
 GRACE = 60  # woken by D-Bus but still unfocused: asleep again after this
 SAMPLE = 5  # seconds of CPU/IO measured before freezing
+RERAISE_MS = (800, 2000)  # a resumed game's window raised again this long after the thaw (Gui.Resume's HACK)
 GAME_WINDOW_S = 600  # a game still without a window this long after its launch (hung) sleeps all the same
 # A unit's app running without a window (Steam -silent) is adopted at most this long after it started (Gui.adopt)
 ADOPT_S = 30
@@ -543,6 +544,11 @@ class Gui(dbus.service.Object):
         self.schedule()
         return json.dumps({**r, "totalMs": round((time.monotonic() - t) * 1000, 2)})
 
+    def reraise(self, wid):
+        if wid in self.wins:
+            self.kwin_run("raise", RAISE_JS % {"window": wid})
+        return False
+
     @dbus.service.method("dev.powos.Sleep.Gui", in_signature="s", out_signature="s")
     def Resume(self, appid):
         """A game's launch (Steam's steam://rungameid/<appid>) while that game already runs: thaw its app (the client
@@ -566,6 +572,13 @@ class Gui(dbus.service.Object):
             wins = [w for w, v in self.wins.items() if v.get("raw") in gpids]
             if wins:
                 self.kwin_run("raise", RAISE_JS % {"window": wins[-1]})
+                # HACK: a just-thawed full-screen Wine/Unity game minimizes itself again right after its task goes live
+                # (bf-return 2026-11-05 12:02: KWin's "keeps minimizing itself: left so until its task takes the
+                # focus" - the task had already taken it, so it stayed minimized: no frame, input to nobody). Raised
+                # again once the thawed game has worked through its queued events. Real fix: find what takes KWin's
+                # activation from it after the thaw (anland focus() vs plasmashell's thaw) and stop that.
+                for ms in RERAISE_MS:
+                    GLib.timeout_add(ms, self.reraise, wins[-1])
             self.schedule()
             log(f"{u['id']} ({root}): app {appid} resumed - "
                 f"{'thawed' if not r.get('already') else 'awake'} in {thawed} ms, window {wins[-1] if wins else 'none yet'}")

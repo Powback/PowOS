@@ -139,6 +139,9 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   without a full deploy: `queue.sh add <task> tools/phone/verify/lib-install.sh apps/powos-sleep-gui game.sh`
   (lib/<p> -> /usr/lib/powos/<p>, backup /var/cache/powos/lib-<name>.<time>.bak, restarts sleep-gui).
 - bf-coldstart `win:<title>` goes base64 (WIN_B64) through su -c: spaces kept (RimWorld = "RimWorld by Ludeon Studios").
+- Resume check: `bf-coldstart.sh resume` (= bf-return.sh; after other variants when mixed). bf-return/bf-resume push
+  bf-xframes.py (missing since the 10-24 split: every resume frame was "none"). PowOS "on screen" needs a surface with
+  consumer AND producer (11-05: stale window tasks with no producer kept it on, the game left for home never froze).
 - Never auto-frozen before its first window (sleep-gui GAME_WINDOW_S 600): a cold start outlasts the 2 min grace.
 - The user's model (2026-10-23): a game is kept in the background ONLY after the user started it and navigated away
   (home, another app, fold) - frozen like Steam, a tap on its icon resumes it. No game is ever started for the user:
