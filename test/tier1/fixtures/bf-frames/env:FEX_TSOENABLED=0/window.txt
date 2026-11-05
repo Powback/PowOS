@@ -1,0 +1,3 @@
+314x208 on 1116x2484
+settled 1116x2484 on 1116x2484
+front PowosWindowActivity

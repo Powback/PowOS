@@ -32,7 +32,9 @@ echo "measuring: $NAME$([ -z "$APP_GIVEN" ] && echo " (APP= not given - defaulte
 PS=/data/powos/root/home/powos/.config/powos/proton-settings.json
 settings() {  # settings <K=V,K=V | empty>: the game's extra environment for this mode (none = file removed)
   "$A" shell "su -c 'rm -f $PS'"; [ -n "$1" ] || return 0
-  printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(dict(kv.split("=", 1) for kv in sys.stdin.read().split(","))))' > "$OUT/settings.json"
+  # Split only at a comma that starts the next K=: WINE_CPU_TOPOLOGY=4:0,1,2,7 has commas in its value (02:53 run: the
+  # plain split threw, settings.json came out empty and the mode ran with no environment at all).
+  printf '%s' "$1" | python3 -c 'import json,re,sys; print(json.dumps(dict(kv.split("=", 1) for kv in re.split(r",(?=[A-Za-z_][A-Za-z0-9_]*=)", sys.stdin.read()))))' > "$OUT/settings.json" && [ -s "$OUT/settings.json" ] || { echo "FAIL settings: can't parse '$1'"; exit 2; }
   "$A" push "$OUT/settings.json" /data/local/tmp/powos-settings.json >/dev/null
   "$A" shell "su -c 'd=\$(dirname $PS); mkdir -p \$d; cp /data/local/tmp/powos-settings.json $PS; chown \$(stat -c %u:%g \$d) $PS; chmod 644 $PS; rm /data/local/tmp/powos-settings.json'"; }
 LOG=/data/powos/root/run/powos-app/hyprland.log
