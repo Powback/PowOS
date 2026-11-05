@@ -7,14 +7,35 @@ Broforce (DXVK on Wine's X11 Vulkan WSI) presents with PresentOptionAsync (immed
 an async flip on a wl_display_sync round trip, so each of its ~84 presents/s went to KWin as a commit (a transaction,
 a dma-buf fence wait) and KWin dropped half of them. On KGSL an async flip now waits for the frame callback like a
 vsync'd one; upstream's flip-queue mailbox replaces an older queued flip with the newest (it completes as skipped and
-its buffer goes back to the client idle), so one drawn frame = one commit and the shown frame is still the newest.
+its buffer goes back to the client idle), so one drawn frame = one commit. A flip paced this way is never skipped
+by a newer one (its buffer would go back idle at once: Broforce then rendered flat out, 111 % -> 220 % CPU at ~200
+presents/s); it completes on its own frame callback, so the client's swapchain throttles it to the compositor's rate.
 Counted on 0014's line: "async flips paced N, skipped N".
 ---
 diff --git a/hw/xwayland/xwayland-present.c b/hw/xwayland/xwayland-present.c
-index b72cc1e..d75ab01 100644
+index b72cc1e..46e726b 100644
 --- a/hw/xwayland/xwayland-present.c
 +++ b/hw/xwayland/xwayland-present.c
-@@ -1155,6 +1155,19 @@ retry:
+@@ -1116,6 +1116,18 @@ xwl_present_flush_blocked(struct xwl_present_window *xwl_present_window,
+     }
+ }
+ 
++/* PowOS 0015: an async present that 0015 turned into a frame-callback flip (KGSL) */
++static Bool
++xwl_present_kgsl_paced(struct xwl_screen *xwl_screen, present_vblank_ptr vblank)
++{
++#ifdef XWL_HAS_GLAMOR
++    return xwl_glamor_is_kgsl_surfaceless(xwl_screen) &&
++           (xwl_present_event_from_vblank(vblank)->options & PresentOptionAsync);
++#else
++    return FALSE;
++#endif /* XWL_HAS_GLAMOR */
++}
++
+ /*
+  * Once the required MSC has been reached, execute the pending request.
+  *
+@@ -1155,6 +1167,19 @@ retry:
          return;
      }
  
@@ -34,7 +55,19 @@ index b72cc1e..d75ab01 100644
      if (flip_pending && vblank->flip && !notify_only) {
          present_vblank_ptr flip_queued_last;
  
-@@ -1171,6 +1184,7 @@ retry:
+@@ -1164,13 +1189,19 @@ retry:
+         /* Do mailbox handling for queued flips, to prevent the flip queue from
+          * growing unbounded.
+          */
++        /* PowOS 0015: not for a flip it paced (an async present on KGSL) - skipping it hands its buffer back idle
++         * at once, and the game rendered flat out into skipped frames (Broforce 111 % -> 220 % CPU, ~200
++         * presents/s, 2026-11-05 16:58); queued, it completes on its own frame callback, so the client's swapchain
++         * throttles it to what the compositor draws. */
+         if (flip_queued_last != flip_pending &&
++            !xwl_present_kgsl_paced(xwl_screen, flip_queued_last) &&
+             (flip_queued_last->sync_flip
+ #ifdef DRI3
+              || vblank->acquire_syncobj
  #endif
               )) {
              xorg_list_del(&flip_queued_last->event_queue);

@@ -24,7 +24,7 @@
 #              commits" line per 30 s - names KWin's 2nd damaged commit per flipped game frame
 #              (xwayland-kgsl-commit-stats.h, unit test: test/run.sh)
 #   0015       an async flip (a game in immediate/mailbox mode) waits for the frame callback like a vsync'd one on KGSL,
-#              upstream's flip-queue mailbox keeping the newest: one drawn frame = one commit (Broforce sent ~84 flip
+#              queued flips complete on their own callbacks (never skipped), so one drawn frame = one commit (Broforce sent ~84 flip
 #              commits/s for ~40 drawn); "async flips paced / skipped" on 0014's line
 # Was built inside the rootfs only (build-inside.sh); a package so a fix reaches phones without a new rootfs:
 # rooted.sh deploy installs it (powos-deploy.sh), the rootfs build installs it with our other packages.
@@ -35,7 +35,7 @@
 
 pkgname=xwayland-kgsl
 pkgver=24.1.13
-pkgrel=10
+pkgrel=11
 pkgdesc='Xwayland with glamor/DRI3 on KGSL surfaceless (PowOS Android: Turnip without /dev/dri)'
 arch=(aarch64)
 url='https://gitlab.freedesktop.org/xorg/xserver'
