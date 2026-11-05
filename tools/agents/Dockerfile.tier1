@@ -2,8 +2,8 @@
 #
 # ubuntu:24.04 + bash 5 + python3 + jq + shellcheck + git + tmux + zip (ship-order-test fake APKs) + node >=22.18 — enough for every
 # test/tier1/test-*.{sh,py} that doesn't need the full Bazzite OS image (those are quarantined/NEEDS_IMAGE
-# in run-all.sh already). Built once, cached as `powos-tier1:latest` by tier1.sh; rebuild with
-# `tools/agents/tier1.sh --rebuild` after editing this file.
+# in run-all.sh already). Built once, cached as `powos-tier1:<this file's git hash>` by tier1.sh, so an
+# edit here gets its own image on the next run (--rebuild forces one, e.g. for a newer base).
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive

@@ -4,7 +4,7 @@
 #
 # WHY: test/tier1/run-all.sh needs bash 4+ (declare -A, mapfile); the Mac's own /bin/bash is 3.2 and fails
 # before a single test runs (friction f84). This builds/reuses a small ubuntu:24.04 image (bash, python3,
-# jq, shellcheck, git, tmux, node>=22.18), cached as `powos-tier1:latest`, and runs run-all.sh inside it,
+# jq, shellcheck, git, tmux, node>=22.18), cached as `powos-tier1:<Dockerfile hash>`, and runs run-all.sh inside it,
 # printing its summary.
 #
 # Usage:
@@ -36,9 +36,14 @@
 
 set -euo pipefail
 
-IMAGE=powos-tier1:latest
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKERFILE="$HERE/Dockerfile.tier1"
+# The image is tagged by its Dockerfile's content, never one shared :latest - every worktree on the Mac shares
+# the Colima image store, and a stale worktree's older Dockerfile rebuilding :latest (11-05 13:13: one without
+# zip) silently broke every other worktree's tests that need the newer image (ship-order-test.sh: "zip: command
+# not found" -> FAIL pre-gate before install / reset order). One tag per Dockerfile version: each checkout
+# runs on the image ITS Dockerfile builds, built on first use.
+IMAGE="powos-tier1:$(git hash-object "$DOCKERFILE" | cut -c1-12)"
 
 REBUILD=false
 ARGS=()

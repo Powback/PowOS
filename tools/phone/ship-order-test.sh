@@ -15,6 +15,8 @@ export GUARD_WAIT_S=2 GUARD_POLL_S=1
 git config --global user.email t@t; git config --global user.name t; git config --global init.defaultBranch main
 ts() { perl -MTime::HiRes=time -e 'printf "%.2f", time'; }
 export -f ts
+# The fake APKs are zips: without zip every case fails far from the cause (11-05: a stale tier1 image).
+command -v zip >/dev/null || { echo "FAIL ship-order-test.sh needs zip on PATH (fake APKs); tier1: tools/agents/tier1.sh --rebuild"; exit 2; }
 # mkapk <commit> <out>: a fake APK - a zip whose assets/shell is that commit's shell
 mkapk() { local d; d=$(mktemp -d); mkdir -p "$d/assets"; git archive "$1" shell | tar -x -C "$d/assets"; rm -rf "$d/assets/shell/dev" "$d/assets/shell/push.sh"; rm -f "$2"; (cd "$d" && zip -qr "$2" assets); rm -rf "$d"; }
 export -f mkapk
