@@ -236,18 +236,24 @@ class Screen:
     """Is PowOS on screen? (phone only; elsewhere always yes.) The PowOS app's display daemon pairs one consumer per
     visible surface - the desktop (surface 0) and each window task - and logs each connect and disconnect: an Activity
     whose surface goes away (Android's home, another app, Recents, the screen off) disconnects. Watched with inotify,
-    no polling: on screen = some consumer connected.
+    no polling: on screen = some surface with both its consumer and its producer connected.
+
+    The producer counts too (2026-11-05): a window task whose window closed (its producer, KWin's export, gone) can keep
+    its consumer connected with nothing of PowOS's on it (surfaces 53 and 56: producer disconnected 10:49 / 10:56, the
+    consumer never). Counted as on screen, it held PowOS "on screen" all session, so a game the user left for home
+    stayed "focused" and was never frozen (bf-return 11:47: not frozen 150 s out of sight).
 
     HACK: the daemon's log (andromarchy.log, its stderr) is the signal - no state of its own is published. Real fix: the
     display daemon (or SessionService) writes the connected surfaces to a state file in the run dir, or KWin's anland
     backend exposes them (D-Bus / a KWin script property); then read that instead."""
 
     IN_MODIFY, IN_ATTRIB, IN_DELETE_SELF, IN_MOVE_SELF = 0x2, 0x4, 0x400, 0x800
-    LINE = re.compile(rb"surface (\d+): consumer (connected|disconnected)|daemon: (listening) on")
+    LINE = re.compile(rb"surface (\d+): (consumer|producer) (connected|disconnected)|daemon: (listening) on")
 
     def __init__(self, path, on_change):
         self.path, self.on_change = path, on_change
-        self.pos, self.ino, self.surfaces, self.known = 0, None, set(), False
+        self.pos, self.ino, self.known = 0, None, False
+        self.consumers, self.producers = set(), set()
         self.started = False
         self.libc = ctypes.CDLL(None, use_errno=True)
         self.fd = self.libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
@@ -258,8 +264,16 @@ class Screen:
         self.started = True
 
     @property
+    def surfaces(self):
+        """The surfaces showing something: a consumer (an Activity on screen) and a producer (what it shows)."""
+        return self.consumers & self.producers
+
+    @property
     def on(self):
         return bool(self.surfaces) or not self.known
+
+    def clear(self):
+        self.consumers, self.producers = set(), set()
 
     def watch(self):
         if self.fd < 0:
@@ -269,7 +283,8 @@ class Screen:
         self.wd = self.libc.inotify_add_watch(self.fd, self.path.encode(),
                                               self.IN_MODIFY | self.IN_ATTRIB | self.IN_DELETE_SELF | self.IN_MOVE_SELF)
         if self.wd < 0:  # no log (yet): not a phone, or the app's daemon not started - look again in a minute
-            self.known, self.surfaces = False, set()
+            self.known = False
+            self.clear()
             GLib.timeout_add_seconds(60, self.watch)
             return False
         self.read()
@@ -296,22 +311,25 @@ class Screen:
         try:
             st = os.stat(self.path)
             if st.st_ino != self.ino or st.st_size < self.pos:  # a new daemon's log (the app restarted)
-                self.ino, self.pos, self.surfaces = st.st_ino, 0, set()
+                self.ino, self.pos = st.st_ino, 0
+                self.clear()
             with open(self.path, "rb") as f:
                 f.seek(self.pos)
                 data = f.read()
         except OSError:
-            self.known, self.surfaces = False, set()
+            self.known = False
+            self.clear()
             data = b""
         else:
             self.known = True
         end = data.rfind(b"\n") + 1
         self.pos += end
         for m in self.LINE.finditer(data[:end]):
-            if m.group(3):  # a new daemon (the app restarted; its log is truncated and written again)
-                self.surfaces = set()
+            if m.group(4):  # a new daemon (the app restarted; its log is truncated and written again)
+                self.clear()
             else:
-                (self.surfaces.add if m.group(2) == b"connected" else self.surfaces.discard)(int(m.group(1)))
+                side = self.consumers if m.group(2) == b"consumer" else self.producers
+                (side.add if m.group(3) == b"connected" else side.discard)(int(m.group(1)))
         if self.on != was and self.started:
             self.on_change(self.on)
 
