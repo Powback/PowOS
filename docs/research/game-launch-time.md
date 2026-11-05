@@ -347,3 +347,34 @@ alone is 8 s, so a FRESH launch of this Unity game can't reach 10 s from the Pow
 return-to-a-left-game path (freeze/resume, 0.6-0.8 s). Not done (evaluated): a pre-warmed container + wineserver per
 prefix (saves at most ~2 s of reaper -> exe; a wineserver outside Steam's reaper makes Steam show the game running,
 and the game-resume freeze keys on Steam's tree); unity-screen's Python (55 ms, not worth it).
+
+## Unity window -> frame: sync path, thread placement, CPU topology, render thread (2026-11-05, agent/unity-sync)
+
+Broforce 274190, `powos-proton-arm64` (steam -36), `bf-coldstart steam` + a 50 Hz sampler of main/UnityPreload (state,
+syscall, CPU; scratch `us-run.sh`/`uswatch.py`, jobs 20261105-153856..155313). Window -> first frame, ms:
+
+| variant | run 1 | run 2 | mean | vs base |
+|---|---|---|---|---|
+| base | 8684 | 8358 | 8521 | - |
+| `WINE_CPU_TOPOLOGY=5:3,4,5,6,7` (5 big cores, Wine maps + pins) | 8373 | 8333 | 8353 | -0.17 s |
+| all game threads pinned to 3-7 at exe start | 8514 | 8377 | 8446 | -0.08 s |
+| main + UnityPreload pinned to 3-6 (one cpufreq domain, A715+A710) | 8675 | 8399 | 8537 | 0 |
+| Unity `-force-gfx-direct` (no render thread) | 8407 | 8445 | 8426 | -0.10 s |
+
+Nothing clears the 0.5 s bar (run-to-run noise is ~0.3 s), so nothing ships. Findings:
+- **ntsync: not available.** Kernel 5.15.180 GKI, no `/dev/ntsync`, no CONFIG_NTSYNC (mainline 6.10, usable 6.14); and
+  Proton Experimental `11.0-20261027b-arm64`'s ntdll has no ntsync support either (fsync only). A backport would be a
+  separate task: an out-of-tree ntsync.ko for this 5.15 (CONFIG_MODULE_SIG set but not forced) plus a Wine/Proton
+  ARM64 build with the ntsync client. Expected gain is small anyway (see the gfx-direct point below).
+- **Placement is already good.** Unscheduled, main is on 3-7 ~100 % of the time (X3 core 7 29-36 %), UnityPreload on
+  little cores 2-6 %; both migrate a lot (main ~300, UnityPreload ~170 per 16 s), but pinning them (to 3-7 or one
+  cpufreq domain 3-6) leaves the wait share unchanged (main W449 34-39 %, UnityPreload 57-63 %): cross-cluster wake
+  latency is not the cost. Note Proton on aarch64 already derives WINE_CPU_TOPOLOGY from its own affinity
+  (`get_current_cpu_affinity`), so a launcher affinity is the one knob if it ever pays.
+- **Main's futex_waitv is the render thread, not UnityPreload.** With `-force-gfx-direct` UnityGfxDeviceWorker is gone
+  and main's Wine-sync wait drops 39 % -> 6 %, but the same time reappears as plain futex (syscall 98, 28-31 %): DXVK's
+  own cs/submit threads' condition variables. So main is waiting on the D3D11 -> DXVK -> Turnip path (uploads/
+  resource creation during load) whichever thread drives it; the window->frame stays 8.4 s. Next lead: what DXVK's cs
+  thread is doing then (DXVK_HUD/`DXVK_LOG_LEVEL=debug` timings, Turnip BO alloc/upload cost on kgsl), not Wine sync.
+- Unity 2017.4 boot.config has only `wait-for-native-debugger=0`; gfx-jobs options are left untested (render-side
+  experimental path in 2017.4, visual risk, and the wait is in DXVK either way).
