@@ -43,6 +43,9 @@ launch)
     if [ "$(cat "$(cg)/cgroup.freeze" 2>/dev/null)" = 1 ]; then echo "the user's $GAME, left frozen: used as it is, frozen again after"
     else echo "SKIP: the user's $GAME runs awake (they play it?)"; exit 3; fi
   fi
+  # Whose game it is, on disk before the launch: a launch cut off (the runner's budget kill, 2026-11-05 13:02) left no
+  # state, so `close` took it for the user's and froze the game this check had started instead of closing it.
+  mine=$([ -z "$r" ] && echo 1 || echo 0); save
   step_launch || { close_mine; exit 1; }
   R0=$(reaper)
   pill "$GAME up: waiting for its full-screen window"
