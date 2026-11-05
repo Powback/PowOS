@@ -6,8 +6,9 @@
 # file reads (/proc/pid/io rchar, read_bytes = from storage, not the page cache); the whole phone's CPU busy share
 # (/proc/stat) and each cpufreq policy's clock. A [game log] (a path the session sees) is tailed: each new line
 # stamped with the sample time it appeared at. Prints, ms from the tap:
-#   LPROF <ms> game <cpu% of one core> rd <MB rchar> io <MB read_bytes> sys <busy % all cores> mhz <policy clocks> | <top threads %>
+#   LPROF <ms> game <cpu% of one core> rd <MB rchar> io <MB read_bytes> sys <busy % all cores> mhz <policy clocks> | <top threads %> || <top other processes %>
 #   LPROF-LOG <ms> <game log line>
+#   LPROF-OTHERS <process core-s ...>  the busiest other processes over the same span (wineserver, Xwayland, ...)
 #   LPROF-SUM exe..frame: game <core-seconds> on <s> wall; threads <name core-s ...>; read <MB> (<MB> from storage)
 import os, sys, time
 
@@ -73,6 +74,17 @@ def sysbusy():
     return sum(f), idle
 
 
+def procs():  # every process's cpu ticks and name: what else runs beside the game (wineserver, Xwayland, KWin...)
+    out = {}
+    for p in os.listdir("/proc"):
+        if p.isdigit():
+            s = rd("/proc/%s/stat" % p).decode(errors="replace")
+            if s:
+                f = s[s.rfind(")") + 2:].split()
+                out[p] = (s[s.find("(") + 1:s.rfind(")")], int(f[11]) + int(f[12]))
+    return out
+
+
 def clocks():
     base, r = "/sys/devices/system/cpu/cpufreq", []
     try:
@@ -86,6 +98,7 @@ def clocks():
 
 
 pid, prev, pio, psys, ptime, upos = None, {}, None, sysbusy(), time.time(), 0
+pprev, others = procs(), {}
 first = None
 total, wall0, wall1, tot_thr = 0, None, None, {}
 rd0 = None
@@ -99,6 +112,9 @@ while not os.path.exists(stop) and time.time() - t0 < 150:
     psys = s
     if pid is None or not os.path.isdir("/proc/%s" % pid):
         pid, prev, pio = game_pid(), {}, None
+    pnow = procs()
+    od = sorted(((v - pprev.get(q, (n, v))[1], n) for q, (n, v) in pnow.items() if q != pid), reverse=True)
+    pprev = pnow
     if ulog:
         try:
             with open(ulog, "rb") as f:
@@ -135,6 +151,9 @@ while not os.path.exists(stop) and time.time() - t0 < 150:
     wall1 = now
     deltas.sort(reverse=True)
     top = " ".join("%s:%d" % (n.replace(" ", "_"), 100 * d / HZ / dt) for d, n in deltas[:4])
+    for d, n in od:
+        others[n] = others.get(n, 0) + d
+    top += " || " + " ".join("%s:%d" % (n.replace(" ", "_"), 100 * d / HZ / dt) for d, n in od[:3] if d > 0)
     print("LPROF %d game %d rd %.1f io %.1f sys %d mhz %s thr %d | %s" % (
         ms, 100 * g / HZ / dt, (rc - rd0[0]) / 1e6, (rb - rd0[1]) / 1e6, busy, clocks(), len(th), top), flush=True)
 if wall0 and wall1:
@@ -143,3 +162,5 @@ if wall0 and wall1:
     print("LPROF-SUM game %.1f core-s on %.1f s wall; threads %s; read %.0f MB (%.0f MB from storage)" % (
         total / HZ, wall1 - wall0, " ".join("%s=%.1f" % (n.replace(" ", "_"), v / HZ) for v, n in tops),
         (rc - rd0[0]) / 1e6, (rb - rd0[1]) / 1e6), flush=True)
+    print("LPROF-OTHERS %s" % " ".join("%s=%.1f" % (n.replace(" ", "_"), v / HZ) for n, v in sorted(
+        others.items(), key=lambda kv: -kv[1])[:8]), flush=True)

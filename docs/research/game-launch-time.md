@@ -90,7 +90,7 @@ and lists that dir.
    (Wine native, wine boot ~3 s - powos-steam-compat's `arm64`, the user pinned x86), or a prefix's wineserver +
    services kept between launches (needs a wineserver outside Steam's reaper, or Steam shows the game as running).
 2. Steam client prep on a cold Steam, 8-12 s: keep Steam resident (powos-steam-resident) so a tap skips it.
-3. Unity window -> frame, ~8 s: the game's own load; outside our control except CPU boost at launch (game-boost.sh).
+3. Unity window -> frame, ~8 s: profiled below (not disk, not shaders, not clocks; the main thread waits ~half the time).
 4. ~~pressure-vessel locale-gen under FEX~~: Fix 2.
 
 ## A/B: ARM64 Proton vs x86 Proton under FEX (2026-11-05, steam 1.0.0.87-35)
@@ -209,3 +209,19 @@ launch failed; GameBoost's tick takes the newest such mark younger than `LAUNCH_
 so the boost holds through Wine's boot and the game's load and the window task takes over without a gap. Generic: every
 game launched through powos-open-task. game-boost.sh's holder already copes with a game whose processes don't exist
 yet (it adopts threads as they appear, every 5 s).
+
+**Measured: no gain on the launch.** A/B before the APK ships, emulated exactly (scratch wrapper: bf-coldstart steam +
+the app's own `game-boost.sh engage steam_app_274190 <the app's lease>` at the tap, lease kept fresh to the first
+frame): boosted 09:49 (job 20261105-094216-88295) window 8.1 frame 16.2 s; unboosted 09:51 (job
+20261105-094218-88434) window 7.5 frame 15.7 s; earlier unboosted 15.6 / ~16 s. Same 10.5-10.8 core-s, same thread
+split, clocks barely different (horae, the vendor's thermal controller, owns the max; the boost holds only the min). The
+mark stays (it is right that a launching game is the boosted one, and the boost no longer starts 20 s late), but it
+does not move tap -> frame.
+
+So the load is **not clock-bound either**: Unity's main thread is busy only 55-97 % (5.4 core-s of 9.8 s) and the whole
+game ~1.1 cores, with the phone 45-75 % idle - the main thread waits about half the time. Next (bf-lprof now also lists
+the busiest OTHER processes per sample, `LPROF-OTHERS`: wineserver, Xwayland, KWin, FEX helpers): find what it waits
+on - wineserver round trips (Wine's server calls under Mono's startup: file/registry/sync), the X server (window
+setup), or futex waits on its own threads (gdb stacks of the main thread during 8-11 s, as bf-stack-syms.py does for
+hangs). Candidates by result: wineserver-bound -> esync/fsync/ntsync in Proton ARM64 (PROTON_NO_FSYNC unset? the
+kernel's futex_waitv), X-bound -> KWin/Xwayland side; own-thread waits -> nothing outside the game.
