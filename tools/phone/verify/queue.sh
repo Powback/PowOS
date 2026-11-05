@@ -41,9 +41,10 @@
 # · 45 s": the check's /tmp/powos-verify-step - bf-lib.sh pill - else its log's last line); no beat for 30 s and the pill hides itself. Its x writes
 # /tmp/powos-verify-stop, which the next beat sees: the check is killed and stays queued. While runnable checks wait for
 # the user (a touch in the last QUEUE_IDLE_S, a game running) the pill says "Tests wait · phone in use" (wait_pill). A check that exits 3 (a real touch, no window)
-# goes back on the queue for the next window, at most 3 tries (a stop from the pill doesn't count). A check that exits 0
+# goes back on the queue for the next window - always, never dropped: from its 5th try it backs off a few minutes per try
+# (rc3_requeue; each try's log appended to done/<job>.log.tries). A check that exits 0
 # but printed a line starting with FAIL is a FAIL. Exit codes -> verdict: 0 PASS; 1 (any other non-zero) FAIL; past its
-# --budget FAIL timeout (rc 124); 3 retried, then SKIP phone in use; 5 SKIP (ENV:/test error: preflight, a recorder that
+# --budget FAIL timeout (rc 124); 3 stays queued (no verdict); 5 SKIP (ENV:/test error: preflight, a recorder that
 # left no file); 137/143 SKIP killed (a signal not the budget's); a first verdict line "SKIP:" SKIP. SKIPs count as no
 # FAIL - a board FAIL must mean a real product bug. Each result goes onto the check's board task (`--step`, the log's
 # last line; a FAIL also gets a screenshot as its review image), a mail to the coder inbox (QUEUE_MAIL_TO) and the log
@@ -71,6 +72,21 @@ Q=${QUEUE_DIR:-$HOME/.cache/powos-verify-queue}; mkdir -p "$Q/done"
 QUEUED_STEP="phone check queued"   # shell/ui/powai.tsx matches this text
 # user_sh <script text>: run it inside PowOS as the session user (its `powos ...`), quietly.
 user_sh() { local s; s=$(mktemp "$Q/user.XXXX"); printf '%s\n' "$1" > "$s"; "$phone/user.sh" "$s" >/dev/null 2>&1; local rc=$?; rm -f "$s"; return $rc; }
+# rc3_requeue <job> <log> <tries> [now]: a check that exited 3 (touched, no window, "skip", bf-pacing's INVALID game
+# not on the screen) STAYS QUEUED - always, however many tries. Before, the 5th rc 3 moved the job to done/ as
+# "SKIP phone in use" and the measurement never ran (11-05: 194920, 215351, 221526, 221528 - all four burnt their 5
+# tries in ~10 min of back-to-back windows while the phone sat idle). Its tries count goes up; from the 5th on it
+# backs off (after=<epoch>: QUEUE_RC3_BACKOFF_S (300) s per try past 4, at most 30 min) so a check that keeps exiting
+# 3 can't hold every idle window. This attempt's log is appended to <log>.tries (not overwritten by the next try;
+# not a .log, so summary/wait/status never read an attempt as a verdict). Prints the backoff epoch (0 = none).
+rc3_requeue() { local j=$1 log=$2 t=$(($3 + 1)) now=${4:-$(date +%s)} after=0 tmp
+  [ $t -lt 5 ] || { after=$(( (t - 4) * ${QUEUE_RC3_BACKOFF_S:-300} )); [ $after -le 1800 ] || after=1800; after=$((now + after)); }
+  [ -f "$log" ] && { printf '=== try %s ended rc 3 at %s ===\n' "$t" "$(date -r "$now" +%T 2>/dev/null || date -d "@$now" +%T)"; cat "$log"; } >> "$log.tries"
+  tmp=$(mktemp "$j.XXXX") || return 1
+  { grep -vE '^(tries|after)=' "$j"; printf 'tries=%s\nafter=%s\n' "$t" "$after"; } > "$tmp" && mv -f "$tmp" "$j"
+  echo "$after"; }
+# rc3_waits <after> [now]: the job backs off (rc3_requeue) until then - not selected for a window yet.
+rc3_waits() { [ "${1:-0}" -gt "${2:-$(date +%s)}" ] 2>/dev/null; }
 # alive_runner <pid>: that pid runs a queue runner (not a recycled pid).
 alive_runner() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null && ps -p "$1" -o command= 2>/dev/null | grep -q queue; }
 runner_up() { alive_runner "$(cat "$Q/runner.lock/pid" 2>/dev/null || cat "$Q/runner.pid" 2>/dev/null)"; }
@@ -562,8 +578,10 @@ EOS
   select_jobs() { local go=$1 j; sel=(); held=0
     for j in "$Q"/*.job; do
       [ -f "$j" ] || continue
-      task=; need=; qt=0; cwd=; rel=0; cmd=(); . "$j"
+      task=; need=; qt=0; cwd=; rel=0; after=0; cmd=(); . "$j"
       [ -z "$go" ] || [ "$go" = all ] || [ "$task" = "$go" ] || continue
+      # Backing off after its 5th rc 3 (rc3_requeue): stays queued, held until then; a "test now" for it runs it at once.
+      if [ "$task" != "$go" ] && rc3_waits "$after"; then held=$((held + 1)); echo "$(date +%T) $(basename "$j" .job): exited 3 $tries times - stays queued, next try after $(date -r "$after" +%T 2>/dev/null || date -d "@$after" +%T)"; continue; fi
       if [ -z "$go" ] && [ "${AWAY:-0}" = 1 ] && ( [ "$rel" = 1 ] && cd "$VR/$cwd" 2>/dev/null || cd "$cwd" 2>/dev/null; closes_game "${cmd[@]}" ); then
         held=$((held + 1)); echo "$(date +%T) $(basename "$j" .job): would close the game left running (nobody playing) - skipped, stays queued"; continue; fi
       if [ "$task" != "$go" ] && ! shipped "$need" "$qt"; then held=$((held + 1)); echo "$(date +%T) $(basename "$j" .job): waits for its ship (${need:0:9}) - skipped, the jobs behind it run"; continue; fi
@@ -643,7 +661,7 @@ EOS
         if ! perl -e 'alarm shift; exec @ARGV' 15 "$phone/adb.sh" shell true >/dev/null 2>&1; then
           echo "$(date +%T) the phone isn't reachable - leaving the window, jobs stay queued"; exit 3
         fi
-        task=; close=0; tries=0; cwd=$PWD; rel=0; from=; name=; screen=; budget=300; need=; qt=0; cmd=(); . "$j"
+        task=; close=0; tries=0; after=0; cwd=$PWD; rel=0; from=; name=; screen=; budget=300; need=; qt=0; cmd=(); . "$j"
         # A job from before repo-relative jobs: its worktree may be gone - run it in the verify checkout instead.
         if [ "$rel" != 1 ] && [[ "$cwd ${cmd[*]}" == *"$REPO/.claude/worktrees/"* ]]; then
           if wt_of "$cwd"; then relify "$wsub"; else relify ""; fi
@@ -662,6 +680,7 @@ EOS
         # f291: the first line names the build the check ran on: the installed APK and the live shell (ship.sh's state).
         ia=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null); lv=$(cat "${SHIP_DIR:-$HOME/.cache/powos-ship-queue}/live" 2>/dev/null)
         printf 'build: %s shell=%s\n' "${ia:--}" "${lv:--}" > "$log"
+        [ -s "$log.tries" ] && echo "try $((tries + 1)): the earlier tries' logs (each ended rc 3) are in $log.tries" >> "$log"
         ( cd "$cwd" && unset VERIFY_GO && export LOCK_HELD=1 && "$here/preflight.sh" "${cmd[@]}" && exec "${cmd[@]}" ) >> "$log" 2>&1 & jp=$!   # preflight: rc 5 + "ENV: why" when the phone cannot run it
         # The heartbeat: every HB_S s the pill hears check, k/N, elapsed; a tap's stop flag or the budget ends the check.
         # The sub-step: the check's own (put) or its log's last line, timed from when that line first showed.
@@ -713,8 +732,15 @@ EOS
           pause "Phone checks paused: $pass passed, $fail failed, $((N - k + 1)) still queued"
           exit 4
         fi
-        if [ $rc = 3 ] && [ $tries -lt 5 ]; then
-          sed -i '' "s/^tries=.*/tries=$((tries + 1))/" "$j"; echo "$(date +%T) $n: no window / touched (rc 3), again next window"
+        if [ $rc = 3 ]; then
+          aft=$(rc3_requeue "$j" "$log" "$tries")
+          if [ "${aft:-0}" = 0 ]; then echo "$(date +%T) $n: no window / touched (rc 3), again next window"
+          else
+            echo "$(date +%T) $n: rc 3 for the $((tries + 1))th time - stays queued, next try after $(date -r "$aft" +%T)"
+            # The board hears it once, as a step (no check verdict: not a PASS, FAIL or SKIP - it still runs).
+            [ $((tries + 1)) = 5 ] && user_sh "$(printf 'powos agents task set %q --step %q >/dev/null 2>&1 || true' "$task" \
+              "$QUEUED_STEP: exited 3 five times ($(grep -E '^(INVALID|SKIP|FAIL)' "$log" | tail -1 | cut -c1-120)) - stays queued, retried every few min (log ~/.cache/powos-verify-queue/done/$n.log.tries)")" &
+          fi
           # Leave the window only when the user really came back (a finger in the last QUEUE_IDLE_S): rc 3 also means
           # "not on the phone yet" (plasma-notify: no PlasmaBridge in the APK), which ended every window at its first
           # job while the user was away charging (01:46, 18 checks never ran).
@@ -743,8 +769,8 @@ EOS
         fi
         [ -n "$skipwhy" ] && envskip=1
         mv "$j" "$Q/done/$n.job"
-        # rc 3 six times = the user kept using the phone: a SKIP (no mail, not a fail), not a bug in the check.
-        if [ -n "$skipwhy" ]; then r="SKIP $skipwhy"; elif [ $envskip = 1 ]; then r="SKIP can't run (ENV): $(sed -n 's/^ENV: //p' "$log" | head -1)"; elif [ $rc = 3 ]; then r="SKIP phone in use"; elif [ $rc != 0 ] && grep -q '^INVALID' "$log"; then r="INVALID rc=$rc"; else
+        # (rc 3 never gets here: rc3_requeue keeps it queued, above.)
+        if [ -n "$skipwhy" ]; then r="SKIP $skipwhy"; elif [ $envskip = 1 ]; then r="SKIP can't run (ENV): $(sed -n 's/^ENV: //p' "$log" | head -1)"; elif [ $rc != 0 ] && grep -q '^INVALID' "$log"; then r="INVALID rc=$rc"; else
         r=$([ $rc = 0 ] && echo PASS || { [ "$why" = timeout ] && echo "FAIL timeout" || echo "FAIL rc=$rc"; }); fi; echo "$r: $(tail -1 "$log")" >> "$log"
         prev="${name:-$task}: $r"
         img=
