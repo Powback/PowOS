@@ -149,5 +149,89 @@ class LaunchHold(unittest.TestCase):
             g.consider(100)
         self.assertEqual(refused, ["never list"], "past the pending-launch check")
 
+
+class LinkWatch(unittest.TestCase):
+    """A frozen Steam whose CM link the server dropped (socket out of ESTABLISHED) is thawed to reconnect while PowOS is
+    on screen, before the tap - not at the tap (12 s of Steam's reconnect backoff, bf-coldstart 2026-11-05 14:34)."""
+
+    U = {"id": "steam", "classes": {"steam"}, "pidfile": "/x", "rule": {}, "busy": {"games": "pause", "cmdline": "SteamLaunch"}}
+
+    def gui(self, on=True, frozen=True, frozen_for=0.0):
+        g = object.__new__(GUI.Gui)
+        g.frozen = {100: {"cls": "steam"}} if frozen else {}
+        g.screen = types.SimpleNamespace(on=on)
+        g.rules = lambda: [self.U]
+        g.refused, g.calls = {}, []
+        g.pulse_at = {100: time.monotonic() - frozen_for} if frozen else {}
+        g.reconnect = lambda u, why: g.calls.append(("reconnect", why))
+        g.thaw = lambda pid, why, quiet=False: (g.frozen.pop(pid, None), g.calls.append(("thaw", why, quiet)))
+        g.freeze = lambda pid, cpu, quiet=False: (g.frozen.update({pid: {}}), g.calls.append(("freeze", quiet)))
+        g.pid_active = lambda pid: False
+        g.schedule = lambda: None
+        return g
+
+    def patched(self, link=1, cmd="./steam -silent"):
+        from unittest import mock
+        import contextlib
+        st = contextlib.ExitStack()
+        for name, f in (("unit_root", lambda u: 100), ("tree", lambda p: [100, 101]),
+                        ("cmdline", lambda p: cmd if p == 100 else "steamwebhelper"), ("steam_link", lambda path: link)):
+            st.enter_context(mock.patch.object(GUI, name, f))
+        st.enter_context(mock.patch.object(GUI.GLib, "timeout_add", lambda ms, f, *a: self.timers.append((ms, f, a)),
+                                           create=True))
+        return st
+
+    def run_watch(self, on=True, frozen=True, link=1, cmd="./steam -silent", frozen_for=0.0):
+        self.timers = []
+        g = self.gui(on, frozen, frozen_for)
+        with self.patched(link, cmd):
+            self.assertTrue(g.link_watch())  # the GLib timer keeps running
+        return [c[1] for c in g.calls if c[0] == "reconnect"]
+
+    def test_dropped_link_thaws_to_reconnect(self):
+        self.assertEqual(self.run_watch(), ["link dropped while frozen"])
+
+    def test_live_link_stays_frozen(self):
+        self.assertEqual(self.run_watch(link=0), [])
+        self.assertEqual(self.run_watch(link=2), [])  # not trying (offline / logged off)
+
+    def test_off_screen_waits_for_screen_on(self):
+        self.assertEqual(self.run_watch(on=False), [])
+
+    def test_awake_or_running_a_game_is_left_alone(self):
+        self.assertEqual(self.run_watch(frozen=False), [])
+        self.assertEqual(self.run_watch(cmd="reaper SteamLaunch AppId=274190 -- x"), [])
+
+    def test_live_link_pulsed_before_the_server_drops_it(self):
+        self.timers = []
+        g = self.gui(frozen_for=GUI.LINK_PULSE_S + 1)
+        with self.patched(link=0):
+            g.link_watch()
+            self.assertEqual(g.calls, [("thaw", "link keepalive", True)])
+            self.assertEqual([t[0] for t in self.timers], [GUI.LINK_PULSE_MS])
+            ms, end, args = self.timers[0]
+            with __import__("unittest").mock.patch.object(GUI.os.path, "isdir", lambda p: True):
+                end(*args)
+        self.assertEqual(g.calls[-1], ("freeze", True))
+        self.assertIn(100, g.frozen)
+
+    def test_pulse_left_awake_by_a_launch(self):
+        self.timers = []
+        g = self.gui(frozen_for=GUI.LINK_PULSE_S + 1)
+        with self.patched(link=0):
+            g.link_watch()
+            g.refused[100] = (time.time() + 60, "launching")  # a launch's Wake during the pulse
+            ms, end, args = self.timers[0]
+            with __import__("unittest").mock.patch.object(GUI.os.path, "isdir", lambda p: True):
+                end(*args)
+        self.assertNotIn(100, g.frozen)
+
+    def test_no_pulse_before_its_time(self):
+        self.timers = []
+        g = self.gui(frozen_for=5)
+        with self.patched(link=0):
+            g.link_watch()
+        self.assertEqual(g.calls, [])
+
 if __name__ == "__main__":
     unittest.main()

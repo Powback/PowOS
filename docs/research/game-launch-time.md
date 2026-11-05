@@ -295,3 +295,53 @@ its own, evaluator "skipped before the container (PowOS ARM64 entry)" both runs.
 7.6, frame 15.9 s, wineserver 2.2 core-s (the first launch after the change still stored blocks); steam#2: reaper 4.8
 (Steam's own prep), exe 7.8, window 8.7, frame 16.9 s, wineserver 0.7 core-s, game 10.2 core-s (was 14.5-16.4).
 Exe -> frame 10.1 / 9.1 s (was 10.0-10.5). bf-pacing base: 41.6 fps, p50 14.7 ms (baseline 40.7).
+
+## Fresh launch < 10 s? Where the 15-16 s go now, and the frozen-Steam handoff (2026-11-05, agent/launch-under-10)
+
+Broforce 274190, `powos-proton-arm64` (steam 1.0.0.87-36), bf-coldstart `steam`, ms from the tap. Scratch A/B wrappers
+(clocks, thread sampler, link lifetime) ran through the verify queue; jobs 20261105-1428..1449.
+
+| run | Steam at the tap | handoff | reaper | pv | wineserver | exe | window | frame |
+|---|---|---|---|---|---|---|---|---|
+| base (job 142854) | **frozen 52 min** | **12748** | 16149 | 16863 | 17598 | 20384 | 21438 | **30301** |
+| base (job 142910) | awake | 1035 | 4680 | 5384 | 5384 | 7999 | 10014 | 18467 |
+| caps lifted (job 142856) | awake | 990 | 2708 | 3308 | 3932 | 5610 | 6582 | 14815 |
+| caps lifted (job 142911) | awake | 989 | 3598 | 4214 | 4214 | 6627 | 7605 | 16187 |
+| sampler (job 143924) | awake | 934 | 3638 | 4295 | 4997 | 7710 | 8683 | 17091 |
+
+**The frozen-Steam handoff (fixed here).** Every earlier `steam` run had Steam AWAKE at the tap (the harness's wait for
+it to sleep timed out). The user's case is a Steam frozen out of sight (units/phone/steam.json: 15 s) while they stay
+in PowOS: its CM server drops the silent client **79 s into the freeze** (job 144202: socket ESTABLISHED -> CLOSE_WAIT in
+/proc/net/tcp, no thaw needed to see it), the client only notices at the thaw = the tap, then Steam's own reconnect
+backoff ("StartAutoReconnect() will start in 11.0 seconds (attempt 1)") and only then the launch: handoff 12.7 s,
+tap -> frame 30.3 s. reconnect_ahead (2026-10-24) covered only PowOS coming back on screen.
+Fix (lib/apps/powos-sleep-gui `link_watch`, every 10 s while PowOS is on screen, generic for any `games: pause`
+launcher): a frozen launcher running no game is thawed for 1.5 s every 50 s (its overdue heartbeat goes out, then
+frozen again, not logged), and thawed to reconnect at once when the kernel shows its link closed anyway (the backoff
+then runs off the tap's path; reconnect_poll puts it back to sleep once logged on). Off screen: no pulses (battery),
+reconnect_ahead at screen on as before. Test: test/tier1/test-sleep-gui-screen.py LinkWatch. HACK row: REMOTE-POWOS §4.
+Expected: the frozen case back to the awake numbers (-11.7 s: 30.3 -> ~16 s).
+
+**Clocks (ruled out).** The vendor's oiface (thread `horaeCb`) holds cpufreq caps of 2054 MHz (A715) / 1708 MHz (X3 prime,
+of 3187) at 28-33 C, with or without the vendor game class (sys_thermal_control_config.xml level 2; category_4 should
+lift it at gear <= 4, it never does here - the class is never re-evaluated, the front package stays com.powos.app).
+A/B with oiface stopped and the caps at hw max from the tap (jobs 142856/142911, A715 at 2.6-2.8 GHz): window -> frame
+8.2 / 8.6 s against 8.5 s capped. Not clock-bound.
+
+**Unity window -> frame, ~8.3 s: the two loading threads wait on each other.** Thread sampler (job 143924, 200 Hz,
+/proc/<tid>/stat + syscall from the exe's start): Unity's main thread is running user code 54 % and **sleeping in
+futex_waitv (syscall 449 = Wine's fsync waits) 40 %**; from +6 s to +16 s it is 50-64 % in futex_waitv. UnityPreload:
+61 % in futex_waitv, 32 % running. Only +3..+5 s (Unity's player init) is main 90 % CPU. So past player init the load is
+a hand-off between main (integrating loaded objects) and UnityPreload (reading/deserialising), each waiting for the
+other through Wine sync objects - wake-up latency x hand-offs, not CPU and not disk (0 MB from storage). Nothing PowOS
+can cut generically from outside the game short of a faster futex wake path (candidates for a next step: ntsync instead
+of fsync in Proton ARM64 when the kernel gets /dev/ntsync; the two threads pinned to one cluster to cut cross-cluster
+wake latency).
+
+**What < 10 s would need.** Awake-Steam floor today: Steam's own prep ~2.5 s (URL -> CreatingProcess: shader-depot
+check, iscript, cloud/stats sync, controller config), reaper -> exe 2.6-3.0 s (pressure-vessel 0.6, Proton's Python
+0.7, Wine boot 1.6), exe -> window 1.0-2.0 s, window -> frame 8.2-8.5 s (game-internal hand-off above). The last stage
+alone is 8 s, so a FRESH launch of this Unity game can't reach 10 s from the PowOS side; < 10 s holds for the
+return-to-a-left-game path (freeze/resume, 0.6-0.8 s). Not done (evaluated): a pre-warmed container + wineserver per
+prefix (saves at most ~2 s of reaper -> exe; a wineserver outside Steam's reaper makes Steam show the game running,
+and the game-resume freeze keys on Steam's tree); unity-screen's Python (55 ms, not worth it).

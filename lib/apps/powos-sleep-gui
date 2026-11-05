@@ -72,6 +72,13 @@ LAUNCH_HOLD_S = 60  # an app a launch path woke (Gui.Wake) stays awake this long
 GAME_WINDOW_S = 600  # a game still without a window this long after its launch (hung) sleeps all the same
 # A unit's app running without a window (Steam -silent) is adopted at most this long after it started (Gui.adopt)
 ADOPT_S = 30
+# A game launcher (Steam) frozen while PowOS is on screen: its CM link checked this often from the kernel's socket
+# table (no thaw); the server dropped it -> thawed to reconnect at once, off the tap's path (Gui.link_watch).
+LINK_S = int(os.environ.get("POWOS_SLEEP_LINK_S", "10"))
+# ... and kept alive meanwhile: thawed for LINK_PULSE_MS every LINK_PULSE_S, its overdue CM heartbeat goes out, frozen
+# again. Measured 2026-11-05 14:47: the server drops a frozen client's link 79 s after the freeze.
+LINK_PULSE_S = int(os.environ.get("POWOS_SLEEP_LINK_PULSE_S", "50"))
+LINK_PULSE_MS = int(os.environ.get("POWOS_SLEEP_LINK_PULSE_MS", "1500"))
 # The desktop shell (plasmashell) while PowOS is off screen (phone): frozen this long after PowOS went off screen
 # ("off": never), thawed the moment it's back, and for DESKTOP_DRAIN s every DESKTOP_AWAKE s meanwhile - long enough
 # to read what KWin sent it (a Wayland client that never reads its socket is disconnected once the buffer fills).
@@ -432,9 +439,12 @@ class Gui(dbus.service.Object):
         self.desk = None  # the desktop shell's pid while frozen (also in self.frozen, for D-Bus to wake it)
         self.home = None  # the desktop home's (powos-shell, its whole tree) while frozen, with the desktop shell
         self.desk_timer = None
+        self.pulse_at = {}  # a frozen game launcher's root -> when it was last frozen or pulsed (monotonic)
         self.screen = Screen(SCREEN_LOG, self.screen_changed)
         self.desktop(self.screen.on)  # started while PowOS is off screen: the desktop shell sleeps too
         GLib.timeout_add_seconds(ADOPT_S, self.adopt)
+        if LINK_S > 0:
+            GLib.timeout_add_seconds(LINK_S, self.link_watch)
 
     def adopt(self):
         """A unit's app that never showed a window (Steam started -silent by powos-steam-resident: only a tray icon) was
@@ -710,18 +720,70 @@ class Gui(dbus.service.Object):
         a few seconds after it is logged on (its normal rules). Never starts Steam, never touches one that runs a
         game (that thaws on focus). Costs nothing while the screen is off (no keepalive)."""
         for u in self.rules():
-            if not game_launcher(u):
-                continue
-            root = unit_root(u)
-            if root is None or root not in self.frozen or "SteamLaunch" in " ".join(cmdline(p) for p in tree(root)):
-                continue
-            t0 = time.monotonic()
-            self.thaw(root, "screen on: reconnect ahead")
-            if not self.pid_active(root):
-                self.idle_since[root] = time.time()
+            self.reconnect(u, "screen on")
+
+    def frozen_launcher(self, u):
+        """The root of a game launcher's client that is frozen and runs no game, else None."""
+        if not game_launcher(u):
+            return None
+        root = unit_root(u)
+        if root is None or root not in self.frozen or "SteamLaunch" in " ".join(cmdline(p) for p in tree(root)):
+            return None
+        return root
+
+    def reconnect(self, u, why):
+        root = self.frozen_launcher(u)
+        if root is None:
+            return
+        t0 = time.monotonic()
+        self.thaw(root, f"{why}: reconnect ahead")
+        if not self.pid_active(root):
+            self.idle_since[root] = time.time()
+        self.schedule()
+        log(f"{u['id']} ({root}): {why} - reconnecting ahead of the tap")
+        GLib.timeout_add(500, self.reconnect_poll, u["id"], root, t0)
+
+    def link_watch(self):
+        """Steam frozen while the user stays in PowOS: its server drops the silent client after a while (the socket
+        leaves ESTABLISHED in the kernel's table while the client sleeps), and the client only notices at the thaw -
+        which was the next game tap: 11-12 s of Steam's reconnect backoff before the launch even started (bf-coldstart
+        14:34, Steam frozen 52 min: handoff 12.7 s, tap -> frame 30.3 s against 14.8 s with a live link). Checked here
+        every LINK_S from the kernel (no thaw, nothing read from the client): a dropped link -> thawed now, the backoff
+        runs off the tap's path, asleep again once logged on (reconnect_poll). Only while PowOS is on screen: off
+        screen, reconnect_ahead does it when PowOS comes back. A link that is still live costs one /proc read."""
+        # HACK: a frozen Steam can't answer its CM server (dropped 79 s into a freeze, 2026-11-05 14:47), so it is thawed
+        # for LINK_PULSE_MS every LINK_PULSE_S while PowOS is on screen (its overdue heartbeat goes out) and thawed to
+        # reconnect when the link died anyway. Real fix: Steam's client keeping its link from a small process of its
+        # own (or a resume that skips the reconnect backoff), so the client could stay frozen.
+        if self.screen.on:
+            cl = os.path.expanduser("~/.local/share/Steam/logs/connection_log.txt")
+            now = time.monotonic()
+            for u in self.rules():
+                root = self.frozen_launcher(u)
+                if root is None:
+                    continue
+                if steam_link(cl) == 1:
+                    self.reconnect(u, "link dropped while frozen")
+                elif now - self.pulse_at.setdefault(root, now) >= LINK_PULSE_S > 0:
+                    self.pulse_at[root] = now
+                    self.thaw(root, "link keepalive", quiet=True)
+                    GLib.timeout_add(LINK_PULSE_MS, self.pulse_end, u, root)
+        for root in [r for r in self.pulse_at if r not in self.frozen and not os.path.isdir(f"/proc/{r}")]:
+            self.pulse_at.pop(root, None)
+        return True
+
+    def pulse_end(self, u, root):
+        """A keepalive pulse's end: frozen again unless something happened meanwhile - focus, a launch's Wake (its
+        hold), a game started, the client gone; those leave it awake under its normal rules."""
+        held = self.refused.get(root, (0, None))[0] > time.time()
+        if os.path.isdir(f"/proc/{root}") and root not in self.frozen and not self.pid_active(root) and not held \
+                and "SteamLaunch" not in " ".join(cmdline(p) for p in tree(root)):
+            self.freeze(root, 0.0, quiet=True)
+            self.pulse_at[root] = time.monotonic()
+        else:
+            log(f"{u['id']} ({root}): keepalive pulse left it awake (focused, launching or a game started)")
             self.schedule()
-            log(f"{u['id']} ({root}): screen on - reconnecting ahead of the tap")
-            GLib.timeout_add(500, self.reconnect_poll, u["id"], root, t0)
+        return False
 
     def reconnect_poll(self, uid, root, t0):
         waited = time.monotonic() - t0
@@ -950,20 +1012,22 @@ class Gui(dbus.service.Object):
         self.schedule()
         return False
 
-    def freeze(self, pid, cpu):
+    def freeze(self, pid, cpu, quiet=False):
         cls = self.cls(pid)
         r = self.sleepd.ask(f"gui-freeze {pid} {cls}")
         if not r.get("ok"):
             return self.refuse(pid, r.get("refused") or r.get("error") or "refused", 600)
         self.refused.pop(pid, None)
+        self.pulse_at[pid] = time.monotonic()  # a game launcher's link keepalive counts from its freeze
         self.frozen[pid] = {"cls": cls, "names": self.bus_names(set(r.get("pids") or [pid])), "cpu": round(cpu, 1),
                             "pids": set(r.get("pids") or [pid])}
-        log(f"{cls} ({pid}): frozen in {r.get('ms')} ms (was {cpu:.1f}% CPU), "
-            f"thaws on focus or D-Bus to {', '.join(self.frozen[pid]['names']) or '-'}")
+        if not quiet:  # a keepalive pulse's: every LINK_PULSE_S, not logged
+            log(f"{cls} ({pid}): frozen in {r.get('ms')} ms (was {cpu:.1f}% CPU), "
+                f"thaws on focus or D-Bus to {', '.join(self.frozen[pid]['names']) or '-'}")
         self.rebuild_monitor()
         self.publish_running()
 
-    def thaw(self, pid, why):
+    def thaw(self, pid, why, quiet=False):
         if pid == self.desk:
             self.desk = None
         if pid == self.home:
@@ -971,7 +1035,9 @@ class Gui(dbus.service.Object):
         f = self.frozen.pop(pid, None)
         t = time.monotonic()
         r = self.sleepd.ask(f"gui-thaw {pid} {why}")
-        if f:
+        if f and quiet:  # a keepalive pulse (frozen again in LINK_PULSE_MS): not logged, the app's state not churned
+            self.rebuild_monitor()
+        elif f:
             log(f"{f['cls']} ({pid}): thawed in {r.get('ms')} ms, {(time.monotonic() - t) * 1000:.1f} ms with the "
                 f"request ({why})")
             self.rebuild_monitor()
