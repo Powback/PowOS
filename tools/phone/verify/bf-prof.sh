@@ -5,6 +5,8 @@
 #   cluster policy<N> cpus=<list> cur=<avg MHz> cap=<min scaling_max MHz> hw=<cpuinfo_max MHz>   1 s samples
 #   gpu busy=<avg %> clk=<avg MHz> max=<max_gpuclk MHz> thermal_pwrlevel=<max> throttling=<last>
 #   temp <zone> <max C>                                   the 4 hottest thermal zones
+#   skin <start C> <end C>                                skin-msm-therm, first and last sample (games-120: thermals
+#                                                          beside every fps number)
 #   cgroup <pid> <comm> <cpuset line> allowed=<cpus>      for each process with a thread above 20%
 # A cap below hw = someone (thermal, the vendor's performance HAL) limits that cluster while the game runs.
 s=${1:-30} out=${2:-/data/local/tmp/bfprof}; mkdir -p "$out"; f=$out/prof.txt; : > "$f"
@@ -34,6 +36,7 @@ awk '$1 == "C" { n[$2]++; c[$2] += $3; if (!($2 in m) || $4 < m[$2]) m[$2] = $4 
 awk -v mx="$(( $(cat $K/max_gpuclk) / 1000000 ))" '$1 == "G" { n++; b += $2; c += $3; if ($4 > tp) tp = $4; th = $5 }
   END { if (n) printf "gpu busy=%d clk=%d max=%d thermal_pwrlevel=%d throttling=%s\n", b / n, c / n / 1000000, mx, tp, th }' "$out/samples" >> "$f"
 awk '$1 == "T" { if ($3 > m[$2]) m[$2] = $3 } END { for (z in m) printf "temp %s %.1f\n", z, m[z] / 1000 }' "$out/samples" | sort -k3 -rn | head -4 >> "$f"
+awk '$1 == "T" && $2 == "skin-msm-therm" { if (!n++) a = $3; b = $3 } END { if (n) printf "skin %.1f %.1f\n", a / 1000, b / 1000 }' "$out/samples" >> "$f"
 for p in $(awk '$1 == "thread" && $2 > 20 {print $3}' "$f" | sort -u); do
   echo "cgroup $p $(cat /proc/$p/comm 2>/dev/null) $(grep -m1 ':cpuset:' /proc/$p/cgroup 2>/dev/null) allowed=$(awk '/Cpus_allowed_list/ {print $2}' /proc/$p/status 2>/dev/null)"
 done >> "$f"

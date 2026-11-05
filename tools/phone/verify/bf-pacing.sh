@@ -8,6 +8,9 @@
 # times + a 20 s screenrecord (bf-present.sh), the same 30 s of per-thread CPU, cluster clocks and caps, GPU busy and
 # clock, temperatures (bf-prof.sh: "prof <mode>" lines), and the session log's "Xwayland KGSL" lines. bf-frames.py turns
 # that into fps / frame-time percentiles / % at 16.7 ms / dup + stale-back frames; its last line = the board result.
+# Before it, bf-layers.py's "layers <mode>:" line: every stage's rate at once (game presents, Xwayland commits + frame
+# callbacks/timeouts, KWin drawn, the consumer's queues + waits (logcat "pacing:"), SurfaceFlinger's actual presents, the
+# panel's mode + render range) and skin temperature - the first stage whose rate drops is the cap (games-120).
 # Restores: dxvk.conf, the game + Steam (bf-stop.sh; Steam restarted -silent if it ran before), the front activity.
 # Exit 3 on a real touch (re-queued), 5 when the game doesn't start. Artefacts: OUT (~/.cache/powos-verify/bfp-*).
 # Valid only with the game ON SCREEN: a display ON, its task (PowosWindowActivity) in front and that task's SurfaceView
@@ -125,7 +128,8 @@ for mode in "$@"; do
   # bf-present (its screen recording) and bf-prof finished, at most 30 s more; then the session log's Xwayland KGSL and
   # KWin window-task lines of this mode, and prof.txt - one call.
   "$A" shell "su -c 'mkdir -p /data/local/tmp/bfp; for i in \$(seq 30); do [ -f /data/local/tmp/bfprof/done ] && ! pgrep -f powos-bf-present.sh >/dev/null && break; sleep 1; done
-    tail -n +$((l0 + 1)) $LOG | grep -E \"Xwayland KGSL|window task\" > /data/local/tmp/bfp/log.txt; cp /data/local/tmp/bfprof/prof.txt /data/local/tmp/bfp/ 2>/dev/null; chmod -R 755 /data/local/tmp/bfp'" >/dev/null
+    tail -n +$((l0 + 1)) $LOG | grep -E \"Xwayland KGSL|window task\" > /data/local/tmp/bfp/log.txt; cp /data/local/tmp/bfprof/prof.txt /data/local/tmp/bfp/ 2>/dev/null
+    logcat -d -t 400 -s Andromarchy:I | grep \" pacing: \" | tail -8 > /data/local/tmp/bfp/consumer.txt; chmod -R 755 /data/local/tmp/bfp'" >/dev/null
   "$A" pull /data/local/tmp/bfp "$M/" >/dev/null && mv "$M"/bfp/* "$M"/ && rmdir "$M/bfp"
   grep "Xwayland KGSL" "$M/log.txt" > "$M/kgsl.txt"; grep "window task" "$M/log.txt" > "$M/kwin.txt"; rm -f "$M/log.txt"
   sed "s/^/kwin $mode: /" "$M/kwin.txt" | tail -5; sed "s/^/prof $mode: /" "$M/prof.txt" 2>/dev/null
@@ -136,4 +140,6 @@ done
 echo "== done $(date +%T)"; restore
 pill "comparing $(echo "$*" | sed 's/ / vs /g')"
 # uv runs it with its own numpy (the script's inline deps, uv's cache): nothing installed into the Mac's python.
+# The per-layer rate table (game > Xwayland > KWin > consumer > SurfaceFlinger > panel, skin), before the board line.
+python3 -I "$here/bf-layers.py" "$OUT" "$@"
 uv run --quiet --script "$here/bf-frames.py" "$OUT" "$@"

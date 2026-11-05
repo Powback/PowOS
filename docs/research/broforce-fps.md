@@ -111,6 +111,49 @@ task (renders the X window item into the consumer's gralloc buffer: one GPU draw
 | Xwayland 19 % | **never flipped**: lfdevs's 0003 made `xwl_present_check_flip` return FALSE on KGSL surfaceless, so every present was a copy: export the client's fence + wait (0008), re-validate the import (0012), a window-sized glamor blit, a `glFinish` (`xwl_present_flush`), then a window-buffer commit with its own fence (0009). Log before (11-05 ~07:40): `3264 Present copies` / 30 s, `961 commits`. | xwayland-kgsl 24.1.13-8, **0013** (agent/present-path-2): a client's DRI3 buffer (0003 keeps its dma-buf planes) goes to KWin as itself (linux-dmabuf, depth-24 = XRGB8888, no Xwayland fence - the client's KGSL fence is on the dma-buf, KWin waits on it), so Present flips it under upstream's rules. KGSL flip timer 100 ms (a registered workaround for stale frame callbacks, docs/REMOTE-POWOS.md §4). One `Present flips, N copies <why>=n` line per 30 s. Device 08:05: `1652 Present flips, 0 copies`, window commits 961 -> 2 / 30 s. Soak 08:02 (`bf-quiet-2026-11-05_0802`): Xwayland 19-20 % -> under top's list (<4.5 %), game CPU 149 % -> 79 % mean, KWin window task 40.0 fps mean (same lines 32.1 in the 04:16 soak), kwin 12.8 %, SF 17 %, skin 34.7 -> 37.1 C; bf-checker base 0 % checkered, 40 fps. |
 | kwin "2 commits per frame" (kwin 3.65 probe: ~84 commits/s for 40 drawn) | **not a second commit**: 0014's per-site line showed every commit is a damaged flip (2500 / 30 s, 0 others; frame callbacks ~29/s). Broforce presents **async** (DXVK on Wine's X11 WSI, PresentOptionAsync), and upstream completes an async flip on a `wl_display_sync` round trip, so all ~84 presents/s went to KWin, which drew 40 and dropped the rest. | xwayland-kgsl 24.1.13-11, **0015** (agent/xw-commits): on KGSL an async flip waits for the frame callback like a vsync'd one and is never skipped by a newer one, so the swapchain throttles the game to KWin's draw rate (-10 skipped queued flips instead: their buffers went back idle at once and the game rendered flat out, 220 % CPU at ~200 presents/s). Soak 17:07 (`bf-quiet-2026-11-05_1707`, PASS 300 s): commits 407-449 -> 221-229 / 5 s, drawn 40 fps kept, game CPU 108-111 % -> 80-83 %, kwin 14.0-14.8 % -> 13.4-13.7 % (per-commit work is not where kwin's cost is), SF ~18-20 %. Open: ~5 frame timeouts/s (100 ms timer: draws whose callback doesn't come back), p90 commit->drawn ~104 ms, unchanged from before. |
 
+## Toward 120 (2026-11-05, agent games-120)
+
+User goal (11-05): "goal is 120" - games at the 120 Hz panel's rate. Every stage's rate at once, from bf-pacing base
+of 19:33 (cover screen, kwin 3.66 direct scanout off, xwayland-kgsl 24.1.13-11; kgsl.txt, kwin.txt, L1.txt, and the
+19:38 bf-quiet SF dump for the panel):
+
+| stage | rate | how measured | reading |
+|---|---|---|---|
+| game presents (DXVK, async) | ~45/s | Xwayland "Present flips" / 30 s (0015 paces them on frame callbacks) | the game would render more: main thread ~30 % |
+| Xwayland commits | 45.4/s, frame callbacks 40.4/s, **timeouts 5.0/s** | 0014's 30 s line | 5 commits/s go out only after the 100 ms TIMER_LEN_FLIP_KGSL |
+| KWin window task drawn | 40.3/s; commit -> drawn p50 12, **p90 104 ms** | kwin "frames:" 5 s lines | KWin draws only into a buffer the consumer offered; it waited for one |
+| consumer queueBuffer | ~40/s (= drawn) | - (no meter before this change) | serial: dequeue -> CPU-wait release fence -> offer -> KWin's frame -> queue |
+| SurfaceFlinger latch (frame ready) | 41.2/s; intervals p50 14 ms, every ~8th **114-121 ms** | `--latency` column 3, deduped | the stall is ~100 ms + the 16 ms nap after a timed-out dequeue |
+| panel | **60 Hz** (cover activeMode 60, displayManagerPolicy render [0, 60]) | `dumpsys SurfaceFlinger` Pacesetter display | ColorOS's per-package policy: com.powos.app is unlisted -> 60 Hz (shell/HighRefresh.kt) |
+| skin | 35.1 -> 38.3 C over 10 min (16:06 soak) | skin-msm-therm | headroom for 120 Hz |
+
+Two caps, in order: (1) the panel itself: 60 Hz on the cover under every game, so 60 fps was the ceiling whatever the
+game did; (2) the consumer's buffer pipeline: KWin keeps the buffer it was offered until the client's next frame, so
+of `min_undequeued + 2` buffers only one was left for SurfaceFlinger - every queue waited for a release before the
+next offer (the 12 ms median), and every ~8th frame the dequeue ran into its 100 ms timeout, slept 16 ms more, and the
+game's frame callback timed out behind it (5 stalls/s x ~110 ms = 0.55 s of every second; the other 0.45 s at ~13 ms a
+frame is ~35 frames, + the 5 stalled ones = the ~40 fps).
+
+Changes (agent/games-120; APK ship needed, no kwin/xwayland change):
+
+1. **Panel at 120 under a game** - `PowosWindowActivity.gameRefresh` (+ `GameRefresh.wanted`, JVM test
+   GameRefreshTest): a game's window task (WebWindows.isGame: steam_app_<id> or a Game desktop file; never Steam
+   itself) asks for its screen's fastest mode at the current resolution while it is the top task, again on every
+   surface change (fold: per-screen mode ids), and gives it back when it leaves the top. Rooted and non-rooted alike.
+   HACK row in REMOTE-POWOS.md §4 (same ColorOS policy as HighRefresh).
+2. **One more buffer for a window task** (native_consumer.c do_connect: `min + 3`, the desktop keeps `min + 2`):
+   the offer goes back to KWin right after a queue, so a game commit is drawn when it lands, not one release later.
+3. **No 16 ms nap after a timed-out dequeue** (it already waited 100 ms): a stall left is <= 100 ms, not ~116.
+4. **Meters**: the consumer logs `surface N pacing: ... queued (/s), N bufs; free-buffer wait p50/p90/max (timeouts),
+   release-fence wait max; producer wait p50/p90/max` every 5 s; bf-present.sh keeps SurfaceFlinger's actual present
+   times (A<n>.txt) and `--displays` (displays.txt); bf-prof.sh a `skin <start> <end>` line; bf-pacing.sh prints
+   bf-layers.py's `layers <mode>:` line - the table above in one line per run (tier1 test-bf-layers.py).
+
+After: pending the APK ship, then `queue.sh add --screen cover broforce-fps-low-cpu-bound-under-fex bf-pacing.sh base`
+(+ bf-checker base for dashes). Expected: panel 120, consumer free-buffer wait ~0, Xwayland timeouts ~0, KWin drawn =
+the game's presents (the game then sets the rate: its main thread was ~30 %, so well past 60). If timeouts stay, the
+stall is SurfaceFlinger not releasing (the consumer's free-buffer wait p90 says so) - next lever there.
+
 ## How to re-measure
 
 `tools/phone/adb.sh shell "su -c 'sh -s'" < design-qa/bf-fps-20261103/sample.sh` (30 s, read-only; divide the

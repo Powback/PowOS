@@ -303,6 +303,7 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         MainActivity.configureConsumer(this);
         setTitleText(title);
         Log.i(TAG, "launch window: now window " + id + " (" + appId + ")");
+        gameRefresh();
         if (holder != null && cropW > 0 && cropH > 0)
             surfaceChanged(holder, 0, cropW, cropH);
         // Its frame again: the bar may go (a window with its own title bar, "decor 0").
@@ -468,6 +469,55 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
     }
 
     /**
+     * Which app ids are games (the app's WebWindows.isGame with the app's desktop categories; set once at start, any
+     * thread). Null: none known yet - no window asks for a refresh rate.
+     */
+    public static volatile java.util.function.Predicate<String> isGame;
+
+    /** The display mode this window asks for now (0: the system's choice). Main thread. */
+    private int gameMode;
+
+    /**
+     * A game's window task asks for its screen's fastest refresh rate while it is the top task (rooted or not).
+     * HACK: ColorOS's refresh-rate policy (oplusscreenmode, /my_product/etc/refresh_rate_config.xml) votes 60 Hz for a
+     * package it doesn't list - com.powos.app - so the cover screen ran at 60 Hz under every game (SurfaceFlinger
+     * 11-05: cover activeMode 60 Hz, displayManagerPolicy render [0, 60]; the user's 120 Hz peak) and a game could never
+     * pass 60 fps. A window's preferred display mode wins over that list (as home's page does while touched,
+     * shell/HighRefresh.kt). Real fix: none in PowOS; ColorOS listing the package or honoring AOSP's frame rate votes
+     * (Surface.setFrameRate) for unlisted ones. Given back (0) when the task leaves the top, so home and other apps get
+     * the system's choice; the panel's mode ids are per screen, so asked again on every surface change (fold).
+     */
+    private void gameRefresh() {
+        String app = getIntent().getStringExtra(EXTRA_APP_ID);
+        android.view.Display d = getDisplay();
+        android.view.Display.Mode[] modes = d != null ? d.getSupportedModes() : new android.view.Display.Mode[0];
+        int n = modes.length;
+        int[] ids = new int[n], ws = new int[n], hs = new int[n];
+        float[] hz = new float[n];
+        for (int i = 0; i < n; i++) {
+            ids[i] = modes[i].getModeId();
+            ws[i] = modes[i].getPhysicalWidth();
+            hs[i] = modes[i].getPhysicalHeight();
+            hz[i] = modes[i].getRefreshRate();
+        }
+        android.view.Display.Mode now = d != null ? d.getMode() : null;
+        int want = GameRefresh.wanted(front && !isFinishing(), app, isGame, ids, ws, hs, hz,
+                now != null ? now.getPhysicalWidth() : 0, now != null ? now.getPhysicalHeight() : 0);
+        if (want == gameMode)
+            return;
+        gameMode = want;
+        float rate = 0f;
+        for (int i = 0; i < n; i++)
+            if (ids[i] == want)
+                rate = hz[i];
+        android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+        lp.preferredDisplayModeId = want;
+        lp.preferredRefreshRate = rate;
+        getWindow().setAttributes(lp);
+        Log.i(TAG, "window " + id + " (" + app + "): " + (want != 0 ? "game in front, display mode " + want + " (" + rate + " Hz)" : "refresh rate back to the system's"));
+    }
+
+    /**
      * The front window's app id (KWin's: its desktop id, or an X11 class such as a Proton game's steam_app_<id>), null
      * when no PowOS window is in front. The app's GameBoost reads it once a second. Any thread.
      */
@@ -486,6 +536,7 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
             frontWindow = null;
         if (!isTop)
             focusSent = false;
+        gameRefresh();
     }
 
     /**
@@ -526,6 +577,7 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
     @Override
     public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
         this.holder = holder;
+        gameRefresh(); // another screen (fold): its own mode ids
         if (id <= 0) {
             // A launch window: no window yet - the consumer starts on this surface once it has one ([become]).
             cropW = width;

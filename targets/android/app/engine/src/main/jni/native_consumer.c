@@ -107,6 +107,17 @@ struct consumer_state {
     unsigned undrawn;
     unsigned undrawn_logged;
     int64_t undrawn_log_ms;
+    /* PowOS: where a window task's frame time goes (render thread only), logged every 5 s (pace_note): the wait for
+     * a free buffer (dequeue: SurfaceFlinger releasing one), for its release fence, and for the producer's frame
+     * (KWin: the client's next commit), in ms per queued frame. The "consumer" row of the per-layer rate table
+     * (docs/research/broforce-fps.md "Toward 120"). */
+    struct pace_stats {
+        int64_t since_ms;
+        unsigned queued, dequeue_timeouts, n;
+        uint16_t dequeue_ms[640], producer_ms[640];
+        int fence_max_ms;
+    } pace;
+    int64_t pace_dequeue_from; /* when the wait for the next free buffer began (0: not yet) */
 
     /* PowOS: direct scanout (direct_scanout.h, protocol.h FRAME_TAG_DIRECT) - window tasks only, and only while the
      * property debug.powos.direct_scanout is 1 at connect: direct_on false = this file behaves exactly as without it. */
@@ -785,7 +796,13 @@ static int do_connect(struct consumer_state *s)
 
         int min_undequeued = 0;
         api.query(win, ANATIVEWINDOW_QUERY_MIN_UNDEQUEUED_BUFFERS, &min_undequeued);
-        int total = min_undequeued + 2;
+        /* PowOS: a window task's producer keeps the buffer it was offered until its client's NEXT frame (KWin draws
+         * a window only when it changes), so of min + 2 only one was left for SurfaceFlinger's pipeline: each queue
+         * waited for SurfaceFlinger to release a buffer before the next offer (Broforce: commit -> drawn median
+         * 12 ms, the game's frame callbacks held behind it; docs/research/broforce-fps.md "Toward 120"). One more
+         * for a window (~11 MB at the cover's 1116x2484): the offer goes back at once after a queue. The desktop
+         * (primary) draws every vsync and keeps min + 2. */
+        int total = min_undequeued + (s->primary ? 2 : 3);
         if (total > MAX_COLLECT_BUFS)
             total = MAX_COLLECT_BUFS;
 
@@ -991,6 +1008,57 @@ static void apply_crop(struct consumer_state *s)
     aw->perform(aw, ANW_SET_CROP, rect);
 }
 
+static int pace_cmp(const void *a, const void *b)
+{
+    return (int)*(const uint16_t *)a - (int)*(const uint16_t *)b;
+}
+
+/* p50 / p90 / max of [n] samples (sorted in place). */
+static void pace_pct(uint16_t *v, unsigned n, int out[3])
+{
+    out[0] = out[1] = out[2] = 0;
+    if (n == 0)
+        return;
+    qsort(v, n, sizeof(*v), pace_cmp);
+    out[0] = v[n / 2];
+    out[1] = v[n * 9 / 10];
+    out[2] = v[n - 1];
+}
+
+static uint16_t pace_ms(int64_t ms)
+{
+    return ms < 0 ? 0 : ms > 65535 ? 65535 : (uint16_t)ms;
+}
+
+/* One queued frame of a window surface: its waits ([dequeue_ms] free buffer, [producer_ms] KWin's frame); the line
+ * every 5 s while frames flow. */
+static void pace_note(struct consumer_state *s, int64_t dequeue_ms, int64_t producer_ms)
+{
+    struct pace_stats *p = &s->pace;
+    if (s->surface_id == 0)
+        return;
+    int64_t now = now_ms();
+    if (p->since_ms == 0)
+        p->since_ms = now;
+    p->queued++;
+    if (p->n < sizeof(p->dequeue_ms) / sizeof(p->dequeue_ms[0])) {
+        p->dequeue_ms[p->n] = pace_ms(dequeue_ms);
+        p->producer_ms[p->n] = pace_ms(producer_ms);
+        p->n++;
+    }
+    if (now - p->since_ms < 5000)
+        return;
+    int dq[3], pr[3];
+    pace_pct(p->dequeue_ms, p->n, dq);
+    pace_pct(p->producer_ms, p->n, pr);
+    LOGI("surface %u pacing: last %lld ms %u queued (%.1f/s), %d bufs; free-buffer wait p50 %d p90 %d max %d ms "
+         "(%u dequeue timeouts), release-fence wait max %d ms; producer wait p50 %d p90 %d max %d ms",
+         s->surface_id, (long long)(now - p->since_ms), p->queued, p->queued * 1000.0 / (double)(now - p->since_ms),
+         s->buf_count, dq[0], dq[1], dq[2], p->dequeue_timeouts, p->fence_max_ms, pr[0], pr[1], pr[2]);
+    memset(p, 0, sizeof(*p));
+    p->since_ms = now;
+}
+
 static void *render_thread_func(void *arg)
 {
     struct consumer_state *s = arg;
@@ -1021,7 +1089,19 @@ static void *render_thread_func(void *arg)
 
         ANativeWindowBuffer *anb = NULL;
         int acqfence = -1;
-        if (api.dequeueBuffer(s->window, &anb, &acqfence) != 0 || !anb) {
+        /* PowOS: the wait for a free buffer counts from the last queue (or the first try after a timeout), so its
+         * timeouts are in it. */
+        if (s->pace_dequeue_from == 0)
+            s->pace_dequeue_from = now_ms();
+        int dq = api.dequeueBuffer(s->window, &anb, &acqfence);
+        if (dq != 0 || !anb) {
+            /* PowOS: a window's dequeue is bounded (100 ms, setDequeueTimeout): a timeout already waited, so try again
+             * at once - the 16 ms nap after it made every such stall ~116 ms (Broforce's 115 ms frames, 11-05). Any
+             * other error: the nap, as before (the window is going away, no busy loop). */
+            if (dq == -ETIMEDOUT) {
+                s->pace.dequeue_timeouts++;
+                continue;
+            }
             usleep(16000);
             continue;
         }
@@ -1029,10 +1109,17 @@ static void *render_thread_func(void *arg)
          * already safe to write (SurfaceFlinger done reading the previous frame)
          * before we hand it to the producer. A sync_file fd signals POLLIN. */
         if (acqfence >= 0) {
+            int64_t f0 = now_ms();
             struct pollfd fpfd = { .fd = acqfence, .events = POLLIN };
             poll(&fpfd, 1, 1000);
             close(acqfence);
+            int fw = (int)(now_ms() - f0);
+            if (fw > s->pace.fence_max_ms)
+                s->pace.fence_max_ms = fw;
         }
+        int64_t offered_ms = now_ms();
+        int64_t dequeue_ms = offered_ms - s->pace_dequeue_from;
+        s->pace_dequeue_from = 0; /* a buffer given back unqueued starts the next wait afresh */
 
         int idx = -1;
         for (int i = 0; i < s->buf_count; i++) {
@@ -1159,6 +1246,8 @@ static void *render_thread_func(void *arg)
         apply_crop(s);
         api.queueBuffer(s->window, anb, rfence);
         count_present(s, true);
+        pace_note(s, dequeue_ms, now_ms() - offered_ms);
+        s->pace_dequeue_from = now_ms();
         if (s->direct)
             direct_hide(s->direct);   /* a composited frame: the window's own buffer shows again */
 

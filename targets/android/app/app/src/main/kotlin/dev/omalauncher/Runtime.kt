@@ -222,6 +222,15 @@ class Runtime(
         started = true
         // The lock screen's face: PowOS's, over Android's (shell/LockFace.kt).
         dev.omalauncher.shell.LockFace.start(context)
+        // Every PowOS (rooted or not): a game's window task asks for its screen's fastest refresh rate while in front
+        // (PowosWindowActivity.gameRefresh - ColorOS's own policy gives com.powos.app 60 Hz).
+        andro.marchy.PowosWindowActivity.isGame =
+            java.util.function.Predicate { id ->
+                dev.omalauncher.shell.WebWindows.isGame(
+                    id,
+                    runCatching { dev.omalauncher.system.RunningApps.linuxAppOf(linuxApps.toList(), id)?.categories }.getOrNull(),
+                )
+            }
         // Rooted PowOS: a game in front gets the big cores' full clocks, a uclamp floor and the prime core for its frame
         // loop (shell/GameBoost.kt), back as it was when it leaves the front.
         if (RootedGuest.enabled) {
