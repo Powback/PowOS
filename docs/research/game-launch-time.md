@@ -108,6 +108,13 @@ x86 = the user's pinned Proton Experimental under FEX. Seconds from the tap.
 
 Wine boot (wineserver -> exe) is 3.0-3.5 s on ARM64 vs 10.9 s under FEX; pv -> wineserver 0 vs 1.8 s. Unity's
 window -> frame stays ~8 s on both. The install-script evaluator still runs on ARM64 (1-1.5 s; the skip in
-pkgs/steam only covers the FEX compat tool) - worth adding. Still pending in the queue: arm64 fps (bf-pacing base,
-x86 38-39 fps), visuals (bf-checker base, 0 dashes expected), x86 steam/cold x2 and arm64 cold#2 (jobs
-20261105-070808..070838); those jobs end with the user's pinned x86 restored.
+pkgs/steam only covers the FEX compat tool) - worth adding.
+
+| arm64 check | result | x86 baseline | job |
+|---|---|---|---|
+| fps (bf-pacing base) | 19.4 fps, p50 33.5 ms, p95 133 ms, 71.6% >25 ms | 38-39 fps | 20261105-070808-38385 |
+| visuals (bf-checker base) | 0/88 X frames checkered, screen 0/9, 18.5 fps | 0 dashes | 20261105-070810-38599 |
+
+Verdict: ARM64 launches ~2x faster and draws clean, but runs at half the frame rate - Broforce stays on the
+user's pinned x86 (restored 07:25 with the x86 prefix, `powos-steam-compat mode 274190` = pinned:x86). Next for
+ARM64: why the game's frames halve there (where the frame time goes under arm64ec/wow64fex), then re-run this A/B.
