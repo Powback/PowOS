@@ -16,7 +16,8 @@
 #   frames <s>  changes=<n>: distinct samples of the game's X window over <s> s (xframes count; bf-recents.sh float)
 # Steps and asserts: bf-lib.sh ("FAIL <step>: <evidence>"); "TIMES ..." after back.
 set -uo pipefail
-RESUME_MS=${RESUME_MS:-10000}  # the limit (a FAIL past it); the goal is under 3 s (TIMES says which)
+RESUME_MS=${RESUME_MS:-10000}  # the limit (a FAIL past it, the user's < 10 s tap -> frame rule)
+GOAL_MS=${GOAL_MS:-2000}       # the goal for a resume (TIMES says met or over)
 . /var/tmp/powos-bf-lib.sh
 E=/tmp/bf-return.env
 [ -f $E ] && . $E
@@ -73,7 +74,7 @@ back)
   echo "back: focused $foc (X input goes to the game), audio $aud (before leaving: ${AUD0:-?})"
   [ $foc = yes ] || fail resume-input "window $W not focused after the resume (active $(active))"
   case ${AUD0:-} in [1-9]*) case $aud in 0\ *|*" ${aud%% *} corked") fail resume-audio "streams before leaving: $AUD0, after the resume: $aud" ;; esac ;; esac
-  echo "TIMES resume ${RES:-none} ms ($(case ${RES:-none} in none) echo 'no frame' ;; *) [ "$RES" -lt 3000 ] && echo 'goal < 3 s met' || echo 'over the 3 s goal' ;; esac)), launch ${LAUNCH:-?} ms to its window"
+  echo "TIMES resume ${RES:-none} ms ($(case ${RES:-none} in none) echo 'no frame' ;; *) [ "$RES" -lt "$GOAL_MS" ] && echo "goal < $GOAL_MS ms met" || echo "over the $GOAL_MS ms goal" ;; esac)), launch ${LAUNCH:-?} ms to its window"
   save ;;
 frames)
   echo "changes=$(xframes count "$W" "${2:-5}" 10)" ;;
