@@ -14,7 +14,7 @@
 # Restores: dxvk.conf, the game + Steam (bf-stop.sh; Steam restarted -silent if it ran before), the front activity.
 # Exit 3 on a real touch (re-queued), 5 when the game doesn't start. Artefacts: OUT (~/.cache/powos-verify/bfp-*).
 # Valid only with the game ON SCREEN: a display ON, its task (PowosWindowActivity) in front and that task's SurfaceView
-# layer there, before and after the 30 s - else "INVALID: ..." and exit 3 (the next window). The 03:58 run of
+# layer there (unfolded: home in front and its full-screen web window's layer composed, bf-onscreen.sh), before and after the 30 s - else "INVALID: ..." and exit 3 (the next window). The 03:58 run of
 # 2026-10-24 measured a game with no task surface (no SurfaceView layer, nothing resumed, no screen recording: the
 # screen was off): KWin draws a window task only while its surface exists, so no frame callbacks and 2 commits/s.
 # Fits its 300 s budget (one mode per job): every wait is ONE phone-side call (bf-nap.sh, bf-window.sh wait) instead of
@@ -50,7 +50,7 @@ asuser() { local n=$1; shift
   "$A" shell "su -c 'cp /data/local/tmp/powos-$n /data/powos/root/var/tmp/powos-$n; chmod 644 /data/powos/root/var/tmp/powos-$n; sh /data/powos/powos-run.sh \"APP=$APP WIN_NAME=$WIN_NAME sh /var/tmp/powos-$n $*\"'" 2>&1 | grep -v sysvipc | tr -d '\r'; }
 pill "checking the phone (a game already up? Steam?)"
 # Every phone-side script in ONE push (each adb.sh call is a docker run over the VPN, ~2-3 s).
-st=$OUT/push; mkdir -p "$st"; for f in bf-start.sh bf-stop.sh bf-window.sh bf-present.sh bf-prof.sh bf-game.sh bf-nap.sh; do
+st=$OUT/push; mkdir -p "$st"; for f in bf-start.sh bf-stop.sh bf-window.sh bf-present.sh bf-prof.sh bf-game.sh bf-nap.sh bf-onscreen.sh; do
   cp "$here/$f" "$st/powos-$f"; done
 "$A" push "$st"/powos-bf-*.sh /data/local/tmp/ >/dev/null || { echo "ENV: can't push the check's scripts"; exit 5; }
 gs=$(asuser bf-game.sh state | tail -1); users=0
@@ -81,13 +81,16 @@ i0=$(irq); touched() { [ "$(irq)" != "$i0" ]; }
 abort() { echo "touch $(date +%T) - abort, restoring"; restore; exit 3; }
 # nap <secs>: one phone-side wait that returns early on a touch (bf-nap.sh).
 nap() { case $("$A" shell "sh /data/local/tmp/powos-bf-nap.sh $1 $i0" | tr -d '\r') in *touched*) abort ;; esac; }
-# onscreen: the game's task really on the screen - a display ON, PowosWindowActivity resumed, its SurfaceView layer
-# there (KWin draws a window task only into that surface) - or why not.
-onscreen() { local r on top sv
-  r=$("$A" shell "dumpsys display | grep -cE '^  DisplayDeviceInfo.* state ON,'; dumpsys activity activities | grep -m1 topResumedActivity; echo; dumpsys SurfaceFlinger --list | grep -cF 'SurfaceView[com.powos.app/andro.marchy.PowosWindowActivity]'" | tr -d '\r')
+# onscreen: the game really on the screen - a display ON and a screen-sized game layer SurfaceFlinger composes
+# (bf-onscreen.sh): its own task's SurfaceView with PowosWindowActivity resumed (folded: KWin's window task), or home's
+# full-screen web window with HomeShell resumed (unfolded: every Linux window is one of home's web windows; 11-05 19:49 -
+# 22:36 every unfolded run was "INVALID ... in front=HomeShell, task surfaces=0" while the game showed) - or why not.
+onscreen() { local r on top sv how
+  r=$("$A" shell "dumpsys display | grep -cE '^  DisplayDeviceInfo.* state ON,'; dumpsys activity activities | grep -m1 topResumedActivity; echo; sh /data/local/tmp/powos-bf-onscreen.sh" | tr -d '\r')
   on=$(echo "$r" | sed -n 1p); top=$(echo "$r" | grep -m1 topResumedActivity | sed -nE 's#.*/[a-zA-Z0-9_.]*\.([A-Za-z0-9_$]+) .*#\1#p')
-  sv=$(echo "$r" | tail -1); WHY="displays on=${on:-?}, in front=${top:-none}, task surfaces=${sv:-?}"; TOP=$top
-  [ "${on:-0}" -ge 1 ] && [ "$top" = PowosWindowActivity ] && [ "${sv:-0}" -ge 1 ]; }
+  set -- $(echo "$r" | grep -m1 '^onscreen '); sv=${2:-0}; how=${3:-none}
+  WHY="displays on=${on:-?}, in front=${top:-none}, game layers=$sv ($how${4:+ ${4}})"; TOP=$top
+  [ "${on:-0}" -ge 1 ] && [ "$sv" -ge 1 ] && { { [ "$how" = task ] && [ "$top" = PowosWindowActivity ]; } || { [ "$how" = web ] && [ "$top" = HomeShell ]; }; }; }
 invalid() { echo "INVALID: $NAME wasn't on the screen $1 ($WHY) - frames of a game nobody sees say nothing"; restore; exit 3; }
 mi=0
 for mode in "$@"; do
@@ -113,14 +116,14 @@ for mode in "$@"; do
   case $win in touched) abort ;; win=[0-9]*) ;; *) echo "FAIL no game window: $NAME showed none in $left s ($win)"; restore; exit 5 ;; esac
   echo "$mode: window after $(( $(date +%s) - w0 )) s: $win"; echo "$win" | sed 's/win=//; s/screen=/on /' > "$M/window.txt"
   pill "$lbl: game up - settling 45 s"
-  nap 45  # KWin opens the game as its own Android task (PowosWindowActivity, WindowTasks): nothing to bring forward
+  nap 45  # KWin opens the game as its own task (folded) or home's web window (unfolded): nothing to bring forward
   onscreen; ok=$?; top=$TOP
   # Unity maps a 314x208 window first and goes full screen later: the size that counts is the one after the settle.
   win2=$(asuser bf-window.sh | tail -1); echo "$mode: after the settle: $win2"
   echo "$win2" | sed 's/win=/settled /; s/screen=/on /' >> "$M/window.txt"
   echo "$mode: in front: $top ($WHY)"; echo "front $top" >> "$M/window.txt"
   [ $ok = 0 ] || invalid "after the settle"
-  "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof; nohup sh /data/local/tmp/powos-bf-present.sh 30 \"PowosWindowActivity|SurfaceView|steam_app${WIN_NAME:+|$WIN_NAME}\" /data/local/tmp/bfp >/dev/null 2>&1 &
+  "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof; nohup sh /data/local/tmp/powos-bf-present.sh 30 \"PowosWindowActivity|SurfaceView|powos-ww-[0-9]+-linux|steam_app${WIN_NAME:+|$WIN_NAME}\" /data/local/tmp/bfp >/dev/null 2>&1 &
     nohup sh /data/local/tmp/powos-bf-prof.sh 30 /data/local/tmp/bfprof >/dev/null 2>&1 &'"
   pill "$lbl: measuring frames (30 s)"; nap 30
   onscreen || invalid "during the measurement"

@@ -72,4 +72,22 @@ class WebWindowsFullScreenWayOutTest {
         assertTrue("toggleMaximise no longer fills the work area", max.contains("workArea()"))
         assertFalse("toggleMaximise goes full screen", max.contains("fullScreen"))
     }
+    /**
+     * FS9 (11-05 21:38, unfolded): a game full screen since before a screen off/on stayed on home's dead surface
+     * ("layer not reachable from root"), home in front with nothing of the game shown. Home's new surface takes every
+     * full-screen window's layer too, in the same transaction as the windows' root.
+     */
+    @Test
+    fun homesNewSurfaceTakesTheFullScreenWindowsToo() {
+        val reattach = body("private fun reattach(")
+        val under = reattach.indexOf("underHome(r,")
+        val full = reattach.indexOf("fullAgain(re, why)")
+        val applied = reattach.indexOf("if (t != null) t.merge(re) else re.apply()")
+        assertTrue("reattach no longer moves the full-screen windows", full > under && under >= 0)
+        assertTrue("the full-screen windows move after the transaction went out", full < applied)
+        val again = body("private fun fullAgain(")
+        assertTrue(again.contains("if (!w.linuxFull || w.closed || !w.container.isValid) continue"))
+        assertTrue(again.contains("buildReparentTransaction(w.container)"))
+        assertFalse("the dead-surface HACK is fixed, not kept", src.contains("leaves it on the old surface ([reattach] moves only"))
+    }
 }

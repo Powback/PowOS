@@ -20,10 +20,11 @@ bfq = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bfq)
 
 
-def sample(t, focus="PowosWindowActivity", resumed="PowosWindowActivity", cpu=130, procs="4/4", end_focus=None):
-    return "\n".join([f"sample t={t}", f"start focus {focus}", f"start resumed {resumed}", "top 130.0% wine64",
-                      f"gamecpu {cpu} procs={procs}", f"end focus {end_focus or focus}", f"end resumed {resumed}",
-                      "skin 41090", "caps 1459200 1785600 1593600"])
+def sample(t, focus="PowosWindowActivity", resumed="PowosWindowActivity", cpu=130, procs="4/4", end_focus=None,
+           shown="onscreen 1 task x"):
+    return "\n".join([f"sample t={t}", f"start focus {focus}", f"start resumed {resumed}", f"start {shown}",
+                      "top 130.0% wine64", f"gamecpu {cpu} procs={procs}", f"end focus {end_focus or focus}",
+                      f"end resumed {resumed}", f"end {shown}", "skin 41090", "caps 1459200 1785600 1593600"])
 
 
 def soak(n=10, over=None):
@@ -41,6 +42,23 @@ class Verdict(unittest.TestCase):
         ok, line = bfq.verdict(text, 600)
         self.assertFalse(ok)
         self.assertIn("not in front", line)
+
+    def test_unfolded_home_with_its_full_screen_web_window_passes(self):
+        # 11-05 19:49-22:36: unfolded, the game is home's full-screen web window - HomeShell is rightly in front.
+        web = dict(focus="HomeShell", resumed="HomeShell", shown="onscreen 1 web [BBQ]_powos-ww-42-linux#1")
+        ok, line = bfq.verdict(soak(over={i: web for i in range(10)}), 600)
+        self.assertTrue(ok, line)
+
+    def test_home_without_a_game_layer_still_fails(self):
+        # 11-05 21:38: the full-screen web window left on home's dead surface - nothing of the game composed.
+        dead = dict(focus="HomeShell", resumed="HomeShell", shown="onscreen 0 none -")
+        ok, line = bfq.verdict(soak(over={i: dead for i in range(10)}), 600)
+        self.assertFalse(ok)
+        self.assertIn("game layers 0 none", line)
+
+    def test_a_web_layer_never_excuses_another_app_in_front(self):
+        other = dict(focus="NotificationShade", resumed="HomeShell", shown="onscreen 1 web x")
+        self.assertFalse(bfq.verdict(soak(over={2: other}), 600)[0])
 
     def test_no_game_process_fails_even_in_front(self):
         ok, line = bfq.verdict(soak(over={3: dict(cpu=0, procs="0/0")}), 600)
@@ -96,6 +114,54 @@ class PhoneSample(unittest.TestCase):
 
     def test_window_without_activity(self):
         self.assertEqual(self.front("  mCurrentFocus=Window{332df39 u0 NotificationShade}", "")[0], "focus NotificationShade")
+
+
+def hwc(*layers):
+    """A SurfaceFlinger dump's active HWC table: (name, l, t, r, b) per layer, plus an inactive display's stale one."""
+    rows = ["Display 9 (inactive) HWC layers:", " SurfaceView[com.powos.app/andro.marchy.PowosWindowActivity](BLAST)#1",
+            "   1 | 0 | 0 | DEVICE | 0 |    0    0 2440 2268 | 0 | [ ]", "Display 8 (active) HWC layers:", "-" * 20,
+            " Layer name", "   Z | Window Type | Layer Class | Comp Type | Transform | Disp Frame (LTRB) | Crop | Rate", "-" * 20]
+    for n, l, t, r, b in layers:
+        rows += [f" {n}", f"   1 |  0 |  0 |  DEVICE |  0 | {l:4} {t:4} {r:4} {b:4} |  0.0 0.0 1.0 1.0 | [ ]", "-" * 20]
+    return "\n".join(rows + ['Display 8 (physical, "")', "    powerMode=On"]) + "\n"
+
+
+HOME = ("com.powos.app/andro.marchy.HomeShell#10430", 0, 0, 2440, 2268)
+
+
+class OnScreen(unittest.TestCase):
+    """bf-onscreen.sh: which screen-sized game layer SurfaceFlinger composes - a task's, home's web window's, or none."""
+
+    def probe(self, dump):
+        with tempfile.TemporaryDirectory() as d:
+            fx = Path(d) / "sf.txt"; fx.write_text(dump)
+            stub = Path(d) / "dumpsys"; stub.write_text(f"#!/bin/sh\ncat {fx}\n"); stub.chmod(0o755)
+            return subprocess.run(["sh", str(V / "bf-onscreen.sh")], capture_output=True, text=True,
+                                  env={**os.environ, "PATH": f"{d}:{os.environ['PATH']}"}).stdout.strip()
+
+    def test_folded_task(self):
+        out = self.probe(hwc(("540fc89 SurfaceView[com.powos.app/andro.marchy.PowosWindowActivity](BLAST)#9184", 0, 0, 1116, 2484),
+                             ("com.powos.app/andro.marchy.PowosWindowActivity#9177", 0, 0, 1116, 2484)))
+        self.assertTrue(out.startswith("onscreen 1 task 540fc89_SurfaceView"), out)
+
+    def test_unfolded_full_screen_web_window(self):
+        out = self.probe(hwc(("[BBQ] powos-ww-42-linux#10267", 0, 0, 2440, 2268), HOME))
+        self.assertEqual(out, "onscreen 1 web [BBQ]_powos-ww-42-linux#10267")
+
+    def test_windowed_steam_is_no_game_on_screen(self):
+        self.assertEqual(self.probe(hwc(HOME, ("[BBQ] powos-ww-41-linux#1", 478, 497, 1613, 1862))), "onscreen 0 none -")
+
+    def test_the_2138_dead_surface_home_only(self):
+        # The full-screen layer hung on home's old surface: not in the active HWC list (the inactive one never counts).
+        self.assertEqual(self.probe(hwc(("Wallpaper BBQ wrapper#73", 0, 0, 2440, 2268), HOME)), "onscreen 0 none -")
+
+    def test_pacing_accepts_each_way_with_its_own_front(self):
+        src = (V / "bf-pacing.sh").read_text()
+        self.assertIn("bf-onscreen.sh", src)
+        self.assertIn('[ "$how" = task ] && [ "$top" = PowosWindowActivity ]', src)
+        self.assertIn('[ "$how" = web ] && [ "$top" = HomeShell ]', src)
+        self.assertIn("powos-ww-[0-9]+-linux", src)
+        self.assertIn("bf-onscreen.sh", (V / "bf-quiet.sh").read_text())
 
 
 class Scripts(unittest.TestCase):
