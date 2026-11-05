@@ -289,3 +289,9 @@ check (job 104137, scratch install of the same files, pinned, then restored to p
 evaluator log "skipped before the container (PowOS ARM64 entry)"; evaluator stage 0.4-1.2 s -> under one 250 ms sample;
 tap -> reaper 3.0-3.4 s (today without it 3.1-6.3), window 7.6-7.9 s, frame 15.7-16.6 s. The ARM64 evaluator was
 never the 1-5 s it was on x86 (no FEX/Python-under-FEX here): the win is ~0.5-1 s.
+
+**After, steam 1.0.0.87-36 installed (jobs 20261105-111321..111326):** tool `powos-proton-arm64` mapped by the policy on
+its own, evaluator "skipped before the container (PowOS ARM64 entry)" both runs. steam#1: reaper 3.0, exe 5.8, window
+7.6, frame 15.9 s, wineserver 2.2 core-s (the first launch after the change still stored blocks); steam#2: reaper 4.8
+(Steam's own prep), exe 7.8, window 8.7, frame 16.9 s, wineserver 0.7 core-s, game 10.2 core-s (was 14.5-16.4).
+Exe -> frame 10.1 / 9.1 s (was 10.0-10.5). bf-pacing base: 41.6 fps, p50 14.7 ms (baseline 40.7).
