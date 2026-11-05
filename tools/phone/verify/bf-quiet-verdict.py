@@ -3,7 +3,9 @@
 
 Each sample block (bf-quiet-phone.sh output, one per ~60 s) holds "start focus X", "start resumed X", "gamecpu N
 procs=a/b", "end focus X", "end resumed X". PASS only when the samples cover <secs> s of soak, the game's window
-(PowosWindowActivity: KWin's window task) is focused AND resumed at the start and end of every sample, and the game's
+(PowosWindowActivity: KWin's window task) is focused AND resumed at the start and end of every sample - or, unfolded,
+home (HomeShell) is, with its full-screen web window composed ("onscreen <n> web": bf-onscreen.sh; every unfolded soak
+of 11-05 19:49-22:36 failed "start focus = HomeShell" though the game showed there) - and the game's
 processes (FEX wine64 running Broforce_beta.exe) use >= min % of a core in every sample. The 2026-11-05 03:02 soak
 printed PASS with home focused, no game process, for 600 s: a soak that measures no game is a FAIL, never a PASS.
 Last line: "PASS ..." or "FAIL ..." (exit 0 / 1).
@@ -12,6 +14,7 @@ import re
 import sys
 
 GAME = "PowosWindowActivity"
+HOME = "HomeShell"  # unfolded: the game is its full-screen web window
 
 
 def samples(text):
@@ -27,6 +30,9 @@ def samples(text):
         m = re.match(r"^(start|end) (focus|resumed) ?(\S*)", line)
         if m:
             cur["front"].append((m.group(1), m.group(2), m.group(3) or "none"))
+        m = re.match(r"^(start|end) onscreen (\d+) (\S+)", line)
+        if m:
+            cur.setdefault("onscreen", {})[m.group(1)] = (int(m.group(2)), m.group(3))
         m = re.match(r"^gamecpu (-?\d+) procs=(\S+)", line)
         if m:
             cur["cpu"], cur["procs"] = int(m.group(1)), m.group(2)
@@ -41,8 +47,12 @@ def verdict(text, secs, min_cpu=25):
         if len(s["front"]) < 4:
             return False, f"FAIL t={s['t']}s: sample incomplete (front {s['front']})"
         for when, what, who in s["front"]:
+            n, how = s.get("onscreen", {}).get(when, (0, "none"))
+            if who == HOME and how == "web" and n >= 1:
+                continue
             if who != GAME:
-                return False, f"FAIL t={s['t']}s: the game's window not in front ({when} {what} = {who})"
+                why = f", game layers {n} {how}" if who == HOME else ""
+                return False, f"FAIL t={s['t']}s: the game's window not in front ({when} {what} = {who}{why})"
         if s["cpu"] is None:
             return False, f"FAIL t={s['t']}s: no game CPU reading"
         if s["procs"].startswith("0/") or s["procs"].endswith("/0"):

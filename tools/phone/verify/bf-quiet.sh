@@ -46,7 +46,7 @@ hwc() { "$A" shell "su -c 'dumpsys SurfaceFlinger'" | tr -d '\r' > "$OUT/sf-$1.t
   awk '/^ *Layer \[/{n=$0; sub(/^ *Layer \[[0-9]+\] /,"",n)} /blurRegions.size\(\)=[1-9]/&&n{print "blurowner", n; n=""}' "$OUT/sf-$1.txt" | sort -u; }
 home() { "$T/cdp.sh" idle 15 home 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); [print("home", p["page"], "hidden=%s" % p["hidden"], " ".join("%s=%s" % kv for kv in p["perSec"].items())) for p in d["pages"]]' || echo "home: cdp failed"; }
 app() { "$A" shell "dumpsys package com.powos.app 2>/dev/null | grep -m1 versionName" | tr -d '\r ' | sed 's/^/app /'; }
-st=$OUT/push; mkdir -p "$st"; for f in bf-start.sh bf-stop.sh bf-window.sh bf-game.sh bf-nap.sh bf-quiet-phone.sh; do cp "$here/$f" "$st/powos-$f"; done
+st=$OUT/push; mkdir -p "$st"; for f in bf-start.sh bf-stop.sh bf-window.sh bf-game.sh bf-nap.sh bf-quiet-phone.sh bf-onscreen.sh; do cp "$here/$f" "$st/powos-$f"; done
 "$A" push "$st"/powos-bf-*.sh /data/local/tmp/ >/dev/null || { echo "ENV: can't push the check's scripts"; exit 5; }
 gs=$(asuser bf-game.sh state | tail -1); started=""
 front=$("$A" shell "dumpsys activity activities | grep -m1 topResumedActivity" | sed -nE 's#.* ([a-zA-Z0-9_.]+/[a-zA-Z0-9_.$]+) .*#\1#p')

@@ -2074,12 +2074,32 @@ class WebWindows(
     ): Boolean {
         val r = root?.takeIf { it.isValid } ?: return false
         val re = underHome(r, "home's surface $why") ?: run { WindowLog.w(TAG, "home's surface $why: no surface to re-attach to"); return false }
+        fullAgain(re, why)
         if (t != null) t.merge(re) else re.apply()
         WindowLog.i(TAG, "home's surface $why: windows' root re-attached (${wins.size} window(s): ${wins.values.joinToString { "${it.id}@d${it.displayId}" }})")
         for (w in wins.values) if (w.displayId >= 0 && w.mirror?.isValid == false) io.post { remirror(w) }
         // Every window's whole layer state again, from the page's next frame (not only when its geometry next changes).
         resend("home's surface $why")
         return true
+    }
+
+    /**
+     * FS9 (11-05 21:38, unfolded: Broforce launched, home stayed in front - "the game's window not in front"): every
+     * full-screen Linux window's layer onto home's CURRENT surface in [re] too. [fillScreen] hangs it on home's surface
+     * itself, not under the root, so moving only the root left a game full screen since before a screen off/on on the
+     * dead surface ("layer not reachable from root"): nothing of it on screen, home's page under it, its own KWin "again"
+     * showed it there. The layer's own position, crop, z and visibility go with it.
+     */
+    private fun fullAgain(
+        re: SurfaceControl.Transaction,
+        why: String,
+    ) {
+        for (w in wins.values) {
+            if (!w.linuxFull || w.closed || !w.container.isValid) continue
+            val move = web.rootSurfaceControl?.buildReparentTransaction(w.container) ?: continue
+            re.merge(move)
+            WindowLog.i(TAG, "home's surface $why: full-screen window ${w.id} re-attached above home's buffer")
+        }
     }
 
     /**
@@ -3112,8 +3132,7 @@ class WebWindows(
         win.container.takeIf { it.isValid }?.let { c ->
             // Full screen is not an element of the page: ABOVE home's buffer (a child of home's surface itself, as the
             // windows' root is), so nothing of the page paints over it; the root's own layer is -1, under home.
-            // HACK: home's surface recreated while it is full screen leaves it on the old surface ([reattach] moves only
-            // the root); real fix: a second root above home's buffer, re-attached the same way.
+            // Home's surface made again while it is full screen (screen off/on): [reattach] moves it too ([fullAgain]).
             web.rootSurfaceControl?.buildReparentTransaction(c)?.let {
                 t.merge(it)
                 win.underRoot = false

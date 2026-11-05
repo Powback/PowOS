@@ -9,13 +9,14 @@
 # Toybox grep has no "\|" in a basic regex: the old `grep -v "a\|b"` dropped nothing, so the 6 picked were container
 # layers (ActivityRecord, the window's) that never carry a buffer - "no presents" read as a compositor fault (03:58).
 mkdir -p "$3"; end=$(( $(date +%s) + $1 ))
-# Only layers that can carry the game's buffers, the BLAST SurfaceView (where KWin's window task draws) first: on
+# Only layers that can carry the game's buffers, the BLAST SurfaceView (where KWin's window task draws) or home's web
+# window buffer ([BBQ] powos-ww-<id>-linux, unfolded) first: on
 # 2026-11-05 02:45 the 6 slots went to leftover "animation-leash of starting_reveal" layers of earlier tasks plus
 # "Bounds for"/"Background for" containers, the BLAST layer was cut by head -6, and the run read the menu's few
 # presents as "no presents" yet still PASSed.
 dumpsys SurfaceFlinger --list | sed -E 's/^RequestedLayerState\{//; s/ parentId=.*//; s/ z=.*//; s/\}$//' | grep -iE "$2" \
   | grep -vE "Gesture Monitor|ActivityRecord|InputSink|animation-leash|^Bounds for|^Background for" > "$3/all"
-{ grep -F "(BLAST)" "$3/all"; grep -vF "(BLAST)" "$3/all"; } | head -6 > "$3/layers"; rm -f "$3/all"
+{ grep -E "\(BLAST\)|\[BBQ\] powos-ww-" "$3/all"; grep -vE "\(BLAST\)|\[BBQ\] powos-ww-" "$3/all"; } | head -6 > "$3/layers"; rm -f "$3/all"
 DID=$(dumpsys display | grep -E "^  DisplayDeviceInfo" | sed -nE 's/.*uniqueId="local:([0-9]+)",.* state ON,.*/\1/p' | head -1)
 [ "${4:-20}" -gt 0 ] && ( sleep 4; screenrecord --display-id "$DID" --bit-rate 40000000 --time-limit "${4:-20}" "$3/rec.mp4" ) &
 while [ $(date +%s) -lt $end ]; do
