@@ -430,3 +430,11 @@ rebuild was not needed. Re-basing on a new Proton: bump TAG, rebuild, update the
 A/B queued (jobs 20261105-183239..183312: bf-pacing base on Valve's dll, then the PowOS dll: bf-coldstart steam x2,
 bf-pacing base, bf-checker base, Valve's restored). Expected: ~1800 fewer wineserver requests/s in play (150 polls/s x
 12), ~0.2 s of main-thread load time.
+
+**Result (steam -37 installed, jobs 20261105-192135..192142):** the gate put the PowOS kernelbase in on the first launch
+(sha a3f08252, checked after each run). bf-coldstart steam, Valve dll: exe -> frame 10.8 s (frame 20.6 s from the tap),
+wineserver 0.8 core-s, main 6.4 s; PowOS dll #1 (first launch with the new dll: FEX re-stored blocks) wineserver 2.7,
+#2: exe -> frame 10.8 s (frame 19.1 s), wineserver 0.7 core-s, main 6.8 s. bf-pacing base 40.4 -> 41.2 fps, main thread
+29.2 -> 29.5 %, wineserver not among the top threads in play either way; bf-checker base 0 % checkered. So the call
+count halves, but it costs no measurable time on this phone: the ~0.4 s estimate did not hold. Kept, since it is exact
+and cheap; not a fps lever. Requests/s not counted directly (+server would distort the timing).
