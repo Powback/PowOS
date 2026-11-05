@@ -94,6 +94,8 @@ After-numbers: pending a ship (same method: `top -b -n2 -d 60`, `cdp.sh idle 15`
 in this run: the Mac's Docker VM (Colima) hit input/output errors mid-run (`mkdir /tmp/containerd-mount...: input/output
 error`), which also took down adb and the JVM test.
 
+2026-11-05 03:02 soak (`bf-quiet.sh 600`, job 20261104-194031-7308) is INVALID: it printed PASS with HomeShell focused and no game process - its `adb shell "pgrep -f Broforce_beta.exe"` matched its own `sh -c`, so it never started the game, and it read a non-existent `run/hyprland.log`. Its HWC list (all CLIENT) is also not the fix's: the phone ran com.powos.app 2026.11.04-1230 (installed 13:31, build b6980d5b), and every APK ship after a7f7792c (17:37) was HELD (modules-first rc 11: phone offline over WireGuard). bf-quiet.sh now starts the game like bf-pacing, FAILs unless PowosWindowActivity is focused + resumed and the game's processes use >= 25 % CPU in every sample (bf-quiet-verdict.py), and logs the app versionName and SF blur lines with the HWC list.
+
 ## How to re-measure
 
 `tools/phone/adb.sh shell "su -c 'sh -s'" < design-qa/bf-fps-20261103/sample.sh` (30 s, read-only; divide the

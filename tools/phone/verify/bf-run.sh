@@ -21,7 +21,7 @@ i0=$(irq); gs=""
 for m in $(seq 1 26); do
   sleep 30
   [ "${NO_START:-}" ] || { [ "$(irq)" != "$i0" ] && { echo "user input $(date +%T) - stopping"; break; }; }
-  g=$("$A" shell "pgrep -f Broforce_beta.exe | head -1" | tr -d '\r')
+  g=$("$A" shell "pgrep -f '[B]roforce_beta[.]exe' | head -1" | tr -d '\r')
   echo "$(date +%T) game=${g:-none} $("$A" shell "tail -1 /data/local/tmp/cv/bf.log" | tr -d '\r')"
   [ -n "$g" ] && pill "game up: sampling memory + frames $(( ${gs:-0} ? $(date +%s) - ${gs:-0} : 0 ))/600 s"
   if [ -n "$g" ]; then gs=${gs:-$(date +%s)}; "$A" shell "su -c 'sh /data/local/tmp/powos-sf-latency.sh \"Broforce|steam_app|powos|SurfaceView\"'" | head -4 | tee -a "$OUT/sf.txt"; fi
