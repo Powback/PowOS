@@ -21,7 +21,7 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
 [ $# -gt 0 ] || set -- base
 BF_ADB=$A . "$here/bf-lib.sh"   # pill <step>: the status pill's sub-step
-cfg_take "$@"; set -- "${CFG_ARGS[@]}"; [ $# -gt 0 ] || set -- base  # cfg:<x86|arm64> first: bf-lib.sh cfg_take
+cfg_take "$@"; set -- ${CFG_ARGS[@]+"${CFG_ARGS[@]}"}; [ $# -gt 0 ] || set -- base  # cfg:<x86|arm64>: bf-lib.sh cfg_take (bash 3.2-safe empty array)
 OUT=${OUT:-$HOME/.cache/powos-verify/bfp-$(date +%F_%H%M)}; mkdir -p "$OUT"
 APP_GIVEN=${APP:+1}; APP=${APP:-274190} WIN_NAME=${WIN_NAME:-}  # any Steam game; default the test case. WIN_NAME
 # (one word) only when its window isn't titled like Steam's name for it (bf-window.sh reads that name from the appmanifest).

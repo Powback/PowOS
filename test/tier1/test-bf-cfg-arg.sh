@@ -7,7 +7,9 @@ set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd); V=$ROOT/tools/phone/verify
 pass=0 fail=0
 ok() { if [ "$2" = "$3" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL $1: got '$2', want '$3'"; fi; }
-take() { bash -c 'BF_ADB=/bin/true . "$0"; cfg_take "$@"; set -- "${CFG_ARGS[@]}"; [ $# -gt 0 ] || set -- base; echo "${CFG_TO:--}|$*"' "$V/bf-lib.sh" "$@"; }
+# /bin/bash on the Mac is 3.2: an empty "${CFG_ARGS[@]}" under set -u is "unbound variable" (cfg:arm64 alone).
+SH=/bin/bash; [ -x "$SH" ] || SH=bash
+take() { "$SH" -c 'set -u; BF_ADB=/bin/true . "$0"; cfg_take "$@"; set -- ${CFG_ARGS[@]+"${CFG_ARGS[@]}"}; [ $# -gt 0 ] || set -- base; echo "${CFG_TO:--}|$*"' "$V/bf-lib.sh" "$@"; }
 ok "cfg + mode" "$(take cfg:arm64 base)" "arm64|base"
 ok "cfg + modes" "$(take cfg:x86 base cap60)" "x86|base cap60"
 ok "cfg alone" "$(take cfg:arm64)" "arm64|base"
@@ -15,7 +17,7 @@ ok "no cfg" "$(take base fifo)" "-|base fifo"
 ok "nothing" "$(take)" "-|base"
 ok "cfg after a mode" "$(take base cfg:arm64)" "arm64|base"
 for s in bf-pacing.sh bf-checker.sh; do
-  t=$(grep -n 'cfg_take "\$@"; set -- "\${CFG_ARGS\[@\]}"' "$V/$s" | head -1 | cut -d: -f1)
+  t=$(grep -nF 'cfg_take "$@"; set -- ${CFG_ARGS[@]+"${CFG_ARGS[@]}"}' "$V/$s" | head -1 | cut -d: -f1)
   u=$(grep -nE '^for (mode|v) in "\$@"|bf-frames.py|bf-checker.py|\$\*' "$V/$s" | grep -v '^[0-9]*:#' | head -1 | cut -d: -f1)
   ok "$s takes cfg: first" "$([ -n "$t" ] && [ -n "$u" ] && [ "$t" -lt "$u" ] && echo yes || echo "no (cfg_take line ${t:-none}, first use ${u:-none})")" yes
   ok "$s restores cfg" "$(grep -c 'cfg_restore' "$V/$s")" 1

@@ -16,7 +16,7 @@ here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
 [ $# -gt 0 ] || set -- base noncoherent noubwc sysmem nomsaa zeromem flushall nolrz zerowg relaxed
 OUT=${OUT:-$HOME/.cache/powos-verify/bfc-$(date +%F_%H%M)}; mkdir -p "$OUT"
 BF_ADB=$A . "$here/bf-lib.sh"   # pill <step>: the status pill's sub-step
-cfg_take "$@"; set -- "${CFG_ARGS[@]}"; [ $# -gt 0 ] || set -- base  # cfg:<x86|arm64> first: bf-lib.sh cfg_take
+cfg_take "$@"; set -- ${CFG_ARGS[@]+"${CFG_ARGS[@]}"}; [ $# -gt 0 ] || set -- base  # cfg:<x86|arm64>: bf-lib.sh cfg_take (bash 3.2-safe empty array)
 irq() { "$A" shell "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts" | tr -d '\r'; }
 asuser() { local n=$1; shift
   "$A" shell "su -c 'cp /data/local/tmp/powos-$n /data/powos/root/var/tmp/powos-$n; chmod 644 /data/powos/root/var/tmp/powos-$n; sh /data/powos/powos-run.sh \"sh /var/tmp/powos-$n $*\"'" 2>&1 | grep -v sysvipc | tr -d '\r'; }
