@@ -1,0 +1,322 @@
+From: PowOS <powos@localhost>
+Subject: [PATCH] xwayland: KGSL surfaceless flips a client's DRI3 buffer
+
+lfdevs's 0003 refused every Present flip on KGSL surfaceless, so each frame of a full-screen game (Broforce:
+Wine X11 Vulkan WSI + DXVK) cost Xwayland a fence wait, a window-sized glamor copy and a glFinish before the
+compositor drew the window again (Xwayland 19-20 % CPU at 38 fps, bf-quiet 2026-11-05 04:19). The copy path is
+only needed for Xwayland's own pixmaps (EGL image export); a client's DRI3 buffer already is a dma-buf (0003 keeps
+its planes), so it goes to the compositor as is (linux-dmabuf, the pixmap's depth format) and Present flips it
+when upstream's rules allow (full-size toplevel, unclipped, not redirected). No Xwayland fence on it: the client's
+own GPU fence is on the dma-buf and KWin waits on it before sampling.
+A flip whose frame callback never comes ends after 100 ms on KGSL (a workaround for 0004's stale callbacks), not 1 s.
+One "Present flips / copies (why)" line per 30 s (xwayland-kgsl-flip-stats.h, test/flip-stats-test.c).
+---
+diff --git a/hw/xwayland/xwayland-glamor-gbm.c b/hw/xwayland/xwayland-glamor-gbm.c
+index 3a5304b..160a988 100644
+--- a/hw/xwayland/xwayland-glamor-gbm.c
++++ b/hw/xwayland/xwayland-glamor-gbm.c
+@@ -1310,6 +1310,66 @@ init_buffer_params_fallback(struct xwl_pixmap *xwl_pixmap,
+     return TRUE;
+ }
+ 
++/*
++ * PowOS (patch 0013): a client's DRI3 buffer on KGSL surfaceless is handed to the compositor as the dma-buf the
++ * client gave us (its planes, strides, offsets, format and modifier, kept by 0003), so Present can flip it - no
++ * EGL image export (that path exists for Xwayland's own pixmaps) and no window-sized glamor copy per frame.
++ * Fences: the client's GPU fence is already on the dma-buf (Mesa attaches a KGSL fence on every present) and the
++ * compositor waits on it before sampling (KWin: EXPORT_SYNC_FILE readiness check), so no Xwayland fence is added -
++ * Xwayland never draws into this buffer.
++ */
++Bool
++xwl_glamor_kgsl_pixmap_can_flip(PixmapPtr pixmap)
++{
++#ifdef DRI3
++    struct xwl_pixmap *xwl_pixmap = xwl_pixmap_get(pixmap);
++    int plane;
++
++    if (!xwl_pixmap || !xwl_pixmap->kgsl_dri3_import || xwl_pixmap->kgsl_num_fds < 1)
++        return FALSE;
++    for (plane = 0; plane < xwl_pixmap->kgsl_num_fds; plane++)
++        if (xwl_pixmap->kgsl_fds[plane] < 0)
++            return FALSE;
++    return TRUE;
++#else
++    return FALSE;
++#endif /* DRI3 */
++}
++
++static Bool
++init_buffer_params_kgsl_dri3(PixmapPtr          pixmap,
++                             struct xwl_pixmap *xwl_pixmap,
++                             uint32_t          *format,
++                             uint64_t          *modifier,
++                             int               *num_planes,
++                             int               *prime_fds,
++                             uint32_t          *strides,
++                             uint32_t          *offsets)
++{
++#ifdef DRI3
++    int i;
++
++    for (i = 0; i < xwl_pixmap->kgsl_num_fds; i++) {
++        prime_fds[i] = dup(xwl_pixmap->kgsl_fds[i]);
++        if (prime_fds[i] < 0) {
++            while (i--)
++                close(prime_fds[i]);
++            return FALSE;
++        }
++        strides[i] = xwl_pixmap->kgsl_strides[i];
++        offsets[i] = xwl_pixmap->kgsl_offsets[i];
++    }
++    *num_planes = xwl_pixmap->kgsl_num_fds;
++    /* The pixmap's depth, as upstream's wl_buffers: kgsl_format is the GLES import's (ARGB8888 for depth 24), which
++     * would give a depth-24 game window an alpha channel in the compositor. */
++    *format = wl_drm_format_for_depth(pixmap->drawable.depth);
++    *modifier = xwl_pixmap->kgsl_modifier;   /* LINEAR (all 0003 advertises) or INVALID: both go out as dma-bufs */
++    return TRUE;
++#else
++    return FALSE;
++#endif /* DRI3 */
++}
++
+ static Bool
+ init_buffer_params_kgsl_surfaceless(struct xwl_screen *xwl_screen,
+                                     PixmapPtr          pixmap,
+@@ -1445,8 +1505,9 @@ xwl_glamor_pixmap_get_wl_buffer(PixmapPtr pixmap)
+     xwl_pixmap = xwl_pixmap_get(pixmap);
+ 
+     if (xwl_pixmap->buffer) {
+-        /* PowOS: GPU-fenced instead of lfdevs's glFinish (see xwl_glamor_kgsl_fence_wl_buffer). */
+-        if (xwl_glamor_is_kgsl_surfaceless(xwl_screen))
++        /* PowOS: GPU-fenced instead of lfdevs's glFinish (see xwl_glamor_kgsl_fence_wl_buffer); a client's DRI3
++         * buffer (0013: flipped as is) carries the client's own fence and Xwayland never draws into it. */
++        if (xwl_glamor_is_kgsl_surfaceless(xwl_screen) && !xwl_glamor_kgsl_pixmap_can_flip(pixmap))
+             xwl_glamor_kgsl_fence_wl_buffer(xwl_screen, xwl_pixmap);
+         /* Buffer already exists. */
+         return xwl_pixmap->buffer;
+@@ -1455,7 +1516,10 @@ xwl_glamor_pixmap_get_wl_buffer(PixmapPtr pixmap)
+     if (!xwl_pixmap->bo && !xwl_glamor_is_kgsl_surfaceless(xwl_screen))
+        return NULL;
+ 
+-    if (xwl_glamor_is_kgsl_surfaceless(xwl_screen)) {
++    if (xwl_glamor_is_kgsl_surfaceless(xwl_screen) && xwl_glamor_kgsl_pixmap_can_flip(pixmap)) {
++        if (!init_buffer_params_kgsl_dri3(pixmap, xwl_pixmap, &format, &modifier, &num_planes, prime_fds, strides, offsets))
++            return NULL;
++    } else if (xwl_glamor_is_kgsl_surfaceless(xwl_screen)) {
+         if (!init_buffer_params_kgsl_surfaceless(xwl_screen, pixmap,
+                                                  &format,
+                                                  &modifier,
+@@ -1535,14 +1599,19 @@ xwl_glamor_pixmap_get_wl_buffer(PixmapPtr pixmap)
+ 
+     /* PowOS: a KGSL buffer's plane-0 fd stays open for its write fences; a new wl_buffer (the first commit, or a
+      * forced-commit refresh) is fenced like a reused one. */
+-    for (i = 0; i < num_planes; i++) {
+-        if (i == 0 && xwl_pixmap->buffer && xwl_glamor_is_kgsl_surfaceless(xwl_screen))
+-            xwl_glamor_kgsl_keep_wl_fd(xwl_pixmap, prime_fds[0]);
+-        else
+-            close(prime_fds[i]);
++    {
++        /* PowOS 0013: a client's DRI3 buffer keeps no fence fd and gets no Xwayland fence (see above). */
++        Bool fenced = xwl_glamor_is_kgsl_surfaceless(xwl_screen) && !xwl_glamor_kgsl_pixmap_can_flip(pixmap);
++
++        for (i = 0; i < num_planes; i++) {
++            if (i == 0 && xwl_pixmap->buffer && fenced)
++                xwl_glamor_kgsl_keep_wl_fd(xwl_pixmap, prime_fds[0]);
++            else
++                close(prime_fds[i]);
++        }
++        if (xwl_pixmap->buffer && fenced)
++            xwl_glamor_kgsl_fence_wl_buffer(xwl_screen, xwl_pixmap);
+     }
+-    if (xwl_pixmap->buffer && xwl_glamor_is_kgsl_surfaceless(xwl_screen))
+-        xwl_glamor_kgsl_fence_wl_buffer(xwl_screen, xwl_pixmap);
+ 
+     /* Add our listener now */
+     if (xwl_pixmap->buffer) {
+diff --git a/hw/xwayland/xwayland-glamor-gbm.h b/hw/xwayland/xwayland-glamor-gbm.h
+index e332b40..b5f8b57 100644
+--- a/hw/xwayland/xwayland-glamor-gbm.h
++++ b/hw/xwayland/xwayland-glamor-gbm.h
+@@ -48,6 +48,7 @@ Bool xwl_glamor_kgsl_refresh_dri3_pixmap(PixmapPtr pixmap);
+ int xwl_glamor_kgsl_export_read_fence(PixmapPtr pixmap);
+ void xwl_glamor_kgsl_copy_wait_note(int what);
+ void xwl_glamor_kgsl_copy_wait_ended(uint64_t waited_us);
++Bool xwl_glamor_kgsl_pixmap_can_flip(PixmapPtr pixmap);
+ 
+ /* Explicit buffer synchronization points */
+ Bool xwl_glamor_gbm_set_syncpts(struct xwl_window *xwl_window, PixmapPtr pixmap);
+diff --git a/hw/xwayland/xwayland-present.c b/hw/xwayland/xwayland-present.c
+index b0a3a7a..29a9af1 100644
+--- a/hw/xwayland/xwayland-present.c
++++ b/hw/xwayland/xwayland-present.c
+@@ -44,6 +44,7 @@
+ #include "xwayland-window.h"
+ #include "xwayland-window-buffers.h"
+ #include "xwayland-pixmap.h"
++#include "xwayland-kgsl-flip-stats.h"
+ 
+ #include "tearing-control-v1-client-protocol.h"
+ #include "linux-drm-syncobj-v1-client-protocol.h"
+@@ -59,6 +60,11 @@
+  */
+ #define TIMER_LEN_COPY      17  // ~60fps
+ #define TIMER_LEN_FLIP    1000  // 1fps
++/* HACK: (PowOS 0013) on KGSL a flip whose frame callback never comes ends after 100 ms, not 1 s - lfdevs's 0004 saw
++ * KGSL surfaces' frame callbacks go stale, and a stale one under upstream's 1 fps timer would freeze a flipping game
++ * for a second. Real fix: the compositor answers every frame callback of a shown surface (KWin anland window tasks
++ * do on every draw); then this goes back to TIMER_LEN_FLIP. */
++#define TIMER_LEN_FLIP_KGSL 100
+ 
+ static DevPrivateKeyRec xwl_present_window_private_key;
+ 
+@@ -193,7 +199,11 @@ xwl_present_reset_timer(struct xwl_present_window *xwl_present_window)
+ 
+         if (xwl_window && xwl_window->frame_callback &&
+             !xorg_list_is_empty(&xwl_present_window->frame_callback_list))
++#ifdef XWL_HAS_GLAMOR
++            timeout = xwl_glamor_is_kgsl_surfaceless(xwl_window->xwl_screen) ? TIMER_LEN_FLIP_KGSL : TIMER_LEN_FLIP;
++#else
+             timeout = TIMER_LEN_FLIP;
++#endif
+         else
+             timeout = TIMER_LEN_COPY;
+ 
+@@ -744,6 +754,29 @@ xwl_present_flush_fenced(WindowPtr window)
+     return fence;
+ }
+ 
++/* PowOS (patch 0013): the rule the latest check_flip refused on (XWL_NOFLIP_UNCHECKED after a yes or once a copy
++ * has been counted), and per 30 s how many presents flipped / were copied and why (xwayland-kgsl-flip-stats.h). */
++static enum xwl_kgsl_noflip xwl_present_kgsl_noflip = XWL_NOFLIP_UNCHECKED;
++static struct xwl_kgsl_flip_stats xwl_present_kgsl_flips;
++
++static void
++xwl_present_kgsl_flip_count(struct xwl_screen *xwl_screen, Bool flipped)
++{
++#ifdef XWL_HAS_GLAMOR
++    char line[384];
++
++    if (!xwl_glamor_is_kgsl_surfaceless(xwl_screen))
++        return;
++    if (flipped)
++        xwl_kgsl_flip_note_flip(&xwl_present_kgsl_flips, GetTimeInMicros());
++    else
++        xwl_kgsl_flip_note_copy(&xwl_present_kgsl_flips, xwl_present_kgsl_noflip, GetTimeInMicros());
++    xwl_present_kgsl_noflip = XWL_NOFLIP_UNCHECKED;
++    if (xwl_kgsl_flip_line(&xwl_present_kgsl_flips, GetTimeInMicros(), line, sizeof(line)))
++        ErrorF("%s", line);
++#endif /* XWL_HAS_GLAMOR */
++}
++
+ static Bool
+ xwl_present_check_flip(RRCrtcPtr crtc,
+                        WindowPtr present_window,
+@@ -761,6 +794,7 @@ xwl_present_check_flip(RRCrtcPtr crtc,
+     if (reason)
+         *reason = PRESENT_FLIP_REASON_UNKNOWN;
+ 
++    xwl_present_kgsl_noflip = XWL_NOFLIP_NO_WINDOW;
+     if (!xwl_window)
+         return FALSE;
+ 
+@@ -769,6 +803,8 @@ xwl_present_check_flip(RRCrtcPtr crtc,
+     if (!crtc)
+         return FALSE;
+ 
++    xwl_present_kgsl_noflip = XWL_NOFLIP_OFFSET;
++
+     /* Source pixmap must align with window exactly */
+     if (x_off || y_off)
+         return FALSE;
+@@ -777,23 +813,32 @@ xwl_present_check_flip(RRCrtcPtr crtc,
+     if (valid)
+         return FALSE;
+ 
++    xwl_present_kgsl_noflip = XWL_NOFLIP_SIZE;
+     /* Flip pixmap must have same dimensions as window */
+     if (present_window->drawable.width != pixmap->drawable.width ||
+             present_window->drawable.height != pixmap->drawable.height)
+         return FALSE;
+ 
+ #ifdef XWL_HAS_GLAMOR
+-    if (xwl_glamor_is_kgsl_surfaceless(xwl_window->xwl_screen))
++    /* PowOS (patch 0013): lfdevs's 0003 refused every flip here. Only a buffer Xwayland must export itself (its
++     * own pixmaps: EGL image export) needs the copy path; a client's DRI3 buffer already is a dma-buf, handed to
++     * the compositor as it is (xwl_glamor_kgsl_dri3_buffer_params), so a full-screen game's frames flip. */
++    xwl_present_kgsl_noflip = XWL_NOFLIP_NOT_DRI3;
++    if (xwl_glamor_is_kgsl_surfaceless(xwl_window->xwl_screen) &&
++        !xwl_glamor_kgsl_pixmap_can_flip(pixmap))
+         return FALSE;
+ #endif /* XWL_HAS_GLAMOR */
+ 
++    xwl_present_kgsl_noflip = XWL_NOFLIP_NO_BUFFER;
+     if (!xwl_pixmap_get_wl_buffer(pixmap))
+         return FALSE;
+ 
++    xwl_present_kgsl_noflip = XWL_NOFLIP_TOPLEVEL;
+     /* Window must be same region as toplevel window */
+     if ( !RegionEqual(&present_window->winSize, &toplvl_window->winSize) )
+         return FALSE;
+ 
++    xwl_present_kgsl_noflip = XWL_NOFLIP_CLIPPED;
+     /* Can't flip if window clipped by children */
+     if (!RegionEqual(&present_window->clipList, &present_window->winSize))
+         return FALSE;
+@@ -802,6 +847,7 @@ xwl_present_check_flip(RRCrtcPtr crtc,
+      * window's, e.g. because a client redirected this window or one of its
+      * parents.
+      */
++    xwl_present_kgsl_noflip = XWL_NOFLIP_REDIRECTED;
+     if (screen->GetWindowPixmap(xwl_window->surface_window) != screen->GetWindowPixmap(present_window))
+         return FALSE;
+ 
+@@ -810,19 +856,23 @@ xwl_present_check_flip(RRCrtcPtr crtc,
+      * dimensions as their xwl_window parent window. For the case of
+      * different sizes subsurfaces are presumably the way forward.
+      */
++    xwl_present_kgsl_noflip = XWL_NOFLIP_TOPLEVEL;
+     if (!RegionEqual(&xwl_window->toplevel->winSize, &present_window->winSize))
+         return FALSE;
+ 
+ #ifdef XWL_HAS_GLAMOR
++    xwl_present_kgsl_noflip = XWL_NOFLIP_SYNC;
+     if (!xwl_glamor_supports_implicit_sync(xwl_window->xwl_screen) &&
+         !xwl_window->xwl_screen->explicit_sync)
+         return FALSE;
+ 
++    xwl_present_kgsl_noflip = XWL_NOFLIP_DEPTH;
+     if (xwl_window->xwl_screen->glamor &&
+         !xwl_glamor_check_flip(present_window, pixmap))
+         return FALSE;
+ #endif /* XWL_HAS_GLAMOR */
+ 
++    xwl_present_kgsl_noflip = XWL_NOFLIP_UNCHECKED;
+     return TRUE;
+ }
+ 
+@@ -1157,6 +1207,8 @@ retry:
+                 struct xwl_window *xwl_window = xwl_window_from_window(window);
+                 PixmapPtr old_pixmap = screen->GetWindowPixmap(window);
+ 
++                xwl_present_kgsl_flip_count(xwl_screen, TRUE);  /* PowOS 0013 */
++
+                 /* Replace window pixmap with flip pixmap */
+ #ifdef COMPOSITE
+                 vblank->pixmap->screen_x = old_pixmap->screen_x;
+@@ -1194,6 +1246,7 @@ retry:
+                 return;
+             }
+ 
++            xwl_present_kgsl_noflip = XWL_NOFLIP_FAILED;  /* PowOS 0013 */
+             vblank->flip = FALSE;
+             /* re-execute, falling through to copy */
+             goto retry;
+@@ -1206,6 +1259,8 @@ retry:
+         else if (xwl_present_window->flip_active)
+             xwl_present_flips_stop(window);
+ 
++        xwl_present_kgsl_flip_count(xwl_screen, FALSE);  /* PowOS 0013 */
++
+ #ifdef XWL_HAS_GLAMOR
+         if (xwl_glamor_is_kgsl_surfaceless(xwl_screen) &&
+             !xwl_glamor_kgsl_refresh_dri3_pixmap(vblank->pixmap)) {
