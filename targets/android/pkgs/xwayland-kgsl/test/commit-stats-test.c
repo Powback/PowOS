@@ -29,12 +29,14 @@ int main(void)
     xwl_kgsl_commit_note(&s, XWL_COMMIT_CURSOR, &cursor, 1000000);
     xwl_kgsl_commit_note(&s, (enum xwl_kgsl_commit_site) 99, NULL, 1000000);   /* out of range: configure */
     xwl_kgsl_commit_note_frame(&s, 1, 1000000);
+    s.paced = 5;
+    s.skipped = 3;
     /* under 30 s: nothing yet */
     assert(!xwl_kgsl_commit_line(&s, 20000000, line, sizeof(line)));
     assert(xwl_kgsl_commit_line(&s, 31000000, line, sizeof(line)));
     assert(strcmp(line, "Xwayland KGSL: last 30s: 1803 surface commits (901 with damage): flip=900/900 "
                         "post-damage=1/0 pointer-hint=900/0 configure=1/0 cursor=1/1; frame callbacks 900, "
-                        "frame timeouts 1\n") == 0);
+                        "frame timeouts 1; async flips paced 5, skipped 3\n") == 0);
     /* a new period started, empty */
     assert(s.commits[XWL_COMMIT_FLIP] == 0 && s.period_start_us == 31000000);
     assert(!xwl_kgsl_commit_line(&s, 62000000, line, sizeof(line)));
