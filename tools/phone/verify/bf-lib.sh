@@ -15,7 +15,8 @@ if [ -n "${BF_ADB:-}" ]; then
   # cfg:<x86|arm64> as a check's FIRST argument (bf-pacing.sh, bf-checker.sh): the game runs under that compat tool
   # for this check only (bf-cfg-phone.sh), the user's choice back at the end. cfg_take "$@" sets CFG_TO (empty = as
   # installed) and CFG_ARGS (the rest); cfg_set before the first launch, cfg_restore in the check's restore().
-  cfg_take() { CFG_TO=; case ${1:-} in cfg:*) CFG_TO=${1#cfg:}; shift ;; esac; CFG_ARGS=("$@"); }
+  cfg_take() { local a; CFG_TO= CFG_ARGS=()  # a cfg: anywhere counts (the last one wins); never a mode
+    for a in "$@"; do case $a in cfg:*) CFG_TO=${a#cfg:} ;; *) CFG_ARGS+=("$a") ;; esac; done; }
   cfg_run() { local here_; here_=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
     "$BF_ADB_PATH" push "$here_/bf-cfg-phone.sh" /data/local/tmp/powos-bf-cfg-phone.sh >/dev/null \
       && "$BF_ADB_PATH" push "$here_/bf-stop.sh" /data/local/tmp/powos-bf-stop.sh >/dev/null \
