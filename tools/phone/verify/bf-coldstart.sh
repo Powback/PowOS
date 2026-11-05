@@ -1,6 +1,6 @@
 #!/bin/bash
 # lanes: phone
-# bf-coldstart.sh [app:<appid>] [win:<window title>] [setup tokens] [cold|steam|fexcache]...: (Mac side, queue it:
+# bf-coldstart.sh [app:<appid>] [win:<window title>] [setup tokens] [cold|steam|frozen|fexcache]...: (Mac side, queue it:
 # queue.sh add <board-task> bf-coldstart.sh) where a Steam game's launch time goes (default Broforce 274190; any
 # installed game with app:<id>, e.g. app:1167630 Teardown; its window title defaults to its Steam name): per variant, tap (the drawer's path) -> Steam's launch -> pressure-vessel -> wineserver
 # -> the game's exe -> its window -> its Android task (+ a screenshot) -> its first new frame, Steam's state at the tap and the shader/FEX cache sizes

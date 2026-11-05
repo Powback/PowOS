@@ -7,6 +7,9 @@
 # The evaluator's own pressure-vessel / wineserver don't count as the game's. Variants:
 #   cold      nothing running (bf-stop.sh --steam first): Steam's own start included
 #   steam     Steam left running (out of sight, so frozen by unified sleep), only the game closed
+#   frozen    as steam, but Steam frozen (powos-sleep-gui sleep steam) FROZEN_S (100) s before the tap: the user's path
+#             after a while in PowOS - its CM server drops a silent client 79 s into a freeze, and the tap then waited
+#             Steam's 11 s reconnect backoff (2026-11-05: handoff 12.7 s) unless unified sleep kept the link (link_watch)
 #   fexcache  as steam, with FEX's code cache on for the game (FEX_ENABLECODECACHINGWIP=1 through PowOS's Proton
 #             user_settings.py: ~/.config/powos/proton-settings.json, removed after; a Proton without ours: its own
 #             user_settings.py, removed after) and FEXOfflineCompiler process-all between two such runs; lists the files FEX wrote
@@ -143,7 +146,12 @@ cs_ready_steam() {
     *) close_game; [ "$(cat /proc/"$(steam_pid)"/comm 2>/dev/null)" = steam ] || { pill "starting Steam (for the warm runs)"; setsid -f steam -silent >/dev/null 2>&1 </dev/null; sleep 60; }
        # A -silent Steam has no window, so unified sleep never freezes it (seen 2026-10-23: resident Steam awake 20 min
        # after its start); a Steam the user had on screen is frozen 15 s after it went out of sight. 25 s at most.
-       pill "waiting for Steam to sleep (out of sight)"; for _ in $(seq 25); do [ -n "$(cg)" ] && break; touched; sleep 1; done ;;
+       pill "waiting for Steam to sleep (out of sight)"; for _ in $(seq 25); do [ -n "$(cg)" ] && break; touched; sleep 1; done
+       if [ "$1" = frozen ]; then
+         [ -n "$(cg)" ] || powos-sleep-gui sleep steam >/dev/null 2>&1
+         pill "Steam frozen ${FROZEN_S:-100} s before the tap"; for _ in $(seq "${FROZEN_S:-100}"); do touched; sleep 1; done
+         echo "   frozen ${FROZEN_S:-100} s: cgroup '$(cg)', CM link $(steam_cm_state)"
+       fi ;;
   esac
 }
 # cs_poll_launch: poll the launch's process tree / windows / logs for stage timestamps (into the global `seen`

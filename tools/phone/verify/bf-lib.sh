@@ -113,6 +113,13 @@ active() { printf '%d' "$(xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | awk '{pri
 # bf-resume "FAIL freeze-auto" 02:58 while powos-sleep-gui had frozen Steam at 02:56:50).
 cg2() { sed -n 's/^0:://p' "/proc/$1/cgroup" 2>/dev/null; }
 cg() { local c; c=$(cg2 "$(steam_pid)"); case $c in */powos/sleep/*) echo "/sys/fs/cgroup$c" ;; esac; }
+# steam_cm_state: Steam's CM link from the kernel (no thaw): the newest ConnectionCompleted's local port in
+# connection_log and its TCP state - "live" (ESTABLISHED), "closed <hex state>" (the server dropped it), "none".
+steam_cm_state() {
+  local p s; p=$(grep -a -o -E 'ConnectionCompleted\(\) \([^)]*\) local address \([^)]*:[0-9]+\)' "$HOME/.local/share/Steam/logs/connection_log.txt" 2>/dev/null | tail -1 | sed -E 's/.*:([0-9]+)\)$/\1/')
+  [ -n "$p" ] || { echo none; return; }
+  s=$(awk -v p=":$(printf '%04X' "$p")" 'FNR > 1 && substr($2, length($2) - 4) == p { print $4; exit }' /proc/net/tcp /proc/net/tcp6)
+  case $s in 01) echo live ;; '') echo none ;; *) echo "closed $s" ;; esac; }
 watcher() { grep -i "steam\|app $APP" "$GLOG" | tail -${1:-2} | cut -c1-200 | tr '\n' '|'; }
 # Frames of an X window: Xlib's XGetImage from python3 + ctypes. Not ffmpeg's x11grab: FFmpeg 9 only grabs through
 # MIT-SHM, and Android's kernel has no System V shared memory - "Could not get shared memory buffer" / "Error during

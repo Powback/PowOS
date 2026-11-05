@@ -320,7 +320,7 @@ launcher): a frozen launcher running no game is thawed for 1.5 s every 50 s (its
 frozen again, not logged), and thawed to reconnect at once when the kernel shows its link closed anyway (the backoff
 then runs off the tap's path; reconnect_poll puts it back to sleep once logged on). Off screen: no pulses (battery),
 reconnect_ahead at screen on as before. Test: test/tier1/test-sleep-gui-screen.py LinkWatch. HACK row: REMOTE-POWOS §4.
-Expected: the frozen case back to the awake numbers (-11.7 s: 30.3 -> ~16 s).
+Pulse checked on the phone (job 144859, the same timings by hand: Sleep, then Wake 1.5 s / Sleep every 50 s): the link stayed ESTABLISHED through 200 s frozen (it died at 79 s without), no disconnect in connection_log. Expected: the frozen case back to the awake numbers (-11.7 s: 30.3 -> ~16 s); end-to-end check `bf-coldstart.sh frozen` (new variant: Steam frozen FROZEN_S=100 s before the tap, its link state printed) after the sleep-gui install.
 
 **Clocks (ruled out).** The vendor's oiface (thread `horaeCb`) holds cpufreq caps of 2054 MHz (A715) / 1708 MHz (X3 prime,
 of 3187) at 28-33 C, with or without the vendor game class (sys_thermal_control_config.xml level 2; category_4 should
