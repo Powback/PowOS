@@ -225,3 +225,10 @@ on - wineserver round trips (Wine's server calls under Mono's startup: file/regi
 setup), or futex waits on its own threads (gdb stacks of the main thread during 8-11 s, as bf-stack-syms.py does for
 hangs). Candidates by result: wineserver-bound -> esync/fsync/ntsync in Proton ARM64 (PROTON_NO_FSYNC unset? the
 kernel's futex_waitv), X-bound -> KWin/Xwayland side; own-thread waits -> nothing outside the game.
+
+**LPROF-OTHERS result (job 20261105-095416-32959, a slower run: window 11.1, frame 19.2 s):** beside the game,
+**wineserver is busy 35-46 % of a core through the whole window -> frame span** (3.3 core-s; next: com.powos.app 0.9,
+steam 0.9, winedevice.exe 0.5), while the game's two busiest Wine threads run 40-97 %. Unity's start is a stream of
+Wine server calls, so the lead is wineserver round trips: next, check whether Proton ARM64 uses fsync/ntsync here
+(`PROTON_LOG=1`: "fsync: up and running" / ntsync, `/dev/ntsync` in the kernel, `PROTON_NO_FSYNC` unset) and which
+requests dominate (`WINEDEBUG=+server` counts over the load).
