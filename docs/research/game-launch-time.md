@@ -378,3 +378,40 @@ Nothing clears the 0.5 s bar (run-to-run noise is ~0.3 s), so nothing ships. Fin
   thread is doing then (DXVK_HUD/`DXVK_LOG_LEVEL=debug` timings, Turnip BO alloc/upload cost on kgsl), not Wine sync.
 - Unity 2017.4 boot.config has only `wait-for-native-debugger=0`; gfx-jobs options are left untested (render-side
   experimental path in 2017.4, visual risk, and the wait is in DXVK either way).
+
+## Unity window -> frame: what the render path does during the load (2026-11-05, agent/load-uploads)
+
+Broforce 274190, `powos-proton-arm64` (steam -36), DXVK v3.1.1-97 (Proton Experimental ARM64, aarch64 build), Turnip
+with `TU_DEBUG=noubwc`. `bf-coldstart steam` + a 20 Hz sampler from the exe's start (scratch `lu-run.sh`/`luwatch.py`):
+kgsl `gpu_busy_percentage` + `gpuclk`, the state/syscall/wchan of main, UnityGfxDeviceWorker, dxvk-cs, dxvk-submit,
+dxvk-queue, UnityPreload, and (one run) the DXVK debug log timestamped as it is written. Jobs 20261105-162655..163940.
+
+**The render path is idle for most of the 8.5 s.** Seconds from the exe (window ~1-2 s, first frame ~9.5-10.5 s):
+
+| span | GPU busy | GPU clock | dxvk-cs / submit / queue | main | DXVK log (debug) |
+|---|---|---|---|---|---|
+| 0-6.5 | **0-4 %** | 220 MHz (floor) | futex-idle 100 % | running ~90 % (3-7 s), Wine-sync waits at 1.5-2.5 s | 145 shader creates, all "Shader cache hit"; swapchain at 5.6 s; 5 memory chunks mapped |
+| 6.5-10.5 | 11-43 % | 220 MHz | queue: `adreno_drawctxt_wait` (GPU fences) ~25 % | Wine-sync waits ~60 % | a few shaders |
+| after the frame | 55-80 % | 295-680 MHz | | | |
+
+So it is not uploads, staging allocations or pipeline compiles: over the whole launch DXVK logs no pipeline compile,
+only 5 chunk allocations (`Mapped memory region`), dxvk-cs/submit are 85-87 % futex-idle (waiting for work), and the
+GPU does nothing until ~3 s before the first frame. The UBWC-off linear path can't matter either (no GPU work to slow
+down). Main's 39 % Wine-sync wait (agent/unity-sync) falls mostly in the last ~3 s, where UnityGfxDeviceWorker waits
+on DXVK (plain futex) and DXVK's queue thread on GPU fences: the first frames' GPU work, at the 220 MHz floor (the
+msm-adreno-tz governor ramps only after the frame). Before that, main runs emulated Mono/Unity code (the previous
+sections' cost); the dxvk.conf knobs (`d3d11.cachedDynamicResources`, `dxvk.numCompilerThreads`, staging size) have
+nothing to act on.
+
+**GPU floor during the load (A/B, `min_pwrlevel` 7 -> 2 = 550 MHz from the tap, restored after):**
+
+| variant | window -> frame run 1 | run 2 | mean |
+|---|---|---|---|
+| base | 8615 | 8479 | 8547 |
+| GPU min 550 MHz | 8299 | 8316 | 8308 (-0.24 s) |
+
+GPU busy in 6.5-10.5 s drops to 12-40 % at 550 MHz but the frame comes only ~0.24 s sooner: under the 0.5 s bar and
+inside run-to-run noise (~0.3 s), so nothing ships (it would also cost GPU power for every game launch). Conclusion:
+**window -> first frame is CPU on Unity's main thread (emulated Mono/Unity init), not the D3D11 -> DXVK -> Turnip
+path.** Next lead, if any: the emulated code itself (FEX: Mono's JIT output is uncachable; Unity 2017.4 player init) -
+e.g. FEX `SMCChecks`/`Multiblock`/`ParanoidTSO` costs on main, or simpleperf of main's JIT blocks by Mono symbol.
