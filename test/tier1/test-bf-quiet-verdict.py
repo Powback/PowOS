@@ -112,6 +112,29 @@ class Scripts(unittest.TestCase):
         self.assertIn("asuser bf-start.sh", src)
         self.assertIn("bf-quiet-verdict.py", src.splitlines()[-1])
 
+    def test_hwc_blur_lines_only_from_the_powered_display(self):
+        # 11-05 04:19 and 08:02: the folded phone's OFF inner display kept 7 stale clientType=BLUR output layers (same
+        # pointers 4 h apart) and read as "blur is back"; the active cover display had none, all 7 layers DEVICE.
+        src = (V / "bf-quiet.sh").read_text()
+        fn = re.search(r"^hwc\(\) \{.*?sort -u; \}$", src, re.S | re.M).group(0)
+        dump = "\n".join([
+            "Display 111 (inactive) HWC layers:", "Display 222 (active) HWC layers:",
+            " game#1", "   0 | 0 | 0 | DEVICE | x",
+            'Display 111 (physical, "")', "    powerMode=Off",
+            "      forceClientComposition=true clientType=BLUR clearClientTarget=false stale",
+            'Display 222 (physical, "")', "    powerMode=On",
+            "      blend=NONE (1) alpha=1.000000 backgroundBlurRadius=0 composition type=DEVICE (2) ",
+            "SurfaceFlinger global state:", "      clientType=BLUR after-the-blocks"])
+        with tempfile.TemporaryDirectory() as d:
+            adb = Path(d) / "adb"; fx = Path(d) / "sf.txt"; fx.write_text(dump + "\n")
+            adb.write_text(f"#!/bin/sh\ncat {fx}\n"); adb.chmod(0o755)
+            run = lambda: subprocess.run(["bash", "-c", fn + "\nhwc end"], capture_output=True, text=True,
+                                         env={**os.environ, "A": str(adb), "OUT": d}).stdout
+            out = run()
+            self.assertIn("hwc DEVICE  game#1", out)
+            self.assertNotIn("blur", out)
+            fx.write_text(dump.replace("222 (physical", "000 (physical").replace("111 (physical", "222 (physical") + "\n")
+            self.assertIn("clientType=BLUR clearClientTarget=false stale", run())
 
 if __name__ == "__main__":
     unittest.main()
