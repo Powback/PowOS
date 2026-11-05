@@ -117,3 +117,15 @@ here, 11448320):
   heap with the same pitch - the test copies that layout, not the buffers).
 
 Next: step 2 (app side, flag off) then 1/3/4 as above - the "high risk" row is retired.
+
+## Step 2 (app side, flag OFF): landed by direct-scanout-1
+
+`targets/android/app/engine/src/main/jni/direct_scanout.c` (template splice + one-time self-test + child
+ASurfaceControl `powos-direct` + release fences -> `INPUT_TYPE_DIRECT_RELEASE`), protocol in `protocol.h`
+(`FRAME_TAG_DIRECT` + `struct direct_frame` on the fence channel; `INPUT_TYPE_DIRECT_CAPS` / `_RELEASE`),
+`display_consumer.c` `take_direct_frame`, wired in `native_consumer.c` for window tasks only. Off unless
+`setprop debug.powos.direct_scanout 1` (read at each connect): with it off no caps are sent, so KWin never sends a
+direct frame and the render loop is the composited one unchanged (the only difference: the fence channel's cmsg
+buffer has room for 2 fds). Next: KWin side (step 4, ~1 d: send the client dma-buf on `FRAME_TAG_DIRECT` when
+`directBlocker()` is empty and caps were offered, hold it until `DIRECT_RELEASE`), then step 5 device proof with
+the property on. Step 3's single-transaction switch is a HACK row for now (direct_scanout.c, direct_hide).

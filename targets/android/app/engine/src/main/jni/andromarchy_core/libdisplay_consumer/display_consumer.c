@@ -27,6 +27,11 @@ struct display_ctx {
     int      wake_fd;         /* PowOS: the owner's stop eventfd (set_wake_fd; -1 none, never closed here) */
     bool     fallback;
     bool     buffer_pending;
+    /* PowOS: the last frame's direct part (protocol.h FRAME_TAG_DIRECT), until take_direct_frame: its fds owned here */
+    bool     direct_valid;
+    struct direct_frame direct;
+    int      direct_fence;
+    int      direct_dmabuf;
 
     /* The display lib is called concurrently: the render thread (select_dmabuf /
      * refresh_done / push_dmabufs), the event thread (poll_output_event /
@@ -382,6 +387,10 @@ void disconnect(display_ctx *ctx)
     if (ctx->buf_ready_efd >= 0)   close(ctx->buf_ready_efd);
     if (ctx->fence_fd >= 0)        close(ctx->fence_fd);
     if (ctx->audio_fd >= 0)        close(ctx->audio_fd);
+    if (ctx->direct_valid) {
+        if (ctx->direct_fence >= 0)  close(ctx->direct_fence);
+        if (ctx->direct_dmabuf >= 0) close(ctx->direct_dmabuf);
+    }
     free_resources(ctx);
     pthread_mutex_destroy(&ctx->state_lock);
     pthread_mutex_destroy(&ctx->data_lock);
@@ -488,7 +497,7 @@ int refresh_done_tagged(display_ctx *ctx, int *fence_out, uint8_t *tag_out)
     char b;
     struct iovec iov = { .iov_base = &b, .iov_len = 1 };
     union {
-        char buf[CMSG_SPACE(sizeof(int))];
+        char buf[CMSG_SPACE(2 * sizeof(int))];   /* PowOS: a direct frame carries fence + dma-buf */
         struct cmsghdr align;
     } cmsg;
     struct msghdr msg = {
@@ -510,8 +519,42 @@ int refresh_done_tagged(display_ctx *ctx, int *fence_out, uint8_t *tag_out)
     if (n < 0)
         return -1;   /* no frame message read (the channel was swapped under us): nothing to show */
     struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
-    if (c && c->cmsg_type == SCM_RIGHTS)
-        memcpy(&rfence, CMSG_DATA(c), sizeof(int));
+    int fds[2] = { -1, -1 }, nfds = 0;
+    if (c && c->cmsg_type == SCM_RIGHTS) {
+        nfds = (int)((c->cmsg_len - CMSG_LEN(0)) / sizeof(int));
+        if (nfds > 2) nfds = 2;
+        memcpy(fds, CMSG_DATA(c), nfds * sizeof(int));
+    }
+    if ((uint8_t)b & FRAME_TAG_DIRECT) {
+        /* PowOS: a direct frame - its struct follows the byte on the stream (same sendmsg: already here or in flight). */
+        struct direct_frame df;
+        size_t got = 0;
+        while (got < sizeof(df)) {
+            struct pollfd dp = { .fd = ctx->fence_fd, .events = POLLIN };
+            if (poll(&dp, 1, 1000) <= 0) break;
+            ssize_t r = recv(ctx->fence_fd, (char *)&df + got, sizeof(df) - got, MSG_DONTWAIT);
+            if (r <= 0) break;
+            got += (size_t)r;
+        }
+        if (got != sizeof(df)) {
+            for (int i = 0; i < nfds; i++) close(fds[i]);
+            enter_fallback(ctx);
+            return -1;
+        }
+        int k = 0;
+        if (ctx->direct_valid) {   /* never taken: drop it */
+            if (ctx->direct_fence >= 0) close(ctx->direct_fence);
+            if (ctx->direct_dmabuf >= 0) close(ctx->direct_dmabuf);
+        }
+        ctx->direct = df;
+        ctx->direct_fence = (df.flags & DIRECT_FLAG_FENCE) && k < nfds ? fds[k++] : -1;
+        ctx->direct_dmabuf = (df.flags & DIRECT_FLAG_NEW_FD) && k < nfds ? fds[k++] : -1;
+        for (; k < nfds; k++) close(fds[k]);
+        ctx->direct_valid = true;
+    } else {
+        rfence = fds[0];
+        if (nfds > 1) close(fds[1]);
+    }
     *fence_out = rfence;
     if (tag_out)
         *tag_out = (uint8_t)b;
@@ -700,4 +743,18 @@ void push_input_event_with_fds(display_ctx *ctx, const struct InputEvent *event,
 
     if (!ok)
         enter_fallback(ctx);   /* outside the lock */
+}
+
+/* PowOS: the direct part of the frame refresh_done_tagged just returned (tag FRAME_TAG_DIRECT): 1 and the frame, its
+ * acquire fence and (first time for the id) dma-buf - the caller owns both fds (-1 = none); 0 = none pending. */
+int take_direct_frame(display_ctx *ctx, struct direct_frame *out, int *fence_out, int *dmabuf_out)
+{
+    if (!ctx->direct_valid)
+        return 0;
+    *out = ctx->direct;
+    *fence_out = ctx->direct_fence;
+    *dmabuf_out = ctx->direct_dmabuf;
+    ctx->direct_valid = false;
+    ctx->direct_fence = ctx->direct_dmabuf = -1;
+    return 1;
 }

@@ -73,6 +73,35 @@ struct bufs_ext {
 } __attribute__((packed));
 #define FRAME_TAG_PRETRANSFORM 0x80
 
+/* PowOS: direct scanout of a full-screen window task (docs/research/window-task-direct-scanout.md). Off unless the
+ * consumer offers it (property debug.powos.direct_scanout=1 in the app):
+ *  - consumer -> producer: INPUT_TYPE_DIRECT_CAPS (input_action.action = DIRECT_CAP_* bits, 0 = stop sending direct
+ *    frames) after every connect, and again with 0 when its self-test refuses the path.
+ *  - producer -> consumer: instead of drawing into the selected buffer, a frame whose fence-channel byte has
+ *    FRAME_TAG_DIRECT is followed (same sendmsg, stream) by a struct direct_frame; SCM_RIGHTS on that sendmsg: the
+ *    acquire fence (DIRECT_FLAG_FENCE) then the client buffer's dma-buf (DIRECT_FLAG_NEW_FD, the first time an id is
+ *    sent or after DIRECT_FORGET). The consumer shows it on its own child surface and drops the selected buffer.
+ *  - consumer -> producer: INPUT_TYPE_DIRECT_RELEASE (input_action.action = id) once SurfaceFlinger no longer reads
+ *    that buffer: the producer may let the client reuse it.
+ * HACK: capability as an input event (an older producer ignores unknown input types) - no versioned handshake yet. */
+#define FRAME_TAG_DIRECT 0x40
+#define INPUT_TYPE_DIRECT_CAPS 12
+#define INPUT_TYPE_DIRECT_RELEASE 13
+#define DIRECT_CAP_XR24_LINEAR 1u
+#define DIRECT_FLAG_NEW_FD 1u
+#define DIRECT_FLAG_FENCE 2u
+#define DIRECT_FLAG_FORGET 4u   /* the producer dropped this id: the consumer frees its buffer (no frame) */
+struct direct_frame {
+    uint32_t id;
+    uint32_t width;
+    uint32_t height;
+    uint32_t pitch;
+    uint32_t fourcc;
+    uint32_t offset;
+    uint64_t modifier;
+    uint32_t flags;
+} __attribute__((packed));
+
 #define INPUT_TYPE_TOUCH          1
 #define INPUT_TYPE_KEY            2
 #define INPUT_TYPE_POINTER_MOTION 3

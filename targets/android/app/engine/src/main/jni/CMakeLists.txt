@@ -5,6 +5,7 @@ set(ANDROMARCHY_CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/andromarchy_core)
 
 add_library(andromarchy_consumer SHARED
     native_consumer.c
+    direct_scanout.c
     native_audio.c
     camera_service.c
     ${ANDROMARCHY_CORE_DIR}/libdisplay_consumer/display_consumer.c
