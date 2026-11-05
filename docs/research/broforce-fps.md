@@ -96,6 +96,20 @@ error`), which also took down adb and the JVM test.
 
 2026-11-05 03:02 soak (`bf-quiet.sh 600`, job 20261104-194031-7308) is INVALID: it printed PASS with HomeShell focused and no game process - its `adb shell "pgrep -f Broforce_beta.exe"` matched its own `sh -c`, so it never started the game, and it read a non-existent `run/hyprland.log`. Its HWC list (all CLIENT) is also not the fix's: the phone ran com.powos.app 2026.11.04-1230 (installed 13:31, build b6980d5b), and every APK ship after a7f7792c (17:37) was HELD (modules-first rc 11: phone offline over WireGuard). bf-quiet.sh now starts the game like bf-pacing, FAILs unless PowosWindowActivity is focused + resumed and the game's processes use >= 25 % CPU in every sample (bf-quiet-verdict.py), and logs the app versionName and SF blur lines with the HWC list.
 
+## Present path (2026-11-05, agent/game-present-path)
+
+Soak 11-05 03:40-03:53 (`bf-quiet.sh 600`, app f19d5059, artefacts `~/.cache/powos-verify/bf-quiet-2026-11-05_0340`):
+game 146 % CPU, 38.0 fps; showing it cost surfaceflinger 28-31 %, Xwayland 19 %, kwin_wayland 12 % (~60 % of a core);
+skin 42.3 -> 44.3 C in 10 min. Chain: game (Wine X11 Vulkan WSI) -> Xwayland (glamor, Present) -> KWin anland window
+task (renders the X window item into the consumer's gralloc buffer: one GPU draw per game frame, 0052) ->
+`SurfaceView[PowosWindowActivity](BLAST)` -> SurfaceFlinger/HWC.
+
+| stage | found (sf-end.txt / hwc-end.txt) | change |
+|---|---|---|
+| SurfaceFlinger 28-31 % + GPU | **every HWC layer CLIENT** (SurfaceView, the activity, panel anchor, EdgeFloatBar, status bar, ...), `forceClientComposition=true clientType=BLUR`. The status-bar fix (a7f7792c) took: `PowOS status bar` has no blur region now. The one blur owner left is **`PowOS verify status`** (the verify pill, VerifyRun.kt): `blurRegions {radius=386u rect=[0,0,479,66]}` - home's glass, set on every add, over whatever is in front. So each verify run's own pill made SF GPU-compose the whole screen every frame: the measuring instrument caused the compositor cost it measured. The game's own layer is already right: `isOpaque=true blend=NONE` (RGBX consumer), so with no blur SF can put it on a DEVICE overlay and skip what's under it. | `VerifyRun.glassOver`: the pill keeps its glass only over home's own page with no game web window full screen/focused; over anything else (an Android window activity, a web-window game) a near-opaque tint (`SOLID`), checked on the pill's 1 s tick. Test `VerifyPillGlassTest`. bf-quiet.sh now prints `blurowner <layer>` for every layer with a blur region. Expected: all layers DEVICE, SF's per-frame GPU pass gone (SF ~5-10 %). After-number: next `bf-quiet.sh 600` once shipped. |
+| kwin_wayland 12 % | one full-screen render of the window item into the consumer buffer per game frame (0052: drawn once per commit since 11-02, was ~2.7x). | none yet. A pass-through (Xwayland's dma-buf queued to the Android consumer without the KWin draw) is not possible as is: the consumer's buffers are gralloc buffers the BufferQueue owns, KWin imports them; passing the client buffer through needs Xwayland/the game to render INTO consumer-allocated gralloc buffers (a wl_drm/linux-dmabuf allocator fed by native_consumer.c) - a separate project. |
+| Xwayland 19 % | the Vulkan WSI's Present of each frame into the X window's pixmap (glamor copy unless xwl_present flips; a flip needs the swapchain image the window's size - Broforce's X window must equal its swapchain). | not measured yet: next is `bf-present.sh` / Xwayland `-verbose` on a run to see flip vs copy counts. |
+
 ## How to re-measure
 
 `tools/phone/adb.sh shell "su -c 'sh -s'" < design-qa/bf-fps-20261103/sample.sh` (30 s, read-only; divide the

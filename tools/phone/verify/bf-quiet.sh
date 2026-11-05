@@ -35,7 +35,9 @@ asuser() { local n=$1; shift
 irq() { "$A" shell "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts" | tr -d '\r'; }
 hwc() { "$A" shell "su -c 'dumpsys SurfaceFlinger'" | tr -d '\r' > "$OUT/sf-$1.txt"
   awk '/\(active\) HWC layers/{p=1;next} p&&/^Display .*HWC layers/{p=0} p&&/^ [^ -]/{n=$0} p&&/\|/&&n{split($0,c,"|"); gsub(/ /,"",c[4]); print "hwc", c[4], n; n=""}' "$OUT/sf-$1.txt"
-  grep -E 'blurRegions|backgroundBlurRadius=[1-9]|clientType=BLUR' "$OUT/sf-$1.txt" | sed 's/^ *//' | sort | uniq -c | sed 's/^ */blur /' | head -8; }
+  grep -E 'blurRegions|backgroundBlurRadius=[1-9]|clientType=BLUR' "$OUT/sf-$1.txt" | sed 's/^ *//' | sort | uniq -c | sed 's/^ */blur /' | head -8
+  # Who owns each blur region (any one makes SF GPU-compose every layer under it: the verify pill's glass, 11-05).
+  awk '/^ *Layer \[/{n=$0; sub(/^ *Layer \[[0-9]+\] /,"",n)} /blurRegions.size\(\)=[1-9]/&&n{print "blurowner", n; n=""}' "$OUT/sf-$1.txt" | sort -u; }
 home() { "$T/cdp.sh" idle 15 home 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); [print("home", p["page"], "hidden=%s" % p["hidden"], " ".join("%s=%s" % kv for kv in p["perSec"].items())) for p in d["pages"]]' || echo "home: cdp failed"; }
 app() { "$A" shell "dumpsys package com.powos.app 2>/dev/null | grep -m1 versionName" | tr -d '\r ' | sed 's/^/app /'; }
 st=$OUT/push; mkdir -p "$st"; for f in bf-start.sh bf-stop.sh bf-window.sh bf-game.sh bf-nap.sh bf-quiet-phone.sh; do cp "$here/$f" "$st/powos-$f"; done

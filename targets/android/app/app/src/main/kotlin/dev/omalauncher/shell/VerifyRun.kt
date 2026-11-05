@@ -264,6 +264,9 @@ object VerifyRun {
                 addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> touchRegion() }
             }
         private val blur = WindowBlur({ root.rootView }, BLUR_DP, cornersDp = FloatArray(4) { CORNER_DP })
+
+        /** Glass on now (null: not yet set) - see [glassOver]. */
+        private var glass: Boolean? = null
         private var added = false
         private var status = JSONObject()
         private var at = 0L
@@ -315,6 +318,7 @@ object VerifyRun {
 
         /** The elapsed time between beats: the beat's own, plus the time since it was written. */
         fun tick(mtime: Long) {
+            glass()
             title.text = local ?: when {
                 kind == Kind.PAUSED -> "Tests paused"
                 kind == Kind.WAIT -> "Tests wait \u00b7 phone in use"
@@ -372,7 +376,8 @@ object VerifyRun {
             added = true
             context.getSystemService(DisplayManager::class.java).registerDisplayListener(displays, main)
             root.post {
-                blur.set(1f)
+                glass = null
+                glass()
                 skipScreenshot()
             }
         }
@@ -420,6 +425,19 @@ object VerifyRun {
             }.onFailure { Log.w(TAG, "the status pill can't keep out of screencaps", it) }
         }
 
+        /**
+         * The glass only over home's own page ([glassOver]); over anything else (a full-screen game: an Android
+         * window activity, a web window game) a plain tint. Checked every second (the pill's tick), set on a change.
+         */
+        private fun glass() {
+            if (!added) return
+            val on = glassOver(WebWindowLaunch.homeInFront, runCatching { WebWindows.frontGame() }.getOrNull())
+            if (on == glass) return
+            glass = on
+            blur.set(if (on) 1f else 0f)
+            (root.background as? GradientDrawable)?.setColor(if (on) TINT else SOLID)
+        }
+
         fun remove() {
             if (!added) return
             added = false
@@ -436,5 +454,20 @@ object VerifyRun {
     private const val SIDE_DP = 6f
     private const val PILL_MAX_DP = 150f
     private val TINT = Color.argb(107, 18, 20, 26)
+
+    /** The pill without its glass: the same ink on a near-opaque tint, readable over any game frame. */
+    private val SOLID = Color.argb(235, 18, 20, 26)
+
+    /**
+     * Whether the pill may blur what's under it: only while home's page is in front with no game's web window full
+     * screen or focused ([webGame]). Any blur region makes SurfaceFlinger GPU-compose (CLIENT) every layer under it
+     * each frame: the 11-05 03:40 Broforce soak (docs/research/broforce-fps.md "Present path") had every HWC layer
+     * CLIENT with this pill the only blur owner - surfaceflinger 28-31 % of a core, and a measurement of the
+     * compositor's cost that the measuring instrument itself caused.
+     */
+    internal fun glassOver(
+        homeInFront: Boolean,
+        webGame: String?,
+    ): Boolean = homeInFront && webGame == null
     private val INK = Color.argb(222, 255, 255, 255)
 }
