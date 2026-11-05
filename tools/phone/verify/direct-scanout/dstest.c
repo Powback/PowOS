@@ -41,6 +41,10 @@ typedef struct native_handle {
 typedef const native_handle_t *(*pfn_getNativeHandle)(const AHardwareBuffer *);
 typedef int (*pfn_createFromHandle)(const AHardwareBuffer_Desc *, const native_handle_t *, int32_t, AHardwareBuffer **);
 
+/* vndk/hardware_buffer.h CreateFromHandleMethod (= GraphicBuffer::HandleWrapMethod): REGISTER 2 (takes the handle,
+ * imports it), CLONE 3 (imports a clone: our fds stay ours). 1 is TAKE_HANDLE - refused (-22, the first two runs). */
+#define HANDLE_CLONE 3
+
 #define P(...) do { printf(__VA_ARGS__); fflush(stdout); } while (0)
 
 static uint32_t W = 1116, H = 2484, PITCH = 4608;
@@ -119,7 +123,7 @@ static AHardwareBuffer *clone_ahb(pfn_createFromHandle mk, const native_handle_t
     c->data[0] = dmabuf;                 /* QTI private_handle_t: fd first, fd_metadata second (the template's) */
     if (si >= 0 && newsize >= 0) c->data[t->numFds + si] = (int)newsize;
     AHardwareBuffer *out = NULL;
-    int r = mk(d, c, 1 /* AHARDWAREBUFFER_CREATE_FROM_HANDLE_METHOD_CLONE: our fds stay ours */, &out);
+    int r = mk(d, c, HANDLE_CLONE, &out);
     free(c);
     P("RESULT import_rc=%d buffer=%s\n", r, out ? "ok" : "null");
     return r == 0 ? out : NULL;
@@ -182,6 +186,22 @@ static int run(JNIEnv *env, jobject jsc, int argc, char **argv)
     }
     P("RESULT size_field_index=%d template_size=%ld client_size=%zu mode=%s\n", si, tsize, len, keep ? "keep" : "fit");
     if (d.stride * 4 != PITCH) P("RESULT WARN template pitch %u != client pitch %u (no stride override in this test)\n", d.stride * 4, PITCH);
+
+    /* control imports: the template's own handle, unmodified, with the described desc and with stride 0 - tells a
+     * refusal of the foreign fd apart from a refusal of the call itself */
+    {
+        AHardwareBuffer *cb = NULL;
+        int rc1 = mk(&d, th, HANDLE_CLONE, &cb);
+        if (cb) AHardwareBuffer_release(cb);
+        AHardwareBuffer_Desc d0 = d; d0.stride = 0; cb = NULL;
+        int rc2 = mk(&d0, th, HANDLE_CLONE, &cb);
+        if (cb) AHardwareBuffer_release(cb);
+        AHardwareBuffer_Desc d1 = d; d1.usage &= 0xffffffffull; cb = NULL;   /* public usage bits only */
+        int rc3 = mk(&d1, th, HANDLE_CLONE, &cb);
+        if (cb) AHardwareBuffer_release(cb);
+        P("RESULT control_import_same_handle rc=%d stride0_rc=%d lowusage_rc=%d desc_usage=0x%llx\n", rc1, rc2, rc3,
+          (unsigned long long)d.usage);
+    }
 
     /* 2. client-like dma-bufs */
     int fa = heap_alloc(len), fb = heap_alloc(len);

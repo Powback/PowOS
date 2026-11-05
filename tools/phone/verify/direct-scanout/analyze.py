@@ -84,6 +84,10 @@ def main():
             if l.startswith(("RESULT", "rc=", "EXIT")) or "Exception" in l or "Error" in l:
                 print("  " + l)
         txt = "\n".join(res)
+        lc = os.path.join(dd, t + ".logcat.txt")
+        if os.path.exists(lc):
+            for l in open(lc, errors="replace").read().splitlines()[-12:]:
+                print("  logcat " + l.strip()[:220])
         imp = re.findall(r"import_rc=(-?\d+) buffer=(\w+)", txt)
         ok_imp = len(imp) == 2 and all(r == "0" and b == "ok" for r, b in imp)
         print("%s %s import: %s" % ("PASS" if ok_imp else "FAIL", t, imp or "none"))

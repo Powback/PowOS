@@ -21,7 +21,7 @@ LS=$(awk -v d="$DID" '$1=="Display" && $2==d && /physical/{p=1; next} p && /laye
 echo "active display $DID layerStack $LS; app $("$A" shell "dumpsys package com.powos.app | grep -m1 versionName" | tr -d '\r ')"
 for mode in fit keep; do
   "$A" shell "su -c 'sh $P/ds-phone.sh $P $LS $DID $mode size=$mode hold=4 flip=3'" >/dev/null 2>&1
-  for f in log sf-shown.txt sf-flip.txt shown.raw shown.png end.raw; do "$A" pull "$P/$mode.$f" "$OUT/" >/dev/null 2>&1; done
+  for f in log logcat.txt sf-shown.txt sf-flip.txt shown.raw shown.png end.raw; do "$A" pull "$P/$mode.$f" "$OUT/" >/dev/null 2>&1; done
 done
 "$A" shell "su -c 'rm -rf $P'" >/dev/null 2>&1
 echo "evidence: $OUT (screencap $OUT/fit.shown.png)"

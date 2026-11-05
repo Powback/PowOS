@@ -92,3 +92,28 @@ goes). A/B is how many of Broforce's frames it could take. Measure: `bf-quiet.sh
 - Same soak (`bf-quiet-2026-11-05_16xx`, PASS 600 s): kwin_wayland 14.0-14.8 %, surfaceflinger 17.7-18.3 %, all 7 HWC
   layers DEVICE, game 107-111 %, 40 fps, skin 35.1 -> 38.3 C. (kwin 12.8 % / game 79 % at 08:02; the probe itself is a
   clock read per frame - the difference is the session's state, not 0057.)
+
+## Step 1 result: the cloned buffer works (2026-11-05 18:14, cover screen, agent direct-scanout-1)
+
+`tools/phone/verify/direct-scanout.sh` (queued: `queue.sh add --screen cover <task> .../direct-scanout.sh`): a root
+app_process host (`direct-scanout/DsTest.java`) puts a layer on the active display's layer stack; `dstest.c` allocates
+two Broforce-shaped dma-bufs from `/dev/dma_heap/system` (1116x2484, pitch 4608, 11448320 bytes, XR24 byte order, a
+known pattern, pitch padding filled with garbage), clones a template AHardwareBuffer's handle onto each and shows them
+on a child ASurfaceControl. **PASS, both variants** (the clone's size field = the dma-buf's / the template's - equal
+here, 11448320):
+
+- template: format 5 (BGRA_8888 = XR24's bytes), usage 0x902 -> stride 1152 px = pitch 4608: **no stride override**.
+  QTI handle: numFds 2, numInts 24: `magic 'gmsm', flags 0x100008, width 1152, height 2484, unaligned 1116x2484,
+  format 5, buffer_type 0, layer_count 1, id (2 ints), usage (2 ints: 0x902), size 11448320 (int 13), offset 0, ...`.
+- `AHardwareBuffer_createFromHandle(desc, clone, 3 /* CLONE */)` = 0 for the foreign fd, template released after.
+  **The method value matters**: 1 (TAKE_HANDLE) is refused with -22 even for the template's own handle - REGISTER is
+  2, CLONE 3 (vndk/hardware_buffer.h = GraphicBuffer::HandleWrapMethod).
+- shown with no CPU lock first: first OnComplete 6.4 ms; SF's HWC list: `powos-ds-clone` **DEVICE** shown and while
+  flipping A/B at ~52 transactions/s (165/165 completes, 163-165 release fences signalled, 0 timeouts).
+- screencap of the display = the pattern, **0 of 2772144 pixels differ** (after the flips too); buffer B's X byte 0
+  under OPAQUE also fine. CPU lock of each clone: stride 1152, 0 mismatches against the pattern.
+- not proven by this: the panel's own scanout (screencap goes through RenderEngine, not the DPU; DEVICE + no HWC
+  error in logcat is the evidence there), and Broforce's real buffers (turnip-kgsl allocates from the same system
+  heap with the same pitch - the test copies that layout, not the buffers).
+
+Next: step 2 (app side, flag off) then 1/3/4 as above - the "high risk" row is retired.
