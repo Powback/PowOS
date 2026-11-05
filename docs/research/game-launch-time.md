@@ -92,3 +92,22 @@ and lists that dir.
 2. Steam client prep on a cold Steam, 8-12 s: keep Steam resident (powos-steam-resident) so a tap skips it.
 3. Unity window -> frame, ~8 s: the game's own load; outside our control except CPU boost at launch (game-boost.sh).
 4. ~~pressure-vessel locale-gen under FEX~~: Fix 2.
+
+## A/B: ARM64 Proton vs x86 Proton under FEX (2026-11-05, steam 1.0.0.87-35)
+
+bf-coldstart.sh, Broforce 274190, same Steam build. arm64 = `cfg:arm64` (Wine native, prefix compatdata/274190.powos-arm64);
+x86 = the user's pinned Proton Experimental under FEX. Seconds from the tap.
+
+| run | iscript | reaper | pv | wineserver | exe | window | frame | job |
+|---|---|---|---|---|---|---|---|---|
+| arm64 steam#1 | 1.5-2.9 | 5.3 | 6.1 | 6.1 | 9.6 | 10.8 | 19.1 | 20261105-070802-37476 |
+| arm64 steam#2 | 1.2-2.2 | 3.6 | 4.3 | 4.3 | 7.3 | 8.5 | 16.5 | 20261105-070803-37693 |
+| arm64 cold#1 | 13.1-13.6 | 15.9 | 16.6 | 17.4 | 19.6 | 20.7 | 28.7 | 20261105-070805-37968 |
+| x86 steam (ref) | skipped | 4.0 | 7.9 | 9.7 | 20.6 | 25.4 | 33.8 | 20261105-041912-28057 |
+| x86 cold (ref) | skipped | 27.2 | 31.5 | 33.3 | 45.7 | 51.1 | 59.8 | 20261105-040827-75111 |
+
+Wine boot (wineserver -> exe) is 3.0-3.5 s on ARM64 vs 10.9 s under FEX; pv -> wineserver 0 vs 1.8 s. Unity's
+window -> frame stays ~8 s on both. The install-script evaluator still runs on ARM64 (1-1.5 s; the skip in
+pkgs/steam only covers the FEX compat tool) - worth adding. Still pending in the queue: arm64 fps (bf-pacing base,
+x86 38-39 fps), visuals (bf-checker base, 0 dashes expected), x86 steam/cold x2 and arm64 cold#2 (jobs
+20261105-070808..070838); those jobs end with the user's pinned x86 restored.
