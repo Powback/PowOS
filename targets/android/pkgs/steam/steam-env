@@ -5,9 +5,12 @@
 # (env:KEY=VALUE tokens) before a line goes in here.
 #
 # Candidates being measured (2026-10-23, Broforce + Teardown):
-#   PRESSURE_VESSEL_GENERATE_LOCALES=0   the container's locale-gen (pv-locale-gen under FEX) for the session's
-#                                        LANG=en_CH.UTF-8, which games run with LC_ALL=C anyway
-#   FEX_ENABLECODECACHINGWIP=1           FEX keeps the x86 code it compiled (per game, compatdata/<id>/fex-emu)
+#   PRESSURE_VESSEL_GENERATE_LOCALES=0   measured 2026-11-05: -3.6 s (pv -> Proton 4.5 -> 0.9 s); NOT set - it would
+#                                        leave games on "C"; /usr/bin/steam's kept LOCPATH (steam_locales) gets the same
+#                                        win with the user's locale
+#   FEX_ENABLECODECACHINGWIP=1           measured 2026-11-05 (FEX-2607): the launch dies right after pressure-vessel
+#                                        (exit -1, no window, 2 of 2) once FEX generated caches (shadercache/<id>/
+#                                        fex-emu/cache: ntdll.so, steamclient.so, ...) - unusable until FEX fixes it
 
 # HACK: GL_ARB_buffer_storage on the phone's freedreno: the lfdevs Mesa (freedreno_screen.c fd_init_screen_caps) turns
 # buffer_map_persistent_coherent off on KGSL ("KGSL mappings are not coherent"), so GL stops at 4.3 without

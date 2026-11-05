@@ -154,6 +154,57 @@ for f in /usr/lib/powos-steam/steam-env "${XDG_CONFIG_HOME:-$HOME/.config}/powos
   done < "$f"
 done
 
+# HACK: the session's locales, compiled once and kept, for every game's Steam Runtime container. pressure-vessel's
+# pv-locale-gen otherwise compiles the session's locale (LANG=en_CH.UTF-8) and en_US.UTF-8 from source on EVERY game
+# launch, because the container doesn't have them; under FEX (x86 Proton) its localedef took 3.6 s a launch
+# (bf-coldstart steam, 2026-11-05: pressure-vessel -> Proton 4.5 s with it, 0.9 s with PRESSURE_VESSEL_GENERATE_LOCALES=0).
+# pv-locale-gen first checks each LANG/LC_* locale and en_US.UTF-8 with setlocale(), which honours LOCPATH: with these
+# already there it generates nothing and the game keeps the user's locale (turning generation off would leave the game
+# on "C"). Compiled here by the host's own localedef (native, ~0.2 s each, only when one is missing), per host glibc
+# version; glibc adds its default locale path after LOCPATH, so Steam itself and the container's own locales (C.UTF-8)
+# still work. A container whose glibc can't read them simply generates as before (pv-locale-gen's own fallback).
+# Off: POWOS_STEAM_LOCALES=0 in ~/.config/powos/steam-env; a LOCPATH already set is left alone.
+# Real fix: pressure-vessel keeping the locales it generated (a cache dir instead of a temp dir per launch), then this goes.
+steam_locales() {
+  local d g loc
+  g=$(getconf GNU_LIBC_VERSION 2>/dev/null | tr -cd 'A-Za-z0-9._-'); [ -n "$g" ] || return 0
+  d=${XDG_CACHE_HOME:-$HOME/.cache}/powos/steam-locales/$g
+  for loc in en_US.UTF-8 "${LANG:-}" "${LC_ALL:-}" "${LC_CTYPE:-}" "${LC_MESSAGES:-}" "${LC_NUMERIC:-}" "${LC_TIME:-}" \
+             "${LC_COLLATE:-}" "${LC_MONETARY:-}" "${LC_PAPER:-}" "${LC_NAME:-}" "${LC_ADDRESS:-}" "${LC_TELEPHONE:-}" \
+             "${LC_MEASUREMENT:-}" "${LC_IDENTIFICATION:-}"; do
+    steam_locale "$d" "$loc"
+  done
+  [ -d "$d/en_US.UTF-8" ] && export LOCPATH=$d
+}
+# steam_locale <dir> <locale>: <dir>/<locale> compiled (UTF-8 locales only). One glibc has no definition for (the
+# session's en_CH.UTF-8: glibc has de_CH/fr_CH/it_CH, no en_CH - pv-locale-gen failed on it every launch, so the game
+# fell back to "C") points at its language's own locale (en -> en_US, de -> de_DE, else the language's first).
+steam_locale() {
+  local d=$1 loc=$2 src tmp l m i=${POWOS_I18N_LOCALES:-/usr/share/i18n/locales}
+  case $loc in '' | C | C.* | POSIX | *..* | */*) return 0 ;; *.UTF-8 | *.utf8) ;; *) return 0 ;; esac
+  [ -d "$d/$loc" ] && return 0
+  src=${loc%%.*}; m=${loc#*@}; [ "$m" = "$loc" ] && m= || m=@$m
+  if [ ! -f "$i/$src$m" ]; then
+    l=${src%%_*}; m=
+    for src in "${l}_$(printf %s "$l" | tr a-z A-Z)" $( [ "$l" = en ] && echo en_US ) \
+               "$(cd "$i" 2>/dev/null && ls -d "${l}"_?? 2>/dev/null | head -1)"; do
+      [ -n "$src" ] && [ -f "$i/$src" ] && break; src=
+    done
+    [ -n "$src" ] || return 0
+    steam_locale "$d" "$src.UTF-8"
+    [ -d "$d/$src.UTF-8" ] && ln -sfn "$src.UTF-8" "$d/$loc"
+    return 0
+  fi
+  mkdir -p "$d" && tmp=$(mktemp -d "$d/.new-XXXXXX") || return 0
+  # Exit 1 = generated with warnings (as pv-locale-gen counts it); a locale is kept once its LC_CTYPE is there.
+  localedef --no-archive -c -f UTF-8 -i "$src$m" "$tmp/$loc" >/dev/null 2>&1
+  [ -f "$tmp/$loc/LC_CTYPE" ] && mv -T "$tmp/$loc" "$d/$loc" 2>/dev/null
+  rm -rf "$tmp"
+}
+if [ "${POWOS_STEAM_LOCALES:-1}" != 0 ] && [ -z "${LOCPATH:-}" ] && command -v localedef >/dev/null 2>&1; then
+  steam_locales
+fi
+
 if [ -n "${STEAM_X86:-}" ]; then
   # -cef-disable-gpu: the x86 web UI (CEF) software-renders; its x86 Mesa can't reach the Adreno GPU.
   exec FEXBash -c 'exec /usr/lib/steam/bin_steam.sh -cef-disable-gpu "$@"' steam "$@"
