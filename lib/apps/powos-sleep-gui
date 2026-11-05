@@ -946,18 +946,6 @@ class Gui(dbus.service.Object):
         elif cpu > CPU_MAX and busy.get("cpu", True):
             self.refuse(pid, f"busy ({cpu:.0f}% CPU)", 120)
         else:
-            mine = [w for w, v in self.wins.items() if v["pid"] == pid and not v["minimized"]]
-            mark = game_launcher(self.unit_of(pid) or {})
-            if mine and mark and any(v["pid"] == pid and any(mark in cmdline(a) for a in ancestors(v["raw"]))
-                                     for v in self.wins.values()):
-                # An app running a game (its windows' processes past the client's own): its windows minimized first,
-                # as `powos game freeze` does, so the Resume's un-minimize + activate brings the game back WITH
-                # KWin's focus. Frozen as it was (shown, never active), the thawed full-screen Unity game was never
-                # activated again - no input reached it, it minimized itself in a loop (resume traces 2026-11-05
-                # 12:46 / 12:55; the minimized-first path had focus at 11:50).
-                self.kwin_run("minimize", "".join(MINIMIZE_JS % {"window": w} for w in mine))
-                GLib.timeout_add(700, self.sleep_now, pid)
-                return False
             self.freeze(pid, cpu)
         self.schedule()
         return False
@@ -1103,9 +1091,16 @@ class Gui(dbus.service.Object):
 
 # One-shot KWin scripts (Gui.kwin_run): a game's window up (un-minimized and focused) on Resume; an app's windows
 # minimized before Sleep freezes it.
+# Only a window on the current desktop: a window an Android task shows lives on the tasks desktop, and its task's own
+# focus (anland focus(): un-minimize + requestFocus, the path every app switch takes) gives it KWin's activation.
+# Activating it from here as well (workspace.activeWindow) was what lost it: KWin's focus went to none on every try,
+# the thawed full-screen Unity game, never active, minimized itself again and again (resume trace 2026-11-05 12:46:
+# 6 minimize/restore rounds, "KWin focus -> none" after each). Still open: without it the task's focus() doesn't
+# activate the thawed game either (12:55, 13:06: no activation at all) - the KWin side (anland focus/requestFocus).
 RAISE_JS = """
 for (const w of workspace.windowList()) {
-    if (w.internalId.toString() === "%(window)s") {
+    if (w.internalId.toString() === "%(window)s"
+            && (w.onAllDesktops || w.desktops.indexOf(workspace.currentDesktop) >= 0)) {
         w.minimized = false;
         workspace.activeWindow = w;
     }
