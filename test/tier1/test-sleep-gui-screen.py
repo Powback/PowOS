@@ -5,7 +5,9 @@ it held PowOS "on screen" all session and a game left for home was never frozen 
 from importlib.machinery import SourceFileLoader
 import importlib.util
 from pathlib import Path
+import json
 import sys
+import time
 import tempfile
 import types
 import unittest
@@ -93,6 +95,59 @@ class Screen(unittest.TestCase):
             s.read()
             self.assertFalse(s.on)
 
+
+class LaunchHold(unittest.TestCase):
+    """A launch path's Wake keeps the launcher awake LAUNCH_HOLD_S, also when it was awake already (Steam frozen 8 s
+    into a launch that waited on its logon lost the forward, 2026-11-05 12:10), and a pending rungameid forward outside
+    the client's tree refuses the freeze."""
+
+    def gui(self):
+        g = object.__new__(GUI.Gui)
+        g.frozen, g.refused, g.idle_since, g.wins, g.tracked = {}, {}, {}, {}, {100: "steam"}
+        g.schedule = lambda: None
+        g.unit_of = lambda pid: {"id": "steam"} if pid == 100 else None
+        return g
+
+    def test_wake_of_an_awake_launcher_holds_it(self):
+        g = self.gui()
+        out = json.loads(g.Wake("steam"))
+        self.assertTrue(out["awake"])
+        until, why = g.refused[100]
+        self.assertEqual(why, "launching")
+        self.assertGreater(until, time.time() + GUI.LAUNCH_HOLD_S - 5)
+
+    def test_hold_never_shortens_a_longer_refusal(self):
+        g = self.gui()
+        g.refused[100] = (time.time() + 3600, "never list")
+        g.hold(100)
+        self.assertGreater(g.refused[100][0], time.time() + 3000)
+
+    def test_pending_launch_refuses_the_freeze(self):
+        from unittest import mock
+        g = self.gui()
+        u = {"id": "steam", "classes": {"steam"}, "pidfile": None, "rule": {},
+             "busy": {"games": "pause", "cmdline": "SteamLaunch"}}
+        g.unit_of = lambda pid: u
+        g.cls = lambda pid: "steam"
+        refused = []
+        g.refuse = lambda pid, why, retry=None: refused.append(why)
+        cmd = {"100": "./steam -silent steam://rungameid/274190", "101": "steamwebhelper",
+               "200": "/bin/bash /usr/bin/steam steam://rungameid/274190"}
+        with mock.patch.object(GUI, "tree", lambda p: [100, 101]), \
+                mock.patch.object(GUI, "cmdline", lambda p: cmd.get(str(p), "")), \
+                mock.patch.object(GUI.os, "listdir", lambda d: list(cmd) + ["self"]):
+            g.consider(100)
+        self.assertTrue(refused and refused[0].startswith("a launch on its way (200"), refused)
+        # The client's own command line (its tree) holding the URL is no pending launch.
+        refused.clear()
+        del cmd["200"]
+        with mock.patch.object(GUI, "tree", lambda p: [100, 101]), \
+                mock.patch.object(GUI, "cmdline", lambda p: cmd.get(str(p), "")), \
+                mock.patch.object(GUI.os, "listdir", lambda d: list(cmd) + ["self"]), \
+                mock.patch.object(GUI, "stat", lambda p: {"comm": "steam"}), \
+                mock.patch.object(GUI.common, "is_never", lambda *a: True):
+            g.consider(100)
+        self.assertEqual(refused, ["never list"], "past the pending-launch check")
 
 if __name__ == "__main__":
     unittest.main()

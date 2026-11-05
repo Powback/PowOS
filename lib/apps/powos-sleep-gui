@@ -66,6 +66,7 @@ SOCK = f"{common.STATE_DIR}/sleepd.sock"
 IDLE = common.seconds(os.environ.get("POWOS_SLEEP_GUI_IDLE", "10m"))
 GRACE = 60  # woken by D-Bus but still unfocused: asleep again after this
 SAMPLE = 5  # seconds of CPU/IO measured before freezing
+RESUME_TRACE_S = 6  # KWin focus changes logged this long after a game's Resume
 LAUNCH_URL = "://rungameid/"  # a launcher's game-launch URL in a process outside its client's tree: a launch pending
 LAUNCH_HOLD_S = 60  # an app a launch path woke (Gui.Wake) stays awake this long: the launch reaches it
 RERAISE_MS = (800, 2000)  # a resumed game's window raised again this long after the thaw (Gui.Resume's HACK)
@@ -418,6 +419,7 @@ class Gui(dbus.service.Object):
         super().__init__(bus, "/Gui")
         self.bus = bus
         self.sleepd = Sleepd(self.reset, self.woken)
+        self.resumed_at = -1e9  # the last game Resume (monotonic), for the resume trace
         self.wins = {}  # wid -> {pid, cls, active, minimized} (pid: the app's - its unit's root process, if it has one)
         self.idle_since = {}  # pid -> when it last lost focus
         self.frozen = {}  # pid -> {"names": [...], "cls", "pids"}
@@ -499,6 +501,9 @@ class Gui(dbus.service.Object):
         if str(wid) not in self.wins and self.units_class(str(cls)):
             # A unit's app's new window: when it showed up after its start (a cold start's length, in the log).
             log(f"{cls} ({pid}): window {wid} {'(focused) ' if active else ''}{age(pid):.1f}s after its start")
+        if time.monotonic() - self.resumed_at < RESUME_TRACE_S:
+            log(f"resume trace +{(time.monotonic() - self.resumed_at) * 1000:.0f} ms: window {wid} {cls} "
+                f"active={bool(active)} minimized={bool(minimized)}")
         self.wins[str(wid)] = {"pid": pid, "raw": raw, "cls": str(cls), "active": bool(active),
                                "minimized": bool(minimized)}
         if self.pid_active(pid):
@@ -559,6 +564,13 @@ class Gui(dbus.service.Object):
         self.refused[pid] = (max(self.refused.get(pid, (0, ""))[0], time.time() + LAUNCH_HOLD_S), "launching")
         self.schedule()
 
+    @dbus.service.method("dev.powos.Sleep.Gui", in_signature="s")
+    def Activated(self, what):
+        """KWin's focus moved (any window; "" = none). Logged for RESUME_TRACE_S after a game's Resume: what takes the
+        focus from a thawed game."""
+        if time.monotonic() - self.resumed_at < RESUME_TRACE_S:
+            log(f"resume trace +{(time.monotonic() - self.resumed_at) * 1000:.0f} ms: KWin focus -> {what or 'none'}")
+
     def reraise(self, wid):
         if wid in self.wins:
             self.kwin_run("raise", RAISE_JS % {"window": wid})
@@ -570,6 +582,7 @@ class Gui(dbus.service.Object):
         and the game, if frozen) and bring the game's window up - instead of handing the launch to Steam, which has
         nothing to start. {"running": false} when no unit's app runs that game (the launch then goes to Steam)."""
         t = time.monotonic()
+        self.resumed_at = t
         appid = str(appid).strip()
         for u in self.rules():
             if not game_launcher(u) or not appid.isdigit():
