@@ -74,6 +74,23 @@ class GameBoostTest {
     }
 
     @Test
+    fun aGameIsBoostedFromItsTapBeforeItsWindowIsInFront() {
+        val cats = mapOf("supertuxkart" to "Game;ArcadeGame;", "org.kde.kate" to "Utility;")
+        val now = 1_000_000L
+        val fresh = listOf(bf to now - 5_000, "org.kde.kate" to now - 1_000)
+        assertEquals("a game's fresh mark, not a non-game's newer one", bf, GameBoost.launching(fresh, now) { cats[it] })
+        assertNull("aged out", GameBoost.launching(listOf(bf to now - GameBoost.LAUNCH_S * 1000 - 1), now) { cats[it] })
+        assertNull("only a non-game launching", GameBoost.launching(listOf("org.kde.kate" to now), now) { cats[it] })
+        assertEquals("newest game first", "supertuxkart", GameBoost.launching(listOf(bf to now - 9_000, "supertuxkart" to now - 2_000), now) { cats[it] })
+        assertEquals("home in front while it loads", bf, GameBoost.front(null, null, bf) { cats[it] })
+        assertEquals("a non-game task in front: the launch still", bf, GameBoost.front(null, "org.kde.kate", bf) { cats[it] })
+        assertEquals("the game task in front wins", "supertuxkart", GameBoost.front(null, "supertuxkart", bf) { cats[it] })
+        val m = GameBoost.Machine()
+        assertEquals("tap: engaged before the window", Action.Engage(bf), m.step(GameBoost.front(null, null, bf) { cats[it] }, true))
+        assertEquals("its window task then takes over without a gap", Action.Renew, m.step(GameBoost.front(null, bf, bf) { cats[it] }, true))
+    }
+
+    @Test
     fun onlyEngageAndRestoreCallRoot() {
         val s = "/data/user/0/com.powos.app/files/game-boost.sh"
         val l = "/data/user/0/com.powos.app/files/game-boost.lease"

@@ -114,14 +114,37 @@ object GameBoost {
     }
 
     /**
+     * A launch boosts its game this long from the tap ([launching]): Wine's boot and the game's own load (Unity's Mono
+     * JIT through FEX, ~1 core busy for 8 s) come before its window is the front task (board broforce-launch-time).
+     */
+    const val LAUNCH_S = 60L
+
+    /**
+     * The game launching now: the newest of [marks] (powos-open-task's run/game-launch/<app id>, its mtime = the tap,
+     * as (app id, mtime ms)) younger than [LAUNCH_S] at [nowMs], if it is a game's ([WebWindows.isGame]); else null.
+     */
+    fun launching(
+        marks: List<Pair<String, Long>>,
+        nowMs: Long,
+        categories: (String) -> String?,
+    ): String? =
+        marks
+            .filter { (id, at) -> id.isNotBlank() && nowMs - at in 0..LAUNCH_S * 1000 }
+            .sortedByDescending { it.second }
+            .firstOrNull { (id, _) -> WebWindows.isGame(id, categories(id)) }
+            ?.first
+
+    /**
      * The game in front: home's web window one ([web]), else the front window task's app ([task], KWin's app id) if it
-     * is a game's ([WebWindows.isGame] with its desktop file's [categories]).
+     * is a game's ([WebWindows.isGame] with its desktop file's [categories]), else a game being launched ([launch],
+     * [launching]: boosted from the tap, before its window exists).
      */
     fun front(
         web: String?,
         task: String?,
+        launch: String? = null,
         categories: (String) -> String?,
-    ): String? = web ?: task?.takeIf { it.isNotBlank() && WebWindows.isGame(it, categories(it)) }
+    ): String? = web ?: task?.takeIf { it.isNotBlank() && WebWindows.isGame(it, categories(it)) } ?: launch
 
     /**
      * GQ1 (board broforce-fps-low-cpu-bound-under-fex, docs/research/broforce-fps.md "Non-game load"): home's page is
@@ -157,6 +180,7 @@ object GameBoost {
     private var handler: Handler? = null
     private lateinit var script: File
     private lateinit var lease: File
+    private lateinit var marks: File
     private lateinit var power: PowerManager
     private lateinit var categoriesOf: (String) -> String?
     private val tick = Runnable { tick() }
@@ -172,6 +196,7 @@ object GameBoost {
         power = app.getSystemService(PowerManager::class.java)
         categoriesOf = categories
         lease = File(app.filesDir, "game-boost.lease")
+        marks = File(app.filesDir, "run/game-launch")
         script = File(app.filesDir, "game-boost.sh")
         val h = Handler(HandlerThread("powos-game-boost").apply { start() }.looper)
         handler = h
@@ -204,7 +229,11 @@ object GameBoost {
         val on = power.isInteractive
         val front =
             runCatching {
-                front(WebWindows.frontGame(), andro.marchy.PowosWindowActivity.frontAppId(), categoriesOf)
+                val launch =
+                    marks.listFiles()?.let { fs ->
+                        launching(fs.map { it.name to it.lastModified() }, System.currentTimeMillis(), categoriesOf)
+                    }
+                front(WebWindows.frontGame(), andro.marchy.PowosWindowActivity.frontAppId(), launch, categoriesOf)
             }.getOrNull()
         val action = machine.step(front, on)
         when (action) {

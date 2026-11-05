@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-# bf-lprof.py <installdir> <t0 (epoch s)> <stopfile> [unity log]: (on the phone, in the session; bf-coldstart-phone.sh
+# bf-lprof.py <installdir> <t0 (epoch s)> <stopfile> [game log]: (on the phone, in the session; bf-coldstart-phone.sh
 # starts it at the tap) where a game's launch time goes between its exe and its first frame, read-only, 4 Hz from /proc
 # and sysfs until <stopfile> exists (or 150 s). Per sample of the game's process (a command line running a file from
 # common/<installdir>/ under Wine or FEX, not a launch wrapper): every thread's CPU (utime+stime) and the process's
 # file reads (/proc/pid/io rchar, read_bytes = from storage, not the page cache); the whole phone's CPU busy share
-# (/proc/stat) and each cpufreq policy's clock. A Unity log (-logFile, opt:log) is tailed: each new line stamped with
-# the sample time it appeared at. Prints, ms from the tap:
+# (/proc/stat) and each cpufreq policy's clock. A [game log] (a path the session sees) is tailed: each new line
+# stamped with the sample time it appeared at. Prints, ms from the tap:
 #   LPROF <ms> game <cpu% of one core> rd <MB rchar> io <MB read_bytes> sys <busy % all cores> mhz <policy clocks> | <top threads %>
-#   LPROF-LOG <ms> <Unity log line>
+#   LPROF-LOG <ms> <game log line>
 #   LPROF-SUM exe..frame: game <core-seconds> on <s> wall; threads <name core-s ...>; read <MB> (<MB> from storage)
 import os, sys, time
 

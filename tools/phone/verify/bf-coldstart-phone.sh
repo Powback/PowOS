@@ -16,7 +16,6 @@
 #             (ARM64: Wine native, only the game's code through FEX) | none = the game's native Linux build (Steam swaps
 #             the depot at the next launch: stage "update")
 #   opt:vk | opt:gl | opt:base         launch options: unity-screen + -force-vulkan | + -force-glcore | as installed
-#   opt:log   + -logFile /tmp/powos-unity.log (a Unity game's own log; its lines stamped by the launch profile)
 #   env:K=V   K=V in the environment of the Steam this check starts (all it launches inherits it), e.g.
 #             env:PRESSURE_VESSEL_GENERATE_LOCALES=0
 #   keep      leave the last setup in place at the end (default: the compat tool + launch options as they were)
@@ -76,7 +75,6 @@ setup() {  # setup <token>
     cfg:auto) $CFG set $APP auto ;;
     opt:vk) $CFG opts $APP "$(plus_opts -force-vulkan)" ;; opt:gl) $CFG opts $APP "$(plus_opts -force-glcore)" ;;
     opt:base) $CFG opts $APP "$(base_opts)" ;;
-    opt:log) $CFG opts $APP "$(plus_opts "-logFile Z:$ULOG")" ;;  # a Unity game's log at $ULOG (bf-lprof.py stamps its lines)
     *) fail setup "unknown setup token $1"; return 1 ;;
   esac
   CHANGED=1; echo "== setup $1: $($CFG get $APP), mode $($CFG mode $APP)"
@@ -100,10 +98,9 @@ restore() {
   CHANGED=0; bash /var/tmp/powos-bf-stop.sh --steam >/dev/null 2>&1
   $CFG set $APP "$ORIG_MODE" >/dev/null && $CFG opts $APP "$ORIG_OPTS" >/dev/null && echo "== restored: $($CFG get $APP), mode $($CFG mode $APP)"
 }
-# The launch profile (bf-lprof.py): the game's threads' CPU, its file reads, the clocks and the Unity log (opt:log) from
-# the tap to its first frame - where the window -> frame time goes. Printed once the frame is in (or not).
-ULOG=/tmp/powos-unity.log
-lprof_start() { rm -f "$T/lprof.stop" "$ULOG"; python3 /var/tmp/powos-bf-lprof.py "$IDIR" "$1" "$T/lprof.stop" "$ULOG" > "$T/lprof.txt" 2>&1 & LPROF=$!; }
+# The launch profile (bf-lprof.py): the game's threads' CPU, its file reads and the clocks from the tap to its first
+# frame - where the window -> frame time goes. Printed once the frame is in (or not).
+lprof_start() { rm -f "$T/lprof.stop"; python3 /var/tmp/powos-bf-lprof.py "$IDIR" "$1" "$T/lprof.stop" > "$T/lprof.txt" 2>&1 & LPROF=$!; }
 lprof_end() { [ -n "${LPROF:-}" ] || return 0; touch "$T/lprof.stop"; wait "$LPROF" 2>/dev/null; LPROF=; sed 's/^/   /' "$T/lprof.txt"; }
 # The renderer the game reported: the newest Unity Player.log / output_log.txt written since this check began (Proton's
 # prefix or the native build's ~/.config/unity3d).

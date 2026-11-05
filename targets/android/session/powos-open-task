@@ -247,6 +247,25 @@ class LaunchRecord:
             pass
 
 
+def launch_mark(key, on):
+    """The launch the PowOS app's GameBoost boosts from the tap on (board broforce-launch-time): $RUN/game-launch/<app
+    id>, mtime = the tap. Wine's boot under the game's Proton and the game's own load (Unity: Mono JIT through FEX,
+    ~1 core busy for 8 s) are CPU-bound, and the boost otherwise starts only once the game's window is the front task -
+    after the first frame (11-05: 17-23 s after the window). GameBoost takes a fresh mark (GameBoost.LAUNCH_S) for a
+    game's id only (its desktop categories) - written for every launch, the app decides. Removed when the launch failed;
+    a shown window keeps it until it ages out, so the front task takes over without a gap."""
+    path = os.path.join(RUN, "game-launch", re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(key))[:64] or "command")
+    try:
+        if on:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(f"{int(time.time() * 1000)}\n")
+        else:
+            os.remove(path)
+    except OSError:
+        pass
+
+
 def session_alive(sid):
     """Any process left in session [sid] (COMMAND runs as a session of its own: start_new_session)."""
     for d in os.listdir("/proc"):
@@ -298,6 +317,8 @@ def main():
     def start_command():
         if game:
             state["launch"] = LaunchRecord(game)
+        state["mark"] = f"steam_app_{game}" if game else min(ids, default="") or command.split()[0]
+        launch_mark(state["mark"], True)
         # Its own output file, not our stdout (the caller's pipe): see the top. Relayed to us while we run.
         fd, path = output_log(f"steam_app_{game}" if game else min(ids, default="") or command.split()[0])
         relay = OutputRelay(path) if fd is not None else None  # from here on: what this launch writes
@@ -358,6 +379,8 @@ def main():
         if state.get("relay"):
             state["relay"].pump()  # COMMAND's last words before the status ("failed": the caller shows them)
         status(what)
+        if state.get("mark") and what != "task":
+            launch_mark(state["mark"], False)  # no window of the launch's in front: nothing to boost for it
         for plugin, path in scripts:
             kwin("unloadScript", plugin)
             try:
