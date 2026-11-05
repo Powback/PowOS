@@ -59,6 +59,7 @@ On the phone, focus also needs PowOS on screen. The PowOS app's display daemon p
 | `sleepBusy.io` | `disk` | busy = disk reads+writes over 256 KB/s (downloads, updates, installs); not `rchar/wchar`, which counts CEF's IPC |
 | `sleepBusy.cpu` | `false` | its idle CPU (~20% of a core, the webhelper) is what freezing saves, so it doesn't keep it awake |
 | `sleepBusy.startGrace` | `2m` | never frozen in its first 2 min, nor in a game's: updating, logging in, handing over the game it was started for, Proton starting it |
+| (launch paths) | - | a launch on its way keeps the launcher awake: a process outside its tree with `://rungameid/` in its command line (/usr/bin/steam's forward waiting for the logon), and 60 s after any `Gui.Wake` (2026-11-05: Steam frozen 8 s into a launch, the forward lost) |
 
 Thawing comes before showing, on every way in:
 - `/usr/bin/steam` (the games widget, the launcher's Exec, `steam steam://...`): a Steam whose `/proc/<pid>/cgroup` says `powos/sleep` is woken first with `dbus-send ... dev.powos.Sleep.Gui.Wake string:steam` (`powos sleep wake <pid>` as the fallback), then the launch goes to the running Steam instead of waiting on a frozen one.

@@ -66,6 +66,8 @@ SOCK = f"{common.STATE_DIR}/sleepd.sock"
 IDLE = common.seconds(os.environ.get("POWOS_SLEEP_GUI_IDLE", "10m"))
 GRACE = 60  # woken by D-Bus but still unfocused: asleep again after this
 SAMPLE = 5  # seconds of CPU/IO measured before freezing
+LAUNCH_URL = "://rungameid/"  # a launcher's game-launch URL in a process outside its client's tree: a launch pending
+LAUNCH_HOLD_S = 60  # an app a launch path woke (Gui.Wake) stays awake this long: the launch reaches it
 RERAISE_MS = (800, 2000)  # a resumed game's window raised again this long after the thaw (Gui.Resume's HACK)
 GAME_WINDOW_S = 600  # a game still without a window this long after its launch (hung) sleeps all the same
 # A unit's app running without a window (Steam -silent) is adopted at most this long after it started (Gui.adopt)
@@ -537,12 +539,25 @@ class Gui(dbus.service.Object):
                 pid = p
                 break
         if pid is None:
+            # Awake already: still held for the launch (a resident Steam, awake, was frozen 8 s into a launch that
+            # waited on its logon: the forward never reached it - bf-return 2026-11-05 12:10:33).
+            awake = next((p for p in self.app_pids() if (what.isdigit() and int(what) == p)
+                          or what.lower() == self.cls(p).lower() or (self.unit_of(p) or {}).get("id") == what), None)
+            if awake is not None:
+                self.hold(awake)
             return json.dumps({"ok": True, "awake": True})
         r = self.thaw(pid, "launched")
         if not self.pid_active(pid):
             self.idle_since[pid] = time.time()
+        self.hold(pid)
         self.schedule()
         return json.dumps({**r, "totalMs": round((time.monotonic() - t) * 1000, 2)})
+
+    def hold(self, pid):
+        """A launch path woke [pid] (Gui.Wake): not frozen for LAUNCH_HOLD_S - the launch it carries (Steam's forward
+        waits up to 30 s for its logon, then the game's own start grace) must reach it awake."""
+        self.refused[pid] = (max(self.refused.get(pid, (0, ""))[0], time.time() + LAUNCH_HOLD_S), "launching")
+        self.schedule()
 
     def reraise(self, wid):
         if wid in self.wins:
@@ -865,6 +880,15 @@ class Gui(dbus.service.Object):
             # Starting: updating itself, logging in, and doing what it was started for (Steam started by a game's
             # launch hands the game over only once it's logged in - frozen before that, the launch waits).
             return self.refuse(pid, f"started {age(pid):.0f}s ago", grace - age(pid) + 1)
+        if u and game_launcher(u):
+            # A game launch on its way to the client (/usr/bin/steam's forward waits up to 30 s for its logon over a
+            # live link): the client stays awake for it. Frozen meanwhile, the forward never reached it (bf-return
+            # 2026-11-05 12:10:33: Steam frozen 8 s into the launch, no game in 20 s).
+            mine = set(pids)
+            pending = next((q for q in map(int, filter(str.isdigit, os.listdir("/proc")))
+                            if q not in mine and LAUNCH_URL in cmdline(q)), None)
+            if pending:
+                return self.refuse(pid, f"a launch on its way ({pending}: {cmdline(pending)[:60]})", 10)
         names = [(stat(p) or {}).get("comm") for p in pids]
         if cls.startswith("android-"):
             # powos-android-tasks' stand-ins for Android apps: its watcher signals them when the app goes away, and
