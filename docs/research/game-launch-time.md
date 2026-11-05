@@ -66,9 +66,14 @@ Off: `POWOS_STEAM_LOCALES=0` in ~/.config/powos/steam-env. Test: `test/tier1/tes
 |---|---|---|---|---|---|---|
 | before (-34, 11-05 02:59) | 3.3 | 6.9 | 11.4 | 23.2 | 29.4 | 37.6 |
 | PRESSURE_VESSEL_GENERATE_LOCALES=0 (11-05 03:57, the upper bound) | 4.6 | 7.8 | 8.7 | 21.1 | 25.9 | 34.4 |
-| kept LOCPATH (-35) | | | | | | pending re-measure after ship |
+| kept LOCPATH (-35, 11-05 04:13) | 3.5 | 7.7 | 8.7 | 21.5 | 27.3 | - (window not focused, black: FAIL frame, re-queued) |
+| Steam cold, before (-34, 11-04 03:00) | 20.8 | 24.4 | 29.3 | 42.2 | 47.9 | 56.8 |
+| Steam cold, kept LOCPATH (-35, 11-05 04:17) | 27.2 | 31.5 | 33.3 | 45.7 | 51.1 | 59.8 |
 
-From the reaper: window -4.7 s, frame -4.5 s.
+No localedef in either -35 timeline. pv -> Proton: 4.5 -> 1.0 s (warm), 4.9 -> 1.7 s (cold); from the reaper: window
+26.1 -> 23.8 s (warm), 27.1 -> 24.0 s (cold), frame 36.0 -> 32.6 s (cold). The cold run's later reaper (27.2 s) is
+Steam's own start + login (varies run to run), not this change. The warm run's missing frame: its window never got
+_NET_WM_STATE_FOCUSED (the cold run's did, and drew) - a focus/export flake, not the locale (re-queued).
 
 ## Tried: FEX code cache (2026-11-05, FEX-2607)
 
