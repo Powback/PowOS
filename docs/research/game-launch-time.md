@@ -149,6 +149,17 @@ image init, likely the image's DRM/pixmap state) and why it is unset only in the
 /run/host/usr/lib/libxcb.so.1.1.0, so Mesa's host libxcb-dri3/-present may not talk to Wine's connection), then fix
 there and re-measure with bf-pacing. Until then ARM64 stays at ~19 fps and Broforce stays pinned x86.
 
+**Cause found + fix (same day):** the pointer test above is irrelevant - the installed Turnip has no DRI3 path at all.
+Its NEEDED list has libxcb-shm but no libxcb-dri3 / libxcb-present / libdrm: with `-Dfreedreno-kmds=kgsl` alone and
+Turnip as the only driver, Mesa's meson sets `system_has_kms_drm = false`, so `with_dri_platform` isn't drm and
+`HAVE_X11_DRM` is never defined - the X11 WSI is software-only (`x11_present_to_x11_sw` is the only present). The
+ARM64 game maps ours (/run/host/usr/lib/libvulkan_freedreno.so via pressure-vessel); the x86 game runs the FEX RootFS's
+own x86 Turnip (Fedora 44, DRM build) and so presents through DRI3. Fix: vulkan-freedreno-kgsl 27.0.0_devel.20261029.
+geb3e7fd4-3 builds `-Dfreedreno-kmds=kgsl,msm` (links libdrm, xcb-dri3/-present/-sync, xshmfence, libdisplay-info,
+libudev; /dev/kgsl-3d0 still enumerated first). Published; queued: vulkan-freedreno-install.sh, then
+`bf-pacing.sh cfg:arm64 base`, `bf-checker.sh cfg:arm64 base` (cfg: now a first argument of both, bf-cfg-phone.sh) and
+an x86 `bf-pacing.sh base` for no regression. After-numbers: pending those jobs.
+
 Install-script evaluator skip on ARM64: not extendable the x86 way. ARM64's chain before the container is
 pw-audio-namespace -> reaper -> SteamLinuxRuntime_4-arm64/_v2-entry-point (/bin/sh) -> pressure-vessel-wrap - no Python
 runs before pressure-vessel, so sitecustomize.py has nowhere to hook; the skip already happens (user_settings.py,
