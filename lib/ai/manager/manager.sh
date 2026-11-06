@@ -76,15 +76,28 @@ _manager_ensure_claude() {
 #   endpoint  the machine's Anthropic endpoint (/etc/powos/ai/endpoint.conf, or ANTHROPIC_BASE_URL exported): the
 #             owner's devices, the fleet authority - unchanged, nothing else is looked at
 #   login     Claude Code's own login in this image (its credentials file, or a key/token the environment exports)
+#   relogin   the endpoint's tenant needs its login (missing, or the refresh failed): the native sign-in
+#             (powos manager --fleet-login status|start|complete; the authority's claude-login flow, never /login here)
 #   signin    neither: the AI page asks to sign in (powos manager --signin)
 # Only file presence and variable names are looked at - never a credential's contents.
 _manager_auth() {
     declare -f _ai_ensure_config &>/dev/null && _ai_ensure_config
     if [[ -r "${POWOS_AI_ENDPOINT_FILE:-/etc/powos/ai/endpoint.conf}" || -n "${ANTHROPIC_BASE_URL:-}" ]]; then
-        echo endpoint
-    elif [[ -s "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json" || -n "${ANTHROPIC_API_KEY:-}" \
-            || -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" || -n "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
+        # relogin: the authority says this machine's tenant has no login, or its refresh failed (what claude itself
+        # reports as "run /login"): the page's native sign-in (fleet_login.py; the authority's claude-login flow).
+        # The authority unreachable or fine: endpoint, as before. Capped at a few seconds; only its state word is read.
+        local w=""
+        local cap=(); command -v timeout &>/dev/null && cap=(timeout 12)
+        command -v python3 &>/dev/null && w=$("${cap[@]}" python3 "$_MANAGER_DIR/fleet_login.py" word 2>/dev/null)
+        [[ "$w" == relogin ]] && echo relogin || echo endpoint
+    elif [[ -n "${ANTHROPIC_API_KEY:-}" || -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" || -n "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
         echo login
+    elif [[ -s "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json" ]]; then
+        # Its own login (direct mode): relogin once it can't refresh any more (fleet_login.py reads only its expiry
+        # and whether a refresh token is there).
+        local w=""
+        command -v python3 &>/dev/null && w=$(python3 "$_MANAGER_DIR/fleet_login.py" word 2>/dev/null)
+        [[ "$w" == relogin ]] && echo relogin || echo login
     else
         echo signin
     fi
@@ -133,6 +146,8 @@ manager_run() {
             # How it's signed in (one word: endpoint / login / signin), Claude Code's login, its logout.
             --auth) _manager_auth; return ;;
             --signin) _manager_signin; return ;;
+            # The native fleet sign-in: status | start <tenant> | complete <tenant> (code#state on stdin); JSON out.
+            --fleet-login) shift; python3 "$_MANAGER_DIR/fleet_login.py" "$@"; return ;;
             --signout) _manager_signout; return ;;
             *) passthru+=("$1") ;;
         esac
@@ -166,9 +181,14 @@ manager_run() {
 # answers 401 - the page's event ("signin": its Sign in to Claude state) and status 1 (manager_run returns 4). $@: the
 # broker's flags.
 _manager_signed_in() {
-    [[ "$(_manager_auth)" != signin ]] && return 0
-    [[ " $* " == *" --json-events "* ]] && echo '{"kind": "signin"}'
-    echo "manager: not signed in to Claude (powos manager --signin)" >&2
+    local how; how="$(_manager_auth)"
+    [[ "$how" != signin && "$how" != relogin ]] && return 0
+    [[ " $* " == *" --json-events "* ]] && echo "{\"kind\": \"$how\"}"
+    if [[ "$how" == relogin ]]; then
+        echo "manager: the fleet's Claude login needs you - sign in from the AI page (powos manager --fleet-login status)" >&2
+    else
+        echo "manager: not signed in to Claude (powos manager --signin)" >&2
+    fi
     return 1
 }
 
