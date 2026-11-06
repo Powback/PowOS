@@ -1227,6 +1227,8 @@ class WebWindows(
         src.handle = handle
         // Its own Android keyboard (kwin 0043 window-ime): KWin's show/hide for it and its typed text on this consumer.
         andro.marchy.WebWindowSource.ownKeyboard(kwin, handle)
+        // A game's touches and KWin's always-on ask for it never raise the keyboard (TapKeyboard.setGame, 11-06 Broforce).
+        andro.marchy.WebWindowSource.gameKeyboard(handle, src.offer.game)
         andro.marchy.WebWindowSource.crop(handle, win.w, win.h)
         andro.marchy.WebWindowSource.refreshRate(handle, src.rate)
         if (win.closed) {

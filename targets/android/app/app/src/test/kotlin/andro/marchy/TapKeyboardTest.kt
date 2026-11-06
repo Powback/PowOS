@@ -57,4 +57,32 @@ class TapKeyboardTest {
         assertFalse(t.up(12_050, 1f, 1f)) // and a tap adds nothing of its own
         assertFalse(t.held())
     }
+
+    @Test
+    fun aGamesTouchesNeverRaiseIt() {
+        // 11-06 Broforce (Proton) full screen on the unfolded screen: "the keyboard opens any time I touch the game".
+        // Wine keeps text input on for the focused game window, so KWin's ask stands for its whole life.
+        for (gate in listOf(true, false)) {
+            val t = TapKeyboard(gate)
+            t.setGame(true)
+            t.down(1_000, 5f, 5f)
+            assertFalse(t.show(1_100)) // an ask right after a touch: still not the user's on a game
+            for (at in listOf(3_000L, 6_000L, 9_000L)) {
+                t.down(at, 50f, 50f)
+                assertFalse(t.up(at + 60, 50f, 50f)) // every tap on the game
+                assertFalse(t.held())
+            }
+        }
+    }
+
+    @Test
+    fun aNonGameWindowStillRaisesItOnTheTap() {
+        // Steam's / an app's text field keeps its keyboard: not a game.
+        val t = TapKeyboard(true)
+        t.setGame(false)
+        assertFalse(t.show(10_000))
+        t.down(12_000, 100f, 40f)
+        assertTrue(t.up(12_080, 100f, 40f))
+        assertTrue(t.held())
+    }
 }

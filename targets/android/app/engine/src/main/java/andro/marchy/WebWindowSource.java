@@ -315,6 +315,12 @@ public final class WebWindowSource {
         return taps.computeIfAbsent(handle, h -> new TapKeyboard(WindowTasks.kwinCan("keyboard-live")));
     }
 
+    /** Window consumer [handle] shows a game ([TapKeyboard.setGame]): KWin's keyboard asks and touches on it raise nothing. */
+    public static void gameKeyboard(long handle, boolean game) {
+        if (handle != 0)
+            tapsOf(handle).setGame(game);
+    }
+
     /** Main thread: [nativeKeyboard]'s show or hide. */
     private static void keyboard(Activity a, long handle, boolean visible) {
         TapKeyboard t = tapsOf(handle);
@@ -324,7 +330,7 @@ public final class WebWindowSource {
         } else if (t.show(android.os.SystemClock.uptimeMillis())) {
             raise(a, handle);
         } else {
-            Log.i(TAG, "keyboard asked for a web window with no touch behind it: held for the user's tap");
+            Log.i(TAG, "keyboard asked for a web window with no touch behind it (or a game's): held");
         }
     }
 

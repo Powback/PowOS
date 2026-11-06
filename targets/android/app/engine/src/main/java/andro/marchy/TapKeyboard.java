@@ -17,6 +17,11 @@ package andro.marchy;
  * kwin 0054): an older one never asks again, so holding its ask would leave a tap raising nothing - there every ask
  * raises the keyboard at once, as before.
  *
+ * A game's window never raises it on KWin's ask or on a touch ([setGame]): Wine/Proton and Unity keep text input
+ * enabled on the focused game window for its whole life, so KWin's ask stands from the first frame and every touch on
+ * the game raised the keyboard (11-06 Broforce on the unfolded screen: "the keyboard opens any time I touch the game").
+ * Steam, apps and PowOS's own fields are not games and keep the behaviour above.
+ *
  * Plain state, no Android: WebWindowSource keeps one per window consumer, on the main thread.
  */
 public final class TapKeyboard {
@@ -34,13 +39,27 @@ public final class TapKeyboard {
     private boolean pending;
     /** KWin's keyboard is asked for (show .. hide): a tap raises it, also after the user put it away. */
     private boolean asked;
+    /** The window is a game's ([setGame]): no ask or touch of it raises the keyboard. */
+    private volatile boolean game;
 
     /** KWin asked for the keyboard at [now] (uptime ms): true = raise it now; false = held for the next tap. */
     public TapKeyboard(boolean gate) {
         this.gate = gate;
     }
 
+    /** The window is a game's (WebWindows.isGame): from now on KWin's asks and the user's touches on it raise nothing. */
+    public void setGame(boolean game) {
+        this.game = game;
+        if (game)
+            pending = false;
+    }
+
     public boolean show(long now) {
+        if (game) {
+            asked = true;
+            pending = false;
+            return false;
+        }
         if (!gate)
             return true;
         asked = true;
@@ -66,7 +85,7 @@ public final class TapKeyboard {
 
     /** The touch ended: true when it was a tap and KWin's ask stands - raise the keyboard (unless a hide comes first). */
     public boolean up(long now, float x, float y) {
-        if (!gate)
+        if (!gate || game)
             return false;
         boolean tap = now - downAt <= TAP_MS && Math.abs(x - downX) <= TAP_SLOP && Math.abs(y - downY) <= TAP_SLOP;
         if (tap && asked)
@@ -76,7 +95,7 @@ public final class TapKeyboard {
 
     /** The tap's raise is still wanted (its delayed raise checks it: KWin's hide for a focus the tap moved wins). */
     public boolean held() {
-        return pending && asked;
+        return pending && asked && !game;
     }
 
     /** The delayed raise happened. */
