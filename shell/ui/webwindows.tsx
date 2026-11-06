@@ -2259,6 +2259,19 @@ function carriesWindow(t: Node): boolean {
   return false;
 }
 
+/**
+ * Paint-only properties: a transition of one of them inside a window (a grip's or a button's fade, a hover colour)
+ * moves and reshapes nothing - the window's own opacity is its alpha, so on the window or around it they still count.
+ * The ship gate's ww-idle-tick on 11-06: "transitionrun svg.ww-grip" restarted the tick 7x in 120 still frames.
+ */
+const PAINT_ONLY = /^(opacity|color|background(-color)?|fill|stroke|box-shadow|filter|outline(-color)?|border(-\w+)?-color|visibility|text-decoration-color|caret-color)$/;
+function decorationOnly(e: Event): boolean {
+  if (!(e instanceof TransitionEvent) || !PAINT_ONLY.test(e.propertyName)) return false;
+  const t = e.target as Element;
+  for (let i = 0; i < winEls.length; i++) if (t === winEls[i] || t.contains(winEls[i])) return false;
+  return true;
+}
+
 /** For the gate's failure line: what last made a frame measure ("mutation <class>", "running <class>", an event). */
 let dirtyBy = "";
 function markDirty(e?: Event | string) {
@@ -2281,7 +2294,7 @@ for (const type of ["transitionrun", "animationstart"] as const)
   addEventListener(type, (e) => {
     // Only what carries or reshapes a window: it contains one or is inside one (not any descendant of a shared
     // ancestor such as the page track - an SVG ring on another page is no reason to re-measure).
-    if (!e.target || !carriesWindow(e.target as Node)) return;
+    if (!e.target || !carriesWindow(e.target as Node) || decorationOnly(e)) return;
     running.add(e.target);
     // getAttribute: an SVG element's className is an SVGAnimatedString, not its classes.
     markDirty(`${e.type} ${(e.target as Element).localName}.${(e.target as Element).getAttribute("class") ?? ""}`);
