@@ -144,6 +144,13 @@ class OnScreen(unittest.TestCase):
                              ("com.powos.app/andro.marchy.PowosWindowActivity#9177", 0, 0, 1116, 2484)))
         self.assertTrue(out.startswith("onscreen 1 task 540fc89_SurfaceView"), out)
 
+    def test_folded_task_direct_scanout(self):
+        # debug.powos.direct_scanout=1: the client's buffer shows on the SurfaceView's child "powos-direct", the
+        # SurfaceView's own layer drops out of the HWC list (11-06 job 110246: 4115/4118 frames direct, INVALID before).
+        out = self.probe(hwc(("powos-direct#9190", 0, 0, 1116, 2484),
+                             ("com.powos.app/andro.marchy.PowosWindowActivity#9177", 0, 0, 1116, 2484)))
+        self.assertTrue(out.startswith("onscreen 1 task powos-direct"), out)
+
     def test_unfolded_full_screen_web_window(self):
         out = self.probe(hwc(("[BBQ] powos-ww-42-linux#10267", 0, 0, 2440, 2268), HOME))
         self.assertEqual(out, "onscreen 1 web [BBQ]_powos-ww-42-linux#10267")

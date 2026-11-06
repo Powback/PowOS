@@ -16,7 +16,7 @@ mkdir -p "$3"; end=$(( $(date +%s) + $1 ))
 # presents as "no presents" yet still PASSed.
 dumpsys SurfaceFlinger --list | sed -E 's/^RequestedLayerState\{//; s/ parentId=.*//; s/ z=.*//; s/\}$//' | grep -iE "$2" \
   | grep -vE "Gesture Monitor|ActivityRecord|InputSink|animation-leash|^Bounds for|^Background for" > "$3/all"
-{ grep -E "\(BLAST\)|\[BBQ\] powos-ww-" "$3/all"; grep -vE "\(BLAST\)|\[BBQ\] powos-ww-" "$3/all"; } | head -6 > "$3/layers"; rm -f "$3/all"
+{ grep -E "\(BLAST\)|\[BBQ\] powos-ww-|powos-direct" "$3/all"; grep -vE "\(BLAST\)|\[BBQ\] powos-ww-|powos-direct" "$3/all"; } | head -6 > "$3/layers"; rm -f "$3/all"
 DID=$(dumpsys display | grep -E "^  DisplayDeviceInfo" | sed -nE 's/.*uniqueId="local:([0-9]+)",.* state ON,.*/\1/p' | head -1)
 [ "${4:-20}" -gt 0 ] && ( sleep 4; screenrecord --display-id "$DID" --bit-rate 40000000 --time-limit "${4:-20}" "$3/rec.mp4" ) &
 while [ $(date +%s) -lt $end ]; do

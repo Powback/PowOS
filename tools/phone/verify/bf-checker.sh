@@ -72,7 +72,7 @@ for v in "$@"; do
       n=$((n + 1)); "$here/../shot.sh" "$M/s$(printf %02d $n).png" >/dev/null 2>>"$M/shot.err"
     fi
     if [ "$el" -ge 45 ] && [ -z "${pres:-}" ]; then pres=1
-      "$A" shell "su -c 'rm -rf /data/local/tmp/bfp; nohup sh /data/local/tmp/powos-bf-present.sh 25 \"PowosWindowActivity|SurfaceView|Broforce|steam_app\" /data/local/tmp/bfp 0 >/dev/null 2>&1 &'"
+      "$A" shell "su -c 'rm -rf /data/local/tmp/bfp; nohup sh /data/local/tmp/powos-bf-present.sh 25 \"PowosWindowActivity|SurfaceView|powos-direct|Broforce|steam_app\" /data/local/tmp/bfp 0 >/dev/null 2>&1 &'"
     fi
     touched && abort; sleep 2
   done; unset pres ps_

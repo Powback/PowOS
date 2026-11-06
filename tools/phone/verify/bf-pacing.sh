@@ -123,7 +123,7 @@ for mode in "$@"; do
   echo "$win2" | sed 's/win=/settled /; s/screen=/on /' >> "$M/window.txt"
   echo "$mode: in front: $top ($WHY)"; echo "front $top" >> "$M/window.txt"
   [ $ok = 0 ] || invalid "after the settle"
-  "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof; nohup sh /data/local/tmp/powos-bf-present.sh 30 \"PowosWindowActivity|SurfaceView|powos-ww-[0-9]+-linux|steam_app${WIN_NAME:+|$WIN_NAME}\" /data/local/tmp/bfp >/dev/null 2>&1 &
+  "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof; nohup sh /data/local/tmp/powos-bf-present.sh 30 \"PowosWindowActivity|SurfaceView|powos-direct|powos-ww-[0-9]+-linux|steam_app${WIN_NAME:+|$WIN_NAME}\" /data/local/tmp/bfp >/dev/null 2>&1 &
     nohup sh /data/local/tmp/powos-bf-prof.sh 30 /data/local/tmp/bfprof >/dev/null 2>&1 &'"
   pill "$lbl: measuring frames (30 s)"; nap 30
   onscreen || invalid "during the measurement"

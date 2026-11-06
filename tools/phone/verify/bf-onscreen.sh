@@ -15,7 +15,9 @@ dumpsys SurfaceFlinger 2>/dev/null | awk '
   p && /^ [^ -]/ { n = $0; sub(/^ /, "", n); next }
   p && /\|/ && n != "" {
     split($0, c, "|"); split(c[6], f, " "); a = (f[3] - f[1]) * (f[4] - f[2]); if (a > big) big = a
-    if (n ~ /SurfaceView\[com\.powos\.app\/andro\.marchy\.PowosWindowActivity\]/) { k[++m] = "task"; nm[m] = n; ar[m] = a }
+    # powos-direct: the SurfaceView child that shows the client own buffer under window-task direct scanout
+    # (direct_scanout.c, debug.powos.direct_scanout=1) - the SurfaceView itself then carries no frame and drops out.
+    if (n ~ /SurfaceView\[com\.powos\.app\/andro\.marchy\.PowosWindowActivity\]|powos-direct/) { k[++m] = "task"; nm[m] = n; ar[m] = a }
     else if (n ~ /powos-ww-[0-9]+-linux/) { k[++m] = "web"; nm[m] = n; ar[m] = a }
     n = ""
   }
