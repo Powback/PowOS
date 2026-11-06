@@ -128,6 +128,19 @@ _manager_load() {
 }
 
 # powos ai manager [--safe] [--no-sandbox]  — start / resume the persistent manager session (--help: its flags).
+# The sign-in flags of manager_run, $1 the flag, the rest its args:
+#   --auth         how it's signed in (one word: endpoint / relogin / login / signin)
+#   --signin       Claude Code's login        --signout  its logout
+#   --fleet-login  the native fleet sign-in: status | start <tenant> | complete <tenant> (code#state on stdin); JSON out
+_manager_auth_cmd() {
+    case "$1" in
+        --auth) _manager_auth ;;
+        --signin) _manager_signin ;;
+        --fleet-login) shift; python3 "$_MANAGER_DIR/fleet_login.py" "$@" ;;
+        --signout) _manager_signout ;;
+    esac
+}
+
 manager_run() {
     command -v python3 &>/dev/null || { echo "manager needs python3" >&2; return 1; }
     [[ -f "$MANAGER_SERVER" ]] || { echo "manager.py not found" >&2; return 1; }
@@ -143,12 +156,8 @@ manager_run() {
             --no-sandbox) export POWOS_SANDBOX_ENABLED=0 ;;
             # --help: the broker's own (manager.py), without the persona load below.
             -h|--help) python3 "$MANAGER_SERVER" --help; return ;;
-            # How it's signed in (one word: endpoint / login / signin), Claude Code's login, its logout.
-            --auth) _manager_auth; return ;;
-            --signin) _manager_signin; return ;;
-            # The native fleet sign-in: status | start <tenant> | complete <tenant> (code#state on stdin); JSON out.
-            --fleet-login) shift; python3 "$_MANAGER_DIR/fleet_login.py" "$@"; return ;;
-            --signout) _manager_signout; return ;;
+            # How it's signed in, Claude Code's login, the native fleet sign-in, its logout (_manager_auth_cmd).
+            --auth|--signin|--fleet-login|--signout) _manager_auth_cmd "$@"; return ;;
             *) passthru+=("$1") ;;
         esac
         shift
