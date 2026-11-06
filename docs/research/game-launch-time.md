@@ -348,6 +348,55 @@ return-to-a-left-game path (freeze/resume, 0.6-0.8 s). Not done (evaluated): a p
 prefix (saves at most ~2 s of reaper -> exe; a wineserver outside Steam's reaper makes Steam show the game running,
 and the game-resume freeze keys on Steam's tree); unity-screen's Python (55 ms, not worth it).
 
+## Unity window -> frame: the emulated main-thread time by symbol, TSO A/B (2026-11-05, agent/fex-mono-start)
+
+Broforce 274190, `powos-proton-arm64` (steam -36). Instrument (scratch `fms-run.sh`/`fms-watch.sh` around `bf-coldstart
+steam`, job 20261105-174324): `simpleperf record -a --call-graph fp` 13 s from the exe, with `FEX_LIBRARYJITNAMING=1
+FEX_BLOCKJITNAMING=1` (proton-settings.json). Proton ARM64's arm64ec FEX writes the perf map to the chroot's
+`/tmp/perf-<linux pid>.map` (37 MB: guest `<dll>+0x<rva>` per file-backed block, `JIT_0x<guest rip>` per anonymous
+block); joined offline with the host NDK's simpleperf_report_lib, FEX's own samples symbolised from
+`libarm64ecfex.dll`'s COFF symbol table (llvm-nm; it has one). Naming makes FEX compile more (frame 19.2 s), so the split
+below is from that run; the warm FEX split is from job 105337 (symbolised the same way).
+
+| main thread, 13 s | s |
+|---|---|
+| FEX compile (warm 0.85 s: RA `TryPostRAMerge`, `GenerateIR`, `FlushRegisterCache`, `AddBlockExecutableRange`) | 1.94 |
+| kernel (page faults 0.28, server round trips write/writev/readv ~0.6, futex 0.19, mmap 0.14) | 1.64 |
+| UnityPlayer.dll emulated (named 0.52 + ~1.0 in blocks not in the map) | ~1.5 |
+| mono.dll emulated (runtime, JIT compiler, bdwgc) | 0.57 |
+| Mono JIT output (anonymous, managed code) | 0.39 |
+| Wine ntdll (dll + so) + vdso clock_gettime | 0.79 |
+
+- **Managed code is small**: Mono's JIT output runs 0.39 s and mono.dll 0.57 s on main; the emulated time is mostly
+  UnityPlayer's own native init. Mono AOT can't apply (Unity 2017.4's embedded mono.dll, no AOT/`MONO_ENV_OPTIONS` for
+  an embedder), and the managed share it could cut is < 0.5 s anyway.
+- **Main idles while UnityPreload works** (sample bins: one 1 s span with 11 main samples and UnityPreload 76 %), and in
+  the last ~3 s main is 25-30 % busy (the GPU work agent/load-uploads saw): the hand-off, not one slow loop.
+- **The main thread's server calls are mostly Steam's**: of 58k wineserver requests by the main thread before the first
+  frame (job 104344's +server log), ~35k are `steam_api64` `SteamAPI_IsSteamRunning` polls - HKCU\Software\Valve\Steam\
+  ActiveProcess `pid` + open_process/get_process_info, ~80/s during the load and ~150/s in play, each 23 requests
+  because Wine probes `Wow6432Node` after every path component. ~0.4 s of main's kernel time; only a Wine registry change
+  (client-side cache / no per-component Wow6432Node probe for a non-WoW64 process) would cut it - a Proton ARM64 build; done in the next
+  section (agent/steam-poll).
+- **TSO off: no gain** (warm cache, `FEX_TSOENABLED=0` + `FEX_DISKCACHEPRUNESTALEENTRIES=0` so the base cache survived;
+  jobs 175352..175445), exe -> frame ms:
+
+  | variant | runs | mean |
+  |---|---|---|
+  | base | 10639, 10648 | 10.64 s |
+  | TSO off | 10579, 10792, 10676, 10487 | 10.63 s |
+
+  So the emulated code isn't barrier-bound; with no gain there is no reason to take Unity/Mono's memory-ordering risk.
+  Proton's Config.json already has Multiblock 1, MaxInst 500 (FEX's Mono hacks need both), X87ReducedPrecision 1.
+- Note: the FEX disk cache dir hash isn't keyed on the JITNaming options (the naming run wrote into the base dir), but a
+  TSO change is a new dir, and a launch with prune on deletes the other dirs - A/Bs of cache-keyed FEX options need
+  `FEX_DISKCACHEPRUNESTALEENTRIES=0` and a warm-up run per variant.
+
+Nothing ships (no knob cleared 0.5 s). What is left of window -> frame is UnityPlayer's native init on main (~1.5 s
+emulated), FEX compiling Mono's fresh JIT output every launch (~0.85 s, uncachable by design), kernel/server calls
+(~1.6 s, ~0.4 s of it Steam's IsSteamRunning polls) and the main <-> UnityPreload / GPU hand-off waits. Fresh tap ->
+frame < 10 s stays out of reach for this game from config; the < 10 s path is resume (0.6-0.8 s).
+
 ## steam_api's IsSteamRunning polls: Wine's 32-bit-view registry walk (2026-11-05, agent/steam-poll)
 
 Follow-up to agent/fex-mono-start's finding (~35k of main's 58k server requests before the first frame are

@@ -269,7 +269,10 @@ class DeckPad:
             self.opened = True
             log("steam (or another reader) opened the deck controller")
         elif kind == UHID_CLOSE:
+            # Logged like the open: while closed no report goes out, so a pad that "does nothing" shows here
+            # (11-06: the log had two opens and no close, the gap could not be placed).
             self.opened = False
+            log("steam (the last reader) closed the deck controller: no reports until it opens again")
         elif kind == UHID_GET_REPORT:
             req_id, _rnum, _rtype = struct.unpack_from("<IBB", ev, 4)
             self.reply_get(req_id)
