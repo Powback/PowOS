@@ -7980,7 +7980,8 @@ async function lockCardsScene() {
  */
 /**
  * WT-IDLE (perf-1793458433606: tick 61-83 ms of script with nothing moving): with 3 windows open and still, the rAF
- * tick is a flag check - p95 < 1 ms over 120 frames, no "w.f" sent, no AppCell/Tile render in 60 frames - and a
+ * tick doesn't run (HP4, perf-1793970543446: no frame callback while nothing moves a window; at most 2 in 120 frames,
+ * each a flag check), no "w.f" sent, no AppCell/Tile render in 60 frames - and a
  * "webwindows.resend" still forces exactly one "w.f" (the RenderWatch probe expects a frame though nothing changed).
  */
 async function webWindowIdleTick() {
@@ -7995,7 +7996,7 @@ async function webWindowIdleTick() {
     await window.__gw.settled();
     await sleep(800); // open transitions over
     await window.__gw.frames(10);
-    const sentAt = window.__ww.sent.length, last = window.__ww.sent.at(-1);
+    const sentAt = window.__ww.sent.length, last = window.__ww.sent.at(-1), ticks0 = window.__ww.ticks;
     window.__powosRenders.start();
     window.__powosRenders.reset();
     await window.__gw.frames(60);
@@ -8004,8 +8005,10 @@ async function webWindowIdleTick() {
     window.__powosRenders.stop();
     if (cells) fails.push(`WT-IDLE: ${cells} AppCell/Tile renders in 60 idle frames with windows (${rows.map((r) => r.name + " " + r.renders).join(", ")})`);
     await window.__gw.frames(60);
-    const ms = window.__ww.tickMs.slice(-120).sort((a, b) => a - b);
-    const p95 = ms[Math.floor(ms.length * 0.95)] ?? Infinity;
+    // HP4: idle, the tick doesn't run at all (no rAF while nothing moves a window); what ran is a flag check.
+    const idleTicks = window.__ww.ticks - ticks0;
+    const ms = window.__ww.tickMs.slice(-Math.max(1, idleTicks)).sort((a, b) => a - b);
+    const p95 = ms[Math.floor(ms.length * 0.95)] ?? 0;
     // The old tick's cost for reference: a full measure (what it did every frame before WT-IDLE).
     const full = [];
     for (let i = 0; i < 120; i++) {
@@ -8015,10 +8018,10 @@ async function webWindowIdleTick() {
       await window.__gw.frames(1);
     }
     full.sort((a, b) => a - b);
-    window.__wwIdle = `p50 ${ms[Math.floor(ms.length * 0.5)]?.toFixed(3)} ms, p95 ${p95.toFixed(3)} ms idle; a full measure p95 ${full[114].toFixed(3)} ms`;
-    console.warn(`[gate] ww-idle-tick p95 ${p95.toFixed(3)} ms over ${ms.length} frames (a full measure: p95 ${full[114].toFixed(3)} ms); dirtied by ${window.__ww.dirtyBy}`);
-    if (ms.length < 100) fails.push(`WT-IDLE: only ${ms.length} ticks measured`);
-    fails.push(...window.__wwTickFails(ms));
+    window.__wwIdle = `${idleTicks} ticks in 120 idle frames (p95 ${p95.toFixed(3)} ms); a full measure p95 ${full[114].toFixed(3)} ms`;
+    console.warn(`[gate] ww-idle-tick: ${idleTicks} ticks in 120 idle frames, p95 ${p95.toFixed(3)} ms (a full measure: p95 ${full[114].toFixed(3)} ms); dirtied by ${window.__ww.dirtyBy}`);
+    if (idleTicks > 2) fails.push(`WT-IDLE: the window tick ran ${idleTicks}x in 120 frames with every window still (want none: no rAF while idle; last dirtied by ${window.__ww.dirtyBy})`);
+    if (idleTicks) fails.push(...window.__wwTickFails(ms));
     if (window.__ww.sent.length !== sentAt || window.__ww.sent.at(-1) !== last) fails.push(`WT-IDLE: ${window.__ww.sent.length - sentAt} w.f sent while idle`);
     const before = window.__ww.sent.at(-1);
     window.__mockEvents.emit("webwindows.resend", 0);
@@ -12575,6 +12578,13 @@ try {
       console.log(`     drawer-drag-renders: ${await r.page.evaluate(() => window.__drawerDrag).catch(() => "?")}`);
       return fails;
     })));
+    // HP4 (perf-1793970543446, 11-06): home's page swipe - no style/size read in its moves or release, no render per move.
+    for (const [w, h, name] of [[821, 883, "page-swipe-perf"], [404, 900, "page-swipe-perf-folded"]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: w, height: h }).then((r) => whenReady(r, async () => {
+        const fails = await r.page.evaluate(async () => (await importShim("./dev/page-swipe-check.js")).pageSwipePerf());
+        console.log(`     ${name}: ${await r.page.evaluate(() => window.__pageSwipe).catch(() => "?")}`);
+        return fails;
+      })));
     // AZL1 (ask-1a1a3856299/-da60): the experimental A-Z list - off: as before; on: centred, whole names, lift on a row opens it.
     for (const [w, h, name] of [[404, 900, "az-list"], [821, 883, "az-list-unfolded"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: w, height: h }).then((r) => whenReady(r, async () => {

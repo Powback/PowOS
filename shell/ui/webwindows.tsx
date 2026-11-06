@@ -1789,6 +1789,7 @@ function holdAppSizes(ids: (number | null)[]) {
     resizing.set(w.id, { cw: w.w, ch: w.h - (w.ownFrame ? 0 : TITLE), frame: 0, last: Infinity, lastAt: Infinity, steps: 0, reqs: 0 });
     held.push(w.id);
   }
+  if (held.length) kick();
 }
 
 /** The drop's preview: the tile the window would take, translucent; it glides between zones. */
@@ -2081,6 +2082,7 @@ const resizing = new Map<number, Resizing>();
 /** A resize grab on window [id] began: its app's size paced from now ([pace]) until [resizeEnd]. */
 function resizeStart(id: number) {
   resizing.set(id, { cw: -1, ch: -1, frame: 0, last: -Infinity, lastAt: -Infinity, steps: 0, reqs: 0 });
+  kick();
 }
 
 /** The grab ended: the next "w.f" has the body's size as the app's (the final relayout); the counts kept for the gate. */
@@ -2175,6 +2177,10 @@ const sent: string[] = [];
   get tickMs() {
     return tickMs;
   },
+  /** How many frames the tick has run (the gate's ww-idle-tick: none while every window is still). */
+  get ticks() {
+    return ticks;
+  },
   get dirtyBy() {
     return `${dirtyBy}; running ${[...running].map((t) => (t as Element).className).join(", ")}`;
   },
@@ -2197,6 +2203,7 @@ const sent: string[] = [];
  */
 function tick(ts: number) {
   raf = 0;
+  ticks++;
   const t0 = performance.now();
   if (moving()) {
     dirty = false;
@@ -2205,7 +2212,10 @@ function tick(ts: number) {
   }
   tickMs.push(performance.now() - t0);
   if (tickMs.length > 240) tickMs.shift();
-  if (webWins.value.length) raf = requestAnimationFrame(tick);
+  // The next frame only while something still moves a window (a transition on one, a resize drag): idle - every window
+  // still, or none on screen - no rAF at all (the title's "window tick", perf-1793970543446: a frame callback every
+  // vsync with nothing to do). What moves one next kicks it again (markDirty, transitionrun, webWins, resend).
+  if (webWins.value.length && moving()) raf = requestAnimationFrame(tick);
 }
 
 // ---- WT-IDLE: the tick measures only when something could have moved a window ------------------------------------
@@ -2221,6 +2231,7 @@ let dirty = true;
 const running = new Set<EventTarget>();
 /** The last frames' tick durations (ms), for the gate (`__ww.tickMs`). */
 const tickMs: number[] = [];
+let ticks = 0;
 const winEls = document.getElementsByClassName("webwindow");
 
 function moving(): boolean {
@@ -2251,8 +2262,10 @@ function carriesWindow(t: Node): boolean {
 /** For the gate's failure line: what last made a frame measure ("mutation <class>", "running <class>", an event). */
 let dirtyBy = "";
 function markDirty(e?: Event | string) {
-  dirty = true;
   dirtyBy = typeof e === "string" ? e : (e?.type ?? "kick");
+  // No window: nothing to measure (a scroll or tap anywhere on home asked a frame); the next window kicks it (webWins).
+  if (!webWins.peek().length) return void (dirty = true);
+  kick();
 }
 
 new MutationObserver((records) => {
@@ -2275,7 +2288,7 @@ for (const type of ["transitionrun", "animationstart"] as const)
   }, true);
 for (const type of ["transitionend", "transitioncancel", "animationend", "animationcancel"] as const)
   addEventListener(type, (e) => {
-    if (e.target && running.delete(e.target)) dirty = true;
+    if (e.target && running.delete(e.target)) kick();
   }, true);
 for (const type of ["resize", "scroll", "pointerup", "pointercancel"] as const) addEventListener(type, markDirty, true);
 visualViewport?.addEventListener("resize", markDirty);

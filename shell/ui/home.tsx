@@ -14,7 +14,7 @@ import type { App, PageRect } from "../types.ts";
 import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
 import { DockSearchButton, buttonMorph, dockButton, grabPill, useButtonMorph } from "./docksearch.tsx";
-import { chromeWay, drawerDragging, drawerOpen, followOpenness, homeGestures, launcherTakesHome, pageDrag, shadeTakesHome, windowGestureActive } from "./gesture.ts";
+import { chromeWay, drawerDragging, drawerOpen, followOpenness, homeGestures, launcherTakesHome, pageDrag, shadeTakesHome, widthOf, windowGestureActive } from "./gesture.ts";
 import { tick } from "./haptics.ts";
 import { PageDots } from "./pagedots.tsx";
 import { Carried, Folders, Pages, startCarry } from "./grid.tsx";
@@ -594,21 +594,6 @@ export function DockTray() {
   );
 }
 
-/** The pages' width, kept by a ResizeObserver: read per frame of a swipe it was a layout read after the track's write. */
-let pagesW = 0;
-let pagesSeen: Element | null = null;
-const pagesSize = new ResizeObserver((es) => (pagesW = es[es.length - 1].contentRect.width));
-function pagesWidth(): number {
-  const el = document.querySelector(".pages");
-  if (el !== pagesSeen) {
-    if (pagesSeen) pagesSize.unobserve(pagesSeen);
-    pagesSeen = el;
-    pagesW = 0;
-    if (el) pagesSize.observe(el);
-  }
-  return pagesW;
-}
-
 /**
  * Home's position for its dots (pagedots.tsx): PowOS AI's page first (-1), then home's pages and the app library - as
  * the track and the screens slide (gesture.ts applyTrack), so the dot moves with the finger, not after the settle.
@@ -619,7 +604,7 @@ function homeDotsAt(): [number, boolean] {
   if (dx == null) return [at + 1, false];
   // Toward PowOS AI's page the whole screen slides; between home's pages, the pages' own width.
   const toAi = at === -1 || (at === 0 && dx > 0);
-  const w = (toAi ? null : pagesWidth()) || innerWidth;
+  const w = (toAi ? null : widthOf(document.querySelector(".pages"))) || innerWidth;
   return [Math.max(0, Math.min(pageCount.value, at + 1 - dx / w)), true];
 }
 

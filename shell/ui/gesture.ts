@@ -76,6 +76,31 @@ export const launcherTakesHome = signal(false);
 export const held = signal(false);
 /** While a finger drags the pages: their offset in px; null otherwise. */
 export const pageDrag = signal<number | null>(null);
+/**
+ * Whether a finger drags the pages: what a render may read (the bar's "sliding"). A render that read [pageDrag] itself
+ * re-rendered on every px of a swipe - the bar, its pill, field and send button 9x per swipe (HP4, perf-1793970543446).
+ */
+export const pageDragging = computed(() => pageDrag.value != null);
+
+/**
+ * Element widths (border box) kept by a ResizeObserver: a swipe's moves and release write the track's transform and
+ * then needed home's and the pages' widths - read there, each one forced a style recalc and layout over the write
+ * (HP4, perf-1793970543446: "DIV.ontouchend 72 ms forced 64 ms", each touchmove 20-37 ms forced). The first ask for an
+ * element reads it once (startGesture asks at the down, before any write) and observes it from then on.
+ */
+const widths = new WeakMap<Element, number>();
+const widthObserver = new ResizeObserver((es) => {
+  for (const e of es) widths.set(e.target, e.borderBoxSize?.[0]?.inlineSize ?? e.contentRect.width);
+});
+export function widthOf(el: Element | null): number {
+  if (!el) return 0;
+  const had = widths.get(el);
+  if (had !== undefined) return had;
+  const w = (el as HTMLElement).offsetWidth ?? el.clientWidth;
+  widths.set(el, w);
+  widthObserver.observe(el);
+  return w;
+}
 
 // Haptics (haptics.ts): a tick as a finger crosses what letting go would commit - the launcher's openness (the host's
 // pull.drag or home's own swipe: OPEN_AT, PanelPull.kt's too; shutting it, CLOSE_KEEP) and the shade's (its pull, its
@@ -317,7 +342,7 @@ export function applyTrack() {
     el.style.transform = `translateX(calc(${base}% + ${shift}px))`;
     // FX1: home's one bar counters home's slide (shell.css .home > .bar translate) - it stays put on screen while the
     // pages slide under it, at rest, on the slide's curve and under a finger (bar.tsx seatOnAi).
-    if (sel === ".home") el.style.setProperty("--track-counter", `${-((base / 100) * el.offsetWidth + shift)}px`);
+    if (sel === ".home") el.style.setProperty("--track-counter", `${-((base / 100) * widthOf(el) + shift)}px`);
   }
   if (!track) return;
   track.classList.toggle("dragging", dx != null);
@@ -435,7 +460,7 @@ function trackBase() {
   const track = document.querySelector<HTMLElement>(".page-track");
   const pages = document.querySelector<HTMLElement>(".pages");
   if (!track || !pages || page.value < 0 || pageDrag.peek() != null) return 0;
-  const w = pages.clientWidth;
+  const w = widthOf(pages);
   const off = track.getBoundingClientRect().left - pages.getBoundingClientRect().left + page.value * w;
   return Math.abs(off) < 1 || Math.abs(off) >= w ? 0 : off;
 }
@@ -489,6 +514,9 @@ function startGesture(x: number, y: number, target: Element, t: number) {
     travel: travelOf(),
     chrome,
   };
+  // Read here, before the swipe writes anything: its moves and release then take them from the observer (widthOf).
+  widthOf(document.querySelector(".home"));
+  widthOf(document.querySelector(".pages"));
   primeFollowers(true);
 }
 
@@ -906,8 +934,8 @@ const logSwipe = (msg: string) => console.info(`pageswipe ${msg}`);
  */
 function settlePages(gs: Gesture) {
   const total = pageDrag.value ?? 0;
+  const width = widthOf(document.querySelector(".pages")) || innerWidth;
   pageDrag.value = null;
-  const width = document.querySelector(".pages")?.clientWidth || innerWidth;
   const dx = gs.last[0] - gs.x0;
   const vx = releaseVx(gs);
   const { dir, why } = pageDecision(total, dx, vx, width);

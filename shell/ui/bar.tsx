@@ -12,7 +12,7 @@ import type { Ref } from "preact";
 import { GrowField } from "./grow.tsx";
 import { Icon } from "./icons.tsx";
 import { searchResults, searchPending, openSearchResult } from "../search.ts";
-import { followOpenness, pageDrag } from "./gesture.ts";
+import { followOpenness, pageDragging } from "./gesture.ts";
 import { chatting, drawer, homePage, launcherIsOverlay, openPanel, page, pullKind, pullPage, query, sharesBar } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { tick } from "./haptics.ts";
@@ -489,7 +489,7 @@ function useAiSeat(proxy: boolean) {
     if (el && !proxy) startCountered(el);
   }).current;
   const at = homePage && !proxy ? page.value : 0;
-  const dragging = homePage && !proxy && pageDrag.value != null;
+  const dragging = homePage && !proxy && pageDragging.value;
   useLayoutEffect(() => {
     const el = form.current;
     if (!el || !homePage || proxy) return;

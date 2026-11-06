@@ -24,6 +24,9 @@ function size() {
   if (!cv) return;
   const w = Math.round(innerWidth * devicePixelRatio), h = Math.round(innerHeight * devicePixelRatio);
   if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  // The font once per size (a resize resets the context's state): set in every frame's draw it was resolved against
+  // the canvas's style each time - "FrameRequestCallback ui/renderoverlay.ts:draw 6 ms forced 5 ms" (perf-1793970543446).
+  if (ctx) ctx.font = "10px monospace";
 }
 /** The element to outline for a component's first DOM node (a text node: its parent), or null. */
 function target(dom: Node | null | undefined): Element | null {
@@ -70,7 +73,6 @@ function draw() {
   const now = performance.now(), c = ctx;
   c.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
   c.clearRect(0, 0, innerWidth, innerHeight);
-  c.font = "10px monospace";
   let labels = 0;
   for (const [el, f] of flashes) {
     const age = now - f.born;
