@@ -113,7 +113,10 @@ class GameBoostTest {
         assertTrue("a thermal controller's cap is found", sh.contains("horae*|thermal*) echo \"\$c\"; return"))
         assertTrue("its cap is kept, only the min held up to it", sh.contains("[ \"\$lo\" -gt \"\$cap\" ] && lo=\$cap") && sh.contains("- kept\""))
         assertTrue("restore never writes a stale max under it", sh.contains("if [ -n \"\$th\" ]; then cap=\$(cat \$P/\$p/scaling_max_freq)"))
-        assertTrue("never a cooling device or thermal-engine", !Regex("cooling_device|thermal-engine|thermal_zone").containsMatchIn(sh.substringAfter("mkdir -p \"\$S\"")))
+        val body = sh.substringAfter("mkdir -p \"\$S\"")
+        assertTrue("never a cooling device or thermal-engine", !Regex("cooling_device|thermal-engine").containsMatchIn(body))
+        // The skin sensor is only read (the cap lines' context, play-cpu-cap): never a write into a thermal zone.
+        assertTrue("thermal zones are only read", !Regex(""">>?\s*\S*thermal_zone""").containsMatchIn(body))
     }
 
     /**
