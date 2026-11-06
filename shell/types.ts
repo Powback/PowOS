@@ -448,7 +448,9 @@ export type NativeBlock = { at: number; ms: number; msg?: string; bridge?: strin
 export type NativeFrame = { at: number; ms: number; delay: number; input: number; animation: number; layout: number; draw: number; sync: number; command: number; swap: number; gpu?: number; deadline?: number };
 /** A gap: `seen` = the sampler's lines while it was open with no long message ("main=<state> <stack> | rt=<RenderThread state>"). */
 export type NativeGap = { at: number; ms: number; lastCall?: string; seen?: string[] };
-export type NativePerf = { thresholdMs: number; blocks: NativeBlock[]; frameGaps: NativeGap[]; frames?: { count: number; missed: number; slow: NativeFrame[] } };
+export type NativePerf = { thresholdMs: number; blocks: NativeBlock[]; frameGaps: NativeGap[]; frames?: { count: number; missed: number; slow: NativeFrame[] };
+  /** The WebViews' Chrome trace of the recording (WebTrace.kt): its path in the guest, or why there is none. */
+  chromeTrace?: string };
 /** The PowOS window in front (a game): its surface's presents since its consumer started; `at` = host epoch ms. */
 export type FrontPresents = { id: number; presented: number; undrawn: number; at: number };
 

@@ -84,8 +84,16 @@ function surfacesSummary(surfaces: ReturnType<typeof takeSurfaces>) {
   return surfaces && Object.fromEntries(Object.entries(surfaces).map(([k, r]) => [k, rendersSummary(r)]));
 }
 /** What home's long frames were made of (the summary's few lines; the full list is in `home.loaf`). */
-function attribution(home: { loaf?: Loaf[]; inputs?: unknown[]; state?: unknown[] } | undefined) {
+/** v2 (perfrec.ts frameVerdicts): each long frame's verdict, scripts, Preact handlers, components and JS stacks. */
+function verdicts(home: HomeDetail & { frames: { verdict: string }[] }) {
+  const js = home.js?.error ?? home.js?.selfTop?.slice(0, 8).map((x) => `${x.ms}ms ${x.at}`);
+  return { preRollMs: home.preRollMs ?? 0, longFrames: home.frames.slice(0, 6), jsSelfTop: js, inputs: home.inputs?.length ?? 0, transitions: home.state?.length ?? 0 };
+}
+type HomeDetail = { loaf?: Loaf[]; inputs?: unknown[]; state?: unknown[]; frames?: { verdict: string }[]; preRollMs?: number;
+  js?: { selfTop?: { ms: number; at: string }[]; error?: string } };
+function attribution(home: HomeDetail | undefined) {
   if (!home) return undefined;
+  if (home.frames) return verdicts(home as HomeDetail & { frames: { verdict: string }[] });
   const top = [...(home.loaf ?? [])].sort((a, b) => b.dur - a.dur).slice(0, 5).map((l) => {
     const end = l.start + l.dur, s = [...l.scripts].sort((a, b) => b.dur - a.dur)[0];
     return { start: l.start, dur: l.dur, script: l.scripts.reduce((x, y) => x + y.dur, 0), styleLayout: l.style ? end - l.style : 0,
@@ -105,7 +113,7 @@ function nativeSection(n: NativePerf | true | null | undefined, from: number) {
   if (!n || n === true) return undefined;
   const zero = performance.timeOrigin + from, rel = (at: number) => Math.round(at - zero);
   return {
-    thresholdMs: n.thresholdMs, blocks: n.blocks.map((b) => ({ start: rel(b.at), ...b })), frameGaps: n.frameGaps.map((g) => ({ start: rel(g.at), ...g })),
+    thresholdMs: n.thresholdMs, chromeTrace: n.chromeTrace, blocks: n.blocks.map((b) => ({ start: rel(b.at), ...b })), frameGaps: n.frameGaps.map((g) => ({ start: rel(g.at), ...g })),
     frames: n.frames && { count: n.frames.count, missed: n.frames.missed, slow: n.frames.slow.map((f) => ({ start: rel(f.at), ...f })) },
   };
 }
@@ -123,7 +131,7 @@ function nativeLine(n: ReturnType<typeof nativeSection>) {
     return { start: f.start, ms: f.ms, phase: top, phaseMs: f[top] ?? 0 };
   });
   const gapSeen = [...n.frameGaps].sort((a, b) => b.ms - a.ms).slice(0, 3).map((g) => ({ start: g.start, ms: g.ms, seen: g.seen?.slice(0, 3) ?? [] }));
-  return { frames: n.frames ? { count: n.frames.count, missed: n.frames.missed, slow } : null, gapSeen, blocks: n.blocks.length, gaps: n.frameGaps.length, longest: [...n.blocks].sort((a, b) => b.ms - a.ms).slice(0, 5)
+  return { chromeTrace: n.chromeTrace ?? "host without a Chrome trace", frames: n.frames ? { count: n.frames.count, missed: n.frames.missed, slow } : null, gapSeen, blocks: n.blocks.length, gaps: n.frameGaps.length, longest: [...n.blocks].sort((a, b) => b.ms - a.ms).slice(0, 5)
     .map((b) => ({ start: b.start, ms: b.ms, msg: b.msg, bridge: b.bridge ?? null, lastCall: b.lastCall ?? null, lastCallAgoMs: b.lastCallAgoMs ?? null, stack: b.stack?.split(" < ").slice(0, 8).join(" < ") ?? null })) };
 }
 let po: PerformanceObserver | null = null;

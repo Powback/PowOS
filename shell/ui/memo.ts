@@ -25,3 +25,27 @@ export function memo<P extends object>(C: ComponentType<P>, same: (a: P, b: P) =
   }
   return Memo as unknown as FunctionComponent<P>;
 }
+
+const plain = (v: unknown): v is Record<string, unknown> => {
+  if (!v || typeof v !== "object") return false;
+  const p = Object.getPrototypeOf(v);
+  return (p === Object.prototype || p === Array.prototype) && !("props" in v && "type" in v); // never a vnode
+};
+/** The same content: identical, or plain objects/arrays of equal content a few levels down (64 keys at most each). */
+function sameValue(a: unknown, b: unknown, depth: number): boolean {
+  if (Object.is(a, b)) return true;
+  if (depth > 3 || !plain(a) || !plain(b) || Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a);
+  if (ka.length !== Object.keys(b).length || ka.length > 64) return false;
+  return ka.every((k) => k in b && sameValue(a[k], b[k], depth + 1));
+}
+/**
+ * Props equal by content: a prop rebuilt equal each parent render (a filtered list, a row object made afresh - the
+ * render scan's "name~", react-scan's needless render) counts as unchanged; a new function is a change (its closure
+ * may differ). For pure leaves fed derived lists (PowOS AI's status sections, the pill's send).
+ */
+export function sameContent<T extends object>(a: T, b: T): boolean {
+  const x = a as Record<string, unknown>, y = b as Record<string, unknown>;
+  const ka = Object.keys(x);
+  return ka.length === Object.keys(y).length && ka.every((k) => k in y && sameValue(x[k], y[k], 0));
+}

@@ -7,6 +7,7 @@
  * rows did. "Try" opens the thing (the app by name, the launcher, home's windows); back on the page, that card is first
  * and asks "Worked?".
  */
+import { memo, sameContent } from "./memo.ts";
 import { useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { apps, launch, openPanel, page } from "../state.ts";
@@ -246,7 +247,8 @@ function TopCard({ n, count }: { n: Need; count: number }) {
 }
 
 /** Needs you: the stack (top card + the next ones peeking), its count; none: not drawn. */
-export function NeedStack({ needs }: { needs: Need[] }) {
+// Memo by content: StatusPage rebuilds its lists/rows each render, equal (render scan 11-06/11-07: needless renders).
+export const NeedStack = memo(function NeedStack({ needs }: { needs: Need[] }) {
   if (!needs.length) return null;
   const order = stackOrder(needs);
   const top = order[0];
@@ -264,4 +266,4 @@ export function NeedStack({ needs }: { needs: Need[] }) {
       </div>
     </section>
   );
-}
+}, sameContent);

@@ -11,6 +11,10 @@
  * object made afresh each parent render) counts as unchanged, marked "name~". What did change is counted per prop
  * name, so a new inline function each parent render shows up as "onClick".
  * Times: inclusive (the component's whole subtree diff) and self (minus the child components' inclusive time).
+ * Handlers: while scanning, every on* function on a DOM element is timed under its owner's name ("Pager.onTouchEnd"):
+ * Preact delegates events through one listener (vendor/preact.js eventProxy), so LoAF's script attribution alone
+ * never named the handler behind a 72 ms touchend. A trace's long frames list the handlers that ran in them.
+ * Commits and handler calls are rings (the newest kept): a recording keeps the scan's last PRE_MS from before it.
  */
 import { Fragment, options } from "preact";
 
@@ -21,15 +25,18 @@ type Frame = { v: VNode; t: number; child: number };
 export type Stat = { name: string; renders: number; needless: number; selfMs: number; totalMs: number; signal: number; changed: Record<string, number> };
 type Snap = { props: Record<string, unknown>; state: Record<string, unknown>; hooks: unknown[] };
 type Commit = { t: number; ms: number; names: Record<string, number> };
+type Call = { t: number; ms: number; name: string };
+export type HStat = { name: string; calls: number; totalMs: number; maxMs: number };
 
 const O = options as unknown as Record<string, Hook | undefined>;
-const KEYS = ["__r", "diffed", "__c", "__e"] as const;
-const MAX_COMMITS = 3000;
+const KEYS = ["__r", "diffed", "__c", "__e", "vnode"] as const;
+const MAX_COMMITS = 3000, MAX_CALLS = 3000;
 
 let saved: Record<string, Hook | undefined> | null = null, mine: Record<string, Hook> | null = null;
 const users = new Set<string>();
 let t0 = 0, stats = new Map<unknown, Stat>(), snaps = new WeakMap<Comp, Snap>(), stack: Frame[] = [];
 let commits: Commit[] = [], pending: Record<string, number> = {}, pendingMs = 0;
+let calls: Call[] = [], handlers = new Map<string, HStat>(), wrapped = new WeakMap<Function, Function>();
 /** Called per rendered component with its first DOM node (the overlay's outline). */
 let onRendered: ((dom: Node | null | undefined, name: string, needless: boolean) => void) | null = null;
 
@@ -115,8 +122,39 @@ function afterDiff(v: VNode) {
 function onCommit() {
   stack = [];
   if (pendingMs === 0 && !Object.keys(pending).length) return;
-  if (commits.length < MAX_COMMITS) commits.push({ t: Math.round((performance.now() - t0) * 10) / 10, ms: Math.round(pendingMs * 100) / 100, names: pending });
+  if (commits.length >= MAX_COMMITS * 2) commits = commits.slice(-MAX_COMMITS);
+  commits.push({ t: Math.round((performance.now() - t0) * 10) / 10, ms: Math.round(pendingMs * 100) / 100, names: pending });
   pending = {}; pendingMs = 0;
+}
+
+const r1 = (x: number) => Math.round(x * 10) / 10;
+/** One handler call, timed (sync part only: what blocks the frame). */
+function timed(name: string, fn: Function) {
+  return function (this: unknown, ...a: unknown[]) {
+    const t = performance.now();
+    try { return fn.apply(this, a); } finally {
+      const ms = performance.now() - t;
+      let h = handlers.get(name);
+      if (!h) handlers.set(name, (h = { name, calls: 0, totalMs: 0, maxMs: 0 }));
+      h.calls++; h.totalMs += ms; if (ms > h.maxMs) h.maxMs = ms;
+      if (ms >= 1) {
+        if (calls.length >= MAX_CALLS * 2) calls = calls.slice(-MAX_CALLS);
+        calls.push({ t: r1(t - t0), ms: r1(ms), name });
+      }
+    }
+  };
+}
+/** A DOM vnode made during a component's render: its on* functions wrapped under that component's name (one wrapper per function, so a stable handler stays stable). */
+function wrapHandlers(v: VNode & { props?: Record<string, unknown> }) {
+  if (typeof v.type !== "string" || !v.props || !stack.length) return;
+  const owner = nameOf(stack[stack.length - 1].v.type), p = v.props;
+  for (const k in p) {
+    const f = p[k];
+    if (k.charCodeAt(0) !== 111 || k.charCodeAt(1) !== 110 || typeof f !== "function") continue; // "on..."
+    let w = wrapped.get(f);
+    if (!w) { w = timed(`${owner}.${k}`, f); wrapped.set(f, w); wrapped.set(w, w); }
+    p[k] = w;
+  }
 }
 
 function install() {
@@ -127,6 +165,7 @@ function install() {
     diffed: (v) => { afterDiff(v as VNode); p.diffed?.(v); },
     __c: (root, queue) => { onCommit(); p.__c?.(root, queue); },
     __e: (...a) => { stack = []; p.__e?.(...a); },
+    vnode: (v) => { wrapHandlers(v as VNode); p.vnode?.(v); },
   };
   Object.assign(O, mine);
 }
@@ -152,7 +191,13 @@ export function stopScan(who: string) {
   if (!users.size) uninstall();
 }
 export function scanning() { return users.size > 0; }
-export function reset() { t0 = performance.now(); stats = new Map(); snaps = new WeakMap(); commits = []; pending = {}; pendingMs = 0; }
+/** Starts the counts over; [keepMs]: the commits and handler calls of the last keepMs stay (a recording's pre-roll), re-timed on the new clock. */
+export function reset(keepMs = 0) {
+  const now = performance.now(), shift = t0 - now, from = -keepMs;
+  const keep = <T extends { t: number }>(l: T[]) => (keepMs ? l.map((x) => ({ ...x, t: r1(x.t + shift) })).filter((x) => x.t >= from) : []);
+  commits = keep(commits); calls = keep(calls);
+  t0 = now; stats = new Map(); snaps = new WeakMap(); pending = {}; pendingMs = 0; handlers = new Map();
+}
 export function setOnRendered(f: typeof onRendered) { onRendered = f; }
 export function scanStats(): Stat[] { return [...stats.values()]; }
 export function scanClock() { return t0; }
@@ -177,6 +222,14 @@ export function topRenders(n = 15) {
     needless: rows.filter((r) => r.needless > 0).sort((a, b) => b.needless - a.needless).slice(0, n),
   };
 }
+/** The handlers with the most time (and the calls of 1 ms or more, newest kept). */
+export function topHandlers(n = 15) {
+  return [...handlers.values()].sort((a, b) => b.totalMs - a.totalMs).slice(0, n).map((h) => ({ ...h, totalMs: r2(h.totalMs), maxMs: r2(h.maxMs) }));
+}
+/** The handler calls inside [f] (scan clock + shift), slowest first: "Pager.onTouchEnd 43ms". */
+function handlersIn(f: { start: number; dur: number }, shift: number) {
+  return calls.filter((c) => c.t + shift >= f.start - 1 && c.t + shift <= f.start + f.dur).sort((a, b) => b.ms - a.ms).slice(0, 6).map((c) => `${c.name} ${c.ms}ms`);
+}
 /** Which components rendered inside each window [start, start+dur] (ms on the scan's clock offset by `shift`). */
 export function rendersIn(frames: { start: number; dur: number }[], shift = 0) {
   return frames.map((f) => {
@@ -184,12 +237,12 @@ export function rendersIn(frames: { start: number; dur: number }[], shift = 0) {
     let ms = 0;
     for (const c of commits) {
       const t = c.t + shift;
-      if (t < f.start || t > f.start + f.dur) continue;
+      if (t < f.start - 2 || t > f.start + f.dur + 2) continue; // the frame's times are rounded: a commit at its very end is its
       ms += c.ms;
       for (const k in c.names) names[k] = (names[k] ?? 0) + c.names[k];
     }
     const top = Object.entries(names).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => `${k}x${v}`).join(" ");
-    return { start: f.start, dur: f.dur, renderMs: r2(ms), components: top };
+    return { start: f.start, dur: f.dur, renderMs: r2(ms), components: top, handlers: handlersIn(f, shift) };
   });
 }
 /** The trace's "renders" section: totals, the top lists, needless ones flagged, and per janky frame what rendered. */
@@ -197,12 +250,13 @@ export function renderReport(janky: { start: number; dur: number }[] = [], shift
   let renders = 0, needlessRenders = 0, ms = 0;
   for (const s of stats.values()) { renders += s.renders; needlessRenders += s.needless; ms += s.selfMs; }
   return { v: 1, durationMs: Math.round(performance.now() - t0), commits: commits.length, renders, needlessRenders, renderMs: r2(ms),
-    ...topRenders(), jankyFrames: rendersIn(janky, shift), commitList: commits.slice(0, 600) };
+    ...topRenders(), jankyFrames: rendersIn(janky, shift), handlers: topHandlers(),
+    commitList: commits.slice(-600).map((c) => ({ ...c, t: r1(c.t + shift) })), handlerCalls: calls.slice(-400).map((c) => ({ ...c, t: r1(c.t + shift) })) };
 }
 
 /** For a dev page / cdp session: start, read, stop. */
 (window as unknown as { __powosRenders?: unknown }).__powosRenders = {
-  start: () => startScan("dev"), stop: () => stopScan("dev"), reset, top: topRenders, report: renderReport,
+  start: () => startScan("dev"), stop: () => stopScan("dev"), reset, top: topRenders, report: renderReport, handlers: topHandlers,
   hooked: () => KEYS.some((k) => mine && O[k] === mine[k]), installed: () => !!saved,
 };
 
@@ -214,5 +268,6 @@ export function rendersSummary(r: Report | { error: string } | undefined) {
   const row = (x: Report["byCount"][number]) => `${x.name} ${x.renders}r ${x.needless}n ${x.selfMs}ms${x.changed ? " (" + x.changed + ")" : ""}`;
   return { renders: r.renders, needless: r.needlessRenders, renderMs: r.renderMs, commits: r.commits,
     byCount: r.byCount.slice(0, 5).map(row), byTime: r.byTime.slice(0, 5).map(row), needlessTop: r.needless.slice(0, 5).map(row),
-    jankyFrames: [...r.jankyFrames].sort((a, b) => b.dur - a.dur).slice(0, 5) };
+    jankyFrames: [...r.jankyFrames].sort((a, b) => b.dur - a.dur).slice(0, 5),
+    handlers: (r.handlers ?? []).slice(0, 5).map((h) => `${h.name} ${h.calls}x ${h.totalMs}ms max ${h.maxMs}ms`) };
 }

@@ -371,7 +371,7 @@ class ShellHost(
             val stream = open(path) ?: return notFound()
             return WebResourceResponse(mime(path), "utf-8", stream).apply {
                 // Always the file as it is now: an edit must show on the next load, not a cached copy.
-                responseHeaders = mapOf("Cache-Control" to "no-store", "Access-Control-Allow-Origin" to ORIGIN)
+                responseHeaders = WebTrace.shellHeaders(path, ORIGIN)
             }
         }
 

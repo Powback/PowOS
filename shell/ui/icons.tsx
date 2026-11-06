@@ -2,6 +2,7 @@
  * The shell's icons: Material Design Icons (Pictogrammers, @mdi/js 7.4.47, Apache-2.0) as SVG paths - only the ones used.
  * Drawn with [Icon], in the text's color (currentColor), so they follow the theme like the text does.
  */
+import { memo } from "./memo.ts";
 export const icons = {
   // The Controller tile (control.tsx, padtile.ts): a pad drawn here (body, d-pad and two buttons cut out; holes wind the other way).
   gamepad:
@@ -191,7 +192,9 @@ export const icons = {
 export type IconName = keyof typeof icons;
 
 /** An icon, sized by the text around it (1em) unless [size] says otherwise (px). */
-export function Icon({ name, size, class: cls }: { name: IconName; size?: number; class?: string }) {
+// Memo: an icon renders again only when its name, size or class do (render scan, the user's traces 11-06: 208 of its 212
+// renders needless - each one an outline in the rs overlay).
+export const Icon = memo(function Icon({ name, size, class: cls }: { name: IconName; size?: number; class?: string }) {
   return (
     <svg
       class={`icon ${cls ?? ""}`}
@@ -203,4 +206,4 @@ export function Icon({ name, size, class: cls }: { name: IconName; size?: number
       <path d={icons[name]} fill="currentColor" />
     </svg>
   );
-}
+});

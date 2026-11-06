@@ -5,6 +5,7 @@
  * the user asked; a tap opens a row in place in Recently done's style (aistatus.tsx DoneRow) - their words, the note,
  * its place in line, since when it waits.
  */
+import { memo, sameContent } from "./memo.ts";
 import { useState } from "preact/hooks";
 import { board, noteOf, SevChip, userAsks, type UserAsk, type WorkRow } from "./aiboard.tsx";
 import { clockAt } from "./time.ts";
@@ -68,7 +69,8 @@ const NEXT_ROWS = 5;
  * Up next: the queue in line. A busy page ([busy]) folds it to one line, "4 up next ▾", until tapped; otherwise it's
  * open with its heading a toggle (Recently done's). None queued: not drawn.
  */
-export function UpNext({ rows, busy }: { rows: WorkRow[]; busy: boolean }) {
+// Memo by content: StatusPage rebuilds its lists/rows each render, equal (render scan 11-06/11-07: needless renders).
+export const UpNext = memo(function UpNext({ rows, busy }: { rows: WorkRow[]; busy: boolean }) {
   const [open, setOpen] = useState<boolean | null>(null);
   const [all, setAll] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -105,4 +107,4 @@ export function UpNext({ rows, busy }: { rows: WorkRow[]; busy: boolean }) {
       )}
     </section>
   );
-}
+}, sameContent);

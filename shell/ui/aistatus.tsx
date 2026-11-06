@@ -14,6 +14,7 @@
  * has no field, reply bubble or "Open chat" of its own. No hold to talk anywhere (the user, 11-01 17:53: voice is the
  * shared bar's mic).
  */
+import { memo, sameContent } from "./memo.ts";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { computed, signal } from "@preact/signals";
 import { useAgents, type BoardCheck } from "../agents.ts";
@@ -96,20 +97,22 @@ function StepText({ text }: { text: string }) {
 }
 
 /** A thin bar under a working agent: its plan's share done, the fill sliding to each new value; no plan: a sweep. */
-function LiveBar({ done, total }: { done: number; total: number }) {
+// Memo: a bar re-renders only when done/total change (render scan: 108 of 115 renders needless).
+const LiveBar = memo(function LiveBar({ done, total }: { done: number; total: number }) {
   const k = total ? Math.min(1, done / total) : 0;
   return (
     <span class={`ais-bar ${total ? "" : "sweep"}`} role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} data-done={done} data-total={total}>
       <span class="ais-bar-fill" style={total ? { transform: `scaleX(${k})` } : undefined} />
     </span>
   );
-}
+}, sameContent);
 
 /**
  * One live agent: its task's title, what it's doing now, the bar; a tap opens that agent live - its conversation - full
  * page (folded) or in the right column ([beside], unfolded; the user, 11-01 16:45: "navigate to the chats").
  */
-function WorkRowLive({ x, beside }: { x: Worker; beside: boolean }) {
+// Memo by content: StatusPage rebuilds its lists/rows each render, equal (render scan 11-06/11-07: needless renders).
+const WorkRowLive = memo(function WorkRowLive({ x, beside }: { x: Worker; beside: boolean }) {
   const now = x.now || (isPowOS(x.a) ? "Working" : projectOf(x.a));
   return (
     <li class="ais-work">
@@ -128,14 +131,15 @@ function WorkRowLive({ x, beside }: { x: Worker; beside: boolean }) {
       </button>
     </li>
   );
-}
+}, sameContent);
 
 /**
  * Working now: fleet.ts workingNow (PowOS's own agents; the ⋯ menu's "Other projects (N)" adds the rest, each with its
  * project - the user's review 10-31 14:17: other projects' sessions listed as if they were PowOS work), up to six.
  */
 export { otherProjects };
-function WorkingNow({ working }: { working: Worker[] }) {
+// Memo by content: StatusPage rebuilds its lists/rows each render, equal (render scan 11-06/11-07: needless renders).
+const WorkingNow = memo(function WorkingNow({ working }: { working: Worker[] }) {
   const shown = working.map((x) => (isPowOS(x.a) ? x : { ...x, now: x.now ? `${projectOf(x.a)} · ${x.now}` : projectOf(x.a) }));
   if (!shown.length) return null;
   return (
@@ -150,7 +154,7 @@ function WorkingNow({ working }: { working: Worker[] }) {
       </ul>
     </section>
   );
-}
+}, sameContent);
 
 /** How many agents of other projects are working now: the ⋯ menu's "Other projects (N)" shows only with some. */
 export const otherProjectsCount = () => fleet().working.filter((x) => !isPowOS(x.a)).length;
@@ -186,7 +190,8 @@ function StuckRow({ x }: { x: Worker }) {
 }
 
 /** Needs attention (unfolded, under the needs-you stack): the fleet's stuck agents, up to six; none: not drawn. */
-function NeedsAttention({ stuck }: { stuck: Worker[] }) {
+// Memo by content: StatusPage rebuilds its lists/rows each render, equal (render scan 11-06/11-07: needless renders).
+const NeedsAttention = memo(function NeedsAttention({ stuck }: { stuck: Worker[] }) {
   if (!stuck.length) return null;
   return (
     <section class="ais-sec" data-sec="attention" aria-label="Needs attention">
@@ -200,7 +205,7 @@ function NeedsAttention({ stuck }: { stuck: Worker[] }) {
       </ul>
     </section>
   );
-}
+}, sameContent);
 
 /** An area's open tasks by state, in the order that matters to the user: needs you, working, to check, idle. */
 const STATE_ORDER = ["waiting", "working", "check", "stalled"] as const;
@@ -429,7 +434,8 @@ function DoneRow({ w, open, onToggle }: { w: WorkRow; open: boolean; onToggle: (
 }
 
 /** Recently done: its heading a toggle, open at first; sized to its rows (DONE_ROWS, then "N more"). */
-function RecentlyDone({ rows }: { rows: WorkRow[] }) {
+// Memo by content: StatusPage rebuilds its lists/rows each render, equal (render scan 11-06/11-07: needless renders).
+const RecentlyDone = memo(function RecentlyDone({ rows }: { rows: WorkRow[] }) {
   const [open, setOpen] = useState(true);
   const [all, setAll] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -459,7 +465,7 @@ function RecentlyDone({ rows }: { rows: WorkRow[] }) {
       </Reveal>
     </section>
   );
-}
+}, sameContent);
 
 /** What was last asked from this page (powai.tsx's send notes it here): its reply shows as one bubble, not a transcript. */
 const asked = signal<{ text: string; at: number } | null>(null);
