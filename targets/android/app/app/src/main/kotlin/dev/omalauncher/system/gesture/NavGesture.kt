@@ -300,8 +300,12 @@ class NavGesture(
     /** The swipe up is on: the app under it starts following the finger, if it can. */
     private fun began() {
         if (pinned) return
-        // Over home's switcher there's no app under the finger: home's (the plain way).
-        from = if (Switcher.open && Switcher.homeVisible) null else Tasks.visible(service)
+        // Over home's switcher there's no app under the finger: home's (the plain way). A web window's task under home's
+        // page is home's too (SF1: a tap on home's search bar in the strip began the switcher over it and blurred the search).
+        val overSwitcher = Switcher.open && Switcher.homeVisible
+        from = SwipeFrom.decide(overSwitcher, Switcher.onHome && Switcher.homeVisible, if (overSwitcher) null else Tasks.visible(service)) {
+            dev.omalauncher.shell.WebWindowDisplays.isWebWindow(service, it)
+        }
         val tasks = recentTasks ?: run { Log.i(TAG, "gesture: no recents transition - SystemUI gave no IRecentTasks"); return }
         if (from == null && dev.omalauncher.shell.WebWindows.fullScreenUp()) {
             overFullWindow = true
