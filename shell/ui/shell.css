@@ -76,8 +76,11 @@
 .home-content {
   position: absolute;
   inset: 0;
-  /* Room for the bar at the panel's foot. */
-  padding-bottom: var(--gap);
+  /* Room for the bar at the panel's foot: the stage already ends at the bar's box (home's flex column, its padding the
+     safe area); the gutter over it, and whatever the bar's translate lifts it by at rest - edit mode's rise
+     (--bar-edit-rise, the one value the bar's own translate reads) - so no row of the grid is under the pill (IB1, the
+     user: "Home app icons float too far up and overlap the search bar"; gate home-icons-clear-bar-*). */
+  padding-bottom: calc(var(--gap) + var(--bar-edit-rise, 0px));
   display: flex;
   flex-direction: column;
   opacity: calc(1 - var(--p));

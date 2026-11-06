@@ -981,3 +981,77 @@ export async function pd1Check(label) {
   S.dock.value = was.dock;
   return fails.map((f) => `pd1 ${label}: ${f}`);
 }
+
+/**
+ * IB1 (the user: "Home app icons float too far up and overlap the search bar"): with the one bar screen-fixed (FX1), the
+ * home grid reserves the bar's real room - no tile on home's page, nor the grid's last row (filled or not), nor the page
+ * dots reach into the pill's rect plus the gutter over it: the bar over and under the dock, gesture and 3-button
+ * navigation insets, edit mode. The keyboard up (the bar focused: the launcher open, home's grid faded out under it,
+ * kept at its resting layout by design - grid.tsx keyboardRoom): nothing of home's grid shows under the pill and the
+ * launcher's window ends at the pill's top. [label]: the viewport's mode, for the messages. The failures, empty when it
+ * holds.
+ */
+export async function homeIconsClearBar(label) {
+  const S = await importShim("./state.ts");
+  const W = await importShim("./ui/searchwidget.tsx");
+  const { geometry } = await importShim("./ui/grid.tsx");
+  const mode = S.dockMode.value === "unfolded" ? "unfolded" : "mobile";
+  const fails = [];
+  S.page.value = 0;
+  await W.pickSearchSpot(mode, "bar");
+  for (const st of ibStates()) {
+    window.__mockEvents?.emit("system.insets", { top: 45, bottom: st.nav, left: 0, right: 0, keyboard: st.keyboard });
+    W.footBelow.value = st.below;
+    S.editing.value = st.editing;
+    S.drawer.value = st.keyboard ? 1 : 0;
+    await sleep(900);
+    const at = `${label} (${mode}), pill ${st.below ? "under" : "over"} the dock, nav ${st.nav} px${st.editing ? ", editing" : ""}${st.keyboard ? ", keyboard up" : ""}`;
+    fails.push(...ibClear(at, geometry.peek(), S.home.value.columns));
+  }
+  S.editing.value = false;
+  S.drawer.value = 0;
+  window.__mockEvents?.emit("system.insets", { top: 45, bottom: 16, left: 0, right: 0, keyboard: 0 });
+  W.footBelow.value = "1";
+  await sleep(600);
+  return fails;
+}
+
+function ibStates() {
+  const out = [];
+  for (const below of ["1", ""]) for (const nav of [16, 48]) for (const editing of [false, true]) out.push({ below, nav, editing, keyboard: 0 });
+  // A phone keyboard's share of the screen: ~a third portrait, more in landscape.
+  for (const below of ["1", ""]) out.push({ below, nav: 16, editing: false, keyboard: Math.round(innerHeight * (innerWidth > innerHeight ? 0.45 : 0.35)) });
+  return out;
+}
+
+/** What of home's page [at] reaches into the pill's rect plus the gutter over it (grid [g], [columns] across). */
+function ibClear(at, g, columns) {
+  const pill = document.querySelector(".home > .bar .bar-pill")?.getBoundingClientRect();
+  const pages = document.querySelector(".home .pages")?.getBoundingClientRect();
+  if (!pill || !pages) return [`${at}: no pill or no pages`];
+  const gutter = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--gap")) || 0;
+  const into = (r) => (r.right > pill.left && r.left < pill.right ? Math.round(r.bottom - (pill.top - gutter)) : 0);
+  const shown = parseFloat(getComputedStyle(document.querySelector(".home-content")).opacity) > 0.05;
+  console.info(`[homeIconsClearBar] ${at}: rows ${g.rows}, pill ${Math.round(pill.top)}-${Math.round(pill.bottom)}, grid shown ${shown}`);
+  return shown ? ibGridFails(at, into, gutter, ibGridFoot(pages, g, columns)) : ibLauncherFails(at, pill);
+}
+
+/** Home's grid faded out under the open launcher: the launcher's window ends at the pill's top. */
+function ibLauncherFails(at, pill) {
+  const clip = document.querySelector(".home > .stage > .launcher-clip")?.getBoundingClientRect();
+  return clip && clip.bottom > pill.top + 0.5 ? [`${at}: the launcher's window ends ${Math.round(clip.bottom - pill.top)} px into the pill`] : [];
+}
+
+/** The grid's last row, whether a tile is there or not: where an icon put there ends (cells are page-relative). */
+const ibGridFoot = (pages, g, columns) => ({ left: pages.left + g.pad, right: pages.left + g.pad + g.cellW * columns, bottom: pages.top + g.pad + g.rows * g.cellH });
+
+/** Home's grid shown: its last row, its tiles and its page dots against the pill ([into]: px into it plus the gutter). */
+function ibGridFails(at, into, gutter, foot) {
+  const tiles = [...document.querySelectorAll(".home .page:not(.away) .home-tile")].map((t) => into(t.getBoundingClientRect())).filter((d) => d > 0);
+  const dots = document.querySelector(".home .home-dots > *")?.getBoundingClientRect();
+  const fails = [];
+  if (into(foot) > 0) fails.push(`${at}: the grid's last row ends ${into(foot)} px into the pill + ${gutter} px gutter`);
+  if (tiles.length) fails.push(`${at}: ${tiles.length} tile(s) into the pill: ${tiles.join(", ")} px`);
+  if (dots?.height && into(dots) > gutter) fails.push(`${at}: the page dots ${into(dots) - gutter} px into the pill`);
+  return fails;
+}
