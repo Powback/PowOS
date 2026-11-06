@@ -62,7 +62,14 @@ topology() {
   rest=$(for p in $BOOSTED; do cpus_of $p; done | tr ' ' '\n' | grep . | grep -vx "$PRIME")
   PRIME_MASK=$(mask $PRIME)
   REST_MASK=$([ -n "$rest" ] && mask $rest)
+  # Each policy's hw max and boost min, once: constants, and the holder re-reads the limits every second.
+  for p in $BOOSTED; do read -r hw < $P/$p/cpuinfo_max_freq; eval HW_$p=$hw LO_$p=$(boost_min $p); done
+  # The skin sensor the vendor's thermal controller gears on (OxygenOS: skin-msm-therm), for the cap lines' context.
+  SKIN=; for z in ${GAME_BOOST_THERMAL:-/sys/class/thermal}/thermal_zone*; do
+    { read -r ty < $z/type; } 2>/dev/null && [ "$ty" = skin-msm-therm ] && SKIN=$z/temp && break; done
+  return 0
 }
+skin() { [ -n "$SKIN" ] && { read -r c < $SKIN; } 2>/dev/null && echo ", skin $((c / 1000)).$((c / 100 % 10)) C"; }
 # The highest available step <= pct % of the policy's hw max (its own steps: a write between steps rounds anyway).
 boost_min() {
   hw=$(cat $P/$1/cpuinfo_max_freq); want=$((hw * BOOST_MIN_PCT / 100)); best=$(cat $P/$1/cpuinfo_min_freq)
@@ -97,14 +104,14 @@ adopt() {
   t=$1; f=/proc/$2/task/$t
   g=$(sed -n 's/^[0-9]*:cpu:\(.*\)$/\1/p' $f/cgroup 2>/dev/null); m=$(taskset -p $t 2>/dev/null | awk '{print $NF}')
   [ -n "$m" ] || return
-  echo "$t ${g:-/} $m" >> "$S/tids"
+  echo "$t ${g:-/} $m" >> "$S/tids"; KNOWN="$KNOWN $t"
   echo $t > $CG/tasks 2>/dev/null
   [ -n "$REST_MASK" ] && taskset -p $REST_MASK $t > /dev/null 2>&1
 }
 # Threads' cpu time (utime + stime ticks), "tid pid ticks" - the comm may hold spaces: fields after the last ") ".
 ticks() {
   for p in $PIDS; do for f in /proc/$p/task/[0-9]*; do
-    s=$(cat $f/stat 2>/dev/null) || continue; r=${s##*) }; set -- $r; echo "${f##*/} $p $(( ${12} + ${13} ))"
+    { read -r s < $f/stat; } 2>/dev/null || continue; r=${s##*) }; set -- $r; echo "${f##*/} $p $(( ${12} + ${13} ))"
   done; done
 }
 
@@ -147,21 +154,24 @@ freqs_save() {
 # gets no cpu cap until gear 10, the default table caps from gear 3. Real fix: have the vendor class the game as a game
 # (its Game Space / app category, or a section for the game in its thermal profile) so its own table lifts the cap.
 freqs_lift() {
+  # Shell builtins only (read, eval, test): this runs every second for the whole game, and each fork costs ~1 ms of a
+  # core on the phone - the holder was 6-13 % of a core in play (11-06 live capture), mostly cat/grep forks.
   for p in $BOOSTED; do
-    hw=$(cat $P/$p/cpuinfo_max_freq); lo=$(boost_min $p)
+    eval hw=\$HW_$p lo=\$LO_$p
+    read -r cap < $P/$p/scaling_max_freq; read -r min < $P/$p/scaling_min_freq
     if [ -n "$THERMAL" ]; then
       # The thermal controller's cap stands; the min goes up to it (never past: a min above the max is refused).
-      cap=$(cat $P/$p/scaling_max_freq); [ "$lo" -gt "$cap" ] && lo=$cap
+      [ "$lo" -gt "$cap" ] && lo=$cap
       eval was=\${CAP_$p:-}
-      [ "$was" != "$cap" ] && eval CAP_$p=$cap && log "$p: thermal cap $cap of hw $hw by $THERMAL - kept"
-      [ "$(cat $P/$p/scaling_min_freq)" -lt "$lo" ] && echo $lo > $P/$p/scaling_min_freq
+      [ "$was" != "$cap" ] && eval CAP_$p=$cap && log "$p: thermal cap $cap of hw $hw by $THERMAL$(skin) - kept"
+      [ "$min" -lt "$lo" ] && echo $lo > $P/$p/scaling_min_freq
       continue
     fi
-    if [ "$(cat $P/$p/scaling_max_freq)" != "$hw" ]; then
-      [ "$LIFTED" = 1 ] && FIGHTS=$((FIGHTS + 1)) && log "$p: max set back to $(cat $P/$p/scaling_max_freq) by someone else: $hw again"
+    if [ "$cap" != "$hw" ]; then
+      [ "$LIFTED" = 1 ] && FIGHTS=$((FIGHTS + 1)) && log "$p: max set back to $cap by someone else: $hw again"
       echo $hw > $P/$p/scaling_max_freq
     fi
-    [ "$(cat $P/$p/scaling_min_freq)" -lt "$lo" ] && echo $lo > $P/$p/scaling_min_freq
+    [ "$min" -lt "$lo" ] && echo $lo > $P/$p/scaling_min_freq
   done
   LIFTED=1
 }
@@ -203,20 +213,23 @@ hold() {
   [ -n "$THERMAL" ] && vendor_game_class "$APP"
   mkdir -p $CG && echo $BOOST_UCLAMP > $CG/cpu.uclamp.min 2>/dev/null
   log "$APP: boost (policies $(echo $BOOSTED | tr '\n' ' '), prime cpu$PRIME, rest mask ${REST_MASK:-none}, uclamp.min $(cat $CG/cpu.uclamp.min 2>/dev/null), thermal controller ${THERMAL:-none})"
-  LIFTED=0 FIGHTS=0 i=0 seen=0 why=
+  LIFTED=0 FIGHTS=0 i=0 seen=0 why= PIDS= KNOWN=
   while :; do
     now=$(date +%s); at=$(stat -c %Y "$LEASE" 2>/dev/null || echo 0)
     [ $((now - at)) -gt $LEASE_S ] && { why="the app's lease is $((now - at)) s old (the game left the front, or the app died)"; break; }
     freqs_lift
     if [ $((i % 5)) = 0 ]; then
-      PIDS=$(game_pids | sort -u | tr '\n' ' ')
+      # The full scan (every process's environ: ~1000 on the phone) until the game is seen, then every 30 s for its new
+      # processes; in between the known ones, as long as one lives (a test, no fork).
+      live=; for p in $PIDS; do [ -d /proc/$p ] && live="$live $p"; done
+      if [ $seen = 0 ] || [ -z "$live" ] || [ $((i % 30)) = 0 ]; then PIDS=$(game_pids | sort -u | tr '\n' ' '); else PIDS=$live; fi
       if [ -z "$PIDS" ]; then
         [ $seen = 1 ] && { why="the game's processes are gone"; break; }
       else
         seen=1
         ticks > "$S/ticks.new"
         for p in $PIDS; do for f in /proc/$p/task/[0-9]*; do t=${f##*/}
-          grep -q "^$t " "$S/tids" || adopt $t $p
+          case "$KNOWN " in *" $t "*) ;; *) adopt $t $p ;; esac
         done; done
         # The frame loop: the thread that used the most cpu since the last look; on the prime core (the one before back
         # on the rest) - moved only when the pinned one used under half of it, so two busy threads don't swap each time.

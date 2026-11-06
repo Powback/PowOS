@@ -216,6 +216,67 @@ dashes). Pass: sf >= 110 and no "render cap" in the layers line; the app logs `w
 If the cap stays (OTI ignores both votes), the next lever is finding what OTI's "AppRequest" takes (SurfaceFlinger strings: findTargetLayer / appRequestLayerReady - a target layer of the focused
 process, every other visible layer "negligible").
 
+## Real play at 38 fps: the vendor's thermal gear, not a profile (2026-11-06, agent play-cpu-cap)
+
+Live capture of the user's own Broforce play (11-06 ~13:20-13:30, unfolded inner 2440x2268 @120 Hz, direct scanout off):
+`layers live: game 38.5 > xwayland 38.7 > kwin 37.0 (commit->drawn p50 1 ms) > sf 39.1 > panel 120 Hz, no render cap`.
+Every stage passes the game's rate on (0 Xwayland timeouts, KWin draws each commit in ~1 ms), so the game itself makes
+38 frames a second: its main thread `Broforce_beta.e` 75.9 % on cpu7 at **1593 MHz of 3187**, UnityGfxDeviceW 24 %,
+GPU 69 % busy at 469 of 680 MHz. The benchmark (bf-pacing base = the title menu) reaches 116 fps; gameplay's frame
+costs ~3x the menu's on the same clock, so the clock is the lever and the menu is the wrong scene to judge it by.
+
+**Who sets the cap: horae applying com.oplus.battery's skin-temperature gear, and it follows temperature.** Read-only
+(game-boost log, `/odm/etc/temperature_profile/sys_thermal_control_config_folding.xml`, LSPosed log, thermal zones):
+
+- The caps seen are rows of the profile's `thermal_cpulevel` table (little, gold, prime max): level 3 = 1459/1920/1709,
+  level 4 = 1459/1786/1594, level 5 = 1459/1651/1363 MHz. Nothing else writes scaling_max_freq (the boost keeps
+  horae's cap, game-boost.sh `thermal_owner` = horaeCb); no cooling device, no uclamp/cpuset limit on the game
+  (cgroup `/`, its threads in /dev/cpuctl/powos-game with uclamp.min 75).
+- The table in use is the **game table** (category_4): the oplus-hook logged `gameClass: com.powos.app appType 4
+  (steam_app_274190 boosted)` at 13:27:05, the moment the caps changed from common_config's level 4 to level 3 - so the
+  app IS recognised as a game while the boost holds; it is not a balanced/default profile. category_4 maps gear 7 ->
+  level 3, gears 8-9 -> level 4 (gear 8 also caps fps at 55, gear 9+ at 50), gear 10 -> level 5, gear 11+ -> 6.
+- The gear follows skin temperature over the run (game-boost log + a 5 s sampler of skin-msm-therm / shell_front):
+
+| time | skin-msm-therm | shell_front | gold / prime cap | level (category_4 gear) |
+|---|---|---|---|---|
+| 13:24-13:25 (game just started) | - | - | 2592-2803 / 3187 | none (gear <= 6) |
+| 13:27-13:30 (the live capture) | 38.2-38.5 | - | 1920-1786 / 1709-1594 | 3-4 (gear 7-8) |
+| 13:35 | 40.5 | 42.9 | 1786 / 1594 | 4 (gear 8-9) |
+| 13:38 | 41.8 | 44.6 | 1786 / 1594 | 4 |
+| 13:38:56 - 13:40 | 42.4 | - | 1651 / 1363 | 5 (gear 10) |
+
+So the cap is thermal and gets tighter the longer one plays (2.8/3.2 GHz cold -> 1.65/1.36 GHz after ~15 min). The
+profile's mode offsets (`game_high_perf_mode_item -1`, `racing_mode_item -10`; `system high_performance_mode_on=0`)
+are the vendor's own user-facing performance modes - not touched (vendor limits stay the vendor's; the user can pick
+"High performance mode" in Battery settings). Android's ADPF/PerformanceHint or GameManager can't lift it either:
+both act below scaling_max_freq, which is horae's. **The legitimate lever is heat: every watt PowOS and Steam burn
+while a game is in front moves the gear.**
+
+**Our own and Steam's load during play** (10 s per-thread sample at 13:33, the game in a level, `/proc/*/task/*/stat`):
+
+| load | % of a core | what | change |
+|---|---|---|---|
+| Steam webhelper, main renderer (pid started with Steam, 537 MB) | Compositor 22.9 + ThreadPool 5.0 + IO 2.9 + main 2.1 | Steam's one UI renderer: the main window is unmapped (closed to tray), but at the game's launch Steam opened the in-game overlay's popup (`steamui_html.txt` 13:22:48 `PopupHTMLWindow ... handle:65536`), and the user's Steam has the performance-monitor corner on (`localconfig.vdf` `InGameOverlayShowFPSCorner 1`, `DetailLevel 4`) | none yet - the overlay draws **nothing** in the game: an x11grab of the game window at 13:37 (in a level) has no FPS corner, i.e. Steam renders an overlay that never reaches the screen. Next: A/B the game launched without gameoverlayrenderer (Steam's per-game "Enable the Steam Overlay" off) - expect ~35-40 % of a core less, mostly on the gold cluster |
+| steamwebhelper gpu-process | VizCompositorTh 7.8 + IO 2.3 | the same overlay's frames | same |
+| steam CSteamController | 10.2 | Steam Input polling the gamepad | none: the game's input path |
+| game-boost.sh holder (our `sh` 5.8-12.9 %) | 7.0 | the boost's own 1 s loop: ~14 forks/s for the cpufreq limits (cat, boost_min) and every 5 s a full /proc environ scan (~1000 processes) + a `cat` and a `grep` per game thread (146 threads) | **fixed** (game-boost.sh): limits read with `read`, hw max / boost step cached once, ticks via `read`, known threads in a variable, the full process scan only until the game is seen and then every 30 s (the known pids' liveness in between). Test `test/tier1/test-game-boost-holder.sh` (fake cpufreq tree: lift, re-assert, restore, no `$(cat` in the per-second path). Cap lines now carry the skin temperature (`thermal cap ... by horaeCb, skin 41.8 C - kept`) so the next run shows the gear curve without a sampler |
+| the other `sh` (8.2 %, pid gone by 13:32) | - | short-lived: the live capture's own samplers (bf-prof / bf-present loops) | none (instrument) |
+
+Not changed, but worth an A/B next: under horae the boost raises each big policy's **min** to horae's cap, so the gold
+cluster (cpu3-6: Unity workers at ~7 % each, nothing pegged) sits at its capped top clock all the time - voltage and
+heat the main thread (on cpu7) doesn't use; uclamp.min 75 on the game's threads already asks schedutil for the clock
+when they run. Try: under a thermal controller lift the min on the prime policy only.
+
+**Gameplay scene for the benchmark** (bf-pacing.sh `play`, new): base, then `bf-play.sh` takes the game from the title
+into a level - keys `BF_PLAY_KEYS` (default six Returns: any-key title -> Start -> Campaign -> slot -> mission) sent
+with xdotool to the activated game window, 3 s apart, a 1/4-size grab before and after each key into the mode's folder
+(`play-<n>.png`: the proof the run is in a level, and what to tune the keys from), 10 s in the level, then the same
+30 s measurement and layers line. The key sequence is a first guess - the first run's grabs say where it stopped.
+Queue after the merge: `queue.sh add --screen inner broforce-fps-low-cpu-bound-under-fex tools/phone/verify/bf-pacing.sh play`
+(and `bf-pacing.sh base` for the menu next to it). Pass for a change = its `layers play:` line + `prof play:` clocks/caps
+and skin, 0 dashes (bf-checker), against the same scene before.
+
 ## How to re-measure
 
 `tools/phone/adb.sh shell "su -c 'sh -s'" < design-qa/bf-fps-20261103/sample.sh` (30 s, read-only; divide the

@@ -2,7 +2,8 @@
 # lanes: phone
 # bf-pacing.sh [mode...]: (Mac; queue it: queue.sh add <task> bf-pacing.sh base cap60) Broforce frame pacing + stale
 # frames, ~3-4 min of screen per mode. Per mode: dxvk.conf in the game dir (base = none; cap60 = dxgi.maxFrameRate 60;
-# fifo = syncInterval 1; nolatency = maxFrameLatency 1; env:K=V[,K=V] = those in the game's environment through
+# fifo = syncInterval 1; nolatency = maxFrameLatency 1; play = base taken into a level first (bf-play.sh: keys
+# BF_PLAY_KEYS, grabs in the mode's folder) so the numbers are gameplay's, not the menu's; env:K=V[,K=V] = those in the game's environment through
 # ~/.config/powos/proton-settings.json, e.g. env:PROTON_USE_XALIA=0), start the game (KWin shows it as its own task),
 # wait for its X window (+ its size vs the screen: unity-screen), 45 s settle, then 30 s of SurfaceFlinger present
 # times + a 20 s screenrecord (bf-present.sh), the same 30 s of per-thread CPU, cluster clocks and caps, GPU busy and
@@ -50,7 +51,7 @@ asuser() { local n=$1; shift
   "$A" shell "su -c 'cp /data/local/tmp/powos-$n /data/powos/root/var/tmp/powos-$n; chmod 644 /data/powos/root/var/tmp/powos-$n; sh /data/powos/powos-run.sh \"APP=$APP WIN_NAME=$WIN_NAME sh /var/tmp/powos-$n $*\"'" 2>&1 | grep -v sysvipc | tr -d '\r'; }
 pill "checking the phone (a game already up? Steam?)"
 # Every phone-side script in ONE push (each adb.sh call is a docker run over the VPN, ~2-3 s).
-st=$OUT/push; mkdir -p "$st"; for f in bf-start.sh bf-stop.sh bf-window.sh bf-present.sh bf-prof.sh bf-game.sh bf-nap.sh bf-onscreen.sh; do
+st=$OUT/push; mkdir -p "$st"; for f in bf-start.sh bf-stop.sh bf-window.sh bf-present.sh bf-prof.sh bf-game.sh bf-nap.sh bf-onscreen.sh bf-play.sh; do
   cp "$here/$f" "$st/powos-$f"; done
 "$A" push "$st"/powos-bf-*.sh /data/local/tmp/ >/dev/null || { echo "ENV: can't push the check's scripts"; exit 5; }
 gs=$(asuser bf-game.sh state | tail -1); users=0
@@ -96,7 +97,7 @@ mi=0
 for mode in "$@"; do
   mi=$((mi + 1)); lbl="$mode $mi/$#"
   case $mode in
-    base) conf= ;; cap60) conf='dxgi.maxFrameRate = 60' ;; fifo) conf='dxgi.syncInterval = 1' ;;
+    base|play) conf= ;; cap60) conf='dxgi.maxFrameRate = 60' ;; fifo) conf='dxgi.syncInterval = 1' ;;
     nolatency) conf='dxgi.maxFrameLatency = 1' ;; env:*=*) conf= ;; *) echo "unknown mode $mode"; continue ;;
   esac
   case $mode in env:*) settings "${mode#env:}" ;; *) settings '' ;; esac
@@ -111,7 +112,8 @@ for mode in "$@"; do
   asuser bf-start.sh >/dev/null
   pill "$lbl: waiting for the game window"
   # The window, waited for only while the rest of this mode still fits the budget (WIN_S overrides).
-  w0=$(date +%s); left=${WIN_S:-$(( T0 + BUDGET_S - AFTER_WIN_S - w0 ))}; [ "$left" -ge 20 ] || left=20
+  w0=$(date +%s); extra=0; [ "$mode" = play ] && extra=35  # play: keys + grabs + 10 s in the level
+  left=${WIN_S:-$(( T0 + BUDGET_S - AFTER_WIN_S - extra - w0 ))}; [ "$left" -ge 20 ] || left=20
   win=$(asuser bf-window.sh wait "$left" "$i0" | tail -1)
   case $win in touched) abort ;; win=[0-9]*) ;; *) echo "FAIL no game window: $NAME showed none in $left s ($win)"; restore; exit 5 ;; esac
   echo "$mode: window after $(( $(date +%s) - w0 )) s: $win"; echo "$win" | sed 's/win=//; s/screen=/on /' > "$M/window.txt"
@@ -123,6 +125,14 @@ for mode in "$@"; do
   echo "$win2" | sed 's/win=/settled /; s/screen=/on /' >> "$M/window.txt"
   echo "$mode: in front: $top ($WHY)"; echo "front $top" >> "$M/window.txt"
   [ $ok = 0 ] || invalid "after the settle"
+  if [ "$mode" = play ]; then
+    # play: from the menu into a level (bf-play.sh: keys + a grab after each, pulled into the mode's folder), 10 s in
+    # play, then the same measurement - the scene the user plays, not the title screen (11-06: menu 116 fps, play 38).
+    pill "$lbl: into a level"
+    echo "$mode: $(asuser bf-play.sh /var/tmp/powos-bfplay ${BF_PLAY_KEYS:-} | tail -1)"
+    "$A" pull /data/powos/root/var/tmp/powos-bfplay "$M/" >/dev/null 2>&1; "$A" shell "su -c 'rm -rf /data/powos/root/var/tmp/powos-bfplay'"
+    nap 10; onscreen || invalid "after entering play"
+  fi
   "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof; nohup sh /data/local/tmp/powos-bf-present.sh 30 \"PowosWindowActivity|SurfaceView|powos-direct|powos-ww-[0-9]+-linux|steam_app${WIN_NAME:+|$WIN_NAME}\" /data/local/tmp/bfp >/dev/null 2>&1 &
     nohup sh /data/local/tmp/powos-bf-prof.sh 30 /data/local/tmp/bfprof >/dev/null 2>&1 &'"
   pill "$lbl: measuring frames (30 s)"; nap 30

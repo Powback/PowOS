@@ -1,0 +1,40 @@
+#!/bin/bash
+# game-boost.sh's holder (the PowOS app's per-game CPU boost) on a fake cpufreq tree: lifts every big policy's max to
+# its hw max and its min to the boost step, re-asserts a max someone set back, restores the originals when the lease
+# goes stale - and does that with shell builtins: 11-06 live capture (Broforce, real play) had the holder at 6-13 % of
+# a core, mostly a cat/grep fork per thread per 5 s and ~14 forks per second for the cpufreq limits.
+set -uo pipefail
+ROOT=$(cd "$(dirname "$0")/../.." && pwd); GB=$ROOT/targets/android/app/app/src/main/assets/game-boost.sh
+pass=0 fail=0
+ok() { if [ "$2" = "$3" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL $1: got '$2', want '$3'"; fi; }
+T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+P=$T/cpufreq
+pol() {  # pol <name> <cpus> <hw max> <min now> <max now> <steps...>
+  local d=$P/$1; mkdir -p "$d"; echo "$2" > $d/related_cpus; echo "$3" > $d/cpuinfo_max_freq; echo 300000 > $d/cpuinfo_min_freq
+  echo "$4" > $d/scaling_min_freq; echo "$5" > $d/scaling_max_freq; shift 5; echo "$*" > $d/scaling_available_frequencies; }
+pol policy0 "0 1 2" 2016000 300000 1459200 300000 1459200 2016000
+pol policy3 "3 4 5 6" 2803200 614400 1920000 614400 1920000 2246400 2803200
+pol policy7 "7" 3187200 864000 1708800 864000 1708800 2476800 3187200
+mkdir -p $T/cpuctl $T/state; touch $T/lease
+export GAME_BOOST_STATE=$T/state GAME_BOOST_CPUCTL=$T/cpuctl GAME_BOOST_CPUFREQ=$P GAME_BOOST_SETTINGS=true LEASE_S=2
+# No such game: the holder lifts and holds until the lease (not touched) goes stale, then restores.
+sh "$GB" hold steam_app_999999999 $T/lease &
+h=$!; sleep 1.5
+ok "policy3 max lifted" "$(cat $P/policy3/scaling_max_freq)" 2803200
+ok "policy3 min = highest step <= 80 %" "$(cat $P/policy3/scaling_min_freq)" 1920000
+ok "policy7 max lifted" "$(cat $P/policy7/scaling_max_freq)" 3187200
+ok "policy7 min" "$(cat $P/policy7/scaling_min_freq)" 2476800
+ok "little cluster untouched" "$(cat $P/policy0/scaling_max_freq)" 1459200
+echo 1708800 > $P/policy7/scaling_max_freq   # someone sets it back: re-asserted on the next tick
+sleep 1.2
+ok "policy7 max re-asserted" "$(cat $P/policy7/scaling_max_freq)" 3187200
+wait $h
+ok "policy3 restored" "$(cat $P/policy3/scaling_min_freq) $(cat $P/policy3/scaling_max_freq)" "614400 1920000"
+ok "policy7 restored" "$(cat $P/policy7/scaling_min_freq) $(cat $P/policy7/scaling_max_freq)" "864000 1708800"
+ok "fight logged" "$(grep -c 'policy7: max set back to 1708800 by someone else' $T/state/log)" 1
+ok "stale lease logged" "$(grep -c 'restore - the app.s lease is' $T/state/log)" 1
+# The per-second path forks nothing for the limits: no $(cat ...) left in freqs_lift / ticks.
+body=$(sed -n '/^freqs_lift()/,/^}/p; /^ticks()/,/^}/p' "$GB")
+ok "no cat forks in the per-second path" "$(echo "$body" | grep -c '\$(cat ')" 0
+echo "Results: $pass passed, $fail failed"
+[ $fail = 0 ]
