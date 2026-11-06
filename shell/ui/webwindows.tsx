@@ -150,6 +150,7 @@ function linuxPlaceholder(key: string, label: string, page: number): number {
   const id = --placeholders;
   webWins.value = [...webWins.value, { id, el: id, key, label, page, ...cascade(), pending: true }];
   fillEmptyTile(page, id);
+  reach(id);
   watchStart(id);
   void powos.apps.launch(key).catch(() => update(id, { failed: "The launch failed." }));
   return id;
@@ -294,6 +295,7 @@ async function openHost(key: string, label: string, page: number, another: boole
   hostGave(id);
   webWins.value = [...webWins.value, { id, key, label, page, x, y, w, h }];
   fillEmptyTile(page, id);
+  reach(id);
   watchBound(id, key);
   return id;
 }
@@ -724,11 +726,63 @@ export function clampPlace(x: number, y: number, w: number): { x: number; y: num
   const o = pageOrigin();
   const inset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--inset-top")) || 0;
   const a = workArea();
-  const keep = w / 3;
-  const vx = Math.min(Math.max(x + o.x, keep - w), innerWidth - keep);
+  // WC1: sideways against the work area, not the screen - a bar's third under the unfolded right dock is no grip (the
+  // user 11-03: Steam "off the right edge ... couldn't be grabbed").
+  const keep = Math.min(w / 3, a.right - a.left);
+  const vx = Math.min(Math.max(x + o.x, a.left + keep - w), a.right - keep);
   const vy = Math.min(Math.max(y + o.y, inset), Math.max(inset, a.bottom - TITLE));
   return { x: vx - o.x, y: vy - o.y };
 }
+
+/**
+ * WC1 (the user, 11-03: a window "off the right edge ... with no way to reach it"): window [w]'s frame change that
+ * brings its bar back into reach ([clampPlace]), or null - it is reachable already. A maximised one fills the work area
+ * NOW (a fold / rotation changed it), its floating frame kept; tiles (their tiling lays them out), full-screen, PiP and
+ * quick windows are not floating frames.
+ */
+function reachOf(w: WebWin): Partial<WebWin> | null {
+  if (w.quick || w.full || w.pip || tiledOn(w.id) != null) return null;
+  return w.restore ? maxFillOf(w) : placeOf(w);
+}
+
+/** A maximised window's frame filling the work area now, or null: it does. */
+function maxFillOf(w: WebWin): Partial<WebWin> | null {
+  const a = workArea();
+  const o = pageOrigin();
+  const fill = { x: a.left - o.x, y: a.top - o.y, w: a.right - a.left, h: a.bottom - a.top };
+  const same = fill.x === w.x && fill.y === w.y && fill.w === w.w && fill.h === w.h;
+  return same ? null : fill;
+}
+
+/** A floating window's place with its bar in reach, or null: it is. */
+function placeOf(w: WebWin): Partial<WebWin> | null {
+  const at = clampPlace(w.x, w.y, w.w * (w.scale ?? 1));
+  const [x, y] = [Math.round(at.x), Math.round(at.y)];
+  return x !== Math.round(w.x) || y !== Math.round(w.y) ? { x, y } : null;
+}
+
+/** WC1: window [id] brought into reach (an open, a move or resize's end). */
+export function reach(id: number) {
+  const w = webWins.value.find((v) => v.id === id);
+  const c = w && reachOf(w);
+  if (c) update(id, c);
+}
+
+/** WC1: every window brought into reach - the screen changed (a fold / unfold, a rotation, a dock moving the work area). */
+export function reachAll(): number {
+  const moved = webWins.value.map((w) => [w, reachOf(w)] as const).filter(([, c]) => c);
+  if (!moved.length) return 0;
+  const by = new Map(moved.map(([w, c]) => [w.id, c]));
+  webWins.value = webWins.value.map((w) => (by.has(w.id) ? { ...w, ...by.get(w.id) } : w));
+  console.info(`[reach] ${moved.length} window(s) back on screen at ${innerWidth}x${innerHeight}`);
+  return moved.length;
+}
+
+// After the resize's layout (the work area is the new screen's in the next frame): a fold, a rotation, a size change.
+let reachFrame = 0;
+const reachSoon = () => void (reachFrame ||= requestAnimationFrame(() => ((reachFrame = 0), reachAll())));
+addEventListener("resize", reachSoon);
+wideHome.subscribe(reachSoon);
 
 /** Fills the work area, or goes back to where it was. */
 export function toggleMaximise(id: number) {
@@ -2090,6 +2144,7 @@ function resizeEnd(id: number) {
   const r = resizing.get(id);
   if (!r) return;
   resizing.delete(id);
+  reach(id);
   lastResize = { id, steps: r.steps, reqs: r.reqs };
   resendGeometry();
 }
