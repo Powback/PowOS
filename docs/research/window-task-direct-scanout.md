@@ -168,3 +168,17 @@ bf-pacing "no game presents"). The app queued each DIRECT_RELEASE for its render
 top of its loop - i.e. after the NEXT frame came; that frame needs a free client buffer, and with all 4 of Xwayland's
 held by KWin it came only past Xwayland's stale-frame timer. Fix: `direct_set_release_cb` - the release goes to KWin
 from SurfaceFlinger's OnComplete callback (after the replaced buffer's release fence) at once.
+
+**11-06 11:05-11:14 why direct "never engages" (agent direct-engage).** Only the first run of the day went direct
+(job 110246 try 1: 4115/4118 frames). Every run after (tasks 7-10, jobs 110246 try 2 and 110247) shows the same
+sequence in KWin's log: `direct scanout offered, caps 1` -> `client buffer: 1116x2484 fourcc AR24 modifier 0x0` ->
+`direct scanout refused by the consumer, caps 0` -> `client buffer: ... XR24 modifier 0xffffffffffffff`, and the app
+logs `direct: createFromHandle 3` (mapper BAD_VALUE). The first buffer of those runs is Xwayland's own AR24 linear
+window pixmap (shown before the game's first Present flip); QTI gralloc won't import that dma-buf, and the consumer
+took a one-buffer failure as "refused for good" (`d->dead`), so the turnip XR24 flips that wrap fine (try 1's first
+buffer, self-test passed) were composited all run: `direct sent 1` = the one refused frame. Fix (app):
+`direct_present` -3 = this buffer refused (wrap failure, layout) - caps 0 (KWin forgets every id and composites),
+then the render thread offers again after 1 s, doubling to 4 s while refusals repeat; only a self-test failure, no
+child surface or too many ids stay for good. Prediction for `direct-scanout-on.sh bf-pacing.sh base` with that APK:
+KWin `offered / refused / offered` (more cycles only while the AR24 pixmap is up), then `direct sent` ~= eligible on
+every `draw:` line in the measuring window.

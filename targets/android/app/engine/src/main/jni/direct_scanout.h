@@ -15,7 +15,9 @@ struct direct_state;
 bool direct_flag(void);
 struct direct_state *direct_new(void);
 /* Show frame f (fence: acquire fence or -1, dmabuf: its fd when DIRECT_FLAG_NEW_FD, else -1; both consumed).
- * 0 shown; -1 not shown (this frame); -2 refused for good (self-test / mapper / layout) - offer no more direct frames. */
+ * 0 shown; -1 not shown (this frame); -2 refused for good (self-test / no child surface / too many ids) - offer no more
+ * direct frames; -3 this buffer refused (gralloc won't take it, or its layout) - stop direct frames for a while (caps 0:
+ * the producer forgets every id and composites) and offer again, the client's next buffers may be fine. */
 int direct_present(struct direct_state *d, ANativeWindow *win, const struct direct_frame *f, int fence, int dmabuf);
 /* A composited frame was queued: hide the child so the window's own buffer shows. */
 void direct_hide(struct direct_state *d);
