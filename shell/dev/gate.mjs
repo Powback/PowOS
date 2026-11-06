@@ -1863,6 +1863,72 @@ async function foldSameFrame(page) {
 }
 
 /**
+ * WC1 (the user, 11-03: a window "off the right edge of its page, couldn't be grabbed"): windows placed off each edge
+ * (and a maximised one from a bigger screen) come back with their bar in reach - at least a third of it inside the work
+ * area sideways (never under the right dock), its top between the status bar and the dock - after a fold, an unfold and
+ * a rotation, with no input. Placed there afresh before each screen change.
+ */
+async function windowClampScene(page) {
+  const F = "./dev/fold-check.js";
+  const call = (fn, ...a) => page.evaluate(async (F, fn, a) => (await importShim(F))[fn](...a), F, fn, a);
+  const folded = { width: 404, height: 899 }, unfolded = { width: 821, height: 883 }, turned = { width: 883, height: 821 };
+  await call("setUnfoldedRight");
+  const place = () =>
+    page.evaluate(async () => {
+      const S = await window.__gw.mod("./state.ts");
+      const W = await window.__gw.mod("./ui/webwindows.tsx");
+      S.page.value = 0;
+      const p = S.pages.value[0];
+      const at = (id, x, y, more = {}) => ({ id, key: `a:gate.clamp${id}`, label: `Clamp ${id}`, page: p, x, y, w: 360, h: 300, live: true, ...more });
+      W.webWins.value = [
+        at(961, innerWidth + 200, 140),
+        at(962, -2000, 160),
+        at(963, 120, -600),
+        at(964, 200, innerHeight + 300),
+        at(965, innerWidth - 40, innerHeight - 10),
+        at(966, 0, 0, { w: 2400, h: 2400, restore: { x: 3000, y: 80, w: 360, h: 300 } }),
+      ];
+      await window.__gw.settled();
+    });
+  const judge = (when) =>
+    page.evaluate(async (when) => {
+      const W = await window.__gw.mod("./ui/webwindows.tsx");
+      await window.__gw.frames(3);
+      const a = W.workArea();
+      const inset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--inset-top")) || 0;
+      const bad = [];
+      for (const id of [961, 962, 963, 964, 965, 966]) {
+        const bar = document.querySelector(`.webwindow[data-wwid="${id}"] .webwindow-title`)?.getBoundingClientRect();
+        if (!bar) {
+          bad.push(`${when}: window ${id} has no bar on the page`);
+          continue;
+        }
+        const seen = Math.min(bar.right, a.right) - Math.max(bar.left, a.left);
+        const r = `${Math.round(bar.left)},${Math.round(bar.top)} ${Math.round(bar.width)}w (work area ${Math.round(a.left)}-${Math.round(a.right)} x ${Math.round(inset)}-${Math.round(a.bottom)})`;
+        if (seen < Math.min(bar.width / 3, a.right - a.left) - 1) bad.push(`${when}: window ${id}'s bar out of reach sideways: ${r}`);
+        if (bar.top < inset - 1 || bar.top > a.bottom - bar.height + 1) bad.push(`${when}: window ${id}'s bar out of reach up/down: ${r}`);
+      }
+      const max = W.webWins.value.find((w) => w.id === 966);
+      if (max && Math.round(max.w) !== Math.round(a.right - a.left)) bad.push(`${when}: the maximised window is ${Math.round(max.w)} wide, want the work area's ${Math.round(a.right - a.left)}`);
+      return bad;
+    }, when);
+  const bad = [];
+  try {
+    for (const [from, to, when] of [[unfolded, folded, "folded"], [folded, unfolded, "unfolded"], [unfolded, turned, "rotated"], [turned, unfolded, "rotated back"]]) {
+      await viewTo(page, from);
+      await restAt(page, from);
+      await place();
+      await viewTo(page, to);
+      await restAt(page, to);
+      bad.push(...(await judge(`${from.width}x${from.height} -> ${to.width}x${to.height} (${when})`)));
+    }
+  } finally {
+    await page.evaluate(async () => ((await window.__gw.mod("./ui/webwindows.tsx")).webWins.value = []));
+  }
+  return bad;
+}
+
+/**
  * The grip while folding (EM2): a long press on home that ends with a fold change within 1 s never leaves edit mode
  * on - the press's timer firing after the resize (EM2), or edit mode entered just before it (EM1).
  */
@@ -13160,6 +13226,7 @@ try {
   if (process.env.SHELL_PAGES !== "0") {
     runs.push(open(browser, `${ORIGIN}/index.html`, "fold-same-frame", { width: 404, height: 899 }).then((r) => whenReady(r, () => foldSameFrame(r.page))));
     runs.push(open(browser, `${ORIGIN}/index.html`, "fold-grip", { width: 404, height: 899 }).then((r) => whenReady(r, () => foldGrip(r.page))));
+    runs.push(open(browser, `${ORIGIN}/index.html`, "window-clamp", { width: 821, height: 883 }).then((r) => whenReady(r, () => windowClampScene(r.page))));
   }
   // Never a stale wide home on the cover screen (staleWide: a desktop size, a resize dropped while hidden, a show).
   if (process.env.SHELL_PAGES !== "0")
