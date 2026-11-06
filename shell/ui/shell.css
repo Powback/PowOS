@@ -1860,16 +1860,35 @@ html:root .ai-board .tile { background: none; box-shadow: none; }
 .ai-answer { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.4; user-select: text; max-height: 40vh; overflow-y: auto; }
 .ai-note, .ai-thinking { font-size: var(--text-small); overflow-wrap: anywhere; }
 .ai-empty { padding: 30px 6px; text-align: center; font-size: var(--text-small); }
-/* Not signed in (powai.tsx SignIn): Sign in to Claude, centred; tapped, Claude Code's own login in a terminal filling the pane. */
+/* Not signed in / the login lapsed (powai.tsx SignIn): the native sign-in sheet (claudesignin.tsx), centred. */
 .ai-signin { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 12px; text-align: center; }
 .ai-signin-icon { color: var(--accent-text); }
-.ai-signin-title { color: var(--color-foreground); font-size: var(--text-body); font-weight: 600; }
-.ai-signin-text { max-width: 320px; font-size: var(--text-small); }
-.ai-signin-go { margin-top: 6px; padding: 10px 22px; border: 0; border-radius: 999px; background: var(--color-accent); color: var(--color-background); font: inherit; font-size: var(--text-body); font-weight: 600; }
-.ai-signin.ai-signin-on { align-items: stretch; padding: 0; gap: 6px; height: 60vh; min-height: 280px; text-align: left; }
-.ai-signin-head { display: flex; align-items: center; gap: 8px; }
-.ai-signin-done { margin-left: auto; padding: 4px 6px; border: 0; background: none; color: var(--accent-text); font: inherit; font-size: var(--text-small); }
-.ai-signin-term { flex: 1; min-height: 0; border-radius: var(--radius); overflow: hidden; }
+.ai-signin-sheet { width: 100%; max-width: 360px; text-align: left; }
+/* The native Claude sign-in (claudesignin.tsx): Login, the code box, the result - on the AI page and a terminal tile. */
+.signin { display: flex; flex-direction: column; gap: 8px; font-family: var(--font-body); font-size: var(--text-body); color: var(--color-foreground); }
+.signin-head { display: flex; align-items: center; gap: 8px; }
+.signin-icon { color: var(--status-needs); }
+.signin-ok { color: var(--status-working); }
+.signin-title { font-weight: 600; }
+.signin-text { font-size: var(--text-small); }
+.signin-err { font-size: var(--text-small); color: var(--color-red); }
+.signin-row { display: flex; gap: 6px; }
+.signin-code { flex: 1; min-width: 0; padding: 10px 12px; border: 0; border-radius: var(--radius); background: var(--glass-fill); color: var(--color-foreground); font: inherit; }
+.signin-paste { padding: 0 14px; border: 0; border-radius: var(--radius); background: var(--glass-fill); color: var(--accent-text); font: inherit; }
+.signin-go {
+  align-self: flex-start; padding: 10px 22px; border: 0; border-radius: 999px; background: var(--color-accent); color: var(--color-background);
+  font: inherit; font-weight: 600; transition: opacity var(--spring-fast-ms) var(--spring-fast);
+}
+.signin-go:disabled { opacity: 0.5; }
+.signin-link { margin-left: auto; padding: 4px 6px; border: 0; background: none; color: var(--accent-text); font: inherit; font-size: var(--text-small); }
+.signin-text .signin-link { margin-left: 6px; padding: 0; }
+/* On a terminal tile whose claude asked for a login: a glass sheet at its foot, over the covers (its taps are its own). */
+.term-signin {
+  position: absolute; left: 8px; right: 8px; bottom: 8px; padding: 12px; border-radius: var(--radius);
+  background: var(--glass-fill); backdrop-filter: blur(var(--glass-blur)); animation: term-signin-in var(--spring-ms) var(--spring);
+}
+.term-signin-x { position: absolute; top: 8px; right: 8px; }
+@keyframes term-signin-in { from { opacity: 0; transform: translateY(8px); } }
 
 /* ui/pending.tsx: the shared "being made" building block - app/widget creation placeholders, and the being-built
    view (apps/sheet.ts's popover). Accent for progress, muted for everything secondary; no borders, no raw colors. */

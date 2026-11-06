@@ -23,6 +23,7 @@ import { tick } from "./haptics.ts";
 import { takeTap } from "./taps.ts";
 import { page, screen } from "../state.ts";
 import type { TermState, TermStyle } from "../types.ts";
+import { TerminalLogin, watchTerminal } from "./claudesignin.tsx";
 
 /** As PtyTerminal's transcript; tmux keeps its own. */
 const SCROLLBACK = 2000;
@@ -393,7 +394,12 @@ const FIT_SCROLLBAR = 14;
 
 const sessions = new Map<string, Session>();
 
-powos.on("term.data", (e: { id: string; run: number; data: string; end: number }) => sessions.get(e.id)?.data(e));
+const watchDecoder = new TextDecoder();
+powos.on("term.data", (e: { id: string; run: number; data: string; end: number }) => {
+  sessions.get(e.id)?.data(e);
+  // claude in this terminal asking for a login ("run /login"): the tile's native sign-in (claudesignin.tsx).
+  watchTerminal(e.id, watchDecoder.decode(unb64(e.data)));
+});
 powos.on("term.exit", (e: { id: string; run: number; code: number }) => sessions.get(e.id)?.exit(e));
 // Another theme: its colors are on the page's tokens a moment later (app.tsx), then in every terminal.
 powos.on("theme.changed", () => setTimeout(() => sessions.forEach((s) => s.restyle()), 50));
@@ -967,6 +973,8 @@ export function TerminalView({ id, owner = null, command = null, interactive = t
       ) : (
         !isFocused && <div class="term-cover" {...scrolls(interactive ? onTap(() => view.current && focus(view.current)) : {})} />
       )}
+      {/* Over the covers: its buttons take the taps, the tile above it still reads. */}
+      <TerminalLogin id={id} />
     </div>
   );
 }

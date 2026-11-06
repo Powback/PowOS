@@ -35,7 +35,38 @@ system; on a phone it is the phone's agent too - the launcher uses it, and it re
   Reply answers inline (`powos comms send <agent> <text>`, into that agent's inbox).
 - **Claude on the phone**: PowOS AI needs the `claude` CLI - `powos ai install claude` (native installer, in
   `~/.local/bin`, now on the rooted session's PATH) and `powos config claude-endpoint http://claude-auth.pow`
-  (the fleet's auth authority, as a follower: no login on the phone).
+  (the fleet's auth authority, as a follower: no login on the phone). When its login lapses: the native sign-in below.
+
+## Native Claude sign-in (no `/login` in terminals)
+
+The phone (rooted or not) notices when Claude's login is **missing** or **needs a refresh** and offers a **Login**
+button where the user sees it. It is **claude-login end to end** (`~/Projects/claude-login`: the real `claude /login`
+run headless, the subscription URL it prints, the pasted `code#state` typed back into that same process). Nothing in
+PowOS builds an OAuth URL or exchanges a code.
+
+- **Two backends, picked by how this machine's claude is configured** (`lib/ai/manager/fleet_login.py`,
+  `powos manager --fleet-login status|word|login`):
+  - **authority** - an endpoint (`/etc/powos/ai/endpoint.conf`: `ANTHROPIC_BASE_URL=http://claude-auth.pow` + the
+    tenant's secret). State from the authority's `GET /auth/check` (whose tenant the secret is) and `GET /tenants`
+    (that tenant's `auth.ok / hasCreds / needsReauth / lastError`). Login = the authority's `POST /oauth/start` and
+    `/oauth/complete` (which run claude-login there), authorized with the tenant's own secret. The authority stays
+    the only refresher: the phone never holds a refresh token or writes a `.credentials.json`.
+  - **direct** - no endpoint (a sellable non-root install): claude-login runs in PowOS's Linux
+    (`POWOS_CLAUDE_LOGIN`=its `dist/cli.js`, or `claude-login` on PATH) and writes the image's own
+    `~/.claude/.credentials.json` (mode 600, straight to the file - the app never sees it). State from that file's
+    presence/expiry/refresh token.
+- **Detection**: `powos manager --auth` says `relogin` (new word; `signin` stays "no login at all, direct"), a chat
+  turn emits `{"kind": "relogin"}` (status 4), a failed turn asks again, the app re-asks every 10 min, and a terminal
+  whose output says claude's `run /login` / `Invalid API key` / 401 (`shell/ui/claudesignin.tsx` `LOGIN_PROMPT`).
+- **Where the user sees it**: the AI page (the sheet instead of the chat), the terminal tile (a sheet at its foot),
+  Settings > AI ("Claude sign-in needed · log in"), and a notification "Claude sign-in needed - powback" (tap: the AI
+  page). One state for all (`Chat.signin`, `ClaudeSignIn.kt`).
+- **Flow**: Login -> the code box shows at once and the link opens in the phone's browser (Android `ACTION_VIEW`);
+  sign in on claude.com (PowOS never sees the password) -> paste the `code#state` (or the Paste button) -> Sign in ->
+  "Signed in to Claude - powback" live, or the authority's/claude-login's error in its words with Login again. One
+  held process (`--fleet-login login`) carries the two steps: its first line the URL, stdin the code, last line done.
+- **Tests**: `test/tier1/test-fleet-login.py` (fake authority + fake claude-login: both states, both backends, the
+  manager words, no secret printed), JVM `ClaudeSignInTest`, gate scene `ai-signin` (`shell/dev/ai-signin-check.js`).
 
 ## Next
 

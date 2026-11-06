@@ -23,6 +23,7 @@ import dev.omalauncher.linux.Guest
 import dev.omalauncher.linux.matches
 import dev.omalauncher.system.RunningApps
 import kotlin.concurrent.thread
+import dev.omalauncher.ClaudeSignIn
 import dev.omalauncher.PowosAiChat
 import dev.omalauncher.Runtime
 import dev.omalauncher.theme.Style
@@ -535,6 +536,13 @@ class ShellBridge(
             // How it's signed in, asked again (after the sign-in terminal ends); Settings > AI's Sign out.
             "ai.auth" -> PowosAiChat.checkAuth()
             "ai.signOut" -> PowosAiChat.signOut()
+            // The native Claude sign-in (ClaudeSignIn: claude-login through the fleet authority or in the image):
+            // Login (the link opens in the browser, the page shows the code box), the pasted code, close, the link again.
+            "ai.signin.status" -> ClaudeSignIn.refresh()
+            "ai.signin.start" -> ClaudeSignIn.start(context)
+            "ai.signin.complete" -> ClaudeSignIn.complete(a.getString(0))
+            "ai.signin.cancel" -> ClaudeSignIn.cancel()
+            "ai.signin.reopen" -> ClaudeSignIn.reopen(context)
             "ai.open" -> PowosAiActivity.open(context, null)
             // Home's PowOS AI page shown or not. Taken and dropped: the side button opens the assist overlay over that page
             // too (the user, 11-02: "I tried to open like the AI overlay with the side button on the AI page and it
@@ -1413,6 +1421,7 @@ class ShellBridge(
             .put("thread", PowosAiChat.thread?.json() ?: JSONObject.NULL)
             .put("queued", JSONArray(PowosAiChat.queued.map { it.json() }))
             .put("auth", PowosAiChat.auth)
+            .put("signin", ClaudeSignIn.json())
 
     /**
      * [key]'s icon ("a:<key>" / "l:<id>"): its file's URL (ShellIcons), the same until the icon changes. One never

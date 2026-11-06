@@ -28,7 +28,7 @@ import { untried } from "./trycard.tsx";
 import { AiSegs, FleetPane, useAgentsInPane } from "./aipanes.tsx";
 import { AiStatus, noteAsked, openChat, OtherProjectsItem, otherProjectsCount } from "./aistatus.tsx";
 import { Icon } from "./icons.tsx";
-import { closeTerminal, TerminalView } from "./terminal.tsx";
+import { SignInSheet } from "./claudesignin.tsx";
 import { usePresence } from "./reveal.tsx";
 
 // The board's state, for what reads it from here (perfrec, the gate, the renders): it lives in aiboard.tsx now.
@@ -170,44 +170,18 @@ function Conversation() {
   );
 }
 
-/** The sign-in terminal's id: one at a time, fresh each time it opens. */
-const SIGNIN_TERM = "claude-signin";
-
 /**
- * Not signed in (Chat.auth "signin": no fleet endpoint, no Claude login in the image - the non-root build until its
- * user signs in): Sign in to Claude, then Claude Code's own login (`powos manager --signin` = `claude auth login`) in a
- * terminal here. Its browser step opens in Android's browser and comes back by itself, or its code is pasted in the
- * terminal; the credentials stay in the image (Claude Code's own file), never seen by the page. Its end asks the auth
- * again: signed in, the chat is back.
+ * Not signed in, or the login lapsed (Chat.auth "signin": no endpoint and no login in the image - the non-root build
+ * until its user signs in; "relogin": the fleet tenant's login, or the image's own, is missing or can't refresh): the
+ * native sign-in (claudesignin.tsx - claude-login through the authority or in the image; no /login in a terminal).
+ * Signed in, the host's auth word moves on and the chat is back.
  */
 function SignIn() {
-  const [term, setTerm] = useState(false);
-  useEffect(() => {
-    if (!term) return;
-    const off = powos.on("term.exit", (e: { id: string }) => e.id === SIGNIN_TERM && void powos.ai.auth?.().catch(() => undefined));
-    return () => (off(), closeTerminal(SIGNIN_TERM));
-  }, [term]);
-  const done = () => (setTerm(false), void powos.ai.auth?.().catch(() => undefined));
-  if (term)
-    return (
-      <div class="ai-signin ai-signin-on">
-        <div class="ai-signin-head">
-          <span class="ai-signin-title">Sign in to Claude</span>
-          <button type="button" class="ai-signin-done" onClick={done}>
-            Done
-          </button>
-        </div>
-        <TerminalView id={SIGNIN_TERM} command="powos manager --signin" focus class="ai-signin-term" />
-      </div>
-    );
+  useEffect(() => void powos.ai.signin?.status().catch(() => undefined), []);
   return (
     <div class="ai-signin">
       <Icon name="robotOutline" size={40} class="ai-signin-icon" />
-      <div class="ai-signin-title">Sign in to Claude</div>
-      <div class="ai-signin-text muted">PowOS AI runs on your own Claude account. Sign in once - the login stays on this phone.</div>
-      <button type="button" class="ai-signin-go" onClick={() => setTerm(true)}>
-        Sign in
-      </button>
+      <SignInSheet class="ai-signin-sheet" onDone={() => void powos.ai.auth?.().catch(() => undefined)} />
     </div>
   );
 }
@@ -215,7 +189,7 @@ function SignIn() {
 /** The chat pane: "Create app"'s own thread view (steps, the finished app) or the question that starts one, else the conversation. */
 function ChatPane({ shown }: { shown: boolean }) {
   useChatSync(shown);
-  if (chat.value.auth === "signin") return <SignIn />;
+  if (chat.value.auth === "signin" || chat.value.auth === "relogin") return <SignIn />;
   if (chat.value.thread?.kind === "app") return <AppBuild />;
   if (newAppAsk.value) return <NewAppAsk />;
   return <Conversation />;

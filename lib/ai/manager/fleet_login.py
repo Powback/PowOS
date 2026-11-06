@@ -145,8 +145,10 @@ def status(url: str, token: str) -> dict:
     row = next((r for r in rows if r.get("name") == out["tenant"]), None)
     state, why = classify(row)
     out["state"] = state
-    if why or state != "ok":
-        out["why"] = why or out["why"]
+    if not out["canLogin"] and state in ("missing", "refresh"):
+        out["why"] = (why + " - " if why else "") + out["why"]
+    elif why:
+        out["why"] = why
     return out
 
 

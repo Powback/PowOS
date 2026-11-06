@@ -416,7 +416,26 @@ export interface Chat {
    * "login" Claude Code's own login in the image (the user's own Claude account), "signin" neither - the page shows
    * Sign in to Claude (powai.tsx SignIn). "" or absent: not known yet (an older host).
    */
-  auth?: "endpoint" | "login" | "signin" | "";
+  auth?: "endpoint" | "login" | "signin" | "relogin" | "";
+  /** The native Claude sign-in (ClaudeSignIn.kt; claude-login through the fleet authority or in the image). ?: older hosts. */
+  signin?: ClaudeSignInState;
+}
+
+/**
+ * The native Claude sign-in's state (ClaudeSignIn.json). [phase]: "" idle, "starting" (asking for the link), "code"
+ * (the link is open in the browser: paste the code), "checking", "done", "error" ([error] says why). [state] the
+ * login's: "ok", "missing" (no login yet), "refresh" (its refresh failed: "run /login"), "unknown". [mode] "authority"
+ * (the fleet's claude-auth.pow, [tenant] its subscription) or "direct" (this machine's own login).
+ */
+export interface ClaudeSignInState {
+  phase: "" | "starting" | "code" | "checking" | "done" | "error";
+  url: string;
+  error: string;
+  mode: "authority" | "direct" | "";
+  state: "ok" | "missing" | "refresh" | "unknown" | "";
+  tenant: string;
+  why: string;
+  canLogin: boolean;
 }
 
 /** An app that runs, or one frozen (asleep in RAM: powos-sleep-gui, a game frozen with Steam). */
@@ -694,6 +713,11 @@ export interface Bridge {
     auth?(): Promise<void>;
     /** Settings > AI's Sign out: Claude Code's own logout in the image (never the endpoint's). ?: older hosts. */
     signOut?(): Promise<void>;
+    /**
+     * The native Claude sign-in (Chat.signin, as "ai.changed"): [start] the Login button (the link opens in the browser),
+     * [complete] the pasted code#state, [cancel] closing it, [reopen] the link again, [status] asked again. ?: older hosts.
+     */
+    signin?: { status(): Promise<void>; start(): Promise<void>; complete(code: string): Promise<void>; cancel(): Promise<void>; reopen(): Promise<void> };
     /** What agents told the user and is unread, newest first ("ai.mail" brings it again). */
     mail(): Promise<AgentMail[]>;
     /**

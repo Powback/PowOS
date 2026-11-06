@@ -108,7 +108,18 @@ object PowosAiChat {
             }.getOrNull()
         show(context)
         checkAuth()
+        main.postDelayed(authPoll, AUTH_POLL_MS)
     }
+
+    /** The login can lapse with nothing on screen (a refresh failing on the authority): asked again now and then. */
+    private const val AUTH_POLL_MS = 10 * 60_000L
+    private val authPoll: Runnable =
+        object : Runnable {
+            override fun run() {
+                checkAuth()
+                main.postDelayed(this, AUTH_POLL_MS)
+            }
+        }
 
     /** Asks the image how the manager is signed in, into [auth] (a background thread; once at a time). */
     fun checkAuth() {
@@ -128,7 +139,7 @@ object PowosAiChat {
                 }
             post {
                 authAsking = false
-                if (word.isNotEmpty()) auth = word
+                if (word.isNotEmpty()) authIs(word)
             }
         }, "powos-ai-auth").start()
     }
@@ -143,10 +154,19 @@ object PowosAiChat {
         }, "powos-ai-signout").start()
     }
 
+    /**
+     * The sign-in state changed: "relogin" (the login is missing or can't refresh - the fleet tenant's, or this image's
+     * own) and "signin" ask ClaudeSignIn for the details, which posts "Claude sign-in needed - <tenant>" once per need.
+     */
+    private fun authIs(word: String) {
+        auth = word
+        if (word == "relogin" || word == "signin") ClaudeSignIn.refresh(appContext.takeIf { word == "relogin" })
+    }
+
     /** `powos manager --auth`'s word from its output; "" for anything else (an older image without the flag). */
     fun authWord(out: String): String = out.lineSequence().map { it.trim() }.lastOrNull { it.isNotEmpty() }?.takeIf { it in AUTH_WORDS } ?: ""
 
-    private val AUTH_WORDS = setOf("endpoint", "login", "signin")
+    private val AUTH_WORDS = setOf("endpoint", "login", "signin", "relogin")
 
     private fun threadFile(context: Context) = File(context.filesDir, "powos-ai/thread.json")
 
@@ -307,7 +327,9 @@ object PowosAiChat {
                         // The mail the turn answers: who it's from, as a line in the chat.
                         "inbox" -> post { add(Item.Note(inboxLine(ev.optString("text")))) }
                         // Not signed in (no endpoint, no Claude login in the image): the page's Sign in to Claude.
-                        "signin" -> post { auth = "signin" }
+                        "signin" -> post { authIs("signin") }
+                        // The login the endpoint's tenant (or this image) has is missing or can't refresh: the sheet.
+                        "relogin" -> post { authIs("relogin") }
                     }
                 }
                 process.waitFor()
@@ -319,7 +341,9 @@ object PowosAiChat {
             // The inbox's turn with nothing waiting (already read): nothing to say.
             // Not signed in (status 4, its "signin" event): the page shows Sign in to Claude, not an error line.
             val quiet = (prompt == null && exit == 0 && !answered) || exit == SIGNIN_EXIT
-            if (exit == SIGNIN_EXIT) auth = "signin"
+            if (exit == SIGNIN_EXIT && auth != "relogin" && auth != "signin") authIs("signin")
+            // A turn that failed otherwise (claude's 401 / "run /login" when the login lapsed mid-session): asked again.
+            if (exit != 0 && exit != SIGNIN_EXIT) checkAuth()
             if (!quiet && (exit != 0 || !answered)) {
                 val why = synchronized(errors) { errors.lastOrNull { it.isNotBlank() } }
                 add(Item.Note("PowOS AI didn't answer" + (why?.let { ": $it" } ?: " (exit $exit)"), error = true))

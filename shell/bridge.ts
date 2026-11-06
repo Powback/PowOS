@@ -23,6 +23,7 @@ import type {
   ChromeState,
   Cell,
   Chat,
+  ClaudeSignInState,
   DesktopWindow,
   VirtualDesktop,
   Home,
@@ -172,6 +173,13 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       closeThread: () => call<boolean>("ai.closeThread"),
       auth: () => call("ai.auth"),
       signOut: () => call("ai.signOut"),
+      signin: {
+        status: () => call("ai.signin.status"),
+        start: () => call("ai.signin.start"),
+        complete: (code) => call("ai.signin.complete", code),
+        cancel: () => call("ai.signin.cancel"),
+        reopen: () => call("ai.signin.reopen"),
+      },
       mail: () => call<AgentMail[]>("ai.mail"),
       mailRead: (id) => call("ai.mailRead", id),
       mailClear: () => call("ai.mailClear"),
@@ -460,6 +468,8 @@ function mock(): Bridge {
   const data = (name: string) => `powos-shell:${name}`;
   let samples: Promise<Record<string, unknown>> | null = null;
   let chat: Chat = { busy: false, items: [], queued: [] };
+  // Dev tools / the gate: the mock host's chat set by hand (its later events build on it, as the host's would).
+  (window as unknown as { __mockChat?: (next: Partial<Chat>) => void }).__mockChat = (next) => events.emit("ai.changed", (chat = { ...chat, ...next }));
   let screen: WidgetScreen = { key: null };
   // The phone-check runner's word (VerifyRun.kt state): checks waiting for a free phone until stopped.
   let mockRunner = "waiting";
@@ -684,6 +694,34 @@ function mock(): Bridge {
         w.__aiAuthAsked = (w.__aiAuthAsked ?? 0) + 1;
       },
       signOut: async () => void events.emit("ai.changed", (chat = { ...chat, auth: "signin" })),
+      // The mock's native sign-in, the host's phases (ClaudeSignIn.kt): the link after a beat, "good#state" signs in,
+      // anything else is the authority's "invalid code". window.__signinOpened counts the links opened (the gate's
+      // ai-native-signin scene).
+      signin: (() => {
+        const base = { phase: "", url: "", error: "", mode: "authority", state: "refresh", tenant: "powback", why: "refresh token itself has expired", canLogin: true } as const;
+        const set = (next: Partial<ClaudeSignInState>) =>
+          events.emit("ai.changed", (chat = { ...chat, signin: { ...base, ...chat.signin, ...next } as ClaudeSignInState }));
+        const w = window as unknown as { __signinOpened?: number };
+        return {
+          status: async () => set({}),
+          start: async () => {
+            set({ phase: "starting", error: "" });
+            await new Promise((r) => setTimeout(r, 250));
+            w.__signinOpened = (w.__signinOpened ?? 0) + 1;
+            set({ phase: "code", url: "https://claude.com/cai/oauth/authorize?mock=1" });
+          },
+          complete: async (code) => {
+            set({ phase: "checking" });
+            await new Promise((r) => setTimeout(r, 250));
+            if (code.trim() === "good#state") {
+              set({ phase: "done", state: "ok", why: "" });
+              events.emit("ai.changed", (chat = { ...chat, auth: "endpoint" }));
+            } else set({ phase: "error", error: "invalid code" });
+          },
+          cancel: async () => set({ phase: "", url: "", error: "" }),
+          reopen: async () => void (w.__signinOpened = (w.__signinOpened ?? 0) + 1),
+        };
+      })(),
       mailRead: async (id) => console.log("[mock] mail read", id),
       mailClear: async () => console.log("[mock] all mail read"),
       mail: async () => {
