@@ -78,7 +78,49 @@ sc_shade() {
 # The shade page's frames: rAF deltas and the list's scroll range, from ss_on to ss_off (a JSON line).
 SS_ON='(()=>{const l=document.querySelector(".notif-list");const r=window.__ssRec={dt:[],last:0,on:true,lo:l?l.scrollTop:-1,hi:l?l.scrollTop:-1};const f=t=>{if(!r.on)return;if(r.last)r.dt.push(Math.round((t-r.last)*10)/10);r.last=t;requestAnimationFrame(f)};requestAnimationFrame(f);if(l)l.addEventListener("scroll",()=>{r.lo=Math.min(r.lo,l.scrollTop);r.hi=Math.max(r.hi,l.scrollTop)},{passive:true});return "ok"})()'
 SS_OFF='(()=>{const r=window.__ssRec;if(!r)return "{}";r.on=false;return JSON.stringify({dt:r.dt,lo:r.lo,hi:r.hi})})()'
+# The check's own test notifications (the phone's own shade often has too few to scroll): SS_N conversations posted as
+# the shell (`cmd notification post -S messaging`, tag powos-ss-<i>; a conversation is its own row in the shade, so
+# they don't fold into one "+N more" stack), and removed again at the end - also on an abort (the EXIT trap) - by the
+# shade's own dismiss (notifications.dismiss through PowOS's listener). Only keys of com.android.shell with our tag
+# are ever touched; the user's own notifications are never read beyond the list or dismissed.
+SS_N=${SS_N:-14}
+SS_KEYS="l=>JSON.stringify((l&&l.items||[]).map(n=>n.key).filter(k=>k.includes('|com.android.shell|')&&k.includes('|powos-ss-')))"
+ss_mine() { hcall notifications.list "[]" "$SS_KEYS"; }
+ss_seed() {
+  local i n
+  trap 'rc=$?; ss_unseed; (exit $rc); e2e_abort' EXIT
+  for i in $(seq 1 "$SS_N"); do
+    sh_ "cmd notification post -S messaging --conversation \"PowOS check $i\" --message \"PowOS check:shade-scroll test $i of $SS_N, removed after the check\" -t \"PowOS check $i\" powos-ss-$i \"shade-scroll test $i\"" >/dev/null
+    sleep 0.3   # NotificationManager drops a package's posts above ~5/s
+  done
+  # Their heads-up banners gone and the shade's list caught up before the shade opens.
+  for i in $(seq 1 10); do sleep 1; n=$(ss_mine | python3 -c 'import json,sys
+try: print(len(json.loads(sys.stdin.read())))
+except Exception: print(0)'); [ "$n" -ge "$SS_N" ] && break; done
+  log "shade-scroll: posted $SS_N test notifications (powos-ss-*), $n in the shade's list"
+  sleep 4
+}
+ss_unseed() {
+  local k left i
+  for i in 1 2 3; do
+    k=$(ss_mine); [ "$k" = "[]" ] && break
+    python3 -c 'import json,sys
+for k in json.loads(sys.argv[1]): print(k)' "$k" 2>/dev/null | while read -r key; do
+      [ -n "$key" ] && hcall notifications.dismiss "[$(python3 -c 'import json,sys;print(json.dumps(sys.argv[1]))' "$key")]" "()=>'ok'" </dev/null >/dev/null
+    done
+    sleep 1
+  done
+  left=$(ss_mine)
+  [ "$left" = "[]" ] && log "shade-scroll: test notifications removed" || note "shade-scroll: test notifications still listed after the clean-up: $left"
+  trap 'e2e_abort' EXIT
+}
 sc_shade_scroll() {
+  ss_seed
+  sc_shade_scroll_run; local rc=$?
+  ss_unseed
+  return $rc
+}
+sc_shade_scroll_run() {
   local i o ox=0 oy=0 g x t b
   hcall shade.open "[]" "()=>'ok'" >/dev/null; sleep 1.5
   [ "$(shadeup)" = up ] || { fail "shade-scroll: the shade didn't open (shade.open)"; return 1; }
