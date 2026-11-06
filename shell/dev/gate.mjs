@@ -936,6 +936,9 @@ async function editResizeCheck() {
   S.selected.value = key;
   const lower = () => document.querySelector(`.home-tile[data-key="${CSS.escape(key)}"]`);
   await G.until(() => lower()?.querySelector(".resize-handle") && lower()?.querySelector(".tile-actions"));
+  // Edit mode's rise is the grid's room too (IB1: shell.css .home-content, the foot's row lifted over the edit bar): the
+  // grid is laid out again for it - the cells measured once that has settled.
+  await G.until(() => G.still());
   // R3: the pill against the widget above.
   const pillOver = () => {
     const above = tiles()[0].querySelector(":scope > .tile").getBoundingClientRect();
@@ -13052,6 +13055,12 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const label of ["folded", "unfolded"])
       runs.push(open(browser, `${ORIGIN}/index.html`, `bar-swipe-fixed-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/dock-search-check.js")).barSwipeFixed()))));
+  // IB1 (dev/dock-search-check.js homeIconsClearBar; the user: "Home app icons float too far up and overlap the search
+  // bar"): no home tile nor the grid's last row in the screen-fixed bar's rect + gutter - folded and unfolded, portrait
+  // and landscape, the bar over and under the dock, the keyboard up and down.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, view] of [["folded", dockOpensView.folded], ["folded-landscape", { width: 899, height: 404 }], ["unfolded", dockOpensView.unfolded], ["unfolded-landscape", { width: 883, height: 821 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `home-icons-clear-bar-${label}`, view).then((r) => whenReady(r, () => r.page.evaluate(async (l) => (await importShim("./dev/dock-search-check.js")).homeIconsClearBar(l), label))));
   // SF1 (dev/dock-search-check.js searchFindable; the user, 11-03 11:49: "Where is that setting?"): Settings search
   // finds the search's spot and opens its row highlighted; a long press on the bar / edit mode's tap on the button flips it.
   if (process.env.SHELL_PAGES !== "0")
