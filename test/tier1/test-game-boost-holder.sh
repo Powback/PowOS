@@ -33,6 +33,43 @@ ok "policy3 restored" "$(cat $P/policy3/scaling_min_freq) $(cat $P/policy3/scali
 ok "policy7 restored" "$(cat $P/policy7/scaling_min_freq) $(cat $P/policy7/scaling_max_freq)" "864000 1708800"
 ok "fight logged" "$(grep -c 'policy7: max set back to 1708800 by someone else' $T/state/log)" 1
 ok "stale lease logged" "$(grep -c 'restore - the app.s lease is' $T/state/log)" 1
+# Under a thermal controller (horae on OxygenOS): its cap stands and only the prime policy's min goes up to it - the
+# gold cluster clocks on demand (less heat, which is what moves the controller's gear).
+cp $T/state/log $T/log.before; rm -f $T/state/log; touch $T/lease
+echo 1920000 > $P/policy3/scaling_max_freq; echo 1708800 > $P/policy7/scaling_max_freq
+GAME_BOOST_OWNER=horaeCb sh "$GB" hold steam_app_999999999 $T/lease &
+h=$!; sleep 1.5
+ok "thermal: prime min up to its cap" "$(cat $P/policy7/scaling_min_freq) $(cat $P/policy7/scaling_max_freq)" "1708800 1708800"
+ok "thermal: gold min left on demand" "$(cat $P/policy3/scaling_min_freq) $(cat $P/policy3/scaling_max_freq)" "614400 1920000"
+ok "thermal: logged prime-only" "$(grep -c 'min held on policy7 only' $T/state/log)" 1
+wait $h
+ok "thermal: prime min restored" "$(cat $P/policy7/scaling_min_freq)" 864000
+# Placement: a busy game thread is pinned to the prime core, and pinned again when its mask is reset under it (the
+# kernel does that on a cpuset change; 11-06 live play had the main thread on cpu4 with Cpus_allowed 0-7). Needs a
+# second cpu to tell the prime from the rest.
+N=$(nproc)
+if [ "$N" -ge 2 ] && command -v taskset > /dev/null; then
+  Q=$T/cpufreq2; P0=$P; P=$Q
+  pol policy0 "0" 2016000 300000 2016000 300000 2016000
+  pol policy1 "0" 2803200 300000 2803200 300000 2803200
+  pol policy2 "$((N - 1))" 3187200 300000 3187200 300000 3187200
+  P=$P0; rm -f $T/state/log
+  SteamAppId=999999998 sh -c 'while :; do :; done' & g=$!
+  ( while kill -0 $g 2>/dev/null; do touch $T/lease; sleep 0.5; done ) & tl=$!
+  GAME_BOOST_CPUFREQ=$Q sh "$GB" hold steam_app_999999998 $T/lease &
+  h=$!; sleep 7
+  ok "placement: busy thread on the prime core" "$(awk '/Cpus_allowed_list/ {print $2}' /proc/$g/status)" "$((N - 1))"
+  taskset -p -c 0-$((N - 1)) $g > /dev/null
+  sleep 5.5
+  ok "placement: re-pinned after a reset" "$(awk '/Cpus_allowed_list/ {print $2}' /proc/$g/status)" "$((N - 1))"
+  ok "placement: reset logged" "$(grep -c 'its mask was reset' $T/state/log)" 1
+  ok "placement: holder off the prime core" "$(awk '/Cpus_allowed_list/ {print $2}' /proc/$h/status)" 0
+  kill $g; wait $g 2>/dev/null; wait $h; kill $tl 2>/dev/null
+  ok "placement: restored after the game" "$(grep -c 'placement resets: 1)' $T/state/log)" 1
+  ok "placement: mask restored" "$(grep -c 'threads restored: ' $T/state/log)" 1
+else
+  echo "skip placement (nproc $N)"
+fi
 # The per-second path forks nothing for the limits: no $(cat ...) left in freqs_lift / ticks.
 body=$(sed -n '/^freqs_lift()/,/^}/p; /^ticks()/,/^}/p' "$GB")
 ok "no cat forks in the per-second path" "$(echo "$body" | grep -c '\$(cat ')" 0

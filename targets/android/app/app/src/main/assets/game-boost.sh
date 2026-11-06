@@ -36,6 +36,7 @@ P=${GAME_BOOST_CPUFREQ:-/sys/devices/system/cpu/cpufreq}
 LEASE_S=${LEASE_S:-4}
 BOOST_MIN_PCT=${BOOST_MIN_PCT:-80}
 BOOST_UCLAMP=${BOOST_UCLAMP:-75}
+BOOST_MIN_ALL=${BOOST_MIN_ALL:-0}
 SETTINGS=${GAME_BOOST_SETTINGS:-settings}
 # The vendor's game class (Settings.Global; GameBoost.VENDOR_GAME_KEY, read by targets/android/oplus-hook): the boosted
 # game's app id while the boost holds under a vendor thermal controller, deleted on every restore.
@@ -62,6 +63,9 @@ topology() {
   rest=$(for p in $BOOSTED; do cpus_of $p; done | tr ' ' '\n' | grep . | grep -vx "$PRIME")
   PRIME_MASK=$(mask $PRIME)
   REST_MASK=$([ -n "$rest" ] && mask $rest)
+  # The lowest policy (the little cluster): where the holder itself runs, off the game's cores.
+  LITTLE=$(for p in $P/policy*; do echo "$(cat $p/cpuinfo_max_freq) ${p##*/}"; done | sort -n | head -n 1 | cut -d' ' -f2)
+  LITTLE_MASK=$(mask $(cpus_of "$LITTLE"))
   # Each policy's hw max and boost min, once: constants, and the holder re-reads the limits every second.
   for p in $BOOSTED; do read -r hw < $P/$p/cpuinfo_max_freq; eval HW_$p=$hw LO_$p=$(boost_min $p); done
   # The skin sensor the vendor's thermal controller gears on (OxygenOS: skin-msm-therm), for the cap lines' context.
@@ -164,6 +168,10 @@ freqs_lift() {
       [ "$lo" -gt "$cap" ] && lo=$cap
       eval was=\${CAP_$p:-}
       [ "$was" != "$cap" ] && eval CAP_$p=$cap && log "$p: thermal cap $cap of hw $hw by $THERMAL$(skin) - kept"
+      # Heat is what moves the controller's gear: only the main thread's policy (the prime core) holds its min up;
+      # the other big clusters (render/dxvk/workers, none pegged) clock on demand - their threads' uclamp.min 75 asks
+      # schedutil for the clock while they run - instead of idling at the capped top voltage (BOOST_MIN_ALL=1: all).
+      [ "$p" != "$TOP" ] && [ "$BOOST_MIN_ALL" != 1 ] && continue
       [ "$min" -lt "$lo" ] && echo $lo > $P/$p/scaling_min_freq
       continue
     fi
@@ -203,17 +211,34 @@ restore_all() {
   rm -f "$S/vendor_game" "$S/freqs" "$S/tids" "$S/ticks" "$S/main" "$S/app" "$S/holder.pid" "$S/thermal"
 }
 
+# The placement holds: the main thread's affinity still the prime core alone (a builtin read of its status, no fork).
+# The kernel rewrites a thread's mask behind our back when its cpuset's cpus change (a cpu paused / brought back, or
+# the cpuset rewritten): 11-06 14:25 live play had the game's main thread on cpu4 with Cpus_allowed 0-7. Then every
+# known thread gets its mask again (the reset hits them all); the forks only on a reset.
+allowed() { a=; while read -r k v; do [ "$k" = Cpus_allowed_list: ] && a=$v && break; done < /proc/$1/status; echo "$a"; } 2>/dev/null
+placed() {
+  m=; { read -r m < "$S/main"; } 2>/dev/null; [ -n "$m" ] && [ -d /proc/$m ] || return 0
+  a=$(allowed $m); [ -z "$a" ] || [ "$a" = "$PRIME" ] && return 0
+  RESETS=$((RESETS + 1))
+  log "$APP: main thread $m on cpus $a (its mask was reset): cpu$PRIME again, the other threads back off it"
+  [ -n "$REST_MASK" ] && for t in $KNOWN; do [ "$t" != "$m" ] && taskset -p $REST_MASK $t > /dev/null 2>&1; done
+  taskset -p $PRIME_MASK $m > /dev/null 2>&1
+}
+
 hold() {
   APP=$1 LEASE=$2
   echo $$ > "$S/holder.pid"; echo "$APP" > "$S/app"; : > "$S/tids"
   trap 'log "$APP: restore asked"; restore_all; exit 0' TERM INT HUP
   topology || { log "$APP: no cpufreq policies"; restore_all; exit 1; }
   freqs_save
-  THERMAL=$(thermal_owner); echo "$THERMAL" > "$S/thermal"
+  # The holder itself on the little cores: its 1 s loop never shares the prime / gold cores with the game (11-06 14:25
+  # live capture: an unpinned sh at 10.5 % on cpu7).
+  [ -n "$LITTLE_MASK" ] && taskset -p $LITTLE_MASK $$ > /dev/null 2>&1
+  THERMAL=${GAME_BOOST_OWNER-$(thermal_owner)}; echo "$THERMAL" > "$S/thermal"
   [ -n "$THERMAL" ] && vendor_game_class "$APP"
   mkdir -p $CG && echo $BOOST_UCLAMP > $CG/cpu.uclamp.min 2>/dev/null
-  log "$APP: boost (policies $(echo $BOOSTED | tr '\n' ' '), prime cpu$PRIME, rest mask ${REST_MASK:-none}, uclamp.min $(cat $CG/cpu.uclamp.min 2>/dev/null), thermal controller ${THERMAL:-none})"
-  LIFTED=0 FIGHTS=0 i=0 seen=0 why= PIDS= KNOWN=
+  log "$APP: boost (policies $(echo $BOOSTED | tr '\n' ' '), prime cpu$PRIME, rest mask ${REST_MASK:-none}, uclamp.min $(cat $CG/cpu.uclamp.min 2>/dev/null), thermal controller ${THERMAL:-none}$([ -n "$THERMAL" ] && [ "$BOOST_MIN_ALL" != 1 ] && echo ": min held on $TOP only"), holder on mask ${LITTLE_MASK:-?})"
+  LIFTED=0 FIGHTS=0 RESETS=0 i=0 seen=0 why= PIDS= KNOWN=
   while :; do
     now=$(date +%s); at=$(stat -c %Y "$LEASE" 2>/dev/null || echo 0)
     [ $((now - at)) -gt $LEASE_S ] && { why="the app's lease is $((now - at)) s old (the game left the front, or the app died)"; break; }
@@ -233,13 +258,16 @@ hold() {
         done; done
         # The frame loop: the thread that used the most cpu since the last look; on the prime core (the one before back
         # on the rest) - moved only when the pinned one used under half of it, so two busy threads don't swap each time.
-        hot=$(awk 'NR == FNR { a[$1] = $3; next } { d = $3 - (($1 in a) ? a[$1] : $3); if (d > b) { b = d; t = $1 } } END { print t, b + 0 }' \
+        # Both deltas over the same 5 s (the pinned one's too: it was compared by its lifetime total, which kept the
+        # first pick - e.g. a loading thread at launch - on the prime core for good).
+        { read -r old < "$S/main"; } 2>/dev/null || old=
+        hot=$(awk -v o="$old" 'NR == FNR { a[$1] = $3; next } { d = $3 - (($1 in a) ? a[$1] : $3); if ($1 == o) od = d; if (d > b) { b = d; t = $1 } } END { print t, b + 0, od + 0 }' \
           "$S/ticks" "$S/ticks.new" 2>/dev/null)
         [ -f "$S/ticks" ] || hot=
         mv -f "$S/ticks.new" "$S/ticks"
-        set -- $hot; ht=$1 hd=${2:-0}; old=$(cat "$S/main" 2>/dev/null)
+        set -- $hot; ht=$1 hd=${2:-0} od=${3:-0}
+        placed
         if [ -n "$ht" ] && [ "$hd" -gt 0 ] && [ "$ht" != "$old" ]; then
-          od=$(awk -v t="$old" '$1 == t { print $3 }' "$S/ticks"); od=${od:-0}
           if [ -z "$old" ] || [ ! -d /proc/$old ] || [ $((od * 2)) -lt "$hd" ] 2>/dev/null; then
             [ -n "$old" ] && [ -n "$REST_MASK" ] && taskset -p $REST_MASK $old > /dev/null 2>&1
             taskset -p $PRIME_MASK $ht > /dev/null 2>&1 && echo $ht > "$S/main"
@@ -250,7 +278,7 @@ hold() {
     fi
     i=$((i + 1)); sleep 1
   done
-  log "$APP: restore - $why (HAL fights: $FIGHTS)"
+  log "$APP: restore - $why (HAL fights: $FIGHTS, placement resets: $RESETS)"
   restore_all
 }
 
@@ -276,7 +304,10 @@ case "$1" in
     restore_all; echo restored ;;
   status)
     h=$(cat "$S/holder.pid" 2>/dev/null)
-    alive "$h" && echo "holder $h app $(cat "$S/app" 2>/dev/null) main $(cat "$S/main" 2>/dev/null) threads $({ wc -l < "$S/tids"; } 2>/dev/null)" || echo "holder none"
+    m=$(cat "$S/main" 2>/dev/null)
+    alive "$h" && echo "holder $h app $(cat "$S/app" 2>/dev/null) main $m threads $({ wc -l < "$S/tids"; } 2>/dev/null)" || echo "holder none"
+    # Where the main thread may run and last ran (stat field 39): the placement check (prime = the highest policy's last cpu).
+    [ -n "$m" ] && [ -d /proc/$m ] && echo "main $m allowed $(allowed $m) last cpu $(s=$(cat /proc/$m/stat); set -- ${s##*) }; echo ${37})"
     for p in $P/policy*; do echo "policy ${p##*/} min $(cat $p/scaling_min_freq) max $(cat $p/scaling_max_freq) hw $(cat $p/cpuinfo_max_freq) cur $(cat $p/scaling_cur_freq)"; done
     [ -s "$S/thermal" ] && echo "thermal $(cat "$S/thermal")"
     echo "vendor_game $($SETTINGS get global $VENDOR_GAME_KEY 2>/dev/null) since $(cat "$S/vendor_game" 2>/dev/null || echo -)"

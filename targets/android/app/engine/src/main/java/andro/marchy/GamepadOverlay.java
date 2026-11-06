@@ -1038,6 +1038,7 @@ public final class GamepadOverlay extends View {
                 break;
             }
             case MotionEvent.ACTION_MOVE:
+                follows = false;
                 for (int i = 0; i < e.getPointerCount(); i++) {
                     int id = e.getPointerId(i);
                     if (slide.tracks(id)) {
@@ -1047,7 +1048,10 @@ public final class GamepadOverlay extends View {
                         continue;
                     }
                     Module m = owner.get(id);
-                    if (m != null) changed |= m.move(e.getPointerId(i), e.getX(i), e.getY(i), state);
+                    if (m != null) {
+                        changed |= m.move(e.getPointerId(i), e.getX(i), e.getY(i), state);
+                        follows |= m instanceof StickModule;
+                    }
                 }
                 break;
             case MotionEvent.ACTION_UP:
@@ -1072,9 +1076,23 @@ public final class GamepadOverlay extends View {
         // A button pressed by this event (tapped or slid onto) buzzes once, however many it pressed.
         if (slidePressed) performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
         slidePressed = false;
-        // Always redraw: a dynamic stick appears (and follows the thumb) before its output leaves the deadzone.
-        invalidate();
+        if (redraws(action, changed, follows)) invalidate();
         return true;
+    }
+
+    /** A stick owned a pointer of the last ACTION_MOVE (its knob follows the thumb). */
+    private boolean follows;
+
+    /**
+     * Whether a play touch redraws the overlay: every down/up (a dynamic stick appears under the thumb before its output
+     * leaves the deadzone, a pressed look comes or goes), and a move only when it changed the pad's state or moved a
+     * stick's knob. A finger held on a button or the d-pad reports ~120+ moves a second (unbuffered dispatch) that
+     * change nothing on screen; redrawing the whole overlay for each kept com.powos.app's main thread + RenderThread
+     * busy under a full-screen game (11-06 live Broforce play: main 11.4 %, RenderThread 5 %; docs/research/broforce-fps.md
+     * "Heat"). Mouse regions redraw from their own down/up/hold callbacks.
+     */
+    public static boolean redraws(int action, boolean changed, boolean stickMoved) {
+        return action != MotionEvent.ACTION_MOVE || changed || stickMoved;
     }
 
     /** Smart guides (editor): the module being dragged snaps to these; drawn while they hold. */

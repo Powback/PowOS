@@ -37,6 +37,15 @@ PATH="$T/bin:$PATH" DISPLAY=:9 POWOS_UNITY_SCREEN=fullscreen sh "$US" "$T/game" 
 PATH="$T/bin:$PATH" DISPLAY=:9 FAKE_SIZE="" sh "$US" "$T/game" -a > "$T/out" 2>/dev/null
 [ "$(args)" = "-a" ] && ok "no size: starts unchanged" || bad "no-size args" "$(args)"
 
+# The Steam overlay: dropped from the game's LD_PRELOAD (the rest kept) unless POWOS_STEAM_OVERLAY=1.
+printf '#!/bin/sh\necho "$LD_PRELOAD|${ENABLE_VK_LAYER_VALVE_steam_overlay_1:-}"\n' > "$T/env"; chmod +x "$T/env"
+OV="/home/u/.steam/ubuntu12_32/gameoverlayrenderer.so:/home/u/.steam/ubuntu12_64/gameoverlayrenderer.so"
+env -u DISPLAY LD_PRELOAD="/x/libfoo.so:$OV" ENABLE_VK_LAYER_VALVE_steam_overlay_1=1 sh "$US" "$T/env" > "$T/out" 2> "$T/err"
+[ "$(cat "$T/out")" = "/x/libfoo.so|" ] && ok "overlay dropped from LD_PRELOAD, its Vulkan layer off" || bad "overlay strip" "$(cat "$T/out")"
+grep -q "Steam overlay off" "$T/err" && ok "says the overlay is off" || bad "overlay stderr" "$(cat "$T/err")"
+env -u DISPLAY LD_PRELOAD="$OV" POWOS_STEAM_OVERLAY=1 ENABLE_VK_LAYER_VALVE_steam_overlay_1=1 sh "$US" "$T/env" > "$T/out" 2>/dev/null
+[ "$(cat "$T/out")" = "$OV|1" ] && ok "POWOS_STEAM_OVERLAY=1 keeps it" || bad "overlay kept" "$(cat "$T/out")"
+
 env -u DISPLAY PATH="$T/bin:$PATH" sh "$US" "$T/game" -a > "$T/out" 2>/dev/null
 [ "$(args)" = "-a" ] && ok "no DISPLAY: starts unchanged" || bad "no-display args" "$(args)"
 

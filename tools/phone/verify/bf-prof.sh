@@ -7,7 +7,8 @@
 #   temp <zone> <max C>                                   the 4 hottest thermal zones
 #   skin <start C> <end C>                                skin-msm-therm, first and last sample (games-120: thermals
 #                                                          beside every fps number)
-#   cgroup <pid> <comm> <cpuset line> allowed=<cpus>      for each process with a thread above 20%
+#   cgroup <pid> <comm> <cpuset line> <cpu line> allowed=<cpus>   for each process with a thread above 20%
+#   boost <game-boost.sh status line>                    holder / main thread placement / thermal owner / uclamp
 # A cap below hw = someone (thermal, the vendor's performance HAL) limits that cluster while the game runs.
 s=${1:-30} out=${2:-/data/local/tmp/bfprof}; mkdir -p "$out"; f=$out/prof.txt; : > "$f"
 snap() { for t in /proc/[0-9]*/task/[0-9]*; do read -r l < "$t/stat" 2>/dev/null && echo "${t#/proc/} $l"; done 2>/dev/null; }
@@ -38,6 +39,10 @@ awk -v mx="$(( $(cat $K/max_gpuclk) / 1000000 ))" '$1 == "G" { n++; b += $2; c +
 awk '$1 == "T" { if ($3 > m[$2]) m[$2] = $3 } END { for (z in m) printf "temp %s %.1f\n", z, m[z] / 1000 }' "$out/samples" | sort -k3 -rn | head -4 >> "$f"
 awk '$1 == "T" && $2 == "skin-msm-therm" { if (!n++) a = $3; b = $3 } END { if (n) printf "skin %.1f %.1f\n", a / 1000, b / 1000 }' "$out/samples" >> "$f"
 for p in $(awk '$1 == "thread" && $2 > 20 {print $3}' "$f" | sort -u); do
-  echo "cgroup $p $(cat /proc/$p/comm 2>/dev/null) $(grep -m1 ':cpuset:' /proc/$p/cgroup 2>/dev/null) allowed=$(awk '/Cpus_allowed_list/ {print $2}' /proc/$p/status 2>/dev/null)"
+  echo "cgroup $p $(cat /proc/$p/comm 2>/dev/null) $(grep -m1 ':cpuset:' /proc/$p/cgroup 2>/dev/null) $(grep -m1 ':cpu:' /proc/$p/cgroup 2>/dev/null) allowed=$(awk '/Cpus_allowed_list/ {print $2}' /proc/$p/status 2>/dev/null)"
 done >> "$f"
+# The game boost's view (game-boost.sh status: holder, main thread, its allowed cpus and last cpu): placement beside
+# the per-thread cpu column (11-06 14:25: main on cpu4 with Cpus_allowed 0-7 and no holder state captured).
+gb=$(ls /data/data/com.powos.app/files/game-boost.sh /data/user/0/com.powos.app/files/game-boost.sh 2>/dev/null | head -n 1)
+[ -n "$gb" ] && sh "$gb" status 2>/dev/null | grep -E '^(holder|main|thermal|uclamp)' | sed 's/^/boost /' >> "$f"
 rm -f "$out/s1" "$out/s2"; : > "$out/done"; chmod -R 755 "$out"

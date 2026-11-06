@@ -277,6 +277,31 @@ Queue after the merge: `queue.sh add --screen inner broforce-fps-low-cpu-bound-u
 (and `bf-pacing.sh base` for the menu next to it). Pass for a change = its `layers play:` line + `prof play:` clocks/caps
 and skin, 0 dashes (bf-checker), against the same scene before.
 
+## Heat: placement and our own load in real play (2026-11-06, agent play-heat)
+
+Live capture 11-06 14:25 of the user's play (`bf-prof`, 30 s): game **29.6 fps**, skin 43.6 C, caps policy0 1017/2016,
+policy3 1401/2803, policy7 1363/3187 (horae's gear on category_4, as above), GPU 57 % busy at 370 of 475 MHz
+(thermal_pwrlevel 3), panel 60 Hz. The main thread `Broforce_beta.e` 75 % **on cpu4 (gold), Cpus_allowed 0-7** - at
+13:20 it was on cpu7. Then UnityGfxDeviceW 26, surfaceflinger 14, com.powos.app main 11.4 + RenderThread 5,
+an `sh` 10.5 (on cpu7), kwin 9.9, CSteamController 8.7, powos-padd 7.5, wineserver 6.9, InputDispatcher 6.6 %.
+Heat is the limit (the gear follows skin temperature), so each item below is less heat or better placement; nothing
+of thermal-engine, horae's caps, vendor limits or SELinux is touched.
+
+| item | cause found | change |
+|---|---|---|
+| main thread on a gold core, mask 0-7 | (a) game-boost.sh pinned it once and never looked again; the kernel rewrites a thread's mask when its cpuset's cpus change (a cpu paused/brought back, the cpuset rewritten), and 0-7 = the root cpuset's own mask, i.e. reset, not ours (adopt gives every game thread 3-6). (b) The hot-thread pick compared the new candidate's 5 s delta with the pinned thread's **lifetime total** (`od` from the cumulative ticks file), so the first pick - at launch, a loading thread - kept cpu7 for good | holder checks the main thread's `Cpus_allowed_list` every 5 s with a builtin read; on a reset it logs `main thread N on cpus X (its mask was reset)`, re-pins it to the prime core and re-masks every known thread off it (forks only on a reset; the restore line counts `placement resets`). Both deltas over the same 5 s. `status` prints `main <tid> allowed <cpus> last cpu <n>`, and bf-prof.sh now records that (`boost ...` lines) plus the cpu cgroup, so the next capture shows placement directly |
+| `sh` 10.5 % on cpu7 | the boost holder (13:43 cut to builtins) or the capture's samplers - unpinned either way | the holder pins itself to the little cluster (lowest policy) at start: its loop never shares the prime/gold cores with the game |
+| gold cluster held at its capped top clock | under horae the boost raised every big policy's min to horae's cap: cpu3-6 (render/dxvk/workers, none pegged) idled at the top voltage | under a thermal controller only the main thread's policy (prime) holds its min up; the rest clock on demand (their uclamp.min 75 asks schedutil when they run). `BOOST_MIN_ALL=1` = the old behaviour, for the A/B |
+| powos-padd 7.5 % + CSteamController 8.7 % | already select()-driven, but it repeated the last state at **250 Hz for a second after any change** - with the overlay's sticks/d-pad in use that is always, so 250 identical Deck reports a second, each one read and processed by Steam Input. The Deck gyro/accel fields are always 0 (the overlay's gyro module drives the mouse/right stick, not the Deck motion fields) | every change still goes out at once (`apply`); the timer is a 30 Hz keepalive, 250 Hz only while the Deck motion fields are live (`period`). Test `test/tier1/test-powos-padd-rate.py`. Expect padd ~1 % and CSteamController down with it |
+| com.powos.app main 11.4 % + RenderThread 5 % | not sampled (phone offline for this run; home's page is already paused under a full-screen game, GQ1). With unbuffered touch dispatch every touch sample reaches the overlay, and `onPlayTouch` invalidated the whole pad view on **every** event - a finger held on a button or the d-pad (Broforce's controls) moves ~120+/s without changing anything on screen. InputDispatcher 6.6 % is the same stream on the system side | `GamepadOverlay.redraws`: down/up always redraw, a move only when it changed the pad's state or moved a stick's knob (mouse regions redraw from their own callbacks). Test `GamepadOverlayRedrawTest`. Still to confirm with a stack sample (`simpleperf record -p <app pid> -t <main tid>` during play) that this was the 11 % |
+| Steam overlay | its webhelper popup renders ~35-40 % of a core and draws nothing in the game | `unity-screen` (Broforce's launch option) drops gameoverlayrenderer from the game's LD_PRELOAD and unsets its Vulkan layer; `POWOS_STEAM_OVERLAY=1` keeps it. Per game; Steam's global settings (the FPS corner) untouched. Takes effect after `unity-screen --install 274190` re-copies the wrapper (Steam closed). Whether Steam still opens the popup without the renderer injected is the A/B's question |
+
+**Not measured yet** (phone offline over WireGuard from 14:40 for this whole run, so no before/after on device). Queue
+after the ship, same scene each: `bf-pacing.sh play` with (1) this build, then (2) `POWOS_STEAM_OVERLAY=1` in the
+launch for the overlay A/B and (3) `BOOST_MIN_ALL=1` for the gold-min A/B; report per run the `layers play:` fps, the
+`prof play:` caps/clocks, skin start/end, `boost main ... allowed 7 last cpu 7`, padd/CSteamController/com.powos.app
+%, and 0 dashes. Pass: main thread on cpu7 for the whole run, padd < 2 %, and a lower skin slope at the same fps.
+
 ## How to re-measure
 
 `tools/phone/adb.sh shell "su -c 'sh -s'" < design-qa/bf-fps-20261103/sample.sh` (30 s, read-only; divide the

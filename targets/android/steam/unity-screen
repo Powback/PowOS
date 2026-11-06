@@ -83,6 +83,23 @@ PY
   exit 0
 fi
 
+# The Steam overlay off for this game (per game: only the games with this launch option; Steam's own settings, the
+# FPS corner included, stay as the user set them; POWOS_STEAM_OVERLAY=1 keeps it). Steam injects it into the game with
+# LD_PRELOAD (gameoverlayrenderer.so, plus its Vulkan layer for DXVK); on the phone it draws nothing in the game (an
+# x11grab in a level, 11-06 13:37, had no FPS corner), yet Steam's webhelper rendered its popup at ~35-40 % of a core
+# next to the game - heat, which is what moves OxygenOS' thermal gear (docs/research/broforce-fps.md "Heat").
+if [ "${POWOS_STEAM_OVERLAY:-0}" != 1 ]; then
+  case ${LD_PRELOAD:-} in
+    *gameoverlayrenderer*)
+      keep=; oifs=$IFS; IFS=': '
+      for l in $LD_PRELOAD; do case $l in *gameoverlayrenderer*) ;; *) keep=${keep:+$keep:}$l ;; esac; done
+      IFS=$oifs
+      if [ -n "$keep" ]; then export LD_PRELOAD="$keep"; else unset LD_PRELOAD; fi
+      unset ENABLE_VK_LAYER_VALVE_steam_overlay_1
+      echo "unity-screen: Steam overlay off for this game (gameoverlayrenderer dropped from LD_PRELOAD)" >&2 ;;
+    *) echo "unity-screen: no Steam overlay in LD_PRELOAD" >&2 ;;
+  esac
+fi
 py=$(command -v python3 || command -v python3.13)
 # The size: Xwayland root's _POWOS_SCREEN_SIZE (kwin 0051: the Android screen the game's full-screen task gets, in its
 # orientation now) - the root itself is KWin's output, which follows the desktop consumer (home below the status bar
