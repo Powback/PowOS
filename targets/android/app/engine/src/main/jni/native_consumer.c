@@ -123,6 +123,11 @@ struct consumer_state {
      * property debug.powos.direct_scanout is 1 at connect: direct_on false = this file behaves exactly as without it. */
     bool direct_on;
     struct direct_state *direct;
+    /* PowOS: after a one-buffer refusal (direct_present -3) direct frames stop (caps 0) and are offered again at
+     * direct_retry_ms (0: no retry due), each refusal in a row doubling direct_backoff_ms (1 s .. 4 s): a buffer that
+     * stays unshowable costs one repeated frame per backoff, never the whole run. */
+    int64_t direct_retry_ms;
+    int direct_backoff_ms;
 
     // Latest display refresh rate (milli-Hz) reported from Java. Read on
     // (re)connect to seed the producer; updated live by nativeSetRefreshRate.
@@ -888,6 +893,7 @@ static int do_connect(struct consumer_state *s)
         audio_set_ctx(s->ctx);   /* audio fd is now live; threads pick it up via get_audio_fd */
 
     s->direct_on = !s->primary && direct_flag();
+    s->direct_retry_ms = 0;   /* this connection's offer (on_exit_fallback) is the retry */
     if (s->direct_on) {
         if (!s->direct) {
             s->direct = direct_new();
@@ -1186,17 +1192,35 @@ static void *render_thread_func(void *arg)
             if (rfence >= 0)
                 close(rfence);
             if (take_direct_frame(s->ctx, &df, &dfence, &dbuf) == 1) {
-                int r = (s->direct_on && s->direct) ? direct_present(s->direct, s->window, &df, dfence, dbuf) : -2;
-                if (r == -2 && !s->direct_on) {
+                if (!s->direct_on || !s->direct) {
+                    /* Sent before our caps 0 reached the producer: dropped, the composited frames follow. */
                     if (dfence >= 0) close(dfence);
                     if (dbuf >= 0) close(dbuf);
+                    note_undrawn(s, "a direct frame after the refusal");
+                    continue;
                 }
+                int r = direct_present(s->direct, s->window, &df, dfence, dbuf);
                 if (r == -2) {
                     LOGE("surface %u: direct scanout refused, composited from now on", s->surface_id);
                     s->direct_on = false;
+                    s->direct_retry_ms = 0;
                     send_direct_caps(s, 0);
                     note_undrawn(s, "direct frame refused");
+                } else if (r == -3) {
+                    /* One buffer gralloc won't take - not the path (direct_scanout.h). Composited for a while, then
+                     * offered again: the producer forgets every id on caps 0, this side too on the re-offer. */
+                    s->direct_backoff_ms = s->direct_backoff_ms ? s->direct_backoff_ms * 2 : 1000;
+                    if (s->direct_backoff_ms > 4000)
+                        s->direct_backoff_ms = 4000;
+                    s->direct_retry_ms = now_ms() + s->direct_backoff_ms;
+                    LOGE("surface %u: direct buffer refused, composited for %d ms, then offered again", s->surface_id,
+                         s->direct_backoff_ms);
+                    s->direct_on = false;
+                    send_direct_caps(s, 0);
+                    note_undrawn(s, "direct buffer refused");
                 } else {
+                    if (r == 0)
+                        s->direct_backoff_ms = 0;   /* shown: the next refusal starts the backoff afresh */
                     count_present(s, r == 0);
                 }
             }
@@ -1250,6 +1274,15 @@ static void *render_thread_func(void *arg)
         s->pace_dequeue_from = now_ms();
         if (s->direct)
             direct_hide(s->direct);   /* a composited frame: the window's own buffer shows again */
+        if (s->direct_retry_ms && s->direct && now_ms() >= s->direct_retry_ms) {
+            /* The backoff after a one-buffer refusal is over: offer direct frames again (a live connection - a frame
+             * just came - so the event isn't dropped as in fallback). */
+            s->direct_retry_ms = 0;
+            s->direct_on = true;
+            direct_reset(s->direct);
+            send_direct_caps(s, DIRECT_CAP_XR24_LINEAR);
+            LOGI("surface %u: direct scanout offered again", s->surface_id);
+        }
 
         /* Follow the transform hint (rotation, fold to the other screen): buffers for the new one. A queue is when
          * the window learns a new hint, so look right after it. */

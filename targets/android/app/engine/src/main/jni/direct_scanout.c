@@ -217,9 +217,9 @@ int direct_present(struct direct_state *d, ANativeWindow *win, const struct dire
         /* HACK: an implicit modifier (INVALID) is taken as linear - the kwin 0057 probe saw turnip's WSI images linear
          * with it. Real fix: KWin sends the explicit modifier (linux-dmabuf v4 feedback) and anything else composites. */
         (f->modifier != MOD_LINEAR && f->modifier != MOD_INVALID)) {
-        LOGE("direct: layout fourcc %08x offset %u modifier %llx - refused", f->fourcc, f->offset,
-             (unsigned long long)f->modifier);
-        d->dead = true; rc = -2;
+        LOGE("direct: id %u layout fourcc %08x offset %u modifier %llx - this buffer refused", f->id, f->fourcc,
+             f->offset, (unsigned long long)f->modifier);
+        rc = -3;   /* this buffer's layout, not the path: the client's next buffers may be fine */
         goto out;
     }
     struct slot *s = slot_of(d, f->id);
@@ -229,9 +229,18 @@ int direct_present(struct direct_state *d, ANativeWindow *win, const struct dire
             if (!d->slots[i].used) s = &d->slots[i];
         if (!s) { LOGE("direct: more than %d client buffers - refused", MAX_IDS); d->dead = true; rc = -2; goto out; }
         AHardwareBuffer *b = wrap(f, dmabuf);
-        if (!b || (!d->tested && !self_test(b, dmabuf, f))) {
-            if (b) AHardwareBuffer_release(b);
-            d->dead = true; rc = -2;
+        if (!b) {
+            /* One buffer gralloc won't take (pitch, or createFromHandle 3 = BAD_VALUE: Xwayland's own AR24 linear
+             * window pixmap that a game task shows before its first Present flip, 11-06 - the turnip XR24 flips right
+             * after wrap fine). Not the path: refusing it for good kept Broforce composited all run (1 frame direct). */
+            LOGE("direct: id %u (%ux%u fourcc %08x modifier %llx pitch %u) - this buffer refused", f->id, f->width,
+                 f->height, f->fourcc, (unsigned long long)f->modifier, f->pitch);
+            rc = -3;
+            goto out;
+        }
+        if (!d->tested && !self_test(b, dmabuf, f)) {
+            AHardwareBuffer_release(b);
+            d->dead = true; rc = -2;   /* gralloc's view of a dma-buf is wrong: the path itself, for good */
             goto out;
         }
         d->tested = true;
