@@ -104,6 +104,8 @@ class ShellHost(
 
     init {
         native.windowFrame = bridge::webWindowFrame
+        // The control centre's controller overlay, as the user left it before this process (ControllerPad.restore).
+        if (mode == null && activity != null) ControllerPad.restore(activity)
         ShellIcons.init(context.applicationContext, runtime)
         overrides.mkdirs()
         // The page's native objects, to its own top frame only (ShellOrigin: no iframe, no other origin).
