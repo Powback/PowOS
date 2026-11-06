@@ -227,6 +227,31 @@ run)
   # units_publish: the phone's units to the PowOS AI page after a ship to it (in the background, one adb call; the
   # rooted deploy publishes itself). tools/units/publish.sh; a failure is in its log, the page then shows "stale".
   units_publish() { ( tools/units/publish.sh phone > /dev/null 2>&1 & ) ; }
+  # phone_offline: the phone is off the VPN (adb.sh --vpn-state rc 69: its WireGuard handshake is stale). That is NOT a
+  # fault of the tip: a step that needs the phone (shell push, module first, APK, rooted deploy) keeps its request
+  # pending and runs again once the phone is back, never "held until a new origin commit" (11-06: two APK fixes and a
+  # rooted deploy sat 2 h after the phone came back, 14:39 / 15:02 "module first ((unreadable)) failed rc 11" and
+  # "rooted deploy FAILED rc 69 ... handshake is 1913s old"). Once offline it is re-checked only every
+  # SHIP_OFFLINE_POLL_S (60) s ($Q/phone-offline: the epoch of the last check); back online is logged once.
+  # SHIP_PHONE_STATE replaces the check (tests). Unknown (no wireguard container) = online, as adb.sh treats it.
+  phone_offline() { local at now src=0
+    now=$(date +%s)
+    if { read -r at < "$Q/phone-offline"; } 2>/dev/null && [ -n "$at" ] && [ $(( now - at )) -lt "${SHIP_OFFLINE_POLL_S:-60}" ]; then return 0; fi
+    ${SHIP_PHONE_STATE:-tools/phone/adb.sh --vpn-state} >/dev/null 2>&1 || src=$?
+    if [ $src = 69 ]; then
+      [ -e "$Q/phone-offline" ] || echo "$(date +%T) the phone is offline (no WireGuard link) - what needs it waits, checked every ${SHIP_OFFLINE_POLL_S:-60} s"
+      echo "$now" > "$Q/phone-offline"; return 0; fi
+    [ -e "$Q/phone-offline" ] && { rm -f "$Q/phone-offline" "$Q/offline-wait"; echo "$(date +%T) the phone is back online - what waited for it runs now"; }
+    return 1; }
+  # link_down FILE: FILE (a step's stderr/log) says adb.sh found the phone off the VPN ("phone offline", rc 69) - the
+  # same as phone_offline, remembered so the next try waits SHIP_OFFLINE_POLL_S. Not "phone unavailable after
+  # reconnect" (VPN up, adb flaked): that stays a link fault with its capped retries (apk_link_fault).
+  link_down() { grep -q 'adb\.sh: phone offline' "$1" 2>/dev/null || return 1
+    [ -e "$Q/phone-offline" ] || echo "$(date +%T) the phone is offline (adb.sh) - what needs it waits, checked every ${SHIP_OFFLINE_POLL_S:-60} s"
+    date +%s > "$Q/phone-offline"; }
+  # offline_wait WHAT: logged once per tip and step - the step's requests stay pending, nothing is marked failed.
+  offline_wait() { ! grep -qxF "$T $1" "$Q/offline-wait" 2>/dev/null || return 0; echo "$T $1" >> "$Q/offline-wait"
+    echo "$(date +%T) ${T:0:9}: $1 waits for the phone (offline) - kept pending, it goes once the phone is back"; }
   # rooted_due: rooted_inputs changed since the last rooted deploy ($Q/rooted-live) up to this checkout's HEAD, and
   # the deploy didn't fail on HEAD. Sets rbase/rchg; keeps $Q/rooted-pending ("BASE TIP", for status) in step.
   # It keeps the runner up until the deploy ran (2026-10-30: a tip with APK + rooted inputs installed its APK, which
@@ -501,10 +526,14 @@ run)
     printf '%s\n' $h $dv | sed '/^$/d' | sort -u; }
   first_done() { grep -qx "$T $1" "$Q/apps-first" 2>/dev/null; }
   # modules_first WHAT ("shell"/"APK") [lock]: 0 = nothing needed or all published; 1 = held (logged + mailed); 2 = the
-  # phone is busy, try again (lock: take the ship lock for the publish - the shell step holds the phone already).
+  # phone is busy or offline (phone_offline), try again (lock: take the ship lock for the publish - the shell step holds the phone already).
   modules_first() {
     local need a mlog mrc=0 left mn lk= mm
-    if ! need=$(modules_needed 2>"$Q/modules-first.err"); then mrc=11; need="(unreadable)"
+    if phone_offline; then offline_wait "$1"; return 2; fi
+    if ! need=$(modules_needed 2>"$Q/modules-first.err"); then
+      # The schemas couldn't be read because the phone dropped off (not a bindings fault): try again, never held.
+      if link_down "$Q/modules-first.err" || phone_offline; then offline_wait "$1"; return 2; fi
+      mrc=11; need="(unreadable)"
     else need=$(for a in $need; do first_done "$a" || echo "$a"; done | paste -sd' ' -); [ -n "$need" ] || return 0; fi
     if [ $mrc = 0 ] && [ "${2:-}" = lock ]; then
       if verify_held; then echo $$ > "$Q/wants-phone"; return 2; fi
@@ -521,12 +550,14 @@ run)
       done
       # The device again: nothing these bindings need may be missing now.
       if [ $mrc = 0 ]; then
-        if ! left=$(device_needs 2>>"$mlog"); then mrc=11
+        if ! left=$(device_needs 2>>"$mlog"); then mrc=11; link_down "$mlog" && mrc=12
         else left=$(echo "$left" | paste -sd' ' -); [ -z "$left" ] || { mrc=10; echo "modules-first: the phone still lacks what the bindings need for $left" >> "$mlog"; }; fi
       fi
     fi
     [ -z "$lk" ] || { rm -rf "$SL"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"; }
     if [ $mrc = 0 ]; then echo "$(date '+%F %T') ${T:0:9} apps-first ($need) for $who_s: before the $1" >> "$Q/shipped.log"; return 0; fi
+    # Published, then the phone dropped off before the re-check: what went out is recorded (apps-first), the rest waits.
+    if [ $mrc = 12 ]; then offline_wait "$1"; return 2; fi
     # The phone WAS read and the bindings wouldn't decode its modules in a way no publish fixes (another shape, or bindings
     # ahead of a module this commit doesn't build): not "can't be checked" - the tip is REFUSED, as schema_gate refuses it.
     mm=$( [ $mrc = 11 ] && grep -E '^ *bindings:.*(fix|isn)' "$Q/modules-first.err" 2>/dev/null | sed 's/^ *//' | head -2 | cut -c1-240 | paste -sd' ' - || true)
@@ -607,6 +638,9 @@ run)
       # unavailable" / "error: closed" / an empty adb install failure; each held every request until an unrelated push,
       # 293 min in 2 days). Nothing new is on the phone (ship-apk restored the overrides), so the same tip goes again, up
       # to SHIP_APK_LINK_RETRIES (default 2) times; a code fault (build, shell doesn't load, guard) still fails at once.
+      # The phone went OFFLINE (no VPN link): not this tip either, and no retry is spent - the APK step waits for the
+      # phone (phone_offline) and launches it again once it's back.
+      elif link_down "$alog" || phone_offline; then echo "$(date +%T) ${A:0:9}: APK ship rc $arc while the phone is offline (log $alog) - it goes again once it's back"
       elif apk_link_fault "$alog" && lr=$(apk_link_retry "$A") && [ "$lr" -le "${SHIP_APK_LINK_RETRIES:-2}" ]; then
         echo "$(date +%T) ${A:0:9}: APK ship rc $arc: the phone link dropped (log $alog) - it goes again ($lr/${SHIP_APK_LINK_RETRIES:-2})"
       else
@@ -751,6 +785,7 @@ run)
         # Held: ask the verify queue to yield before its next check (queue.sh reads wants-phone, as for ship-apk) - it
         # touches its lock every heartbeat, so waiting for the lock alone held every ship for a whole window (15:07-15:41,
         # 2026-10-23). Cleared below once the phone is ours and done.
+        if phone_offline; then offline_wait shell; sleep "$POLL"; continue; fi
         if verify_held; then echo $$ > "$Q/wants-phone"; echo "$(date +%T) verify lock held ($(cat "$VL/who" 2>/dev/null)) - asked it to yield, waiting"; sleep "$POLL"; continue; fi
         if apk_alive && mkdir "$SL/phone" 2>/dev/null; then held="$SL/phone"
         elif ! apk_alive && ship_lock; then held=$SL
@@ -771,8 +806,10 @@ run)
         fi
         # MODULE FIRST (modules_first above, 11-01 f391): every module these bindings need is published on the phone
         # before this push; a failed publish holds the shell (logged + mailed there).
-        if ! modules_first shell; then
+        mfs=0; modules_first shell || mfs=$?
+        if [ $mfs != 0 ]; then
           rm -rf "$held"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"
+          [ $mfs = 2 ] && { sleep "$POLL"; continue; }   # offline: kept pending, tried again (phone_offline)
           echo "$T" > "$Q/failed"; continue
         fi
         # Schema changes ship atomically (2026-10-30, powos-agents work.try_line): a vendored app's module change in
@@ -827,6 +864,7 @@ run)
         else
           git -C "$REPO" fetch -q origin "$BASE" 2>/dev/null
           if [ "$(git rev-parse "origin/$BASE")" != "$T" ]; then echo "$(date +%T) ${T:0:9}: shell ship ended rc $rc while origin moved on - shipping the new tip"; continue; fi
+          if link_down "$log" || phone_offline; then offline_wait shell; continue; fi
           echo "$T" > "$Q/failed"
           echo "$(date +%T) ${T:0:9}: shell ship FAILED rc $rc (log $log) - waiting for a new origin commit"
           mail "ship ${T:0:9} (shell) FAILED rc $rc for $who_s: $(grep -E 'REFUSED|refused|FAIL|error' "$log" | tail -1 | cut -c1-200) - log $log on the Mac; fix it on origin, then ship.sh request again"
@@ -846,7 +884,7 @@ run)
         why="no record of the installed build"; [ -n "$inst" ] && why="APK inputs changed: $(apk_inputs "$inst" "$T" | head -3 | paste -sd' ' -)"
         # MODULE FIRST for the shell this APK's install brings (11-01 c615e0f6: the shell held for its APK went live
         # with the install while the agents module waited for the apps step, which never ran): under the ship lock.
-        mfa=0; modules_first APK lock || mfa=$?
+        mfa=0; modules_first APK lock || mfa=$?   # rc 2 (busy / offline): the APK stays pending, tried next pass
         if [ $mfa = 1 ]; then echo "$T" > "$Q/failed-apk"
         elif [ $mfa = 0 ]; then
         echo "$(date +%T) ship ${T:0:9} as an APK ($why) for $who_s - beside the loop"
@@ -914,7 +952,8 @@ run)
         [ -z "$rn" ] || printf 'who: %s\n%s\n' "$who_s" "$rn" > "$Q/rooted-note"
       else rchg=; fi
       if [ -n "$rchg" ] && ! apk_out && ! rooted_after_apk && [ "$age" -ge "$QS" ]; then
-        if verify_held; then echo $$ > "$Q/wants-phone"
+        if phone_offline; then offline_wait "rooted deploy"
+        elif verify_held; then echo $$ > "$Q/wants-phone"
         elif ship_lock; then
           echo $$ > "$Q/installing"
           [ -n "$rn" ] || rn=$(sed -n 2p "$Q/rooted-note" 2>/dev/null); rn=${rn:-"rooted update"}
@@ -931,6 +970,10 @@ run)
             echo "$T" > "$Q/rooted-live"; rm -f "$Q/failed-rooted" "$Q/rooted-pending" "$Q/rooted-note"
             echo "$(date '+%F %T') ${T:0:9} rooted ($rchg) for $who_s: $rn" >> "$Q/shipped.log"
             echo "$(date +%T) ${T:0:9}: rooted deploy done ($rchg)"
+          elif link_down "$rlog" || phone_offline || { [ $rrc = 69 ] && date +%s > "$Q/phone-offline"; }; then
+            # The phone dropped off (adb.sh rc 69, EX_UNAVAILABLE): its note and pending record stay, the deploy goes
+            # again once phone_offline says it's back (>= SHIP_OFFLINE_POLL_S later).
+            offline_wait "rooted deploy"
           else
             echo "$T" > "$Q/failed-rooted"; rm -f "$Q/rooted-pending" "$Q/rooted-note"
             echo "$(date +%T) ${T:0:9}: rooted deploy FAILED rc $rrc (log $rlog) - waiting for a new origin commit"

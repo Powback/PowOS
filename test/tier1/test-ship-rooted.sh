@@ -19,6 +19,8 @@ T=$(mktemp -d "${TMPDIR:-/tmp}/ship-rooted-test.XXXXXX")
 export HOME=$T/home LOG=$T/log GIT_CONFIG_GLOBAL=$T/gitconfig SHIP_DIR=$T/home/.cache/powos-ship-queue
 export SHIP_QUIET_S=3 SHIP_QUIET_SHELL_S=1 SHIP_POLL_S=1
 export SHIP_GATE_FIRST=1   # these tests cover the gate-then-push mode; deploy-first is the default
+# The phone's VPN link (ship.sh phone_offline): $HOME/phone-offline = adb.sh --vpn-state's rc 69 (handshake stale).
+export SHIP_PHONE_STATE=$T/bin/phone-state SHIP_OFFLINE_POLL_S=1
 unset POWOS_SHIP_SERVICE SHIP_AGENT
 Q=$SHIP_DIR
 stop_runner() { local p; p=$(cat "$Q/runner.lock/pid" 2>/dev/null) && kill "$p" 2>/dev/null; pkill -f "$T/" 2>/dev/null; }
@@ -26,6 +28,7 @@ trap 'stop_runner; rm -rf "$T"' EXIT
 mkdir -p "$HOME/.cache" "$T/bin"
 git config --global user.email t@t; git config --global user.name t; git config --global init.defaultBranch main
 printf '#!/bin/bash\nexit 0\n' > "$T/bin/adb"; chmod +x "$T/bin/adb"
+printf '#!/bin/bash\n[ -e "$HOME/phone-offline" ] && { echo vpn=offline; exit 69; }; echo vpn=up\n' > "$T/bin/phone-state"; chmod +x "$T/bin/phone-state"
 export PATH="$T/bin:$PATH"
 
 git init -q --bare "$T/origin.git"
@@ -43,6 +46,8 @@ git clone -q "$T/origin.git" "$T/seed" 2>/dev/null
   cat > targets/android/rooted/rooted.sh <<'ROOTED'
 #!/bin/bash
 echo "ROOTED $(git rev-parse HEAD) $*" >> "$LOG"
+# $HOME/deploy-offline: the phone drops off the VPN during the deploy - adb.sh's rc 69 (11-06 15:02).
+[ -e "$HOME/deploy-offline" ] && { echo "adb.sh: phone offline: its WireGuard handshake is 1913s old (> 180s) - not running adb" >&2; exit 69; }
 grep -q ROOTED_BROKEN targets/android/rooted/powos-run.sh 2>/dev/null && exit 1
 exit 0
 ROOTED
@@ -109,6 +114,19 @@ wait_for "[ \"\$(grep -c '^ROOTED' \"\$LOG\")\" = 1 ]" 10
 # and the runner has nothing queued and exits; a fresh request is what gives it a reason to look at the new tip.
 land targets/android/rooted/powos-run.sh "guard v4 fixed" "fix rooted change"; req --note "fix"
 drained && wait_for "[ \"\$(grep -c '^ROOTED' \"\$LOG\")\" = 2 ]" 20 && ok "the fix ships (one more rooted deploy)" || { bad "fix not shipped"; cat "$LOG" "$Q/runner.log"; }
+
+# 5. 11-06: the phone is offline - before the deploy (VPN stale) it isn't tried; during it (rc 69 "phone offline") it
+#    isn't marked failed or mailed. Either way the same tip deploys once the phone is back, no new commit.
+: > "$LOG"; touch "$HOME/phone-offline"
+land targets/android/rooted/powos-run.sh "guard v5" "rooted while offline"; req --note "offline"; to=$(tip)
+wait_for "grep -q '${to:0:9}: rooted deploy waits for the phone' \"\$Q/runner.log\"" 20
+grep -q "${to:0:9}: rooted deploy waits for the phone" "$Q/runner.log" && ! grep -q '^ROOTED' "$LOG" && ok "VPN offline: the rooted deploy waits" || { bad "rooted offline wait"; cat "$LOG"; tail -6 "$Q/runner.log"; }
+touch "$HOME/deploy-offline"; rm -f "$HOME/phone-offline"
+wait_for "grep -q '^ROOTED $to' \"\$LOG\"" 20; sleep 2
+[ "$(cat "$Q/failed-rooted" 2>/dev/null)" != "$to" ] && ! grep -q '^MAIL' "$LOG" && ! grep -q "${to:0:9}: rooted deploy FAILED" "$Q/runner.log" &&
+  ok "rc 69 mid-deploy: not failed, not mailed" || { bad "rc 69 marked failed"; cat "$LOG"; tail -6 "$Q/runner.log"; }
+rm -f "$HOME/deploy-offline"
+wait_for "[ \"\$(cat \"\$Q/rooted-live\" 2>/dev/null)\" = \"$to\" ]" 30 && ok "phone back: the same tip deploys" || { bad "rooted not retried"; cat "$LOG"; tail -8 "$Q/runner.log"; }
 
 for _ in $(seq 15); do [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 1; done
 echo "---"
