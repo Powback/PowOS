@@ -67,7 +67,7 @@ internal class RenderWatch {
         homeShown: Boolean,
         lastFrame: Long,
     ): Act {
-        if (bootAt != 0L && lastFrame >= bootAt) bootAt = 0L
+        booted(lastFrame)
         // Nothing to watch, or the page answered what was asked: a new watch from here.
         if (resting(now, live, homeShown) || answered(lastFrame)) clear()
         if (resting(now, live, homeShown) || now - lastFrame < PROBE_MS) return Act.NONE
@@ -82,7 +82,14 @@ internal class RenderWatch {
         now: Long,
         live: Int,
         homeShown: Boolean,
-    ) = live == 0 || !homeShown || now < backoffUntil || (bootAt != 0L && now - bootAt < BOOT_MS)
+    ) = live == 0 || !homeShown || now < backoffUntil || booting(now)
+
+    /** The page's first "w.f" since its load ([pageStarted]) ends its boot. */
+    private fun booted(lastFrame: Long) {
+        if (bootAt != 0L && lastFrame >= bootAt) bootAt = 0L
+    }
+
+    private fun booting(now: Long) = bootAt != 0L && now - bootAt < BOOT_MS
 
     private fun answered(lastFrame: Long): Boolean {
         val pending = maxOf(probedAt, stalledAt)
