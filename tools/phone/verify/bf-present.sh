@@ -5,7 +5,8 @@
 # analysis dedupes. <outdir>/layers = the names, <outdir>/L<n>.txt = times, each poll led by "P <vsync period ns>".
 # Also (games-120, the per-layer rate table): <outdir>/A<n>.txt = the same polls' ACTUAL present times (column 2: when
 # the frame reached the panel, so its rate is what the screen showed), and <outdir>/displays.txt = SurfaceFlinger's
-# displays (each one's activeMode vsyncRate and displayManagerPolicy render range: the panel's rate under the game).
+# displays (each one's activeMode vsyncRate and displayManagerPolicy render range: the panel's rate under the game),
+# and <outdir>/vrr.txt = ColorOS's VRR state (its CVT render-rate cap).
 # Toybox grep has no "\|" in a basic regex: the old `grep -v "a\|b"` dropped nothing, so the 6 picked were container
 # layers (ActivityRecord, the window's) that never carry a buffer - "no presents" read as a compositor fault (03:58).
 mkdir -p "$3"; end=$(( $(date +%s) + $1 ))
@@ -29,4 +30,7 @@ while [ $(date +%s) -lt $end ]; do
   sleep 0.5
 done
 rm -f "$3/lat"; dumpsys SurfaceFlinger --displays > "$3/displays.txt" 2>/dev/null
+# ColorOS's own render rate under the panel's (OPlus VRR "CVT: CurrentRate [<fps>, <source>]", e.g. 60 from touch idle
+# "oti-adfr" while the panel stays 120 Hz: sf-latch-60, 11-06) - bf-layers.py shows it as "render cap".
+dumpsys SurfaceFlinger --oplus vrr > "$3/vrr.txt" 2>/dev/null
 wait; chmod -R 755 "$3"

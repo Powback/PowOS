@@ -179,6 +179,43 @@ up at once instead of on the next tick. Cap (2) of the brief - what holds the ga
 game is not CPU/GPU-capped below 120 (between stalls it presents at the panel's 116-120; main thread 38 % of a core,
 UnityGfxDeviceW 12 %, GPU busy 60 % at 374 of 680 MHz, skin 38.1 -> 38.4 C, no Unity/DXVK cap: async presents).
 
+## The 60 Hz render rate under a 120 Hz panel: ColorOS touch idle (2026-11-06, agent sf-latch-60)
+
+After kwin 3.67 every run was ~58 fps with frames 16.7 ms apart, direct scanout or not: `layers base: game 116.0 >
+xwayland 115.8 > kwin 121.7 (direct, 13111/13113 frames) > consumer ? > sf 57.1 > panel 120 Hz (render 120-120)`
+(job 20261106-114545-74705). "sf" is the game layer's `dumpsys SurfaceFlinger --latency` ACTUAL present times
+(column 2, deduped over the 0.5 s polls) - what reached the panel; the screen recording agrees (~58 fr/s).
+
+A 4 s atrace during the same run (probe 20261106-120052-98429, `atrace gfx view sched freq` in the measure window):
+the app applied 127 powos-direct buffers/s, but SurfaceFlinger's `VSYNC-sf` fired every 16.7 ms (235 in 4 s), its
+VSyncPredictor traced `CVT-fps 60` and each `scheduleFrame` skipped the next 120 Hz vsync ("VSP-prediction" +4 ms ->
+"VSYNC in 20.7 ms"). No missed frames (HWC/GPU missed counters unchanged), no client composition on the cover, no
+per-uid frame-rate override (GameFrameRateOverrides / FrameRateOverrides empty), display policy [120 120].
+
+Cause: ColorOS's own render-rate cap in SurfaceFlinger - OPlus VRR "CVT", source **oti-adfr** = touch idle (OTI): 2.5 s
+after the last touch (IdleTimeOut 2500000000, ADFR "H->L [120 -> 60]") SurfaceFlinger wakes at 60 while the panel stays
+at 120. `dumpsys SurfaceFlinger --oplus vrr` shows it: `CVT: CurrentRate [60, oti-adfr]` and a history of
+`{ fps 60, source oti-adfr, enable at 12:04:03, disable at 12:08:38 }` = exactly the probe's game run (and 10:39:59 -
+11:45:13 over the morning's runs). system_server (`VRR [OPlusExternalRefreshRateManager] notifyDisableOtiMode: false` ->
+`setTouchIdleShouldPause false`) arms it when the screen is on; it exempts only its package blacklist (games such as
+com.tencent.ig, /my_product/etc/oplus_vrr_config.json) and an app's own request (OTI SW "AppRequest: fps, layer, pkg").
+The verify runs never touch the phone (a free window needs 120 s without touch), and a game played on a gamepad or
+keyboard doesn't either, so the game ran at 116 into a 60 Hz latch. The 11-05 runs at 116 between stalls predate the
+reboot of 11-06 morning (whatever kept OTI paused then is not reproducible now).
+
+Fix (APK, non-rooted alike): a game's window surface votes its mode's rate while the task is the top one -
+`PowosWindowActivity.surfaceVote` (Surface.setFrameRate(rate, DEFAULT, ONLY_IF_SEAMLESS) on the SurfaceView's surface;
+the direct child powos-direct inherits it and also votes itself - `direct_set_vote` / ASurfaceTransaction_setFrameRate
+with its next frame, Native.nativeSetWindowFrameRateVote; 0 when the task leaves the top; `GameRefresh.rate`, JVM test). HACK row in
+REMOTE-POWOS.md §4. Meter: bf-present.sh saves `--oplus vrr` (vrr.txt) and the layers line ends `panel 120 Hz (render
+120-120, render cap 60 oti-adfr)` while the cap holds (tier1 test-bf-layers.py).
+
+Check after the APK ship: `queue.sh add --screen cover broforce-fps-low-cpu-bound-under-fex
+tools/phone/verify/direct-scanout-on.sh bf-pacing.sh base` (+ plain `bf-pacing.sh base`, + `bf-checker.sh base` for 0
+dashes). Pass: sf >= 110 and no "render cap" in the layers line; the app logs `window N: surface votes 120.00001 Hz`.
+If the cap stays (OTI ignores both votes), the next lever is finding what OTI's "AppRequest" takes (SurfaceFlinger strings: findTargetLayer / appRequestLayerReady - a target layer of the focused
+process, every other visible layer "negligible").
+
 ## How to re-measure
 
 `tools/phone/adb.sh shell "su -c 'sh -s'" < design-qa/bf-fps-20261103/sample.sh` (30 s, read-only; divide the

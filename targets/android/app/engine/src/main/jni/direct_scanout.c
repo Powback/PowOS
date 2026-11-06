@@ -49,6 +49,8 @@ struct direct_state {
     void (*release_cb)(void *, uint32_t);   /* direct_set_release_cb: releases sent from the callback at once */
     void *release_ud;
     bool has_on_screen;
+    float vote;           /* direct_set_vote: the rate the child should vote for (0 none) */
+    float voted;          /* what the child votes now (a new child: 0) */
 };
 
 struct txn_ctx { struct direct_state *d; uint32_t prev; bool has_prev; };
@@ -250,6 +252,7 @@ int direct_present(struct direct_state *d, ANativeWindow *win, const struct dire
         if (d->child) ASurfaceControl_release(d->child);
         d->child = ASurfaceControl_createFromWindow(win, "powos-direct");
         d->child_of = win;
+        d->voted = 0.0f;
         if (!d->child) { LOGE("direct: no child surface"); d->dead = true; rc = -2; goto out; }
     }
     ASurfaceTransaction *t = ASurfaceTransaction_create();
@@ -258,6 +261,12 @@ int direct_present(struct direct_state *d, ANativeWindow *win, const struct dire
     ASurfaceTransaction_setBufferTransparency(t, d->child, ASURFACE_TRANSACTION_TRANSPARENCY_OPAQUE);
     ASurfaceTransaction_setZOrder(t, d->child, 1);
     ASurfaceTransaction_setVisibility(t, d->child, ASURFACE_TRANSACTION_VISIBILITY_SHOW);
+    if (d->vote != d->voted) {
+        /* The layer that updates votes itself too (it inherits the SurfaceView's vote; ColorOS's touch idle picks its
+         * "app request" per layer: PowosWindowActivity.surfaceVote, sf-latch-60). The mode is already the rate's. */
+        ASurfaceTransaction_setFrameRate(t, d->child, d->vote, ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT);
+        d->voted = d->vote;
+    }
     bool had = d->has_on_screen;
     uint32_t prev = d->on_screen;
     d->on_screen = f->id; d->has_on_screen = true; d->shown = true;
@@ -267,6 +276,12 @@ out:
     if (fence >= 0) close(fence);
     if (dmabuf >= 0) close(dmabuf);   /* gralloc's clone holds its own dup */
     return rc;
+}
+
+void direct_set_vote(struct direct_state *d, float hz)
+{
+    if (d)
+        d->vote = hz;
 }
 
 void direct_hide(struct direct_state *d)

@@ -47,6 +47,8 @@ public final class Native {
     public static native void nativeSetWindowCrop(long handle, int width, int height);
     public static native void nativeStopWindow(long handle);
     public static native void nativeSetWindowRefreshRate(long handle, float hz);
+    // The frame rate the window's direct-scanout child votes for (a game's mode rate, 0 = no vote): PowosWindowActivity.surfaceVote.
+    public static native void nativeSetWindowFrameRateVote(long handle, float hz);
     public static native void nativeSendWindowTouch(long handle, int action, float x, float y, int pointerId);
     public static native void nativeSendWindowTouchFrame(long handle);
     public static native void nativeSendWindowKey(long handle, int action, int keycode);

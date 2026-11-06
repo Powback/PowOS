@@ -38,4 +38,11 @@ class GameRefreshTest {
 
     @Test
     fun beforeTheAppSaysWhatIsAGameNothingIsAsked() = assertEquals(0, want(true, "steam_app_274190", null))
+
+    @Test
+    fun theSurfaceVotesThePickedModesRateAndNothingWithoutAGame() {
+        assertEquals(120f, GameRefresh.rate(4, ids, hz), 0f)
+        assertEquals(0f, GameRefresh.rate(0, ids, hz), 0f)
+        assertEquals(0f, GameRefresh.rate(7, ids, hz), 0f)
+    }
 }

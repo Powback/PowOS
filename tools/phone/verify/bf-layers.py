@@ -5,13 +5,14 @@ line per mode, from what bf-pacing.sh collected in OUT/<mode>/ (games-120, docs/
 
   layers <mode>: game <presents/s> > xwayland <commits/s> (cb <frame callbacks/s>, timeouts <n/s>) > kwin <drawn/s>
     (commit->drawn p50/p90 ms) > consumer <queued/s> (free-buffer wait p50/p90, producer wait p50 ms) > sf <latched/s>
-    > panel <Hz> (render <lo-hi>) ; skin <start>-><end> C
+    > panel <Hz> (render <lo-hi>[, render cap <fps> <source>]) ; skin <start>-><end> C
 
 Every stage at once, so the one that caps the frame rate is the first whose rate drops. A stage with no data says "?".
 Inputs: kgsl.txt (Xwayland's 30 s lines: Present flips/copies = the game's presents, surface commits, frame callbacks,
 timeouts), kwin.txt (window task "frames:" 5 s lines), consumer.txt (the consumer's "pacing:" 5 s lines, logcat),
 A<n>.txt (SurfaceFlinger actual present times of each layer; the layer with the most = the game's), displays.txt
-(SurfaceFlinger --displays: the ON display's activeMode and render range), prof.txt (skin).
+(SurfaceFlinger --displays: the ON display's activeMode and render range), vrr.txt (ColorOS's CVT render cap),
+prof.txt (skin).
 """
 import os
 import re
@@ -91,6 +92,13 @@ def panel(md):
     return out[0] if out else (None, None)
 
 
+def cvt(md):
+    """ColorOS's render-rate cap (vrr.txt, `dumpsys SurfaceFlinger --oplus vrr`): "CVT: ... CurrentRate: [60, oti-adfr]"
+    = SurfaceFlinger wakes at 60 under a 120 Hz panel (touch idle). None: no cap (rate 0) or no data."""
+    m = re.search(r"^CVT:\s*\n(?:.*\n)*?\s*CurrentRate: \[(\d+), ([^\]]*)\]", read(md, "vrr.txt"), re.M)
+    return f"{m.group(1)} {m.group(2)}" if m and int(m.group(1)) > 0 else None
+
+
 def skin(md):
     m = re.search(r"^skin ([\d.]+) ([\d.]+)", read(md, "prof.txt"), re.M)
     return f"{m.group(1)}->{m.group(2)} C" if m else "? C"
@@ -106,7 +114,7 @@ def line(out, mode):
                             f"{fmt(c['dq90'], 0)} ms, {fmt(c['to'])} timeouts/s, producer wait p50 {fmt(c['pr50'], 0)} ms)")
     return (f"layers {mode}: game {fmt(g)} > xwayland {fmt(xc)} (cb {fmt(cb)}, timeouts {fmt(to)}/s) > kwin {fmt(kd)} "
             f"(commit->drawn p50 {fmt(k50, 0)} p90 {fmt(k90, 0)} ms) > consumer {cs} > sf {fmt(sf(md))} > panel "
-            f"{fmt(hz, 0)} Hz (render {rr or '?'}) ; skin {skin(md)}")
+            f"{fmt(hz, 0)} Hz (render {rr or '?'}{', render cap ' + cvt(md) if cvt(md) else ''}) ; skin {skin(md)}")
 
 
 if __name__ == "__main__":

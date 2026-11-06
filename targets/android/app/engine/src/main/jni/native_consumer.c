@@ -132,6 +132,7 @@ struct consumer_state {
     // Latest display refresh rate (milli-Hz) reported from Java. Read on
     // (re)connect to seed the producer; updated live by nativeSetRefreshRate.
     volatile uint32_t refresh_mhz;
+    volatile uint32_t vote_mhz;   /* PowOS: the direct child's frame rate vote (0 none): nativeSetWindowFrameRateVote */
 
     // Event (output) thread
     pthread_t event_thread;
@@ -1199,6 +1200,7 @@ static void *render_thread_func(void *arg)
                     note_undrawn(s, "a direct frame after the refusal");
                     continue;
                 }
+                direct_set_vote(s->direct, s->vote_mhz / 1000.0f);
                 int r = direct_present(s->direct, s->window, &df, dfence, dbuf);
                 if (r == -2) {
                     LOGE("surface %u: direct scanout refused, composited from now on", s->surface_id);
@@ -1825,6 +1827,15 @@ Java_andro_marchy_Native_nativeSetWindowRefreshRate(
         return;
     s->refresh_mhz = (uint32_t)(hz * 1000.0f + 0.5f);
     send_refresh_rate(s);
+}
+
+JNIEXPORT void JNICALL
+Java_andro_marchy_Native_nativeSetWindowFrameRateVote(
+    JNIEnv *env, jclass clazz, jlong handle, jfloat hz)
+{
+    struct consumer_state *s = (struct consumer_state *)(intptr_t)handle;
+    if (s)
+        s->vote_mhz = hz > 0.0f ? (uint32_t)(hz * 1000.0f + 0.5f) : 0;
 }
 
 JNIEXPORT void JNICALL

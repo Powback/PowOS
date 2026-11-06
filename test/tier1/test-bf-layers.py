@@ -63,6 +63,15 @@ class BfLayers(unittest.TestCase):
         self.assertEqual(empty, "layers empty: game ? > xwayland ? (cb ?, timeouts ?/s) > kwin ? (commit->drawn p50 ? "
                                 "p90 ? ms) > consumer ? > sf ? > panel ? Hz (render ?) ; skin ? C")
 
+    def test_colors_touch_idle_render_cap(self):
+        # sf-latch-60 (11-06): `dumpsys SurfaceFlinger --oplus vrr` under a game with no touch for 2.5 s - the panel at
+        # 120 Hz, SurfaceFlinger woken at 60 by ColorOS's touch idle (CVT oti-adfr); no cap (rate 0) says nothing.
+        vrr = "OplusVSyncPredictor:\n  mCvtFps: 60 \n\nCVT:\n  Enable: true, Mute: false\n  CurrentRate: [60, oti-adfr]\n"
+        base, _ = self.run_tool({"vrr.txt": vrr, "displays.txt": DISPLAYS})
+        self.assertIn("panel 60 Hz (render 0-60, render cap 60 oti-adfr)", base)
+        base, _ = self.run_tool({"vrr.txt": vrr.replace("[60, oti-adfr]", "[0, null]"), "displays.txt": DISPLAYS})
+        self.assertIn("panel 60 Hz (render 0-60) ;", base)
+
 
 if __name__ == "__main__":
     unittest.main()

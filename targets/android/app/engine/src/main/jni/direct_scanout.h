@@ -21,6 +21,8 @@ struct direct_state *direct_new(void);
 int direct_present(struct direct_state *d, ANativeWindow *win, const struct direct_frame *f, int fence, int dmabuf);
 /* A composited frame was queued: hide the child so the window's own buffer shows. */
 void direct_hide(struct direct_state *d);
+/* The frame rate the child votes for ([hz] 0: none), sent with the next direct frame when it changed (render thread). */
+void direct_set_vote(struct direct_state *d, float hz);
 /* Send each release from SurfaceFlinger's callback thread as it comes (cb(ud, id)) instead of queueing it for
  * direct_take_release. */
 void direct_set_release_cb(struct direct_state *d, void (*cb)(void *ud, uint32_t id), void *ud);

@@ -25,4 +25,17 @@ public final class GameRefresh {
                 best = i;
         return best < 0 ? 0 : ids[best];
     }
+
+    /**
+     * The frame rate a game's window surface votes for (PowosWindowActivity.surfaceVote): the rate of the mode
+     * [wanted] picked ([want], from [ids] / [hz]), 0 (no vote) when none is wanted or the id is not among them.
+     */
+    public static float rate(int want, int[] ids, float[] hz) {
+        if (want == 0)
+            return 0f;
+        for (int i = 0; i < ids.length; i++)
+            if (ids[i] == want)
+                return hz[i];
+        return 0f;
+    }
 }

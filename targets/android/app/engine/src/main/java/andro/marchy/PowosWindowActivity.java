@@ -503,18 +503,67 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         android.view.Display.Mode now = d != null ? d.getMode() : null;
         int want = GameRefresh.wanted(front && !isFinishing(), app, isGame, ids, ws, hs, hz,
                 now != null ? now.getPhysicalWidth() : 0, now != null ? now.getPhysicalHeight() : 0);
-        if (want == gameMode)
+        if (want == gameMode) {
+            surfaceVote();
             return;
+        }
         gameMode = want;
-        float rate = 0f;
-        for (int i = 0; i < n; i++)
-            if (ids[i] == want)
-                rate = hz[i];
+        float rate = GameRefresh.rate(want, ids, hz);
+        gameRate = rate;
+        surfaceVote();
         android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
         lp.preferredDisplayModeId = want;
         lp.preferredRefreshRate = rate;
         getWindow().setAttributes(lp);
         Log.i(TAG, "window " + id + " (" + app + "): " + (want != 0 ? "game in front, display mode " + want + " (" + rate + " Hz)" : "refresh rate back to the system's"));
+    }
+
+    /** The rate of [gameMode] (0: none) - what the window's surface votes for (surfaceVote). Main thread. */
+    private float gameRate;
+    /** The surface that got [votedRate] (null: none voted yet). Main thread. */
+    private android.view.Surface votedSurface;
+    private float votedRate;
+
+    /**
+     * A game's window surface votes for its mode's rate (Surface.setFrameRate, rooted or not); 0 (no vote) once the
+     * task leaves the top. The vote is the SurfaceView's layer's (its children inherit it), and the direct-scanout
+     * child powos-direct, the layer that updates, votes the same itself (nativeSetWindowFrameRateVote).
+     * HACK: ColorOS's touch idle (OTI, SurfaceFlinger's OPlus VRR: `dumpsys SurfaceFlinger --oplus vrr` "CVT:
+     * CurrentRate [60, oti-adfr]") drops the render rate to 60 Hz 2.5 s after the last touch while the panel stays at
+     * 120 Hz - SurfaceFlinger then latched a game's frames on every 2nd vsync (11-06: game 116 > kwin 122 > sf 57 > panel
+     * 120). A game has no touch to keep it at 120 (a gamepad, a keyboard). Its blacklist (games by package,
+     * /my_product/etc/oplus_vrr_config.json) can't name com.powos.app's window tasks; this layer vote is the app's own
+     * request (OTI "AppRequest"). Real fix: none in PowOS; ColorOS pausing touch idle for a focused layer that keeps
+     * producing frames, as AOSP has no such idle drop.
+     */
+    private void surfaceVote() {
+        SurfaceHolder h = holder;
+        android.view.Surface s = h != null ? h.getSurface() : null;
+        if (s == null || !s.isValid())
+            return;
+        float want = gameMode != 0 ? gameRate : 0f;
+        if (s == votedSurface && want == votedRate)
+            return;
+        if (s != votedSurface && want == 0f) {
+            votedSurface = s; // a new surface has no vote: nothing to take back
+            votedRate = 0f;
+            return;
+        }
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 31)
+                s.setFrameRate(want, android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT,
+                        android.view.Surface.CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS);
+            else
+                s.setFrameRate(want, android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT);
+            votedSurface = s;
+            votedRate = want;
+            if (handle != 0)
+                Native.nativeSetWindowFrameRateVote(handle, want);
+            Log.i(TAG, "window " + id + ": surface votes " + (want > 0 ? want + " Hz" : "nothing"));
+        } catch (RuntimeException e) {
+            // A surface released between isValid and the call: the next surfaceChanged votes again.
+            Log.w(TAG, "window " + id + ": surface frame rate vote failed: " + e);
+        }
     }
 
     /**
@@ -635,6 +684,7 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         Native.nativeSetWindowCrop(h, cropW, cropH);
         if (rate > 0)
             Native.nativeSetWindowRefreshRate(h, rate);
+        Native.nativeSetWindowFrameRateVote(h, votedRate);
         handle = h;
         dropSplash();
     }
@@ -655,6 +705,7 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
     public void surfaceDestroyed(SurfaceHolder holder) {
         Log.i(TAG, "surface " + id + " destroyed" + (isFinishing() ? " (finishing)" : ""));
         this.holder = null;
+        votedSurface = null; // a recreated surface votes afresh
         surfaceGen++;
         stopConsumer();
     }
