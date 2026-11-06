@@ -1,0 +1,278 @@
+#!/bin/bash
+# lanes: phone
+# tools/phone/verify/window-bench.sh: the window-handling benchmark - every number the user feels as "windows are slow /
+# bugged / don't load" (11-07 00:2x: "we really need to benchmark and fix all the window handling", "focus on
+# performance atm", "no windows not loading etc"), each with a PASS budget. Runs in the verify queue's idle window:
+#   queue.sh add <task> tools/phone/verify/window-bench.sh [--apps "kate dolphin konsole calc settings"] [--no-fold]
+# Linux apps (Kate, Dolphin, Konsole: KWin -> web window) and Android web windows (Calculator, Settings: a virtual
+# display mirrored into home's page), on the unfolded home, opened through home's own launch path (state.ts launch,
+# what a dock/drawer tap runs). Measured (in-page times are performance.now() in home's page, frame-exact; "drawn" is a
+# screencap of the window's body on the glass, window-render.py stats, so its resolution is one shot, ~0.5-1 s):
+#   open      launch -> its frame on the page (placeholder)          budget OPEN_FRAME_MS   150
+#             launch -> live (the placeholder goes: its first frame) budget Linux 2500 / Android 1500 (LIVE_*_MS)
+#             launch -> its body drawn on the glass (not flat)        budget live + DRAWN_SLACK_MS 1500
+#   blank     the "not loading" detector: live but its body flat (one colour, no edges) for > BLANK_S (3) s, or never
+#             live in LIVE_MAX_S (20) s = FAIL "not loading" (the window log + KWin log lines for it are kept)
+#   drag      the bar dragged 1 s (input swipe): home's frames during it - fps >= 55, p95 frame <= 25 ms, and the window
+#             moved with the finger (its frame within 10%)
+#   resize    the SE grip dragged 1 s: the same frame budget; then the body drawn at its new size <= RESIZE_SETTLE_MS 1500
+#   switch    a tap on the lower window's bar -> it is on top: <= SWITCH_MS 100
+#   maximise  toggleMaximise (the bar's double tap / button) -> its frame settled: <= MAX_MS 400, drawn again after
+#   restore   the same back
+#   rotate    the screen turned 90 deg (user_rotation, put back) -> every window's frame settled, live and drawn <= 2500
+#   unfold    folded 4 s and unfolded -> every window back live and drawn <= UNFOLD_MS 4000 (--no-fold skips it)
+#   five      5 apps launched at once -> all live <= FIVE_MS 8000, all drawn
+#   close     a tap on its close button -> its frame gone from the page <= CLOSE_MS 150, from the host <= 1000
+# Output: $OUT/bench.tsv (metric, app, value ms|fps, budget, PASS|FAIL), one "BENCH" line each in the log; the window
+# log / KWin log / logcat window tags since the start in $OUT. Only what it opened is closed; an app the user already
+# runs is left out (noted). Exit: 0 all within budget; 1 a FAIL; 3 the user touched it / not now (re-queued); 5 ENV.
+set -uo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+APPS="kate dolphin konsole calc settings"; FOLD=1; ARGS=()
+while [ $# -gt 0 ]; do case "$1" in --apps) APPS=$2; shift 2 ;; --no-fold) FOLD=0; shift ;; *) ARGS+=("$1"); shift ;; esac; done
+. "$here/e2e-lib.sh"
+e2e_args ${ARGS[@]+"${ARGS[@]}"}
+E2E_APPS='com.oneplus.calculator|com.android.settings'
+E2E_LINUX='kate dolphin konsole'
+e2e_init window-bench
+PY="python3 -I $here/window-render.py"
+HYPR=/data/powos/root/run/powos-app/hyprland.log
+OPEN_FRAME_MS=${OPEN_FRAME_MS:-150}; LIVE_LINUX_MS=${LIVE_LINUX_MS:-2500}; LIVE_ANDROID_MS=${LIVE_ANDROID_MS:-1500}
+DRAWN_SLACK_MS=${DRAWN_SLACK_MS:-1500}; BLANK_S=${BLANK_S:-3}; LIVE_MAX_S=${LIVE_MAX_S:-20}
+FPS_MIN=${FPS_MIN:-55}; P95_MS=${P95_MS:-25}; RESIZE_SETTLE_MS=${RESIZE_SETTLE_MS:-1500}; SWITCH_MS=${SWITCH_MS:-100}
+MAX_MS=${MAX_MS:-400}; ROTATE_MS=${ROTATE_MS:-2500}; UNFOLD_MS=${UNFOLD_MS:-4000}; FIVE_MS=${FIVE_MS:-8000}
+CLOSE_MS=${CLOSE_MS:-150}; CLOSE_HOST_MS=${CLOSE_HOST_MS:-1000}
+TSV=$OUT/bench.tsv; printf 'metric\tapp\tvalue\tbudget\tverdict\n' > "$TSV"
+MINEW=""   # the web windows this bench opened (w-ids)
+ROT0=""
+
+# bench <metric> <app> <value> <budget> <le|ge> [unit]: one measured number against its budget.
+bench() {
+  local v=$3 b=$4 ok=FAIL u=${6:-ms}
+  if [ -n "$v" ] && [ "$v" != - ] && awk -v v="$v" -v b="$b" -v o="$5" 'BEGIN{exit !(o=="le" ? v<=b : v>=b)}'; then ok=PASS; fi
+  printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "${v:--}" "$([ "$5" = le ] && echo "<=$b" || echo ">=$b")$u" "$ok" >> "$TSV"
+  log "BENCH $1 $2: ${v:--}$u (budget $([ "$5" = le ] && echo "<=" || echo ">=")$b$u) $ok"
+  [ $ok = PASS ] && pass "$1 $2: ${v}$u" || fail "$1 $2: ${v:--}$u, budget $([ "$5" = le ] && echo "<=" || echo ">=")$b$u"
+}
+nowms() { python3 -c 'import time; print(int(time.time()*1000))'; }
+WW="Promise.all([importShim('./ui/webwindows.tsx'),importShim('./state.ts')])"
+
+# keyof <app>: home's launch key.
+keyof() {
+  case $1 in
+    kate|dolphin|konsole) echo "l:org.kde.$1" ;;
+    calc) hcall apps.list "[]" "l=>(l.find(a=>/^a:com\\.oneplus\\.calculator\\//.test(a.key))||{}).key||'none'" ;;
+    settings) hcall apps.list "[]" "l=>(l.find(a=>/^a:com\\.android\\.settings\\//.test(a.key))||{}).key||'none'" ;;
+  esac
+}
+linux() { case $1 in kate|dolphin|konsole) return 0 ;; esac; return 1; }
+
+# open_js <key...>: launches them through home's launch path at once; resolves when each is live (or LIVE_MAX_S):
+# {key: {frame, live, id, failed}} in ms from the launch.
+open_js() {
+  local keys; keys=$(printf "'%s'," "$@")
+  ev "$WW.then(([m,s])=>{const K=[${keys%,}],before=new Set(m.webWins.value.map(w=>w.id)),t0=performance.now(),r={};
+for(const k of K){r[k]={frame:-1,live:-1,id:null,failed:''};s.launch(k)}
+return new Promise(ok=>{const tick=()=>{const t=Math.round(performance.now()-t0);
+ for(const k of K){const w=m.webWins.value.filter(w=>String(w.key).startsWith(k)&&!before.has(w.id)).at(-1);if(!w)continue;const o=r[k];o.id=w.id;
+  if(o.frame<0&&document.querySelector('.webwindow[data-wwid=\"'+w.id+'\"]'))o.frame=t;if(o.live<0&&w.live)o.live=t;if(w.failed)o.failed=String(w.failed)}
+ if(K.every(k=>r[k].live>=0||r[k].failed)||t>${LIVE_MAX_S}000)return ok(JSON.stringify(r));requestAnimationFrame(tick)};tick()})})"
+}
+jget() { python3 -c "import json,sys
+try: print(json.loads(sys.argv[1])[sys.argv[2]][sys.argv[3]])
+except Exception: print('')" "$1" "$2" "$3"; }
+
+# drawn <w-id> <name>: its body on the glass is a picture, not a flat fill (kwin-restart-windows.sh's rule).
+drawn() {
+  local r st dom col
+  r=$(wwbody "$1"); [ -n "$r" ] || { echo "no body on screen"; return 1; }
+  "$A" exec-out "screencap | gzip -1" > "$OUT/$2.raw.gz" 2>/dev/null && [ -s "$OUT/$2.raw.gz" ] || { echo "screencap failed"; return 1; }
+  # shellcheck disable=SC2086
+  st=$($PY stats "$OUT/$2.raw.gz" $r 2>&1)
+  dom=$(echo "$st" | sed -n 's/.*dominant=\([0-9.]*\).*/\1/p'); col=$(echo "$st" | sed -n 's/.*colours=\([0-9]*\).*/\1/p')
+  echo "$st"
+  awk -v d="${dom:-1}" -v c="${col:-0}" 'BEGIN { exit !(d < 0.97 && c >= 4) }' && return 0
+  # shellcheck disable=SC2086
+  $PY png "$OUT/$2.raw.gz" "$OUT/$2.png" $r "$OUT/$2-body.png" >/dev/null 2>&1; return 1
+}
+# until_drawn <w-id> <name> <max ms>: ms (Mac clock, from now) until drawn, or "" by max.
+until_drawn() {
+  local t0 t; t0=$(nowms)
+  while :; do
+    drawn "$1" "$2" >/dev/null && { echo $(($(nowms) - t0)); return 0; }
+    t=$(($(nowms) - t0)); [ $t -gt "$3" ] && return 1
+    sleep 0.2
+  done
+}
+# blank_check <w-id> <app>: the "not loading" detector - live and drawn within BLANK_S s, else FAIL with evidence.
+blank_check() {
+  local live d
+  live=$(wwel "$1" "e=>e.querySelector('.webwindow-body.live')?'live':(e.querySelector('.ww-failed,.failed')?'failed':'placeholder')")
+  if d=$(until_drawn "$1" "blank-$2" $((BLANK_S * 1000))); then pass "loaded $2 ($1): $live, drawn"; return 0; fi
+  fail "NOT LOADING $2 ($1): $live but its body is flat for > ${BLANK_S} s ($(drawn "$1" "blank-$2-last"))"
+  log "  shot: $OUT/blank-$2-last.png (body: blank-$2-last-body.png)"
+  return 1
+}
+
+# fps_js <ms>: home's frames for that long (rAF intervals): "fps p50 p95 max n" - run in the background beside input.
+fps_js() {
+  ev "new Promise(ok=>{const t=[];const t0=performance.now();const f=n=>{t.push(n);if(n-t0<$1)requestAnimationFrame(f);else{const d=t.slice(1).map((v,i)=>v-t[i]).sort((a,b)=>a-b);const q=p=>d.length?d[Math.min(d.length-1,Math.floor(p*d.length))]:0;ok([Math.round(1000*d.length/(t.at(-1)-t[0])),q(.5).toFixed(1),q(.95).toFixed(1),(d.at(-1)||0).toFixed(1),d.length].join(' '))}};requestAnimationFrame(f)})"
+}
+# frame_of <w-id>: its frame element's rect, "x y w h" CSS px.
+frame_of() { wwel "$1" "e=>{const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height].map(Math.round).join(' ')}"; }
+
+# gesture <metric> <w-id> <app> <x0 y0 x1 y1>: an injected 1 s swipe while home's frames are sampled.
+gesture() {
+  local m=$1 id=$2 app=$3 f0 f1 res fps p95
+  f0=$(frame_of "$id")
+  fps_js 1600 > "$OUT/fps-$m-$app.txt" &
+  local bg=$!; sleep 0.15
+  swipe "$4" "$5" "$6" "$7" 1000 "$m $app" || { wait $bg; fail "$m $app: no spot to touch"; return 1; }
+  wait $bg; res=$(cat "$OUT/fps-$m-$app.txt"); f1=$(frame_of "$id")
+  set -- $res; fps=${1:-}; p95=${3:-}
+  log "$m $app: frames '$res' (fps p50 p95 max n), frame $f0 -> $f1"
+  bench "$m-fps" "$app" "$fps" "$FPS_MIN" ge fps
+  bench "$m-p95" "$app" "$p95" "$P95_MS" le
+  echo "$f0|$f1" > "$OUT/frames-$m-$app.txt"
+}
+
+RB=0
+restore_bench() {
+  [ $RB = 1 ] && return 0; RB=1
+  local i
+  for i in $MINEW; do hcall webwindows.close "[${i#w}]" "()=>'ok'" >/dev/null 2>&1; done
+  [ -n "$ROT0" ] && { set -- $ROT0; sh_ "settings put system accelerometer_rotation $1; settings put system user_rotation $2"; log "rotation put back ($ROT0)"; ROT0=""; }
+  sh_ "tail -n +$((H0 + 1)) $HYPR" > "$OUT/kwin.log" 2>/dev/null
+  "$A" exec-out "su -c 'cat /data/data/com.powos.app/files/window-log.1.txt /data/data/com.powos.app/files/window-log.txt 2>/dev/null'" 2>/dev/null |
+    awk -v s="$START" '$1" "$2 >= s' > "$OUT/window-log.txt"
+  sh_ "logcat -d -v time -s PowosWebWindows:V PowosRenderWatch:V RenderWatch:V WebWindowSource:V" > "$OUT/logcat-windows.txt"
+  log "logs: window-log $(wc -l < "$OUT/window-log.txt" | tr -d ' ') lines, kwin $(wc -l < "$OUT/kwin.log" | tr -d ' '), logcat $(wc -l < "$OUT/logcat-windows.txt" | tr -d ' ') -> $OUT"
+}
+
+e2e_setup inner
+START=$(sh_ "date +\"%m-%d %H:%M:%S\""); H0=$(sh_ "wc -l < $HYPR"); H0=${H0:-0}
+trap 'restore_bench; e2e_abort' EXIT
+[ "$(hcall webwindows.list "[]" "l=>'ok'")" = ok ] || { echo "ENV: home has no web windows here (folded, off)"; exit 5; }
+[ -z "$(sh_ "chroot /data/powos/root pgrep -f steam_app_ | head -1")" ] || e2e_skip "a game runs: not now"
+log "apk $(sh_ "dumpsys package com.powos.app | grep -m1 versionName"), kwin $(sh_ "chroot /data/powos/root pacman -Q kwin 2>/dev/null")"
+
+# The apps: one the user already runs is left out (its window could be theirs).
+RUN=""; for a in $APPS; do
+  if linux "$a" && [ -n "$(us "pgrep -x $a | head -1")" ]; then note "$a: the user's $a runs - left out"; continue; fi
+  k=$(keyof "$a"); case $k in ""|none|ERR*) note "$a: no launch key ($k)"; continue ;; esac
+  RUN="$RUN $a"; eval "KEY_$a=\$k"
+done
+[ -n "$RUN" ] || { echo "ENV: no app to bench"; exit 5; }
+log "apps: $RUN"
+
+# 1. open, one at a time (cold for Linux: no process yet), and the not-loading detector on each.
+for a in $RUN; do
+  eval "k=\$KEY_$a"; chk "open $a"
+  t0=$(nowms); r=$(open_js "$k"); t1=$(nowms)
+  id=$(jget "$r" "$k" id); fr=$(jget "$r" "$k" frame); lv=$(jget "$r" "$k" live); fl=$(jget "$r" "$k" failed)
+  log "open $a: $r"
+  [ -n "$id" ] && [ "$id" != None ] && { MINEW="$MINEW w$id"; eval "ID_$a=w\$id"; }
+  bench open-frame "$a" "$fr" "$OPEN_FRAME_MS" le
+  if [ -z "$lv" ] || [ "$lv" -lt 0 ] 2>/dev/null; then
+    bench open-live "$a" - "$(linux "$a" && echo $LIVE_LINUX_MS || echo $LIVE_ANDROID_MS)" le
+    fail "NOT LOADING $a: never live in ${LIVE_MAX_S} s${fl:+ ($fl)}"; continue
+  fi
+  bench open-live "$a" "$lv" "$(linux "$a" && echo $LIVE_LINUX_MS || echo $LIVE_ANDROID_MS)" le
+  d=$(until_drawn "w$id" "open-$a" 6000) && bench open-drawn "$a" $((t1 - t0 + d)) $((lv + DRAWN_SLACK_MS)) le || blank_check "w$id" "$a"
+  step "open-$a" "$a opened as a web window"
+done
+
+# 2. drag + resize + maximise/restore on each window, frame-timed.
+for a in $RUN; do
+  eval "id=\${ID_$a:-}"; [ -n "$id" ] || continue; chk "gestures $a"
+  hcall webwindows.list "[]" "()=>'ok'" >/dev/null
+  ev "$WW.then(([m])=>(m.raise(${id#w}),'ok'))" >/dev/null; sleep 0.4
+  p=$(barpt "$id"); [ -n "$p" ] && { set -- $p; gesture drag "$id" "$a" "$1" "$2" $(($1 + $(dp 120))) $(($2 + $(dp 60))); sleep 0.6; }
+  g=$(wwpt "$id" ".ww-grip-se"); [ -n "$g" ] || g=$(wwpt "$id" "[class*=grip][class*=se]")
+  if [ -n "$g" ]; then set -- $g; gesture resize "$id" "$a" "$1" "$2" $(($1 - $(dp 90))) $(($2 - $(dp 70)))
+    d=$(until_drawn "$id" "resize-$a" 4000) && bench resize-settle "$a" "$d" "$RESIZE_SETTLE_MS" le || blank_check "$id" "$a"
+  else note "resize $a: no SE grip on its frame"; fi
+  for dir in maximise restore; do
+    ms=$(ev "$WW.then(([m])=>{const id=${id#w},q=()=>{const e=document.querySelector('.webwindow[data-wwid=\"'+id+'\"] .webwindow-body');if(!e)return '';const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height].map(Math.round).join(' ')},a=q(),t0=performance.now();m.toggleMaximise(id);
+return new Promise(ok=>{let last=a,same=0;const f=()=>{const t=performance.now()-t0,c=q();if(c!==a&&c===last)same++;else same=0;last=c;if(same>=3)return ok(String(Math.round(t-3*16.7)));if(t>3000)return ok('-');requestAnimationFrame(f)};requestAnimationFrame(f)})})")
+    bench "$dir" "$a" "$ms" "$MAX_MS" le
+    d=$(until_drawn "$id" "$dir-$a" 4000) && log "$dir $a: drawn again ${d} ms after (Mac clock)" || blank_check "$id" "$a"
+  done
+  step "gestures-$a" "$a dragged, resized, maximised and restored"
+done
+
+# 3. switching: a tap on the lower of two windows' bars puts it on top.
+set -- $RUN; if [ $# -ge 2 ]; then
+  eval "i1=\${ID_$1:-}; i2=\${ID_$2:-}"
+  if [ -n "$i1" ] && [ -n "$i2" ]; then
+    for pair in "$i1 $i2 $1" "$i2 $i1 $2"; do set -- $pair; chk switch
+      ev "$WW.then(([m])=>(m.raise(${2#w}),'ok'))" >/dev/null; sleep 0.5
+      p=$(barpt "$1"); [ -n "$p" ] || { note "switch: $1's bar not on screen (under the other)"; continue; }
+      ev "$WW.then(([m])=>{window.__wbSw=null;let t0=0;const d=e=>{t0=e.timeStamp};document.addEventListener('pointerdown',d,{capture:true,once:true});const t1=performance.now();const f=()=>{const top=m.webWins.value.at(-1);if(t0&&top&&top.id===${1#w}){window.__wbSw=String(Math.round(performance.now()-t0));return}if(performance.now()-t1>3000){window.__wbSw='-';return}requestAnimationFrame(f)};requestAnimationFrame(f);return 'armed'})" >/dev/null
+      set -- $p; tap "$1" "$2" "the lower window's bar"; sleep 0.8
+      bench switch "$3" "$(ev 'String(window.__wbSw)')" "$SWITCH_MS" le
+    done
+  fi
+fi
+
+# 4. rotate 90 deg and back: every window settled, live and drawn.
+settle_all() {   # settle_all <metric> <budget>: ms (Mac clock) until every bench window is live and drawn
+  local t0 left w; t0=$(nowms)
+  while :; do
+    left=""; for w in $MINEW; do
+      [ "$(wwhost "$w" gone)" = true ] && continue
+      [ "$(wwel "$w" "e=>e.querySelector('.webwindow-body.live')?'live':'no'")" = live ] && drawn "$w" "$1-$w" >/dev/null || left="$left $w"
+    done
+    [ -z "$left" ] && { echo $(($(nowms) - t0)); return 0; }
+    [ $(($(nowms) - t0)) -gt $(($2 * 3)) ] && { echo "- (not back:$left)"; return 1; }
+    sleep 0.3
+  done
+}
+chk rotate
+ROT0=$(sh_ "echo \$(settings get system accelerometer_rotation) \$(settings get system user_rotation)")
+for rot in 1 0; do
+  sh_ "settings put system accelerometer_rotation 0; settings put system user_rotation $rot"; sleep 0.3
+  v=$(settle_all "rotate$rot" "$ROTATE_MS"); bench "rotate-$rot" all "${v%% *}" "$ROTATE_MS" le; [ "${v%% *}" = - ] && log "rotate: $v"
+done
+set -- $ROT0; sh_ "settings put system accelerometer_rotation $1; settings put system user_rotation $2"; ROT0=""
+step rotated "rotated and back"
+
+# 5. fold 4 s, unfold: the windows come back.
+if [ $FOLD = 1 ]; then chk fold
+  device_state_set 0; sleep 4; device_state_set 3; sleep 0.3
+  v=$(settle_all unfold "$UNFOLD_MS"); bench unfold all "${v%% *}" "$UNFOLD_MS" le; [ "${v%% *}" = - ] && log "unfold: $v"
+  # The ids may be new after a fold (Linux windows handed back and adopted again): read them by key.
+  for a in $RUN; do eval "k=\$KEY_$a"; n=$(wwids "$k" | tail -1); [ -n "$n" ] && { eval "ID_$a=\$n"; MINEW="$MINEW $n"; }; done
+  step unfolded "folded and unfolded"
+fi
+
+# 6. close every window by its close button, timed in the page.
+for a in $RUN; do
+  eval "id=\${ID_$a:-}"; [ -n "$id" ] || continue; chk "close $a"
+  ev "$WW.then(([m])=>(m.raise(${id#w}),'ok'))" >/dev/null; sleep 0.4
+  p=$(wwpt "$id" .ww-close); [ -n "$p" ] || { note "close $a: no close button on screen"; continue; }
+  ev "(()=>{window.__wbCl=null;let t0=0;document.addEventListener('pointerdown',e=>{t0=e.timeStamp},{capture:true,once:true});const t1=performance.now();const f=()=>{if(t0&&!document.querySelector('.webwindow[data-wwid=\"${id#w}\"]')){window.__wbCl=String(Math.round(performance.now()-t0));return}if(performance.now()-t1>3000){window.__wbCl='-';return}requestAnimationFrame(f)};requestAnimationFrame(f);return 'armed'})()" >/dev/null
+  t0=$(nowms); set -- $p; tap "$1" "$2" "$a's close button"
+  hg=-; for _ in $(seq 1 25); do [ "$(wwhost "$id" gone)" = true ] && { hg=$(($(nowms) - t0)); break; }; sleep 0.1; done
+  bench close "$a" "$(ev 'String(window.__wbCl)')" "$CLOSE_MS" le
+  bench close-host "$a" "$hg" "$CLOSE_HOST_MS" le
+done
+MINEW=""
+sleep 1.5
+
+# 7. five at once (warm: the Linux apps quit by their close a moment ago may still be ending).
+set -- $RUN; if [ $# -ge 2 ]; then chk five
+  keys=(); for a in $RUN; do eval "keys+=(\"\$KEY_$a\")"; done
+  t0=$(nowms); r=$(open_js "${keys[@]}"); t1=$(nowms); log "five: $r"
+  worst=0; ok=1; for a in $RUN; do eval "k=\$KEY_$a"; id=$(jget "$r" "$k" id); lv=$(jget "$r" "$k" live)
+    [ -n "$id" ] && [ "$id" != None ] && { MINEW="$MINEW w$id"; eval "ID_$a=w\$id"; }
+    if [ -z "$lv" ] || [ "$lv" -lt 0 ] 2>/dev/null; then ok=0; fail "NOT LOADING $a (five at once): never live"; else [ "$lv" -gt $worst ] && worst=$lv; fi
+  done
+  bench five-live "${#keys[@]}apps" "$([ $ok = 1 ] && echo $worst || echo -)" "$FIVE_MS" le
+  for a in $RUN; do eval "id=\${ID_$a:-}"; [ -n "$id" ] && blank_check "$id" "five-$a"; done
+  step five "five windows at once"
+fi
+
+restore_bench
+log "bench table: $TSV"; column -t -s$'\t' "$TSV" | tee -a "$OUT/log.txt"
+e2e_finish
