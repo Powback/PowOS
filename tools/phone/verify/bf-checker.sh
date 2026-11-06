@@ -11,12 +11,14 @@
 # DXVK + Unity logs. bf-checker.py scores the black checker per frame; its last line = the board result (which variant
 # removes it, fps each). Restores user_settings.py, dxvk.conf, the game + Steam, the front activity.
 # Exit 3 on a real touch (re-queued), 5 when the game doesn't start. Artefacts: OUT (~/.cache/powos-verify/bfc-*).
+# INPUT=touch|key|pad: one injected event/s from the game window on (bf-lib.sh input_inject; oti-cap).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
 [ $# -gt 0 ] || set -- base noncoherent noubwc sysmem nomsaa zeromem flushall nolrz zerowg relaxed
 OUT=${OUT:-$HOME/.cache/powos-verify/bfc-$(date +%F_%H%M)}; mkdir -p "$OUT"
 BF_ADB=$A . "$here/bf-lib.sh"   # pill <step>: the status pill's sub-step
 cfg_take "$@"; set -- ${CFG_ARGS[@]+"${CFG_ARGS[@]}"}; [ $# -gt 0 ] || set -- base  # cfg:<x86|arm64>: bf-lib.sh cfg_take (bash 3.2-safe empty array)
+input_check || exit 2
 irq() { "$A" shell "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts" | tr -d '\r'; }
 asuser() { local n=$1; shift
   "$A" shell "su -c 'cp /data/local/tmp/powos-$n /data/powos/root/var/tmp/powos-$n; chmod 644 /data/powos/root/var/tmp/powos-$n; sh /data/powos/powos-run.sh \"sh /var/tmp/powos-$n $*\"'" 2>&1 | grep -v sysvipc | tr -d '\r'; }
@@ -64,6 +66,7 @@ for v in "$@"; do
   win=""; for i in $(seq 48); do nap 1; win=$(asuser bf-window.sh | tail -1); case $win in win=[0-9]*) break ;; esac; done
   case $win in win=[0-9]*) ;; *) echo "FAIL $v: no game window in 4 min ($win)"; restore; exit 1 ;; esac
   echo "$v: window after $((i * 5)) s: $win"; echo "$win" > "$M/window.txt"
+  input_inject 94
   asuser bf-checker-phone.sh grab 80 /var/tmp/bfc/$v >/dev/null; t0=$(date +%s); n=0
   while [ $(( $(date +%s) - t0 )) -lt 92 ]; do
     el=$(( $(date +%s) - t0 ))

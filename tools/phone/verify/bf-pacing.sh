@@ -13,12 +13,9 @@
 # panel's mode + render range) and skin temperature - the first stage whose rate drops is the cap (games-120).
 # Restores: dxvk.conf, the game + Steam (bf-stop.sh; Steam restarted -silent if it ran before), the front activity.
 # Exit 3 on a real touch (re-queued), 5 when the game doesn't start. Artefacts: OUT (~/.cache/powos-verify/bfp-*).
-# ColorOS touch idle (oti-cap, docs/research/broforce-fps.md): INPUT=touch|key|pad injects one tap (screen centre) /
-# keyboard key (SCROLL_LOCK) / gamepad button (THUMBL) per second over the 30 s measurement (`input`, not the touch
-# IRQ: no abort) - does a player who touches / only uses keys see 120? OTI_OFF=1 sets ColorOS's own switch
-# `settings put secure settings_shutdown_adfr_oti 1` (OPlusRefreshRateService: bit 1 = disable OTI) after the window
-# shows, its previous value back in restore. Either way the run prints "oti <mode>:" lines: the OTI state, CVT history
-# and the game layers' requestedFrameRate votes at the end of the measurement, and the app's "surface votes" lines.
+# ColorOS touch idle (oti-cap, docs/research/broforce-fps.md): INPUT=touch|key|pad injects one event/s over the 30 s
+# measurement (bf-lib.sh input_inject). Every run prints "oti <mode>:" lines: ColorOS's OTI state + CVT history and the
+# game layers' requestedFrameRate votes at the end of the measurement, and the app's "surface votes" lines.
 # Valid only with the game ON SCREEN: a display ON, its task (PowosWindowActivity) in front and that task's SurfaceView
 # layer there (unfolded: home in front and its full-screen web window's layer composed, bf-onscreen.sh), before and after the 30 s - else "INVALID: ..." and exit 3 (the next window). The 03:58 run of
 # 2026-10-24 measured a game with no task surface (no SurfaceView layer, nothing resumed, no screen recording: the
@@ -72,16 +69,9 @@ front=$(echo "$ph" | grep -m1 topResumedActivity | sed -nE 's#.* ([a-zA-Z0-9_.]+
 steam_before=$(echo "$ph" | sed -n 's/^steam=//p')
 fold=$(echo "$ph" | sed -nE "s/.*mCommittedState.*name='([A-Z_]+)'.*/\1/p")
 echo "front=${front:-?} steam_before=${steam_before:+yes} fold=$fold"
-OTI_OFF=${OTI_OFF:-} INPUT=${INPUT:-}
-case $INPUT in ''|touch|key|pad) ;; *) echo "INPUT: touch, key or pad"; exit 2 ;; esac
-oti_prev=; [ -n "$OTI_OFF" ] && oti_prev=$("$A" shell "settings get secure settings_shutdown_adfr_oti" | tr -d '\r')
-[ -n "$OTI_OFF$INPUT" ] && echo "touch-idle probe: INPUT=${INPUT:-none} OTI_OFF=${OTI_OFF:-0} (settings_shutdown_adfr_oti was '${oti_prev:-}')"
-oti_restore() { [ -n "$OTI_OFF" ] || return 0
-  case $oti_prev in ''|null) "$A" shell "settings put secure settings_shutdown_adfr_oti 0; settings delete secure settings_shutdown_adfr_oti" >/dev/null ;;
-    *) "$A" shell "settings put secure settings_shutdown_adfr_oti $oti_prev" >/dev/null ;; esac; }
+input_check || exit 2
 restore() {
   pill "closing the game, putting Steam back"
-  oti_restore
   "$A" shell "su -c 'pkill -f powos-bf-present.sh; pkill -f powos-bf-prof.sh; pkill -INT screenrecord'" >/dev/null 2>&1
   settings ''
   if [ $users = 1 ]; then echo "the user's $NAME: $(asuser bf-game.sh freeze | tail -1)"; else asuser bf-stop.sh >/dev/null; fi
@@ -138,12 +128,7 @@ for mode in "$@"; do
   echo "$win2" | sed 's/win=/settled /; s/screen=/on /' >> "$M/window.txt"
   echo "$mode: in front: $top ($WHY)"; echo "front $top" >> "$M/window.txt"
   [ $ok = 0 ] || invalid "after the settle"
-  [ -n "$OTI_OFF" ] && "$A" shell "settings put secure settings_shutdown_adfr_oti 1"
-  case $INPUT in
-    touch) ev='input tap 558 1242' ;; key) ev='input keyboard keyevent KEYCODE_SCROLL_LOCK' ;;
-    pad) ev='input gamepad keyevent KEYCODE_BUTTON_THUMBL' ;; *) ev= ;;
-  esac
-  [ -n "$ev" ] && "$A" shell "nohup sh -c 'e=\$((\$(date +%s) + 32)); while [ \$(date +%s) -lt \$e ]; do $ev; sleep 1; done' >/dev/null 2>&1 &"
+  input_inject 32
   "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof; nohup sh /data/local/tmp/powos-bf-present.sh 30 \"PowosWindowActivity|SurfaceView|powos-direct|powos-ww-[0-9]+-linux|steam_app${WIN_NAME:+|$WIN_NAME}\" /data/local/tmp/bfp >/dev/null 2>&1 &
     nohup sh /data/local/tmp/powos-bf-prof.sh 30 /data/local/tmp/bfprof >/dev/null 2>&1 &'"
   pill "$lbl: measuring frames (30 s)"; nap 30
@@ -156,7 +141,7 @@ for mode in "$@"; do
     logcat -d -t 400 -s Andromarchy:I | grep \" pacing: \" | tail -8 > /data/local/tmp/bfp/consumer.txt
     dumpsys SurfaceFlinger --oplus vrr | grep -A4 -E \"^OTI Status|^CVT:\" > /data/local/tmp/bfp/oti.txt
     dumpsys SurfaceFlinger | grep requestedFrameRate | grep -E \"SurfaceView|powos-direct|PowosWindowActivity\" | sed -E \"s/^[^A-Za-z]*//\" | head -6 >> /data/local/tmp/bfp/oti.txt
-    logcat -d -T \"$lt\" | grep -E \"surface votes|VRR \\[OTI\\]|OTI-ADFR\\]: targetRate|CVT\\]: setFrameRate|ShutdownAdfrOti\" | tail -12 >> /data/local/tmp/bfp/oti.txt; chmod -R 755 /data/local/tmp/bfp'" >/dev/null
+    logcat -d -T \"$lt\" | grep -E \"surface votes|VRR \\[OTI\\]|OTI-ADFR\\]: targetRate|CVT\\]: setFrameRate\" | tail -12 >> /data/local/tmp/bfp/oti.txt; chmod -R 755 /data/local/tmp/bfp'" >/dev/null
   "$A" pull /data/local/tmp/bfp "$M/" >/dev/null && mv "$M"/bfp/* "$M"/ && rmdir "$M/bfp"
   grep "Xwayland KGSL" "$M/log.txt" > "$M/kgsl.txt"; grep "window task" "$M/log.txt" > "$M/kwin.txt"; rm -f "$M/log.txt"
   sed "s/^/kwin $mode: /" "$M/kwin.txt" | tail -5; sed "s/^/prof $mode: /" "$M/prof.txt" 2>/dev/null

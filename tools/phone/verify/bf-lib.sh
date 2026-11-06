@@ -25,6 +25,16 @@ if [ -n "${BF_ADB:-}" ]; then
     "$BF_ADB_PATH" shell "su -c 'cp /data/local/tmp/powos-bf-cfg-phone.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-steam-compat /data/powos/root/var/tmp/; chmod 644 /data/powos/root/var/tmp/powos-bf-cfg-phone.sh /data/powos/root/var/tmp/powos-steam-compat; sh /data/powos/powos-run.sh \"APP=${APP:-274190} bash /var/tmp/powos-bf-cfg-phone.sh $*\"'" 2>&1 | grep -v sysvipc | tr -d '\r'; }
   cfg_set() { [ -n "$CFG_TO" ] || return 0; pill "setup cfg:$CFG_TO (closing Steam)"; cfg_run set "$CFG_TO"; }
   cfg_restore() { [ -n "$CFG_TO" ] || return 0; cfg_run restore; }
+  # INPUT=touch|key|pad (bf-pacing.sh, bf-checker.sh; oti-cap 11-06): does a player who touches / only uses keys see
+  # 120? ColorOS's touch idle drops SurfaceFlinger to 60 Hz 2.5 s after the last touch. input_inject <secs> starts one
+  # phone-side loop injecting a tap (screen centre) / keyboard key (SCROLL_LOCK) / gamepad button (THUMBL) every ~1 s
+  # for <secs> s (`input`: no touch IRQ, so the checks' own touch abort stays quiet). Nothing when INPUT is unset.
+  input_check() { case ${INPUT:-} in ''|touch|key|pad) ;; *) echo "INPUT: touch, key or pad"; return 2 ;; esac
+    [ -z "${INPUT:-}" ] || echo "input probe: INPUT=$INPUT, one event/s over the measurement"; }
+  input_inject() { local ev
+    case ${INPUT:-} in touch) ev='input tap 558 1242' ;; key) ev='input keyboard keyevent KEYCODE_SCROLL_LOCK' ;;
+      pad) ev='input gamepad keyevent KEYCODE_BUTTON_THUMBL' ;; *) return 0 ;; esac
+    "$BF_ADB_PATH" shell "nohup sh -c 'e=\$((\$(date +%s) + $1)); while [ \$(date +%s) -lt \$e ]; do $ev; sleep 1; done' >/dev/null 2>&1 &"; }
   return 0
 fi
 # APP / GAME / WIN_NAME: the game under test - any Steam app id (default 274190, Broforce, the test case); GAME =
