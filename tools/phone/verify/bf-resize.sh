@@ -6,10 +6,17 @@
 # -> the inner screen - instead of keeping its launch size letterboxed (0017; the user saw Broforce at 496x1104
 # portrait in a 2484x1116 landscape task, touches beside it "outside its input region").
 # Steps (one free window, the user's phone handed over): Broforce up (bf-fold-phone.sh start: open-task, a frozen one
-# of the user's resumed) -> unfolded (state 3) -> rotated landscape (user_rotation 1) -> folded (state 0, cover,
-# landscape) -> cover portrait (user_rotation 0) -> unfolded again. Each step: the X window's aspect (xwininfo, bf-fold-
-# phone.sh state geom) matches the screen's (shot.sh: the full-screen task fills it) within 4% = "resized"; the window
-# still drawing (xframes count) = the game follows; screencap edge bars (a note: dark art reads as bars too).
+# of the user's resumed; GRACE_S=0 - no 130 s wait for the sleep grace, which ran the 10-28 check out of its budget)
+# -> unfolded (state 3, inner 2268x2440) -> rotated landscape (user_rotation 1) -> folded (state 0, cover 2484x1116
+# landscape) -> cover portrait (user_rotation 0, 1116x2484) -> unfolded again. Each step (board steps G1-G3):
+#   G1 the X window's size (xwininfo, bf-fold-phone.sh state geom) IS the screen's (shot.sh) within 1 % per side - the
+#      game renders at its container's size, no scaling (an aspect-only match let a half-size window pass);
+#   G2 it gets there by itself after the change: polled every ~1 s for SETTLE_S (12) s, the time logged ("settled
+#      N s"; Unity maps 314x208 first and goes full screen later), and the window still drawing (xframes count);
+#   G3 the game's layer is what SurfaceFlinger composes full screen (bf-onscreen.sh: own task or home's full-screen web
+#      window, logged as how=task|web - unfolded the game is a web window, folded its own task), and screencap edge
+#      bars logged (a note, not a verdict: dark art reads as bars too; bf-checker.sh base scores black columns).
+# G4 (controller layout per orientation) is pad-fullscreen.sh's.
 # Rotation and device state are always put back. Not covered: a floating task's drag-resize (no scripted drag yet).
 # Exit 3 = no window / user input. KWIN_MIN default 6.7.5-3.37 (queue kwin-install.sh 6.7.5-3.37 before it).
 set -uo pipefail
@@ -24,9 +31,9 @@ WL_TRAP='restore'
 trap 'restore; [ "${WL_LOCK:-}" ] && rm -rf "$WL_LOCK"' EXIT
 log() { echo "$(date +%T) $*" | tee -a "$OUT/run.txt"; }
 BF_ADB=$A . "$here/bf-lib.sh"
-for f in bf-fold-phone.sh bf-stop.sh bf-lib.sh bf-xframes.py; do "$A" push "$here/$f" "/data/local/tmp/powos-$f" >/dev/null || { echo "ENV: can't push $f to the phone (a stale /data/local/tmp copy would run instead)"; exit 5; }; done
+for f in bf-fold-phone.sh bf-stop.sh bf-lib.sh bf-xframes.py bf-onscreen.sh; do "$A" push "$here/$f" "/data/local/tmp/powos-$f" >/dev/null || { echo "ENV: can't push $f to the phone (a stale /data/local/tmp copy would run instead)"; exit 5; }; done
 "$A" shell "su -c 'cd /data/local/tmp && cp powos-bf-fold-phone.sh powos-bf-stop.sh powos-bf-lib.sh powos-bf-xframes.py /data/powos/root/var/tmp/ && chmod 644 /data/powos/root/var/tmp/powos-bf-*'"
-ph() { "$A" shell "su -c 'sh /data/powos/powos-run.sh \"APP=$APP WIN_NAME=$WIN_NAME bash /var/tmp/powos-bf-fold-phone.sh $*\"'" | tr -d '\r'; }
+ph() { "$A" shell "su -c 'sh /data/powos/powos-run.sh \"APP=$APP WIN_NAME=$WIN_NAME GRACE_S=0 bash /var/tmp/powos-bf-fold-phone.sh $*\"'" | tr -d '\r'; }
 irq() { "$A" shell "cat /proc/interrupts" | awk '/touch-0/{s+=$2+$3+$4+$5+$6+$7+$8+$9} END{print s}'; }
 I0=$(irq); touched() { [ "$(irq)" != "$I0" ] && { log "user input - stopping"; return 0; }; return 1; }
 printf 'v=$(pacman -Q kwin | cut -d" " -f2); echo "$v $(vercmp "$v" %s)"\n' "$MIN" > "$OUT/q.sh"
@@ -49,22 +56,29 @@ bars() {  # black rows/columns at each edge of a screencap
       i = rev ? n - k : k + 1; if (a[i] > 12) return k }; return n }
     BEGIN { printf "top=%d bottom=%d left=%d right=%d\n", edge(r, 0), edge(r, 1), edge(c, 0), edge(c, 1) }'; }
 fails=0 sizes=
+SETTLE_S=${SETTLE_S:-12}
+fits() {  # fits <win WxH> <screen WxH>: the same size within 1 % per side (G1: no scaling, not just the same shape)
+  awk -v g="$1" -v s="$2" 'BEGIN { split(g, a, "x"); split(s, b, "x"); dw = a[1] - b[1]; dh = a[2] - b[2]
+    ok = (b[1] + 0 > 0) && (b[2] + 0 > 0) && (dw * dw * 10000 <= b[1] * b[1]) && (dh * dh * 10000 <= b[2] * b[2]); exit !ok }'; }
 probe() {  # probe <label>
-  local st g c s wh bad=
+  local st g c s wh bad= t0 dt on
   pill "$1: the game's window vs its screen"
-  st=$(ph state); c=$(ph changes 3)
-  g=$(echo "$st" | grep -o 'geom=[0-9]*x[0-9]*' | cut -d= -f2)
-  if "$P/shot.sh" "$OUT/$1.png" >/dev/null 2>&1; then
-    wh=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0:s=x "$OUT/$1.png"); s=$(bars "$OUT/$1.png")
-  else wh=; s="no screencap"; fi
-  log "$1: $st $c screen=${wh:--} $s"
-  sizes+=" $1=${g:--}"
+  if "$P/shot.sh" "$OUT/$1-0.png" >/dev/null 2>&1; then
+    wh=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0:s=x "$OUT/$1-0.png")
+  else wh=; fi
+  t0=$(date +%s); st=$(ph state); g=$(echo "$st" | grep -o 'geom=[0-9]*x[0-9]*' | cut -d= -f2)
+  while [ -n "$wh" ] && ! fits "${g:-0x0}" "$wh" && [ $(($(date +%s) - t0)) -lt "$SETTLE_S" ]; do
+    sleep 1; st=$(ph state); g=$(echo "$st" | grep -o 'geom=[0-9]*x[0-9]*' | cut -d= -f2); done
+  dt=$(($(date +%s) - t0))
+  c=$(ph changes 3)
+  on=$("$A" shell sh /data/local/tmp/powos-bf-onscreen.sh | tr -d '\r'); set -- "$1" $on
+  if "$P/shot.sh" "$OUT/$1.png" >/dev/null 2>&1; then s=$(bars "$OUT/$1.png"); else s="no screencap"; fi
+  log "$1: $st $c screen=${wh:--} settled=${dt}s how=${4:-none} $s"
+  sizes+=" $1=${g:--}/${wh:--}"
   [[ $st == *reaper=-* ]] && bad+=" game-gone"
   [ -n "$g" ] && [ -n "$wh" ] || bad+=" no-geometry"
-  if [ -n "$g" ] && [ -n "$wh" ]; then
-    awk -v g="$g" -v s="$wh" 'BEGIN { split(g, a, "x"); split(s, b, "x"); d = (a[1] / a[2]) / (b[1] / b[2]); exit !(d > 0.96 && d < 1.04) }' \
-      || bad+=" window-${g}-not-the-screen's-shape-${wh}"
-  fi
+  [ -n "$g" ] && [ -n "$wh" ] && ! fits "$g" "$wh" && bad+=" G1-window-${g}-is-not-the-screen-${wh}-after-${SETTLE_S}s"
+  [ "${3:-0}" -ge 1 ] 2>/dev/null || bad+=" G3-no-full-screen-game-layer(${on:-?})"
   [ "${c#changes=}" -ge 3 ] 2>/dev/null || bad+=" not-drawing"
   [ -n "$bad" ] && { fails=$((fails + 1)); log "  $1 bad:$bad"; }
   return 0

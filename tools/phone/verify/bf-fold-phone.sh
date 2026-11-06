@@ -3,7 +3,8 @@
 #   bf-fold-phone.sh state         one line: reaper=<pid|-> win=<id|-> geom=<WxH+X+Y|-> frozen=<yes|no> root=<WxH>
 #   bf-fold-phone.sh start         Broforce up the way the user starts it (bf-lib step_launch: powos-open-task, its
 #                                  window as its own task in front; one the user left frozen is resumed), past the
-#                                  2 min sleep grace; prints mine=1 when this started it (bf-stop.sh closes it after),
+#                                  2 min sleep grace (GRACE_S, default 130; bf-resize.sh passes 0: a resize check doesn't
+#                                  need the automatic sleep, and the wait was 130 s of its 300 s budget); prints mine=1 when this started it (bf-stop.sh closes it after),
 #                                  mine=0 for the user's (refreeze puts it back); "FAIL launch: ..." when it didn't come
 #   bf-fold-phone.sh changes <s>   changes=<n>: distinct samples of the game's window over <s> s (bf-lib xframes count,
 #                                  10 a second; ffmpeg's x11grab gets no frame on Android: no MIT-SHM)
@@ -31,7 +32,7 @@ start)
   cd "$HOME"; LAUNCH_S=200 . /var/tmp/powos-bf-lib.sh; trap - HUP TERM INT
   step_launch || { echo "mine=$mine"; exit 1; }
   # Past the start grace (2 min from the game's reaper), so the fold meets the automatic sleep as a player would.
-  e=$(ps -o etimes= -p "$(reaper)" | tr -d ' '); [ "${e:-0}" -lt 130 ] && sleep $((130 - ${e:-0}))
+  g=${GRACE_S:-130}; e=$(ps -o etimes= -p "$(reaper)" | tr -d ' '); [ "$g" -gt 0 ] && [ "${e:-0}" -lt "$g" ] && sleep $((g - ${e:-0}))
   sleep 5; rm -rf "$T"; echo "mine=$mine" ;;
 changes)
   w=$(gamewin); [ -n "$w" ] || { echo "changes=0 (no window)"; exit 0; }
