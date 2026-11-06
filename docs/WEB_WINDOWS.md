@@ -823,3 +823,12 @@ With the APK installed, unfolded, `powos_web_windows` = 1 and the user idle: ope
   desktop consumer still decides. Popup placement itself was right: drawn relative to the toplevel's client area.
 - **Home restart:** windows are handed back as tasks; re-adopting them as web windows when home returns (KWin's
   `session` list) is open.
+- **App restart / KWin restart (kwin 0060, 2026-11-06):** an app restart (APK install, force-stop, crash) takes the
+  display daemon down and every window task goes back to KWin's desktop ("lost the display daemon"). KWin kept the old
+  app's `export-new 1`, so the new app's `export-new 1` was a no-op and no sweep ran: every Linux window stayed on the
+  hidden desktop (no task, no web window, no `powos-ww-*-linux` layer) until a session restart. KWin now forgets the
+  app's `export-new` when its daemon goes and on its `hello`, so the re-told one sweeps the windows out again (each is
+  offered to home's web windows). A window shown as a task also drops its desktop mark (0025/0034): Dolphin, marked
+  during a moment the Plasma app was on screen, skipped every later sweep. A new KWin starts with `export-new` off and
+  sweeps the Qt clients that reconnect. Check: `tools/phone/verify/kwin-restart-windows.sh` (both restarts, Kate +
+  Dolphin back live with their layers within 20 s, Dolphin's body not a flat fill).

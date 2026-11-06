@@ -1,0 +1,93 @@
+From a023cb74e99e3321b1fc8d03b442a6301b0200d7 Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Fri, 6 Nov 2026 22:35:05 +0100
+Subject: [PATCH] backends/anland: Linux windows the app lost come back as
+ tasks when it is back
+
+An app restart (an APK install, a force-stop, a crash) takes its display daemon down: every window task goes
+back to KWin's desktop ("lost the display daemon"). The new app's control channel says hello and "export-new 1"
+again - but KWin still had export-new on from the old process, so setExportNew(true) was a no-op, its sweep never
+ran, and every Linux window the old app showed stayed on the hidden desktop: no task, no web window, no layer,
+until a session restart. Now the app's going (its daemon's end of the control socket closed) and its hello forget
+its export-new, so the re-told "export-new 1" sweeps those windows out into tasks again (the new app offers each
+to home's web windows).
+
+A window shown as a task (the PowOS launcher's show, or an export) is no longer the desktop's: a desktop mark
+from a moment the Plasma app was on screen (0034's never-live task) made it skip every later sweep - Dolphin,
+marked at 16:46 on 2026-11-06 and then shown from the launcher, was gone for good after the next app restart.
+---
+ src/backends/anland/anland_window_task.cpp | 23 ++++++++++++++++++++++
+ src/backends/anland/anland_window_task.h   |  2 ++
+ 2 files changed, 25 insertions(+)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 3e30626..c64d505 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -1563,6 +1563,10 @@ void AnlandWindowTasks::onControlReadable()
+     const ssize_t n = ::recv(m_controlFd, buf, sizeof(buf), MSG_DONTWAIT);
+     if (n == 0 || (n < 0 && errno != EAGAIN && errno != EINTR)) {
+         // The daemon went away (the app restarted): reconnect.
++        // PowOS (0060): what the app said goes with it. Its window tasks went back to the desktop (each one's "lost the
++        // display daemon"); the new app's "export-new 1" must sweep them out again - kept "on", it was a no-op and
++        // every Linux window the old app showed stayed on the hidden desktop until a session restart.
++        forgetApp("its daemon went away");
+         m_controlNotifier->setEnabled(false);
+         m_controlNotifier->deleteLater();
+         m_controlNotifier = nullptr;
+@@ -1609,6 +1613,9 @@ void AnlandWindowTasks::handleLine(const QString &line)
+     }
+     if (f[0] == QLatin1String("hello")) {
+         // The app's control channel (re)connected after ours: the daemon dropped what we said while it was away.
++        // PowOS (0060): a new app process (or its channel back) re-tells "export-new"/"desktop" after "caps": from
++        // nothing, so "export-new 1" sweeps every window it doesn't show yet into a task again.
++        forgetApp("the app's channel said hello");
+         announce();
+         return;
+     }
+@@ -1945,6 +1952,14 @@ void AnlandWindowTasks::setExportNew(bool on)
+     }
+ }
+ 
++void AnlandWindowTasks::forgetApp(const char *why)
++{
++    if (m_exportNew) {
++        qCInfo(KWIN_ANLAND) << "new windows as tasks: forgotten until the app says again (" << why << ")";
++    }
++    m_exportNew = false;
++}
++
+ void AnlandWindowTasks::setDesktopShown(bool on)
+ {
+     if (on == m_desktopShown) {
+@@ -2130,6 +2145,14 @@ bool AnlandWindowTasks::show(Window *window, bool fullScreen)
+         send(open);
+         return true;
+     }
++    // PowOS (0060): shown as a task (the PowOS launcher's show, or an export), it is PowOS's window now, not the
++    // desktop's. Its desktop mark from a moment the Plasma app was on screen (a task that never went live there, 0034)
++    // made it skip every later "export-new" sweep: after an app restart gave it back to the desktop, Dolphin never came
++    // back (2026-11-06 16:46: "window ... Dolphin stays on the desktop", later task 32 "lost the display daemon", gone).
++    if (ownedByDesktop(window)) {
++        window->setProperty("powosDesktopOwned", false);
++        qCInfo(KWIN_ANLAND) << "window" << window->caption() << "is a task now: no longer the desktop's";
++    }
+     const uint32_t id = m_nextId++;
+     auto *task = new AnlandWindowTask(this, window, id, fullScreen);
+     m_tasks.insert(id, task);
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 5d699cf..e5c27bb 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -349,6 +349,8 @@ private:
+     void handleLine(const QString &line);
+     void quit(AnlandWindowTask *task);
+     void setExportNew(bool on);
++    /** The app went or came back (its daemon gone, its "hello"): its "export-new" forgotten, so its next one sweeps (0060). */
++    void forgetApp(const char *why);
+     /** The app's "desktop 1|0": the desktop (the Plasma app) is on screen; its windows stay on it ([ownedByDesktop]). */
+     void setDesktopShown(bool on);
+     /** [window] is the desktop's: seen on it while it was on screen, never exported by itself (export-new, maximize). */
+-- 
+2.50.1 (Apple Git-155)
+
