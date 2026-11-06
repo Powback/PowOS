@@ -1,0 +1,158 @@
+diff --git a/src/backends/anland/anland_backend.cpp b/src/backends/anland/anland_backend.cpp
+index 606c476..6e6023e 100644
+--- a/src/backends/anland/anland_backend.cpp
++++ b/src/backends/anland/anland_backend.cpp
+@@ -584,14 +584,45 @@ void AnlandBackend::enterFallback()
+     }
+ }
+ 
++// PowOS (kwin 0059): try_exit_fallback() asks the daemon for a consumer once and never waits for the answer (its
++// poll of up to 100 ms per 200 ms tick ran on this thread for as long as the desktop had no consumer - behind every
++// full-screen game task: KWin stopped half the time, the game's frame callbacks came ~100 ms late 4-5 times a second).
++// The answer arrives on ctrl_fd: watched here while in fallback, so a returning consumer is picked up at once, not on
++// the next tick. Level-triggered, so it is disabled around the call and dropped once live (or its fd went: redial).
++void AnlandBackend::watchCtrl()
++{
++    const int fd = (m_inFallback && m_display) ? get_ctrl_fd(m_display) : -1;
++    if (m_ctrlNotifier && (fd < 0 || fd != m_ctrlNotifierFd)) {
++        m_ctrlNotifier->setEnabled(false);
++        m_ctrlNotifier->deleteLater(); // may be the notifier whose activation got us here
++        m_ctrlNotifier = nullptr;
++        m_ctrlNotifierFd = -1;
++    }
++    if (fd < 0) {
++        return;
++    }
++    if (!m_ctrlNotifier) {
++        auto *notifier = new QSocketNotifier(fd, QSocketNotifier::Read, this);
++        m_ctrlNotifier = notifier;
++        m_ctrlNotifierFd = fd;
++        connect(notifier, &QSocketNotifier::activated, this, [this, notifier]() {
++            notifier->setEnabled(false);
++            onReconnectTimer(); // calls watchCtrl() again: re-enabled, replaced or gone
++        });
++    }
++    m_ctrlNotifier->setEnabled(true);
++}
++
+ void AnlandBackend::onReconnectTimer()
+ {
+     if (!m_inFallback) {
+         m_reconnectTimer->stop();
++        watchCtrl();
+         return;
+     }
+ 
+     if (try_exit_fallback(m_display) != 0) {
++        watchCtrl(); // PowOS (0059): the daemon's answer (a consumer came) wakes us before the next tick
+         return; // still down, keep retrying
+     }
+ 
+@@ -599,6 +630,7 @@ void AnlandBackend::onReconnectTimer()
+     m_inFallback = false;
+     m_consumerReady = false;
+     m_reconnectTimer->stop();
++    watchCtrl(); // PowOS (0059): live - ctrl_fd no longer watched
+ 
+     // try_exit_fallback() already received a fresh dmabuf set. Import it into the
+     // layer (which arms an infinite/full-output repaint on every rotation buffer),
+diff --git a/src/backends/anland/anland_backend.h b/src/backends/anland/anland_backend.h
+index 388102c..3a5d5da 100644
+--- a/src/backends/anland/anland_backend.h
++++ b/src/backends/anland/anland_backend.h
+@@ -129,6 +129,7 @@ private:
+     void processInputEvent(const InputEvent &ev);
+     QPointF mapInputToLogical(const QPointF &devicePoint) const;
+     void onReconnectTimer();
++    void watchCtrl(); // PowOS (0059): the daemon's answer to the fallback's fd request wakes onReconnectTimer
+     void enterFallback();
+ 
+     // Clipboard sync — bidirectional bridge between KWin selection / consumer
+@@ -169,6 +170,9 @@ private:
+     QSocketNotifier *m_inputNotifier = nullptr;
+     QSocketNotifier *m_bufReadyNotifier = nullptr;
+     QTimer *m_reconnectTimer = nullptr;
++    // PowOS (0059): ctrl_fd while in fallback (try_exit_fallback no longer waits on it: the answer wakes us instead)
++    QSocketNotifier *m_ctrlNotifier = nullptr;
++    int m_ctrlNotifierFd = -1;
+ 
+     bool m_consumerReady = false;
+     bool m_inFallback = false;
+diff --git a/src/backends/anland/display_producer.c b/src/backends/anland/display_producer.c
+index 176c414..e2a3a83 100644
+--- a/src/backends/anland/display_producer.c
++++ b/src/backends/anland/display_producer.c
+@@ -43,6 +43,9 @@ struct display_ctx {
+     char    *socket_path;
+     uint32_t surface_id;
+     bool     redialing;
++    /* PowOS (kwin 0059): a PICKUP_FDS is out on ctrl_fd and the daemon hasn't answered (it answers once a consumer is
++     * there, try_deliver_fds): try_exit_fallback() asks once and only looks for the answer after that. */
++    bool     pickup_asked;
+ };
+ 
+ /*
+@@ -575,6 +578,7 @@ static void drop_ctrl(display_ctx *ctx)
+         close(ctx->ctrl_fd);
+     ctx->ctrl_fd = -1;
+     ctx->redialing = false;
++    ctx->pickup_asked = false; /* PowOS (0059): the new daemon gets its own request */
+ }
+ 
+ /*
+@@ -605,9 +609,10 @@ static int redial(display_ctx *ctx)
+         ctx->redialing = true;
+     }
+     struct pollfd pfd = { .fd = ctx->ctrl_fd, .events = POLLIN };
+-    int r = poll(&pfd, 1, HANDSHAKE_TIMEOUT_MS);
+-    if (r == 0)
+-        return -1; // answer still pending: next tick
++    // PowOS (kwin 0059): no wait on KWin's thread - the backend watches ctrl_fd in fallback, so the answer wakes it.
++    int r = poll(&pfd, 1, 0);
++    if (r == 0 || (r < 0 && errno == EINTR))
++        return -1; // answer still pending: when it comes (or the next tick)
+     if (r < 0 || connect_to_deamon_finish(ctx) < 0) {
+         drop_ctrl(ctx);
+         return -1;
+@@ -626,7 +631,26 @@ int try_exit_fallback(display_ctx *ctx)
+         return -1;
+ 
+     // Step 1: ask the daemon to hand over the consumer-side fds.
+-    if (pickup_fds(ctx, true) < 0) {
++    // PowOS (kwin 0059): once, then look for its answer without waiting. The daemon keeps the request until a consumer
++    // deposits its fds, so there is nothing to ask again on the next tick - and the old ask-and-poll(100 ms) per 200 ms
++    // reconnect tick ran on KWin's main thread for as long as the desktop had no consumer (every full-screen game task
++    // on the cover: home not shown): KWin stopped for 100 ms of every 200 ms, the game's frame callback came 100 ms
++    // late each time (Xwayland's 100 ms frame timeouts, ~4-5/s, at 40 and at 66 fps alike: Broforce's p95 104 ms
++    // frames, commit -> drawn max ~110 ms in every 5 s, 2026-11-06).
++    if (!ctx->pickup_asked) {
++        struct ctrl_msg hdr = { .type = CTRL_MSG_PICKUP_FDS, .size = 0 };
++        if (send_all(ctx->ctrl_fd, &hdr, sizeof(hdr)) < 0) {
++            drop_ctrl(ctx); // the next call dials the new daemon
++            return -1;
++        }
++        ctx->pickup_asked = true;
++    }
++    struct pollfd pfd = { .fd = ctx->ctrl_fd, .events = POLLIN };
++    int ready = poll(&pfd, 1, 0);
++    if (ready == 0 || (ready < 0 && errno == EINTR))
++        return -1; // no consumer yet: the answer comes on a later tick
++    ctx->pickup_asked = false;
++    if (pickup_fds(ctx, false) < 0) {
+         release_consumer_resources(ctx);
+         if (ctrl_dead(ctx))
+             drop_ctrl(ctx); // the next call dials the new daemon
+diff --git a/src/backends/anland/display_producer.h b/src/backends/anland/display_producer.h
+index 7109be7..aa00a89 100644
+--- a/src/backends/anland/display_producer.h
++++ b/src/backends/anland/display_producer.h
+@@ -92,7 +92,8 @@ bool is_fallback(display_ctx *ctx);
+  * dmabuf set (the consumer sends the dmabufs right after the fd handshake). Clears
+  * fallback only when BOTH the fds and the dmabufs are in hand, so on a 0 return the
+  * dmabufs are ready to import right away. Returns 0 on success, -1 if there is
+- * still no consumer (stays in fallback; safe to retry on the next tick). */
++ * still no consumer (stays in fallback; safe to retry on the next tick). PowOS (0059): never waits for a consumer -
++ * asks once and returns at once until the daemon's answer is there (it runs on KWin's main thread). */
+ int  try_exit_fallback(display_ctx *ctx);
+ 
+ int  get_data_fd(display_ctx *ctx);

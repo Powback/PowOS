@@ -79,6 +79,12 @@
 #               full screen, one window, linear XR24/AR24 of the task's size) with the client's own dma-buf
 #               (FRAME_TAG_DIRECT, fd once per buffer) instead of compositing, holds that buffer until DIRECT_RELEASE,
 #               forgets destroyed buffers, composites any other frame. Without the consumer's caps: unchanged.
+#   0059        ours (3.67): the desktop's reconnect never waits on KWin's thread - try_exit_fallback() asked the daemon
+#               for a consumer and poll()ed up to 100 ms for it on every 200 ms tick, for as long as the desktop had none
+#               (behind every full-screen game task): KWin's main thread stopped half the time and the game's frame
+#               callbacks came ~100 ms late 4-5x/s (Xwayland's 100 ms frame timeouts, Broforce p95 104 ms). Now it asks
+#               once (the daemon keeps the request until a consumer deposits its fds), never waits, and a QSocketNotifier
+#               on ctrl_fd in fallback wakes the reconnect when the answer comes; redial's answer likewise.
 #
 # HACK: same pkgname as Arch's kwin with pkgrel 3.1 (makepkg allows only integer[.integer]; ".1" = ours), so every Plasma package's
 # "depends=(kwin)" is satisfied by ours and pacman sees it as newer than 6.7.5-3. The real fix is
@@ -88,7 +94,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.66
+pkgrel=3.67
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -161,11 +167,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0054-backends-anland-a-shown-keyboard-moves-to-a-window-task-s-own-consumer-when-it-goes-live.patch
           0056-backends-anland-a-task-s-window-is-made-active-on-its-task-s-focus-and-activation-stays-off-the-tasks-desktop.patch
           0057-backends-anland-a-window-task-measures-its-composite-and-how-often-the-client-s-buffer-could-go-direct.patch
-          0058-backends-anland-a-full-screen-window-task-sends-the-client-s-buffer-direct-when-the-consumer-shows-it.patch)
+          0058-backends-anland-a-full-screen-window-task-sends-the-client-s-buffer-direct-when-the-consumer-shows-it.patch
+          0059-backends-anland-the-desktop-s-reconnect-never-waits-on-KWin-s-thread.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver

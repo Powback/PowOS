@@ -154,6 +154,31 @@ After: pending the APK ship, then `queue.sh add --screen cover broforce-fps-low-
 the game's presents (the game then sets the rate: its main thread was ~30 %, so well past 60). If timeouts stay, the
 stall is SurfaceFlinger not releasing (the consumer's free-buffer wait p90 says so) - next lever there.
 
+## The 100 ms stalls: KWin's own reconnect poll (2026-11-06, agent games-120-b)
+
+After games-120 (panel 120 Hz, consumer min+3 buffers, 0 dequeue timeouts) the cover still showed
+`layers base: game 66.1 > xwayland 66.0 (cb 61.8, timeouts 4.2/s) > kwin 67.1 (commit->drawn p50 1 p90 8 ms) >
+consumer 67.4 (5 bufs, ... 0.0 timeouts/s) > sf 65.1 > panel 120 Hz`, frame ms p50 7.5 / p95 104 (job
+20261105-235740-47903, app c995b83c). SurfaceFlinger's present times (A1.txt) are **two states, not a slow game**:
+runs at 116 fps (frame mean 8.6 ms = the 120 Hz vsync) cut by a ~100 ms stall (median 99.6 ms) every ~200 ms (189-209
+ms apart, at 40 fps before and at 66 now alike) - 48 % of the time stalled. KWin's `commit -> drawn max` was ~110 ms
+in every 5 s line, so KWin itself held a damaged game frame that long.
+
+Cause: the **desktop** output's reconnect. Behind a full-screen game task the desktop has no consumer (home is not
+shown: "no desktop consumer: the output follows the window tasks' screen" in the session log), so AnlandBackend sits in
+fallback and its 200 ms `m_reconnectTimer` calls `try_exit_fallback()` - which sent PICKUP_FDS and `poll()`ed up to
+`HANDSHAKE_TIMEOUT_MS` (100 ms) for the answer **on KWin's main thread**. KWin stopped for 100 ms of every 200: no
+draw, no frame callback; Xwayland's 100 ms TIMER_LEN_FLIP_KGSL then fired (the 4.2 timeouts/s), the game's next
+frame went out and KWin drew both. The display daemon already keeps a PICKUP_FDS until a consumer deposits its fds
+(`try_deliver_fds`), so asking again each tick was never needed.
+
+Fix (kwin 6.7.5-3.67, **0059**): `try_exit_fallback()` asks once (`pickup_asked`, reset with the daemon connection)
+and only checks for the answer (`poll(..., 0)`); redial's HELLO answer likewise. A QSocketNotifier on ctrl_fd while
+in fallback (`AnlandBackend::watchCtrl`) runs the reconnect as soon as the answer comes, so a returning home is picked
+up at once instead of on the next tick. Cap (2) of the brief - what holds the game at ~66 - is the same stall: the
+game is not CPU/GPU-capped below 120 (between stalls it presents at the panel's 116-120; main thread 38 % of a core,
+UnityGfxDeviceW 12 %, GPU busy 60 % at 374 of 680 MHz, skin 38.1 -> 38.4 C, no Unity/DXVK cap: async presents).
+
 ## How to re-measure
 
 `tools/phone/adb.sh shell "su -c 'sh -s'" < design-qa/bf-fps-20261103/sample.sh` (30 s, read-only; divide the
