@@ -4,6 +4,7 @@
 # bugged / don't load" (11-07 00:2x: "we really need to benchmark and fix all the window handling", "focus on
 # performance atm", "no windows not loading etc"), each with a PASS budget. Runs in the verify queue's idle window:
 #   queue.sh add <task> tools/phone/verify/window-bench.sh [--apps "kate dolphin konsole calc settings"] [--no-fold]
+#   STRESS_N=20 (default) open/switch/close cycles first - the storm (see 0. below); STRESS_N=0 skips it.
 # Linux apps (Kate, Dolphin, Konsole: KWin -> web window) and Android web windows (Calculator, Settings: a virtual
 # display mirrored into home's page), on the unfolded home, opened through home's own launch path (state.ts launch,
 # what a dock/drawer tap runs). Measured (in-page times are performance.now() in home's page, frame-exact; "drawn" is a
@@ -164,6 +165,93 @@ RUN=""; for a in $APPS; do
 done
 [ -n "$RUN" ] || { echo "ENV: no app to bench"; exit 5; }
 log "apps: $RUN"
+
+# 0. THE STORM (the user 11-07: "rapidly opening and closing apps seeing how responsive everything is measuring
+# framedrops etc"): STRESS_N cycles at user speed (one per ~STRESS_PACE_S s). Cycle k opens app k (round robin over
+# the apps), then taps the bar of the window cycle k-1 opened (switch: it comes on top) and closes it by its close
+# button - so one or two windows are up at any time. Per cycle: tap -> frame (first visual response), tap -> live,
+# switch, close -> gone; home's frames over the cycle (rAF: dropped frames = missed 16.7 ms vsyncs, janky = > 25 ms,
+# p95/p99). Then: leaks (web windows, host windows, ww layers, tasks, PSS before vs after), stuck/blank windows, and
+# whether it slows down (last third vs first third of open->live).
+STRESS_N=${STRESS_N:-20}; STRESS_PACE_S=${STRESS_PACE_S:-1.5}
+STORM_P95_MS=${STORM_P95_MS:-25}; STORM_DROP=${STORM_DROP:-6}; SLOWDOWN=${SLOWDOWN:-1.5}
+leakstate() {   # "pagewins hostwins wwlayers tasks pss_kb"
+  local pw hw ly tk ps
+  pw=$(ev "document.querySelectorAll('.webwindow[data-wwid]').length")
+  hw=$(hcall webwindows.list "[]" "l=>String(l.length)")
+  ly=$(sh_ "dumpsys SurfaceFlinger --list" | grep -cE "powos-ww-[0-9]+")
+  tk=$(tasks | grep -cE "$E2E_APPS")
+  ps=$(sh_ "dumpsys meminfo com.powos.app" | awk '/TOTAL PSS:/{print $3; exit} /^ *TOTAL /{print $2; exit}')
+  echo "$pw $hw $ly $tk ${ps:-0}"
+}
+storm() {
+  local apps=() a k i prev="" previd="" r id fr lv t sw cl nm drop
+  for a in $RUN; do apps+=("$a"); done
+  [ ${#apps[@]} -ge 1 ] || return 0
+  S0=$(leakstate); log "storm: before (page host layers tasks pss) $S0"
+  sh_ "dumpsys gfxinfo com.powos.app reset" >/dev/null
+  printf 'cycle\tapp\tframe_ms\tlive_ms\tswitch_ms\tclose_ms\tdrop\tjank\tp95\tp99\tfps\n' > "$OUT/storm.tsv"
+  # home's frames through the whole storm, marked per cycle (window.__wbS).
+  ev "(()=>{const S=window.__wbS={t:[],m:[],on:true};const f=n=>{S.t.push(n);if(S.on)requestAnimationFrame(f)};requestAnimationFrame(f);return 'on'})()" >/dev/null
+  for i in $(seq 1 "$STRESS_N"); do
+    chk "storm $i"; a=${apps[$(((i - 1) % ${#apps[@]}))]}; eval "k=\$KEY_$a"
+    ev "(window.__wbS.m.push(performance.now()),'ok')" >/dev/null
+    t=$(nowms); r=$(open_js "$k")
+    id=$(jget "$r" "$k" id); fr=$(jget "$r" "$k" frame); lv=$(jget "$r" "$k" live)
+    [ -n "$id" ] && [ "$id" != None ] && MINEW="$MINEW w$id" || id=""
+    { [ -z "$lv" ] || [ "$lv" -lt 0 ] 2>/dev/null; } && { fail "NOT LOADING storm $i $a: never live ($(jget "$r" "$k" failed))"; lv=-; }
+    sw=-; cl=-
+    if [ -n "$previd" ] && [ "$(wwhost "$previd" gone)" != true ]; then
+      p=$(barpt "$previd")
+      if [ -n "$p" ]; then
+        ev "$WW.then(([m])=>{window.__wbSw=null;let t0=0;document.addEventListener('pointerdown',e=>{t0=e.timeStamp},{capture:true,once:true});const t1=performance.now();const f=()=>{const top=m.webWins.value.at(-1);if(t0&&top&&top.id===${previd#w}){window.__wbSw=String(Math.round(performance.now()-t0));return}if(performance.now()-t1>2000){window.__wbSw='-';return}requestAnimationFrame(f)};requestAnimationFrame(f);return 'armed'})" >/dev/null
+        set -- $p; sh_ "input tap $1 $2"; sleep 0.25; sw=$(ev 'String(window.__wbSw)')
+      fi
+      p=$(wwpt "$previd" .ww-close)
+      if [ -n "$p" ]; then
+        ev "(()=>{window.__wbCl=null;let t0=0;document.addEventListener('pointerdown',e=>{t0=e.timeStamp},{capture:true,once:true});const t1=performance.now();const f=()=>{if(t0&&!document.querySelector('.webwindow[data-wwid=\"${previd#w}\"]')){window.__wbCl=String(Math.round(performance.now()-t0));return}if(performance.now()-t1>2000){window.__wbCl='-';return}requestAnimationFrame(f)};requestAnimationFrame(f);return 'armed'})()" >/dev/null
+        set -- $p; offpill "$1" "$2" "close" && sh_ "input tap $1 $2"; sleep 0.25; cl=$(ev 'String(window.__wbCl)')
+      else hcall webwindows.close "[${previd#w}]" "()=>'ok'" >/dev/null; fi
+    fi
+    # Pace: one cycle per STRESS_PACE_S s at least (user speed), never faster.
+    nm=$(( $(nowms) - t )); awk -v n="$nm" -v p="$STRESS_PACE_S" 'BEGIN{exit !(n < p*1000)}' && sleep "$(awk -v n="$nm" -v p="$STRESS_PACE_S" 'BEGIN{print (p*1000-n)/1000}')"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$i" "$a" "${fr:--}" "$lv" "$sw" "$cl" >> "$OUT/storm.part"
+    log "storm $i $a: frame ${fr:--} live $lv switch $sw close $cl ms (prev ${previd:-none})"
+    previd=$id
+  done
+  [ -n "$previd" ] && { hcall webwindows.close "[${previd#w}]" "()=>'ok'" >/dev/null; }
+  # Frames per cycle: from mark i to mark i+1 (the last to the stop).
+  fr=$(ev "(()=>{const S=window.__wbS;S.on=false;const out=[];const m=[...S.m,performance.now()];const all=[];for(let i=0;i+1<m.length;i++){const t=S.t.filter(v=>v>=m[i]&&v<m[i+1]);const d=t.slice(1).map((v,j)=>v-t[j]);all.push(...d);const s=[...d].sort((a,b)=>a-b);const q=p=>s.length?s[Math.min(s.length-1,Math.floor(p*s.length))]:0;out.push([d.reduce((a,v)=>a+Math.max(0,Math.round(v/16.67)-1),0),d.filter(v=>v>25).length,q(.95).toFixed(1),q(.99).toFixed(1),Math.round(1000*d.length/((t.at(-1)-t[0])||1))].join(' '))}const s=all.sort((a,b)=>a-b);const q=p=>s.length?s[Math.min(s.length-1,Math.floor(p*s.length))]:0;out.push(['ALL',all.reduce((a,v)=>a+Math.max(0,Math.round(v/16.67)-1),0),all.filter(v=>v>25).length,q(.95).toFixed(1),q(.99).toFixed(1),s.length].join(' '));return out.join('|')})()")
+  local n=0; IFS='|' read -ra FR <<<"$fr"
+  while IFS=$'\t' read -r c ap f l s2 c2; do
+    set -- ${FR[$n]:-- - - - -}; printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$c" "$ap" "$f" "$l" "$s2" "$c2" "$1" "$2" "$3" "$4" "$5" >> "$OUT/storm.tsv"; n=$((n + 1))
+  done < "$OUT/storm.part"; rm -f "$OUT/storm.part"
+  column -t -s$'\t' "$OUT/storm.tsv" | tee -a "$OUT/log.txt"
+  set -- ${FR[${#FR[@]}-1]}; log "storm frames: $*  (ALL dropped janky p95 p99 n)"
+  local cyc=${#FR[@]}; cyc=$((cyc - 1)); [ $cyc -ge 1 ] || cyc=1
+  bench storm-p95 home "$4" "$STORM_P95_MS" le
+  bench storm-drop-per-cycle home "$(awk -v d="$2" -v c=$cyc 'BEGIN{printf "%.1f", d/c}')" "$STORM_DROP" le frames
+  sh_ "dumpsys gfxinfo com.powos.app" | grep -E "Total frames rendered|Janky frames|(50|90|95|99)th percentile" | head -7 > "$OUT/gfxinfo.txt"; log "gfxinfo (whole app, the storm): $(tr '\n' ';' < "$OUT/gfxinfo.txt")"
+  for col in 3 4 6; do   # frame, live, close: medians, and the slowdown (last third / first third)
+    local nm2; nm2=$(sed -n 1p "$OUT/storm.tsv" | cut -f$col)
+    read -r med slow <<<"$(python3 -c 'import sys
+c=int(sys.argv[2]); v=[int(r.split("\t")[c-1]) for r in open(sys.argv[1]).read().splitlines()[1:] if r.split("\t")[c-1].isdigit()]
+if not v: print("- -"); raise SystemExit
+s=sorted(v); t=max(1,len(v)//3); a=sum(v[:t]); b=sum(v[-t:])
+print(s[len(s)//2], "%.2f" % (b/a if a else 1))' "$OUT/storm.tsv" $col)"
+    log "storm $nm2: median ${med} ms, last third / first third ${slow}x"
+    case $nm2 in frame_ms) bench storm-frame-median all "$med" "$OPEN_FRAME_MS" le ;; live_ms) bench storm-live-median all "$med" "$LIVE_LINUX_MS" le ;; close_ms) bench storm-close-median all "$med" "$CLOSE_MS" le ;; esac
+    bench "storm-slowdown-$nm2" all "$slow" "$SLOWDOWN" le x
+  done
+  sleep 3; S1=$(leakstate); log "storm: after (page host layers tasks pss) $S1 (before $S0)"
+  set -- $S0; local b1=$1 b2=$2 b3=$3 b4=$4 b5=$5; set -- $S1
+  bench leak-page-windows all $(($1 - b1)) 0 le " win"; bench leak-host-windows all $(($2 - b2)) 0 le " win"
+  bench leak-ww-layers all $(($3 - b3)) 0 le " layers"; bench leak-tasks all $(($4 - b4)) 0 le " tasks"
+  bench leak-pss-mb all $((($5 - b5) / 1024)) 40 le MB
+  MINEW=""
+  step storm "after $STRESS_N open/switch/close cycles"
+}
+[ "${STRESS_N:-20}" -gt 0 ] && storm
 
 # 1. open, one at a time (cold for Linux: no process yet), and the not-loading detector on each.
 for a in $RUN; do
