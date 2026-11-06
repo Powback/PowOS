@@ -78,37 +78,52 @@ sc_shade() {
 # The shade page's frames: rAF deltas and the list's scroll range, from ss_on to ss_off (a JSON line).
 SS_ON='(()=>{const l=document.querySelector(".notif-list");const r=window.__ssRec={dt:[],last:0,on:true,lo:l?l.scrollTop:-1,hi:l?l.scrollTop:-1};const f=t=>{if(!r.on)return;if(r.last)r.dt.push(Math.round((t-r.last)*10)/10);r.last=t;requestAnimationFrame(f)};requestAnimationFrame(f);if(l)l.addEventListener("scroll",()=>{r.lo=Math.min(r.lo,l.scrollTop);r.hi=Math.max(r.hi,l.scrollTop)},{passive:true});return "ok"})()'
 SS_OFF='(()=>{const r=window.__ssRec;if(!r)return "{}";r.on=false;return JSON.stringify({dt:r.dt,lo:r.lo,hi:r.hi})})()'
-# The check's own test notifications (the phone's own shade often has too few to scroll): SS_N conversations posted as
-# the shell (`cmd notification post -S messaging`, tag powos-ss-<i>; a conversation is its own row in the shade, so
-# they don't fold into one "+N more" stack), and removed again at the end - also on an abort (the EXIT trap) - by the
-# shade's own dismiss (notifications.dismiss through PowOS's listener). Only keys of com.android.shell with our tag
-# are ever touched; the user's own notifications are never read beyond the list or dismissed.
+# The check's own test notifications (the phone's own shade often has too few to scroll), SILENT: the queue runs in
+# idle windows, often at night - no sound, no vibration, no banner. `cmd notification post` can't do that (the shell's
+# channel is IMPORTANCE_DEFAULT and it has no importance flag), so they go in as PowOS's own Plasma mirror would post
+# a low-urgency Linux notification: a {"op":"notify","urgency":0} file in the app's run/plasma/out (PlasmaBridge.kt's
+# FileObserver) -> its "plasma-quiet-v1" channel, IMPORTANCE_LOW (listed in the shade, never peeks or sounds; PowOS's
+# own banner needs HIGH). Plasma itself isn't involved. Read first: that channel at importance 1..2, else a SKIP
+# (nothing posted). SS_N of them, two per made-up Linux app ("PowOS check A".."), so each app is its own row with two
+# cards; ids SS_ID0+i (far above Plasma's own counter, never a real one's). Removed again at the end - also on an
+# abort (the EXIT trap) - by {"op":"close"} files (PlasmaBridge cancels its own tag+id); only keys "|plasma|<our id>|"
+# are ever touched, the user's notifications never.
 SS_N=${SS_N:-14}
-SS_KEYS="l=>JSON.stringify((l&&l.items||[]).map(n=>n.key).filter(k=>k.includes('|com.android.shell|')&&k.includes('|powos-ss-')))"
+SS_ID0=2000000000
+SS_RUN=/data/data/com.powos.app/files/run/plasma/out
+SS_KEYS="l=>JSON.stringify((l&&l.items||[]).map(n=>n.key).filter(k=>{const p=k.split('|');return p[1]==='com.powos.app'&&p[3]==='plasma'&&+p[2]>$SS_ID0&&+p[2]<=$SS_ID0+$SS_N}))"
 ss_mine() { hcall notifications.list "[]" "$SS_KEYS"; }
+# ss_files <op>: one root script writing an op file per test id, as the session's bridge does (.name, renamed in).
+ss_files() {
+  local i c=$((SS_N / 2 + SS_N % 2)) L=ABCDEFGHIJKLMNOPQRSTUVWXYZ
+  { echo "set -e; d=$SS_RUN; [ -d \$d ]"
+    for i in $(seq 1 "$SS_N"); do
+      local id=$((SS_ID0 + i)) f="ss-$(date +%s)-$i.json" j=$(( (i - 1) % c ))
+      if [ "$1" = notify ]; then
+        printf 'printf %%s %q > $d/.%s\n' "{\"op\":\"notify\",\"id\":$id,\"app\":\"PowOS check ${L:$j:1}\",\"title\":\"shade-scroll test $i of $SS_N\",\"text\":\"posted by the scroll check, removed after it\",\"urgency\":0,\"time\":$(date +%s)}" "$f"
+      else
+        printf 'printf %%s %q > $d/.%s\n' "{\"op\":\"close\",\"id\":$id}" "$f"
+      fi
+      printf 'chmod 644 $d/.%s; mv $d/.%s $d/%s\n' "$f" "$f" "$f"
+    done
+    echo "echo wrote"; } | ash
+}
 ss_seed() {
-  local i n
+  local i n imp
+  imp=$(sh_ "dumpsys notification" | grep -m1 "mId=.plasma-quiet-v1" | grep -oE "mImportance=-?[0-9]+" | cut -d= -f2)
+  case ${imp:-x} in 1|2) ;; *) e2e_skip "shade-scroll: no silent channel for test notifications (plasma-quiet-v1 importance '${imp:-missing}', want 1..2) - nothing posted" ;; esac
   trap 'rc=$?; ss_unseed; (exit $rc); e2e_abort' EXIT
-  for i in $(seq 1 "$SS_N"); do
-    sh_ "cmd notification post -S messaging --conversation \"PowOS check $i\" --message \"PowOS check:shade-scroll test $i of $SS_N, removed after the check\" -t \"PowOS check $i\" powos-ss-$i \"shade-scroll test $i\"" >/dev/null
-    sleep 0.3   # NotificationManager drops a package's posts above ~5/s
-  done
-  # Their heads-up banners gone and the shade's list caught up before the shade opens.
+  [ "$(ss_files notify)" = wrote ] || { fail "shade-scroll: couldn't write the test notifications to $SS_RUN"; return 1; }
   for i in $(seq 1 10); do sleep 1; n=$(ss_mine | python3 -c 'import json,sys
 try: print(len(json.loads(sys.stdin.read())))
 except Exception: print(0)'); [ "$n" -ge "$SS_N" ] && break; done
-  log "shade-scroll: posted $SS_N test notifications (powos-ss-*), $n in the shade's list"
-  sleep 4
+  log "shade-scroll: posted $SS_N silent test notifications (plasma-quiet-v1, importance $imp), $n in the shade's list"
 }
 ss_unseed() {
-  local k left i
+  local left i
   for i in 1 2 3; do
-    k=$(ss_mine); [ "$k" = "[]" ] && break
-    python3 -c 'import json,sys
-for k in json.loads(sys.argv[1]): print(k)' "$k" 2>/dev/null | while read -r key; do
-      [ -n "$key" ] && hcall notifications.dismiss "[$(python3 -c 'import json,sys;print(json.dumps(sys.argv[1]))' "$key")]" "()=>'ok'" </dev/null >/dev/null
-    done
-    sleep 1
+    [ "$(ss_mine)" = "[]" ] && break
+    ss_files close >/dev/null; sleep 1.5
   done
   left=$(ss_mine)
   [ "$left" = "[]" ] && log "shade-scroll: test notifications removed" || note "shade-scroll: test notifications still listed after the clean-up: $left"
