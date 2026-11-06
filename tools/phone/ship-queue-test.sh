@@ -10,6 +10,8 @@ T=$(mktemp -d "${TMPDIR:-/tmp}/ship-queue-test.XXXXXX")
 export HOME=$T/home PHONE=$T/phone LOG=$T/log GIT_CONFIG_GLOBAL=$T/gitconfig SHIP_DIR=$T/home/.cache/powos-ship-queue
 export SHIP_QUIET_S=2 SHIP_QUIET_SHELL_S=2 SHIP_POLL_S=0.2
 export SHIP_GATE_FIRST=1   # these tests cover the gate-then-push mode; deploy-first is the default
+# The phone's VPN link (ship.sh phone_offline): $HOME/phone-offline = adb.sh --vpn-state's rc 69 (handshake stale).
+export SHIP_PHONE_STATE=$T/bin/phone-state SHIP_OFFLINE_POLL_S=1
 unset POWOS_SHIP_SERVICE SHIP_AGENT
 Q=$SHIP_DIR
 stop_runner() { local p; p=$(cat "$Q/runner.lock/pid" 2>/dev/null) && kill "$p" 2>/dev/null; pkill -f "$T/" 2>/dev/null; }
@@ -46,6 +48,7 @@ case "$all" in
 esac
 exit 0
 EOF
+printf '#!/bin/bash\n[ -e "$HOME/phone-offline" ] && { echo vpn=offline handshake=1913s; exit 69; }; echo vpn=up\n' > "$T/bin/phone-state"
 chmod +x "$T/bin/"*; export PATH="$T/bin:$PATH"
 git init -q --bare "$T/origin.git"
 git clone -q "$T/origin.git" "$T/seed" 2>/dev/null; cd "$T/seed"; git checkout -q -b worktree-powos-multiplatform
@@ -90,6 +93,8 @@ EOF
 cat > tools/phone/bindings-check.sh <<'EOF'
 #!/bin/bash
 [ "${1:-}" = --remote-cmd ] && { echo true; exit 0; }
+# $HOME/schemas-offline: the schemas can't be read - adb.sh found the phone off the VPN (11-06 14:39, rc 11 "(unreadable)").
+case " $* " in *" --needs "*) [ -e "$HOME/schemas-offline" ] && { echo "adb.sh: phone offline: its WireGuard handshake is 494s old (> 180s) - not running adb" >&2; exit 69; } ;; esac
 case " $* " in *" --needs "*) [ -f "$HOME/device-lacks" ] && [ ! -e "$HOME/published-x" ] && cat "$HOME/device-lacks" ;; esac
 exit 0
 EOF
@@ -380,6 +385,26 @@ for _ in $(seq 300); do [ "$(cat "$Q/failed-apk" 2>/dev/null)" = "$t15b" ] && gr
 [ "$(cat "$Q/failed-apk" 2>/dev/null)" = "$t15b" ] && [ "$(grep -c '^APKLINKDROP' "$LOG")" = 3 ] && [ "$(grep -c '^MAIL.*FAILED' "$LOG")" = 1 ] &&
   ok "a link that keeps dropping: FAILED after 2 retries, mailed once" || { bad "link drop cap: $(grep -c '^APKLINKDROP' "$LOG") drops"; cat "$LOG"; tail -8 "$Q/runner.log"; }
 rm -f "$HOME/apk-link-drop"; land targets/android/app/Main.kt 'class Main15c' "kt15c"; drained 60 && ok "the next tip ships" || bad "after link-drop cap"
+
+# 16. 11-06: the phone is OFFLINE at the APK's module-first check (its schemas unreadable: adb.sh "phone offline") - not
+#     a hold until a new commit: the APK stays pending, nothing failed or mailed, and it ships once the phone is back
+#     (14b above: a real module-first failure with the phone online still holds).
+: > "$LOG"; touch "$HOME/schemas-offline"
+land targets/android/app/Main.kt 'class Main16' "kt16"; req --note "sixteen"; t16=$(tip)
+for _ in $(seq 100); do grep -q "${t16:0:9}: APK waits for the phone" "$Q/runner.log" && break; sleep 0.2; done; sleep 3
+grep -q "${t16:0:9}: APK waits for the phone" "$Q/runner.log" && ! grep -q '^APKSTART' "$LOG" && ! grep -q '^MAIL' "$LOG" &&
+  [ "$(cat "$Q/failed-apk" 2>/dev/null)" != "$t16" ] && ! grep -q "${t16:0:9}: APK HELD" "$Q/runner.log" && ls "$Q"/*.req >/dev/null 2>&1 &&
+  ok "offline schemas: the APK waits (pending, not held, not mailed)" || { bad "offline schemas"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+rm -f "$HOME/schemas-offline"
+drained 60 && grep -q "^APK $t16 svc=1 --note sixteen" "$LOG" && ok "phone back: the same tip's APK ships, no new commit" || { bad "no retry after offline"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+# 16b. The VPN handshake itself is stale (adb.sh --vpn-state rc 69): the APK isn't even tried; back online = it ships.
+: > "$LOG"; touch "$HOME/phone-offline"
+land targets/android/app/Main.kt 'class Main16b' "kt16b"; req --note "sixteen b"; t16b=$(tip)
+for _ in $(seq 100); do grep -q "${t16b:0:9}: APK waits for the phone" "$Q/runner.log" && break; sleep 0.2; done; sleep 2
+grep -q "the phone is offline (no WireGuard link)" "$Q/runner.log" && ! grep -q '^APKSTART' "$LOG" && ! grep -q '^MAIL' "$LOG" &&
+  ok "VPN offline: the APK waits" || { bad "VPN offline wait"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+rm -f "$HOME/phone-offline"
+drained 60 && grep -q "^APK $t16b" "$LOG" && grep -q "the phone is back online" "$Q/runner.log" && ok "VPN back: the APK ships" || { bad "VPN back"; cat "$LOG"; tail -8 "$Q/runner.log"; }
 
 for _ in $(seq 75); do [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 0.2; done
 runner_left=$(cat "$Q/runner.lock/pid" 2>/dev/null)
