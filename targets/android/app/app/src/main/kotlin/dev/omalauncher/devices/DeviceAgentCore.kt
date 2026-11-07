@@ -72,32 +72,50 @@ class DeviceAgentCore(
         authorization: String?,
         body: String,
     ): JSONObject {
-        if (method == "GET" && path == "/v1/info") return info()
-        if (method == "POST" && path == "/v1/pair") return pairStart(json(body))
-        if (method == "POST" && path == "/v1/pair/confirm") return pairConfirm(json(body))
+        open(method, path, body)?.let { return it }
         val peer = peer(authorization) ?: throw DeviceActionError("this device doesn't know you - pair again", "auth")
-        if (method == "GET" && path == "/v1/status") return info().put("status", backend.status())
-        if (method == "POST" && path == "/v1/action") {
-            val b = json(body)
-            val action = b.optString("action")
-            if (action !in ACTIONS) throw DeviceActionError("no action '${action.take(24)}'", "bad-request")
-            if (action !in backend.caps()) throw DeviceActionError("$action: this device can't", "unsupported")
-            log("action $action by ${peer.first}")
-            val result =
-                if (action == "status") backend.status() else backend.act(action, b.optJSONObject("args") ?: JSONObject(), b.optBoolean("force"))
-            return JSONObject().put("ok", true).put("action", action).put("result", result)
-        }
-        if (method == "GET" && path == "/v1/peers") {
-            val out = JSONArray()
-            val all = peers()
-            for (k in all.keys()) {
-                val p = all.getJSONObject(k)
-                out.put(JSONObject().put("id", k).put("name", p.optString("name")).put("kind", p.optString("kind")).put("paired", p.optLong("paired")))
-            }
-            return JSONObject().put("peers", out)
-        }
         if (method == "DELETE" && path.startsWith("/v1/peers/")) return JSONObject().put("revoked", revoke(path.substringAfterLast('/')))
-        throw DeviceActionError("no such endpoint", "unsupported")
+        return when ("$method $path") {
+            "GET /v1/status" -> info().put("status", backend.status())
+            "POST /v1/action" -> action(peer.first, json(body))
+            "GET /v1/peers" -> peerList()
+            else -> throw DeviceActionError("no such endpoint", "unsupported")
+        }
+    }
+
+    /** What an unpaired device may call: the card and pairing. */
+    private fun open(
+        method: String,
+        path: String,
+        body: String,
+    ): JSONObject? =
+        when ("$method $path") {
+            "GET /v1/info" -> info()
+            "POST /v1/pair" -> pairStart(json(body))
+            "POST /v1/pair/confirm" -> pairConfirm(json(body))
+            else -> null
+        }
+
+    private fun action(
+        by: String,
+        b: JSONObject,
+    ): JSONObject {
+        val action = b.optString("action")
+        if (action !in ACTIONS) throw DeviceActionError("no action '${action.take(24)}'", "bad-request")
+        if (action !in backend.caps()) throw DeviceActionError("$action: this device can't", "unsupported")
+        log("action $action by $by")
+        val result = if (action == "status") backend.status() else backend.act(action, b.optJSONObject("args") ?: JSONObject(), b.optBoolean("force"))
+        return JSONObject().put("ok", true).put("action", action).put("result", result)
+    }
+
+    private fun peerList(): JSONObject {
+        val out = JSONArray()
+        val all = peers()
+        for (k in all.keys()) {
+            val p = all.getJSONObject(k)
+            out.put(JSONObject().put("id", k).put("name", p.optString("name")).put("kind", p.optString("kind")).put("paired", p.optLong("paired")))
+        }
+        return JSONObject().put("peers", out)
     }
 
     @Synchronized

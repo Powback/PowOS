@@ -87,37 +87,52 @@ object DeviceAgentHost {
     ) {
         s.soTimeout = 15_000
         val inp = BufferedInputStream(s.getInputStream())
-        val head = StringBuilder()
-        while (!head.endsWith("\r\n\r\n")) {
-            val c = inp.read()
-            if (c < 0 || head.length > 8192) return
-            head.append(c.toChar())
-        }
-        val lines = head.split("\r\n")
-        val (method, path) = lines[0].split(" ").let { (it.getOrNull(0) ?: "") to (it.getOrNull(1) ?: "/") }
+        val lines = readHead(inp)?.split("\r\n") ?: return
+        val parts = lines[0].split(" ")
+        val method = parts.getOrNull(0) ?: ""
+        val path = parts.getOrNull(1) ?: "/"
         val headers = lines.drop(1).filter { ':' in it }.associate { it.substringBefore(':').trim().lowercase() to it.substringAfter(':').trim() }
         val n = headers["content-length"]?.toIntOrNull() ?: 0
-        val body =
-            if (n in 1..BODY_MAX) {
-                val b = ByteArray(n)
-                var off = 0
-                while (off < n) {
-                    val r = inp.read(b, off, n - off)
-                    if (r < 0) break
-                    off += r
-                }
-                String(b, 0, off)
-            } else {
-                ""
-            }
         val reply =
             if (n > BODY_MAX) {
                 DeviceAgentCore.Reply(400, JSONObject().put("ok", false).put("error", "request too large").put("code", "bad-request"))
             } else {
-                core.handle(method, path, headers["authorization"], body)
+                core.handle(method, path, headers["authorization"], readBody(inp, n))
             }
         // One line per request, never a header (tokens live in headers).
         Log.i(TAG, "${s.inetAddress.hostAddress} $method ${path.substringBefore('?')} ${reply.status}")
+        write(s, reply)
+    }
+
+    private fun readHead(inp: BufferedInputStream): String? {
+        val head = StringBuilder()
+        while (!head.endsWith("\r\n\r\n")) {
+            val c = inp.read()
+            if (c < 0 || head.length > 8192) return null
+            head.append(c.toChar())
+        }
+        return head.toString()
+    }
+
+    private fun readBody(
+        inp: BufferedInputStream,
+        n: Int,
+    ): String {
+        if (n <= 0) return ""
+        val b = ByteArray(n)
+        var off = 0
+        while (off < n) {
+            val r = inp.read(b, off, n - off)
+            if (r < 0) break
+            off += r
+        }
+        return String(b, 0, off)
+    }
+
+    private fun write(
+        s: Socket,
+        reply: DeviceAgentCore.Reply,
+    ) {
         val out = reply.body.toString().toByteArray()
         val w = s.getOutputStream()
         w.write(
