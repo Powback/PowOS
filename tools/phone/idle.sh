@@ -96,6 +96,9 @@ fi
 # reused pid after a reboot (11-02 21:57: the 21:27 pid file named com.google.android.youtube), so the watcher never
 # restarted, powos-lasttouch stayed empty and idle read 0 s forever - the verify queue ran nothing for 4 h.
 d=/data/local/tmp
+# The watcher's version: --ensure restarts a running watcher of another version (a long-lived watcher otherwise kept
+# the old logic until the phone rebooted - the file is rewritten under it but sh keeps what it already read).
+V=2
 if [ "${1:-}" = --ensure ]; then
   now=$(date +%s); boot=$(( now - $(cut -d. -f1 /proc/uptime) ))
   p=$(cat $d/powos-touchmon.pid 2>/dev/null)
@@ -103,6 +106,16 @@ if [ "${1:-}" = --ensure ]; then
   live=0
   case x$p in x|x*[!0-9]*) ;; *) tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null | grep -v -e --ensure | grep -q powos-touchmon.sh && live=1 ;; esac
   l=$(cat $d/powos-lasttouch 2>/dev/null); case x$l in x|x*[!0-9]*) l= ;; esac
+  # A watcher of an older version: restarted, its lasttouch kept (it saw the same input, only the self-input mask is new).
+  if [ $live = 1 ] && [ "$(cat $d/powos-touchmon.ver 2>/dev/null)" != "$V" ]; then
+    kill $p 2>/dev/null; g=$(cat $d/powos-touchmon.gpid 2>/dev/null)
+    case x$g in x|x*[!0-9]*) ;; *) tr '\0' ' ' < /proc/$g/cmdline 2>/dev/null | grep -q '^getevent' && kill $g 2>/dev/null ;; esac
+    rm -f $d/powos-touchmon.pid $d/powos-touchmon.gpid
+    nohup sh $d/powos-touchmon.sh >/dev/null 2>&1 &
+    echo touchmon=upgraded
+    [ -n "$l" ] && echo touch=$(( now - l )) || echo touch=unknown
+    exit 0
+  fi
   if [ $live = 0 ] || [ -z "$l" ]; then
     # A watcher that wasn't running didn't see the touches since: its old lasttouch is untrusted as well.
     [ $live = 1 ] && kill $p 2>/dev/null
@@ -115,7 +128,7 @@ if [ "${1:-}" = --ensure ]; then
   [ -n "$l" ] && echo touch=$(( now - l )) || echo touch=unknown
   exit 0
 fi
-echo $$ > $d/powos-touchmon.pid
+echo $$ > $d/powos-touchmon.pid; echo $V > $d/powos-touchmon.ver
 # Every input device, not only the panels: a pad or keyboard game is played without a touch (11-03). getevent appends
 # "/dev/input/eventN: type code value" lines to powos-input.ev; each 2 s look keeps the devices that are a person's
 # (powos-input.devs: real hardware, or a virtual pad/keyboard - uinput-made touch/nav devices are injected input) and
@@ -133,7 +146,16 @@ while [ $(( $(date +%s) - $(stat -c %Y $d/powos-touchmon.ask 2>/dev/null || echo
   c=$(awk '/touch-0/{for(i=2;i<=NF;i++) if($i ~ /^[0-9]+$/) s+=$i; else break} END{print s}' /proc/interrupts)
   ev=0; [ -s $d/powos-input.ev ] && [ -s $d/powos-input.devs ] && grep -qF -f $d/powos-input.devs $d/powos-input.ev && ev=1
   : > $d/powos-input.ev
-  { [ "$c" != "$prev" ] || [ $ev = 1 ]; } && { date +%s > $d/powos-lasttouch; prev=$c; }
+  # The tools' own screen changes are not the user (11-07 20:20-22:04: ww-glue stopped as "touched" 10 times at night).
+  # Waking/sleeping the screen (KEYCODE_WAKEUP/SLEEP from wl_wake/wl_sleep, ship-guard, e2e) makes the touch panels
+  # resume/suspend: their IRQ counters move and the panel nodes emit events, with no finger. A tool that changes the
+  # screen state writes the epoch until which that is its own (powos-selfinput, see SELF_INPUT in window-lock.sh) first:
+  # a change seen up to one sample (2 s) after it is taken in without counting as a touch.
+  now=$(date +%s); sf=$(cat $d/powos-selfinput 2>/dev/null); case x$sf in x|x*[!0-9]*) sf=0 ;; esac
+  if [ "$c" != "$prev" ] || [ $ev = 1 ]; then
+    [ $now -le $(( sf + 3 )) ] || date +%s > $d/powos-lasttouch
+    prev=$c
+  fi
   sleep 2
 done
 [ -n "$gp" ] && kill $gp 2>/dev/null

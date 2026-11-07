@@ -32,10 +32,10 @@ check)
   # an idle phone), and put it back to sleep afterwards if this woke it.
   woke=
   if ! "$here/adb.sh" shell 'dumpsys power' 2>/dev/null | grep -q 'mWakefulness=Awake'; then
-    "$here/adb.sh" shell 'input keyevent KEYCODE_WAKEUP; sleep 1; wm dismiss-keyguard' >/dev/null 2>&1 && woke=1
-    echo "ship-guard: woke the dozing screen for the boot check"
+    "$here/adb.sh" shell 'echo $(( $(date +%s) + 8 )) > /data/local/tmp/powos-selfinput; input keyevent KEYCODE_WAKEUP; sleep 1; wm dismiss-keyguard' >/dev/null 2>&1 && woke=1
+    echo "ship-guard: woke the dozing screen for the boot check"   # powos-selfinput: the panels' resume is not a touch (idle.sh)
   fi
-  [ -n "$woke" ] && trap '"$here/adb.sh" shell "input keyevent KEYCODE_SLEEP" >/dev/null 2>&1' EXIT
+  [ -n "$woke" ] && trap '"$here/adb.sh" shell "echo \$(( \$(date +%s) + 8 )) > /data/local/tmp/powos-selfinput; input keyevent KEYCODE_SLEEP" >/dev/null 2>&1' EXIT
   end=$(( $(date +%s) + ${2:-120} ))
   while :; do
     bad=""

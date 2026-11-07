@@ -147,9 +147,10 @@ hidden() {
     [ "$need" -gt 0 ] 2>/dev/null && asleep || return 0
     i=$("$T/idle.sh" 2>/dev/null | sed -n 's/^idle=\([0-9]*\) .*/\1/p')
     if [ -z "$i" ] || [ "$i" -lt "$need" ]; then log "start: the phone is $WAKE, the user touched it ${i:-?} s ago (< $need s) - not woken"; return 0; fi
-    WI0=$(irq)
-    "$A" shell 'input keyevent KEYCODE_WAKEUP; sleep 1; wm dismiss-keyguard' </dev/null >/dev/null 2>&1
-    WOKE=1; sleep 1
+    # The wake's own panel resume moves the touch IRQs (no finger): the baseline is read once it has settled, and the
+    # wake is marked as the tools' own for idle.sh's watcher (powos-selfinput) - else the wake read as the user (11-07).
+    "$A" shell 'echo $(( $(date +%s) + 8 )) > /data/local/tmp/powos-selfinput; input keyevent KEYCODE_WAKEUP; sleep 1; wm dismiss-keyguard' </dev/null >/dev/null 2>&1
+    WOKE=1; sleep 1; WI0=$(irq)
     log "start: woke the $WAKE screen for the check (the user idle $i s); it sleeps again after"
   }
   # keep_awake: the screen this check woke stays on (a wake key resets the screen timeout); a real touch since -> it's
@@ -157,7 +158,7 @@ hidden() {
   keep_awake() {
     [ -n "$WOKE" ] || return 0
     [ "$(irq)" = "$WI0" ] || { WOKE=; log "the user touched the phone - it stays on, no more wake keys"; return 0; }
-    "$A" shell 'input keyevent KEYCODE_WAKEUP; wm dismiss-keyguard' </dev/null >/dev/null 2>&1
+    "$A" shell 'echo $(( $(date +%s) + 8 )) > /data/local/tmp/powos-selfinput; input keyevent KEYCODE_WAKEUP; wm dismiss-keyguard' </dev/null >/dev/null 2>&1
   }
   awake_or_nj() { keep_awake; asleep && hnj "$1"; return 0; }
   # A failed step on a phone that fell asleep is not a window fault (10-31 a4dcb83b: the tap "changed nothing", Dozing).
@@ -182,7 +183,7 @@ hidden() {
       if [ -z "$left" ]; then log "display $D released, no task left on it"; else log "WARNING: tasks still on display $D: $left"; fi
     fi
     if [ -n "$WOKE" ] && [ "$(irq)" = "$WI0" ]; then
-      "$A" shell 'input keyevent KEYCODE_SLEEP' </dev/null >/dev/null 2>&1; log "the screen this check woke: back to sleep"
+      "$A" shell 'echo $(( $(date +%s) + 8 )) > /data/local/tmp/powos-selfinput; input keyevent KEYCODE_SLEEP' </dev/null >/dev/null 2>&1; log "the screen this check woke: back to sleep"
     fi; WOKE=
   }
   # tasks_on DISPLAY: the task ids on a display; app_tasks: every task of $APP (any display).
