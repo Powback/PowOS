@@ -1,0 +1,708 @@
+#!/usr/bin/env python3
+"""powos-deviced - a PowOS device's control agent (docs/research/device-ecosystem.md).
+
+Every PowOS device runs one: it says what the device is and what it can do (capabilities, never a device type), its
+live status (online, power/battery, screen on/off, locked, what keeps it awake), and runs actions other enrolled
+devices ask for (lock, screen off/on, sleep, wake another device by Wake-on-LAN, ...). The Devices app
+(apps/devices) talks to it on every device through host.net; `powos devices` is its CLI.
+
+  powos-deviced serve [--port 3416]      the agent (HTTPS on every interface; its own self-signed certificate, pinned
+                                         by each client at pairing; advertised as _powos._tcp over mDNS when avahi is up)
+  powos-deviced info | status            this device's card / live status (JSON)
+  powos-deviced codes                    pairing requests waiting here, with their codes (a person reads one out)
+  powos-deviced peers                    devices that may control this one
+  powos-deviced revoke <peer-id>         one of them may no longer (its token stops working at once)
+  powos-deviced pair <https://host:port> [--code N]   pair this device's CLI with another device's agent
+  powos-deviced devices                  devices this CLI has paired with
+  powos-deviced call <device> <action> [--force]      run an action there (status, lock, screen_off, ...)
+
+Protocol (v1; JSON over HTTPS):
+  GET  /v1/info            no auth: {id, name, kind, v, caps} - what discovery shows before pairing; no status
+  POST /v1/pair            no auth: {id, name, kind} -> {request, expires_s}; the code is shown ON THIS DEVICE
+                           (a notification on a desktop, `codes` anywhere), never returned
+  POST /v1/pair/confirm    no auth: {request, code} -> {token, device}; 5 tries per request, 2 min, 3 pending at most
+  GET  /v1/status          Bearer token
+  POST /v1/action          Bearer token: {action, force?, args?} -> {ok, result | error}
+  GET  /v1/peers           Bearer token
+  DELETE /v1/peers/<id>    Bearer token: revoke a device (a lost phone revoked from any other paired device)
+
+Identity: a random device id + a TLS key made once in the state dir. A peer is known by the sha256 of the token it
+was given at pairing (the token itself is never stored here). Every authenticated call checks the token; there is no
+unauthenticated action and no bypass.
+
+State: $POWOS_DEVICED_DIR (default ~/.local/state/powos/deviced), 0700. Config: ~/.config/powos/deviced.json
+  {"name": "Desk", "kind": "desktop", "sleep_blockers": ["llama-swap.service"], "port": 3416}
+"""
+import hashlib
+import hmac
+import json
+import os
+import secrets
+import shutil
+import socket
+import ssl
+import subprocess
+import sys
+import threading
+import time
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+V = 1
+PORT = 3416
+STATE = os.environ.get("POWOS_DEVICED_DIR") or os.path.expanduser("~/.local/state/powos/deviced")
+CONFIG = os.environ.get("POWOS_DEVICED_CONFIG") or os.path.expanduser("~/.config/powos/deviced.json")
+PAIR_TTL_S = 120
+PAIR_TRIES = 5
+PAIR_PENDING_MAX = 3
+BODY_MAX = 16 * 1024
+# Actions and what they mean to a person; a device advertises the ones its backend can do.
+DESKTOP_GPU = {"kwin_wayland", "Xwayland", "plasmashell", "gnome-shell", "gamescope", "steamwebhelper"}
+ACTIONS = ("lock", "screen_off", "screen_on", "sleep", "wake", "ring")
+
+
+def now():
+    return time.time()
+
+
+def load_json(path, default):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def save_json(path, data):
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(data, f, indent=1)
+    os.replace(tmp, path)
+
+
+def sha(s):
+    return hashlib.sha256(s.encode()).hexdigest()
+
+
+def run(cmd, timeout=8, env=None):
+    """(rc, stdout) of a command; rc 127 when it isn't there, 124 on timeout."""
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+        return r.returncode, r.stdout.strip() + ("\n" + r.stderr.strip() if r.returncode and r.stderr else "")
+    except FileNotFoundError:
+        return 127, f"{cmd[0]}: not installed"
+    except subprocess.TimeoutExpired:
+        return 124, f"{cmd[0]}: timed out"
+
+
+# ── identity ────────────────────────────────────────────────────────────────
+
+
+def config():
+    return load_json(CONFIG, {})
+
+
+def identity():
+    p = os.path.join(STATE, "identity.json")
+    ident = load_json(p, None)
+    if not ident:
+        ident = {"id": secrets.token_hex(8), "created": int(now())}
+        save_json(p, ident)
+    cfg = config()
+    ident = dict(ident)
+    ident["name"] = cfg.get("name") or socket.gethostname()
+    ident["kind"] = cfg.get("kind") or backend().kind
+    return ident
+
+
+def tls_files():
+    """The agent's certificate + key (made once: P-256, self-signed, CN = the device id)."""
+    crt, key = os.path.join(STATE, "tls.crt"), os.path.join(STATE, "tls.key")
+    if not (os.path.exists(crt) and os.path.exists(key)):
+        os.makedirs(STATE, mode=0o700, exist_ok=True)
+        rc, out = run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
+                       "-nodes", "-days", "3650", "-subj", f"/CN=powos-{identity()['id']}",
+                       "-keyout", key, "-out", crt], timeout=30)
+        if rc:
+            raise SystemExit(f"powos-deviced: can't make a TLS key ({out.splitlines()[0] if out else rc})")
+        os.chmod(key, 0o600)
+    return crt, key
+
+
+# ── backends: what this device can do ───────────────────────────────────────
+
+
+class Backend:
+    """A device with no display (a server): status, sleep (guarded), wake others."""
+    kind = "server"
+
+    def caps(self):
+        c = ["status"]
+        if shutil.which("systemctl"):
+            c.append("sleep")
+        c.append("wake")  # wake ANOTHER device: this one sends the magic packet on its LAN
+        return c
+
+    def power(self):
+        bats = []
+        base = "/sys/class/power_supply"
+        src = "ac"
+        main = None
+        try:
+            names = sorted(os.listdir(base))
+        except OSError:
+            names = []
+        for n in names:
+            d = os.path.join(base, n)
+            rd = lambda f: open(os.path.join(d, f)).read().strip() if os.path.exists(os.path.join(d, f)) else ""
+            t, scope = rd("type"), rd("scope")
+            if t != "Battery":
+                continue
+            cap = rd("capacity")
+            entry = {"name": rd("model_name") or n, "battery": int(cap) if cap.isdigit() else None,
+                     "charging": rd("status") == "Charging"}
+            if scope == "Device" or n.startswith(("hidpp_", "hid-")):
+                if entry["battery"]:  # 0 = switched off (a headset on its stand), not empty
+                    bats.append(entry)  # a mouse, a headset: an accessory, not this device's power
+                continue
+            main = entry
+            if rd("status") == "Discharging":
+                src = "battery"
+        return {"source": src, "battery": main and main["battery"], "charging": bool(main and main["charging"]),
+                "accessories": bats}
+
+    def screen(self):
+        return None
+
+    def locked(self):
+        return None
+
+    def wol(self):
+        """This device's own NICs: (mac, wake-on-LAN armed?) - so another device can wake it."""
+        out = []
+        for n in sorted(os.listdir("/sys/class/net")) if os.path.isdir("/sys/class/net") else []:
+            d = f"/sys/class/net/{n}"
+            if n == "lo" or not os.path.exists(f"{d}/device"):
+                continue
+            try:
+                mac = open(f"{d}/address").read().strip()
+                up = open(f"{d}/operstate").read().strip() == "up"
+            except OSError:
+                continue
+            rc, eth = run(["ethtool", n], timeout=3)
+            armed = None
+            for line in eth.splitlines():
+                line = line.strip()
+                if line.startswith("Wake-on:"):
+                    armed = "g" in line.split(":", 1)[1]
+            out.append({"if": n, "mac": mac, "up": up, "wol": armed})
+        return out
+
+    def blockers(self):
+        """What would stop if this device slept: configured services that are running, GPU compute jobs."""
+        out = []
+        for u in config().get("sleep_blockers", []):
+            for scope in (["--user"], []):
+                rc, _ = run(["systemctl", *scope, "is-active", "--quiet", u], timeout=3)
+                if rc == 0:
+                    out.append(u)
+                    break
+        rc, gpu = run(["nvidia-smi", "--query-compute-apps=process_name", "--format=csv,noheader"], timeout=5)
+        if rc == 0:
+            # The compositor/desktop hold a GPU context on every desktop: not a job sleep would stop.
+            jobs = {os.path.basename(p.strip()) for p in gpu.splitlines() if p.strip()} - DESKTOP_GPU
+            out += [f"GPU: {j}" for j in sorted(jobs)]
+        return out
+
+    def status(self):
+        try:
+            up = int(float(open("/proc/uptime").read().split()[0]))
+        except OSError:
+            up = None
+        return {"online": True, "at": int(now()), "power": self.power(), "screen": self.screen(),
+                "locked": self.locked(), "uptime_s": up, "busy": self.blockers(), "nics": self.wol()}
+
+    def act(self, action, args, force=False):
+        if action == "status":
+            return self.status()
+        if action == "sleep":
+            busy = self.blockers()
+            if busy and not force:
+                raise ActionError(f"busy: {', '.join(busy)} would stop - sleep refused", "busy")
+            return self._ok(run(["systemctl", "suspend"]))
+        if action == "wake":
+            return send_wol(str(args.get("mac", "")), str(args.get("broadcast") or "255.255.255.255"))
+        raise ActionError(f"{action}: this device can't", "unsupported")
+
+    @staticmethod
+    def _ok(r):
+        rc, out = r
+        if rc:
+            raise ActionError(out.splitlines()[0] if out else f"failed (rc {rc})", "failed")
+        return {"done": True}
+
+
+class KdeBackend(Backend):
+    """A PowOS desktop on KDE Plasma (Wayland): logind lock, KScreen DPMS."""
+    kind = "desktop"
+
+    def env(self):
+        e = dict(os.environ)
+        e.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+        e.setdefault("WAYLAND_DISPLAY", "wayland-0")
+        e.setdefault("QT_QPA_PLATFORM", "wayland")
+        return e
+
+    def caps(self):
+        return ["status", "lock", "screen_off", "screen_on", *Backend.caps(self)[1:]]
+
+    def session(self):
+        """The graphical session on seat0 of this user (what lock and LockedHint act on)."""
+        rc, out = run(["loginctl", "list-sessions", "--no-legend"], timeout=3)
+        for line in out.splitlines():
+            f = line.split()
+            if len(f) >= 4 and f[1] == str(os.getuid()) and "seat0" in f:
+                return f[0]
+        return None
+
+    def screen(self):
+        rc, out = run(["kscreen-doctor", "--dpms", "show"], env=self.env(), timeout=5)
+        if rc:
+            return None
+        modes = [l.rsplit(":", 1)[1].strip() for l in out.splitlines() if "dpms mode" in l]
+        return ("on" if "on" in modes else "off") if modes else None
+
+    def locked(self):
+        s = self.session()
+        if not s:
+            return None
+        rc, out = run(["loginctl", "show-session", s, "-p", "LockedHint", "--value"], timeout=3)
+        return out == "yes" if rc == 0 else None
+
+    def act(self, action, args, force=False):
+        if action == "lock":
+            s = self.session()
+            if not s:
+                raise ActionError("no desktop session to lock", "failed")
+            return self._ok(run(["loginctl", "lock-session", s]))
+        if action in ("screen_off", "screen_on"):
+            return self._ok(run(["kscreen-doctor", "--dpms", action.split("_")[1]], env=self.env()))
+        return Backend.act(self, action, args, force)
+
+
+class AndroidBackend(Backend):
+    """A rooted PowOS phone's Linux session: Android reached through the session's own adb (lib/android.sh's
+    127.0.0.1:5555). HACK: adb to itself is the rooted path only; the non-root path is the app's own agent
+    (ShellNet-side, docs/research/device-ecosystem.md D5) - real fix: the PowOS app serves this protocol itself."""
+    kind = "phone"
+    ADB = ["adb", "-s", "127.0.0.1:5555", "shell"]
+
+    def caps(self):
+        return ["status", "lock", "screen_on", "wake"]
+
+    def sh(self, *cmd):
+        return run(self.ADB + list(cmd), timeout=6)
+
+    def screen(self):
+        rc, out = self.sh("dumpsys", "power")
+        for line in out.splitlines():
+            if "mWakefulness=" in line:
+                return "on" if "Awake" in line else "off"
+        return None
+
+    def act(self, action, args, force=False):
+        if action == "lock":
+            return self._ok(self.sh("input", "keyevent", "223"))  # KEYCODE_SLEEP: screen off, keyguard on
+        if action == "screen_on":
+            return self._ok(self.sh("input", "keyevent", "224"))  # KEYCODE_WAKEUP
+        return Backend.act(self, action, args, force)
+
+
+_backend = None
+
+
+def backend():
+    global _backend
+    if _backend is None:
+        forced = os.environ.get("POWOS_DEVICED_BACKEND")
+        if forced:
+            _backend = {"server": Backend, "desktop": KdeBackend, "phone": AndroidBackend}[forced]()
+        elif os.path.exists("/data/powos") or os.environ.get("POWOS_HOST") in ("phone", "phone-android"):
+            _backend = AndroidBackend()
+        elif shutil.which("kscreen-doctor") and shutil.which("loginctl"):
+            _backend = KdeBackend()
+        else:
+            _backend = Backend()
+    return _backend
+
+
+class ActionError(Exception):
+    def __init__(self, msg, code):
+        super().__init__(msg)
+        self.code = code
+
+
+def send_wol(mac, broadcast="255.255.255.255"):
+    hexmac = mac.replace(":", "").replace("-", "").lower()
+    if len(hexmac) != 12 or any(c not in "0123456789abcdef" for c in hexmac):
+        raise ActionError("wake needs a MAC address", "bad-request")
+    pkt = b"\xff" * 6 + bytes.fromhex(hexmac) * 16
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        s.sendto(pkt, (broadcast, 9))
+    finally:
+        s.close()
+    return {"sent": True, "mac": mac}
+
+
+# ── peers and pairing ───────────────────────────────────────────────────────
+
+LOCK = threading.Lock()
+PENDING = {}  # request id -> {code, peer, expires, tries}
+
+
+def peers_path():
+    return os.path.join(STATE, "peers.json")
+
+
+def peers():
+    return load_json(peers_path(), {})
+
+
+def peer_by_token(token):
+    """The paired peer whose token this is (constant-time on the hash), or None."""
+    if not token:
+        return None
+    h = sha(token)
+    for pid, p in peers().items():
+        if hmac.compare_digest(p.get("token_sha256", ""), h):
+            return pid, p
+    return None
+
+
+def pair_start(body):
+    pid, name, kind = str(body.get("id", ""))[:64], str(body.get("name", ""))[:64], str(body.get("kind", ""))[:24]
+    if not pid or not name:
+        raise ActionError("pairing needs the asking device's id and name", "bad-request")
+    with LOCK:
+        t = now()
+        for r in [r for r, p in PENDING.items() if p["expires"] < t]:
+            del PENDING[r]
+        if len(PENDING) >= PAIR_PENDING_MAX:
+            raise ActionError("too many pairing requests waiting here - try again in two minutes", "busy")
+        req = secrets.token_hex(8)
+        code = f"{secrets.randbelow(10 ** 6):06d}"
+        PENDING[req] = {"code": code, "peer": {"id": pid, "name": name, "kind": kind}, "expires": t + PAIR_TTL_S,
+                        "tries": 0}
+        save_pending()
+    show_code(name, code)
+    return {"request": req, "expires_s": PAIR_TTL_S}
+
+
+def save_pending():
+    """The waiting codes for `codes` (this user only, 0600): a person at this device reads one out."""
+    save_json(os.path.join(STATE, "pending.json"),
+              [{"from": p["peer"]["name"], "code": p["code"], "expires": int(p["expires"])} for p in PENDING.values()])
+
+
+def show_code(name, code):
+    """The code where a person at THIS device sees it (never in the answer to the asking device)."""
+    if shutil.which("notify-send"):
+        run(["notify-send", "-a", "PowOS", "-u", "critical", f"{name} wants to control this device",
+             f"Pairing code {code} - type it there. Ignore this if it wasn't you."], timeout=3)
+    print(f"pairing request from {name}: code shown on this device (powos devices codes)", flush=True)
+
+
+def pair_confirm(body):
+    req, code = str(body.get("request", "")), str(body.get("code", ""))
+    with LOCK:
+        p = PENDING.get(req)
+        if not p or p["expires"] < now():
+            PENDING.pop(req, None)
+            raise ActionError("that pairing request has expired - start again", "expired")
+        p["tries"] += 1
+        if not hmac.compare_digest(p["code"], code):
+            if p["tries"] >= PAIR_TRIES:
+                del PENDING[req]
+                save_pending()
+            raise ActionError("wrong code", "auth")
+        del PENDING[req]
+        save_pending()
+        token = secrets.token_urlsafe(32)
+        all_p = peers()
+        all_p[p["peer"]["id"]] = {**p["peer"], "token_sha256": sha(token), "paired": int(now()), "seen": 0}
+        save_json(peers_path(), all_p)
+    return {"token": token, "device": public_info()}
+
+
+def revoke(pid):
+    with LOCK:
+        all_p = peers()
+        if pid not in all_p:
+            return False
+        del all_p[pid]
+        save_json(peers_path(), all_p)
+    return True
+
+
+def touch(pid):
+    with LOCK:
+        all_p = peers()
+        if pid in all_p and now() - all_p[pid].get("seen", 0) > 60:
+            all_p[pid]["seen"] = int(now())
+            save_json(peers_path(), all_p)
+
+
+def public_info():
+    i = identity()
+    return {"id": i["id"], "name": i["name"], "kind": i["kind"], "v": V, "caps": backend().caps()}
+
+
+# ── HTTP ────────────────────────────────────────────────────────────────────
+
+HTTP_OF = {"bad-request": 400, "auth": 401, "unsupported": 404, "expired": 410, "busy": 409, "failed": 500}
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "powos-deviced/1"
+    timeout = 15
+
+    def log_message(self, fmt, *a):  # one line per request, never a header (tokens live in headers)
+        sys.stderr.write(f"{self.address_string()} {self.command} {self.path.split('?')[0]} {a[1] if len(a) > 1 else ''}\n")
+
+    def send(self, code, data):
+        b = json.dumps(data).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(b)
+
+    def body(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > BODY_MAX:
+            raise ActionError("request too large", "bad-request")
+        if not n:
+            return {}
+        try:
+            d = json.loads(self.rfile.read(n))
+        except ValueError:
+            raise ActionError("not JSON", "bad-request")
+        if not isinstance(d, dict):
+            raise ActionError("not a JSON object", "bad-request")
+        return d
+
+    def peer(self):
+        a = self.headers.get("Authorization", "")
+        p = peer_by_token(a[7:].strip() if a.startswith("Bearer ") else "")
+        if not p:
+            raise ActionError("this device doesn't know you - pair again", "auth")
+        touch(p[0])
+        return p
+
+    def route(self, method):
+        path = self.path.split("?")[0].rstrip("/")
+        if method == "GET" and path == "/v1/info":
+            return public_info()
+        if method == "POST" and path == "/v1/pair":
+            return pair_start(self.body())
+        if method == "POST" and path == "/v1/pair/confirm":
+            return pair_confirm(self.body())
+        pid, _ = self.peer()
+        if method == "GET" and path == "/v1/status":
+            return {**public_info(), "status": backend().status()}
+        if method == "POST" and path == "/v1/action":
+            b = self.body()
+            action = str(b.get("action", ""))
+            if action not in ACTIONS and action != "status":
+                raise ActionError(f"no action '{action[:24]}'", "bad-request")
+            if action not in backend().caps():
+                raise ActionError(f"{action}: this device can't", "unsupported")
+            sys.stderr.write(f"action {action} by {pid}\n")
+            args = b.get("args") if isinstance(b.get("args"), dict) else {}
+            return {"ok": True, "action": action, "result": backend().act(action, args, bool(b.get("force")))}
+        if method == "GET" and path == "/v1/peers":
+            return {"peers": [{"id": k, "name": v.get("name"), "kind": v.get("kind"), "paired": v.get("paired"),
+                               "seen": v.get("seen")} for k, v in peers().items()]}
+        if method == "DELETE" and path.startswith("/v1/peers/"):
+            return {"revoked": revoke(path.rsplit("/", 1)[1])}
+        raise ActionError("no such endpoint", "unsupported")
+
+    def handle_method(self, method):
+        try:
+            self.send(200, self.route(method))
+        except ActionError as e:
+            self.send(HTTP_OF.get(e.code, 500), {"ok": False, "error": str(e), "code": e.code})
+        except Exception as e:  # never a traceback to the network
+            sys.stderr.write(f"error: {e!r}\n")
+            self.send(500, {"ok": False, "error": "internal error", "code": "failed"})
+
+    def do_GET(self):
+        self.handle_method("GET")
+
+    def do_POST(self):
+        self.handle_method("POST")
+
+    def do_DELETE(self):
+        self.handle_method("DELETE")
+
+
+class Server(ThreadingHTTPServer):
+    """TLS handshakes in the request's own thread (do_handshake_on_connect=False on the listener), so a client that
+    connects and stalls holds one thread, not the accept loop; a dropped connection is one log line, no traceback."""
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        sys.stderr.write(f"{client_address[0]} dropped: {sys.exc_info()[1]!r}\n")
+
+
+def listen(bind, port, crt, key):
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.load_cert_chain(crt, key)
+    httpd = Server((bind, port), Handler)
+    httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True, do_handshake_on_connect=False)
+    return httpd
+
+
+def advertise(port):
+    """_powos._tcp on the LAN (docs/REMOTE-POWOS.md 2.2), TXT id/v/dev=<port>; avahi only (absent: no mDNS)."""
+    if not shutil.which("avahi-publish"):
+        return None
+    i = identity()
+    try:
+        return subprocess.Popen(["avahi-publish", "-s", i["name"], "_powos._tcp", str(port), f"id={i['id']}",
+                                 f"v={V}", f"dev={port}", f"kind={i['kind']}"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return None
+
+
+def serve(argv):
+    port = int(opt(argv, "--port") or config().get("port") or PORT)
+    bind = opt(argv, "--bind") or "0.0.0.0"
+    crt, key = tls_files()
+    httpd = listen(bind, port, crt, key)
+    adv = advertise(port)
+    i = public_info()
+    print(f"powos-deviced: {i['name']} ({i['kind']}, {i['id']}) on {bind}:{port}, caps {','.join(i['caps'])}", flush=True)
+    try:
+        httpd.serve_forever()
+    finally:
+        if adv:
+            adv.terminate()
+
+
+# ── the CLI client (this device controlling another) ────────────────────────
+
+
+def remotes_path():
+    return os.path.join(STATE, "remotes.json")
+
+
+def pin_of(url):
+    host, port = url.split("//", 1)[1].split("/", 1)[0].rsplit(":", 1)
+    pem = ssl.get_server_certificate((host, int(port)), timeout=5)
+    return hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest()
+
+
+def request(url, method="GET", body=None, token=None, pin=None):
+    """One call to another device's agent: its certificate must be the one pinned at pairing (first use: any)."""
+    if pin and pin_of(url) != pin:
+        raise SystemExit(f"powos-deviced: {url}'s certificate changed since pairing - refusing (pair again)")
+    ctx = ssl.create_default_context()
+    ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE  # trust = the pin above, not a CA
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read() or b"{}")
+
+
+def opt(argv, name):
+    return argv[argv.index(name) + 1] if name in argv and argv.index(name) + 1 < len(argv) else None
+
+
+def cli_pair(argv):
+    url = argv[0].rstrip("/")
+    pin = pin_of(url)
+    st, info = request(f"{url}/v1/info", pin=pin)
+    if st != 200:
+        raise SystemExit(f"powos-deviced: {url} isn't a PowOS device ({st})")
+    me = identity()
+    st, r = request(f"{url}/v1/pair", "POST", {"id": me["id"], "name": me["name"], "kind": me["kind"]}, pin=pin)
+    if st != 200:
+        raise SystemExit(f"powos-deviced: {r.get('error', st)}")
+    code = opt(argv, "--code") or input(f"code shown on {info['name']}: ").strip()
+    st, r = request(f"{url}/v1/pair/confirm", "POST", {"request": r["request"], "code": code}, pin=pin)
+    if st != 200:
+        raise SystemExit(f"powos-deviced: {r.get('error', st)}")
+    rem = load_json(remotes_path(), {})
+    rem[info["id"]] = {"name": info["name"], "kind": info["kind"], "url": url, "pin": pin, "token": r["token"]}
+    save_json(remotes_path(), rem)
+    print(f"paired with {info['name']} ({info['kind']}, {info['id']}): {', '.join(info['caps'])}")
+
+
+def find_remote(key):
+    rem = load_json(remotes_path(), {})
+    for rid, r in rem.items():
+        if key in (rid, r["name"], r["kind"]):
+            return rid, r
+    raise SystemExit(f"powos-deviced: no paired device '{key}' (powos devices devices)")
+
+
+def cli_call(argv):
+    rid, r = find_remote(argv[0])
+    action = argv[1] if len(argv) > 1 else "status"
+    if action == "status":
+        st, out = request(f"{r['url']}/v1/status", token=r["token"], pin=r["pin"])
+    else:
+        st, out = request(f"{r['url']}/v1/action", "POST", {"action": action, "force": "--force" in argv},
+                          token=r["token"], pin=r["pin"])
+    print(json.dumps(out, indent=1))
+    return 0 if st == 200 else 1
+
+
+def main(argv):
+    cmd = argv[0] if argv else "help"
+    rest = argv[1:]
+    if cmd == "serve":
+        return serve(rest)
+    if cmd == "info":
+        print(json.dumps(public_info(), indent=1))
+    elif cmd == "status":
+        print(json.dumps(backend().status(), indent=1))
+    elif cmd == "codes":
+        waiting = [p for p in load_json(os.path.join(STATE, "pending.json"), []) if p["expires"] > now()]
+        for p in waiting:
+            print(f"{p['code']}  from {p['from']}  ({int(p['expires'] - now())} s left)")
+        if not waiting:
+            print("no pairing request waiting")
+    elif cmd == "peers":
+        for k, v in peers().items():
+            print(f"{k}  {v.get('name')} ({v.get('kind')})  paired {time.strftime('%F %H:%M', time.localtime(v.get('paired', 0)))}")
+    elif cmd == "revoke":
+        print("revoked" if revoke(rest[0]) else f"no peer {rest[0]}")
+    elif cmd == "pair":
+        cli_pair(rest)
+    elif cmd == "devices":
+        for k, v in load_json(remotes_path(), {}).items():
+            print(f"{k}  {v['name']} ({v['kind']})  {v['url']}")
+    elif cmd == "call":
+        return cli_call(rest)
+    else:
+        print(__doc__.split("Protocol")[0].strip())
+        return 0 if cmd in ("help", "-h", "--help") else 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]) or 0)

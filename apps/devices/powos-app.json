@@ -1,0 +1,16 @@
+{
+  "id": "local.devices",
+  "name": "Devices",
+  "version": "0.1.0",
+  "description": "Your PowOS devices in one place: which are on, their battery and screens, and what you can do from here - lock a PC, turn its monitors off or on, put it to sleep (never while something runs there), wake it. Each device is paired once with a code shown on its own screen; every action goes to that device's own agent, signed in as this device.",
+  "icon": "icon.svg",
+  "ui": { "dir": "out/ui/" },
+  "page": { "entry": "pages/main.js" },
+  "module": null,
+  "backend": null,
+  "net": ["lan"],
+  "widgets": [],
+  "surfaces": { "launcher": true, "desktop": true },
+  "permissions": [],
+  "budget": { "phone": { "memMB": 8, "idle": "unload" }, "desktop": { "memMB": 16 } }
+}

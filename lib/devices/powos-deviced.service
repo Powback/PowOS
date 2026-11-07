@@ -1,0 +1,17 @@
+# PowOS device agent (lib/devices/powos-deviced; unit record units/<host>/powos-deviced.json). systemd --user, so it
+# acts in the user's own desktop session (lock, screen power) with no root; installed by lib/devices/deploy.sh.
+[Unit]
+Description=PowOS device agent (Devices app control channel, :3416)
+After=graphical-session.target network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/.local/lib/powos/devices/powos-deviced serve
+Restart=on-failure
+RestartSec=5
+MemoryMax=64M
+CPUQuota=20%
+TasksMax=32
+Nice=5
+
+[Install]
+WantedBy=default.target

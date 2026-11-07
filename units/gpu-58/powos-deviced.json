@@ -1,0 +1,46 @@
+{
+  "id": "powos-deviced",
+  "name": "PowOS device agent (Devices app control channel)",
+  "kind": "service",
+  "host": "desktop",
+  "hostNote": "the 9950X3D/RTX 5090 box (192.168.50.58, Bazzite + KDE Plasma)",
+  "owner": "system:devices",
+  "purpose": "this device's card, live status (power, screen on/off, locked, what keeps it busy) and actions (lock, screen off/on, guarded sleep, wake another device) for the Devices app on the other PowOS devices; HTTPS :3416 with its own pinned certificate, every status/action call authenticated by a per-device token given at pairing (code shown on this screen); mDNS _powos._tcp. docs/research/device-ecosystem.md",
+  "installedBy": "lib/devices/deploy.sh powos@192.168.50.58 (systemd --user, user powos, linger on)",
+  "ports": [
+    "3416/tcp"
+  ],
+  "files": [
+    "/var/home/powos/.local/lib/powos/devices/powos-deviced",
+    "/var/home/powos/.config/systemd/user/powos-deviced.service",
+    "/var/home/powos/.config/powos/deviced.json",
+    "/var/home/powos/.local/state/powos/deviced (identity, TLS key, paired peers as token hashes; 0700)"
+  ],
+  "processes": [
+    {
+      "systemd": "powos-deviced.service"
+    },
+    {
+      "match": "avahi-publish -s .* _powos._tcp 3416"
+    }
+  ],
+  "limits": {
+    "memory": "64m",
+    "cpus": 0.2,
+    "pids": 32
+  },
+  "autosleep": "none needed: idle in accept(), a few MB",
+  "health": "curl -sk https://192.168.50.58:3416/v1/info",
+  "remove": {
+    "stop": [
+      "systemctl --user disable --now powos-deviced.service"
+    ],
+    "commands": [
+      "rm -rf /var/home/powos/.local/lib/powos/devices /var/home/powos/.config/systemd/user/powos-deviced.service /var/home/powos/.config/powos/deviced.json /var/home/powos/.config/powos/units.d/powos-deviced.json",
+      "systemctl --user daemon-reload"
+    ],
+    "keep": [
+      "/var/home/powos/.local/state/powos/deviced (delete it to forget every pairing and the device id)"
+    ]
+  }
+}
