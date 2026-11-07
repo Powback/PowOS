@@ -1,0 +1,35 @@
+{
+  "id": "powos-deviced",
+  "name": "PowOS device agent",
+  "version": "1.0.0",
+  "description": "This device's card, live status and actions for the Devices app on the other PowOS devices (lib/devices/powos-deviced; docs/DEVICES.md). HTTPS :3416 on the LAN/VPN with its own pinned certificate; every status/action call needs a per-device token given at pairing or enrollment. On the phone the backend reaches Android through the session's adb to itself (rooted; the non-root app serves the same protocol itself). Unit: units/phone/powos-deviced.json.",
+  "backend": {
+    "user": "powos",
+    "env": {
+      "HOME": "/home/powos",
+      "POWOS_DEVICED_BACKEND": "phone"
+    },
+    "exec": [
+      "/usr/bin/python3",
+      "/usr/lib/powos/devices/powos-deviced",
+      "serve"
+    ]
+  },
+  "needs": {
+    "network": "host",
+    "listen": [
+      "0.0.0.0:3416"
+    ]
+  },
+  "budget": {
+    "phone": {
+      "memMB": 48,
+      "cpuPct": 10,
+      "nice": 10
+    },
+    "desktop": {
+      "memMB": 64
+    }
+  },
+  "autosleep": "never"
+}

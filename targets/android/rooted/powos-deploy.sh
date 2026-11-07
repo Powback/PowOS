@@ -352,6 +352,13 @@ if [ -d $A ]; then
   rm -rf $L/sleep && cp -r $A/sleep $L/sleep && chmod -R a+rX $L/sleep
   # Their unit manifests come with the rest (units/phone, below).
   install -m 644 $A/services/*.json $L/services/
+  # The device agent (unit powos-deviced; its manifest came with the services above, so the supervisor starts it):
+  # `powos devices` runs it from here. A running one is restarted onto the new file (the supervisor restarts it).
+  # powos-units: /data/powos/root/usr/lib/powos/devices
+  if [ -f $A/devices/powos-deviced ]; then
+    mkdir -p $R/usr/lib/powos/devices && install -m 755 $A/devices/powos-deviced $R/usr/lib/powos/devices/powos-deviced
+    pkill -f 'python3 /usr/lib/powos/devices/powos-deviced serve' 2>/dev/null && echo "deviced: restarted onto the new file"
+  fi
   # `powos app new`'s templates (lib/apps/templates).
   if [ -d $A/templates ]; then rm -rf $L/templates && cp -r $A/templates $L/templates && chmod -R a+rX $L/templates; fi
   [ -f $A/registry.wasm ] && install -m 644 $A/registry.wasm $L/registry/module.wasm

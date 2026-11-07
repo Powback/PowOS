@@ -1,0 +1,46 @@
+{
+  "id": "powos-deviced",
+  "name": "PowOS device agent (Devices app control channel)",
+  "kind": "service",
+  "host": "phone",
+  "owner": "system:devices",
+  "purpose": "the phone's card, live status (battery, screen on/off, locked) and actions (lock, screen off/on, ring, wake another device by Wake-on-LAN) for the Devices app on the other PowOS devices, so Desk can see and lock the phone; HTTPS :3416 with its own pinned certificate, every status/action call authenticated by a per-device token given at pairing (code shown on this phone) or enrollment; mDNS _powos._tcp. A system-tier service (lib/apps/services/powos-deviced.json). Rooted backend: adb to itself (HACK row in docs/REMOTE-POWOS.md section 4). docs/DEVICES.md",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (lib/devices, staged by rooted.sh deploy)",
+  "ports": [
+    "3416/tcp"
+  ],
+  "files": [
+    "/usr/lib/powos/devices",
+    "/usr/lib/powos/apps/services/powos-deviced.json",
+    "/home/powos/.config/powos/deviced.json",
+    "/home/powos/.local/state/powos/deviced (identity, TLS key, paired peers as token hashes, enrollment; 0700)"
+  ],
+  "packages": [
+    "python3",
+    "openssl",
+    "android-tools"
+  ],
+  "processes": [
+    {
+      "match": "^/usr/bin/python3 /usr/lib/powos/devices/powos-deviced serve"
+    },
+    {
+      "match": "avahi-publish -s .* _powos._tcp 3416"
+    }
+  ],
+  "limits": {
+    "memory": "48m",
+    "cpus": 0.1,
+    "pids": 32
+  },
+  "autosleep": "never: idle in accept(), a few MB; the phone's own sleep is Android's",
+  "health": "curl -sk https://127.0.0.1:3416/v1/info",
+  "remove": {
+    "commands": [
+      "rm -rf /usr/lib/powos/devices /usr/lib/powos/apps/services/powos-deviced.json"
+    ],
+    "keep": [
+      "/home/powos/.local/state/powos/deviced (delete it to forget every pairing, the enrollment and the device id)"
+    ]
+  }
+}
