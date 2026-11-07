@@ -1,0 +1,94 @@
+From: PowOS <powos@localhost>
+Subject: [PATCH] xwayland-kgsl: a size-refused flip says which windows and shapes
+
+PowOS: on the unfolded inner screen every present of a full-screen game is a copy, reason "toplevel" (Broforce
+11-06 16:51: 3303 copies / 30 s, toplevel=3002; Abzu 11-07: toplevel=843), ~110 frames/s rendered and ~48 shown,
+while on the folded cover the same game flips. check_flip has two size rules and 0013 counted both as "toplevel":
+the present window's region vs its pixmap toplevel's, and vs the xwl_window's toplevel (the wl_surface's window).
+The second now counts as "surface-size", and the period's first refusal of either is logged once with both windows:
+id, drawable geometry, winSize extents and rectangle count (a shape or a clip by the parent), and how many levels
+the present window is below the toplevel - so the next run reads whether it is a Wine client child smaller than its
+whole window (KWin sized the toplevel 2268x2440 while the game kept 2268x2439), an offset, or a shape.
+
+No behaviour change: only the counts' names and one extra line per 30 s. Unit test: test/flip-stats-test.c.
+---
+diff --git a/hw/xwayland/xwayland-present.c b/hw/xwayland/xwayland-present.c
+index 6a98459..2c09586 100644
+--- a/hw/xwayland/xwayland-present.c
++++ b/hw/xwayland/xwayland-present.c
+@@ -766,7 +766,7 @@ static void
+ xwl_present_kgsl_flip_count(struct xwl_screen *xwl_screen, Bool flipped)
+ {
+ #ifdef XWL_HAS_GLAMOR
+-    char line[384];
++    char line[768];  /* PowOS 0018: + the first size refusal's line */
+ 
+     if (!xwl_glamor_is_kgsl_surfaceless(xwl_screen))
+         return;
+@@ -780,6 +780,40 @@ xwl_present_kgsl_flip_count(struct xwl_screen *xwl_screen, Bool flipped)
+ #endif /* XWL_HAS_GLAMOR */
+ }
+ 
++/* PowOS (patch 0018): a size rule refused the flip - keep both windows' shapes for the period's line
++ * (xwl_kgsl_flip_note_refusal keeps only the first per period, so this runs once a period at most in effect). */
++static void
++xwl_present_kgsl_win_shape(WindowPtr window, struct xwl_kgsl_flip_win *w)
++{
++    const BoxRec *box = RegionExtents(&window->winSize);
++
++    w->id = window->drawable.id;
++    w->x = window->drawable.x;
++    w->y = window->drawable.y;
++    w->w = window->drawable.width;
++    w->h = window->drawable.height;
++    w->x1 = box->x1;
++    w->y1 = box->y1;
++    w->x2 = box->x2;
++    w->y2 = box->y2;
++    w->nrects = RegionNumRects(&window->winSize);
++}
++
++static void
++xwl_present_kgsl_refused(enum xwl_kgsl_noflip why, WindowPtr present_window, WindowPtr top)
++{
++    struct xwl_kgsl_flip_refusal r = { .why = why };
++    WindowPtr w;
++
++    if (xwl_present_kgsl_flips.refusal.why != XWL_NOFLIP_UNCHECKED)
++        return;
++    for (w = present_window; w && w != top; w = w->parent)
++        r.depth++;
++    xwl_present_kgsl_win_shape(present_window, &r.present);
++    xwl_present_kgsl_win_shape(top, &r.top);
++    xwl_kgsl_flip_note_refusal(&xwl_present_kgsl_flips, &r);
++}
++
+ static Bool
+ xwl_present_check_flip(RRCrtcPtr crtc,
+                        WindowPtr present_window,
+@@ -838,8 +872,10 @@ xwl_present_check_flip(RRCrtcPtr crtc,
+ 
+     xwl_present_kgsl_noflip = XWL_NOFLIP_TOPLEVEL;
+     /* Window must be same region as toplevel window */
+-    if ( !RegionEqual(&present_window->winSize, &toplvl_window->winSize) )
++    if ( !RegionEqual(&present_window->winSize, &toplvl_window->winSize) ) {
++        xwl_present_kgsl_refused(XWL_NOFLIP_TOPLEVEL, present_window, toplvl_window);  /* PowOS 0018 */
+         return FALSE;
++    }
+ 
+     xwl_present_kgsl_noflip = XWL_NOFLIP_CLIPPED;
+     /* Can't flip if window clipped by children */
+@@ -859,9 +895,11 @@ xwl_present_check_flip(RRCrtcPtr crtc,
+      * dimensions as their xwl_window parent window. For the case of
+      * different sizes subsurfaces are presumably the way forward.
+      */
+-    xwl_present_kgsl_noflip = XWL_NOFLIP_TOPLEVEL;
+-    if (!RegionEqual(&xwl_window->toplevel->winSize, &present_window->winSize))
++    xwl_present_kgsl_noflip = XWL_NOFLIP_SURFACE_SIZE;  /* PowOS 0018: its own name, not "toplevel" again */
++    if (!RegionEqual(&xwl_window->toplevel->winSize, &present_window->winSize)) {
++        xwl_present_kgsl_refused(XWL_NOFLIP_SURFACE_SIZE, present_window, xwl_window->toplevel);  /* PowOS 0018 */
+         return FALSE;
++    }
+ 
+ #ifdef XWL_HAS_GLAMOR
+     xwl_present_kgsl_noflip = XWL_NOFLIP_SYNC;

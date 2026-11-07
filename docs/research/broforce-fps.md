@@ -336,3 +336,34 @@ differs from the toplevel on the inner screen (Wine child window vs. a resized t
 Check after the ship: `queue.sh add --screen inner broforce-fps-low-cpu-bound-under-fex tools/phone/verify/bf-pacing.sh play`.
 Pass: the kgsl line has `async copies paced` > 0, the `layers play:` game rate within ~5 % of the xwayland rate, and
 sf/kwin fps not lower than 49.7.
+
+## Why the inner screen copies: a 1-px toplevel/child mismatch (2026-11-07, agent game-flip-inner)
+
+Asked: make the game's present flip on the inner screen (copies there, reason `toplevel`). Read-only evidence:
+
+| run | screen | X window (bf-window) | KWin client geometry (logical, scale 2.25) | Xwayland |
+|---|---|---|---|---|
+| bfp 11-06 10:50..13:02 base (8 runs) | cover 1116x2484 | 1116x2484 on 1116x2484 | 496x1104 (integer: 2484/2.25 = 1104) | 1500-3800 flips, 0 copies |
+| bfp 11-07 03:04 Abzu | inner 2268x2440 | **2268x2439** on 2268x2440; DXVK swapchain 2268x2439 | first `1008x1084.44`, then `1008x1084` (= 2439 px) | 0 flips, toplevel=843 |
+| bfp 11-07 12:05 Broforce | inner | 2268x2440 on 2268x2440 after `follows its task -> 1008x1084.44` | 1084 -> 1084.44 | 0 flips, toplevel=707 |
+| bfp 11-06 16:51 play | inner, then cover | first toplevel buffer **2268x2439**, then 1116x2484 | - | 0 flips, toplevel=3002 |
+
+- The inner screen's logical height is fractional (2440 / 2.25 = 1084.44); the cover's is not (2484 / 2.25 = 1104).
+  That is the only difference between "always flips" and "never flips".
+- KWin rounds the logical geometry to an integer in places: `LogicalOutput::geometry()` is `m_geometry.rounded()`,
+  `Workspace::m_geometry` is the union of those, so the root's `_NET_DESKTOP_GEOMETRY` on the phone reads
+  `1008, 1084` (logical and truncated: also unscaled at startup, `workspace.cpp:433`) and the guard window gets
+  `toXNative(1084)` = 2439. The game's window was configured to 2439 at one point (KWin logged `1008x1084`), the game
+  (Wine's Win32 rect, Unity, DXVK's swapchain) kept 2268x2439, and the toplevel later went 2268x2440 (`follows its
+  task -> 1084.44`). check_flip needs the present window's region == the toplevel's: a 2268x2439 child in a
+  2268x2440 toplevel is a 1-row mismatch -> copy, forever (nothing re-sizes the child once the game settled).
+- check_flip has TWO size rules and 0013 counted both as `toplevel`; nothing on the device said which window was
+  which size. **xwayland-kgsl 0018** (pkgrel 14): the second rule counts as `surface-size`, and each 30 s line is
+  followed by `Xwayland KGSL: first <rule> refusal: present window 0x.. WxH+x+y region x1,y1-x2,y2 (n rects), N
+  levels below toplevel 0x.. ...` - the next `bf-pacing.sh play --screen inner` names the two windows exactly.
+
+Fix once 0018's line confirms (expected: present = Wine's client child 2268x2439, depth 1, toplevel 2268x2440): KWin
+must configure a full-screen X window to exactly `toXNative(output geometryF)` everywhere (never the rounded logical
+Rect), and re-send the configure when the game's own window settles 1 px off the screen, so every game window is the
+screen's size in device pixels on every fold state ("right resolution in every mode"). Generic: any output whose
+pixel size / Xwayland scale is fractional (the inner 2440 / 2.25), not a Broforce rule.

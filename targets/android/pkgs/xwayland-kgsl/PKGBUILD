@@ -33,6 +33,9 @@
 #              zeroes the bits - Wine on focus flips) is rejected like a gone client's instead of BUG at exevents.c:1396
 #              (backtrace per event) and kept as an owner that never ends; a pointer-emulating listener that just
 #              doesn't select Motion is skipped quietly (xwayland-kgsl-touch-listener.h, unit test: test/run.sh)
+#   0018       check_flip's second size rule (the xwl_window's toplevel) counts
+#              as "surface-size", and the period's first size refusal logs both windows (id, geometry, winSize
+#              extents/rects, levels between): why a full-screen game copies on the inner screen (flip-stats.h, test)
 # Was built inside the rootfs only (build-inside.sh); a package so a fix reaches phones without a new rootfs:
 # rooted.sh deploy installs it (powos-deploy.sh), the rootfs build installs it with our other packages.
 #
@@ -42,7 +45,7 @@
 
 pkgname=xwayland-kgsl
 pkgver=24.1.13
-pkgrel=13
+pkgrel=14
 pkgdesc='Xwayland with glamor/DRI3 on KGSL surfaceless (PowOS Android: Turnip without /dev/dri)'
 arch=(aarch64)
 url='https://gitlab.freedesktop.org/xorg/xserver'
@@ -67,7 +70,8 @@ _patches=(0005-present-fence-callback-fires-once.patch
           0014-xwayland-kgsl-count-surface-commits-per-site.patch
           0015-xwayland-kgsl-pace-async-flips-on-frame-callback.patch
           0016-xwayland-kgsl-pace-async-copies-on-frame-callback.patch
-          0017-xi-touch-listener-deselected-is-dropped.patch)
+          0017-xi-touch-listener-deselected-is-dropped.patch
+          0018-xwayland-kgsl-size-refused-flip-says-its-windows.patch)
 source=("xserver::git+https://gitlab.freedesktop.org/xorg/xserver.git#tag=xwayland-$pkgver"
         "${_lfdevs[@]/#/https://raw.githubusercontent.com/lotfibennour/andromarchy/$_andromarchy/patches/xwayland/}"
         "${_patches[@]}"
@@ -82,7 +86,7 @@ sha256sums=(SKIP
             88f40f91416cc76d3ed3588fc93d4a892e414442938e25b2555e50dfcdf88f97
             652094faa7e89ff05726d9b7c2c3f5631b1c3e6a0e5460ebf4afe52612e07a2f
             d175913cbbd23e80c6bb7fd17565f1fad9ccf247171bf5a939fb157117f05b88
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   for p in "${_lfdevs[@]}" "${_patches[@]}"; do

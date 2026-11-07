@@ -25,20 +25,57 @@
  * request, or a target MSC already past) - or FAILED: check_flip said yes but xwl_present_flip couldn't attach. */
 enum xwl_kgsl_noflip {
     XWL_NOFLIP_UNCHECKED, XWL_NOFLIP_NO_WINDOW, XWL_NOFLIP_OFFSET, XWL_NOFLIP_SIZE, XWL_NOFLIP_NOT_DRI3,
-    XWL_NOFLIP_NO_BUFFER, XWL_NOFLIP_TOPLEVEL, XWL_NOFLIP_CLIPPED, XWL_NOFLIP_REDIRECTED, XWL_NOFLIP_SYNC,
-    XWL_NOFLIP_DEPTH, XWL_NOFLIP_FAILED, XWL_NOFLIP_COUNT
+    XWL_NOFLIP_NO_BUFFER, XWL_NOFLIP_TOPLEVEL, XWL_NOFLIP_CLIPPED, XWL_NOFLIP_REDIRECTED, XWL_NOFLIP_SURFACE_SIZE,
+    XWL_NOFLIP_SYNC, XWL_NOFLIP_DEPTH, XWL_NOFLIP_FAILED, XWL_NOFLIP_COUNT
 };
 
 static const char *const xwl_kgsl_noflip_names[XWL_NOFLIP_COUNT] = {
     "unchecked", "no-window", "offset/valid", "size", "not-dri3", "no-buffer", "toplevel", "clipped", "redirected",
-    "sync", "depth", "flip-failed"
+    "surface-size", "sync", "depth", "flip-failed"
+};
+
+/* PowOS (patch 0018): one X window's shape as check_flip compared it - its id, its drawable (x, y, w, h: screen
+ * coordinates) and its winSize region (extents and rectangle count: a bounding shape or a clip by the parent shows
+ * as a smaller extent or > 1 rect). */
+struct xwl_kgsl_flip_win {
+    uint32_t id;
+    int x, y, w, h;
+    int x1, y1, x2, y2;
+    int nrects;
+};
+
+/* PowOS (patch 0018): the first present per period that a size rule refused ("toplevel": the present window's
+ * region isn't its pixmap toplevel's; "surface-size": not the xwl_window's toplevel's), with both windows' shapes
+ * and how many levels the present window is below the toplevel - so the line says WHY a full-screen game copies
+ * (a Wine client child smaller than its whole window, a WM-sized toplevel, a shape) instead of it being guessed. */
+struct xwl_kgsl_flip_refusal {
+    enum xwl_kgsl_noflip why;   /* XWL_NOFLIP_UNCHECKED: none recorded this period */
+    unsigned depth;             /* levels from the present window up to the toplevel (0: it is the toplevel) */
+    struct xwl_kgsl_flip_win present, top;
 };
 
 struct xwl_kgsl_flip_stats {
     uint64_t period_start_us;   /* 0: not started */
     unsigned flips;
     unsigned copies[XWL_NOFLIP_COUNT];
+    struct xwl_kgsl_flip_refusal refusal;
 };
+
+/* Keep the period's first size refusal (later ones the same period are only counted). */
+static inline void
+xwl_kgsl_flip_note_refusal(struct xwl_kgsl_flip_stats *s, const struct xwl_kgsl_flip_refusal *r)
+{
+    if (s->refusal.why == XWL_NOFLIP_UNCHECKED && r->why != XWL_NOFLIP_UNCHECKED)
+        s->refusal = *r;
+}
+
+static inline size_t
+xwl_kgsl_flip_win_desc(const struct xwl_kgsl_flip_win *w, char *buf, size_t len)
+{
+    return (size_t) snprintf(buf, len, "0x%x %dx%d%+d%+d region %d,%d-%d,%d (%d rect%s)", (unsigned) w->id,
+                             w->w, w->h, w->x, w->y, w->x1, w->y1, w->x2, w->y2, w->nrects,
+                             w->nrects == 1 ? "" : "s");
+}
 
 static inline void
 xwl_kgsl_flip_start(struct xwl_kgsl_flip_stats *s, uint64_t now_us)
@@ -80,7 +117,20 @@ xwl_kgsl_flip_line(struct xwl_kgsl_flip_stats *s, uint64_t now_us, char *buf, si
         if (s->copies[i])
             n += (size_t) snprintf(buf + n, len - n, " %s=%u", xwl_kgsl_noflip_names[i], s->copies[i]);
     if (n < len)
-        snprintf(buf + n, len - n, "\n");
+        n += (size_t) snprintf(buf + n, len - n, "\n");
+    if (s->refusal.why != XWL_NOFLIP_UNCHECKED && n < len) {
+        n += (size_t) snprintf(buf + n, len - n, "Xwayland KGSL: first %s refusal: present window ",
+                               xwl_kgsl_noflip_names[s->refusal.why]);
+        if (n < len)
+            n += xwl_kgsl_flip_win_desc(&s->refusal.present, buf + n, len - n);
+        if (n < len)
+            n += (size_t) snprintf(buf + n, len - n, ", %u level%s below toplevel ", s->refusal.depth,
+                                   s->refusal.depth == 1 ? "" : "s");
+        if (n < len)
+            n += xwl_kgsl_flip_win_desc(&s->refusal.top, buf + n, len - n);
+        if (n < len)
+            snprintf(buf + n, len - n, "\n");
+    }
     memset(s, 0, sizeof(*s));
     s->period_start_us = now_us;
     return 1;
