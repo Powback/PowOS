@@ -51,7 +51,7 @@ The Devices app does the same from any PowOS device (pair from mDNS `_powos._tcp
 | device | agent | caps |
 |---|---|---|
 | Desk (.58, KDE) | `powos-deviced` systemd --user unit (`lib/devices/deploy.sh`, `units/gpu-58/powos-deviced.json`) | status, lock, screen_off, screen_on, sleep (guarded), wake |
-| Phone, rooted | `powos-deviced` in the system tier (`lib/apps/services/powos-deviced.json`, `units/phone/powos-deviced.json`; deployed by `rooted.sh deploy`). HACK: Android through the session's adb to itself | status (battery, screen, locked), lock, screen_off, screen_on, ring, wake |
+| Phone, rooted | `powos-deviced` in the system tier (`lib/apps/services/powos-deviced.json`, `units/phone/powos-deviced.json`; deployed by `rooted.sh deploy`). Android through the session's adb to itself (a hack row in REMOTE-POWOS §4) | status (battery, screen, locked), lock, screen_off, screen_on, ring, wake |
 | Phone, no root | the PowOS app (`devices/DeviceAgentHost.kt`, key in Android Keystore) | status, screen_on, ring (lock/screen_off need a device admin or the accessibility service: not yet) |
 | Server (gpu-195, PowStation) | `powos-deviced` (server backend), not deployed yet | status, sleep (guarded), wake |
 
