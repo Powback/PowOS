@@ -1,0 +1,44 @@
+{
+  "id": "powstation.powos-enroll",
+  "name": "powos-enroll: powos-enroll",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "infrastructure; Compose-managed by powos-enroll",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "powos-enroll"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "powos-enroll",
+    "service": "powos-enroll",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "application",
+      "exposure": "internet",
+      "reason": "device API carries no PowAuth session by design (RFC 8628 device flow); LAN/VPN only"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/PowStation/enroll -f /Users/macback/Projects/PowStation/enroll/docker-compose.yml --project-name powos-enroll stop powos-enroll"
+    ],
+    "keep": [
+      "/Users/macback/Projects/PowStation/enroll/powos-enroll.py",
+      "/Users/macback/Projects/PowStation/data/powos-enroll",
+      "/Users/macback/.claude-tenants/enrolled"
+    ]
+  },
+  "limits": {
+    "memory": "67108864",
+    "cpus": 0.25,
+    "pids": 32
+  }
+}
