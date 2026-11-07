@@ -1,0 +1,136 @@
+From ed33a9b44d70c411567a65676bbd92f058d0ed29 Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Sat, 7 Nov 2026 03:26:00 +0100
+Subject: [PATCH] backends/anland: the output and Xwayland's root follow the
+ app's screen on rotation and fold
+
+Rotating breaks the games (the user, 11-07). bf-resize.sh / game-resize.sh 11-07 03:09-03:18: Xwayland's root was
+2268x2440 in every state. The output followed the window tasks' buffers (0048), made once at the screen's size at
+their open and never changed by a rotation or fold, and each task's size was bounded by them: a rotated full-screen
+Broforce got 2268x2268 of the 2440x2268 screen, folded 2268x1116 of 2484x1116. Besiege (Wine) went further: resized
+to a window that no longer covered its monitor (the root), Wine took it out of full screen - KWin 'floating again',
+the web window back at 1135x1365, unfocused, for every later state.
+
+The app now says the Android screen ('screen 0 W H', cap 'screen') on connect, on every display change, and before
+the windows' new sizes on a configuration change; the output (and so Xwayland's root, Wine's monitor) and
+_POWOS_SCREEN_SIZE follow it, the output first so a resized full-screen window still covers its root. The app makes
+window buffers square (as large as either orientation needs), so they no longer bound a rotated task; only an app that
+never says the screen leaves the output to the buffers, as before.
+---
+ src/backends/anland/anland_backend.cpp     | 18 ++++++++++++++++++
+ src/backends/anland/anland_backend.h       | 13 +++++++++++++
+ src/backends/anland/anland_window_task.cpp | 17 +++++++++++++----
+ 3 files changed, 44 insertions(+), 4 deletions(-)
+
+diff --git a/src/backends/anland/anland_backend.cpp b/src/backends/anland/anland_backend.cpp
+index 6e6023e..04c8f9e 100644
+--- a/src/backends/anland/anland_backend.cpp
++++ b/src/backends/anland/anland_backend.cpp
+@@ -304,6 +304,19 @@ void AnlandBackend::followWindowScreen(const QSize &screen)
+     m_outputs[0]->resize(screen);
+ }
+ 
++void AnlandBackend::setAndroidScreen(const QSize &screen)
++{
++    if (!screen.isValid() || screen == m_androidScreen) {
++        return;
++    }
++    qCInfo(KWIN_ANLAND) << "the app's screen:" << m_androidScreen << "->" << screen;
++    m_androidScreen = screen;
++    // The output first, then the windows: a full-screen game's window resized past (or short of) the root it covers
++    // is no longer full screen to Wine, which takes it out of full screen (Besiege on a rotation, 11-07 03:15).
++    followWindowScreen(screen);
++    publishScreenSize(screen);
++}
++
+ void AnlandBackend::publishScreenSize(const QSize &screen)
+ {
+     if (!screen.isValid()) {
+@@ -569,6 +582,11 @@ void AnlandBackend::enterFallback()
+ 
+     m_consumerReady = false;
+     m_inFallback = true;
++    // PowOS (0061): no desktop consumer decides the output now: the app's screen does (from the event loop - this runs
++    // inside the producer library).
++    QMetaObject::invokeMethod(this, [this]() {
++        followWindowScreen(m_androidScreen);
++    }, Qt::QueuedConnection);
+ 
+     // Detach the audio socket before the transport closes the borrowed fd. The streams
+     // keep running (capture drops its PCM, the mic Source feeds silence), so PipeWire
+diff --git a/src/backends/anland/anland_backend.h b/src/backends/anland/anland_backend.h
+index 3a5d5da..25cfa1a 100644
+--- a/src/backends/anland/anland_backend.h
++++ b/src/backends/anland/anland_backend.h
+@@ -120,6 +120,18 @@ public:
+      * (home below the status bar, a floating task, the folded cover) and is not the game's container.
+      */
+     void publishScreenSize(const QSize &screen);
++    /**
++     * PowOS (0061): the Android screen's size now, in its orientation, as the app says it ("screen 0 W H" on every
++     * rotation and fold). The output (Xwayland's root, the monitor Wine/Unity size a full-screen game to) and
++     * _POWOS_SCREEN_SIZE follow it. The window tasks' buffers (0048) can't say it: they are made once at their open,
++     * as large as any orientation needs, and never change - the root stayed 2268x2440 through every rotation and fold.
++     */
++    void setAndroidScreen(const QSize &screen);
++    /** The size [setAndroidScreen] said; invalid from an app that never says it (the buffers' size then decides). */
++    QSize androidScreen() const
++    {
++        return m_androidScreen;
++    }
+ 
+ private:
+     void setupNotifiers();
+@@ -176,6 +188,7 @@ private:
+ 
+     bool m_consumerReady = false;
+     bool m_inFallback = false;
++    QSize m_androidScreen; // PowOS (0061): setAndroidScreen
+     QSize m_publishedScreen; // PowOS: publishScreenSize's last size, published again when Xwayland (re)starts
+     bool m_noDrmDeviceMode = false;
+ 
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index c64d505..6078037 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -654,9 +654,13 @@ bool AnlandWindowTask::importBuffers()
+     m_bufCount = count;
+     // KWin's screen is the one the windows are on: placed against a smaller one (the cover screen KWin started on),
+     // a client's menus and X11 override-redirect popups landed far from their parent's buttons.
+-    m_tasks->backend()->followWindowScreen(m_bufferSize);
+-    // The screen a full-screen game's task gets, for its launcher (unity-screen: the game's resolution = its container).
+-    m_tasks->backend()->publishScreenSize(m_bufferSize);
++    // PowOS (0061): the app's own screen size when it says it (its buffers are made square, as large as any
++    // orientation needs - not the screen); only an app that never says it leaves this to the buffers.
++    if (!m_tasks->backend()->androidScreen().isValid()) {
++        m_tasks->backend()->followWindowScreen(m_bufferSize);
++        // The screen a full-screen game's task gets, for its launcher (unity-screen: the game's resolution = its container).
++        m_tasks->backend()->publishScreenSize(m_bufferSize);
++    }
+     return true;
+ }
+ 
+@@ -1542,7 +1546,7 @@ void AnlandWindowTasks::announce()
+     // task's size as before).
+     // keyboard-live (kwin 0054): a keyboard asked for before a task went live moves to its consumer, so the app may
+     // hold an ask no touch came before (TapKeyboard) - an older KWin never re-sends it and a tap would raise nothing.
+-    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize nodecor quit window-ime fullscreen-request parent moveresize ownframe keyboard-live")});
++    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize nodecor quit window-ime fullscreen-request parent moveresize ownframe keyboard-live screen")});
+     // Which KWin this is and the tasks it shows now (window ids restart at 1 with each KWin): the app finishes every
+     // window task of an earlier KWin, or one this KWin no longer has, instead of showing a new window in it (after a
+     // session restart, Kate's launcher tap raised the old session's dead Kate task).
+@@ -1611,6 +1615,11 @@ void AnlandWindowTasks::handleLine(const QString &line)
+         setDesktopShown(f[1] == QLatin1String("1"));
+         return;
+     }
++    if (f[0] == QLatin1String("screen") && f.size() >= 4) {
++        // PowOS (0061): "screen 0 W H" - the Android screen now (rotation, fold): KWin's output and Xwayland's root.
++        m_backend->setAndroidScreen(QSize(f[2].toInt(), f[3].toInt()));
++        return;
++    }
+     if (f[0] == QLatin1String("hello")) {
+         // The app's control channel (re)connected after ours: the daemon dropped what we said while it was away.
+         // PowOS (0060): a new app process (or its channel back) re-tells "export-new"/"desktop" after "caps": from
+-- 
+2.50.1 (Apple Git-155)
+

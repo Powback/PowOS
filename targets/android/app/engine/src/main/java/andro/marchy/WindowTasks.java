@@ -62,6 +62,12 @@ public final class WindowTasks {
     /** The "desktop" state KWin has (null: not told on this connection). */
     private static volatile Boolean desktopSent;
 
+    /** The screen size last told KWin ("screen"), "WxH"; null = not told on this connection. */
+    private static volatile String screenSent;
+
+    /** Rotations and folds re-tell the screen ([tellScreen]), registered once. */
+    private static volatile boolean screenWatched;
+
     /**
      * Whether apps float now (the app module's AppWindows.floating, set by App through setFloating: the unfolded home). KWin is told
      * ("export-new"), so every new application window opens as its own task - a floating window - not on the desktop
@@ -227,6 +233,52 @@ public final class WindowTasks {
         Log.i(TAG, "desktop " + (on ? 1 : 0) + (out == null ? ": channel down, dropped" : ""));
     }
 
+    /**
+     * KWin told the Android screen's size now, in its orientation ("screen 0 W H", kwin 0061): its output - Xwayland's
+     * root, the monitor Wine and Unity size a full-screen game to - follows it. Before, the output followed the window
+     * tasks' buffers, which are the screen's size at their open and never change: the root stayed 2268x2440 through
+     * every rotation and fold (bf-resize.sh 11-07), a rotated game got 2268x2268, and Wine took a window that no
+     * longer covered its monitor out of full screen (Besiege). Said before the windows' new sizes on a configuration
+     * change (WebWindows), and by a display listener for everything else. Any thread; deduplicated.
+     */
+    public static void tellScreen(Context context) {
+        if (context == null || !kwinCan("screen"))
+            return;
+        Context app = context.getApplicationContext();
+        watchScreen(app);
+        android.hardware.display.DisplayManager dm = app.getSystemService(android.hardware.display.DisplayManager.class);
+        android.view.Display d = dm != null ? dm.getDisplay(android.view.Display.DEFAULT_DISPLAY) : null;
+        if (d == null)
+            return;
+        android.graphics.Point p = new android.graphics.Point();
+        d.getRealSize(p);
+        if (p.x <= 0 || p.y <= 0)
+            return;
+        String size = p.x + "\t" + p.y;
+        if (size.equals(screenSent))
+            return;
+        screenSent = size;
+        sendLine("screen\t0\t" + size);
+        Log.i(TAG, "screen " + p.x + "x" + p.y + (out == null ? ": channel down, dropped" : ""));
+    }
+
+    private static void watchScreen(Context app) {
+        if (screenWatched)
+            return;
+        screenWatched = true;
+        android.hardware.display.DisplayManager dm = app.getSystemService(android.hardware.display.DisplayManager.class);
+        if (dm == null)
+            return;
+        dm.registerDisplayListener(new android.hardware.display.DisplayManager.DisplayListener() {
+            @Override public void onDisplayAdded(int id) {}
+            @Override public void onDisplayRemoved(int id) {}
+            @Override public void onDisplayChanged(int id) {
+                if (id == android.view.Display.DEFAULT_DISPLAY)
+                    tellScreen(app);
+            }
+        }, new android.os.Handler(android.os.Looper.getMainLooper()));
+    }
+
     /** KWin told whether apps float now ("export-new 1/0"), when it changed or KWin hasn't been told. */
     static void tellExportNew(Context context) {
         java.util.function.Predicate<Context> f = floating;
@@ -303,6 +355,7 @@ public final class WindowTasks {
                 session = null;
                 exportNewSent = null;
                 desktopSent = null;
+                screenSent = null;
                 out = o;
                 // KWin says "caps" + "session" when it connects; if it came first, the daemon dropped them: ask again
                 // (an older KWin ignores it).
@@ -351,8 +404,10 @@ public final class WindowTasks {
             Log.i(TAG, "KWin caps:" + caps);
             exportNewSent = null;
             desktopSent = null;
+            screenSent = null;
             tellDesktop();
             tellExportNew(context);
+            tellScreen(context);
             return;
         }
         if (f[0].equals("session") && f.length > 1) {
