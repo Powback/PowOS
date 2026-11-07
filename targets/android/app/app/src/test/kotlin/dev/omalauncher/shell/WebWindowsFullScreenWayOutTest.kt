@@ -86,8 +86,8 @@ class WebWindowsFullScreenWayOutTest {
         assertTrue("reattach no longer moves the full-screen windows", full > under && under >= 0)
         assertTrue("the full-screen windows move after the transaction went out", full < applied)
         val again = body("private fun fullAgain(")
-        assertTrue(again.contains("if (!w.linuxFull || w.closed || !w.container.isValid) continue"))
-        assertTrue(again.contains("buildReparentTransaction(w.container)"))
+        assertTrue(again.contains("if (!w.linuxFull || w.closed || !fullLayer(re, w)) continue"))
+        assertTrue(body("private fun fullLayer(").contains("buildReparentTransaction(c)"))
         assertFalse("the dead-surface HACK is fixed, not kept", src.contains("leaves it on the old surface ([reattach] moves only"))
     }
 }

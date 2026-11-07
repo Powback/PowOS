@@ -23,6 +23,9 @@
 #             gwenview, ffplay, steam, kwin). Else phone. Handbook "The emulator lane" has the table, per check.
 #   queue.sh summary [--since HH:MM | YYYY-MM-DD[ HH:MM]]  one line per finished job: time, id, PASS/FAIL/SKIP, first FAIL line
 #        --since: HH:MM means today; a bare date means from its midnight; compared on the job id's date and time (f291)
+#        last line: the idle windows' utilization over that span - seconds of jobs that gave a verdict vs wasted ones
+#        (rc 3 tries: touched / precond / early, SKIPs, the gaps between jobs); the runner logs it hourly too
+#   queue.sh util [--since EPOCH] [--windows]  that utilization line alone (--windows: one line per idle window)
 #   queue.sh wait <job-id> [max_s]              block until that job's result; prints its PASS/FAIL/SKIP lines only
 #   queue.sh list                               queued, running, paused (who/why/until, if given) and the last results
 #   queue.sh pause --why TEXT [--until WHEN]    pause the runner (what the pill's tap does, with its own reason) / resume
@@ -40,9 +43,12 @@
 # every HB_S (4) s carries the check, k/N, elapsed time and the SUB-STEP with its own time ("waiting for the game window
 # · 45 s": the check's /tmp/powos-verify-step - bf-lib.sh pill - else its log's last line); no beat for 30 s and the pill hides itself. Its x writes
 # /tmp/powos-verify-stop, which the next beat sees: the check is killed and stays queued. While runnable checks wait for
-# the user (a touch in the last QUEUE_IDLE_S, a game running) the pill says "Tests wait · phone in use" (wait_pill). A check that exits 3 (a real touch, no window)
-# goes back on the queue for the next window - always, never dropped: from its 5th try it backs off a few minutes per try
-# (rc3_requeue; each try's log appended to done/<job>.log.tries). A check that exits 0
+# the user (a touch in the last QUEUE_IDLE_S, a game running) the pill says "Tests wait · phone in use" (wait_pill). A check that exits 3 goes back on the queue for the
+# next window when the phone's input source says a finger came while it ran (rc3_kind touched) or it gave up at once
+# (early) - never dropped: from its 5th try it backs off a few minutes per try (rc3_requeue; each try's log appended to
+# done/<job>.log.tries). One that burnt the phone's time with nobody on it (precond: its own setup failed, e.g. the game
+# never on screen) gets a verdict at its QUEUE_PRECOND_MAX (3)rd such try: FAIL precondition + its reason line.
+# Same-game jobs run back to back (order_jobs) and may hand the running game on (QUEUE_NEXT_APP, warm_stop). A check that exits 0
 # but printed a line starting with FAIL is a FAIL. Exit codes -> verdict: 0 PASS; 1 (any other non-zero) FAIL; past its
 # --budget FAIL timeout (rc 124); 3 stays queued (no verdict); 5 SKIP (ENV:/test error: preflight, a recorder that
 # left no file); 137/143 SKIP killed (a signal not the budget's); a first verdict line "SKIP:" SKIP. SKIPs count as no
@@ -85,6 +91,60 @@ rc3_requeue() { local j=$1 log=$2 t=$(($3 + 1)) now=${4:-$(date +%s)} after=0 tm
   tmp=$(mktemp "$j.XXXX") || return 1
   { grep -vE '^(tries|after)=' "$j"; printf 'tries=%s\nafter=%s\n' "$t" "$after"; } > "$tmp" && mv -f "$tmp" "$j"
   echo "$after"; }
+# rc3_kind <elapsed s> <idle s>: what an exit 3 really was, from the input source (idle.sh: the touch IRQs + every
+# input device), never from the check's own word. touched = a finger/pad came while it ran (idle < its run time, or
+# idle unknown: the old meaning, safe). early = nobody touched it and it gave up within QUEUE_EARLY_S (20) s: not ready
+# yet (perf-scenarios' "need 600 s idle"), cheap - kept queued, backing off as before. precond = nobody touched it, it
+# spent the phone's time and still had no result: its own setup failed. 11-07 03:32-03:37: six ABZU bf-pacing runs of
+# ~85 s each ended "INVALID ... wasn't on the screen" + rc 3, logged "no window / touched" while idle=507 - retried
+# forever while the phone sat in the switcher. Those are capped (rc3_precond).
+rc3_kind() { local el=$1 idl=${2:-}
+  case $idl in ''|*[!0-9]*) echo touched; return ;; esac
+  [ "$idl" -lt "$el" ] && { echo touched; return; }
+  [ "$el" -lt "${QUEUE_EARLY_S:-20}" ] && { echo early; return; }
+  echo precond; }
+# rc3_precond <job>: one more precond rc 3 for it (ptries= in the job); prints the new count. At QUEUE_PRECOND_MAX (3)
+# the runner turns it into a verdict - "FAIL precondition: <its INVALID/SKIP/FAIL line>" - instead of another retry.
+rc3_precond() { local j=$1 p=0 tmp; p=$(sed -n 's/^ptries=//p' "$j" | tail -1); p=$(( ${p:-0} + 1 ))
+  tmp=$(mktemp "$j.XXXX") || return 1
+  { grep -v '^ptries=' "$j"; printf 'ptries=%s\n' "$p"; } > "$tmp" && mv -f "$tmp" "$j"; echo "$p"; }
+# util_rec J <start> <end> <class> <job> | W <open> <close>: the utilization ledger ($Q/util.log, queue-util.py reads
+# it): every job's seconds by outcome and every idle window's span - `queue.sh summary` / `util` and the hourly line.
+util_rec() { echo "$*" >> "$Q/util.log" 2>/dev/null; }
+util_line() { python3 -I "$here/queue-util.py" "$@" "$Q/util.log" 2>/dev/null; }
+# util_hourly: once an hour (the stamp $Q/util.stamp), the last hour's utilization into runner.log.
+util_hourly() { local now; now=$(date +%s)
+  [ $(( now - $(cat "$Q/util.stamp" 2>/dev/null || echo 0) )) -ge "${UTIL_EVERY_S:-3600}" ] || return 0
+  echo "$now" > "$Q/util.stamp"; echo "$(date +%T) last hour's $(util_line --since $((now - 3600)))"; }
+# warm_stop: close the game a job left warm ($Q/warm: its app id; bf-pacing's "WARM:" line) when the job after it
+# isn't for that game after all (a dropped job, the window ended) - the same close bf-stop.sh does, and its marker.
+warm_stop() { local a; a=$(cat "$Q/warm" 2>/dev/null); rm -f "$Q/warm"; case $a in ''|*[!0-9]*) return 0 ;; esac
+  echo "$(date +%T) closing app $a: left warm for a next job of it that didn't come"
+  user_sh "export XDG_RUNTIME_DIR=/run/powos-app DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus; timeout 20 powos game $a stop; timeout 5 powos sleep never --remove steam"
+  phone_sh "rm -f /var/tmp/powos-warm-$a" >/dev/null; }
+# warm_takes <cmd...>: the check reuses a game the job before left warm (bf-pacing.sh, its warm marker).
+warm_takes() { local a; for a in "$@"; do [ "$(basename -- "$a" 2>/dev/null)" = bf-pacing.sh ] && return 0; done; return 1; }
+# game_key <cmd...>: the Steam app a games check drives ("" for any other check): APP=<id> in its env, else a games
+# script's first numeric argument (game-resize.sh 384190), else Broforce (274190, bf-*.sh's default).
+game_key() { local a g=0 app=
+  for a in "$@"; do
+    case $a in APP=[0-9]*) app=${a#APP=} ;; esac
+    basename -- "$a" 2>/dev/null | grep -qiE '^(bf-|games?-)' && g=1 && continue
+    [ $g = 1 ] && [ -z "$app" ] && case $a in [0-9]*) [ -z "${a//[0-9]/}" ] && app=$a ;; esac
+  done
+  [ $g = 1 ] && echo "${app:-274190}"; :; }
+# order_jobs: sel[] regrouped so every game's jobs run back to back (each group where its first job was; the others
+# keep their order) - ABZU's fps jobs one after another, the game kept warm between them (QUEUE_NEXT_APP), instead of
+# ABZU, window-bench ("a game runs: not now"), ABZU again. Sources each job: call it in the window's subshell.
+order_jobs() { local j k i out=() keys=() seen=" "
+  for j in ${sel[@]+"${sel[@]}"}; do cmd=(); . "$j"; keys+=("$(game_key ${cmd[@]+"${cmd[@]}"})"); done
+  for i in ${sel[@]+"${!sel[@]}"}; do
+    k=${keys[$i]}
+    if [ -z "$k" ]; then out+=("${sel[$i]}"); continue; fi
+    case "$seen" in *" $k "*) continue ;; esac; seen="$seen$k "
+    for j in "${!sel[@]}"; do [ "${keys[$j]}" = "$k" ] && out+=("${sel[$j]}"); done
+  done
+  sel=(${out[@]+"${out[@]}"}); }
 # rc3_waits <after> [now]: the job backs off (rc3_requeue) until then - not selected for a window yet.
 rc3_waits() { [ "${1:-0}" -gt "${2:-$(date +%s)}" ] 2>/dev/null; }
 # alive_runner <pid>: that pid runs a queue runner (not a recycled pid).
@@ -417,7 +477,12 @@ summary)  # one line per finished job: finish time, id, PASS/FAIL/SKIP, first FA
     elif grep -qE '^FAIL' "$f"; then v=FAIL; d=$(grep -m1 -E '^FAIL' "$f"); elif grep -qE '^SKIP' "$f"; then v=SKIP; d=$(grep -m1 -E '^SKIP' "$f")
     elif tail -1 "$f" | grep -qE '^PASS'; then v=PASS; d=; else v=PASS?; d=$(tail -1 "$f"); fi
     echo "$t $id $v${d:+ ${d:0:160}}"
-  done ;;
+  done
+  # The idle windows' use over the same span (util.log, queue-util.py): verdict seconds vs wasted (rc 3s, SKIPs, gaps).
+  se=0; [ -z "$since" ] || se=$(date -j -f '%Y-%m-%d %H:%M' "$since" +%s 2>/dev/null || date -d "$since" +%s 2>/dev/null || echo 0)
+  util_line --since "$se" || true ;;
+util)  # queue.sh util [--since EPOCH] [--windows]: the idle windows' utilization (queue-util.py over $Q/util.log)
+  shift; util_line "$@" ;;
 wait)  # queue.sh wait <job-id|prefix> [max_s=1500]: block until that job has a result, print its PASS/FAIL/SKIP lines only.
   id=${2:-}; max=${3:-1500}; [ -n "$id" ] || { echo "queue.sh wait <job-id> [max_s]"; exit 2; }
   end=$((SECONDS + max)); id=${id%.job}
@@ -612,7 +677,10 @@ EOS
       rm -f "$Q/paused"; RSTATE=running   # a go ends a pause
       go=; case "${WL_GOT:-}" in go=*) go=${WL_GOT#go=}; go=${go%% *} ;; esac
       AWAY=0; case "${WL_GOT:-}" in *game=away*) AWAY=1; echo "$(date +%T) a game is running with nobody playing: checks leave it alone" ;; esac
-      select_jobs "$go"
+      select_jobs "$go"; order_jobs
+      # The window's span for the utilization ledger, and a game a job left warm for a next job that never came (the
+      # window ended: an install, a touch) closed again - else idle.sh reads it as the user playing for GAME_IDLE_S.
+      wopen=$(date +%s); trap 'warm_stop; util_rec W "$wopen" "$(date +%s)"' EXIT
       N=${#sel[@]}; k=0; pass=0; fail=0; first=; prev=; results=
       [ $N -gt 0 ] || { status "" '{"done":true}' "rm -f /tmp/powos-verify-go"; [ $held = 0 ] && exit 5; exit 7; }
       # f317: what a "test all" costs, before it starts: the count and the summed budgets (an upper bound).
@@ -673,6 +741,13 @@ EOS
         # long as this job runs, the same way wl_sleep already restores sleep once the whole window ends.
         game=0; for a in "${cmd[@]}"; do basename -- "$a" 2>/dev/null | grep -qiE "$HW_ONLY" && game=1; done
         n=$(basename "$j" .job); log=$Q/done/$n.log; k=$((k + 1))
+        # Warm hand-over: the next job drives the same game -> QUEUE_NEXT_APP tells this one (bf-pacing) to leave it
+        # running ("WARM: ..." in its log) for the next to reuse; a game left warm for another app is closed first.
+        # Only a check that takes the hand-over (bf-pacing.sh reads its warm marker) gets one: game-resize would take a
+        # running game for the user's.
+        gk=$(game_key "${cmd[@]}"); nk=; [ -n "$gk" ] && [ -n "${sel[$k]:-}" ] && nk=$( cmd=(); . "${sel[$k]}"; warm_takes "${cmd[@]}" && game_key "${cmd[@]}" )
+        nextapp=; [ -n "$gk" ] && [ "$nk" = "$gk" ] && nextapp=$gk
+        [ -s "$Q/warm" ] && [ "$(cat "$Q/warm")" != "$gk" ] && warm_stop
         echo "$(date +%T) run $n: ${cmd[*]}"
         js() { printf '{"name":%s,"task":%s,"k":%s,"n":%s,"screen":%s,"el":%s,"budget":%s,"prev":"@@HINT@@","step":"@@STEP@@","stepel":@@STEPEL@@}' \
           "$(jstr "${name:-$task}")" "$(jstr "$task")" $k $N "$(jstr "$screen")" "$1" "$budget"; }
@@ -681,7 +756,7 @@ EOS
         ia=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null); lv=$(cat "${SHIP_DIR:-$HOME/.cache/powos-ship-queue}/live" 2>/dev/null)
         printf 'build: %s shell=%s\n' "${ia:--}" "${lv:--}" > "$log"
         [ -s "$log.tries" ] && echo "try $((tries + 1)): the earlier tries' logs (each ended rc 3) are in $log.tries" >> "$log"
-        ( cd "$cwd" && unset VERIFY_GO && export LOCK_HELD=1 && "$here/preflight.sh" "${cmd[@]}" && exec "${cmd[@]}" ) >> "$log" 2>&1 & jp=$!   # preflight: rc 5 + "ENV: why" when the phone cannot run it
+        ( cd "$cwd" && unset VERIFY_GO && export LOCK_HELD=1 QUEUE_NEXT_APP=$nextapp && "$here/preflight.sh" "${cmd[@]}" && exec "${cmd[@]}" ) >> "$log" 2>&1 & jp=$!   # preflight: rc 5 + "ENV: why" when the phone cannot run it
         # The heartbeat: every HB_S s the pill hears check, k/N, elapsed; a tap's stop flag or the budget ends the check.
         # The sub-step: the check's own (put) or its log's last line, timed from when that line first showed.
         t0=$(date +%s); why=; ls_=; lt=$t0
@@ -728,15 +803,33 @@ EOS
           echo "$(date +%T) $n: past its ${budget}s budget - killed"
         fi
         if [ "$why" = stop ]; then
-          echo "$(date +%T) $n: stopped from the phone - stays queued, paused"
+          echo "$(date +%T) $n: stopped from the phone - stays queued, paused"; util_rec J "$t0" "$(date +%s)" stopped "$n"
           pause "Phone checks paused: $pass passed, $fail failed, $((N - k + 1)) still queued"
           exit 4
         fi
+        t1=$(date +%s); grep -q '^WARM: ' "$log" && { [ -n "$gk" ] && echo "$gk" > "$Q/warm"; } || rm -f "$Q/warm"
+        pfinal=
+        if [ $rc = 3 ]; then
+          # Touched or not comes from the input source (rc3_kind), read right after the check: idle shorter than its
+          # run = a finger came. Nobody touched it and it burnt the phone's time: precond - at QUEUE_PRECOND_MAX (3)
+          # tries a verdict ("FAIL precondition: <why>"), never an endless rc 3 loop while the phone sits idle.
+          idl=$("$phone/idle.sh" 2>/dev/null | sed -n 's/.*idle=\([0-9]*\).*/\1/p')
+          kind=$(rc3_kind $((t1 - t0)) "$idl"); util_rec J "$t0" "$t1" "$kind" "$n"
+          if [ "$kind" = precond ]; then
+            pt=$(rc3_precond "$j")
+            if [ "${pt:-0}" -ge "${QUEUE_PRECOND_MAX:-3}" ]; then
+              why3=$(grep -E '^(INVALID|SKIP|FAIL)' "$log" | tail -1 | cut -c1-160)
+              echo "FAIL precondition: ${why3:-exit 3 with no reason line} - $pt tries of $((t1 - t0)) s with nobody on the phone (each try: done/$n.log.tries)" >> "$log"
+              echo "$(date +%T) $n: rc 3 with the phone idle $pt times (its setup fails, not a touch) - FAIL precondition, no more retries"
+              rc=1; pfinal=1
+            fi
+          fi
+        fi
         if [ $rc = 3 ]; then
           aft=$(rc3_requeue "$j" "$log" "$tries")
-          if [ "${aft:-0}" = 0 ]; then echo "$(date +%T) $n: no window / touched (rc 3), again next window"
+          if [ "${aft:-0}" = 0 ]; then echo "$(date +%T) $n: rc 3 ($kind$([ "$kind" = precond ] && echo " $pt/${QUEUE_PRECOND_MAX:-3}: nobody touched the phone, its setup failed"; [ "$kind" = early ] && echo ": not ready yet")), again next window"
           else
-            echo "$(date +%T) $n: rc 3 for the $((tries + 1))th time - stays queued, next try after $(date -r "$aft" +%T)"
+            echo "$(date +%T) $n: rc 3 ($kind) for the $((tries + 1))th time - stays queued, next try after $(date -r "$aft" +%T)"
             # The board hears it once, as a step (no check verdict: not a PASS, FAIL or SKIP - it still runs).
             [ $((tries + 1)) = 5 ] && user_sh "$(printf 'powos agents task set %q --step %q >/dev/null 2>&1 || true' "$task" \
               "$QUEUED_STEP: exited 3 five times ($(grep -E '^(INVALID|SKIP|FAIL)' "$log" | tail -1 | cut -c1-120)) - stays queued, retried every few min (log ~/.cache/powos-verify-queue/done/$n.log.tries)")" &
@@ -744,9 +837,8 @@ EOS
           # Leave the window only when the user really came back (a finger in the last QUEUE_IDLE_S): rc 3 also means
           # "not on the phone yet" (plasma-notify: no PlasmaBridge in the APK), which ended every window at its first
           # job while the user was away charging (01:46, 18 checks never ran).
-          idl=$("$phone/idle.sh" 2>/dev/null | sed -n 's/.*idle=\([0-9]*\).*/\1/p')
           if [ -n "$idl" ] && [ "$idl" -ge "${QUEUE_IDLE_S:-120}" ]; then
-            echo "$(date +%T) $n: rc 3 but the phone is still idle (${idl}s) - next check"; continue
+            echo "$(date +%T) $n: rc 3 but the phone is still idle (${idl}s) - next check"; util_hourly; continue
           fi
           status "" "{\"done\":true,\"summary\":$(jstr "Phone checks wait for the next free window (the phone was touched): $pass passed, $fail failed")}"
           exit 4   # leave the window: the user is on the phone
@@ -769,8 +861,8 @@ EOS
         fi
         [ -n "$skipwhy" ] && envskip=1
         mv "$j" "$Q/done/$n.job"
-        # (rc 3 never gets here: rc3_requeue keeps it queued, above.)
-        if [ -n "$skipwhy" ]; then r="SKIP $skipwhy"; elif [ $envskip = 1 ]; then r="SKIP can't run (ENV): $(sed -n 's/^ENV: //p' "$log" | head -1)"; elif [ $rc != 0 ] && grep -q '^INVALID' "$log"; then r="INVALID rc=$rc"; else
+        # (rc 3 gets here only as a FAIL precondition, pfinal; every other rc 3 stays queued, above.)
+        if [ -n "$skipwhy" ]; then r="SKIP $skipwhy"; elif [ $envskip = 1 ]; then r="SKIP can't run (ENV): $(sed -n 's/^ENV: //p' "$log" | head -1)"; elif [ -n "$pfinal" ]; then r="FAIL precondition"; elif [ $rc != 0 ] && grep -q '^INVALID' "$log"; then r="INVALID rc=$rc"; else
         r=$([ $rc = 0 ] && echo PASS || { [ "$why" = timeout ] && echo "FAIL timeout" || echo "FAIL rc=$rc"; }); fi; echo "$r: $(tail -1 "$log")" >> "$log"
         prev="${name:-$task}: $r"
         img=
@@ -788,6 +880,9 @@ EOS
         [ -z "$skipwhy" ] || line=$r
         board "$task" "verify $r: $(printf %s "$line" | cut -c1-160)${ver:+ ($ver)} (log ~/.cache/powos-verify-queue/done/$n.log)" "$([ $rc = 0 ] && [ -z "$skipwhy" ] && echo $close || echo 0)" "$img"
         echo "$(date +%T) $n: $r"
+        case $r in PASS*) uc=pass ;; "FAIL timeout"*) uc=timeout ;; FAIL*|INVALID*) uc=fail ;; *) uc=skip ;; esac
+        [ -n "$pfinal" ] && uc=precond   # its last try burnt the time like the others: no verdict worth the seconds
+        util_rec J "$t0" "$t1" "$uc" "$n"; util_hourly
       done
       # Only the LATEST result per check counts: a check that failed and then passed in this same window (a re-queue)
       # is a pass, not a stale fail in the notification.

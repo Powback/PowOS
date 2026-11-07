@@ -1,8 +1,8 @@
 # lanes: phone
 # bf-window.sh [wait <secs> <touch irq count>]: (in the PowOS session as powos; APP=<appid>, WIN_NAME=<its window's
 # name>, default Steam's name for the app from its appmanifest) the game's X window size vs the X screen - prints
-# "win=WxH screen=WxH", win= empty while there's no window yet. Matches the name exactly or a title starting "<name> "
-# (bf-lib gamewin's rule). `wait`: the same, looked at every 2 s for up to <secs> s in this one call (one adb call
+# "win=WxH screen=WxH", win= empty while there's no window yet. Proton's class steam_app_<APP> first (byclass), else
+# the name exactly or a title starting "<name> " (bf-lib gamewin's rule). `wait`: the same, looked at every 2 s for up to <secs> s in this one call (one adb call
 # instead of two per 5 s from the Mac: those calls were most of bf-pacing's time), "touched" as soon as the touch IRQs
 # move from <count>.
 export DISPLAY=:0 XAUTHORITY=$(tr "\0" "\n" < /proc/$(pgrep -x Xwayland | head -1)/cmdline | grep -A1 -x -- -auth | tail -1)
@@ -11,8 +11,16 @@ if [ -z "${WIN_NAME:-}" ]; then
   for f in "$S/steamapps/appmanifest_${APP:-274190}.acf" $(sed -nE 's/^\s*"path"\s*"(.*)"/\1/p' "$S/steamapps/libraryfolders.vdf" 2>/dev/null | sed "s|\$|/steamapps/appmanifest_${APP:-274190}.acf|"); do
     [ -f "$f" ] && { WIN_NAME=$(sed -nE 's/^\s*"name"\s*"(.*)"/\1/p' "$f" | head -1); break; }; done
 fi
+# The window: first by Proton's X class steam_app_<APP> (every Proton game has it, whatever its title: ABZU's is
+# "AbzuGame", not Steam's "ABZÛ" - 11-07 its jobs only found it through a hand-set WIN_NAME), the largest viewable one;
+# else by name (native games, no Proton class).
+byclass() { command -v xdotool >/dev/null 2>&1 || return 0
+  for id in $(xdotool search --class "^steam_app_${APP:-274190}\$" 2>/dev/null); do
+    xwininfo -id "$id" 2>/dev/null | awk '/Width:/{w=$2} /Height:/{h=$2} /Map State: IsViewable/{v=1} END{if (v && w > 1) print w "x" h}'
+  done | sort -t x -k1 -n | tail -1; }
 win() {
-  w=$(xwininfo -root -tree 2>/dev/null | awk -v n="\"${WIN_NAME:-Broforce}\"" -v p="\"${WIN_NAME:-Broforce} " 'index($0, n) || index($0, p)' \
+  w=$(byclass)
+  [ -n "$w" ] || w=$(xwininfo -root -tree 2>/dev/null | awk -v n="\"${WIN_NAME:-Broforce}\"" -v p="\"${WIN_NAME:-Broforce} " 'index($0, n) || index($0, p)' \
     | grep -oE '[0-9]+x[0-9]+\+' | tr -d + | sort -t x -k1 -n | tail -1)
   s=$(xwininfo -root 2>/dev/null | awk '/Width:/{w=$2} /Height:/{h=$2} END{print w "x" h}')
   echo "win=$w screen=$s"

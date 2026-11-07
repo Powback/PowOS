@@ -168,6 +168,10 @@ class ShellBridge(
         speech.cancel()
         // RL1: the old page's web windows wait for the new page to claim them (hidden if it doesn't).
         if (webWindowsMade) webWindows.pageStarted()
+        // The first Android window's display helper started ahead of it (WebWindows.warmHelper), on home unfolded only:
+        // web windows exist there; a folded phone never pays for the process.
+        if (activity != null && WebWindows.on(context) && context.resources.configuration.smallestScreenWidthDp >= WIDE_DP)
+            main.postDelayed({ webWindows.also { webWindowsMade = true }.warmHelper() }, HELPER_WARM_MS)
     }
     /** The panel's quick settings: what an app may switch, and Android's panels for the rest. */
     private val quick: QuickSettings =
@@ -450,7 +454,7 @@ class ShellBridge(
             "apps.local" -> LocalApps.json(context)
             "apps.getLinux" -> runtime.installLinux(emptyList()).let { null }
             "apps.launch" -> launch(a.getString(0), a.optJSONObject(1)?.optBoolean("fullScreen") == true)
-            "webwindows.enabled" -> activity != null && webWindows.also { webWindowsMade = true }.enabled()
+            "webwindows.enabled" -> (activity != null && webWindows.also { webWindowsMade = true }.enabled()).also { if (it) webWindows.warmHelper() }
             "webwindows.open" ->
                 if (activity == null) -1
                 // A Linux window KWin opened ("webwindows.adopt" with its KWin id): its consumer in a web window.
@@ -1982,6 +1986,12 @@ class ShellBridge(
         private const val BAR_TEXT_MAX = 8000
 
         private const val TAG = "PowosShell"
+
+        /** Home's page started: the web windows' display helper this much later (after the page's own start work). */
+        private const val HELPER_WARM_MS = 3_000L
+
+        /** The smallest width (dp) of a screen web windows open on: the unfolded inner screen (~820 dp; the cover ~400). */
+        private const val WIDE_DP = 600
 
         /** A board task id, as the page's "works" / "still broken" may name one (apps/agents caps ids at 64). */
         private val VERDICT_TASK = Regex("[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")

@@ -865,14 +865,26 @@ html:root .menu.tile { --glass-blur-native: var(--backdrop-blur-native); backgro
   clip-path: inset(calc(-1 * var(--inset-top, 0px)) 0 0 0);
   touch-action: none;
 }
+/*
+ * N1 (docs/WEB_WINDOWS.md "Native-glued windows"): the track's place is --track-x (gesture.ts applyTrack), a registered
+ * property. Without web windows its transform transitions - the compositor runs the slide. With one (html.ww-glued,
+ * ui/webwindows.tsx) --track-x itself transitions: the main thread samples it each frame, so the rAF that measures a
+ * window's body ("w.f") sees exactly what that frame commits and the app's layer moves on the same frame as its page.
+ * A compositor-run transform was ticked at the draw, a frame after the page measured it: the window lagged its page
+ * by a frame's travel on every page switch (the user, 11-07: "no race condition in updating window positions").
+ */
+@property --track-x { syntax: "<length-percentage>"; inherits: false; initial-value: 0px; }
+@property --glass-x { syntax: "<length-percentage>"; inherits: false; initial-value: 0px; }
 .page-track {
   display: flex;
   height: 100%;
+  transform: translateX(var(--track-x));
   transition: transform var(--spring-ms) var(--spring);
   will-change: transform;
 }
+html.ww-glued .page-track { transition: --track-x var(--spring-ms) var(--spring); }
 /* A finger is sliding the pages: they follow it exactly. */
-.page-track.dragging { transition: none; }
+.page-track.dragging, html.ww-glued .page-track.dragging { transition: none; }
 .page { position: relative; flex: 0 0 100%; height: 100%; }
 /* PowOS apps' own controls (islands on home, their pages) get the shell's borderless look too: their buttons' and
    chips' outlines go (their styles are inline - hence !important), a bare one takes a soft fill. */
@@ -906,9 +918,12 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   height: var(--glass-h);
   background: var(--glass-image) 0 0 / 100% 100% no-repeat;
   will-change: transform;
+  transform: translateX(var(--glass-x));
   transition: transform var(--spring-ms) var(--spring);
 }
-.page-track.dragging .page-glass-img, .page-glass-img.sliding { transition: none; }
+/* N1: on the track's clock (above) - the glass holds still on screen only when both run on the same thread. */
+html.ww-glued .page-glass-img { transition: --glass-x var(--spring-ms) var(--spring); }
+.page-track.dragging .page-glass-img, .page-glass-img.sliding, html.ww-glued :is(.page-track.dragging .page-glass-img, .page-glass-img.sliding) { transition: none; }
 .glass :is(.page .home-tile > .tile, .lib-card.tile) { background: var(--glass-fill); }
 .home-tile { position: absolute; padding: calc(var(--gap) / 2); touch-action: none; }
 .home-tile.lifted { opacity: 0.25; }
@@ -1677,12 +1692,18 @@ input.folder-title:focus { background: var(--soft-fill); }
  * PowOS AI's page (powai.tsx), left of home: it and home slide as one (gesture.ts applyTrack sets both transforms) -
  * home's bar, dock and recent apps go with it. Each its own fixed layer, so what's fixed inside home stays home's.
  */
-.home, .ai-screen { transition: transform var(--spring-ms) var(--spring); }
-.home.sliding, .ai-screen.sliding { transition: none; }
+/* N1b (docs/WEB_WINDOWS.md "Native-glued windows"): the slide to PowOS AI's page and back - home, the AI screen and
+   the bar's counter (below) - on registered properties set by gesture.ts applyTrack; with a web window (html.ww-glued)
+   the properties themselves transition, on the main thread: a window riding home moves on the frame its page does. */
+@property --slide-x { syntax: "<length-percentage>"; inherits: false; initial-value: 0px; }
+@property --bar-counter { syntax: "<length>"; inherits: false; initial-value: 0px; }
+.home, .ai-screen { transform: translateX(var(--slide-x)); transition: transform var(--spring-ms) var(--spring); }
+html.ww-glued :is(.home, .ai-screen) { transition: --slide-x var(--spring-ms) var(--spring); }
+.home.sliding, .ai-screen.sliding, html.ww-glued :is(.home.sliding, .ai-screen.sliding) { transition: none; }
 .ai-screen {
   position: fixed;
   inset: 0;
-  transform: translateX(-100%);
+  --slide-x: -100%;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -4437,6 +4458,11 @@ html:has(.home > .bar[data-role="ai"] textarea:focus) .ai-screen.stacked > .ai-s
    (.sliding) it follows at once. --bar-lift: the keyboard's lift on PowOS AI's page (bar.tsx seatOnAi). */
 .home:not(.pull-screen) > .bar { translate: var(--track-counter, 0px) calc(var(--bar-lift, 0px) - var(--bar-edit-rise, 0px)); transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s, translate var(--spring-ms) var(--spring); }
 .home:not(.pull-screen).sliding > .bar, .home:not(.pull-screen) > .bar.sliding { transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s; }
+/* N1b: with a web window the counter is the bar's own registered --bar-counter (gesture.ts applyTrack sets it beside
+   home's --track-counter), on home's clock: the bar holds still while home slides on the main thread. */
+html.ww-glued .home:not(.pull-screen) > .bar { translate: var(--bar-counter) calc(var(--bar-lift, 0px) - var(--bar-edit-rise, 0px)); transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s, --bar-counter var(--spring-ms) var(--spring); }
+html.ww-glued .home:not(.pull-screen).sliding > .bar, html.ww-glued .home:not(.pull-screen) > .bar.sliding, html.ww-glued .home.button-morph:not(.pull-screen) > .bar { transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s; }
+html.ww-glued .home.button-morph:not(.pull-screen, .sliding) > .bar:not(.sliding) { transition: --bar-counter var(--spring-ms) var(--spring); }
 .home.search-parked > .bar.seated { opacity: 1; pointer-events: auto; }
 
 /*
