@@ -69,6 +69,9 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
             // Opened at the tap (LaunchWindows): the app's icon and name until its window comes ([become]).
             LaunchWindows.add(this);
             content(true);
+            // SL1: a game's launch window is full screen from its first frame, as the game will be.
+            if (getIntent().getBooleanExtra(EXTRA_FULLSCREEN, false))
+                immersive();
             setTitleText(getIntent().getStringExtra(EXTRA_TITLE));
             return;
         }
@@ -112,7 +115,7 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         if (launch) {
             android.widget.FrameLayout root = new android.widget.FrameLayout(this);
             root.addView(view);
-            splash = LaunchWindows.splash(this, getIntent().getStringExtra(EXTRA_TITLE), icon());
+            splash = LaunchWindows.splash(this, getIntent().getStringExtra(EXTRA_TITLE), icon(), getIntent().getStringExtra(LaunchWindows.EXTRA_PHASE));
             root.addView(splash);
             setContentView(root);
             rootView = root;
@@ -303,6 +306,9 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         MainActivity.configureConsumer(this);
         setTitleText(title);
         Log.i(TAG, "launch window: now window " + id + " (" + appId + ")");
+        // SL1: a game's launch window stays the immersive full-screen task the game is.
+        if (getIntent().getBooleanExtra(EXTRA_FULLSCREEN, false))
+            immersive();
         gameRefresh();
         if (holder != null && cropW > 0 && cropH > 0)
             surfaceChanged(holder, 0, cropW, cropH);
@@ -310,6 +316,41 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         Runnable r = WindowTasks.barChanged;
         if (r != null)
             r.run();
+    }
+
+    /** SL1: the launch's step on the splash's phase line (LaunchWindows.phase). Main thread. */
+    void launchPhase(String phase) {
+        android.view.View s = splash;
+        android.view.View v = s != null ? s.findViewWithTag(LaunchWindows.PHASE_TAG) : null;
+        if (!(v instanceof android.widget.TextView))
+            return;
+        ((android.widget.TextView) v).setText(phase != null ? phase : "");
+        v.setVisibility(phase != null && !phase.isEmpty() ? android.view.View.VISIBLE : android.view.View.GONE);
+    }
+
+    /**
+     * SL1: the launch ended before its window ([reason], LaunchWindows.failed): "Couldn't start <name>. <why>" on the
+     * splash and a Close that ends this task - never a launch window that just vanishes, never one left waiting.
+     */
+    void launchFailed(String reason) {
+        if (id > 0 || isFinishing())
+            return;
+        String name = getIntent().getStringExtra(EXTRA_TITLE);
+        String why = reason == null || reason.isEmpty() ? "It ended" : reason.replaceAll("\\.$", "");
+        launchPhase("Couldn't start " + (name != null ? name : "it") + ". " + why + ".");
+        android.view.View s = splash;
+        if (!(s instanceof android.view.ViewGroup) || s.findViewWithTag("launch-close") != null)
+            return;
+        android.widget.Button close = new android.widget.Button(this);
+        close.setTag("launch-close");
+        close.setText("Close");
+        close.setOnClickListener(v -> finishAndRemoveTask());
+        float d = getResources().getDisplayMetrics().density;
+        android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                android.view.Gravity.CENTER_HORIZONTAL | android.view.Gravity.BOTTOM);
+        lp.bottomMargin = Math.round(96 * d);
+        ((android.view.ViewGroup) s).addView(close, lp);
     }
 
     /** The app's launch ended with no window for this launch window (LaunchWindows.done): it goes. */

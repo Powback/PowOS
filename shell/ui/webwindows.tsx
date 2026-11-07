@@ -203,6 +203,11 @@ interface SteamLaunch {
   reason?: string;
   /** When it started (epoch s). */
   since: number;
+  /**
+   * Its game's own Android task holds it (SteamLaunchTasks: folded - a fold mid-launch too - or its window opened as a
+   * full-screen task): no placeholder here, and one waiting goes - the task shows the launch.
+   */
+  task?: boolean;
 }
 
 /**
@@ -226,6 +231,7 @@ async function steamLaunch(l: SteamLaunch) {
   // window closed and Steam's "ended" is still on its way).
   if (webWins.value.some((v) => v.key === l.key && v.live)) return void steamSeen.add(launch);
   const w = webWins.value.find((v) => v.key === l.key && (v.pending || v.failed || v.steam));
+  if (l.task) return steamToTask(w, launch);
   if (w) return steamUpdate(w, l, launch);
   if (!newSteamLaunch(l, launch) || !(await webWindowsOn())) return;
   // Placed meanwhile (another event while the host answered).
@@ -249,6 +255,12 @@ function steamUpdate(w: WebWin, l: SteamLaunch, launch: string) {
   const asking = l.state === "asking";
   update(w.id, { steam: true, phase: l.phase, failed: undefined, ...askingChange(w, asking) });
   if (!asking && w.asking) raise(w.id);
+}
+
+/** The launch is its game's task's now ([SteamLaunch.task]): a placeholder still waiting here goes (a fold mid-launch), never a second one. */
+function steamToTask(w: WebWin | undefined, launch: string) {
+  steamSeen.add(launch);
+  if (w?.pending && w.id < 0) close(w.id);
 }
 
 /** Steam asking something ([asking]): the waiting window minimised so Steam's window shows; back once it goes on. */

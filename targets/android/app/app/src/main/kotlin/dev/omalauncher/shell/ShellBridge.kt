@@ -295,8 +295,11 @@ class ShellBridge(
         // SL1: a game Steam is launching (PowOS's tap or Steam's own UI): home's page shows its placeholder window from
         // the launch's first step, with its phase, until the game's window takes it (webwindows.tsx steamLaunches).
         scope.launch {
-            snapshotFlow { RunningApps.launches.value }.collect {
-                if (activity != null) emit("apps.launching", RunningApps.launchesFor(it, runtime.linuxApps))
+            snapshotFlow { RunningApps.launches.value to dev.omalauncher.system.SteamLaunchTasks.held.value }.collect { (text, _) ->
+                if (activity == null) return@collect
+                // Folded (or web windows off): the game's own task as its launch window (SteamLaunchTasks).
+                dev.omalauncher.system.SteamLaunchTasks.update(context, dev.omalauncher.system.SteamLaunchTasks.parse(text, runtime.linuxApps))
+                emit("apps.launching", RunningApps.launchesFor(text, runtime.linuxApps, dev.omalauncher.system.SteamLaunchTasks.held.value))
             }
         }
         // A floating window opened, minimised, brought back or closed: the dock shows the windows again.

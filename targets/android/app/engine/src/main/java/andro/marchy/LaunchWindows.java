@@ -32,6 +32,10 @@ public final class LaunchWindows {
     private static final String TAG = "LaunchWindows";
     /** The ids a launch window's app's windows may carry (the .desktop id, StartupWMClass): KWin's app id is one. */
     static final String EXTRA_IDS = "launch_ids";
+    /** SL1: a game launch window's step at its start (Steam's phase), then [phase]. */
+    static final String EXTRA_PHASE = "launch_phase";
+    /** The splash's phase line (SL1), found by this tag. */
+    static final String PHASE_TAG = "launch-phase";
     /** The splash stays this long after the window's consumer is up (its first frames), then fades. */
     static final long SPLASH_HOLD_MS = 250;
     static final long SPLASH_FADE_MS = 180;
@@ -47,6 +51,16 @@ public final class LaunchWindows {
      * tasks (KWin not connected, an older KWin) or one is waiting for that app already.
      */
     public static boolean open(Context context, String appId, String[] ids, String label) {
+        return open(context, appId, ids, label, false, null);
+    }
+
+    /**
+     * SL1: [open] for a game Steam launches (from its own UI or PowOS's tap) where its window will be a task (folded,
+     * or web windows off): [game] = an immersive full-screen launch window with Steam's [phase] under the name
+     * ([phase], [failed], [asking] follow the launch); the game's window becomes it whether it maps full screen or not
+     * ([adopt]) - the same task, no second one.
+     */
+    public static boolean open(Context context, String appId, String[] ids, String label, boolean game, String phase) {
         if (!WindowTasks.connected() || !WindowTasks.kwinCan("export-new") || waitingFor(ids) != null)
             return false;
         // The Plasma app is on screen: the app's window opens ON the desktop (KWin: "desktop 1"), nothing is a task. A
@@ -56,7 +70,7 @@ public final class LaunchWindows {
             Log.i(TAG, "no launch window for " + appId + ": the desktop is on screen (its window opens there)");
             return false;
         }
-        java.util.function.Function<Context, android.os.Bundle> options = AndroidRequests.openOptions;
+        java.util.function.Function<Context, android.os.Bundle> options = game ? null : AndroidRequests.openOptions;
         Log.i("PowosDock", "launch window task for " + appId + " (desktop on screen=" + WindowTasks.desktopOnScreen() + ")");
         Intent i = new Intent(context, PowosWindowActivity.class)
                 // Its own document each time (documentLaunchMode intoExisting would bring an old one back).
@@ -64,6 +78,8 @@ public final class LaunchWindows {
                 .putExtra(PowosWindowActivity.EXTRA_APP_ID, appId)
                 .putExtra(PowosWindowActivity.EXTRA_TITLE, label)
                 .putExtra(EXTRA_IDS, ids)
+                .putExtra(PowosWindowActivity.EXTRA_FULLSCREEN, game)
+                .putExtra(EXTRA_PHASE, phase)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NEW_DOCUMENT);
         context.startActivity(i, options != null ? options.apply(context) : null);
         Log.i(TAG, "launch window for " + appId);
@@ -95,7 +111,8 @@ public final class LaunchWindows {
         if (a == null)
             return false;
         waiting.remove(a);
-        if (fullScreen) {
+        // SL1: a game's launch window is full screen itself: the game's window becomes it, full screen or not.
+        if (fullScreen && !a.getIntent().getBooleanExtra(PowosWindowActivity.EXTRA_FULLSCREEN, false)) {
             Log.i(TAG, "window of " + a.getIntent().getStringExtra(PowosWindowActivity.EXTRA_APP_ID) + " opened full screen in a task of its own: its launch window goes");
             a.runOnUiThread(a::launchEnded);
             return false;
@@ -181,6 +198,50 @@ public final class LaunchWindows {
         }
     }
 
+    /** A launch window waits for app id [appId] exactly (its ids): KWin's window of it goes there, not to a web window. */
+    static boolean claims(String appId) {
+        return appId != null && !appId.isEmpty() && waitingFor(new String[] {appId}) != null;
+    }
+
+    /** The launch window waiting with app id [appId] (open's), or null. */
+    private static PowosWindowActivity of(String appId) {
+        for (PowosWindowActivity a : waiting)
+            if (!a.isFinishing() && appId.equals(a.getIntent().getStringExtra(PowosWindowActivity.EXTRA_APP_ID)))
+                return a;
+        return null;
+    }
+
+    /** SL1: app [appId]'s launch is at step [phase] ("Syncing saves", "Starting Proton"): its launch window says so. */
+    public static void phase(String appId, String phase) {
+        PowosWindowActivity a = of(appId);
+        if (a != null)
+            a.runOnUiThread(() -> a.launchPhase(phase));
+    }
+
+    /** SL1: app [appId]'s launch ended before its window ([reason]): its launch window says why, with a close. */
+    public static void failed(String appId, String reason) {
+        PowosWindowActivity a = of(appId);
+        if (a == null)
+            return;
+        waiting.remove(a);
+        Log.i(TAG, "launch of " + appId + " failed: " + reason);
+        a.runOnUiThread(() -> a.launchFailed(reason));
+    }
+
+    /**
+     * SL1: Steam asks something for app [appId]'s launch ([on]: a cloud conflict, the shader skip - in Steam's own window):
+     * its launch window steps back so Steam's shows, and comes to the front again when the launch goes on.
+     */
+    public static void asking(Context context, String appId, boolean on) {
+        PowosWindowActivity a = of(appId);
+        if (a == null)
+            return;
+        if (on)
+            a.runOnUiThread(() -> a.moveTaskToBack(true));
+        else
+            WindowTasks.raiseLaunch(context, a.getTaskId());
+    }
+
     /** The tasks of launch windows still waiting (WindowTasks.finishStale keeps them). */
     static Set<Integer> taskIds() {
         Set<Integer> ids = new java.util.HashSet<>();
@@ -219,6 +280,11 @@ public final class LaunchWindows {
 
     /** A launch window's face: the app's icon and name in the middle, on the window's plain background. */
     static View splash(Context context, String label, Bitmap icon) {
+        return splash(context, label, icon, null);
+    }
+
+    /** [splash] with a launch's step under the name ([phase]; SL1: its line, tagged [PHASE_TAG], is always there). */
+    static View splash(Context context, String label, Bitmap icon, String phase) {
         boolean night = (context.getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
                 == android.content.res.Configuration.UI_MODE_NIGHT_YES;
         float d = context.getResources().getDisplayMetrics().density;
@@ -240,6 +306,15 @@ public final class LaunchWindows {
             t.setPadding(0, (int) (12 * d), 0, 0);
             col.addView(t);
         }
+        TextView p = new TextView(context);
+        p.setTag(PHASE_TAG);
+        p.setText(phase != null ? phase : "");
+        p.setTextSize(13);
+        p.setGravity(Gravity.CENTER_HORIZONTAL);
+        p.setTextColor(night ? 0x99FFFFFF : 0x99000000);
+        p.setPadding((int) (24 * d), (int) (8 * d), (int) (24 * d), 0);
+        p.setVisibility(phase != null && !phase.isEmpty() ? View.VISIBLE : View.GONE);
+        col.addView(p);
         root.addView(col, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
         return root;
     }

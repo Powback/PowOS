@@ -136,6 +136,7 @@ object RunningApps {
     fun launchesFor(
         text: String,
         apps: List<LinuxApp>,
+        held: Set<String> = emptySet(),
     ): org.json.JSONArray {
         val out = org.json.JSONArray()
         val all = runCatching { JSONObject(text).optJSONObject("launches") }.getOrNull() ?: return out
@@ -144,6 +145,8 @@ object RunningApps {
             val app = linuxAppOf(apps, "steam_app_$appid")
             val label = app?.name ?: l.optString("name").ifBlank { "Game" }
             val e = JSONObject().put("key", "l:${app?.id ?: "steam_app_$appid"}").put("label", label).put("appid", appid)
+            // SL1 folded: a launch window (its own task) holds it - home's page shows no placeholder for it.
+            if ("$appid@${l.optLong("since")}" in held) e.put("task", true)
             for (k in listOf("state", "phase", "reason")) l.optString(k).takeIf { it.isNotEmpty() }?.let { e.put(k, it) }
             out.put(e.put("since", l.optLong("since")))
         }

@@ -11910,7 +11910,20 @@ async function lw3SteamEnded() {
   els(key)[0]?.querySelector(".ww-failed-close")?.click();
   await window.__gw.settled();
   fails.push(W.webWins.value.some((v) => v.key === key) && "its Close left the window");
-  return fails.filter(Boolean);
+  return [...fails, ...(await window.__lw3f.lw3SteamFolded())].filter(Boolean);
+}
+
+/** SL1 folded: a launch its game's task holds ("task": a fold mid-launch) - the page's placeholder goes, none comes back. */
+async function lw3SteamFolded() {
+  const { W } = await window.__lw3f.lw3Env();
+  W.webWins.value = [];
+  const key = "l:steam_app_11";
+  const at = (task) => [{ key, label: "Fold Game", appid: "11", state: "running", phase: "Starting", since: Math.round(Date.now() / 1000), task }];
+  const emit = async (task) => (window.__mockEvents.emit("apps.launching", at(task)), await window.__gw.settled(), W.webWins.value.filter((v) => v.key === key).length);
+  const fails = [(await emit(undefined)) !== 1 && "no placeholder before the fold"];
+  fails.push((await emit(true)) !== 0 && "folded mid-launch (its task holds it): the page's placeholder stayed");
+  fails.push((await emit(true)) !== 0 && "a launch its task holds made a placeholder on the page");
+  return fails;
 }
 
 /** LW3: the real host back. */
@@ -11924,7 +11937,7 @@ async function lw3End() {
 }
 
 /** The LW3 run's steps into the page (window.__lw3f); evaluates to []. */
-const LW3_HELPERS = `(window.__lw3f = { ${[lw3Env, lw3Launch, lw3Offer, lw3Alts, lw3Timeout, lw3Retry, lw3BadExec, lw3HostFailed, lw3SteamLaunch, lw3SteamPhase, lw3Fills, lw3SteamTaken, lw3SteamEnded, lw3End].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
+const LW3_HELPERS = `(window.__lw3f = { ${[lw3Env, lw3Launch, lw3Offer, lw3Alts, lw3Timeout, lw3Retry, lw3BadExec, lw3HostFailed, lw3SteamLaunch, lw3SteamPhase, lw3Fills, lw3SteamTaken, lw3SteamEnded, lw3SteamFolded, lw3End].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
 
 /** [webWindowMaskCheck]'s helpers into the page (window.__wwg); evaluates to [] (no problems) as a gate step. */
 const WW_HELPERS = `(window.__wwg = { ${[wwHelpers, wwFound, wwCuts, wwMenu, wwRaise, wwStacked, wwSwipe, wwHidden, wwMaximise, wwMaximiseAt, wwMergedBar, wwBarHit].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;

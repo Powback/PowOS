@@ -487,8 +487,9 @@ public final class WindowTasks {
         if (web && (withTask || overFull) && !WebWindowSource.isWeb(id))
             Log.i(TAG, "open " + id + " (" + appId + ", \"" + title + "\"): a task, in front of window " + parent
                     + (withTask ? "'s task" : ", a full-screen web window"));
-        else if (web && (WebWindowSource.isWeb(id) || (!fullScreen && !tasks.containsKey(id) && !opening.containsKey(id)))
-                && WebWindowSource.offer(id, appId, title))
+        // SL1: a game's launch window waiting for it (opened folded, then unfolded mid-launch) takes it, not a web window.
+        else if (web && (WebWindowSource.isWeb(id) || (!fullScreen && !tasks.containsKey(id) && !opening.containsKey(id)
+                && !LaunchWindows.claims(appId))) && WebWindowSource.offer(id, appId, title))
             return;
         // One task per KWin window: a window that has one already (KWin's show again - the launcher, the
         // dock, a window activated the desktop way) brings that one back, never a second activity; one that
@@ -525,6 +526,10 @@ public final class WindowTasks {
             Log.i(TAG, "open " + id + " (" + appId + "): in its launch window");
             return;
         }
+        // SL1: a game's window got a task of its own: a launch placeholder waiting for it elsewhere (home's page) goes.
+        java.util.function.Consumer<String> to = taskOpened;
+        if (to != null)
+            to.accept(appId);
         android.os.Bundle options = fullScreen ? null : floatingOptions(context);
         Log.i(TAG, "open " + id + " (" + appId + "): " + (fullScreen ? "full screen (the app's own)" : options != null ? "floating" : "full screen"));
         Intent i = new Intent(context, PowosWindowActivity.class)
@@ -695,6 +700,17 @@ public final class WindowTasks {
      * (false): the app module's (WindowFrames.appFullScreen, set by App). Null: the task stays as it is.
      */
     public static volatile java.util.function.BiConsumer<Integer, Boolean> fullScreenTask = null;
+
+    /**
+     * SL1: KWin's window of app id [appId] opens as a task (not a web window): the app module's (SteamLaunchTasks) - home's
+     * page closes a Steam launch's placeholder waiting for it. Null: nothing to tell.
+     */
+    public static volatile java.util.function.Consumer<String> taskOpened = null;
+
+    /** A launch window's task [taskId] to the front again (LaunchWindows.asking). */
+    static boolean raiseLaunch(Context context, int taskId) {
+        return raise(context, taskId);
+    }
 
     private static boolean raise(Context context, int taskId) {
         java.util.function.BiPredicate<Context, Integer> r = raiseTask;
