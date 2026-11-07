@@ -290,13 +290,30 @@ class Session {
     // Layout sizes on both sides (offsetHeight, not the bounding rect): a session screen fits while it grows out of
     // its card under a scale transform, and the rect's scaled height left most of the screen as "space to split" -
     // the content shifted half a screen down, an empty band above it and its last rows under the bottom edge.
-    requestAnimationFrame(() => {
-      const xt = this.holder.querySelector<HTMLElement>(".xterm");
-      const scr = this.holder.querySelector<HTMLElement>(".xterm-screen");
-      if (!xt || !scr) return;
-      const left = Math.min(this.holder.clientHeight - scr.offsetHeight, this.holder.clientHeight / this.term.rows);
-      xt.style.transform = left > 1 ? `translateY(${Math.floor(left / 2)}px)` : "";
-    });
+    requestAnimationFrame(() => this.place());
+  }
+
+  /**
+   * Places xterm's screen in its view: the rows' leftover split above and below them, and the screen on a whole
+   * device pixel. PowTerm (Termux's TerminalRenderer) draws straight into the view's device pixels; xterm's WebGL
+   * canvas is a texture Chromium composites, and the phone's devicePixelRatio is 2.7625, so a canvas at a whole CSS
+   * pixel (the 6 px pad: device pixel 16.575) sat between device pixels and every glyph was resampled - soft, smeared
+   * text (the user 11-07: "no powterm is perfect the one we have suuuucks"; gate term-crisp measures it). Under a
+   * scale transform (a screen growing out of its card) the rect isn't the resting one: placed again when it settles.
+   */
+  place() {
+    const xt = this.holder.querySelector<HTMLElement>(".xterm");
+    const scr = this.holder.querySelector<HTMLElement>(".xterm-screen");
+    if (!xt || !scr || !this.holder.isConnected) return;
+    const left = Math.min(this.holder.clientHeight - scr.offsetHeight, this.holder.clientHeight / this.term.rows);
+    const dy = left > 1 ? Math.floor(left / 2) : 0;
+    xt.style.transform = dy ? `translateY(${dy}px)` : "";
+    const r = scr.getBoundingClientRect();
+    if (Math.abs(r.width - scr.offsetWidth) > 0.5) return; // scaled: not where it rests
+    const dpr = window.devicePixelRatio || 1;
+    const fx = Math.round(r.left * dpr) / dpr - r.left;
+    const fy = Math.round(r.top * dpr) / dpr - r.top;
+    if (Math.abs(fx) > 0.001 || Math.abs(fy) > 0.001) xt.style.transform = `translate(${fx}px, ${dy + fy}px)`;
   }
 
   /**
@@ -393,6 +410,18 @@ const RESIZE_SETTLE_MS = 120;
 const FIT_SCROLLBAR = 14;
 
 const sessions = new Map<string, Session>();
+
+// A transition or animation ending around a shown terminal (a screen grown out of its card, the home lifted over the
+// keyboard) leaves it at a new resting rect: back on whole device pixels ([Session.place]).
+for (const type of ["transitionend", "animationend"])
+  document.addEventListener(
+    type,
+    (e) => {
+      const t = e.target as Node | null;
+      for (const s of sessions.values()) if (t && s.holder.isConnected && t.contains(s.holder)) s.place();
+    },
+    { capture: true, passive: true },
+  );
 
 const watchDecoder = new TextDecoder();
 powos.on("term.data", (e: { id: string; run: number; data: string; end: number }) => {
