@@ -137,9 +137,24 @@ frame of drag latency; measure it before turning it on for drags (animations fir
     `PopupBookTest`. Phone: `tools/phone/verify/ww-popups.sh` (queue; opens Steam's menus by X clicks on its menu bar,
     asserts KWin's `exports popup N`, the popup line's size/place against the X window's x the window's scale, a buffer,
     and `popup-gone` after Escape). Daemon limit: `MAX_PAIRS 16` surfaces (andromarchy.c) - a menu takes one while open.
-  - [ ] **N3b - the app shows them**: a child SurfaceControl per popup under the window's container (positive layer, not
-    the body crop) at body + (x, y), the consumer on its Surface (re-made when it grows), `web <id> 2`, input on the
-    popup's surface (KWin maps it to the popup's frame).
+  - [x] **N3b - the app shows them** (kwin 0064, pkgrel 3.72; `WebWindowPopups.kt`): with a KWin that has cap
+    `popup-area` the app says `web <id> 2` (KWin no longer draws them into the window) and each `popup` is a buffer
+    layer of its own on home's surface ABOVE home's buffer (`LAYER` = FULL_LAYER + 1: over the page and a full-screen
+    window) - not under the window's container: that is cropped to the body and sits under home's buffer, so the page
+    would hide a menu's part outside the window. Placed at body + (x, y) x the body's scale in the SAME transaction as
+    its window (`WebWindows.place` / `fillScreen` -> `popups.place`), so it moves with its window and page on the frame
+    that moves them (N2's binding); cropped to the screen only; hidden with its window; re-attached with home's surface
+    (`fullAgain`); re-made when it grows past its buffers. KWin places xdg_popups in the screen around the window
+    (`popup-area <id> l t r b`, task px, sent when the window's place changes, at most every 100 ms + the last one)
+    instead of the task's area (0027). Input: a DOWN on a popup layer is its window's whole gesture (`popupGesture` ->
+    `linuxClaim`, the page never sees it; KWin's task finds the popup under the finger, outside the window too); a DOWN
+    elsewhere with popups open says `dismiss <id>` for each window not under the finger (KWin: popup_done for
+    xdg_popups, Escape for an X11 menu) and the page keeps the touch; a touch on the window's body is KWin's own
+    dismissal (it now walks the exported popups too). Touch only: the phone has no hover pointer on this path. JVM
+    `WebWindowPopupsTest` (placement past the window, screen crop, scale, the area, its throttle, the wiring);
+    `ww-popups.sh` with kwin 3.72+: each menu's layer up and KWin's surface live, then Steam's window made short (edge
+    drag, put back) so a menu is taller than it - its part below the window changed on screen (>= 40 % of samples), a
+    swipe from that part is the window's (host log), a tap on an empty spot of the page closes it.
 - [ ] **N4 - resize with no drop**: the frame follows the finger every frame (today); Android: VD resize paced as RS1,
   last buffer anchored; Linux: screen-sized buffers (no allocation per step). Gate the frame stats: gfxinfo janky <= 5 %
   over `ww-glue.sh`'s edge drag, KWin's `window task N frames` commits ~= drawn during it.

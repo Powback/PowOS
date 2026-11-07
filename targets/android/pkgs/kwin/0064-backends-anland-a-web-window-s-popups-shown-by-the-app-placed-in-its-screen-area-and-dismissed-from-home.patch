@@ -1,0 +1,142 @@
+From: PowOS <mats@powback.com>
+Subject: [PATCH] backends/anland: a web window's popups shown by the app, placed in its screen area, dismissed from home
+
+docs/WEB_WINDOWS.md N3b. With 0063's mode 2 ("web <id> 2") the app shows each popup as a layer of its own over home,
+not cut at the window's edge; this gives that mode what the task's own buffers gave popups before (cap "popup-area"):
+  popup-area <id> l t r b  where the app can show the window's popups: the screen around it, task buffer px against the
+                           task's top left. xdg_popups are placed inside it (popupAreaHandler) instead of the task's
+                           area (0027), so a menu longer than the window opens past it.
+  dismiss <id>             a tap on home outside the window and its popups: xdg_popups get popup_done; an X11 menu
+                           (override-redirect, its client holds the grab: Steam's) an Escape to the task's window.
+A touch in the task outside a popup dismisses every popup it shows, its own surfaces' too (mode 2 leaves those out of
+the task's painted windows, which that dismissal walked).
+---
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 23cf136..a86b46f 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -286,6 +286,45 @@ void AnlandWindowTask::dropAllPopups(const char *why)
+     }
+ }
+ 
++void AnlandWindowTask::setPopupArea(const QRect &area)
++{
++    if (m_isPopup || area == m_popupArea) {
++        return;
++    }
++    m_popupArea = area;
++}
++
++RectF AnlandWindowTask::popupPlacementArea() const
++{
++    if (m_webPopups != 2 || m_popupArea.isEmpty() || !m_window) {
++        return area();
++    }
++    const qreal s = scale();
++    return RectF(viewport().topLeft() + QPointF(m_popupArea.topLeft()) / s, QSizeF(m_popupArea.size()) / s);
++}
++
++void AnlandWindowTask::dismissPopups()
++{
++    bool x11Menu = false;
++    const auto watched = m_watched;
++    for (const Watched &w : watched) {
++        if (!w.window || w.window->isDeleted() || w.window == m_window) {
++            continue;
++        }
++        if (w.window->isPopupWindow() && !w.window->isUnmanaged()) {
++            w.window->popupDone();
++        } else if (w.window->isUnmanaged()) {
++            x11Menu = true;
++        }
++    }
++    if (x11Menu && m_state == State::Live) {
++        qCInfo(KWIN_ANLAND) << "window task" << m_id << ": a tap outside it: Escape for its X11 menu";
++        focus();
++        m_tasks->backend()->inputDevice()->keyboardKey(1 /* KEY_ESC */, true);
++        m_tasks->backend()->inputDevice()->keyboardKey(1 /* KEY_ESC */, false);
++    }
++}
++
+ void AnlandWindowTask::giveUp(const char *why)
+ {
+     if (!m_isPopup) {
+@@ -1550,7 +1589,13 @@ void AnlandWindowTask::processInputEvent(const InputEvent &ev)
+             }
+             // Straight to the window or popup under the finger (no hit test against the desktop, where this window
+             // isn't). A touch outside an open popup dismisses it, as KWin's popup filter does.
+-            const QList<Window *> windows = paintedWindows();
++            // PowOS (0064): every popup it shows, its own surfaces' too (mode 2 leaves them out of paintedWindows).
++            QList<Window *> windows = paintedWindows();
++            for (Window *w : m_popupSurfaces.keys()) {
++                if (!windows.contains(w) && w && !w->isDeleted()) {
++                    windows.append(w);
++                }
++            }
+             Window *target = touchTarget(pos);
+             if (!target->isPopupWindow()) {
+                 for (Window *w : windows) {
+@@ -1722,7 +1767,7 @@ void AnlandWindowTasks::announce()
+     // task's size as before).
+     // keyboard-live (kwin 0054): a keyboard asked for before a task went live moves to its consumer, so the app may
+     // hold an ask no touch came before (TapKeyboard) - an older KWin never re-sends it and a tap would raise nothing.
+-    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize nodecor quit window-ime fullscreen-request parent moveresize ownframe keyboard-live screen web")});
++    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize nodecor quit window-ime fullscreen-request parent moveresize ownframe keyboard-live screen web popup-area")});
+     // Which KWin this is and the tasks it shows now (window ids restart at 1 with each KWin): the app finishes every
+     // window task of an earlier KWin, or one this KWin no longer has, instead of showing a new window in it (after a
+     // session restart, Kate's launcher tap raised the old session's dead Kate task).
+@@ -1860,6 +1905,12 @@ void AnlandWindowTasks::handleLine(const QString &line)
+             qCInfo(KWIN_ANLAND) << "window task" << id << ": full screen" << on << "asked, stays" << window->isFullScreen();
+             send({QStringLiteral("fullscreen"), QString::number(id), window->isFullScreen() ? QStringLiteral("1") : QStringLiteral("0")});
+         }
++    } else if (f[0] == QLatin1String("popup-area") && f.size() >= 6) {
++        // PowOS (0064): "popup-area <id> l t r b" - where the app shows this window's popups (mode 2).
++        task->setPopupArea(QRect(QPoint(f[2].toInt(), f[3].toInt()), QPoint(f[4].toInt() - 1, f[5].toInt() - 1)));
++    } else if (f[0] == QLatin1String("dismiss")) {
++        // PowOS (0064): a tap on home outside the window and its popups.
++        task->dismissPopups();
+     } else if (f[0] == QLatin1String("web") && f.size() >= 3) {
+         // PowOS (0063): "web <id> <mode>" - this task is a web window of home; its popups as surfaces of their own.
+         task->setWebPopups(f[2].toInt());
+@@ -1989,7 +2040,7 @@ void AnlandWindowTasks::integrate()
+     workspace()->setPopupAreaHandler([this](const Window *parent) -> std::optional<RectF> {
+         for (const Window *w = parent; w; w = w->transientFor()) {
+             if (AnlandWindowTask *task = taskFor(w)) {
+-                const RectF area = task->area();
++                const RectF area = task->popupPlacementArea(); // PowOS (0064): the app's popup area in mode 2
+                 return area.isEmpty() ? std::nullopt : std::optional<RectF>(area);
+             }
+         }
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index db85a9d..f9efb2f 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -148,6 +148,20 @@ public:
+     {
+         return m_isPopup;
+     }
++    /**
++     * PowOS (0064): "popup-area <id> l t r b" - where the app can show this window's popups (its own surfaces, mode 2):
++     * the screen around the window, in task buffer px against the task's top left. xdg_popups are placed inside it
++     * instead of the task's area, so a menu longer than the window opens past it, not squeezed in.
++     */
++    void setPopupArea(const QRect &area);
++    /** The area its popups are placed in (popupAreaHandler): the app's popup area in mode 2, else [area]. */
++    RectF popupPlacementArea() const;
++    /**
++     * PowOS (0064): "dismiss <id>" - a tap outside the window and its popups (on home): every open popup goes, as a
++     * click outside does on a desktop - xdg_popups get popup_done, an X11 menu (override-redirect: its client holds the
++     * grab) an Escape on the keyboard, which goes to this task's window.
++     */
++    void dismissPopups();
+ 
+ private:
+     enum class State {
+@@ -312,6 +326,7 @@ private:
+     QPointer<AnlandWindowTask> m_popupOf;
+     QRect m_popupTold; // the last "popup" geometry said (sent again only when it changes)
+     int m_webPopups = 0; // the app's "web <id> <mode>"
++    QRect m_popupArea; // PowOS (0064): the app's "popup-area" (task buffer px), empty until it says one
+     QHash<Window *, AnlandWindowTask *> m_popupSurfaces;
+ };
+ 

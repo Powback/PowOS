@@ -126,6 +126,31 @@ public final class WebWindowSource {
             WindowTasks.sendLine("web\t" + id + "\t" + mode);
     }
 
+    /**
+     * kwin 0064 ("popup-area" cap): KWin takes a web window's popup area and "dismiss", so the host shows its popups
+     * as layers of their own (mode 2, WebWindowPopups); without it they stay inside the window (mode 1, recorded only).
+     */
+    public static boolean popupLayers() {
+        return WindowTasks.kwinCan("popup-area");
+    }
+
+    /** Window [id]'s popups' mode for this KWin: 2 (the host shows them), 1 (recorded only), 0 (an older KWin). */
+    public static int popupMode() {
+        return popupLayers() ? 2 : WindowTasks.kwinCan("web") ? 1 : 0;
+    }
+
+    /** kwin 0064: where window [id]'s popups can show - the screen, in its task px against its top left. */
+    public static void popupArea(int id, int l, int t, int r, int b) {
+        if (popupLayers())
+            WindowTasks.sendLine("popup-area\t" + id + "\t" + l + "\t" + t + "\t" + r + "\t" + b);
+    }
+
+    /** kwin 0064: a tap on home outside window [id] and its popups - KWin closes them. */
+    public static void dismissPopups(int id) {
+        if (popupLayers())
+            WindowTasks.sendLine("dismiss\t" + id);
+    }
+
     static void control(int id, String action) {
         Host h = host;
         if (h != null && ids.contains(id))

@@ -1,9 +1,10 @@
 #!/bin/bash
 # lanes: phone
-# tools/phone/verify/ww-popups.sh: N3a of docs/WEB_WINDOWS.md "Native-glued windows" on the phone - a Linux web window's
+# tools/phone/verify/ww-popups.sh: N3 of docs/WEB_WINDOWS.md "Native-glued windows" on the phone - a Linux web window's
 # popups are surfaces of their own (kwin 0063, pkgrel 3.71+): Steam's menus (X11 override-redirect POPUP_MENU windows, no
 # WM_TRANSIENT_FOR, 0062) each come to the app as "popup <window> <popup> x y w h" with their own buffers, and go as
-# "popup-gone". The app's consumer is log-only (PopupLog, logcat PowosPopups): nothing on screen changes.
+# "popup-gone". kwin 3.71 (N3a): the app's consumer is log-only (PopupLog). kwin 3.72+ (N3b, 0064): each is a layer of
+# its own over home (WebWindowPopups), not cut at the window's edge, and touches on it are its window's.
 # Needs Steam running as a web window on home (unfolded), no game under it, the user idle 2+ min. Queue it:
 #   tools/phone/verify/queue.sh add --budget 300 native-windows tools/phone/verify/ww-popups.sh
 # It never starts or closes Steam and changes none of its settings: it clicks its menu bar as X input (xdotool, Steam's
@@ -15,6 +16,12 @@
 #           place against Steam's window times the same scale (+-6 px); no "popup N insane" line
 #   buffer  "popup N buffer #1" (its buffers arrived on the app's consumer)
 #   gone    "popup-gone P N" within 5 s of the Escape
+# and with kwin 3.72+ (layers):
+#   layer   "popup N layer up" (its layer's consumer) and KWin's "window task N live" (its buffers drawn into)
+#   long    Steam's window made short (an edge drag of its frame, put back after) so a menu is taller than it: the
+#           menu's part below the window shows (the screen there changed when it opened), a finger on that part goes
+#           to the menu (host "a touch on its popup"; the swipe ends far off the menu, so no item is chosen), and a tap
+#           on an empty spot of the page closes it ("dismiss", then "popup-gone")
 # Exit: 0 PASS; 1 FAIL; 3 SKIP (not now / no Steam web window / a KWin without 0063).
 set -uo pipefail
 T=$(cd "$(dirname "$0")/.." && pwd)
@@ -32,8 +39,9 @@ X='export DISPLAY=:0 XAUTHORITY=$(pgrep -a Xwayland | grep -o -- "-auth [^ ]*" |
 read -r screen < <("$T/idle.sh")
 case "$screen" in *screen=Awake*) ;; *) echo "SKIP screen not on ($screen)"; exit 3 ;; esac
 kw=$(us 'pacman -Q kwin' | tail -1)
-python3 -c "import sys; r=sys.argv[1].split('-')[-1]; sys.exit(0 if tuple(map(int,r.split('.')))>=(3,71) else 1)" "${kw:-x 0-0}" 2>/dev/null ||
-  { echo "SKIP $kw has no 0063 (popups as surfaces need kwin 3.71+)"; exit 3; }
+kwat() { python3 -c "import sys; r=sys.argv[1].split('-')[-1]; sys.exit(0 if tuple(map(int,r.split('.')))>=tuple(map(int,sys.argv[2].split('.'))) else 1)" "${kw:-x 0-0}" "$1" 2>/dev/null; }
+kwat 3.71 || { echo "SKIP $kw has no 0063 (popups as surfaces need kwin 3.71+)"; exit 3; }
+LAYERS=0; kwat 3.72 && LAYERS=1
 [ "$(us "pgrep -fc 'SteamLaunch AppId='" | tail -1)" = 0 ] || { echo "SKIP a game runs under Steam (the user's): not now"; exit 3; }
 sw=$(hcall webwindows.list "[]" "l=>{const w=l.find(w=>/steam/i.test(String(w.key))&&!/steam_app_/i.test(String(w.key)));return w?'w'+w.id:'none'}")
 case $sw in w[0-9]*) ;; *) echo "SKIP Steam isn't a web window on home ($sw)"; exit 3 ;; esac
@@ -66,6 +74,7 @@ for y in 50 58 40 66; do
     [ -n "$new" ] || continue
     read -r MW MX MY MWW MWH <<<"$new"
     opened=$((opened + 1))
+    [ -n "${CX:-}" ] || { CX=$x; CY=$y; }
     say "menu $opened: a click at $x,$y opened X window $MW at $MX,$MY ${MWW}x$MWH"
     sleep 1.5
     lines=$("$adb" shell "logcat -d -T '$since' -s PowosPopups:I PowosPopups:W" 2>/dev/null | tr -d '\r' | grep -oE 'popup.*')
@@ -82,8 +91,15 @@ for y in 50 58 40 66; do
       [ $(( (ax - ex) * (ax - ex) )) -le 36 ] && [ $(( (ay - ey) * (ay - ey) )) -le 36 ] ||
         bad "popup $N at $ax,$ay, want ~$ex,$ey (its X place against Steam's window x $scale, +-6 px)"
       echo "$lines" | grep -q "^popup $N insane" && bad "popup $N: $(echo "$lines" | grep "^popup $N insane" | tail -1)"
-      echo "$lines" | grep -q "^popup $N buffer #1 " && say "buffer: $(echo "$lines" | grep "^popup $N buffer #1 " | tail -1)" ||
-        bad "buffer: no buffer of popup $N reached the app's consumer"
+      if [ $LAYERS = 1 ]; then
+        echo "$lines" | grep -q "^popup $N layer up" && say "layer: $(echo "$lines" | grep "^popup $N layer up" | tail -1)" ||
+          bad "layer: no layer consumer up for popup $N"
+        rs "tail -n +$((klog0 + 1)) /run/powos-app/hyprland.log | grep -a 'window task $N live'" | tail -1 | grep -q . ||
+          bad "layer: KWin's popup surface $N never went live (no buffers from the app)"
+      else
+        echo "$lines" | grep -q "^popup $N buffer #1 " && say "buffer: $(echo "$lines" | grep "^popup $N buffer #1 " | tail -1)" ||
+          bad "buffer: no buffer of popup $N reached the app's consumer"
+      fi
       rs "tail -n +$((klog0 + 1)) /run/powos-app/hyprland.log | grep -a 'exports popup $N '" | tail -1 | grep -q . &&
         say "kwin: $(rs "tail -n +$((klog0 + 1)) /run/powos-app/hyprland.log | grep -a 'exports popup $N '" | tail -1 | cut -c1-200)" ||
         bad "kwin: no \"exports popup $N\" line in KWin's log"
@@ -102,6 +118,69 @@ for y in 50 58 40 66; do
   done
 done
 [ $opened -ge 1 ] || bad "no click on Steam's menu bar opened a menu (no new override-redirect window): the scan's points, or Steam"
+
+# N3b: a menu taller than its window shows whole and takes touches (kwin 3.72+).
+# region <save|cmp> l t r b: the screen's pixels there (every 6th) saved, or the share (%) that differ from the saved ones.
+region() { "$adb" shell "su -c 'screencap /data/powos/root/var/tmp/wwp.raw'" >/dev/null 2>&1
+  rs "python3 - $* <<'REGION' 2>/dev/null || echo 0
+import struct, sys
+mode = sys.argv[1]; l, t, r, b = map(int, sys.argv[2:6]); d = open('/var/tmp/wwp.raw', 'rb').read(); w, h = struct.unpack('<II', d[:8])
+off = len(d) - w * h * 4; px = []
+for y in range(max(t, 0), min(b, h), 6):
+    for x in range(max(l, 0), min(r, w), 6):
+        p = off + (y * w + x) * 4; px.append(d[p:p + 3])
+if mode == 'save':
+    open('/var/tmp/wwp.saved', 'wb').write(b''.join(px)); print(len(px))
+else:
+    s = open('/var/tmp/wwp.saved', 'rb').read(); old = [s[i:i + 3] for i in range(0, len(s), 3)]
+    n = min(len(old), len(px)); print(round(100.0 * sum(1 for a, c in zip(old, px) if sum(abs(i - j) for i, j in zip(a, c)) > 24) / max(n, 1)))
+REGION
+rm -f /var/tmp/wwp.raw" | tail -1; }
+# py <expr>: a number from python (the geometry below).
+py() { python3 -c "print(round($1))"; }
+long_menu() {
+  local fl ft fr fb bl bt br bb nb l2 t2 r2 bb2 hit at ax ay pw ph sx0 sx1 sy1 lines spot gone s t0 k0 diff mx my how
+  read -r fl ft fr fb <<<"$(wwrect "$sw")"; read -r bl bt br bb <<<"$(wwbody "$sw")"
+  [ -n "${fb:-}" ] && [ -n "${bb:-}" ] || { bad "long: Steam's frame/body not on screen"; return; }
+  nb=$((bt + 360))
+  say "long: Steam's body $bl $bt $br $bb (frame $fl $ft $fr $fb): its bottom edge dragged up to $nb (put back after)"
+  "$adb" shell "input swipe $((fr - 4)) $((fb - 4)) $((fr - 4)) $((nb + fb - bb - 4)) 900"; sleep 2.5
+  RESTORE="$((fr - 4)) $((nb + fb - bb - 4)) $((fr - 4)) $((fb - 4))"
+  read -r l2 t2 r2 bb2 <<<"$(wwbody "$sw")"
+  [ "${bb2:-$bb}" -lt "$bb" ] || { bad "long: the edge drag didn't make Steam's window shorter ($bb -> ${bb2:-?})"; return; }
+  region save "$bl" "$bb2" "$br" "$((bb2 + 600))" >/dev/null
+  read -r SW SX SY SWW SWH <<<"$(steamwin)"
+  t0=$("$adb" shell 'date +%m-%d\ %H:%M:%S.000' | tr -d '\r'); k0=$(rs 'wc -l < /run/powos-app/hyprland.log' | tail -1)
+  us "$X; xdotool mousemove --window $SW $CX $CY click 1" >/dev/null; sleep 2
+  lines=$("$adb" shell "logcat -d -T '$t0' -s PowosPopups:I" 2>/dev/null | tr -d '\r' | grep -oE 'popup.*')
+  hit=$(echo "$lines" | grep -E '^popup [0-9]+ [0-9]+ at' | tail -1)
+  [ -n "$hit" ] || { bad "long: no popup line after the click at $CX,$CY"; return; }
+  read -r _ P N _ at pw _ <<<"$hit"; ax=${at%,*}; ay=${at#*,}; ph=${pw#*x}; pw=${pw%x*}
+  s=$(python3 -c "import sys; print('%.4f' % ((float(sys.argv[2]) - float(sys.argv[1])) / float(sys.argv[3])))" "$l2" "$r2" "$SWW")
+  # Its part below the window on screen (device px): the window's body bottom .. the menu's bottom.
+  sy1=$(py "$t2 + ($ay + $ph) * $s"); sx0=$(py "$l2 + $ax * $s"); sx1=$(py "$l2 + ($ax + $pw) * $s")
+  say "long: $hit, window body $l2 $t2 $r2 $bb2 x$s: the menu reaches $sy1 (the window's bottom $bb2)"
+  [ "$sy1" -gt $((bb2 + 40)) ] || { bad "long: the menu isn't taller than the window ($sy1 vs $bb2): nothing to show"; return; }
+  diff=$(region cmp "$sx0" "$((bb2 + 4))" "$sx1" "$((sy1 - 4))")
+  say "long: ${diff}% of the screen below the window (the menu's part outside it) changed when it opened"
+  [ "${diff:-0}" -ge 40 ] || bad "long: the menu's part below its window isn't on screen (${diff}% changed, want >= 40)"
+  # A finger on that part, the swipe ending far off the menu: the menu takes the touch, no item is chosen.
+  my=$(( (bb2 + sy1) / 2 )); mx=$(( (sx0 + sx1) / 2 ))
+  "$adb" shell "input swipe $mx $my $(( mx > 1200 ? mx - 900 : mx + 900 )) $my 400"; sleep 1.5
+  if "$adb" shell "logcat -d -T '$t0' -s PowosWebWindows:I" 2>/dev/null | grep -q 'a touch on its popup'; then
+    say "long: the host gave the touch on the menu's outside part to its window"
+  else bad "long: the touch on the menu's outside part wasn't its window's"; fi
+  rs "tail -n +$((k0 + 1)) /run/powos-app/hyprland.log | grep -a 'touch at' | tail -1" | cut -c1-200 | sed 's/^/long: KWin: /' | tee -a "$OUT/log.txt"
+  # Dismiss: a tap on an empty spot of the page, off the window and the menu (else Escape).
+  spot=$(ev "(()=>{const d=devicePixelRatio;for(let y=innerHeight*0.15;y<=innerHeight*0.85;y+=14)for(let x=innerWidth*0.95;x>=innerWidth*0.05;x-=14){const e=document.elementFromPoint(x,y);if(e&&e.closest('.page-track')&&!e.closest('.webwindow,.tile,.home-tile,.app,.panel,.widget,.island,button,a,input,textarea,.bar,.dock,[data-key]')){const X=x*d,Y=y*d;if(!(X>=$sx0-20&&X<=$sx1+20&&Y>=$t2-20&&Y<=$sy1+20)&&!(X>=$l2&&X<=$r2&&Y>=$t2&&Y<=$bb2))return Math.round(X)+' '+Math.round(Y)}}return ''})()")
+  if [ -z "$spot" ]; then how="Escape"; us "$X; xdotool key Escape" >/dev/null
+  else how="a tap on the page at $spot"; "$adb" shell "input tap $spot"; fi
+  gone=""; for _ in 1 2 3 4; do sleep 1; gone=$("$adb" shell "logcat -d -T '$t0' -s PowosPopups:I" 2>/dev/null | tr -d '\r' | grep -oE "popup-gone $P $N:.*" | tail -1); [ -n "$gone" ] && break; done
+  if [ -n "$gone" ]; then say "long: $how closed it: $gone"; else bad "long: popup $N still open 4 s after $how"; fi
+}
+RESTORE=""
+if [ $LAYERS = 1 ] && [ -n "${CX:-}" ]; then long_menu; fi
+if [ -n "$RESTORE" ]; then "$adb" shell "input swipe $RESTORE 900"; sleep 1.5; say "long: Steam's window size put back ($(wwbody "$sw"))"; fi
 "$adb" shell "logcat -d -T '$since' -s PowosPopups:*" 2>/dev/null > "$OUT/popups.txt"
-[ "$fail" = 0 ] && say "PASS $opened Steam menus came as popup surfaces with sane geometry and buffers"
+[ "$fail" = 0 ] && say "PASS $opened Steam menus came as popup surfaces with sane geometry$([ $LAYERS = 1 ] && echo ", shown as layers of their own past the window's edge, touchable, dismissed from the page" || echo " and buffers")"
 exit "$fail"

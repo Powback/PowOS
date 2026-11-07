@@ -59,9 +59,9 @@ class PopupBookTest {
         // Wiring: the Linux consumer's start says "web <id> 1"; WindowTasks routes "popup"/"popup-gone" before a web
         // window's close forgets it; the bridge's host hands them to PopupLog.
         val src = File("src/main/kotlin/dev/omalauncher/shell")
-        assertTrue(File(src, "WebWindows.kt").readText().contains("WebWindowSource.webPopups(kwin, 1)"))
+        assertTrue(File(src, "WebWindows.kt").readText().contains("WebWindowSource.webPopups(kwin, andro.marchy.WebWindowSource.popupMode())"))
         val bridge = File(src, "ShellBridge.kt").readText()
-        assertTrue(bridge.contains("popupLog.popup(parent, popup, PopupGeo(x, y, w, h))") && bridge.contains("popupLog.popupGone(parent, popup)"))
+        assertTrue(bridge.contains("popupLog.popup(parent, popup, geo)") && bridge.contains("popupLog.popupGone(parent, popup)"))
         val tasks = File("../engine/src/main/java/andro/marchy/WindowTasks.java").readText()
         assertTrue(tasks.indexOf("f[0].equals(\"popup-gone\")") in 0 until tasks.indexOf("if (f[0].equals(\"close\"))"))
         val source = File("../engine/src/main/java/andro/marchy/WebWindowSource.java").readText()

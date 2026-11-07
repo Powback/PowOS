@@ -141,7 +141,8 @@ class ShellBridge(
                 main.post { if (webWindowsMade) webWindows.linuxControl(id, action) }
             }
 
-            // kwin 0063 (N3a): a Linux web window's popups as surfaces of their own - recorded, offscreen ([PopupLog]).
+            // kwin 0063/0064: a Linux web window's popups as surfaces of their own - layers of their own over home with
+            // a KWin that takes "popup-area" (N3b, WebWindowPopups), else recorded offscreen only ([PopupLog], N3a).
             override fun popup(
                 parent: Int,
                 popup: Int,
@@ -149,12 +150,19 @@ class ShellBridge(
                 y: Int,
                 w: Int,
                 h: Int,
-            ) = popupLog.popup(parent, popup, PopupGeo(x, y, w, h))
+            ) {
+                val geo = PopupGeo(x, y, w, h)
+                if (!andro.marchy.WebWindowSource.popupLayers()) return popupLog.popup(parent, popup, geo)
+                main.post { if (webWindowsMade) webWindows.linuxPopup(parent, popup, geo) }
+            }
 
             override fun popupGone(
                 parent: Int,
                 popup: Int,
-            ) = popupLog.popupGone(parent, popup)
+            ) {
+                if (!andro.marchy.WebWindowSource.popupLayers()) return popupLog.popupGone(parent, popup)
+                main.post { if (webWindowsMade) webWindows.linuxPopupGone(parent, popup) }
+            }
         }
 
     /** N3a's log-only popup consumer (kwin 0063): made on the first popup. */
