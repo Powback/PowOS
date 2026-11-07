@@ -321,7 +321,8 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   output_log.txt shows the game in its menu. KWin's log has "window task N live 2268x2440" but NO 0037 "fixed-size game
   window goes full screen": 0037's fillsAsFullScreen only runs from refit() (the window resizing itself), never when
   the task first goes live. Next: call fillsAsFullScreen at goLive / task start (kwin patch), then re-run
-  game-resize.sh 346010. Why 1135x1365 regardless of -screen-width/-height: open (not the saved 2268x1600 either).
+  game-resize.sh 346010. Why 1135x1365 regardless of -screen-width/-height: the page's default web-window body
+  (window-log "as a web window, 1135x1364"), which KWin sized the X window to before Wine fixed it (see below).
 - Unfolded games are home's WEB windows (how=web), also on the cover after a fold. 11-07 game-resize.sh: (1) a game
   window opened floating at the page's default 1135x1364 and Wine pinned that as its fixed size (Besiege, My Friend
   Pedro) -> WebWindows.gameFullScreenAtOpen asks KWin's full screen for every game offer at open; (2) "rotating breaks
