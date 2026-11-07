@@ -30,7 +30,7 @@ export interface Host {
 }
 
 export const APP = "local.devices";
-export type Cap = "status" | "lock" | "screen_off" | "screen_on" | "sleep" | "wake" | "ring";
+export type Cap = "status" | "lock" | "unlock" | "screen_off" | "screen_on" | "sleep" | "wake" | "ring";
 
 export interface Device {
   id: string;
@@ -195,6 +195,7 @@ export function expected(s: Status | undefined, action: Cap): Partial<Status> {
   if (action === "screen_off") return { screen: "off" };
   if (action === "screen_on") return { screen: "on" };
   if (action === "lock") return { locked: true };
+  if (action === "unlock") return { locked: false };
   if (action === "sleep") return { online: false };
   return {};
 }

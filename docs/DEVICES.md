@@ -75,11 +75,26 @@ powos devices peers                                # who may control THIS device
 
 The Devices app does the same from any PowOS device (pair from mDNS `_powos._tcp` or an address).
 
+### Unlock (a desktop, its owner only)
+
+A locked desktop is unlocked remotely the owner's way: `unlock` is logind's `UnlockSession` on this user's seat0
+session (`loginctl unlock-session <id>`), which KDE's screen locker honours. No password is typed, sent or stored, and
+the lock screen stays on for everything else. Only the owner may: a paired device marked owner ON the desktop
+(`powos devices owner <device>` there, `--off` to take it back; `powos devices peers` shows it), or an approver device
+enrolled in the desktop's realm (asked at most once a minute). Any other paired device gets 403; every unlock and
+refusal is logged with the peer id (`journalctl --user -u powos-deviced`). `/v1/status` says `you: {owner}`.
+Phones never advertise unlock - Android can't be unlocked remotely without the PIN, and PowOS doesn't try.
+
+```sh
+powos devices owner Mac              # on Desk (or ssh to it): the Mac may unlock Desk
+powos devices call Desk unlock       # on the Mac; then `call Desk status` -> "locked": false
+```
+
 ## Per device
 
 | device | agent | caps |
 |---|---|---|
-| Desk (.58, KDE) | `powos-deviced` systemd --user unit (`lib/devices/deploy.sh`, `units/gpu-58/powos-deviced.json`) | status, lock, screen_off, screen_on, sleep (guarded), wake |
+| Desk (.58, KDE) | `powos-deviced` systemd --user unit (`lib/devices/deploy.sh`, `units/gpu-58/powos-deviced.json`) | status, lock, unlock (owner only), screen_off, screen_on, sleep (guarded), wake |
 | Phone, rooted | `powos-deviced` in the system tier (`lib/apps/services/powos-deviced.json`, `units/phone/powos-deviced.json`; deployed by `rooted.sh deploy`). Android through the session's adb to itself (a hack row in REMOTE-POWOS §4) | status (battery, screen, locked), lock, screen_off, screen_on, ring, wake |
 | Phone, no root | the PowOS app (`devices/DeviceAgentHost.kt`, key in Android Keystore) | status, screen_on, ring; lock and screen_off once the owner allows them (below) |
 | Server (gpu-195, PowStation) | `powos-deviced` (server backend), not deployed yet | status, sleep (guarded), wake |
@@ -133,7 +148,8 @@ curl -H 'Host: enroll.pow' http://192.168.50.100/healthz                       #
   `agent/devices-enroll`). Until that is deployed a device token is an unknown bearer to the authority (the host
   subscription by fallback, or a 401 with `AUTH_REQUIRE_TENANT`), so don't `ai-apply` before it is.
 
-Tests: `test/tier1/test-deviced.py` (agent + enroll client), `test/tier1/test-deviced-approve.py` (pending/approve/
-revoke CLI and `/v1/enroll/*`, approver-only, same-device-only), the gate's `app local.devices` (`dvJoin`,
+Tests: `test/tier1/test-deviced.py` (agent + enroll client), `test/tier1/test-deviced-unlock.py` (unlock: desktop
+only, owner/approver only, fake loginctl), `test/tier1/test-deviced-approve.py` (pending/approve/
+revoke CLI and `/v1/enroll/*`, approver-only, same-device-only), the gate's `app local.devices` (`dvUnlock`, `dvJoin`,
 `dvJoinDeny`, `dvMember`), `DeviceAgentCoreTest` + `LockActionsTest` (the no-root agent),
 PowStation `enroll/test_powos_enroll.py` (the realm side), claude-rate-limiter `npm run test:enrolled`.

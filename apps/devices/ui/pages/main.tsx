@@ -22,6 +22,7 @@ interface Props {
 
 const LABEL: Partial<Record<Cap, string>> = {
   lock: "Lock",
+  unlock: "Unlock",
   screen_off: "Screen off",
   screen_on: "Screen on",
   sleep: "Sleep",
@@ -83,11 +84,14 @@ function shownStatus(live?: Live, pending?: Pending): Status | undefined {
   return { ...base, ...pending.expect };
 }
 
-/** The buttons for a device right now: its caps that make sense in its state (screen off or on, wake when off). */
+/**
+ * The buttons for a device right now: its caps that make sense in its state (screen off or on, wake when off). Unlock
+ * sits next to Lock when the device advertises it (a desktop; its owner only - anyone else gets the device's refusal).
+ */
 function actionsFor(d: Device, s: Status | undefined, wake: boolean): Cap[] {
   if (!s?.online) return wake ? ["wake"] : [];
   const screen: Cap = s.screen === "off" ? "screen_on" : "screen_off";
-  return (["lock", screen, "sleep", "ring"] as Cap[]).filter((a) => d.caps.includes(a));
+  return (["lock", "unlock", screen, "sleep", "ring"] as Cap[]).filter((a) => d.caps.includes(a));
 }
 
 function DeviceCard({ d, live, pending, wake, run, dismiss, remove, enrolled, revoke }: {

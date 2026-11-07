@@ -10,7 +10,8 @@ devices ask for (lock, screen off/on, sleep, wake another device by Wake-on-LAN,
                                          by each client at pairing; advertised as _powos._tcp over mDNS when avahi is up)
   powos-deviced info | status            this device's card / live status (JSON)
   powos-deviced codes                    pairing requests waiting here, with their codes (a person reads one out)
-  powos-deviced peers                    devices that may control this one
+  powos-deviced peers                    devices that may control this one ("owner" marks the ones that may unlock it)
+  powos-deviced owner <device> [--off]   (run here, as this device's user) let a paired device unlock this one, or not
   powos-deviced pair <https://host:port> [--code N]   pair this device's CLI with another device's agent
   powos-deviced devices                  devices this CLI has paired with
   powos-deviced call <device> <action> [--force]      run an action there (status, lock, screen_off, ...)
@@ -33,7 +34,9 @@ Protocol (v1; JSON over HTTPS):
                            (a notification on a desktop, `codes` anywhere), never returned
   POST /v1/pair/confirm    no auth: {request, code} -> {token, device}; 5 tries per request, 2 min, 3 pending at most
   GET  /v1/status          Bearer token
-  POST /v1/action          Bearer token: {action, force?, args?} -> {ok, result | error}
+  POST /v1/action          Bearer token: {action, force?, args?} -> {ok, result | error}. `unlock` (a desktop only) is
+                           owner-only: the peer marked owner here (`owner`), or an approver device enrolled in this
+                           device's realm; anyone else is refused (403). Every unlock and refusal is logged.
   GET  /v1/peers           Bearer token
   DELETE /v1/peers/<id>    Bearer token: revoke a device (a lost phone revoked from any other paired device)
   GET  /v1/enroll/pending  Bearer token, from this same device only (the Devices app here): devices waiting to join,
@@ -76,7 +79,9 @@ PAIR_PENDING_MAX = 3
 BODY_MAX = 16 * 1024
 # Actions and what they mean to a person; a device advertises the ones its backend can do.
 DESKTOP_GPU = {"kwin_wayland", "Xwayland", "plasmashell", "gnome-shell", "gamescope", "steamwebhelper"}
-ACTIONS = ("lock", "screen_off", "screen_on", "sleep", "wake", "ring")
+ACTIONS = ("lock", "unlock", "screen_off", "screen_on", "sleep", "wake", "ring")
+# Actions only the device's owner may run (owner_of): ending a lock screen is the owner's, not every paired device's.
+OWNER_ONLY = ("unlock",)
 
 
 def now():
@@ -271,7 +276,9 @@ class Backend:
 
 
 class KdeBackend(Backend):
-    """A PowOS desktop on KDE Plasma (Wayland): logind lock, KScreen DPMS."""
+    """A PowOS desktop on KDE Plasma (Wayland): logind lock/unlock, KScreen DPMS. Unlock is logind's own
+    UnlockSession on this user's graphical session (KDE's screen locker ends on it): no password is typed or stored
+    and the lock screen stays on for every other unlock."""
     kind = "desktop"
 
     def env(self):
@@ -282,7 +289,7 @@ class KdeBackend(Backend):
         return e
 
     def caps(self):
-        return ["status", "lock", "screen_off", "screen_on", *Backend.caps(self)[1:]]
+        return ["status", "lock", "unlock", "screen_off", "screen_on", *Backend.caps(self)[1:]]
 
     def session(self):
         """The graphical session on seat0 of this user (what lock and LockedHint act on)."""
@@ -313,6 +320,11 @@ class KdeBackend(Backend):
             if not s:
                 raise ActionError("no desktop session to lock", "failed")
             return self._ok(run(["loginctl", "lock-session", s]))
+        if action == "unlock":
+            s = self.session()
+            if not s:
+                raise ActionError("no desktop session to unlock", "failed")
+            return self._ok(run(["loginctl", "unlock-session", s]))
         if action in ("screen_off", "screen_on"):
             return self._ok(run(["kscreen-doctor", "--dpms", action.split("_")[1]], env=self.env()))
         return Backend.act(self, action, args, force)
@@ -506,6 +518,43 @@ def revoke(pid):
     return True
 
 
+def set_owner(key, on=True):
+    """Mark a paired device as this device's owner (may unlock it) or not; run here only, never over the network."""
+    with LOCK:
+        all_p = peers()
+        pid = next((k for k, v in all_p.items() if key in (k, v.get("name"))), None)
+        if not pid:
+            return None
+        if on:
+            all_p[pid]["owner"] = True
+        else:
+            all_p[pid].pop("owner", None)
+        save_json(peers_path(), all_p)
+    return pid
+
+
+def owner_of(pid):
+    """May this peer run owner-only actions: marked owner here, or an approver device of this device's realm."""
+    if peers().get(pid, {}).get("owner"):
+        return True
+    if not realm_state()["enrolled"]:
+        return False
+    hit = REALM_OWNERS.get(pid)
+    if hit and now() - hit[0] < REALM_OWNER_TTL_S:  # status is polled; the realm is asked at most once a minute
+        return hit[1]
+    try:
+        devs = realm_ask("/v1/devices", approver=False).get("devices", [])
+    except ActionError:
+        return False  # realm unreachable: only the local owner mark counts
+    ok = any(x.get("id") == pid and x.get("approver") and not x.get("revoked") for x in devs)
+    REALM_OWNERS[pid] = (now(), ok)
+    return ok
+
+
+REALM_OWNERS = {}  # peer id -> (asked at, an approver of the realm?)
+REALM_OWNER_TTL_S = 60
+
+
 def touch(pid):
     with LOCK:
         all_p = peers()
@@ -582,7 +631,8 @@ class Handler(BaseHTTPRequestHandler):
             return pair_confirm(self.body())
         pid, _ = self.peer()
         if method == "GET" and path == "/v1/status":
-            return {**public_info(), "status": backend().status(), "realm": {**realm_state(), "here": self.here()}}
+            return {**public_info(), "status": backend().status(), "realm": {**realm_state(), "here": self.here()},
+                    "you": {"owner": owner_of(pid)}}
         if method == "POST" and path == "/v1/action":
             b = self.body()
             action = str(b.get("action", ""))
@@ -590,12 +640,16 @@ class Handler(BaseHTTPRequestHandler):
                 raise ActionError(f"no action '{action[:24]}'", "bad-request")
             if action not in backend().caps():
                 raise ActionError(f"{action}: this device can't", "unsupported")
-            sys.stderr.write(f"action {action} by {pid}\n")
+            if action in OWNER_ONLY and not owner_of(pid):
+                sys.stderr.write(f"action {action} refused for {pid}: not this device's owner\n")
+                raise ActionError(f"{action}: only this device's owner may (powos devices owner <device> on it, "
+                                  "or an enrolled approver device)", "forbidden")
+            sys.stderr.write(f"action {action} by {pid}{' (owner)' if action in OWNER_ONLY else ''}\n")
             args = b.get("args") if isinstance(b.get("args"), dict) else {}
             return {"ok": True, "action": action, "result": backend().act(action, args, bool(b.get("force")))}
         if method == "GET" and path == "/v1/peers":
             return {"peers": [{"id": k, "name": v.get("name"), "kind": v.get("kind"), "paired": v.get("paired"),
-                               "seen": v.get("seen")} for k, v in peers().items()]}
+                               "seen": v.get("seen"), "owner": bool(v.get("owner"))} for k, v in peers().items()]}
         if method == "DELETE" and path.startswith("/v1/peers/"):
             return {"revoked": revoke(path.rsplit("/", 1)[1])}
         if path.startswith("/v1/enroll/"):
@@ -1026,7 +1080,15 @@ def main(argv):
             print("no pairing request waiting")
     elif cmd == "peers":
         for k, v in peers().items():
-            print(f"{k}  {v.get('name')} ({v.get('kind')})  paired {time.strftime('%F %H:%M', time.localtime(v.get('paired', 0)))}")
+            print(f"{k}  {v.get('name')} ({v.get('kind')})  paired {time.strftime('%F %H:%M', time.localtime(v.get('paired', 0)))}"
+                  + ("  owner" if v.get("owner") else ""))
+    elif cmd == "owner":
+        if not rest or rest[0].startswith("--"):
+            raise SystemExit("powos-deviced: owner <device> [--off]")
+        pid = set_owner(rest[0], "--off" not in rest)
+        if not pid:
+            raise SystemExit(f"powos-deviced: {rest[0]}: not paired with this device (powos devices peers)")
+        print(f"{pid}: {'may no longer' if '--off' in rest else 'may'} unlock this device")
     elif cmd == "revoke":
         return cli_revoke(rest)
     elif cmd == "pending":

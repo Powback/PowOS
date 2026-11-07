@@ -14168,11 +14168,11 @@ async function settleDevices(r) {
   try {
     await r.page.evaluate(() => new Promise((ok) => (window.importShim ? ok() : addEventListener("load", ok))));
     await r.page.evaluate([dvWait, dvType, dvLine, dvFails, dvAgent, dvJoinAgent, dvTxt, dvLock, dvLockAsk, dvLockDecline, dvLockGrant, dvLockStop, dvSleep].map((f) => `window.${f.name} = ${f}`).join(";\n"));
-    for (const step of [dvMount, dvThisPhone, dvPair, dvPaired, dvOptimistic, dvRollback, dvBusy, dvJoin, dvJoinDeny, dvMember]) {
+    for (const step of [dvMount, dvThisPhone, dvPair, dvPaired, dvOptimistic, dvRollback, dvUnlock, dvBusy, dvJoin, dvJoinDeny, dvMember]) {
       const out = await r.page.evaluate(step);
       r.problems.push(...out);
       if (step === dvJoinDeny) await r.page.screenshot({ path: "/cache/devices-join.png" }).catch(() => {});
-      if (out.length && ![dvOptimistic, dvBusy, dvRollback, dvThisPhone, dvJoin, dvJoinDeny, dvMember].includes(step)) break;
+      if (out.length && ![dvOptimistic, dvBusy, dvRollback, dvUnlock, dvThisPhone, dvJoin, dvJoinDeny, dvMember].includes(step)) break;
     }
     await r.page.screenshot({ path: "/cache/devices-folded.png" }).catch(() => {});
   } catch (e) {
@@ -14246,15 +14246,18 @@ function dvJoinAgent(sleep, reply) {
 function dvAgent() {
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
   const TPL = "Bearer ${secret:dev-desk1}";
-  const dev = { id: "desk1", name: "Desk", kind: "desktop", v: 1, caps: ["status", "lock", "screen_off", "screen_on", "sleep", "wake"] };
+  const dev = { id: "desk1", name: "Desk", kind: "desktop", v: 1, caps: ["status", "lock", "unlock", "screen_off", "screen_on", "sleep", "wake"] };
   const st = { online: true, screen: "on", locked: false, power: { source: "ac", battery: null, charging: false }, busy: ["llama-swap.service"], nics: [] };
   const calls = [];
+  const fails = { lock: 1, unlock: 1 };
   const reply = (status, body) => ({ status, json: () => body });
   const done = (a) => reply(200, { ok: true, action: a, result: { done: true } });
   const ACT = {
     screen_off: (a) => ((st.screen = "off"), done(a)),
     screen_on: (a) => ((st.screen = "on"), done(a)),
-    lock: () => reply(500, { ok: false, error: "no desktop session to lock", code: "failed" }),
+    // the first Lock fails (dvRollback), later ones lock; the first Unlock is refused as not the owner (dvUnlock)
+    lock: (a) => (fails.lock-- > 0 ? reply(500, { ok: false, error: "no desktop session to lock", code: "failed" }) : ((st.locked = true), done(a))),
+    unlock: (a) => (fails.unlock-- > 0 ? reply(403, { ok: false, error: "unlock: only this device's owner may", code: "forbidden" }) : ((st.locked = false), done(a))),
     sleep: () => reply(409, { ok: false, error: "busy: llama-swap.service would stop - sleep refused", code: "busy" }),
   };
   const confirm = (init) => (JSON.parse(init.body).code === "424242" ? reply(200, { token: "", device: dev }) : reply(401, { ok: false, error: "wrong code", code: "auth" }));
@@ -14416,7 +14419,7 @@ async function dvPaired() {
     [confirm.secret === "dev-desk1" && confirm.path === "token", `pairing didn't hand the token to host.net (capture ${JSON.stringify(confirm)})`],
     [!bad, `a call carried a token the page made up (${bad?.auth}), not the \${secret:dev-desk1} template`],
     [!bare, "a status/action call went without the device's token"],
-    [shown === "lock,screen_off,sleep", `a PC that's on shows actions "${shown}", want lock,screen_off,sleep (its caps)`],
+    [shown === "lock,unlock,screen_off,sleep", `a PC that's on shows actions "${shown}", want lock,unlock,screen_off,sleep (its caps)`],
   ]);
 }
 
@@ -14452,6 +14455,36 @@ async function dvRollback() {
   err?.querySelector("[data-dismiss]")?.click();
   await new Promise((ok) => setTimeout(ok, 50));
   return fails;
+}
+
+/**
+ * Unlock next to Lock: Lock (now accepted) shows locked; Unlock refused as not the owner stays locked with the PC's
+ * words and a Try again; Try again shows unlocked at once (optimistic) and stays unlocked when the PC says done.
+ */
+async function dvUnlock() {
+  const card = window.__dv.root.querySelector('[data-device="desk1"]');
+  const btn = (a) => card.querySelector(`[data-action="${a}"]:not([disabled])`);
+  btn("lock")?.click();
+  const locked = await (async () => { for (let i = 0; i < 80 && !/locked/.test(dvLine()); i++) await dvSleep(25); return /locked/.test(dvLine()); })();
+  const unlock = await dvWait('[data-device="desk1"] [data-action="unlock"]:not([disabled])', 1500);
+  if (!unlock) return ["no Unlock next to Lock on a desktop that advertises it"];
+  unlock.click();
+  await dvSleep(100);
+  const early = dvLine();
+  const err = await dvWait('[data-device="desk1"] [data-device-error]');
+  const words = err?.textContent ?? "nothing";
+  const rolled = /locked/.test(dvLine());
+  err?.querySelector("[data-retry]")?.click();
+  await dvSleep(100);
+  const again = dvLine();
+  await dvWait('[data-device="desk1"] [data-action="unlock"]:not([disabled])', 1500);
+  return dvFails([
+    [locked, `after Lock the line is "${dvLine()}" (want locked)`],
+    [!/locked/.test(early), `100 ms after Unlock the line is "${early}" (want unlocked at once)`],
+    [/owner/.test(words), `a refused unlock shows "${words}", want the PC's own words`],
+    [rolled, "a refused unlock doesn't roll back to locked"],
+    [!/locked/.test(again) && !/locked/.test(dvLine()), `after Try again the line is "${dvLine()}" (want unlocked)`],
+  ]);
 }
 
 /** Sleep while something runs there: refused by the PC, the page names what would stop and offers "Sleep anyway". */
