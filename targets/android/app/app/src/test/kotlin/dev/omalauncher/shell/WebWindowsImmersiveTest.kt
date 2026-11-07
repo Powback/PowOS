@@ -31,9 +31,10 @@ class WebWindowsImmersiveTest {
         assertTrue(WebWindows.opensFullScreen(WebWindows.isGame("steam_app_346010", null)))
         assertFalse(WebWindows.opensFullScreen(WebWindows.isGame("org.kde.kate", "Qt;KDE;Utility;TextEditor;")))
         assertFalse("Steam itself floats", WebWindows.opensFullScreen(WebWindows.isGame("steam", "Game;")))
-        val open = body("    fun openLinux(")
-        assertTrue("openLinux asks full screen for a game", open.contains("opensFullScreen(p.game)") && open.contains("fullScreen(win)"))
-        assertTrue("never over a window already full screen or asked", open.contains("win.linuxFull || win.fullAsked"))
+        assertTrue("openLinux asks it", body("    fun openLinux(").contains("gameFullScreenAtOpen(win, p)"))
+        val at = body("    private fun gameFullScreenAtOpen(")
+        assertTrue("a game's offer -> KWin's full screen", at.contains("opensFullScreen(p.game)") && at.contains("fullScreen(win)"))
+        assertTrue("never over a window already full screen or asked", at.contains("win.linuxFull || win.fullAsked"))
     }
 
     @Test
