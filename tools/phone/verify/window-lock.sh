@@ -16,6 +16,12 @@
 # `wm dismiss-keyguard` (dismisses a swipe lock; a PIN/pattern lock stays up - never entered). Battery below
 # WAKE_MIN_BATT (20) % and not charging: never woken.
 WL_WOKE=${WL_WOKE:-$HOME/.cache/powos-verify-woke}
+# SELF_INPUT: prefix for an adb shell command that changes the screen state (KEYCODE_WAKEUP/SLEEP, a power key): it
+# marks the next 8 s as the tools' own on the phone (powos-selfinput, read by idle.sh's touch watcher), since the
+# panels' resume/suspend move the touch IRQ counters and emit panel events with no finger. Without it every wake counted
+# as the user picking the phone up: wl_touched stopped the woken window's first check within 4 s (11-07 20:20-22:04,
+# ww-glue rc 3 "touched" 10 times at night, nothing ran).
+SELF_INPUT='echo $(( $(date +%s) + 8 )) > /data/local/tmp/powos-selfinput; '
 wl_wake() {
   [ -z "${GO_ONLY:-}" ] || return 0
   local st i bat lvl pw cur b m t
@@ -33,7 +39,7 @@ wl_wake() {
     [ -n "$b" ] && [ -n "$m" ] && [ -n "$t" ] || { echo "not waking the phone: can't read its brightness/timeout to restore later"; return 0; }
     mkdir -p "$(dirname "$WL_WOKE")"; printf 'b=%s\nm=%s\nt=%s\nat=%s\n' "$b" "$m" "$t" "$(date +%s)" > "$WL_WOKE"
   fi
-  "$1/adb.sh" shell "settings put system screen_brightness_mode 0; settings put system screen_brightness ${WAKE_BRIGHTNESS:-1}; settings put system screen_off_timeout 1800000; input keyevent KEYCODE_WAKEUP; sleep 1; wm dismiss-keyguard" >/dev/null 2>&1
+  "$1/adb.sh" shell "settings put system screen_brightness_mode 0; settings put system screen_brightness ${WAKE_BRIGHTNESS:-1}; settings put system screen_off_timeout 1800000; ${SELF_INPUT}input keyevent KEYCODE_WAKEUP; sleep 1; wm dismiss-keyguard" >/dev/null 2>&1
   WL_DID=1   # this window woke it (queue.sh's wl_done logs it even after a touch restored the settings early)
   echo "woke the phone at minimum brightness for the checks (idle ${i}s${lvl:+, battery ${lvl}%})"
 }
@@ -53,7 +59,7 @@ wl_sleep() {
   local i touched=0; wl_touched "$1" && touched=1
   wl_restore "$1"
   i=$("$1/idle.sh" 2>/dev/null | sed -n 's/.*idle=\([0-9]*\).*/\1/p')
-  [ $touched = 0 ] && [ -n "$i" ] && [ "$i" -ge "${QUEUE_IDLE_S:-120}" ] && "$1/adb.sh" shell 'input keyevent KEYCODE_SLEEP' >/dev/null 2>&1
+  [ $touched = 0 ] && [ -n "$i" ] && [ "$i" -ge "${QUEUE_IDLE_S:-120}" ] && "$1/adb.sh" shell "${SELF_INPUT}input keyevent KEYCODE_SLEEP" >/dev/null 2>&1
   # The save goes only with a restore that went through (wl_restore removes it then): a failed restore keeps it for the
   # next wl_sleep/wl_restore - else the user's brightness/timeout are lost (11-07: the phone left at brightness 1,
   # manual mode, 30 min timeout after the 12:28 window, and the next wake saved those as "the user's").

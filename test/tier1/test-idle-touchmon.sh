@@ -65,6 +65,7 @@ else bad "pid file older than the boot" "rc=$rc out=$out"$'\n'"$(cat "$T/restart
 
 # 3. The real watcher running, lasttouch 300 s ago: left alone, idle from lasttouch.
 echo 777 > "$T/dlt/powos-touchmon.pid"; echo $(( now - 300 )) > "$T/dlt/powos-lasttouch"
+sed -n 's/^V=//p' "$src/tools/phone/idle.sh" > "$T/dlt/powos-touchmon.ver"   # the running watcher is this version
 run
 idle=$(sed -n 's/^idle=\([0-9]*\) .*/\1/p' <<<"$out")
 if [ ! -s "$T/restart.log" ] && [ -n "$idle" ] && [ "$idle" -ge 300 ] && [ "$idle" -le 305 ]; then
