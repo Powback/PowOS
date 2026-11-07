@@ -1582,6 +1582,8 @@ class ShellBridge(
         fullScreen: Boolean = false,
     ) {
         runtime.usage.record(key)
+        // Any launch: the switcher goes, what was launched is what shows (Switcher.launched).
+        dev.omalauncher.system.Switcher.launched("launch $key")
         // Web windows on (unfolded): an app opened from another of PowOS's windows (the launcher overlay, Quick Tools,
         // the AI) opens as a web window on home, as home's own launch does (state.ts launch -> openWebWindow) - never
         // an Android freeform window with the old WindowFrames bar (the Phone app from the launcher, 2026-10-30).

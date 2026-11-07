@@ -25,6 +25,24 @@ if [ -n "${BF_ADB:-}" ]; then
     "$BF_ADB_PATH" shell "su -c 'cp /data/local/tmp/powos-bf-cfg-phone.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-steam-compat /data/powos/root/var/tmp/; chmod 644 /data/powos/root/var/tmp/powos-bf-cfg-phone.sh /data/powos/root/var/tmp/powos-steam-compat; sh /data/powos/powos-run.sh \"APP=${APP:-274190} bash /var/tmp/powos-bf-cfg-phone.sh $*\"'" 2>&1 | grep -v sysvipc | tr -d '\r'; }
   cfg_set() { [ -n "$CFG_TO" ] || return 0; pill "setup cfg:$CFG_TO (closing Steam)"; cfg_run set "$CFG_TO"; }
   cfg_restore() { [ -n "$CFG_TO" ] || return 0; cfg_run restore; }
+  # switcher_state: "up" / "down" / "?" - the switcher (recents overview) as PowOS's window log last said ("switcher
+  # up|down", Switcher.open; older builds: "windows hidden under the switcher" / "shown again (switcher down)").
+  switcher_state() { local l
+    l=$(perl -e 'alarm shift; exec @ARGV' 15 "$BF_ADB_PATH" shell "su -c 'grep -E \"Switcher: switcher (up|down|closed)|windows hidden under the switcher|windows shown again \\(switcher down\\)\" /data/data/com.powos.app/files/window-log.txt | tail -1'" 2>/dev/null | tr -d '\r')
+    case $l in *"switcher up"*|*"hidden under the switcher"*) echo up ;; *"switcher down"*|*"switcher closed"*|*"shown again"*) echo down ;; *) echo "?" ;; esac; }
+  # stray_switcher: before a launch, a switcher left up (agent abzu-fps 11-07 02:58 / 03:36: the game started under it
+  # and ran unseen) is closed with Home - sent only when it IS up: over home's main page Home opens it
+  # (ShellActivity.homePressed). Prints what it found.
+  stray_switcher() { local s; s=$(switcher_state)
+    [ "$s" = up ] || { echo "switcher before the launch: $s"; return 0; }
+    "$BF_ADB_PATH" shell "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null 2>&1"; sleep 1
+    echo "switcher before the launch: up - closed (Home); now $(switcher_state)"; }
+  # front_back <component>: the activity that was in front put back - never PowosWindowActivity by name: started bare
+  # it is an EMPTY window task (no Linux window in it), which covered home's web windows on the next check (agent
+  # abzu-fps 11-07 04:19 "in front=PowosWindowActivity", the game behind it). Home instead (its explicit component,
+  # not the HOME intent: that would be a Home press).
+  front_back() { case $1 in "") ;; */*PowosWindowActivity*|*/*SwitcherActivity*) "$BF_ADB_PATH" shell "am start -n com.powos.app/andro.marchy.HomeShell >/dev/null 2>&1" ;;
+    *) "$BF_ADB_PATH" shell "am start -n $1 >/dev/null 2>&1" ;; esac; }
   return 0
 fi
 # APP / GAME / WIN_NAME: the game under test - any Steam app id (default 274190, Broforce, the test case); GAME =

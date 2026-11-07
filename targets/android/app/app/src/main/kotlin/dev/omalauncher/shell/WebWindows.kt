@@ -1139,6 +1139,16 @@ class WebWindows(
      */
     private fun androidStandIn(appId: String) = appId.startsWith(ANDROID_APP_ID)
 
+    /** KWin window [kwin] of [appId], offered now, will show: not the selftest's (kept offscreen) nor an Android app's stand-in. */
+    private fun offerShows(
+        kwin: Int,
+        appId: String,
+    ): Boolean {
+        if (androidStandIn(appId)) return false
+        val t = selftest ?: return true
+        return !((t.kwin < 0 && t.matches(appId)) || selftestOwns(t.kwin, kwin))
+    }
+
     fun linuxOpened(
         kwin: Int,
         key: String,
@@ -1146,10 +1156,12 @@ class WebWindows(
     ) {
         wins.values.firstOrNull { it.linux?.kwin == kwin }?.let { w ->
             WindowLog.i(TAG, "KWin window $kwin (${offer.appId}) again: web window ${w.id} shown where it was")
+            toFront("KWin window $kwin (${offer.appId}) shown again")
             emit("webwindows.show", w.id)
             return
         }
         if (pendingLinux.containsKey(kwin)) return
+        if (offerShows(kwin, offer.appId)) toFront("KWin window $kwin (${offer.appId}) opened")
         // The ship gate's hidden Linux check (selftestLinux): its app's next KWin window never reaches the page.
         selftest?.let { t ->
             if (t.kwin < 0 && t.matches(offer.appId)) return t.take(kwin, offer.appId)
@@ -1176,6 +1188,31 @@ class WebWindows(
                 andro.marchy.WebWindowSource.fallback(context, kwin, p.appId, p.title)
             }
         }, LINUX_ADOPT_MS)
+    }
+
+    /**
+     * A Linux window opening (or shown again) on home's page - a launch's result, however it was launched (an icon, Steam,
+     * steam:// / -applaunch, powos-open-task): the switcher goes ([dev.omalauncher.system.Switcher.launched]) and home -
+     * where the window is - comes to the front when one of PowOS's own activities covers it ([homeToFront]). Agent
+     * abzu-fps 11-07 04:19: an empty PowosWindowActivity (a check's restore had started it with no window) stayed in front
+     * while ABZÛ opened as home's web window behind it: the game ran unseen. A third-party app in front is left there (a
+     * Linux app's own window, e.g. Steam's, must not pull the user out of their app).
+     */
+    private fun toFront(why: String) {
+        dev.omalauncher.system.Switcher.launched(why)
+        if (dev.omalauncher.system.Switcher.homeVisible) return
+        io.post {
+            @Suppress("DEPRECATION")
+            val top = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(1).firstOrNull()?.topActivity }.getOrNull()
+            if (!homeToFront(false, top?.packageName, top?.className, context.packageName)) return@post
+            WindowLog.i(TAG, "$why: home to the front over ${top?.flattenToShortString()}")
+            runCatching {
+                context.startActivity(
+                    android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_HOME)
+                        .setPackage(context.packageName).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK).putExtra(EXTRA_WINDOW_FRONT, true),
+                )
+            }.onFailure { WindowLog.w(TAG, "$why: can't bring home to the front", it) }
+        }
     }
 
     /**
@@ -4021,6 +4058,20 @@ class WebWindows(
          * the front" and put back in its window (step 55).
          */
         const val EXTRA_APP_LEFT = "dev.omalauncher.shell.appLeft"
+
+        /** On the HOME intent [toFront] starts (a Linux window opened on home's page): not a Home press either. */
+        const val EXTRA_WINDOW_FRONT = "dev.omalauncher.shell.windowFront"
+
+        /**
+         * Whether a Linux window opening on home's page brings home to the front: home is out of sight and what covers
+         * it is one of PowOS's own activities (a window task, the switcher's) - never home itself, never another app.
+         */
+        fun homeToFront(
+            homeVisible: Boolean,
+            frontPackage: String?,
+            frontClass: String?,
+            ownPackage: String,
+        ): Boolean = !homeVisible && frontPackage == ownPackage && frontClass != null && frontClass != ShellActivity::class.java.name && !frontClass.endsWith(".HomeShell")
 
         /** A task change's [reconcile] waits this long, and an empty display is read again this long after. */
         private const val RECONCILE_MS = 400L

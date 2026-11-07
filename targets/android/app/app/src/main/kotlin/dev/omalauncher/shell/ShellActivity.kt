@@ -324,7 +324,9 @@ class ShellActivity : Activity() {
         val recents = intent.getBooleanExtra(dev.omalauncher.system.Switcher.EXTRA_RECENTS, false)
         // Nor a web window's minimise (WebWindows.EXTRA_APP_LEFT: its app's home-gesture lifecycle): home is in front already.
         val appLeft = intent.getBooleanExtra(WebWindows.EXTRA_APP_LEFT, false)
-        if (intent.hasCategory(Intent.CATEGORY_HOME) && !intent.hasExtra(EXTRA_REDIRECTED) && !recents && !appLeft) homePressed()
+        // Nor a Linux window opening on home's page (WebWindows.toFront): home comes forward to show it.
+        val windowFront = intent.getBooleanExtra(WebWindows.EXTRA_WINDOW_FRONT, false)
+        if (intent.hasCategory(Intent.CATEGORY_HOME) && !intent.hasExtra(EXTRA_REDIRECTED) && !recents && !appLeft && !windowFront) homePressed()
         dev.omalauncher.AgentsSpool.opened(intent)
         // An edge gesture's "app drawer": home with its pull-up panel up.
         openPanel(intent)

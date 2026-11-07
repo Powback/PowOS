@@ -569,6 +569,18 @@ export function recentsBack(): boolean {
   return true;
 }
 
+/**
+ * A launch (an icon, the launcher overlay, a Linux window KWin opened - Steam starting a game -, an app adopted as a
+ * window): the switcher goes at once, so what was launched is what shows - never left up over it (agent abzu-fps 11-07
+ * 02:58 / 03:36: ABZU started under the open switcher and ran unseen). The host closes its side too
+ * (Switcher.launched); not one a swipe is building (its own end decides).
+ */
+export function recentsLaunched() {
+  if (phase.value !== "shown") return;
+  console.info("recents: closed by a launch");
+  collapse(false);
+}
+
 /** Home pressed: the switcher goes with everything else - not one a swipe is building now (a late home intent). */
 export function recentsHome() {
   if (phase.value === "drag") return;
