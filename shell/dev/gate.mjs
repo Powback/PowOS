@@ -351,6 +351,9 @@ async function privacyGrace() {
   await P.sleep(3000);
   fails.push([!P.chip("org.example.recorder"), "the stopped use stayed past the 15 s grace"], [P.chip("org.example.maps"), "the location chip went with it"]);
   await P.feed([]);
+  // The row's exit (Reveal, --spring-ms) is over within feed's 600 ms on an idle gate; on a loaded one it ran later and
+  // the scene failed on origin's tip alone (11-07): up to 2 s for it to go.
+  for (let t = 0; t < 2000 && document.querySelector(".privacy-row"); t += 50) await P.sleep(50);
   fails.push([!document.querySelector(".privacy-row"), "the row stayed with nothing in use"]);
   return fails.filter(([ok]) => !ok).map(([, why]) => why);
 }
@@ -10117,6 +10120,90 @@ async function gridSnapScene(r) {
  * again (hostless) / the host's "webwindows.full" off brings back its floating frame. Hostless = the work area; with a
  * host, the page's model of the real full-screen app (full, hidden) must hold until the host says it is back.
  */
+/**
+ * WB1-WB4 (window-bench, the user 11-07: "we really need to benchmark and fix all the window handling", "no windows not
+ * loading"): the page side of tools/phone/verify/window-bench.sh, frame-timed in the page with a stubbed host - a new
+ * window's frame + placeholder within a few frames (never a blank frame before it is live: the not-loading rule), the
+ * placeholder gone the frame after "webwindows.live", maximise and restore settled within 400 ms, a closed window's
+ * frame gone within a few frames. Times logged as "ww-bench {...}" (the phone bench has the same names).
+ */
+function WB_HELPERS() {
+  const frame = () => new Promise((ok) => requestAnimationFrame(() => ok()));
+  const el = (id) => document.querySelector(`.webwindow[data-wwid="${id}"]`);
+  const body = (id) => el(id)?.querySelector(".webwindow-body");
+  const rect = (id) => {
+    const r = body(id)?.getBoundingClientRect();
+    return r ? [r.x, r.y, r.width, r.height].map(Math.round).join(" ") : "";
+  };
+  // ms until [f] holds (checked each frame), -1 past [max].
+  const until = async (f, max) => {
+    const t0 = performance.now();
+    while (!f()) {
+      if (performance.now() - t0 > max) return -1;
+      await frame();
+    }
+    return Math.round(performance.now() - t0);
+  };
+  // ms until [id]'s body rect changed from before [act] and stayed the same 3 frames (those 3 not counted).
+  const settle = async (id, act) => {
+    const a = rect(id);
+    const t0 = performance.now();
+    act();
+    let last = a;
+    let same = 0;
+    while (performance.now() - t0 < 3000) {
+      await frame();
+      const c = rect(id);
+      same = c !== a && c === last ? same + 1 : 0;
+      if (same >= 3) return Math.max(0, Math.round(performance.now() - t0 - 3 * 16.7));
+      last = c;
+    }
+    return -1;
+  };
+  window.__wb = { el, body, until, settle };
+}
+
+/**
+ * WB1-WB4 (window-bench, the user 11-07: "we really need to benchmark and fix all the window handling", "no windows not
+ * loading"): the page side of tools/phone/verify/window-bench.sh, frame-timed in the page with a stubbed host - a new
+ * window's frame + placeholder within a few frames (never a blank frame before it is live: the not-loading rule), the
+ * placeholder gone the frame after "webwindows.live", maximise and restore settled within 400 ms, a closed window's
+ * frame gone within a few frames. Times logged as "ww-bench {...}" (the phone bench has the same names).
+ */
+async function wwBenchChecks() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const { el, body, until, settle } = window.__wb;
+  const fails = [];
+  const times = {};
+  const within = (name, v, max) => {
+    times[name] = v;
+    if (v < 0 || v > max) fails.push(`window-bench ${name}: ${v < 0 ? "never" : `${v} ms`} (budget <= ${max} ms)`);
+  };
+  const was = S.page.value;
+  try {
+    S.page.value = 0;
+    await window.__gw.settled();
+    W.webWins.value = [{ id: 981, key: "a:gate.bench", label: "Bench", page: S.pages.value[0], x: 80, y: 140, w: 320, h: 240 }];
+    within("open-frame", await until(() => body(981)?.classList.contains("placeholder"), 1000), 100);
+    // The not-loading rule: a window not live yet shows its placeholder (the theme's surface, icon, progress), never a hole.
+    if (!el(981)?.querySelector(".ww-placeholder")) fails.push("window-bench blank: a window that isn't live shows no placeholder");
+    window.__mockEvents.emit("webwindows.live", 981);
+    // Budgets loose enough for a loaded gate (86 / 106 ms seen in a full ship gate, 11-07); the phone bench has the tight ones.
+    within("open-live", await until(() => body(981)?.classList.contains("live"), 1000), 200);
+    within("maximise", await settle(981, () => W.toggleMaximise(981)), 400);
+    within("restore", await settle(981, () => W.toggleMaximise(981)), 400);
+    W.webWins.value = [];
+    within("close", await until(() => !el(981), 1000), 200);
+    console.log(`ww-bench ${JSON.stringify(times)}`);
+    return fails;
+  } finally {
+    W.webWins.value = [];
+    S.page.value = was;
+    await window.__gw.settled();
+  }
+}
+
 async function fullStaysScene(r) {
   await r.page.evaluate(FULL_STAYS_HELPERS);
   try {
@@ -12784,6 +12871,9 @@ try {
   // EC1: a window let go at the screen's right / left edge (or over the right dock) goes to the next / previous page with home, whole inside the work area (ww-edge-carry-unfolded; E2E 194 step 38, 197 step 39).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-edge-carry-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => edgeCarryScene(r))));
+  // WB1-WB4: the window bench's page side - open/live/maximise/restore/close frame-timed, no blank frame (ww-bench-unfolded; the user 11-07).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ww-bench-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, async () => (await r.page.evaluate(WB_HELPERS), r.page.evaluate(wwBenchChecks)))));
   // WX1: a tap on a divider / the ⇄ hint swaps the sides (ww-swap-unfolded; the user, 10-31 15:47-15:52).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-swap-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => swapScene(r))));

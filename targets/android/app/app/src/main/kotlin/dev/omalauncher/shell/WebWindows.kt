@@ -116,6 +116,16 @@ class WebWindows(
 
     private val hideUnclaimedRun = Runnable { hideUnclaimed() }
 
+    /**
+     * The display helper started now, not at the first Android window: window-bench 11-07 (the window log since 11-01)
+     * - an open that started the helper showed its app after 1044 ms p50 / 2472 ms p90 (36 of 121 opens: the first after
+     * every app start), one with it running after 354 / 699 ms. Its app_process start was the open's slowest step.
+     * Home's bridge calls it when its page starts unfolded and when the page asks whether web windows are on.
+     */
+    fun warmHelper() {
+        io.post { helper.warm() }
+    }
+
     /** Main thread: every window the page hasn't claimed since its load, hidden (layers only; its app keeps running). */
     private fun hideUnclaimed() {
         val left = wins.values.filter { !it.claimed && !it.closed && it.container.isValid && !it.linuxFull }
@@ -2474,17 +2484,58 @@ class WebWindows(
 
     /**
      * The window's app's content shows (the placeholder can go, the manager's LW1): "webwindows.live" to the page once.
-     * HACK: there is no "first frame drawn" signal for a mirrored display; a task on it plus [LIVE_AFTER_MS] stands in
-     * (Linux: the consumer up plus that). Real fix: a frame callback on the mirror's first buffer (S8).
+     * HACK: there is no "first frame drawn" signal for a mirrored display; a task on it plus [LIVE_AFTER_MS] stands in.
+     * Real fix: a frame callback on the mirror's first buffer (S8). Linux windows have the real signal: the consumer's
+     * first present ([FirstFrame]).
      */
     private fun liveWhenDrawn(
         w: Win,
         since: Long = SystemClock.uptimeMillis(),
+        nudged: Boolean = false,
     ) {
         if (w.closed || w.live) return
-        val landed = w.linux != null || (tasksOn(w.displayId) ?: 0) > 0
+        // Linux: live on the consumer's first present (FirstFrame), never on "consumer up" alone - 11-06 16:46 Dolphin
+        // went live 270 ms after its consumer with no frame: a blank window.
+        w.linux?.let { return linuxLiveWhenDrawn(w, it, since, nudged) }
+        val landed = (tasksOn(w.displayId) ?: 0) > 0
         if (landed || SystemClock.uptimeMillis() - since > ESCAPE_CHECK_MS) io.postDelayed({ main.post { goLive(w) } }, LIVE_AFTER_MS)
         else io.postDelayed({ liveWhenDrawn(w, since) }, 100)
+    }
+
+    /** [liveWhenDrawn] for Linux window [w]: live on [src]'s first present; a nudge to KWin when none comes ([FirstFrame]). */
+    private fun linuxLiveWhenDrawn(
+        w: Win,
+        src: LinuxSource,
+        since: Long,
+        nudged: Boolean,
+    ) {
+        val waited = SystemClock.uptimeMillis() - since
+        when (FirstFrame.step(waited, andro.marchy.WebWindowSource.presented(src.kwin), nudged)) {
+            FirstFrame.Act.LIVE -> {
+                WindowLog.i(TAG, "window ${w.id}: KWin window ${src.kwin}'s first frame $waited ms after its consumer came up, ${SystemClock.uptimeMillis() - w.openedAt} ms after open")
+                main.post { goLive(w) }
+            }
+            FirstFrame.Act.GIVE_UP ->
+                WindowLog.w(TAG, "window ${w.id}: KWin window ${src.kwin} drew no frame in $waited ms - its placeholder stays (the page says it never drew)")
+            FirstFrame.Act.NUDGE -> {
+                // HACK: a window that drew before its consumer connected sends nothing until something changes;
+                // a 1 px size change makes KWin configure it and the app draw. Real fix: KWin re-sends the
+                // window's current buffer to a consumer that connects (kwin backend, "export" on connect).
+                WindowLog.w(TAG, "window ${w.id}: KWin window ${src.kwin} drew no frame in $waited ms: asked to lay out again")
+                main.post { if (!w.closed && !w.linuxFull) nudgeLayout(src.kwin, w.w, w.h) }
+                io.postDelayed({ liveWhenDrawn(w, since, true) }, FIRST_FRAME_POLL_MS)
+            }
+            FirstFrame.Act.WAIT -> io.postDelayed({ liveWhenDrawn(w, since, nudged) }, FIRST_FRAME_POLL_MS)
+        }
+    }
+
+    private fun nudgeLayout(
+        kwin: Int,
+        width: Int,
+        height: Int,
+    ) {
+        andro.marchy.WebWindowSource.size(kwin, width, maxOf(1, height - 1))
+        andro.marchy.WebWindowSource.size(kwin, width, height)
     }
 
     /** Main thread: [liveWhenDrawn]'s "webwindows.live", once. */
@@ -3746,6 +3797,12 @@ class WebWindows(
         private var writer: BufferedWriter? = null
         private val waiting = HashMap<String, (Int, String?) -> Unit>()
 
+        /** Started ahead of the first window ([warmHelper]); a running one is left as it is. On [io]. */
+        fun warm() {
+            if (process?.isAlive != true) WindowLog.i(TAG, "display helper: started ahead of the first window")
+            ensure()
+        }
+
         /** Running, or null (logged). */
         private fun ensure(): BufferedWriter? {
             writer?.let { if (process?.isAlive == true) return it }
@@ -4494,6 +4551,9 @@ class WebWindows(
         private const val FILL_SCALE = 8192f
         /** After a task lands on a window's display (or a Linux consumer starts): its first frame is taken as drawn. */
         private const val LIVE_AFTER_MS = 250L
+
+        /** How often a Linux window's consumer is asked for its first present ([FirstFrame]). */
+        private const val FIRST_FRAME_POLL_MS = 16L
 
         /** A scale below this in "w.f" is a bad one (an element measured mid-mount): taken as 1. */
         private const val MIN_ZOOM = 0.05f
