@@ -15,7 +15,7 @@ devices ask for (lock, screen off/on, sleep, wake another device by Wake-on-LAN,
   powos-deviced pair <https://host:port> [--code N]   pair this device's CLI with another device's agent
   powos-deviced devices                  devices this CLI has paired with
   powos-deviced call <device> <action> [--force]      run an action there (status, lock, screen_off, ...)
-  powos-deviced enroll [--realm URL] [--apply-ai] [--name N]   join the realm through PowAuth (docs/DEVICES.md):
+  powos-deviced enroll [--realm URL] [--apply-ai] [--name N]   join the realm, approved by a trusted device (docs/DEVICES.md):
                                          shows a code + QR, waits for a person to approve it on a signed-in device,
                                          stores this device's identity + tokens (0600) and registers it in units.d
   powos-deviced enrollment               this device's enrollment (no secrets)
@@ -719,7 +719,7 @@ def cli_call(argv):
     return 0 if st == 200 else 1
 
 
-# ── enrollment: joining the realm through PowAuth (PowStation powos-enroll, docs/DEVICES.md) ────────────────
+# ── enrollment: joining the realm, LAN/VPN only (PowStation powos-enroll, docs/DEVICES.md) ──────────────────────
 
 REALM = os.environ.get("POWOS_ENROLL_URL", "http://enroll.pow")
 
@@ -792,7 +792,7 @@ def unit_record(e):
     d = e["device"]
     return {"id": "powos-device", "name": f"This device's enrollment ({d['name']})", "kind": "system",
             "owner": "system:devices",
-            "purpose": "this device's identity in the PowOS realm, approved through PowAuth (docs/DEVICES.md)",
+            "purpose": "this device's identity in the PowOS realm, approved by a trusted device or the owner on the server (docs/DEVICES.md)",
             "device": {"id": d["id"], "name": d["name"], "class": d.get("kind"), "platform": d.get("platform"),
                        "caps": d.get("caps", []), "agent": d.get("agent"), "realm": e["realm"],
                        "enrolled": time.strftime("%F", time.localtime(d.get("enrolled", 0))),
@@ -817,8 +817,9 @@ def cli_enroll(argv):
     if st != 200:
         raise SystemExit(f"powos-deviced: {realm} refused: {code.get('error_description') or code.get('error', st)}")
     url = code["verification_uri_complete"]
-    print(f"To add this device, open on a device signed in to PowAuth:\n\n  {url}\n\nand check it shows the code"
-          f"\n\n  {code['user_code']}\n", flush=True)
+    print(f"To add this device, approve the code\n\n  {code['user_code']}\n\nfrom the Devices app on an enrolled "
+          f"PowOS device ({url}), or on the server: docker exec powos-enroll powos-enroll approve {code['user_code']}\n",
+          flush=True)
     show_qr(url)
     interval, deadline = int(code.get("interval", 5)), now() + int(code.get("expires_in", 600))
     while now() < deadline:

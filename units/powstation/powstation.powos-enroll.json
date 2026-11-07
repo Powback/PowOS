@@ -22,7 +22,7 @@
     },
     "access": {
       "authentication": "application",
-      "exposure": "internet",
+      "exposure": "lan",
       "reason": "device API carries no PowAuth session by design (RFC 8628 device flow); LAN/VPN only"
     }
   },
@@ -31,8 +31,7 @@
       "docker compose --project-directory /Users/macback/Projects/PowStation/enroll -f /Users/macback/Projects/PowStation/enroll/docker-compose.yml --project-name powos-enroll stop powos-enroll"
     ],
     "keep": [
-      "/Users/macback/Projects/PowStation/enroll/powos-enroll.py",
-      "/Users/macback/Projects/PowStation/data/powos-enroll",
+      "powos-enroll-data",
       "/Users/macback/.claude-tenants/enrolled"
     ]
   },
