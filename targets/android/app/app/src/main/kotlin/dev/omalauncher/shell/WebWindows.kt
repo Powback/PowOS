@@ -106,6 +106,7 @@ class WebWindows(
         // RL0 (10-31 14:20, "the windows doesn't render again"): a new page's "w.f" frame ids start at 1 again; the
         // last page's count (f399) made FrameSync drop every new frame as old - no geometry, empty bodies.
         sync.reset()
+        renderWatch.pageStarted(SystemClock.uptimeMillis())
         if (wins.isEmpty()) return
         wins.values.forEach { it.claimed = false }
         WindowLog.i(TAG, "page (re)loaded: ${wins.size} window(s) wait for the page to claim them (${wins.keys})")
@@ -114,6 +115,16 @@ class WebWindows(
     }
 
     private val hideUnclaimedRun = Runnable { hideUnclaimed() }
+
+    /**
+     * The display helper started now, not at the first Android window: window-bench 11-07 (the window log since 11-01)
+     * - an open that started the helper showed its app after 1044 ms p50 / 2472 ms p90 (36 of 121 opens: the first after
+     * every app start), one with it running after 354 / 699 ms. Its app_process start was the open's slowest step.
+     * Home's bridge calls it when its page starts unfolded and when the page asks whether web windows are on.
+     */
+    fun warmHelper() {
+        io.post { helper.warm() }
+    }
 
     /** Main thread: every window the page hasn't claimed since its load, hidden (layers only; its app keeps running). */
     private fun hideUnclaimed() {
@@ -2162,12 +2173,14 @@ class WebWindows(
         re: SurfaceControl.Transaction,
         why: String,
     ) {
+        var any = false
         for (w in wins.values) {
-            if (!w.linuxFull || w.closed || !w.container.isValid) continue
-            val move = web.rootSurfaceControl?.buildReparentTransaction(w.container) ?: continue
-            re.merge(move)
+            if (!w.linuxFull || w.closed || !fullLayer(re, w)) continue
+            any = true
             WindowLog.i(TAG, "home's surface $why: full-screen window ${w.id} re-attached above home's buffer")
         }
+        // FS10: and again after the new surface's first draw - a placement queued before must not land last.
+        if (any) main.post { restateFull("home's surface $why") }
     }
 
     /**
@@ -2471,17 +2484,58 @@ class WebWindows(
 
     /**
      * The window's app's content shows (the placeholder can go, the manager's LW1): "webwindows.live" to the page once.
-     * HACK: there is no "first frame drawn" signal for a mirrored display; a task on it plus [LIVE_AFTER_MS] stands in
-     * (Linux: the consumer up plus that). Real fix: a frame callback on the mirror's first buffer (S8).
+     * HACK: there is no "first frame drawn" signal for a mirrored display; a task on it plus [LIVE_AFTER_MS] stands in.
+     * Real fix: a frame callback on the mirror's first buffer (S8). Linux windows have the real signal: the consumer's
+     * first present ([FirstFrame]).
      */
     private fun liveWhenDrawn(
         w: Win,
         since: Long = SystemClock.uptimeMillis(),
+        nudged: Boolean = false,
     ) {
         if (w.closed || w.live) return
-        val landed = w.linux != null || (tasksOn(w.displayId) ?: 0) > 0
+        // Linux: live on the consumer's first present (FirstFrame), never on "consumer up" alone - 11-06 16:46 Dolphin
+        // went live 270 ms after its consumer with no frame: a blank window.
+        w.linux?.let { return linuxLiveWhenDrawn(w, it, since, nudged) }
+        val landed = (tasksOn(w.displayId) ?: 0) > 0
         if (landed || SystemClock.uptimeMillis() - since > ESCAPE_CHECK_MS) io.postDelayed({ main.post { goLive(w) } }, LIVE_AFTER_MS)
         else io.postDelayed({ liveWhenDrawn(w, since) }, 100)
+    }
+
+    /** [liveWhenDrawn] for Linux window [w]: live on [src]'s first present; a nudge to KWin when none comes ([FirstFrame]). */
+    private fun linuxLiveWhenDrawn(
+        w: Win,
+        src: LinuxSource,
+        since: Long,
+        nudged: Boolean,
+    ) {
+        val waited = SystemClock.uptimeMillis() - since
+        when (FirstFrame.step(waited, andro.marchy.WebWindowSource.presented(src.kwin), nudged)) {
+            FirstFrame.Act.LIVE -> {
+                WindowLog.i(TAG, "window ${w.id}: KWin window ${src.kwin}'s first frame $waited ms after its consumer came up, ${SystemClock.uptimeMillis() - w.openedAt} ms after open")
+                main.post { goLive(w) }
+            }
+            FirstFrame.Act.GIVE_UP ->
+                WindowLog.w(TAG, "window ${w.id}: KWin window ${src.kwin} drew no frame in $waited ms - its placeholder stays (the page says it never drew)")
+            FirstFrame.Act.NUDGE -> {
+                // HACK: a window that drew before its consumer connected sends nothing until something changes;
+                // a 1 px size change makes KWin configure it and the app draw. Real fix: KWin re-sends the
+                // window's current buffer to a consumer that connects (kwin backend, "export" on connect).
+                WindowLog.w(TAG, "window ${w.id}: KWin window ${src.kwin} drew no frame in $waited ms: asked to lay out again")
+                main.post { if (!w.closed && !w.linuxFull) nudgeLayout(src.kwin, w.w, w.h) }
+                io.postDelayed({ liveWhenDrawn(w, since, true) }, FIRST_FRAME_POLL_MS)
+            }
+            FirstFrame.Act.WAIT -> io.postDelayed({ liveWhenDrawn(w, since, nudged) }, FIRST_FRAME_POLL_MS)
+        }
+    }
+
+    private fun nudgeLayout(
+        kwin: Int,
+        width: Int,
+        height: Int,
+    ) {
+        andro.marchy.WebWindowSource.size(kwin, width, maxOf(1, height - 1))
+        andro.marchy.WebWindowSource.size(kwin, width, height)
     }
 
     /** Main thread: [liveWhenDrawn]'s "webwindows.live", once. */
@@ -3166,6 +3220,9 @@ class WebWindows(
             // (above every other window) until the page measured a change - and none comes while nothing moves.
             win.geo?.let { place(t, win, it) } ?: underRoot(t, win)
             t.apply()
+            // FS10: a full-screen state still queued on home's draw ([restateFull]) must not land after this and put
+            // the window back over everything: its place under the root queued after it.
+            backOnDraw(win)
         }
         WindowLog.i(TAG, "window ${win.id}: KWin window ${src.kwin} ${if (on) "full screen" else "back in its window"}")
         win.full = on
@@ -3192,6 +3249,20 @@ class WebWindows(
         }
     }
 
+    /** FS10: [win] back in its window, its container under the root at the page's place, queued on home's next draw. */
+    private fun backOnDraw(win: Win) {
+        val c = win.container.takeIf { it.isValid } ?: return
+        val r = root?.takeIf { it.isValid } ?: return
+        val t = SurfaceControl.Transaction().reparent(c, r)
+        win.geo?.let { g ->
+            frameAt(t, win, g)
+            cornerRadius(t, c, g.radius)
+            t.setLayer(c, g.z).setAlpha(c, g.alpha).setVisibility(c, g.visible && !g.clip.isEmpty && win.mirror != null)
+        } ?: t.setVisibility(c, false)
+        web.rootSurfaceControl?.applyTransactionOnDraw(t) ?: t.apply()
+        web.invalidate()
+    }
+
     /** [win]'s [Win.linuxFull] set to [on], its IR1 marks reset. */
     private fun markLinuxFull(
         win: Win,
@@ -3214,28 +3285,83 @@ class WebWindows(
     ) {
         if (linuxTouch !== win) linuxTouch = null
         val area = fullScreenArea(win.immersive)
-        win.container.takeIf { it.isValid }?.let { c ->
-            // Full screen is not an element of the page: ABOVE home's buffer (a child of home's surface itself, as the
-            // windows' root is), so nothing of the page paints over it; the root's own layer is -1, under home.
-            // Home's surface made again while it is full screen (screen off/on): [reattach] moves it too ([fullAgain]).
-            web.rootSurfaceControl?.buildReparentTransaction(c)?.let {
-                t.merge(it)
-                win.underRoot = false
-            }
-            // FL5: the app's area starts below the status bar, never under it (the user, 10-30 22:19: Dolphin's toolbar
-            // drawn through the clock and icons).
-            t.setPosition(c, area.left.toFloat(), area.top.toFloat()).setScale(c, 1f, 1f)
-                .setCrop(c, Rect(0, 0, area.width(), area.height())).setLayer(c, FULL_LAYER).setVisibility(c, !underSwitcher)
-            cornerRadius(t, c, 0f)
-        }
-        src.content.takeIf { it.isValid }?.let { m -> t.setPosition(m, 0f, 0f).setScale(m, 1f, 1f).setCrop(m, Rect(0, 0, area.width(), area.height())) }
+        fullLayer(t, win)
         t.apply()
         win.shown = true
+        restateFull("window ${win.id} full screen")
         if (win.fullAsked) {
             WindowLog.i(TAG, "window ${win.id}: full screen ${area.width()}x${area.height()} at ${area.left},${area.top}: sized on KWin's answer")
         } else {
             linuxResize(win, src, area.width(), area.height())
         }
+    }
+
+    /**
+     * The ONE place a full-screen Linux window's layer state is written (into [t]): its container ABOVE home's buffer
+     * (a child of home's CURRENT surface itself, as the windows' root is - full screen is not an element of the page,
+     * nothing of the page paints over it; the root's own layer is -1, under home), over the whole full-screen area at
+     * 1:1, at [FULL_LAYER], shown unless the switcher or a swipe home hides it; its app's layer at 0,0 inside. Every
+     * value is stated each time, so writing it again is idempotent: [fillScreen], [fullAgain] (home's surface made
+     * again) and [restateFull] (FS10) all write it here. False: no layer or no surface to hang it on.
+     */
+    private fun fullLayer(
+        t: SurfaceControl.Transaction,
+        win: Win,
+    ): Boolean {
+        val c = win.container.takeIf { it.isValid } ?: return false
+        val move = web.rootSurfaceControl?.buildReparentTransaction(c) ?: return false
+        t.merge(move)
+        win.underRoot = false
+        // FL5: the app's area starts below the status bar, never under it (the user, 10-30 22:19: Dolphin's toolbar
+        // drawn through the clock and icons).
+        val area = fullScreenArea(win.immersive)
+        t.setPosition(c, area.left.toFloat(), area.top.toFloat()).setScale(c, 1f, 1f).setAlpha(c, 1f)
+            .setCrop(c, Rect(0, 0, area.width(), area.height())).setLayer(c, FULL_LAYER).setVisibility(c, fullVisible(win))
+        cornerRadius(t, c, 0f)
+        win.linux?.content?.takeIf { it.isValid }?.let { m -> t.setPosition(m, 0f, 0f).setScale(m, 1f, 1f).setCrop(m, Rect(0, 0, area.width(), area.height())) }
+        return true
+    }
+
+    /** A full-screen window's layer shows unless the switcher is up or a swipe home hides it ([rootShown]). */
+    private fun fullVisible(win: Win): Boolean = !underSwitcher && !fullHidden && !win.closed
+
+    /**
+     * FS10 (11-07 03:14, Besiege unfolded: Steam's window on screen, the status bar up, no game layer composed although
+     * the game ran and "full screen" was logged): the page's placements ride home's NEXT DRAW ([apply]:
+     * applyTransactionOnDraw), and right after home's surface is made again (the game's start had stopped home) that
+     * draw waits on the window's first-frame sync for 100+ ms. A placement queued before the full-screen move - the new
+     * window placed (or, not yet in the page's list, hidden) as a plain window - then landed AFTER the move and undid
+     * it: layer, crop and visibility back to the page's, the game invisible. Broforce at 03:09 won the same race by
+     * 50 ms. Now the full-screen state is queued on home's next draw too, AFTER anything queued before it (a later
+     * merge wins), home is asked to draw, and it is written again directly once the draw path settled
+     * ([FULL_RESTATE_MS]) - every write the same idempotent [fullLayer], skipped once the window left full screen. The
+     * immersive status bar is asked hidden again with it (asked during the surface's transition, it stayed up).
+     */
+    private fun restateFull(why: String) {
+        val t = SurfaceControl.Transaction()
+        val n = wins.values.count { it.linuxFull && !it.closed && fullLayer(t, it) }
+        if (n == 0) return
+        val attached = web.rootSurfaceControl
+        if (attached == null) t.apply() else attached.applyTransactionOnDraw(t)
+        web.invalidate()
+        for (ms in FULL_RESTATE_MS) main.postDelayed({ restateNow(why) }, ms)
+    }
+
+    /** [restateFull]'s direct write: every full-screen window's layer and immersive status bar, applied now. */
+    private fun restateNow(why: String) {
+        val t = SurfaceControl.Transaction()
+        val full = wins.values.filter { it.linuxFull && !it.closed && fullLayer(t, it) }
+        if (full.isEmpty()) return
+        t.apply()
+        for (w in full) if (w.immersive) statusBarHidden()
+        WindowLog.i(TAG, "full screen restated ($why): ${full.joinToString { "window ${it.id}" }}")
+    }
+
+    /** Home's window's status bar asked hidden again for an immersive full screen (idempotent, not logged). */
+    private fun statusBarHidden() {
+        val c = web.windowInsetsController ?: return
+        c.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        c.hide(android.view.WindowInsets.Type.statusBars())
     }
 
     /**
@@ -3670,6 +3796,12 @@ class WebWindows(
         private var process: Process? = null
         private var writer: BufferedWriter? = null
         private val waiting = HashMap<String, (Int, String?) -> Unit>()
+
+        /** Started ahead of the first window ([warmHelper]); a running one is left as it is. On [io]. */
+        fun warm() {
+            if (process?.isAlive != true) WindowLog.i(TAG, "display helper: started ahead of the first window")
+            ensure()
+        }
 
         /** Running, or null (logged). */
         private fun ensure(): BufferedWriter? {
@@ -4129,6 +4261,12 @@ class WebWindows(
         /** A rotation's new screen size, settled: [refillFull] runs again this long after the configuration change. */
         const val FULL_REFIT_SETTLE_MS = 400L
 
+        /**
+         * FS10: after a full screen or home's surface made again, the full-screen state written again directly this
+         * long after (ms): past a first-frame sync (100+ ms seen, 11-07 03:14) and a slow transition's.
+         */
+        val FULL_RESTATE_MS = longArrayOf(250L, 1_000L, 3_000L)
+
         /** Whether a Linux window opens full screen at once: a game's ([isGame], [LinuxOffer.game]); anything else floats. */
         fun opensFullScreen(game: Boolean): Boolean = game
 
@@ -4413,6 +4551,9 @@ class WebWindows(
         private const val FILL_SCALE = 8192f
         /** After a task lands on a window's display (or a Linux consumer starts): its first frame is taken as drawn. */
         private const val LIVE_AFTER_MS = 250L
+
+        /** How often a Linux window's consumer is asked for its first present ([FirstFrame]). */
+        private const val FIRST_FRAME_POLL_MS = 16L
 
         /** A scale below this in "w.f" is a bad one (an element measured mid-mount): taken as 1. */
         private const val MIN_ZOOM = 0.05f

@@ -15,6 +15,44 @@ import org.junit.Test
  * 15:37 the old 2 s steps took ~9 s to recover; now probe 1 s, rebind 1.5 s, reload no sooner than 4 s.
  */
 class RenderWatchTest {
+    /** Still windows: the page sends no "w.f" of its own (no frame tick while idle), only answers each probe. */
+    @Test
+    fun stillWindowsAnsweringProbesNeverStallForTwentySeconds() {
+        val w = RenderWatch()
+        var last = 1_000L
+        var answerAt = 0L
+        var t = last
+        // A fixed end: `last` moves with every answered probe, so `last + 20_000` never came (the test looped for an
+        // hour in the 11-07 ship's JVM run).
+        val end = t + 20_000
+        while (t <= end) {
+            if (answerAt != 0L && t >= answerAt) last = answerAt.also { answerAt = 0L }
+            val act = w.step(t, 1, true, last)
+            assertTrue("$act at $t", act == Act.NONE || act == Act.PROBE)
+            if (act == Act.PROBE) answerAt = t + 30
+            t += RenderWatch.WATCH_MS
+        }
+    }
+
+    /** 11-06 23:46: a shell push reloaded home; the new page still booting 4 s later is not a stall. */
+    @Test
+    fun aReloadedPageHasItsBootBeforeItIsWatched() {
+        val w = RenderWatch()
+        w.pageStarted(10_000)
+        var t = 10_000L
+        while (t < 10_000 + RenderWatch.BOOT_MS) {
+            assertEquals(Act.NONE, w.step(t, 1, true, 9_000))
+            t += RenderWatch.WATCH_MS
+        }
+        // Silent past its boot: watched as before.
+        assertEquals(Act.PROBE, w.step(10_000 + RenderWatch.BOOT_MS, 1, true, 9_000))
+        // Its first frame ends the grace at once: a later silence is probed after PROBE_MS, not BOOT_MS.
+        val v = RenderWatch()
+        v.pageStarted(10_000)
+        assertEquals(Act.NONE, v.step(11_000, 1, true, 10_800))
+        assertEquals(Act.PROBE, v.step(10_800 + PROBE_MS, 1, true, 10_800))
+    }
+
     @Test
     fun anIdleWorkingPageIsOnlyProbed() {
         val w = RenderWatch()
