@@ -434,6 +434,10 @@ out/pkgs fex-emu/gtk2) only in powos-multiplatform/bf-fast (f76); answer.sh is i
 Next: (1) dead-link launches now take Steam's 9-19 s backoff: keeping a frozen Steam's CM link alive is a unified-sleep
 decision (manager); (2) powos-open-task should raise Steam's main window when a launch logs "waiting for user
 response" with no Steam Dialog window; (3) Desk Job = a real ShowInterstitials notice, separate.
+11-07 (agent/steam-dialog-front): Steam's dialogs have NO caption now (all steamwebhelper windows nameless); tell them
+by size hints - dialog = WM_NORMAL_HINTS min == max (sync question 1364x646), main = min only (2268x1350) - or
+transient-for (powos-open-task steam_dialog). A tap whose game launch Steam holds (held_ask, = bf-ask.sh) brings the
+open dialog forward; tests in test/tier1/test-open-task-steam-dialog.py. Probe: `xprop -id <w> WM_NORMAL_HINTS`.
 
 ## Latest hand-off (fps)
 - State 2026-10-24: no valid fps number yet. The 03:58 "low fps" evidence was Broforce (no APP=) measured with the
