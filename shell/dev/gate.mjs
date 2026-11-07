@@ -2331,6 +2331,53 @@ function switcherGoneFails() {
   return fails;
 }
 
+/**
+ * Board launch-closes-overview (agent abzu-fps 11-07 02:58 / 03:36: ABZU started under the open switcher and ran
+ * unseen): every launch closes the switcher - a Linux window KWin offers (Steam starting a game: "webwindows.adopt"),
+ * an app opened from another PowOS window ("webwindows.launch"), and home's own launch (state.ts launch: an icon, the
+ * drawer, search). Each with the switcher up, then: the layer closed and hidden, the launched app's window on the page.
+ */
+async function launchClosesSwitcherCheck() {
+  const fails = [];
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const launched = [];
+  const launch0 = powos.apps.launch;
+  powos.apps.launch = async (key) => (launched.push(key), true);
+  const task = (id, label) => ({ id, label, key: null, icon: null, snapshot: "" });
+  const layer = () => document.querySelector(".recents");
+  const up = async (why) => {
+    window.__mockEvents.emit("recents.show", { open: true, from: 901, tasks: [task(901, "Chrome"), task(902, "Camera")] });
+    await new Promise((ok) => setTimeout(ok, 400));
+    if (!layer()?.classList.contains("shown")) fails.push(`${why}: the switcher isn't up after recents.show`);
+  };
+  const gone = async (why) => {
+    await window.__gw.settled(() => true, ".recents");
+    const l = layer();
+    if (!l?.classList.contains("closed") || l.classList.contains("shown")) fails.push(`${why}: the switcher is still up after the launch (${l?.className})`);
+    else if (getComputedStyle(l).visibility !== "hidden") fails.push(`${why}: the switcher's layer is still visible after the launch`);
+  };
+  try {
+    await up("a Linux window (Steam's game)");
+    window.__mockEvents.emit("webwindows.adopt", { kwin: 953, key: "l:steam_app_384190", label: "ABZU" });
+    await gone("a Linux window (Steam's game)");
+    await window.__gw.settled();
+    if (W.webWins && !W.webWins.value.some((w) => w.key === "l:steam_app_384190") && W.webWindowsOn && (await W.webWindowsOn()))
+      fails.push("the game's window isn't on the page after its launch");
+    await up("an app from another window");
+    window.__mockEvents.emit("webwindows.launch", { key: "a:gate.launched" });
+    await gone("an app from another window");
+    await up("home's own launch");
+    await S.launch("a:gate.icon");
+    await gone("home's own launch");
+    if (!launched.length && !(W.webWins?.value ?? []).some((w) => w.key === "a:gate.icon")) fails.push("home's launch reached neither the host nor a window");
+  } finally {
+    powos.apps.launch = launch0;
+  }
+  return fails;
+}
+
 /** X2: a tap on empty space in the switcher (beside the cards) returns to the app it was opened over, as Back does. */
 async function switcherBesideTapCheck() {
   const fails = [];
@@ -12943,6 +12990,9 @@ try {
     if (process.env.SHELL_PAGES !== "0") runs.push(open(browser, `${ORIGIN}/index.html`, name, view).then((r) => whenReady(r, () => switcherHomeSwipeCheck(r.page))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-beside-tap", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(switcherBesideTapCheck))));
+  // Board launch-closes-overview: a launch with the switcher open closes it, folded and unfolded.
+  for (const [name, view] of [["launch-closes-switcher-folded", { width: 404, height: 900 }], ["launch-closes-switcher-unfolded", { width: 821, height: 883 }]])
+    if (process.env.SHELL_PAGES !== "0") runs.push(open(browser, `${ORIGIN}/index.html`, name, view).then((r) => whenReady(r, () => r.page.evaluate(launchClosesSwitcherCheck))));
   // Board swiping-a-game-or-linux-app-away-in-the-switcher: a Linux window's card swiped away is that window's close.
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-swipe-close", { width: 404, height: 900 }).then((r) => whenReady(r, () => switcherSwipeCloseCheck(r.page))));

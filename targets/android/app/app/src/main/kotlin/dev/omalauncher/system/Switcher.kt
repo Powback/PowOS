@@ -148,6 +148,9 @@ object Switcher {
         private set(v) {
             if (field == v) return
             field = v
+            // One line per change, always (the window log): a check reads whether the switcher is up before it launches
+            // (tools/phone/verify/bf-pacing.sh) - "windows hidden under the switcher" is only there with windows open.
+            dev.omalauncher.shell.WindowLog.i(TAG, if (v) "switcher up" else "switcher down")
             ShadeHost.current?.barClaimsChanged()
             // Home's panels aren't over the windows while the switcher is up (PanelLift); back after, if still open.
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
@@ -517,6 +520,30 @@ object Switcher {
         depthTo(0f)
         dev.omalauncher.shell.WebWindows.switcherHome("switcher closed to home")
         home?.emit("recents.end", JSONObject().put("to", "home"))
+    }
+
+    /**
+     * Whether a launch closes the layer now: it's up and no swipe owns it (a swipe's own end decides where it goes).
+     */
+    fun closesOnLaunch(
+        open: Boolean,
+        gesture: Boolean,
+    ): Boolean = open && !gesture
+
+    /**
+     * A launch (any way: an icon, the launcher overlay, Steam starting a game, steam:// or -applaunch, a Linux window KWin
+     * opened, an Android app): the switcher goes at once, so what was launched is what shows. Before (agent abzu-fps
+     * 11-07 02:58 / 03:36, window log "switcher up" 03:32:42 .. "down" 03:37:13): ABZÛ started under an open switcher -
+     * home never stopped (its web window opens ON home), so no [homeStopped] hide came, the web windows stayed hidden
+     * under the cards (WebWindows.switcherOpen) and the game ran with no layer on screen. Not via [close]: that leaves a
+     * full-screen Linux window's full screen (switcherHome), which the launched game is asking for right then. Any thread.
+     */
+    fun launched(why: String) {
+        main.post {
+            if (!closesOnLaunch(open, gesture)) return@post
+            dev.omalauncher.shell.WindowLog.i(TAG, "switcher closed by a launch: $why")
+            hide()
+        }
     }
 
     /** Away (SystemUI's onOverviewHidden, a quick switch): the layer closes. */

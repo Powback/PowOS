@@ -54,7 +54,7 @@ steam_before=$("$A" shell "pgrep -f 'steam -cef' | head -1" | tr -d '\r')
 restore() {
   if [ -n "$started" ]; then pill "closing the game"; asuser bf-stop.sh >/dev/null; started=""
     [ -n "$steam_before" ] && "$A" shell "su -c 'sh /data/powos/powos-run.sh \"cd /home/powos; setsid -f steam -silent </dev/null >/dev/null 2>&1\"'" >/dev/null 2>&1
-    [ -n "$front" ] && "$A" shell "am start -n $front >/dev/null 2>&1"
+    front_back "$front"  # bf-lib.sh: never a bare PowosWindowActivity (an empty window task over home)
   fi
   "$A" shell "su -c 'rm -f /data/local/tmp/powos-bf-*.sh /data/local/tmp/powos-bfq-top.txt /data/powos/root/var/tmp/powos-bf-*.sh'" >/dev/null 2>&1; }
 i0=$(irq)
@@ -65,6 +65,7 @@ case $gs in
   game=frozen) echo "SKIP the user's Broforce is left frozen: not woken for a soak"; restore; exit 3 ;;
   game=awake) echo "the user's Broforce is up: measured as it is, never closed" ;;
   *) [ "${NO_START:-}" ] && { echo "SKIP no game running (NO_START)"; restore; exit 5; }
+     stray_switcher  # bf-lib.sh: a switcher left up is closed first (the game would start under it, unseen)
      pill "starting Steam + Broforce"; asuser bf-start.sh | tail -1; started=1
      pill "waiting for the game window"
      win=$(asuser bf-window.sh wait 300 "$i0" | tail -1)
