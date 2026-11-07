@@ -237,10 +237,14 @@ fd=os.open(sys.argv[1],os.O_RDONLY|os.O_NONBLOCK); print(struct.unpack("i",fcntl
   RETRIED=1  # close_mine watches for the game this may start late
   ( cd ~ && Y700_SYSV_DEBUG=1 timeout 20 steam "steam://rungameid/$APP" > "$T/retry.out" 2>&1 < /dev/null )
   echo "handoff: semaphores after the second hand-off: $(sems); forwarder's IPC: $(grep -a 'sysvipc-emu' "$T/retry.out" | sed 's/^\[sysvipc-emu [0-9]*\] //' | tail -8 | cut -c1-90 | tr '\n' '|')"
-  for _ in $(seq 20); do tail -n +$((cl0 + 1)) "$HOME/.local/share/Steam/logs/console_log.txt" | grep -q "rungameid/$APP" && break; sleep 0.5; done
+  for _ in $(seq 20); do logged_since "$HOME/.local/share/Steam/logs/console_log.txt" "$cl0" "rungameid/$APP" && break; sleep 0.5; done
   echo "handoff: second hand-off (the same URL again): $(tail -n +$((cl0 + 1)) "$HOME/.local/share/Steam/logs/console_log.txt" | grep -q "rungameid/$APP" && echo "TAKEN" || echo "not taken either") - $(grep -v 'LD_PRELOAD\|^$' "$T/retry.out" | tail -2 | cut -c1-120 | tr '\n' '|')"
 }
 
+# logged_since <file> <lines before> <text>: <text> in a line after the first <lines before>. Not `tail | grep -q`: under
+# the callers' `set -o pipefail` grep -q's early exit SIGPIPEs tail (141) and the pipeline reads as "not found" - Besiege
+# 2026-11-07 01:05: "the running Steam didn't log the launch's URL in 20 s" while console_log had it 2 s after the tap.
+logged_since() { awk -v n="$2" -v s="$3" 'NR > n && index($0, s) { f = 1; exit } END { exit !f }' "$1" 2>/dev/null; }
 # step_launch: the game up through the drawer's path (a running one: brought up the same way). Sets W, LAUNCH.
 # A Steam that runs (awake or frozen) logs the launch's URL at once ("ExecCommandLine ... steam://rungameid/<id>" in
 # console_log): nothing in HANDOFF_S (20) = the launch was lost (2026-10-23 02:42: a -silent resident Steam took the
@@ -262,8 +266,8 @@ step_launch() {
   ( open_task $((ls_ + 10)) "steam_app_$APP" > "$T/open.status" ) &
   for i in $(seq $((ls_ * 2))); do W=$(gamewin); [ -n "$W" ] && [ "$(mapped "$W")" = IsViewable ] && break
     if [ "$up" = 1 ] && [ "$i" = $((${HANDOFF_S:-20} * 2)) ]; then
-      if tail -n +$((cl0 + 1)) "$CL" 2>/dev/null | grep -q "steam://rungameid/$APP"; then up=; echo "launch: Steam took the URL"
-      elif tail -n +$((cl0 + 1)) "$CL" 2>/dev/null | grep -q "Client version"; then up=; echo "launch: Steam restarted with the URL (/usr/bin/steam's fallback: $(grep '^steam: ' "$T/open.out" | tail -1))"
+      if logged_since "$CL" "$cl0" "steam://rungameid/$APP"; then up=; echo "launch: Steam took the URL"
+      elif logged_since "$CL" "$cl0" "Client version"; then up=; echo "launch: Steam restarted with the URL (/usr/bin/steam's fallback: $(grep '^steam: ' "$T/open.out" | tail -1))"
       else fail launch-handoff "the running Steam didn't log the launch's URL in ${HANDOFF_S:-20} s: $(handoff_diag); open-task: $(cat "$T/open.status" 2>/dev/null)"; handoff_detail; return 1; fi
     fi
     touched; sleep 0.5; done

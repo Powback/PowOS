@@ -52,7 +52,7 @@ stop() { if [ "$mine" = 1 ]; then pill "closing the game"
     log "closed: $("$A" shell "su -c 'sh /data/powos/powos-run.sh \"APP=$APP bash /var/tmp/powos-bf-stop.sh\"'" 2>&1 | tr -d '\r' | tail -1)"
   elif [[ $r == *mine=0* ]]; then log "the user's $WIN_NAME: $(ph refreeze | tail -1)"; fi; }
 [[ $r == *"user input"* ]] && { log "user input during the start"; exit 3; }
-[[ $r == *FAIL* || $r != *mine=* ]] && { log "FAIL: $WIN_NAME didn't come up: $(echo "$r" | grep -m1 FAIL)"; stop; exit 1; }
+[[ $r == *FAIL* || $r != *mine=* ]] && { log "FAIL: ${WIN_NAME:-app $APP} didn't come up: $(echo "$r" | grep -m1 FAIL)"; stop; exit 1; }
 log "game args: $(ph args | tail -1)"
 bars() {  # black rows/columns at each edge of a screencap
   local r c
