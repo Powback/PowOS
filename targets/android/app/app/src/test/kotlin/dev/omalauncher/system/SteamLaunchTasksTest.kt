@@ -21,13 +21,13 @@ class SteamLaunchTasksTest {
         at: Long = since,
     ) = SteamLaunchTasks.Launch("274190", at, state, phase, if (state == "ended") "It closed before it showed a window" else null, "Broforce", "Broforce", listOf("Broforce", "steam_app_274190"))
 
-    private fun plan(
-        l: SteamLaunchTasks.Launch,
-        tasks: Boolean = true,
-        held: Boolean = false,
-        asking: Boolean = false,
-        window: Boolean = false,
-    ) = SteamLaunchTasks.plan(listOf(l), SteamLaunchTasks.Where(tasks, if (held) setOf(l.token) else emptySet(), if (asking) setOf(l.token) else emptySet(), now)) { window }.map { it.first }
+    /** Where the plan runs: on the folded task screen, holding the launch's task, Steam asking, the game's window up. */
+    private data class At(val tasks: Boolean = true, val held: Boolean = false, val asking: Boolean = false, val window: Boolean = false)
+
+    private fun plan(l: SteamLaunchTasks.Launch, at: At = At()) = SteamLaunchTasks.plan(
+        listOf(l),
+        SteamLaunchTasks.Where(at.tasks, if (at.held) setOf(l.token) else emptySet(), if (at.asking) setOf(l.token) else emptySet(), now),
+    ) { at.window }.map { it.first }
 
     @Test fun aFoldedLaunchOpensItsTaskAtTheFirstStep() {
         assertEquals(listOf(Act.OPEN), plan(launch("launching")))
@@ -35,29 +35,29 @@ class SteamLaunchTasksTest {
     }
 
     @Test fun unfoldedTheLaunchIsThePagesPlaceholder() {
-        assertEquals(emptyList<Act>(), plan(launch("launching"), tasks = false))
+        assertEquals(emptyList<Act>(), plan(launch("launching"), At(tasks = false)))
     }
 
     @Test fun anUnfoldMidLaunchKeepsTheTaskFollowingSteam() {
         // Opened folded, then unfolded: it holds the launch whatever the screen, until the game's window becomes it.
-        assertEquals(listOf(Act.PHASE), plan(launch("running", "Loading"), tasks = false, held = true))
+        assertEquals(listOf(Act.PHASE), plan(launch("running", "Loading"), At(tasks = false, held = true)))
     }
 
     @Test fun neverASecondTaskNorOneOverTheGamesWindowNorAnOldLaunch() {
-        assertEquals(listOf(Act.PHASE), plan(launch("running"), held = true))
-        assertEquals(emptyList<Act>(), plan(launch("running"), window = true))
+        assertEquals(listOf(Act.PHASE), plan(launch("running"), At(held = true)))
+        assertEquals(emptyList<Act>(), plan(launch("running"), At(window = true)))
         assertEquals(emptyList<Act>(), plan(launch("running", at = since - SteamLaunchTasks.START_MS / 1000 - 5)))
     }
 
     @Test fun endedBeforeItsWindowSaysWhy() {
-        assertEquals(listOf(Act.FAIL), plan(launch("ended"), held = true))
+        assertEquals(listOf(Act.FAIL), plan(launch("ended"), At(held = true)))
         assertEquals(emptyList<Act>(), plan(launch("ended")))
     }
 
     @Test fun steamAskingStepsBackThenComesBack() {
-        assertEquals(listOf(Act.ASK), plan(launch("asking", "Steam is asking something"), held = true))
-        assertEquals(listOf(Act.PHASE), plan(launch("asking"), held = true, asking = true))
-        assertEquals(listOf(Act.RESUME), plan(launch("launching"), held = true, asking = true))
+        assertEquals(listOf(Act.ASK), plan(launch("asking", "Steam is asking something"), At(held = true)))
+        assertEquals(listOf(Act.PHASE), plan(launch("asking"), At(held = true, asking = true)))
+        assertEquals(listOf(Act.RESUME), plan(launch("launching"), At(held = true, asking = true)))
         assertEquals(emptyList<Act>(), plan(launch("asking")))
     }
 
