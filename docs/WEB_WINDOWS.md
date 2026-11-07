@@ -107,10 +107,18 @@ frame of drag latency; measure it before turning it on for drags (animations fir
   With `html.ww-glued` both transition on the main thread; without windows the compositor runs transform/translate as
   before. Gate `desktops` -> `webWindowGlueAiCheck`: page -1 and back with a window, home on `--slide-x`, the bar never
   on `translate`, 0 off-thread frames, the bar within 2 px on screen every frame.
-- [ ] **N2 - exact binding (option C)**: `w.f` carries the geometry of the NEXT frame for time-driven motion (the glue
-  animation's value at ts + one frame, computed from the registered property's transition: or drive the slide from a
-  page-side spring), the host binds it with `postVisualStateCallback`, `next` as the fallback when no callback within a
-  frame; gate on pf0 >= 99 % over a scripted swipe (host counters) instead of 86 %.
+- [x] **N2 - exact binding (option C)**: while only main-thread transitions move windows (N1's glued slides; no pointer
+  down, no resize drag) the page also sends the geometry of its NEXT frame (`ui/webwindows.tsx sendAhead`: each running
+  window-carrying transition's `currentTime` + the rAF period, measured, put back) as `w.f ... <page ms> <sent ms> 1`,
+  only after the host said `w.ahead 1` (ShellNative, after `w.key`). The host binds it with `FrameSync.ahead`: the
+  visual-state request is posted while frame k still commits, so it rides commit k+1 and its callback runs right before
+  the draw that shows it - exact whatever the raster time; newest id wins against `next`; 50 ms fallback. The next
+  frame's own measure, equal to the prediction, sends nothing; different (a finger came), it goes as a normal `w.f` and
+  wins. Host log `ahead=a0/a1/a2/a3`. Gate `desktops` -> `webWindowAheadCheck`: >= 10 predictions over a switch and
+  back, median miss (net of the frame's own lateness) < 1 px and <= a quarter of a frame's step. JVM
+  `WebWindowsAheadTest`. Phone: `ww-glue.sh` fails under 99 % a0 when 20+ ran (and now also slides to PowOS AI's page).
+  Finger-driven motion still binds with `next` (pf0 86 %): N2b = finger frames one frame ahead (the touch's own
+  prediction) once a0 is proven on the phone.
 - [ ] **N3 - Linux popups as their own surfaces (S7)**: KWin `web <id> 1`: popups and override-redirect windows of a
   web window exported as their own surface ids (`popup <id> <parent> x y w h`), layers under the window's container
   (not its crop) with a positive layer, placed against the screen: a Steam menu longer than the window is no longer cut.

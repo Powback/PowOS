@@ -11936,6 +11936,45 @@ async function webWindowGlueAiCheck() {
   }
 }
 
+/**
+ * N2: frame-ahead geometry. With the host's "w.ahead 1" (here the knob), each frame of a glued page switch also
+ * measures the NEXT frame (the running transitions sampled one frame on) - the host binds it to the commit that shows
+ * it. The prediction must be what the next frame then measures: over the switch and back, at least 10 predictions,
+ * their median miss (largest number apart, px) under a quarter of the median frame-to-frame step and under 1 px.
+ */
+async function webWindowAheadCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const { glide, frame, fails, expect, track, pages, from } = window.__glue.setup(S);
+  const median = (v) => (v.length ? [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)] : NaN);
+  const inline = track.style.transition;
+  track.style.removeProperty("transition");
+  try {
+    W.webWins.value = [{ id: 923, key: "a:gate.ahead", label: "Ahead", page: pages[from], x: 220, y: 160, w: 320, h: 260, live: true }];
+    await frame();
+    await frame();
+    window.__ww.aheadOn = true;
+    const a = window.__ww.ahead;
+    const [sent0, n0] = [a.sent, a.errors.length];
+    await glide(923);
+    // A frame that came off the period the prediction assumed (the gate's own load) moved further than a prediction of
+    // one period could know: that share (step x |dt - period| / dt) is taken off its miss; on the phone vsync is the period.
+    const k = a.errors.length - n0;
+    const rows = a.errors.map((e, i) => [e, a.steps[i], a.jitter[i], a.dts[i]]).slice(-k).filter(([e, st, , dt]) => Number.isFinite(e) && st > 0.5 && dt > 0);
+    const err = median(rows.map(([e, st, j, dt]) => Math.max(0, e - (st * j) / dt)));
+    const step = median(rows.map((v) => v[1]));
+    expect(rows.length >= 5, `ahead: ${rows.length} predicted frames to judge (want >= 5)`);
+    expect(a.sent - sent0 >= 10, `ahead: ${a.sent - sent0} frame-ahead geometries over a page switch and back (want >= 10)`);
+    expect(err < 1 && err <= step / 4, `ahead: predictions missed the next frame by ${err?.toFixed(2)} px (median, less the frame's own lateness), the frames step ${step?.toFixed(2)} px - want < 1 and <= a quarter`);
+    return fails;
+  } finally {
+    window.__ww.aheadOn = false;
+    W.webWins.value = [];
+    S.page.value = from;
+    track.style.transition = inline;
+  }
+}
+
 /** [webWindowGlueCheck]'s setup: the pages to switch between, and the switch itself, frame by frame. */
 function glueSetup(S) {
   const fails = [];
@@ -12725,7 +12764,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockToggleHost, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, SF_HELPERS, webWindowSnapFill, webWindowRelaunch, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck, GLUE_HELPERS, webWindowGlueCheck, webWindowGlueAiCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockToggleHost, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, SF_HELPERS, webWindowSnapFill, webWindowRelaunch, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck, GLUE_HELPERS, webWindowGlueCheck, webWindowGlueAiCheck, webWindowAheadCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }

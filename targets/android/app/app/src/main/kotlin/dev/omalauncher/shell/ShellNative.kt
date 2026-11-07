@@ -112,6 +112,8 @@ class ShellNative(
             val key = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
             geo.key = key
             mine.postMessage(WebMessage("w.key $key"))
+            // N2: this host binds "w.f" geometry measured one frame ahead (FrameSync.ahead): the page may send it.
+            mine.postMessage(WebMessage("w.ahead 1"))
             // A new page: its glass asks again (b.hello); the last page's regions go with it.
             glass?.reset()
         }

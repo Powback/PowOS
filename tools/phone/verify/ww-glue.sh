@@ -5,7 +5,8 @@
 # page switching etc works instantly and 100% natively no race condition in updating window positions"), and a resize
 # drops no frames. Needs a web window shown on home's page on screen (unfolded, the user idle 2+ min).
 #
-#   ww-glue.sh            two page swipes (there and back) on an empty spot of the page, then an edge drag of the window
+#   ww-glue.sh            two page swipes (there and back) on an empty spot of the page, the slide to PowOS AI's page and
+#                         back (N1b: from home's first page a swipe right), then an edge drag of the window
 #   ww-glue.sh --read     read-only: the counts so far (no input)
 #
 # PASS needs, over the swipes:
@@ -13,7 +14,9 @@
 #          and at least one has N >= 10: no frame of the slide moved the window by a compositor-run animation (each
 #          such frame = the app's layer a frame's travel behind its page)
 #   host   FrameSync's page-frame lag over the swipes ("pf=a/b/c/d" in the host's "w.f" log, the difference before ->
-#          after): reported as the share applied on the draw that shows its page frame (pf0); informative, N2's target
+#          after): reported as the share applied on the draw that shows its page frame (pf0); informative
+#   ahead  N2's frame-ahead applies over the run ("ahead=a/b/c/d", FrameSync.ahead): >= 99 % on the draw that shows
+#          their frame (a0), when 20+ of them ran (an APK without N2 has none: reported, not failed)
 #   resize gfxinfo over the edge drag: janky frames <= 5 % (Android's own frame stats for home's window)
 # Steam (informative): KWin's "also draws override-redirect" lines (0062) - its menus drawn into its window.
 set -uo pipefail
@@ -25,9 +28,10 @@ fail=0
 say() { echo "$*"; }
 bad() { echo "FAIL $*"; fail=1; }
 
-pf() { "$adb" shell 'logcat -d -s PowosWebWindows:I' | grep -oE 'pf=[0-9]+/[0-9]+/[0-9]+/[0-9]+' | tail -1 | cut -d= -f2; }
+pf() { "$adb" shell 'logcat -d -s PowosWebWindows:I' | grep -oE "${1:-pf}=[0-9]+/[0-9]+/[0-9]+/[0-9]+" | tail -1 | cut -d= -f2; }
 since=$("$adb" shell 'date +%m-%d\ %H:%M:%S.000' | tr -d '\r')
 pf0=$(pf)
+ah0=$(pf ahead)
 
 if [ "${1:-}" != --read ]; then
   "$T/idle.sh" --wait 120 1800 >/dev/null || { echo "SKIP phone busy (not idle 2 min within 30 min)"; exit 3; }
@@ -43,6 +47,11 @@ if [ "${1:-}" != --read ]; then
   "$adb" shell "input swipe $x $y $((x - 900)) $y 220"
   sleep 1.5
   "$adb" shell "input swipe $((x - 900)) $y $x $y 220"
+  sleep 1.5
+  # N1b: on home's first page now, the same swipe right is the slide to PowOS AI's page; then back.
+  "$adb" shell "input swipe $((x - 900)) $y $x $y 220"
+  sleep 1.5
+  "$adb" shell "input swipe $x $y $((x - 900)) $y 220"
   sleep 1.5
   # The resize: the top window's bottom-right grab, 300 px out and back, 1.2 s each, with home's frame stats reset.
   read -r l t r b <<<"$(echo "${rects##*,}")"
@@ -68,6 +77,17 @@ if [ "${1:-}" != --read ]; then
     bad "page: a motion moved the window off the main thread, or none was 10+ frames: $(echo "$lines" | tr '\n' ';')"
 fi
 pf1=$(pf)
+ah1=$(pf ahead)
+if [ -n "$ah1" ]; then
+  verdict=$(python3 -c "
+a=[int(v) for v in ('${ah0:-0/0/0/0}').split('/')]; b=[int(v) for v in '$ah1'.split('/')]; d=[y-x for x,y in zip(a,b)]; n=sum(d)
+print('%d %s %.1f' % (n, '/'.join(map(str,d)), 100.0*d[0]/n if n else 0))")
+  read -r an ad apct <<<"$verdict"
+  say "ahead: $an frame-ahead applies, a0..3 = $ad ($apct% on the draw that shows their frame)"
+  [ "${1:-}" != --read ] && [ "$an" -ge 20 ] && awk -v p="$apct" 'BEGIN{exit !(p < 99)}' && bad "ahead: $apct% on their frame's draw (want >= 99)"
+else
+  say "ahead: no ahead= counters (an APK without N2)"
+fi
 if [ -n "$pf0" ] && [ -n "$pf1" ]; then
   python3 -c "
 a=[int(v) for v in '$pf0'.split('/')]; b=[int(v) for v in '$pf1'.split('/')]; d=[y-x for x,y in zip(a,b)]; n=sum(d)
