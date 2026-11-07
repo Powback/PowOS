@@ -7,7 +7,7 @@
 set -uo pipefail
 src=$(cd "$(dirname "$0")/../.." && pwd)/tools/phone/verify/queue.sh
 fns=$(sed -n '/^rc3_requeue() {/,/echo "\$after"; }$/p; /^rc3_waits() {/p' "$src")
-sel=$(sed -n '/^  select_jobs() {/,/^    done; }$/p' "$src")
+sel=$(sed -n '/^  job_held() {/,/^    return 1; }$/p; /^  select_jobs() {/,/^    done; }$/p' "$src")
 [ -n "$fns" ] && [ -n "$sel" ] || { echo "FAIL couldn't find rc3_requeue/rc3_waits/select_jobs in queue.sh"; exit 1; }
 eval "$fns"; eval "$sel"
 shipped() { return 0; }
