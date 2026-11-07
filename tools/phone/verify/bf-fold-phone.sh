@@ -40,7 +40,8 @@ state)
   [ -n "$w" ] && g=$(xwininfo -id "$w" 2>/dev/null | awk '/-geometry/{print $2}')
   s=$(sed -n 's/^0:://p' "/proc/$(cat ~/.steam/steam.pid 2>/dev/null)/cgroup" 2>/dev/null); case $s in */powos/sleep/*) f=yes ;; *) f=no ;; esac
   r=$(xwininfo -root 2>/dev/null | awk '/Width:/{w=$2} /Height:/{h=$2} END{print w "x" h}')
-  echo "reaper=$(reaper | grep . || echo -) win=${w:--} geom=$g frozen=$f root=$r wins=$(candidates | awk '{printf "%s%s:%s:%s", (NR > 1 ? "," : ""), $2, $3, substr($4, 1, 6)}')" ;;
+  a=$(xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | awk '{print $NF}'); fa=no; [ -n "$w" ] && [ -n "$a" ] && [ $((a)) = $((w)) ] 2>/dev/null && fa=yes
+  echo "reaper=$(reaper | grep . || echo -) win=${w:--} geom=$g frozen=$f focused=$fa root=$r wins=$(candidates | awk '{printf "%s%s:%s:%s", (NR > 1 ? "," : ""), $2, $3, substr($4, 1, 6)}')" ;;
 start)
   powos sleep never --remove steam >/dev/null 2>&1  # the real setup: Steam sleepable (games: "pause")
   cd "$HOME"; LAUNCH_S=200 . /var/tmp/powos-bf-lib.sh; trap - HUP TERM INT

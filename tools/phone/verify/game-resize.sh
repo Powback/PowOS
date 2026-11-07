@@ -12,13 +12,14 @@
 # 2484x1116 landscape) -> cover portrait (user_rotation 0, 1116x2484) -> unfolded again. Each step (board steps G1-G3):
 #   G1 the X window's size (xwininfo, bf-fold-phone.sh state geom) IS the screen's (shot.sh) within 1 % per side - the
 #      game renders at its container's size, no scaling (an aspect-only match let a half-size window pass);
-#   G2 it gets there by itself after the change: polled every ~1 s for SETTLE_S (12) s, the time logged ("settled
+#   G2 it gets there by itself after the change (every step after the first is a rotation or a fold mid-game): polled every ~1 s for SETTLE_S (12) s, the time logged ("settled
 #      N s"; Unity maps 314x208 first and goes full screen later), and the window still drawing (xframes count);
 #   G3 the game's layer is what SurfaceFlinger composes full screen (bf-onscreen.sh: own task or home's full-screen web
 #      window, logged as how=task|web), and no letterbox / pillarbox in the screencap: black bars on BOTH opposite
 #      edges, each > 1.5 % of that side and within a third of each other (Proton's fullscreen hack centres a game that
 #      renders a smaller / other-shaped mode than its window: Besiege's saved 2268x1600 in a 2268x2440 window). One
 #      dark edge alone is the game's art, logged only. BARS=note keeps bars a note (a game whose menu is black-framed).
+#   G2 input: the game's window is still KWin's active window after each change (focused=yes in its state line).
 # Also logged once: the game's own command line's size arguments (unity-screen / unreal's -ResX), from /proc.
 # G4 (controller layout per orientation) is pad-fullscreen.sh's.
 # Rotation and device state are always put back. Not covered: a floating task's drag-resize (no scripted drag yet).
@@ -97,6 +98,9 @@ probe() {  # probe <label>
   [ -n "$g" ] && [ -n "$wh" ] && ! fits "$g" "$wh" && bad+=" G1-window-${g}-is-not-the-screen-${wh}-after-${SETTLE_S}s"
   [ "${3:-0}" -ge 1 ] 2>/dev/null || bad+=" G3-no-full-screen-game-layer(${on:-?})"
   [ "${c#changes=}" -ge 3 ] 2>/dev/null || bad+=" not-drawing"
+  # Input after a rotation / fold (the user, 11-07: "rotating breaks the games"): the game's window is still KWin's
+  # active one - its keys and the pad's events go to it (touch: G1's size = its input region).
+  [[ $st == *focused=yes* ]] || bad+=" G2-input-not-the-game's($(echo "$st" | grep -o 'focused=[a-z]*'))"
   [ -n "$box" ] && { if [ "${BARS:-verdict}" = note ]; then log "  $1 note: $box (BARS=note)"; else bad+=" G3-$box"; fi; }
   [ -n "$bad" ] && { fails=$((fails + 1)); log "  $1 bad:$bad"; }
   return 0
