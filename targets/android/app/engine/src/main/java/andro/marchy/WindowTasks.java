@@ -436,6 +436,12 @@ public final class WindowTasks {
             }
             return;
         }
+        if (f[0].equals("popup") || f[0].equals("popup-gone")) {
+            // kwin 0063: "popup <id> <popup-id> x y w h" / "popup-gone <id> <popup-id>" - a popup of web window <id>
+            // as a surface of its own (WebWindowSource.webPopups); its "popup-gone" may come after the window's close.
+            onPopupLine(id, f);
+            return;
+        }
         if (f[0].equals("close"))
             parents.remove(id);
         if (f[0].equals("open"))
@@ -585,6 +591,21 @@ public final class WindowTasks {
                 break;
             default:
                 Log.i(TAG, "web window " + id + ": " + String.join(" ", f) + " (not yet for web windows)");
+        }
+    }
+
+    /** "popup"/"popup-gone" for web window [parent] (kwin 0063); a malformed one is logged and dropped. */
+    static void onPopupLine(int parent, String[] f) {
+        try {
+            int popup = Integer.parseInt(f[2]);
+            if (f[0].equals("popup-gone")) {
+                WebWindowSource.popupGone(parent, popup);
+                return;
+            }
+            WebWindowSource.popup(parent, popup, Integer.parseInt(f[3]), Integer.parseInt(f[4]), Integer.parseInt(f[5]),
+                    Integer.parseInt(f[6]));
+        } catch (NumberFormatException | ArrayIndexOutOfBoundsException e) {
+            Log.w(TAG, "bad popup line: " + String.join(" ", f));
         }
     }
 

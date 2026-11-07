@@ -63,6 +63,18 @@ public final class WebWindowSource {
 
         /** Window [id]'s own frame's "maximize" or "minimize" button (or its double click). Control channel's thread. */
         default void control(int id, String action) {}
+
+        /**
+         * kwin 0063 (docs/WEB_WINDOWS.md N3): popup [popup] of window [parent] (a menu, an xdg_popup, an X11
+         * override-redirect window: Steam's menus) is a surface of its own at ([x], [y]) [w] x [h] - parent buffer px
+         * against the window's top left (negative / past it: the popup reaches out of the window), its own px. Said
+         * again when it moves or resizes. Its buffers come on the daemon's surface [popup] like a window's. Control
+         * channel's thread.
+         */
+        default void popup(int parent, int popup, int x, int y, int w, int h) {}
+
+        /** Popup [popup] of window [parent] closed (or its window stopped drawing / went): its surface is gone. */
+        default void popupGone(int parent, int popup) {}
     }
 
     /** Set by home's bridge (ShellBridge) while it lives; null = every Linux window is a task (as before). */
@@ -90,6 +102,28 @@ public final class WebWindowSource {
         Host h = host;
         if (h != null && ids.contains(id))
             h.moveResize(id, edges);
+    }
+
+    static void popup(int parent, int popup, int x, int y, int w, int h) {
+        Host h2 = host;
+        if (h2 != null && ids.contains(parent))
+            h2.popup(parent, popup, x, y, w, h);
+    }
+
+    static void popupGone(int parent, int popup) {
+        Host h = host;
+        if (h != null)
+            h.popupGone(parent, popup); // also after the parent's close: the host forgets the popup either way
+    }
+
+    /**
+     * kwin 0063 ("web" cap): window [id] is a web window of home, its popups as surfaces of their own - [mode] 1 also
+     * exported (still drawn into the window: the host records them, N3a), 2 only exported (the host shows them, N3b).
+     * An older KWin: nothing (its popups stay inside the window's buffers).
+     */
+    public static void webPopups(int id, int mode) {
+        if (WindowTasks.kwinCan("web"))
+            WindowTasks.sendLine("web\t" + id + "\t" + mode);
     }
 
     static void control(int id, String action) {

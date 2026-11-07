@@ -1259,6 +1259,8 @@ class WebWindows(
         src.handle = handle
         // Its own Android keyboard (kwin 0043 window-ime): KWin's show/hide for it and its typed text on this consumer.
         andro.marchy.WebWindowSource.ownKeyboard(kwin, handle)
+        // Its popups as surfaces of their own (kwin 0063, N3a: also still drawn into it; the host records them, PopupLog).
+        andro.marchy.WebWindowSource.webPopups(kwin, 1)
         // A game's touches and KWin's always-on ask for it never raise the keyboard (TapKeyboard.setGame, 11-06 Broforce).
         andro.marchy.WebWindowSource.gameKeyboard(handle, src.offer.game)
         andro.marchy.WebWindowSource.crop(handle, win.w, win.h)

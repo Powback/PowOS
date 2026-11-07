@@ -1,0 +1,405 @@
+From: PowOS <mats@powback.com>
+Subject: [PATCH] backends/anland: a web window's popups are exported as surfaces of their own
+
+docs/WEB_WINDOWS.md N3 (board task native-windows; the user, 11-07: windows "absolutely glued" to their pages, "we had
+issues with steam menus"). A window task drew its popups (xdg_popups, X11 menus, 0062's override-redirect windows:
+Steam's menus) into its own buffers, cut at the window's edge (0027). N3a: the app says "web <id> <mode>" for a task
+that is a web window of home (cap "web"):
+  1  each popup the task draws is ALSO exported as a surface of its own: "popup <id> <popup-id> x y w h" (task buffer
+     px against the task's top left, the popup's own px; said again when it moves or resizes) and
+     "popup-gone <id> <popup-id>" when it closes, the task stops drawing or goes. The popup's buffers come like a
+     window's: the app's consumer says hello on the daemon with <popup-id>, KWin draws only the popup into them (clear
+     around it, never direct scanout). The task still draws it (the app only records them: N3a).
+  2  exported and no longer drawn into the task (the app shows them as layers of its own: N3b).
+  0  none (as before).
+A popup surface is an AnlandWindowTask of its own kind (its parent's child): no desktop move, decoration or resize; its
+parent task keeps the popup shown on the tasks desktop. Its input is read and dropped until N3b (touches still reach the
+popup through its parent task, HACK in onInputReadable).
+---
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 7a555d2..23cf136 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -162,6 +162,139 @@ AnlandWindowTask::AnlandWindowTask(AnlandWindowTasks *tasks, Window *window, uin
+     set_fallback_callback(m_display, &AnlandWindowTask::fallbackTrampoline, this);
+     m_ctrlNotifier = new QSocketNotifier(get_ctrl_fd(m_display), QSocketNotifier::Read, this);
+     connect(m_ctrlNotifier, &QSocketNotifier::activated, this, &AnlandWindowTask::onCtrlReadable);
++    // PowOS (0063): the window moved or resized (a floating task, its own move): its exported popups' places with it.
++    connect(window, &Window::frameGeometryChanged, this, [this]() {
++        for (AnlandWindowTask *surface : std::as_const(m_popupSurfaces)) {
++            tellPopup(surface);
++        }
++    });
++}
++
++AnlandWindowTask::AnlandWindowTask(AnlandWindowTasks *tasks, Window *popup, uint32_t id, AnlandWindowTask *parent)
++    : QObject(parent)
++    , m_tasks(tasks)
++    , m_window(popup)
++    , m_id(id)
++    , m_fullScreen(false)
++    , m_isPopup(true)
++    , m_popupOf(parent)
++{
++    m_retry.setSingleShot(true);
++    m_retry.setInterval(500);
++    connect(&m_retry, &QTimer::timeout, this, &AnlandWindowTask::requestConsumer);
++    m_statsReport.setInterval(5000);
++    connect(&m_statsReport, &QTimer::timeout, this, &AnlandWindowTask::noteFrameStats);
++    m_keepalive.setSingleShot(true);
++    m_keepalive.setInterval(s_keepaliveMs);
++    connect(&m_keepalive, &QTimer::timeout, this, [this]() {
++        render(true);
++    });
++    // Its surface of the daemon: the app's consumer for it says hello with this id after "popup".
++    if (connect_to_deamon_begin(&m_display, m_tasks->socketPath().toLocal8Bit().constData(), m_id) < 0) {
++        qCWarning(KWIN_ANLAND) << "popup surface" << m_id << ": no display daemon";
++        m_display = nullptr;
++        return;
++    }
++    set_fallback_callback(m_display, &AnlandWindowTask::fallbackTrampoline, this);
++    m_ctrlNotifier = new QSocketNotifier(get_ctrl_fd(m_display), QSocketNotifier::Read, this);
++    connect(m_ctrlNotifier, &QSocketNotifier::activated, this, &AnlandWindowTask::onCtrlReadable);
++}
++
++bool AnlandWindowTask::exportablePopup(const Window *window) const
++{
++    // A popup (menu, dropdown, combo box, tooltip: xdg_popup or the X11 types) or an X11 override-redirect window
++    // (0062's: Steam's menus, Wine's untyped ones) - never the window itself nor a dialog (those stay in the task).
++    return !m_isPopup && window && window != m_window && !window->isDeleted()
++        && (window->isPopupWindow() || window->isUnmanaged());
++}
++
++void AnlandWindowTask::setWebPopups(int mode)
++{
++    if (m_isPopup || mode == m_webPopups || mode < 0 || mode > 2) {
++        return;
++    }
++    qCInfo(KWIN_ANLAND) << "window task" << m_id << ": popups as their own surfaces" << mode << "(was" << m_webPopups << ")";
++    m_webPopups = mode;
++    if (mode == 0) {
++        dropAllPopups("the app turned them off");
++    } else if (m_state == State::Live) {
++        const auto watched = m_watched;
++        for (const Watched &w : watched) {
++            if (w.window && exportablePopup(w.window)) {
++                exportPopup(w.window);
++            }
++        }
++    }
++    markStale(); // mode 2 leaves them out of this task's frames, 0/1 draws them again
++    scheduleRender();
++}
++
++void AnlandWindowTask::exportPopup(Window *popup)
++{
++    if (m_webPopups == 0 || m_state != State::Live || m_popupSurfaces.contains(popup) || !exportablePopup(popup)) {
++        return;
++    }
++    const uint32_t id = m_tasks->takeId();
++    auto *surface = new AnlandWindowTask(m_tasks, popup, id, this);
++    m_popupSurfaces.insert(popup, surface);
++    qCInfo(KWIN_ANLAND) << "window task" << m_id << "exports popup" << id << describe(popup) << "at" << popup->frameGeometry();
++    // Where its client moves or sizes it (a submenu, a dropdown growing): said again.
++    connect(popup, &Window::frameGeometryChanged, surface, [this, surface]() {
++        tellPopup(surface);
++    });
++    tellPopup(surface);
++}
++
++void AnlandWindowTask::tellPopup(AnlandWindowTask *surface)
++{
++    Window *popup = surface->window();
++    if (!popup || popup->isDeleted()) {
++        return;
++    }
++    // In this task's buffer pixels: the popup's frame against the task's viewport (what the task's buffers show from
++    // their top left), so the app places it at its window's body + (x, y). Negative or past the task's size: the popup
++    // reaches out of the window (a Steam menu longer than it) - the reason it is a surface of its own.
++    const qreal s = scale();
++    const RectF frame = popup->frameGeometry();
++    const QPointF at = (frame.topLeft() - viewport().topLeft()) * s;
++    const qreal ps = popup->targetScale();
++    const QRect told(QPoint(qRound(at.x()), qRound(at.y())), QSize(qMax(1, qRound(frame.width() * ps)), qMax(1, qRound(frame.height() * ps))));
++    if (told == surface->m_popupTold) {
++        return;
++    }
++    surface->m_popupTold = told;
++    m_tasks->send({QStringLiteral("popup"), QString::number(m_id), QString::number(surface->id()), QString::number(told.x()),
++                   QString::number(told.y()), QString::number(told.width()), QString::number(told.height())});
++}
++
++void AnlandWindowTask::dropPopup(Window *popup, const char *why)
++{
++    AnlandWindowTask *surface = m_popupSurfaces.take(popup);
++    if (!surface) {
++        return;
++    }
++    qCInfo(KWIN_ANLAND) << "window task" << m_id << ": popup" << surface->id() << "gone:" << why;
++    m_tasks->send({QStringLiteral("popup-gone"), QString::number(m_id), QString::number(surface->id())});
++    surface->deleteLater(); // maybe inside its own callback (a failed handshake)
++}
++
++void AnlandWindowTask::dropAllPopups(const char *why)
++{
++    const auto popups = m_popupSurfaces.keys();
++    for (Window *popup : popups) {
++        dropPopup(popup, why);
++    }
++}
++
++void AnlandWindowTask::giveUp(const char *why)
++{
++    if (!m_isPopup) {
++        m_tasks->remove(this);
++    } else if (m_popupOf) {
++        m_popupOf->dropPopup(m_window, why);
++    } else {
++        deleteLater();
++    }
+ }
+ 
+ void AnlandWindowTask::tellDecoration(bool again)
+@@ -324,6 +457,7 @@ void AnlandWindowTask::holdNoBorder()
+ 
+ AnlandWindowTask::~AnlandWindowTask()
+ {
++    dropAllPopups("its window task went"); // PowOS (0063): their "popup-gone" (the surfaces are children: they go with it)
+     cancelTouches();
+     // Back on the KWin desktop: its border is KDE's again (as it was before "nodecor").
+     if (m_noBorderHeld && m_window && !m_window->isDeleted()) {
+@@ -410,7 +544,7 @@ void AnlandWindowTask::onCtrlReadable()
+         m_ctrlNotifier->setEnabled(false);
+         if (connect_to_deamon_finish(m_display) < 0) {
+             qCWarning(KWIN_ANLAND) << "window task" << m_id << ": daemon handshake failed";
+-            m_tasks->remove(this);
++            giveUp("daemon handshake failed");
+             return;
+         }
+         m_state = State::Fallback;
+@@ -433,7 +567,7 @@ void AnlandWindowTask::requestConsumer()
+     }
+     if (request_consumer_fds(m_display) < 0) {
+         qCWarning(KWIN_ANLAND) << "window task" << m_id << ": lost the display daemon";
+-        m_tasks->remove(this);
++        giveUp("lost the display daemon");
+         return;
+     }
+     m_ctrlNotifier->setEnabled(true);
+@@ -455,6 +589,13 @@ void AnlandWindowTask::goLive()
+     connect(m_inputNotifier, &QSocketNotifier::activated, this, &AnlandWindowTask::onInputReadable);
+     m_bufReadyNotifier = new QSocketNotifier(get_buffer_ready_fd(m_display), QSocketNotifier::Read, this);
+     connect(m_bufReadyNotifier, &QSocketNotifier::activated, this, &AnlandWindowTask::onBufferReady);
++    if (m_isPopup) {
++        // PowOS (0063): only the popup, where its client put it; its parent task keeps it shown and on the tasks desktop.
++        if (m_window && !m_window->isDeleted()) {
++            watchWindow(m_window);
++        }
++        return;
++    }
+     if (m_ownKeyboard && m_keyboardShown) {
+         // Asked for while the consumer was away: its keyboard comes up now.
+         OutputEvent ev = {};
+@@ -526,7 +667,9 @@ void AnlandWindowTask::watchWindow(Window *window)
+         }
+     }
+     window->refOffscreenRendering();
+-    setShownByTask(window, true);
++    if (!m_isPopup) {
++        setShownByTask(window, true); // PowOS (0063): a popup's surface never: its parent task shows (and unshows) it
++    }
+     Watched watched;
+     watched.window = window;
+     watched.damaged = connect(window, &Window::damaged, this, [this]() {
+@@ -551,12 +694,14 @@ void AnlandWindowTask::watchWindow(Window *window)
+                 break;
+             }
+         }
++        dropPopup(window, "it closed"); // PowOS (0063)
+         markStale();
+         scheduleRender();
+     });
+     m_watched.append(watched);
+     markStale();
+     scheduleRender();
++    exportPopup(window); // PowOS (0063): a popup of a window whose app said "web <id> 1|2": its own surface too
+ }
+ 
+ bool AnlandWindowTask::watching(const Window *window) const
+@@ -584,12 +729,15 @@ void AnlandWindowTask::attach(Window *window)
+ void AnlandWindowTask::unwatchAll()
+ {
+     disconnect(m_popupAdded);
++    dropAllPopups("its task stopped drawing"); // PowOS (0063): exported again when it is live again
+     for (const Watched &w : std::as_const(m_watched)) {
+         disconnect(w.damaged);
+         disconnect(w.closed);
+         if (w.window) {
+             w.window->unrefOffscreenRendering();
+-            setShownByTask(w.window, false);
++            if (!m_isPopup) {
++                setShownByTask(w.window, false);
++            }
+         }
+     }
+     m_watched.clear();
+@@ -667,7 +815,7 @@ bool AnlandWindowTask::importBuffers()
+     // a client's menus and X11 override-redirect popups landed far from their parent's buttons.
+     // PowOS (0061): the app's own screen size when it says it (its buffers are made square, as large as any
+     // orientation needs - not the screen); only an app that never says it leaves this to the buffers.
+-    if (!m_tasks->backend()->androidScreen().isValid()) {
++    if (!m_isPopup && !m_tasks->backend()->androidScreen().isValid()) { // a popup's buffers are its own size (0063)
+         m_tasks->backend()->followWindowScreen(m_bufferSize);
+         // The screen a full-screen game's task gets, for its launcher (unity-screen: the game's resolution = its container).
+         m_tasks->backend()->publishScreenSize(m_bufferSize);
+@@ -710,6 +858,10 @@ qreal AnlandWindowTask::scale() const
+ 
+ RectF AnlandWindowTask::viewport() const
+ {
++    if (m_isPopup) {
++        // PowOS (0063): a popup's surface shows its frame from its top left.
++        return m_window ? RectF(m_window->frameGeometry().topLeft(), QSizeF(m_bufferSize) / scale()) : RectF();
++    }
+     // The client area, at the task's size: no title bar (the task has its own), the window's popups where they open.
+     const RectF client = contentGeometry();
+     const QSizeF size = QSizeF(m_bufferSize) / scale();
+@@ -1210,7 +1362,10 @@ QList<Window *> AnlandWindowTask::paintedWindows() const
+ {
+     QList<Window *> windows;
+     for (const Watched &w : m_watched) {
+-        if (w.window && !w.window->isDeleted() && (w.window == m_window || w.window->readyForPainting())) {
++        if (m_webPopups == 2 && m_popupSurfaces.contains(w.window)) {
++            continue; // PowOS (0063): on its own surface, which the app shows
++        }
++        if (w.window && !w.window->isDeleted() && ((w.window == m_window && !m_isPopup) || w.window->readyForPainting())) {
+             windows.append(w.window);
+         }
+     }
+@@ -1276,7 +1431,7 @@ void AnlandWindowTask::render(bool keepalive)
+             m_statBlockers[blocker]++;
+         }
+     };
+-    if (valid && m_stale[idx] && m_directCaps) {
++    if (valid && m_stale[idx] && m_directCaps && !m_isPopup) { // a popup always composited (0063)
+         if (m_directShowing && m_newestQueued) {
+             // The keepalive with nothing new while the consumer shows the client's buffer: answering with this
+             // (undrawn) buffer would show it - an old composite - over the newest frame. "Nothing new" instead.
+@@ -1317,7 +1472,8 @@ void AnlandWindowTask::render(bool keepalive)
+         RenderViewport renderViewport(viewport(), scale(), renderTarget, QPoint());
+         WorkspaceScene *scene = kwinApp()->scene();
+         scene->renderer()->beginFrame(renderTarget, renderViewport);
+-        glClearColor(0.0, 0.0, 0.0, 1.0);
++        // PowOS (0063): a popup's own surface is clear around it (rounded corners, shadows), a task's black.
++        glClearColor(0.0, 0.0, 0.0, m_isPopup ? 0.0 : 1.0);
+         glClear(GL_COLOR_BUFFER_BIT);
+         // The window, then its popups (as a window screencast draws them).
+         for (Window *w : paintedWindows()) {
+@@ -1359,6 +1515,14 @@ void AnlandWindowTask::render(bool keepalive)
+ void AnlandWindowTask::onInputReadable()
+ {
+     InputEvent ev;
++    if (m_isPopup) {
++        // HACK: N3a (0063) - a popup surface's own input is read and dropped: its touches still reach it through its
++        // parent task (touchTarget), which draws it too in mode 1. Real fix: N3b, input on the popup's own surface
++        // mapped to the popup's frame (docs/WEB_WINDOWS.md N3).
++        while (m_state == State::Live && poll_input_event(m_display, &ev, 0) > 0) {
++        }
++        return;
++    }
+     while (m_state == State::Live && poll_input_event(m_display, &ev, 0) > 0) {
+         processInputEvent(ev);
+     }
+@@ -1558,7 +1722,7 @@ void AnlandWindowTasks::announce()
+     // task's size as before).
+     // keyboard-live (kwin 0054): a keyboard asked for before a task went live moves to its consumer, so the app may
+     // hold an ask no touch came before (TapKeyboard) - an older KWin never re-sends it and a tap would raise nothing.
+-    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize nodecor quit window-ime fullscreen-request parent moveresize ownframe keyboard-live screen")});
++    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize nodecor quit window-ime fullscreen-request parent moveresize ownframe keyboard-live screen web")});
+     // Which KWin this is and the tasks it shows now (window ids restart at 1 with each KWin): the app finishes every
+     // window task of an earlier KWin, or one this KWin no longer has, instead of showing a new window in it (after a
+     // session restart, Kate's launcher tap raised the old session's dead Kate task).
+@@ -1696,6 +1860,9 @@ void AnlandWindowTasks::handleLine(const QString &line)
+             qCInfo(KWIN_ANLAND) << "window task" << id << ": full screen" << on << "asked, stays" << window->isFullScreen();
+             send({QStringLiteral("fullscreen"), QString::number(id), window->isFullScreen() ? QStringLiteral("1") : QStringLiteral("0")});
+         }
++    } else if (f[0] == QLatin1String("web") && f.size() >= 3) {
++        // PowOS (0063): "web <id> <mode>" - this task is a web window of home; its popups as surfaces of their own.
++        task->setWebPopups(f[2].toInt());
+     } else if (f[0] == QLatin1String("size") && f.size() >= 4) {
+         // A floating task resized (its frame dragged): the window follows, live.
+         task->resizeTo(QSize(f[2].toInt(), f[3].toInt()));
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 5156259..db85a9d 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -57,6 +57,13 @@ class AnlandWindowTask : public QObject
+ public:
+     /** [fullScreen]: opened because the application went full screen (a game, Steam Big Picture, a video). */
+     AnlandWindowTask(AnlandWindowTasks *tasks, Window *window, uint32_t id, bool fullScreen);
++    /**
++     * PowOS (0063, docs/WEB_WINDOWS.md N3): popup [popup] of task [parent] (a menu, an xdg_popup, an X11
++     * override-redirect window) as a surface of its own ([id], the daemon's surface id like a window's): its buffers
++     * hold only the popup, drawn at its frame. No desktop move, no decoration, no resize of its own: the popup stays
++     * where its client put it, the parent decides when it comes and goes ([AnlandWindowTask::setWebPopups]).
++     */
++    AnlandWindowTask(AnlandWindowTasks *tasks, Window *popup, uint32_t id, AnlandWindowTask *parent);
+     /** Puts the window back on the desktop, as it was, unless it was closed. */
+     ~AnlandWindowTask() override;
+ 
+@@ -130,6 +137,17 @@ public:
+      * floating task crops the buffers to that), the whole window when it is scaled to fit. Popups are kept inside it.
+      */
+     RectF area() const;
++    /**
++     * PowOS (0063): "web <id> <mode>" from the app - [mode] 1: each popup of this window (menus, xdg_popups, X11
++     * override-redirect windows 0062 gives it) is ALSO exported as a surface of its own ("popup <id> <popup-id> x y w
++     * h", "popup-gone <id> <popup-id>"), still drawn into this task (the app only records them: N3a); 2: exported and
++     * no longer drawn into this task (the app shows them itself: N3b); 0: none (as before).
++     */
++    void setWebPopups(int mode);
++    bool isPopupSurface() const
++    {
++        return m_isPopup;
++    }
+ 
+ private:
+     enum class State {
+@@ -190,6 +208,13 @@ private:
+     void handOverMaximize();
+     void handOverMinimize();
+     QSize fullScreenTaskSize() const;
++    // PowOS (0063): popups as surfaces of their own.
++    bool exportablePopup(const Window *window) const;
++    void exportPopup(Window *popup);
++    void dropPopup(Window *popup, const char *why);
++    void dropAllPopups(const char *why);
++    void tellPopup(AnlandWindowTask *surface);
++    void giveUp(const char *why); // the daemon connection failed: a task is removed, a popup surface dropped by its parent
+ 
+     AnlandWindowTasks *m_tasks;
+     QPointer<Window> m_window;
+@@ -282,6 +307,12 @@ private:
+     QList<Watched> m_watched; // while live: the window and its popups, each holding an offscreen-rendering ref
+     QMetaObject::Connection m_popupAdded;
+     QSet<qint32> m_touches;
++    // PowOS (0063): this is a popup's surface (its parent's [m_popupSurfaces]), or a task exporting its popups.
++    const bool m_isPopup = false;
++    QPointer<AnlandWindowTask> m_popupOf;
++    QRect m_popupTold; // the last "popup" geometry said (sent again only when it changes)
++    int m_webPopups = 0; // the app's "web <id> <mode>"
++    QHash<Window *, AnlandWindowTask *> m_popupSurfaces;
+ };
+ 
+ /**
+@@ -319,6 +350,11 @@ public:
+     AnlandWindowTask *popupOwner(const Window *popup) const;
+     /** A task is done (the app closed it, or its window closed): forget it. */
+     void remove(AnlandWindowTask *task);
++    /** PowOS (0063): a new surface id for a popup's own surface (the same id space as the tasks'). */
++    uint32_t takeId()
++    {
++        return m_nextId++;
++    }
+     /** Every task, now (the compositor is going): windows back on the desktop, buffers released. */
+     void closeAll();
+ 

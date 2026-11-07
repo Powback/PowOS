@@ -140,7 +140,25 @@ class ShellBridge(
             ) {
                 main.post { if (webWindowsMade) webWindows.linuxControl(id, action) }
             }
+
+            // kwin 0063 (N3a): a Linux web window's popups as surfaces of their own - recorded, offscreen ([PopupLog]).
+            override fun popup(
+                parent: Int,
+                popup: Int,
+                x: Int,
+                y: Int,
+                w: Int,
+                h: Int,
+            ) = popupLog.popup(parent, popup, x, y, w, h)
+
+            override fun popupGone(
+                parent: Int,
+                popup: Int,
+            ) = popupLog.popupGone(parent, popup)
         }
+
+    /** N3a's log-only popup consumer (kwin 0063): made on the first popup. */
+    private val popupLog by lazy { PopupLog(context) }
 
     /** An app floated not by the user's pick ([SystemFloat]): a web window, as the switcher's "Desktop window". */
     private val systemFloat: (Int) -> Unit = { id -> main.post { toWebWindow(id) } }

@@ -119,9 +119,27 @@ frame of drag latency; measure it before turning it on for drags (animations fir
   `WebWindowsAheadTest`. Phone: `ww-glue.sh` fails under 99 % a0 when 20+ ran (and now also slides to PowOS AI's page).
   Finger-driven motion still binds with `next` (pf0 86 %): N2b = finger frames one frame ahead (the touch's own
   prediction) once a0 is proven on the phone.
-- [ ] **N3 - Linux popups as their own surfaces (S7)**: KWin `web <id> 1`: popups and override-redirect windows of a
-  web window exported as their own surface ids (`popup <id> <parent> x y w h`), layers under the window's container
-  (not its crop) with a positive layer, placed against the screen: a Steam menu longer than the window is no longer cut.
+- [ ] **N3 - Linux popups as their own surfaces (S7)**: popups and override-redirect windows of a web window exported
+  as their own surface ids, layers under the window's container (not its crop) with a positive layer, placed against
+  the screen: a Steam menu longer than the window is no longer cut.
+  - [x] **N3a - KWin exports them, the app records them** (kwin 0063, pkgrel 3.71, `agent/native-windows-n3a`): the app
+    says `web <id> <mode>` (cap `web`) from each Linux web window's consumer start (`WebWindows.startConsumer` ->
+    `WebWindowSource.webPopups(kwin, 1)`). Mode 1: every popup the task draws (`isPopupWindow()` - xdg_popup, X11
+    menus/tooltips/combos - or 0062's override-redirect windows; never a dialog) is ALSO a surface of its own: KWin says
+    `popup <id> <popup-id> x y w h` (task buffer px against the task's viewport top left, so the app places it at its
+    body + (x, y); the popup's own px; again on every move/resize of it or its window) and `popup-gone <id> <popup-id>`
+    (closed, the task stopped drawing, or went). The popup's buffers come like a window's: the consumer says hello on
+    the daemon with `<popup-id>`, KWin draws only the popup into them (clear around it, never direct scanout). The task
+    still draws it, so nothing on screen changes. Mode 2 (N3b): exported only, the task leaves them out. A popup surface
+    is an `AnlandWindowTask` of its own kind (its parent's child: no desktop move, decoration, resize, shown flag); its
+    input is dropped (HACK, N3b). App: `PopupLog` (log-only consumer: offscreen ImageReader, logcat `PowosPopups`:
+    `popup P N at X,Y WxH (#k)`, `popup N buffer #b ...`, `popup-gone P N: ...`, `popup N insane: ...`), JVM
+    `PopupBookTest`. Phone: `tools/phone/verify/ww-popups.sh` (queue; opens Steam's menus by X clicks on its menu bar,
+    asserts KWin's `exports popup N`, the popup line's size/place against the X window's x the window's scale, a buffer,
+    and `popup-gone` after Escape). Daemon limit: `MAX_PAIRS 16` surfaces (andromarchy.c) - a menu takes one while open.
+  - [ ] **N3b - the app shows them**: a child SurfaceControl per popup under the window's container (positive layer, not
+    the body crop) at body + (x, y), the consumer on its Surface (re-made when it grows), `web <id> 2`, input on the
+    popup's surface (KWin maps it to the popup's frame).
 - [ ] **N4 - resize with no drop**: the frame follows the finger every frame (today); Android: VD resize paced as RS1,
   last buffer anchored; Linux: screen-sized buffers (no allocation per step). Gate the frame stats: gfxinfo janky <= 5 %
   over `ww-glue.sh`'s edge drag, KWin's `window task N frames` commits ~= drawn during it.
