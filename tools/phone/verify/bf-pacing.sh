@@ -95,7 +95,8 @@ onscreen() { local r on top sv how
   set -- $(echo "$r" | grep -m1 '^onscreen '); sv=${2:-0}; how=${3:-none}
   WHY="displays on=${on:-?}, in front=${top:-none}, game layers=$sv ($how${4:+ ${4}})"; TOP=$top
   [ "${on:-0}" -ge 1 ] && [ "$sv" -ge 1 ] && { { [ "$how" = task ] && [ "$top" = PowosWindowActivity ]; } || { [ "$how" = web ] && [ "$top" = HomeShell ]; }; }; }
-invalid() { echo "INVALID: $NAME wasn't on the screen $1 ($WHY) - frames of a game nobody sees say nothing"; restore; exit 3; }
+invalid() { "$here/../shot.sh" "$OUT/invalid-$(date +%H%M%S).png" >/dev/null 2>&1
+  echo "INVALID: $NAME wasn't on the screen $1 ($WHY) - frames of a game nobody sees say nothing (screenshot in $OUT)"; restore; exit 3; }
 mi=0
 for mode in "$@"; do
   mi=$((mi + 1)); lbl="$mode $mi/$#"
@@ -117,7 +118,9 @@ for mode in "$@"; do
   # HomeShell/PowosWindowActivity, game layers 0 or a web layer behind it); the two valid ones came right after Home.
   # restore() starts the activity that was in front again. HACK: the real fix is a launch closing the overview, as
   # Android's does (docs/research/abzu-fps.md "Measurement friction"); then this line goes.
-  [ "${BF_HOME_FIRST:-1}" = 0 ] || { "$A" shell "input keyevent 3" >/dev/null 2>&1; sleep 1; }
+  # Home, then Back: 11-07 05:10 Home alone left the switcher (Steam + calculator cards) up and the run INVALID; Back
+  # closes the switcher over home (shell/ui/recents.tsx) and does nothing on plain home.
+  [ "${BF_HOME_FIRST:-1}" = 0 ] || { "$A" shell "input keyevent 3; sleep 1; input keyevent 4" >/dev/null 2>&1; sleep 1; }
   asuser bf-start.sh >/dev/null
   pill "$lbl: waiting for the game window"
   # The window, waited for only while the rest of this mode still fits the budget (WIN_S overrides).
