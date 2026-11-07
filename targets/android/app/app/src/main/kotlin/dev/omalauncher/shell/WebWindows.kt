@@ -106,6 +106,7 @@ class WebWindows(
         // RL0 (10-31 14:20, "the windows doesn't render again"): a new page's "w.f" frame ids start at 1 again; the
         // last page's count (f399) made FrameSync drop every new frame as old - no geometry, empty bodies.
         sync.reset()
+        renderWatch.pageStarted(SystemClock.uptimeMillis())
         if (wins.isEmpty()) return
         wins.values.forEach { it.claimed = false }
         WindowLog.i(TAG, "page (re)loaded: ${wins.size} window(s) wait for the page to claim them (${wins.keys})")

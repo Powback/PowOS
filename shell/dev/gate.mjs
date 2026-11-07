@@ -8104,11 +8104,7 @@ async function webWindowIdleTick() {
     if (idleTicks > 2) fails.push(`WT-IDLE: the window tick ran ${idleTicks}x in 120 frames with every window still (want none: no rAF while idle; last dirtied by ${window.__ww.dirtyBy})`);
     if (idleTicks) fails.push(...window.__wwTickFails(ms));
     if (window.__ww.sent.length !== sentAt || window.__ww.sent.at(-1) !== last) fails.push(`WT-IDLE: ${window.__ww.sent.length - sentAt} w.f sent while idle`);
-    const before = window.__ww.sent.at(-1);
-    window.__mockEvents.emit("webwindows.resend", 0);
-    await window.__gw.frames(10);
-    const after = window.__ww.sent.slice(window.__ww.sent.lastIndexOf(before) + 1);
-    if (after.length !== 1) fails.push(`WT-IDLE: ${after.length} w.f after one webwindows.resend (want exactly 1)`);
+    fails.push(...(await (await importShim("./dev/ww-probe-check.js")).probedStillWindows()));
     // A real move still sends: window 972 dragged in its style.
     const el = document.querySelector('.webwindow[data-wwid="972"]');
     const was = window.__ww.sent.at(-1);
