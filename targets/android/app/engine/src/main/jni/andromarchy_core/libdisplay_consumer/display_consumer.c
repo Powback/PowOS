@@ -636,20 +636,42 @@ int poll_output_event(display_ctx *ctx, struct OutputEvent *event, int timeout_m
         return -1;
     }
 
-    uint8_t msg_buf[sizeof(struct data_msg) + sizeof(struct OutputEvent)];
-    ssize_t n = recv(ctx->data_fd, msg_buf, sizeof(msg_buf), MSG_PEEK);
-    if (n < (ssize_t)sizeof(struct data_msg))
-        return 0;
-
+    /* PowOS: never block past the poll, and take an event by its header's size. A blocking peek, then recv_all of
+     * this side's sizeof(OutputEvent) whatever the header said, waited in recvfrom for bytes that never came when the
+     * producer's event was shorter (or only part of one had come): the event thread stuck there, nativeStopWindow's
+     * join with it, and the closed window's consumer, its ANativeWindow and the BLAST layer ("[BBQ] powos-ww-N-linux")
+     * stayed alive for good (11-07: 26 "consumer stop still blocked" in window-log). Only a whole message is taken;
+     * anything less waits for the next poll. */
     struct data_msg hdr;
-    memcpy(&hdr, msg_buf, sizeof(hdr));
+    ssize_t n = recv(ctx->data_fd, &hdr, sizeof(hdr), MSG_PEEK | MSG_DONTWAIT);
+    if (n < (ssize_t)sizeof(hdr))
+        return 0;
     if (hdr.type != DATA_MSG_OUTPUT_EVENT)
         return 0;
-
-    if (recv_all(ctx->data_fd, msg_buf, sizeof(struct data_msg) + sizeof(struct OutputEvent)) < 0)
+    if (hdr.size > 4096) {
+        enter_fallback(ctx);   /* not a message of this protocol: the stream is lost */
         return -1;
-    memcpy(event, msg_buf + sizeof(struct data_msg), sizeof(*event));
-    return 1;
+    }
+    size_t need = sizeof(hdr) + hdr.size;
+    uint8_t stackbuf[sizeof(struct data_msg) + sizeof(struct OutputEvent)];
+    uint8_t *msg = need <= sizeof(stackbuf) ? stackbuf : malloc(need);
+    if (!msg)
+        return 0;
+    n = recv(ctx->data_fd, msg, need, MSG_PEEK | MSG_DONTWAIT);
+    if (n < (ssize_t)need) {
+        if (msg != stackbuf)
+            free(msg);
+        usleep(2000);   /* the rest is on its way: no busy spin on a readable fd meanwhile */
+        return 0;
+    }
+    int r = recv_all(ctx->data_fd, msg, need);   /* all of it is there: returns at once */
+    if (r >= 0) {
+        memset(event, 0, sizeof(*event));
+        memcpy(event, msg + sizeof(hdr), hdr.size < sizeof(*event) ? hdr.size : sizeof(*event));
+    }
+    if (msg != stackbuf)
+        free(msg);
+    return r < 0 ? -1 : 1;
 }
 int poll_output_event_extend_data(display_ctx *ctx, void* payload, size_t size, int timeout_ms)
 {
