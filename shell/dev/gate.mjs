@@ -11834,6 +11834,182 @@ async function lw3End() {
 /** The LW3 run's steps into the page (window.__lw3f); evaluates to []. */
 const LW3_HELPERS = `(window.__lw3f = { ${[lw3Env, lw3Launch, lw3Offer, lw3Alts, lw3Timeout, lw3Retry, lw3BadExec, lw3HostFailed, lw3End].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
 
+/**
+ * N1 (docs/WEB_WINDOWS.md "Native-glued windows"; the user, 11-07: "the pages should have the windows absolutely glued
+ * to them ... page switching etc works instantly and 100% natively no race condition in updating window positions"):
+ * with a web window on home, a page switch's slide runs on the main thread - the track's (and its glass's) transition
+ * is the registered --track-x/--glass-x, never a compositor-run transform - so every "w.f" the slide sends is measured
+ * on the frame it commits: __ww.glue counts 0 off-thread frames over the switch and its way back, with the window's
+ * body x in "w.f" stepping across the slide (>= 10 frames). Without windows the compositor still runs it (transform).
+ * Control: the same switch with html.ww-glued taken off counts off-thread frames (the audit sees the race it guards).
+ */
+async function webWindowGlueCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const { go, glide, frame, fails, expect, track, html, pages, from } = await window.__glue.setup(S);
+  if (!track || pages.length < 2) return [`glue: needs home's page track with 2+ pages (${pages.length})`];
+  // The stylesheet's transition (an earlier check, wwSwipe, leaves an inline "transition: none" on the track).
+  const inline = track.style.transition;
+  track.style.removeProperty("transition");
+  try {
+    W.webWins.value = [];
+    await frame();
+    expect(!html.classList.contains("ww-glued"), "no window: html.ww-glued is on");
+    const plain = await glide(-1);
+    expect(plain.there.includes("transform"), `no window: the slide runs ${plain.there} (want the compositor's transform transition)`);
+    W.webWins.value = [{ id: 921, key: "a:gate.glue", label: "Glue", page: pages[from], x: 220, y: 160, w: 320, h: 260, live: true }];
+    await frame();
+    await frame();
+    expect(html.classList.contains("ww-glued"), "a window on home: html.ww-glued is off");
+    const g0 = window.__ww.glue;
+    const glued = await glide(921);
+    const g1 = window.__ww.glue;
+    expect(glued.there.includes("--track-x") && !glued.there.includes("transform"), `a window: the slide runs ${glued.there} (want --track-x on the main thread)`);
+    const off = g1.offThread - g0.offThread;
+    expect(off === 0, `a window: ${off} of ${g1.frames - g0.frames} frames moved it by a compositor-run animation (${g1.last.by}) - its layer trails the page`);
+    const steps = new Set(glued.xs.map(Math.round)).size;
+    expect(steps >= 10, `a window: its w.f body x took ${steps} values over the switch (want >= 10: one per frame of the slide)`);
+    // Control: the race the audit guards - the compositor's slide with a window counts off-thread frames.
+    html.classList.remove("ww-glued");
+    const c0 = window.__ww.glue.offThread;
+    const ran = await go(window.__glue.to, 921, []);
+    expect(ran.includes("transform") && window.__ww.glue.offThread > c0, `control: the compositor's slide (${ran}) with a window counted no off-thread frame (the audit is blind)`);
+    html.classList.add("ww-glued");
+    await go(from, 921, []);
+    return fails;
+  } finally {
+    W.webWins.value = [];
+    S.page.value = from;
+    track.style.transition = inline;
+  }
+}
+
+/**
+ * N1b: the slide to PowOS AI's page (page -1) and back with a web window on home: home's transition is the registered
+ * --slide-x and the bar's counter its --bar-counter (main thread), never a transform/translate; 0 off-thread frames;
+ * the bar holds still on screen through it (its left within 2 px of where it started, each frame). Without windows the
+ * compositor still runs it (transform).
+ */
+async function webWindowGlueAiCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const { frame, fails, expect, pages, from } = window.__glue.setup(S);
+  const home = document.querySelector(".home");
+  const bar = () => document.querySelector(".home:not(.pull-screen) > .bar");
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  // Page -1 and back: home's and the bar's running transitions at the start, the bar's left each frame.
+  const there = async () => {
+    const lefts = [];
+    S.page.value = -1;
+    await frame();
+    await frame();
+    const run = [home, bar()].map((e) => (e ? e.getAnimations().map((a) => a.transitionProperty).join("+") : "-"));
+    for (let i = 0; i < 90 && home.getAnimations().length; i++) await frame(), bar() && lefts.push(bar().getBoundingClientRect().left);
+    S.page.value = 0;
+    await frame();
+    for (let i = 0; i < 90 && home.getAnimations().length; i++) await frame();
+    await sleep(60);
+    return { run, lefts };
+  };
+  if (!home) return ["glue AI: no .home"];
+  try {
+    W.webWins.value = [];
+    S.page.value = 0;
+    await sleep(500);
+    const plain = await there();
+    expect(plain.run[0].includes("transform"), `no window: home's slide runs ${plain.run[0]} (want the compositor's transform)`);
+    W.webWins.value = [{ id: 922, key: "a:gate.glue2", label: "Glue", page: pages[0], x: 220, y: 160, w: 320, h: 260, live: true }];
+    await frame();
+    await frame();
+    const g0 = window.__ww.glue;
+    const glued = await there();
+    const g1 = window.__ww.glue;
+    expect(glued.run[0].includes("--slide-x") && !glued.run[0].includes("transform"), `a window: home's slide runs ${glued.run[0]} (want --slide-x)`);
+    expect(glued.run[1] === "-" || !glued.run[1].includes("translate"), `a window: the bar's counter runs ${glued.run[1]} (want --bar-counter, never translate)`);
+    expect(g1.offThread === g0.offThread, `a window: ${g1.offThread - g0.offThread} off-thread frames over the AI slide (${g1.last.by})`);
+    const drift = glued.lefts.length ? Math.max(...glued.lefts) - Math.min(...glued.lefts) : 0;
+    expect(drift <= 2, `a window: the bar drifted ${drift.toFixed(1)} px on screen over the slide (want it held still)`);
+    return fails;
+  } finally {
+    W.webWins.value = [];
+    S.page.value = from;
+  }
+}
+
+/**
+ * N2: frame-ahead geometry. With the host's "w.ahead 1" (here the knob), each frame of a glued page switch also
+ * measures the NEXT frame (the running transitions sampled one frame on) - the host binds it to the commit that shows
+ * it. The prediction must be what the next frame then measures: over the switch and back, at least 10 predictions,
+ * their median miss (largest number apart, px) under a quarter of the median frame-to-frame step and under 1 px.
+ */
+async function webWindowAheadCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const { glide, frame, fails, expect, track, pages, from } = window.__glue.setup(S);
+  const median = (v) => (v.length ? [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)] : NaN);
+  const inline = track.style.transition;
+  track.style.removeProperty("transition");
+  try {
+    W.webWins.value = [{ id: 923, key: "a:gate.ahead", label: "Ahead", page: pages[from], x: 220, y: 160, w: 320, h: 260, live: true }];
+    await frame();
+    await frame();
+    window.__ww.aheadOn = true;
+    const a = window.__ww.ahead;
+    const [sent0, n0] = [a.sent, a.errors.length];
+    await glide(923);
+    // A frame that came off the period the prediction assumed (the gate's own load) moved further than a prediction of
+    // one period could know: that share (step x |dt - period| / dt) is taken off its miss; on the phone vsync is the period.
+    const k = a.errors.length - n0;
+    const rows = a.errors.map((e, i) => [e, a.steps[i], a.jitter[i], a.dts[i]]).slice(-k).filter(([e, st, , dt]) => Number.isFinite(e) && st > 0.5 && dt > 0);
+    const err = median(rows.map(([e, st, j, dt]) => Math.max(0, e - (st * j) / dt)));
+    const step = median(rows.map((v) => v[1]));
+    expect(rows.length >= 5, `ahead: ${rows.length} predicted frames to judge (want >= 5)`);
+    expect(a.sent - sent0 >= 10, `ahead: ${a.sent - sent0} frame-ahead geometries over a page switch and back (want >= 10)`);
+    expect(err < 1 && err <= step / 4, `ahead: predictions missed the next frame by ${err?.toFixed(2)} px (median, less the frame's own lateness), the frames step ${step?.toFixed(2)} px - want < 1 and <= a quarter`);
+    return fails;
+  } finally {
+    window.__ww.aheadOn = false;
+    W.webWins.value = [];
+    S.page.value = from;
+    track.style.transition = inline;
+  }
+}
+
+/** [webWindowGlueCheck]'s setup: the pages to switch between, and the switch itself, frame by frame. */
+function glueSetup(S) {
+  const fails = [];
+  const frame = () => new Promise((ok) => requestAnimationFrame(ok));
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const track = document.querySelector(".page-track");
+  const pages = S.pages.value;
+  const from = S.page.value >= 0 ? S.page.value : 0;
+  const to = from === 0 ? 1 : 0;
+  window.__glue.to = to;
+  // Page [p], waited out: what the track's transition runs, and the "w.f" body x of window [id] each frame of it.
+  const go = async (p, id, xs) => {
+    S.page.value = p;
+    await frame();
+    await frame();
+    const running = track.getAnimations().map((a) => a.transitionProperty);
+    for (let i = 0; i < 90 && track.getAnimations().length; i++) {
+      await frame();
+      const t = (window.__ww.sent.at(-1) ?? "").split(" ");
+      for (let k = 4, n = Number(t[3]); n-- > 0; k += 24) if (Number(t[k]) === id) xs.push(Number(t[k + 5]));
+    }
+    await sleep(60);
+    return running;
+  };
+  // One switch there and back.
+  const glide = async (id) => {
+    const xs = [];
+    const there = await go(to, id, xs);
+    await go(from, id, xs);
+    return { there, xs };
+  };
+  return { go, glide, frame, fails, expect: (ok, msg) => ok || fails.push(msg), track, html: document.documentElement, pages, from };
+}
+const GLUE_HELPERS = `(window.__glue = { setup: ${glueSetup} }, [])`;
+
 /** [webWindowMaskCheck]'s helpers into the page (window.__wwg); evaluates to [] (no problems) as a gate step. */
 const WW_HELPERS = `(window.__wwg = { ${[wwHelpers, wwFound, wwCuts, wwMenu, wwRaise, wwStacked, wwSwipe, wwHidden, wwMaximise, wwMaximiseAt, wwMergedBar, wwBarHit].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
 
@@ -12588,7 +12764,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockToggleHost, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, SF_HELPERS, webWindowSnapFill, webWindowRelaunch, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockToggleHost, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, SF_HELPERS, webWindowSnapFill, webWindowRelaunch, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck, GLUE_HELPERS, webWindowGlueCheck, webWindowGlueAiCheck, webWindowAheadCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }

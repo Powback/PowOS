@@ -1486,10 +1486,11 @@ class WebWindows(
         rest: String,
         direct: Boolean = false,
     ) {
-        val (frame, geos, pageMs) = parse(rest) ?: return
+        val (frame, geos, pageMs, ahead) = parse(rest) ?: return
         val cookie = sync.receive(frame)
         via = if (direct) "direct" else "port"
-        sync.next(frame, cookie, pageMs) { apply(frame, geos) }
+        // N2: geometry for the page's next frame rides the visual-state callback of the commit that shows it.
+        if (ahead) sync.ahead(frame, cookie, pageMs) { apply(frame, geos) } else sync.next(frame, cookie, pageMs) { apply(frame, geos) }
     }
 
     @Volatile private var lastDpr = 1f
@@ -1503,7 +1504,15 @@ class WebWindows(
     @Volatile private var via = "port"
 
     /** The frame id, the windows, and the page frame's time (epoch ms; NaN when the page didn't stamp it). */
-    private fun parse(rest: String): Triple<Long, List<Geo>, Double>? =
+    /** A parsed "w.f": its page frame id, the windows, the page frame's time (wall ms), and N2's ahead flag. */
+    private data class Parsed(
+        val frame: Long,
+        val geos: List<Geo>,
+        val pageMs: Double,
+        val ahead: Boolean,
+    )
+
+    private fun parse(rest: String): Parsed? =
         try {
             val t = rest.trim().split(' ')
             val dpr = t[1].toFloat()
@@ -1518,7 +1527,8 @@ class WebWindows(
                 rxHop += System.currentTimeMillis() - sent
                 rxSplit++
             }
-            Triple(t[0].toLong(), geos, page)
+            // N2: a third stamp "1" = geometry for the page's NEXT frame (the page sends it only after "w.ahead 1").
+            Parsed(t[0].toLong(), geos, page, aheadFlag(t, c.i))
         } catch (e: RuntimeException) {
             WindowLog.w(TAG, "w.f: bad geometry ($e)")
             null
@@ -1789,7 +1799,7 @@ class WebWindows(
         // An empty frame too (every window minimised): the ship check (ship.sh render_watch) reads "w.f" lines as the page alive.
         if (now - lastPlaceLog < PLACE_LOG_MS) return
         lastPlaceLog = now
-        WindowLog.i(TAG, "w.f f$frame behind=$behind (${behindFrames}/$appliedFrames applies behind) lag=${sync.lag.joinToString("/")} pf=${sync.pageLag.joinToString("/")} rx=${"%.1f".format(sync.receiptMs / sync.pageLag.sum().coerceAtLeast(1))}ms (page ${"%.1f".format(rxPage / rxSplit.coerceAtLeast(1))} + hop ${"%.1f".format(rxHop / rxSplit.coerceAtLeast(1))}) via=$via " + geos.joinToString { "${it.id}@${it.body.toShortString()} clip ${it.clip.toShortString()} z${it.z} ${if (it.visible) "shown" else "hidden"}" })
+        WindowLog.i(TAG, "w.f f$frame behind=$behind (${behindFrames}/$appliedFrames applies behind) lag=${sync.lag.joinToString("/")} pf=${sync.pageLag.joinToString("/")} ahead=${sync.aheadLag.joinToString("/")} rx=${"%.1f".format(sync.receiptMs / sync.pageLag.sum().coerceAtLeast(1))}ms (page ${"%.1f".format(rxPage / rxSplit.coerceAtLeast(1))} + hop ${"%.1f".format(rxHop / rxSplit.coerceAtLeast(1))}) via=$via " + geos.joinToString { "${it.id}@${it.body.toShortString()} clip ${it.clip.toShortString()} z${it.z} ${if (it.visible) "shown" else "hidden"}" })
     }
 
     private var lastPlaceLog = 0L
@@ -3938,6 +3948,12 @@ class WebWindows(
     enum class LeaveStep { WAIT, HOME }
 
     companion object {
+        /** N2: "w.f"'s words [t], its windows read up to [end]: the third stamp after them is "1" for an ahead frame. */
+        internal fun aheadFlag(
+            t: List<String>,
+            end: Int,
+        ) = t.getOrNull(end + 2) == "1"
+
         private const val TAG = "PowosWebWindows"
 
         /**

@@ -2242,6 +2242,18 @@ const sent: string[] = [];
   get lastResize() {
     return lastResize;
   },
+  /** N2: frame-ahead lines sent, and per frame how far the next frame's own measure was from the prediction (px). */
+  get ahead() {
+    return aheadStats;
+  },
+  /** N2 without a host (the gate): compute and keep the frame-ahead geometry anyway. */
+  set aheadOn(on: boolean) {
+    geometryChannel.ahead = on;
+  },
+  /** N1: the motions measured so far (frames sent, and those a compositor-run animation moved a window in). */
+  get glue() {
+    return { ...glue, last: lastGlue };
+  },
   get direct() {
     return geometryChannel.direct;
   },
@@ -2264,14 +2276,71 @@ function tick(ts: number) {
     dirty = false;
     for (const [id, r] of resizing) pace(id, r, ts);
     send(ts);
-  }
+  } else glueEnd();
   tickMs.push(performance.now() - t0);
   if (tickMs.length > 240) tickMs.shift();
   // The next frame only while something still moves a window (a transition on one, a resize drag): idle - every window
   // still, or none on screen - no rAF at all (the title's "window tick", perf-1793970543446: a frame callback every
   // vsync with nothing to do). What moves one next kicks it again (markDirty, transitionrun, webWins, resend).
   if (webWins.value.length && moving()) raf = requestAnimationFrame(tick);
+  else glueEnd();
 }
+
+// ---- N1: native-glued windows - every motion that carries a window runs on the main thread -------------------------
+// docs/WEB_WINDOWS.md "Native-glued windows". The host moves an app's layer on the draw that shows the page frame its
+// "w.f" was measured in (FrameSync.next). That holds for what the main thread moves (a finger, a rAF, a main-thread
+// transition): the measured frame IS the committed one. A transition the compositor runs (transform, translate, scale,
+// rotate, opacity) is ticked at the draw, a frame after the page measured it - the app's layer then trails its page by
+// a frame's travel (a page switch: ~60 px a frame mid-slide). So while a window exists the page track and its glass
+// slide on registered properties (html.ww-glued, shell.css --track-x/--glass-x), and every frame sent is checked here:
+// [offThread] = a compositor-run animation on a window or an ancestor (want 0), logged per motion and kept for the gate.
+
+/** Properties Chrome animates on the compositor thread (a transition/animation of one of them is off the main thread). */
+const COMPOSITED = /^(transform|translate|scale|rotate|opacity)$/;
+const glue = { motions: 0, frames: 0, offThread: 0 };
+let lastGlue = { frames: 0, offThread: 0, by: "" };
+let episode = { frames: 0, offThread: 0, by: "" };
+
+/** The compositor-run animation moving a window this frame, as "<element>.<class> <property>", or "". */
+function offThreadMover(): string {
+  for (const a of document.getAnimations()) {
+    if (a.playState !== "running") continue;
+    const t = (a.effect as KeyframeEffect | null)?.target;
+    if (!t || !carriesWindow(t)) continue;
+    const props =
+      a instanceof CSSTransition ? [a.transitionProperty] : ((a.effect as KeyframeEffect).getKeyframes().flatMap((k) => Object.keys(k)) as string[]);
+    const hit = props.find((p) => COMPOSITED.test(p));
+    // Opacity only fades (the host takes the measured alpha): a frame late is a shade, never a misplaced window.
+    if (hit && hit !== "opacity") return `${t.localName}.${t.getAttribute("class") ?? ""} ${hit}`;
+  }
+  return "";
+}
+
+/** A frame was sent: counted into this motion. */
+function glueFrame() {
+  const by = offThreadMover();
+  episode.frames++;
+  glue.frames++;
+  if (by) {
+    episode.offThread++;
+    glue.offThread++;
+    episode.by ||= by;
+  }
+}
+
+/** The motion ended (nothing moves a window): one log line, to logcat (PowosShell) - the phone check reads it. */
+function glueEnd() {
+  if (!episode.frames) return;
+  glue.motions++;
+  lastGlue = episode;
+  if (episode.frames > 2) console.info(`ww glue: ${episode.frames} frames, ${episode.offThread} off-thread${episode.by ? ` (${episode.by})` : ""}`);
+  episode = { frames: 0, offThread: 0, by: "" };
+}
+
+/** N1: any window on home glues the page track to the main thread (shell.css html.ww-glued). */
+effect(() => {
+  document.documentElement.classList.toggle("ww-glued", webWins.value.some((w) => !w.full));
+});
 
 // ---- WT-IDLE: the tick measures only when something could have moved a window ------------------------------------
 // perf-1793458433606 (10-31): [geometry] every frame - a querySelector, two rects and a computed-style walk up to the
@@ -2374,11 +2443,113 @@ function send(ts: number) {
     const line = `w.f ${id} ${g} ${(now - (performance.now() - ts)).toFixed(2)} ${now}`;
     sent.push(line);
     if (sent.length > 120) sent.shift();
+    glueFrame();
     if (native.value) {
       console.timeStamp(`ww f${id}`);
       sendGeometry(line);
     }
   }
+  sendAhead(ts, g);
+}
+
+// ---- N2: geometry one frame ahead, bound to the commit that shows it --------------------------------------------
+// docs/WEB_WINDOWS.md "Native-glued windows" N2. FrameSync.next applies a "w.f" on the first window draw after it
+// arrives - right only when the page's commit is ready by then (pf0 86 % on the phone, 11-07). A visual-state
+// request names the draw exactly, but it reaches the renderer after the commit that sent it: it rides the NEXT one.
+// So while only main-thread transitions move windows (N1's glued slides; no finger, no resize drag - their next frame
+// isn't known yet) the page also sends the geometry of its NEXT frame - each running transition sampled one frame
+// on (currentTime + the frame's period, then put back) - with a third stamp "1": the host posts its visual-state
+// request now, it rides that next commit, and the layer moves on exactly the draw that shows it. The next frame's own
+// measure, when it matches, sends nothing more; when it doesn't (a finger came), it goes out as a normal "w.f" and,
+// being newer, wins.
+
+/** Pointers down anywhere on the page: a finger drives the next frame, it can't be sampled ahead. */
+const downs = new Set<number>();
+addEventListener("pointerdown", (e) => downs.add(e.pointerId), true);
+for (const type of ["pointerup", "pointercancel"] as const) addEventListener(type, (e) => downs.delete(e.pointerId), true);
+/** The page's frame period (ms), from its rAF times. */
+let period = 1000 / 60;
+let lastTs = 0;
+/** The last frame-ahead geometry, and how the next frame's own measure matched it (gate: `__ww.ahead`). */
+let predicted: string | null = null;
+const aheadStats = { sent: 0, errors: [] as number[], steps: [] as number[], jitter: [] as number[], dts: [] as number[] };
+let previous: string | null = null;
+
+/** The largest difference between two geometry strings' numbers (their words in the same order), or Infinity. */
+function geometryDiff(a: string, b: string): number {
+  const x = a.split(" ");
+  const y = b.split(" ");
+  if (x.length !== y.length) return Infinity;
+  let d = 0;
+  for (let i = 0; i < x.length; i++) {
+    const u = Number(x[i]);
+    const v = Number(y[i]);
+    if (Number.isFinite(u) && Number.isFinite(v)) d = Math.max(d, Math.abs(u - v));
+    else if (x[i] !== y[i]) return Infinity;
+  }
+  return d;
+}
+
+/** The running transitions that carry a window, when ALL of them run on the main thread (registered properties). */
+function aheadAnimations(): CSSTransition[] | null {
+  const out: CSSTransition[] = [];
+  for (const a of document.getAnimations()) {
+    if (a.playState !== "running") continue;
+    const t = (a.effect as KeyframeEffect | null)?.target;
+    if (!t || !carriesWindow(t)) continue;
+    if (!(a instanceof CSSTransition) || !a.transitionProperty.startsWith("--")) return null;
+    out.push(a);
+  }
+  return out.length ? out : null;
+}
+
+/** [send]'s second half: this frame's measure [g] checked against the last prediction, then the next frame's sent. */
+function sendAhead(ts: number, g: string) {
+  scoreAhead(ts, g);
+  const anims = geometryChannel.ahead && !downs.size && !resizing.size ? aheadAnimations() : null;
+  if (!anims) return;
+  const next = sampleAhead(anims);
+  predicted = next;
+  // The next frame's own measure compares against this; equal, it isn't sent again.
+  lastGeometry = next;
+  aheadStats.sent++;
+  const now = Date.now();
+  const line = `w.f ${nextFrameId()} ${next} ${(now - (performance.now() - ts) + period).toFixed(2)} ${now} 1`;
+  if (native.value) sendGeometry(line);
+}
+
+/** This frame (rAF time [ts], measured [g]) against the last prediction: its miss, its step, how late the frame came. */
+function scoreAhead(ts: number, g: string) {
+  const dt = lastTs ? ts - lastTs : period;
+  if (predicted != null) {
+    aheadStats.errors.push(geometryDiff(predicted, g));
+    aheadStats.steps.push(previous != null ? geometryDiff(previous, g) : NaN);
+    // The frame came this far off the period the prediction assumed (a page's own jank: the miss is that, not N2's).
+    aheadStats.jitter.push(Math.abs(dt - period));
+    aheadStats.dts.push(dt);
+  }
+  if (aheadStats.errors.length > 240) trimAhead();
+  if (lastTs) period = Math.min(34, Math.max(4, 0.8 * period + 0.2 * dt));
+  lastTs = ts;
+  previous = g;
+  predicted = null;
+}
+
+/** The oldest of [aheadStats]' rows dropped (each list one row per predicted frame). */
+function trimAhead() {
+  for (const v of [aheadStats.errors, aheadStats.steps, aheadStats.jitter, aheadStats.dts]) v.shift();
+}
+
+/** The geometry one frame on: each of [anims] moved on by the period, measured, put back. */
+function sampleAhead(anims: CSSTransition[]): string {
+  const at = anims.map((a) => Number(a.currentTime));
+  anims.forEach((a, i) => {
+    const end = Number(a.effect?.getComputedTiming().endTime ?? 0);
+    a.currentTime = Math.min(at[i] + period, end - 0.01);
+  });
+  const next = geometry();
+  anims.forEach((a, i) => (a.currentTime = at[i]));
+  return next;
 }
 
 function kick() {

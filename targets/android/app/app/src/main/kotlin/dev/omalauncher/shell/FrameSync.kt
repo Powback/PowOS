@@ -61,6 +61,12 @@ internal class FrameSync(
      */
     val pageLag = LongArray(4)
 
+    /**
+     * N2 (docs/WEB_WINDOWS.md "Native-glued windows"): [ahead]'s applies by window draws between the PREDICTED page frame
+     * (the frame the geometry is for, one after the one that sent it) and the apply - 0 = on the draw that shows it.
+     */
+    val aheadLag = LongArray(4)
+
     /** Sum of (receipt - page frame) ms over [pageLag]'s applies: how long the message took to reach the host. */
     var receiptMs = 0.0
 
@@ -110,11 +116,58 @@ internal class FrameSync(
         page: Double,
         receivedMs: Double,
     ) {
+        pageLag[drawsSince(page).coerceAtMost(3)]++
+        receiptMs += receivedMs - page
+    }
+
+    /** Main: the window's draws that ran after [page] (monotonic ms), of the last [RING]. */
+    private fun drawsSince(page: Double): Int {
         var since = 0
         val n = minOf(draws, RING.toLong()).toInt()
         while (since < n && drawAt[((draws - 1 - since) % RING).toInt()] > page) since++
-        pageLag[since.coerceAtMost(3)]++
-        receiptMs += receivedMs - page
+        return since
+    }
+
+    /**
+     * N2, on the port's thread: geometry the page measured for its NEXT frame (a main-thread transition sampled one
+     * frame ahead, ui/webwindows.tsx ahead) - [id] sent from page frame k, for frame k+1 at [pageEpochMs]. The
+     * visual-state request is posted now, while frame k is still being committed, so it rides commit k+1 - the one
+     * that shows this geometry - and its callback runs right before the draw that shows it: [apply] lands on exactly
+     * that draw whatever the raster/activation time (where [next] guesses "the first draw after receipt"). Newest wins
+     * with [next]'s ids; never waits longer than [MAX_WAIT_MS] (applied then, as [bind]).
+     */
+    fun ahead(
+        id: Long,
+        cookie: Int,
+        pageEpochMs: Double,
+        apply: () -> Unit,
+    ) {
+        val page = pageEpochMs - (System.currentTimeMillis() - System.nanoTime() / 1e6)
+        ui.post {
+            val once = java.util.concurrent.atomic.AtomicBoolean(false)
+            val fire = { if (once.compareAndSet(false, true)) applyAhead(id, cookie, page, apply) }
+            web.postVisualStateCallback(
+                id,
+                object : WebView.VisualStateCallback() {
+                    override fun onComplete(requestId: Long) = fire()
+                },
+            )
+            web.postDelayed({ fire() }, MAX_WAIT_MS)
+        }
+    }
+
+    /** Main: [ahead]'s apply, once, unless a newer frame went first; counted into [aheadLag] from its frame [page]. */
+    private fun applyAhead(
+        id: Long,
+        cookie: Int,
+        page: Double,
+        apply: () -> Unit,
+    ) {
+        Trace.endAsyncSection("$name f$id", cookie)
+        if (id <= applied) return
+        applied = id
+        if (!page.isNaN()) aheadLag[drawsSince(page).coerceAtMost(3)]++
+        apply()
     }
 
     /** On the port's thread: [id] arrived. The cookie for [bind]. */
