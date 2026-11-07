@@ -351,6 +351,9 @@ async function privacyGrace() {
   await P.sleep(3000);
   fails.push([!P.chip("org.example.recorder"), "the stopped use stayed past the 15 s grace"], [P.chip("org.example.maps"), "the location chip went with it"]);
   await P.feed([]);
+  // The row's exit (Reveal, --spring-ms) is over within feed's 600 ms on an idle gate; on a loaded one it ran later and
+  // the scene failed on origin's tip alone (11-07): up to 2 s for it to go.
+  for (let t = 0; t < 2000 && document.querySelector(".privacy-row"); t += 50) await P.sleep(50);
   fails.push([!document.querySelector(".privacy-row"), "the row stayed with nothing in use"]);
   return fails.filter(([ok]) => !ok).map(([, why]) => why);
 }
@@ -10190,11 +10193,12 @@ async function wwBenchChecks() {
     // The not-loading rule: a window not live yet shows its placeholder (the theme's surface, icon, progress), never a hole.
     if (!el(981)?.querySelector(".ww-placeholder")) fails.push("window-bench blank: a window that isn't live shows no placeholder");
     window.__mockEvents.emit("webwindows.live", 981);
-    within("open-live", await until(() => body(981)?.classList.contains("live"), 1000), 50);
+    // Budgets loose enough for a loaded gate (86 / 106 ms seen in a full ship gate, 11-07); the phone bench has the tight ones.
+    within("open-live", await until(() => body(981)?.classList.contains("live"), 1000), 200);
     within("maximise", await settle(981, () => W.toggleMaximise(981)), 400);
     within("restore", await settle(981, () => W.toggleMaximise(981)), 400);
     W.webWins.value = [];
-    within("close", await until(() => !el(981), 1000), 50);
+    within("close", await until(() => !el(981), 1000), 200);
     console.log(`ww-bench ${JSON.stringify(times)}`);
     return fails;
   } finally {
