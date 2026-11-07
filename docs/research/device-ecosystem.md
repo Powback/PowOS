@@ -1,6 +1,7 @@
 # PowOS device ecosystem: how devices are hooked up, and how they should join
 
-Status: **research + design + first slice** (2026-11-07). Board task
+Status: **research + design + first slice; P1 phone agent, P2 enrollment, P7 per-device AI built** (2026-11-07).
+How-to: `docs/DEVICES.md`. Board task
 `powos-device-ecosystem-enrollment-via-powauth-de`. Builds on `docs/REMOTE-POWOS.md` (channels C1-C16, realm
 identity, M0-M8) and `docs/PLATFORM.md` (unit/fleet registry). This doc adds what those don't cover: the
 **device** view (what every machine is, how it got its secrets, how it is controlled), enrollment through PowAuth,
@@ -223,24 +224,38 @@ The same enrollment and the same protocol on a non-rooted phone (memory: non-roo
 - [x] P0 `powos-deviced` v1 + unit test; deployed on Desk as a registered unit; real lock / screens off-on / guarded sleep
 - [x] P0 Devices app (`apps/devices`, bundled) + gate scene
 - [ ] P1 Ship the Devices app; pair the phone with Desk from the app (code on Desk's screen); check from bed
-- [ ] P1 `powos-deviced` on the rooted phone (unit `units/phone/`, started by the session) so Desk's CLI/app sees the
-      phone's battery and screen and can lock it
+- [x] P1 `powos-deviced` on the rooted phone (system-tier service `lib/apps/services/powos-deviced.json`, unit
+      `units/phone/powos-deviced.json`, installed by `rooted.sh deploy`) so Desk's CLI/app sees the phone's battery and
+      screen and can lock it. 11-07: tested Desk -> phone over the LAN (paired with the code from the phone; status
+      battery/plugged/screen/locked, screen_on -> on, screen_off/lock -> off + locked); the coordinator's deploy installs it
+- [x] P1 Non-root: the PowOS app serves the same protocol (`devices/DeviceAgentHost.kt` + `DeviceAgentCore.kt`, key in
+      Android Keystore; status, screen_on, ring; lock needs a device admin / accessibility service - next)
 - [ ] P1 Arm Wake-on-LAN on Desk (`nmcli connection modify <eth> 802-3-ethernet.wake-on-lan magic` + firmware
       setting, needs root there) and run deviced on an always-on device (PowStation/Mac) as the waker
 - [ ] P1 Make Desk a WireGuard peer (its own key) so the Devices app reaches it away from home
-- [ ] P2 PowAuth OIDC client `powos-device` (device_code, two_factor) + `enroll.pow` enrollment service on PowStation
-- [ ] P2 Endpoints bundle: `endpoint.conf`, WireGuard, trust roots applied by the device; `powos devices enroll`
+- [x] P2 Enrollment service (built, not deployed): PowStation `enroll/powos-enroll.py`, an RFC 8628 device-code flow
+      whose approval pages sit behind `authelia@docker` on `enroll.powback.com` and re-check each request's PowAuth
+      session with `/api/verify` (a forged `Remote-User` gets nothing); device API on `enroll.pow` (LAN/VPN). Chosen
+      over a PowAuth OIDC `device_code` client: no PowAuth config change or restart, and the approval page can show the
+      device's caps and source address. An OIDC client stays possible later behind the same device API.
+- [x] P2 `powos devices enroll` (code + QR, polls, stores the identity 0600, registers `powos-device` in units.d),
+      `enrollment`, `registry`, `unenroll`, `ai-apply` (endpoint.conf with the device's own token). Endpoints bundle
+      returned (store, llm, turn, cdn, hub); WireGuard per device still to do
+- [ ] P2 WireGuard peer per enrolled device (its own key) in the bundle
 - [ ] P3 Device records in the registry (D3) on the hub STDB; the Devices app reads them; units publish per device
 - [ ] P4 Realm CA + device certificates; mutual TLS replaces per-pair tokens; revocation list cached offline
 - [ ] P5 Non-root: the PowOS app serves the agent protocol (D5) and does enrollment + VPN; remove the adb HACK
 - [ ] P6 PowStream: `stream_source`/`stream_target` caps, stream tickets through the agent, "Stream from" in the app
-- [ ] P7 claude-auth per-device credentials (`device -> tenant`), revocation without rotating the tenant
+- [x] P7 claude-auth per-device credentials (`device -> tenant`), revocation without rotating the tenant: branch
+      `agent/devices-enroll` in claude-rate-limiter (`src/enrolled-devices.ts`, proxy path only), not deployed
 - [ ] P8 Retire the runtime dev channels (vadb mirror, unrestricted `powos-phone` key) - REMOTE-POWOS M1/M2/M8
 - [ ] P9 Enroll the rest: macback, gpu-195 (status + guarded sleep only), laptop/tablet, TV (PowFrame)
 
 ## 5. Open questions
 
-- PowAuth's device flow is accepted by its validator; whether the deployed `powauth:latest` exposes the device
-  authorization endpoint with the current `configuration.yml` needs a check before P2.
+- PowAuth's own OIDC device flow: not used for P2 (the enrollment service's flow needs no PowAuth config change); revisit
+  if other realm clients want OIDC tokens.
+- Policy for `enroll.powback.com`: PowAuth's default `one_factor` today; `two_factor` as designed needs the owner's
+  second factor registered first.
 - Who may sleep a shared box: today `force` is any paired device of the owner; with guests (P4 policy) only owners.
 - KDE Connect on Desk: leave alone (KDE's own), or turn it off once the Devices app covers it - the user decides.

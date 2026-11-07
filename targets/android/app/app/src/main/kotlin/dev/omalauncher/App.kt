@@ -32,6 +32,9 @@ class App : Application() {
         // the image is installed yet (the first install's sign-in runs in this same process); an idle FileObserver.
         if (Application.getProcessName() == packageName) dev.omalauncher.linux.OpenSpool.start(this, File(filesDir, "run"))
         startEngineWatchers()
+        // The device agent (docs/DEVICES.md): Desk's Devices app sees this phone's battery/screen and can wake or ring
+        // it. Without root the app serves it itself; a rooted phone's system tier runs lib/devices/powos-deviced.
+        if (Application.getProcessName() == packageName && !RootedGuest.enabled) dev.omalauncher.devices.DeviceAgentHost.start(this)
         if (RootedGuest.enabled) {
             AgentMail.start(this, File(filesDir, "run"))
             // Desktop mode switched while the session runs: powos-shell's roles, Plasma's panels and Meta follow at once.

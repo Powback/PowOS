@@ -15,6 +15,13 @@ devices ask for (lock, screen off/on, sleep, wake another device by Wake-on-LAN,
   powos-deviced pair <https://host:port> [--code N]   pair this device's CLI with another device's agent
   powos-deviced devices                  devices this CLI has paired with
   powos-deviced call <device> <action> [--force]      run an action there (status, lock, screen_off, ...)
+  powos-deviced enroll [--realm URL] [--apply-ai] [--name N]   join the realm through PowAuth (docs/DEVICES.md):
+                                         shows a code + QR, waits for a person to approve it on a signed-in device,
+                                         stores this device's identity + tokens (0600) and registers it in units.d
+  powos-deviced enrollment               this device's enrollment (no secrets)
+  powos-deviced registry                 every enrolled device of the realm (asks the realm with this device's token)
+  powos-deviced unenroll                 leave the realm (revokes this device's realm and AI tokens there)
+  powos-deviced ai-apply                 point this device's AI at claude-auth with ITS OWN token (endpoint.conf)
 
 Protocol (v1; JSON over HTTPS):
   GET  /v1/info            no auth: {id, name, kind, v, caps} - what discovery shows before pairing; no status
@@ -45,6 +52,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -71,6 +79,14 @@ def load_json(path, default):
             return json.load(f)
     except (OSError, ValueError):
         return default
+
+
+def load_text(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
 
 
 def save_json(path, data):
@@ -295,12 +311,17 @@ class KdeBackend(Backend):
 class AndroidBackend(Backend):
     """A rooted PowOS phone's Linux session: Android reached through the session's own adb (lib/android.sh's
     127.0.0.1:5555). HACK: adb to itself is the rooted path only; the non-root path is the app's own agent
-    (ShellNet-side, docs/research/device-ecosystem.md D5) - real fix: the PowOS app serves this protocol itself."""
+    (DeviceAgent.kt, docs/research/device-ecosystem.md D5), which serves this same protocol from the PowOS app.
+    Real fix: the rooted phone runs the app's agent too and this backend goes (docs/REMOTE-POWOS.md section 4)."""
     kind = "phone"
     ADB = ["adb", "-s", "127.0.0.1:5555", "shell"]
+    RING = "/usr/share/sounds/freedesktop/stereo/phone-incoming-call.oga"
 
     def caps(self):
-        return ["status", "lock", "screen_on", "wake"]
+        c = ["status", "lock", "screen_off", "screen_on", "wake"]
+        if os.path.exists(self.RING) and shutil.which("paplay"):
+            c.append("ring")
+        return c
 
     def sh(self, *cmd):
         return run(self.ADB + list(cmd), timeout=6)
@@ -309,14 +330,40 @@ class AndroidBackend(Backend):
         rc, out = self.sh("dumpsys", "power")
         for line in out.splitlines():
             if "mWakefulness=" in line:
-                return "on" if "Awake" in line else "off"
+                return "on" if line.split("=", 1)[1].strip() == "Awake" else "off"  # Asleep, Dozing, Dreaming
         return None
 
+    def locked(self):
+        rc, out = self.sh("dumpsys", "window")
+        for line in out.splitlines():
+            if "isKeyguardShowing=" in line:
+                return line.split("=", 1)[1].strip().startswith("true")
+        return None
+
+    def power(self):
+        rc, out = self.sh("dumpsys", "battery")
+        if rc:
+            return Backend.power(self)
+        kv = {}
+        for line in out.splitlines():
+            if ":" in line:
+                k, v = line.split(":", 1)
+                kv.setdefault(k.strip(), v.strip())
+        plugged = any(kv.get(f"{w} powered") == "true" for w in ("AC", "USB", "Wireless", "Dock"))
+        lvl = kv.get("level", "")
+        return {"source": "ac" if plugged else "battery", "battery": int(lvl) if lvl.isdigit() else None,
+                "charging": kv.get("status") == "2", "accessories": []}  # BatteryManager.BATTERY_STATUS_CHARGING
+
+    def blockers(self):
+        return []  # a phone sleeps on its own; nothing here is put to sleep remotely
+
     def act(self, action, args, force=False):
-        if action == "lock":
+        if action in ("lock", "screen_off"):
             return self._ok(self.sh("input", "keyevent", "223"))  # KEYCODE_SLEEP: screen off, keyguard on
         if action == "screen_on":
-            return self._ok(self.sh("input", "keyevent", "224"))  # KEYCODE_WAKEUP
+            return self._ok(self.sh("input", "keyevent", "224"))  # KEYCODE_WAKEUP (stays locked)
+        if action == "ring":
+            return self._ok(run(["paplay", self.RING], timeout=15))
         return Backend.act(self, action, args, force)
 
 
@@ -329,7 +376,8 @@ def backend():
         forced = os.environ.get("POWOS_DEVICED_BACKEND")
         if forced:
             _backend = {"server": Backend, "desktop": KdeBackend, "phone": AndroidBackend}[forced]()
-        elif os.path.exists("/data/powos") or os.environ.get("POWOS_HOST") in ("phone", "phone-android"):
+        elif os.path.exists("/data/powos") or os.environ.get("POWOS_HOST") in ("phone", "phone-android") or \
+                load_text("/etc/powos/platform") == "phone":
             _backend = AndroidBackend()
         elif shutil.which("kscreen-doctor") and shutil.which("loginctl"):
             _backend = KdeBackend()
@@ -671,6 +719,154 @@ def cli_call(argv):
     return 0 if st == 200 else 1
 
 
+# ── enrollment: joining the realm through PowAuth (PowStation powos-enroll, docs/DEVICES.md) ────────────────
+
+REALM = os.environ.get("POWOS_ENROLL_URL", "http://enroll.pow")
+
+
+def enrollment_path():
+    return os.path.join(STATE, "enrollment.json")
+
+
+def realm_call(realm, path, body=None, token=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(realm.rstrip("/") + path, data=data, method="POST" if data is not None else "GET",
+                                 headers={"Content-Type": "application/json"})
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read() or b"{}")
+        except ValueError:
+            return e.code, {"error": f"http {e.code}"}
+
+
+def lan_address():
+    """The address other devices reach this one's agent on (the interface the default route uses)."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("192.168.50.1", 9))
+        return s.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        s.close()
+
+
+def platform_name():
+    p = load_text("/etc/powos/platform")
+    if p:
+        return p
+    for line in load_text("/etc/os-release").splitlines():
+        if line.startswith("ID="):
+            return line[3:].strip('"')
+    return sys.platform
+
+
+def enroll_request():
+    """What this device tells the realm about itself: identity, kind, caps, where its agent answers, its cert pin."""
+    i = public_info()
+    crt = os.path.join(STATE, "tls.crt")
+    pin = None
+    if os.path.exists(crt):
+        try:
+            pin = hashlib.sha256(ssl.PEM_cert_to_DER_cert(open(crt).read())).hexdigest()
+        except (OSError, ValueError):
+            pin = None
+    addr = lan_address()
+    port = config().get("port") or PORT
+    return {"id": i["id"], "name": i["name"], "kind": i["kind"], "platform": platform_name(), "caps": i["caps"],
+            "agent": f"https://{addr}:{port}" if addr else "", "cert_sha256": pin}
+
+
+def show_qr(url):
+    if shutil.which("qrencode") and sys.stdout.isatty():
+        subprocess.run(["qrencode", "-t", "ansiutf8", "-m", "1", url])
+
+
+def unit_record(e):
+    """The registry's record for this device (device-ecosystem.md D3): kind system, owner system:devices; no secret."""
+    d = e["device"]
+    return {"id": "powos-device", "name": f"This device's enrollment ({d['name']})", "kind": "system",
+            "owner": "system:devices",
+            "purpose": "this device's identity in the PowOS realm, approved through PowAuth (docs/DEVICES.md)",
+            "device": {"id": d["id"], "name": d["name"], "class": d.get("kind"), "platform": d.get("platform"),
+                       "caps": d.get("caps", []), "agent": d.get("agent"), "realm": e["realm"],
+                       "enrolled": time.strftime("%F", time.localtime(d.get("enrolled", 0))),
+                       "approved_by": d.get("approved_by"), "revoked": None, "holds": d.get("holds", [])},
+            "installedBy": "powos devices enroll",
+            "files": [enrollment_path()],
+            "remove": {"commands": ["powos devices unenroll"]}}
+
+
+def units_record_path():
+    return os.path.expanduser(os.environ.get("POWOS_DEVICE_UNIT", "~/.config/powos/units.d/powos-device.json"))
+
+
+def cli_enroll(argv):
+    realm = (opt(argv, "--realm") or REALM).rstrip("/")
+    if opt(argv, "--name"):
+        cfg = config()
+        cfg["name"] = opt(argv, "--name")
+        save_json(CONFIG, cfg)
+    tls_files()  # the agent's key exists before the realm records its pin
+    st, code = realm_call(realm, "/v1/device/code", enroll_request())
+    if st != 200:
+        raise SystemExit(f"powos-deviced: {realm} refused: {code.get('error_description') or code.get('error', st)}")
+    url = code["verification_uri_complete"]
+    print(f"To add this device, open on a device signed in to PowAuth:\n\n  {url}\n\nand check it shows the code"
+          f"\n\n  {code['user_code']}\n", flush=True)
+    show_qr(url)
+    interval, deadline = int(code.get("interval", 5)), now() + int(code.get("expires_in", 600))
+    while now() < deadline:
+        time.sleep(interval)
+        st, r = realm_call(realm, "/v1/device/token", {"device_code": code["device_code"]})
+        if st == 200:
+            break
+        err = r.get("error")
+        if err == "authorization_pending":
+            continue
+        if err == "slow_down":
+            interval += 5
+            continue
+        raise SystemExit(f"powos-deviced: not enrolled: {r.get('error_description') or err}")
+    else:
+        raise SystemExit("powos-deviced: nobody approved it in time - run enroll again")
+    e = {"realm": realm, "device": r["device"], "device_token": r["device_token"], "ai": r.get("ai"),
+         "endpoints": r.get("endpoints", {}), "at": int(now())}
+    save_json(enrollment_path(), e)
+    save_json(units_record_path(), unit_record(e))
+    os.chmod(units_record_path(), 0o644)
+    print(f"enrolled: {e['device']['name']} ({e['device']['id']}), approved by {e['device'].get('approved_by')}"
+          + (f"; AI: its own token for {e['ai']['tenant']} (powos devices ai-apply)" if e.get("ai") else "; no AI access"))
+    if "--apply-ai" in argv and e.get("ai"):
+        return cli_ai_apply()
+    return 0
+
+
+def enrolled():
+    e = load_json(enrollment_path(), None)
+    if not e:
+        raise SystemExit("powos-deviced: this device isn't enrolled (powos devices enroll)")
+    return e
+
+
+def cli_ai_apply():
+    """endpoint.conf = claude-auth + this device's own token (lib/config.sh cfg_endpoint_write; sudo for /etc)."""
+    e = enrolled()
+    if not e.get("ai"):
+        raise SystemExit("powos-deviced: this device was enrolled without AI access")
+    lib = os.environ.get("POWOS_LIB", "/usr/lib/powos")
+    env = dict(os.environ, POWOS_AI_URL=e["ai"]["base_url"], POWOS_AI_TOKEN=e["ai"]["token"])
+    r = subprocess.run(["bash", "-c", 'source "$1/config.sh" && cfg_endpoint_write "$POWOS_AI_URL" "$POWOS_AI_TOKEN"',
+                        "ai-apply", lib], env=env)
+    print("AI: this device now uses its own token" if r.returncode == 0 else "AI: not applied (needs sudo)")
+    return r.returncode
+
+
 def main(argv):
     cmd = argv[0] if argv else "help"
     rest = argv[1:]
@@ -698,6 +894,33 @@ def main(argv):
             print(f"{k}  {v['name']} ({v['kind']})  {v['url']}")
     elif cmd == "call":
         return cli_call(rest)
+    elif cmd == "enroll":
+        return cli_enroll(rest)
+    elif cmd == "enrollment":
+        e = enrolled()
+        print(json.dumps({"realm": e["realm"], "device": e["device"], "ai": e.get("ai") and {"tenant": e["ai"]["tenant"],
+                          "base_url": e["ai"]["base_url"]}, "endpoints": e.get("endpoints")}, indent=1))
+    elif cmd == "registry":
+        e = enrolled()
+        st, r = realm_call(e["realm"], "/v1/devices", token=e["device_token"])
+        if st != 200:
+            raise SystemExit(f"powos-deviced: {r.get('error_description') or r.get('error', st)}")
+        for d in r["devices"]:
+            state = "revoked" if d.get("revoked") else "enrolled"
+            print(f"{d['id']}  {d['name']} ({d.get('kind')}, {d.get('platform')})  {state}  {d.get('agent') or ''}")
+    elif cmd == "unenroll":
+        e = enrolled()
+        st, r = realm_call(e["realm"], "/v1/devices/self/unenroll", {}, token=e["device_token"])
+        if st != 200 and st != 401:
+            raise SystemExit(f"powos-deviced: {r.get('error_description') or r.get('error', st)}")
+        for f in (enrollment_path(), units_record_path()):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+        print("unenrolled: this device's realm and AI tokens no longer work")
+    elif cmd == "ai-apply":
+        return cli_ai_apply()
     else:
         print(__doc__.split("Protocol")[0].strip())
         return 0 if cmd in ("help", "-h", "--help") else 2

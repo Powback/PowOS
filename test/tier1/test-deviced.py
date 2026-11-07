@@ -189,9 +189,83 @@ finally:
     builtins.input = orig_input
 
 httpd.shutdown()
+
+# Enrollment (powos devices enroll) against a stand-in realm speaking PowStation powos-enroll's device flow: pending
+# once, slow_down once, then approved. The tokens land only in the 0600 enrollment file; the units.d record has none.
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer as _TS
+
+realm_log, polls = [], []
+
+
+class Realm(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def answer(self, code, data):
+        b = json.dumps(data).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
+    def do_GET(self):
+        ok = self.headers.get("Authorization") == "Bearer realm-tok"
+        self.answer(200 if ok else 401, {"devices": [{"id": "x", "name": "Desk", "kind": "desktop"}]} if ok else {"error": "invalid_token"})
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+        realm_log.append((self.path, body))
+        if self.path == "/v1/device/code":
+            return self.answer(200, {"device_code": "dc", "user_code": "BCDF-GHJK", "interval": 0, "expires_in": 30,
+                                     "verification_uri": "https://enroll.example/approve",
+                                     "verification_uri_complete": "https://enroll.example/approve?code=BCDF-GHJK"})
+        if self.path == "/v1/device/token":
+            polls.append(1)
+            if len(polls) == 1:
+                return self.answer(400, {"error": "authorization_pending"})
+            return self.answer(200, {"device": {**realm_log[0][1], "enrolled": 1794000000, "approved_by": "mats",
+                                                "holds": ["enroll:device-token", "claude-auth:default"]},
+                                     "device_token": "realm-tok", "endpoints": {"store": "http://android.pow"},
+                                     "ai": {"base_url": "http://claude-auth.pow", "token": "powdev-secret", "tenant": "default"}})
+        if self.path == "/v1/devices/self/unenroll":
+            return self.answer(200 if self.headers.get("Authorization") == "Bearer realm-tok" else 401, {"revoked": True})
+        self.answer(404, {})
+
+
+rs = _TS(("127.0.0.1", 0), Realm)
+threading.Thread(target=rs.serve_forever, daemon=True).start()
+realm = f"http://127.0.0.1:{rs.server_address[1]}"
+os.environ["POWOS_DEVICE_UNIT"] = os.path.join(work, "units.d", "powos-device.json")
+rc = d.cli_enroll(["--realm", realm])
+check(rc == 0, f"enroll rc {rc}")
+sent = realm_log[0][1]
+check(sent["id"] == d.identity()["id"] and sent["caps"] == d.backend().caps() and len(sent.get("cert_sha256") or "") == 64,
+      f"enroll sends id, caps and its agent's cert pin: {sent}")
+e = json.load(open(d.enrollment_path()))
+check(e["device_token"] == "realm-tok" and e["ai"]["token"] == "powdev-secret", "enrollment keeps both tokens")
+check(oct(os.stat(d.enrollment_path()).st_mode & 0o777) == "0o600", "enrollment.json is 0600")
+unit = open(os.environ["POWOS_DEVICE_UNIT"]).read()
+check("realm-tok" not in unit and "powdev-secret" not in unit and json.loads(unit)["device"]["approved_by"] == "mats",
+      "the units.d record carries the device, never a token")
+check(json.loads(unit)["owner"] == "system:devices" and json.loads(unit)["kind"] == "system", "units.d record shape")
+import io
+import contextlib
+out = io.StringIO()
+with contextlib.redirect_stdout(out):
+    d.main(["enrollment"])
+    d.main(["registry"])
+check("powdev-secret" not in out.getvalue() and "realm-tok" not in out.getvalue() and "Desk" in out.getvalue(),
+      "enrollment/registry print no secret")
+with contextlib.redirect_stdout(io.StringIO()):
+    d.main(["unenroll"])
+check(not os.path.exists(d.enrollment_path()) and not os.path.exists(os.environ["POWOS_DEVICE_UNIT"]),
+      "unenroll drops the enrollment and its units.d record")
+rs.shutdown()
+
 shutil.rmtree(work, ignore_errors=True)
 if fails:
     for f in fails:
         print("FAIL", f)
     sys.exit(1)
-print("ok deviced: info/pair/confirm/status/action/revoke/pin")
+print("ok deviced: info/pair/confirm/status/action/revoke/pin/enroll/unenroll")
