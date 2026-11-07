@@ -14167,11 +14167,12 @@ async function settleNeedsMe(r) {
 async function settleDevices(r) {
   try {
     await r.page.evaluate(() => new Promise((ok) => (window.importShim ? ok() : addEventListener("load", ok))));
-    await r.page.evaluate([dvWait, dvType, dvLine, dvFails, dvAgent, dvLock, dvLockAsk, dvLockDecline, dvLockGrant, dvLockStop, dvSleep].map((f) => `window.${f.name} = ${f}`).join(";\n"));
-    for (const step of [dvMount, dvThisPhone, dvPair, dvPaired, dvOptimistic, dvRollback, dvBusy]) {
+    await r.page.evaluate([dvWait, dvType, dvLine, dvFails, dvAgent, dvJoinAgent, dvTxt, dvLock, dvLockAsk, dvLockDecline, dvLockGrant, dvLockStop, dvSleep].map((f) => `window.${f.name} = ${f}`).join(";\n"));
+    for (const step of [dvMount, dvThisPhone, dvPair, dvPaired, dvOptimistic, dvRollback, dvBusy, dvJoin, dvJoinDeny, dvMember]) {
       const out = await r.page.evaluate(step);
       r.problems.push(...out);
-      if (out.length && step !== dvOptimistic && step !== dvBusy && step !== dvRollback && step !== dvThisPhone) break;
+      if (step === dvJoinDeny) await r.page.screenshot({ path: "/cache/devices-join.png" }).catch(() => {});
+      if (out.length && ![dvOptimistic, dvBusy, dvRollback, dvThisPhone, dvJoin, dvJoinDeny, dvMember].includes(step)) break;
     }
     await r.page.screenshot({ path: "/cache/devices-folded.png" }).catch(() => {});
   } catch (e) {
@@ -14200,6 +14201,47 @@ function dvFails(checks) {
   return checks.filter(([ok]) => !ok).map(([, why]) => why);
 }
 
+/**
+ * The mock agent's realm side: this device enrolled as an approver (its agent's /v1/enroll/*), two devices waiting,
+ * the Pixel already paired; the first Deny and the first Revoke fail once (rollback); the registry starts without the
+ * Desk (paired only).
+ */
+function dvJoinAgent(sleep, reply) {
+  const realm = { enrolled: true, approver: true, here: true };
+  const join = {
+    waiting: [
+      { user_code: "BCDF-GHJK", device: { id: "phone9", name: "Pixel", kind: "phone", platform: "android" }, expires_in: 540, paired: true },
+      { user_code: "MNPQ-RSTV", device: { id: "tv1", name: "Living room TV", kind: "tv" }, expires_in: 300, paired: false },
+    ],
+    devices: [{ id: "phone9", name: "Pixel" }],
+    decided: [],
+    denyFails: true,
+    revokeFails: true,
+    revoked: [],
+  };
+  const decide = async (init) => {
+    const b = JSON.parse(init.body);
+    await sleep(600);
+    if (b.decision === "deny" && join.denyFails) return (join.denyFails = false), reply(502, { ok: false, error: "the realm (http://enroll.pow) isn't reachable", code: "offline" });
+    join.decided.push(b);
+    join.waiting = join.waiting.filter((w) => w.user_code !== b.code);
+    return reply(200, { state: b.decision === "approve" ? "approved" : "denied" });
+  };
+  const revokeIt = async (init) => {
+    await sleep(400);
+    if (join.revokeFails) return (join.revokeFails = false), reply(403, { ok: false, error: "this device may not approve or revoke devices", code: "forbidden" });
+    join.revoked.push(JSON.parse(init.body).id);
+    return reply(200, { revoked: true });
+  };
+  const ENROLL = {
+    "/v1/enroll/pending": () => reply(200, { pending: join.waiting }),
+    "/v1/enroll/devices": () => reply(200, { devices: join.devices }),
+    "/v1/enroll/approve": decide,
+    "/v1/enroll/revoke": revokeIt,
+  };
+  return { realm, join, ENROLL };
+}
+
 /** A mock device agent (lib/devices/powos-deviced v1): a PC, its status, actions answered after 600 ms. */
 function dvAgent() {
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
@@ -14222,7 +14264,12 @@ function dvAgent() {
     return ACT[a]?.(a) ?? reply(404, { ok: false, error: "can't", code: "unsupported" });
   };
   const OPEN = { "/v1/info": () => reply(200, dev), "/v1/pair": () => reply(200, { request: "r1", expires_s: 120 }), "/v1/pair/confirm": confirm };
-  const AUTHED = { "/v1/status": () => reply(200, { ...dev, status: st }), "/v1/action": action };
+  const { realm, join, ENROLL } = dvJoinAgent(sleep, reply);
+  const AUTHED = {
+    "/v1/status": () => reply(200, { ...dev, status: st, realm }),
+    "/v1/action": action,
+    ...ENROLL,
+  };
   const fetch = async (_app, url, init = {}) => {
     const path = url.replace(/^https:\/\/[^/]+/, "");
     const auth = init.headers?.Authorization;
@@ -14248,7 +14295,7 @@ function dvAgent() {
     },
     onLock: (f) => (lock.on.add(f), () => lock.on.delete(f)),
   };
-  return { host: { net: { fetch, mdns, forget: async () => {} }, thisDevice }, calls, st, TPL, lock, fire };
+  return { host: { net: { fetch, mdns, forget: async () => {} }, thisDevice }, calls, st, TPL, lock, fire, join };
 }
 
 /** The page mounted fresh on the mock agent: the PC on mDNS offered for pairing, the page in the UI font. */
@@ -14413,6 +14460,93 @@ async function dvBusy() {
   card.querySelector('[data-action="sleep"]').click();
   const err = await dvWait('[data-device="desk1"] [data-device-error]');
   return dvFails([[/llama-swap/.test(err?.textContent ?? ""), `sleep while busy shows "${err?.textContent ?? "nothing"}", want what would stop`], [card.querySelector("[data-force]"), "sleep while busy offers no Sleep anyway"]]);
+}
+
+/** In the page: the text of [sel] under the Devices root ("" when it isn't there). */
+function dvTxt(sel) {
+  const el = window.__dv.root.querySelector(sel);
+  return el ? el.textContent : "";
+}
+
+/**
+ * "New device wants to join" (this device enrolled as an approver): each waiting device's code shown big to match
+ * with its own screen, a paired one marked; Approve shows the result at once while the realm answers, and keeps it.
+ */
+async function dvJoin() {
+  const { root, join, calls, TPL } = window.__dv;
+  const card = await dvWait("[data-join]", 3000);
+  if (!card) return [`an approver shows no "New device wants to join" card: "${root.textContent.slice(0, 200)}"`];
+  const codes = [...card.querySelectorAll("[data-join-code]")].map((c) => c.textContent).join(",");
+  const size = parseFloat(getComputedStyle(card.querySelector("[data-join-code]")).fontSize);
+  const body = parseFloat(getComputedStyle(root.querySelector("[data-devices]")).fontSize);
+  const row = '[data-waiting="BCDF-GHJK"]';
+  const marked = dvTxt(row);
+  root.querySelector(`${row} [data-join-approve]`).click();
+  await dvSleep(100);
+  const early = dvTxt(`${row} [data-join-result]`);
+  await dvSleep(900);
+  const kept = `${root.querySelector(row)?.dataset.state} ${dvTxt(row)}`;
+  const sent = JSON.stringify(join.decided[0]);
+  return dvFails([
+    [codes === "BCDF-GHJK,MNPQ-RSTV", `the card shows codes "${codes}", want both waiting devices' codes`],
+    [size >= body * 1.8, `the code is ${size}px on a ${body}px page - not big enough to match at a glance`],
+    [/paired with this device/.test(marked), `a paired device asking to join isn't marked paired: "${marked}"`],
+    [/Approved - Pixel is joining/.test(early), `100 ms after Approve the row says "${early}" (want the result at once)`],
+    [/^done .*Approved/.test(kept), `after the realm took it the row is "${kept}"`],
+    [sent === '{"code":"BCDF-GHJK","decision":"approve"}', `the realm got ${sent}`],
+    [calls.filter((c) => c.path.startsWith("/v1/enroll/")).every((c) => c.auth === TPL), "an enroll call went without this device's token template"],
+  ]);
+}
+
+/** Deny that the realm doesn't take: shown denied at once, rolled back with the realm's words, Try again denies it. */
+async function dvJoinDeny() {
+  const { root, join } = window.__dv;
+  const row = '[data-waiting="MNPQ-RSTV"]';
+  root.querySelector(`${row} [data-join-deny]`).click();
+  await dvSleep(100);
+  const early = dvTxt(`${row} [data-join-result]`);
+  const err = await dvWait(`${row} [data-join-error]`, 2000);
+  const words = dvTxt(`${row} [data-join-error]`);
+  const kept = dvTxt(`${row} [data-join-result]`);
+  err?.querySelector("[data-join-retry]")?.click();
+  await dvSleep(900);
+  const denied = join.decided.some((b) => b.code === "MNPQ-RSTV" && b.decision === "deny");
+  return dvFails([
+    [/Denied/.test(early), `100 ms after Deny the row says "${early}" (want "Denied" at once)`],
+    [/isn't reachable/.test(words) && !kept, `a failed Deny shows "${words}" / "${kept}", want the realm's words and no result kept`],
+    [denied && /Denied/.test(dvTxt(row)), `Try again didn't deny it (${JSON.stringify(join.decided)})`],
+  ]);
+}
+
+/**
+ * The Desk's place in the realm: paired only -> how it enrolls; enrolled (the registry says so on the next poll) ->
+ * Revoke, asked once, shown revoked at once, a refusal rolled back with why, then revoked and forgotten here.
+ */
+async function dvMember() {
+  const { root, join } = window.__dv;
+  const card = '[data-device="desk1"]';
+  await dvWait(`${card} [data-not-enrolled]`, 4000);
+  const hint = dvTxt(`${card} [data-not-enrolled]`);
+  join.devices.push({ id: "desk1", name: "Desk" });
+  const btn = await dvWait(`${card} [data-revoke]`, 4500);
+  const revoke = async () => {
+    root.querySelector(`${card} [data-revoke]`)?.click();
+    (await dvWait(`${card} [data-revoke-yes]`))?.click();
+  };
+  await revoke();
+  await dvSleep(100);
+  const early = dvTxt(`${card} [data-revoked]`);
+  await dvWait(`${card} [data-revoke-error]`, 2000);
+  const err = dvTxt(`${card} [data-revoke-error]`);
+  await revoke();
+  await dvSleep(700);
+  return dvFails([
+    [/powos devices enroll/.test(hint), `a paired-only device doesn't say how it enrolls ("${hint}")`],
+    [btn, "an enrolled device has no Revoke"],
+    [/Revoked/.test(early), `100 ms after Revoke the card says "${early}" (want revoked at once)`],
+    [/may not approve/.test(err), `a refused Revoke shows "${err}", want the realm's words`],
+    [join.revoked[0] === "desk1" && !root.querySelector(card), `Revoke again didn't revoke and forget it (${JSON.stringify(join.revoked)})`],
+  ]);
 }
 
 /** App API's page (above): mounted on a mock runtime, checked for its fonts, shot folded and unfolded, list and app. */

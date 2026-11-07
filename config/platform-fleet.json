@@ -24,6 +24,9 @@
     },
     {
       "compose": "../../PowStation/docker-compose.yaml"
+    },
+    {
+      "compose": "../../PowStation/enroll/docker-compose.yml"
     }
   ]
 }

@@ -50,7 +50,20 @@ export interface Status {
   locked: boolean | null;
   busy?: string[];
   nics?: Nic[];
+  /** This device's enrollment in the realm as its agent says it (no token): an approver, and whether this app runs on it. */
+  realm?: Realm;
 }
+export interface Realm { enrolled: boolean; approver: boolean; here: boolean }
+/** A device waiting to join the realm (its agent's /v1/enroll/pending): the code its own screen shows. */
+export interface Waiting {
+  user_code: string;
+  device: { id: string; name: string; kind?: string; platform?: string };
+  from?: string;
+  expires_in: number;
+  /** Already paired with the approving device: a paired-only device upgrading to enrolled. */
+  paired?: boolean;
+}
+export interface Enrolled { id: string; name: string; revoked?: number | null }
 export interface Found { name: string; url: string; id: string; kind: string }
 
 const KEY = "powos.devices.v1";
@@ -123,8 +136,8 @@ async function call<T>(net: Net | undefined, url: string, init: Parameters<Net["
 export const info = (net: Net | undefined, url: string) => call<{ id: string; name: string; kind: string; caps: Cap[] }>(net, `${url}/v1/info`);
 
 export async function status(net: Net | undefined, d: Device): Promise<Status & { caps: Cap[] }> {
-  const r = await call<{ caps: Cap[]; status: Status }>(net, `${d.url}/v1/status`, { headers: auth(d.id) });
-  return { ...r.status, caps: r.caps };
+  const r = await call<{ caps: Cap[]; status: Status; realm?: Realm }>(net, `${d.url}/v1/status`, { headers: auth(d.id) });
+  return { ...r.status, caps: r.caps, ...(r.realm && { realm: r.realm }) };
 }
 
 export function act(net: Net | undefined, d: Device, action: Cap, opts: { force?: boolean; args?: Record<string, string> } = {}) {
@@ -190,4 +203,33 @@ export function expected(s: Status | undefined, action: Cap): Partial<Status> {
 export function waker(target: Device, list: Device[], live: Record<string, Status | undefined>): Device | null {
   if (!target.wakeMac) return null;
   return list.find((d) => d.id !== target.id && d.caps.includes("wake") && live[d.id]?.online) ?? null;
+}
+
+/**
+ * The realm through the approver: the paired agent on THIS device whose enrollment may approve (lib/devices/powos-deviced
+ * /v1/enroll/*, refused to callers on other devices). Approving uses that device's enrollment, never a token here.
+ */
+export const approverOf = (list: Device[], live: Record<string, Status | undefined>) =>
+  list.find((d) => live[d.id]?.online && live[d.id]?.realm?.approver && live[d.id]?.realm?.here) ?? null;
+
+export const waiting = (net: Net | undefined, by: Device) =>
+  call<{ pending: Waiting[] }>(net, `${by.url}/v1/enroll/pending`, { headers: auth(by.id) }).then((r) => r.pending ?? []);
+
+export const enrolledDevices = (net: Net | undefined, by: Device) =>
+  call<{ devices: Enrolled[] }>(net, `${by.url}/v1/enroll/devices`, { headers: auth(by.id) }).then((r) => r.devices ?? []);
+
+export function decide(net: Net | undefined, by: Device, code: string, decision: "approve" | "deny") {
+  return call<{ state: string }>(net, `${by.url}/v1/enroll/approve`, {
+    method: "POST",
+    headers: { ...auth(by.id), "content-type": "application/json" },
+    body: JSON.stringify({ code, decision }),
+  });
+}
+
+export function revokeEnrolled(net: Net | undefined, by: Device, id: string) {
+  return call<{ revoked: boolean }>(net, `${by.url}/v1/enroll/revoke`, {
+    method: "POST",
+    headers: { ...auth(by.id), "content-type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
 }

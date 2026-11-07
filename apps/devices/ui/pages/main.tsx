@@ -4,12 +4,14 @@
  * same page works for a PC, a phone, a TV. A tap shows the result at once (optimistic) and rolls back with the
  * device's own words and a retry if it refused. Pairing: a code shown on the other device's screen, typed here.
  * lib/devices.ts is the protocol, lib/live.ts the polling and actions; docs/research/device-ecosystem.md the design.
+ * On a device enrolled as an approver, lib/join.tsx: new devices asking to join (Approve / Deny) and Revoke per device.
  */
 import { useState } from "preact/hooks";
-import { forget, load, save, type Cap, type Device, type Host, type Status } from "../lib/devices";
+import { approverOf, forget, load, save, type Cap, type Device, type Host, type Status } from "../lib/devices";
 import { canWake, useActions, useLive, type Live, type Pending } from "../lib/live";
 import { AddDevice } from "../lib/add";
 import { ThisPhone } from "../lib/thisphone";
+import { Join, useRealm } from "../lib/join";
 import { KIND, S } from "../lib/ui";
 
 interface Props {
@@ -37,6 +39,12 @@ export default function Main({ host, close }: Props) {
   const liveState = useLive(net, list, update);
   const live = liveState.live;
   const { pending, run, dismiss } = useActions(net, list, liveState);
+  const by = approverOf(list, Object.fromEntries(Object.entries(live).map(([k, v]) => [k, v.s])));
+  const realm = useRealm(net, by);
+  const drop = (d: Device) => {
+    update(list.filter((x) => x.id !== d.id));
+    forget(net, d);
+  };
   return (
     <div style={S.page} data-devices>
       <header style={S.head}>
@@ -44,6 +52,7 @@ export default function Main({ host, close }: Props) {
         <h1 style={S.title}>Devices</h1>
       </header>
       <ThisPhone dev={host.thisDevice} />
+      <Join net={net} by={by} />
       {list.length === 0 && <div style={S.muted}>No devices yet. Add one below: it shows a code on its own screen.</div>}
       {list.map((d) => (
         <DeviceCard
@@ -54,9 +63,11 @@ export default function Main({ host, close }: Props) {
           wake={canWake(d, list, live)}
           run={(a, force) => run(d, a, force)}
           dismiss={() => dismiss(d.id)}
-          remove={() => {
-            update(list.filter((x) => x.id !== d.id));
-            forget(net, d);
+          remove={() => drop(d)}
+          enrolled={by && realm.enrolled ? realm.enrolled.has(d.id) : null}
+          revoke={async () => {
+            await realm.revoke(d.id);
+            drop(d);
           }}
         />
       ))}
@@ -79,7 +90,7 @@ function actionsFor(d: Device, s: Status | undefined, wake: boolean): Cap[] {
   return (["lock", screen, "sleep", "ring"] as Cap[]).filter((a) => d.caps.includes(a));
 }
 
-function DeviceCard({ d, live, pending, wake, run, dismiss, remove }: {
+function DeviceCard({ d, live, pending, wake, run, dismiss, remove, enrolled, revoke }: {
   d: Device;
   live?: Live;
   pending?: Pending;
@@ -87,6 +98,9 @@ function DeviceCard({ d, live, pending, wake, run, dismiss, remove }: {
   run: (a: Cap, force?: boolean) => void;
   dismiss: () => void;
   remove: () => void;
+  /** In the realm (this device an approver): true enrolled, false paired only; null = not known here. */
+  enrolled: boolean | null;
+  revoke: () => Promise<void>;
 }) {
   const shown = shownStatus(live, pending);
   const actions = actionsFor(d, shown, wake);
@@ -102,6 +116,45 @@ function DeviceCard({ d, live, pending, wake, run, dismiss, remove }: {
       </div>
       {actions.length > 0 && <Actions actions={actions} pending={pending} run={run} />}
       {pending?.error && <Refused pending={pending} run={run} dismiss={dismiss} />}
+      {enrolled !== null && <Membership name={d.name} enrolled={enrolled} revoke={revoke} />}
+    </div>
+  );
+}
+
+type RevokeState = "idle" | "confirm" | "sending" | { error: string };
+
+/**
+ * A device's place in the realm, seen from an approver: enrolled -> Revoke (asked once: its realm and AI tokens stop
+ * at once, and this device forgets it), shown revoked the moment it's confirmed, rolled back with the realm's words;
+ * paired only -> how it joins (`powos devices enroll` on it, then approve it here).
+ */
+function Membership({ name, enrolled, revoke }: { name: string; enrolled: boolean; revoke: () => Promise<void> }) {
+  const [st, setSt] = useState<RevokeState>("idle");
+  if (!enrolled && st !== "sending") return <div style={S.muted} data-not-enrolled>Paired, not enrolled - run powos devices enroll on it, then approve it here</div>;
+  const go = async () => {
+    setSt("sending");
+    try {
+      await revoke();
+    } catch (e) {
+      setSt({ error: (e as Error).message });
+    }
+  };
+  if (st === "sending") return <div style={S.muted} data-revoked>Revoked - {name} is out of the realm</div>;
+  if (st === "confirm")
+    return (
+      <div style={S.confirm} data-revoke-confirm>
+        <div>Revoke {name}? Its realm and AI tokens stop at once, and this device forgets it.</div>
+        <div style={S.actions}>
+          <button style={S.btn} data-revoke-yes onClick={go}>Revoke</button>
+          <button style={S.ghost} onClick={() => setSt("idle")}>Cancel</button>
+        </div>
+      </div>
+    );
+  return (
+    <div style={S.row}>
+      <div style={{ ...S.muted, ...S.grow }}>Enrolled</div>
+      {typeof st === "object" && <div style={S.errorText} data-revoke-error>Revoke: {st.error}</div>}
+      <button style={S.ghost} data-revoke onClick={() => setSt("confirm")}>{typeof st === "object" ? "Try again" : "Revoke"}</button>
     </div>
   );
 }

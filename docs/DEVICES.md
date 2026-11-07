@@ -12,7 +12,7 @@ Every PowOS device (desktop, laptop, handheld, phone rooted or not, TV, server) 
 | enrollment | `powos devices enroll` + PowStation `enroll/powos-enroll.py` (`enroll.pow` only, LAN/VPN; no public route) | the device's identity in the realm, approved by an already-enrolled approver device or by the owner on the server; returns the device's own realm token, its own AI token, the endpoints bundle |
 | AI per device | claude-rate-limiter `src/enrolled-devices.ts` | the authority maps each enrolled device's own bearer to a tenant, so one device is revoked without rotating the tenant secret |
 | registry | `~/.config/powos/units.d/powos-device.json` on the device (`powos units`), the realm's `registry.json` on PowStation (`powos devices registry`) | which devices exist, their caps and agent address, who approved them, what they hold |
-| Devices app | `apps/devices` (bundled, every surface) | paired devices with live status and actions |
+| Devices app | `apps/devices` (bundled, every surface) | paired devices with live status and actions; on an approver, new devices asking to join (Approve / Deny) and Revoke per device |
 
 ## How a new device joins
 
@@ -26,13 +26,25 @@ comes from a device the realm already trusts, never from a browser session.
      `docker exec powos-enroll powos-enroll pending` then
      `docker exec powos-enroll powos-enroll approve BCDF-GHJK [--tenant default] [--no-approver]`. This talks to a
      loopback-only admin port inside the container (per-start secret), so only a shell on PowStation can use it.
-   - **Any later device**: from an enrolled *approver* device (the Devices app; approvers are the default, a TV or
-     test box can be enrolled `--no-approver`), with that device's own token on `enroll.pow`:
-     `GET /v1/devices/pending`, then `POST /v1/devices/approve {code, decision: approve|deny, tenant?, approver?}`.
-     Check the code matches the one on the new device, pick its AI subscription (or none). HACK: the Devices app's
-     Approve button and a `powos devices approve` CLI are not built yet (PowOS side); until then use the server CLI.
-     Real fix: that button over the API above.
-   A device that is only *paired* (not enrolled) can't approve; enroll it first (the owner approves it on the server).
+   - **Any later device**: from an enrolled *approver* device (approvers are the default; a TV or test box can be
+     enrolled `--no-approver`), using that device's own enrollment token - never one typed anywhere:
+     - **The Devices app** on the approver shows **New device wants to join**: each waiting device with its code shown
+       big, its kind and platform, and "paired with this device" when it already was; **Approve** / **Deny**. Match
+       the code with the one on the new device's screen first. Live (polled every 3 s while shown) and optimistic: the
+       result shows at once, a refusal rolls back with the realm's words and a Try again. The app approves without an
+       AI subscription; the CLI below picks one.
+     - **The CLI** on the approver: `powos devices pending`, then `powos devices approve BCDF-GHJK [--tenant default]
+       [--no-approver] [--deny]` (no code: the only device waiting, after a yes).
+     Both go through the approver's own agent (`powos-deviced`: `/v1/enroll/pending|approve|devices|revoke`), which
+     calls `enroll.pow`'s `GET /v1/devices/pending` / `POST /v1/devices/approve {code, decision, tenant?, approver?}`
+     with its enrollment token. The agent answers `/v1/enroll/*` only to a caller on the same device (loopback or its
+     own address): pairing grants control of a device, never the right to approve others through it. `/v1/status`
+     says `realm: {enrolled, approver, here}` (no token), which is how the app knows to show the card - only on a
+     device whose enrollment is an approver, and only to the app running on it (the app pairs with its own device's
+     agent once, like any other device: Add a device, this device's address, the code shown here).
+   **A device that is only paired** upgrades the same way: `powos devices enroll` on it, approved by the owner on the
+   server or by any approver (the card and `pending` mark it "paired with this device"). Pairings stay as they were;
+   once it is enrolled it can approve others too (unless approved `--no-approver`).
 3. The new device finishes by itself: it stores its enrollment (`~/.local/state/powos/deviced/enrollment.json`, 0600),
    registers `powos-device` in its `units.d`, and prints `enrolled: <name>`. `--apply-ai` (or later
    `powos devices ai-apply`) points its AI at claude-auth with **its own** token (`/etc/powos/ai/endpoint.conf`).
@@ -41,10 +53,12 @@ comes from a device the realm already trusts, never from a browser session.
 
 The service re-checks the presented device token (hash, not revoked, approver flag) on every request; nothing is cached.
 
-Leave: `powos devices unenroll` (its realm and AI tokens stop at once). Revoke a lost device: from an approver device
-`POST /v1/devices/revoke {id}`, or on the server `docker exec powos-enroll powos-enroll revoke <id>` (`forget <id>`
-then drops the revoked row); and on each device it was paired with, `powos devices revoke <id>` or the Devices app's
-Forget.
+Leave: `powos devices unenroll` (its realm and AI tokens stop at once). Revoke a lost device: on an approver,
+`powos devices revoke <id|name>` (drops its pairing with this device and revokes it in the realm; `--local` only the
+pairing) or the Devices app's **Revoke** on its card (asked once, shown revoked at once, rolled back if the realm
+refuses; the card then goes); on the server `docker exec powos-enroll powos-enroll revoke <id>` (`forget <id>` then
+drops the revoked row). On each other device it was paired with, `powos devices revoke <id> --local` or Forget.
+A paired card on an approver that isn't enrolled says how it joins.
 
 **No hub (offline, a new LAN):** pairing alone still works - two devices on one LAN pair with the code on the target's
 screen and stay "paired, not enrolled".
@@ -112,10 +126,14 @@ curl -H 'Host: enroll.pow' http://192.168.50.100/healthz                       #
 
 - One route: `enroll.pow` (`/v1/*`, `/healthz`) on `local-only@docker`; the fleet-wide `pow-local-only` router
   (priority 1000000000) answers 403 to any non-LAN/VPN source before it. `enroll.powback.com` has no router (404).
-- Then add `../../PowStation/enroll/docker-compose.yml` to `config/platform-fleet.json` and run the fleet check.
+- In the fleet manifest `config/platform-fleet.json` (`../../PowStation/enroll/docker-compose.yml`, project
+  `powos-enroll`); `pow-compose fleet --manifest PowOS/config/platform-fleet.json --json` checks it with the others
+  (ok 2026-11-07; the path resolves once PowStation `agent/devices-enroll` is merged into its main checkout).
 - Per-device AI needs the claude-rate-limiter authority with `src/enrolled-devices.ts` (branch
   `agent/devices-enroll`). Until that is deployed a device token is an unknown bearer to the authority (the host
   subscription by fallback, or a 401 with `AUTH_REQUIRE_TENANT`), so don't `ai-apply` before it is.
 
-Tests: `test/tier1/test-deviced.py` (agent + enroll client), `DeviceAgentCoreTest` + `LockActionsTest` (the no-root agent),
+Tests: `test/tier1/test-deviced.py` (agent + enroll client), `test/tier1/test-deviced-approve.py` (pending/approve/
+revoke CLI and `/v1/enroll/*`, approver-only, same-device-only), the gate's `app local.devices` (`dvJoin`,
+`dvJoinDeny`, `dvMember`), `DeviceAgentCoreTest` + `LockActionsTest` (the no-root agent),
 PowStation `enroll/test_powos_enroll.py` (the realm side), claude-rate-limiter `npm run test:enrolled`.

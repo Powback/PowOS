@@ -11,7 +11,6 @@ devices ask for (lock, screen off/on, sleep, wake another device by Wake-on-LAN,
   powos-deviced info | status            this device's card / live status (JSON)
   powos-deviced codes                    pairing requests waiting here, with their codes (a person reads one out)
   powos-deviced peers                    devices that may control this one
-  powos-deviced revoke <peer-id>         one of them may no longer (its token stops working at once)
   powos-deviced pair <https://host:port> [--code N]   pair this device's CLI with another device's agent
   powos-deviced devices                  devices this CLI has paired with
   powos-deviced call <device> <action> [--force]      run an action there (status, lock, screen_off, ...)
@@ -22,6 +21,11 @@ devices ask for (lock, screen off/on, sleep, wake another device by Wake-on-LAN,
   powos-deviced registry                 every enrolled device of the realm (asks the realm with this device's token)
   powos-deviced unenroll                 leave the realm (revokes this device's realm and AI tokens there)
   powos-deviced ai-apply                 point this device's AI at claude-auth with ITS OWN token (endpoint.conf)
+  powos-deviced pending                  devices waiting to join the realm (this device enrolled as an approver)
+  powos-deviced approve [code] [--deny] [--tenant T] [--no-approver]   let one join (no code: the only one waiting,
+                                         after a yes; check the code matches the one on the new device's screen)
+  powos-deviced revoke <device> [--local]   a device may no longer control this one, and (an approver) is revoked in
+                                         the realm: its realm and AI tokens stop at once; --local only the first
 
 Protocol (v1; JSON over HTTPS):
   GET  /v1/info            no auth: {id, name, kind, v, caps} - what discovery shows before pairing; no status
@@ -32,6 +36,12 @@ Protocol (v1; JSON over HTTPS):
   POST /v1/action          Bearer token: {action, force?, args?} -> {ok, result | error}
   GET  /v1/peers           Bearer token
   DELETE /v1/peers/<id>    Bearer token: revoke a device (a lost phone revoked from any other paired device)
+  GET  /v1/enroll/pending  Bearer token, from this same device only (the Devices app here): devices waiting to join,
+                           each {user_code, device, asked, expires_in, paired}; this device's enrollment must be an approver
+  POST /v1/enroll/approve  same: {code, decision: approve|deny, tenant?, approver?} -> the realm's answer
+  GET  /v1/enroll/devices  same: the realm's registry (no tokens)
+  POST /v1/enroll/revoke   same: {id} -> {revoked}
+  /v1/status carries "realm": {enrolled, approver, here} (here = the caller runs on this device) - never a token.
 
 Identity: a random device id + a TLS key made once in the state dir. A peer is known by the sha256 of the token it
 was given at pairing (the token itself is never stored here). Every authenticated call checks the token; there is no
@@ -511,7 +521,8 @@ def public_info():
 
 # ── HTTP ────────────────────────────────────────────────────────────────────
 
-HTTP_OF = {"bad-request": 400, "auth": 401, "unsupported": 404, "expired": 410, "busy": 409, "failed": 500}
+HTTP_OF = {"bad-request": 400, "auth": 401, "forbidden": 403, "unsupported": 404, "expired": 410, "busy": 409,
+           "failed": 500, "offline": 502}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -552,6 +563,15 @@ class Handler(BaseHTTPRequestHandler):
         touch(p[0])
         return p
 
+    def here(self):
+        """The caller runs on this device: loopback, or this device's own address (its LAN IP to itself)."""
+        c = self.client_address[0].removeprefix("::ffff:")
+        try:
+            me = self.connection.getsockname()[0].removeprefix("::ffff:")
+        except OSError:
+            me = None
+        return c in ("127.0.0.1", "::1") or c == me
+
     def route(self, method):
         path = self.path.split("?")[0].rstrip("/")
         if method == "GET" and path == "/v1/info":
@@ -562,7 +582,7 @@ class Handler(BaseHTTPRequestHandler):
             return pair_confirm(self.body())
         pid, _ = self.peer()
         if method == "GET" and path == "/v1/status":
-            return {**public_info(), "status": backend().status()}
+            return {**public_info(), "status": backend().status(), "realm": {**realm_state(), "here": self.here()}}
         if method == "POST" and path == "/v1/action":
             b = self.body()
             action = str(b.get("action", ""))
@@ -578,6 +598,22 @@ class Handler(BaseHTTPRequestHandler):
                                "seen": v.get("seen")} for k, v in peers().items()]}
         if method == "DELETE" and path.startswith("/v1/peers/"):
             return {"revoked": revoke(path.rsplit("/", 1)[1])}
+        if path.startswith("/v1/enroll/"):
+            # Approving devices into the realm uses THIS device's enrollment: only for a person at this device (its
+            # own Devices app), never for a paired peer elsewhere - pairing grants control of this device, not the realm.
+            if not self.here():
+                raise ActionError("approving devices is only for this device's own Devices app", "forbidden")
+            sys.stderr.write(f"enroll {path.rsplit('/', 1)[1]} by {pid}\n")
+            if method == "GET" and path == "/v1/enroll/pending":
+                return enroll_pending()
+            if method == "GET" and path == "/v1/enroll/devices":
+                return realm_ask("/v1/devices", approver=False)
+            if method == "POST" and path == "/v1/enroll/approve":
+                b = self.body()
+                return enroll_decide(str(b.get("code", ""))[:16], str(b.get("decision", "approve")),
+                                     b.get("tenant") or None, b.get("approver", True) is not False)
+            if method == "POST" and path == "/v1/enroll/revoke":
+                return realm_ask("/v1/devices/revoke", {"id": str(self.body().get("id", ""))[:64]})
         raise ActionError("no such endpoint", "unsupported")
 
     def handle_method(self, method):
@@ -818,7 +854,7 @@ def cli_enroll(argv):
         raise SystemExit(f"powos-deviced: {realm} refused: {code.get('error_description') or code.get('error', st)}")
     url = code["verification_uri_complete"]
     print(f"To add this device, approve the code\n\n  {code['user_code']}\n\nfrom the Devices app on an enrolled "
-          f"PowOS device ({url}), or on the server: docker exec powos-enroll powos-enroll approve {code['user_code']}\n",
+          f"PowOS device (or powos devices approve {code['user_code']} there; {url}), or on the server: docker exec powos-enroll powos-enroll approve {code['user_code']}\n",
           flush=True)
     show_qr(url)
     interval, deadline = int(code.get("interval", 5)), now() + int(code.get("expires_in", 600))
@@ -855,6 +891,111 @@ def enrolled():
     return e
 
 
+# ── approving other devices (this device enrolled as an approver) ─────────
+
+
+def realm_state():
+    """What anyone paired may know about this device's enrollment: whether it is enrolled, and an approver."""
+    e = load_json(enrollment_path(), None) or {}
+    d = e.get("device") or {}
+    return {"enrolled": bool(e.get("device_token")), "approver": bool(e.get("device_token") and d.get("approver"))}
+
+
+REALM_ERR = {401: "forbidden", 403: "forbidden", 404: "unsupported", 410: "expired", 429: "busy"}
+
+
+def realm_ask(path, body=None, approver=True):
+    """One realm call with this device's own token; refusals as ActionError in the realm's words."""
+    e = load_json(enrollment_path(), None)
+    if not e or not e.get("device_token"):
+        raise ActionError("this device isn't enrolled - powos devices enroll on it first", "unsupported")
+    if approver and not e["device"].get("approver"):
+        raise ActionError("this device was enrolled without the right to approve devices", "forbidden")
+    try:
+        st, r = realm_call(e["realm"], path, body, token=e["device_token"])
+    except (urllib.error.URLError, OSError) as x:
+        raise ActionError(f"the realm ({e['realm']}) isn't reachable: {getattr(x, 'reason', x)}", "offline")
+    if st != 200:
+        # a realm 401 is about THIS device's enrollment, never the caller's pairing (that would read "pair again")
+        raise ActionError(r.get("error_description") or r.get("error") or f"the realm answered {st}",
+                          REALM_ERR.get(st, "failed"))
+    return r
+
+
+def enroll_pending():
+    """Devices waiting to join, each marked when it is already paired with this device (a paired one upgrading)."""
+    known = set(peers()) | set(load_json(remotes_path(), {}))
+    return {"pending": [{**p, "paired": (p.get("device") or {}).get("id") in known}
+                        for p in realm_ask("/v1/devices/pending").get("pending", [])]}
+
+
+def enroll_decide(code, decision="approve", tenant=None, approver=True):
+    if decision not in ("approve", "deny"):
+        raise ActionError("decision is approve or deny", "bad-request")
+    body = {"code": code, "decision": decision, "approver": approver, **({"tenant": tenant} if tenant else {})}
+    return realm_ask("/v1/devices/approve", body)
+
+
+def cli_realm(fn, *a, **kw):
+    try:
+        return fn(*a, **kw)
+    except ActionError as e:
+        raise SystemExit(f"powos-deviced: {e}")
+
+
+def pending_line(p):
+    d = p.get("device") or {}
+    return (f"{p['user_code']}  {d.get('name')} ({d.get('kind') or 'device'}{', ' + d['platform'] if d.get('platform') else ''})"
+            f"  from {p.get('from') or '?'}{'  already paired with this device' if p.get('paired') else ''}"
+            f"  ({p.get('expires_in', 0)} s left)")
+
+
+def cli_pending():
+    waiting = cli_realm(enroll_pending)["pending"]
+    for p in waiting:
+        print(pending_line(p))
+    if not waiting:
+        print("no device waiting to join")
+
+
+def cli_approve(argv):
+    code = next((a for a in argv if not a.startswith("--") and a != opt(argv, "--tenant")), None)
+    if not code:
+        waiting = cli_realm(enroll_pending)["pending"]
+        if len(waiting) != 1:
+            for p in waiting:
+                print(pending_line(p))
+            raise SystemExit("powos-deviced: no device waiting to join" if not waiting else
+                             "powos-deviced: more than one device is waiting - name its code")
+        print(pending_line(waiting[0]))
+        if not sys.stdin.isatty() or input("is this the code on the new device's screen? [y/N] ").strip().lower() != "y":
+            raise SystemExit("powos-deviced: not approved")
+        code = waiting[0]["user_code"]
+    deny = "--deny" in argv
+    r = cli_realm(enroll_decide, code, "deny" if deny else "approve", opt(argv, "--tenant"), "--no-approver" not in argv)
+    d = r.get("device") or {}
+    print(f"{r.get('state')}: {d.get('name')} ({d.get('id')})"
+          + ("" if deny else (f", AI {r['tenant']}" if r.get("tenant") else ", no AI")
+             + (", may approve others" if r.get("approver") else ", may not approve others")))
+
+
+def cli_revoke(argv):
+    """A lost or retired device: it may no longer control this one, and (this device an approver) the realm drops it."""
+    if not argv or argv[0].startswith("--"):
+        raise SystemExit("powos-deviced: revoke <device> [--local]")
+    key = argv[0]
+    pid = next((k for k, v in peers().items() if key in (k, v.get("name"))), None)
+    rid = next((k for k, v in load_json(remotes_path(), {}).items() if key in (k, v.get("name"))), None)
+    did = pid or rid or key
+    print(f"{pid}: may no longer control this device" if pid and revoke(pid) else f"{key}: not paired with this device")
+    if "--local" in argv or not realm_state()["approver"]:
+        return 0
+    r = cli_realm(realm_ask, "/v1/devices/revoke", {"id": did})
+    print(f"{did}: revoked in the realm - its realm and AI tokens stop at once" if r.get("revoked")
+          else f"{did}: not enrolled in the realm (or already revoked)")
+    return 0
+
+
 def cli_ai_apply():
     """endpoint.conf = claude-auth + this device's own token (lib/config.sh cfg_endpoint_write; sudo for /etc)."""
     e = enrolled()
@@ -887,7 +1028,11 @@ def main(argv):
         for k, v in peers().items():
             print(f"{k}  {v.get('name')} ({v.get('kind')})  paired {time.strftime('%F %H:%M', time.localtime(v.get('paired', 0)))}")
     elif cmd == "revoke":
-        print("revoked" if revoke(rest[0]) else f"no peer {rest[0]}")
+        return cli_revoke(rest)
+    elif cmd == "pending":
+        cli_pending()
+    elif cmd == "approve":
+        cli_approve(rest)
     elif cmd == "pair":
         cli_pair(rest)
     elif cmd == "devices":
