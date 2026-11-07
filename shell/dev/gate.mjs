@@ -11821,6 +11821,98 @@ async function lw3HostFailed() {
   return [!text.includes("cannot open display") && `the host's launch failure shows no reason: "${text}"`].filter(Boolean);
 }
 
+/**
+ * SL1 (the user 11-07: "if steam is launching a game why arent we seeing the splashscreen app placeholder window thing we
+ * made?"): a launch Steam started itself (its library, Big Picture - "apps.launching" from powos-sleep-gui's
+ * SteamLaunches) shows the placeholder at once, filling the work area, with Steam's phase; no launch of its own; Steam's
+ * slow steps outlast LINUX_START; the game's KWin window takes it (the same element) and its first frame shows it.
+ */
+async function lw3SteamLaunch() {
+  const { W, g, els } = await window.__lw3f.lw3Env();
+  W.webWins.value = [];
+  W.LINUX_START.ms = 200;
+  const key = "l:steam_app_413150";
+  const at = (state, phase) => [{ key, label: "Stardew Valley", appid: "413150", state, phase, since: Math.round(Date.now() / 1000) }];
+  const n = g.launched.length;
+  window.__mockEvents.emit("apps.launching", at("launching", "Syncing saves"));
+  await window.__gw.settled();
+  const w = () => W.webWins.value.find((v) => v.key === key) ?? {};
+  const phase = () => els(key)[0]?.querySelector(".ww-phase")?.textContent;
+  const el = els(key)[0];
+  const fills = window.__lw3f.lw3Fills(W, w());
+  const placed = w().pending && w().steam && w().id < 0;
+  const fails = [
+    !placed && `a Steam-started launch made no placeholder window (${JSON.stringify(w())})`,
+    !(w().restore && fills) && `the game's placeholder doesn't fill the work area: ${JSON.stringify(w())}`,
+    phase() !== "Syncing saves" && `the placeholder shows no phase: "${phase()}"`,
+    g.launched.length !== n && "a Steam-started launch was launched again by the page (Steam runs it)",
+  ];
+  fails.push(...(await window.__lw3f.lw3SteamPhase(key, at, phase, w)));
+  return [...fails, ...(await window.__lw3f.lw3SteamTaken(key, el, at))].filter(Boolean);
+}
+
+/** SL1: Steam's next phase shows on the same placeholder, past LINUX_START (a cold Proton start takes a minute). */
+async function lw3SteamPhase(key, at, phase, w) {
+  const { W, wait } = await window.__lw3f.lw3Env();
+  window.__mockEvents.emit("apps.launching", at("running", "Starting Proton"));
+  await wait(400);
+  await window.__gw.settled();
+  return [
+    phase() !== "Starting Proton" && "the phase didn't follow Steam's",
+    w().failed && `Steam's launch failed at LINUX_START (${w().failed}): a cold Proton start takes a minute`,
+    W.webWins.value.filter((v) => v.key === key).length !== 1 && "a second Steam event made a second placeholder",
+  ];
+}
+
+/** SL1: window [w] fills the work area (within a px). */
+function lw3Fills(W, w) {
+  const a = W.workArea();
+  return Math.abs(w.w - (a.right - a.left)) <= 1 && Math.abs(w.h - (a.bottom - a.top)) <= 1;
+}
+
+/** SL1: the game's KWin window takes the Steam placeholder (the same element); its first frame shows it; no second one. */
+async function lw3SteamTaken(key, el, at) {
+  const { W, els } = await window.__lw3f.lw3Env();
+  const w = () => W.webWins.value.find((v) => v.key === key) ?? {};
+  window.__mockEvents.emit("webwindows.adopt", { kwin: 61, key, label: "Stardew Valley" });
+  await window.__gw.settled();
+  const fails = [
+    !(w().id === 77 && !w().pending) && `the game's KWin window did not take the Steam placeholder: ${JSON.stringify(w())}`,
+    els(key)[0] !== el && "the game's window is a new element, not the placeholder's (it jumps)",
+  ];
+  window.__mockEvents.emit("webwindows.live", 77);
+  await window.__gw.settled();
+  fails.push(!!els(key)[0]?.querySelector(".ww-placeholder") && "the game's first frame left the placeholder over it");
+  window.__mockEvents.emit("apps.launching", at("running", "Loading"));
+  await window.__gw.settled();
+  fails.push(W.webWins.value.filter((v) => v.key === key).length !== 1 && "a running game's Steam event made a placeholder beside its window");
+  W.webWins.value = [];
+  return fails;
+}
+
+/** SL1: Steam's launch ends before its window - "couldn't start" with why; Steam asking something - it steps aside. */
+async function lw3SteamEnded() {
+  const { W, els } = await window.__lw3f.lw3Env();
+  W.webWins.value = [];
+  const key = "l:steam_app_9";
+  const since = Math.round(Date.now() / 1000);
+  const step = async (state, extra) => {
+    window.__mockEvents.emit("apps.launching", [{ key, label: "Gate Game", appid: "9", state, since, ...extra }]);
+    await window.__gw.settled();
+    return W.webWins.value.find((v) => v.key === key) ?? {};
+  };
+  await step("launching", { phase: "Getting ready" });
+  const fails = [!(await step("asking", { phase: "Steam is asking something" })).minimised && "Steam asking something left the placeholder over Steam's window"];
+  fails.push((await step("running", { phase: "Starting" })).minimised && "the launch went on but its placeholder stayed minimised");
+  await step("ended", { phase: "Starting", reason: "It closed before it showed a window" });
+  const text = els(key)[0]?.querySelector(".ww-failed-text")?.textContent ?? "";
+  fails.push(!text.includes("closed before") && `a game that closed before its window shows no reason: "${text}"`);
+  els(key)[0]?.querySelector(".ww-failed-close")?.click();
+  await window.__gw.settled();
+  fails.push(W.webWins.value.some((v) => v.key === key) && "its Close left the window");
+  return fails.filter(Boolean);
+}
+
 /** LW3: the real host back. */
 async function lw3End() {
   const { W, powos, g } = await window.__lw3f.lw3Env();
@@ -11832,7 +11924,7 @@ async function lw3End() {
 }
 
 /** The LW3 run's steps into the page (window.__lw3f); evaluates to []. */
-const LW3_HELPERS = `(window.__lw3f = { ${[lw3Env, lw3Launch, lw3Offer, lw3Alts, lw3Timeout, lw3Retry, lw3BadExec, lw3HostFailed, lw3End].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
+const LW3_HELPERS = `(window.__lw3f = { ${[lw3Env, lw3Launch, lw3Offer, lw3Alts, lw3Timeout, lw3Retry, lw3BadExec, lw3HostFailed, lw3SteamLaunch, lw3SteamPhase, lw3Fills, lw3SteamTaken, lw3SteamEnded, lw3End].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
 
 /** [webWindowMaskCheck]'s helpers into the page (window.__wwg); evaluates to [] (no problems) as a gate step. */
 const WW_HELPERS = `(window.__wwg = { ${[wwHelpers, wwFound, wwCuts, wwMenu, wwRaise, wwStacked, wwSwipe, wwHidden, wwMaximise, wwMaximiseAt, wwMergedBar, wwBarHit].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
@@ -12299,6 +12391,8 @@ try {
     fails.push(...(await step("lw3BadExec")));
     await shot("4-bad-exec");
     fails.push(...(await step("lw3HostFailed")));
+    fails.push(...(await step("lw3SteamLaunch")));
+    fails.push(...(await step("lw3SteamEnded")));
     fails.push(...(await step("lw3End")));
     return fails;
   })));

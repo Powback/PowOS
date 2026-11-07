@@ -3670,6 +3670,8 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .webwindow-body.placeholder { background: var(--color-surface); }
 .ww-placeholder { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 18px; }
 .ww-placeholder-icon { width: 56px; height: 56px; border-radius: 12px; }
+/* SL1: a Steam launch's step ("Syncing saves", "Starting Proton") under its progress line. */
+.ww-phase { font: var(--text-body) var(--font-body); color: var(--color-muted); }
 .ww-progress { width: 72px; height: 3px; border-radius: 8px; overflow: hidden; background: color-mix(in srgb, var(--color-foreground) 12%, transparent); }
 .ww-progress::after { content: ""; display: block; width: 40%; height: 100%; border-radius: inherit; background: color-mix(in srgb, var(--color-foreground) 45%, transparent); animation: ww-progress 1.1s var(--ambient) infinite; }
 @keyframes ww-progress { from { transform: translateX(-100%); } to { transform: translateX(250%); } }

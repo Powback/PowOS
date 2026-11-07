@@ -74,6 +74,15 @@ export interface WebWin {
   /** Not live in [LINUX_START] (or its app gone): "couldn't start", with the reason - its body shows it and a close. */
   failed?: string;
   /**
+   * SL1: a game Steam is launching (PowOS's tap or Steam's own UI, "apps.launching" - [steamLaunches]): Steam reports
+   * its steps and its end, so it waits [STEAM_START] (a cold Proton start under FEX takes a minute), not [LINUX_START].
+   */
+  steam?: boolean;
+  /** SL1: what the launch is doing now, in plain words ("Syncing saves", "Starting Proton", "Loading"): under its progress line. */
+  phase?: string;
+  /** SL1: minimised because Steam is asking something in its own window; back when the launch goes on. */
+  asking?: boolean;
+  /**
    * Its app draws its own complete frame (a Linux window with client-side decorations: Brave, Chrome, Steam, a GTK
    * header bar; kwin 0046 "decor ... own"): no PowOS bar over it (one bar, never two) - its own drag moves this frame
    * ("webwindows.moveresize"), a hold on that drag opens the tile menu.
@@ -165,12 +174,104 @@ powos.on("apps.launchfailed", ({ key, reason }: { key: string; reason?: string }
 // says so instead of an endless placeholder (10-31 16:01 "Dolphin is loading forever").
 powos.on("webwindows.failed", ({ id, reason }: { id: number; reason: string }) => update(id, { live: false, failed: reason }));
 
-/** Window [id] not live in [LINUX_START] (no toplevel, or one that never drew): "couldn't start" - never forever. */
-function watchStart(id: number) {
+/**
+ * Window [id] not live in [LINUX_START] (no toplevel, or one that never drew): "couldn't start" - never forever. A
+ * Steam game's ([WebWin.steam]) gets [STEAM_START] in all: Steam says itself when its launch ends ([steamLaunches]).
+ */
+function watchStart(id: number, ms = LINUX_START.ms) {
   setTimeout(() => {
     const w = webWins.value.find((v) => v.id === id);
-    if (w && !w.live && !w.failed) update(id, { failed: w.pending ? "It opened no window." : "Its window never drew." });
-  }, LINUX_START.ms);
+    if (!w || w.live || w.failed) return;
+    if (w.steam && ms < STEAM_START.ms) return watchStart(id, STEAM_START.ms - ms);
+    update(id, { failed: w.pending ? "It opened no window." : "Its window never drew." });
+  }, ms);
+}
+
+/** SL1: how long a Steam game's launch may take to show its window ([watchStart]); also how old a launch may be to get a placeholder. */
+export const STEAM_START = { ms: 180_000 };
+
+/** One game launch Steam runs, as the host reports it ("apps.launching": RunningApps.launchesFor, powos-sleep-gui SteamLaunches). */
+interface SteamLaunch {
+  /** The key its window will be offered as (the drawer entry that starts it, else "l:steam_app_<appid>"). */
+  key: string;
+  label: string;
+  appid: string;
+  /** launching (Steam's steps), asking (a question in Steam's window), running (the game's process), ended. */
+  state: "launching" | "asking" | "running" | "ended";
+  phase?: string;
+  /** Why it ended (ended only). */
+  reason?: string;
+  /** When it started (epoch s). */
+  since: number;
+}
+
+/**
+ * SL1 (the user, 11-07: "if steam is launching a game why arent we seeing the splashscreen app placeholder window thing
+ * we made? like everything should feel completely native and snappy"): a game Steam launches - from Steam's own UI
+ * (Big Picture, its library) as well as PowOS's tap - shows the launch's placeholder window from its first step, as a
+ * tap on a PowOS icon does (LW3), filling the work area like the game will, with Steam's phase under its progress line.
+ * The game's window takes it when KWin offers it (adoptWebWindow -> takePlaceholder: the same element, no jump), and
+ * its first frame ("webwindows.live") shows the game in it. Ended before its window: "couldn't start" with why and a
+ * close. Steam asking something (a cloud conflict, the shader skip): the placeholder steps aside (minimised) so Steam's
+ * window shows, and comes back when the launch goes on. A game with its window already: nothing to do.
+ */
+async function steamLaunches(list: SteamLaunch[]) {
+  for (const l of list) await steamLaunch(l);
+}
+
+/** [steamLaunches] for one launch. */
+async function steamLaunch(l: SteamLaunch) {
+  const launch = `${l.appid}@${l.since}`;
+  // Its game's window shows already: this launch is that window's (never a second placeholder for it, also once the
+  // window closed and Steam's "ended" is still on its way).
+  if (webWins.value.some((v) => v.key === l.key && v.live)) return void steamSeen.add(launch);
+  const w = webWins.value.find((v) => v.key === l.key && (v.pending || v.failed || v.steam));
+  if (w) return steamUpdate(w, l, launch);
+  if (!newSteamLaunch(l, launch) || !(await webWindowsOn())) return;
+  // Placed meanwhile (another event while the host answered).
+  if (webWins.value.some((v) => v.key === l.key) || steamSeen.has(launch)) return;
+  steamSeen.add(launch);
+  steamPlaceholder(l);
+}
+
+/** A launch that gets a placeholder: going on, not seen yet, recent (not from before this page: a reload mid-game). */
+const newSteamLaunch = (l: SteamLaunch, launch: string) =>
+  (l.state === "launching" || l.state === "running") && !steamSeen.has(launch) && Date.now() - l.since * 1000 <= STEAM_START.ms;
+
+/** Launch [l]'s step on its waiting window [w] (a placeholder, or the game's window before its first frame). */
+function steamUpdate(w: WebWin, l: SteamLaunch, launch: string) {
+  if (l.state === "ended") return steamEnded(w, l);
+  // One that couldn't start before Steam said anything (LW3's own): a tap is its new try.
+  if (w.failed && !w.steam) return;
+  steamSeen.add(launch);
+  // A PowOS tap's placeholder (LW3, cascaded) fills the work area as a game does.
+  if (!w.steam && w.pending && !w.restore) toggleMaximise(w.id);
+  const asking = l.state === "asking";
+  update(w.id, { steam: true, phase: l.phase, failed: undefined, ...askingChange(w, asking) });
+  if (!asking && w.asking) raise(w.id);
+}
+
+/** Steam asking something ([asking]): the waiting window minimised so Steam's window shows; back once it goes on. */
+const askingChange = (w: WebWin, asking: boolean): Partial<WebWin> => (asking !== !!w.asking ? { minimised: asking, asking: asking || undefined } : {});
+
+/** Launch [l] ended before its window's first frame: [w] says why, with a close. */
+function steamEnded(w: WebWin, l: SteamLaunch) {
+  if (!w.failed) update(w.id, { failed: `${(l.reason || "It ended").replace(/\.$/, "")}.`, phase: undefined, minimised: false, asking: undefined });
+}
+
+/** SL1: the launches ("<appid>@<since>") that have their placeholder or window already. */
+const steamSeen = new Set<string>();
+powos.on("apps.launching", (list: SteamLaunch[]) => void steamLaunches(Array.isArray(list) ? list : []));
+
+/** SL1: the placeholder window of a Steam launch on the page on screen, on top, filling the work area - no launch of its own (Steam runs it). */
+function steamPlaceholder(l: SteamLaunch): number {
+  const id = --placeholders;
+  const page = shownPage();
+  webWins.value = [...webWins.value, { id, el: id, key: l.key, label: l.label, page, ...cascade(), pending: true, steam: true, phase: l.phase }];
+  toggleMaximise(id);
+  watchStart(id);
+  console.info(`[steam-launch] ${l.label} (${l.appid}): placeholder ${id} at ${l.phase ?? l.state}`);
+  return id;
 }
 
 /** A new window's default frame (page px): half the screen wide, cascaded by the windows there are. */
@@ -3161,6 +3262,7 @@ function Placeholder({ win, icon }: { win: WebWin; icon: string | undefined }) {
     <div class={`ww-placeholder ${win.failed ? "failed" : ""}`}>
       {icon && <img class="ww-placeholder-icon" src={icon} alt="" draggable={false} />}
       {!win.failed && <div class="ww-progress" />}
+      {!win.failed && win.phase && <div class="ww-phase">{win.phase}</div>}
       {win.failed && <div class="ww-failed-text">Couldn't start {win.label}. {win.failed}</div>}
       {win.failed && (
         <button class="ww-failed-close" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => (e.stopPropagation(), close(win.id))}>

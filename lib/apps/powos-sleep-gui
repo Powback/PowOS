@@ -95,6 +95,8 @@ UNITS = os.environ.get("POWOS_UNITS_DIR", "/etc/powos/units.d")
 RUN = os.environ.get("XDG_RUNTIME_DIR", "/run/powos-app")
 SCREEN_LOG = os.environ.get("POWOS_SLEEP_SCREEN_LOG", f"{RUN}/andromarchy.log")
 RUNNING_DIR = f"{RUN}/running"  # the PowOS app makes it (and watches it); none on the desktop, nothing written
+# Steam's console log: every game launch's steps as they happen (SteamLaunches)
+STEAM_LOG = os.environ.get("POWOS_STEAM_LOG", os.path.expanduser("~/.local/share/Steam/logs/console_log.txt"))
 
 
 def log(msg):
@@ -256,28 +258,16 @@ def unit_rules():
     return out
 
 
-class Screen:
-    """Is PowOS on screen? (phone only; elsewhere always yes.) The PowOS app's display daemon pairs one consumer per
-    visible surface - the desktop (surface 0) and each window task - and logs each connect and disconnect: an Activity
-    whose surface goes away (Android's home, another app, Recents, the screen off) disconnects. Watched with inotify,
-    no polling: on screen = some surface with both its consumer and its producer connected.
-
-    The producer counts too (2026-11-05): a window task whose window closed (its producer, KWin's export, gone) can keep
-    its consumer connected with nothing of PowOS's on it (surfaces 53 and 56: producer disconnected 10:49 / 10:56, the
-    consumer never). Counted as on screen, it held PowOS "on screen" all session, so a game the user left for home
-    stayed "focused" and was never frozen (bf-return 11:47: not frozen 150 s out of sight).
-
-    HACK: the daemon's log (andromarchy.log, its stderr) is the signal - no state of its own is published. Real fix: the
-    display daemon (or SessionService) writes the connected surfaces to a state file in the run dir, or KWin's anland
-    backend exposes them (D-Bus / a KWin script property); then read that instead."""
+class LogTail:
+    """A log file followed with inotify, no polling: [read] gets each new complete line's bytes from [pos] on. A log
+    that is replaced (a new inode, or shorter than what was read: rotated, truncated) is read from its start; one that
+    isn't there (yet) is looked for again every minute ([lost] first). Subclasses: Screen, SteamLaunches."""
 
     IN_MODIFY, IN_ATTRIB, IN_DELETE_SELF, IN_MOVE_SELF = 0x2, 0x4, 0x400, 0x800
-    LINE = re.compile(rb"surface (\d+): (consumer|producer) (connected|disconnected)|daemon: (listening) on")
 
-    def __init__(self, path, on_change):
-        self.path, self.on_change = path, on_change
+    def __init__(self, path):
+        self.path = path
         self.pos, self.ino, self.known = 0, None, False
-        self.consumers, self.producers = set(), set()
         self.started = False
         self.libc = ctypes.CDLL(None, use_errno=True)
         self.fd = self.libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
@@ -287,17 +277,8 @@ class Screen:
         self.watch()
         self.started = True
 
-    @property
-    def surfaces(self):
-        """The surfaces showing something: a consumer (an Activity on screen) and a producer (what it shows)."""
-        return self.consumers & self.producers
-
-    @property
-    def on(self):
-        return bool(self.surfaces) or not self.known
-
-    def clear(self):
-        self.consumers, self.producers = set(), set()
+    def lost(self):
+        """The log isn't there (or can't be read): forget what it said."""
 
     def watch(self):
         if self.fd < 0:
@@ -306,9 +287,9 @@ class Screen:
             self.libc.inotify_rm_watch(self.fd, self.wd)
         self.wd = self.libc.inotify_add_watch(self.fd, self.path.encode(),
                                               self.IN_MODIFY | self.IN_ATTRIB | self.IN_DELETE_SELF | self.IN_MOVE_SELF)
-        if self.wd < 0:  # no log (yet): not a phone, or the app's daemon not started - look again in a minute
+        if self.wd < 0:  # no log (yet) - look again in a minute
             self.known = False
-            self.clear()
+            self.lost()
             GLib.timeout_add_seconds(60, self.watch)
             return False
         self.read()
@@ -325,30 +306,77 @@ class Screen:
             gone |= bool(mask & (self.IN_DELETE_SELF | self.IN_MOVE_SELF))
             data = data[16 + ln:]
         if gone:
+            # Renamed or deleted (Steam rotates console_log.txt to .previous): whatever is at the path now is a new
+            # log, read from its start - also when it got the old one's inode number back.
+            self.ino = None
             self.watch()
         else:
             self.read()
         return True
 
-    def read(self):
-        was = self.on
+    def new_lines(self, fresh=None):
+        """The complete lines written since the last call (bytes), or b"". [fresh] runs first when the log was
+        replaced (read from its start then)."""
         try:
             st = os.stat(self.path)
-            if st.st_ino != self.ino or st.st_size < self.pos:  # a new daemon's log (the app restarted)
+            if st.st_ino != self.ino or st.st_size < self.pos:
                 self.ino, self.pos = st.st_ino, 0
-                self.clear()
+                if fresh:
+                    fresh(st)
             with open(self.path, "rb") as f:
                 f.seek(self.pos)
                 data = f.read()
         except OSError:
             self.known = False
-            self.clear()
-            data = b""
-        else:
-            self.known = True
+            self.lost()
+            return b""
+        self.known = True
         end = data.rfind(b"\n") + 1
         self.pos += end
-        for m in self.LINE.finditer(data[:end]):
+        return data[:end]
+
+
+class Screen(LogTail):
+    """Is PowOS on screen? (phone only; elsewhere always yes.) The PowOS app's display daemon pairs one consumer per
+    visible surface - the desktop (surface 0) and each window task - and logs each connect and disconnect: an Activity
+    whose surface goes away (Android's home, another app, Recents, the screen off) disconnects. Watched with inotify,
+    no polling: on screen = some surface with both its consumer and its producer connected.
+
+    The producer counts too (2026-11-05): a window task whose window closed (its producer, KWin's export, gone) can keep
+    its consumer connected with nothing of PowOS's on it (surfaces 53 and 56: producer disconnected 10:49 / 10:56, the
+    consumer never). Counted as on screen, it held PowOS "on screen" all session, so a game the user left for home
+    stayed "focused" and was never frozen (bf-return 11:47: not frozen 150 s out of sight).
+
+    HACK: the daemon's log (andromarchy.log, its stderr) is the signal - no state of its own is published. Real fix: the
+    display daemon (or SessionService) writes the connected surfaces to a state file in the run dir, or KWin's anland
+    backend exposes them (D-Bus / a KWin script property); then read that instead."""
+
+    LINE = re.compile(rb"surface (\d+): (consumer|producer) (connected|disconnected)|daemon: (listening) on")
+
+    def __init__(self, path, on_change):
+        self.on_change = on_change
+        self.consumers, self.producers = set(), set()
+        super().__init__(path)
+
+    @property
+    def surfaces(self):
+        """The surfaces showing something: a consumer (an Activity on screen) and a producer (what it shows)."""
+        return self.consumers & self.producers
+
+    @property
+    def on(self):
+        return bool(self.surfaces) or not self.known
+
+    def clear(self):
+        self.consumers, self.producers = set(), set()
+
+    lost = clear
+
+    def read(self):
+        was = self.on
+        # A new daemon's log (the app restarted): what the old one said is gone.
+        data = self.new_lines(lambda _st: self.clear())
+        for m in self.LINE.finditer(data):
             if m.group(4):  # a new daemon (the app restarted; its log is truncated and written again)
                 self.clear()
             else:
@@ -358,6 +386,146 @@ class Screen:
             self.on_change(self.on)
 
 
+class SteamLaunches(LogTail):
+    """SL1 (the user, 11-07: "if steam is launching a game why arent we seeing the splashscreen app placeholder window
+    thing we made?"): every game launch Steam runs, the moment it starts - from PowOS's tap (steam://rungameid) and
+    from Steam's own UI (Big Picture, its library, a desktop shortcut) alike, native and Proton games alike - with its
+    phases, for the phone shell's launch placeholder (webwindows.tsx steamLaunches). Steam's console_log says each step
+    of a launch as it happens:
+        GameAction [AppID 384190, ActionID 19] : LaunchApp changed task to SynchronizingCloud with ""
+        GameAction [AppID 384190, ActionID 19] : LaunchApp waiting for user response to ShowInterstitials ""
+        Game process added : AppID 384190 "<the launch command: ... reaper SteamLaunch AppId=384190 -- ... proton ...>"
+        Game process updated : AppID 384190 "..."   (more processes of the game: Proton's wine, the game's exe)
+        Game process removed: AppID 384190 "..."
+    Followed with inotify from its end (a launch before this watcher started is not replayed), written to
+    RUN/running/launches.json ({"launches": {appid: {state, phase, name, since[, reason]}}}, state launching | asking |
+    running | ended) whenever it changes; the app watches that folder (RunningApps.kt). An ended launch is kept
+    ENDED_S, then dropped.
+
+    HACK: Steam's log is the signal - Steam publishes no launch event a client can subscribe to (its CEF UI's
+    SteamClient.Apps.RegisterForGameActionStart is the real API, inside steamwebhelper only). Real fix: a Steam UI
+    plugin (or the compat tool entry plus a native-game wrapper) that reports game actions over the session bus."""
+
+    ACTION = re.compile(rb'GameAction \[AppID (\d+), ActionID (\d+)\] : LaunchApp (changed task to|waiting for user response to|'
+                        rb'continues with user response|failed with) "?(\w*)')
+    PROC = re.compile(rb"Game process (added|updated|removed)\s*: AppID (\d+) \"([^\n]*)")
+    # Steam's task names in plain words (anything else: "Getting ready").
+    PHASES = {"SynchronizingCloud": "Syncing saves", "DownloadingDepots": "Updating", "ProcessingShaderCache": "Processing shaders",
+              "CreatingProcess": "Starting"}
+    ASK_S = 2  # a "waiting for user response" this long: Steam is asking something (a dialog in its window)
+    ENDED_S = 30
+
+    def __init__(self, path, out_dir, steam_dir=None):
+        self.out_dir, self.steam = out_dir, steam_dir or os.path.dirname(os.path.dirname(path))
+        self.launches = {}  # appid -> {"state", "phase", "name", "since", "action", ["reason"]}
+        self.written = None
+        self.skip = True  # the first read starts at the log's end: only launches from now on
+        super().__init__(path)
+
+    def read(self):
+        data = self.new_lines(self.replaced)
+        if self.skip:
+            self.skip = False
+            return
+        changed = False
+        for line in data.splitlines():
+            changed |= self.line(line)
+        if changed:
+            self.publish()
+
+    def replaced(self, st):
+        """A new log (Steam rotated it, or this is the first look): the first look skips what is in it already."""
+        if self.skip:
+            self.pos = st.st_size
+
+    def line(self, line, now=None):
+        """One log line (bytes): True when a launch changed."""
+        now = time.time() if now is None else now
+        m = self.ACTION.search(line)
+        if m:
+            appid, action, verb, task = m.group(1).decode(), m.group(2).decode(), m.group(3).decode(), m.group(4).decode()
+            l = self.launches.get(appid)
+            if l is None or l["state"] == "ended" or l.get("action") != action:
+                if verb != "changed task to" or task in ("Completed", "Failed"):
+                    return False
+                l = self.launches[appid] = {"state": "launching", "since": round(now), "action": action,
+                                            "name": self.name(appid)}
+            if verb == "failed with":  # `failed with AppError_6`, then `changed task to Failed`
+                l["error"] = task
+                return False
+            if verb == "changed task to" and task == "Failed":
+                l.update(state="ended", reason=f"Steam couldn't start it ({l.get('error') or 'failed'})", ended=now)
+            elif verb == "changed task to":
+                if task == "Completed" or l["state"] == "running":
+                    return False
+                l.update(state="launching", phase=self.PHASES.get(task, "Getting ready"))
+            elif verb == "waiting for user response to":
+                l["waiting"] = task
+                GLib.timeout_add_seconds(self.ASK_S, self.asking, appid, action, task)
+                return False
+            elif verb == "continues with user response":
+                l.pop("waiting", None)
+                if l["state"] != "asking":
+                    return False
+                l["state"] = "launching"
+            return True
+        m = self.PROC.search(line)
+        if not m:
+            return False
+        what, appid, cmd = m.group(1).decode(), m.group(2).decode(), m.group(3).decode(errors="replace")
+        l = self.launches.get(appid)
+        if what == "added":
+            if l is None or l["state"] == "ended":
+                l = self.launches[appid] = {"since": round(now), "name": self.name(appid)}
+            l.pop("waiting", None)
+            l.update(state="running", phase="Starting Proton" if "/proton " in cmd else "Starting")
+        elif l is None or l["state"] == "ended":
+            return False
+        elif what == "updated":
+            if l.get("phase") == "Loading":
+                return False
+            l["phase"] = "Loading"
+        else:
+            l.update(state="ended", reason="It closed before it showed a window", ended=now)
+        return True
+
+    def asking(self, appid, action, task):
+        """Still waiting for the same answer ASK_S on: Steam shows a question (a cloud conflict, an EULA) the user must
+        see - the placeholder steps aside for it."""
+        l = self.launches.get(appid)
+        if l and l.get("action") == action and l.get("waiting") == task and l["state"] == "launching":
+            l.update(state="asking", phase="Steam is asking something")
+            self.publish()
+        return False
+
+    def name(self, appid):
+        """The game's name from its appmanifest in any Steam library folder, or ""."""
+        dirs = [self.steam] + re.findall(r'"path"\s+"([^"]+)"', rd(f"{self.steam}/steamapps/libraryfolders.vdf"))
+        for d in dirs:
+            m = re.search(r'"name"\s+"([^"]*)"', rd(f"{d}/steamapps/appmanifest_{appid}.acf"))
+            if m:
+                return m.group(1)
+        return ""
+
+    def publish(self, now=None):
+        now = time.time() if now is None else now
+        for appid in [a for a, l in self.launches.items() if l["state"] == "ended" and now - l["ended"] > self.ENDED_S]:
+            del self.launches[appid]
+        out = {a: {k: v for k, v in l.items() if k in ("state", "phase", "name", "since", "reason")}
+               for a, l in self.launches.items()}
+        text = json.dumps({"launches": out}, sort_keys=True)
+        if text == self.written or not os.path.isdir(self.out_dir):
+            return
+        self.written = text
+        try:
+            with open(f"{self.out_dir}/.launches.json", "w") as f:
+                f.write(text)
+            os.replace(f"{self.out_dir}/.launches.json", f"{self.out_dir}/launches.json")
+            log(f"steam launches: {text}")
+        except OSError as e:
+            log(f"can't write {self.out_dir}/launches.json: {e}")
+        if any(l["state"] == "ended" for l in self.launches.values()):
+            GLib.timeout_add_seconds(self.ENDED_S + 1, lambda: self.publish() and False)
 
 def fg_job(pids):
     """A terminal in the tree with a job in the foreground: its shell's terminal's foreground group isn't the shell's
@@ -455,6 +623,7 @@ class Gui(dbus.service.Object):
         self.desk_timer = None
         self.pulse_at = {}  # a frozen game launcher's root -> when it was last frozen or pulsed (monotonic)
         self.screen = Screen(SCREEN_LOG, self.screen_changed)
+        self.steam_launches = SteamLaunches(STEAM_LOG, RUNNING_DIR)  # SL1: the launch placeholder's phases
         self.desktop(self.screen.on)  # started while PowOS is off screen: the desktop shell sleeps too
         GLib.timeout_add_seconds(ADOPT_S, self.adopt)
         if LINK_S > 0:

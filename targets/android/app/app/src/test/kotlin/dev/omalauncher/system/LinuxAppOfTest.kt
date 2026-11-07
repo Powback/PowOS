@@ -23,6 +23,26 @@ class LinuxAppOfTest {
         assertEquals(broforce, RunningApps.linuxAppOf(apps, "steam_app_274190"))
     }
 
+    /**
+     * SL1 (the user 11-07: "if steam is launching a game why arent we seeing the splashscreen app placeholder window"):
+     * a launch from Steam's own UI goes to the page under the key its game window will be offered as - the entry that
+     * starts it, else "l:steam_app_<appid>" with Steam's name - so that window takes the launch's placeholder.
+     */
+    @Test fun aSteamLaunchIsAnnouncedUnderItsWindowsKey() {
+        val text =
+            """{"launches": {"274190": {"state": "launching", "phase": "Syncing saves", "name": "Broforce", "since": 5},
+            "9": {"state": "ended", "phase": "Starting", "name": "Other", "since": 7, "reason": "It closed"}}}"""
+        val out = RunningApps.launchesFor(text, apps)
+        val byId = (0 until out.length()).map { out.getJSONObject(it) }.associateBy { it.getString("appid") }
+        assertEquals("l:Broforce", byId["274190"]!!.getString("key"))
+        assertEquals("Syncing saves", byId["274190"]!!.getString("phase"))
+        assertEquals("l:steam_app_9", byId["9"]!!.getString("key"))
+        assertEquals("Other", byId["9"]!!.getString("label"))
+        assertEquals("It closed", byId["9"]!!.getString("reason"))
+        assertEquals(7L, byId["9"]!!.getLong("since"))
+        assertEquals(0, RunningApps.launchesFor("{}", apps).length())
+    }
+
     @Test fun aDesktopIdStillMatches() {
         assertEquals(dolphin, RunningApps.linuxAppOf(apps, "org.kde.dolphin"))
     }

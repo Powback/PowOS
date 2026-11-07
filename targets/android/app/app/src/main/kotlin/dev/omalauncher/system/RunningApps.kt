@@ -21,6 +21,7 @@ import java.io.File
 object RunningApps {
     private const val TAG = "PowosRunning"
     private const val FILE = "apps.json"
+    private const val LAUNCHES = "launches.json"
     private const val SETTLE_MS = 120L
     private const val MAX_TASKS = 64
     private const val TASKS_STAMP = "android-tasks"
@@ -30,6 +31,13 @@ object RunningApps {
 
     /** powos-sleep-gui's running/apps.json, as it is ("{}" without a PowOS session). */
     val linux = mutableStateOf("{}")
+
+    /**
+     * SL1: powos-sleep-gui's running/launches.json, as it is - every game launch Steam runs, from PowOS's tap or Steam's
+     * own UI, with its phase ({"launches": {appid: {state, phase, name, since, reason?}}}; SteamLaunches there): home's
+     * page shows the launch's placeholder window from its first step ([launchesFor]).
+     */
+    val launches = mutableStateOf("{}")
 
     private val main = Handler(Looper.getMainLooper())
     private val readTasksNow =
@@ -98,6 +106,7 @@ object RunningApps {
         dir.setReadable(true, false)
         dir.setExecutable(true, false)
         val file = File(dir, FILE)
+        val launchFile = File(dir, LAUNCHES)
         val o =
             object : FileObserver(dir, CLOSE_WRITE or MOVED_TO or DELETE) {
                 override fun onEvent(
@@ -105,11 +114,40 @@ object RunningApps {
                     path: String?,
                 ) {
                     if (path == FILE) main.post { readLinux(file) }
+                    if (path == LAUNCHES) main.post { readLaunches(launchFile) }
                 }
             }
         observer = o
         o.startWatching()
         readLinux(file)
+        readLaunches(launchFile)
+    }
+
+    private fun readLaunches(file: File) {
+        val text = runCatching { file.readText() }.getOrDefault("{}")
+        if (text != launches.value) launches.value = text
+    }
+
+    /**
+     * SL1: [launches] ([text]) for the page ("apps.launching"): one entry per launch, under the key its window will be
+     * offered as ([linuxAppOf] of steam_app_<appid>: the entry that starts it, else "l:steam_app_<appid>") with its label
+     * (that entry's name, else Steam's) - [{key, label, appid, state, phase, since, reason?}].
+     */
+    fun launchesFor(
+        text: String,
+        apps: List<LinuxApp>,
+    ): org.json.JSONArray {
+        val out = org.json.JSONArray()
+        val all = runCatching { JSONObject(text).optJSONObject("launches") }.getOrNull() ?: return out
+        for (appid in all.keys()) {
+            val l = all.optJSONObject(appid) ?: continue
+            val app = linuxAppOf(apps, "steam_app_$appid")
+            val label = app?.name ?: l.optString("name").ifBlank { "Game" }
+            val e = JSONObject().put("key", "l:${app?.id ?: "steam_app_$appid"}").put("label", label).put("appid", appid)
+            for (k in listOf("state", "phase", "reason")) l.optString(k).takeIf { it.isNotEmpty() }?.let { e.put(k, it) }
+            out.put(e.put("since", l.optLong("since")))
+        }
+        return out
     }
 
     private fun readLinux(file: File) {
