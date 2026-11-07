@@ -26,17 +26,21 @@ if [ -z "$WIN_NAME" ]; then
     [ -f "$f" ] && { WIN_NAME=$(sed -nE 's/^\s*"name"\s*"(.*)"/\1/p' "$f" | head -1); break; }; done
   export WIN_NAME
 fi
-gamewin() { local w; w=$(xwininfo -root -tree 2>/dev/null | awk -v n="\"$WIN_NAME\"" 'n != "\"\"" && index($0, n) && !/has no name/ {print $1; exit}')
-  [ -n "$w" ] && { echo "$w"; return; }
-  for w in $(xdotool search --onlyvisible --class "^steam_app_$APP\$" 2>/dev/null); do
-    xwininfo -id "$w" 2>/dev/null | awk -v w="$w" '/Width:/{x=$2} /Height:/{y=$2} END{printf "%d 0x%x\n", x*y, w}'; done | sort -rn | head -1 | cut -d' ' -f2; }
+# candidates: "<area> <id> <WxH> <map state>" for each window named WIN_NAME or of class steam_app_<appid>, largest first.
+# Not the first by name: Besiege (11-07) has two "Besiege" windows - a 1135x1365 one listed first and the game's
+# full-screen one KWin made its task 2268x2440 - and the first-by-name made every probe measure the wrong window.
+candidates() {
+  { xwininfo -root -tree 2>/dev/null | awk -v n="\"$WIN_NAME\"" 'n != "\"\"" && index($0, n) && !/has no name/ {print $1}'
+    xdotool search --class "^steam_app_$APP\$" 2>/dev/null | awk '{printf "0x%x\n", $1}'; } | sort -u | while read -r w; do
+    xwininfo -id "$w" 2>/dev/null | awk -v w="$w" '/Width:/{x=$2} /Height:/{y=$2} /Map State:/{m=$3} END{if (x) printf "%d %s %dx%d %s\n", x*y, w, x, y, m}'; done | sort -rn; }
+gamewin() { local c; c=$(candidates); { echo "$c" | awk '$4 == "IsViewable" {print $2; exit}'; echo "$c" | awk 'NF {print $2; exit}'; } | head -1; }
 case ${1:-state} in
 state)
   w=$(gamewin); g=-
   [ -n "$w" ] && g=$(xwininfo -id "$w" 2>/dev/null | awk '/-geometry/{print $2}')
   s=$(sed -n 's/^0:://p' "/proc/$(cat ~/.steam/steam.pid 2>/dev/null)/cgroup" 2>/dev/null); case $s in */powos/sleep/*) f=yes ;; *) f=no ;; esac
   r=$(xwininfo -root 2>/dev/null | awk '/Width:/{w=$2} /Height:/{h=$2} END{print w "x" h}')
-  echo "reaper=$(reaper | grep . || echo -) win=${w:--} geom=$g frozen=$f root=$r" ;;
+  echo "reaper=$(reaper | grep . || echo -) win=${w:--} geom=$g frozen=$f root=$r wins=$(candidates | awk '{printf "%s%s:%s:%s", (NR > 1 ? "," : ""), $2, $3, substr($4, 1, 6)}')" ;;
 start)
   powos sleep never --remove steam >/dev/null 2>&1  # the real setup: Steam sleepable (games: "pause")
   cd "$HOME"; LAUNCH_S=200 . /var/tmp/powos-bf-lib.sh; trap - HUP TERM INT

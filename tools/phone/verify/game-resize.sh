@@ -101,14 +101,18 @@ probe() {  # probe <label>
   [ -n "$bad" ] && { fails=$((fails + 1)); log "  $1 bad:$bad"; }
   return 0
 }
-rotate() { "$A" shell "settings put system accelerometer_rotation 0; settings put system user_rotation $1"; sleep 5; }
+# rebase: the touch-interrupt baseline taken again after a fold / rotate this check made - the panels' own interrupts on a
+# display switch read as "user input" (Besiege 11-07 01:10 and 01:16, Broforce 01:03: every run stopped after the cover
+# portrait step, before "unfolded again"); touches during the probes still stop it.
+rebase() { I0=$(irq); }
+rotate() { "$A" shell "settings put system accelerometer_rotation 0; settings put system user_rotation $1"; sleep 5; rebase; }
 "$A" shell cmd device_state state 3; rotate 0; touched && { [ "$mine" = 1 ] && stop; exit 3; }
 probe unfolded
 rotate 1; log "rotated landscape"; probe unfolded-landscape
-"$A" shell cmd device_state state 0; sleep 6; log "folded (cover)"; probe folded-landscape
+"$A" shell cmd device_state state 0; sleep 6; rebase; log "folded (cover)"; probe folded-landscape
 rotate 0; log "cover portrait"; probe folded-portrait
 touched && { restore; [ "$mine" = 1 ] && stop; exit 3; }
-"$A" shell cmd device_state state 3; sleep 6; log "unfolded again"; probe unfolded-again
+"$A" shell cmd device_state state 3; sleep 6; rebase; log "unfolded again"; probe unfolded-again
 restore
 stop
 "$A" shell "su -c 'rm -f /data/local/tmp/powos-bf-* /data/powos/root/var/tmp/powos-bf-fold-phone.sh /data/powos/root/var/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-bf-xframes.py'"
