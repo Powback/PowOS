@@ -52,7 +52,7 @@ args)  # the game's own command line (its size arguments: unity-screen's -screen
   for q in $(pgrep -f -- '-screen-width|-ResX|[.]exe|[.]x86_64'); do grep -qa "SteamGameId=$APP" "/proc/$q/environ" 2>/dev/null || continue
     c=$(tr '\0' ' ' < "/proc/$q/cmdline" 2>/dev/null)
     case $c in *iscriptevaluator*|*wineserver*|*steam.exe*|*services.exe*|*explorer.exe*|*winedevice*|*plugplay*|*svchost*|*rpcss*|*tabtip*|*conhost*|*proton\ *|*python*) continue ;; esac
-    echo "$c" | cut -c1-240; done | sort -u | head -3 | tr '\n' '|'; echo ;;
+    echo "$c" | grep -oE '[^ /\\]+[.](exe|x86_64)( |$)|-screen-[a-z]+ [0-9]+|-popupwindow|-Res[XY]=[0-9]+|-windowed|-fullscreen' | tr '\n' ' '; echo; done | grep '[^ ]' | sort -u | head -3 | tr '\n' '|'; echo ;;
 refreeze)
   powos game $APP freeze 2>&1 | tail -1 | sed 's/\x1b\[[0-9;]*m//g' ;;
 sleeplog)  # what powos-sleep-gui did to Steam in the last 2 minutes

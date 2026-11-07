@@ -53,7 +53,10 @@ stop() { if [ "$mine" = 1 ]; then pill "closing the game"
   elif [[ $r == *mine=0* ]]; then log "the user's $WIN_NAME: $(ph refreeze | tail -1)"; fi; }
 [[ $r == *"user input"* ]] && { log "user input during the start"; exit 3; }
 [[ $r == *FAIL* || $r != *mine=* ]] && { log "FAIL: ${WIN_NAME:-app $APP} didn't come up: $(echo "$r" | grep -m1 FAIL)"; stop; exit 1; }
-log "game args: $(ph args | tail -1)"
+# Ready: the window drawing before the first probe (a game's own load screen after its window maps - Besiege, 32-bit
+# Unity under x86 Proton + FEX, sat on a black 1135x1365 window for minutes), at most READY_S (90) s; logged.
+t0=$(date +%s); while [ $(($(date +%s) - t0)) -lt "${READY_S:-90}" ]; do c=$(ph changes 3); [ "${c#changes=}" -ge 3 ] 2>/dev/null && break; touched && { stop; exit 3; }; done
+log "ready: $c after $(($(date +%s) - t0)) s; game args: $(ph args | tail -1)"
 bars() {  # black rows/columns at each edge of a screencap
   local r c
   r=$(ffmpeg -nostdin -loglevel error -i "$1" -vf "format=gray,scale=1:ih:flags=area" -f rawvideo - 2>/dev/null | od -An -v -tu1 | tr -s ' \n' ' ')
