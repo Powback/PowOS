@@ -61,10 +61,15 @@ chk() { [ "$(irq)" = "$I0" ] || { log "STOP: a real touch at $1 - restoring"; ex
 read -r screen < <("$T/idle.sh")
 case "$screen" in *screen=Awake*) ;; *) log "SKIP screen not on ($screen)"; exit 3 ;; esac
 sh_ "dumpsys device_state" | grep -q "mCommittedState=.*OPENED" || { log "SKIP folded (needs the inner screen)"; exit 3; }
-full=$(hcall webwindows.list "[]" "l=>l.filter(w=>w.state==='full').map(w=>w.key).join(' ')")
-case $full in ERR*) log "SKIP home's bridge: $full"; exit 3 ;; esac
+# Home first (a check before this one may have left another app in front: home's page then didn't answer, 11-07).
+sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME" >/dev/null
+for i in $(seq 1 10); do
+  full=$(hcall webwindows.list "[]" "l=>'ok '+l.filter(w=>w.state==='full').map(w=>w.key).join(' ')")
+  case $full in ok*) break ;; esac; sleep 2
+done
+case $full in ok*) full=${full#ok} full=${full# } ;; *) log "SKIP home's bridge: $full"; exit 3 ;; esac
 [ -z "$full" ] || { log "SKIP a full-screen window is up ($full: a game left running) - not touched"; exit 3; }
-sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME" >/dev/null; sleep 1.5
+sleep 1
 "$A" shell "logcat -v time -s PowosWebWindows:I Andromarchy:I PowosShell:I" > "$OUT/logcat.txt" 2>/dev/null &
 LOGPID=$!
 
