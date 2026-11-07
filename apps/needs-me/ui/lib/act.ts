@@ -4,8 +4,9 @@
  * user's back, nothing talks to Discord's, WhatsApp's or Gmail's servers: the official apps do, as from the shade).
  *
  * Optimistic: a marked-read row goes at once (kept out while its notification is unchanged, back with the error if
- * the press failed); a sent reply shows "Sent" until the app updates the notification (then the user's reply is its
- * last message and the row leaves, model.ts) or cancels it.
+ * the press failed); a sent reply shows "Sent" the moment send is tapped (the field closes at once), until the app updates
+ * the notification (then the user's reply is its last message and the row leaves, model.ts) or cancels it. A press that
+ * fails rolls the row back: "Didn't go" with the reason and a Retry that sends the same words again.
  */
 import { signal } from "@preact/signals";
 import { rememberReply } from "./history";
@@ -42,8 +43,9 @@ export interface Props {
   close?: () => void;
 }
 
-/** [time]: the row's newest message then - a newer one (or the app's update) and the state is over. */
-export type RowState = { state: "sending" | "sent" | "error"; time: number; message?: string };
+/** [time]: the row's newest message then - a newer one (or the app's update) and the state is over. [text]: the reply
+ * that was sent (or failed to go: what Retry sends again). */
+export type RowState = { state: "sent" | "error"; time: number; message?: string; text?: string };
 /** Per row (Group.id): a reply on its way, sent, or a press that failed. */
 export const rowState = signal<Record<string, RowState>>({});
 /** Notifications marked read (key -> the time it had): out of the list while unchanged. */
@@ -57,22 +59,32 @@ const say = (e: unknown) => String((e as Error)?.message ?? e);
 /** Whether [e] was marked read and hasn't changed since. */
 export const isMarked = (e: Entry) => marked.value[e.n.key] === e.n.time;
 
-/** The typed reply through the newest entry's own reply action: one press, [text] in its RemoteInput. */
+/**
+ * The typed reply through the newest entry's own reply action: one press, [text] in its RemoteInput. Optimistic: the
+ * row says "Sent" before the press (memory powos-always-show-pending-change); a rejected press (the host throws when
+ * nothing reached the app - Notifications.action) rolls it back to the error, the words kept for Retry.
+ */
 export async function sendReply(host: Host, app: string, g: Group, text: string): Promise<boolean> {
   const n = host.notifications;
   const t = replyTarget(g);
-  if (!n || !t || !text.trim()) return false;
-  setRow(g.id, { state: "sending", time: g.time });
+  const words = text.trim();
+  if (!n || !t || !words) return false;
+  setRow(g.id, { state: "sent", time: g.time, text: words });
   try {
-    await n.action(app, t.n.key, t.reply, text.trim());
-    setRow(g.id, { state: "sent", time: g.time });
+    await n.action(app, t.n.key, t.reply, words);
     // Kept as the row's last message: once the notification goes, the row stays, marked replied (history.ts).
-    rememberReply(app, g, text.trim());
+    rememberReply(app, g, words);
     return true;
   } catch (e) {
-    setRow(g.id, { state: "error", time: g.time, message: say(e) });
+    setRow(g.id, { state: "error", time: g.time, message: say(e), text: words });
     return false;
   }
+}
+
+/** Retry (a failed reply's button): the same words again, through the row's reply action as it is now. */
+export function retryReply(host: Host, app: string, g: Group) {
+  const s = stateOf(g);
+  if (s?.state === "error" && s.text) void sendReply(host, app, g, s.text);
 }
 
 /** One entry read: its mark-as-read action, or dismissed when it has none. */

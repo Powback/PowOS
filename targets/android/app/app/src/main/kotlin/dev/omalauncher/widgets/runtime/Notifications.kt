@@ -206,6 +206,10 @@ class Notifications(
     /**
      * Presses [key]'s action [index] - with [text] typed into it when it takes a reply (its RemoteInputs, as SystemUI's
      * inline reply fills them).
+     *
+     * Throws (the bridge rejects the caller's promise with the message) whenever nothing reached the app: no access, the
+     * notification or action gone, text for an action with no field, or the app having cancelled its PendingIntent.
+     * It used to return quietly in each of those, so What needs me showed "Sent" for a reply that never left.
      */
     fun action(
         key: String,
@@ -213,18 +217,24 @@ class Notifications(
         text: String?,
     ) {
         val listener = MediaListener.connected
-        if (!media.granted || listener == null) return
-        val sbn = runCatching { listener.getActiveNotifications(arrayOf(key)) }.getOrNull()?.firstOrNull() ?: return
-        val action = sbn.notification.actions?.getOrNull(index) ?: return
+        check(media.granted && listener != null) { "no notification access" }
+        val sbn = runCatching { listener.getActiveNotifications(arrayOf(key)) }.getOrNull()?.firstOrNull()
+        checkNotNull(sbn) { "the notification is gone" }
+        val action = checkNotNull(sbn.notification.actions?.getOrNull(index)) { "the notification has no such action" }
         val fill = Intent()
         val inputs = action.remoteInputs.orEmpty().filter { it.allowFreeFormInput }.toTypedArray()
-        val typed = replyResults(inputs.map { it.resultKey }, text) ?: return
+        val keys = inputs.map { it.resultKey }
+        val typed = checkNotNull(replyResults(keys, text)) { replyRefusal(keys, text) }
         if (typed.isNotEmpty()) {
             val results = Bundle().apply { typed.forEach { (k, v) -> putCharSequence(k, v) } }
             RemoteInput.addResultsToIntent(inputs, fill, results)
             RemoteInput.setResultsSource(fill, RemoteInput.SOURCE_FREE_FORM_INPUT)
         }
-        runCatching { dev.omalauncher.system.AppWindows.send(context, action.actionIntent, fill, startOptions()) }
+        try {
+            dev.omalauncher.system.AppWindows.send(context, action.actionIntent, fill, startOptions())
+        } catch (e: android.app.PendingIntent.CanceledException) {
+            throw IllegalStateException("the app no longer takes that reply", e)
+        }
     }
 
     /** The launcher is in front, so it may start the app; since Android 14 it has to say so. */
@@ -310,6 +320,12 @@ class Notifications(
                 text.isBlank() || keys.isEmpty() -> null
                 else -> keys.associateWith { text.trim() }
             }
+
+        /** Why [replyResults] refused to press (it gave null): the message the caller's promise is rejected with. */
+        internal fun replyRefusal(
+            keys: List<String>,
+            text: String?,
+        ): String = if (text.isNullOrBlank()) "nothing to send" else if (keys.isEmpty()) "that action takes no reply: open the app" else "not sent"
 
         private const val MAX_ITEMS = 50
         private const val MAX_ALERTED = 200

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- tools/phone/verify/replycheck: the reply check's own test sender (tools/phone/verify/needs-me-reply.sh). It posts
+     ONE notification with a RemoteInput reply action and keeps what that action receives, so the check proves What
+     needs me's inline reply end to end without ever touching a real Discord / WhatsApp / Gmail thread. Installed by
+     the check for its run and uninstalled after; never part of PowOS. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.powos.replycheck"
+    android:versionCode="1" android:versionName="replycheck-1">
+    <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="36" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <application android:label="PowOS reply check">
+        <!-- Only the shell (adb, root) may ask for the test notification: DUMP is a shell/system-only permission. -->
+        <receiver android:name=".Post" android:exported="true" android:permission="android.permission.DUMP">
+            <intent-filter><action android:name="dev.powos.replycheck.POST" /></intent-filter>
+        </receiver>
+        <!-- The reply action's target: reached only through this app's own PendingIntent. -->
+        <receiver android:name=".Reply" android:exported="false" />
+    </application>
+</manifest>

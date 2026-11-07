@@ -4,7 +4,7 @@
  * its app. Every action is the notification's own (act.ts), on that one gesture.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { isMarked, markRead, openEntry, sendReply, stateOf, type Host, type ReplyFieldProps } from "./act";
+import { isMarked, markRead, openEntry, retryReply, sendReply, stateOf, type Host, type ReplyFieldProps } from "./act";
 import { forget, lineOf, remember, store, withHistory, type Convo } from "./history";
 import { ago, groups, replyTarget, sourceOf, type Entry, type Group } from "./model";
 
@@ -211,10 +211,32 @@ function newest(g: Group): string {
   return c?.said.length ? lineOf(c, c.said[c.said.length - 1]) : "";
 }
 
-function Line({ g, lines }: { g: Group; lines: number }) {
+/** The row's line: its newest message, "Sent" for a reply on its way, or a failed one's reason with Retry. */
+function Line({ g, lines, host, app }: { g: Group; lines: number; host: Host; app: string }) {
   const s = stateOf(g);
-  const text = s?.state === "sending" ? "Sending…" : s?.state === "sent" ? "Sent" : s?.state === "error" ? `Didn't go: ${s.message}` : newest(g);
-  return <Clamp text={text} lines={lines} style={{ ...S.line, color: s?.state === "error" ? "var(--color-red)" : undefined }} />;
+  if (s?.state === "error") {
+    const why = s.text ? `Didn't go: ${s.message}` : `Failed: ${s.message}`;
+    return (
+      <div class="nm-failed" style={{ display: "flex", alignItems: "center", gap: "0.5em" }}>
+        <Clamp text={why} lines={lines} style={{ ...S.line, flex: 1, minWidth: 0, color: "var(--color-red)" }} />
+        {s.text && (
+          <button
+            class="nm-retry"
+            style={S.pillButton}
+            onPointerDown={stop}
+            onClick={(e) => {
+              e.stopPropagation();
+              retryReply(host, app, g);
+            }}
+          >
+            Retry
+          </button>
+        )}
+      </div>
+    );
+  }
+  const text = s?.state === "sent" ? "Sent" : newest(g);
+  return <Clamp text={text} lines={lines} style={S.line} />;
 }
 
 /**
@@ -256,7 +278,7 @@ export function Row(p: { g: Group; host: Host; app: string; open: boolean; onTog
         {narrow !== "text" && <Icons g={g} host={host} app={app} />}
         <div style={{ flex: 1, minWidth: 0 }}>
           <Who g={g} />
-          <Line g={g} lines={lines} />
+          <Line g={g} lines={lines} host={host} app={app} />
         </div>
         {narrow === "no" && <div class="nm-time" style={S.time}>{ago(g.time)}</div>}
       </div>
@@ -266,7 +288,13 @@ export function Row(p: { g: Group; host: Host; app: string; open: boolean; onTog
 }
 
 /** A row's data-* marks: its group, past (no live notification), replied - what checks and the device look read. */
-const marks = (g: Group) => ({ "data-group": g.id, "data-past": g.entries.length ? undefined : "", "data-replied": g.replied ? "" : undefined });
+const marks = (g: Group) => ({
+  "data-group": g.id,
+  "data-past": g.entries.length ? undefined : "",
+  "data-replied": g.replied ? "" : undefined,
+  // A reply's state while it lasts: "sent" (optimistic) or "error" (rolled back, Retry) - needs-me-reply.sh reads it.
+  "data-reply": stateOf(g)?.state,
+});
 
 /** Under an opened row: its history (the page only), then its reply field. */
 function Opened({ g, host, app, done, history }: { g: Group; host: Host; app: string; done(): void; history?: boolean }) {
@@ -314,7 +342,6 @@ function Plain(p: ReplyFieldProps) {
 /** The reply field under a row: the text goes only when send (or Enter) is tapped, once. */
 function Reply({ g, host, app, done }: { g: Group; host: Host; app: string; done(): void }) {
   const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
   const going = useRef(false);
   const t = replyTarget(g);
   if (!t && !g.entries.length) {
@@ -337,20 +364,17 @@ function Reply({ g, host, app, done }: { g: Group; host: Host; app: string; done
     );
   }
   const Field = host.notifications?.ReplyField ?? Plain;
-  const send = async () => {
-    // One press per tap: a second tap (or Enter) while it goes is ignored - the state lags a render, the ref doesn't.
-    if (going.current) return;
+  // Optimistic: the field closes and the row says "Sent" at once; a failed press brings the words back on the row with
+  // Retry (act.ts sendReply). One press per tap: a second tap (or Enter) before the field is gone is ignored - the
+  // render lags, the ref doesn't (a fresh field, the next time the row opens, starts with a fresh ref).
+  const send = () => {
+    if (going.current || !text.trim()) return;
     going.current = true;
-    setSending(true);
-    const ok = await sendReply(host, app, g, text);
-    going.current = false;
-    setSending(false);
-    if (ok) {
-      setText("");
-      done();
-    }
+    void sendReply(host, app, g, text);
+    setText("");
+    done();
   };
-  return <Field value={text} onInput={setText} onSend={send} sending={sending} placeholder={`Reply in ${sourceOf(t.n)}`} />;
+  return <Field value={text} onInput={setText} onSend={send} placeholder={`Reply in ${sourceOf(t.n)}`} />;
 }
 
 export const S = {

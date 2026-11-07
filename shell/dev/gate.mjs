@@ -14190,7 +14190,7 @@ function overpullInFlow() {
 
 /** The What needs me case (above): mount, then each gesture, every step in the page (window.__nm); its problems. */
 async function settleNeedsMe(r) {
-  const steps = [nmMount, nmRows, nmBadge, nmReply, nmSwipe, nmPast, nmPastPage, nmForget, nmOpen, nmScale];
+  const steps = [nmMount, nmRows, nmBadge, nmReply, nmReplyFail, nmSwipe, nmPast, nmPastPage, nmForget, nmOpen, nmScale];
   try {
     await r.page.evaluate(() => new Promise((ok) => (window.importShim ? ok() : addEventListener("load", ok))));
     await r.page.evaluate(`window.__nmItems = ${nmItems.toString()}`);
@@ -14940,7 +14940,13 @@ async function nmMount() {
   const list = { available: true, items: window.__nmItems() };
   Object.assign(powos.notifications, {
     list: async () => list,
-    action: async (...a) => void calls.push(["action", ...a]),
+    // nmReplyFail: [hold] keeps a press pending (the optimistic "Sent" is seen before the answer), [fail] rejects it as
+    // the bridge does when nothing reached the app (Notifications.action).
+    action: async (...a) => {
+      calls.push(["action", ...a]);
+      if (window.__nm?.hold) await window.__nm.hold;
+      if (window.__nm?.fail) throw new Error(window.__nm.fail);
+    },
     dismiss: async (k) => void calls.push(["dismiss", k]),
     open: async (k) => void calls.push(["open", k]),
   });
@@ -15005,6 +15011,44 @@ async function nmReply() {
   await sleep(500);
   const ok = said() === JSON.stringify([["action", "wa", 0, "on my way"]]);
   return [...before, ...(ok ? [] : [`reply pressed ${said()}, want once ["action","wa",0,"on my way"]`])];
+}
+
+/**
+ * Optimistic reply, rolled back: while the press is pending the field is closed and the row says "Sent" already; the
+ * host rejecting it brings "Didn't go: <why>" and Retry; Retry presses the same reply again (same words, same action).
+ */
+async function nmReplyFail() {
+  const { row, calls, until, sleep, said } = window.__nm;
+  calls.length = 0;
+  let release;
+  window.__nm.hold = new Promise((r) => (release = r));
+  window.__nm.fail = "the app no longer takes that reply";
+  const fails = [];
+  try {
+    row("Anna Berg").querySelector("[role=button]").click();
+    if (!(await until(() => row("Anna Berg").querySelector("form textarea, form input")))) return ["no reply field after tapping the row again"];
+    const field = row("Anna Berg").querySelector("form textarea, form input");
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field), "value").set.call(field, "on my way");
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    await sleep(100);
+    row("Anna Berg").querySelector("form [type=submit]").click();
+    const sentAtOnce = await until(() => row("Anna Berg").dataset.reply === "sent" && /Sent/.test(row("Anna Berg").textContent) && !row("Anna Berg").querySelector("form"), 600);
+    if (!sentAtOnce) fails.push(`while the press is pending the row isn't "Sent" with the field closed: reply=${row("Anna Berg").dataset.reply} "${row("Anna Berg").textContent.slice(0, 80)}"`);
+    release();
+    window.__nm.hold = null;
+    if (!(await until(() => row("Anna Berg").dataset.reply === "error" && row("Anna Berg").querySelector(".nm-retry"))))
+      return [...fails, `a rejected reply didn't roll back to the error with Retry: reply=${row("Anna Berg").dataset.reply} "${row("Anna Berg").textContent.slice(0, 80)}"`];
+    if (!/Didn't go: the app no longer takes that reply/.test(row("Anna Berg").textContent)) fails.push(`the rolled-back row doesn't say why: "${row("Anna Berg").textContent.slice(0, 80)}"`);
+    window.__nm.fail = null;
+    row("Anna Berg").querySelector(".nm-retry").click();
+    if (!(await until(() => row("Anna Berg").dataset.reply === "sent"))) fails.push(`Retry didn't send: reply=${row("Anna Berg").dataset.reply}`);
+    const want = JSON.stringify([["action", "wa", 0, "on my way"], ["action", "wa", 0, "on my way"]]);
+    if (said() !== want) fails.push(`pressed ${said()}, want ${want} (the failed press, then Retry's)`);
+  } finally {
+    release?.();
+    window.__nm.hold = window.__nm.fail = null;
+  }
+  return fails;
 }
 
 /** Swipe #powos sideways: Discord's own mark-as-read (action 0), once. */

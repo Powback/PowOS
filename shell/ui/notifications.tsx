@@ -70,7 +70,7 @@ export function Actions({ n, onDone, onOpen }: { n: PhoneNotification; onDone?: 
           onClick={(e) => {
             e.stopPropagation();
             if (a.input) replying.value = { key: n.key, index: i };
-            else powos.notifications.action(n.key, i);
+            else powos.notifications.action(n.key, i).catch((err) => console.warn("[notifications] action", err));
             onDone?.(a.input);
           }}
         >
@@ -119,7 +119,7 @@ function Reply({ n, index }: { n: PhoneNotification; index: number }) {
   const send = () => {
     const t = text.trim();
     if (!t) return;
-    powos.notifications.action(n.key, index, t);
+    powos.notifications.action(n.key, index, t).catch((err) => console.warn("[notifications] reply", err));
     replying.value = null;
   };
   return (
