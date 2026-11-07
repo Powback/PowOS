@@ -1,0 +1,59 @@
+From: PowOS <powos@localhost>
+Subject: [PATCH] xwayland: KGSL paces async copies on the frame callback
+
+0015 paced async flips; a present that can't flip still went the copy path unpaced. A copy hands the client its
+buffer back idle at once, so a game in immediate/mailbox mode (DXVK on Wine's X11 WSI) rendered flat out into copies
+the compositor never showed. Broforce in real play on the inner screen (bf-pacing play, 2026-11-06 16:51): flips
+refused (3303 copies / 30 s, reason toplevel=3002), the game presented 109.7/s for 47.8 surface commits/s (= frame
+callbacks 47.6/s), each copy a window-sized glamor blit + finish, GPU busy 76 % at 670 of 680 MHz, while the game's
+main thread was only 60 % of a core - so the game, FEX and Unity were not the cap. On KGSL an async copy now waits for
+the next frame callback when its window already took a copy in the current one: its buffer stays busy until then, so
+the client's swapchain throttles it to one copy per drawn frame. Counted on 0014's line: "async copies paced N".
+---
+diff --git a/hw/xwayland/xwayland-present.c b/hw/xwayland/xwayland-present.c
+index 46e726b..6a98459 100644
+--- a/hw/xwayland/xwayland-present.c
++++ b/hw/xwayland/xwayland-present.c
+@@ -1288,6 +1288,27 @@ retry:
+         DebugPresent(("\tc %p %" PRIu64 ": %08" PRIx32 " -> %08" PRIx32 "\n",
+                       vblank, crtc_msc, vblank->pixmap->drawable.id, vblank->window->drawable.id));
+ 
++#ifdef XWL_HAS_GLAMOR
++        /* PowOS 0016: on KGSL an async copy waits for the next frame callback when this window already took a
++         * copy in the current one - 0015's pacing for presents that can't flip. A copy hands the client its
++         * buffer back idle at once, so a game in immediate/mailbox mode rendered flat out into copies the
++         * compositor never showed: Broforce on the inner screen (flip refused: toplevel) presented 109.7/s for
++         * 47.8 commits/s, every copy a window-sized glamor blit + finish, GPU busy 76 % at 670/680 MHz
++         * (bf-pacing play, 2026-11-06 16:51). Queued, its buffer stays busy until the copy, so the client's
++         * swapchain throttles it to one copy per drawn frame. */
++        if (xwl_glamor_is_kgsl_surfaceless(xwl_screen) && (event->options & PresentOptionAsync) &&
++            xwl_present_window->kgsl_copy_msc_valid && xwl_present_window->kgsl_copy_msc == crtc_msc) {
++            vblank->queued = TRUE;
++            if (xwl_present_queue_vblank(screen, window, vblank->crtc, vblank->event_id, crtc_msc + 1) == Success) {
++                xwl_kgsl_commits.copies_paced++;
++                return;
++            }
++            vblank->queued = FALSE;
++        }
++        xwl_present_window->kgsl_copy_msc = crtc_msc;
++        xwl_present_window->kgsl_copy_msc_valid = TRUE;
++#endif /* XWL_HAS_GLAMOR */
++
+         if (flip_pending)
+             flip_pending->abort_flip = TRUE;
+         else if (xwl_present_window->flip_active)
+diff --git a/hw/xwayland/xwayland-present.h b/hw/xwayland/xwayland-present.h
+index 808e541..1754636 100644
+--- a/hw/xwayland/xwayland-present.h
++++ b/hw/xwayland/xwayland-present.h
+@@ -58,6 +58,10 @@ struct xwl_present_window {
+     OsTimerPtr unredirect_timer;
+     Bool redirected;
+     Bool redirect_failed;
++
++    /* PowOS 0016 (KGSL): the msc of this window's last Present copy - one async copy per frame callback */
++    uint64_t kgsl_copy_msc;
++    Bool kgsl_copy_msc_valid;
+ };
+ 
+ struct xwl_present_event {

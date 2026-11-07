@@ -43,6 +43,7 @@ struct xwl_kgsl_commit_stats {
     unsigned frame_timeouts;                /* Present frame timers that fired (no callback in time) */
     unsigned paced;                         /* 0015: async flips held for the frame callback */
     unsigned skipped;                       /* 0015: queued flips replaced by a newer one (never committed) */
+    unsigned copies_paced;                  /* 0016: async copies held for the next frame callback */
     const void *damage_surface;             /* the surface the pending damage was asked on (NULL: none) */
 };
 
@@ -95,7 +96,7 @@ xwl_kgsl_commit_line(struct xwl_kgsl_commit_stats *s, uint64_t now_us, char *buf
         damaged += s->damaged[i];
     }
     if (!s->period_start_us || now_us - s->period_start_us < XWL_KGSL_COMMIT_PERIOD_US ||
-        !(total + s->frame_callbacks + s->frame_timeouts + s->paced + s->skipped))
+        !(total + s->frame_callbacks + s->frame_timeouts + s->paced + s->skipped + s->copies_paced))
         return 0;
     n = (size_t) snprintf(buf, len, "Xwayland KGSL: last %us: %u surface commits (%u with damage):",
                           (unsigned) ((now_us - s->period_start_us) / 1000000), total, damaged);
@@ -105,7 +106,8 @@ xwl_kgsl_commit_line(struct xwl_kgsl_commit_stats *s, uint64_t now_us, char *buf
                                    s->damaged[i]);
     if (n < len)
         n += (size_t) snprintf(buf + n, len - n, "; frame callbacks %u, frame timeouts %u; async flips paced %u, "
-                               "skipped %u\n", s->frame_callbacks, s->frame_timeouts, s->paced, s->skipped);
+                               "skipped %u; async copies paced %u\n", s->frame_callbacks, s->frame_timeouts, s->paced,
+                               s->skipped, s->copies_paced);
     memset(s, 0, sizeof(*s));
     s->period_start_us = now_us;
     return 1;

@@ -307,3 +307,32 @@ launch for the overlay A/B and (3) `BOOST_MIN_ALL=1` for the gold-min A/B; repor
 `tools/phone/adb.sh shell "su -c 'sh -s'" < design-qa/bf-fps-20261103/sample.sh` (30 s, read-only; divide the
 per-thread column by 100) or `tools/phone/verify/bf-prof.sh`. Pass = main thread on cpu7 at >= 2.8 GHz and KWin
 `frames:` lines >= 45 fps.
+
+## Play at 49.7: the game is not the cap - Xwayland's unpaced async copies (2026-11-07, agent broforce-fps)
+
+Asked: FEX per-app config + Unity workers (CPU-bound). Read from the 11-06 16:51 `bf-pacing play` run (inner screen,
+`bfp-2026-11-06_1651/play`) next to the cover `base` runs of 11-06:
+
+| run | game presents/s | Xwayland path | commits/s | main thread | prime clock | GPU |
+|---|---|---|---|---|---|---|
+| base (cover, menu) 11:45 / 12:54 | 116.0 / 123.3 | flips, async paced (0015) | 115.8 / 123.3 | 55.6 / 57.9 % | 2.83 / 2.89 GHz | - |
+| play (inner, level) 16:51 | **109.7** | **0 flips, 3303 copies / 30 s, toplevel=3002**, async paced 0 | **47.8** (= frame callbacks 47.6) | **60.6 %** on cpu7 | 1.59 GHz (horae cap) | busy 76 % at 670/680 MHz |
+
+So even at horae's 1.59 GHz the game makes ~110 frames a second with its main thread 40 % idle: FEX, Mono and Unity's
+loop are not what holds play at 50, and FEX TSO/x87/multiblock or worker-count tweaks would not move the shown rate.
+The first stage whose rate drops is Xwayland: on the inner screen the present window is not the toplevel's size, so
+every present is a copy, and 0015 only paced flips. An async copy returns the buffer idle at once, so the game
+renders flat out; ~62 of its 110 frames a second are rendered and blitted (window-sized glamor blit + finish each)
+and never shown, and the GPU sits at its max clock. KWin draws each commit in 1 ms and the consumer waits 20 ms for
+KWin (producer wait p50), so neither caps it.
+
+Fix (xwayland-kgsl 24.1.13-12, **0016**): on KGSL an async copy waits for the next frame callback when its window
+already took a copy in the current one, so the swapchain throttles the game to one copy per drawn frame (like 0015 for
+flips); counted as `async copies paced N` on 0014's line. Expected: game presents ~= commits, GPU busy/clock down,
+less heat (horae's gear is skin-driven, so a cooler phone keeps the prime clock up). Open: why the present window
+differs from the toplevel on the inner screen (Wine child window vs. a resized toplevel; the window file shows
+`314x208 on 2268x2440 settled 1116x2484 on 1116x2484`) - the flip there removes the copy entirely.
+
+Check after the ship: `queue.sh add --screen inner broforce-fps-low-cpu-bound-under-fex tools/phone/verify/bf-pacing.sh play`.
+Pass: the kgsl line has `async copies paced` > 0, the `layers play:` game rate within ~5 % of the xwayland rate, and
+sf/kwin fps not lower than 49.7.

@@ -26,6 +26,9 @@
 #   0015       an async flip (a game in immediate/mailbox mode) waits for the frame callback like a vsync'd one on KGSL,
 #              queued flips complete on their own callbacks (never skipped), so one drawn frame = one commit (Broforce sent ~84 flip
 #              commits/s for ~40 drawn); "async flips paced / skipped" on 0014's line
+#   0016       an async copy (a present that can't flip, e.g. a windowed game) waits for the next frame callback when
+#              its window already took a copy in this one: one copy per drawn frame (Broforce on the inner screen
+#              copied 109.7 presents/s for 47.8 commits/s, GPU 76 % at max clock); "async copies paced" on 0014's line
 # Was built inside the rootfs only (build-inside.sh); a package so a fix reaches phones without a new rootfs:
 # rooted.sh deploy installs it (powos-deploy.sh), the rootfs build installs it with our other packages.
 #
@@ -35,7 +38,7 @@
 
 pkgname=xwayland-kgsl
 pkgver=24.1.13
-pkgrel=11
+pkgrel=12
 pkgdesc='Xwayland with glamor/DRI3 on KGSL surfaceless (PowOS Android: Turnip without /dev/dri)'
 arch=(aarch64)
 url='https://gitlab.freedesktop.org/xorg/xserver'
@@ -58,7 +61,8 @@ _patches=(0005-present-fence-callback-fires-once.patch
           0012-xwayland-kgsl-one-import-per-client-dma-buf.patch
           0013-xwayland-kgsl-flip-client-dri3-buffers.patch
           0014-xwayland-kgsl-count-surface-commits-per-site.patch
-          0015-xwayland-kgsl-pace-async-flips-on-frame-callback.patch)
+          0015-xwayland-kgsl-pace-async-flips-on-frame-callback.patch
+          0016-xwayland-kgsl-pace-async-copies-on-frame-callback.patch)
 source=("xserver::git+https://gitlab.freedesktop.org/xorg/xserver.git#tag=xwayland-$pkgver"
         "${_lfdevs[@]/#/https://raw.githubusercontent.com/lotfibennour/andromarchy/$_andromarchy/patches/xwayland/}"
         "${_patches[@]}"
@@ -72,7 +76,7 @@ sha256sums=(SKIP
             88f40f91416cc76d3ed3588fc93d4a892e414442938e25b2555e50dfcdf88f97
             652094faa7e89ff05726d9b7c2c3f5631b1c3e6a0e5460ebf4afe52612e07a2f
             d175913cbbd23e80c6bb7fd17565f1fad9ccf247171bf5a939fb157117f05b88
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   for p in "${_lfdevs[@]}" "${_patches[@]}"; do
