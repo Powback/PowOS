@@ -8486,12 +8486,16 @@ async function grabZones(g) {
   let f = await window.__grab.grabReset(g);
   const r = await window.__grab.grabPress(g, [f.right + 20, f.top + f.height / 2], [30, 30]);
   const edge = g.win();
+  // The outline leaves on the spring (usePresence: unmounted --spring-fast-ms after its first leaving frames, by a
+  // timer, not its transition's end) - so "stayed" is still there well after that, not in the frame [settled] returns:
+  // that raced the timer by a frame or two and failed whenever the frames came late (N1's glued page, a loaded gate).
+  const gone = await window.__gw.until(() => !document.querySelector(`${g.sel} .ww-outline`), 4 * (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--spring-fast-ms")) || 250) + 500);
   const fails = [
     !r.t.classList.contains("ww-edge") && `RZ2: a press 20 dp outside the right edge hit .${r.t.className} (want a resize zone)`,
     (edge.w !== 330 || edge.h !== 260) && `RZ2: a drag 20 dp outside the right edge left ${edge.w}x${edge.h} (want 330x260: width only)`,
     !r.outline && "RZ4: no live size outline during a resize",
     !g.ticks && "RZ4: no haptic tick on the grab",
-    !!document.querySelector(`${g.sel} .ww-outline`) && "RZ4: the size outline stayed after release",
+    !gone && "RZ4: the size outline stayed after release",
   ];
   f = await window.__grab.grabReset(g);
   await window.__grab.grabPress(g, [f.right + 30, f.bottom + 30], [30, 20]);
