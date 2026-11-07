@@ -20,6 +20,9 @@ import sys
 USEFUL = {"pass", "fail", "timeout"}   # a timeout is a FAIL verdict too
 
 
+WAKES = []
+
+
 def from_util(path, since):
     jobs, wins = [], []
     try:
@@ -31,6 +34,8 @@ def from_util(path, since):
         try:
             if p[0] == "J" and len(p) >= 4 and int(p[2]) >= since:
                 jobs.append((int(p[1]), int(p[2]), p[3]))
+            elif p[0] == "K" and len(p) >= 3 and int(p[1]) >= since:
+                WAKES.append(int(p[2]))   # queue.sh wl_done: the queue woke the phone for that many jobs
             elif p[0] == "W" and len(p) >= 3 and int(p[2]) >= since:
                 wins.append((int(p[1]), int(p[2])))
         except (ValueError, IndexError):
@@ -108,7 +113,8 @@ def report(jobs, wins, per_window=False):
     nv = sum(1 for _, _, c in jobs if c in USEFUL)
     waste = ", ".join(f"{k} {v}s" for k, v in sorted(by.items()) if k not in USEFUL and v) or "none"
     lines = [f"utilization: {len(wins)} windows, {tot}s window time, {useful}s on {nv} verdicts ({pct}%); "
-             f"wasted {tot - useful}s: {waste}, gaps {gaps}s"]
+             f"wasted {tot - useful}s: {waste}, gaps {gaps}s"
+             + (f"; woke the phone {len(WAKES)} times for {sum(WAKES)} jobs" if WAKES else "")]
     if per_window:
         for a, b in wins:
             inw = [(s, e, c) for s, e, c in jobs if s >= a and e <= b + 1]

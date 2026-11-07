@@ -74,7 +74,7 @@ EOF
 eq "runner.log line" "$(python3 -I "$util" --runner-log "$T/runner.log")" "utilization: 1 windows, 268s window time, 180s on 1 verdicts (67%); wasted 88s: precond 85s, gaps 3s"
 
 # The runner records it: per job, per window, hourly, and in summary.
-for p in 'util_rec J "$t0" "$t1" "$uc" "$n"; util_hourly' 'trap '"'"'warm_stop; util_rec W "$wopen" "$(date +%s)"'"'"' EXIT' \
+for p in 'util_rec J "$t0" "$t1" "$uc" "$n"; util_hourly' 'trap '"'"'warm_stop; util_rec W "$wopen" "$(date +%s)"; wl_done'"'"' EXIT' \
          'select_jobs "$go"; order_jobs' 'util_line --since "$se"' 'QUEUE_NEXT_APP=$nextapp'; do
   grep -qF "$p" "$src" && ok "runner: $p" || bad "runner wiring missing" "$p"; done
 

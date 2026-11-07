@@ -680,7 +680,10 @@ EOS
       select_jobs "$go"; order_jobs
       # The window's span for the utilization ledger, and a game a job left warm for a next job that never came (the
       # window ended: an install, a touch) closed again - else idle.sh reads it as the user playing for GAME_IDLE_S.
-      wopen=$(date +%s); trap 'warm_stop; util_rec W "$wopen" "$(date +%s)"' EXIT
+      wopen=$(date +%s); trap 'warm_stop; util_rec W "$wopen" "$(date +%s)"; wl_done' EXIT
+      # wl_done: the window ends - if the queue woke the phone (wl_wake), say for how many jobs (runner.log and the
+      # util ledger's K line), then the user's settings back and the screen off again (wl_sleep: not after a touch).
+      wl_done() { [ -n "${WL_DID:-}" ] || [ -e "$WL_WOKE" ] || return 0; echo "$(date +%T) woke the phone for ${k:-0} jobs"; util_rec K "$(date +%s)" "${k:-0}"; wl_sleep "$phone"; }
       N=${#sel[@]}; k=0; pass=0; fail=0; first=; prev=; results=
       [ $N -gt 0 ] || { status "" '{"done":true}' "rm -f /tmp/powos-verify-go"; [ $held = 0 ] && exit 5; exit 7; }
       # f317: what a "test all" costs, before it starts: the count and the summed budgets (an upper bound).
@@ -773,6 +776,8 @@ EOS
           touch "$HOME/.cache/powos-verify.lock" 2>/dev/null   # fresh through a long check too (f22)
           kill -0 $jp 2>/dev/null || break
           [ "$game" = 1 ] && wl_wake "$phone" >/dev/null 2>&1   # f106: keep the screen on through the whole check
+          # The phone was woken by the queue and a real input came: stop now, settings back - the user's phone again.
+          wl_touched "$phone" && { why=touched; wl_restore "$phone"; break; }
           el=$(( $(date +%s) - t0 ))
           [ $el -ge "$budget" ] && { why=timeout; break; }
           l=$(logstep "$log"); [ "$l" = "$ls_" ] || { ls_=$l; lt=$(date +%s); }
@@ -802,6 +807,8 @@ EOS
           kill_step "$log" "$ls_" >> "$log"
           echo "$(date +%T) $n: past its ${budget}s budget - killed"
         fi
+        # Stopped for the user's input on a phone the queue woke: rc 3 touched - stays queued, the window ends below.
+        [ "$why" = touched ] && { echo "$(date +%T) $n: the user picked up the phone the queue woke - stopped, stays queued"; why=; rc=3; }
         if [ "$why" = stop ]; then
           echo "$(date +%T) $n: stopped from the phone - stays queued, paused"; util_rec J "$t0" "$(date +%s)" stopped "$n"
           pause "Phone checks paused: $pass passed, $fail failed, $((N - k + 1)) still queued"
@@ -893,6 +900,7 @@ EOS
       sum="Phone checks: $pass passed"; [ $fail = 0 ] || sum="$sum, $fail failed ($first$([ $fail -gt 1 ] && echo ", ..."))"
       status "" "{\"done\":true,\"summary\":$(jstr "$sum")}" ) & wait $!
     rc=$?; [ -n "$wpp" ] && endjob "$wpp"   # the wait ended without a window (exit 3/6): its pill writes end before pause's
+    [ -e "$WL_WOKE" ] && wl_sleep "$phone"   # woken but no window came (or the window's own wl_done couldn't): settings back
     if [ -n "$nowin" ] && [ $rc = 3 ]; then
       echo "$(date +%T) every queued check waits for its ship - no window taken, looking again in ${NEED_POLL_S:-60} s"
       w0=$(( ${NEED_POLL_S:-60} - ($(date +%s) - w0) )); [ $w0 -gt 0 ] && sleep $w0   # a wait that returned at once (no phone)
