@@ -92,4 +92,21 @@ class OutsideLaunchClosesOverviewTest {
         assertTrue(watch.contains("launched("))
         assertTrue("watched from the moment it's up", src.substringAfter("var open = false").substringBefore("\n        }\n").contains("watchLaunches(v)"))
     }
+
+    /**
+     * e2e-desktop 248 40-recents (11-07: "the switcher shows no card for Calculator"): the switcher closed itself 21 ms
+     * after it came up - its watch's start was uptimeMillis, 78 min behind lastActiveTime's elapsedRealtime after deep
+     * sleep, so the floating Calculator it was opened over (fronted by a dock tap a minute before) read as a launch.
+     * The start is in lastActiveTime's clock; a window fronted before the switcher came up never closes it.
+     */
+    @Test
+    fun theWatchStartsInLastActiveTimesClock() {
+        val src = File("src/main/kotlin/dev/omalauncher/system/Switcher.kt").readText()
+        val watch = src.substringAfter("private fun watchLaunches(").substringBefore("\n    }\n")
+        assertTrue("since = elapsedRealtime (lastActiveTime's clock)", watch.contains("val since = SystemClock.elapsedRealtime()"))
+        assertTrue("never uptimeMillis (stops in deep sleep)", !watch.contains("SystemClock.uptimeMillis()"))
+        // The device's numbers: switcher up at elapsed 57_306_000 (uptime 52_636_000); Calculator fronted 60 s before.
+        val calculator = t(2743, "com.oneplus.calculator/com.android.calculator2.Calculator", true, 57_246_000)
+        org.junit.Assert.assertNull(dev.omalauncher.system.Tasks.frontedSince(listOf(calculator), 57_306_000, home))
+    }
 }
