@@ -54,7 +54,30 @@ wl_sleep() {
   wl_restore "$1"
   i=$("$1/idle.sh" 2>/dev/null | sed -n 's/.*idle=\([0-9]*\).*/\1/p')
   [ $touched = 0 ] && [ -n "$i" ] && [ "$i" -ge "${QUEUE_IDLE_S:-120}" ] && "$1/adb.sh" shell 'input keyevent KEYCODE_SLEEP' >/dev/null 2>&1
-  rm -f "$WL_WOKE"
+  # The save goes only with a restore that went through (wl_restore removes it then): a failed restore keeps it for the
+  # next wl_sleep/wl_restore - else the user's brightness/timeout are lost (11-07: the phone left at brightness 1,
+  # manual mode, 30 min timeout after the 12:28 window, and the next wake saved those as "the user's").
+  [ -e "$WL_WOKE" ] && echo "could not restore the phone's brightness/timeout yet - kept in $WL_WOKE for the next try"
+  return 0
+}
+# wl_release: the verify lock goes, if this window took it. A caller that sets its own EXIT trap after window_lock
+# (bash keeps ONE EXIT trap: the new one replaces window_lock's) must call it there - 11-07 12:28: queue.sh's window
+# trap (warm_stop/util_rec/wl_done) replaced it, the lock outlived every window and the runner waited on its own lock
+# (phone idle, 14 jobs queued, nothing ran for 2 h).
+wl_release() { [ -n "${WL_MINE:-}" ] || return 0; rm -rf "${WL_LOCK:-$HOME/.cache/powos-verify.lock}"; WL_MINE=; }
+# wl_stale <name>: a verify lock whose owner is gone is removed (its who line ends "(pid N)"): pid N no longer runs, or
+# it is THIS process asking for a window under the same name - a window of ours that ended without its release (a
+# runner's windows never overlap, so the lock it asks past can only be a leaked one). A who without a pid (an injected
+# check's own mkdir lock) is never touched: that check's trap owns it.
+wl_stale() {
+  local L=${WL_LOCK:-$HOME/.cache/powos-verify.lock} who pid
+  [ -d "$L" ] || return 0
+  who=$(cat "$L/who" 2>/dev/null) || return 0
+  pid=$(sed -n 's/.*(pid \([0-9][0-9]*\))$/\1/p' <<<"$who"); [ -n "$pid" ] || return 0
+  if [ "$pid" = "$$" ] && [ "${who%% *}" = "$1" ]; then :
+  elif kill -0 "$pid" 2>/dev/null; then return 0; fi
+  echo "$1: removing a stale verify lock ($who - its window ended without releasing it)"
+  rm -rf "$L"
 }
 window_lock() {
   local name=$1 need=${2:-120} max=${3:-${WAIT_S:-7200}} phone end s
@@ -76,9 +99,10 @@ window_lock() {
       wl_wake "$phone"; continue
     fi
     case "$s" in stop*) WL_GOT=$s; echo "$name: stopped from the phone"; exit 6 ;; esac
+    wl_stale "$name"
     if mkdir "$WL_LOCK" 2>/dev/null; then
-      echo "$name $(date +%T) (pid $$)" > "$WL_LOCK/who"
-      trap 'rm -rf "$WL_LOCK"; '"${WL_TRAP:-:}" EXIT
+      echo "$name $(date +%T) (pid $$)" > "$WL_LOCK/who"; WL_MINE=1
+      trap 'wl_release; '"${WL_TRAP:-:}" EXIT
       WL_GOT=$s
       echo "$s"
       return 0

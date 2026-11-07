@@ -687,7 +687,7 @@ EOS
       select_jobs "$go"; order_jobs
       # The window's span for the utilization ledger, and a game a job left warm for a next job that never came (the
       # window ended: an install, a touch) closed again - else idle.sh reads it as the user playing for GAME_IDLE_S.
-      wopen=$(date +%s); trap 'warm_stop; util_rec W "$wopen" "$(date +%s)"; wl_done' EXIT
+      wopen=$(date +%s); trap 'warm_stop; util_rec W "$wopen" "$(date +%s)"; wl_done; wl_release' EXIT   # wl_release: this trap replaces window_lock's (one EXIT trap per shell) - without it the lock outlived the window (11-07 12:28)
       # wl_done: the window ends - if the queue woke the phone (wl_wake), say for how many jobs (runner.log and the
       # util ledger's K line), then the user's settings back and the screen off again (wl_sleep: not after a touch).
       wl_done() { [ -n "${WL_DID:-}" ] || [ -e "$WL_WOKE" ] || return 0; echo "$(date +%T) woke the phone for ${k:-0} jobs"; util_rec K "$(date +%s)" "${k:-0}"; wl_sleep "$phone"; }
