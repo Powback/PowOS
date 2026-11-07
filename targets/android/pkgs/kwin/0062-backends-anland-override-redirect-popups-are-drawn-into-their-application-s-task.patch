@@ -1,0 +1,122 @@
+From: PowOS <mats@powback.com>
+Subject: [PATCH] backends/anland: override-redirect popups are drawn into their application's task
+
+The user, 2026-11-06/07: Steam's menus (Steam, View, Friends, Games) "don't appear on click", "we had issues with steam
+menus". Live on the phone (xwininfo/xprop, 11-07 03:4x): each menu is an X11 override-redirect window of type
+_NET_WM_WINDOW_TYPE_POPUP_MENU with no WM_TRANSIENT_FOR, placed in root coordinates next to its button (e.g.
+312x445+151+148 under the main "Steam" window at +0+0). A window task drew its window and the tree of its transients
+(0013 popups, 0044 dialogs); an unmanaged window has no transientFor, so the menus were never in the task's buffers.
+
+Now AnlandWindowTasks::popupOwner gives an override-redirect popup (menu, dropdown, combo box, tooltip, or an untyped
+one: Wine's menus set no type; never a drag icon/OSD/notification or a <=4 px helper) to its application's task (same
+process, else the same X11 class): the active window's task when the popup touches its frame, else any whose frame it
+touches, else the active one. The task watches it like a transient popup: drawn after (over) the window at its own
+place, touches go to it (touchTarget), it leaves the task when X unmaps it (closed); a task blocks direct scanout
+while it shows one (0058, more than one painted window). An untyped one is never raised or focused by a touch.
+Still inside the task's buffers (as every popup until popups are their own surfaces, docs/WEB_WINDOWS.md N3).
+---
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index c64d505..cede1b7 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -502,8 +502,19 @@ void AnlandWindowTask::goLive()
+             qCInfo(KWIN_ANLAND) << "window task" << m_id << "also draws" << describe(added);
+             watchWindow(added);
+             attach(added);
++        } else if (m_tasks->popupOwner(added) == this) {
++            // PowOS: an X11 override-redirect popup (Steam's menus) names no parent: it is its application's.
++            qCInfo(KWIN_ANLAND) << "window task" << m_id << "also draws override-redirect" << describe(added) << "at" << added->frameGeometry();
++            watchWindow(added);
+         }
+     });
++    // PowOS: override-redirect popups of its application already open (a menu up while the task started).
++    for (Window *other : workspace()->windows()) {
++        if (!watching(other) && m_tasks->popupOwner(other) == this) {
++            qCInfo(KWIN_ANLAND) << "window task" << m_id << "also draws override-redirect" << describe(other) << "at" << other->frameGeometry();
++            watchWindow(other);
++        }
++    }
+     fitWindow();
+ }
+ 
+@@ -1381,7 +1392,8 @@ void AnlandWindowTask::processInputEvent(const InputEvent &ev)
+                 }
+             }
+             focus();
+-            if (target != m_window && !target->isPopupWindow()) {
++            // PowOS: never an override-redirect window (an untyped Wine menu, 0062): X stacks it itself, it takes no focus.
++            if (target != m_window && !target->isPopupWindow() && !target->isUnmanaged()) {
+                 workspace()->raiseWindow(target); // over the window for Xwayland too (it picks by X stacking)
+                 workspace()->requestFocus(target, true); // a dialog: its fields take the keys
+             }
+@@ -2199,6 +2211,57 @@ AnlandWindowTask *AnlandWindowTasks::relatedTask(const Window *window) const
+     return nullptr;
+ }
+ 
++/**
++ * PowOS: the task an X11 override-redirect popup belongs with, or null. Steam (CEF) maps each menu of its menu bar -
++ * Steam, View, Friends, Games - as an override-redirect window of type POPUP_MENU with no WM_TRANSIENT_FOR, placed in
++ * root coordinates next to the button (live on the phone 2026-11-07: "0x3000078 312x445+151+148", the main window
++ * "Steam" at +0+0). KWin has no parent for it (an unmanaged window has no transientFor), so a task drew only the
++ * windows its toplevel's transients tree names: the menus were never in the task's buffers and "don't appear on
++ * click". It belongs with its application's task (same process, else the same X11 class): the one it opens over -
++ * the active window's first (the menu bar the user pressed), then any whose frame it touches, then the active one.
++ * Only popups (menu, dropdown, combo box, tooltip) and untyped override-redirect windows (Wine's menus set no type),
++ * never a drag icon, notification or OSD, and never a 1x1 helper window.
++ */
++AnlandWindowTask *AnlandWindowTasks::popupOwner(const Window *popup) const
++{
++    if (!popup || popup->isDeleted() || !popup->isUnmanaged() || popup->transientFor()) {
++        return nullptr;
++    }
++    const WindowType type = popup->windowType();
++    if (!popup->isPopupWindow() && type != WindowType::Unknown && type != WindowType::Normal) {
++        return nullptr;
++    }
++    const RectF frame = popup->frameGeometry();
++    if (frame.width() <= 4 || frame.height() <= 4) {
++        return nullptr;
++    }
++    const auto sameApp = [popup](const AnlandWindowTask *task) {
++        const Window *w = task ? task->window() : nullptr;
++        if (!w || w->isDeleted()) {
++            return false;
++        }
++        if (popup->pid() > 0 && w->pid() > 0) {
++            return popup->pid() == w->pid();
++        }
++        return !popup->resourceClass().isEmpty() && popup->resourceClass() == w->resourceClass();
++    };
++    AnlandWindowTask *active = nullptr;
++    for (const Window *w = workspace()->activeWindow(); w && !active; w = w->transientFor()) {
++        if (AnlandWindowTask *task = taskFor(w); sameApp(task)) {
++            active = task;
++        }
++    }
++    if (active && active->window()->frameGeometry().intersects(frame)) {
++        return active;
++    }
++    for (AnlandWindowTask *task : m_tasks) {
++        if (sameApp(task) && task->window()->frameGeometry().intersects(frame)) {
++            return task;
++        }
++    }
++    return active;
++}
++
+ void AnlandWindowTasks::closeAll()
+ {
+     const auto tasks = m_tasks;
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index e5c27bb..5156259 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -315,6 +315,8 @@ public:
+     AnlandWindowTask *keyboardTask() const;
+     /** The virtual desktop exported windows live on, made on first use. */
+     VirtualDesktop *tasksDesktop();
++    /** PowOS: the task an X11 override-redirect popup (no transient-for: Steam's menus) is drawn into, or null. */
++    AnlandWindowTask *popupOwner(const Window *popup) const;
+     /** A task is done (the app closed it, or its window closed): forget it. */
+     void remove(AnlandWindowTask *task);
+     /** Every task, now (the compositor is going): windows back on the desktop, buffers released. */

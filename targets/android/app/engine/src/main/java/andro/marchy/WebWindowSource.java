@@ -198,6 +198,12 @@ public final class WebWindowSource {
         return handle;
     }
 
+    /** Window [id]'s frames its consumer showed since it started (queued buffers); 0 = none yet, or no consumer. Any thread. */
+    public static long presented(int id) {
+        long[] p = Native.nativeWindowPresents(id);
+        return p == null ? 0 : p[0];
+    }
+
     /** The part of the buffers shown: the window's body size (KWin draws the window from their top left). */
     public static void crop(long handle, int width, int height) {
         if (handle != 0)

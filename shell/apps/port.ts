@@ -43,10 +43,15 @@ export const send = (command: string) => native.value?.postMessage(command);
 let geometryKey: string | null = null;
 fromNative.add((text) => {
   if (text.startsWith("w.key ")) geometryKey = text.slice(6);
+  // N2: the host binds geometry measured one frame ahead (FrameSync.ahead); an older one never says it.
+  if (text === "w.ahead 1") geometryChannel.ahead = true;
 });
 
-/** Test knob (CDP: `__ww.direct = false`): "w.f" over the port, as before the direct interface. */
-export const geometryChannel = { direct: true };
+/**
+ * Test knob (CDP: `__ww.direct = false`): "w.f" over the port, as before the direct interface. [ahead]: the host takes
+ * N2's frame-ahead geometry (ui/webwindows.tsx sendAhead); the gate turns it on without a host.
+ */
+export const geometryChannel = { direct: true, ahead: false };
 
 /**
  * A "w.f" line to the host, off its main thread when it can be: the direct interface runs on the WebView's binder

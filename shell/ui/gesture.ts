@@ -329,7 +329,9 @@ export function applyTrack() {
   // Page -1 is PowOS AI's, left of home: the whole screen slides to it - home (bar and dock with it) and the AI page
   // move as one; home's own pages stay on the first meanwhile.
   const toAi = at === -1 || (at === 0 && (dx ?? 0) > 0);
-  const transform = `translateX(calc(${-Math.max(at, 0) * 100}% + ${toAi ? 0 : (dx ?? 0)}px))`;
+  // N1: the track's and the glass's places are registered properties (shell.css --track-x/--glass-x): with web windows
+  // they transition on the main thread, so a window's layer and its page move on the same frame.
+  const trackX = `calc(${-Math.max(at, 0) * 100}% + ${toAi ? 0 : (dx ?? 0)}px)`;
   const shift = toAi ? (dx ?? 0) : 0;
   const track = document.querySelector<HTMLElement>(".page-track");
   for (const [sel, base] of [
@@ -339,14 +341,20 @@ export function applyTrack() {
     const el = document.querySelector<HTMLElement>(sel);
     if (!el) continue;
     el.classList.toggle("sliding", dx != null);
-    el.style.transform = `translateX(calc(${base}% + ${shift}px))`;
+    // N1b: a registered property (shell.css --slide-x) - with web windows it transitions on the main thread.
+    el.style.setProperty("--slide-x", `calc(${base}% + ${shift}px)`);
     // FX1: home's one bar counters home's slide (shell.css .home > .bar translate) - it stays put on screen while the
-    // pages slide under it, at rest, on the slide's curve and under a finger (bar.tsx seatOnAi).
-    if (sel === ".home") el.style.setProperty("--track-counter", `${-((base / 100) * widthOf(el) + shift)}px`);
+    // pages slide under it, at rest, on the slide's curve and under a finger (bar.tsx seatOnAi). N1b: and as each bar's
+    // own --bar-counter, which the glued (main-thread) slide transitions.
+    if (sel === ".home") {
+      const counter = `${-((base / 100) * widthOf(el) + shift)}px`;
+      el.style.setProperty("--track-counter", counter);
+      el.querySelectorAll<HTMLElement>(":scope > .bar").forEach((b) => b.style.setProperty("--bar-counter", counter));
+    }
   }
   if (!track) return;
   track.classList.toggle("dragging", dx != null);
-  track.style.transform = transform;
+  track.style.setProperty("--track-x", trackX);
   // Each page's glass layer (grid.tsx PageGlass) the other way - against the track, and against home sliding over to
   // PowOS AI's page - in the same frame and with the same transition: it stays put on screen, over the wallpaper.
   const back = Math.max(at, 0) - (at === -1 ? 1 : 0);
@@ -355,7 +363,7 @@ export function applyTrack() {
     const img = p.querySelector<HTMLElement>(":scope > .page-glass > .page-glass-img");
     if (!img) return;
     img.classList.toggle("sliding", dx != null);
-    img.style.transform = `translateX(calc(${back - i} * 100% - ${pull}px))`;
+    img.style.setProperty("--glass-x", `calc(${back - i} * 100% - ${pull}px)`);
   });
 }
 
