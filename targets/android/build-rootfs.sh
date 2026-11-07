@@ -3,6 +3,9 @@
 # layer) as powos-rootfs.tar.gz, natively on an aarch64 Docker host (Apple Silicon Colima: no qemu).
 #
 # Usage: targets/android/build-rootfs.sh [path/to/kwin-*.pkg.tar.zst]
+#        POWOS_FROM_ROOTFS=<full powos-rootfs.tar.gz> targets/android/build-rootfs.sh
+#   The second form skips the build: it re-splits an already built (and checked) full rootfs, e.g. the published one,
+#   after a rootfs-packs.conf change, then publishes and pins like a build (~10 min instead of hours).
 #   Output: $POWOS_IMAGES/powos-rootfs.tar.gz (+ .sha256, base + packs; also pinned into the app when published) - on the
 #   NAS, /mnt/nas/cdn/powos/android/images/<checkout> by default (tools/data-root.sh). Default kwin package:
 #   targets/android/out/pkgs/kwin-*.pkg.tar.* (build it with targets/android/build-pkgs.sh).
@@ -25,6 +28,8 @@ ANDROMARCHY_URL=https://github.com/lotfibennour/andromarchy
 ANDROMARCHY_REF=220754d390f743aa5a8227e689402de1a6eb0281
 IMAGE=menci/archlinuxarm:latest   # build host userland only; the rootfs itself is the ALARM tarball
 
+# The full build (steps 1-3); POWOS_FROM_ROOTFS takes an existing full rootfs instead.
+build_full() {
 KWIN_PKG=${1:-$("$HERE/tools/newest-pkgs.sh" "$OUT/pkgs" kwin)}
 [ -f "${KWIN_PKG:-}" ] || { echo "no kwin package: run targets/android/build-pkgs.sh first" >&2; exit 1; }
 # Xwayland too (patches/andromarchy/0005: build-inside.sh installs it from our package instead of compiling it).
@@ -104,6 +109,16 @@ docker run --rm --privileged --platform linux/arm64 --cpus 8 --memory 16g \
   "${work[@]}" -v powos-android-cache:/cache -v "$W:/in:ro" -v "$POWOS_IMAGES:/out" -v "$HERE/rootfs-in-container.sh:/rootfs-in-container.sh:ro" \
   "$IMAGE" bash -c "$inner"
 echo "built: $POWOS_IMAGES/powos-rootfs.tar.gz"
+}
+if [ -n "${POWOS_FROM_ROOTFS:-}" ]; then
+  [ -s "$POWOS_FROM_ROOTFS" ] && [ -s "$POWOS_FROM_ROOTFS.sha256" ] ||
+    { echo "build-rootfs: POWOS_FROM_ROOTFS=$POWOS_FROM_ROOTFS: no such rootfs (with .sha256)" >&2; exit 1; }
+  publish_file "$POWOS_FROM_ROOTFS" "$POWOS_IMAGES/powos-rootfs.tar.gz"
+  publish_file "$POWOS_FROM_ROOTFS.sha256" "$POWOS_IMAGES/powos-rootfs.tar.gz.sha256"
+  echo "re-splitting $POWOS_FROM_ROOTFS (no build)"
+else
+  build_full "$@"
+fi
 # KWin is ours at a pinned Plasma version (pkgs/kwin, IgnorePkg); the Plasma libraries it links come from today's Arch
 # Linux ARM. When those move a minor version KWin can't start at all: the 11-04 rootfs had kscreenlocker/libplasma/
 # plasma-workspace 6.8.1 under kwin 6.7.5 ("undefined symbol ScreenLocker::KSldApp::lock" - no desktop, no Linux app
