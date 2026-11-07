@@ -63,6 +63,18 @@ public final class WebWindowSource {
 
         /** Window [id]'s own frame's "maximize" or "minimize" button (or its double click). Control channel's thread. */
         default void control(int id, String action) {}
+
+        /**
+         * kwin 0063 (docs/WEB_WINDOWS.md N3): popup [popup] of window [parent] (a menu, an xdg_popup, an X11
+         * override-redirect window: Steam's menus) is a surface of its own at ([x], [y]) [w] x [h] - parent buffer px
+         * against the window's top left (negative / past it: the popup reaches out of the window), its own px. Said
+         * again when it moves or resizes. Its buffers come on the daemon's surface [popup] like a window's. Control
+         * channel's thread.
+         */
+        default void popup(int parent, int popup, int x, int y, int w, int h) {}
+
+        /** Popup [popup] of window [parent] closed (or its window stopped drawing / went): its surface is gone. */
+        default void popupGone(int parent, int popup) {}
     }
 
     /** Set by home's bridge (ShellBridge) while it lives; null = every Linux window is a task (as before). */
@@ -90,6 +102,53 @@ public final class WebWindowSource {
         Host h = host;
         if (h != null && ids.contains(id))
             h.moveResize(id, edges);
+    }
+
+    static void popup(int parent, int popup, int x, int y, int w, int h) {
+        Host h2 = host;
+        if (h2 != null && ids.contains(parent))
+            h2.popup(parent, popup, x, y, w, h);
+    }
+
+    static void popupGone(int parent, int popup) {
+        Host h = host;
+        if (h != null)
+            h.popupGone(parent, popup); // also after the parent's close: the host forgets the popup either way
+    }
+
+    /**
+     * kwin 0063 ("web" cap): window [id] is a web window of home, its popups as surfaces of their own - [mode] 1 also
+     * exported (still drawn into the window: the host records them, N3a), 2 only exported (the host shows them, N3b).
+     * An older KWin: nothing (its popups stay inside the window's buffers).
+     */
+    public static void webPopups(int id, int mode) {
+        if (WindowTasks.kwinCan("web"))
+            WindowTasks.sendLine("web\t" + id + "\t" + mode);
+    }
+
+    /**
+     * kwin 0064 ("popup-area" cap): KWin takes a web window's popup area and "dismiss", so the host shows its popups
+     * as layers of their own (mode 2, WebWindowPopups); without it they stay inside the window (mode 1, recorded only).
+     */
+    public static boolean popupLayers() {
+        return WindowTasks.kwinCan("popup-area");
+    }
+
+    /** Window [id]'s popups' mode for this KWin: 2 (the host shows them), 1 (recorded only), 0 (an older KWin). */
+    public static int popupMode() {
+        return popupLayers() ? 2 : WindowTasks.kwinCan("web") ? 1 : 0;
+    }
+
+    /** kwin 0064: where window [id]'s popups can show - the screen, in its task px against its top left. */
+    public static void popupArea(int id, int l, int t, int r, int b) {
+        if (popupLayers())
+            WindowTasks.sendLine("popup-area\t" + id + "\t" + l + "\t" + t + "\t" + r + "\t" + b);
+    }
+
+    /** kwin 0064: a tap on home outside window [id] and its popups - KWin closes them. */
+    public static void dismissPopups(int id) {
+        if (popupLayers())
+            WindowTasks.sendLine("dismiss\t" + id);
     }
 
     static void control(int id, String action) {

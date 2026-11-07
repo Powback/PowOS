@@ -1307,6 +1307,9 @@ class WebWindows(
         src.handle = handle
         // Its own Android keyboard (kwin 0043 window-ime): KWin's show/hide for it and its typed text on this consumer.
         andro.marchy.WebWindowSource.ownKeyboard(kwin, handle)
+        // Its popups as surfaces of their own (kwin 0063/0064): shown as layers of their own over home (mode 2,
+        // WebWindowPopups); a KWin without "popup-area" keeps them in the window and the host only records them (1).
+        andro.marchy.WebWindowSource.webPopups(kwin, andro.marchy.WebWindowSource.popupMode())
         // A game's touches and KWin's always-on ask for it never raise the keyboard (TapKeyboard.setGame, 11-06 Broforce).
         andro.marchy.WebWindowSource.gameKeyboard(handle, src.offer.game)
         andro.marchy.WebWindowSource.crop(handle, win.w, win.h)
@@ -1411,6 +1414,7 @@ class WebWindows(
         handBack: Boolean,
     ) {
         if (linuxTouch === w) linuxTouch = null
+        popupsGo(w)
         // A game closed in its immersive full screen (it quit, KWin closed it): the status bar comes back with it.
         if (w.immersive) {
             w.immersive = false
@@ -1779,7 +1783,7 @@ class WebWindows(
         for (win in wins.values) {
             if (win.id in shown || !win.container.isValid) continue
             win.shown = false
-            t.setVisibility(win.container, false)
+            hideLayers(t, win)
         }
         publishBars()
     }
@@ -1889,6 +1893,8 @@ class WebWindows(
         t.setVisibility(c, g.visible && !g.clip.isEmpty && win.mirror != null)
         fillUnder(t, win, g)
         val released = paced(win, g)
+        // N3b: its popups' layers at its body in this same transaction (glued to it and its page), cut by the screen only.
+        win.linux?.let { popups.place(t, it.kwin, WebWindowPopups.Origin(g.body.left.toFloat(), g.body.top.toFloat(), g.scale, g.visible && !g.clip.isEmpty)) }
         resizeContent(win, g.cw, g.ch)
         released?.let { counts -> if (win.linux == null && win.displayId >= 0) helper.settle(win.displayId, counts) else WindowLog.i(TAG, "$counts (Linux: no settle measure)") }
     }
@@ -2216,6 +2222,7 @@ class WebWindows(
             any = true
             WindowLog.i(TAG, "home's surface $why: full-screen window ${w.id} re-attached above home's buffer")
         }
+        popups.reattach(re) // N3b: popup layers hang on home's surface too
         // FS10: and again after the new surface's first draw - a placement queued before must not land last.
         if (any) main.post { restateFull("home's surface $why") }
     }
@@ -2283,12 +2290,103 @@ class WebWindows(
     /** The Linux window the current gesture belongs to (the page pressed its body), else null. */
     private var linuxTouch: Win? = null
 
+    /** N3b: the gesture began on a popup layer of this window ([popupDown]): all of it is the window's, none the page's. */
+    private var popupTouch: Win? = null
+
+    /** N3b: every Linux web window's popups as layers of their own (kwin 0063 mode 2 + 0064). Main thread. */
+    private val popups by lazy { WebWindowPopups(context, { web.rootSurfaceControl }, main) }
+
+    /** KWin's "popup" for Linux window [kwin] (mode 2): its layer made or moved. Main thread. */
+    internal fun linuxPopup(
+        kwin: Int,
+        id: Int,
+        geo: PopupGeo,
+    ) {
+        if (wins.values.none { it.linux?.kwin == kwin && !it.closed }) {
+            WindowLog.i(PopupLog.TAG, "popup $kwin $id: no web window for it")
+            return
+        }
+        popups.popup(kwin, id, geo)
+    }
+
+    /** [win] (not on the page this frame) hidden: its container and its popups' layers. */
+    private fun hideLayers(
+        t: SurfaceControl.Transaction,
+        win: Win,
+    ) {
+        t.setVisibility(win.container, false)
+        win.linux?.let { popups.place(t, it.kwin, null) }
+    }
+
+    /** Linux window [w] going: its popup layers and their gesture with it (N3b). */
+    private fun popupsGo(w: Win) {
+        if (popupTouch === w) popupTouch = null
+        w.linux?.let { popups.closed(it.kwin) }
+    }
+
+    /**
+     * N3b, every touch on home first: a gesture begun on a popup layer goes on being its window's (true: taken), and a
+     * DOWN is checked against the popups ([popupDown]).
+     */
+    private fun popupGesture(ev: MotionEvent): Boolean {
+        val w = popupTouch
+        if (w == null) return ev.actionMasked == MotionEvent.ACTION_DOWN && popupDown(ev)
+        linuxInput(w, ev)
+        if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) popupTouch = null
+        return true
+    }
+
+    /** KWin's "popup-gone". Main thread. */
+    fun linuxPopupGone(
+        kwin: Int,
+        id: Int,
+    ) = popups.gone(kwin, id)
+
+    /**
+     * N3b, a DOWN on home ([onTouch]): on a popup layer, the gesture is its window's (true - KWin's task finds the popup
+     * under the finger; the page never sees it, the popup covers it). Elsewhere, with popups open: every window whose
+     * body isn't under the finger is told "dismiss" (a click outside a menu closes it; one on the window's body is
+     * KWin's own: the page gives the window that touch, and its task dismisses).
+     */
+    private fun popupDown(ev: MotionEvent): Boolean {
+        val open = popups.parents()
+        if (open.isEmpty()) return false
+        val at = IntArray(2).also(web::getLocationInWindow)
+        val x = ev.getX(0) + at[0]
+        val y = ev.getY(0) + at[1]
+        val kwin = popups.at(x, y)
+        val win = kwin?.let { k -> wins.values.firstOrNull { it.linux?.kwin == k && !it.closed } }
+        if (win != null) {
+            popupTouch = win
+            WindowLog.i(TAG, "window ${win.id}: a touch on its popup at ${x.toInt()},${y.toInt()}")
+            linuxClaim(win)
+            return true
+        }
+        dismissOutside(open, x.toInt(), y.toInt())
+        return false
+    }
+
+    /** A DOWN at [x], [y] off every popup: each window of [open] whose body isn't under it is told "dismiss". */
+    private fun dismissOutside(
+        open: Set<Int>,
+        x: Int,
+        y: Int,
+    ) {
+        for (k in open) {
+            val w = wins.values.firstOrNull { it.linux?.kwin == k } ?: continue
+            if (w.geo?.body?.contains(x, y) == true && !w.linuxFull) continue
+            WindowLog.i(TAG, "window ${w.id}: a tap outside it and its popups: dismiss")
+            andro.marchy.WebWindowSource.dismissPopups(k)
+        }
+    }
+
     /** The KWin window that last got "focus" from a touch here: told again only when another one is touched. */
     private var linuxFocused = -1
 
     private fun onTouch(ev: MotionEvent): Boolean {
         val a = ev.actionMasked
         imeGesture(a)
+        if (popupGesture(ev)) return true
         if (a == MotionEvent.ACTION_DOWN) {
             gesture?.recycle()
             gesture = MotionEvent.obtain(ev)
@@ -3356,6 +3454,8 @@ class WebWindows(
             .setCrop(c, Rect(0, 0, area.width(), area.height())).setLayer(c, FULL_LAYER).setVisibility(c, fullVisible(win))
         cornerRadius(t, c, 0f)
         win.linux?.content?.takeIf { it.isValid }?.let { m -> t.setPosition(m, 0f, 0f).setScale(m, 1f, 1f).setCrop(m, Rect(0, 0, area.width(), area.height())) }
+        // N3b: its popups with it, at the full-screen origin - every restate too, so a page placement can't leave them behind.
+        win.linux?.let { popups.place(t, it.kwin, WebWindowPopups.Origin(area.left.toFloat(), area.top.toFloat(), 1f, fullVisible(win))) }
         return true
     }
 

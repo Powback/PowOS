@@ -140,7 +140,33 @@ class ShellBridge(
             ) {
                 main.post { if (webWindowsMade) webWindows.linuxControl(id, action) }
             }
+
+            // kwin 0063/0064: a Linux web window's popups as surfaces of their own - layers of their own over home with
+            // a KWin that takes "popup-area" (N3b, WebWindowPopups), else recorded offscreen only ([PopupLog], N3a).
+            override fun popup(
+                parent: Int,
+                popup: Int,
+                x: Int,
+                y: Int,
+                w: Int,
+                h: Int,
+            ) {
+                val geo = PopupGeo(x, y, w, h)
+                if (!andro.marchy.WebWindowSource.popupLayers()) return popupLog.popup(parent, popup, geo)
+                main.post { if (webWindowsMade) webWindows.linuxPopup(parent, popup, geo) }
+            }
+
+            override fun popupGone(
+                parent: Int,
+                popup: Int,
+            ) {
+                if (!andro.marchy.WebWindowSource.popupLayers()) return popupLog.popupGone(parent, popup)
+                main.post { if (webWindowsMade) webWindows.linuxPopupGone(parent, popup) }
+            }
         }
+
+    /** N3a's log-only popup consumer (kwin 0063): made on the first popup. */
+    private val popupLog by lazy { PopupLog(context) }
 
     /** An app floated not by the user's pick ([SystemFloat]): a web window, as the switcher's "Desktop window". */
     private val systemFloat: (Int) -> Unit = { id -> main.post { toWebWindow(id) } }
