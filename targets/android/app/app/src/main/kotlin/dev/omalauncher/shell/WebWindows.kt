@@ -1128,6 +1128,16 @@ class WebWindows(
      */
     private fun androidStandIn(appId: String) = appId.startsWith(ANDROID_APP_ID)
 
+    /** KWin window [kwin] of [appId], offered now, will show: not the selftest's (kept offscreen) nor an Android app's stand-in. */
+    private fun offerShows(
+        kwin: Int,
+        appId: String,
+    ): Boolean {
+        if (androidStandIn(appId)) return false
+        val t = selftest ?: return true
+        return !((t.kwin < 0 && t.matches(appId)) || selftestOwns(t.kwin, kwin))
+    }
+
     fun linuxOpened(
         kwin: Int,
         key: String,
@@ -1140,9 +1150,7 @@ class WebWindows(
             return
         }
         if (pendingLinux.containsKey(kwin)) return
-        // Not the selftest's (kept offscreen) nor an Android app's stand-in: the window shows, in front ([toFront]).
-        val shown = !androidStandIn(offer.appId) && selftest.let { t -> t == null || !((t.kwin < 0 && t.matches(offer.appId)) || selftestOwns(t.kwin, kwin)) }
-        if (shown) toFront("KWin window $kwin (${offer.appId}) opened")
+        if (offerShows(kwin, offer.appId)) toFront("KWin window $kwin (${offer.appId}) opened")
         // The ship gate's hidden Linux check (selftestLinux): its app's next KWin window never reaches the page.
         selftest?.let { t ->
             if (t.kwin < 0 && t.matches(offer.appId)) return t.take(kwin, offer.appId)

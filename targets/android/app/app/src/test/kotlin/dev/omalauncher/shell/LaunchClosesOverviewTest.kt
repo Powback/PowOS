@@ -30,7 +30,7 @@ class LaunchClosesOverviewTest {
         assertTrue(bridge.substringAfter("private fun launch(").substringBefore("\n    }\n").contains("Switcher.launched("))
         val opened = ww.substringAfter("fun linuxOpened(").substringBefore("\n    }\n")
         assertTrue("the 'again' path brings the window to the front", opened.substringBefore("emit(\"webwindows.show\"").contains("toFront("))
-        assertTrue("a new offer brings the window to the front", opened.substringBefore("emit(\"webwindows.adopt\"").contains("if (shown) toFront("))
+        assertTrue("a new offer brings the window to the front", opened.substringBefore("emit(\"webwindows.adopt\"").contains("if (offerShows(kwin, offer.appId)) toFront("))
         assertTrue(ww.substringAfter("private fun toFront(").substringBefore("\n    }\n").contains("Switcher.launched(why)"))
     }
 
