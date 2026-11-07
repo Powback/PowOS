@@ -315,6 +315,13 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   options kept around it; `powos-steam-compat screen <appid> off` opts out. Unreal gets `-windowed -ResX -ResY`.
   Before: Besiege ran its saved 2268x1600 (user.reg Screenmanager) letterboxed in 2268x2440. Check any game:
   `game-resize.sh <appid>` (bf-resize.sh = it for 274190; G3 now FAILs a letterbox/pillarbox).
+- Besiege (346010, Unity 5.4.0f3, 32-bit, x86 Proton) 11-07: with or without unity-screen's args its only viewable X
+  window is a FIXED-SIZE 1135x1365 (WM_NORMAL_HINTS min == max, motif no-resize) "Besiege", class steam_app_346010,
+  shown as a floating web window (unfolded) / floating on the cover, black, never drawing (xframes 1 sample) while
+  output_log.txt shows the game in its menu. KWin's log has "window task N live 2268x2440" but NO 0037 "fixed-size game
+  window goes full screen": 0037's fillsAsFullScreen only runs from refit() (the window resizing itself), never when
+  the task first goes live. Next: call fillsAsFullScreen at goLive / task start (kwin patch), then re-run
+  game-resize.sh 346010. Why 1135x1365 regardless of -screen-width/-height: open (not the saved 2268x1600 either).
 - ABZU (UE4, 384190) pillarbox: our window IS the container size; the game's own GameUserSettings.ini has
   DesiredScreenWidth/Height=1280x720, Fullscreen=ON, bUseDesktopResolutionForFullscreen=False, so it renders 1280x720
   and Proton's fullscreen hack scales it. Lever: a UE twin of unity-screen (`-ResX=W -ResY=H` / desktop resolution).
