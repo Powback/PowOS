@@ -213,7 +213,7 @@ def main(tarball, conf, outdir):
             print(f'split-rootfs: {name}: {sizes[name] / 1e9:.2f} GB gz, {o.unpacked / 2**30:.2f} GiB unpacked, {o.files} files')
     with open(os.path.join(outdir, 'powos-packs-plan.txt'), 'w') as f:
         f.write(plan_text(by_pkg, totals))
-    print(f'split-rootfs: dropped {dropped / 2**30:.2f} GiB (docs)')
+    print(f'split-rootfs: dropped {dropped / 2**30:.2f} GiB (rootfs-packs.conf drop: docs, what Steam fetches itself, FEX RootFS dev/other-GPU files)')
 
 
 def plan(listing, dbdir, conf):

@@ -16,6 +16,7 @@ unset _powos_checkout
 # publish_file <src> <dst>: a hard link when both are on the NAS (instant), else copy beside and rename over, so a
 # reader of <dst> sees the whole old or the whole new file, never a half-written one.
 publish_file() {
+  [ "$1" -ef "$2" ] && return 0   # already that file (POWOS_IMAGES = the published dir, or a re-split's own input)
   ln -f "$1" "$2" 2>/dev/null && return 0
   cp "$1" "$(dirname "$2")/.$(basename "$2").new" && mv -f "$(dirname "$2")/.$(basename "$2").new" "$2"
 }
