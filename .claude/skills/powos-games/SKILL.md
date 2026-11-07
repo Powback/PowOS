@@ -322,6 +322,12 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   window goes full screen": 0037's fillsAsFullScreen only runs from refit() (the window resizing itself), never when
   the task first goes live. Next: call fillsAsFullScreen at goLive / task start (kwin patch), then re-run
   game-resize.sh 346010. Why 1135x1365 regardless of -screen-width/-height: open (not the saved 2268x1600 either).
+- Unfolded games are home's WEB windows (how=web), also on the cover after a fold. 11-07 game-resize.sh: (1) a game
+  window opened floating at the page's default 1135x1364 and Wine pinned that as its fixed size (Besiege, My Friend
+  Pedro) -> WebWindows.gameFullScreenAtOpen asks KWin's full screen for every game offer at open; (2) "rotating breaks
+  the games": WebWindows.fillScreen ran only on ENTERING full screen, so a rotation/fold left the game at its old
+  2268x2439 (ABZU) on a 2440x2268 / 2484x1116 screen -> refillFull on every configuration change (+400 ms settle).
+  Both need an APK ship; re-check with game-resize.sh 346010 / 557340 / 384190 and bf-resize.sh.
 - ABZU (UE4, 384190) pillarbox: our window IS the container size; the game's own GameUserSettings.ini has
   DesiredScreenWidth/Height=1280x720, Fullscreen=ON, bUseDesktopResolutionForFullscreen=False, so it renders 1280x720
   and Proton's fullscreen hack scales it. Lever: a UE twin of unity-screen (`-ResX=W -ResY=H` / desktop resolution).
