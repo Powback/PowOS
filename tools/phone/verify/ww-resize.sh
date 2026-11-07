@@ -12,7 +12,8 @@
 #               content   the window's own frames on the display (its buffer layer: powos-ww-<id>-linux, or the app's
 #                         window on its display): presented, max gap ms
 #               kwin      KWin's "window task N frames: ... C commits, D drawn" (0057) lines over the gesture: commits ~=
-#                         drawn, a commit KWin never drew is a lost content frame (Linux only)
+#                         drawn, a commit KWin never drew is a lost content frame; its "resized: N commits, configure->
+#                         commit median" (0018): how long the app takes to draw at a new size (Linux only)
 #               buffers   the host's "resize: R relayouts for S steps" (RS1) and "outgrew its buffers" (a consumer
 #                         restart = new buffers), the consumer's "pacing" (Andromarchy) lines
 #   record pass screenrecord over the same gesture; every frame's part of the body that stays inside the window through
@@ -86,7 +87,7 @@ PY
 # kwin_since <line count>: KWin's frame lines after that many lines of its log.
 KLOG=/run/powos-app/hyprland.log
 klines() { rs "wc -l < $KLOG" | tail -1; }
-kwin_since() { rs "tail -n +$(( $1 + 1 )) $KLOG | grep -a 'window task .* frames:'"; }
+kwin_since() { rs "tail -n +$(( $1 + 1 )) $KLOG | grep -aE 'window task .* (frames|resized):'"; }
 
 # One way of a drag: from $1,$2 to $3,$4, the shell's and the content's layers' frames on the display.
 way() {
@@ -171,15 +172,17 @@ for app in $APPS; do
     way "$px" "$py" $((px + dx)) $((py + dy)) "$app-$g-in"
     sleep 0.25
     way $((px + dx)) $((py + dy)) "$px" "$py" "$app-$g-out"
-    sleep 1.5; chk "$app $g"
+    # KWin writes its frame line every 5 s: one covering the gesture's end is out by then.
+    [ "$app" = calc ] && sleep 1.5 || sleep 5.2; chk "$app $g"
     gfx=$(sh_ "dumpsys gfxinfo com.powos.app")
     jank=$(echo "$gfx" | grep -m1 'Janky frames:' | sed -E 's/.*Janky frames: ([0-9]+) \(([0-9.]+)%\).*/\1 (\2%)/')
     p90=$(echo "$gfx" | grep -m1 '90th percentile' | grep -oE '[0-9]+ms'); p99=$(echo "$gfx" | grep -m1 '99th percentile' | grep -oE '[0-9]+ms')
     read -r hi mi xi <<<"$(frames "$OUT/$app-$g-in-home.lat")"; read -r ho mo xo <<<"$(frames "$OUT/$app-$g-out-home.lat")"
     read -r ci _ cxi <<<"$(frames "$OUT/$app-$g-in-content.lat")"; read -r co _ cxo <<<"$(frames "$OUT/$app-$g-out-content.lat")"
-    kw=$(kwin_since "$k0" | sed -nE 's/.*frames: last 5 s ([0-9]+) commits, ([0-9]+) drawn.*/\1 \2/p' | awk '{c+=$1; d+=$2} END{print c+0, d+0}')
+    kl=$(kwin_since "$k0"); kr=$(echo "$kl" | grep -oE 'resized: .*' | tail -2 | tr '\n' ';')
+    kw=$(echo "$kl" | sed -nE 's/.*frames: last 5 s ([0-9]+) commits, ([0-9]+) drawn.*/\1 \2/p' | awk '{c+=$1; d+=$2} END{print c+0, d+0}')
     hostl=$(grep -aE "window $n: (resize:|body outgrew)" "$OUT/logcat.txt" | tail -2 | sed -E 's/.*(window [0-9]+: )/\1/' | tr '\n' ';')
-    line="$app $g: shell in $hi frames $mi missed (max ${xi} ms), out $ho frames $mo missed (max ${xo} ms); gfxinfo janky ${jank:-?} p90 ${p90:-?} p99 ${p99:-?} | content in $ci frames (max gap ${cxi} ms), out $co (max gap ${cxo} ms) | kwin commits/drawn $kw | host $hostl"
+    line="$app $g: shell in $hi frames $mi missed (max ${xi} ms), out $ho frames $mo missed (max ${xo} ms); gfxinfo janky ${jank:-?} p90 ${p90:-?} p99 ${p99:-?} | content in $ci frames (max gap ${cxi} ms), out $co (max gap ${cxo} ms) | kwin commits/drawn $kw, ${kr:-no resize line} | host $hostl"
     log "$line"; echo "$line" >> "$OUT/summary.txt"
     [ $((mi + mo)) -gt 0 ] && bad "$app $g: $((mi + mo)) missed shell vsyncs while the finger moved (want 0)"
     [ "$app" != calc ] && read -r kc kd <<<"$kw" && [ "${kc:-0}" -gt 0 ] && [ $((kc - kd)) -gt $((kc / 20 + 1)) ] && bad "$app $g: KWin drew $kd of $kc commits"
