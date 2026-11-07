@@ -3285,6 +3285,11 @@ SHELLHELP
             *) echo "Unknown shell command: $1 (powos shell help)" >&2; exit 1 ;;
         esac
         ;;
+    devices)
+        # This device's agent and the devices it controls (lib/devices/powos-deviced; `powos devices help`).
+        shift
+        exec python3 "$POWOS_LIB/devices/powos-deviced" "$@"
+        ;;
     agents)
         # The work board (lib/ai/agents/powos-agents-cli; `powos agents help`).
         shift

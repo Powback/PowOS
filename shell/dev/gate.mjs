@@ -13685,6 +13685,11 @@ try {
   // renders go to /cache/app-api-<screen>-<view>.png (the design review's shots: shots.mjs has no app UIs).
   if (apps().some((a) => a.id === "local.app-api"))
     runs.push(open(browser, `${ORIGIN}/__gate_app.html`, "app local.app-api page", { width: 404, height: 899 }).then((r) => settleAppApi(r)));
+  // Devices (apps/devices, its UI through --app): pair a PC found on mDNS with the code from its screen, then its
+  // actions on a mock agent - the result shown the moment it's tapped (optimistic), a refusal rolled back with the
+  // device's words and a retry, sleep while busy offered as "Sleep anyway"; tokens only ever as ${secret:dev-<id>}.
+  if (apps().some((a) => a.id === "local.devices"))
+    runs.push(open(browser, `${ORIGIN}/__gate_app.html`, "app local.devices", { width: 404, height: 899 }).then((r) => settleDevices(r)));
   if (opening.length) console.log(`gate: ${opening.length} page(s) opened outside runs.push (their scene slots are held to the end)`);
   for (const r of (await Promise.all(runs)).filter(Boolean)) {
     if (r.problems.length) {
@@ -13733,6 +13738,170 @@ async function settleNeedsMe(r) {
   }
   r.problems.push(...r.uncaught);
   return { ...r, ready: true, ms: Date.now() - r.started };
+}
+
+/** Devices' page (above): every step in the page, its problems; a shot at /cache/devices-folded.png. */
+async function settleDevices(r) {
+  try {
+    await r.page.evaluate(() => new Promise((ok) => (window.importShim ? ok() : addEventListener("load", ok))));
+    await r.page.evaluate([dvWait, dvType, dvLine, dvFails, dvAgent].map((f) => `window.${f.name} = ${f}`).join(";\n"));
+    for (const step of [dvMount, dvPair, dvPaired, dvOptimistic, dvRollback, dvBusy]) {
+      const out = await r.page.evaluate(step);
+      r.problems.push(...out);
+      if (out.length && step !== dvOptimistic && step !== dvBusy && step !== dvRollback) break;
+    }
+    await r.page.screenshot({ path: "/cache/devices-folded.png" }).catch(() => {});
+  } catch (e) {
+    r.problems.push(`evaluate: ${e.message.split("\n")[0]}`);
+  }
+  r.problems.push(...r.uncaught);
+  return { ...r, ready: true, ms: Date.now() - r.started };
+}
+
+/** In the page: [sel] under the Devices root within [ms], or null. */
+async function dvWait(sel, ms = 2000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end && !window.__dv.root.querySelector(sel)) await new Promise((ok) => setTimeout(ok, 25));
+  return window.__dv.root.querySelector(sel);
+}
+function dvType(el, v) {
+  el.value = v;
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+/** The PC card's live line ("PC · on mains · screen on · busy: ..."). */
+function dvLine() {
+  return window.__dv.root.querySelector('[data-device="desk1"] [data-device-line]')?.textContent ?? "";
+}
+/** [[ok, "problem"]...] -> the problems. */
+function dvFails(checks) {
+  return checks.filter(([ok]) => !ok).map(([, why]) => why);
+}
+
+/** A mock device agent (lib/devices/powos-deviced v1): a PC, its status, actions answered after 600 ms. */
+function dvAgent() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const TPL = "Bearer ${secret:dev-desk1}";
+  const dev = { id: "desk1", name: "Desk", kind: "desktop", v: 1, caps: ["status", "lock", "screen_off", "screen_on", "sleep", "wake"] };
+  const st = { online: true, screen: "on", locked: false, power: { source: "ac", battery: null, charging: false }, busy: ["llama-swap.service"], nics: [] };
+  const calls = [];
+  const reply = (status, body) => ({ status, json: () => body });
+  const done = (a) => reply(200, { ok: true, action: a, result: { done: true } });
+  const ACT = {
+    screen_off: (a) => ((st.screen = "off"), done(a)),
+    screen_on: (a) => ((st.screen = "on"), done(a)),
+    lock: () => reply(500, { ok: false, error: "no desktop session to lock", code: "failed" }),
+    sleep: () => reply(409, { ok: false, error: "busy: llama-swap.service would stop - sleep refused", code: "busy" }),
+  };
+  const confirm = (init) => (JSON.parse(init.body).code === "424242" ? reply(200, { token: "", device: dev }) : reply(401, { ok: false, error: "wrong code", code: "auth" }));
+  const action = async (init) => {
+    const a = JSON.parse(init.body).action;
+    await sleep(600);
+    return ACT[a]?.(a) ?? reply(404, { ok: false, error: "can't", code: "unsupported" });
+  };
+  const OPEN = { "/v1/info": () => reply(200, dev), "/v1/pair": () => reply(200, { request: "r1", expires_s: 120 }), "/v1/pair/confirm": confirm };
+  const AUTHED = { "/v1/status": () => reply(200, { ...dev, status: st }), "/v1/action": action };
+  const fetch = async (_app, url, init = {}) => {
+    const path = url.replace(/^https:\/\/[^/]+/, "");
+    const auth = init.headers?.Authorization;
+    calls.push({ path, auth, capture: init.capture });
+    if (OPEN[path]) return OPEN[path](init);
+    if (auth !== TPL) return reply(401, { ok: false, error: "this device doesn't know you - pair again", code: "auth" });
+    return (AUTHED[path] ?? (() => reply(404, {})))(init);
+  };
+  const mdns = async () => [{ name: "Desk", host: "192.168.50.58", port: 3416, txt: { id: "desk1", dev: "3416", kind: "desktop", v: "1" } }];
+  return { host: { net: { fetch, mdns, forget: async () => {} } }, calls, st, TPL };
+}
+
+/** The page mounted fresh on the mock agent: the PC on mDNS offered for pairing, the page in the UI font. */
+async function dvMount() {
+  const { h, render } = await window.importShim("preact");
+  try { localStorage.removeItem("powos.devices.v1"); } catch {}
+  const agent = dvAgent();
+  const mod = await window.importShim("./_app/local.devices/pages/main.js");
+  document.querySelector("#dv-root")?.remove();
+  const root = Object.assign(document.createElement("div"), { id: "dv-root", style: "position:fixed;inset:0;background:var(--color-background);color:var(--color-foreground)" });
+  document.body.append(root);
+  window.__dv = { root, ...agent };
+  render(h(mod.default, { host: agent.host, app: "local.devices", close: () => {} }), root);
+  if (!(await dvWait("[data-found]", 3000))) return [`the PC on mDNS isn't offered for pairing: "${root.textContent.slice(0, 160)}"`];
+  const fam = getComputedStyle(root.querySelector("[data-devices]")).fontFamily;
+  return dvFails([[!/mono/i.test(fam), `the page is monospace (${fam}), not --font-body`]]);
+}
+
+/** Pair: tap the found PC, a wrong code is refused, the right one adds it. */
+async function dvPair() {
+  const { root } = window.__dv;
+  root.querySelector("[data-found]").click();
+  if (!(await dvWait("[data-code]"))) return ["tapping the found PC didn't ask for its code"];
+  dvType(root.querySelector("[data-code]"), "111111");
+  await new Promise((ok) => setTimeout(ok, 50));
+  root.querySelector("[data-confirm]").click();
+  const wrong = await dvWait("[data-add-error]");
+  dvType(root.querySelector("[data-code]"), "424242");
+  await new Promise((ok) => setTimeout(ok, 50));
+  root.querySelector("[data-confirm]").click();
+  const card = await dvWait('[data-device="desk1"]', 3000);
+  return dvFails([[wrong, "a wrong code showed no error"], [card, `the right code didn't add the PC: "${root.textContent.slice(0, 200)}"`]]);
+}
+
+/** The paired PC: its live line, its caps as buttons, the token only ever captured by host.net and sent as a template. */
+async function dvPaired() {
+  const { root, calls, TPL } = window.__dv;
+  const end = Date.now() + 3000;
+  while (Date.now() < end && !/screen on/.test(dvLine())) await new Promise((ok) => setTimeout(ok, 25));
+  const confirm = calls.filter((c) => c.path === "/v1/pair/confirm").pop()?.capture ?? {};
+  const bad = calls.find((c) => c.auth && c.auth !== TPL);
+  const bare = calls.some((c) => /^\/v1\/(status|action)/.test(c.path) && !c.auth);
+  const shown = [...root.querySelectorAll('[data-device="desk1"] [data-action]')].map((b) => b.dataset.action).join(",");
+  return dvFails([
+    [/screen on/.test(dvLine()) && /busy/.test(dvLine()), `the paired PC's live line is "${dvLine()}", want its screen and what keeps it busy`],
+    [confirm.secret === "dev-desk1" && confirm.path === "token", `pairing didn't hand the token to host.net (capture ${JSON.stringify(confirm)})`],
+    [!bad, `a call carried a token the page made up (${bad?.auth}), not the \${secret:dev-desk1} template`],
+    [!bare, "a status/action call went without the device's token"],
+    [shown === "lock,screen_off,sleep", `a PC that's on shows actions "${shown}", want lock,screen_off,sleep (its caps)`],
+  ]);
+}
+
+/** Screen off: the line says so the moment it's tapped, while the PC is still answering; then the button turns. */
+async function dvOptimistic() {
+  const card = window.__dv.root.querySelector('[data-device="desk1"]');
+  card.querySelector('[data-action="screen_off"]').click();
+  await new Promise((ok) => setTimeout(ok, 100));
+  const early = dvLine();
+  const held = window.__dv.root.querySelector('[data-device="desk1"] [data-action]')?.disabled;
+  const on = await dvWait('[data-device="desk1"] [data-action="screen_on"]:not([disabled])', 1500);
+  return dvFails([
+    [/screen off/.test(early), `100 ms after "Screen off" the line is "${early}" (want "screen off" at once)`],
+    [held, "while the PC is still answering, its other actions can be tapped"],
+    [on, "after the PC turned its screen off there's no Screen on"],
+  ]);
+}
+
+/** Lock that the PC refuses: shown locked at once, then rolled back with its words and a retry. */
+async function dvRollback() {
+  const card = window.__dv.root.querySelector('[data-device="desk1"]');
+  card.querySelector('[data-action="lock"]').click();
+  await new Promise((ok) => setTimeout(ok, 100));
+  const early = dvLine();
+  const err = await dvWait('[data-device="desk1"] [data-device-error]');
+  const words = err?.textContent ?? "nothing";
+  const fails = dvFails([
+    [/locked/.test(early), "Lock didn't show locked at once"],
+    [/no desktop session/.test(words), `a refused lock shows "${words}", want the PC's own words`],
+    [!/locked/.test(dvLine()), "a refused lock still shows locked (no rollback)"],
+    [card.querySelector("[data-retry]"), "a refused lock has no Try again"],
+  ]);
+  err?.querySelector("[data-dismiss]")?.click();
+  await new Promise((ok) => setTimeout(ok, 50));
+  return fails;
+}
+
+/** Sleep while something runs there: refused by the PC, the page names what would stop and offers "Sleep anyway". */
+async function dvBusy() {
+  const card = window.__dv.root.querySelector('[data-device="desk1"]');
+  card.querySelector('[data-action="sleep"]').click();
+  const err = await dvWait('[data-device="desk1"] [data-device-error]');
+  return dvFails([[/llama-swap/.test(err?.textContent ?? ""), `sleep while busy shows "${err?.textContent ?? "nothing"}", want what would stop`], [card.querySelector("[data-force]"), "sleep while busy offers no Sleep anyway"]]);
 }
 
 /** App API's page (above): mounted on a mock runtime, checked for its fonts, shot folded and unfolded, list and app. */
