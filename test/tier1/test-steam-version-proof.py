@@ -193,6 +193,19 @@ class FixesReport(Base):
         self.assertFalse(r["applied"])
         self.assertIn("doesn't know FEX_THUNKCONFIG", r["why"])
 
+    def test_turnip_flag_from_user_settings(self):
+        # 11-07: noubwc moved from steam-env into user_settings.py's default (Proton's env beat proton-settings.json).
+        self.env.write_text("FEX_THUNKCONFIG=/x\n")
+        us = self.t / "user_settings.py"
+        us.write_text('user_settings = {}\nuser_settings["TU_DEBUG"] = "noubwc"\n')
+        self.lib.write_bytes(b"\0syncdraw\0noubwc\0")
+        env = dict(os.environ, POWOS_STEAM_DIR=str(self.S), POWOS_STEAM_ENV_FILES=str(self.env), POWOS_USER_SETTINGS=str(us),
+                   POWOS_TURNIP_LIB=str(self.lib), XDG_CACHE_HOME=str(self.t / "cache"))
+        r = subprocess.run([sys.executable, str(PKG / "powos-steam-fixes"), "--json"], env=env, capture_output=True,
+                           text=True, timeout=60)
+        rep = {x["fix"]: x for x in json.loads(r.stdout)}
+        self.assertTrue(rep["turnip TU_DEBUG=noubwc"]["applied"])
+
     def test_turnip_flag_two_builds(self):
         self.lib.write_bytes(b"\0syncdraw\0noubwc\0flushall\0")
         self.assertTrue(self.report()["turnip TU_DEBUG=noubwc"]["applied"])

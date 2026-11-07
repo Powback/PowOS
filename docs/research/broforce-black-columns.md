@@ -291,3 +291,20 @@ Check: `queue.sh add <task> tools/phone/verify/bf-driver.sh` - PASS needs the ga
   `bf-checker.sh base ubwc syncdraw gmem 3dload` once agent/steam-noubwc is merged.
 - bf-checker.sh now restarts a Steam that is older than its steam-env before the first variant, so `base` right after
   a steam install measures the new env.
+
+## UBWC was never measured on after 11-04 (render-scale-ubwc, 2026-11-07)
+- Valve's proton (Experimental ARM64, line ~1742): `for key, value in user_settings.items(): if key not in self.env:
+  self.env[key] = value` - a user_settings key applies only when the environment doesn't already have it.
+- steam-env exported `TU_DEBUG=noubwc` to Steam and everything it starts (11-04 16:37), so the checks' variants -
+  proton-settings.json `TU_DEBUG=startup` (ubwc), `gmem`, `syncdraw`, ABZU's `env:TU_DEBUG=startup` - never reached a
+  game. Proof, 11-07 05:12 (bf-checker.sh ubwc, which now prints the game's /proc environ): proton-settings.json said
+  `startup`, every process of the chain down to Broforce's wine-preloader had `TU_DEBUG=noubwc`. The 11-04 17:07
+  "ubwc X 0/84" / "syncdraw 0/82" / "gmem 0/82" rows above are noubwc runs, not UBWC-on results.
+- Fix (steam 1.0.0.87-40): noubwc is user_settings.py's default (`user_settings["TU_DEBUG"] = "noubwc"`, HACK moved
+  there), so a check's or the user's TU_DEBUG wins; steam-env no longer sets it; powos-steam-fixes checks the flag from
+  either place. Native Linux games (no Proton) no longer get noubwc - the dashes were a DXVK/Unity-on-Proton finding.
+  bf-checker-phone.sh writes proton-settings.json for every Proton (it skipped it when the x86 Proton's file wasn't
+  PowOS's).
+- Next, after -40 is installed and Steam restarted: `BF_BASE_FROM=<a clean bfc dir> bf-checker.sh ubwc` (the log's
+  "game env:" line must say startup), then syncdraw / gmem / 3dload, and ABZU `bf-pacing.sh env:TU_DEBUG=startup` +
+  `gus:ResolutionScale=SCALE_75 env:TU_DEBUG=startup`. Only a 0-dash ubwc run lets the default go.

@@ -32,10 +32,14 @@ set)
   [ -d "$P" ] || { echo "no Proton dir $P"; exit 2; }
   # PowOS's own user_settings.py (pkgs/steam) takes them from ~/.config/powos/proton-settings.json and stays in place
   # (it also skips the install script evaluator); a Proton without it gets a user_settings.py of the check's own.
-  if head -1 "$P/user_settings.py" 2>/dev/null | grep -q '^# PowOS user_settings'; then
-    mkdir -p ~/.config/powos
-    { printf '{"DXVK_LOG_PATH": "Z:%s"' "$L"; [ -n "$tu" ] && printf ', "TU_DEBUG": "%s"' "$tu"; [ -n "$nc" ] && printf ', "TU_KGSL_FORCE_NONCOHERENT": "1"'; echo '}'; } > ~/.config/powos/proton-settings.json
-  else
+  # proton-settings.json ALWAYS: every Proton /usr/bin/steam set up reads it (PowOS's user_settings.py), the ARM64 one
+  # Broforce is pinned to included. Before 11-07 it was written only when the x86 "Proton - Experimental" had PowOS's
+  # file - with its own user_settings.py there instead, an ARM64 Broforce never got the variant: the "ubwc" run of
+  # 11-07 05:12 played with steam-env's TU_DEBUG=noubwc (its /proc environ), so every earlier ubwc/gmem/syncdraw "0 %"
+  # on ARM64 measured noubwc.
+  mkdir -p ~/.config/powos
+  { printf '{"DXVK_LOG_PATH": "Z:%s"' "$L"; [ -n "$tu" ] && printf ', "TU_DEBUG": "%s"' "$tu"; [ -n "$nc" ] && printf ', "TU_KGSL_FORCE_NONCOHERENT": "1"'; echo '}'; } > ~/.config/powos/proton-settings.json
+  if ! head -1 "$P/user_settings.py" 2>/dev/null | grep -q '^# PowOS user_settings'; then
     [ -e "$P/user_settings.py" ] && [ ! -e "$P/user_settings.py.powos-bak" ] && mv "$P/user_settings.py" "$P/user_settings.py.powos-bak"
     { echo 'user_settings = {'; echo "    \"DXVK_LOG_PATH\": \"Z:$L\","; [ -n "$tu" ] && echo "    \"TU_DEBUG\": \"$tu\","; [ -n "$nc" ] && echo '    "TU_KGSL_FORCE_NONCOHERENT": "1",'; echo '}'; } > "$P/user_settings.py"
   fi
