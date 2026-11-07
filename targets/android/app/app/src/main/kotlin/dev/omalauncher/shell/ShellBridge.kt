@@ -149,7 +149,7 @@ class ShellBridge(
                 y: Int,
                 w: Int,
                 h: Int,
-            ) = popupLog.popup(parent, popup, x, y, w, h)
+            ) = popupLog.popup(parent, popup, PopupGeo(x, y, w, h))
 
             override fun popupGone(
                 parent: Int,

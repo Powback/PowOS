@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
 import andro.marchy.WebWindowSource
+import kotlin.math.abs
 
 /**
  * N3a of docs/WEB_WINDOWS.md "Native-glued windows": a Linux web window's popups (Steam's menus, xdg_popups, X11
@@ -48,13 +49,12 @@ internal class PopupLog(
     fun popup(
         parent: Int,
         id: Int,
-        x: Int,
-        y: Int,
-        w: Int,
-        h: Int,
+        geo: PopupGeo,
     ) {
+        val w = geo.w
+        val h = geo.h
         val now = SystemClock.uptimeMillis()
-        val line = synchronized(book) { book.popup(parent, id, x, y, w, h, now) }
+        val line = synchronized(book) { book.popup(parent, id, geo, now) }
         WindowLog.i(TAG, line)
         synchronized(book) { book.insane(id, screen()) }?.let { WindowLog.w(TAG, "popup $id insane: $it") }
         synchronized(consumers) {
@@ -123,6 +123,14 @@ internal class PopupLog(
     }
 }
 
+/** A popup's place against its window's top left and its size, KWin's "popup" line's x y w h (px). */
+internal data class PopupGeo(
+    val x: Int,
+    val y: Int,
+    val w: Int,
+    val h: Int,
+)
+
 /**
  * What [PopupLog] records per popup surface: its parent, its last geometry, how many "popup" lines and buffers came and
  * when. Pure (JVM-tested, PopupBookTest); every call returns the log line it is worth.
@@ -152,20 +160,17 @@ internal class PopupBook {
     fun popup(
         parent: Int,
         id: Int,
-        x: Int,
-        y: Int,
-        w: Int,
-        h: Int,
+        g: PopupGeo,
         now: Long,
     ): String {
         val r = recs.getOrPut(id) { Rec(parent, id, now) }
-        r.x = x
-        r.y = y
-        r.w = w
-        r.h = h
+        r.x = g.x
+        r.y = g.y
+        r.w = g.w
+        r.h = g.h
         r.msgs++
         val reparent = if (r.parent != parent) " (was of ${r.parent})" else ""
-        return "popup $parent $id at $x,$y ${w}x$h (#${r.msgs})$reparent"
+        return "popup $parent $id at ${g.x},${g.y} ${g.w}x${g.h} (#${r.msgs})$reparent"
     }
 
     /** A buffer of [id]: the line for the first one and every [EVERY]th, else null. */
@@ -202,12 +207,11 @@ internal class PopupBook {
         screen: Pair<Int, Int>,
     ): String? {
         val r = recs[id] ?: return null
-        val (sw, sh) = screen
-        val big = maxOf(sw, sh)
+        val big = maxOf(screen.first, screen.second)
         return when {
-            r.w <= 0 || r.h <= 0 -> "empty ${r.w}x${r.h}"
-            r.w > big || r.h > big -> "${r.w}x${r.h} larger than the screen ${sw}x$sh"
-            r.x < -big || r.y < -big || r.x > big || r.y > big -> "at ${r.x},${r.y}: a screen away from its window"
+            minOf(r.w, r.h) <= 0 -> "empty ${r.w}x${r.h}"
+            maxOf(r.w, r.h) > big -> "${r.w}x${r.h} larger than the screen ${screen.first}x${screen.second}"
+            maxOf(abs(r.x), abs(r.y)) > big -> "at ${r.x},${r.y}: a screen away from its window"
             else -> null
         }
     }
