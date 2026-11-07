@@ -7,8 +7,18 @@ import unittest
 
 SOURCE = pathlib.Path(__file__).resolve().parents[2] / "tools/phone/verify/queue.sh"
 CODE = SOURCE.read_text()
-START = CODE.index('        for f in "$Q"/*.job; do', CODE.index('# A runnable job that sorts before'))
-BLOCK = CODE[START:CODE.index('\n        done', START) + len('\n        done')]
+# The window's "queued to go first" look: first_waiting (with job_held, select_jobs' hold rules) and its call line.
+def _func(head, tail):
+    start = CODE.index(head)
+    return CODE[start:CODE.index(tail, start) + len(tail)]
+CALL = next(l for l in CODE.splitlines() if "first_waiting \"$j\" \"$go\"" in l)
+BLOCK = "\n".join([
+    next(l for l in CODE.splitlines() if l.startswith("rc3_waits() {")),
+    "closes_game() { return 1; }",
+    _func("  job_held() {", "    return 1; }"),
+    _func("  first_waiting() {", "    done; return 1; }"),
+    CALL,
+])
 
 
 class TaskSelection(unittest.TestCase):

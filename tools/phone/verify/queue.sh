@@ -153,6 +153,8 @@ order_jobs() { local j k i out=() keys=() seen=" "
   done
   sel=(${out[@]+"${out[@]}"}); }
 # rc3_waits <after> [now]: the job backs off (rc3_requeue) until then - not selected for a window yet.
+# runner_sum <queue.sh copy>: what the runner runs - that queue.sh and the verify checkout's window-lock.sh it sources.
+runner_sum() { echo "$(cksum < "$1" 2>/dev/null) $(cksum < "$VR/tools/phone/verify/window-lock.sh" 2>/dev/null)"; }
 rc3_waits() { [ "${1:-0}" -gt "${2:-$(date +%s)}" ] 2>/dev/null; }
 # alive_runner <pid>: that pid runs a queue runner (not a recycled pid).
 alive_runner() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null && ps -p "$1" -o command= 2>/dev/null | grep -q queue; }
@@ -529,7 +531,7 @@ run)
     # A private copy of the verify checkout's queue.sh: bash reads a script as it runs, and checkouts get pulled into.
     verify_tree || exit 1
     c=$(mktemp "${TMPDIR:-/tmp}/powos-queue.XXXXXX") && cp "$VR/tools/phone/verify/queue.sh" "$c" || exit 1
-    QUEUE_SUM=$(cksum < "$c") QUEUE_COPY=$c QUEUE_HERE=$VR/tools/phone/verify exec bash "$c" run
+    QUEUE_SUM=$(runner_sum "$c") QUEUE_COPY=$c QUEUE_HERE=$VR/tools/phone/verify exec bash "$c" run
   fi
   rm -f "$QUEUE_COPY"; unset QUEUE_COPY   # bash keeps it open
   . "$here/window-lock.sh"
@@ -647,16 +649,33 @@ EOS
       f=$a; [ -f "$f" ] || f=$VR/$a; [ -f "$f" ] || continue
       grep -qE "bf-stop|kwin_restart|kwin_up|power logout|pkill[^|;]*(steam|reaper|SteamLaunch)|killall[^|;]*steam|force-stop[^|;]*steam" "$f" 2>/dev/null && return 0
     done; return 1; }
+  # job_held <go> <job name>: (the job's vars sourced) it stays queued this window - prints why, returns 0. Shared by
+  # select_jobs and the window's "queued to go first" look, so a held job never ends a window it couldn't run in.
+  job_held() { local go=$1 n=${2:-job}
+    # Backing off after its 5th rc 3 (rc3_requeue): stays queued, held until then; a "test now" for it runs it at once.
+    if [ "$task" != "$go" ] && rc3_waits "$after"; then echo "$(date +%T) $n: exited 3 $tries times - stays queued, next try after $(date -r "$after" +%T 2>/dev/null || date -d "@$after" +%T)"; return 0; fi
+    if [ -z "$go" ] && [ "${AWAY:-0}" = 1 ] && ( [ "$rel" = 1 ] && cd "$VR/$cwd" 2>/dev/null || cd "$cwd" 2>/dev/null; closes_game "${cmd[@]}" ); then
+      echo "$(date +%T) $n: would close the game left running (nobody playing) - skipped, stays queued"; return 0; fi
+    if [ "$task" != "$go" ] && ! shipped "$need" "$qt"; then echo "$(date +%T) $n: waits for its ship (${need:0:9}) - skipped, the jobs behind it run"; return 0; fi
+    return 1; }
+  # first_waiting <job> <go>: a job sorting before <job>, not in this window's sel, that the next window would run
+  # (prints its name). Sources jobs: call it in $( ).
+  first_waiting() { local j=$1 go=$2 f
+    for f in "$Q"/*.job; do
+      [ "$f" \< "$j" ] || break
+      case " ${sel[*]} " in *" $f "*) continue ;; esac
+      need=; qt=0; task=; after=0; tries=0; cwd=; rel=0; cmd=(); . "$f"
+      # A task-specific test request must not yield forever to a job it cannot select next window.
+      [ -z "$go" ] || [ "$go" = all ] || [ "$task" = "$go" ] || continue
+      job_held "$go" >/dev/null && continue
+      basename "$f" .job; return 0
+    done; return 1; }
   select_jobs() { local go=$1 j; sel=(); held=0
     for j in "$Q"/*.job; do
       [ -f "$j" ] || continue
-      task=; need=; qt=0; cwd=; rel=0; after=0; cmd=(); . "$j"
+      task=; need=; qt=0; cwd=; rel=0; after=0; tries=0; cmd=(); . "$j"
       [ -z "$go" ] || [ "$go" = all ] || [ "$task" = "$go" ] || continue
-      # Backing off after its 5th rc 3 (rc3_requeue): stays queued, held until then; a "test now" for it runs it at once.
-      if [ "$task" != "$go" ] && rc3_waits "$after"; then held=$((held + 1)); echo "$(date +%T) $(basename "$j" .job): exited 3 $tries times - stays queued, next try after $(date -r "$after" +%T 2>/dev/null || date -d "@$after" +%T)"; continue; fi
-      if [ -z "$go" ] && [ "${AWAY:-0}" = 1 ] && ( [ "$rel" = 1 ] && cd "$VR/$cwd" 2>/dev/null || cd "$cwd" 2>/dev/null; closes_game "${cmd[@]}" ); then
-        held=$((held + 1)); echo "$(date +%T) $(basename "$j" .job): would close the game left running (nobody playing) - skipped, stays queued"; continue; fi
-      if [ "$task" != "$go" ] && ! shipped "$need" "$qt"; then held=$((held + 1)); echo "$(date +%T) $(basename "$j" .job): waits for its ship (${need:0:9}) - skipped, the jobs behind it run"; continue; fi
+      job_held "$go" "$(basename "$j" .job)" && { held=$((held + 1)); continue; }
       sel+=("$j")
     done; }
   # The runner stays while anything is queued (a "test now" needs one waiting): a window that didn't come is waited for again.
@@ -665,8 +684,10 @@ EOS
     # A fix to the runner itself takes effect between windows: the pulled queue.sh differs from the copy it started
     # from -> start again from it (same pid: the runner lock stays ours). Before, a fix waited for the runner to end -
     # with checks always queued, never (2026-10-23).
-    if [ -n "${QUEUE_SUM:-}" ] && [ -z "${QUEUE_NO_TREE:-}" ] && [ "$(cksum < "$VR/tools/phone/verify/queue.sh" 2>/dev/null)" != "$QUEUE_SUM" ]; then
-      echo "$(date +%T) queue.sh changed on origin - the runner starts again from it"; unset QUEUE_SUM
+    # The sum covers window-lock.sh too (sourced once at start): 11-07 its self-input fix shipped 22:32 and the runner
+    # kept the old wl_wake/wl_sleep all night - every wake still read as the user picking the phone up.
+    if [ -n "${QUEUE_SUM:-}" ] && [ -z "${QUEUE_NO_TREE:-}" ] && [ "$(runner_sum "$VR/tools/phone/verify/queue.sh")" != "$QUEUE_SUM" ]; then
+      echo "$(date +%T) queue.sh/window-lock.sh changed on origin - the runner starts again from it"; unset QUEUE_SUM
       exec bash "$VR/tools/phone/verify/queue.sh" run
     fi
     # Paused: the wait returns for the go flag only (resume / test all / test now), never for a free window.
@@ -709,15 +730,11 @@ EOS
         # A runnable job that sorts before this one but came in after the window began (a job queued to go first, e.g.
         # an install the next checks depend on) ends the window, and the next window re-picks in order. Before, it
         # waited for the whole batch: 58 checks, hours (06:22).
-        for f in "$Q"/*.job; do
-          [ "$f" \< "$j" ] || break
-          case " ${sel[*]} " in *" $f "*) continue ;; esac
-          need=; qt=0; task=; . "$f"
-          # A task-specific test request must not yield forever to a job it cannot select next window.
-          [ -z "$go" ] || [ "$go" = all ] || [ "$task" = "$go" ] || continue
-          if shipped "$need" "$qt"; then echo "$(date +%T) $(basename "$f" .job) queued to go first - re-picking the window"; exit 4; fi
-        done
-        task=; need=; qt=0
+        # Only a job the next window WOULD select counts (job_held, the same rules as select_jobs): 11-07 22:51-00:14 the
+        # head job, backing off after its rc 3s, sorted first and ended every window at once - "queued to go first -
+        # re-picking", "woke the phone for 0 jobs" four times, 23 queued and one ran in 2 h.
+        f=$(first_waiting "$j" "$go") && { echo "$(date +%T) $f queued to go first - re-picking the window"; exit 4; }
+        task=; need=; qt=0; after=0
         # An APK install waits for this window (ship-apk wrote wants-phone): yield before the next check - the install
         # restarts the app anyway, and the rest run in the next window against the new build.
         wp=${SHIP_DIR:-$HOME/.cache/powos-ship-queue}/wants-phone

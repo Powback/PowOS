@@ -10,8 +10,10 @@ import tempfile
 import unittest
 
 CODE = (pathlib.Path(__file__).resolve().parents[2] / "tools/phone/verify/queue.sh").read_text()
-START = CODE.index("  select_jobs() {")
-FUNC = CODE[START:CODE.index("    done; }", START) + len("    done; }")]
+START = CODE.index("  job_held() {")  # select_jobs' hold rules live in job_held, just above it
+SEL = CODE.index("  select_jobs() {")
+FUNC = CODE[START:CODE.index("    done; }", SEL) + len("    done; }")]
+FUNC = next(l for l in CODE.splitlines() if l.startswith("rc3_waits() {")) + "\ncloses_game() { return 1; }\n" + FUNC
 
 
 def pick(jobs, unshipped, go=""):
