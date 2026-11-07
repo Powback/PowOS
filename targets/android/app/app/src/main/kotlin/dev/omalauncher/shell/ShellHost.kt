@@ -245,7 +245,7 @@ class ShellHost(
     /**
      * A load started: the page has [BOOT_ERROR_MS] to be ready if it reported an error meanwhile, [BOOT_MS] if not
      * (an old page without the guard, a slow start: its window.__powosAlive is asked before it's judged). Not judged
-     * with the screen off (a page may be throttled then).
+     * with the screen off (a page may be throttled then), nor while its window isn't on the screen (BootJudge).
      */
     private fun bootStarted() {
         val serial = ++bootSerial
@@ -260,30 +260,87 @@ class ShellHost(
     private fun checkBoot(
         serial: Int,
         after: Long,
+        waitedHidden: Boolean = false,
     ) {
-        if (serial != bootSerial || bootReady || bootFailed) return
-        if (after < BOOT_MS && bootError == null) return
-        if (!context.getSystemService(android.os.PowerManager::class.java).isInteractive) {
-            main.postDelayed({ checkBoot(serial, after) }, 2_000)
-            return
-        }
+        if (stale(serial) || (after < BOOT_MS && bootError == null)) return
+        if (waitBeforeProbe(serial, after, waitedHidden)) return
         PageWatchdog.probe(web) { alive, _ ->
-            if (serial != bootSerial || bootReady || bootFailed) return@probe
-            if (alive) {
-                bootReady = true
-                ShellErrors.markReady(context, mode ?: "home")
-                return@probe
+            when {
+                stale(serial) -> Unit
+                alive -> judgeBoot(serial, after, true, false)
+                else -> documentHidden { judgeBoot(serial, after, false, it) }
             }
-            if (bootError == null && after < BOOT_SLOW_MS) {
-                main.postDelayed({ checkBoot(serial, BOOT_SLOW_MS) }, BOOT_SLOW_MS - after)
-                return@probe
-            }
-            bootFailed = true
-            val cause = bootError ?: "no window.__powosAlive ${after / 1000} s after the page started loading, and no error reported"
-            ShellErrors.notReady(context, mode ?: "home", "${after / 1000} s after load: $cause")
-            // Broken right after a hot push: the push rolled back, every page loaded again on what was there before.
-            if (ShellErrors.rollback(context, mode ?: "home", cause).isNotEmpty()) main.postDelayed({ HotReload.reloadAll() }, 300)
         }
+    }
+
+    /** A late check of an earlier load, or one already decided. */
+    private fun stale(serial: Int) = serial != bootSerial || bootReady || bootFailed
+
+    private val bootPage get() = mode ?: "home"
+
+    /** True when the page isn't asked now ([BootJudge.before]): the screen is off, its window isn't on the screen (it
+     *  can't draw, so it can't be ready - judged once shown), or it just came back (its boot clock starts again). */
+    private fun waitBeforeProbe(
+        serial: Int,
+        after: Long,
+        waitedHidden: Boolean,
+    ): Boolean {
+        val interactive = context.getSystemService(android.os.PowerManager::class.java).isInteractive
+        when (BootJudge.before(interactive, onScreen(), waitedHidden)) {
+            BootJudge.Before.WAIT_SCREEN_OFF -> main.postDelayed({ checkBoot(serial, after, waitedHidden) }, 2_000)
+            BootJudge.Before.WAIT_HIDDEN -> main.postDelayed({ checkBoot(serial, after, true) }, 2_000)
+            // It only starts running now: the same allowance as a load that just started.
+            BootJudge.Before.RESTART -> main.postDelayed({ checkBoot(serial, after) }, BOOT_MS)
+            BootJudge.Before.PROBE -> return false
+        }
+        return true
+    }
+
+    private fun judgeBoot(
+        serial: Int,
+        after: Long,
+        alive: Boolean,
+        pageHidden: Boolean,
+    ) {
+        if (stale(serial)) return
+        when (BootJudge.after(alive, pageHidden || !onScreen(), bootError != null, after < BOOT_SLOW_MS)) {
+            BootJudge.After.READY -> {
+                bootReady = true
+                ShellErrors.markReady(context, bootPage)
+            }
+            BootJudge.After.WAIT_HIDDEN -> main.postDelayed({ checkBoot(serial, after, true) }, 2_000)
+            BootJudge.After.LATER -> main.postDelayed({ checkBoot(serial, BOOT_SLOW_MS) }, BOOT_SLOW_MS - after)
+            BootJudge.After.FAIL -> bootFail(after)
+        }
+    }
+
+    private fun bootFail(after: Long) {
+        bootFailed = true
+        val cause = bootError ?: "no window.__powosAlive ${after / 1000} s after the page started loading, and no error reported"
+        ShellErrors.notReady(context, bootPage, "${after / 1000} s after load: $cause")
+        // Broken right after a hot push: the push rolled back, every page loaded again on what was there before.
+        if (ShellErrors.rollback(context, bootPage, cause).isNotEmpty()) main.postDelayed({ HotReload.reloadAll() }, 300)
+    }
+
+    /** The page's window is on the screen (its WebView can draw). The gate's test page is in no window by design: judged as before. */
+    private fun onScreen(): Boolean =
+        mode == GateTest.MODE || (web.isAttachedToWindow && web.windowVisibility == android.view.View.VISIBLE && web.isShown)
+
+    /** Whether the page's document says it's hidden (a paused WebView); no answer in time is "not hidden" - a page that
+     *  doesn't answer while its window is on the screen is hung. */
+    private fun documentHidden(result: (Boolean) -> Unit) {
+        if (mode == GateTest.MODE) return result(false)
+        var answered = false
+        val late = Runnable { if (!answered) { answered = true; result(false) } }
+        main.postDelayed(late, 1_000)
+        runCatching {
+            web.evaluateJavascript("document.visibilityState") { v ->
+                if (answered) return@evaluateJavascript
+                answered = true
+                main.removeCallbacks(late)
+                result(v == "\"hidden\"")
+            }
+        }.onFailure { if (!answered) { answered = true; main.removeCallbacks(late); result(false) } }
     }
 
     /** The page again, from scratch (after a rollback: its modules as they are now) - only one that isn't up: a live
