@@ -82,5 +82,61 @@ check "the gate counts as the arm64 prefix family" '[ "$(cat "$CD/200/powos-fami
 rm -rf "$St/compatibilitytools.d/powos-proton-arm64"; C apply >/dev/null
 check "gate gone -> back to Valve's ARM64 tool"    '[ "$(C get 200)" = "tool=proton-experimental-arm64 opts=-" ]'
 
+# Screen size: a Unity / Unreal game gets the unity-screen wrapper in front of %command% at apply (user options kept).
+mkdir -p "$St/userdata/1/config" "$T/.local/share/powos" "$St/steamapps/common/UGame/UGame_Data" "$St/steamapps/common/RGame/RGame_Data" \
+  "$St/steamapps/common/EGame/Engine/Binaries" "$St/steamapps/common/PGame/PGame_Data" "$St/steamapps/common/SGame"
+touch "$St/steamapps/common/UGame/UnityPlayer.dll" "$St/steamapps/common/RGame/RGame_Data/globalgamemanagers" \
+  "$St/steamapps/common/PGame/UnityPlayer.dll" "$St/steamapps/common/SGame/sgame.exe"
+W=$T/.local/share/powos/unity-screen; printf '#!/bin/sh\nexec "$@"\n' > "$W"
+for a in 300:UGame 301:RGame 302:EGame 303:PGame 304:SGame; do
+  printf '"AppState"\n{\n\t"appid"\t\t"%s"\n\t"name"\t\t"%s"\n\t"installdir"\t\t"%s"\n}\n' "${a%%:*}" "${a#*:}" "${a#*:}" > "$St/steamapps/appmanifest_${a%%:*}.acf"
+done
+cat > "$St/userdata/1/config/localconfig.vdf" <<'V'
+"UserLocalConfigStore"
+{
+	"Software"
+	{
+		"Valve"
+		{
+			"Steam"
+			{
+				"apps"
+				{
+					"301"
+					{
+						"LaunchOptions"		"SteamDeck=1 %command%"
+					}
+					"303"
+					{
+						"LaunchOptions"		"-dx11"
+					}
+				}
+			}
+		}
+	}
+}
+V
+out=$(C apply --dry-run)
+check "dry run names the Unity game"               'echo "$out" | grep -q "would set 300 (unity)"'
+check "dry run writes nothing"                      '[ "$(C get 300)" = "tool=proton-experimental-arm64 opts=-" ] || [ "$(C get 300 | cut -d" " -f2)" = "opts=-" ]'
+C apply >/dev/null
+check "Unity game: wrapper + %command%"             '[ "$(C get 300 | sed "s/.* opts=//")" = "$W %command%" ]'
+check "user env prefix kept around it"              '[ "$(C get 301 | sed "s/.* opts=//")" = "SteamDeck=1 $W %command%" ]'
+check "Unreal game gets it too"                     '[ "$(C get 302 | sed "s/.* opts=//")" = "$W %command%" ]'
+check "plain user args go after %command%"          '[ "$(C get 303 | sed "s/.* opts=//")" = "$W %command% -dx11" ]'
+check "other engines untouched"                     '[ "$(C get 304 | sed "s/.* opts=//")" = "-" ]'
+cp "$St/userdata/1/config/localconfig.vdf" "$T/lc1"; C apply >/dev/null
+check "apply again changes nothing"                 'cmp -s "$St/userdata/1/config/localconfig.vdf" "$T/lc1"'
+C screen 301 off >/dev/null
+check "screen off: wrapper out, user's options back" '[ "$(C get 301 | sed "s/.* opts=//")" = "SteamDeck=1 %command%" ]'
+C apply >/dev/null
+check "screen off stays off at the next apply"      '[ "$(C get 301 | sed "s/.* opts=//")" = "SteamDeck=1 %command%" ]'
+C screen 300 off >/dev/null
+check "screen off on a bare wrapper -> no options"   '[ "$(C get 300 | sed "s/.* opts=//")" = "-" ]'
+C screen 300 auto >/dev/null
+check "screen auto puts it back"                    '[ "$(C get 300 | sed "s/.* opts=//")" = "$W %command%" ]'
+rm "$W"; C screen 303 off >/dev/null; C screen 303 auto >/dev/null
+check "no wrapper on disk: not added"               '[ "$(C get 303 | sed "s/.* opts=//")" = "%command% -dx11" ]'
+
 echo; echo "== Results: $PASS passed, $FAIL failed =="
 [ $FAIL = 0 ]

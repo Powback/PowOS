@@ -309,6 +309,12 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   Fixed: kwin 0040 (a full-screen task's window minimise is undone; a never-live task restores it on the desktop;
   floating task gone full screen takes the output size at once, not 1360x1708) + WindowFrames.mayHide (never hide a
   window full screen or launched/activated < 10 s ago). Check: `grep minimized itself` in KWin's log, `xprop WM_STATE`.
+- Every Unity/Unreal game, not just Broforce (2026-11-07, game-resize-all): `powos-steam-compat apply` (each Steam start)
+  puts ~/.local/share/powos/unity-screen in front of %command% in the LaunchOptions of every installed game whose
+  folder is Unity (UnityPlayer.dll / *_Data/globalgamemanagers) or Unreal (Engine/Binaries, */Binaries/Win64); user
+  options kept around it; `powos-steam-compat screen <appid> off` opts out. Unreal gets `-windowed -ResX -ResY`.
+  Before: Besiege ran its saved 2268x1600 (user.reg Screenmanager) letterboxed in 2268x2440. Check any game:
+  `game-resize.sh <appid>` (bf-resize.sh = it for 274190; G3 now FAILs a letterbox/pillarbox).
 - ABZU (UE4, 384190) pillarbox: our window IS the container size; the game's own GameUserSettings.ini has
   DesiredScreenWidth/Height=1280x720, Fullscreen=ON, bUseDesktopResolutionForFullscreen=False, so it renders 1280x720
   and Proton's fullscreen hack scales it. Lever: a UE twin of unity-screen (`-ResX=W -ResY=H` / desktop resolution).
