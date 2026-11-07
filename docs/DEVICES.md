@@ -1,7 +1,15 @@
 # PowOS devices: how a device joins, and how devices control each other
 
 Every PowOS device (desktop, laptop, handheld, phone rooted or not, TV, server) runs one **device agent** and can
-**enroll** in the realm. Design and map: `docs/research/device-ecosystem.md`. This page is the how-to.
+**enroll** in the realm. Design and map: `docs/research/device-ecosystem.md`. This page is the how-to, and it
+describes what is deployed (owner 2026-11-07: keep the current setup, don't extend it).
+
+## Quick start
+
+1. **To control a device, pair it in the Devices app**: Add a device, pick it (mDNS or its address), type the 6-digit
+   code the target shows. Then lock, unlock (desktop, owner-marked peers only), screen on/off, sleep, wake, ring.
+2. **Enroll only if you want it to approve other devices**: `powos devices enroll` on it (LAN/VPN, `enroll.pow`);
+   the first device is approved on the server, later ones from an approver (below). Enrolling gives no AI access.
 
 ## The pieces
 
@@ -9,8 +17,8 @@ Every PowOS device (desktop, laptop, handheld, phone rooted or not, TV, server) 
 |---|---|---|
 | device agent | `lib/devices/powos-deviced` (Linux: desktop, rooted phone's system tier); `DeviceAgentHost.kt` (phone without root, served by the PowOS app) | HTTPS :3416, its own pinned key; `GET /v1/info` (open), `/v1/status`, `/v1/action` (paired token only). Actions by capability: `lock`, `screen_off`, `screen_on`, `sleep` (refused while services/GPU jobs run unless forced), `wake` (Wake-on-LAN for another device), `ring` |
 | pairing | the agent | the controller asks, the **target shows a 6-digit code** (notification / `powos devices codes`), the person types it on the controller; per-peer token, stored hashed; revoke from any paired device. Works offline, no hub needed |
-| enrollment | `powos devices enroll` + PowStation `enroll/powos-enroll.py` (`enroll.pow` only, LAN/VPN; no public route) | the device's identity in the realm, approved by an already-enrolled approver device or by the owner on the server; returns the device's own realm token, its own AI token, the endpoints bundle |
-| AI per device | claude-rate-limiter `src/enrolled-devices.ts` | the authority maps each enrolled device's own bearer to a tenant, so one device is revoked without rotating the tenant secret |
+| enrollment | `powos devices enroll` + PowStation `enroll/powos-enroll.py` (`enroll.pow` only, LAN/VPN; no public route) | the device's identity in the realm, approved by an already-enrolled approver device or by the owner on the server; returns the device's own realm token and the endpoints bundle |
+| AI per device | not deployed, not planned now | AI stays on the existing subscription secret (claude-auth); `src/enrolled-devices.ts` is not in the deployed claude-rate-limiter, so the authority knows no device tokens |
 | registry | `~/.config/powos/units.d/powos-device.json` on the device (`powos units`), the realm's `registry.json` on PowStation (`powos devices registry`) | which devices exist, their caps and agent address, who approved them, what they hold |
 | Devices app | `apps/devices` (bundled, every surface) | paired devices with live status and actions; on an approver, new devices asking to join (Approve / Deny) and Revoke per device |
 
@@ -31,8 +39,8 @@ comes from a device the realm already trusts, never from a browser session.
      - **The Devices app** on the approver shows **New device wants to join**: each waiting device with its code shown
        big, its kind and platform, and "paired with this device" when it already was; **Approve** / **Deny**. Match
        the code with the one on the new device's screen first. Live (polled every 3 s while shown) and optimistic: the
-       result shows at once, a refusal rolls back with the realm's words and a Try again. The app approves without an
-       AI subscription; the CLI below picks one.
+       result shows at once, a refusal rolls back with the realm's words and a Try again. `--tenant` (CLI and
+       server) only records a name; nothing uses it while per-device AI isn't deployed.
      - **The CLI** on the approver: `powos devices pending`, then `powos devices approve BCDF-GHJK [--tenant default]
        [--no-approver] [--deny]` (no code: the only device waiting, after a yes).
      Both go through the approver's own agent (`powos-deviced`: `/v1/enroll/pending|approve|devices|revoke`), which
@@ -46,14 +54,15 @@ comes from a device the realm already trusts, never from a browser session.
    server or by any approver (the card and `pending` mark it "paired with this device"). Pairings stay as they were;
    once it is enrolled it can approve others too (unless approved `--no-approver`).
 3. The new device finishes by itself: it stores its enrollment (`~/.local/state/powos/deviced/enrollment.json`, 0600),
-   registers `powos-device` in its `units.d`, and prints `enrolled: <name>`. `--apply-ai` (or later
-   `powos devices ai-apply`) points its AI at claude-auth with **its own** token (`/etc/powos/ai/endpoint.conf`).
+   registers `powos-device` in its `units.d`, and prints `enrolled: <name>`. `--apply-ai` and
+   `powos devices ai-apply` are **not available**: per-device AI isn't deployed, so don't use them; AI keeps using
+   the existing subscription secret.
 4. To control it from another device, pair once (below). The enrollment says *who* the device is; pairing grants
    control. (Realm certificates replacing per-pair tokens: device-ecosystem.md P4.)
 
 The service re-checks the presented device token (hash, not revoked, approver flag) on every request; nothing is cached.
 
-Leave: `powos devices unenroll` (its realm and AI tokens stop at once). Revoke a lost device: on an approver,
+Leave: `powos devices unenroll` (its realm token stops at once). Revoke a lost device: on an approver,
 `powos devices revoke <id|name>` (drops its pairing with this device and revokes it in the realm; `--local` only the
 pairing) or the Devices app's **Revoke** on its card (asked once, shown revoked at once, rolled back if the realm
 refuses; the card then goes); on the server `docker exec powos-enroll powos-enroll revoke <id>` (`forget <id>` then
@@ -130,8 +139,8 @@ turn-off rollback).
 ## The realm side (PowStation) - deployed 2026-11-07, LAN/VPN only
 
 Runs as its own compose project `powos-enroll` (PowStation branch `agent/devices-enroll`, `enroll/`) until it is
-folded into PowStation's main compose; state is the named volume `powos-enroll-data`, the authority's map is
-`~/.claude-tenants/enrolled/devices.json`.
+folded into PowStation's main compose; state is the named volume `powos-enroll-data` (it also writes
+`~/.claude-tenants/enrolled/devices.json`, which the deployed authority doesn't read).
 
 ```sh
 mkdir -p ~/.claude-tenants/enrolled
@@ -144,12 +153,12 @@ curl -H 'Host: enroll.pow' http://192.168.50.100/healthz                       #
 - In the fleet manifest `config/platform-fleet.json` (`../../PowStation/enroll/docker-compose.yml`, project
   `powos-enroll`); `pow-compose fleet --manifest PowOS/config/platform-fleet.json --json` checks it with the others
   (ok 2026-11-07; the path resolves once PowStation `agent/devices-enroll` is merged into its main checkout).
-- Per-device AI needs the claude-rate-limiter authority with `src/enrolled-devices.ts` (branch
-  `agent/devices-enroll`). Until that is deployed a device token is an unknown bearer to the authority (the host
-  subscription by fallback, or a 401 with `AUTH_REQUIRE_TENANT`), so don't `ai-apply` before it is.
+- Not deployed and not planned now: per-device AI (claude-rate-limiter `src/enrolled-devices.ts` is not in the
+  deployed authority; `--apply-ai` / `ai-apply` are not available), PowAuth device principals / forwardAuth (those
+  branches are superseded, unmerged) and OpenBao.
 
 Tests: `test/tier1/test-deviced.py` (agent + enroll client), `test/tier1/test-deviced-unlock.py` (unlock: desktop
 only, owner/approver only, fake loginctl), `test/tier1/test-deviced-approve.py` (pending/approve/
 revoke CLI and `/v1/enroll/*`, approver-only, same-device-only), the gate's `app local.devices` (`dvUnlock`, `dvJoin`,
 `dvJoinDeny`, `dvMember`), `DeviceAgentCoreTest` + `LockActionsTest` (the no-root agent),
-PowStation `enroll/test_powos_enroll.py` (the realm side), claude-rate-limiter `npm run test:enrolled`.
+PowStation `enroll/test_powos_enroll.py` (the realm side).
