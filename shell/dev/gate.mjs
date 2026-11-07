@@ -709,6 +709,66 @@ async function termTakeOverKeysCheck() {
 }
 
 /**
+ * In the page, at the phone's devicePixelRatio (2.7625): a session's text as crisp as PowTerm's (the user 11-07,
+ * "still broken": "no powterm is perfect the one we have suuuucks"). Termux's TerminalRenderer draws straight into the
+ * view's device pixels; xterm's WebGL canvas is composited by Chromium, so it is only as sharp as PowTerm's when its
+ * backing store is exactly its device-pixel box (no resampling) and that box starts on a whole device pixel.
+ */
+async function termCrispCheck() {
+  // Helpers are inner: page.evaluate serialises only this function.
+  const deviceBox = (canvas) =>
+    new Promise((ok) => {
+      const ro = new ResizeObserver((es) => {
+        ro.disconnect();
+        const d = es[0].devicePixelContentBoxSize?.[0];
+        ok(d ? { w: d.inlineSize, h: d.blockSize } : null);
+      });
+      ro.observe(canvas, { box: "device-pixel-content-box" });
+    });
+  const placeProblems = (canvas, box, dpr) => {
+    const fails = [];
+    if (box && (box.w !== canvas.width || box.h !== canvas.height))
+      fails.push(`the canvas's backing store is ${canvas.width}x${canvas.height} drawn into a ${box.w}x${box.h} device-pixel box: resampled, blurry`);
+    const r = canvas.getBoundingClientRect();
+    const off = (v) => Math.abs(v * dpr - Math.round(v * dpr));
+    if (off(r.left) > 0.02 || off(r.top) > 0.02)
+      fails.push(`the canvas starts at device pixel ${(r.left * dpr).toFixed(3)},${(r.top * dpr).toFixed(3)}: between pixels, every glyph resampled`);
+    return fails;
+  };
+  const cellProblems = (term, canvas, dpr) => {
+    const ctx = document.createElement("canvas").getContext("2d");
+    ctx.font = `${term.options.fontSize}px ${term.options.fontFamily}`;
+    const ink = ctx.measureText("W").width * dpr;
+    const cellW = term._core?._renderService?.dimensions?.device?.cell?.width ?? canvas.width / term.cols;
+    const fails = [];
+    if (Math.abs(cellW - Math.round(cellW)) > 0.01) fails.push(`cells ${cellW.toFixed(3)} device px wide (not whole pixels)`);
+    if (Math.abs(cellW - ink) > 1.01) fails.push(`cells ${cellW.toFixed(2)} device px wide; the face's advance is ${ink.toFixed(2)}`);
+    return fails;
+  };
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const T = await G.mod("./ui/terminal.tsx");
+  const { powos } = await G.mod("./bridge.ts");
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  S.openSession("powos-scratch-crisp", null, undefined, { host: "mac", agent: true });
+  const id = "at-work:mac:powos-scratch-crisp";
+  await G.until(() => T.terminalFor(id) && document.querySelector(".session-term .xterm-screen canvas"), 4000);
+  await wait(800);
+  const term = T.terminalFor(id);
+  const st = await powos.term.open(id, null, null, term.cols, term.rows, false);
+  const grid = Array.from({ length: 8 }, (_, i) => `${i} ┌──┐ The quick brown fox │ ▀▄█░ ✓ λ → ≠ abcdefghijklmnopqrstuvwxyz`).join("\r\n");
+  const bytes = new TextEncoder().encode("\x1b[H\x1b[2J" + grid);
+  window.__mockEvents.emit("term.data", { id, run: st.run, data: btoa(String.fromCharCode(...bytes)), end: st.end + bytes.length });
+  await wait(600);
+  const dpr = devicePixelRatio;
+  const fails = Math.abs(dpr - 2.7625) > 0.001 ? [`the scene runs at devicePixelRatio ${dpr}, not the phone's 2.7625`] : [];
+  if (T.rendererFor(id) !== "webgl") fails.push(`the ${T.rendererFor(id)} renderer draws (PowTerm's: a canvas)`);
+  const canvas = document.querySelector(".session-term .xterm-screen canvas:not(.xterm-link-layer)");
+  if (!canvas) return [...fails, "no canvas in the terminal's screen"];
+  return [...fails, ...placeProblems(canvas, await deviceBox(canvas), dpr), ...cellProblems(term, canvas, dpr)];
+}
+
+/**
  * In the page: a session's text drawn as PowTerm's (the user 11-02: "The terminal still doesn't work half as well as
  * the Powterm"; Termux's TerminalRenderer draws Typeface.MONOSPACE at 12sp, rows at the font's own spacing, to a
  * canvas): the WebGL renderer (glyphs to the GPU, not DOM spans), the system monospace at the host's size, rows the
@@ -12393,7 +12453,7 @@ async function open(browser, url, name, viewport = { width: 412, height: 915 }) 
   // puppeteer's own 30 s defaults (goto, waitFor*) are fixed too: scale them with the load like READY_MS (f30).
   page.setDefaultTimeout(PUPPETEER_MS);
   page.setDefaultNavigationTimeout(PUPPETEER_MS);
-  await step(`${name}: setViewport`, page.setViewport({ ...viewport, deviceScaleFactor: 1 }));
+  await step(`${name}: setViewport`, page.setViewport({ deviceScaleFactor: 1, ...viewport }));
   if (THROTTLE > 1) await step(`${name}: throttle`, page.target().createCDPSession().then((c) => c.send("Emulation.setCPUThrottlingRate", { rate: THROTTLE })));
   const problems = [];
   const warnings = [];
@@ -12998,6 +13058,18 @@ try {
         whenReady(r, async () => {
           const fails = await r.page.evaluate(termGlyphsCheck);
           await r.page.screenshot({ path: "/cache/term-glyphs.png" }).catch(() => {});
+          return fails;
+        }),
+      ),
+    );
+  // A session's text as crisp as PowTerm's at the phone's own scale (the Open's inner screen: 821x883 CSS px at
+  // devicePixelRatio 2.7625): the WebGL canvas one texel per device pixel, at a whole device pixel, cells whole pixels.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(
+      open(browser, `${ORIGIN}/index.html`, "term-crisp", { width: 821, height: 883, deviceScaleFactor: 2.7625 }).then((r) =>
+        whenReady(r, async () => {
+          const fails = await r.page.evaluate(termCrispCheck);
+          await r.page.screenshot({ path: "/cache/term-crisp.png" }).catch(() => {});
           return fails;
         }),
       ),
