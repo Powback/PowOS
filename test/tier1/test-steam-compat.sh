@@ -152,5 +152,28 @@ check "screen auto puts it back"                    '[ "$(C get 300 | sed "s/.* 
 rm "$W"; C screen 303 off >/dev/null; C screen 303 auto >/dev/null
 check "no wrapper on disk: not added"               '[ "$(C get 303 | sed "s/.* opts=//")" = "%command% -dx11" ]'
 
+# Render scale (abz-has-low-fps): the setting unity-screen reads, the widget's JSON, fps records, watch-fps.
+C scale 302 70 >/dev/null
+check "scale 302 70 stored"                          '[ "$(C scale 302)" = 70 ]'
+check "scale 302 7 refused"                          '! C scale 302 7 2>/dev/null'
+mkdir -p "$T/render-scale"; echo '{"scale": 70, "why": "set", "engine": "unreal", "applied": true}' > "$T/render-scale/302.json"
+check "scales: the Unreal game, setting + applied"    'C scales | python3 -c "import json,sys; d=json.load(sys.stdin)[\"302\"]; sys.exit(not (d[\"setting\"]==\"70\" and d[\"scale\"]==70 and d[\"engine\"]==\"unreal\"))"'
+check "scales: no other engine"                       '! C scales | grep -q "\"304\""'
+C fps 302 27.3 >/dev/null
+check "fps tagged with the applied scale"            'python3 -c "import json; f=json.load(open(\"$T/state.json\"))[\"apps\"][\"302\"][\"fps\"][-1]; exit(not (f[\"fps\"]==27.3 and f[\"scale\"]==70))"'
+C scale 302 auto >/dev/null
+check "scale auto clears the setting"                '[ "$(C scale 302)" = auto ]'
+LOGF=$T/session.log; : > "$LOGF"
+sleep 600 & GP=$!; exec -a "reaper SteamLaunch AppId=302 -- x" sleep 600 & RP=$!
+( sleep 0.5; for f in 31.0 33.2 32.0 30.8 34.0; do
+    echo "kwin_backend_anland: window task 9 frames: last 5 s 160 commits, 160 drawn ($f fps); commit -> drawn median 1 ms" >> "$LOGF"
+    echo "kwin_backend_anland: window task 4 frames: last 5 s 5 commits, 5 drawn (1.0 fps); commit -> drawn median 1 ms" >> "$LOGF"; sleep 0.2; done ) &
+POWOS_SESSION_LOG=$LOGF POWOS_WATCH_FPS=0.1,2.5 C watch-fps 302 >/dev/null 2>&1; wait $! 2>/dev/null
+check "watch-fps: the busiest task's median, recorded"  'python3 -c "import json; f=json.load(open(\"$T/state.json\"))[\"apps\"][\"302\"][\"fps\"][-1]; exit(not (f[\"fps\"]==32.0))"'
+kill $RP $GP 2>/dev/null; wait $RP $GP 2>/dev/null
+n=$(python3 -c "import json; print(len(json.load(open('$T/state.json'))['apps']['302']['fps']))")
+POWOS_SESSION_LOG=$LOGF POWOS_WATCH_FPS=0,0.5 C watch-fps 302 >/dev/null 2>&1
+check "watch-fps: game closed -> nothing recorded"   '[ "$(python3 -c "import json; print(len(json.load(open(\"$T/state.json\"))[\"apps\"][\"302\"][\"fps\"]))")" = "$n" ]'
+
 echo; echo "== Results: $PASS passed, $FAIL failed =="
 [ $FAIL = 0 ]

@@ -112,6 +112,12 @@ for mode in "$@"; do
   M=$OUT/$mode; mkdir -p "$M"; l0=$("$A" shell "su -c 'wc -l < $LOG'" | tr -d '\r ')
   echo "== $mode $(date +%T)"
   if [ -n "$("$A" shell "pgrep -f 'steam -cef'" | tr -d '\r')" ]; then pill "$lbl: launching $NAME"; else pill "$lbl: starting Steam + $NAME"; fi
+  # Home first (BF_HOME_FIRST=0: not): a launch while home's recent-apps overview or another app's task is in front
+  # never brings the game's window forward - 7 of 9 ABZU runs 11-07 02:56-03:37 ended INVALID that way (in front
+  # HomeShell/PowosWindowActivity, game layers 0 or a web layer behind it); the two valid ones came right after Home.
+  # restore() starts the activity that was in front again. HACK: the real fix is a launch closing the overview, as
+  # Android's does (docs/research/abzu-fps.md "Measurement friction"); then this line goes.
+  [ "${BF_HOME_FIRST:-1}" = 0 ] || { "$A" shell "input keyevent 3" >/dev/null 2>&1; sleep 1; }
   asuser bf-start.sh >/dev/null
   pill "$lbl: waiting for the game window"
   # The window, waited for only while the rest of this mode still fits the budget (WIN_S overrides).

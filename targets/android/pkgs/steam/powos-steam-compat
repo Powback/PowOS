@@ -31,6 +31,10 @@ while Steam runs (set, a failed launch) is applied at its next start (`powos gam
     powos-steam-compat tool <appid> <name|->        the raw mapping (Steam off; no policy state change)
     powos-steam-compat opts <appid> <text|->        every user's LaunchOptions for the app (Steam off)
     powos-steam-compat screen <appid> auto|off      the screen-size launch wrapper for a Unity / Unreal game (below)
+    powos-steam-compat scale <appid> auto|<25-100>  its render scale in % (unity-screen applies it at each launch)
+    powos-steam-compat scales                       JSON {appid: {name, engine, setting, scale, why, fps}} (the widget)
+    powos-steam-compat fps <appid> <fps> [--scale N]   a measured fps at a scale (default: what the last launch applied)
+    powos-steam-compat watch-fps <appid>            after a launch: KWin's window task fps (45 s settle, 30 s) -> fps
 
 Screen size (apply, every installed game): a Unity or Unreal game (detected from its install folder) gets the wrapper
 ~/.local/share/powos/unity-screen (targets/android/steam/unity-screen, copied there on every deploy) in its
@@ -38,6 +42,11 @@ LaunchOptions, in front of %command% - the user's own options kept around it. It
 size (the Android screen KWin publishes as _POWOS_SCREEN_SIZE) in a borderless window that re-renders when KWin resizes
 it on rotate/fold, instead of the size the game saved last time scaled + letterboxed by Proton (Besiege: 2268x1600 in
 2268x2440). `screen <appid> off` takes it out and keeps it out; other engines (own engines, SDL, Source) are left alone.
+
+Render scale (scale/scales/fps/watch-fps): the game draws fewer pixels, its window stays the container's size -
+targets/android/steam/unity-screen has the how per engine and the "auto" policy (from the recorded fps). A setting
+takes effect at the game's next launch, Steam running or not (no Steam config file is involved). powos-open-task runs
+watch-fps after each launch it saw through, so auto learns from real play.
 
 State: ~/.local/share/powos/steam-compat.json. Edits keep <file>.powos-bak-<time> copies of config.vdf/localconfig.vdf.
 """
@@ -594,6 +603,101 @@ def cmd_record(appid, res, tool, cold):
     return 0
 
 
+SCALES = ("auto", "100", "85", "70", "50")
+SCALE_DIR = os.path.join(os.path.dirname(STATE), "render-scale")
+SESSION_LOG = os.environ.get("POWOS_SESSION_LOG") or os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/run/powos-app"), "hyprland.log")
+FRAMES = re.compile(r"window task (\d+) frames: last 5 s (\d+) commits, (\d+) drawn \(([\d.]+) fps\)")
+
+
+def last_applied(appid):
+    """What unity-screen applied at the game's last launch ({} = never launched through it)."""
+    try:
+        with open(os.path.join(SCALE_DIR, "%s.json" % appid)) as f:
+            r = json.load(f)
+        return r if isinstance(r, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def cmd_scale(appid, what):
+    try:
+        ok = what == "auto" or 25 <= int(what) <= 100
+    except ValueError:
+        ok = False
+    if not ok:
+        print("powos-steam-compat: scale is auto or 25..100 (%%), not %r" % what, file=sys.stderr); return 2
+    s = load(); e = app_entry(s, appid)
+    if what == "auto": e.pop("scale", None)
+    else: e["scale"] = int(what)
+    save(s)
+    print("%s: render scale %s%s - from its next launch" % (appid, what, "" if what == "auto" else "%"))
+    return 0
+
+
+def cmd_scales():
+    s, games, out = load(), installed_games(), {}
+    for g, name in sorted(games.items()):
+        e = s["apps"].get(g, {}); r = last_applied(g); eng = r.get("engine") or engine(g)
+        if eng not in ("unity", "unreal"):
+            continue  # only the games unity-screen launches
+        out[g] = {"name": name, "engine": eng, "setting": str(e.get("scale", "auto")),
+                  "scale": (r.get("scale", 100) if r.get("applied", True) else 100) if r else None,
+                  "why": r.get("why", ""), "fps": (e.get("fps") or [None])[-1]}
+    print(json.dumps(out))
+    return 0
+
+
+def cmd_fps(appid, fps, scale=None):
+    if scale is None:
+        r = last_applied(appid)
+        scale = r.get("scale", 100) if r.get("applied", True) else 100
+    s = load(); e = app_entry(s, appid)
+    e["fps"] = (e.get("fps", []) + [{"fps": round(float(fps), 1), "scale": int(scale), "t": time.strftime("%F %T")}])[-KEEP:]
+    save(s)
+    print("%s: %.1f fps at render scale %d%% recorded" % (appid, float(fps), int(scale)))
+    return 0
+
+
+def game_running(appid):
+    """Its launch chain is up (Steam's reaper for it; what lib/game.sh's _game_steam_reaper looks for)."""
+    import subprocess
+    try:
+        return subprocess.run(["pgrep", "-f", "SteamLaunch AppId=%s( |$)" % appid], stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL).returncode == 0
+    except OSError:
+        return True  # no pgrep: can't tell, keep the number
+
+
+def cmd_watch_fps(appid, settle=45.0, span=30.0):
+    """The launched game's frame rate as KWin draws its window task (kwin 0046's 5 s "frames:" lines in the session
+    log), median of the busiest task over `span` s after `settle` s, recorded at the scale the launch applied. Nothing
+    recorded when the game closed meanwhile or fewer than 4 lines came (not in front: no frames, no number)."""
+    time.sleep(settle)
+    try:
+        f = open(SESSION_LOG, errors="replace"); f.seek(0, 2)
+    except OSError as e:
+        print("watch-fps %s: no session log (%s)" % (appid, e), file=sys.stderr); return 1
+    end, tasks = time.monotonic() + span, {}
+    while time.monotonic() < end:
+        for line in f.readlines():
+            m = FRAMES.search(line)
+            if m:
+                tasks.setdefault(m.group(1), []).append((int(m.group(3)), float(m.group(4))))
+        time.sleep(1)
+    for line in f.readlines():
+        m = FRAMES.search(line)
+        if m:
+            tasks.setdefault(m.group(1), []).append((int(m.group(3)), float(m.group(4))))
+    if not game_running(appid):
+        print("watch-fps %s: the game closed - nothing recorded" % appid, file=sys.stderr); return 1
+    if not tasks:
+        print("watch-fps %s: no window task frames in %d s - nothing recorded" % (appid, span), file=sys.stderr); return 1
+    busiest = max(tasks.values(), key=lambda v: sum(d for d, _ in v))
+    if len(busiest) < 4:
+        print("watch-fps %s: %d frame lines - nothing recorded" % (appid, len(busiest)), file=sys.stderr); return 1
+    return cmd_fps(appid, statistics.median(v for _, v in busiest))
+
+
 def main(a):
     if not a or a[0] in ("-h", "--help", "help"):
         print(__doc__); return 0
@@ -616,6 +720,15 @@ def main(a):
         if steam_running():
             print("%s: screen %s - applied at Steam's next start" % (a[1], a[2])); return 0
         return cmd_apply(False)
+    if c == "scale" and len(a) == 3: return cmd_scale(a[1], a[2])
+    if c == "scale" and len(a) == 2:
+        s = load(); print(s["apps"].get(a[1], {}).get("scale", "auto")); return 0
+    if c == "scales": return cmd_scales()
+    if c == "fps" and len(a) >= 3:
+        return cmd_fps(a[1], a[2], a[a.index("--scale") + 1] if "--scale" in a else None)
+    if c == "watch-fps" and len(a) == 2:  # POWOS_WATCH_FPS="<settle>,<span>" s (tests)
+        w = [float(x) for x in os.environ.get("POWOS_WATCH_FPS", "45,30").split(",")]
+        return cmd_watch_fps(a[1], *w)
     if c in ("set", "tool", "opts") and len(a) == 3:
         if c == "set": return cmd_set(a[1], a[2])
         if steam_running():

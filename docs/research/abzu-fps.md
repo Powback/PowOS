@@ -86,3 +86,23 @@ close transient home UI before launching.
 3. Quality presets: measure (queued) how much of the fixed ~23 ms is shadows/reflections/post.
 4. 120 fps is not reachable for ABZU on this GPU at these settings; 60 needs ~16 ms of GPU per frame, i.e. scale +
    UBWC + lower quality together.
+
+## Per-game render scale (render-scale-ubwc, 2026-11-07)
+Built as proposed in "Conclusion" 1, generic for every Unity / Unreal game unity-screen launches:
+- **Setting**: `powos game <name|appid> scale auto|100|85|70|50` = `powos-steam-compat scale <appid> ...`
+  (steam-compat.json `apps.<id>.scale`); the games widget's header "settings" opens a screen with one chip row per
+  Unity/Unreal game (the pick shows at once, a failed save puts the old one back with a note). Applies at the next
+  launch; no Steam restart (no Steam config file involved).
+- **Unreal** (unity-screen): the window stays -ResX/-ResY = the container; the engine's own screen percentage in the
+  prefix's GameUserSettings.ini - the game's own `ResolutionScale=SCALE_<n>` when the file has it (ABZU: 70 -> SCALE_75,
+  50 -> SCALE_50), else `[ScalabilityGroups] sg.ResolutionQuality=<n>`. The value before ours is kept in
+  `~/.local/share/powos/render-scale/<appid>.json` and put back at 100; a value we never wrote stays.
+- **Unity**: below 100, a full-screen player at the scaled size (`-screen-fullscreen 1 -screen-width/-height`),
+  stretched by Wine's fullscreen hack (Proton) / Xwayland's emulated mode; at 100 the live borderless window as before.
+- **auto**: `powos-steam-compat watch-fps` (started by powos-open-task after each launch it saw through) records the
+  median of KWin's window task fps 45-75 s after the window, tagged with the scale applied. Policy: the highest scale
+  that held 55 fps (one step up again at >= 80), a step down while none did (100 85 70 50), back to the highest when a
+  lower step bought < 10 % (not GPU-bound - Broforce is CPU-bound and stays at 100); nothing measured yet: 70 for an
+  Unreal game on > 3 MP (ABZU unfolded: 5.5 MP), else 100.
+- Tests: test/tier1/test-unity-screen.sh (ABZU's enum, plain UE's sg key, restore, every auto branch, no ini),
+  test-steam-compat.sh (scale/scales/fps/watch-fps on a fake session log).

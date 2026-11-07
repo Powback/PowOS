@@ -10,6 +10,21 @@ widget "games" {
   source acf = cmd('for f in ~/.local/share/Steam/steamapps/appmanifest_*.acf; do awk -F"\"" "/\"appid\"/{a=\$4} /\"name\"/{n=\$4} /\"LastPlayed\"/{l=\$4} /\"SizeOnDisk\"/{s=\$4} END{if (n !~ /^Proton|Steam Linux Runtime|Steamworks|^FEX$/) printf \"%s\\t%s\\t%s\\t%s\\n\", a, l+0, s+0, n}" "$f"; done 2>/dev/null | sort -t "$(printf "\t")" -k2,2nr') every 2m
   source steam = cmd("pgrep -x steam >/dev/null && echo on || echo off") every 15s
   source now = clock every 1m
+  // Each Unity / Unreal game's render scale (powos-steam-compat scales): its setting, what its last launch applied and
+  // why, its last measured fps. The settings screen (the header's "settings") changes it; it applies at the next launch.
+  source scales = cmd("powos-steam-compat scales 2>/dev/null || echo '{}'") every 2m json
+
+  // The scale just picked shows at once (optimistic) while it's saved; a failed save puts the saved one back and says so.
+  state pendId = ""
+  state pendVal = ""
+  state saved = ""
+  state note = ""
+  on saved {
+    note = startsWith(value, "fail") ? "couldn't save that - the setting is unchanged" : ""
+    pendId = startsWith(value, "fail") ? "" : pendId
+  }
+  let steps = ["auto", "100", "85", "70", "50"]
+  let tunable = games.filter(g => get(scales ?? {}, g.id, null) != null)
 
   let games = lines(acf ?? "").filter(l => len(l) > 0).map(l => split(l, "\t"))
     .map(g => {id: g[0], last: num(g[1], 0), size: num(g[2], 0), name: g[3]})
@@ -65,6 +80,9 @@ widget "games" {
       Text { text: "steam"; style: label; weight: 1 }
       Box { width: 7; height: 7; radius: 4; background: steam == "on" ? green : alpha(muted, 0.6) }
       Text { text: steam == "on" ? "running" : "${len(games)} installed"; style: small; color: muted; width: 84; align: end }
+      if len(tunable) > 0 {
+        Text { text: "settings"; style: small; color: accent; onTap: screen() }
+      }
     }
 
     if acf == null {
@@ -96,6 +114,42 @@ widget "games" {
               Text { text: g.name; fontSize: rowFs; maxLines: 1 }
               Ago { stamp: g.last; size: round(rowFs * 0.85) }
             }
+          }
+        }
+      }
+    }
+  }
+
+  // Per game: its render scale. Fewer pixels drawn, the window still the whole screen (Unreal: the engine's own screen
+  // percentage, sharp UI; Unity: a smaller full-screen player, stretched). auto = from the fps it measured.
+  screen {
+    title: "game settings"
+    Column {
+      scroll: true; gap: 14
+      Text { text: "render scale - lower draws fewer pixels for more fps; applies at the game's next launch"; style: small; color: muted }
+      if note != "" {
+        Text { text: note; style: small; color: red }
+      }
+      for g in tunable key g.id {
+        Column {
+          gap: 6
+          Row {
+            align: center
+            Text { text: g.name; bold: true; weight: 1; maxLines: 1 }
+            Text { text: get(scales ?? {}, g.id, {}).scale == null ? "not launched yet" : "now ${get(scales ?? {}, g.id, {}).scale}%${get(scales ?? {}, g.id, {}).fps == null ? "" : " · ${round(get(scales ?? {}, g.id, {}).fps.fps)} fps"}"; style: small; color: muted }
+          }
+          Row {
+            gap: 6
+            for v in steps key v {
+              Button {
+                text: v == "auto" ? "auto" : "${v}%"
+                color: (pendId == g.id ? pendVal : get(scales ?? {}, g.id, {}).setting) == v ? accent : muted
+                onTap: { pendId = g.id; pendVal = v; saved = run("powos-steam-compat scale ${g.id} ${v} >/dev/null 2>&1 && echo ok $(date +%s%N) || echo fail $(date +%s%N)") }
+              }
+            }
+          }
+          if get(scales ?? {}, g.id, {}).why != "" {
+            Text { text: get(scales ?? {}, g.id, {}).why; style: small; color: muted; maxLines: 2 }
           }
         }
       }

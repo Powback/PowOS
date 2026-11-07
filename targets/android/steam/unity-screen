@@ -151,11 +151,154 @@ for a in "$@"; do
   [ -d "$d/Engine/Binaries" ] && engine=unreal
   break
 done
+# The render scale (board abz-has-low-fps, 2026-11-07): the window stays the container's size, the game draws fewer
+# pixels and its frame is scaled up to it. ABZU (UE4, GPU-bound on the a740) at the native 2268x2439 that -ResX/-ResY
+# gives it: 19.6 fps; at its own SCALE_50: 27.3 (docs/research/abzu-fps.md). Per game: `powos game <x> scale
+# auto|100|85|70|50` or the games widget's settings screen (powos-steam-compat scale; steam-compat.json "scale").
+#   Unreal: the engine's own screen percentage in the game's GameUserSettings.ini (its Proton prefix, or ~/.config/Epic
+#     for a native build): the game's own ResolutionScale=SCALE_<n> enum when the file has that key (ABZU's
+#     EGraphicsRenderScale, SCALE_25..200), else UE's standard [ScalabilityGroups] sg.ResolutionQuality. UE upsamples
+#     to its full-size window in its own pipeline, so the UI stays sharp. The value there before is kept in the record
+#     and put back at 100; at 100 a value we never wrote (the user's in-game choice) is left alone.
+#   Unity: a full-screen player at the scaled size (its render size is fixed at launch); Wine's fullscreen hack
+#     (Proton) or Xwayland's emulated mode (native) stretches it to the screen. A rotate/fold then rescales the frame
+#     instead of re-rendering (100 % keeps the live borderless window).
+# auto: from the game's recorded fps (powos-steam-compat watch-fps after each launch: KWin's window task frames) - the
+# highest scale that held 55 fps (one step up again at >= 80), a step down while none did (100 85 70 50), back to the
+# highest when lowering didn't buy >= 10 % (not GPU-bound); nothing recorded: 70 for an Unreal game on > 3 MP, else 100.
+# Fail loudly, run as is: a scale that can't be applied says why on stderr and the game starts at full size.
+# ~/.local/share/powos/render-scale/<appid>.json: what the last launch applied and why (the widget and watch-fps read it).
+# POWOS_RENDER_SCALE=off: nothing read, nothing written.
+RS_PY=$(cat <<'PY'
+import glob, json, os, re, sys, time
+appid, engine, w, h = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+STEPS = [100, 85, 70, 50]
+home = os.path.expanduser("~")
+data = os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local/share")
+try:
+    with open(os.environ.get("POWOS_STEAM_COMPAT_STATE") or os.path.join(data, "powos/steam-compat.json")) as f:
+        app = json.load(f).get("apps", {}).get(appid, {})
+except (OSError, ValueError, AttributeError):
+    app = {}
+want = str(app.get("scale", "auto"))
+
+
+def auto():
+    m = {}
+    for r in app.get("fps", []):  # oldest first: the latest fps per scale wins
+        try:
+            m[int(r["scale"])] = float(r["fps"])
+        except (KeyError, TypeError, ValueError):
+            pass
+    if not m:
+        if engine == "unreal" and w * h > 3000000:
+            return 70, "auto: Unreal at %.1f MP, nothing measured yet" % (w * h / 1e6)
+        return 100, "auto: nothing measured yet"
+    hi, lo = max(m), min(m)
+    if len(m) > 1 and m[lo] < m[hi] * 1.1:
+        return hi, "auto: %d%% %.0f fps, %d%% %.0f - not GPU-bound" % (hi, m[hi], lo, m[lo])
+    held = [s for s in m if m[s] >= 55]
+    if held:
+        s = max(held)
+        up = [t for t in STEPS if t > s and t not in m]
+        if m[s] >= 80 and up:
+            return min(up), "auto: %.0f fps at %d%%, trying %d%%" % (m[s], s, min(up))
+        return s, "auto: %.0f fps at %d%%" % (m[s], s)
+    down = [t for t in STEPS if t < lo]
+    if down:
+        return down[0], "auto: %.0f fps at %d%%, under 55" % (m[lo], lo)
+    return lo, "auto: %.0f fps at %d%%, the lowest step" % (m[lo], lo)
+
+
+if want == "auto":
+    scale, why = auto()
+else:
+    try:
+        scale, why = max(25, min(100, int(want))), "set"
+    except ValueError:
+        scale, why = 100, "unknown setting %r" % want
+msgs = []
+rec_path = os.path.join(data, "powos/render-scale", appid + ".json")
+try:
+    with open(rec_path) as f:
+        prev = json.load(f)
+except (OSError, ValueError):
+    prev = {}
+rec = {"scale": scale, "why": why, "engine": engine, "size": [w, h], "t": time.strftime("%F %T"), "applied": True}
+if engine == "unreal":
+    pfx = os.environ.get("STEAM_COMPAT_DATA_PATH", "")
+    pats = [os.path.join(glob.escape(pfx), "pfx/drive_c/users/*/AppData/Local/*/Saved/Config/Windows*/GameUserSettings.ini")] if pfx else []
+    pats.append(os.path.join(glob.escape(home), ".config/Epic/*/Saved/Config/Linux*/GameUserSettings.ini"))
+    inis = sorted({p for pat in pats for p in glob.glob(pat) if "/UnrealEngine/" not in p}, key=os.path.getmtime, reverse=True)
+    if not inis:
+        rec["applied"] = scale == 100
+        if scale != 100:
+            msgs.append("%d%% not applied: no GameUserSettings.ini yet (the game writes it when it first exits) - from the next launch on" % scale)
+    else:
+        ini = inis[0]
+        t = open(ini, encoding="utf-8", errors="surrogateescape").read()
+        orig = dict(prev.get("orig", {})) if prev.get("ini") == ini else {}
+        own = re.search(r"(?m)^ResolutionScale=(SCALE_\d+)[ \t\r]*$", t)
+        key = "ResolutionScale" if own else "sg.ResolutionQuality"
+        g = own or re.search(r"(?m)^sg\.ResolutionQuality=(\S+)[ \t\r]*$", t)
+        cur = g.group(1) if g else None
+        if scale == 100:
+            val = orig.get(key, cur)  # ours put back; never ours = the game's (or the user's in-game) value stays
+        elif own:
+            val = "SCALE_%d" % max(25, int(round(scale / 25.0)) * 25)
+        else:
+            val = str(scale)
+        if val is not None and val != cur:
+            if scale != 100 and key not in orig:
+                orig[key] = cur if cur is not None else ("SCALE_100" if own else "100")
+            if g:
+                t = t[:g.start(1)] + val + t[g.end(1):]
+            elif re.search(r"(?m)^\[ScalabilityGroups\][ \t\r]*$", t):
+                t = re.sub(r"(?m)^\[ScalabilityGroups\][ \t\r]*$", lambda x: x.group(0) + "\n%s=%s" % (key, val), t, count=1)
+            else:
+                t = t.rstrip("\n") + "\n\n[ScalabilityGroups]\n%s=%s\n" % (key, val)
+            try:
+                with open(ini + ".powos-tmp", "w", encoding="utf-8", errors="surrogateescape") as f:
+                    f.write(t)
+                os.replace(ini + ".powos-tmp", ini)
+                msgs.append("%s=%s (was %s) in %s" % (key, val, cur, ini))
+            except OSError as e:
+                rec["applied"] = False
+                msgs.append("%d%% not applied: %s" % (scale, e))
+        if scale == 100:
+            orig.pop(key, None)
+        rec.update(ini=ini, key=key, value=val, orig=orig)
+try:
+    os.makedirs(os.path.dirname(rec_path), exist_ok=True)
+    with open(rec_path + ".tmp", "w") as f:
+        json.dump(rec, f)
+    os.replace(rec_path + ".tmp", rec_path)
+except OSError as e:
+    msgs.append("record not written: %s" % e)
+print(scale if rec["applied"] else 100, why)
+for m in msgs:
+    print(m)
+PY
+)
+scale=100
+if [ -n "$py" ] && [ "${POWOS_RENDER_SCALE:-}" != off ]; then
+  case $size in [1-9]*' '[1-9]*)
+    rs=$("$py" -c "$RS_PY" "${SteamAppId:-${SteamGameId:-0}}" "$engine" "${size% *}" "${size#* }" 2>&1)
+    case $rs in [1-9]*) scale=${rs%% *} ;; esac
+    case $scale in *[!0-9]*|'') scale=100 ;; esac
+    printf '%s\n' "$rs" | sed 's/^/unity-screen: render scale /' >&2 ;;
+  esac
+fi
 case $size in
   [1-9]*' '[1-9]*)
     if [ "$engine" = unreal ]; then
       echo "unity-screen: Unreal window ${size% *}x${size#* } (-ResX/-ResY -windowed)" >&2
       exec "$@" -windowed "-ResX=${size% *}" "-ResY=${size#* }"
+    fi
+    if [ "$scale" -lt 100 ]; then
+      sw=$(( ${size% *} * scale / 100 / 2 * 2 )); shh=$(( ${size#* } * scale / 100 / 2 * 2 ))
+      echo "unity-screen: fullscreen ${sw}x${shh} at render scale ${scale}% (stretched to ${size% *}x${size#* })" >&2
+      exec "$@" -screen-fullscreen 1 -screen-width "$sw" -screen-height "$shh"
     fi
     if [ "${POWOS_UNITY_SCREEN:-window}" = fullscreen ]; then
       echo "unity-screen: fullscreen ${size% *}x${size#* }" >&2
