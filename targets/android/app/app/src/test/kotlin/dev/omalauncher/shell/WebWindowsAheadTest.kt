@@ -22,10 +22,32 @@ class WebWindowsAheadTest {
     }
 
     @Test
+    fun theThirdStampTwoMarksACorrection() {
+        assertTrue(WebWindows.aheadKind(words, 3) == 0)
+        assertTrue(WebWindows.aheadKind(words + "1", 3) == 1)
+        assertTrue(WebWindows.aheadKind(words + "2", 3) == 2)
+    }
+
+    /**
+     * 11-07 on the phone: 341 predictions sent, 4 applied - the page's own measure of each predicted frame came out a
+     * little different (its frame late, a sub-pixel miss), went to FrameSync.next as a newer id and the prediction
+     * waiting for its draw was dropped. A correction now takes the pending prediction's place (same draw); only one
+     * whose prediction's draw already went falls back to next.
+     */
+    @Test
+    fun aCorrectionTakesThePendingPredictionsPlace() {
+        val sync = File("src/main/kotlin/dev/omalauncher/shell/FrameSync.kt").readText()
+        val correct = sync.substringAfter("fun correct(").substringBefore("\n    }\n")
+        assertTrue("correct no longer replaces the pending prediction's apply", correct.contains("p.apply = apply"))
+        assertTrue("correct no longer falls back to next when the prediction already drew", correct.contains("next(id, cookie, pageEpochMs, apply)"))
+    }
+
+    @Test
     fun aheadFramesRideTheVisualStateCallback() {
         val src = File("src/main/kotlin/dev/omalauncher/shell/WebWindows.kt").readText()
         val cmd = src.substringAfter("fun frameCommand(").substringBefore("\n    }\n")
-        assertTrue("an ahead frame no longer goes to FrameSync.ahead", cmd.contains("if (ahead) sync.ahead("))
+        assertTrue("an ahead frame no longer goes to FrameSync.ahead", cmd.contains("1 -> sync.ahead("))
+        assertTrue("a predicted frame's correction no longer goes to FrameSync.correct", cmd.contains("2 -> sync.correct("))
         val sync = File("src/main/kotlin/dev/omalauncher/shell/FrameSync.kt").readText()
         val ahead = sync.substringAfter("fun ahead(").substringBefore("\n    }\n")
         assertTrue("FrameSync.ahead no longer binds to postVisualStateCallback", ahead.contains("web.postVisualStateCallback("))

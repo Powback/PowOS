@@ -12230,7 +12230,7 @@ async function webWindowAheadCheck() {
     await frame();
     window.__ww.aheadOn = true;
     const a = window.__ww.ahead;
-    const [sent0, n0] = [a.sent, a.errors.length];
+    const [sent0, n0, fix0] = [a.sent, a.errors.length, a.corrections];
     await glide(923);
     // A frame that came off the period the prediction assumed (the gate's own load) moved further than a prediction of
     // one period could know: that share (step x |dt - period| / dt) is taken off its miss; on the phone vsync is the period.
@@ -12240,6 +12240,13 @@ async function webWindowAheadCheck() {
     const step = median(rows.map((v) => v[1]));
     expect(rows.length >= 5, `ahead: ${rows.length} predicted frames to judge (want >= 5)`);
     expect(a.sent - sent0 >= 10, `ahead: ${a.sent - sent0} frame-ahead geometries over a page switch and back (want >= 10)`);
+    // A predicted frame whose own measure differs goes as the prediction's correction (third stamp "2", FrameSync.correct
+    // puts it on the prediction's draw); as a plain newer frame it dropped the waiting prediction (phone 11-07: 4 of 341).
+    const missed = a.errors.slice(-k).filter((e) => e !== 0).length;
+    const fixes = a.corrections - fix0;
+    const stamped = window.__ww.sent.filter((l) => l.endsWith(" 2")).length;
+    expect(fixes >= missed && fixes <= k, `ahead: ${fixes} corrections for ${missed} of ${k} predicted frames that measured different (want each one)`);
+    expect(!fixes || stamped > 0, `ahead: ${fixes} corrections counted, none of the last "w.f" lines carries the stamp`);
     expect(err < 1 && err <= step / 4, `ahead: predictions missed the next frame by ${err?.toFixed(2)} px (median, less the frame's own lateness), the frames step ${step?.toFixed(2)} px - want < 1 and <= a quarter`);
     return fails;
   } finally {

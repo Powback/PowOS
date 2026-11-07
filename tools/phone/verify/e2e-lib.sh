@@ -235,8 +235,6 @@ screenrect() { set -- $1; [ $# -ge 4 ] || { echo "$*"; return; }
   case ${INST:-0} in 3) echo "$((W - $4)) $1 $((W - $2)) $3" ;; 1) echo "$2 $((H - $3)) $4 $((H - $1))" ;; 2) echo "$((W - $3)) $((H - $4)) $((W - $1)) $((H - $2))" ;; *) echo "$*" ;; esac; }
 # closebtn <task>: its title bar's close button (21 dp from the bar's right), "x y" or "".
 closebtn() { case $1 in w*) wwpt "$1" .ww-close; return ;; esac; local b; b=$(wframe "PowOS window bar $1}"); [ -n "$b" ] || return 0; set -- $b; echo "$(($3 - $(dp 21))) $((($2 + $4) / 2))"; }
-# wwpt <w-id> <selector>: the centre of that element inside the web window, "x y" device px, or "".
-wwpt() { local v; v=$(wwel "$1" "e=>{const b=e.querySelector('$2');if(!b)return '';const r=b.getBoundingClientRect(),d=devicePixelRatio;return r.width<1?'':Math.round((r.left+r.width/2)*d)+' '+Math.round((r.top+r.height/2)*d)}"); [ "$v" = none ] || echo "$v"; }
 # minbtn <w-id>: a web window's title-bar minimise button, "x y" device px or "".
 minbtn() { case $1 in w*) wwpt "$1" ".ww-button[aria-label=Minimise]" ;; esac; }
 # hitat <x> <y>: what the page's hit test finds at that device-px point ("tag.class.es" or "none") - a grip's log line.

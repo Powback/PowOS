@@ -143,9 +143,15 @@ internal class FrameSync(
         apply: () -> Unit,
     ) {
         val page = pageEpochMs - (System.currentTimeMillis() - System.nanoTime() / 1e6)
+        val p = Pending(id, cookie, apply)
+        synchronized(this) { pending = p }
         ui.post {
-            val once = java.util.concurrent.atomic.AtomicBoolean(false)
-            val fire = { if (once.compareAndSet(false, true)) applyAhead(id, cookie, page, apply) }
+            // How long before its frame's vsync the request went to the renderer: under ~0 it can't ride that commit.
+            if (!page.isNaN()) {
+                leadMs += page - System.nanoTime() / 1e6
+                leads++
+            }
+            val fire = { applyAhead(p, page) }
             web.postVisualStateCallback(
                 id,
                 object : WebView.VisualStateCallback() {
@@ -156,17 +162,90 @@ internal class FrameSync(
         }
     }
 
-    /** Main: [ahead]'s apply, once, unless a newer frame went first; counted into [aheadLag] from its frame [page]. */
-    private fun applyAhead(
+    /**
+     * N2, on the port's thread: the page's own measure of the frame it predicted with [ahead], which came out different
+     * (the page's frame ran late - the prediction assumed one period, 11-07 on the phone: dt 16.7 / 33 / 50 ms at 120 Hz
+     * against 8.3 - or a sub-pixel miss). That frame's commit is the one the pending [ahead]'s visual-state request
+     * rides, so this geometry takes the prediction's place on the same draw. Before, it went to [next] as a newer id:
+     * applied at once (on whatever draw came next) and the pending prediction dropped as older - of 341 predictions
+     * sent on the phone 4 were applied. When the prediction's draw already went: [next], as before.
+     */
+    fun correct(
         id: Long,
         cookie: Int,
-        page: Double,
+        pageEpochMs: Double,
         apply: () -> Unit,
     ) {
+        synchronized(this) {
+            val p = pending
+            if (p != null && !p.fired && p.id < id) {
+                Trace.endAsyncSection("$name f${p.id}", p.cookie)
+                p.id = id
+                p.cookie = cookie
+                p.apply = apply
+                corrected++
+                return
+            }
+        }
+        correctedLate++
+        next(id, cookie, pageEpochMs, apply)
+    }
+
+    /** An [ahead] waiting for its draw: its id, cookie and apply ([correct] replaces them until it fires). */
+    private class Pending(
+        var id: Long,
+        var cookie: Int,
+        var apply: () -> Unit,
+    ) {
+        var fired = false
+    }
+
+    /** The newest [ahead] (port thread writes, [correct] reads; guarded by this). */
+    private var pending: Pending? = null
+
+    /** [correct]s that took a pending prediction's place / that came after its draw (went to [next]). */
+    var corrected = 0L
+        private set
+    var correctedLate = 0L
+        private set
+
+    /** [ahead]s dropped because a newer frame was applied first (a [next] of a frame the page didn't predict). */
+    var aheadLost = 0L
+        private set
+
+    /**
+     * Sums over [ahead]: ms from posting its visual-state request to its frame's vsync ([leadMs], over [leads]), and
+     * from that vsync to the callback ([fireMs], over [aheadLag]'s count) - which commit the request rode, in ms.
+     */
+    var leadMs = 0.0
+        private set
+    var leads = 0L
+        private set
+    var fireMs = 0.0
+        private set
+
+    /** Main: [ahead]'s apply, once, unless a newer frame went first; counted into [aheadLag] from its frame [page]. */
+    private fun applyAhead(
+        p: Pending,
+        page: Double,
+    ) {
+        val (id, cookie, apply) =
+            synchronized(this) {
+                if (p.fired) return
+                p.fired = true
+                if (pending === p) pending = null
+                Triple(p.id, p.cookie, p.apply)
+            }
         Trace.endAsyncSection("$name f$id", cookie)
-        if (id <= applied) return
+        if (id <= applied) {
+            aheadLost++
+            return
+        }
         applied = id
-        if (!page.isNaN()) aheadLag[drawsSince(page).coerceAtMost(3)]++
+        if (!page.isNaN()) {
+            aheadLag[drawsSince(page).coerceAtMost(3)]++
+            fireMs += System.nanoTime() / 1e6 - page
+        }
         apply()
     }
 
@@ -234,6 +313,7 @@ internal class FrameSync(
         received = -1L
         applied = -1L
         staleSaid = false
+        synchronized(this) { pending = null }
     }
 
     /** [next] dropped page frame [id] as older than the last applied: said once per page (a missed [reset] shows). */

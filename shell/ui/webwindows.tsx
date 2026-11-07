@@ -2553,7 +2553,13 @@ function send(ts: number) {
     const now = Date.now();
     // Two stamps (wall-clock ms): the rAF's frame time, and now - the send - so the host splits its "rx=" into the page's
     // own share (vsync to this send: rAF scheduling and measuring) and the hop to the host.
-    const line = `w.f ${id} ${g} ${(now - (performance.now() - ts)).toFixed(2)} ${now}`;
+    // N2: a frame the last one predicted (sendAhead), measured different from the prediction (its frame came late, a
+    // sub-pixel miss), is that prediction's CORRECTION (third stamp "2"): the host puts it on the draw the prediction
+    // waits for (FrameSync.correct), as this frame's commit is the one that request rides. Sent as a plain newer frame it
+    // was applied at once and the waiting prediction dropped (phone 11-07: 341 predictions sent, 4 applied).
+    const fix = predicted != null && geometryChannel.ahead ? " 2" : "";
+    if (fix) aheadStats.corrections++;
+    const line = `w.f ${id} ${g} ${(now - (performance.now() - ts)).toFixed(2)} ${now}${fix}`;
     sent.push(line);
     if (sent.length > 120) sent.shift();
     glueFrame();
@@ -2585,7 +2591,7 @@ let period = 1000 / 60;
 let lastTs = 0;
 /** The last frame-ahead geometry, and how the next frame's own measure matched it (gate: `__ww.ahead`). */
 let predicted: string | null = null;
-const aheadStats = { sent: 0, errors: [] as number[], steps: [] as number[], jitter: [] as number[], dts: [] as number[] };
+const aheadStats = { sent: 0, corrections: 0, errors: [] as number[], steps: [] as number[], jitter: [] as number[], dts: [] as number[] };
 let previous: string | null = null;
 
 /** The largest difference between two geometry strings' numbers (their words in the same order), or Infinity. */

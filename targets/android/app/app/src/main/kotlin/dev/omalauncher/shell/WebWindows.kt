@@ -1541,8 +1541,13 @@ class WebWindows(
         val (frame, geos, pageMs, ahead) = parse(rest) ?: return
         val cookie = sync.receive(frame)
         via = if (direct) "direct" else "port"
-        // N2: geometry for the page's next frame rides the visual-state callback of the commit that shows it.
-        if (ahead) sync.ahead(frame, cookie, pageMs) { apply(frame, geos) } else sync.next(frame, cookie, pageMs) { apply(frame, geos) }
+        // N2: geometry for the page's next frame rides the visual-state callback of the commit that shows it; the page's
+        // own measure of a predicted frame that came out different takes the prediction's place on that draw.
+        when (ahead) {
+            1 -> sync.ahead(frame, cookie, pageMs) { apply(frame, geos) }
+            2 -> sync.correct(frame, cookie, pageMs) { apply(frame, geos) }
+            else -> sync.next(frame, cookie, pageMs) { apply(frame, geos) }
+        }
     }
 
     @Volatile private var lastDpr = 1f
@@ -1561,7 +1566,7 @@ class WebWindows(
         val frame: Long,
         val geos: List<Geo>,
         val pageMs: Double,
-        val ahead: Boolean,
+        val ahead: Int,
     )
 
     private fun parse(rest: String): Parsed? =
@@ -1579,8 +1584,9 @@ class WebWindows(
                 rxHop += System.currentTimeMillis() - sent
                 rxSplit++
             }
-            // N2: a third stamp "1" = geometry for the page's NEXT frame (the page sends it only after "w.ahead 1").
-            Parsed(t[0].toLong(), geos, page, aheadFlag(t, c.i))
+            // N2: a third stamp "1" = geometry for the page's NEXT frame (the page sends it only after "w.ahead 1"), "2" =
+            // the page's own measure of a frame it predicted, different from the prediction.
+            Parsed(t[0].toLong(), geos, page, aheadKind(t, c.i))
         } catch (e: RuntimeException) {
             WindowLog.w(TAG, "w.f: bad geometry ($e)")
             null
@@ -1851,7 +1857,7 @@ class WebWindows(
         // An empty frame too (every window minimised): the ship check (ship.sh render_watch) reads "w.f" lines as the page alive.
         if (now - lastPlaceLog < PLACE_LOG_MS) return
         lastPlaceLog = now
-        WindowLog.i(TAG, "w.f f$frame behind=$behind (${behindFrames}/$appliedFrames applies behind) lag=${sync.lag.joinToString("/")} pf=${sync.pageLag.joinToString("/")} ahead=${sync.aheadLag.joinToString("/")} rx=${"%.1f".format(sync.receiptMs / sync.pageLag.sum().coerceAtLeast(1))}ms (page ${"%.1f".format(rxPage / rxSplit.coerceAtLeast(1))} + hop ${"%.1f".format(rxHop / rxSplit.coerceAtLeast(1))}) via=$via " + geos.joinToString { "${it.id}@${it.body.toShortString()} clip ${it.clip.toShortString()} z${it.z} ${if (it.visible) "shown" else "hidden"}" })
+        WindowLog.i(TAG, "w.f f$frame behind=$behind (${behindFrames}/$appliedFrames applies behind) lag=${sync.lag.joinToString("/")} pf=${sync.pageLag.joinToString("/")} ahead=${sync.aheadLag.joinToString("/")} aheadfix=${sync.corrected}/${sync.correctedLate} aheadlost=${sync.aheadLost} aheadlead=${"%.1f".format(sync.leadMs / sync.leads.coerceAtLeast(1))}ms aheadfire=${"%.1f".format(sync.fireMs / sync.aheadLag.sum().coerceAtLeast(1))}ms rx=${"%.1f".format(sync.receiptMs / sync.pageLag.sum().coerceAtLeast(1))}ms (page ${"%.1f".format(rxPage / rxSplit.coerceAtLeast(1))} + hop ${"%.1f".format(rxHop / rxSplit.coerceAtLeast(1))}) via=$via " + geos.joinToString { "${it.id}@${it.body.toShortString()} clip ${it.clip.toShortString()} z${it.z} ${if (it.visible) "shown" else "hidden"}" })
     }
 
     private var lastPlaceLog = 0L
@@ -4147,7 +4153,17 @@ class WebWindows(
         internal fun aheadFlag(
             t: List<String>,
             end: Int,
-        ) = t.getOrNull(end + 2) == "1"
+        ) = aheadKind(t, end) == 1
+
+        /** N2: that third stamp - 0 a plain frame, 1 an ahead frame, 2 the correction of a predicted frame. */
+        internal fun aheadKind(
+            t: List<String>,
+            end: Int,
+        ) = when (t.getOrNull(end + 2)) {
+            "1" -> 1
+            "2" -> 2
+            else -> 0
+        }
 
         private const val TAG = "PowosWebWindows"
 

@@ -34,6 +34,8 @@ wwrect() { local v; v=$(wwel "$1" "e=>{const r=e.getBoundingClientRect(),d=devic
 wwhost() { hcall webwindows.list "[]" "l=>{const w=l.find(w=>w.id===${1#w});return '$2'==='gone'?String(!w):w?String(w['$2']):'none'}"; }
 # wwbody <w-id>: its body (the app's content, under the title bar) on screen, "l t r b" device px, or "".
 wwbody() { local v; v=$(wwel "$1" "e=>{const b=e.querySelector('.webwindow-body');if(!b)return '';const r=b.getBoundingClientRect(),d=devicePixelRatio;return r.width<2||r.height<2||r.right<1||r.bottom<1||r.left>innerWidth-1||r.top>innerHeight-1?'':[r.left,r.top,r.right,r.bottom].map(v=>Math.round(v*d)).join(' ')}"); [ "$v" = none ] && v=""; echo "$v"; }
+# wwpt <w-id> <selector>: the centre of that element inside the web window, "x y" device px, or "". (here, not e2e-lib.sh: ww-resize.sh sources only this file and FAILed "wwpt: command not found" -> "no .ww-edge-se on screen", 11-07 16:32)
+wwpt() { local v; v=$(wwel "$1" "e=>{const b=e.querySelector('$2');if(!b)return '';const r=b.getBoundingClientRect(),d=devicePixelRatio;return r.width<1?'':Math.round((r.left+r.width/2)*d)+' '+Math.round((r.top+r.height/2)*d)}"); [ "$v" = none ] || echo "$v"; }
 # wwids [key prefix]: the host's web windows (webwindows.list) whose key starts with it, "w<id>" one per line, sorted
 # (comm's order). "l:" = every Linux window.
 wwids() { local v; v=$(hcall webwindows.list "[]" "l=>l.filter(w=>String(w.key).startsWith('${1:-}')).map(w=>'w'+w.id).join(' ')"); case $v in ERR*) v="" ;; esac

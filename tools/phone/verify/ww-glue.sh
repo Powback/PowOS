@@ -114,6 +114,9 @@ a=[int(v) for v in ('${ah0:-0/0/0/0}').split('/')]; b=[int(v) for v in '$ah1'.sp
 print('%d %s %.1f' % (n, '/'.join(map(str,d)), 100.0*d[0]/n if n else 0))")
   read -r an ad apct <<<"$verdict"
   say "ahead: $an frame-ahead applies, a0..3 = $ad ($apct% on the draw that shows their frame)"
+  # N2's timing (FrameSync): corrections on the prediction's draw / after it, predictions lost to a newer frame, ms from
+  # the request to its frame's vsync (lead: under ~0 it can't ride that commit) and from that vsync to the callback.
+  say "ahead timing: $("$adb" shell 'logcat -d -s PowosWebWindows:I' | grep -oE 'aheadfix=[0-9/]+ aheadlost=[0-9]+ aheadlead=[-0-9.]+ms aheadfire=[-0-9.]+ms' | tail -1) (totals since the app started)"
   [ "${1:-}" != --read ] && [ "$an" -ge 20 ] && awk -v p="$apct" 'BEGIN{exit !(p < 99)}' && bad "ahead: $apct% on their frame's draw (want >= 99)"
 else
   say "ahead: no ahead= counters (an APK without N2)"

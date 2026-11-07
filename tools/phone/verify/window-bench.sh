@@ -154,7 +154,9 @@ e2e_setup inner
 START=$(sh_ "date +\"%m-%d %H:%M:%S\""); H0=$(sh_ "wc -l < $HYPR"); H0=${H0:-0}
 trap 'restore_bench; e2e_abort' EXIT
 [ "$(hcall webwindows.list "[]" "l=>'ok'")" = ok ] || { echo "ENV: home has no web windows here (folded, off)"; exit 5; }
-[ -z "$(sh_ "chroot /data/powos/root /usr/bin/pgrep -f steam_app_ | head -1")" ] || e2e_skip "a game runs: not now"
+# "[s]team_app_", not steam_app_: pgrep -f matched the su/sh wrapping its own command line (it carries the pattern), so
+# every run SKIPped "a game runs: not now" with no game up (11-07). The bracket keeps the pattern out of that line.
+[ -z "$(sh_ "chroot /data/powos/root /usr/bin/pgrep -f \"[s]team_app_\" | head -1")" ] || e2e_skip "a game runs: not now"
 log "apk $(sh_ "dumpsys package com.powos.app | grep -m1 versionName"), kwin $(sh_ "chroot /data/powos/root /usr/bin/pacman -Q kwin 2>/dev/null")"
 
 # The apps: one the user already runs is left out (its window could be theirs).

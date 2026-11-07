@@ -61,7 +61,7 @@ qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript khc >/dev/nul
 
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
-[ -z "$(sh_ "chroot /data/powos/root pgrep -f steam_app_ | head -1")" ] || { echo "a game runs: not now"; exit 3; }
+[ -z "$(sh_ "chroot /data/powos/root pgrep -f \"[s]team_app_\" | head -1")" ] || { echo "a game runs: not now"; exit 3; }
 K0=$(kwin_pid); [ -n "$K0" ] || { echo "ENV: no kwin_wayland runs"; exit 5; }
 log "KWin pid $K0, hyprland.log at line $H0"
 sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home

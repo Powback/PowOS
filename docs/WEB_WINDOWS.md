@@ -117,6 +117,16 @@ frame of drag latency; measure it before turning it on for drags (animations fir
   wins. Host log `ahead=a0/a1/a2/a3`. Gate `desktops` -> `webWindowAheadCheck`: >= 10 predictions over a switch and
   back, median miss (net of the frame's own lateness) < 1 px and <= a quarter of a frame's step. JVM
   `WebWindowsAheadTest`. Phone: `ww-glue.sh` fails under 99 % a0 when 20+ ran (and now also slides to PowOS AI's page).
+  - [x] **N2 on the phone, 11-07 (`agent/windows-device-fixes`)**: `ahead: 4 frame-ahead applies, a0..3 = 0/1/2/1` -
+    the page sent 341 predictions but its own measure of each predicted frame came out different (120 Hz: rAF dt
+    16.7/33/50 ms on busy frames against the 8.3 ms the prediction assumed; median miss 0.32 px), went as a plain newer
+    `w.f`, `FrameSync.next` applied it at once and the waiting prediction was dropped as older. Now that measure is the
+    prediction's CORRECTION (third stamp `2`, `FrameSync.correct`): it takes the pending prediction's place on the draw
+    its visual-state request names (only one whose draw already went falls back to `next`). Host log adds
+    `aheadfix=on-draw/late aheadlost= aheadlead= aheadfire=` (ms from the request to its frame's vsync, and from that
+    vsync to the callback): the next phone run says whether the request reaches the renderer before commit k+1 at
+    120 Hz (rx 8.6 ms ~ one period) - if lead <= 0, predict two frames ahead. Gate `webWindowAheadCheck` counts the
+    corrections; JVM `WebWindowsAheadTest`.
   Finger-driven motion still binds with `next` (pf0 86 %): N2b = finger frames one frame ahead (the touch's own
   prediction) once a0 is proven on the phone.
 - [ ] **N3 - Linux popups as their own surfaces (S7)**: popups and override-redirect windows of a web window exported
