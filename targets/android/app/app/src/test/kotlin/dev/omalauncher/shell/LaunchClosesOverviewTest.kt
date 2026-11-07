@@ -52,3 +52,44 @@ class LaunchClosesOverviewTest {
         assertTrue(activity.substringAfter("override fun onNewIntent(").substringBefore("homePressed()").contains("!windowFront"))
     }
 }
+
+/**
+ * An Android app launched from OUTSIDE PowOS (a notification, the share sheet, a deep link, another app, the assistant)
+ * while the switcher is up - a floating window leaves home in sight, so no home stop hid it: the task stack listener's
+ * newly-fronted visible task closes it (Switcher.watchLaunches).
+ */
+class OutsideLaunchClosesOverviewTest {
+    private val home = Switcher.ownFronts
+    private val since = 1_000L
+    private fun t(id: Int, c: String, visible: Boolean, at: Long) = dev.omalauncher.system.Tasks.Front(id, c, visible, at)
+
+    @Test
+    fun aTaskFrontedAfterTheSwitcherOpenedIsALaunch() {
+        val list = listOf(t(7, "com.whatsapp/.Main", true, 1_500), t(3, "com.android.chrome/org.chromium.Main", false, 900))
+        org.junit.Assert.assertEquals(7, dev.omalauncher.system.Tasks.frontedSince(list, since, home))
+    }
+
+    @Test
+    fun homeTheSwitcherAndOlderOrHiddenTasksAreNot() {
+        val list =
+            listOf(
+                t(1, "com.powos.app/andro.marchy.HomeShell", true, 1_600),
+                t(2, "com.powos.app/" + ShellActivity::class.java.name, true, 1_600),
+                t(4, "com.powos.app/" + SwitcherActivity::class.java.name, true, 1_600),
+                // The app it was opened over: in front before the switcher came up.
+                t(5, "com.android.chrome/org.chromium.Main", true, 900),
+                // Fronted but not showing (moved behind at once).
+                t(6, "com.spotify/.Main", false, 1_700),
+            )
+        org.junit.Assert.assertNull(dev.omalauncher.system.Tasks.frontedSince(list, since, home))
+    }
+
+    @Test
+    fun theWatchRunsWhileTheSwitcherIsUpAndCloses() {
+        val src = File("src/main/kotlin/dev/omalauncher/system/Switcher.kt").readText()
+        val watch = src.substringAfter("private fun watchLaunches(").substringBefore("\n    }\n")
+        assertTrue(watch.contains("FreeformTasks.listen"))
+        assertTrue(watch.contains("launched("))
+        assertTrue("watched from the moment it's up", src.substringAfter("var open = false").substringBefore("\n        }\n").contains("watchLaunches(v)"))
+    }
+}

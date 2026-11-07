@@ -151,6 +151,7 @@ object Switcher {
             // One line per change, always (the window log): a check reads whether the switcher is up before it launches
             // (tools/phone/verify/bf-pacing.sh) - "windows hidden under the switcher" is only there with windows open.
             dev.omalauncher.shell.WindowLog.i(TAG, if (v) "switcher up" else "switcher down")
+            watchLaunches(v)
             ShadeHost.current?.barClaimsChanged()
             // Home's panels aren't over the windows while the switcher is up (PanelLift); back after, if still open.
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
@@ -247,6 +248,7 @@ object Switcher {
      * the desktop is home, the recents activity's warm page; else home itself, preloaded ([preloadHome]).
      */
     fun prepare(context: Context) {
+        appContext = context.applicationContext
         if (!homeIsShell(context)) page(context) else preloadHome(context)
     }
 
@@ -480,6 +482,7 @@ object Switcher {
             return
         }
         val app = context.applicationContext
+        appContext = app
         onHome = homeIsShell(app)
         if (!onHome) page(app)
         thread(name = "powos-recents-show") {
@@ -544,6 +547,36 @@ object Switcher {
             dev.omalauncher.shell.WindowLog.i(TAG, "switcher closed by a launch: $why")
             hide()
         }
+    }
+
+    /** The app's context, for the launch watch ([watchLaunches]): set by the first [attach] / [show]. */
+    private var appContext: Context? = null
+
+    /** Stops the launch watch's task stack listener; null while the switcher is down. */
+    private var stopWatch: (() -> Unit)? = null
+
+    /** The activities the switcher itself brings to the front (never a launch): home's and the recents activity's. */
+    val ownFronts = setOf("/" + ShellActivity::class.java.name, ".HomeShell", "/" + SwitcherActivity::class.java.name)
+
+    /**
+     * While the switcher is up: Android's task changes watched, and a task that comes to the front and shows - launched
+     * from OUTSIDE PowOS (a notification, the share sheet, a deep link, another app's intent, the assistant), as a
+     * floating window or a full task - closes it ([launched]). A full task stops home and so hid it already
+     * ([homeStopped]); a floating window leaves home in sight, and the switcher stayed up over it. One platform signal
+     * (the task stack listener, FreeformTasks.listen) instead of a hook per way in.
+     */
+    private fun watchLaunches(on: Boolean) {
+        stopWatch?.invoke()
+        stopWatch = null
+        val ctx = appContext ?: return
+        if (!on) return
+        val since = SystemClock.uptimeMillis()
+        stopWatch =
+            FreeformTasks.listen {
+                if (!open) return@listen
+                val id = Tasks.frontedSince(Tasks.fronts(ctx), since, ownFronts) ?: return@listen
+                launched("task $id came to the front")
+            }
     }
 
     /** Away (SystemUI's onOverviewHidden, a quick switch): the layer closes. */

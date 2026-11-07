@@ -77,6 +77,37 @@ object Tasks {
         }
     }
 
+    /** A recent task as the switcher's launch watch reads it ([frontedSince]). */
+    data class Front(
+        val id: Int,
+        val component: String?,
+        val visible: Boolean,
+        val lastActive: Long,
+    )
+
+    /** The newest recent tasks with their visibility and last time in front (the recents provider sees them all). */
+    fun fronts(
+        context: Context,
+        max: Int = 8,
+    ): List<Front> {
+        val am = context.getSystemService(ActivityManager::class.java)
+        @Suppress("DEPRECATION")
+        val tasks = runCatching { am.getRecentTasks(max, ActivityManager.RECENT_IGNORE_UNAVAILABLE) }.getOrNull() ?: return emptyList()
+        return tasks.map { t -> Front(t.taskId, (t.topActivity ?: t.baseActivity ?: t.baseIntent.component)?.flattenToString(), t.isVisible, lastActive(t)) }
+    }
+
+    /**
+     * A task that came to the front after [since] (uptime ms) and shows - a launch from anywhere: a notification, the
+     * share sheet, a deep link, another app's intent, the assistant, a floating window or a full task - or null. Home and
+     * the switcher's own activity ([home]: their class names) never count: the switcher brings them up itself.
+     */
+    fun frontedSince(
+        tasks: List<Front>,
+        since: Long,
+        home: Set<String>,
+    ): Int? =
+        tasks.firstOrNull { t -> t.visible && t.lastActive > since && home.none { h -> t.component?.endsWith(h) == true } }?.id
+
     /** TaskInfo.lastActiveTime (a hidden field; 0 where it can't be read). */
     private fun lastActive(t: ActivityManager.RecentTaskInfo): Long =
         runCatching { android.app.TaskInfo::class.java.getField("lastActiveTime").getLong(t) }.getOrDefault(0L)
