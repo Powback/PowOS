@@ -45,3 +45,28 @@ wwbar() { wwel "$1" "e=>{const b=e.querySelector('.webwindow-title');if(!b)retur
 # wwtop <w-id>...: of those, the one on top (the page's webWins, bottom first), "w<id>" or "none".
 wwtop() { local ids; ids=$(printf "%s," "${@#w}")
   ev "importShim('./ui/webwindows.tsx').then(m=>{const s=[${ids%,}],w=m.webWins.value.filter(w=>s.includes(w.id)).at(-1);return w?'w'+w.id:'none'})"; }
+
+# --- Self-setup (11-07: ww-glue/ww-popups SKIPped "no web window" / "no viewable Steam main window" on an idle phone;
+# a check never SKIPs for state it can create itself). A check opens what it needs through home's own launch path
+# (the bridge call a tap makes: apps.launch, as float-windows.sh / steam-one-window.sh) and closes only what it opened.
+# ww_us <script text>: run it in the PowOS session as the session user (user.sh), output back.
+ww_us() { local f; f=$(mktemp "${TMPDIR:-/tmp}/wwus.XXXXXX"); printf '%s\n' "$1" > "$f"; "$T/user.sh" "$f" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; rm -f "$f"; }
+# ww_ready: home shows web windows here (unfolded, the host has the list) - else nothing a check can open.
+ww_ready() { [ "$(hcall webwindows.list "[]" "l=>'ok'")" = ok ]; }
+# ww_running <proc>: true when that process runs in the session (the user's app - never opened over, never closed).
+ww_running() { [ -n "$(ww_us "pgrep -x '$1' | head -1")" ]; }
+# ww_open <key> <secs>: launch it as a tap would (apps.launch), wait up to secs for a NEW web window of that key whose
+# body is live (its app's frames, not the launch placeholder); prints "w<id>" (rc 1 and the last state when none).
+ww_open() { local key=$1 s=$2 before r n="" i live=""
+  before=$(wwids "$key")
+  r=$(hcall apps.launch "['$key']" "()=>'ok'"); [ "$r" = ok ] || { echo "apps.launch $key: $r"; return 1; }
+  for i in $(seq 1 "$s"); do
+    sleep 1
+    [ -n "$n" ] || n=$(comm -13 <(echo "$before") <(wwids "$key") | head -1)
+    [ -n "$n" ] || continue
+    live=$(wwel "$n" "e=>e.querySelector('.webwindow-body.live')?'live':'placeholder'")
+    [ "$live" = live ] && { echo "$n"; return 0; }
+  done
+  echo "no live $key window ${s} s after apps.launch (window ${n:-none} ${live:-})"; return 1; }
+# ww_close <w-id>: the host's close (what its bar's close does: the app is asked to close that window).
+ww_close() { hcall webwindows.close "[${1#w}]" "()=>'ok'" >/dev/null 2>&1; }

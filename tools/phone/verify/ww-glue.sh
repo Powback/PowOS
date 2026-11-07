@@ -3,8 +3,11 @@
 # tools/phone/verify/ww-glue.sh: N1 of docs/WEB_WINDOWS.md "Native-glued windows" on the phone - a web window stays glued
 # to its page through page switches (the user, 11-07: "the pages should have the windows absolutely glued to them ...
 # page switching etc works instantly and 100% natively no race condition in updating window positions"), and a resize
-# drops no frames. Needs a web window shown on home's page on screen (unfolded, the user idle 2+ min).
+# drops no frames. Needs home unfolded and the user idle 2+ min. With no web window on home's page it opens one itself
+# (WW_GLUE_APPS, default Kate then Dolphin: the first the user isn't running, through home's launch path - apps.launch),
+# measures on it, and closes it after (its window, and the app when it wasn't running before); never one of the user's.
 #
+#   ww-glue.sh --dry-run  read-only: what the run would open / measure / close now (no input, nothing opened)
 #   ww-glue.sh            two page swipes (there and back) on an empty spot of the page, the slide to PowOS AI's page and
 #                         back (N1b: from home's first page a swipe right), then an edge drag of the window
 #   ww-glue.sh --read     read-only: the counts so far (no input)
@@ -33,12 +36,39 @@ since=$("$adb" shell 'date +%m-%d\ %H:%M:%S.000' | tr -d '\r')
 pf0=$(pf)
 ah0=$(pf ahead)
 
+# setup_window: a web window on home's page - the one shown, else one this opens (OPENED, closed on exit).
+OPENED="" OPENED_PROC=""   # only an app that wasn't running is ever opened (ww_running), so its process is ours
+closeup() { [ -n "$OPENED" ] || return 0
+  ww_close "$OPENED"; sleep 1.5
+  ww_us "pkill -x '$OPENED_PROC'; true" >/dev/null   # the app this started: its process too
+  say "closed $OPENED ($OPENED_PROC): this check opened it"; OPENED=""; }
+trap closeup EXIT
+setup_window() { local a key why
+  rects=$(ev "$WWRECTS")
+  [ -n "$rects" ] && [ "$rects" != null ] && { say "a web window on home's page already: $rects"; return 0; }
+  ww_ready || { echo "SKIP home has no web windows here (folded, off): nothing to open one on"; exit 3; }
+  for a in ${WW_GLUE_APPS:-kate dolphin}; do
+    if ww_running "$a"; then say "$a: the user's $a runs - not opened over it"; continue; fi
+    key=l:org.kde.$a
+    if [ "${DRY:-0}" = 1 ]; then say "dry-run: would open $a ($key) via apps.launch, measure on it, close it after"; return 0; fi
+    say "no web window on home's page: opening $a ($key) through home's launch path"
+    OPENED_PROC=$a; if why=$(ww_open "$key" 45); then OPENED=$why; sleep 2; else echo "FAIL setup: $why"; exit 1; fi
+    rects=$(ev "$WWRECTS")
+    [ -n "$rects" ] && [ "$rects" != null ] || { echo "FAIL setup: $a opened as $OPENED but shows on no page on screen"; exit 1; }
+    say "opened $OPENED ($a) at $rects"; return 0
+  done
+  echo "SKIP every candidate app (${WW_GLUE_APPS:-kate dolphin}) is the user's, running now: not opened over"; exit 3; }
+
+if [ "${1:-}" = --dry-run ]; then
+  DRY=1; read -r screen < <("$T/idle.sh"); say "phone: $screen"
+  setup_window; say "dry-run: then 4 page swipes from an empty spot, an edge drag of the top window, the counts; nothing done"
+  exit 0
+fi
 if [ "${1:-}" != --read ]; then
   "$T/idle.sh" --wait 120 1800 >/dev/null || { echo "SKIP phone busy (not idle 2 min within 30 min)"; exit 3; }
   read -r screen < <("$T/idle.sh")
   case "$screen" in *screen=Awake*) ;; *) echo "SKIP screen not on ($screen)"; exit 3 ;; esac
-  rects=$(ev "$WWRECTS")
-  [ -n "$rects" ] && [ "$rects" != null ] || { echo "SKIP no web window shown on home's page"; exit 3; }
+  setup_window
   # An empty spot of the page, device px (as the gate's homeGesturesScene finds one): never a window, tile or bar.
   at=$(ev "(()=>{const d=devicePixelRatio;for(let y=innerHeight*0.3;y<=innerHeight*0.7;y+=12)for(let x=innerWidth*0.9;x>=innerWidth*0.55;x-=12){const e=document.elementFromPoint(x,y);if(e&&e.closest('.page-track')&&!e.closest('.webwindow,.tile,.home-tile,.app,.panel,.widget,.island,button,a,input,textarea,.bar,.dock,[data-key]'))return Math.round(x*d)+' '+Math.round(y*d)}return ''})()")
   [ -n "$at" ] || { echo "SKIP no empty spot on home's page to swipe from"; exit 3; }
