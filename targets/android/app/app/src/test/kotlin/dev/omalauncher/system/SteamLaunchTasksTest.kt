@@ -27,7 +27,7 @@ class SteamLaunchTasksTest {
         held: Boolean = false,
         asking: Boolean = false,
         window: Boolean = false,
-    ) = SteamLaunchTasks.plan(listOf(l), tasks, if (held) setOf(l.token) else emptySet(), if (asking) setOf(l.token) else emptySet(), now) { window }.map { it.first }
+    ) = SteamLaunchTasks.plan(listOf(l), SteamLaunchTasks.Where(tasks, if (held) setOf(l.token) else emptySet(), if (asking) setOf(l.token) else emptySet(), now)) { window }.map { it.first }
 
     @Test fun aFoldedLaunchOpensItsTaskAtTheFirstStep() {
         assertEquals(listOf(Act.OPEN), plan(launch("launching")))

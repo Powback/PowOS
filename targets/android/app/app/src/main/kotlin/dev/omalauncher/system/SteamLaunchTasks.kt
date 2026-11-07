@@ -78,27 +78,46 @@ object SteamLaunchTasks {
      * the game shows a window already; [now] ms): a launch window for a new one going on, its phase, its failure, Steam's
      * question on and off. Pure: the JVM test's.
      */
+    /** Where [plan] stands: [tasks] (a window becomes a task here), the launches [held] and [asking], [now] (ms). */
+    data class Where(
+        val tasks: Boolean,
+        val held: Set<String>,
+        val asking: Set<String>,
+        val now: Long,
+    )
+
     fun plan(
         launches: List<Launch>,
-        tasks: Boolean,
-        held: Set<String>,
-        asking: Set<String>,
-        now: Long,
+        where: Where,
         hasWindow: (Launch) -> Boolean,
-    ): List<Pair<Act, Launch>> =
-        launches.mapNotNull { l ->
-            val on = l.state == "launching" || l.state == "running" || l.state == "asking"
-            when {
-                l.token in held && l.state == "ended" -> Act.FAIL to l
-                l.token in held && l.state == "asking" && l.token !in asking -> Act.ASK to l
-                l.token in held && l.state != "asking" && l.token in asking -> Act.RESUME to l
-                l.token in held && on -> Act.PHASE to l
-                l.token in held -> null
-                !tasks || l.state == "ended" || l.state == "asking" || !on -> null
-                now - l.since * 1000 > START_MS || hasWindow(l) -> null
-                else -> Act.OPEN to l
-            }
+    ): List<Pair<Act, Launch>> = launches.mapNotNull { l -> (if (l.token in where.held) heldAct(l, where) else newAct(l, where, hasWindow))?.let { it to l } }
+
+    /** A launch its launch window holds: Steam's step, its question on / off, its end. */
+    private fun heldAct(
+        l: Launch,
+        where: Where,
+    ): Act? {
+        val asked = l.token in where.asking
+        return when {
+            l.state == "ended" -> Act.FAIL
+            l.state == "asking" && !asked -> Act.ASK
+            l.state != "asking" && asked -> Act.RESUME
+            l.state in GOING -> Act.PHASE
+            else -> null
         }
+    }
+
+    private val GOING = setOf("launching", "running", "asking")
+
+    /** A launch no launch window holds: one opens for it when its window will be a task and it goes on, fresh, windowless. */
+    private fun newAct(
+        l: Launch,
+        where: Where,
+        hasWindow: (Launch) -> Boolean,
+    ): Act? {
+        val fresh = where.now - l.since * 1000 <= START_MS
+        return if (where.tasks && (l.state == "launching" || l.state == "running") && fresh && !hasWindow(l)) Act.OPEN else null
+    }
 
     /** Home's bridge, on every launches.json change ([launches]) - also again on a fold / unfold ([refresh]). Main thread. */
     fun update(
@@ -111,18 +130,27 @@ object SteamLaunchTasks {
         val live = launches.map { it.token }.toSet()
         if (!live.containsAll(held.value)) held.value = held.value intersect live
         asking.retainAll(live)
-        for ((act, l) in plan(launches, tasks, held.value, asking, System.currentTimeMillis()) { andro.marchy.WindowTasks.hasWindow(it.ids.toTypedArray()) }) {
-            when (act) {
-                Act.OPEN ->
-                    if (andro.marchy.LaunchWindows.open(context, l.appId, l.ids.toTypedArray(), l.label, true, l.phase)) {
-                        Log.i(TAG, "${l.label} (${l.appid}): its launch window at ${l.phase ?: l.state}")
-                        held.value = held.value + l.token
-                    }
-                Act.PHASE -> andro.marchy.LaunchWindows.phase(l.appId, l.phase)
-                Act.FAIL -> andro.marchy.LaunchWindows.failed(l.appId, l.reason)
-                Act.ASK -> asking.add(l.token).also { andro.marchy.LaunchWindows.asking(context, l.appId, true) }
-                Act.RESUME -> asking.remove(l.token).also { andro.marchy.LaunchWindows.asking(context, l.appId, false) }
-            }
+        for ((act, l) in plan(launches, Where(tasks, held.value, asking.toSet(), System.currentTimeMillis())) { andro.marchy.WindowTasks.hasWindow(it.ids.toTypedArray()) }) {
+            run(context, act, l)
+        }
+    }
+
+    /** [act] for launch [l] on its launch window (andro.marchy.LaunchWindows). */
+    private fun run(
+        context: Context,
+        act: Act,
+        l: Launch,
+    ) {
+        when (act) {
+            Act.OPEN ->
+                if (andro.marchy.LaunchWindows.open(context, l.appId, l.ids.toTypedArray(), l.label, true, l.phase)) {
+                    Log.i(TAG, "${l.label} (${l.appid}): its launch window at ${l.phase ?: l.state}")
+                    held.value = held.value + l.token
+                }
+            Act.PHASE -> andro.marchy.LaunchWindows.phase(l.appId, l.phase)
+            Act.FAIL -> andro.marchy.LaunchWindows.failed(l.appId, l.reason)
+            Act.ASK -> asking.add(l.token).also { andro.marchy.LaunchWindows.asking(context, l.appId, true) }
+            Act.RESUME -> asking.remove(l.token).also { andro.marchy.LaunchWindows.asking(context, l.appId, false) }
         }
     }
 
