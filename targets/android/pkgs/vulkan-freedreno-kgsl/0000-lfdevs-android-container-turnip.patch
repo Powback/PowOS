@@ -1,0 +1,1138 @@
+diff --git a/meson.build b/meson.build
+index 14cf3f1f..0e9c6f2f 100644
+--- a/meson.build
++++ b/meson.build
+@@ -361,6 +361,10 @@ with_vdrm = [
+   with_intel_virtio,
+ ].contains(true)
+ 
++if freedreno_kmds.contains('kgsl')
++  pre_args += '-DHAVE_FREEDRENO_KGSL'
++endif
++
+ if with_virtio_vk
+   dep_venus_protocol = dependency('venus-protocol',
+     version : '== 1.1.3',
+@@ -849,9 +853,10 @@ _va_drivers = [
+ ]
+ 
+ allow_fallback_for_libva = get_option('allow-fallback-for').contains('libva')
++_termux_va_bridge = get_option('termux-va-bridge')
+ _va = get_option('gallium-va') \
+-  .require(_va_drivers.contains(true),
+-           error_message : 'VA state tracker requires at least one of the following gallium drivers: r600, radeonsi, nouveau, zink, d3d12 (with option gallium-d3d12-video), virgl.')
++  .require(_va_drivers.contains(true) or not _termux_va_bridge.disabled(),
++           error_message : 'VA state tracker requires at least one of the following gallium drivers: r600, radeonsi, nouveau, d3d12 (with option gallium-d3d12-video), virgl, or -Dtermux-va-bridge for the termux-va bridge.')
+ _dep_va_name = host_machine.system() == 'windows' ? 'libva-win32' : 'libva'
+ dep_va = dependency(
+   _dep_va_name, version : '>= 1.8.0',
+@@ -874,6 +879,21 @@ if dep_va.found()
+                                 dependencies: dep_va_headers).split('.')
+ endif
+ with_gallium_va = dep_va.found()
++# The termux-va bridge is compiled into the VA frontend whenever it is not
++# explicitly disabled; activation is decided at runtime by the TERMUX_VA_*
++# environment variables (see src/gallium/frontends/va/tva_bridge.c).
++with_termux_va_bridge = with_gallium_va and not _termux_va_bridge.disabled()
++
++_termux_va_wayland_shim = get_option('termux-va-wayland-shim')
++if _termux_va_wayland_shim.enabled()
++  if not with_platform_wayland
++    error('termux-va-wayland-shim requires the Wayland platform')
++  endif
++  if not dep_libdrm.found()
++    error('termux-va-wayland-shim requires libdrm development headers')
++  endif
++endif
++with_termux_va_wayland_shim = _termux_va_wayland_shim.enabled()
+ 
+ va_drivers_path = get_option('va-libs-path')
+ if va_drivers_path == ''
+diff --git a/meson.options b/meson.options
+index 281b0431..0544c49a 100644
+--- a/meson.options
++++ b/meson.options
+@@ -108,6 +108,20 @@ option(
+   description : 'enable gallium va frontend.',
+ )
+ 
++option(
++  'termux-va-bridge',
++  type : 'feature',
++  value : 'auto',
++  description : 'build the termux-va bridge into the VA frontend (VA decode forwarded over a Unix socket to the Termux termux-va daemon; runtime-gated by the TERMUX_VA_* environment variables)',
++)
++
++option(
++  'termux-va-wayland-shim',
++  type : 'feature',
++  value : 'disabled',
++  description : 'build the LD_PRELOAD DRM compatibility shim for Chromium Wayland and X11 in DRM-less KGSL PRoot containers',
++)
++
+ option(
+   'gallium-mediafoundation',
+   type : 'feature',
+diff --git a/src/freedreno/common/freedreno_devices.py b/src/freedreno/common/freedreno_devices.py
+index 63abb5cc..cd2ef956 100644
+--- a/src/freedreno/common/freedreno_devices.py
++++ b/src/freedreno/common/freedreno_devices.py
+@@ -301,6 +301,8 @@ a6xx_gen1_low_raw_magic_regs = [
+ add_gpus([
+         GPUId(605), # TODO: Test it, based only on libwrapfake dumps
+         GPUId(610),
++        GPUId(612), # TODO: Test it, based only on libwrapfake dumps
++        GPUId(613),
+     ], A6xxGPUInfo(
+         CHIP.A6XX,
+         [a6xx_base, a6xx_gen1_low],
+@@ -983,7 +985,7 @@ a740_raw_magic_regs = [
+ #   snapshot shader_blocks num_sps=1;
+ # 720=crow/SM7550 DT gen7_14_0 (qcom,adreno-gpu-gen7-14-0): 1M, hbb=15,
+ #   num_sps=2. Raw regs captured from blob .rd + cffdump per-SKU.
+-# RB_* magic all zero like A730, reuse a730_magic_regs.
++# RB_* registers are all zero, as on A730.
+ a710_raw_magic_regs = [
+         [A6XXRegs.REG_A6XX_UCHE_CACHE_WAYS, 0x00040004],
+         [A6XXRegs.REG_A6XX_TPL1_DBG_ECO_CNTL, 0x01000000],
+@@ -1173,10 +1175,70 @@ add_gpus([
+         raw_magic_regs = a730_raw_magic_regs,
+     ))
+ 
++add_gpus([
++        GPUId(chip_id=0x07010000, name="FD710"), # KGSL, no speedbin data
++        GPUId(chip_id=0xffff07010000, name="FD710"), # Default no-speedbin fallback
++    ], A6xxGPUInfo(
++        CHIP.A7XX,
++        [a7xx_base, a7xx_gen1],
++        num_ccu = 3,
++        tile_align_w = 64,
++        tile_align_h = 32,
++        tile_max_w = 1024,
++        tile_max_h = 1024,
++        num_vsc_pipes = 32,
++        cs_shared_mem_size = 32 * 1024,
++        wave_granularity = 2,
++        fibers_per_sp = 128 * 2 * 16,
++        highest_bank_bit = 16,
++        raw_magic_regs = a730_raw_magic_regs,
++    ))
++
++add_gpus([
++        GPUId(chip_id=0x43020000, name="FD720"), # KGSL, no speedbin data
++        GPUId(chip_id=0xffff043020000, name="FD720"), # Default no-speedbin fallback
++    ], A6xxGPUInfo(
++        CHIP.A7XX,
++        [a7xx_base, a7xx_gen1],
++        num_ccu = 3,
++        tile_align_w = 64,
++        tile_align_h = 32,
++        tile_max_w = 1024,
++        tile_max_h = 1024,
++        num_vsc_pipes = 32,
++        cs_shared_mem_size = 32 * 1024,
++        wave_granularity = 2,
++        fibers_per_sp = 128 * 2 * 16,
++        highest_bank_bit = 16,
++        raw_magic_regs = a730_raw_magic_regs,
++    ))
++
++add_gpus([
++        GPUId(chip_id=0x43020100, name="FD722"),
++        GPUId(chip_id=0xffff43020100, name="FD722"),
++    ], A6xxGPUInfo(
++        CHIP.A7XX,
++        [a7xx_base, a7xx_gen1],
++        num_ccu = 3,
++        tile_align_w = 64,
++        tile_align_h = 32,
++        tile_max_w = 1024,
++        tile_max_h = 1024,
++        num_vsc_pipes = 32,
++        cs_shared_mem_size = 32 * 1024,
++        wave_granularity = 2,
++        fibers_per_sp = 128 * 2 * 16,
++        highest_bank_bit = 16,
++        raw_magic_regs = a730_raw_magic_regs,
++    ))
++
+ add_gpus([
+         GPUId(chip_id=0xffff43030c00, name="Adreno X1-45"),
+         GPUId(chip_id=0xffff43030B00, name="FD735"),
+         GPUId(chip_id=0xffff43030E01, name="Adreno (TM) 735"),
++        GPUId(chip_id=0xffff43030B00, name="FD735"), # any-speedbin fallback
++        GPUId(chip_id=0x43030A00, name="FD732"),     # speculative a732 own id
++        GPUId(chip_id=0xffff43030A00, name="FD732")  # speculative a732 any-speedbin
+     ], A6xxGPUInfo(
+         CHIP.A7XX,
+         [a7xx_base, a7xx_gen2, GPUProps(enable_tp_ubwc_flag_hint = True)],
+@@ -1495,6 +1557,16 @@ add_gpus([
+     ], A6xxGPUInfo(
+         CHIP.A8XX,
+         [a7xx_base, a7xx_gen3, a8xx_base, a8xx_gen1, GPUProps(
++            # The A810's 576 KiB GMEM cannot fit a8xx_gen1's 608 KiB
++            # sysmem cache layout.
++            sysmem_ccu_color_cache_fraction = CCUColorCacheFraction.FULL.value,
++            sysmem_per_ccu_color_cache_size = 64 * 1024,
++            sysmem_ccu_depth_cache_fraction = CCUColorCacheFraction.THREE_QUARTER.value,
++            sysmem_per_ccu_depth_cache_size = 64 * 1024,
++            gmem_ccu_color_cache_fraction = CCUColorCacheFraction.EIGHTH.value,
++            gmem_per_ccu_color_cache_size = 32 * 1024,
++            gmem_ccu_depth_cache_fraction = CCUColorCacheFraction.FULL.value,
++            gmem_per_ccu_depth_cache_size = 48 * 1024,
+             gmem_vpc_attr_buf_size = 16384,
+             gmem_vpc_pos_buf_size = 12288,
+             gmem_vpc_bv_pos_buf_size = 20480,
+@@ -1558,6 +1630,30 @@ add_gpus([
+         raw_magic_regs = a8xx_base_raw_magic_regs,
+     ))
+ 
++add_gpus([
++        GPUId(chip_id=0x44030000, name="Adreno (TM) 825"),
++    ], A6xxGPUInfo(
++        CHIP.A8XX,
++        [a7xx_base, a7xx_gen3, a8xx_base, a8xx_gen1, GPUProps(
++            # This is probably not an optimal config for gmem/sysmem, but it was working before and I don't have any a825 device to test (neither I have any trace info)
++            sysmem_ccu_color_cache_fraction = CCUColorCacheFraction.FULL.value,
++            sysmem_per_ccu_color_cache_size = 128 * 1024,
++            sysmem_ccu_depth_cache_fraction = CCUColorCacheFraction.THREE_QUARTER.value,
++            sysmem_per_ccu_depth_cache_size = 96 * 1024,
++        )],
++        num_ccu = 4,
++        num_slices = 2,
++        tile_align_w = 96,
++        tile_align_h = 32,
++        tile_max_w = 16416,
++        tile_max_h = 16384,
++        num_vsc_pipes = 32,
++        cs_shared_mem_size = 32 * 1024,
++        wave_granularity = 2,
++        fibers_per_sp = 128 * 2 * 16,
++        raw_magic_regs = a8xx_base_raw_magic_regs,
++    ))
++
+ add_gpus([
+         GPUId(chip_id=0xffff44050A31, name="Adreno (TM) 840"),
+     ], A6xxGPUInfo(
+@@ -1634,5 +1730,27 @@ add_gpus([
+         raw_magic_regs = a8xx_base_raw_magic_regs,
+     ))
+ 
++add_gpus([
++        GPUId(chip_id=0x44051401, name="Adreno (TM) 850"), # DRM/MSM
++        GPUId(chip_id=0xffff44051401, name="Adreno (TM) 850"), # DRM/MSM fuse fallback
++        GPUId(chip_id=0xffff44051431, name="Adreno (TM) 850"), # KGSL
++    ], A6xxGPUInfo(
++        CHIP.A8XX,
++        [a7xx_base, a7xx_gen3, a8xx_base, a8xx_gen2,
++         GPUProps(shading_rate_matches_vk = True)],
++        num_ccu = 6,
++        num_slices = 3,
++        tile_align_w = 96,
++        tile_align_h = 32,
++        tile_max_w = 16416,
++        tile_max_h = 16384,
++        num_vsc_pipes = 32,
++        cs_shared_mem_size = 32 * 1024,
++        wave_granularity = 2,
++        fibers_per_sp = 128 * 2 * 16,
++        highest_bank_bit = 16,
++        raw_magic_regs = a8xx_base_raw_magic_regs,
++    ))
++
+ if __name__ == "__main__":
+     main()
+diff --git a/src/freedreno/vulkan/msm_kgsl.h b/src/freedreno/vulkan/msm_kgsl.h
+index 036be5ab..0c4e1366 100644
+--- a/src/freedreno/vulkan/msm_kgsl.h
++++ b/src/freedreno/vulkan/msm_kgsl.h
+@@ -249,6 +249,7 @@ enum kgsl_user_mem_type {
+ #define KGSL_UBWC_4_0	4
+ #define KGSL_UBWC_5_0	5
+ #define KGSL_UBWC_6_0	6
++#define KGSL_UBWC_7_0	7
+ 
+ /*
+  * Reset status values for context
+diff --git a/src/freedreno/vulkan/tu_clear_blit.cc b/src/freedreno/vulkan/tu_clear_blit.cc
+index 0b6ccc80..d746cb17 100644
+--- a/src/freedreno/vulkan/tu_clear_blit.cc
++++ b/src/freedreno/vulkan/tu_clear_blit.cc
+@@ -27,6 +27,9 @@
+ #include "tu_scratch_ram.h"
+ #include "tu_tracepoints.h"
+ 
++#include <stdio.h>
++#include <stdlib.h>
++
+ static const VkOffset2D blt_no_coord = { ~0, ~0 };
+ 
+ /* The helpers below quantize floats to match shader export behavior and avoid
+@@ -2975,6 +2978,29 @@ tu_copy_buffer_to_image(struct tu_cmd_buffer *cmd,
+    uint32_t pitch = src_width * block_size;
+    uint32_t layer_size = src_height * pitch;
+ 
++   if (getenv("TU_KGSL_DEBUG_COPY")) {
++      fprintf(stderr,
++              "tu upload fmt=%d aspect=%#x srcfmt=%d dstfmt=%d img=%llu "
++              "extent=%ux%u off=%d,%d src_iova=%#llx img_iova=%#llx "
++              "img_size=%llu row=%u height=%u boff=%llu\n",
++              dst_image->vk.format, info->imageSubresource.aspectMask,
++              src_format, dst_format,
++              (unsigned long long)dst_image->total_size,
++              extent.width, extent.height, offset.x, offset.y,
++              (unsigned long long)vk_buffer_address(&src_buffer->vk,
++                                                    info->bufferOffset),
++              (unsigned long long)dst_image->iova,
++              (unsigned long long)dst_image->total_size,
++              info->bufferRowLength, info->bufferImageHeight,
++              (unsigned long long)info->bufferOffset);
++      if (src_buffer->bo->map) {
++         const uint8_t *p = (const uint8_t *)src_buffer->bo->map +
++                            info->bufferOffset;
++         fprintf(stderr, "tu upload src bytes=%02x %02x %02x %02x %02x %02x %02x %02x\n",
++                 p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
++      }
++   }
++
+    /* only the 2d path can rotate, a6xx still needs the per-row loop for unaligned buffers */
+    const enum a6xx_rotation copy_rot = tu_copy_transform_rotation(info->pNext);
+    const VkOffset2D rot_origin = tu_rotated_region_origin(copy_rot, offset, extent);
+@@ -3194,7 +3220,10 @@ tu_copy_image_to_buffer(struct tu_cmd_buffer *cmd,
+ 
+    /* note: could use "R8_UNORM" when no UBWC */
+    unsigned blit_param = 0;
+-   if (dst_format == PIPE_FORMAT_Y8_UNORM) {
++   if (dst_format == PIPE_FORMAT_Y8_UNORM ||
++       (getenv("TU_KGSL_FORCE_R3D_COPY") &&
++        (dst_format == PIPE_FORMAT_R8_UNORM ||
++         dst_format == PIPE_FORMAT_R8G8_UNORM))) {
+       ops = &r3d_ops<CHIP>;
+       blit_param = R3D_COPY;
+    }
+@@ -3210,6 +3239,29 @@ tu_copy_image_to_buffer(struct tu_cmd_buffer *cmd,
+    uint32_t pitch = dst_width * block_size;
+    uint32_t layer_size = pitch * dst_height;
+ 
++   if (getenv("TU_KGSL_DEBUG_COPY")) {
++      unsigned plane = tu6_plane_index(src_image->vk.format,
++                                       info->imageSubresource.aspectMask);
++      const struct fdl_layout *layout = &src_image->layout[plane];
++      fprintf(stderr,
++              "tu copy fmt=%d aspect=%#x plane=%u srcfmt=%d dstfmt=%d "
++              "img=%llu extent=%ux%u off=%d,%d layout=%ux%u pitch=%u "
++              "layer=%llu iova=%#llx dst_iova=%#llx dst_size=%llu "
++              "row=%u height=%u boff=%llu ops=%s\n",
++              src_image->vk.format, info->imageSubresource.aspectMask, plane,
++              src_format, dst_format, (unsigned long long)src_image->total_size,
++              extent.width, extent.height, offset.x, offset.y,
++              layout->width0, layout->height0, fdl_pitch(layout, 0),
++              (unsigned long long)fdl_layer_stride(layout, 0),
++              (unsigned long long)src_image->iova,
++              (unsigned long long)vk_buffer_address(&dst_buffer->vk,
++                                                    info->bufferOffset),
++              (unsigned long long)dst_buffer->bo->size,
++              info->bufferRowLength, info->bufferImageHeight,
++              (unsigned long long)info->bufferOffset,
++              ops == &r3d_ops<CHIP> ? "r3d" : "r2d");
++   }
++
+    /* only the 2d path can rotate, reading back into the buffer needs the inverse */
+    const enum a6xx_rotation copy_rot = tu_copy_transform_rotation(info->pNext);
+    const VkOffset2D rot_origin = tu_rotated_region_origin(copy_rot, offset, extent);
+@@ -3232,6 +3284,15 @@ tu_copy_image_to_buffer(struct tu_cmd_buffer *cmd,
+    tu_image_view_copy<CHIP>(&src, src_image, src_format,
+                             &info->imageSubresource, offset.z);
+ 
++   if (getenv("TU_KGSL_DEBUG_COPY")) {
++      fprintf(stderr,
++              "tu copy view base=%#llx off=%u pitch=%u layer=%u size=%ux%u "
++              "format=%d ubwc=%d\n",
++              (unsigned long long)src.base_addr, src.offset, src.pitch,
++              src.layer_size, src.width, src.height, src.format,
++              src.ubwc_enabled);
++   }
++
+    for (uint32_t i = 0; i < layers; i++) {
+       ops->src(cmd, cs, &src, i, VK_FILTER_NEAREST, dst_format);
+ 
+diff --git a/src/freedreno/vulkan/tu_cmd_buffer.cc b/src/freedreno/vulkan/tu_cmd_buffer.cc
+index ca3fca59..53d47a08 100644
+--- a/src/freedreno/vulkan/tu_cmd_buffer.cc
++++ b/src/freedreno/vulkan/tu_cmd_buffer.cc
+@@ -31,6 +31,10 @@
+ #include "tu_tracepoints.h"
+ #include "tu_trace_bin_layout.h"
+ 
++#include <inttypes.h>
++#include <stdio.h>
++#include <stdlib.h>
++
+ enum tu_cmd_buffer_status {
+    TU_CMD_BUFFER_STATUS_IDLE = 0,
+    TU_CMD_BUFFER_STATUS_ACTIVE = 1,
+@@ -5902,6 +5906,14 @@ tu_flush_for_access(struct tu_cache_state *cache,
+ 
+    cache->flush_bits |= flush_bits;
+    cache->pending_flush_bits &= ~flush_bits;
++
++   if (getenv("TU_KGSL_DEBUG_BARRIER")) {
++      fprintf(stderr,
++              "tu access src=%#x dst=%#x add=%#x flush=%#x pending=%#x\n",
++              (unsigned)src_mask, (unsigned)dst_mask, (unsigned)flush_bits,
++              (unsigned)cache->flush_bits,
++              (unsigned)cache->pending_flush_bits);
++   }
+ }
+ TU_GENX(tu_flush_for_access);
+ 
+@@ -10691,6 +10703,18 @@ tu_barrier(struct tu_cmd_buffer *cmd,
+          dst_flags |= TU_ACCESS_UCHE_READ;
+    }
+ 
++   if (getenv("TU_KGSL_DEBUG_BARRIER")) {
++      fprintf(stderr,
++              "tu barrier srcStage=%#" PRIx64 " dstStage=%#" PRIx64
++              " src=%#x dst=%#x no_sync=%d pass=%d gmem=%d preflush=%#x"
++              " prepen=%#x\n",
++              (uint64_t)srcStage, (uint64_t)dstStage,
++              (unsigned)src_flags, (unsigned)dst_flags, no_sync,
++              cmd->state.pass != NULL, gmem,
++              (unsigned)cache->flush_bits,
++              (unsigned)cache->pending_flush_bits);
++   }
++
+    /* a750 has a HW bug where writing a UBWC compressed image with a compute
+     * shader followed by reading it as a texture (or readonly image) requires
+     * a CACHE_CLEAN event. Some notes about this bug:
+diff --git a/src/freedreno/vulkan/tu_device.cc b/src/freedreno/vulkan/tu_device.cc
+index 645c3017..0ec6c097 100644
+--- a/src/freedreno/vulkan/tu_device.cc
++++ b/src/freedreno/vulkan/tu_device.cc
+@@ -9,6 +9,8 @@
+ 
+ #include "tu_device.h"
+ 
++#include <stdlib.h>
++
+ #include "drm-uapi/drm_fourcc.h"
+ #include "git_sha1.h"
+ #include "perfcntrs/freedreno_perfcntr.h"
+@@ -240,7 +242,11 @@ get_device_extensions(const struct tu_physical_device *device,
+       .KHR_external_memory = true,
+       .KHR_external_memory_fd = true,
+       .KHR_external_semaphore = true,
+-      .KHR_external_semaphore_fd = true,
++      /* KGSL exposes binary SYNC_FD fences only.  OPAQUE_FD timeline
++       * semaphores are unsupported, yet FFmpeg treats this extension as
++       * evidence that they are available and cannot import dma-heap frames.
++       */
++      .KHR_external_semaphore_fd = !is_kgsl(device->instance),
+       .KHR_format_feature_flags2 = true,
+       .KHR_fragment_shading_rate = device->info->props.has_attachment_shading_rate,
+       .KHR_get_memory_requirements2 = true,
+@@ -1780,6 +1786,17 @@ tu_physical_device_init(struct tu_physical_device *device,
+    device->level1_dcache_size = util_cache_granularity();
+    device->has_cached_non_coherent_memory =
+       device->level1_dcache_size > 0 && !DETECT_ARCH_ARM;
++
++   /* KGSL on some Android kernels reports IOCOHERENT support even though
++    * userspace mappings still require explicit cache maintenance.  Keep the
++    * normal capability probing as the default, but provide a device-side
++    * switch while diagnosing such stacks.  This makes Vulkan expose a cached
++    * non-coherent memory type and routes map readback through the invalidate
++    * path instead of relying on the (incorrect) HOST_COHERENT declaration. */
++   if (getenv("TU_KGSL_FORCE_NONCOHERENT")) {
++      device->has_cached_coherent_memory = false;
++      device->has_cached_non_coherent_memory = device->level1_dcache_size > 0;
++   }
+    device->preferred_uncached_as_cached_index = -1;
+ 
+    device->memory.type_count = 1;
+@@ -3538,6 +3555,23 @@ tu_GetInstanceProcAddr(VkInstance _instance, const char *pName)
+                                     pName);
+ }
+ 
++VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
++tu_GetDeviceProcAddr(VkDevice _device, const char *pName)
++{
++   VK_FROM_HANDLE(tu_device, device, _device);
++   return vk_device_get_proc_addr(&device->vk, pName);
++}
++
++/* Required ICD entrypoint for the loader */
++PUBLIC VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
++vk_icdGetDeviceProcAddr(VkDevice device, const char *pName);
++
++PUBLIC VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
++vk_icdGetDeviceProcAddr(VkDevice device, const char *pName)
++{
++   return tu_GetDeviceProcAddr(device, pName);
++}
++
+ /* The loader wants us to expose a second GetInstanceProcAddr function
+  * to work around certain LD_PRELOAD issues seen in apps.
+  */
+diff --git a/src/freedreno/vulkan/tu_knl_kgsl.cc b/src/freedreno/vulkan/tu_knl_kgsl.cc
+index 68a684b5..dc5a53b1 100644
+--- a/src/freedreno/vulkan/tu_knl_kgsl.cc
++++ b/src/freedreno/vulkan/tu_knl_kgsl.cc
+@@ -8,6 +8,9 @@
+ #include <linux/dma-heap.h>
+ #include <poll.h>
+ #include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
+ #include <sys/ioctl.h>
+ #include <sys/mman.h>
+ 
+@@ -47,6 +50,32 @@ safe_ioctl(int fd, unsigned long request, void *arg)
+    return ret;
+ }
+ 
++/* Imported dma-bufs are backed by cached system memory on KGSL.  A producer
++ * in another API (for example the termux-va Gallium bridge) can have dirty
++ * CPU cache lines when Turnip imports the object.  Synchronize the object
++ * before exposing it to GPU commands; Vulkan's mapped-memory entrypoints are
++ * not involved for an externally imported image.
++ */
++static int
++kgsl_sync_imported_bo_to_gpu(struct tu_device *dev, uint32_t id,
++                             uint64_t size)
++{
++   struct kgsl_gpuobj_sync_obj obj = {
++      .offset = 0,
++      .length = size,
++      .id = id,
++      .op = KGSL_GPUMEM_CACHE_FLUSH,
++   };
++   struct kgsl_gpuobj_sync sync = {
++      .objs = (uintptr_t)&obj,
++      .obj_len = sizeof(obj),
++      .count = 1,
++   };
++
++   return safe_ioctl(dev->physical_device->local_fd,
++                     IOCTL_KGSL_GPUOBJ_SYNC, &sync);
++}
++
+ static int
+ kgsl_submitqueue_new(struct tu_device *dev, struct tu_queue *queue)
+ {
+@@ -78,39 +107,25 @@ kgsl_submitqueue_close(struct tu_device *dev, struct tu_queue *queue)
+ static void kgsl_bo_finish(struct tu_device *dev, struct tu_bo *bo);
+ 
+ static VkResult
+-bo_init_new_dmaheap(struct tu_device *dev, struct tu_bo **out_bo, uint64_t size,
+-                uint64_t align, enum tu_bo_alloc_flags flags)
++kgsl_import_allocated_dmabuf(struct tu_device *dev,
++                             struct tu_bo **out_bo,
++                             uint64_t size,
++                             uint64_t align,
++                             int fd)
+ {
+-   struct dma_heap_allocation_data alloc = {
+-      .len = size,
+-      .fd_flags = O_RDWR | O_CLOEXEC,
+-   };
+-
+-   int ret;
+-   ret = safe_ioctl(dev->physical_device->kgsl_dma_fd, DMA_HEAP_IOCTL_ALLOC,
+-                    &alloc);
+-
+-   if (ret) {
+-      return vk_errorf(dev, VK_ERROR_OUT_OF_DEVICE_MEMORY,
+-                       "DMA_HEAP_IOCTL_ALLOC failed (%s)", strerror(errno));
+-   }
+-
+-   /* tu_bo_init_dmabuf() only borrows the fd: it keeps a dup of its own in
+-    * bo->shared_fd, which is what kgsl_bo_finish() closes. That is correct for
+-    * an imported dma-buf, whose fd belongs to the caller, but here the fd is
+-    * ours and nobody else will ever drop it. Leaking it keeps the dma-buf
+-    * alive after the BO is destroyed, so the memory is never reclaimed.
+-    */
++   /* The import only borrows fd and retains its own dup in bo->shared_fd.
++    * These allocation paths own the original descriptor, so close it even
++    * when the import fails to avoid keeping the dma-buf allocation alive. */
+    VkResult result =
+-      tu_bo_init_dmabuf(dev, out_bo, -1, align, TU_BO_ALLOC_NO_FLAGS, alloc.fd);
+-   close(alloc.fd);
++      tu_bo_init_dmabuf(dev, out_bo, size, align, TU_BO_ALLOC_NO_FLAGS, fd);
+ 
++   close(fd);
+    return result;
+ }
+ 
+ static VkResult
+-bo_init_new_ion(struct tu_device *dev, struct tu_bo **out_bo, uint64_t size,
+-                uint64_t align, enum tu_bo_alloc_flags flags)
++bo_init_new_ion_fd(struct tu_device *dev, struct tu_bo **out_bo,
++                   uint64_t size, uint64_t align, int ion_fd)
+ {
+    struct ion_new_allocation_data alloc = {
+       .len = size,
+@@ -119,24 +134,18 @@ bo_init_new_ion(struct tu_device *dev, struct tu_bo **out_bo, uint64_t size,
+       .fd = -1,
+    };
+ 
+-   int ret;
+-   ret = safe_ioctl(dev->physical_device->kgsl_dma_fd, ION_IOC_NEW_ALLOC, &alloc);
++   int ret = safe_ioctl(ion_fd, ION_IOC_NEW_ALLOC, &alloc);
+    if (ret) {
+       return vk_errorf(dev, VK_ERROR_OUT_OF_DEVICE_MEMORY,
+                        "ION_IOC_NEW_ALLOC failed (%s)", strerror(errno));
+    }
+ 
+-   /* See bo_init_new_dmaheap(): the fd is ours to close. */
+-   VkResult result =
+-      tu_bo_init_dmabuf(dev, out_bo, -1, align, TU_BO_ALLOC_NO_FLAGS, alloc.fd);
+-   close(alloc.fd);
+-
+-   return result;
++   return kgsl_import_allocated_dmabuf(dev, out_bo, size, align, alloc.fd);
+ }
+ 
+ static VkResult
+-bo_init_new_ion_legacy(struct tu_device *dev, struct tu_bo **out_bo, uint64_t size,
+-                       uint64_t align, enum tu_bo_alloc_flags flags)
++bo_init_new_ion_legacy_fd(struct tu_device *dev, struct tu_bo **out_bo,
++                          uint64_t size, uint64_t align, int ion_fd)
+ {
+    struct ion_allocation_data alloc = {
+       .len = size,
+@@ -146,8 +155,7 @@ bo_init_new_ion_legacy(struct tu_device *dev, struct tu_bo **out_bo, uint64_t si
+       .handle = -1,
+    };
+ 
+-   int ret;
+-   ret = safe_ioctl(dev->physical_device->kgsl_dma_fd, ION_IOC_ALLOC, &alloc);
++   int ret = safe_ioctl(ion_fd, ION_IOC_ALLOC, &alloc);
+    if (ret) {
+       return vk_errorf(dev, VK_ERROR_OUT_OF_DEVICE_MEMORY,
+                        "ION_IOC_ALLOC failed (%s)", strerror(errno));
+@@ -158,12 +166,12 @@ bo_init_new_ion_legacy(struct tu_device *dev, struct tu_bo **out_bo, uint64_t si
+       .fd = -1,
+    };
+ 
+-   ret = safe_ioctl(dev->physical_device->kgsl_dma_fd, ION_IOC_SHARE, &share);
++   ret = safe_ioctl(ion_fd, ION_IOC_SHARE, &share);
+    if (ret) {
+       struct ion_handle_data free = {
+          .handle = alloc.handle,
+       };
+-      safe_ioctl(dev->physical_device->kgsl_dma_fd, ION_IOC_FREE, &free);
++      safe_ioctl(ion_fd, ION_IOC_FREE, &free);
+ 
+       return vk_errorf(dev, VK_ERROR_OUT_OF_DEVICE_MEMORY,
+                        "ION_IOC_SHARE failed (%s)", strerror(errno));
+@@ -172,21 +180,77 @@ bo_init_new_ion_legacy(struct tu_device *dev, struct tu_bo **out_bo, uint64_t si
+    struct ion_handle_data free = {
+       .handle = alloc.handle,
+    };
+-   ret = safe_ioctl(dev->physical_device->kgsl_dma_fd, ION_IOC_FREE, &free);
++   ret = safe_ioctl(ion_fd, ION_IOC_FREE, &free);
+    if (ret) {
+       close(share.fd);
+       return vk_errorf(dev, VK_ERROR_OUT_OF_DEVICE_MEMORY,
+                        "ION_IOC_FREE failed (%s)", strerror(errno));
+    }
+ 
+-   /* See bo_init_new_dmaheap(): the fd is ours to close. */
+-   VkResult result =
+-      tu_bo_init_dmabuf(dev, out_bo, -1, align, TU_BO_ALLOC_NO_FLAGS, share.fd);
+-   close(share.fd);
++   return kgsl_import_allocated_dmabuf(dev, out_bo, size, align, share.fd);
++}
++
++static VkResult
++bo_init_new_ion_fallback(struct tu_device *dev, struct tu_bo **out_bo,
++                         uint64_t size, uint64_t align)
++{
++   int ion_fd = open("/dev/ion", O_RDONLY);
++   if (ion_fd < 0)
++      return VK_ERROR_OUT_OF_DEVICE_MEMORY;
++
++   struct ion_handle_data free = { .handle = 0 };
++   bool legacy = safe_ioctl(ion_fd, ION_IOC_FREE, &free) >= 0 || errno != ENOTTY;
+ 
++   VkResult result = legacy ?
++      bo_init_new_ion_legacy_fd(dev, out_bo, size, align, ion_fd) :
++      bo_init_new_ion_fd(dev, out_bo, size, align, ion_fd);
++   close(ion_fd);
+    return result;
+ }
+ 
++static VkResult
++bo_init_new_dmaheap(struct tu_device *dev, struct tu_bo **out_bo, uint64_t size,
++                uint64_t align, enum tu_bo_alloc_flags flags)
++{
++   struct dma_heap_allocation_data alloc = {
++      .len = size,
++      .fd_flags = O_RDWR | O_CLOEXEC,
++   };
++
++   int ret;
++   ret = safe_ioctl(dev->physical_device->kgsl_dma_fd, DMA_HEAP_IOCTL_ALLOC,
++                    &alloc);
++
++   if (ret) {
++      int dmaheap_errno = errno;
++      VkResult fallback = bo_init_new_ion_fallback(dev, out_bo, size, align);
++      if (fallback == VK_SUCCESS)
++         return VK_SUCCESS;
++
++      errno = dmaheap_errno;
++      return vk_errorf(dev, VK_ERROR_OUT_OF_DEVICE_MEMORY,
++                       "DMA_HEAP_IOCTL_ALLOC failed (%s)", strerror(errno));
++   }
++
++   return kgsl_import_allocated_dmabuf(dev, out_bo, size, align, alloc.fd);
++}
++
++static VkResult
++bo_init_new_ion(struct tu_device *dev, struct tu_bo **out_bo, uint64_t size,
++                uint64_t align, enum tu_bo_alloc_flags flags)
++{
++   return bo_init_new_ion_fd(dev, out_bo, size, align,
++                             dev->physical_device->kgsl_dma_fd);
++}
++
++static VkResult
++bo_init_new_ion_legacy(struct tu_device *dev, struct tu_bo **out_bo, uint64_t size,
++                       uint64_t align, enum tu_bo_alloc_flags flags)
++{
++   return bo_init_new_ion_legacy_fd(dev, out_bo, size, align,
++                                    dev->physical_device->kgsl_dma_fd);
++}
++
+ static VkResult
+ kgsl_bo_user_map(struct tu_device *dev, struct tu_bo *bo, uint64_t client_iova)
+ {
+@@ -304,6 +368,11 @@ kgsl_bo_init(struct tu_device *dev,
+                           "cannot allocate an exportable BO with a fixed address");
+       }
+ 
++      if (dev->physical_device->kgsl_dma_fd < 0) {
++         return vk_errorf(dev, VK_ERROR_OUT_OF_DEVICE_MEMORY,
++                          "no dma-heap or ION fd available for shareable KGSL BO");
++      }
++
+       switch(dev->physical_device->kgsl_dma_type) {
+       case TU_KGSL_DMA_TYPE_DMAHEAP:
+          return bo_init_new_dmaheap(dev, out_bo, size, align, flags);
+@@ -365,6 +434,11 @@ kgsl_bo_init(struct tu_device *dev,
+       .base = base,
+    };
+ 
++   if (getenv("TU_KGSL_DEBUG_IMPORT"))
++      fprintf(stderr, "tu kgsl new id=%u size=%llu iova=%#llx flags=%#x\n",
++              bo->gem_handle, (unsigned long long)bo->size,
++              (unsigned long long)bo->iova, (unsigned)mem_property);
++
+    tu_dump_bo_init(dev, bo);
+ 
+    VkResult result = VK_SUCCESS;
+@@ -445,6 +519,11 @@ kgsl_bo_init_dmabuf(struct tu_device *dev,
+       .shared_fd = os_dupfd_cloexec(fd),
+    };
+ 
++   if (getenv("TU_KGSL_DEBUG_IMPORT"))
++      fprintf(stderr, "tu kgsl dmabuf id=%u size=%llu iova=%#llx fd=%d\n",
++              bo->gem_handle, (unsigned long long)bo->size,
++              (unsigned long long)bo->iova, fd);
++
+    struct stat st;
+    if (fstat(fd, &st) == 0)
+       /* Use the inode number as the unique ID, but set the MSB to avoid
+@@ -454,6 +533,30 @@ kgsl_bo_init_dmabuf(struct tu_device *dev,
+ 
+    tu_dump_bo_init(dev, bo);
+ 
++   /* The dma-buf may have been written through a cached CPU mapping by the
++    * producer.  Clean it before the first Vulkan GPU read. */
++   int sync_ret = kgsl_sync_imported_bo_to_gpu(dev, bo->gem_handle, bo->size);
++   if (sync_ret != 0)
++      mesa_logw("KGSL cache sync for imported dma-buf failed: %s\n",
++                strerror(errno));
++
++   if (getenv("TU_KGSL_DEBUG_IMPORT")) {
++      void *map = mmap(NULL, MIN2((uint64_t)4096, bo->size), PROT_READ,
++                       MAP_SHARED, fd, 0);
++      if (map == MAP_FAILED) {
++         fprintf(stderr, "tu kgsl import id=%u size=%llu"
++                         " sync=%d errno=%d mmap failed\n",
++                 bo->gem_handle, (unsigned long long)bo->size, sync_ret, errno);
++      } else {
++         const uint8_t *p = (const uint8_t *)map;
++         fprintf(stderr, "tu kgsl import id=%u size=%llu"
++                         " sync=%d bytes=%02x %02x %02x %02x %02x %02x %02x %02x\n",
++                 bo->gem_handle, (unsigned long long)bo->size, sync_ret,
++                 p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
++         munmap(map, MIN2((uint64_t)4096, bo->size));
++      }
++   }
++
+    *out_bo = bo;
+ 
+    return VK_SUCCESS;
+@@ -1434,6 +1537,20 @@ kgsl_submit_add_entries(struct tu_device *device, void *_submit,
+          .flags = KGSL_CMDLIST_IB,
+          .id = entries[i].bo->gem_handle,
+       };
++      if (getenv("TU_KGSL_DEBUG_SUBMIT"))
++         fprintf(stderr, "kgsl cmd gpu=%#llx size=%llu id=%u off=%llu\n",
++                 (unsigned long long)cmds[i].gpuaddr,
++                 (unsigned long long)cmds[i].size,
++                 cmds[i].id, (unsigned long long)cmds[i].offset);
++      if (getenv("TU_KGSL_DEBUG_SUBMIT") && entries[i].bo->map) {
++         const uint32_t *p = (const uint32_t *)entries[i].bo->map +
++                             entries[i].offset / 4;
++         unsigned n = MIN2(entries[i].size / 4, 1000);
++         fprintf(stderr, "kgsl ib:");
++         for (unsigned j = 0; j < n; j++)
++            fprintf(stderr, " %08x", p[j]);
++         fprintf(stderr, "\n");
++      }
+    }
+ }
+ 
+@@ -1514,6 +1631,19 @@ kgsl_queue_submit(struct tu_queue *queue, void *_submit,
+    struct tu_kgsl_queue_submit *submit =
+       static_cast<struct tu_kgsl_queue_submit *>(_submit);
+ 
++   if (getenv("TU_KGSL_DEBUG_SUBMIT")) {
++      fprintf(stderr, "kgsl submit begin queue=%u prior_ts=%d waits=%u signals=%u cmds=%u binds=%u\n",
++              queue->msm_queue_id, p_atomic_read(&queue->fence), wait_count,
++              signal_count, submit->commands.size, submit->bind_cmds.size);
++      for (uint32_t i = 0; i < wait_count; i++) {
++         const struct kgsl_syncobj *wait =
++            &container_of(waits[i].sync, struct vk_kgsl_syncobj, vk)->syncobj;
++         fprintf(stderr, "kgsl submit wait[%u] state=%d queue=%u ts=%u fd=%d\n",
++                 i, wait->state, wait->queue ? wait->queue->msm_queue_id : 0,
++                 wait->timestamp, wait->fd);
++      }
++   }
++
+ #if HAVE_PERFETTO
+    uint64_t start_ts = tu_perfetto_begin_submit();
+ #endif
+@@ -1636,6 +1766,12 @@ kgsl_queue_submit(struct tu_queue *queue, void *_submit,
+       memset(profiling_buffer, 0, sizeof(*profiling_buffer));
+    }
+ 
++   if (getenv("TU_KGSL_DEBUG_SUBMIT"))
++      fprintf(stderr, "kgsl submit merged-wait state=%d queue=%u ts=%u fd=%d\n",
++              wait_sync.state,
++              wait_sync.queue ? wait_sync.queue->msm_queue_id : 0,
++              wait_sync.timestamp, wait_sync.fd);
++
+    struct kgsl_cmd_syncpoint_timestamp ts;
+    struct kgsl_cmd_syncpoint_fence fn;
+    struct kgsl_command_syncpoint sync = { 0 };
+@@ -1703,6 +1839,9 @@ kgsl_queue_submit(struct tu_queue *queue, void *_submit,
+          goto fail_submit;
+       }
+       timestamp = req.timestamp;
++      if (getenv("TU_KGSL_DEBUG_SUBMIT"))
++         fprintf(stderr, "kgsl submit ret=%d errno=%d ts=%u cmds=%u\n",
++                 ret, ret ? errno : 0, timestamp, req.numcmds);
+    } else {
+       /* kgsl doesn't support multiple bind commands at once */
+       uint32_t i = 0;
+@@ -1909,10 +2048,7 @@ tu_kgsl_get_raytracing(int fd)
+ VkResult
+ tu_knl_kgsl_load(struct tu_instance *instance, int fd)
+ {
+-   if (instance->vk.enabled_extensions.KHR_display) {
+-      return vk_errorf(instance, VK_ERROR_INITIALIZATION_FAILED,
+-                       "I can't KHR_display");
+-   }
++
+ 
+    struct tu_physical_device *device = static_cast<struct tu_physical_device *>(
+       vk_zalloc(&instance->vk.alloc, sizeof(*device), 8,
+@@ -2048,6 +2184,7 @@ tu_knl_kgsl_load(struct tu_instance *instance, int fd)
+    case KGSL_UBWC_4_0:
+    case KGSL_UBWC_5_0:
+    case KGSL_UBWC_6_0:
++   case KGSL_UBWC_7_0:
+       device->ubwc_config.bank_swizzle_levels = 0x6;
+       device->ubwc_config.macrotile_mode = FDL_MACROTILE_8_CHANNEL;
+       break;
+diff --git a/src/freedreno/vulkan/tu_wsi.cc b/src/freedreno/vulkan/tu_wsi.cc
+index 4db6d5e1..5d2604f1 100644
+--- a/src/freedreno/vulkan/tu_wsi.cc
++++ b/src/freedreno/vulkan/tu_wsi.cc
+@@ -15,6 +15,15 @@
+ 
+ #include "tu_device.h"
+ 
++#include <string.h>
++
++static bool
++tu_wsi_is_kgsl(const struct tu_physical_device *pdevice)
++{
++   return pdevice->instance->knl &&
++          strcmp(pdevice->instance->knl->name, "kgsl") == 0;
++}
++
+ static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+ tu_wsi_proc_addr(VkPhysicalDevice physicalDevice, const char *pName)
+ {
+@@ -27,6 +36,11 @@ tu_wsi_can_present_on_device(VkPhysicalDevice physicalDevice, int fd)
+ {
+ #ifdef HAVE_LIBDRM
+    VK_FROM_HANDLE(tu_physical_device, pdevice, physicalDevice);
++   const bool is_kgsl = tu_wsi_is_kgsl(pdevice);
++
++   if (is_kgsl)
++      return true;
++
+    return wsi_common_drm_devices_equal(fd, pdevice->local_fd);
+ #else
+    return true;
+diff --git a/src/loader/loader.c b/src/loader/loader.c
+index 2328b675..c54de82a 100644
+--- a/src/loader/loader.c
++++ b/src/loader/loader.c
+@@ -750,6 +750,12 @@ loader_get_linux_pci_id_for_fd(int fd, int *vendor_id, int *chip_id)
+ bool
+ loader_get_pci_id_for_fd(int fd, int *vendor_id, int *chip_id)
+ {
++#ifdef __TERMUX__
++   const char *env = getenv("MESA_LOADER_DRIVER_OVERRIDE");
++   if (env && strcmp(env, "kgsl") == 0) {
++      return false;
++   }
++#endif
+ #ifdef __linux__
+    /* Implementation without causing full enumeration of DRM devices. */
+    if (loader_get_linux_pci_id_for_fd(fd, vendor_id, chip_id))
+@@ -814,6 +820,22 @@ loader_get_driver_for_fd(int fd)
+       const char *override = os_get_option("MESA_LOADER_DRIVER_OVERRIDE");
+       if (override && strlen(override))
+          return strdup(override);
++
++      /* A PRoot Android container can expose KGSL without a DRM node.  The
++       * explicit bridge backend is the equivalent of
++       * MESA_LOADER_DRIVER_OVERRIDE=kgsl for that device, but keep the
++       * selection limited to an actual KGSL descriptor so unrelated DRM
++       * fds are still inferred normally. */
++      const char *backend = os_get_option("TERMUX_VA_GPU_BACKEND");
++      if (backend && !strcmp(backend, "kgsl")) {
++#ifdef __linux__
++         struct stat fd_stat, kgsl_stat;
++         if (fstat(fd, &fd_stat) == 0 &&
++             stat("/dev/kgsl-3d0", &kgsl_stat) == 0 &&
++             fd_stat.st_rdev == kgsl_stat.st_rdev)
++            return strdup("kgsl");
++#endif
++      }
+    }
+ 
+ #if defined(USE_DRICONF)
+diff --git a/src/util/os_file.c b/src/util/os_file.c
+index 7d99383e..d3d3fb01 100644
+--- a/src/util/os_file.c
++++ b/src/util/os_file.c
+@@ -232,6 +232,10 @@ typedef void *kvaddr_t;
+ 
+ #endif /* DETECT_OS_DRAGONFLY || DETECT_OS_FREEBSD */
+ 
++#ifdef __TERMUX__
++#undef SYS_kcmp
++#endif
++
+ int
+ os_same_file_description(int fd1, int fd2)
+ {
+diff --git a/src/vulkan/wsi/wsi_common_x11.c b/src/vulkan/wsi/wsi_common_x11.c
+index e33f6263..5bde7930 100644
+--- a/src/vulkan/wsi/wsi_common_x11.c
++++ b/src/vulkan/wsi/wsi_common_x11.c
+@@ -81,6 +81,9 @@
+ #ifndef XCB_PRESENT_CAPABILITY_ASYNC_MAY_TEAR
+ #define XCB_PRESENT_CAPABILITY_ASYNC_MAY_TEAR 8
+ #endif
++#ifndef XCB_VALUE
++#define XCB_VALUE 2
++#endif
+ 
+ #define MAX_DAMAGE_RECTS 64
+ 
+@@ -1301,6 +1304,11 @@ struct x11_swapchain {
+    bool                                         has_async_may_tear;
+    bool                                         msc_estimate_is_stable;
+ 
++   /* Some X servers reject DRI3FenceFromFD for imported pixmaps.  Fall back
++    * to Present IdleNotify for implicit-sync image reuse when that happens.
++    */
++   bool                                         disable_shm_fences;
++
+    xcb_connection_t *                           conn;
+    /* Connection Present events are selected and read on: our own connection
+     * when we could open one, so the event thread never reads from the
+@@ -1838,7 +1846,8 @@ x11_present_to_x11_dri3(struct x11_swapchain *chain, uint32_t image_index,
+        !wsi_device->x11.ignore_suboptimal)
+       options |= XCB_PRESENT_OPTION_SUBOPTIMAL;
+ 
+-   xshmfence_reset(image->shm_fence);
++   if (image->shm_fence)
++      xshmfence_reset(image->shm_fence);
+ 
+    if (!chain->base.image_info.explicit_sync) {
+       ++chain->sent_image_count;
+@@ -2633,7 +2642,7 @@ x11_image_init(VkDevice device_h, struct x11_swapchain *chain,
+    xcb_void_cookie_t cookie;
+    xcb_generic_error_t *error = NULL;
+    uint32_t bpp = 32;
+-   int fence_fd;
++   int fence_fd = -1;
+    image->update_region = xcb_generate_id(chain->conn);
+    xcb_xfixes_create_region(chain->conn, image->update_region, 0, NULL);
+ 
+@@ -2669,7 +2678,8 @@ x11_image_init(VkDevice device_h, struct x11_swapchain *chain,
+             for (int j = 0; j < i; j++)
+                close(fds[j]);
+ 
+-            return VK_ERROR_OUT_OF_HOST_MEMORY;
++            result = VK_ERROR_OUT_OF_HOST_MEMORY;
++            goto fail_image;
+          }
+       }
+ 
+@@ -2697,8 +2707,10 @@ x11_image_init(VkDevice device_h, struct x11_swapchain *chain,
+ 
+       /* XCB will take ownership of the FD we pass it. */
+       int fd = os_dupfd_cloexec(image->base.dma_buf_fd);
+-      if (fd == -1)
+-         return VK_ERROR_OUT_OF_HOST_MEMORY;
++      if (fd == -1) {
++         result = VK_ERROR_OUT_OF_HOST_MEMORY;
++         goto fail_image;
++      }
+ 
+       cookie =
+          xcb_dri3_pixmap_from_buffer_checked(chain->conn,
+@@ -2739,6 +2751,12 @@ x11_image_init(VkDevice device_h, struct x11_swapchain *chain,
+ #endif
+ 
+ out_fence:
++   if (chain->disable_shm_fences && !chain->base.image_info.explicit_sync) {
++      image->shm_fence = NULL;
++      image->sync_fence = XCB_NONE;
++      return VK_SUCCESS;
++   }
++
+    fence_fd = xshmfence_alloc_shm();
+    if (fence_fd < 0)
+       goto fail_pixmap;
+@@ -2748,17 +2766,38 @@ out_fence:
+       goto fail_shmfence_alloc;
+ 
+    image->sync_fence = xcb_generate_id(chain->conn);
+-   xcb_dri3_fence_from_fd(chain->conn,
+-                          image->pixmap,
+-                          image->sync_fence,
+-                          false,
+-                          fence_fd);
++   cookie = xcb_dri3_fence_from_fd_checked(chain->conn,
++                                           image->pixmap,
++                                           image->sync_fence,
++                                           false,
++                                           fence_fd);
++   fence_fd = -1;
++   error = xcb_request_check(chain->conn, cookie);
++   if (error != NULL) {
++      const uint8_t error_code = error->error_code;
++      free(error);
++
++      if (error_code == XCB_VALUE && !chain->base.image_info.explicit_sync) {
++         chain->disable_shm_fences = true;
++         image->sync_fence = XCB_NONE;
++         xshmfence_unmap_shm(image->shm_fence);
++         image->shm_fence = NULL;
++         return VK_SUCCESS;
++      }
++
++      goto fail_shmfence_map;
++   }
+ 
+    xshmfence_trigger(image->shm_fence);
+    return VK_SUCCESS;
+ 
++fail_shmfence_map:
++   xshmfence_unmap_shm(image->shm_fence);
++   image->shm_fence = NULL;
++
+ fail_shmfence_alloc:
+-   close(fence_fd);
++   if (fence_fd >= 0)
++      close(fence_fd);
+ 
+ fail_pixmap:
+    cookie = xcb_free_pixmap(chain->conn, image->pixmap);
+@@ -2770,7 +2809,7 @@ fail_image:
+ #else
+    UNREACHABLE("SHM support not compiled in");
+ #endif
+-   return VK_ERROR_INITIALIZATION_FAILED;
++   return result != VK_SUCCESS ? result : VK_ERROR_INITIALIZATION_FAILED;
+ }
+ 
+ static void
+@@ -2781,9 +2820,12 @@ x11_image_finish(struct x11_swapchain *chain,
+    xcb_void_cookie_t cookie;
+    if (!chain->base.wsi->sw || chain->has_mit_shm) {
+ #ifdef HAVE_X11_DRM
+-      cookie = xcb_sync_destroy_fence(chain->conn, image->sync_fence);
+-      xcb_discard_reply(chain->conn, cookie.sequence);
+-      xshmfence_unmap_shm(image->shm_fence);
++      if (image->sync_fence != XCB_NONE) {
++         cookie = xcb_sync_destroy_fence(chain->conn, image->sync_fence);
++         xcb_discard_reply(chain->conn, cookie.sequence);
++      }
++      if (image->shm_fence)
++         xshmfence_unmap_shm(image->shm_fence);
+ #endif
+ 
+       cookie = xcb_free_pixmap(chain->conn, image->pixmap);
+@@ -3418,7 +3460,8 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
+    chain->sent_image_count = 0;
+    chain->last_present_msc = 0;
+    chain->status = VK_SUCCESS;
+-   chain->has_dri3_modifiers = wsi_conn->has_dri3_modifiers;
++   chain->has_dri3_modifiers = wsi_conn->has_dri3_modifiers &&
++                                use_modifiers(wsi_device);
+    chain->has_mit_shm = wsi_conn->has_mit_shm;
+    chain->has_async_may_tear = present_caps & XCB_PRESENT_CAPABILITY_ASYNC_MAY_TEAR;
+    chain->has_reliable_msc = !wsi_conn->is_xwayland;
+diff --git a/src/x11/x11_dri3.c b/src/x11/x11_dri3.c
+index 3587d24d..45badc90 100644
+--- a/src/x11/x11_dri3.c
++++ b/src/x11/x11_dri3.c
+@@ -23,6 +23,7 @@
+ 
+ #include "x11_dri3.h"
+ 
++#include <string.h>
+ #include <stdbool.h>
+ #include <stdlib.h>
+ #include <fcntl.h>
+@@ -48,6 +49,15 @@ x11_dri3_open(xcb_connection_t *conn,
+    int                          fd;
+    const xcb_query_extension_reply_t *extension;
+ 
++   const char *env = getenv("MESA_LOADER_DRIVER_OVERRIDE");
++   const char *backend = getenv("TERMUX_VA_GPU_BACKEND");
++   if ((env && !strcmp(env, "kgsl")) ||
++       (backend && !strcmp(backend, "kgsl"))) {
++      fd = open("/dev/kgsl-3d0", O_RDWR | O_CLOEXEC);
++      if (fd >= 0)
++         return fd;
++   }
++
+    xcb_prefetch_extension_data(conn, &xcb_dri3_id);
+    extension = xcb_get_extension_data(conn, &xcb_dri3_id);
+    if (!(extension && extension->present))

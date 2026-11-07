@@ -6,8 +6,8 @@
 # forwards to the phone's native aarch64 library (Mesa Turnip/freedreno on Adreno via KGSL) through a host
 # thunk, instead of running x86 Mesa under emulation (which can't reach the GPU at all).
 pkgname=fex-emu
-pkgver=2610
-pkgrel=6
+pkgver=2611
+pkgrel=1
 install=fex-emu.install
 pkgdesc='Fast usermode x86 and x86-64 emulator for Arm64 (PowOS phone build, with library thunks)'
 url=https://fex-emu.com
@@ -27,10 +27,10 @@ optdepends=('vulkan-icd-loader: Vulkan thunk (native Turnip)'
             'alsa-lib: asound thunk')
 source=("git+https://github.com/FEX-Emu/FEX.git#tag=FEX-$pkgver"
         0001-exec-by-path-through-libc.patch
-        0002-thunkgen-llvm23.patch
         0003-futex_waitv-probe-host.patch
         Config.json
-        thunks.json)
+        thunks.json
+        fex-options-check.py)
 sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
 
 # x86 sysroot for cross-compiling the guest thunks (x86-64 and i686) with clang. Headers + glibc/libstdc++
@@ -80,13 +80,16 @@ prepare() {
   git submodule update --init --recursive --depth 1
   # Android: exec by path through libc (the userspace launcher; see the patch)
   patch -p1 --no-backup-if-mismatch < "$srcdir/0001-exec-by-path-through-libc.patch" || { echo "patch 0001-exec-by-path-through-libc.patch FAILED"; exit 1; }
-  # Thunk generator vs LLVM 23 (Arch Linux ARM's clang): FileManager's stat cache is gone; nothing to clear.
-  patch -p1 --no-backup-if-mismatch < "$srcdir/0002-thunkgen-llvm23.patch" || { echo "patch 0002-thunkgen-llvm23.patch FAILED"; exit 1; }
+  # (0002-thunkgen-llvm23.patch dropped at FEX-2611: upstream gen.cpp guards clearStatCache() with
+  #  LLVM_VERSION_MAJOR < 23 itself.)
   # futex_waitv (Proton's fsync) passed through when the host has it, not only from kernel 5.16: the phone kernel
   # backports it on 5.15 (see the patch)
   git apply "$srcdir/0003-futex_waitv-probe-host.patch" || { echo "patch 0003-futex_waitv-probe-host.patch FAILED"; exit 1; }
   [ -z "$(find . -name '*.rej' -print -quit)" ] || { echo "patch left .rej files (a hunk was rejected)"; exit 1; }
   cd "$srcdir"
+  # Every option/thunk our Config.json and thunks.json set still exists in this FEX (FEX ignores unknown ones
+  # silently, so a rename upstream would drop a fix without a word): the build stops here instead.
+  FEX_VERSION=FEX-$pkgver python3 "$srcdir/fex-options-check.py" --fex "$srcdir/FEX" "$srcdir/Config.json" "$srcdir/thunks.json"
 
   _make_x86_sysroot
   # FEX's own clang toolchain files (target triple, lld) plus the sysroot, so the guest thunks compile

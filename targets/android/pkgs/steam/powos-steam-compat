@@ -411,15 +411,43 @@ def has_prefix(appid):
     return os.path.isdir(os.path.join(S, "steamapps/compatdata", appid, "pfx/drive_c/users"))
 
 
+def _steam_tools():
+    """powos_steam_tools.py (pkgs/steam): next to this file in the repo, /usr/lib/powos-steam/py installed."""
+    import importlib.util
+    for d in (os.path.dirname(os.path.realpath(__file__)), os.environ.get("POWOS_STEAM_PY", "/usr/lib/powos-steam/py")):
+        f = os.path.join(d, "powos_steam_tools.py")
+        if os.path.isfile(f):
+            spec = importlib.util.spec_from_file_location("powos_steam_tools", f)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+    return None
+
+
+TOOLS = _steam_tools()
+
+
 def arm64_proton():
+    """Valve's ARM64 Proton is installed - found by what it is (an ARM64 Wine), not by the directory name Proton
+    Experimental (ARM64) has today (powos_steam_tools.arm64_protons)."""
+    if TOOLS:
+        return bool(TOOLS.arm64_protons(S))
     return os.path.isfile(os.path.join(S, "steamapps/common", ARM64_DIR, "proton"))
+
+
+def arm64_runtime():
+    """Valve's ARM64 Steam Linux Runtime (SteamLinuxRuntime_<n>-arm64, newest), or None."""
+    if TOOLS:
+        return TOOLS.arm64_runtime(S)
+    d = os.path.join(S, "steamapps/common/SteamLinuxRuntime_4-arm64")
+    return d if os.path.isfile(os.path.join(d, "_v2-entry-point")) else None
 
 
 def tool_name(want):
     """The CompatToolMapping name for a policy choice (native/arm64/x86 or a raw tool name)."""
     if want == "arm64" and arm64_proton() \
             and os.path.isfile(os.path.join(S, "compatibilitytools.d", ARM64_GATE, "powos-entry")) \
-            and os.path.isfile(os.path.join(S, "steamapps/common/SteamLinuxRuntime_4-arm64/_v2-entry-point")):
+            and arm64_runtime():
         return ARM64_GATE
     return TOOL.get(want, want)
 

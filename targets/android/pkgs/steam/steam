@@ -32,7 +32,12 @@ steam_pid=$(cat "$HOME/.steam/steam.pid" 2>/dev/null)
 # powos-reg) and puts it back over a broken one; with no copy, Proton rebuilds the registry itself (its creation path:
 # no creation_sync_guard -> the default prefix's files are copied in, drive_c and the game's data stay). Every Wine
 # key the game changed since the copy is lost, nothing else.
-reg_ok() { [ "$(head -c 23 "$1" 2>/dev/null | tr -d '\0')" = "WINE REGISTRY Version 2" ] && ! LC_ALL=C grep -qaP '\x00' "$1"; }
+# Any registry format version (Wine's header is "WINE REGISTRY Version 2" today): a Wine that bumps it must not have every
+# good registry taken for a broken one and replaced.
+reg_ok() {
+  case $(head -c 26 "$1" 2>/dev/null | head -1 | tr -d '\0') in "WINE REGISTRY Version "[0-9]*) ;; *) return 1 ;; esac
+  ! LC_ALL=C grep -qaP '\x00' "$1"
+}
 reg_guard() {
   local p c r ok bad
   for p in "${XDG_DATA_HOME:-$HOME/.local/share}"/Steam/steamapps/compatdata/*/pfx; do
@@ -146,7 +151,12 @@ case $(readlink "/proc/${steam_pid:-0}/exe" 2>/dev/null) in
       for f in "${XDG_DATA_HOME:-$HOME/.local/share}"/Steam/steamapps/compatdata/*/fex-emu/ThunksDB.json; do
         [ -f "$f" ] && cmp -s /usr/lib/powos-steam/fex-ThunksDB.json "$f" && rm -f "$f"
       done
-    fi ;;
+    fi
+    # Which PowOS fixes inside Valve's tools (Proton overlay, the evaluator skips, FEX options, Turnip flags) still
+    # apply after Steam/Proton/FEX updated themselves: checked by capability, never by version; only the ones NOT
+    # applied are said ("steam: fix X not applied: why" - the game then runs stock). powos-steam-fixes for all of them.
+    command -v powos-steam-fixes >/dev/null && timeout 10 powos-steam-fixes --quiet 2>&1 | sed 's/^/steam: /' >&2
+    ;;
 esac
 
 # Environment for Steam and every game it starts (/usr/lib/powos-steam/steam-env, then the user's

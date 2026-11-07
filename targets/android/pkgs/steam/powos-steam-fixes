@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""powos-steam-fixes: is each PowOS fix that goes INTO Valve's Steam, Proton, FEX tool or Turnip still in effect?
+
+Steam, Proton and Steam's FEX tool update themselves, and Mesa/FEX move under our patches; a fix tied to the version it
+was made for can silently stop working after an update. This checks every such fix by capability (does the target
+still have what the fix needs?), never by version number, and says which ones are not applied and why. It changes
+nothing. /usr/bin/steam runs it (--quiet) at every Steam start, while no Steam runs: only fixes NOT applied are
+printed ("steam: fix X not applied: reason"), so the game still starts - stock - and the log says what is missing.
+
+    powos-steam-fixes [--quiet] [--json] [--strict]
+      --quiet   only the fixes not applied      --json   the report as JSON      --strict   exit 1 if any is not applied
+The report is also kept in ~/.cache/powos/steam-fixes/status.json (a check reads it there).
+Inventory and reasons: docs/research/version-proof-gaming.md.
+"""
+import glob
+import importlib.util
+import json
+import os
+import re
+import sys
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+S = os.path.expanduser(os.environ.get("POWOS_STEAM_DIR", "~/.local/share/Steam"))
+GATE_PKG = os.environ.get("POWOS_GATE_DIR", "/usr/lib/powos-steam/compat/powos-proton-arm64")
+ENV_FILES = os.environ.get("POWOS_STEAM_ENV_FILES") or ":".join(
+    ["/usr/lib/powos-steam/steam-env",
+     os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "powos/steam-env")])
+TURNIP = os.environ.get("POWOS_TURNIP_LIB", "/usr/lib/libvulkan_freedreno.so")
+CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "powos/steam-fixes")
+
+
+def tools():
+    for d in (HERE, os.environ.get("POWOS_STEAM_PY", "/usr/lib/powos-steam/py")):
+        f = os.path.join(d, "powos_steam_tools.py")
+        if os.path.isfile(f):
+            spec = importlib.util.spec_from_file_location("powos_steam_tools", f)
+            m = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(m)
+            return m
+    return None
+
+
+def steam_env():
+    """The environment /usr/bin/steam exports from steam-env files (same rules: later wins, KEY= unsets)."""
+    env = {}
+    for f in ENV_FILES.split(":"):
+        try:
+            lines = open(f).read().splitlines()
+        except OSError:
+            continue
+        for l in lines:
+            m = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", l)
+            if not m:
+                continue
+            if m.group(2):
+                env[m.group(1)] = m.group(2)
+            else:
+                env.pop(m.group(1), None)
+    return env
+
+
+def fex_tool():
+    """Valve's Steam FEX tool (appid 3127680): found by its fex-compat-tool, not by the directory name."""
+    for d in sorted(glob.glob(os.path.join(S, "steamapps/common/*/"))):
+        if os.path.isfile(os.path.join(d, "fex-compat-tool")) and os.path.isfile(os.path.join(d, "usr/bin/FEX")):
+            return d.rstrip("/")
+    return None
+
+
+def fex_describe(d):
+    try:
+        t = open(os.path.join(d, "VERSIONS.txt")).read()
+        m = re.search(r"FEX-\d{4}[\w.-]*", t)
+        return m.group(0) if m else "?"
+    except OSError:
+        return "?"
+
+
+def read(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def check():
+    T = tools()
+    out = []
+
+    def fix(name, ok, why):
+        out.append({"fix": name, "applied": bool(ok), "why": why})
+
+    env = steam_env()
+    # ARM64 launch gate + the kernelbase overlay it applies.
+    proton = T.arm64_proton(S) if T else None
+    slr = T.arm64_runtime(S) if T else None
+    gate = os.path.join(S, "compatibilitytools.d", "powos-proton-arm64")
+    if not T:
+        fix("arm64-gate", False, "powos_steam_tools.py not found")
+    elif not proton:
+        fix("arm64-gate", False, "no ARM64 Proton installed (a Proton with Wine's aarch64-windows DLLs): ARM64 games "
+            "fall back to x86 Proton")
+    elif not slr:
+        fix("arm64-gate", False, "no ARM64 Steam Linux Runtime (SteamLinuxRuntime_<n>-arm64) installed")
+    elif not os.path.isfile(os.path.join(gate, "powos-entry")):
+        fix("arm64-gate", False, "the gate isn't in compatibilitytools.d yet (/usr/bin/steam copies it at start)")
+    else:
+        fix("arm64-gate", True, "%s (%s) in %s" % (os.path.basename(proton), T.proton_version(proton) or "?",
+                                                   os.path.basename(slr)))
+    if T and proton:
+        here = gate if os.path.isfile(os.path.join(gate, "overlay-kernelbase.dll")) else GATE_PKG
+        for rel, state, why, row in T.overlay_status(proton, here):
+            if state == "apply":
+                fix("kernelbase-wow32", True, "goes in at the next ARM64 launch (%s)" % row[4])
+            else:
+                fix("kernelbase-wow32", state == "ours", why if state != "ours" else "PowOS build in place (%s)" % row[4])
+    # x86 Proton: the install script evaluator skipped in Valve's FEX compat tool (sitecustomize.py).
+    ft = fex_tool()
+    if not ft:
+        fix("iscript-early-x86", False, "Valve's Steam FEX tool (a steamapps/common dir with fex-compat-tool) isn't "
+            "installed: x86 Proton games run the evaluator in Proton (user_settings.py)")
+    else:
+        head = (read(os.path.join(ft, "fex-compat-tool")) or b"")[:120]
+        if not re.match(rb"#![^\n]*python", head):
+            fix("iscript-early-x86", False, "Valve's fex-compat-tool is no longer a Python script (%r): "
+                "sitecustomize.py never runs there; the in-Proton skip (user_settings.py) still does" % head[:40])
+        elif env.get("PYTHONPATH", "").split(":").count("/usr/lib/powos-steam/py") == 0:
+            fix("iscript-early-x86", False, "steam-env's PYTHONPATH doesn't include /usr/lib/powos-steam/py")
+        else:
+            fix("iscript-early-x86", True, "fex-compat-tool is Python, sitecustomize.py on PYTHONPATH")
+    # The evaluator skip inside every Proton (user_settings.py put in by /usr/bin/steam).
+    protons = [d for d in glob.glob(os.path.join(S, "steamapps/common/*")) + glob.glob(os.path.join(S, "compatibilitytools.d/*"))
+               if os.path.isfile(os.path.join(d, "proton"))]
+    mine = [d for d in protons if (read(os.path.join(d, "user_settings.py")) or b"").startswith(b"# PowOS user_settings")]
+    missing = [os.path.basename(d) for d in protons if d not in mine and not os.path.exists(os.path.join(d, "user_settings.py"))]
+    fix("iscript-proton", not missing,
+        ("in %d Proton(s)" % len(mine)) if not missing and mine else
+        ("no Proton installed: nothing to do" if not protons else "not yet in: %s (/usr/bin/steam puts it in at start)" % ", ".join(missing)))
+    # FEX options set through steam-env: Valve's FEX (another version than ours) must still read each FEX_<NAME>
+    # (FEX's env loader compares the literal "FEX_<NAME>": absent from the binary = ignored without a word).
+    if ft:
+        fexbin = read(os.path.join(ft, "usr/bin/FEX")) or b""
+        for k in sorted(k for k in env if k.startswith("FEX_")):
+            known = k.encode() + b"\0" in fexbin  # the NUL-terminated literal, not a longer name it starts
+            fix("fex-env " + k, known,
+                "Valve's FEX %s reads it" % fex_describe(ft) if known else
+                "Valve's FEX %s doesn't know %s (renamed or dropped upstream): the fix behind it is off" % (fex_describe(ft), k))
+        # The futex_waitv probe build (targets/android/steam/fex-compat-tool, installed by hand over Valve's FEX).
+        valve = os.path.join(ft, "usr/bin/FEX.valve")
+        if os.path.isfile(valve):
+            same = read(valve) == fexbin
+            fix("fex-futex-waitv", not same,
+                "PowOS FEX build in Valve's tool" if not same else
+                "Steam updated its FEX tool to %s and put Valve's FEX back: rebuild with COMMIT=<its sha, VERSIONS.txt> "
+                "targets/android/steam/fex-compat-tool/build.sh + install.sh" % fex_describe(ft))
+    # Turnip debug flags set through steam-env (TU_DEBUG=noubwc ...): each must still be a flag Turnip knows.
+    if env.get("TU_DEBUG"):
+        lib = read(TURNIP)
+        for flag in filter(None, env["TU_DEBUG"].split(",")):
+            if lib is None:
+                fix("turnip TU_DEBUG=" + flag, False, "%s not found" % TURNIP)
+            else:
+                ok = re.search(rb"\x00" + re.escape(flag.encode()) + rb"\x00", lib) is not None
+                fix("turnip TU_DEBUG=" + flag, ok, "Turnip knows it" if ok else
+                    "Turnip (%s) has no TU_DEBUG flag %s: renamed or dropped upstream" % (TURNIP, flag))
+    return out
+
+
+def main(argv):
+    quiet, js, strict = "--quiet" in argv, "--json" in argv, "--strict" in argv
+    rep = check()
+    try:
+        os.makedirs(CACHE, exist_ok=True)
+        with open(os.path.join(CACHE, "status.json.tmp"), "w") as f:
+            json.dump(rep, f, indent=1)
+        os.replace(os.path.join(CACHE, "status.json.tmp"), os.path.join(CACHE, "status.json"))
+    except OSError:
+        pass
+    if js:
+        print(json.dumps(rep, indent=1))
+    else:
+        for r in rep:
+            if r["applied"] and quiet:
+                continue
+            print("fix %s %s: %s" % (r["fix"], "applied" if r["applied"] else "not applied", r["why"]))
+    return 1 if strict and any(not r["applied"] for r in rep) else 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except Exception as e:  # never stop a Steam start over a report
+        print("powos-steam-fixes: %s" % e, file=sys.stderr)
+        sys.exit(0 if "--strict" not in sys.argv else 1)

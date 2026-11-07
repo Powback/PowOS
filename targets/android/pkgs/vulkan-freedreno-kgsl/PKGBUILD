@@ -1,8 +1,15 @@
 # PowOS Android: Turnip (Mesa's Vulkan driver for Adreno) on KGSL - /usr/lib/libvulkan_freedreno.so and its ICD, the
 # library every Vulkan program on the phone runs (DXVK games through FEX's thunk, Zink).
 #
-# The same Mesa Andromarchy's build-inside.sh builds into the rootfs (lfdevs/mesa-for-android-container @ eb3e7fd4,
-# rootfs-in-container.sh's MESA_SRC_URL) with its options, only the Vulkan driver, plus ours:
+# Source = UPSTREAM Mesa main (a pinned commit, gitlab archive) + the lfdevs fork's Turnip changes as one patch + ours
+# (since 11-07, board task gaming-fixes-version-independent-stack-on-latest). Before, the source was the fork's own
+# tree, which merges upstream only every week or two: its dev/adreno-main tip b2d3bc3e (11-06) had no source change
+# since our pin eb3e7fd4 (= Mesa main of 10-25 + fork work), only CI, so upstream Turnip fixes reached us late (0003
+# was a hand cherry-pick of upstream 2fae1d0d). Patches, in order:
+#   0000  lfdevs/mesa-for-android-container's Turnip-relevant delta (fork _fork vs its merge base with Mesa main,
+#         18879c94): KGSL kernel interface (tu_knl_kgsl.cc, msm_kgsl.h), devices table, tu_device/tu_wsi/
+#         tu_clear_blit/tu_cmd_buffer, the X11 WSI/dri3/loader/os_file bits and its meson options - only the paths a
+#         Vulkan-only build compiles. Regenerate (see "Moving the pin") when the fork changes those files.
 #   0001  A7XX: RB_CCU_CNTL and the RB_* magic regs are written on the BR pipe only. tu_init_hw emits the static
 #         regs under CP_SET_THREAD_BOTH, so BV executed the RB non-context write too and the Adreno 740's CP faulted
 #         on every command buffer start: dmesg "kgsl kgsl-3d0: CP: AHB bus error, CP_RL_ERROR_DETAILS_0:0x10008e07"
@@ -14,10 +21,9 @@
 #         broforce-black-columns.md "Coherency override"). Now the same as TU_KGSL_FORCE_NONCOHERENT=1: no
 #         cached-coherent type, the override is a no-op; one "turnip: KGSL accepts IOCOHERENT but ..." warning.
 #         TU_KGSL_TRUST_IOCOHERENT=1 restores the kernel's answer.
-#   0003  upstream Mesa 2fae1d0d (main 2026-10-27, after the pin's last upstream merge; drop on the next pin move if
-#         the fork has it): a7xx gen1/gen2 (Adreno 740 is gen2) pad VPC_PS_CNTL::NUMNONPOSVAR by one vec4 when the
-#         FS varyings take an odd number of slots, as Qualcomm's driver does - else garbage in loaded varyings
-#         ("Fixes rendering corruption in Devil May Cry 5").
+#   (0003-turnip-a7xx-gen1-gen2-numnonposvar-alignment.patch dropped 11-07: upstream 2fae1d0d is in Mesa main.)
+# The build refuses a patch that no longer fits or that the source already has (patch -N: "previously applied"),
+# naming it: a fix upstream took is dropped on purpose with a note here, never silently.
 # Build option -Dfreedreno-kmds=kgsl,msm (not kgsl alone): with ONLY kgsl and only Turnip, Mesa's meson drops
 #   system_has_kms_drm, so with_dri_platform isn't 'drm', HAVE_X11_DRM is never defined and the X11 WSI is built
 #   software-only: every vkQueuePresentKHR to an X window became one xcb_put_image of the whole image on the
@@ -32,28 +38,31 @@
 # (fd6_emit_restore sets CP_SET_THREAD_BR first).
 #
 # Version = what the source is: Mesa's own VERSION (27.0.0-devel) + the pinned commit's date + its sha, e.g.
-# 27.0.0_devel.20261029.geb3e7fd4 (pacman forbids '-' in pkgver). Not a Mesa release: lfdevs's dev/adreno-main is Mesa
-# main + the fork's KGSL/termux-va work, merged from upstream main roughly weekly.
+# 27.0.0_devel.20261107.g3a2cd129 (pacman forbids '-' in pkgver). Not a Mesa release.
 # Moving the pin (do it on purpose, with a reason - the source never moves on its own):
-#   1. pick the commit: the fork's DEVELOPMENT branch is dev/adreno-main (Mesa source). NOT adreno-main: that one is
-#      docs/CI only on a 26.1.0-devel (2026-04) tree - "45 commits ahead" there are README/workflow edits.
-#      gh api repos/lfdevs/mesa-for-android-container/commits/dev/adreno-main --jq '.sha, .commit.committer.date'
-#   2. _commit=<full sha>, pkgver=<its VERSION with _>.<committer date YYYYMMDD>.g<sha:8>, pkgrel=1; sha256sums[0] =
-#      shasum -a 256 of https://github.com/lfdevs/mesa-for-android-container/archive/<sha>.tar.gz
-#   3. rebase 0001-0003: extract the archive, `patch -Np1 --dry-run` each; regenerate with diff -u when offsets moved;
-#      drop a patch the source already has (grep the fix's symbol: RB_CCU_CNTL guard in tu_cmd_buffer.cc's
-#      tu_init_hw path, IOCOHERENT in tu_knl_kgsl.cc).
-#   4. the SAME sha in targets/android/rootfs-in-container.sh MESA_SRC_URL (Gallium freedreno must match Turnip).
+#   1. _commit = Mesa main (git ls-remote https://gitlab.freedesktop.org/mesa/mesa.git refs/heads/main), pkgver =
+#      <its VERSION with _>.<committer date YYYYMMDD>.g<sha:8>, pkgrel=1, sha256sums[0] = shasum -a 256 of
+#      https://gitlab.freedesktop.org/mesa/mesa/-/archive/<sha>/mesa-<sha>.tar.gz
+#   2. 0000, only when the fork's dev/adreno-main changed Turnip paths since _fork (gh api repos/lfdevs/mesa-for-android-
+#      container/compare/<_fork>...dev/adreno-main --jq '.files[].filename'): in a git dir with both remotes,
+#      M=$(git merge-tree --write-tree <mesa sha> <fork sha> | head -1); git diff <mesa sha> $M -- meson.build
+#      meson.options src/freedreno/common src/freedreno/vulkan src/vulkan src/x11 src/util src/loader > 0000-...patch;
+#      _fork=<fork sha>.
+#   3. rebase 0001-0002: `patch -Np1 --dry-run` each on the extracted source + 0000; regenerate with diff -u when
+#      offsets moved; drop a patch the source already has, with a note above.
+#   4. targets/android/rootfs-in-container.sh MESA_SRC_COMMIT is the rootfs's whole Mesa from the fork (Gallium
+#      freedreno for KWin and Xwayland's glamor, GL, EGL): it needs the fork's Gallium KGSL work and stays a fork sha.
+#      Turnip is a separate library (libvulkan_freedreno.so links libdrm/xcb/wayland/expat/zstd only, no Gallium).
 #   5. record why + what changed in docs/research/broforce-black-columns.md ("Turnip pin").
-# Pin history: ef25369b (2026-10-04, termux-va topic branch test/add-va-bridge, pinned 10-13 in 56007a05) ->
-#   eb3e7fd4 (2026-10-29, dev/adreno-main, 11-04).
+# Pin history: ef25369b (fork, 2026-10-04, termux-va topic branch test/add-va-bridge, pinned 10-13 in 56007a05) ->
+#   eb3e7fd4 (fork dev/adreno-main, 2026-10-29, 11-04) -> Mesa main 3a2cd129 (2026-11-07) + fork eb3e7fd4's delta.
 
 pkgname=vulkan-freedreno-kgsl
-pkgver=27.0.0_devel.20261029.geb3e7fd4
-pkgrel=3
-pkgdesc='Turnip Vulkan driver on KGSL (lfdevs Mesa) with PowOS fixes (PowOS Android)'
+pkgver=27.0.0_devel.20261107.g3a2cd129
+pkgrel=1
+pkgdesc='Turnip Vulkan driver on KGSL (Mesa main + lfdevs KGSL work) with PowOS fixes (PowOS Android)'
 arch=(aarch64)
-url='https://github.com/lfdevs/mesa-for-android-container'
+url='https://gitlab.freedesktop.org/mesa/mesa'
 license=(MIT)
 depends=(libdrm libx11 libxcb libxshmfence wayland zstd expat libelf vulkan-icd-loader libdisplay-info systemd-libs)
 makedepends=(meson ninja python-mako python-yaml python-packaging python-ply glslang byacc bison flex
@@ -61,31 +70,41 @@ makedepends=(meson ninja python-mako python-yaml python-packaging python-ply gls
 provides=(vulkan-freedreno vulkan-driver)
 conflicts=(vulkan-freedreno)
 replaces=(vulkan-freedreno)
+# 27.0.0_devel.20261107-1: Mesa main + the fork's Turnip delta (was the fork's own tree, 20261029.geb3e7fd4-3).
 # -3: freedreno-kmds=kgsl,msm (X11 WSI presents through DRI3, see above).
 # -2: andromarchy-protect put the rootfs's 10-13 Turnip back after every install of -1 (see the .install).
 install=vulkan-freedreno-kgsl.install
-_commit=eb3e7fd4f009cab04b1482aad4843c0bde28a786
-_patches=(0001-turnip-a7xx-rb-ccu-cntl-br-only.patch
-          0002-turnip-kgsl-iocoherent-needs-coherent-user-cb.patch
-          0003-turnip-a7xx-gen1-gen2-numnonposvar-alignment.patch)
-source=("mesa-$_commit.tar.gz::https://github.com/lfdevs/mesa-for-android-container/archive/$_commit.tar.gz"
+_commit=3a2cd129ca41d87267b3cd4262fc4280f3f63176   # Mesa main, 2026-11-07
+_fork=eb3e7fd4f009cab04b1482aad4843c0bde28a786     # lfdevs dev/adreno-main whose Turnip delta 0000 carries
+_patches=(0000-lfdevs-android-container-turnip.patch
+          0001-turnip-a7xx-rb-ccu-cntl-br-only.patch
+          0002-turnip-kgsl-iocoherent-needs-coherent-user-cb.patch)
+source=("mesa-$_commit.tar.gz::https://gitlab.freedesktop.org/mesa/mesa/-/archive/$_commit/mesa-$_commit.tar.gz"
         "${_patches[@]}")
-sha256sums=(123af0b3b2f7c83273a51f28367a64054201d524cbfa52f99ba76696e619927a
+sha256sums=(2ba9a6f48e3c5706584772888a3b7d2f94b18a041b19577b5acb7b2f5f6c1ad8
             SKIP
             SKIP
             SKIP)
 
 prepare() {
-  cd mesa-for-android-container-$_commit
+  cd mesa-$_commit
+  local p out
   for p in "${_patches[@]}"; do
     echo "Applying $p"
-    patch -Np1 -i "$srcdir/$p"
+    # A dry run first (-N: a patch the source already has fails instead of reversing): one that no longer fits, or
+    # that upstream took, stops the build with its name before anything is half applied.
+    out=$(patch -Np1 --dry-run -i "$srcdir/$p" 2>&1) || {
+      printf '%s\n' "$out"
+      echo "patch $p does not apply to Mesa $_commit: rebase it, or drop it if upstream has it (see the header)"
+      exit 1
+    }
+    patch -Np1 -s -i "$srcdir/$p"
   done
 }
 
 build() {
   # build-inside.sh's options that apply to the Vulkan driver (no Gallium drivers: they stay the rootfs's).
-  meson setup build mesa-for-android-container-$_commit --prefix=/usr --buildtype=release -Dplatforms=x11,wayland \
+  meson setup build mesa-$_commit --prefix=/usr --buildtype=release -Dplatforms=x11,wayland \
     -Dgallium-drivers= -Dvulkan-drivers=freedreno -Dfreedreno-kmds=kgsl,msm -Dvideo-codecs=all \
     -Degl=disabled -Dglx=disabled -Dgbm=disabled -Dopengl=false -Dgles1=disabled -Dgles2=disabled \
     -Dllvm=disabled -Dintel-rt=disabled -Dmicrosoft-clc=disabled -Dvalgrind=disabled -Dlibunwind=disabled
@@ -96,5 +115,5 @@ package() {
   install -Dm755 build/src/freedreno/vulkan/libvulkan_freedreno.so "$pkgdir"/usr/lib/libvulkan_freedreno.so
   install -Dm644 build/src/freedreno/vulkan/freedreno_icd.aarch64.json \
     "$pkgdir"/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json
-  install -Dm644 mesa-for-android-container-$_commit/docs/license.rst "$pkgdir"/usr/share/licenses/$pkgname/license.rst
+  install -Dm644 mesa-$_commit/docs/license.rst "$pkgdir"/usr/share/licenses/$pkgname/license.rst
 }

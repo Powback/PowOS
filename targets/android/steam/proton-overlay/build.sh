@@ -5,11 +5,22 @@
 # container. Only wine's tools and dlls/kernelbase are built (~10 min the first time; the tree and build stay in the
 # docker volume powos-steam-poll-wine for the next run).
 # Output: pkgs/steam/proton-arm64-kernelbase.dll (gitignored; also put into the shared build-inputs cache as
-# steam-proton-arm64-kernelbase.dll). Its sha256 and Valve's go into pkgs/steam/arm64-gate-entry OVERLAY and the
-# PKGBUILD - a new Proton build (Valve's file changes) means: bump TAG, rebuild, update both hashes.
+# steam-proton-arm64-kernelbase.dll). Its sha256 and Valve's go into a row of pkgs/steam/powos_steam_tools.py
+# OVERLAYS and the PKGBUILD's sha256sums.
+# A new Proton build (Steam updated Proton; the launch then says "fix kernelbase-wow32 not applied: ... Make one:
+# PROTON_VERSION=<v> targets/android/steam/proton-overlay/build.sh"): run exactly that - the wine tag comes from
+# Proton's own version (experimental-11.0-20261027b-arm64 -> experimental-wine-11.0-20261027b, TAG= overrides) - then
+# add the printed row (VALVE_SHA= the phone's kernelbase.dll sha256, as the launch logged its first 12 characters).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(cd "$HERE/../../../.." && pwd)
-TAG=${TAG:-experimental-wine-11.0-20261027b} LLVM_MINGW=${LLVM_MINGW:-20261006}
+PROTON_VERSION=${PROTON_VERSION:-experimental-11.0-20261027b-arm64}
+if [ -z "${TAG:-}" ]; then
+  TAG=$(python3 -c 'import importlib.util,sys; s=importlib.util.spec_from_file_location("t",sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); print(m.wine_tag(sys.argv[2]) or "")' \
+        "$REPO/targets/android/pkgs/steam/powos_steam_tools.py" "$PROTON_VERSION")
+  [ -n "$TAG" ] || { echo "no wine tag known for Proton $PROTON_VERSION: set TAG=<ValveSoftware/wine tag>" >&2; exit 1; }
+fi
+LLVM_MINGW=${LLVM_MINGW:-20261006}
+# A patch the tag already has (upstream took it) or that no longer applies stops the build, by name (git apply below).
 OUT=$HERE/out; mkdir -p "$OUT"
 docker run --rm --platform linux/arm64 --cpus 12 --memory 16g -v powos-steam-poll-wine:/w -v powos-android-llvm-mingw:/tc \
   -v "$HERE:/src:ro" -v "$OUT:/out" -e TAG="$TAG" -e V="$LLVM_MINGW" menci/archlinuxarm:latest bash -euo pipefail -c '
@@ -34,4 +45,7 @@ docker run --rm --platform linux/arm64 --cpus 12 --memory 16g -v powos-steam-pol
   llvm-strip -o /out/kernelbase.dll dlls/kernelbase/aarch64-windows/kernelbase.dll'
 cp "$OUT/kernelbase.dll" "$REPO/targets/android/pkgs/steam/proton-arm64-kernelbase.dll"
 "$REPO/tools/agents/build-inputs-cache.sh" put "$OUT/kernelbase.dll" steam-proton-arm64-kernelbase.dll >/dev/null || true
-shasum -a 256 "$OUT/kernelbase.dll"
+OURS=$(shasum -a 256 "$OUT/kernelbase.dll" | cut -d' ' -f1)
+echo "$OURS  kernelbase.dll ($TAG)"
+echo "powos_steam_tools.py OVERLAYS row:"
+echo "    (\"files/lib/wine/aarch64-windows/kernelbase.dll\", \"${VALVE_SHA:-<the Valve file sha256>}\", \"$OURS\", \"overlay-kernelbase.dll\", \"$PROTON_VERSION\"),"

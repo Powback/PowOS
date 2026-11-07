@@ -173,16 +173,19 @@ class Arm64GateOverlay(Arm64Gate):
         tool = self.steam / "compatibilitytools.d/powos-proton-arm64"
         tool.mkdir(parents=True)
         (tool / "overlay-kernelbase.dll").write_bytes(self.OURS)
-        src = (PKG / "arm64-gate-entry").read_text()
+        # The overlay table lives in powos_steam_tools.py (next to the gate): its first row's hashes -> the fixture's.
+        src = (PKG / "powos_steam_tools.py").read_text()
         for old, new in zip(Arm64GateOverlay.shas_in(src), (self.VALVE, self.OURS)):
             src = src.replace(old, hashlib.sha256(new).hexdigest())
+        (tool / "powos_steam_tools.py").write_text(src)
         self.gate = tool / "powos-entry"
-        self.gate.write_text(src)
+        shutil.copy(PKG / "arm64-gate-entry", self.gate)
+        self.env["XDG_CACHE_HOME"] = str(self.steam.parent / "cache")
 
     @staticmethod
     def shas_in(src):
-        block = src[src.index("OVERLAY = {"):]
-        return [w.strip('",') for w in block.split() if len(w.strip('",')) == 64][:2]
+        block = src[src.index("OVERLAYS = ["):]
+        return [w.strip('",()') for w in block.split() if len(w.strip('",()')) == 64][:2]
 
     def launch(self):
         return self.run_chain(self.chain("waitforexitandrun", ["proton", "waitforexitandrun", "S:\\Broforce.exe"]))

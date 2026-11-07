@@ -16,6 +16,8 @@ St=$T/Steam
 mkdir -p "$St/config" "$St/steamapps/common/Proton Experimental (ARM64)" "$St/steamapps/compatdata/100/pfx/drive_c/users"
 echo save > "$St/steamapps/compatdata/100/pfx/drive_c/users/save.dat"
 touch "$St/steamapps/common/Proton Experimental (ARM64)/proton"
+# An ARM64 Proton is found by what it is (a proton script + Wine's aarch64-windows DLLs), not by its name.
+mkdir -p "$St/steamapps/common/Proton Experimental (ARM64)/files/lib/wine/aarch64-windows"
 cat > "$St/config/config.vdf" <<'V'
 "InstallConfigStore"
 {
@@ -81,6 +83,18 @@ check "arm64 with the gate installed -> the gate"  '[ "$(C get 200)" = "tool=pow
 check "the gate counts as the arm64 prefix family" '[ "$(cat "$CD/200/powos-family" 2>/dev/null || echo arm64)" = arm64 ]'
 rm -rf "$St/compatibilitytools.d/powos-proton-arm64"; C apply >/dev/null
 check "gate gone -> back to Valve's ARM64 tool"    '[ "$(C get 200)" = "tool=proton-experimental-arm64 opts=-" ]'
+# Version-proof: Valve renames its ARM64 Proton / ships a newer runtime - still found by capability, not by name.
+mkdir -p "$St/compatibilitytools.d/powos-proton-arm64"; touch "$St/compatibilitytools.d/powos-proton-arm64/powos-entry"
+mv "$St/steamapps/common/Proton Experimental (ARM64)" "$St/steamapps/common/Proton 12.0 (ARM64)"
+mv "$St/steamapps/common/SteamLinuxRuntime_4-arm64" "$St/steamapps/common/SteamLinuxRuntime_5-arm64"; C apply >/dev/null
+check "renamed ARM64 Proton + runtime 5 -> still the gate" '[ "$(C get 200)" = "tool=powos-proton-arm64 opts=-" ]'
+mkdir -p "$St/steamapps/common/Proton 12.0 (x86)"; touch "$St/steamapps/common/Proton 12.0 (x86)/proton"
+rm -rf "$St/steamapps/common/Proton 12.0 (ARM64)"; C apply >/dev/null
+check "only an x86 Proton -> not the gate"         '[ "$(C get 200)" = "tool=proton-experimental-arm64 opts=-" ]'
+mkdir -p "$St/steamapps/common/Proton Experimental (ARM64)/files/lib/wine/aarch64-windows"
+touch "$St/steamapps/common/Proton Experimental (ARM64)/proton"
+mv "$St/steamapps/common/SteamLinuxRuntime_5-arm64" "$St/steamapps/common/SteamLinuxRuntime_4-arm64"
+rm -rf "$St/compatibilitytools.d/powos-proton-arm64" "$St/steamapps/common/Proton 12.0 (x86)"; C apply >/dev/null
 
 # Screen size: a Unity / Unreal game gets the unity-screen wrapper in front of %command% at apply (user options kept).
 mkdir -p "$St/userdata/1/config" "$T/.local/share/powos" "$St/steamapps/common/UGame/UGame_Data" "$St/steamapps/common/RGame/RGame_Data" \

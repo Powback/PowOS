@@ -10,10 +10,33 @@
 import os
 import sys
 
-STEAM = os.environ.get("STEAM_COMPAT_CLIENT_INSTALL_PATH") or os.path.expanduser("~/.local/share/Steam")
-PROTON = os.environ.get("POWOS_ARM64_PROTON") or os.path.join(STEAM, "steamapps/common/Proton Experimental (ARM64)")
-SLR = os.environ.get("POWOS_ARM64_RUNTIME") or os.path.join(STEAM, "steamapps/common/SteamLinuxRuntime_4-arm64")
+import importlib.util
 
+HERE = os.path.dirname(os.path.realpath(__file__))
+
+
+def _tools():
+    """powos_steam_tools (pkgs/steam/powos_steam_tools.py): next to this file in the repo, /usr/lib/powos-steam/py on
+    the phone (this file runs from Steam's compatibilitytools.d copy)."""
+    for d in (HERE, os.environ.get("POWOS_STEAM_PY", "/usr/lib/powos-steam/py")):
+        f = os.path.join(d, "powos_steam_tools.py")
+        if os.path.isfile(f):
+            spec = importlib.util.spec_from_file_location("powos_steam_tools", f)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+    return None
+
+
+T = _tools()
+STEAM = os.environ.get("STEAM_COMPAT_CLIENT_INSTALL_PATH") or os.path.expanduser("~/.local/share/Steam")
+# Valve's ARM64 Proton and runtime, found by what they are (an ARM64 Wine; SteamLinuxRuntime_<n>-arm64), not by the
+# directory names one Steam release used: a renamed or newer one still launches (powos_steam_tools.py).
+# Neither found: the names of today's, so the exec below fails with a path that says what's missing.
+PROTON = (T and T.arm64_proton(STEAM)) or os.environ.get("POWOS_ARM64_PROTON") \
+    or os.path.join(STEAM, "steamapps/common/Proton Experimental (ARM64)")
+SLR = (T and T.arm64_runtime(STEAM)) or os.environ.get("POWOS_ARM64_RUNTIME") \
+    or os.path.join(STEAM, "steamapps/common/SteamLinuxRuntime_4-arm64")
 
 def skip_evaluator(verb, cmd):
     if verb != "run" or not cmd or os.path.basename(cmd[0].replace("\\", "/")).lower() != "iscriptevaluator.exe":
@@ -35,43 +58,56 @@ def skip_evaluator(verb, cmd):
 # HKCU\Software\Valve\Steam\ActiveProcess on every call and Broforce calls it 80-150 times a second (19 of the 24
 # calls per poll, ~0.4 s of the load). targets/android/steam/proton-overlay builds Valve's own wine tag with
 # 0001-kernelbase-wow32-direct-open.patch (7 calls); it replaces Proton's file only while that file is the exact Valve
-# build it was made from (a Proton update brings a new file: left alone until rebuilt). Valve's is kept as .valve.
-# Real fix: the patch upstream (Wine kernelbase), then Valve's next Proton has it - drop this table and the overlay.
-OVERLAY = {  # Proton-relative path: (sha256 of Valve's file, sha256 of ours, our file next to this script)
-    "files/lib/wine/aarch64-windows/kernelbase.dll": (
-        "21ab141457dc3a360d34540b362ee21bf3edb69d629a29a820b0344652a4a8a0",
-        "a3f08252c4ce37840ba7bd67d0041dae0adc8d6c29aacadfee459361694ba736", "overlay-kernelbase.dll"),
-}
+# build it was made from (powos_steam_tools.OVERLAYS: one row per Valve build). Checked on EVERY launch, so after a
+# Proton update (Steam puts Valve's new file in) it goes back in by itself when we have a row for that build; for a
+# build we don't, Valve's file stays and the launch says why, once per Valve build ("fix kernelbase-wow32 not
+# applied: ..." on stderr and in ~/.cache/powos/steam-fixes/kernelbase-wow32.txt, which powos-steam-fixes reports).
+# Valve's file is kept as .valve (refreshed to the build being replaced).
+# Real fix: the patch upstream (Wine kernelbase), then Valve's next Proton has it - drop the table and the overlay.
+FIX_DIR = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "powos/steam-fixes")
 
 
-def sha256(path):
-    import hashlib
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for b in iter(lambda: f.read(1 << 20), b""):
-            h.update(b)
-    return h.hexdigest()
+def note_fix(name, line):
+    """The fix's state, one line, kept for powos-steam-fixes; said on stderr only when it changed."""
+    f = os.path.join(FIX_DIR, name + ".txt")
+    try:
+        with open(f) as old:
+            if old.read().strip() == line:
+                return
+    except OSError:
+        pass
+    sys.stderr.write("powos-entry: %s\n" % line)
+    try:
+        os.makedirs(FIX_DIR, exist_ok=True)
+        with open(f + ".tmp", "w") as new:
+            new.write(line + "\n")
+        os.replace(f + ".tmp", f)
+    except OSError:
+        pass
 
 
 def apply_overlay():
-    here = os.path.dirname(os.path.realpath(__file__))
-    for rel, (valve, ours, name) in OVERLAY.items():
-        dst, src = os.path.join(PROTON, rel), os.path.join(here, name)
-        try:
-            if not os.path.isfile(src) or os.path.getsize(src) == os.path.getsize(dst) and sha256(dst) == ours:
-                continue  # not packaged, or in place already
-            if sha256(dst) != valve or sha256(src) != ours:
-                continue  # another Proton build (or a damaged copy): Valve's file stays
-            import shutil
-            if not os.path.exists(dst + ".valve"):
-                shutil.copy2(dst, dst + ".valve")
-            shutil.copyfile(src, dst + ".powos-tmp")
-            os.chmod(dst + ".powos-tmp", 0o555)
-            os.replace(dst + ".powos-tmp", dst)  # atomic: a running game keeps the file it mapped
-            sys.stderr.write("powos-entry: %s -> PowOS build\n" % rel)
-        except OSError as e:
-            sys.stderr.write("powos-entry: overlay %s: %s\n" % (rel, e))
-
+    if T is None:
+        note_fix("kernelbase-wow32", "fix kernelbase-wow32 not applied: powos_steam_tools.py not found")
+        return
+    import shutil
+    for rel, state, why, row in T.overlay_status(PROTON, HERE):
+        if state == "apply":
+            dst, src = os.path.join(PROTON, rel), os.path.join(HERE, row[3])
+            try:
+                if not os.path.isfile(dst + ".valve") or T.sha256(dst + ".valve") != row[1]:
+                    shutil.copy2(dst, dst + ".valve")
+                shutil.copyfile(src, dst + ".powos-tmp")
+                os.chmod(dst + ".powos-tmp", 0o555)
+                os.replace(dst + ".powos-tmp", dst)  # atomic: a running game keeps the file it mapped
+                sys.stderr.write("powos-entry: %s -> PowOS build\n" % rel)
+                note_fix("kernelbase-wow32", "fix kernelbase-wow32 applied: %s (%s)" % (rel, row[4]))
+            except OSError as e:
+                note_fix("kernelbase-wow32", "fix kernelbase-wow32 not applied: %s: %s" % (rel, e))
+        elif state == "ours":
+            note_fix("kernelbase-wow32", "fix kernelbase-wow32 applied: %s (%s)" % (rel, row[4]))
+        else:
+            note_fix("kernelbase-wow32", "fix kernelbase-wow32 not applied: " + why)
 
 def main():
     verb, cmd = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("waitforexitandrun", [])
@@ -93,4 +129,5 @@ def main():
     os.execv(entry, [entry, "--verb=" + verb, "--", os.path.join(PROTON, "proton"), verb] + cmd)
 
 
-main()
+if __name__ == "__main__":
+    main()

@@ -147,6 +147,19 @@ would not change anything: no hop uses UBWC.
   source cache is now keyed by commit - the old fixed `mesa-src.tar.gz` name would have kept serving ef25369b).
   How to move the pin next time: the PKGBUILD header.
 
+## Turnip pin moved onto Mesa main (version-proof, 2026-11-07)
+- **Why:** the fork's dev/adreno-main tip b2d3bc3e (11-06) had no source change since eb3e7fd4 - 8 commits, all CI -
+  so pinning the fork could never be "latest". Upstream Mesa main had 9 Turnip commits since (2fae1d0d = our 0003,
+  31f1cedd KGSL A635 macrotile, ce116a01 CCU depth invalidation, c8c572b0 multiview indirect, ...).
+- **Now:** source = Mesa main 3a2cd129 (2026-11-07) + `0000-lfdevs-android-container-turnip.patch` (the fork's delta
+  vs its merge base 18879c94, Turnip paths only: tu_knl_kgsl.cc, msm_kgsl.h, devices table, tu_device/tu_wsi/
+  tu_clear_blit/tu_cmd_buffer, X11 WSI/dri3/loader/os_file, meson options - merges cleanly onto main) + 0001 + 0002
+  (both apply unchanged). 0003 dropped (upstream). Package 27.0.0_devel.20261107.g3a2cd129-1.
+- The rootfs's Gallium Mesa (rootfs-in-container.sh MESA_SRC_COMMIT) stays the fork's eb3e7fd4: it needs the fork's
+  Gallium KGSL work (freedreno_screen/fd6/kgsl drm), which doesn't merge onto main without conflicts (EGL wayland).
+- prepare() now dry-runs each patch with -N first: a patch upstream took stops the build by name instead of being
+  reversed or half-applied. docs/research/version-proof-gaming.md has the whole inventory.
+
 ## Which driver the game runs (bf-which-driver, 2026-11-04) - NOT ours
 - **Broforce runs on x86 Proton, not Proton ARM64.** config.vdf CompatToolMapping 274190 = `proton_experimental`;
   compatdata/274190/config_info = `Proton - Experimental` 11.0-100 (powos-steam-compat mode "kept": the prefix predates
