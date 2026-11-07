@@ -31,8 +31,7 @@
       "docker compose --project-directory /Users/macback/Projects/PowStation/enroll -f /Users/macback/Projects/PowStation/enroll/docker-compose.yml --project-name powos-enroll stop powos-enroll"
     ],
     "keep": [
-      "powos-enroll-data",
-      "/Users/macback/.claude-tenants/enrolled"
+      "powos-enroll-data"
     ]
   },
   "limits": {

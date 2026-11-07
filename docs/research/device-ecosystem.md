@@ -77,8 +77,8 @@ tree.
 
 Principles kept from REMOTE-POWOS §2.1: a device is authoritative for itself and works offline; keys are identity,
 names are for people; every cross-device call is authenticated as a device; no root channel; actions are executed
-by the owning device's own daemon. Added here: **capabilities, not device types**; **PowAuth approves, the realm
-issues**; **one registry** (the existing unit/fleet registry), not a new store.
+by the owning device's own daemon. Added here: **capabilities, not device types**; **PowAuth holds every device
+credential** (D7); **one registry** (the existing unit/fleet registry), not a new store.
 
 ### D1. Device identity
 
@@ -112,19 +112,97 @@ device with no keyboard. Flow:
 5. The device applies the bundle itself: `endpoint.conf`, its WireGuard config (Linux: NetworkManager; Android:
    the PowOS app as `VpnService` or the WireGuard app via its import intent), trust roots. Nothing typed by hand.
 
-**AI access per device.** The authority gains device credentials: the enrollment service registers
-`device-id -> tenant` with claude-rate-limiter and hands the device a per-device bearer (or the device presents its
-certificate), so revoking one device doesn't rotate the tenant for everyone. Until the authority has that, the bundle
-carries the tenant secret and the registry records which devices hold it (revocation then rotates it, deliberately).
+**AI access per device.** Superseded by D7 (owner 2026-11-07): the device's PowAuth key is its AI credential;
+claude-auth asks PowAuth who it is and maps the PowAuth group `ai-<tenant>` to the tenant. No device map in the proxy.
 
 **Revocation** (gap 4): from the Devices app on any enrolled device (step-up: a fresh PowAuth login) or
-`powos devices revoke <id>`. The enrollment service marks the device revoked in the registry, removes its WireGuard
-peer, drops its claude-auth credential and its PowAuth sessions, and every device's agent refuses its certificate
+`powos devices revoke <id>`. The enrollment service deletes the device's PowAuth principal (D7: its key then fails
+everywhere at once), marks it revoked in the registry, removes its WireGuard peer, and every device's agent refuses its certificate
 (revocation list from the registry, cached for offline). The slice already revokes per pairing: `DELETE /v1/peers/<id>`
 from any paired device, or `powos devices revoke` on the device itself.
 
 **Offline fallback.** Two devices on one LAN without the hub can still pair directly with the code shown on the
 target's screen (the slice's flow, D4). Those pairings stay local and are listed as "paired, not enrolled".
+
+### D7. Identity and credentials belong to PowAuth (owner 2026-11-07)
+
+Owner: "why is claude rate limiter dealing with device enrolling? wtf" / "yeah powauth has secret handling". So:
+**PowAuth owns device identity, per-device credentials and revocation; services only consume a PowAuth-verified
+identity.** Identity (who) and secret values (what a service needs, e.g. TURN_SECRET) are split: identity is this
+section; a fleet secret store for values is phase 2 (D8).
+
+**Mechanism: a device is a PowAuth user with one API key.** Each enrolled device is user `dev-<device id>` in
+group `devices`, plus role groups `devices-*` (`devices-approvers`) and `ai-<tenant>`. Its credential is a PowAuth
+API key (`pk_` + 64 hex, PowAuth stores only the SHA-256). Chosen because PowAuth already has every part: hashed
+API keys with revoke and last-used, the users database with an admin API, and API-key auth in forwardAuth. Rejected:
+
+- an OIDC client per device (client_credentials): Authelia's clients are static `configuration.yml` entries, so
+  every enroll/revoke would hand-edit secrets into config and restart PowAuth (drops every session);
+- PowAuth's OIDC device-code grant as the enrollment flow: also a static client, and the approval would need a
+  browser session (no public routes, no web pages for now). Possible later behind the same device API;
+- a device store with its own tokens in powos-enroll or claude-auth (the first slice): two more credential
+  stores and revocation paths, which is what the owner rejected.
+
+PowAuth additions (PowAuth branch `agent/device-principals`, `docs/powauth/API.md`):
+
+| endpoint | who | what |
+|---|---|---|
+| `POST /api/admin/devices/{id}` `{display_name, groups}` | `admins` or `device-enrollers` | create `dev-<id>` (or re-issue: old keys revoked) + mint its key, returned once; groups only `devices-*`/`ai-*` |
+| `DELETE /api/admin/devices/{id}` | same | revoke every key, delete the user; idempotent; never touches a non-device account |
+| `GET /api/admin/devices` | same | list, no secrets |
+| `GET /api/authz/apikey[?group=]` | any key holder | 200 + `Remote-User/Groups/Name` and `{username, groups}`, or 401/403; no session or https needed |
+| `authelia storage user apikey create <user> --file F` | shell on PowStation | a service account's key into a new 0600 file, never stdout |
+
+`device-enrollers` is accepted by the device endpoints only, so the enrollment service's account can create and
+delete device principals and nothing else (no fleet administration, no human accounts, no admin groups). Every key
+check needs a live key **and** an existing, enabled user.
+
+**Flow.** powos-enroll (PowStation branch `agent/powauth-devices`) runs the same LAN-only device-code flow (D2). On
+approval it calls `POST /api/admin/devices/<id>` with its own `device-enrollers` key (a compose secret) and hands the
+device the returned key once (`device_token`, and as `ai.token` for older agents). Revoke and self-unenroll call
+`DELETE` first; if PowAuth can't, the device stays enrolled (502/503), never half-revoked. Device calls to
+powos-enroll are verified by PowAuth on every request. Its `registry.json` keeps only non-secret metadata (name, kind,
+platform, caps, agent address, cert pin, approver, AI tenant name, who approved, when, revoked).
+
+**How services consume it.**
+
+- *Introspection* (a service reachable directly on the Docker network must not trust headers): call
+  `GET /api/authz/apikey` with the presented bearer. powos-enroll does this per request; claude-auth (branch
+  `agent/powauth-identity`) does it with a 30 s cache by key hash and maps `user:`/`group:` to tenants via
+  `POWAUTH_TENANT_MAP` - generic, no device concept; a pk_ key never falls back to the host subscription.
+- *forwardAuth* on `.pow` routes: `powauth-key@file` / `powauth-device@file` (PowStation
+  `config/traefik/dynamic/powauth-key.yml`), after `local-only@docker`. Not attached to any route yet.
+- *Public routes*: Authelia rule `group:devices` -> `deny` on `*.powback.com`, first in the list, so a device key
+  never opens a browser route through the legacy `/api/verify` API-key path. PowAuth policy is otherwise unchanged.
+
+**Later:** device certificates (P4) can bind the PowAuth principal (`sub = dev-<id>`) instead of a bearer; the key
+then only bootstraps. WireGuard peers (P2) are created and removed by the same approve/revoke steps.
+
+### D8. Phase 2: one fleet secret store (OpenBao), PowAuth as its auth method
+
+Secret *values* that services and devices need are scattered today: `/etc/powstation/turn.env` (TURN_SECRET),
+claude-auth `AUTH_TENANTS`/tenants.json secrets and `AUTH_BROKER_SECRET`, `~/.claude-tenants/codex-tenants.json`,
+WireGuard server/peer keys, per-project `.env`/`env_file`, and PowAuth's own secrets inline in its git-tracked
+`configuration.yml`. Design:
+
+- **One small OpenBao** (the open Vault fork) on PowStation, its own compose project, internal on the `traefik`
+  network plus `vault.pow` (LAN/VPN, `local-only@docker`); integrated raft storage on local disk (`state`, backup
+  required); file audit device; registered unit. No public route.
+- **Auth = PowAuth identity.** OpenBao's `jwt` auth method trusts PowAuth's existing OIDC JWKS. A device or service
+  exchanges its PowAuth API key for a short-lived JWT (a small PowAuth endpoint, `sub`/`groups` claims, `aud=openbao`,
+  ~10 min) and logs in with it; the OpenBao role's `bound_claims`/`groups_claim` pick policies. People use the
+  `oidc` method with one static PowAuth OIDC client `openbao`. Revoking the PowAuth principal ends access at the next
+  login; token TTLs bound the rest.
+- **Policies per group**: `devices` (common endpoint values), `ai-<tenant>` (nothing secret is needed: claude-auth
+  verifies the PowAuth key), per-service accounts `svc-<unit>` for their own paths (`kv/powstation/<unit>/*`).
+- **Stays local** (offline start, no circular dependency): PowAuth's own secrets (moved out of `configuration.yml`
+  into Authelia `*_FILE` secret files first), OpenBao's unseal material, the enrollment service's own key, and
+  anything PowOS needs to boot. OpenBao down = services keep their last rendered secrets; nothing starts blank.
+- **Delivery**: OpenBao Agent (or `pow-compose` at `up`) renders a service's secrets into a tmpfs file/`env_file`,
+  so compose files stop naming plaintext files; rotation re-renders and restarts only that unit.
+- **Migration of an existing `.env`** (per file, in this order): list key *names* only; `bao kv put` from the file
+  via stdin (never echoed); switch the consumer to the rendered file; verify the service; delete the plaintext file;
+  then **rotate** the value (it lived in plaintext); record the path in the unit's registry record.
 
 ### D3. Registry: the existing unit/fleet registry, one more record kind
 
@@ -246,15 +324,45 @@ The same enrollment and the same protocol on a non-rooted phone (memory: non-roo
 - [ ] P4 Realm CA + device certificates; mutual TLS replaces per-pair tokens; revocation list cached offline
 - [ ] P5 Non-root: the PowOS app serves the agent protocol (D5) and does enrollment + VPN; remove the adb HACK
 - [ ] P6 PowStream: `stream_source`/`stream_target` caps, stream tickets through the agent, "Stream from" in the app
-- [x] P7 claude-auth per-device credentials (`device -> tenant`), revocation without rotating the tenant: branch
-      `agent/devices-enroll` in claude-rate-limiter (`src/enrolled-devices.ts`, proxy path only), not deployed
+- [x] ~~P7 claude-auth per-device credentials (`device -> tenant` map in the proxy)~~ - rejected by the owner
+      2026-11-07; branch `agent/devices-enroll` in claude-rate-limiter is marked SUPERSEDED (not merged). See P10.
+- [x] P10 PowAuth owns device identity (D7): PowAuth `agent/device-principals` (device principals API, key
+      identity endpoint, service-key CLI, tests `TestDevice*`), PowStation `agent/powauth-devices` (powos-enroll on
+      PowAuth principals, metadata-only registry + v1 migration, devices denied on public routes, `powauth-key@file`,
+      test against a fake PowAuth), claude-rate-limiter `agent/powauth-identity` (PowAuth-verified identity -> tenant,
+      `test:powauth`). Built and pushed 2026-11-07, nothing deployed
+- [ ] P10.1 Deploy PowAuth: merge `agent/device-principals`, build `powauth:latest`, redeploy `authelia` on its normal
+      deployment (sessions are in redis and survive the restart)
+- [ ] P10.2 Merge PowStation `agent/powauth-devices` into the main checkout with the owner's pending
+      `configuration.yml` edits (the new `group:devices` deny rule goes first in `rules:`); reload Traefik's file config
+- [ ] P10.3 Bootstrap powos-enroll's account: `svc-powos-enroll` in `device-enrollers`, key via
+      `authelia storage user apikey create ... --file`, secret file per `enroll/README.md`; redeploy `powos-enroll`
+- [ ] P10.4 Re-enroll the devices enrolled by the first slice (rows marked `reenroll`; their old tokens work nowhere)
+- [ ] P10.5 claude-auth: merge `agent/powauth-identity`, set `POWAUTH_VERIFY_URL=http://authelia:9091/api/authz/apikey`
+      and `POWAUTH_TENANT_MAP={"group:ai-default":"default", ...}` on the authority; then `powos devices ai-apply`
+- [ ] P10.6 Delete `~/.claude-tenants/enrolled/` if it exists (the rejected map); remove the `ai.token` duplicate
+      from the enroll response once every agent reads `device_token`
+- [ ] P10.7 Approver step-up: approving/revoking from the Devices app asks for a fresh PowAuth login (D2), once
+      PowAuth's portal is reachable for it without a public route
+- [ ] P11 Phase 2 secret store (D8), in order:
+  - [ ] P11.1 PowAuth's own secrets out of git-tracked `configuration.yml` into Authelia `*_FILE` secret files; rotate
+        them (they are in git history)
+  - [ ] P11.2 OpenBao on PowStation (compose project, raft, audit file, `vault.pow` LAN-only, registered unit,
+        unseal procedure documented and local)
+  - [ ] P11.3 PowAuth: API key -> short-lived JWT exchange; OpenBao `jwt` auth on PowAuth's JWKS, roles by group;
+        `oidc` for people via one static client `openbao`
+  - [ ] P11.4 TURN_SECRET: `kv/powstation/coturn`; `write-turn-env.sh` renders from it; rotate
+  - [ ] P11.5 claude-auth tenant + Codex tenant secrets and `AUTH_BROKER_SECRET` (authority + followers); rotate
+  - [ ] P11.6 WireGuard server key and peer configs (devices keep their own private keys)
+  - [ ] P11.7 Every remaining project `.env`/`env_file` secret, one unit at a time (D8 migration steps)
+  - [ ] P11.8 Rotation schedule per secret + audit review in PowDash
 - [ ] P8 Retire the runtime dev channels (vadb mirror, unrestricted `powos-phone` key) - REMOTE-POWOS M1/M2/M8
 - [ ] P9 Enroll the rest: macback, gpu-195 (status + guarded sleep only), laptop/tablet, TV (PowFrame)
 
 ## 5. Open questions
 
-- PowAuth's own OIDC device flow: not used for P2 (the enrollment service's flow needs no PowAuth config change); revisit
-  if other realm clients want OIDC tokens.
+- PowAuth's own OIDC device flow: not used (D7: static clients, browser approval); revisit if other realm clients want
+  OIDC tokens. OpenBao's unseal: owner-held shares vs a local auto-unseal key (offline start) - decide at P11.2.
 - Policy for `enroll.powback.com`: PowAuth's default `one_factor` today; `two_factor` as designed needs the owner's
   second factor registered first.
 - Who may sleep a shared box: today `force` is any paired device of the owner; with guests (P4 policy) only owners.
