@@ -482,17 +482,31 @@ public final class WindowTasks {
         boolean fullScreen = f.length > 4 && f[4].equals("fullscreen");
         String appId = f.length > 2 ? f[2] : "";
         String title = f.length > 3 ? f[3] : "";
-        // A web window already, or a new window with web windows on: home's (a window that has a task keeps it; a
-        // full-screen application - a game - stays a full-screen task until web windows have a full screen of their own).
+        // A web window already, or a new window with web windows on: home's (a window that has a task moves into one,
+        // [moveTaskToWeb]; a full-screen application - a game - stays a full-screen task until web windows have a full screen of their own).
         // A window of an app whose other window is a task, or a full-screen web window (which covers every other web
         // window): a task too, so it opens IN FRONT of that window with the focus. As a web window of home it was
         // under Steam's task, unseen (the user, 10-30 20:29: "Steam got a dialog window which I couldn't see").
         Integer parent = parents.get(id);
         boolean withTask = parent != null && !WebWindowSource.isWeb(parent) && (tasks.containsKey(parent) || opening.containsKey(parent));
         boolean overFull = parent != null && WebWindowSource.isWeb(parent) && WebWindowSource.coversScreen(parent);
+        PowosWindowActivity had = tasks.get(id);
         if (web && (withTask || overFull) && !WebWindowSource.isWeb(id))
             Log.i(TAG, "open " + id + " (" + appId + ", \"" + title + "\"): a task, in front of window " + parent
                     + (withTask ? "'s task" : ", a full-screen web window"));
+        // A window that got a task while web windows didn't take windows (folded, or home's page not up yet after the
+        // app restarted: KWin's "new windows as tasks: forgotten until the app says again") and is shown again now that
+        // they do: it moves into a web window, its task goes. Kept as a task it was raised behind the unfolded home -
+        // Steam's main window (window 10, 11-07 16:25): a tap on Steam showed its task "live", then "in the background"
+        // at once, no web window in 161 s (ww-popups.sh "no viewable Steam main window").
+        else if (moveTaskToWeb(web, had != null, WebWindowSource.isWeb(id), fullScreen, had != null && fullScreen(had),
+                LaunchWindows.claims(appId), WebWindowSource.wanted()) && WebWindowSource.offer(id, appId, title)) {
+            tasks.remove(id, had);
+            opening.remove(id);
+            Log.i(TAG, "open " + id + " (" + appId + "): its task " + had.getTaskId() + " moved into a web window");
+            had.replaced();
+            return;
+        }
         // SL1: a game's launch window waiting for it (opened folded, then unfolded mid-launch) takes it, not a web window.
         else if (web && (WebWindowSource.isWeb(id) || (!fullScreen && !tasks.containsKey(id) && !opening.containsKey(id)
                 && !LaunchWindows.claims(appId))) && WebWindowSource.offer(id, appId, title))
@@ -547,6 +561,16 @@ public final class WindowTasks {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NEW_DOCUMENT);
         Log.i("PowosDock", "window task for " + id + " (" + appId + ") started over the " + (desktopOnScreen() ? "Plasma desktop" : "home"));
         context.startActivity(i, options);
+    }
+
+    /**
+     * [open]'s rule for a KWin "open" (show again) of a window that has a task ([hasTask]) and isn't a web window: it
+     * moves into a web window when web windows take windows now ([wanted], [web]), unless it is full screen (a game:
+     * its immersive task, now or as its task was made) or a game's launch window claims its app ([claimed]).
+     */
+    public static boolean moveTaskToWeb(boolean web, boolean hasTask, boolean isWeb, boolean fullScreen, boolean taskFullScreen,
+            boolean claimed, boolean wanted) {
+        return web && hasTask && !isWeb && !fullScreen && !taskFullScreen && !claimed && wanted;
     }
 
     /** Window [id]'s task data: the session in it too, so a new KWin's window 1 is a new task, not the old one's. */

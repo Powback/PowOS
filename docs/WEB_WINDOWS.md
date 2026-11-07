@@ -894,11 +894,16 @@ Popups still render inside the toplevel's buffer (kwin 0013) and are confined to
 window draws outside its frame - the price is Z3 (S7 below).
 
 **Fallbacks (the old path stays).** Web windows off, folded, no home bridge, a KWin without `size`, a full-screen
-application (`open ... fullscreen`: a game stays a full-screen task), or a window that already has a task: a
+application (`open ... fullscreen`: a game stays a full-screen task), or a window whose parent is a task: a
 `PowosWindowActivity` task exactly as before. A window offered to the page and not taken within 3 s
 (`LINUX_ADOPT_MS`: no page, a page from before S6), or `openLinux` without a surface: `WebWindowSource.fallback` →
 `WindowTasks.openAsTask`. Home's bridge closing (`closeAll`: the activity destroyed, a fold) hands every Linux web
-window back as a task (`handBack`), never quits the app. Launch windows (LaunchWindows' splash tasks) are not opened
+window back as a task (`handBack`), never quits the app. Such a task is not kept for good: KWin's next `open` (show
+again: a launch, a tap on the app) of a window that has a task, while web windows take windows, moves it into a web
+window and finishes its task without telling KWin (`WindowTasks.moveTaskToWeb`, then `replaced()`); full-screen ones
+(games) and a game's launch window keep theirs. Before (11-07 16:25), Steam's main window, handed back as a task by an
+app restart, was raised as that task behind the unfolded home on every tap: "live", then "in the background" at once,
+no web window in 161 s. Launch windows (LaunchWindows' splash tasks) are not opened
 while web windows want Linux windows (`Runtime.openRooted`); a launcher tap on a Linux app that has a web window
 brings it to the page (`ui/webwindows.tsx linuxWindow`), as an Android app's does.
 
