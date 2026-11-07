@@ -38,6 +38,15 @@ ShowInterstitials" and starts nothing until it is answered. It is shown in front
 home and the launch waited forever: ABZU and Desk Job 2026-10-23, no game in 265 s), and once it closes the helper
 waits WAIT_GAME_S again for the game's window.
 
+Steam's dialogs are told by what they are, not their caption (steam_dialog): since 11-07 every steamwebhelper window
+is nameless - no "Steam Dialog" - so ABZU's cloud sync question (SynchronizingCloud "syncfailed", 15:44) stayed behind
+home and four later taps did nothing visible. A steamwebhelper toplevel of a fixed size (min = max size hints: Steam's
+popups, its main window has only a minimum) or transient for another window is a dialog. And a question already up
+counts too: a launch Steam holds waiting on the user (held_ask: the game's newest GameAction in console_log is "waiting
+for user response to ...") swallows every later steam://rungameid of the game, so a tap then brings that dialog
+forward instead of waiting for a window that won't come (the placeholder says "Steam is asking something":
+powos-sleep-gui SteamLaunches).
+
 COMMAND's output goes to $XDG_RUNTIME_DIR/open-task/<app>.log, never to the caller's pipe; while this helper runs it
 relays that output to its own (the caller's "couldn't start: <why>" reads it). COMMAND outlives the helper and the
 caller: on the caller's pipe it would write into a pipe nobody reads once the caller goes (the PowOS app restarting for
@@ -79,6 +88,62 @@ SHOW_TRIES = 10
 SHOW_RETRY_MS = 500
 STEAM_DIALOG = "Steam Dialog"  # the caption of Steam's modal dialogs (its web UI's popups)
 STEAM_GAME = re.compile(r"steam://rungameid/(\d+)|^steam_app_(\d+)$")
+# A dialog shown this long before it closed was a question the user answered: its time isn't the launch's.
+ASKED_S = 5
+
+
+def steam_dialog(caption, resource_name, resource_class, fixed, transient):
+    """Is this KWin window one of Steam's dialogs (its web UI's popups: a cloud conflict, an EULA or publisher notice,
+    an update, the launch-option picker, "game is running", the install folder)? By what it is, not its caption: a
+    steamwebhelper toplevel of a fixed size (min = max size hints) or transient for another of Steam's windows. Its
+    main window (minimum size only) and its menus (not normal windows: never reported) aren't. Recorded 11-07 on the
+    phone (xprop): main 2268x1350 min, no max; the cloud sync question 1364x646 min = max, nameless, no transient."""
+    if caption == STEAM_DIALOG:
+        return True
+    if "steamwebhelper" not in (resource_name.lower(), resource_class.lower()):
+        return False
+    return fixed == "1" or transient == "1"
+
+
+GAME_ACTION = re.compile(rb"^\[([0-9-]+ [0-9:]+)\] GameAction \[AppID (\d+), ActionID (\d+)\] : (.*?)\r?$", re.M)
+
+
+def held_ask(game, log_path=None, since=None):
+    """(ActionID, what) of a launch of [game] Steam holds waiting on the user, else None: the game's newest GameAction
+    in console_log ends on "LaunchApp waiting for user response to <what>" (tools/phone/verify/bf-ask.sh's test).
+    Such a launch is never dropped - every later steam://rungameid of the game joins it and nothing starts until it is
+    answered. A line from before [since] (epoch s: this Steam's start) belongs to a Steam that's gone."""
+    log_path = log_path or os.path.join(STEAM, "logs/console_log.txt")
+    try:
+        with open(log_path, "rb") as f:
+            f.seek(max(0, os.fstat(f.fileno()).st_size - (4 << 20)))
+            data = f.read()
+    except OSError:
+        return None
+    last = None
+    for m in GAME_ACTION.finditer(data):
+        if m.group(2).decode() == game:
+            last = m
+    if not last:
+        return None
+    msg = last.group(4).decode(errors="replace")
+    if not msg.startswith("LaunchApp waiting for user response to "):
+        return None
+    if since is not None:
+        try:
+            if time.mktime(time.strptime(last.group(1).decode(), "%Y-%m-%d %H:%M:%S")) < since - 1:
+                return None
+        except ValueError:
+            return None
+    return last.group(3).decode(), msg.removeprefix("LaunchApp waiting for user response to ").strip()
+
+
+def steam_started():
+    """When the running Steam started (its pid file's mtime, epoch s), else None."""
+    try:
+        return os.path.getmtime(os.path.expanduser("~/.steam/steam.pid"))
+    except OSError:
+        return None
 
 REPORT_SCRIPT = """
 const helper = ["%(service)s", "/", "org.powos.OpenTask"];
@@ -86,9 +151,12 @@ function report(w, existing) {
     if (!w || !w.normalWindow || w.skipTaskbar) {
         return;
     }
+    // A fixed size (min = max size hints) and transient-for: what tells Steam's nameless dialogs (steam_dialog).
+    const lo = w.minSize, hi = w.maxSize;
+    const fixed = !!(lo && hi && lo.width > 0 && lo.width === hi.width && lo.height === hi.height);
     callDBus(helper[0], helper[1], helper[2], "Window", w.internalId.toString(), String(w.pid),
              String(w.desktopFileName), String(w.resourceClass), String(w.resourceName), existing ? "1" : "0",
-             String(w.caption));
+             String(w.caption), fixed ? "1" : "0", w.transient ? "1" : "0");
 }
 for (const w of workspace.windowList()) {
     report(w, true);
@@ -320,7 +388,7 @@ def main():
     # picked: the window being shown; shown: a window of ours was shown as a task (the status said "task"); tries: shows
     # KWin refused for the picked window so far; picked_at: when it came (the launch record's time).
     state = {"child": None, "picked": None, "existing": [], "pids": {}, "done": False, "shown": False, "tries": 0,
-             "picked_at": None, "gen": 0, "seen": [], "dialog": None, "timer": 0}
+             "picked_at": None, "gen": 0, "seen": [], "dialog": None, "dialog_at": None, "dialogs": [], "timer": 0}
 
     def start_command():
         if game:
@@ -436,6 +504,13 @@ def main():
         wake(window)
         show(window)
 
+    def ask(window, why):
+        """A Steam dialog in front now, whatever was shown; the game's window after it."""
+        print(f"powos-open-task: Steam asks before the game starts ({why}) - its dialog {window} in front",
+              file=sys.stderr, flush=True)
+        state["dialog"], state["dialog_at"], state["picked"] = window, time.monotonic(), None
+        pick(window)
+
     def settled(window):
         """The shown window of a launch lasted SETTLE_S: it's the app's - done."""
         if state["picked"] != window or state["done"] or window == state["dialog"]:
@@ -446,15 +521,15 @@ def main():
 
     @ClassInfo({"D-Bus Interface": "org.powos.OpenTask"})
     class Service(QObject):
-        @Slot(str, str, str, str, str, str, str)
-        def Window(self, window, pid, desktop_file, resource_class, resource_name, existing, caption):  # noqa: N802
-            if existing != "1" and game and caption == STEAM_DIALOG and not state["done"]:
-                # Steam asks before the game starts: in front now, whatever was shown; the game's window after it.
-                print(f"powos-open-task: Steam asks before the game starts - its dialog {window} in front",
-                      file=sys.stderr, flush=True)
-                state["dialog"], state["picked"], state["pids"][window] = window, None, pid
-                state.pop("launch", None)  # the user's answer time isn't the launch's: not recorded
-                pick(window)
+        @Slot(str, str, str, str, str, str, str, str, str)
+        def Window(self, window, pid, desktop_file, resource_class, resource_name, existing, caption, fixed,  # noqa: N802
+                   transient):
+            dialog = bool(game) and steam_dialog(caption, resource_name, resource_class, fixed, transient)
+            if dialog:
+                state["pids"][window] = pid
+                state["dialogs"].append(window)
+            if existing != "1" and dialog and not state["done"]:
+                ask(window, "a new dialog")
                 return
             if existing == "1":
                 if matches(desktop_file, resource_class, resource_name, pid):
@@ -474,11 +549,18 @@ def main():
             # The launch's window closed before it settled (a throwaway one): the next matching window is shown.
             if window in state["seen"]:
                 state["seen"].remove(window)
+            if window in state["dialogs"]:
+                state["dialogs"].remove(window)
             if window == state["dialog"] and not state["done"]:
                 # Answered: the game starts now (or the user said no) - its window gets a fresh WAIT_GAME_S.
+                if time.monotonic() - state["dialog_at"] >= ASKED_S:
+                    state.pop("launch", None)  # the user's answer time isn't the launch's: not recorded
                 state["dialog"] = None
                 if state["picked"] == window:
                     state["picked"] = None
+                if state["dialogs"] and held_ask(game, since=steam_started()):
+                    ask(state["dialogs"][-1], "another dialog still up")  # it asks on (two questions in a row)
+                    return
                 state["timer"] += 1
                 QTimer.singleShot(wait_s * 1000, lambda g=state["timer"]: g == state["timer"] and timed_out())
                 if state["seen"]:
@@ -502,8 +584,13 @@ def main():
                 # Its last one: windowList() is in stacking order, the top one last.
                 pick(state["existing"][-1])
                 return
-            start_command()
+            held = held_ask(game, since=steam_started()) if game and state["dialogs"] else None
+            start_command()  # a held launch: the tap joins it (Steam starts nothing new) - the dialog is what shows
             QTimer.singleShot(wait_s * 1000, lambda g=state["timer"]: g == state["timer"] and timed_out())
+            if held:
+                # Steam already asks (an earlier tap's launch, its dialog behind home): that question in front - the
+                # top one of Steam's dialogs (windowList() is in stacking order).
+                ask(state["dialogs"][-1], f"launch {held[0]} waits for an answer to {held[1]}")
 
         @Slot(str)
         def Shown(self, ok):  # noqa: N802
@@ -529,6 +616,12 @@ def main():
     def timed_out():
         # No window that lasted came in time: a launch that showed one leaves it at that (the status said "task").
         if state["done"]:
+            return
+        if state["dialog"]:
+            # Steam's question is still up: the user answers in their own time, and the game's window after it must
+            # still come in front - the wait goes on while it is open (Closed starts a fresh one once it goes).
+            state["timer"] += 1
+            QTimer.singleShot(wait_s * 1000, lambda g=state["timer"]: g == state["timer"] and timed_out())
             return
         if state.get("launch"):
             state.pop("launch").done(False)
