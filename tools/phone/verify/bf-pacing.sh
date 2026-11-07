@@ -14,7 +14,10 @@
 # callbacks/timeouts, KWin drawn, the consumer's queues + waits (logcat "pacing:"), SurfaceFlinger's actual presents, the
 # panel's mode + render range) and skin temperature - the first stage whose rate drops is the cap (games-120).
 # Restores: dxvk.conf, the game + Steam (bf-stop.sh; Steam restarted -silent if it ran before), the front activity.
-# Exit 3 on a real touch (re-queued), 5 when the game doesn't start. Artefacts: OUT (~/.cache/powos-verify/bfp-*).
+# Exit 3 on a real touch (re-queued), 5 when the game doesn't start. An INVALID (exit 3 too) with nobody on the phone is
+# the queue's "precond" (queue.sh rc3_kind, from the touch source): a FAIL precondition at its 3rd try, not endless
+# retries; its line names what home showed instead (homewhy: the switcher up, the web windows). QUEUE_NEXT_APP=APP
+# (the queue's next job is this game too): the game is left running ("WARM:"), and that job reuses it for the same mode. Artefacts: OUT (~/.cache/powos-verify/bfp-*).
 # Valid only with the game ON SCREEN: a display ON, its task (PowosWindowActivity) in front and that task's SurfaceView
 # layer there (unfolded: home in front and its full-screen web window's layer composed, bf-onscreen.sh), before and after the 30 s - else "INVALID: ..." and exit 3 (the next window). The 03:58 run of
 # 2026-10-24 measured a game with no task surface (no SurfaceView layer, nothing resumed, no screen recording: the
@@ -57,6 +60,17 @@ st=$OUT/push; mkdir -p "$st"; for f in bf-start.sh bf-stop.sh bf-window.sh bf-pr
   cp "$here/$f" "$st/powos-$f"; done
 "$A" push "$st"/powos-bf-*.sh /data/local/tmp/ >/dev/null || { echo "ENV: can't push the check's scripts"; exit 5; }
 gs=$(asuser bf-game.sh state | tail -1); users=0
+# Warm hand-over (queue.sh order_jobs + QUEUE_NEXT_APP): the job before this one, for the same game, left it running
+# and wrote /var/tmp/powos-warm-<APP> = "<its last mode>|cfg:<CFG_TO>". That game is the queue's, not the user's: the
+# same mode reuses it (no close, relaunch, window wait - 11-07: ABZU's jobs each spent ~20 s of launch and Steam
+# restore), any other mode closes it and starts fresh (its env / dxvk.conf only apply at launch).
+WM=/data/powos/root/var/tmp/powos-warm-$APP warm=
+wm=$("$A" shell "su -c 'cat $WM 2>/dev/null; rm -f $WM'" | tr -d '\r')
+if [ -n "$wm" ] && [ "$gs" = game=awake ]; then
+  if [ "$wm" = "$1|cfg:$CFG_TO" ] && [ "$1" != play ]; then warm=1; echo "warm: $NAME left running by the job before (mode $1) - reused"
+  else echo "warm: $NAME left running by the job before ($wm) - closed, mode $1 needs a fresh start"; asuser bf-stop.sh >/dev/null; fi
+  gs=game=none
+fi
 G=$(asuser bf-game.sh dir | tail -1); [ -n "$G" ] || { echo "ENV: app $APP isn't installed (no Steam appmanifest)"; exit 5; }
 case $gs in
   game=awake) echo "the user's $NAME is up and awake (they play it?) - skip"; exit 3 ;;
@@ -69,7 +83,14 @@ front=$(echo "$ph" | grep -m1 topResumedActivity | sed -nE 's#.* ([a-zA-Z0-9_.]+
 steam_before=$(echo "$ph" | sed -n 's/^steam=//p')
 fold=$(echo "$ph" | sed -nE "s/.*mCommittedState.*name='([A-Z_]+)'.*/\1/p")
 echo "front=${front:-?} steam_before=${steam_before:+yes} fold=$fold"
-restore() {
+restore() {  # restore [warm]: warm = the queue's next job is this game too (QUEUE_NEXT_APP): leave it running for it
+  if [ "${1:-}" = warm ] && [ "${QUEUE_NEXT_APP:-}" = "$APP" ] && [ $users = 0 ] && [ -z "$CFG_TO" ]; then
+    pill "leaving $NAME up for the next check"
+    "$A" shell "su -c 'pkill -f powos-bf-present.sh; pkill -f powos-bf-prof.sh; pkill -INT screenrecord; printf %s \"$mode|cfg:$CFG_TO\" > $WM; chmod 644 $WM
+      rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof /data/local/tmp/powos-bf-*.sh /data/powos/root/var/tmp/powos-bf-*.sh'" >/dev/null 2>&1
+    settings ''; "$A" shell "su -c 'rm -f /data/powos/root$G/dxvk.conf'"  # both only read at launch: the running game keeps its own
+    echo "WARM: $NAME left running for the next check of app $APP (mode $mode)"; return 0
+  fi
   pill "closing the game, putting Steam back"
   "$A" shell "su -c 'pkill -f powos-bf-present.sh; pkill -f powos-bf-prof.sh; pkill -INT screenrecord'" >/dev/null 2>&1
   settings ''
@@ -95,8 +116,12 @@ onscreen() { local r on top sv how
   set -- $(echo "$r" | grep -m1 '^onscreen '); sv=${2:-0}; how=${3:-none}
   WHY="displays on=${on:-?}, in front=${top:-none}, game layers=$sv ($how${4:+ ${4}})"; TOP=$top
   [ "${on:-0}" -ge 1 ] && [ "$sv" -ge 1 ] && { { [ "$how" = task ] && [ "$top" = PowosWindowActivity ]; } || { [ "$how" = web ] && [ "$top" = HomeShell ]; }; }; }
-invalid() { "$here/../shot.sh" "$OUT/invalid-$(date +%H%M%S).png" >/dev/null 2>&1
-  echo "INVALID: $NAME wasn't on the screen $1 ($WHY) - frames of a game nobody sees say nothing (screenshot in $OUT)"; restore; exit 3; }
+# homewhy: what home showed instead (the user, 11-07 03:3x: "atm its just waiting in the switcher") - the switcher up,
+# and each web window's size / state, read from home's page (cdp.sh, read-only). One line, "home: ..." or "".
+HOMEWHY_JS="(()=>{const l=document.querySelector('.recents');const up=!!l&&(l.classList.contains('shown')||getComputedStyle(l).visibility!=='hidden');const w=[...document.querySelectorAll('.webwindow')].map(e=>{const r=e.getBoundingClientRect();return Math.round(r.width)+'x'+Math.round(r.height)+(e.classList.contains('focused')?' focused':'')+(e.classList.contains('live')?'':' not-live')});return 'switcher '+(up?'UP':'down')+', web windows ['+w.join(', ')+']'})()"
+homewhy() { local r; r=$(perl -e 'alarm 25; exec @ARGV' "$here/../cdp.sh" eval home "$HOMEWHY_JS" 2>/dev/null | tail -1 | tr -d '"'); [ -n "$r" ] && echo "home: $r"; }
+invalid() { local h; h=$(homewhy); "$here/../shot.sh" "$OUT/invalid-$(date +%H%M%S).png" >/dev/null 2>&1
+  echo "INVALID: $NAME wasn't on the screen $1 ($WHY${h:+; $h}) - frames of a game nobody sees say nothing (screenshot in $OUT)"; restore; exit 3; }
 mi=0
 for mode in "$@"; do
   mi=$((mi + 1)); lbl="$mode $mi/$#"
@@ -120,8 +145,11 @@ for mode in "$@"; do
   # Android's does (docs/research/abzu-fps.md "Measurement friction"); then this line goes.
   # Home, then Back: 11-07 05:10 Home alone left the switcher (Steam + calculator cards) up and the run INVALID; Back
   # closes the switcher over home (shell/ui/recents.tsx) and does nothing on plain home.
-  [ "${BF_HOME_FIRST:-1}" = 0 ] || { "$A" shell "input keyevent 3; sleep 1; input keyevent 4" >/dev/null 2>&1; sleep 1; }
-  asuser bf-start.sh >/dev/null
+  # A warm game reused (the job before left it in front) is neither sent behind home nor started again.
+  if ! { [ "$mi" = 1 ] && [ -n "$warm" ]; }; then
+    [ "${BF_HOME_FIRST:-1}" = 0 ] || { "$A" shell "input keyevent 3; sleep 1; input keyevent 4" >/dev/null 2>&1; sleep 1; }
+    asuser bf-start.sh >/dev/null
+  fi
   pill "$lbl: waiting for the game window"
   # The window, waited for only while the rest of this mode still fits the budget (WIN_S overrides).
   w0=$(date +%s); extra=0; [ "$mode" = play ] && extra=35  # play: keys + grabs + 10 s in the level
@@ -129,8 +157,9 @@ for mode in "$@"; do
   win=$(asuser bf-window.sh wait "$left" "$i0" | tail -1)
   case $win in touched) abort ;; win=[0-9]*) ;; *) echo "FAIL no game window: $NAME showed none in $left s ($win)"; restore; exit 5 ;; esac
   echo "$mode: window after $(( $(date +%s) - w0 )) s: $win"; echo "$win" | sed 's/win=//; s/screen=/on /' > "$M/window.txt"
-  pill "$lbl: game up - settling 45 s"
-  nap 45  # KWin opens the game as its own task (folded) or home's web window (unfolded): nothing to bring forward
+  st=45; [ "$mi" = 1 ] && [ -n "$warm" ] && st=${WARM_SETTLE_S:-10}  # a warm game settled in the job before
+  pill "$lbl: game up - settling $st s"
+  nap $st  # KWin opens the game as its own task (folded) or home's web window (unfolded): nothing to bring forward
   onscreen; ok=$?; top=$TOP
   # Unity maps a 314x208 window first and goes full screen later: the size that counts is the one after the settle.
   win2=$(asuser bf-window.sh | tail -1); echo "$mode: after the settle: $win2"
@@ -162,7 +191,7 @@ for mode in "$@"; do
   # The next mode needs a fresh start (its dxvk.conf); the last one is closed (or frozen again) by restore.
   [ $mi -lt $# ] && { pill "$lbl: closing the game"; asuser bf-stop.sh >/dev/null; }
 done
-echo "== done $(date +%T)"; restore
+echo "== done $(date +%T)"; restore warm
 pill "comparing $(echo "$*" | sed 's/ / vs /g')"
 # uv runs it with its own numpy (the script's inline deps, uv's cache): nothing installed into the Mac's python.
 # The per-layer rate table (game > Xwayland > KWin > consumer > SurfaceFlinger > panel, skin), before the board line.

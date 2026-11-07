@@ -35,6 +35,20 @@ internal class RenderWatch {
     /** The last memory trim (uptime ms; 0: none). */
     private var trimmedAt = 0L
 
+    /** Home's page (re)loaded at this uptime ms and hasn't sent a "w.f" since (0: none pending). */
+    private var bootAt = 0L
+
+    /**
+     * Home's page (re)loaded at [now] (a shell update, a reload): it boots, asks the host for its windows and sends
+     * their geometry once rebuilt - no probe, stall or reload for [BOOT_MS] or until its first "w.f". 11-06 23:46 (ship
+     * bbe9e53c): a shell push reloaded home with a live window, the new page was still booting 4 s later and the watch
+     * reloaded it again ("a resend unanswered: home reloaded"). A page silent past [BOOT_MS] is watched as before.
+     */
+    fun pageStarted(now: Long) {
+        bootAt = now
+        clear()
+    }
+
     /** The system asked the app to trim memory at [now] (uptime ms): no reload for [PRESSURE_MS] from here. */
     fun trimmed(now: Long) {
         trimmedAt = now
@@ -53,6 +67,7 @@ internal class RenderWatch {
         homeShown: Boolean,
         lastFrame: Long,
     ): Act {
+        booted(lastFrame)
         // Nothing to watch, or the page answered what was asked: a new watch from here.
         if (resting(now, live, homeShown) || answered(lastFrame)) clear()
         if (resting(now, live, homeShown) || now - lastFrame < PROBE_MS) return Act.NONE
@@ -67,7 +82,14 @@ internal class RenderWatch {
         now: Long,
         live: Int,
         homeShown: Boolean,
-    ) = live == 0 || !homeShown || now < backoffUntil
+    ) = live == 0 || !homeShown || now < backoffUntil || booting(now)
+
+    /** The page's first "w.f" since its load ([pageStarted]) ends its boot. */
+    private fun booted(lastFrame: Long) {
+        if (bootAt != 0L && lastFrame >= bootAt) bootAt = 0L
+    }
+
+    private fun booting(now: Long) = bootAt != 0L && now - bootAt < BOOT_MS
 
     private fun answered(lastFrame: Long): Boolean {
         val pending = maxOf(probedAt, stalledAt)
@@ -121,6 +143,9 @@ internal class RenderWatch {
 
         /** How often [WebWindows] looks while there are windows (the steps above land within this of their time). */
         const val WATCH_MS = 250L
+
+        /** After home's page (re)loads ([pageStarted]), this long to send its first "w.f" before it is watched. */
+        const val BOOT_MS = 10_000L
 
         /** After a reload, no look for this long: the page boots and its sender starts. */
         const val BACKOFF_MS = 30_000L

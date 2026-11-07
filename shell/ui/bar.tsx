@@ -478,9 +478,12 @@ function startCountered(bar: HTMLElement) {
   const now = new DOMMatrixReadOnly(getComputedStyle(home).transform).m41;
   bar.style.transition = "none";
   bar.style.translate = `${-now}px var(--bar-lift, 0px)`;
+  // N1b: the glued slide's counter (shell.css html.ww-glued) starts there too, then eases to home's.
+  bar.style.setProperty("--bar-counter", `${-now}px`);
   void bar.offsetWidth;
   bar.style.removeProperty("translate");
   bar.style.removeProperty("transition");
+  bar.style.setProperty("--bar-counter", getComputedStyle(home).getPropertyValue("--track-counter").trim() || "0px");
 }
 
 /** Seats the bar on PowOS AI's page while that's the page (and re-seats it as the page's layout changes). */

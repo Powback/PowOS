@@ -35,6 +35,10 @@ UNOWNED = {
     'etc/pacman.conf': b'[options]\nNoExtract = usr/bin/bwrap\n',
     'usr/bin/powos-steam': b'#!/bin/bash',
     'usr/share/fex-emu/RootFS/x/lib.so': b'x86',
+    'usr/share/fex-emu/RootFS/x/usr/lib64/libvulkan_freedreno.so': b'turnip',
+    'usr/share/fex-emu/RootFS/x/usr/lib64/libvulkan_intel.so': b'intel',
+    'usr/share/fex-emu/RootFS/x/usr/lib64/libclang-cpp.so.22.1': b'clang',
+    'usr/share/fex-emu/RootFS/x/usr/bin/llvm-exegesis': b'llvm',
     'usr/share/gamescope-session-plus/bootstrap_steam.tar.gz': b'steam',
     'usr/share/homebrew.tar.zst': b'brew',
     'usr/share/locale/en_GB/LC_MESSAGES/x.mo': b'en',
@@ -98,7 +102,13 @@ class SplitTest(unittest.TestCase):
     def test_packs(self):
         self.assertEqual(self.files_of('powos-pack-gaming.tar.gz'),
                          {'usr/bin/box64', 'usr/lib/libsteamonly.so', 'usr/share/fex-emu/RootFS/x/lib.so',
-                          'usr/share/gamescope-session-plus/bootstrap_steam.tar.gz'})
+                          'usr/share/fex-emu/RootFS/x/usr/lib64/libvulkan_freedreno.so'})
+        # What Steam downloads itself (its pre-seeded x86 client) and FEX RootFS's toolchain / other GPUs' drivers:
+        # in no pack and not in the base (11-07: no Proton/Steam client in the image).
+        every = set().union(*(self.files_of(f) for f in os.listdir(self.out) if f.endswith('.tar.gz')))
+        for gone in ('usr/share/gamescope-session-plus/bootstrap_steam.tar.gz', 'usr/share/fex-emu/RootFS/x/usr/lib64/libvulkan_intel.so',
+                     'usr/share/fex-emu/RootFS/x/usr/lib64/libclang-cpp.so.22.1', 'usr/share/fex-emu/RootFS/x/usr/bin/llvm-exegesis'):
+            self.assertNotIn(gone, every)
         # kate as the rest: its own translation goes with it, not to languages.
         self.assertEqual(self.files_of('powos-pack-apps.tar.gz'),
                          {'opt/brave/brave', 'usr/bin/kate', 'usr/share/locale/de/LC_MESSAGES/kate.mo', 'usr/share/homebrew.tar.zst'})
