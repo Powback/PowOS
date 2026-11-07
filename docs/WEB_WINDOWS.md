@@ -101,9 +101,12 @@ frame of drag latency; measure it before turning it on for drags (animations fir
   dropdown, combo, tooltip, or untyped - Wine's) goes to its application's task (same pid, else X11 class; the active
   window's task it opens over first) and is drawn over the window at its place, takes touches (`touchTarget`), leaves
   when X unmaps it. Log `window task N also draws override-redirect ... at RectF(...)`.
-- [ ] **N1b - the PowOS AI slide on the main thread**: `.home` / `.ai-screen` on a registered `--slide-x`, and the bar's
-  counter (`--track-counter`, inherited today) as its own registered property set beside it, so bar and home share a
-  clock (bar.tsx `startCountered` reads home's transform - keep it).
+- [x] **N1b - the PowOS AI slide on the main thread**: `.home` / `.ai-screen` take their place from a registered
+  `--slide-x` (gesture.ts applyTrack), the bar's counter is also its own registered `--bar-counter` (set beside home's
+  inherited `--track-counter`, which docksearch/bar still read; `startCountered` seeds it for a bar mounted mid-slide).
+  With `html.ww-glued` both transition on the main thread; without windows the compositor runs transform/translate as
+  before. Gate `desktops` -> `webWindowGlueAiCheck`: page -1 and back with a window, home on `--slide-x`, the bar never
+  on `translate`, 0 off-thread frames, the bar within 2 px on screen every frame.
 - [ ] **N2 - exact binding (option C)**: `w.f` carries the geometry of the NEXT frame for time-driven motion (the glue
   animation's value at ts + one frame, computed from the registered property's transition: or drive the slide from a
   page-side spring), the host binds it with `postVisualStateCallback`, `next` as the fallback when no callback within a

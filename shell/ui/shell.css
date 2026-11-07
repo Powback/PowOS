@@ -1692,12 +1692,18 @@ input.folder-title:focus { background: var(--soft-fill); }
  * PowOS AI's page (powai.tsx), left of home: it and home slide as one (gesture.ts applyTrack sets both transforms) -
  * home's bar, dock and recent apps go with it. Each its own fixed layer, so what's fixed inside home stays home's.
  */
-.home, .ai-screen { transition: transform var(--spring-ms) var(--spring); }
-.home.sliding, .ai-screen.sliding { transition: none; }
+/* N1b (docs/WEB_WINDOWS.md "Native-glued windows"): the slide to PowOS AI's page and back - home, the AI screen and
+   the bar's counter (below) - on registered properties set by gesture.ts applyTrack; with a web window (html.ww-glued)
+   the properties themselves transition, on the main thread: a window riding home moves on the frame its page does. */
+@property --slide-x { syntax: "<length-percentage>"; inherits: false; initial-value: 0px; }
+@property --bar-counter { syntax: "<length>"; inherits: false; initial-value: 0px; }
+.home, .ai-screen { transform: translateX(var(--slide-x)); transition: transform var(--spring-ms) var(--spring); }
+html.ww-glued :is(.home, .ai-screen) { transition: --slide-x var(--spring-ms) var(--spring); }
+.home.sliding, .ai-screen.sliding, html.ww-glued :is(.home.sliding, .ai-screen.sliding) { transition: none; }
 .ai-screen {
   position: fixed;
   inset: 0;
-  transform: translateX(-100%);
+  --slide-x: -100%;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -4450,6 +4456,11 @@ html:has(.home > .bar[data-role="ai"] textarea:focus) .ai-screen.stacked > .ai-s
    (.sliding) it follows at once. --bar-lift: the keyboard's lift on PowOS AI's page (bar.tsx seatOnAi). */
 .home:not(.pull-screen) > .bar { translate: var(--track-counter, 0px) calc(var(--bar-lift, 0px) - var(--bar-edit-rise, 0px)); transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s, translate var(--spring-ms) var(--spring); }
 .home:not(.pull-screen).sliding > .bar, .home:not(.pull-screen) > .bar.sliding { transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s; }
+/* N1b: with a web window the counter is the bar's own registered --bar-counter (gesture.ts applyTrack sets it beside
+   home's --track-counter), on home's clock: the bar holds still while home slides on the main thread. */
+html.ww-glued .home:not(.pull-screen) > .bar { translate: var(--bar-counter) calc(var(--bar-lift, 0px) - var(--bar-edit-rise, 0px)); transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s, --bar-counter var(--spring-ms) var(--spring); }
+html.ww-glued .home:not(.pull-screen).sliding > .bar, html.ww-glued .home:not(.pull-screen) > .bar.sliding, html.ww-glued .home.button-morph:not(.pull-screen) > .bar { transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s; }
+html.ww-glued .home.button-morph:not(.pull-screen, .sliding) > .bar:not(.sliding) { transition: --bar-counter var(--spring-ms) var(--spring); }
 .home.search-parked > .bar.seated { opacity: 1; pointer-events: auto; }
 
 /*

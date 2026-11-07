@@ -11884,6 +11884,58 @@ async function webWindowGlueCheck() {
   }
 }
 
+/**
+ * N1b: the slide to PowOS AI's page (page -1) and back with a web window on home: home's transition is the registered
+ * --slide-x and the bar's counter its --bar-counter (main thread), never a transform/translate; 0 off-thread frames;
+ * the bar holds still on screen through it (its left within 2 px of where it started, each frame). Without windows the
+ * compositor still runs it (transform).
+ */
+async function webWindowGlueAiCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const { frame, fails, expect, pages, from } = window.__glue.setup(S);
+  const home = document.querySelector(".home");
+  const bar = () => document.querySelector(".home:not(.pull-screen) > .bar");
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  // Page -1 and back: home's and the bar's running transitions at the start, the bar's left each frame.
+  const there = async () => {
+    const lefts = [];
+    S.page.value = -1;
+    await frame();
+    await frame();
+    const run = [home, bar()].map((e) => (e ? e.getAnimations().map((a) => a.transitionProperty).join("+") : "-"));
+    for (let i = 0; i < 90 && home.getAnimations().length; i++) await frame(), bar() && lefts.push(bar().getBoundingClientRect().left);
+    S.page.value = 0;
+    await frame();
+    for (let i = 0; i < 90 && home.getAnimations().length; i++) await frame();
+    await sleep(60);
+    return { run, lefts };
+  };
+  if (!home) return ["glue AI: no .home"];
+  try {
+    W.webWins.value = [];
+    S.page.value = 0;
+    await sleep(500);
+    const plain = await there();
+    expect(plain.run[0].includes("transform"), `no window: home's slide runs ${plain.run[0]} (want the compositor's transform)`);
+    W.webWins.value = [{ id: 922, key: "a:gate.glue2", label: "Glue", page: pages[0], x: 220, y: 160, w: 320, h: 260, live: true }];
+    await frame();
+    await frame();
+    const g0 = window.__ww.glue;
+    const glued = await there();
+    const g1 = window.__ww.glue;
+    expect(glued.run[0].includes("--slide-x") && !glued.run[0].includes("transform"), `a window: home's slide runs ${glued.run[0]} (want --slide-x)`);
+    expect(glued.run[1] === "-" || !glued.run[1].includes("translate"), `a window: the bar's counter runs ${glued.run[1]} (want --bar-counter, never translate)`);
+    expect(g1.offThread === g0.offThread, `a window: ${g1.offThread - g0.offThread} off-thread frames over the AI slide (${g1.last.by})`);
+    const drift = glued.lefts.length ? Math.max(...glued.lefts) - Math.min(...glued.lefts) : 0;
+    expect(drift <= 2, `a window: the bar drifted ${drift.toFixed(1)} px on screen over the slide (want it held still)`);
+    return fails;
+  } finally {
+    W.webWins.value = [];
+    S.page.value = from;
+  }
+}
+
 /** [webWindowGlueCheck]'s setup: the pages to switch between, and the switch itself, frame by frame. */
 function glueSetup(S) {
   const fails = [];
@@ -12673,7 +12725,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockToggleHost, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, SF_HELPERS, webWindowSnapFill, webWindowRelaunch, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck, GLUE_HELPERS, webWindowGlueCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockToggleHost, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, SF_HELPERS, webWindowSnapFill, webWindowRelaunch, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck, GLUE_HELPERS, webWindowGlueCheck, webWindowGlueAiCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }
