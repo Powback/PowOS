@@ -368,6 +368,9 @@ class WebWindows(
 
             // A rotation / fold: every full-screen Linux window follows the screen ([refillFull]).
             override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+                // KWin's output (Xwayland's root, Wine's monitor) first, then the windows' sizes: a window resized
+                // before its root no longer covers it and Wine takes it out of full screen (Besiege, 11-07 03:15).
+                andro.marchy.WindowTasks.tellScreen(context)
                 main.post { refillFull("configuration change") }
                 main.postDelayed({ refillFull("configuration settled") }, FULL_REFIT_SETTLE_MS)
             }
@@ -1180,10 +1183,15 @@ class WebWindows(
         val w = (rect.optDouble("width") * d).toInt().coerceAtLeast(1)
         val h = (rect.optDouble("height") * d).toInt().coerceAtLeast(1)
         val container = SurfaceControl.Builder().setName("powos-ww-$id").setParent(parent).setHidden(true).build()
-        // The screen's size, either way round (a resize or a rotation needs no new buffers): PowosWindowActivity's buffersFor.
+        // The screen's size EITHER WAY ROUND - square, its longer side (a resize or a rotation needs no new buffers).
+        // KWin bounds a task's size by its buffers: at the portrait 2268x2440 a rotated full-screen game got
+        // 2268x2268 of the 2440x2268 screen, folded 2268x1116 of 2484x1116 (bf-resize.sh 11-07 03:10), and Wine,
+        // its window no longer covering its monitor, left full screen (Besiege, 1135x1365 floating). A fold to a
+        // longer screen still regrows them ([growBuffers]).
         val metrics = context.getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
-        val bw = maxOf(metrics.width(), w)
-        val bh = maxOf(metrics.height(), h)
+        val side = maxOf(metrics.width(), metrics.height(), w, h)
+        val bw = side
+        val bh = side
         // Its buffer queue's size = the body (the consumer's crop): a queued buffer shows 1:1, as in a SurfaceView.
         val content =
             SurfaceControl.Builder().setName("powos-ww-$id-linux").setParent(container).setBufferSize(w, h)
@@ -1964,6 +1972,7 @@ class WebWindows(
     ) {
         win.w = bw
         win.h = bh
+        if (bw > src.bw || bh > src.bh) growBuffers(win, src, maxOf(bw, bh))
         // KWin lays the window out at the body's size; the consumer's crop and the buffer queue's size follow in
         // this transaction, so its next frames show 1:1 (one of the old size is dropped by the queue, never stretched).
         // Its own transaction, applied now: a buffer size riding [t] (applyTransactionOnDraw merges it into the
@@ -1971,6 +1980,29 @@ class WebWindows(
         if (src.content.isValid) SurfaceControl.Transaction().setBufferSize(src.content, bw, bh).apply()
         andro.marchy.WebWindowSource.crop(src.handle, bw, bh)
         andro.marchy.WebWindowSource.size(src.kwin, bw, bh)
+    }
+
+    /**
+     * [src]'s consumer again with square buffers of [side] px: the body outgrew them (unfolded 2268x2440 -> the cover's
+     * 1116x2484). KWin shows a task only as large as its buffers, so a full-screen game would stay cropped to the old
+     * ones. On the consumer's lane: the old consumer stops, the new one starts (KWin re-imports, as on a reconnect).
+     */
+    private fun growBuffers(
+        win: Win,
+        src: LinuxSource,
+        side: Int,
+    ) {
+        WindowLog.i(TAG, "window ${win.id}: body outgrew its buffers ${src.bw}x${src.bh}: consumer again at ${side}x$side")
+        src.bw = side
+        src.bh = side
+        src.lane.run {
+            val h = src.handle
+            if (h == 0L || win.closed) return@run
+            src.handle = 0
+            andro.marchy.WebWindowSource.stop(h)
+            src.starting.set(false)
+            startConsumer(win, src)
+        }
     }
 
     /**
