@@ -43,9 +43,47 @@ rec_off() {
   python3 "$here/perf-summary.py" "$1" "$OUT/$1.json" | tee -a "$OUT/log.txt"
 }
 
+# A page swipe never tears a native surface down (perf-1793735444160: windows.slide -> Plasma's SurfaceView
+# surfaceChanged -> startNative -> awaitPendingStop, 450-560 ms main-thread freezes per swipe; fixed f313f709: off-page
+# windows stay WM-visible, their leash hidden + scaled to nothing; startNative never waits on the main thread). The
+# app's own lines during the swipes are followed into $PDIR/swipe-surface.txt (logcat -T 1: from now; the ring wraps in
+# ~1 min) and counted: any desktop reconnect/teardown (MainActivity startNative/surfaceDestroyed) or a window WM-hidden
+# off its page FAILs, and so does a main-thread stall >= SWIPE_STALL_MS (250) in the recording's native trace.
+SWIPE_STALL_MS=${SWIPE_STALL_MS:-250}
+surf_on() {
+  ash <<EOF
+mkdir -p $PDIR; f=$PDIR/swipe-surface.txt; [ -f \$f.pid ] && kill \$(cat \$f.pid) 2>/dev/null
+: > \$f; nohup logcat -T 1 -v time -s Andromarchy:I PowosFreeform:I PowosPageSlide:I > \$f 2>&1 < /dev/null &
+echo \$! > \$f.pid; chmod a+r \$f
+EOF
+}
+surf_off() {
+  ash <<EOF
+f=$PDIR/swipe-surface.txt; [ -f \$f.pid ] && kill \$(cat \$f.pid) 2>/dev/null; : > \$f.pid
+EOF
+  sh_ "tail -n +2 $PDIR/swipe-surface.txt" > "$OUT/swipe-surface.txt"
+  local slides tear wmhid stall
+  slides=$(grep -c 'PowosPageSlide.* end (' "$OUT/swipe-surface.txt")
+  tear=$(grep -E 'startNative: reconnecting|surfaceDestroyed:' "$OUT/swipe-surface.txt" | head -5)
+  wmhid=$(grep -E 'hidden in WM' "$OUT/swipe-surface.txt" | head -3)
+  stall=$(python3 -c '
+import json,sys
+n=(json.load(open(sys.argv[1])).get("summary") or {}).get("native") or {}
+print(int(max([x.get("ms",0) for x in n.get("longest") or []] or [0])))' "$OUT/swipe.json" 2>/dev/null)
+  log "swipe surfaces: ${slides:-0} slides ended, longest main-thread stall ${stall:-?} ms; teardown: ${tear:-none}; WM-hidden: ${wmhid:-none}"
+  step swipe-surface "no native surface torn down by a page swipe"
+  if [ -n "$tear" ] || [ -n "$wmhid" ]; then
+    fail "a page swipe tore a native surface down: ${tear}${wmhid:+ $wmhid} (log: swipe-surface.txt)"
+  elif [ "${stall:-0}" -ge "$SWIPE_STALL_MS" ]; then
+    fail "main thread stalled ${stall} ms during the swipes (want < $SWIPE_STALL_MS; before the fix 450-560 ms)"
+  else
+    pass "${slides:-0} slides, no reconnect/surfaceDestroyed, longest stall ${stall:-0} ms (< $SWIPE_STALL_MS)"
+  fi
+}
 sc_swipe() {
   local p d=$((W * 45 / 100)) i; p=$(freept "" -1 "$d" .3); [ "$p" != none ] && [ -n "$p" ] || { fail "swipe: no empty spot on home"; return 1; }
   set -- $p; local x=$1 y=$2
+  surf_on
   rec_on
   for i in $(seq 1 "$REPS"); do
     chk swipe$i; swipe "$x" "$y" $((x - d)) "$y" 220 "page swipe to the next page" || break; sleep 1.2
@@ -53,6 +91,7 @@ sc_swipe() {
   done
   rec_off swipe
   step swipe "page swipes done ($REPS pairs)"; pass "recorded"
+  surf_off
 }
 sc_launcher() {
   local i p; rec_on

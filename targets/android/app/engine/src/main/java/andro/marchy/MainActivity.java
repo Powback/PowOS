@@ -417,6 +417,8 @@ public class MainActivity extends Activity
     private void startNative(Surface surface, Object key) {
         nativeOwner = this; // starting: onResume doesn't start it twice, surfaceDestroyed stops (and drops) it
         compatibleFdReady = false;
+        // perf-scenarios.sh --only swipe counts this line: a page swipe must never reconnect the desktop.
+        Log.i(TAG, "startNative: reconnecting the desktop (stop + start on native-stop)");
         NATIVE.start(key, () -> {
             if (nativeOwner != this || !surface.isValid())
                 return;
@@ -1375,6 +1377,7 @@ public class MainActivity extends Activity
     @Override
     public void surfaceDestroyed(SurfaceHolder holder) {
         surfaceReady = false;
+        Log.i(TAG, "surfaceDestroyed: the desktop's surface is gone (its connection stops)");
         releaseAllMouseButtons();
         resetCapturedTouchpadGesture();
         stopOwnNative();

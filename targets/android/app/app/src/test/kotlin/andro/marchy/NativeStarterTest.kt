@@ -63,4 +63,25 @@ class NativeStarterTest {
         starter.stop()
         assertFalse(starter.unchanged(key))
     }
+
+    /** A page swipe's surfaceChanged calls (same surface, size, format) never stop or restart the desktop. */
+    @Test
+    fun aPageSwipesSurfaceChangedBurstReconnectsNothing() {
+        release.countDown()
+        val surface = Any()
+        var started = 0
+        // MainActivity.surfaceChanged: start only when not unchanged.
+        val changed = { w: Int, h: Int ->
+            val key = NativeStarter.key(surface, w, h, 1)
+            if (!starter.unchanged(key)) starter.start(key) { started++ }
+        }
+        changed(2268, 2440) // first connect
+        stopThread.submit {}.get(5, TimeUnit.SECONDS)
+        drainMain(1)
+        repeat(20) { changed(2268, 2440) } // 10 swipes there and back
+        stopThread.submit {}.get(5, TimeUnit.SECONDS)
+        assertEquals(1, started)
+        assertEquals(1, stops) // only the first connect's own stop
+        assertFalse(starter.busy())
+    }
 }
