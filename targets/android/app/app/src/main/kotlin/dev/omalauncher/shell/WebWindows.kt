@@ -2152,12 +2152,14 @@ class WebWindows(
         re: SurfaceControl.Transaction,
         why: String,
     ) {
+        var any = false
         for (w in wins.values) {
-            if (!w.linuxFull || w.closed || !w.container.isValid) continue
-            val move = web.rootSurfaceControl?.buildReparentTransaction(w.container) ?: continue
-            re.merge(move)
+            if (!w.linuxFull || w.closed || !fullLayer(re, w)) continue
+            any = true
             WindowLog.i(TAG, "home's surface $why: full-screen window ${w.id} re-attached above home's buffer")
         }
+        // FS10: and again after the new surface's first draw - a placement queued before must not land last.
+        if (any) main.post { restateFull("home's surface $why") }
     }
 
     /**
@@ -3156,6 +3158,9 @@ class WebWindows(
             // (above every other window) until the page measured a change - and none comes while nothing moves.
             win.geo?.let { place(t, win, it) } ?: underRoot(t, win)
             t.apply()
+            // FS10: a full-screen state still queued on home's draw ([restateFull]) must not land after this and put
+            // the window back over everything: its place under the root queued after it.
+            backOnDraw(win)
         }
         WindowLog.i(TAG, "window ${win.id}: KWin window ${src.kwin} ${if (on) "full screen" else "back in its window"}")
         win.full = on
@@ -3182,6 +3187,20 @@ class WebWindows(
         }
     }
 
+    /** FS10: [win] back in its window, its container under the root at the page's place, queued on home's next draw. */
+    private fun backOnDraw(win: Win) {
+        val c = win.container.takeIf { it.isValid } ?: return
+        val r = root?.takeIf { it.isValid } ?: return
+        val t = SurfaceControl.Transaction().reparent(c, r)
+        win.geo?.let { g ->
+            frameAt(t, win, g)
+            cornerRadius(t, c, g.radius)
+            t.setLayer(c, g.z).setAlpha(c, g.alpha).setVisibility(c, g.visible && !g.clip.isEmpty && win.mirror != null)
+        } ?: t.setVisibility(c, false)
+        web.rootSurfaceControl?.applyTransactionOnDraw(t) ?: t.apply()
+        web.invalidate()
+    }
+
     /** [win]'s [Win.linuxFull] set to [on], its IR1 marks reset. */
     private fun markLinuxFull(
         win: Win,
@@ -3204,28 +3223,83 @@ class WebWindows(
     ) {
         if (linuxTouch !== win) linuxTouch = null
         val area = fullScreenArea(win.immersive)
-        win.container.takeIf { it.isValid }?.let { c ->
-            // Full screen is not an element of the page: ABOVE home's buffer (a child of home's surface itself, as the
-            // windows' root is), so nothing of the page paints over it; the root's own layer is -1, under home.
-            // Home's surface made again while it is full screen (screen off/on): [reattach] moves it too ([fullAgain]).
-            web.rootSurfaceControl?.buildReparentTransaction(c)?.let {
-                t.merge(it)
-                win.underRoot = false
-            }
-            // FL5: the app's area starts below the status bar, never under it (the user, 10-30 22:19: Dolphin's toolbar
-            // drawn through the clock and icons).
-            t.setPosition(c, area.left.toFloat(), area.top.toFloat()).setScale(c, 1f, 1f)
-                .setCrop(c, Rect(0, 0, area.width(), area.height())).setLayer(c, FULL_LAYER).setVisibility(c, !underSwitcher)
-            cornerRadius(t, c, 0f)
-        }
-        src.content.takeIf { it.isValid }?.let { m -> t.setPosition(m, 0f, 0f).setScale(m, 1f, 1f).setCrop(m, Rect(0, 0, area.width(), area.height())) }
+        fullLayer(t, win)
         t.apply()
         win.shown = true
+        restateFull("window ${win.id} full screen")
         if (win.fullAsked) {
             WindowLog.i(TAG, "window ${win.id}: full screen ${area.width()}x${area.height()} at ${area.left},${area.top}: sized on KWin's answer")
         } else {
             linuxResize(win, src, area.width(), area.height())
         }
+    }
+
+    /**
+     * The ONE place a full-screen Linux window's layer state is written (into [t]): its container ABOVE home's buffer
+     * (a child of home's CURRENT surface itself, as the windows' root is - full screen is not an element of the page,
+     * nothing of the page paints over it; the root's own layer is -1, under home), over the whole full-screen area at
+     * 1:1, at [FULL_LAYER], shown unless the switcher or a swipe home hides it; its app's layer at 0,0 inside. Every
+     * value is stated each time, so writing it again is idempotent: [fillScreen], [fullAgain] (home's surface made
+     * again) and [restateFull] (FS10) all write it here. False: no layer or no surface to hang it on.
+     */
+    private fun fullLayer(
+        t: SurfaceControl.Transaction,
+        win: Win,
+    ): Boolean {
+        val c = win.container.takeIf { it.isValid } ?: return false
+        val move = web.rootSurfaceControl?.buildReparentTransaction(c) ?: return false
+        t.merge(move)
+        win.underRoot = false
+        // FL5: the app's area starts below the status bar, never under it (the user, 10-30 22:19: Dolphin's toolbar
+        // drawn through the clock and icons).
+        val area = fullScreenArea(win.immersive)
+        t.setPosition(c, area.left.toFloat(), area.top.toFloat()).setScale(c, 1f, 1f).setAlpha(c, 1f)
+            .setCrop(c, Rect(0, 0, area.width(), area.height())).setLayer(c, FULL_LAYER).setVisibility(c, fullVisible(win))
+        cornerRadius(t, c, 0f)
+        win.linux?.content?.takeIf { it.isValid }?.let { m -> t.setPosition(m, 0f, 0f).setScale(m, 1f, 1f).setCrop(m, Rect(0, 0, area.width(), area.height())) }
+        return true
+    }
+
+    /** A full-screen window's layer shows unless the switcher is up or a swipe home hides it ([rootShown]). */
+    private fun fullVisible(win: Win): Boolean = !underSwitcher && !fullHidden && !win.closed
+
+    /**
+     * FS10 (11-07 03:14, Besiege unfolded: Steam's window on screen, the status bar up, no game layer composed although
+     * the game ran and "full screen" was logged): the page's placements ride home's NEXT DRAW ([apply]:
+     * applyTransactionOnDraw), and right after home's surface is made again (the game's start had stopped home) that
+     * draw waits on the window's first-frame sync for 100+ ms. A placement queued before the full-screen move - the new
+     * window placed (or, not yet in the page's list, hidden) as a plain window - then landed AFTER the move and undid
+     * it: layer, crop and visibility back to the page's, the game invisible. Broforce at 03:09 won the same race by
+     * 50 ms. Now the full-screen state is queued on home's next draw too, AFTER anything queued before it (a later
+     * merge wins), home is asked to draw, and it is written again directly once the draw path settled
+     * ([FULL_RESTATE_MS]) - every write the same idempotent [fullLayer], skipped once the window left full screen. The
+     * immersive status bar is asked hidden again with it (asked during the surface's transition, it stayed up).
+     */
+    private fun restateFull(why: String) {
+        val t = SurfaceControl.Transaction()
+        val n = wins.values.count { it.linuxFull && !it.closed && fullLayer(t, it) }
+        if (n == 0) return
+        val attached = web.rootSurfaceControl
+        if (attached == null) t.apply() else attached.applyTransactionOnDraw(t)
+        web.invalidate()
+        for (ms in FULL_RESTATE_MS) main.postDelayed({ restateNow(why) }, ms)
+    }
+
+    /** [restateFull]'s direct write: every full-screen window's layer and immersive status bar, applied now. */
+    private fun restateNow(why: String) {
+        val t = SurfaceControl.Transaction()
+        val full = wins.values.filter { it.linuxFull && !it.closed && fullLayer(t, it) }
+        if (full.isEmpty()) return
+        t.apply()
+        for (w in full) if (w.immersive) statusBarHidden()
+        WindowLog.i(TAG, "full screen restated ($why): ${full.joinToString { "window ${it.id}" }}")
+    }
+
+    /** Home's window's status bar asked hidden again for an immersive full screen (idempotent, not logged). */
+    private fun statusBarHidden() {
+        val c = web.windowInsetsController ?: return
+        c.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        c.hide(android.view.WindowInsets.Type.statusBars())
     }
 
     /**
@@ -4112,6 +4186,12 @@ class WebWindows(
 
         /** A rotation's new screen size, settled: [refillFull] runs again this long after the configuration change. */
         const val FULL_REFIT_SETTLE_MS = 400L
+
+        /**
+         * FS10: after a full screen or home's surface made again, the full-screen state written again directly this
+         * long after (ms): past a first-frame sync (100+ ms seen, 11-07 03:14) and a slow transition's.
+         */
+        val FULL_RESTATE_MS = longArrayOf(250L, 1_000L, 3_000L)
 
         /** Whether a Linux window opens full screen at once: a game's ([isGame], [LinuxOffer.game]); anything else floats. */
         fun opensFullScreen(game: Boolean): Boolean = game
