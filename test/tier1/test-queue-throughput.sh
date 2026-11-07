@@ -9,8 +9,8 @@
 # Drives queue.sh's own functions (the runner needs a phone).
 set -uo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd); src=$root/tools/phone/verify/queue.sh; util=$root/tools/phone/verify/queue-util.py
-fns=$(sed -n '/^rc3_kind() {/,/^  echo precond; }$/p; /^rc3_precond() {/,/echo "\$p"; }$/p; /^warm_takes() {/p; /^game_key() {/,/^  \[ \$g = 1 \] && echo/p; /^order_jobs() {/,/^  sel=(/p' "$src")
-for f in rc3_kind rc3_precond warm_takes game_key order_jobs; do
+fns=$(sed -n '/^rc3_kind() {/,/^  echo precond; }$/p; /^rc3_precond() {/,/echo "\$p"; }$/p; /^warm_takes() {/p; /^warm_after() {/p; /^game_key() {/,/^  \[ \$g = 1 \] && echo/p; /^order_jobs() {/,/^  sel=(/p' "$src")
+for f in rc3_kind rc3_precond warm_takes warm_after game_key order_jobs; do
   grep -q "^$f() {" <<<"$fns" || { echo "FAIL couldn't find $f in queue.sh"; exit 1; }; done
 eval "$fns"
 T=$(mktemp -d "${TMPDIR:-/tmp}/qthru.XXXXXX"); trap 'rm -rf "$T"' EXIT
@@ -41,8 +41,24 @@ eq "env APP= bf-pacing" "$(game_key env APP=384190 WIN_NAME=AbzuGame tools/phone
 eq "game-resize.sh <appid>" "$(game_key tools/phone/verify/game-resize.sh 557340)" 557340
 eq "bf-* without APP = Broforce" "$(game_key tools/phone/verify/bf-pacing.sh base)" 274190
 eq "a non-game check has no key" "$(game_key tools/phone/verify/folder-clip.sh 3)" ""
-warm_takes env APP=1 x/bf-pacing.sh base && ok "bf-pacing takes a warm game" || bad "bf-pacing takes a warm game"
-warm_takes x/game-resize.sh 384190 && bad "game-resize must not take a warm game" || ok "game-resize doesn't take a warm game"
+# warm_takes <dir> <cmd...>: only a bf-pacing.sh that reads the warm marker (11-07 12:08: frozen copies in
+# ~/.cache/abzu-tools had no hand-over, took the queue's ABZU for the user's, and it stayed up for window-bench).
+mkdir -p "$T/new/v" "$T/old/v"; echo 'WM=/data/powos/root/var/tmp/powos-warm-$APP' > "$T/new/v/bf-pacing.sh"; echo 'echo no hand-over' > "$T/old/v/bf-pacing.sh"
+warm_takes "$T/new" env APP=1 v/bf-pacing.sh base && ok "bf-pacing (relative, knows the marker) takes a warm game" || bad "bf-pacing takes a warm game"
+warm_takes / env APP=1 "$T/new/v/bf-pacing.sh" base && ok "bf-pacing (absolute path) takes a warm game" || bad "absolute bf-pacing takes a warm game"
+warm_takes / env APP=1 "$T/old/v/bf-pacing.sh" base && bad "a frozen bf-pacing copy without the hand-over must not get the warm game" || ok "a frozen bf-pacing copy without the hand-over gets no warm game"
+warm_takes "$T/new" x/game-resize.sh 384190 && bad "game-resize must not take a warm game" || ok "game-resize doesn't take a warm game"
+grep -qF 'warm_takes "$cwd" "${cmd[@]}"' "$src" && ok "runner: warm_takes from the next job's own dir" || bad "runner: warm_takes with the job's dir"
+
+# warm_after <log> <gk>: the warm-stop rule - a game is warm only while a WARM: line hands it on; else it is closed
+Q=$T/q; mkdir -p "$Q"; stopped=0; warm_stop() { [ -s "$Q/warm" ] && stopped=$((stopped + 1)); rm -f "$Q/warm"; }
+echo 'WARM: AbzuGame left running for the next check of app 384190' > "$T/w.log"; echo 'the user'"'"'s AbzuGame is up and awake (they play it?) - skip' > "$T/n.log"
+warm_after "$T/w.log" 384190; eq "WARM: line -> the game stays warm for the next job" "$(cat "$Q/warm" 2>/dev/null):$stopped" "384190:0"
+warm_after "$T/n.log" 384190; eq "12:08 case: handed the warm game, no WARM: (rc 3 early) -> closed at once" "$(cat "$Q/warm" 2>/dev/null):$stopped" ":1"
+warm_after "$T/n.log" ""; eq "nothing warm, a non-game job -> nothing to close" "$(cat "$Q/warm" 2>/dev/null):$stopped" ":1"
+echo 384190 > "$Q/warm"; warm_after "$T/w.log" ""; eq "a stray WARM: from a non-game job never keeps a game" "$(cat "$Q/warm" 2>/dev/null):$stopped" ":2"
+grep -qF 'warm_after "$log" "$gk"' "$src" && ok "runner: warm_after after every job" || bad "runner: warm_after after every job"
+grep -qF '[ -s "$Q/warm" ] && [ "$(cat "$Q/warm")" != "$gk" ] && warm_stop' "$src" && ok "runner: a warm game closed before a job of another app" || bad "runner: warm_stop before another app's job"
 
 # order_jobs: ABZU, window-bench, ABZU, resize ABZU, perf, Besiege -> ABZU x3 back to back where the first was
 mk() { printf 'task=t\ncmd=(%s)\n' "$2" > "$T/$1.job"; echo "$T/$1.job"; }

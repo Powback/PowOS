@@ -119,11 +119,18 @@ util_hourly() { local now; now=$(date +%s)
 # warm_stop: close the game a job left warm ($Q/warm: its app id; bf-pacing's "WARM:" line) when the job after it
 # isn't for that game after all (a dropped job, the window ended) - the same close bf-stop.sh does, and its marker.
 warm_stop() { local a; a=$(cat "$Q/warm" 2>/dev/null); rm -f "$Q/warm"; case $a in ''|*[!0-9]*) return 0 ;; esac
-  echo "$(date +%T) closing app $a: left warm for a next job of it that didn't come"
+  echo "$(date +%T) closing app $a: ${1:-left warm for a next job of it that never came}"
   user_sh "export XDG_RUNTIME_DIR=/run/powos-app DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus; timeout 20 powos game $a stop; timeout 5 powos sleep never --remove steam"
   phone_sh "rm -f /var/tmp/powos-warm-$a" >/dev/null; }
-# warm_takes <cmd...>: the check reuses a game the job before left warm (bf-pacing.sh, its warm marker).
-warm_takes() { local a; for a in "$@"; do [ "$(basename -- "$a" 2>/dev/null)" = bf-pacing.sh ] && return 0; done; return 1; }
+# warm_takes <dir> <cmd...>: the check reuses a game the job before left warm - a bf-pacing.sh (relative paths from the
+# job's dir) that reads the warm marker. 11-07 12:08: ABZU jobs queued with frozen copies of bf-pacing
+# (~/.cache/abzu-tools, rsu-tools: no hand-over) were handed the running game, read it as "the user's AbzuGame is up"
+# (rc 3) and the game stayed up - window-bench, ww-glue and ww-popups after it all SKIPped on "a game runs".
+warm_takes() { local d=$1 a f; shift; for a in "$@"; do [ "$(basename -- "$a" 2>/dev/null)" = bf-pacing.sh ] || continue; case $a in /*) f=$a ;; *) f=$d/$a ;; esac; grep -q 'powos-warm-' "$f" 2>/dev/null && return 0; done; return 1; }
+# warm_after <log> <game key>: after a job. Its "WARM:" line hands the game on ($Q/warm = its app); anything else and a
+# game that was left warm for it is closed now - the job closed it itself (a no-op then) or never took it (an rc 3
+# before its setup, an old check): never a queue game left running into the next, unrelated job.
+warm_after() { if grep -q '^WARM: ' "$1" 2>/dev/null && [ -n "$2" ]; then echo "$2" > "$Q/warm"; else warm_stop "the job it was left warm for didn't hand it on"; fi; }
 # game_key <cmd...>: the Steam app a games check drives ("" for any other check): APP=<id> in its env, else a games
 # script's first numeric argument (game-resize.sh 384190), else Broforce (274190, bf-*.sh's default).
 game_key() { local a g=0 app=
@@ -748,7 +755,7 @@ EOS
         # running ("WARM: ..." in its log) for the next to reuse; a game left warm for another app is closed first.
         # Only a check that takes the hand-over (bf-pacing.sh reads its warm marker) gets one: game-resize would take a
         # running game for the user's.
-        gk=$(game_key "${cmd[@]}"); nk=; [ -n "$gk" ] && [ -n "${sel[$k]:-}" ] && nk=$( cmd=(); . "${sel[$k]}"; warm_takes "${cmd[@]}" && game_key "${cmd[@]}" )
+        gk=$(game_key "${cmd[@]}"); nk=; [ -n "$gk" ] && [ -n "${sel[$k]:-}" ] && nk=$( cmd=(); cwd=.; rel=0; . "${sel[$k]}"; [ "$rel" = 1 ] && cwd=$VR/$cwd; warm_takes "$cwd" "${cmd[@]}" && game_key "${cmd[@]}" )
         nextapp=; [ -n "$gk" ] && [ "$nk" = "$gk" ] && nextapp=$gk
         [ -s "$Q/warm" ] && [ "$(cat "$Q/warm")" != "$gk" ] && warm_stop
         echo "$(date +%T) run $n: ${cmd[*]}"
@@ -814,7 +821,7 @@ EOS
           pause "Phone checks paused: $pass passed, $fail failed, $((N - k + 1)) still queued"
           exit 4
         fi
-        t1=$(date +%s); grep -q '^WARM: ' "$log" && { [ -n "$gk" ] && echo "$gk" > "$Q/warm"; } || rm -f "$Q/warm"
+        t1=$(date +%s); warm_after "$log" "$gk"
         pfinal=
         if [ $rc = 3 ]; then
           # Touched or not comes from the input source (rc3_kind), read right after the check: idle shorter than its

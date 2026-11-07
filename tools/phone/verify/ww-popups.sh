@@ -5,10 +5,14 @@
 # WM_TRANSIENT_FOR, 0062) each come to the app as "popup <window> <popup> x y w h" with their own buffers, and go as
 # "popup-gone". kwin 3.71 (N3a): the app's consumer is log-only (PopupLog). kwin 3.72+ (N3b, 0064): each is a layer of
 # its own over home (WebWindowPopups), not cut at the window's edge, and touches on it are its window's.
-# Needs Steam running as a web window on home (unfolded), no game under it, the user idle 2+ min. Queue it:
+# Needs home unfolded, no game under Steam (a game is the user's: SKIP), the user idle 2+ min. Queue it:
 #   tools/phone/verify/queue.sh add --budget 300 native-windows tools/phone/verify/ww-popups.sh
-# It never starts or closes Steam and changes none of its settings: it clicks its menu bar as X input (xdotool, Steam's
-# own X window) to open a menu, reads the lines, and closes the menu with Escape.
+# With no Steam main window on home it opens Steam itself through home's launch path (apps.launch l:steam, as a tap on
+# its dock cell), up to STEAM_WAIT_S (150) for its main window, and leaves Steam as it found it: a Steam this started is
+# closed after (powos game stop --steam); a Steam that was running keeps running, only the web window this brought up is
+# closed (its bar's close: Steam goes back to the tray). It changes none of Steam's settings: it clicks its menu bar as
+# X input (xdotool, Steam's own X window) to open a menu, reads the lines, and closes the menu with Escape.
+#   ww-popups.sh --dry-run   read-only: what the run would open / test / close now (no input, nothing opened)
 #
 # PASS needs, per menu opened (up to 2: Steam's menu bar, scanned until a new override-redirect window is viewable):
 #   kwin    KWin's "exports popup N" line for it (/run/powos-app/hyprland.log)
@@ -35,21 +39,59 @@ us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | 
 rs() { printf '%s\n' "$1" > "$OUT/r.sh"; "$T/root.sh" "$OUT/r.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
 X='export DISPLAY=:0 XAUTHORITY=$(pgrep -a Xwayland | grep -o -- "-auth [^ ]*" | head -1 | cut -d" " -f2)'
 
-"$T/idle.sh" --wait 120 1800 >/dev/null || { echo "SKIP phone busy (not idle 2 min within 30 min)"; exit 3; }
+DRY=0; [ "${1:-}" = --dry-run ] && DRY=1
+if [ $DRY = 0 ]; then
+  "$T/idle.sh" --wait 120 1800 >/dev/null || { echo "SKIP phone busy (not idle 2 min within 30 min)"; exit 3; }
+fi
 read -r screen < <("$T/idle.sh")
-case "$screen" in *screen=Awake*) ;; *) echo "SKIP screen not on ($screen)"; exit 3 ;; esac
+[ $DRY = 1 ] && say "phone: $screen"
+case "$screen" in *screen=Awake*) ;; *) [ $DRY = 1 ] || { echo "SKIP screen not on ($screen)"; exit 3; } ;; esac
 kw=$(us 'pacman -Q kwin' | tail -1)
 kwat() { python3 -c "import sys; r=sys.argv[1].split('-')[-1]; sys.exit(0 if tuple(map(int,r.split('.')))>=tuple(map(int,sys.argv[2].split('.'))) else 1)" "${kw:-x 0-0}" "$1" 2>/dev/null; }
 kwat 3.71 || { echo "SKIP $kw has no 0063 (popups as surfaces need kwin 3.71+)"; exit 3; }
 LAYERS=0; kwat 3.72 && LAYERS=1
 [ "$(us "pgrep -fc 'SteamLaunch AppId='" | tail -1)" = 0 ] || { echo "SKIP a game runs under Steam (the user's): not now"; exit 3; }
-sw=$(hcall webwindows.list "[]" "l=>{const w=l.find(w=>/steam/i.test(String(w.key))&&!/steam_app_/i.test(String(w.key)));return w?'w'+w.id:'none'}")
-case $sw in w[0-9]*) ;; *) echo "SKIP Steam isn't a web window on home ($sw)"; exit 3 ;; esac
+steamww() { hcall webwindows.list "[]" "l=>{const w=l.filter(w=>/steam/i.test(String(w.key))&&!/steam_app_/i.test(String(w.key))).at(-1);return w?'w'+w.id:'none'}"; }
+sw=$(steamww)
 # Steam's main X window "<id> <x> <y> <w> <h>" (as steam-tap.sh finds it), and the override-redirect windows viewable now.
 steamwin() { us "$X; xwininfo -root -tree 2>/dev/null | awk '/\"Steam\": \\(\"steamwebhelper\" \"steam\"\\)/{print \$1}' | while read -r w; do xwininfo -id \$w 2>/dev/null | awk -v w=\$w '/Map State/{m=\$3} /Absolute upper-left X/{ax=\$4} /Absolute upper-left Y/{ay=\$4} /Width:/{x=\$2} /Height:/{y=\$2} END{if(m==\"IsViewable\"&&x>=400&&y>=300)print w, ax, ay, x, y}'; done | head -1" | tail -1; }
 menus() { us "$X; xwininfo -root -children 2>/dev/null | awk '/\\(\"steamwebhelper\" \"steam\"\\)/ && /has no name/{print \$1}' | while read -r w; do xwininfo -id \$w 2>/dev/null | awk -v w=\$w '/Map State/{m=\$3} /Override Redirect State/{o=\$4} /Absolute upper-left X/{ax=\$4} /Absolute upper-left Y/{ay=\$4} /Width:/{x=\$2} /Height:/{y=\$2} END{if(m==\"IsViewable\"&&o==\"yes\")print w, ax, ay, x, y}'; done" | grep .; }
 read -r SW SX SY SWW SWH <<<"$(steamwin)"
-[ -n "${SW:-}" ] || { echo "SKIP no viewable Steam main window"; exit 3; }
+# Self-setup: no Steam web window, or no viewable main window in it -> Steam opened as a tap would (apps.launch l:steam:
+# starts it, or brings a running one's main window up), then up to STEAM_WAIT_S for its main window. Put back on exit.
+STEAM_BEFORE="" STEAM_NEW="" b0=""
+restore_steam() {
+  if [ -z "$STEAM_BEFORE" ] && [ -n "${STEAM_STARTED:-}" ]; then
+    ww_us 'export XDG_RUNTIME_DIR=/run/powos-app DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus; timeout 20 powos game 274190 stop --steam' >/dev/null
+    say "Steam closed: this check started it"
+  else
+    local w; [ -n "${STEAM_STARTED:-}" ] && STEAM_NEW=$(comm -13 <(echo "$b0") <(wwids l:steam) | xargs)  # also after a failed wait
+    for w in $STEAM_NEW; do ww_close "$w"; say "Steam's web window $w closed: this check brought it up (Steam keeps running, as before)"; done
+  fi; STEAM_STARTED="" STEAM_NEW=""; }
+if [ -z "${SW:-}" ] || [ "$sw" = none ]; then
+  STEAM_BEFORE=$(ww_us "pgrep -x steam | head -1")
+  ww_ready || { echo "SKIP home has no web windows here (folded, off): Steam can't open as one"; exit 3; }
+  if [ $DRY = 1 ]; then
+    say "dry-run: no Steam main window on home (web window $sw); would open it via apps.launch l:steam ($([ -n "$STEAM_BEFORE" ] && echo "Steam runs: only the window it brings up is closed after" || echo "Steam not running: closed after")), then click up to 2 menus"
+    exit 0
+  fi
+  b0=$(wwids l:steam)
+  say "no viewable Steam main window (web window $sw, Steam $([ -n "$STEAM_BEFORE" ] && echo running || echo "not running")): opening it through home's launch path"
+  STEAM_STARTED=1; trap 'restore_steam' EXIT
+  r=$(hcall apps.launch "['l:steam']" "()=>'ok'"); [ "$r" = ok ] || { echo "FAIL setup: apps.launch l:steam: $r"; exit 1; }
+  t0=$SECONDS
+  while [ $((SECONDS - t0)) -lt "${STEAM_WAIT_S:-150}" ]; do
+    sleep 3
+    read -r SW SX SY SWW SWH <<<"$(steamwin)"; sw=$(steamww)
+    [ -n "${SW:-}" ] && [ "$sw" != none ] && [ "$(wwel "$sw" "e=>e.querySelector('.webwindow-body.live')?'live':'no'")" = live ] && break
+    SW=""
+  done
+  STEAM_NEW=$(comm -13 <(echo "$b0") <(wwids l:steam) | xargs)
+  [ -n "${SW:-}" ] || { echo "FAIL setup: no viewable Steam main window $((SECONDS - t0)) s after apps.launch l:steam (web window $sw)"; exit 1; }
+  say "Steam's main window up $((SECONDS - t0)) s after the launch (web window $sw, new: ${STEAM_NEW:-none})"; sleep 2
+elif [ $DRY = 1 ]; then
+  say "dry-run: Steam's main window $SW is up in web window $sw: would click up to 2 menus, nothing opened or closed"; exit 0
+fi
 open0=$(menus)
 [ -z "$open0" ] || { say "a Steam menu is open already ($open0): Escape first"; us "$X; xdotool key Escape" >/dev/null; sleep 1; }
 # The window's scale: its web window body (device px) against the X window's width.
@@ -57,7 +99,7 @@ body=$(wwbody "$sw")
 scale=$(python3 -c "import sys; l,t,r,b=map(float,sys.argv[1].split()); print('%.4f' % ((r-l)/float(sys.argv[2])))" "$body" "$SWW" 2>/dev/null || echo 1)
 say "Steam: web window $sw body ${body:-?}, X window $SW at $SX,$SY ${SWW}x$SWH, scale ~$scale; $kw"
 # A menu this opened never stays open: Escape on the way out (whatever ended the run).
-trap '[ "${opened:-0}" -gt 0 ] && us "$X; xdotool key Escape" >/dev/null 2>&1' EXIT
+trap '[ "${opened:-0}" -gt 0 ] && us "$X; xdotool key Escape" >/dev/null 2>&1; restore_steam' EXIT
 
 since=$("$adb" shell 'date +%m-%d\ %H:%M:%S.000' | tr -d '\r')
 klog0=$(rs 'wc -l < /run/powos-app/hyprland.log' | tail -1)
