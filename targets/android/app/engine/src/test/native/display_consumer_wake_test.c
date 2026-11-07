@@ -6,6 +6,10 @@
  *
  * The test is the producer (KWin's side): it takes the HELLO's fds over a socketpair, answers FDS_READY, and sends
  * frames on the fence channel - or none, for the stop case.
+ *
+ * 6. (11-07) Part of an output event on the data channel: the event thread's poll returns 0 and takes nothing, it
+ * never blocks in recv for the rest (it did - recvfrom forever, the stop's join with it, and the closed window's
+ * BLAST layer "[BBQ] powos-ww-N-linux" left alive); the whole event is read once the rest comes.
  */
 #define _GNU_SOURCE
 #include <stddef.h>
@@ -34,6 +38,16 @@ static long now_ms(void)
 }
 
 struct waiter { display_ctx *ctx; int ret; long ms; };
+
+struct evwait { display_ctx *ctx; int ret; struct OutputEvent ev; volatile int done; };
+
+static void *wait_event(void *arg)
+{
+    struct evwait *w = arg;
+    w->ret = poll_output_event(w->ctx, &w->ev, 300);
+    w->done = 1;
+    return NULL;
+}
 
 static void *wait_frame(void *arg)
 {
@@ -112,6 +126,39 @@ int main(void)
     poll_output_event(ctx, &ev, 300);
     ms = now_ms() - t0;
     CHECK(ms >= 250, "no wake fd: poll_output_event waits its timeout (%ld ms)", ms);
+
+    /* 6. Half an output event on the data channel: no blocking recv for the rest. */
+    int data_w = fds[2];
+    uint8_t msg[sizeof(struct data_msg) + sizeof(struct OutputEvent)];
+    memset(msg, 0, sizeof(msg));
+    struct data_msg dh = { .type = DATA_MSG_OUTPUT_EVENT, .size = sizeof(struct OutputEvent) };
+    memcpy(msg, &dh, sizeof(dh));
+    struct OutputEvent oe;
+    memset(&oe, 0, sizeof(oe));
+    oe.type = OUTPUT_TYPE_KEYBOARD;
+    oe.keyboard.visible = 1;
+    memcpy(msg + sizeof(dh), &oe, sizeof(oe));
+    size_t half = sizeof(dh) + sizeof(oe) / 2;
+    send(data_w, msg, half, 0);
+    struct evwait e6 = { .ctx = ctx };
+    pthread_t th6;
+    pthread_create(&th6, NULL, wait_event, &e6);
+    for (int i = 0; i < 100 && !e6.done; i++)
+        usleep(10000);
+    CHECK(e6.done && e6.ret == 0, "half an event: the poll returned %s (%d), it never waits in recv for the rest",
+          e6.done ? "at once" : "NOT within 1 s", e6.ret);
+    if (!e6.done) {
+        /* The old code: unblock it for the report (the rest arrives), as nothing on a closed window ever did. */
+        send(data_w, msg + half, sizeof(msg) - half, 0);
+        pthread_join(th6, NULL);
+    } else {
+        pthread_join(th6, NULL);
+        send(data_w, msg + half, sizeof(msg) - half, 0);
+        struct OutputEvent got6;
+        int r6 = poll_output_event(ctx, &got6, 300);
+        CHECK(r6 == 1 && got6.type == OUTPUT_TYPE_KEYBOARD && got6.keyboard.visible == 1,
+              "the rest come: the whole event is read (%d, type %u)", r6, got6.type);
+    }
 
     printf(failures ? "display_consumer_wake_test: %d FAILED\n" : "display_consumer_wake_test: PASS\n", failures);
     return failures ? 1 : 0;

@@ -19,8 +19,8 @@
 #   record pass screenrecord over the same gesture; every frame's part of the body that stays inside the window through
 #               the whole drag compared to the frame before the drag: a BLANK frame (that part uniform or black where
 #               it showed content) - the budget is 0
-# Facts per app/gesture in OUT/summary.txt. FAIL: a missed shell vsync while the finger moves, a blank frame, or a
-# commit KWin never drew. Needs the phone unfolded and idle (the runner's window); a full-screen window (a game left
+# Facts per app/gesture in OUT/summary.txt. FAIL: a missed shell vsync while the finger moves, a blank frame, a
+# commit KWin never drew, or a closed Linux window's layer still in SurfaceFlinger 3 s after its close. Needs the phone unfolded and idle (the runner's window); a full-screen window (a game left
 # running) skips the run (exit 3, re-queued) - never touched.
 #   WWR_APPS="kate dolphin calc" (default) | any subset;  WWR_REC=0 skips the record pass
 # Exit: 0 PASS; 1 FAIL; 3 not now (a real touch, busy, folded, a game up); 5 can't run.
@@ -202,6 +202,23 @@ for app in $APPS; do
     fi
   done
 done
+# Closed windows leave no layer behind: each Linux window's content ("powos-ww-N-linux") and its BLAST queue
+# ("[BBQ] powos-ww-N-linux") are gone from SurfaceFlinger 3 s after its close (11-07: a consumer stop wedged on its
+# event thread kept "[BBQ] powos-ww-1-linux" alive for good, one per closed game window).
+LIN=""
+for w in $MINE; do case $(wwhost "$w" key) in l:*) LIN="$LIN ${w#w}" ;; esac; done
+for w in $MINE; do hcall webwindows.close "[${w#w}]" "v=>String(v)" >/dev/null; done
+MINE=""
+if [ -n "$LIN" ]; then
+  sleep 3
+  layers=$(sh_ "dumpsys SurfaceFlinger --list")
+  for n in $LIN; do
+    left=$(echo "$layers" | grep -cE "powos-ww-$n-linux#")
+    log "closed Linux window w$n: $left of its layers left in SurfaceFlinger"
+    [ "$left" = 0 ] || bad "closed Linux window w$n: $left layers left ($(echo "$layers" | grep -E "powos-ww-$n-linux#" | tr '\n' ' '))"
+  done
+fi
+grep -aE "consumer stop still blocked" "$OUT/logcat.txt" | sed 's/^/stop: /' | tee -a "$OUT/summary.txt"
 grep -aE "pacing:" "$OUT/logcat.txt" | tail -4 | sed 's/^/consumer: /' | tee -a "$OUT/summary.txt"
 log "summary: $OUT/summary.txt"
 [ "$fail" = 0 ] && log PASS

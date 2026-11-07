@@ -374,6 +374,14 @@ static void window_events(JNIEnv *env, struct consumer_state *s)
                                          (jboolean)(ev.keyboard.visible != 0));
             if ((*env)->ExceptionCheck(env))
                 (*env)->ExceptionClear(env);
+        } else if (ev.type == OUTPUT_TYPE_CLIPBOARD && ev.clipboard.size > 0) {
+            /* PowOS: its text follows the event on the same stream - read past it (home's own consumer sets the
+             * clipboard). Left there, the next poll took the text for a message header: the stream lost, and a
+             * "header" whose size never came kept this thread in recv, the window's stop with it (11-07). */
+            char *buf = ev.clipboard.size <= (1u << 24) ? malloc(ev.clipboard.size) : NULL;
+            if (!buf || poll_output_event_extend_data(s->ctx, buf, ev.clipboard.size, 5000) != 1)
+                LOGE("window %u: a clipboard event's %u bytes not read past", s->surface_id, ev.clipboard.size);
+            free(buf);
         } else {
             LOGI("window %u: output event type=%u not for windows", s->surface_id, ev.type);
         }

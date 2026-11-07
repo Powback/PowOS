@@ -125,6 +125,14 @@ frame of drag latency; measure it before turning it on for drags (animations fir
 - [ ] **N4 - resize with no drop**: the frame follows the finger every frame (today); Android: VD resize paced as RS1,
   last buffer anchored; Linux: screen-sized buffers (no allocation per step). Gate the frame stats: gfxinfo janky <= 5 %
   over `ww-glue.sh`'s edge drag, KWin's `window task N frames` commits ~= drawn during it.
+  Bench + gate: `tools/phone/verify/ww-resize.sh` (Kate, Dolphin, Calculator; edge and corner drags; shell missed
+  vsyncs from SurfaceFlinger latency = 0, no blank frame in a screenrecord of the body, KWin commits = drawn, host
+  relayouts, KWin's configure->commit; and no layer of a closed Linux window left).
+  Found 11-07: a closed Linux window's BLAST layer (`[BBQ] powos-ww-N-linux`) stayed alive for good - its consumer's
+  stop joined an event thread stuck in `recvfrom` (`poll_output_event`: blocking peek + `recv_all` of this side's event
+  size, and a window consumer never read past a clipboard event's text, so the stream lost its framing). Fixed in
+  `display_consumer.c` (non-blocking, whole messages by the header's size) and `native_consumer.c` (window consumers
+  read past the clipboard text); native test `engine/src/test/native` case 6.
 - [ ] **N5 - games**: windowed games are Linux windows (N1-N4 apply); full screen stays the direct-scanout task. Check:
   a windowed Proton game's menu (untyped override-redirect) shows (0062), fps x/120 unchanged by N1.
 
