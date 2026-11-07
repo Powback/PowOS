@@ -262,48 +262,64 @@ class ShellHost(
         after: Long,
         waitedHidden: Boolean = false,
     ) {
-        if (serial != bootSerial || bootReady || bootFailed) return
-        if (after < BOOT_MS && bootError == null) return
-        // A page whose window isn't on the screen can't draw, so it can't be ready yet (BootJudge): judged once shown.
+        if (stale(serial) || (after < BOOT_MS && bootError == null)) return
+        if (waitBeforeProbe(serial, after, waitedHidden)) return
+        PageWatchdog.probe(web) { alive, _ ->
+            when {
+                stale(serial) -> Unit
+                alive -> judgeBoot(serial, after, true, false)
+                else -> documentHidden { judgeBoot(serial, after, false, it) }
+            }
+        }
+    }
+
+    /** A late check of an earlier load, or one already decided. */
+    private fun stale(serial: Int) = serial != bootSerial || bootReady || bootFailed
+
+    private val bootPage get() = mode ?: "home"
+
+    /** True when the page isn't asked now ([BootJudge.before]): the screen is off, its window isn't on the screen (it
+     *  can't draw, so it can't be ready - judged once shown), or it just came back (its boot clock starts again). */
+    private fun waitBeforeProbe(
+        serial: Int,
+        after: Long,
+        waitedHidden: Boolean,
+    ): Boolean {
         val interactive = context.getSystemService(android.os.PowerManager::class.java).isInteractive
         when (BootJudge.before(interactive, onScreen(), waitedHidden)) {
-            BootJudge.Before.WAIT_SCREEN_OFF -> {
-                main.postDelayed({ checkBoot(serial, after, waitedHidden) }, 2_000)
-                return
-            }
-            BootJudge.Before.WAIT_HIDDEN -> {
-                main.postDelayed({ checkBoot(serial, after, true) }, 2_000)
-                return
-            }
+            BootJudge.Before.WAIT_SCREEN_OFF -> main.postDelayed({ checkBoot(serial, after, waitedHidden) }, 2_000)
+            BootJudge.Before.WAIT_HIDDEN -> main.postDelayed({ checkBoot(serial, after, true) }, 2_000)
             // It only starts running now: the same allowance as a load that just started.
-            BootJudge.Before.RESTART -> {
-                main.postDelayed({ checkBoot(serial, after) }, BOOT_MS)
-                return
-            }
-            BootJudge.Before.PROBE -> Unit
+            BootJudge.Before.RESTART -> main.postDelayed({ checkBoot(serial, after) }, BOOT_MS)
+            BootJudge.Before.PROBE -> return false
         }
-        PageWatchdog.probe(web) { alive, _ ->
-            if (serial != bootSerial || bootReady || bootFailed) return@probe
-            fun judge(pageHidden: Boolean) {
-                if (serial != bootSerial || bootReady || bootFailed) return
-                when (BootJudge.after(alive, pageHidden || !onScreen(), bootError != null, after, BOOT_SLOW_MS)) {
-                    BootJudge.After.READY -> {
-                        bootReady = true
-                        ShellErrors.markReady(context, mode ?: "home")
-                    }
-                    BootJudge.After.WAIT_HIDDEN -> main.postDelayed({ checkBoot(serial, after, true) }, 2_000)
-                    BootJudge.After.LATER -> main.postDelayed({ checkBoot(serial, BOOT_SLOW_MS) }, BOOT_SLOW_MS - after)
-                    BootJudge.After.FAIL -> {
-                        bootFailed = true
-                        val cause = bootError ?: "no window.__powosAlive ${after / 1000} s after the page started loading, and no error reported"
-                        ShellErrors.notReady(context, mode ?: "home", "${after / 1000} s after load: $cause")
-                        // Broken right after a hot push: the push rolled back, every page loaded again on what was there before.
-                        if (ShellErrors.rollback(context, mode ?: "home", cause).isNotEmpty()) main.postDelayed({ HotReload.reloadAll() }, 300)
-                    }
-                }
+        return true
+    }
+
+    private fun judgeBoot(
+        serial: Int,
+        after: Long,
+        alive: Boolean,
+        pageHidden: Boolean,
+    ) {
+        if (stale(serial)) return
+        when (BootJudge.after(alive, pageHidden || !onScreen(), bootError != null, after < BOOT_SLOW_MS)) {
+            BootJudge.After.READY -> {
+                bootReady = true
+                ShellErrors.markReady(context, bootPage)
             }
-            if (alive) judge(false) else documentHidden(::judge)
+            BootJudge.After.WAIT_HIDDEN -> main.postDelayed({ checkBoot(serial, after, true) }, 2_000)
+            BootJudge.After.LATER -> main.postDelayed({ checkBoot(serial, BOOT_SLOW_MS) }, BOOT_SLOW_MS - after)
+            BootJudge.After.FAIL -> bootFail(after)
         }
+    }
+
+    private fun bootFail(after: Long) {
+        bootFailed = true
+        val cause = bootError ?: "no window.__powosAlive ${after / 1000} s after the page started loading, and no error reported"
+        ShellErrors.notReady(context, bootPage, "${after / 1000} s after load: $cause")
+        // Broken right after a hot push: the push rolled back, every page loaded again on what was there before.
+        if (ShellErrors.rollback(context, bootPage, cause).isNotEmpty()) main.postDelayed({ HotReload.reloadAll() }, 300)
     }
 
     /** The page's window is on the screen (its WebView can draw). The gate's test page is in no window by design: judged as before. */

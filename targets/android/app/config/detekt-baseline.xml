@@ -115,7 +115,6 @@
     <ID>CognitiveComplexMethod:ShellErrors.kt$ShellErrors$fun rollback( context: Context, mode: String, cause: String, ): List&lt;String&gt;</ID>
     <ID>CognitiveComplexMethod:ShellErrors.kt$ShellErrors$private fun send( context: Context, text: String, test: Boolean = false, force: Boolean = false, )</ID>
     <ID>CognitiveComplexMethod:ShellHost.kt$HotReload$private fun changed( file: File, root: File, prefix: String, )</ID>
-    <ID>CognitiveComplexMethod:ShellHost.kt$ShellHost$private fun checkBoot( serial: Int, after: Long, )</ID>
     <ID>CognitiveComplexMethod:ShellHost.kt$ShellHost.Client$override fun shouldInterceptRequest( view: WebView, request: WebResourceRequest, ): WebResourceResponse?</ID>
     <ID>CognitiveComplexMethod:ShellNative.kt$ShellNative.Tile$fun draw(frame: String)</ID>
     <ID>CognitiveComplexMethod:ShellNet.kt$ShellNet.Stream$override fun run()</ID>
@@ -262,7 +261,6 @@
     <ID>CyclomaticComplexMethod:ShellBridge.kt$ShellBridge$private fun dispatch( method: String, a: JSONArray, ): Any?</ID>
     <ID>CyclomaticComplexMethod:ShellErrors.kt$ShellErrors$fun rollback( context: Context, mode: String, cause: String, ): List&lt;String&gt;</ID>
     <ID>CyclomaticComplexMethod:ShellErrors.kt$ShellErrors$private fun send( context: Context, text: String, test: Boolean = false, force: Boolean = false, )</ID>
-    <ID>CyclomaticComplexMethod:ShellHost.kt$ShellHost$private fun checkBoot( serial: Int, after: Long, )</ID>
     <ID>CyclomaticComplexMethod:ShellHost.kt$ShellHost$private fun mime(path: String)</ID>
     <ID>CyclomaticComplexMethod:ShellHost.kt$ShellHost.Client$override fun shouldInterceptRequest( view: WebView, request: WebResourceRequest, ): WebResourceResponse?</ID>
     <ID>CyclomaticComplexMethod:ShellNative.kt$ShellNative$private fun command(text: String)</ID>

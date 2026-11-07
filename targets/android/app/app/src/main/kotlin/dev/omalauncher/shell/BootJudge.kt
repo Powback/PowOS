@@ -41,19 +41,18 @@ internal object BootJudge {
     /**
      * The page's answer: [alive] (window.__powosAlive), whether its document said it is hidden ([pageHidden]: the
      * WebView paused, or its window went away mid-probe), an error it reported while booting, and how long since
-     * the load started ([after]) against the slow-start allowance ([slowMs]).
+     * the load started, still inside the slow-start allowance ([beforeSlow]).
      */
     fun after(
         alive: Boolean,
         pageHidden: Boolean,
         hadError: Boolean,
-        after: Long,
-        slowMs: Long,
+        beforeSlow: Boolean,
     ): After =
         when {
             alive -> After.READY
             pageHidden -> After.WAIT_HIDDEN
-            !hadError && after < slowMs -> After.LATER
+            !hadError && beforeSlow -> After.LATER
             else -> After.FAIL
         }
 }

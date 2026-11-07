@@ -29,15 +29,15 @@ class BootJudgeTest {
 
     @Test
     fun aHiddenDocumentAt20sWaitsInsteadOfFailing() {
-        assertEquals(BootJudge.After.WAIT_HIDDEN, BootJudge.after(alive = false, pageHidden = true, hadError = false, after = 20_000, slowMs = 20_000))
-        assertEquals(BootJudge.After.WAIT_HIDDEN, BootJudge.after(alive = false, pageHidden = true, hadError = true, after = 3_000, slowMs = 20_000))
+        assertEquals(BootJudge.After.WAIT_HIDDEN, BootJudge.after(alive = false, pageHidden = true, hadError = false, beforeSlow = false))
+        assertEquals(BootJudge.After.WAIT_HIDDEN, BootJudge.after(alive = false, pageHidden = true, hadError = true, beforeSlow = true))
     }
 
     @Test
     fun aVisiblePageThatNeverRendersStillFails() {
-        assertEquals(BootJudge.After.FAIL, BootJudge.after(alive = false, pageHidden = false, hadError = false, after = 20_000, slowMs = 20_000))
-        assertEquals(BootJudge.After.FAIL, BootJudge.after(alive = false, pageHidden = false, hadError = true, after = 3_000, slowMs = 20_000))
-        assertEquals(BootJudge.After.LATER, BootJudge.after(alive = false, pageHidden = false, hadError = false, after = 8_000, slowMs = 20_000))
-        assertEquals(BootJudge.After.READY, BootJudge.after(alive = true, pageHidden = true, hadError = false, after = 8_000, slowMs = 20_000))
+        assertEquals(BootJudge.After.FAIL, BootJudge.after(alive = false, pageHidden = false, hadError = false, beforeSlow = false))
+        assertEquals(BootJudge.After.FAIL, BootJudge.after(alive = false, pageHidden = false, hadError = true, beforeSlow = true))
+        assertEquals(BootJudge.After.LATER, BootJudge.after(alive = false, pageHidden = false, hadError = false, beforeSlow = true))
+        assertEquals(BootJudge.After.READY, BootJudge.after(alive = true, pageHidden = true, hadError = false, beforeSlow = true))
     }
 }
