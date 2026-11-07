@@ -68,7 +68,7 @@ for v in "$@"; do
   case $win in win=[0-9]*) ;; *) echo "FAIL $v: no game window in 4 min ($win)"; restore; exit 1 ;; esac
   echo "$v: window after $((i * 5)) s: $win"; echo "$win" > "$M/window.txt"
   # The variant as the game really got it (steam-env's TU_DEBUG vs the variant's: the 11-04 runs couldn't tell).
-  echo "$v: game env: $("$A" shell "su -c 'for p in \$(pgrep -f Broforce_beta.exe); do xargs -0 -n1 echo < /proc/\$p/environ; done' | grep -E '^TU_(DEBUG|KGSL_FORCE_NONCOHERENT)=' | sort -u | tr '\n' ' '" | tr -d '\r')" | tee -a "$M/window.txt"
+  echo "$v: game env: $("$A" shell "su -c 'for p in \$(pgrep -f \"[B]roforce_beta[.]exe\"); do xargs -0 -n1 echo < /proc/\$p/environ; done' | grep -E '^TU_(DEBUG|KGSL_FORCE_NONCOHERENT)=' | sort -u | tr '\n' ' '" | tr -d '\r')" | tee -a "$M/window.txt"
   asuser bf-checker-phone.sh grab 80 /var/tmp/bfc/$v >/dev/null; t0=$(date +%s); n=0
   while [ $(( $(date +%s) - t0 )) -lt 92 ]; do
     el=$(( $(date +%s) - t0 ))
