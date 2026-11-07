@@ -102,7 +102,7 @@ class DeviceAgentCore(
     ): JSONObject {
         val action = b.optString("action")
         if (action !in ACTIONS) throw DeviceActionError("no action '${action.take(24)}'", "bad-request")
-        if (action !in backend.caps()) throw DeviceActionError("$action: this device can't", "unsupported")
+        if (action !in backend.caps()) throw DeviceActionError(backend.refusal(action) ?: "$action: this device can't", "unsupported")
         log("action $action by $by")
         val result = if (action == "status") backend.status() else backend.act(action, b.optJSONObject("args") ?: JSONObject(), b.optBoolean("force"))
         return JSONObject().put("ok", true).put("action", action).put("result", result)
@@ -222,6 +222,9 @@ class DeviceAgentCore(
 /** What this device can do and how: Android's own APIs in the app (DeviceAgentHost), a fake in the tests. */
 interface DeviceBackend {
     fun caps(): List<String>
+
+    /** Why [action] isn't in caps() right now, when the person can change that (a permission not given); else null. */
+    fun refusal(action: String): String? = null
 
     fun status(): JSONObject
 

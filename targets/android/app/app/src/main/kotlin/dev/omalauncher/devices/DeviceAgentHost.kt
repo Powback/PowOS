@@ -38,14 +38,18 @@ import javax.security.auth.x500.X500Principal
  * (the same port), so this starts only when RootedGuest is off.
  *
  * Caps: status (battery, plugged, screen, locked), screen_on (a wake lock that turns the screen on; it stays locked),
- * ring (the alarm sound for 10 s, for a phone lost in the bed). lock/screen_off need a device admin or an
- * accessibility service, which the app doesn't hold yet, so they aren't advertised here (the rooted backend has them).
+ * ring (the alarm sound for 10 s, for a phone lost in the bed), and lock + screen_off (= lock: no screen-off without
+ * root leaves the phone unlocked) only while the person allows PowOS's lock admin (LockAccess.kt, from the Devices
+ * app) - read live, so a grant or a revoke is in the very next info/status answer.
  */
 object DeviceAgentHost {
     private const val TAG = "PowosDeviced"
     private const val ALIAS = "powos-deviced-tls"
     private const val CHANNEL = "devices"
     private const val BODY_MAX = 16 * 1024
+
+    /** What every no-root phone can do without asking; WithLock adds lock/screen_off while allowed. */
+    private val BASE_CAPS = listOf("status", "screen_on", "ring")
     private var started = false
 
     @Synchronized
@@ -61,7 +65,7 @@ object DeviceAgentHost {
             DeviceAgentCore(
                 dir = File(ctx.filesDir, "deviced"),
                 name = { Settings.Global.getString(ctx.contentResolver, Settings.Global.DEVICE_NAME) ?: "Phone" },
-                backend = AndroidBackend(ctx),
+                backend = WithLock(AndroidBackend(ctx), LockActions(LockAccess.locker(ctx))),
                 showCode = { from, code -> notifyCode(ctx, from, code) },
             )
         core.log = { Log.i(TAG, it) }
@@ -189,7 +193,7 @@ object DeviceAgentHost {
     private class AndroidBackend(
         private val ctx: Context,
     ) : DeviceBackend {
-        override fun caps() = listOf("status", "screen_on", "ring")
+        override fun caps() = BASE_CAPS
 
         override fun status(): JSONObject {
             val b = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))

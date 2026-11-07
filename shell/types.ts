@@ -830,6 +830,17 @@ export interface Bridge {
      */
     changes(types: HealthType[], token: string): Promise<{ token: string; records: HealthRecord[]; deleted: string[]; expired: boolean }>;
   };
+  /**
+   * Host-optional (an older APK rejects: feature-detect): this phone's lock from other devices without root
+   * (devices/LockAccess.kt - an Android device admin with only force-lock). "devices.lock" ({@link LockAccess}) on
+   * every change, whoever made it (this page, Android's Settings).
+   */
+  devices?: {
+    lock(): Promise<LockAccess>;
+    /** Android's own "Activate device admin app?" screen; the answer comes as a "devices.lock" event. */
+    allowLock(): Promise<LockAccess>;
+    stopLock(): Promise<LockAccess>;
+  };
   /** The phone's notifications, for the launcher's own panel; "notifications.changed" brings the list again. */
   /**
    * Who uses the mic / camera / location (RecordingLight.kt's AppOps watch, the recording light's source): list() now,
@@ -1466,6 +1477,15 @@ export interface GlassesState {
 }
 
 export type HealthType = "steps" | "heart_rate" | "sleep" | "exercise" | "weight" | "active_calories";
+
+/** This phone's lock from other devices (devices/LockAccess.kt). */
+export interface LockAccess {
+  /** The no-root agent serves this phone (false on a rooted phone: its system-tier agent locks without asking). */
+  available: boolean;
+  rooted: boolean;
+  /** The person turned it on (PowOS's lock-only device admin is active). */
+  allowed: boolean;
+}
 
 export interface HealthStatus {
   /** "none": no Health Connect on this phone; "update": its provider app needs an update. */

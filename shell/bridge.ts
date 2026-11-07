@@ -20,6 +20,7 @@ import type {
   Bridge,
   HealthRecord,
   HealthStatus,
+  LockAccess,
   ChromeState,
   Cell,
   Chat,
@@ -230,6 +231,11 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       token: (types) => call<{ token: string }>("health.token", types), // detect
       changes: (types, token) =>
         call<{ token: string; records: HealthRecord[]; deleted: string[]; expired: boolean }>("health.changes", types, token), // detect
+    },
+    devices: {
+      lock: () => call<LockAccess>("devices.lock"), // detect
+      allowLock: () => call<LockAccess>("devices.lockAllow"), // detect
+      stopLock: () => call<LockAccess>("devices.lockStop"), // detect
     },
     privacy: {
       list: () => call<PrivacyList>("privacy.list"),

@@ -14167,11 +14167,11 @@ async function settleNeedsMe(r) {
 async function settleDevices(r) {
   try {
     await r.page.evaluate(() => new Promise((ok) => (window.importShim ? ok() : addEventListener("load", ok))));
-    await r.page.evaluate([dvWait, dvType, dvLine, dvFails, dvAgent].map((f) => `window.${f.name} = ${f}`).join(";\n"));
-    for (const step of [dvMount, dvPair, dvPaired, dvOptimistic, dvRollback, dvBusy]) {
+    await r.page.evaluate([dvWait, dvType, dvLine, dvFails, dvAgent, dvLock, dvLockAsk, dvLockDecline, dvLockGrant, dvLockStop, dvSleep].map((f) => `window.${f.name} = ${f}`).join(";\n"));
+    for (const step of [dvMount, dvThisPhone, dvPair, dvPaired, dvOptimistic, dvRollback, dvBusy]) {
       const out = await r.page.evaluate(step);
       r.problems.push(...out);
-      if (out.length && step !== dvOptimistic && step !== dvBusy && step !== dvRollback) break;
+      if (out.length && step !== dvOptimistic && step !== dvBusy && step !== dvRollback && step !== dvThisPhone) break;
     }
     await r.page.screenshot({ path: "/cache/devices-folded.png" }).catch(() => {});
   } catch (e) {
@@ -14232,7 +14232,23 @@ function dvAgent() {
     return (AUTHED[path] ?? (() => reply(404, {})))(init);
   };
   const mdns = async () => [{ name: "Desk", host: "192.168.50.58", port: 3416, txt: { id: "desk1", dev: "3416", kind: "desktop", v: "1" } }];
-  return { host: { net: { fetch, mdns, forget: async () => {} } }, calls, st, TPL };
+  // This phone's lock admin (apps/thisdevice.ts): off; allowLock opens "Android's screen" (nothing answers until the
+  // step says), stopLock refuses once (rollback) - each call logged.
+  const lock = { access: { available: true, rooted: false, allowed: false }, calls: [], on: new Set(), stopFails: true };
+  const fire = (allowed) => ((lock.access = { ...lock.access, allowed }), lock.on.forEach((f) => f(lock.access)));
+  const thisDevice = {
+    lock: async () => (lock.calls.push("lock"), lock.access),
+    allowLock: async () => (lock.calls.push("allow"), lock.access),
+    stopLock: async () => {
+      lock.calls.push("stop");
+      await sleep(300);
+      if (lock.stopFails) throw new Error("Android refused");
+      fire(false);
+      return lock.access;
+    },
+    onLock: (f) => (lock.on.add(f), () => lock.on.delete(f)),
+  };
+  return { host: { net: { fetch, mdns, forget: async () => {} }, thisDevice }, calls, st, TPL, lock, fire };
 }
 
 /** The page mounted fresh on the mock agent: the PC on mDNS offered for pairing, the page in the UI font. */
@@ -14249,6 +14265,78 @@ async function dvMount() {
   if (!(await dvWait("[data-found]", 3000))) return [`the PC on mDNS isn't offered for pairing: "${root.textContent.slice(0, 160)}"`];
   const fam = getComputedStyle(root.querySelector("[data-devices]")).fontFamily;
   return dvFails([[!/mono/i.test(fam), `the page is monospace (${fam}), not --font-body`]]);
+}
+
+/**
+ * This phone's lock from other devices (no root: Android's lock-only device admin): never on by itself; Allow lock
+ * opens the explanation sheet first, Continue shows it on at once (optimistic) while Android asks; Android's screen
+ * closed without Activate rolls it back with why and a Try again; Activate (the "devices.lock" event) keeps it; a
+ * failed Turn off rolls back to on with the reason.
+ */
+async function dvThisPhone() {
+  if (!(await dvWait("[data-this-phone]"))) return ["no This phone card on a no-root phone"];
+  const out = [];
+  for (const step of [dvLockAsk, dvLockDecline, dvLockGrant, dvLockStop]) out.push(...(await step()));
+  return out;
+}
+function dvSleep(ms) {
+  return new Promise((ok) => setTimeout(ok, ms));
+}
+/** The This phone card's shown state ("true"/"false") and line. */
+function dvLock() {
+  const r = window.__dv.root;
+  return { on: r.querySelector("[data-this-phone]")?.dataset.lockOn, line: r.querySelector("[data-this-phone-line]")?.textContent ?? "", err: r.querySelector("[data-lock-error]") };
+}
+async function dvLockAsk() {
+  const { root, lock } = window.__dv;
+  const before = dvLock().on;
+  root.querySelector("[data-lock-allow]").click();
+  const text = (await dvWait("[data-lock-sheet]"))?.textContent ?? "";
+  const asked = lock.calls.includes("allow");
+  root.querySelector("[data-lock-continue]")?.click();
+  await dvSleep(50);
+  const now = dvLock();
+  return dvFails([
+    [before === "false", `the lock is ${before} before anyone allowed it`],
+    [/nothing else/.test(text) && /Settings/.test(text), `Allow lock didn't explain what it allows first: "${text.slice(0, 120)}"`],
+    [!asked, "Android's screen opened before the sheet's Continue"],
+    [now.on === "true" && /Activate/.test(now.line), `Continue didn't show it on at once with what's next ("${now.on}", "${now.line}")`],
+  ]);
+}
+/** Back from Android's screen, nothing activated: rolled back with why. */
+async function dvLockDecline() {
+  document.dispatchEvent(new Event("visibilitychange"));
+  const err = await dvWait("[data-lock-error]", 3000);
+  const now = dvLock();
+  return dvFails([[/without Activate/.test(err?.textContent ?? "") && now.on === "false", `closing Android's screen didn't roll back with why (${now.on}, "${err?.textContent}")`]]);
+}
+/** Try again -> the sheet again -> Continue -> Android says activated: kept on. */
+async function dvLockGrant() {
+  dvLock().err?.querySelector("[data-lock-retry]")?.click();
+  (await dvWait("[data-lock-continue]"))?.click();
+  await dvSleep(50);
+  window.__dv.fire(true);
+  await dvSleep(50);
+  const now = dvLock();
+  return dvFails([[now.on === "true" && /can lock/.test(now.line) && !now.err, `Activate didn't keep it on ("${now.on}", "${now.line}")`]]);
+}
+/** Turn off that Android refuses: off at once, then back on with the reason; again, and it's off. */
+async function dvLockStop() {
+  const { root, lock } = window.__dv;
+  root.querySelector("[data-lock-stop]").click();
+  await dvSleep(50);
+  const early = dvLock().on;
+  const err = await dvWait("[data-lock-error]", 2000);
+  const back = dvLock().on;
+  lock.stopFails = false;
+  err?.querySelector("[data-lock-retry]")?.click();
+  await dvSleep(400);
+  const end = dvLock();
+  return dvFails([
+    [early === "false", `Turn off didn't show off at once (${early})`],
+    [/Android refused/.test(err?.textContent ?? "") && back === "true", `a refused Turn off didn't roll back to on with why (${back}, "${err?.textContent}")`],
+    [end.on === "false" && !end.err, `Turn off again didn't turn it off (${end.on})`],
+  ]);
 }
 
 /** Pair: tap the found PC, a wrong code is refused, the right one adds it. */
