@@ -24,7 +24,7 @@ Fast checks (shell/)
 
 Phone/emulator checks
 - `tools/phone/verify/queue.sh add <task> <check.sh> [args]` then END YOUR TURN or block once with
-  `queue.sh wait <job-id> [max_s]` (PASS/FAIL lines only). `queue.sh summary [--since HH:MM]` = one line per finished job.
+  `queue.sh wait <job-id> [max_s]` (PASS/FAIL lines only). `queue.sh summary [--since HH:MM]` = one line per finished job + the idle windows' utilization (verdict s vs wasted; `queue.sh util --windows` per window).
   Never poll `queue.sh list/status`, `ship.sh status`, `ls ~/.cache/powos-verify-queue`, `tail runner.log`
   (the hook denies repeats); never grep runner.log.
 - Waiting: `tools/phone/idle.sh --wait`, or a background `until ...` with run_in_background. Never a foreground sleep loop.
