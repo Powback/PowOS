@@ -154,8 +154,8 @@ e2e_setup inner
 START=$(sh_ "date +\"%m-%d %H:%M:%S\""); H0=$(sh_ "wc -l < $HYPR"); H0=${H0:-0}
 trap 'restore_bench; e2e_abort' EXIT
 [ "$(hcall webwindows.list "[]" "l=>'ok'")" = ok ] || { echo "ENV: home has no web windows here (folded, off)"; exit 5; }
-[ -z "$(sh_ "chroot /data/powos/root pgrep -f steam_app_ | head -1")" ] || e2e_skip "a game runs: not now"
-log "apk $(sh_ "dumpsys package com.powos.app | grep -m1 versionName"), kwin $(sh_ "chroot /data/powos/root pacman -Q kwin 2>/dev/null")"
+[ -z "$(sh_ "chroot /data/powos/root /usr/bin/pgrep -f steam_app_ | head -1")" ] || e2e_skip "a game runs: not now"
+log "apk $(sh_ "dumpsys package com.powos.app | grep -m1 versionName"), kwin $(sh_ "chroot /data/powos/root /usr/bin/pacman -Q kwin 2>/dev/null")"
 
 # The apps: one the user already runs is left out (its window could be theirs).
 RUN=""; for a in $APPS; do
