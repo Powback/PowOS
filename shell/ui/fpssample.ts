@@ -85,12 +85,16 @@ function recorder(v: { on?: boolean; rec?: number; stop?: number; renders?: bool
 }
 
 export function startSampler() {
-  powos.on("perf.meter", (v: { on?: boolean; rec?: number; stop?: number; renders?: boolean } | null) => { on = !!v?.on; if (on) wake(); else stop(); recorder(v); });
+  let heard = false; // the host's event came before the stored value: that one is newer
+  powos.on("perf.meter", (v: { on?: boolean; rec?: number; stop?: number; renders?: boolean } | null) => { heard = true; on = !!v?.on; if (on) wake(); else stop(); recorder(v); });
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) return wake();
     stop();
     if (on) publish({ gone: true }); // the bar measures its own frames while home is away
   });
   for (const t of WAKE) window.addEventListener(t, wake, { capture: true, passive: true });
-  powos.store.get<{ on?: boolean; renders?: boolean }>("perf.meter").then((v) => { on = !!v?.on; if (on) wake(); setOverlay(!!(on && v?.renders)); }, () => {});
+  powos.store.get<{ on?: boolean; renders?: boolean }>("perf.meter").then((v) => {
+    on = !!v?.on; if (on) wake(); setOverlay(!!(on && v?.renders));
+    if (!heard) try { onMeter(on ? { on: true } : null); } catch (e) { console.error("perfrec", e); } // armed from the start: the pre-roll (perfrec.ts)
+  }, () => {});
 }

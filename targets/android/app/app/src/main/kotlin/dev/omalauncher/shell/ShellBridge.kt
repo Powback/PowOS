@@ -511,7 +511,18 @@ class ShellBridge(
             // Perf trace from the status bar's fps meter: saved where PowOS AI sees it (the shared run dir), the last 20 kept,
             // and mailed to the coordinator (the Mac session running PowOS) so every recording reaches it with its full data.
             // The fps meter's native trace section (MainStallWatch): main-thread blocks and frame gaps while it records.
-            "perf.native" -> if (a.optBoolean(0, false)) MainStallWatch.start(homeWindow()).let { true } else MainStallWatch.stop()
+            // With it the WebViews' Chrome trace (WebTrace: JS stacks, layout/paint/raster, compositor), its file named in the result.
+            "perf.native" -> if (a.optBoolean(0, false)) {
+                MainStallWatch.start(homeWindow())
+                WebTrace.start()
+                true
+            } else {
+                val trace = WebTrace.stop(java.io.File(context.filesDir, "run/powos-ai-shared"))
+                MainStallWatch.stop().put(
+                    "chromeTrace",
+                    trace?.let { "/run/powos-app/powos-ai-shared/${it.name}" } ?: (WebTrace.error ?: "not traced"),
+                )
+            }
             // The PowOS window in front (a game): its presents since its consumer started, for the meter's rate; null = none.
             "perf.front" -> andro.marchy.PowosWindowActivity.frontPresents()?.let { p ->
                 JSONObject().put("id", p[0]).put("presented", p[1]).put("undrawn", p[2]).put("at", System.currentTimeMillis())

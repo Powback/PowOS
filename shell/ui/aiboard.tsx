@@ -6,6 +6,7 @@
  * for an agent; paused, done lately and friction folded under it. Things to try reach the user as the manager's chat
  * messages instead (trycard.tsx); a verdict here and there is the same call (recordVerdict).
  */
+import { memo, sameContent } from "./memo.ts";
 import { useEffect, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
@@ -58,7 +59,8 @@ export interface WorkRow {
 }
 
 /** The P0/P1 chip on a task with that severity (none: nothing drawn); infra-only (no user evidence) says so. */
-export function SevChip({ w }: { w: WorkRow }) {
+// Memo by content: its row is rebuilt equal on every board render (render scan: w~).
+export const SevChip = memo(function SevChip({ w }: { w: WorkRow }) {
   const s = Number(w.severity || 0);
   if (!s) return null;
   const infra = !Number(w.userScore || 0);
@@ -67,7 +69,7 @@ export function SevChip({ w }: { w: WorkRow }) {
       {s >= 2 ? "P0" : "P1"}
     </span>
   );
-}
+}, sameContent);
 
 /** The prefix of an after image's entry (`task set --image P --image-kind after`); a bare path is a report image. */
 const AFTER = "after:";

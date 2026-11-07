@@ -1707,7 +1707,7 @@ async function otherColumns(page, to, fresh) {
  */
 /** In the page: the render scan's hooks are there only while it's used, and the very originals after (renderscan.ts). */
 async function renderScanCheck() {
-  const fails = [], KEYS = ["__r", "diffed", "__c", "__e"];
+  const fails = [], KEYS = ["__r", "diffed", "__c", "__e", "vnode"];
   const options = (await window.importShim("preact")).options;
   const orig = KEYS.map((k) => options[k]);
   const same = () => KEYS.every((k, i) => options[k] === orig[i]);
@@ -1738,6 +1738,18 @@ async function renderScanCheck() {
   if (R.scanning()) fails.push("still scanning after every user stopped");
   if (document.querySelector("html > canvas")) fails.push("the overlay's canvas left behind");
   return fails;
+}
+
+/**
+ * perf-trace (the user, 11-07: "can we improve the fps tracing ... so that you can actually get a proper trace? i sent
+ * it like 10 times and nothing improves, reactscan catches it fine"): home's detail of a meter recording names what a
+ * long frame was - a slow frame BEFORE the record tap is in it (the armed pre-roll, negative start), with its JS stack
+ * (jsprofile.ts) and a "not-js"/"js" verdict; a slow Preact handler during the recording is named "<Component>.onClick"
+ * (renderscan.ts wraps handlers while scanning: LoAF alone says only "vendor/preact.js"), its forced layout counted,
+ * the components it rendered listed; and meter off = no hooks, no profiler.
+ */
+async function perfTraceCheck() {
+  return (await window.importShim("./dev/perf-trace-probe.js")).perfTraceScene();
 }
 
 /**
@@ -11987,6 +11999,10 @@ const bootQueue = [];
 const bootSlot = () => new Promise((ok) => (booting < BOOTS ? (booting++, ok()) : bootQueue.push(ok)));
 const bootDone = () => (bootQueue.length ? bootQueue.shift()() : booting--);
 
+/** A shell file's response headers: never cached; a page may profile its own JS (Document-Policy, as ShellHost.kt). */
+function fileHeaders(name) {
+  return name.endsWith(".html") ? { "Cache-Control": "no-store", "Document-Policy": "js-profiling" } : { "Cache-Control": "no-store" };
+}
 async function open(browser, url, name, viewport = { width: 412, height: 915 }) {
   if (ONLY && !ONLY.test(name)) throw SKIP;
   const ticket = { name, slot: false, context: null };
@@ -12023,9 +12039,10 @@ async function open(browser, url, name, viewport = { width: 412, height: 915 }) 
       );
     }
     const f = file(url);
-    if (f?.virtual) return req.respond({ status: 200, contentType: "text/html", body: appPage() });
+    // Document-Policy js-profiling on pages, as ShellHost.kt serves them: the fps meter's JS stacks (ui/jsprofile.ts).
+    if (f?.virtual) return req.respond({ status: 200, contentType: "text/html", body: appPage(), headers: { "Document-Policy": "js-profiling" } });
     if (!f) return req.respond({ status: 404, contentType: "text/plain", body: "" });
-    req.respond({ status: 200, contentType: mime(f.name), body: fs.readFileSync(f.path), headers: { "Cache-Control": "no-store" } });
+    req.respond({ status: 200, contentType: mime(f.name), body: fs.readFileSync(f.path), headers: fileHeaders(f.name) });
   });
   page.on("response", (res) => {
     const u = res.url();
@@ -13307,6 +13324,15 @@ try {
   // and when the last user stops Preact's options hooks are the originals again - zero cost when off.
   if (process.env.SHELL_PAGES !== "0" && fs.existsSync(path.join(ROOT, "ui/renderscan.ts")))
     runs.push(open(browser, `${ORIGIN}/index.html`, "render-scan").then((r) => whenReady(r, () => r.page.evaluate(renderScanCheck))));
+  // The render scan's needless renders on home under its everyday updates (dev/needless-check.js; the user's traces 11-06).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "needless-renders", { width: 821, height: 883 }).then((r) => whenReady(r, async () => {
+      const fails = await r.page.evaluate(async () => (await importShim("./dev/needless-check.js")).needlessRenders());
+      console.log(`     needless-renders: ${await r.page.evaluate(() => window.__needless).catch(() => "?")}`);
+      return fails;
+    })));
+  if (process.env.SHELL_PAGES !== "0" && fs.existsSync(path.join(ROOT, "ui/jsprofile.ts")))
+    runs.push(open(browser, `${ORIGIN}/index.html`, "perf-trace").then((r) => whenReady(r, () => r.page.evaluate(perfTraceCheck))));
   // f428: a check's fps-meter recording files no ask and no mail; a user's still does (perfSourceCheck).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "perf-source").then((r) => whenReady(r, () => r.page.evaluate(perfSourceCheck))));

@@ -1,5 +1,5 @@
 #!/bin/bash
-# bf-resize.sh's G1 test (board task games-resize-live-to-their-container-portrait-la): the game's X window must BE its
+# game-resize.sh's (bf-resize.sh's) G1/G3 test (board task games-resize-live-to-their-container-portrait-la): the game's X window must BE its
 # screen's size (within 1 % per side), not just its shape - the old aspect-only match passed a half-size window
 # (1134x1220 on the 2268x2440 inner screen) and a 314x208 Unity first map on a wide screen. Also: the start doesn't
 # wait out the 130 s sleep grace (GRACE_S=0), the wait that ran the 10-28 check out of its 300 s budget.
@@ -8,7 +8,7 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd); V=$ROOT/tools/phone/verify
 pass=0 fail=0
 ok() { if [ "$2" = "$3" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL $1: got '$2', want '$3'"; fi; }
 f=$(mktemp); trap 'rm -f "$f"' EXIT
-sed -n '/^fits() {/,/; }$/p' "$V/bf-resize.sh" > "$f"
+sed -n '/^fits() {/,/; }$/p; /^boxed() {/,/; }$/p' "$V/game-resize.sh" > "$f"
 ok "fits() found" "$(grep -c '^fits()' "$f")" 1
 . "$f"
 fit() { fits "$1" "$2" && echo yes || echo no; }
@@ -23,7 +23,17 @@ ok "not rotated" "$(fit 2268x2440 2440x2268)" no
 ok "cover size on inner" "$(fit 2484x1116 2440x2268)" no
 ok "no window" "$(fit 0x0 2268x2440)" no
 ok "no screen" "$(fit 2268x2440 '')" no
-ok "start without the grace" "$(grep -c 'GRACE_S=0 bash' "$V/bf-resize.sh")" 1
+ok "start without the grace" "$(grep -c 'GRACE_S=0 bash' "$V/game-resize.sh")" 1
+# G3 letterbox / pillarbox: both opposite edges black, each > 1.5 % of the side, within a third of each other.
+ok "boxed() found" "$(grep -c '^boxed()' "$f")" 1
+ok "full picture" "$(boxed 'top=0 bottom=0 left=0 right=0' 2268x2440)" ""
+ok "Besiege 2268x1600 in 2268x2440" "$(boxed 'top=420 bottom=420 left=0 right=0' 2268x2440)" "letterbox-420/420"
+ok "4:3 on the cover" "$(boxed 'top=0 bottom=0 left=498 right=498' 2484x1116)" "pillarbox-498/498"
+ok "dark art one edge" "$(boxed 'top=0 bottom=900 left=0 right=0' 2268x2440)" ""
+ok "thin edges (< 1.5 %)" "$(boxed 'top=20 bottom=20 left=0 right=0' 2268x2440)" ""
+ok "black screen" "$(boxed 'top=2440 bottom=2440 left=2268 right=2268' 2268x2440)" ""
+ok "no screen size" "$(boxed 'top=420 bottom=420 left=0 right=0' '')" ""
+ok "bf-resize wraps game-resize" "$(grep -c '^exec .*game-resize.sh' "$V/bf-resize.sh")" 1
 ok "fold-phone honours GRACE_S" "$(grep -c 'g=${GRACE_S:-130}' "$V/bf-fold-phone.sh")" 1
 echo "Results: $pass passed, $fail failed"
 [ $fail = 0 ]

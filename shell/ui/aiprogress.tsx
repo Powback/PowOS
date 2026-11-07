@@ -5,6 +5,7 @@
  * one line each, a state dot (working / waiting on you / no check). The parts are exported for the folded status page.
  * Above the areas, the Needs you card (needsyou.tsx): what really waits on the user, each answered in place.
  */
+import { memo, sameContent } from "./memo.ts";
 import { useEffect, useState } from "preact/hooks";
 import { computed, signal } from "@preact/signals";
 import { boardState, QUEUED_STEP, type BoardCheck } from "../agents.ts";
@@ -104,14 +105,15 @@ export function ProgressRing({ pct, label, sub }: { pct: number; label: string; 
 }
 
 /** A thin bar, [done] of [total], its fill a spring from empty (transform only). */
-export function ThinBar({ done, total }: { done: number; total: number }) {
+// Memo: a bar re-renders only when done/total change (render scan 11-03: 200 of 210 renders needless).
+export const ThinBar = memo(function ThinBar({ done, total }: { done: number; total: number }) {
   const k = total ? Math.min(1, done / total) : 0;
   return (
     <span class="aip-bar" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} data-done={done} data-total={total}>
       <span class="aip-bar-fill" style={{ transform: `scaleX(${k})` }} />
     </span>
   );
-}
+}, sameContent);
 
 export type Dot = "working" | "check" | "waiting" | "stalled";
 /** Each dot's words, in the legend's order. */

@@ -6,6 +6,7 @@
  * It listens from the moment the finger lands: a press that lasts becomes a hold (speech.hold) - no first words lost
  * to deciding which it is.
  */
+import { memo, sameContent } from "./memo.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { computed } from "@preact/signals";
 import type { Ref } from "preact";
@@ -155,7 +156,8 @@ function logBlur(e: FocusEvent, field: HTMLTextAreaElement | null) {
  * nothing (shell.css .pill .send: width and opacity), so the empty pill's layout is the one it always had.
  * [waiting]: a send tapped mid-dictation waits for the final words (dictation.ts finish): it spins meanwhile.
  */
-function Send({ shown, waiting }: { shown: boolean; waiting: boolean }) {
+// Memo: shown/waiting only (render scan 11-06: 94 of 95 renders needless, with the pill's every render).
+const Send = memo(function Send({ shown, waiting }: { shown: boolean; waiting: boolean }) {
   return (
     <button
       type="submit"
@@ -178,7 +180,7 @@ function Send({ shown, waiting }: { shown: boolean; waiting: boolean }) {
       )}
     </button>
   );
-}
+}, sameContent);
 
 /**
  * SB3: a submit of [form] (the send button, Enter) while one of [targets] dictates first ends the dictation and waits
@@ -212,6 +214,8 @@ function useSubmitFinishes(box: { current: HTMLDivElement | null }, targets: Mic
 
 /** The pill's send: shown while there's text, or while one of [targets] dictates - before its first words land too
  *  (the field is empty until then) - and spinning while a send waits for a dictation's final words. */
+// Not memo'd: it reads the dictation's state (listeningFor) that no prop or signal carries - the pill's render is its
+// cue. Its Send is memo'd, so these renders end here (render scan 11-06: Send 94 of 95 needless).
 function PillSend({ targets, value }: { targets: MicTarget[]; value: string }) {
   const waiting = !!finishing.value && targets.includes(finishing.value);
   // SI1: the shared bar's text written by another window's dictation (home's, under the launcher): its send shows here.
