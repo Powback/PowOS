@@ -56,7 +56,7 @@ asuser() { local n=$1; shift
   "$A" shell "su -c 'cp /data/local/tmp/powos-$n /data/powos/root/var/tmp/powos-$n; chmod 644 /data/powos/root/var/tmp/powos-$n; sh /data/powos/powos-run.sh \"APP=$APP WIN_NAME=$WIN_NAME sh /var/tmp/powos-$n $*\"'" 2>&1 | grep -v sysvipc | tr -d '\r'; }
 pill "checking the phone (a game already up? Steam?)"
 # Every phone-side script in ONE push (each adb.sh call is a docker run over the VPN, ~2-3 s).
-st=$OUT/push; mkdir -p "$st"; for f in bf-start.sh bf-stop.sh bf-window.sh bf-present.sh bf-prof.sh bf-game.sh bf-nap.sh bf-onscreen.sh bf-play.sh; do
+st=$OUT/push; mkdir -p "$st"; for f in bf-start.sh bf-stop.sh bf-window.sh bf-present.sh bf-prof.sh bf-game.sh bf-nap.sh bf-onscreen.sh bf-play.sh bf-ask.sh; do
   cp "$here/$f" "$st/powos-$f"; done
 "$A" push "$st"/powos-bf-*.sh /data/local/tmp/ >/dev/null || { echo "ENV: can't push the check's scripts"; exit 5; }
 gs=$(asuser bf-game.sh state | tail -1); users=0
@@ -152,6 +152,16 @@ for mode in "$@"; do
   # A warm game reused (the job before left it in front) is neither sent behind home nor started again.
   if ! { [ "$mi" = 1 ] && [ -n "$warm" ]; }; then
     [ "${BF_HOME_FIRST:-1}" = 0 ] || { "$A" shell "input keyevent 3; sleep 1; input keyevent 4" >/dev/null 2>&1; sleep 1; }
+    # A launch of this game Steam still holds, waiting on the user (bf-ask.sh): every new launch joins it and nothing
+    # starts - ABZU 11-07 15:44 cloud sync "syncfailed", then 4 runs "no game window" with no game process at all.
+    # HACK: this verify job closes Steam (its idle window; bf-start.sh starts it again) so the launch is a fresh one;
+    # the real fix is the launch showing Steam's question - a nameless steamwebhelper dialog that powos-open-task's
+    # "Steam Dialog" caption match never brings forward (docs/REMOTE-POWOS.md section 4).
+    ask=$(asuser bf-ask.sh | tail -1)
+    if [ "${ask:-ask none}" != "ask none" ]; then
+      echo "$mode: Steam holds a launch of $NAME waiting on the user (${ask#ask }) - closing Steam so this one starts fresh"
+      asuser bf-stop.sh --steam >/dev/null
+    fi
     asuser bf-start.sh >/dev/null
   fi
   pill "$lbl: waiting for the game window"
@@ -159,7 +169,8 @@ for mode in "$@"; do
   w0=$(date +%s); extra=0; [ "$mode" = play ] && extra=35  # play: keys + grabs + 10 s in the level
   left=${WIN_S:-$(( T0 + BUDGET_S - AFTER_WIN_S - extra - w0 ))}; [ "$left" -ge 20 ] || left=20
   win=$(asuser bf-window.sh wait "$left" "$i0" | tail -1)
-  case $win in touched) abort ;; win=[0-9]*) ;; *) echo "FAIL no game window: $NAME showed none in $left s ($win)"; restore; exit 5 ;; esac
+  case $win in touched) abort ;; win=[0-9]*) ;; *) ask=$(asuser bf-ask.sh | tail -1)
+    echo "FAIL no game window: $NAME showed none in $left s ($win)$([ "${ask:-ask none}" != "ask none" ] && echo "; Steam waits on the user for its launch: ${ask#ask }")"; restore; exit 5 ;; esac
   echo "$mode: window after $(( $(date +%s) - w0 )) s: $win"; echo "$win" | sed 's/win=//; s/screen=/on /' > "$M/window.txt"
   st=45; [ "$mi" = 1 ] && [ -n "$warm" ] && st=${WARM_SETTLE_S:-10}  # a warm game settled in the job before
   pill "$lbl: game up - settling $st s"

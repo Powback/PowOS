@@ -87,7 +87,10 @@ hostfull() { ev "importShim('./bridge.ts').then(b=>b.powos.webwindows.fullScreen
 hosttowin() { ev "importShim('./bridge.ts').then(b=>b.powos.webwindows.toWindow(${1#w})).then(String)"; }
 # btn <w-id> <aria-label>: that title-bar button's centre, "x y" or "".
 btn() { wwpt "$1" ".ww-button[aria-label=\"$2\"]"; }
-tapat() { local p=$1; [[ $p =~ ^-?[0-9]+\ -?[0-9]+$ ]] || { log "no spot for $2 ($p)"; return 1; }; set -- $p "$2"; tap "$1" "$2" "$3"; }
+tapat() { local p=${1:-}; [[ $p =~ ^-?[0-9]+\ -?[0-9]+$ ]] || { log "no spot for ${2:-?} ($p)"; return 1; }; set -- $p "${2:-}"; tap "$1" "$2" "$3"; }
+# isxy <s>: true when s is "x y" (two integers) - check before "set -- $s; ... $1 $2" (set -u: a short
+# answer would kill the run on "$2: unbound variable", as calccfg's did on 11-07).
+isxy() { [[ ${1:-} =~ ^-?[0-9]+\ -?[0-9]+$ ]]; }
 switcher() { sh_ "input keyevent KEYCODE_APP_SWITCH"; sleep 2; chk switcher; }
 # card <task id> <part selector>: that switcher card's part, "x y" / none / off.
 card() { pt "document.querySelector('.recents .task[data-task=\"$1\"] $2')"; }
@@ -155,7 +158,7 @@ if [ "$CASE" = max-bar ]; then
     [ -n "$h" ] && [ "$h" != "[]" ] && [ "$h" != null ] && pass "the title took the tap (page pointerdown: $h)" || fail "the tap on the title never reached the bar ($h): SystemUI's status bar took it"
     # From the title: a maximised bar's middle is the status bar's (its pull), barpt's quarter point lands there.
     b0=$(wwrect "$A1"); p=$(wwpt "$A1" .ww-title-label); [ -n "$p" ] || p=$(barpt "$A1")
-    if [ -n "$p" ]; then set -- $p; x=$1; y=$2; dy=$(dp 160)
+    if isxy "$p"; then set -- $p; x=$1; y=$2; dy=$(dp 160)
       mdown "$x" "$y" "the maximised bar (a drag)" && { mpath "$x" "$y" "$x" $((y + dy)) 8; sleep 0.3; mup "$x" $((y + dy)); }
       sleep 1.5; chk drag; step drag "the maximised bar dragged down ${dy} px"
       b1=$(wwrect "$A1"); s=$(wwstate "$A1")
@@ -327,13 +330,14 @@ if [ "$CASE" = window-page ]; then
       step over-edge "Calculator floating, 40 px past its page's right edge"
       b0=$(tbounds "$A1"); [ "$(tvis "$A1")" = true ] && [ "$(wfvis "$A1")" = 1 ] && pass "shown at $b0 (w.f visible)" || fail "not shown before the swipe: at '$b0', w.f visible=$(wfvis "$A1")"
       d=$((W * 35 / 100)); p=$(freept "$b0" -1 "$d")
-      if [ "$p" = none ] || [ -z "$p" ]; then fail "no empty spot beside the window to swipe from"
+      if ! isxy "$p"; then fail "no empty spot beside the window to swipe from ($p)"
       else set -- $p; x=$1; y=$2; to=$((x - d)); [ $to -lt 20 ] && to=20
         swipe $x $y $to $y 250 "beside the window to the next page" && { sleep 1.5; chk page2
           step page2 "a swipe beside the window: the next page, the window stays on its own"
           v=$(tvis "$A1"); f=$(wfvis "$A1")
           [ "$(hpage)" = $((pg0 + 1)) ] && [ "$v" = false ] && [ "$f" = 0 ] && pass "page $((pg0 + 2)) shows, Calculator hidden with its page (w.f visible 0)" || fail "after the swipe: page $(hpage) (from $pg0), Calculator shows=$v, w.f visible=$f"
-          p=$(freept "" 1 "$d"); set -- $p; x=$1; y=$2; to=$((x + d)); [ $to -gt $((W - 20)) ] && to=$((W - 20))
+          p=$(freept "" 1 "$d"); isxy "$p" || { fail "no empty spot to swipe back from ($p)"; p="$((W / 4)) $((H / 2))"; }
+          set -- $p; x=$1; y=$2; to=$((x + d)); [ $to -gt $((W - 20)) ] && to=$((W - 20))
           swipe $x $y $to $y 250 "back to the window's page" && { sleep 1.5; chk page1
             step page1 "swiped back: the window's page, the window as it was"
             [ "$(hpage)" = "$pg0" ] && [ "$(tvis "$A1")" = true ] && [ "$(tbounds "$A1")" = "$b0" ] && pass "back on page $((pg0 + 1)), Calculator at $b0" || fail "back: page $(hpage), shows=$(tvis "$A1"), at $(tbounds "$A1") (was $b0)"; }; }
@@ -348,8 +352,8 @@ tsize() { sh_ "am stack list" | grep -E "taskId=$1:" | head -1 | sed -nE 's/.*bo
 # tmode <task>: its windowing mode word from dumpsys (fullscreen, freeform, ...), or "".
 tmode() { sh_ "dumpsys activity activities" | grep -m1 -E "Task\{[0-9a-f]+ #$1 " | grep -oE 'mode=[a-z-]+' | cut -d= -f2; }
 # bsize <l t r b>: "w h". near <w h> <w h>: within 3 px each way.
-bsize() { [ -n "$1" ] && { set -- $1; echo "$(($3 - $1)) $(($4 - $2))"; }; }
-near() { set -- $1 $2; local a=$1 b=$2 c=$3 d=$4; [ -n "$a" ] && [ -n "$c" ] && [ $((a - c)) -le 3 ] && [ $((c - a)) -le 3 ] && [ $((b - d)) -le 3 ] && [ $((d - b)) -le 3 ]; }
+bsize() { [[ ${1:-} =~ ^-?[0-9]+\ -?[0-9]+\ -?[0-9]+\ -?[0-9]+$ ]] && { set -- $1; echo "$(($3 - $1)) $(($4 - $2))"; }; }
+near() { isxy "${1:-}" && isxy "${2:-}" || return 1; set -- $1 $2; local a=$1 b=$2 c=$3 d=$4; [ -n "$a" ] && [ -n "$c" ] && [ $((a - c)) -le 3 ] && [ $((c - a)) -le 3 ] && [ $((b - d)) -le 3 ] && [ $((d - b)) -le 3 ]; }
 # fills <w-id> <what>: its app's task size == its body's size.
 fills() { local t b s; t=$(wwhost "$1" task); b=$(bsize "$(wwbody "$1")"); s=$(tsize "$t")
   near "$s" "$b" && pass "$2: Chrome's task $t is ${s/ /x}, its body ${b/ /x}" || fail "$2: Chrome's task $t is '${s/ /x}', its body '${b/ /x}' - the app doesn't fill its window"; }
@@ -390,12 +394,13 @@ if [ "$CASE" = relaunch ]; then
     [ "$(recentsdown)" = down ] || log "the switcher's layer is still up after ~3 s"
     step home "Home pressed"
     f=$(searchpt)
-    case $f in none|off*|"") fail "no search on home ($f)" ;; *)
+    isxy "$f" || f="none ($f)"
+    case $f in none*|off*|"") fail "no search on home ($f)" ;; *)
       set -- $f; tap "$1" "$2" "home's search"; sleep 1.2; chk search
       if [ "$(ev "$SEARCHED")" = yes ] && homefocused; then
         q=$(tr 'A-Z' 'a-z' <<<"${LABEL%% *}" | tr -cd 'a-z0-9'); sh_ "input text ${q:-calc}"; sleep 1.5; chk typed
-        p=$(searchresult "$KEY")
-        case $p in none|off|"") fail "no Calculator in the search results ($p)"; back; back ;; *)
+        p=$(searchresult "$KEY"); isxy "$p" || p="none ($p)"
+        case $p in none*|off|"") fail "no Calculator in the search results ($p)"; back; back ;; *)
           set -- $p; tap "$1" "$2" "Calculator in the results (launched again)"; sleep 3; chk relaunch
           step relaunch "Calculator launched again while its window is open"
           o=$(wwof "$KEY"); n1=$(ntasks "$CALC"); set -- $o
@@ -455,7 +460,8 @@ if [ "$CASE" = multi-instance ]; then
     KEY=${K%%|*}; n0=$(ntasks "$CHROME")
     step setup "Chrome's window $A1 on page $P1, Calculator's $A2 on the next page ($n0 Chrome task(s))"
     d=$(pt "$(dockel "$KEY")")
-    case $d in none|off|"") fail "Chrome isn't on the dock ($d)" ;; *)
+    isxy "$d" || d="none ($d)"
+    case $d in none*|off|"") fail "Chrome isn't on the dock ($d)" ;; *)
       set -- $d; X=$1; Y=$2; MX=$(ev 'String(Math.round(innerWidth*devicePixelRatio/2))'); MY=$(ev 'String(Math.round(innerHeight*devicePixelRatio/2))')
       c="input motionevent DOWN $X $Y; sleep 0.9; "; for i in 1 2 3 4 5 6 7 8; do c+="input motionevent MOVE $((X + (MX - X) * i / 8)) $((Y + (MY - Y) * i / 8)); "; done
       log "drag Chrome's dock icon $X,$Y -> $MX,$MY (held 0.9 s)"; sh_ "$c sleep 0.5; input motionevent UP $MX $MY"; sleep 4; chk dragged
@@ -470,14 +476,25 @@ fi
 
 # --- calc-density ----------------------------------------------------------------------------------------------
 # calccfg: Calculator's activity's last reported configuration, "<dpi> <sw dp> <w dp>" or "none".
+# Android 14+ dumps it over lines ("mLastReportedConfigurations:" then "mGlobalConfig={...}" and
+# "mOverrideConfig={...}"; the override is the activity's merged one); older builds print it on the
+# "mLastReportedConfiguration=" line itself. Anything short of all three numbers is "none", so calcfits
+# never reads a missing field (the 11-07 run died on "$2: unbound variable" that way).
 calccfg() { sh_ "dumpsys activity activities" | awk -v p="$CALC/" 'index($0,"ActivityRecord{") && index($0,p){f=1}
-  f && /mLastReportedConfiguration/ {match($0,/ [0-9]+dpi/); dpi=substr($0,RSTART+1,RLENGTH-4)
-    match($0,/ sw[0-9]+dp/); sw=substr($0,RSTART+3,RLENGTH-5); match($0,/ w[0-9]+dp/); w=substr($0,RSTART+2,RLENGTH-4)
-    print dpi, sw, w; exit}' | grep . || echo none; }
+  function cfg(s,  dpi, sw, w) {
+    if (match(s,/ [0-9]+dpi/)) dpi=substr(s,RSTART+1,RLENGTH-4)
+    if (match(s,/ sw[0-9]+dp/)) sw=substr(s,RSTART+3,RLENGTH-5)
+    if (match(s,/ w[0-9]+dp/)) w=substr(s,RSTART+2,RLENGTH-4)
+    if (dpi != "" && sw != "" && w != "") { print dpi, sw, w; return 1 }
+    return 0 }
+  f && /mLastReportedConfiguration/ { if (cfg($0)) exit; r=1; next }
+  f && r && /mOverrideConfig=/ { cfg($0); exit }
+  f && r && !/mGlobalConfig=/ { exit }' | grep -E "^[0-9]+ [0-9]+ [0-9]+$" || echo none; }
 # calcfits <what>: PASS when Calculator's configuration is the screen's density and its width the window display's.
 calcfits() { local c scr px; c=$(calccfg); scr=$(sh_ "wm density" | grep -oE '[0-9]+' | tail -1)
-  px=$(wwbody "$A1"); [ -n "$px" ] && { set -- $px; px=$(( $3 - $1 )); }; set -- $c
+  px=$(wwbody "$A1"); [ -n "$px" ] && { set -- $px; px=$(( $3 - $1 )); }
   if [ "$c" = none ]; then fail "$what: no Calculator activity configuration in dumpsys"; return; fi
+  set -- $c
   if [ "$1" != "$scr" ]; then fail "$what: Calculator at ${1}dpi, the screen's is ${scr}dpi (sw${2}dp w${3}dp) - mixed density, garbled text"
   elif [ -n "$px" ] && [ $(( ${3} - px * 160 / scr )) -gt 2 -o $(( px * 160 / scr - ${3} )) -gt 2 ]; then
     fail "$what: Calculator w${3}dp, its window display is ${px}px = $((px * 160 / scr))dp at ${scr}dpi"
