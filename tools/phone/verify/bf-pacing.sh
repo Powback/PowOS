@@ -4,7 +4,8 @@
 # frames, ~3-4 min of screen per mode. Per mode: dxvk.conf in the game dir (base = none; cap60 = dxgi.maxFrameRate 60;
 # fifo = syncInterval 1; nolatency = maxFrameLatency 1; play = base taken into a level first (bf-play.sh: keys
 # BF_PLAY_KEYS, grabs in the mode's folder) so the numbers are gameplay's, not the menu's; env:K=V[,K=V] = those in the game's environment through
-# ~/.config/powos/proton-settings.json, e.g. env:PROTON_USE_XALIA=0), start the game (KWin shows it as its own task),
+# ~/.config/powos/proton-settings.json, e.g. env:PROTON_USE_XALIA=0; gus:K=V[,K=V] anywhere = an Unreal game's own
+# GameUserSettings.ini keys for the whole check, e.g. gus:ResolutionScale=SCALE_75 for ABZU, bf-lib.sh), start the game (KWin shows it as its own task),
 # wait for its X window (+ its size vs the screen: unity-screen), 45 s settle, then 30 s of SurfaceFlinger present
 # times + a 20 s screenrecord (bf-present.sh), the same 30 s of per-thread CPU, cluster clocks and caps, GPU busy and
 # clock, temperatures (bf-prof.sh: "prof <mode>" lines), and the session log's "Xwayland KGSL" lines. bf-frames.py turns
@@ -26,6 +27,7 @@ here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
 [ $# -gt 0 ] || set -- base
 BF_ADB=$A . "$here/bf-lib.sh"   # pill <step>: the status pill's sub-step
 cfg_take "$@"; set -- ${CFG_ARGS[@]+"${CFG_ARGS[@]}"}; [ $# -gt 0 ] || set -- base  # cfg:<x86|arm64>: bf-lib.sh cfg_take (bash 3.2-safe empty array)
+gus_take "$@"; set -- ${GUS_ARGS[@]+"${GUS_ARGS[@]}"}; [ $# -gt 0 ] || set -- base  # gus:K=V: the game's GameUserSettings.ini (bf-lib.sh)
 OUT=${OUT:-$HOME/.cache/powos-verify/bfp-$(date +%F_%H%M)}; mkdir -p "$OUT"
 APP_GIVEN=${APP:+1}; APP=${APP:-274190} WIN_NAME=${WIN_NAME:-}  # any Steam game; default the test case. WIN_NAME
 # (one word) only when its window isn't titled like Steam's name for it (bf-window.sh reads that name from the appmanifest).
@@ -73,11 +75,12 @@ restore() {
   settings ''
   if [ $users = 1 ]; then echo "the user's $NAME: $(asuser bf-game.sh freeze | tail -1)"; else asuser bf-stop.sh >/dev/null; fi
   "$A" shell "su -c 'rm -f /data/powos/root$G/dxvk.conf'"
-  cfg_restore
+  cfg_restore; gus_restore
   [ -n "$steam_before" ] && "$A" shell "su -c 'sh /data/powos/powos-run.sh \"cd /home/powos; setsid -f steam -silent </dev/null >/dev/null 2>&1\"'" >/dev/null 2>&1
   "$A" shell "${front:+am start -n $front >/dev/null 2>&1; }su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof /data/local/tmp/powos-bf-*.sh /data/powos/root/var/tmp/powos-bf-*.sh'"
 }
 cfg_set || exit 5
+gus_set || { restore; exit 5; }
 i0=$(irq); touched() { [ "$(irq)" != "$i0" ]; }
 abort() { echo "touch $(date +%T) - abort, restoring"; restore; exit 3; }
 # nap <secs>: one phone-side wait that returns early on a touch (bf-nap.sh).
