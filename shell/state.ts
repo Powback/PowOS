@@ -8,7 +8,7 @@ import { closeRemote, remoteOpen } from "./remote.ts";
 import { closeGlasses, glassesOpen } from "./glasses/open.ts";
 import { agentsView, closeAgents } from "./agents.ts";
 import { backScreen, closeScreens } from "./screens.ts";
-import { recentsBack, recentsHome } from "./ui/recents.tsx";
+import { recentsBack, recentsHome, recentsLaunched } from "./ui/recents.tsx";
 import { stableRows } from "./apps/stable.ts";
 import { appView, closeApp, initPowosApps, mergeRecent, noteHostRecent, openApp, powosApps, PREFIX } from "./apps/pages.ts";
 import type { App, AppWindow, Chat, Home, HomeItem, WebWindowRect, WidgetScreen } from "./types.ts";
@@ -600,12 +600,15 @@ onWebWindowPage((p) => {
 // An app's task made a PowOS desktop window (ShellBridge.toWebWindow): a web window on the page home shows now.
 // A Linux window KWin opened (web windows on, docs/WEB_WINDOWS.md S6) comes the same way, with its KWin id instead of a task.
 powos.on("webwindows.adopt", (m: { task?: number; kwin?: number; key: string; label?: string; body?: WebWindowRect; ownFrame?: boolean; alts?: string[] }) => {
+  // A window coming up is a launch's result (Steam's game, a Linux app, an app made a window): the switcher goes.
+  recentsLaunched();
   void adoptWebWindow({ ...m, label: m.label ?? byKey.value.get(m.key)?.label ?? m.key }, pages.value[page.value] ?? 1);
 });
 
 // An app opened from another PowOS window (the launcher overlay, Quick Tools, the AI; ShellBridge.launchOnHome): a web
 // window on this page, as home's own launch makes one. Not one here (no window for it): the host launches it as before.
 powos.on("webwindows.launch", ({ key }: { key: string }) => {
+  recentsLaunched();
   void openAsWebWindow(key).then((ok) => {
     if (!ok) void powos.apps.launch(key);
   });
@@ -630,6 +633,7 @@ function openAsWebWindow(key: string): Promise<boolean> {
  */
 export async function launch(key: string, { fullScreen = false }: { fullScreen?: boolean } = {}) {
   menu.value = null;
+  recentsLaunched();
   // A PowOS app: its page, full screen in this one (ui/appscreen.tsx).
   if (key.startsWith(PREFIX)) {
     openApp(key.slice(PREFIX.length));

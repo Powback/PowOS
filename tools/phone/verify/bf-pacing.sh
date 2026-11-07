@@ -98,7 +98,8 @@ restore() {  # restore [warm]: warm = the queue's next job is this game too (QUE
   "$A" shell "su -c 'rm -f /data/powos/root$G/dxvk.conf'"
   cfg_restore; gus_restore
   [ -n "$steam_before" ] && "$A" shell "su -c 'sh /data/powos/powos-run.sh \"cd /home/powos; setsid -f steam -silent </dev/null >/dev/null 2>&1\"'" >/dev/null 2>&1
-  "$A" shell "${front:+am start -n $front >/dev/null 2>&1; }su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof /data/local/tmp/powos-bf-*.sh /data/powos/root/var/tmp/powos-bf-*.sh'"
+  front_back "$front"  # bf-lib.sh: never a bare PowosWindowActivity (an empty window task over home)
+  "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof /data/local/tmp/powos-bf-*.sh /data/powos/root/var/tmp/powos-bf-*.sh'"
 }
 cfg_set || exit 5
 gus_set || { restore; exit 5; }
@@ -114,7 +115,7 @@ onscreen() { local r on top sv how
   r=$("$A" shell "dumpsys display | grep -cE '^  DisplayDeviceInfo.* state ON,'; dumpsys activity activities | grep -m1 topResumedActivity; echo; sh /data/local/tmp/powos-bf-onscreen.sh" | tr -d '\r')
   on=$(echo "$r" | sed -n 1p); top=$(echo "$r" | grep -m1 topResumedActivity | sed -nE 's#.*/[a-zA-Z0-9_.]*\.([A-Za-z0-9_$]+) .*#\1#p')
   set -- $(echo "$r" | grep -m1 '^onscreen '); sv=${2:-0}; how=${3:-none}
-  WHY="displays on=${on:-?}, in front=${top:-none}, game layers=$sv ($how${4:+ ${4}})"; TOP=$top
+  WHY="displays on=${on:-?}, in front=${top:-none}, switcher $(switcher_state), game layers=$sv ($how${4:+ ${4}})"; TOP=$top
   [ "${on:-0}" -ge 1 ] && [ "$sv" -ge 1 ] && { { [ "$how" = task ] && [ "$top" = PowosWindowActivity ]; } || { [ "$how" = web ] && [ "$top" = HomeShell ]; }; }; }
 # homewhy: what home showed instead (the user, 11-07 03:3x: "atm its just waiting in the switcher") - the switcher up,
 # and each web window's size / state, read from home's page (cdp.sh, read-only). One line, "home: ..." or "".
@@ -138,6 +139,9 @@ for mode in "$@"; do
   M=$OUT/$mode; mkdir -p "$M"; l0=$("$A" shell "su -c 'wc -l < $LOG'" | tr -d '\r ')
   echo "== $mode $(date +%T)"
   if [ -n "$("$A" shell "pgrep -f 'steam -cef'" | tr -d '\r')" ]; then pill "$lbl: launching $NAME"; else pill "$lbl: starting Steam + $NAME"; fi
+  # A switcher left up is closed first (bf-lib.sh stray_switcher: the game would start under it, unseen), and what
+  # was in front is said as it was.
+  echo "$mode: before the launch: in front $("$A" shell "dumpsys activity activities | grep -m1 topResumedActivity" | tr -d '\r' | sed -nE 's#.* ([a-zA-Z0-9_.]+/[a-zA-Z0-9_.$]+) .*#\1#p'); $(stray_switcher)"
   # Home first (BF_HOME_FIRST=0: not): a launch while home's recent-apps overview or another app's task is in front
   # never brings the game's window forward - 7 of 9 ABZU runs 11-07 02:56-03:37 ended INVALID that way (in front
   # HomeShell/PowosWindowActivity, game layers 0 or a web layer behind it); the two valid ones came right after Home.
