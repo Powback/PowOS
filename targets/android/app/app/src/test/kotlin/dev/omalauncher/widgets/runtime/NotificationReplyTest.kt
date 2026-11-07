@@ -33,4 +33,11 @@ class NotificationReplyTest {
     fun textForAnActionWithoutAFieldIsNotPressed() {
         assertNull(Notifications.replyResults(emptyList(), "on my way"))
     }
+
+    /** A refused press is an error the caller sees (its row rolls back from "Sent"), never a quiet success. */
+    @Test
+    fun refusalSaysWhy() {
+        assertEquals("nothing to send", Notifications.replyRefusal(listOf("reply"), "  "))
+        assertEquals("that action takes no reply: open the app", Notifications.replyRefusal(emptyList(), "on my way"))
+    }
 }
