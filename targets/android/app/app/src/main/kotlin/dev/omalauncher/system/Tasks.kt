@@ -99,7 +99,8 @@ object Tasks {
     /**
      * A task that came to the front after [since] (uptime ms) and shows - a launch from anywhere: a notification, the
      * share sheet, a deep link, another app's intent, the assistant, a floating window or a full task - or null. Home and
-     * the switcher's own activity ([home]: their class names) never count: the switcher brings them up itself.
+     * the switcher's own activity ([home]: their class names) never count: the switcher brings them up itself. [since] is
+     * SystemClock.elapsedRealtime ms, the clock lastActiveTime is in.
      */
     fun frontedSince(
         tasks: List<Front>,
@@ -108,7 +109,7 @@ object Tasks {
     ): Int? =
         tasks.firstOrNull { t -> t.visible && t.lastActive > since && home.none { h -> t.component?.endsWith(h) == true } }?.id
 
-    /** TaskInfo.lastActiveTime (a hidden field; 0 where it can't be read). */
+    /** TaskInfo.lastActiveTime (a hidden field; 0 where it can't be read): SystemClock.elapsedRealtime ms, never uptime. */
     private fun lastActive(t: ActivityManager.RecentTaskInfo): Long =
         runCatching { android.app.TaskInfo::class.java.getField("lastActiveTime").getLong(t) }.getOrDefault(0L)
 

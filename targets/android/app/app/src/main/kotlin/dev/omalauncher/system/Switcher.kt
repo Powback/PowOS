@@ -570,7 +570,11 @@ object Switcher {
         stopWatch = null
         val ctx = appContext ?: return
         if (!on) return
-        val since = SystemClock.uptimeMillis()
+        // elapsedRealtime, the clock TaskInfo.lastActiveTime is stamped in (Task.touchActiveTime). Not uptimeMillis: it
+        // stops in deep sleep, so after a night it trails elapsedRealtime by hours (phone 11-07: 52636 s vs 57306 s) and
+        // every task fronted in that gap - the window the switcher was opened over - read as "launched after the switcher
+        // came up" and closed it 21 ms after "switcher up" (e2e-desktop 248 40-recents: no card for Calculator).
+        val since = SystemClock.elapsedRealtime()
         stopWatch =
             FreeformTasks.listen {
                 if (!open) return@listen

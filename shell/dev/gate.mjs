@@ -2535,6 +2535,42 @@ async function switcherLinuxFullCase(page) {
   return fails;
 }
 
+/**
+ * e2e-desktop 248 40-recents (11-07: "the switcher shows no card for Calculator"): every open window has its card while
+ * the switcher is up - a plain floating Linux window (KWin, card LINUX_CARD + its id) and an Android app's window
+ * (Calculator, its task's card) - and a window's first frame arriving while it shows ("webwindows.live", window-fixes
+ * FirstFrame) neither drops a card nor closes the switcher. (The device bug was the host's launch watch closing it at
+ * once - Switcher.watchLaunches' clock, JVM OutsideLaunchClosesOverviewTest.theWatchStartsInLastActiveTimesClock.)
+ */
+async function switcherWindowCardsCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const LIN = 11;
+  const CALC = 12;
+  const LINUX = (1 << 29) + LIN;
+  const TASK = 2743;
+  S.page.value = 0;
+  await window.__gw.settled();
+  const pg = S.pages.value[0];
+  W.webWins.value = [
+    { id: LIN, key: "l:org.kde.dolphin", label: "Dolphin", page: pg, x: 30, y: 120, w: 300, h: 360, live: false },
+    { id: CALC, key: "a:com.oneplus.calculator", label: "Calculator", page: pg, x: 60, y: 200, w: 300, h: 400, task: TASK, live: true },
+  ];
+  await window.__gw.settled();
+  const task = (id, label, key, more = {}) => ({ id, label, key, icon: null, snapshot: "", ...more });
+  window.__mockEvents.emit("recents.show", { open: true, from: null, tasks: [task(LINUX, "Dolphin", "l:org.kde.dolphin", { webwindow: LIN }), task(TASK, "Calculator", "a:com.oneplus.calculator")] });
+  await new Promise((ok) => setTimeout(ok, 300));
+  window.__mockEvents.emit("webwindows.live", LIN);
+  await new Promise((ok) => setTimeout(ok, 400));
+  const fails = [];
+  const layer = document.querySelector(".recents");
+  if (!layer?.classList.contains("shown")) fails.push(`switcher-window-cards: the switcher isn't up with windows open (${layer?.className})`);
+  const cards = [...document.querySelectorAll(".recents .task")].map((c) => ({ id: Number(c.dataset.task), w: c.querySelector(".task-shot")?.getBoundingClientRect().width ?? 0 }));
+  for (const [id, what] of [[LINUX, "the floating Linux window (Dolphin)"], [TASK, "the Android window (Calculator)"]])
+    if (!cards.some((c) => c.id === id && c.w > 0)) fails.push(`switcher-window-cards: no card for ${what} (cards: ${cards.map((c) => c.id).join(", ") || "none"})`);
+  return fails;
+}
+
 /** [switcherLinuxMaxCheck]'s home: a maximised Linux window (Dolphin), then the switcher up with its card and two apps'. */
 async function switcherLinuxMaxSetup([linux, win, full]) {
   const { powos } = await window.__gw.mod("./bridge.ts");
@@ -13372,6 +13408,8 @@ try {
   // Board switcher-shows-every-open-window-linux-too: a maximised Linux window has its card; opened, it comes back.
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-linux-max", { width: 404, height: 900 }).then((r) => whenReady(r, () => switcherLinuxMaxCheck(r.page))));
+    // Every open window (Linux + Android) has its switcher card, a first frame while it shows keeps them (E2E 248).
+    runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-window-cards", { width: 821, height: 883 }).then((r) => whenReady(r, () => r.page.evaluate(switcherWindowCardsCheck))));
   // Board switcher-opened-over-a-maximised-linux-window-ce: over home, the maximised web window's card is the centred one.
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-centre", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(switcherCentreCheck))));
