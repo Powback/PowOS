@@ -22,7 +22,10 @@ class RenderWatchTest {
         var last = 1_000L
         var answerAt = 0L
         var t = last
-        while (t <= last + 20_000) {
+        // A fixed end: `last` moves with every answered probe, so `last + 20_000` never came (the test looped for an
+        // hour in the 11-07 ship's JVM run).
+        val end = t + 20_000
+        while (t <= end) {
             if (answerAt != 0L && t >= answerAt) last = answerAt.also { answerAt = 0L }
             val act = w.step(t, 1, true, last)
             assertTrue("$act at $t", act == Act.NONE || act == Act.PROBE)
