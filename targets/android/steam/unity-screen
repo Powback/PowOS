@@ -1,5 +1,7 @@
 #!/bin/sh
-# unity-screen: a Unity game's Steam launch option - `<home>/.local/share/powos/unity-screen %command%` - that starts
+# unity-screen: a Unity or Unreal game's Steam launch option (powos-steam-compat apply sets it for every installed Unity
+# / Unreal game at each Steam start - the generic default, board task games-resize-live-to-their-container-portrait-la;
+# Besiege launched at its saved 2268x1600 in a 2268x2440 container, letterboxed) - `<home>/.local/share/powos/unity-screen %command%` - that starts
 # the game fullscreen at the CURRENT screen size. Unity keeps the size it saved last time (Broforce: 1116x2440 from the
 # folded cover screen, stored in the Proton prefix's user.reg) and doesn't follow KWin's output when the phone is
 # unfolded/rotated (the output anland-1 follows the Android surface: one mode, resized). So each launch passes
@@ -134,8 +136,27 @@ if d:
     print(size[0], size[1])
 PY
 )" 2>/dev/null)
+# The engine, from the game's own executable in the command (Proton: `... proton waitforexitandrun <dir>/<game>.exe`;
+# native: `<dir>/<game>.x86_64`): Unreal (an Engine/ folder at the install root, or the exe under <Project>/Binaries/)
+# takes `-ResX=W -ResY=H -windowed` (ABZU, UE4: its GameUserSettings.ini says 1280x720 Fullscreen and
+# bUseDesktopResolutionForFullscreen=False, so it rendered 1280x720 and Proton's fullscreen hack scaled + pillarboxed
+# it; a windowed UE viewport re-renders at its window's size like windowed Unity). Anything else gets the Unity player
+# arguments (this wrapper's first job; powos-steam-compat apply only sets it for Unity and Unreal games).
+engine=unity
+for a in "$@"; do
+  case $a in *.exe|*.x86_64|*.x86) ;; *) continue ;; esac
+  [ -f "$a" ] || continue
+  d=$(dirname "$a")
+  case $a in */Binaries/Win64/*|*/Binaries/Linux/*) engine=unreal ;; esac
+  [ -d "$d/Engine/Binaries" ] && engine=unreal
+  break
+done
 case $size in
   [1-9]*' '[1-9]*)
+    if [ "$engine" = unreal ]; then
+      echo "unity-screen: Unreal window ${size% *}x${size#* } (-ResX/-ResY -windowed)" >&2
+      exec "$@" -windowed "-ResX=${size% *}" "-ResY=${size#* }"
+    fi
     if [ "${POWOS_UNITY_SCREEN:-window}" = fullscreen ]; then
       echo "unity-screen: fullscreen ${size% *}x${size#* }" >&2
       exec "$@" -screen-fullscreen 1 -screen-width "${size% *}" -screen-height "${size#* }"

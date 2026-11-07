@@ -49,6 +49,17 @@ env -u DISPLAY LD_PRELOAD="$OV" POWOS_STEAM_OVERLAY=1 ENABLE_VK_LAYER_VALVE_stea
 env -u DISPLAY PATH="$T/bin:$PATH" sh "$US" "$T/game" -a > "$T/out" 2>/dev/null
 [ "$(args)" = "-a" ] && ok "no DISPLAY: starts unchanged" || bad "no-display args" "$(args)"
 
+# Unreal: an Engine/Binaries folder beside the exe (ABZU) or the exe under <Project>/Binaries/Win64 -> -windowed -ResX/-ResY.
+mkdir -p "$T/ue/Engine/Binaries" "$T/ue2/Proj/Binaries/Win64" "$T/un/G_Data"
+cp "$T/game" "$T/ue/AbzuGame.exe"; cp "$T/game" "$T/ue2/Proj/Binaries/Win64/Proj-Win64-Shipping.exe"; cp "$T/game" "$T/un/G.exe"
+PATH="$T/bin:$PATH" DISPLAY=:9 sh "$US" "$T/ue/AbzuGame.exe" > "$T/out" 2> "$T/err"
+[ "$(args)" = "-windowed -ResX=2268 -ResY=2440" ] && ok "Unreal (Engine/ at the root): -windowed -ResX/-ResY" || bad "unreal args" "$(args)"
+grep -q "Unreal window 2268x2440" "$T/err" && ok "says Unreal" || bad "unreal stderr" "$(cat "$T/err")"
+PATH="$T/bin:$PATH" DISPLAY=:9 sh "$US" "$T/ue2/Proj/Binaries/Win64/Proj-Win64-Shipping.exe" > "$T/out" 2>/dev/null
+[ "$(args)" = "-windowed -ResX=2268 -ResY=2440" ] && ok "Unreal (exe under Binaries/Win64)" || bad "unreal2 args" "$(args)"
+PATH="$T/bin:$PATH" DISPLAY=:9 sh "$US" "$T/un/G.exe" > "$T/out" 2>/dev/null
+[ "$(args)" = "-screen-fullscreen 0 -popupwindow -screen-width 2268 -screen-height 2440" ] && ok "a Unity exe: Unity arguments" || bad "unity exe args" "$(args)"
+
 # End to end with a real X server: the root's _POWOS_SCREEN_SIZE (kwin 0051) wins over the root size.
 if command -v Xvfb >/dev/null && command -v xprop >/dev/null && command -v python3 >/dev/null; then
   Xvfb :93 -screen 0 1116x2358x24 -noreset >/dev/null 2>&1 & XP=$!

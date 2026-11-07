@@ -26,6 +26,31 @@ class WebWindowsImmersiveTest {
     }
 
     @Test
+    fun aFullScreenGameFollowsARotation() {
+        // ABZU 11-07: portrait 2268x2439 stayed on the landscape 2440x2268 screen ("rotating breaks the games").
+        assertTrue(WebWindows.fullFollows(2268, 2439, 2440, 2268))
+        assertTrue("fold to the cover", WebWindows.fullFollows(2268, 2440, 2484, 1116))
+        assertFalse("same size: nothing to do", WebWindows.fullFollows(2440, 2268, 2440, 2268))
+        assertFalse("no area measured", WebWindows.fullFollows(2268, 2440, 0, 0))
+        val cb = src.substringAfter("override fun onConfigurationChanged(newConfig: android.content.res.Configuration)").substringBefore("\n            }\n")
+        assertTrue("a configuration change refits every full-screen window", cb.contains("refillFull(") && cb.contains("FULL_REFIT_SETTLE_MS"))
+        val refill = body("    private fun refillFull(")
+        assertTrue(refill.contains("w.linuxFull") && refill.contains("fullScreenArea(w.immersive)") && refill.contains("fillScreen("))
+    }
+
+    @Test
+    fun aGamesWindowOpensFullScreenNotFloating() {
+        // game-resize.sh 11-07: Besiege / My Friend Pedro opened as 1135x1364 floating windows and Wine pinned that size.
+        assertTrue(WebWindows.opensFullScreen(WebWindows.isGame("steam_app_346010", null)))
+        assertFalse(WebWindows.opensFullScreen(WebWindows.isGame("org.kde.kate", "Qt;KDE;Utility;TextEditor;")))
+        assertFalse("Steam itself floats", WebWindows.opensFullScreen(WebWindows.isGame("steam", "Game;")))
+        assertTrue("openLinux asks it", body("    fun openLinux(").contains("gameFullScreenAtOpen(win, p)"))
+        val at = body("    private fun gameFullScreenAtOpen(")
+        assertTrue("a game's offer -> KWin's full screen", at.contains("opensFullScreen(p.game)") && at.contains("fullScreen(win)"))
+        assertTrue("never over a window already full screen or asked", at.contains("win.linuxFull || win.fullAsked"))
+    }
+
+    @Test
     fun gamesAreProtonClassesOrGameDesktopFilesNotSteam() {
         assertTrue(WebWindows.isGame("steam_app_274190", null))
         assertTrue(WebWindows.isGame("STEAM_APP_1", null))

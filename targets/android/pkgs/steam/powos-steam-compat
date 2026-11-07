@@ -30,6 +30,14 @@ while Steam runs (set, a failed launch) is applied at its next start (`powos gam
     powos-steam-compat get <appid>                  tool=<mapping name or -> opts=<LaunchOptions or ->
     powos-steam-compat tool <appid> <name|->        the raw mapping (Steam off; no policy state change)
     powos-steam-compat opts <appid> <text|->        every user's LaunchOptions for the app (Steam off)
+    powos-steam-compat screen <appid> auto|off      the screen-size launch wrapper for a Unity / Unreal game (below)
+
+Screen size (apply, every installed game): a Unity or Unreal game (detected from its install folder) gets the wrapper
+~/.local/share/powos/unity-screen (targets/android/steam/unity-screen, copied there on every deploy) in its
+LaunchOptions, in front of %command% - the user's own options kept around it. It starts the game at its container's
+size (the Android screen KWin publishes as _POWOS_SCREEN_SIZE) in a borderless window that re-renders when KWin resizes
+it on rotate/fold, instead of the size the game saved last time scaled + letterboxed by Proton (Besiege: 2268x1600 in
+2268x2440). `screen <appid> off` takes it out and keeps it out; other engines (own engines, SDL, Source) are left alone.
 
 State: ~/.local/share/powos/steam-compat.json. Edits keep <file>.powos-bak-<time> copies of config.vdf/localconfig.vdf.
 """
@@ -290,6 +298,73 @@ def installed_games():
     return out
 
 
+# ---- Screen size: the launch wrapper for engines that start at a saved size ----
+SCREEN = os.path.expanduser(os.environ.get("POWOS_GAME_SCREEN", "~/.local/share/powos/unity-screen"))
+
+
+def install_dir(appid):
+    libs = [os.path.join(S, "steamapps")]
+    try:
+        libs += [m + "/steamapps" for m in re.findall(r'"path"\s+"([^"]+)"', read(os.path.join(S, "steamapps/libraryfolders.vdf")))]
+    except OSError:
+        pass
+    for lib in dict.fromkeys(libs):
+        try:
+            m = re.search(r'"installdir"\s+"([^"]+)"', read(os.path.join(lib, "appmanifest_%s.acf" % appid)))
+        except OSError:
+            continue
+        if m:
+            return os.path.join(lib, "common", m.group(1))
+    return None
+
+
+def engine(appid):
+    """"unity", "unreal" or None, from the game's install folder."""
+    d = install_dir(appid)
+    if not d or not os.path.isdir(d):
+        return None
+    g = glob.escape(d)
+    if (os.path.exists(os.path.join(d, "UnityPlayer.dll")) or glob.glob(os.path.join(g, "*_Data", "globalgamemanagers"))
+            or glob.glob(os.path.join(g, "*_Data", "mainData")) or glob.glob(os.path.join(g, "*_Data", "Managed", "UnityEngine.dll"))):
+        return "unity"
+    if os.path.isdir(os.path.join(d, "Engine", "Binaries")) or glob.glob(os.path.join(g, "*", "Binaries", "Win64")) \
+            or glob.glob(os.path.join(g, "*", "Binaries", "Linux")):
+        return "unreal"
+    return None
+
+
+def with_screen(opts):
+    """LaunchOptions with the wrapper in front of %command% (the user's own options kept); None = already there."""
+    if SCREEN in opts:
+        return None
+    if opts in ("-", ""):
+        return "%s %%command%%" % SCREEN
+    if "%command%" in opts:
+        return opts.replace("%command%", "%s %%command%%" % SCREEN, 1)
+    return "%s %%command%% %s" % (SCREEN, opts)  # plain arguments: Steam appends them to the command
+
+
+def without_screen(opts):
+    if SCREEN not in opts:
+        return None
+    o = re.sub(r"\s*%s(?=\s|$)" % re.escape(SCREEN), "", opts).strip()
+    return "-" if o in ("", "%command%") else o
+
+
+def screen_apply(appid, a, dry):
+    """The wrapper in (or, screen off, out of) a Unity / Unreal game's LaunchOptions; a line when it changed."""
+    eng = engine(appid)
+    if not eng or not localconfigs():
+        return None
+    cur = get_opts(appid)
+    new = without_screen(cur) if a.get("screen") == "off" else (with_screen(cur) if os.path.exists(SCREEN) else None)
+    if new is None:
+        return None
+    if not dry:
+        set_opts(appid, new)
+    return "%s %s (%s): LaunchOptions %s -> %s" % ("would set" if dry else "set", appid, eng, cur, new)
+
+
 def family(tool):
     """The Wine architecture a tool's prefix is for: "arm64" (ARM64 Proton), "x86" (any other Proton), None (native)."""
     if tool in ("-", "", None):
@@ -441,6 +516,9 @@ def cmd_apply(dry):
                 set_tool(appid, tool_name(want)); t = read(CONFIG)
                 a["applied"] = time.strftime("%F %T")
         a["why"] = why
+        line = screen_apply(appid, a, dry)
+        if line:
+            print(line)
     if not dry:
         save(s)
     return 0
@@ -502,6 +580,14 @@ def main(a):
     if c == "record" and len(a) >= 3:
         tool = a[a.index("--tool") + 1] if "--tool" in a else None
         return cmd_record(a[1], a[2], tool, "--cold" in a)
+    if c == "screen" and len(a) == 3 and a[2] in ("auto", "off"):
+        s = load(); e = app_entry(s, a[1])
+        if a[2] == "off": e["screen"] = "off"
+        else: e.pop("screen", None)
+        save(s)
+        if steam_running():
+            print("%s: screen %s - applied at Steam's next start" % (a[1], a[2])); return 0
+        return cmd_apply(False)
     if c in ("set", "tool", "opts") and len(a) == 3:
         if c == "set": return cmd_set(a[1], a[2])
         if steam_running():

@@ -366,7 +366,11 @@ class WebWindows(
                 }
             }
 
-            override fun onConfigurationChanged(newConfig: android.content.res.Configuration) = Unit
+            // A rotation / fold: every full-screen Linux window follows the screen ([refillFull]).
+            override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+                main.post { refillFull("configuration change") }
+                main.postDelayed({ refillFull("configuration settled") }, FULL_REFIT_SETTLE_MS)
+            }
 
             @Deprecated("Deprecated in Java")
             override fun onLowMemory() = onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
@@ -1203,7 +1207,27 @@ class WebWindows(
         // waits for the user instead of covering it: selfFullScreenNow).
         focused = id
         WindowLog.i(TAG, "window $id: KWin window $kwin (${p.appId}) as a web window, ${w}x$h")
+        gameFullScreenAtOpen(win, p)
         return id
+    }
+
+    /**
+     * A game's window ([LinuxOffer.game]) opens FULL SCREEN, never as a floating window first (game-resize.sh 11-07:
+     * Besiege and My Friend Pedro, Unity under Proton, opened at the page's default 1135x1364; KWin sized their X windows
+     * to that, Wine then pinned it as their fixed size (min == max) and they never went full screen - a small floating
+     * window, black or one frame, in all 4 fold/rotation states). Full screen at once: KWin sizes the window to the
+     * screen before the game settles on a size, and fitFullScreen follows every fold / rotation.
+     */
+    private fun gameFullScreenAtOpen(
+        win: Win,
+        p: LinuxOffer,
+    ) {
+        if (!opensFullScreen(p.game)) return
+        main.post {
+            if (win.closed || win.linuxFull || win.fullAsked) return@post
+            WindowLog.i(TAG, "window ${win.id}: a game's window (${p.appId}): full screen at its open")
+            fullScreen(win)
+        }
     }
 
     /** On a consumer thread: Linux window [win]'s consumer started, once ([LinuxSource.starting]). */
@@ -3109,6 +3133,23 @@ class WebWindows(
         quietCheck("window ${win.id} full screen=$on")
     }
 
+    /**
+     * A rotation or fold under a full-screen Linux window: its layers and KWin's window to the screen's new size
+     * ([fillScreen]). Before, [fillScreen] ran only when the window went full screen - a rotation left a game (ABZU,
+     * game-resize.sh 11-07 01:33) at its portrait 2268x2439 on the landscape 2440x2268 screen, cropped and off its place,
+     * the window never told the new size ("rotating breaks the games", the user, 11-07). Main thread.
+     */
+    private fun refillFull(why: String) {
+        for (w in wins.values) {
+            val src = w.linux ?: continue
+            if (w.closed || !w.linuxFull || w.fullAsked) continue
+            val a = fullScreenArea(w.immersive)
+            if (!fullFollows(w.w, w.h, a.width(), a.height())) continue
+            WindowLog.i(TAG, "window ${w.id}: full screen follows the screen ($why): ${w.w}x${w.h} -> ${a.width()}x${a.height()}")
+            fillScreen(SurfaceControl.Transaction(), w, src)
+        }
+    }
+
     /** [win]'s [Win.linuxFull] set to [on], its IR1 marks reset. */
     private fun markLinuxFull(
         win: Win,
@@ -4028,6 +4069,20 @@ class WebWindows(
             if (focused in open) return false
             return !coming && open.max() == id
         }
+
+        /** Whether a full-screen window of [w]x[h] must be refitted to a screen area of [aw]x[ah] (a rotation / fold). */
+        fun fullFollows(
+            w: Int,
+            h: Int,
+            aw: Int,
+            ah: Int,
+        ): Boolean = aw > 0 && ah > 0 && (w != aw || h != ah)
+
+        /** A rotation's new screen size, settled: [refillFull] runs again this long after the configuration change. */
+        const val FULL_REFIT_SETTLE_MS = 400L
+
+        /** Whether a Linux window opens full screen at once: a game's ([isGame], [LinuxOffer.game]); anything else floats. */
+        fun opensFullScreen(game: Boolean): Boolean = game
 
         private val STEAM_GAME_CLASS = Regex("steam_app_\\d+")
 
