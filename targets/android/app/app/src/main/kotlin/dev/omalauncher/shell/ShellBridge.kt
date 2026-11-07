@@ -42,7 +42,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -301,7 +300,7 @@ class ShellBridge(
         // changes as one list: on main they blocked Android's frame 117-159 ms during the shade's scroll (perf
         // shade-scroll 11-07, native gapSeen in ShellBridge.notificationList). The JSON (ShellIcons: main only) stays here.
         scope.launch {
-            MediaListener.changes.conflate().collect {
+            MediaListener.changes.collect { // a StateFlow: a burst collapses to one list
                 val n = runtime.widgets.notifications
                 val items = withContext(Dispatchers.IO) { runCatching { n.items() }.getOrDefault(emptyList()) }
                 emit("notifications.changed", notificationList(n.available, items))
