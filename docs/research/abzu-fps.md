@@ -68,7 +68,7 @@ and SCALE_50 + UBWC. Each ran at least once but ended INVALID (below).
   (eb3e7fd4 + 0002 warning seen in the log). FIFO present, no frame cap.
 
 ## Measurement friction (why most runs were INVALID)
-7 of 9 ABZU runs 02:56-03:37 ended `INVALID ... in front=HomeShell, game layers=0`: the screenshots (03:58-ish
+7 of 9 ABZU runs 02:56-03:37 ended `INVALID ... in front=HomeShell, game layers=0`: the screenshots (02:58
 s1, 03:36 s4) show home's **recent-apps overview** left open (Steam + a settings card, "2 running in background")
 with the game's window behind it; the game's full-screen web window never composes while the overview is up. The two
 valid runs came right after `input keyevent 3` (Home) closed it. So: a game launched while the overview is open
