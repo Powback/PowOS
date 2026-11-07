@@ -865,14 +865,26 @@ html:root .menu.tile { --glass-blur-native: var(--backdrop-blur-native); backgro
   clip-path: inset(calc(-1 * var(--inset-top, 0px)) 0 0 0);
   touch-action: none;
 }
+/*
+ * N1 (docs/WEB_WINDOWS.md "Native-glued windows"): the track's place is --track-x (gesture.ts applyTrack), a registered
+ * property. Without web windows its transform transitions - the compositor runs the slide. With one (html.ww-glued,
+ * ui/webwindows.tsx) --track-x itself transitions: the main thread samples it each frame, so the rAF that measures a
+ * window's body ("w.f") sees exactly what that frame commits and the app's layer moves on the same frame as its page.
+ * A compositor-run transform was ticked at the draw, a frame after the page measured it: the window lagged its page
+ * by a frame's travel on every page switch (the user, 11-07: "no race condition in updating window positions").
+ */
+@property --track-x { syntax: "<length-percentage>"; inherits: false; initial-value: 0px; }
+@property --glass-x { syntax: "<length-percentage>"; inherits: false; initial-value: 0px; }
 .page-track {
   display: flex;
   height: 100%;
+  transform: translateX(var(--track-x));
   transition: transform var(--spring-ms) var(--spring);
   will-change: transform;
 }
+html.ww-glued .page-track { transition: --track-x var(--spring-ms) var(--spring); }
 /* A finger is sliding the pages: they follow it exactly. */
-.page-track.dragging { transition: none; }
+.page-track.dragging, html.ww-glued .page-track.dragging { transition: none; }
 .page { position: relative; flex: 0 0 100%; height: 100%; }
 /* PowOS apps' own controls (islands on home, their pages) get the shell's borderless look too: their buttons' and
    chips' outlines go (their styles are inline - hence !important), a bare one takes a soft fill. */
@@ -906,9 +918,12 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   height: var(--glass-h);
   background: var(--glass-image) 0 0 / 100% 100% no-repeat;
   will-change: transform;
+  transform: translateX(var(--glass-x));
   transition: transform var(--spring-ms) var(--spring);
 }
-.page-track.dragging .page-glass-img, .page-glass-img.sliding { transition: none; }
+/* N1: on the track's clock (above) - the glass holds still on screen only when both run on the same thread. */
+html.ww-glued .page-glass-img { transition: --glass-x var(--spring-ms) var(--spring); }
+.page-track.dragging .page-glass-img, .page-glass-img.sliding, html.ww-glued :is(.page-track.dragging .page-glass-img, .page-glass-img.sliding) { transition: none; }
 .glass :is(.page .home-tile > .tile, .lib-card.tile) { background: var(--glass-fill); }
 .home-tile { position: absolute; padding: calc(var(--gap) / 2); touch-action: none; }
 .home-tile.lifted { opacity: 0.25; }

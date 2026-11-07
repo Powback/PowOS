@@ -2242,6 +2242,10 @@ const sent: string[] = [];
   get lastResize() {
     return lastResize;
   },
+  /** N1: the motions measured so far (frames sent, and those a compositor-run animation moved a window in). */
+  get glue() {
+    return { ...glue, last: lastGlue };
+  },
   get direct() {
     return geometryChannel.direct;
   },
@@ -2264,14 +2268,71 @@ function tick(ts: number) {
     dirty = false;
     for (const [id, r] of resizing) pace(id, r, ts);
     send(ts);
-  }
+  } else glueEnd();
   tickMs.push(performance.now() - t0);
   if (tickMs.length > 240) tickMs.shift();
   // The next frame only while something still moves a window (a transition on one, a resize drag): idle - every window
   // still, or none on screen - no rAF at all (the title's "window tick", perf-1793970543446: a frame callback every
   // vsync with nothing to do). What moves one next kicks it again (markDirty, transitionrun, webWins, resend).
   if (webWins.value.length && moving()) raf = requestAnimationFrame(tick);
+  else glueEnd();
 }
+
+// ---- N1: native-glued windows - every motion that carries a window runs on the main thread -------------------------
+// docs/WEB_WINDOWS.md "Native-glued windows". The host moves an app's layer on the draw that shows the page frame its
+// "w.f" was measured in (FrameSync.next). That holds for what the main thread moves (a finger, a rAF, a main-thread
+// transition): the measured frame IS the committed one. A transition the compositor runs (transform, translate, scale,
+// rotate, opacity) is ticked at the draw, a frame after the page measured it - the app's layer then trails its page by
+// a frame's travel (a page switch: ~60 px a frame mid-slide). So while a window exists the page track and its glass
+// slide on registered properties (html.ww-glued, shell.css --track-x/--glass-x), and every frame sent is checked here:
+// [offThread] = a compositor-run animation on a window or an ancestor (want 0), logged per motion and kept for the gate.
+
+/** Properties Chrome animates on the compositor thread (a transition/animation of one of them is off the main thread). */
+const COMPOSITED = /^(transform|translate|scale|rotate|opacity)$/;
+const glue = { motions: 0, frames: 0, offThread: 0 };
+let lastGlue = { frames: 0, offThread: 0, by: "" };
+let episode = { frames: 0, offThread: 0, by: "" };
+
+/** The compositor-run animation moving a window this frame, as "<element>.<class> <property>", or "". */
+function offThreadMover(): string {
+  for (const a of document.getAnimations()) {
+    if (a.playState !== "running") continue;
+    const t = (a.effect as KeyframeEffect | null)?.target;
+    if (!t || !carriesWindow(t)) continue;
+    const props =
+      a instanceof CSSTransition ? [a.transitionProperty] : ((a.effect as KeyframeEffect).getKeyframes().flatMap((k) => Object.keys(k)) as string[]);
+    const hit = props.find((p) => COMPOSITED.test(p));
+    // Opacity only fades (the host takes the measured alpha): a frame late is a shade, never a misplaced window.
+    if (hit && hit !== "opacity") return `${t.localName}.${t.getAttribute("class") ?? ""} ${hit}`;
+  }
+  return "";
+}
+
+/** A frame was sent: counted into this motion. */
+function glueFrame() {
+  const by = offThreadMover();
+  episode.frames++;
+  glue.frames++;
+  if (by) {
+    episode.offThread++;
+    glue.offThread++;
+    episode.by ||= by;
+  }
+}
+
+/** The motion ended (nothing moves a window): one log line, to logcat (PowosShell) - the phone check reads it. */
+function glueEnd() {
+  if (!episode.frames) return;
+  glue.motions++;
+  lastGlue = episode;
+  if (episode.frames > 2) console.info(`ww glue: ${episode.frames} frames, ${episode.offThread} off-thread${episode.by ? ` (${episode.by})` : ""}`);
+  episode = { frames: 0, offThread: 0, by: "" };
+}
+
+/** N1: any window on home glues the page track to the main thread (shell.css html.ww-glued). */
+effect(() => {
+  document.documentElement.classList.toggle("ww-glued", webWins.value.some((w) => !w.full));
+});
 
 // ---- WT-IDLE: the tick measures only when something could have moved a window ------------------------------------
 // perf-1793458433606 (10-31): [geometry] every frame - a querySelector, two rects and a computed-style walk up to the
@@ -2374,6 +2435,7 @@ function send(ts: number) {
     const line = `w.f ${id} ${g} ${(now - (performance.now() - ts)).toFixed(2)} ${now}`;
     sent.push(line);
     if (sent.length > 120) sent.shift();
+    glueFrame();
     if (native.value) {
       console.timeStamp(`ww f${id}`);
       sendGeometry(line);

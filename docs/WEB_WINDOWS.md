@@ -28,6 +28,97 @@ scope here, and `powos_desktop_mode` stays as it is (unchanged).
 
 ---
 
+## Native-glued windows (2026-11-07): audit, design, phases
+
+The user, 2026-11-07 03:3x: **"windows need to work fucking flawlessly on both android and linux apps and games. like I
+should be able to resize it flawlessly with no perf drop and no rendering issues ever, the pages should have the windows
+absolutely glued to them like totally a part of their page system not an overlay so that page switching etc works
+instantly and 100% natively no race condition in updating window positions or whatever, as native powos web as
+possible"**, and **"like idk we had issues with steam menus"**. Board task `native-windows`.
+
+### Audit: every path that moves or resizes a window (evidence, 11-07 03:39-03:50, APK on the phone, read-only)
+
+The model is the Element model below: the page measures each body every frame it changes and sends `w.f`; the host
+(`WebWindows.kt` via `FrameSync.next`) moves the app's SurfaceControl on the first window draw after receipt. Host
+counters on the phone at f1567 (`PowosWebWindows: w.f ... lag= pf= rx=`):
+
+| counter | value | reads as |
+|---|---|---|
+| `lag` (window draws between receipt and apply) | 1530 / 34 / 1 / 0 | 97.7 % applied on the next draw after receipt |
+| `pf` (window draws between the page frame and the apply) | 1349 / 173 / 34 / 9 of 1565 | **86.2 % on the draw of their page frame, 11.1 % one draw late, 2.2 % two, 0.6 % 3+** |
+| `rx` | 6.3 ms (page 3.4 + hop 2.7) | rAF to host receipt |
+
+| path | what moves it | thread of the motion | glued? |
+|---|---|---|---|
+| page swipe under a finger | gesture.ts `applyTrack` per touch move (`.page-track.dragging`, no transition) | main | yes when the draw after receipt shows that commit (pf0: 86 %) |
+| **page settle after release, dock/keyboard page switch** | `.page-track` CSS `transform` transition (`--spring`, ~410 ms) | **compositor** | **no, by construction: the compositor ticks the transform at the draw, a frame after the rAF measured it; the layer trails its page by one frame's travel on every frame of every switch (~60 px mid-slide at 120 Hz)** - fixed by N1 |
+| page glass under the tiles | `.page-glass-img` transform transition | compositor | (not a window; must share the track's clock or the glass wobbles) - N1 |
+| slide to the PowOS AI page and back | `.home` / `.ai-screen` transform transition, the bar's counter `translate` | compositor | no (same 1-frame trail) - N1b |
+| title-bar drag, app's own move (CSD) | DOM state per pointer move | main | as the finger swipe |
+| edge resize | DOM frame per move; the app's size paced (RS1: >= 3 frames and 40 ms apart), host `resizeContent` | main | frame yes; content = the app's last buffer anchored top-left until it draws at the new size |
+| tile / maximise / restore reflow | `.ww-reflow` left/top/width/height transitions | main | as above |
+| open / close | placeholder until live (`liveWhenDrawn`, HACK +250 ms), `webwindows.open/close` | main | - |
+| fold / rotate / viewport resize | `resize` -> markDirty; host re-makes layers -> `webwindows.resend` | main | one frame of old geometry possible on the re-make |
+| Android popups, menus, dialogs | windows on the app's own VirtualDisplay | - | inside the window by design (§3.2) |
+| **Linux popups (xdg_popup, transient X11 menus)** | KWin draws them into the toplevel's buffers (0013), confined to it (0027) | KWin | yes (same buffer), but clipped to the window (Z3 open) |
+| **Steam's menus** (Steam / View / Friends / Games) | X11 **override-redirect** `_NET_WM_WINDOW_TYPE_POPUP_MENU`, **no `WM_TRANSIENT_FOR`**, root coordinates next to the button (xprop: 11 such windows, e.g. `312x445+151+148` under "Steam" at `+0+0`) | KWin | **not drawn at all: a task drew only its toplevel's transient tree, an unmanaged window has no transientFor** ("don't appear on click") - fixed by kwin 0062 |
+| full-screen games | a real full-screen task on display 0; KWin's direct scanout (0058) | SurfaceFlinger | not a page window (no page to glue to) |
+| windowed games (Proton/Wine, native) | a Linux web window like any other | as Linux | as Linux; Wine's menus are untyped override-redirect windows (0062 takes them too) |
+
+### Design options
+
+| option | how | verdict |
+|---|---|---|
+| A. per-frame JS geometry, apply on the next draw (today) | `w.f` from rAF, `FrameSync.next` | exact for main-thread motion when the commit activates before the next draw (86 %); never exact for compositor-run motion |
+| B. bind to `postVisualStateCallback` | apply on the draw the callback names | exact pairing, but the request reaches the renderer after the commit it measured: always >= 1 frame late (10-30: 888 of 932) |
+| C. frame-ahead geometry + visual-state bind (N2) | the page sends frame k+1's geometry from rAF k (an animation is a function of time: exact; a finger: applied one frame later), the host posts the visual-state request at receipt, it rides commit k+1 and fires right before the draw that shows it | **exact by construction**, independent of raster/activation time; costs one frame of finger latency on drags |
+| D. native drives the page transform | the page hands the track's curve to the host once per gesture | rejected: the WebView still draws the DOM track on its own clock - two clocks again |
+| E. the app's buffer inside the WebView's compositor | a video/SurfaceTexture-style import | rejected: no WebView API to import a foreign buffer; a GPU copy and a frame of content latency per window; no direct scanout |
+| F. the layer under home's surface (today) | `powos-webwindows` at layer -1 under home's buffer, positioned by transactions merged into home's draw (`applyTransactionOnDraw`) | kept: the right structure; only WHEN each transaction lands is the question |
+
+**Chosen: A with N1 now, then C (N2).** The race on page switching is not the bridge: it is that the page switch runs on
+the compositor thread while the window's geometry is measured on the main thread. N1 puts every motion that carries a
+window on the main thread, so the measured frame IS the committed frame and the existing next-draw binding holds for
+page switches too. N2 then removes the remaining activation-timing misses (pf 1-3: 13.8 %) by construction.
+
+Risks: a main-thread slide stutters when home's main thread is busy (a widget render) where the compositor slide did
+not - N1 applies only while a window exists, the tick is cheap (`__ww.tickMs`), and the phone check reads gfxinfo.
+The registered properties restyle one element per frame (non-inherited): negligible. N2's frame-ahead finger costs one
+frame of drag latency; measure it before turning it on for drags (animations first).
+
+### Phases
+
+- [x] **N1 - page switches on the main thread** (`agent/native-windows`): `html.ww-glued` while any window is on home
+  (`ui/webwindows.tsx`); the track and its glass take their place from registered properties `--track-x` / `--glass-x`
+  (`shell.css`, `gesture.ts applyTrack`). Without windows the compositor still runs the slide (transform); with one, the
+  property itself transitions on the main thread. Audit built in: each sent frame checks `document.getAnimations()` for
+  a compositor-run transform/translate/scale/rotate on a window or an ancestor (`__ww.glue`, logcat
+  `ww glue: N frames, M off-thread`). Gate `desktops` -> `webWindowGlueCheck`: 0 off-thread frames over a switch and
+  back with a window, the body x stepping every frame, the transform path unchanged without one, and a control (glue
+  off) that counts the off-thread frames. Phone: `tools/phone/verify/ww-glue.sh` (swipes on an empty spot, the glue
+  lines, the host's pf over the run, gfxinfo over an edge drag: <= 5 % janky).
+- [x] **Steam menus - kwin 0062 (pkgrel 3.70)**: `AnlandWindowTasks::popupOwner`: an override-redirect popup (menu,
+  dropdown, combo, tooltip, or untyped - Wine's) goes to its application's task (same pid, else X11 class; the active
+  window's task it opens over first) and is drawn over the window at its place, takes touches (`touchTarget`), leaves
+  when X unmaps it. Log `window task N also draws override-redirect ... at RectF(...)`.
+- [ ] **N1b - the PowOS AI slide on the main thread**: `.home` / `.ai-screen` on a registered `--slide-x`, and the bar's
+  counter (`--track-counter`, inherited today) as its own registered property set beside it, so bar and home share a
+  clock (bar.tsx `startCountered` reads home's transform - keep it).
+- [ ] **N2 - exact binding (option C)**: `w.f` carries the geometry of the NEXT frame for time-driven motion (the glue
+  animation's value at ts + one frame, computed from the registered property's transition: or drive the slide from a
+  page-side spring), the host binds it with `postVisualStateCallback`, `next` as the fallback when no callback within a
+  frame; gate on pf0 >= 99 % over a scripted swipe (host counters) instead of 86 %.
+- [ ] **N3 - Linux popups as their own surfaces (S7)**: KWin `web <id> 1`: popups and override-redirect windows of a
+  web window exported as their own surface ids (`popup <id> <parent> x y w h`), layers under the window's container
+  (not its crop) with a positive layer, placed against the screen: a Steam menu longer than the window is no longer cut.
+- [ ] **N4 - resize with no drop**: the frame follows the finger every frame (today); Android: VD resize paced as RS1,
+  last buffer anchored; Linux: screen-sized buffers (no allocation per step). Gate the frame stats: gfxinfo janky <= 5 %
+  over `ww-glue.sh`'s edge drag, KWin's `window task N frames` commits ~= drawn during it.
+- [ ] **N5 - games**: windowed games are Linux windows (N1-N4 apply); full screen stays the direct-scanout task. Check:
+  a windowed Proton game's menu (untyped override-redirect) shows (0062), fps x/120 unchanged by N1.
+
+---
+
 ## 0. What exists (verified in code, worktree base `debd259f`)
 
 ### 0.1 Web windows v0 (ee5f776d, behind `Settings.Global powos_web_windows`, default 0)
