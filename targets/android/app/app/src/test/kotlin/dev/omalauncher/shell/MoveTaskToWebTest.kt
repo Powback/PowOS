@@ -12,34 +12,38 @@ import java.io.File
  * task, raised behind home - a tap on Steam showed nothing for 161 s).
  */
 class MoveTaskToWebTest {
-    private fun move(
-        web: Boolean = true,
-        hasTask: Boolean = true,
-        isWeb: Boolean = false,
-        fullScreen: Boolean = false,
-        taskFullScreen: Boolean = false,
-        claimed: Boolean = false,
-        wanted: Boolean = true,
-    ) = WindowTasks.moveTaskToWeb(web, hasTask, isWeb, fullScreen, taskFullScreen, claimed, wanted)
+    /** One KWin "open" of a window: what [WindowTasks.moveTaskToWeb] is asked. */
+    private data class Case(
+        val web: Boolean = true,
+        val hasTask: Boolean = true,
+        val isWeb: Boolean = false,
+        val fullScreen: Boolean = false,
+        val taskFullScreen: Boolean = false,
+        val claimed: Boolean = false,
+        val wanted: Boolean = true,
+    )
+
+    private fun move(c: Case = Case()) =
+        WindowTasks.moveTaskToWeb(c.web, c.hasTask, c.isWeb, c.fullScreen, c.taskFullScreen, c.claimed, c.wanted)
 
     @Test fun aTaskShownAgainOnTheUnfoldedHomeBecomesAWebWindow() = assertTrue(move())
 
     /** Folded / the setting off / home's page not up: its task comes back, as before. */
-    @Test fun webWindowsNotWantedKeepTheTask() = assertFalse(move(wanted = false))
+    @Test fun webWindowsNotWantedKeepTheTask() = assertFalse(move(Case(wanted = false)))
 
-    @Test fun aFallbackOpenNeverOffersAgain() = assertFalse(move(web = false))
+    @Test fun aFallbackOpenNeverOffersAgain() = assertFalse(move(Case(web = false)))
 
     /** A game (full screen now, or its task made immersive) stays its full-screen task. */
     @Test fun fullScreenStaysATask() {
-        assertFalse(move(fullScreen = true))
-        assertFalse(move(taskFullScreen = true))
+        assertFalse(move(Case(fullScreen = true)))
+        assertFalse(move(Case(taskFullScreen = true)))
     }
 
-    @Test fun aGamesLaunchWindowKeepsIt() = assertFalse(move(claimed = true))
+    @Test fun aGamesLaunchWindowKeepsIt() = assertFalse(move(Case(claimed = true)))
 
     @Test fun noTaskOrAWebWindowAlreadyIsNotAMove() {
-        assertFalse(move(hasTask = false))
-        assertFalse(move(isWeb = true))
+        assertFalse(move(Case(hasTask = false)))
+        assertFalse(move(Case(isWeb = true)))
     }
 
     @Test fun openRetiresTheOldTaskOnceTheWebWindowTookIt() {
