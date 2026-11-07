@@ -1,0 +1,176 @@
+From: PowOS <powos@localhost>
+Subject: [PATCH] Xi: a touch listener whose client deselected mid-sequence is dropped, not a BUG
+
+The phone's KWin log has Xwayland's "BUG: triggered 'if (!iclients)' ../xserver/Xi/exevents.c:1396 in
+RetrieveTouchDeliveryData()" (with a full backtrace) at Broforce's focus flips (KWin minimize/restore), and 9 of 19
+of its stall onsets follow one right away. XISetEventMask() with an empty or touch-less mask keeps the client's
+InputClients entry and its RT_INPUTCLIENT resource and only zeroes its bits; a regular touch listener recorded at
+TouchBegin then still resolves its window but no client selects the event, and upstream (no fix up to main,
+2026-11) BUG()s on every event and keeps the listener: an owner that never takes the rest of the sequence and never
+hands ownership to the listeners behind it. Wine deselects on focus/clip changes.
+
+Now RetrieveTouchDeliveryData returns FALSE quietly, and DeliverTouchEvents classifies the miss
+(xwayland-kgsl-touch-listener.h, unit test test/touch-listener-test.c): if the listener's own client still selects
+the type it was added for (TouchBegin, or ButtonPress for a pointer-emulating listener that just doesn't select
+Motion) the event is skipped; if it no longer does, the listener is rejected like a disconnected client's
+(TouchListenerGone) once the listener walk is done - ownership moves on, or the record ends when it was the last.
+Never on a TouchEnd (the record ends anyway, and a reject's own TouchEnd must not recurse). One "Xwayland touch:"
+line for the first miss of each kind, then every 256th.
+---
+diff --git a/Xi/exevents.c b/Xi/exevents.c
+index 1991399ce..a5e98e161 100644
+--- a/Xi/exevents.c
++++ b/Xi/exevents.c
+@@ -108,6 +108,7 @@ SOFTWARE.
+ #include "eventstr.h"
+ #include "inpututils.h"
+ #include "mi.h"
++#include "xwayland-kgsl-touch-listener.h" /* PowOS 0017 */
+ 
+ #include <X11/extensions/XKBproto.h>
+ #include "xkbsrv.h"
+@@ -1351,6 +1352,53 @@ TouchCopyValuatorData(DeviceEvent *ev, TouchPointInfoPtr ti)
+  * @return TRUE if an event should be delivered to the listener, FALSE
+  *         otherwise.
+  */
++#define MAX_TOUCH_LISTENERS_GONE 8 /* PowOS 0017: deselected listeners rejected per delivered event */
++
++/* PowOS 0017: the listener's own InputClients entry on its window (resource == listener id), or NULL */
++static InputClients *
++TouchListenerOwnInputClient(WindowPtr win, TouchListener *listener)
++{
++    InputClients *iclients;
++
++    if (!wOtherInputMasks(win))
++        return NULL;
++    nt_list_for_each_entry(iclients, wOtherInputMasks(win)->inputClients, next)
++        if (iclients->resource == listener->listener)
++            return iclients;
++    return NULL;
++}
++
++/* PowOS 0017: classify a regular listener's "no client selects this event" (xwayland-kgsl-touch-listener.h):
++ * its own client still selects the type the listener was added for (it just doesn't select this one), or it
++ * deselected touch/button events on the window mid-sequence (Wine on focus/clip changes) and the listener is gone. */
++static enum xwl_touch_miss
++TouchListenerMiss(DeviceIntPtr dev, TouchListener *listener, WindowPtr win)
++{
++    static struct xwl_touch_miss_stats stats;
++    InputClients *own = TouchListenerOwnInputClient(win, listener);
++    int selects_begin = 0;
++    enum xwl_touch_miss miss;
++
++    if (own && listener->level == XI2)
++        selects_begin = xi2mask_isset(own->xi2mask, dev,
++                                      listener->type == TOUCH_LISTENER_POINTER_REGULAR ?
++                                      GetXI2Type(ET_ButtonPress) : XI_TouchBegin);
++    else if (own && listener->level == XI)
++        selects_begin = !!(own->mask[dev->id] &
++                           event_get_filter_from_type(dev, GetXIType(ET_ButtonPress)));
++
++    miss = xwl_touch_classify_miss(own != NULL, selects_begin);
++    if (xwl_touch_miss_count(&stats, miss))
++        LogMessageVerb(X_INFO, 1, "Xwayland touch: %s (window 0x%x, listener 0x%x): %lu deselected, "
++                       "%lu not selected so far\n",
++                       miss == XWL_TOUCH_MISS_DESELECTED ?
++                       "a touch listener's client deselected mid-sequence, listener dropped" :
++                       "a touch listener's client doesn't select this event, skipped",
++                       (unsigned int) win->drawable.id, (unsigned int) listener->listener,
++                       stats.deselected, stats.not_selected);
++    return miss;
++}
++
+ static Bool
+ RetrieveTouchDeliveryData(DeviceIntPtr dev, TouchPointInfoPtr ti,
+                           InternalEvent *ev, TouchListener * listener,
+@@ -1387,13 +1435,18 @@ RetrieveTouchDeliveryData(DeviceIntPtr dev, TouchPointInfoPtr ti,
+             else
+                 evtype = GetXI2Type(ev->any.type);
+ 
+-            BUG_RETURN_VAL(!wOtherInputMasks(*win), FALSE);
++            /* PowOS 0017: no selecting client is not a server bug - the listener's client deselected (or never
++             * selected this event type); upstream BUG()ed here (exevents.c:1396) on every such event. The caller
++             * drops a deselected listener (TouchListenerMiss). */
++            if (!wOtherInputMasks(*win))
++                return FALSE;
+             nt_list_for_each_entry(iclients,
+                                    wOtherInputMasks(*win)->inputClients, next)
+                 if (xi2mask_isset(iclients->xi2mask, dev, evtype))
+                 break;
+ 
+-            BUG_RETURN_VAL(!iclients, FALSE);
++            if (!iclients)
++                return FALSE;
+ 
+             *mask = iclients->xi2mask;
+             *client = rClient(iclients);
+@@ -1402,12 +1455,15 @@ RetrieveTouchDeliveryData(DeviceIntPtr dev, TouchPointInfoPtr ti,
+             int xi_type = GetXIType(TouchGetPointerEventType(ev));
+             Mask xi_filter = event_get_filter_from_type(dev, xi_type);
+ 
+-            BUG_RETURN_VAL(!wOtherInputMasks(*win), FALSE);
++            /* PowOS 0017: as XI2 above */
++            if (!wOtherInputMasks(*win))
++                return FALSE;
+             nt_list_for_each_entry(iclients,
+                                    wOtherInputMasks(*win)->inputClients, next)
+                 if (iclients->mask[dev->id] & xi_filter)
+                 break;
+-            BUG_RETURN_VAL(!iclients, FALSE);
++            if (!iclients)
++                return FALSE;
+ 
+             *client = rClient(iclients);
+         }
+@@ -2197,6 +2253,8 @@ DeliverTouchEvents(DeviceIntPtr dev, TouchPointInfoPtr ti,
+                    InternalEvent *ev, XID resource)
+ {
+     int i;
++    XID gone[MAX_TOUCH_LISTENERS_GONE];
++    int ngone = 0;
+ 
+     if (ev->any.type == ET_TouchBegin &&
+         !(ev->device_event.flags & (TOUCH_CLIENT_ID | TOUCH_REPLAYING)))
+@@ -2215,11 +2273,41 @@ DeliverTouchEvents(DeviceIntPtr dev, TouchPointInfoPtr ti,
+             continue;
+ 
+         if (!RetrieveTouchDeliveryData(dev, ti, ev, listener, &client, &win,
+-                                       &grab, &mask))
++                                       &grab, &mask)) {
++            /* PowOS 0017: a regular listener whose window still exists but whose client deselected is gone:
++             * collect it, rejected below once the listener array is no longer being walked */
++            if ((listener->type == TOUCH_LISTENER_REGULAR ||
++                 listener->type == TOUCH_LISTENER_POINTER_REGULAR) &&
++                (listener->level == XI2 || listener->level == XI) &&
++                ngone < MAX_TOUCH_LISTENERS_GONE &&
++                dixLookupResourceByType((void **) &win, listener->listener,
++                                        listener->resource_type, serverClient,
++                                        DixSendAccess) == Success &&
++                xwl_touch_should_reject(TouchListenerMiss(dev, listener, win),
++                                        ev->any.type == ET_TouchEnd,
++                                        listener->state == TOUCH_LISTENER_HAS_END))
++                gone[ngone++] = listener->listener;
+             continue;
++        }
+ 
+         DeliverTouchEvent(dev, ti, ev, listener, client, win, grab, mask);
+     }
++
++    /* PowOS 0017: reject each deselected listener like a disconnected client's (TouchListenerGone): ownership
++     * moves to the next listener, or the touch record ends when it was the last. Marked HAS_END first, so the
++     * reject doesn't emit a TouchEnd to a client that no longer selects it. Upstream kept such a listener: an owner
++     * that never took the rest of the sequence, the listeners behind it never got ownership. */
++    for (i = 0; i < ngone && ti->active; i++) {
++        int j;
++
++        for (j = 0; j < ti->num_listeners; j++) {
++            if (ti->listeners[j].listener != gone[i])
++                continue;
++            ti->listeners[j].state = TOUCH_LISTENER_HAS_END;
++            TouchListenerAcceptReject(dev, ti, j, XIRejectTouch);
++            break;
++        }
++    }
+ }
+ 
+ /**
