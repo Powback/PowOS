@@ -1203,6 +1203,18 @@ class WebWindows(
         // waits for the user instead of covering it: selfFullScreenNow).
         focused = id
         WindowLog.i(TAG, "window $id: KWin window $kwin (${p.appId}) as a web window, ${w}x$h")
+        if (opensFullScreen(p.game)) {
+            // A game's window opens FULL SCREEN, never as a floating window first (game-resize.sh 11-07: Besiege and
+            // My Friend Pedro, Unity under Proton, opened here at the page's default 1135x1364; KWin sized their X
+            // windows to that, Wine then pinned it as their fixed size (min == max) and they never went full screen -
+            // a small floating window, black or one frame, in all 4 fold/rotation states). Full screen at once, KWin
+            // sizes the window to the screen before the game settles on a size, and fitFullScreen follows every fold.
+            main.post {
+                if (win.closed || win.linuxFull || win.fullAsked) return@post
+                WindowLog.i(TAG, "window $id: a game's window (${p.appId}): full screen at its open")
+                fullScreen(win)
+            }
+        }
         return id
     }
 
@@ -4028,6 +4040,9 @@ class WebWindows(
             if (focused in open) return false
             return !coming && open.max() == id
         }
+
+        /** Whether a Linux window opens full screen at once: a game's ([isGame], [LinuxOffer.game]); anything else floats. */
+        fun opensFullScreen(game: Boolean): Boolean = game
 
         private val STEAM_GAME_CLASS = Regex("steam_app_\\d+")
 

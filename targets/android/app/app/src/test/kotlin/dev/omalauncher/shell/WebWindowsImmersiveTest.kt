@@ -26,6 +26,17 @@ class WebWindowsImmersiveTest {
     }
 
     @Test
+    fun aGamesWindowOpensFullScreenNotFloating() {
+        // game-resize.sh 11-07: Besiege / My Friend Pedro opened as 1135x1364 floating windows and Wine pinned that size.
+        assertTrue(WebWindows.opensFullScreen(WebWindows.isGame("steam_app_346010", null)))
+        assertFalse(WebWindows.opensFullScreen(WebWindows.isGame("org.kde.kate", "Qt;KDE;Utility;TextEditor;")))
+        assertFalse("Steam itself floats", WebWindows.opensFullScreen(WebWindows.isGame("steam", "Game;")))
+        val open = body("    fun openLinux(")
+        assertTrue("openLinux asks full screen for a game", open.contains("opensFullScreen(p.game)") && open.contains("fullScreen(win)"))
+        assertTrue("never over a window already full screen or asked", open.contains("win.linuxFull || win.fullAsked"))
+    }
+
+    @Test
     fun gamesAreProtonClassesOrGameDesktopFilesNotSteam() {
         assertTrue(WebWindows.isGame("steam_app_274190", null))
         assertTrue(WebWindows.isGame("STEAM_APP_1", null))
