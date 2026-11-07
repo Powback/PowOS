@@ -42,8 +42,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -295,7 +297,16 @@ class ShellBridge(
         // An app started or stopped using the mic / camera / location: the shade's privacy row (ui/privacy.tsx) follows.
         privacy.watch(privacyChanged)
         // A notification posted or gone: the panel lists them again.
-        scope.launch { MediaListener.changes.collect { emit("notifications.changed", notificationList()) } }
+        // The listener's binder read (getActiveNotifications) and each item's extras off the main thread, a burst of
+        // changes as one list: on main they blocked Android's frame 117-159 ms during the shade's scroll (perf
+        // shade-scroll 11-07, native gapSeen in ShellBridge.notificationList). The JSON (ShellIcons: main only) stays here.
+        scope.launch {
+            MediaListener.changes.conflate().collect {
+                val n = runtime.widgets.notifications
+                val items = withContext(Dispatchers.IO) { runCatching { n.items() }.getOrDefault(emptyList()) }
+                emit("notifications.changed", notificationList(n.available, items))
+            }
+        }
         // The terminal font or text size changed (the Style screen, a pinch on a page terminal, style.toml edited): the
         // page's terminals ask for their style again.
         scope.launch {
@@ -1218,7 +1229,16 @@ class ShellBridge(
     /** The notification panel's list: { available, items: [notificationJson] }. */
     private fun notificationList(): JSONObject {
         val n = runtime.widgets.notifications
-        return JSONObject().put("available", n.available).put("items", JSONArray(n.items().map(::notificationJson)))
+        return notificationList(n.available, n.items())
+    }
+
+    /** [items] as the panel's list; the drawer's apps indexed once, not scanned per notification. */
+    private fun notificationList(
+        available: Boolean,
+        items: List<dev.omalauncher.widgets.runtime.Notifications.Item>,
+    ): JSONObject {
+        val apps = runtime.androidApps.apps.toList().groupBy { it.component.packageName }
+        return JSONObject().put("available", available).put("items", JSONArray(items.map { notificationJson(it, apps[it.pkg].orEmpty()) }))
     }
 
     /**
@@ -1229,9 +1249,12 @@ class ShellBridge(
      * panel's (grouped: notifications.tsx), and the shade's
      * heads-up banner's ("shade.peek").
      */
-    fun notificationJson(item: dev.omalauncher.widgets.runtime.Notifications.Item): JSONObject {
+    fun notificationJson(
+        item: dev.omalauncher.widgets.runtime.Notifications.Item,
+        apps: List<dev.omalauncher.AndroidApp> = runtime.androidApps.apps.filter { it.component.packageName == item.pkg },
+    ): JSONObject {
         // The app's drawer icon (its own profile's, badge and all, when it's from a work or cloned one).
-        val app = runtime.androidApps.apps.firstOrNull { it.component.packageName == item.pkg && (item.profile == null) == (it.profile == null) }
+        val app = apps.firstOrNull { (item.profile == null) == (it.profile == null) }
         return messaging(
             item,
             JSONObject()

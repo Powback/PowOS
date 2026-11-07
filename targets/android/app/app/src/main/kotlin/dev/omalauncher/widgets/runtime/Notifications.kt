@@ -35,7 +35,7 @@ class Notifications(
     private val profile: (UserHandle) -> String?,
 ) {
     /** App labels by package; the lookup is a binder call. */
-    private val labels = HashMap<String, String>()
+    private val labels = java.util.concurrent.ConcurrentHashMap<String, String>()  // read off main too (ShellBridge)
 
     /** What a widget lists: not ongoing ones (music, downloads, the launcher's own service) or group headers. */
     private fun shown(): List<StatusBarNotification> {
