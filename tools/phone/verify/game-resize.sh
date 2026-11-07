@@ -23,10 +23,12 @@
 # Also logged once: the game's own command line's size arguments (unity-screen / unreal's -ResX), from /proc.
 # G4 (controller layout per orientation) is pad-fullscreen.sh's.
 # Rotation and device state are always put back. Not covered: a floating task's drag-resize (no scripted drag yet).
-# Exit 3 = no window / user input. KWIN_MIN default 6.7.5-3.37 (queue kwin-install.sh 6.7.5-3.37 before it).
+#   G1 root: Xwayland's root (Wine's / Unity's monitor) IS the screen too (kwin 0061, 6.7.5-3.69: the output follows the
+#      app's "screen"): it stayed 2268x2440 in every state (11-07), a rotated game got 2268x2268 and Besiege left full screen.
+# Exit 3 = no window / user input. KWIN_MIN default 6.7.5-3.69 (queue kwin-install.sh 6.7.5-3.69 before it).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); P=$here/..; A=$P/adb.sh
-APP=${1:-${APP:-}} WIN_NAME=${2:-${WIN_NAME:-}} MIN=${KWIN_MIN:-6.7.5-3.37} NAME=${CHECK_NAME:-game-resize}
+APP=${1:-${APP:-}} WIN_NAME=${2:-${WIN_NAME:-}} MIN=${KWIN_MIN:-6.7.5-3.69} NAME=${CHECK_NAME:-game-resize}
 case $APP in ""|*[!0-9]*) echo "usage: game-resize.sh <steam appid> [window name]"; exit 2 ;; esac
 case "$WIN_NAME" in *[!A-Za-z0-9_.-]*) echo "WIN_NAME: one word (letters, digits, _ . -)"; exit 2 ;; esac
 OUT=${OUT:-$HOME/.cache/powos-verify/$NAME-$APP-$(date +%F_%H%M)}; mkdir -p "$OUT"
@@ -78,7 +80,7 @@ fits() {  # fits <win WxH> <screen WxH>: the same size within 1 % per side (G1: 
   awk -v g="$1" -v s="$2" 'BEGIN { split(g, a, "x"); split(s, b, "x"); dw = a[1] - b[1]; dh = a[2] - b[2]
     ok = (b[1] + 0 > 0) && (b[2] + 0 > 0) && (dw * dw * 10000 <= b[1] * b[1]) && (dh * dh * 10000 <= b[2] * b[2]); exit !ok }'; }
 probe() {  # probe <label>
-  local st g c s wh bad= t0 dt on
+  local st g c s wh bad= t0 dt on rt
   pill "$1: the game's window vs its screen"
   if "$P/shot.sh" "$OUT/$1-0.png" >/dev/null 2>&1; then
     wh=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0:s=x "$OUT/$1-0.png")
@@ -96,6 +98,8 @@ probe() {  # probe <label>
   [[ $st == *reaper=-* ]] && bad+=" game-gone"
   [ -n "$g" ] && [ -n "$wh" ] || bad+=" no-geometry"
   [ -n "$g" ] && [ -n "$wh" ] && ! fits "$g" "$wh" && bad+=" G1-window-${g}-is-not-the-screen-${wh}-after-${SETTLE_S}s"
+  rt=$(echo "$st" | grep -o 'root=[0-9]*x[0-9]*' | cut -d= -f2)
+  [ -n "$rt" ] && [ -n "$wh" ] && ! fits "$rt" "$wh" && bad+=" G1-root-${rt}-is-not-the-screen-${wh}"
   [ "${3:-0}" -ge 1 ] 2>/dev/null || bad+=" G3-no-full-screen-game-layer(${on:-?})"
   [ "${c#changes=}" -ge 3 ] 2>/dev/null || bad+=" not-drawing"
   # Input after a rotation / fold (the user, 11-07: "rotating breaks the games"): the game's window is still KWin's

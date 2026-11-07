@@ -89,6 +89,9 @@
 #               task back to the desktop, and the new app's "export-new 1" was a no-op (KWin still had it on), so no sweep:
 #               they stayed on the hidden desktop until a session restart. The app's going and its "hello" now forget its
 #               export-new (the re-told one sweeps), and a window shown as a task drops its desktop mark (0025/0034).
+#   0061        ours (3.69): the output and Xwayland's root follow the app's screen ("screen 0 W H") on rotation and fold -
+#               they followed the window tasks' buffers, which never change, so the root stayed 2268x2440 in every state,
+#               a rotated full-screen game got 2268x2268 and Wine took Besiege out of full screen (rotating breaks games).
 #   0062        ours (3.70): override-redirect popups are drawn into their application's task - Steam's menus (X11
 #               override-redirect POPUP_MENU windows with no WM_TRANSIENT_FOR) were never in the task's buffers ("don't
 #               appear on click"); now the app's task (same pid, else X11 class; the active one it opens over) draws them.
@@ -177,11 +180,13 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0058-backends-anland-a-full-screen-window-task-sends-the-client-s-buffer-direct-when-the-consumer-shows-it.patch
           0059-backends-anland-the-desktop-s-reconnect-never-waits-on-KWin-s-thread.patch
           0060-backends-anland-Linux-windows-the-app-lost-come-back-as-tasks-when-it-is-back.patch
+          0061-backends-anland-the-output-and-Xwayland-s-root-follow-the-app-s-screen.patch
+
           0062-backends-anland-override-redirect-popups-are-drawn-into-their-application-s-task.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver
