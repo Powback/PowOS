@@ -326,6 +326,9 @@ except Exception: pass' 2>/dev/null) || ids=
   case "$screen" in ""|inner|cover) ;; *) echo "queue.sh: --screen inner|cover"; exit 2 ;; esac
   [ -x "$1" ] || [ -x "$here/$1" ] || command -v "$1" >/dev/null || { echo "queue.sh: not runnable: $1"; exit 2; }
   [ -x "$here/$1" ] && [ ! -x "$1" ] && set -- "$here/$1" "${@:2}"
+  # The command's own script (past `env A=1 ...`) must be executable: the runner execs it, and a 100644 one fails the
+  # phone window with rc=126 "Permission denied" (11-07: steam-launch-placeholder.sh, twice; test-verify-executable.sh).
+  for a in "$@"; do case "$a" in */env|env|*=*) ;; *.sh) [ ! -f "$a" ] || [ -x "$a" ] || { echo "queue.sh: $a isn't executable - git update-index --chmod=+x $a, commit, push"; exit 2; }; break ;; *) break ;; esac; done
   if [ -z "$name" ]; then  # the script's name (past `env A=1 ...`)
     for a in "$@"; do case "$a" in */env|env|*=*) ;; *) name=$(basename "$a"); break ;; esac; done; name=${name%.sh}
   fi
