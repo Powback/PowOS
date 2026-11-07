@@ -329,6 +329,12 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   the games": WebWindows.fillScreen ran only on ENTERING full screen, so a rotation/fold left the game at its old
   2268x2439 (ABZU) on a 2440x2268 / 2484x1116 screen -> refillFull on every configuration change (+400 ms settle).
   Both need an APK ship; re-check with game-resize.sh 346010 / 557340 / 384190 and bf-resize.sh.
+- FS10 (11-07 03:14, Besiege unfolded, G3 "onscreen 0 none", status bar up): a game started via Steam's task stops
+  home (surface destroyed) and home's surface is made again just before the game's full screen. The page's placements
+  ride home's NEXT DRAW (applyTransactionOnDraw), which after a new surface waits on a first-frame sync, so a placement
+  queued before the move landed after it and hid the game. WebWindows.fullLayer is now the one writer of a full-screen
+  layer; restateFull queues it on home's draw after anything queued earlier and rewrites it at 250 ms/1 s/3 s (+ the
+  immersive status bar); leaving full screen queues its place after it (backOnDraw). Log line: "full screen restated".
 - ABZU (UE4, 384190) pillarbox: our window IS the container size; the game's own GameUserSettings.ini has
   DesiredScreenWidth/Height=1280x720, Fullscreen=ON, bUseDesktopResolutionForFullscreen=False, so it renders 1280x720
   and Proton's fullscreen hack scales it. Lever: a UE twin of unity-screen (`-ResX=W -ResY=H` / desktop resolution).

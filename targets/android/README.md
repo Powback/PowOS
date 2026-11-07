@@ -112,6 +112,13 @@ request `pack gaming`), or right after the install for languages when Android's 
 
 Measured on the 10-26 build (7.07 GB download, 15.9 GiB unpacked): base 1.03 GB / 2.8 GiB, gaming 2.75 GB / 5.0 GiB,
 apps 2.20 GB / 5.2 GiB, dev 0.23 GB / 0.8 GiB, languages 0.59 GB / 1.6 GiB, docs dropped 0.5 GiB.
+11-07 (no Steam client/Proton in the image): rootfs-packs.conf also drops what Steam downloads itself (Bazzite's
+pre-seeded x86 Steam client + sniper runtime, `gamescope-session-plus/bootstrap_steam.tar.gz`, 1.42 GB; powos-steam runs
+Valve's ARM64 client, which fetches and updates itself; Proton is Steam's download, found by capability) and FEX
+RootFS's LLVM/clang toolchain, OpenCL, other GPUs' Vulkan drivers, headers and docs (Turnip x86, gallium + libLLVM,
+glibc, SDL stay). Proton/Wine/DXVK were never in it. Gaming pack 2.75 GB -> 0.94 GB (5.0 -> 2.6 GiB); base 1.04 GB.
+`POWOS_FROM_ROOTFS=<full rootfs> POWOS_PUBLISH_PACKS=1 build-rootfs.sh` re-splits an existing full rootfs after a
+rootfs-packs.conf change and publishes + pins it, without the hours-long build.
 
 Publishing: build-rootfs.sh hard-links the full rootfs into `$POWOS_PUBLISH_DIR` (default `$POWOS_PUBLISHED` =
 `/mnt/nas/cdn/powos/android/published`, on the NAS beside the images; android-app-dev's nginx serves those names on

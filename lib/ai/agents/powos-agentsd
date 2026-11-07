@@ -937,7 +937,14 @@ class Watch:
             self.fd = libc.inotify_init1(os.O_CLOEXEC | os.O_NONBLOCK)
             IN_CLOSE_WRITE, IN_MOVED_TO = 0x8, 0x80
             if self.fd < 0 or libc.inotify_add_watch(self.fd, path.encode(), IN_CLOSE_WRITE | IN_MOVED_TO) < 0:
-                raise OSError(ctypes.get_errno(), "inotify")
+                # HACK: out of inotify instances/watches (EMFILE/ENOSPC: fs.inotify.max_user_instances is 128 per
+                # uid and every root process on a box shares it - 11-07 the Colima VM's ~87 containerd-shims +
+                # udev + browsers held 141, so every ask hook raised here and silently gave up). Fall back to a
+                # 250 ms timed wait so asks and the queue still work. Real fix: the host raises
+                # fs.inotify.max_user_instances (PowStation's colima.yaml provision; the phone's init).
+                if self.fd >= 0:
+                    os.close(self.fd)
+                self.fd = None
         else:
             self.fd = os.open(path, os.O_RDONLY)
             self.kq = select.kqueue()
@@ -956,6 +963,9 @@ class Watch:
     def wait(self, timeout):
         if self.kq is not None:
             return bool(self.kq.control(None, 4, timeout))
+        if self.fd is None:
+            time.sleep(min(timeout, 0.25))
+            return False  # unknown: the caller re-checks what it waits for
         r, _, _ = select.select([self.fd], [], [], timeout)
         if r:
             try:
