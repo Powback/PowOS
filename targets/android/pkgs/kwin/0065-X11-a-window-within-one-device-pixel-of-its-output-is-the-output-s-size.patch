@@ -1,0 +1,211 @@
+From 2978cad7e89ab118ebadf22dc40f90cf52e1b396 Mon Sep 17 00:00:00 2001
+From: PowOS <powos@localhost>
+Date: Sat, 7 Nov 2026 22:54:49 +0100
+Subject: [PATCH] X11: a window within one device pixel of its output is the
+ output's size
+
+PowOS: on the OnePlus Open's inner screen (2268x2440 px at Xwayland scale 2.25 = 1008x1084.44 logical) every
+full-screen game's present was copied, not flipped: an integer step on the way (the rounded LogicalOutput::geometry,
+a client ConfigureRequest of 2439 px = 1084.0 logical) left the game at 2268x2439 in a 2268x2440 toplevel, and
+Xwayland's flip check (present window == toplevel) refused every frame - ~110 rendered, ~48 shown. The folded cover
+(2484 / 2.25 = 1104, exact) always flips.
+
+X11Window::configure now gives a window whose every edge is within one X pixel of an output exactly that output's
+rectangle in X pixels, from its unrounded logical geometry (edges converted, so outputs at fractional offsets still
+abut); a RandR-emulated mode's size is kept. _NET_DESKTOP_GEOMETRY is X pixels from the unrounded outputs too (it was
+the rounded logical size, and unscaled at startup: 1008,1084 on the phone). Generic: every X client on any output
+whose size / Xwayland scale is fractional. Unit test: test/xnativesnap-test.cpp (src/utils/xnativesnap.h).
+---
+ src/utils/xnativesnap.h | 59 +++++++++++++++++++++++++++++++++++++++++
+ src/workspace.cpp       | 30 +++++++++++++++------
+ src/workspace.h         |  3 +++
+ src/x11window.cpp       | 19 +++++++++++++
+ 4 files changed, 103 insertions(+), 8 deletions(-)
+ create mode 100644 src/utils/xnativesnap.h
+
+diff --git a/src/utils/xnativesnap.h b/src/utils/xnativesnap.h
+new file mode 100644
+index 0000000..563fa07
+--- /dev/null
++++ b/src/utils/xnativesnap.h
+@@ -0,0 +1,59 @@
++/*
++    PowOS (kwin 0065): an X window within one device pixel of its output is configured to the output exactly.
++
++    KWin keeps X11 geometry in logical units and converts each value to X pixels on its own
++    (Xcb::toXNative: round(value * xwaylandScale)). With a fractional logical size - the OnePlus Open's inner
++    screen is 2268x2440 px at Xwayland scale 2.25, 1008x1084.44 logical - an integer step anywhere on the way
++    (LogicalOutput::geometry() is rounded, a client's own ConfigureRequest comes back as 1084.0 logical) lands the
++    window at 2439 px in a 2440 px screen. A full-screen game then keeps its swapchain at 2268x2439 while its
++    toplevel is 2268x2440, Xwayland's flip check (present window == toplevel) refuses every frame and copies it
++    (Broforce/Abzu on the inner screen: 0 flips, ~110 frames/s rendered, ~48 shown; the cover's 2484/2.25 = 1104
++    is exact and always flips). A window that is the screen's size give or take one pixel is meant to cover it,
++    so it gets the screen's size in device pixels, for every app and every fold state.
++
++    Plain ints, no Qt: test/run.sh (xnativesnap-test.cpp) tests it in a gcc container.
++
++    SPDX-License-Identifier: GPL-2.0-or-later
++*/
++#pragma once
++
++#include <cstdlib>
++
++namespace KWin::XNativeSnap
++{
++
++struct Box
++{
++    int x = 0, y = 0, w = 0, h = 0;
++};
++
++// The output's rectangle in X pixels from its unrounded logical one: each EDGE converted (round(edge * scale)),
++// so an output at a fractional offset still ends where the next one starts.
++inline Box outputBox(double x, double y, double w, double h, double scale)
++{
++    const auto px = [scale](double v) {
++        const double s = v * scale;
++        return int(s < 0 ? s - 0.5 : s + 0.5);
++    };
++    return Box{px(x), px(y), px(x + w) - px(x), px(y + h) - px(y)};
++}
++
++// true (and *out = output) when every edge of g is within `slack` px of the output's and g isn't it already.
++inline bool snap(const Box &g, const Box &output, Box *out, int slack = 1)
++{
++    if (output.w <= 0 || output.h <= 0) {
++        return false;
++    }
++    if (g.x == output.x && g.y == output.y && g.w == output.w && g.h == output.h) {
++        return false;
++    }
++    if (std::abs(g.x - output.x) > slack || std::abs(g.y - output.y) > slack
++        || std::abs((g.x + g.w) - (output.x + output.w)) > slack
++        || std::abs((g.y + g.h) - (output.y + output.h)) > slack) {
++        return false;
++    }
++    *out = output;
++    return true;
++}
++
++} // namespace KWin::XNativeSnap
+diff --git a/src/workspace.cpp b/src/workspace.cpp
+index be2aada..c873608 100644
+--- a/src/workspace.cpp
++++ b/src/workspace.cpp
+@@ -429,10 +429,7 @@ void Workspace::initializeX11()
+     rootInfo->setDesktopViewport(VirtualDesktopManager::self()->count(), *viewports);
+     delete[] viewports;
+ 
+-    NETSize desktop_geometry;
+-    desktop_geometry.width = m_geometry.width();
+-    desktop_geometry.height = m_geometry.height();
+-    rootInfo->setDesktopGeometry(desktop_geometry);
++    rootInfo->setDesktopGeometry(nativeDesktopSize()); // PowOS (kwin 0065): X pixels, unrounded (was logical)
+     rootInfo->setActiveWindow(XCB_WINDOW_NONE);
+ 
+     // Focus the null window, technically it is not required but we do it anyway just to be consistent.
+@@ -2303,6 +2300,26 @@ void Workspace::checkTransients(xcb_window_t w)
+ }
+ #endif
+ 
++#if KWIN_BUILD_X11
++// PowOS (kwin 0065): _NET_DESKTOP_GEOMETRY in X pixels from the outputs' unrounded logical geometry. It was the
++// rounded logical size (m_geometry: 1008x1084 for the 2268x2440 inner screen at scale 2.25) - at startup not even
++// scaled - so X clients reading it were told the desktop is 2439 px (or 1084 px) tall.
++NETSize Workspace::nativeDesktopSize() const
++{
++    RectF all;
++    for (const LogicalOutput *output : std::as_const(m_outputs)) {
++        all = all.isEmpty() ? output->geometryF() : all.united(output->geometryF());
++    }
++    if (all.isEmpty()) {
++        all = RectF(m_geometry);
++    }
++    NETSize size;
++    size.width = Xcb::toXNative(all.x() + all.width()) - Xcb::toXNative(all.x());
++    size.height = Xcb::toXNative(all.y() + all.height()) - Xcb::toXNative(all.y());
++    return size;
++}
++#endif
++
+ /**
+  * Resizes the workspace after an XRANDR screen size change
+  */
+@@ -2316,10 +2333,7 @@ void Workspace::desktopResized(const QHash<Window *, LogicalOutput *> &oldOutput
+ 
+ #if KWIN_BUILD_X11
+     if (rootInfo()) {
+-        NETSize desktop_geometry;
+-        desktop_geometry.width = Xcb::toXNative(m_geometry.width());
+-        desktop_geometry.height = Xcb::toXNative(m_geometry.height());
+-        rootInfo()->setDesktopGeometry(desktop_geometry);
++        rootInfo()->setDesktopGeometry(nativeDesktopSize()); // PowOS (kwin 0065)
+     }
+ 
+     if (m_guardWindow) {
+diff --git a/src/workspace.h b/src/workspace.h
+index 3508442..a518b7d 100644
+--- a/src/workspace.h
++++ b/src/workspace.h
+@@ -605,6 +605,9 @@ private:
+     void setupWindowShortcut(Window *window);
+     bool switchWindow(Window *window, Direction direction, QPoint curPos, VirtualDesktop *desktop);
+     void desktopResized(const QHash<Window *, LogicalOutput *> &oldOutputs);
++#if KWIN_BUILD_X11
++    NETSize nativeDesktopSize() const; // PowOS (kwin 0065)
++#endif
+ 
+     QList<Window *> constrainedStackingOrder();
+     bool areConstrained(const Window *below, const Window *above) const;
+diff --git a/src/x11window.cpp b/src/x11window.cpp
+index a3d8f90..02eeee3 100644
+--- a/src/x11window.cpp
++++ b/src/x11window.cpp
+@@ -32,6 +32,7 @@
+ #include "wayland/xwaylandshell_v1.h"
+ #include "wayland_server.h"
+ #include "workspace.h"
++#include "utils/xnativesnap.h"
+ #include <KDecoration3/DecoratedWindow>
+ #include <KDecoration3/Decoration>
+ // KDE
+@@ -3576,6 +3577,7 @@ void X11Window::configure(const Rect &nativeGeometry)
+     // - we need to configure the window to match the emulated size
+     // - Xwayland will set up the viewport to present the window properly on the Wayland side
+     Rect effectiveGeometry = nativeGeometry;
++    bool emulated = false; // PowOS (kwin 0065): an emulated mode's size stays as Xwayland asked
+     if (m_fullscreenMode == X11Window::FullScreenMode::FullScreenNormal) {
+         Xcb::Property property(0, m_client, atoms->xwayland_xrandr_emulation, XCB_ATOM_CARDINAL, 0, workspace()->outputs().size() * 4);
+         const auto values = property.array<uint32_t>();
+@@ -3588,11 +3590,28 @@ void X11Window::configure(const Rect &nativeGeometry)
+                 if (xwaylandOutputPos == QPoint(x, y)) {
+                     effectiveGeometry.setWidth((*values)[i * 4 + 2]);
+                     effectiveGeometry.setHeight((*values)[i * 4 + 3]);
++                    emulated = true;
+                     break;
+                 }
+             }
+         }
+     }
++    if (!emulated) {
++        // PowOS (kwin 0065): within one device px of an output -> exactly the output, in X pixels from its
++        // unrounded logical geometry (xnativesnap.h: a 2268x2439 game in a 2268x2440 screen never flips).
++        const qreal scale = kwinApp()->xwaylandScale();
++        const XNativeSnap::Box g{effectiveGeometry.x(), effectiveGeometry.y(), effectiveGeometry.width(), effectiveGeometry.height()};
++        for (const LogicalOutput *output : workspace()->outputs()) {
++            const RectF o = output->geometryF();
++            XNativeSnap::Box snapped;
++            if (XNativeSnap::snap(g, XNativeSnap::outputBox(o.x(), o.y(), o.width(), o.height(), scale), &snapped)) {
++                qCDebug(KWIN_CORE) << "X window" << window() << "snapped to its output:" << effectiveGeometry.size()
++                                   << "->" << QSize(snapped.w, snapped.h);
++                effectiveGeometry = Rect(snapped.x, snapped.y, snapped.w, snapped.h);
++                break;
++            }
++        }
++    }
+     if (m_client.size() != effectiveGeometry.size()) {
+         m_client.setGeometry(effectiveGeometry);
+     } else if (m_client.position() != effectiveGeometry.topLeft()) {
+-- 
+2.50.1 (Apple Git-155)
+

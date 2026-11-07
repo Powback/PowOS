@@ -367,3 +367,13 @@ must configure a full-screen X window to exactly `toXNative(output geometryF)` e
 Rect), and re-send the configure when the game's own window settles 1 px off the screen, so every game window is the
 screen's size in device pixels on every fold state ("right resolution in every mode"). Generic: any output whose
 pixel size / Xwayland scale is fractional (the inner 2440 / 2.25), not a Broforce rule.
+
+**KWin fix landed beside it (kwin 3.73, 0065), without waiting for 0018's confirmation:** `X11Window::configure`
+gives any X window whose every edge is within 1 X pixel of an output exactly that output's rectangle in X pixels,
+computed from the unrounded logical geometry (`src/utils/xnativesnap.h`, edges converted so fractional-offset outputs
+abut; a RandR-emulated mode keeps Xwayland's size), and `_NET_DESKTOP_GEOMETRY` is X pixels from the unrounded outputs.
+A game asking 2268x2439 is configured 2268x2440, Wine's Win32 rect and the swapchain follow the ConfigureNotify, so
+present window == toplevel and the flip check passes. Check: install kwin 3.73 + xwayland-kgsl -14, then
+`queue.sh add --screen inner broforce-fps-low-cpu-bound-under-fex tools/phone/verify/bf-pacing.sh play`. Pass: the
+kgsl line shows Present flips > 0 and no `toplevel`/`surface-size` copies; if copies remain, 0018's "first ...
+refusal" line names the two windows.
