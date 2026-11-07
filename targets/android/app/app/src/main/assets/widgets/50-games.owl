@@ -24,11 +24,11 @@ widget "games" {
     pendId = startsWith(value, "fail") ? "" : pendId
   }
   let steps = ["auto", "100", "85", "70", "50"]
-  let tunable = games.filter(g => get(scales ?? {}, g.id, null) != null)
 
   let games = lines(acf ?? "").filter(l => len(l) > 0).map(l => split(l, "\t"))
     .map(g => {id: g[0], last: num(g[1], 0), size: num(g[2], 0), name: g[3]})
   let hero = first(games)
+  let tunable = games.filter(g => get(scales ?? {}, g.id, null) != null)
   let tints = [accent, magenta, cyan, green, orange, blue, yellow, red]
 
   // Launching: app() starts `steam steam://rungameid/...` - rooted, through powos-open-task (Runtime.launch): a game
