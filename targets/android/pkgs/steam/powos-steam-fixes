@@ -26,6 +26,7 @@ ENV_FILES = os.environ.get("POWOS_STEAM_ENV_FILES") or ":".join(
     ["/usr/lib/powos-steam/steam-env",
      os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "powos/steam-env")])
 TURNIP = os.environ.get("POWOS_TURNIP_LIB", "/usr/lib/libvulkan_freedreno.so")
+USER_SETTINGS = os.environ.get("POWOS_USER_SETTINGS", "/usr/lib/powos-steam/user_settings.py")
 CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "powos/steam-fixes")
 
 
@@ -154,7 +155,11 @@ def check():
                 "PowOS FEX build in Valve's tool" if not same else
                 "Steam updated its FEX tool to %s and put Valve's FEX back: rebuild with COMMIT=<its sha, VERSIONS.txt> "
                 "targets/android/steam/fex-compat-tool/build.sh + install.sh" % fex_describe(ft))
-    # Turnip debug flags set through steam-env (TU_DEBUG=noubwc ...): each must still be a flag Turnip knows.
+    # Turnip debug flags set through steam-env or PowOS's user_settings.py default (user_settings["TU_DEBUG"] =
+    # "noubwc"): each must still be a flag Turnip knows.
+    m = re.search(rb'user_settings\["TU_DEBUG"\]\s*=\s*"([^"]*)"', read(USER_SETTINGS) or b"")
+    if not env.get("TU_DEBUG") and m:
+        env["TU_DEBUG"] = m.group(1).decode()
     if env.get("TU_DEBUG"):
         lib = read(TURNIP)
         for flag in filter(None, env["TU_DEBUG"].split(",")):

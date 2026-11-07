@@ -16,8 +16,11 @@ T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/bin"
 # The game: prints its argv, one per line.
 printf '#!/bin/sh\nfor a in "$@"; do echo "$a"; done\n' > "$T/game"; chmod +x "$T/game"
-# A python3 that answers the size query the way the libX11 snippet does (the container 2268x2440).
-printf '#!/bin/sh\necho "${FAKE_SIZE-2268 2440}"\n' > "$T/bin/python3"; chmod +x "$T/bin/python3"
+# A python3 that answers the size query the way the libX11 snippet does (the container 2268x2440); the render-scale
+# snippet (STEPS in its code) runs on the real python3.
+RP=$(command -v python3)
+printf '#!/bin/sh\ncase "$2" in *STEPS*) exec %s "$@" ;; esac\necho "${FAKE_SIZE-2268 2440}"\n' "$RP" > "$T/bin/python3"; chmod +x "$T/bin/python3"
+export XDG_DATA_HOME="$T/data" HOME="$T/home"; mkdir -p "$T/data/powos" "$T/home"
 
 args() { tr '\n' ' ' < "$T/out" | sed 's/ $//'; }
 
@@ -59,6 +62,66 @@ PATH="$T/bin:$PATH" DISPLAY=:9 sh "$US" "$T/ue2/Proj/Binaries/Win64/Proj-Win64-S
 [ "$(args)" = "-windowed -ResX=2268 -ResY=2440" ] && ok "Unreal (exe under Binaries/Win64)" || bad "unreal2 args" "$(args)"
 PATH="$T/bin:$PATH" DISPLAY=:9 sh "$US" "$T/un/G.exe" > "$T/out" 2>/dev/null
 [ "$(args)" = "-screen-fullscreen 0 -popupwindow -screen-width 2268 -screen-height 2440" ] && ok "a Unity exe: Unity arguments" || bad "unity exe args" "$(args)"
+
+# Render scale (abz-has-low-fps): steam-compat.json "scale" per appid; the record in render-scale/<appid>.json.
+st() { printf '%s' "$1" > "$T/data/powos/steam-compat.json"; }
+rec() { python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r.get(sys.argv[2]))' "$T/data/powos/render-scale/$1.json" "$2"; }
+st '{"apps": {"274190": {"scale": 70}}}'
+PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=274190 sh "$US" "$T/game" > "$T/out" 2> "$T/err"
+[ "$(args)" = "-screen-fullscreen 1 -screen-width 1586 -screen-height 1708" ] \
+  && ok "Unity at 70 %: a full-screen player at 1586x1708, stretched" || bad "unity 70 args" "$(args)" 
+grep -q "render scale 70 set" "$T/err" && [ "$(rec 274190 scale)" = 70 ] && ok "says it and records 70" || bad "unity 70 log" "$(cat "$T/err")"
+st '{"apps": {}}'
+PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=274190 sh "$US" "$T/game" > "$T/out" 2> "$T/err"
+[ "$(args)" = "-screen-fullscreen 0 -popupwindow -screen-width 2268 -screen-height 2440" ] \
+  && ok "Unity, auto, nothing measured: 100 % (the live borderless window)" || bad "unity auto args" "$(args)"
+PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=274190 POWOS_RENDER_SCALE=off sh "$US" "$T/game" > "$T/out" 2> "$T/err"
+! grep -q "render scale" "$T/err" && ok "POWOS_RENDER_SCALE=off: not looked at" || bad "off" "$(cat "$T/err")"
+
+# Unreal: ABZU's own ResolutionScale enum in the prefix's GameUserSettings.ini; auto on 5.5 MP, nothing measured = 70
+# -> SCALE_75; then 100 puts the user's value back; a game without that key gets sg.ResolutionQuality.
+CD="$T/compat/384190"; INI="$CD/pfx/drive_c/users/steamuser/AppData/Local/AbzuGame/Saved/Config/WindowsNoEditor/GameUserSettings.ini"
+mkdir -p "$(dirname "$INI")"
+printf '[/Script/AbzuGame.AbzuGameUserSettings]\r\nResolutionScale=SCALE_100\r\nVSync=ON\r\n' > "$INI"
+PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh "$US" "$T/ue/AbzuGame.exe" > "$T/out" 2> "$T/err"
+[ "$(args)" = "-windowed -ResX=2268 -ResY=2440" ] && grep -q "^ResolutionScale=SCALE_75" "$INI" && grep -q "^VSync=ON" "$INI" \
+  && ok "Unreal auto (nothing measured, 5.5 MP): the game's own ResolutionScale=SCALE_75, window still full size" \
+  || bad "abzu auto" "$(args) / $(cat "$INI") / $(cat "$T/err")"
+grep -q "auto: Unreal at 5.5 MP" "$T/err" && ok "says why (auto, Unreal, MP)" || bad "abzu why" "$(cat "$T/err")"
+st '{"apps": {"384190": {"scale": 50}}}'
+PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh "$US" "$T/ue/AbzuGame.exe" > /dev/null 2>&1
+grep -q "^ResolutionScale=SCALE_50" "$INI" && ok "set 50: SCALE_50" || bad "abzu 50" "$(cat "$INI")"
+st '{"apps": {"384190": {"scale": 100}}}'
+PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh "$US" "$T/ue/AbzuGame.exe" > /dev/null 2>&1
+grep -q "^ResolutionScale=SCALE_100" "$INI" && ok "100: the value before ours (SCALE_100) put back" || bad "abzu restore" "$(cat "$INI")"
+sed -i.b 's/SCALE_100/SCALE_125/' "$INI"
+PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh "$US" "$T/ue/AbzuGame.exe" > /dev/null 2>&1
+grep -q "^ResolutionScale=SCALE_125" "$INI" && ok "100: a value we never wrote (in-game choice) stays" || bad "abzu user value" "$(cat "$INI")"
+st '{"apps": {"384190": {"fps": [{"fps": 19.6, "scale": 100}, {"fps": 27.3, "scale": 50}, {"fps": 40, "scale": 70}]}}}'
+PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh "$US" "$T/ue/AbzuGame.exe" > /dev/null 2> "$T/err"
+grep -q "render scale 50 auto: 27 fps at 50%, the lowest step\|render scale 50 auto" "$T/err" && grep -q "^ResolutionScale=SCALE_50" "$INI" \
+  && ok "auto, none held 55: the lowest step tried (50)" || bad "auto lowest" "$(cat "$T/err")"
+st '{"apps": {"384190": {"fps": [{"fps": 30, "scale": 100}, {"fps": 31, "scale": 70}]}}}'
+PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh "$US" "$T/ue/AbzuGame.exe" > /dev/null 2> "$T/err"
+grep -q "render scale 100 auto: .*not GPU-bound" "$T/err" && ok "auto: lowering bought < 10 % -> back to 100 (CPU-bound)" || bad "auto cpu-bound" "$(cat "$T/err")"
+st '{"apps": {"384190": {"fps": [{"fps": 62, "scale": 70}]}}}'
+PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh "$US" "$T/ue/AbzuGame.exe" > /dev/null 2> "$T/err"
+grep -q "render scale 70 auto: 62 fps at 70%" "$T/err" && ok "auto: 70 held 55 -> stays 70" || bad "auto held" "$(cat "$T/err")"
+st '{"apps": {"384190": {"fps": [{"fps": 30, "scale": 100}]}}}'
+PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh "$US" "$T/ue/AbzuGame.exe" > /dev/null 2> "$T/err"
+grep -q "render scale 85 auto: 30 fps at 100%, under 55" "$T/err" && ok "auto: 100 under 55 -> one step down (85)" || bad "auto step" "$(cat "$T/err")"
+CD2="$T/compat/9"; INI2="$CD2/pfx/drive_c/users/steamuser/AppData/Local/Proj/Saved/Config/WindowsNoEditor/GameUserSettings.ini"
+mkdir -p "$(dirname "$INI2")"; printf '[ScalabilityGroups]\nsg.ShadowQuality=3\n' > "$INI2"
+st '{"apps": {"9": {"scale": 70}}}'
+PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=9 STEAM_COMPAT_DATA_PATH="$CD2" sh "$US" "$T/ue2/Proj/Binaries/Win64/Proj-Win64-Shipping.exe" > /dev/null 2>&1
+grep -q "^sg.ResolutionQuality=70" "$INI2" && grep -q "^sg.ShadowQuality=3" "$INI2" && ok "a plain UE game: [ScalabilityGroups] sg.ResolutionQuality=70" || bad "ue sg" "$(cat "$INI2")"
+st '{"apps": {"9": {"scale": 100}}}'
+PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=9 STEAM_COMPAT_DATA_PATH="$CD2" sh "$US" "$T/ue2/Proj/Binaries/Win64/Proj-Win64-Shipping.exe" > /dev/null 2>&1
+grep -q "^sg.ResolutionQuality=100" "$INI2" && ok "100 again: sg.ResolutionQuality back to the engine's 100" || bad "ue sg restore" "$(cat "$INI2")"
+st '{"apps": {"8": {"scale": 70}}}'
+PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=8 STEAM_COMPAT_DATA_PATH="$T/compat/8" sh "$US" "$T/ue2/Proj/Binaries/Win64/Proj-Win64-Shipping.exe" > "$T/out" 2> "$T/err"
+[ "$(args)" = "-windowed -ResX=2268 -ResY=2440" ] && grep -q "70% not applied: no GameUserSettings.ini yet" "$T/err" && [ "$(rec 8 applied)" = False ] \
+  && ok "no ini yet: says so, starts at full size" || bad "ue no ini" "$(args) / $(cat "$T/err")"
 
 # End to end with a real X server: the root's _POWOS_SCREEN_SIZE (kwin 0051) wins over the root size.
 if command -v Xvfb >/dev/null && command -v xprop >/dev/null && command -v python3 >/dev/null; then

@@ -15,6 +15,9 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
 [ $# -gt 0 ] || set -- base noncoherent noubwc sysmem nomsaa zeromem flushall nolrz zerowg relaxed
 OUT=${OUT:-$HOME/.cache/powos-verify/bfc-$(date +%F_%H%M)}; mkdir -p "$OUT"
+# BF_BASE_FROM=<an earlier bfc-* dir>: its base run is the one scored against (one variant per job fits the 300 s
+# budget: `BF_BASE_FROM=~/.cache/powos-verify/bfc-... bf-checker.sh ubwc` without a base run of its own).
+[ -n "${BF_BASE_FROM:-}" ] && [ -d "$BF_BASE_FROM/base" ] && [ ! -e "$OUT/base" ] && cp -R "$BF_BASE_FROM/base" "$OUT/base"
 BF_ADB=$A . "$here/bf-lib.sh"   # pill <step>: the status pill's sub-step
 cfg_take "$@"; set -- ${CFG_ARGS[@]+"${CFG_ARGS[@]}"}; [ $# -gt 0 ] || set -- base  # cfg:<x86|arm64>: bf-lib.sh cfg_take (bash 3.2-safe empty array)
 irq() { "$A" shell "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts" | tr -d '\r'; }
@@ -64,6 +67,8 @@ for v in "$@"; do
   win=""; for i in $(seq 48); do nap 1; win=$(asuser bf-window.sh | tail -1); case $win in win=[0-9]*) break ;; esac; done
   case $win in win=[0-9]*) ;; *) echo "FAIL $v: no game window in 4 min ($win)"; restore; exit 1 ;; esac
   echo "$v: window after $((i * 5)) s: $win"; echo "$win" > "$M/window.txt"
+  # The variant as the game really got it (steam-env's TU_DEBUG vs the variant's: the 11-04 runs couldn't tell).
+  echo "$v: game env: $("$A" shell "su -c 'for p in \$(pgrep -f \"[B]roforce_beta[.]exe\"); do xargs -0 -n1 echo < /proc/\$p/environ; done' | grep -E '^TU_(DEBUG|KGSL_FORCE_NONCOHERENT)=' | sort -u | tr '\n' ' '" | tr -d '\r')" | tee -a "$M/window.txt"
   asuser bf-checker-phone.sh grab 80 /var/tmp/bfc/$v >/dev/null; t0=$(date +%s); n=0
   while [ $(( $(date +%s) - t0 )) -lt 92 ]; do
     el=$(( $(date +%s) - t0 ))
@@ -89,4 +94,5 @@ for v in "$@"; do
 done
 echo "== done $(date +%T)"; restore
 pill "scoring the black checker: $(echo "${done_v[*]}" | sed 's/ / vs /g')"
-uv run --quiet --with numpy python3 "$here/bf-checker.py" "$OUT" "${done_v[@]}"
+bv=(); [ -d "$OUT/base" ] && case " ${done_v[*]} " in *" base "*) ;; *) bv=(base) ;; esac  # BF_BASE_FROM's
+uv run --quiet --with numpy python3 "$here/bf-checker.py" "$OUT" ${bv[@]+"${bv[@]}"} "${done_v[@]}"

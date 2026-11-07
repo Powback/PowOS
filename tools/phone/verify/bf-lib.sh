@@ -25,6 +25,24 @@ if [ -n "${BF_ADB:-}" ]; then
     "$BF_ADB_PATH" shell "su -c 'cp /data/local/tmp/powos-bf-cfg-phone.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-steam-compat /data/powos/root/var/tmp/; chmod 644 /data/powos/root/var/tmp/powos-bf-cfg-phone.sh /data/powos/root/var/tmp/powos-steam-compat; sh /data/powos/powos-run.sh \"APP=${APP:-274190} bash /var/tmp/powos-bf-cfg-phone.sh $*\"'" 2>&1 | grep -v sysvipc | tr -d '\r'; }
   cfg_set() { [ -n "$CFG_TO" ] || return 0; pill "setup cfg:$CFG_TO (closing Steam)"; cfg_run set "$CFG_TO"; }
   cfg_restore() { [ -n "$CFG_TO" ] || return 0; cfg_run restore; }
+  # gus:<Key=Value[,Key=Value]> anywhere in a check's arguments (bf-pacing.sh): those keys in an Unreal game's own
+  # GameUserSettings.ini (its Proton prefix: AppData/Local/<Game>/Saved/Config/Windows*/) for this check only - e.g.
+  # ABZU's render scale, gus:ResolutionScale=SCALE_75 (abzu-fps, 2026-11-07). Only keys already in the file are set.
+  # The user's file is kept as <ini>.powos-gus-bak (once: a check killed mid-way never makes the test values the
+  # backup) and put back by gus_restore after the game closed (UE writes the file again at exit). gus_take "$@" sets
+  # GUS and GUS_ARGS (the rest); call it on cfg_take's CFG_ARGS.
+  gus_take() { local a; GUS= GUS_ARGS=()
+    for a in "$@"; do case $a in gus:*) GUS=${a#gus:} ;; *) GUS_ARGS+=("$a") ;; esac; done; }
+  gus_ini() {  # the phone-side snippet that sets $f to the game's GameUserSettings.ini (empty: none)
+    echo "f=\$(ls /data/powos/root/home/powos/.local/share/Steam/steamapps/compatdata/${APP:-274190}/pfx/drive_c/users/steamuser/AppData/Local/*/Saved/Config/Windows*/GameUserSettings.ini 2>/dev/null | grep -v /UnrealEngine/ | head -1)"; }
+  gus_set() { [ -n "$GUS" ] || return 0; local kv sets=
+    case "$GUS" in *[!A-Za-z0-9_.,=-]*) echo "gus: '$GUS': letters, digits and _ . - only"; return 5 ;; esac
+    for kv in $(echo "$GUS" | tr , ' '); do
+      sets="$sets if grep -q \"^${kv%%=*}=\" \$f; then sed -i \"s|^${kv%%=*}=.*|$kv|\" \$f; echo \"gus: $kv\"; else echo \"gus: ${kv%%=*} not in \$f - not set\"; fi;"; done
+    pill "setup gus:$GUS"
+    "$BF_ADB_PATH" shell "su -c '$(gus_ini); [ -n \"\$f\" ] || { echo \"gus: no GameUserSettings.ini for app ${APP:-274190}\"; exit 5; }; [ -f \$f.powos-gus-bak ] || cp -p \$f \$f.powos-gus-bak; $sets'" | tr -d '\r'; }
+  gus_restore() { [ -n "$GUS" ] || return 0
+    "$BF_ADB_PATH" shell "su -c '$(gus_ini); [ -n \"\$f\" ] && [ -f \$f.powos-gus-bak ] && cat \$f.powos-gus-bak > \$f && rm \$f.powos-gus-bak && echo \"gus: the game settings restored\"'" | tr -d '\r'; }
   # switcher_state: "up" / "down" / "?" - the switcher (recents overview) as PowOS's window log last said ("switcher
   # up|down", Switcher.open; older builds: "windows hidden under the switcher" / "shown again (switcher down)").
   switcher_state() { local l

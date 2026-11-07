@@ -233,7 +233,15 @@ class LaunchRecord:
         self.game, self.t0, self.cold, self.mark = game, time.monotonic(), not steam_alive(), download_mark(game)
 
     def done(self, ok, at=None):
-        if os.environ.get("POWOS_NO_LAUNCH_RECORD") or self.mark[0] or download_mark(self.game) != self.mark:
+        if os.environ.get("POWOS_NO_LAUNCH_RECORD"):
+            return
+        if ok:  # its frame rate once it settled, for the render scale's "auto" (powos-steam-compat watch-fps, ~75 s)
+            try:
+                subprocess.Popen(["powos-steam-compat", "watch-fps", self.game], stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+            except OSError:
+                pass
+        if self.mark[0] or download_mark(self.game) != self.mark:
             return
         # No window on a Steam that was already running is Steam's (a frozen client not thawed for the launch, unified
         # sleep, 2026-10-23), not the game's way of running: only a launch that started Steam itself can fail a tool.

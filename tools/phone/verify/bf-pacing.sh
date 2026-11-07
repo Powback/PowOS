@@ -4,7 +4,8 @@
 # frames, ~3-4 min of screen per mode. Per mode: dxvk.conf in the game dir (base = none; cap60 = dxgi.maxFrameRate 60;
 # fifo = syncInterval 1; nolatency = maxFrameLatency 1; play = base taken into a level first (bf-play.sh: keys
 # BF_PLAY_KEYS, grabs in the mode's folder) so the numbers are gameplay's, not the menu's; env:K=V[,K=V] = those in the game's environment through
-# ~/.config/powos/proton-settings.json, e.g. env:PROTON_USE_XALIA=0), start the game (KWin shows it as its own task),
+# ~/.config/powos/proton-settings.json, e.g. env:PROTON_USE_XALIA=0; gus:K=V[,K=V] anywhere = an Unreal game's own
+# GameUserSettings.ini keys for the whole check, e.g. gus:ResolutionScale=SCALE_75 for ABZU, bf-lib.sh), start the game (KWin shows it as its own task),
 # wait for its X window (+ its size vs the screen: unity-screen), 45 s settle, then 30 s of SurfaceFlinger present
 # times + a 20 s screenrecord (bf-present.sh), the same 30 s of per-thread CPU, cluster clocks and caps, GPU busy and
 # clock, temperatures (bf-prof.sh: "prof <mode>" lines), and the session log's "Xwayland KGSL" lines. bf-frames.py turns
@@ -29,6 +30,7 @@ here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
 [ $# -gt 0 ] || set -- base
 BF_ADB=$A . "$here/bf-lib.sh"   # pill <step>: the status pill's sub-step
 cfg_take "$@"; set -- ${CFG_ARGS[@]+"${CFG_ARGS[@]}"}; [ $# -gt 0 ] || set -- base  # cfg:<x86|arm64>: bf-lib.sh cfg_take (bash 3.2-safe empty array)
+gus_take "$@"; set -- ${GUS_ARGS[@]+"${GUS_ARGS[@]}"}; [ $# -gt 0 ] || set -- base  # gus:K=V: the game's GameUserSettings.ini (bf-lib.sh)
 OUT=${OUT:-$HOME/.cache/powos-verify/bfp-$(date +%F_%H%M)}; mkdir -p "$OUT"
 APP_GIVEN=${APP:+1}; APP=${APP:-274190} WIN_NAME=${WIN_NAME:-}  # any Steam game; default the test case. WIN_NAME
 # (one word) only when its window isn't titled like Steam's name for it (bf-window.sh reads that name from the appmanifest).
@@ -94,12 +96,13 @@ restore() {  # restore [warm]: warm = the queue's next job is this game too (QUE
   settings ''
   if [ $users = 1 ]; then echo "the user's $NAME: $(asuser bf-game.sh freeze | tail -1)"; else asuser bf-stop.sh >/dev/null; fi
   "$A" shell "su -c 'rm -f /data/powos/root$G/dxvk.conf'"
-  cfg_restore
+  cfg_restore; gus_restore
   [ -n "$steam_before" ] && "$A" shell "su -c 'sh /data/powos/powos-run.sh \"cd /home/powos; setsid -f steam -silent </dev/null >/dev/null 2>&1\"'" >/dev/null 2>&1
   front_back "$front"  # bf-lib.sh: never a bare PowosWindowActivity (an empty window task over home)
   "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof /data/local/tmp/powos-bf-*.sh /data/powos/root/var/tmp/powos-bf-*.sh'"
 }
 cfg_set || exit 5
+gus_set || { restore; exit 5; }
 i0=$(irq); touched() { [ "$(irq)" != "$i0" ]; }
 abort() { echo "touch $(date +%T) - abort, restoring"; restore; exit 3; }
 # nap <secs>: one phone-side wait that returns early on a touch (bf-nap.sh).
@@ -118,7 +121,8 @@ onscreen() { local r on top sv how
 # and each web window's size / state, read from home's page (cdp.sh, read-only). One line, "home: ..." or "".
 HOMEWHY_JS="(()=>{const l=document.querySelector('.recents');const up=!!l&&(l.classList.contains('shown')||getComputedStyle(l).visibility!=='hidden');const w=[...document.querySelectorAll('.webwindow')].map(e=>{const r=e.getBoundingClientRect();return Math.round(r.width)+'x'+Math.round(r.height)+(e.classList.contains('focused')?' focused':'')+(e.classList.contains('live')?'':' not-live')});return 'switcher '+(up?'UP':'down')+', web windows ['+w.join(', ')+']'})()"
 homewhy() { local r; r=$(perl -e 'alarm 25; exec @ARGV' "$here/../cdp.sh" eval home "$HOMEWHY_JS" 2>/dev/null | tail -1 | tr -d '"'); [ -n "$r" ] && echo "home: $r"; }
-invalid() { local h; h=$(homewhy); echo "INVALID: $NAME wasn't on the screen $1 ($WHY${h:+; $h}) - frames of a game nobody sees say nothing"; restore; exit 3; }
+invalid() { local h; h=$(homewhy); "$here/../shot.sh" "$OUT/invalid-$(date +%H%M%S).png" >/dev/null 2>&1
+  echo "INVALID: $NAME wasn't on the screen $1 ($WHY${h:+; $h}) - frames of a game nobody sees say nothing (screenshot in $OUT)"; restore; exit 3; }
 mi=0
 for mode in "$@"; do
   mi=$((mi + 1)); lbl="$mode $mi/$#"
@@ -138,7 +142,18 @@ for mode in "$@"; do
   # A switcher left up is closed first (bf-lib.sh stray_switcher: the game would start under it, unseen), and what
   # was in front is said as it was.
   echo "$mode: before the launch: in front $("$A" shell "dumpsys activity activities | grep -m1 topResumedActivity" | tr -d '\r' | sed -nE 's#.* ([a-zA-Z0-9_.]+/[a-zA-Z0-9_.$]+) .*#\1#p'); $(stray_switcher)"
-  [ "$mi" = 1 ] && [ -n "$warm" ] || asuser bf-start.sh >/dev/null
+  # Home first (BF_HOME_FIRST=0: not): a launch while home's recent-apps overview or another app's task is in front
+  # never brings the game's window forward - 7 of 9 ABZU runs 11-07 02:56-03:37 ended INVALID that way (in front
+  # HomeShell/PowosWindowActivity, game layers 0 or a web layer behind it); the two valid ones came right after Home.
+  # restore() starts the activity that was in front again. HACK: the real fix is a launch closing the overview, as
+  # Android's does (docs/research/abzu-fps.md "Measurement friction"); then this line goes.
+  # Home, then Back: 11-07 05:10 Home alone left the switcher (Steam + calculator cards) up and the run INVALID; Back
+  # closes the switcher over home (shell/ui/recents.tsx) and does nothing on plain home.
+  # A warm game reused (the job before left it in front) is neither sent behind home nor started again.
+  if ! { [ "$mi" = 1 ] && [ -n "$warm" ]; }; then
+    [ "${BF_HOME_FIRST:-1}" = 0 ] || { "$A" shell "input keyevent 3; sleep 1; input keyevent 4" >/dev/null 2>&1; sleep 1; }
+    asuser bf-start.sh >/dev/null
+  fi
   pill "$lbl: waiting for the game window"
   # The window, waited for only while the rest of this mode still fits the budget (WIN_S overrides).
   w0=$(date +%s); extra=0; [ "$mode" = play ] && extra=35  # play: keys + grabs + 10 s in the level

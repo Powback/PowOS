@@ -290,6 +290,8 @@ Verbs (thin wrappers — each dispatches to the subsystem that owns it):
   compat [status]         Which way it runs: native Linux build / ARM64 Proton / x86 Proton, what each launch measured
   compat auto|native|arm64|x86   Pick: auto = the fastest that worked (native, arm64, x86 until measured), or pin one
                           (written while Steam is off: at its next start)   → powos-steam-compat
+  scale [auto|100|85|70|50]   Its render scale in % (Unity/Unreal: fewer pixels drawn, stretched to the screen);
+                          auto = from its measured fps; from its next launch   → powos-steam-compat scale
 
 A Steam game out of sight for 15 s is frozen with Steam on its own and launching it again resumes it at once
 (units/phone/steam.json "games": "pause", docs/UNIFIED-SLEEP.md); freeze/thaw do it by hand.
@@ -331,7 +333,7 @@ cmd_game() {
 
     # A running Steam game's verbs (any installed Steam game, by name or appid - the mod registry not needed).
     case "${1:-}" in
-        freeze|thaw|compat|stop|close) _game_steam_verb "$name" "$@"; return $? ;;
+        freeze|thaw|compat|scale|stop|close) _game_steam_verb "$name" "$@"; return $? ;;
     esac
 
     _game_need_mods
@@ -422,6 +424,9 @@ _game_steam_verb() {
     app="$(_game_steam_appid "$name")" || { perr "No installed Steam game called $name"; return 1; }
     case "$verb" in
         compat) _game_compat "$app" "${3:-status}" ;;
+        scale)
+            command -v powos-steam-compat >/dev/null || { perr "powos-steam-compat isn't installed (package steam)"; return 1; }
+            powos-steam-compat scale "$app" ${3:+"$3"} ;;
         *) _game_steam_close "$app" "$([[ "${3:-}" == --steam ]] && echo 1 || echo 0)" ;;
     esac
 }

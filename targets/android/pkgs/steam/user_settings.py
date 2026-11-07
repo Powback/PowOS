@@ -17,6 +17,17 @@ import time
 # turns it back on for a check.
 user_settings = {"PROTON_USE_XALIA": "0"}
 
+# HACK: black 16x4-block dashes in every Unity/DXVK frame (Broforce: 17-44 % of frames, Xwayland's copy and the screen)
+# come from the game's own UBWC render targets on Adreno 740 - both FEX's x86 Turnip 26.2.0 and ours (eb3e7fd4), GMEM
+# and sysmem; TU_DEBUG=flushall doesn't help (not a missing flush). TU_DEBUG=noubwc: 0 of 93 frames
+# (bf-checker.sh, docs/research/broforce-black-columns.md, 2026-11-04). Costs GPU bandwidth: ABZU (GPU-bound) pays it.
+# Here, not in steam-env (where it was until 11-07): Proton applies a user_settings key only when the environment
+# doesn't have it, so steam-env's export made every "UBWC on" check (proton-settings.json TU_DEBUG=startup/gmem/
+# syncdraw) run with noubwc anyway - UBWC was never measured on since 11-04. Now a check's or the user's TU_DEBUG wins.
+# Real fix: find which UBWC path dashes (bf-checker.sh ubwc syncdraw gmem 3dload, on the steam package with this
+# change) and fix it in pkgs/vulkan-freedreno-kgsl, then this line goes.
+user_settings["TU_DEBUG"] = "noubwc"
+
 
 # HACK: FEX's disk cache (FEX_DISKCACHE=1, Proton ARM64's arm64ec FEX) also caches ANONYMOUS code by default
 # (DiskCacheAnonCaching). A Mono game's anonymous code is Mono's own JIT output, different every launch, so it never
