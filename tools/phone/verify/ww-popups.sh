@@ -54,7 +54,19 @@ LAYERS=0; kwat 3.72 && LAYERS=1
 steamww() { hcall webwindows.list "[]" "l=>{const w=l.filter(w=>/steam/i.test(String(w.key))&&!/steam_app_/i.test(String(w.key))).at(-1);return w?'w'+w.id:'none'}"; }
 sw=$(steamww)
 # Steam's main X window "<id> <x> <y> <w> <h>" (as steam-tap.sh finds it), and the override-redirect windows viewable now.
-steamwin() { us "$X; xwininfo -root -tree 2>/dev/null | awk '/\"Steam\": \\(\"steamwebhelper\" \"steam\"\\)/{print \$1}' | while read -r w; do xwininfo -id \$w 2>/dev/null | awk -v w=\$w '/Map State/{m=\$3} /Absolute upper-left X/{ax=\$4} /Absolute upper-left Y/{ay=\$4} /Width:/{x=\$2} /Height:/{y=\$2} END{if(m==\"IsViewable\"&&x>=400&&y>=300)print w, ax, ay, x, y}'; done | head -1" | tail -1; }
+# Its main window carries no name at times (11-07 16:25: every Steam window "has no name" after a frozen stretch):
+# then the viewable, managed one KWin may resize (dialogs and menus may not) is it.
+STEAMWIN_SH=$(cat <<'EOF'
+xwininfo -root -tree 2>/dev/null | awk '/"Steam": \("steamwebhelper" "steam"\)/{print $1, "named"} /\(has no name\): \("steamwebhelper" "steam"\)/{print $1, "nameless"}' \
+ | while read -r w k; do
+  g=$(xwininfo -id $w 2>/dev/null | awk -v w=$w '/Map State/{m=$3} /Override Redirect State/{o=$4} /Absolute upper-left X/{ax=$4} /Absolute upper-left Y/{ay=$4} /Width:/{x=$2} /Height:/{y=$2} END{if(m=="IsViewable"&&o!="yes"&&x>=400&&y>=300)print w, ax, ay, x, y}')
+  [ -n "$g" ] || continue
+  [ $k = named ] && { echo "0 $g"; continue; }
+  xprop -id $w _NET_WM_ALLOWED_ACTIONS 2>/dev/null | grep -q _NET_WM_ACTION_RESIZE && echo "1 $g"
+ done | sort -n | head -1 | cut -d" " -f2-
+EOF
+)
+steamwin() { us "$X; $STEAMWIN_SH" | tail -1; }
 menus() { us "$X; xwininfo -root -children 2>/dev/null | awk '/\\(\"steamwebhelper\" \"steam\"\\)/ && /has no name/{print \$1}' | while read -r w; do xwininfo -id \$w 2>/dev/null | awk -v w=\$w '/Map State/{m=\$3} /Override Redirect State/{o=\$4} /Absolute upper-left X/{ax=\$4} /Absolute upper-left Y/{ay=\$4} /Width:/{x=\$2} /Height:/{y=\$2} END{if(m==\"IsViewable\"&&o==\"yes\")print w, ax, ay, x, y}'; done" | grep .; }
 read -r SW SX SY SWW SWH <<<"$(steamwin)"
 # Self-setup: no Steam web window, or no viewable main window in it -> Steam opened as a tap would (apps.launch l:steam:
