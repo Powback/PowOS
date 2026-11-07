@@ -478,6 +478,21 @@
                 <action android:name="com.powos.app.action.CAPTION_MENU" />
             </intent-filter>
         </receiver>
+        <!-- The no-root device agent's lock (devices/LockAccess.kt): a device admin with only force-lock, turned on by the
+             person from the Devices app (Android's own consent screen) and off there or in Settings. Only the system binds it. -->
+        <receiver
+            android:name=".devices.PowosLockAdmin"
+            android:description="@string/lock_admin_description"
+            android:exported="true"
+            android:label="@string/lock_admin_label"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/powos_lock_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
         <receiver
             android:name=".widgets.recon.ReconReceiver"
             android:exported="true"

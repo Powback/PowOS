@@ -9,6 +9,7 @@ import { useState } from "preact/hooks";
 import { forget, load, save, type Cap, type Device, type Host, type Status } from "../lib/devices";
 import { canWake, useActions, useLive, type Live, type Pending } from "../lib/live";
 import { AddDevice } from "../lib/add";
+import { ThisPhone } from "../lib/thisphone";
 import { KIND, S } from "../lib/ui";
 
 interface Props {
@@ -42,6 +43,7 @@ export default function Main({ host, close }: Props) {
         {close && <button style={S.back} onClick={close} aria-label="back">‹</button>}
         <h1 style={S.title}>Devices</h1>
       </header>
+      <ThisPhone dev={host.thisDevice} />
       {list.length === 0 && <div style={S.muted}>No devices yet. Add one below: it shows a code on its own screen.</div>}
       {list.map((d) => (
         <DeviceCard

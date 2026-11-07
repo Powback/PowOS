@@ -31,6 +31,16 @@ function wakeMacOf(d: Device, l: Live): string | null {
   return nic && nic.mac !== d.wakeMac ? nic.mac : null;
 }
 
+/**
+ * The device's caps from its last status, when they differ from the ones kept: what it can do changes while it's paired
+ * (a phone's owner allows or turns off its lock), and the buttons follow the device's own word.
+ */
+function capsChanged(d: Device, l: Live): Cap[] | null {
+  const caps = (l.s as { caps?: Cap[] } | undefined)?.caps;
+  if (!Array.isArray(caps) || !l.s?.online) return null;
+  return caps.length === d.caps.length && caps.every((c) => d.caps.includes(c)) ? null : caps;
+}
+
 export function useLive(net: Net | undefined, list: Device[], update: (next: Device[]) => void) {
   const [live, setLive] = useState<Record<string, Live>>({});
   const ref = useRef({ list, live });
@@ -43,7 +53,8 @@ export function useLive(net: Net | undefined, list: Device[], update: (next: Dev
         if (stop) return;
         setLive((all) => ({ ...all, [d.id]: l }));
         const mac = wakeMacOf(d, l);
-        if (mac) update(ref.current.list.map((x) => (x.id === d.id ? { ...x, wakeMac: mac } : x)));
+        const caps = capsChanged(d, l);
+        if (mac || caps) update(ref.current.list.map((x) => (x.id === d.id ? { ...x, ...(mac && { wakeMac: mac }), ...(caps && { caps }) } : x)));
       });
     poll();
     const t = setInterval(() => !document.hidden && poll(), POLL_MS);

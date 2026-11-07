@@ -275,6 +275,9 @@ class ShellBridge(
     private val wallpaperColors = android.app.WallpaperManager.OnColorsChangedListener { _, _ -> ShellWallpaper.refresh(context) }
     private val themeChanged: () -> Unit = { ShellWallpaper.refresh(context) }
 
+    /** The no-root lock admin turned on or off (devices/LockAccess.kt): the Devices app's "this phone" row follows. */
+    private val lockChanged: (JSONObject) -> Unit = { emit("devices.lock", it) }
+
     init {
         // Home's bridge: an app the system's own window menu floats becomes a web window (SystemFloat, web windows on).
         if (activity != null) SystemFloat.start(context, systemFloat)
@@ -284,6 +287,7 @@ class ShellBridge(
         ShellWallpaper.onChange.add(wallpaperChanged)
         runCatching { android.app.WallpaperManager.getInstance(context).addOnColorsChangedListener(wallpaperColors, main) }
         dev.omalauncher.theme.ThemeStore.changeListeners.add(themeChanged)
+        dev.omalauncher.devices.LockAccess.listeners.add(lockChanged)
         // Live mode on or off (its consent answered, its capture stopped): the assistant's page follows.
         dev.omalauncher.assist.LiveCapture.onChange = { main.post { emit("assist.live", liveState()) } }
         // An agent told the user something: the PowOS AI page lists it.
@@ -743,6 +747,10 @@ class ShellBridge(
             "pet.overlay" -> dev.omalauncher.system.PetOverlay.enabled(context, if (a.length() == 0 || a.isNull(0)) null else a.optBoolean(0))
             // The shade's window blurs what's behind it itself (ShadeHost): its page only tints.
             "system.glass" -> ShellWallpaper.info(context, blurBehind = shade != null || overlay != null)
+            // This phone's lock from other devices (devices/LockAccess.kt): the person's own choice, Android's screen asks.
+            "devices.lock" -> dev.omalauncher.devices.LockAccess.state(context)
+            "devices.lockAllow" -> dev.omalauncher.devices.LockAccess.ask(activity ?: context)
+            "devices.lockStop" -> dev.omalauncher.devices.LockAccess.stop(context)
             "privacy.list" -> privacyList()
             "privacy.open" -> openPermissions(a.getString(0))
             "notifications.list" -> notificationList()
@@ -1876,6 +1884,7 @@ class ShellBridge(
         privacy.unwatch(privacyChanged)
         runCatching { android.app.WallpaperManager.getInstance(context).removeOnColorsChangedListener(wallpaperColors) }
         dev.omalauncher.theme.ThemeStore.changeListeners.remove(themeChanged)
+        dev.omalauncher.devices.LockAccess.listeners.remove(lockChanged)
         screens.close()
         appWidgets.unlisten(appWidgetEvents)
         remote.close()

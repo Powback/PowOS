@@ -25,6 +25,7 @@ import { localApps } from "./localapps.ts";
 import { DetailSheet, type DetailSheetProps } from "./sheet.ts";
 import { notifications, type AppNotifications } from "./notify.tsx";
 import { setBadge } from "./badge.ts";
+import { thisDevice, type ThisDevice } from "./thisdevice.ts";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 
 export const STDB_URL = "ws://127.0.0.1:3410";
@@ -100,6 +101,8 @@ export interface IslandHost {
    * shows, 0 removes it. Kept across reloads; call it again whenever the count changes. An older shell has none.
    */
   badge?(app: string, n: number): void;
+  /** This phone itself (apps/thisdevice.ts): its lock from other devices without root. Calls reject on an older APK. */
+  thisDevice?: ThisDevice;
 }
 
 export interface AppWidgetHost {
@@ -623,4 +626,5 @@ export const host: IslandHost = {
   health: powos.health,
   notifications,
   badge: setBadge,
+  thisDevice,
 };

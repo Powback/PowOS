@@ -2,4 +2,7 @@
 <resources>
     <string name="wallpaper_label">Omarchy</string>
     <string name="wallpaper_description">The current Omarchy theme background. System colors follow the theme.</string>
+    <!-- Android's own "Activate device admin app?" screen shows these (devices/LockAccess.kt): the one thing asked. -->
+    <string name="lock_admin_label">PowOS: lock from your devices</string>
+    <string name="lock_admin_description">Lets your paired PowOS devices lock this phone\u2019s screen, and nothing else: PowOS can\u2019t see or change your PIN, wipe the phone or set password rules. Turn it off in the Devices app or here at any time.</string>
 </resources>

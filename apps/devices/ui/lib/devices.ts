@@ -16,8 +16,17 @@ export interface Net {
   mdns?(app: string, type: string, ms?: number): Promise<{ name: string; host: string; port: number; txt: Record<string, string> }[]>;
   forget?(app: string, what: { host?: string; secret?: string }): Promise<void>;
 }
+/** This phone's lock from other devices without root (the shell's apps/thisdevice.ts); calls reject on an older APK. */
+export interface LockAccess { available: boolean; rooted: boolean; allowed: boolean }
+export interface ThisDevice {
+  lock(): Promise<LockAccess>;
+  allowLock(): Promise<LockAccess>;
+  stopLock(): Promise<LockAccess>;
+  onLock(on: (s: LockAccess) => void): () => void;
+}
 export interface Host {
   net?: Net;
+  thisDevice?: ThisDevice;
 }
 
 export const APP = "local.devices";
