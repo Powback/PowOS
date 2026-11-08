@@ -1681,23 +1681,17 @@ class ShellBridge(
 
     /** PowOS app [key]: its floating window back, else it starts; one that can't start tells the pages why ("apps.launchfailed"). */
     private fun launchLinux(key: String) {
-        val moved = moveLinuxToWeb(key)
-        val raised = if (moved) null else restoreLinux(key)
-        val app = if (raised == null && !moved) runtime.linuxApps.firstOrNull { "l:${it.id}" == key } else null
+        // Its tasks into web windows first: their "webwindows.adopt" is the launch's window.
+        if (moveLinuxToWeb(key)) {
+            Log.i(TAG, "launch $key: its task moved into a web window")
+            return
+        }
+        val raised = restoreLinux(key)
+        val app = if (raised == null) runtime.linuxApps.firstOrNull { "l:${it.id}" == key } else null
         // Each way a tap goes, in logcat: Dolphin's 2026-10-30 21:00 tap left no trace of which one it took.
-        Log.i(
-            TAG,
-            "launch $key: " +
-                when {
-                    moved -> "its task moved into a web window"
-                    raised != null -> "its window $raised came back"
-                    app != null -> "starting ${app.exec}"
-                    else -> "no such app"
-                },
-        )
+        Log.i(TAG, "launch $key: " + if (raised != null) "its window $raised came back" else if (app != null) "starting ${app.exec}" else "no such app")
         val failed = { why: String -> broadcast("apps.launchfailed", JSONObject().put("key", key).put("reason", why).toString()) }
         when {
-            moved -> Unit
             raised != null -> emit("windows.raised", raised)
             // The page's placeholder says why at once, not "loading" for 20 s.
             app != null -> runtime.launch(app, failed)

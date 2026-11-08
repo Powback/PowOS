@@ -66,7 +66,7 @@ class MoveTaskToWebTest {
         val bridge = File("src/main/kotlin/dev/omalauncher/shell/ShellBridge.kt").readText()
         val launch = bridge.substring(bridge.indexOf("private fun launchLinux("))
         assertTrue(launch.indexOf("moveLinuxToWeb(key)") in 0 until launch.indexOf("restoreLinux(key)"))
-        assertTrue(launch.contains("if (moved) null else restoreLinux(key)"))
+        assertTrue(launch.contains("if (moveLinuxToWeb(key)) {"))
         val move = bridge.substring(bridge.indexOf("private fun moveLinuxToWeb("))
         assertTrue(move.substring(0, move.indexOf("private fun restoreLinux(")).contains("WindowTasks.moveToWeb(it.id)"))
         val src = File("../engine/src/main/java/andro/marchy/WindowTasks.java").readText()
