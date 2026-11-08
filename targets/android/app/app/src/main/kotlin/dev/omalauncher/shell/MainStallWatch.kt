@@ -37,8 +37,15 @@ object StallRules {
     /** A main-thread message held the UI thread long enough to cost a 120 Hz frame or more: kept, with what it was. */
     const val MSG_MS = 24L
 
-    /** A frame gap / slow frame worth a row. */
-    const val GAP_MS = 50L
+    /**
+     * A frame gap / slow frame worth a row: a frame over 33 ms (two 60 Hz frames, four at 120 Hz), the line the perf
+     * checks fail on ("no frame > 33 ms"). It was 50: the 11-08 shade-scroll run failed on 49.9 / 41.8 / 33.4 / 33.3 ms
+     * shade frames and the native side showed none of them (gapSeen [], no message over 24 ms), so nothing named the cause.
+     */
+    const val GAP_MS = 33L
+
+    /** Whether a frame gap or a slow frame of [ms] gets a row. */
+    fun keepsGap(ms: Long) = ms > GAP_MS
 
     fun keepsMessage(ms: Long) = ms > MSG_MS
 
@@ -53,6 +60,9 @@ object StallRules {
 object MainStallWatch {
     private const val BLOCK_MS = StallRules.GAP_MS
     private const val SAMPLE_MS = 40L
+
+    /** The gap watch's beat: a 33-50 ms gap (the threshold's range) is seen at least once, not missed between 40 ms beats. */
+    private const val GAP_SAMPLE_MS = 12L
     private const val MAX_ENTRIES = 200
     private const val STACK_DEPTH = 24
     private const val GAP_DEPTH = 10
@@ -93,7 +103,7 @@ object MainStallWatch {
             frameCount++
             val total = m.getMetric(FrameMetrics.TOTAL_DURATION)
             if (android.os.Build.VERSION.SDK_INT >= 31 && total > m.getMetric(FrameMetrics.DEADLINE)) missedCount++
-            if (total / 1_000_000 <= BLOCK_MS) return@OnFrameMetricsAvailableListener
+            if (!StallRules.keepsGap(total / 1_000_000)) return@OnFrameMetricsAvailableListener
             val ms = { id: Int -> Math.round(m.getMetric(id) / 100_000.0) / 10.0 }
             val e =
                 JSONObject().put("at", epoch(m.getMetric(FrameMetrics.INTENDED_VSYNC_TIMESTAMP) / 1_000_000)).put("ms", ms(FrameMetrics.TOTAL_DURATION))
@@ -116,7 +126,7 @@ object MainStallWatch {
                     val line = "main=${threadState(android.os.Process.myPid())} $main | rt=${if (renderTid > 0) threadState(renderTid) else "?"}"
                     synchronized(gapSamples) { if (gapSamples.size < MAX_GAP_SAMPLES) gapSamples += line }
                 }
-                samplerHandler?.postDelayed(this, SAMPLE_MS)
+                samplerHandler?.postDelayed(this, GAP_SAMPLE_MS)
             }
         }
 
@@ -135,7 +145,7 @@ object MainStallWatch {
             override fun doFrame(frameTimeNanos: Long) {
                 if (!on) return
                 val now = frameTimeNanos / 1_000_000
-                if (lastFrame != 0L && now - lastFrame > BLOCK_MS) {
+                if (lastFrame != 0L && StallRules.keepsGap(now - lastFrame)) {
                     val seen = synchronized(gapSamples) { JSONArray(gapSamples.toList()).also { gapSamples.clear() } }
                     synchronized(gaps) {
                         if (gaps.size < MAX_ENTRIES) gaps += StallRules.gapEntry(epoch(lastFrame), now - lastFrame, lastCall, StallRules.callAgo(lastCallEnd, lastFrame)).put("seen", seen)
@@ -205,7 +215,7 @@ object MainStallWatch {
         lastFrame = 0L
         lastFrameAt = 0L
         on = true
-        samplerHandler?.postDelayed(gapWatch, SAMPLE_MS)
+        samplerHandler?.postDelayed(gapWatch, GAP_SAMPLE_MS)
         metricsWindow = window?.also { w -> runCatching { w.addOnFrameMetricsAvailableListener(metrics, samplerHandler) } }
         main.setMessageLogging(printer)
         Choreographer.getInstance().postFrameCallback(frames)

@@ -181,7 +181,7 @@ dockel() { echo "[...document.querySelectorAll('.home .dock .app[data-key]')].fi
 # docs/WEB_WINDOWS.md) - round 189 read only windows.list, saw [] with Chrome open as a web window, and pulled/held on it.
 winrects() { local v w; v=$(hcall windows.list "[]" "l=>l.filter(w=>!w.minimised&&!w.away&&w.bounds).map(w=>w.bounds.join(' ')).join(',')"); case $v in ERR*) v="" ;; esac
   w=$(ev "$WWRECTS"); case $w in none|ERR*|"") ;; *) v=${v:+$v,}$w ;; esac; echo "$v"; }
-# freept <window bounds or ""> <way -1|1|0> <length> [min x, 0..1] [min y, 0..1]: an empty spot on home's page (no tile,
+# freept <window bounds or ""> <way -1|1|0> <length> [min x, 0..1] [min y, 0..1] [max y, 0..1, default .75]: an empty spot on home's page (no tile,
 # app, bar, dock; outside the window) with room for a sideways swipe that long (float-touch.sh's: a short swipe doesn't
 # turn a page). Never under ANY window on screen: elementFromPoint sees only home's page, so a spot under a floating
 # window (Chrome left up, a stray Kate) read as empty and the touch went to that window (the drawer's stages, rounds 1-3).
@@ -190,7 +190,7 @@ freept() {
   # left its only roomy spot (2086-2116, between it and the side dock) between grid columns, so a 116 px swipe from
   # the left gap was all the check did and the page "didn't change" (e2e-desktop 1029-1430 [36-page2]).
   local ws; ws=$(winrects)
-  ev "(()=>{const b='$1'.split(' ').filter(Boolean).map(Number),ws='$ws'.split(',').filter(Boolean).map(s=>s.split(' ').map(Number)),r=devicePixelRatio,d=${2:-0},len=${3:-0},W=innerWidth*r;let best=null,room=-1;const x0=innerWidth*${4:-.06},xs=[];for(let x=${4:-.06};x<=.94;x+=.04)xs.push(innerWidth*x);for(const w of [b,...ws])if(w.length===4)for(const e of [(w[2]+61)/r,(w[0]-61)/r])if(e>=x0&&e<innerWidth)xs.push(e);for(let y=${5:-.2};y<=.75;y+=.05)for(const cx of xs){const cy=innerHeight*y,px=cx*r,py=cy*r;if(b.length===4&&px>=b[0]-60&&px<=b[2]+60&&py>=b[1]-120&&py<=b[3]+60)continue;if(ws.some(w=>px>=w[0]-40&&px<=w[2]+40&&py>=w[1]-140&&py<=w[3]+40))continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.webwindow,.tile,.home-tile,.app,.panel,.widget,.island,.owl,button,a,input,textarea,.bar,.dock,[data-key]'))continue;const m=d<0?px-20:d>0?W-20-px:len;if(m>=len)return Math.round(px)+' '+Math.round(py);if(m>room){room=m;best=Math.round(px)+' '+Math.round(py)}}return best||'none'})()"
+  ev "(()=>{const b='$1'.split(' ').filter(Boolean).map(Number),ws='$ws'.split(',').filter(Boolean).map(s=>s.split(' ').map(Number)),r=devicePixelRatio,d=${2:-0},len=${3:-0},W=innerWidth*r;let best=null,room=-1;const x0=innerWidth*${4:-.06},xs=[];for(let x=${4:-.06};x<=.94;x+=.04)xs.push(innerWidth*x);for(const w of [b,...ws])if(w.length===4)for(const e of [(w[2]+61)/r,(w[0]-61)/r])if(e>=x0&&e<innerWidth)xs.push(e);for(let y=${5:-.2};y<=${6:-.75}+1e-9;y+=.05)for(const cx of xs){const cy=innerHeight*y,px=cx*r,py=cy*r;if(b.length===4&&px>=b[0]-60&&px<=b[2]+60&&py>=b[1]-120&&py<=b[3]+60)continue;if(ws.some(w=>px>=w[0]-40&&px<=w[2]+40&&py>=w[1]-140&&py<=w[3]+40))continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.webwindow,.tile,.home-tile,.app,.panel,.widget,.island,.owl,button,a,input,textarea,.bar,.dock,[data-key]'))continue;const m=d<0?px-20:d>0?W-20-px:len;if(m>=len)return Math.round(px)+' '+Math.round(py);if(m>room){room=m;best=Math.round(px)+' '+Math.round(py)}}return best||'none'})()"
 }
 
 # Tasks and windows.

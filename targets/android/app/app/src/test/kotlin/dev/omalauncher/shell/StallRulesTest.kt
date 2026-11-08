@@ -21,6 +21,15 @@ class StallRulesTest {
     }
 
     @Test
+    fun aFrameOverThirtyThreeMsGetsARow() {
+        // The 11-08 shade-scroll run: 49.9 / 41.8 / 33.4 ms shade frames failed the check, none had a native row.
+        assertTrue(StallRules.keepsGap(49))
+        assertTrue(StallRules.keepsGap(34))
+        assertFalse(StallRules.keepsGap(33))
+        assertFalse(StallRules.keepsGap(17))
+    }
+
+    @Test
     fun aGapSaysHowLongAgoTheLastBridgeCallEnded() {
         val g = StallRules.gapEntry(1_793_551_424_514, 59, "perf.native", StallRules.callAgo(lastCallEnd = 10_000, at = 14_580))
         assertEquals("perf.native", g.getString("lastCall"))

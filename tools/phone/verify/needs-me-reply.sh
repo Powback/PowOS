@@ -60,10 +60,32 @@ if [ "${idle:--1}" -le "${E2E_IDLE_S:-120}" ]; then echo "SKIP: needs-me-reply: 
 apk=$("$here/replycheck/build.sh") || { fail "the test sender didn't build (replycheck/build.sh)"; exit 1; }
 "$A" install -r -t "$apk" >/dev/null 2>&1 || { fail "the test sender didn't install ($apk)"; exit 1; }
 INSTALLED=1
-"$A" shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1
+grant=$("$A" shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS 2>&1 | tr -d '\r')
+# The app-op too: OxygenOS keeps its own per-app notification switch for a fresh install beside the runtime permission.
+sh_ "appops set $PKG POST_NOTIFICATION allow" >/dev/null
 sh_ "rm -f /data/data/$PKG/files/last-reply"
+# posted: how many of the sender's notifications Android's notification service holds now (its own record, before any
+# listener or home's list: 0 = never posted, so the fault is the sender's start, not home).
+posted() { sh_ "dumpsys notification --noredact" | grep -c "NotificationRecord(.* pkg=$PKG "; }
 # -f 0x20: FLAG_INCLUDE_STOPPED_PACKAGES (a fresh install is stopped until something starts it).
-"$A" shell am broadcast -f 0x20 -n "$PKG/.Post" -a "$PKG.POST" --es token "$TOKEN" >/dev/null 2>&1
+bc=$("$A" shell am broadcast -f 0x20 -n "$PKG/.Post" -a "$PKG.POST" --es token "$TOKEN" 2>&1 | tr -d '\r' | tail -1)
+n=0; for _ in $(seq 1 10); do n=$(posted); [ "${n:-0}" -gt 0 ] && break; sleep 0.5; done
+if [ "${n:-0}" -eq 0 ]; then
+  # HACK: a second post from root - OxygenOS's OplusAppStartupManager may refuse to start a fresh third-party app's
+  # process for a shell broadcast (the 11-07 run: nothing posted, no reason logged). Real fix: none needed in PowOS
+  # (the sender is the check's own test app); drop this once the diagnosis below shows which caller it lets through.
+  log "not posted after the shell's broadcast ($bc); again as root"
+  bc="$bc / root: $(sh_ "am broadcast -f 0x20 -n $PKG/.Post -a $PKG.POST --es token $TOKEN" | tail -1)"
+  for _ in $(seq 1 10); do n=$(posted); [ "${n:-0}" -gt 0 ] && break; sleep 0.5; done
+fi
+# why: everything that says where the post stopped - for the FAIL line.
+why() {
+  echo "posted in Android: ${n:-0}; broadcast: ${bc:-no answer}; grant: ${grant:-ok};" \
+    "permission: $(sh_ "dumpsys package $PKG" | grep -m1 -oE 'POST_NOTIFICATIONS: granted=[a-z]+')" \
+    "app-op: $(sh_ "appops get $PKG POST_NOTIFICATION" | head -1);" \
+    "process: $(sh_ "pidof $PKG" || true);" \
+    "log: $(sh_ "logcat -d -t 600" | grep -E "PowosReplyCheck|$PKG" | grep -v adbd | tail -4 | cut -c1-200 | tr '\n' '~')"
+}
 
 # 3. Posted, from the sender, with a reply that takes text.
 seen=
@@ -71,7 +93,11 @@ for _ in $(seq 1 20); do
   seen=$(ev 'importShim("./bridge.ts").then(({powos})=>powos.notifications.list()).then(l=>{const n=(l.items||[]).find(i=>i.pkg==="'$PKG'"&&i.title==="'"$WHO"'");return n?(n.actions||[]).some(a=>a.input)?"ok":"no reply action":(l.available?"none":"no notification access")})')
   [ "$seen" = ok ] && break; sleep 0.5
 done
-[ "$seen" = ok ] || { fail "the test notification isn't in home's list from $PKG with a reply action: ${seen:-no answer}"; exit 1; }
+if [ "$seen" != ok ]; then
+  # Home's list from the sender at all (another title = the check's match is wrong, not the post).
+  mine=$(ev 'importShim("./bridge.ts").then(({powos})=>powos.notifications.list()).then(l=>JSON.stringify((l.items||[]).filter(i=>i.pkg==="'$PKG'").map(i=>({title:i.title,actions:i.actions}))))')
+  fail "the test notification isn't in home's list from $PKG with a reply action: ${seen:-no answer} (home's from $PKG: ${mine:-none}; $(why))"; exit 1
+fi
 pass "posted \"$WHO\" from $PKG with a RemoteInput reply"
 
 # 4. What needs me may read the sender, in the page's memory for this run.
