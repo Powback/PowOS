@@ -75,7 +75,10 @@ LOGPID=$!
 
 # The SurfaceFlinger layer named <regex> (its name as --latency takes it, "name#id"), the newest one.
 layer() { sh_ "dumpsys SurfaceFlinger --list" | sed -nE 's|^RequestedLayerState[{]('"$1"'[^{}]*#[0-9]+)( parentId.*)?[}]$|\1|p' | tail -1; }
-# frames <file of --latency output>: "<presented> <missed vsyncs> <max gap ms>" (gaps over 100 ms: idle, not missed).
+# frames <file of --latency output>: "<presented> <missed vsyncs> <longest gap in motion, ms>" - gaps over 100 ms are
+# idle (nothing changed on screen, no frame needed), neither missed nor a hitch. (11-08: the old third field was the
+# longest gap of all, idle ones too - "max 884 ms", "max 1251 ms" read as ~1 s hitches; they were the swipe's
+# start/end with nothing to draw.)
 frames() { python3 - "$1" <<'PY'
 import sys
 L=[l.split() for l in open(sys.argv[1]) if l.strip()]
@@ -84,11 +87,19 @@ p=int(L[0][0]) or 8333333
 a=sorted(int(r[1]) for r in L[1:] if len(r)==3 and 0<int(r[1])<(1<<62))
 miss=0; mx=0
 for x,y in zip(a,a[1:]):
-    g=y-x; mx=max(mx,g)
-    if g<100e6: miss+=max(0,round(g/p)-1)
+    g=y-x
+    if g<100e6: miss+=max(0,round(g/p)-1); mx=max(mx,g)
 print(len(a), miss, round(mx/1e6,1))
 PY
 }
+# The window under test alone where its zones are: at the work area's bottom right (its east and south-east zones off
+# every other window - 11-08 16:52, Steam's window covered Kate's, Dolphin's and Calculator's east zones: RZ7 passed
+# each press on to Steam (raised it, then resized STEAM from its bottom edge in "kate corner"), so every stats line
+# measured another window or none). "ok" or why not.
+wwclear() { ev "importShim('./ui/webwindows.tsx').then(m=>{const a=m.workArea(),W=Math.round((a.right-a.left)*0.5),H=Math.round((a.bottom-a.top)*0.5);m.placeWindow(${1#w},{x:a.right-W-56,y:a.bottom-H-64,w:W,h:H});return 'ok'},e=>'ERR '+e)"; }
+# wwhit <w-id> <selector> <x> <y>: "ok" when a press at x,y (device px) is that window's zone as RZ7 decides it: the
+# top element is in the zone and no other window's frame is under it; else what takes the press.
+wwhit() { wwel "$1" "e=>{const d=devicePixelRatio,x=$3/d,y=$4/d,z=e.querySelector('$2'),l=document.elementsFromPoint(x,y);if(!z||!l.length)return 'nothing at '+x+','+y;if(!z.contains(l[0]))return 'top is '+l[0].tagName+'.'+String(l[0].className).split(' ')[0];const u=l.find(el=>!e.contains(el)),o=u&&u.closest('.webwindow[data-wwid]');return o?'window w'+o.dataset.wwid+' under it (RZ7 passes the press on)':'ok'}"; }
 # kwin_since <line count>: KWin's frame lines after that many lines of its log.
 KLOG=/run/powos-app/hyprland.log
 klines() { rs "wc -l < $KLOG" | tail -1; }
@@ -166,17 +177,27 @@ for app in $APPS; do
   n=${id#w}
   HL=$(layer 'com\.powos\.app/andro\.marchy\.HomeShell')
   case $app in calc) CL=$(layer "${CALC//./\\.}/") ;; *) CL=$(layer "\\[BBQ\\] powos-ww-$n-linux") ;; esac
+  c=$(wwclear "$id"); [ "$c" = ok ] || { bad "$app: placing $id clear of the others: $c"; continue; }
+  sleep 1
   log "== $app: window $id ($key), home layer '$HL', content layer '$CL', body $(wwbody "$id")"
   for g in edge corner; do
     case $g in edge) zone=.ww-edge-e; dx=-300; dy=0 ;; corner) zone=.ww-edge-se; dx=-300; dy=-200 ;; esac
     read -r px py <<<"$(wwpt "$id" "$zone")"
     [ -n "${py:-}" ] || { bad "$app $g: no $zone on screen"; continue; }
+    hit=$(wwhit "$id" "$zone" "$px" "$py")
+    [ "$hit" = ok ] || { bad "$app $g: a press on its $zone at $px,$py isn't its resize: $hit - nothing measured"; continue; }
     read -r bl bt br bb <<<"$(wwbody "$id")"
     k0=$(klines)
     sh_ "dumpsys gfxinfo com.powos.app reset" >/dev/null
     way "$px" "$py" $((px + dx)) $((py + dy)) "$app-$g-in"
     sleep 0.25
-    way $((px + dx)) $((py + dy)) "$px" "$py" "$app-$g-out"
+    # The way back from where the zone IS now (a snap to a tile size or a min size moves it off the finger's end).
+    read -r b2l b2t b2r b2b <<<"$(wwbody "$id")"
+    read -r qx qy <<<"$(wwpt "$id" "$zone")"
+    way "${qx:-$((px + dx))}" "${qy:-$((py + dy))}" "$px" "$py" "$app-$g-out"
+    # The drag resized THIS window: its body's size followed the finger at least half its way.
+    ow=$(( (br - bl) - (${b2r:-$br} - ${b2l:-$bl}) )); oh=$(( (bb - bt) - (${b2b:-$bb} - ${b2t:-$bt}) ))
+    [ $((ow * 2)) -ge $((-dx)) ] && [ $((oh * 2)) -ge $((-dy)) ] || bad "$app $g: the drag didn't resize it (body $bl $bt $br $bb -> ${b2l:-?} ${b2t:-?} ${b2r:-?} ${b2b:-?})"
     # KWin writes its frame line every 5 s: one covering the gesture's end is out by then.
     [ "$app" = calc ] && sleep 1.5 || sleep 5.2; chk "$app $g"
     gfx=$(sh_ "dumpsys gfxinfo com.powos.app")
@@ -187,7 +208,7 @@ for app in $APPS; do
     kl=$(kwin_since "$k0"); kr=$(echo "$kl" | grep -oE 'resized: .*' | tail -2 | tr '\n' ';')
     kw=$(echo "$kl" | sed -nE 's/.*frames: last 5 s ([0-9]+) commits, ([0-9]+) drawn.*/\1 \2/p' | awk '{c+=$1; d+=$2} END{print c+0, d+0}')
     hostl=$(grep -aE "window $n: (resize:|body outgrew)" "$OUT/logcat.txt" | tail -2 | sed -E 's/.*(window [0-9]+: )/\1/' | tr '\n' ';')
-    line="$app $g: shell in $hi frames $mi missed (max ${xi} ms), out $ho frames $mo missed (max ${xo} ms); gfxinfo janky ${jank:-?} p90 ${p90:-?} p99 ${p99:-?} | content in $ci frames (max gap ${cxi} ms), out $co (max gap ${cxo} ms) | kwin commits/drawn $kw, ${kr:-no resize line} | host $hostl"
+    line="$app $g: shell in $hi frames $mi missed (longest ${xi} ms), out $ho frames $mo missed (longest ${xo} ms); gfxinfo janky ${jank:-?} p90 ${p90:-?} p99 ${p99:-?} | content in $ci frames (max gap ${cxi} ms), out $co (max gap ${cxo} ms) | kwin commits/drawn $kw, ${kr:-no resize line} | host $hostl"
     log "$line"; echo "$line" >> "$OUT/summary.txt"
     [ $((mi + mo)) -gt 0 ] && bad "$app $g: $((mi + mo)) missed shell vsyncs while the finger moved (want 0)"
     [ "$app" != calc ] && read -r kc kd <<<"$kw" && [ "${kc:-0}" -gt 0 ] && [ $((kc - kd)) -gt $((kc / 20 + 1)) ] && bad "$app $g: KWin drew $kd of $kc commits"

@@ -176,6 +176,15 @@ frame of drag latency; measure it before turning it on for drags (animations fir
   size, and a window consumer never read past a clipboard event's text, so the stream lost its framing). Fixed in
   `display_consumer.c` (non-blocking, whole messages by the header's size) and `native_consumer.c` (window consumers
   read past the clipboard text); native test `engine/src/test/native` case 6.
+  Bench validity, 11-08 16:51 run (the tip with RS5b): its stats lines measured the wrong window. Steam's window (z
+  top after the first press) covered Kate's, Dolphin's and Calculator's east zones - RZ7 passes a zone press over
+  another window's frame on to that window, so every "edge" drag raised/scrolled Steam (kate 3 shell frames, "1
+  missed"), and "kate corner" (112 frames, 44 missed) was STEAM resized from its bottom edge (host: "window 1: resize:
+  15 relayouts"). The "~1 s hitches" (max 884-1251 ms) were idle gaps (>100 ms, nothing to draw) in the max column, not
+  hitches. ww-resize.sh now places the window under test at the work area's bottom right, checks a press on the zone
+  is its resize (RZ7's own test), starts the way back where the zone IS, FAILs a drag that didn't resize, and prints
+  the longest gap IN motion. Steam (FEX) resizing at 44/112 missed vs Calculator 9/121 is the next lead: the Linux
+  client's relayout CPU against home's renderer.
   Page side, 11-08 (RS5, gate `ww-resize-cost`, four windows, the top one's corner dragged; `GATE_PROFILE=1` prints the
   trace's self ms and style invalidations a move): renders read no layout per window (79 -> 11 reads a move); the
   windows under the dragged one no longer re-render for their masks (WebWindowsOn's `cutAll` writes them after the
