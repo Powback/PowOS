@@ -82,6 +82,22 @@ class HeldAsk(unittest.TestCase):
         self.assertIsNotNone(self.held(LOG_HELD, since=t - 60))
         self.assertIsNone(self.held(LOG_HELD, since=t + 600))
 
+    def test_young_wait_is_not_held_yet(self):
+        # An ordinary launch's own "waiting for user response to ShowInterstitials/CreatingProcess" is continued within
+        # the second, and Steam's "Launching..." popup (nameless, fixed 1350x644, Broforce 11-08 02:29) is up meanwhile:
+        # no question until the wait is ASK_HELD_S old.
+        t = time.mktime(time.strptime("2026-11-07 15:44:19", "%Y-%m-%d %H:%M:%S"))
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "console_log.txt")
+            pathlib.Path(p).write_bytes(LOG_HELD)
+            self.assertIsNone(mod.held_ask("384190", p, min_age=mod.ASK_HELD_S, now=t + 1))
+            self.assertEqual(mod.held_ask("384190", p, min_age=mod.ASK_HELD_S, now=t + 3)[0], "3")
+
+    def test_nameless_dialog_waits_for_a_held_launch(self):
+        src = SOURCE.read_text()
+        self.assertIn("watch_ask()", src)
+        self.assertIn("min_age=ASK_HELD_S", src)
+
     def test_no_log(self):
         self.assertIsNone(mod.held_ask("384190", "/nonexistent/console_log.txt"))
 

@@ -13,6 +13,6 @@ reapers() { local p; for p in $(pgrep -f "SteamLaunch AppId=$APP( |\$)"); do gre
 pgrep -f powos-sleep-gui >/dev/null || { echo "FAIL setup: powos-sleep-gui isn't running (nothing announces launches)"; exit 1; }
 t0=$(date +%s%N)
 setsid steam -applaunch "$APP" </dev/null >/dev/null 2>&1 &
-for _ in $(seq 1 300); do grep -q "\"$APP\"" "$F" 2>/dev/null && break; sleep 0.1; done
+for _ in $(seq 1 300); do grep -qE "\"$APP\": \{[^}]*\"state\": \"(launching|running|asking)\"" "$F" 2>/dev/null && break; sleep 0.1; done
 ms=$(( ($(date +%s%N) - t0) / 1000000 ))
-if grep -q "\"$APP\"" "$F" 2>/dev/null; then echo "ANNOUNCE $ms ms: $(head -c 300 "$F")"; else echo "FAIL announce: no launches.json entry for $APP in $ms ms ($(head -c 200 "$F" 2>/dev/null || echo no file))"; fi
+if grep -qE "\"$APP\": \{[^}]*\"state\": \"(launching|running|asking)\"" "$F" 2>/dev/null; then echo "ANNOUNCE $ms ms: $(head -c 300 "$F")"; else echo "FAIL announce: no launches.json entry for $APP in $ms ms ($(head -c 200 "$F" 2>/dev/null || echo no file))"; fi

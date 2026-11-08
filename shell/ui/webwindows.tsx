@@ -2282,7 +2282,27 @@ function pace(id: number, r: Resizing, now: number) {
  */
 function sizeOf(w: WebWin, body: HTMLElement): string {
   const r = resizing.get(w.id);
-  return r && r.cw > 0 ? `1 ${r.cw} ${r.ch}` : `0 ${body.offsetWidth} ${body.offsetHeight}`;
+  if (r && r.cw > 0) return `1 ${r.cw} ${r.ch}`;
+  const [lw, lh] = layoutSize(body);
+  return `0 ${px(lw)} ${px(lh)}`;
+}
+
+/**
+ * [body]'s layout size in CSS px, unrounded and untransformed (its computed width/height plus its padding and border
+ * for a content-box): offsetWidth/offsetHeight round to whole CSS px, and x dpr that missed the screen - a full-screen
+ * game's window settled at 2268x2439 on the 2268x2440 screen (bf-pacing 11-08 02:19), so Xwayland couldn't flip it.
+ */
+function layoutSize(body: HTMLElement): [number, number] {
+  const cs = getComputedStyle(body);
+  let w = parseFloat(cs.width);
+  let h = parseFloat(cs.height);
+  if (!(w >= 0) || !(h >= 0)) return [body.offsetWidth, body.offsetHeight];
+  if (cs.boxSizing !== "border-box") {
+    const n = (k: string) => parseFloat(cs.getPropertyValue(k)) || 0;
+    w += n("padding-left") + n("padding-right") + n("border-left-width") + n("border-right-width");
+    h += n("padding-top") + n("padding-bottom") + n("border-top-width") + n("border-bottom-width");
+  }
+  return [w, h];
 }
 
 /** The theme's surface as "rrggbb" (the host's fill under a resized app's last buffer), cached by its token's value. */

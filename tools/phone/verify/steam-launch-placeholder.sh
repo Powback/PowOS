@@ -6,7 +6,7 @@
 # show home's launch placeholder (webwindows.tsx steamLaunches: a pending window with steam set and Steam's phase)
 # within PLACEHOLDER_MS (default 3000) of the call, then the game's window takes it (a host id, the same element) and
 # draws (live) within WINDOW_S (default 150). Needs the unfolded inner screen (web windows). FOLDED=1 (queue with
-# --screen cover): the cover screen, where the game's window is an Android task - its full-screen launch window
+# --screen cover; the check folds to it itself - device_state 0 - and resets after): the cover screen, where the game's window is an Android task - its full-screen launch window
 # (SteamLaunchTasks -> LaunchWindows, logcat "its launch window") within PLACEHOLDER_MS, then the game's window
 # becomes THAT task ("launch window: now window"), no second task ("full screen (the app's own)"). The game (APP, default
 # Broforce 274190) is closed after (powos game <appid> stop: the game only, Steam stays); one running already is the
@@ -22,6 +22,12 @@ WIN="importShim('./ui/webwindows.tsx').then(m=>{const w=m.webWins.value.find(w=>
 "$A" push "$here/steam-launch-placeholder-phone.sh" /data/local/tmp/powos-slp.sh >/dev/null || { echo "FAIL setup: can't push the phone side"; exit 1; }
 "$A" shell "su -c 'cp /data/local/tmp/powos-slp.sh /data/powos/root/var/tmp/powos-slp.sh && chmod 755 /data/powos/root/var/tmp/powos-slp.sh'" >/dev/null
 if [ "${FOLDED:-0}" = 1 ]; then
+  # The cover screen made here (device_state 0, as game-present-rate.sh's fold), reset at the end: --screen cover is
+  # only the pill's hint - 11-08 02:40 the job ran on the open inner screen, where the launch is home's web window, and
+  # failed "no-launch-task window-never-took-the-task" with Steam's launch fine (Completed in 2 s).
+  "$A" shell cmd device_state state 0 >/dev/null 2>&1
+  trap '"$A" shell cmd device_state state reset >/dev/null 2>&1' EXIT
+  sleep 3
   "$A" logcat -c >/dev/null 2>&1
   logs() { "$A" logcat -d -s SteamLaunchTasks:I LaunchWindows:I PowosWindow:I WindowTasks:I 2>/dev/null | tr -d '\r'; }
 else
