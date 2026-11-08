@@ -1,0 +1,3 @@
+[2026-11-08 03:10:02] AppID 274190 state changed : Fully Installed,
+[2026-11-08 03:10:04] AppID 274190 state changed : Fully Installed,App Running,
+[2026-11-08 03:20:01] AppID 274190 state changed : Fully Installed,

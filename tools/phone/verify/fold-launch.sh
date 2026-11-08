@@ -18,7 +18,7 @@ APP=557340
 for a in "$@"; do case $a in app:[0-9]*) APP=${a#app:} ;; *) echo "FAIL setup: unknown argument '$a'"; exit 2 ;; esac; done
 OUT=${OUT:-$HOME/.cache/powos-verify/fold-launch-$(date +%F_%H%M%S)}; mkdir -p "$OUT"
 COVER=4630946316123810436 INNER=4630946704981769859
-cleanup() { [ -n "${started:-}" ] && { echo "closing $APP"; user "timeout 20 powos game $APP stop 2>&1 | tail -1"; }; }
+cleanup() { [ -n "${started:-}" ] && { echo "closing $APP"; user "timeout 35 powos game $APP stop 2>&1 | tail -1"; }; }
 WL_TRAP='cleanup; "$A" shell cmd device_state state reset >/dev/null 2>&1; echo "device state reset: $("$A" shell cmd device_state print-state | tr -d "\r")"'
 . "$here/window-lock.sh"
 window_lock fold-launch.sh 120

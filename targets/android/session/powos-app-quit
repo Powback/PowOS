@@ -85,8 +85,11 @@ if [[ -n "$app" ]]; then
   log "$(comm_of "$pid") is Steam game $app's: ending its launch chain (powos game $app stop; Steam stays)"
   [[ "$DRY" == 1 ]] && { log "dry run: nothing ended"; exit 0; }
   if command -v powos >/dev/null; then
-    timeout 20 powos game "$app" stop 2>&1 | while read -r l; do log "powos game: $l"; done
-    log "game $app: done (exit ${PIPESTATUS[0]})"
+    timeout 35 powos game "$app" stop 2>&1 | while read -r l; do log "powos game: $l"; done
+    rc=${PIPESTATUS[0]}; log "game $app: done (exit $rc)"
+    # 4: Steam's cloud sync of the game still runs (lib/game.sh _game_steam_close) - left for Steam to finish; killing
+    # it mid-sync leaves a sync-conflict question that holds every later launch of the game.
+    [[ $rc == 4 ]] && exit 0
   else
     log "no powos command"
   fi

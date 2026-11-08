@@ -1,0 +1,8 @@
+[2026-11-08 03:10:02] GameAction [AppID 274190, ActionID 12] : LaunchApp changed task to SynchronizingCloud with ""
+[2026-11-08 03:10:03] GameAction [AppID 274190, ActionID 12] : LaunchApp changed task to CreatingProcess with ""
+[2026-11-08 03:10:04] Game process added : AppID 274190 "/home/powos/.local/share/Steam/ubuntu12_32/reaper SteamLaunch AppId=274190 -- /home/powos/.local/share/Steam/steamapps/common/Broforce/Broforce_beta.x86_64", ProcID 4242, IP 0.0.0.0:0
+[2026-11-08 03:10:04] GameAction [AppID 274190, ActionID 12] : LaunchApp changed task to Completed with ""
+[2026-11-08 03:12:30] GameAction [AppID 384190, ActionID 14] : LaunchApp changed task to SynchronizingCloud with ""
+[2026-11-08 03:20:01] Game process removed: AppID 274190 "/home/powos/.local/share/Steam/ubuntu12_32/reaper SteamLaunch AppId=274190 -- /home/powos/.local/share/Steam/steamapps/common/Broforce/Broforce_beta.x86_64", ProcID 4242
+[2026-11-08 03:20:01] GameAction [AppID 274190, ActionID 13] : ExitApp changed task to SynchronizingCloud with ""
+[2026-11-08 03:20:04] GameAction [AppID 274190, ActionID 13] : ExitApp changed task to Completed with ""

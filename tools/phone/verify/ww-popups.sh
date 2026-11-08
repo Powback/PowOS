@@ -76,7 +76,7 @@ read -r SW SX SY SWW SWH <<<"$(steamwin)"
 STEAM_BEFORE="" STEAM_NEW="" b0=""
 restore_steam() {
   if [ -z "$STEAM_BEFORE" ] && [ -n "${STEAM_STARTED:-}" ]; then
-    ww_us 'export XDG_RUNTIME_DIR=/run/powos-app DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus; timeout 20 powos game 274190 stop --steam' >/dev/null
+    ww_us 'export XDG_RUNTIME_DIR=/run/powos-app DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus; timeout 35 powos game 274190 stop --steam' >/dev/null
     say "Steam closed: this check started it"
   else
     local w; [ -n "${STEAM_STARTED:-}" ] && STEAM_NEW=$(comm -13 <(echo "$b0") <(wwids l:steam) | xargs)  # also after a failed wait

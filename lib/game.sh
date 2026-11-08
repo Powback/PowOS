@@ -284,7 +284,8 @@ Verbs (thin wrappers — each dispatches to the subsystem that owns it):
   play                    Launch the game
   freeze                  Freeze it now with Steam (0% CPU, kept in RAM)  → powos-sleep-gui (unified sleep)
   thaw                    Thaw it and raise its window (what launching it does while it runs)
-  stop [--steam]          Close it (its whole launch chain, wineserver too) within ~3 s; --steam closes Steam
+  stop [--steam]          Close it (its whole launch chain, wineserver too) within ~3 s, then wait (<=20 s) for
+                          Steam's exit steps (cloud sync: never killed mid-sync, left to Steam: exit 4); --steam closes Steam
                           as well: asked to shut down, killed after 6 s (a frozen or dying client never stalls it)
   status                  (a Steam game outside the mod registry) running / frozen, CPU of its tree
   compat [status]         Which way it runs: native Linux build / ARM64 Proton / x86 Proton, what each launch measured
@@ -555,31 +556,71 @@ _game_descendants() {
              m = split(c[p], k, " "); for (j = 1; j <= m; j++) q[++n] = k[j]}}' || true
 }
 
-# _game_steam_close <appid> <1: Steam too>: closed within ~3 s (the game) / ~8 s (with Steam), for certain. TERM the
-# game's chain, KILL what's left after 2 s; Steam: thawed (a frozen client never answers), asked with -shutdown, KILLed
-# after 6 s; then one more sweep for anything a launcher started meanwhile. Never waits on a client: SIGKILL ends
-# frozen tasks too (cgroup v2), every wait is bounded, the wait loop only stats /proc.
+# _game_steam_close <appid> <1: Steam too>: the game closed gracefully, then Steam's exit steps for it awaited; Steam
+# (with --steam) asked to shut down only after them. TERM the game's chain; what is left after 2 s is KILLed - unless
+# Steam's log says a cloud sync of the game runs (_game_steam_exit_state): that is never killed. Once the chain is
+# gone, Steam's exit steps (cloud sync, "App Running" cleared) are awaited, all within ~20 s. A sync still running
+# then: the game is left for Steam to finish (exit 4, logged) - killing it or Steam mid-sync left Broforce held on a
+# sync-conflict question 11-08 ~03:20 ("Steam is asking something"), which then SKIPped every game check.
+# Steam: thawed (a frozen client never answers), asked with -shutdown, KILLed after 6 s; then one more sweep for
+# anything a launcher started meanwhile. Every wait is bounded and only stats /proc (and the log every 0.5 s).
 # _gsc_steam_chain: Steam's client pid and its ancestors, space-separated - kept alive when only the game closes.
 _gsc_steam_chain() {
     local a; a="$(cat "$HOME/.steam/steam.pid" 2>/dev/null || true)"
     while [[ -n "$a" && "$a" -gt 1 ]]; do printf '%s ' "$a"; a="$(awk '{print $4}' "/proc/$a/stat" 2>/dev/null || true)"; done
 }
 
+# _game_steam_exit_state <appid> <since: epoch s> [<log dir>]: what Steam's logs (console_log + content_log, the ones
+# bf-ask.sh reads) say about APP's exit, one word:
+#   sync         its newest GameAction (of the last 10 min) is "<Action> changed task to SynchronizingCloud": a cloud
+#                sync of the game runs (an ExitApp's upload, or a launch's download) - never kill the game meanwhile
+#   ask <what>   its newest GameAction waits on the user ("waiting for user response to <what>") - nobody answers it here
+#   running      Steam's newest "AppID APP state changed : ..." still says Running (Steam hasn't finished the exit)
+#   done         Steam logged APP's exit (a state change without Running, or a finished action) since <since>
+#   quiet        nothing about APP since <since> (Steam hasn't noticed yet, or it is frozen)
+# HACK: Steam's logs are the signal - Steam publishes no cloud-sync/exit event a client can subscribe to (its CEF UI's
+# SteamClient.Apps.RegisterForGameActionStart/End is the real API, inside steamwebhelper only). Real fix: a Steam UI
+# plugin reporting game actions over the session bus (the same one powos-sleep-gui's SteamLaunches waits for).
+_game_steam_exit_state() {
+    local app=$1 d=${3:-${POWOS_STEAM_LOGS:-$HOME/.local/share/Steam/logs}} since recent
+    since=$(date -d "@$2" '+%F %T' 2>/dev/null || date -r "$2" '+%F %T')
+    recent=$(date -d "@$(( $2 - 600 ))" '+%F %T' 2>/dev/null || date -r "$(( $2 - 600 ))" '+%F %T')
+    { tail -c 1048576 "$d/console_log.txt" 2>/dev/null; echo; tail -c 262144 "$d/content_log.txt" 2>/dev/null; } | tr -d '\r' \
+        | awk -v app="$app" -v since="$since" -v recent="$recent" '
+        { if (!match($0, /^\[[0-9-]+ [0-9:]+\]/)) next; ts = substr($0, 2, RLENGTH - 2) }
+        index($0, "GameAction [AppID " app ", ActionID ") && ts >= recent { at = ts; act = $0 }
+        index($0, "AppID " app " state changed : ") { st = $0; sts = ts }
+        index($0, "AppID " app " ") && ts >= since { heard = 1 }
+        END {
+            if (act ~ /changed task to SynchronizingCloud/) { print "sync"; exit }
+            if (act ~ /waiting for user response to /) { w = act; sub(/.*waiting for user response to /, "", w); print "ask " substr(w, 1, 80); exit }
+            if (st != "") { s = st; sub(/.*state changed : /, "", s); n = split(s, p, "->"); s = p[n]
+                            if (s ~ /Running/) { print "running"; exit } }
+            if (heard || (st != "" && sts >= since) || (act != "" && at >= since)) print "done"; else print "quiet"
+        }'
+}
+
 _game_steam_close() {
-    local app=$1 all=$2 t0 g s="" left how="" me=" $$ ${BASHPID:-} $PPID "  # me: never kill ourselves (_gsc_set)
+    local app=$1 all=$2 t0 g s="" left how="" st me=" $$ ${BASHPID:-} $PPID "  # me: never kill ourselves (_gsc_set)
     t0=$(date +%s%N)
     # The game alone: Steam's client and its launchers stay, even when one carries the game's SteamAppId (a game that
     # started Steam itself passes its environment on) - powos-app-quit (a swiped game's card) relies on this.
     [[ $all == 1 ]] || me+="$(_gsc_steam_chain)"
     g=$(_gsc_set $(_game_launch_pids "$app"))
     [[ -n "$g" ]] && kill -TERM $g 2>/dev/null || true
+    left=$(_gsc_game_wait "$app" "$g" "$(( t0 / 1000000000 - 1 ))")
+    st=${left%%|*}; left=${left#*|}
+    if [[ $st == sync ]]; then
+        pok "$app: left to Steam - its cloud sync still runs after $(( ($(date +%s%N) - t0) / 1000000 )) ms (game pids: ${left:-none}); not killed$([[ $all == 1 ]] && echo ', Steam not shut down')"
+        return 4
+    fi
+    [[ $st == ask* ]] && how="Steam asks: ${st#ask }"
     if [[ $all == 1 ]]; then
         s=$(_gsc_set $(_game_steam_pids))
-        [[ -z "$s" ]] || { _gsc_steam_shutdown; how="Steam asked to shut down"; }
+        [[ -z "$s" ]] || { _gsc_steam_shutdown; how="${how:+$how, }Steam asked to shut down"; }
+        left=$(_gsc_wait "$left" "$s")
+        [[ -n "$left" && -n "$s" ]] && how="${how:+$how, }killed after 6 s"
     fi
-    left=$(_gsc_wait "$g" "$s")
-    [[ -n "$left" && $all == 1 ]] && how="${how:+$how, }killed after 6 s"
-    [[ -z "$left" && -n "$how" ]] && how="Steam shut down on request"
     left=$(_gsc_sweep "$app" "$all" "$left")
     if [[ -n "$left" ]]; then
         perr "still running after $(( ($(date +%s%N) - t0) / 1000000 )) ms: $(ps -o pid=,stat=,comm= -p "$(echo $left | tr ' ' ,)" 2>/dev/null | tr '\n' ';')"
@@ -588,12 +629,41 @@ _game_steam_close() {
     pok "$app$([[ $all == 1 ]] && echo ' + Steam') closed in $(( ($(date +%s%N) - t0) / 1000000 )) ms${how:+ ($how)}"
 }
 
+# _gsc_game_wait <appid> <game pids> <since epoch>: up to ~20 s for the game's chain to end and Steam to finish its exit
+# steps for it; KILLs what is left at 2 s unless Steam's log says a cloud sync of the game runs. Prints
+# "<last state>|<pids left>" (state: _game_steam_exit_state's word; "sync" + pids = left to Steam).
+_gsc_game_wait() {
+    local i left st=quiet gone=0 killed=0
+    for i in $(seq "${POWOS_GAME_STOP_TICKS:-200}"); do  # 0.1 s ticks: ~20 s
+        left=$(_gsc_alive $2)
+        (( i % 5 == 1 )) && st=$(_game_steam_exit_state "$1" "$3")
+        if [[ -z "$left" ]]; then
+            (( ++gone ))
+            # Steam logs "Game process removed" a moment before an exit sync starts: "done" counts after 1 s, silence
+            # after 2 s; "running" (exit steps not logged done) is awaited 5 s - a frozen Steam logs nothing more.
+            case $st in
+                sync) ;;
+                running) (( gone > 50 )) && break ;;
+                done) (( gone > 10 )) && break ;;
+                quiet) (( gone > 20 )) && break ;;
+                *) break ;;
+            esac
+        elif (( i >= 20 && killed == 0 )) && [[ $st != sync ]]; then
+            kill -KILL $left 2>/dev/null || true; killed=1
+        fi
+        sleep 0.1
+    done
+    echo "$st|$left"
+}
+
 # <pid>...: the set, sorted, without $me (_game_steam_close's shell and its parent), on one line.
 _gsc_set() {
     local p
     for p in "$@"; do [[ "$me" == *" $p "* ]] || echo "$p"; done | sort -un | tr '\n' ' '
 }
-_gsc_alive() { local p; for p in $*; do [[ -d /proc/$p ]] && printf '%s ' "$p"; done; return 0; }
+# <pid>...: those still running (a zombie has ended: its parent just hasn't reaped it yet).
+_gsc_alive() { local p st; for p in $*; do st=$(cat "/proc/$p/stat" 2>/dev/null) || continue; st=${st##*) }
+    [[ ${st%% *} == Z ]] || printf '%s ' "$p"; done; return 0; }
 
 # Steam thawed (a frozen client never answers) and asked to shut down.
 _gsc_steam_shutdown() {
@@ -603,7 +673,7 @@ _gsc_steam_shutdown() {
     (timeout -k 1 3 steam -shutdown >/dev/null 2>&1 </dev/null &)
 }
 
-# <game pids> <steam pids>: up to 6 s for them to end, the game's KILLed at 2 s; prints what is left.
+# <game pids left> <steam pids>: up to 6 s for them to end, the game's KILLed at 2 s; prints what is left.
 _gsc_wait() {
     local i left
     for i in $(seq 60); do

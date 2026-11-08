@@ -129,7 +129,7 @@ util_hourly() { local now; now=$(date +%s)
 # isn't for that game after all (a dropped job, the window ended) - the same close bf-stop.sh does, and its marker.
 warm_stop() { local a; a=$(cat "$Q/warm" 2>/dev/null); rm -f "$Q/warm"; case $a in ''|*[!0-9]*) return 0 ;; esac
   echo "$(date +%T) closing app $a: ${1:-left warm for a next job of it that never came}"
-  user_sh "export XDG_RUNTIME_DIR=/run/powos-app DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus; timeout 20 powos game $a stop; timeout 5 powos sleep never --remove steam"
+  user_sh "export XDG_RUNTIME_DIR=/run/powos-app DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus; timeout 35 powos game $a stop; timeout 5 powos sleep never --remove steam"
   phone_sh "rm -f /var/tmp/powos-warm-$a" >/dev/null; }
 # warm_takes <dir> <cmd...>: the check reuses a game the job before left warm - a bf-pacing.sh (relative paths from the
 # job's dir) that reads the warm marker. 11-07 12:08: ABZU jobs queued with frozen copies of bf-pacing

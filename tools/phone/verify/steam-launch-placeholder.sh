@@ -59,7 +59,7 @@ if [ "${FOLDED:-0}" = 1 ]; then
   logs | grep -q "launch window: now window" || fails="$fails window-never-took-the-task"
   logs | grep -q "full screen (the app's own)" && fails="$fails second-task"
   q=$(steam_ask)
-  session "timeout 20 powos game $APP stop 2>&1 | tail -1" | tee -a "$OUT/run.txt"
+  session "timeout 35 powos game $APP stop 2>&1 | tail -1" | tee -a "$OUT/run.txt"
   [ -z "$fails" ] && { echo "RESULT PASS folded launch task ${seen} ms"; exit 0; }
   logs > "$OUT/logcat.txt"; echo "artefacts: $OUT (logcat.txt: the launch's window tags)"
   [ -n "$q" ] && { echo "SKIP Steam asked about $APP during the launch: $q (left unanswered)$fails"; exit 3; }
@@ -95,7 +95,7 @@ case $how in
   *) fails="$fails window($w)" ;;
 esac
 q=${q:-$(steam_ask)}
-session "timeout 20 powos game $APP stop 2>&1 | tail -1" | tee -a "$OUT/run.txt"
+session "timeout 35 powos game $APP stop 2>&1 | tail -1" | tee -a "$OUT/run.txt"
 # Home after the game (the user's way back): its page answers again within 15 s - one that doesn't is home frozen.
 back=""; for _ in $(seq 1 15); do [ "$(CDP_TIMEOUT_S=5 ev '1+1')" = 2 ] && { back=$(since); break; }; sleep 1; done
 echo "home's page after the game: ${back:+answers at $back ms}${back:-NO ANSWER in 15 s}" | tee -a "$OUT/run.txt"
