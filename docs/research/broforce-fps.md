@@ -216,6 +216,29 @@ dashes). Pass: sf >= 110 and no "render cap" in the layers line; the app logs `w
 If the cap stays (OTI ignores both votes), the next lever is finding what OTI's "AppRequest" takes (SurfaceFlinger strings: findTargetLayer / appRequestLayerReady - a target layer of the focused
 process, every other visible layer "negligible").
 
+## 11-08 play at 57/120: still ColorOS's no-touch cap, not the game, DXVK, Xwayland or KWin (agent bf-60-cap)
+
+After KWin 3.73/3.74 + Xwayland -14 (jobs 20261108-030028 / -030143, `bf-pacing.sh play`, settled 2268x2440, front
+PowosWindowActivity): `layers play: game 57.2 > xwayland 57.1 (cb 57.1, timeouts 0.0/s) > kwin 57.5 > consumer 40.0 >
+sf 57.0 > panel 120 Hz (render 120-120, render cap 60 oti-adfr)`, frame ms p50 16.5 = every 2nd 120 Hz vsync. The
+game, Xwayland's frame callbacks and KWin's commits all follow SurfaceFlinger's 60 Hz wake-up (KWin's frame
+callbacks pace on the consumer's buffer release, which pace on SurfaceFlinger), so no stage below SF imposes 60.
+`--oplus vrr` (vrr.txt of the run): `mCvtFps: 60`, `CVT: CurrentRate [60, oti-adfr]` enabled 03:05:43 (before the
+03:09:33 launch, the phone untouched since) and never released; OTI `StateCollect: shouldPause 0, appRequestSceneReady 0`,
+`AppRequest: fps=[0], layer=[null]` - the sf-latch-60 surface votes are not an OTI AppRequest (that comes only from
+ColorOS's sw_whitelist_3rd packages, oti-cap above); `RefreshRateDirector IsGameMode: 0, IsBlackList: 0`; display
+policy primary/appRequest [120, 120] (the game-refresh mode vote works). The cap layer is ColorOS's touch idle, which a
+verify run (nobody touches) always meets; per the user (11-06 "dw about 60 no touch") the 120 target is judged with
+the screen touched, so the run must touch. ColorOS's own switch (`settings secure settings_shutdown_adfr_oti`) stays
+unused: it is a user/system setting, not ours to flip for a measurement.
+
+Change: `INPUT=touch|key|pad` on bf-pacing.sh (bf-lib.sh `input_inject`: a tap at the screen's centre / SCROLL_LOCK /
+THUMBL each second over the 30 s measurement, marked as the tools' own input) and an `oti <mode>:` block per run (OTI
+state, CVT rate, the game layers' requestedFrameRate, the app's "surface votes"). Queue:
+`queue.sh add --screen inner broforce-fps-low-cpu-bound-under-fex env INPUT=touch tools/phone/verify/bf-pacing.sh play`.
+Pass: no "render cap" in the layers line and `oti play:` CVT `[0, null]`; then the play fps is the game's own (11-06
+live play with touch: 38 fps, no render cap, CPU/thermal-bound) and the next lever is the main thread, not the display.
+
 ## Real play at 38 fps: the vendor's thermal gear, not a profile (2026-11-06, agent play-cpu-cap)
 
 Live capture of the user's own Broforce play (11-06 ~13:20-13:30, unfolded inner 2440x2268 @120 Hz, direct scanout off):

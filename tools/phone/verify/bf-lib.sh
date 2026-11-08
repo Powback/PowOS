@@ -61,6 +61,21 @@ if [ -n "${BF_ADB:-}" ]; then
   # not the HOME intent: that would be a Home press).
   front_back() { case $1 in "") ;; */*PowosWindowActivity*|*/*SwitcherActivity*) "$BF_ADB_PATH" shell "am start -n com.powos.app/andro.marchy.HomeShell >/dev/null 2>&1" ;;
     *) "$BF_ADB_PATH" shell "am start -n $1 >/dev/null 2>&1" ;; esac; }
+  # INPUT=touch|key|pad (bf-pacing.sh; oti-cap 11-06, bf-60-cap 11-08): what a player who touches the
+  # screen / only uses keys / a pad sees. ColorOS's touch idle (OTI, `dumpsys SurfaceFlinger --oplus vrr` "CVT:
+  # CurrentRate [60, oti-adfr]") wakes SurfaceFlinger at 60 Hz 2.5 s after the last touch under a 120 Hz panel, so a
+  # run nobody touches measures that 60 (user 11-06: "dw about 60 no touch" - judge 120 with the screen touched).
+  # input_inject <secs>: one phone-side loop, a tap at the screen's centre / keyboard SCROLL_LOCK / gamepad THUMBL
+  # every ~1 s for <secs> s (`input`: no touch IRQ, so the checks' own touch abort stays quiet; marked as the tools'
+  # own input for idle.sh). Nothing when INPUT is unset.
+  input_check() { case ${INPUT:-} in ''|touch|key|pad) ;; *) echo "INPUT: touch, key or pad"; return 2 ;; esac
+    [ -z "${INPUT:-}" ] || echo "input probe: INPUT=$INPUT, one event/s over the measurement"; }
+  input_inject() { local ev
+    case ${INPUT:-} in touch) ev='input tap $((${s%x*} / 2)) $((${s#*x} / 2))' ;;
+      key) ev='input keyboard keyevent KEYCODE_SCROLL_LOCK' ;; pad) ev='input gamepad keyevent KEYCODE_BUTTON_THUMBL' ;;
+      *) return 0 ;; esac
+    "$BF_ADB_PATH" shell "echo \$((\$(date +%s) + $1 + 5)) > /data/local/tmp/powos-selfinput
+      nohup sh -c 's=\$(wm size | tail -1 | sed \"s/.*: //\"); e=\$((\$(date +%s) + $1)); while [ \$(date +%s) -lt \$e ]; do $ev; sleep 1; done' >/dev/null 2>&1 &"; }
   return 0
 fi
 # APP / GAME / WIN_NAME: the game under test - any Steam app id (default 274190, Broforce, the test case); GAME =

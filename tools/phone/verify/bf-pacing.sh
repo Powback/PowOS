@@ -18,6 +18,9 @@
 # the queue's "precond" (queue.sh rc3_kind, from the touch source): a FAIL precondition at its 3rd try, not endless
 # retries; its line names what home showed instead (homewhy: the switcher up, the web windows). QUEUE_NEXT_APP=APP
 # (the queue's next job is this game too): the game is left running ("WARM:"), and that job reuses it for the same mode. Artefacts: OUT (~/.cache/powos-verify/bfp-*).
+# ColorOS touch idle (docs/research/broforce-fps.md): INPUT=touch|key|pad injects one event/s over the 30 s measurement
+# (bf-lib.sh input_inject) - a run nobody touches measures ColorOS's 60 Hz no-touch cap. Every run prints "oti <mode>:"
+# lines: ColorOS's OTI state + CVT rate and the game layers' requestedFrameRate votes at the end of the measurement.
 # Valid only with the game ON SCREEN: a display ON, its task (PowosWindowActivity) in front and that task's SurfaceView
 # layer there (unfolded: home in front and its full-screen web window's layer composed, bf-onscreen.sh), before and after the 30 s - else "INVALID: ..." and exit 3 (the next window). The 03:58 run of
 # 2026-10-24 measured a game with no task surface (no SurfaceView layer, nothing resumed, no screen recording: the
@@ -86,6 +89,7 @@ front=$(echo "$ph" | grep -m1 topResumedActivity | sed -nE 's#.* ([a-zA-Z0-9_.]+
 steam_before=$(echo "$ph" | sed -n 's/^steam=//p')
 fold=$(echo "$ph" | sed -nE "s/.*mCommittedState.*name='([A-Z_]+)'.*/\1/p")
 echo "front=${front:-?} steam_before=${steam_before:+yes} fold=$fold"
+input_check || exit 2
 restore() {  # restore [warm]: warm = the queue's next job is this game too (QUEUE_NEXT_APP): leave it running for it
   if [ "${1:-}" = warm ] && [ "${QUEUE_NEXT_APP:-}" = "$APP" ] && [ $users = 0 ] && [ -z "$CFG_TO" ]; then
     pill "leaving $NAME up for the next check"
@@ -198,6 +202,7 @@ for mode in "$@"; do
   # while something happens, so a stalled game leaves none in the window - the lines before it (11-08 02:02: "game 37 >
   # xwayland 38" from before the stall while KWin got 0 commits; the stall read as the web window's consumer's).
   l1=$("$A" shell "su -c 'wc -l < $LOG'" | tr -d '\r ')
+  input_inject 32
   "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof; nohup sh /data/local/tmp/powos-bf-present.sh 30 \"PowosWindowActivity|SurfaceView|powos-direct|powos-ww-[0-9]+-linux|steam_app${WIN_NAME:+|$WIN_NAME}\" /data/local/tmp/bfp >/dev/null 2>&1 &
     nohup sh /data/local/tmp/powos-bf-prof.sh 30 /data/local/tmp/bfprof >/dev/null 2>&1 &'"
   pill "$lbl: measuring frames (30 s)"; nap 30
@@ -208,10 +213,14 @@ for mode in "$@"; do
   "$A" shell "su -c 'mkdir -p /data/local/tmp/bfp; for i in \$(seq 30); do [ -f /data/local/tmp/bfprof/done ] && ! pgrep -f powos-bf-present.sh >/dev/null && break; sleep 1; done
     { head -n $l1 $LOG | tail -n +$((l0 + 1)) | grep -E \"Xwayland KGSL|window task\"; echo \"Xwayland KGSL: == measuring\"; echo \"window task == measuring\"
       tail -n +$((l1 + 1)) $LOG | grep -E \"Xwayland KGSL|window task\"; } > /data/local/tmp/bfp/log.txt; cp /data/local/tmp/bfprof/prof.txt /data/local/tmp/bfp/ 2>/dev/null
-    logcat -d -t 400 -s Andromarchy:I | grep \" pacing: \" | tail -8 > /data/local/tmp/bfp/consumer.txt; chmod -R 755 /data/local/tmp/bfp'" >/dev/null
+    logcat -d -t 400 -s Andromarchy:I | grep \" pacing: \" | tail -8 > /data/local/tmp/bfp/consumer.txt
+    dumpsys SurfaceFlinger --oplus vrr | grep -A3 -E \"^OTI Status|^CVT:\" | grep -vE \"^ +\\{ fps\" > /data/local/tmp/bfp/oti.txt
+    dumpsys SurfaceFlinger | grep requestedFrameRate | grep -E \"SurfaceView|powos-direct|PowosWindowActivity\" | sed -E \"s/^[^A-Za-z]*//\" | head -6 >> /data/local/tmp/bfp/oti.txt
+    logcat -d -t 2000 -s Andromarchy:I | grep \"surface votes\" | tail -4 >> /data/local/tmp/bfp/oti.txt; chmod -R 755 /data/local/tmp/bfp'" >/dev/null
   "$A" pull /data/local/tmp/bfp "$M/" >/dev/null && mv "$M"/bfp/* "$M"/ && rmdir "$M/bfp"
   grep "Xwayland KGSL" "$M/log.txt" > "$M/kgsl.txt"; grep "window task" "$M/log.txt" > "$M/kwin.txt"; rm -f "$M/log.txt"
   sed "s/^/kwin $mode: /" "$M/kwin.txt" | tail -5; sed "s/^/prof $mode: /" "$M/prof.txt" 2>/dev/null
+  sed "s/^/oti $mode: /" "$M/oti.txt" 2>/dev/null
   "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof'"
   # The next mode needs a fresh start (its dxvk.conf); the last one is closed (or frozen again) by restore.
   [ $mi -lt $# ] && { pill "$lbl: closing the game"; asuser bf-stop.sh >/dev/null; }
