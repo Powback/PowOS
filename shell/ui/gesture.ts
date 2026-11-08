@@ -20,6 +20,7 @@
 import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { dropKeyboard } from "./keyboard.ts";
+import { viewport } from "./viewport.ts";
 import { panelTicks } from "./haptics.ts";
 import { overPull, overRelease } from "./overpull.ts";
 import { inWindow } from "./desktops.ts";
@@ -151,7 +152,7 @@ let followers: Follower[] | null = null;
 const tables = new WeakMap<HTMLElement, { key: string; table: Keyframe[] }>();
 
 function tableOf(el: HTMLElement): Keyframe[] {
-  const key = `${innerWidth}x${innerHeight} ${el.offsetWidth}x${el.offsetHeight} ${el.closest(".home")?.classList.contains("pill-below")} ${el.closest(".home")?.classList.contains("search-parked")} ${el.closest(".home")?.classList.contains("from-button")} ${document.querySelector(".home")?.className.match(/dock-(bottom|left|right)/)?.[0]}`;
+  const key = `${viewport().w}x${viewport().h} ${el.offsetWidth}x${el.offsetHeight} ${el.closest(".home")?.classList.contains("pill-below")} ${el.closest(".home")?.classList.contains("search-parked")} ${el.closest(".home")?.classList.contains("from-button")} ${document.querySelector(".home")?.className.match(/dock-(bottom|left|right)/)?.[0]}`;
   const had = tables.get(el);
   if (had?.key === key) return had.table;
   const st = el.style;
@@ -797,7 +798,7 @@ function claimVertical(gs: Gesture, dy: number): Gesture["mode"] {
 /** Up on home: the launcher. */
 function claimUp(gs: Gesture): Gesture["mode"] {
   // The pull-up corners (state.ts pullPanels): from the left half PowOS AI's panel, from the right the apps.
-  const kind = pullPanels.value === "on" && gs.x0 < innerWidth / 2 ? "ai" : "apps";
+  const kind = pullPanels.value === "on" && gs.x0 < viewport().w / 2 ? "ai" : "apps";
   // Home's page: the launcher is the overlay (pull.tsx) - the host's own pull takes the finger; without it, asked.
   if (!launcherIsOverlay) {
     pullKind.value = kind;
@@ -942,7 +943,7 @@ const logSwipe = (msg: string) => console.info(`pageswipe ${msg}`);
  */
 function settlePages(gs: Gesture) {
   const total = pageDrag.value ?? 0;
-  const width = widthOf(document.querySelector(".pages")) || innerWidth;
+  const width = widthOf(document.querySelector(".pages")) || viewport().w;
   pageDrag.value = null;
   const dx = gs.last[0] - gs.x0;
   const vx = releaseVx(gs);

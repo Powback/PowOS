@@ -46,6 +46,7 @@ import { remoteOpen } from "../remote.ts";
 import { glassesOpen } from "../glasses/open.ts";
 import { agentsView } from "../agents.ts";
 import { springFast } from "./spring.ts";
+import { viewport } from "./viewport.ts";
 
 /**
  * A pull down on home is the system shade's (ShadeHost, the same window, pull and blur as over an app): home has no
@@ -78,20 +79,71 @@ export function fullScreenAppRegion(): PageRect {
   const inset = (name: string) => parseFloat(css.getPropertyValue(name)) || 0;
   const top = Math.max(24, inset("--inset-top"));
   const bottom = Math.max(24, inset("--inset-bottom"));
-  return { left: 0, top, width: innerWidth, height: Math.max(0, innerHeight - top - bottom) };
+  const view = viewport();
+  return { left: 0, top, width: view.w, height: Math.max(0, view.h - top - bottom) };
 }
 
 function pageRect(r: DOMRect): PageRect {
   return { left: r.left, top: r.top, width: r.width, height: r.height };
 }
 
-/** Whether [el] scrolls along y (or x) and has more to show that way. */
-function scrolls(el: Element): boolean {
-  const up = el.scrollHeight > el.clientHeight + 1;
-  const side = el.scrollWidth > el.clientWidth + 1;
-  if (!up && !side) return false;
+/** [el]'s scroll axes by its style (overflow auto / scroll): y, x, or none. A style read only, never a layout one. */
+function scrollAxes(el: Element): { y: boolean; x: boolean } | null {
   const s = getComputedStyle(el);
-  return (up && /auto|scroll/.test(s.overflowY)) || (side && /auto|scroll/.test(s.overflowX));
+  const y = /auto|scroll/.test(s.overflowY);
+  const x = /auto|scroll/.test(s.overflowX);
+  return y || x ? { y, x } : null;
+}
+
+/** Whether [el] (a scroller by its style) has more to show along an axis it scrolls. */
+function hasMore(el: Element, axes: { y: boolean; x: boolean }): boolean {
+  return (axes.y && el.scrollHeight > el.clientHeight + 1) || (axes.x && el.scrollWidth > el.clientWidth + 1);
+}
+
+/**
+ * Home's scrollers by style - the elements that may scroll - found by one walk of home and kept until home's DOM changes
+ * (a node added or removed, a class that isn't a swipe's own state). The user's trace perf-1794158824368 (11-08 18:27,
+ * swiping home's pages): the walk ran on every page change, reading every element's scroll and client sizes and then
+ * its style - "scrolls (ui/home.tsx:89)" 1200 ms of self time, 70-170 ms per run, right as each swipe settled. Now a
+ * page change reads the few kept scrollers' sizes and rects; the walk reads style only (no layout).
+ */
+let scrollers: { el: Element; axes: { y: boolean; x: boolean } }[] | null = null;
+/** Class tokens a swipe or settle toggles (gesture.ts applyTrack, pagedots.tsx, grid.tsx): none sets an overflow. */
+const SWIPE_STATE = new Set(["sliding", "dragging", "live", "away", "seated"]);
+const tokens = (v: string | null) => new Set((v ?? "").split(/\s+/).filter(Boolean));
+/** A class token in [a] but not [b] that isn't a swipe's own state. */
+const gained = (a: Set<string>, b: Set<string>) => [...a].some((t) => !b.has(t) && !SWIPE_STATE.has(t));
+/** Whether a mutation could change which elements scroll: a node added / removed, or a class beyond a swipe's state. */
+function reshapes(m: MutationRecord): boolean {
+  if (m.type !== "attributes") return true;
+  const was = tokens(m.oldValue);
+  const now = tokens((m.target as Element).getAttribute("class"));
+  return gained(was, now) || gained(now, was);
+}
+const shapeChanged = (ms: MutationRecord[]) => ms.some(reshapes);
+const homeShape = new MutationObserver((ms) => {
+  if (scrollers && shapeChanged(ms)) scrollers = null;
+});
+let watched: Element | null = null;
+
+function homeScrollers(home: Element) {
+  if (watched !== home) {
+    homeShape.disconnect();
+    homeShape.observe(home, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"], attributeOldValue: true });
+    watched = home;
+    scrollers = null;
+  }
+  // Changes not delivered yet (the observer's callback is a microtask away): seen here first.
+  if (scrollers && shapeChanged(homeShape.takeRecords())) scrollers = null;
+  if (scrollers) return scrollers;
+  const found: { el: Element; axes: { y: boolean; x: boolean } }[] = [];
+  // Hidden subtrees are walked too: an inline style that shows one again isn't a change this observer sees.
+  for (const el of home.querySelectorAll("*")) {
+    const axes = scrollAxes(el);
+    if (axes) found.push({ el, axes });
+  }
+  homeShape.takeRecords();
+  return (scrollers = found);
 }
 
 /**
@@ -111,7 +163,8 @@ function claimFree(dockNode: HTMLElement | null): PageRect[] {
 /** The dock's and home's scrollers (the costly walk). */
 function claimStatic(dockNode: HTMLElement | null): PageRect[] {
   const out: PageRect[] = [];
-  const big = innerWidth * innerHeight * 0.5;
+  const view = viewport();
+  const big = view.w * view.h * 0.5;
   const add = (el: Element) => {
     const r = el.getBoundingClientRect();
     if (r.width > 0 && r.height > 0 && r.width * r.height < big) out.push(pageRect(r));
@@ -121,9 +174,7 @@ function claimStatic(dockNode: HTMLElement | null): PageRect[] {
     dockNode.querySelectorAll(".dock-pages, .dock-recent").forEach(add);
   }
   const home = document.querySelector(".home");
-  home?.querySelectorAll("*").forEach((el) => {
-    if (!dockNode?.contains(el) && scrolls(el)) add(el);
-  });
+  if (home) for (const { el, axes } of homeScrollers(home)) if (el.isConnected && !dockNode?.contains(el) && hasMore(el, axes)) add(el);
   return out;
 }
 
@@ -135,13 +186,14 @@ function claimWindows(): PageRect[] {
   // RZ5: with its resize zones outside the frame (32 dp edges, 48 dp corners: the rect grown by the corners'), kept out
   // of the status strip and the bottom gesture area - those stay the system's.
   const app = fullScreenAppRegion();
+  const view = viewport();
   document.querySelectorAll(".page:not(.away) .webwindow").forEach((el) => {
     const r = el.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) return;
     const top = Math.max(app.top, r.top - WINDOW_ZONE);
     const bottom = Math.min(app.top + app.height, r.bottom + WINDOW_ZONE);
     const left = Math.max(0, r.left - WINDOW_ZONE);
-    const right = Math.min(innerWidth, r.right + WINDOW_ZONE);
+    const right = Math.min(view.w, r.right + WINDOW_ZONE);
     if (bottom > top && right > left) out.push({ left, top, width: right - left, height: bottom - top });
   });
   // FL4: a full-screen Linux window (over all of home, no element on the page) is the app's everywhere but the edge
@@ -604,7 +656,9 @@ function homeDotsAt(): [number, boolean] {
   if (dx == null) return [at + 1, false];
   // Toward PowOS AI's page the whole screen slides; between home's pages, the pages' own width.
   const toAi = at === -1 || (at === 0 && dx > 0);
-  const w = (toAi ? null : widthOf(document.querySelector(".pages"))) || innerWidth;
+  // The viewport cached (viewport.ts): innerWidth read here, in the move's effects right after the track's write, was a
+  // forced layout per move toward PowOS AI's page - homeDotsAt's 710 ms self time in perf-1794158824368 (11-08 18:27).
+  const w = (toAi ? null : widthOf(document.querySelector(".pages"))) || viewport().w;
   return [Math.max(0, Math.min(pageCount.value, at + 1 - dx / w)), true];
 }
 

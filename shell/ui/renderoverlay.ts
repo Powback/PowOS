@@ -8,6 +8,7 @@
  * updated at 2 Hz, not Preact (so it doesn't render itself into the scan), the rAF loop only while a flash fades.
  */
 import { setOnRendered, startScan, stopScan, topRenders } from "./renderscan.ts";
+import { viewport } from "./viewport.ts";
 
 const FLASH_MS = 700, MAX_FLASHES = 400, LIST_MS = 500;
 type Flash = { x: number; y: number; w: number; h: number; name: string; count: number; needless: boolean; born: number };
@@ -22,7 +23,7 @@ function readColors() {
 }
 function size() {
   if (!cv) return;
-  const w = Math.round(innerWidth * devicePixelRatio), h = Math.round(innerHeight * devicePixelRatio);
+  const v = viewport(), w = Math.round(v.w * v.dpr), h = Math.round(v.h * v.dpr);
   if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
   // The font once per size (a resize resets the context's state): set in every frame's draw it was resolved against
   // the canvas's style each time - "FrameRequestCallback ui/renderoverlay.ts:draw 6 ms forced 5 ms" (perf-1793970543446).
@@ -71,8 +72,11 @@ function draw() {
   raf = 0;
   if (!cv || !ctx) return;
   const now = performance.now(), c = ctx;
-  c.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-  c.clearRect(0, 0, innerWidth, innerHeight);
+  // The viewport cached (viewport.ts): innerWidth / innerHeight / devicePixelRatio read here, in the rAF after the
+  // frame's writes, forced a layout every flash frame - draw's 760 ms self time in perf-1794158824368 (11-08 18:27).
+  const v = viewport();
+  c.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
+  c.clearRect(0, 0, v.w, v.h);
   let labels = 0;
   for (const [el, f] of flashes) {
     const age = now - f.born;

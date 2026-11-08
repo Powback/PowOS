@@ -15,6 +15,7 @@ import type { AppWindow } from "../types.ts";
 import { byKey, desktopPages, launch, page, pages, windows } from "../state.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { pageDrag, widthOf } from "./gesture.ts";
+import { viewport } from "./viewport.ts";
 import { dockToggle } from "./webwindows.tsx";
 import { spring } from "./spring.ts";
 
@@ -131,7 +132,7 @@ function slideRels(cur: number): Record<number, number> {
 
 /** The pages' width from home's ResizeObserver (gesture.ts widthOf): read at a swipe's first move it forced a layout. */
 function pagesWidth() {
-  return widthOf(document.querySelector(".pages")) || innerWidth;
+  return widthOf(document.querySelector(".pages")) || viewport().w;
 }
 
 function slideStart(dx: number) {
