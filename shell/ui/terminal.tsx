@@ -11,6 +11,13 @@
  * soft keyboard comes up with the extra keys over it (ExtraKeys.kt's), its touches are the terminal's (a drag
  * scrolls, a tap is tmux's click) - until a press elsewhere, Back, or the keyboard put away by the system. A view
  * that isn't interactive only shows: its taps go to the widget.
+ *
+ * On the phone PowTerm's own terminal draws them (the user 11-08, third "doesn't work anything like PowTerm": "I can
+ * honestly just use the Powterm source"): Termux's TerminalView fed through PowTerm's RemoteSessionBridge, compiled from
+ * PowTerm's repo (ShellTermViews.kt), placed over each terminal element ([Session.placeNative]). Its renderer, font,
+ * scrolling and fling, scrollback, selection and IME are PowTerm's; the page keeps what it owns around it (focus, the
+ * home's lift over the keyboard, the extra keys, the pinch's saved size, the tmux picker as the shell's command).
+ * Elsewhere (the desktop's powos-shell, a browser, the gate) xterm.js draws, as below.
  */
 import { render } from "preact";
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
@@ -22,7 +29,7 @@ import { powos } from "../bridge.ts";
 import { tick } from "./haptics.ts";
 import { takeTap } from "./taps.ts";
 import { page, screen } from "../state.ts";
-import type { TermState, TermStyle } from "../types.ts";
+import type { TermPlace, TermState, TermStyle } from "../types.ts";
 import { TerminalLogin, watchTerminal } from "./claudesignin.tsx";
 
 /** As PtyTerminal's transcript; tmux keeps its own. */
@@ -42,6 +49,11 @@ const b64 = (bytes: Uint8Array) => {
   return btoa(s);
 };
 const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+/** PowTerm's terminal draws the terminals (the phone's host has term.view); false: xterm.js here. */
+let nativeTerms = !!powos.term?.view;
+/** How often (frames) a shown native terminal checks that nothing of the page covers it. */
+const COVER_EVERY = 6;
 
 // --- looks -----------------------------------------------------------------------------------------------------------
 
@@ -120,6 +132,8 @@ interface View {
   textSize: number | null;
   /** How much of its bottom the soft keyboard takes while it's focused (a tile too tall to lift clear). */
   cut: number;
+  /** A drag scrolls it unfocused too (TerminalProps.scroll). */
+  scroll: boolean;
 }
 
 class Session {
@@ -130,6 +144,8 @@ class Session {
   private ptySize = "";
 
   private sizePty(cols: number, rows: number) {
+    // PowTerm's view sizes the pty from its own columns and rows (ShellTermViews.syncSize).
+    if (nativeTerms) return;
     if (this.status.value !== "running" || this.ptySize === `${cols}x${rows}`) return;
     this.ptySize = `${cols}x${rows}`;
     powos.term.resize(this.id, cols, rows);
@@ -152,7 +168,7 @@ class Session {
    */
   held: number | null = null;
   /** "webgl" (PowTerm's canvas drawing: glyphs to a texture atlas, cells on the GPU) or "dom" (no WebGL, or it lost). */
-  renderer: "webgl" | "dom" = "dom";
+  renderer: "webgl" | "dom" | "native" = "dom";
   /** Its WebGL context was lost (WebGL is there): a full-screen view showing it again asks for a new one ([show]). */
   webglLost = false;
 
@@ -178,8 +194,8 @@ class Session {
       allowProposedApi: false,
     });
     this.term.loadAddon(this.fit);
-    this.term.open(this.holder);
-    this.renderer = webgl(this.term);
+    if (nativeTerms) this.renderer = "native";
+    else this.openXterm();
     this.term.onData((d) => this.send(modify(d)));
     // Mouse reports in the X10 encoding: bytes, not text.
     this.term.onBinary((d) => this.sendBytes(Uint8Array.from(d, (c) => c.charCodeAt(0) & 0xff)));
@@ -191,6 +207,12 @@ class Session {
         this.sizePty(cols, rows);
       }, RESIZE_SETTLE_MS);
     });
+  }
+
+  /** xterm draws it here (no PowTerm view on this host). */
+  openXterm() {
+    this.term.open(this.holder);
+    this.renderer = webgl(this.term);
   }
 
   send(text: string) {
@@ -240,11 +262,20 @@ class Session {
   private output(bytes: Uint8Array, end: number) {
     if (end <= this.seen) return;
     const start = end - bytes.length;
+    // PowTerm's view has the bytes from the host itself (ShellTerminals.onOutput).
+    if (nativeTerms) return void (this.seen = end);
     this.term.write(start < this.seen ? bytes.subarray(this.seen - start) : bytes, () => {
       const b = this.term.buffer.active;
       if (this.held != null && b.viewportY !== Math.min(this.held, b.baseY)) this.term.scrollToLine(Math.min(this.held, b.baseY));
     });
     this.seen = end;
+  }
+
+  /** Shows the host's output again from what it wrote lately ([toXterm]). */
+  reopen() {
+    this.seen = 0;
+    this.run = -1;
+    void this.start();
   }
 
   data(e: { run: number; data: string; end: number }) {
@@ -275,6 +306,10 @@ class Session {
     // fitting from the renderer's cell size ourselves once xterm exposes it).
     this.holder.style.right = `${style.pad - FIT_SCROLLBAR}px`;
     const sp = viewText(view);
+    if (nativeTerms) {
+      this.look = { textPx: sp != null ? sp * style.fontScale : style.size, pinch: atTerminalText(view), bg: String(theme().background ?? "") };
+      return this.track();
+    }
     this.term.options.fontSize = sp != null ? sp * style.fontScale : style.size;
     this.term.options.fontFamily = await fontFamily(style);
     this.backToWebgl(view);
@@ -323,6 +358,56 @@ class Session {
    */
   private backToWebgl(view: View) {
     if (this.webglLost && this.renderer === "dom" && atTerminalText(view)) this.renderer = webgl(this.term);
+  }
+
+  /** PowTerm's view's placement last sent, its look ([show]), the frame loop placing it, the last cover check. */
+  private sent = "";
+  private look = { textPx: 0, pinch: true, bg: "" };
+  private tracking = 0;
+  private frames = 0;
+  private covered = false;
+
+  /** PowTerm's view follows its element every frame while a view shows this session ([placeNative]). */
+  track() {
+    if (this.tracking) return;
+    const step = () => {
+      this.tracking = 0;
+      if (this.placeNative()) this.tracking = requestAnimationFrame(step);
+    };
+    this.tracking = requestAnimationFrame(step);
+  }
+
+  /**
+   * Puts PowTerm's view over the holder of the view that shows it (its pad and the keyboard's cut inside): its touches
+   * the terminal's while it's focused or scrolls by itself, else the page's (a tile's swipes and long press, the tap
+   * that focuses it); hidden while it isn't up or something of the page covers it (a sheet, a menu). Sent on change
+   * only. False once no view shows it (hidden, the loop stops).
+   */
+  placeNative(): boolean {
+    if (!nativeTerms) return false;
+    const v = this.views[this.views.length - 1];
+    const r = this.holder.getBoundingClientRect();
+    const place: TermPlace = { x: r.left, y: r.top, w: r.width, h: r.height, dpr: window.devicePixelRatio || 1, ...this.look, mode: this.nativeMode(v, r) };
+    // Hidden, where it is doesn't matter (a tile under a sheet moving with the page isn't sent every frame).
+    const next = JSON.stringify(place.mode === 0 && this.sent ? { ...place, x: 0, y: 0 } : place);
+    if (next !== this.sent) {
+      this.sent = next;
+      powos.term.view!(this.id, place).catch((e) => toXterm(e));
+    }
+    return !!v;
+  }
+
+  /** Running, laid out and on a visible page. */
+  private up(r: DOMRect) {
+    return this.holder.isConnected && r.width > 0 && r.height > 0 && !document.hidden && this.status.value === "running";
+  }
+
+  /** PowTerm's view's mode over [v] at [r]: hidden (not up, or covered), the terminal's touches, or the page's. */
+  private nativeMode(v: View | undefined, r: DOMRect): 0 | 1 | 2 {
+    if (!v || !this.up(r)) return 0;
+    if (this.frames++ % COVER_EVERY === 0) this.covered = coveredOver(v.el, r);
+    if (this.covered) return 0;
+    return focused.peek() === v || v.scroll ? 2 : 1;
   }
 
   restyle() {
@@ -403,6 +488,37 @@ export async function pinchText(dir: 1 | -1) {
   }, PINCH_SAVE_MS);
 }
 
+/**
+ * Something of the page over [el] at [r] (a sheet, a menu, the drawer): PowTerm's view is above the page, so it hides.
+ * Five points inside it (clamped to the screen); a point on [el], in it or on one of its parents is uncovered.
+ */
+function coveredOver(el: HTMLElement, r: DOMRect) {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const xs = [0.5, 0.2, 0.8, 0.2, 0.8];
+  const ys = [0.5, 0.2, 0.2, 0.8, 0.8];
+  return xs.some((fx, i) => {
+    const x = Math.min(w - 1, Math.max(0, r.left + r.width * fx));
+    const y = Math.min(h - 1, Math.max(0, r.top + r.height * ys[i]));
+    const hit = document.elementFromPoint(x, y);
+    return !!hit && !el.contains(hit) && !hit.contains(el);
+  });
+}
+
+/**
+ * The host has no PowTerm view after all (an APK older than this shell, "no such call"): xterm draws every terminal
+ * here, from what the host wrote lately.
+ */
+function toXterm(e: unknown) {
+  if (!nativeTerms) return;
+  console.warn("term: no native terminal view, xterm draws", e);
+  nativeTerms = false;
+  for (const s of sessions.values()) {
+    s.openXterm();
+    s.reopen();
+  }
+}
+
 /** How long a terminal's size holds before the pty takes it. */
 const RESIZE_SETTLE_MS = 120;
 
@@ -474,20 +590,29 @@ function focus(view: View) {
   focused.value = view;
   document.documentElement.classList.add("term-focus");
   mountExtraKeys();
-  s.term.focus();
-  powos.keyboard.show("terminal");
+  if (nativeTerms) {
+    // PowTerm's view has the keys (its IME connection, as PowTerm's showKeyboard): placed first, so the host has it.
+    s.placeNative();
+    void powos.term.focus!(s.id, true);
+  } else {
+    s.term.focus();
+    powos.keyboard.show("terminal");
+  }
   requestAnimationFrame(lift);
 }
 
 function release() {
   const view = focused.value;
   if (!view) return;
-  focusedSession()?.term.blur();
+  const s = focusedSession();
+  if (nativeTerms) {
+    if (s) void powos.term.focus!(s.id, false);
+  } else s?.term.blur();
   focused.value = null;
   view.cut = 0;
   document.documentElement.classList.remove("term-focus");
   document.documentElement.style.removeProperty("--term-lift");
-  powos.keyboard.hide();
+  if (!nativeTerms) powos.keyboard.hide();
   [...sessions.values()].find((s) => s.views.includes(view))?.show();
 }
 
@@ -576,6 +701,27 @@ function consume() {
   if (alt.value === 1) alt.value = 0;
 }
 
+// PowTerm's view reads the sticky modifiers as Termux's readControlKey/readAltKey; a typed key that took a latched one
+// says so ("term.consumed").
+effect(() => {
+  const c = ctrl.value;
+  const a = alt.value;
+  if (nativeTerms) void powos.term.mods!(c, a).catch(() => {});
+});
+powos.on("term.consumed", () => consume());
+// A tap on PowTerm's view (its touches the terminal's: focused, or a scrolling view): as the page's tap on its cover -
+// an interactive view focuses; a focused one's keyboard comes back (Back put it away in a screen), as Termux's does.
+powos.on("term.tap", ({ id }: { id: string }) => {
+  const s = sessions.get(id);
+  const v = s?.views[s.views.length - 1];
+  if (!s || !v) return;
+  if (focused.peek() === v) {
+    if (!extraKeysState.peek().keyboard) void powos.term.focus!(id, true);
+  } else if (v.interactive) focus(v);
+});
+// A pinch on PowTerm's view (Termux's onScale, a step per 10%): the terminal text size, as the page's pinch.
+powos.on("term.pinch", ({ dir }: { dir: number }) => void pinchText(dir > 0 ? 1 : -1));
+
 /** A key's bytes: cursor keys follow the application's cursor mode; with modifiers, xterm's CSI 1;m form. */
 function keySeq(key: string, term: Terminal) {
   const mod = 1 + (alt.value ? 2 : 0) + (ctrl.value ? 4 : 0);
@@ -605,9 +751,20 @@ const ROWS: (Key | "ctrl" | "alt")[][] = [
   [{ label: "tab", key: "tab" }, "ctrl", "alt", { label: "left", key: "left", repeats: true, arrow: -90 }, { label: "down", key: "down", repeats: true, arrow: 180 }, { label: "right", key: "right", repeats: true, arrow: 90 }, { label: "pgdn", key: "pgdn", repeats: true }, { label: "paste", key: "paste" }],
 ];
 
+/** PowTerm's onExtraKey: through Termux's key handling (cursor/keypad modes, the sticky modifiers as meta). */
+async function pressNative(id: string, key: string) {
+  if (key === "copy") await powos.term.copy!(id);
+  else if (key === "paste") await powos.term.paste!(id);
+  else {
+    void powos.term.key!(id, key);
+    consume();
+  }
+}
+
 async function press(key: string) {
   const s = focusedSession();
   if (!s) return;
+  if (nativeTerms) return pressNative(s.id, key);
   if (key === "copy") {
     const text = s.term.getSelection();
     if (text) await powos.clipboard.write(text);
@@ -828,7 +985,7 @@ export function TerminalView({ id, owner = null, command = null, interactive = t
   const isFocused = focused.value != null && focused.value === view.current;
 
   useLayoutEffect(() => {
-    const v: View = { el: el.current!, screen: screen.current!, interactive, fontSize, textSize, cut: 0 };
+    const v: View = { el: el.current!, screen: screen.current!, interactive, fontSize, textSize, cut: 0, scroll };
     view.current = v;
     session.views.push(v);
     session.show();
@@ -846,14 +1003,14 @@ export function TerminalView({ id, owner = null, command = null, interactive = t
   // Props that change: a new size shows at once; a new command is a new shell.
   useEffect(() => {
     const v = view.current!;
-    Object.assign(v, { interactive, fontSize, textSize });
+    Object.assign(v, { interactive, fontSize, textSize, scroll });
     session.owner = owner;
     if (session.command !== command) {
       session.command = command;
       session.start(true);
     } else if (session.status.value === "starting") session.start();
     session.show();
-  }, [session, command, owner, interactive, fontSize, textSize]);
+  }, [session, command, owner, interactive, fontSize, textSize, scroll]);
 
   useEffect(() => {
     if (autoFocus && status === "running" && interactive && view.current && focused.value !== view.current) focus(view.current);

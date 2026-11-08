@@ -43,6 +43,12 @@ class ShellTerminals(
     private val main = Handler(Looper.getMainLooper())
     private val sessions = HashMap<String, Session>()
 
+    /** Each frame's output of a terminal, besides the page's "term.data": its native view ([ShellTermViews]). Main thread. */
+    var onOutput: ((String, ByteArray) -> Unit)? = null
+
+    /** A terminal started (again): its native view starts a clean screen. */
+    var onRun: ((String) -> Unit)? = null
+
     /** Numbers each start of a terminal: the page drops events of a run it no longer shows. */
     private var runs = 0
 
@@ -77,7 +83,18 @@ class ShellTerminals(
         val s = Session(id, owner, owner?.let(::instance), command)
         sessions[id] = s
         s.start(cols.coerceAtLeast(1), rows.coerceAtLeast(1))
+        onRun?.invoke(id)
         return s.state()
+    }
+
+    /** What terminal [id] wrote lately, up to what's been handed out: a new native view starts from it. */
+    fun history(id: String): ByteArray? = sessions[id]?.state()?.let { Base64.decode(it.getString("history"), Base64.DEFAULT) }
+
+    fun writeBytes(
+        id: String,
+        bytes: ByteArray,
+    ) {
+        sessions[id]?.write(bytes)
     }
 
     fun write(
@@ -222,6 +239,7 @@ class ShellTerminals(
                 end = sent
             }
             if (chunk.isNotEmpty() && sessions[id] === this) {
+                onOutput?.invoke(id, chunk)
                 emit("term.data", JSONObject().put("id", id).put("run", run).put("data", chunk.base64()).put("end", end))
             }
         }

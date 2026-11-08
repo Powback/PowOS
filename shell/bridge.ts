@@ -75,6 +75,19 @@ class Events {
  * window.__powosHost.resolve / reject; events arrive through window.__powosHost.emit. An area a host doesn't have
  * rejects ("no such call" / "unsupported").
  */
+/** PowTerm's terminal over the page (ShellTermViews.kt): the phone's WebView only, not the desktop's powos-shell. */
+function termViews(call: <T = unknown>(method: string, ...args: unknown[]) => Promise<T>, host: string | undefined): Partial<Bridge["term"]> {
+  if (host != null && host !== "android") return {};
+  return {
+    view: (id, place) => call<boolean>("term.view", id, place),
+    focus: (id, on) => call("term.focus", id, on),
+    mods: (ctrl, alt) => call("term.mods", ctrl, alt),
+    key: (id, name) => call("term.key", id, name),
+    paste: (id) => call("term.paste", id),
+    copy: (id) => call<string | null>("term.copy", id),
+  };
+}
+
 function native(host: NonNullable<Window["PowosHost"]>): Bridge {
   const send = host.call
     ? (id: number, method: string, args: string) => host.call!(id, method, args)
@@ -194,6 +207,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       resize: (id, cols, rows) => call("term.resize", id, cols, rows),
       close: (id) => call("term.close", id),
       style: (points) => call("term.style", points),
+      ...termViews(call, host.name),
     },
     clipboard: {
       read: () => call<string | null>("clipboard.read"),

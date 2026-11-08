@@ -756,6 +756,22 @@ export interface Bridge {
     close(id: string): Promise<void>;
     /** How terminals look: the launcher's terminal font, at [points] (null: the terminal text size). */
     style(points: number | null): Promise<TermStyle>;
+    /**
+     * The phone's only (ShellTermViews.kt): PowTerm's own terminal (Termux's TerminalView, its renderer, scrolling,
+     * fling, scrollback, selection, IME) drawn over the page at [place] (TermPlace). A pinch on it is "term.pinch"
+     * {id, dir}, a tap in mode 2 "term.tap" {id}, a typed key that took a latched Ctrl/Alt "term.consumed". Absent
+     * elsewhere: the page draws with xterm.js.
+     */
+    view?(id: string, place: TermPlace): Promise<boolean>;
+    /** The view's keys (the soft keyboard) on or off. */
+    focus?(id: string, on: boolean): Promise<void>;
+    /** The extra keys' sticky modifiers (0 off, 1 latched, 2 locked). */
+    mods?(ctrl: number, alt: number): Promise<void>;
+    /** An extra key (esc, tab, home, end, up, down, left, right, pgup, pgdn, or characters). */
+    key?(id: string, name: string): Promise<void>;
+    /** The clipboard pasted (bracketed when the program asked); the selection copied (answers it, null: none). */
+    paste?(id: string): Promise<void>;
+    copy?(id: string): Promise<string | null>;
   };
   clipboard: {
     read(): Promise<string | null>;
@@ -1265,6 +1281,23 @@ export interface TermState {
   /** Its latest output (base64), up to [end], the offset after it. */
   history: string;
   end: number;
+}
+
+/** Where and how PowTerm's view of a terminal shows (Bridge.term.view). */
+export interface TermPlace {
+  /** The rect, CSS px at [dpr]; the text size, CSS px. */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  dpr: number;
+  textPx: number;
+  /** 0 hidden, 1 its touches the page's, 2 the terminal's. */
+  mode: 0 | 1 | 2;
+  /** The terminal background, "#rrggbbaa" (anything else: the theme's). */
+  bg: string;
+  /** A pinch sizes the text (no size of its own). */
+  pinch: boolean;
 }
 
 export interface TermStyle {
