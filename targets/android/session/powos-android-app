@@ -59,9 +59,10 @@ if command -v scrcpy >/dev/null && command -v adb >/dev/null; then
     # Hardware decoding (VA-API through the PowOS app's termux-va -> MediaCodec), set here so it doesn't depend on
     # how this was started. Without DISPLAY, FFmpeg takes VA-API's DRM path (served by the bridge) instead of X11
     # (not served: "Failed to initialise VAAPI connection").
-    if [ -S "${XDG_RUNTIME_DIR:-/run/powos-app}/termux-va.sock" ] && [ -e /usr/lib/dri/termuxva_drv_video.so ]; then
-      export LIBVA_DRIVER_NAME=termuxva TERMUX_VA_BRIDGE=1 TERMUX_VA_GPU_BACKEND=kgsl \
-        TERMUX_VA_SOCKET="${XDG_RUNTIME_DIR:-/run/powos-app}/termux-va.sock"
+    # The session's own TERMUX_VA_SOCKET first (no root: run/termux-va/termux-va.sock), else rooted mode's.
+    tva=${TERMUX_VA_SOCKET:-${XDG_RUNTIME_DIR:-/run/powos-app}/termux-va.sock}
+    if [ -S "$tva" ] && [ -e /usr/lib/dri/termuxva_drv_video.so ]; then
+      export LIBVA_DRIVER_NAME=termuxva TERMUX_VA_BRIDGE=1 TERMUX_VA_GPU_BACKEND=kgsl TERMUX_VA_SOCKET="$tva"
       unset DISPLAY
     fi
     # Density = the desktop's scale x 160 (Android's 1 dp = density/160 px), so an Android app is the same size as

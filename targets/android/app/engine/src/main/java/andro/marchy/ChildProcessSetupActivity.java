@@ -22,6 +22,39 @@ import android.widget.Toast;
 public class ChildProcessSetupActivity extends Activity {
     static final String EXTRA_KILLED = "killed";
     static final String EXTRA_PROCESSES = "processes";
+    /** Shown before the session's first start (MainActivity): the session waits for it (SetupGate). */
+    static final String EXTRA_BEFORE_START = "before_start";
+    static final String GATE = "child-processes";
+
+    /** This phone still has the limit on (PhantomLimit.fix). */
+    static boolean needed(android.content.Context ctx) {
+        return PhantomLimit.fix(Build.VERSION.SDK_INT,
+                Settings.Global.getString(ctx.getContentResolver(), PhantomLimit.MONITOR_SETTING)) != PhantomLimit.Fix.NONE;
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Back from Developer options with the restriction off: nothing left to do here, the desktop can start.
+        if (getIntent().getBooleanExtra(EXTRA_BEFORE_START, false) && !needed(this))
+            finish();
+    }
+
+    // Ended in onPause (before MainActivity resumes and asks for storage, which waits for this step); onDestroy too,
+    // but not for a recreate (fold/rotation): the step is still on screen then. An unanswered step expires (SetupGate).
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (isFinishing())
+            SetupGate.end(GATE);
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (isFinishing())
+            SetupGate.end(GATE);
+    }
 
     @Override
     protected void onCreate(Bundle state) {
@@ -68,7 +101,7 @@ public class ChildProcessSetupActivity extends Activity {
             box.addView(copy);
         }
         Button done = new Button(this);
-        done.setText("Done");
+        done.setText(getIntent().getBooleanExtra(EXTRA_BEFORE_START, false) ? "Start the desktop" : "Done");
         done.setOnClickListener(v -> finish());
         box.addView(done);
 

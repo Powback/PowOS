@@ -53,6 +53,39 @@ class SessionPlanTest {
     }
 
     @Test
+    fun aKilledCoreProcessFailsTheTryAtOnce() {
+        // 11-09 razr: the storage grant SIGKILLed dbus + the display daemon 1 s in; the bus socket file stayed, so
+        // the session counted as up and Plasma came up on a dead bus (blank desktop). A lost core process = FAILED.
+        assertEquals(Health.FAILED, SessionPlan.health(true, true, true, 1_000, "dbus"))
+        assertEquals(SessionPlan.Action.RETRY, SessionPlan.next(false, true, false, Health.FAILED, 0))
+        assertEquals(Health.UP, SessionPlan.health(true, true, true, 1_000, null))
+        assertEquals(Health.NOT_STARTED, SessionPlan.health(false, true, true, 0, "dbus"))
+        for (core in listOf("dbus", "andromarchy", "system-dbus", "hyprland"))
+            assertTrue(core, SessionPlan.CORE.contains(core))
+        assertFalse("a side service ending is not a failed session", SessionPlan.CORE.contains("gnome-keyring"))
+    }
+
+    @Test
+    fun theFirstStartWaitsForTheSetupSteps() {
+        // 11-09 razr: the storage grant during the start got the session's first processes killed. The first start
+        // waits for MainActivity's setup steps; a running session never does; an unanswered step expires.
+        assertEquals(Action.WAIT_SETUP, SessionPlan.next(false, true, false, true, Health.NOT_STARTED, 0))
+        assertEquals(Action.START, SessionPlan.next(false, true, false, false, Health.NOT_STARTED, 0))
+        assertEquals(Action.UP, SessionPlan.next(false, true, false, true, Health.UP, 0))
+        assertEquals(Action.WAIT_IMAGE, SessionPlan.next(false, false, false, true, Health.NOT_STARTED, 0))
+        assertEquals(Action.START, SessionPlan.next(true, true, false, true, Health.NOT_STARTED, 0))
+        SetupGate.clear()
+        SetupGate.begin("storage", 1_000)
+        assertTrue(SetupGate.pending(2_000))
+        assertTrue(SetupGate.waiting("storage", 2_000))
+        SetupGate.end("storage")
+        assertFalse(SetupGate.pending(2_000))
+        SetupGate.begin("child-processes", 1_000)
+        assertFalse("expired", SetupGate.pending(1_000 + SetupGate.MAX_WAIT_MS))
+        SetupGate.clear()
+    }
+
+    @Test
     fun packageUpdateNeverDowngrades() {
         val c = SessionPlan.packagesCommand()
         assertTrue(c.contains("-Syu"))

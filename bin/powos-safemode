@@ -61,7 +61,8 @@ while true; do
     echo "  5) Recovery shell"
     echo "  6) Reboot"
     echo
-    read -r -p "Choose [1-6]: " choice
+    # No more input (stdin closed: started without its tty, as the phone's unit runner once did): leave, don't spin.
+    read -r -p "Choose [1-6]: " choice || { echo; echo "powos-safemode: no input, exiting." >&2; exit 1; }
     case "$choice" in
         1) run_doctor_ai ;;
         2) command -v powos >/dev/null 2>&1 && powos doctor --offline --target auto \

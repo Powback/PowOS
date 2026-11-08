@@ -11,7 +11,7 @@ package andro.marchy;
 final class SessionPlan {
     private SessionPlan() {}
 
-    enum Action { WAIT_IMAGE, START, UP, RETRY, GIVE_UP }
+    enum Action { WAIT_IMAGE, WAIT_SETUP, START, UP, RETRY, GIVE_UP }
 
     /** What a start that came up looks like so far. */
     enum Health { NOT_STARTED, STARTING, UP, FAILED }
@@ -22,8 +22,16 @@ final class SessionPlan {
     static final long START_TIMEOUT_MS = 90_000;
 
     static Action next(boolean rootMode, boolean imageReady, boolean installing, Health health, int attempts) {
+        return next(rootMode, imageReady, installing, false, health, attempts);
+    }
+
+    /** setupPending: a setup step the first start waits for (SetupGate); a running session never waits for one. */
+    static Action next(boolean rootMode, boolean imageReady, boolean installing, boolean setupPending, Health health,
+            int attempts) {
         if (!rootMode && (!imageReady || installing))
             return Action.WAIT_IMAGE;
+        if (!rootMode && setupPending && health == Health.NOT_STARTED)
+            return Action.WAIT_SETUP;
         switch (health) {
             case UP:
                 return Action.UP;
@@ -41,10 +49,25 @@ final class SessionPlan {
         return Math.min(60_000L, 5_000L << Math.max(0, Math.min(attempts - 1, 4)));
     }
 
-    /** A start is up once the session bus and the compositor's Wayland socket exist; failed past the timeout. */
+    /**
+     * The session's processes it can't work without (SessionService.spawn names): the session bus, the display
+     * daemon, the system bus and the session itself (KWin + Plasma). One of them ending is a failed try, at once.
+     */
+    static final java.util.Set<String> CORE = java.util.Set.of("dbus", "andromarchy", "system-dbus", "hyprland");
+
     static Health health(boolean started, boolean busUp, boolean waylandUp, long sinceStartMs) {
+        return health(started, busUp, waylandUp, sinceStartMs, null);
+    }
+
+    /**
+     * A start is up once the session bus and the compositor's Wayland socket exist; failed past the timeout, or at
+     * once when a CORE process ended (lostCore: its name) - the bus socket file outlives a killed dbus-daemon.
+     */
+    static Health health(boolean started, boolean busUp, boolean waylandUp, long sinceStartMs, String lostCore) {
         if (!started)
             return Health.NOT_STARTED;
+        if (lostCore != null)
+            return Health.FAILED;
         if (busUp && waylandUp)
             return Health.UP;
         return sinceStartMs >= START_TIMEOUT_MS ? Health.FAILED : Health.STARTING;
@@ -55,6 +78,8 @@ final class SessionPlan {
         switch (a) {
             case WAIT_IMAGE:
                 return "Waiting for the PowOS image to finish installing...";
+            case WAIT_SETUP:
+                return "Finish the setup step, then the desktop starts...";
             case RETRY:
                 return "The desktop didn't start (try " + attempts + " of " + MAX_ATTEMPTS + "), trying again in "
                         + (retryInMs / 1000) + " s...";

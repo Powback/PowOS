@@ -472,6 +472,27 @@ public class MainActivity extends Activity
         handleSplitPick(intent);
     }
 
+    private static final int REQ_STORAGE = 1;
+    private static final String STORAGE_GATE = "storage";
+    private static boolean childSetupAsked; // per process: the step, once (it's also reachable from the notification)
+    private static boolean storageAsked;
+
+    /**
+     * Shared storage (targetSdk 28: the classic permission; /storage is passed through to Linux, SessionService
+     * archEnv), asked once per process and only while no setup screen is in front. The first session start waits for
+     * the answer (SetupGate).
+     */
+    private void requestStorageWhenFree() {
+        if (storageAsked || SetupGate.waiting(ChildProcessSetupActivity.GATE, android.os.SystemClock.uptimeMillis()))
+            return;
+        storageAsked = true;
+        if (checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+            return;
+        SetupGate.begin(STORAGE_GATE, android.os.SystemClock.uptimeMillis());
+        requestPermissions(new String[] {android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -479,9 +500,16 @@ public class MainActivity extends Activity
         Prefs.init(this); // settings defaults + move from the former file name
         // PowOS: the phone's files in PowOS (Dolphin, file pickers): shared storage. targetSdk 28 = full access
         // with the classic storage permission; /storage is passed through to Linux (SessionService.archEnv).
-        if (checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED)
-            requestPermissions(new String[] {android.Manifest.permission.READ_EXTERNAL_STORAGE,
-                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
+        // Both are setup steps the session's first start waits for (SetupGate): granting storage while the session
+        // starts made Android re-check the app's processes and kill the session's first ones (11-09 razr, blank
+        // desktop). The child process step first (its own screen), storage when back from it (onResume).
+        if (!RootMode.enabled() && !childSetupAsked && ChildProcessSetupActivity.needed(this)) {
+            childSetupAsked = true;
+            SetupGate.begin(ChildProcessSetupActivity.GATE, android.os.SystemClock.uptimeMillis());
+            startActivity(new Intent(this, ChildProcessSetupActivity.class)
+                    .putExtra(ChildProcessSetupActivity.EXTRA_BEFORE_START, true));
+        }
+        requestStorageWhenFree();
         // PowOS: keep running with the screen off. Doze and Samsung's battery management firewall an optimized app
         // completely, loopback included, and the Linux side lives on loopback (fake root over TCP: sudo, pacman,
         // PowOS's services). Measured on the S25: screen off -> every loopback connect timed out. Ask once to be
@@ -954,6 +982,7 @@ public class MainActivity extends Activity
     protected void onResume() {
         super.onResume();
         inFront = true;
+        requestStorageWhenFree(); // after the child process setup step, if it came first
         mPipTransitionPending = false;
         // Desktop mode's unfold, timed (target < 700 ms): hinge seen -> desktop resumed -> its next frame.
         long unfoldAt = FoldWatcher.unfoldAt;
@@ -1292,6 +1321,8 @@ public class MainActivity extends Activity
     public void onRequestPermissionsResult(int requestCode, String[] permissions,
                                            int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_STORAGE)
+            SetupGate.end(STORAGE_GATE); // answered either way: the session may start
         if (requestCode == REQ_RECORD_AUDIO || requestCode == REQ_CAMERA) {
             for (int i = 0; i < permissions.length && i < grantResults.length; i++) {
                 boolean granted = grantResults[i] == PackageManager.PERMISSION_GRANTED;

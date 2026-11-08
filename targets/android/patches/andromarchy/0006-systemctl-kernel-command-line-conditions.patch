@@ -1,0 +1,49 @@
+PowOS: the systemctl replacement honours ConditionKernelCommandLine= / AssertKernelCommandLine=.
+
+Against lotfibennour/andromarchy @ 220754d390f743aa5a8227e689402de1a6eb0281, native/install-systemctl.sh.
+11-09 razr (no root): powos-installer.service and powos-safemode.service (ConditionKernelCommandLine=powos.install /
+powos.mode) started in every phone session and spun on a closed stdin.
+
+
+diff --git a/native/install-systemctl.sh b/native/install-systemctl.sh
+index 21d7930..15526f1 100644
+--- a/native/install-systemctl.sh
++++ b/native/install-systemctl.sh
+@@ -27,6 +27,37 @@ sed -i 's/^                        elif not os.listdir(filepath):$/
+ grep -q 'delay = conf.get(section, "RestartSec", default or strE(DefaultRestartSec))' "$T/systemctl"
+ sed -i 's/delay = conf.get(section, "RestartSec", default or strE(DefaultRestartSec))/delay = conf.get(section, "RestartSec", default or "100ms")/' "$T/systemctl"
+ 
++# PowOS: ConditionKernelCommandLine= (and Assert...), which v1.7 doesn't know: it ignored them, so units meant for one
++# boot entry only (PowOS's installer, its Safe Mode console: powos.install / powos.mode) started in every session - on
++# a phone two consoles spinning on a closed stdin for good. As systemd: a word, or word=value, among the kernel's
++# arguments; "!" inverts. An app can't read /proc/cmdline: no arguments, so a unit that wants one stays off.
++grep -q '        for spec in \["ConditionHost", "AssertHost"\]:' "$T/systemctl"
++python3 - "$T/systemctl" <<'PY'
++import sys
++p = sys.argv[1]
++s = open(p).read()
++anchor = '        for spec in ["ConditionHost", "AssertHost"]:\n'
++block = """        try:
++            with open("/proc/cmdline") as f:
++                kargs = f.read().split()
++        except OSError:
++            kargs = []
++        for spec in ["ConditionKernelCommandLine", "AssertKernelCommandLine"]:
++            warn = logging.ERROR if "Assert" in spec else warning
++            for checkname in conf.getlist(section, spec):
++                mode, want = checkprefix(checkname)
++                if not want:
++                    continue
++                found = any(a == want or ("=" not in want and a.split("=", 1)[0] == want) for a in kargs)
++                if found == ("!" in mode):
++                    logg.log(warn, "%s: %s - %s %s on the kernel command line", unit, spec, want,
++                             "found" if found else "not")
++                    problems += [spec]
++"""
++assert s.count(anchor) == 1
++open(p, "w").write(s.replace(anchor, block + anchor))
++PY
++
+ mkdir -p "$D" "$X"
+ # systemctl itself is a wrapper (native/systemctl-wrapper.sh): power verbs go to the app.
+ install -m 755 "$T/systemctl" "$X/systemctl"
