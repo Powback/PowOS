@@ -36,8 +36,23 @@ def fmt(v, nd=1):
     return "?" if v is None else f"{v:.{nd}f}"
 
 
+MARK = "== measuring"
+
+
+def measured(t):
+    """The lines after bf-pacing's measurement-start mark, and whether there was one. Xwayland's 30 s lines and KWin's 5 s
+    lines are written only while something happens: a stall in the window leaves none there, and the lines before it
+    must not stand in for it (11-08 02:02: "game 37 > xwayland 38" from before the stall, KWin 0 commits - read as the
+    web window's consumer starving). Files without the mark (older runs, the tests' fixtures): all of it."""
+    if MARK not in t:
+        return t, False
+    return t.split(MARK, 1)[1], True
+
+
 def xwayland(md):
-    t = read(md, "kgsl.txt")
+    t, mark = measured(read(md, "kgsl.txt"))
+    if mark and "Xwayland KGSL" not in t:
+        return 0.0, 0.0, 0.0, 0.0  # nothing in the window: Xwayland got no presents and made no commits
     flips = [int(a) + int(b) for a, b in re.findall(r"(\d+) Present flips, (\d+) copies", t)]
     commits = [int(x) for x in re.findall(r"(\d+) surface commits", t)]
     cbs = [int(x) for x in re.findall(r"frame callbacks (\d+)", t)]
@@ -47,10 +62,10 @@ def xwayland(md):
 
 
 def kwin(md):
-    t = read(md, "kwin.txt")
+    t, mark = measured(read(md, "kwin.txt"))
     rows = re.findall(r"frames: last 5 s (\d+) commits, (\d+) drawn .*?median (\d+) ms, p90 (\d+) ms", t)[-6:]
     if not rows:
-        return None, None, None
+        return (0.0, None, None) if mark else (None, None, None)
     return mean([int(r[1]) / 5.0 for r in rows]), mean([int(r[2]) for r in rows]), mean([int(r[3]) for r in rows])
 
 
