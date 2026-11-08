@@ -69,13 +69,14 @@ keyof() {
 linux() { case $1 in kate|dolphin|konsole) return 0 ;; esac; return 1; }
 
 # open_js <key...>: launches them through home's launch path at once; resolves when each is live (or LIVE_MAX_S):
-# {key: {frame, live, id, failed}} in ms from the launch.
+# {key: {frame, live, id, failed}} in ms from the launch. One whose window from before is still up (one app, one
+# window: the launch only raises it) fails at 1.5 s saying so, not 20 s of "never live" (11-08 storm).
 open_js() {
   local keys; keys=$(printf "'%s'," "$@")
   ev "$WW.then(([m,s])=>{const K=[${keys%,}],before=new Set(m.webWins.value.map(w=>w.id)),t0=performance.now(),r={};
 for(const k of K){r[k]={frame:-1,live:-1,id:null,failed:''};s.launch(k)}
 return new Promise(ok=>{const tick=()=>{const t=Math.round(performance.now()-t0);
- for(const k of K){const w=m.webWins.value.filter(w=>String(w.key).startsWith(k)&&!before.has(w.id)).at(-1);if(!w)continue;const o=r[k];o.id=w.id;
+ for(const k of K){const w=m.webWins.value.filter(w=>String(w.key).startsWith(k)&&!before.has(w.id)).at(-1);if(!w){const o=m.webWins.value.find(w=>String(w.key).startsWith(k)&&before.has(w.id));if(o&&t>1500)r[k].failed='its window '+o.id+' from before is still open: the launch raised it (a close that missed)';continue}const o=r[k];o.id=w.id;
   if(o.frame<0&&document.querySelector('.webwindow[data-wwid=\"'+w.id+'\"]'))o.frame=t;if(o.live<0&&w.live)o.live=t;if(w.failed)o.failed=String(w.failed)}
  if(K.every(k=>r[k].live>=0||r[k].failed)||t>${LIVE_MAX_S}000)return ok(JSON.stringify(r));requestAnimationFrame(tick)};tick()})})"
 }
@@ -190,14 +191,16 @@ leakstate() {   # "pagewins hostwins wwlayers tasks pss_kb"
 storm_switch() {
   local p; p=$(barpt "$1"); [ -n "$p" ] || { echo -; return; }
   ev "$WW.then(([m])=>{window.__wbSw=null;let t0=0;document.addEventListener('pointerdown',e=>{t0=e.timeStamp},{capture:true,once:true});const t1=performance.now();const f=()=>{const top=m.webWins.value.at(-1);if(t0&&top&&top.id===${1#w}){window.__wbSw=String(Math.round(performance.now()-t0));return}if(performance.now()-t1>2000){window.__wbSw='-';return}requestAnimationFrame(f)};requestAnimationFrame(f);return 'armed'})" >/dev/null
-  set -- $p; sh_ "input tap $1 $2"; sleep 0.25; ev 'String(window.__wbSw)'
+  set -- $p; sh_ "input tap $1 $2"; storm_read __wbSw
 }
+# storm_read <var>: the page's armed measurement once it resolved (up to ~2.5 s; it gives "-" itself after 2 s).
+storm_read() { local v i; for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.25; v=$(ev "String(window.$1)"); [ "$v" != null ] && break; done; echo "${v:--}"; }
 # storm_close <w-id>: a tap on its close button -> ms until its frame is gone ("-": no button, closed by the host).
 storm_close() {
   local p; p=$(wwpt "$1" .ww-close)
   [ -n "$p" ] || { hcall webwindows.close "[${1#w}]" "()=>'ok'" >/dev/null; echo -; return; }
   ev "(()=>{window.__wbCl=null;let t0=0;document.addEventListener('pointerdown',e=>{t0=e.timeStamp},{capture:true,once:true});const t1=performance.now();const f=()=>{if(t0&&!document.querySelector('.webwindow[data-wwid=\"${1#w}\"]')){window.__wbCl=String(Math.round(performance.now()-t0));return}if(performance.now()-t1>2000){window.__wbCl='-';return}requestAnimationFrame(f)};requestAnimationFrame(f);return 'armed'})()" >/dev/null
-  set -- $p; offpill "$1" "$2" "close" && sh_ "input tap $1 $2"; sleep 0.25; ev 'String(window.__wbCl)'
+  set -- $p; offpill "$1" "$2" "close" && sh_ "input tap $1 $2"; storm_read __wbCl
 }
 # storm_cycle <i> <app>: open it, switch to the window the last cycle opened (PREVID) and close that; one storm.part row.
 storm_cycle() {
@@ -208,7 +211,9 @@ storm_cycle() {
   id=$(jget "$r" "$k" id); fr=$(jget "$r" "$k" frame); lv=$(jget "$r" "$k" live)
   [ -n "$id" ] && [ "$id" != None ] && MINEW="$MINEW w$id" || id=""
   { [ -z "$lv" ] || [ "$lv" -lt 0 ] 2>/dev/null; } && { fail "NOT LOADING storm $i $a: never live ($(jget "$r" "$k" failed))"; lv=-; }
-  if [ -n "$PREVID" ] && [ "$(wwhost "$PREVID" gone)" != true ]; then sw=$(storm_switch "$PREVID"); cl=$(storm_close "$PREVID"); fi
+  # "w<id>": barpt takes a web window's id with its w (a bare id went to its uiautomator path: no bar found, every switch
+  # "-", so the close tap hit whatever lay over the lower window's button - 11-08 storm).
+  if [ -n "$PREVID" ] && [ "$(wwhost "$PREVID" gone)" != true ]; then sw=$(storm_switch "w$PREVID"); cl=$(storm_close "w$PREVID"); fi
   # Pace: one cycle per STRESS_PACE_S s at least (user speed), never faster.
   nm=$(( $(nowms) - t )); awk -v n="$nm" -v p="$STRESS_PACE_S" 'BEGIN{exit !(n < p*1000)}' && sleep "$(awk -v n="$nm" -v p="$STRESS_PACE_S" 'BEGIN{print (p*1000-n)/1000}')"
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$i" "$a" "${fr:--}" "$lv" "$sw" "$cl" >> "$OUT/storm.part"

@@ -3188,6 +3188,25 @@ function sideAt(side: string, e: PointerEvent): string {
 }
 
 /**
+ * RZ7: a press on an outer zone that lands on ANOTHER window's frame is that window's - the zone is invisible, the
+ * window under it is what the finger sees. Cascaded windows sit 32 dp apart ([cascade]), exactly a zone's depth, so
+ * the newer window's top zone covered the whole visible strip of the one under it - its bar and its close button: a
+ * tap there grabbed the newer window instead (window-bench 11-08: the storm's closes missed, the apps stayed open and
+ * their next launches only raised them - "NOT LOADING storm 6 kate"). Now a button under the press is pressed, else
+ * that window comes on top (a bar tap's switch). true: passed on (no resize).
+ */
+function zonePassedOn(e: PointerEvent): boolean {
+  const own = (e.currentTarget as HTMLElement).closest(".webwindow");
+  const under = document.elementsFromPoint(e.clientX, e.clientY).find((el) => !own?.contains(el));
+  const other = under?.closest<HTMLElement>(".webwindow[data-wwid]");
+  if (!under || !other) return false;
+  const button = under.closest<HTMLElement>("button");
+  if (button && other.contains(button)) button.click();
+  else raise(Number(other.dataset.wwid));
+  return true;
+}
+
+/**
  * A resize grab (RZ2): an invisible zone OUTSIDE the frame - 32 dp along each edge, 48x48 dp off each corner - so it
  * never covers the app or the bar's buttons (the bottom corners also reach CORNER_IN in, under their drawn grips: GR1); a higher window's content is over a lower window's zones (z order: the
  * DOM's hit test). The frame follows the finger, the app's size paced ([pace]: RS1), the final on release; a haptic
@@ -3208,6 +3227,7 @@ function Edge({ id, side, height }: { id: number; side: (typeof EDGES)[number]; 
       style={{ height }}
       onPointerDown={(e) => {
         e.stopPropagation();
+        if (zonePassedOn(e)) return;
         const win = webWins.value.find((w) => w.id === id);
         if (!win) return;
         raise(id);

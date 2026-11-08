@@ -8585,7 +8585,7 @@ async function webWindowGrabCheck() {
   const g = { S, W, ticks: 0, sel: '.webwindow[data-wwid="904"]', win: () => W.webWins.value.find((w) => w.id === 904) };
   navigator.vibrate = () => (g.ticks++, true);
   try {
-    return [...(await window.__grab.grabLooks(g)), ...(await window.__grab.grabZones(g)), ...(await window.__grab.grabContent(g)), ...(await window.__grab.grabSnap(g))];
+    return [...(await window.__grab.grabLooks(g)), ...(await window.__grab.grabZones(g)), ...(await window.__grab.grabContent(g)), ...(await window.__grab.grabCascade(g)), ...(await window.__grab.grabSnap(g))];
   } finally {
     navigator.vibrate = vib;
     W.webWins.value = [];
@@ -8661,6 +8661,44 @@ async function grabContent(g) {
   return fails.filter(Boolean);
 }
 
+/**
+ * RZ7 (window-bench 11-08, the storm: closes missed, "NOT LOADING storm 6 kate"): two windows cascaded 32 dp apart
+ * (state cascade) - the higher one's top zone lies over the lower one's whole visible bar strip. A tap on the lower
+ * one's close button there closes it; a tap on its bar there brings it on top - neither resizes the higher window.
+ */
+async function grabCascade(g) {
+  const P = g.S.pages.value[0];
+  const put = async () => {
+    g.W.webWins.value = [
+      { id: 906, key: "a:gate.low", label: "Low", page: P, x: 120, y: 160, w: 300, h: 260, live: true },
+      { id: 907, key: "a:gate.high", label: "High", page: P, x: 152, y: 192, w: 300, h: 260, live: true },
+    ];
+    await window.__gw.settled();
+  };
+  const centre = (sel) => {
+    const r = document.querySelector(`.webwindow[data-wwid="906"] ${sel}`).getBoundingClientRect();
+    return [r.left + r.width / 2, r.top + r.height / 2];
+  };
+  const high = () => g.W.webWins.value.find((w) => w.id === 907) ?? {};
+  const kept = () => high().w === 300 && high().h === 260 && high().y === 192;
+  await put();
+  const cp = centre(".ww-close");
+  const hit = document.elementFromPoint(cp[0], cp[1]);
+  if (!hit?.closest('.webwindow[data-wwid="907"] .ww-edge')) return [`RZ7: the scene's premise: the lower window's close button should lie under the higher one's zone (hit .${hit?.className})`];
+  // A tap: down and up on the spot (the zone takes the down).
+  await window.__grab.grabPress(g, cp, [0, 0]);
+  const fails = [
+    g.W.webWins.value.some((w) => w.id === 906) && "RZ7: a tap on the lower window's close button under the higher one's zone left it open",
+    !kept() && `RZ7: that tap resized the higher window (${high().w}x${high().h} at y ${high().y})`,
+  ];
+  await put();
+  const [bx, by] = centre(".webwindow-title");
+  await window.__grab.grabPress(g, [bx - 90, by], [0, 0]);
+  const top = g.W.webWins.value.at(-1).id;
+  fails.push(top !== 906 && `RZ7: a tap on the lower window's bar strip under the higher one's zone left ${top} on top (want 906)`, !kept() && `RZ7: the bar tap resized the higher window (${high().w}x${high().h})`);
+  return fails.filter(Boolean);
+}
+
 /** RZ4: a drag let go 9 px past half the work area's width snaps to the half. */
 async function grabSnap(g) {
   const f = await window.__grab.grabReset(g);
@@ -8672,7 +8710,7 @@ async function grabSnap(g) {
 }
 
 // webWindowGrabCheck's helpers: page functions too (evaluated just before it: page.evaluate sends only that function).
-const GRAB_HELPERS = `(window.__grab = { ${[grabPress, grabReset, grabLooks, grabZones, grabContent, grabSnap].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
+const GRAB_HELPERS = `(window.__grab = { ${[grabPress, grabReset, grabLooks, grabZones, grabContent, grabCascade, grabSnap].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
 
 /**
  * In the page, after webWindowCheck: TB4 (the user, 2026-10-30: "If I click on the icon of an open window I should be
