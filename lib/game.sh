@@ -581,23 +581,23 @@ _gsc_steam_chain() {
 # HACK: Steam's logs are the signal - Steam publishes no cloud-sync/exit event a client can subscribe to (its CEF UI's
 # SteamClient.Apps.RegisterForGameActionStart/End is the real API, inside steamwebhelper only). Real fix: a Steam UI
 # plugin reporting game actions over the session bus (the same one powos-sleep-gui's SteamLaunches waits for).
+# The awk program of _game_steam_exit_state (app, since, recent: its -v variables).
+_GSES_AWK='
+    { if (!match($0, /^\[[0-9-]+ [0-9:]+\]/)) next; ts = substr($0, 2, RLENGTH - 2) }
+    index($0, "GameAction [AppID " app ", ActionID ") && ts >= recent { at = ts; act = $0 }
+    index($0, "AppID " app " state changed : ") { st = $0; sts = ts }
+    index($0, "AppID " app " ") && ts >= since { heard = 1 }
+    END {
+        if (act ~ /changed task to SynchronizingCloud/) { print "sync"; exit }
+        if (act ~ /waiting for user response to /) { w = act; sub(/.*waiting for user response to /, "", w); print "ask " substr(w, 1, 80); exit }
+        if (st != "") { s = st; sub(/.*state changed : /, "", s); n = split(s, p, "->"); s = p[n]
+                        if (s ~ /Running/) { print "running"; exit } }
+        if (heard || (st != "" && sts >= since) || (act != "" && at >= since)) print "done"; else print "quiet"
+    }'
 _game_steam_exit_state() {
-    local app=$1 d=${3:-${POWOS_STEAM_LOGS:-$HOME/.local/share/Steam/logs}} since recent
-    since=$(date -d "@$2" '+%F %T' 2>/dev/null || date -r "$2" '+%F %T')
-    recent=$(date -d "@$(( $2 - 600 ))" '+%F %T' 2>/dev/null || date -r "$(( $2 - 600 ))" '+%F %T')
+    local app=$1 d=${3:-${POWOS_STEAM_LOGS:-$HOME/.local/share/Steam/logs}}
     { tail -c 1048576 "$d/console_log.txt" 2>/dev/null; echo; tail -c 262144 "$d/content_log.txt" 2>/dev/null; } | tr -d '\r' \
-        | awk -v app="$app" -v since="$since" -v recent="$recent" '
-        { if (!match($0, /^\[[0-9-]+ [0-9:]+\]/)) next; ts = substr($0, 2, RLENGTH - 2) }
-        index($0, "GameAction [AppID " app ", ActionID ") && ts >= recent { at = ts; act = $0 }
-        index($0, "AppID " app " state changed : ") { st = $0; sts = ts }
-        index($0, "AppID " app " ") && ts >= since { heard = 1 }
-        END {
-            if (act ~ /changed task to SynchronizingCloud/) { print "sync"; exit }
-            if (act ~ /waiting for user response to /) { w = act; sub(/.*waiting for user response to /, "", w); print "ask " substr(w, 1, 80); exit }
-            if (st != "") { s = st; sub(/.*state changed : /, "", s); n = split(s, p, "->"); s = p[n]
-                            if (s ~ /Running/) { print "running"; exit } }
-            if (heard || (st != "" && sts >= since) || (act != "" && at >= since)) print "done"; else print "quiet"
-        }'
+        | awk -v app="$app" -v since="$(date -d "@$2" '+%F %T')" -v recent="$(date -d "@$(( $2 - 600 ))" '+%F %T')" "$_GSES_AWK"
 }
 
 _game_steam_close() {
@@ -638,16 +638,7 @@ _gsc_game_wait() {
         left=$(_gsc_alive $2)
         (( i % 5 == 1 )) && st=$(_game_steam_exit_state "$1" "$3")
         if [[ -z "$left" ]]; then
-            (( ++gone ))
-            # Steam logs "Game process removed" a moment before an exit sync starts: "done" counts after 1 s, silence
-            # after 2 s; "running" (exit steps not logged done) is awaited 5 s - a frozen Steam logs nothing more.
-            case $st in
-                sync) ;;
-                running) (( gone > 50 )) && break ;;
-                done) (( gone > 10 )) && break ;;
-                quiet) (( gone > 20 )) && break ;;
-                *) break ;;
-            esac
+            _gsc_exit_over "$st" $(( ++gone )) && break
         elif (( i >= 20 && killed == 0 )) && [[ $st != sync ]]; then
             kill -KILL $left 2>/dev/null || true; killed=1
         fi
@@ -671,6 +662,18 @@ _gsc_steam_shutdown() {
         dev.powos.Sleep.Gui.Wake string:steam >/dev/null 2>&1 || true
     # The forwarder can hang on a dying client (or start a new one): bounded, and swept with the rest.
     (timeout -k 1 3 steam -shutdown >/dev/null 2>&1 </dev/null &)
+}
+
+# _gsc_exit_over <state> <0.1 s ticks since the game's chain ended>: are Steam's exit steps for it over? Steam logs
+# "Game process removed" a moment before an exit sync starts: "done" counts after 1 s, silence after 2 s; "running"
+# (exit steps not logged done) is awaited 5 s - a frozen Steam logs nothing more; a sync is never over; ask: over.
+_gsc_exit_over() {
+    case $1 in
+        sync) return 1 ;;
+        running) (( $2 > 50 )) ;;
+        done) (( $2 > 10 )) ;;
+        quiet) (( $2 > 20 )) ;;
+    esac
 }
 
 # <game pids left> <steam pids>: up to 6 s for them to end, the game's KILLed at 2 s; prints what is left.
