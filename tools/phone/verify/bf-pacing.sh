@@ -211,4 +211,6 @@ pill "comparing $(echo "$*" | sed 's/ / vs /g')"
 # uv runs it with its own numpy (the script's inline deps, uv's cache): nothing installed into the Mac's python.
 # The per-layer rate table (game > Xwayland > KWin > consumer > SurfaceFlinger > panel, skin), before the board line.
 python3 -I "$here/bf-layers.py" "$OUT" "$@"
-uv run --quiet --script "$here/bf-frames.py" "$OUT" "$@"
+# BF_APP: bf-frames.py compares the fps with this game's last PASSes (its history) and FAILs a measurement that isn't
+# the game on the screen (11-08 02:02: "PASS ... 2.3 fps ... front HomeShell" while the game made 37/s).
+BF_APP=$APP uv run --quiet --script "$here/bf-frames.py" "$OUT" "$@"

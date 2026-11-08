@@ -77,6 +77,15 @@ VR=$POWOS_RUN_ROOT/verify-runner
 Q=${QUEUE_DIR:-$HOME/.cache/powos-verify-queue}; mkdir -p "$Q/done"
 QUEUED_STEP="phone check queued"   # shell/ui/powai.tsx matches this text
 # user_sh <script text>: run it inside PowOS as the session user (its `powos ...`), quietly.
+# drop_job <job> <reason>: a queued job leaves the queue without a verdict - never silently: the reason goes into the
+# job (dropped=, dropped_at=), it moves to cancelled/, and runner.log and the caller get a line. 11-08 the coordinator
+# found two install jobs "vanished with no verdict and no done/cancelled file" (they were still queued, behind a game
+# group order_jobs pulled ahead of them) - nothing could tell a dropped job from a waiting one.
+drop_job() { local j=$1 n; n=$(basename "$j" .job); [ -f "$j" ] || return 0; mkdir -p "$Q/cancelled"
+  printf 'dropped=%q\ndropped_at=%s\n' "$2" "$(date +%s)" >> "$j"
+  mv -f "$j" "$Q/cancelled/$n.job" || return 1
+  echo "$(date +%T) $n: dropped without a verdict - $2 (cancelled/$n.job)" >> "$Q/runner.log"
+  echo "dropped queued $n: $2 (cancelled/$n.job)"; }
 user_sh() { local s; s=$(mktemp "$Q/user.XXXX"); printf '%s\n' "$1" > "$s"; "$phone/user.sh" "$s" >/dev/null 2>&1; local rc=$?; rm -f "$s"; return $rc; }
 # rc3_requeue <job> <log> <tries> [now]: a check that exited 3 (touched, no window, "skip", bf-pacing's INVALID game
 # not on the screen) STAYS QUEUED - always, however many tries. Before, the 5th rc 3 moved the job to done/ as
@@ -143,13 +152,21 @@ game_key() { local a g=0 app=
 # order_jobs: sel[] regrouped so every game's jobs run back to back (each group where its first job was; the others
 # keep their order) - ABZU's fps jobs one after another, the game kept warm between them (QUEUE_NEXT_APP), instead of
 # ABZU, window-bench ("a game runs: not now"), ABZU again. Sources each job: call it in the window's subshell.
-order_jobs() { local j k i out=() keys=() seen=" "
-  for j in ${sel[@]+"${sel[@]}"}; do cmd=(); . "$j"; keys+=("$(game_key ${cmd[@]+"${cmd[@]}"})"); done
+# A job is never pulled ahead of an earlier queued job of its own TASK: a task's jobs run in the order they were
+# queued (its installs first). 11-08 00:57-02:04 "Broforce fps after the KWin + Xwayland installs" ran twice, grouped
+# behind a games job, before the task's pkg-install/kwin-install jobs queued ahead of it - it measured the old builds
+# and the installs looked "vanished".
+order_jobs() { local j k i m b out=() keys=() tasks=() placed=()
+  for j in ${sel[@]+"${sel[@]}"}; do task=; cmd=(); . "$j"; keys+=("$(game_key ${cmd[@]+"${cmd[@]}"})"); tasks+=("$task"); placed+=(0); done
   for i in ${sel[@]+"${!sel[@]}"}; do
-    k=${keys[$i]}
-    if [ -z "$k" ]; then out+=("${sel[$i]}"); continue; fi
-    case "$seen" in *" $k "*) continue ;; esac; seen="$seen$k "
-    for j in "${!sel[@]}"; do [ "${keys[$j]}" = "$k" ] && out+=("${sel[$j]}"); done
+    [ "${placed[$i]}" = 1 ] && continue
+    out+=("${sel[$i]}"); placed[$i]=1; k=${keys[$i]}
+    [ -n "$k" ] || continue
+    for j in "${!sel[@]}"; do
+      [ "$j" -gt "$i" ] && [ "${placed[$j]}" = 0 ] && [ "${keys[$j]}" = "$k" ] || continue
+      b=0; for ((m = i + 1; m < j; m++)); do [ "${placed[$m]}" = 0 ] && [ "${tasks[$m]}" = "${tasks[$j]}" ] && { b=1; break; }; done
+      [ $b = 1 ] || { out+=("${sel[$j]}"); placed[$j]=1; }
+    done
   done
   sel=(${out[@]+"${out[@]}"}); }
 # rc3_waits <after> [now]: the job backs off (rc3_requeue) until then - not selected for a window yet.
@@ -406,8 +423,7 @@ except Exception: pass' 2>/dev/null) || ids=
       # duplicate (its need equals or is a descendant of ours, or either side has none) is still refused.
       onid=$(sed -n 's/^need=//p' "$o" | head -1)
       if [ -n "$need" ] && [ -n "$onid" ] && [ "$onid" != "$need" ] && ! git -C "$from" merge-base --is-ancestor "$need" "$onid" 2>/dev/null; then
-        echo "replacing queued $(basename "$o" .job) (waits for older ship ${onid:0:9}) with this add (needs ${need:0:9})"
-        rm -f "$o"; continue
+        drop_job "$o" "replaced by a re-add of the same check (it waited for older ship ${onid:0:9}, the add needs ${need:0:9})"; continue
       fi
       echo "already queued as $(basename "$o" .job) - not added again (QUEUE_DUP=1 to add anyway)"; exit 0
     done
@@ -421,8 +437,7 @@ except Exception: pass' 2>/dev/null) || ids=
       grep -qxF "task=$(printf '%q' "$task")" "$o" || continue
       ok_=$(cmd=(); eval "$(grep -m1 '^cmd=' "$o")" 2>/dev/null; supersede_key "${cmd[@]}")
       [ -n "$nk" ] && [ "$ok_" = "$nk" ] || continue
-      mkdir -p "$Q/done"; mv -f "$o" "$Q/done/$(basename "$o" .job).superseded"
-      echo "superseded queued $(basename "$o" .job) (the same check for this task, older) - this add replaces it"
+      drop_job "$o" "superseded: the same check for this task, older - a newer add replaces it"
     done
   fi
   qd=$Q; [ "$dev" = emu ] && { qd=$E; mkdir -p "$E"; }
@@ -721,7 +736,8 @@ EOS
       est=0; for j in "${sel[@]}"; do b=$(sed -n 's/^budget=//p' "$j" | head -1); est=$((est + ${b:-300})); done
       [ -n "$go" ] && echo "$(date +%T) go from the phone: $go ($N checks, at most ~$(( (est + 59) / 60 )) min)"
       for j in "${sel[@]}"; do
-        [ -f "$j" ] || continue
+        # Gone since the window picked it (renamed or removed outside the queue): said, never a silent skip.
+        [ -f "$j" ] || { echo "$(date +%T) $(basename "$j" .job): left the queue dir since this window picked it (renamed or removed by hand?) - not run"; continue; }
         # f97: a `queue.sh pause` mid-window (its stop flag only reaches a check that's ALREADY running, via beat's
         # look below) used to leave the runner chewing through the rest of this window's jobs regardless, holding
         # the lock the whole time while the phone dozed and the queue already said paused. A paused (or now-idle,

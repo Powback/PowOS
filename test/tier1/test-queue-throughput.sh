@@ -61,11 +61,17 @@ grep -qF 'warm_after "$log" "$gk"' "$src" && ok "runner: warm_after after every 
 grep -qF '[ -s "$Q/warm" ] && [ "$(cat "$Q/warm")" != "$gk" ] && warm_stop' "$src" && ok "runner: a warm game closed before a job of another app" || bad "runner: warm_stop before another app's job"
 
 # order_jobs: ABZU, window-bench, ABZU, resize ABZU, perf, Besiege -> ABZU x3 back to back where the first was
-mk() { printf 'task=t\ncmd=(%s)\n' "$2" > "$T/$1.job"; echo "$T/$1.job"; }
+mk() { printf 'task=%s\ncmd=(%s)\n' "${3:-t$1}" "$2" > "$T/$1.job"; echo "$T/$1.job"; }
 sel=("$(mk 01 'env APP=384190 bf-pacing.sh base')" "$(mk 02 'window-bench.sh --round before')" "$(mk 03 'env APP=384190 bf-pacing.sh env:X=1')"
      "$(mk 04 'game-resize.sh 384190')" "$(mk 05 'perf-scenarios.sh --only swipe')" "$(mk 06 'game-resize.sh 346010')")
 order_jobs; got=$(for j in "${sel[@]}"; do basename "$j" .job; done | tr '\n' ' ')
 eq "same-game jobs back to back, the rest in queue order" "$got" "01 03 04 02 05 06 "
+# 11-08 00:57: a games job (game-audio), the fps task's installs, then its fps measurement: the measurement must not be
+# pulled into the games job's group ahead of its own task's installs (it measured the old KWin/Xwayland twice).
+sel=("$(mk 11 'bash -c "cd x && /tmp/game-audio-run.sh"' audio)" "$(mk 12 'pkg-install.sh xwayland-kgsl-14.pkg' bf)" "$(mk 13 'kwin-install.sh 3.73' bf)"
+     "$(mk 14 'bf-pacing.sh play' bf)" "$(mk 15 'game-present-rate.sh' stall)" "$(mk 16 'bf-pacing.sh play' bf)")
+order_jobs; got=$(for j in "${sel[@]}"; do basename "$j" .job; done | tr '\n' ' ')
+eq "a job never runs ahead of its own task's earlier jobs (installs first); other tasks still group" "$got" "11 15 12 13 14 16 "
 sel=(); order_jobs; eq "no jobs -> none" "${#sel[@]}" 0
 
 # queue-util.py: util.log -> useful vs wasted
