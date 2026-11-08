@@ -377,13 +377,33 @@ object Tasks {
      * As WM Shell's recents controller does for Quickstep (screenshotTask: IActivityTaskManager.takeTaskSnapshot(id,
      * updateCache)). Blocking (a screen capture in the system server): off the main thread.
      */
-    fun capture(id: Int): Boolean =
-        runCatching {
+    fun capture(id: Int): Boolean {
+        if (noFrameBuffer) return false
+        return runCatching {
             HiddenApi.allow()
             val m = atm().javaClass.methods.first { it.name == "takeTaskSnapshot" }
             val args: Array<Any?> = if (m.parameterTypes.size >= 2) arrayOf(id, true) else arrayOf(id)
             m.invoke(atm(), *args) != null
-        }.onFailure { Log.w(TAG, "can't take task $id's snapshot", it) }.getOrDefault(false)
+        }.onFailure { if (!deniedFrameBuffer(it)) Log.w(TAG, "can't take task $id's snapshot", it) }.getOrDefault(false)
+    }
+
+    /**
+     * Set once the system refused a snapshot for want of READ_FRAME_BUFFER (a signature permission: held only when
+     * PowOS is the recents provider on a rooted install). Without it every call fails the same way, so the rest are
+     * skipped: no binder call and no stack trace per switcher card (a non-root install logged two full traces per
+     * frame request on the razr fold, 2026-11-08). The callers fall back to their own pictures (ThumbCache).
+     */
+    @Volatile private var noFrameBuffer = false
+
+    /** True (and [noFrameBuffer] set, logged once) when [e] is the system's READ_FRAME_BUFFER refusal. */
+    private fun deniedFrameBuffer(e: Throwable): Boolean {
+        var c: Throwable? = e
+        while (c != null && !(c is SecurityException && c.message?.contains("READ_FRAME_BUFFER") == true)) c = c.cause
+        if (c == null) return false
+        if (!noFrameBuffer) Log.i(TAG, "no READ_FRAME_BUFFER (not the recents provider): task snapshots off - ${c.message}")
+        noFrameBuffer = true
+        return true
+    }
 
     /**
      * Task [id]'s last frame (the system's task snapshot) as a JPEG at most [width] px wide, or null if it has none.
@@ -393,7 +413,11 @@ object Tasks {
         id: Int,
         width: Int = 720,
     ): ByteArray? {
-        val bitmap = runCatching { snapshotBitmap(id, true) ?: snapshotBitmap(id, false) }.onFailure { Log.w(TAG, "no snapshot of task $id", it) }.getOrNull() ?: return null
+        if (noFrameBuffer) return null
+        val bitmap =
+            runCatching { snapshotBitmap(id, true) ?: snapshotBitmap(id, false) }
+                .onFailure { if (!deniedFrameBuffer(it)) Log.w(TAG, "no snapshot of task $id", it) }
+                .getOrNull() ?: return null
         val scaled = if (bitmap.width > width) Bitmap.createScaledBitmap(bitmap, width, bitmap.height * width / bitmap.width, true) else bitmap
         return ByteArrayOutputStream().also { scaled.compress(Bitmap.CompressFormat.JPEG, 82, it) }.toByteArray()
     }

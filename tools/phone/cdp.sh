@@ -14,5 +14,9 @@ if [ "${POWOS_DEVICE:-phone}" = emu ]; then
   "$here/adb.sh" forward tcp:9334 "localabstract:webview_devtools_remote_$pid" >/dev/null || { echo "cdp: adb forward failed" >&2; exit 2; }
   CDP_PORT=9334 exec node --no-warnings "$here/cdp.ts" "$@"
 fi
-"$here/adb.sh" forward tcp:9333 "localabstract:webview_devtools_remote_$pid" >/dev/null || { echo "cdp: adb forward failed" >&2; exit 2; }
-exec docker run --rm -i -e CDP_TIMEOUT_S --network container:powos-vadb -v "$here:/t:ro" oven/bun:1 bun /t/cdp.ts "$@"
+# A second phone (PHONE_SERIAL, e.g. the unrooted razr fold) forwards on its own port: one adb server holds both
+# forwards, and reusing 9333 would re-point the OnePlus's checks at the other phone mid-run.
+port=9333
+case "${PHONE_SERIAL:-10.13.13.7:5555}" in 10.13.13.7:5555) ;; *) port=$((9340 + $(printf %s "$PHONE_SERIAL" | cksum | cut -d' ' -f1) % 50)) ;; esac
+"$here/adb.sh" forward tcp:$port "localabstract:webview_devtools_remote_$pid" >/dev/null || { echo "cdp: adb forward failed" >&2; exit 2; }
+exec docker run --rm -i -e CDP_TIMEOUT_S -e CDP_PORT=$port --network container:powos-vadb -v "$here:/t:ro" oven/bun:1 bun /t/cdp.ts "$@"

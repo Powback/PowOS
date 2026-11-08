@@ -1818,7 +1818,12 @@ class ShellBridge(
     fun display(): JSONObject {
         val d = context.resources.displayMetrics.density
         val bounds = (activity?.windowManager ?: context.getSystemService(android.view.WindowManager::class.java)).currentWindowMetrics.bounds
-        val disp = activity?.display ?: context.display
+        // No activity yet (the page asks before its window is attached): the application context has no display and
+        // context.display threw ("system.display failed", razr fold 2026-11-08) - the default display then.
+        val disp =
+            activity?.display
+                ?: runCatching { context.display }.getOrNull()
+                ?: context.getSystemService(android.hardware.display.DisplayManager::class.java)?.getDisplay(android.view.Display.DEFAULT_DISPLAY)
         return JSONObject()
             .put("widthDp", Math.round(bounds.width() / d))
             .put("heightDp", Math.round(bounds.height() / d))

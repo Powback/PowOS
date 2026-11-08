@@ -22,8 +22,11 @@ for a in "$@"; do case "$a" in --all) all=1 ;; --phone) onphone=1 ;; -h|--help) 
 [ -n "$out" ] || { sed -n '2,3p' "$0"; exit 2; }
 base=${out%.png}
 tag=powos-shot-$$
-# One root shell on the phone does all of it: state, display pick, capture, blank check.
-res=$("$here/adb.sh" shell "su -c 'sh -s'" <<EOF 2>&1
+# Root where the phone has it (the rooted OnePlus), else adb's own shell uid - screencap, dumpsys and /data/local/tmp
+# need nothing more, so an unrooted phone (PHONE_SERIAL=<the razr fold>) is shot the same way.
+asroot() { "$here/adb.sh" shell "if command -v su >/dev/null 2>&1; then su -c '$1'; else $1; fi"; }
+# One shell on the phone does all of it: state, display pick, capture, blank check.
+res=$("$here/adb.sh" shell "if command -v su >/dev/null 2>&1; then exec su -c 'sh -s'; else exec sh -s; fi" <<EOF 2>&1
 w=\$(dumpsys power | sed -n "s/.*mWakefulness=//p" | head -1)
 [ "\$w" = Awake ] || { echo "OFF \$w"; exit 0; }
 dumpsys display | grep -E "^  DisplayDeviceInfo" | sed -nE 's/.*uniqueId="local:([0-9]+)", ([0-9]+) x ([0-9]+),.* state ON,.*/\1 \2 \3/p' > /data/local/tmp/$tag.ids
@@ -47,13 +50,13 @@ echo "$res" | grep -q '^SHOT' || { echo "shot: failed: $res" >&2; exit 2; }
 rc=0
 while read -r _ name id dw dh n sec f; do
   dest=$base.png; [ -n "$all" ] && dest=$base-$name.png
-  if [ -n "$onphone" ]; then "$here/adb.sh" shell "su -c 'mv $f $dest'" >/dev/null
+  if [ -n "$onphone" ]; then asroot "mv $f $dest" >/dev/null
   else
     # adb.sh mounts only paths that exist: pull into OUT's folder, then rename.
     d=$(cd "$(dirname "$dest")" && pwd) || { echo "shot: no folder for $dest" >&2; exit 2; }
-    "$here/adb.sh" shell "su -c 'chmod 644 $f'" >/dev/null
+    asroot "chmod 644 $f" >/dev/null
     "$here/adb.sh" pull "$f" "$d/" >/dev/null 2>&1 && mv "$d/$(basename "$f")" "$dest" || { echo "shot: pull failed for $dest" >&2; rc=2; }
-    "$here/adb.sh" shell "su -c 'rm -f $f'" >/dev/null
+    asroot "rm -f $f" >/dev/null
   fi
   if [ "$n" = 0 ]; then
     why="nothing drawn - a window at alpha 0 or mid-transition; shoot again after it settles"

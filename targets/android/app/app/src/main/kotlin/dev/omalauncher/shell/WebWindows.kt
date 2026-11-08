@@ -4705,7 +4705,14 @@ class WebWindows(
         private const val HOME_GRACE_MS = 4000L
 
         /** Web windows on: Android apps opened from the wide home are web windows (only those stand the old path down: WebWindowDisplays). */
-        fun on(context: Context): Boolean = isOn(runCatching { Settings.Global.getInt(context.contentResolver, SETTING) }.getOrNull())
+        /**
+         * On only with root: the display helper is a `su 2000` app_process ([Helper]) and every window op goes through
+         * it (am start --display, input, SurfaceFlinger). Without root it never starts ("display helper not started:
+         * Cannot run program su", razr fold 2026-11-08) and each Android app opened as a web window got nothing; off,
+         * apps open as ordinary Android tasks / Android's own freeform - the clean fallback
+         * (docs/research/nonroot-parity.md row 7).
+         */
+        fun on(context: Context): Boolean = andro.marchy.RootMode.enabled() && isOn(runCatching { Settings.Global.getInt(context.contentResolver, SETTING) }.getOrNull())
 
         /** Web windows are THE window path (board "device check, then switch on", 11-01): on unless stored 0; unset = on. */
         fun isOn(stored: Int?): Boolean = stored != 0

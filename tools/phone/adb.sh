@@ -1,5 +1,5 @@
 #!/bin/bash
-# adb to the phone over the VPN (the powos-vadb container's adb server, 10.13.13.7:5555), from the Mac:
+# adb to the phone over the VPN (the powos-vadb container's adb server, $PHONE_SERIAL, default 10.13.13.7:5555), from the Mac:
 #   tools/phone/adb.sh shell 'dumpsys power | head'      tools/phone/adb.sh push FILE /data/local/tmp/
 # Paths given to push/pull/install are on the Mac, anywhere (temp dirs too); they reach a throwaway android-builder container sharing
 # powos-vadb's network, so any session or agent can use it (no per-session mounts).
@@ -14,6 +14,11 @@ case "${POWOS_DEVICE:-phone}" in
     exec "${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}/platform-tools/adb" -s "emulator-${EMU_PORT:-5584}" "$@" ;;
   *) echo "adb.sh: POWOS_DEVICE=${POWOS_DEVICE} - phone or emu" >&2; exit 2 ;;
 esac
+# Which phone: PHONE_SERIAL (powos-vadb's adb serial, host:port), default the OnePlus over the VPN. A second device on
+# the LAN (the non-root razr fold, e.g. PHONE_SERIAL=192.168.50.203:33919) goes through the same path; the WireGuard
+# staleness check below only applies to a serial whose address is a VPN peer (10.13.13.0/24).
+serial=${PHONE_SERIAL:-${POWOS_PHONE_ADDR:-10.13.13.7:5555}}
+serial_ip=${serial%:*}
 # A stopped local transport is not a busy/offline phone. Keep this check outside the device-state cache.
 if [ "$(docker inspect --format '{{.State.Running}}' powos-vadb 2>/dev/null || true)" != true ]; then
   echo 'adb.sh: transport unavailable: powos-vadb is not running (start it with docker start powos-vadb)' >&2
@@ -28,8 +33,10 @@ fi
 # ours): carry on as before - the command then fails on its own.
 wg_age() {
   docker exec wireguard wg show wg0 dump 2>/dev/null | awk -F'\t' -v now="$(date +%s)" \
-    'NR > 1 && $4 ~ /(^|,)10\.13\.13\.7\/32(,|$)/ { print ($5 == 0 ? "never" : now - $5); exit }'
+    -v ip="$serial_ip" 'NR > 1 && index("," $4 ",", "," ip "/32,") { print ($5 == 0 ? "never" : now - $5); exit }'
 }
+# Not a VPN peer (a LAN serial): no handshake to check.
+[[ "$serial_ip" == 10.13.13.* ]] || wg_age() { :; }
 if [ "${1:-}" = --vpn-state ]; then
   a=$(wg_age); [ -n "$a" ] || { echo "vpn=unknown"; exit 0; }
   [ "$a" != never ] && [ "$a" -le "${PHONE_WG_STALE_S:-180}" ] && { echo "vpn=up handshake=${a}s"; exit 0; }
@@ -41,7 +48,7 @@ fi
 # connection only goes stale after a real network change on the phone, so a GOOD result is cached for
 # ADB_STATE_CACHE_S (default 30s); anything else (no cache yet, cache expired, or the last check failed) always
 # re-checks live - a failure is never papered over by a stale "ok".
-state_file=${POWOS_ADB_STATE_FILE:-/tmp/.powos-adb-state}
+state_file=${POWOS_ADB_STATE_FILE:-/tmp/.powos-adb-state$([ "$serial" = 10.13.13.7:5555 ] || echo ".${serial//[^0-9A-Za-z]/_}")}
 now=$(date +%s); cached_ok=
 if read -r c_epoch c_status 2>/dev/null < "$state_file"; then
   [ "$c_status" = ok ] && [ $(( now - c_epoch )) -lt "${ADB_STATE_CACHE_S:-30}" ] && cached_ok=1
@@ -55,10 +62,10 @@ if [ -z "$cached_ok" ]; then
   # A network change on the phone (wifi <-> mobile) leaves powos-vadb's adb connection stale ("offline", "device
   # not found") although the VPN is up: every agent's next call then fails. Not "device"? Drop it and connect
   # afresh, once, before the command (a pre-check, not a retry: the command itself never runs twice).
-  if [ "$(docker exec powos-vadb adb -s 10.13.13.7:5555 get-state 2>/dev/null || true)" != device ]; then
-    docker exec powos-vadb sh -c 'adb disconnect 10.13.13.7:5555 >/dev/null 2>&1; timeout 15 adb connect 10.13.13.7:5555 >/dev/null 2>&1' || true
+  if [ "$(docker exec powos-vadb adb -s "$serial" get-state 2>/dev/null || true)" != device ]; then
+    docker exec powos-vadb sh -c 'adb disconnect "$1" >/dev/null 2>&1; timeout 15 adb connect "$1" >/dev/null 2>&1' _ "$serial" || true
   fi
-  if [ "$(docker exec powos-vadb adb -s 10.13.13.7:5555 get-state 2>/dev/null || true)" != device ]; then
+  if [ "$(docker exec powos-vadb adb -s "$serial" get-state 2>/dev/null || true)" != device ]; then
     rm -f "$state_file"
     echo 'adb.sh: phone unavailable after reconnect; not caching device state' >&2
     exit 69
@@ -106,10 +113,10 @@ done
 # per-call cost in friction f78 - and exec straight into powos-vadb's own, already-running, already-connected adb:
 # the same one-`docker exec` path the 0.33s benchmark used.
 if [ ${#mounts[@]} -eq 0 ] && [ ${#cp_in[@]} -eq 0 ] && [ ${#cp_out[@]} -eq 0 ]; then
-  exec docker exec -i powos-vadb adb -s 10.13.13.7:5555 "${args[@]}"
+  exec docker exec -i powos-vadb adb -s "$serial" "${args[@]}"
 fi
 run=(--network container:powos-vadb ${mounts[@]+"${mounts[@]}"} --entrypoint /opt/android-sdk/platform-tools/adb
-  android-app-dev-android-builder:latest -s 10.13.13.7:5555 "${args[@]}")
+  android-app-dev-android-builder:latest -s "$serial" "${args[@]}")
 [ ${#cp_in[@]} -eq 0 ] && [ ${#cp_out[@]} -eq 0 ] && exec docker run --rm -i "${run[@]}"
 # docker cp: create the container, copy the files in, run it attached, copy results out, remove it.
 c=$(docker create -i "${run[@]}"); sk=$(mktemp -d)

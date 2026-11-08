@@ -156,12 +156,13 @@
         </activity-alias>
 
         <!-- Android's home screen when it should be the launcher (andro.marchy.HomeScreen switches this and the
-             engine's .HomeDesktop alias; one is enabled). -->
+             engine's .HomeDesktop alias; one is enabled). The default one: "auto" home is the launcher, and a phone
+             without root has no session to call HomeScreen.apply until its image is installed. -->
         <activity-alias
             android:name="andro.marchy.HomeShell"
             android:label="PowOS Launcher"
             android:targetActivity=".shell.ShellActivity"
-            android:enabled="false"
+            android:enabled="true"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

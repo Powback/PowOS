@@ -58,11 +58,15 @@
              launcher, app module's manifest) - and HomeScreen enables exactly one: Home then opens it directly (no
              in-between activity showing the wallpaper). Settings > Home screen: auto = launcher on the cover screen,
              desktop on the inner one (switched on fold/unfold). -->
+        <!-- Off until HomeScreen.apply picks it (the "desktop" setting / desktop mode, rooted: both on): Home on a fresh
+             install is the launcher. On by default, a phone without root got the image's setup form for Home until
+             the image was installed (apply runs only from the session, which waits for the image) - every Home press
+             stacked another one (razr fold, 2026-11-08); tools/emu/emu.sh enabled HomeShell by hand for the same reason. -->
         <activity-alias
             android:name=".HomeDesktop"
             android:label="PowOS Launcher"
             android:targetActivity=".MainActivity"
-            android:enabled="true"
+            android:enabled="false"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
