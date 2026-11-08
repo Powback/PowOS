@@ -819,6 +819,22 @@ export function tileArea(): Area {
 }
 
 /**
+ * RS5 (ww-resize.sh 11-08: 63-117 missed shell vsyncs per resize drag on the phone): the page-level layout that a
+ * window's render reads - its pages' origin ([pageOrigin]), the tile area ([tileArea]) and the system strips - read
+ * once per task and kept until the next one. Read in a render they forced a layout per read: each window's render runs
+ * after the one before it wrote its frame's style, so every SwapHint's [aloneHalf] (a rect and a computed style) and
+ * every Handles' [zoneKey] (8 zones x a rect and a computed style) laid the page out again - per pointer move, ~3 ms of
+ * a gate frame's 3.5 (render scan: SwapHint 183 ms over 60 moves). None of the three moves with a window's own frame.
+ */
+let layoutCache: { origin: { x: number; y: number }; area: Area; strips: { top: number; bottom: number } } | null = null;
+function renderLayout(): NonNullable<typeof layoutCache> {
+  if (layoutCache) return layoutCache;
+  layoutCache = { origin: pageOrigin(), area: tileArea(), strips: readStrips() };
+  setTimeout(() => (layoutCache = null), 0);
+  return layoutCache;
+}
+
+/**
  * The page on screen's top left AT REST (windows are page-local): its pages' box, never the page's own rect - that one
  * moves with the track's transform, so a window placed while the track slid (a page switch's spring: open from the
  * dock or switcher, cameHere + toPage) got up to a page width added to its x (11-03: Steam "on the very right side so
@@ -953,14 +969,14 @@ export function WebWindowsOn({ page }: { page: number }) {
   const strips = parkedOn(page);
   if (!here.length && !strips.length && parkView.value?.page !== page) return null;
   const t = tilings.value[page];
-  const o = pageOrigin();
+  const o = renderLayout().origin;
   return (
     // Clipped to its page (PS2): a window bigger than its page never shows on the next one.
     <div class="page-windows">
       {here.map((w, i) => (
         <WebWindowEl key={w.el ?? w.id} win={w} z={webWins.value.indexOf(w)} above={sameAbove(w.id, here.slice(i + 1))} />
       ))}
-      {t && dividers(t, tileArea()).map((d) => <DividerEl key={d.ratio} page={page} d={d} o={o} />)}
+      {t && dividers(t, renderLayout().area).map((d) => <DividerEl key={d.ratio} page={page} d={d} o={o} />)}
       <Previews page={page} o={o} />
       {strips.map((p) => <ParkStrip key={p.id} p={p} o={o} />)}
     </div>
@@ -2054,8 +2070,7 @@ export function swapEdge(w: WebWin): Edge4 | null {
 /** A lone window snapped to a half (SC1: no tiling of one): which, by its frame on the half's rect. */
 function aloneHalf(w: WebWin): { layout: "2h" | "2v"; i: number } | null {
   if (w.restore || w.minimised || w.full || (w.scale ?? 1) !== 1) return null;
-  const o = pageOrigin();
-  const a = tileArea();
+  const { origin: o, area: a } = renderLayout();
   const on = (r: Box) => [r.x - o.x - w.x, r.y - o.y - w.y, r.w - w.w, r.h - w.h].every((v) => Math.abs(v) <= 2);
   for (const layout of ["2h", "2v"] as const) {
     const i = tileRects({ layout, ids: [], rx: 0.5, ry: 0.5 }, a).findIndex(on);
@@ -3130,7 +3145,7 @@ export const resizeView = signal<{ id: number; snapped: string } | null>(null);
 /** Window [id]'s frame resized from [s] by pointer [e] on edges [side] (an Edge grab, or the app's own), scale [k]. */
 function resizeBy(id: number, s: Grab & { side: string; k: number }, e: PointerEvent) {
   const { side, k } = s;
-  const a = tileArea();
+  const a = renderLayout().area;
   const dx = (e.clientX - s.px) / k;
   const dy = (e.clientY - s.py) / k;
   const r = {
@@ -3260,6 +3275,10 @@ effect(() => {
 
 /** The screen's system strips (px from the top / bottom): the status bar's and the gesture bar's, 24 px at least. */
 function systemStrips(): { top: number; bottom: number } {
+  return renderLayout().strips;
+}
+
+function readStrips(): { top: number; bottom: number } {
   const css = getComputedStyle(document.documentElement);
   const inset = (name: string) => parseFloat(css.getPropertyValue(name)) || 0;
   return { top: Math.max(24, inset("--inset-top")), bottom: Math.max(24, inset("--inset-bottom")) };
@@ -3273,7 +3292,7 @@ function systemStrips(): { top: number; bottom: number } {
 function zoneHeight(win: WebWin, side: string): string | undefined {
   const k = win.scale ?? 1;
   const strips = systemStrips();
-  const top = pageOrigin().y + win.y;
+  const top = renderLayout().origin.y + win.y;
   const zone = side.length === 2 ? 48 : 32;
   if (side.startsWith("n")) {
     const room = Math.max(0, top - strips.top);
@@ -3518,10 +3537,13 @@ function appDragEnd(id: number, e: PointerEvent, cancelled: boolean): boolean {
  * here; over its body the page is transparent (the app's layer). A lower window is masked where a higher window is
  * (the app's pixels are under home's buffer, so DOM there would paint over that app, or show through its bar's glass).
  */
-function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[] }) {
+// RS5: memo - a window whose props (its WebWin, z, the windows above) didn't change skips another window's resize or
+// move frame (render scan 11-08: all four windows' AppWindowEl and SwapHint rendered on each move of one); its signals
+// (resizeView, tileMenu, grips, tilings ...) still re-render it on their own.
+const WebWindowEl = memo(function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[] }) {
   if (win.quick) return <QuickEl win={win} z={z} />;
   return <AppWindowEl win={win} z={z} above={above} />;
-}
+});
 
 function AppWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[] }) {
   const body = useRef<HTMLDivElement>(null);

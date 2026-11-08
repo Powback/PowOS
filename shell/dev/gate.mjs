@@ -7445,6 +7445,75 @@ async function webWindowCheck() {
 }
 
 /**
+ * In the page: RS5 (ww-resize.sh 11-08 on the phone: "kate edge: 63 missed shell vsyncs while the finger moved", the
+ * page at ~40 fps through a resize drag; the user, 11-07: "resize it flawlessly with no perf drop"). Four windows on the
+ * page (the phone's run had four), the top one's se corner dragged one move per frame for [n] frames, each move at the
+ * frame's start as a finger's: per frame the move's handler ms (sync) and the frame's main-thread work (the rAF's
+ * start to a task after its rendering: handler + renders + the window tick + style/layout/paint), and the components
+ * rendered per move (the render scan). Returns the numbers; the node side judges them (wwResizeCost).
+ */
+/** RS5: the most layout reads one resize move may make, its renders included (11 on 11-08: the handler's clamp, the window tick). */
+const RS5_READS = 16;
+async function wwResizeCostIn(n) {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const R = await window.__gw.mod("./ui/renderscan.ts");
+  const p0 = S.pages.value[0];
+  W.webWins.value = [
+    { id: 911, key: "a:gate.one", label: "One", page: p0, x: 420, y: 80, w: 420, h: 520, live: true },
+    { id: 912, key: "a:gate.two", label: "Two", page: p0, x: 40, y: 80, w: 420, h: 520, live: true },
+    { id: 913, key: "a:gate.three", label: "Three", page: p0, x: 40, y: 80, w: 420, h: 520, live: true },
+    { id: 914, key: "a:gate.four", label: "Four", page: p0, x: 60, y: 120, w: 400, h: 480, live: true },
+  ];
+  await window.__gw.settled();
+  const frame = () => new Promise((ok) => requestAnimationFrame(ok));
+  try {
+    const edge = document.querySelector('.webwindow[data-wwid="914"] .ww-edge-se');
+    if (!edge) return { error: "no se edge on window 914" };
+    const r = edge.getBoundingClientRect();
+    const [x0, y0] = [r.left + r.width / 2, r.top + r.height / 2];
+    const pe = (type, k) => edge.dispatchEvent(new PointerEvent(type, { pointerId: 51, pointerType: "touch", isPrimary: true, clientX: x0 + k * 4, clientY: y0 + k * 3, bubbles: true }));
+    pe("pointerdown", 0);
+    await frame(), await frame();
+    R.startScan("gate-rs5");
+    R.reset();
+    const handler = [], work = [], reads = [];
+    // Layout reads (a rect, a computed style) from the move to the end of its renders (its microtasks): each one after
+    // a render's style write is a forced layout.
+    const P = Element.prototype, gbcr = P.getBoundingClientRect, gcs = window.getComputedStyle;
+    let count = 0;
+    P.getBoundingClientRect = function () { count++; return gbcr.call(this); };
+    window.getComputedStyle = function (...a) { count++; return gcs.apply(window, a); };
+    try {
+      for (let k = 1; k <= n; k++) {
+        const ms = await new Promise((ok) =>
+          requestAnimationFrame(() => {
+            const t0 = performance.now();
+            count = 0;
+            pe("pointermove", k);
+            handler.push(performance.now() - t0);
+            setTimeout(() => (reads.push(count), ok(performance.now() - t0)), 0);
+          }),
+        );
+        work.push(ms);
+      }
+    } finally {
+      P.getBoundingClientRect = gbcr;
+      window.getComputedStyle = gcs;
+    }
+    const top = R.topRenders(12).byCount.map((c) => `${c.name}x${c.renders}(${c.selfMs}ms)`);
+    R.stopScan("gate-rs5");
+    pe("pointerup", n);
+    await frame(), await frame();
+    const q = (l, f) => [...l].sort((a, b) => a - b)[Math.min(l.length - 1, Math.floor(l.length * f))];
+    const r2 = (x) => Math.round(x * 100) / 100;
+    return { n, readsP50: q(reads, 0.5), readsMax: Math.max(...reads), handlerP50: r2(q(handler, 0.5)), handlerP90: r2(q(handler, 0.9)), workP50: r2(q(work, 0.5)), workP90: r2(q(work, 0.9)), workMax: r2(Math.max(...work)), renders: top, tick: r2(q(window.__ww.tickMs.slice(-n), 0.5)), tickP90: r2(q(window.__ww.tickMs.slice(-n), 0.9)) };
+  } finally {
+    W.webWins.value = [];
+  }
+}
+
+/**
  * In the page: RS1 (the user, 10-30: "I try to resize windows, it's just lagging after, eventually it's catching up") -
  * a corner drag, one move per frame for 30 frames: every frame's "w.f" has the new body (the frame follows the finger),
  * but the app's size (the host's real resize: a relayout, a new buffer) changes at most once per 2 frames, and on
@@ -13130,6 +13199,29 @@ try {
         await r.page.reload().catch(() => {});
         return whenReady(r, () => r.page.evaluate(desktopsReloaded));
       }),
+    );
+  // RS5: a resize drag's per-frame cost with four windows (wwResizeCostIn) - CPU metrics from CDP around it.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(
+      open(browser, `${ORIGIN}/index.html`, "ww-resize-cost", { width: 1134, height: 1220 }).then((r) =>
+        whenReady(r, async () => {
+          const cdp = await r.page.target().createCDPSession();
+          await cdp.send("Performance.enable");
+          const m = async () => Object.fromEntries((await cdp.send("Performance.getMetrics")).metrics.map((x) => [x.name, x.value]));
+          await r.page.evaluate(`window.wwResizeCostIn = ${wwResizeCostIn}`);
+          const N = 60;
+          const a = await m();
+          const out = await r.page.evaluate((n) => window.wwResizeCostIn(n), N);
+          const b = await m();
+          const per = (k) => Math.round(((b[k] - a[k]) * 1000 * 100) / N) / 100;
+          const line = `ww-resize-cost: ${JSON.stringify(out)} per frame script ${per("ScriptDuration")} style ${per("RecalcStyleDuration")} layout ${per("LayoutDuration")} task ${per("TaskDuration")} ms`;
+          console.log(line);
+          if (out.error) return [`RS5: ${out.error}`];
+          // 11-08, before the fix: 79 layout reads a move (each window's SwapHint and Handles reading the page's rects and
+          // computed styles mid-render, after the window before it wrote its style: a forced layout each); after: 11.
+          return out.readsMax > RS5_READS ? [`RS5: ${out.readsMax} layout reads (rects, computed styles) in one resize move's handler + renders (want <= ${RS5_READS}): a render reads layout per window again`] : [];
+        }),
+      ),
     );
   // QP1: settings pages as quick pages - one compact card each (unfolded ~440 wide, folded a full-width sheet), pop-out, Back at the root, tap outside, a forced failure refused (quick-page-unfolded / -folded).
   if (process.env.SHELL_PAGES !== "0")
