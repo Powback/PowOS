@@ -12319,8 +12319,43 @@ async function lw3SteamTaken(key, el, at) {
   window.__mockEvents.emit("apps.launching", at("running", "Loading"));
   await window.__gw.settled();
   fails.push(W.webWins.value.filter((v) => v.key === key).length !== 1 && "a running game's Steam event made a placeholder beside its window");
+  fails.push(...(await window.__lw3f.lw3GameBar(key)));
   W.webWins.value = [];
   return fails;
+}
+
+/**
+ * The user, 11-08: Broforce "shows as a window but without a title bar, so there's no way to resize it or make it
+ * fullscreen". A game's undecorated (borderless: Unity -popupwindow) window comes with ownFrame false
+ * (WebWindows.pageOwnFrame) - even KWin's later "decor own" change - so it has PowOS's bar, and the bar's full screen
+ * is the host's (the game's immersive full screen). A Steam/Chrome CSD window (ownFrame true) still has no second bar.
+ */
+async function lw3GameBar(key) {
+  const { powos, els } = await window.__lw3f.lw3Env();
+  const port = await window.__gw.mod("./apps/port.ts");
+  const was = { ww: powos.webwindows, native: port.native.value };
+  const full = [];
+  powos.webwindows = { ...was.ww, fullScreen: async (id) => (full.push(id), true) };
+  port.native.value = { postMessage() {}, close() {} };
+  const bar = () => els(key)[0]?.querySelector('.ww-button[aria-label="Full screen"]');
+  try {
+    window.__mockEvents.emit("webwindows.frame", { id: 77, own: false });
+    await window.__gw.settled();
+    const fails = [!bar() && "a game's borderless window has no PowOS bar (no full screen / close / resize)"];
+    bar()?.click();
+    await window.__gw.settled();
+    fails.push(!full.includes(77) && `the game's bar's full screen didn't reach the host's full screen (${JSON.stringify(full)})`);
+    window.__mockEvents.emit("webwindows.frame", { id: 77, own: true });
+    await window.__gw.settled();
+    fails.push(!!bar() && "a window drawing its own frame (Steam's CSD) still got PowOS's bar over it");
+    window.__mockEvents.emit("webwindows.frame", { id: 77, own: false });
+    await window.__gw.settled();
+    fails.push(!bar() && "PowOS's bar didn't come back when the game's window stopped drawing its own frame");
+    return fails;
+  } finally {
+    powos.webwindows = was.ww;
+    port.native.value = was.native;
+  }
 }
 
 /** SL1: Steam's launch ends before its window - "couldn't start" with why; Steam asking something - it steps aside. */
@@ -12370,7 +12405,7 @@ async function lw3End() {
 }
 
 /** The LW3 run's steps into the page (window.__lw3f); evaluates to []. */
-const LW3_HELPERS = `(window.__lw3f = { ${[lw3Env, lw3Launch, lw3Offer, lw3Alts, lw3Timeout, lw3Retry, lw3BadExec, lw3HostFailed, lw3SteamLaunch, lw3SteamPhase, lw3Fills, lw3SteamTaken, lw3SteamEnded, lw3SteamFolded, lw3End].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
+const LW3_HELPERS = `(window.__lw3f = { ${[lw3Env, lw3Launch, lw3Offer, lw3Alts, lw3Timeout, lw3Retry, lw3BadExec, lw3HostFailed, lw3SteamLaunch, lw3SteamPhase, lw3Fills, lw3SteamTaken, lw3GameBar, lw3SteamEnded, lw3SteamFolded, lw3End].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
 
 /**
  * N1 (docs/WEB_WINDOWS.md "Native-glued windows"; the user, 11-07: "the pages should have the windows absolutely glued

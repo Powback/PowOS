@@ -62,6 +62,26 @@ class WebWindowsImmersiveTest {
         assertFalse("a category that only contains the word", WebWindows.isGame("x", "GameTools;"))
     }
 
+    /**
+     * The user, 11-08: Broforce "shows as a window but without a title bar, so there's no way to resize it or make it
+     * fullscreen". Unity -popupwindow / a Wine WS_POPUP / SDL borderless = _MOTIF_WM_HINTS no decorations, which kwin 0046
+     * reports as "draws its own frame" (Steam's, Chrome's) - a game's borderless window has none: PowOS's bar stays.
+     */
+    @Test
+    fun aGamesBorderlessWindowKeepsPowOSsBar() {
+        assertFalse("a borderless game window gets the bar", WebWindows.pageOwnFrame(kwinOwn = true, game = true))
+        assertTrue("Steam / Chrome CSD: their own frame, no second bar", WebWindows.pageOwnFrame(kwinOwn = true, game = false))
+        assertFalse(WebWindows.pageOwnFrame(kwinOwn = false, game = false))
+        assertFalse(WebWindows.pageOwnFrame(kwinOwn = false, game = true))
+        // Every path the page learns ownFrame from goes through it: the offer, the list (a reload) and KWin's later change
+        // (a game leaving its full screen: kwin 0046 says "own" again once _NET_WM_STATE_FULLSCREEN is off).
+        assertTrue("adopt", body("    fun linuxOpened(").contains("pageOwnFrame(andro.marchy.WebWindowSource.ownFrame(kwin), offer.game)"))
+        assertTrue("list", src.contains("pageOwnFrame(andro.marchy.WebWindowSource.ownFrame(src.kwin), src.offer.game)"))
+        val change = body("    fun linuxOwnFrame(")
+        assertTrue("frame change", change.contains("pageOwnFrame(kwinOwn, game)") && change.contains("\"own\" to own"))
+        assertFalse("no raw ownFrame reaches the page", Regex("put\\(\"ownFrame\", andro").containsMatchIn(src))
+    }
+
     @Test
     fun theOfferCarriesWhetherItIsAGame() {
         assertTrue(bridge.contains("WebWindows.LinuxOffer(appId, title, label, icon, WebWindows.isGame(appId, app?.categories), alts)"))

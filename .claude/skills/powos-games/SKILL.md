@@ -288,6 +288,11 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   The popup covers Wine's monitor (root <= task) -> winex11 still sets _NET_WM_STATE_FULLSCREEN. Old launch:
   POWOS_UNITY_SCREEN=fullscreen. Test: tier1 test-unity-screen.sh (Xvfb end-to-end when Xvfb is present).
   Unverified on device: Broforce's Unity honouring an external (WM-driven) resize of a non-resizable window.
+- A game's window always has PowOS's bar (game-window-chrome, 11-08; user: Broforce "shows as a window but without a
+  title bar"): kwin 0046 reports any _MOTIF_WM_HINTS-undecorated X window (Unity -popupwindow, Wine WS_POPUP, SDL
+  borderless) as "decor ... own" = draws its own frame, which hid the bar (fine for Steam/Chrome CSD). WebWindows.pageOwnFrame
+  = own && !offer.game on every path (adopt, list, the later "decor" change when the game leaves full screen); the bar's
+  full screen = the immersive game full screen. -popupwindow kept. Test: WebWindowsImmersiveTest.aGamesBorderlessWindowKeepsPowOSsBar.
 
 - kwin 0052 (3.59, 2026-11-02, games-p1): (1) "window task N frames: X commits, Y drawn" with Y ~2.7x X = each game
   frame composited into every consumer buffer in turn (GPU shared with the game; late redraws sample Xwayland's buffer
