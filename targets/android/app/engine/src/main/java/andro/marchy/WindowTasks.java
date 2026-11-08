@@ -210,6 +210,11 @@ public final class WindowTasks {
         return desktopOnScreen() && !FoldWatcher.desktopModeActive();
     }
 
+    /** Desktop mode now ([FoldWatcher.desktopModeActive]): KWin's desktop holds every Linux window, new ones too. */
+    public static boolean desktopModeActive() {
+        return FoldWatcher.desktopModeActive();
+    }
+
     /**
      * Desktop mode (FoldWatcher.desktopModeActive: the setting on, the phone open): KWin's desktop holds every Linux
      * window for the whole mode - "desktop 1" whether or not the Plasma app is started, and "export-new 0" - so a
