@@ -46,9 +46,24 @@ def _mono_game():
                 or glob.glob(os.path.join(p, "MonoBleedingEdge/EmbedRuntime/mono*.dll")))
 
 
+# HACK: FEX's TSO emulation (x86 store/load ordering: every guest load/store an LDAPR/STLR + barriers) off for Mono
+# games. The game's frame rate under touch is set by its main thread (Broforce play 11-06: 75.9 % of the prime core at
+# horae's 1.59 GHz cap, 38 fps; we never touch that cap), so its per-frame cost is the lever. Measured 2026-11-05
+# (bf-pacing base, cover, same 1.6-1.7 GHz cap, fps held ~39 by the display either way): main thread per frame
+# 13.2-14.4 ms with TSO (3 runs) vs 11.8-11.9 ms without (3 runs) = 15-23 % fewer cycles, no crash or hang; the
+# exe -> first frame A/B was flat (compile-bound, not barrier-bound). Mono's JIT output + UnityPlayer are the main
+# thread's hot code; their atomics (lock-prefixed / Interlocked) stay atomic without TSO - only plain-store ordering
+# is relaxed, which box64 also runs Unity games without by default (strongmem 0). TSO is part of FEX's disk cache key:
+# the first launch after this recompiles once. Per game back on: launch options `FEX_TSOENABLED=1 %command%` (Proton
+# applies a user_settings key only when the environment lacks it) or proton-settings.json {"FEX_TSOENABLED": "1"}.
+# Real fix: hardware TSO (none on Snapdragon 8 Gen 2) or FEX eliding barriers for thread-private memory, upstream.
+def _mono_settings():
+    return {"FEX_DISKCACHEANONCACHING": "0", "FEX_TSOENABLED": "0"}
+
+
 try:
     if _mono_game():
-        user_settings["FEX_DISKCACHEANONCACHING"] = "0"
+        user_settings.update(_mono_settings())
 except OSError:
     pass
 try:

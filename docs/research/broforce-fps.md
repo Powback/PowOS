@@ -451,3 +451,49 @@ KWin's EIS permission settings untouched):
 Check after the ship: `bf-pacing.sh play` (its XTEST still asks). Pass: kwin.txt has `took the focus from full-screen
 window task N: opens in front of it`, the window log has the prompt as a task (`a task, in front of window`), not a
 web window; any `drew nothing` kick is followed by non-zero `frames:` lines for the game's task.
+
+## The main thread's own cost: FEX TSO off for Mono games (2026-11-08, agent bf-mainthread)
+
+Asked: the biggest lever on the game's main thread under FEX that we control (never thermal-engine / horae's caps).
+Read from saved evidence only (phone adb unauthorized): every `bfp-*/*/prof.txt` + the 11-08 play jobs.
+
+- **Placement and clock are already what we can make them.** 11-08 play (jobs 20261108-030028 / -030143): main
+  thread `allowed=7 last cpu 7`, uclamp.min 75, in `/dev/cpuctl/powos-game`, prime policy `cur=1363 cap=1363` - at
+  horae's cap (level 5: gold 1651 / prime 1363 MHz, already at skin 32.5 C), nothing of ours lowers it. The X3 at
+  1363 still beats an A715 at 1651 (IPC ~1.4x), so the prime pin stays right. Left on cpu7: an `sh` at 8.6 % (the
+  capture's own samplers; the boost holder sits on cpu0-2) - instrument cost, not the user's play.
+- **Main thread per frame** (busy % / fps): bench play scene ~6.6-7.3 ms at 1363 MHz (37.6-42 % at 57 fps, held by
+  OTI's 60), 11-06 play 5.5 ms at 1593 (60.6 % at 110); the user's touched play 20 ms at 1593 (75.9 % at 38 fps) -
+  the heavier scene. At a fixed clock, fps under touch scales with this cost: the lever is the cycles per frame.
+- **FEX TSO is the one knob with a measured per-frame effect** (11-05 bf-pacing base, cover, fps held ~39 by the
+  display either way, so busy % compares directly):
+
+  | run | main % | fps | prime MHz | main ms/frame |
+  |---|---|---|---|---|
+  | base 02:45 / 03:31 / 04:50 | 55.6 / 51.2 / 55.3 | 38.6 / 38.8 / 38.8 | 1708 | 14.4 / 13.2 / 14.3 |
+  | `FEX_TSOENABLED=0` 02:48 / 02:50 / 03:34 | 47.3 / 46.6 / 47.1 | 39.6 / 39.4 / 40.0 | 1708 / ~1610 / 1708 | 11.9 / 11.8 / 11.8 |
+
+  15-23 % fewer main-thread cycles per frame, no crash or hang in the three runs. (The exe -> first frame A/B in
+  game-launch-time.md was flat because start-up is FEX-compile-bound, not barrier-bound.)
+- Not levers: X87ReducedPrecision (already 1 in Proton's Config.json; the game is x86-64 under arm64ec FEX, SSE
+  math), Multiblock (1), the JIT cache (file-backed code cached; Mono's anonymous JIT output differs every launch,
+  ANONCACHING off since steam -36, it is compiled once per launch, not per frame), Mono AOT/interpreter (Unity
+  2017.4's embedded mono.dll has no AOT or MONO_ENV_OPTIONS for an embedder), `-job-worker-count` (Unity 2019.3+;
+  the workers are < 3 % each in play now), DXVK vs WineD3D (dxvk-cs 7 %, UnityGfxDeviceW 9.5 % - not the main
+  thread; WineD3D's GL path moves more work onto it).
+
+Change (steam 1.0.0.87-41, `pkgs/steam/user_settings.py` `_mono_settings`): Mono games (Unity's embedded Mono or
+MonoBleedingEdge) get `FEX_TSOENABLED=0` beside `FEX_DISKCACHEANONCACHING=0`. Atomics stay atomic; only plain
+load/store ordering is relaxed (box64 runs Unity games that way by default). TSO is in FEX's disk cache key, so the
+first launch after the update recompiles once (slower start once). Per game back on: launch options
+`FEX_TSOENABLED=1 %command%` or proton-settings.json `{"FEX_TSOENABLED": "1"}`. Test: tier1
+test-steam-iscript-skip.py `MonoAnonCache` (Mono -> 0, other games untouched, proton-settings.json wins).
+
+Expected: main-thread ms/frame -15..-23 % at the same clock -> touched play ~38 -> ~45-49 fps in the user's heavy
+scene (main-bound), the bench play scene's main thread 37.6 % -> ~30 % at 57 fps (room for ~120 at horae's 1363 MHz).
+Measure after the steam ship (launch once to rebuild the cache first): 
+`queue.sh add --screen inner broforce-fps-low-cpu-bound-under-fex env INPUT=touch tools/phone/verify/bf-pacing.sh play`
+then the same with `env:FEX_TSOENABLED=1` for the A/B. Compare per run `prof play:` main % / fps / policy7 cur
+(main ms/frame = main% x 10 / fps), the `layers play:` game fps, and bf-checker 0 dashes. Pass: ms/frame at least
+10 % lower than the TSO-on run at the same prime clock, and no crash/hang (game exits only by the run's stop).
+If a Mono game misbehaves (crash, freeze, corrupt state), that game gets TSO back via its launch options and a row here.

@@ -209,13 +209,16 @@ class Arm64GateOverlay(Arm64Gate):
 class MonoAnonCache(unittest.TestCase):
     """user_settings.py: FEX's anonymous-code disk cache off for Mono games only."""
 
-    def settings(self, layout):
+    def settings(self, layout, key="FEX_DISKCACHEANONCACHING", override=None):
         t = Path(tempfile.mkdtemp())
         try:
             for f in layout:
                 (t / f).parent.mkdir(parents=True, exist_ok=True)
                 (t / f).write_text("x")
-            code = "import runpy; print(runpy.run_path(%r)['user_settings'].get('FEX_DISKCACHEANONCACHING'))" % str(PKG / "user_settings.py")
+            if override is not None:
+                (t / ".config/powos").mkdir(parents=True)
+                (t / ".config/powos/proton-settings.json").write_text(override)
+            code = "import runpy; print(runpy.run_path(%r)['user_settings'].get(%r))" % (str(PKG / "user_settings.py"), key)
             r = subprocess.run([sys.executable, "-c", code], env=dict(os.environ, STEAM_COMPAT_INSTALL_PATH=str(t), HOME=str(t)),
                                capture_output=True, text=True, timeout=30)
             return r.stdout.strip()
@@ -228,6 +231,17 @@ class MonoAnonCache(unittest.TestCase):
 
     def test_other_games_keep_fex_default(self):
         self.assertEqual(self.settings(["Game.exe", "GameAssembly.dll"]), "None")
+        self.assertEqual(self.settings(["Game.exe", "GameAssembly.dll"], "FEX_TSOENABLED"), "None")
+
+    def test_mono_main_thread_tso_off(self):
+        """The Mono game's main thread without FEX's TSO barriers (15-23 % fewer cycles per frame, 11-05 A/B)."""
+        self.assertEqual(self.settings(["Broforce_beta_Data/Mono/EmbedRuntime/mono.dll"], "FEX_TSOENABLED"), "0")
+        self.assertEqual(self.settings(["MonoBleedingEdge/EmbedRuntime/mono-2.0-bdwgc.dll"], "FEX_TSOENABLED"), "0")
+
+    def test_tso_back_on_per_check(self):
+        """proton-settings.json still wins: a check (or the user) turns TSO back on for one run."""
+        self.assertEqual(self.settings(["Broforce_beta_Data/Mono/EmbedRuntime/mono.dll"], "FEX_TSOENABLED",
+                                       '{"FEX_TSOENABLED": "1"}'), "1")
 
 
 if __name__ == "__main__":
