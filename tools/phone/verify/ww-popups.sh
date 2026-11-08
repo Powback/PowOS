@@ -35,6 +35,10 @@ T=$(cd "$(dirname "$0")/.." && pwd)
 adb="$T/adb.sh"
 OUT=${OUT:-$HOME/.cache/powos-verify/ww-popups-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
 fail=0
+# Its own clock: a verdict (with the step it stopped at) before the queue's budget kill (300 s; 11-08 16:46 the menu-bar
+# scan ran ~11 s a tap, two X reads each, and was killed mid-scan with no verdict). WWP_BUDGET_S: the whole run.
+DEADLINE=${WWP_BUDGET_S:-270}
+late() { [ "$SECONDS" -ge "$DEADLINE" ]; }
 say() { echo "$*" | tee -a "$OUT/log.txt"; }
 bad() { say "FAIL $*"; fail=1; }
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
@@ -69,7 +73,8 @@ xwininfo -root -tree 2>/dev/null | awk '/"Steam": \("steamwebhelper" "steam"\)/{
 EOF
 )
 steamwin() { us "$X; $STEAMWIN_SH" | tail -1; }
-menus() { us "$X; xwininfo -root -children 2>/dev/null | awk '/\\(\"steamwebhelper\" \"steam\"\\)/ && /has no name/{print \$1}' | while read -r w; do xwininfo -id \$w 2>/dev/null | awk -v w=\$w '/Map State/{m=\$3} /Override Redirect State/{o=\$4} /Absolute upper-left X/{ax=\$4} /Absolute upper-left Y/{ay=\$4} /Width:/{x=\$2} /Height:/{y=\$2} END{if(m==\"IsViewable\"&&o==\"yes\")print w, ax, ay, x, y}'; done" | grep .; }
+# Every viewable override-redirect steamwebhelper window, named or not (a named menu was never counted before 11-08).
+menus() { us "$X; xwininfo -root -children 2>/dev/null | awk '/\\(\"steamwebhelper\" \"steam\"\\)/{print \$1}' | while read -r w; do xwininfo -id \$w 2>/dev/null | awk -v w=\$w '/Map State/{m=\$3} /Override Redirect State/{o=\$4} /Absolute upper-left X/{ax=\$4} /Absolute upper-left Y/{ay=\$4} /Width:/{x=\$2} /Height:/{y=\$2} END{if(m==\"IsViewable\"&&o==\"yes\")print w, ax, ay, x, y}'; done" | grep .; }
 read -r SW SX SY SWW SWH <<<"$(steamwin)"
 # Self-setup: no Steam web window, or no viewable main window in it -> Steam opened as a tap would (apps.launch l:steam:
 # starts it, or brings a running one's main window up), then up to STEAM_WAIT_S for its main window. Put back on exit.
@@ -79,7 +84,7 @@ restore_steam() {
     ww_us 'export XDG_RUNTIME_DIR=/run/powos-app DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus; timeout 35 powos game 274190 stop --steam' >/dev/null
     say "Steam closed: this check started it"
   else
-    local w; [ -n "${STEAM_STARTED:-}" ] && STEAM_NEW=$(comm -13 <(echo "$b0") <(wwids l:steam) | xargs)  # also after a failed wait
+    local w; [ -n "${STEAM_STARTED:-}" ] && STEAM_NEW=$(comm -13 <(echo "$b0") <(wwids l:steam)); STEAM_NEW=${STEAM_NEW//$'\n'/ }  # (no `| xargs`: killed mid-pipe it printed "xargs: /bin/echo: terminated with signal 13" as the verdict) also after a failed wait
     for w in $STEAM_NEW; do ww_close "$w"; say "Steam's web window $w closed: this check brought it up (Steam keeps running, as before)"; done
   fi; STEAM_STARTED="" STEAM_NEW=""; }
 if [ -z "${SW:-}" ] || [ "$sw" = none ]; then
@@ -100,7 +105,7 @@ if [ -z "${SW:-}" ] || [ "$sw" = none ]; then
     [ -n "${SW:-}" ] && [ "$sw" != none ] && [ "$(wwel "$sw" "e=>e.querySelector('.webwindow-body.live')?'live':'no'")" = live ] && break
     SW=""
   done
-  STEAM_NEW=$(comm -13 <(echo "$b0") <(wwids l:steam) | xargs)
+  STEAM_NEW=$(comm -13 <(echo "$b0") <(wwids l:steam)); STEAM_NEW=${STEAM_NEW//$'\n'/ }
   [ -n "${SW:-}" ] || { echo "FAIL setup: no viewable Steam main window $((SECONDS - t0)) s after apps.launch l:steam (web window $sw)"; exit 1; }
   say "Steam's main window up $((SECONDS - t0)) s after the launch (web window $sw, new: ${STEAM_NEW:-none})"; sleep 2
 elif [ $DRY = 1 ]; then
@@ -133,15 +138,23 @@ trap 'm=$(menus | head -1); [ "${opened:-0}" -gt 0 ] && [ -n "$m" ] && menu_clos
 since=$("$adb" shell 'date +%m-%d\ %H:%M:%S.000' | tr -d '\r')
 klog0=$(rs 'wc -l < /run/powos-app/hyprland.log' | tail -1)
 opened=0
-# Steam's menu bar (Steam, View, Friends, Games, Help) along the top of its window, window px: scanned left to right
-# until a click opens a menu (a new viewable override-redirect window), then the next one further right.
-for y in 50 58 40 66; do
-  for x in 40 110 190 280 360 430; do
+# Steam's menu bar (Steam, View, Friends, Games, Help) along the top of its window, window px (the 11-07 screenshot,
+# steam-one-window: labels centred at y ~40, x ~110/220/330/450/550 at scale 1): scanned left to right until a tap
+# opens a menu (a new viewable override-redirect window), then the next one further right. One X read per tap (the
+# last read is the next tap's "before"; ~4 s each over user.sh), and the run's clock checked before every tap.
+taps=0 kpop=0 scan_stop=""
+popn() { "$adb" shell "logcat -d -T '$since' -s PowosPopups:I" 2>/dev/null | tr -d '\r' | grep -cE 'popup [0-9]+ [0-9]+ at '; }
+cur=$(menus)
+for y in 40 28 52; do
+  for x in 110 220 330 450 550; do
     [ $opened -ge 2 ] && break 2
-    before=$(menus)
-    wtap "$x" "$y"
+    late && { scan_stop="the run's ${DEADLINE}s clock ran out at the tap at $x,$y ($taps taps, $opened menus)"; break 2; }
+    before=$cur
+    wtap "$x" "$y" || { scan_stop="Steam's window body isn't on screen (tap at $x,$y)"; break 2; }
+    taps=$((taps + 1))
     sleep 1.2
-    new=$(comm -13 <(echo "$before" | sort) <(menus | sort) | head -1)
+    cur=$(menus)
+    new=$(comm -13 <(echo "$before" | sort) <(echo "$cur" | sort) | grep . | head -1)
     [ -n "$new" ] || continue
     read -r MW MX MY MWW MWH <<<"$new"
     opened=$((opened + 1))
@@ -184,11 +197,19 @@ for y in 50 58 40 66; do
       [ -n "$gone" ] && break
     done
     [ -n "${N:-}" ] && { [ -n "$gone" ] && say "gone: $gone" || bad "gone: no \"popup-gone ... $N\" 5 s after closing it ($how)"; }
-    [ -z "$(comm -13 <(echo "$before" | sort) <(menus | sort))" ] || say "note: the menu is still viewable after closing it ($how)"
+    cur=$(menus)
+    [ -z "$(comm -13 <(echo "$before" | sort) <(echo "$cur" | sort) | grep .)" ] || say "note: the menu is still viewable after closing it ($how)"
     N=""
   done
 done
-[ $opened -ge 1 ] || bad "no tap on Steam's menu bar opened a menu (no new override-redirect window): the scan's points, or Steam"
+[ -n "$scan_stop" ] && bad "scan stopped: $scan_stop"
+if [ $opened -lt 1 ]; then
+  # Which side failed: the taps never reached KWin, KWin exported a popup the X read missed, or Steam opened nothing.
+  kt=$(rs "tail -n +$((klog0 + 1)) /run/powos-app/hyprland.log | grep -ac 'touch at'" | tail -1)
+  kpop=$(popn)
+  "$adb" exec-out screencap -p > "$OUT/no-menu.png" 2>/dev/null
+  bad "no tap on Steam's menu bar opened a menu ($taps taps; KWin touch lines ${kt:-?}, app popup lines ${kpop:-?}; screen $OUT/no-menu.png): $([ "${kt:-0}" = 0 ] && echo "the taps never reached KWin" || { [ "${kpop:-0}" -gt 0 ] && echo "KWin exported popups the X read didn't see" || echo "taps reached KWin, Steam opened no X menu"; })"
+fi
 
 # N3b: a menu taller than its window shows whole and takes touches (kwin 3.72+).
 # region <save|cmp> l t r b: the screen's pixels there (every 6th) saved, or the share (%) that differ from the saved ones.
@@ -250,7 +271,9 @@ long_menu() {
   if [ -n "$gone" ]; then say "long: $how closed it: $gone"; else bad "long: popup $N still open 4 s after $how"; fi
 }
 RESTORE=""
-if [ $LAYERS = 1 ] && [ -n "${CX:-}" ]; then long_menu; fi
+if [ $LAYERS = 1 ] && [ -n "${CX:-}" ]; then
+  if [ $((SECONDS + 60)) -ge "$DEADLINE" ]; then bad "long: not run - $((DEADLINE - SECONDS)) s left of the run's ${DEADLINE}s clock (it needs ~60)"; else long_menu; fi
+fi
 if [ -n "$RESTORE" ]; then "$adb" shell "input swipe $RESTORE 900"; sleep 1.5; say "long: Steam's window size put back ($(wwbody "$sw"))"; fi
 "$adb" shell "logcat -d -T '$since' -s PowosPopups:*" 2>/dev/null > "$OUT/popups.txt"
 [ "$fail" = 0 ] && say "PASS $opened Steam menus came as popup surfaces with sane geometry$([ $LAYERS = 1 ] && echo ", shown as layers of their own past the window's edge, touchable, dismissed from the page" || echo " and buffers")"
