@@ -393,3 +393,12 @@ the restore is intermittent. Fixed: bf-pacing marks the measurement start in the
 lines after it (none = 0) - test/tier1/test-bf-layers.py. Open: xdotool's XTEST still asks (an
 `[Xwayland] XwaylandEisNoPromptApps=xdotool` default was refused by the agent's permission check as a security
 setting - the owner decides), and why the restored game stops presenting.
+
+Fixed on the checks' side (check-input-android, 11-08): no verify check makes an XTEST client any more, so KWin has
+nothing to ask about. bf-play presses its keys as the user's on-screen controls' pad (tools/phone/verify/pad-lib.sh
+`pad_press`: PAD2 packets to `@powos.padd` -> the Deck controller -> Steam Input -> the game; Return = A, Escape = B),
+which reaches the game on both screens (a home web window gets no hardware keys from Android). steam-install and
+steam-dialogs/answer press the dialogs' default button the same way; steam-tap and ww-popups tap Steam's window through
+Android `input tap` at the X point mapped on screen. The pad is an input device idle.sh counts as a person's, so the
+Mac side marks those runs as the tools' own first (`self_input_for <s>` in window-lock.sh). Guard:
+test/tier1/test-verify-no-xtest.sh.

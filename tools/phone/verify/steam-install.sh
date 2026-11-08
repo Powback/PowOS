@@ -9,10 +9,14 @@ here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
 [ $# -gt 0 ] || { echo "usage: steam-install.sh <appid>..."; exit 2; }
 for id in "$@"; do case $id in *[!0-9]*) echo "steam-install.sh: not an appid: $id"; exit 2 ;; esac; done
 OUT=${OUT:-$HOME/.cache/powos-verify/steam-install-$(date +%F_%H%M)}; mkdir -p "$OUT"
-for f in steam-install-phone.sh bf-lib.sh bf-stop.sh; do "$A" push "$here/$f" /data/local/tmp/powos-$f >/dev/null || { echo "FAIL setup: can't push $f"; exit 1; }; done
-"$A" shell "su -c 'cp /data/local/tmp/powos-steam-install-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-stop.sh /data/powos/root/var/tmp/ && chmod 644 /data/powos/root/var/tmp/powos-steam-install-phone.sh /data/powos/root/var/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-bf-stop.sh && sh /data/powos/powos-run.sh \"bash /var/tmp/powos-steam-install-phone.sh $*\"'" \
+. "$here/window-lock.sh"   # self_input_for
+for f in steam-install-phone.sh bf-lib.sh bf-stop.sh pad-lib.sh; do "$A" push "$here/$f" /data/local/tmp/powos-$f >/dev/null || { echo "FAIL setup: can't push $f"; exit 1; }; done
+# The install dialog's Return is a press of the on-screen controls' pad (pad-lib.sh, no XTEST): an input device idle.sh
+# counts as a person's, so the run (up to 90 s per game) is marked as the tools' own; the run's own touched() reads the
+# touch panels' IRQs and still stops at a real touch.
+"$A" shell "$(self_input_for $(( $# * 95 + 30 )))su -c 'cp /data/local/tmp/powos-steam-install-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-pad-lib.sh /data/powos/root/var/tmp/ && chmod 644 /data/powos/root/var/tmp/powos-steam-install-phone.sh /data/powos/root/var/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-bf-stop.sh /data/powos/root/var/tmp/powos-pad-lib.sh && sh /data/powos/powos-run.sh \"bash /var/tmp/powos-steam-install-phone.sh $*\"'" \
   | sed -l $'s/\r$//' | tee "$OUT/run.txt"
-"$A" shell "su -c 'rm -f /data/local/tmp/powos-steam-install-phone.sh /data/local/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-steam-install-phone.sh'"
+"$A" shell "su -c 'rm -f /data/local/tmp/powos-steam-install-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-pad-lib.sh /data/powos/root/var/tmp/powos-steam-install-phone.sh /data/powos/root/var/tmp/powos-pad-lib.sh'"
 echo "artefacts: $OUT/run.txt"
 grep -q "^RESULT" "$OUT/run.txt" || { grep -q "^user input\|^stopped from outside" "$OUT/run.txt" && exit 3; echo "FAIL run: no RESULT line"; exit 1; }
 grep "^RESULT" "$OUT/run.txt" | tail -1

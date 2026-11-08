@@ -21,7 +21,10 @@ WL_WOKE=${WL_WOKE:-$HOME/.cache/powos-verify-woke}
 # panels' resume/suspend move the touch IRQ counters and emit panel events with no finger. Without it every wake counted
 # as the user picking the phone up: wl_touched stopped the woken window's first check within 4 s (11-07 20:20-22:04,
 # ww-glue rc 3 "touched" 10 times at night, nothing ran).
-SELF_INPUT='echo $(( $(date +%s) + 8 )) > /data/local/tmp/powos-selfinput; '
+# self_input_for <s>: the same mark for the next <s> s - a check's own injected input that lasts longer than a key (the
+# pad presses of pad-lib.sh: powos-padd's controller is an input device idle.sh counts as a person's; bf-play).
+self_input_for() { printf 'echo $(( $(date +%%s) + %d )) > /data/local/tmp/powos-selfinput; ' "${1:-8}"; }
+SELF_INPUT=$(self_input_for 8)
 wl_wake() {
   [ -z "${GO_ONLY:-}" ] || return 0
   local st i bat lvl pw cur b m t

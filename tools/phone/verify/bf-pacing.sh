@@ -27,6 +27,7 @@
 # window is waited for only while the rest still fits (WIN_S; else "FAIL no game window" instead of a budget kill).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
+. "$here/window-lock.sh"   # self_input_for
 [ $# -gt 0 ] || set -- base
 BF_ADB=$A . "$here/bf-lib.sh"   # pill <step>: the status pill's sub-step
 cfg_take "$@"; set -- ${CFG_ARGS[@]+"${CFG_ARGS[@]}"}; [ $# -gt 0 ] || set -- base  # cfg:<x86|arm64>: bf-lib.sh cfg_take (bash 3.2-safe empty array)
@@ -52,13 +53,15 @@ T0=$(date +%s) BUDGET_S=${BUDGET_S:-300}
 # After the window: settle 45 + measure 30 + collecting ~25 + restore ~25 + comparing ~25 s, and a margin.
 AFTER_WIN_S=${AFTER_WIN_S:-165}
 irq() { "$A" shell "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts" | tr -d '\r'; }
+# asuser <script> [args]: ASUSER_PRE = an adb shell prefix run first as shell (self_input_for: bf-play's pad presses are
+# the tools' own, not the user's); pad-lib.sh goes along (bf-play's input).
 asuser() { local n=$1; shift
-  "$A" shell "su -c 'cp /data/local/tmp/powos-$n /data/powos/root/var/tmp/powos-$n; chmod 644 /data/powos/root/var/tmp/powos-$n; sh /data/powos/powos-run.sh \"APP=$APP WIN_NAME=$WIN_NAME sh /var/tmp/powos-$n $*\"'" 2>&1 | grep -v sysvipc | tr -d '\r'; }
+  "$A" shell "${ASUSER_PRE:-}su -c 'cp /data/local/tmp/powos-$n /data/local/tmp/powos-pad-lib.sh /data/powos/root/var/tmp/; chmod 644 /data/powos/root/var/tmp/powos-$n /data/powos/root/var/tmp/powos-pad-lib.sh; sh /data/powos/powos-run.sh \"APP=$APP WIN_NAME=$WIN_NAME sh /var/tmp/powos-$n $*\"'" 2>&1 | grep -v sysvipc | tr -d '\r'; }
 pill "checking the phone (a game already up? Steam?)"
 # Every phone-side script in ONE push (each adb.sh call is a docker run over the VPN, ~2-3 s).
-st=$OUT/push; mkdir -p "$st"; for f in bf-start.sh bf-stop.sh bf-window.sh bf-present.sh bf-prof.sh bf-game.sh bf-nap.sh bf-onscreen.sh bf-play.sh bf-ask.sh; do
+st=$OUT/push; mkdir -p "$st"; for f in bf-start.sh bf-stop.sh bf-window.sh bf-present.sh bf-prof.sh bf-game.sh bf-nap.sh bf-onscreen.sh bf-play.sh bf-ask.sh pad-lib.sh; do
   cp "$here/$f" "$st/powos-$f"; done
-"$A" push "$st"/powos-bf-*.sh /data/local/tmp/ >/dev/null || { echo "ENV: can't push the check's scripts"; exit 5; }
+"$A" push "$st"/powos-bf-*.sh "$st"/powos-pad-lib.sh /data/local/tmp/ >/dev/null || { echo "ENV: can't push the check's scripts"; exit 5; }
 gs=$(asuser bf-game.sh state | tail -1); users=0
 # Warm hand-over (queue.sh order_jobs + QUEUE_NEXT_APP): the job before this one, for the same game, left it running
 # and wrote /var/tmp/powos-warm-<APP> = "<its last mode>|cfg:<CFG_TO>". That game is the queue's, not the user's: the
@@ -185,7 +188,9 @@ for mode in "$@"; do
     # play: from the menu into a level (bf-play.sh: keys + a grab after each, pulled into the mode's folder), 10 s in
     # play, then the same measurement - the scene the user plays, not the title screen (11-06: menu 116 fps, play 38).
     pill "$lbl: into a level"
-    echo "$mode: $(asuser bf-play.sh /var/tmp/powos-bfplay ${BF_PLAY_KEYS:-} | tail -1)"
+    # The pad presses are an input device on the phone: marked as the tools' own for the keys' run (+15 s).
+    nk=$(set -- ${BF_PLAY_KEYS:-Return Return Return Return Return Return}; echo $#)
+    echo "$mode: $(ASUSER_PRE=$(self_input_for $(( nk * ${BF_PLAY_GAP_S:-3} + 15 ))) asuser bf-play.sh /var/tmp/powos-bfplay ${BF_PLAY_KEYS:-} | tail -1)"
     "$A" pull /data/powos/root/var/tmp/powos-bfplay "$M/" >/dev/null 2>&1; "$A" shell "su -c 'rm -rf /data/powos/root/var/tmp/powos-bfplay'"
     nap 10; onscreen || invalid "after entering play"
   fi
