@@ -107,11 +107,20 @@ class ShellActivity : Activity() {
      * home screen's own instance, extras and all, and gone - one shell page, not a second WebView in a task of its own
      * (Android keeps a home activity and the same activity started as an app in different tasks, singleTask or not).
      * A HOME intent without a component is a home launch from any app; it resolves to .HomeShell, the one enabled.
+     * Only while PowOS is the default home ([HomeRedirect]); otherwise this is the app, opened right here.
      */
     private fun toHome(): Boolean {
-        if (intent.hasCategory(Intent.CATEGORY_HOME)) return false
         val alias = android.content.ComponentName(this, "andro.marchy.HomeShell")
-        if (packageManager.getComponentEnabledSetting(alias) != PackageManager.COMPONENT_ENABLED_STATE_ENABLED) return false
+        val redirect = HomeRedirect.redirects(
+            homeIntent = intent.hasCategory(Intent.CATEGORY_HOME),
+            // DEFAULT (manifest android:enabled="true") counts as on: HomeShell has been on by default since 909ff910.
+            aliasOn = packageManager.getComponentEnabledSetting(alias) != PackageManager.COMPONENT_ENABLED_STATE_DISABLED &&
+                runCatching { packageManager.getActivityInfo(alias, 0).enabled }.getOrDefault(false),
+            // Not the default home (the razr fold, Moto's launcher home): the HOME intent below lands on this very
+            // instance (singleTask, START_DELIVERED_TO_TOP) and finish() then closed it - a tap on the icon showed nothing.
+            isDefaultHome = getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_HOME),
+        )
+        if (!redirect) return false
         startActivity(
             Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_HOME)
