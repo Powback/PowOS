@@ -7,11 +7,16 @@
 # -> stream.audio_group:... output_FL/FR -> anland-speaker (KWin -> Android). Channel maps are not the drop: PipeWire's
 # channelmix pairs unpositioned channels 1:1 (channelmix-ops.c make_matrix "pairing UNK channels").
 # Taps: a private pw-record (node.autoconnect=false) linked by hand to an output port pair, 2 s, peak of S16 samples:
-#   A game's own output   B the loopback's output (what anland-speaker receives)   C B again while a 440 Hz tone
-#   plays INTO the group sink (pw-play --target <group sink>, media.role Game).
+#   A game's own output   B the loopback's output (what anland-speaker receives)
+#   C anland-speaker's own monitor (its monitor_FL/FR ports, else a stream.capture.sink recorder on it): what the sink
+#     mixes from ALL its inputs = what KWin's process callback hands the Android bridge (non-game sound included)
+#   T B again while a 440 Hz tone plays INTO the group sink (pw-play --target <group sink>, media.role Game).
+#   E KWin's audio socket to Android (ss -x of kwin_wayland's seqpacket sockets): a Send-Q stuck full = the Android
+#     side stopped reading, so KWin's MSG_DONTWAIT sends drop every period. Stage D (Android's AAudio track, its frames
+#     written/underruns/volume) runs on the Mac side: game-audio-flow.sh.
 # Also: the loopback owner's process state (a frozen/stopped Steam = a dead loopback with every node still "running"),
 # each node's Props (mute, channel/soft volumes). Read-only except the tone (2 s, the group sink only).
-# Exit: 0 = tone reaches the loopback output (B or C non-silent); 1 = tone silent at the loopback output; 3 = no group.
+# Exit: 0 = tone reaches the loopback output (T non-silent); 1 = tone silent at the loopback output; 3 = no group.
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 T=$(mktemp -d /tmp/gaflow.XXXX); trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$T"' EXIT
 pw-dump >"$T/dump.json" 2>/dev/null
@@ -46,6 +51,19 @@ gout=$(pw-link -l 2>/dev/null | awk -v g="$gname" '/^[^ |]/ && $0 !~ /audio_grou
 echo "game ports into the group: ${gout:-none}"
 [ -n "$gout" ] && peak "A game-output" $gout
 peak "B loopback-output" "$fname:output_FL" "$fname:output_FR" | tee "$T/B"
+spk_mon=$(pw-link -o 2>/dev/null | grep -E '^anland-speaker:monitor_F[LR]$' | sort | tr '\n' ' ')
+if [ -n "$spk_mon" ]; then peak "C speaker-monitor" $spk_mon | tee "$T/Cm"
+else  # a pw_stream sink may carry no monitor ports: record the sink itself (stream.capture.sink) instead
+  n=gaflow-$RANDOM
+  pw-record --target anland-speaker -P "{ node.name=$n stream.capture.sink=true }" --format s16 --rate 48000 --channels 2 - >"$T/$n.raw" 2>/dev/null &
+  p=$!; sleep 2; kill $p 2>/dev/null; wait $p 2>/dev/null
+  python3 -c 'import sys,array; a=array.array("h"); b=open(sys.argv[1],"rb").read(); a.frombytes(b[:len(b)//2*2]); print("C speaker-monitor(sink-capture) samples=%d peak=%d" % (len(a), max(map(abs,a)) if a else -1))' "$T/$n.raw" | tee "$T/Cm"
+fi
+k=$(pgrep -x kwin_wayland | head -1)
+if command -v ss >/dev/null && [ -n "$k" ]; then
+  echo "E kwin_wayland($k) seqpacket sockets (Recv-Q Send-Q; a full Send-Q = Android stopped reading audio):"
+  ss -xp 2>/dev/null | awk -v k="pid=$k," '$1=="u_seq" && index($0,k) {print "   ", $1, $2, "recvq=" $3, "sendq=" $4, $5, $6, $7, $8}'
+else echo "E kwin socket: ss or kwin_wayland unavailable"; fi
 python3 - "$T/tone.wav" <<'PY'
 import sys,wave,math,struct
 w=wave.open(sys.argv[1],"wb"); w.setnchannels(2); w.setsampwidth(2); w.setframerate(48000)
@@ -53,8 +71,11 @@ w.writeframes(b"".join(struct.pack("<hh",v,v) for v in (int(8000*math.sin(2*math
 PY
 pw-play --target "$gid" -P '{ media.role=Game application.name=gaflow-tone }' "$T/tone.wav" 2>"$T/play.err" &
 sleep 0.8
-peak "C loopback-output+tone" "$fname:output_FL" "$fname:output_FR" | tee "$T/C"
+peak "T loopback-output+tone" "$fname:output_FL" "$fname:output_FR" | tee "$T/C"
 wait 2>/dev/null; [ -s "$T/play.err" ] && echo "pw-play: $(head -c 300 "$T/play.err")"
 c=$(sed -n 's/.*peak=\(-*[0-9]*\).*/\1/p' "$T/C"); b=$(sed -n 's/.*peak=\(-*[0-9]*\).*/\1/p' "$T/B")
+m=$(sed -n 's/.*peak=\(-*[0-9]*\).*/\1/p' "$T/Cm")
+[ "${b:-0}" -gt 1000 ] && [ "${m:-0}" -le 1000 ] && echo "STAGE: sound reaches the loopback output but NOT anland-speaker's mix (C peak ${m:-none}) - the forward->speaker link drops it"
+[ "${m:-0}" -gt 1000 ] && echo "STAGE: anland-speaker mixes the sound (C peak $m) - any loss is after KWin: see stage E and the Mac-side stage D"
 if [ "${c:-0}" -gt 1000 ]; then echo "PASS: tone into $gname reaches the loopback output (peak $c; game-only $b)"; exit 0; fi
 echo "FAIL: tone into $gname is silent at the loopback output (peak ${c:-none}; game-only ${b:-none})"; exit 1

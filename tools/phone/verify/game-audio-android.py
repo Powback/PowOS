@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Stage D of game-audio-flow.sh: did Android actually play what KWin's audio bridge sent? Reads two
+`dumpsys media.audio_flinger` snapshots taken a few seconds apart while the game plays (the Mac side takes them through
+tools/phone/adb.sh), finds the PowOS app's tracks (the andromarchy engine's AAudio output, Client = the app's pid), and
+prints per track: output thread + device, frames the server consumed between the snapshots, underruns, and its gains
+(L/R/VS dB: -inf = muted by Android's stream/app volume). Then STREAM_MUSIC's volume/mute from `dumpsys audio` and the
+app's player lines (Android 12+ lists per-player mute reasons there).
+  game-audio-android.py <app pid> <af snapshot 1> <af snapshot 2> <dumpsys audio> -> rc 0 = a PowOS track advanced
+  with audible gain, 1 = no track / not advancing / muted (the line says which)."""
+import re, sys
+
+pid, af1, af2, aud = sys.argv[1], *(open(p, errors="replace").read() for p in sys.argv[2:5])
+
+
+def tracks(txt):
+    """{(thread, track id): {column: value, 'thread': ..., 'device': ...}} for rows whose Client is pid."""
+    out, thread, device, hdr = {}, "?", "?", None
+    for line in txt.splitlines():
+        m = re.match(r"\s*Output thread (0x[0-9a-f]+)", line)
+        if m: thread, device, hdr = m.group(1), "?", None; continue
+        m = re.search(r"Output devices?: *(.*)", line)
+        if m: device = m.group(1).strip()[:60]
+        if "Client" in line and "Underruns" in line:
+            # "L dB", "Chn mask", "Port Id" are two header words over one value: fold them to one column name
+            h = [w for w in line.split() if w not in ("dB", "db", "mask")]
+            hdr = []
+            for w in h:
+                if w == "Id" and hdr and hdr[-1] == "Port": hdr[-1] = "PortId"
+                else: hdr.append(w)
+            continue
+        if hdr is None or not line.strip():
+            hdr = None if not line.strip() else hdr; continue
+        tok = line.split()
+        if not any(t == pid or t.startswith(pid + "/") for t in tok): continue
+        if hdr[0] == "Type" and tok[0].isdigit(): tok = [""] + tok   # blank Type column
+        row = dict(zip(hdr, tok)); row.update(thread=thread, device=device, raw=line.strip())
+        out[(thread, row.get("Id", tok[1] if len(tok) > 1 else "?"))] = row
+    return out
+
+
+t1, t2 = tracks(af1), tracks(af2)
+ok = False
+if not t2:
+    print(f"D FAIL: no AudioFlinger track for the PowOS app (pid {pid}) - the bridge's AAudio output is not open/started")
+for k, r in t2.items():
+    prev = t1.get(k, {})
+    def num(row, col, base=10):
+        try: return int(row.get(col, ""), base)
+        except ValueError: return None
+    s1, s2 = num(prev, "Server", 16), num(r, "Server", 16)
+    adv = (s2 - s1) if s1 is not None and s2 is not None else None
+    u1, u2 = num(prev, "Underruns"), num(r, "Underruns")
+    gains = {c: r.get(c) for c in ("L", "R", "VS", "G") if c in r}
+    # G (the aux/master send column) reads -inf on normal playing tracks; only L/R/VS are the track's own volume
+    muted = any(gains.get(c) and "inf" in gains[c] for c in ("L", "R", "VS"))
+    print(f"D track thread={r['thread']} device={r['device']} active={r.get('Active', '?')} "
+          f"server_frames_advanced={adv} underruns={u1}->{u2} gains_dB={gains}")
+    print("   ", r["raw"][:200])
+    if adv and adv > 0 and not muted: ok = True
+    elif muted: print("D FAIL: the PowOS track is muted by Android (L/R/VS gain -inf: stream/app volume)")
+    elif not adv: print("D FAIL: the PowOS track is not consuming frames (stopped/paused or its thread is not running)")
+m = re.search(r"- STREAM_MUSIC:\n((?:\s{3,}.*\n){1,12})", aud)
+print("D STREAM_MUSIC:", " | ".join(l.strip() for l in (m.group(1).splitlines() if m else ["not found"])
+                                    if re.search(r"Muted|Current|Min|Max|Devices", l) or not m)[:400])
+for l in aud.splitlines():
+    if re.search(rf"\bpid:{pid}\b|/{pid}\b", l) and re.search(r"(?i)player|mute|usage", l):
+        print("D player:", l.strip()[:220])
+print("D PASS: a PowOS track is consuming frames at audible gain - Android plays it" if ok else
+      "D verdict: Android does NOT play the bridge's audio (see the FAIL line above)")
+sys.exit(0 if ok else 1)
