@@ -40,8 +40,11 @@ const SURFACES = ".tile, .notif-panel, .status-chrome .chrome-surface";
  * The web windows above a surface ([el]): ui/webwindows.tsx bodiesOver, viewport CSS px, l t r b. That file sets
  * globalThis.__wwCutouts (an import either way closes a module cycle through apps/native.ts).
  */
-const windowsOver = (el: Element): [number, number, number, number][] =>
-  (globalThis as { __wwCutouts?: (el: Element) => [number, number, number, number][] }).__wwCutouts?.(el) ?? [];
+type Clip4 = [number, number, number, number];
+/** One measure's windows per page (bodiesOver fills it): each window's rect read once a measure, not per surface. */
+let windowsSeen = new Map<Element, [number, Clip4][]>();
+const windowsOver = (el: Element): Clip4[] =>
+  (globalThis as { __wwCutouts?: (el: Element, seen?: Map<Element, [number, Clip4][]>) => Clip4[] }).__wwCutouts?.(el, windowsSeen) ?? [];
 
 /**
  * A surface's region box (its joined sides reaching over) and its own box, whole, and whether a web window above it
@@ -257,7 +260,8 @@ function readBlur() {
 }
 
 /** Every surface's region as laid out now (one layout read of each surface, its clips and its fading ancestors). */
-function measureRaw(followers: Element[] = []): Raw[] {
+const measureRaw = (followers: Element[] = []): Raw[] => ((windowsSeen = new Map()), measureSurfaces(followers));
+function measureSurfaces(followers: Element[] = []): Raw[] {
   if (shapesDirty) (reshape(), readBlur());
   const out: Raw[] = [];
   // Ancestors are shared (a page's tiles): each one's opacity read once a frame.

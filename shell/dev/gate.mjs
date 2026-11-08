@@ -7454,8 +7454,16 @@ async function webWindowCheck() {
  */
 /** RS5: the most layout reads one resize move may make, its renders included (11 on 11-08: the handler's clamp, the window tick). */
 const RS5_READS = 16;
-async function wwResizeCostIn(n) {
+async function wwResizeCostIn(n, glass) {
   const S = await window.__gw.mod("./state.ts");
+  // The live glass's stand-in (as PERF5-GLASS): a port and "b.state 1", so nativeglass.ts measures as on the phone.
+  const N = glass ? await window.__gw.mod("./apps/native.ts") : null;
+  const had = N?.native.value;
+  if (N) {
+    const ch = new MessageChannel();
+    N.native.value = ch.port1;
+    for (const f of N.fromNative) f("b.state 1");
+  }
   const W = await window.__gw.mod("./ui/webwindows.tsx");
   const R = await window.__gw.mod("./ui/renderscan.ts");
   const p0 = S.pages.value[0];
@@ -7475,8 +7483,8 @@ async function wwResizeCostIn(n) {
     const pe = (type, k) => edge.dispatchEvent(new PointerEvent(type, { pointerId: 51, pointerType: "touch", isPrimary: true, clientX: x0 + k * 4, clientY: y0 + k * 3, bubbles: true }));
     pe("pointerdown", 0);
     await frame(), await frame();
-    R.startScan("gate-rs5");
-    R.reset();
+    // The render scan only with the glass off: its own timing per render is script the glass pass's numbers leave out.
+    if (!glass) R.startScan("gate-rs5"), R.reset();
     const handler = [], work = [], reads = [];
     // Layout reads (a rect, a computed style) from the move to the end of its renders (its microtasks): each one after
     // a render's style write is a forced layout.
@@ -7501,16 +7509,56 @@ async function wwResizeCostIn(n) {
       P.getBoundingClientRect = gbcr;
       window.getComputedStyle = gcs;
     }
-    const top = R.topRenders(12).byCount.map((c) => `${c.name}x${c.renders}(${c.selfMs}ms)`);
-    R.stopScan("gate-rs5");
+    const top = glass ? undefined : R.topRenders(12).byCount.map((c) => `${c.name}x${c.renders}(${c.selfMs}ms)`);
+    if (!glass) R.stopScan("gate-rs5");
+    // The glass's measure of the page as it is mid-drag (layout clean: as its after-layout callback finds it), ms each.
+    let glassMs;
+    if (glass && window.__glass?.live?.measure) {
+      const t0 = performance.now();
+      for (let i = 0; i < 10; i++) window.__glass.live.measure();
+      glassMs = Math.round(((performance.now() - t0) / 10) * 100) / 100;
+    }
     pe("pointerup", n);
     await frame(), await frame();
     const q = (l, f) => [...l].sort((a, b) => a - b)[Math.min(l.length - 1, Math.floor(l.length * f))];
     const r2 = (x) => Math.round(x * 100) / 100;
-    return { n, readsP50: q(reads, 0.5), readsMax: Math.max(...reads), handlerP50: r2(q(handler, 0.5)), handlerP90: r2(q(handler, 0.9)), workP50: r2(q(work, 0.5)), workP90: r2(q(work, 0.9)), workMax: r2(Math.max(...work)), renders: top, tick: r2(q(window.__ww.tickMs.slice(-n), 0.5)), tickP90: r2(q(window.__ww.tickMs.slice(-n), 0.9)) };
+    return { n, readsP50: q(reads, 0.5), readsMax: Math.max(...reads), handlerP50: r2(q(handler, 0.5)), handlerP90: r2(q(handler, 0.9)), workP50: r2(q(work, 0.5)), workP90: r2(q(work, 0.9)), workMax: r2(Math.max(...work)), renders: top, tick: r2(q(window.__ww.tickMs.slice(-n), 0.5)), tickP90: r2(q(window.__ww.tickMs.slice(-n), 0.9)), glassMs };
   } finally {
     W.webWins.value = [];
+    if (N) {
+      for (const f of N.fromNative) f("b.state 0");
+      N.native.value = had;
+    }
   }
+}
+
+/** RS5: a trace's main-thread events summed by name, per move ([n] moves), the top [k]: where a move's ms go. */
+function traceTop(buf, n, k = 14) {
+  const ev = JSON.parse(buf.toString()).traceEvents;
+  const main = ev.find((e) => e.name === "thread_name" && e.args?.name === "CrRendererMain");
+  // Self time: each event's duration less its children's (nested X events on the main thread).
+  const xs = ev.filter((e) => e.ph === "X" && e.dur && (!main || (e.pid === main.pid && e.tid === main.tid))).sort((a, b) => a.ts - b.ts || b.dur - a.dur);
+  const by = new Map(), stack = [];
+  for (const e of xs) {
+    while (stack.length && stack.at(-1).ts + stack.at(-1).dur <= e.ts) stack.pop();
+    const up = stack.at(-1);
+    if (up) by.set(up.name, (by.get(up.name) ?? 0) - Math.min(e.dur, up.ts + up.dur - e.ts));
+    by.set(e.name, (by.get(e.name) ?? 0) + e.dur);
+    stack.push(e);
+  }
+  // Elements whose style was recalculated, a move (UpdateLayoutTree's elementCount): a broad restyle shows here.
+  const styled = xs.filter((e) => e.name === "UpdateLayoutTree").reduce((t, e) => t + (e.args?.elementCount ?? e.args?.data?.elementCount ?? 0), 0);
+  // Why: each style invalidation by node and reason (the trace's invalidation tracking), the top few, per move.
+  const why = new Map();
+  for (const e of ev) {
+    if (!/InvalidationTracking/.test(e.name)) continue;
+    const d = e.args?.data ?? {};
+    const what = d.changedClass ?? d.changedAttribute ?? d.changedPseudo ?? d.changedId ?? d.reason ?? d.invalidationList?.map((x) => JSON.stringify(x.classes ?? x.attributes ?? x.id ?? x)).join("/") ?? "";
+    const key = `${e.name.replace("InvalidationTracking", "")} ${d.nodeName ?? "?"} ${what}`;
+    why.set(key, (why.get(key) ?? 0) + 1);
+  }
+  const whyTop = [...why].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([key, c]) => `${key} x${Math.round((c / n) * 10) / 10}`).join(", ");
+  return [...by].sort((a, b) => b[1] - a[1]).slice(0, k).map(([name, us]) => `${name} ${Math.round(us / n / 10) / 100}`).join(", ") + `; restyled elements ${Math.round(styled / n)}; invalidations a move: ${whyTop}`;
 }
 
 /**
@@ -13210,16 +13258,27 @@ try {
           const m = async () => Object.fromEntries((await cdp.send("Performance.getMetrics")).metrics.map((x) => [x.name, x.value]));
           await r.page.evaluate(`window.wwResizeCostIn = ${wwResizeCostIn}`);
           const N = 60;
-          const a = await m();
-          const out = await r.page.evaluate((n) => window.wwResizeCostIn(n), N);
-          const b = await m();
-          const per = (k) => Math.round(((b[k] - a[k]) * 1000 * 100) / N) / 100;
-          const line = `ww-resize-cost: ${JSON.stringify(out)} per frame script ${per("ScriptDuration")} style ${per("RecalcStyleDuration")} layout ${per("LayoutDuration")} task ${per("TaskDuration")} ms`;
-          console.log(line);
-          if (out.error) return [`RS5: ${out.error}`];
+          // Twice: the glass off (the gate's page as it boots), then its stand-in on (the phone: nativeglass.ts measures
+          // each frame of the drag). GATE_PROFILE=1: once more with the glass, traced (the main thread's events, self ms a
+          // move, and the elements restyled): where a move's ms go.
+          let out, reads = 0;
+          for (const [glass, how] of [[false, ""], [true, ""], ...(process.env.GATE_PROFILE ? [[true, "trace"]] : [])]) {
+            const a = await m();
+            if (how === "trace") await r.page.tracing.start({ categories: ["devtools.timeline", "disabled-by-default-devtools.timeline", "disabled-by-default-devtools.timeline.invalidationTracking", "blink", "cc", "viz"] });
+            out = await r.page.evaluate((n, g) => window.wwResizeCostIn(n, g), N, glass);
+            const tr = how === "trace" ? await r.page.tracing.stop() : null;
+            const b = await m();
+            const per = (k) => Math.round(((b[k] - a[k]) * 1000 * 100) / N) / 100;
+            console.log(`ww-resize-cost${glass ? ` (glass, ${how})` : ""}: ${JSON.stringify(out)} per frame script ${per("ScriptDuration")} style ${per("RecalcStyleDuration")} layout ${per("LayoutDuration")} task ${per("TaskDuration")} ms`);
+            if (tr) console.log(`ww-resize-cost trace self ms/move: ${traceTop(tr, N)}`);
+            if (out.error) return [`RS5: ${out.error}`];
+            // The glass's own reads come after the frame's layout (nativeglass.ts: a ResizeObserver callback), never
+            // forced: the read budget is the glass-off pass's.
+            if (!glass) reads = out.readsMax;
+          }
           // 11-08, before the fix: 79 layout reads a move (each window's SwapHint and Handles reading the page's rects and
           // computed styles mid-render, after the window before it wrote its style: a forced layout each); after: 11.
-          return out.readsMax > RS5_READS ? [`RS5: ${out.readsMax} layout reads (rects, computed styles) in one resize move's handler + renders (want <= ${RS5_READS}): a render reads layout per window again`] : [];
+          return reads > RS5_READS ? [`RS5: ${reads} layout reads (rects, computed styles) in one resize move's handler + renders (want <= ${RS5_READS}): a render reads layout per window again`] : [];
         }),
       ),
     );

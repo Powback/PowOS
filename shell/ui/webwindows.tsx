@@ -7,7 +7,7 @@
 // home's surface, exactly where this file measures the body every frame (position, clip, visibility, z), on the same
 // draw. Over the body the page is transparent; anything above it in the DOM paints over the app and takes its taps.
 import { effect, signal } from "@preact/signals";
-import { useRef, useState } from "preact/hooks";
+import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { geometryChannel, native, nextFrameId, sendGeometry } from "../apps/port.ts";
 import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
@@ -951,17 +951,30 @@ powos.on("webwindows.control", (m: { id: number; action: string }) => {
 
 /** The windows pinned to home page [page] (not minimised), and its tiles' dividers: elements of that page, in z order. */
 /**
- * The windows above [id], the same array while they are the same windows: a fresh slice each render re-rendered every
- * window (its bar, body, 8 edges) on each frame of another one's move or resize (render scan 10-30: half of
- * WebWindowEl's renders in a drag needless, with all of their Edges and Marks).
+ * RS5: the masks of [here]'s windows (bottom first) and their shadows in [box]: each one less the windows above it
+ * ([holes]), written to its element's style when it changed - never by its render (a window under the one being
+ * dragged keeps its vnode, its props unchanged). Preact never touches these properties (no render sets them).
  */
-const aboveOf = new Map<number, WebWin[]>();
-function sameAbove(id: number, list: WebWin[]): WebWin[] {
-  const was = aboveOf.get(id);
-  if (was && was.length === list.length && was.every((w, i) => w === list[i])) return was;
-  aboveOf.set(id, list);
-  if (aboveOf.size > 64) aboveOf.delete(aboveOf.keys().next().value!);
-  return list;
+function cutAll(box: HTMLElement | null, here: WebWin[]) {
+  if (!box) return;
+  here.forEach((w, i) => {
+    const above = here.slice(i + 1);
+    const frame = box.querySelector<HTMLElement>(`.webwindow[data-wwid="${w.id}"]`);
+    if (frame && !w.quick) setMask(frame, holes(above, { x: w.x, y: w.y, s: w.scale ?? 1 }));
+    const shadow = box.querySelector<HTMLElement>(`.ww-shadow[data-wwid="${w.id}"]`);
+    const b = frameBox(w);
+    if (shadow) setMask(shadow, holes(above, { x: b.x - SHADOW_PAD, y: b.y - SHADOW_PAD, s: 1 }));
+  });
+}
+
+const MASK_PROPS = ["maskImage", "maskSize", "maskPosition", "maskRepeat", "maskComposite"] as const;
+/** The mask last written to each element (the same again is not written: no style change, no restyle). */
+const maskOf = new WeakMap<HTMLElement, string>();
+function setMask(el: HTMLElement, m: Record<string, string> | undefined) {
+  const key = m ? MASK_PROPS.map((p) => m[p]).join("|") : "";
+  if (maskOf.get(el) === key) return;
+  maskOf.set(el, key);
+  for (const p of MASK_PROPS) el.style[p] = m?.[p] ?? "";
 }
 
 export function WebWindowsOn({ page }: { page: number }) {
@@ -970,11 +983,16 @@ export function WebWindowsOn({ page }: { page: number }) {
   if (!here.length && !strips.length && parkView.value?.page !== page) return null;
   const t = tilings.value[page];
   const o = renderLayout().origin;
+  const box = useRef<HTMLDivElement>(null);
+  // RS5: each window's and shadow's cut (the windows above it) written here, after this render, not as their props: a
+  // resize or move of the top window changes only ITS props, so the windows under it skip the frame (render scan
+  // 11-08: all four windows' AppWindowEl and WindowShadow rendered on each move of one, for their masks alone).
+  useLayoutEffect(() => cutAll(box.current, here));
   return (
     // Clipped to its page (PS2): a window bigger than its page never shows on the next one.
-    <div class="page-windows">
+    <div class="page-windows" ref={box}>
       {here.map((w, i) => (
-        <WebWindowEl key={w.el ?? w.id} win={w} z={webWins.value.indexOf(w)} above={sameAbove(w.id, here.slice(i + 1))} />
+        <WebWindowEl key={w.el ?? w.id} win={w} z={webWins.value.indexOf(w)} focused={i === here.length - 1} />
       ))}
       {t && dividers(t, renderLayout().area).map((d) => <DividerEl key={d.ratio} page={page} d={d} o={o} />)}
       <Previews page={page} o={o} />
@@ -2187,15 +2205,31 @@ function narrow(clip: Clip, q: DOMRect, x: boolean, y: boolean) {
   if (y) (clip[1] = Math.max(clip[1], q.top), (clip[3] = Math.min(clip[3], q.bottom)));
 }
 
-/** One ancestor's share of [shown]: its opacity (0: hidden), and its clip into [clip]. */
-function ancestor(a: HTMLElement, clip: Clip): number {
+/** An ancestor as [shown] reads it: its clip box and axes (null: it clips nothing), its opacity (0: hidden). */
+interface Ancestor {
+  box: DOMRect | null;
+  x: boolean;
+  y: boolean;
+  alpha: number;
+}
+/** RS5: one [geometry]'s ancestors, read once for all its windows (they share the page, the track, home ...). */
+let ancestorsSeen: Map<HTMLElement, Ancestor> | null = null;
+
+function readAncestor(a: HTMLElement): Ancestor {
   const cs = getComputedStyle(a);
   // Its own page's area always clips it (PS2), whatever the page's overflow.
   const page = a.classList.contains("page");
   const x = page || cs.overflowX !== "visible";
   const y = page || cs.overflowY !== "visible";
-  if (x || y) narrow(clip, a.getBoundingClientRect(), x, y);
-  return cs.visibility === "hidden" || cs.display === "none" ? 0 : parseFloat(cs.opacity) || 0;
+  return { box: x || y ? a.getBoundingClientRect() : null, x, y, alpha: cs.visibility === "hidden" || cs.display === "none" ? 0 : parseFloat(cs.opacity) || 0 };
+}
+
+/** One ancestor's share of [shown]: its opacity (0: hidden), and its clip into [clip]. */
+function ancestor(a: HTMLElement, clip: Clip): number {
+  let v = ancestorsSeen?.get(a);
+  if (!v) (v = readAncestor(a)), ancestorsSeen?.set(a, v);
+  if (v.box) narrow(clip, v.box, v.x, v.y);
+  return v.alpha;
 }
 
 /** What of [el] its clipping ancestors and the screen let show (viewport CSS px, l t r b), and its ancestors' opacity. */
@@ -2327,13 +2361,21 @@ export const windowFrame = signal(0);
 /** "<dpr> <n> <entries...>": every window the page shows, bottom first (DOM order = z-order). */
 export function geometry(): string {
   const parts: string[] = [];
-  for (const w of webWins.value) {
-    const e = w.pending || hiddenTab(w.id) ? null : entry(w);
-    if (!e) continue;
-    for (const t of stackOf(w.id)?.ids ?? []) if (t !== w.id) parts.push(hiddenEntry(e, t));
-    parts.push(e);
+  ancestorsSeen = new Map();
+  try {
+    for (const w of webWins.value) entriesOf(w, parts);
+  } finally {
+    ancestorsSeen = null;
   }
   return [devicePixelRatio, parts.length, ...parts].join(" ");
+}
+
+/** Window [w]'s entry into [parts], its stack's hidden tabs first (none: it isn't shown). */
+function entriesOf(w: WebWin, parts: string[]) {
+  const e = w.pending || hiddenTab(w.id) ? null : entry(w);
+  if (!e) return;
+  for (const t of stackOf(w.id)?.ids ?? []) if (t !== w.id) parts.push(hiddenEntry(e, t));
+  parts.push(e);
 }
 
 /**
@@ -3378,7 +3420,7 @@ function ResizeOutline({ win, leaving }: { win: WebWin; leaving: boolean }) {
  * element under the frame, so the frame's mask (a higher window's hole) never cuts it; masked itself where the windows
  * above it are (a lower window's shadow never darkens a higher one's app). Outside the frame only: never on its app.
  */
-function WindowShadow({ win, z, above, focused }: { win: WebWin; z: number; above: WebWin[]; focused: boolean }) {
+function WindowShadow({ win, z, focused }: { win: WebWin; z: number; focused: boolean }) {
   if (win.restore) return null;
   const b = frameBox(win);
   const style = {
@@ -3387,10 +3429,10 @@ function WindowShadow({ win, z, above, focused }: { win: WebWin; z: number; abov
     width: `${b.w + 2 * SHADOW_PAD}px`,
     height: `${b.h + 2 * SHADOW_PAD}px`,
     zIndex: 20 + z,
-    ...holes(above, { x: b.x - SHADOW_PAD, y: b.y - SHADOW_PAD, s: 1 }),
+    // Its mask (the windows above it): WebWindowsOn's cutAll, after the render.
   };
   return (
-    <div class={`ww-shadow ${focused ? "focused" : ""} ${reflowing.value === win.page ? "ww-reflow" : ""}`} style={style}>
+    <div class={`ww-shadow ${focused ? "focused" : ""} ${reflowing.value === win.page ? "ww-reflow" : ""}`} data-wwid={win.id} style={style}>
       <div style={{ inset: `${SHADOW_PAD}px` }} />
     </div>
   );
@@ -3540,12 +3582,12 @@ function appDragEnd(id: number, e: PointerEvent, cancelled: boolean): boolean {
 // RS5: memo - a window whose props (its WebWin, z, the windows above) didn't change skips another window's resize or
 // move frame (render scan 11-08: all four windows' AppWindowEl and SwapHint rendered on each move of one); its signals
 // (resizeView, tileMenu, grips, tilings ...) still re-render it on their own.
-const WebWindowEl = memo(function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[] }) {
+const WebWindowEl = memo(function WebWindowEl({ win, z, focused }: { win: WebWin; z: number; focused: boolean }) {
   if (win.quick) return <QuickEl win={win} z={z} />;
-  return <AppWindowEl win={win} z={z} above={above} />;
+  return <AppWindowEl win={win} z={z} focused={focused} />;
 });
 
-function AppWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[] }) {
+function AppWindowEl({ win, z, focused }: { win: WebWin; z: number; focused: boolean }) {
   const body = useRef<HTMLDivElement>(null);
   const pinch = usePinch(win);
   // SC1: a pinch's scale zooms the whole frame (bar and body); the app keeps its size (sizeOf sends the layout size).
@@ -3561,10 +3603,9 @@ function AppWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[
     zIndex: 20 + z,
     display: "flex",
     flexDirection: "column",
-    ...holes(above, { x: win.x, y: win.y, s }),
+    // Its mask (the windows above it): WebWindowsOn's cutAll, after the render.
   } as const;
   const free = !win.restore && tiledOn(win.id) == null;
-  const focused = !above.length;
   const sizing = resizeView.value?.id === win.id;
   // The outline and the tile menu leave on the spring (§6: both were gone in one frame).
   const outline = usePresence(sizing);
@@ -3572,7 +3613,7 @@ function AppWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[
   const cls = frameClass(win, focused, sizing);
   return (
     <>
-      <WindowShadow win={win} z={z} above={above} focused={focused} />
+      <WindowShadow win={win} z={z} focused={focused} />
       <div class={cls} data-wwid={win.id} data-z={z} style={{ ...frame, "--ww-k": s }} {...pinch}>
         {(!win.ownFrame || orphaned(win.id)) && <TitleBar win={win} />}
         <Body win={win} body={body} />
@@ -3634,18 +3675,22 @@ export function underWindows(page: number): Record<string, string> | undefined {
  * surface in [el] (a window's own bar: the windows above that one; page content: every window on its page; anything
  * outside the pages: none). A surface one of them overlaps is blurred on the host's layer under the windows.
  */
-export function bodiesOver(el: Element): Clip[] {
+export function bodiesOver(el: Element, seen?: Map<Element, [number, Clip][]>): Clip[] {
   const page = el.closest(".page");
   if (!page) return [];
   const own = el.closest<HTMLElement>(".webwindow[data-wwid]");
   const z = own ? Number(own.dataset.z) : -1;
-  const out: Clip[] = [];
-  for (const w of page.querySelectorAll<HTMLElement>(".webwindow[data-wwid]")) {
-    if (Number(w.dataset.z) <= z) continue;
-    const b = w.getBoundingClientRect();
-    out.push([b.left, b.top, b.right, b.bottom]);
+  // RS5: one measure's surfaces share their page's windows ([seen], per measure): each window's rect read once a
+  // measure, not once per surface (11-08, the glass stand-in in ww-resize-cost: 118-182 rect reads a resize move).
+  let wins = seen?.get(page);
+  if (!wins) {
+    wins = [...page.querySelectorAll<HTMLElement>(".webwindow[data-wwid]")].map((w) => {
+      const b = w.getBoundingClientRect();
+      return [Number(w.dataset.z), [b.left, b.top, b.right, b.bottom]];
+    });
+    seen?.set(page, wins);
   }
-  return out;
+  return wins.filter(([wz]) => wz > z).map(([, c]) => c);
 }
 // To the glass (nativeglass.ts reads it; an import either way would close a module cycle through apps/native.ts).
 (globalThis as { __wwCutouts?: typeof bodiesOver }).__wwCutouts = bodiesOver;

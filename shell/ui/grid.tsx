@@ -763,6 +763,9 @@ function PageUnder({ n, children }: { n: number; children: ComponentChildren }) 
 const renderTile = (item: HomeItem, join?: Record<string, number>) =>
   item.kind === "panel" && item.name === "creation" ? <CreationTile key={item.key} item={item} /> : <Tile key={item.key} item={item} join={join} />;
 
+/** A merged tile's classes: joined, and free-top when nothing sits above any of its top (shell.css: its light edge). */
+const joinClass = (join?: Record<string, number>) => (!join ? "" : join["--free-top"] ? "joined free-top" : "joined");
+
 function Tile({ item, join }: { item: HomeItem; join?: Record<string, number> }) {
   const press = useTilePress(item, () => {
     if (item.kind === "app") launch(item.app!);
@@ -780,7 +783,7 @@ function Tile({ item, join }: { item: HomeItem; join?: Record<string, number> })
   const b = box(shown(item));
   return (
     <div
-      class={`home-tile ${item.kind} ${isSelected ? "selected" : ""} ${isChosen(item.key) ? "chosen" : ""} ${morphing.value === item.key ? "opened" : ""} ${lifted ? "lifted" : ""} ${join ? "joined" : ""}`}
+      class={`home-tile ${item.kind} ${isSelected ? "selected" : ""} ${isChosen(item.key) ? "chosen" : ""} ${morphing.value === item.key ? "opened" : ""} ${lifted ? "lifted" : ""} ${joinClass(join)}`}
       /* Its key: what finds it from outside (the pet perches on a tile by it - ui/petperch.ts). */
       data-key={item.key}
       style={{ left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px`, ...join }}

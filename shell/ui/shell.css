@@ -948,7 +948,9 @@ html.ww-glued .page-glass-img { transition: --glass-x var(--spring-ms) var(--spr
      whole group (grid.tsx GroupShadow). */
   box-shadow: none;
 }
-.home-tile.joined[style*="--free-top: 1"] > .tile { box-shadow: var(--lift-edge); }
+/* A class, never [style*=...]: an attribute selector on style made EVERY element's style write (a window's frame and
+   shadow each frame of a resize drag) restyle every .tile under it - the window bars, home's widgets (RS5, 11-08). */
+.home-tile.joined.free-top > .tile { box-shadow: var(--lift-edge); }
 .group-shadow { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 /*
  * The pieces merging tiles that touch over part of an edge (grid.tsx seams): the gutter along the shared span, and a
