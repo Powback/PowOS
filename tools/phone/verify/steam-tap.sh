@@ -9,8 +9,8 @@
 #   resident: Steam closed, started exactly as powos-steam-resident does (`steam -silent`), up 30 s, no Steam window
 #             viewable -> the same tap -> the same assertions. "TIME resident <ms>".
 #   touch:    a real tap on Steam's LIBRARY tab (X window point 427,103 - its tab row, Steam's UI at scale 1): the
-#             window's URL row (store.steampowered.com on the Store) changes. Else the same point as an X click
-#             (xdotool, the app's own input) tells KWin's touch path from the app; then the tap again with
+#             window's URL row (store.steampowered.com on the Store) changes. Else the same tap again (a lost first
+#             tap vs. a point that never works; no X click - XTEST asks KWin's Remote Control prompt); then the tap again with
 #             `settings put global powos_live_leash 0` (the TaskLeash bisect; put back after).
 #   kate:     Kate through home's launch call, a real tap in its window's middle, `input text` -> its part of the
 #             screen changed (the tap focused it, the keys went in).
@@ -153,12 +153,14 @@ if [ -n "${STEAMTASK:-}" ] && [ -n "${STEAMWIN:-}" ]; then
   if [ "$u2" != "$u1" ]; then pass "touch: a tap on LIBRARY reached Steam (URL row changed)"
   else
     fail "touch: a tap on LIBRARY changed nothing in Steam's window"
-    us "$X; xdotool mousemove --window $STEAMWIN 427 103 click 1" >/dev/null; sleep 3; u3=$(urlrow)
-    [ "$u3" != "$u2" ] && log "control: an X click at the same point switched it - the touch path (Android -> KWin -> Xwayland) loses the tap" \
-                       || log "control: an X click didn't switch it either - the point or Steam itself"
+    # Control: the same tap once more (no X click: xdotool's XTEST makes KWin's Remote Control prompt take the focus,
+    # 11-08 - checks send only the user's input). The second switching it = the first tap is lost (timing/focus).
+    tap_library control; u3=$(urlrow)
+    [ "$u3" != "$u2" ] && log "control: a second tap at the same point switched it - the first tap is lost on the way (focus/timing)" \
+                       || log "control: a second tap didn't switch it either - the point, the touch path or Steam itself"
     LEASH0=$(sh_ "settings get global powos_live_leash" | tr -dc '0-9'); LEASH0=${LEASH0:-1}
     sh_ "settings put global powos_live_leash 0"; sleep 1
-    us "$X; xdotool mousemove --window $STEAMWIN 160 103 click 1" >/dev/null; sleep 3   # back to STORE
+    read -r l t _ _ <<<"$(tbounds "$STEAMTASK")"; sh_ "input tap $((l + 160)) $((t + 103))"; sleep 3   # back to STORE
     u4=$(urlrow); tap_library leash-off; u5=$(urlrow)
     [ "$u5" != "$u4" ] && log "bisect: with powos_live_leash 0 the tap reaches Steam - TaskLeash" || log "bisect: powos_live_leash 0 changes nothing - not TaskLeash"
     sh_ "settings put global powos_live_leash $LEASH0"; LEASH0=""

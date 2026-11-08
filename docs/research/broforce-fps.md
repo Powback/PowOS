@@ -378,6 +378,31 @@ present window == toplevel and the flip check passes. Check: install kwin 3.73 +
 kgsl line shows Present flips > 0 and no `toplevel`/`surface-size` copies; if copies remain, 0018's "first ...
 refusal" line names the two windows.
 
+## 11-08 02:02 "screen 2.3 fps, game 37" was a game stall, not the web window (game-webwindow-starve)
+
+The play run's layers line said `game 37.0 > xwayland 38.1 > kwin 14.5 > consumer 0.5 (producer wait p50 1998 ms) >
+sf 2.3`. The game and Xwayland figures were stale: Xwayland's KGSL 30 s lines and KWin's 5 s frame lines are written
+only while something happens, and bf-layers took the last two from before the stall. In the window KWin's task 52 got
+**0 commits** (1-2 keep-alive draws per 5 s = the consumer's 0.5/s; FrameSync and the web window were never asked for
+more). Sequence (kwin.txt, window log): bf-play's `xdotool key` (XTEST via Xwayland's EI socket) made KWin start
+`kwin_eis_prompter` ("Remote Control", org.kde.kwin.eisprompter) with a privileged activation token -> it took the focus
+-> Broforce minimized itself -> anland 0040 restored it -> Broforce presented nothing more. The prompt is a web window
+that never shows under the full-screen game (`shown 99601 ms after open (no display)`), nobody answers it, so the keys
+never arrive either. The same sequence happened at 01:39 and 02:30 and the game kept presenting there: the stall after
+the restore is intermittent. Fixed: bf-pacing marks the measurement start in the collected log, bf-layers uses only the
+lines after it (none = 0) - test/tier1/test-bf-layers.py. Open: xdotool's XTEST still asks (an
+`[Xwayland] XwaylandEisNoPromptApps=xdotool` default was refused by the agent's permission check as a security
+setting - the owner decides), and why the restored game stops presenting.
+
+Fixed on the checks' side (check-input-android, 11-08): no verify check makes an XTEST client any more, so KWin has
+nothing to ask about. bf-play presses its keys as the user's on-screen controls' pad (tools/phone/verify/pad-lib.sh
+`pad_press`: PAD2 packets to `@powos.padd` -> the Deck controller -> Steam Input -> the game; Return = A, Escape = B),
+which reaches the game on both screens (a home web window gets no hardware keys from Android). steam-install and
+steam-dialogs/answer press the dialogs' default button the same way; steam-tap and ww-popups tap Steam's window through
+Android `input tap` at the X point mapped on screen. The pad is an input device idle.sh counts as a person's, so the
+Mac side marks those runs as the tools' own first (`self_input_for <s>` in window-lock.sh). Guard:
+test/tier1/test-verify-no-xtest.sh.
+
 ## 11-08: a prompt over a full-screen game, and the restored game that stopped drawing (prompt-over-game, kwin 3.74)
 
 Sequence of 11-08 02:03 (agent game-webwindow-starve): bf-play's xdotool XTEST -> KWin's Remote Control prompt
