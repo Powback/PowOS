@@ -57,6 +57,28 @@ fi
 # as noise blocks (OnePlus Open, Adreno 740, Mesa 26.3). Real fix: find and report the UBWC bug in Mesa's KGSL path.
 export FD_MESA_DEBUG=${FD_MESA_DEBUG:-noubwc}
 
+# Process checks without pgrep, and without forking at all. pgrep reads every /proc/<pid>/environ it can see, which
+# SELinux denies an Android app for most of them: on the 11-09 razr (no root) the plasmashell wait below forked a pgrep
+# and a sleep five times a second for minutes and filled run/denied.log with "pgrep environ" (1154 lines in 2 min),
+# each fork one more of Android's 32 child processes. These read only /proc/<pid>/comm and cmdline of this uid's
+# processes (-O: owned by us), with bash builtins: no process of their own.
+proc_named() { # an own process whose name (comm) is exactly $1 runs (pgrep -x)
+  local f c
+  for f in /proc/[0-9]*/comm; do
+    [ -O "$f" ] && read -r c 2>/dev/null < "$f" && [ "$c" = "$1" ] && return 0
+  done
+  return 1
+}
+proc_cmdline() { # an own process other than this shell whose command line matches the extended regex $1 runs (pgrep -f)
+  local d a
+  for d in /proc/[0-9]*; do
+    [ -O "$d" ] && [ "${d#/proc/}" != "$BASHPID" ] || continue
+    mapfile -d '' -t a 2>/dev/null < "$d/cmdline" || continue
+    [[ "${a[*]}" =~ $1 ]] && return 0
+  done
+  return 1
+}
+
 # One helper (fewer guest processes: Android 12+ stops an app's child processes past 32, docs/REMOTE-POWOS.md) waits
 # for plasmashell, then:
 # - desktop-ready: ends the app's splash (SplashScreen), which waits for this file alone;
@@ -69,7 +91,8 @@ export FD_MESA_DEBUG=${FD_MESA_DEBUG:-noubwc}
 #   Rooted mode (POWOS_SESSION_MODE=rooted): Linux apps are windows beside Android apps there, so
 #   powos-rooted-session's powos-output-scale matches Android's window density instead.
 (
-  for _ in $(seq 600); do pgrep -x plasmashell >/dev/null && break; sleep 0.2; done
+  # Twice a second for 5 min (plasmashell can take minutes on a cold first start): one short sleep per look.
+  for _ in {1..600}; do proc_named plasmashell && break; sleep 0.5; done
   sleep 1
   touch "$XDG_RUNTIME_DIR/desktop-ready"
   [ "${POWOS_SESSION_MODE:-}" = rooted ] && exit 0
@@ -109,12 +132,12 @@ fi
 # enabled ones once and returns; "init" (a PID 1 stand-in) loops reaping over /proc, which an Android app can
 # only partly read (it spun on "Permission denied" on the S25). Daemons it starts keep running.
 sudo env SYSTEMD_DEFAULT_TARGET=multi-user.target systemctl default >"$XDG_RUNTIME_DIR/powos-system-units.log" 2>&1 &
-pgrep -f 'pytho[n].*systemctl --user init' >/dev/null ||
+proc_cmdline 'python[^ ]* .*systemctl --user init' ||
   systemctl --user init >"$XDG_RUNTIME_DIR/powos-user-units.log" 2>&1 &
 
 # adb's way into the session for tools/device-test.sh (only adb's uid is accepted; see the file). HACK: until the
 # PowOS app has its own command service.
-pgrep -f 'powos-devtest-agen[t]' >/dev/null ||
+proc_cmdline 'powos-devtest-agent' ||
   /usr/lib/powos/phone/powos-devtest-agent >"$XDG_RUNTIME_DIR/powos-devtest-agent.log" 2>&1 &
 
 # First session of this rootfs (Flatpak remote, theme defaults); idempotent, marks itself done.

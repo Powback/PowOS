@@ -217,7 +217,7 @@ public class SessionService extends Service {
             long now = android.os.SystemClock.uptimeMillis();
             File[] wl = run.listFiles((d, n) -> n.startsWith("wayland-") && !n.endsWith(".lock"));
             SessionPlan.Health h = SessionPlan.health(startedAt >= 0, new File(run, "bus").exists(),
-                    wl != null && wl.length > 0, now - startedAt);
+                    wl != null && wl.length > 0, now - startedAt, lostCore);
             SessionPlan.Action a = SessionPlan.next(false, rootfsReady(SessionService.this), InstallService.installing(SessionService.this),
                     h, attempts);
             long delay = SessionPlan.retryDelayMs(attempts);
@@ -229,6 +229,7 @@ public class SessionService extends Service {
                 case START:
                     attempts++;
                     startedAt = now;
+                    lostCore = null;
                     Log.i(TAG, "session: starting (try " + attempts + ")");
                     try {
                         startSession();
@@ -248,8 +249,13 @@ public class SessionService extends Service {
                         session.postDelayed(this, 2000); // still coming up
                     return;
                 case RETRY:
-                    Log.w(TAG, "session: no D-Bus or compositor " + (now - startedAt) / 1000 + " s after try "
-                            + attempts + ", ending it and trying again in " + delay / 1000 + " s");
+                    if (lostCore != null)
+                        Log.w(TAG, "session: " + lostCore + " ended " + (now - startedAt) / 1000 + " s after try "
+                                + attempts + ", the session can't work without it: ending it and trying again in "
+                                + delay / 1000 + " s");
+                    else
+                        Log.w(TAG, "session: no D-Bus or compositor " + (now - startedAt) / 1000 + " s after try "
+                                + attempts + ", ending it and trying again in " + delay / 1000 + " s");
                     endSession();
                     session.postDelayed(this, delay);
                     return;
@@ -269,7 +275,42 @@ public class SessionService extends Service {
             processes.clear();
         }
         endLeftovers("libandromarchy.so");
+        // Everything the session's own programs started (kwin_wayland, plasma_session, Xwayland, the units): ending
+        // only the processes this service spawned left them running - holding wayland-0 and a dead bus - so the next
+        // try's KWin could not take the socket. Only this app's uid is visible and killable here.
+        endGuests();
         startedAt = -1;
+        lostCore = null;
+    }
+
+    /**
+     * A session process the session can't work without ended (SessionPlan.CORE), or null. 11-09 razr: granting the
+     * storage permission (asked right as the session starts) made Android SIGKILL the session's first processes -
+     * D-Bus and the display daemon among them - 1 s after the start. The bus socket FILE stayed, so the session
+     * counted as up; KWin, Plasma and the portals came up on a dead bus ("Not connected to D-Bus server",
+     * WaitForName timed out), plasmashell never started and the desktop stayed blank. Now that ends the try and the
+     * session starts again (SessionPlan.health: FAILED).
+     */
+    private volatile String lostCore;
+
+    /** This app's processes that aren't its own Android ones: the Linux session's, ended outright. */
+    private void endGuests() {
+        File[] procs = new File("/proc").listFiles((d, n) -> n.chars().allMatch(Character::isDigit));
+        if (procs == null)
+            return;
+        int uid = android.os.Process.myUid(), me = android.os.Process.myPid();
+        for (File p : procs) {
+            try {
+                int pid = Integer.parseInt(p.getName());
+                if (pid == me || android.system.Os.stat(p.getPath()).st_uid != uid)
+                    continue;
+                byte[] b = java.nio.file.Files.readAllBytes(new File(p, "cmdline").toPath());
+                if (b.length > 0 && !new String(b, java.nio.charset.StandardCharsets.UTF_8).startsWith(getPackageName()))
+                    android.os.Process.killProcess(pid);
+            } catch (Exception e) {
+                // gone meanwhile, or not ours
+            }
+        }
     }
 
     private void startSession() throws IOException {
@@ -367,7 +408,10 @@ public class SessionService extends Service {
         // "login" keyring is created once (gnome-keyring's plain format) and made the default.
         spawn("android-session-services", List.of(launcher, "-c", "for i in $(seq 50); do [ -S \"$XDG_RUNTIME_DIR/"
                 + "bus\" ] && break; sleep 0.1; done; exec android-session-services"), archEnv(run, sock));
-        spawn("gnome-keyring", List.of(launcher, "-c", "for i in $(seq 50); do [ -S \"$XDG_RUNTIME_DIR/bus\" ] && break;"
+        // Only when the image has it: a base image without it (11-09 razr) spent one of Android's 32 child processes
+        // on "exec: gnome-keyring-daemon: not found". rootfs-packs.conf keeps it in the base now.
+        if (new File(rootfs(this), "usr/bin/gnome-keyring-daemon").exists())
+            spawn("gnome-keyring", List.of(launcher, "-c", "for i in $(seq 50); do [ -S \"$XDG_RUNTIME_DIR/bus\" ] && break;"
                 + " sleep 0.1; done; K=$HOME/.local/share/keyrings; mkdir -p $K && chmod 700 $K;"
                 + " [ -f $K/login.keyring ] || printf '[keyring]\\ndisplay-name=Login\\nctime=0\\nmtime=0\\n"
                 + "lock-on-idle=false\\nlock-after=false\\n' > $K/login.keyring; [ -f $K/default ] || printf login > $K/default;"
@@ -672,6 +716,11 @@ public class SessionService extends Service {
             if (PhantomLimit.killedByAndroid(code, !ours)) {
                 Log.w(TAG, "session: " + name + " was killed (signal 9) - Android's child process limit?");
                 phantomNotice(true);
+            }
+            // A core process gone while this try still owns it (not ended by endSession): the try has failed.
+            if (ours && !RootMode.enabled() && SessionPlan.CORE.contains(name) && lostCore == null) {
+                lostCore = name;
+                kick();
             }
         }, "watch-" + name);
         t.setDaemon(true);

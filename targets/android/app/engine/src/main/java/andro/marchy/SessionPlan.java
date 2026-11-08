@@ -41,10 +41,25 @@ final class SessionPlan {
         return Math.min(60_000L, 5_000L << Math.max(0, Math.min(attempts - 1, 4)));
     }
 
-    /** A start is up once the session bus and the compositor's Wayland socket exist; failed past the timeout. */
+    /**
+     * The session's processes it can't work without (SessionService.spawn names): the session bus, the display
+     * daemon, the system bus and the session itself (KWin + Plasma). One of them ending is a failed try, at once.
+     */
+    static final java.util.Set<String> CORE = java.util.Set.of("dbus", "andromarchy", "system-dbus", "hyprland");
+
     static Health health(boolean started, boolean busUp, boolean waylandUp, long sinceStartMs) {
+        return health(started, busUp, waylandUp, sinceStartMs, null);
+    }
+
+    /**
+     * A start is up once the session bus and the compositor's Wayland socket exist; failed past the timeout, or at
+     * once when a CORE process ended (lostCore: its name) - the bus socket file outlives a killed dbus-daemon.
+     */
+    static Health health(boolean started, boolean busUp, boolean waylandUp, long sinceStartMs, String lostCore) {
         if (!started)
             return Health.NOT_STARTED;
+        if (lostCore != null)
+            return Health.FAILED;
         if (busUp && waylandUp)
             return Health.UP;
         return sinceStartMs >= START_TIMEOUT_MS ? Health.FAILED : Health.STARTING;
