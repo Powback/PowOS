@@ -71,6 +71,9 @@ class ShellBridge(
     private val home = ShellHome(runtime)
     private val widgets = ShellWidgets(runtime, scope, ::emit)
     private val terminals = ShellTerminals(runtime, scope, ::emit)
+
+    /** The terminals drawn by PowTerm's terminal (Termux's view), over their elements ([ShellTermViews]). */
+    private val termViews = ShellTermViews(context, runtime, web, terminals, ::emit)
     private val media = ShellMedia(context, runtime, scope, ::emit)
     /** Android apps as home elements (on unless Settings.Global powos_web_windows = 0; home's activity only). */
     private val webWindows by lazy { WebWindows(context, web, ::emit) }
@@ -804,7 +807,18 @@ class ShellBridge(
             "term.open" -> terminals.open(a.getString(0), a.optStringOrNull(1), a.optStringOrNull(2), a.getInt(3), a.getInt(4), a.optBoolean(5))
             "term.write" -> terminals.write(a.getString(0), a.getString(1))
             "term.resize" -> terminals.resize(a.getString(0), a.getInt(1), a.getInt(2))
-            "term.close" -> terminals.close(a.getString(0))
+            "term.close" -> {
+                termViews.unview(a.getString(0))
+                terminals.close(a.getString(0))
+            }
+            // PowTerm's terminal over the page's element (ShellTermViews): place/look/touch mode, focus, the extra keys.
+            "term.view" -> termViews.view(a.getString(0), a.getJSONObject(1))
+            "term.unview" -> termViews.unview(a.getString(0))
+            "term.focus" -> termViews.focus(a.getString(0), a.getBoolean(1))
+            "term.mods" -> termViews.mods(a.getInt(0), a.getInt(1))
+            "term.paste" -> termViews.paste(a.getString(0))
+            "term.copy" -> termViews.copy(a.getString(0))
+            "term.key" -> termViews.key(a.getString(0), a.getString(1))
             "term.style" -> terminalStyle(if (a.isNull(0)) null else a.getDouble(0))
             "clipboard.read" -> clipboard().primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
             "clipboard.write" -> clipboard().setPrimaryClip(ClipData.newPlainText("PowOS", a.getString(0)))
@@ -1940,6 +1954,7 @@ class ShellBridge(
         media.close()
         speech.cancel()
         applyObserver.dispose()
+        termViews.removeAll()
         terminals.closeAll()
         scope.cancel()
     }

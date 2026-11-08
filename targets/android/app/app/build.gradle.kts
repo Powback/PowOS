@@ -90,6 +90,20 @@ val copyShell by tasks.registering(Sync::class) {
 android.sourceSets.getByName("main").assets.srcDir(shellAssets)
 tasks.named("preBuild") { dependsOn(copyShell) }
 
+// PowTerm's terminal glue, built from PowTerm's own repo (android-app-dev/projects/powterm), not copied here: its
+// RemoteSessionBridge lets Termux's TerminalView draw a byte stream that isn't its own pty (the shell's terminals,
+// shell/ShellTermViews.kt). Termux's view and emulator come at PowTerm's version (libs termux-terminal). The APK is
+// built by android-app-dev's builder (build-app.sh), which mounts that repo beside this one; POWTERM_SRC overrides.
+val powtermJava: File =
+    System.getenv("POWTERM_SRC")?.let(::File)
+        ?: sequenceOf(rootDir, rootDir.canonicalFile)
+            .flatMap { generateSequence(it) { d -> d.parentFile } }
+            .flatMap { sequenceOf(File(it, "android-app-dev/projects/powterm"), File(it, "Projects/android-app-dev/projects/powterm")) }
+            .map { File(it, "app/src/main/java") }
+            .firstOrNull { File(it, "com/termux/terminal/RemoteSessionBridge.java").isFile }
+        ?: error("PowTerm's source (android-app-dev/projects/powterm) not found above $rootDir: set POWTERM_SRC")
+android.sourceSets.getByName("main").java.srcDir(powtermJava)
+
 // PowOS apps the APK ships (the repo's apps/bundled.list), built by build-app.sh (apps/build.sh) just before: each as
 // assets/apps/<app id>/{powos-app.json, ui/, module.wasm} - the launcher's own apps on a phone without root, where no
 // `powos app install` runs (shell/LocalApps.kt). Versioned with the APK. Also the no-root services' starter
