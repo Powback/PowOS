@@ -1,0 +1,351 @@
+From 50c3665234dff32c0ac9bcb83ab6903fcd524b7a Mon Sep 17 00:00:00 2001
+From: PowOS <powos@localhost>
+Date: Sun, 8 Nov 2026 02:56:54 +0100
+Subject: [PATCH] backends/anland: a window that takes a full-screen game's
+ focus opens in front of it, and a restored game that stops drawing is
+ restored again
+
+11-08 02:03 (bf-pacing play, Broforce): xdotool's XTEST made KWin start kwin_eis_prompter (Remote Control) with a
+privileged activation token. The prompt became a web window of home under the game's full-screen layer - unseen,
+unanswered ("shown 99601 ms after open") - while it held the focus: the game minimized itself, 0040 restored it and
+made it active, and the restored game sometimes never drew again (window task 52: 0 commits for good, engine running).
+
+1. A new window that takes the activation from a live full-screen task (another app's - a prompt, polkit, a portal
+   dialog) is sent as "parent <id> <full-screen task>" before its "open": the app opens it as a task in front of the
+   full-screen web window (WindowTasks overFull). Over a full-screen task, exportNew waits up to 400 ms for the
+   activation a token gives after the map. A window that doesn't take the focus opens as before.
+2. While such a window has the focus, the game's self-minimize is still undone but its focus is not taken back; when
+   the window closes, the full-screen task gets the focus back (restored if minimized).
+3. A full-screen window restored after its own minimize is watched for 20 s (from the restore or its focus again): one
+   that has the focus and commits nothing for 3 s is minimized and restored again after 500 ms (Iconic, then Normal,
+   then the focus, the order Wine acts on), twice at most. A hack (marked in the code): the recovery; the cause is in Wine's window-state
+   handling of a restore right after its own iconify.
+
+Decisions in anland_task_policy.h (test/task-policy-test.cpp).
+---
+ src/backends/anland/anland_task_policy.h   |  55 ++++++++
+ src/backends/anland/anland_window_task.cpp | 139 ++++++++++++++++++++-
+ src/backends/anland/anland_window_task.h   |  27 ++++
+ 3 files changed, 220 insertions(+), 1 deletion(-)
+ create mode 100644 src/backends/anland/anland_task_policy.h
+
+diff --git a/src/backends/anland/anland_task_policy.h b/src/backends/anland/anland_task_policy.h
+new file mode 100644
+index 0000000..551eb23
+--- /dev/null
++++ b/src/backends/anland/anland_task_policy.h
+@@ -0,0 +1,55 @@
++/*
++    PowOS (0066): pure decisions of the window tasks around a full-screen task (a game), kept free of Qt and KWin so
++    test/task-policy-test.cpp checks them without a KWin build.
++*/
++#pragma once
++
++#include <cstdint>
++
++namespace KWin::AnlandTaskPolicy
++{
++
++/**
++ * A new window opens IN FRONT of a full-screen task ("parent <new> <full-screen task>": the app makes it a task over
++ * the full-screen web window) when it took KWin's activation away from it - a system prompt (KWin's Remote Control
++ * prompt, polkit, a portal dialog) or another app's dialog. Shown as a web window it lay under the game's full-screen
++ * layer, unseen, while it held the focus: the game minimized itself (11-08 02:03, kwin_eis_prompter "shown 99601 ms
++ * after open"). A window that didn't take the focus leaves the game alone and opens as before; a full-screen one is a
++ * game of its own (its own full-screen task).
++ */
++inline bool opensOverFullScreen(bool fullScreenTaskShown, bool newWindowActive, bool newWindowFullScreen)
++{
++    return fullScreenTaskShown && newWindowActive && !newWindowFullScreen;
++}
++
++/** How long a new window may take to get the activation it was started with (an xdg-activation token, an X11 map). */
++constexpr int64_t activationWaitMs = 400;
++
++enum class RestoreWatch {
++    Wait, // nothing to do yet
++    Kick, // the restored window has the focus and draws nothing: minimize and restore it again, the way the app sees
++    Done, // watched long enough, or kicked enough
++};
++
++constexpr int64_t restoreWatchMs = 20000; // after a restore (or the window's activation again)
++constexpr int64_t restoreStallMs = 3000; // no commit for this long while it has the focus = stalled
++constexpr int restoreKicksMax = 2;
++
++/**
++ * A full-screen task's window restored after it minimized itself (handOverMinimize): [sinceMs] since the restore or
++ * since the window got the focus again, [sinceCommitMs] since its last commit (or since the watch began, if none).
++ * Only a window that has the focus and isn't minimized counts as stalled: another window in front (a prompt the user
++ * answers) may hold a game's frames, and that is the game's own pause.
++ */
++inline RestoreWatch restoreWatch(int64_t sinceMs, int64_t sinceCommitMs, bool active, bool minimized, int kicks)
++{
++    if (kicks >= restoreKicksMax || sinceMs > restoreWatchMs) {
++        return RestoreWatch::Done;
++    }
++    if (minimized || !active) {
++        return RestoreWatch::Wait;
++    }
++    return sinceCommitMs >= restoreStallMs ? RestoreWatch::Kick : RestoreWatch::Wait;
++}
++
++} // namespace KWin::AnlandTaskPolicy
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index a86b46f..9d0262b 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -12,4 +12,5 @@
+ #include "anland_input.h"
+ #include "anland_logging.h"
++#include "anland_task_policy.h"
+ 
+ #include "core/rendertarget.h"
+@@ -153,4 +154,6 @@ AnlandWindowTask::AnlandWindowTask(AnlandWindowTasks *tasks, Window *window, uin
+     connect(window, &Window::maximizedChanged, this, &AnlandWindowTask::handOverMaximize);
+     connect(window, &Window::minimizedChanged, this, &AnlandWindowTask::handOverMinimize);
++    m_restoreWatch.setInterval(1000);
++    connect(&m_restoreWatch, &QTimer::timeout, this, &AnlandWindowTask::checkRestore);
+ 
+     // Its surface of the daemon: the task's consumer says hello with the same id once the activity is up.
+@@ -397,4 +400,9 @@ void AnlandWindowTask::handOverMinimize()
+         // after a few tries in a row - focus() restores it when its task comes to the front. The real fix is the
+         // game not seeing a focus loss while its task is on screen (Proton's fullscreen focus handling).
++        if (m_kicking) {
++            // PowOS (0066): checkRestore's own minimize - restored after a pause (restoreKick), so the client sees
++            // Iconic, then Normal, then the focus: the order it acts on.
++            return;
++        }
+         const auto now = std::chrono::steady_clock::now();
+         if (now - m_minimizeUndoneAt > std::chrono::seconds(2)) {
+@@ -413,7 +421,10 @@ void AnlandWindowTask::handOverMinimize()
+                 // with the restore. Restored only, it stayed inactive (KWin had moved on to the desktop's window) and
+                 // minimized itself again: a thawed game came back to a task it never got the input of.
+-                if (m_state == State::Live) {
++                // PowOS (0066): not while a window opened in front of it (a prompt) has the focus - that one keeps
++                // it until it closes, then this task gets it back (show).
++                if (m_state == State::Live && !m_tasks->activeIsOver(this)) {
+                     focus();
+                 }
++                watchRestore();
+             }
+         }, Qt::QueuedConnection);
+@@ -542,4 +553,68 @@ AnlandWindowTask::~AnlandWindowTask()
+ }
+ 
++void AnlandWindowTask::watchRestore()
++{
++    // PowOS (0066): a full-screen game restored after it minimized itself sometimes never draws again - 11-08 02:03,
++    // Broforce after KWin's Remote Control prompt took its focus: restored, made active, then 0 commits for good while
++    // its engine ran (01:39 and 02:30, the same sequence, kept drawing). The restore came right after the client's own
++    // iconify, before Wine had acted on it; its window state and ours can then disagree (Win32 still minimized on a
++    // mapped, active X window), and a minimized Unity game renders nothing. Watched for a while: one that has the
++    // focus and draws nothing is minimized and restored again (checkRestore).
++    // HACK: the recovery, not the cause. Real fix: find in Wine's (Proton's) X11 window-state handling why an Iconic
++    // -> Normal right after its own WM_CHANGE_STATE can leave the Win32 window minimized, and fix it there or never
++    // restore before the client's iconify is seen (docs/REMOTE-POWOS.md section 4).
++    m_restoreWatchFrom = std::chrono::steady_clock::now();
++    m_restoreKicks = 0;
++    if (!m_restoreActive && m_window) {
++        // The focus coming back (the user answered a prompt in front of it) starts the watch again.
++        m_restoreActive = connect(m_window, &Window::activeChanged, this, [this]() {
++            if (m_window && m_window->isActive() && m_restoreWatch.isActive()) {
++                m_restoreWatchFrom = std::chrono::steady_clock::now();
++            }
++        });
++    }
++    m_restoreWatch.start();
++}
++
++void AnlandWindowTask::checkRestore()
++{
++    using namespace AnlandTaskPolicy;
++    const auto now = std::chrono::steady_clock::now();
++    const auto ms = [now](std::chrono::steady_clock::time_point t) {
++        return int64_t(std::chrono::duration_cast<std::chrono::milliseconds>(now - t).count());
++    };
++    const bool gone = !m_window || m_window->isDeleted() || m_state != State::Live
++        || !(m_fullScreen || m_appFullScreen || m_window->isFullScreen());
++    const int64_t since = ms(m_restoreWatchFrom);
++    const int64_t sinceCommit = std::min(since, ms(m_lastCommitAt));
++    const RestoreWatch what = gone ? RestoreWatch::Done
++                                   : restoreWatch(since, sinceCommit, m_window->isActive(), m_window->isMinimized(), m_restoreKicks);
++    if (what == RestoreWatch::Done) {
++        m_restoreWatch.stop();
++        disconnect(m_restoreActive);
++        m_restoreActive = {};
++        return;
++    }
++    if (what == RestoreWatch::Wait || m_kicking) {
++        return;
++    }
++    m_restoreKicks++;
++    qCWarning(KWIN_ANLAND) << "window task" << m_id << "full-screen window restored" << since << "ms ago has the focus and drew nothing for"
++                           << sinceCommit << "ms: minimized and restored again (" << m_restoreKicks << "of" << restoreKicksMax << ")";
++    m_kicking = true;
++    m_window->setMinimized(true);
++    QTimer::singleShot(500, this, [this]() {
++        m_kicking = false;
++        if (!m_window || m_window->isDeleted()) {
++            return;
++        }
++        m_window->setMinimized(false);
++        if (m_state == State::Live) {
++            focus();
++        }
++        m_restoreWatchFrom = std::chrono::steady_clock::now();
++    });
++}
++
+ void AnlandWindowTask::focus()
+ {
+@@ -715,4 +790,5 @@ void AnlandWindowTask::watchWindow(Window *window)
+         markStale();
+         m_statCommits++;
++        m_lastCommitAt = std::chrono::steady_clock::now(); // PowOS (0066): checkRestore
+         if (!m_damagePending) {
+             m_damagePending = true;
+@@ -2273,4 +2349,26 @@ void AnlandWindowTasks::exportNew(Window *window)
+         return;
+     }
++    // PowOS (0066): over a full-screen task (a game), whether the new window takes the focus decides where it opens
++    // (show: in front of the game, or a web window as before) - and an activation token (KWin's prompts, xdg-
++    // activation) is used after the window maps. Not active yet: decided once it is, or after activationWaitMs.
++    if (!window->isActive() && !relatedTask(window) && fullScreenTask(window) && !m_activationWaited.contains(window)) {
++        m_activationWaited.insert(window);
++        auto done = std::make_shared<bool>(false);
++        auto again = [this, done, w = QPointer<Window>(window), raw = window]() {
++            if (*done) {
++                return;
++            }
++            *done = true;
++            if (w && !w->isDeleted() && !taskFor(w)) {
++                exportNew(w);
++            } else {
++                m_activationWaited.remove(raw);
++            }
++        };
++        connect(window, &Window::activeChanged, this, again, Qt::SingleShotConnection);
++        QTimer::singleShot(AnlandTaskPolicy::activationWaitMs, this, again);
++        return;
++    }
++    m_activationWaited.remove(window);
+     if (show(window)) {
+         qCInfo(KWIN_ANLAND) << "new window" << window->caption() << "(" << window->desktopFileName() << ") opened as a task";
+@@ -2398,4 +2496,15 @@ bool AnlandWindowTasks::show(Window *window, bool fullScreen)
+     connect(window, &Window::closed, task, [this, task]() {
+         send({QStringLiteral("close"), QString::number(task->id())});
++        // PowOS (0066): a window that opened in front of a full-screen task (a prompt) closed: the game behind it
++        // gets the focus back, restored if it minimized itself meanwhile, and is watched until it draws again.
++        if (const auto cover = m_overFull.take(task->id()); cover && m_tasks.contains(cover)) {
++            QMetaObject::invokeMethod(this, [this, cover]() {
++                if (AnlandWindowTask *t = m_tasks.value(cover); t && t->live() && t->window() && !t->window()->isDeleted()) {
++                    qCInfo(KWIN_ANLAND) << "window task" << cover << ": the window in front of it closed - the focus back";
++                    t->focus();
++                    t->watchRestore();
++                }
++            }, Qt::QueuedConnection);
++        }
+         remove(task);
+     });
+@@ -2407,4 +2516,14 @@ bool AnlandWindowTasks::show(Window *window, bool fullScreen)
+                             << "of" << (parent->window() ? parent->window()->caption() : QString()) << ")";
+         send({QStringLiteral("parent"), QString::number(id), QString::number(parent->id())});
++    } else if (AnlandWindowTask *cover = fullScreenTask(window);
++               cover && AnlandTaskPolicy::opensOverFullScreen(true, window->isActive(), window->isFullScreen())) {
++        // PowOS (0066): another app's window that took the activation from a full-screen task (a game) - KWin's
++        // Remote Control prompt, polkit, a portal dialog: in front of it, as a task over its full-screen web window
++        // (the app's "a task, in front of window N, a full-screen web window"). As a web window of home it lay under
++        // the game's layer, unseen and unanswered, while it held the focus (11-08 02:03: "shown 99601 ms after open").
++        qCInfo(KWIN_ANLAND) << "window task" << id << "(" << window->caption() << ") took the focus from full-screen window task"
++                            << cover->id() << ": opens in front of it";
++        send({QStringLiteral("parent"), QString::number(id), QString::number(cover->id())});
++        m_overFull.insert(id, cover->id());
+     }
+     QStringList open{QStringLiteral("open"), QString::number(id), offeredAppId(window), window->caption()};
+@@ -2416,4 +2535,22 @@ bool AnlandWindowTasks::show(Window *window, bool fullScreen)
+ }
+ 
++AnlandWindowTask *AnlandWindowTasks::fullScreenTask(const Window *window) const
++{
++    for (AnlandWindowTask *task : m_tasks) {
++        const Window *w = task->window();
++        if (w && w != window && !w->isDeleted() && !w->isMinimized() && task->live() && !task->isPopupSurface()
++            && (task->fullScreen() || task->appFullScreen() || w->isFullScreen())) {
++            return task;
++        }
++    }
++    return nullptr;
++}
++
++bool AnlandWindowTasks::activeIsOver(const AnlandWindowTask *cover) const
++{
++    const AnlandWindowTask *active = workspace() ? taskFor(workspace()->activeWindow()) : nullptr;
++    return cover && active && m_overFull.value(active->id()) == cover->id();
++}
++
+ AnlandWindowTask *AnlandWindowTasks::relatedTask(const Window *window) const
+ {
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index f9efb2f..518513a 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -87,4 +87,15 @@ public:
+         return m_exported;
+     }
++    /**
++     * PowOS (0066): watches a full-screen window restored after it minimized itself ([handOverMinimize]) for
++     * [AnlandTaskPolicy::restoreWatchMs]: one that has the focus and commits nothing for restoreStallMs is minimized
++     * and restored again ([checkRestore]).
++     */
++    void watchRestore();
++    /** PowOS (0066): its consumer shows it now. */
++    bool live() const
++    {
++        return m_state == State::Live;
++    }
+     /**
+      * The task's size in its pixels ("size" from the app: a floating window being resized). Its buffers stay at the
+@@ -222,4 +233,5 @@ private:
+     void handOverMaximize();
+     void handOverMinimize();
++    void checkRestore();
+     QSize fullScreenTaskSize() const;
+     // PowOS (0063): popups as surfaces of their own.
+@@ -264,4 +276,11 @@ private:
+     std::chrono::steady_clock::time_point m_minimizeUndoneAt; // handOverMinimize: a full-screen window's own minimize undone
+     int m_minimizeUndos = 0; // ... how many times in a row (2 s apart at most)
++    // PowOS (0066): watchRestore - since when (the restore, or the window's focus again), its last commit, its kicks.
++    QTimer m_restoreWatch;
++    QMetaObject::Connection m_restoreActive;
++    std::chrono::steady_clock::time_point m_restoreWatchFrom;
++    std::chrono::steady_clock::time_point m_lastCommitAt;
++    int m_restoreKicks = 0;
++    bool m_kicking = false; // checkRestore's own minimize: restored after a pause, not at once
+     // Configure -> commit latency of resizeTo's steps (one log line per resize, 500 ms after its last step).
+     std::chrono::steady_clock::time_point m_resizeAsked;
+@@ -380,4 +399,6 @@ public Q_SLOTS:
+ public:
+     bool show(Window *window, bool fullScreen = false);
++    /** PowOS (0066): the active window is one opened in front of full-screen task [cover] (show), which keeps it. */
++    bool activeIsOver(const AnlandWindowTask *cover) const;
+ 
+ private:
+@@ -391,4 +412,6 @@ private:
+      */
+     AnlandWindowTask *relatedTask(const Window *window) const;
++    /** PowOS (0066): a live task whose window is full screen (a game), other than [window]'s, or null. */
++    AnlandWindowTask *fullScreenTask(const Window *window) const;
+     /** An Android app's own window (powos-android-app): back to Android, the app itself in front. */
+     static QString offeredAppId(const Window *window);
+@@ -432,4 +455,8 @@ private:
+     /** Windows waiting for their surface (whenSurfaced): one wait each. */
+     QSet<Window *> m_waitingSurface;
++    /** PowOS (0066): new windows given their activation wait over a full-screen task (exportNew): one wait each. */
++    QSet<Window *> m_activationWaited;
++    /** PowOS (0066): task id -> the full-screen task it opened in front of (show); the cover gets the focus back. */
++    QHash<uint32_t, uint32_t> m_overFull;
+     QPointer<VirtualDesktop> m_desktop;
+     QPointer<VirtualDesktop> m_returnDesktop; // where to go back to when something switched to the tasks desktop
+-- 
+2.50.1 (Apple Git-155)
+

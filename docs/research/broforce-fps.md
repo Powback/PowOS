@@ -393,3 +393,38 @@ the restore is intermittent. Fixed: bf-pacing marks the measurement start in the
 lines after it (none = 0) - test/tier1/test-bf-layers.py. Open: xdotool's XTEST still asks (an
 `[Xwayland] XwaylandEisNoPromptApps=xdotool` default was refused by the agent's permission check as a security
 setting - the owner decides), and why the restored game stops presenting.
+
+Fixed on the checks' side (check-input-android, 11-08): no verify check makes an XTEST client any more, so KWin has
+nothing to ask about. bf-play presses its keys as the user's on-screen controls' pad (tools/phone/verify/pad-lib.sh
+`pad_press`: PAD2 packets to `@powos.padd` -> the Deck controller -> Steam Input -> the game; Return = A, Escape = B),
+which reaches the game on both screens (a home web window gets no hardware keys from Android). steam-install and
+steam-dialogs/answer press the dialogs' default button the same way; steam-tap and ww-popups tap Steam's window through
+Android `input tap` at the X point mapped on screen. The pad is an input device idle.sh counts as a person's, so the
+Mac side marks those runs as the tools' own first (`self_input_for <s>` in window-lock.sh). Guard:
+test/tier1/test-verify-no-xtest.sh.
+
+## 11-08: a prompt over a full-screen game, and the restored game that stopped drawing (prompt-over-game, kwin 3.74)
+
+Sequence of 11-08 02:03 (agent game-webwindow-starve): bf-play's xdotool XTEST -> KWin's Remote Control prompt
+(`kwin_eis_prompter`, a plain QDialog = a normal toplevel of another app, started with a privileged activation token)
+-> it became web window 2 of home, under Broforce's full-screen layer (`shown 99601 ms after open`) while it held
+KWin's focus -> Broforce minimized itself -> 0040 restored it and made it active -> window task 52 then committed 0
+frames for good (01:39 and 02:30: the same lines, and it kept drawing). Fixes (kwin 0066, generic, no Broforce rule;
+KWin's EIS permission settings untouched):
+
+1. A new window that takes the activation from a live full-screen task opens IN FRONT of it: KWin sends
+   `parent <new> <full-screen task>` before its `open`, and the app's existing path (WindowTasks.open `overFull`:
+   "a task, in front of window N, a full-screen web window") makes it a task over the game. Over a full-screen task
+   exportNew waits up to 400 ms for the activation (a token is used after the map). A window that doesn't take the
+   focus opens as before. While it has the focus the game's self-minimize is still undone but the focus stays with
+   the prompt; when it closes the game gets the focus back (restored if minimized).
+2. Restore watch: a full-screen window restored after its own minimize is watched 20 s (restarted when it gets the
+   focus back); one that has the focus and commits nothing for 3 s is minimized and restored again after 500 ms
+   (Iconic, then Normal, then the focus), twice at most - log `full-screen window restored N ms ago has the focus and
+   drew nothing ...`. HACK (registry row): the cause is suspected in Wine's window-state handling of an Iconic ->
+   Normal right after its own iconify (Win32 window left minimized on a mapped, active X window; a minimized Unity
+   game renders nothing) - not proven: the next stall's `kwin.txt` shows whether the kick brought frames back.
+
+Check after the ship: `bf-pacing.sh play` (its XTEST still asks). Pass: kwin.txt has `took the focus from full-screen
+window task N: opens in front of it`, the window log has the prompt as a task (`a task, in front of window`), not a
+web window; any `drew nothing` kick is followed by non-zero `frames:` lines for the game's task.

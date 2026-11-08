@@ -7491,6 +7491,15 @@ async function webWindowResizeCheck() {
     const b903 = f903?.querySelector(".webwindow-body");
     const bar = b903 ? b903.getBoundingClientRect().top - f903.getBoundingClientRect().top : NaN;
     if (Math.abs(bar - 36) > 0.5) fails.push(`RB1: after a corner drag the bar is ${bar} px (want 36, fixed)`);
+    // WS1: the app's size is the body's exact layout size, not offsetHeight's whole CSS px - x dpr that missed the
+    // screen by a pixel (a full-screen game at 2268x2439 on 2268x2440, bf-pacing 11-08 02:19: no Xwayland flip).
+    W.webWins.value = W.webWins.value.map((w) => (w.id === 903 ? { ...w, h: 300.4 } : w));
+    const at = window.__ww.sent.length;
+    await frame(), await frame(), await frame();
+    const exact = b903 ? parseFloat(getComputedStyle(b903).height) : NaN;
+    const sentH = window.__ww.sent.slice(at).map((l) => ours(l.split(" ").slice(4))).filter(Boolean).at(-1)?.[22];
+    if (!(Math.abs(Number(sentH) - exact) < 0.02) || Number.isInteger(exact))
+      fails.push(`WS1: a body ${exact} CSS px high sent app height ${sentH} (want its exact layout size, not rounded)`);
   } finally {
     W.webWins.value = [];
   }

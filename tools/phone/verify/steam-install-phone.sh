@@ -1,13 +1,14 @@
 #!/bin/bash
 # steam-install-phone.sh <appid>...: (in the PowOS session as powos; steam-install.sh pushes and runs it) Steam's own
 # install of games the user already owns: `steam steam://install/<appid>` (/usr/bin/steam thaws a frozen Steam first),
-# Return on Steam's install dialog if one comes up, until Steam writes the game's appmanifest (its download queued).
+# Return (the on-screen controls' pad A, pad-lib.sh) on Steam's install dialog if one comes up, until Steam writes the game's appmanifest (its download queued).
 # Never launches a game, never signs in or buys: a game Steam can't install (not owned) only shows its dialog / the
 # store, which this closes again ("FAIL install-<id>"). Windows that came up for the installs (the dialog, Steam's main
 # window) are closed again at the end (Steam keeps running in the tray, downloading). A touch: exit 3.
 set -uo pipefail
 APP=${1:?appid}
 . /var/tmp/powos-bf-lib.sh
+. /var/tmp/powos-pad-lib.sh   # pad_press: the dialog's Return as the on-screen controls' A (no XTEST: KWin's Remote Control prompt)
 S=$HOME/.local/share/Steam
 flags() { sed -nE 's/^\s*"StateFlags"\s*"([0-9]+)"/\1/p' "$S/steamapps/appmanifest_$1.acf" 2>/dev/null | head -1; }
 vis() { xdotool search --onlyvisible --name . 2>/dev/null | sort -u; }
@@ -91,8 +92,8 @@ for id in "$@"; do
     if [ $i -ge 4 ] && [ $pressed -lt 2 ] && [ $((i % 8)) = 4 ]; then
       for w in $(comm -13 <(echo "$w0") <(vis)); do
         n=$(xdotool getwindowname "$w" 2>/dev/null)
-        case $n in *[Ii]nstall*) echo "   dialog '$n' ($w): Return"; xdotool windowactivate --sync "$w" >/dev/null 2>&1; sleep 0.5
-          xdotool key --window "$w" Return; pressed=$((pressed + 1)) ;; esac
+        # The dialog activated (an EWMH request, not input), then the pad's A: its default button, as the user's own press.
+        case $n in *[Ii]nstall*) echo "   dialog '$n' ($w): Return (pad A)"; xdotool windowactivate --sync "$w" >/dev/null 2>&1; sleep 0.5; pad_press Return >/dev/null; pressed=$((pressed + 1)) ;; esac
       done
     fi
   done

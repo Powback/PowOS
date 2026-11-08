@@ -10,11 +10,10 @@
 # With no Steam main window on home it opens Steam itself through home's launch path (apps.launch l:steam, as a tap on
 # its dock cell), up to STEAM_WAIT_S (150) for its main window, and leaves Steam as it found it: a Steam this started is
 # closed after (powos game stop --steam); a Steam that was running keeps running, only the web window this brought up is
-# closed (its bar's close: Steam goes back to the tray). It changes none of Steam's settings: it taps its menu bar as a
-# finger does (input tap on the screen, at the X point times the window's scale: home -> KWin -> Steam, the user's path)
-# to open a menu, reads the lines, and closes the menu with a tap on an empty spot of the page. Never X input: xdotool's
-# XTEST goes through Xwayland's EIS, which makes KWin ask "Remote Control" (kwin_eis_prompter) in a web window nobody
-# answers, so no click arrived and no menu opened (11-08 01:52: "no click on Steam's menu bar opened a menu").
+# closed (its bar's close: Steam goes back to the tray). It changes none of Steam's settings: it taps its menu bar as the
+# user does (Android `input tap` at the X point through the web window's body) to open a menu, reads the lines, and
+# closes the menu with a tap on an empty spot of the page (else its header again). No X input: xdotool's XTEST makes
+# KWin's Remote Control prompt take the focus (11-08, docs/research/broforce-fps.md).
 #   ww-popups.sh --dry-run   read-only: what the run would open / test / close now (no input, nothing opened)
 #
 # PASS needs, per menu opened (up to 2: Steam's menu bar, scanned until a new override-redirect window is viewable):
@@ -107,25 +106,29 @@ if [ -z "${SW:-}" ] || [ "$sw" = none ]; then
 elif [ $DRY = 1 ]; then
   say "dry-run: Steam's main window $SW is up in web window $sw: would click up to 2 menus, nothing opened or closed"; exit 0
 fi
-open0=$(menus)
 # The window's scale: its web window body (device px) against the X window's width.
 body=$(wwbody "$sw")
 scale=$(python3 -c "import sys; l,t,r,b=map(float,sys.argv[1].split()); print('%.4f' % ((r-l)/float(sys.argv[2])))" "$body" "$SWW" 2>/dev/null || echo 1)
 say "Steam: web window $sw body ${body:-?}, X window $SW at $SX,$SY ${SWW}x$SWH, scale ~$scale; $kw"
-# wtap <x> <y>: a finger's tap at Steam's window point (X px; its X origin is its body's top-left on screen).
-wtap() { local l t r b; read -r l t r b <<<"$(wwbody "$sw")"; [ -n "${b:-}" ] || return 1
+# wtap <x> <y>: a real tap (Android input, the user's path: home -> KWin touch -> Xwayland) at Steam's X window point
+# x,y (window px) = its web window's body on screen + x,y times the scale.
+wtap() { local l t _r _b; read -r l t _r _b <<<"$(wwbody "$sw")"; [ -n "${_b:-}" ] || return 1
   "$adb" shell "input tap $(python3 -c "print(round($l + $1 * $scale), round($t + $2 * $scale))")"; }
-# unmenu [l t r b]: an open menu closed by a tap on an empty spot of the page - off Steam's window and off that screen
-# rect (the menu's, device px; it may reach past the window) - as a finger dismisses one. "": no spot (nothing tapped).
-unmenu() {
-  local spot
-  spot=$(ev "(()=>{const d=devicePixelRatio,m=[${1:-0},${2:-0},${3:-0},${4:-0}],f=document.querySelector('.webwindow[data-wwid=\"${sw#w}\"]')?.getBoundingClientRect();for(let y=innerHeight*0.15;y<=innerHeight*0.85;y+=14)for(let x=innerWidth*0.95;x>=innerWidth*0.05;x-=14){const e=document.elementFromPoint(x,y);if(!e||!e.closest('.page-track')||e.closest('.webwindow,.tile,.home-tile,.app,.panel,.widget,.island,button,a,input,textarea,.bar,.dock,[data-key]'))continue;if(f&&x>=f.left-20&&x<=f.right+20&&y>=f.top-20&&y<=f.bottom+20)continue;const X=x*d,Y=y*d;if(X>=m[0]-20&&X<=m[2]+20&&Y>=m[1]-20&&Y<=m[3]+20)continue;return Math.round(X)+' '+Math.round(Y)}return ''})()")
-  [ -n "$spot" ] && "$adb" shell "input tap $spot"; echo "$spot"; }
-# menurect <MX> <MY> <MW> <MH>: an X menu's rect on screen, "l t r b" device px.
-menurect() { local l t r b; read -r l t r b <<<"$(wwbody "$sw")"; python3 -c "import sys; l,t,s=float(sys.argv[1]),float(sys.argv[2]),float(sys.argv[3]); a=list(map(int,sys.argv[4:])); x,y=l+(a[0]-a[4])*s,t+(a[1]-a[5])*s; print(round(x), round(y), round(x+a[2]*s), round(y+a[3]*s))" "$l" "$t" "$scale" "$@" "$SX" "$SY"; }
-[ -z "$open0" ] || { say "a Steam menu is open already ($open0): a tap on the page first ($(unmenu))"; sleep 1; }
-# A menu this opened never stays open: dismissed on the way out (whatever ended the run).
-trap '[ "${opened:-0}" -gt 0 ] && [ -n "$(menus)" ] && unmenu >/dev/null 2>&1; restore_steam' EXIT
+# menu_close "<MW MX MY MWW MWH>" [hx hy]: a menu closed as the user would - a tap on an empty spot of the page, off
+# Steam's window and off the menu (its X place on screen; a menu is a layer of its own, not in the page's DOM); with no
+# such spot, its menu-bar header (hx,hy) tapped again. Prints how.
+menu_close() {
+  local mx my mww mwh l t r b x0 y0 x1 y1 spot; read -r _ mx my mww mwh <<<"$1"; read -r l t r b <<<"$(wwbody "$sw")"
+  [ -n "${b:-}" ] && [ -n "${mwh:-}" ] || { echo "nothing (no window/menu geometry)"; return 1; }
+  read -r x0 y0 x1 y1 <<<"$(python3 -c "s=$scale; print(round($l+($mx-$SX)*s), round($t+($my-$SY)*s), round($l+($mx-$SX+$mww)*s), round($t+($my-$SY+$mwh)*s))")"
+  spot=$(ev "(()=>{const d=devicePixelRatio;for(let y=innerHeight*0.15;y<=innerHeight*0.85;y+=14)for(let x=innerWidth*0.95;x>=innerWidth*0.05;x-=14){const e=document.elementFromPoint(x,y);if(e&&e.closest('.page-track')&&!e.closest('.webwindow,.tile,.home-tile,.app,.panel,.widget,.island,button,a,input,textarea,.bar,.dock,[data-key]')){const X=x*d,Y=y*d;if(!(X>=$x0-20&&X<=$x1+20&&Y>=$y0-20&&Y<=$y1+20)&&!(X>=$l&&X<=$r&&Y>=$t&&Y<=$b))return Math.round(X)+' '+Math.round(Y)}}return ''})()")
+  if [ -n "$spot" ]; then "$adb" shell "input tap $spot"; echo "a tap on the page at $spot"
+  elif [ -n "${2:-}" ]; then wtap "$2" "$3"; echo "its header ($2,$3) tapped again"
+  else echo "nothing (no empty spot on the page)"; return 1; fi; }
+open0=$(menus)
+[ -z "$open0" ] || { say "a Steam menu is open already ($open0): closed first ($(menu_close "$(echo "$open0" | head -1)"))"; sleep 1; }
+# A menu this opened never stays open: closed on the way out (whatever ended the run).
+trap 'm=$(menus | head -1); [ "${opened:-0}" -gt 0 ] && [ -n "$m" ] && menu_close "$m" >/dev/null 2>&1; restore_steam' EXIT
 
 since=$("$adb" shell 'date +%m-%d\ %H:%M:%S.000' | tr -d '\r')
 klog0=$(rs 'wc -l < /run/powos-app/hyprland.log' | tail -1)
@@ -136,14 +139,14 @@ for y in 50 58 40 66; do
   for x in 40 110 190 280 360 430; do
     [ $opened -ge 2 ] && break 2
     before=$(menus)
-    wtap "$x" "$y" || { bad "Steam's window body isn't on screen"; break 2; }
+    wtap "$x" "$y"
     sleep 1.2
     new=$(comm -13 <(echo "$before" | sort) <(menus | sort) | head -1)
     [ -n "$new" ] || continue
     read -r MW MX MY MWW MWH <<<"$new"
     opened=$((opened + 1))
     [ -n "${CX:-}" ] || { CX=$x; CY=$y; }
-    say "menu $opened: a click at $x,$y opened X window $MW at $MX,$MY ${MWW}x$MWH"
+    say "menu $opened: a tap at $x,$y opened X window $MW at $MX,$MY ${MWW}x$MWH"
     sleep 1.5
     lines=$("$adb" shell "logcat -d -T '$since' -s PowosPopups:I PowosPopups:W" 2>/dev/null | tr -d '\r' | grep -oE 'popup.*')
     exp=$(python3 -c "import sys; s=float(sys.argv[1]); a=list(map(int,sys.argv[2:])); print(round(a[2]*s), round(a[3]*s), round((a[0]-a[4])*s), round((a[1]-a[5])*s))" "$scale" "$MWW" "$MWH" "$MX" "$MY" "$SX" "$SY")
@@ -172,7 +175,7 @@ for y in 50 58 40 66; do
         say "kwin: $(rs "tail -n +$((klog0 + 1)) /run/powos-app/hyprland.log | grep -a 'exports popup $N '" | tail -1 | cut -c1-200)" ||
         bad "kwin: no \"exports popup $N\" line in KWin's log"
     fi
-    sp=$(unmenu $(menurect "$MX" "$MY" "$MWW" "$MWH")); say "dismiss: a tap on the page at ${sp:-? (no empty spot)}"
+    how=$(menu_close "$new" "$x" "$y")
     gone=""
     for _ in 1 2 3 4 5; do
       sleep 1
@@ -180,8 +183,8 @@ for y in 50 58 40 66; do
       gone=$("$adb" shell "logcat -d -T '$since' -s PowosPopups:I" 2>/dev/null | tr -d '\r' | grep -oE "popup-gone $P $N:.*" | tail -1)
       [ -n "$gone" ] && break
     done
-    [ -n "${N:-}" ] && { [ -n "$gone" ] && say "gone: $gone" || bad "gone: no \"popup-gone ... $N\" 5 s after the dismiss"; }
-    [ -z "$(comm -13 <(echo "$before" | sort) <(menus | sort))" ] || say "note: the menu is still viewable after the dismiss"
+    [ -n "${N:-}" ] && { [ -n "$gone" ] && say "gone: $gone" || bad "gone: no \"popup-gone ... $N\" 5 s after closing it ($how)"; }
+    [ -z "$(comm -13 <(echo "$before" | sort) <(menus | sort))" ] || say "note: the menu is still viewable after closing it ($how)"
     N=""
   done
 done
@@ -222,7 +225,7 @@ long_menu() {
   wtap "$CX" "$CY"; sleep 2
   lines=$("$adb" shell "logcat -d -T '$t0' -s PowosPopups:I" 2>/dev/null | tr -d '\r' | grep -oE 'popup.*')
   hit=$(echo "$lines" | grep -E '^popup [0-9]+ [0-9]+ at' | tail -1)
-  [ -n "$hit" ] || { bad "long: no popup line after the click at $CX,$CY"; return; }
+  [ -n "$hit" ] || { bad "long: no popup line after the tap at $CX,$CY"; return; }
   read -r _ P N _ at pw _ <<<"$hit"; ax=${at%,*}; ay=${at#*,}; ph=${pw#*x}; pw=${pw%x*}
   s=$(python3 -c "import sys; print('%.4f' % ((float(sys.argv[2]) - float(sys.argv[1])) / float(sys.argv[3])))" "$l2" "$r2" "$SWW")
   # Its part below the window on screen (device px): the window's body bottom .. the menu's bottom.
@@ -239,10 +242,10 @@ long_menu() {
     say "long: the host gave the touch on the menu's outside part to its window"
   else bad "long: the touch on the menu's outside part wasn't its window's"; fi
   rs "tail -n +$((k0 + 1)) /run/powos-app/hyprland.log | grep -a 'touch at' | tail -1" | cut -c1-200 | sed 's/^/long: KWin: /' | tee -a "$OUT/log.txt"
-  # Dismiss: a tap on an empty spot of the page, off the window and the menu.
+  # Dismiss: a tap on an empty spot of the page, off the window and the menu (else its header again).
   spot=$(ev "(()=>{const d=devicePixelRatio;for(let y=innerHeight*0.15;y<=innerHeight*0.85;y+=14)for(let x=innerWidth*0.95;x>=innerWidth*0.05;x-=14){const e=document.elementFromPoint(x,y);if(e&&e.closest('.page-track')&&!e.closest('.webwindow,.tile,.home-tile,.app,.panel,.widget,.island,button,a,input,textarea,.bar,.dock,[data-key]')){const X=x*d,Y=y*d;if(!(X>=$sx0-20&&X<=$sx1+20&&Y>=$t2-20&&Y<=$sy1+20)&&!(X>=$l2&&X<=$r2&&Y>=$t2&&Y<=$bb2))return Math.round(X)+' '+Math.round(Y)}}return ''})()")
-  [ -n "$spot" ] || { bad "long: no empty spot on the page to dismiss the menu by"; return; }
-  how="a tap on the page at $spot"; "$adb" shell "input tap $spot"
+  if [ -z "$spot" ]; then how="its header tapped again"; wtap "$CX" "$CY"
+  else how="a tap on the page at $spot"; "$adb" shell "input tap $spot"; fi
   gone=""; for _ in 1 2 3 4; do sleep 1; gone=$("$adb" shell "logcat -d -T '$t0' -s PowosPopups:I" 2>/dev/null | tr -d '\r' | grep -oE "popup-gone $P $N:.*" | tail -1); [ -n "$gone" ] && break; done
   if [ -n "$gone" ]; then say "long: $how closed it: $gone"; else bad "long: popup $N still open 4 s after $how"; fi
 }
