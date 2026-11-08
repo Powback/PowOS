@@ -10,7 +10,11 @@
 # (SteamLaunchTasks -> LaunchWindows, logcat "its launch window") within PLACEHOLDER_MS, then the game's window
 # becomes THAT task ("launch window: now window"), no second task ("full screen (the app's own)"). The game (APP, default
 # Broforce 274190) is closed after (powos game <appid> stop: the game only, Steam stays); one running already is the
-# user's - SKIP (exit 3).
+# user's - SKIP (exit 3). Unfolded, the game's window may also open as its own full-screen task (WindowTasks "open ...:
+# full screen", the placeholder handed over): the host's log says so while home's page is behind it and can't answer.
+# After the game, home's page must answer again within 15 s (else FAIL home-frozen-after-game: the user's way back).
+# Steam asking about APP (a cloud conflict, a launch option; "LaunchApp waiting for user response") before or during
+# the launch: SKIP with its question - never answered here.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A=$T/adb.sh
 # shellcheck source=ww-lib.sh
@@ -21,6 +25,12 @@ session() { "$A" shell "su -c 'sh /data/powos/powos-run.sh \"$1\"'" | tr -d '\r'
 WIN="importShim('./ui/webwindows.tsx').then(m=>{const w=m.webWins.value.find(w=>w.steam);return w?[w.id,!!w.pending,!!w.live,w.phase||'',w.failed||''].join('|'):'none'})"
 "$A" push "$here/steam-launch-placeholder-phone.sh" /data/local/tmp/powos-slp.sh >/dev/null || { echo "FAIL setup: can't push the phone side"; exit 1; }
 "$A" shell "su -c 'cp /data/local/tmp/powos-slp.sh /data/powos/root/var/tmp/powos-slp.sh && chmod 755 /data/powos/root/var/tmp/powos-slp.sh'" >/dev/null
+# A page eval gives up in 20 s, not cdp.ts's 120 s: home's page is paused under a game's full screen (GQ1,
+# WebWindows.quietCheck) or behind the game's own task, and the 11-08 runs spent their budget on 120 s waits.
+export CDP_TIMEOUT_S=${CDP_TIMEOUT_S:-20}
+logs() { "$A" logcat -d -s SteamLaunchTasks:I LaunchWindows:I PowosWindow:I WindowTasks:I PowosWebWindows:I 2>/dev/null | tr -d '\r'; }
+# Steam asking about APP (the phone side's ask: "LaunchApp waiting for user response to <what>"), else empty.
+steam_ask() { session "bash /var/tmp/powos-slp.sh $APP ask" | sed -n 's/^ASK //p' | grep -v '^none$'; }
 if [ "${FOLDED:-0}" = 1 ]; then
   # The cover screen made here (device_state 0, as game-present-rate.sh's fold), reset at the end: --screen cover is
   # only the pill's hint - 11-08 02:40 the job ran on the open inner screen, where the launch is home's web window, and
@@ -28,11 +38,10 @@ if [ "${FOLDED:-0}" = 1 ]; then
   "$A" shell cmd device_state state 0 >/dev/null 2>&1
   trap '"$A" shell cmd device_state state reset >/dev/null 2>&1' EXIT
   sleep 3
-  "$A" logcat -c >/dev/null 2>&1
-  logs() { "$A" logcat -d -s SteamLaunchTasks:I LaunchWindows:I PowosWindow:I WindowTasks:I 2>/dev/null | tr -d '\r'; }
 else
   [ "$(ev "$WIN")" = none ] || { echo "SKIP a Steam launch's window is up already: $(ev "$WIN")"; exit 3; }
 fi
+"$A" logcat -c >/dev/null 2>&1
 t0=$(python3 -c 'import time;print(time.time())')
 session "bash /var/tmp/powos-slp.sh $APP" | tee "$OUT/run.txt"
 grep -q "^SKIP" "$OUT/run.txt" && exit 3
@@ -49,8 +58,11 @@ if [ "${FOLDED:-0}" = 1 ]; then
   logs | grep "its launch window\|launch window: now window\|launch of .* failed\|full screen (the app's own)" | tail -6 | tee -a "$OUT/run.txt"
   logs | grep -q "launch window: now window" || fails="$fails window-never-took-the-task"
   logs | grep -q "full screen (the app's own)" && fails="$fails second-task"
+  q=$(steam_ask)
   session "timeout 20 powos game $APP stop 2>&1 | tail -1" | tee -a "$OUT/run.txt"
   [ -z "$fails" ] && { echo "RESULT PASS folded launch task ${seen} ms"; exit 0; }
+  logs > "$OUT/logcat.txt"; echo "artefacts: $OUT (logcat.txt: the launch's window tags)"
+  [ -n "$q" ] && { echo "SKIP Steam asked about $APP during the launch: $q (left unanswered)$fails"; exit 3; }
   echo "RESULT FAIL$fails"; exit 1
 fi
 seen="" ; w=none
@@ -60,14 +72,36 @@ fails=""
 [ -n "$seen" ] || fails="$fails no-placeholder"
 [ -n "$seen" ] && [ "$seen" -gt "$PLACEHOLDER_MS" ] && fails="$fails slow-placeholder"
 case $w in -*'|true|'*) ;; none) ;; *) fails="$fails not-a-placeholder($w)" ;; esac
-end=$(( $(date +%s) + WINDOW_S )); last=$w
+# The game's window takes the placeholder (a host id, live) - or opens as its own task (WindowTasks "open <id>
+# (<app>): full screen ...": the launch is the task's, the placeholder goes - SteamLaunchTasks.taskOpened), after which
+# home's page is behind the game and may not answer: the host's log says how it went, not the page.
+# Its app id names APP when KWin's window says steam_app_<appid>; else the only full-screen task opened since the
+# logcat was cleared at the call (nothing else launches meanwhile: the user is idle for a queue job).
+task_opened() { local o; o=$(logs | grep -E "WindowTasks.*: open [0-9]+ \(.*\): (full screen|floating|in its launch window)")
+  grep -E "$APP" <<<"$o" | tail -1 | grep . || grep "full screen (the app's own)" <<<"$o" | tail -1; }
+end=$(( $(date +%s) + WINDOW_S )); last=$w; how=""; asked=0
 while [ "$(date +%s)" -lt "$end" ]; do
   w=$(ev "$WIN"); [ "$w" != "$last" ] && { echo "  $(since) ms: $w" | tee -a "$OUT/run.txt"; last=$w; }
-  case $w in [0-9]*'|false|true|'*) break ;; *'|'*'|'*'|'*'|'?*) break ;; esac
+  case $w in [0-9]*'|false|true|'*) how=web; break ;; *'|'*'|'*'|'*'|'?*) break ;; esac
+  case $w in none|""|cdp:*) t=$(task_opened); [ -n "$t" ] && { how=task; echo "  $(since) ms: its own task: ${t##*WindowTasks}" | tee -a "$OUT/run.txt"; break; } ;; esac
+  # Steam asking for 20 s+ (a cloud conflict, a launch option): its question, not a placeholder fault - SKIP below.
+  case $w in *'|Steam is asking something|'*) asked=$((asked + 1)) ;; *) asked=0 ;; esac
+  [ "$asked" -ge 20 ] && q=$(steam_ask) && [ -n "$q" ] && break
   sleep 1
 done
-case $w in [0-9]*'|false|true|'*) echo "window: the game's window took it and drew at $(since) ms" | tee -a "$OUT/run.txt" ;; *) fails="$fails window($w)" ;; esac
+case $how in
+  web) echo "window: the game's window took it and drew at $(since) ms" | tee -a "$OUT/run.txt" ;;
+  task) echo "window: the game's window opened as its own task at $(since) ms (the placeholder handed over)" | tee -a "$OUT/run.txt" ;;
+  *) fails="$fails window($w)" ;;
+esac
+q=${q:-$(steam_ask)}
 session "timeout 20 powos game $APP stop 2>&1 | tail -1" | tee -a "$OUT/run.txt"
-echo "artefacts: $OUT/run.txt"
-[ -z "$fails" ] && { echo "RESULT PASS placeholder ${seen} ms"; exit 0; }
+# Home after the game (the user's way back): its page answers again within 15 s - one that doesn't is home frozen.
+back=""; for _ in $(seq 1 15); do [ "$(CDP_TIMEOUT_S=5 ev '1+1')" = 2 ] && { back=$(since); break; }; sleep 1; done
+echo "home's page after the game: ${back:+answers at $back ms}${back:-NO ANSWER in 15 s}" | tee -a "$OUT/run.txt"
+[ -n "$back" ] || fails="$fails home-frozen-after-game"
+logs > "$OUT/logcat.txt"
+echo "artefacts: $OUT (run.txt, logcat.txt)"
+[ -z "$fails" ] && { echo "RESULT PASS placeholder ${seen} ms, ${how} window"; exit 0; }
+[ -n "$q" ] && [ -n "$back" ] && { echo "SKIP Steam asked about $APP during the launch: $q (left unanswered)$fails"; exit 3; }
 echo "RESULT FAIL$fails"; exit 1

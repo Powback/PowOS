@@ -305,7 +305,7 @@ step_launch() {
   fi
   [ -z "$r" ] && mine=1
   pill "launching $GAME$([ -n "$r" ] && echo ' (already running)')"
-  local CL=$HOME/.local/share/Steam/logs/console_log.txt cl0 up i
+  local CL=$HOME/.local/share/Steam/logs/console_log.txt cl0 up i q
   cl0=$(wc -l < "$CL" 2>/dev/null || echo 0); up=$([ -z "$r" ] && [ -d "/proc/$(steam_pid)" ] && echo 1)
   t0=$(now)
   # ${LAUNCH_S:-360}, not $LAUNCH_S: a phone copy sourced without the default above ran "LAUNCH_S: unbound variable"
@@ -318,9 +318,12 @@ step_launch() {
       elif logged_since "$CL" "$cl0" "Client version"; then up=; echo "launch: Steam restarted with the URL (/usr/bin/steam's fallback: $(grep '^steam: ' "$T/open.out" | tail -1))"
       else fail launch-handoff "the running Steam didn't log the launch's URL in ${HANDOFF_S:-20} s: $(handoff_diag); open-task: $(cat "$T/open.status" 2>/dev/null)"; handoff_detail; return 1; fi
     fi
+    # Steam holding this launch for a question (steam_ask) is checked every 20 s, not only after LAUNCH_S: 11-08 03:53
+    # game-present-rate waited out its 300 s job budget on "Steam took the URL" (a question left since 03:20) and
+    # ended as "FAIL timeout" instead of this SKIP.
+    if [ $((i % 40)) = 0 ] && q=$(steam_ask); then echo "SKIP Steam is asking: $q (the user's question - left unanswered)"; return 1; fi
     touched; sleep 0.5; done
   LAUNCH=$(ms "$t0" "$(now)")
-  local q
   if [ -z "$W" ] || [ "$(mapped "$W")" != IsViewable ]; then
     q=$(steam_ask) && { echo "SKIP Steam is asking: $q (the user's question - left unanswered)"; return 1; }
     fail launch "no mapped $WIN_NAME window ${LAUNCH} ms after the launch (window '${W:-none}' $(mapped "${W:-0}")); steam $(steam_pid) frozen '$(cg)', reaper '$(reaper)' $(tree "$(reaper)" | wc -w) processes, watcher: $(watcher 3)"
