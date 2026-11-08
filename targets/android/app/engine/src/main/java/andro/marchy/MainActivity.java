@@ -498,9 +498,13 @@ public class MainActivity extends Activity
         // Andromarchy: this app is also the Linux side. Start the session (daemon, audio, Hyprland) if the Arch
         // rootfs is installed; this activity then connects to the daemon like the Termux version did.
         // PowOS rooted mode (RootMode): PowOS is installed as root at /data/powos/root - no rootfs of the app's own.
-        if (!SessionService.rootfsReady(this) && !RootMode.enabled()) { // first launch: setup form, then download
+        // An install job that isn't done (the languages pack after the rootfs is in place, or one the process lost)
+        // shows its progress too. SINGLE_TOP|CLEAR_TOP: the HOME press / unlock / fold that recreates this launcher
+        // brings back the install screen already in the task instead of stacking a fresh form on it.
+        if (!RootMode.enabled() && (!SessionService.rootfsReady(this) || InstallService.pending(this))) {
             redirected = true;
-            startActivity(new Intent(this, InstallActivity.class));
+            startActivity(new Intent(this, InstallActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP));
             finish();
             return;
         }

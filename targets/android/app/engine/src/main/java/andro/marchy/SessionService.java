@@ -218,12 +218,12 @@ public class SessionService extends Service {
             File[] wl = run.listFiles((d, n) -> n.startsWith("wayland-") && !n.endsWith(".lock"));
             SessionPlan.Health h = SessionPlan.health(startedAt >= 0, new File(run, "bus").exists(),
                     wl != null && wl.length > 0, now - startedAt);
-            SessionPlan.Action a = SessionPlan.next(false, rootfsReady(SessionService.this), InstallActivity.installing,
+            SessionPlan.Action a = SessionPlan.next(false, rootfsReady(SessionService.this), InstallService.installing(SessionService.this),
                     h, attempts);
             long delay = SessionPlan.retryDelayMs(attempts);
             status = SessionPlan.status(a, attempts, delay);
             switch (a) {
-                case WAIT_IMAGE: // InstallActivity starts this service again once the image is complete
+                case WAIT_IMAGE: // InstallService starts this service again once the image is complete
                     Log.i(TAG, "session: waiting for the PowOS image to finish installing");
                     return;
                 case START:

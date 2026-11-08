@@ -12,35 +12,22 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.util.zip.GZIPInputStream;
 
-import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.FileWriter;
-import java.io.FilterInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.Locale;
 
 /**
  * First launch: what Omarchy's setup form asks that still applies here (keyboard layouts, name and email; the
  * language and time zone come from Android), then the rootfs download and extraction. SessionService then runs
- * first-boot.sh, which applies the answers (setup.conf).
+ * first-boot.sh, which applies the answers (setup.conf). The install itself is a job of InstallService (InstallJob):
+ * this screen only starts it and attaches to it, so a fold, the launcher coming back, a lock or an app restart shows
+ * the running job's progress instead of a fresh form (2026-11-08 razr: "keeps restarting the install").
  */
 public class InstallActivity extends Activity {
-    /** The image is being installed (download, unpack, packs): the no-root session waits for it (SessionPlan). */
-    static volatile boolean installing;
-
     /** PowOS: the PowOS rootfs (targets/android/build-rootfs.sh), served by android-app-dev's web server on the LAN/VPN
      *  (android.pow/apk = ~/Projects/android-app-dev/output). Was Andromarchy's Omarchy rootfs on GitHub. */
     public static final String ROOTFS_URL = "http://android.pow/apk/powos-rootfs.tar.gz";
@@ -111,6 +98,14 @@ public class InstallActivity extends Activity {
         page.setBackgroundColor(Color.rgb(0x12, 0x13, 0x1d));
         page.getSettings().setJavaScriptEnabled(true);
         page.addJavascriptInterface(bridge, "A");
+        page.setWebViewClient(new android.webkit.WebViewClient() {
+            @Override
+            public void onPageFinished(WebView v, String url) {
+                loaded = true;
+                show();
+            }
+        });
+        InstallService.listeners.add(onJob);
         page.loadUrl("file:///android_asset/install.html");
         setContentView(page);
     }
@@ -121,7 +116,65 @@ public class InstallActivity extends Activity {
         for (Object o : args)
             a.put(o);
         String js = fn + ".apply(null, " + a + ")";
-        runOnUiThread(() -> page.evaluateJavascript(js, null));
+        runOnUiThread(() -> {
+            if (page != null)
+                page.evaluateJavascript(js, null);
+        });
+    }
+
+    /** The page shows the job's state; the job itself runs in InstallService, never in this activity. */
+    private final Runnable onJob = this::show;
+    private volatile boolean loaded, resumed, leaving;
+
+    /** Attaches the page to the install job (InstallJob.onOpen): progress, a resume after process death, the error,
+     *  or on to the desktop when it finished. Called on page load, on resume and on every job change. */
+    private void show() {
+        if (!loaded)
+            return;
+        InstallJob job = InstallService.current(this);
+        InstallJob.Attach a = InstallJob.onOpen(job, SessionService.rootfsReady(this), InstallService.workerAlive());
+        switch (a) {
+            case FORM:
+                return;
+            case RESUME:
+                InstallService.resume(this);
+                // fall through: its progress shows at once (super-optimistic), the worker picks up from the saved step
+            case WATCH:
+                call("running", job.permille(), job.text);
+                return;
+            case FAILED:
+                call("running", job.permille(), job.text);
+                call("failed", job.error);
+                return;
+            case DONE:
+                runOnUiThread(() -> {
+                    if (resumed && !leaving) {
+                        leaving = true;
+                        startActivity(new Intent(this, MainActivity.class));
+                        finish();
+                    }
+                });
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        resumed = true;
+        show();
+    }
+
+    @Override
+    protected void onPause() {
+        resumed = false;
+        super.onPause();
+    }
+
+    @Override
+    protected void onDestroy() {
+        InstallService.listeners.remove(onJob);
+        page = null;
+        super.onDestroy();
     }
 
     private void start(String name, String email, String layouts) {
@@ -133,25 +186,9 @@ public class InstallActivity extends Activity {
         }
         String conf = "KB_LAYOUTS=" + layouts.replaceAll("[^a-z,]", "") + "\nFULL_NAME=" + quote(name)
                 + "\nEMAIL=" + quote(email) + "\n";
-        installing = true;
-        new Thread(() -> {
-            try {
-                boolean base = installRootfs(conf);
-                if (base && !Locale.getDefault().getLanguage().equals("en"))
-                    Packs.install(this, "languages", (phase, done, total) -> call("progress", total > 0 ? done * 1000 / total : -1,
-                            (phase.equals("installing") ? "Installing " : "Downloading ") + Locale.getDefault().getDisplayLanguage() + " (" + (done >> 20)
-                                    + (total > 0 ? " / " + (total >> 20) : "") + " MB)"));
-                installing = false;
-                SessionService.start(this); // the session waited for this (SessionPlan.WAIT_IMAGE)
-                runOnUiThread(() -> {
-                    startActivity(new Intent(this, MainActivity.class));
-                    finish();
-                });
-            } catch (Throwable e) { // shown, never a crash: the user can retry
-                installing = false;
-                call("failed", String.valueOf(e.getMessage()));
-            }
-        }).start();
+        // A running job is never restarted (InstallJob.shouldRun): a second tap, or a tap on a recreated page, attaches.
+        call("running", 0, "Starting the download…");
+        InstallService.start(this, conf);
     }
 
     private static String quote(String s) { // setup.conf is sourced by bash
@@ -178,99 +215,7 @@ public class InstallActivity extends Activity {
         return useBase(ctx) ? BASE_URL : ROOTFS_URL;
     }
 
-    /** Installs the base image when this APK can ([useBase]), the full rootfs otherwise; true for the base. */
-    private boolean installRootfs(String conf) throws IOException {
-        File rootfs = SessionService.rootfs(this);
-        File partial = new File(rootfs.getPath() + ".partial");
-        deleteTree(partial); // a previous attempt that stopped halfway
-        final boolean base = useBase();
-        final String url = base ? BASE_URL : ROOTFS_URL;
-        String pin = base ? pinnedSha256(BASE_PIN_ASSET) : pinnedSha256();
-        final String localName = base ? "powos-rootfs-base.tar.gz" : LOCAL_NAME;
-        File external = new File(getExternalFilesDir(null), localName);
-        // or in files/ (adb run-as, or a rootfs build on the device)
-        final File local = external.canRead() ? external : new File(getFilesDir(), localName);
-        // The download goes to a file first and is checked whole before a single entry is unpacked: nothing from an
-        // archive that doesn't match the pin ever lands in the rootfs. Not named LOCAL_NAME, so a leftover is never
-        // mistaken for a local copy.
-        File download = new File(getFilesDir(), localName + ".download");
-        download.delete();
-        try {
-            File archive;
-            String got;
-            if (local.canRead()) {
-                archive = local;
-                got = sha256(new FileInputStream(local), local.length(), null, "Checking the rootfs");
-            } else {
-                HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-                c.setInstanceFollowRedirects(true); // GitHub release assets redirect to their storage host
-                c.connect();
-                if (c.getResponseCode() != 200)
-                    throw new IOException("download: HTTP " + c.getResponseCode());
-                try (OutputStream out = new FileOutputStream(download)) {
-                    got = sha256(c.getInputStream(), c.getContentLengthLong(), out, "Downloading the rootfs");
-                }
-                archive = download;
-            }
-            if (!got.equals(pin))
-                throw new IOException("the rootfs's checksum doesn't match this app's (expected sha256 "
-                        + pin.substring(0, 16) + "…, got " + got.substring(0, 16) + "…): refusing to install it. "
-                        + (archive == local ? "Remove " + local + ", or" : "The published rootfs (" + url
-                        + ") is not the one this app was built for:") + " rebuild the app after the rootfs is published");
-            extract(archive, partial);
-        } finally {
-            download.delete();
-        }
-        File setup = new File(partial, "root/.config/andromarchy/setup.conf");
-        setup.getParentFile().mkdirs();
-        try (FileWriter w = new FileWriter(setup)) {
-            w.write(conf);
-        }
-        if (!partial.renameTo(rootfs))
-            throw new IOException("could not move the rootfs into place");
-        return base;
-    }
-
-    /** Unpacks the (already checked) archive into partial, with progress. */
-    private void extract(File archive, File partial) throws IOException {
-        final long size = archive.length();
-        long[] read = {0};
-        long[] shown = {0};
-        InputStream counting = new FilterInputStream(new BufferedInputStream(new FileInputStream(archive), 1 << 20)) {
-            @Override
-            public int read(byte[] b, int off, int len) throws IOException {
-                int n = super.read(b, off, len);
-                if (n > 0)
-                    read[0] += n;
-                return n;
-            }
-        };
-        try (InputStream in = new GZIPInputStream(counting, 1 << 16)) {
-            TarExtractor.extract(in, partial, entry -> {
-                long now = System.currentTimeMillis();
-                if (now - shown[0] < 200)
-                    return;
-                shown[0] = now;
-                String what = "Installing (" + (read[0] >> 20) + (size > 0 ? " / " + (size >> 20) : "") + " MB)\n" + entry;
-                call("progress", size > 0 ? read[0] * 1000 / size : -1, what);
-            });
-        }
-    }
-
-    /** The pinned sha256 (64 lowercase hex), or an error saying this APK has none. */
-    private String pinnedSha256() throws IOException {
-        String hex = pinnedSha256(PIN_ASSET);
-        if (hex == null)
-            throw new IOException("this app has no rootfs checksum pinned (assets/" + PIN_ASSET
-                    + "): rebuild it after targets/android/build-rootfs.sh publishes the rootfs");
-        return hex;
-    }
-
     /** The sha256 pinned in an asset (64 lowercase hex), or null when the asset is missing or holds none. */
-    private String pinnedSha256(String asset) {
-        return pinnedSha256(this, asset);
-    }
-
     static String pinnedSha256(android.content.Context ctx, String asset) {
         String line = null;
         try (BufferedReader r = new BufferedReader(new InputStreamReader(ctx.getAssets().open(asset),
@@ -281,51 +226,5 @@ public class InstallActivity extends Activity {
         }
         String hex = line == null ? "" : line.trim().split("\\s+")[0].toLowerCase(Locale.ROOT);
         return hex.matches("[0-9a-f]{64}") ? hex : null;
-    }
-
-    /** sha256 of a stream (closed afterwards), copied to out when given, with progress under label. */
-    private String sha256(InputStream raw, long size, OutputStream out, String label) throws IOException {
-        MessageDigest md;
-        try {
-            md = MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException e) {
-            throw new IOException(e);
-        }
-        byte[] buf = new byte[1 << 20];
-        long read = 0, shown = 0;
-        try (InputStream in = raw) {
-            for (int n; (n = in.read(buf)) > 0; ) {
-                md.update(buf, 0, n);
-                if (out != null)
-                    out.write(buf, 0, n);
-                read += n;
-                long now = System.currentTimeMillis();
-                if (now - shown >= 200) {
-                    shown = now;
-                    call("progress", size > 0 ? read * 1000 / size : -1,
-                            label + " (" + (read >> 20) + (size > 0 ? " / " + (size >> 20) : "") + " MB)");
-                }
-            }
-        }
-        StringBuilder hex = new StringBuilder(64);
-        for (byte b : md.digest())
-            hex.append(String.format(Locale.ROOT, "%02x", b));
-        return hex.toString();
-    }
-
-    private static void deleteTree(File f) {
-        File[] children = f.isDirectory() && !isSymlink(f) ? f.listFiles() : null;
-        if (children != null)
-            for (File c : children)
-                deleteTree(c);
-        f.delete();
-    }
-
-    private static boolean isSymlink(File f) {
-        try {
-            return java.nio.file.Files.isSymbolicLink(f.toPath());
-        } catch (Exception e) {
-            return false;
-        }
     }
 }

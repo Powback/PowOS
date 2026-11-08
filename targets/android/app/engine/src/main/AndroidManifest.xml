@@ -15,6 +15,8 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <!-- Andromarchy session (SessionService): foreground service + wake lock, or HyperOS kills it -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- InstallService: the no-root image download/unpack as a dataSync foreground service -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- CoverPadActivity hands the focus back to the desktop task (moveTaskToFront). -->
     <uses-permission android:name="android.permission.REORDER_TASKS" />
@@ -106,6 +108,8 @@
             android:name=".InstallActivity"
             android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
             android:exported="false"
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|density"
             android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".ChildProcessSetupActivity"
@@ -122,6 +126,11 @@
         <service
             android:name=".SessionService"
             android:exported="false" />
+        <!-- The no-root PowOS install (InstallJob): outlives the install screen, folds, locks and process death. -->
+        <service
+            android:name=".InstallService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
         <receiver
             android:name=".UserActionReceiver"
             android:exported="false" />

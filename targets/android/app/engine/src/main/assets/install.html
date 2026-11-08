@@ -73,7 +73,8 @@
 </div></main>
 <script>
   // A (Java, InstallActivity): layouts() = [{id, label, on}], install(name, email, "fr,us").
-  // Java calls progress(permille, text) and failed(message).
+  // Java calls progress(permille, text), running(permille, text) (a job is on: the page attaches to it instead of
+  // offering a new one - after a fold, the launcher coming back or an app restart) and failed(message).
   const order = []; // selection order: the first chosen is the physical keyboard's
   for (const l of JSON.parse(A.layouts())) {
     const d = document.createElement('div');
@@ -94,6 +95,7 @@
     A.install(name.value, email.value, (order.length ? order : ['us']).join(','));
   };
   function progress(pm, text) { const p = pm >= 0 ? (pm / 10).toFixed(1) + '%' : ''; pct.textContent = p; if (pm >= 0) fill.style.width = p; what.textContent = text; }
+  function running(pm, text) { go.disabled = true; err.style.display = 'none'; prog.style.display = 'block'; progress(pm, text); }
   function failed(m) { err.textContent = 'Install failed: ' + m + ' — check the connection and retry.'; err.style.display = 'block'; go.disabled = false; }
 </script>
 </body>
