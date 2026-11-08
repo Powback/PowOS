@@ -171,7 +171,7 @@ class WebWindows(
         val (key, label) = src?.let { it.offer.key to it.offer.label } ?: keyLabel(w, appOf)
         val o = JSONObject().put("id", w.id).put("key", key).put("label", label).put("display", w.displayId).put("task", w.taskId).put("state", listedState(w)).put("live", w.live)
         if (w.zoom != 1.0) o.put("zoom", w.zoom)
-        if (src != null) o.put("kwin", src.kwin).put("ownFrame", andro.marchy.WebWindowSource.ownFrame(src.kwin))
+        if (src != null) o.put("kwin", src.kwin).put("ownFrame", pageOwnFrame(andro.marchy.WebWindowSource.ownFrame(src.kwin), src.offer.game))
         w.geo?.let { g -> o.put("frame", css(g.frame)).put("body", css(g.body)).put("maximised", g.maximised) }
         return o
     }
@@ -1180,7 +1180,8 @@ class WebWindows(
         pendingLinux[kwin] = offer
         WindowLog.i(TAG, "KWin window $kwin (${offer.appId}, \"${offer.title}\"): offered to the page as $key")
         // "ownFrame": it draws its own complete frame (Brave, Steam, GTK CSD; kwin 0046) - the page shows no bar over it.
-        val own = andro.marchy.WebWindowSource.ownFrame(kwin)
+        // Never a game's ([pageOwnFrame]): its borderless window has no bar of its own.
+        val own = pageOwnFrame(andro.marchy.WebWindowSource.ownFrame(kwin), offer.game)
         emit("webwindows.adopt", JSONObject().put("kwin", kwin).put("key", key).put("label", offer.label).put("ownFrame", own).put("alts", org.json.JSONArray(offer.alts)))
         main.postDelayed({
             pendingLinux.remove(kwin)?.let { p ->
@@ -3598,13 +3599,18 @@ class WebWindows(
 
     // ---- Linux windows that draw their own frame (CSD: Brave, Chrome, Steam, GTK header bars; kwin 0046) -------------
 
-    /** KWin window [kwin] draws its own frame now ([own]) or not: the page shows its bar or not (main thread). */
+    /** KWin window [kwin] draws its own frame now ([kwinOwn]) or not: the page shows its bar or not ([pageOwnFrame]; main thread). */
     fun linuxOwnFrame(
         kwin: Int,
-        own: Boolean,
+        kwinOwn: Boolean,
     ) {
         val w = wins.values.firstOrNull { it.linux?.kwin == kwin } ?: return
-        WindowLog.i(TAG, "window ${w.id}: KWin window $kwin ${if (own) "draws its own frame: no PowOS bar" else "has PowOS's bar"}")
+        val game = w.linux?.offer?.game == true
+        val own = pageOwnFrame(kwinOwn, game)
+        WindowLog.i(
+            TAG,
+            "window ${w.id}: KWin window $kwin ${if (own) "draws its own frame: no PowOS bar" else if (kwinOwn) "is a game's borderless window: PowOS's bar" else "has PowOS's bar"}",
+        )
         emit("webwindows.frame", mapOf("id" to w.id, "own" to own))
     }
 
@@ -4433,6 +4439,20 @@ class WebWindows(
          * long after (ms): past a first-frame sync (100+ ms seen, 11-07 03:14) and a slow transition's.
          */
         val FULL_RESTATE_MS = longArrayOf(250L, 1_000L, 3_000L)
+
+        /**
+         * Whether the page leaves out PowOS's bar over a Linux window: KWin says it draws its own complete frame
+         * ([kwinOwn], kwin 0046 "decor ... own": undecorated - _MOTIF_WM_HINTS no decorations, GTK frame extents, an
+         * xdg toplevel with client-side decorations) and it is not a [game]'s. A game's undecorated window is a
+         * borderless one (Unity -popupwindow, a Wine WS_POPUP, SDL_WINDOW_BORDERLESS), not a frame: it has no close,
+         * full-screen or resize of its own, so it keeps PowOS's bar (the user, 11-08: Broforce "shows as a window but
+         * without a title bar, so there's no way to resize it or make it fullscreen"). Its bar's full screen is the
+         * game's immersive full screen ([immersive]).
+         */
+        fun pageOwnFrame(
+            kwinOwn: Boolean,
+            game: Boolean,
+        ): Boolean = kwinOwn && !game
 
         /** Whether a Linux window opens full screen at once: a game's ([isGame], [LinuxOffer.game]); anything else floats. */
         fun opensFullScreen(game: Boolean): Boolean = game

@@ -18,6 +18,10 @@
 # KWin keeps the task immersive. Fixed size hints (no WS_THICKFRAME) are covered by 0037 (fixed-size steam_app_ window
 # -> full screen in its task). A windowed game also doesn't minimise itself on focus loss the way a full-screen Wine
 # window does (skill: "Minimised game").
+# -popupwindow stays in windowed mode (game-window-chrome, 11-08): the window's chrome is PowOS's, not the game's - a
+# game's undecorated window keeps the web window's bar (close / full screen / resize; WebWindows.pageOwnFrame), so a
+# Wine caption isn't needed for it, and one would add a non-client area (render size != the task) and drop the
+# monitor-covering _NET_WM_STATE_FULLSCREEN the immersive task relies on.
 # POWOS_UNITY_SCREEN=fullscreen: the old `-screen-fullscreen 1` launch (render size fixed at launch, scaled after).
 #
 # Runs where Steam puts launch-option prefixes: inside the Steam Linux Runtime container, under FEX (x86). That runtime
