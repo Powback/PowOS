@@ -263,6 +263,31 @@ agent hours late. Action rows are the audit log.
 developer at a keyboard and need root on purpose (flashing, system module, rootfs). They take `--host` names from the
 directory (M5) and work through `powos dev adb on`. Nothing that runs unattended may call them.
 
+#### adb authorization (11-08)
+
+Two failure modes, both seen 2026-11-08 on the OnePlus Open (Oplus ROM), and the rule that keeps them from becoming a
+dialog storm:
+
+- **The key dropped.** The phone lost the Mac's key from `/data/misc/adb/adb_keys`; every phone check waited ~8 h.
+  Healed by unit `adb-mac-key-heal` (`targets/android/rooted/adb-key-heal.sh`, installed by `powos-deploy.sh`): it
+  restores only the Mac's one key, only when its key material is missing, append-only, `system:shell 0640`,
+  `adb_keys_file` context; at boot (Magisk hook `powos-adbkey-heal.sh`), every 10 min (`powos-periodic.sh`) and on
+  every deploy. Test: `test/tier1/test-adb-key-heal.sh`.
+- **The key is there, the grant is not.** Keeping the key in `adb_keys` is NOT enough on this Oplus phone: its
+  `AdbDebuggingManager` tracks the key with `alwaysAllow=false` and the framework (not adbd) decides, so every new
+  connection pops "Allow USB debugging?" again; restarting adbd does not help. The one-time fix is the user tapping
+  Allow with **"Always allow from this computer"** ticked (the framework's grant, persisted in
+  `/data/misc/adb/adb_temp_keys.xml`). Open question: writing that grant at deploy time so a future key drop + re-add
+  doesn't restart the cycle - not done (it edits a framework store; needs a check that Oplus honours it).
+- **Never a reconnect storm.** Each `adb disconnect` + `adb connect` is a new auth request = a new dialog. 11-08 the
+  Mac's verify and ship runners reconnected through `tools/phone/adb.sh` in a tight loop (~3 requests in 2 s) and
+  spammed the user. Now, while the phone reports `unauthorized`, `adb.sh` makes no connect on first sight, at most
+  one per `ADB_UNAUTH_BACKOFF_S` (600 s) after that, answers every call with exit 69 "phone offline: adb
+  unauthorized" (`--vpn-state` too: the runners' offline path, logged once), and notifies the user once per episode
+  (`powos comms notify --batch adb-unauthorized`). powos-vadb's keepalive backs off the same way
+  (`VADB_UNAUTH_BACKOFF_S`). Reading the state never prompts, so an Allow is picked up on the next call. Test:
+  `test/tier1/test-adb-unauthorized.py`.
+
 ---
 
 ## 3. Migration plan

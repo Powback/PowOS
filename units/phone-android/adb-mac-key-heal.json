@@ -1,0 +1,27 @@
+{
+  "id": "adb-mac-key-heal",
+  "name": "adb Mac key self-heal",
+  "kind": "system",
+  "owner": "system:powos-manager",
+  "host": "phone-android",
+  "purpose": "Restores the Mac's adb public key (macback@macback.local) to /data/misc/adb/adb_keys at boot (Magisk service.d) and on each powos-periodic pass (every 10 min) if the phone drops it. Append-only, that one key only. Fixes the 2026-11-08 lockout where the dropped key blocked all phone work for ~8h. The key alone is not enough on this Oplus phone: the framework re-prompts \"Allow USB debugging?\" unless \"Always allow\" was ticked (docs/REMOTE-POWOS.md, adb authorization).",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (written live by the manager 2026-11-08; the repo copy is the same bytes)",
+  "files": [
+    "/data/powos/adb-key-heal.sh",
+    "/data/adb/service.d/powos-adbkey-heal.sh",
+    "/data/powos/state/adb-key-heal.log"
+  ],
+  "edits": [
+    "/data/misc/adb/adb_keys"
+  ],
+  "runs": [
+    "/data/adb/service.d/powos-adbkey-heal.sh (boot)",
+    "/data/powos/powos-periodic.sh (every 10 min)",
+    "/data/powos/adb-key-heal.sh (guarded heal)"
+  ],
+  "remove": {
+    "commands": [
+      "rm -f /data/adb/service.d/powos-adbkey-heal.sh /data/powos/adb-key-heal.sh /data/powos/state/adb-key-heal.log /data/powos/units.d/adb-mac-key-heal.json"
+    ]
+  }
+}

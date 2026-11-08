@@ -37,7 +37,43 @@ wg_age() {
 }
 # Not a VPN peer (a LAN serial): no handshake to check.
 [[ "$serial_ip" == 10.13.13.* ]] || wg_age() { :; }
+state_file=${POWOS_ADB_STATE_FILE:-/tmp/.powos-adb-state$([ "$serial" = 10.13.13.7:5555 ] || echo ".${serial//[^0-9A-Za-z]/_}")}
+# adb UNAUTHORIZED (the phone shows "Allow USB debugging?" and the user hasn't allowed it, or denied it): BACK OFF.
+# Every `adb disconnect` + `adb connect` is a fresh auth request, i.e. a fresh dialog on the user's screen - 11-08 the
+# verify and ship runners reconnected through here in a tight loop (~3 auth requests in 2 s) and spammed the user.
+# So while the phone reports unauthorized: no connect at all on first sight (the dialog already up is enough), at most
+# one reconnect per ADB_UNAUTH_BACKOFF_S (default 600 s) after that, every call exits 69 "phone offline: adb
+# unauthorized" (the runners' offline path: logged once, polled without touching adb), and the user is notified ONCE
+# per episode (`powos comms notify --batch adb-unauthorized`). Reading the state (`adb get-state`) never prompts, so
+# the moment the user taps Allow the next call sees "device" and the backoff ends. On this Oplus phone the key in
+# /data/misc/adb/adb_keys is NOT enough: the framework re-prompts unless "Always allow from this computer" was ticked
+# (docs/REMOTE-POWOS.md, "adb authorization"). Marker: "$state_file.unauth" = "<last connect attempt epoch> <first seen>".
+unauth_file=$state_file.unauth
+adb_state() { local o; o=$(docker exec powos-vadb adb -s "$serial" get-state 2>&1 || true)
+  case "$o" in device) echo device ;; *unauthorized*) echo unauthorized ;; *) echo other ;; esac; }
+unauth_notify() {
+  local msg="The phone is asking \"Allow USB debugging?\" for the Mac ($serial): tap Allow and tick \"Always allow from this computer\". Until then the Mac's phone checks and ships wait (no reconnect more than once per $(( ${ADB_UNAUTH_BACKOFF_S:-600} / 60 )) min)."
+  local here; here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  # Backgrounded and capped: a slow comms store never holds the caller.
+  local cmd=(perl -e 'alarm 20; exec @ARGV' "$here/../../bin/powos" comms notify --from adb --priority high --batch adb-unauthorized --window 3600)
+  [ -z "${POWOS_ADB_NOTIFY:-}" ] || cmd=("$POWOS_ADB_NOTIFY")   # tests: a stand-in that records the message
+  ( "${cmd[@]}" "$msg" >/dev/null 2>&1 & ) || true
+}
+unauth_mark() {  # unauth_mark <epoch of the connect attempt>: the marker (re)written; a new episode notifies once
+  local first=$1; [ -s "$unauth_file" ] && read -r _ first < "$unauth_file"
+  [ -s "$unauth_file" ] || { unauth_notify; echo "adb.sh: $(date '+%F %T') phone $serial reports adb UNAUTHORIZED - backing off reconnects (${ADB_UNAUTH_BACKOFF_S:-600} s), user notified" >&2; }
+  printf '%s %s\n' "$1" "${first:-$1}" > "$unauth_file.$$" && mv -f "$unauth_file.$$" "$unauth_file"; }
+unauth_wait() {  # 0 while inside the backoff window (prints the seconds left)
+  local at; read -r at _ 2>/dev/null < "$unauth_file" || return 1
+  [ -n "$at" ] && [ $(( $(date +%s) - at )) -lt "${ADB_UNAUTH_BACKOFF_S:-600}" ] || return 1
+  echo $(( ${ADB_UNAUTH_BACKOFF_S:-600} - ($(date +%s) - at) )); }
 if [ "${1:-}" = --vpn-state ]; then
+  # Unauthorized inside its backoff window: offline for the runners (the state read never prompts); allowed meanwhile:
+  # the marker goes and the normal answer follows.
+  if [ -s "$unauth_file" ] && left=$(unauth_wait); then
+    if [ "$(adb_state)" = device ]; then rm -f "$unauth_file"
+    else echo "vpn=offline adb=unauthorized retry-in=${left}s"; exit 69; fi
+  fi
   a=$(wg_age); [ -n "$a" ] || { echo "vpn=unknown"; exit 0; }
   [ "$a" != never ] && [ "$a" -le "${PHONE_WG_STALE_S:-180}" ] && { echo "vpn=up handshake=${a}s"; exit 0; }
   echo "vpn=offline handshake=$a$([ "$a" = never ] || echo s)"; exit 69
@@ -48,7 +84,6 @@ fi
 # connection only goes stale after a real network change on the phone, so a GOOD result is cached for
 # ADB_STATE_CACHE_S (default 30s); anything else (no cache yet, cache expired, or the last check failed) always
 # re-checks live - a failure is never papered over by a stale "ok".
-state_file=${POWOS_ADB_STATE_FILE:-/tmp/.powos-adb-state$([ "$serial" = 10.13.13.7:5555 ] || echo ".${serial//[^0-9A-Za-z]/_}")}
 now=$(date +%s); cached_ok=
 if read -r c_epoch c_status 2>/dev/null < "$state_file"; then
   [ "$c_status" = ok ] && [ $(( now - c_epoch )) -lt "${ADB_STATE_CACHE_S:-30}" ] && cached_ok=1
@@ -62,14 +97,33 @@ if [ -z "$cached_ok" ]; then
   # A network change on the phone (wifi <-> mobile) leaves powos-vadb's adb connection stale ("offline", "device
   # not found") although the VPN is up: every agent's next call then fails. Not "device"? Drop it and connect
   # afresh, once, before the command (a pre-check, not a retry: the command itself never runs twice).
-  if [ "$(docker exec powos-vadb adb -s "$serial" get-state 2>/dev/null || true)" != device ]; then
+  # Unauthorized (see unauth_file above): never a reconnect storm - no connect on first sight, then one per backoff window.
+  st=$(adb_state)
+  if [ "$st" = device ]; then rm -f "$unauth_file"
+  else
+    if [ "$st" = unauthorized ] && [ ! -s "$unauth_file" ]; then unauth_mark "$now"; fi
+    if [ -s "$unauth_file" ]; then
+      if left=$(unauth_wait); then
+        rm -f "$state_file"
+        echo "adb.sh: phone offline: adb unauthorized on the phone (Allow USB debugging pending/denied) - not reconnecting for ${left}s" >&2
+        exit 69
+      fi
+      unauth_mark "$now"   # the window's one attempt, stamped before it runs
+    fi
     docker exec powos-vadb sh -c 'adb disconnect "$1" >/dev/null 2>&1; timeout 15 adb connect "$1" >/dev/null 2>&1' _ "$serial" || true
+    st=$(adb_state)
   fi
-  if [ "$(docker exec powos-vadb adb -s "$serial" get-state 2>/dev/null || true)" != device ]; then
+  if [ "$st" != device ]; then
     rm -f "$state_file"
+    if [ "$st" = unauthorized ]; then
+      unauth_mark "$now"
+      echo "adb.sh: phone offline: adb unauthorized on the phone (Allow USB debugging pending/denied) - not reconnecting for ${ADB_UNAUTH_BACKOFF_S:-600}s" >&2
+      exit 69
+    fi
     echo 'adb.sh: phone unavailable after reconnect; not caching device state' >&2
     exit 69
   fi
+  rm -f "$unauth_file"
   printf '%s ok\n' "$now" > "$state_file.$$" && mv -f "$state_file.$$" "$state_file"
 fi
 # Local paths: only a file command's own arguments are (push's sources, pull's destination, install's APKs) - a

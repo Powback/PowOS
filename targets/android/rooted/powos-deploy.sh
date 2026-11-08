@@ -22,6 +22,12 @@ install -m 755 $T/powos-units.sh /data/powos/powos-units.sh
 # The VPN client kept running while the phone rests (unit vpn-keep): applied now, and at every boot by powos-start.sh.
 install -m 755 $T/powos-vpn-keep.sh /data/powos/powos-vpn-keep.sh
 sh /data/powos/powos-vpn-keep.sh apply || true
+# The Mac's adb key kept authorized (unit adb-mac-key-heal): the guarded heal (that one key, append-only), run at boot by
+# its Magisk hook and every 10 min by powos-periodic.sh, and once now. 11-08 the phone dropped the key and every phone
+# check waited ~8 h. The key alone is not the whole grant on this Oplus phone (docs/REMOTE-POWOS.md, adb authorization).
+install -m 755 $T/adb-key-heal.sh /data/powos/adb-key-heal.sh
+install -m 755 $T/powos-adbkey-heal.sh /data/adb/service.d/powos-adbkey-heal.sh
+sh /data/powos/adb-key-heal.sh || true
 # The phone's timers (unit powos-periodic: App API health every 10 min, units published every 15): restarted onto
 # the new copy (started at every boot by powos-start.sh).
 install -m 755 $T/powos-periodic.sh /data/powos/powos-periodic.sh
@@ -121,6 +127,7 @@ install -Dm644 $T/fex-thunks.json $R/usr/share/fex-emu/thunks.json
 rm -f $T/fex-Config.json $T/fex-thunks.json
 rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-run.sh $T/powos-rooted-session $T/powos-android-app $T/powos-android-tasks \
   $T/powos-units.sh $T/powos-vpn-keep.sh $T/powos-periodic.sh $T/powos-appdata.sh $T/powos-idle-sysupdate.sh \
+  $T/adb-key-heal.sh $T/powos-adbkey-heal.sh \
   $T/powos-android-tasks.desktop $T/powos-padd $T/powos-focus-watch $T/powos-apps-export $T/powos-open-task \
   $T/powos-apps-watch $T/powos-apps-watch.desktop $T/powos-plasma-bridge $T/powos-plasma-bridge.desktop \
   $T/powos-ime-bridge $T/powos-ime-bridge.desktop $T/powos-output-scale $T/android-nm \
