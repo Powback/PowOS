@@ -7456,14 +7456,7 @@ async function webWindowCheck() {
 const RS5_READS = 16;
 async function wwResizeCostIn(n, glass) {
   const S = await window.__gw.mod("./state.ts");
-  // The live glass's stand-in (as PERF5-GLASS): a port and "b.state 1", so nativeglass.ts measures as on the phone.
-  const N = glass ? await window.__gw.mod("./apps/native.ts") : null;
-  const had = N?.native.value;
-  if (N) {
-    const ch = new MessageChannel();
-    N.native.value = ch.port1;
-    for (const f of N.fromNative) f("b.state 1");
-  }
+  const undoGlass = await window.__rs5.glass(glass);
   const W = await window.__gw.mod("./ui/webwindows.tsx");
   const R = await window.__gw.mod("./ui/renderscan.ts");
   const p0 = S.pages.value[0];
@@ -7485,59 +7478,104 @@ async function wwResizeCostIn(n, glass) {
     await frame(), await frame();
     // The render scan only with the glass off: its own timing per render is script the glass pass's numbers leave out.
     if (!glass) R.startScan("gate-rs5"), R.reset();
-    const handler = [], work = [], reads = [];
-    // Layout reads (a rect, a computed style) from the move to the end of its renders (its microtasks): each one after
-    // a render's style write is a forced layout.
-    const P = Element.prototype, gbcr = P.getBoundingClientRect, gcs = window.getComputedStyle;
-    let count = 0;
-    P.getBoundingClientRect = function () { count++; return gbcr.call(this); };
-    window.getComputedStyle = function (...a) { count++; return gcs.apply(window, a); };
-    try {
-      for (let k = 1; k <= n; k++) {
-        const ms = await new Promise((ok) =>
-          requestAnimationFrame(() => {
-            const t0 = performance.now();
-            count = 0;
-            pe("pointermove", k);
-            handler.push(performance.now() - t0);
-            setTimeout(() => (reads.push(count), ok(performance.now() - t0)), 0);
-          }),
-        );
-        work.push(ms);
-      }
-    } finally {
-      P.getBoundingClientRect = gbcr;
-      window.getComputedStyle = gcs;
-    }
+    const m = await window.__rs5.moves(pe, n);
     const top = glass ? undefined : R.topRenders(12).byCount.map((c) => `${c.name}x${c.renders}(${c.selfMs}ms)`);
     if (!glass) R.stopScan("gate-rs5");
-    // The glass's measure of the page as it is mid-drag (layout clean: as its after-layout callback finds it), ms each.
-    let glassMs;
-    if (glass && window.__glass?.live?.measure) {
-      const t0 = performance.now();
-      for (let i = 0; i < 10; i++) window.__glass.live.measure();
-      glassMs = Math.round(((performance.now() - t0) / 10) * 100) / 100;
-    }
+    const glassMs = glass ? window.__rs5.glassMs() : undefined;
     pe("pointerup", n);
     await frame(), await frame();
-    const q = (l, f) => [...l].sort((a, b) => a - b)[Math.min(l.length - 1, Math.floor(l.length * f))];
-    const r2 = (x) => Math.round(x * 100) / 100;
-    return { n, readsP50: q(reads, 0.5), readsMax: Math.max(...reads), handlerP50: r2(q(handler, 0.5)), handlerP90: r2(q(handler, 0.9)), workP50: r2(q(work, 0.5)), workP90: r2(q(work, 0.9)), workMax: r2(Math.max(...work)), renders: top, tick: r2(q(window.__ww.tickMs.slice(-n), 0.5)), tickP90: r2(q(window.__ww.tickMs.slice(-n), 0.9)), glassMs };
+    return window.__rs5.summary(n, m, { renders: top, glassMs });
   } finally {
     W.webWins.value = [];
-    if (N) {
-      for (const f of N.fromNative) f("b.state 0");
-      N.native.value = had;
-    }
+    undoGlass();
   }
+}
+
+/** In the page, RS5: the live glass's stand-in (as PERF5-GLASS) when [on] - a port and "b.state 1", so nativeglass.ts
+ *  measures as on the phone; the undo. */
+async function rs5Glass(on) {
+  if (!on) return () => {};
+  const N = await window.__gw.mod("./apps/native.ts");
+  const had = N.native.value;
+  N.native.value = new MessageChannel().port1;
+  for (const f of N.fromNative) f("b.state 1");
+  return () => {
+    for (const f of N.fromNative) f("b.state 0");
+    N.native.value = had;
+  };
+}
+
+/** In the page, RS5: [n] moves by [pe], one at each frame's start: each move's handler ms, its frame's work ms (to a
+ *  task after its rendering) and its layout reads (rects, computed styles: each after a render's style write is forced). */
+async function rs5Moves(pe, n) {
+  const handler = [], work = [], reads = [];
+  const P = Element.prototype, gbcr = P.getBoundingClientRect, gcs = window.getComputedStyle;
+  let count = 0;
+  P.getBoundingClientRect = function () { count++; return gbcr.call(this); };
+  window.getComputedStyle = function (...a) { count++; return gcs.apply(window, a); };
+  try {
+    for (let k = 1; k <= n; k++) {
+      const ms = await new Promise((ok) =>
+        requestAnimationFrame(() => {
+          const t0 = performance.now();
+          count = 0;
+          pe("pointermove", k);
+          handler.push(performance.now() - t0);
+          setTimeout(() => (reads.push(count), ok(performance.now() - t0)), 0);
+        }),
+      );
+      work.push(ms);
+    }
+  } finally {
+    P.getBoundingClientRect = gbcr;
+    window.getComputedStyle = gcs;
+  }
+  return { handler, work, reads };
+}
+
+/** In the page, RS5: the glass's measure of the page as it is mid-drag (layout clean, as its after-layout callback finds it), ms each. */
+function rs5GlassMs() {
+  if (!window.__glass?.live?.measure) return undefined;
+  const t0 = performance.now();
+  for (let i = 0; i < 10; i++) window.__glass.live.measure();
+  return Math.round(((performance.now() - t0) / 10) * 100) / 100;
+}
+
+/** In the page, RS5: [rs5Moves]'s lists as quantiles, with [extra] and the window tick's last [n]. */
+function rs5Summary(n, { handler, work, reads }, extra) {
+  const q = (l, f) => [...l].sort((a, b) => a - b)[Math.min(l.length - 1, Math.floor(l.length * f))];
+  const r2 = (x) => Math.round(x * 100) / 100;
+  const ticks = window.__ww.tickMs.slice(-n);
+  return { n, readsP50: q(reads, 0.5), readsMax: Math.max(...reads), handlerP50: r2(q(handler, 0.5)), handlerP90: r2(q(handler, 0.9)), workP50: r2(q(work, 0.5)), workP90: r2(q(work, 0.9)), workMax: r2(Math.max(...work)), ...extra, tick: r2(q(ticks, 0.5)), tickP90: r2(q(ticks, 0.9)) };
+}
+
+/** RS5 (node side): one ww-resize-cost pass of [RS5_MOVES] moves on [r]'s page, CDP metrics ([m]) around it, printed; traced when [how] says. */
+const RS5_MOVES = 60;
+async function rs5Pass(r, m, glass, how) {
+  const a = await m();
+  if (how === "trace") await r.page.tracing.start({ categories: ["devtools.timeline", "disabled-by-default-devtools.timeline", "disabled-by-default-devtools.timeline.invalidationTracking", "blink", "cc", "viz"] });
+  const out = await r.page.evaluate((n, g) => window.wwResizeCostIn(n, g), RS5_MOVES, glass);
+  const tr = how === "trace" ? await r.page.tracing.stop() : null;
+  const b = await m();
+  const per = (k) => Math.round(((b[k] - a[k]) * 1000 * 100) / RS5_MOVES) / 100;
+  console.log(`ww-resize-cost${glass ? ` (glass${how ? `, ${how}` : ""})` : ""}: ${JSON.stringify(out)} per frame script ${per("ScriptDuration")} style ${per("RecalcStyleDuration")} layout ${per("LayoutDuration")} task ${per("TaskDuration")} ms`);
+  if (tr) console.log(`ww-resize-cost trace self ms/move: ${traceTop(tr, RS5_MOVES)}`);
+  return out;
 }
 
 /** RS5: a trace's main-thread events summed by name, per move ([n] moves), the top [k]: where a move's ms go. */
 function traceTop(buf, n, k = 14) {
   const ev = JSON.parse(buf.toString()).traceEvents;
   const main = ev.find((e) => e.name === "thread_name" && e.args?.name === "CrRendererMain");
-  // Self time: each event's duration less its children's (nested X events on the main thread).
   const xs = ev.filter((e) => e.ph === "X" && e.dur && (!main || (e.pid === main.pid && e.tid === main.tid))).sort((a, b) => a.ts - b.ts || b.dur - a.dur);
+  // Elements whose style was recalculated, a move (UpdateLayoutTree's elementCount): a broad restyle shows here.
+  const styled = xs.filter((e) => e.name === "UpdateLayoutTree").reduce((t, e) => t + (e.args?.elementCount ?? e.args?.data?.elementCount ?? 0), 0);
+  const top = [...traceSelf(xs)].sort((a, b) => b[1] - a[1]).slice(0, k);
+  return top.map(([name, us]) => `${name} ${Math.round(us / n / 10) / 100}`).join(", ") + `; restyled elements ${Math.round(styled / n)}; invalidations a move: ${traceWhy(ev, n)}`;
+}
+
+/** Self time by event name: each event's duration less its children's ([xs]: nested X events, by start). */
+function traceSelf(xs) {
   const by = new Map(), stack = [];
   for (const e of xs) {
     while (stack.length && stack.at(-1).ts + stack.at(-1).dur <= e.ts) stack.pop();
@@ -7546,20 +7584,21 @@ function traceTop(buf, n, k = 14) {
     by.set(e.name, (by.get(e.name) ?? 0) + e.dur);
     stack.push(e);
   }
-  // Elements whose style was recalculated, a move (UpdateLayoutTree's elementCount): a broad restyle shows here.
-  const styled = xs.filter((e) => e.name === "UpdateLayoutTree").reduce((t, e) => t + (e.args?.elementCount ?? e.args?.data?.elementCount ?? 0), 0);
-  // Why: each style invalidation by node and reason (the trace's invalidation tracking), the top few, per move.
+  return by;
+}
+
+/** Why styles were recalculated: each invalidation (the trace's invalidation tracking) by node and cause, the top few a move. */
+function traceWhy(ev, n) {
   const why = new Map();
-  for (const e of ev) {
-    if (!/InvalidationTracking/.test(e.name)) continue;
-    const d = e.args?.data ?? {};
-    const what = d.changedClass ?? d.changedAttribute ?? d.changedPseudo ?? d.changedId ?? d.reason ?? d.invalidationList?.map((x) => JSON.stringify(x.classes ?? x.attributes ?? x.id ?? x)).join("/") ?? "";
-    const key = `${e.name.replace("InvalidationTracking", "")} ${d.nodeName ?? "?"} ${what}`;
+  for (const e of ev.filter((x) => /InvalidationTracking/.test(x.name))) {
+    const key = `${e.name.replace("InvalidationTracking", "")} ${e.args?.data?.nodeName ?? "?"} ${invalidationCause(e.args?.data ?? {})}`;
     why.set(key, (why.get(key) ?? 0) + 1);
   }
-  const whyTop = [...why].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([key, c]) => `${key} x${Math.round((c / n) * 10) / 10}`).join(", ");
-  return [...by].sort((a, b) => b[1] - a[1]).slice(0, k).map(([name, us]) => `${name} ${Math.round(us / n / 10) / 100}`).join(", ") + `; restyled elements ${Math.round(styled / n)}; invalidations a move: ${whyTop}`;
+  return [...why].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([key, c]) => `${key} x${Math.round((c / n) * 10) / 10}`).join(", ");
 }
+
+const invalidationCause = (d) =>
+  d.changedClass ?? d.changedAttribute ?? d.changedPseudo ?? d.changedId ?? d.reason ?? d.invalidationList?.map((x) => JSON.stringify(x.classes ?? x.attributes ?? x.id ?? x)).join("/") ?? "";
 
 /**
  * In the page: RS1 (the user, 10-30: "I try to resize windows, it's just lagging after, eventually it's catching up") -
@@ -13256,21 +13295,13 @@ try {
           const cdp = await r.page.target().createCDPSession();
           await cdp.send("Performance.enable");
           const m = async () => Object.fromEntries((await cdp.send("Performance.getMetrics")).metrics.map((x) => [x.name, x.value]));
-          await r.page.evaluate(`window.wwResizeCostIn = ${wwResizeCostIn}`);
-          const N = 60;
+          await r.page.evaluate(`window.wwResizeCostIn = ${wwResizeCostIn}; window.__rs5 = { glass: ${rs5Glass}, moves: ${rs5Moves}, glassMs: ${rs5GlassMs}, summary: ${rs5Summary} }`);
           // Twice: the glass off (the gate's page as it boots), then its stand-in on (the phone: nativeglass.ts measures
           // each frame of the drag). GATE_PROFILE=1: once more with the glass, traced (the main thread's events, self ms a
           // move, and the elements restyled): where a move's ms go.
-          let out, reads = 0;
+          let reads = 0;
           for (const [glass, how] of [[false, ""], [true, ""], ...(process.env.GATE_PROFILE ? [[true, "trace"]] : [])]) {
-            const a = await m();
-            if (how === "trace") await r.page.tracing.start({ categories: ["devtools.timeline", "disabled-by-default-devtools.timeline", "disabled-by-default-devtools.timeline.invalidationTracking", "blink", "cc", "viz"] });
-            out = await r.page.evaluate((n, g) => window.wwResizeCostIn(n, g), N, glass);
-            const tr = how === "trace" ? await r.page.tracing.stop() : null;
-            const b = await m();
-            const per = (k) => Math.round(((b[k] - a[k]) * 1000 * 100) / N) / 100;
-            console.log(`ww-resize-cost${glass ? ` (glass, ${how})` : ""}: ${JSON.stringify(out)} per frame script ${per("ScriptDuration")} style ${per("RecalcStyleDuration")} layout ${per("LayoutDuration")} task ${per("TaskDuration")} ms`);
-            if (tr) console.log(`ww-resize-cost trace self ms/move: ${traceTop(tr, N)}`);
+            const out = await rs5Pass(r, m, glass, how);
             if (out.error) return [`RS5: ${out.error}`];
             // The glass's own reads come after the frame's layout (nativeglass.ts: a ResizeObserver callback), never
             // forced: the read budget is the glass-off pass's.
