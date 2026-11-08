@@ -18,6 +18,7 @@ import { signal } from "@preact/signals";
 import { fromNative, native, nextFrameId, send } from "../apps/native.ts";
 import { powos } from "../bridge.ts";
 import { themeBlur } from "./glassblur.ts";
+import { viewport } from "./viewport.ts";
 
 const root = document.documentElement;
 const mode = new URLSearchParams(location.search).get("mode") ?? "home";
@@ -335,15 +336,10 @@ function measureSurfaces(followers: Element[] = []): Raw[] {
  * CSS px; the first k are under web windows (GlassBlur: blurred on the layer below the windows). A host from before
  * reads n regions and ignores the rest.
  */
-/**
- * The viewport, read on resize only: innerWidth/innerHeight/devicePixelRatio bring the page's style and layout up to
- * date when read - in a drag frame, right after gesture.ts set its animations' time, that was a forced style recalc
- * every frame (format's 28 ms a second of a drawer drag on the phone, 2026-10-22).
- */
-let view = { w: innerWidth, h: innerHeight, dpr: devicePixelRatio };
-addEventListener("resize", () => (view = { w: innerWidth, h: innerHeight, dpr: devicePixelRatio }));
 
+/** The viewport (viewport.ts: read on resize only, never in a drag frame). */
 function format(raws: Raw[]): string {
+  const view = viewport();
   const under: string[] = [];
   const over: string[] = [];
   for (const g of raws) {
@@ -643,6 +639,7 @@ let restTimer = 0;
 const windowOnScreen = () =>
   [...document.querySelectorAll(".webwindow[data-wwid]")].some((w) => {
     const b = w.getBoundingClientRect();
+    const view = viewport();
     return b.width > 0 && b.height > 0 && b.right > 0 && b.left < view.w && b.bottom > 0 && b.top < view.h;
   });
 /** The loop stopped: still in REST_MS unless something kicks it first. */
