@@ -30,8 +30,11 @@ note "found home on page index $PAGE0 (-1 = PowOS AI's page), ${W}x${H}; the jou
 
 # The drawer by a swipe up from empty space in home's right half (the left half's pull is PowOS AI's panel when the
 # pull-up corners are on: from the centre, 02-drawer got the AI panel, round 1); 0 when it opened.
+# The spot may sit low on the page, down to 88% (just above home's search bar): round 250 found the user's own floating
+# windows (Konsole, Steam, kwin's "Remote Control" prompts) over the whole 20-75% band and only the strip under them
+# empty - the user swipes up from there too.
 open_drawer() {
-  local p; p=$(freept "" 0 0 .54); [ "$p" != none ] && [ -n "$p" ] || { fail "no empty spot on home to swipe up from"; return 1; }
+  local p; p=$(freept "" 0 0 .54 .2 .88); [ "$p" != none ] && [ -n "$p" ] || { fail "no empty spot on home to swipe up from (windows on screen: $(winrects))"; return 1; }
   set -- $p; swipe "$1" "$2" "$1" $(($2 - H * 30 / 100)) 250 "up from empty space (the drawer)" || return 1
   sleep 1.2; chk drawer; [ "$(isopen)" = true ]
 }
