@@ -720,7 +720,7 @@ class Runtime(
             }
             val desktop = {
                 andro.marchy.LaunchWindows.done(app.id)
-                showDesktop()
+                showDesktopFor(app.id)
             }
             val code = runCatching { Guest.openAsTask(Guest.TaskApp(app.id, app.wmClass, app.exec), desktop, log) }.getOrElse { e -> outcome.error(e); -1 }
             Log.i(TAG, "exited $code: ${app.exec}")
@@ -780,6 +780,22 @@ class Runtime(
     /** Brings the PowOS desktop to the front, also folded (on the cover screen), to show an app just opened there. */
     fun showDesktop() = andro.marchy.MainActivity.show(context)
 
+    /**
+     * A launch of [what] that powos-open-task didn't show as its own task ("desktop": no window tasks, KWin off the
+     * session bus, no window in time): the Plasma desktop comes up to show it - only where KWin's desktop is where
+     * its window goes ([desktopShowsLaunch]). With web windows on, KWin exports every new window itself (its "open",
+     * over the window-tasks socket, not D-Bus) and home's page makes it a web window; the desktop brought up over
+     * home instead took the window ("stays on the desktop": the user 11-08, "it just opens the version on the Plasma
+     * desktop instead of as an app natively" - Steam, Dolphin, Kate, Besiege, since the session bus lost KWin).
+     */
+    private fun showDesktopFor(what: String) {
+        if (desktopShowsLaunch(andro.marchy.WebWindowSource.wanted(), andro.marchy.WindowTasks.desktopModeActive())) {
+            showDesktop()
+        } else {
+            Log.i(TAG, "launch $what: not on the Plasma desktop - web windows take its window when KWin opens it")
+        }
+    }
+
     /** Opens the Files app, at [path] (a guest path) if given. */
     fun openFiles(path: String? = null) {
         context.startActivity(
@@ -805,14 +821,15 @@ class Runtime(
         // task - powos-open-task resumes a running (maybe frozen) game at once and shows its window, a cold start's
         // window when it comes; the desktop only where it can't be a task.
         val game = if (rooted) STEAM_GAME.find(command)?.groupValues?.get(1) else null
-        // Rooted mode: it opens on the PowOS desktop (RootedGuest), which comes to the front to show it.
-        if (rooted && game == null) showDesktop()
+        // Rooted mode: it opens on the PowOS desktop (RootedGuest), which comes to the front to show it - unless web
+        // windows take its window ([showDesktopFor]: a terminal's foot window is home's web window, not Plasma's).
+        if (rooted && game == null) showDesktopFor(command.take(24))
         thread(name = "guest-launch", isDaemon = true) {
             val log: (String) -> Unit = { Log.i(TAG, "[${command.take(24)}] $it") }
             val code =
                 runCatching {
                     when {
-                        game != null -> Guest.openAsTask(Guest.TaskApp("steam_app_$game", null, command), ::showDesktop, log)
+                        game != null -> Guest.openAsTask(Guest.TaskApp("steam_app_$game", null, command), { showDesktopFor("steam_app_$game") }, log)
                         rooted -> Guest.launch(command, command, log) // runs on: never the app's pipe
                         else -> proot.run("exec $command", log)
                     }
@@ -865,6 +882,16 @@ class Runtime(
             webWindows: Boolean,
             desktopCoversHome: Boolean,
         ) = webWindows && desktopCoversHome
+
+        /**
+         * A launch that isn't its own task shows the Plasma desktop only where its window goes there: no web windows
+         * (folded, off) or desktop mode (KWin's desktop holds every window). Web windows on: never - the window is
+         * home's web window (docs/WEB_WINDOWS.md: every window lives in the PowOS web UI, Plasma is an app).
+         */
+        internal fun desktopShowsLaunch(
+            webWindows: Boolean,
+            desktopMode: Boolean,
+        ) = !webWindows || desktopMode
 
         /** powos-open-task's status for a command that ended with no window (session/powos-open-task). */
         private const val OPEN_FAILED = "powos-open-task: failed"

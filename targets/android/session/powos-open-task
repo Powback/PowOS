@@ -54,7 +54,8 @@ an update), and a Steam client cold-started here passes its output on to every g
 2026-11-03 19:22-19:24: four launches after the 19:07 APK update each ended ~10 s in, with no window.
 Prints one status line for the caller, then exits (COMMAND keeps running):
     powos-open-task: task       shown as its own task
-    powos-open-task: desktop    not as a task - no window tasks (the PowOS app isn't connected to KWin, KWin not up),
+    powos-open-task: desktop    not as a task - no window tasks (the PowOS app isn't connected to KWin, KWin not up or
+                                off the session bus: COMMAND started at once),
                                 a window KWin doesn't export, or no window in time: the caller shows the desktop
     powos-open-task: failed: exited N   COMMAND ended (it and every process it started) with no window: nothing will
                                 show. Said within GONE_GRACE_S of its end, not after WAIT_S, so the caller's placeholder
@@ -86,6 +87,8 @@ GONE_GRACE_S = 3
 # A show KWin refused for a new window: tried again this often, this far apart (its surface may come a moment later).
 SHOW_TRIES = 10
 SHOW_RETRY_MS = 500
+# KWin running this long without org.kde.KWin on our session bus: the bus restarted under it, not a KWin starting up.
+KWIN_BUS_S = 30
 STEAM_DIALOG = "Steam Dialog"  # the caption of Steam's modal dialogs (its web UI's popups)
 STEAM_GAME = re.compile(r"steam://rungameid/(\d+)|^steam_app_(\d+)$")
 # A dialog shown this long before it closed was a question the user answered: its time isn't the launch's.
@@ -243,6 +246,32 @@ def status(what):
     if what not in _said:
         _said.add(what)
         print(f"powos-open-task: {what}", flush=True)
+
+
+def kwin_running_since(age_s):
+    """The pid of a kwin_wayland of ours that has run at least age_s seconds, else None."""
+    try:
+        with open("/proc/uptime") as f:
+            uptime = float(f.read().split()[0])
+        hz = os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError):
+        return None
+    for d in os.listdir("/proc"):
+        if not d.isdigit():
+            continue
+        try:
+            with open(f"/proc/{d}/comm") as f:
+                if f.read().strip() != "kwin_wayland":
+                    continue
+            if os.stat(f"/proc/{d}").st_uid != os.getuid():
+                continue
+            with open(f"/proc/{d}/stat") as f:
+                start = int(f.read().rsplit(")", 1)[1].split()[19]) / hz
+        except (OSError, ValueError, IndexError):
+            continue
+        if uptime - start >= age_s:
+            return int(d)
+    return None
 
 
 def ancestors(pid):
@@ -456,6 +485,16 @@ def main():
             return True
         os.remove(path)
         return False
+
+    def kwin_off_bus():
+        """KWin's pid when it has run KWIN_BUS_S and still owns no org.kde.KWin on our bus (a restarted bus), else None."""
+        msg = QDBusMessage.createMethodCall("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+                                            "NameHasOwner")
+        msg.setArguments(["org.kde.KWin"])
+        reply = bus.call(msg, QDBus.CallMode.Block, 2000)
+        if reply.type() != QDBusMessage.MessageType.ReplyMessage or not reply.arguments() or reply.arguments()[0]:
+            return None
+        return kwin_running_since(KWIN_BUS_S)
 
     def finish(what):
         if state["done"]:
@@ -677,6 +716,16 @@ def main():
             QTimer.singleShot(5000, no_list)
             return
         if time.monotonic() > deadline:
+            start_command()
+            finish("desktop")
+            return
+        lost = kwin_off_bus()
+        if lost:
+            # KWin runs but isn't on this session bus (the bus restarted under it: 11-08 16:10 a new dbus-daemon took
+            # $XDG_RUNTIME_DIR/bus, KWin kept the dead one). It never will be: no 30 s wait for it, COMMAND starts now
+            # - KWin still exports the window itself (window-tasks socket), so the PowOS app makes it a web window.
+            print(f"powos-open-task: KWin (pid {lost}) is not on the session bus - started without it", file=sys.stderr,
+                  flush=True)
             start_command()
             finish("desktop")
             return

@@ -269,6 +269,16 @@ frame of drag latency; measure it before turning it on for drags (animations fir
 - `sources/powos-shell/src/desktops.cpp` maps KWin's VirtualDesktopManager over D-Bus (`:11-37`). That is the
   powos-shell (KWin desktop) host and is **not on this path**.
 
+**A launch never routes into Plasma (2026-11-08).** With web windows on, a Linux launch that powos-open-task didn't
+show as a task (status `desktop`) does not bring the Plasma desktop up (`Runtime.showDesktopFor` /
+`desktopShowsLaunch`: only with web windows off or in desktop mode): KWin exports every new window over the
+window-tasks socket itself and home's page makes it a web window. Before, the desktop came up over home and KWin kept
+the new window on it ("stays on the desktop") - the user: "it just opens the version on the Plasma desktop instead of
+as an app natively". Trigger on the phone: the session D-Bus was restarted under a running KWin (16:10, a manual
+`setsid dbus-daemon`), so `org.kde.KWin` was gone from the bus and every launch said `desktop`; powos-open-task now
+detects that (KWin running > 30 s, no `org.kde.KWin` owner) and starts the command at once instead of waiting 30 s.
+Real fix of the trigger: the session restarts KWin with its bus (or never restarts the bus alone).
+
 **Key reuse:** the Linux producer already writes one toplevel into Android-owned buffers with no CPU copy. Web
 windows only change *whose* Surface that is: a child of home's surface instead of an activity's own.
 
