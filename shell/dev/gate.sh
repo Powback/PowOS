@@ -34,7 +34,7 @@
 #      or missing glyphs fail it).
 # Exit 0: pass. 1: failed (the reasons on stdout). 2: couldn't run (no docker...). Time: ~5-10 s, the image cached.
 # GATE_REMOTE=<ssh host>: the browser runs (scenes, widget sweep) on that box over ssh, not on the Mac (dev/gate-remote.sh;
-# unreachable: local). GATE_ONLY=<regex>: only the browser runs so named (a case worked on alone); GATE_THROTTLE=N: every page's CPU slowed
+# unreachable: local). GATE_ONLY=<regex>: only the browser runs so named (a case worked on alone); GATE_PROFILE=1: a scene that can (ww-resize-cost) also prints a trace's top costs; GATE_SCENE_MS: the per-scene cap. GATE_THROTTLE=N: every page's CPU slowed
 # N times (a loaded Mac on demand: a case's waits must hold at 6). GATE_IMAGE overrides the Chromium image. Docker's
 # build cache and images are never pruned here.
 set -euo pipefail
@@ -333,7 +333,7 @@ browser_run() {
   # slots (GATE_SLOTS) that already cap how many gates run. GATE_BUILD_SLOT=1 brings it back.
   local envs=(-e READY_MS="$1" ${GATE_SCENES:+-e GATE_SCENES="$GATE_SCENES"} \
     ${GATE_SHELL_PAGES:+-e SHELL_PAGES="$GATE_SHELL_PAGES"} ${IDLE_MS:+-e IDLE_MS="$IDLE_MS"} ${IDLE_WAIT_MS:+-e IDLE_WAIT_MS="$IDLE_WAIT_MS"} ${GATE_SHARED_TX:+-e GATE_SHARED_TX="$GATE_SHARED_TX"} \
-    ${2:+-e GATE_ONLY="$2"} ${3:+-e GATE_BOOTS="$3"} ${GATE_THROTTLE:+-e GATE_THROTTLE="$GATE_THROTTLE"})
+    ${2:+-e GATE_ONLY="$2"} ${3:+-e GATE_BOOTS="$3"} ${GATE_THROTTLE:+-e GATE_THROTTLE="$GATE_THROTTLE"} ${GATE_PROFILE:+-e GATE_PROFILE="$GATE_PROFILE"} ${GATE_SCENE_MS:+-e GATE_SCENE_MS="$GATE_SCENE_MS"})
   # GATE_REMOTE (dev/gate-remote.sh): the same run on the remote, over the tree pushed there; its own load and cores
   # size the scene concurrency (the Mac's GATE_HOST_LOAD/CPUS don't apply there).
   if [ -n "$GR_HOST" ]; then

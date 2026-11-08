@@ -176,6 +176,14 @@ frame of drag latency; measure it before turning it on for drags (animations fir
   size, and a window consumer never read past a clipboard event's text, so the stream lost its framing). Fixed in
   `display_consumer.c` (non-blocking, whole messages by the header's size) and `native_consumer.c` (window consumers
   read past the clipboard text); native test `engine/src/test/native` case 6.
+  Page side, 11-08 (RS5, gate `ww-resize-cost`, four windows, the top one's corner dragged; `GATE_PROFILE=1` prints the
+  trace's self ms and style invalidations a move): renders read no layout per window (79 -> 11 reads a move); the
+  windows under the dragged one no longer re-render for their masks (WebWindowsOn's `cutAll` writes them after the
+  render); `[style*=...]` selectors are gone from shell.css (one made every inline style write - the frame and shadow
+  each move - restyle every `.tile` under it: the window bars, home's widgets; restyle 4.6 -> 1.8 ms a move at 4x
+  CPU); the glass reads each window's rect once a measure, not per surface (its measure 1.7 -> 0.5 ms); the tick reads
+  shared ancestors once for all windows. Host side: the app's relayouts were already paced (RS1: >= 3 frames, 40 ms;
+  the final one on release) - the frame follows per move, the app's size at most 25 times a second.
 - [ ] **N5 - games**: windowed games are Linux windows (N1-N4 apply); full screen stays the direct-scanout task. Check:
   a windowed Proton game's menu (untyped override-redirect) shows (0062), fps x/120 unchanged by N1.
 
