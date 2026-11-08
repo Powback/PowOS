@@ -11,8 +11,17 @@
     stale = a frame that goes BACK to one of the 2-4 frames before it (the "jittering back and forth" bug).
 Prints one line per mode; the last line is the summary for the board. PASS (exit 0) only when every mode has the
 GAME's presents (>= MIN_PRESENTS on a layer that can carry its buffers); else the summary starts "FAIL" and exit 1.
-The 2026-11-05 02:45 base run PASSed on "no presents" - it had measured leftover leash layers, not the game."""
-import os, re, subprocess, sys
+The 2026-11-05 02:45 base run PASSed on "no presents" - it had measured leftover leash layers, not the game.
+A mode with presents still FAILs when they aren't the game on the screen (truth(), the 11-08 02:02 play run PASSed
+"2.3 fps ... front HomeShell" while the game made 37/s - its web window's frames never reached the screen):
+  - the window never settled to full size (window.txt "settled WxH on WxH": under 60 % of the screen; BF_WINDOWED=1
+    for a game meant to run windowed),
+  - the game isn't in front (window.txt "front X": PowosWindowActivity, or home with a web window's layer measured),
+  - the screen shows under a quarter of what the game presents (Xwayland's Present flips + copies, bf-layers.py), capped
+    at the panel rate,
+  - BF_APP set: the fps is under half the median of this game + mode's last PASSes (BF_HISTORY, default
+    ~/.cache/powos-verify/bf-history.tsv; a PASS appends to it)."""
+import importlib.util, os, re, statistics, subprocess, sys, time
 
 # The game's surface: KWin's window task draws into the task's BLAST SurfaceView. These never carry its buffers:
 # containers, leftover start-animation leashes of earlier tasks, the SurfaceView's bounds/background layers.
@@ -132,18 +141,82 @@ def line_for(d, m, rec=True):
     return line, bool(p)
 
 
+def game_rate(md):
+    """The game's own presents/s (Xwayland's Present flips + copies, bf-layers.py), None without kgsl.txt lines."""
+    spec = importlib.util.spec_from_file_location("bf_layers", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                                          "bf-layers.py"))
+    lay = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lay)
+    return lay.xwayland(md)[0]
+
+
+HISTORY = os.environ.get("BF_HISTORY") or os.path.expanduser("~/.cache/powos-verify/bf-history.tsv")
+
+
+def history(app, mode, n=5):
+    """fps of this app + mode's last n PASSes (BF_HISTORY rows: epoch, app, mode, fps)."""
+    try:
+        rows = [l.rstrip("\n").split("\t") for l in open(HISTORY)]
+    except OSError:
+        return []
+    return [float(r[3]) for r in rows if len(r) >= 4 and r[1] == app and r[2] == mode][-n:]
+
+
+def truth(md, mode, p):
+    """Why mode's presents are NOT the game on the screen ([] = they are)."""
+    why = []
+    wf = os.path.join(md, "window.txt")
+    win = open(wf).read() if os.path.exists(wf) else ""
+    m = re.search(r"settled (\d+)x(\d+) on (\d+)x(\d+)", win)
+    if m and os.environ.get("BF_WINDOWED") != "1":
+        w, h, sw, sh = map(int, m.groups())
+        if sw * sh and w * h < 0.6 * sw * sh:
+            why.append("its window never settled to full size (%dx%d on %dx%d)" % (w, h, sw, sh))
+    f = re.search(r"^front (\S+)", win, re.M)
+    if f and not (f.group(1) == "PowosWindowActivity" or (f.group(1) == "HomeShell" and "powos-ww-" in p["layer"])):
+        why.append("the game isn't in front (front %s, measured %s)" % (f.group(1), p["layer"]))
+    g = game_rate(md)
+    cap = min(g, 1000.0 / p["vsync"]) if g and p["vsync"] else g
+    if cap and cap >= 10 and p["fps"] < 0.25 * cap:
+        why.append("the screen showed %.1f fps of the game's %.1f - its frames don't reach the screen" % (p["fps"], g))
+    app = os.environ.get("BF_APP", "")
+    prev = history(app, mode) if app else []
+    if len(prev) >= 3 and p["fps"] < 0.5 * statistics.median(prev):
+        why.append("%.1f fps is under half this game's previous runs (median %.1f of %d)" % (
+            p["fps"], statistics.median(prev), len(prev)))
+    return why
+
+
 def main():
-    d, modes, out, bad = sys.argv[1], sys.argv[2:], [], []
+    d, modes, out, bad, wrong, good = sys.argv[1], sys.argv[2:], [], [], [], []
     for m in modes:
         line, ok = line_for(d, m)
         print(line)
         out.append(line)
         if not ok:
             bad.append(m)
+            continue
+        p = presents(os.path.join(d, m))
+        why = truth(os.path.join(d, m), m, p)
+        if why:
+            wrong.append("%s: %s" % (m, "; ".join(why)))
+        else:
+            good.append((m, p["fps"]))
     summary = " | ".join(out)
     if bad:
         print("FAIL no game presents in %s: %s" % (" ".join(bad), summary))
         sys.exit(1)
+    if wrong:
+        print("FAIL not the game on the screen - %s: %s" % (" / ".join(wrong), summary))
+        sys.exit(1)
+    app = os.environ.get("BF_APP", "")
+    if app:
+        try:
+            os.makedirs(os.path.dirname(HISTORY), exist_ok=True)
+            with open(HISTORY, "a") as f:
+                f.writelines("%d\t%s\t%s\t%.1f\n" % (time.time(), app, m, fps) for m, fps in good)
+        except OSError:
+            pass
     print(summary)
 
 

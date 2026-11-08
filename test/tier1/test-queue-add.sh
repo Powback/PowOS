@@ -109,8 +109,9 @@ out=$(run_queue add t1 dummy.sh echo dup 2>&1)
 sleep 1
 out=$(run_queue add t1 dummy.sh echo dup 2>&1)
 new=$(git -C "$VA" rev-parse HEAD)
-{ grep -q "replacing queued" <<<"$out" && [ "$(ls "$VQ"/*.job | wc -l | tr -d " ")" = 1 ] && grep -qx "need=$new" "$VQ"/*.job; } \
-  && ok "f258: older-need job replaced by newer add" || bad "f258: older-need job replaced by newer add" "$out"
+{ grep -q "dropped queued .*: replaced by a re-add" <<<"$out" && [ "$(ls "$VQ"/*.job | wc -l | tr -d " ")" = 1 ] && grep -qx "need=$new" "$VQ"/*.job \
+  && grep -q '^dropped=replaced' "$VQ/cancelled/$(basename "$j1")" && grep -q "$(basename "$j1" .job): dropped without a verdict - replaced" "$VQ/runner.log"; } \
+  && ok "f258: older-need job replaced by newer add (cancelled/ with its reason, a runner.log line)" || bad "f258: older-need job replaced by newer add" "$out"
 (cd "$VA" && git reset -q --hard HEAD~1)
 out=$(run_queue add t1 dummy.sh echo dup 2>&1)
 grep -q "already queued" <<<"$out" && ok "f258: newer-need job kept against an older add" || bad "f258: newer-need job kept against an older add" "$out"
@@ -123,13 +124,13 @@ run_queue add t1 dummy.sh --round 7 --part 2 >/dev/null; sleep 1
 run_queue add t2 dummy.sh --round 7 --part 1 >/dev/null; sleep 1
 out=$(run_queue add t1 dummy.sh --round 8 --part 1 2>&1)
 n=$(ls "$VQ"/*.job | wc -l | tr -d ' ')
-{ grep -q "superseded queued" <<<"$out" && [ "$n" = 3 ] && ! grep -l 'round 7 --part 1' "$VQ"/*.job | xargs grep -q 'task=t1' \
-  && grep -q 'round 8 --part 1' "$VQ"/*.job && ls "$VQ"/done/*.superseded >/dev/null 2>&1; } \
+{ grep -q "dropped queued .*: superseded" <<<"$out" && [ "$n" = 3 ] && ! grep -l 'round 7 --part 1' "$VQ"/*.job | xargs grep -q 'task=t1' \
+  && grep -q 'round 8 --part 1' "$VQ"/*.job && grep -q '^dropped=superseded' "$VQ"/cancelled/*.job && grep -q 'dropped without a verdict - superseded' "$VQ/runner.log"; } \
   && ok "f317: an e2e part of a newer round replaces the same part of an older one (other parts/tasks kept)" \
   || bad "f317: an e2e part of a newer round replaces the same part of an older one" "n=$n $out"
 run_queue add t1 kwin-install.sh 3.35 >/dev/null; sleep 1
 out=$(run_queue add t1 kwin-install.sh 3.36 2>&1)
-{ grep -q "superseded queued" <<<"$out" && ! grep -q 'kwin-install.sh 3.35' "$VQ"/*.job && grep -q 'kwin-install.sh 3.36' "$VQ"/*.job; } \
+{ grep -q "dropped queued .*: superseded" <<<"$out" && ! grep -q 'kwin-install.sh 3.35' "$VQ"/*.job && grep -q 'kwin-install.sh 3.36' "$VQ"/*.job; } \
   && ok "f317: a newer kwin-install version replaces the queued older one" || bad "f317: a newer kwin-install version replaces the queued older one" "$out"
 
 # ============================================= f368: e2e-queue fails loudly on a refused add =

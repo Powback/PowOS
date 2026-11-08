@@ -1,0 +1,11 @@
+Xwayland KGSL: last 44s: 3 Present copies from client buffers: 0 waited for the client's GPU fence (avg 0.0 ms, max 0.0 ms), 0 already drawn, 3 with the fence already signalled or none (stub), 0 export failures
+Xwayland KGSL: last 45s: 1080 Present flips, 4 copies size=1 redirected=3
+Xwayland KGSL: last 44s: client dma-buf imports 8 / reuses 4 / frees 11 (64 live, 8 uncached: table full)
+Xwayland KGSL: last 30s: 3 commits (2 forced past a stale frame callback, 0 held back at 4 buffers), 2 buffers released, up to 2 held by the compositor; 3 fenced, 0 finished on the CPU
+Xwayland KGSL: last 30s: 5 surface commits (3 with damage): post-damage=3/3 surface-id=2/0; frame callbacks 1, frame timeouts 2; async flips paced 0, skipped 0
+Xwayland KGSL: last 30s: 1135 Present flips, 2 copies redirected=2
+Xwayland KGSL: last 30s: 3 commits (1 forced past a stale frame callback, 0 held back at 4 buffers), 4 buffers released, up to 2 held by the compositor; 3 fenced, 0 finished on the CPU
+Xwayland KGSL: last 30s: 1273 surface commits (1273 with damage): flip=1269/1269 post-damage=3/3 cursor=1/1; frame callbacks 1270, frame timeouts 1; async flips paced 1271, skipped 0
+Xwayland KGSL: last 56s: 3 Present copies from client buffers: 0 waited for the client's GPU fence (avg 0.0 ms, max 0.0 ms), 0 already drawn, 3 with the fence already signalled or none (stub), 0 export failures
+Xwayland KGSL: last 56s: client dma-buf imports 9 / reuses 3 / frees 5 (64 live, 9 uncached: table full)
+Xwayland KGSL: last 30s: 1013 surface commits (1012 with damage): flip=1009/1009 post-damage=2/2 surface-id=1/0 cursor=1/1; frame callbacks 1010, frame timeouts 1; async flips paced 1010, skipped 0
