@@ -189,6 +189,10 @@ for mode in "$@"; do
     "$A" pull /data/powos/root/var/tmp/powos-bfplay "$M/" >/dev/null 2>&1; "$A" shell "su -c 'rm -rf /data/powos/root/var/tmp/powos-bfplay'"
     nap 10; onscreen || invalid "after entering play"
   fi
+  # The session log's line at the measurement's start: Xwayland's 30 s KGSL lines and KWin's 5 s frame lines come only
+  # while something happens, so a stalled game leaves none in the window - the lines before it (11-08 02:02: "game 37 >
+  # xwayland 38" from before the stall while KWin got 0 commits; the stall read as the web window's consumer's).
+  l1=$("$A" shell "su -c 'wc -l < $LOG'" | tr -d '\r ')
   "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof; nohup sh /data/local/tmp/powos-bf-present.sh 30 \"PowosWindowActivity|SurfaceView|powos-direct|powos-ww-[0-9]+-linux|steam_app${WIN_NAME:+|$WIN_NAME}\" /data/local/tmp/bfp >/dev/null 2>&1 &
     nohup sh /data/local/tmp/powos-bf-prof.sh 30 /data/local/tmp/bfprof >/dev/null 2>&1 &'"
   pill "$lbl: measuring frames (30 s)"; nap 30
@@ -197,7 +201,8 @@ for mode in "$@"; do
   # bf-present (its screen recording) and bf-prof finished, at most 30 s more; then the session log's Xwayland KGSL and
   # KWin window-task lines of this mode, and prof.txt - one call.
   "$A" shell "su -c 'mkdir -p /data/local/tmp/bfp; for i in \$(seq 30); do [ -f /data/local/tmp/bfprof/done ] && ! pgrep -f powos-bf-present.sh >/dev/null && break; sleep 1; done
-    tail -n +$((l0 + 1)) $LOG | grep -E \"Xwayland KGSL|window task\" > /data/local/tmp/bfp/log.txt; cp /data/local/tmp/bfprof/prof.txt /data/local/tmp/bfp/ 2>/dev/null
+    { head -n $l1 $LOG | tail -n +$((l0 + 1)) | grep -E \"Xwayland KGSL|window task\"; echo \"Xwayland KGSL: == measuring\"; echo \"window task == measuring\"
+      tail -n +$((l1 + 1)) $LOG | grep -E \"Xwayland KGSL|window task\"; } > /data/local/tmp/bfp/log.txt; cp /data/local/tmp/bfprof/prof.txt /data/local/tmp/bfp/ 2>/dev/null
     logcat -d -t 400 -s Andromarchy:I | grep \" pacing: \" | tail -8 > /data/local/tmp/bfp/consumer.txt; chmod -R 755 /data/local/tmp/bfp'" >/dev/null
   "$A" pull /data/local/tmp/bfp "$M/" >/dev/null && mv "$M"/bfp/* "$M"/ && rmdir "$M/bfp"
   grep "Xwayland KGSL" "$M/log.txt" > "$M/kgsl.txt"; grep "window task" "$M/log.txt" > "$M/kwin.txt"; rm -f "$M/log.txt"
