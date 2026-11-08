@@ -913,7 +913,12 @@ again: a launch, a tap on the app) of a window that has a task, while web window
 window and finishes its task without telling KWin (`WindowTasks.moveTaskToWeb`, then `replaced()`); full-screen ones
 (games) and a game's launch window keep theirs. Before (11-07 16:25), Steam's main window, handed back as a task by an
 app restart, was raised as that task behind the unfolded home on every tap: "live", then "in the background" at once,
-no web window in 161 s. Launch windows (LaunchWindows' splash tasks) are not opened
+no web window in 161 s. A launch never waits for that show again: the raise of a task (`ShellBridge.launchLinux` ->
+`restoreLinux`, home's tap and `apps.launch`) sends KWin nothing, so 11-08 00:58-01:39 Kate's task 2828 and Steam's
+2815/2816 (from the 22:50 APK restart) stayed tasks floating over home - ww-glue/ww-resize/window-bench timed out,
+ww-popups found no Steam main window, and Kate's task took the e2e's close-button taps. `launchLinux` now moves the
+app's tasks into web windows first (`moveLinuxToWeb` -> `WindowTasks.moveToWeb(taskId)`, the same rule, offer before
+`replaced()`); home's placeholder for the launch takes the window's `webwindows.adopt`. Launch windows (LaunchWindows' splash tasks) are not opened
 while web windows want Linux windows (`Runtime.openRooted`); a launcher tap on a Linux app that has a web window
 brings it to the page (`ui/webwindows.tsx linuxWindow`), as an Android app's does.
 

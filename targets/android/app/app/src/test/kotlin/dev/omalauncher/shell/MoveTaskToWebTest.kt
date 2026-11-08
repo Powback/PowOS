@@ -56,4 +56,27 @@ class MoveTaskToWebTest {
         assertTrue(branch.indexOf("WebWindowSource.offer") < branch.indexOf("had.replaced()"))
         assertTrue(branch.contains("tasks.remove(id, had)"))
     }
+
+    /**
+     * A launch (home's tap, apps.launch) of an app whose window is a task moves that task into a web window before any
+     * raise: the raise sends KWin nothing, so [open]'s move never ran (11-08 00:58-01:39: Kate's task 2828 and Steam's
+     * 2815/2816 floated over home; ww-glue/ww-popups timed out, close-button taps hit Kate).
+     */
+    @Test fun aLaunchMovesTheAppsTaskIntoAWebWindowBeforeARaise() {
+        val bridge = File("src/main/kotlin/dev/omalauncher/shell/ShellBridge.kt").readText()
+        val launch = bridge.substring(bridge.indexOf("private fun launchLinux("))
+        assertTrue(launch.indexOf("moveLinuxToWeb(key)") in 0 until launch.indexOf("restoreLinux(key)"))
+        assertTrue(launch.contains("if (moved) null else restoreLinux(key)"))
+        val move = bridge.substring(bridge.indexOf("private fun moveLinuxToWeb("))
+        assertTrue(move.substring(0, move.indexOf("private fun restoreLinux(")).contains("WindowTasks.moveToWeb(it.id)"))
+        val src = File("../engine/src/main/java/andro/marchy/WindowTasks.java").readText()
+        val body = src.substring(src.indexOf("public static boolean moveToWeb(int taskId)"))
+        val end = body.indexOf("return false;\n    }")
+        val m = body.substring(0, end)
+        // The same rule as KWin's show again, offered first; only a taken window's task goes, KWin told nothing.
+        assertTrue(m.contains("moveTaskToWeb(true, true, WebWindowSource.isWeb(id), false, fullScreen(a)"))
+        assertTrue(m.contains("WebWindowSource.wanted()"))
+        assertTrue(m.indexOf("WebWindowSource.offer(") in 0 until m.indexOf("a.replaced()"))
+        assertTrue(m.contains("tasks.remove(id, a)"))
+    }
 }

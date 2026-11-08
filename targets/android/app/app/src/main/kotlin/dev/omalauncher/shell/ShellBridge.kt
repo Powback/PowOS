@@ -1564,6 +1564,20 @@ class ShellBridge(
         return runtime.linuxApps.firstOrNull { it.exec != dev.omalauncher.linux.PLASMA_COMMAND && (it.name.equals(c, true) || it.name.equals(tail, true)) }
     }
 
+    /**
+     * PowOS app [key]'s windows that are tasks (left from an app restart: KWin's "new windows as tasks" before home's page
+     * was up) moved into web windows of home, when web windows take windows (WindowTasks.moveToWeb: unfolded, on, not
+     * full screen). A raise of such a task sends KWin nothing, so [WindowTasks]' own move on KWin's show again never ran
+     * for a launch: 11-08 00:58-01:39 Kate's task 2828 and Steam's 2815/2816 floated over home - ww-glue/ww-popups got no
+     * web window, and Kate over home took the e2e's and window-bench's close-button taps. True: one moved (its web
+     * window comes as "webwindows.adopt", which home's placeholder for the launch takes).
+     */
+    private fun moveLinuxToWeb(key: String): Boolean =
+        dev.omalauncher.system.WindowFrames.running.value
+            .filter { linuxApp(it.id, it.pkg, it.label)?.let { a -> "l:${a.id}" } == key }
+            .map { andro.marchy.WindowTasks.moveToWeb(it.id) }
+            .any { it }
+
     /** A PowOS app's floating window, if it has one (shown, minimised or on another page): brought back, its task. */
     private fun restoreLinux(key: String): Int? {
         val w = dev.omalauncher.system.WindowFrames.running.value.firstOrNull { linuxApp(it.id, it.pkg, it.label)?.let { a -> "l:${a.id}" } == key } ?: return null
@@ -1667,12 +1681,23 @@ class ShellBridge(
 
     /** PowOS app [key]: its floating window back, else it starts; one that can't start tells the pages why ("apps.launchfailed"). */
     private fun launchLinux(key: String) {
-        val raised = restoreLinux(key)
-        val app = if (raised == null) runtime.linuxApps.firstOrNull { "l:${it.id}" == key } else null
+        val moved = moveLinuxToWeb(key)
+        val raised = if (moved) null else restoreLinux(key)
+        val app = if (raised == null && !moved) runtime.linuxApps.firstOrNull { "l:${it.id}" == key } else null
         // Each way a tap goes, in logcat: Dolphin's 2026-10-30 21:00 tap left no trace of which one it took.
-        Log.i(TAG, "launch $key: " + if (raised != null) "its window $raised came back" else if (app != null) "starting ${app.exec}" else "no such app")
+        Log.i(
+            TAG,
+            "launch $key: " +
+                when {
+                    moved -> "its task moved into a web window"
+                    raised != null -> "its window $raised came back"
+                    app != null -> "starting ${app.exec}"
+                    else -> "no such app"
+                },
+        )
         val failed = { why: String -> broadcast("apps.launchfailed", JSONObject().put("key", key).put("reason", why).toString()) }
         when {
+            moved -> Unit
             raised != null -> emit("windows.raised", raised)
             // The page's placeholder says why at once, not "loading" for 20 s.
             app != null -> runtime.launch(app, failed)

@@ -564,6 +564,36 @@ public final class WindowTasks {
     }
 
     /**
+     * Android task [taskId] (a Linux window's task) moved into a web window of home, as [open] does on KWin's show
+     * again ([moveTaskToWeb]), for a launch that would only raise that task (ShellBridge.launchLinux: home's tap,
+     * apps.launch). That raise sends KWin nothing, so no "open" came back: a task left from an app restart (Kate's
+     * 2828, Steam's 2815/2816, 11-08 00:58-01:39) stayed a task floating over home - ww-glue/ww-popups never got their
+     * web window (timeouts, "no viewable Steam main window"), and Kate's task over home took the e2e's and
+     * window-bench's close-button taps. False: not a Linux window's task, or it stays one (web windows not wanted -
+     * folded, off -, full screen, a game's launch window claims its app).
+     */
+    public static boolean moveToWeb(int taskId) {
+        for (Map.Entry<Integer, PowosWindowActivity> e : tasks.entrySet()) {
+            PowosWindowActivity a = e.getValue();
+            if (a.getTaskId() != taskId)
+                continue;
+            int id = e.getKey();
+            String appId = a.getIntent().getStringExtra(PowosWindowActivity.EXTRA_APP_ID);
+            String title = a.getIntent().getStringExtra(PowosWindowActivity.EXTRA_TITLE);
+            appId = appId == null ? "" : appId;
+            if (!moveTaskToWeb(true, true, WebWindowSource.isWeb(id), false, fullScreen(a), LaunchWindows.claims(appId),
+                    WebWindowSource.wanted()) || !WebWindowSource.offer(id, appId, title == null ? "" : title))
+                return false;
+            tasks.remove(id, a);
+            opening.remove(id);
+            Log.i(TAG, "launch of window " + id + " (" + appId + "): its task " + taskId + " moved into a web window");
+            a.replaced();
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * [open]'s rule for a KWin "open" (show again) of a window that has a task ([hasTask]) and isn't a web window: it
      * moves into a web window when web windows take windows now ([wanted], [web]), unless it is full screen (a game:
      * its immersive task, now or as its task was made) or a game's launch window claims its app ([claimed]).
