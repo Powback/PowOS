@@ -180,7 +180,18 @@ open_task() {  # open_task <timeout s> <app id>: the drawer's / widget's launch 
   # otherwise, in its session - the check then died silently at its close, no RESULT line (04:34 bf-coldstart, 06:32
   # bf-launchpaths: every step passed, then "FAIL run: no RESULT line"); a Steam started from the drawer isn't either.
   POWOS_NO_LAUNCH_RECORD=1 setsid -w timeout "$1" powos-open-task --app-id "$2" -- steam steam://rungameid/$APP >"$T/open.out" 2>&1 </dev/null
-  grep -m1 '^powos-open-task:' "$T/open.out" || echo "no status line"; }
+  # Its status line only (task / desktop / failed: ...): its stderr says "powos-open-task: Steam asks ..." too, and
+  # 11-08 02:29 that line was read as the status - a FAIL launch for a game shown as its task.
+  grep -m1 -E '^powos-open-task: (task|desktop|failed)' "$T/open.out" || echo "no status line"; }
+# steam_ask: what Steam holds this launch of APP for, waiting on the user (bf-ask.sh's test: the newest GameAction of
+# APP in console_log is "LaunchApp waiting for user response to <what>", older than 5 s - Steam continues its own steps
+# within the second); status 1 when nothing. The user's question: a check never answers it, it SKIPs.
+steam_ask() {
+  local line t age; line=$(tail -c 4194304 "$HOME/.local/share/Steam/logs/console_log.txt" 2>/dev/null | grep -a "GameAction \[AppID $APP, ActionID " | tail -1)
+  case $line in *"LaunchApp waiting for user response to "*) ;; *) return 1 ;; esac
+  t=$(printf '%s\n' "$line" | sed -nE 's/^\[([0-9-]+ [0-9:]+)\].*/\1/p')
+  age=$(( $(date +%s) - $(date -d "$t" +%s 2>/dev/null || date +%s) )); [ "$age" -gt 5 ] || return 1
+  printf '%s\n' "$line" | sed -E 's/.*waiting for user response to //' | tr -d '\r' | cut -c1-80; }
 
 # A launch chain outside Steam's tree (left by a dead Steam) is never frozen nor resumed and holds Proton's prefix: gone.
 clean_stale() {
@@ -309,13 +320,16 @@ step_launch() {
     fi
     touched; sleep 0.5; done
   LAUNCH=$(ms "$t0" "$(now)")
+  local q
   if [ -z "$W" ] || [ "$(mapped "$W")" != IsViewable ]; then
+    q=$(steam_ask) && { echo "SKIP Steam is asking: $q (the user's question - left unanswered)"; return 1; }
     fail launch "no mapped $WIN_NAME window ${LAUNCH} ms after the launch (window '${W:-none}' $(mapped "${W:-0}")); steam $(steam_pid) frozen '$(cg)', reaper '$(reaper)' $(tree "$(reaper)" | wc -w) processes, watcher: $(watcher 3)"
     return 1
   fi
   for _ in $(seq 60); do [ -s "$T/open.status" ] && break; touched; sleep 0.5; done
   st=$(cat "$T/open.status" 2>/dev/null)
   echo "launch: window $W mapped ${LAUNCH} ms after the launch, $st"
+  [ "$st" != "powos-open-task: task" ] && q=$(steam_ask) && { echo "SKIP Steam is asking: $q (the user's question - left unanswered)"; return 1; }
   [ "$st" = "powos-open-task: task" ] || fail launch "window $W is up but not shown as its own task: '${st:-still waiting}'"
   e=$(first_change "$W" 10 10)
   echo "launch: $([ "$e" = none ] && echo 'no new frame in 10 s (a still screen?)' || echo "drawing (a new frame $(ms "$t0" "$e") ms after the launch)")"

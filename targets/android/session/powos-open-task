@@ -90,6 +90,11 @@ STEAM_DIALOG = "Steam Dialog"  # the caption of Steam's modal dialogs (its web U
 STEAM_GAME = re.compile(r"steam://rungameid/(\d+)|^steam_app_(\d+)$")
 # A dialog shown this long before it closed was a question the user answered: its time isn't the launch's.
 ASKED_S = 5
+# A nameless Steam dialog during a launch is a question only once Steam holds the launch on the user this long (held_ask):
+# Steam's own "Launching..." / cloud-sync progress popup is the same kind of window (nameless, fixed 1350x644) and
+# closes by itself, and the "waiting for user response to ShowInterstitials/CreatingProcess" lines of an ordinary
+# launch are continued within the same second. Broforce 11-08 02:29: that popup (4 s) was taken for a question.
+ASK_HELD_S = 2
 
 
 def steam_dialog(caption, resource_name, resource_class, fixed, transient):
@@ -108,11 +113,12 @@ def steam_dialog(caption, resource_name, resource_class, fixed, transient):
 GAME_ACTION = re.compile(rb"^\[([0-9-]+ [0-9:]+)\] GameAction \[AppID (\d+), ActionID (\d+)\] : (.*?)\r?$", re.M)
 
 
-def held_ask(game, log_path=None, since=None):
+def held_ask(game, log_path=None, since=None, min_age=0, now=None):
     """(ActionID, what) of a launch of [game] Steam holds waiting on the user, else None: the game's newest GameAction
     in console_log ends on "LaunchApp waiting for user response to <what>" (tools/phone/verify/bf-ask.sh's test).
     Such a launch is never dropped - every later steam://rungameid of the game joins it and nothing starts until it is
-    answered. A line from before [since] (epoch s: this Steam's start) belongs to a Steam that's gone."""
+    answered. A line from before [since] (epoch s: this Steam's start) belongs to a Steam that's gone; one younger than
+    [min_age] s (at [now], epoch s) may still be continued by Steam itself (an ordinary launch's own steps)."""
     log_path = log_path or os.path.join(STEAM, "logs/console_log.txt")
     try:
         with open(log_path, "rb") as f:
@@ -129,11 +135,14 @@ def held_ask(game, log_path=None, since=None):
     msg = last.group(4).decode(errors="replace")
     if not msg.startswith("LaunchApp waiting for user response to "):
         return None
-    if since is not None:
+    if since is not None or min_age:
         try:
-            if time.mktime(time.strptime(last.group(1).decode(), "%Y-%m-%d %H:%M:%S")) < since - 1:
-                return None
+            at = time.mktime(time.strptime(last.group(1).decode(), "%Y-%m-%d %H:%M:%S"))
         except ValueError:
+            return None
+        if since is not None and at < since - 1:
+            return None
+        if min_age and (time.time() if now is None else now) - at < min_age:
             return None
     return last.group(3).decode(), msg.removeprefix("LaunchApp waiting for user response to ").strip()
 
@@ -511,6 +520,24 @@ def main():
         state["dialog"], state["dialog_at"], state["picked"] = window, time.monotonic(), None
         pick(window)
 
+    def watch_ask():
+        """While one of Steam's nameless dialogs is up during the launch: is Steam holding the launch on the user
+        (held_ask, ASK_HELD_S)? Then the newest of them is its question - in front. Its "Launching..." progress popup
+        closes by itself before that and is never brought forward (Broforce 11-08 02:29: it was, and the caller read
+        the ask line as the launch's status)."""
+        if state["done"] or not state["dialogs"] or state["dialog"] in state["dialogs"] or state.get("watching"):
+            return
+        held = held_ask(game, since=steam_started(), min_age=ASK_HELD_S)
+        if held:
+            ask(state["dialogs"][-1], f"launch {held[0]} waits for an answer to {held[1]}")
+            return
+        state["watching"] = True
+
+        def again():
+            state["watching"] = False
+            watch_ask()
+        QTimer.singleShot(1000, again)
+
     def settled(window):
         """The shown window of a launch lasted SETTLE_S: it's the app's - done."""
         if state["picked"] != window or state["done"] or window == state["dialog"]:
@@ -529,7 +556,10 @@ def main():
                 state["pids"][window] = pid
                 state["dialogs"].append(window)
             if existing != "1" and dialog and not state["done"]:
-                ask(window, "a new dialog")
+                if caption == STEAM_DIALOG:
+                    ask(window, "a new dialog")
+                else:
+                    watch_ask()  # nameless: Steam's launch progress popup too - a question only once Steam holds
                 return
             if existing == "1":
                 if matches(desktop_file, resource_class, resource_name, pid):
