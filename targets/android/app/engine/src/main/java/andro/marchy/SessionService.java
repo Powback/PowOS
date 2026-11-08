@@ -219,12 +219,15 @@ public class SessionService extends Service {
             SessionPlan.Health h = SessionPlan.health(startedAt >= 0, new File(run, "bus").exists(),
                     wl != null && wl.length > 0, now - startedAt, lostCore);
             SessionPlan.Action a = SessionPlan.next(false, rootfsReady(SessionService.this), InstallService.installing(SessionService.this),
-                    h, attempts);
+                    SetupGate.pending(now), h, attempts);
             long delay = SessionPlan.retryDelayMs(attempts);
             status = SessionPlan.status(a, attempts, delay);
             switch (a) {
                 case WAIT_IMAGE: // InstallService starts this service again once the image is complete
                     Log.i(TAG, "session: waiting for the PowOS image to finish installing");
+                    return;
+                case WAIT_SETUP: // MainActivity's setup steps (SetupGate): look again shortly
+                    session.postDelayed(this, 1000);
                     return;
                 case START:
                     attempts++;
@@ -242,7 +245,8 @@ public class SessionService extends Service {
                     if (h == SessionPlan.Health.UP) {
                         if (attempts > 0)
                             Log.i(TAG, "session: up (try " + attempts + ")");
-                        attempts = 0;
+                        // attempts goes back to 0 only once it stayed up a minute (limitCheck): a session Android
+                        // keeps killing right after it comes up must reach GIVE_UP, not restart every few seconds.
                         // The whole session runs by now (Plasma is what pushes it past the limit): look again then.
                         session.postDelayed(limitCheck, 60_000);
                     } else
@@ -279,6 +283,7 @@ public class SessionService extends Service {
         // only the processes this service spawned left them running - holding wayland-0 and a dead bus - so the next
         // try's KWin could not take the socket. Only this app's uid is visible and killable here.
         endGuests();
+        session.removeCallbacks(limitCheck); // a stale one would count the next try as up for a minute
         startedAt = -1;
         lostCore = null;
     }
@@ -311,6 +316,11 @@ public class SessionService extends Service {
                 // gone meanwhile, or not ours
             }
         }
+    }
+
+    /** No-root termux-va's socket (see startSession 2c): run/termux-va/, so its 01777 chmod stays off the run dir. */
+    static File termuxVaSocket(File run) {
+        return new File(run, "termux-va/termux-va.sock");
     }
 
     private void startSession() throws IOException {
@@ -347,6 +357,14 @@ public class SessionService extends Service {
                     + sock + " " + env.get("ANDROMARCHY_PHYSICAL_MM") + " " + env.get("LANG") + " "
                     + env.get("TZ") + " " + libDir + "/libtermuxva.so"), null);
             return;
+        }
+
+        // XDG_RUNTIME_DIR is the run dir: owner only, as the spec (and Qt's QStandardPaths check) wants. A device set up
+        // before termuxVaSocket moved still has it at 01777. Rooted mode doesn't come here (root's session reads it).
+        try {
+            android.system.Os.chmod(run.getPath(), 0700);
+        } catch (android.system.ErrnoException e) {
+            Log.w(TAG, "can't make " + run + " 0700: " + e);
         }
 
         // 0. First boot of this rootfs on this device (once; the locale part on each start): see first-boot.sh.
@@ -418,8 +436,12 @@ public class SessionService extends Service {
                 + " exec gnome-keyring-daemon --foreground --components=secrets < /dev/null"), archEnv(run, sock));
 
         // 2c. Hardware video (termux-va, third_party/): decodes and encodes with MediaCodec for the VA-API bridge.
-        spawn("termux-va", List.of(libDir + "/libtermuxva.so", "--sock", new File(run, "termux-va.sock").getPath()),
-                null);
+        //     Its socket in a directory of its own (termuxVaSocket): the daemon chmods its socket's directory to 01777
+        //     (shared-tmp containers), which made the whole run dir world-writable - Qt then refused XDG_RUNTIME_DIR
+        //     ("wrong permissions on runtime directory ... 0777 instead of 0700").
+        File tva = termuxVaSocket(run);
+        tva.getParentFile().mkdirs();
+        spawn("termux-va", List.of(libDir + "/libtermuxva.so", "--sock", tva.getPath()), null);
 
         // 3. Sound: Hyprland's Andromarchy backend creates PipeWire nodes, so the stack must exist (it reconnects anyway).
         //    wireplumber and pipewire-pulse give up when PipeWire is not up yet (a cold first start): they wait for its
@@ -551,7 +573,7 @@ public class SessionService extends Service {
             env.put("LIBVA_DRIVER_NAME", "termuxva");
             env.put("TERMUX_VA_BRIDGE", "1");
             env.put("TERMUX_VA_GPU_BACKEND", "kgsl");
-            env.put("TERMUX_VA_SOCKET", new File(run, "termux-va.sock").getPath());
+            env.put("TERMUX_VA_SOCKET", termuxVaSocket(run).getPath());
         }
         // No root: PowOS's service ports (SpacetimeDB, the App API) are private Unix sockets in loopbackDir, not TCP
         // ports every app on the phone could reach (lotfix-run preloads loopback-unix.c; docs/research/nonroot-parity.md).
@@ -729,6 +751,8 @@ public class SessionService extends Service {
 
     /** The guest at or over Android's child process limit while the limit is on: the setup step, before a kill. */
     private final Runnable limitCheck = () -> {
+        if (startedAt >= 0 && lostCore == null)
+            attempts = 0; // up for a minute: a later failure starts counting anew
         int n = guestProcesses();
         Log.i(TAG, "session: " + n + " guest processes (Android 12+ limit " + PhantomLimit.ANDROID_LIMIT + ")");
         if (PhantomLimit.atLimit(n))

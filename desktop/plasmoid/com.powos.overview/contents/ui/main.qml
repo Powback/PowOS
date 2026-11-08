@@ -90,12 +90,15 @@ PlasmoidItem {
         "ps -eo comm,%cpu,%mem --sort=-%cpu --no-headers; " +
         "echo __IO__; " +
         "T1=$(mktemp); T2=$(mktemp); " +
+        // Only this user's /proc/PID/io (the only readable ones without root): globbing every pid made each
+        // refresh try the others too - on Android each try is an SELinux denial in the log (11-09 razr).
+        "IOF=$(find /proc -mindepth 1 -maxdepth 1 -user \"$(id -u)\" -name '[0-9]*' -printf '%p/io\\n' 2>/dev/null); " +
         // grep -s (NOT awk on the files directly): gawk FATALS on the first
         // unreadable/vanished /proc file (root-owned pids, exit races), which
         // silently produced nothing. grep -s skips them and never aborts.
-        "grep -sH -E '^(read_bytes|write_bytes)' /proc/[0-9]*/io | awk -F: '{s[$1]+=$3} END{for(f in s) print f, s[f]}' > $T1; " +
+        "grep -sH -E '^(read_bytes|write_bytes)' $IOF </dev/null | awk -F: '{s[$1]+=$3} END{for(f in s) print f, s[f]}' > $T1; " +
         "sleep 1; " +
-        "grep -sH -E '^(read_bytes|write_bytes)' /proc/[0-9]*/io | awk -F: '{s[$1]+=$3} END{for(f in s) print f, s[f]}' > $T2; " +
+        "grep -sH -E '^(read_bytes|write_bytes)' $IOF </dev/null | awk -F: '{s[$1]+=$3} END{for(f in s) print f, s[f]}' > $T2; " +
         // aggregate the delta by process NAME (same 15-char comm key `ps` uses)
         // so it merges straight into the grouped process rows.
         "awk 'NR==FNR{a[$1]=$2; next} ($1 in a) && ($2>a[$1]) {d=$2-a[$1]; split($1,p,\"/\"); pid=p[3]; cf=\"/proc/\"pid\"/comm\"; c=\"?\"; if((getline c < cf)>0) close(cf); s[c]+=d} END{for(n in s) printf \"%s %.2f\\n\", n, s[n]/1048576}' $T1 $T2; " +

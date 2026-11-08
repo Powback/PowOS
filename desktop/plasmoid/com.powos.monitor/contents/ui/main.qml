@@ -110,9 +110,12 @@ PlasmoidItem {
         "ps -eo pid,%mem,comm --sort=-%mem --no-headers | head -3 | while read pid val comm; do echo \"$comm $val $(rc $pid)\"; done; " +
         "echo __D__; " +
         "T1=$(mktemp); T2=$(mktemp); " +
-        "grep -sH -E '^(read_bytes|write_bytes)' /proc/[0-9]*/io | awk -F: '{s[$1]+=$3} END{for(f in s) print f, s[f]}' > $T1; " +
+        // Only this user's /proc/PID/io (the only readable ones without root): globbing every pid made each
+        // refresh try the others too - on Android each try is an SELinux denial in the log (11-09 razr).
+        "IOF=$(find /proc -mindepth 1 -maxdepth 1 -user \"$(id -u)\" -name '[0-9]*' -printf '%p/io\\n' 2>/dev/null); " +
+        "grep -sH -E '^(read_bytes|write_bytes)' $IOF </dev/null | awk -F: '{s[$1]+=$3} END{for(f in s) print f, s[f]}' > $T1; " +
         "sleep 1; " +
-        "grep -sH -E '^(read_bytes|write_bytes)' /proc/[0-9]*/io | awk -F: '{s[$1]+=$3} END{for(f in s) print f, s[f]}' > $T2; " +
+        "grep -sH -E '^(read_bytes|write_bytes)' $IOF </dev/null | awk -F: '{s[$1]+=$3} END{for(f in s) print f, s[f]}' > $T2; " +
         "awk 'NR==FNR{a[$1]=$2; next} ($1 in a) && ($2>a[$1]) {d=$2-a[$1]; split($1,p,\"/\"); pid=p[3]; cf=\"/proc/\"pid\"/comm\"; c=\"?\"; if((getline c < cf)>0) close(cf); print d, pid, c}' $T1 $T2 | sort -k1 -rn | head -3 | while read d pid c; do mb=$(awk -v x=\"$d\" 'BEGIN{printf \"%.2f\", x/1048576}'); echo \"$c $mb $(rc $pid)\"; done; " +
         "rm -f $T1 $T2; " +
         // Per-process net BANDWIDTH needs root (nethogs); unprivileged proxy is
