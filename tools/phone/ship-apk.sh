@@ -258,6 +258,11 @@ if ! docker run --rm --network container:powos-vadb -v "$PWD/targets/android":/t
   exit 5
 fi
 git rev-parse HEAD > "$HOME/.cache/powos-installed-commit"
+# The same APK for the non-root phones (tools/phone/nonroot-sync.sh, devices.conf): a copy of exactly what was just
+# installed - the build output is shared and the next build overwrites it.
+nr=${SHIP_DIR:-$HOME/.cache/powos-ship-queue}/nonroot
+mkdir -p "$nr" && cp "$apk" "$nr/powos.apk.tmp" && mv "$nr/powos.apk.tmp" "$nr/powos.apk" && git rev-parse HEAD > "$nr/powos.apk.commit" ||
+  echo "ship-apk: WARNING - couldn't keep the APK for the non-root phones ($nr)" >&2
 # Then, in ONE push, every shell file origin's tip (now: it may have moved during the wait) has differently from the
 # APK's own shell. The set gated before the install goes on without a second gate (the stamp is for exactly it at that
 # tree); a different set (origin moved) is gated as any push, from the new tip.
