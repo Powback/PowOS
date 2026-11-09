@@ -506,3 +506,44 @@ inside run-to-run noise (~0.3 s), so nothing ships (it would also cost GPU power
 **window -> first frame is CPU on Unity's main thread (emulated Mono/Unity init), not the D3D11 -> DXVK -> Turnip
 path.** Next lead, if any: the emulated code itself (FEX: Mono's JIT output is uncachable; Unity 2017.4 player init) -
 e.g. FEX `SMCChecks`/`Multiblock`/`ParanoidTSO` costs on main, or simpleperf of main's JIT blocks by Mono symbol.
+
+## Per-phase timeline now, and the page-cache read-ahead from the tap (2026-11-09, agent/game-launch-time)
+
+Best current run (bf-coldstart steam, 11-07 04:37, job 20261107-032738-52211; steam -39, Broforce on `powos-proton-arm64`,
+Steam awake at the tap), seconds from the tap (4 Hz process samples + LPROF):
+
+| phase | from -> to | s | what |
+|---|---|---|---|
+| launcher | tap -> Steam handoff | 0.8 | powos-open-task -> Steam's URL |
+| Steam prep | handoff -> reaper | 3.2 | Steam's own (iscript gate skipped at ~3.0 s, cloud/stats sync, CreatingProcess) |
+| container | reaper -> pv-adverb/Proton/wineserver | 1.5 | pressure-vessel (no localedef since Fix 2) |
+| Wine boot | wineserver -> game exe | 3.9 | wineboot --init -> services/winedevice/plugplay (6.4) -> svchost (7.4) -> explorer/rpcss/tabtip (8.3) -> exe (9.4) |
+| engine init | exe -> X window | 1.1 | Unity player init |
+| first scene | window -> first frame | 8.8 | black window; main ~95 % busy 10.1-16 s (emulated Unity/Mono), then render hand-off |
+| **total** | | **19.3** | goal < 10 s |
+
+Every phase is slower than the 11-05 runs (frame 15.7-16.9 s: pv 0.6, Wine boot 1.6-2.6, window->frame 8.2-8.5) and
+LPROF shows why: clocks `?/1785/1651/1363` MHz the whole launch - horae's cap held the prime core at 1.36 GHz of 3.19
+while the launch is one CPU-bound thread. That lever is task game-boost-loses-to-a-vendor-cpu-cap (oplus-hook in
+com.oplus.battery), not repeated here. The board's suspects are not on this path any more: no FEX RootFS (ARM64 Proton,
+arm64ec FEX in-process), FEX's DiskCache persists and hits (49632 KB before and after the launch), and the
+IsSteamRunning poll fix (steam -37) measured no change (above). Of what's left, I/O is the one PowOS-side cost that
+grows with idle time: this run read **68 MB from storage** during the load (11-05's back-to-back runs: 0 MB), and a game
+not run since boot reads its whole load (~300 MB for Broforce) cold, in page faults on the emulated main thread.
+
+**Cut: read-ahead from the tap.** `powos-open-task` (drawer/widget/shortcut launch path, every Steam game) finds the
+game's install dir (appmanifest_<id>.acf in any library of libraryfolders.vdf) and issues `posix_fadvise(WILLNEED)` on
+its files in a thread - code first (.exe/.dll/.so/configs), then data smallest-first - capped at 1 GB and a quarter of
+MemAvailable (`POWOS_LAUNCH_PREFETCH_MB`, 0 = off). It runs during Steam prep + container + Wine boot (~8.6 s with no
+game I/O), so the engine's reads hit the page cache. Asynchronous kernel readahead: nothing copied or written, cache
+stays reclaimable, every error ignored. HACK row: Valve's client could read ahead the depot while it prepares the launch.
+Test: test/tier1/test-open-task-prefetch.py.
+Expected: warm (back-to-back) launches ~0; after idle 0.3-1 s; first launch since boot more (the cold ~300 MB read
+moves off the critical path). Check after merge: `bf-coldstart.sh steam` with the page cache dropped first
+(`echo 1 > /proc/sys/vm/drop_caches` as root) vs today's 19.3 s, read_bytes in LPROF-SUM -> ~0 MB.
+
+Ranked next cuts: (1) the clock cap (other task; 11-05's caps-lifted A/B: tap->frame 14.8/16.2 vs 18.5 s); (2) Wine
+boot 2-4 s - wineboot waits on every auto-start service (winedevice drivers, svchost) serially; a prefix pre-booted
+while Steam preps needs Proton's `waitforexitandrun` not to wait on that wineserver (`run` verb in powos-proton-arm64's
+entry) - big, needs device iteration; (3) window->frame 8.8 s is the game's own emulated init: < 10 s for this Unity
+game fresh is not reachable from PowOS alone; resume (0.6-0.8 s) is the < 10 s path.
