@@ -84,13 +84,13 @@ fi
 for d in ${apps[@]+"${apps[@]}"}; do add_app "$d"; done
 
 # The OWL CLI, built once per source version (by content: a rebase touches every file's time) and shared across
-# checkouts through the build-inputs cache (dev/owl-jar.sh, friction f402). A build that can't run now (the Gradle
-# cache is the APK builds' - locked while one runs) keeps the jar there is, and says so.
+# checkouts through the build-inputs cache (dev/owl-jar.sh, friction f402). A build that fails keeps the jar there
+# is and says why (owl-jar.sh prints Gradle's error) and what that means for the widgets.
 jar=$REPO/targets/android/app/owl/build/cli/owl.jar
 rc=0; "$SHELL_DIR/dev/owl-jar.sh" "$REPO" --build >/dev/null || rc=$?
 case $rc in
   0) ;;
-  3) echo "     owl.jar: couldn't build now (the Gradle cache busy?) - using the one built before" ;;
+  3) echo "     owl.jar: didn't build (reason above) - using an OLDER compiler: a widget using OWL it doesn't know FAILs as 'didn't evaluate'" ;;
   *) echo "preview: owl.jar didn't build" >&2; exit 2 ;;
 esac
 owl_trees() {
@@ -98,6 +98,9 @@ owl_trees() {
     echo "     owl trees: some widgets didn't evaluate (their errors are in the report)"
 }
 docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull -q "$IMAGE" >/dev/null
+# The browser image's arch, as this Mac runs it. Set here, not as $(case ...) inside the docker line: macOS bash 3.2
+# can't parse a case pattern's ")" inside $( ) - that failed every widget sweep run under /bin/bash (11-09 ships).
+case $(uname -m) in x86_64 | amd64) platform=linux/amd64 ;; *) platform=linux/arm64 ;; esac
 browser() { # PASS
   local mounts=(-v "$S:/shell:ro" -v "$work:/work" -v "$out:/out" -v "$SHELL_DIR/dev/preview/preview.mjs:/usr/src/app/preview.mjs:ro" -v "$work/apps:/apps:ro")
   # shell/fonts/nerd_symbols.ttf links out of the shell (../../targets/android/.../res/font): where it points, so OWL's
@@ -110,7 +113,7 @@ browser() { # PASS
     -e PREVIEW_LIVE="$live" -e PREVIEW_FAST="$fast" ${only:+-e PREVIEW_ONLY="$only"} ${PREVIEW_EMPTY:+-e PREVIEW_EMPTY="$PREVIEW_EMPTY"} \
     ${PREVIEW_JOBS:+-e PREVIEW_JOBS="$PREVIEW_JOBS"} ${PREVIEW_DEBUG:+-e PREVIEW_DEBUG=1} ${PREVIEW_DEBUG_KEY:+-e PREVIEW_DEBUG_KEY="$PREVIEW_DEBUG_KEY"} ${PREVIEW_BASELINE:+-e PREVIEW_BASELINE="$PREVIEW_BASELINE"})
   if [ -n "$GR_HOST" ]; then browser_remote "$1" "${envs[@]}"; return; fi
-  docker run --rm "${gc_flags[@]}" --platform "$(case $(uname -m) in x86_64 | amd64) echo linux/amd64 ;; *) echo linux/arm64 ;; esac)" --shm-size 1g ${GATE_CPU_SHARES:+--cpu-shares "$GATE_CPU_SHARES"} "${mounts[@]}" "${envs[@]}" \
+  docker run --rm "${gc_flags[@]}" --platform "$platform" --shm-size 1g ${GATE_CPU_SHARES:+--cpu-shares "$GATE_CPU_SHARES"} "${mounts[@]}" "${envs[@]}" \
     -w /usr/src/app --entrypoint timeout "$IMAGE" "${gc_cap[@]}" node preview.mjs
 }
 # GATE_HOST=58 / GATE_REMOTE (dev/gate-remote.sh): the browser passes on the remote. The OWL trees between them stay here (the JVM

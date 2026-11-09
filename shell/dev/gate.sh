@@ -431,6 +431,12 @@ if [ "$widgets" = 1 ]; then
   set -e
   t_widgets=$(( $(mark) - ts ))
   grep -E "^(FAIL|known|       |preview:|     owl)" "$work/widgets.log" | sed 's/^FAIL /FAIL widget /' | head -80
+  # A sweep that died before its verdict line (a shell error, docker refusing a flag) printed nothing the filter
+  # above keeps, so the gate said "FAIL" with no reason (11-09 apps ships): show the log's tail then.
+  if [ $wrc != 0 ] && ! grep -qE "^(FAIL |preview: )" "$work/widgets.log"; then
+    echo "FAIL widgets: dev/preview.sh exited $wrc before its verdict - its last lines:"
+    tail -15 "$work/widgets.log" | sed 's/^/       /'
+  fi
   [ $wrc = 0 ] || fail=1
 fi
 # 3. Design QA's renders (not a check: they're looked at).
