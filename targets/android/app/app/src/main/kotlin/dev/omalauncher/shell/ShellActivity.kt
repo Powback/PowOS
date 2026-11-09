@@ -55,6 +55,8 @@ class ShellActivity : Activity() {
         // Each home made, and why (the manager saw home's task change: an app update, a recreation, a second home).
         Log.i(TAG, "home created: task $taskId, restored ${savedInstanceState != null}, intent ${intent.component?.shortClassName} ${intent.categories} ${intent.extras?.keySet()}, from ${referrer}")
         if (toHome()) return
+        // A restored task's intent is the one it was made with, not a new ask (the stale-home check, [leaveStaleHome]).
+        noteArrived(restored = savedInstanceState != null)
         dropOtherHomes()
         // The launcher's runtime (themes, widgets, the PowOS session); started once.
         runtime.start()
@@ -201,6 +203,7 @@ class ShellActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (leaveStaleHome()) return
         dockLog("resumed")
         inFront = true
         WebWindowLaunch.homeInFront = true
@@ -280,6 +283,48 @@ class ShellActivity : Activity() {
         checkStuckSoon("after re-delivering home")
     }
 
+    /** The intent that brought this instance up since its last resume (null: none - raised with its task). */
+    private var arrived: Intent? = null
+
+    private fun noteArrived(restored: Boolean) {
+        arrived = if (restored) null else intent
+    }
+
+    /**
+     * Home's task with PowOS no longer the default home ([staleHome]): the task goes, so the phone's own home and its
+     * recents overview are in front again; opened as an app, the app comes back in a task of its own. True: leaving.
+     */
+    private fun leaveStaleHome(): Boolean {
+        val came = arrived
+        arrived = null
+        val roles = getSystemService(RoleManager::class.java)
+        val action =
+            staleHome(
+                isDefaultHome = !roles.isRoleAvailable(RoleManager.ROLE_HOME) || roles.isRoleHeld(RoleManager.ROLE_HOME),
+                inHomeTask = inHomeTask(),
+                homeIntentNow = came?.hasCategory(Intent.CATEGORY_HOME) == true,
+                appIntentNow = came != null && !came.hasCategory(Intent.CATEGORY_HOME),
+            )
+        if (action == StaleHome.STAY) return false
+        Log.i(TAG, "home task $taskId left: PowOS isn't the default home any more (${action.name.lowercase()})")
+        dev.omalauncher.system.Tasks.logRemove("finishAndRemoveTask", taskId, "home's task, PowOS no longer the default home", removes = true)
+        finishAndRemoveTask()
+        // Finishing, this instance is no longer the singleTask one a start finds: a task of its own, a standard one.
+        if (action == StaleHome.REOPEN && came != null) {
+            runCatching {
+                startActivity(Intent(came).setComponent(android.content.ComponentName(this, ShellActivity::class.java)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.onFailure { Log.w(TAG, "can't reopen PowOS as an app", it) }
+        }
+        return true
+    }
+
+    /** This instance's task was made as home (the .HomeShell alias's HOME intent is its base). */
+    private fun inHomeTask(): Boolean =
+        getSystemService(ActivityManager::class.java).appTasks.any { t ->
+            val info = runCatching { t.taskInfo }.getOrNull()
+            info != null && info.taskId == taskId && info.baseIntent.hasCategory(Intent.CATEGORY_HOME)
+        }
+
     /** Drops Recents cards whose Linux window no longer exists (app exited or process restarted). */
     private fun dropHome(
         task: ActivityManager.AppTask,
@@ -326,6 +371,7 @@ class ShellActivity : Activity() {
      */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        arrived = intent
         // Home re-delivered to resize its window (unstick): not a Home press, the page stays where it is.
         if (intent.getBooleanExtra(EXTRA_UNSTICK, false)) return
         // Home pressed - not a notification's or the app entry's way here (toHome), which carries what it opens.

@@ -33,13 +33,16 @@
 #      SHOTS_THEME / SHOTS_ONLY / SHOTS_SCALE / SHOTS_PROBE / SHOTS_STRICT pass through (STRICT=1: overlapping tiles
 #      or missing glyphs fail it).
 # Exit 0: pass. 1: failed (the reasons on stdout). 2: couldn't run (no docker...). Time: ~5-10 s, the image cached.
-# GATE_REMOTE=<ssh host>: the browser runs (scenes, widget sweep) on that box over ssh, not on the Mac (dev/gate-remote.sh;
-# unreachable: local). GATE_ONLY=<regex>: only the browser runs so named (a case worked on alone); GATE_PROFILE=1: a scene that can (ww-resize-cost) also prints a trace's top costs; GATE_SCENE_MS: the per-scene cap. GATE_THROTTLE=N: every page's CPU slowed
+# GATE_HOST=58 (or any ssh host; GATE_REMOTE is its older name): the browser runs (scenes, retries, widget sweep, --shots)
+# on that box over ssh at its native arch, at most GATE_HOST_CPUS (24) cpus under nice 10, not on the Mac; report.json
+# and the PNGs come back to --shots DIR (dev/gate-remote.sh; unreachable: local, said so). GATE_ONLY=<regex>: only the browser runs so named (a case worked on alone); GATE_PROFILE=1: a scene that can (ww-resize-cost) also prints a trace's top costs; GATE_SCENE_MS: the per-scene cap. GATE_THROTTLE=N: every page's CPU slowed
 # N times (a loaded Mac on demand: a case's waits must hold at 6). GATE_IMAGE overrides the Chromium image. Docker's
 # build cache and images are never pruned here.
 set -euo pipefail
 SHELL_DIR=$(cd "$(dirname "$0")/.." && pwd)
 IMAGE=${GATE_IMAGE:-zenika/alpine-chrome:with-puppeteer}
+# The local container's platform: the docker host's own arch (the Mac's VM: arm64), never an emulated one.
+case $(uname -m) in x86_64 | amd64) PLATFORM=linux/amd64 ;; *) PLATFORM=linux/arm64 ;; esac
 GATE_ALL=${GATE_ALL:-}
 base=head dir="" installed="" overrides="" app="" shots="" wallpaper="" widgets=${GATE_WIDGETS:-} files=()
 while [ $# -gt 0 ]; do
@@ -299,7 +302,7 @@ gr_id=${slot:+$(basename "$slot")} gr_id=${gr_id:-dir} gr_mounts=() GR_PREFIX=po
 if [ -n "$GR_HOST" ]; then
   gr_dir=run/$gr_id
   if gr_push "$S" "$gr_dir/shell" --exclude /node_modules &&
-     gr_push "$SHELL_DIR/dev" "$gr_dir/dev" --include gate.mjs --include agents-fleet.mjs --include search-check.js --exclude '*' &&
+     gr_push "$SHELL_DIR/dev" "$gr_dir/dev" --include gate.mjs --include agents-fleet.mjs --include search-check.js --include shots.mjs --exclude '*' &&
      { [ -z "$app" ] || { gr_push "$app/out/ui" "$gr_dir/app/ui" && gr_push "$app/powos-app.json" "$gr_dir/app/powos-app.json"; }; }; then
     gr_mounts=(-v "@/$gr_dir/shell:/shell:ro" -v "@/$gr_dir/dev/gate.mjs:/usr/src/app/gate.mjs:ro" -v "@/$gr_dir/dev/agents-fleet.mjs:/usr/src/app/agents-fleet.mjs:ro"
       -v "@/$gr_dir/dev/search-check.js:/usr/src/app/search-check.js:ro" -v "@/tx:/cache")
@@ -337,12 +340,12 @@ browser_run() {
   # GATE_REMOTE (dev/gate-remote.sh): the same run on the remote, over the tree pushed there; its own load and cores
   # size the scene concurrency (the Mac's GATE_HOST_LOAD/CPUS don't apply there).
   if [ -n "$GR_HOST" ]; then
-    gr_run "${GR_PREFIX}r$1" --shm-size 512m $cpu "${gr_mounts[@]}" "${envs[@]}" \
+    gr_run "${GR_PREFIX}r$1" --shm-size 512m $cpu "${gr_mounts[@]}" "${envs[@]}" -e GATE_HOST_CPUS="$GR_NCPUS" \
       -w /usr/src/app --entrypoint node "$GR_IMAGE" gate.mjs
     return
   fi
   ${GATE_BUILD_SLOT:+"$SHELL_DIR/../tools/agents/build-slot.sh" "gate $base" --} \
-  docker run --rm "${gc_flags[@]}" --platform linux/arm64 --shm-size 512m $cpu "${mounts[@]}" "${envs[@]}" \
+  docker run --rm "${gc_flags[@]}" --platform "$PLATFORM" --shm-size 512m $cpu "${mounts[@]}" "${envs[@]}" \
     ${host_load:+-e GATE_HOST_LOAD="$host_load"} ${host_cpus:+-e GATE_HOST_CPUS="$host_cpus"} \
     -w /usr/src/app --entrypoint timeout "$IMAGE" "${gc_cap[@]}" node gate.mjs
 }
@@ -438,8 +441,23 @@ if [ -n "$shots" ]; then
   # container can't follow - without it every icon glyph renders as tofu.
   nerd=$(cd "$SHELL_DIR/fonts" && cd "$(dirname "$(readlink nerd_symbols.ttf)")" 2>/dev/null && pwd -P)/nerd_symbols.ttf
   [ -f "$nerd" ] && smounts+=(-v "$nerd:/fonts/nerd_symbols.ttf:ro")
-  docker run --rm "${gc_flags[@]}" --platform linux/arm64 --shm-size 512m $cpu "${smounts[@]}" ${SHOTS_THEME:+-e SHOTS_THEME="$SHOTS_THEME"} \
-    ${SHOTS_ONLY:+-e SHOTS_ONLY="$SHOTS_ONLY"} ${SHOTS_SCALE:+-e SHOTS_SCALE="$SHOTS_SCALE"} ${SHOTS_PROBE:+-e SHOTS_PROBE="$SHOTS_PROBE"} ${SHOTS_STRICT:+-e SHOTS_STRICT="$SHOTS_STRICT"} -w /usr/src/app --entrypoint timeout "$IMAGE" "${gc_cap[@]}" node shots.mjs ||
+  senvs=(${SHOTS_THEME:+-e SHOTS_THEME="$SHOTS_THEME"} ${SHOTS_ONLY:+-e SHOTS_ONLY="$SHOTS_ONLY"} ${SHOTS_SCALE:+-e SHOTS_SCALE="$SHOTS_SCALE"}
+    ${SHOTS_PROBE:+-e SHOTS_PROBE="$SHOTS_PROBE"} ${SHOTS_STRICT:+-e SHOTS_STRICT="$SHOTS_STRICT"})
+  # GATE_HOST: rendered on the remote into its slot's shots/, then mirrored back into DIR (report.json + the PNGs).
+  shots_remote() {
+    local m=(-v "@/$gr_dir/shell:/shell:ro" -v "@/$gr_dir/dev/shots.mjs:/usr/src/app/shots.mjs:ro"
+      -v "@/$gr_dir/dev/agents-fleet.mjs:/usr/src/app/agents-fleet.mjs:ro" -v "@/$gr_dir/shots:/out") rc=0
+    perl -e 'alarm 60; exec @ARGV' "${GR_SSH[@]}" "$GR_HOST" "rm -rf $GR_ROOT/$gr_dir/shots && mkdir -p $GR_ROOT/$gr_dir/shots" || return 2
+    if [ -n "$wallpaper" ]; then gr_push "$wallpaper" "$gr_dir/wallpaper.jpg" || return 2; m+=(-v "@/$gr_dir/wallpaper.jpg:/wallpaper.jpg:ro"); fi
+    if [ -f "$nerd" ]; then gr_push "$nerd" "$gr_dir/nerd_symbols.ttf" || return 2; m+=(-v "@/$gr_dir/nerd_symbols.ttf:/fonts/nerd_symbols.ttf:ro"); fi
+    gr_run "${GR_PREFIX}shots" --shm-size 512m $cpu "${m[@]}" "${senvs[@]}" -w /usr/src/app --entrypoint node "$GR_IMAGE" shots.mjs || rc=$?
+    # Not mirrored (--delete): DIR may hold other files, as with a local run.
+    rsync -a -e "${GR_SSH[*]}" "$GR_HOST:$GR_ROOT/$gr_dir/shots/" "$shots/" || { echo "     shots: copying the renders back from $GR_HOST failed"; return 2; }
+    return $rc
+  }
+  if [ -n "$GR_HOST" ]; then shots_remote
+  else docker run --rm "${gc_flags[@]}" --platform "$PLATFORM" --shm-size 512m $cpu "${smounts[@]}" "${senvs[@]}" -w /usr/src/app --entrypoint timeout "$IMAGE" "${gc_cap[@]}" node shots.mjs
+  fi ||
     { echo "     shots: the render run failed$([ "${SHOTS_STRICT:-}" = 1 ] && echo " (strict: overlapping tiles or missing glyphs, report.json)")"
       [ "${SHOTS_STRICT:-}" = 1 ] && fail=1; }
 fi
@@ -450,7 +468,7 @@ n_ok=$(cat "$browser_log" "$work/browser-retry.log" 2>/dev/null | grep -c '^ok  
 bad_scenes=$(grep -h '^FAIL ' "$browser_log" 2>/dev/null | sed 's/^FAIL \([^:]*\):.*/\1/' | sort -u | while IFS= read -r n; do
   grep -qF "ok   $n (" "$work/browser-retry.log" 2>/dev/null || grep -qxF "$n" "$work/flaky.txt" 2>/dev/null || echo "$n"; done | paste -sd' ' - || true)
 # A FLAKY scene (dev/gate-rerun.sh: failed in the full run, passed alone every rerun) is neither a PASS nor a FAIL.
-flaky=$(paste -sd' ' - < "$work/flaky.txt" 2>/dev/null || true) n_flaky=$(grep -c . "$work/flaky.txt" 2>/dev/null || true)
+flaky=$(paste -sd' ' - 2>/dev/null < "$work/flaky.txt" || true) n_flaky=$(grep -c . "$work/flaky.txt" 2>/dev/null || true)
 n_retried=$(grep -c '^ok   ' "$work/browser-retry.log" 2>/dev/null || true); [ "${n_retried:-0}" != 0 ] || n_retried=
 echo "gate: summary: scenes $n_ok PASS${n_retried:+ ($n_retried on a retry)}, $(echo "$bad_scenes" | wc -w | tr -d ' ') FAIL${bad_scenes:+ ($bad_scenes)}, ${n_flaky:-0} flaky${flaky:+ ($flaky)}; slot wait ${slot_wait} s; tsc ${t_tsc} s, lints ${t_lint} s, browser ${t_browser} s, widgets ${t_widgets} s"
 [ $fail = 0 ] && [ -z "$shots" ] && echo "$(date +%F\ %T) $scope_note" > "$cache_dir/$cache_key"

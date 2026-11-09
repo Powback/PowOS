@@ -1,0 +1,24 @@
+{
+  "id": "vm-route-mac",
+  "name": "Colima VM service address route (Mac launchd daemon)",
+  "kind": "service",
+  "owner": "system:powstation",
+  "host": "mac",
+  "purpose": "since 2026-11-08 the Colima VM runs on vzNAT; launchd com.powstation.vm-route (PowStation/scripts/vm-route.sh, root, KeepAlive) keeps 192.168.50.100 host-routed to the VM's vzNAT lease and proxy-ARPs .100 on en0, so LAN clients, router forwards and DHCP DNS keep using .100. HACK until Lima's vmnet-helper backend (lima-vm/lima#4370). Design: PowStation/docs/research/vm-networking-permanent.md",
+  "installedBy": "sudo cp PowStation/scripts/com.powstation.vm-route.plist /Library/LaunchDaemons/ && sudo launchctl bootstrap system /Library/LaunchDaemons/com.powstation.vm-route.plist",
+  "files": [
+    "/Library/LaunchDaemons/com.powstation.vm-route.plist",
+    "~/Projects/PowStation/data/vm-route.log"
+  ],
+  "processes": [
+    {
+      "match": "PowStation/scripts/vm-route\\.sh"
+    }
+  ],
+  "unbounded": "macOS has no cgroups; one bash loop doing a lease-file read plus route/arp lookups every 10 s, logs only on change",
+  "remove": {
+    "commands": [
+      "sudo PowStation/scripts/vm-route-remove.sh --uninstall"
+    ]
+  }
+}
