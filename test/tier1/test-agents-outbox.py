@@ -56,6 +56,8 @@ class OutboxTest(unittest.TestCase):
                 "argv = json.loads(base64.b64decode(m.group(1))) if m else []\n"
                 f'with open({json.dumps(self.calls_log)}, "a") as f:\n'
                 '    f.write(json.dumps(argv) + "\\n")\n'
+                f'import os\nif os.path.exists({json.dumps(os.path.join(self.tmp, "lost"))}):\n'
+                '    sys.stderr.write("adb: device \'10.13.13.7:5555\' not found\\n"); sys.exit(1)\n'
                 'if argv[:2] == ["task", "list"]:\n'
                 '    print("BOARD-SNAPSHOT: one task")\n'
                 "else:\n"
@@ -126,6 +128,20 @@ class OutboxTest(unittest.TestCase):
         self.assertEqual(r2.returncode, 0, r2.stderr)
         self.assertIn("BOARD-SNAPSHOT", r2.stdout, "served from the cache, not a live call")
         self.assertIn("(offline, as of ", r2.stdout)
+
+    def test_read_falls_back_to_cache_when_adb_lost_the_phone(self):
+        """11-09: the VPN peer still looked up but adb had lost the phone ("device ... not found"): the read died
+        with adb's words and the board read as empty, instead of the cached board."""
+        self.set_online(True)
+        r1 = self.run_cli("task", "list")
+        self.assertEqual(r1.returncode, 0, r1.stderr)
+        open(os.path.join(self.tmp, "lost"), "w").close()
+        r2 = self.run_cli("task", "list")
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        self.assertIn("BOARD-SNAPSHOT", r2.stdout)
+        self.assertIn("(offline, as of ", r2.stdout)
+        w = self.run_cli("task", "set", "x", "--status", "done", "--note", "n")
+        self.assertIn("queued (offline)", w.stdout, "a write while adb lost the phone goes to the outbox")
 
     def test_read_with_no_cache_while_offline_fails_fast(self):
         self.set_online(False)

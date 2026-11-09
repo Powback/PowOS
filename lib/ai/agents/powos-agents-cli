@@ -2502,12 +2502,20 @@ def cache_load(argv):
     return text, when
 
 
+# 11-09: the phone dropped off adb while its VPN peer still looked up; every read then died with adb's own words
+# ("device '10.13.13.7:5555' not found") instead of the cached board, so the board read as empty.
+_TRANSPORT_LOST_RE = re.compile(r"adb: device .* not found|error: device (offline|not found)|error: closed|"
+                                r"no devices/emulators found|device offline|cannot connect to")
+
+
 def handle_down(argv):
     """The module isn't reachable locally (always true off the phone - remote()'s own HACK). Try the phone; off
     the VPN, queue a write for later or serve a read from the last cached snapshot - never just die."""
     outbox_flush()   # clear any backlog first, in order, so this call lands after whatever came before it
     if phone_reachable():
         out = _remote_run(argv)
+        if out is not None and out[0] != 0 and _TRANSPORT_LOST_RE.search(out[2] or ""):
+            out = None   # the VPN says up but adb lost the phone ("device ... not found"): treat as offline - cache/outbox
         if out is not None:
             rc, stdout, stderr = out
             stale = _stale_phone_stderr(rc, stderr)
