@@ -111,6 +111,10 @@
 #               game gets the focus back when it closes; a game restored after its own minimize that has the focus and
 #               draws nothing for 3 s is minimized + restored again (HACK, twice at most; anland_task_policy.h,
 #               test/task-policy-test.cpp).
+#   0067        ours (3.75): the desktop's sound goes out on the desktop consumer's audio socket while it is live, else
+#               on a live window task's (the full-screen one first): a game full screen in its own task runs with no
+#               desktop consumer, and its sound reached anland-speaker but never Android (11-08 game-audio-flow D).
+#               The app listens on every connection's socket (native_audio.c audio_attach).
 #   0068        ours (3.76): a borderless window is not a frame of its own - "decor <id> 0 own" only with proof the app
 #               draws a frame (_GTK_FRAME_EXTENTS, an xdg toplevel's CSD, or it started its own move/resize); a window
 #               that only asked _MOTIF_WM_HINTS for no decorations counts only while resizable and not opened at its
@@ -208,11 +212,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0064-backends-anland-a-web-window-s-popups-shown-by-the-app-placed-in-its-screen-area-and-dismissed-from-home.patch
           0065-X11-a-window-within-one-device-pixel-of-its-output-is-the-output-s-size.patch
           0066-backends-anland-a-window-taking-a-full-screen-game-s-focus-opens-in-front-of-it.patch
+          0067-backends-anland-the-sound-goes-out-on-a-live-window-task-s-socket-when-there-is-no-desktop.patch
           0068-backends-anland-a-borderless-window-is-not-a-frame-of-its-own.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver

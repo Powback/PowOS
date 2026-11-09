@@ -18,6 +18,10 @@ def tracks(txt):
     for line in txt.splitlines():
         m = re.match(r"\s*Output thread (0x[0-9a-f]+)", line)
         if m: thread, device, hdr = m.group(1), "?", None; continue
+        # "Local log:" is the thread's track history (AT::add / removeTrack_l rows of long-gone tracks): not a live
+        # track - 11-08's "not consuming frames" was read off such rows. Skip it until the next thread.
+        if line.strip() == "Local log:": hdr, thread = None, "log"; continue
+        if thread == "log": continue
         m = re.search(r"Output devices?: *(.*)", line)
         if m: device = m.group(1).strip()[:60]
         if "Client" in line and "Underruns" in line:

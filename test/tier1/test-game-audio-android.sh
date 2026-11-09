@@ -21,6 +21,11 @@ ok "music volume" "$o" "Current: 2 (speaker): 9"
 o=$(python3 "$P" 12345 "$T/a" "$T/a" "$T/audio"); ok "stalled" "$o" "not consuming frames"
 o=$(python3 "$P" 12345 "$T/a" "$T/m" "$T/audio"); ok "muted" "$o" "muted by Android"
 o=$(python3 "$P" 999 "$T/a" "$T/b" "$T/audio"); ok "no track" "$o" "no AudioFlinger track"
+# 11-08: only the thread's "Local log" history held the pid (no live track): that is "no track", not a stalled one
+{ printf 'Output thread 0x7a1 type 0 (MIXER):\n  Local log:\n'
+  printf '      Type     Id Active Client Session Port Id S  Flags   Format Chn mask  SRate ST Usg CT  G db  L dB  R dB  VS dB   Server FrmCnt  FrmRdy F Underruns  Flushed   Latency\n'
+  printf '   11-08 18:36:18.739 AT::add  (0xb4)  110  no  12345/  10359  577  145 r  0x000 00000001 00000003  48000  3   1  2  -inf  0  0  0  00000000  2886  0 f  0  0  new\n\n'; } >"$T/l"
+o=$(python3 "$P" 12345 "$T/l" "$T/l" "$T/audio"); ok "local log is history" "$o" "no AudioFlinger track"
 python3 "$P" 12345 "$T/a" "$T/b" "$T/audio" >/dev/null; ok "rc pass" "$?" "^0$"
 python3 "$P" 12345 "$T/a" "$T/a" "$T/audio" >/dev/null; ok "rc fail" "$?" "^1$"
 echo "test-game-audio-android: $pass passed, $fail failed"; [ "$fail" -eq 0 ]
