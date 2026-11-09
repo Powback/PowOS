@@ -12,7 +12,7 @@ import { openScreen } from "../screens.ts";
 import { AppWidgetPicker, picker } from "./appwidget.tsx";
 import { geometry, placeNew, placeNewCells } from "./grid.tsx";
 import { hasRecentsWidget, recentsSpot } from "./recentwidget.tsx";
-import { footAim, footBelow, SEARCH_KEY, hasSearchWidget, putBackInBar, undockSearch } from "./searchwidget.tsx";
+import { footAim, footBelow, pillBelow, SEARCH_KEY, hasSearchWidget, putBackInBar, undockSearch } from "./searchwidget.tsx";
 import { startNewApp } from "./appbuild.tsx";
 import { AppList, findApps } from "./drawer.tsx";
 import { Pill, type MicTarget } from "./bar.tsx";
@@ -130,10 +130,10 @@ function ShellAdds({ done, q }: { done: () => void; q: string }) {
     });
     widgets.push({
       key: "search-foot",
-      label: footBelow.value ? "search above the dock" : "search under the dock",
-      desc: footBelow.value ? "the pill back over the dock" : "the pill in home's foot, below the dock",
-      preview: <span class={`aw-foot-preview ${footBelow.value ? "" : "below"}`}><i /><span class="aw-pill-preview">search</span></span>,
-      add: () => (footBelow.value = footBelow.value ? "" : "1"),
+      label: pillBelow() ? "search above the dock" : "search under the dock",
+      desc: pillBelow() ? "the pill back over the dock" : "the pill in home's foot, below the dock",
+      preview: <span class={`aw-foot-preview ${pillBelow() ? "" : "below"}`}><i /><span class="aw-pill-preview">search</span></span>,
+      add: () => (footBelow.value = pillBelow() ? "0" : "1"),
     });
   } else
     widgets.push({

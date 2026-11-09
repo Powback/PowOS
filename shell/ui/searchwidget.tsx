@@ -159,7 +159,7 @@ export function dropSearchOnFoot(c: Carry | null, ev: PointerEvent): boolean {
   selected.value = null;
   tick();
   if (a === "dock") return void dockSearch(), true;
-  footBelow.value = a === "below" ? "1" : "";
+  footBelow.value = a === "below" ? "1" : "0";
   setSpot("bar", "dragged onto the foot");
   void putBackInBar();
   return true;
@@ -168,8 +168,15 @@ export function dropSearchOnFoot(c: Carry | null, ev: PointerEvent): boolean {
 /** Home's classes for the search widget (shell.css): on the grid (the foot's pill parked), carried under the dock. */
 export const searchClasses = () => `${hasSearchWidget() ? "search-parked" : ""} ${footAim.value === "below" ? "search-below-aim" : ""} ${carryingSearch() ? "search-carried" : ""}`;
 
-/** In the foot: the pill under the dock ("1"), else over it. */
-export const footBelow = stored("search.belowDock", "");
+/**
+ * In the foot: the pill under the dock ("1", the default) or over it ("0", the user's choice). Below by default (the
+ * user, 2026-11-09: "put the search bar below the icons by default"), on every device; a stored "1" or "0" is the
+ * user's own and stays. ("" was "over it" before: an explicit over-choice then removed the key, so it can't be told
+ * apart from never chosen - those get the new default.)
+ */
+export const footBelow = stored("search.belowDock", "1");
+/** The foot's pill is under the dock. */
+export const pillBelow = () => footBelow.value !== "0";
 
 /**
  * The widget's face: the pill, centred in its cells - no tile of its own (the pill is the surface). Its face only (the

@@ -116,9 +116,19 @@ powos devices call Desk unlock       # on the Mac; then `call Desk status` -> "l
 | device | agent | caps |
 |---|---|---|
 | Desk (.58, KDE) | `powos-deviced` systemd --user unit (`lib/devices/deploy.sh`, `units/gpu-58/powos-deviced.json`) | status, lock, unlock (owner only), screen_off, screen_on, sleep (guarded), wake |
-| Phone, rooted | `powos-deviced` in the system tier (`lib/apps/services/powos-deviced.json`, `units/phone/powos-deviced.json`; deployed by `rooted.sh deploy`). Android through the session's adb to itself (a hack row in REMOTE-POWOS §4) | status (battery, screen, locked), lock, screen_off, screen_on, ring, wake |
+| Phone, rooted | `powos-deviced` in the system tier (`lib/apps/services/powos-deviced.json`, `units/phone/powos-deviced.json`; deployed by `rooted.sh deploy`). Android through the session's adb to itself (a hack row in REMOTE-POWOS §4) | status (battery, screen, locked), lock, screen_off, screen_on, ring, wake, layout |
 | Phone, no root | the PowOS app (`devices/DeviceAgentHost.kt`, key in Android Keystore) | status, screen_on, ring; lock and screen_off once the owner allows them (below) |
 | Server (gpu-195, PowStation) | `powos-deviced` (server backend), not deployed yet | status, sleep (guarded), wake |
+
+## Import a home and dock from another device
+
+A new or second phone (the razr fold, no root) takes the home screen and pinned dock of the user's other PowOS
+device once: Settings > **import home** opens the Devices app; on the paired device's card, **Import**. The other
+device's agent answers `layout` (read-only: its shell keeps `shell-data/layout-export.json`, `shell/state.ts`); this
+shell applies it (`shell/homeimport.ts`): dock pins first (this device's own kept after them), home apps, folders and
+the shell's panels where they were, Android apps matched by package, the ones not installed here skipped and named.
+Nothing is removed and nothing keeps syncing. A device that can't answer yet (the no-root agent, `DeviceAgentCore.kt`)
+shows no Import.
 
 ## Phone without root: lock
 

@@ -23,6 +23,8 @@ export interface ThisDevice {
   allowLock(): Promise<LockAccess>;
   stopLock(): Promise<LockAccess>;
   onLock(on: (s: LockAccess) => void): () => void;
+  /** Another device's home + dock (its "layout" answer) onto this one (the shell's homeimport.ts); missing on older shells. */
+  importHome?(layout: unknown): Promise<{ dock: number; home: number; skipped: string[] }>;
 }
 export interface Host {
   net?: Net;
@@ -30,7 +32,7 @@ export interface Host {
 }
 
 export const APP = "local.devices";
-export type Cap = "status" | "lock" | "unlock" | "screen_off" | "screen_on" | "sleep" | "wake" | "ring";
+export type Cap = "status" | "lock" | "unlock" | "screen_off" | "screen_on" | "sleep" | "wake" | "ring" | "layout";
 
 export interface Device {
   id: string;

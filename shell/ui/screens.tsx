@@ -34,6 +34,7 @@ import {
 } from "../screens.ts";
 import { Icon, type IconName } from "./icons.tsx";
 import { PACK_INFO, PackBar, packAction, packCancellable, packFrees, packSize, packStatus, usePacks, type Pack, type PackStatus } from "./packs.tsx";
+import { openApp } from "../apps/pages.ts";
 import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, searchSpot, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine, chat, openPanel } from "../state.ts";
 import { iconTint } from "./icontint.ts";
 import { UI_FONTS, uiFont } from "./uifont.ts";
@@ -407,6 +408,8 @@ function SettingsScreen() {
     ["palette", "style", s?.theme ?? "theme, background, icons", () => openScreen("style")],
     // Home's own choices (style screen's "home" section): where the dock and the search sit - found from here too.
     ["apps", "home", "dock and search: bar or dock button", () => openScreen("style", "home")],
+    // Another device's home + pinned dock onto this one (homeimport.ts): the Devices app's Import on a paired device.
+    ["cellphoneScreenshot", "import home", "home and dock from your other device", () => (closeScreens(), openApp("local.devices"))],
     ["storefrontOutline", "widget store", "widgets for home", () => openScreen("store")],
     ["penguin", "linux", linuxLine(s?.linux, s?.powos ?? false), () => openScreen("linux")],
     ai,
