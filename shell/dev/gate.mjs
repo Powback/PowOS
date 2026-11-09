@@ -14583,6 +14583,12 @@ try {
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, `shade-steps-${label}`, viewport).then((r) => whenReady(r, () =>
         r.page.evaluate(async (at) => (await importShim("./dev/shade-steps-check.js")).steps(at), label))));
+  // S8'' (dev/shade-scroll-check.js): the one scroll - folded, the control center stays with its header pinned and its
+  // edge collapsing 1:1 with the notifications' scroll, all back at the top; unfolded, the control center column stays.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, `shade-scroll-${label}`, viewport).then((r) => whenReady(r, () =>
+        r.page.evaluate(async (at) => (await importShim("./dev/shade-scroll-check.js")).scroll(at), label))));
   // NS1-NS4 (dev/notif-stacks-check.js; the user, 11-01 16:39: "just show like 3 cards and then an 'x more' hint"):
   // groups of 1, 3 and 7 all on screen at once, each up to 3 full cards one after another and "+4 more" on the 7, top-
   // and bottom-aligned; a tap on "+4 more" opens that group alone. NS5-NS7 (11-01 16:47: "Let's move the notifications
