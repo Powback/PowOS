@@ -211,14 +211,17 @@ export const QUEUED_STEP = "phone check queued";
 export const CLAIM_EXPIRE_MS = 4 * 3600_000;
 const heartbeat = (w: BoardTask) => Math.max(Number(w.activity ?? 0), Number(w.updated ?? 0));
 
+/** [a] is the owner role's idle agent, and [w]'s heartbeat is inside the claim window. */
+const roleHolds = (a: Agent, w: BoardTask, now: number) =>
+  !a.work && !!w.owner && w.owner !== "coder" && a.role === w.owner && now - heartbeat(w) < CLAIM_EXPIRE_MS;
+
 export function holder(w: BoardTask, now = Date.now()): Agent | null {
   let byRole: Agent | null = null;
-  const fresh = now - heartbeat(w) < CLAIM_EXPIRE_MS;
   for (const id of agentIds.value) {
     const a = rows.get(id)?.value;
     if (!a || !isLive(a)) continue;
     if (a.work === w.id) return a;
-    if (fresh && !a.work && w.owner && w.owner !== "coder" && a.role === w.owner) byRole = a;
+    if (roleHolds(a, w, now)) byRole = a;
   }
   return byRole;
 }
