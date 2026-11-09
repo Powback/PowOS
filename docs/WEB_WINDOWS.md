@@ -193,6 +193,12 @@ frame of drag latency; measure it before turning it on for drags (animations fir
   CPU); the glass reads each window's rect once a measure, not per surface (its measure 1.7 -> 0.5 ms); the tick reads
   shared ancestors once for all windows. Host side: the app's relayouts were already paced (RS1: >= 3 frames, 40 ms;
   the final one on release) - the frame follows per move, the app's size at most 25 times a second.
+  RS5c (11-08): a resize move renders nothing (`resizeLive`): the dragged WebWin takes its frame in place (no webWins
+  write, so neither page's PageUnder/WebWindowsOn nor the window's tree re-render), and the move writes the frame's and
+  shadow's boxes, the outline's size text and the masks (lower windows', the page content's) to the DOM; the drag's end
+  commits one render. Renders a move 16 -> 0 (a snap change still renders the window: its outline class); gate trace
+  at 4x CPU: AsyncTask Run (Preact's render task) 50.8 -> 10.9 ms, restyled elements 20 -> 6 a move. Maximised frames
+  and zone heights near the system strips take the old path (a render).
 - [ ] **N5 - games**: windowed games are Linux windows (N1-N4 apply); full screen stays the direct-scanout task. Check:
   a windowed Proton game's menu (untyped override-redirect) shows (0062), fps x/120 unchanged by N1.
 
