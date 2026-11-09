@@ -6983,7 +6983,7 @@ async function searchToDock() {
   const G = await window.__gw.mod("./ui/grid.tsx");
   const W = await window.__gw.mod("./ui/searchwidget.tsx");
   const wide = !!document.querySelector(".home.wide");
-  W.footBelow.value = "";
+  W.footBelow.value = "0";
   const item = await window.__sp.placeSearchWidget();
   S.editing.value = true;
   // Folded the dock's row: it docks (SW1, the user 15:34: the button between pinned and recents); wide the one bar's

@@ -184,7 +184,7 @@ export async function adoptsHome(position, opts = {}) {
   await manyApps(powos);
   if (S.dock.value.length < 4) S.dock.value = S.recent.value.slice(0, 4);
   S.dockTry.value = position;
-  W.footBelow.value = opts.below ? "1" : "";
+  W.footBelow.value = opts.below ? "1" : "0";
   // The pill on home, folded too (folded's default is the dock button since SW1).
   S.searchTry.value = opts.button ? "dock" : "bar";
   await sleep(300);

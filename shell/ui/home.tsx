@@ -37,7 +37,7 @@ import { entryKey, PairCell, recentEntries } from "./pairs.tsx";
 import { Recents } from "./recents.tsx";
 import { appOf, dockTap } from "./desktops.ts";
 import { overWindows } from "./panellift.ts";
-import { SearchSpotMenu, footBelow, openSpotMenu, searchClasses } from "./searchwidget.tsx";
+import { SearchSpotMenu, openSpotMenu, pillBelow, searchClasses } from "./searchwidget.tsx";
 import { wideHome } from "../hosts/wide.ts";
 import { webWins, windowFrame } from "./webwindows.tsx";
 import { byKey, carry, dock, dockPosition, dockAim, dockDrag, drawer, editing, folder, menu, page, pageCount, pullKind, pullPanels, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
@@ -729,7 +729,7 @@ function HomeFrame({ children }: { children: preact.ComponentChildren }) {
     <div
       onPointerDownCapture={grabPill}
       onContextMenu={pillMenu}
-      class={`home adopts dock-${dockPosition.value} ${wideHome.value ? "wide" : ""} ${footBelow.value ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${overWindows.value ? "over-windows" : ""} ${carriedApp(carry.value) ? "carry-app" : ""} ${searchDockClasses()}`}
+      class={`home adopts dock-${dockPosition.value} ${wideHome.value ? "wide" : ""} ${pillBelow() ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${overWindows.value ? "over-windows" : ""} ${carriedApp(carry.value) ? "carry-app" : ""} ${searchDockClasses()}`}
     >
       {children}
     </div>

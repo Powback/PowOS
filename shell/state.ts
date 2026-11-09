@@ -484,7 +484,24 @@ export async function load() {
   noteHostRecent(keys);
   hostRecent.value = keys;
   dock.value = Array.isArray(pins) ? pins : [];
+  layoutLoaded = true;
 }
+
+/**
+ * This device's home and dock as data (data/layout-export.json), for another of the user's devices to import
+ * (homeimport.ts; the device agent's "layout" action hands it to a paired device). Written a moment after either
+ * changes, once both are loaded - never the empty defaults from before load().
+ */
+let layoutLoaded = false;
+let layoutTimer: ReturnType<typeof setTimeout> | undefined;
+effect(() => {
+  const h = home.value;
+  const d = dock.value;
+  if (!layoutLoaded) return;
+  clearTimeout(layoutTimer);
+  const items = h.items.filter((i) => !i.pending).map(({ key, kind, page, cell, name, label, app, apps }) => ({ key, kind, page, cell, name, label, app, apps }));
+  layoutTimer = setTimeout(() => void powos.store.set("layout-export", { v: 1, at: Date.now(), dock: d, home: { pages: h.pages, items } }), 2000);
+});
 
 // The host's list arrives after the page (it loads apps and icons in the background): the recent strip, filtered to
 // installed apps, follows it. Back on screen, the strip shows what was opened meanwhile.

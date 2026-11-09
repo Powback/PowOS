@@ -7,7 +7,7 @@
  * On a device enrolled as an approver, lib/join.tsx: new devices asking to join (Approve / Deny) and Revoke per device.
  */
 import { useState } from "preact/hooks";
-import { approverOf, forget, load, save, type Cap, type Device, type Host, type Status } from "../lib/devices";
+import { act, approverOf, forget, load, save, type Cap, type Device, type Host, type Status } from "../lib/devices";
 import { canWake, useActions, useLive, type Live, type Pending } from "../lib/live";
 import { AddDevice } from "../lib/add";
 import { ThisPhone } from "../lib/thisphone";
@@ -66,6 +66,11 @@ export default function Main({ host, close }: Props) {
           dismiss={() => dismiss(d.id)}
           remove={() => drop(d)}
           enrolled={by && realm.enrolled ? realm.enrolled.has(d.id) : null}
+          importHome={
+            d.caps.includes("layout") && host.thisDevice?.importHome
+              ? async () => host.thisDevice!.importHome!((await act(net, d, "layout")).result)
+              : undefined
+          }
           revoke={async () => {
             await realm.revoke(d.id);
             drop(d);
@@ -94,7 +99,7 @@ function actionsFor(d: Device, s: Status | undefined, wake: boolean): Cap[] {
   return (["lock", "unlock", screen, "sleep", "ring"] as Cap[]).filter((a) => d.caps.includes(a));
 }
 
-function DeviceCard({ d, live, pending, wake, run, dismiss, remove, enrolled, revoke }: {
+function DeviceCard({ d, live, pending, wake, run, dismiss, remove, enrolled, revoke, importHome }: {
   d: Device;
   live?: Live;
   pending?: Pending;
@@ -105,6 +110,8 @@ function DeviceCard({ d, live, pending, wake, run, dismiss, remove, enrolled, re
   /** In the realm (this device an approver): true enrolled, false paired only; null = not known here. */
   enrolled: boolean | null;
   revoke: () => Promise<void>;
+  /** This device takes [d]'s home + dock (d advertises "layout", this shell can import). */
+  importHome?: () => Promise<{ dock: number; home: number; skipped: string[] }>;
 }) {
   const shown = shownStatus(live, pending);
   const actions = actionsFor(d, shown, wake);
@@ -121,6 +128,38 @@ function DeviceCard({ d, live, pending, wake, run, dismiss, remove, enrolled, re
       {actions.length > 0 && <Actions actions={actions} pending={pending} run={run} />}
       {pending?.error && <Refused pending={pending} run={run} dismiss={dismiss} />}
       {enrolled !== null && <Membership name={d.name} enrolled={enrolled} revoke={revoke} />}
+      {importHome && <ImportHome name={d.name} go={importHome} />}
+    </div>
+  );
+}
+
+type ImportState = "idle" | "working" | { done: string } | { error: string };
+
+/**
+ * [name]'s home and pinned dock onto this device, once (the user, 2026-11-09: "I don't have my original dock"): apps
+ * by package, the ones not installed here skipped and named. Shown as working at once, then what it did, or the
+ * device's words and a Try again.
+ */
+function ImportHome({ name, go }: { name: string; go: () => Promise<{ dock: number; home: number; skipped: string[] }> }) {
+  const [st, setSt] = useState<ImportState>("idle");
+  const run = async () => {
+    setSt("working");
+    try {
+      const r = await go();
+      const miss = r.skipped.length ? ` - not installed here: ${[...new Set(r.skipped)].slice(0, 4).join(", ")}${r.skipped.length > 4 ? "..." : ""}` : "";
+      setSt({ done: `Dock: ${r.dock} apps, home: ${r.home} added${miss}` });
+    } catch (e) {
+      setSt({ error: (e as Error).message });
+    }
+  };
+  return (
+    <div style={S.row} data-import-home>
+      <div style={{ ...(typeof st === "object" && "error" in st ? S.errorText : S.muted), ...S.grow }}>
+        {st === "working" ? `Taking ${name}'s home and dock...` : typeof st === "object" ? ("done" in st ? st.done : `Import: ${st.error}`) : `Use ${name}'s home and dock here`}
+      </div>
+      {st !== "working" && !(typeof st === "object" && "done" in st) && (
+        <button style={S.btn} data-import-home-go onClick={run}>{typeof st === "object" ? "Try again" : "Import"}</button>
+      )}
     </div>
   );
 }

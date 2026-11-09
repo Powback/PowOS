@@ -40,6 +40,8 @@ Protocol (v1; JSON over HTTPS):
   POST /v1/action          Bearer token: {action, force?, args?} -> {ok, result | error}. `unlock` (a desktop only) is
                            owner-only: the peer marked owner here (`owner`), or an approver device enrolled in this
                            device's realm; anyone else is refused (403). Every unlock and refusal is logged.
+                           `layout` (a phone): its PowOS home + dock as data, for a paired device to import
+                           (shell/homeimport.ts) - read-only, nothing on this device changes.
   GET  /v1/peers           Bearer token
   DELETE /v1/peers/<id>    Bearer token: revoke a device (a lost phone revoked from any other paired device)
   GET  /v1/enroll/pending  Bearer token, from this same device only (the Devices app here): devices waiting to join,
@@ -83,7 +85,7 @@ PAIR_PENDING_MAX = 3
 BODY_MAX = 16 * 1024
 # Actions and what they mean to a person; a device advertises the ones its backend can do.
 DESKTOP_GPU = {"kwin_wayland", "Xwayland", "plasmashell", "gnome-shell", "gamescope", "steamwebhelper"}
-ACTIONS = ("lock", "unlock", "screen_off", "screen_on", "sleep", "wake", "ring")
+ACTIONS = ("lock", "unlock", "screen_off", "screen_on", "sleep", "wake", "ring", "layout")
 # Actions only the device's owner may run (owner_of): ending a lock screen is the owner's, not every paired device's.
 OWNER_ONLY = ("unlock",)
 
@@ -343,11 +345,29 @@ class AndroidBackend(Backend):
     ADB = ["adb", "-s", "127.0.0.1:5555", "shell"]
     RING = "/usr/share/sounds/freedesktop/stereo/phone-incoming-call.oga"
 
+    # The PowOS app's home + dock as its shell exports them (shell/state.ts exportLayout, shell/homeimport.ts): what
+    # "layout" hands a paired device that imports this phone's home (read-only; the app's data needs root here).
+    LAYOUT = "/data/data/com.powos.app/files/shell-data/layout-export.json"
+
     def caps(self):
-        c = ["status", "lock", "screen_off", "screen_on", "wake"]
+        c = ["status", "lock", "screen_off", "screen_on", "wake", "layout"]
         if os.path.exists(self.RING) and shutil.which("paplay"):
             c.append("ring")
         return c
+
+    def layout(self):
+        rc, out = (1, "")
+        if os.access(self.LAYOUT, os.R_OK):
+            rc, out = 0, load_text(self.LAYOUT)
+        if rc or not out:
+            rc, out = self.sh("su", "-c", f"cat {self.LAYOUT}")
+        try:
+            data = json.loads(out) if rc == 0 else None
+        except ValueError:
+            data = None
+        if not isinstance(data, dict) or data.get("v") != 1:
+            raise ActionError("no home layout exported yet (open the PowOS home once)", "failed")
+        return data
 
     def sh(self, *cmd):
         return run(self.ADB + list(cmd), timeout=6)
@@ -390,6 +410,8 @@ class AndroidBackend(Backend):
             return self._ok(self.sh("input", "keyevent", "224"))  # KEYCODE_WAKEUP (stays locked)
         if action == "ring":
             return self._ok(run(["paplay", self.RING], timeout=15))
+        if action == "layout":
+            return self.layout()
         return Backend.act(self, action, args, force)
 
 

@@ -181,6 +181,14 @@ run)
   # is a few quick user.sh calls, never a reason to hold the ship loop. SHIP_E2E=0 turns it off (tests).
   e2e_round() { [ "${SHIP_E2E:-1}" = 1 ] && [ -z "${SHIP_DIR:-}" ] && [ -x "$here/verify/e2e-queue.sh" ] || return 0
     ( "$here/verify/e2e-queue.sh" --if-idle >> "$Q/e2e.log" 2>&1 || echo "$(date '+%F %T') e2e: round NOT queued (queue.sh refused) - $Q/e2e.log" >> "$Q/shipped.log" & ) ; echo "$(date +%T) e2e: a round of user journeys asked for ($Q/e2e.log)"; }
+  # nonroot_kick: the non-root phones (tools/phone/devices.conf) brought to what's live here - the last installed APK and
+  # the live shell (tools/phone/nonroot-sync.sh, in the background, from a private copy: this checkout is reset under
+  # it). At most once a minute unless the live tip moved (--now: the runner's idle exit, a last pass); never in a test queue (SHIP_DIR) unless SHIP_NONROOT=1.
+  # (2026-11-09: the razr fold kept its last manual APK's UI - "the launcher seems way outdated".)
+  nonroot_kick() { { [ -z "${SHIP_DIR:-}" ] || [ "${SHIP_NONROOT:-}" = 1 ]; } && [ -s "$SR/tools/phone/devices.conf" ] && [ -f "$SR/tools/phone/nonroot-sync.sh" ] || return 0
+    local d; d=$(mktemp -d "${TMPDIR:-/tmp}/powos-nonroot-kick.XXXXXX") || return 0
+    cp "$SR/tools/phone/nonroot-sync.sh" "$SR/tools/phone/devices.conf" "$d/" || { rm -rf "$d"; return 0; }
+    ( NONROOT_REPO=$SR NONROOT_CONF=$d/devices.conf bash "$d/nonroot-sync.sh" ${1:---if-due} >/dev/null 2>&1; rm -rf "$d" ) & }
   mail() { local s t ev kind; s=$(mktemp "$Q/mail.XXXX")
     printf 'powos comms send %q %q --from ship-queue >/dev/null 2>&1 || true\n' "${SHIP_MAIL_TO:-coder}" "$1" > "$s"
     # A failed/refused ship is friction too (powos friction: counted, so a recurring refusal shows up as the top item).
@@ -720,6 +728,7 @@ run)
       T=$(git rev-parse HEAD)
       inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
       reap_apk
+      nonroot_kick
       inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
       # Paused: nothing new starts; an APK ship still out (installing) is reaped first.
       if [ -e "$Q/paused" ]; then
@@ -1005,6 +1014,7 @@ run)
     [ -f "$Q/apk/rc" ] && { reap_apk; continue; }
     # A rooted deploy still due (its APK just installed, say): one more pass, never while paused.
     [ ! -e "$Q/paused" ] && ship_tree >/dev/null && rooted_go && continue
+    [ -e "$Q/paused" ] || nonroot_kick --now
     rm -rf "$L"
     [ -e "$Q/paused" ] && break
     # A request written while this runner was on its way out: take the lock again and serve it.
