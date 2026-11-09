@@ -8,7 +8,7 @@ package andro.marchy;
  * AND InstallActivity finished, packs included); a start whose D-Bus or compositor doesn't come up is ended and made
  * again after a growing pause, a few times, every state shown on the splash (SessionService.status).
  */
-final class SessionPlan {
+public final class SessionPlan {
     private SessionPlan() {}
 
     enum Action { WAIT_IMAGE, WAIT_SETUP, START, UP, RETRY, GIVE_UP }
@@ -96,9 +96,19 @@ final class SessionPlan {
      * 6.7.5-3.3 replaced the base image's 3.31, built against an older libKScreenLocker - KWin then died at start
      * ("undefined symbol ScreenLocker::KSldApp::lock") and no Linux app found a display. -Su (without -uu) never
      * downgrades; packages the image doesn't have come with the packs (Packs), not with every session start.
+     *
+     * The image's own updater when it has one (lib/phone-update.sh, from the powos-core package: the same run as
+     * `powos update` and the app's Settings, docs/PHONE-UPDATES.md). An image without it yet: this bootstrap - the
+     * stale lock a killed pacman left removed (every later start failed "unable to lock database", razr 11-09), the
+     * upgrade, then powos-core installed once over the files the base image put there unowned (--overwrite), which
+     * brings the updater for every later start.
      */
-    static String packagesCommand() {
+    public static String packagesCommand() {
         return "C=/etc/pacman.d/powos-repo.conf; exec >\"$XDG_RUNTIME_DIR/powos-packages.log\" 2>&1;"
-                + " sudo pacman --config $C -Syu --noconfirm || exit 0";
+                + " U=/usr/lib/powos/phone-update.sh; [ -f $U ] && exec sh $U --session;"
+                + " [ -e /var/lib/pacman/db.lck ] && ! pgrep -x pacman >/dev/null && rm -f /var/lib/pacman/db.lck;"
+                + " sudo pacman --config $C -Syu --noconfirm;"
+                + " pacman -Q powos-core >/dev/null 2>&1 || sudo pacman --config $C -S --noconfirm --overwrite '*' powos-core;"
+                + " exit 0";
     }
 }

@@ -681,6 +681,15 @@ internal object ShellSource {
         return shipped
     }
 
+    /** The served shell's commit time (the newer of the APK's and the layer's stamps), 0: neither is stamped. The
+     *  store's bundle applies only when newer than this (upgrade/PowosUpdates). */
+    @Synchronized
+    fun servedTime(context: Context): Long {
+        readApk(context)
+        readLayer(context)
+        return maxOf(apk?.time ?: 0L, layer?.time ?: 0L)
+    }
+
     /** The commit the page is served from, for window.__powosShellCommit (ship.sh's post-install check). */
     fun servedCommit(context: Context): String {
         shippedWins(context)

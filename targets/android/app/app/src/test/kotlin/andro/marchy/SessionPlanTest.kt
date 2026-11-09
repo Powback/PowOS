@@ -93,4 +93,16 @@ class SessionPlanTest {
         assertFalse(c.contains("-uu"))
         assertFalse(c.contains("Slq"))
     }
+
+    @Test
+    fun packageUpdateHandsOverToTheImagesUpdaterAndBootstrapsPowosCore() {
+        val c = SessionPlan.packagesCommand()
+        // The packaged updater wins once powos-core brought it.
+        assertTrue(c.indexOf("exec sh \$U --session") in 0 until c.indexOf("pacman --config"))
+        // A killed pacman's lock is cleared only when no pacman runs.
+        assertTrue(c.contains("! pgrep -x pacman >/dev/null && rm -f /var/lib/pacman/db.lck"))
+        // powos-core only when absent (never -S of an installed one: that could downgrade it).
+        assertTrue(c.contains("pacman -Q powos-core >/dev/null 2>&1 || sudo pacman --config \$C -S --noconfirm --overwrite '*' powos-core"))
+        assertTrue(c.trimEnd().endsWith("exit 0"))
+    }
 }
