@@ -66,24 +66,27 @@ object EngineHome {
     ): String? {
         val p: Path = File(rootfs, rel).toPath()
         target.mkdirs()
-        if (Files.isSymbolicLink(p)) {
-            if (Files.readSymbolicLink(p).toString() == target.path) return null
-            Files.delete(p)
-        } else if (Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) {
-            val dir = p.toFile()
-            for (entry in dir.listFiles().orEmpty()) {
-                val dest = File(target, entry.name)
-                if (!dest.exists()) entry.renameTo(dest)
-            }
-            if (!dir.delete()) {
-                val aside = File(dir.parentFile, "${dir.name}.before-link")
-                if (!dir.renameTo(aside)) return "$rel: a dir in the way, kept"
-            }
-        } else if (Files.exists(p, LinkOption.NOFOLLOW_LINKS)) {
-            Files.delete(p)
-        }
+        if (Files.isSymbolicLink(p) && Files.readSymbolicLink(p).toString() == target.path) return null
+        if (!clear(p, target)) return "$rel: a dir in the way, kept"
         p.parent?.let { Files.createDirectories(it) }
         Files.createSymbolicLink(p, target.toPath())
         return "$rel -> ${target.path}"
+    }
+
+    /** Nothing at [p] any more: a link or file deleted, a dir's entries moved into [target]; false when it stayed. */
+    private fun clear(
+        p: Path,
+        target: File,
+    ): Boolean {
+        if (!Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) {
+            Files.deleteIfExists(p)
+            return true
+        }
+        val dir = p.toFile()
+        for (entry in dir.listFiles().orEmpty()) {
+            val dest = File(target, entry.name)
+            if (!dest.exists()) entry.renameTo(dest)
+        }
+        return dir.delete() || dir.renameTo(File(dir.parentFile, "${dir.name}.before-link"))
     }
 }
