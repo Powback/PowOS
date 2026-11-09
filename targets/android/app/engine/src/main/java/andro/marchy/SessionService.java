@@ -546,7 +546,10 @@ public class SessionService extends Service {
         env.put("ARCH_ROOTFS", rootfs(ctx).getPath());
         // sockets: real paths, not rewritten into the rootfs. PowOS: also the phone's shared storage (/storage,
         // /sdcard), so PowOS's file manager and apps see the phone's files (storage permission: MainActivity).
-        env.put("ARCH_EXCLUDE_EXTRA", run.getPath() + ":/storage:/sdcard");
+        // PowOS: also the launcher's widgets and apps dirs, which the image's home links to (EngineHome, gh#13): a
+        // link's absolute target must not be rewritten into the rootfs (owl-check's realpath, powos app's renames).
+        env.put("ARCH_EXCLUDE_EXTRA", run.getPath() + ":/storage:/sdcard"
+                + ":" + new File(ctx.getFilesDir(), "widgets").getPath() + ":" + new File(ctx.getFilesDir(), "apps").getPath());
         env.put("XDG_RUNTIME_DIR", run.getPath());
         env.put("TZ", java.util.TimeZone.getDefault().getID()); // glibc only knows /etc/localtime otherwise: UTC
         env.put("LANG", androidLocale(ctx)); // Android's language (first-boot.sh compiles its locale)

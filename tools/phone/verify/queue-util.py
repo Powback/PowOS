@@ -4,6 +4,8 @@
   queue-util.py [--since EPOCH] [--windows] UTIL_LOG          the runner's own records (queue.sh util_rec)
   queue-util.py [--last S] [--windows] --runner-log LOG       the same, rebuilt from runner.log's text (older runs;
                                                               --last: its trailing S seconds)
+  queue-util.py --history LOG                                 per check script, from runner.log: "<script> <runs>
+                                                              <p50 s> <budget s>" (queue.sh's job_budget / order_quick)
 
 UTIL_LOG lines (queue.sh writes them):
   J <start> <end> <class> <job>   one job: class pass | fail | skip | touched | precond | early | stopped | timeout
@@ -123,7 +125,80 @@ def report(jobs, wins, per_window=False):
     return "\n".join(lines)
 
 
+# --history: what each check script costs, from its past runs in runner.log ("run <job>: <cmd>" + its verdict line).
+# Why (11-09, the window ledger 11-07 05:31 - 11-09 04:03): 15336 s of idle windows, 45% on PASS/FAIL verdicts, 16% on
+# "FAIL timeout" kills - every one at the 300 s default budget (962 of 1104 jobs carry it), never an explicit one. A
+# check known to finish in 60 s that hangs burnt 300 s; a check that passes in 366 s by design (e2e-desktop: 9 passes over
+# 240 s) was killed as a FAIL. The budget follows the check's own history instead (queue.sh job_budget, default
+# budgets only):
+#   lower: >= HIST_MIN_DONE completed runs (PASS/FAIL, no timeout) in its last 20: 2 x their max + 60, at least 120 s
+#   raise: >= 3 PASSes, the longest over 80% of the default, not a games/Steam check (a slow game launch IS the FAIL,
+#          the add-time rule): 1.25 x the longest pass + 30, at most HIST_MAX_S (900)
+# The p50 is the expected run time: queue.sh order_quick runs short checks first in a window.
+HRUN = re.compile(r"^(\d\d):(\d\d):(\d\d) run (\S+): (.*)$")
+HEND = re.compile(r"^(\d\d):(\d\d):(\d\d) (\S+): (PASS|FAIL|SKIP|INVALID|no window|rc 3|stopped|past its)(.*)$")
+GAMES = re.compile(r"^(bf-|steam-|td-launch|mc-launch|games?-)|fps|(^|[^a-z])fold([^a-z]|$)|kernel")   # queue.sh HW_ONLY
+HIST_MIN_DONE, HIST_MAX_S, DEFAULT_BUDGET = 5, 900, 300
+
+
+def script_key(cmd):
+    """The check a command runs: its first *.sh / *.py word's basename (env X=1 ... / bash -c "..." aside)."""
+    for w in cmd.replace('"', " ").replace("'", " ").split():
+        if w.endswith((".sh", ".py")):
+            return w.rsplit("/", 1)[-1]
+    return ""
+
+
+def history(path):
+    day, last, cur, runs = 0, -1, {}, {}
+    try:
+        f = open(path, encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    for ln in f:
+        m = HRUN.match(ln) or HEND.match(ln)
+        if not m:
+            continue
+        t = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+        if last >= 0 and t < last - 3600:
+            day += 1
+        last = t
+        at = day * 86400 + t
+        if HRUN.match(ln):
+            cur[m.group(4)] = (at, script_key(m.group(5)))
+            continue
+        if m.group(5) == "past its" or m.group(4) not in cur:
+            continue
+        a, k = cur.pop(m.group(4))
+        if not k:
+            continue
+        rest = m.group(5) + m.group(6)
+        kind = "timeout" if rest.startswith("FAIL timeout") else ("pass" if rest.startswith("PASS") else
+                                                                   "fail" if rest.startswith("FAIL") else "other")
+        runs.setdefault(k, []).append((at - a, kind))
+    return runs
+
+
+def budget_of(key, runs):
+    """(p50, budget) for one script's runs (oldest first); budget 0 = keep the job's own."""
+    recent = runs[-20:]
+    done = sorted(d for d, k in recent if k in ("pass", "fail"))
+    p50 = done[len(done) // 2] if done else 0
+    passes = [d for d, k in runs if k == "pass"][-20:]
+    if len(passes) >= 3 and max(passes) > 0.8 * DEFAULT_BUDGET and not GAMES.match(key):
+        return p50, min(HIST_MAX_S, int(1.25 * max(passes)) + 30)
+    if len(done) >= HIST_MIN_DONE and not key.endswith("-install.sh"):   # an install's time follows its package
+        b = max(120, 2 * done[-1] + 60)
+        return p50, (b if b < DEFAULT_BUDGET else 0)
+    return p50, 0
+
+
 def main(argv):
+    if argv[:1] == ["--history"] and len(argv) >= 2:
+        for k, v in sorted(history(argv[1]).items()):
+            p50, b = budget_of(k, v)
+            print(k, len(v), p50, b)
+        return 0
     since, per, rlog, path = 0, False, None, None
     i = 0
     while i < len(argv):

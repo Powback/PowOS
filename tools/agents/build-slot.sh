@@ -66,5 +66,41 @@ while :; do
   sleep "${BUILD_SLOT_POLL_S:-2}"
 done
 [ -z "$said" ] || echo "build-slot: got the $lane slot after $(($(date +%s) - t0))s" >&2
-trap 'rm -rf "$lock"' EXIT
-"$@"
+# Releasing the slot, and not leaving a container behind (2026-11-09: `angry_beaver`, a `./gradlew
+# testDebugUnitTest` on the shared gradle-cache volume, ran 33+ min after its caller was gone, holding Gradle's
+# journal lock so every other JVM test/ship failed). Callers wrap this in `perl -e 'alarm N; exec @ARGV'` or get
+# stopped; SIGALRM/SIGTERM then killed this shell without running an EXIT trap (bash skips EXIT on an untrapped
+# fatal signal) - the slot stayed locked until the pid-reuse check reclaimed it - and killing the docker CLI never
+# stops its container. So: a `docker run` gets a container name (the caller's own --name, else a generated one),
+# the command runs in the background with `wait` so a signal is handled at once, and every way out (normal exit,
+# HUP/INT/TERM/ALRM) kills the CLI, `docker rm -f`s the container and removes the lock. SIGKILL can't be trapped;
+# its lock is reclaimed by the dead-holder check above, its container is not.
+cname=""; own_name=""
+if [ "${1##*/}" = docker ] && [ "${2:-}" = run ]; then
+  prev=""
+  for a in "${@:3}"; do
+    case $a in --name=*) cname=${a#--name=}; own_name=1; break ;; esac
+    [ "$prev" = --name ] && { cname=$a; own_name=1; break; }
+    prev=$a
+  done
+  if [ -z "$cname" ]; then
+    tag=$(printf '%s' "$label" | tr -c 'A-Za-z0-9_.-' '-' | cut -c1-40)
+    cname="build-slot-$$-$tag"
+    set -- "$1" run --name "$cname" "${@:3}"
+  fi
+fi
+child=""
+cleanup() {   # <on-signal>: kill the CLI, remove the container (a caller-named one only on a signal), free the slot
+  [ -z "$child" ] || kill -TERM "$child" 2>/dev/null
+  if [ -n "$cname" ] && { [ -n "$1" ] || [ -z "$own_name" ]; }; then docker rm -f "$cname" >/dev/null 2>&1; fi
+  rm -rf "$lock"
+}
+on_signal() { trap - EXIT HUP INT TERM ALRM; cleanup 1; exit $((128 + $1)); }
+trap 'cleanup ""' EXIT
+trap 'on_signal 1' HUP; trap 'on_signal 2' INT; trap 'on_signal 15' TERM; trap 'on_signal 14' ALRM
+# `0<&0`: an async command in a non-interactive shell otherwise gets /dev/null as stdin (docker run -i, pipes).
+"$@" 0<&0 &
+child=$!
+wait "$child"; rc=$?
+child=""
+exit "$rc"

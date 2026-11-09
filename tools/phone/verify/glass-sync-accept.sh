@@ -34,6 +34,7 @@ setsync() { sh_ "settings put global powos_glass_sync $1"; }
 . "$here/window-lock.sh"; window_lock glass-sync-accept.sh 120
 ORIG=$(sh_ "settings get global powos_glass_sync"); case $ORIG in 0|1) ;; *) ORIG=0 ;; esac
 KEEP=0 # 1 = PASS: leave sync on
+WHY="" # why nothing was judged (exit 5): restore prints it last, the line the queue shows
 CLEAN='(async()=>{document.getElementById("gsa-t")?.remove();document.getElementById("gsa-s")?.remove();try{const S=await importShim("./state.ts");S.folder.value=null}catch(e){}return "clean"})()'
 reload() { # both glass pages, then wait for home to be back (its glass module and tiles)
   cdp home 'location.reload(),1' >/dev/null; cdp shade 'location.reload(),1' >/dev/null
@@ -45,7 +46,8 @@ restore() {
   local want=$ORIG; [ $KEEP = 1 ] && want=1
   if [ "$(sh_ "settings get global powos_glass_sync")" != "$want" ]; then setsync "$want"; reload >/dev/null; fi
   echo "powos_glass_sync now $(sh_ "settings get global powos_glass_sync") (was $ORIG)"
-  home; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"; }
+  home; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"
+  [ -z "${WHY:-}" ] || echo "SKIP can't run: $WHY"; }
 trap restore EXIT
 I0=$(irq)
 chk() { [ "$(irq)" = "$I0" ] || { echo "STOP: a real touch at $1 - restoring"; exit 3; }; }
@@ -69,7 +71,9 @@ S_JS='(async()=>{const {powos}=await importShim("./bridge.ts");await powos.shade
 FF() { docker run --rm -v "$OUT":/w -w /w --entrypoint "$1" linuxserver/ffmpeg:latest "${@:2}"; }
 record() { # record <mode> <scene>: screenrecord around the scene's driver
   local m=$1 sc=$2 f=/data/local/tmp/gsa-$1-$2.mp4 rp r
-  "$A" shell "rm -f $f; screenrecord --display-id $DID --bit-rate 40000000 --time-limit 4 $f" >/dev/null 2>&1 & rp=$!
+  # As root, as ww-resize.sh's working recorder (11-02/10-28: the shell user's screenrecord left no file - every run
+  # exited 5 at "no recording for off/widget", read on the board as the setting toggle); its own words kept in .err.
+  "$A" shell "su -c 'rm -f $f; screenrecord --display-id $DID --bit-rate 40000000 --time-limit 4 $f'" > "$OUT/$m-$sc.err" 2>&1 & rp=$!
   sleep 0.6
   case $sc in
     widget) r=$(cdp home "$W_JS") ;;
@@ -78,9 +82,9 @@ record() { # record <mode> <scene>: screenrecord around the scene's driver
     shade)  cdp shade "$S_PRE" >/dev/null; r=$(cdp home "$S_JS"); sleep 1.4; "$A" shell input keyevent KEYCODE_BACK; sleep 1.2
             cdp shade 'document.getElementById("gsa-s")?.remove(),1' >/dev/null ;;
   esac
-  wait $rp; "$A" pull "$f" "$OUT/$m-$sc.mp4" >/dev/null 2>&1; "$A" shell "rm -f $f" >/dev/null 2>&1
+  wait $rp; sh_ "chmod 644 $f"; "$A" pull "$f" "$OUT/$m-$sc.mp4" >/dev/null 2>&1; sh_ "rm -f $f" >/dev/null
   case $r in *ok*) ;; *) [ $sc = shade ] || { echo "can't run scene $sc: $r"; exit 5; } ;; esac
-  [ -s "$OUT/$m-$sc.mp4" ] || { echo "no recording for $m/$sc"; exit 5; }
+  [ -s "$OUT/$m-$sc.mp4" ] || { WHY="no recording for $m/$sc (display $DID; screenrecord: $(tr '\n' ' ' < "$OUT/$m-$sc.err" | cut -c1-200))"; echo "$WHY"; exit 5; }
   home; chk "$m/$sc"; }
 
 cat > "$OUT/an.py" <<'PY'

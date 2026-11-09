@@ -1,0 +1,52 @@
+{
+  "id": "local.powos-progress",
+  "name": "Progress",
+  "version": "0.1.0",
+  "description": "How far PowOS is from being your everyday phone: the daily-driver checklist (what works, what's partly there, what's broken), the agents' board (needs you, ready to try, being worked on, blocked) and the known hacks, live.",
+  "icon": "icon.svg",
+  "ui": {
+    "dir": "out/ui/"
+  },
+  "page": {
+    "entry": "pages/main.js"
+  },
+  "module": {
+    "path": "module/",
+    "lang": "rust",
+    "database": "local-powos-progress",
+    "stdb": "2.12"
+  },
+  "backend": null,
+  "widgets": [
+    {
+      "id": "main",
+      "name": "Daily driver",
+      "kind": "island",
+      "entry": "widgets/main.js",
+      "size": "2x2",
+      "minSize": "2x2"
+    },
+    {
+      "id": "hacks",
+      "name": "Hacks",
+      "kind": "island",
+      "entry": "widgets/hacks.js",
+      "size": "2x2",
+      "minSize": "2x2"
+    }
+  ],
+  "surfaces": {
+    "launcher": true,
+    "desktop": true
+  },
+  "permissions": [],
+  "budget": {
+    "phone": {
+      "memMB": 8,
+      "idle": "unload"
+    },
+    "desktop": {
+      "memMB": 16
+    }
+  }
+}

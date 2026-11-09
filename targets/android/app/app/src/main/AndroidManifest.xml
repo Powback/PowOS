@@ -79,6 +79,10 @@
 
     <!-- Uninstall from the app drawer's long-press menu (ACTION_DELETE). -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <!-- Its own update from the PowApps store (upgrade/PowosUpdates, docs/PHONE-UPDATES.md): a user-confirmed install,
+         silent where Android lets the installer of record update itself. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
     <uses-feature
         android:name="android.software.live_wallpaper"
@@ -498,6 +502,10 @@
             android:name=".widgets.recon.ReconReceiver"
             android:exported="true"
             android:permission="android.permission.DUMP" />
+        <!-- PackageInstaller's answer to the app's own update (upgrade/PowosUpdates): only the system sends it. -->
+        <receiver
+            android:name=".upgrade.PowosUpdates$InstallResult"
+            android:exported="false" />
 
         <!-- Smart glasses (glasses/): the connection's foreground service, the companion pairing flow (invisible: only the
              system's dialogs), and the companion presence callbacks (the system binds it; the permission says so). -->

@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# GATE_REMOTE=<ssh host> (sourced by dev/gate.sh and dev/preview.sh): the gate's headless-Chromium runs - the scene run
+# GATE_HOST=58 | <ssh host> (sourced by dev/gate.sh and dev/preview.sh): the gate's headless-Chromium runs - the scene run
 # (gate.mjs) and the widget sweep's browser passes (preview.mjs) - go to an idle LAN box instead of the Mac, whose CPU
 # is the agents' (11-01: the full ship gate took 780-952 s at Mac load 15-20, 36% of ship gates failed under load).
 # Same image and tag (the remote's native arch: amd64 on the x86 boxes), same command, same env; the output streams
@@ -9,15 +9,31 @@
 #   slot's dir is reused so it stays warm), tx/ (gate.mjs's transpile cache, shared, kept between runs) and the image.
 #   Registered on the remote as unit powos-gate-remote (units/gpu-58/powos-gate-remote.json -> ~/.config/powos/units.d).
 # Unreachable (ssh BatchMode, 5 s) -> the gate runs locally and says so. Non-interactive ssh keys only.
-#   GATE_REMOTE=powos@192.168.50.58   the 9950X3D box (32 threads, idle most of the day)
-#   GATE_REMOTE=0 / unset             local, as before
+#   GATE_HOST=58                      the 9950X3D box, powos@192.168.50.58 (32 threads, idle most of the day)
+#   GATE_HOST=<ssh host>              any other box with docker/podman
+#   GATE_HOST=local / 0 / unset       local, as before. GATE_REMOTE is the older name of the same setting.
+# 11-09: at Mac load 40-80 every scene of the ship's gate hit its 900 s deadline (0 PASS / 321 FAIL) while each passed
+# alone - the browser work is what the Mac can't carry.
+#   On the remote each container gets at most GATE_HOST_CPUS (default 24 of .58's 32: the box is shared with another
+# project, as tools/agents/offload.sh) as a CFS quota (--cpus: rootless podman there has the cpu controller delegated,
+# not cpuset, and a taskset on podman doesn't reach the container) under nice 10 (that one is inherited), and gate.mjs
+# sizes its scene concurrency from that many cores (passed as GATE_HOST_CPUS) and the box's own load.
 GR_HOST="" GR_ROOT=".cache/powos-gate-remote" GR_PLATFORM="" GR_IMAGE="" GR_PREFIX=""
+GR_NCPUS=${GATE_HOST_CPUS:-24}
 GR_SSH=(ssh -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+
+# gr_target: the ssh host GATE_HOST (or GATE_REMOTE) names, or nothing for local.
+gr_target() {
+  local want=${GATE_HOST:-${GATE_REMOTE:-}}
+  case $want in "" | 0 | local) return 0 ;; 58) want=powos@192.168.50.58 ;; esac
+  echo "$want"
+}
 
 # gr_init IMAGE: GR_HOST set when the remote answers and has the image; else empty (local) with a line saying why.
 gr_init() {
-  local want=${GATE_REMOTE:-} arch
-  [ -n "$want" ] && [ "$want" != 0 ] || return 0
+  local want arch
+  want=$(gr_target)
+  [ -n "$want" ] || return 0
   if ! arch=$(perl -e 'alarm 15; exec @ARGV' "${GR_SSH[@]}" "$want" uname -m 2>/dev/null); then
     echo "gate: remote $want unreachable - running locally"; return 0
   fi
@@ -32,7 +48,7 @@ gr_init() {
   fi
   [ -f "$unit" ] && rsync -q -e "${GR_SSH[*]}" "$unit" "$want:.config/powos/units.d/" 2>/dev/null || true
   GR_HOST=$want
-  echo "gate: remote: browser runs on $GR_HOST ($GR_PLATFORM)"
+  echo "gate: remote: browser runs on $GR_HOST ($GR_PLATFORM, at most $GR_NCPUS cpus, nice 10)"
 }
 
 # gr_push SRC DEST [rsync args]: SRC (a dir: its contents) to ~/GR_ROOT/DEST on the remote, mirrored.
@@ -54,7 +70,8 @@ gr_run() {
   home=$(perl -e 'alarm 15; exec @ARGV' "${GR_SSH[@]}" "$GR_HOST" 'echo $HOME') || return 2
   for a in "$@"; do out+=("${a//@\//$home/$GR_ROOT/}"); done
   # keep-id: the image's user (chrome, 1000) is the remote user, so it can write /cache; label=disable: SELinux.
-  perl -e 'alarm 3600; exec @ARGV' "${GR_SSH[@]}" "$GR_HOST" "$(printf '%q ' docker run --rm --name "$name" --userns keep-id \
+  perl -e 'alarm 3600; exec @ARGV' "${GR_SSH[@]}" "$GR_HOST" "$(printf '%q ' nice -n 10 \
+    docker run --rm --name "$name" --cpus "$GR_NCPUS" --userns keep-id \
     --security-opt label=disable ${GR_PLATFORM:+--platform "$GR_PLATFORM"} "${out[@]}")"
 }
 gr_cleanup() {

@@ -22,7 +22,14 @@
 # Facts per app/gesture in OUT/summary.txt. FAIL: a missed shell vsync while the finger moves, a blank frame, a
 # commit KWin never drew, or a closed Linux window's layer still in SurfaceFlinger 3 s after its close. Needs the phone unfolded and idle (the runner's window); a full-screen window (a game left
 # running) skips the run (exit 3, re-queued) - never touched.
-#   WWR_APPS="kate dolphin calc" (default) | any subset;  WWR_REC=0 skips the record pass
+#   per frame   each way of the stats pass under perfetto (SF frame timeline, gfx/view atrace, sched) -> OUT/<app>-<g>-<way>
+#               .pftrace, read by resize-trace.py: every home surface frame's jank type (App Deadline Missed = the shell
+#               late; SurfaceFlinger CPU/GPU = composition; Buffer Stuffing; Display HAL), SF's display frames (GPU-
+#               composited count), SF/RenderEngine/home slices >= 4 ms and CPU per process over the drag, one "verdict"
+#               (the layer that owns the misses) and a per-frame CSV. From the --latency data alone, each missed vsync is
+#               "late" (home's buffer not GPU-done 2 ms before it: the shell's layout/paint/render) or "held" (it was ready,
+#               the display showed it later: downstream of the shell - SF, a transaction, the display).
+#   WWR_APPS="kate dolphin calc" (default) | any subset;  WWR_REC=0 skips the record pass;  WWR_TRACE=0 no perfetto
 # Exit: 0 PASS; 1 FAIL; 3 not now (a real touch, busy, folded, a game up); 5 can't run.
 set -uo pipefail
 # WWR_HERE: the tools/phone/verify to use when this file runs from a copy outside a checkout (a check queued before
@@ -32,6 +39,7 @@ OUT=${1:-$HOME/.cache/powos-verify/ww-resize-$(date +%m%d-%H%M)}; mkdir -p "$OUT
 L=$HOME/.cache/powos-verify.lock
 APPS=${WWR_APPS:-"kate dolphin calc"}
 REC=${WWR_REC:-1}
+TRACE=${WWR_TRACE:-1}
 CALC=${TEST_APP:-com.oneplus.calculator}
 sh_() { "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
@@ -75,21 +83,27 @@ LOGPID=$!
 
 # The SurfaceFlinger layer named <regex> (its name as --latency takes it, "name#id"), the newest one.
 layer() { sh_ "dumpsys SurfaceFlinger --list" | sed -nE 's|^RequestedLayerState[{]('"$1"'[^{}]*#[0-9]+)( parentId.*)?[}]$|\1|p' | tail -1; }
-# frames <file of --latency output>: "<presented> <missed vsyncs> <longest gap in motion, ms>" - gaps over 100 ms are
+# frames <file of --latency output>: "<presented> <missed vsyncs> <longest gap in motion, ms> <late> <held>" (late/held:
+# each missed vsync, home's buffer not yet GPU-done 2 ms before it / done and waiting) - gaps over 100 ms are
 # idle (nothing changed on screen, no frame needed), neither missed nor a hitch. (11-08: the old third field was the
 # longest gap of all, idle ones too - "max 884 ms", "max 1251 ms" read as ~1 s hitches; they were the swipe's
 # start/end with nothing to draw.)
 frames() { python3 - "$1" <<'PY'
 import sys
 L=[l.split() for l in open(sys.argv[1]) if l.strip()]
-if not L: print("0 0 0"); sys.exit()
+if not L: print("0 0 0 0 0"); sys.exit()
 p=int(L[0][0]) or 8333333
-a=sorted(int(r[1]) for r in L[1:] if len(r)==3 and 0<int(r[1])<(1<<62))
-miss=0; mx=0
+# rows: (queued/desired, presented, GPU-done), in present order
+a=sorted((tuple(map(int,r)) for r in L[1:] if len(r)==3 and 0<int(r[1])<(1<<62)),key=lambda r:r[1])
+miss=0; mx=0; late=0; held=0
 for x,y in zip(a,a[1:]):
-    g=y-x
-    if g<100e6: miss+=max(0,round(g/p)-1); mx=max(mx,g)
-print(len(a), miss, round(mx/1e6,1))
+    g=y[1]-x[1]
+    if g<100e6:
+        k=max(0,round(g/p)-1); miss+=k; mx=max(mx,g)
+        for j in range(1,k+1):
+            if y[2] < x[1]+j*p-2e6: held+=1
+            else: late+=1
+print(len(a), miss, round(mx/1e6,1), late, held)
 PY
 }
 # The window under test alone where its zones are: at the work area's bottom right (its east and south-east zones off
@@ -105,11 +119,31 @@ KLOG=/run/powos-app/hyprland.log
 klines() { rs "wc -l < $KLOG" | tail -1; }
 kwin_since() { rs "tail -n +$(( $1 + 1 )) $KLOG | grep -aE 'window task .* (frames|resized):'"; }
 
+# perfetto around one way (window-rec.sh's sources, the SF frame timeline among them); trace_off pulls it to $1.
+TCFG=$OUT/trace.cfg
+printf '%s\n' 'buffers { size_kb: 32768 fill_policy: RING_BUFFER }' 'buffers { size_kb: 4096 fill_policy: DISCARD }' \
+  'data_sources { config { name: "linux.ftrace" ftrace_config { ftrace_events: "sched/sched_switch" ftrace_events: "sched/sched_wakeup" ftrace_events: "power/cpu_frequency" atrace_categories: "gfx" atrace_categories: "view" atrace_categories: "input" atrace_apps: "com.powos.app" } } }' \
+  'data_sources { config { name: "android.surfaceflinger.frametimeline" } }' \
+  'data_sources { config { name: "linux.process_stats" target_buffer: 1 process_stats_config { scan_all_processes_on_start: true } } }' \
+  'duration_ms: 10000' > "$TCFG"
+trace_on() { [ "$TRACE" = 1 ] || return 0
+  "$A" push "$TCFG" /data/local/tmp/wwr-trace.cfg >/dev/null 2>&1
+  sh_ "rm -f /data/misc/perfetto-traces/wwr.pftrace; cat /data/local/tmp/wwr-trace.cfg | perfetto --txt -c - -o /data/misc/perfetto-traces/wwr.pftrace --background" >/dev/null; sleep 0.6; }
+trace_off() { [ "$TRACE" = 1 ] || return 0
+  sh_ "pkill -INT -f wwr.pftrace"; sleep 1.2
+  sh_ "cp /data/misc/perfetto-traces/wwr.pftrace /data/local/tmp/wwr.pftrace; chmod 644 /data/local/tmp/wwr.pftrace"
+  "$A" pull /data/local/tmp/wwr.pftrace "$1" >/dev/null 2>&1 || rm -f "$1"; sh_ "rm -f /data/local/tmp/wwr.pftrace"; }
+# attrib <tag>: resize-trace.py's lines for that way's trace (verdict first), the CSV beside it.
+attrib() { [ -s "$OUT/$1.pftrace" ] || { echo "verdict: no trace"; return; }
+  uvx -q --with perfetto python3 "$here/resize-trace.py" "$OUT/$1.pftrace" "$OUT/$1-frames.csv" 2>&1 | tail -8; }
+
 # One way of a drag: from $1,$2 to $3,$4, the shell's and the content's layers' frames on the display.
 way() {
   local x1=$1 y1=$2 x2=$3 y2=$4 tag=$5
   sh_ "dumpsys SurfaceFlinger --latency-clear \"$HL\"; dumpsys SurfaceFlinger --latency-clear \"$CL\""
+  trace_on
   sh_ "input swipe $x1 $y1 $x2 $y2 700"
+  trace_off "$OUT/$tag.pftrace"
   sh_ "dumpsys SurfaceFlinger --latency \"$HL\"" > "$OUT/$tag-home.lat"
   sh_ "dumpsys SurfaceFlinger --latency \"$CL\"" > "$OUT/$tag-content.lat"
 }
@@ -203,13 +237,15 @@ for app in $APPS; do
     gfx=$(sh_ "dumpsys gfxinfo com.powos.app")
     jank=$(echo "$gfx" | grep -m1 'Janky frames:' | sed -E 's/.*Janky frames: ([0-9]+) \(([0-9.]+)%\).*/\1 (\2%)/')
     p90=$(echo "$gfx" | grep -m1 '90th percentile' | grep -oE '[0-9]+ms'); p99=$(echo "$gfx" | grep -m1 '99th percentile' | grep -oE '[0-9]+ms')
-    read -r hi mi xi <<<"$(frames "$OUT/$app-$g-in-home.lat")"; read -r ho mo xo <<<"$(frames "$OUT/$app-$g-out-home.lat")"
+    read -r hi mi xi li di <<<"$(frames "$OUT/$app-$g-in-home.lat")"; read -r ho mo xo lo do_ <<<"$(frames "$OUT/$app-$g-out-home.lat")"
     read -r ci _ cxi <<<"$(frames "$OUT/$app-$g-in-content.lat")"; read -r co _ cxo <<<"$(frames "$OUT/$app-$g-out-content.lat")"
     kl=$(kwin_since "$k0"); kr=$(echo "$kl" | grep -oE 'resized: .*' | tail -2 | tr '\n' ';')
     kw=$(echo "$kl" | sed -nE 's/.*frames: last 5 s ([0-9]+) commits, ([0-9]+) drawn.*/\1 \2/p' | awk '{c+=$1; d+=$2} END{print c+0, d+0}')
     hostl=$(grep -aE "window $n: (resize:|body outgrew)" "$OUT/logcat.txt" | tail -2 | sed -E 's/.*(window [0-9]+: )/\1/' | tr '\n' ';')
-    line="$app $g: shell in $hi frames $mi missed (longest ${xi} ms), out $ho frames $mo missed (longest ${xo} ms); gfxinfo janky ${jank:-?} p90 ${p90:-?} p99 ${p99:-?} | content in $ci frames (max gap ${cxi} ms), out $co (max gap ${cxo} ms) | kwin commits/drawn $kw, ${kr:-no resize line} | host $hostl"
+    line="$app $g: shell in $hi frames $mi missed ($li late, $di held; longest ${xi} ms), out $ho frames $mo missed ($lo late, $do_ held; longest ${xo} ms); gfxinfo janky ${jank:-?} p90 ${p90:-?} p99 ${p99:-?} | content in $ci frames (max gap ${cxi} ms), out $co (max gap ${cxo} ms) | kwin commits/drawn $kw, ${kr:-no resize line} | host $hostl"
     log "$line"; echo "$line" >> "$OUT/summary.txt"
+    for w_ in in out; do attrib "$app-$g-$w_" | sed "s/^/$app $g $w_ trace: /" | tee -a "$OUT/summary.txt" >> "$OUT/log.txt"; done
+    grep -h "^$app $g .* trace: verdict" "$OUT/summary.txt" | sed 's/^/  /'
     [ $((mi + mo)) -gt 0 ] && bad "$app $g: $((mi + mo)) missed shell vsyncs while the finger moved (want 0)"
     [ "$app" != calc ] && read -r kc kd <<<"$kw" && [ "${kc:-0}" -gt 0 ] && [ $((kc - kd)) -gt $((kc / 20 + 1)) ] && bad "$app $g: KWin drew $kd of $kc commits"
     if [ "$REC" = 1 ]; then

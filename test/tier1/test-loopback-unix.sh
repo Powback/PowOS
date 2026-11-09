@@ -16,7 +16,9 @@ if [ "${LOOPBACK_INNER:-}" != 1 ]; then
   if [ "$(uname -s)/$(uname -m)" = Linux/aarch64 ] && command -v cc >/dev/null && [ "$(id -u)" = 0 ]; then
     LOOPBACK_INNER=1 exec bash "$0"
   elif command -v docker >/dev/null && docker info >/dev/null 2>&1; then
-    exec docker run --rm --platform linux/arm64 -e LOOPBACK_INNER=1 -v "$HERE:$HERE:ro" gcc:14 bash "$HERE/test/tier1/test-loopback-unix.sh"
+    # label=disable: on an SELinux-enforcing engine (.58's podman) container_t may not read a $HOME bind mount
+    # (bash: Permission denied, rc=126); a no-op on Colima. Never :z - that would relabel the checkout.
+    exec docker run --rm --platform linux/arm64 --security-opt label=disable -e LOOPBACK_INNER=1 -v "$HERE:$HERE:ro" gcc:14 bash "$HERE/test/tier1/test-loopback-unix.sh"
   fi
   echo "SKIP test-loopback-unix: no aarch64 Linux C compiler (cc as root, or docker with gcc:14)"
   exit 0
@@ -68,10 +70,11 @@ case $out in refused*) ;; *) fail "another uid reached the server: $out" ;; esac
 python3 - "$W/sock/3410.sock" <<'PY' || fail "a peer of another uid got an answer"
 import socket, sys
 s = socket.socket(socket.AF_UNIX); s.settimeout(3); s.connect(sys.argv[1])
-s.sendall(b"GET /root-peer HTTP/1.0\r\n\r\n")
+# The drop can land before our send (it does under qemu-user on an x86 host): a broken pipe there is the same pass.
 try:
+    s.sendall(b"GET /root-peer HTTP/1.0\r\n\r\n")
     data = s.recv(100)
-except (ConnectionResetError, socket.timeout):
+except (BrokenPipeError, ConnectionResetError, socket.timeout):
     data = b""
 sys.exit(1 if data else 0)
 PY
