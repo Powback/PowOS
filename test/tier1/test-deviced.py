@@ -281,6 +281,34 @@ with contextlib.redirect_stdout(io.StringIO()):
     open(os.path.join(work, "b.json"), "w").write('{"POWOS_TERMS_LINKS": "mac=me@hub"}')
     d.main(["owner-apply", os.path.join(work, "b.json")])
 check(open(os.environ["POWOS_OWNER_CONF"]).read().endswith("POWOS_TERMS_LINKS=mac=me@hub\n"), "owner-apply FILE writes it")
+# The phone app's setup ("Join your PowStation", PowStation.kt) finished the device flow itself: adopt keeps it here too,
+# owner config and units.d record included, no secret printed; without AI it doesn't touch the endpoint.
+adopted = {"realm": "http://powstation.example", "device": {"id": "ph1", "name": "razr", "kind": "phone"},
+           "device_token": "adopt-tok", "endpoints": {"owner": {"POWOS_VOICE_URL": "ws://voice.example/ws"}},
+           "owner": "Mats", "junk": 1}
+out = io.StringIO()
+real_stdin = sys.stdin
+sys.stdin = io.StringIO(json.dumps(adopted))
+try:
+    with contextlib.redirect_stdout(out):
+        rc = d.main(["adopt", "-"])
+finally:
+    sys.stdin = real_stdin
+kept = json.load(open(d.enrollment_path()))
+check(rc == 0 and kept["device_token"] == "adopt-tok" and kept["owner"] == "Mats" and "junk" not in kept,
+      f"adopt keeps the enrollment: {kept}")
+check(oct(os.stat(d.enrollment_path()).st_mode & 0o777) == "0o600", "adopted enrollment is 0600")
+check("POWOS_VOICE_URL=ws://voice.example/ws\n" in open(os.environ["POWOS_OWNER_CONF"]).read(), "adopt writes the owner config")
+check(os.path.exists(os.environ["POWOS_DEVICE_UNIT"]) and "adopt-tok" not in out.getvalue(), "adopt: units.d record, no secret printed")
+try:
+    sys.stdin = io.StringIO('{"device": {}}')
+    d.main(["adopt", "-"])
+    check(False, "adopt refuses a non-enrollment")
+except SystemExit:
+    pass
+finally:
+    sys.stdin = real_stdin
+check(d.REALM == os.environ.get("POWOS_ENROLL_URL", "http://powstation.pow"), "the hub's default name is powstation.pow")
 rs.shutdown()
 
 shutil.rmtree(work, ignore_errors=True)

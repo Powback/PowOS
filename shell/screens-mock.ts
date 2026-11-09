@@ -61,6 +61,39 @@ function packJobs(get: () => any, put: (storage: unknown) => void) {
   };
 }
 
+/** "Join your PowStation" (PowStation.kt) on the mock host; returns the join screen's act. */
+function joinMock(st: () => Record<string, any>, changed: (name: string) => void) {
+  // "Join your PowStation" (PowStation.kt): the hub found after 300 ms, the code after 300 ms more, approved when the
+  // page's window.__joinApprove() runs (the gate's join scene stands in for the approver), Leave after 300 ms.
+  const join = (next: Record<string, unknown>, after = 0) =>
+    setTimeout(() => {
+      const s = st();
+      s.join = { ...s.join, ...next };
+      s.settings = { ...s.settings, join: s.join };
+      changed("join");
+      changed("settings");
+    }, after);
+  const w = window as unknown as { __joinApprove?: () => void; __joinAsked?: string[] };
+  w.__joinApprove = () => st().join?.phase === "code" && join({ phase: "joined", owner: "Mats", tenant: "default", code: "", linux: "PowOS Linux joined too" });
+  const steps: Record<string, (arg: unknown) => [Record<string, unknown>, Record<string, unknown>?]> = {
+    standalone: () => [{ phase: "standalone", error: "" }],
+    start: () => [{ phase: "finding" }, { phase: "ready", found: true, address: "powstation.pow", owner: "Mats" }],
+    ask: (arg) =>
+      String(arg).trim() === "nowhere.pow"
+        ? [{ phase: "asking", error: "" }, { phase: "ready", error: "couldn't reach nowhere.pow" }]
+        : [{ phase: "asking", address: String(arg), error: "" }, { phase: "code", code: "BCDF-GHJK" }],
+    cancel: () => [{ phase: "choose", error: "" }],
+    leave: () => [{ phase: "leaving" }, { phase: "standalone", owner: "", tenant: "", linux: "" }],
+  };
+  const joinAct = (action: string, arg: unknown) => {
+    (w.__joinAsked ??= []).push(action);
+    const [now, later] = (steps[action === "find" ? "start" : action] ?? (() => [{}]))(arg);
+    join(now);
+    if (later) join(later, 300);
+  };
+  return joinAct;
+}
+
 export function mockScreens(events: Emitter): Bridge["screens"] {
   let state: Record<string, any> = {};
   const ready = fixture().then((f) => (state = sampleState(f)));
@@ -70,6 +103,7 @@ export function mockScreens(events: Emitter): Bridge["screens"] {
     state.storage = storage;
     changed("storage");
   });
+  const joinAct = joinMock(() => state, changed);
   return {
     watch: async (name) => {
       await ready;
@@ -98,6 +132,8 @@ export function mockScreens(events: Emitter): Bridge["screens"] {
         changed("aur");
       } else if (name === "storage" && (action === "add" || action === "remove" || action === "cancel")) {
         packJob(arg as string, action);
+      } else if (name === "join") {
+        joinAct(action, arg);
       } else if (name === "licenses" && action === "text") {
         return "MIT License\n\nPermission is hereby granted, free of charge, …";
       }
@@ -108,10 +144,15 @@ export function mockScreens(events: Emitter): Bridge["screens"] {
 
 /** The screens' sample states, painted from the fixture. */
 function sampleState(f: Fixture): Record<string, any> {
+  // ?join=choose: a first run that hasn't picked yet (the gate's join scene); otherwise a device already on its own.
+  const phase = new URLSearchParams(location.search).get("join") === "choose" ? "choose" : "standalone";
+  const join = { phase, address: "powstation.pow", found: false, hub: "Your PowStation", owner: "", code: "", name: "PowOS phone", tenant: "", error: "", linux: "" };
   const linux = { state: "installed" as const };
   const themes = f.themes.map((t) => ({ ...t, preview: svg(t.colors.background, t.colors.accent, t.title) }));
   return {
+    join,
     settings: {
+      join,
       theme: "Kanagawa",
       linux,
       powos: true,

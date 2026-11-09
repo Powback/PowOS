@@ -34,6 +34,19 @@ overrides; a phone also gets the launcher's copy in the app's `files/run/owner.c
 `{cmd}` = the powos command), `POWOS_ROOTSH_SHELL`, `POWOS_TERMS_LINKS` (`host=user@address,...`),
 `POWOS_SHIP_GATE_URL`, `POWOS_STT_URL`, `POWOS_VOICE_URL`. The realm must carry `owner` in `ENROLL_ENDPOINTS` for this.
 
+## First run: "Join your PowStation" (phone)
+
+After the image installs, PowOS asks once (shell/ui/screens.tsx JoinScreen, `targets/android/.../devices/PowStation.kt`):
+**Use PowOS on its own** or **Join your PowStation**. Join prefills the address with `powstation.pow` when the hub's
+`GET /v1/realm` answers on this network (LAN/VPN only; editable), asks the realm for a code and shows it big with the
+phone's name. Approve it on any enrolled approver (the Devices app's card; its "Claude" line picks the subscription,
+the hub's first by default, or none) - no password on the phone. On approval the phone keeps its enrollment
+(`files/devices/enrollment.json`, 0600), writes the owner config (`files/run/owner.conf`), and hands the same
+enrollment to PowOS's Linux when it's installed (`powos devices adopt -`: owner config, units.d record, and the hub's
+claude-auth as its AI endpoint - no Claude login on the phone). It then offers the home/dock import and a theme.
+Settings > powstation says "Part of <owner>'s PowOS", with Leave (revokes the tokens; standalone again). The realm says
+whose it is from `ENROLL_OWNER_NAME` (PowStation `enroll/docker-compose.yml`).
+
 ## How a new device joins
 
 LAN/VPN only (owner 2026-11-07: "no public routes yet"): there is no `enroll.powback.com` and no web page. Approval

@@ -749,7 +749,7 @@ class ShellBridge(
             "theme.pick" -> pickTheme(a.getString(0))
             "screens.watch" -> screens.watch(a.getString(0))
             "screens.unwatch" -> screens.unwatch(a.getString(0))
-            "screens.act" -> screens.act(a.getString(0), a.getString(1), a.opt(2)?.takeIf { it != JSONObject.NULL })
+            "screens.act" -> screens.dispatch(a.getString(0), a.getString(1), a.opt(2)?.takeIf { it != JSONObject.NULL })
             "agents.default" -> runtime.agents.default?.name
             "agents.newWidget" -> withAgent { newWidgetCommand(it.bin) to "New widget" }
             "agents.newApp" -> withAgent { newAppCommand(it.bin) to "New app" }

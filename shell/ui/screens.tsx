@@ -25,6 +25,8 @@ import {
   screens,
   screenTarget,
   setInnerBack,
+  type JoinState,
+  partOf,
   type SettingsState,
   type StoreState,
   type StoreWidget,
@@ -405,6 +407,8 @@ function SettingsScreen() {
   const installed = s?.linux.state === "installed";
   const needs = (name: ScreenName) => () => openScreen(installed ? name : "linux");
   const tiles: [IconName, string, string, () => void][] = [
+    // Joined to the owner's hub or on its own (JoinScreen): Leave and Join live there.
+    ["vpn", "powstation", joinLine(s?.join), () => openScreen("join")],
     ["palette", "style", s?.theme ?? "theme, background, icons", () => openScreen("style")],
     // Home's own choices (style screen's "home" section): where the dock and the search sit - found from here too.
     ["apps", "home", "dock and search: bar or dock button", () => openScreen("style", "home")],
@@ -1510,6 +1514,150 @@ function GesturesScreen() {
   );
 }
 
+// --- join: "Use PowOS on its own" or "Join your PowStation" (first run, then Settings' PowStation tile)
+
+/** Settings' PowStation tile line. */
+function joinLine(j?: JoinState) {
+  if (!j) return "your PowStation";
+  if (j.phase === "joined" || j.phase === "leaving") return partOf(j);
+  if (j.phase === "code") return `waiting for approval · ${j.code}`;
+  return "on its own · join your PowStation";
+}
+
+/**
+ * The setup step after the image installs and Settings' PowStation (PowStation.kt; the user, 11-09: "proper device
+ * management and onboarding so I can use all of my devices", "we just need to give it a tenant URL"). LAN/VPN only:
+ * the hub's name is powstation.pow, prefilled when it answers here. Optimistic: each tap shows its next step at once,
+ * the host's phase replaces it (a refusal comes back in the hub's words on the address step).
+ */
+function JoinScreen() {
+  const host = useScreen<JoinState>("join");
+  const [shown, setShown] = useState<JoinState["phase"] | null>(null);
+  const [typed, setTyped] = useState<string | null>(null);
+  useEffect(() => setShown(null), [host?.phase, host?.error]);
+  if (!host) return <Frame icon="vpn" title="your powstation"><div class="scr-note muted">…</div></Frame>;
+  const j = { ...host, phase: shown ?? host.phase };
+  const go = (phase: JoinState["phase"], action: string, arg?: unknown) => (setShown(phase), act("join", action, arg));
+  return (
+    <Frame icon="vpn" title={j.phase === "joined" || j.phase === "leaving" ? "your powstation" : "set up PowOS"}>
+      <div class="scr-join" data-join-phase={j.phase}>
+        <JoinBody j={j} go={go} address={typed ?? j.address} setAddress={setTyped} />
+      </div>
+    </Frame>
+  );
+}
+
+type Go = (phase: JoinState["phase"], action: string, arg?: unknown) => void;
+
+function JoinBody({ j, go, address, setAddress }: { j: JoinState; go: Go; address: string; setAddress: (v: string) => void }) {
+  if (j.phase === "joined" || j.phase === "leaving") return <JoinedCard j={j} go={go} />;
+  if (j.phase === "code") return <JoinCode j={j} go={go} />;
+  if (j.phase === "ready" || j.phase === "finding" || j.phase === "asking")
+    return <JoinAddress j={j} go={go} address={address} setAddress={setAddress} />;
+  return <JoinChoice j={j} go={go} />;
+}
+
+function JoinChoice({ j, go }: { j: JoinState; go: Go }) {
+  return (
+    <>
+      <div class="scr-big">How will you use this {j.name ? `device (${j.name})` : "device"}?</div>
+      <button type="button" class="scr-card tile" data-join-choice="join" onClick={() => go("finding", "start")}>
+        <div class="scr-row">
+          <Icon name="vpn" size={22} class="scr-row-icon" />
+          <div class="scr-row-text">
+            <span>Join your PowStation</span>
+            <span class="scr-sub muted">your own hub on this network: its AI, boards and devices. Approve it from a device you already use - no password here.</span>
+          </div>
+        </div>
+      </button>
+      <button type="button" class={`scr-card tile${j.phase === "standalone" ? " on" : ""}`} data-join-choice="standalone" onClick={() => go("standalone", "standalone")}>
+        <div class="scr-row">
+          <Icon name="cellphoneCog" size={22} class="scr-row-icon" />
+          <div class="scr-row-text">
+            <span>Use PowOS on its own</span>
+            <span class="scr-sub muted">{j.phase === "standalone" ? "this is how it runs now · join any time from Settings" : "everything stays on this device; join later from Settings"}</span>
+          </div>
+        </div>
+      </button>
+      {j.phase === "standalone" && <Action icon="check" label="done" tone="primary" onClick={() => closeScreen("join")} />}
+    </>
+  );
+}
+
+function JoinAddress({ j, go, address, setAddress }: { j: JoinState; go: Go; address: string; setAddress: (v: string) => void }) {
+  const finding = j.phase === "finding";
+  return (
+    <>
+      <div class="scr-big">Your PowStation</div>
+      <div class="scr-sub muted" data-join-found={j.found ? "yes" : "no"}>
+        {finding ? "looking for it on this network…" : j.found ? `found on this network${j.owner ? ` · ${j.owner}'s` : ""}` : "not found on this network - type its address (on your Wi-Fi or VPN)"}
+      </div>
+      <Field value={address} onInput={setAddress} placeholder="powstation.pow" icon="vpn" />
+      {j.error && <div class="scr-note danger" data-join-error>{j.error}</div>}
+      <div class="scr-inline">
+        <Action icon="arrowRight" label={j.phase === "asking" ? "asking…" : "ask to join"} tone="primary" disabled={j.phase === "asking" || !address.trim()} onClick={() => go("asking", "ask", address)} />
+        <Action icon="arrowLeft" label="back" tone="muted" onClick={() => go("choose", "cancel")} />
+      </div>
+    </>
+  );
+}
+
+function JoinCode({ j, go }: { j: JoinState; go: Go }) {
+  return (
+    <>
+      <div class="scr-big">Approve {j.name} on a device you already use</div>
+      <div class="scr-join-code" data-join-code>{j.code}</div>
+      <div class="scr-sub muted">Open Devices there: "New device wants to join" shows this code. Check it matches, then Approve. Waiting…</div>
+      <Action icon="close" label="cancel" tone="muted" onClick={() => go("choose", "cancel")} />
+    </>
+  );
+}
+
+function JoinedCard({ j, go }: { j: JoinState; go: Go }) {
+  const [sure, setSure] = useState(false);
+  return (
+    <>
+      <div class="scr-card tile" data-join-joined>
+        <div class="scr-row">
+          <Icon name="checkCircleOutline" size={22} class="scr-row-icon" />
+          <div class="scr-row-text">
+            <span>{partOf(j)}</span>
+            <span class="scr-sub muted">{[j.hub || "Your PowStation", j.address, j.tenant ? `Claude: ${j.tenant} (the hub's)` : "no Claude from the hub"].filter(Boolean).join(" · ")}</span>
+          </div>
+        </div>
+        {j.linux && <div class="scr-note muted">{j.linux}</div>}
+      </div>
+      <div class="scr-sub muted">Make it feel like your other devices:</div>
+      <div class="scr-inline">
+        <Action icon="cellphoneScreenshot" label="import home and dock" onClick={() => (closeScreens(), openApp("local.devices"))} />
+        <Action icon="palette" label="pick a theme" onClick={() => openScreen("style")} />
+      </div>
+      {j.error && <div class="scr-note danger">{j.error}</div>}
+      <Action
+        icon="close"
+        label={j.phase === "leaving" ? "leaving…" : sure ? "tap again to leave" : "leave"}
+        tone="danger"
+        disabled={j.phase === "leaving"}
+        onClick={() => (sure ? (setSure(false), go("leaving", "leave")) : setSure(true))}
+      />
+    </>
+  );
+}
+
+/** First run: the setup step shows once, until a choice is made (the host says "choose"). */
+let joinAsked = false;
+function askJoinOnFirstRun() {
+  if (joinAsked) return;
+  joinAsked = true;
+  powos.screens.watch("join").then(
+    (s) => {
+      powos.screens.unwatch("join");
+      if ((s as JoinState | null)?.phase === "choose") openScreen("join");
+    },
+    () => {},
+  );
+}
+
 const SCREENS: Record<ScreenName, FunctionComponent> = {
   settings: SettingsScreen,
   style: StyleScreen,
@@ -1521,10 +1669,12 @@ const SCREENS: Record<ScreenName, FunctionComponent> = {
   licenses: LicensesScreen,
   gestures: GesturesScreen,
   storage: StorageScreen,
+  join: JoinScreen,
 };
 
 /** The top screen, over home; those under it wait (unwatched) until it closes. */
 export function Screens() {
+  useEffect(askJoinOnFirstRun, []);
   const top = screens.value[screens.value.length - 1];
   if (!top) return null;
   const Screen = SCREENS[top];
