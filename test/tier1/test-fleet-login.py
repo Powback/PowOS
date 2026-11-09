@@ -158,8 +158,10 @@ STATE["auth"] = {"ok": False, "hasCreds": True, "needsReauth": True, "lastError"
 script = f"""
 source "{REPO}/lib/ai/agent.sh" >/dev/null 2>&1
 _ai_load_agent() {{ :; }}
-_manager_ensure_claude() {{ :; }}
 source "{REPO}/lib/ai/manager/manager.sh"
+# After the source, or manager.sh's own definition wins: a chat turn runs _manager_ensure_claude before the sign-in
+# gate, and the real one downloads Claude Code into $HOME (~20 s, network) - a 60 s timeout in a loaded full run.
+_manager_ensure_claude() {{ :; }}
 manager_run "$@"; echo "rc=$?"
 """
 bin_dir = os.path.join(work, "bin")

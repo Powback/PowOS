@@ -110,10 +110,10 @@ browser() { # PASS
     -e PREVIEW_LIVE="$live" -e PREVIEW_FAST="$fast" ${only:+-e PREVIEW_ONLY="$only"} ${PREVIEW_EMPTY:+-e PREVIEW_EMPTY="$PREVIEW_EMPTY"} \
     ${PREVIEW_JOBS:+-e PREVIEW_JOBS="$PREVIEW_JOBS"} ${PREVIEW_DEBUG:+-e PREVIEW_DEBUG=1} ${PREVIEW_DEBUG_KEY:+-e PREVIEW_DEBUG_KEY="$PREVIEW_DEBUG_KEY"} ${PREVIEW_BASELINE:+-e PREVIEW_BASELINE="$PREVIEW_BASELINE"})
   if [ -n "$GR_HOST" ]; then browser_remote "$1" "${envs[@]}"; return; fi
-  docker run --rm "${gc_flags[@]}" --platform linux/arm64 --shm-size 1g ${GATE_CPU_SHARES:+--cpu-shares "$GATE_CPU_SHARES"} "${mounts[@]}" "${envs[@]}" \
+  docker run --rm "${gc_flags[@]}" --platform "$(case $(uname -m) in x86_64 | amd64) echo linux/amd64 ;; *) echo linux/arm64 ;; esac)" --shm-size 1g ${GATE_CPU_SHARES:+--cpu-shares "$GATE_CPU_SHARES"} "${mounts[@]}" "${envs[@]}" \
     -w /usr/src/app --entrypoint timeout "$IMAGE" "${gc_cap[@]}" node preview.mjs
 }
-# GATE_REMOTE (dev/gate-remote.sh): the browser passes on the remote. The OWL trees between them stay here (the JVM
+# GATE_HOST=58 / GATE_REMOTE (dev/gate-remote.sh): the browser passes on the remote. The OWL trees between them stay here (the JVM
 # image is the Mac's): /work goes up before each pass and comes back after it, with /out. HOST_WORK stays this $work,
 # the path the local JVM container sees.
 . "$SHELL_DIR/dev/gate-remote.sh"

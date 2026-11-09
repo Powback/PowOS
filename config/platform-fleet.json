@@ -26,6 +26,12 @@
       "compose": "../../PowStation/docker-compose.yaml"
     },
     {
+      "compose": "../../PowCDN/docker-compose.yml"
+    },
+    {
+      "compose": "../../PowDash/docker-compose.yaml"
+    },
+    {
       "compose": "../../PowStation/enroll/docker-compose.yml"
     }
   ]

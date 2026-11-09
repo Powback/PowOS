@@ -40,3 +40,27 @@ class HomeRedirectTest {
         assertTrue(app.contains("""android:name=".shell.ShellActivity""""))
     }
 }
+
+/** 11-09 razr fold: default home set back to Moto's launcher, PowOS's home task stayed over it - the switcher broke. */
+class StaleHomeTest {
+    @Test
+    fun theDefaultHomeOrAnAppTaskStays() {
+        assertTrue(staleHome(isDefaultHome = true, inHomeTask = true, homeIntentNow = false, appIntentNow = false) == StaleHome.STAY)
+        assertTrue(staleHome(isDefaultHome = false, inHomeTask = false, homeIntentNow = false, appIntentNow = true) == StaleHome.STAY)
+    }
+
+    @Test
+    fun aHomeIntentPickingPowosJustOnceStays() {
+        assertTrue(staleHome(isDefaultHome = false, inHomeTask = true, homeIntentNow = true, appIntentNow = false) == StaleHome.STAY)
+    }
+
+    @Test
+    fun raisedByAHomeGestureItLeavesForTheRealHome() {
+        assertTrue(staleHome(isDefaultHome = false, inHomeTask = true, homeIntentNow = false, appIntentNow = false) == StaleHome.LEAVE)
+    }
+
+    @Test
+    fun openedFromItsIconItReopensAsAnApp() {
+        assertTrue(staleHome(isDefaultHome = false, inHomeTask = true, homeIntentNow = false, appIntentNow = true) == StaleHome.REOPEN)
+    }
+}
