@@ -977,6 +977,9 @@ def dispatch(a):
         else:
             runtime("config", a[2], "--app", a[1])
     elif c == "services":
+        # A phone without root has no system tier (powos-start.sh runs the supervisor as root, Magisk only).
+        if not shutil.which("powos-supervisor"):
+            die("no system tier on this device (powos-supervisor runs on a rooted phone only): no PowOS app services here")
         os.execvp("powos-supervisor", ["powos-supervisor", "status", *a[1:]])
     elif c == "check":
         runtime("check")

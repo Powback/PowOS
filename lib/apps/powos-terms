@@ -27,7 +27,7 @@ import sys
 import time
 
 FIELDS = ("session_name", "session_windows", "session_activity", "session_attached",
-          "pane_title", "pane_current_path", "pane_current_command")
+          "pane_title", "pane_current_path", "pane_current_command", "pane_pid")
 FORMAT = "\t".join("#{%s}" % f for f in FIELDS)
 NAME = re.compile(r"^[A-Za-z0-9_.:-]+$")
 TARGET = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9._:-]+$")
@@ -36,15 +36,21 @@ FRESH_S = 4
 # A refresh that hasn't finished in this long is taken as dead (its lock is ignored).
 LOCK_S = 20
 CACHE = os.path.expanduser(os.environ.get("POWOS_TERMS_CACHE", "~/.cache/powos/terms"))
+# ssh's control socket: a unix socket path has a 108-byte limit, which ~/.cache/.../<40 hex>.ssh plus ssh's own
+# temporary suffix passes on a phone without root (the real path is under /data/user/0/<app>/files/rootfs).
+CONTROL_DIR = os.environ.get("POWOS_TERMS_CONTROL_DIR") or f"/tmp/pt-{os.getuid()}"
 HOSTS_CONF = os.path.expanduser(os.environ.get("POWOS_TERMS_HOSTS_CONF", "~/.config/powos/terms-hosts"))
 # HACK: the Mac's address is a constant until the host directory exists (docs/REMOTE-POWOS.md 2.2, powos-hosts: a
 # host found by name and enrolled key). It is the same login the app builder already uses (powos app builder).
+# Only a device that has already reached it (its address in ~/.ssh/known_hosts) uses it: on any other device (a
+# fresh phone, someone else's) it was a host it has never seen, "unreachable" in every terminal list (issue #6).
 DEFAULT_LINKS = [("mac", "macback@192.168.50.99")]
+KNOWN_HOSTS = os.path.expanduser(os.environ.get("POWOS_TERMS_KNOWN_HOSTS", "~/.ssh/known_hosts"))
 # The Mac's tmux is Homebrew's; a command over ssh gets no login PATH.
 REMOTE_PATH = "PATH=/opt/homebrew/bin:/usr/local/bin:$PATH; "
 # One connection per host, kept a minute: the list every few seconds and an attach reuse it (no new login each time).
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=4", "-o", "ServerAliveInterval=15",
-       "-o", "ControlMaster=auto", "-o", f"ControlPath={CACHE}/%C.ssh", "-o", "ControlPersist=60"]
+       "-o", "ControlMaster=auto", "-o", f"ControlPath={CONTROL_DIR}/%r@%h:%p", "-o", "ControlPersist=60"]
 AGENT_COMMANDS = {"claude", "codex", "aider"}
 
 
@@ -67,6 +73,16 @@ def this_host():
     return plat or "desktop"
 
 
+def _known(target):
+    """This device has reached [target] (user@address) before: its address is in ssh's known_hosts."""
+    addr = target.rsplit("@", 1)[-1]
+    try:
+        with open(KNOWN_HOSTS) as f:
+            return any(addr in l.split(None, 1)[0].split(",") or f"[{addr}]" in l.split(None, 1)[0] for l in f if l.strip() and not l.startswith("#"))
+    except OSError:
+        return False
+
+
 def links():
     """The linked hosts, (name, user@address), never this host itself."""
     raw = os.environ.get("POWOS_TERMS_HOSTS")
@@ -78,7 +94,7 @@ def links():
             with open(HOSTS_CONF) as f:
                 pairs = [tuple(l.split(None, 1)) for l in f if l.strip() and not l.startswith("#")]
         except OSError:
-            pairs = DEFAULT_LINKS
+            pairs = [(n, t) for n, t in DEFAULT_LINKS if _known(t)]
     me = this_host()
     out = []
     for p in pairs:
@@ -97,19 +113,42 @@ def is_agent(command, title):
     return bool(re.match(r"^[⠀-⣿✳]", title))
 
 
+def real_command(command, pane_pid):
+    """HACK: on a phone without root every program runs through fakechroot's ELF loader, so tmux names them all
+    "ld-linux-aarch64.so.1" (and Claude Code was never seen as an agent). The pane's foreground process (its
+    tty's tpgid) has the loader as argv[0] and the real program as argv[1]. Real fix: a chroot-aware loader that
+    sets the process name (or tmux reading argv). Only this host's /proc can answer; a remote one keeps tmux's name."""
+    if not command.startswith("ld-linux") or not pane_pid.isdigit():
+        return command
+    try:
+        with open(f"/proc/{pane_pid}/stat") as f:
+            tpgid = f.read().rsplit(")", 1)[1].split()[5]
+        with open(f"/proc/{tpgid}/cmdline", "rb") as f:
+            argv = [a.decode(errors="replace") for a in f.read().split(b"\0") if a]
+    except (OSError, IndexError):
+        return command
+    rest = argv[1:] if argv and os.path.basename(argv[0]).startswith("ld-linux") else argv
+    # An interpreter (node for claude, python3 for a script): the script it runs names the program.
+    for a in rest[:3]:
+        name = os.path.basename(a)
+        if name and not name.startswith("-") and name not in ("node", "python3", "python", "bash", "sh"):
+            return name
+    return os.path.basename(rest[0]) if rest else command
+
+
 def parse(text, host):
     rows = []
     for line in text.splitlines():
         f = line.split("\t")
-        if len(f) < len(FIELDS) or not NAME.match(f[0]):
+        if len(f) < len(FIELDS) - 1 or not NAME.match(f[0]):   # pane_pid (the last) may be missing: an older tmux line
             continue
         rows.append({
             "host": host, "name": f[0],
             "windows": int(f[1]) if f[1].isdigit() else 0,
             "activity": int(f[2]) if f[2].isdigit() else 0,
             "attached": f[3] not in ("", "0"),
-            "title": f[4], "path": f[5], "command": f[6],
-            "agent": is_agent(f[6], f[4]),
+            "title": f[4], "path": f[5], "command": real_command(f[6], f[7] if len(f) > 7 else ""),
+            "agent": is_agent(real_command(f[6], f[7] if len(f) > 7 else ""), f[4]),
         })
     return rows
 
@@ -132,7 +171,7 @@ def read_local():
 
 
 def remote_cmd(target, command):
-    os.makedirs(CACHE, exist_ok=True)
+    os.makedirs(CONTROL_DIR, mode=0o700, exist_ok=True)
     return SSH + [target, REMOTE_PATH + command]
 
 
@@ -293,7 +332,7 @@ def cmd_attach(args):
     tmux = ["tmux", "-u", "attach", "-t", name]
     if local:
         os.execvp("tmux", tmux)
-    os.makedirs(CACHE, exist_ok=True)
+    os.makedirs(CONTROL_DIR, mode=0o700, exist_ok=True)
     os.execvp("ssh", SSH[:1] + ["-t"] + SSH[1:] + [target, REMOTE_PATH + "exec " + " ".join(shlex.quote(a) for a in tmux)])
 
 

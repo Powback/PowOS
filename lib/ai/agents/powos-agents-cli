@@ -2020,6 +2020,13 @@ def phone_reachable():
     return r.returncode != 69
 
 
+def no_board_route():
+    """True on a device that can't reach any board at all: no local module (handle_down's caller found none) and
+    no dev channel to the owner's phone (no docker for powos-vadb, no tools/phone/adb.sh) - a fresh phone without
+    root, say. Its writes wait in the outbox like an offline Mac's, but "back on the VPN" was never true there."""
+    return not shutil.which("docker") and not os.path.exists(_adb_sh())
+
+
 def outbox_enqueue(argv):
     os.makedirs(PENDING_DIR, exist_ok=True)
     path = os.path.join(PENDING_DIR, f"{time.time():020.6f}-{os.getpid()}.json")
@@ -2091,7 +2098,11 @@ def handle_down(argv):
             sys.exit(rc)
     if is_write(argv):
         outbox_enqueue(argv)
-        print("queued (offline): sent once the phone's back on the VPN")
+        if no_board_route():
+            print("saved on this device only: it has no board yet (no local powos-agents module and no board host "
+                  "linked - Powback/PowOS#1); kept in the outbox for when one is")
+        else:
+            print("queued (offline): sent once the phone's back on the VPN")
         return 0
     cached = cache_load(argv)
     if cached:
@@ -2099,6 +2110,8 @@ def handle_down(argv):
         sys.stdout.write(text)
         print(f"(offline, as of {when})")
         return 0
+    if no_board_route():
+        die(f"no board on this device yet: no powos-agents module at {SERVER} and no board host linked (Powback/PowOS#1)")
     die(f"the powos-agents module isn't reachable at {SERVER} (phone offline, no cached board yet)")
 
 
