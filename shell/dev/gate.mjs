@@ -13347,8 +13347,12 @@ try {
           // each frame of the drag). GATE_PROFILE=1: once more with the glass, traced (the main thread's events, self ms a
           // move, and the elements restyled): where a move's ms go.
           let reads = 0;
-          for (const [glass, how] of [[false, ""], [true, ""], ...(process.env.GATE_PROFILE ? [[true, "trace"]] : [])]) {
+          const AB = [[false, "", 1], [false, "", 0], [false, "", 1], [false, "", 0], [false, "", 1], [false, "", 0], [true, "", 1], [true, "", 0], [true, "", 1], [true, "", 0], [true, "", 1], [true, "", 0], [true, "trace", 1], [true, "trace", 0]];
+          for (const [glass, how, old] of AB) {
+            await r.page.evaluate((o) => ((window.__rs5Old = !!o), (window.__rs5T = { zone: 0, frame: 0, cut: 0, under: 0, tail: 0 })), old);
+            console.log(`AB ${old ? "TIP" : "NEW"}`);
             const out = await rs5Pass(r, m, glass, how);
+            console.log(`AB parts ms/move: ${await r.page.evaluate(() => Object.entries(window.__rs5T).map(([k, v]) => `${k} ${(v / 60).toFixed(2)}`).join(" "))}`);
             if (out.error) return [`RS5: ${out.error}`];
             // The glass's own reads come after the frame's layout (nativeglass.ts: a ResizeObserver callback), never
             // forced: the read budget is the glass-off pass's.

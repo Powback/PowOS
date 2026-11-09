@@ -827,8 +827,11 @@ export function tileArea(): Area {
  * a gate frame's 3.5 (render scan: SwapHint 183 ms over 60 moves). None of the three moves with a window's own frame.
  */
 let layoutCache: { origin: { x: number; y: number }; area: Area; strips: { top: number; bottom: number } } | null = null;
+/** RS5c: a resize drag's page layout, once per drag, by window id ([dragLayout]). */
+const dragLayouts = new Map<number, NonNullable<typeof layoutCache> & { top: number }>();
 function renderLayout(): NonNullable<typeof layoutCache> {
   if (layoutCache) return layoutCache;
+  for (const d of dragLayouts.values()) return d;
   layoutCache = { origin: pageOrigin(), area: tileArea(), strips: readStrips() };
   setTimeout(() => (layoutCache = null), 0);
   return layoutCache;
@@ -968,13 +971,32 @@ function cutAll(box: HTMLElement | null, here: WebWin[]) {
 }
 
 const MASK_PROPS = ["maskImage", "maskSize", "maskPosition", "maskRepeat", "maskComposite"] as const;
-/** The mask last written to each element (the same again is not written: no style change, no restyle). */
-const maskOf = new WeakMap<HTMLElement, string>();
+/**
+ * The mask last written to each element, by property: only a property whose value changed is written (a resize move
+ * changes one window's size: the windows under it get a new mask-size, never a new mask-image - each style write is a
+ * parse and an invalidation; RS5c, ww-resize-cost 11-08: all five per element made cutAll 4.4-6.4 ms a move at 4x CPU).
+ */
+// Kept with the value as the element serialises it after the write: a write by anyone else (PageUnder's render) since
+// then shows as a different inline value, so the skip never leaves a stale mask.
+const maskOf = new WeakMap<HTMLElement, Record<string, [string, string]>>();
+const oldMaskOf = new WeakMap<HTMLElement, string>();
 function setMask(el: HTMLElement, m: Record<string, string> | undefined) {
-  const key = m ? MASK_PROPS.map((p) => m[p]).join("|") : "";
-  if (maskOf.get(el) === key) return;
-  maskOf.set(el, key);
-  for (const p of MASK_PROPS) el.style[p] = m?.[p] ?? "";
+  if ((globalThis as any).__rs5Old) {
+    const key = m ? MASK_PROPS.map((p) => m[p]).join("|") : "";
+    if (oldMaskOf.get(el) === key) return;
+    oldMaskOf.set(el, key);
+    for (const p of MASK_PROPS) el.style[p] = m?.[p] ?? "";
+    return;
+  }
+  let was = maskOf.get(el);
+  if (!was) maskOf.set(el, (was = {}));
+  for (const p of MASK_PROPS) {
+    const v = m?.[p] ?? "";
+    const [set, shown] = was[p] ?? ["", ""];
+    if (set === v && el.style[p] === shown) continue;
+    el.style[p] = v;
+    was[p] = [v, el.style[p]];
+  }
 }
 
 /** The windows shown on home page [page], bottom first. */
@@ -2309,7 +2331,9 @@ function resizeEnd(id: number) {
   const r = resizing.get(id);
   if (!r) return;
   resizing.delete(id);
+  dragLayouts.delete(id);
   // RS5c: the live frame committed (a new WebWin: the window's one render with it).
+  flushLive();
   if (liveSized.delete(id)) update(id, {});
   reach(id);
   lastResize = { id, steps: r.steps, reqs: r.reqs };
@@ -2467,6 +2491,7 @@ function tick(ts: number) {
   raf = 0;
   ticks++;
   const t0 = performance.now();
+  flushLive();
   if (moving()) {
     dirty = false;
     for (const [id, r] of resizing) pace(id, r, ts);
@@ -3212,7 +3237,8 @@ export const resizeView = signal<{ id: number; snapped: string } | null>(null);
 /** Window [id]'s frame resized from [s] by pointer [e] on edges [side] (an Edge grab, or the app's own), scale [k]. */
 function resizeBy(id: number, s: Grab & { side: string; k: number }, e: PointerEvent) {
   const { side, k } = s;
-  const a = renderLayout().area;
+  const d = (globalThis as any).__rs5Old ? { ...renderLayout(), top: clampPlace(s.x, -Infinity, s.w).y } : dragLayout(id, s);
+  const a = d.area;
   const dx = (e.clientX - s.px) / k;
   const dy = (e.clientY - s.py) / k;
   const r = {
@@ -3224,13 +3250,15 @@ function resizeBy(id: number, s: Grab & { side: string; k: number }, e: PointerE
   if (side.includes("w")) r.x = s.x + s.w - r.w;
   if (side.includes("n")) r.y = s.y + s.h - r.h;
   // DB1: the top edge stops at the status bar (the bar stays reachable).
-  const top = clampPlace(r.x, r.y, r.w).y;
-  if (r.y < top) (r.h -= top - r.y), (r.y = top);
+  if (r.y < d.top) (r.h -= d.top - r.y), (r.y = d.top);
   const pacing = resizing.get(id);
   if (pacing) pacing.steps++;
+  const T = (globalThis as any).__rs5T;
+  const t1 = performance.now();
   showSnap(id, r, k, a);
   const next = { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) };
-  if (!resizeLive(id, next)) update(id, { ...next, restore: undefined });
+  if ((globalThis as any).__rs5Old || !resizeLive(id, next)) update(id, { ...next, restore: undefined });
+  if (T) T.tail += performance.now() - t1;
 }
 
 /**
@@ -3244,16 +3272,43 @@ function resizeBy(id: number, s: Grab & { side: string; k: number }, e: PointerE
  * false: a move that changes more (a maximised frame's restore, a zone height near a system strip): [update] it.
  */
 function resizeLive(id: number, next: { x: number; y: number; w: number; h: number }): boolean {
+  const T = (globalThis as any).__rs5T ?? { zone: 0, frame: 0, cut: 0, under: 0 };
+  let t = performance.now();
+  const lap = (k: string) => { const n = performance.now(); T[k] = (T[k] ?? 0) + n - t; t = n; };
   const w = webWins.peek().find((v) => v.id === id);
-  const frame = document.querySelector<HTMLElement>(`.webwindow[data-wwid="${id}"]`);
-  if (!w || !frame || !liveable(w, next)) return false;
+  if (!w || !liveable(w, next)) return false;
+  lap("zone");
   Object.assign(w, next);
   liveSized.add(id);
-  writeFrame(frame, w);
-  cutAll(frame.closest<HTMLElement>(".page-windows"), windowsHere(w.page));
-  const under = frame.closest(".page")?.querySelector<HTMLElement>(":scope > .page-under");
-  if (under) writeMask(under, underWindows(w.page));
+  liveDue.add(id);
+  kick();
   return true;
+}
+
+/**
+ * RS5c: the live frames' DOM writes, once per page frame - the window tick's first step, before it measures (and at a
+ * drag's end): a move only sets the model, so the handler writes nothing and two moves in a frame write once.
+ */
+function flushLive() {
+  for (const id of liveDue) writeLive(id);
+  liveDue.clear();
+}
+const liveDue = new Set<number>();
+
+function writeLive(id: number) {
+  const T = (globalThis as any).__rs5T ?? { zone: 0, frame: 0, cut: 0, under: 0 };
+  let t = performance.now();
+  const lap = (k: string) => { const n = performance.now(); T[k] = (T[k] ?? 0) + n - t; t = n; };
+  const w = webWins.peek().find((v) => v.id === id);
+  const frame = document.querySelector<HTMLElement>(`.webwindow[data-wwid="${id}"]`);
+  if (!w || !frame) return;
+  writeFrame(frame, w);
+  lap("frame");
+  cutAll(frame.closest<HTMLElement>(".page-windows"), windowsHere(w.page));
+  lap("cut");
+  const under = frame.closest(".page")?.querySelector<HTMLElement>(":scope > .page-under");
+  if (under) setMask(under, underWindows(w.page));
+  lap("under");
 }
 /** [w]'s drag may take [next] live: a resize drag's, a floating frame, its zones' heights (near the strips) unchanged. */
 const liveable = (w: WebWin, next: Partial<WebWin>) => resizing.has(w.id) && !w.restore && !w.quick && zoneKey({ ...w, ...next }) === zoneKey(w);
@@ -3267,22 +3322,34 @@ function writeFrame(frame: HTMLElement, w: WebWin) {
   const size = frame.querySelector(".ww-outline-size");
   // Its text nodes' data (the size, " × ", the size): Preact keeps these nodes and diffs their text on its next render.
   if (size?.firstChild instanceof Text && size.lastChild instanceof Text) {
-    size.firstChild.data = String(Math.round(b.w));
-    size.lastChild.data = String(Math.round(b.h));
+    const [sw, sh] = [String(Math.round(b.w)), String(Math.round(b.h))];
+    if (size.firstChild.data !== sw) size.firstChild.data = sw;
+    if (size.lastChild.data !== sh) size.lastChild.data = sh;
   }
 }
 /** Windows resized live ([resizeLive]) since their drag began: [resizeEnd] commits them. */
 const liveSized = new Set<number>();
-const setBox = (el: HTMLElement, b: { x: number; y: number; w: number; h: number }) => {
-  el.style.left = `${b.x}px`;
-  el.style.top = `${b.y}px`;
-  el.style.width = `${b.w}px`;
-  el.style.height = `${b.h}px`;
-};
-/** [m] on [el]'s inline style where it differs (the same value again is no style change: no restyle). */
-function writeMask(el: HTMLElement, m: Record<string, string> | undefined) {
-  for (const p of MASK_PROPS) if (el.style[p] !== (m?.[p] ?? "")) el.style[p] = m?.[p] ?? "";
+/** [el]'s box written where it changed (a corner drag moves two sides: two writes, not four). */
+function setBox(el: HTMLElement, b: { x: number; y: number; w: number; h: number }) {
+  const v = [`${b.x}px`, `${b.y}px`, `${b.w}px`, `${b.h}px`];
+  BOX_PROPS.forEach((p, i) => {
+    if (el.style[p] !== v[i]) el.style[p] = v[i];
+  });
 }
+const BOX_PROPS = ["left", "top", "width", "height"] as const;
+
+/**
+ * RS5c: what a resize drag's moves read of the page, once per drag ([resizeEnd] and a viewport resize drop it): the
+ * work area and the frame's highest top - clampPlace's floor (the status bar's bottom: it depends on no x, y or width),
+ * each a rect and a computed style read every move before. While a drag holds one, [renderLayout] is it (the Handles'
+ * zone heights read it per move too).
+ */
+function dragLayout(id: number, s: Grab): ReturnType<typeof renderLayout> & { top: number } {
+  let d = dragLayouts.get(id);
+  if (!d) dragLayouts.set(id, (d = { ...renderLayout(), top: clampPlace(s.x, -Infinity, s.w).y }));
+  return d;
+}
+addEventListener("resize", () => dragLayouts.clear());
 
 /** The outline's snapped sides for frame [r]; a haptic tick as a side snaps (RZ4). */
 function showSnap(id: number, r: { w: number; h: number }, k: number, a: Area) {
