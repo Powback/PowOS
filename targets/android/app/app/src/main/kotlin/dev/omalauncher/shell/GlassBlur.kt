@@ -143,7 +143,25 @@ internal class GlassBlur(
         lastShown = null
     }
 
-    val on get() = allowed && compositorBlurs && !broken && checked == true
+    /**
+     * Whether this host's compositor blur is the one to show ([compositorTrusted]): read again on each [update], so
+     * `settings put global powos_glass_compositor 0|1` takes effect on the page's next hello (reload/resume).
+     */
+    private var trusted = trustedHere()
+
+    // HACK: non-root (no READ_FRAME_BUFFER) the regions are set but SurfaceFlinger's render of them can't be checked
+    // (RestGlass/WallpaperBackdrop captures fail), and on the razr fold (AOSP's 10-float regions, 11-09) it rendered
+    // wrong: the open drawer flat grey (75,79,79 to the pixel), the widgets over sharp wallpaper - so the page frosts
+    // its WallpaperManager picture there (ui/glass.ts, the same theme tint). Real fix: find why that SF draws our
+    // regions wrong (446 px radius under AOSP Kawase, or the inner display's 90-degree layer transform), then trust it.
+    private fun trustedHere(): Boolean {
+        val ctx = view.context
+        val setting = runCatching { Settings.Global.getInt(ctx.contentResolver, "powos_glass_compositor", -1) }.getOrDefault(-1)
+        val frameBuffer = ctx.checkSelfPermission("android.permission.READ_FRAME_BUFFER") == android.content.pm.PackageManager.PERMISSION_GRANTED
+        return compositorTrusted(setting, frameBuffer)
+    }
+
+    val on get() = allowed && compositorBlurs && !broken && checked == true && trusted
 
     fun allow(on: Boolean) {
         allowed = on
@@ -332,6 +350,7 @@ internal class GlassBlur(
 
     private fun update() {
         if (checked == null && !broken) check()
+        trusted = trustedHere()
         val now = on
         if (!now && regions.isNotEmpty()) set(emptyList(), -1)
         if (told == now) return
@@ -768,6 +787,22 @@ internal class GlassBlur(
 
     companion object {
         private const val TAG = "PowosGlassBlur"
+
+        /**
+         * The compositor's blur regions are shown only by a host that can check SurfaceFlinger's render of them
+         * ([frameBuffer]: READ_FRAME_BUFFER, held by the rooted PowOS through the recents role); a non-root install
+         * gets the page's frosted picture under the same tint. Settings.Global powos_glass_compositor: 1 forces the
+         * compositor's blur, 0 the picture, anything else (unset) decides by [frameBuffer].
+         */
+        internal fun compositorTrusted(
+            setting: Int,
+            frameBuffer: Boolean,
+        ): Boolean =
+            when (setting) {
+                1 -> true
+                0 -> false
+                else -> frameBuffer
+            }
 
         /** [under]'s z on the window's surface: below the web windows' root (-1) and anything else hung there. */
         private const val UNDER_LAYER = -(1 shl 20)
