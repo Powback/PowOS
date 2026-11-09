@@ -79,6 +79,9 @@
 
     <!-- Uninstall from the app drawer's long-press menu (ACTION_DELETE). -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <!-- PowOS's keyboard (system/DefaultKeyboard.kt): installs and updates the swipe keyboard from the PowApps store
+         without root (an appop the user grants once; not privileged, so not on the priv-app allowlist). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <uses-feature
         android:name="android.software.live_wallpaper"

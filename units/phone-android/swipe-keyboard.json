@@ -1,0 +1,36 @@
+{
+  "id": "swipe-keyboard",
+  "name": "Swipe Keyboard (PowOS's keyboard)",
+  "kind": "app",
+  "owner": "app:powos",
+  "host": "phone-android",
+  "purpose": "PowOS's default keyboard: the swipe keyboard (com.swipekeyboard; source android-app-dev projects/swipe-keyboard, built and published by `make build PROJECT=swipe-keyboard` to http://android.pow/apk/swipe-keyboard.apk + .ver). The PowOS app (targets/android/app system/DefaultKeyboard.kt) installs it and keeps it at the store's latest build: checked a minute after start and every 6 h, upgrades only, gated (package, advertised version, input method service, signer), the previous APK kept as rollback (files/keyboard/rollback.apk; rooted: rolled back with pm install -d on a failed health check; a failed version is skipped until a newer one). Made the default input method once per phone (rooted: secure settings written; no root: the user is asked once via Android's keyboard settings); a keyboard picked after that stays.",
+  "installedBy": "the PowOS app (system/DefaultKeyboard.kt): rooted `pm install -i com.powos.app`, no root Android's PackageInstaller",
+  "files": [
+    "/data/app/*/com.swipekeyboard-*",
+    "/data/data/com.swipekeyboard",
+    "/data/data/com.powos.app/files/keyboard"
+  ],
+  "edits": [
+    "/data/system/users/0/settings_secure.xml"
+  ],
+  "processes": [
+    {
+      "match": "^com\\.swipekeyboard(:.*)?$"
+    }
+  ],
+  "limits": {
+    "memory": "512m",
+    "pids": 128
+  },
+  "cgroups": [
+    "uid_<app uid> (Android's own per-app cgroups: ActivityManager places it, lmkd bounds its memory; powos units enforce never moves an Android app)"
+  ],
+  "autosleep": "never",
+  "remove": {
+    "commands": [
+      "pm uninstall com.swipekeyboard"
+    ]
+  },
+  "remove_note": "Android falls back to the phone's own keyboard when the default IME is uninstalled; DefaultKeyboard reinstalls it on its next check unless that code is removed too"
+}
