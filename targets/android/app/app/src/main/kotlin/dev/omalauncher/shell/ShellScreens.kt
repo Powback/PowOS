@@ -131,7 +131,11 @@ class ShellScreens(
     private fun opened(name: String) {
         val themes = runtime.themes
         when (name) {
-            SETTINGS -> if (runtime.bootstrap.isInstalled) scope.launch { runtime.updates.check() }
+            SETTINGS -> {
+                if (runtime.bootstrap.isInstalled) scope.launch { runtime.updates.check() }
+                // PowOS's own: the app, the shell, the image's packages (no root: pulled from the store; throttled).
+                dev.omalauncher.upgrade.PowosUpdates.maybeRun(context)
+            }
             STYLE -> {
                 if (themes.loaded) scope.launch { themes.rescan() }
                 if (runtime.bootstrap.isInstalled) scope.launch { runtime.terminalFont.refreshFamilies() }
@@ -157,7 +161,11 @@ class ShellScreens(
     ): Any? {
         val text = (arg as? String).orEmpty()
         val result: Any? = when ("$name.$action") {
-            "settings.check" -> scope.launch { runtime.updates.check(force = true) }.let { null }
+            "settings.check" -> {
+                if (runtime.bootstrap.isInstalled) scope.launch { runtime.updates.check(force = true) }
+                dev.omalauncher.upgrade.PowosUpdates.maybeRun(context, force = true)
+                null
+            }
             "settings.update" -> runtime.updateSystem()
             "settings.retryUpdates" -> runtime.retryUpdates()
             "settings.android" -> start(Intent(Settings.ACTION_SETTINGS))
@@ -214,7 +222,7 @@ class ShellScreens(
             .put("linux", linuxState())
             .put("powos", runtime.powosSession)
             .put("agent", runtime.agents.default?.name ?: JSONObject.NULL)
-            .put("updates", if (installed) updates() else JSONObject.NULL)
+            .put("updates", if (installed) updates() else powosUpdates())
             .put("setup", job(runtime.bootstrap.updates.value).takeIf { it != JSONObject.NULL && installed } ?: JSONObject.NULL)
             .put("version", dev.omalauncher.AppVersion.name(context))
     }
@@ -230,6 +238,19 @@ class ShellScreens(
             .put("packages", JSONArray(pending?.packages.orEmpty()))
             .put("tools", JSONArray(pending?.tools.orEmpty().map { "${it.name} ${it.current} → ${it.latest}" }))
             .put("job", job(u.job))
+    }
+
+    /** No Arch of Omalauncher's own: the card shows PowOS's pull updates (upgrade/PowosUpdates); none on a rooted phone. */
+    private fun powosUpdates(): Any {
+        if (dev.omalauncher.linux.RootedGuest.enabled) return JSONObject.NULL
+        val p = dev.omalauncher.upgrade.PowosUpdates.status(context)
+        return JSONObject()
+            .put("checking", p.checking)
+            .put("checked", p.checkedAt ?: JSONObject.NULL)
+            .put("error", p.error ?: JSONObject.NULL)
+            .put("packages", JSONArray())
+            .put("tools", JSONArray())
+            .put("job", JSONObject.NULL)
     }
 
     // --- storage
