@@ -6656,6 +6656,9 @@ async function searchDefaultCheck() {
   A.picker.value = true;
   await window.__gw.until(() => /search bar/.test(document.body.innerText));
   if (!/search bar/.test(document.body.innerText)) fails.push('"+ widget" doesn\'t list the search bar');
+  // The built-in terminal too, not only the widget store's "built in" row (Powback/PowOS#7).
+  const labels = [...document.querySelectorAll(".aw-provider .aw-label")].map((l) => l.textContent.trim());
+  if (!labels.includes("terminal")) fails.push(`"+ widget" doesn't list the terminal (it has: ${labels.join(", ")})`);
   A.picker.value = false;
   S.editing.value = false;
   // Out of edit mode and at rest: the bar's pill back (what the next check starts from).
