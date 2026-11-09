@@ -68,7 +68,8 @@ fi
 if [ $RUN = docker ]; then O=/out S=/src; else O=$out S=$APP; fi
 detekt() {
   if [ $RUN = host ]; then (cd "$APP" && java -jar "$JAR" --input "$inputs" --config "$CFG" --excludes '**/build/**,**/test/**' "$@"); return; fi
-  docker run --rm -v "$CACHE:/lint:ro" -v "$APP:/src:ro" -v "$out:/out" -w /src --entrypoint java "$IMAGE" \
+  # label=disable: SELinux-enforcing engines (.58 podman) deny container_t on $HOME bind mounts; no-op on Colima.
+  docker run --rm --security-opt label=disable -v "$CACHE:/lint:ro" -v "$APP:/src:ro" -v "$out:/out" -w /src --entrypoint java "$IMAGE" \
     -jar "/lint/$(basename "$JAR")" --input "$inputs" --config "$CFG" --excludes '**/build/**,**/test/**' "$@"
 }
 
