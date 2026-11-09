@@ -19,7 +19,9 @@ _manager_sysprompt() {
     local ctx=""
     [[ -n "${AGENT_CONTEXT_CMD:-}" ]] && ctx="$(eval "$AGENT_CONTEXT_CMD" 2>/dev/null || true)"
     # What THIS device is (platform, model, rooted or not, the owner's or standalone): capabilities.md is every device's.
-    ctx="$(sh "$_MANAGER_DIR/powos-device-context" 2>/dev/null)${ctx:+
+    # Optional, like every context step: `|| true` - a missing/failing helper (sh exits 127) must never kill the
+    # turn under bin/powos's errexit (11-09 "PowAI didn't answer (exit 127)").
+    ctx="$(sh "$_MANAGER_DIR/powos-device-context" 2>/dev/null || true)${ctx:+
 
 $ctx}"
     printf '%s' "${AGENT_SYSTEM_PROMPT:-}"
@@ -92,7 +94,7 @@ _manager_auth() {
         # The authority unreachable or fine: endpoint, as before. Capped at a few seconds; only its state word is read.
         local w=""
         local cap=(); command -v timeout &>/dev/null && cap=(timeout 12)
-        command -v python3 &>/dev/null && w=$("${cap[@]}" python3 "$_MANAGER_DIR/fleet_login.py" word 2>/dev/null)
+        command -v python3 &>/dev/null && w=$("${cap[@]}" python3 "$_MANAGER_DIR/fleet_login.py" word 2>/dev/null || true)
         [[ "$w" == relogin ]] && echo relogin || echo endpoint
     elif [[ -n "${ANTHROPIC_API_KEY:-}" || -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" || -n "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
         echo login
@@ -100,7 +102,7 @@ _manager_auth() {
         # Its own login (direct mode): relogin once it can't refresh any more (fleet_login.py reads only its expiry
         # and whether a refresh token is there).
         local w=""
-        command -v python3 &>/dev/null && w=$(python3 "$_MANAGER_DIR/fleet_login.py" word 2>/dev/null)
+        command -v python3 &>/dev/null && w=$(python3 "$_MANAGER_DIR/fleet_login.py" word 2>/dev/null || true)
         [[ "$w" == relogin ]] && echo relogin || echo login
     else
         echo signin

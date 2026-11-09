@@ -243,7 +243,9 @@ if [ -d $T/powos-manager ]; then
   mkdir -p $R/usr/lib/powos/ai/manager
   # Every file of it: fleet_login.py (the native Claude sign-in, `powos manager --fleet-login`) was left out when only
   # manager.py + manager.sh were named, so the sign-in's Login stopped at once ("the sign-in stopped - try again").
-  install -m 644 $T/powos-manager/*.py $T/powos-manager/*.sh $R/usr/lib/powos/ai/manager/
+  # And every file, not a *.py/*.sh glob: the glob skipped the extensionless powos-device-context (added 11-09), so the
+  # 16:55 deploy put a manager.sh that runs it next to no such file -> every PowAI turn "exit 127" (11-09 22:20).
+  for f in $T/powos-manager/*; do [ -f "$f" ] && install -m 644 "$f" $R/usr/lib/powos/ai/manager/; done
 fi
 rm -rf $T/powos-agents $T/comms-mcp.py $T/powos-manager
 # The manager's TypeScript sandbox (unit ai-sandbox): its sources plus its deps from its lock, which rooted.sh built

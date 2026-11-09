@@ -810,7 +810,7 @@ _ai_compose_prompt() {
     if [[ -n "${AGENT_CONTEXT_CMD:-}" ]]; then
         context=$(eval "$AGENT_CONTEXT_CMD" 2>/dev/null || true)
         # What THIS device is (lib/ai/manager/powos-device-context): capabilities.md describes every device.
-        local _dc; _dc="$(sh "$(dirname "${BASH_SOURCE[0]}")/manager/powos-device-context" 2>/dev/null)"
+        local _dc; _dc="$(sh "$(dirname "${BASH_SOURCE[0]}")/manager/powos-device-context" 2>/dev/null || true)"
         [[ -z "$_dc" ]] || context="$_dc
 
 $context"
@@ -830,7 +830,7 @@ User request: $prompt"
     # If mail is waiting for this agent's role, nudge it to read the inbox.
     # Non-consuming: the agent decides whether to drain it.
     if declare -f comms_pending_note &>/dev/null && comms_enabled; then
-        local _comms_note; _comms_note="$(comms_pending_note "$agent")"
+        local _comms_note; _comms_note="$(comms_pending_note "$agent" 2>/dev/null || true)"
         [[ -n "$_comms_note" ]] && full_prompt="[comms] $_comms_note
 
 $full_prompt"
