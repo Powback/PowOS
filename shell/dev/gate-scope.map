@@ -14,7 +14,7 @@ dev/complexity-baseline*  none
 dev/gate-scope.map      none
 dev/gate.sh             none
 dev/gate-*.sh           none
-ui/terminal.*           none
+ui/terminal.*           ^term-.*$
 ui/remote.*             none
 ui/glasses.*            none
 ui/rich.*               none

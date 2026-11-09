@@ -632,6 +632,110 @@ async function termScrollCheck() {
 }
 
 /**
+ * In the page: the paste key shows the clipboard's recent copies as cards in place of the keyboard (the board's paste
+ * UX: "tapping paste shows a CARD picker of clipboard history ... tap a card to insert - not a blind single-item
+ * paste"): the keyboard goes, a card per copy shows under the extra keys, the terminal keeps the keys; a tapped card's
+ * text goes in (bracketed: the program asked), the picker closes and the keyboard comes back; paste again closes it.
+ */
+async function termPasteCheck() {
+  const G = window.__gw;
+  const { powos } = await G.mod("./bridge.ts");
+  const fails = [];
+  const t = await window.__tpSetup(G, powos);
+  if (!t.key()) fails.push("no paste key in the extra keys");
+  else {
+    fails.push(...(await window.__tpOpen(G, t)));
+    fails.push(...(await window.__tpTap(t)));
+    fails.push(...(await window.__tpToggle(G, t)));
+  }
+  t.restore();
+  // Open for the scene's screenshot (/cache/term-paste.png): the cards where the keyboard was.
+  if (t.key()) {
+    t.press(t.key());
+    await G.until(() => document.querySelector(".term-clip:not(.pending)"), 2000);
+  }
+  t.restoreClipboard();
+  return fails;
+}
+
+/** term-paste's session (taken over, bracketed paste on), its stubbed clipboard history and what it sends. */
+async function termPasteSetup(G, powos) {
+  const S = await G.mod("./state.ts");
+  const T = await G.mod("./ui/terminal.tsx");
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  S.openSession("powos-scratch-paste", null, undefined, { host: "mac", agent: false });
+  S.takeOver();
+  const id = "at-work:mac:powos-scratch-paste";
+  await G.until(() => T.terminalFor(id) && document.querySelector(".session-term.focused .xterm-screen"), 4000);
+  await wait(500);
+  const term = T.terminalFor(id);
+  const st = await powos.term.open(id, null, null, term.cols, term.rows, false);
+  const bytes = new TextEncoder().encode("\x1b[?2004h");
+  window.__mockEvents.emit("term.data", { id, run: st.run, data: btoa(String.fromCharCode(...bytes)), end: st.end + bytes.length });
+  await wait(200);
+  const clips = [
+    { text: "git status", at: Date.now() - 5000 },
+    { text: "echo two\nlines", at: Date.now() - 120000 },
+    { text: "ls -la", at: Date.now() - 7200000 },
+  ];
+  const orig = { history: powos.clipboard.history, read: powos.clipboard.read, write: powos.term.write, hide: powos.keyboard.hide, show: powos.keyboard.show };
+  const t = { wait, sent: [], kb: [], reads: 0 };
+  powos.clipboard.history = async () => clips;
+  powos.clipboard.read = async () => (t.reads++, "blind");
+  powos.term.write = (i, data) => (i === id && t.sent.push(atob(data)), orig.write(i, data));
+  powos.keyboard.hide = (...a) => (t.kb.push("hide"), orig.hide(...a));
+  powos.keyboard.show = (...a) => (t.kb.push("show"), orig.show(...a));
+  t.key = () => [...document.querySelectorAll(".term-key")].find((b) => b.textContent === "paste");
+  t.press = (el) => el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerType: "touch" }));
+  t.restore = () => Object.assign(powos.term, { write: orig.write }) && Object.assign(powos.keyboard, { hide: orig.hide, show: orig.show });
+  t.restoreClipboard = () => Object.assign(powos.clipboard, { history: orig.history, read: orig.read });
+  return t;
+}
+
+/** The paste key: a card per copy under the extra keys, the keyboard away, the terminal still focused, nothing sent. */
+async function termPasteOpen(G, t) {
+  const fails = [];
+  t.press(t.key());
+  await G.until(() => document.querySelectorAll(".term-clip:not(.pending)").length > 0, 2000);
+  const cards = document.querySelectorAll(".term-clip:not(.pending)").length;
+  if (cards !== 3) fails.push(`the paste key showed ${cards} cards (3 copies in the history)`);
+  if (!t.kb.includes("hide")) fails.push("the keyboard stayed up under the paste picker (it takes the keyboard's place)");
+  if (!document.querySelector(".session-term.focused")) fails.push("opening the paste picker let go of the terminal");
+  const pick = document.querySelector(".term-clips");
+  const keys = document.querySelector(".term-extra");
+  if (!pick || !keys || pick.getBoundingClientRect().top < keys.getBoundingClientRect().bottom - 1) fails.push("the paste picker isn't under the extra keys");
+  if (t.reads) fails.push("the paste key pasted the clipboard blind");
+  if (t.sent.join("")) fails.push(`opening the picker sent ${JSON.stringify(t.sent.join(""))} to the terminal`);
+  return fails;
+}
+
+/** A tapped card: its text in, bracketed (the program asked); the picker closes, the keyboard comes back. */
+async function termPasteTap(t) {
+  const fails = [];
+  t.kb.length = 0;
+  document.querySelectorAll(".term-clip:not(.pending)")[1]?.click();
+  await t.wait(300);
+  const got = t.sent.join("");
+  if (!got.includes("\x1b[200~echo two") || !got.includes("lines\x1b[201~")) fails.push(`a tapped card sent ${JSON.stringify(got)} (its text, bracketed)`);
+  if (document.querySelector(".term-clips")) fails.push("the paste picker stayed open after a card was tapped");
+  if (!t.kb.includes("show")) fails.push("the keyboard didn't come back after a card was tapped");
+  return fails;
+}
+
+/** Paste opens it, paste again closes it: nothing sent. */
+async function termPasteToggle(G, t) {
+  const fails = [];
+  t.sent.length = 0;
+  t.press(t.key());
+  await G.until(() => document.querySelector(".term-clips"), 2000);
+  t.press(t.key());
+  await t.wait(200);
+  if (document.querySelector(".term-clips")) fails.push("a second paste press didn't close the picker");
+  if (t.sent.join("")) fails.push(`closing the picker sent ${JSON.stringify(t.sent.join(""))}`);
+  return fails;
+}
+
+/**
  * In the page: a view-only session scrolls (the coordinator's 11-02 step for "still not at PowTerm quality": `tmux -r`
  * drops mouse input, so a drag on a view-only session scrolled nothing). Its command is `powos terms attach`'s view on
  * every host (no tmux client); a drag of 4 rows moves its scrollback 4 rows with nothing written to the session; the
@@ -13434,6 +13538,18 @@ try {
         whenReady(r, async () => {
           const fails = await r.page.evaluate(termScrollCheck);
           await r.page.screenshot({ path: "/cache/term-scroll.png" }).catch(() => {});
+          return fails;
+        }),
+      ),
+    );
+  // The paste key's card picker of the clipboard's recent copies (ui/terminal.tsx ClipPicker).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(
+      open(browser, `${ORIGIN}/index.html`, "term-paste", { width: 404, height: 900 }).then((r) =>
+        whenReady(r, async () => {
+          await r.page.evaluate(`window.__tpSetup = ${termPasteSetup}; window.__tpOpen = ${termPasteOpen}; window.__tpTap = ${termPasteTap}; window.__tpToggle = ${termPasteToggle}`);
+          const fails = await r.page.evaluate(termPasteCheck);
+          await r.page.screenshot({ path: "/cache/term-paste.png" }).catch(() => {});
           return fails;
         }),
       ),
