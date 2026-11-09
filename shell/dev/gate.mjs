@@ -2857,6 +2857,53 @@ async function resumeThemeHealCheck() {
   return [...new Set(fails)].slice(0, 8);
 }
 
+/**
+ * The widget glass's theme tint in both wallpaper tones (razr fold 11-09, dark theme over a light wallpaper: "its got
+ * blur but its missing the tint"): every widget face's background valid (not "none": an unset --frost-sheen voided it)
+ * and the open drawer's fill still see-through (68% + the 32% tint was an opaque slab, no blur through it).
+ */
+async function glassTintToneCheck() {
+  const fails = [];
+  const root = document.documentElement;
+  root.classList.add("glass-native");
+  // The drawer open: home mounts its launcher (and its frame) only on the first open (home.tsx HomeLauncher).
+  const S = await window.__gw.mod("./state.ts");
+  S.drawer.value = 1;
+  const ready = () => document.querySelector(".page .home-tile > .tile") && document.querySelector(".home.open .launcher-frame");
+  if (!(await window.__gw.settled(ready))) return [`never ready: ${document.querySelector(".page .home-tile > .tile") ? "" : "no widget face; "}${document.querySelector(".home.open .launcher-frame") ? "" : "the drawer didn't open"}`];
+  try {
+    for (const [fill, tone] of [["#f4f4f4", "light"], ["#101418", "dark"]]) fails.push(...(await glassTintIn(fill, tone)));
+  } finally {
+    S.drawer.value = 0;
+  }
+  return [...new Set(fails)].slice(0, 8);
+}
+
+/** glassTintToneCheck in one wallpaper tone: a one-colour picture of [fill], settled to [tone]. */
+async function glassTintIn(fill, tone) {
+  const root = document.documentElement;
+  const c = document.createElement("canvas");
+  c.width = c.height = 32;
+  const x = c.getContext("2d");
+  x.fillStyle = fill;
+  x.fillRect(0, 0, 32, 32);
+  window.__mockEvents.emit("system.glass", { wallpaper: { url: c.toDataURL("image/png"), rev: `tint-${fill}`, source: "live" }, blurBehind: false });
+  await window.__gw.until(() => root.dataset.wallpaper === tone, 3000);
+  if (root.dataset.wallpaper !== tone) return [`no ${tone} tone`];
+  const where = `${root.dataset.light === "true" ? "light" : "dark"} theme, ${tone} wallpaper`;
+  const bare = [...document.querySelectorAll(".page .home-tile > .tile")].filter((t) => getComputedStyle(t).backgroundImage === "none");
+  const fails = bare.map(() => `${where}: a widget face has no tint`);
+  const probe = document.createElement("i");
+  probe.style.cssText = "position:absolute;width:1px;height:1px;background:var(--text-fill)";
+  document.querySelector(".home .launcher-frame").append(probe);
+  // A color-mix computes to "color(srgb r g b / a)", a plain colour to "rgba(r, g, b, a)"; no alpha given is opaque.
+  const bg = getComputedStyle(probe).backgroundColor;
+  const a = Number(/\/\s*([\d.]+)\s*\)$/.exec(bg)?.[1] ?? /^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)$/.exec(bg)?.[1] ?? 1);
+  probe.remove();
+  if (!(a < 0.95)) fails.push(`${where}: the drawer's fill is opaque (${bg})`);
+  return fails;
+}
+
 /** A page swipe changes the page without a haptic tick (the user, 10-31: "Don't need haptics when changing page"). */
 async function pageSwipeNoHapticCheck() {
   const raf = () => new Promise((ok) => requestAnimationFrame(() => ok()));
@@ -6578,6 +6625,61 @@ async function addGamingCheck() {
   if (!cancel) return [...fails, `"add gaming" has no cancel while it downloads: "${add.textContent}"`];
   cancel.click();
   if (!(await until(() => shows(/add gaming/) && !shows(/adding/) && !add.querySelector(".scr-bar"), 3000))) fails.push(`"cancel" didn't stop adding gaming: "${add.textContent}"`);
+  return fails;
+}
+
+/**
+ * In the page, on the app library (after libraryCheck): every folder card shows ALL its apps (board "Home page content
+ * ends early: folder widget clips its apps, page leaves empty space" - 'Other (14)' showed four): a card of more than
+ * four spans the row and lays every app out in rows, none clipped by the card, and the page scrolls to its last one.
+ * Ten extra apps (one category) make sure such a card exists; they go again after.
+ */
+async function libraryAllAppsCheck() {
+  const L = await window.__gw.mod("./ui/library.tsx");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const list = powos.apps.list;
+  const fake = Array.from({ length: 10 }, (_, i) => ({ key: `a:org.gate.zz${i}/.Main`, label: `Zq Gate ${i}`, icon: "", kind: "android" }));
+  powos.apps.list = async () => [...(await list()), ...fake];
+  window.__mockEvents.emit("apps.changed", null);
+  const fails = [];
+  try {
+    await window.__gw.until(() => L.library.value.some((f) => f.apps.length > 4 && document.querySelector(`.page.library .lib-card[data-key="${f.key}"] .lib-icons`)?.children.length === f.apps.length));
+    await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+    const lib = document.querySelector(".page.library");
+    const grid = lib.querySelector(".lib-grid").getBoundingClientRect();
+    // One card: all its apps there, none outside the card or squashed, a big one the row's width.
+    const cardFails = (f, card) => {
+      const icons = [...card.querySelectorAll(".lib-icons > *")];
+      const c = card.getBoundingClientRect();
+      const out = icons.filter((e) => { const r = e.getBoundingClientRect(); return r.width < 20 || r.bottom > c.bottom + 0.5 || r.right > c.right + 0.5 || r.left < c.left - 0.5; });
+      return [
+        icons.length !== f.apps.length && `"${f.name} (${f.apps.length})" shows ${icons.length} of its apps`,
+        out.length && `"${f.name}": ${out.length} app icons clipped by or squashed in the card`,
+        f.apps.length > 4 && Math.abs(c.width - grid.width) > 1 && `"${f.name} (${f.apps.length})" is ${Math.round(c.width)} px wide, not the row (${Math.round(grid.width)})`,
+      ].filter(Boolean);
+    };
+    for (const f of L.library.value) {
+      const card = lib.querySelector(`.lib-card[data-key="${f.key}"]`);
+      if (card) fails.push(...cardFails(f, card));
+    }
+    const sc = lib.querySelector(".library-scroll");
+    // The scroll runs to the stage's foot (the dock's / pill's top), not cut at the grid pages' foot gap (the user,
+    // 11-07: "the page is ending early, like there's no reason to cut off here"), and is drawn and hit there.
+    const foot = document.querySelector(".stage").getBoundingClientRect().bottom;
+    const sb = sc.getBoundingClientRect();
+    if (Math.abs(sb.bottom - foot) > 1) fails.push(`the library's scroll ends at ${Math.round(sb.bottom)}, not at the stage's foot (${Math.round(foot)})`);
+    const hit = document.elementFromPoint(sb.left + sb.width / 2, foot - 3);
+    if (!lib.contains(hit)) fails.push(`just above the stage's foot the library is cut off: ${hit?.className || hit?.tagName} is hit there`);
+    sc.scrollTop = sc.scrollHeight;
+    await new Promise((ok) => requestAnimationFrame(ok));
+    const after = [...lib.querySelectorAll(".lib-card")].pop().getBoundingClientRect();
+    if (after.bottom > sc.getBoundingClientRect().bottom + 1) fails.push(`scrolled to the end, the last card ends at ${Math.round(after.bottom)}, under the page (${Math.round(sc.getBoundingClientRect().bottom)})`);
+    sc.scrollTop = 0;
+  } finally {
+    powos.apps.list = list;
+    window.__mockEvents.emit("apps.changed", null);
+    await window.__gw.until(() => !L.library.value.some((f) => f.apps.some((a) => a.app.startsWith("a:org.gate.zz"))));
+  }
   return fails;
 }
 
@@ -13564,7 +13666,7 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `library-${label}`, viewport).then((r) => whenReady(r, async () => {
-        for (const check of [libraryCheck, addGamingCheck, libraryLiveCheck, folderMorphCheck, folderCloseCheck, libraryDragCheck]) {
+        for (const check of [libraryCheck, libraryAllAppsCheck, addGamingCheck, libraryLiveCheck, folderMorphCheck, folderCloseCheck, libraryDragCheck]) {
           const fails = await r.page.evaluate(check);
           if (fails.length) return fails;
         }
@@ -13759,6 +13861,12 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeCheck))));
     runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme-heal", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeHealCheck))));
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "glass-tint-tone", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
+      // Its helper as the page's global (an evaluated function carries no closure).
+      await r.page.evaluate(String(glassTintIn));
+      return r.page.evaluate(glassTintToneCheck);
+    })));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "page-swipe-no-haptic", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(pageSwipeNoHapticCheck))));
   if (process.env.SHELL_PAGES !== "0")

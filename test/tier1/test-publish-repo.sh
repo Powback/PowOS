@@ -15,7 +15,13 @@ if [ "${PUBLISH_REPO_INNER:-}" != 1 ]; then
   if command -v repo-add >/dev/null && command -v vercmp >/dev/null; then
     PUBLISH_REPO_INNER=1 exec bash "$0"
   elif command -v docker >/dev/null && docker info >/dev/null 2>&1; then
-    exec docker run --rm --platform linux/arm64 -e PUBLISH_REPO_INNER=1 -v "$HERE:$HERE:ro" menci/archlinuxarm:latest \
+    # label=disable: on an SELinux-enforcing engine (.58's podman) container_t may not read a $HOME bind mount
+    # (bash: Permission denied, rc=126); a no-op on Colima. Never :z - that would relabel the checkout.
+    # HACK: --user nobody - on an SELinux host every file carries security.selinux, repo-add's bsdtar archives it into
+    # powos.db and, as root, restores it on the next repo-add, which fails ("Cannot restore extended attributes",
+    # .58). Non-root bsdtar skips xattr restore. Real fix: repo-merge.sh drops xattrs itself if publishing ever runs
+    # on an SELinux host (today it runs in archlinuxarm on the Mac). Registry: docs/REMOTE-POWOS.md section 4.
+    exec docker run --rm --platform linux/arm64 --security-opt label=disable --user 65534:65534 -e PUBLISH_REPO_INNER=1 -v "$HERE:$HERE:ro" menci/archlinuxarm:latest \
       bash "$HERE/test/tier1/test-publish-repo.sh"
   fi
   echo "SKIP test-publish-repo: no repo-add (Arch) and no docker"
