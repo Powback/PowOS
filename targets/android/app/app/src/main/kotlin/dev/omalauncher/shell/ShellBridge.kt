@@ -1162,18 +1162,19 @@ class ShellBridge(
         val apps = listOf(first, second).map { k -> android(k) ?: return false.also { Log.w(TAG, "pair $first | $second: $k is no Android app") } }
         listOf(first, second).forEach { runtime.usage.record(it) }
         dev.omalauncher.system.Switcher.launched("launch pair $first | $second")
-        val tasks = dev.omalauncher.system.Tasks.list(context)
-        val ids = apps.map { app -> tasks.firstOrNull { it.component?.packageName == app.component.packageName }?.id }
-        val pair = dev.omalauncher.system.SplitDrawer.pair
-        val ok =
-            when {
-                ids[0] != null && ids[1] != null && pair.toSet() == ids.toSet() -> openSplit(pair[0], pair[1])
-                ids[0] != null && ids[1] != null && dev.omalauncher.system.Tasks.splitScreen != null ->
-                    dev.omalauncher.system.Tasks.splitApps(context, ids[0]!!, ids[1]!!)
-                else -> dev.omalauncher.system.Tasks.launchAdjacent(context, apps[0].component, apps[1].component)
-            }
+        val ok = splitTasksOf(apps.map { it.component.packageName }) ?: dev.omalauncher.system.Tasks.launchAdjacent(context, apps[0].component, apps[1].component)
         runtime.usage.settle()
         return ok
+    }
+
+    /** [launchPair]'s split of packages [pkgs]' running tasks (the split back, or WM Shell's split); null: launch them instead. */
+    private fun splitTasksOf(pkgs: List<String>): Boolean? {
+        val tasks = dev.omalauncher.system.Tasks.list(context)
+        val ids = pkgs.map { p -> tasks.firstOrNull { it.component?.packageName == p }?.id ?: return null }
+        val pair = dev.omalauncher.system.SplitDrawer.pair
+        if (pair.toSet() == ids.toSet()) return openSplit(pair[0], pair[1])
+        if (dev.omalauncher.system.Tasks.splitScreen == null) return null
+        return dev.omalauncher.system.Tasks.splitApps(context, ids[0], ids[1])
     }
 
     /**
