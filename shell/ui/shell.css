@@ -1405,7 +1405,7 @@ input.folder-title:focus { background: var(--soft-fill); }
   padding: 8px 14px;
 }
 .edit-act.on { background: color-mix(in srgb, var(--color-accent) 22%, transparent); color: var(--accent-text); }
-.edit-act.done { box-shadow: none; background: none; color: var(--accent-text); text-shadow: var(--label-shadow); padding-right: 0; }
+.edit-act.done { color: var(--accent-text); font-weight: 600; } /* the same pill as the other edit actions: no text-shadow - on accent text over the wallpaper it read as a glow (user 11-09) */
 .edit-note { flex: 1; min-width: 0; font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The theme popover, just above the bar. */
 .theme-pop {
