@@ -6,7 +6,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 # Never a silent exit: under set -e a failed adb call inside $(...) ended the script with no output, and a check read
 # the empty answer as the page's ("Calculator's key from home's apps.list: ", 2026-10-23). Say what failed, exit 2.
-pid=$("$here/adb.sh" shell pidof com.powos.app 2>&1 | tr -d '\r' | awk '{print $1}') || { echo "cdp: adb failed (pidof): $pid" >&2; exit 2; }
+pid=$("${CDP_ADB:-$here/adb.sh}" shell pidof com.powos.app 2>&1 | tr -d '\r' | awk '{print $1}') || { echo "cdp: adb failed (pidof): $pid" >&2; exit 2; }
 [[ "$pid" =~ ^[0-9]+$ ]] || { echo "com.powos.app isn't running${pid:+ ($pid)}" >&2; exit 1; }
 # The emulator lane (POWOS_DEVICE=emu): its adb forwards to the Mac's own localhost, so cdp.ts runs here (node strips
 # its types), on a port of its own.
@@ -18,5 +18,10 @@ fi
 # forwards, and reusing 9333 would re-point the OnePlus's checks at the other phone mid-run.
 port=9333
 case "${PHONE_SERIAL:-10.13.13.7:5555}" in 10.13.13.7:5555) ;; *) port=$((9340 + $(printf %s "$PHONE_SERIAL" | cksum | cut -d' ' -f1) % 50)) ;; esac
-"$here/adb.sh" forward tcp:$port "localabstract:webview_devtools_remote_$pid" >/dev/null || { echo "cdp: adb forward failed" >&2; exit 2; }
-exec docker run --rm -i -e CDP_TIMEOUT_S -e CDP_PORT=$port --network container:powos-vadb -v "$here:/t:ro" oven/bun:1 bun /t/cdp.ts "$@"
+"${CDP_ADB:-$here/adb.sh}" forward tcp:$port "localabstract:webview_devtools_remote_$pid" >/dev/null || { echo "cdp: adb forward failed" >&2; exit 2; }
+# The warm runner (tools/phone/cdp-warm.sh): `docker exec` into one long-lived bun container instead of a fresh
+# container per call (7-10 s each at Mac load ~25, 2026-11-09). Rc 75 = it couldn't run: the per-call path below.
+. "$here/cdp-warm.sh"
+rc=0; cdp_warm_run "$port" "$@" || rc=$?
+[ "$rc" = 75 ] || exit "$rc"
+exec "${CDP_DOCKER:-docker}" run --rm -i -e CDP_TIMEOUT_S -e CDP_PORT=$port --network "container:${CDP_NETNS:-powos-vadb}" -v "$here:/t:ro" oven/bun:1 bun /t/cdp.ts "$@"
