@@ -22,7 +22,7 @@ class WebAppInstallActivity : Activity() {
         val url = intent.getStringExtra("url").orEmpty()
         val ok =
             when (intent.action) {
-                ACTION_INSTALL -> WebApps.install(this, intent.getStringExtra("name").orEmpty(), url, intent.getStringExtra("icon").orEmpty(), intent.getStringExtra("theme").orEmpty())
+                ACTION_INSTALL -> WebApps.install(this, WebApps.Request(intent.getStringExtra("name").orEmpty(), url, intent.getStringExtra("icon").orEmpty(), intent.getStringExtra("theme").orEmpty()))
                 ACTION_UNINSTALL -> WebApps.idOf(url)?.let { WebApps.uninstall(this, it) } == true
                 else -> false
             }

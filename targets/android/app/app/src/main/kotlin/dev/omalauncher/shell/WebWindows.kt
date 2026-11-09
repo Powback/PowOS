@@ -615,6 +615,9 @@ class WebWindows(
     }
 
     /** One window: its container layer, its display (-1 until the helper made it), its mirror (once WM knows the display). */
+    /** What [make]'s window shows besides its app: a quick page's token, or an installed web app's URL ([openWeb]). */
+    private class Made(val quick: String? = null, val web: String? = null)
+
     private class Win(
         val id: Int,
         val component: ComponentName,
@@ -949,7 +952,7 @@ class WebWindows(
         if (!openable(component, component.packageName)) return -1
         val how = if (another && task < 0) anotherDecision(component) else launchDecision(component, task)
         if (how is LaunchReuse.Decision.Reuse) return how.window
-        return make(component, rect, how, null)
+        return make(component, rect, how, Made())
     }
 
     /**
@@ -960,7 +963,7 @@ class WebWindows(
         component: ComponentName,
         rect: JSONObject,
         token: String,
-    ): Int = if (openable(component, QuickPageRoute.key(token))) make(component, rect, LaunchReuse.Decision.New, token) else -1
+    ): Int = if (openable(component, QuickPageRoute.key(token))) make(component, rect, LaunchReuse.Decision.New, Made(quick = token)) else -1
 
     /**
      * Installed web app [url]'s window (WebApps, "w:<host>"; issue #8) at [rect]: WebAppActivity on its own display, one
@@ -974,7 +977,7 @@ class WebWindows(
         if (!openable(component, component.packageName)) return -1
         // The site has a window already: that one (the page fronts it), never a second WebView on the same site.
         wins.values.firstOrNull { !it.closed && it.web == url }?.let { return it.id }
-        return make(component, rect, LaunchReuse.Decision.New, null, url)
+        return make(component, rect, LaunchReuse.Decision.New, Made(web = url))
     }
 
     /** Web windows on and [component] resizeable; else false, its held launch ([held]'s key) let go the old way. */
@@ -996,8 +999,7 @@ class WebWindows(
         component: ComponentName,
         rect: JSONObject,
         how: LaunchReuse.Decision,
-        quick: String?,
-        web: String? = null,
+        made: Made,
     ): Int {
         val adopt = (how as? LaunchReuse.Decision.Adopt)?.task ?: -1
         val pkg = component.packageName
@@ -1011,8 +1013,8 @@ class WebWindows(
         val container = SurfaceControl.Builder().setName("powos-ww-$id").setParent(parent).setHidden(true).build()
         val win = Win(id, component, container, w, h, windowDpi(component.packageName))
         win.adopt = adopt
-        win.quick = quick
-        win.web = web
+        win.quick = made.quick
+        win.web = made.web
         win.apart = how is LaunchReuse.Decision.Apart
         win.another = how is LaunchReuse.Decision.Another
         wins[id] = win

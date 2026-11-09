@@ -48,20 +48,20 @@ object WebApps {
         }
 
     /** Adds (or updates) [url] as an app; its icon is fetched off the caller's thread. False: not a `.pow` URL. */
+    /** What PowApps hands over (its catalog entry): name, site URL, icon URL, theme colour. */
+    class Request(val name: String, val url: String, val icon: String, val theme: String)
+
     fun install(
         context: Context,
-        name: String,
-        url: String,
-        iconUrl: String,
-        theme: String,
+        req: Request,
     ): Boolean {
-        val id = idOf(url) ?: return false.also { Log.w(TAG, "install refused: not a .pow URL: $url") }
-        val app = App(id, name.trim().take(60).ifEmpty { id.removeSuffix(".pow") }, url, iconUrl, theme.take(32))
+        val id = idOf(req.url) ?: return false.also { Log.w(TAG, "install refused: not a .pow URL: ${req.url}") }
+        val app = App(id, req.name.trim().take(60).ifEmpty { id.removeSuffix(".pow") }, req.url, req.icon, req.theme.take(32))
         synchronized(this) {
             apps = list(context).filter { it.id != id } + app
             save(context)
         }
-        Log.i(TAG, "installed $id ($url)")
+        Log.i(TAG, "installed $id (${req.url})")
         version.intValue++
         io.execute { fetchIcon(context, app) }
         return true

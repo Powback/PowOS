@@ -1707,14 +1707,16 @@ class ShellBridge(
                 }
             // A PowOS app's floating window likewise (unfolded: its task floats, WindowTasks), else it opens.
             key.startsWith("l:") -> launchLinux(key)
-            // A .pow web app without web windows (folded, the setting off): its site's own task, full screen.
-            key.startsWith("w:") ->
-                WebApps.get(context, key.removePrefix("w:"))?.let { app ->
-                    runCatching { context.startActivity(WebAppActivity.intent(context, app.url)) }.onFailure { Log.w(TAG, "launch $key: ${it.message}") }
-                }
+            key.startsWith("w:") -> launchWeb(key)
         }
         // The strip shows it first next time home shows (the Compose launcher settles on stop, likewise).
         runtime.usage.settle()
+    }
+
+    /** A .pow web app [key] without web windows (folded, the setting off): its site's own task, full screen. */
+    private fun launchWeb(key: String) {
+        val app = WebApps.get(context, key.removePrefix("w:")) ?: return
+        runCatching { context.startActivity(WebAppActivity.intent(context, app.url)) }.onFailure { Log.w(TAG, "launch $key: ${it.message}") }
     }
 
     /** PowOS app [key]: its floating window back, else it starts; one that can't start tells the pages why ("apps.launchfailed"). */
