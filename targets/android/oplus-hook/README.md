@@ -74,6 +74,11 @@ floating window over PowOS's home (no RecentsActivity left behind), and Split Vi
    gear 5). While `game-boost.sh` holds a boost it sets `Settings.Global powos_game_front` to the game's app id; only
    then, and only for `com.powos.app`, `ThermalControlUtils`' appType lookup (its one `(String)int` method) answers 4.
    Not through the vendor's game list: `StateManager` caches a positive appType until the package is uninstalled.
+   The controller only re-picks its table on a front-package or gear change, and `com.powos.app` stays the front
+   package for a whole launch, so a ContentObserver on the marker runs its own category evaluation
+   (`com.oplus.thermalcontrol.m.q1()`, what its app switch calls) on the controller's thread, on and off: the game
+   table applies from the tap. Logcat: `gameClass: marker <app id>, category evaluated now`, then `Battery :
+   ThermalControllHandler: ... appType=4 ... configItemName=category_4`. Needs `com.oplus.battery` restarted.
 
 9. **Split divider drag without the white flash** (SystemUI, scope `com.android.systemui`). While the divider is
    dragged, WM Shell's `SplitDecorManager` veils each resizing app in its TaskDescription background colour (white

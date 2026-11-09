@@ -781,8 +781,105 @@ public class Hook implements IXposedHookLoadPackage {
                 }
             });
             XposedBridge.log(TAG + ": gameClass: hooked " + lookup.getName());
+            reevaluateOnMarker(cl);
         } catch (Throwable t) {
             log("gameClass", t);
+        }
+    }
+
+    /**
+     * The game table from the tap, not minutes later. The controller picks its table only when it evaluates - a front
+     * package change or a temperature gear change - and the front package stays com.powos.app for the whole launch, so
+     * the marker going on was not seen until the next gear change: 11-08/11-09 launches ran under common_config's cpu
+     * level 4-5 (prime 1.59 / 1.36 GHz of 3.19 on a cool phone) while category_4 allows full clocks to gear 4 and
+     * level 1 (prime 1.98) at gears 5-6. Here a ContentObserver on the marker runs the controller's own category
+     * evaluation (what its app switch calls: ThermalControlUtils -> controller.q1(), "CategoryChanged") on the
+     * controller's thread, both ways: marker on picks category_4, off goes back to common_config (through the vendor's
+     * own protect period). Temperature still sets the gear and the gear the cap: a hot phone stays capped by the
+     * vendor's game table.
+     *
+     * HACK: com.oplus.thermalcontrol.m / q1 are obfuscated names in CPH2551_16.0.5.1301's Battery.apk (jadx 11-09); a
+     * rename only logs and leaves the old next-gear behaviour. Real fix: a vendor API that classes a running game per
+     * window/process.
+     */
+    private static void reevaluateOnMarker(ClassLoader cl) {
+        final Class<?> controller;
+        final java.lang.reflect.Method getter;
+        final java.lang.reflect.Method evaluate;
+        try {
+            controller = XposedHelpers.findClass("com.oplus.thermalcontrol.m", cl);
+            java.lang.reflect.Method g = null;
+            for (java.lang.reflect.Method m : controller.getDeclaredMethods()) {
+                Class<?>[] p = m.getParameterTypes();
+                if (java.lang.reflect.Modifier.isStatic(m.getModifiers()) && m.getReturnType() == controller
+                    && p.length == 1 && p[0] == android.content.Context.class)
+                    g = m;
+            }
+            java.lang.reflect.Method e = controller.getDeclaredMethod("q1");
+            if (g == null || e.getReturnType() != void.class) {
+                XposedBridge.log(TAG + ": gameClass: no controller getter / q1(), the table switches on the next gear");
+                return;
+            }
+            g.setAccessible(true);
+            e.setAccessible(true);
+            getter = g;
+            evaluate = e;
+        } catch (Throwable t) {
+            log("gameClass reevaluate (the table switches on the next gear)", t);
+            return;
+        }
+        XposedHelpers.findAndHookMethod(android.app.Application.class, "attach", android.content.Context.class, new XC_MethodHook() {
+            private boolean done;
+
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) {
+                if (done)
+                    return;
+                done = true;
+                try {
+                    final android.content.Context ctx = ((android.app.Application) param.thisObject).getApplicationContext();
+                    ctx.getContentResolver().registerContentObserver(
+                        android.provider.Settings.Global.getUriFor(VENDOR_GAME_KEY), false,
+                        new android.database.ContentObserver(new android.os.Handler(android.os.Looper.getMainLooper())) {
+                            @Override
+                            public void onChange(boolean self) {
+                                reevaluate(ctx, controller, getter, evaluate);
+                            }
+                        });
+                    XposedBridge.log(TAG + ": gameClass: the category is evaluated on every " + VENDOR_GAME_KEY + " change");
+                } catch (Throwable t) {
+                    log("gameClass observer", t);
+                }
+            }
+        });
+    }
+
+    private static void reevaluate(android.content.Context ctx, Class<?> controller, java.lang.reflect.Method getter,
+                                   java.lang.reflect.Method evaluate) {
+        try {
+            final Object c = getter.invoke(null, ctx);
+            // On the controller's own thread (its Handler field), where its messages run.
+            android.os.Handler h = null;
+            for (java.lang.reflect.Field f : controller.getDeclaredFields()) {
+                if (h == null && android.os.Handler.class.isAssignableFrom(f.getType())
+                    && !java.lang.reflect.Modifier.isStatic(f.getModifiers())) {
+                    f.setAccessible(true);
+                    h = (android.os.Handler) f.get(c);
+                }
+            }
+            Runnable run = () -> {
+                try {
+                    evaluate.invoke(c);
+                } catch (Throwable t) {
+                    log("gameClass reevaluate", t);
+                }
+            };
+            if (h == null || !h.post(run))
+                run.run();
+            String game = android.provider.Settings.Global.getString(ctx.getContentResolver(), VENDOR_GAME_KEY);
+            XposedBridge.log(TAG + ": gameClass: marker " + (game == null ? "off" : game) + ", category evaluated now");
+        } catch (Throwable t) {
+            log("gameClass reevaluate", t);
         }
     }
 
