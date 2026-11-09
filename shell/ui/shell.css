@@ -3449,6 +3449,10 @@ html:root .wsheet.tile { --glass-blur-native: var(--backdrop-blur-native); backg
 /* Up to four apps, small, in a uniform 2x2 - the whole card is the tap (it opens the folder). */
 .lib-icons { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 8px; aspect-ratio: 1; padding: 4px; pointer-events: none; }
 .lib-icons > .app-icon { width: 100%; height: auto; aspect-ratio: 1; }
+/* A folder of more than four (library.tsx Card): the whole row, every app in rows of icons as large as the 2x2's - all of
+   them show, and the page scrolls on instead of ending early (board: 'Other (14)' showed four). */
+.lib-card.wide { grid-column: 1 / -1; }
+.lib-card.wide .lib-icons { grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); grid-template-rows: none; grid-auto-rows: auto; aspect-ratio: auto; gap: 12px 8px; }
 /* "Add gaming" (library.tsx AddGamingCard): a folder-sized card with the pack's state and its live progress bar. */
 .lib-pack-body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; aspect-ratio: 1; padding: 4px; text-align: center; color: var(--color-foreground); }
 .lib-pack-text { font-size: var(--text-small); opacity: 0.75; overflow-wrap: anywhere; }
