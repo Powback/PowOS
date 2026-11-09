@@ -1,0 +1,29 @@
+{
+  "id": "cdp-warm-mac",
+  "name": "PowOS warm CDP runner (Mac)",
+  "kind": "container",
+  "owner": "system:powos-agents",
+  "host": "mac",
+  "purpose": "powos-cdp-warm-<user>: one long-lived oven/bun container in powos-vadb's network that tools/phone/cdp.sh docker-execs cdp.ts in (phone WebView evals for checks and agents), instead of a fresh docker run per call. Recreated when powos-vadb's container changes; ends itself (and --rm removes it) after 15 min with no call (CDP_WARM_IDLE_S). cdp.sh falls back to the per-call docker run when it can't start; CDP_WARM=0 forces that path.",
+  "installedBy": "tools/phone/cdp-warm.sh (on demand, from tools/phone/cdp.sh)",
+  "files": [
+    "~/.cache/powos-cdp (copies of callers' cdp.ts, last-call stamp)"
+  ],
+  "processes": [
+    {
+      "match": "docker container powos-cdp-warm-macback"
+    }
+  ],
+  "limits": {
+    "memory": "1g",
+    "cpus": "2"
+  },
+  "remove": {
+    "stop": [
+      "tools/phone/cdp-warm.sh stop"
+    ],
+    "files": [
+      "rm -rf ~/.cache/powos-cdp"
+    ]
+  }
+}
