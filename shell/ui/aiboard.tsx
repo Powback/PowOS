@@ -14,6 +14,7 @@ import { ago } from "./time.ts";
 import { boardState, useAgents, type BoardCheck } from "../agents.ts";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import { checkAlive, useDb, useRows } from "../apps/stdb.ts";
+import { stableRows } from "../apps/stable.ts";
 import type { VerifyState } from "../types.ts";
 import { imageUrl, openFull } from "./rich.tsx";
 import { askQueued } from "./assistant.ts";
@@ -148,13 +149,13 @@ function FactsFeed({ db }: { db: ReturnType<typeof useDb> }) {
   const fr = useRows<FrictionRow>(db, "friction", FRICTION_QUERY);
   const as = useRows<UserAsk>(db, "user_ask", ASKS_QUERY);
   useEffect(() => {
-    if (db.status === "connected") checks.value = cs;
+    if (db.status === "connected") checks.value = stableRows(checks.value, cs);
   }, [cs, db.status]);
   useEffect(() => {
-    if (db.status === "connected") friction.value = fr;
+    if (db.status === "connected") friction.value = stableRows(friction.value, fr);
   }, [fr, db.status]);
   useEffect(() => {
-    if (db.status === "connected") userAsks.value = as;
+    if (db.status === "connected") userAsks.value = stableRows(userAsks.value, as);
   }, [as, db.status]);
   return null;
 }
@@ -168,7 +169,9 @@ export function WorkFeed() {
   useEffect(() => {
     if (db.status !== "connected") return;
     if (rows.length) {
-      board.value = rows;
+      // Every show subscribes afresh (the feed mounts with the page): equal rows keep the board as it was, so coming
+      // back re-renders nothing that didn't change (GitHub Powback/PowOS#5).
+      board.value = stableRows(board.value, rows);
       boardSeen.value = true;
       return;
     }

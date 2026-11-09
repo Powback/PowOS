@@ -17,8 +17,9 @@ import java.io.File;
 /**
  * PowOS: a PowOS (KWin) window as its own Android task - its own card in Recents, split screen and floating windows
  * (docs/powos-window-tasks.md). KWin exports the window to this activity's surface: the display daemon's surface
- * {@code id} (the intent's data, powos-window://id - a document task per window), pixels and input only; audio,
- * clipboard and the keyboard stay with the desktop (MainActivity).
+ * {@code id} (the intent's data, powos-window://id - a document task per window), pixels and input; audio and the
+ * clipboard stay with the desktop (MainActivity). The Android keyboard for the window's text fields is this task's own
+ * (WebWindowSource.ownTaskKeyboard, KWin cap window-ime): the desktop isn't on screen while the task is in front.
  *
  * Started and finished by KWin over the control channel (WindowTasks: "open", "close"); tells it when it gets the
  * focus (KWin activates the window) and when it is closed for good (KWin shows the window on the desktop again).
@@ -744,6 +745,9 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
             Native.nativeSetWindowRefreshRate(h, rate);
         Native.nativeSetWindowFrameRateVote(h, votedRate);
         handle = h;
+        // The window's keyboard is ours (Powback/PowOS#12: KWin sent it to the desktop, which wasn't on screen).
+        if (id > 0)
+            WebWindowSource.ownTaskKeyboard(this, id, h);
         dropSplash();
     }
 
@@ -773,8 +777,10 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         long h = handle;
         handle = 0;
         starting = false;
-        if (h != 0)
+        if (h != 0) {
+            WebWindowSource.releaseTaskKeyboard(h);
             stopLater(h);
+        }
     }
 
     private void stopLater(long h) {
@@ -886,6 +892,8 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
             Native.nativeSendWindowTouch(h, action, e.getX(i), e.getY(i), e.getPointerId(i));
         }
         Native.nativeSendWindowTouchFrame(h);
+        // A tap is what lets KWin's keyboard show raise the keyboard (WebWindowSource's TapKeyboard).
+        WebWindowSource.taskTouch(h, e);
     }
 
     @Override

@@ -19,6 +19,7 @@ import java.nio.file.LinkOption
 object EngineServices {
     private const val TAG = "EngineServices"
     private const val RETRY_MS = 30_000L
+    private const val MISSING_RETRY_MS = 600_000L
     private const val STDB_PORT = 3410
 
     @Volatile private var lastStart = 0L
@@ -38,6 +39,9 @@ object EngineServices {
         val up = has && LoopbackGate.up(ctx, STDB_PORT)
         val s = stateOf(image, has, up)
         if (s == "starting") start(ctx)
+        // An image without SpacetimeDB (a base from before 11-09: its files were in the apps pack) still runs the other
+        // services - the App API needs only python3 - so the starter runs anyway, rarely (razr 11-09: no service at all).
+        if (s == "missing") start(ctx, MISSING_RETRY_MS)
         return s
     }
 
@@ -54,11 +58,14 @@ object EngineServices {
             else -> "starting"
         }
 
-    /** Starts the services in the image (a background thread; once at a time, at most every [RETRY_MS]). */
-    fun start(ctx: Context) {
+    /** Starts the services in the image (a background thread; once at a time, at most every [minGapMs]). */
+    fun start(
+        ctx: Context,
+        minGapMs: Long = RETRY_MS,
+    ) {
         if (Guest.kind != Guest.Kind.ENGINE || running) return
         val now = System.currentTimeMillis()
-        if (now - lastStart < RETRY_MS) return
+        if (lastStart != 0L && now - lastStart < minGapMs) return
         lastStart = now
         running = true
         val app = ctx.applicationContext

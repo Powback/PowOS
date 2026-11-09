@@ -56,4 +56,11 @@ class ExamplesTest {
         assertTrue(!p.needsLinux)
         assertTrue(p.commands.first().startsWith(Compiler.IF_LINUX))
     }
+
+    /** The performance tile runs on an unrooted phone without Linux: its numbers come from android.perf (nonroot-parity row 8). */
+    @Test fun performanceWorksWithoutLinux() {
+        val src = examples.first { it.name == "55-performance.owl" }.readText()
+        assertTrue(!Compiler.compile(src).needsLinux)
+        assertTrue(src.contains("android.perf"))
+    }
 }

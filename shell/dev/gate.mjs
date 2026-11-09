@@ -5468,6 +5468,26 @@ async function aiStatusCheck(page) {
   fails.push(...(await aiStackCheck(page)).map((f) => `folded stack: ${f}`));
   const words = await page.evaluate(aiStatusWordsSetup);
   fails.push(...[...aiStatusRowWords(words.rows), ...aiStatusHeadWords(words.head)].map((f) => `folded words: ${f}`));
+  fails.push(...(await page.evaluate(boardClaimExpiry)).map((f) => `claims: ${f}`));
+  return fails;
+}
+
+/**
+ * In the page (the user, 11-09: "fix the issue where the board becomes stale"): a live idle agent of a task's owner role
+ * holds it only while the row's heartbeat is inside CLAIM_EXPIRE_MS; an agent whose work is the task always does.
+ */
+async function boardClaimExpiry() {
+  const G = window.__gw, E = window.__mockEvents;
+  const A = await G.mod("./agents.ts");
+  const now = Date.now();
+  const ag = (id, o) => ({ id, host: "mac", role: "powos-claims", parent: null, state: "working", title: "", step: "", cwd: "PowOS", pid: 0, subs: 0, unread: 0, report: "", work: "", started: now - 6e5, last: now - 2e3, rev: 1, ...o });
+  E.emit("agents.delta", { agents: [ag("mac:claim-idle"), ag("mac:claim-held", { role: "other", work: "claim-held" })] });
+  await G.until(() => A.agent("mac:claim-held")?.value && A.agent("mac:claim-idle")?.value, 3000);
+  const t = (id, age) => ({ id, owner: "powos-claims", activity: now - age, updated: now - age });
+  const fails = [];
+  if (A.boardState(t("claim-fresh", 36e5), []) !== "working") fails.push("a fresh row of a live role's idle agent isn't working");
+  if (A.boardState(t("claim-stale", 5 * 36e5), []) === "working") fails.push("a row silent 5 h still says working through an idle agent of its role");
+  if (A.boardState(t("claim-held", 9 * 36e5), []) !== "working") fails.push("a row its agent holds (work = the task) isn't working");
   return fails;
 }
 
@@ -6862,6 +6882,9 @@ async function searchDefaultCheck() {
   A.picker.value = true;
   await window.__gw.until(() => /search bar/.test(document.body.innerText));
   if (!/search bar/.test(document.body.innerText)) fails.push('"+ widget" doesn\'t list the search bar');
+  // The built-in terminal too, not only the widget store's "built in" row (Powback/PowOS#7).
+  const labels = [...document.querySelectorAll(".aw-provider .aw-label")].map((l) => l.textContent.trim());
+  if (!labels.includes("terminal")) fails.push(`"+ widget" doesn't list the terminal (it has: ${labels.join(", ")})`);
   A.picker.value = false;
   S.editing.value = false;
   // Out of edit mode and at rest: the bar's pill back (what the next check starts from).
@@ -14583,6 +14606,12 @@ try {
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, `shade-steps-${label}`, viewport).then((r) => whenReady(r, () =>
         r.page.evaluate(async (at) => (await importShim("./dev/shade-steps-check.js")).steps(at), label))));
+  // S8'' (dev/shade-scroll-check.js): the one scroll - folded, the control center stays with its header pinned and its
+  // edge collapsing 1:1 with the notifications' scroll, all back at the top; unfolded, the control center column stays.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, `shade-scroll-${label}`, viewport).then((r) => whenReady(r, () =>
+        r.page.evaluate(async (at) => (await importShim("./dev/shade-scroll-check.js")).scroll(at), label))));
   // NS1-NS4 (dev/notif-stacks-check.js; the user, 11-01 16:39: "just show like 3 cards and then an 'x more' hint"):
   // groups of 1, 3 and 7 all on screen at once, each up to 3 full cards one after another and "+4 more" on the 7, top-
   // and bottom-aligned; a tap on "+4 more" opens that group alone. NS5-NS7 (11-01 16:47: "Let's move the notifications

@@ -5,13 +5,16 @@
  * 2 or more tabs that isn't in such a tiling (a tiled stack's tabs belong to its tiling's group). Its cell shows the
  * group's icons together (switcher.tsx GroupIcon, the split card's combined icon) in the group's layout; its apps get no cells of
  * their own; a tap brings every window of the group to the front on its page (webwindows.tsx bringGroup). Its mark
- * (pagemarks.ts) is the group's page against the page on screen. Folded there are no web windows: no groups.
+ * (pagemarks.ts) is the group's page against the page on screen. Android's split (folded: no web windows) is a group too
+ * (DockGroup.native, ui/splitpair.ts): its tap brings the split back.
  */
-import { computed } from "@preact/signals";
+import { computed, effect } from "@preact/signals";
+import { powos } from "../bridge.ts";
 import { byKey } from "../state.ts";
 import { usePress } from "./apps.tsx";
 import { pageId } from "./desktops.ts";
 import { GroupIcon } from "./switcher.tsx";
+import { livePair, notePair } from "./splitpair.ts";
 import { bringGroup, stacks, tilings, webWins } from "./webwindows.tsx";
 
 export interface DockGroup {
@@ -27,6 +30,8 @@ export interface DockGroup {
   layout: string;
   /** Every window minimised. */
   minimised: boolean;
+  /** Android's split (ui/splitpair.ts livePair): its two tasks, left / top first; [ids] is empty (no web windows). */
+  native?: number[];
 }
 
 type Win = (typeof webWins.value)[number];
@@ -49,6 +54,17 @@ const tabsOf = (ids: number[]) => stacks.value.filter((s) => ids.includes(s.acti
 let last: DockGroup[] = [];
 const sig = (gs: DockGroup[]) => JSON.stringify(gs);
 
+/**
+ * Android's split (WM Shell's: folded, or an app that can't be a web window) as one cell too, as its switcher card is
+ * one card - unless its apps are a web window group already ([groups]).
+ */
+function splitGroup(groups: DockGroup[]): DockGroup | null {
+  const split = livePair.value;
+  if (!split || !split.keys.every((k) => byKey.value.has(k))) return null;
+  if (split.keys.some((k) => groups.some((g) => g.keys.includes(k)))) return null;
+  return { keys: split.keys, ids: [], icons: split.keys, page: pageId(), layout: split.layout, minimised: false, native: split.ids };
+}
+
 /** The window groups on the dock, tilings by page, then stacks. */
 export const dockGroups = computed((): DockGroup[] => {
   const wins = new Map(webWins.value.filter((w) => !w.full && !w.quick).map((w) => [w.id, w]));
@@ -64,6 +80,8 @@ export const dockGroups = computed((): DockGroup[] => {
     const g = groupOf(s.ids, [], "stack", wins);
     if (g) out.push(g);
   }
+  const split = splitGroup(out);
+  if (split) out.push(split);
   if (sig(out) === sig(last)) return last;
   return (last = out);
 });
@@ -79,12 +97,27 @@ const groupMark = (g: DockGroup) => (g.page === pageId() && !g.minimised ? "mark
 
 /** A group's dock cell: its icons together, a tap brings the whole group to the front on its page. */
 export function DockGroupCell({ group }: { group: DockGroup }) {
-  const press = usePress(() => bringGroup(group.ids, group.page), () => {}, null);
+  // Android's split: the split back (as its switcher card's tap, ShellBridge openSplit) - never one of its apps alone.
+  const press = usePress(() => (group.native ? void powos.tasks.openSplit(group.native[0], group.native[1]) : bringGroup(group.ids, group.page)), () => {}, null);
   const icons = group.icons.map((k) => byKey.value.get(k)?.icon ?? null);
   const state = group.minimised ? "minimised" : "running";
   return (
-    <div class={`app group windowed ${state} ${groupMark(group)}`} data-key={`group:${group.ids.join(",")}`} data-group={group.keys.join(",")} {...press}>
+    <div class={`app group windowed ${state} ${groupMark(group)}`} data-key={group.native ? `split:${group.native.join(",")}` : `group:${group.ids.join(",")}`} data-group={group.keys.join(",")} {...press}>
       <GroupIcon class="app-icon" icons={icons} layout={group.layout} />
     </div>
   );
 }
+
+// PowOS's own split: a tiling of 2+ web windows (not a tab stack) is a pair used now - one recent entry (ui/pairs.tsx).
+// Only a group that formed or changed since the last run: two tilings on two pages don't swap places on every update.
+let noted = new Set<string>();
+effect(() => {
+  const now = new Set<string>();
+  for (const g of dockGroups.value) {
+    if (g.layout === "stack" || g.native) continue;
+    const id = `${g.layout} ${g.icons.join(",")}`;
+    now.add(id);
+    if (!noted.has(id)) notePair({ keys: g.icons, layout: g.layout });
+  }
+  noted = now;
+});

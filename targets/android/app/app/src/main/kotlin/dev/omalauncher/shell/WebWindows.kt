@@ -572,7 +572,10 @@ class WebWindows(
     /** On [io]: [w]'s display read; empty after it had its app: read again [ORPHAN_CONFIRM_MS] later ([confirmOrphan]). */
     private fun checkOrphan(w: Win) {
         val n = tasksOn(w.displayId)
-        if (n != null && n > 0) w.landed = true
+        if (n != null && n > 0) {
+            w.landed = true
+            fillDisplay(w)
+        }
         if (gone(w, n)) io.postDelayed({ confirmOrphan(w) }, ORPHAN_CONFIRM_MS)
     }
 
@@ -3837,7 +3840,10 @@ class WebWindows(
     private fun landedOrFallback(w: Win) {
         if (w.closed || awayByChoice(w)) return
         val n = tasksOn(w.displayId)
-        if (n != null && n > 0) w.landed = true
+        if (n != null && n > 0) {
+            w.landed = true
+            fillDisplay(w)
+        }
         if (n == null || n > 0 || pullStrayTask(w)) return
         WindowLog.w(TAG, "fallback: ${w.component.packageName} has no task on display ${w.displayId} ${ESCAPE_CHECK_MS} ms after its launch: Android's own window instead of web window ${w.id}")
         main.post {
@@ -3875,6 +3881,26 @@ class WebWindows(
         }?.taskId
     }
 
+    /**
+     * On [io]: every task on [w]'s display fills it. A task that came onto it in freeform (an existing task the launch
+     * only brought forward, kept its freeform bounds - [WebWindowLaunch.fillDisplay] sets full screen for new ones)
+     * drew its content offset inside the body and cut at its right and bottom (board: PowTerm at +188,+116 device px).
+     * Such a task is started from recents full screen on the same display ([fromRecents]).
+     */
+    private fun fillDisplay(w: Win) {
+        val tasks =
+            runCatching {
+                HiddenApi.allow()
+                atm().javaClass.getMethod("getAllRootTaskInfosOnDisplay", Int::class.javaPrimitiveType).invoke(atm(), w.displayId) as List<*>
+            }.getOrNull() ?: return
+        for (t in tasks.filterIsInstance<android.app.TaskInfo>()) {
+            val mode = windowingMode(t)
+            if (mode == WINDOWING_MODE_FULLSCREEN || mode < 0) continue
+            val ok = fromRecents(t.taskId, w.displayId)
+            WindowLog.w(TAG, "window ${w.id}: task ${t.taskId} on its display ${w.displayId} was in windowing mode $mode, not filling the body - full screen there: $ok")
+        }
+    }
+
     /** How many root tasks [displayId] has, or null (unknown: no fallback on a guess). */
     private fun tasksOn(displayId: Int): Int? =
         runCatching {
@@ -3910,14 +3936,14 @@ class WebWindows(
         if (w.another) WindowLog.i(TAG, "window ${w.id}: a second instance of ${w.component.packageName}: launched as a new document task")
         if (w.apart) WindowLog.i(TAG, "window ${w.id}: ${w.component.packageName}'s task is on another tool's display: launched as a task of its own, that one left alone")
         try {
-            val opts = ActivityOptions.makeBasic().setLaunchDisplayId(w.displayId)
+            val opts = WebWindowLaunch.fillDisplay(ActivityOptions.makeBasic().setLaunchDisplayId(w.displayId))
             context.startActivity(intent, opts.toBundle())
             WindowLog.i(TAG, "launched ${w.component.flattenToShortString()} on display ${w.displayId} (ActivityOptions)")
         } catch (e: Exception) {
             WindowLog.w(TAG, "ActivityOptions launch on display ${w.displayId} refused: ${e.message}; trying root am start")
             io.post {
                 val flags = "0x" + Integer.toHexString(Intent.FLAG_ACTIVITY_NEW_TASK or launchFlags(w))
-                val r = runCatching { andro.marchy.RootShell.run("am start --display ${w.displayId} -f $flags -n ${w.component.flattenToShortString()}") }.getOrNull()
+                val r = runCatching { andro.marchy.RootShell.run("am start --display ${w.displayId} --windowingMode $WINDOWING_MODE_FULLSCREEN -f $flags -n ${w.component.flattenToShortString()}") }.getOrNull()
                 WindowLog.i(TAG, "launched ${w.component.flattenToShortString()} on display ${w.displayId} (root am start): code ${r?.code} ${r?.output?.take(200)}")
             }
         }
@@ -4447,7 +4473,9 @@ class WebWindows(
          * borderless one (Unity -popupwindow, a Wine WS_POPUP, SDL_WINDOW_BORDERLESS), not a frame: it has no close,
          * full-screen or resize of its own, so it keeps PowOS's bar (the user, 11-08: Broforce "shows as a window but
          * without a title bar, so there's no way to resize it or make it fullscreen"). Its bar's full screen is the
-         * game's immersive full screen ([immersive]).
+         * game's immersive full screen ([immersive]). Since kwin 0068 KWin itself tells a borderless window (any app's:
+         * fixed size or opened at its output's size, with no frame extents and no move of its own) from a frame, so
+         * "own" no longer comes for one; [game] stays as the rule for a known game whose borderless window is resizable.
          */
         fun pageOwnFrame(
             kwinOwn: Boolean,

@@ -1,0 +1,16 @@
+{
+  "id": "owner-config",
+  "name": "Owner config (the owner's hosts this device uses)",
+  "kind": "system",
+  "owner": "system:devices",
+  "purpose": "~/.config/powos/owner.conf: the owner's hub/Mac/GPU endpoints (board host, root shell, terminals' links, ship gate, speech servers) that make this one of the owner's devices; written by powos-deviced owner-apply (enrollment's owner bundle; for this OnePlus, rooted.sh deploy renders tools/phone/owner.json with it). Not a secret. Without it the device runs standalone",
+  "installedBy": "powos devices enroll / targets/android/rooted/rooted.sh deploy -> powos-deploy.sh",
+  "files": [
+    "/home/powos/.config/powos/owner.conf"
+  ],
+  "remove": {
+    "commands": [
+      "powos devices owner-apply - <<< '{}'"
+    ]
+  }
+}

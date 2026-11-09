@@ -1,0 +1,18 @@
+{
+  "id": "owner-config-mac",
+  "name": "Owner config (Mac)",
+  "kind": "system",
+  "owner": "system:devices",
+  "host": "mac",
+  "purpose": "~/.config/powos/owner.conf: the owner's hosts the Mac's PowOS tools use (the board host and root shell over powos-vadb, the speech servers); written by powos-deviced owner-apply from tools/phone/owner.json (HACK until the Mac enrolls with the realm's owner bundle). Not a secret",
+  "installedBy": "python3 lib/devices/powos-deviced owner-apply tools/phone/owner.json",
+  "files": [
+    "~/.config/powos/owner.conf"
+  ],
+  "unbounded": "a config file",
+  "remove": {
+    "commands": [
+      "rm -f ~/.config/powos/owner.conf"
+    ]
+  }
+}

@@ -28,6 +28,7 @@ dev/dock-dragout-check.js  ^dock-dragout-.*$
 ui/notifications.*      ^(shade-.*|cc-reorder|align-shade)$
 ui/shadeanchor.ts       ^(shade-.*|align-shade)$
 dev/notif-stacks-check.js  ^shade-notif-stacks-.*$
+dev/shade-scroll-check.js  ^shade-scroll-.*$
 ui/overpull.ts          ^(shade-.*|cc-reorder)$
 ui/chrome.css           ^(chrome-.*|dock-.*)$
 ui/library*             ^(library-.*|add-app-.*)$

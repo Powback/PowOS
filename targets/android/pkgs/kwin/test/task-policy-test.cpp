@@ -1,5 +1,6 @@
 // 0066's decisions (anland_task_policy.h): a new window that took the focus from a full-screen task opens in front of
 // it; a restored full-screen window that has the focus and draws nothing is kicked, at most restoreKicksMax times.
+// 0068's: which undecorated window draws its own frame (no PowOS bar) and which is borderless (PowOS's bar).
 #include "anland_task_policy.h"
 
 #include <cstdio>
@@ -33,6 +34,21 @@ int main()
     // Enough kicks, or watched long enough: done.
     CHECK(restoreWatch(5000, 5000, true, false, restoreKicksMax) == RestoreWatch::Done);
     CHECK(restoreWatch(restoreWatchMs + 1, 5000, true, false, 0) == RestoreWatch::Done);
+
+    // drawsOwnFrame(clientSideDecorated, undecoratedByHints, resizable, coversOutput, movedItself)
+    // GTK / Chrome / Brave: _GTK_FRAME_EXTENTS - their own frame, whatever else.
+    CHECK(drawsOwnFrame(true, true, true, false, false));
+    CHECK(drawsOwnFrame(true, false, false, true, false));
+    // Steam: _MOTIF_WM_HINTS no decorations, resizable, opened at its own size - its own frame.
+    CHECK(drawsOwnFrame(false, true, true, false, false));
+    // Broforce under Proton (Wine WS_POPUP / Unity -popupwindow), min = max size: borderless, PowOS's bar (11-08).
+    CHECK(!drawsOwnFrame(false, true, false, false, false));
+    // A borderless full-screen game (opened at the screen's size; Wine reports it resizable then): PowOS's bar.
+    CHECK(!drawsOwnFrame(false, true, true, true, false));
+    // A borderless window that drags itself by its own title bar (a fixed-size launcher): its own frame after all.
+    CHECK(drawsOwnFrame(false, true, false, false, true));
+    // Not undecorated by hints and no frame extents (a splash, an odd toolkit): PowOS's bar.
+    CHECK(!drawsOwnFrame(false, false, true, false, false));
 
     if (failures) {
         return 1;
