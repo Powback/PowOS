@@ -126,7 +126,9 @@ class WidgetServices(
         onLine: (String) -> Unit,
     ) = streams.collect(command, onLine)
 
-    override fun android(name: String): Value =
+    override fun android(name: String): Value = if (name == "perf") synchronized(perf) { perf.value() } else androidFact(name)
+
+    private fun androidFact(name: String): Value =
         when (name) {
             "battery" -> battery()
             "device" -> device()
@@ -136,7 +138,6 @@ class WidgetServices(
             "volume" -> volume.value()
             "alarm" -> alarm.value()
             "modes" -> modes.value()
-            "perf" -> synchronized(perf) { perf.value() }
             else -> throw WidgetError("unknown android source $name")
         }
 
