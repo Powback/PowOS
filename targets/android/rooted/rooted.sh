@@ -13,6 +13,10 @@
 #   session [status|restart]   the desktop session (KWin + Linux apps): healthy? / a new one on purpose (an app
 #             update no longer restarts it: the app reattaches, powos-session.sh)
 #   wifi      adb over Wi-Fi (port 5555, kept across reboots): unplug the cable
+#   app-ca [gen|install|status|remove]   the App API's local CA: generate on-device, then (explicit) install its
+#             public cert into system trust so enabled apps' HTTPS can be read on-device (app-ca.sh; key stays local)
+#   app-frida [install|start PKG|stop|status|remove]   the App API's on-demand in-app hook helper, default STOPPED,
+#             runs only in a capture window for ONE enabled package (app-frida.sh)
 #   widevine-l3 [remove]   Netflix etc. in SD on the unlocked phone (targets/native/widevine-l3.sh)
 #   sandbox-bundle  build only the manager sandbox's tarball deploy pushes (deps from its lock; no phone)
 #   module <zip>  stage the PowOS system module (system-module/build-module.sh's zip) in Magisk: on at the next reboot
@@ -264,6 +268,26 @@ wifi)
   asu "setprop persist.adb.tcp.port 5555"
   adb tcpip 5555 && sleep 2 && adb connect "$ip:5555"
   echo "unplug USB, or: export ANDROID_SERIAL=$ip:5555" ;;
+app-ca)
+  # The App API's LOCAL certificate (unit app-ca): generate the device-local CA and, as an explicit step, install
+  # ONLY its public cert into the system trust store so the on-device capture proxy can read HTTPS from apps the
+  # owner ENABLED in the App API. The private key stays on the device (never pushed, printed or committed). The owner
+  # runs this with the user present; installing the CA is this command + a reboot, never a silent side effect.
+  #   rooted.sh app-ca [gen|install|status|remove [--wipe-key]]      (status if omitted)
+  adb push -q "$HERE/app-ca.sh" /data/local/tmp/app-ca.sh >/dev/null
+  asu "sh /data/local/tmp/app-ca.sh ${2:-status} ${3:-}; rm -f /data/local/tmp/app-ca.sh" ;;
+app-frida)
+  # The App API's on-demand IN-APP HOOK helper (unit app-frida): for an enabled app that pins/signs, read the
+  # request the way the app itself builds it (reuse the app's own auth). Default STOPPED; runs only in a bounded
+  # capture window for ONE enabled package. `install` stages the matching-arch binary this pushes.
+  #   rooted.sh app-frida install [BIN] | start PKG | stop | status | remove
+  adb push -q "$HERE/app-frida.sh" /data/local/tmp/app-frida.sh >/dev/null
+  if [ "${2:-status}" = install ] && [ -n "${3:-}" ] && [ -f "${3:-}" ]; then
+    adb push -q "${3}" /data/local/tmp/frida-server-staged >/dev/null
+    asu "sh /data/local/tmp/app-frida.sh install /data/local/tmp/frida-server-staged; rm -f /data/local/tmp/app-frida.sh /data/local/tmp/frida-server-staged"
+  else
+    asu "sh /data/local/tmp/app-frida.sh ${2:-status} ${3:-}; rm -f /data/local/tmp/app-frida.sh"
+  fi ;;
 widevine-l3)
   # Netflix etc. in SD on the unlocked phone (Widevine L1 can't be provisioned): see targets/native/widevine-l3.sh.
   if [ "${2:-}" = remove ]; then
@@ -275,5 +299,5 @@ widevine-l3)
     echo "Widevine L3 forced (now and at every boot)"
   fi ;;
 *)
-  sed -n '2,21p' "$0"; exit 1 ;;
+  sed -n '2,25p' "$0"; exit 1 ;;
 esac
