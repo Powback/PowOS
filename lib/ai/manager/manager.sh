@@ -86,24 +86,27 @@ _manager_ensure_claude() {
 #             (powos manager --fleet-login status|start|complete; the authority's claude-login flow, never /login here)
 #   signin    neither: the AI page asks to sign in (powos manager --signin)
 # Only file presence and variable names are looked at - never a credential's contents.
+# fleet_login.py's one state word (relogin, or anything else), capped at $1 s when given; "" when it can't run or fails -
+# never a failing status (errexit: a failed auth probe killed the whole chat turn, 11-09).
+_manager_fleet_word() {
+    command -v python3 &>/dev/null || return 0
+    local cap=(); [[ -n "${1:-}" ]] && command -v timeout &>/dev/null && cap=(timeout "$1")
+    "${cap[@]}" python3 "$_MANAGER_DIR/fleet_login.py" word 2>/dev/null || true
+}
+
 _manager_auth() {
     declare -f _ai_ensure_config &>/dev/null && _ai_ensure_config
     if [[ -r "${POWOS_AI_ENDPOINT_FILE:-/etc/powos/ai/endpoint.conf}" || -n "${ANTHROPIC_BASE_URL:-}" ]]; then
         # relogin: the authority says this machine's tenant has no login, or its refresh failed (what claude itself
         # reports as "run /login"): the page's native sign-in (fleet_login.py; the authority's claude-login flow).
         # The authority unreachable or fine: endpoint, as before. Capped at a few seconds; only its state word is read.
-        local w=""
-        local cap=(); command -v timeout &>/dev/null && cap=(timeout 12)
-        command -v python3 &>/dev/null && w=$("${cap[@]}" python3 "$_MANAGER_DIR/fleet_login.py" word 2>/dev/null || true)
-        [[ "$w" == relogin ]] && echo relogin || echo endpoint
+        [[ "$(_manager_fleet_word 12)" == relogin ]] && echo relogin || echo endpoint
     elif [[ -n "${ANTHROPIC_API_KEY:-}" || -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" || -n "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
         echo login
     elif [[ -s "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json" ]]; then
         # Its own login (direct mode): relogin once it can't refresh any more (fleet_login.py reads only its expiry
         # and whether a refresh token is there).
-        local w=""
-        command -v python3 &>/dev/null && w=$(python3 "$_MANAGER_DIR/fleet_login.py" word 2>/dev/null || true)
-        [[ "$w" == relogin ]] && echo relogin || echo login
+        [[ "$(_manager_fleet_word)" == relogin ]] && echo relogin || echo login
     else
         echo signin
     fi
