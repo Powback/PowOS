@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # kwin anland unit tests in a throwaway gcc container, against the patched tree src-tree.sh builds (no Qt, no KWin
 # build): reconnect-test.c = 0059's non-blocking try_exit_fallback(); xnativesnap-test.cpp = 0065's 1-px snap;
-# task-policy-test.cpp = 0066's prompt-over-game and restore-watch decisions.
+# task-policy-test.cpp = 0066's prompt-over-game and restore-watch decisions, 0068's own-frame vs borderless one.
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 tree=$("$here/src-tree.sh" "${KWIN_TREE:-$here/out/src-tree}" | grep '^/' | head -1 | cut -d' ' -f1)

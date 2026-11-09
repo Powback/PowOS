@@ -4473,7 +4473,9 @@ class WebWindows(
          * borderless one (Unity -popupwindow, a Wine WS_POPUP, SDL_WINDOW_BORDERLESS), not a frame: it has no close,
          * full-screen or resize of its own, so it keeps PowOS's bar (the user, 11-08: Broforce "shows as a window but
          * without a title bar, so there's no way to resize it or make it fullscreen"). Its bar's full screen is the
-         * game's immersive full screen ([immersive]).
+         * game's immersive full screen ([immersive]). Since kwin 0068 KWin itself tells a borderless window (any app's:
+         * fixed size or opened at its output's size, with no frame extents and no move of its own) from a frame, so
+         * "own" no longer comes for one; [game] stays as the rule for a known game whose borderless window is resizable.
          */
         fun pageOwnFrame(
             kwinOwn: Boolean,

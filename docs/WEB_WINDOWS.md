@@ -1035,6 +1035,15 @@ With the APK installed, unfolded, `powos_web_windows` = 1 and the user idle: ope
   `moveresize <id> move|<edges>`: `WebWindows.linuxMoveResize` cancels the touch to KWin, the page's Body drives the
   frame with the same pointer (`appDragMove`: moves/untiles/snaps like the bar, resizes like an edge; held still 500 ms:
   the tile menu). Its maximize (button or double click on its tab strip) = PowOS full screen, minimize = the dock.
+- **Borderless is not a frame (kwin 0068 / 3.76, 2026-11-09):** of the windows without KWin's title bar, one that asked
+  for full screen has no frame at all (immersive/full screen), one that bypasses the WM (X11 override-redirect) is never
+  a window (a popup drawn into its app's task, 0062), and an undecorated one is `own` only with proof it draws a frame:
+  `_GTK_FRAME_EXTENTS`, an xdg toplevel's CSD, or it started its own move/resize. `_MOTIF_WM_HINTS` "no decorations"
+  alone (Steam's CEF window, and every game's borderless window: Wine `WS_POPUP`, Unity `-popupwindow`, SDL borderless)
+  counts only while the window is resizable and did not open at its output's size, so a game's window keeps PowOS's bar
+  (close, full screen, resize) by what it is, for every game (`AnlandTaskPolicy::drawsOwnFrame`; the user 11-08,
+  Broforce "without a title bar, so there's no way to resize it or make it fullscreen"). The app's
+  `WebWindows.pageOwnFrame` keeps a known game's (`isGame`) bar too, for a resizable borderless game.
 - **Content = the visible frame (kwin 0046):** an undecorated window is shown and sized by KWin's `frameGeometry` (the
   X11 client geometry includes `_GTK_FRAME_EXTENTS`, the shadow): before, Brave's frame sat ~16 logical px inside the
   body with a dark gutter left/right/bottom and KWin's refit loop ("took 543x628 itself, the task is 504x606").
