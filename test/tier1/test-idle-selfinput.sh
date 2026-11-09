@@ -29,7 +29,8 @@ case "\$cmd" in
 esac
 EOF2
 printf '#!/bin/sh\n[ "$1" = -c ] && exec sh -c "$2"\n' > "$T/bin/su"
-printf '#!/bin/sh\necho "  lastUserActivityTime=1 (45000 ms ago)"\necho "  mWakefulness=Awake"\n' > "$T/bin/dumpsys"
+echo '  mOverrideState=Optional.empty' > "$T/ovr"
+printf '#!/bin/sh\necho "  lastUserActivityTime=1 (45000 ms ago)"\necho "  mWakefulness=Awake"\ncat %s/ovr\n' "$T" > "$T/bin/dumpsys"
 printf '#!/bin/sh\necho "nohup $*" >> %s/restart.log\n' "$T" > "$T/bin/nohup"
 : > "$T/evsrc"
 printf '#!/bin/sh\nexec tail -n0 -F %s/evsrc 2>/dev/null\n' "$T" > "$T/bin/getevent"
@@ -66,6 +67,15 @@ settle; echo "/dev/input/event8: 0003 0035 00000200" >> "$T/evsrc"; sleep 5
 # 5. A stale mark (long past) doesn't mask a real touch.
 settle; echo $(( $(date +%s) - 60 )) > "$T/dlt/powos-selfinput"; irq 1030; sleep 5
 [ "$(lt)" -gt 1 ] && ok "a mark 60 s old masks nothing" || bad "stale mark masked a touch" "lasttouch=$(lt)"
+# 5b. A fold override set by a tool (cmd device_state state 0) + the other panel's power-up IRQs -> not a touch (11-07
+#     01:44: game-present-rate stopped as "picked up" 10 s after its own fold); then reset (state reset) -> not either.
+settle; echo "  mOverrideState=Optional[DeviceState{identifier=0, name='CLOSED'}]" > "$T/ovr"; sleep 1; irq 1040; sleep 5
+[ "$(lt)" = 1 ] && ok "panel IRQs right after a fold override was set: not a touch" || bad "own fold counted as a touch" "lasttouch=$(lt)"
+echo '  mOverrideState=Optional.empty' > "$T/ovr"; sleep 1; irq 1050; sleep 3
+[ "$(lt)" = 1 ] && ok "panel IRQs right after the override was reset: not a touch" || bad "own fold reset counted as a touch" "lasttouch=$(lt)"
+# 5c. The override unchanged for long: a finger counts again.
+sleep 10; settle; irq 1060; sleep 5
+[ "$(lt)" -gt 1 ] && ok "an unchanged override masks nothing" || bad "unchanged override masked a touch" "lasttouch=$(lt)"
 kill $wp 2>/dev/null; wait $wp 2>/dev/null; wp=
 
 # 6. --ensure restarts a live watcher of an older version, lasttouch kept.
@@ -75,7 +85,7 @@ echo 777 > "$T/dlt/powos-touchmon.pid"; echo 1 > "$T/dlt/powos-touchmon.ver"; ec
 i=$(sed -n 's/^idle=\([0-9]*\) .*/\1/p' <<<"$out")
 grep -q powos-touchmon.sh "$T/restart.log" && [ -n "$i" ] && [ "$i" -ge 300 ] && [ "$i" -le 305 ] \
   && ok "old-version watcher: restarted, idle kept from its lasttouch ($i)" || bad "old-version watcher" "$out"$'\n'"$(cat "$T/restart.log")"
-echo 2 > "$T/dlt/powos-touchmon.ver"; echo 777 > "$T/dlt/powos-touchmon.pid"; : > "$T/restart.log"; bash "$T/tools/idle.sh" >/dev/null 2>&1
+echo 3 > "$T/dlt/powos-touchmon.ver"; echo 777 > "$T/dlt/powos-touchmon.pid"; : > "$T/restart.log"; bash "$T/tools/idle.sh" >/dev/null 2>&1
 [ ! -s "$T/restart.log" ] && ok "current-version watcher: left running" || bad "current watcher restarted" "$(cat "$T/restart.log")"
 
 # 7. Every wake/sleep key the tools send carries the mark.

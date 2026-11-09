@@ -1048,10 +1048,70 @@ const ibGridFoot = (pages, g, columns) => ({ left: pages.left + g.pad, right: pa
 /** Home's grid shown: its last row, its tiles and its page dots against the pill ([into]: px into it plus the gutter). */
 function ibGridFails(at, into, gutter, foot) {
   const tiles = [...document.querySelectorAll(".home .page:not(.away) .home-tile")].map((t) => into(t.getBoundingClientRect())).filter((d) => d > 0);
-  const dots = document.querySelector(".home .home-dots > *")?.getBoundingClientRect();
+  // The dots drawn (their <i>s), not their row's 14 px box: on the phone (unfolded, dock right, pill under) the box
+  // reached 0.6 px past the gutter while the dots themselves sat 3 px clear of the pill.
+  const drawn = [...document.querySelectorAll(".home .home-dots i")].map((i) => i.getBoundingClientRect()).filter((r) => r.height > 0);
+  const dots = drawn.length ? { left: Math.min(...drawn.map((r) => r.left)), right: Math.max(...drawn.map((r) => r.right)), bottom: Math.max(...drawn.map((r) => r.bottom)), height: 1 } : null;
   const fails = [];
   if (into(foot) > 0) fails.push(`${at}: the grid's last row ends ${into(foot)} px into the pill + ${gutter} px gutter`);
   if (tiles.length) fails.push(`${at}: ${tiles.length} tile(s) into the pill: ${tiles.join(", ")} px`);
   if (dots?.height && into(dots) > gutter) fails.push(`${at}: the page dots ${into(dots) - gutter} px into the pill`);
+  return fails;
+}
+
+/*
+ * On the PHONE (tools/phone/verify/shell-check.sh: the live page, the real host), read only - the user's layout as it
+ * is, never a setting changed. The gate scenes above set their own states; these measure what the phone shows.
+ */
+
+/**
+ * IB1 on the phone (board "Home app icons float too far up and overlap the search bar"): each of home's grid pages in
+ * turn, as the user has it (the pill over or - razr-current-layout's default - under the icons), no tile nor the grid's
+ * last row in the pill's rect + gutter, and the page dots clear of it. Home's page put back after.
+ */
+export async function homeIconsClearNow(label) {
+  const S = await importShim("./state.ts");
+  const { geometry } = await importShim("./ui/grid.tsx");
+  if (!document.querySelector(".home > .bar .bar-pill")) return ["SKIP: home's search is the dock's button here (no pill in the foot)"];
+  const was = S.page.value;
+  const below = document.querySelector(".home.pill-below") ? "under" : "over";
+  const fails = [];
+  try {
+    for (let p = 0; p < S.pages.value.length; p++) {
+      S.page.value = p;
+      await window.__gw.settled(() => true, ".home");
+      fails.push(...ibClear(`${label}, page ${p + 1}, pill ${below} the icons`, geometry.peek(), S.home.value.columns));
+    }
+  } finally {
+    S.page.value = was;
+  }
+  return fails;
+}
+
+/** The shell's key of open window [w]: its PowOS app, else the Android app of its package. */
+const pd1KeyOf = (w, keys) => w.app ?? keys.find((k) => k.startsWith(`a:${w.pkg}/`));
+
+/**
+ * PD1 on the phone, folded (board "Folded dock shows only pinned apps; open apps go to the front of recents"): with an
+ * app open that isn't pinned, the dock's pinned row is only pinned apps and the open ones lead its recents, in the
+ * windows' order (front first); [opened]: the app dock-folded.sh opened just before (it opens one when none is).
+ */
+export async function pd1Now(label, opened = "") {
+  const S = await importShim("./state.ts");
+  if (label !== "folded") return ["SKIP: PD1 is the folded dock (the phone is unfolded)"];
+  const keys = [...S.byKey.value.keys()];
+  // Folded the host lists no floating windows (WindowFrames: none folded): the app the check just opened is the
+  // front-most open one, and leads.
+  const open = [...new Set([opened, ...S.windows.value.map((w) => pd1KeyOf(w, keys))].filter((k) => k && !S.dock.value.includes(k)))];
+  if (!open.length) return ["SKIP: no unpinned app open"];
+  await window.__gw.settled(() => document.querySelector(".home > .dock"), ".home > .dock");
+  const cells = (sel) => [...(document.querySelector(sel)?.querySelectorAll(".app[data-key]") ?? [])].map((c) => c.dataset.key);
+  const row = cells(".home > .dock:not(.dock-tray) .dock-pages > .dock-page:not(.dock-recent)");
+  const recent = cells(".home > .dock:not(.dock-tray) .dock-recent");
+  const fails = [];
+  const strays = row.filter((k) => !S.dock.value.includes(k));
+  if (strays.length) fails.push(`pd1 phone: the pinned row has unpinned apps [${strays}] (pinned: [${S.dock.value}])`);
+  if (recent.slice(0, open.length).join() !== open.join()) fails.push(`pd1 phone: recents start [${recent.slice(0, open.length)}], not the open [${open}]`);
+  if (new Set(recent).size !== recent.length) fails.push(`pd1 phone: an app twice in the recents: ${recent}`);
   return fails;
 }

@@ -12,6 +12,8 @@
 #   tools/agents/tier1.sh test-land.sh    # just the matching test(s) - substring filter, run-all.sh's own
 #   tools/agents/tier1.sh --rebuild       # force-rebuild the cached image (after editing Dockerfile.tier1)
 #   TIER1_DOCKER=0 tools/agents/tier1.sh  # skip mounting the docker socket even for the full suite
+#   TIER1_HOST=58 tools/agents/tier1.sh x # run on .58 via tools/agents/offload.sh (any ssh host string works too);
+#                                         # .58 unreachable -> runs here, saying so. TIER1_HOST=local forces local.
 #
 # Gotchas baked in here so nobody re-learns them (friction f84, f108, f113, f122, f163, f185):
 #   - the Mac's bash 3.2 can't run run-all.sh at all - that's the whole reason this wrapper exists (f84).
@@ -45,6 +47,18 @@ DOCKERFILE="$HERE/Dockerfile.tier1"
 # runs on the image ITS Dockerfile builds, built on first use.
 IMAGE="powos-tier1:$(git hash-object "$DOCKERFILE" | cut -c1-12)"
 
+# Offload to another host (tools/agents/offload.sh): the Mac at load 40-60 times ship-step tests out (rc=124).
+case "${TIER1_HOST:-}" in
+  "" | local) ;;
+  *)
+    host=$TIER1_HOST; [ "$host" = 58 ] && host=powos@192.168.50.58
+    if ssh -o ConnectTimeout=5 -o BatchMode=yes "$host" true 2>/dev/null; then
+      exec env OFFLOAD_HOST="$host" "$(dirname "${BASH_SOURCE[0]}")/offload.sh" \
+        env TIER1_HOST=local ${TIER1_DOCKER:+TIER1_DOCKER=$TIER1_DOCKER} "./$(git rev-parse --show-cdup)tools/agents/tier1.sh" "$@"
+    fi
+    echo "tier1.sh: TIER1_HOST=$TIER1_HOST unreachable - running locally" >&2 ;;
+esac
+
 REBUILD=false
 ARGS=()
 for a in "$@"; do
@@ -60,11 +74,13 @@ TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) ||
   { echo "tier1.sh: cd into a PowOS checkout (any worktree) first" >&2; exit 1; }
 GCD=$(git rev-parse --path-format=absolute --git-common-dir)
 
-case "$TOPLEVEL" in
+# Colima-only rule: on Linux (.58) the engine sees the host filesystem directly (and $HOME=/home is a symlink
+# to /var/home there, so the prefix check would misfire).
+[ "$(uname -s)" = Darwin ] && case "$TOPLEVEL" in
   "$HOME"/*) ;;
   *) echo "tier1.sh: $TOPLEVEL is outside \$HOME - Colima only shares \$HOME into the VM, so it can't be mounted (friction f185)" >&2; exit 1 ;;
 esac
-case "$GCD" in
+[ "$(uname -s)" = Darwin ] && case "$GCD" in
   "$HOME"/*) ;;
   *) echo "tier1.sh: $GCD is outside \$HOME - Colima only shares \$HOME into the VM, so it can't be mounted (friction f185)" >&2; exit 1 ;;
 esac
@@ -92,8 +108,16 @@ fi
 case "${TIER1_DOCKER:-}" in 1) NEED_DOCKER=true ;; 0) NEED_DOCKER=false ;; esac
 
 HOME_ENV=()
+# The engine socket: Colima's in-VM path on the Mac; on a Linux host with DOCKER_HOST=unix://... (.58's rootless
+# podman) that socket, mounted at the path the in-container docker client expects.
+SOCK=/var/run/docker.sock
+case "${DOCKER_HOST:-}" in unix://*) SOCK=${DOCKER_HOST#unix://} ;; esac
+# SELinux-enforcing hosts (.58 is Bazzite) deny container_t access to $HOME bind mounts; relabeling the
+# user's home (:z) would be worse, so disable labeling for this throwaway test container only.
+SEC=()
+command -v getenforce >/dev/null && [ "$(getenforce 2>/dev/null)" = Enforcing ] && SEC=(--security-opt label=disable)
 if $NEED_DOCKER; then
-  MOUNTS+=(-v /var/run/docker.sock:/var/run/docker.sock)
+  MOUNTS+=(-v "$SOCK:/var/run/docker.sock")
   # The docker-using lints (targets/android/lint-complexity.sh, tools/lint/rust-complexity.sh) cache into
   # $HOME/.cache and hand that path to a NESTED `docker run -v` of their own. That nested mount resolves
   # against the VM, same as the f163 note above - so our own container's $HOME must equal the Mac's real
@@ -110,6 +134,7 @@ if $REBUILD || ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
 fi
 
 exec docker run --rm \
+  ${SEC[@]+"${SEC[@]}"} \
   "${MOUNTS[@]}" \
   -e SHELL=/bin/bash \
   ${HOME_ENV[@]+"${HOME_ENV[@]}"} \

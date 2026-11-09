@@ -281,3 +281,19 @@ hour; it is the task's next step.
   (files/run/open, powos-android-open's spool) was started only when rooted. Fixed (07df518a, App.kt): started in every
   main process. Then Chrome opens claude.ai/login ("Sign in - Claude"), shots ~/pw/nonroot-base-signin-shots/08-11.
   Account entry is the user's (not done by agents).
+
+## What changed 11-09 (gh#13: making an app on a phone without root)
+
+- `powos app` (`lib/apps/powos-app`): `build --ui` builds the module first when `ui/bindings` is missing (else says why,
+  not bun's `Could not resolve "../bindings"`); `check` / `runtime` / `services` print a capability table (the baked
+  tree's sibling `powos-runtime` is found off PATH, no execvp traceback); a UI-only app (`"module": null`) installs
+  without SpacetimeDB, the registry row optional without root (the launcher lists files/apps itself). Tier1
+  `test-app-noroot-cli.sh`.
+- Base image: `roots spacetimedb` (out of the apps pack); `apps/registry` in `apps/bundled.list`, so
+  `powos-noroot-services` publishes `powos-registry` on first start. Tier1 `test-noroot-app-base.py`. Needs a re-split
+  + publish of the base image to reach phones.
+- `linux/EngineHome.kt` (run by `EngineServices`): the image's `~/.config/omalauncher/widgets` and
+  `~/.local/share/powos/apps` are symlinks to the app's files/widgets and files/apps (passed through fakechroot by
+  SessionService's `ARCH_EXCLUDE_EXTRA`), and owl-check/owl-send/owl-recon are in `/usr/local/bin`. JVM `EngineHomeTest`.
+- Still open: no public module builder (a module app still needs `powos app builder` or cargo + wasm32 on the phone),
+  example App API specs for `powos compose blocks`, and `.preview/` PNGs on no-root.

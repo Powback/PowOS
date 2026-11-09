@@ -157,12 +157,23 @@ class ShellTermViews(
         slots[id]?.session?.emulator?.paste(text)
     }
 
+    /** [text] (a card of the paste picker: [ClipHistory]) into [id], bracketed when the program asked for it. */
+    fun pasteText(
+        id: String,
+        text: String,
+    ) {
+        slots[id]?.session?.emulator?.paste(text)
+    }
+
     /** What's selected in [id] (Termux's long-press selection), to the clipboard; the selection ends. */
     fun copy(id: String): String? {
         val slot = slots[id] ?: return null
         val text = slot.selection()
         slot.term.stopTextSelectionMode()
-        text?.let { clipboard().setPrimaryClip(ClipData.newPlainText("PowOS terminal", it)) }
+        text?.let {
+            clipboard().setPrimaryClip(ClipData.newPlainText("PowOS terminal", it))
+            ClipHistory.of(context).add(it)
+        }
         return text
     }
 
@@ -467,6 +478,7 @@ class ShellTermViews(
             text: String,
         ) {
             clipboard().setPrimaryClip(ClipData.newPlainText("PowOS terminal", text))
+            ClipHistory.of(context).add(text)
         }
 
         override fun onPasteTextFromClipboard(session: TerminalSession) = paste(slot.id)

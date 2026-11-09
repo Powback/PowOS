@@ -106,3 +106,13 @@ Built as proposed in "Conclusion" 1, generic for every Unity / Unreal game unity
   Unreal game on > 3 MP (ABZU unfolded: 5.5 MP), else 100.
 - Tests: test/tier1/test-unity-screen.sh (ABZU's enum, plain UE's sg key, restore, every auto branch, no ini),
   test-steam-compat.sh (scale/scales/fps/watch-fps on a fake session log).
+
+## auto targets the panel's 120 + UBWC A/B (games-perf, 2026-11-09)
+- auto's target is the panel refresh, 120 (games-120fps-goal), not a fixed 55: the recorded 23 fps at 70 % (11-08
+  02:27) now steps down 50 -> 35 (ABZU's SCALE_25) instead of stopping at 50; the "not GPU-bound" rule still brings a
+  CPU-bound game back up. Overrides: `POWOS_FPS_TARGET`, steam-compat.json `apps.<id>.target`.
+- A check's `gus:` (bf-lib gus_set, .powos-gus-bak beside the ini) now holds the file: unity-screen's auto wrote over
+  it at launch, so every `gus:ResolutionScale=...` run measured auto's scale. Held launches are not recorded by
+  watch-fps.
+- UBWC A/B queued at a fixed SCALE_50: `base` (user_settings' default TU_DEBUG=noubwc) vs `env:TU_DEBUG=startup` (UBWC
+  on) - the first UBWC-on fps number since 11-04 (every earlier one was SKIP/cancelled).

@@ -83,21 +83,16 @@ if [ $defaults = 1 ]; then
 fi
 for d in ${apps[@]+"${apps[@]}"}; do add_app "$d"; done
 
-# The OWL CLI, built once and again when its sources change (by content: a rebase touches every file's time). A build
-# that can't run now (the Gradle cache is the APK builds' - locked while one runs) keeps the jar there is, and says so.
+# The OWL CLI, built once per source version (by content: a rebase touches every file's time) and shared across
+# checkouts through the build-inputs cache (dev/owl-jar.sh, friction f402). A build that can't run now (the Gradle
+# cache is the APK builds' - locked while one runs) keeps the jar there is, and says so.
 jar=$REPO/targets/android/app/owl/build/cli/owl.jar
-src_hash=$(find "$REPO/targets/android/app/owl/src" -name '*.kt' -print0 | sort -z | xargs -0 shasum | shasum | cut -c1-16)
-if [ ! -f "$jar" ] || [ "$(cat "$jar.src" 2>/dev/null)" != "$src_hash" ]; then
-  echo "     owl.jar: building (targets/android/app/owl)"
-  if docker run --rm "${gc_flags[@]}" -v "$GRADLE_VOLUME:/root/.gradle" -v "$REPO:$REPO" -w "$REPO/targets/android/app" --entrypoint bash "$JVM_IMAGE" \
-    -c './gradlew -q --offline --configure-on-demand :owl:owlJar' >/dev/null 2>&1; then
-    echo "$src_hash" > "$jar.src"
-  elif [ -f "$jar" ]; then
-    echo "     owl.jar: couldn't build now (the Gradle cache busy?) - using the one built before"
-  else
-    echo "preview: owl.jar didn't build" >&2; exit 2
-  fi
-fi
+rc=0; "$SHELL_DIR/dev/owl-jar.sh" "$REPO" --build >/dev/null || rc=$?
+case $rc in
+  0) ;;
+  3) echo "     owl.jar: couldn't build now (the Gradle cache busy?) - using the one built before" ;;
+  *) echo "preview: owl.jar didn't build" >&2; exit 2 ;;
+esac
 owl_trees() {
   docker run --rm "${gc_flags[@]}" -v "$work:$work" -v "$jar:/owl.jar:ro" --entrypoint java "$JVM_IMAGE" -jar /owl.jar trees --batch "$work/batch.json" ||
     echo "     owl trees: some widgets didn't evaluate (their errors are in the report)"
@@ -115,10 +110,10 @@ browser() { # PASS
     -e PREVIEW_LIVE="$live" -e PREVIEW_FAST="$fast" ${only:+-e PREVIEW_ONLY="$only"} ${PREVIEW_EMPTY:+-e PREVIEW_EMPTY="$PREVIEW_EMPTY"} \
     ${PREVIEW_JOBS:+-e PREVIEW_JOBS="$PREVIEW_JOBS"} ${PREVIEW_DEBUG:+-e PREVIEW_DEBUG=1} ${PREVIEW_DEBUG_KEY:+-e PREVIEW_DEBUG_KEY="$PREVIEW_DEBUG_KEY"} ${PREVIEW_BASELINE:+-e PREVIEW_BASELINE="$PREVIEW_BASELINE"})
   if [ -n "$GR_HOST" ]; then browser_remote "$1" "${envs[@]}"; return; fi
-  docker run --rm "${gc_flags[@]}" --platform linux/arm64 --shm-size 1g ${GATE_CPU_SHARES:+--cpu-shares "$GATE_CPU_SHARES"} "${mounts[@]}" "${envs[@]}" \
+  docker run --rm "${gc_flags[@]}" --platform "$(case $(uname -m) in x86_64 | amd64) echo linux/amd64 ;; *) echo linux/arm64 ;; esac)" --shm-size 1g ${GATE_CPU_SHARES:+--cpu-shares "$GATE_CPU_SHARES"} "${mounts[@]}" "${envs[@]}" \
     -w /usr/src/app --entrypoint timeout "$IMAGE" "${gc_cap[@]}" node preview.mjs
 }
-# GATE_REMOTE (dev/gate-remote.sh): the browser passes on the remote. The OWL trees between them stay here (the JVM
+# GATE_HOST=58 / GATE_REMOTE (dev/gate-remote.sh): the browser passes on the remote. The OWL trees between them stay here (the JVM
 # image is the Mac's): /work goes up before each pass and comes back after it, with /out. HOST_WORK stays this $work,
 # the path the local JVM container sees.
 . "$SHELL_DIR/dev/gate-remote.sh"

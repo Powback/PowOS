@@ -1121,6 +1121,16 @@ cmd_update() {
     local action="${1:-check}"
     local UPDATES_LAYER="/run/powos/usb-layers/layers/updates"
 
+    # The phone (rooted or not): no bootc, no dnf - its image updates package by package from the [powos] repo, PowOS's
+    # own code included (powos-core). lib/phone-update.sh, the same run the app makes (docs/PHONE-UPDATES.md).
+    if [[ "$(cat /etc/powos/platform 2>/dev/null)" == phone && -f "$POWOS_LIB/phone-update.sh" ]]; then
+        case "$action" in
+            check) sh "$POWOS_LIB/phone-update.sh" --check; return ;;
+            packages|apply|os) shift; sh "$POWOS_LIB/phone-update.sh" "$@"; return ;;
+            system) shift; sh "$POWOS_LIB/phone-update.sh" --system "$@"; return ;;
+        esac
+    fi
+
     case "$action" in
         check)
             _update_check
@@ -3294,6 +3304,11 @@ SHELLHELP
         # The work board (lib/ai/agents/powos-agents-cli; `powos agents help`).
         shift
         exec python3 "$POWOS_LIB/ai/agents/powos-agents-cli" "$@"
+        ;;
+    progress)
+        # The Progress app's data: the daily-driver checklist and the known hacks (`powos progress help`).
+        shift
+        exec python3 "$POWOS_LIB/apps/powos-progress-cli" "$@"
         ;;
     friction)
         # Friction log: what got in an agent's way, so it gets fixed for good (`powos friction help`).

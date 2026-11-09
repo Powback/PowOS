@@ -772,10 +772,17 @@ export interface Bridge {
     /** The clipboard pasted (bracketed when the program asked); the selection copied (answers it, null: none). */
     paste?(id: string): Promise<void>;
     copy?(id: string): Promise<string | null>;
+    /** [text] (a card of the paste picker) into [id], bracketed when the program asked. */
+    pasteText?(id: string, text: string): Promise<void>;
   };
   clipboard: {
     read(): Promise<string | null>;
     write(text: string): Promise<void>;
+    /**
+     * The phone's only (ClipHistory.kt): the recent copies, newest first, the clipboard now included - kept on the
+     * device only. Absent elsewhere: the paste picker shows the clipboard now.
+     */
+    history?(): Promise<Clip[]>;
   };
   /**
    * Remote input (ui/remote.tsx): the phone as a keyboard and mouse for a computer, over its USB cable (HID functions
@@ -1284,6 +1291,12 @@ export interface TermState {
 }
 
 /** Where and how PowTerm's view of a terminal shows (Bridge.term.view). */
+/** A copy in the clipboard's history: its text and when (epoch ms). */
+export interface Clip {
+  text: string;
+  at: number;
+}
+
 export interface TermPlace {
   /** The rect, CSS px at [dpr]; the text size, CSS px. */
   x: number;

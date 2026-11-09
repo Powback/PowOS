@@ -74,6 +74,10 @@ class ShellBridge(
 
     /** The terminals drawn by PowTerm's terminal (Termux's view), over their elements ([ShellTermViews]). */
     private val termViews = ShellTermViews(context, runtime, web, terminals, ::emit)
+
+    /** The clipboard's recent copies, local only: the terminals' paste picker ([ClipHistory]). */
+    private val clips = ClipHistory.of(context)
+    private val clipChanged = ClipboardManager.OnPrimaryClipChangedListener { clips.add(ClipHistory.primaryText(context, clipboard())) }
     private val media = ShellMedia(context, runtime, scope, ::emit)
     /** Android apps as home elements (on unless Settings.Global powos_web_windows = 0; home's activity only). */
     private val webWindows by lazy { WebWindows(context, web, ::emit) }
@@ -283,6 +287,10 @@ class ShellBridge(
     private val lockChanged: (JSONObject) -> Unit = { emit("devices.lock", it) }
 
     init {
+        // The games' built-in fps counter follows the fps meter's switch (store "perf.meter"), from the start.
+        andro.marchy.GameFpsCounter.on = runCatching {
+            store("perf.meter").takeIf { it.isFile }?.let { JSONObject(it.readText()).optBoolean("on") } ?: false
+        }.getOrDefault(false)
         // Home's bridge: an app the system's own window menu floats becomes a web window (SystemFloat, web windows on).
         if (activity != null) SystemFloat.start(context, systemFloat)
         if (activity != null) andro.marchy.WebWindowSource.host = linuxWindows
@@ -292,6 +300,7 @@ class ShellBridge(
         runCatching { android.app.WallpaperManager.getInstance(context).addOnColorsChangedListener(wallpaperColors, main) }
         dev.omalauncher.theme.ThemeStore.changeListeners.add(themeChanged)
         dev.omalauncher.devices.LockAccess.listeners.add(lockChanged)
+        runCatching { clipboard().addPrimaryClipChangedListener(clipChanged) }
         // Live mode on or off (its consent answered, its capture stopped): the assistant's page follows.
         dev.omalauncher.assist.LiveCapture.onChange = { main.post { emit("assist.live", liveState()) } }
         // An agent told the user something: the PowOS AI page lists it.
@@ -539,7 +548,11 @@ class ShellBridge(
             "store.set" -> {
                 store(a.getString(0)).writeText(a.get(1).let { if (it is String) JSONObject.quote(it) else it.toString() })
                 // The fps meter's switch takes effect in every shell window at once (status bar, home), not on its next poll.
-                if (a.getString(0) == "perf.meter") runCatching { JSONObject(a.get(1).toString()).toString() }.getOrNull()?.let { broadcast("perf.meter", it) }
+                if (a.getString(0) == "perf.meter") runCatching { JSONObject(a.get(1).toString()).toString() }.getOrNull()?.let {
+                    broadcast("perf.meter", it)
+                    // A game's window task shows its own counter (the bar's meter is hidden under a full-screen game).
+                    andro.marchy.GameFpsCounter.on = runCatching { JSONObject(it).optBoolean("on") }.getOrDefault(false)
+                }
                 Unit
             }
             // SI1: the one search/chat bar input home's bar (and its search widget) and the launcher overlay share (barsync.ts):
@@ -817,11 +830,21 @@ class ShellBridge(
             "term.focus" -> termViews.focus(a.getString(0), a.getBoolean(1))
             "term.mods" -> termViews.mods(a.getInt(0), a.getInt(1))
             "term.paste" -> termViews.paste(a.getString(0))
+            "term.pasteText" -> termViews.pasteText(a.getString(0), a.getString(1))
             "term.copy" -> termViews.copy(a.getString(0))
             "term.key" -> termViews.key(a.getString(0), a.getString(1))
             "term.style" -> terminalStyle(if (a.isNull(0)) null else a.getDouble(0))
             "clipboard.read" -> clipboard().primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
-            "clipboard.write" -> clipboard().setPrimaryClip(ClipData.newPlainText("PowOS", a.getString(0)))
+            "clipboard.write" -> {
+                clipboard().setPrimaryClip(ClipData.newPlainText("PowOS", a.getString(0)))
+                clips.add(a.getString(0))
+            }
+            // The paste picker's cards: the clipboard now first (a copy made in another app, readable now home has
+            // the focus), then the rest of the local history (ClipHistory).
+            "clipboard.history" -> {
+                clips.add(ClipHistory.primaryText(context, clipboard()))
+                clips.toJson()
+            }
             else ->
                 when {
                     method.startsWith("remote.") -> remote.call(method.removePrefix("remote."), a)
@@ -1955,6 +1978,7 @@ class ShellBridge(
         speech.cancel()
         applyObserver.dispose()
         termViews.removeAll()
+        runCatching { clipboard().removePrimaryClipChangedListener(clipChanged) }
         terminals.closeAll()
         scope.cancel()
     }
