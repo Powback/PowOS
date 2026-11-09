@@ -136,17 +136,17 @@ public final class Packs {
     }
 
     /**
-     * A pack's install as an Android progress notification (Progress): a first Steam launch adds the 0.9 GB gaming pack,
+     * A pack's install as an Android progress notification (andro.marchy.Progress; the nested Progress here is the download callback): a first Steam launch adds the 0.9 GB gaming pack,
      * and from an icon nobody saw powos-pack's stderr (Powback/PowOS#11).
      */
     private static void notifyProgress(Context ctx, String name, String state) {
         String id = "pack-" + name;
         if (state == null || state.equals("done")) {
-            Progress.finish(ctx, id);
+            andro.marchy.Progress.finish(ctx, id);
             return;
         }
         if (state.startsWith("failed")) {
-            Progress.failed(ctx, id, state.length() > 7 ? state.substring(7) : "");
+            andro.marchy.Progress.failed(ctx, id, state.length() > 7 ? state.substring(7) : "");
             return;
         }
         String[] p = state.split(" ");
@@ -160,7 +160,7 @@ public final class Packs {
             return;
         }
         String size = total > 0 ? String.format(java.util.Locale.ROOT, " (%.1f GB)", total / 1e9) : "";
-        Progress.update(ctx, id, (p[0].equals("downloading") ? "Adding " + name + " support" + size : "Unpacking " + name + " support"), done, total);
+        andro.marchy.Progress.update(ctx, id, (p[0].equals("downloading") ? "Adding " + name + " support" + size : "Unpacking " + name + " support"), done, total);
     }
 
     /** Installs the pack in the background (one job at a time per pack); [state] reports how it goes. */
