@@ -71,3 +71,7 @@ if [ ! "$AAD/output/powos.apk" -nt "$stamp" ]; then
 fi
 rm -f "$stamp"
 echo "published: http://android.pow/apk/powos.apk (version code $(cat "$AAD/output/powos.ver"))"
+# The same commit's shell bundle and PowOS code (powos-core) for the phones that pull their updates (no adb: the S25,
+# the razr - docs/PHONE-UPDATES.md). Only from origin's history; a failure only warns: the APK stands.
+"$HERE/publish-shell.sh" "$AAD/output" || echo "build-app: publish-shell failed - the pull phones keep their shell" >&2
+"$HERE/build-powos-core.sh" --publish || echo "build-app: powos-core not published - the pull phones keep their code" >&2
