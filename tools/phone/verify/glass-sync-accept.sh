@@ -57,12 +57,15 @@ DID=$(sh_ "dumpsys display" | grep -E "^  DisplayDeviceInfo" | sed -nE 's/.*uniq
 [ -n "$DID" ] || { echo "no display is on"; exit 3; }
 echo "display $DID, apk $(sh_ "dumpsys package com.powos.app | grep -m1 lastUpdateTime" | tr -s ' '), sync was $ORIG"
 case $(cdp home 'typeof (window.__glass&&__glass.live&&__glass.live.sync)') in *function*) ;;
-  *) echo "the live shell has no frame-synced glass (71b2c58c not shipped) - nothing judged"; exit 5;; esac
+  *) WHY="the live shell has no frame-synced glass (71b2c58c not shipped)"; echo "$WHY - nothing judged"; exit 5;; esac
 home; chk home
 
 # The scenes (home page unless named). Each returns "ok" or why it couldn't run.
 W_JS='(async()=>{const t=[...document.querySelectorAll(".home-tile")].find(e=>{const r=e.getBoundingClientRect();return e.querySelector(".tile")&&r.width>120&&r.top>40&&r.bottom<innerHeight-40});if(!t)return "no widget tile on screen";const s=t.querySelector(".tile");const o=[t.style.transform,t.style.transition,t.style.zIndex,s.style.outline];s.style.outline="4px solid #ff00ff";t.style.transition="none";t.style.zIndex=50;await new Promise(r=>setTimeout(r,600));let x=0,v=14;const end=performance.now()+2200;await new Promise(r=>{function f(){x+=v;if(Math.abs(x)>innerWidth*0.3)v=-v;t.style.transform=`translate(${x}px,${x/3}px)`;performance.now()<end?requestAnimationFrame(f):r()}requestAnimationFrame(f)});await new Promise(r=>setTimeout(r,500));[t.style.transform,t.style.transition,t.style.zIndex,s.style.outline]=o;return "ok"})()'
-F_PRE='const S=await importShim("./state.ts");const it=(S.home.value.items||[]).find(i=>Array.isArray(i.apps)&&i.apps.length>1&&document.querySelector(`.home-tile[data-key="${i.key}"]`));if(!it)return "no folder on home";const st=document.createElement("style");st.id="gsa-s";'
+# The folder: one on home (its face morphs open), else an app-library folder (ui/library.tsx: folderview opens "lib:*"
+# keys too, morphing from the library's card) - the phone's home had no folder at all on 11-09 ("can't run scene
+# folder: no folder on home", nothing judged). The scenes measure the open sheet's glass, the same either way.
+F_PRE='const S=await importShim("./state.ts");let it=(S.home.value.items||[]).find(i=>i.kind==="folder"&&Array.isArray(i.apps)&&i.apps.length>1&&document.querySelector(`.home-tile[data-key="${i.key}"]`));if(!it){const L=await importShim("./ui/library.tsx");const on=k=>{const e=document.querySelector(`.lib-card[data-key="${k}"]`);if(!e)return 0;const r=e.getBoundingClientRect();return r.right>0&&r.left<innerWidth?2:1};it=L.library.value.filter(f=>f.apps.length>1&&on(f.key)).sort((a,b)=>on(b.key)-on(a.key))[0]}if(!it)return "no folder on home and none in the app library";const st=document.createElement("style");st.id="gsa-s";'
 F_JS="(async()=>{${F_PRE}st.textContent=\".folder-view .folder-sheet{outline:4px solid #ff00ff!important}\";document.head.appendChild(st);const w=ms=>new Promise(r=>setTimeout(r,ms));for(let k=0;k<2;k++){S.folder.value=it.key;await w(900);S.folder.value=null;await w(900)}st.remove();return \"ok\"})()"
 G_JS="(async()=>{${F_PRE}st.textContent=\"#gsa-t,#gsa-t::before,#gsa-t::after{background:none!important;box-shadow:none!important;border:0!important;border-radius:0!important}\";document.head.appendChild(st);const w=ms=>new Promise(r=>setTimeout(r,ms));S.folder.value=it.key;await w(700);const sh=document.querySelector(\".folder-view .folder-sheet\");if(!sh){S.folder.value=null;st.remove();return \"the folder sheet did not open\"}const b=sh.getBoundingClientRect();const d=document.createElement(\"div\");d.className=\"tile\";d.id=\"gsa-t\";const tw=Math.min(180,b.width/3);Object.assign(d.style,{position:\"fixed\",left:\"0px\",top:(b.top+b.height/2-tw/2)+\"px\",width:tw+\"px\",height:tw+\"px\",outline:\"4px solid #ff00ff\",zIndex:99999});document.body.appendChild(d);let x=b.left,v=12;d.style.transform=\"translateX(\"+x+\"px)\";await w(400);const end=performance.now()+2000;await new Promise(r=>{function f(){x+=v;if(x>b.right-tw||x<b.left)v=-v;d.style.transform=\"translateX(\"+x+\"px)\";performance.now()<end?requestAnimationFrame(f):r()}requestAnimationFrame(f)});await w(300);d.remove();S.folder.value=null;await w(600);st.remove();return \"ok\"})()"
 S_PRE='(()=>{document.getElementById("gsa-s")?.remove();const st=document.createElement("style");st.id="gsa-s";st.textContent=".notif-panel{outline:4px solid #ff00ff!important}";document.head.appendChild(st);return "ok"})()'
@@ -83,7 +86,7 @@ record() { # record <mode> <scene>: screenrecord around the scene's driver
             cdp shade 'document.getElementById("gsa-s")?.remove(),1' >/dev/null ;;
   esac
   wait $rp; sh_ "chmod 644 $f"; "$A" pull "$f" "$OUT/$m-$sc.mp4" >/dev/null 2>&1; sh_ "rm -f $f" >/dev/null
-  case $r in *ok*) ;; *) [ $sc = shade ] || { echo "can't run scene $sc: $r"; exit 5; } ;; esac
+  case $r in *ok*) ;; *) [ $sc = shade ] || { WHY="scene $sc: $r"; echo "can't run $WHY"; exit 5; } ;; esac
   [ -s "$OUT/$m-$sc.mp4" ] || { WHY="no recording for $m/$sc (display $DID; screenrecord: $(tr '\n' ' ' < "$OUT/$m-$sc.err" | cut -c1-200))"; echo "$WHY"; exit 5; }
   home; chk "$m/$sc"; }
 
@@ -165,19 +168,19 @@ analyse() { # analyse <mode> <scene> -> json line in OUT/<mode>-<scene>.json
 SCENES="widget folder gog shade"
 for mode in off on; do
   v=0; [ $mode = on ] && v=1
-  setsync $v; reload || exit 5; chk "reload $mode"
+  setsync $v; reload || { WHY="home didn't come back after the reload ($mode)"; exit 5; }; chk "reload $mode"
   echo "== $mode (powos_glass_sync=$(sh_ "settings get global powos_glass_sync"))"
   for sc in $SCENES; do record $mode $sc; done
 done
 # Judged off the phone: the window is over (the lock stays until the verdict sets the knob).
 num() { sed -nE "s/.*\"$2\": ([0-9]+).*/\1/p" "$OUT/$1.json" | head -1; }
 fail=0; offm=0; onm=0; offd=0; ond=0
-for sc in $SCENES; do for mode in off on; do analyse $mode $sc || { echo "analysis failed: $mode/$sc"; exit 5; }; done
+for sc in $SCENES; do for mode in off on; do analyse $mode $sc || { WHY="analysis failed: $mode/$sc"; echo "$WHY"; exit 5; }; done
   for mode in off on; do echo "$mode/$sc: $(cat "$OUT/$mode-$sc.json" | cut -c1-260)"; done
   m0=$(num off-$sc mismatched); m1=$(num on-$sc mismatched); d0=$(num off-$sc dropped); d1=$(num on-$sc dropped); mv=$(num on-$sc moving)
-  [ -n "$m1" ] && [ -n "$mv" ] || { echo "no numbers for $sc"; exit 5; }
+  [ -n "$m1" ] && [ -n "$mv" ] || { WHY="no numbers for $sc"; echo "$WHY"; exit 5; }
   if [ "$mv" -lt 15 ]; then [ $sc = shade ] && { echo "NOTE: shade scene not measured (moving frames $mv: the shade's outline wasn't seen)"; continue; }
-    echo "the $sc scene had $mv outlined moving frames - not measurable"; exit 5; fi
+    WHY="the $sc scene had $mv outlined moving frames - not measurable"; echo "$WHY"; exit 5; fi
   offm=$((offm + m0)); onm=$((onm + m1)); offd=$((offd + d0)); ond=$((ond + d1))
   [ "$m1" -le 1 ] || { echo "FAIL $sc: ON has $m1 mismatched frames (OFF $m0)"; fail=1; }
 done

@@ -19,7 +19,9 @@
 #      reply field, send tapped (a click in the page: no touch on the screen) -> the row says "Sent" at once
 #      (data-reply="sent", the optimistic state) and never "error";
 #   6. the sender's files/last-reply reads "<token>\t<the text>" within 15 s: the words reached the app.
-# PASS: exit 0; FAIL lines: exit 1; SKIP: exit 3. Budget: 300 s (watchdog).
+# PASS: exit 0; FAIL lines: exit 1; SKIP: exit 3. Budget: NEEDS_ME_BUDGET_S (450 s; queue it with --budget 480).
+# Every wait on the page polls INSIDE the page (one CDP hop): a hop is a `docker run` of bun (cdp.sh), ~10 s on the
+# loaded Mac (11-09: load 25, 7-8 s per docker run), so the old shell loops of up to 20+10+16 hops ran past 300 s.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 T=$here/..; A=$T/adb.sh
@@ -34,8 +36,13 @@ FAILS=0
 log() { echo "$*"; }
 fail() { echo "FAIL $*"; FAILS=$((FAILS + 1)); }
 pass() { echo "PASS $*"; }
-# The whole check under 300 s: a stuck adb/CDP hop ends it as a FAIL, the trap still runs.
-( sleep 290; echo "FAIL needs-me-reply: over its 300 s budget" >&2; kill -TERM $$ ) 2>/dev/null &
+# The whole check under its budget: a stuck adb/CDP hop ends it as a FAIL, the trap still runs. The hop (a child) is
+# killed first: bash runs the TERM trap only after the foreground child returns, so `kill $$` alone waited out a
+# 120 s CDP timeout and the runner's SIGKILL came first (11-09 16:36, no trap: test app left installed).
+NM_BUDGET=${NEEDS_ME_BUDGET_S:-450}
+( me=$(sh -c 'echo $PPID'); sleep "$NM_BUDGET"; echo "FAIL needs-me-reply: over its $NM_BUDGET s budget" >&3
+  for c in $(pgrep -P $$); do [ "$c" = "$me" ] || pkill -TERM -P "$c" 2>/dev/null; [ "$c" = "$me" ] || kill -TERM "$c" 2>/dev/null; done
+  kill -TERM $$ ) 3>&1 2>/dev/null &
 DOG=$!
 
 SCOPED=; OPENED=; INSTALLED=
@@ -92,11 +99,8 @@ why() {
 }
 
 # 3. Posted, from the sender, with a reply that takes text.
-seen=
-for _ in $(seq 1 20); do
-  seen=$(ev 'importShim("./bridge.ts").then(({powos})=>powos.notifications.list()).then(l=>{const n=(l.items||[]).find(i=>i.pkg==="'$PKG'"&&i.title==="'"$WHO"'");return n?(n.actions||[]).some(a=>a.input)?"ok":"no reply action":(l.available?"none":"no notification access")})')
-  [ "$seen" = ok ] && break; sleep 0.5
-done
+# Up to 10 s, polled in the page (one hop).
+seen=$(ev '(async()=>{const {powos}=await importShim("./bridge.ts");let v="";for(let k=0;k<20;k++){const l=await powos.notifications.list();const n=(l.items||[]).find(i=>i.pkg==="'$PKG'"&&i.title==="'"$WHO"'");v=n?(n.actions||[]).some(a=>a.input)?"ok":"no reply action":(l.available?"none":"no notification access");if(v==="ok")break;await new Promise(o=>setTimeout(o,500))}return v})()')
 if [ "$seen" != ok ]; then
   # Home's list from the sender at all (another title = the check's match is wrong, not the post).
   mine=$(ev 'importShim("./bridge.ts").then(({powos})=>powos.notifications.list()).then(l=>JSON.stringify((l.items||[]).filter(i=>i.pkg==="'$PKG'").map(i=>({title:i.title,actions:i.actions}))))')
@@ -111,12 +115,14 @@ SCOPED=1
 
 # 5. The row (the widget on home, else the page), opened, typed into, sent.
 ROW='(()=>{const k="'"$(tr '[:upper:]' '[:lower:]' <<<"$WHO")"'";const rs=[...document.querySelectorAll(".nm-row")].filter(r=>(r.dataset.group||"").endsWith(k));return rs[0]||null})()'
-where=$(ev "(()=>{const r=$ROW;return r?(r.closest('.app-screen')?'page':'widget'):'none'})()")
-for _ in $(seq 1 10); do [ "$where" != none ] && break; sleep 0.5; where=$(ev "(()=>{const r=$ROW;return r?(r.closest('.app-screen')?'page':'widget'):'none'})()"); done
+# waitrow <tries>: the row's place, polled every 0.5 s in the page (one hop).
+waitrow() { ev "(async()=>{for(let k=0;k<$1;k++){const r=$ROW;if(r)return r.closest('.app-screen')?'page':'widget';await new Promise(o=>setTimeout(o,500))}return 'none'})()"; }
+where=$(waitrow 10)
 if [ "$where" = none ]; then
   OPENED=1; ev 'importShim("./apps/pages.ts").then(P=>{P.openApp("local.needs-me");return "ok"})' >/dev/null
-  for _ in $(seq 1 16); do sleep 0.5; where=$(ev "(()=>{const r=$ROW;return r?'page':'none'})()"); [ "$where" = page ] && break; done
+  where=$(waitrow 16)
 fi
+[ -n "$where" ] || where=none
 [ "$where" = none ] && { fail "no What needs me row for \"$WHO\" (widget or page)"; exit 1; }
 log "row for \"$WHO\" in the $where"
 r=$(ev "(async()=>{const sleep=ms=>new Promise(o=>setTimeout(o,ms));const row=()=>$ROW;
