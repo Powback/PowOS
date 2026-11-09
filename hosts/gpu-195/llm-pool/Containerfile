@@ -16,5 +16,27 @@ RUN set -eu; \
     rm /tmp/ls.tgz; \
     llama-swap -version
 
+# Bonsai's ternary GGUF packings need PrismML's matching llama.cpp kernels.
+# CUDA 13 matches this vLLM base's runtime; pin both release and archive digest.
+ARG PRISM_VERSION=prism-b10826-c9c34bc
+ARG PRISM_SHA256=43e203be88b8c2fbebb24d518078c3ff02df742970d89f739e9dc23646c6ff2d
+RUN set -eu; \
+    curl -fsSL -o /tmp/prism.tgz \
+      "https://github.com/PrismML-Eng/llama.cpp/releases/download/${PRISM_VERSION}/llama-${PRISM_VERSION}-bin-linux-cuda-13.3-x64.tar.gz"; \
+    echo "${PRISM_SHA256}  /tmp/prism.tgz" | sha256sum -c -; \
+    mkdir -p /opt/llama-prism; \
+    tar -xzf /tmp/prism.tgz -C /opt/llama-prism --strip-components=1; \
+    rm /tmp/prism.tgz; \
+    ldd /opt/llama-prism/libggml-cuda.so > /tmp/prism-libs.txt; \
+    cat /tmp/prism-libs.txt; \
+    # libcuda is injected by CDI at runtime; it is absent during an image build.
+    if grep 'not found' /tmp/prism-libs.txt | grep -v 'libcuda.so.1'; then exit 1; fi; \
+    /opt/llama-prism/llama-server --version
+
+# Pinned Strata engine and its private Python runtime for the offloaded MoE.
+COPY --from=ghcr.io/niko1221/strata@sha256:d39ca9fc583c5085dc66b857fbf3b3e3a9e256f692672d4061322d3bd468433a /opt/strata /opt/strata
+COPY strata-voice-aware.py /usr/local/bin/strata-voice-aware
+RUN chmod 755 /usr/local/bin/strata-voice-aware
+
 EXPOSE 8080
 ENTRYPOINT ["llama-swap", "-config", "/etc/llama-swap/config.yaml", "-listen", ":8080", "-watch-config"]

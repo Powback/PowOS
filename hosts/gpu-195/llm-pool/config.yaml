@@ -1,23 +1,32 @@
-# gpu-195 general LLM pool: llama-swap (:9292 on the box, http://llm-gpu.pow via Traefik on .100) on GPU1.
+# gpu-195 general LLM pool: llama-swap (:9292 on the box, http://llm-gpu.pow via Traefik on .100).
 # Installed by hosts/gpu-195/install.sh to ~/.config/llm-pool/config.yaml (mounted read-only; -watch-config reloads
 # it). Plan and measurements: docs/GPU-SERVERS-PLAN.md. Unit: powos units show llm-pool.
 #
 # One OpenAI-compatible endpoint, model by name:
 #   general  Qwen3-14B-AWQ, 32k context, tool calls (hermes), thinking on (reasoning_content separate)
 #   general-nothink  the same loaded model with thinking off (no reload: a request parameter)
-#   vision   Qwen2.5-VL-7B-Instruct-AWQ, 16k context, up to 4 images per prompt
+#   swift-27b / swift-27b-nothink  opt-in Swift 1.5 Qwen3.8-27B W4A16 coding profile, text only, 32k
+#   bonsai-27b / bonsai-27b-nothink  opt-in Ternary Bonsai 2 27B PQ2_0, text only, 32k
+#   nanbeige-33b[-nothink]  opt-in Nanbeige4.3-33B Q4_K_S / Q4 KV, 32k
+#   flash-next[-huihui][-nothink]  opt-in Flash Next IQ2_XS, Strata expert offload, 128k
+#   vision   Qwen2.5-VL-7B-Instruct-AWQ, 32k context, up to 4 images per prompt
 #   embed    bge-m3 dense embeddings (1024-d, 8k tokens), /v1/embeddings
 #   ocr      PaddleOCR-VL-1.6 (0.9B) document OCR: one image + a task prompt ("OCR:", "Table Recognition:",
 #            "Formula Recognition:", "Chart Recognition:", "Spotting:", "Seal Recognition:"); used by PowScan
 #
+# Voice LLM sleep state is written by voice-llm-gateway. Flash Next reads that state at launch: GPU1 only while voice
+# is awake/unknown; both 3090s while voice weights are offloaded to RAM. Every other pool model is pinned to host GPU1.
 # GPU1 budget (24 GiB): stt-batch keeps ~2.4 GiB resident; embed ~2.4 GiB (0.10); ocr ~2.9 GiB (0.12); general or
 # vision ~16.8 GiB (0.70). The matrix lets embed or ocr sit beside either big model (never both: 2.4 + 2.4 + 2.9 +
 # 16.8 > 24), never general and vision together: asking for one swaps the other out (a cold start, ~1-2 min). Every model unloads after 10 idle minutes, so an idle GPU1 holds only stt-batch.
 # vLLM's --gpu-memory-utilization is this instance's share of the whole card and is checked against what's free at
 # start, so the shares must add up with stt-batch's: 2.4 + 2.9 + 16.8 = 22.1 of 24 GiB at most.
+# Swift uses 0.86 (~20.6 GiB) and evicts ALL other pool models; stt-batch remains resident.
+# Its idle TTL is 300 s. Eager execution and one sequence keep runtime memory within GPU1's budget.
+# Bonsai also runs alone in the pool, with a 300 s TTL; measured ~9 GiB plus stt-batch at 32k.
 #
-# GPU0 is the realtime voice path's (voice-llm and friends): nothing here may name it. The container only gets
-# nvidia.com/gpu=1, so CUDA device 0 inside is the host's GPU1.
+# llm-pool sees both GPUs. Non-Strata profiles below set CUDA_VISIBLE_DEVICES=1 (host GPU1). The voice-aware
+# launcher selects host GPU0+GPU1 only while voice-llm is confirmed asleep, otherwise just host GPU1.
 
 healthCheckTimeout: 600
 logLevel: info
@@ -37,6 +46,116 @@ macros:
     --disable-uvicorn-access-log
 
 models:
+  nanbeige-33b:
+    name: "Nanbeige4.3-33B Q4_K_S"
+    description: "opt-in dense coding model, Q4_K_S weights and Q4 KV, 32k"
+    cmd: |
+      /opt/llama-prism/llama-server
+      --model /root/.cache/huggingface/hub/models--bartowski--Nanbeige_Nanbeige4.3-33B-GGUF/snapshots/9beb68421fdf7be095093a6888325fa2c83ddd38/Nanbeige_Nanbeige4.3-33B-Q4_K_S.gguf
+      --host 127.0.0.1 --port ${PORT} --alias ${MODEL_ID}
+      --n-gpu-layers 99 --flash-attn on --ctx-size 32768 --parallel 1 --threads 3
+      --cache-type-k q4_0 --cache-type-v q4_0
+      --batch-size 512 --ubatch-size 128
+      --jinja --reasoning-format deepseek
+      --chat-template-kwargs '{"preserve_thinking":true,"tool_call_format":"xml"}'
+      --temp 1.0 --top-p 0.95 --top-k 0 --min-p 0.0
+    env:
+      - "CUDA_VISIBLE_DEVICES=1"
+    useModelName: "nanbeige-33b"
+    filters:
+      setParamsByID:
+        "nanbeige-33b-nothink":
+          chat_template_kwargs:
+            enable_thinking: false
+            preserve_thinking: true
+            tool_call_format: xml
+    concurrencyLimit: 1
+    ttl: 300
+    timeouts:
+      responseHeader: 0
+
+  flash-next:
+    name: "Qwen3.8 Flash Next IQ2_XS"
+    description: "Strata expert streaming, 128k RAM-backed KV, 4 GiB conversation cache, optional Huihui projection"
+    cmd: |
+      /usr/local/bin/strata-voice-aware
+      --engine strata --config /etc/llama-swap/flash-next.json
+      --host 127.0.0.1 --port ${PORT} --parallel 1
+    useModelName: "flash-next"
+    filters:
+      setParamsByID:
+        "flash-next":
+          experimental_speed_projection: false
+        "flash-next-nothink":
+          experimental_speed_projection: false
+          chat_template_kwargs:
+            enable_thinking: false
+        "flash-next-huihui":
+          experimental_speed_projection: true
+        "flash-next-huihui-nothink":
+          experimental_speed_projection: true
+          chat_template_kwargs:
+            enable_thinking: false
+    concurrencyLimit: 1
+    ttl: 300
+    timeouts:
+      responseHeader: 0
+
+  bonsai-27b:
+    name: "Ternary Bonsai 2 27B PQ2_0"
+    description: "compact coding trial, PrismML llama.cpp, text only, 32k"
+    cmd: |
+      /opt/llama-prism/llama-server
+      --model /root/.cache/huggingface/hub/models--prism-ml--Ternary-Bonsai-2-27B-gguf/snapshots/b072e1d3b35a0a630cece372c2127528e0994386/Ternary-Bonsai-2-27B-PQ2_0.gguf
+      --host 127.0.0.1 --port ${PORT} --alias ${MODEL_ID}
+      --n-gpu-layers 99 --flash-attn on --ctx-size 32768 --parallel 1 --threads 3
+      --jinja --reasoning-format deepseek
+      --chat-template-kwargs '{"reasoning_effort":"medium"}'
+      --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.05
+    env:
+      - "CUDA_VISIBLE_DEVICES=1"
+    useModelName: "bonsai-27b"
+    filters:
+      setParamsByID:
+        "bonsai-27b-nothink":
+          chat_template_kwargs:
+            enable_thinking: false
+          temperature: 0.7
+          top_p: 0.8
+          min_p: 0.0
+          presence_penalty: 1.5
+    concurrencyLimit: 1
+    ttl: 300
+    timeouts:
+      responseHeader: 0
+
+  swift-27b:
+    name: "Swift 1.5 Qwen3.8-27B W4A16"
+    description: "coding trial, GPU1 exclusive within the pool, 32k context"
+    cmd: |
+      vllm serve ukisai/Swift-1.5-Qwen3.8-27b-W4A16-AWQ ${serve}
+      --revision 9dba8a05877150d587215a519ce6befec3c9978a
+      --language-model-only
+      --max-model-len 32768
+      --max-num-seqs 1
+      --max-num-batched-tokens 2048
+      --gpu-memory-utilization 0.86
+      --enforce-eager
+      --enable-auto-tool-choice --tool-call-parser qwen3_coder
+      --reasoning-parser qwen3
+    env:
+      - "CUDA_VISIBLE_DEVICES=1"
+    useModelName: "swift-27b"
+    filters:
+      setParamsByID:
+        "swift-27b-nothink":
+          chat_template_kwargs:
+            enable_thinking: false
+    concurrencyLimit: 1
+    ttl: 300
+    timeouts:
+      responseHeader: 0
+
   general:
     name: "Qwen3-14B-AWQ"
     description: "general pool model: agents, summaries, tool calls"
@@ -48,6 +167,8 @@ models:
       --gpu-memory-utilization 0.70
       --enable-auto-tool-choice --tool-call-parser hermes
       --reasoning-parser qwen3
+    env:
+      - "CUDA_VISIBLE_DEVICES=1"
     # general-nothink reaches vLLM as `general` (it serves one name); the alias only flips the template's thinking off.
     useModelName: "general"
     filters:
@@ -65,11 +186,13 @@ models:
     cmd: |
       vllm serve Qwen/Qwen2.5-VL-7B-Instruct-AWQ ${serve}
       --quantization awq_marlin
-      --max-model-len 16384
-      --max-num-seqs 8
+      --max-model-len 32768
+      --max-num-seqs 4
       --gpu-memory-utilization 0.70
       --limit-mm-per-prompt '{"image":4,"video":0}'
       --enable-auto-tool-choice --tool-call-parser hermes
+    env:
+      - "CUDA_VISIBLE_DEVICES=1"
     concurrencyLimit: 8
 
   embed:
@@ -81,6 +204,8 @@ models:
       --max-model-len 8192
       --max-num-seqs 64
       --gpu-memory-utilization 0.10
+    env:
+      - "CUDA_VISIBLE_DEVICES=1"
 
   ocr:
     name: "PaddleOCR-VL-1.6"
@@ -97,6 +222,8 @@ models:
       --mm-processor-cache-gb 0
       --limit-mm-per-prompt '{"image":1}'
       --gpu-memory-utilization 0.12
+    env:
+      - "CUDA_VISIBLE_DEVICES=1"
     concurrencyLimit: 8
 
 routing:
@@ -105,11 +232,19 @@ routing:
     settings:
       matrix:
         evict_costs:
+          nanbeige-33b: 30
+          flash-next: 50
+          bonsai-27b: 10
+          swift-27b: 40
           general: 30
           vision: 20
           embed: 5
           ocr: 5
         sets:
+          dense-coding: "nanbeige-33b"
+          flash-coding: "flash-next"
+          compact-coding: "bonsai-27b"
+          coding: "swift-27b"
           text: "general & embed"
           image: "vision & embed"
           scan: "general & ocr"

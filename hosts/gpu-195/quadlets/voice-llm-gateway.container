@@ -1,0 +1,30 @@
+# Public :8100 OpenAI proxy and idle GPU lease manager for voice-llm.
+# Only /v1 routes and /health are exposed; vLLM sleep/wake/control routes stay on voice.network.
+[Unit]
+Description=PowOS voice LLM gateway and GPU lease manager
+After=network-online.target voice-network.service voice-llm.service llm-pool.service
+Wants=network-online.target voice-network.service voice-llm.service llm-pool.service
+
+[Container]
+ContainerName=voice-llm-gateway
+Image=localhost/voice-llm-gateway:latest
+Network=voice.network
+PublishPort=8100:8080
+SecurityLabelDisable=true
+Volume=/var/lib/powos/voiceagent:/state
+Environment=VOICE_LLM_URL=http://voice-llm:8000
+Environment=LLM_POOL_URL=http://host.containers.internal:9292
+Environment=VOICE_LLM_IDLE_SECONDS=300
+Environment=GPU0_VOICE_RESERVE_GIB=8
+# If Flash Next owns both cards, wait for its natural TTL unload; never force-stop an active local generation.
+Environment=VOICE_GPU_DRAIN_TIMEOUT=1800
+Label=io.powos.unit=voice-llm-gateway
+PodmanArgs=--memory=512m --memory-swap=512m --cpus=1 --pids-limit=256
+
+[Service]
+Restart=always
+RestartSec=3
+TimeoutStartSec=180
+
+[Install]
+WantedBy=default.target

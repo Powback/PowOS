@@ -1,0 +1,50 @@
+{
+  "id": "maya-bench",
+  "name": "GLM Flash offload benchmark",
+  "kind": "container",
+  "host": "desktop",
+  "owner": "system:llm",
+  "purpose": "Opt-in GLM-5.3-Flash Maya-S24 benchmark on GPU1. Container-owned build dependencies and pinned source; no boot service.",
+  "installedBy": "hosts/gpu-195/maya-bench/Containerfile",
+  "image": "localhost/maya-bench:1.1.28",
+  "files": [
+    "/var/lib/powos/models/maya",
+    "/var/home/powos/.config/containers/systemd/maya-bench.container"
+  ],
+  "processes": [
+    {
+      "systemd": "maya-bench.service"
+    },
+    {
+      "container": "maya-bench"
+    },
+    {
+      "container": "maya-download"
+    }
+  ],
+  "limits": {
+    "memory": "52g",
+    "cpus": 4,
+    "pids": 8192,
+    "memory_swap": "52g"
+  },
+  "gpu": "nvidia.com/gpu=1",
+  "autosleep": "Manual benchmark only; stop after trials",
+  "remove": {
+    "stop": [
+      "systemctl --user stop maya-bench.service",
+      "podman stop maya-download"
+    ],
+    "commands": [
+      "podman rmi localhost/maya-bench:1.1.28",
+      "rm -f /var/home/powos/.config/containers/systemd/maya-bench.container",
+      "systemctl --user daemon-reload"
+    ],
+    "keep": [
+      "/var/lib/powos/models/maya (downloaded weights and packs)"
+    ]
+  },
+  "ports": [
+    "127.0.0.1:9294/tcp"
+  ]
+}

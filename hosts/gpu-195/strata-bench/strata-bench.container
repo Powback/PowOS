@@ -1,0 +1,27 @@
+# Opt-in benchmark only; no boot activation. Restore llm-pool after the trial.
+[Unit]
+Description=PowOS larger-model benchmark (Strata, GPU1)
+Conflicts=llm-pool.service
+After=llm-pool.service network-online.target
+
+[Container]
+ContainerName=strata-bench
+Image=ghcr.io/niko1221/strata@sha256:d39ca9fc583c5085dc66b857fbf3b3e3a9e256f692672d4061322d3bd468433a
+PublishPort=127.0.0.1:9293:8080
+AddDevice=nvidia.com/gpu=1
+SecurityLabelDisable=true
+ShmSize=2g
+Volume=/var/lib/powos/models/strata:/data
+Environment=FAMILY=qwen
+Environment=MODEL=IQ2_XS
+Environment=CONTEXT=32k
+Environment=PARALLEL=1
+Environment=VISION=off
+Environment=GPU=0
+Environment=TUNE=skip
+Label=io.powos.unit=strata-bench
+PodmanArgs=--memory=48g --memory-swap=48g --cpus=4 --cpu-shares=256 --pids-limit=8192 --ulimit=memlock=-1:-1 --stop-timeout=120
+
+[Service]
+TimeoutStartSec=14400
+TimeoutStopSec=150

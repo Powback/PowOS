@@ -5,8 +5,8 @@
 # Unit: powos units show voice-agent  (repo units/gpu-195/voice-agent.json)
 [Unit]
 Description=PowOS voice - VoiceAgent backend (/ws, /transcribe)
-After=voice-stt.service voice-tts.service voice-llm.service
-Wants=voice-stt.service voice-tts.service voice-llm.service
+After=voice-stt.service voice-tts.service voice-llm.service voice-llm-gateway.service
+Wants=voice-stt.service voice-tts.service voice-llm.service voice-llm-gateway.service
 
 [Container]
 ContainerName=voice-agent

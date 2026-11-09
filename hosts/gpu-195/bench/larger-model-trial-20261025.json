@@ -1,0 +1,1039 @@
+{
+  "date": "2026-10-25",
+  "status": "complete",
+  "hardware": {
+    "host": "192.168.50.195",
+    "cpu": "Intel Core i7-7700K (4 cores/8 threads)",
+    "ram_gib": 62,
+    "gpu": "RTX 3090 24 GiB, GPU1 only",
+    "gpu1_stt_resident_mib": 2441,
+    "gpu0": "reserved for voice"
+  },
+  "method": {
+    "tasks": [
+      "intervals",
+      "cache"
+    ],
+    "tools": [
+      "Read",
+      "Edit",
+      "Write",
+      "Bash"
+    ],
+    "deadline_seconds": 600,
+    "output_tokens": 4096,
+    "context_tokens": 32768,
+    "note": "Small harness smoke tests, not a broad coding benchmark. Model sampling uses profile defaults and is not deterministic. Final cases run after warming the model. GLM compilation was frozen during timed Qwen and final general trials.",
+    "intervals_prompt_revision": 2,
+    "revision_note": "Original prompt said return sorted tuples but checks required a list. Revision 2 explicitly requires a list of tuples; rerun intervals for final comparison. Original Huihui interval failure is inconclusive due to this ambiguity."
+  },
+  "voice_before": {
+    "first_audio_median_ms": 636.5,
+    "n": 10
+  },
+  "candidates": {
+    "qwen_flash_next": {
+      "repo": "ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF",
+      "revision": "ed59f92082b1e93c0e96d60a8b11aab089b52f09",
+      "quant": "IQ2_XS",
+      "runtime_image": "ghcr.io/niko1221/strata@sha256:d39ca9fc583c5085dc66b857fbf3b3e3a9e256f692672d4061322d3bd468433a",
+      "engine": "0.1.48",
+      "status": "deployed opt-in and passed both proxy harness tasks",
+      "speed": {
+        "model": "qwen3.8-flash-next-iq2_xs",
+        "first_request_seconds": 0.701,
+        "warm_samples": [
+          {
+            "ttft_ms": 486.4,
+            "decode_tokens_s": 102.21,
+            "output_tokens": 128,
+            "seconds": 1.729,
+            "text": "Idle GPUs should proactively unload their resident models to optimize resource efficiency, reduce operational costs, and enhance system flexibility. When a GPU remains allocated to an inactive model, it monopolizes valuable memory bandwidth and VRAM capacity that could otherwise be utilized by other workloads or shared across multiple inference tasks. This static allocation leads to significant waste in multi-tenant environments where demand fluctuates dynamically; idle resources cannot be repurposed for active users, causing bottlenecks and degraded performance for concurrent jobs. Furthermore, unloading models allows for better thermal management, as GPUs consume less power when not actively processing data or maintaining large memory states, thereby lowering"
+          },
+          {
+            "ttft_ms": 179.3,
+            "decode_tokens_s": 113.46,
+            "output_tokens": 128,
+            "seconds": 1.299,
+            "text": "Idle GPUs should proactively unload their loaded models to optimize resource efficiency and system responsiveness in shared computing environments. When a GPU remains assigned to a specific model but receives no inference requests, it holds valuable VRAM hostage, preventing other workloads from accessing that memory. This \"memory fragmentation\" can lead to out-of-memory errors for subsequent tasks or force inefficient CPU offloading for smaller models that could otherwise fit on the GPU. By unloading idle models, systems free up VRAM, allowing dynamic allocation for active jobs, which maximizes throughput and reduces latency for new requests. Furthermore, this practice enhances energy efficiency; maintaining a model resident in memory"
+          },
+          {
+            "ttft_ms": 209.2,
+            "decode_tokens_s": 109.17,
+            "output_tokens": 128,
+            "seconds": 1.372,
+            "text": "Idle GPUs should aggressively unload their loaded models to optimize system efficiency, resource management, and environmental sustainability. When a GPU remains idle but retains a model in its Video RAM (VRAM), it consumes unnecessary memory that could be allocated to other active processes or users in shared environments. This \"memory hogging\" prevents the system from scaling effectively, leading to bottlenecks when multiple workloads compete for limited hardware resources. Furthermore, unloading models reduces power consumption and heat generation. Even in an idle state, maintaining large model weights in memory can keep the GPU at a higher thermal baseline, increasing energy usage without performing any actual computation. By releasing"
+          }
+        ],
+        "median_decode_tokens_s": 109.17,
+        "median_ttft_ms": 209.2,
+        "long_prompt": {
+          "prompt_characters": 10315,
+          "ttft_ms": 4282.3,
+          "decode_tokens_s": 59.77,
+          "output_tokens": 50,
+          "seconds": 5.102,
+          "text": "The logs record 160 sequential GET requests to `/items` routes with response times increasing linearly from 0 to 159 ms, resulting in four isolated HTTP 500 errors scattered throughout an otherwise successful request sequence."
+        }
+      },
+      "harness": [
+        {
+          "case": "intervals",
+          "tools": "Read,Edit,Write,Bash",
+          "seconds": 48.5,
+          "cli_exit": 0,
+          "passed": true,
+          "assertions_passed": true,
+          "turns": 8,
+          "usage": {
+            "input_tokens": 8,
+            "cache_creation_input_tokens": 4943,
+            "cache_read_input_tokens": 41709,
+            "output_tokens": 2940,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "is_error": false
+        },
+        {
+          "case": "cache",
+          "tools": "Read,Edit,Write,Bash",
+          "seconds": 27.14,
+          "cli_exit": 0,
+          "passed": true,
+          "assertions_passed": true,
+          "turns": 4,
+          "usage": {
+            "input_tokens": 4,
+            "cache_creation_input_tokens": 4351,
+            "cache_read_input_tokens": 15050,
+            "output_tokens": 1703,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "is_error": false
+        }
+      ],
+      "harness_mode": "runtime default thinking (Claude MAX_THINKING_TOKENS=0 did not disable runtime reasoning)",
+      "gpu1_total_mib": 23839,
+      "container_memory_gb": 39.41,
+      "voice_first_audio_median_ms": 639.5,
+      "voice_n": 10,
+      "proxy_nothink_harness": [
+        {
+          "case": "intervals",
+          "tools": "Read,Edit,Write,Bash",
+          "seconds": 26.54,
+          "cli_exit": 0,
+          "passed": true,
+          "assertions_passed": true,
+          "turns": 5,
+          "usage": {
+            "input_tokens": 4443,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 19885,
+            "output_tokens": 1467,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "is_error": false
+        },
+        {
+          "case": "cache",
+          "tools": "Read,Edit,Write,Bash",
+          "seconds": 25.42,
+          "cli_exit": 0,
+          "passed": true,
+          "assertions_passed": true,
+          "turns": 6,
+          "usage": {
+            "input_tokens": 4518,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 23906,
+            "output_tokens": 1528,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "is_error": false
+        }
+      ],
+      "pool_cold_seconds": 36.94,
+      "final_harness": [
+        {
+          "case": "intervals",
+          "tools": "Read,Edit,Write,Bash",
+          "seconds": 29.15,
+          "cli_exit": 0,
+          "passed": true,
+          "assertions_passed": true,
+          "turns": 6,
+          "usage": {
+            "input_tokens": 4605,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 25942,
+            "output_tokens": 1901,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "is_error": false
+        },
+        {
+          "case": "cache",
+          "tools": "Read,Edit,Write,Bash",
+          "seconds": 25.42,
+          "cli_exit": 0,
+          "passed": true,
+          "assertions_passed": true,
+          "turns": 6,
+          "usage": {
+            "input_tokens": 4518,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 23906,
+            "output_tokens": 1528,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "is_error": false
+        }
+      ],
+      "pool_speed": {
+        "model": "flash-next-nothink",
+        "first_request_seconds": 1.006,
+        "warm_samples": [
+          {
+            "ttft_ms": 738.7,
+            "decode_tokens_s": 45.61,
+            "output_tokens": 128,
+            "seconds": 3.523,
+            "text": "Idle GPUs should unload their models primarily to optimize resource efficiency and system performance across multi-tenant or distributed environments. When a GPU holds a model in memory but remains inactive, it occupies valuable VRAM that could be utilized by other active workloads, leading to unnecessary fragmentation and reduced overall throughput. In cloud infrastructure, where resources are shared among numerous users, leaving idle models loaded creates a \"dead weight\" that prevents optimal scheduling and increases operational costs. Furthermore, modern AI workflows often involve dynamic model switching; if multiple models reside simultaneously on the same hardware, memory pressure can cause severe bottlenecks or even out-of-memory errors for subsequent tasks."
+          },
+          {
+            "ttft_ms": 213.5,
+            "decode_tokens_s": 80.01,
+            "output_tokens": 128,
+            "seconds": 1.801,
+            "text": "Idle GPUs should proactively unload their loaded models to optimize resource utilization, reduce operational costs, and improve system reliability. When a GPU remains idle while retaining model weights in memory, it consumes valuable VRAM that could otherwise be allocated to other active tasks or different models, leading to inefficient resource fragmentation. Furthermore, maintaining large models in memory unnecessarily increases power consumption, as GPUs often draw baseline power even when not performing computations, thereby raising electricity costs and contributing to unnecessary thermal output, which can accelerate hardware degradation over time. Unloading idle models also enhances system flexibility by allowing dynamic reallocation of resources; if a new request arrives for a different model,"
+          },
+          {
+            "ttft_ms": 196.1,
+            "decode_tokens_s": 67.87,
+            "output_tokens": 128,
+            "seconds": 2.067,
+            "text": "Idle GPUs should aggressively unload their models to optimize resource efficiency and system responsiveness. When a GPU holds model weights in memory while inactive, it consumes valuable VRAM that could be allocated to other active processes, leading to potential bottlenecks or out-of-memory errors for concurrent tasks. This static allocation prevents dynamic scaling, where the system cannot easily adjust memory usage based on real-time demand. Furthermore, keeping large models loaded unnecessarily increases power consumption and heat generation, reducing hardware lifespan and energy efficiency, particularly in data centers where idle states are frequent. Unloading models allows for faster context switching between different workloads, enabling more flexible multi-tenant environments where"
+          }
+        ],
+        "median_decode_tokens_s": 67.87,
+        "median_ttft_ms": 213.5,
+        "long_prompt": {
+          "prompt_characters": 10315,
+          "ttft_ms": 4104.8,
+          "decode_tokens_s": 75.48,
+          "output_tokens": 40,
+          "seconds": 4.622,
+          "text": "The synthetic logs show a linear increase in response time for GET requests to `/items`, with occasional 500 errors occurring on specific routes, suggesting a performance degradation or load issue over time."
+        }
+      },
+      "stt_batch_coexistence": {
+        "short": "  stt 225.5 ms: 'Hey Luna what time is it?' (1.54 s audio)\n  stt 65.9 ms: 'Hey Luna what time is it?' (1.54 s audio)\n  stt 68.0 ms: 'Hey Luna what time is it?' (1.54 s audio)\n  stt 67.0 ms: 'Hey Luna what time is it?' (1.54 s audio)\n  stt 68.2 ms: 'Hey Luna what time is it?' (1.54 s audio)\n  stt 66.1 ms: 'Hey Luna what time is it?' (1.54 s audio)\nstt_latency: median 67.0 ms, min 65.9 ms (n=5)\n{\"stt_latency\": {\"median_ms\": 67.0, \"min_ms\": 65.9, \"n\": 5}}\n",
+        "long": "  stt 223.6 ms: 'Please check the project files and run the relevant tests. Then tell me which changes passed, which checks failed, and whether the local language model is ready for another coding task. Keep the explanation clear and include the measured response time.' (13.71 s audio)\n  stt 224.1 ms: 'Please check the project files and run the relevant tests. Then tell me which changes passed, which checks failed, and whether the local language model is ready for another coding task. Keep the explanation clear and include the measured response time.' (13.71 s audio)\nstt_latency: median 224.1 ms, min 224.1 ms (n=1)\n{\"stt_latency\": {\"median_ms\": 224.1, \"min_ms\": 224.1, \"n\": 1}}\n"
+      }
+    },
+    "huihui_projection": {
+      "repo": "alesha-pro/Qwen3.8-Flash-Next-abliterated-GSQ-RCO-Strata-GGUF",
+      "revision": "d4af3be5701549435e0770d625f79dd2def1358f",
+      "vector_sha256": "59f9ae8b4372107ae79044278a4406bdfe8f8861fe599aa5848515f0d072be38",
+      "status": "deployed opt-in and passed both proxy harness tasks",
+      "original_prompt_harness": [
+        {
+          "case": "intervals",
+          "tools": "Read,Edit,Write,Bash",
+          "seconds": 23.38,
+          "cli_exit": 0,
+          "passed": false,
+          "assertions_passed": false,
+          "turns": 5,
+          "usage": {
+            "input_tokens": 4435,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 19603,
+            "output_tokens": 1348,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "is_error": false
+        },
+        {
+          "case": "cache",
+          "tools": "Read,Edit,Write,Bash",
+          "seconds": 20.56,
+          "cli_exit": 0,
+          "passed": true,
+          "assertions_passed": true,
+          "turns": 5,
+          "usage": {
+            "input_tokens": 4526,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 19143,
+            "output_tokens": 1148,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "is_error": false
+        }
+      ],
+      "final_harness": [
+        {
+          "case": "intervals",
+          "tools": "Read,Edit,Write,Bash",
+          "seconds": 24.51,
+          "cli_exit": 0,
+          "passed": true,
+          "assertions_passed": true,
+          "turns": 6,
+          "usage": {
+            "input_tokens": 4463,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 24137,
+            "output_tokens": 1317,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "is_error": false
+        },
+        {
+          "case": "cache",
+          "tools": "Read,Edit,Write,Bash",
+          "seconds": 20.56,
+          "cli_exit": 0,
+          "passed": true,
+          "assertions_passed": true,
+          "turns": 5,
+          "usage": {
+            "input_tokens": 4526,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 19143,
+            "output_tokens": 1148,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "is_error": false
+        }
+      ],
+      "pool_speed": {
+        "model": "flash-next-huihui-nothink",
+        "first_request_seconds": 0.48,
+        "warm_samples": [
+          {
+            "ttft_ms": 375.3,
+            "decode_tokens_s": 71.89,
+            "output_tokens": 128,
+            "seconds": 2.142,
+            "text": "Idle GPUs, despite appearing dormant, often retain substantial amounts of memory allocated to pre-loaded model weights and intermediate activation buffers. This phenomenon occurs because modern inference frameworks typically maintain a persistent context to minimize latency for subsequent requests, assuming the GPU will remain active. However, in scenarios where a GPU is genuinely idle\u2014perhaps waiting for a new batch of data or during periods of low traffic\u2014this retained memory becomes a significant resource bottleneck. By proactively unloading models, developers can reclaim this valuable VRAM, allowing it to be utilized for other critical tasks such as running additional concurrent workloads, processing larger batch sizes, or accommodating more complex model architectures"
+          },
+          {
+            "ttft_ms": 203.0,
+            "decode_tokens_s": 75.59,
+            "output_tokens": 128,
+            "seconds": 1.883,
+            "text": "Idle GPUs should aggressively unload their loaded models to optimize resource efficiency, reduce operational costs, and enhance system flexibility. When a GPU remains idle but retains model weights in its high-bandwidth memory (VRAM), it consumes valuable resources that could be repurposed for other tasks or shared among multiple users. In multi-tenant environments, such as cloud inference platforms or research labs, this static allocation leads to significant waste, as VRAM is often the bottleneck for concurrency. By unloading models from idle GPUs, developers can free up memory for on-demand loading, enabling dynamic scaling and better utilization of hardware assets. Furthermore, keeping models resident in VR"
+          },
+          {
+            "ttft_ms": 175.1,
+            "decode_tokens_s": 86.78,
+            "output_tokens": 128,
+            "seconds": 1.639,
+            "text": "Idle GPUs should proactively unload their loaded models to optimize system efficiency, resource management, and long-term hardware health. When a GPU remains idle but retains large model weights in its high-bandwidth memory (VRAM), it occupies critical resources that could be reallocated for other active workloads or shared among multiple users in multi-tenant environments. This unnecessary retention leads to \"memory fragmentation,\" reducing the available space for new tasks and potentially causing out-of-memory errors when subsequent jobs attempt to load larger models. Furthermore, unloading models during idle periods significantly reduces power consumption. Modern GPUs consume substantial energy even in low-utilization states if they maintain active"
+          }
+        ],
+        "median_decode_tokens_s": 75.59,
+        "median_ttft_ms": 203.0,
+        "long_prompt": {
+          "prompt_characters": 10315,
+          "ttft_ms": 4064.6,
+          "decode_tokens_s": 82.65,
+          "output_tokens": 48,
+          "seconds": 4.633,
+          "text": "The logs show 160 GET requests to `/items` routes with linearly increasing durations, where most responses are successful (status 200) but a few isolated requests return server errors (status 500)."
+        }
+      }
+    },
+    "glm_flash": {
+      "repo": "peasantsmith/GLM-5.3-Flash-Maya-GGUF",
+      "revision": "f16ee4ba50d8fd2bb726ea1862ca6ca14ba188da",
+      "quant": "Maya-S24",
+      "runtime_commit": "6afa525bbabc3a8f5fd165f89e9bc72155d9bd39",
+      "status": "completed: thinking-enabled native Claude Code harness 2/2, single GPU with speech paused",
+      "runtime_image_id": "64afbf508ed0e0b2f8e3830562786d6ec7f781153942ba0d077b2bfa998e900d",
+      "baseline_speed": {
+        "model": "glm-5.3-flash",
+        "first_request_seconds": 12.755,
+        "warm_samples": [
+          {
+            "ttft_ms": 7461.4,
+            "decode_tokens_s": 3.23,
+            "output_tokens": 128,
+            "seconds": 46.77,
+            "text": "# Why Idle GPUs Should Unload Their Models\n\nWhen large language models or other deep learning systems sit idle on a GPU, they consume valuable resources that could serve other purposes. Unloading models from idle GPUs frees up scarce VRAM, allowing other workloads\u2014training jobs, inference requests, or entirely different applications\u2014to access hardware that would otherwise be wasted. This matters especially in shared environments like data centers, universities, and cloud platforms, where GPU capacity is expensive and often in high demand. Memory-resident models also draw power even when unused, contributing to unnecessary energy consumption and operating costs; unloading them supports both sustainability goals and tighter budgets"
+          },
+          {
+            "ttft_ms": 785.6,
+            "decode_tokens_s": 4.04,
+            "output_tokens": 128,
+            "seconds": 32.242,
+            "text": "# Why Idle GPUs Should Unload Their Models\n\nWhen GPUs sit idle holding loaded models, they waste resources that others could use productively. Memory is the most pressing concern: large models occupy gigabytes of VRAM even when generating nothing, preventing other workloads\u2014whether inference requests, training jobs, or unrelated applications\u2014from running on that hardware. In shared environments like data centers, labs, or multi-tenant cloud platforms, an idle process hoarding GPU memory creates artificial scarcity and forces unnecessary purchases or queuing delays.\n\nUnloading also reduces power consumption and heat output. An idle GPU with a resident model still draws standby power and may maintain"
+          },
+          {
+            "ttft_ms": 634.3,
+            "decode_tokens_s": 4.75,
+            "output_tokens": 128,
+            "seconds": 27.35,
+            "text": "# Why Idle GPUs Should Unload Their Models\n\nWhen large language models and other deep learning systems sit idle on a GPU, they consume valuable resources that could serve other purposes. Unloading models from idle GPUs frees up scarce VRAM\u2014often tens of gigabytes per model\u2014which allows other workloads, such as inference requests, fine-tuning jobs, or unrelated applications, to run without hitting out-of-memory errors. This is especially important in shared environments like data centers, cloud platforms, and multi-user research clusters, where GPU capacity is expensive and frequently contested.\n\nBeyond memory, unloading reduces power consumption. An idle GPU holding a resident model"
+          }
+        ],
+        "median_decode_tokens_s": 4.04,
+        "median_ttft_ms": 785.6,
+        "long_prompt": {
+          "prompt_characters": 10315,
+          "ttft_ms": 24018.3,
+          "decode_tokens_s": 3.0,
+          "output_tokens": 64,
+          "seconds": 44.991,
+          "text": "Across 160 sequential GET requests to /items/0\u2013/items/16, 156 returned 200 OK while 5 sporadic 500 errors occurred (on /items/0, /items/9 twice, /items/1, and /items/10), with latencies rising steadily from 0"
+        }
+      },
+      "baseline_ram_tier_gib": 36,
+      "gpu1_total_mib": 22685,
+      "container_memory_gb": 41.98,
+      "tuning_sources": [
+        "https://github.com/mw00/project-maya/blob/main/docs/SETTINGS.md",
+        "https://github.com/mw00/project-maya/issues/274"
+      ],
+      "exclusive_trial": {
+        "ram_tier_gib": 46,
+        "speech_units_temporarily_stopped": [
+          "voice-agent",
+          "voice-llm",
+          "voice-stt",
+          "voice-tts",
+          "stt-batch"
+        ],
+        "gpu": "GPU1 only",
+        "note": "42 GiB profile loaded successfully with voice running (7.5 GiB MemAvailable); not speed-benchmarked before user authorized pausing speech.",
+        "without_expert_profile_speed": {
+          "model": "glm-5.3-flash",
+          "first_request_seconds": 8.486,
+          "warm_samples": [
+            {
+              "ttft_ms": 4778.4,
+              "decode_tokens_s": 4.81,
+              "output_tokens": 128,
+              "seconds": 31.178,
+              "text": "# Why Idle GPUs Should Unload Their Models\n\nWhen GPUs sit idle holding loaded models, they waste resources that others could use. Model weights are enormous\u2014often gigabytes to hundreds of gigabytes\u2014and keeping them in GPU memory blocks that capacity even when no inference requests are pending. In shared environments like data centers, cloud platforms, or multi-tenant serving clusters, this hoarding directly reduces the number of models or requests the system can handle, forcing other workloads to queue, spill to slower storage, or fail entirely. Unloading idle models frees VRAM for active models, larger batch sizes, or additional tenants, improving overall throughput and"
+            },
+            {
+              "ttft_ms": 449.5,
+              "decode_tokens_s": 5.88,
+              "output_tokens": 128,
+              "seconds": 22.045,
+              "text": "# Why Idle GPUs Should Unload Their Models\n\nWhen GPUs sit idle with large models loaded in memory, they waste one of the most expensive and scarce resources in modern computing. Model weights for large language models and deep learning systems can occupy tens or hundreds of gigabytes of VRAM, effectively locking that hardware away from other workloads. Unloading idle models frees this memory for other users, other models, or batch jobs, dramatically improving utilization rates across shared infrastructure\u2014critical in data centers where GPU capacity is costly and often contended for.\n\nBeyond memory, idle loaded models still consume power. GPU memory (especially HBM) draws significant standby"
+            },
+            {
+              "ttft_ms": 299.9,
+              "decode_tokens_s": 6.66,
+              "output_tokens": 128,
+              "seconds": 19.36,
+              "text": "# Why Idle GPUs Should Unload Their Models\n\nWhen GPUs sit idle with loaded models, they consume significant resources that could otherwise serve productive purposes. Unloading models from idle GPUs frees up valuable VRAM, which is often the scarcest resource in machine learning infrastructure. This memory can be reallocated to other workloads, allowing more models or larger batch sizes to run concurrently, improving overall system throughput. Additionally, idle GPUs holding models still draw power and generate heat, contributing to unnecessary energy consumption and cooling costs in data centers\u2014expenses that scale dramatically across large deployments.\n\nUnloading also improves resource fairness in multi-tenant environments. When one user"
+            }
+          ],
+          "median_decode_tokens_s": 5.88,
+          "median_ttft_ms": 449.5,
+          "long_prompt": {
+            "prompt_characters": 10315,
+            "ttft_ms": 16946.7,
+            "decode_tokens_s": 4.04,
+            "output_tokens": 64,
+            "seconds": 32.538,
+            "text": "These logs show 160 sequential GET requests cycling through /items/0\u2013/items/16 with steadily increasing latencies (0\u2013159 ms), of which 155 succeeded (status 200) and 5 failed with a 500 error (on /items/0, /items/9 twice, /items"
+          }
+        },
+        "speed": {
+          "model": "glm-5.3-flash",
+          "first_request_seconds": 6.136,
+          "warm_samples": [
+            {
+              "ttft_ms": 3953.4,
+              "decode_tokens_s": 5.73,
+              "output_tokens": 128,
+              "seconds": 26.107,
+              "text": "# Why Idle GPUs Should Unload Their Models\n\nWhen GPUs sit idle holding loaded models, they waste valuable resources that could serve other purposes. Memory is the primary concern: large models, especially language models with billions of parameters, can occupy tens of gigabytes of VRAM even when no inference requests are pending. This memory could otherwise serve additional model replicas, larger batch sizes, or entirely different workloads. Keeping models resident also consumes power, as GPUs maintain clock speeds and memory states even at low utilization, driving up energy costs and data center cooling demands\u2014an increasingly important consideration for sustainability. Furthermore, in multi-tenant environments like inference serving platforms"
+            },
+            {
+              "ttft_ms": 381.6,
+              "decode_tokens_s": 6.73,
+              "output_tokens": 128,
+              "seconds": 19.255,
+              "text": "# Why Idle GPUs Should Unload Their Models\n\nWhen GPUs sit idle holding loaded models, they waste valuable resources that could serve other purposes. Model weights can occupy gigabytes of VRAM\u2014a 70-billion-parameter model may consume over 130 GB\u2014effectively locking hardware that other applications, users, or services could otherwise use. Unloading idle models frees this memory, allowing inference servers to multiplex multiple models on shared hardware and dramatically reduce infrastructure costs. Beyond memory, idle loaded models still consume power for basic memory refresh, contributing to unnecessary energy usage and heat generation in data centers already grappling with sustainability concerns. There are also security benefits:"
+            },
+            {
+              "ttft_ms": 326.9,
+              "decode_tokens_s": 7.18,
+              "output_tokens": 128,
+              "seconds": 18.017,
+              "text": "# Why Idle GPUs Should Unload Their Models\n\nWhen GPUs sit idle holding loaded models, they waste one of the most expensive and scarce resources in modern computing. GPU memory is finite, and a model that remains resident\u2014consuming gigabytes of VRAM\u2014prevents other workloads from using that capacity, effectively shrinking the usable fleet. In multi-tenant environments like data centers and shared inference clusters, an idle model holding memory blocks colleagues' requests, forcing new allocations, spills to slower storage, or outright failures under contention. Unloading idle models also reduces power draw: keeping weights in memory and maintaining idle CUDA contexts consumes measurable energy,"
+            }
+          ],
+          "median_decode_tokens_s": 6.73,
+          "median_ttft_ms": 381.6,
+          "long_prompt": {
+            "prompt_characters": 10315,
+            "ttft_ms": 16786.5,
+            "decode_tokens_s": 4.56,
+            "output_tokens": 64,
+            "seconds": 30.616,
+            "text": "These logs show 160 sequential GET requests cycling through /items/0\u2013/items/16 with steadily increasing latencies (0\u2013159 ms), of which 5 requests (requests 0, 43, 86, 129, and the first) returned 500 errors while the rest succeeded with 200"
+          }
+        }
+      },
+      "diagnostic_note": "Initial 36 and 46 GiB runs omitted the bundled expert profile. They are diagnostic results, not the final configured Maya performance. Corrected launcher passes /opt/maya/data/expert-profile-glm.bin, matching upstream setup.",
+      "expert_profile_sha256": "53b03a13482b6fedc599d149be2d69f88c38d9edc4611a740da46314ab1dc5a7",
+      "harness_mode": "Native Anthropic endpoint; observed thinking enabled by Claude Code request despite server fallback reasoning_effort=none and MAX_THINKING_TOKENS=0. Speed measurements explicitly disable thinking through OpenAI chat_template_kwargs.",
+      "gpu_link": "PCIe generation 3, width x8 during inference",
+      "artifacts": "/var/folders/z0/fp4cl59s6t312c9t7zf2sr380000gn/T/powos-trial-glm-5.3-flash-tl4ozbau",
+      "harness": [
+        {
+          "case": "intervals",
+          "tools": "Read,Edit,Write,Bash",
+          "seconds": 596.03,
+          "cli_exit": 0,
+          "passed": true,
+          "assertions_passed": true,
+          "turns": 5,
+          "usage": {
+            "input_tokens": 6086,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 18588,
+            "output_tokens": 2242,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "is_error": false
+        },
+        {
+          "case": "cache",
+          "tools": "Read,Edit,Write,Bash",
+          "seconds": 498.32,
+          "cli_exit": 0,
+          "passed": true,
+          "assertions_passed": true,
+          "turns": 6,
+          "usage": {
+            "input_tokens": 5606,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 22675,
+            "output_tokens": 1797,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "is_error": false
+        }
+      ]
+    },
+    "nanbeige_33b": {
+      "repo": "bartowski/Nanbeige_Nanbeige4.3-33B-GGUF",
+      "revision": "9beb68421fdf7be095093a6888325fa2c83ddd38",
+      "quant": "Q4_K_S",
+      "status": "completed: non-thinking 1/2; thinking interval retest passed",
+      "upstream": "https://huggingface.co/Nanbeige/Nanbeige4.3-33B",
+      "context": 32768,
+      "kv_cache": "q4_0",
+      "sha256": "b61162b5c20e31cd19d92607d2c2237950e8f3dcb307b3d7ca792c9a65eeffe5",
+      "pool_speed": {
+        "model": "nanbeige-33b-nothink",
+        "first_request_seconds": 12.456,
+        "warm_samples": [
+          {
+            "ttft_ms": 67.7,
+            "decode_tokens_s": 37.23,
+            "output_tokens": 128,
+            "seconds": 3.479,
+            "text": "Idle GPUs should unload their models for several critical operational, financial, and architectural reasons. First and foremost, modern GPUs\u2014especially enterprise-grade accelerators like NVIDIA A100 or H100\u2014are extraordinarily expensive assets. Retaining large models in memory while idle ties up valuable hardware, blocking other workloads and teams from accessing capacity when demand spikes. This creates resource contention and severely degrades overall cluster utilization.\n\nFrom a financial perspective, GPU instances often incur significant recurring cloud computing or power-draw costs. Keeping large models loaded consumes substantial memory bandwidth and power even without incoming requests. Unloading the models when idle frees up"
+          },
+          {
+            "ttft_ms": 38.1,
+            "decode_tokens_s": 37.28,
+            "output_tokens": 128,
+            "seconds": 3.444,
+            "text": "Idle GPUs should unload their models for several critical operational and economic reasons. First and foremost, GPU memory is a scarce and expensive resource. When a GPU sits idle while still holding a model, it ties up substantial VRAM that could otherwise be allocated to active, revenue-generating inference or training workloads. In shared or cloud environments, this leads to poor resource utilization and needlessly increases infrastructure costs. Furthermore, retaining models on idle GPUs introduces severe operational inefficiencies; idle memory blocks can trigger out-of-memory (OOM) errors for new tasks, necessitating manual intervention or complex memory-tiering systems. From a hardware perspective, keeping large"
+          },
+          {
+            "ttft_ms": 38.4,
+            "decode_tokens_s": 37.0,
+            "output_tokens": 128,
+            "seconds": 3.47,
+            "text": "Idle GPUs should unload their models to optimize resource utilization and operational efficiency. When a GPU sits idle with models loaded, it ties up valuable, high-cost memory that could otherwise serve incoming inference or training workloads. Unloading models\u2014clearing them from GPU memory\u2014reduces idle resource waste, allows dynamic workload allocation, and enables faster response times when new jobs arrive, maximizing throughput across the infrastructure. Additionally, keeping unused models resident can trigger unnecessary power draw and thermal stress, contributing to higher energy costs and potential hardware degradation over time. By proactively unloading models during idle periods, systems can lower power consumption, improve overall cluster efficiency, and ensure"
+          }
+        ],
+        "median_decode_tokens_s": 37.23,
+        "median_ttft_ms": 38.4,
+        "long_prompt": {
+          "prompt_characters": 10315,
+          "ttft_ms": 3919.9,
+          "decode_tokens_s": 32.29,
+          "output_tokens": 64,
+          "seconds": 5.871,
+          "text": "**Summary:**\n\nThe logs show an otherwise healthy GET request loop across `/items/0` through `/items/16` with steadily increasing latencies, but sporadic isolated 500 errors occur at `/items/0` (request 0), `/items/9` (request 43), `/"
+        }
+      },
+      "gpu1_total_mib": 22861,
+      "stt_batch_coexistence": "  stt 140.6 ms: 'Hey Luna what time is it?' (1.54 s audio)\n  stt 155.1 ms: 'Hey Luna what time is it?' (1.54 s audio)\n  stt 136.9 ms: 'Hey Luna what time is it?' (1.54 s audio)\n  stt 158.3 ms: 'Hey Luna what time is it?' (1.54 s audio)\n  stt 145.7 ms: 'Hey Luna what time is it?' (1.54 s audio)\n  stt 161.8 ms: 'Hey Luna what time is it?' (1.54 s audio)\nstt_latency: median 155.1 ms, min 136.9 ms (n=5)\n{\"stt_latency\": {\"median_ms\": 155.1, \"min_ms\": 136.9, \"n\": 5}}\n",
+      "stt_note": "Speech requests ran concurrently with the first harness case; speed trial ran without extra speech requests.",
+      "harness": [
+        {
+          "case": "intervals",
+          "tools": "Read,Edit,Write,Bash",
+          "seconds": 600,
+          "passed": false,
+          "error": "timeout"
+        },
+        {
+          "case": "cache",
+          "tools": "Read,Edit,Write,Bash",
+          "seconds": 191.53,
+          "cli_exit": 0,
+          "passed": true,
+          "assertions_passed": true,
+          "turns": 13,
+          "usage": {
+            "input_tokens": 8903,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 59862,
+            "output_tokens": 4143,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "is_error": false
+        }
+      ],
+      "artifacts": "/var/folders/z0/fp4cl59s6t312c9t7zf2sr380000gn/T/powos-trial-nanbeige-33b-nothink-rc23w_76",
+      "thinking_interval_harness": [
+        {
+          "case": "intervals",
+          "tools": "Read,Edit,Write,Bash",
+          "seconds": 258.32,
+          "cli_exit": 0,
+          "passed": true,
+          "assertions_passed": true,
+          "turns": 11,
+          "usage": {
+            "input_tokens": 8449,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 64197,
+            "output_tokens": 5458,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "is_error": false
+        }
+      ],
+      "thinking_artifacts": "/var/folders/z0/fp4cl59s6t312c9t7zf2sr380000gn/T/powos-trial-nanbeige-33b-ryov_ixh"
+    }
+  },
+  "general_nothink_original_prompt": [
+    {
+      "case": "intervals",
+      "tools": "Read,Edit,Write,Bash",
+      "seconds": 52.64,
+      "cli_exit": 0,
+      "passed": false,
+      "assertions_passed": false,
+      "turns": 8,
+      "usage": {
+        "input_tokens": 35862,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 805,
+        "output_tokens_details": {
+          "thinking_tokens": 0
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "",
+        "iterations": [],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "is_error": false
+    },
+    {
+      "case": "cache",
+      "tools": "Read,Edit,Write,Bash",
+      "seconds": 19.73,
+      "cli_exit": 0,
+      "passed": false,
+      "assertions_passed": false,
+      "turns": 11,
+      "usage": {
+        "input_tokens": 29864,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 1196,
+        "output_tokens_details": {
+          "thinking_tokens": 0
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "",
+        "iterations": [],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "is_error": false
+    }
+  ],
+  "general_nothink": [
+    {
+      "case": "intervals",
+      "tools": "Read,Edit,Write,Bash",
+      "seconds": 23.05,
+      "cli_exit": 0,
+      "passed": false,
+      "assertions_passed": false,
+      "turns": 11,
+      "usage": {
+        "input_tokens": 52711,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 1440,
+        "output_tokens_details": {
+          "thinking_tokens": 0
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "",
+        "iterations": [],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "is_error": false
+    },
+    {
+      "case": "cache",
+      "tools": "Read,Edit,Write,Bash",
+      "seconds": 32.49,
+      "cli_exit": 0,
+      "passed": false,
+      "assertions_passed": false,
+      "turns": 18,
+      "usage": {
+        "input_tokens": 69832,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 2032,
+        "output_tokens_details": {
+          "thinking_tokens": 0
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "",
+        "iterations": [],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "is_error": false
+    }
+  ],
+  "general_nothink_speed": {
+    "model": "general-nothink",
+    "first_request_seconds": 0.162,
+    "warm_samples": [
+      {
+        "ttft_ms": 39.0,
+        "decode_tokens_s": 82.99,
+        "output_tokens": 128,
+        "seconds": 1.569,
+        "text": "Idle GPUs should unload their models to optimize resource utilization and energy efficiency. When a GPU is not actively processing tasks, retaining large machine learning models in memory consumes unnecessary power and computational resources. This not only increases energy costs but also limits the availability of GPU memory for other tasks that may require it. By unloading models when they are not in use, systems can dynamically allocate resources more effectively, improving overall performance and reducing latency for subsequent tasks. Additionally, unloading models helps in maintaining system stability by preventing memory leaks and ensuring that the GPU remains responsive to new computational demands. In environments with multiple users or tasks, such as cloud computing platforms or"
+      },
+      {
+        "ttft_ms": 25.7,
+        "decode_tokens_s": 82.42,
+        "output_tokens": 128,
+        "seconds": 1.567,
+        "text": "Idle GPUs should unload their models to optimize system performance, conserve energy, and prolong hardware lifespan. When a GPU is not actively processing tasks, keeping large models loaded in memory consumes valuable system resources, including memory bandwidth and power. This unnecessary usage can lead to increased heat generation, which not only raises cooling costs but also risks thermal throttling or long-term hardware degradation. By unloading models when they are not in use, the GPU can return to a low-power state, reducing energy consumption and environmental impact. Additionally, unloading models allows the system to allocate resources more efficiently, improving responsiveness when the GPU is needed again. This practice is particularly"
+      },
+      {
+        "ttft_ms": 22.8,
+        "decode_tokens_s": 81.94,
+        "output_tokens": 128,
+        "seconds": 1.573,
+        "text": "Idle GPUs should unload their models to optimize resource utilization and improve system efficiency. When a GPU is not actively processing tasks, retaining large machine learning models in memory consumes valuable memory bandwidth and power, which could be better allocated to other processes or saved for more critical computations. Unloading models from idle GPUs also helps prevent unnecessary computations and reduces the risk of overheating or excessive power consumption, which is especially important in data centers and high-performance computing environments. Furthermore, unloading models can help maintain a more responsive system by freeing up memory and computational resources that can be used for other tasks, such as background updates or user-initiated computations. This practice"
+      }
+    ],
+    "median_decode_tokens_s": 82.42,
+    "median_ttft_ms": 25.7,
+    "long_prompt": {
+      "prompt_characters": 10315,
+      "ttft_ms": 1811.1,
+      "decode_tokens_s": 75.1,
+      "output_tokens": 54,
+      "seconds": 2.517,
+      "text": "The logs show a series of GET requests to endpoints /items/0 through /items/16, with most returning 200 OK status, except for a few instances of 500 Internal Server Error, and response durations increasing gradually over time."
+    }
+  },
+  "gpu_topology_note": "nvidia-smi topo -m reports GPU0 <-> GPU1 NV4 (NVLink). Trials expose GPU1 only; GPU0 remains the voice GPU.",
+  "measurements_completed_utc": "2026-10-25T23:28:56.311538+00:00",
+  "voice_after": {
+    "ws_end_of_speech_to_transcript": {
+      "median_ms": 422.2,
+      "min_ms": 388.9,
+      "n": 5
+    },
+    "ws_end_of_speech_to_first_token": {
+      "median_ms": 517.3,
+      "min_ms": 508.0,
+      "n": 5
+    },
+    "ws_end_of_speech_to_first_audio": {
+      "median_ms": 689.7,
+      "min_ms": 679.8,
+      "n": 5
+    },
+    "ws_example": {
+      "heard": "Hey Luna what time is it?",
+      "reply": "It's 11:12 PM on Sunday."
+    }
+  },
+  "voice_after_raw": "  ws: end of speech -> final transcript 388.9 ms, first LLM token 1146.3 ms, first audio byte 1397.2 ms (120472 bytes audio)\n      heard 'Hey Luna what time is it?'; reply \"It's 11:12 PM on Sunday.\"\n  ws: end of speech -> final transcript 454.2 ms, first LLM token 553.8 ms, first audio byte 728.2 ms (120766 bytes audio)\n      heard 'Hey Luna what time is it?'; reply \"It's 11:12 PM on Sunday.\"\n  ws: end of speech -> final transcript 426.7 ms, first LLM token 517.3 ms, first audio byte 689.7 ms (120472 bytes audio)\n      heard 'Hey Luna what time is it?'; reply \"It's 11:12 PM on Sunday.\"\n  ws: end of speech -> final transcript 417.7 ms, first LLM token 508.0 ms, first audio byte 685.9 ms (120766 bytes audio)\n      heard 'Hey Luna what time is it?'; reply \"It's 11:12 PM on Sunday.\"\n  ws: end of speech -> final transcript 422.2 ms, first LLM token 508.1 ms, first audio byte 679.8 ms (120472 bytes audio)\n      heard 'Hey Luna what time is it?'; reply \"It's 11:12 PM on Sunday.\"\nws_end_of_speech_to_transcript: median 422.2 ms, min 388.9 ms (n=5)\nws_end_of_speech_to_first_token: median 517.3 ms, min 508.0 ms (n=5)\nws_end_of_speech_to_first_audio: median 689.7 ms, min 679.8 ms (n=5)\n{\"ws_end_of_speech_to_transcript\": {\"median_ms\": 422.2, \"min_ms\": 388.9, \"n\": 5}, \"ws_end_of_speech_to_first_token\": {\"median_ms\": 517.3, \"min_ms\": 508.0, \"n\": 5}, \"ws_end_of_speech_to_first_audio\": {\"median_ms\": 689.7, \"min_ms\": 679.8, \"n\": 5}, \"ws_example\": {\"heard\": \"Hey Luna what time is it?\", \"reply\": \"It's 11:12 PM on Sunday.\"}}\n",
+  "restored_state": {
+    "voice_services": "active; WebSocket speech round trips passed",
+    "llm_pool": "active, no model loaded",
+    "strata_bench": "inactive",
+    "maya_bench": "inactive; default 36 GiB RAM restored",
+    "temporary_tunnel": "closed",
+    "local_benchmark_key": "removed",
+    "multi_gpu_tested": false
+  }
+}

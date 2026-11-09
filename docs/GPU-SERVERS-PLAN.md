@@ -3,13 +3,14 @@
 PowOS now has real GPU servers on the LAN. This is how inference (voice, LLMs, everything AI) is laid out across
 them, how it's run and managed, and the order to build it in. Status: **phases 1-3 built on `.195` (2026-10-21), see
 [Status](#status-2026-10-21); phase 4 done (2026-10-21): the GPU1 pool (`llm-gpu.pow`: general, vision, embed), the router
-(`llm.pow`) and `.58`'s `coder-32b` are live and verified end to end; phases 5-6 not started**.
+(`llm.pow`) and `.58`'s `coder-32b` are live and verified end to end; phases 5-6 not started. Request-idle voice
+offload and the Flash Next dual-GPU lease were added 2026-10-26 (see the section at the end)**.
 
 ## What we have
 
 | host | GPUs | role in this plan |
 |---|---|---|
-| `192.168.50.195` (new PowOS box, Bazzite 44 nvidia-open, 8 cores, 62 GB, 3.6 TB NVMe) | 2x RTX 3090 24 GB | **realtime + general inference**: GPU0 = voice (always fast), GPU1 = general LLM pool |
+| `192.168.50.195` (new PowOS box, Bazzite 44 nvidia-open, 8 cores, 62 GB, 3.6 TB NVMe) | 2x RTX 3090 24 GB | **realtime + general inference**: GPU0 = voice while active; Flash Next can lease both cards after voice LLM idle-offload; other pool models use GPU1 |
 | `192.168.50.58` (PowOS, still up: Ollama answers) | RTX 5090 32 GB | **big models**: the 32B-class coder/reasoning model (llama-swap :9292 + Ollama :11434, as today) |
 | `192.168.50.100` (Colima on the Mac) | none | **router + front door**: Traefik, Authelia, Pi-hole, the LLM router, claude-auth |
 | phone (OnePlus Open), glasses (Even G2) | Adreno 740 | **clients**: PowOS AI voice, glasses mic/HUD |
@@ -32,12 +33,12 @@ Prior work this reuses, not rewrites:
 2. **Every service is a registered PowOS unit** (`powos units`) with owner, limits, autosleep and a removal path.
    - No ad-hoc `docker run`, no host-level pip/conda (memory: no unmanaged system deps).
    - Containers are rootless podman with CDI GPUs, pinned to a GPU each.
-3. **Voice is never queued behind batch work.**
-   - GPU0 on `.195` belongs to the realtime voice path and nothing else may allocate on it.
-   - Everything else shares GPU1 and the 5090, swapped on demand.
+3. **Voice takes GPU priority without cancelling active local sessions.**
+   - GPU0 on `.195` is reserved for voice while its LLM is active. Flash Next may lease both 3090s after the voice LLM has been offloaded to RAM.
+   - A Flash Next session using GPU1 only does not block voice from waking on GPU0. If Flash Next leased both cards, voice waits for that session and its normal TTL unload; other pool models remain on GPU1.
 4. **Idle = no VRAM, near-zero power, fast wake.**
    - Big models load on first request (llama-swap with a TTL) and unload when idle.
-   - The voice path stays resident: about 13 GB, and the price of sub-second replies.
+   - The voice LLM stays in VRAM while requests arrive; after five idle minutes its weights move to host RAM and wake on demand.
 5. **Images built from the repo, not bind-mounted from the Mac.** VoiceAgent's compose mounts `/Users/macback/...`.
    On the server it runs from images built from the repo (CI on the hub or `podman build` on the box) with config in
    env files.
@@ -48,7 +49,7 @@ Prior work this reuses, not rewrites:
 
 ## Layout
 
-### `.195` GPU0: realtime voice (resident, ~13-15 GB of 24)
+### `.195` GPU0: realtime voice (resident while active, ~13-15 GB of 24)
 | service | what | VRAM |
 |---|---|---|
 | `stt` | faster-whisper (CUDA) `large-v3-turbo`, float16 (replaces MLX Whisper) | ~3 GB |
@@ -319,7 +320,7 @@ per model as a child process on the first request and stops it after 10 idle min
 |---|---|---|---|
 | `general` | `Qwen/Qwen3-14B-AWQ` (awq_marlin), 32k context, 32 seqs, hermes tool calls, thinking on (`reasoning_content` separate, `--reasoning-parser qwen3`) | 0.70 = 16.5 GiB (9.4 weights, 5.3 KV = 35k tokens) | verified |
 | `general-nothink` | the same loaded model with `chat_template_kwargs.enable_thinking=false` (a llama-swap alias, no second load) | - | verified |
-| `vision` | `Qwen/Qwen2.5-VL-7B-Instruct-AWQ`, 16k, up to 4 images | 0.70 (KV 138,832 tokens) | verified |
+| `vision` | `Qwen/Qwen2.5-VL-7B-Instruct-AWQ`, 32k, up to 4 images, 4 sequences | 0.70 (KV 138,832 tokens) | 16k verified; 32k configured 2026-10-27 |
 | `embed` | `BAAI/bge-m3` (`--runner pooling`), 8k | 0.10 = 2.4 GiB | verified |
 
 The routing is a llama-swap matrix: `general & embed` or `vision & embed`, never general with vision. GPU1's
@@ -534,3 +535,578 @@ Checked with a stub podman: every argument reaches vLLM. Loading the model is th
   - Point VoiceAgent's `litellm` provider at `http://llm.pow` with the router key, if it should use it.
   - `.58`'s llama-swap (a `systemd --user` service from local-llm-stack) has no PowOS unit yet.
 - Phases 5-6.
+
+
+### Shared local queue, interrupts and conversation cache — 26 October 2026
+
+The Claude authority now gives local GPU-pool requests a separate admission
+queue: one active generation, round-robin between session IDs and FIFO within
+each session. Flash aliases share that lane; the other general-pool models and
+the coder fallback share it too. Voice-fast/embedding have separate lanes, and
+cloud subscription queues are unchanged. This is request fairness, not time/token
+fairness: a long active generation runs until completion or cancellation.
+Direct calls to LiteLLM or llama-swap bypass authority admission.
+
+Up to 32 requests / 64 MiB of request bodies wait per lane, for at most 240
+seconds. Streaming callers get SSE pings while waiting. Queue overflow/deadline
+errors remain possible; this is not an unbounded backlog. A busy backend rejection
+is retried for up to 30 seconds to cover cancellation cleanup. Generation that
+has already emitted output is never retried by this queue.
+
+Cancelling a queued HTTP request removes it before inference. Cancelling active
+work closes its upstream request and response, propagating through LiteLLM to
+Strata without killing the shared engine. In the live probe, the queue fell from
+two waiting requests to one after cancellation; after interrupting the active
+stream, the next request returned `INTERRUPT-OK` in **0.346 seconds**. Strata
+logged `disconnect, cancel=True`. This tests HTTP cancellation, not a particular
+terminal key binding, and does not undo shell commands or file edits.
+
+Flash Next's conversation cache is now explicitly bounded to **4096 MiB / four
+parked entries**, with a 3072 MiB free-memory floor under the 49152 MiB container
+limit. It skips prompts shorter than 2048 tokens and uses a 2048-token growth
+threshold to reduce repeated snapshot copying. Matching token prefixes and
+steering modes are required for reuse. The four-entry ceiling does not promise
+four full 128k histories; large snapshots compete for the byte budget and evict
+older ones. Restarting/swapping the model loses KV state, not the client's saved
+conversation. The engine log now supplies park/restore counters; the previous
+zero counters did not establish that caching was disabled.
+
+A → unrelated B → A follow-up succeeded amid live traffic. The A follow-up
+reused **13,839 tokens**, read **19 new tokens**, and returned the correct marker.
+The engine recorded **83.8 ms** to restore its snapshot and **667 ms** for the
+remaining prompt processing, against **10,064 ms** to read A's original prompt.
+Client wall times include waits behind other sessions and are not speed scores.
+The same log showed other live histories restoring tens of thousands of tokens.
+
+Two inference slots were also tested, with local admission briefly held while
+active work drained. The hold is container-loopback-only and automatically
+expires after 180 seconds; the original config and admission were restored.
+Two rounds each, with two concurrent short coding prompts capped at 256 output
+tokens per request, produced:
+
+| Configuration | Combined output tokens / wall second, median |
+|---|---:|
+| Single slot, deployed MTP configuration | 93.59 |
+| Two slots, batch MTP, 768 MiB VRAM reserve | 50.93 |
+
+The two-slot candidate was **45.6% slower**, and reserved another 1.46 GiB of GPU
+session state plus two 50 MiB private draft states. This is a small configuration
+comparison, including prompt time, not a quality benchmark or a controlled
+estimate of slot count alone. **Single-slot serving remains deployed.** No
+multi-GPU changes were made.
+
+Validation: 15 automated routing/queue/transport checks passed, including fairness,
+queue limits, timeout, cancellation, SSE errors, upstream truncation, and automatic
+maintenance expiry. The public maintenance endpoint refused access with 403.
+Live session/interrupt evidence and both slot profiles are saved in
+[local-session-trial-20261026.json](../hosts/gpu-195/bench/local-session-trial-20261026.json).
+Probes: [local-session-trial.py](../hosts/gpu-195/bench/local-session-trial.py) and
+[strata-slots-trial.py](../hosts/gpu-195/bench/strata-slots-trial.py).
+See also [Strata batching documentation](https://github.com/Niko1221/Strata/blob/main/docs/BATCHING.md).
+
+### Flash Next context-window fix — 26 October 2026
+
+The coding trials below used 32k context. Interactive PowFrame use exposed an
+integration problem: its initial Claude Code request already used about 15,249
+tokens for instructions/tools and the greeting. Claude Code 2.1.310 reserves
+4,096 output tokens and another 13,000 for compaction, so a 32,768-token window
+starts compacting at approximately **15,672 tokens**. Raising the compaction
+percentage cannot remove that fixed buffer in this version.
+
+All four Flash Next aliases now use **131,072 tokens**, on both Strata and
+`claude-local`. The engine keeps int8 KV with `--kv-resident 32768`: the larger
+cache is backed by host RAM. GPU1 remains the only inference GPU; speech stays
+running. The usual compaction threshold becomes approximately **113,976 tokens**.
+Other model profiles remain at their previously tested 32k limits, including the
+coder-to-general fallback chain. Restart Claude Code through the launcher to
+pick up the new window; existing processes retain their startup environment.
+
+Validation with `flash-next-huihui`, thinking enabled, in PowFrame:
+
+- Engine startup and Claude Code both reported 131,072 context tokens.
+- A 72,449-token synthetic log prompt returned all three embedded checkpoints
+  correctly in 45.09 seconds including CLI overhead.
+- A resumed follow-up returned the same three checkpoints in 1.56 seconds;
+  usage reported 72,512 cached input tokens plus 33 fresh tokens.
+- Neither turn compacted. Debug logs reported `level=ok effectiveWindow=126976`.
+- The launcher/routing suite passed all six checks. All five speech units stayed
+  active; pool memory during the longer prompt was about 41.17 GB of its 51.54 GB
+  limit. GPU1 used about 23,813 MiB, with 365 MiB free in that sample.
+
+This checks serving capacity and simple recall at 72k, not accuracy at the full
+128k limit or an updated speed ranking. The prior 32k coding benchmark numbers
+remain historical measurements. Huihui is the currently selected profile: it
+passed both short coding tasks fastest, but those runs do not establish a broad
+quality advantage over the plain profile.
+
+Evidence: [context-trial-20261026.json](../hosts/gpu-195/bench/context-trial-20261026.json).
+Reusable probe: [claude-context-trial.py](../hosts/gpu-195/bench/claude-context-trial.py).
+See [Claude Code custom-model context configuration](https://code.claude.com/docs/en/model-config#correct-the-window-for-a-gateway-or-custom-model-id)
+and [Strata KV memory modes](https://github.com/Niko1221/Strata/blob/main/docs/DETAILS.md).
+
+### Consolidated benchmark overview 25 and 26 October 2026
+
+**Fastest successful candidate in these trials: `flash-next-huihui-nothink`.**
+The plain Flash Next variant also passed both coding tasks. Both completed them in tens of seconds,
+with normal speech services running. Nanbeige and GLM can produce correct code,
+but took minutes on these tasks. This selects a candidate for a real `nofate/br`
+trial; two small Python exercises do not establish reverse-engineering ability
+or a broad model-quality ranking.
+
+#### Hardware and method
+
+- Host: `.195`, i7-7700K, four physical cores/eight threads, 62 GiB usable RAM,
+  WD_BLACK AN1500 NVMe storage, two 24 GB RTX 3090s connected by NVLink.
+- Every inference trial used **GPU1 only**. GPU1 negotiated PCIe 3.0 x8 under
+  load. GPU0 served voice until the explicitly authorized GLM speech pause.
+- `.58` and its 32 GB RTX 5090 were unreachable by SSH. No multi-GPU trial ran.
+- Claude Code 2.1.310; 32k context and 4k output per request. The current two
+  tasks repair interval merging and an LRU cache, using Read/Edit/Write/Bash
+  and external assertions kept outside its working directory. Each newer case has a
+  600-second wall deadline and requires a clean CLI completion as well as
+  passing assertions. These are single runs with each profile's sampling.
+- The interval prompt explicitly requires a **list of tuples** and distinguishes
+  shared endpoints from adjacent integers. An earlier ambiguous Huihui failure
+  is excluded. Raw earlier runs remain in the JSON for traceability.
+- New speed results are medians of three warm 128-token streams. The long-input
+  test uses 10,315 characters of synthetic logs. Its latency includes reading
+  the prompt; cached short-prompt latency is a different measurement.
+
+#### Current coding harness results
+
+| Profile | Quantization | Decode median | Interval task | Cache task |
+|---|---|---:|---|---|
+| general-nothink | Qwen3-14B AWQ | 82.42 tok/s | Fail, 23.05 s | Fail, 32.49 s |
+| flash-next-nothink | Flash Next IQ2_XS, Strata | 67.87 tok/s | Pass, 29.15 s | Pass, 25.42 s |
+| flash-next-huihui-nothink | Same weights plus Huihui projection | 75.59 tok/s | Pass, 24.51 s | Pass, 20.56 s |
+| nanbeige-33b-nothink | Nanbeige4.3-33B Q4_K_S, Q4 KV | 37.23 tok/s | Timeout, 600 s | Pass, 191.53 s |
+| nanbeige-33b | Same weights, thinking enabled | Not separately measured | Pass, 258.32 s retest | Not rerun in this mode |
+| GLM-5.3-Flash | Maya-S24, corrected expert profile | 6.73 tok/s, thinking-off speed probe | Pass, 596.03 s, thinking enabled | Pass, 498.32 s, thinking enabled |
+
+GLM used its native Anthropic endpoint through an SSH tunnel, with speech
+services temporarily stopped and a 46 GiB pinned expert cache. The other rows
+used the production Claude authority → LiteLLM → llama-swap route with speech
+running. Claude Code enabled thinking on GLM despite the server's fallback
+setting; the trace, not the zero-valued aggregate thinking-token counter,
+identifies the mode. These differences prevent treating the table as a
+controlled accuracy leaderboard. Huihui's faster single run does not establish
+that its projection improves coding quality.
+
+| Profile | Short-prompt TTFT median | Longer-input TTFT |
+|---|---:|---:|
+| general-nothink | 25.7 ms | 1.81 s |
+| flash-next-nothink | 213.5 ms | 4.10 s |
+| flash-next-huihui-nothink | 203.0 ms | 4.06 s |
+| nanbeige-33b-nothink | 38.4 ms | 3.92 s |
+| Corrected GLM with speech paused | 381.6 ms | 16.79 s |
+
+Flash Next's measured pool cold start plus a small answer was 36.94 s;
+Nanbeige's was 12.46 s. GLM's first API request happened after engine startup,
+so its `first_request_seconds` is **not** a cold-load measurement.
+
+#### Earlier 27B trials
+
+These used earlier prompts, tool selections or deadlines and are kept separate
+from the current paired comparison. Their token speeds are single warm samples.
+
+| Profile | Decode | Observed agent outcome |
+|---|---:|---|
+| Swift 1.5 Qwen3.8-27B W4A16, non-thinking | 13.65 tok/s | File tools only: intervals pass 44.34 s; cache pass 41.36 s |
+| Swift 1.5 with thinking | Not separately measured | File tools only: intervals fail 108.03 s; cache pass 57.39 s |
+| Ternary Bonsai 2 27B PQ2_0, non-thinking | 66.93 tok/s | With Bash: intervals timeout 240 s; cache pass 56.62 s. File-only run instead passed intervals 68.35 s and timed out on cache |
+
+Bonsai's compact weights did not make it the most reliable coding agent in these
+runs. The publisher's aggregate retention percentage is not a measurement of
+this harness. Swift's file-only successes warrant a future comparable trial,
+not an automatic claim that it outperforms the current Bash-enabled profiles.
+
+#### What the Maya investigation changed
+
+The first launcher omitted the bundled expert profile. Corrected serving passes
+`--expert-profile /opt/maya/data/expert-profile-glm.bin`, matching upstream setup.
+The profile ranks experts for initial placement and assigns GPU slots per layer.
+The pack also has to sit inside the GGUF shard directory because its references
+are relative. Both fixes are in `hosts/gpu-195/maya-bench/launch.py`.
+
+Before correcting the profile, the voice-running 36 GiB cache diagnostic gave
+4.04 tok/s. A 42 GiB cache loaded successfully beside voice but was not timed.
+Pausing speech allowed 46 GiB and a larger GPU expert pool; the corrected final
+result was 6.73 tok/s. The earlier numbers are diagnostics, not a fair estimate
+of correctly configured Maya or an isolated measurement of the effect of RAM.
+Disk waits and PCIe transfers remain substantial. CPU quota throttling was
+negligible, so the CPU cap stayed at four logical CPUs with low scheduling weight.
+
+The investigation followed the [Maya tuning guide](https://github.com/mw00/project-maya/blob/main/docs/SETTINGS.md)
+and a [24 GB GPU / 64 GB RAM report](https://github.com/mw00/project-maya/issues/274).
+The latter uses a much newer CPU/GPU and a mostly free machine. Its published
+throughput is not an expectation for this host while it serves other workloads.
+
+#### Availability and routing
+
+Run the selected candidate with:
+
+```sh
+/Users/macback/Projects/claude-rate-limiter/bin/claude-local flash-next-nothink
+# Same checkpoint with the optional refusal-direction projection:
+/Users/macback/Projects/claude-rate-limiter/bin/claude-local flash-next-huihui-nothink
+# Nanbeige's thinking-enabled profile:
+/Users/macback/Projects/claude-rate-limiter/bin/claude-local nanbeige-33b
+```
+
+The launcher sets the main, background and subagent model variables, points
+Claude Code at `http://claude-auth.pow`, and uses the local-only credential.
+Model aliases choose the host: these profiles route to `.195:9292`; `coder-32b`
+routes to `.58` with a general-model fallback on `.195`. There is no least-busy
+host scheduler and no local-to-cloud fallback. The launcher default is still
+`general-nothink`; the new profiles are opt-in. GLM remains an experimental
+loopback-only benchmark unit, not a production `claude-local` alias.
+
+The rest of the requested list has **not** received a local benchmark: non-Flash
+GLM-5.3, DeepSeek V4.1 Flash 1017 variants, the separate Qwen3.8-27B abliteration
+variants including Defiance/Heretic, Venice Uncensored 1.2 and Gemma 4 Venice.
+Flash Next's tested Huihui option is a runtime projection of the same checkpoint,
+not a separately trained checkpoint. Defiance was inspected, not downloaded and
+benchmarked. No result should be inferred for those untested variants.
+
+#### Final service state and evidence
+
+Speech and the normal pool were restored. The authority health endpoint returned
+200; LiteLLM was healthy; stt-batch health passed; five real voice WebSocket turns
+completed with first-audio median **689.7 ms** after restoration. Earlier ten-turn
+medians were 636.5 ms before and 639.5 ms during the Flash Next test. The restored
+five-turn sample includes a cold first turn; the raw measurements are retained.
+Flash Next and Nanbeige also passed stt-batch transcription coexistence checks.
+
+The pool was idle with no model loaded, both benchmark units were stopped, the
+Maya unit's 36 GiB default was restored, and the temporary tunnel/local key were
+removed. No idle voice-offload or multi-GPU policy was installed.
+
+- Current results and complete run metadata: [larger-model-trial-20261025.json](../hosts/gpu-195/bench/larger-model-trial-20261025.json).
+- Earlier trials: [model-trial-20261025.json](../hosts/gpu-195/bench/model-trial-20261025.json).
+- Harness: [claude-code-trial.py](../hosts/gpu-195/bench/claude-code-trial.py).
+- Streaming speed probe: [model-speed-trial.py](../hosts/gpu-195/bench/model-speed-trial.py).
+- Exact model revisions, runtime pins, deployment details and earlier evidence follow below.
+
+### Local Claude Code model trials — 2026-10-25
+
+The Claude authority now sends named local models to the shared LiteLLM router.
+`claude-rate-limiter/bin/claude-local` pins main/background models and uses the
+`local-only` token, which rejects cloud model requests. The default remains
+`general-nothink`. `.58:9292` timed out during these checks.
+
+Swift 1.5 Qwen3.8-27B W4A16 is available as `swift-27b` and
+`swift-27b-nothink` on .195 GPU1, via the existing llama-swap pool. Model revision
+`9dba8a05877150d587215a519ce6befec3c9978a`; vLLM 0.32.0, text only,
+32k context, one sequence, utilization 0.86, eager mode, TTL 300 s. Its matrix
+set excludes all other pool models; stt-batch stays resident. Startup reported
+16.83 GiB of weights and 41,642 tokens of KV capacity. First cold start took
+about 110 s; a warm 128-token sample measured 13.65 decode tokens/s and 335 ms
+to first token. GPU1 total used memory was about 23,555 MiB with stt-batch.
+
+LiteLLM drops client reasoning effort and sets Swift's thinking profile to
+`medium`: its template accepts low/medium/xhigh and rejects Claude Code's high.
+The nothink profile disables thinking. Background requests use the same model's
+nothink alias, preventing repeated swaps back to general.
+
+`hosts/gpu-195/bench/claude-code-trial.py` runs two small file-edit tasks through
+Claude Code with isolated configuration and Read/Edit/Write tools. External
+Python assertions check generator/range handling and an LRU cache. This is a
+single-run compatibility/correctness smoke test, not a repository benchmark.
+The first interval wording was ambiguous about adjacent integers and was
+excluded; the recorded reruns explicitly define shared endpoints.
+
+| Profile | Interval assertions | Cache assertions | Task seconds |
+|---|---|---|---|
+| general-nothink (Qwen3-14B AWQ) | fail | fail | 56.54 (cold), 9.55 |
+| swift-27b-nothink | pass | pass | 44.34, 41.36 (warm) |
+| swift-27b (medium) | fail | pass | 108.03, 57.39 (warm) |
+
+Swift medium still merged (1,2) with (3,4), contradicting the explicit example.
+The 14B run mishandled generators and broke the cache constructor. Do not use
+these two tasks to infer a broad model ranking. Voice first-audio median over
+10 turns was 693.0 ms before, 629.3 ms with Swift resident and during its coding
+trial; stt-batch health remained OK.
+
+Publisher evidence: https://huggingface.co/ukisai/Swift-1.5-Qwen3.8-27b
+reports matched BF16 results, not this AWQ/32k setup. Its coding gains are a
+reason to trial the model, not measured gains on our hardware.
+
+
+Bonsai 2 follow-up (same date): `bonsai-27b` / `bonsai-27b-nothink` use
+PrismML's PQ2_0 GGUF at revision `b072e1d3b35a0a630cece372c2127528e0994386`
+(about 7.2 GB on disk, chosen for prompt speed instead of the 5.9 GB PTQ1_0
+packing). The pool image includes the SHA256-verified CUDA 13.3 archive from
+`PrismML-Eng/llama.cpp`, release `prism-b10826-c9c34bc`. The existing CUDA 13
+runtime supplies its user-space libraries; CDI injects the host driver at run
+time. The previous pool image is retained as `localhost/llm-pool:pre-bonsai-20261025`.
+The model uses text-only 32k context, one slot, full GPU offload, flash attention,
+medium reasoning (or disabled on the nothink alias), publisher sampling settings,
+and a 300 s TTL. Its matrix set is exclusive within the pool.
+
+First load plus a two-token reply took about 3.5 s. GPU1 used 11,681 MiB total,
+including stt-batch: roughly 9 GiB incremental for the model, runtime and 32k KV.
+Coding runs generated approximately 55–64 tokens/s. Voice first-audio median was
+621.8 ms over ten turns during this trial, compared with 693.0 ms before the
+model trials. No voice containers were restarted.
+
+Bonsai nothink passed the interval assertions in 68.35 s with file tools, but
+looped on the cache task until the 240 s limit. A separate run with `--shell`
+exposes Bash and asks the model to run Python tests. It also timed out on the
+interval task after repeated Bash calls and self-written tests that contradicted
+the requested behavior. This is evidence of a problem in these trials, not an
+estimate of a general success rate. The runtime's /apply-template confirmed
+that enable_thinking=false closes the thinking block, so the alias does disable
+reasoning. Both profiles remain opt-in; general-nothink is unchanged.
+
+The publisher's 98.2% headline is a 20-benchmark aggregate and excludes separate
+coding-agent evaluations: Terminal-Bench 2.1 is 52.8 vs 69.7 for Qwen3.8-27B,
+and SWE-bench Verified is 60.8 vs 80.6. Source (section 4 / appendix B):
+https://github.com/PrismML-Eng/Bonsai-demo/blob/main/bonsai-2-27b-whitepaper.pdf
+The publisher also documents tool-call loops:
+https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/blob/main/KNOWN_ISSUES.md
+
+To reproduce a coding smoke test from the Mac:
+`python3 hosts/gpu-195/bench/claude-code-trial.py bonsai-27b-nothink ~/Projects/claude-rate-limiter/bin/claude-local --shell`
+The runner saves a live JSONL trace, final CLI result, generated files and external
+assertion output in a temporary directory. Each case has a 240-second deadline;
+a timeout is a failed agent run even if its partially written code happens to pass.
+
+Bonsai's Bash-enabled cache task passed the independent assertions in 56.62 s
+(seven turns). The Bash-enabled interval case timed out at 240 s. Machine-readable
+results are in `hosts/gpu-195/bench/model-trial-20261025.json`.
+
+A separate warm Bonsai 128-token streaming sample measured 66.93 decode tokens/s,
+766 ms to first token, and 2.66 s total. Thinking mode also completed a tool
+round-trip through the Anthropic-compatible proxy: multiply(17,23), tool result
+391, then a correct final answer. This confirms protocol compatibility, not coding
+reliability.
+
+Weight prefetch (inside the pool container, before the first request):
+```sh
+podman exec -e HF_HUB_OFFLINE=0 llm-pool python3 -c 'from huggingface_hub import hf_hub_download; hf_hub_download(repo_id="prism-ml/Ternary-Bonsai-2-27B-gguf", filename="Ternary-Bonsai-2-27B-PQ2_0.gguf", revision="b072e1d3b35a0a630cece372c2127528e0994386")'
+podman exec -e HF_HUB_OFFLINE=0 llm-pool python3 -c 'from huggingface_hub import snapshot_download; snapshot_download(repo_id="ukisai/Swift-1.5-Qwen3.8-27b-W4A16-AWQ", revision="9dba8a05877150d587215a519ce6befec3c9978a")'
+```
+Normal serving remains offline. Rebuilding only the pool and restarting only
+`llm-pool.service` leaves the voice services running.
+
+Post-image-change regression check: general-nothink loaded and answered in
+38.59 s, then measured 82.79 decode tokens/s and 60 ms to first token for a warm
+128-token stream. The added llama.cpp runtime did not break the existing vLLM
+profile. The pool was unloaded after testing.
+
+### Larger offloaded models, 2026-10-25
+
+File size alone was too restrictive a filter. Strata keeps Qwen3.8 Flash Next's
+experts in host RAM, caches hot experts on GPU1, and reads its n-gram table from
+the NVMe. The tested machine is an i7-7700K (4 cores/8 threads), 62 GiB usable
+RAM and one available 24 GiB RTX 3090; GPU0 remains assigned to voice. .58 was
+unreachable during this trial.
+
+Installed opt-in profiles: `flash-next`, `flash-next-nothink`,
+`flash-next-huihui`, `flash-next-huihui-nothink`. All use the same engine and
+weights, exclusive within the pool; Huihui enables a per-request projection,
+not a separately fine-tuned checkpoint. The launcher pins background requests
+to the selected variant's thinking-off alias. Routes go through the existing
+Claude authority and LiteLLM to .195:9292. No fallback or default change.
+
+- Weights: ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF, IQ2_XS,
+  revision `ed59f92082b1e93c0e96d60a8b11aab089b52f09`.
+- Engine: Strata 0.1.48 from container release 0.2.3, pinned digest in the
+  pool Containerfile. The engine and its private Python runtime are copied into
+  the pool image; no host Python packages are installed.
+- Huihui vector: alesha-pro/Qwen3.8-Flash-Next-abliterated-GSQ-RCO-Strata-GGUF,
+  revision `d4af3be5701549435e0770d625f79dd2def1358f`, SHA256
+  `59f9ae8b4372107ae79044278a4406bdfe8f8861fe599aa5848515f0d072be38`.
+  Projection uses layers 4–44, strength 1.0, with explicit off/on request filters.
+- Prepared files live at `/var/lib/powos/models/strata`, mounted as `/data`.
+  `flash-next.json` is a separate, credential-free runtime config installed with
+  the pool YAML. A clean host must prepare the pinned weights and draft layer
+  before selecting this profile; normal serving does not download them.
+- The pool's host RAM cap is now 48 GiB and its CPU cap four logical CPUs at low
+  shares (256). Flash Next measured about 39.4 GB container memory and 23,839 MiB
+  total GPU1 usage including stt-batch. Idle TTL is five minutes.
+
+Two small Claude Code tasks use Read/Edit/Write/Bash and independent assertions,
+32k context, 4k output limit and a 600-second case deadline. Both standard and
+Huihui thinking-off profiles passed through the production proxy. The interval
+prompt was clarified to explicitly require a **list of tuples** after an earlier
+Huihui answer returned a tuple: that earlier failure is not counted against it.
+These are smoke tests with profile defaults, not a broad or deterministic coding
+ranking. Raw results, revisions and earlier runs are retained in
+`hosts/gpu-195/bench/larger-model-trial-20261025.json`.
+
+| Profile | Interval fix | LRU cache fix | Short-prompt decode median | Longer-input TTFT |
+|---|---:|---:|---:|---:|
+| general-nothink | fail, 23.05 s | fail, 32.49 s | 82.42 tok/s | 1.81 s |
+| flash-next-nothink | pass, 29.15 s | pass, 25.42 s | 67.87 tok/s | 4.10 s |
+| flash-next-huihui-nothink | pass, 24.51 s | pass, 20.56 s | 75.59 tok/s | 4.06 s |
+
+Decode medians use three 128-token samples. The longer prompt has 10,315
+characters and asks for a short log summary. The earlier standalone Strata run
+measured 109.17 tok/s; use the deployed profile's measurements above for planning.
+First pool load plus a small answer took 36.94 s. Voice first-audio latency was
+636.5 ms before and 639.5 ms during the Qwen trial (10 turns each).
+
+The experimental `strata-bench` and `maya-bench` units have no boot activation,
+use GPU1 only, and conflict with the normal pool while active. Their API ports
+bind loopback and are accessed through SSH. Stop a benchmark unit and start
+`llm-pool.service` to restore normal serving. The Strata unit prepared the Qwen
+files; the Maya unit is for GLM-5.3-Flash Maya-S24 CPU/GPU/NVMe offload trials.
+
+
+Nanbeige trial added the same day: `nanbeige-33b` / `nanbeige-33b-nothink`.
+The upstream is [Nanbeige4.3-33B](https://huggingface.co/Nanbeige/Nanbeige4.3-33B),
+a dense Llama architecture. The pinned Bartowski Q4_K_S GGUF is 19,740,519,552
+bytes, revision `9beb68421fdf7be095093a6888325fa2c83ddd38`, SHA256
+`b61162b5c20e31cd19d92607d2c2237950e8f3dcb307b3d7ca792c9a65eeffe5`.
+It uses the existing Prism llama.cpp binary, all layers on GPU1, 32k context,
+Q4_0 K/V cache, one sequence and 128-token microbatches. Total GPU1 use measured
+22,861 MiB including stt-batch, leaving 1,317 MiB free. The chat template requests
+XML tools and preserved reasoning; the non-thinking alias explicitly disables
+thinking. Its model-card scores use high thinking effort, so those scores are
+not comparable to this non-thinking smoke test.
+
+Nanbeige's warm short-prompt decode median was 37.23 tok/s, short TTFT 38.4 ms,
+and longer-input TTFT 3.92 s. First load plus a short answer took 12.46 s.
+Concurrent short speech transcription succeeded (155.1 ms median, five samples).
+Flash Next also passed short (67.0 ms median, five samples) and 13.71-second
+(224.1 ms, one measured sample after warm-up) transcription checks while loaded.
+These speech runs used the `stt.pow` route: stt-batch is not on the `voice` network.
+
+
+`nvidia-smi topo -m` reports **NV4** between the two 3090s on .195. Maya can
+split a model across local GPUs and pipeline GLM work, but this trial exposes
+only GPU1. A full two-card comparison needs a separate voice allocation plan;
+48 GiB of physical VRAM is not 48 GiB currently available to the coding pool.
+The current router chooses a host for a whole request and does not distribute
+inference between .195 and .58.
+
+
+Nanbeige non-thinking passed the cache task in 191.53 s but timed out on intervals
+at 600 s. It repeatedly repaired its own tests, initially edited a mistyped path,
+and triggered context compaction. A fresh thinking-enabled interval retest passed
+in 258.32 s. Reasoning blocks were present in the trace even though LiteLLM's
+aggregate usage reported zero `thinking_tokens`; use the trace, not that counter,
+to identify the mode. This gives 1/2 non-thinking tasks and 1/1 thinking retest,
+not a complete thinking-mode score.
+
+
+GLM-5.3-Flash Maya-S24 trial: pinned weights
+`peasantsmith/GLM-5.3-Flash-Maya-GGUF@f16ee4ba50d8fd2bb726ea1862ca6ca14ba188da`,
+three shards totaling 94,701,676,224 bytes. Project Maya v1.1.28 is built from
+`6afa525bbabc3a8f5fd165f89e9bc72155d9bd39` for SM86. Pack preparation must put
+the pack **inside the shard directory**, because its native references use
+`../<shard-name>`. The launcher must pass the bundled
+`/opt/maya/data/expert-profile-glm.bin`, as upstream setup does; omitting it
+leaves uniform per-layer slots and an unsuitable initial expert placement.
+
+The initial diagnostics omitted that profile: 36 GiB pinned experts with speech
+running gave a 4.04 tok/s median; pausing voice-agent, voice-llm, voice-stt,
+voice-tts and stt-batch permitted 46 GiB and a larger GPU1 cache. Those early
+runs are retained as diagnostics, not representative final Maya results.
+A 42 GiB configuration also loaded with speech running and 7.5 GiB MemAvailable,
+but was not speed-tested. All runs still expose **GPU1 only**.
+
+With the profile corrected and speech paused, the final 46 GiB run measured
+6.73 tok/s median, short TTFT 381.6 ms, and longer-input TTFT 16.79 s. It holds
+about 52.8 GB in the container, with a 52 GiB cap; the host retained about 10 GiB
+MemAvailable. The default benchmark unit remains 36 GiB (safe beside speech);
+46 was a temporary live override, not an automatic idle policy. The native
+Maya Anthropic API is reached through an SSH tunnel for the agent trials.
+
+Sources for the tuning investigation:
+[Maya settings](https://github.com/mw00/project-maya/blob/main/docs/SETTINGS.md)
+and [24 GB GPU / 64 GB RAM report](https://github.com/mw00/project-maya/issues/274).
+The reference machine has a much newer CPU/GPU and more free expert-cache memory;
+its performance is not a promise for this i7-7700K host. CPU quota throttling in
+our baseline was only 0.48 seconds across 3,073 periods, so the CPU cap was not
+relaxed. Logs instead showed about 200 ms/token in disk waits before tuning.
+
+
+The corrected Maya configuration passed both independent Claude Code checks:
+intervals **596.03 s**, cache **498.32 s**, within a 600 s deadline each.
+The native Anthropic endpoint honored Claude Code's thinking request despite
+`MAX_THINKING_TOKENS=0` and the server's fallback effort `none`: reasoning blocks
+and `thinking` engine phases are present in the trace. Thus these are **thinking
+agent results**, while the OpenAI speed probe explicitly disabled thinking.
+They are not an equal-mode accuracy comparison with the non-thinking profiles.
+GPU1 negotiated PCIe 3.0 x8 during inference; individual tool-prompt reads moved
+tens of GB over PCIe at about 4.7 GB/s. The two-GPU Strata trial follows.
+
+
+### Two-GPU Strata trial (2026-10-26; exploratory)
+
+The installed Strata 0.1.48 engine supports a layer split, but the `llm-pool`
+quadlet had exposed only host GPU1 and `flash-next.json` selected container GPU0.
+For this trial, the container was temporarily given both 3090s and Strata was
+configured with `gpu: [0, 1]`. `nvidia-smi topo -m` reports NV4 between them.
+The test used Flash Next IQ2_XS, the 131,072-token context, int8 KV and Huihui
+projection; benchmark requests disabled thinking, used temperature 0 and capped
+output at 256 tokens.
+
+Initial short-request smoke samples: single GPU, 98.24 and 101.18 tok/s
+(median **99.71**); dual GPU with the voice LLM running, 73.67 and 107.99 tok/s
+(median **90.83**). These two-sample arms are exploratory. The split used layers
+0-10 on GPU0 and 11-47 on GPU1, while GPU0's voice workloads left only **475
+MiB** free after load; Strata warned that memory pressure could page and stall
+long prompts.
+
+With only `voice-llm.service` stopped (voice STT and TTS remained up), the split
+balanced at layers 0-23 / 24-47. Strata reported **94% of profiled experts
+resident**. A live 119,139-token Claude prompt was read in 35 seconds (about
+3,400 prompt tok/s); the response was generating at about 110 tok/s in the
+available log sample. This is a live-workload observation, not a matched A/B
+benchmark. For a matched short coding probe, both cards were tested with the
+voice LLM stopped, the same two prompts, temperature 0, thinking off, Huihui
+projection on and a 256-token cap. After a clean model reload and warmup, the
+single-GPU repeat measured **110.58 tok/s median** (four requests); the dual-GPU
+repeat measured **139.78 tok/s median** (four requests), a **26%** increase in
+this small sample. Median TTFT was 0.401 s versus 0.224 s. A separate, already
+warm dual-GPU run measured 165.03 tok/s median, showing material run-to-run
+spread; these numbers are directional, not a robust benchmark. Cold model load
+took 31.7 s single-GPU and 35.6 s dual-GPU, excluded from decode medians.
+
+After loading the split, the engine reported only **474 MiB free on GPU0 and
+424 MiB on GPU1**, still below its own recommended reserves. Thus the split
+works and both cards participate, and the matched sample improved decode speed,
+but the 128k profile leaves too little headroom for safe permanent use. The
+voice LLM was stopped temporarily and then restarted; the deployed pool and
+queue were restored to GPU1-only. Full measurements are in
+[`dual-gpu-trial-20261026.json`](../hosts/gpu-195/bench/dual-gpu-trial-20261026.json).
+
+### Request-idle voice GPU lease
+
+The voice LLM's idle timer measures time since the last request through its
+OpenAI API gateway. After 300 seconds with no requests, the gateway calls vLLM
+`/sleep?level=1`, which offloads model weights to host RAM. The next voice API
+request checks llama-swap's global GPU memory metrics. If Flash Next is running
+on GPU1 only, voice wakes on GPU0 immediately, even while that coding request is
+active. If Flash Next holds both cards, the gateway waits for its normal
+five-minute TTL to release GPU0 before waking voice. The gateway never
+force-unloads Flash Next. If it cannot verify that GPU0 has been released within
+30 minutes, it returns a retryable 503 and leaves the local session untouched.
+
+The gateway alone publishes port 8100. vLLM stays private on `voice.network`
+because its development sleep/wake endpoints are unauthenticated. Other pool
+models stay on GPU1. Flash Next checks the gateway's heartbeat state when it
+starts: it uses GPU1 while voice is awake or the state is stale, and GPUs 0+1
+only while the gateway confirms voice is asleep. The gateway refreshes that
+state every 15 seconds during idle, so a crashed gateway fails closed to GPU1.
+
+This is a launch-time lease, not continuous GPU migration: when voice wakes,
+the dual-GPU engine is unloaded. The next Flash Next launch can lease both
+cards again if voice has returned to idle. The dual split has under 0.5 GiB
+free per card in the trial, so this mode is suitable only when the voice LLM
+has fully offloaded; voice STT/TTS and unrelated GPU workloads still affect
+available memory. The gateway uses an 8 GiB GPU0 reserve threshold; unknown
+metrics fail closed and keep waiting. Runtime behavior should be observed after
+deployment.
+
+Live wake check on 26 October: with Flash Next still running on GPU1 and GPU0
+using 4.1 GiB for voice STT/TTS, `GET /v1/models` through the gateway returned
+200 in 1.09 seconds. The voice LLM woke on GPU0 (about 13.3 GiB total use), and
+the Flash Next process stayed running on GPU1. This confirms the two workloads
+can overlap when Flash Next has a single-GPU lease. It is still one model
+generation slot: the two-slot trial above was 45.6% slower in aggregate, so
+additional agent and subagent requests share the fair queue rather than
+overcommitting the engine.

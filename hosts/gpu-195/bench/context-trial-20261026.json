@@ -1,0 +1,116 @@
+{
+  "date": "2026-10-26",
+  "model": "flash-next-huihui",
+  "context_tokens": 131072,
+  "max_output_tokens": 4096,
+  "kv": "int8",
+  "kv_resident_tokens": 32768,
+  "compaction_threshold_tokens": 113976,
+  "compaction_events": [],
+  "debug": [
+    "2026-10-25T23:49:41.525Z [DEBUG] autocompact: tokens=[REDACTED] level=ok effectiveWindow=126976",
+    "2026-10-25T23:50:26.644Z [DEBUG] autocompact: tokens=[REDACTED] level=ok effectiveWindow=126976"
+  ],
+  "results": [
+    {
+      "result": "CEDAR-7421, ORBIT-5938, MAPLE-2604",
+      "session_id": "329e2dc6-8bef-4aef-8aa1-b78e39d7eb43",
+      "is_error": false,
+      "modelUsage": {
+        "flash-next-huihui": {
+          "inputTokens": 72449,
+          "outputTokens": 64,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.363845,
+          "contextWindow": 131072,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 0,
+          "canonicalModel": "flash-next-huihui",
+          "provider": "firstParty",
+          "costBasis": "unknown"
+        }
+      },
+      "usage": {
+        "input_tokens": 72449,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 64,
+        "output_tokens_details": {
+          "thinking_tokens": 0
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "",
+        "iterations": [],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "num_turns": 1,
+      "label": "long",
+      "seconds": 45.09,
+      "markers_correct": true
+    },
+    {
+      "result": "CEDAR-7421, ORBIT-5938, MAPLE-2604",
+      "session_id": "329e2dc6-8bef-4aef-8aa1-b78e39d7eb43",
+      "is_error": false,
+      "modelUsage": {
+        "flash-next-huihui": {
+          "inputTokens": 72482,
+          "outputTokens": 118,
+          "thinkingTokens": 0,
+          "cacheReadInputTokens": 72512,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.401616,
+          "contextWindow": 131072,
+          "maxOutputTokens": 32000,
+          "canonicalModel": "flash-next-huihui",
+          "provider": "firstParty",
+          "costBasis": "unknown"
+        }
+      },
+      "usage": {
+        "input_tokens": 33,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 72512,
+        "output_tokens": 54,
+        "output_tokens_details": {
+          "thinking_tokens": 0
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "",
+        "iterations": [],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "num_turns": 1,
+      "label": "followup",
+      "seconds": 1.56,
+      "markers_correct": true
+    }
+  ],
+  "notes": [
+    "Executed in PowFrame through claude-local and production proxy. No tools or file modifications requested.",
+    "The costUSD/provider fields are Claude Code estimates for an unknown alias, not cloud billing. Requests were local-only.",
+    "modelUsage maxOutputTokens is generic alias metadata; the configured and server-observed per-request max_tokens is 4096.",
+    "This verifies 72k serving and simple recall across two turns, not quality at the full 128k limit."
+  ]
+}

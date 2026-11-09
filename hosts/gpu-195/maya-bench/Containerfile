@@ -1,0 +1,10 @@
+FROM docker.io/vllm/vllm-openai@sha256:6ee133356d49ed24cee03dd0cda3d3980279a11c107ce3e752c89e76540f41c9
+ARG MAYA_COMMIT=6afa525bbabc3a8f5fd165f89e9bc72155d9bd39
+RUN apt-get update && apt-get install -y --no-install-recommends cmake ninja-build unzip && rm -rf /var/lib/apt/lists/*
+RUN mkdir /opt/maya && curl -fsSL "https://github.com/mw00/project-maya/archive/${MAYA_COMMIT}.tar.gz" | tar -xz -C /opt/maya --strip-components=1
+WORKDIR /opt/maya
+RUN python3 -c 'import setup; setup.get_llama_cpp()'
+RUN curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-profiler-api-13-0_13.0.85-1_amd64.deb -o /tmp/profiler.deb && echo '8898cca6fd086e94ccd5122a4953b75e50a4f29a33b2a8a348a0a032339a235e  /tmp/profiler.deb' | sha256sum -c - && dpkg -i /tmp/profiler.deb && rm /tmp/profiler.deb
+RUN curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-nvtx-13-0_13.0.85-1_amd64.deb -o /tmp/nvtx.deb && echo 'e422c59cda087456d3e5646e6606b62c5cff1aa0fe3783ae47deaeb80f1abe42  /tmp/nvtx.deb' | sha256sum -c - && dpkg -i /tmp/nvtx.deb && rm /tmp/nvtx.deb
+RUN --mount=type=cache,id=powos-maya-6afa-sm86,target=/maya-build cmake -S . -B /maya-build -DCMAKE_BUILD_RPATH_USE_ORIGIN=ON -G Ninja -DCMAKE_BUILD_TYPE=Release -DSTRATA_ENABLE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=86 -DSTRATA_NATIVE_EXPERTS=ON -DSTRATA_BUILD_TESTS=OFF -DSTRATA_GGML_DIR=/opt/maya/third_party/llama.cpp && cmake --build /maya-build --target maya -j 2 && cp -a /maya-build /opt/maya/build
+ENTRYPOINT ["python3", "/opt/maya/maya.py"]

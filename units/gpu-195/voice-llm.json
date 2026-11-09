@@ -5,12 +5,10 @@
   "host": "desktop",
   "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 nvidia-open, 2x RTX 3090)",
   "owner": "system:voice",
-  "purpose": "the voice agent's fast LLM: vLLM Qwen/Qwen3-8B-AWQ (awq_marlin, hermes tool calls, 16k context, max 16 seqs, --gpu-memory-utilization 0.45), resident; OpenAI API on :8100 as qwen3-8b (phase 4: the router's voice-fast)",
+  "purpose": "the voice agent's fast LLM: vLLM Qwen/Qwen3-8B-AWQ (awq_marlin, hermes tool calls, 16k context, max 16 seqs, --gpu-memory-utilization 0.45), private on voice.network; its gateway offloads weights to host RAM after 300 s without API requests and wakes it on demand",
   "installedBy": "hosts/gpu-195/install.sh (rootless podman quadlet, user powos, linger on)",
   "image": "docker.io/vllm/vllm-openai:latest",
-  "ports": [
-    "8100/tcp"
-  ],
+  "ports": [],
   "files": [
     "/var/home/powos/.config/containers/systemd/voice-llm.container"
   ],
@@ -28,11 +26,11 @@
     "cpus": 4,
     "pids": 4096
   },
-  "autosleep": "never",
+  "autosleep": "gateway sleeps vLLM level 1 after five minutes without OpenAI API requests; next request wakes weights from host RAM",
   "gpu": "nvidia.com/gpu=0",
   "vramBudget": "11g",
   "vramMeasured": "10.9 GiB",
-  "health": "http://192.168.50.195:8100/health",
+  "health": "private on voice.network; public health and OpenAI API are via voice-llm-gateway :8100",
   "remove": {
     "stop": [
       "systemctl --user stop voice-llm.service"
@@ -47,5 +45,5 @@
       "/var/lib/powos/models/vllm"
     ]
   },
-  "vramNote": "GPU0 belongs to the realtime voice path (docs/GPU-SERVERS-PLAN.md); nothing else allocates on it"
+  "vramNote": "GPU0 is leased to Flash Next only while the voice gateway confirms vLLM is asleep; voice requests preempt dual-GPU Flash Next before waking"
 }
