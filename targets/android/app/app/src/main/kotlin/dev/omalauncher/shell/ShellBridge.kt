@@ -1203,9 +1203,49 @@ class ShellBridge(
         val apps = listOf(first, second).map { k -> android(k) ?: return false.also { Log.w(TAG, "pair $first | $second: $k is no Android app") } }
         listOf(first, second).forEach { runtime.usage.record(it) }
         dev.omalauncher.system.Switcher.launched("launch pair $first | $second")
-        val ok = splitTasksOf(apps.map { it.component.packageName }) ?: dev.omalauncher.system.Tasks.launchAdjacent(context, apps[0].component, apps[1].component)
+        val pkgs = apps.map { it.component.packageName }
+        val ok = splitTasksOf(pkgs) ?: launchThenSplit(apps.map { it.component }) ?: dev.omalauncher.system.Tasks.launchAdjacent(context, apps[0].component, apps[1].component)
         runtime.usage.settle()
         return ok
+    }
+
+    /**
+     * [launchPair] with WM Shell's ISplitScreen PowOS's (root) and an app with no task: the apps without one started
+     * (plain launches, [first] then [second]), then WM Shell's split of the two tasks ([Tasks.splitApps]) once both are
+     * listed. Not launch-adjacent there: OxygenOS intercepts FLAG_ACTIVITY_LAUNCH_ADJACENT (atms_intercept
+     * interceptStartForSplitScreenMode) into its own pocket-studio canvas (com.oplus.pscanvas ContainerActivity, phone
+     * job 20261109-121732-73666) - both apps on screen but no WM Shell split, so no "tasks.splitPair" and no pair entity.
+     * Null: no ISplitScreen (launch-adjacent instead).
+     *
+     * HACK: the new tasks are polled for (Tasks.list every 150 ms, 3 s at most) before the split. Real fix: WM Shell's
+     * ISplitScreen.startIntents (both apps started split in one transition), once its transaction code on this
+     * SystemUI is read from its dex as startTasks' was.
+     */
+    private fun launchThenSplit(comps: List<android.content.ComponentName>): Boolean? {
+        if (dev.omalauncher.system.Tasks.splitScreen == null) return null
+        val running = dev.omalauncher.system.Tasks.list(context).mapNotNull { it.component?.packageName }.toSet()
+        val start =
+            comps.filter { it.packageName !in running }.map { c ->
+                android.content.Intent(android.content.Intent.ACTION_MAIN)
+                    .addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+                    .setComponent(c)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+            }
+        if (start.isNotEmpty()) runCatching { context.startActivities(start.toTypedArray()) }.onFailure { Log.w(TAG, "pair: can't start $comps", it) }.getOrNull() ?: return null
+        Log.i(TAG, "pair ${comps.joinToString(" | ") { it.packageName }}: started ${start.size}, then WM Shell's split")
+        scope.launch(Dispatchers.Default) {
+            repeat(20) {
+                kotlinx.coroutines.delay(150)
+                val tasks = dev.omalauncher.system.Tasks.list(context)
+                val ids = comps.map { c -> tasks.firstOrNull { it.component?.packageName == c.packageName }?.id }
+                if (ids.all { it != null }) {
+                    dev.omalauncher.system.Tasks.splitApps(context, ids[0]!!, ids[1]!!)
+                    return@launch
+                }
+            }
+            Log.w(TAG, "pair $comps: no task for both after 3 s, not split")
+        }
+        return true
     }
 
     /** [launchPair]'s split of packages [pkgs]' running tasks (the split back, or WM Shell's split); null: launch them instead. */

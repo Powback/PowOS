@@ -22,7 +22,8 @@
 #                 icon holding both icons, stacked folded / side by side unfolded; neither app has its own card;
 #   pair-entity   (split-apps-a-split-pair-is-one-app-everywhere-sw): the same split is ONE app everywhere - the page's
 #                 pair (ui/splitpair.ts livePair) has both apps; Home: the dock has ONE group cell for it (both icons)
-#                 and no cell of either app's own; a real tap on that cell -> the split back (both tasks on screen,
+#                 and no recent/window cell of either app's own (a pinned app keeps its pinned cell: dockgroups.tsx
+#                 unpinnedGroups); a real tap on that cell (scrolled into view) -> the split back (both tasks on screen,
 #                 split); both tasks closed (tasks.remove, the switcher swipe's call) -> the recent apps still show ONE
 #                 pair entry (dock recents) and neither app alone; a real tap on it -> both apps up again, split;
 #   split-lr      (split-screen-side-by-side-left-right-on-the-unfo): unfolded only (SKIP with reason when folded - not
@@ -253,9 +254,11 @@ pair_entity() {
   k1=$(appkey "$CALC"); k1=${k1%%|*}; k2=$(appkey "$SECOND"); k2=${k2%%|*}
   case $lp in *"$k1"*"$k2"*|*"$k2"*"$k1"*) pass "the page's pair has both apps ($lp)" ;; *) fail "the page's pair isn't Calculator + $SECOND: $lp (keys $k1 $k2)"; return ;; esac
   sh_ "input keyevent KEYCODE_HOME"; sleep 2.5; chk home; step home "home with the split in the background"
-  g=$(ev "(()=>{const d=[...document.querySelectorAll('.home .dock .app[data-key]')],g=d.filter(a=>a.dataset.key.startsWith('split:'));return JSON.stringify({groups:g.length,icons:g[0]?g[0].querySelectorAll('.task-icon').length:0,own:d.filter(a=>a.dataset.key==='$k1'||a.dataset.key==='$k2').map(a=>a.dataset.key)})})()")
+  g=$(ev "(()=>{const d=[...document.querySelectorAll('.home .dock .app[data-key]')],g=d.filter(a=>a.dataset.key.startsWith('split:'));return JSON.stringify({groups:g.length,icons:g[0]?g[0].querySelectorAll('.task-icon').length:0,own:d.filter(a=>!(a.closest('.dock-page:not(.dock-recent)')&&!a.classList.contains('windowed'))&&(a.dataset.key==='$k1'||a.dataset.key==='$k2')).map(a=>a.dataset.key)})})()")
   log "dock: $g"
   case $g in *'"groups":1,"icons":2,"own":[]'*) pass "the dock has one cell for the pair, both icons, no own cells ($g)" ;; *) fail "the dock isn't one cell for the pair: $g" ;; esac
+  # Folded the group cell leads the dock's recent section (PD1), a page past the pinned one: scrolled into view first.
+  inview "[...document.querySelectorAll('.home .dock .app[data-key]')].find(a=>a.dataset.key.startsWith('split:'))" >/dev/null
   pt1=$(pt "[...document.querySelectorAll('.home .dock .app[data-key]')].find(a=>a.dataset.key.startsWith('split:'))")
   if isxy "$pt1"; then tapat "$pt1" "the dock's pair cell"; sleep 3; chk dock-tap; step dock-tap "the dock's pair cell tapped"
     r=$(splitup); case $r in "1 1 2") pass "the split came back from the dock ($r)" ;; *) fail "the dock's pair cell didn't bring the split back (on screen / pair: $r)" ;; esac
@@ -264,7 +267,7 @@ pair_entity() {
   hcall tasks.remove "[$T1]" "v=>String(v)" >/dev/null; hcall tasks.remove "[$T2]" "v=>String(v)" >/dev/null; sleep 2.5
   sh_ "input keyevent KEYCODE_HOME"; sleep 2; chk closed; step closed "both apps closed"
   inview "[...document.querySelectorAll('.home .dock .app.pair')].find(a=>a.dataset.group.includes('$k1')&&a.dataset.group.includes('$k2'))" >/dev/null
-  own=$(ev "(()=>{const d=[...document.querySelectorAll('.home .dock .app[data-key]')];return JSON.stringify({pairs:d.filter(a=>a.classList.contains('pair')&&a.dataset.group.includes('$k1')&&a.dataset.group.includes('$k2')).length,own:d.filter(a=>a.dataset.key==='$k1'||a.dataset.key==='$k2').map(a=>a.dataset.key)})})()")
+  own=$(ev "(()=>{const d=[...document.querySelectorAll('.home .dock .app[data-key]')];return JSON.stringify({pairs:d.filter(a=>a.classList.contains('pair')&&a.dataset.group.includes('$k1')&&a.dataset.group.includes('$k2')).length,own:d.filter(a=>!(a.closest('.dock-page:not(.dock-recent)')&&!a.classList.contains('windowed'))&&(a.dataset.key==='$k1'||a.dataset.key==='$k2')).map(a=>a.dataset.key)})})()")
   log "recents: $own"
   case $own in *'"pairs":1,"own":[]'*) pass "the recent apps show the pair as one entry, neither app alone ($own)" ;; *) fail "the recent apps don't show the pair as one entry: $own" ;; esac
   pt1=$(pt "[...document.querySelectorAll('.home .dock .app.pair')].find(a=>a.dataset.group.includes('$k1')&&a.dataset.group.includes('$k2'))")
