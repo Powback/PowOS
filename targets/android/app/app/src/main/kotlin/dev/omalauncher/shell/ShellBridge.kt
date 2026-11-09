@@ -287,6 +287,10 @@ class ShellBridge(
     private val lockChanged: (JSONObject) -> Unit = { emit("devices.lock", it) }
 
     init {
+        // The games' built-in fps counter follows the fps meter's switch (store "perf.meter"), from the start.
+        andro.marchy.GameFpsCounter.on = runCatching {
+            store("perf.meter").takeIf { it.isFile }?.let { JSONObject(it.readText()).optBoolean("on") } ?: false
+        }.getOrDefault(false)
         // Home's bridge: an app the system's own window menu floats becomes a web window (SystemFloat, web windows on).
         if (activity != null) SystemFloat.start(context, systemFloat)
         if (activity != null) andro.marchy.WebWindowSource.host = linuxWindows
@@ -544,7 +548,11 @@ class ShellBridge(
             "store.set" -> {
                 store(a.getString(0)).writeText(a.get(1).let { if (it is String) JSONObject.quote(it) else it.toString() })
                 // The fps meter's switch takes effect in every shell window at once (status bar, home), not on its next poll.
-                if (a.getString(0) == "perf.meter") runCatching { JSONObject(a.get(1).toString()).toString() }.getOrNull()?.let { broadcast("perf.meter", it) }
+                if (a.getString(0) == "perf.meter") runCatching { JSONObject(a.get(1).toString()).toString() }.getOrNull()?.let {
+                    broadcast("perf.meter", it)
+                    // A game's window task shows its own counter (the bar's meter is hidden under a full-screen game).
+                    andro.marchy.GameFpsCounter.on = runCatching { JSONObject(it).optBoolean("on") }.getOrDefault(false)
+                }
                 Unit
             }
             // SI1: the one search/chat bar input home's bar (and its search widget) and the launcher overlay share (barsync.ts):

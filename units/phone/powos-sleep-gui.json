@@ -13,7 +13,7 @@
     {
       "name": "powos-sleep-gui",
       "user": "powos",
-      "started_by": "powos-rooted-session (the desktop session)"
+      "started_by": "powos-rooted-session (the desktop session; its keep loop starts it again when it exits)"
     },
     {
       "name": "KWin script powos-sleep",

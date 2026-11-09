@@ -32,6 +32,13 @@ here=$(cd "$(dirname "$0")" && pwd)
 APPS="kate dolphin konsole calc settings"; FOLD=1; ARGS=()
 while [ $# -gt 0 ]; do case "$1" in --apps) APPS=$2; shift 2 ;; --no-fold) FOLD=0; shift ;; *) ARGS+=("$1"); shift ;; esac; done
 . "$here/e2e-lib.sh"
+# Every phase published as "-- HH:MM:SS <phase>" (queue.sh's kill_step names the step a timeout hit): 11-08 03:20's
+# "FAIL timeout at step: apps: kate konsole calc settings" was only the last log line - the bench was in the storm's
+# leak count (S0=$(leakstate)), no app had hung. And each page eval gives up in 20 s, not cdp.ts's 120 s: one call into
+# a paused page (home behind a task) spent 40 % of the job's budget.
+export CDP_TIMEOUT_S=${CDP_TIMEOUT_S:-20}
+eval "e2e_$(declare -f chk)"
+chk() { [ "$1" = "${PHASE:-}" ] || { PHASE=$1; echo "-- $(date +%T) $1"; }; e2e_chk "$1"; }
 e2e_args ${ARGS[@]+"${ARGS[@]}"}
 E2E_APPS='com.oneplus.calculator|com.android.settings'
 E2E_LINUX='kate dolphin konsole'
@@ -264,7 +271,7 @@ storm() {
   local apps=() a i S0
   for a in $RUN; do apps+=("$a"); done
   [ ${#apps[@]} -ge 1 ] || return 0
-  S0=$(leakstate); log "storm: before (page host layers tasks pss) $S0"
+  chk "storm: leaks before"; S0=$(leakstate); log "storm: before (page host layers tasks pss) $S0"
   sh_ "dumpsys gfxinfo com.powos.app reset" >/dev/null
   printf 'cycle\tapp\tframe_ms\tlive_ms\tswitch_ms\tclose_ms\tdrop\tjank\tp95\tp99\tfps\n' > "$OUT/storm.tsv"
   # home's frames through the whole storm, marked per cycle (window.__wbS).
@@ -272,7 +279,7 @@ storm() {
   PREVID=""
   for i in $(seq 1 "$STRESS_N"); do chk "storm $i"; a=${apps[$(((i - 1) % ${#apps[@]}))]}; storm_cycle "$i" "$a"; done
   [ -n "$PREVID" ] && { hcall webwindows.close "[${PREVID#w}]" "()=>'ok'" >/dev/null; }
-  storm_frames; storm_trend; storm_leaks "$S0"
+  chk "storm: frames, trend, leaks after"; storm_frames; storm_trend; storm_leaks "$S0"
   MINEW=""
   step storm "after $STRESS_N open/switch/close cycles"
 }

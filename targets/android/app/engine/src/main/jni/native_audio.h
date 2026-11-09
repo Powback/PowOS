@@ -16,17 +16,24 @@
  * frame-aligned ring buffer and the callback supplies near-silent keepalive samples
  * on underrun. The output stream is rebuilt independently after AAudio failures and
  * may idle-stop after silence; the display connection is never rebuilt for this.
- * The capture stream is opened once and only started while the mic is enabled. The
- * active display_ctx (and thus the live audio fd) is swapped via audio_set_ctx().
- * The audio fd is owned by the display library -- never closed here.
+ * The capture stream is opened once and only started while the mic is enabled.
+ *
+ * PowOS: every live connection (surface) carries its own audio socket, and KWin sends the desktop's sound on ONE of
+ * them: the desktop's (surface 0) while it is connected, otherwise a live window task's (kwin 0067) - with a game
+ * full screen in its own task there is usually no desktop connection at all (11-08: game sound reached anland-speaker
+ * but no AudioTrack ran). So the bridge listens on all of them: audio_attach() when a connection goes live
+ * (exit-fallback), audio_detach() when it drops or closes. Each attached fd is dup()ed and owned here (closed by the
+ * playback thread only), so the display library closing its own copy never races a read.
  */
 
 void audio_start(void);
 void audio_stop(void);
 
-/* Point the bridge at the current connection (its audio fd is fetched live via
- * get_audio_fd), or NULL to detach. Mirrors the event thread's use of s->ctx. */
-void audio_set_ctx(display_ctx *ctx);
+/* Surface [surface_id]'s connection is live with audio socket [fd] (get_audio_fd; dup()ed - the caller keeps its
+ * own). Replaces that surface's previous link. fd < 0 = audio_detach(). Any thread. */
+void audio_attach(uint32_t surface_id, int fd);
+/* Surface [surface_id]'s connection dropped or is closing: stop using its audio socket. Any thread, idempotent. */
+void audio_detach(uint32_t surface_id);
 
 /* Enable/disable microphone capture (the up path). Off by default; the Java layer
  * turns it on only once RECORD_AUDIO has been granted. */

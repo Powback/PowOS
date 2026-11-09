@@ -48,6 +48,8 @@ static bool api_loaded = false;
 static void on_fallback(void *userdata);
 
 static void on_exit_fallback(void *userdata);
+static void audio_lifetime(bool desktop_running);
+static void audio_window_count(int delta);
 /* PowOS: one per Android surface. g_state is the desktop (MainActivity: audio, camera, clipboard, keyboard
  * visibility); others are PowOS windows shown as their own Android tasks (PowosWindowActivity), surfaces of the same
  * display daemon with their own id - pixels and input only. See docs/powos-window-tasks.md. */
@@ -758,8 +760,7 @@ static int do_connect(struct consumer_state *s)
     const char *sock = sock_path;
 
     if (s->ctx) {
-        if (s->primary)
-            audio_set_ctx(NULL);   /* detach audio before the old ctx (and its fd) dies */
+        audio_detach(s->surface_id);   /* this surface's old connection's audio socket goes with it */
         stop_event_thread(s);
         join_event_thread(s);
         disconnect(s->ctx);
@@ -898,9 +899,6 @@ static int do_connect(struct consumer_state *s)
     set_fallback_callback(s->ctx, on_fallback, s);
     set_exit_fallback_callback(s->ctx, on_exit_fallback, s);
 
-    if (s->primary)
-        audio_set_ctx(s->ctx);   /* audio fd is now live; threads pick it up via get_audio_fd */
-
     s->direct_on = !s->primary && direct_flag();
     s->direct_retry_ms = 0;   /* this connection's offer (on_exit_fallback) is the retry */
     if (s->direct_on) {
@@ -924,8 +922,7 @@ static void on_fallback(void *userdata)
     struct consumer_state *s = userdata;
     LOGI("fallback triggered (surface %u)", s->surface_id);
 
-    if (s->primary)
-        audio_set_ctx(NULL);   /* the lib has closed the audio fd; stop touching it */
+    audio_detach(s->surface_id);   /* the lib has closed its audio fd; drop our copy too */
 
     // Disable clip listener on Java side before stopping event thread
     if (s->primary && g_jvm && g_activity_obj) {
@@ -958,6 +955,11 @@ static void on_exit_fallback(void *userdata)
 {
     struct consumer_state *s = userdata;
     LOGI("exit fallback triggered (surface %u)", s->surface_id);
+
+    /* PowOS: every surface's connection has an audio socket, and KWin plays the desktop's sound on the desktop's
+     * while it is connected, else on a live window task's (kwin 0067) - a full-screen game runs with no desktop
+     * connection at all, and its sound reached anland-speaker but never an AudioTrack (11-08 game-audio-flow D). */
+    audio_attach(s->surface_id, get_audio_fd(s->ctx));
 
     send_refresh_rate(s);
     /* PowOS: direct scanout offered on every hand-over to KWin (each one is a new goLive there: it forgot every id, so
@@ -1326,6 +1328,39 @@ static void copy_jstring(JNIEnv *env, jstring js, char *dst, size_t dstsz)
     }
 }
 
+/* PowOS: the audio bridge runs while ANY consumer may carry the sound - the desktop (nativeStart..nativeStop) or a
+ * window task (nativeStartWindow..nativeStopWindow): a full-screen game's task runs with the desktop stopped, and the
+ * bridge used to stop with the desktop, so no AudioTrack ever played the game (11-08 game-audio-flow stage D). */
+static pthread_mutex_t audio_life_lock = PTHREAD_MUTEX_INITIALIZER;
+static bool audio_desktop_running;
+static int audio_windows;
+
+static void audio_life_apply_locked(void)
+{
+    if (audio_desktop_running || audio_windows > 0)
+        audio_start();   /* idempotent */
+    else
+        audio_stop();    /* idempotent */
+}
+
+static void audio_lifetime(bool desktop_running)
+{
+    pthread_mutex_lock(&audio_life_lock);
+    audio_desktop_running = desktop_running;
+    audio_life_apply_locked();
+    pthread_mutex_unlock(&audio_life_lock);
+}
+
+static void audio_window_count(int delta)
+{
+    pthread_mutex_lock(&audio_life_lock);
+    audio_windows += delta;
+    if (audio_windows < 0)
+        audio_windows = 0;
+    audio_life_apply_locked();
+    pthread_mutex_unlock(&audio_life_lock);
+}
+
 JNIEXPORT void JNICALL
 Java_andro_marchy_Native_nativeConfigure(
     JNIEnv *env, jclass clazz, jstring socketPath, jboolean useRoot,
@@ -1415,6 +1450,7 @@ Java_andro_marchy_Native_nativeStart(
     }
 
     if (g_state.ctx) {
+        audio_detach(0);
         disconnect(g_state.ctx);
         g_state.ctx = NULL;
     }
@@ -1450,9 +1486,9 @@ Java_andro_marchy_Native_nativeStart(
     g_state.need_reconnect = true;
     pthread_create(&g_state.render_thread, NULL, render_thread_func, &g_state);
 
-    /* Audio streams live independently of the connection; the render thread attaches
-     * the fd via audio_set_ctx() once connected. */
-    audio_start();
+    /* Audio streams live independently of the connection; each connection attaches its
+     * audio socket on exit-fallback (audio_attach). */
+    audio_lifetime(true);
 
     pthread_mutex_unlock(&g_state.lock);
 }
@@ -1470,9 +1506,10 @@ Java_andro_marchy_Native_nativeStop(
         pthread_mutex_lock(&g_state.lock);
     }
 
-    /* Stop audio before the ctx (and its fd) is torn down. */
-    audio_set_ctx(NULL);
-    audio_stop();
+    /* The desktop's audio socket goes before its ctx; the bridge itself keeps running while a window task's
+     * connection may still carry the sound (a full-screen game in its own task, no desktop). */
+    audio_detach(0);
+    audio_lifetime(false);
 
     if (g_state.ctx) {
         stop_event_thread(&g_state);
@@ -1746,6 +1783,7 @@ Java_andro_marchy_Native_nativeStartWindow(
         free(s);
         return 0;
     }
+    audio_window_count(+1);
     LOGI("window consumer started for surface %u", s->surface_id);
     return (jlong)(intptr_t)s;
 }
@@ -1765,12 +1803,14 @@ Java_andro_marchy_Native_nativeStopWindow(
     if (s->wake_efd >= 0)
         eventfd_write(s->wake_efd, 1);
     pthread_join(s->render_thread, NULL);
+    audio_detach(s->surface_id);
     if (s->ctx) {
         stop_event_thread(s);
         join_event_thread(s);
         disconnect(s->ctx);
         s->ctx = NULL;
     }
+    audio_window_count(-1);
     cleanup_dmabufs(s);
     direct_free(s->direct);   /* before the window: its child surface is the window's */
     s->direct = NULL;
