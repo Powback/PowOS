@@ -29,7 +29,8 @@ import { powos } from "../bridge.ts";
 import { tick } from "./haptics.ts";
 import { takeTap } from "./taps.ts";
 import { page, screen } from "../state.ts";
-import type { TermPlace, TermState, TermStyle } from "../types.ts";
+import type { Clip, TermPlace, TermState, TermStyle } from "../types.ts";
+import { ago } from "./time.ts";
 import { TerminalLogin, watchTerminal } from "./claudesignin.tsx";
 
 /** As PtyTerminal's transcript; tmux keeps its own. */
@@ -609,6 +610,7 @@ function release() {
     if (s) void powos.term.focus!(s.id, false);
   } else s?.term.blur();
   focused.value = null;
+  clips.value = null;
   view.cut = 0;
   document.documentElement.classList.remove("term-focus");
   document.documentElement.style.removeProperty("--term-lift");
@@ -640,8 +642,10 @@ powos.on("system.insets", (i: { keyboard: number }) => {
   keyboardHeight = i.keyboard;
   // The keyboard gone by itself (Back closes it before the page sees Back): a tile lets go, as the Compose one; a
   // screen's terminal keeps the keys (the next Back closes the screen).
-  if (keyboardUp && i.keyboard === 0 && screen.value.key == null) release();
+  // The paste picker put it away on purpose: its cards take its place, the tile keeps the keys.
+  if (keyboardUp && i.keyboard === 0 && screen.value.key == null && !clips.peek()) release();
   keyboardUp = i.keyboard > 0;
+  if (keyboardUp) keyboardSeen = i.keyboard;
   extraKeysState.value = { keyboard: keyboardUp };
   requestAnimationFrame(lift);
 });
@@ -659,7 +663,8 @@ function lift() {
   const lifted = px("--term-lift");
   const r = view.el.getBoundingClientRect();
   const top = r.top + lifted;
-  const bar = extraKeys?.firstElementChild?.getBoundingClientRect().height ?? 0;
+  // The extra keys, and the paste picker's cards under them while it shows.
+  const bar = extraKeys?.getBoundingClientRect().height ?? 0;
   const floor = window.innerHeight - Math.max(keyboardHeight, px("--inset-bottom")) - bar;
   const overlap = Math.max(0, top + r.height - floor);
   const room = Math.max(0, top - px("--inset-top"));
@@ -716,7 +721,8 @@ powos.on("term.tap", ({ id }: { id: string }) => {
   const v = s?.views[s.views.length - 1];
   if (!s || !v) return;
   if (focused.peek() === v) {
-    if (!extraKeysState.peek().keyboard) void powos.term.focus!(id, true);
+    if (clips.peek()) closeClips();
+    else if (!extraKeysState.peek().keyboard) void powos.term.focus!(id, true);
   } else if (v.interactive) focus(v);
 });
 // A pinch on PowTerm's view (Termux's onScale, a step per 10%): the terminal text size, as the page's pinch.
@@ -754,7 +760,7 @@ const ROWS: (Key | "ctrl" | "alt")[][] = [
 /** PowTerm's onExtraKey: through Termux's key handling (cursor/keypad modes, the sticky modifiers as meta). */
 async function pressNative(id: string, key: string) {
   if (key === "copy") await powos.term.copy!(id);
-  else if (key === "paste") await powos.term.paste!(id);
+  else if (key === "paste") toggleClips();
   else {
     void powos.term.key!(id, key);
     consume();
@@ -771,11 +777,7 @@ async function press(key: string) {
     s.term.clearSelection();
     return;
   }
-  if (key === "paste") {
-    const text = await powos.clipboard.read();
-    if (text) s.term.paste(text);
-    return;
-  }
+  if (key === "paste") return toggleClips();
   s.send(keySeq(key, s.term));
 }
 
@@ -839,14 +841,99 @@ function Sticky({ name, mod }: { name: string; mod: typeof ctrl }) {
 function ExtraKeys() {
   if (!focused.value) return null;
   return (
-    <div class="term-extra tile">
-      <div class="term-rows">
-        {ROWS.map((row, i) => (
-          <div class="term-row" key={i}>
-            {row.map((k) => (k === "ctrl" ? <Sticky key={k} name={k} mod={ctrl} /> : k === "alt" ? <Sticky key={k} name={k} mod={alt} /> : <Cap key={k.key} k={k} />))}
-          </div>
-        ))}
+    <>
+      <div class="term-extra tile">
+        <div class="term-rows">
+          {ROWS.map((row, i) => (
+            <div class="term-row" key={i}>
+              {row.map((k) => (k === "ctrl" ? <Sticky key={k} name={k} mod={ctrl} /> : k === "alt" ? <Sticky key={k} name={k} mod={alt} /> : <Cap key={k.key} k={k} />))}
+            </div>
+          ))}
+        </div>
       </div>
+      <ClipPicker />
+    </>
+  );
+}
+
+// --- paste: the clipboard's recent copies as cards, in place of the keyboard -----------------------------------------
+// (the board's paste UX: "tapping paste shows a CARD picker of clipboard history (recent copies as cards, in place of
+// the keyboard), tap a card to insert - not a blind single-item paste")
+
+/** The paste picker's cards while it shows: "loading" until the host answers; null: closed. */
+const clips = signal<Clip[] | "loading" | null>(null);
+/** The keyboard's height when last up (CSS px): the picker takes its place; [PICKER_PX] before it was ever up. */
+let keyboardSeen = 0;
+const PICKER_PX = 280;
+/** A card's preview: its first lines, as many characters as a card shows. */
+const PREVIEW_CHARS = 240;
+
+/** The paste key: the picker opens (the keyboard goes, the cards come in its place), or closes (the keyboard back). */
+function toggleClips() {
+  if (clips.peek()) closeClips();
+  else void openClips();
+}
+
+async function openClips() {
+  const s = focusedSession();
+  if (!s) return;
+  clips.value = "loading";
+  if (nativeTerms) void powos.term.focus!(s.id, false);
+  else {
+    s.term.blur();
+    powos.keyboard.hide();
+  }
+  requestAnimationFrame(lift);
+  // The phone keeps the history (ClipHistory.kt, the clipboard now first); elsewhere the clipboard now is the card.
+  const list: Clip[] =
+    (await powos.clipboard.history?.().catch(() => null)) ??
+    [await powos.clipboard.read().catch(() => null)].filter((t): t is string => !!t).map((text) => ({ text, at: Date.now() }));
+  if (clips.peek() === "loading") clips.value = list;
+  requestAnimationFrame(lift);
+}
+
+/** The picker closes; the focused terminal's keyboard comes back unless [keys] is false (it lets go). */
+function closeClips(keys = true) {
+  if (!clips.peek()) return;
+  clips.value = null;
+  const s = focusedSession();
+  if (keys && s) {
+    if (nativeTerms) void powos.term.focus!(s.id, true);
+    else {
+      s.term.focus();
+      powos.keyboard.show("terminal");
+    }
+  }
+  requestAnimationFrame(lift);
+}
+
+/** A card tapped: its text into the focused terminal (bracketed when the program asked), the keyboard back. */
+function pasteClip(text: string) {
+  const s = focusedSession();
+  if (!s) return;
+  tick();
+  closeClips();
+  if (nativeTerms) void powos.term.pasteText!(s.id, text);
+  else s.term.paste(text);
+}
+
+function ClipPicker() {
+  const c = clips.value;
+  if (!c) return null;
+  return (
+    <div class="term-clips tile" style={{ height: `${keyboardSeen || PICKER_PX}px` }}>
+      {c === "loading" ? (
+        <div class="term-clip surface pending" />
+      ) : c.length === 0 ? (
+        <div class="term-clips-empty muted">Nothing copied yet</div>
+      ) : (
+        c.map((clip) => (
+          <button class="term-clip surface" key={clip.at + clip.text.slice(0, 32)} onClick={() => pasteClip(clip.text)}>
+            <span class="term-clip-text">{clip.text.slice(0, PREVIEW_CHARS)}</span>
+            <span class="term-clip-at muted">{ago(clip.at / 1000)}</span>
+          </button>
+        ))
+      )}
     </div>
   );
 }
@@ -1087,7 +1174,8 @@ export function TerminalView({ id, owner = null, command = null, interactive = t
     onPointerUp: (e: PointerEvent) => {
       const d = dragEnd(e);
       // A tap with the keyboard down (Back put it away in a screen) brings it back, as Termux's view does.
-      if (d && Math.abs(e.clientY - d.y0) < SLOP && !extraKeysState.peek().keyboard) {
+      if (d && Math.abs(e.clientY - d.y0) < SLOP && clips.peek()) closeClips();
+      else if (d && Math.abs(e.clientY - d.y0) < SLOP && !extraKeysState.peek().keyboard) {
         session.term.focus();
         powos.keyboard.show("terminal");
       }

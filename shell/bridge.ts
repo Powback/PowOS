@@ -5,6 +5,7 @@
  * the phone, so the shell still runs.
  */
 import type {
+  Clip,
   BackgroundApp,
   HostWebWindow,
   BarInput,
@@ -85,7 +86,14 @@ function termViews(call: <T = unknown>(method: string, ...args: unknown[]) => Pr
     key: (id, name) => call("term.key", id, name),
     paste: (id) => call("term.paste", id),
     copy: (id) => call<string | null>("term.copy", id),
+    pasteText: (id, text) => call("term.pasteText", id, text),
   };
+}
+
+/** The phone's local clipboard history (ClipHistory.kt): the paste picker's cards; the desktop's powos-shell has none. */
+function clipHistory(call: <T = unknown>(method: string, ...args: unknown[]) => Promise<T>, host: string | undefined): Partial<Bridge["clipboard"]> {
+  if (host != null && host !== "android") return {};
+  return { history: () => call<Clip[]>("clipboard.history") };
 }
 
 function native(host: NonNullable<Window["PowosHost"]>): Bridge {
@@ -212,6 +220,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     clipboard: {
       read: () => call<string | null>("clipboard.read"),
       write: (text) => call("clipboard.write", text),
+      ...clipHistory(call, host.name),
     },
     remote: {
       state: () => call<RemoteState>("remote.state"),
