@@ -229,7 +229,7 @@ except Exception: print('')"; }
     [ "$(jf "$lj" content)" -ge 2 ] 2>/dev/null || lfail "linux: KWin window $(jf "$lj" kwin)'s consumer delivered $(jf "$lj" content) frames with content of $(jf "$lj" frames) (want >= 2; best $(jf "$lj" best))"
     log "linux: (b) consumer up in $(jf "$lj" upMs) ms, $(jf "$lj" content) of $(jf "$lj" frames) frames with content ($(jf "$lj" best))"
     st=$(jf "$lj" stopMs); { [ "$st" -ge 0 ] && [ "$st" -le 1000 ]; } 2>/dev/null || lfail "linux: the consumer's stop took ${st} ms (want <= 1000; -1 = still blocked after 3 s)"
-    log "linux: (c) stop returned in $st ms"
+    LSTOP=$st; log "linux: (c) stop returned in $st ms"
     for _ in $(seq 1 "${WR_CLOSE_WAIT_S:-12}"); do [ "$(jf "$lj" kwinClosed)" = True ] && break; sleep 1; lj=$(hb webwindows.selftestLinuxResult "[]"); done
     [ "$(jf "$lj" kwinClosed)" = True ] || lfail "linux: KWin window $(jf "$lj" kwin) wasn't closed after the quit"
     log "linux: (d) KWin closed window $(jf "$lj" kwin)"
@@ -337,7 +337,7 @@ EOF
   wl1=$(wlist); log "the user's page's windows after: ${wl1:-unreadable}"
   windows_same "$wl0" "$wl1"
   if [ "$HOLD" -gt 0 ]; then
-    log "window-render: PASS (hidden: task $task on display $D drew the app, the tap reached it; $(( $(date +%s) - t0 )) s; holding $HOLD s) - $OUT"
+    log "window-render: PASS (hidden: task $task on display $D drew the app, the tap reached it; linux stopMs=${LSTOP:--1}; $(( $(date +%s) - t0 )) s; holding $HOLD s) - $OUT"
     # Into logcat: the helper's geometry line for this display, then the content every ~5 s (no quotes in the text).
     lc() { "$A" shell "log -t PowosWrHidden '$(echo "$*" | tr -d "'\"\\\\")'" </dev/null >/dev/null 2>&1; }
     lc "hold display $D start: $(echo "$r" | grep -m1 "^log display $D " | cut -c5-) task $task, $HOLD s"
@@ -367,7 +367,7 @@ EOF
     exit 0
   fi
   hclean
-  log "window-render: PASS (hidden: task $task on display $D drew the app, the tap reached it; $(( $(date +%s) - t0 )) s) - $OUT"
+  log "window-render: PASS (hidden: task $task on display $D drew the app, the tap reached it; linux stopMs=${LSTOP:--1}; $(( $(date +%s) - t0 )) s) - $OUT"
   ls "$OUT"/*.png 2>/dev/null | sed 's/^/  /' | tee -a "$OUT/log.txt"
   exit 0
 }
