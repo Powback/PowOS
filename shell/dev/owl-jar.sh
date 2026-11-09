@@ -16,7 +16,7 @@
 #   4. --build only: gradle in the Android builder image with the shared gradle cache volume, then cached.
 # tools/agents/worktree.sh new runs this without --build, so a fresh worktree already has the jar.
 # Exit 0: a jar built from these sources is in place. 3: only a jar built from OTHER sources is there (--build
-# couldn't build - the gradle cache busy). 2: no jar. Copies, never hardlinks, into a checkout: gradle rewrites
+# couldn't build; Gradle's reason is on stderr). 2: no jar. Copies, never hardlinks, into a checkout: gradle rewrites
 # owl.jar in place, which would change a hardlinked cache blob under every other user. Never deletes cache entries.
 set -euo pipefail
 repo=$(cd "${1:?usage: owl-jar.sh <repo> [--build]}" && pwd)
@@ -61,11 +61,21 @@ if [ $build = 1 ]; then
   echo "     owl.jar: building (targets/android/app/owl)" >&2
   # f411: the gate's container flags (--init, labels a later gate reaps by) when preview.sh/gate.sh run this.
   [ -f "$repo/shell/dev/gate-containers.sh" ] && . "$repo/shell/dev/gate-containers.sh"
-  if docker run --rm ${gc_flags[@]+"${gc_flags[@]}"} -v "${PREVIEW_GRADLE_VOLUME:-powos-android-gradle}:/root/.gradle" -v "$repo:$repo" -w "$repo/targets/android/app" \
-    --entrypoint bash "${PREVIEW_JVM_IMAGE:-android-app-dev-android-builder:latest}" \
-    -c './gradlew -q --offline --configure-on-demand :owl:owlJar' >/dev/null 2>&1 && [ -f "$jar" ]; then
-    echo "$h" > "$jar.src"; cache_put "$jar"; echo "$jar"; exit 0
+  # The dependencies (AGP etc.) come read-only from the APK builders' seeded cache (android-gradle-cache, what
+  # powos-gradle-warm seeds from) through Gradle's GRADLE_RO_DEP_CACHE: the owl Gradle home (powos-android-gradle)
+  # only ever held the wrapper, so its --offline build could never resolve com.android.application and every
+  # build since the AGP bump failed - reported as "the Gradle cache busy?" (11-09 apps ships). A read-only cache
+  # takes no locks, so this never waits on or disturbs a running APK build.
+  log=$(mktemp "${TMPDIR:-/tmp}/owl-jar-build.XXXXXX")
+  if docker run --rm ${gc_flags[@]+"${gc_flags[@]}"} -v "${PREVIEW_GRADLE_VOLUME:-powos-android-gradle}:/root/.gradle" \
+    -v "${OWL_SEED_VOLUME:-android-gradle-cache}:/seed:ro" -e GRADLE_RO_DEP_CACHE=/seed/caches \
+    -v "$repo:$repo" -w "$repo/targets/android/app" --entrypoint bash "${PREVIEW_JVM_IMAGE:-android-app-dev-android-builder:latest}" \
+    -c './gradlew -q --offline --configure-on-demand :owl:owlJar' >"$log" 2>&1 && [ -f "$jar" ]; then
+    rm -f "$log"; echo "$h" > "$jar.src"; cache_put "$jar"; echo "$jar"; exit 0
   fi
+  # Why it didn't build, not a guess: Gradle's "What went wrong" block (or the log's tail).
+  { sed -n '/What went wrong/,/^\* Try/p' "$log" | grep -v '^\* Try' | grep . || tail -8 "$log"; } | head -12 | sed 's/^/     owl.jar build: /' >&2
+  rm -f "$log"
 fi
 [ -f "$jar" ] && { echo "$jar"; exit 3; }
 exit 2
