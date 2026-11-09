@@ -1,0 +1,26 @@
+{
+  "id": "mac-agents-boot-mac",
+  "name": "Load the PowOS launchd agents at boot (Mac LaunchDaemon)",
+  "kind": "service",
+  "owner": "system:powos-agents",
+  "host": "mac",
+  "purpose": "at boot and every 10 min (LaunchDaemon com.powos.mac-agents-boot, tools/agents/mac-agents-boot.sh, as root): `launchctl bootstrap user/<uid>` for each ~/Library/LaunchAgents/com.powos.*.plist that is installed but not loaded. The Mac is headless, so after a reboot launchd loads no LaunchAgents: the 11-02 and 11-07 reboots silently stopped board-sweep (worktree gc) and mac-disk-trim (Colima fstrim) and the disk ran to 0 GB. Never edits, unloads or restarts a loaded agent; a removed agent (plist deleted) stays removed",
+  "installedBy": "tools/agents/mac-agents-boot-deploy.sh install",
+  "files": [
+    "/Library/LaunchDaemons/com.powos.mac-agents-boot.plist",
+    "/usr/local/libexec/powos/mac-agents-boot.sh",
+    "~/Library/Logs/powos-mac-agents-boot.log"
+  ],
+  "processes": [
+    {
+      "match": "powos/mac-agents-boot\\.sh",
+      "tree": false
+    }
+  ],
+  "unbounded": "macOS has no cgroups; one short bash pass (a launchctl print per agent, a bootstrap only for a missing one) every 10 minutes",
+  "remove": {
+    "commands": [
+      "tools/agents/mac-agents-boot-deploy.sh remove"
+    ]
+  }
+}

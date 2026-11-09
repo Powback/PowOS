@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Loads the installed PowOS launchd agents (~/Library/LaunchAgents/com.powos.*.plist) at boot and every 10 min on
+  this headless Mac (tools/agents/mac-agents-boot.sh; unit units/mac/mac-agents-boot-mac.json). A LaunchDaemon (system
+  domain, root) because launchd loads LaunchAgents only for a GUI login. Installed into /Library/LaunchDaemons by
+  tools/agents/mac-agents-boot-deploy.sh, which fills in @BIN@ (a root-owned copy of the script) and @USER@.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.powos.mac-agents-boot</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@BIN@/mac-agents-boot.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>POWOS_AGENTS_USER</key>
+    <string>@USER@</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>600</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/dev/null</string>
+  <key>StandardErrorPath</key>
+  <string>/var/log/powos-mac-agents-boot.err</string>
+</dict>
+</plist>
