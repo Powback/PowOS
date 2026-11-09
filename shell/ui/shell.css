@@ -495,8 +495,9 @@
   --glass-dim: 42%;
   --text-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--glass-dim)), transparent);
 }
-/* Over a wallpaper of the other tone (theme.css data-wallpaper): the root's deeper tint, the drawer's too. */
-:root[data-light="false"][data-wallpaper="light"] .home .launcher-frame, :root[data-light="true"][data-wallpaper="dark"] .home .launcher-frame { --glass-dim: 68%; }
+/* Over a wallpaper of the other tone (theme.css data-wallpaper): a deeper tint for the drawer's labels, still glass -
+   68% with the 32% tint was 100%: an opaque slab, no blur through it (razr fold 11-09: the open drawer one flat grey). */
+:root[data-light="false"][data-wallpaper="light"] .home .launcher-frame, :root[data-light="true"][data-wallpaper="dark"] .home .launcher-frame { --glass-dim: 50%; }
 /* The widget and app picker (appwidget.tsx, edit mode's "+"): a page-sized sheet of small labels on cards - at the
    sheets' reference fill 11-13 of its texts were under 4.5:1, at the drawer's 42% still 10 (design audit, launcher gap
    7). The deeper tint, whatever the wallpaper: home is hidden under it anyway (DESIGN-LANGUAGE.md §2 sheets hide home).
@@ -3145,6 +3146,14 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
   --color-muted: color-mix(in srgb, var(--frost-ink) 80%, transparent);
   --accent-text: color-mix(in srgb, var(--color-accent) 45%, var(--frost-ink));
   color: var(--frost-ink);
+}
+/* The widget glass over the other tone: its frost resolved here, from the swapped --frost-base (inherited, it was the
+   root's dark one), and a sheen of its own - their background names --frost-sheen, which nothing set on them in this
+   tone, so the whole background was invalid and the faces had no tint over the live blur (razr fold, dark theme over a
+   light wallpaper, 11-09 "its got blur but its missing the tint"). */
+:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) :is(.page .home-tile > .tile, .lib-card.tile, .page .seam, .page .search-face .bar-pill) {
+  --frost-fill: color-mix(in srgb, var(--frost-base) calc(var(--glass-tint) + 20%), transparent);
+  --frost-sheen: transparent;
 }
 /*
  * PowOS AI's labels on the wallpaper (its title and state, "open", the headings, "clear all", the empty line): each a

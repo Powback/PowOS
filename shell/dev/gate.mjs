@@ -2857,6 +2857,43 @@ async function resumeThemeHealCheck() {
   return [...new Set(fails)].slice(0, 8);
 }
 
+/**
+ * The widget glass's theme tint in both wallpaper tones (razr fold 11-09, dark theme over a light wallpaper: "its got
+ * blur but its missing the tint"): every widget face's background valid (not "none": an unset --frost-sheen voided it)
+ * and the open drawer's fill still see-through (68% + the 32% tint was an opaque slab, no blur through it).
+ */
+async function glassTintToneCheck() {
+  const fails = [];
+  const root = document.documentElement;
+  root.classList.add("glass-native");
+  await window.__gw.settled(() => document.querySelector(".page .home-tile > .tile") && document.querySelector(".home .launcher-frame"));
+  for (const [fill, tone] of [["#f4f4f4", "light"], ["#101418", "dark"]]) fails.push(...(await glassTintIn(fill, tone)));
+  return [...new Set(fails)].slice(0, 8);
+}
+
+/** glassTintToneCheck in one wallpaper tone: a one-colour picture of [fill], settled to [tone]. */
+async function glassTintIn(fill, tone) {
+  const root = document.documentElement;
+  const c = document.createElement("canvas");
+  c.width = c.height = 32;
+  const x = c.getContext("2d");
+  x.fillStyle = fill;
+  x.fillRect(0, 0, 32, 32);
+  window.__mockEvents.emit("system.glass", { wallpaper: { url: c.toDataURL("image/png"), rev: `tint-${fill}`, source: "live" }, blurBehind: false });
+  await window.__gw.until(() => root.dataset.wallpaper === tone, 3000);
+  if (root.dataset.wallpaper !== tone) return [`no ${tone} tone`];
+  const where = `${root.dataset.light === "true" ? "light" : "dark"} theme, ${tone} wallpaper`;
+  const bare = [...document.querySelectorAll(".page .home-tile > .tile")].filter((t) => getComputedStyle(t).backgroundImage === "none");
+  const fails = bare.map(() => `${where}: a widget face has no tint`);
+  const probe = document.createElement("i");
+  probe.style.cssText = "position:absolute;width:1px;height:1px;background:var(--text-fill)";
+  document.querySelector(".home .launcher-frame").append(probe);
+  const a = /rgba?\(([^)]*)\)/.exec(getComputedStyle(probe).backgroundColor)?.[1].split(",").map(Number)[3] ?? 1;
+  probe.remove();
+  if (!(a < 0.95)) fails.push(`${where}: the drawer's fill is opaque (alpha ${a})`);
+  return fails;
+}
+
 /** A page swipe changes the page without a haptic tick (the user, 10-31: "Don't need haptics when changing page"). */
 async function pageSwipeNoHapticCheck() {
   const raf = () => new Promise((ok) => requestAnimationFrame(() => ok()));
@@ -13759,6 +13796,8 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeCheck))));
     runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme-heal", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeHealCheck))));
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "glass-tint-tone", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(glassTintToneCheck))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "page-swipe-no-haptic", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(pageSwipeNoHapticCheck))));
   if (process.env.SHELL_PAGES !== "0")
