@@ -6,7 +6,7 @@
  */
 import { age, hackLine, setFocus, useHacks } from "../lib/progress";
 import type { Props } from "../lib/app";
-import { Fit } from "../lib/fit";
+import { Fit, Tile } from "../lib/fit";
 
 const own = { onPointerDown: (e: Event) => e.stopPropagation() };
 
@@ -19,13 +19,14 @@ export default function Hacks({ host, app: id, cells }: Props) {
   };
   const live = status === "connected";
   return (
+    <Tile>
     <button type="button" style={S.box} onClick={open} {...own}>
       <div style={S.head}>
         <span style={S.label}>Hacks</span>
         <span style={S.count}>{live ? hacks.length : "–"}</span>
         <span style={S.label}>open</span>
       </div>
-      <Fit style={{ flex: "1 1 0" }}>
+      <Fit style={{ flex: "1 1 0", justifyContent: "space-between" }}>
         {hacks.length ? (
           hacks.slice(0, 12).map((h) => (
             <div key={h.key} style={S.row}>
@@ -38,19 +39,25 @@ export default function Hacks({ host, app: id, cells }: Props) {
         )}
       </Fit>
     </button>
+    </Tile>
   );
 }
 
 const S: Record<string, Record<string, string | number>> = {
   box: {
-    containerType: "size", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "0.35em", width: "100%", height: "100%", padding: "0.7em 0.9em",
+    containerType: "size", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "0.35em", width: "100%", height: "100%", padding: "0.7em 0.75em",
     boxSizing: "border-box", overflow: "hidden", lineHeight: 1.25,
     font: "inherit", fontSize: "clamp(9px, 6.4cqmin, 22px)", background: "none", border: 0, color: "inherit", textAlign: "left",
   },
   head: { display: "flex", alignItems: "baseline", gap: "0.35em", flex: "none", fontSize: "min(1em, 9cqw)" },
   label: { fontWeight: 600, opacity: 0.8 },
   count: { fontSize: "min(2.4em, 34cqh)", fontWeight: 700, lineHeight: 1, fontVariantNumeric: "tabular-nums" },
-  row: { display: "flex", alignItems: "baseline", gap: "0.6em", fontSize: "0.85em", width: "100%", flex: "none" },
+  // Each hack a soft card across the tile (the design's fill, no lines): a narrow tile's wrapped lines end ragged, the
+  // card keeps the column full width.
+  row: {
+    display: "flex", alignItems: "baseline", gap: "0.6em", fontSize: "0.85em", width: "100%", flex: "none", boxSizing: "border-box",
+    padding: "0.25em 0.5em", borderRadius: "0.6em", background: "color-mix(in srgb, currentColor 8%, transparent)",
+  },
   line: { flex: "1 1 0", minWidth: 0, overflowWrap: "anywhere" },
   age: { flex: "none", marginLeft: "auto", opacity: 0.55, fontSize: "0.9em", fontVariantNumeric: "tabular-nums" },
 };

@@ -9,7 +9,7 @@
  */
 import { setFocus, STATE_COLOR, STATE_ORDER, useProgress, type AreaBar, type Blocker, type ItemState } from "../lib/progress";
 import type { Props } from "../lib/app";
-import { Fit } from "../lib/fit";
+import { Fit, Tile } from "../lib/fit";
 
 /** A control's touches are its own: home's long press / drag of the tile doesn't start on it. */
 const own = { onPointerDown: (e: Event) => e.stopPropagation() };
@@ -110,6 +110,7 @@ export default function Widget({ host, app: id, cells }: Props) {
   const pct = p.status === "connected" ? p.pct : null;
   // What's left over when the tile can't hold it all goes, whole: a Fit wraps it out of sight (never a cut line).
   return (
+    <Tile>
     <div style={{ ...S.box, gap: big ? "0.45em" : "0.3em" }}>
       <button type="button" style={S.head} onClick={openPage} {...own}>
         Daily driver
@@ -126,6 +127,7 @@ export default function Widget({ host, app: id, cells }: Props) {
       <Blockers blockers={p.blockers} open={openBlocker} />
       <Foot counts={countLines(p, cols >= 3)} />
     </div>
+    </Tile>
   );
 }
 
@@ -147,6 +149,8 @@ const S: Record<string, Record<string, string | number>> = {
   blocker: { display: "flex", alignItems: "baseline", gap: "0.45em", font: "inherit", fontSize: "0.9em", background: "none", border: 0, color: "inherit", padding: 0, textAlign: "left", width: "100%", flex: "none" },
   mark: { width: "0.5em", height: "0.5em", borderRadius: "50%", flex: "none", alignSelf: "center" },
   line: { flex: 1, minWidth: 0, overflowWrap: "anywhere" },
-  foot: { display: "flex", flexWrap: "wrap", columnGap: "0.3em", fontSize: "0.8em", opacity: 0.65, flex: "none", height: "1.2em", overflow: "hidden" },
+  // One line: a count that doesn't fit beside the others wraps to a second line, out of sight whole. The line's box is
+  // the font's glyph box (1.4em, not the 1.2 line height) so the line itself is never cut at its edge.
+  foot: { display: "flex", flexWrap: "wrap", columnGap: "0.3em", fontSize: "0.8em", lineHeight: 1.4, opacity: 0.65, flex: "none", height: "1.4em", overflow: "hidden" },
   count: { whiteSpace: "nowrap" },
 };

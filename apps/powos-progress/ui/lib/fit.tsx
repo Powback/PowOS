@@ -27,3 +27,13 @@ export function Fit({ style, children }: { style?: Record<string, string | numbe
     </div>
   );
 }
+
+/**
+ * The tile as a size container, for the widget's type to follow: cq units in an element's own styles resolve against
+ * an ANCESTOR container, so a box that is its own container and sets fontSize in cqmin measured the page (the
+ * viewport - the font pinned at its 22 px cap on every tile, the cover screen's small ones cut). The widget's box goes
+ * inside this one.
+ */
+export function Tile({ children }: { children: ComponentChildren }) {
+  return <div style={{ containerType: "size", width: "100%", height: "100%" }}>{children}</div>;
+}
