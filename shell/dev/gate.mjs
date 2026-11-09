@@ -6616,6 +6616,13 @@ async function libraryAllAppsCheck() {
       if (card) fails.push(...cardFails(f, card));
     }
     const sc = lib.querySelector(".library-scroll");
+    // The scroll runs to the stage's foot (the dock's / pill's top), not cut at the grid pages' foot gap (the user,
+    // 11-07: "the page is ending early, like there's no reason to cut off here"), and is drawn and hit there.
+    const foot = document.querySelector(".stage").getBoundingClientRect().bottom;
+    const sb = sc.getBoundingClientRect();
+    if (Math.abs(sb.bottom - foot) > 1) fails.push(`the library's scroll ends at ${Math.round(sb.bottom)}, not at the stage's foot (${Math.round(foot)})`);
+    const hit = document.elementFromPoint(sb.left + sb.width / 2, foot - 3);
+    if (!lib.contains(hit)) fails.push(`just above the stage's foot the library is cut off: ${hit?.className || hit?.tagName} is hit there`);
     sc.scrollTop = sc.scrollHeight;
     await new Promise((ok) => requestAnimationFrame(ok));
     const after = [...lib.querySelectorAll(".lib-card")].pop().getBoundingClientRect();
