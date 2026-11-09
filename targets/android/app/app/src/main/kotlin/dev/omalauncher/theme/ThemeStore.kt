@@ -515,7 +515,14 @@ class ThemeStore(
         const val OMARCHY_REF = "8b4eae66da2938ba9559f103b18dbf85cdf28a70"
 
         private const val RENDERED_BY = "rendered_by"
-        private const val DEFAULT_THEME = "tokyo-night"
+        /**
+         * A fresh install's theme: the one the user runs on their main phone (2026-11-09, read off the OnePlus's
+         * style.toml: matte-black) - "the theme that we have now is pretty good ... make it into a PowOS default theme".
+         * HACK: Omarchy's matte-black under its own name, not a theme called "PowOS": a theme is a directory of the
+         * pinned Omarchy release (scan), and a renamed copy has none. Real fix: a bundled "powos" theme directory
+         * (colors + backgrounds) seeded as the app's own theme, then this names it (docs/REMOTE-POWOS.md section 4).
+         */
+        private const val DEFAULT_THEME = "matte-black"
 
         /** Called on the main thread after the theme or background changes (the live wallpaper listens). */
         val changeListeners = CopyOnWriteArraySet<() -> Unit>()
