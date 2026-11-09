@@ -3,10 +3,13 @@ package dev.omalauncher.shell
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.graphics.Typeface
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.ViewGroup
@@ -195,7 +198,7 @@ class ShellTermViews(
                 RemoteSessionBridge.install(it, COLS, ROWS, TRANSCRIPT_ROWS)
             }
         val term = TerminalView(context, null)
-        private val frame = Frame(context)
+        private val frame = Frame(context, this)
         private var mode = -1
         private var textPx = 0
         private var bg: Int? = null
@@ -335,6 +338,52 @@ class ShellTermViews(
             return session.emulator?.getSelectedText(sel[2], sel[0], sel[3], sel[1])?.takeIf { it.isNotEmpty() }
         }
 
+        /** The link under [e] (a terminal touch), opened in the phone's browser; whether there was one. */
+        fun openLinkAt(e: MotionEvent): Boolean {
+            val url = linkAt(e) ?: return false
+            runCatching {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.onFailure { Log.w(TAG, "$id: no app opens $url", it) }
+            return true
+        }
+
+        /** The link under [e]: its rows (and the ones it wraps onto) read from the emulator, see [linkAt]. */
+        private fun linkAt(e: MotionEvent): String? {
+            val emu = session.emulator ?: return null
+            val screen = emu.screen
+            val (col, row) = term.getColumnAndRow(e, true).let { it[0] to it[1] }
+            val from = (row - LINK_ROWS).coerceAtLeast(-screen.activeTranscriptRows)
+            val to = (row + LINK_ROWS).coerceAtMost(emu.mRows - 1)
+            if (row !in from..to) return null
+            val rows = (from..to).map { screen.getSelectedText(0, it, emu.mColumns - 1, it) ?: "" }
+            val wraps = (from..to).map { screen.getLineWrap(it) }
+            return linkAt(Rows(rows, wraps, emu.mColumns), row - from, col)
+        }
+
+        /**
+         * Termux's long-press selection (its handles and floating Copy) from [e], in either mode: the view takes focus
+         * for it (TerminalView.startTextSelectionMode does nothing without), which an unfocused terminal's view didn't
+         * have - so a long press selected nothing and the user couldn't copy the sign-in link (11-09). The focus goes
+         * back when the selection ends ([selectionEnded]).
+         */
+        fun startSelection(e: MotionEvent): Boolean {
+            if (term.isSelectingText || session.emulator == null) return term.isSelectingText
+            term.isFocusable = true
+            term.isFocusableInTouchMode = true
+            term.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            term.startTextSelectionMode(e)
+            if (!term.isSelectingText) selectionEnded()
+            return term.isSelectingText
+        }
+
+        /** The selection's done: the keys stay where they were (the page's, unless this terminal has them). */
+        fun selectionEnded() {
+            if (focused == id) return
+            term.isFocusable = false
+            term.isFocusableInTouchMode = false
+            web.requestFocus()
+        }
+
         fun remove() {
             removed = true
             main.removeCallbacks(resize)
@@ -343,19 +392,66 @@ class ShellTermViews(
         }
     }
 
-    /** The slot's box: in "page" mode its touches are the page's, at the same place on the page. */
+    /**
+     * The slot's box: in "page" mode its touches are the page's, at the same place on the page - except a long press,
+     * which selects in the terminal (the page gets a cancel; the terminal has the touches while its selection shows),
+     * and a tap on a link, which opens it (the page still gets the tap: it focuses the terminal as before).
+     */
     private inner class Frame(
         context: Context,
+        private val slot: Slot,
     ) : FrameLayout(context) {
         var toPage = true
 
+        /** This gesture is the terminal's: a long press took it, or it began on a showing selection. */
+        private var terminalHas = false
+
+        /** A long press took the gesture mid-way: the rest of it (to the finger's lift) goes nowhere. */
+        private var swallow = false
+
+        private val gestures =
+            GestureDetector(
+                context,
+                object : GestureDetector.SimpleOnGestureListener() {
+                    override fun onLongPress(e: MotionEvent) {
+                        if (!toPage || !slot.startSelection(e)) return
+                        swallow = true
+                        toWeb(MotionEvent.obtain(e).apply { action = MotionEvent.ACTION_CANCEL })
+                    }
+
+                    override fun onSingleTapUp(e: MotionEvent): Boolean {
+                        if (toPage) slot.openLinkAt(e)
+                        return false
+                    }
+                },
+            )
+
         override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
             if (!toPage) return super.dispatchTouchEvent(ev)
-            val e = MotionEvent.obtain(ev)
+            val end = ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+                swallow = false
+                terminalHas = slot.term.isSelectingText
+            }
+            if (terminalHas) {
+                super.dispatchTouchEvent(ev)
+                if (end) terminalHas = false
+                return true
+            }
+            gestures.onTouchEvent(ev)
+            if (swallow) {
+                if (end) swallow = false
+                return true
+            }
+            toWeb(MotionEvent.obtain(ev))
+            return true
+        }
+
+        /** [e] (a copy, recycled here) to the page, at the same place on it. */
+        private fun toWeb(e: MotionEvent) {
             e.offsetLocation(x - web.x, y - web.y)
             web.dispatchTouchEvent(e)
             e.recycle()
-            return true
         }
     }
 
@@ -369,7 +465,10 @@ class ShellTermViews(
             return 1f
         }
 
-        override fun onSingleTapUp(e: MotionEvent) = emit("term.tap", JSONObject().put("id", slot.id))
+        /** A tap on a link opens it; anywhere else it's the page's (focus). */
+        override fun onSingleTapUp(e: MotionEvent) {
+            if (!slot.openLinkAt(e)) emit("term.tap", JSONObject().put("id", slot.id))
+        }
 
         override fun shouldBackButtonBeMappedToEscape() = false
 
@@ -379,7 +478,9 @@ class ShellTermViews(
 
         override fun isTerminalViewSelected() = true
 
-        override fun copyModeChanged(copyMode: Boolean) = Unit
+        override fun copyModeChanged(copyMode: Boolean) {
+            if (!copyMode) slot.selectionEnded()
+        }
 
         override fun onKeyDown(
             keyCode: Int,
@@ -392,7 +493,11 @@ class ShellTermViews(
             e: KeyEvent,
         ) = false
 
-        override fun onLongPress(event: MotionEvent) = false
+        /** Termux's selection, focus or not ([Slot.startSelection]); true: handled here. */
+        override fun onLongPress(event: MotionEvent): Boolean {
+            slot.startSelection(event)
+            return true
+        }
 
         override fun readControlKey() = ctrl != 0
 
@@ -561,6 +666,69 @@ class ShellTermViews(
 
         /** PowTerm's: the pty follows the view once its size has held this long (each resize is a tmux redraw). */
         private const val RESIZE_SETTLE_MS = 120L
+
+        /** How far up and down from a tapped row a link may run (wrapped over rows). */
+        private const val LINK_ROWS = 12
+
+        /** A link: everything up to a space or a quote, its query string and fragment included. */
+        private val LINK = Regex("""(?:https?|file)://[^\s<>"'`]+""")
+
+        /**
+         * A terminal's rows around a touch: each row's text (trailing blanks dropped), whether it wrapped onto the next
+         * ([wraps]), the width in columns.
+         */
+        data class Rows(
+            val text: List<String>,
+            val wraps: List<Boolean>,
+            val cols: Int,
+        ) {
+            /**
+             * Row [i] goes on in the next: it wrapped, or it's full to the last column - tmux and Claude Code's own
+             * layout break a long line with cursor moves, not a wrap, so the sign-in link (~400 characters) spans
+             * several rows that only fill the width.
+             */
+            fun continues(i: Int) = i < text.size - 1 && (wraps.getOrElse(i) { false } || text[i].length >= cols)
+
+            /** The rows row [at] is part of, joined, and where its column [col] falls in them. */
+            fun line(
+                at: Int,
+                col: Int,
+            ): Pair<String, Int> {
+                var a = at
+                while (a > 0 && continues(a - 1)) a--
+                var b = at
+                while (continues(b)) b++
+                return (a..b).joinToString("") { if (it < b) text[it].padEnd(cols) else text[it] } to (at - a) * cols + col
+            }
+        }
+
+        /**
+         * The link at column [col] of row [at] of [rows], or null - its query string and fragment included: the old
+         * link match ended at the '?' (the user, 11-09: "it doesn't catch the whole link ... it ends after the question
+         * mark").
+         */
+        fun linkAt(
+            rows: Rows,
+            at: Int,
+            col: Int,
+        ): String? {
+            if (at !in rows.text.indices || rows.cols <= 0) return null
+            val (line, pos) = rows.line(at, col)
+            return LINK.findAll(line)
+                .map { it.range.first to trimLink(it.value) }
+                .firstOrNull { (from, url) -> pos >= from && pos < from + url.length }
+                ?.second
+        }
+
+        /** A link without the sentence's punctuation after it (a ')' it opened stays). */
+        fun trimLink(s: String): String {
+            var u = s
+            while (u.isNotEmpty() && u.last() in ".,;:!?'\")]}>") {
+                if (u.last() == ')' && u.count { it == '(' } >= u.count { it == ')' }) break
+                u = u.dropLast(1)
+            }
+            return u
+        }
 
         /** "#rrggbbaa" (the page's) to ARGB; null for anything else. */
         fun parseColor(s: String?): Int? {
