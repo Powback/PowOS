@@ -1,0 +1,180 @@
+From da189132efbea919b8d000481cc2ac624e80a96c Mon Sep 17 00:00:00 2001
+From: PowOS <powos@localhost>
+Date: Mon, 9 Nov 2026 03:45:48 +0100
+Subject: [PATCH] backends/anland: the sound goes out on a live window task's
+ socket when there is no desktop consumer
+
+---
+ src/backends/anland/anland_audio.c         | 10 ++++++++
+ src/backends/anland/anland_backend.cpp     | 16 +++++++++---
+ src/backends/anland/anland_backend.h       |  8 ++++++
+ src/backends/anland/anland_window_task.cpp | 30 ++++++++++++++++++++++
+ src/backends/anland/anland_window_task.h   |  4 +++
+ 5 files changed, 65 insertions(+), 3 deletions(-)
+
+diff --git a/src/backends/anland/anland_audio.c b/src/backends/anland/anland_audio.c
+index 6e55e85..56010b5 100644
+--- a/src/backends/anland/anland_audio.c
++++ b/src/backends/anland/anland_audio.c
+@@ -470,6 +470,16 @@ void anland_audio_set_fd(int audio_fd)
+ 
+     pw_thread_loop_lock(a->loop);
+ 
++    /* PowOS (0067): the backend re-picks the socket on every connection change (the desktop's, else a live window
++     * task's); the one already attached again is a no-op - its io, ring and mic state stay. Every borrowed fd is
++     * switched away from before it closes, so the same number is the same socket. */
++    if (audio_fd >= 0 && audio_fd == a->audio_fd && a->io) {
++        pw_thread_loop_unlock(a->loop);
++        return;
++    }
++    if (audio_fd != a->audio_fd)
++        fprintf(stderr, "kwin_backend_anland: audio socket %d -> %d\n", a->audio_fd, audio_fd);
++
+     struct pw_loop *loop = pw_thread_loop_get_loop(a->loop);
+     if (a->io) {
+         pw_loop_destroy_source(loop, a->io);
+diff --git a/src/backends/anland/anland_backend.cpp b/src/backends/anland/anland_backend.cpp
+index 04c8f9e..4892e20 100644
+--- a/src/backends/anland/anland_backend.cpp
++++ b/src/backends/anland/anland_backend.cpp
+@@ -590,8 +590,9 @@ void AnlandBackend::enterFallback()
+ 
+     // Detach the audio socket before the transport closes the borrowed fd. The streams
+     // keep running (capture drops its PCM, the mic Source feeds silence), so PipeWire
+-    // never perceives the disconnect.
+-    anland_audio_set_fd(-1);
++    // never perceives the disconnect. PowOS (0067): onto a live window task's socket if there is one (a full-screen
++    // game's task with no desktop consumer), else none.
++    updateAudio();
+ 
+     // The consumer's camera fds are now dead: stop recording, destroy the virtual
+     // camera nodes and close the fds. New ones arrive on the next reconnect.
+@@ -671,7 +672,7 @@ void AnlandBackend::onReconnectTimer()
+     qCDebug(KWIN_ANLAND) << "reconnect: notifiers installed";
+     // Attach the fresh audio socket (a new socketpair was installed by pickup_fds).
+     qCDebug(KWIN_ANLAND) << "reconnect: attaching audio fd" << get_audio_fd(m_display);
+-    anland_audio_set_fd(get_audio_fd(m_display));
++    updateAudio(); // PowOS (0067): the desktop's socket takes the sound back
+     qCDebug(KWIN_ANLAND) << "reconnect: audio fd attached";
+     // Render loop is resuming and the data channel is live: immediately request the
+     // camera service. The consumer replies asynchronously with an INPUT_TYPE_RESOURCE
+@@ -1005,4 +1006,13 @@ void AnlandBackend::sendTextInputToKWin(const QByteArray &text)
+     }
+ }
+ 
++void AnlandBackend::updateAudio(const AnlandWindowTask *leaving)
++{
++    int fd = (!m_inFallback && m_display) ? get_audio_fd(m_display) : -1;
++    if (fd < 0 && m_windowTasks) {
++        fd = m_windowTasks->liveAudioFd(leaving);
++    }
++    anland_audio_set_fd(fd); // the same fd again: a no-op (0067)
++}
++
+ } // namespace KWin
+diff --git a/src/backends/anland/anland_backend.h b/src/backends/anland/anland_backend.h
+index 25cfa1a..304bdbe 100644
+--- a/src/backends/anland/anland_backend.h
++++ b/src/backends/anland/anland_backend.h
+@@ -127,6 +127,14 @@ public:
+      * as large as any orientation needs, and never change - the root stayed 2268x2440 through every rotation and fold.
+      */
+     void setAndroidScreen(const QSize &screen);
++    /**
++     * PowOS (0067): the one audio socket the desktop's sound goes out on: the desktop consumer's while it is live,
++     * else a live window task's (other than [leaving], whose connection is about to close). Every consumer
++     * connection has its own audio socketpair; a full-screen game runs in its own task with no desktop consumer, and
++     * the sound only ever went to the desktop's, so the game was silent (11-08 game-audio-flow stage D). Call before
++     * any audio fd closes (the borrowed fd must never be read after its close) and after a connection goes live.
++     */
++    void updateAudio(const AnlandWindowTask *leaving = nullptr);
+     /** The size [setAndroidScreen] said; invalid from an app that never says it (the buffers' size then decides). */
+     QSize androidScreen() const
+     {
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 9d0262b..b9271ba 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -516,6 +516,7 @@ AnlandWindowTask::~AnlandWindowTask()
+     resetDirect(); // PowOS (0058): the client's buffers back to it
+     releaseBuffers();
+     if (m_display) {
++        m_tasks->backend()->updateAudio(this); // PowOS (0067): off its audio socket before it closes
+         ::disconnect(m_display); // C producer API, not QObject::disconnect
+         m_display = nullptr;
+     }
+@@ -696,6 +697,7 @@ void AnlandWindowTask::goLive()
+         return;
+     }
+     m_state = State::Live;
++    m_tasks->backend()->updateAudio(); // PowOS (0067): with no desktop consumer, the sound goes out on this task's
+     qCInfo(KWIN_ANLAND) << "window task" << m_id << "live," << m_bufferSize << "pre-rotated" << get_buffer_transform(m_display)
+                         << "for" << (m_window ? m_window->caption() : QString());
+ 
+@@ -858,6 +860,33 @@ void AnlandWindowTask::unwatchAll()
+     m_watched.clear();
+ }
+ 
++int AnlandWindowTask::audioFd() const
++{
++    return (m_state == State::Live && !m_isPopup && m_display) ? get_audio_fd(m_display) : -1;
++}
++
++int AnlandWindowTasks::liveAudioFd(const AnlandWindowTask *except) const
++{
++    // The full-screen one first (a game: the likeliest to stay), then any live task.
++    int any = -1;
++    for (const AnlandWindowTask *task : m_tasks) {
++        if (task == except) {
++            continue;
++        }
++        const int fd = task->audioFd();
++        if (fd < 0) {
++            continue;
++        }
++        if (task->fullScreen()) {
++            return fd;
++        }
++        if (any < 0) {
++            any = fd;
++        }
++    }
++    return any;
++}
++
+ void AnlandWindowTask::enterFallback()
+ {
+     if (m_state == State::Fallback) {
+@@ -867,6 +896,7 @@ void AnlandWindowTask::enterFallback()
+     // where it is (on the tasks desktop) until the task comes back or is closed.
+     qCInfo(KWIN_ANLAND) << "window task" << m_id << "in the background";
+     m_state = State::Fallback;
++    m_tasks->backend()->updateAudio(this); // PowOS (0067): the library closes its audio socket right after this
+     cancelTouches();
+     if (m_inputNotifier) {
+         m_inputNotifier->setEnabled(false);
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 518513a..1f4da28 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -97,6 +97,8 @@ public:
+     {
+         return m_state == State::Live;
+     }
++    /** PowOS (0067): its connection's audio socket while live (not a popup's surface: those carry no sound); -1. */
++    int audioFd() const;
+     /**
+      * The task's size in its pixels ("size" from the app: a floating window being resized). Its buffers stay at the
+      * screen's size, so the window takes the new size at once - a configure, drawn at its real size top-left when it
+@@ -389,6 +391,8 @@ public:
+     {
+         return m_nextId++;
+     }
++    /** PowOS (0067): a live (non-popup) task's audio socket, other than [except]'s; -1: none. */
++    int liveAudioFd(const AnlandWindowTask *except) const;
+     /** Every task, now (the compositor is going): windows back on the desktop, buffers released. */
+     void closeAll();
+ 
+-- 
+2.50.1 (Apple Git-155)
+
