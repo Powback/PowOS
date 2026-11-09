@@ -1005,7 +1005,7 @@ export async function homeIconsClearBar(label) {
     S.editing.value = st.editing;
     S.drawer.value = st.keyboard ? 1 : 0;
     await sleep(900);
-    const at = `${label} (${mode}), pill ${st.below ? "under" : "over"} the dock, nav ${st.nav} px${st.editing ? ", editing" : ""}${st.keyboard ? ", keyboard up" : ""}`;
+    const at = `${label} (${mode}), pill ${st.below === "1" ? "under" : "over"} the dock, nav ${st.nav} px${st.editing ? ", editing" : ""}${st.keyboard ? ", keyboard up" : ""}`;
     fails.push(...ibClear(at, geometry.peek(), S.home.value.columns));
   }
   S.editing.value = false;
@@ -1018,9 +1018,9 @@ export async function homeIconsClearBar(label) {
 
 function ibStates() {
   const out = [];
-  for (const below of ["1", ""]) for (const nav of [16, 48]) for (const editing of [false, true]) out.push({ below, nav, editing, keyboard: 0 });
+  for (const below of ["1", "0"]) for (const nav of [16, 48]) for (const editing of [false, true]) out.push({ below, nav, editing, keyboard: 0 });
   // A phone keyboard's share of the screen: ~a third portrait, more in landscape.
-  for (const below of ["1", ""]) out.push({ below, nav: 16, editing: false, keyboard: Math.round(innerHeight * (innerWidth > innerHeight ? 0.45 : 0.35)) });
+  for (const below of ["1", "0"]) out.push({ below, nav: 16, editing: false, keyboard: Math.round(innerHeight * (innerWidth > innerHeight ? 0.45 : 0.35)) });
   return out;
 }
 
