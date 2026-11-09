@@ -167,19 +167,43 @@ object TaskSurfaces {
         }.onFailure { Log.w(TAG, "can't release the leashes", it) }
     }
 
-    /** Leash [leash] of task [id] back to WM's own state in [t]: shown, no crop, no corners or shadow. */
+    /**
+     * Leash [leash] of task [id] back to WM's own state in [t]: no crop, no corners or shadow, and shown again only if
+     * PowOS hid it and WM still has the task visible. Never force-shown otherwise: WM hides a stopped task's leash once
+     * and caches that, so a show here sticks - and an uncropped window-task leash is WM Shell's solid task colour
+     * (taskDescription backgroundColor, black) over the whole display. 11-09: a stopped Linux window task (3191) shown
+     * by the fold's [releaseAll] covered home on the cover screen; every capture was black but the status bar.
+     */
     private fun plain(
         t: SurfaceControl.Transaction,
         id: Int,
         leash: SurfaceControl,
     ) {
-        if (hiddenLeashes.remove(id)) Log.i(TAG, "task $id: hidden leash shown again")
-        hide(t, leash, false)
+        val wasHidden = hiddenLeashes.remove(id)
+        if (wasHidden && wmVisible(id)) {
+            Log.i(TAG, "task $id: hidden leash shown again")
+            hide(t, leash, false)
+        } else {
+            if (wasHidden) Log.i(TAG, "task $id: hidden leash left hidden (not visible in WM)")
+            if (android.os.Build.VERSION.SDK_INT >= 33) t.setScale(leash, 1f, 1f)
+            t.setAlpha(leash, 1f)
+        }
         t.setCrop(leash, null)
         runCatching {
             cornerRadius?.invoke(t, leash, 0f)
             shadowRadius?.invoke(t, leash, 0f)
         }
+    }
+
+    /** Whether WM has task [id] visible (TaskInfo.isVisible, hidden field); true when it can't tell. */
+    private fun wmVisible(id: Int): Boolean {
+        val c = app ?: return true
+        return runCatching {
+            @Suppress("DEPRECATION")
+            val t = c.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS).firstOrNull { it.taskId == id }
+                ?: return false
+            android.app.TaskInfo::class.java.getField("isVisible").getBoolean(t)
+        }.getOrDefault(true)
     }
 
     private fun dropAll(why: String) {
