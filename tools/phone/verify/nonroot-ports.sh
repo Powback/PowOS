@@ -5,9 +5,12 @@
 # the mdns name adb-ZY22MQL54Q), read only, from adb's shell uid = "any other app":
 #   1. nothing listens on TCP 3410/3411 (SpacetimeDB, App API) or 5037 (the image's adb server: any app reaching it
 #      gets a shell with PowOS's access - 11-09, board-close-waiting) - connects are refused, adb's host:version unanswered
-#   2. EVERY other TCP listener of PowOS's uid (LoopbackGate, anything the image's programs open) answers no request
-#      without a token: no 2xx to a token-less GET, and no adb protocol (OKAY) on any port. 3416 is the device agent
-#      (docs/DEVICES.md: HTTPS, paired token only - listed, not probed).
+#   2. EVERY other TCP listener of PowOS's uid (LoopbackGate, anything the image's programs open) proves it needs a
+#      token: a token-less GET must get an HTTP 4xx (the gate's 403, a 401/404); a 2xx/3xx/5xx, a non-HTTP answer
+#      (a raw protocol speaks to anyone) or silence is a FAIL - and no adb protocol (OKAY) on any port. 3416 is the
+#      device agent (docs/DEVICES.md: TLS, a per-device token from pairing, whose code is shown on the phone): it must
+#      not answer plain HTTP. The image's fixed loopback ports are private sockets since SessionService.LOOPBACK_PORTS
+#      has "loopback", so a listener here is the gate, the device agent, a port-0 or LAN bind - each with its own auth.
 #   3. the services are up behind private sockets: files/run/loopback holds 0600 sockets owned by the app (islands can
 #      connect) - empty = SpacetimeDB/App API aren't running, which this check can't call a pass.
 # Not for the verify queue (that is the rooted OnePlus); run it from the Mac. FAIL on 1/2, FAIL on 3 unless SKIP_UP=1.
@@ -33,9 +36,13 @@ for p in $(printf '5037\n%s\n' "$lis" | sort -un); do
   r=$(sh_ "printf '000chost:version' | toybox nc -w 2 127.0.0.1 $p 2>&1 | head -c 4")
   [ "$r" = OKAY ] && f="$f :$p is an adb server another uid can drive;"
 done
-for p in $lis; do case $p in 3410|3411|3416|5037) continue;; esac
-  r=$(sh_ "printf 'GET / HTTP/1.0\r\n\r\n' | toybox nc -w 2 127.0.0.1 $p 2>&1 | head -1")
-  echo "  127.0.0.1:$p without a token: ${r:-no answer}"; grep -qE '^HTTP/1\.[01] 2' <<<"$r" && f="$f :$p served another uid without a token;"
+for p in $lis; do case $p in 3410|3411|5037) continue;; esac
+  r=$(sh_ "printf 'GET / HTTP/1.0\r\n\r\n' | toybox nc -w 2 127.0.0.1 $p 2>/dev/null | head -1 | tr -c '[:print:]' '?' | head -c 60")
+  echo "  127.0.0.1:$p without a token: ${r:-no answer}"
+  if [ "$p" = 3416 ]; then grep -q '^HTTP' <<<"$r" && f="$f :3416 (device agent) answers plain HTTP, not TLS;"
+  elif grep -qE '^HTTP/1\.[01] 2' <<<"$r"; then f="$f :$p served another uid without a token;"
+  elif ! grep -qE '^HTTP/1\.[01] 4[0-9][0-9]' <<<"$r"; then f="$f :$p is a token-less listener (no 4xx without a token: ${r:-silent});"
+  fi
 done
 socks=$(sh_ 'run-as com.powos.app ls -ln files/run/loopback 2>&1' | grep '^s')
 echo "  files/run/loopback: $(grep -c . <<<"$socks") sockets $(awk '{print $1,$NF}' <<<"$socks" | tr '\n' ' ')"
@@ -43,4 +50,4 @@ grep -vq '^srw-------' <<<"$socks" && [ -n "$socks" ] && f="$f a loopback socket
 [ -n "$f" ] && { echo "FAIL:$f"; exit 1; }
 [ -n "$socks" ] || { [ "${SKIP_UP:-0}" = 1 ] && { echo "SKIP: ports closed, but SpacetimeDB/App API aren't up (no loopback sockets)"; exit 5; }
   echo "FAIL: ports 3410/3411 closed to other apps, but SpacetimeDB/App API aren't running (files/run/loopback empty) - islands can't connect"; exit 1; }
-echo "PASS: unrooted - 3410/3411/5037 refused to other uids, no adb server reachable, every other listener needs a token, the services on $(grep -c . <<<"$socks") private 0600 sockets"
+echo "PASS: unrooted - 3410/3411/5037 refused to other uids, no adb server reachable, every other listener answers 4xx without a token, the services on $(grep -c . <<<"$socks") private 0600 sockets"

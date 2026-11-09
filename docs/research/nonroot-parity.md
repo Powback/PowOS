@@ -318,6 +318,18 @@ Changes:
   FAILs on any TCP 3410/3411/5037 listener, on an adb server (`host:version` -> OKAY) on ANY port of PowOS's uid, and
   on a token-less 2xx from any other listener. 11-09 02:55 before the fix: FAIL (5037 listens, answers OKAY); also
   listening: 3416 (device agent, paired token), 40777 (Claude Code's local server, 404 without its state).
+- **Every fixed loopback port private (11-09, nonroot-ports)**: instead of growing the list one hole at a time,
+  `LOOPBACK_PORTS` is `3410,3411,5037,loopback`: with `loopback`, libpowosloopback turns ANY bind of a fixed port on
+  127/8 or ::1 in the image into `files/run/loopback/<port>.sock` (0600; a live socket isn't taken over - EADDRINUSE;
+  dual-stack 127.0.0.1+::1 on one port is a HACK left at that), and a loopback connect uses the socket when one
+  exists, else plain TCP (Android's own ports, programs without the preload, a stale file). Left on TCP by design:
+  port 0 (the kernel's pick, handed to someone outside - Claude Code's OAuth callback for the phone's browser) and
+  wildcard/LAN binds (meant for the network, with their own auth). In-app listeners: LoopbackGate (token, 403
+  without), the device agent 3416 (TLS + pairing token). `nonroot-ports.sh` now FAILs on any PowOS-uid listener that
+  doesn't answer a token-less GET with a 4xx (2xx/3xx/5xx, a raw-protocol banner or silence), and on 3416 answering
+  plain HTTP. razr 11-09 (old APK, old base without SpacetimeDB): ports half passes (only 3416 listens; 3410/3411/5037
+  refused); services-up half SKIPs until the new base + APK. Known gap: a static/Go server (no libc, no preload)
+  binding loopback stays TCP - the script catches it.
 - **No services on a base without SpacetimeDB**: `EngineServices.state` said "missing" and kicked nothing, so the App
   API (python3 only) never started either; now the starter runs in "missing" too (every 10 min at most) and starts
   what the image has. SpacetimeDB itself comes with the next base (roots above) or the apps pack.

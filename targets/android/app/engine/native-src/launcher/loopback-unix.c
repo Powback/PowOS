@@ -4,7 +4,13 @@
 // So, in every program of the no-root PowOS image (lotfix-run preloads this when POWOS_LOOPBACK_DIR is set):
 //   - bind() of a TCP socket to one of POWOS_LOOPBACK_PORTS (any address) binds a Unix socket
 //     $POWOS_LOOPBACK_DIR/<port>.sock instead (mode 0600, in the app's private files: only PowOS's uid can open it),
-//   - connect() of a TCP socket to 127.0.0.0/8 or ::1 on one of those ports connects to that Unix socket,
+//   - with the word "loopback" in POWOS_LOOPBACK_PORTS, so does a bind() of ANY other fixed port on a loopback address
+//     (127/8, ::1): every service of the image that means to be local is private by default, so a new one can't open
+//     the hole again (board no-root-spacetimedb-app-api-ports-reachable-by-a). Not redirected: port 0 (the kernel's
+//     pick, which the program hands to someone outside - an OAuth redirect to the phone's browser) and the wildcard or
+//     LAN addresses (a service meant for the network, which has its own auth: the device agent's pairing token),
+//   - connect() of a TCP socket to 127.0.0.0/8 or ::1 on one of those ports connects to that Unix socket (a listed
+//     port with no socket file is refused; any other port without one stays TCP - Android's own loopback services),
 //   - accept() on such a listener refuses a peer of another uid (SO_PEERCRED; defence in depth),
 //   - getsockname/getpeername/accept's address answer 127.0.0.1:<port> and TCP-only setsockopt()s succeed, so the
 //     programs (SpacetimeDB's tokio/hyper, Python's http.server and urllib, curl, the spacetime CLI) don't notice.
@@ -34,6 +40,7 @@
 #define IPPROTO_TCP 6
 #define AT_FDCWD (-100)
 #define ENOENT 2
+#define EADDRINUSE 98
 #define EINVAL 22
 #define ECONNREFUSED 111
 #define ECONNABORTED 103
@@ -76,7 +83,7 @@ extern void *dlsym(void *, const char *);
 #define RTLD_NEXT ((void *)-1l)
 
 // aarch64 Linux syscall numbers
-enum { NR_dup3 = 24, NR_fcntl = 25, NR_unlinkat = 35, NR_fchmodat = 53, NR_close = 57, NR_getuid = 174,
+enum { NR_dup3 = 24, NR_fcntl = 25, NR_unlinkat = 35, NR_faccessat = 48, NR_fchmodat = 53, NR_close = 57, NR_getuid = 174,
        NR_socket = 198, NR_bind = 200, NR_accept4 = 242, NR_connect = 203, NR_getsockname = 204,
        NR_getpeername = 205, NR_getsockopt = 209 };
 
@@ -104,6 +111,8 @@ static int ready;
 static char dir[96];
 static uint16_t ports[8];
 static int nports;
+// "loopback" in POWOS_LOOPBACK_PORTS: every fixed-port loopback bind is private too, not only the listed ports.
+static int all_loopback;
 // The port each redirected fd stands for (0: not redirected).
 static uint16_t redirected[MAXFD];
 
@@ -118,7 +127,17 @@ static void init(void)
             dir[i] = d[i];
         dir[i] = 0;
         unsigned v = 0;
+        const char *list = p;
         for (;; p++) {
+            const char *w = "loopback";
+            int k = 0;
+            while (w[k] && p[k] == w[k])
+                k++;
+            if (!w[k] && (p[k] == ',' || !p[k]) && (p == list || p[-1] == ',')) {
+                all_loopback = 1;
+                p += k - 1;
+                continue;
+            }
             if (*p >= '0' && *p <= '9')
                 v = v * 10 + (unsigned)(*p - '0');
             else {
@@ -130,18 +149,20 @@ static void init(void)
             }
         }
         if (d[i]) // too long for a socket path: redirect nothing
-            nports = 0;
+            nports = all_loopback = 0;
     }
     ready = 1;
 }
 
 static uint16_t ntoh16(uint16_t v) { return (uint16_t)((v >> 8) | (v << 8)); }
 
-// The protected port [addr] names (any address when !loopback_only, else 127/8 or ::1 only), else 0.
-static uint16_t protected_port(const struct sockaddr *addr, socklen_t len, int loopback_only)
+// The protected port [addr] names, else 0: a listed port (any address when !loopback_only, else 127/8 or ::1 only;
+// *listed = 1), or with all_loopback any other non-zero port on 127/8 or ::1 (*listed = 0).
+static uint16_t protected_port(const struct sockaddr *addr, socklen_t len, int loopback_only, int *listed)
 {
     init();
-    if (!nports || !addr)
+    *listed = 0;
+    if ((!nports && !all_loopback) || !addr)
         return 0;
     uint16_t port;
     int loop;
@@ -161,12 +182,12 @@ static uint16_t protected_port(const struct sockaddr *addr, socklen_t len, int l
         loop = one || mapped;
     } else
         return 0;
-    if (loopback_only && !loop)
-        return 0;
     for (int i = 0; i < nports; i++)
-        if (ports[i] == port)
-            return port;
-    return 0;
+        if (ports[i] == port) {
+            *listed = 1;
+            return loopback_only && !loop ? 0 : port;
+        }
+    return all_loopback && loop && port ? port : 0;
 }
 
 static void socket_path(struct sockaddr_un *u, uint16_t port)
@@ -198,13 +219,13 @@ static int stream(int fd)
            (type & SOCK_TYPE_MASK) == SOCK_STREAM;
 }
 
-// Puts a new Unix stream socket, with [fd]'s flags, in [fd]'s place. 0, or -errno.
-static long replace(int fd)
+// Puts a new [domain] stream socket, with [fd]'s flags, in [fd]'s place. 0, or -errno.
+static long replace(int fd, int domain)
 {
     long fl = sys(NR_fcntl, fd, F_GETFL, 0), fdfl = sys(NR_fcntl, fd, F_GETFD, 0);
     if (fl < 0 || fdfl < 0)
         return fl < 0 ? fl : fdfl;
-    long u = sys(NR_socket, AF_UNIX, SOCK_STREAM | ((fl & O_NONBLOCK) ? SOCK_NONBLOCK : 0) | SOCK_CLOEXEC, 0);
+    long u = sys(NR_socket, domain, SOCK_STREAM | ((fl & O_NONBLOCK) ? SOCK_NONBLOCK : 0) | SOCK_CLOEXEC, 0);
     if (u < 0)
         return u;
     long r = sys(NR_dup3, u, fd, (fdfl & FD_CLOEXEC) ? SOCK_CLOEXEC : 0);
@@ -228,13 +249,31 @@ static void fake_addr(uint16_t port, struct sockaddr *addr, socklen_t *len)
     if (!next_##name) \
         next_##name = (rtype(*) args)dlsym(RTLD_NEXT, #name)
 
+// Someone listens on the Unix socket [u] (a connect gets through).
+static int live(const struct sockaddr_un *u)
+{
+    long s = sys(NR_socket, AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (s < 0)
+        return 0;
+    long r = sys(NR_connect, s, u, sizeof *u);
+    sys(NR_close, s, 0, 0);
+    return r == 0;
+}
+
 int bind(int fd, const struct sockaddr *addr, socklen_t len)
 {
-    uint16_t port = protected_port(addr, len, 0);
+    int listed;
+    uint16_t port = protected_port(addr, len, 0, &listed);
     if (port && fd >= 0 && fd < MAXFD && stream(fd)) {
         struct sockaddr_un u;
         socket_path(&u, port);
-        long r = replace(fd);
+        // An unlisted port's socket can be another program's (127.0.0.1 and ::1 on one port are one socket here):
+        // in use while it answers. A listed port's is always this service's own, from a previous run.
+        // HACK: a server binding the same port on both 127.0.0.1 and ::1 gets EADDRINUSE for the second; real fix:
+        // name the socket <port>.<family>.sock and have connect() try both, once something needs dual-stack loopback.
+        if (!listed && live(&u))
+            return ret(-EADDRINUSE);
+        long r = replace(fd, AF_UNIX);
         if (r < 0)
             return ret(r);
         sys(NR_unlinkat, AT_FDCWD, u.sun_path, 0); // a socket left by a previous run
@@ -251,19 +290,31 @@ int bind(int fd, const struct sockaddr *addr, socklen_t len)
 
 int connect(int fd, const struct sockaddr *addr, socklen_t len)
 {
-    uint16_t port = protected_port(addr, len, 1);
+    NEXT(connect, int, (int, const struct sockaddr *, socklen_t));
+    int listed;
+    uint16_t port = protected_port(addr, len, 1, &listed);
     if (port && fd >= 0 && fd < MAXFD && stream(fd)) {
         struct sockaddr_un u;
         socket_path(&u, port);
-        long r = replace(fd);
+        // An unlisted port without a socket is someone's real TCP port (Android's, a program without the preload).
+        if (!listed && sys(NR_faccessat, AT_FDCWD, u.sun_path, 0) != 0)
+            return next_connect(fd, addr, len);
+        long r = replace(fd, AF_UNIX);
         if (r < 0)
             return ret(r);
         redirected[fd] = port;
         r = sys(NR_connect, fd, &u, sizeof u);
+        if (!listed && (r == -ECONNREFUSED || r == -ENOENT)) {
+            // A stale socket file (its program died): back to TCP, where a listener without the preload may be.
+            redirected[fd] = 0;
+            long t = replace(fd, addr->sa_family);
+            if (t < 0)
+                return ret(t);
+            return next_connect(fd, addr, len);
+        }
         // No socket file = nobody listening: what a TCP client expects to see then.
         return ret(r == -ENOENT ? -ECONNREFUSED : r);
     }
-    NEXT(connect, int, (int, const struct sockaddr *, socklen_t));
     return next_connect(fd, addr, len);
 }
 

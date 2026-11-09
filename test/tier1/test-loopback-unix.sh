@@ -6,7 +6,9 @@
 #   2. a client of the same uid reaching http://127.0.0.1:3410 gets the server (getsockname/peer faked as TCP),
 #   3. another uid can't: the socket file refuses it, and a peer that gets past the file (root) is dropped by
 #      SO_PEERCRED before the server sees a request,
-#   4. other ports and addresses are untouched.
+#   4. other ports and addresses are untouched,
+#   5. with "loopback" in the list (the phone's setting): every fixed-port loopback bind is a private socket too, while
+#      port 0, wildcard binds and TCP servers without the preload stay TCP and reachable; a live socket isn't stolen.
 # Needs a C compiler for aarch64 Linux: `cc` here, else gcc:14 through docker; SKIP without either.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/../.." && pwd)
@@ -87,5 +89,53 @@ setpriv --reuid=nobody --regid=nogroup --clear-groups env LD_PRELOAD="$PRE" pyth
 for _ in $(seq 50); do python3 -c 'import socket; socket.create_connection(("127.0.0.1", 3499), 1)' 2>/dev/null && break; sleep 0.1; done
 python3 -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:3499/", timeout=3)' || fail "port 3499 (not protected) didn't stay TCP"
 [ ! -e "$W/sock/3499.sock" ] || fail "an unprotected port was redirected"
+
+# 5. "loopback": any fixed loopback port is private; port 0, 0.0.0.0 and non-preloaded TCP servers stay TCP
+LB="env POWOS_LOOPBACK_PORTS=3410,3411,loopback LD_PRELOAD=$PRE"
+as_nobody() { setpriv --reuid=nobody --regid=nogroup --clear-groups "$@"; }
+as_nobody $LB python3 "$W/server.py" 3520 "$W/sock/log5" &
+for _ in $(seq 50); do [ -S "$W/sock/3520.sock" ] && break; sleep 0.1; done
+[ -S "$W/sock/3520.sock" ] || fail "loopback mode: 127.0.0.1:3520 wasn't made a socket"
+[ "$(stat -c %a "$W/sock/3520.sock")" = 600 ] || fail "loopback mode: socket mode $(stat -c %a "$W/sock/3520.sock")"
+python3 -c 'import socket
+try:
+    socket.create_connection(("127.0.0.1", 3520), 1); print("open")
+except OSError: print("refused")' | grep -qx refused || fail "loopback mode: 127.0.0.1:3520 is open over TCP"
+out=$(as_nobody $LB python3 -c 'import urllib.request
+print(urllib.request.urlopen("http://127.0.0.1:3520/y", timeout=3).read().decode())')
+[ "$out" = "hello 127.0.0.1 on 3520" ] || fail "loopback mode: same-uid client got: $out"
+out=$(setpriv --reuid=daemon --regid=daemon --clear-groups $LB python3 -c 'import urllib.request
+try:
+    urllib.request.urlopen("http://127.0.0.1:3520/other-uid", timeout=3); print("reached")
+except Exception as e: print("refused", e)')
+case $out in refused*) ;; *) fail "loopback mode: another uid reached 3520: $out" ;; esac
+# a second program can't take a live socket's port
+out=$(as_nobody $LB python3 -c 'import socket
+s = socket.socket()
+try:
+    s.bind(("127.0.0.1", 3520)); print("bound")
+except OSError as e: print("inuse", e.errno)')
+[ "$out" = "inuse 98" ] || fail "loopback mode: a second bind of a live 3520 got: $out"
+# port 0 (the kernel's pick, handed to e.g. a browser) and 0.0.0.0 stay TCP
+out=$(as_nobody $LB python3 -c 'import socket
+a = socket.socket(); a.bind(("127.0.0.1", 0)); a.listen(1)
+b = socket.socket(); b.bind(("0.0.0.0", 3521)); b.listen(1)
+for s in (a, b):
+    socket.create_connection(("127.0.0.1", s.getsockname()[1]), 1).close()
+print("tcp", a.getsockname()[1])')
+case $out in tcp*) ;; *) fail "loopback mode: port 0 / 0.0.0.0 didn't stay TCP: $out" ;; esac
+[ ! -e "$W/sock/3521.sock" ] || fail "loopback mode: a 0.0.0.0 bind was redirected"
+# a TCP server without the preload (3522) stays reachable from a preloaded client: no socket file, so TCP
+python3 "$W/server.py" 3522 "$W/sock/log6" &
+for _ in $(seq 50); do python3 -c 'import socket; socket.create_connection(("127.0.0.1", 3522), 1)' 2>/dev/null && break; sleep 0.1; done
+out=$(as_nobody $LB python3 -c 'import urllib.request
+print(urllib.request.urlopen("http://127.0.0.1:3522/", timeout=3).read().decode())')
+[ "$out" = "hello 127.0.0.1 on 3522" ] || fail "loopback mode: a plain TCP server wasn't reached: $out"
+# a stale socket file (its program gone) doesn't hide a TCP server on that port
+python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$W/sock/3522.sock"
+chown nobody "$W/sock/3522.sock"
+out=$(as_nobody $LB python3 -c 'import urllib.request
+print(urllib.request.urlopen("http://127.0.0.1:3522/", timeout=3).read().decode())')
+[ "$out" = "hello 127.0.0.1 on 3522" ] || fail "loopback mode: a stale socket hid the TCP server: $out"
 
 echo "PASS test-loopback-unix"
