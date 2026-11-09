@@ -40,6 +40,11 @@ if [ -n "$kt" ]; then
   k=0; "$root/targets/android/lint-complexity.sh" --only "$kt" || k=$?
   [ $k = 1 ] && s=1
 fi
+# 11-09: five ships in one night failed only on test-hack-registry (a new HACK: with no row in REMOTE-POWOS.md §4) -
+# it is a ~1 s file scan, so it runs on every push here instead of 15 min later in the ship.
+if ! out=$(bash "$root/test/tier1/test-hack-registry.sh" 2>&1); then
+  echo "$out" | grep -E "FAIL" | sed 's/^ */FAIL hack registry: /'; s=1
+fi
 [ $s = 1 ] && echo "pre-push: refused - the lint / tsc fails on what you push (above)." >&2
 [ $s = 1 ] && exit 1
 exit 0
