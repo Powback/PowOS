@@ -63,9 +63,9 @@ object DefaultKeyboard {
 
     @Volatile private var started = false
 
-    /** Starts the checks (the main process, App.onCreate). */
+    /** Starts the checks (App.onCreate); in the main process only (the engine's ":restart" runs App too). */
     fun start(context: Context) {
-        if (started) return
+        if (started || android.app.Application.getProcessName() != context.packageName) return
         started = true
         val app = context.applicationContext
         val filter = IntentFilter(ACTION_RESULT)

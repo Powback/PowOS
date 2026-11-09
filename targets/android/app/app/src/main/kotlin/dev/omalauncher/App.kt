@@ -33,8 +33,8 @@ class App : Application() {
         if (Application.getProcessName() == packageName) dev.omalauncher.linux.OpenSpool.start(this, File(filesDir, "run"))
         startEngineWatchers()
         // PowOS's keyboard: the swipe keyboard from the PowApps store, kept at its latest build and made the default once
-        // (system/DefaultKeyboard.kt); rooted and not alike. The main process only: one installer.
-        if (Application.getProcessName() == packageName) dev.omalauncher.system.DefaultKeyboard.start(this)
+        // (system/DefaultKeyboard.kt); rooted and not alike. It runs in the main process only: one installer.
+        dev.omalauncher.system.DefaultKeyboard.start(this)
         // The device agent (docs/DEVICES.md): Desk's Devices app sees this phone's battery/screen and can wake or ring
         // it. Without root the app serves it itself; a rooted phone's system tier runs lib/devices/powos-deviced.
         if (Application.getProcessName() == packageName && !RootedGuest.enabled) dev.omalauncher.devices.DeviceAgentHost.start(this)
