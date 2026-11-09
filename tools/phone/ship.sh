@@ -566,7 +566,7 @@ run)
       mn=$(joined ${snotes[@]+"${snotes[@]}"} ${anotes[@]+"${anotes[@]}"}); mn=${mn:-"app update"}
       vendor_ok $need >> "$mlog" 2>&1 || { mrc=9; echo "modules-first: REFUSED - committed bindings aren't what the module builds" >> "$mlog"; }
       [ $mrc = 0 ] && for a in $need; do
-        ( PATH="$here/bin:$PATH" apps/build.sh "$a" && PATH="$here/bin:$PATH" POWOS_SHIP_SERVICE=1 apps/install.sh "$a" install --note "$mn" --no-build ) >> "$mlog" 2>&1 || { mrc=$?; [ $mrc != 0 ] || mrc=1; break; }
+        ( PATH="$here/bin:$PATH" apps/build.sh "$a" && PATH="$here/bin:$PATH" POWOS_SHIP_SERVICE=1 GATE_HOST="${GATE_HOST:-58}" apps/install.sh "$a" install --note "$mn" --no-build ) >> "$mlog" 2>&1 || { mrc=$?; [ $mrc != 0 ] || mrc=1; break; }
         echo "$T $a" >> "$Q/apps-first"
       done
       # The device again: nothing these bindings need may be missing now.
@@ -948,7 +948,7 @@ run)
           vpub=$(echo "$vmods" | awk 'NF {print $1}' | paste -sd' ' -)
           if [ -n "$vpub" ] && ! vendor_ok $vpub >> "$alog" 2>&1; then arc=9; echo "apps: REFUSED - committed bindings aren't what the module builds" >> "$alog"; fi
           if [ $arc = 0 ]; then for a in $achg; do
-            ( PATH="$here/bin:$PATH" apps/build.sh "$a" && PATH="$here/bin:$PATH" POWOS_SHIP_SERVICE=1 apps/install.sh "$a" install --note "$an" --no-build ) >> "$alog" 2>&1 || { arc=$?; break; }
+            ( PATH="$here/bin:$PATH" apps/build.sh "$a" && PATH="$here/bin:$PATH" POWOS_SHIP_SERVICE=1 GATE_HOST="${GATE_HOST:-58}" apps/install.sh "$a" install --note "$an" --no-build ) >> "$alog" 2>&1 || { arc=$?; break; }
           done; fi
           # And after the publish: the shell's bindings decode the phone's modules (no auto-publish here).
           if [ $arc = 0 ] && [ -n "$vpub" ] && ! ${SHIP_BINDINGS_CHECK:-tools/phone/bindings-check.sh} --no-publish --vendor shell/vendor >> "$alog" 2>&1; then
