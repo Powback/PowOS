@@ -3,6 +3,8 @@ package dev.omalauncher.system
 import android.app.AppOpsManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioManager
+import android.media.AudioRecordingConfiguration
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -36,6 +38,12 @@ class RecordingOps(private val clock: () -> Long = System::currentTimeMillis) {
     private val active = linkedSetOf<Use>()
     /** Uses that stopped, and when: the row keeps them, greyed, for [GRACE_MS]. */
     private val ended = linkedMapOf<Use, Long>()
+    /**
+     * Live mic captures Android names no app for - the non-root path ([captures]): without WATCH_APPOPS AppOps reports
+     * PowOS's own uid only, but AudioManager's recording callback still reports every app's capture (uid and package
+     * blanked). They light the ring (no app named) and add no chip.
+     */
+    private var anonymousMic = 0
 
     /** One callback: [op] started or stopped for [uid]/[pkg] (now). True when anything either view shows changed. */
     fun changed(op: String, uid: Int, pkg: String, on: Boolean): Boolean {
@@ -50,9 +58,24 @@ class RecordingOps(private val clock: () -> Long = System::currentTimeMillis) {
         return true
     }
 
+    /**
+     * AudioManager's current recordings, as (audio source, silenced) - the whole list each time it calls. Only the ones
+     * really capturing count ([capturing]): a silenced client (Android feeds a background app zeros) or the hotword
+     * detector is not the mic in use, and lights no ring - the same rule as Android's own mic indicator. True when
+     * whether any such capture runs changed.
+     */
+    fun captures(recordings: List<Pair<Int, Boolean>>): Boolean {
+        val was = anonymousMic > 0
+        anonymousMic = recordings.count { (source, silenced) -> capturing(source, silenced) }
+        return was != (anonymousMic > 0)
+    }
+
     /** The ring's view: what's on now. Its apps: the ones using what lights it (location alone names no one there). */
     fun state() =
-        State(active.mapNotNull { kind(it.op) }.toSet(), active.filter { kind(it.op)?.ring == true }.map { it.pkg }.distinct())
+        State(
+            active.mapNotNull { kind(it.op) }.toSet() + (if (anonymousMic > 0) setOf(Kind.MIC) else emptySet()),
+            active.filter { kind(it.op)?.ring == true }.map { it.pkg }.distinct(),
+        )
 
     /**
      * The row's view at [now]: one chip per app (package and uid), the ones still using something first (in the order
@@ -98,6 +121,12 @@ class RecordingOps(private val clock: () -> Long = System::currentTimeMillis) {
                 OP_FINE_LOCATION, OP_COARSE_LOCATION, OP_MONITOR_HIGH_POWER_LOCATION,
             )
 
+        /** MediaRecorder.AudioSource.HOTWORD (hidden): an always-on wake-word detector, not the mic in use. */
+        const val SOURCE_HOTWORD = 1999
+
+        /** One recording AudioManager reports: does it light the mic? Not when silenced, not the hotword detector. */
+        fun capturing(source: Int, silenced: Boolean) = !silenced && source != SOURCE_HOTWORD
+
         fun kind(op: String): Kind? =
             when (op) {
                 OP_CAMERA, OP_PHONE_CALL_CAMERA -> Kind.CAMERA
@@ -113,7 +142,9 @@ class RecordingOps(private val clock: () -> Long = System::currentTimeMillis) {
  * Every app's camera / mic / screen-capture / location use, live (AppOpsManager.startWatchingActive) - ONE watch for the
  * whole app ([shared]): the status bar's recording light and every page's privacy row ("privacy.changed", ShellBridge)
  * read the same [RecordingOps]. Seeing other apps' ops takes WATCH_APPOPS (signature|privileged: the system module's
- * privapp allowlist); without it Android quietly reports only PowOS's own uid.
+ * privapp allowlist); without it Android quietly reports only PowOS's own uid - then (non-root: no module) the mic comes
+ * from AudioManager's recording callback instead, which reports every app's capture to any app, uid and package blanked:
+ * the ring lights, naming no one.
  */
 class RecordingWatcher private constructor(context: Context) {
     private val appOps = context.getSystemService(AppOpsManager::class.java)
@@ -121,12 +152,23 @@ class RecordingWatcher private constructor(context: Context) {
     private val listeners = mutableListOf<AppOpsManager.OnOpActiveChangedListener>()
     private val watchers = CopyOnWriteArraySet<() -> Unit>()
     private val main = Handler(Looper.getMainLooper())
+    private val audio = context.getSystemService(AudioManager::class.java)
+    /** The non-root mic source (no WATCH_APPOPS): every app's capture, anonymous - see [RecordingOps.captures]. */
+    private val recordingCallback =
+        object : AudioManager.AudioRecordingCallback() {
+            override fun onRecordingConfigChanged(configs: List<AudioRecordingConfiguration>) = recordings(configs)
+        }
     /** A stopped use's chip leaving the row once its grace is up: the views hear it then, not at the next op. */
     private val expire = Runnable { tell() }
 
     init {
-        if (context.checkSelfPermission(WATCH_APPOPS) != PackageManager.PERMISSION_GRANTED)
-            Log.w(TAG, "no $WATCH_APPOPS: the recording light sees only PowOS's own camera/mic use")
+        if (context.checkSelfPermission(WATCH_APPOPS) != PackageManager.PERMISSION_GRANTED) {
+            Log.w(TAG, "no $WATCH_APPOPS: other apps' mic from AudioManager's recording callback (no app named), camera/screen PowOS's own only")
+            runCatching {
+                audio.registerAudioRecordingCallback(recordingCallback, main)
+                recordings(audio.activeRecordingConfigurations)
+            }.onFailure { Log.w(TAG, "can't watch recordings: ${it.message}") }
+        }
         // One op, one listener: an op this Android doesn't know (project_media is hidden) throws and mustn't take the
         // rest - and AppOps keeps a listener's first registration only, so each op needs its own.
         for (op in RecordingOps.WATCHED) {
@@ -142,6 +184,11 @@ class RecordingWatcher private constructor(context: Context) {
         ops.chips() // drops the expired ones before nextExpiry
         ops.nextExpiry()?.let { main.postDelayed(expire, maxOf(0L, it - System.currentTimeMillis())) }
         for (w in watchers) w()
+    }
+
+    /** Main thread: the callback's handler is [main], the first read is in init (shared() is made on the main thread). */
+    private fun recordings(configs: List<AudioRecordingConfiguration>) {
+        if (ops.captures(configs.map { it.clientAudioSource to it.isClientSilenced })) tell()
     }
 
     fun state() = ops.state()

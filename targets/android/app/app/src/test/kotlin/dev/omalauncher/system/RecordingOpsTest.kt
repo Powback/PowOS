@@ -74,4 +74,49 @@ class RecordingOpsTest {
         assertFalse(ops.changed(OP_CAMERA, 10999, "other", false))
         assertEquals(Kind.CAMERA, ops.state().ring)
     }
+
+    // The non-root mic (no WATCH_APPOPS): AudioManager's recordings, anonymous. MediaRecorder.AudioSource.MIC = 1,
+    // VOICE_RECOGNITION = 6, VOICE_COMMUNICATION = 7.
+    @Test fun anAnonymousCaptureLightsTheMicNamingNoOne() {
+        val ops = RecordingOps()
+        assertFalse(ops.captures(emptyList()))
+        assertNull(ops.state().ring)
+        assertTrue(ops.captures(listOf(1 to false)))
+        assertEquals(Kind.MIC, ops.state().ring)
+        assertEquals(emptyList<String>(), ops.state().apps)
+        assertEquals(emptyList<RecordingOps.Chip>(), ops.chips())
+        // A second capture joins: still on, nothing the ring shows changed.
+        assertFalse(ops.captures(listOf(1 to false, 7 to false)))
+        assertTrue(ops.captures(emptyList()))
+        assertNull(ops.state().ring)
+    }
+
+    @Test fun aMicAtRestNeverLights() {
+        val ops = RecordingOps()
+        // A silenced client (a background app fed zeros) and the hotword detector are not the mic in use.
+        assertFalse(ops.captures(listOf(6 to true, RecordingOps.SOURCE_HOTWORD to false)))
+        assertNull(ops.state().ring)
+        assertFalse(RecordingOps.capturing(1, silenced = true))
+        assertFalse(RecordingOps.capturing(RecordingOps.SOURCE_HOTWORD, silenced = false))
+        assertTrue(RecordingOps.capturing(6, silenced = false))
+        // The same client unsilenced (back in front): it lights; silenced again: off.
+        assertTrue(ops.captures(listOf(6 to false)))
+        assertEquals(Kind.MIC, ops.state().ring)
+        assertTrue(ops.captures(listOf(6 to true)))
+        assertNull(ops.state().ring)
+    }
+
+    @Test fun anonymousAndAppOpsMicTogetherAndCameraStillWins() {
+        val ops = RecordingOps()
+        ops.changed(OP_RECORD_AUDIO, 10100, "com.powos.app", true)
+        assertTrue(ops.captures(listOf(1 to false, 6 to false))) // anonymous captures started (the ring already orange)
+        assertEquals(listOf("com.powos.app"), ops.state().apps)
+        ops.changed(OP_RECORD_AUDIO, 10100, "com.powos.app", false)
+        assertEquals(Kind.MIC, ops.state().ring) // another app's capture still runs
+        ops.changed(OP_CAMERA, 10100, "com.powos.app", true)
+        assertEquals(Kind.CAMERA, ops.state().ring)
+        ops.changed(OP_CAMERA, 10100, "com.powos.app", false)
+        assertTrue(ops.captures(emptyList()))
+        assertNull(ops.state().ring)
+    }
 }

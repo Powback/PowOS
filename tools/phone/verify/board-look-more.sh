@@ -25,8 +25,9 @@
 #                   own picture (an img / one-colour mask), not one shared gear. Read only: nothing added;
 #   rec-light       (recording-light-a-ring-around-the-camera-when-th, eee8f5a0): the camera app started (am start
 #                   STILL_IMAGE_CAMERA) -> a green ring (data-kind camera) on the camera cutout in the status chrome,
-#                   unfolded (inner) then folded (cover); the camera's task closed -> the ring gone. The mic (orange) is a
-#                   NOTE: no app to start a recording by script;
+#                   unfolded (inner) then folded (cover); the camera's task closed -> the ring gone. Then the mic: the
+#                   system's speech input (RECOGNIZE_SPEECH, another app) opened -> an orange ring (data-kind mic) while
+#                   Android has its RECORD_AUDIO running, folded then unfolded; closed -> off once the mic rests;
 #   term-remote     (native-terminals-rebuilt-on-powterm-s-code-fit-w, 179a9012 + 050a553d): a REMOTE host's session
 #                   opened view-only (never a local tmux session, never taken over; every write to it dropped and
 #                   counted): the WebGL renderer, a monospace face, an injected 4-row drag scrolls its scrollback 4 rows
@@ -260,6 +261,14 @@ REC='(()=>{const r=document.querySelector(".status-rec-ring"),d=document.querySe
 # Only the status chrome's pages (mode=statusbar) and home's: a hidden surface page (shade, pull) can hold CDP 120 s.
 recread() { local pg v out="none (no statusbar/home page)"; for pg in $("$T/cdp.sh" pages 2>/dev/null | awk '$1=="statusbar"||$1=="home"{print $1}' | sort -u); do
     v=$(CDP_TIMEOUT_S=15 ev "$REC" "$pg"); case $v in ring*|dot*) echo "$pg: $v"; return ;; esac; out="$pg: $v"; done; echo "$out"; }
+# micrun: the packages Android has RECORD_AUDIO running for now (dumpsys appops), space-separated; empty: the mic rests.
+micrun() { sh_ "dumpsys appops --op RECORD_AUDIO" | python3 -c 'import sys,re
+pkg=None; out=[]
+for l in sys.stdin:
+    m=re.match(r"\s*Package (\S+):",l)
+    if m: pkg=m[1]; continue
+    if pkg and re.search(r"Running start|running=true|\(running\)",l,re.I) and pkg not in out: out.append(pkg)
+print(" ".join(out))'; }
 # camclose: the camera's tasks (any not there at the start of the case) closed.
 camclose() { local id pkg vis; while read -r id pkg vis; do [ -n "$id" ] || continue
     grep -q "^$id " <<<"$CAMT0" || { sh_ "am stack remove $id"; log "closed task $id ($pkg): the camera this case started"; }; done <<<"$(tasks)"; sleep 2; }
@@ -278,7 +287,36 @@ if [ "$CASE" = rec-light ]; then
     r2=$(recread); log "$fold after: $r2"
     case $r2 in *ring*|*dot*) fail "$fold: the light still on after the camera closed ($r2)" ;; *) pass "$fold: light off once the camera stopped" ;; esac
   done
-  note "mic (orange): not checked - no app on the phone to start a recording by script"
+  more_restore
+fi
+if [ "$CASE" = rec-light ]; then
+  # The mic (orange), any app: the system's speech-input activity (RECOGNIZE_SPEECH, Google's on this phone) listens
+  # the moment it opens - another app's real capture, seen through AppOps (WATCH_APPOPS) or, non-root, AudioManager's
+  # anonymous recording callback. Android's own RECORD_AUDIO "running" state is the truth the ring is held to: on while
+  # it runs, off once it stopped (the mic-at-rest rule). Nothing is said to it; its task is closed after.
+  MICAPP=$(sh_ "cmd package resolve-activity --brief -a android.speech.action.RECOGNIZE_SPEECH" | tail -1)
+  log "speech input: $MICAPP"
+  for fold in cover inner; do
+    [ $fold = inner ] && { setfold inner || break; }
+    case $MICAPP in */*) ;; *) note "mic: no speech-input activity on the phone ($MICAPP) - not checked"; break ;; esac
+    r0=$(recread); log "$fold mic before: $r0 (running: $(micrun))"
+    [ -n "$(micrun)" ] && { note "$fold: something already records ($(micrun)) - mic not checked"; continue; }
+    case $r0 in *ring*|*dot*) fail "$fold: a recording light on with nothing recording ($r0)" ;; esac
+    CAMT0=$(tasks); CAMON=1; sh_ "am start -n $MICAPP -a android.speech.action.RECOGNIZE_SPEECH >/dev/null"
+    seen=; ran=; for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 0.7; m=$(micrun); [ -n "$m" ] && ran=$m
+      r1=$(recread); case $r1 in *"ring mic"*|*"dot mic"*) seen=$r1; [ -n "$ran" ] && break ;; esac; done
+    chk mic; step "mic-$fold" "$fold: speech input open ($MICAPP), recording: ${ran:-none}"
+    log "$fold with the mic: ${seen:-$r1} (android running: ${ran:-none})"
+    if [ -n "$seen" ]; then pass "$fold: orange ring while ${ran:-an app} records ($seen)"
+    elif [ -n "$ran" ]; then fail "$fold: $ran recorded (RECORD_AUDIO running) but no mic ring ($r1)"
+    else note "$fold: $MICAPP never started recording (no RECORD_AUDIO running) - mic not checked"; fi
+    camclose; CAMON=; chk "mic closed"
+    off=; for _ in 1 2 3 4 5 6; do [ -z "$(micrun)" ] && { r2=$(recread); case $r2 in *ring*|*dot*) ;; *) off=1; break ;; esac; }; sleep 1; done
+    step "mic-closed-$fold" "$fold: speech input closed"
+    if [ -n "$off" ]; then pass "$fold: light off once the mic stopped"
+    elif [ -n "$(micrun)" ]; then note "$fold: RECORD_AUDIO still running after the close ($(micrun))"
+    else fail "$fold: the light still on after the mic stopped ($r2)"; fi
+  done
   more_restore
 fi
 
