@@ -384,7 +384,8 @@ export async function openWindow(key: string, label: string, page: number): Prom
 }
 
 async function openFresh(key: string, label: string, page: number): Promise<number | null> {
-  if (!wideHome.value || !key.startsWith("a:") || !(await enabled())) return null;
+  // An Android app ("a:") or an installed .pow web app ("w:", the host's WebAppActivity on its site; issue #8).
+  if (!wideHome.value || !(key.startsWith("a:") || key.startsWith("w:")) || !(await enabled())) return null;
   const had = existingWindow(key, page);
   if (had != null) return had;
   return openHost(key, label, page, false);

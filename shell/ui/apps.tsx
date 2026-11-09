@@ -233,9 +233,12 @@ function menuItems(app: App): Item[] {
     // The control center's quick-launch row, at its end (launchers.tsx: the row's own add/remove).
     [quick ? "remove from quick launch" : "add to quick launch", () => void toggleLauncher(app.key)],
     // On the page home shows (also from the launcher overlay's own page: state.ts shownHomePage), in its first free cell.
-    ["add to home", () => shownHomePage().then((p) => powos.home.add(app.key, p))],
+    // Not a web app yet: home's grid pins Android/Linux shortcuts only (ShellHome.add); the dock and quick launch take it.
+    ...(app.kind === "web" ? [] : ([["add to home", () => shownHomePage().then((p) => powos.home.add(app.key, p))]] as Item[])),
     ...(android ? ([["app info", () => powos.apps.info(app.key)]] as Item[]) : []),
     ...(android && !app.system ? ([["uninstall", () => powos.apps.uninstall(app.key)]] as Item[]) : []),
+    // A .pow web app from PowApps (issue #8): only its launcher entry goes; the service itself is untouched.
+    ...(app.kind === "web" ? ([["uninstall", () => powos.apps.uninstall(app.key)]] as Item[]) : []),
   ];
 }
 

@@ -157,6 +157,7 @@ class WebWindows(
         appOf: (ComponentName) -> Pair<String, String>?,
     ): Pair<String, String> =
         w.quick?.let { QuickPageRoute.key(it) to (QuickPages.entry(it)?.label ?: w.component.packageName) }
+            ?: w.web?.let { url -> WebApps.idOf(url)?.let { id -> "w:$id" to (WebApps.get(context, id)?.name ?: id) } }
             ?: appOf(w.component) ?: ("a:${w.component.packageName}" to w.component.packageName)
 
     /** [list]'s entry for [w]: geometry from window px ([at]: the WebView's place) to CSS px by [dpr]. */
@@ -617,6 +618,9 @@ class WebWindows(
     }
 
     /** One window: its container layer, its display (-1 until the helper made it), its mirror (once WM knows the display). */
+    /** What [make]'s window shows besides its app: a quick page's token, or an installed web app's URL ([openWeb]). */
+    private class Made(val quick: String? = null, val web: String? = null)
+
     private class Win(
         val id: Int,
         val component: ComponentName,
@@ -629,6 +633,9 @@ class WebWindows(
     ) {
         /** A quick page's token (QuickPages; ui/quickpage.tsx), null: an app's window. Never reused for an app launch. */
         var quick: String? = null
+
+        /** An installed `.pow` web app's URL (WebApps; [openWeb]): its window shows WebAppActivity on it, null: an app's. */
+        var web: String? = null
 
         /** TS1: its content zoom (the user's pinch, [zoom]) and its display's dpi at it ([WindowDpi.zoomed]): every resize at it. */
         var zoom = 1.0
@@ -948,7 +955,7 @@ class WebWindows(
         if (!openable(component, component.packageName)) return -1
         val how = if (another && task < 0) anotherDecision(component) else launchDecision(component, task)
         if (how is LaunchReuse.Decision.Reuse) return how.window
-        return make(component, rect, how, null)
+        return make(component, rect, how, Made())
     }
 
     /**
@@ -959,7 +966,22 @@ class WebWindows(
         component: ComponentName,
         rect: JSONObject,
         token: String,
-    ): Int = if (openable(component, QuickPageRoute.key(token))) make(component, rect, LaunchReuse.Decision.New, token) else -1
+    ): Int = if (openable(component, QuickPageRoute.key(token))) make(component, rect, LaunchReuse.Decision.New, Made(quick = token)) else -1
+
+    /**
+     * Installed web app [url]'s window (WebApps, "w:<host>"; issue #8) at [rect]: WebAppActivity on its own display, one
+     * per site - never an app's window reused or adopted. -1: none (setting off).
+     */
+    fun openWeb(
+        url: String,
+        rect: JSONObject,
+    ): Int {
+        val component = ComponentName(context, WebAppActivity::class.java)
+        if (!openable(component, component.packageName)) return -1
+        // The site has a window already: that one (the page fronts it), never a second WebView on the same site.
+        wins.values.firstOrNull { !it.closed && it.web == url }?.let { return it.id }
+        return make(component, rect, LaunchReuse.Decision.New, Made(web = url))
+    }
 
     /** Web windows on and [component] resizeable; else false, its held launch ([held]'s key) let go the old way. */
     private fun openable(
@@ -980,7 +1002,7 @@ class WebWindows(
         component: ComponentName,
         rect: JSONObject,
         how: LaunchReuse.Decision,
-        quick: String?,
+        made: Made,
     ): Int {
         val adopt = (how as? LaunchReuse.Decision.Adopt)?.task ?: -1
         val pkg = component.packageName
@@ -994,7 +1016,8 @@ class WebWindows(
         val container = SurfaceControl.Builder().setName("powos-ww-$id").setParent(parent).setHidden(true).build()
         val win = Win(id, component, container, w, h, windowDpi(component.packageName))
         win.adopt = adopt
-        win.quick = quick
+        win.quick = made.quick
+        win.web = made.web
         win.apart = how is LaunchReuse.Decision.Apart
         win.another = how is LaunchReuse.Decision.Another
         wins[id] = win
@@ -3929,10 +3952,12 @@ class WebWindows(
             return
         }
         val intent =
-            Intent(Intent.ACTION_MAIN)
-                .addCategory(Intent.CATEGORY_LAUNCHER)
-                .setComponent(w.component)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or launchFlags(w))
+            // A task of its own on this display (MULTIPLE_TASK): the site's document task elsewhere stays where it is.
+            w.web?.let { WebAppActivity.intent(context, it).addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK) }
+                ?: Intent(Intent.ACTION_MAIN)
+                    .addCategory(Intent.CATEGORY_LAUNCHER)
+                    .setComponent(w.component)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or launchFlags(w))
         if (w.another) WindowLog.i(TAG, "window ${w.id}: a second instance of ${w.component.packageName}: launched as a new document task")
         if (w.apart) WindowLog.i(TAG, "window ${w.id}: ${w.component.packageName}'s task is on another tool's display: launched as a task of its own, that one left alone")
         try {

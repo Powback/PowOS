@@ -1068,3 +1068,24 @@ With the APK installed, unfolded, `powos_web_windows` = 1 and the user idle: ope
   during a moment the Plasma app was on screen, skipped every later sweep. A new KWin starts with `export-new` off and
   sweeps the Qt clients that reconnect. Check: `tools/phone/verify/kwin-restart-windows.sh` (both restarts, Kate +
   Dolphin back live with their layers within 20 s, Dolphin's body not a flat fill).
+
+---
+
+## `.pow` web apps in web windows (issue #8, 2026-11-09)
+
+The fleet's `.pow` services the user installs from PowApps open as PowOS apps in web windows. Nothing is added on
+pairing (owner 11-09): pairing makes them available, the user picks them.
+
+- **Catalog**: PowStation `GET http://powstation.pow/v1/apps` (powos-enroll, read-only, LAN/VPN, no token): every
+  whole-site `*.pow` Traefik router, probed through Traefik for its web app manifest (name, `start_url`, icons, theme)
+  or `<title>`/icon. API-only routes are left out. A route behind `autosleep@file` is listed but never fetched (no wake).
+- **Store**: PowApps' "Pow web apps" section lists it; Install / Remove call the launcher's `WebAppInstallActivity`
+  (`dev.omalauncher.action.INSTALL_WEB_APP` / `UNINSTALL_WEB_APP`, startActivityForResult; only `com.powapps` may call
+  it, only http(s) `.pow` URLs are taken).
+- **Launcher**: `shell/WebApps.kt` keeps them (`files/webapps.json`, icons `files/webapps/<host>.png` read at install
+  from the manifest icon or `/favicon.ico`); `apps.list` gives each as `w:<host>`, kind `web`. A tap opens
+  `WebWindows.openWeb`: `WebAppActivity` (one WebView on the site; other hosts go to the browser) on the window's own
+  display, one window per site. Without web windows (folded, setting off) it opens as its own document task.
+- **Not yet**: live state (running/asleep) on the icon and tap-to-wake, pinning to the home grid (ShellHome pins
+  Android/Linux shortcuts only; dock and quick launch take it), SVG/data: icons (the letter icon shows), PowApps
+  reading the launcher's installed list (it keeps its own).

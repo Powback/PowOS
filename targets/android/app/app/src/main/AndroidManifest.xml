@@ -188,6 +188,32 @@
             android:resizeableActivity="true"
             android:windowSoftInputMode="adjustResize|stateAlwaysHidden" />
 
+        <!-- A .pow web app installed from PowApps (shell/WebApps.kt, issue #8): one WebView on its site, a document task
+             per site (FLAG_ACTIVITY_NEW_DOCUMENT keyed by its URL), shown in a web window. -->
+        <activity
+            android:name=".shell.WebAppActivity"
+            android:label="Web app"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
+            android:exported="false"
+            android:resizeableActivity="true"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- PowApps' install/uninstall of a .pow web app (startActivityForResult; only com.powapps may, checked in the
+             activity by its calling package). No UI. -->
+        <activity
+            android:name=".shell.WebAppInstallActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="dev.omalauncher.action.INSTALL_WEB_APP" />
+                <action android:name="dev.omalauncher.action.UNINSTALL_WEB_APP" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <!-- PowOS (rooted mode): opens a PowOS app from Android - its shortcut on the PowOS icon, in Android's
              search, or pinned to the phone's home screen (PowosShortcuts). Exported: launchers start shortcuts. -->
         <activity
