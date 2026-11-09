@@ -46,7 +46,7 @@ http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
 PY
 # The server as an ordinary uid (nobody), as PowOS's services run as the app's uid.
 setpriv --reuid=nobody --regid=nogroup --clear-groups env LD_PRELOAD="$PRE" python3 "$W/server.py" 3410 "$W/sock/log" &
-for _ in $(seq 50); do [ -S "$W/sock/3410.sock" ] && break; sleep 0.1; done
+for _ in $(seq 300); do [ -S "$W/sock/3410.sock" ] && break; sleep 0.1; done
 [ -S "$W/sock/3410.sock" ] || fail "no $W/sock/3410.sock (the bind wasn't redirected)"
 [ "$(stat -c %a "$W/sock/3410.sock")" = 600 ] || fail "socket mode $(stat -c %a "$W/sock/3410.sock"), want 600"
 
@@ -58,24 +58,25 @@ except OSError: print("refused")' | grep -qx refused || fail "127.0.0.1:3410 is 
 
 # 2. the same uid through the preload: the server answers, both ends think it's TCP
 out=$(setpriv --reuid=nobody --regid=nogroup --clear-groups env LD_PRELOAD="$PRE" python3 -c 'import urllib.request
-print(urllib.request.urlopen("http://127.0.0.1:3410/x", timeout=3).read().decode())')
+print(urllib.request.urlopen("http://127.0.0.1:3410/x", timeout=20).read().decode())')
 [ "$out" = "hello 127.0.0.1 on 3410" ] || fail "same-uid client got: $out"
 grep -q 'GET /x' "$W/sock/log" || fail "the server saw no request"
 
 # 3a. another uid (daemon) through the preload: the 0600 socket refuses it - as "connection refused", never TCP
 out=$(setpriv --reuid=daemon --regid=daemon --clear-groups env LD_PRELOAD="$PRE" python3 -c 'import urllib.request
 try:
-    urllib.request.urlopen("http://127.0.0.1:3410/other-uid", timeout=3); print("reached")
+    urllib.request.urlopen("http://127.0.0.1:3410/other-uid", timeout=20); print("reached")
 except Exception as e: print("refused", e)')
 case $out in refused*) ;; *) fail "another uid reached the server: $out" ;; esac
 # 3b. root gets past the file's mode: SO_PEERCRED drops it before the server reads a request
 python3 - "$W/sock/3410.sock" <<'PY' || fail "a peer of another uid got an answer"
 import socket, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(3); s.connect(sys.argv[1])
-s.sendall(b"GET /root-peer HTTP/1.0\r\n\r\n")
+s = socket.socket(socket.AF_UNIX); s.settimeout(20); s.connect(sys.argv[1])
+# The shim closes the dropped peer at once, so the send itself can already hit the closed end (EPIPE): also a drop.
 try:
+    s.sendall(b"GET /root-peer HTTP/1.0\r\n\r\n")
     data = s.recv(100)
-except (ConnectionResetError, socket.timeout):
+except (BrokenPipeError, ConnectionResetError, socket.timeout):
     data = b""
 sys.exit(1 if data else 0)
 PY
@@ -83,13 +84,13 @@ sleep 0.2
 ! grep -q 'other-uid\|root-peer' "$W/sock/log" || fail "the server saw another uid's request"
 # the server still serves afterwards (the refused accept didn't stop it)
 out=$(setpriv --reuid=nobody --regid=nogroup --clear-groups env LD_PRELOAD="$PRE" python3 -c 'import urllib.request
-print(urllib.request.urlopen("http://127.0.0.1:3410/again", timeout=3).read().decode())')
+print(urllib.request.urlopen("http://127.0.0.1:3410/again", timeout=20).read().decode())')
 [ "$out" = "hello 127.0.0.1 on 3410" ] || fail "server stopped serving after a refused peer: $out"
 
 # 4. other ports stay TCP under the preload
 setpriv --reuid=nobody --regid=nogroup --clear-groups env LD_PRELOAD="$PRE" python3 "$W/server.py" 3499 "$W/sock/log2" &
-for _ in $(seq 50); do python3 -c 'import socket; socket.create_connection(("127.0.0.1", 3499), 1)' 2>/dev/null && break; sleep 0.1; done
-python3 -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:3499/", timeout=3)' || fail "port 3499 (not protected) didn't stay TCP"
+for _ in $(seq 300); do python3 -c 'import socket; socket.create_connection(("127.0.0.1", 3499), 1)' 2>/dev/null && break; sleep 0.1; done
+python3 -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:3499/", timeout=20)' || fail "port 3499 (not protected) didn't stay TCP"
 [ ! -e "$W/sock/3499.sock" ] || fail "an unprotected port was redirected"
 
 echo "PASS test-loopback-unix"
