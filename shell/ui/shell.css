@@ -1974,8 +1974,13 @@ html:root .ai-board .tile { background: none; box-shadow: none; }
 /* Off screen (home on another page: PowOS AI and home's other pages are kept laid out beside it), nothing on it animates - the work list's
    "working" dots pulse forever, and an infinite animation anywhere in the page keeps the compositor drawing every
    frame on an idle home (the app's and the renderer's CPU). */
-.ai-screen:not(.shown) *, .ai-screen:not(.shown) *::before, .ai-screen:not(.shown) *::after,
-.page.away *, .page.away *::before, .page.away *::after { animation-play-state: paused !important; }
+/* Only the shell's endless animations are named (GitHub Powback/PowOS#5, the hitch on every switch to the AI page):
+   the universal `.ai-screen:not(.shown) *` made the .shown flip restyle every element of the page, and `.page.away *`
+   every element of home's page, in the switch's first frame (dev/perf/ai-switch.js). Named, only those restyle. A new
+   `infinite` animation joins this list, or it keeps an idle home drawing (the gate's idle check). Its subject is a class
+   only those elements carry: `.x > .icon` would restyle every icon on the flip (screens.css's spinner isn't on these). */
+:is(.ai-screen:not(.shown), .page.away) :is(.aip-dot.working, .ais-mic-dot, .pending-ring.spin, .pending-bar-fill, .prompt, .send-spin),
+:is(.ai-screen:not(.shown), .page.away) .ww-progress::after { animation-play-state: paused !important; }
 .ai-session-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ai-session-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-session-meta { font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -4382,8 +4387,10 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .ais-mic-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--color-foreground); opacity: 0.6; }
 .ais-mic.on .ais-mic-dot { background: var(--color-accent); opacity: 1; animation: aip-pulse 1.2s var(--ambient) infinite; }
 .ais-reply + .ais-mic { display: none; }
-/* Off screen, at rest: nothing on the page animates (the idle check; it never paints behind home). */
-.ai-screen.status:not(.shown) * { animation: none !important; transition: none !important; }
+/* Off screen, at rest: its endless animations are paused (the named list by `.ai-screen:not(.shown)` above); a finite
+   one ends by itself. No `.ai-screen.status:not(.shown) * { animation: none; transition: none }` any more (GitHub
+   Powback/PowOS#5): every switch restyled the whole page (770 elements, the .shown flip) and replayed every section's
+   entrance animation as it came in - the hitch on each switch (dev/perf/ai-switch.js, PERF_TRACE=inv). */
 /* At rest on screen too: a working agent's dot is still (its bar and step move when it does). */
 :is(.ai-screen.status, .ai-left) .aip-dot.working { animation-iteration-count: 3; }
 /*
