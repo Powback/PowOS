@@ -1,5 +1,5 @@
 widget "performance" {
-  meta { owl: 7; description: "The phone under load: Adreno GPU busy and clock, CPU load, and how hot the CPU, GPU, skin and battery run"; version: "1.1"; license: "MIT"; category: "system" }
+  meta { owl: 7; description: "The phone under load: Adreno GPU busy and clock, CPU load, and how hot the CPU, GPU, skin and battery run (GPU load needs root)"; version: "1.2"; license: "MIT"; category: "system" }
   page: 1
   order: 7
   size: 6x3
@@ -8,22 +8,30 @@ widget "performance" {
   // One cheap read every 5 s (each changes the widget: home repaints, the glass under it re-composites - at most one
   // a 5 s on an idle home, 2026-10-21), builtins only (no forks per sensor): GPU busy %, GPU clock (Hz), GPU temp, the
   // hottest CPU sensor, skin and battery temps (m°C), then /proc/stat's total and idle jiffies for the CPU load.
-  source raw = cmd('k=/sys/class/kgsl/kgsl-3d0; read b x < $k/gpu_busy_percentage; read f < $k/devfreq/cur_freq; read g < $k/temp; c=0; s=0; bt=0; for z in /sys/class/thermal/thermal_zone*; do read t < $z/type; read v < $z/temp || continue; [ "${t#cpu}" != "$t" ] && [ "$v" -gt "$c" ] && c=$v; [ "$t" = skin-msm-therm ] && s=$v; [ "$t" = battery ] && bt=$v; done 2>/dev/null; read _ u n y i w q r rest < /proc/stat; echo $b $f $g $c $s $bt $((u+n+y+i+w+q+r)) $((i+w))') every 5s
+  // A value it can't read is -1 (never a missing word: the rest would shift). `optional`: without Linux, or where an
+  // unrooted app can't read kgsl or /proc/stat, the numbers come from Android (`android.perf`: cpuidle load, thermal
+  // zones - what any app may read) and the GPU's busy % says it needs root (nonroot-parity row 8).
+  source raw = cmd('k=/sys/class/kgsl/kgsl-3d0; b=-1 f=-1 g=-1 t0=-1 i0=-1; read b x < $k/gpu_busy_percentage; read f < $k/devfreq/cur_freq; read g < $k/temp; c=0; s=0; bt=0; for z in /sys/class/thermal/thermal_zone*; do read t < $z/type; read v < $z/temp || continue; [ "${t#cpu}" != "$t" ] && [ "$v" -gt "$c" ] && c=$v; [ "$t" = skin-msm-therm ] && s=$v; [ "$t" = battery ] && bt=$v; done 2>/dev/null; read _ u n y i w q r rest < /proc/stat && t0=$((u+n+y+i+w+q+r)) i0=$((i+w)); echo ${b:--1} ${f:--1} ${g:--1} $c $s $bt $t0 $i0') every 5s optional
+  source ap = android.perf every 5s
 
-  let v = words(raw ?? "").map(w => num(w, 0))
-  let gpu = raw == null ? null : v[0]
-  let mhz = raw == null ? null : v[1] / 1000000
-  let tGpu = v[2] / 1000
-  let tCpu = v[3] / 1000
-  let tSkin = v[4] / 1000
-  let tBat = v[5] / 1000
-  let total = v[6]
-  let idle = v[7]
+  let v = words(raw ?? "").map(w => num(w, -1))
+  let has = raw != null && v[7] != null
+  let gpu = has && v[0] >= 0 ? v[0] : ap.gpu
+  let gpuLocked = gpu == null && ap.gpuNeedsRoot == true
+  let mhz = has && v[1] > 0 ? v[1] / 1000000 : null
+  let tGpu = has && v[2] > 0 ? v[2] / 1000 : ap.gpuTemp
+  let tCpu = has && v[3] > 0 ? v[3] / 1000 : ap.cpuTemp
+  let tSkin = has && v[4] > 0 ? v[4] / 1000 : ap.skinTemp
+  let tBat = has && v[5] > 0 ? v[5] / 1000 : ap.battTemp
+  let total = has && v[6] > 0 ? v[6] : null
+  let idle = has && v[6] > 0 ? v[7] : null
   let pTotal = prev(total)
   let pIdle = prev(idle)
-  let cpu = pTotal != null && total > pTotal ? clamp((1 - (idle - pIdle) / (total - pTotal)) * 100, 0, 100) : null
+  let cpu = total != null && pTotal != null && total > pTotal ? clamp((1 - (idle - pIdle) / (total - pTotal)) * 100, 0, 100) : ap.cpu
   let gpuHist = history(gpu, 90)
   let cpuHist = history(cpu, 90)
+  // What the GPU's number says when an unrooted app can't read it.
+  let gpuText = gpu != null ? "${round(gpu)}%" : gpuLocked ? "root" : "…"
 
   // Parameters aren't named after properties (value, name): inside, the property would win.
   component Temp(sensor, deg) {
@@ -34,19 +42,19 @@ widget "performance" {
     }
   }
 
-  component Trace(what, pct, series, tint) {
+  component Trace(what, pct, series, tint, waitText = "…") {
     Column {
       gap: 2; weight: 1
       Row {
         Text { text: what; style: label; weight: 1 }
-        Text { text: pct == null ? "…" : "${round(pct)}%"; style: small; color: tint; width: 44; align: end }
+        Text { text: pct == null ? waitText : "${round(pct)}%"; style: small; color: tint; width: 44; align: end }
       }
       Sparkline { values: series; min: 0; max: 100; area: alpha(tint, 0.18); color: tint; thickness: 1.5; fill: width; weight: 1 }
     }
   }
 
   // A gauge: the arc fills with load, its color warms with the temperature; the narrow tiles' layout.
-  component Gauge(what, pct, deg, dim, tint) {
+  component Gauge(what, pct, deg, dim, tint, waitText = "…") {
     Box {
       width: dim; height: dim; align: center
       Ring {
@@ -56,7 +64,7 @@ widget "performance" {
       }
       Column {
         gap: 0; align: center
-        Text { text: pct == null ? "…" : "${round(pct)}%"; fontSize: clamp(round(dim * 0.24), 15, 60); bold: true; align: center }
+        Text { text: pct == null ? waitText : "${round(pct)}%"; fontSize: clamp(round(dim * 0.24), 15, 60); bold: true; align: center }
         Text { text: deg > 0 ? "${what} ${round(deg)}°" : what; fontSize: clamp(round(dim * 0.09), 11, 20); color: muted; align: center; maxLines: 1 }
       }
     }
@@ -101,7 +109,7 @@ widget "performance" {
       }
       Row {
         gap: 6; align: center
-        Gauge { what: "gpu"; pct: gpu; deg: tGpu; dim: dim; tint: accent }
+        Gauge { what: "gpu"; waitText: gpuText; pct: gpu; deg: tGpu; dim: dim; tint: accent }
         if across == 2 {
           Gauge { what: "cpu"; pct: cpu; deg: tCpu; dim: dim; tint: magenta }
         }
@@ -116,7 +124,7 @@ widget "performance" {
       if traced {
         Column {
           gap: 6; fill: width; height: 104
-          Trace { what: "gpu"; pct: gpu; series: gpuHist; tint: accent }
+          Trace { what: "gpu"; waitText: gpuText; pct: gpu; series: gpuHist; tint: accent }
           Trace { what: "cpu"; pct: cpu; series: cpuHist; tint: magenta }
         }
       }
@@ -138,14 +146,14 @@ widget "performance" {
       Row {
         gap: 16; align: center
         Spacer { weight: 1 }
-        Gauge { what: "gpu"; pct: gpu; deg: tGpu; dim: big; tint: accent }
+        Gauge { what: "gpu"; waitText: gpuText; pct: gpu; deg: tGpu; dim: big; tint: accent }
         Gauge { what: "cpu"; pct: cpu; deg: tCpu; dim: big; tint: magenta }
         Spacer { weight: 1 }
       }
       Text { text: mhz == null ? "adreno" : "adreno · ${round(mhz)} MHz"; style: small; color: muted; align: center; maxLines: 1 }
       Column {
         gap: 8; weight: 1; fill: width
-        Trace { what: "gpu"; pct: gpu; series: gpuHist; tint: accent }
+        Trace { what: "gpu"; waitText: gpuText; pct: gpu; series: gpuHist; tint: accent }
         Trace { what: "cpu"; pct: cpu; series: cpuHist; tint: magenta }
       }
       Row {
@@ -170,7 +178,7 @@ widget "performance" {
         }
         Column {
           gap: 0; align: center
-          Text { text: gpu == null ? "…" : "${round(gpu)}%"; fontSize: clamp(round(side * 0.2), 16, 32); bold: true; align: center }
+          Text { text: gpuText; fontSize: clamp(round(side * 0.2), 16, 32); bold: true; align: center }
           if !short {
             Text { text: mhz == null ? "" : "${round(mhz)} MHz"; style: small; color: muted; align: center }
           }
@@ -180,7 +188,7 @@ widget "performance" {
 
       Column {
         gap: short ? 4 : 8; weight: 1; fill: height
-        Trace { what: "gpu"; pct: gpu; series: gpuHist; tint: accent }
+        Trace { what: "gpu"; waitText: gpuText; pct: gpu; series: gpuHist; tint: accent }
         Trace { what: "cpu"; pct: cpu; series: cpuHist; tint: magenta }
         if !short {
           Row {

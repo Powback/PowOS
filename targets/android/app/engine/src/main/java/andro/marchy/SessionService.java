@@ -591,8 +591,16 @@ public class SessionService extends Service {
         return env;
     }
 
-    /** The no-root PowOS image's service ports, which loopback-unix.c turns into Unix sockets. */
-    public static final String LOOPBACK_PORTS = "3410,3411";
+    /**
+     * The no-root PowOS image's service ports, which loopback-unix.c turns into Unix sockets in the app's private files:
+     * SpacetimeDB 3410, the App API 3411, and 5037 - the adb server any `adb` call of the image starts (powos android,
+     * powos-deviced, scrcpy): on Android's shared loopback it was reachable by every app on the phone, which could then
+     * drive PowOS's adb (razr 11-09, board-close-waiting). The image's adb clients reach it at 127.0.0.1:5037 as before.
+     * "loopback": every other service of the image that binds a fixed port on 127.0.0.1/::1 gets a private socket too,
+     * so no new service can reopen the hole (port 0 and LAN/wildcard binds stay TCP: those carry their own auth, which
+     * tools/phone/verify/nonroot-ports.sh checks). The page reaches 3410/3411 only through LoopbackGate's token.
+     */
+    public static final String LOOPBACK_PORTS = "3410,3411,5037,loopback";
 
     /** Where those sockets are (<port>.sock): the app's private files, 0700, so only this app's uid opens them. */
     public static File loopbackDir(Context ctx) {
