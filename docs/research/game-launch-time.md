@@ -547,3 +547,26 @@ boot 2-4 s - wineboot waits on every auto-start service (winedevice drivers, svc
 while Steam preps needs Proton's `waitforexitandrun` not to wait on that wineserver (`run` verb in powos-proton-arm64's
 entry) - big, needs device iteration; (3) window->frame 8.8 s is the game's own emulated init: < 10 s for this Unity
 game fresh is not reachable from PowOS alone; resume (0.6-0.8 s) is the < 10 s path.
+
+## Why the boost lost to the vendor cap at launch (2026-11-09, agent/game-boost-cap)
+
+Who writes scaling_max_freq: only `horae` (thread horaeCb, holding every policy's limits open), applying
+com.oplus.battery's ThermalControllHandler policy; it rewrites on each evaluation (a temperature gear change or a
+front-package change) - minutes apart, not a fight. The holder never raised it (under horae it keeps the cap and holds
+the prime min up to it: 0 fights in every 11-08/09 log). The cap at launch was the wrong TABLE, not heat: the holder log
+shows `thermal cap 1785600 / 1593600 by horaeCb, skin 28.1 C` (21:29, 11-08) = `thermal_cpulevel` level 4 = common_config
+at gear 6-7, and the 19.3 s run's 1.36 GHz = level 5 = common_config gear 8-10. game-boost.sh sets the vendor game
+marker at the tap and the oplus-hook answers appType 4, but the controller only asks on its next evaluation; the front
+package stays com.powos.app for the whole launch, so category_4 arrived at the next gear change (11-06: 2 min in).
+category_4 vs common_config (folding profile): gears <= 4 no cap (common: level 2 from gear 3), gears 5-6 level 1
+(prime 1.98 / gold 2.19 GHz; common: 3-4 = 1.71-1.59 / 1.92-1.79), gear 7 level 3, 8-9 level 4, 10 level 5.
+
+Fix (oplus-hook `reevaluateOnMarker`): a ContentObserver on Settings.Global powos_game_front in com.oplus.battery runs
+the controller's own category evaluation (jadx of Battery.apk 16.0.5.1301: `ThermalControlUtils` app switch ->
+`m.M0(ctx).q1()`) on its handler thread, on and off. No thermal limit is touched: the vendor's game table, at the
+vendor's own temperature gear, sets the cap; a hot phone stays capped. Off goes back through the vendor's protect
+period. Test: test-game-boost-holder.sh (marker on from the hold's start and off after, min follows a lifted cap, a
+lowered cap stands; polls instead of fixed sleeps - it flaked on .58 under load).
+Expected: prime 1.98-3.19 GHz instead of 1.36-1.59 for the launch on a phone at gear <= 6; per the 11-05 caps-lifted A/B
+(14.8/16.2 vs 18.5 s) ~2-3 s off tap -> frame, 19.3 -> ~16-17 s. Check: `bf-coldstart.sh steam` after the ship (needs
+the oplus-hook APK installed and com.oplus.battery restarted), LPROF clocks + logcat `configItemName=category_4` at the tap.
