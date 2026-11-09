@@ -241,7 +241,9 @@ install -m 755 $T/comms-mcp.py $R/usr/lib/powos/ai/comms/comms-mcp.py
 # The manager (unit ai-manager): PowOS AI's chat starts a turn of it per message.
 if [ -d $T/powos-manager ]; then
   mkdir -p $R/usr/lib/powos/ai/manager
-  install -m 644 $T/powos-manager/manager.py $T/powos-manager/manager.sh $R/usr/lib/powos/ai/manager/
+  # Every file of it: fleet_login.py (the native Claude sign-in, `powos manager --fleet-login`) was left out when only
+  # manager.py + manager.sh were named, so the sign-in's Login stopped at once ("the sign-in stopped - try again").
+  install -m 644 $T/powos-manager/*.py $T/powos-manager/*.sh $R/usr/lib/powos/ai/manager/
 fi
 rm -rf $T/powos-agents $T/comms-mcp.py $T/powos-manager
 # The manager's TypeScript sandbox (unit ai-sandbox): its sources plus its deps from its lock, which rooted.sh built
