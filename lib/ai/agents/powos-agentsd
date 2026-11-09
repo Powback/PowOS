@@ -47,6 +47,10 @@ TASKS_PER_AGENT = 50
 MESSAGES = 200
 COALESCE_MS = 10_000
 SWEEP_S = 60
+# The board's janitor (powos-agents-cli janitor_decide: expired claims back to queued, done-by-the-facts closed): run
+# this often, on the host whose powos-agents module is local (the phone) - POWOS_AGENTS_REMOTE=0, so the Mac's copy
+# never takes the dev channel for it. POWOS_JANITOR_S overrides (0: off).
+JANITOR_S = float(os.environ.get("POWOS_JANITOR_S", "600"))
 IDLE_EXIT_S = 600
 # A working agent that went quiet: a long tool call says nothing until it ends, so this is generous.
 STALE_WORKING_MS = 30 * 60_000
@@ -1192,6 +1196,28 @@ class Stdb:
                 self.warned = True
 
 
+def janitor_cmd():
+    """The CLI's `janitor` verb beside this file, local module only; None when there is no CLI."""
+    cli = os.path.join(os.path.dirname(os.path.abspath(__file__)), "powos-agents-cli")
+    return [sys.executable, cli, "janitor"] if os.path.exists(cli) else None
+
+
+def run_janitor(cmd=None, timeout=60):
+    """One janitor pass, detached from the fold loop's fate: an error or a module that isn't here is only logged."""
+    cmd = cmd or janitor_cmd()
+    if not cmd:
+        return None
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                           env=dict(os.environ, POWOS_AGENTS_REMOTE="0"))
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"powos-agentsd: janitor: {e!r}", file=sys.stderr)
+        return None
+    if r.returncode == 0 and "0 row(s)" not in r.stdout:
+        print(f"powos-agentsd: {r.stdout.strip()}", file=sys.stderr)
+    return r.returncode
+
+
 def main():
     import argparse
 
@@ -1225,6 +1251,7 @@ def main():
     watch = None if args.once else Watch(q)
     last_event = time.monotonic()
     next_sweep = time.monotonic()
+    next_janitor = time.monotonic() + 30   # after the first fold settles
     try:
         while True:
             got, waiting = read_queue(q, spool, now_ms())
@@ -1242,6 +1269,9 @@ def main():
             if time.monotonic() >= next_sweep:
                 s.sweep(now_ms())
                 next_sweep = time.monotonic() + SWEEP_S
+            if JANITOR_S > 0 and not args.once and stdb is not None and time.monotonic() >= next_janitor:
+                run_janitor()
+                next_janitor = time.monotonic() + JANITOR_S
             changed = s.flush(stdb)
             if mirror and changed:
                 mirror.wanted = True
