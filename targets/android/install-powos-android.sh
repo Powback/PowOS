@@ -166,6 +166,19 @@ cp $P/manifest/flatpaks.txt /usr/share/powos/phone-flatpaks.txt
 # can't carry it; the aarch64 build of the same release. Real fix: the manifest lists such binaries too.
 curl -fsSL -o /tmp/bun.zip https://github.com/oven-sh/bun/releases/latest/download/bun-linux-aarch64.zip
 bsdtar -xf /tmp/bun.zip -C /tmp && install -m 755 /tmp/bun-linux-aarch64/bun /usr/bin/bun && rm -rf /tmp/bun*
+# Claude Code out of the box (the user, 11-09 on the non-root razr: "claude is not installed"): the vendor's native
+# installer, the same one `powos ai install claude` and the manager's first use run, into the app user's home
+# (/root/.local/bin, on every login shell's PATH) so it keeps updating itself there. Not fatal: the first use installs
+# it again when the network was down here.
+HOME=/root bash -c 'curl -fsSL https://claude.ai/install.sh | bash' || echo "powos: Claude Code's installer failed - it installs on first use" >&2
+# claude-login (~/Projects/claude-login, staged by build-rootfs.sh): the real `claude /login` run headless, which PowOS's
+# native Claude sign-in (lib/ai/manager/fleet_login.py, direct mode) drives. Without it the AI page's Login said "the
+# sign-in stopped - try again" at once. Node isn't in the image; bun runs its ES module as is (checked on the razr).
+if [ -s $P/claude-login/cli.js ]; then
+  install -Dm 644 -t /usr/lib/claude-login $P/claude-login/*.js
+  printf '#!/bin/sh\n# claude-login: headless `claude /login` (build-rootfs.sh stages it from ~/Projects/claude-login)\nif command -v node >/dev/null; then exec node /usr/lib/claude-login/cli.js "$@"; fi\nexec bun /usr/lib/claude-login/cli.js "$@"\n' > /usr/bin/claude-login
+  chmod 755 /usr/bin/claude-login
+fi
 mkdir -p /etc/powos && echo "$POWOS_TARGET" > /etc/powos/platform
 
 if [ "$POWOS_TARGET" = phone ]; then

@@ -64,4 +64,35 @@ mkdir "$D"; echo 999999 > "$D/pid"; run h4 "build-pkgs y"
 waitfor '[ -f "$L.h4" ]'; ok "dead lock reclaimed" '[ -f "$L.h4" ]'
 touch "$R.h4"; wait
 ok "no locks left" '[ -z "$(ls "$XDG_CACHE_HOME" | grep powos-build-slot)" ]'
+
+# killed mid-run (perl alarm, the agents' timeout wrapper): a `docker run` gets a generated --name and on SIGALRM
+# its container is `docker rm -f`ed and the slot freed (2026-11-09: an orphaned gradle container held the journal
+# lock for 33+ min). A fake docker on PATH records its calls; `run` blocks like a long build.
+S=$XDG_CACHE_HOME/shim; mkdir -p "$S"; DL=$XDG_CACHE_HOME/docker.log
+cat > "$S/docker" <<SH
+#!/bin/bash
+echo "\$*" >> '$DL'
+[ "\$1" = run ] && exec sleep 30
+exit 0
+SH
+chmod +x "$S/docker"
+# shellcheck disable=SC2034  # t0/arc/name are read inside ok's eval strings
+t0=$(date +%s)
+PATH="$S:$PATH" perl -e 'alarm 2; exec @ARGV' bash "$B" "build-pkgs alarm" -- docker run --rm img ./gradlew x \
+  > "$L.alarm.err" 2>&1
+# shellcheck disable=SC2034
+arc=$?
+# shellcheck disable=SC2034
+name=$(sed -n 's/^run --name \([^ ]*\) --rm img .*/\1/p' "$DL")
+ok "alarm: docker run got a generated --name" '[ -n "$name" ] && case $name in build-slot-*-build-pkgs-alarm) true ;; *) false ;; esac'
+ok "alarm: container rm -f'ed" 'grep -qx "rm -f $name" "$DL"'
+ok "alarm: exits promptly with 128+14" '[ "$arc" = 142 ] && [ $(( $(date +%s) - t0 )) -lt 15 ]'
+ok "alarm: lock released" '[ ! -e "$XDG_CACHE_HOME/powos-build-slot" ]'
+# a caller's own --name is kept (not doubled) and is the one removed; a normal exit keeps the command's code
+: > "$DL"
+PATH="$S:$PATH" perl -e 'alarm 2; exec @ARGV' bash "$B" "build-pkgs own" -- docker run --name mine img \
+  > "$L.own.err" 2>&1
+ok "own --name kept and removed" '[ "$(head -1 "$DL")" = "run --name mine img" ] && grep -qx "rm -f mine" "$DL"'
+bash "$B" "build-pkgs rc" -- bash -c 'exit 7'; ok "exit code is the command's" '[ $? = 7 ]'
+ok "no locks left after signals" '[ -z "$(ls "$XDG_CACHE_HOME" | grep powos-build-slot)" ]'
 [ "$failn" = 0 ]

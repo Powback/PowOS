@@ -98,7 +98,7 @@ fi
 d=/data/local/tmp
 # The watcher's version: --ensure restarts a running watcher of another version (a long-lived watcher otherwise kept
 # the old logic until the phone rebooted - the file is rewritten under it but sh keeps what it already read).
-V=2
+V=3
 if [ "${1:-}" = --ensure ]; then
   now=$(date +%s); boot=$(( now - $(cut -d. -f1 /proc/uptime) ))
   p=$(cat $d/powos-touchmon.pid 2>/dev/null)
@@ -139,7 +139,7 @@ devs() { for e in /sys/class/input/event*; do
     case "$(readlink -f $e)" in */devices/virtual/input/*) echo "$n" | grep -qiE 'pad|controller|joystick|keyboard|mouse' || continue ;; esac
     echo "/dev/input/${e##*/}: "
   done > $d/powos-input.devs; }
-gp=; prev=""; i=0
+gp=; prev=""; i=0; po=
 while [ $(( $(date +%s) - $(stat -c %Y $d/powos-touchmon.ask 2>/dev/null || echo 0) )) -lt 1800 ]; do
   [ $(( i % 30 )) = 0 ] && devs; i=$(( i + 1 ))
   { [ -n "$gp" ] && kill -0 $gp 2>/dev/null; } || { : > $d/powos-input.ev; getevent -q >> $d/powos-input.ev 2>/dev/null & gp=$!; echo $gp > $d/powos-touchmon.gpid; }
@@ -151,6 +151,13 @@ while [ $(( $(date +%s) - $(stat -c %Y $d/powos-touchmon.ask 2>/dev/null || echo
   # resume/suspend: their IRQ counters move and the panel nodes emit events, with no finger. A tool that changes the
   # screen state writes the epoch until which that is its own (powos-selfinput, see SELF_INPUT in window-lock.sh) first:
   # a change seen up to one sample (2 s) after it is taken in without counting as a touch.
+  # A fold-state override (`cmd device_state state N` / `state reset`, the fold checks: game-present-rate, game-resize,
+  # bf-fold, ...) powers the other panel up/down: its IRQ counter moves with no finger (11-07 01:44 + 02:06:
+  # game-present-rate stopped as "the user picked up the phone" 10 s after its own "fold: cover", twice). Only a tool
+  # sets an override - the hinge moves mBaseState - so an mOverrideState change marks the next 8 s as the tools' own.
+  o=$(dumpsys device_state 2>/dev/null | grep -m1 mOverrideState=)
+  [ -n "$po" ] && [ "$o" != "$po" ] && echo $(( $(date +%s) + 8 )) > $d/powos-selfinput
+  po=${o:-none}
   now=$(date +%s); sf=$(cat $d/powos-selfinput 2>/dev/null); case x$sf in x|x*[!0-9]*) sf=0 ;; esac
   if [ "$c" != "$prev" ] || [ $ev = 1 ]; then
     [ $now -le $(( sf + 3 )) ] || date +%s > $d/powos-lasttouch

@@ -341,6 +341,22 @@ export interface BackgroundApp {
   frozen?: boolean;
 }
 
+/** Android's split screen as the pair entity (ui/splitpair.ts): its tasks and their apps, left / top first. */
+export interface SplitPair {
+  ids: number[];
+  keys: string[];
+  /** "2h" side by side, "2v" one over the other. */
+  layout: string;
+}
+
+/** A pair (2-4 apps used together: Android's split, a tiling of web windows) as one recent entry (ui/pairs.tsx). */
+export interface AppPair {
+  /** Its apps, left / top first (a tiling's tile order). */
+  keys: string[];
+  /** As a tiling names it: "2h", "2v", ...; how its combined icon is laid out and how it splits again. */
+  layout: string;
+}
+
 /** One app of a split card ([RecentTask.split]). */
 export interface SplitSide {
   id: number;
@@ -772,10 +788,17 @@ export interface Bridge {
     /** The clipboard pasted (bracketed when the program asked); the selection copied (answers it, null: none). */
     paste?(id: string): Promise<void>;
     copy?(id: string): Promise<string | null>;
+    /** [text] (a card of the paste picker) into [id], bracketed when the program asked. */
+    pasteText?(id: string, text: string): Promise<void>;
   };
   clipboard: {
     read(): Promise<string | null>;
     write(text: string): Promise<void>;
+    /**
+     * The phone's only (ClipHistory.kt): the recent copies, newest first, the clipboard now included - kept on the
+     * device only. Absent elsewhere: the paste picker shows the clipboard now.
+     */
+    history?(): Promise<Clip[]>;
   };
   /**
    * Remote input (ui/remote.tsx): the phone as a keyboard and mouse for a computer, over its USB cable (HID functions
@@ -1057,6 +1080,13 @@ export interface Bridge {
     split(first: number, second: number): Promise<boolean>;
     /** A split card's split back ([first] left / top): restored while WM Shell still has it, else split again. */
     openSplit(first: number, second: number): Promise<boolean>;
+    /** Host-optional: Android's split as it stands (ui/splitpair.ts), or null; "tasks.splitPair" (SplitPair | null) when it changes. */
+    splitPair?(): Promise<SplitPair | null>;
+    /**
+     * Host-optional: apps [first] (left / top) and [second] ("a:" keys) launched together as Android's split - the split
+     * back while it stands, WM Shell's split of their tasks (root), else Android's launch-adjacent (no root).
+     */
+    launchPair?(first: string, second: string): Promise<boolean>;
     /** The task in a floating window (freeform). */
     float(id: number): Promise<boolean>;
     /** Host-optional (f307: feature-detect): the task in a PowOS desktop window ([on], AppWindows' size/placement) or full screen. */
@@ -1284,6 +1314,12 @@ export interface TermState {
 }
 
 /** Where and how PowTerm's view of a terminal shows (Bridge.term.view). */
+/** A copy in the clipboard's history: its text and when (epoch ms). */
+export interface Clip {
+  text: string;
+  at: number;
+}
+
 export interface TermPlace {
   /** The rect, CSS px at [dpr]; the text size, CSS px. */
   x: number;

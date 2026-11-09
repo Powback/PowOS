@@ -21,7 +21,7 @@ import urllib.request
 # the Mac just finished validating for itself, and that parse error reads as a real bug. __cli_version__
 # (below) lets the Mac tell "phone copy is stale" apart from "the command itself is wrong" before passing
 # an error through.
-CLI_VERSION = 5   # 4: status queued (Up next); 5: friction link/--task, task set --friction, sweep --full
+CLI_VERSION = 6   # 4: status queued (Up next); 5: friction link/--task, task set --friction, sweep --full; 6: janitor
 
 DB = "powos-agents"
 SERVER = os.environ.get("POWOS_STDB", "http://127.0.0.1:3410")
@@ -139,6 +139,12 @@ The board shows each task's TRUE state, computed from facts - never from the sta
   queued          up next: accepted, waiting for an agent slot - never an orphan (#N: its place in line)
   blocked         status blocked or waiting (on the user), with the note as the reason
   done            closed (its check passed, or --no-check)
+`powos agents janitor [--dry-run]` (powos-agentsd every 10 min, and every `task list`): the stored status follows
+the truth - a "working" claim needs a live owner (an agent whose work is the task, or the owner role's agent while
+the row's heartbeat - any task set, step or commit link - is under POWOS_CLAIM_EXPIRE_H, default 4 h); past that
+with no check queued it goes back to queued, note "claim expired: <owner> silent since <t>"; a task the facts say
+is done (a PASS of a shipped build, its fix landed, nothing else open) closes itself with that evidence. A pushed
+fix with no check reads "needs a check" everywhere until one is queued.
 `powos agents sweep [--dry-run] [--full]` (every 10 min from the Mac: launchd com.powos.board-sweep ->
 tools/agents/board-sweep.sh) reads EVERY open task and open friction each pass: recomputes severity, resolves
 the dead-end states (leaked plan steps on a passed task, a PASS / no-check reason nobody closed, same-title
@@ -1220,6 +1226,8 @@ def task(argv):
         if o.get("state") and o["state"] not in TRUTH:
             die(f"--state is one of {' | '.join(TRUTH)}")
         ids = set(o.get("id") or [])
+        if os.environ.get("POWOS_JANITOR", "1") != "0":
+            janitor(quiet=bool(o.get("json")))   # every list: the stored status follows the truth first
         ws = [w for w in board_truth() if (ids or o.get("all") or w["status"] != "done")
               and (not ids or w["id"] in ids)
               and (not o.get("state") or w["truth"] == o["state"])
@@ -1347,8 +1355,15 @@ def truth(w, held, idle_roles, checks, now_ms=None, ws=()):
         # Accepted, not started: it waits for an agent slot, so it's nobody's orphan (an owner's idle agent doesn't
         # hold it either - the agent that takes it moves it, which sets it working; `task set` below).
         pos = queue_pos(w, ws)
-        return "queued", f"up next{f' (#{pos} in the queue)' if pos else ''}"
-    h = held.get(w["id"]) or (idle_roles.get(owner) if owner and owner not in GENERIC_OWNERS else None)
+        flag = (f"; needs a check: fix pushed ({len(_jl(w.get('commits', '')))} commit(s)), no check"
+                if _jl(w.get("commits", "")) and not checks else "")
+        return "queued", f"up next{f' (#{pos} in the queue)' if pos else ''}{flag}"
+    # A live claim: an agent whose `work` is this task (agentsd records each session's claim from its own `task set
+    # --step/--progress/--plan/--commit`), else - a role's idle agent - only while the row's own heartbeat is inside
+    # the claim window (the user, 11-09: 51 rows "working", 4 moved in 6 h - any live agent of the owner's role kept
+    # every task of that role "working" forever).
+    fresh = now_ms - heartbeat(w) < claim_expire_ms()
+    h = held.get(w["id"]) or (idle_roles.get(owner) if fresh and owner and owner not in GENERIC_OWNERS else None)
     if h:
         return "working", f"{h} has it"
     if status in ("blocked", "waiting"):
@@ -1382,9 +1397,95 @@ def truth(w, held, idle_roles, checks, now_ms=None, ws=()):
         return "no-check", f"no device check possible ({last.get('line', '')[:80]}) - close it"
     commits = _jl(w.get("commits", ""))
     if commits:
-        return "no-check", f"fix pushed ({len(commits)} commit{'s' if len(commits) != 1 else ''}), no phone check queued"
+        return "no-check", f"needs a check: fix pushed ({len(commits)} commit{'s' if len(commits) != 1 else ''}), no phone check queued"
     gone = f"; owner {owner} isn't running" if owner and owner not in GENERIC_OWNERS else ""
     return "stalled", f"nobody on it and no check{gone}"
+
+
+CLAIM_EXPIRE_H = 4.0            # a "working" claim with no heartbeat this long expires (POWOS_CLAIM_EXPIRE_H)
+
+
+def claim_expire_ms():
+    try:
+        h = float(os.environ.get("POWOS_CLAIM_EXPIRE_H") or CLAIM_EXPIRE_H)
+    except ValueError:
+        h = CLAIM_EXPIRE_H
+    return int(max(0.0, h) * 3600_000)
+
+
+def heartbeat(w):
+    """A row's last heartbeat (ms): any task set, step update or commit link moves the module's `activity`."""
+    return max(int(w.get("activity") or 0), int(w.get("updated") or 0))
+
+
+def _when(ms):
+    return time.strftime("%m-%d %H:%M", time.localtime(int(ms) / 1000)) if ms else "ever"
+
+
+def janitor_decide(ws, checks, agents, now_ms=None):
+    """The board's janitor (the user, 11-09: "fix the issue where the board becomes stale" - 51 rows said working, 4
+    had moved in 6 h; "a lot has been done just not marked as such"). Pure: [(kind, id, why, (reducer, *args))] for
+    the stored status to follow the truth, from the same facts as truth():
+      done    - open (working / queued / waiting), nothing else open on it, and the facts say done (a PASS of a shipped
+                build with the fix landed): closed with that evidence in the note - never over the user's own latest
+                "still broken" (check `you` FAIL), never a manager-owned row (the manager's own, left alone);
+      expired - status working, no live claim (no agent holds it, no check queued or running) and no heartbeat for
+                claim_expire_ms(): back to queued, note "claim expired: <owner> silent since <t>" (+ "needs a check"
+                when its fix is pushed with no check at all).
+    awaiting-check rows keep their claim: the verify queue holds them until the result, which then decides."""
+    now_ms = now_ms or int(time.time() * 1000)
+    held, idle_roles = holders(agents)
+    by = checks_by_task(checks)
+    out = []
+    for w in ws:
+        st, owner = w.get("status") or "working", (w.get("owner") or "")
+        if st in ("done", "blocked") or owner == "manager":
+            continue
+        cs = by.get(w["id"], [])
+        if st in ("working", "queued", "waiting") and not held.get(w["id"]):
+            # The facts alone: the row as if nobody held it and it were open (queued/waiting is someone's word on
+            # what comes next, not evidence against what already passed).
+            fact, why = truth(dict(w, status="working", owner=""), {}, {}, cs, now_ms, ws)
+            mine = [c for c in cs if c.get("name") == "you" and c.get("state") in ("PASS", "FAIL")]
+            if fact == "done" and not (mine and mine[-1]["state"] == "FAIL"):
+                out.append(("done", w["id"], why, ("work_set", w["id"], "", "", "done", f"board: done - {why}"[:280], "")))
+                continue
+        if st != "working":
+            continue
+        t, why = truth(w, held, idle_roles, cs, now_ms, ws)
+        beat = heartbeat(w)
+        if t in ("working", "awaiting-check", "done") or now_ms - beat < claim_expire_ms():
+            continue
+        who = owner or "nobody"
+        note = f"claim expired: {who} silent since {_when(beat)}"
+        if why.startswith("needs a check"):
+            note += f"; {why}"
+        elif t == "no-check":
+            note += f"; {why}"
+        out.append(("expired", w["id"], note, ("work_set", w["id"], "", "", "queued", note[:280], "")))
+    return out
+
+
+def janitor(now_ms=None, ws=None, checks=None, agents=None, quiet=False):
+    """Runs janitor_decide on the live board and applies it (one refused write - the module's own done rule - never
+    stops the rest). Returns the decisions applied. powos-agentsd runs it periodically; every `task list` runs it."""
+    ws = rows() if ws is None else ws
+    if checks is None:
+        try:
+            checks = table("work_check")
+        except (Down, SystemExit):
+            checks = []
+    agents = live_agents(now_ms) if agents is None else agents
+    done = []
+    for kind, wid, why, c in janitor_decide(ws, checks, agents, now_ms):
+        try:
+            call(*c)
+        except SystemExit:
+            continue
+        done.append((kind, wid, why))
+        if not quiet:
+            print(f"board janitor: {wid}: {kind} - {why}", file=sys.stderr)
+    return done
 
 
 def queue_of(ws):
@@ -2489,6 +2590,23 @@ def main(argv):
         return 0
     argv = inline_stdin(argv)
     sub = {"check": check_cmd, "checks": check_cmd, "ask": ask_cmd, "asks": ask_cmd, "friction": friction_cmd}
+    if argv[0] == "janitor":   # powos-agentsd's periodic pass (and by hand): the stored status follows the truth
+        o, _ = opts(argv[1:], ["dry-run!"])
+        try:
+            if o.get("dry-run"):
+                ws = rows()
+                try:
+                    cs = table("work_check")
+                except (Down, SystemExit):
+                    cs = []
+                for kind, wid, why, _c in janitor_decide(ws, cs, live_agents()):
+                    print(f"{wid}: {kind} - {why}")
+            else:
+                n = janitor(quiet=True)
+                print(f"board janitor: {len(n)} row(s) moved" + "".join(f"\n  {w}: {k} - {y}" for k, w, y in n))
+        except Down as e:
+            die(f"the powos-agents module isn't reachable at {SERVER} ({e})")
+        return 0
     if argv[0] in sub or argv[0] == "sweep":
         if argv[0] == "check" and argv[1:2] == ["scan"]:
             check_cmd(argv[1:])   # local: the Mac's queue dir

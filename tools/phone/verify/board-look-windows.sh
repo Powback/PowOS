@@ -20,6 +20,11 @@
 #   split-pair    (multitasking-split-pairs-as-one-app-combined-ico, 9db906b9): Android's split of Calculator + Chrome by
 #                 the bridge's tasks.split (the switcher's own call): the switcher shows ONE card for them, one combined
 #                 icon holding both icons, stacked folded / side by side unfolded; neither app has its own card;
+#   pair-entity   (split-apps-a-split-pair-is-one-app-everywhere-sw): the same split is ONE app everywhere - the page's
+#                 pair (ui/splitpair.ts livePair) has both apps; Home: the dock has ONE group cell for it (both icons)
+#                 and no cell of either app's own; a real tap on that cell -> the split back (both tasks on screen,
+#                 split); both tasks closed (tasks.remove, the switcher swipe's call) -> the recent apps still show ONE
+#                 pair entry (dock recents) and neither app alone; a real tap on it -> both apps up again, split;
 #   split-lr      (split-screen-side-by-side-left-right-on-the-unfo): unfolded only (SKIP with reason when folded - not
 #                 forced open): the same split is left/right: WMShell mIsLeftRightSplit=true and the tasks side by side;
 #   term-fill     (phone-terminal-sessions-fill-the-screen-tmux-siz, e47ff321): a PowOS terminal session opened view-only
@@ -55,15 +60,15 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/e2e-lib.sh"
 CASE=${1:-}; shift || true
-case "$CASE" in tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size|relaunch|snap-fill|multi-instance|calc-density) ;;
-  *) echo "usage: board-look-windows.sh tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|split-lr|term-fill|window-page|chrome-size|relaunch|snap-fill|multi-instance|calc-density [--round R]"; exit 2 ;; esac
+case "$CASE" in tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|pair-entity|split-lr|term-fill|window-page|chrome-size|relaunch|snap-fill|multi-instance|calc-density) ;;
+  *) echo "usage: board-look-windows.sh tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|pair-entity|split-lr|term-fill|window-page|chrome-size|relaunch|snap-fill|multi-instance|calc-density [--round R]"; exit 2 ;; esac
 e2e_args "$@"
 e2e_init "lookw-$CASE"
 CALC=${TEST_APP:-com.oneplus.calculator} CHROME=com.android.chrome
 # The split cases' second app when Chrome is the user's (already has a task); closed on exit like Chrome.
 SPLIT_ALT="com.oneplus.note com.oneplus.deskclock"; E2E_APPS="$E2E_APPS|${SPLIT_ALT// /|}"
 # The split cases run in the fold the phone is in (split-lr SKIPs folded); the window cases need the unfolded home.
-case $CASE in split-pair|split-lr) e2e_setup ;; *) e2e_setup inner ;; esac
+case $CASE in split-pair|pair-entity|split-lr) e2e_setup ;; *) e2e_setup inner ;; esac
 # Closed on any exit, on top of e2e_restore: the session view, Linux full screen, the switcher.
 OPENED_TERM=0
 lookw_cleanup() {
@@ -236,10 +241,43 @@ startfull() { local c before id; c=$(sh_ "cmd package resolve-activity --brief -
   before=$(tasks); sh_ "am start -W --windowingMode 1 --display 0 -n $c >/dev/null"; sleep 2
   id=$(tasks | while read -r i p v; do grep -q "^$i " <<<"$before" || { grep -q "$1" <<<"$p" && echo "$i"; }; done | head -1)
   echo "${id:-none}"; }
+SP='importShim("./ui/splitpair.ts")'
+# onscreen <task>: its bounds on screen (4 numbers) - "1" when it shows, else "0".
+onscreen() { local b; b=$(tbounds "$1"); set -- $b; [ $# -ge 4 ] && [ "$3" -gt "$1" ] && echo 1 || echo 0; }
+# splitup: both split tasks on screen and WM Shell's split pair them again (the page's livePair) - "1 1 <pair keys>".
+splitup() { echo "$(onscreen "$T1") $(onscreen "$T2") $(ev "$SP.then(m=>m.livePair.value?m.livePair.value.ids.length:0)")"; }
+# pair_entity: the split pair as one app - dock group, recent pair, launched together (see the case's header).
+pair_entity() {
+  local lp k1 k2 g r pt1 own
+  lp=$(ev "$SP.then(m=>JSON.stringify(m.livePair.value))"); log "livePair: $lp"
+  k1=$(appkey "$CALC"); k1=${k1%%|*}; k2=$(appkey "$SECOND"); k2=${k2%%|*}
+  case $lp in *"$k1"*"$k2"*|*"$k2"*"$k1"*) pass "the page's pair has both apps ($lp)" ;; *) fail "the page's pair isn't Calculator + $SECOND: $lp (keys $k1 $k2)"; return ;; esac
+  sh_ "input keyevent KEYCODE_HOME"; sleep 2.5; chk home; step home "home with the split in the background"
+  g=$(ev "(()=>{const d=[...document.querySelectorAll('.home .dock .app[data-key]')],g=d.filter(a=>a.dataset.key.startsWith('split:'));return JSON.stringify({groups:g.length,icons:g[0]?g[0].querySelectorAll('.task-icon').length:0,own:d.filter(a=>a.dataset.key==='$k1'||a.dataset.key==='$k2').map(a=>a.dataset.key)})})()")
+  log "dock: $g"
+  case $g in *'"groups":1,"icons":2,"own":[]'*) pass "the dock has one cell for the pair, both icons, no own cells ($g)" ;; *) fail "the dock isn't one cell for the pair: $g" ;; esac
+  pt1=$(pt "[...document.querySelectorAll('.home .dock .app[data-key]')].find(a=>a.dataset.key.startsWith('split:'))")
+  if isxy "$pt1"; then tapat "$pt1" "the dock's pair cell"; sleep 3; chk dock-tap; step dock-tap "the dock's pair cell tapped"
+    r=$(splitup); case $r in "1 1 2") pass "the split came back from the dock ($r)" ;; *) fail "the dock's pair cell didn't bring the split back (on screen / pair: $r)" ;; esac
+  else fail "no dock pair cell to tap ($pt1)"; fi
+  # Closed together: the switcher swipe's call for both (tasks.remove).
+  hcall tasks.remove "[$T1]" "v=>String(v)" >/dev/null; hcall tasks.remove "[$T2]" "v=>String(v)" >/dev/null; sleep 2.5
+  sh_ "input keyevent KEYCODE_HOME"; sleep 2; chk closed; step closed "both apps closed"
+  inview "[...document.querySelectorAll('.home .dock .app.pair')].find(a=>a.dataset.group.includes('$k1')&&a.dataset.group.includes('$k2'))" >/dev/null
+  own=$(ev "(()=>{const d=[...document.querySelectorAll('.home .dock .app[data-key]')];return JSON.stringify({pairs:d.filter(a=>a.classList.contains('pair')&&a.dataset.group.includes('$k1')&&a.dataset.group.includes('$k2')).length,own:d.filter(a=>a.dataset.key==='$k1'||a.dataset.key==='$k2').map(a=>a.dataset.key)})})()")
+  log "recents: $own"
+  case $own in *'"pairs":1,"own":[]'*) pass "the recent apps show the pair as one entry, neither app alone ($own)" ;; *) fail "the recent apps don't show the pair as one entry: $own" ;; esac
+  pt1=$(pt "[...document.querySelectorAll('.home .dock .app.pair')].find(a=>a.dataset.group.includes('$k1')&&a.dataset.group.includes('$k2'))")
+  if isxy "$pt1"; then tapat "$pt1" "the recent pair"; sleep 4; chk pair-tap; step pair-tap "the recent pair tapped"
+    T1=$(tasks | awk -v p="$CALC" 'index($2,p){print $1; exit}'); T2=$(tasks | awk -v p="$SECOND" 'index($2,p){print $1; exit}')
+    r=$(splitup); log "after the pair's tap: Calculator ${T1:-none}, $SECOND ${T2:-none}: $r"
+    case $r in "1 1 2") pass "the pair launched both apps together, split ($r)" ;; *) fail "the recent pair didn't launch both apps split (on screen / pair: $r)" ;; esac
+  else fail "no recent pair entry to tap ($pt1)"; fi
+}
 if [ "$CASE" = split-lr ] && [ "$W" -le 2000 ]; then
   step folded "the phone is folded (${W}x${H})"
   note "SKIP: folded - left/right split is the unfolded screen's (not forced open); re-run unfolded"
-elif [ "$CASE" = split-pair ] || [ "$CASE" = split-lr ]; then
+elif [ "$CASE" = split-pair ] || [ "$CASE" = pair-entity ] || [ "$CASE" = split-lr ]; then
   # The second app: Chrome unless it already has a task (the user's - am start only brings that one up, no new task,
   # and splitting it would move the user's window), else the first of Notes / Clock with none.
   SECOND=""; for p in $CHROME $SPLIT_ALT; do grep -q " $p/" <<<"$TASKS0" || { SECOND=$p; break; }; done
@@ -256,7 +294,9 @@ elif [ "$CASE" = split-pair ] || [ "$CASE" = split-lr ]; then
     if [ $# -lt 8 ]; then fail "the split didn't come up (bounds '$b1' / '$b2', tasks.split $r)"
     else
       side=0; { [ "$3" -le $(($5 + 2)) ] || [ "$7" -le $(($1 + 2)) ]; } && side=1
-      if [ "$CASE" = split-lr ]; then
+      if [ "$CASE" = pair-entity ]; then
+        pair_entity
+      elif [ "$CASE" = split-lr ]; then
         [ "$shl" = mIsLeftRightSplit=true ] && [ $side = 1 ] && pass "left/right: $shl, $b1 | $b2" || fail "unfolded split not left/right: ${shl:-no line}, $b1 / $b2"
       else
         switcher; step switcher "the switcher with the split pair"

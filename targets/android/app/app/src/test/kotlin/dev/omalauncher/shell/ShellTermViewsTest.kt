@@ -13,6 +13,35 @@ class ShellTermViewsTest {
         for (m in listOf("install", "readInput", "append", "close")) assert(m in methods) { "RemoteSessionBridge.$m missing" }
     }
 
+    @Test fun theWholeSignInLinkOverItsRows() {
+        // Claude Code's sign-in link, query string and all, laid over 3 rows of a 40-column terminal that only fill
+        // the width (no wrap flag: tmux redraws with cursor moves) - the user 11-09: "it ends after the question mark".
+        val url = "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c&redirect_uri=https%3A%2F%2Fx&state=ab#c"
+        val cols = 40
+        val line = "  $url"
+        val rows = listOf("Browser didn't open? Use the url below:") + line.chunked(cols) + listOf("", "Paste code here if prompted >")
+        val wraps = rows.map { false }
+        // A tap on its first row, on its last, and on the '?'.
+        assertEquals(url, ShellTermViews.linkAt(ShellTermViews.Companion.Rows(rows, wraps, cols), 1, 5))
+        assertEquals(url, ShellTermViews.linkAt(ShellTermViews.Companion.Rows(rows, wraps, cols), 3, 2))
+        val q = line.indexOf('?')
+        assertEquals(url, ShellTermViews.linkAt(ShellTermViews.Companion.Rows(rows, wraps, cols), 1 + q / cols, q % cols))
+        // Not on it: the text before, the blank margin, the prompt.
+        assertNull(ShellTermViews.linkAt(ShellTermViews.Companion.Rows(rows, wraps, cols), 0, 3))
+        assertNull(ShellTermViews.linkAt(ShellTermViews.Companion.Rows(rows, wraps, cols), 1, 0))
+        assertNull(ShellTermViews.linkAt(ShellTermViews.Companion.Rows(rows, wraps, cols), 5, 3))
+    }
+
+    @Test fun aFullRowContinuesAndPunctuationStaysOut() {
+        val rows = listOf("see https://example.com/a?b=1", "&c=2).", "next")
+        val flat = listOf(false, false, false)
+        // 29 columns: the first row is full, so the link goes on; 40: it ends there.
+        assertEquals("https://example.com/a?b=1&c=2", ShellTermViews.linkAt(ShellTermViews.Companion.Rows(rows, flat, 29), 1, 1))
+        assertEquals("https://example.com/a?b=1", ShellTermViews.linkAt(ShellTermViews.Companion.Rows(rows, flat, 40), 0, 6))
+        assertNull(ShellTermViews.linkAt(ShellTermViews.Companion.Rows(rows, flat, 40), 1, 1))
+        assertEquals("https://en.wikipedia.org/wiki/A_(b)", ShellTermViews.trimLink("https://en.wikipedia.org/wiki/A_(b)."))
+    }
+
     @Test fun pageColorsToArgb() {
         assertEquals(0x80112233.toInt(), ShellTermViews.parseColor("#11223380"))
         assertEquals(0x00000000, ShellTermViews.parseColor("#00000000"))
