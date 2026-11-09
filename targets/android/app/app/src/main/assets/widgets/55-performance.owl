@@ -15,7 +15,7 @@ widget "performance" {
   source ap = android.perf every 5s
 
   let v = words(raw ?? "").map(w => num(w, -1))
-  let has = raw != null && len(v) >= 8
+  let has = raw != null && v[7] != null
   let gpu = has && v[0] >= 0 ? v[0] : ap.gpu
   let gpuLocked = gpu == null && ap.gpuNeedsRoot == true
   let mhz = has && v[1] > 0 ? v[1] / 1000000 : null
