@@ -293,6 +293,13 @@
 }
 @keyframes scroll-fade-t { from { --scroll-fade-t: 0px; } to { --scroll-fade-t: var(--scroll-fade); } }
 @keyframes scroll-fade-b { from { --scroll-fade-b: var(--scroll-fade); } to { --scroll-fade-b: 0px; } }
+/* A/B arms for the perf check only (perf-scenarios.sh --ab scroll-fade=static|off, set over CDP on the page's root;
+   the shell never sets it): static = the same mask at a fixed 24px both ends, never scroll-driven (no per-frame mask
+   repaint); off = no mask. Unset (always, outside that check): the scroll-driven fade above. 11-09 shade-scroll jank
+   (job 20261109-173029-97865): ~25 ms frames only within the first 24px of scrollTop - the fade-t range. */
+:root[data-scroll-fade="static"] :is(.drawer-list, .notif-list) { animation: none; --scroll-fade-t: var(--scroll-fade); --scroll-fade-b: var(--scroll-fade); }
+:root[data-scroll-fade="off"] :is(.drawer-list, .notif-list) { animation: none; -webkit-mask-image: none; mask-image: none; }
+:root[data-overscroll="none"] :is(.drawer-list, .notif-list) { overscroll-behavior: none; }
 
 /*
  * Page dots (ui/pagedots.tsx): home's pages and the launcher's, one style - one row on home (the dock has none of its own). Each dot's

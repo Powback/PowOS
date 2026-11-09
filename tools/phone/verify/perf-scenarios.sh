@@ -12,7 +12,10 @@
 # (the shade is its own page, the meter takes only its renders), so the shade page's own rAF deltas are recorded beside
 # it with the list's scroll events, and the frames the list moved in are gated: FAIL when their fps p5 < 55 or any is
 # > 33 ms, or when the list didn't scroll (too few notifications). Long frames between the swipes are listed only.
-#   perf-scenarios.sh [--round R] [--only swipe|launcher|shade|shade-scroll] [--reps N]
+#   perf-scenarios.sh [--round R] [--only swipe|launcher|shade|shade-scroll] [--reps N] [--ab NAME=VALUE ...]
+# --ab (shade-scroll's A/B arms, repeatable): data-NAME="VALUE" on the shade page's root for the recording only, removed
+# after - scroll-fade=static|off (the list's scroll-driven edge mask: fixed / none), overscroll=none (no stretch).
+# shell.css matches only those attributes; nothing in the shell sets them. No --ab: the shipped behaviour.
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/e2e-lib.sh"
 # The user's finger away >= PERF_IDLE_S (600) by the touch panels' IRQs (idle.sh); e2e's own gate (dumpsys power's
@@ -20,8 +23,13 @@ here=$(cd "$(dirname "$0")" && pwd)
 PERF_IDLE_S=${PERF_IDLE_S:-600}
 s=$("$T/idle.sh"); i=${s#idle=}; i=${i%% *}
 [ "${i:-0}" -ge "$PERF_IDLE_S" ] || { echo "SKIP: user touched the phone ${i:-?} s ago (need $PERF_IDLE_S): $s"; exit 3; }
-ONLY=; REPS=3; ARGS=()
-while [ $# -gt 0 ]; do case "$1" in --only) ONLY=$2; shift 2 ;; --reps) REPS=$2; shift 2 ;; *) ARGS+=("$1"); shift ;; esac; done
+ONLY=; REPS=3; ARGS=(); AB=()
+while [ $# -gt 0 ]; do case "$1" in --only) ONLY=$2; shift 2 ;; --reps) REPS=$2; shift 2 ;; --ab) AB+=("$2"); shift 2 ;; *) ARGS+=("$1"); shift ;; esac; done
+for a in "${AB[@]}"; do [[ $a =~ ^[a-z-]+=[a-z]+$ ]] || { echo "perf-scenarios: --ab NAME=VALUE (lowercase), got '$a'"; exit 2; }; done
+# ab_js on|off: the JS that sets / removes the --ab attributes on a page's root.
+ab_js() { local a js=""; for a in "${AB[@]}"; do
+  if [ "$1" = on ]; then js+="r.setAttribute('data-${a%%=*}','${a#*=}');"; else js+="r.removeAttribute('data-${a%%=*}');"; fi; done
+  echo "(()=>{const r=document.documentElement;${js}return [...r.attributes].filter(x=>x.name.startsWith('data-')).map(x=>x.name+'='+x.value).join(' ')||'none'})()"; }
 e2e_args "${ARGS[@]}"
 e2e_init perf-scenarios
 PDIRF=/data/data/com.powos.app/files/run/powos-ai-shared
@@ -29,6 +37,8 @@ newest() { sh_ "ls -t $PDIRF 2>/dev/null | grep -m1 '^perf-'"; }
 METER0=
 meter_back() { [ -n "$METER0" ] && ev "importShim('./bridge.ts').then(b=>b.powos.store.set('perf.meter',$METER0)).then(()=>'ok')" >/dev/null; METER0=; }
 e2e_setup
+# An --ab arm never outlives the run (an abort too): its attributes off the shade page's root, then e2e's own abort.
+[ ${#AB[@]} -gt 0 ] && trap 'rc=$?; ev "$(ab_js off)" shade >/dev/null 2>&1; (exit $rc); e2e_abort' EXIT
 METER0=$(ev 'importShim("./bridge.ts").then(b=>b.powos.store.get("perf.meter")).then(v=>JSON.stringify(v??null))')
 case $METER0 in null|\{*) ;; *) METER0= ;; esac
 log "perf.meter at start: ${METER0:-unreadable}"
@@ -190,12 +200,14 @@ sc_shade_scroll_run() {
   # other order spent every first swipe overpulling an end that can't scroll.
   local y0=$t y1=$b w0="finger down" w1="finger up"
   [ "$6" = 0 ] && { y0=$b y1=$t w0="finger up" w1="finger down"; }
+  [ ${#AB[@]} -gt 0 ] && log "shade-scroll: A/B arm ${AB[*]} (shade root: $(ev "$(ab_js on)" shade))"
   rec_on; ev "$SS_ON" shade >/dev/null
   for i in $(seq 1 "$REPS"); do
     chk shadescroll$i; swipe "$x" "$y0" "$x" "$y1" 300 "the notification list scrolled ($w0)" || break; sleep 1
     chk shadescroll$i-back; swipe "$x" "$y1" "$x" "$y0" 300 "the notification list scrolled back ($w1)" || break; sleep 1
   done
   ev "$SS_OFF" shade > "$OUT/shade-scroll-raf.json"
+  [ ${#AB[@]} -gt 0 ] && log "shade-scroll: A/B arm removed (shade root: $(ev "$(ab_js off)" shade))"
   rec_off shade-scroll
   shade_shut "shade-scroll"
   step shade-scroll "notification list scrolled down and up ($REPS times)"
