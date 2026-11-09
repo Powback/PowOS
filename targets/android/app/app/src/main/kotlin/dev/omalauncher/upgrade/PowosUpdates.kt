@@ -507,7 +507,8 @@ internal object Store {
 
     fun sha256(file: File): String {
         val md = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { s -> DigestInputStream(s, md).use { it.copyTo(java.io.OutputStream.nullOutputStream()) } }
+        val buf = ByteArray(65536)
+        DigestInputStream(file.inputStream(), md).use { s -> while (s.read(buf) >= 0) Unit }
         return md.digest().joinToString("") { "%02x".format(it) }
     }
 }
