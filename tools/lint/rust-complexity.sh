@@ -32,7 +32,7 @@ if [ ${#apps[@]} = 0 ]; then for m in "$ROOT"/apps/*/module/Cargo.toml; do [ -f 
 # at most the CPUs it has (a 4-CPU runner refuses --cpus 6).
 arch=$(docker version -f '{{.Server.Arch}}' 2>/dev/null) || { echo "FAIL rust complexity: docker isn't reachable (GATE_LINT=0 skips it explicitly)"; exit 1; }
 cpus=$(docker info -f '{{.NCPU}}' 2>/dev/null); cpus=${cpus:-6}; [ "$cpus" -gt 6 ] && cpus=6
-raw=$(docker run --rm --platform "linux/$arch" --cpus "$cpus" --memory 8g -v powos-apps-cargo:/cache -v "$ROOT/apps:/apps:ro" \
+raw=$(docker run --rm --security-opt label=disable --platform "linux/$arch" --cpus "$cpus" --memory 8g -v powos-apps-cargo:/cache -v "$ROOT/apps:/apps:ro" \
   -v "$HERE:/lint:ro" -e CARGO_HOME=/cache/cargo -e CLIPPY_CONF_DIR=/lint -e APPS="${apps[*]}" rust:1-bookworm bash -c '
   rustup component list --installed | grep -q clippy || rustup component add clippy >/dev/null 2>&1
   rustup target list --installed | grep -q wasm32-unknown-unknown || rustup target add wasm32-unknown-unknown >/dev/null 2>&1
