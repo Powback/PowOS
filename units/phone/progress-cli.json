@@ -1,0 +1,14 @@
+{
+  "id": "progress-cli",
+  "name": "powos progress",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "purpose": "`powos progress item add|set|list|rm`: the manager's edits to the Progress app's daily-driver checklist (apps/powos-progress); a command-line tool, nothing running",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (lib/apps/powos-progress-cli)",
+  "files": [
+    "/usr/lib/powos/apps/powos-progress-cli"
+  ],
+  "remove": {
+    "commands": []
+  }
+}

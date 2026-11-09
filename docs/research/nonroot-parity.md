@@ -30,7 +30,7 @@ feature calls `RootedGuest` - `su`, which isn't there.
 | 5 | Terminals (terminal tiles, Terminal app, `terms`/tmux list) | works | via Guest (11-03 nonroot-session) | `ShellTerminals`/`TerminalTiles` run `su -c powos-run.sh`; Omalauncher's foot-on-Wayland path is off with `onLinuxReady` | PtyTerminal on `liblotfixrun.so -c powos-tmux-shell` (EngineGuest) |
 | 6 | PowOS AI page chat / manager, agent mail, comms, "send to coordinator" | works | via Guest (11-03 nonroot-session) | `PowosAiChat`, `AgentMail`, `AgentsSpool`, `ShellBridge` call `RootedGuest` only | the same calls through EngineGuest once the image is installed; a clear "needs the PowOS Linux image" state before |
 | 7 | Android app web windows (floating/tiled Android apps on virtual displays) | works | degraded | `WebWindows` uses `RootShell` for `am start --display`, `move-stack`, input injection, SurfaceFlinger dumps | partly needs-root-by-nature (launching other apps on our virtual display); fallback: open as a normal Android task / Android's own freeform, say so |
-| 8 | Performance widget numbers (GPU busy, thermal, /proc/stat) | works | degraded (zeros) | untrusted apps can't read `/proc/stat`, kgsl or thermal zones (SELinux), root or not inside fakechroot | Android APIs where they exist (`HardwarePropertiesManager` is system-only; `PowerManager.getThermalHeadroom`, `BatteryManager`); mark the rest "needs root" in the tile |
+| 8 | Performance widget numbers (GPU busy, thermal, /proc/stat) | works | degraded (zeros) | untrusted apps can't read `/proc/stat`, kgsl or thermal zones (SELinux), root or not inside fakechroot | DONE 11-09 (board-nonroot): `android.perf` - CPU load from the cores' cpuidle times and every thermal zone, both readable by any app (razr, unrooted); the GPU's busy % says "root" (kgsl denied) |
 | 9 | Game boost (big-core clocks, uclamp), system float overlay, force-stop background apps, Android settings writes (web window tiles), Android system colours from the theme, wallpaper root shot, native settings index | works | needs root by nature | `RootShell` for sysfs/cgroups/`cmd overlay`/`am force-stop`/`settings put` | keep off without root; where a `pm grant WRITE_SECURE_SETTINGS` (one adb line) would do, offer it |
 | 10 | Home grid, dock, search, drawer (Android apps), folders, Android app widgets, weather widget (http), quick launchers | works | works | Android APIs + the web shell only | - |
 | 11 | Notifications, shade, control center toggles, lock face, keyboard, assist, dictation | works | expected to work (no root in the path; listener/accessibility grants) | Android permissions | verify on an unrooted device (no emulator path checked here) |
@@ -297,3 +297,55 @@ hour; it is the task's next step.
   SessionService's `ARCH_EXCLUDE_EXTRA`), and owl-check/owl-send/owl-recon are in `/usr/local/bin`. JVM `EngineHomeTest`.
 - Still open: no public module builder (a module app still needs `powos app builder` or cargo + wasm32 on the phone),
   example App API specs for `powos compose blocks`, and `.preview/` PNGs on no-root.
+
+## 11-09 (board-nonroot): what an unrooted app can read, and the base image's gaps
+
+Read on the razr fold (unrooted, `run-as com.powos.app` = the app's own SELinux domain), base image only:
+
+| read | result |
+|---|---|
+| `/proc/stat`, `/proc/loadavg`, kgsl `gpu_busy_percentage` / `temp` | denied |
+| every `/sys/class/thermal/thermal_zone*/{type,temp}` (cpu-*, gpuss-*, back_temp, battery, ...) | readable |
+| `/sys/devices/system/cpu/cpu*/cpuidle/state*/time`, `cpufreq/scaling_cur_freq` | readable |
+| `/usr/lib/spacetimedb/2.12.0/` in the base | **empty** (the package went to the apps pack): no SpacetimeDB, so no island DBs, no agents board |
+| `/usr/bin/tmux` in the base | **missing** (pack): powos-tmux-shell falls back to a bare shell, no `terms` list |
+| `/usr/bin/gh` | **not in the image at all**: `powos login github` / `powos self push` can't sign in |
+
+Changes:
+- `widgets/runtime/Perf.kt` + `WidgetServices.android("perf")`: `source p = android.perf every 5s` (`{cpu, gpu,
+  gpuNeedsRoot, cpuTemp, gpuTemp, skinTemp, battTemp}`); `55-performance.owl` 1.2: its Linux read is `optional` and
+  writes -1 for what it can't read (a missing word shifted every later number), each number falls back to
+  android.perf, the GPU says "root" where nothing can read it. JVM `PerfTest`, `ExamplesTest.performanceWorksWithoutLinux`.
+- `rootfs-packs.conf`: `roots spacetimedb github-cli tmux` (spacetimedb left the apps pack line);
+  `install-powos-android.sh` installs github-cli. Takes effect with the next base build + publish; a device on the
+  old base gets SpacetimeDB/tmux by adding the apps pack (Settings > Storage).
+- `FreeformTasks.applyHomeFocus`: a refused home-focus WindowContainerTransaction (no MANAGE_ACTIVITY_TASKS without
+  root) is asked once, not on every windows/typing change (136 lines in the razr's window-log.txt).
+- Lock face on the razr: 3 of 3 starts in the 11-09 logcat allowed (`BAL_ALLOW_NON_APP_VISIBLE_WINDOW`: the overlay
+  grant + a visible PowOS overlay window). A screen-off with no PowOS overlay showing can still be refused (the 11-08
+  `BAL_BLOCK`, result 102): `LockFace.show` (no root) posts the same face as a silent full-screen-intent notification
+  when it isn't up 400 ms later - only where Android lets PowOS use full-screen intents (Android 14+ special access;
+  else a heads-up per screen-off, so nothing is posted and the log says so); cancelled as the face shows / on unlock.
+- **adb server on 5037 (found by board-close-waiting)**: any `adb` call in the image (powos android, powos-deviced,
+  scrcpy) auto-starts `adb -L tcp:5037 fork-server` - on Android's shared loopback every app could drive it.
+  `SessionService.LOOPBACK_PORTS` is now `3410,3411,5037`: libpowosloopback binds it as `files/run/loopback/5037.sock`
+  (0600) and the image's adb clients reach it unchanged. An adb server already running keeps its TCP port until the
+  session restarts (the APK update does that). Check: `tools/phone/verify/nonroot-ports.sh` (from the Mac, razr) now
+  FAILs on any TCP 3410/3411/5037 listener, on an adb server (`host:version` -> OKAY) on ANY port of PowOS's uid, and
+  on a token-less 2xx from any other listener. 11-09 02:55 before the fix: FAIL (5037 listens, answers OKAY); also
+  listening: 3416 (device agent, paired token), 40777 (Claude Code's local server, 404 without its state).
+- **Every fixed loopback port private (11-09, nonroot-ports)**: instead of growing the list one hole at a time,
+  `LOOPBACK_PORTS` is `3410,3411,5037,loopback`: with `loopback`, libpowosloopback turns ANY bind of a fixed port on
+  127/8 or ::1 in the image into `files/run/loopback/<port>.sock` (0600; a live socket isn't taken over - EADDRINUSE;
+  dual-stack 127.0.0.1+::1 on one port is a HACK left at that), and a loopback connect uses the socket when one
+  exists, else plain TCP (Android's own ports, programs without the preload, a stale file). Left on TCP by design:
+  port 0 (the kernel's pick, handed to someone outside - Claude Code's OAuth callback for the phone's browser) and
+  wildcard/LAN binds (meant for the network, with their own auth). In-app listeners: LoopbackGate (token, 403
+  without), the device agent 3416 (TLS + pairing token). `nonroot-ports.sh` now FAILs on any PowOS-uid listener that
+  doesn't answer a token-less GET with a 4xx (2xx/3xx/5xx, a raw-protocol banner or silence), and on 3416 answering
+  plain HTTP. razr 11-09 (old APK, old base without SpacetimeDB): ports half passes (only 3416 listens; 3410/3411/5037
+  refused); services-up half SKIPs until the new base + APK. Known gap: a static/Go server (no libc, no preload)
+  binding loopback stays TCP - the script catches it.
+- **No services on a base without SpacetimeDB**: `EngineServices.state` said "missing" and kicked nothing, so the App
+  API (python3 only) never started either; now the starter runs in "missing" too (every 10 min at most) and starts
+  what the image has. SpacetimeDB itself comes with the next base (roots above) or the apps pack.

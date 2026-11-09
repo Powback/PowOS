@@ -54,8 +54,11 @@ t0=$(date +%s)
 at() { local w=$(( t0 + $1 - $(date +%s) )); [ $w -gt 0 ] && sleep $w; touched; }
 at 10; log "switcher open"; sh_ "input keyevent KEYCODE_APP_SWITCH"
 at 16; log "switcher closed by the game's card: $([ -n "$TID" ] && hcall tasks.open "[$TID]" || sh_ "input keyevent KEYCODE_BACK")"
-at 26; log "fold: cover (device_state 0)"; sh_ "cmd device_state state 0"
-at 40; log "unfold (device_state 3)"; sh_ "cmd device_state state 3"
+# rebase: the touch-IRQ baseline taken again 3 s after this check's own fold - the other panel's power-up moves its
+# counter with no finger (game-resize.sh's rebase; idle.sh's watcher skips it by the mOverrideState change).
+rebase() { sleep 3; i0=$(irq); }
+at 26; log "fold: cover (device_state 0)"; sh_ "cmd device_state state 0"; rebase
+at 40; log "unfold (device_state 3)"; sh_ "cmd device_state state 3"; rebase
 wait "$SP"; SP=
 sh_ "cat $PD/samples" > "$OUT/samples"; sh_ "cat $PD/kwin.txt" > "$OUT/kwin.txt"; sh_ "rm -rf $PD"
 finish

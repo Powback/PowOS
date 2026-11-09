@@ -27,7 +27,7 @@ import sys
 import time
 
 FIELDS = ("session_name", "session_windows", "session_activity", "session_attached",
-          "pane_title", "pane_current_path", "pane_current_command")
+          "pane_title", "pane_current_path", "pane_current_command", "pane_pid")
 FORMAT = "\t".join("#{%s}" % f for f in FIELDS)
 NAME = re.compile(r"^[A-Za-z0-9_.:-]+$")
 TARGET = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9._:-]+$")
@@ -36,15 +36,41 @@ FRESH_S = 4
 # A refresh that hasn't finished in this long is taken as dead (its lock is ignored).
 LOCK_S = 20
 CACHE = os.path.expanduser(os.environ.get("POWOS_TERMS_CACHE", "~/.cache/powos/terms"))
+# ssh's control socket: a unix socket path has a 108-byte limit, which ~/.cache/.../<40 hex>.ssh plus ssh's own
+# temporary suffix passes on a phone without root (the real path is under /data/user/0/<app>/files/rootfs).
+CONTROL_DIR = os.environ.get("POWOS_TERMS_CONTROL_DIR") or f"/tmp/pt-{os.getuid()}"
 HOSTS_CONF = os.path.expanduser(os.environ.get("POWOS_TERMS_HOSTS_CONF", "~/.config/powos/terms-hosts"))
-# HACK: the Mac's address is a constant until the host directory exists (docs/REMOTE-POWOS.md 2.2, powos-hosts: a
-# host found by name and enrolled key). It is the same login the app builder already uses (powos app builder).
-DEFAULT_LINKS = [("mac", "macback@192.168.50.99")]
+
+
+def owner_conf(key):
+    """$KEY, else KEY=value in the owner config ($POWOS_OWNER_CONF, else /etc/powos/owner.conf, else
+    ~/.config/powos/owner.conf: written when the device pairs with the owner's hub). "" = not configured."""
+    if os.environ.get(key):
+        return os.environ[key]
+    p = os.environ.get("POWOS_OWNER_CONF")
+    for path in [p] if p is not None else ["/etc/powos/owner.conf", os.path.expanduser("~/.config/powos/owner.conf")]:
+        try:
+            with open(path) as f:
+                lines = f.read().splitlines()
+        except OSError:
+            continue
+        val = ""
+        for line in lines:
+            k, sep, v = line.strip().partition("=")
+            if sep and k.strip() == key:
+                val = v.strip()
+        return val[1:-1] if len(val) > 1 and val[0] == val[-1] and val[0] in "\"'" else val
+    return ""
+
+
+# With no terms-hosts file: the links the owner config names (POWOS_TERMS_LINKS="host=user@address,...", the owner's
+# devices: the Mac), else none - a fresh device lists only its own sessions (issue #1).
+DEFAULT_LINKS = [tuple(p.split("=", 1)) for p in owner_conf("POWOS_TERMS_LINKS").split(",") if "=" in p]
 # The Mac's tmux is Homebrew's; a command over ssh gets no login PATH.
 REMOTE_PATH = "PATH=/opt/homebrew/bin:/usr/local/bin:$PATH; "
 # One connection per host, kept a minute: the list every few seconds and an attach reuse it (no new login each time).
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=4", "-o", "ServerAliveInterval=15",
-       "-o", "ControlMaster=auto", "-o", f"ControlPath={CACHE}/%C.ssh", "-o", "ControlPersist=60"]
+       "-o", "ControlMaster=auto", "-o", f"ControlPath={CONTROL_DIR}/%r@%h:%p", "-o", "ControlPersist=60"]
 AGENT_COMMANDS = {"claude", "codex", "aider"}
 
 
@@ -97,19 +123,43 @@ def is_agent(command, title):
     return bool(re.match(r"^[⠀-⣿✳]", title))
 
 
+def real_command(command, pane_pid):
+    """HACK: on a phone without root every program runs through fakechroot's ELF loader, so tmux names them all
+    "ld-linux-aarch64.so.1" (and Claude Code was never seen as an agent). The pane's foreground process (its
+    tty's tpgid) has the loader as argv[0] and the real program as argv[1]. Real fix: a chroot-aware loader that
+    sets the process name (or tmux reading argv). Only this host's /proc can answer; a remote one keeps tmux's name."""
+    if not command.startswith("ld-linux") or not pane_pid.isdigit():
+        return command
+    try:
+        with open(f"/proc/{pane_pid}/stat") as f:
+            tpgid = f.read().rsplit(")", 1)[1].split()[5]
+        with open(f"/proc/{tpgid}/cmdline", "rb") as f:
+            argv = [a.decode(errors="replace") for a in f.read().split(b"\0") if a]
+    except (OSError, IndexError):
+        return command
+    rest = argv[1:] if argv and os.path.basename(argv[0]).startswith("ld-linux") else argv
+    # An interpreter (node for claude, python3 for a script): the script it runs names the program.
+    for a in rest[:3]:
+        name = os.path.basename(a)
+        if name and not name.startswith("-") and name not in ("node", "python3", "python", "bash", "sh"):
+            return name
+    return os.path.basename(rest[0]) if rest else command
+
+
 def parse(text, host):
     rows = []
     for line in text.splitlines():
         f = line.split("\t")
-        if len(f) < len(FIELDS) or not NAME.match(f[0]):
+        if len(f) < len(FIELDS) - 1 or not NAME.match(f[0]):   # pane_pid (the last) may be missing: an older tmux line
             continue
+        cmd = real_command(f[6], f[7] if len(f) > 7 else "")
         rows.append({
             "host": host, "name": f[0],
             "windows": int(f[1]) if f[1].isdigit() else 0,
             "activity": int(f[2]) if f[2].isdigit() else 0,
             "attached": f[3] not in ("", "0"),
-            "title": f[4], "path": f[5], "command": f[6],
-            "agent": is_agent(f[6], f[4]),
+            "title": f[4], "path": f[5], "command": cmd,
+            "agent": is_agent(cmd, f[4]),
         })
     return rows
 
@@ -132,7 +182,7 @@ def read_local():
 
 
 def remote_cmd(target, command):
-    os.makedirs(CACHE, exist_ok=True)
+    os.makedirs(CONTROL_DIR, mode=0o700, exist_ok=True)
     return SSH + [target, REMOTE_PATH + command]
 
 
@@ -293,7 +343,7 @@ def cmd_attach(args):
     tmux = ["tmux", "-u", "attach", "-t", name]
     if local:
         os.execvp("tmux", tmux)
-    os.makedirs(CACHE, exist_ok=True)
+    os.makedirs(CONTROL_DIR, mode=0o700, exist_ok=True)
     os.execvp("ssh", SSH[:1] + ["-t"] + SSH[1:] + [target, REMOTE_PATH + "exec " + " ".join(shlex.quote(a) for a in tmux)])
 
 

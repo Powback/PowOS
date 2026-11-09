@@ -74,6 +74,17 @@ bg() { local name=$1; shift; ( "$@" ) > "$R/$name.log" 2>&1 & }
 # dir and display socket; rooted/powos-deploy.sh). Root keeps only the system bus and the phone's stand-in services.
 AS_USER=(setpriv --reuid=powos --regid=powos --init-groups -- env HOME=/home/powos USER=powos LOGNAME=powos)
 as_user() { "${AS_USER[@]}" "$@"; }
+# keep <cmd...>: runs it again whenever it exits (a crash, a kill), 2 s back-off doubling to 60 s, back to 2 s after a
+# run of 60 s or more. Lives in the session's process group: the next session's start ends it with everything else.
+keep() {
+  local d=2 t rc
+  while :; do
+    t=$(date +%s); "$@"; rc=$?
+    [ $(( $(date +%s) - t )) -ge 60 ] && d=2
+    echo "$(date '+%F %T') keep: $* exited (rc $rc), again in ${d} s"
+    sleep $d; d=$(( d * 2 > 60 ? 60 : d * 2 ))
+  done
+}
 wait_sock() { for _ in $(seq 100); do [ -S "$1" ] && return 0; sleep 0.1; done; return 1; }
 
 # D-Bus: the session bus, and a system bus of PowOS's own for the stand-in hardware services (same config and
@@ -94,7 +105,9 @@ wait_sock "$R/bus"
 bg android-session-services as_user android-session-services
 # Unified sleep's session side: Linux apps unfocused for 10 min are frozen, thawed on focus or D-Bus (the file; limits:
 # powos-sleepd puts it in its own groups).
-bg powos-sleep-gui as_user powos-sleep-gui
+# Kept running (keep): 11-08 16:55 it died unseen (no "down" in its log: a KILL) and nothing started it again - no game
+# launch was announced after that, so a game started from Steam's own UI got no placeholder (steam-launch-placeholder).
+bg powos-sleep-gui keep as_user powos-sleep-gui
 as_user sh -c 'K=$HOME/.local/share/keyrings; mkdir -p "$K" && chmod 700 "$K"
   [ -f "$K/login.keyring" ] || printf "[keyring]\ndisplay-name=Login\nctime=0\nmtime=0\nlock-on-idle=false\nlock-after=false\n" > "$K/login.keyring"
   [ -f "$K/default" ] || printf login > "$K/default"'

@@ -70,6 +70,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.collectLatest
 import dev.omalauncher.theme.SystemTheme
+import dev.omalauncher.ui.IconTheme
+import dev.omalauncher.ui.LauncherStyle
 import dev.omalauncher.ui.Palette
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -100,6 +102,17 @@ class Runtime(
 
     /** Silhouettes of [linuxIcons] for the monochrome icon style. */
     val linuxMasks = mutableStateMapOf<String, ImageBitmap>()
+
+    /** [linuxIcons] as the apps' files draw them: [linuxIcons] has them in the theme's colors when the style says so. */
+    private val linuxOriginals = HashMap<String, android.graphics.Bitmap>()
+
+    /** The palette Linux icons are themed for (AndroidAppCatalog's rule), or null for their own colors. */
+    private fun linuxIconPalette() = if (LauncherStyle.themedIcons) Palette.current.named else null
+
+    private fun linuxThemed(
+        bmp: android.graphics.Bitmap,
+        palette: Map<String, androidx.compose.ui.graphics.Color>?,
+    ) = (if (palette == null) bmp else IconTheme.of(palette).recolor(bmp)).asImageBitmap()
     val androidApps = AndroidAppCatalog(context)
     val usage = AppUsage(context)
     val drawerPins = DrawerPins(context)
@@ -172,6 +185,16 @@ class Runtime(
             snapshotFlow { style.style[Style.TERMINAL_FONT] to style.style[Style.TERMINAL_TEXT] }.drop(1).collect { terminalFont.write() }
         }
         androidApps.start()
+        // Linux apps' icons follow a theme or icon style change too, like Android's (Powback/PowOS#4: Bold Brew and
+        // every other Linux app kept its own colors).
+        scope.launch {
+            snapshotFlow { linuxIconPalette() }.drop(1).collectLatest { palette ->
+                for ((id, bmp) in HashMap(linuxOriginals)) {
+                    val img = withContext(Dispatchers.Default) { linuxThemed(bmp, palette) }
+                    if (id in linuxIcons) linuxIcons[id] = img
+                }
+            }
+        }
         // PowOS rooted mode: the theme goes to the PowOS desktop and Android too (SystemTheme); once per change.
         if (RootedGuest.enabled) {
             scope.launch {
@@ -599,19 +622,22 @@ class Runtime(
         val ids = apps.mapTo(HashSet()) { it.id }
         linuxIcons.keys.retainAll(ids)
         linuxMasks.keys.retainAll(ids)
+        linuxOriginals.keys.retainAll(ids)
         val missing = apps.filter { it.icon != null && it.id !in linuxIcons }
         if (missing.isEmpty()) return
         val size = (52 * context.resources.displayMetrics.density).toInt()
+        val palette = linuxIconPalette()
         val loaded =
             withContext(Dispatchers.IO) {
                 missing.mapNotNull { app ->
                     val file = (if (powos) File(app.icon!!).takeIf { it.isFile } else resolveLinuxIcon(proot.rootfs, app.icon!!)) ?: return@mapNotNull null
-                    decodeIcon(file, size)?.let { Triple(app.id, it.asImageBitmap(), bitmapMask(it).asImageBitmap()) }
+                    decodeIcon(file, size)?.let { LoadedLinuxIcon(app.id, it, linuxThemed(it, palette), bitmapMask(it).asImageBitmap()) }
                 }
             }
-        for ((id, icon, mask) in loaded) {
-            linuxIcons[id] = icon
-            linuxMasks[id] = mask
+        for (l in loaded) {
+            linuxOriginals[l.id] = l.original
+            linuxIcons[l.id] = l.icon
+            linuxMasks[l.id] = l.mask
         }
     }
 
@@ -905,3 +931,11 @@ class Runtime(
         private const val SYSTEM_THEME_KEY = "system_theme_applied"
     }
 }
+
+/** A Linux app's icon as loaded: its file's own pixels, as drawn (themed or not), and its silhouette. */
+private class LoadedLinuxIcon(
+    val id: String,
+    val original: android.graphics.Bitmap,
+    val icon: ImageBitmap,
+    val mask: ImageBitmap,
+)

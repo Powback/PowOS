@@ -142,13 +142,31 @@ object ClaudeSignIn {
             proc = p
             stdin = p.outputStream.bufferedWriter()
         }
+        // Its stderr's last words, for when it ends without a line of its own: an image whose `powos manager` has no
+        // --fleet-login (the non-root razr's, 11-09) said only "the sign-in stopped - try again", with the reason
+        // ("not signed in to Claude ...") thrown away.
+        val why = StringBuffer()
+        val errors =
+            Thread({
+                runCatching {
+                    p.errorStream.bufferedReader().forEachLine { line ->
+                        if (line.isNotBlank()) {
+                            why.setLength(0)
+                            why.append(line.trim())
+                        }
+                    }
+                }
+            }, "claude-signin-errors").apply { start() }
         runCatching {
             p.inputStream.bufferedReader().forEachLine { line ->
                 event(line)?.let { ev -> main.post { if (proc === p) on(app, ev) } }
             }
             p.waitFor()
         }.onFailure { Log.w(TAG, "sign-in process", it) }
-        main.post { ended(p) }
+        runCatching { errors.join(2000) }
+        val last = why.toString()
+        if (last.isNotEmpty()) Log.w(TAG, "sign-in ended: $last")
+        main.post { ended(p, last) }
     }
 
     private fun on(
@@ -171,11 +189,20 @@ object ClaudeSignIn {
         }
     }
 
-    private fun ended(p: Process) {
+    private fun ended(
+        p: Process,
+        why: String = "",
+    ) {
         if (proc !== p) return
         proc = null
         stdin = null
-        if (phase == "starting" || phase == "code" || phase == "checking") fail("the sign-in stopped - try again")
+        if (phase == "starting" || phase == "code" || phase == "checking") fail(stoppedMessage(why))
+    }
+
+    /** What the sheet says when the login ended without saying done or why: its stderr's last line when it had one. */
+    fun stoppedMessage(why: String): String {
+        val w = why.trim().removePrefix("manager: ").take(240)
+        return if (w.isEmpty()) "the sign-in stopped - try again" else "the sign-in stopped: $w"
     }
 
     /** The pasted code#state, into the waiting login. */

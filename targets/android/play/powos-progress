@@ -1,0 +1,23 @@
+#!/bin/bash
+# powos-progress: a long job's progress as an Android notification with a progress bar (engine Progress.java;
+# Powback/PowOS#11: a first Steam launch spent minutes downloading with nothing on screen).
+#
+#   powos-progress <id> <done> <total> <title...>   job <id> at done/total (any unit; total 0 = no known size)
+#   powos-progress <id> done                        finished: the notification goes
+#   powos-progress <id> failed <message...>         failed: a notification that stays
+#
+# Writes $XDG_RUNTIME_DIR/progress-<id>.state atomically (the app watches the run dir); one file per job, so updates
+# never clobber another job's or an android-request. Without the app (a desktop) it does nothing and succeeds.
+set -uo pipefail
+id=${1:-}; what=${2:-}
+[[ $id =~ ^[A-Za-z0-9._-]{1,64}$ ]] && [ -n "$what" ] || { echo "usage: powos-progress <id> <done> <total> <title...> | <id> done | <id> failed <message>" >&2; exit 2; }
+run=${XDG_RUNTIME_DIR:-}
+[ -n "$run" ] && [ -d "$run" ] && [ -e "$run/android-request.verbs" ] && grep -qx progress "$run/android-request.verbs" || exit 0
+case $what in
+  done) body=done ;;
+  failed) shift 2; body="failed $*" ;;
+  *) [[ $what =~ ^[0-9]+$ && ${3:-} =~ ^[0-9]+$ ]] || { echo "powos-progress: done and total must be numbers" >&2; exit 2; }
+     t=$3; shift 3; body="$what $t"$'\n'"$*" ;;
+esac
+f=$run/progress-$id.state
+printf '%s\n' "$body" > "$f.tmp.$$" && mv -f "$f.tmp.$$" "$f"

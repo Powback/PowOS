@@ -168,15 +168,17 @@ done
 #     (Proton) or Xwayland's emulated mode (native) stretches it to the screen. A rotate/fold then rescales the frame
 #     instead of re-rendering (100 % keeps the live borderless window).
 # auto: from the game's recorded fps (powos-steam-compat watch-fps after each launch: KWin's window task frames) - the
-# highest scale that held 55 fps (one step up again at >= 80), a step down while none did (100 85 70 50), back to the
-# highest when lowering didn't buy >= 10 % (not GPU-bound); nothing recorded: 70 for an Unreal game on > 3 MP, else 100.
+# highest scale that held the target fps (one step up again at >= 1.45x it), a step down while none did (100 85 70 50
+# 35), back to the highest when lowering didn't buy >= 10 % (not GPU-bound); nothing recorded: 70 for an Unreal game on
+# > 3 MP, else 100. The target is the panel's refresh, 120 (games-120fps-goal; was a fixed 55, so ABZU sat at 23/120 on
+# 70 % and the ladder ended at 50); POWOS_FPS_TARGET or steam-compat.json apps.<id>.target overrides it.
 # Fail loudly, run as is: a scale that can't be applied says why on stderr and the game starts at full size.
 # ~/.local/share/powos/render-scale/<appid>.json: what the last launch applied and why (the widget and watch-fps read it).
 # POWOS_RENDER_SCALE=off: nothing read, nothing written.
 RS_PY=$(cat <<'PY'
 import glob, json, os, re, sys, time
 appid, engine, w, h = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
-STEPS = [100, 85, 70, 50]
+STEPS = [100, 85, 70, 50, 35]
 home = os.path.expanduser("~")
 data = os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local/share")
 try:
@@ -185,6 +187,10 @@ try:
 except (OSError, ValueError, AttributeError):
     app = {}
 want = str(app.get("scale", "auto"))
+try:
+    TARGET = max(1.0, float(os.environ.get("POWOS_FPS_TARGET") or app.get("target") or 120))
+except (TypeError, ValueError):
+    TARGET = 120.0
 
 
 def auto():
@@ -201,16 +207,16 @@ def auto():
     hi, lo = max(m), min(m)
     if len(m) > 1 and m[lo] < m[hi] * 1.1:
         return hi, "auto: %d%% %.0f fps, %d%% %.0f - not GPU-bound" % (hi, m[hi], lo, m[lo])
-    held = [s for s in m if m[s] >= 55]
+    held = [s for s in m if m[s] >= TARGET]
     if held:
         s = max(held)
         up = [t for t in STEPS if t > s and t not in m]
-        if m[s] >= 80 and up:
+        if m[s] >= TARGET * 1.45 and up:
             return min(up), "auto: %.0f fps at %d%%, trying %d%%" % (m[s], s, min(up))
         return s, "auto: %.0f fps at %d%%" % (m[s], s)
     down = [t for t in STEPS if t < lo]
     if down:
-        return down[0], "auto: %.0f fps at %d%%, under 55" % (m[lo], lo)
+        return down[0], "auto: %.0f fps at %d%%, under %.0f" % (m[lo], lo, TARGET)
     return lo, "auto: %.0f fps at %d%%, the lowest step" % (m[lo], lo)
 
 
@@ -238,6 +244,12 @@ if engine == "unreal":
         rec["applied"] = scale == 100
         if scale != 100:
             msgs.append("%d%% not applied: no GameUserSettings.ini yet (the game writes it when it first exits) - from the next launch on" % scale)
+    elif os.path.exists(inis[0] + ".powos-gus-bak"):
+        # A check holds this game's settings (bf-lib.sh gus_set: its own ResolutionScale etc. for one run, the user's
+        # file kept as .powos-gus-bak): written over here, the check measured auto's scale, not its own (11-07 22:32
+        # ABZU "SCALE_75" ran at whatever auto chose). Nothing written; "held" keeps watch-fps from tagging that run.
+        rec.update(applied=False, held=True, ini=inis[0])
+        msgs.append("not applied: a check holds %s (its .powos-gus-bak)" % inis[0])
     else:
         ini = inis[0]
         t = open(ini, encoding="utf-8", errors="surrogateescape").read()

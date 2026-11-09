@@ -143,13 +143,31 @@ object WebWindowLaunch {
         p: Pending,
         displayId: Int,
     ) {
-        val opts = (p.base ?: ActivityOptions.makeBasic()).setLaunchDisplayId(displayId)
+        val opts = fillDisplay((p.base ?: ActivityOptions.makeBasic()).setLaunchDisplayId(displayId))
         runCatching { p.start(opts.toBundle()) }.onFailure {
             WindowLog.w(TAG, "launch $pkg on display $displayId refused (${it.message}): the old way instead")
             p.base?.setLaunchDisplayId(Display.DEFAULT_DISPLAY)
             runCatching(p.fallback).onFailure { e -> WindowLog.w(TAG, "launch $pkg (old way) failed", e) }
         }
     }
+
+    /**
+     * [opts] launch full screen on their display: a web window's display is the app's whole window, its body.
+     * Without it, freeform support on (global enable_freeform_support=1) gave a task its freeform launch bounds on the
+     * window's display - centred, below a status bar's height (board: PowTerm's content at +188,+116 device px inside
+     * its body and cut at the frame's right and bottom; WireGuard's task kept mLastNonFullscreenBounds 189,115 on a
+     * 1135x1365 window display). Check: tools/phone/verify/ww-fill.sh.
+     * HACK: ActivityOptions.setLaunchWindowingMode is hidden (reflected, as WebWindows.fromRecents). Real fix: none
+     * public for an app (a platform-signed system module would make the window displays fullscreen-only).
+     */
+    fun fillDisplay(opts: ActivityOptions): ActivityOptions {
+        dev.omalauncher.system.HiddenApi.allow()
+        runCatching { ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType).invoke(opts, WINDOWING_MODE_FULLSCREEN) }
+            .onFailure { WindowLog.w(TAG, "launch windowing mode not set: ${it.cause ?: it}") }
+        return opts
+    }
+
+    private const val WINDOWING_MODE_FULLSCREEN = 1
 
     /** Home up under the new window (a launch from the shade over a full-screen app): its page holds the window. */
     private fun frontHome(context: Context) {

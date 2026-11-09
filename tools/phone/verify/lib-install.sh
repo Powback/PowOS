@@ -35,7 +35,10 @@ if [ -n "$gui" ]; then
   s=$(mkdir -p "$HOME/.cache/powos-verify" && mktemp "$HOME/.cache/powos-verify/install.XXXXXX"); cat > "$s" <<'SH'
 export XDG_RUNTIME_DIR=/run/powos-app DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus
 pkill -TERM -f 'bin/powos-sleep-gui$'; for _ in $(seq 20); do pgrep -f 'bin/powos-sleep-gui$' >/dev/null || break; sleep 0.5; done
-setsid -f powos-sleep-gui >> /run/powos-app/powos-sleep-gui.log 2>&1 < /dev/null
+# The session's keeper (powos-rooted-session keep) starts the new file in ~2 s; started here only without one (an older
+# session) - two would just lose the bus name race, but each lost start costs the keeper a back-off.
+for _ in $(seq 12); do pgrep -f 'bin/powos-sleep-gui$' >/dev/null && break; sleep 0.5; done
+pgrep -f 'bin/powos-sleep-gui$' >/dev/null || setsid -f powos-sleep-gui >> /run/powos-app/powos-sleep-gui.log 2>&1 < /dev/null
 sleep 4; pgrep -f 'bin/powos-sleep-gui$' >/dev/null && echo "powos-sleep-gui restarted: $(grep ' up: ' /run/powos-app/powos-sleep-gui.log | tail -1 | cut -c1-140)" || echo "FAIL restart: powos-sleep-gui not running"
 SH
   "$here/../user.sh" "$s" 2>&1 | grep -v 'pushed' | tail -2; rm -f "$s"

@@ -177,6 +177,18 @@ object PowosAiChat {
     /** `powos manager --auth` answers in well under a second (fleet_login.py's authority call is capped at 12 s). */
     private const val AUTH_ASK_MS = 20_000L
 
+    /**
+     * A terminal ended (ShellTerminals): when the manager isn't signed in, how it is signed in is asked again - a sign-in
+     * done in a terminal (`claude` /login, `powos manager --signin`) wrote the credentials but nothing re-asked, so the
+     * launcher kept "not signed in to Claude" (issue #1). The answer reaches the page as ai.changed.
+     */
+    fun terminalEnded() {
+        if (recheckAfterTerminal(auth)) checkAuth()
+    }
+
+    /** Signed in already (the fleet endpoint, the image's login): a terminal ending changes nothing. */
+    fun recheckAfterTerminal(auth: String) = auth != "endpoint" && auth != "login"
+
     /** Settings > AI's Sign out: Claude Code's own logout in the image (never the endpoint's), then [auth] again. */
     fun signOut() {
         if (!Guest.enabled) return
