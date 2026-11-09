@@ -346,7 +346,7 @@ class ShellTermViews(
             if (row !in from..to) return null
             val rows = (from..to).map { screen.getSelectedText(0, it, emu.mColumns - 1, it) ?: "" }
             val wraps = (from..to).map { screen.getLineWrap(it) }
-            return linkAt(rows, wraps, row - from, col, emu.mColumns)
+            return linkAt(Rows(rows, wraps, emu.mColumns), row - from, col)
         }
 
         /**
@@ -662,34 +662,50 @@ class ShellTermViews(
         private val LINK = Regex("""(?:https?|file)://[^\s<>"'`]+""")
 
         /**
-         * The link at column [col] of row [at] of [rows] (each row's text, trailing blanks dropped; [wraps]: the row
-         * wrapped onto the next), or null. A row continues on the next when it wrapped, or when it's full to the last of
-         * its [cols] columns: tmux and Claude Code's own layout break a long line with cursor moves, not a wrap, so
-         * the sign-in link (~400 characters) spans several rows that only fill the width. Its query string counts:
-         * the old link match ended at the '?' (the user, 11-09: "it doesn't catch the whole link ... it ends after the
-         * question mark").
+         * A terminal's rows around a touch: each row's text (trailing blanks dropped), whether it wrapped onto the next
+         * ([wraps]), the width in columns.
+         */
+        data class Rows(
+            val text: List<String>,
+            val wraps: List<Boolean>,
+            val cols: Int,
+        ) {
+            /**
+             * Row [i] goes on in the next: it wrapped, or it's full to the last column - tmux and Claude Code's own
+             * layout break a long line with cursor moves, not a wrap, so the sign-in link (~400 characters) spans
+             * several rows that only fill the width.
+             */
+            fun continues(i: Int) = i < text.size - 1 && (wraps.getOrElse(i) { false } || text[i].length >= cols)
+
+            /** The rows row [at] is part of, joined, and where its column [col] falls in them. */
+            fun line(
+                at: Int,
+                col: Int,
+            ): Pair<String, Int> {
+                var a = at
+                while (a > 0 && continues(a - 1)) a--
+                var b = at
+                while (continues(b)) b++
+                return (a..b).joinToString("") { if (it < b) text[it].padEnd(cols) else text[it] } to (at - a) * cols + col
+            }
+        }
+
+        /**
+         * The link at column [col] of row [at] of [rows], or null - its query string and fragment included: the old
+         * link match ended at the '?' (the user, 11-09: "it doesn't catch the whole link ... it ends after the question
+         * mark").
          */
         fun linkAt(
-            rows: List<String>,
-            wraps: List<Boolean>,
+            rows: Rows,
             at: Int,
             col: Int,
-            cols: Int,
         ): String? {
-            if (at !in rows.indices || cols <= 0) return null
-            fun continues(i: Int) = i < rows.size - 1 && (wraps.getOrElse(i) { false } || rows[i].length >= cols)
-            var a = at
-            while (a > 0 && continues(a - 1)) a--
-            var b = at
-            while (continues(b)) b++
-            val text = StringBuilder()
-            for (i in a..b) text.append(if (i < b) rows[i].padEnd(cols) else rows[i])
-            val pos = (at - a) * cols + col
-            for (m in LINK.findAll(text)) {
-                val url = trimLink(m.value)
-                if (pos >= m.range.first && pos < m.range.first + url.length) return url
-            }
-            return null
+            if (at !in rows.text.indices || rows.cols <= 0) return null
+            val (line, pos) = rows.line(at, col)
+            return LINK.findAll(line)
+                .map { it.range.first to trimLink(it.value) }
+                .firstOrNull { (from, url) -> pos >= from && pos < from + url.length }
+                ?.second
         }
 
         /** A link without the sentence's punctuation after it (a ')' it opened stays). */
