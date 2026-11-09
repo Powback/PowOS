@@ -10,3 +10,6 @@ counter
 sketch
 app-api
 devices
+# The app registry (powos-registry), module only: published on first start without root (powos-noroot-services), so
+# `powos app install` registers apps there as on a rooted phone (gh#13). No UI: the launcher lists no row for it.
+registry
