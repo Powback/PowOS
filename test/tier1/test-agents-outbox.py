@@ -69,6 +69,9 @@ class OutboxTest(unittest.TestCase):
             POWOS_AGENTS_ADB=self.adb,
             POWOS_AGENTS_OUTBOX=os.path.join(self.tmp, "outbox"),
             POWOS_STDB="http://127.0.0.1:1",  # nothing listens here: Down is raised at once, every time
+            # A device the owner linked to the phone's board (owner.conf, as the Mac has it): the remote/outbox path.
+            POWOS_OWNER_CONF=os.path.join(self.tmp, "no-owner.conf"),
+            POWOS_BOARD_REMOTE="docker exec powos-vadb adb shell su -c \"sh /data/powos/powos-run.sh '{cmd}'\"",
         )
 
     def tearDown(self):

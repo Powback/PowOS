@@ -32,8 +32,9 @@ Per-tag results (--tag): <dir>/status/<tag>.ok holds the epoch of the last succe
 current run of failures began. The powos-vadb container's health check (targets/android/vadb/vadb-health.sh) reads
 them and mails the phone's manager when the agents mirror (tag "mirror") goes stale.
 
-The session: POWOS_ROOTSH_SHELL (a shell command line), default `docker exec -i powos-vadb adb shell -T su` (adb over
-the WireGuard VPN, targets/android/vadb/compose.yaml); `adb -s 192.168.50.239:5555 shell -T su` on the LAN works too.
+The session: POWOS_ROOTSH_SHELL (a shell command line; env, else the owner config owner.conf), e.g. `docker exec -i
+<adb container> adb shell -T su` (adb over a VPN) or `adb -s <phone>:5555 shell -T su` on the LAN. No default: unset, every
+call answers 255 "no root shell configured".
 """
 
 import base64
@@ -53,7 +54,31 @@ SOCK = os.path.join(DIR, "rootsh.sock")
 LOCK = os.path.join(DIR, "rootsh.lock")
 LOG = os.path.join(DIR, "rootsh.log")
 STATUS = os.path.join(DIR, "status")
-SHELL = os.environ.get("POWOS_ROOTSH_SHELL") or "docker exec -i powos-vadb adb shell -T su"
+
+
+def owner_conf(key):
+    """$KEY, else KEY=value in the owner config ($POWOS_OWNER_CONF, else /etc/powos/owner.conf, else
+    ~/.config/powos/owner.conf: written when the device pairs with the owner's hub). "" = not configured."""
+    if os.environ.get(key):
+        return os.environ[key]
+    p = os.environ.get("POWOS_OWNER_CONF")
+    for path in [p] if p is not None else ["/etc/powos/owner.conf", os.path.expanduser("~/.config/powos/owner.conf")]:
+        try:
+            with open(path) as f:
+                lines = f.read().splitlines()
+        except OSError:
+            continue
+        val = ""
+        for line in lines:
+            k, sep, v = line.strip().partition("=")
+            if sep and k.strip() == key:
+                val = v.strip()
+        return val[1:-1] if len(val) > 1 and val[0] == val[-1] and val[0] in "\"'" else val
+    return ""
+
+
+# The owner's Mac: `docker exec -i powos-vadb adb shell -T su` (owner.conf). Unset: no root shell configured here.
+SHELL = owner_conf("POWOS_ROOTSH_SHELL")
 IDLE_S = float(os.environ.get("POWOS_ROOTSH_IDLE", "1800"))
 RECONNECT_S = 5.0
 DEFAULT_TIMEOUT = 30.0
@@ -156,6 +181,9 @@ class Session:
         self.close()
         if time.monotonic() - self.failed_at < RECONNECT_S:
             return "no session (the last attempt failed under %ds ago)" % RECONNECT_S
+        if not SHELL:
+            self.failed_at = time.monotonic()
+            return "no session: no root shell configured (POWOS_ROOTSH_SHELL in owner.conf)"
         log("opening:", SHELL)
         try:
             self.proc = subprocess.Popen(

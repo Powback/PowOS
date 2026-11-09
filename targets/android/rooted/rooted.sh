@@ -198,9 +198,18 @@ deploy)
   gs=$HOME/.config/powos/ship-gate.secret
   if [ -s "$gs" ]; then
     adb push -q "$gs" /data/local/tmp/ship-gate.secret
-    gc=$(mktemp "${TMPDIR:-/tmp}/powos-gate.XXXXXX") && echo "url=${POWOS_SHIP_GATE_URL:-http://192.168.50.99:7433}" > "$gc" &&
+    gc=$(mktemp "${TMPDIR:-/tmp}/powos-gate.XXXXXX") && echo "url=${POWOS_SHIP_GATE_URL:-$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["POWOS_SHIP_GATE_URL"])' "$HERE/../../../tools/phone/owner.json")}" > "$gc" &&
       adb push -q "$gc" /data/local/tmp/ship-gate.conf; rm -f "$gc"
   else echo "rooted.sh: no $gs (tools/phone/ship-deploy.sh gate-install makes it) - the phone's ship gate not configured"; fi
+  # The owner config (tools/phone/owner.json, the owner realm's bundle): rendered HERE by the same writer enrollment
+  # uses (powos-deviced owner-apply), pushed as a file; powos-deploy.sh installs it for the session and the launcher.
+  # HACK: the OnePlus was set up before enrollment carried the owner bundle, so its deploy hands it over. Real fix:
+  # the OnePlus enrolls in the realm with ENROLL_ENDPOINTS.owner set (docs/DEVICES.md) and this push goes.
+  adb shell rm -f /data/local/tmp/owner.conf
+  oc=$(mktemp -d "${TMPDIR:-/tmp}/powos-owner.XXXXXX") &&
+    POWOS_OWNER_CONF=$oc/owner.conf POWOS_APP_RUN=$oc/none python3 "$HERE/../../../lib/devices/powos-deviced" owner-apply \
+      "$HERE/../../../tools/phone/owner.json" >/dev/null && adb push -q "$oc/owner.conf" /data/local/tmp/owner.conf
+  rm -rf "$oc"
   # Its exit status is the deploy's, not the rm's: powos-deploy.sh stopping half way under set -e (10-30: after
   # mimeapps.list, before powos-output-scale) was logged "rooted deploy done", and nothing after it (comms-mcp.py,
   # the agents, the manager) had landed since 10-29.

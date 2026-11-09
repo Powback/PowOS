@@ -472,6 +472,54 @@ def _phone_wake(agent):
         pass
 
 
+def _owner_linked():
+    """This device is one of the owner's, linked to the hub where the agents run (owner config POWOS_BOARD_REMOTE,
+    written by enrollment: lib/devices/powos-deviced owner_apply): mail for a role nobody here reads is theirs."""
+    if os.environ.get("POWOS_BOARD_REMOTE"):
+        return True
+    p = os.environ.get("POWOS_OWNER_CONF")
+    for path in [p] if p is not None else ["/etc/powos/owner.conf", os.path.expanduser("~/.config/powos/owner.conf")]:
+        try:
+            with open(path) as f:
+                return any(l.strip().startswith("POWOS_BOARD_REMOTE=") and l.strip() != "POWOS_BOARD_REMOTE=" for l in f)
+        except OSError:
+            continue
+    return False
+
+
+def _reader(to):
+    """Who reads [to]'s mail on this device, as words for the sender, or None: nobody (issue #1: a fresh phone took
+    `comms send coder` into an inbox nothing ever read). A role with an agent config (/etc/powos/ai/agents/<role>) is
+    started here (`powos ai --agent <role>`, once at a time) on a device that can run one; a phone's app wakes only
+    the manager."""
+    if to == "user":
+        return "the user"
+    if _on_phone() and to == "manager":
+        return "the manager (woken)"
+    if _owner_linked():
+        return "the owner's hub"
+    pidf = os.path.join(ROOT, "agents", _safe_name(to), "runner.pid")
+    try:
+        os.kill(int(open(pidf).read().strip()), 0)
+        return "its agent (running)"
+    except (OSError, ValueError):
+        pass
+    conf = os.path.join(os.environ.get("POWOS_AI_AGENTS_DIR", "/etc/powos/ai/agents"), _safe_name(to), "agent.conf")
+    powos = shutil.which("powos")
+    if _on_phone() or not os.path.isfile(conf) or not powos or os.environ.get("POWOS_COMMS_START") == "0":
+        return None
+    try:
+        with open(os.devnull, "w") as null:
+            pr = subprocess.Popen([powos, "ai", "--agent", to, "check your inbox and act on it"], stdin=subprocess.DEVNULL,
+                                  stdout=null, stderr=null, start_new_session=True)
+        os.makedirs(os.path.dirname(pidf), exist_ok=True)
+        with open(pidf, "w") as f:
+            f.write(str(pr.pid))
+    except OSError:
+        return None
+    return "its agent (started)"
+
+
 def _agents_queue():
     """powos-agentsd's queue (lib/ai/agents; the same choice as powos-agent-hook's), or None while no hook made it."""
     q = os.environ.get("POWOS_AGENTS_QUEUE")
@@ -987,7 +1035,14 @@ def run_cli(argv):
             print("powos comms send: refusing an empty message", file=sys.stderr)
             sys.exit(2)
         mid = _deliver(a.to, "message", text, a.priority)
-        print(f"Sent to '{a.to}' (id {mid}).")
+        who = _reader(_safe_name(a.to))
+        if who:
+            print(f"Sent to '{a.to}' (id {mid}): {who}.")
+        else:
+            print(f"Sent to '{a.to}' (id {mid}) - no agent for this role here: nothing on this device reads "
+                  f"'{a.to}' (kept in its inbox; link this device to the owner's hub, or run `powos ai --agent "
+                  f"{a.to}` where it exists).", file=sys.stderr)
+            print(f"Queued for '{a.to}' (id {mid}): no agent for this role here.")
     elif a.cmd == "notify":
         AGENT_ID = a.frm
         # "-": the message from stdin (scripts passing text through layers of shell quoting).

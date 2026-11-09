@@ -18,6 +18,10 @@ print(json.dumps({"mcpServers": {k: v for a in sys.argv[1:] for k, v in json.loa
 _manager_sysprompt() {
     local ctx=""
     [[ -n "${AGENT_CONTEXT_CMD:-}" ]] && ctx="$(eval "$AGENT_CONTEXT_CMD" 2>/dev/null || true)"
+    # What THIS device is (platform, model, rooted or not, the owner's or standalone): capabilities.md is every device's.
+    ctx="$(sh "$_MANAGER_DIR/powos-device-context" 2>/dev/null)${ctx:+
+
+$ctx}"
     printf '%s' "${AGENT_SYSTEM_PROMPT:-}"
     [[ -z "$ctx" ]] || printf '\n\n## Current system state (at session start)\n%s' "$ctx"
 }

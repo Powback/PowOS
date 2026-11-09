@@ -690,12 +690,22 @@ EOF
 
 # ── push --ship: ask the Mac ship service to ship what we just pushed ──────────
 # The Mac runs tools/phone/ship-gate.py (unit ship-gate-mac). Config, never a value in git:
-#   POWOS_SHIP_GATE_URL   (default http://192.168.50.99:7433; or "url=" in the conf file)
+#   POWOS_SHIP_GATE_URL   (env, else "url=" in the conf file, else POWOS_SHIP_GATE_URL in the owner config - written
+#                         by pairing with the owner's hub; no default: unset = no ship gate configured, issue #1)
 #   POWOS_SHIP_GATE_SECRET_FILE (default ~/.config/powos/ship-gate.secret, mode 0600: the Mac's same file)
+self_owner_conf() {   # KEY: its value in the owner config ($POWOS_OWNER_CONF, else /etc/powos/owner.conf, else ~/.config/powos/owner.conf)
+    local f
+    if [[ -n "${POWOS_OWNER_CONF+x}" ]]; then f="$POWOS_OWNER_CONF"
+    elif [[ -e /etc/powos/owner.conf ]]; then f=/etc/powos/owner.conf
+    else f="$HOME/.config/powos/owner.conf"; fi
+    [[ -r "$f" ]] || return 0
+    awk -F= -v k="$1" '$1==k { sub(/^[^=]*=/, ""); v=$0 } END { gsub(/^["\047]|["\047]$/, "", v); print v }' "$f"
+}
 self_ship_conf() {   # echoes "URL<TAB>SECRET_FILE"
     local conf="${POWOS_SHIP_GATE_CONF:-$HOME/.config/powos/ship-gate.conf}" url=""
     [[ -r "$conf" ]] && url="$(sed -n 's/^url=//p' "$conf" | head -1)"
-    printf '%s\t%s\n' "${POWOS_SHIP_GATE_URL:-${url:-http://192.168.50.99:7433}}" \
+    [[ -n "$url" ]] || url="$(self_owner_conf POWOS_SHIP_GATE_URL)"
+    printf '%s\t%s\n' "${POWOS_SHIP_GATE_URL:-$url}" \
         "${POWOS_SHIP_GATE_SECRET_FILE:-$HOME/.config/powos/ship-gate.secret}"
 }
 
@@ -718,6 +728,7 @@ self_json_str() {
 self_ship_request() {
     local src="$1" note="$2" task="${3:-}" url sf sha dev json res code body
     IFS=$'\t' read -r url sf < <(self_ship_conf)
+    [[ -n "$url" ]] || { perr "Pushed, but not shipped: no ship gate configured (POWOS_SHIP_GATE_URL; pair this device with the owner's hub)."; return 1; }
     [[ -r "$sf" ]] || { perr "Pushed, but not shipped: no ship secret at $sf (copy the Mac's ~/.config/powos/ship-gate.secret there, chmod 600)."; return 1; }
     sha="$(git -C "$src" rev-parse HEAD)"; dev="$(hostname 2>/dev/null | tr -c 'A-Za-z0-9._\n-' '-')"
     json="$(printf '{"sha":"%s","note":"%s","task":"%s","from":"%s"}' "$sha" "$(self_json_str "$note")" \
