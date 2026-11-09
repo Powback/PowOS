@@ -96,12 +96,50 @@ absent, which was accurate.
   service is down. Wire it to fire a PowOS notification + a board task on a down runtime, and schedule it
   at session start + every 10 min (next-agent step; the hook points are `powos-start.sh` and the agents
   board).
-- **AA4 (design):** runtime survivability is already correct (chroot-persistent + the health check
-  restarts the service). What still needs doing: (1) make `app-frida`/`app-ca` real install targets
-  (`rooted.sh app-ca`/`app-frida`) so they stop reading MISSING, with frida kept STOPPED by default and
-  the CA install gated on the user's OK (it needs a Magisk module + reboot); (2) the health unit survives
-  APK/module updates because it lives in the chroot, not `/data/local/tmp`; (3) after the LSPosed/Zygisk
-  change, re-run the health check to confirm notification access and the hook path.
+- **AA4 (built 2026-11-10):** runtime survivability is already correct (chroot-persistent + the health
+  check restarts the service). The two capture units now have real install targets so they stop reading
+  MISSING — see "The capture path, on-device" below. The health unit survives APK/module updates because
+  it lives in the chroot, not `/data/local/tmp`. After any LSPosed/Zygisk change, re-run the health check
+  to confirm notification access and the hook path.
+
+## The capture path, on-device (AA4 — `app-ca` + `app-frida`, owner's device only)
+
+Both are the owner's deliberate, reversible acts on the owner's own phone and apps; neither runs from the
+Mac and neither is a silent side effect. They exist only to let the **on-device** capture proxy learn an
+app's own API (for widgets and tracker-blocking) from apps the owner **explicitly enabled** in the App
+API. Install + a one-time uninstall test are the on-device agent's step, with the user present.
+
+**Local certificate — `targets/android/rooted/app-ca.sh` (unit `app-ca`), via `rooted.sh app-ca`:**
+- `rooted.sh app-ca gen` — generate the device-local CA **on the device** (openssl inside the PowOS
+  chroot). The **private key** lands at `/data/powos/app-api/ca.key` (0600) and **never** leaves the
+  device: it is never printed, never logged, never pushed to the Mac, never committed, and never placed in
+  the Magisk module. Only the public cert (`ca.crt`) and its SHA-256 fingerprint are ever shown.
+- `rooted.sh app-ca install` — the explicit, separate step that changes what the device trusts: it builds
+  a Magisk module (`/data/adb/modules/powos-appca`) that, at boot, overlays the system cacerts dir with
+  the real system trust **plus** our one public cert, then prints that a **reboot** is required. Android
+  7+ apps ignore user-store CAs, which is why system trust needs root + a module. SELinux is untouched.
+- `rooted.sh app-ca remove [--wipe-key]` — drop the module (+ reboot) to revert the trust store fully;
+  `--wipe-key` also deletes the local CA key/cert.
+- Trusting the CA does **not** by itself route or capture anything — capture is per-app (below).
+
+**In-app hook helper — `targets/android/rooted/app-frida.sh` (unit `app-frida`), via `rooted.sh app-frida`:**
+- For an enabled app that pins TLS or signs its requests, the proxy alone can't read the traffic; an
+  in-app hook reads the request the way the app itself builds it, so we reuse the app's own auth/headers
+  and never re-implement auth or run a second client (the provider contract above).
+- `rooted.sh app-frida install [BIN]` stages the matching-arch hook-server binary (0700, root-only),
+  **default STOPPED**. `start PKG` runs it only inside an explicit capture window and **refuses any package
+  the owner has not enabled in the App API** — the allowlist is exactly the apps the owner picked in the
+  UI; it records the one target package (`capture-target`) so the capture layer attaches to that package
+  only. `stop` ends the window; `remove` stops it and deletes the binary. No other app is ever hooked.
+
+**Capture on a non-rooted device (non-root parity):** both of the above need root (system-trust CA; a root
+hook). On a non-rooted phone the App API falls back to sources that need **neither** a CA nor a hook:
+- the **notification-stream** read path (PowOS notification listener) — the ban-safe `needs-me` source for
+  Discord/WhatsApp/Gmail, with reply via each app's own RemoteInput action; no capture at all;
+- an app's exported deep links / official first-party or LAN APIs with the owner's own key (Hue,
+  Open-Meteo, Gmail OAuth) — the app's own normal use, root-free.
+So learning an arbitrary app's private HTTPS API is root-only; the read/act capabilities that most apps
+need (notifications + deep links + official APIs) have a full non-root path and are the default.
 
 ## Streamlined consumer path (AA2 design — existing pieces + gaps)
 
