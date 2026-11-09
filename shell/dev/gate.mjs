@@ -6581,6 +6581,61 @@ async function addGamingCheck() {
   return fails;
 }
 
+/**
+ * In the page, on the app library (after libraryCheck): every folder card shows ALL its apps (board "Home page content
+ * ends early: folder widget clips its apps, page leaves empty space" - 'Other (14)' showed four): a card of more than
+ * four spans the row and lays every app out in rows, none clipped by the card, and the page scrolls to its last one.
+ * Ten extra apps (one category) make sure such a card exists; they go again after.
+ */
+async function libraryAllAppsCheck() {
+  const L = await window.__gw.mod("./ui/library.tsx");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const list = powos.apps.list;
+  const fake = Array.from({ length: 10 }, (_, i) => ({ key: `a:org.gate.zz${i}/.Main`, label: `Zq Gate ${i}`, icon: "", kind: "android" }));
+  powos.apps.list = async () => [...(await list()), ...fake];
+  window.__mockEvents.emit("apps.changed", null);
+  const fails = [];
+  try {
+    await window.__gw.until(() => L.library.value.some((f) => f.apps.length > 4 && document.querySelector(`.page.library .lib-card[data-key="${f.key}"] .lib-icons`)?.children.length === f.apps.length));
+    await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+    const lib = document.querySelector(".page.library");
+    const grid = lib.querySelector(".lib-grid").getBoundingClientRect();
+    // One card: all its apps there, none outside the card or squashed, a big one the row's width.
+    const cardFails = (f, card) => {
+      const icons = [...card.querySelectorAll(".lib-icons > *")];
+      const c = card.getBoundingClientRect();
+      const out = icons.filter((e) => { const r = e.getBoundingClientRect(); return r.width < 20 || r.bottom > c.bottom + 0.5 || r.right > c.right + 0.5 || r.left < c.left - 0.5; });
+      return [
+        icons.length !== f.apps.length && `"${f.name} (${f.apps.length})" shows ${icons.length} of its apps`,
+        out.length && `"${f.name}": ${out.length} app icons clipped by or squashed in the card`,
+        f.apps.length > 4 && Math.abs(c.width - grid.width) > 1 && `"${f.name} (${f.apps.length})" is ${Math.round(c.width)} px wide, not the row (${Math.round(grid.width)})`,
+      ].filter(Boolean);
+    };
+    for (const f of L.library.value) {
+      const card = lib.querySelector(`.lib-card[data-key="${f.key}"]`);
+      if (card) fails.push(...cardFails(f, card));
+    }
+    const sc = lib.querySelector(".library-scroll");
+    // The scroll runs to the stage's foot (the dock's / pill's top), not cut at the grid pages' foot gap (the user,
+    // 11-07: "the page is ending early, like there's no reason to cut off here"), and is drawn and hit there.
+    const foot = document.querySelector(".stage").getBoundingClientRect().bottom;
+    const sb = sc.getBoundingClientRect();
+    if (Math.abs(sb.bottom - foot) > 1) fails.push(`the library's scroll ends at ${Math.round(sb.bottom)}, not at the stage's foot (${Math.round(foot)})`);
+    const hit = document.elementFromPoint(sb.left + sb.width / 2, foot - 3);
+    if (!lib.contains(hit)) fails.push(`just above the stage's foot the library is cut off: ${hit?.className || hit?.tagName} is hit there`);
+    sc.scrollTop = sc.scrollHeight;
+    await new Promise((ok) => requestAnimationFrame(ok));
+    const after = [...lib.querySelectorAll(".lib-card")].pop().getBoundingClientRect();
+    if (after.bottom > sc.getBoundingClientRect().bottom + 1) fails.push(`scrolled to the end, the last card ends at ${Math.round(after.bottom)}, under the page (${Math.round(sc.getBoundingClientRect().bottom)})`);
+    sc.scrollTop = 0;
+  } finally {
+    powos.apps.list = list;
+    window.__mockEvents.emit("apps.changed", null);
+    await window.__gw.until(() => !L.library.value.some((f) => f.apps.some((a) => a.app.startsWith("a:org.gate.zz"))));
+  }
+  return fails;
+}
+
 /** In the page, on the app library (after libraryCheck): no search bar of its own; an app installed or removed shows or goes at once. */
 async function libraryLiveCheck() {
   const S = await window.__gw.mod("./state.ts");
@@ -13564,7 +13619,7 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `library-${label}`, viewport).then((r) => whenReady(r, async () => {
-        for (const check of [libraryCheck, addGamingCheck, libraryLiveCheck, folderMorphCheck, folderCloseCheck, libraryDragCheck]) {
+        for (const check of [libraryCheck, libraryAllAppsCheck, addGamingCheck, libraryLiveCheck, folderMorphCheck, folderCloseCheck, libraryDragCheck]) {
           const fails = await r.page.evaluate(check);
           if (fails.length) return fails;
         }

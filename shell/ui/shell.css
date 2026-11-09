@@ -80,7 +80,8 @@
      safe area); the gutter over it, and whatever the bar's translate lifts it by at rest - edit mode's rise
      (--bar-edit-rise, the one value the bar's own translate reads) - so no row of the grid is under the pill (IB1, the
      user: "Home app icons float too far up and overlap the search bar"; gate home-icons-clear-bar-*). */
-  padding-bottom: calc(var(--gap) + var(--bar-edit-rise, 0px));
+  --content-foot: calc(var(--gap) + var(--bar-edit-rise, 0px));
+  padding-bottom: var(--content-foot);
   display: flex;
   flex-direction: column;
   opacity: calc(1 - var(--p));
@@ -862,7 +863,9 @@ html:root .menu.tile { --glass-blur-native: var(--backdrop-blur-native); backgro
   flex: 1;
   min-height: 0;
   overflow-x: clip;
-  clip-path: inset(calc(-1 * var(--inset-top, 0px)) 0 0 0);
+  /* Downward to the stage's foot (the dock's / pill's top): the app library's scroll runs on under the page dots instead
+     of being cut at the grid's foot (below, .page.library). Home's grid pages never reach past their own box. */
+  clip-path: inset(calc(-1 * var(--inset-top, 0px)) 0 calc(-1 * var(--content-foot, 0px)) 0);
   touch-action: none;
 }
 /*
@@ -3429,7 +3432,11 @@ html:root .wsheet.tile { --glass-blur-native: var(--backdrop-blur-native); backg
  * The app library (ui/library.tsx): home's last page - the search pill, then a card (a .tile face) per folder, its
  * name and its first apps; up and down it scrolls (gesture.ts leaves the page's up/down to it). No lines.
  */
-.page.library { display: flex; flex-direction: column; }
+/* Its scroll reaches the stage's foot, past the grid pages' foot gap (.home-content --content-foot): the board's "page is
+   ending early, like there's no reason to cut off here" (11-07, 'Other (14)' cut in half at the page dots with empty
+   wallpaper under it). The scroll's own padding lets the last card come up clear of the dots. */
+.page.library { display: flex; flex-direction: column; height: calc(100% + var(--content-foot, 0px)); }
+.page.library .library-scroll { padding-bottom: calc(var(--edge) + var(--content-foot, 0px)); }
 .library-scroll {
   flex: 1;
   min-height: 0;
@@ -3449,6 +3456,10 @@ html:root .wsheet.tile { --glass-blur-native: var(--backdrop-blur-native); backg
 /* Up to four apps, small, in a uniform 2x2 - the whole card is the tap (it opens the folder). */
 .lib-icons { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 8px; aspect-ratio: 1; padding: 4px; pointer-events: none; }
 .lib-icons > .app-icon { width: 100%; height: auto; aspect-ratio: 1; }
+/* A folder of more than four (library.tsx Card): the whole row, every app in rows of icons as large as the 2x2's - all of
+   them show, and the page scrolls on instead of ending early (board: 'Other (14)' showed four). */
+.lib-card.wide { grid-column: 1 / -1; }
+.lib-card.wide .lib-icons { grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); grid-template-rows: none; grid-auto-rows: auto; aspect-ratio: auto; gap: 12px 8px; }
 /* "Add gaming" (library.tsx AddGamingCard): a folder-sized card with the pack's state and its live progress bar. */
 .lib-pack-body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; aspect-ratio: 1; padding: 4px; text-align: center; color: var(--color-foreground); }
 .lib-pack-text { font-size: var(--text-small); opacity: 0.75; overflow-wrap: anywhere; }
