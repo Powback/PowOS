@@ -227,6 +227,15 @@ run)
   # units_publish: the phone's units to the PowOS AI page after a ship to it (in the background, one adb call; the
   # rooted deploy publishes itself). tools/units/publish.sh; a failure is in its log, the page then shows "stale".
   units_publish() { ( tools/units/publish.sh phone > /dev/null 2>&1 & ) ; }
+  # pull_publish WHAT LOG: what just went live on the rooted phone, published for the phones no adb reaches (the S25,
+  # the razr: docs/PHONE-UPDATES.md) - the shell bundle (shell) or powos-core, PowOS's own code (rooted). Both skip
+  # what the store has already and never fail the ship (the phone's ship stands).
+  pull_publish() {
+    case "$1" in
+      shell) targets/android/publish-shell.sh >> "$2" 2>&1 || echo "$(date +%T) pull update: publish-shell failed (log $2)" ;;
+      rooted) targets/android/build-powos-core.sh --publish >> "$2" 2>&1 || echo "$(date +%T) pull update: powos-core failed (log $2)" ;;
+    esac
+  }
   # phone_offline: the phone is off the VPN (adb.sh --vpn-state rc 69: its WireGuard handshake is stale). That is NOT a
   # fault of the tip: a step that needs the phone (shell push, module first, APK, rooted deploy) keeps its request
   # pending and runs again once the phone is back, never "held until a new origin commit" (11-06: two APK fixes and a
@@ -842,6 +851,7 @@ run)
         rm -rf "$held"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"
         if [ $rc = 0 ]; then
           echo "$T" > "$Q/live"; echo "$T" > "$Q/processed"; rm -f "$Q/failed"
+          pull_publish shell "$log"
           post_gate "$T" "$log" $add
           # A shell whose tip also has APK inputs not yet installed is checked by that APK's ship, on the build it needs:
           # checked here it ran on the OLD APK, failed, marked the ship broken, and the APK carrying the fix never
@@ -968,6 +978,7 @@ run)
           rm -rf "$SL"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"
           if [ $rrc = 0 ]; then
             echo "$T" > "$Q/rooted-live"; rm -f "$Q/failed-rooted" "$Q/rooted-pending" "$Q/rooted-note"
+            pull_publish rooted "$rlog"
             echo "$(date '+%F %T') ${T:0:9} rooted ($rchg) for $who_s: $rn" >> "$Q/shipped.log"
             echo "$(date +%T) ${T:0:9}: rooted deploy done ($rchg)"
           elif link_down "$rlog" || phone_offline || { [ $rrc = 69 ] && date +%s > "$Q/phone-offline"; }; then
