@@ -172,7 +172,10 @@
 .home.pill-below > .bar { top: var(--bar-drop); }
 /* DG1 (the user, 11-03 21:30: "Now the icons are floating too far up over the search bar"): the dock over the pill comes
    down with it, so the gap between them stays the design's own (dev/dock-search-check.js barFootSame). */
-.home.pill-below > .dock { top: var(--bar-drop); }
+/* Not the ghost (nothing pinned, an app carried: .dock-ghost, fixed at the screen's foot): a top on it pinned the drop
+   zone to the screen's top, and every drop on home's upper rows went to the dock (gate library-folded,
+   home-folder-folded once the pill sat under the dock by default). */
+.home.pill-below > .dock:not(.dock-ghost) { top: var(--bar-drop); }
 /* Edit mode: the foot's row rises over the edit bar (--edit-rise, measured from the inset, so undropped first) - the
    screen-fixed bar's translate carries the rise (--bar-edit-rise: its translate is --track-counter's, FX1). */
 .home.editing { --bar-drop: 0px; --bar-edit-rise: var(--edit-rise); }
