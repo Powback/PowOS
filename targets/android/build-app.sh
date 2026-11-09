@@ -35,7 +35,8 @@ fi
 if [ "${POWOS_SKIP_APPS:-}" != 1 ]; then
   alog=$(mktemp)
   for a in $(sed 's/#.*//' "$ROOT/apps/bundled.list"); do
-    "$ROOT/apps/build.sh" "$a" > "$alog" 2>&1 && [ -d "$ROOT/apps/$a/out/ui" ] ||
+    "$ROOT/apps/build.sh" "$a" > "$alog" 2>&1 && { [ ! -d "$ROOT/apps/$a/ui" ] || [ -d "$ROOT/apps/$a/out/ui" ]; } &&
+      { [ ! -f "$ROOT/apps/$a/module/Cargo.toml" ] || [ -f "$ROOT/apps/$a/out/module.wasm" ]; } ||
       { tail -20 "$alog" >&2; rm -f "$alog"; echo "build-app: refusing - apps/build.sh $a failed (above): the APK would ship without it" >&2; exit 6; }
   done
   rm -f "$alog"

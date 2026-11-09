@@ -74,6 +74,11 @@ object EngineServices {
     }
 
     private fun run(ctx: Context) {
+        // The launcher's widgets and apps dirs + the widget tools where the image's programs look (gh#13): before
+        // `powos app install` in the image, which writes ~/.local/share/powos/apps.
+        EngineHome.apply(andro.marchy.SessionService.rootfs(ctx), ctx.filesDir) { name ->
+            runCatching { ctx.assets.open("$name.sh").use { it.readBytes() } }.getOrNull()
+        }
         // The modules where the guest sees them as they are: the session's run dir is passed through (ARCH_EXCLUDE_EXTRA).
         val bundled = File(andro.marchy.SessionService.runDir(ctx), "powos-bundled").apply { mkdirs() }
         val want = dev.omalauncher.shell.LocalApps.modules(ctx)
