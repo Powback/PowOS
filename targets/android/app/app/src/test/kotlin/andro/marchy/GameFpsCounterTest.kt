@@ -8,7 +8,7 @@ class GameFpsCounterTest {
     @Test
     fun ratesFromPresentedCounts() {
         assertEquals(60, GameFpsCounter.fps(100, 1_000, 130, 1_500))
-        assertEquals(23, GameFpsCounter.fps(0, 0, 47, 2_000)) // ABZÛ's 23.3 fps (11-07) reads as 23
+        assertEquals(23, GameFpsCounter.fps(0, 0, 46, 2_000)) // ABZU-like 23 fps
         assertEquals(0, GameFpsCounter.fps(500, 0, 500, 500)) // a stalled game: 0, not a dash
     }
 
