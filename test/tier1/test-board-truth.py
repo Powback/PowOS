@@ -318,12 +318,105 @@ class TruthTest(unittest.TestCase):
 
     def test_pushed_blocked_done(self):
         st, why = self.t(row("a", commits=json.dumps([{"sha": "abc", "subject": "x"}])))
-        self.assertEqual((st, why), ("no-check", "fix pushed (1 commit), no phone check queued"))
+        self.assertEqual((st, why), ("no-check", "needs a check: fix pushed (1 commit), no phone check queued"))
         self.assertEqual(self.t(row("a", status="blocked", note="needs the kernel")), ("blocked", "needs the kernel"))
         self.assertEqual(self.t(row("a", status="blocked"))[1], "no reason given")
         self.assertEqual(self.t(row("a", status="waiting", note="fold it"))[1], "waiting on the user: fold it")
         self.assertEqual(self.t(row("a", status="done"), [agent("a")])[0], "done")
         self.assertEqual(self.t(row("a"))[0], "stalled")
+
+
+class JanitorTest(unittest.TestCase):
+    """The board's janitor (the user, 11-09: "fix the issue where the board becomes stale" - 51 rows said working, 4
+    had moved in 6 h; "a lot has been done just not marked as such"): claims expire, the facts close, fake clock."""
+
+    H = 3600_000
+    PASS = {"task": "a", "job": "j2", "name": "board-state", "state": "PASS", "at": NOW - 60_000, "shipped": True}
+    LANDED = json.dumps([{"sha": "abc1234", "subject": "fix"}])
+
+    def setUp(self):
+        os.environ.pop("POWOS_CLAIM_EXPIRE_H", None)
+
+    def d(self, ws, checks=(), agents=(), now=NOW):
+        return {wid: (kind, why, c) for kind, wid, why, c in cli.janitor_decide(list(ws), list(checks), list(agents), now)}
+
+    def test_claim_expires_after_4h_without_a_heartbeat(self):
+        silent = row("a", owner="powos-games", activity=NOW - 5 * self.H, updated=NOW - 5 * self.H)
+        kind, why, c = self.d([silent])["a"]
+        self.assertEqual(kind, "expired")
+        self.assertTrue(why.startswith("claim expired: powos-games silent since "), why)
+        self.assertEqual(c[:5], ("work_set", "a", "", "", "queued"))
+        # Under 4 h: still its claim; any heartbeat (activity) restarts the clock.
+        self.assertEqual(self.d([dict(silent, activity=NOW - 3 * self.H)]), {})
+        # The window is config.
+        os.environ["POWOS_CLAIM_EXPIRE_H"] = "6"
+        self.assertEqual(self.d([silent]), {})
+        os.environ["POWOS_CLAIM_EXPIRE_H"] = "1"
+        self.assertIn("a", self.d([dict(silent, activity=NOW - 2 * self.H, updated=NOW - 2 * self.H)]))
+
+    def test_a_live_claim_never_expires(self):
+        silent = row("a", owner="powos-games", activity=NOW - 9 * self.H, updated=NOW - 9 * self.H)
+        # An agent whose work is the task holds it, however long the row is quiet.
+        self.assertEqual(self.d([silent], agents=[agent("a")]), {})
+        # The owner role's idle agent no longer does once the row's heartbeat is stale (the 11-09 leak) ...
+        self.assertEqual(self.d([silent], agents=[agent(role="powos-games")])["a"][0], "expired")
+        held, roles = cli.holders([agent(role="powos-games")])
+        self.assertEqual(cli.truth(silent, held, roles, [], NOW)[0], "stalled")
+        # ... but does while it is fresh.
+        fresh = dict(silent, activity=NOW - self.H)
+        self.assertEqual(cli.truth(fresh, held, roles, [], NOW)[0], "working")
+
+    def test_awaiting_check_keeps_its_claim(self):
+        q = {"task": "a", "job": "j3", "name": "x", "state": "queued", "at": NOW - 6 * self.H}
+        silent = row("a", activity=NOW - 9 * self.H, updated=NOW - 9 * self.H)
+        self.assertEqual(self.d([silent], [q]), {})
+
+    def test_pushed_fix_without_a_check_is_flagged(self):
+        silent = row("a", owner="coder", commits=self.LANDED, activity=NOW - 5 * self.H, updated=NOW - 5 * self.H)
+        kind, why, _ = self.d([silent])["a"]
+        self.assertEqual(kind, "expired")
+        self.assertIn("needs a check: fix pushed (1 commit)", why)
+        # On a queued row too (truth's why), so nothing waits forever.
+        q = cli.truth(dict(silent, status="queued"), {}, {}, [], NOW)
+        self.assertEqual(q[0], "queued")
+        self.assertIn("needs a check", q[1])
+
+    def test_done_by_the_facts_closes_itself(self):
+        for st in ("working", "queued", "waiting"):
+            w = row("a", status=st, commits=self.LANDED)
+            kind, why, c = self.d([w], [self.PASS])["a"]
+            self.assertEqual(kind, "done", st)
+            self.assertEqual(c[4], "done")
+            self.assertIn("check board-state PASSED", c[5])
+        # Never: blocked (the owner's word), manager-owned, held by a live agent, no landed fix, the user's own FAIL
+        # newer than the pass, a pass of a build not on the phone, open planned steps.
+        w = row("a", commits=self.LANDED)
+        self.assertEqual(self.d([dict(w, status="blocked")], [self.PASS]), {})
+        self.assertEqual(self.d([dict(w, owner="manager")], [self.PASS]), {})
+        self.assertEqual(self.d([w], [self.PASS], [agent("a")]), {})
+        self.assertEqual(self.d([row("a")], [self.PASS]), {})
+        you = {"task": "a", "job": "you1", "name": "you", "state": "FAIL", "at": NOW - 1000, "line": "still broken"}
+        self.assertNotIn("a", {k for k, v in self.d([w], [self.PASS, you]).items() if v[0] == "done"})
+        self.assertEqual(self.d([w], [dict(self.PASS, shipped=False)]), {})
+        steps = json.dumps([{"text": "next bit", "state": "next"}])
+        self.assertEqual(self.d([dict(w, steps=steps)], [self.PASS]), {})
+
+    def test_status_done_blocked_untouched(self):
+        old = dict(activity=NOW - 50 * self.H, updated=NOW - 50 * self.H)
+        self.assertEqual(self.d([row("a", status="done", **old), row("b", status="blocked", **old),
+                                 row("c", status="queued", **old), row("d", status="waiting", **old)]), {})
+
+
+class AgentsdJanitorTest(unittest.TestCase):
+    """powos-agentsd runs the janitor periodically: the CLI beside it, local module only, never fatal."""
+
+    def test_janitor_cmd_and_run(self):
+        d = load("powos_agentsd_j", AGENTSD)
+        cmd = d.janitor_cmd()
+        self.assertEqual(cmd[1:], [CLI, "janitor"])
+        self.assertEqual(d.run_janitor([sys.executable, "-c", "import os,sys; sys.exit(os.environ['POWOS_AGENTS_REMOTE'] != '0')"]), 0)
+        self.assertIsNone(d.run_janitor(["/nonexistent/powos-agents-cli"]))
+        self.assertGreater(d.JANITOR_S, 0)
 
 
 class PassClosesOnlyItsOwnTaskTest(unittest.TestCase):
@@ -460,6 +553,18 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(js["switcher-follows-finger"]["status"], "working", "the status column itself is untouched")
         self.assertIn("switcher-follows-finger", self.run_cli("task", "list", "--state", "stalled").stdout)
         self.assertNotIn("lights-popup-rooms", self.run_cli("task", "list", "--state", "stalled").stdout)
+
+    def test_list_runs_the_janitor(self):
+        self.run_cli("task", "add", "Quiet claim", "--owner", "powos-games")
+        self.run_cli("task", "add", "Busy claim", "--owner", "powos-games")
+        self.old("quiet-claim", minutes=5 * 60)
+        self.run_cli("task", "list")
+        w = FakeStdb.db["work"]
+        self.assertEqual(w["quiet-claim"]["status"], "queued")
+        self.assertIn("claim expired: powos-games silent since", w["quiet-claim"]["note"])
+        self.assertEqual(w["busy-claim"]["status"], "working")
+        out = self.run_cli("janitor", "--dry-run").stdout
+        self.assertEqual(out, "", "nothing left to move")
 
     def test_done_needs_a_passed_check(self):
         self.run_cli("task", "add", "Prompt glyph")

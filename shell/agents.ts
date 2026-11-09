@@ -171,7 +171,8 @@ export function since(ms: number) {
  * A board task's state as the user should read it - the same rule as `powos agents task list` (lib/ai/agents/
  * powos-agents-cli truth(); the user, 2026-10-23: "30 tasks show working while only 4 agents run"): "working" only while
  * a LIVE agent holds it - one whose `work` is the task (its own `task set <id> --step/--progress` calls,
- * powos-agentsd), else a live agent of the owner's role holding nothing else. Without one, from its phone checks (the
+ * powos-agentsd), else a live agent of the owner's role holding nothing else while the row's heartbeat is inside
+ * CLAIM_EXPIRE_MS (a live claim, never a stale one). Without one, from its phone checks (the
  * module's work_check rows, synced from the verify queue): "awaiting check" (one queued), "no check" (nobody on it,
  * nothing queued, but something to act on: a FAILED / INVALID / SKIPPED check, a pass nobody closed, a pushed fix
  * with no check) or "stalled" (nothing at all: it needs an owner). Live = working or needs you, heard from within
@@ -183,6 +184,9 @@ export interface BoardTask {
   owner: string;
   step?: string;
   commits?: string;
+  /** The row's heartbeat (ms): any task set, step or commit link moves it (0 on old rows: [updated]). */
+  activity?: bigint | number;
+  updated?: bigint | number;
 }
 /** A work_check row (apps/agents): a task's phone check, queued or its result. */
 export interface BoardCheck {
@@ -199,13 +203,22 @@ const isLive = (a: Agent) => (a.state === "working" || a.state === "needs_you") 
 /** tools/phone/verify/queue.sh's step marker: a check queued before the sweeper synced it. */
 export const QUEUED_STEP = "phone check queued";
 
-export function holder(w: BoardTask): Agent | null {
+/**
+ * A claim expires: the owner role's idle agent counts as holding a task only while the row's own heartbeat is this
+ * fresh - the CLI's POWOS_CLAIM_EXPIRE_H default (the user, 11-09: "fix the issue where the board becomes stale" - 51
+ * rows said working, 4 had moved in 6 h; any live agent of the owner's role kept all of its tasks "working").
+ */
+export const CLAIM_EXPIRE_MS = 4 * 3600_000;
+const heartbeat = (w: BoardTask) => Math.max(Number(w.activity ?? 0), Number(w.updated ?? 0));
+
+export function holder(w: BoardTask, now = Date.now()): Agent | null {
   let byRole: Agent | null = null;
+  const fresh = now - heartbeat(w) < CLAIM_EXPIRE_MS;
   for (const id of agentIds.value) {
     const a = rows.get(id)?.value;
     if (!a || !isLive(a)) continue;
     if (a.work === w.id) return a;
-    if (!a.work && w.owner && w.owner !== "coder" && a.role === w.owner) byRole = a;
+    if (fresh && !a.work && w.owner && w.owner !== "coder" && a.role === w.owner) byRole = a;
   }
   return byRole;
 }

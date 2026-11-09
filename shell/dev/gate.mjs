@@ -5317,6 +5317,26 @@ async function aiStatusCheck(page) {
   fails.push(...(await aiStackCheck(page)).map((f) => `folded stack: ${f}`));
   const words = await page.evaluate(aiStatusWordsSetup);
   fails.push(...[...aiStatusRowWords(words.rows), ...aiStatusHeadWords(words.head)].map((f) => `folded words: ${f}`));
+  fails.push(...(await page.evaluate(boardClaimExpiry)).map((f) => `claims: ${f}`));
+  return fails;
+}
+
+/**
+ * In the page (the user, 11-09: "fix the issue where the board becomes stale"): a live idle agent of a task's owner role
+ * holds it only while the row's heartbeat is inside CLAIM_EXPIRE_MS; an agent whose work is the task always does.
+ */
+async function boardClaimExpiry() {
+  const G = window.__gw, E = window.__mockEvents;
+  const A = await G.mod("./agents.ts");
+  const now = Date.now();
+  const ag = (id, o) => ({ id, host: "mac", role: "powos-claims", parent: null, state: "working", title: "", step: "", cwd: "PowOS", pid: 0, subs: 0, unread: 0, report: "", work: "", started: now - 6e5, last: now - 2e3, rev: 1, ...o });
+  E.emit("agents.delta", { agents: [ag("mac:claim-idle"), ag("mac:claim-held", { role: "other", work: "claim-held" })] });
+  await G.until(() => A.agent("mac:claim-held")?.value && A.agent("mac:claim-idle")?.value, 3000);
+  const t = (id, age) => ({ id, owner: "powos-claims", activity: now - age, updated: now - age });
+  const fails = [];
+  if (A.boardState(t("claim-fresh", 36e5), []) !== "working") fails.push("a fresh row of a live role's idle agent isn't working");
+  if (A.boardState(t("claim-stale", 5 * 36e5), []) === "working") fails.push("a row silent 5 h still says working through an idle agent of its role");
+  if (A.boardState(t("claim-held", 9 * 36e5), []) !== "working") fails.push("a row its agent holds (work = the task) isn't working");
   return fails;
 }
 
