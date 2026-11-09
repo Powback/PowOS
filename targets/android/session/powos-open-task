@@ -305,6 +305,99 @@ def steam_launch_of(pid):
 
 
 STEAM = os.path.expanduser("~/.local/share/Steam")
+# Page cache warmed from the tap for a Steam game (board broforce-launch-time): at most this much, and never more than
+# a quarter of MemAvailable. 0 (POWOS_LAUNCH_PREFETCH_MB=0) turns it off.
+PREFETCH_MB = int(os.environ.get("POWOS_LAUNCH_PREFETCH_MB", "1024") or 0)
+PREFETCH_CODE = (".exe", ".dll", ".so", ".json", ".config", ".xml", ".ini")
+
+
+def steam_game_dir(appid, steam=STEAM):
+    """The game's install dir (steamapps/common/<installdir> of the library holding appmanifest_<appid>.acf), else None."""
+    libs = [os.path.join(steam, "steamapps")]
+    try:
+        with open(os.path.join(steam, "steamapps/libraryfolders.vdf"), errors="replace") as f:
+            libs += [os.path.join(p, "steamapps") for p in re.findall(r'"path"\s+"([^"]+)"', f.read())]
+    except OSError:
+        pass
+    for lib in dict.fromkeys(libs):
+        try:
+            with open(os.path.join(lib, f"appmanifest_{appid}.acf"), errors="replace") as f:
+                m = re.search(r'"installdir"\s+"([^"]+)"', f.read())
+        except OSError:
+            continue
+        if m and os.path.isdir(os.path.join(lib, "common", m.group(1))):
+            return os.path.join(lib, "common", m.group(1))
+    return None
+
+
+def prefetch_plan(root, cap_bytes):
+    """The files under root to read ahead, in order: code first (the exe, dlls, .so - what Wine/the loader maps before
+    anything draws), then data smallest-first (Unity's globalgamemanagers/level0/sharedassets before the big bundles),
+    until cap_bytes. [(path, size)]."""
+    code, data = [], []
+    for d, dirs, files in os.walk(root):
+        dirs.sort()
+        for n in sorted(files):
+            p = os.path.join(d, n)
+            try:
+                size = os.stat(p).st_size
+            except OSError:
+                continue
+            if size:
+                (code if n.lower().endswith(PREFETCH_CODE) else data).append((p, size))
+    out, total = [], 0
+    for i, (p, size) in enumerate(code + sorted(data, key=lambda e: (e[1], e[0]))):
+        if total + size > cap_bytes:
+            if i < len(code):
+                continue  # a huge dll past the cap: a smaller one after it may still fit
+            break  # data is smallest-first: nothing after this fits either
+        out.append((p, size))
+        total += size
+    return out
+
+
+def mem_available():
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0
+
+
+def launch_prefetch(appid, steam=STEAM):
+    """Reads the game's files into the page cache while Steam does its own prep (tap -> reaper 3-4 s, no game I/O yet),
+    so Wine's loader and the engine's load find them there instead of faulting them in from storage on an emulated,
+    clock-capped main thread (bf-coldstart 11-07 04:37: 68 MB came from storage during the load after the phone sat;
+    a game not run since boot reads its ~300 MB load cold). posix_fadvise(WILLNEED) = asynchronous kernel readahead:
+    nothing is copied into this process, nothing written, the cache stays reclaimable. A thread (the syscall drops the
+    GIL); every error ignored - the launch never waits on it. Generic: every Steam game started through here.
+    HACK: Valve's client could read ahead the game's depot itself while it prepares the launch (it already walks the
+    files for its update check); until then PowOS does it from the tap."""
+    cap = min(PREFETCH_MB << 20, mem_available() // 4)
+    root = steam_game_dir(appid, steam) if cap > 0 and hasattr(os, "posix_fadvise") else None
+    if not root:
+        return None
+
+    def run():
+        for p, _ in prefetch_plan(root, cap):
+            try:
+                fd = os.open(p, os.O_RDONLY | os.O_CLOEXEC)
+            except OSError:
+                continue
+            try:
+                os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_WILLNEED)
+            except OSError:
+                pass
+            finally:
+                os.close(fd)
+
+    import threading
+    t = threading.Thread(target=run, name="launch-prefetch", daemon=True)
+    t.start()
+    return t
 
 
 def steam_alive():
@@ -431,6 +524,7 @@ def main():
     def start_command():
         if game:
             state["launch"] = LaunchRecord(game)
+            launch_prefetch(game)
         state["mark"] = f"steam_app_{game}" if game else min(ids, default="") or command.split()[0]
         launch_mark(state["mark"], True)
         # Its own output file, not our stdout (the caller's pipe): see the top. Relayed to us while we run.
