@@ -35,7 +35,8 @@ fi
 if [ "${POWOS_SKIP_APPS:-}" != 1 ]; then
   alog=$(mktemp)
   for a in $(sed 's/#.*//' "$ROOT/apps/bundled.list"); do
-    "$ROOT/apps/build.sh" "$a" > "$alog" 2>&1 && [ -d "$ROOT/apps/$a/out/ui" ] ||
+    "$ROOT/apps/build.sh" "$a" > "$alog" 2>&1 && { [ ! -d "$ROOT/apps/$a/ui" ] || [ -d "$ROOT/apps/$a/out/ui" ]; } &&
+      { [ ! -f "$ROOT/apps/$a/module/Cargo.toml" ] || [ -f "$ROOT/apps/$a/out/module.wasm" ]; } ||
       { tail -20 "$alog" >&2; rm -f "$alog"; echo "build-app: refusing - apps/build.sh $a failed (above): the APK would ship without it" >&2; exit 6; }
   done
   rm -f "$alog"
@@ -71,3 +72,7 @@ if [ ! "$AAD/output/powos.apk" -nt "$stamp" ]; then
 fi
 rm -f "$stamp"
 echo "published: http://android.pow/apk/powos.apk (version code $(cat "$AAD/output/powos.ver"))"
+# The same commit's shell bundle and PowOS code (powos-core) for the phones that pull their updates (no adb: the S25,
+# the razr - docs/PHONE-UPDATES.md). Only from origin's history; a failure only warns: the APK stands.
+"$HERE/publish-shell.sh" "$AAD/output" || echo "build-app: publish-shell failed - the pull phones keep their shell" >&2
+"$HERE/build-powos-core.sh" --publish || echo "build-app: powos-core not published - the pull phones keep their code" >&2

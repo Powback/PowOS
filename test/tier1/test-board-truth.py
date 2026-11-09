@@ -999,8 +999,8 @@ class RefusalTest(unittest.TestCase):
             self.assertEqual(len(calls), 1)
             a = calls[0]
             self.assertEqual(a[:6], ["friction", "add", "--area", "permissions", "--kind", "refused"])
-            self.assertEqual(a[6], "Bash refused by the permission system: Reboot")
-            self.assertIn("powos-games ran Bash: Reboot the phone", a)
+            self.assertEqual(a[6], "Bash refused by the permission system: adb")   # perm-log: the command, not the description
+            self.assertIn("powos-games ran Bash: adb shell su -c reboot", a)
         finally:
             os.environ.pop("POWOS_AGENTS_CLI", None)
             shutil.rmtree(tmp)

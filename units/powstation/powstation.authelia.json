@@ -31,7 +31,8 @@
     ],
     "keep": [
       "/Users/macback/Projects/PowStation/config/authelia",
-      "/Users/macback/Projects/PowStation/data/authelia"
+      "/Users/macback/Projects/PowStation/data/authelia",
+      "/Users/macback/Projects/PowStation/secrets/authelia"
     ]
   },
   "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
