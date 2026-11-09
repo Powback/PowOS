@@ -1,0 +1,16 @@
+{
+  "id": "owner-config-app",
+  "name": "Owner config, the launcher's copy",
+  "kind": "system",
+  "owner": "system:devices",
+  "purpose": "the launcher's copy of the owner config (the app's files/run = /run/powos-app/owner.conf): the speech servers its dictation uses (POWOS_STT_URL, POWOS_VOICE_URL); none = on-device dictation only",
+  "installedBy": "powos devices enroll / targets/android/rooted/rooted.sh deploy -> powos-deploy.sh",
+  "files": [
+    "/data/data/com.powos.app/files/run/owner.conf"
+  ],
+  "remove": {
+    "commands": [
+      "rm -f /data/data/com.powos.app/files/run/owner.conf"
+    ]
+  }
+}

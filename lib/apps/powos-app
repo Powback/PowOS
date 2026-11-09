@@ -977,7 +977,14 @@ def dispatch(a):
         else:
             runtime("config", a[2], "--app", a[1])
     elif c == "services":
-        os.execvp("powos-supervisor", ["powos-supervisor", "status", *a[1:]])
+        # The system tier is powos-supervisor (rooted phones, desktops); a no-root build has none (issue #1: a traceback).
+        sup = shutil.which("powos-supervisor") or next(
+            (p for p in [os.path.join(os.path.dirname(os.path.realpath(__file__)), "powos-supervisor")] if os.access(p, os.X_OK)), None)
+        if not sup:
+            print("no system tier on this build (powos-supervisor isn't installed: without root the launcher runs "
+                  "SpacetimeDB and the App API itself)")
+            return 0
+        os.execv(sup, [sup, "status", *a[1:]])
     elif c == "check":
         runtime("check")
     else:

@@ -251,6 +251,9 @@ class ShellTerminals(
             closeFd()
             Log.i(TAG, "$id exited $status")
             if (sessions[id] === this) emit("term.exit", JSONObject().put("id", id).put("run", run).put("code", status))
+            // A sign-in done in this terminal: the launcher's Claude state asked again (on the main thread, as the
+            // chat's state is).
+            main.post { dev.omalauncher.PowosAiChat.terminalEnded() }
         }
 
         fun write(bytes: ByteArray) {
