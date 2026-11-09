@@ -8,6 +8,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,6 +22,7 @@ import dev.omalauncher.shell.WebWindows
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.UnknownHostException
 import java.security.DigestInputStream
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
@@ -35,6 +38,23 @@ import org.json.JSONObject
 object UpdatePlan {
     /** The PowApps store (android-app-dev's output/): LAN, or the WireGuard VPN with Pi-hole's DNS; no public route. */
     const val STORE = "http://android.pow/apk"
+
+    /** The store's name, for the [HUB] fallback's Host header (Traefik routes by it). */
+    const val STORE_HOST = "android.pow"
+
+    /**
+     * The hub (PowStation's Traefik, what Pi-hole answers for every .pow name), reached by address when the name doesn't
+     * resolve: away from home on the WireGuard VPN with a DNS that isn't Pi-hole (Android's Private DNS, a split tunnel
+     * without DNS, the image's fixed 8.8.8.8). Every peer's AllowedIPs carry 192.168.50.0/24, and Traefik's .pow
+     * allowlist (pow-local-only.yml) admits the VPN's 10.13.13.0/24, so no public route is involved (issue #2).
+     * HACK: a fixed address. Real fix: the host directory's hub row (docs/REMOTE-POWOS.md §2, `powos-hosts`) or the
+     * public release channel #2 plans for phones off the owner's VPN.
+     */
+    const val HUB = "192.168.50.100"
+
+    /** [url] on the store's name, rewritten to the [HUB]'s address (its Host header stays [STORE_HOST]); null: not the store. */
+    fun viaHub(url: String): String? =
+        "http://$STORE_HOST/".let { pre -> if (url.startsWith(pre)) "http://$HUB/" + url.removePrefix(pre) else null }
 
     /** A run on its own (the launcher in front) at most this often; Settings' "check" runs at once. */
     const val INTERVAL_MS = 6 * 60 * 60 * 1000L
@@ -120,9 +140,10 @@ object UpdatePlan {
         reached: Boolean,
         done: List<String>,
         force: Boolean,
+        vpn: Boolean = false,
     ): String? =
         when {
-            !reached -> if (force) "Couldn't reach the PowOS store (home network or VPN)" else null
+            !reached -> if (force) unreachable(vpn).replaceFirstChar { it.uppercase() } else null
             done.isEmpty() -> if (force) "PowOS is up to date" else null
             else -> "Updated: ${done.joinToString(", ")}"
         }
@@ -134,12 +155,21 @@ object UpdatePlan {
     fun error(
         reached: Boolean,
         linuxFailed: Boolean,
+        vpn: Boolean = false,
     ): String? =
         when {
-            !reached -> "couldn't reach the PowOS store (home network or VPN)"
+            !reached -> unreachable(vpn)
             linuxFailed -> "the Linux update didn't finish (see run/powos-update.log)"
             else -> null
         }
+
+    /**
+     * Why the store didn't answer, as Settings says it: with no VPN up the phone is away from home (or on a network
+     * without the store), and the way to update is the PowOS VPN (WireGuard); with one up, the VPN doesn't reach it.
+     */
+    fun unreachable(vpn: Boolean): String =
+        if (vpn) "couldn't reach the PowOS store over the VPN (is it the PowOS WireGuard tunnel?)"
+        else "couldn't reach the PowOS store - away from home, connect the PowOS VPN (WireGuard) to update"
 
     /** A download's percentage, null: its size isn't known. */
     fun percent(
@@ -235,7 +265,7 @@ object PowosUpdates {
                 state.writeText("$at $now")
                 status.checkedAt = at
             }
-            val summary = UpdatePlan.summary(reached, done, force)
+            val summary = UpdatePlan.summary(reached, done, force, vpnUp(context))
             Log.i(TAG, "run done: ${summary ?: "nothing new"}")
             if (summary == null) UpdateNotes.cancel(context) else UpdateNotes.finished(context, summary)
         } finally {
@@ -246,6 +276,7 @@ object PowosUpdates {
     /** The three steps: whether the store answered, and what changed. */
     private fun runSteps(context: Context): Pair<Boolean, List<String>> {
         val done = mutableListOf<String>()
+        Store.byAddress = false
         UpdateNotes.progress(context, "Checking for updates")
         val apk = runCatching { apk(context) }.onFailure { Log.i(TAG, "apk: $it") }
         if (apk.getOrNull() == true) done += "the app (tap to install)"
@@ -254,9 +285,16 @@ object PowosUpdates {
         val linux = runCatching { linux(context) }.onFailure { Log.i(TAG, "linux: $it") }.getOrNull()
         UpdatePlan.packages(linux)?.let { done += it }
         val reached = apk.isSuccess || shell.isSuccess
-        status.error = UpdatePlan.error(reached, linuxFailed = linux == null && EngineGuest.enabled)
+        status.error = UpdatePlan.error(reached, linuxFailed = linux == null && EngineGuest.enabled, vpn = vpnUp(context))
         return reached to done
     }
+
+    /** Whether a VPN carries the phone's traffic now (the store answers off the LAN only through one). */
+    private fun vpnUp(context: Context): Boolean =
+        runCatching {
+            val cm = context.getSystemService(ConnectivityManager::class.java)
+            cm.getNetworkCapabilities(cm.activeNetwork)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+        }.getOrDefault(false)
 
     /** A game in front (a web window's, or launched in the last 2 minutes): updates wait. lib/phone-update.sh checks too. */
     private fun gameRunning(context: Context): Boolean {
@@ -457,9 +495,59 @@ internal object ShellBundleApply {
     }
 }
 
-/** The store over HTTP (LAN/VPN only). */
+/**
+ * The store over HTTP (LAN/VPN only). By name first; a name that doesn't resolve (off the LAN on the VPN with another
+ * DNS) is tried once more at the hub's address with the store's Host header ([UpdatePlan.HUB]), and the rest of the
+ * run goes there straight away.
+ */
 internal object Store {
-    fun get(url: String): ByteArray = dev.omalauncher.httpGet(url, connectTimeout = 4_000, readTimeout = 15_000)
+    /** Set once the name didn't resolve; [PowosUpdates] clears it at each run's start (the phone may be home again). */
+    @Volatile var byAddress = false
+
+    fun get(url: String): ByteArray =
+        connect(url, readTimeout = 15_000).let { c ->
+            try {
+                c.inputStream.use { it.readBytes() }
+            } finally {
+                c.disconnect()
+            }
+        }
+
+    /** [url] opened and answering 200: by name, or at the hub's address when the name doesn't resolve. */
+    private fun connect(
+        url: String,
+        readTimeout: Int,
+    ): HttpURLConnection {
+        val hub = UpdatePlan.viaHub(url) ?: return open(url, readTimeout, host = null)
+        if (!byAddress) {
+            try {
+                return open(url, readTimeout, host = null)
+            } catch (_: UnknownHostException) {
+                Log.i("PowosUpdates", "${UpdatePlan.STORE_HOST} doesn't resolve - the hub by address (${UpdatePlan.HUB})")
+                byAddress = true
+            }
+        }
+        return open(hub, readTimeout, host = UpdatePlan.STORE_HOST)
+    }
+
+    private fun open(
+        url: String,
+        readTimeout: Int,
+        host: String?,
+    ): HttpURLConnection {
+        val c = URL(url).openConnection() as HttpURLConnection
+        c.connectTimeout = 4_000
+        c.readTimeout = readTimeout
+        c.useCaches = false
+        host?.let { c.setRequestProperty("Host", it) }
+        try {
+            check(c.responseCode == 200) { "HTTP ${c.responseCode} for $url" }
+        } catch (t: Throwable) {
+            c.disconnect()
+            throw t
+        }
+        return c
+    }
 
     /** [url] into [to] (through a .part file), its percentage to [onPercent] every 5 %. */
     fun download(
@@ -467,12 +555,8 @@ internal object Store {
         to: File,
         onPercent: (Int?) -> Unit,
     ) {
-        val c = URL(url).openConnection() as HttpURLConnection
-        c.connectTimeout = 4_000
-        c.readTimeout = 30_000
-        c.useCaches = false
+        val c = connect(url, readTimeout = 30_000)
         try {
-            check(c.responseCode == 200) { "HTTP ${c.responseCode} for $url" }
             val total = c.contentLengthLong
             val part = File(to.path + ".part")
             val got = c.inputStream.use { input -> part.outputStream().use { out -> pump(input, out, total, onPercent) } }

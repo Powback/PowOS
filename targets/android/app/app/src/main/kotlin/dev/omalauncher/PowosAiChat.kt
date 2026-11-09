@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import dev.omalauncher.linux.Guest
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 /**
  * The phone's conversation with PowOS AI: PowOS's persistent manager (`powos manager`, lib/ai/manager), one turn at a
@@ -121,28 +122,60 @@ object PowosAiChat {
             }
         }
 
-    /** Asks the image how the manager is signed in, into [auth] (a background thread; once at a time). */
+    /**
+     * Asks the image how the manager is signed in, into [auth] (a background thread; one ask at a time).
+     *
+     * A call while an ask runs is not dropped: it asks once more after it (issue #3, S25: the sign-in's checkAuth came
+     * while the page-show ask, started before the credentials were written, was still running; that one answered
+     * "signin" and the new one was skipped, so the page said "not signed in" until a force-stop). An ask that hangs
+     * (the image still starting, a stuck python3) is killed after [AUTH_ASK_MS], so it can never block every later ask.
+     */
     fun checkAuth() {
-        if (!Guest.enabled || authAsking) return
+        if (!Guest.enabled) return
+        if (authAsking) {
+            authAgain = true
+            return
+        }
         authAsking = true
+        authAgain = false
         Thread({
-            val word =
-                runCatching {
-                    val p = Guest.process("exec powos manager --auth", mergeErrors = false).start()
-                    p.outputStream.close()
-                    val out = p.inputStream.bufferedReader().readText()
-                    p.waitFor()
-                    authWord(out)
-                }.getOrElse {
-                    Log.w(TAG, "auth check failed", it)
-                    ""
-                }
+            val word = askAuth()
             post {
                 authAsking = false
                 if (word.isNotEmpty()) authIs(word)
+                if (authAgain) checkAuth()
             }
         }, "powos-ai-auth").start()
     }
+
+    /** `powos manager --auth`'s word ("" when it failed or hung past [AUTH_ASK_MS]); blocks, a background thread's. */
+    private fun askAuth(): String =
+        runCatching {
+            val p = Guest.process("exec powos manager --auth", mergeErrors = false).start()
+            p.outputStream.close()
+            val out = StringBuilder()
+            val reader =
+                Thread({
+                    val text = runCatching { p.inputStream.bufferedReader().readText() }.getOrDefault("")
+                    synchronized(out) { out.append(text) }
+                }, "powos-ai-auth-out")
+            reader.start()
+            if (!p.waitFor(AUTH_ASK_MS, TimeUnit.MILLISECONDS)) {
+                p.destroyForcibly()
+                Log.w(TAG, "auth check timed out after $AUTH_ASK_MS ms")
+            }
+            reader.join(1_000)
+            authWord(synchronized(out) { out.toString() })
+        }.getOrElse {
+            Log.w(TAG, "auth check failed", it)
+            ""
+        }
+
+    /** A checkAuth that came while one ran: asked again once that one answers. */
+    private var authAgain = false
+
+    /** `powos manager --auth` answers in well under a second (fleet_login.py's authority call is capped at 12 s). */
+    private const val AUTH_ASK_MS = 20_000L
 
     /**
      * A terminal ended (ShellTerminals): when the manager isn't signed in, how it is signed in is asked again - a sign-in
