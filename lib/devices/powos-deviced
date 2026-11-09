@@ -19,6 +19,7 @@ devices ask for (lock, screen off/on, sleep, wake another device by Wake-on-LAN,
                                          shows a code + QR, waits for a person to approve it on a signed-in device,
                                          stores this device's identity + tokens (0600) and registers it in units.d
   powos-deviced enrollment               this device's enrollment (no secrets)
+  powos-deviced adopt -                  keep an enrollment the phone app's setup finished (JSON on stdin), + ai-apply
   powos-deviced registry                 every enrolled device of the realm (asks the realm with this device's token)
   powos-deviced unenroll                 leave the realm (revokes this device's realm and AI tokens there)
   powos-deviced ai-apply                 point this device's AI at claude-auth with ITS OWN token (endpoint.conf)
@@ -837,10 +838,9 @@ def cli_call(argv):
 
 # ── enrollment: joining the realm, LAN/VPN only (PowStation powos-enroll, docs/DEVICES.md) ──────────────────────
 
-# HACK: the realm's address defaults to the owner's (enroll.pow, LAN/VPN only): enrolling is how a device becomes the
-# owner's, so there is nothing to read it from yet. Real fix: the realm found by discovery (mDNS on the LAN) or typed /
-# scanned at enroll (--realm, the QR), no default.
-REALM = os.environ.get("POWOS_ENROLL_URL", "http://enroll.pow")
+# The hub's name on any PowOS LAN/VPN: "Your PowStation" (powstation.pow, the realm's GET /v1/realm). Not an owner
+# host: every owner's hub answers at that name on their own network. --realm (or the setup's address field) overrides.
+REALM = os.environ.get("POWOS_ENROLL_URL", "http://powstation.pow")
 
 
 def enrollment_path():
@@ -1009,17 +1009,41 @@ def cli_enroll(argv):
     else:
         raise SystemExit("powos-deviced: nobody approved it in time - run enroll again")
     e = {"realm": realm, "device": r["device"], "device_token": r["device_token"], "ai": r.get("ai"),
-         "endpoints": r.get("endpoints", {}), "at": int(now())}
-    save_json(enrollment_path(), e)
-    owner = owner_apply((e["endpoints"] or {}).get("owner"))
-    save_json(units_record_path(), unit_record(e))
-    os.chmod(units_record_path(), 0o644)
+         "endpoints": r.get("endpoints", {}), "owner": r.get("owner"), "hub": r.get("hub"), "at": int(now())}
+    owner = save_enrollment(e)
     print(f"enrolled: {e['device']['name']} ({e['device']['id']}), approved by {e['device'].get('approved_by')}"
           + (f"; AI: its own token for {e['ai']['tenant']} (powos devices ai-apply)" if e.get("ai") else "; no AI access")
           + (f"; owner config: {', '.join(owner)}" if owner else ""))
     if "--apply-ai" in argv and e.get("ai"):
         return cli_ai_apply()
     return 0
+
+
+def save_enrollment(e):
+    """This device joined: its enrollment (0600), the owner config from the realm's bundle, its units.d record.
+    Returns the owner keys written."""
+    save_json(enrollment_path(), e)
+    owner = owner_apply((e.get("endpoints") or {}).get("owner"))
+    save_json(units_record_path(), unit_record(e))
+    os.chmod(units_record_path(), 0o644)
+    return owner
+
+
+def cli_adopt(argv):
+    """`adopt -`: an enrollment another part of this device already finished (the phone app's setup, "Join your
+    PowStation": the device flow in PowStation.kt) - {realm, device, device_token, ai?, endpoints, owner?} on stdin -
+    kept here like `enroll` keeps its own, so this Linux's agents, terminals and claude are the owner's too. With AI
+    (the tenant the approver picked) it also applies it (`ai-apply`)."""
+    if argv[:1] != ["-"]:
+        raise SystemExit("usage: powos-deviced adopt -   (the enrollment JSON on stdin)")
+    e = json.loads(sys.stdin.read())
+    if not (isinstance(e, dict) and e.get("device_token") and isinstance(e.get("device"), dict) and e.get("realm")):
+        raise SystemExit("powos-deviced: adopt: not an enrollment (realm, device, device_token)")
+    e = {k: e.get(k) for k in ("realm", "device", "device_token", "ai", "endpoints", "owner", "hub")}
+    e["endpoints"], e["at"] = e["endpoints"] or {}, int(now())
+    owner = save_enrollment(e)
+    print(json.dumps({"ok": True, "owner": owner, "ai": bool(e.get("ai"))}), flush=True)
+    return cli_ai_apply() if e.get("ai") else 0
 
 
 def enrolled():
@@ -1063,8 +1087,10 @@ def realm_ask(path, body=None, approver=True):
 def enroll_pending():
     """Devices waiting to join, each marked when it is already paired with this device (a paired one upgrading)."""
     known = set(peers()) | set(load_json(remotes_path(), {}))
-    return {"pending": [{**p, "paired": (p.get("device") or {}).get("id") in known}
-                        for p in realm_ask("/v1/devices/pending").get("pending", [])]}
+    r = realm_ask("/v1/devices/pending")
+    # tenants: the Claude subscriptions the approver may give the new device (the realm's; the card's choice)
+    return {"pending": [{**p, "paired": (p.get("device") or {}).get("id") in known} for p in r.get("pending", [])],
+            "tenants": [t for t in r.get("tenants", []) if isinstance(t, str)]}
 
 
 def enroll_decide(code, decision="approve", tenant=None, approver=True):
@@ -1214,6 +1240,8 @@ def main(argv):
         print("unenrolled: this device's realm and AI tokens no longer work")
     elif cmd == "ai-apply":
         return cli_ai_apply()
+    elif cmd == "adopt":
+        return cli_adopt(rest)
     elif cmd == "owner-apply":
         return cli_owner_apply(rest)
     else:

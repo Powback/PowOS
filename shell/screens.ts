@@ -8,7 +8,7 @@ import { signal } from "@preact/signals";
 import { useEffect, useState } from "preact/hooks";
 import { powos } from "./bridge.ts";
 
-export type ScreenName = "settings" | "style" | "themes" | "store" | "linux" | "coding" | "aur" | "licenses" | "gestures" | "storage";
+export type ScreenName = "settings" | "style" | "themes" | "store" | "linux" | "coding" | "aur" | "licenses" | "gestures" | "storage" | "join";
 
 /** The open screens, bottom first; the last one shows. */
 export const screens = signal<ScreenName[]>([]);
@@ -107,7 +107,35 @@ export interface SettingsState {
   } | null;
   setup: Job;
   version: string;
+  /** "Join your PowStation" (PowStation.kt): for the tile's line. Missing on an older host. */
+  join?: JoinState;
 }
+
+/**
+ * First-run setup's second step and Settings' PowStation tile (PowStation.kt): use PowOS on its own, or join the
+ * owner's hub. choose (not decided yet) -> standalone | finding -> ready (the address field; found = the hub answered
+ * at powstation.pow) -> asking -> code (approve it on an enrolled device) -> joined; leaving -> standalone.
+ */
+export interface JoinState {
+  phase: "choose" | "standalone" | "finding" | "ready" | "asking" | "code" | "joined" | "leaving";
+  address: string;
+  found: boolean;
+  /** "Your PowStation" */
+  hub: string;
+  /** Whose PowOS this device is part of ("Mats"); "" when the hub doesn't say. */
+  owner: string;
+  code: string;
+  /** This device's name, as the approver's card shows it. */
+  name: string;
+  /** The Claude subscription the approver gave it (the hub's claude-auth); "" none. */
+  tenant: string;
+  error: string;
+  /** What PowOS's Linux said when it took the enrollment. */
+  linux: string;
+}
+
+/** "Part of Mats's PowOS" / "Part of your PowOS". */
+export const partOf = (j: Pick<JoinState, "owner">) => (j.owner ? `Part of ${j.owner}'s PowOS` : "Part of your PowOS");
 
 export interface CodingAgent {
   bin: string;

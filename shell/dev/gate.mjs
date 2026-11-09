@@ -13682,6 +13682,10 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `ai-fade-${label}`, viewport).then((r) => whenReady(r, () => aiFadeCheck(r.page, label))));
+  // First run: "Join your PowStation" or "Use PowOS on its own", the code to approve, joined, Leave (dev/join-check.js;
+  // the user, 11-09: "proper device management and onboarding so I can use all of my devices").
+  for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+    runs.push(open(browser, `${ORIGIN}/index.html?join=choose`, `join-${label}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(async (l) => (await importShim("./dev/join-check.js")).joinFails(l), `join-${label}`))));
   // The non-root build's AI page before its user signs in: Sign in to Claude, Claude Code's own login (11-04; aiSigninInPage).
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
@@ -14615,7 +14619,7 @@ function dvJoinAgent(sleep, reply) {
     return reply(200, { revoked: true });
   };
   const ENROLL = {
-    "/v1/enroll/pending": () => reply(200, { pending: join.waiting }),
+    "/v1/enroll/pending": () => reply(200, { pending: join.waiting, tenants: ["default", "plink"] }),
     "/v1/enroll/devices": () => reply(200, { devices: join.devices }),
     "/v1/enroll/approve": decide,
     "/v1/enroll/revoke": revokeIt,
@@ -14895,6 +14899,13 @@ async function dvJoin() {
   const body = parseFloat(getComputedStyle(root.querySelector("[data-devices]")).fontSize);
   const row = '[data-waiting="BCDF-GHJK"]';
   const marked = dvTxt(row);
+  // The hub's Claude goes with the approval (join-powstation: no Claude login on the new phone): the first subscription
+  // by default; a tap on another row's Claude line picks the next, then none.
+  const tv = '[data-waiting="MNPQ-RSTV"] [data-join-tenant]';
+  const claude0 = root.querySelector(tv)?.dataset.joinTenant;
+  root.querySelector(tv)?.click();
+  await dvSleep(50);
+  const claude1 = root.querySelector(tv)?.dataset.joinTenant;
   root.querySelector(`${row} [data-join-approve]`).click();
   await dvSleep(100);
   const early = dvTxt(`${row} [data-join-result]`);
@@ -14907,7 +14918,8 @@ async function dvJoin() {
     [/paired with this device/.test(marked), `a paired device asking to join isn't marked paired: "${marked}"`],
     [/Approved - Pixel is joining/.test(early), `100 ms after Approve the row says "${early}" (want the result at once)`],
     [/^done .*Approved/.test(kept), `after the realm took it the row is "${kept}"`],
-    [sent === '{"code":"BCDF-GHJK","decision":"approve"}', `the realm got ${sent}`],
+    [sent === '{"code":"BCDF-GHJK","decision":"approve","tenant":"default"}', `the realm got ${sent} (want the hub's first Claude subscription)`],
+    [claude0 === "default" && claude1 === "plink", `the Claude line: "${claude0}" then "${claude1}" after a tap (want default, then plink)`],
     [calls.filter((c) => c.path.startsWith("/v1/enroll/")).every((c) => c.auth === TPL), "an enroll call went without this device's token template"],
   ]);
 }

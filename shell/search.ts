@@ -50,6 +50,7 @@ export const settingDestinations: { screen: ScreenName; label: string; target?: 
   { screen: "settings", label: "Voice", target: "voice", keywords: "speech microphone dictation transcription whisper engine" },
   { screen: "settings", label: "Android settings", target: "android settings", keywords: "wifi bluetooth network phone system" },
   { screen: "settings", label: "System updates", target: "system updates", keywords: "upgrade download check version" },
+  { screen: "join", label: "Your PowStation", keywords: "join hub enroll owner devices leave standalone setup" },
   { screen: "store", label: "Widget store", keywords: "home widgets install" },
   { screen: "style", label: "Theme", target: "theme", keywords: "appearance style colors colours" },
   { screen: "style", label: "Wallpaper", target: "background", keywords: "background image" },

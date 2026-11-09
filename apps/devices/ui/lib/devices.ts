@@ -215,17 +215,23 @@ export function waker(target: Device, list: Device[], live: Record<string, Statu
 export const approverOf = (list: Device[], live: Record<string, Status | undefined>) =>
   list.find((d) => live[d.id]?.online && live[d.id]?.realm?.approver && live[d.id]?.realm?.here) ?? null;
 
+/** The devices waiting, and the Claude subscriptions (claude-auth tenants) the realm lets an approver give them. */
 export const waiting = (net: Net | undefined, by: Device) =>
-  call<{ pending: Waiting[] }>(net, `${by.url}/v1/enroll/pending`, { headers: auth(by.id) }).then((r) => r.pending ?? []);
+  call<{ pending: Waiting[]; tenants?: string[] }>(net, `${by.url}/v1/enroll/pending`, { headers: auth(by.id) }).then((r) => ({
+    pending: r.pending ?? [],
+    tenants: r.tenants ?? [],
+  }));
 
 export const enrolledDevices = (net: Net | undefined, by: Device) =>
   call<{ devices: Enrolled[] }>(net, `${by.url}/v1/enroll/devices`, { headers: auth(by.id) }).then((r) => r.devices ?? []);
 
-export function decide(net: Net | undefined, by: Device, code: string, decision: "approve" | "deny") {
+/** [tenant]: the Claude subscription the new device uses through the hub's claude-auth (none: no Claude from the hub). */
+export function decide(net: Net | undefined, by: Device, d: { code: string; decision: "approve" | "deny"; tenant?: string | null }) {
+  const { code, decision, tenant } = d;
   return call<{ state: string }>(net, `${by.url}/v1/enroll/approve`, {
     method: "POST",
     headers: { ...auth(by.id), "content-type": "application/json" },
-    body: JSON.stringify({ code, decision }),
+    body: JSON.stringify({ code, decision, ...(tenant ? { tenant } : {}) }),
   });
 }
 

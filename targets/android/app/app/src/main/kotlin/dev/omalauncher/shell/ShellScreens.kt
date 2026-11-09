@@ -105,6 +105,8 @@ class ShellScreens(
             AUR to ::packages,
             LICENSES to ::licenses,
             STORAGE to ::storage,
+            // "Join your PowStation" (first run) and Settings' PowStation tile: PowStation.kt's state, no token.
+            JOIN to ::join,
         )
 
     /** The page shows [name]: its state now, and again on every change until [unwatch]. Opening also refreshes it. */
@@ -152,6 +154,19 @@ class ShellScreens(
                 }
         }
     }
+
+    /** The page's tap on any screen: the join screen's go to PowStation.kt, the rest to [act]. */
+    fun dispatch(
+        name: String,
+        action: String,
+        arg: Any?,
+    ): Any? =
+        if (name == JOIN) {
+            dev.omalauncher.devices.PowStation.act(context, action, (arg as? String).orEmpty())
+            null
+        } else {
+            act(name, action, arg)
+        }
 
     /** Something tapped on screen [name]: [action], with its argument (a name, a number, a list). */
     fun act(
@@ -213,6 +228,8 @@ class ShellScreens(
         return result as? String
     }
 
+    private fun join(): JSONObject = dev.omalauncher.devices.PowStation.json(context)
+
     // --- settings
 
     private fun settings(): JSONObject {
@@ -225,6 +242,7 @@ class ShellScreens(
             .put("updates", if (installed) updates() else powosUpdates())
             .put("setup", job(runtime.bootstrap.updates.value).takeIf { it != JSONObject.NULL && installed } ?: JSONObject.NULL)
             .put("version", dev.omalauncher.AppVersion.name(context))
+            .put("join", dev.omalauncher.devices.PowStation.json(context))
     }
 
     /** Pending pacman and agent updates, from the last check; "update all" runs them as one job. */
@@ -688,6 +706,7 @@ class ShellScreens(
         const val AUR = "aur"
         const val LICENSES = "licenses"
         const val STORAGE = "storage"
+        const val JOIN = "join"
 
         /** ShellActivity's request codes: the photo picker's, the notification permission's. */
         const val PICK_IMAGE_REQUEST = 42

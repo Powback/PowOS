@@ -250,3 +250,16 @@
   background: color-mix(in srgb, var(--color-accent) 18%, transparent);
   border-radius: var(--radius);
 }
+
+/* Set up PowOS / Your PowStation (JoinScreen): the steps stacked; the code big enough to match at a glance. */
+.scr-join { display: flex; flex-direction: column; gap: 10px; }
+.scr-card.on { border-color: var(--color-accent); }
+.scr-join-code {
+  font: bold calc(var(--text-item) * 2.4) var(--font-body);
+  letter-spacing: 0.12em;
+  text-align: center;
+  color: var(--accent-text);
+  padding: 12px 0;
+  user-select: text;
+  -webkit-user-select: text;
+}
