@@ -126,7 +126,10 @@ class ManagerWiring(unittest.TestCase):
                        ANTHROPIC_API_KEY="test-fixture")
             env.pop("POWOS_SANDBOX_ENABLED", None)
             env.pop("COMMS_AGENT_ID", None)
-            r = sh(f'{stubs} source "{MANAGER_SH}"; manager_run {" ".join(flags)} --once hi', env=env)
+            # Claude Code "installed": defined after the source (manager.sh's own would win), or manager_run downloads
+            # it into $HOME on first use - network, ~20 s, and concurrent runs collide on ~/.bun (full tier1 on .58).
+            r = sh(f'{stubs} source "{MANAGER_SH}"; _manager_ensure_claude() {{ :; }}; '
+                   f'manager_run {" ".join(flags)} --once hi', env=env)
             self.assertEqual(r.returncode, 0, r.stderr)
             with open(seen) as f:
                 out = json.load(f)

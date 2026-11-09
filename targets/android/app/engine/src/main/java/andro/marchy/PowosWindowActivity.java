@@ -519,6 +519,22 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
     /** The display mode this window asks for now (0: the system's choice). Main thread. */
     private int gameMode;
 
+    /** A game's built-in fps counter (GameFpsCounter): counts while this game's task is the top one. */
+    private GameFpsCounter fpsCounter;
+
+    private void gameFps() {
+        String app = getIntent().getStringExtra(EXTRA_APP_ID);
+        java.util.function.Predicate<String> games = isGame;
+        boolean game = app != null && games != null && games.test(app);
+        if (front && game && rootView != null && id > 0) {
+            if (fpsCounter == null)
+                fpsCounter = new GameFpsCounter(rootView, id, Native::nativeWindowPresents);
+            fpsCounter.start();
+        } else if (fpsCounter != null) {
+            fpsCounter.stop();
+        }
+    }
+
     /**
      * A game's window task asks for its screen's fastest refresh rate while it is the top task (rooted or not).
      * HACK: ColorOS's refresh-rate policy (oplusscreenmode, /my_product/etc/refresh_rate_config.xml) votes 60 Hz for a
@@ -628,6 +644,7 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         if (!isTop)
             focusSent = false;
         gameRefresh();
+        gameFps();
     }
 
     /**
@@ -897,6 +914,8 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
 
     @Override
     protected void onDestroy() {
+        if (fpsCounter != null)
+            fpsCounter.stop();
         CHROME.remove(this);
         if (frontWindow == this)
             frontWindow = null;

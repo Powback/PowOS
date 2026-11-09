@@ -71,7 +71,7 @@ Writing one (what to edit after `new`):
 The system side:
   powos app runtime [<id> [<mode>]]  how an app's process runs: native | sandbox | container (powos-runtime)
   powos app services                 the system tier (powos-supervisor status)
-  powos app check                    what this machine's runtimes can do (powos-runtime check)
+  powos app check                    what making an app needs and whether this machine has it (+ powos-runtime check)
 
 Installed apps live in ~/.local/share/powos/apps/<id>/<version>/ with a `current` link; on the phone that directory
 is the PowOS app's own files/apps (bound by rooted/powos-session.sh), which the shell serves at
@@ -539,8 +539,26 @@ def cmd_build(d, a):
         if not build_module(d, m, where, force="--force" in opts) and m.get("module"):
             log("module: unchanged")
     if "--module" not in opts:
+        ensure_bindings(d, m, where)
         build_ui(d, m)
     log(f"built {m['id']} in {ms(t0)} ms")
+
+
+def ensure_bindings(d, m, where=None):
+    """A UI with a module imports ../bindings, which only the module's build makes: without them bun said
+    `Could not resolve: "../bindings"` (gh#13, a fresh `powos app new` + `build --ui` on a phone). So the module is
+    built first (an unchanged one isn't: its source hash), and when it can't be, the error says what's missing."""
+    if not m.get("ui") or not os.path.isdir(os.path.join(d, "ui")) or os.path.isdir(os.path.join(d, "ui", "bindings")):
+        return
+    mod = os.path.join(d, (m.get("module") or {}).get("path", "module/").rstrip("/"))
+    if not m.get("module") or not os.path.isfile(os.path.join(mod, "Cargo.toml")):
+        return
+    log("ui: no ui/bindings yet - building the module first (they come from it)")
+    try:
+        build_module(d, m, where)
+    except Fail as e:
+        die(f"ui: the UI imports ui/bindings, made from the module's build, which can't run here:\n  {e}\n"
+            "A UI-only app needs none: \"module\": null in powos-app.json")
 
 
 # ------------------------------------------------------------------------------------------------------ install
@@ -754,15 +772,41 @@ def register_unit(m):
         log(f"note: not registered as a unit ({e})")
 
 
+def ensure_published_with_registry(d, m, optional):
+    try:
+        ensure_registry()
+    except Fail as e:
+        if not optional:
+            raise
+        log(f"note: no app registry yet ({e}); the launcher lists the app from its files")
+    ensure_published(d, m)
+
+
+def register_row(text, optional):
+    if optional and not shutil.which("spacetime"):
+        return False
+    try:
+        register(text)
+        return True
+    except Fail as e:
+        if not optional:
+            raise
+        log(f"note: not in the app registry ({str(e).splitlines()[0]}); the launcher lists it from its files")
+        return False
+
+
 def cmd_install(d):
     m, text = manifest(d)
     # Always: an unchanged module isn't rebuilt (its source hash), and the UI bundles in ~0.1 s - an install never
     # ships a UI older than its source (it did: ui/lib edited, out/ui kept).
     cmd_build(d, [])
-    ensure_registry()
-    ensure_published(d, m)
+    # No root: the launcher lists files/apps itself (shell/LocalApps.kt), so the registry row is a bonus there, not
+    # the way in - a UI-only app installs without SpacetimeDB at all (gh#13: "no spacetime CLI here" refused it).
+    listed = noroot()
+    if m.get("module") or not listed:
+        ensure_published_with_registry(d, m, optional=listed)
     install_ui(d, m)
-    register(text)
+    register_row(text, optional=listed)
     register_unit(m)
     page = (m.get("page") or {}).get("entry")
     log(f"installed {m['id']} {m['version']}" + (" - in the drawer" if page else "")
@@ -859,8 +903,60 @@ def cmd_remove(app_id, data):
     print(f"removed {app_id}")
 
 
+def tool(name):
+    """A PowOS tool: on PATH, else this install's own copy beside powos-app (the no-root image runs powos-app from its
+    baked source tree, where lib/apps isn't on PATH); None when this install hasn't it."""
+    return shutil.which(name) or next((p for p in [os.path.join(LIB, name)] if os.access(p, os.X_OK)), None)
+
+
+def noroot():
+    """A phone without root: the PowOS app's session (SessionService sets POWOS_LOOPBACK_DIR only then)."""
+    return bool(os.environ.get("POWOS_LOOPBACK_DIR"))
+
+
+def capabilities():
+    """What making an app needs, and whether this machine has it: (step, ok, how). `powos app check` prints it."""
+    stdb = shutil.which("spacetime")
+    up = stdb and sql(REGISTRY, "SELECT id FROM app")[0]
+    b = builder()
+    rust = local_rust()
+    where = (f"builder {b}" if b and b != "local" else "here (cargo + wasm32)" if rust else
+             "nowhere: no cargo + wasm32 here and no builder (powos app builder user@host); a UI-only app "
+             "(\"module\": null) needs none")
+    return [
+        ("new", True, f"templates {TEMPLATES}" if os.path.isdir(TEMPLATES) else f"no templates ({TEMPLATES})"),
+        ("build --ui", bool(shutil.which("bun") or shutil.which("npx")), shutil.which("bun") or shutil.which("npx")
+         or "no bun (or npx) here"),
+        ("build module", bool(rust or (b and b != "local")), where),
+        ("install", bool(stdb), (f"SpacetimeDB {SERVER}, registry " + ("up" if up else "not answering yet")) if stdb
+         else "no spacetime CLI here (the spacetimedb package)"),
+        ("launcher", True, APPS + (" (the PowOS app's files/apps)" if noroot() else "")),
+        ("runtimes", bool(tool("powos-runtime")), "powos-runtime check" if tool("powos-runtime") else
+         "no powos-runtime here: apps run as modules + UI only (no root: no sandbox/container backends)"),
+        ("services", bool(tool("powos-supervisor")) or noroot(),
+         "no root: the PowOS app starts SpacetimeDB + the App API itself (powos-noroot-services)" if noroot()
+         else "powos-supervisor" if tool("powos-supervisor") else "no powos-supervisor here"),
+    ]
+
+
+def cmd_check():
+    """Never a traceback (gh#13: execvp("powos-runtime") on a phone without root): every step of making an app, and
+    whether it works here; then the runtimes' own check where powos-runtime is."""
+    rows = capabilities()
+    for step, ok, how in rows:
+        print(f"{step:13} {'yes' if ok else 'no ':4} {how}")
+    rt = tool("powos-runtime")
+    if rt:
+        print()
+        sys.stdout.flush()
+        subprocess.run([rt, "check"])
+
+
 def runtime(*args):
-    os.execvp("powos-runtime", ["powos-runtime", *args])
+    rt = tool("powos-runtime")
+    if not rt:
+        die("no powos-runtime here (a phone without root has no app runtimes: apps are modules + UI) - powos app check")
+    os.execv(rt, [rt, *args])
 
 
 def take_note(a):
@@ -963,7 +1059,7 @@ def dispatch(a):
         cmd_build(a[1], ["--ui"])
         m, text = manifest(a[1])
         n = install_ui(a[1], m)
-        register(text)
+        register_row(text, optional=noroot())
         log(f"{m['id']}: UI {m['version']} in place" + (f" ({n} files changed)" if n >= 0 else ""))
     elif c == "preview":
         cmd_preview(a[1:])
@@ -971,22 +1067,26 @@ def dispatch(a):
         cmd_remove(a[1], "--data" in a)
     elif c == "runtime":
         if len(a) == 1:
-            runtime("check")
+            cmd_check()
         elif len(a) == 2:
             runtime("mode", a[1])
         else:
             runtime("config", a[2], "--app", a[1])
     elif c == "services":
-        # The system tier is powos-supervisor (rooted phones, desktops); a no-root build has none (issue #1: a traceback).
-        sup = shutil.which("powos-supervisor") or next(
-            (p for p in [os.path.join(os.path.dirname(os.path.realpath(__file__)), "powos-supervisor")] if os.access(p, os.X_OK)), None)
-        if not sup:
-            print("no system tier on this build (powos-supervisor isn't installed: without root the launcher runs "
-                  "SpacetimeDB and the App API itself)")
-            return 0
-        os.execv(sup, [sup, "status", *a[1:]])
+        # The system tier is powos-supervisor (rooted phones, desktops); tool() also finds the copy beside powos-app.
+        sv = tool("powos-supervisor")
+        # No root: the PowOS app starts the services (powos-noroot-services), not the supervisor (it needs root).
+        # A no-root build has none (issue #1: it was a traceback); print what this machine has instead.
+        if not sv or noroot():
+            print("no system tier on this build (powos-supervisor isn't installed or can't run: without root the launcher "
+                  "runs SpacetimeDB and the App API itself)")
+            for step, ok, how in capabilities():
+                if step in ("install", "services"):
+                    print(f"{step:13} {'yes' if ok else 'no ':4} {how}")
+            return
+        os.execv(sv, [sv, "status", *a[1:]])
     elif c == "check":
-        runtime("check")
+        cmd_check()
     else:
         die(f"unknown: {' '.join(a)} (powos app help)")
 

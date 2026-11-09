@@ -254,11 +254,37 @@ def validate_datasets(model, policy, errors, warnings):
     return result
 
 
+# Address ranges a Docker network must never take (2026-11-09): the Colima VM's vzNAT link (the Mac is
+# 192.168.64.1; a network holding it, mcspacetime_default 192.168.64.0/20, killed all VM egress during the
+# vzNAT switch), the LAN, Lima's user-mode network and the WireGuard subnets.
+RESERVED_NETS = [ipaddress.ip_network(n) for n in (
+    "192.168.64.0/18", "192.168.50.0/24", "192.168.5.0/24", "10.13.13.0/24", "10.13.14.0/24")]
+
+
+def network_errors(model):
+    errors = []
+    for name, net in (model.get("networks") or {}).items():
+        if not isinstance(net, dict) or net.get("external"):
+            continue
+        for cfg in ((net.get("ipam") or {}).get("config") or []):
+            subnet = (cfg or {}).get("subnet")
+            try:
+                parsed = ipaddress.ip_network(subnet, strict=False) if subnet else None
+            except ValueError:
+                errors.append(f"network {name}: invalid subnet {subnet}")
+                continue
+            for reserved in RESERVED_NETS:
+                if parsed is not None and parsed.version == reserved.version and parsed.overlaps(reserved):
+                    errors.append(f"network {name}: subnet {subnet} overlaps reserved {reserved} "
+                                  "(vzNAT/LAN/Lima/WireGuard); leave it to Docker's 10.128.0.0/9 pool")
+    return errors
+
+
 def inspect_model(model):
     policy = model.get("x-pow")
-    errors, warnings, services = [], [], []
+    errors, warnings, services = network_errors(model), [], []
     if policy is None:
-        return {"project": model.get("name", "unknown"), "managed": False, "errors": [],
+        return {"project": model.get("name", "unknown"), "managed": False, "errors": network_errors(model),
                 "warnings": ["No x-pow contract; existing Compose behavior retained"], "services": [], "datasets": []}
     if not isinstance(policy, dict) or policy.get("schema") != SCHEMA:
         return {"project": model.get("name", "unknown"), "managed": True, "errors": [f"x-pow.schema must be {SCHEMA}"], "warnings": [], "services": [], "datasets": []}

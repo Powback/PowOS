@@ -977,8 +977,11 @@ function setMask(el: HTMLElement, m: Record<string, string> | undefined) {
   for (const p of MASK_PROPS) el.style[p] = m?.[p] ?? "";
 }
 
+/** The windows shown on home page [page], bottom first. */
+const windowsHere = (page: number) => webWins.value.filter((w) => w.page === page && !w.minimised && !w.full && !w.pip && !hiddenTab(w.id));
+
 export function WebWindowsOn({ page }: { page: number }) {
-  const here = webWins.value.filter((w) => w.page === page && !w.minimised && !w.full && !w.pip && !hiddenTab(w.id));
+  const here = windowsHere(page);
   const strips = parkedOn(page);
   if (!here.length && !strips.length && parkView.value?.page !== page) return null;
   const t = tilings.value[page];
@@ -2306,6 +2309,8 @@ function resizeEnd(id: number) {
   const r = resizing.get(id);
   if (!r) return;
   resizing.delete(id);
+  // RS5c: the live frame committed (a new WebWin: the window's one render with it).
+  if (liveSized.delete(id)) update(id, {});
   reach(id);
   lastResize = { id, steps: r.steps, reqs: r.reqs };
   resendGeometry();
@@ -3224,7 +3229,59 @@ function resizeBy(id: number, s: Grab & { side: string; k: number }, e: PointerE
   const pacing = resizing.get(id);
   if (pacing) pacing.steps++;
   showSnap(id, r, k, a);
-  update(id, { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h), restore: undefined });
+  const next = { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) };
+  if (!resizeLive(id, next)) update(id, { ...next, restore: undefined });
+}
+
+/**
+ * RS5c (ww-resize-cost 11-08 after RS5b: 16 component renders a move - both pages' PageUnder and WebWindowsOn, the
+ * dragged window's whole tree - most of a move's script): a resize drag's move renders nothing. Window [id]'s WebWin
+ * takes its new frame [next] IN PLACE (no webWins write: every reader - the tick's entry, clamps, holes, a render for
+ * another reason - sees the live frame), and the move writes only what the frame drives, straight to the DOM: the
+ * frame's box, its shadow's, the outline's size, the masks of the windows under it and of the page's own content.
+ * [resizeEnd] commits it (a new WebWin: one render, every derived prop exact). A Preact render diffs against its last
+ * vnode, never the DOM, and each value written here is the one that render would write, so the two never disagree.
+ * false: a move that changes more (a maximised frame's restore, a zone height near a system strip): [update] it.
+ */
+function resizeLive(id: number, next: { x: number; y: number; w: number; h: number }): boolean {
+  const w = webWins.peek().find((v) => v.id === id);
+  const frame = document.querySelector<HTMLElement>(`.webwindow[data-wwid="${id}"]`);
+  if (!w || !frame || !liveable(w, next)) return false;
+  Object.assign(w, next);
+  liveSized.add(id);
+  writeFrame(frame, w);
+  cutAll(frame.closest<HTMLElement>(".page-windows"), windowsHere(w.page));
+  const under = frame.closest(".page")?.querySelector<HTMLElement>(":scope > .page-under");
+  if (under) writeMask(under, underWindows(w.page));
+  return true;
+}
+/** [w]'s drag may take [next] live: a resize drag's, a floating frame, its zones' heights (near the strips) unchanged. */
+const liveable = (w: WebWin, next: Partial<WebWin>) => resizing.has(w.id) && !w.restore && !w.quick && zoneKey({ ...w, ...next }) === zoneKey(w);
+
+/** [w]'s frame [frame], its shadow and its size outline as its render would write them (RS5c: [resizeLive]). */
+function writeFrame(frame: HTMLElement, w: WebWin) {
+  setBox(frame, w);
+  const shadow = frame.parentElement?.querySelector<HTMLElement>(`.ww-shadow[data-wwid="${w.id}"]`);
+  const b = frameBox(w);
+  if (shadow) setBox(shadow, { x: b.x - SHADOW_PAD, y: b.y - SHADOW_PAD, w: b.w + 2 * SHADOW_PAD, h: b.h + 2 * SHADOW_PAD });
+  const size = frame.querySelector(".ww-outline-size");
+  // Its text nodes' data (the size, " × ", the size): Preact keeps these nodes and diffs their text on its next render.
+  if (size?.firstChild instanceof Text && size.lastChild instanceof Text) {
+    size.firstChild.data = String(Math.round(b.w));
+    size.lastChild.data = String(Math.round(b.h));
+  }
+}
+/** Windows resized live ([resizeLive]) since their drag began: [resizeEnd] commits them. */
+const liveSized = new Set<number>();
+const setBox = (el: HTMLElement, b: { x: number; y: number; w: number; h: number }) => {
+  el.style.left = `${b.x}px`;
+  el.style.top = `${b.y}px`;
+  el.style.width = `${b.w}px`;
+  el.style.height = `${b.h}px`;
+};
+/** [m] on [el]'s inline style where it differs (the same value again is no style change: no restyle). */
+function writeMask(el: HTMLElement, m: Record<string, string> | undefined) {
+  for (const p of MASK_PROPS) if (el.style[p] !== (m?.[p] ?? "")) el.style[p] = m?.[p] ?? "";
 }
 
 /** The outline's snapped sides for frame [r]; a haptic tick as a side snaps (RZ4). */

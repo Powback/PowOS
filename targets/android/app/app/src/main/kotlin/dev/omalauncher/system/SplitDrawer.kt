@@ -93,6 +93,12 @@ object SplitDrawer {
     @Volatile var pair: List<Int> = emptyList()
         private set
 
+    /**
+     * [pair] as it changes, for the page's pair entity (ShellBridge "tasks.splitPair": the dock's group cell and the
+     * recent apps' pair entry, ui/pairs.tsx). Empty when there's no split.
+     */
+    val pairs = kotlinx.coroutines.flow.MutableStateFlow<List<Int>>(emptyList())
+
     /** Task [task]'s screen share in the split (0..1), or null before it was measured. */
     fun splitShare(task: Int): Float? = share[task]
 
@@ -121,6 +127,7 @@ object SplitDrawer {
         val next = if (top.size == 2) top.entries.sortedBy { position(it.key) ?: it.key }.map { it.value } else emptyList()
         if (next != pair) Log.i(TAG, "split pair ${if (next.isEmpty()) "gone" else next.joinToString(" | ")}")
         pair = next
+        pairs.value = next
     }
 
     fun tucked(side: Int): Tuck? = if (side in 0 until tucked.length()) tucked.get(side) else null

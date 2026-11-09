@@ -58,6 +58,22 @@ fill_missing_inputs() {
 }
 # Empties a PKG_SCRATCH dir; it lives in the VM, not on this Mac, hence through a container.
 wipe_scratch() { docker run --rm --platform linux/arm64 -v "$scratch:/build" "$IMAGE" find /build -mindepth 1 -delete; }
+# fill_ours_from_cache: our earlier builds (fex-emu, gtk2, kwin ...) satisfy later packages' dependencies through
+# the [ours] repo below, which is made from $OUT alone. A fresh worktree's $OUT is empty, so steam failed with
+# "target not found: fex-emu / gtk2" although both sat in the shared cache, where every run puts its builds
+# (2026-11-07). Fill $OUT with the newest cached build of each package $OUT has no build of (hardlinks: free).
+fill_ours_from_cache() {
+  [ -x "$BIC" ] || return 0
+  local cache=${POWOS_BUILD_INPUTS_CACHE:-$HOME/.cache/powos-build-inputs}/pkgs f b n
+  [ -d "$cache" ] || return 0
+  sh "$HERE/tools/newest-pkgs.sh" "$cache" | while IFS= read -r f; do
+    b=${f##*/}
+    n=$(printf '%s\n' "$b" | sed -E 's/-[^-]+-[^-]+-[^-]+\.pkg\.tar\..*$//')
+    [ -n "$(sh "$HERE/tools/newest-pkgs.sh" "$OUT" "$n")" ] && continue
+    "$BIC" get "pkgs/$b" "$OUT/$b" >/dev/null 2>&1 && echo "build-pkgs: out/pkgs/$b filled from the shared cache" >&2 || true
+  done
+}
+fill_ours_from_cache
 pkgs=("$@")
 [ ${#pkgs[@]} -gt 0 ] || pkgs=($(cd "$HERE/pkgs" && ls) $(awk '!/^#/ && NF {print $1}' "$HERE/recipes.list"))
 

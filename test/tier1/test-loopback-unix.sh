@@ -20,7 +20,9 @@ if [ "${LOOPBACK_INNER:-}" != 1 ]; then
     # output - that red-lined master CI for a week (issue #10). Probe once; the workflow installs qemu so CI runs it.
     docker run --rm --platform linux/arm64 gcc:14 true >/dev/null 2>&1 || {
       echo "SKIP test-loopback-unix: docker can't run linux/arm64 here (no qemu binfmt)"; exit 0; }
-    exec docker run --rm --platform linux/arm64 -e LOOPBACK_INNER=1 -v "$HERE:$HERE:ro" gcc:14 bash "$HERE/test/tier1/test-loopback-unix.sh"
+    # label=disable: on an SELinux-enforcing engine (.58's podman) container_t may not read a $HOME bind mount
+    # (bash: Permission denied, rc=126); a no-op on Colima. Never :z - that would relabel the checkout.
+    exec docker run --rm --platform linux/arm64 --security-opt label=disable -e LOOPBACK_INNER=1 -v "$HERE:$HERE:ro" gcc:14 bash "$HERE/test/tier1/test-loopback-unix.sh"
   fi
   echo "SKIP test-loopback-unix: no aarch64 Linux C compiler (cc as root, or docker with gcc:14)"
   exit 0
@@ -72,7 +74,8 @@ case $out in refused*) ;; *) fail "another uid reached the server: $out" ;; esac
 python3 - "$W/sock/3410.sock" <<'PY' || fail "a peer of another uid got an answer"
 import socket, sys
 s = socket.socket(socket.AF_UNIX); s.settimeout(20); s.connect(sys.argv[1])
-# The shim closes the dropped peer at once, so the send itself can already hit the closed end (EPIPE): also a drop.
+# The shim closes the dropped peer at once, so the send itself can already hit the closed end (EPIPE; it does under
+# qemu-user on an x86 host): a broken pipe there is the same pass. 20 s: emulation-sized wait (issue #10).
 try:
     s.sendall(b"GET /root-peer HTTP/1.0\r\n\r\n")
     data = s.recv(100)

@@ -1,0 +1,404 @@
+{
+ "rows": {
+  "item": [
+   {
+    "id": "calls",
+    "area": "Calls & messages",
+    "capability": "Calls + SMS work",
+    "state": "partly",
+    "tasks": "",
+    "note": "drops audio on the cover screen",
+    "rank": 0,
+    "updated": {
+     "$daysAgo": 0
+    }
+   },
+   {
+    "id": "sms",
+    "area": "Calls & messages",
+    "capability": "Group chats send pictures",
+    "state": "broken",
+    "tasks": "",
+    "note": "",
+    "rank": 1,
+    "updated": {
+     "$daysAgo": 1
+    }
+   },
+   {
+    "id": "notif",
+    "area": "Notifications",
+    "capability": "Notifications arrive on time",
+    "state": "works",
+    "tasks": "",
+    "note": "",
+    "rank": 2,
+    "updated": {
+     "$daysAgo": 2
+    }
+   },
+   {
+    "id": "notif-act",
+    "area": "Notifications",
+    "capability": "Reply from a notification",
+    "state": "partly",
+    "tasks": "",
+    "note": "",
+    "rank": 3,
+    "updated": {
+     "$daysAgo": 0
+    }
+   },
+   {
+    "id": "type",
+    "area": "Typing",
+    "capability": "Typing in every app",
+    "state": "broken",
+    "tasks": "closing-a-window-leaves-a-grey-box",
+    "note": "the keyboard doesn't open in Linux apps",
+    "rank": 4,
+    "updated": {
+     "$daysAgo": 1
+    }
+   },
+   {
+    "id": "type-voice",
+    "area": "Typing",
+    "capability": "Voice typing",
+    "state": "untested",
+    "tasks": "",
+    "note": "",
+    "rank": 5,
+    "updated": {
+     "$daysAgo": 2
+    }
+   },
+   {
+    "id": "apps",
+    "area": "Apps",
+    "capability": "Banking app opens",
+    "state": "works",
+    "tasks": "",
+    "note": "",
+    "rank": 6,
+    "updated": {
+     "$daysAgo": 0
+    }
+   },
+   {
+    "id": "apps2",
+    "area": "Apps",
+    "capability": "Maps navigation in the background",
+    "state": "works",
+    "tasks": "",
+    "note": "",
+    "rank": 7,
+    "updated": {
+     "$daysAgo": 1
+    }
+   },
+   {
+    "id": "cam",
+    "area": "Camera",
+    "capability": "Photos and video",
+    "state": "works",
+    "tasks": "",
+    "note": "",
+    "rank": 8,
+    "updated": {
+     "$daysAgo": 2
+    }
+   },
+   {
+    "id": "battery",
+    "area": "Battery",
+    "capability": "Lasts a full day",
+    "state": "partly",
+    "tasks": "",
+    "note": "",
+    "rank": 9,
+    "updated": {
+     "$daysAgo": 0
+    }
+   },
+   {
+    "id": "home",
+    "area": "Home & launcher",
+    "capability": "Widgets stay where I put them",
+    "state": "works",
+    "tasks": "",
+    "note": "",
+    "rank": 10,
+    "updated": {
+     "$daysAgo": 1
+    }
+   },
+   {
+    "id": "lock",
+    "area": "Home & launcher",
+    "capability": "Unlock is instant",
+    "state": "works",
+    "tasks": "",
+    "note": "",
+    "rank": 11,
+    "updated": {
+     "$daysAgo": 2
+    }
+   }
+  ],
+  "work": [
+   {
+    "id": "closing-a-window-leaves-a-grey-box",
+    "title": "P0: Closing a window leaves a grey box over home",
+    "owner": "coder",
+    "status": "working",
+    "note": "",
+    "project": "Windows",
+    "step": "fixing the surface teardown",
+    "tryLine": "",
+    "done": 0,
+    "updated": {
+     "$daysAgo": 0
+    },
+    "activity": {
+     "$daysAgo": 0
+    },
+    "parent": ""
+   },
+   {
+    "id": "app-already-running",
+    "title": "Launching an app that's already running opens it in its window",
+    "owner": "coder",
+    "status": "working",
+    "note": "P0",
+    "project": "Windows",
+    "step": "",
+    "tryLine": "",
+    "done": 0,
+    "updated": {
+     "$daysAgo": 0
+    },
+    "activity": {
+     "$daysAgo": 0
+    },
+    "parent": ""
+   },
+   {
+    "id": "health-allow",
+    "title": "Allow Health Connect for the Health app",
+    "owner": "coder",
+    "status": "waiting",
+    "note": "Open Health once and allow Health Connect",
+    "project": "Apps",
+    "step": "",
+    "tryLine": "",
+    "done": 0,
+    "updated": {
+     "$daysAgo": 0
+    },
+    "activity": {
+     "$daysAgo": 0
+    },
+    "parent": ""
+   },
+   {
+    "id": "media",
+    "title": "Media controls under the quick launchers",
+    "owner": "coder",
+    "status": "working",
+    "note": "",
+    "project": "Shade & lock",
+    "step": "",
+    "tryLine": "Play a song and look at the shade",
+    "done": 0,
+    "updated": {
+     "$daysAgo": 0
+    },
+    "activity": {
+     "$daysAgo": 0
+    },
+    "parent": ""
+   },
+   {
+    "id": "fps",
+    "title": "Home scrolls at 120 fps",
+    "owner": "coder",
+    "status": "working",
+    "note": "",
+    "project": "Performance",
+    "step": "measuring",
+    "tryLine": "",
+    "done": 0,
+    "updated": {
+     "$daysAgo": 0
+    },
+    "activity": {
+     "$daysAgo": 0
+    },
+    "parent": ""
+   },
+   {
+    "id": "kernel-nf",
+    "title": "Kernel netfilter for the VPN",
+    "owner": "coder",
+    "status": "blocked",
+    "note": "needs a kernel build slot",
+    "project": "Kernel & system",
+    "step": "",
+    "tryLine": "",
+    "done": 0,
+    "updated": {
+     "$daysAgo": 0
+    },
+    "activity": {
+     "$daysAgo": 0
+    },
+    "parent": ""
+   },
+   {
+    "id": "drawer",
+    "title": "Drawer search finds settings",
+    "owner": "coder",
+    "status": "done",
+    "note": "",
+    "project": "Home & launcher",
+    "step": "",
+    "tryLine": "",
+    "done": {
+     "$daysAgo": 0
+    },
+    "updated": {
+     "$daysAgo": 0
+    },
+    "activity": {
+     "$daysAgo": 0
+    },
+    "parent": ""
+   },
+   {
+    "id": "dock",
+    "title": "Dock icons stay sharp",
+    "owner": "coder",
+    "status": "done",
+    "note": "",
+    "project": "Home & launcher",
+    "step": "",
+    "tryLine": "",
+    "done": {
+     "$daysAgo": 0
+    },
+    "updated": {
+     "$daysAgo": 0
+    },
+    "activity": {
+     "$daysAgo": 0
+    },
+    "parent": ""
+   },
+   {
+    "id": "dict",
+    "title": "Dictation in the chat",
+    "owner": "coder",
+    "status": "waiting",
+    "note": "Try dictating a message",
+    "project": "AI page",
+    "step": "",
+    "tryLine": "",
+    "done": 0,
+    "updated": {
+     "$daysAgo": 0
+    },
+    "activity": {
+     "$daysAgo": 0
+    },
+    "parent": ""
+   }
+  ],
+  "hack": [
+   {
+    "key": "targets/android/app/app/src/main/kotlin/A.kt#1",
+    "file": "targets/android/app/app/src/main/kotlin/A.kt",
+    "line": 10,
+    "area": "Phone app",
+    "why": "The shell polls the battery: no change callback in the bridge yet.",
+    "fix": "the real fix",
+    "task": "",
+    "since": {
+     "$daysAgo": 40
+    }
+   },
+   {
+    "key": "shell/apps/stdb.ts#1",
+    "file": "shell/apps/stdb.ts",
+    "line": 11,
+    "area": "Apps",
+    "why": "Apps use the server's anonymous per-database tokens: there is no PowOS issuer yet.",
+    "fix": "the real fix",
+    "task": "",
+    "since": {
+     "$daysAgo": 35
+    }
+   },
+   {
+    "key": "targets/android/session/x.sh#1",
+    "file": "targets/android/session/x.sh",
+    "line": 12,
+    "area": "Linux on the phone",
+    "why": "KWin starts twice on a cold boot: the session waits on a sleep, not a socket.",
+    "fix": "the real fix",
+    "task": "",
+    "since": {
+     "$daysAgo": 30
+    }
+   },
+   {
+    "key": "apps/stickman/ui/workers/sim.ts#1",
+    "file": "apps/stickman/ui/workers/sim.ts",
+    "line": 13,
+    "area": "Apps",
+    "why": "The stickman sim and brain are copied from robotsupremacy's stickman.ts: there is no library.",
+    "fix": "the real fix",
+    "task": "",
+    "since": {
+     "$daysAgo": 25
+    }
+   },
+   {
+    "key": "lib/ai/agents/powos-agents-cli#1",
+    "file": "lib/ai/agents/powos-agents-cli",
+    "line": 14,
+    "area": "Agents & tooling",
+    "why": "powos agents off the phone runs on the phone over adb: no module on the Mac.",
+    "fix": "the real fix",
+    "task": "",
+    "since": {
+     "$daysAgo": 20
+    }
+   },
+   {
+    "key": "targets/web/x.ts#1",
+    "file": "targets/web/x.ts",
+    "line": 15,
+    "area": "Web shell",
+    "why": "The web shell fakes the clipboard: no permission prompt in the WebView.",
+    "fix": "the real fix",
+    "task": "",
+    "since": {
+     "$daysAgo": 15
+    }
+   },
+   {
+    "key": "tools/phone/ship.sh#1",
+    "file": "tools/phone/ship.sh",
+    "line": 16,
+    "area": "Agents & tooling",
+    "why": "The ship waits a fixed 60 s for quiet: no signal from the agents that a push is final.",
+    "fix": "the real fix",
+    "task": "",
+    "since": {
+     "$daysAgo": 10
+    }
+   }
+  ]
+ }
+}

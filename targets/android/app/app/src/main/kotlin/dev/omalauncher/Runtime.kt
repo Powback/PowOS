@@ -575,6 +575,8 @@ class Runtime(
         if (screens++ == 0) proot.procShim.setActive(true)
         // Only checks when the last check is hours old; see SystemUpdates.
         if (linux) scope.launch { updates.check() }
+        // PowOS's pull updates (no root: the app, the shell, the image's packages from the store), at most every 6 h.
+        dev.omalauncher.upgrade.PowosUpdates.maybeRun(context)
     }
 
     fun screenStopped() {

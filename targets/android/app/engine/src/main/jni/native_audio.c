@@ -5,11 +5,13 @@
 #include <aaudio/AAudio.h>
 #include <android/log.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <poll.h>
 #include <time.h>
@@ -37,21 +39,33 @@
  * long so the audio path can idle instead of holding the codec/HAL on forever
  * (idle power). A fresh PCM datagram restarts it via ensure_play_stream_started(). */
 #define PLAY_IDLE_STOP_MS  1500
+/* Live connections listened on at once: the desktop + window tasks (+ their popup surfaces). */
+#define AUDIO_MAX_LINKS    16
+
+/* One live connection's audio socket (see native_audio.h). fd is our own dup(): only the playback thread closes it
+ * (reap_links), under link_lock, so the capture thread's send under the same lock never hits a closed/reused fd. */
+struct audio_link {
+    uint32_t surface_id;
+    int fd;              /* -1: free slot */
+    bool live;           /* false: detached / hung up, closed on the playback thread's next turn */
+    bool announced;      /* the device formats were sent on it */
+    bool wants_mic;      /* its producer's last AUDIO_MSG_MIC_WANTED */
+};
 
 struct audio_bridge {
     volatile bool running;
     volatile bool mic_enabled;
-    /* A Linux app is reading the virtual mic right now (AUDIO_MSG_MIC_WANTED from the producer). The Android mic opens
-     * only while this AND mic_enabled hold: 2026-11-03 the bridge held VOICE_RECOGNITION open (recording light on) with
-     * anland-mic SUSPENDED and no Linux source-output - "always on while the socket is up" recorded for nobody.
-     * False on every (re)connect: an older producer that never sends it gets no mic (privacy over a silent mic). */
-    volatile bool linux_wants_mic;
 
-    /* The live connection. Set by audio_set_ctx() from the render thread, read by
-     * the audio threads -- same lightweight convention as the event thread's
-     * s->ctx. get_audio_fd() returns -1 in fallback, so a stale-but-valid ctx just
-     * yields no fd rather than misbehaving. */
-    display_ctx *volatile ctx;
+    /* The live connections' audio sockets (audio_attach/audio_detach). A Linux app is reading the virtual mic when the
+     * ACTIVE link (the one KWin last sent PCM or AUDIO_MSG_MIC_WANTED on - KWin uses one at a time and announces the
+     * mic state on every switch) says so; the Android mic opens only while that AND mic_enabled hold: 2026-11-03 the
+     * bridge held VOICE_RECOGNITION open (recording light on) with anland-mic SUSPENDED and no Linux source-output.
+     * False on every new link: an older producer that never sends it gets no mic (privacy over a silent mic). */
+    pthread_mutex_t link_lock;
+    struct audio_link links[AUDIO_MAX_LINKS];
+    int active_link;     /* index into links, -1: none yet */
+    int wake_efd;        /* audio_attach/detach -> the playback thread's poll returns at once */
+    bool threads_alive;  /* link_lock: the playback thread exists (it is the closer); else whoever detaches is */
 
     pthread_t play_thread;
     pthread_t cap_thread;
@@ -97,12 +111,34 @@ struct audio_bridge {
 
 static struct audio_bridge g = {
     .play_lock = PTHREAD_MUTEX_INITIALIZER,
+    .link_lock = PTHREAD_MUTEX_INITIALIZER,
+    .links = { [0 ... AUDIO_MAX_LINKS - 1] = { .fd = -1 } },   /* free slots (fd 0 is a real fd) */
+    .active_link = -1,
+    .wake_efd = -1,
 };
 
-static int current_fd(struct audio_bridge *b)
+/* Playback thread only (the one closer), link_lock held: close every detached/hung-up link's socket. */
+static void reap_links_locked(struct audio_bridge *b)
 {
-    display_ctx *ctx = b->ctx;
-    return ctx ? get_audio_fd(ctx) : -1;
+    for (int i = 0; i < AUDIO_MAX_LINKS; ++i) {
+        struct audio_link *l = &b->links[i];
+        if (l->fd >= 0 && !l->live) {
+            LOGI("audio link surface %u closed", l->surface_id);
+            close(l->fd);
+            *l = (struct audio_link){ .fd = -1 };
+            if (b->active_link == i)
+                b->active_link = -1;
+        }
+    }
+}
+
+/* The mic's destination: the active link if it is live and its producer wants the mic, else -1. link_lock held. */
+static int mic_fd_locked(struct audio_bridge *b)
+{
+    int i = b->active_link;
+    if (i < 0 || !b->links[i].live || !b->links[i].wants_mic)
+        return -1;
+    return b->links[i].fd;
 }
 
 static uint64_t now_ms(void)
@@ -511,8 +547,6 @@ static void *play_thread_func(void *arg)
     struct audio_bridge *b = arg;
     LOGI("playback thread started");
 
-    bool had_fd = false;   /* drives a one-shot format handshake per connection */
-    int last_fd = -1;
     /* Last time real PCM was queued; the idle-stop logic below uses it to let the
      * audio path sleep once the desktop has been silent for a while. */
     uint64_t last_pcm_ms = now_ms();
@@ -534,80 +568,110 @@ static void *play_thread_func(void *arg)
                 AAudioStream_requestStop(b->play);
         }
 
-        int fd = current_fd(b);
-        if (fd != last_fd) {
-            b->linux_wants_mic = false;   /* the new producer says when it wants the mic */
-            pthread_mutex_lock(&b->play_lock);
-            play_ring_reset_locked(b);
-            pthread_mutex_unlock(&b->play_lock);
-            had_fd = false;
-            last_fd = fd;
-        }
-
-        if (fd < 0) {
-            usleep(20000);
-            continue;
-        }
-
-        /* Hand the producer the real device formats + latency presets for both
-         * directions: once when the socket comes up (just left fallback), and again
-         * whenever a preset/device change needs to re-size its PipeWire nodes live. */
-        if (!had_fd || b->resend_formats) {
-            ensure_play_stream_started(b);
+        /* The live links, polled together with the wake eventfd. Hand each new link's producer the real device
+         * formats + latency presets for both directions (KWin reads them whenever it attaches that socket - they wait
+         * in it until then), and every link again when a preset/device change needs its PipeWire nodes re-sized. */
+        struct pollfd pfd[AUDIO_MAX_LINKS + 1];
+        int idx[AUDIO_MAX_LINKS];
+        int n_pfd = 0;
+        bool resend = b->resend_formats;
+        bool need_announce = resend;
+        pthread_mutex_lock(&b->link_lock);
+        reap_links_locked(b);
+        for (int i = 0; i < AUDIO_MAX_LINKS; ++i)
+            if (b->links[i].live && !b->links[i].announced)
+                need_announce = true;
+        pthread_mutex_unlock(&b->link_lock);
+        if (need_announce)
+            ensure_play_stream_started(b);   /* outside link_lock: it may reopen the AAudio stream */
+        pthread_mutex_lock(&b->link_lock);
+        if (resend)
             b->resend_formats = false;
-            send_format(fd, AUDIO_ROLE_PLAYBACK, b->play_rate, b->play_channels,
-                        ms_to_frames(b->play_latency_ms, b->play_rate));
-            send_format(fd, AUDIO_ROLE_CAPTURE, b->cap_rate, b->cap_channels,
-                        ms_to_frames(b->cap_latency_ms, b->cap_rate));
-            had_fd = true;
+        for (int i = 0; i < AUDIO_MAX_LINKS; ++i) {
+            struct audio_link *l = &b->links[i];
+            if (!l->live)
+                continue;
+            if (!l->announced || resend) {
+                send_format(l->fd, AUDIO_ROLE_PLAYBACK, b->play_rate, b->play_channels,
+                            ms_to_frames(b->play_latency_ms, b->play_rate));
+                send_format(l->fd, AUDIO_ROLE_CAPTURE, b->cap_rate, b->cap_channels,
+                            ms_to_frames(b->cap_latency_ms, b->cap_rate));
+                l->announced = true;
+            }
+            pfd[n_pfd] = (struct pollfd){ .fd = l->fd, .events = POLLIN };
+            idx[n_pfd++] = i;
         }
-
-        struct pollfd pfd = { .fd = fd, .events = POLLIN };
-        int poll_result = poll(&pfd, 1, PLAY_POLL_MS);
-        if (poll_result == 0)
-            continue;
-        if (poll_result < 0)
-            continue;
-        if (pfd.revents & (POLLHUP | POLLERR)) {
-            b->linux_wants_mic = false;
-            pthread_mutex_lock(&b->play_lock);
-            play_ring_reset_locked(b);
-            pthread_mutex_unlock(&b->play_lock);
-            had_fd = false;
-            last_fd = -1;
+        pthread_mutex_unlock(&b->link_lock);
+        /* Only this thread closes link fds, so they stay open through the poll/recv below without the lock. */
+        int n_links = n_pfd;
+        if (b->wake_efd >= 0)
+            pfd[n_pfd++] = (struct pollfd){ .fd = b->wake_efd, .events = POLLIN };
+        if (n_pfd == 0) {
             usleep(20000);
             continue;
         }
 
-        ssize_t n = recv(fd, b->rx, sizeof(b->rx), 0);
-        if (n < (ssize_t)sizeof(struct audio_msg))
+        int poll_result = poll(pfd, (nfds_t)n_pfd, PLAY_POLL_MS);
+        if (poll_result <= 0)
             continue;
-
-        struct audio_msg h;
-        memcpy(&h, b->rx, sizeof(h));
-        if (h.type == AUDIO_MSG_MIC_WANTED) {
-            uint32_t want = 0;
-            if ((size_t)n >= sizeof(struct audio_msg) + sizeof(want))
-                memcpy(&want, b->rx + sizeof(struct audio_msg), sizeof(want));
-            if (b->linux_wants_mic != (want != 0))
-                LOGI("linux mic %s", want ? "wanted" : "idle");
-            b->linux_wants_mic = want != 0;
-            continue;
+        if (n_pfd > n_links && (pfd[n_links].revents & POLLIN)) {
+            eventfd_t v;
+            eventfd_read(b->wake_efd, &v);
         }
-        if (h.type != AUDIO_MSG_PCM)
-            continue;   /* the producer sends PCM + mic demand back; formats flow upstream */
 
-        size_t avail = (size_t)n - sizeof(struct audio_msg);
-        size_t bytes = h.size < avail ? h.size : avail;
-        int play_channels = b->play_channels > 0 ? b->play_channels : WANT_PLAY_CHANNELS;
-        size_t frame_bytes = sizeof(int16_t) * (size_t)play_channels;
-        bytes -= bytes % frame_bytes;
-        int32_t frames = (int32_t)(bytes / frame_bytes);
-        if (frames <= 0)
-            continue;
+        for (int k = 0; k < n_links; ++k) {
+            struct audio_link *l = &b->links[idx[k]];
+            if (pfd[k].revents & (POLLHUP | POLLERR)) {
+                pthread_mutex_lock(&b->link_lock);
+                l->live = false;   /* the producer closed it: reaped next turn */
+                pthread_mutex_unlock(&b->link_lock);
+                continue;
+            }
+            if (!(pfd[k].revents & POLLIN))
+                continue;
 
-        queue_playback_frames(b, b->rx + sizeof(struct audio_msg), frames, play_channels);
-        last_pcm_ms = now_ms();
+            ssize_t n = recv(pfd[k].fd, b->rx, sizeof(b->rx), MSG_DONTWAIT);
+            if (n < (ssize_t)sizeof(struct audio_msg))
+                continue;
+
+            struct audio_msg h;
+            memcpy(&h, b->rx, sizeof(h));
+            if (h.type == AUDIO_MSG_MIC_WANTED) {
+                uint32_t want = 0;
+                if ((size_t)n >= sizeof(struct audio_msg) + sizeof(want))
+                    memcpy(&want, b->rx + sizeof(struct audio_msg), sizeof(want));
+                pthread_mutex_lock(&b->link_lock);
+                if (b->active_link != idx[k])
+                    LOGI("audio link surface %u is KWin's now", l->surface_id);
+                b->active_link = idx[k];
+                if (l->wants_mic != (want != 0))
+                    LOGI("linux mic %s", want ? "wanted" : "idle");
+                l->wants_mic = want != 0;
+                pthread_mutex_unlock(&b->link_lock);
+                continue;
+            }
+            if (h.type != AUDIO_MSG_PCM)
+                continue;   /* the producer sends PCM + mic demand back; formats flow upstream */
+
+            if (b->active_link != idx[k]) {
+                pthread_mutex_lock(&b->link_lock);
+                LOGI("audio link surface %u is KWin's now", l->surface_id);
+                b->active_link = idx[k];
+                pthread_mutex_unlock(&b->link_lock);
+            }
+
+            size_t avail = (size_t)n - sizeof(struct audio_msg);
+            size_t bytes = h.size < avail ? h.size : avail;
+            int play_channels = b->play_channels > 0 ? b->play_channels : WANT_PLAY_CHANNELS;
+            size_t frame_bytes = sizeof(int16_t) * (size_t)play_channels;
+            bytes -= bytes % frame_bytes;
+            int32_t frames = (int32_t)(bytes / frame_bytes);
+            if (frames <= 0)
+                continue;
+
+            queue_playback_frames(b, b->rx + sizeof(struct audio_msg), frames, play_channels);
+            last_pcm_ms = now_ms();
+        }
     }
 
     LOGI("playback thread stopped");
@@ -642,8 +706,10 @@ static void *cap_thread_func(void *arg)
         mic_frames = MIC_MAX_FRAMES;
 
     while (b->running) {
-        int fd = current_fd(b);
-        if (!mic_should_record(b->mic_enabled, b->linux_wants_mic, fd)) {
+        pthread_mutex_lock(&b->link_lock);
+        int fd = mic_fd_locked(b);
+        pthread_mutex_unlock(&b->link_lock);
+        if (!mic_should_record(b->mic_enabled, fd >= 0, fd)) {
             if (started && b->rec) {
                 AAudioStream_requestStop(b->rec);
                 started = false;
@@ -674,7 +740,12 @@ static void *cap_thread_func(void *arg)
             { .iov_base = buf, .iov_len = bytes },
         };
         struct msghdr m = { .msg_iov = iov, .msg_iovlen = 2 };
-        sendmsg(fd, &m, MSG_DONTWAIT | MSG_NOSIGNAL);   /* drop if the socket is full */
+        /* Re-fetched under the lock the closer holds: the link may have gone during the read. */
+        pthread_mutex_lock(&b->link_lock);
+        fd = mic_fd_locked(b);
+        if (fd >= 0)
+            sendmsg(fd, &m, MSG_DONTWAIT | MSG_NOSIGNAL);   /* drop if the socket is full */
+        pthread_mutex_unlock(&b->link_lock);
     }
 
     if (started && b->rec)
@@ -712,7 +783,15 @@ void audio_start(void)
     LOGI("device formats: playback %d Hz x%d, capture %d Hz x%d",
          b->play_rate, b->play_channels, b->cap_rate, b->cap_channels);
 
+    pthread_mutex_lock(&b->link_lock);
+    if (b->wake_efd < 0)
+        b->wake_efd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    pthread_mutex_unlock(&b->link_lock);
+
     b->running = true;
+    pthread_mutex_lock(&b->link_lock);
+    b->threads_alive = true;
+    pthread_mutex_unlock(&b->link_lock);
     pthread_create(&b->play_thread, NULL, play_thread_func, b);
     pthread_create(&b->cap_thread, NULL, cap_thread_func, b);
     LOGI("audio bridge started (play=%p rec=%p)", (void *)b->play, (void *)b->rec);
@@ -739,13 +818,66 @@ void audio_stop(void)
     b->play_ring_size = 0;
     play_ring_reset_locked(b);
     pthread_mutex_unlock(&b->play_lock);
-    b->ctx = NULL;
+    pthread_mutex_lock(&b->link_lock);
+    b->threads_alive = false;
+    for (int i = 0; i < AUDIO_MAX_LINKS; ++i)
+        b->links[i].live = false;
+    reap_links_locked(b);   /* the threads are joined: this is the closer now */
+    pthread_mutex_unlock(&b->link_lock);
     LOGI("audio bridge stopped");
 }
 
-void audio_set_ctx(display_ctx *ctx)
+void audio_attach(uint32_t surface_id, int fd)
 {
-    g.ctx = ctx;
+    struct audio_bridge *b = &g;
+    if (fd < 0) {
+        audio_detach(surface_id);
+        return;
+    }
+    int own = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    if (own < 0) {
+        LOGE("audio link surface %u: dup failed: %s", surface_id, strerror(errno));
+        return;
+    }
+    pthread_mutex_lock(&b->link_lock);
+    int slot = -1;
+    for (int i = 0; i < AUDIO_MAX_LINKS; ++i) {
+        if (b->links[i].live && b->links[i].surface_id == surface_id)
+            b->links[i].live = false;   /* its previous connection: reaped by the playback thread */
+        else if (slot < 0 && b->links[i].fd < 0)
+            slot = i;
+    }
+    if (slot < 0) {
+        pthread_mutex_unlock(&b->link_lock);
+        LOGE("audio link surface %u: no free slot (%d live connections)", surface_id, AUDIO_MAX_LINKS);
+        close(own);
+        return;
+    }
+    b->links[slot] = (struct audio_link){ .surface_id = surface_id, .fd = own, .live = true };
+    int wake = b->wake_efd;
+    pthread_mutex_unlock(&b->link_lock);
+    LOGI("audio link surface %u attached", surface_id);
+    if (wake >= 0)
+        eventfd_write(wake, 1);
+}
+
+void audio_detach(uint32_t surface_id)
+{
+    struct audio_bridge *b = &g;
+    bool any = false;
+    pthread_mutex_lock(&b->link_lock);
+    for (int i = 0; i < AUDIO_MAX_LINKS; ++i) {
+        if (b->links[i].live && b->links[i].surface_id == surface_id) {
+            b->links[i].live = false;
+            any = true;
+        }
+    }
+    if (any && !b->threads_alive)
+        reap_links_locked(b);   /* no playback thread to do it */
+    int wake = b->wake_efd;
+    pthread_mutex_unlock(&b->link_lock);
+    if (any && wake >= 0)
+        eventfd_write(wake, 1);
 }
 
 void audio_set_mic_enabled(int enabled)
