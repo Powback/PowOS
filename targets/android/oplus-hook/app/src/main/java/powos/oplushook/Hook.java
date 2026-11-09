@@ -837,7 +837,9 @@ public class Hook implements IXposedHookLoadPackage {
                     return;
                 done = true;
                 try {
-                    final android.content.Context ctx = ((android.app.Application) param.thisObject).getApplicationContext();
+                    // The base context attach() was given: getApplicationContext() is still null here (LoadedApk has not stored the
+                    // Application yet) - 11-09 on the OnePlus: "gameClass observer: NullPointerException ... ContentResolver".
+                    final android.content.Context ctx = (android.content.Context) param.args[0];
                     ctx.getContentResolver().registerContentObserver(
                         android.provider.Settings.Global.getUriFor(VENDOR_GAME_KEY), false,
                         new android.database.ContentObserver(new android.os.Handler(android.os.Looper.getMainLooper())) {
