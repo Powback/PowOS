@@ -37,12 +37,17 @@ export interface AppWidget {
 }
 
 export interface App {
-  /** Stable id: "a:<package/activity[@profile]>" (Android), "l:<desktop id>" (Linux / PowOS), "p:<app id>" (a PowOS app). */
+  /**
+   * Stable id: "a:<package/activity[@profile]>" (Android), "l:<desktop id>" (Linux / PowOS), "p:<app id>" (a PowOS app),
+   * "w:<host>" (a .pow web app installed from PowApps, opened in a web window on its site; issue #8).
+   */
   key: string;
   label: string;
   /** URL of its icon (the host serves them). */
   icon: string;
-  kind: "android" | "linux" | "powos";
+  kind: "android" | "linux" | "powos" | "web";
+  /** A web app's site (kind "web"). */
+  url?: string;
   /** A work-profile app, a clone, or the system's own (not uninstallable). */
   work?: boolean;
   clone?: boolean;

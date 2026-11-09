@@ -332,7 +332,7 @@ class ShellBridge(
         // Installs, removals, Linux apps, and an app's icon drawn anew or for the first time (ShellIcons names each by
         // its pixels): the page reloads its list. An icon arriving that looks as it did last time changes nothing.
         scope.launch {
-            snapshotFlow { listOf(runtime.androidApps.apps.size, runtime.linuxApps.size, ShellIcons.version.intValue) }.drop(1).collect { emit("apps.changed", null) }
+            snapshotFlow { listOf(runtime.androidApps.apps.size, runtime.linuxApps.size, ShellIcons.version.intValue, WebApps.version.intValue) }.drop(1).collect { emit("apps.changed", null) }
         }
         scope.launch { runtime.refreshApps() }
         // An app's task opened or gone, a Linux app's window, or its freeze or thaw: the running dots (ui/running.ts).
@@ -506,6 +506,11 @@ class ShellBridge(
                 else if (a.getString(0).startsWith("q:")) QuickPages.entry(a.getString(0).removePrefix("q:"))?.let { q ->
                     webWindows.also { webWindowsMade = true }.openQuick(q.component, a.getJSONObject(1), q.token)
                 } ?: -1
+                // An installed .pow web app (WebApps, issue #8): WebAppActivity on its site, a window of its own.
+                else if (a.getString(0).startsWith("w:")) WebApps.get(context, a.getString(0).removePrefix("w:"))?.let { app ->
+                    runtime.usage.record(a.getString(0))
+                    webWindows.also { webWindowsMade = true }.openWeb(app.url, a.getJSONObject(1))
+                } ?: -1
                 else android(a.getString(0))?.let { app ->
                     runtime.usage.record(a.getString(0))
                     webWindows.also { webWindowsMade = true }.open(app.component, a.getJSONObject(1), a.optInt(2, -1), a.optBoolean(4, false))
@@ -531,7 +536,9 @@ class ShellBridge(
             "webwindows.restore" -> webWindowsMade && webWindows.restore(a.getInt(0))
             "webwindows.zoom" -> webWindowsMade && webWindows.zoom(a.getInt(0), a.getDouble(1))
             "apps.info" -> android(a.getString(0))?.let { runtime.androidApps.openInfo(it) }
-            "apps.uninstall" -> android(a.getString(0))?.let { runtime.androidApps.uninstall(it) }
+            "apps.uninstall" ->
+                if (a.getString(0).startsWith("w:")) WebApps.uninstall(context, a.getString(0).removePrefix("w:"))
+                else android(a.getString(0))?.let { runtime.androidApps.uninstall(it) }
             // App API's "+ add app": the deep links an app opens, read from its manifest - nothing fired (AppLinks.kt).
             "apps.links" -> AppLinks.read(context, a.getString(0))
             "usage.recent" -> JSONArray(installed(runtime.usage.recent).take(a.optInt(0, 5)))
@@ -844,6 +851,17 @@ class ShellBridge(
                     .put("system", app.system)
                     // The app library's folders (shell/ui/library.ts): Android's own category, when the app says one.
                     .putOpt("category", app.category.takeIf { it >= 0 }),
+            )
+        }
+        // The .pow web apps the user installed from PowApps (WebApps): opened in a web window on their site.
+        for (app in WebApps.list(context)) {
+            list.put(
+                JSONObject()
+                    .put("key", "w:${app.id}")
+                    .put("label", app.name)
+                    .put("icon", icon("w:${app.id}"))
+                    .put("kind", "web")
+                    .put("url", app.url),
             )
         }
         for (app in runtime.linuxApps) {
@@ -1527,6 +1545,7 @@ class ShellBridge(
             when {
                 key.startsWith("a:") -> runtime.androidApps.icons[key.removePrefix("a:")]
                 key.startsWith("l:") -> runtime.linuxIcons[key.removePrefix("l:")]
+                key.startsWith("w:") -> WebApps.icon(context, key.removePrefix("w:"))
                 else -> null
             }
         return ShellIcons.url(key, bitmap) ?: "${ShellHost.ORIGIN}/_icon/${Uri.encode(key)}"
@@ -1534,7 +1553,7 @@ class ShellBridge(
 
     /** Recent keys still installed, in the page's form ("a:…" / "l:…"). */
     private fun installed(keys: List<String>): List<String> {
-        val have = runtime.androidApps.apps.map { "a:${it.key}" }.toSet() + runtime.linuxApps.map { "l:${it.id}" }
+        val have = runtime.androidApps.apps.map { "a:${it.key}" }.toSet() + runtime.linuxApps.map { "l:${it.id}" } + WebApps.list(context).map { "w:${it.id}" }
         return keys.filter { it in have }
     }
 
@@ -1688,6 +1707,11 @@ class ShellBridge(
                 }
             // A PowOS app's floating window likewise (unfolded: its task floats, WindowTasks), else it opens.
             key.startsWith("l:") -> launchLinux(key)
+            // A .pow web app without web windows (folded, the setting off): its site's own task, full screen.
+            key.startsWith("w:") ->
+                WebApps.get(context, key.removePrefix("w:"))?.let { app ->
+                    runCatching { context.startActivity(WebAppActivity.intent(context, app.url)) }.onFailure { Log.w(TAG, "launch $key: ${it.message}") }
+                }
         }
         // The strip shows it first next time home shows (the Compose launcher settles on stop, likewise).
         runtime.usage.settle()
@@ -1716,7 +1740,7 @@ class ShellBridge(
     /** Not home's bridge, web windows on: home's page asked to open [key] as a web window ("webwindows.launch"); false: not so here. */
     private fun launchOnHome(key: String): Boolean {
         // A Linux app too (LW3): home's page shows its placeholder window at once and launches it from there.
-        if (activity != null || !(key.startsWith("a:") || key.startsWith("l:")) || !dev.omalauncher.system.AppWindows.webDesktop(context)) return false
+        if (activity != null || !(key.startsWith("a:") || key.startsWith("l:") || key.startsWith("w:")) || !dev.omalauncher.system.AppWindows.webDesktop(context)) return false
         val home = synchronized(live) { live.firstOrNull { it.activity != null } } ?: return false
         Log.i(TAG, "$key launched from an overlay: a web window on home")
         home.emit("webwindows.launch", JSONObject().put("key", key))
