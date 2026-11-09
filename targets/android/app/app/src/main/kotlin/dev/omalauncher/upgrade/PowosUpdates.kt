@@ -518,12 +518,11 @@ internal object Store {
         url: String,
         readTimeout: Int,
     ): HttpURLConnection {
-        val hub = UpdatePlan.viaHub(url)
-        if (!byAddress || hub == null) {
+        val hub = UpdatePlan.viaHub(url) ?: return open(url, readTimeout, host = null)
+        if (!byAddress) {
             try {
                 return open(url, readTimeout, host = null)
-            } catch (e: UnknownHostException) {
-                if (hub == null) throw e
+            } catch (_: UnknownHostException) {
                 Log.i("PowosUpdates", "${UpdatePlan.STORE_HOST} doesn't resolve - the hub by address (${UpdatePlan.HUB})")
                 byAddress = true
             }

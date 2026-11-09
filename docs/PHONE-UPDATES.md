@@ -19,6 +19,27 @@ from the install script, so the image and the package can't disagree). Its versi
 newest commit touching those files: it only grows along origin's history, and a ship without code changes publishes
 nothing new. Only commits on `origin/worktree-powos-multiplatform` are published (an agent's branch never reaches phones).
 
+## Away from home: the PowOS VPN (issue #2)
+
+The store has no public route (fleet rule: no new public routes). Off the LAN a phone updates **over the WireGuard
+VPN** (`vpn.powback.com:51820`, PowStation's `wireguard` service; peer from `docker exec wireguard /app/show-peer <name>`,
+imported into Android's WireGuard app). Every peer routes `192.168.50.0/24` and Traefik's `.pow` allowlist
+(`pow-local-only.yml`) admits `10.13.13.0/24`, so the store answers exactly as at home.
+
+| step | at home | away, VPN up, Pi-hole DNS | away, VPN up, other DNS | away, no VPN |
+|---|---|---|---|---|
+| name | `android.pow` -> Pi-hole -> `192.168.50.100` | same | doesn't resolve | - |
+| app (`PowosUpdates`) | by name | by name | `UnknownHostException` -> `http://192.168.50.100/...` with `Host: android.pow` (`Store.connect`, the rest of that run too) | Settings/notification: "away from home, connect the PowOS VPN (WireGuard) to update" |
+| image (`phone-update.sh`) | by name | by name if the image follows Android's DNS (`android-nm`) | `getent hosts android.pow` fails -> a pinned copy of the config with `XferCommand = curl --resolve android.pow:80:192.168.50.100` | "the repo isn't reachable ... home network or the PowOS VPN only" |
+
+"Other DNS" is common: the non-root image's resolv.conf is a fixed `8.8.8.8` (`Bootstrap.configure`), Android's Private
+DNS (strict) replaces the tunnel's, or a tunnel imported without `DNS = 172.30.0.100`. `UpdatePlan.HUB` and
+`POWOS_UPDATE_HUB` hold the hub's address (HACK: fixed; real fix: the host directory's hub row, REMOTE-POWOS.md §2).
+
+Phones that aren't VPN peers (a buyer's) have no update path for PowOS's parts yet: that is the public channel in #2's
+plan (CI publishing `powos.apk` + `powos.ver`, the shell bundle and the `[powos]` repo, signed, for PowApps and the
+launcher), which needs the owner's OK for a public route. The store's URLs here are the same ones that channel mirrors.
+
 ## When it runs
 
 - **The app, no root** (`dev.omalauncher.upgrade.PowosUpdates`): on the launcher's start at most every 6 h (30 min after
