@@ -52,6 +52,9 @@ fi
 
 # ── What the phone session itself needs (not PowOS content: the Plasma session on Android) ─────────────
 pacman -S --noconfirm --needed plasma-workspace xdg-desktop-portal-kde kscreen python zstd
+# `powos login github` / `powos self push` (units/phone/github-cli.json): the 11-04 and 11-08 images had no gh although
+# phone-rules.conf maps the Containerfile's gh to github-cli - the package manifest the resolver read predates it.
+pacman -S --noconfirm --needed github-cli
 
 # ── Our packages (build-pkgs.sh): KWin with the Anland backend, FEX, and PowOS packages Arch Linux ARM doesn't
 # build (recipes.list: upstream recipes built for aarch64). First, so the mapping below finds them.
@@ -119,6 +122,7 @@ pacman -S --noconfirm --needed vulkan-icd-loader vulkan-tools libxinerama libxco
   libxi libxkbcommon sdl2-compat gnutls freetype2 fontconfig gst-plugins-base-libs
 install -m 755 "$P/play/powos-play" /usr/bin/powos-play
 install -m 755 "$P/play/powos-pack" /usr/bin/powos-pack   # packs the base image leaves out (rootfs-packs.conf)
+install -m 755 "$P/play/powos-progress" /usr/bin/powos-progress   # long jobs' progress as an Android notification (Progress.java)
 # Steam: Valve's native ARM64 client (play/powos-steam bootstraps it on first use, ~110 MB + its own update).
 # What it links that Valve's Steam Runtime would otherwise provide (gtk2 is ours, recipes.list).
 pacman -S --noconfirm --needed alsa-lib libasyncns at-spi2-core libcups gdk-pixbuf2 libibus libnm nspr \

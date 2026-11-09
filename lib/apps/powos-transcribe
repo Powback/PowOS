@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""powos transcribe - speech to text on the GPU server (stt.pow), from any PowOS: desktop, phone, the Mac.
+"""powos transcribe - speech to text on a GPU server (the owner's: stt.pow), from any PowOS: desktop, phone, the Mac.
 
 Usage:
   powos transcribe FILE|- [--lang xx] [--json] [--format F] [--prompt TEXT] [--url URL]
@@ -10,7 +10,8 @@ Usage:
   --json      the whole result as JSON: text, language, duration, segments with start/end seconds
   --format F  text (default), json (= --json), srt or vtt (subtitles, timed)
   --prompt T  words to expect: names, jargon, spelling ("PowOS, Mats, Bazzite")
-  --url URL   the server (default: $POWOS_STT_URL, else POWOS_STT_URL in /etc/powos/config, else http://stt.pow)
+  --url URL   the server (default: $POWOS_STT_URL, else POWOS_STT_URL in /etc/powos/config, else in the owner config
+              /etc/powos/owner.conf - written by pairing with the owner's hub; none: "no speech server configured")
   --health    is the server up: its model, queue, upload limit (exit 0 up, 2 not)
 
 Plain text comes as it's recognized (the server streams segments), so a long recording prints as it goes. A file over
@@ -33,7 +34,6 @@ import time
 import urllib.parse
 import uuid
 
-DEFAULT_URL = "http://stt.pow"
 CONFIG = os.environ.get("POWOS_CONFIG", "/etc/powos/config")
 BUSY_WAIT_S = 120
 TIMEOUT_S = float(os.environ.get("POWOS_STT_TIMEOUT", "1800"))
@@ -58,7 +58,17 @@ def server_url(arg):
                     return v.strip().strip("\"'").rstrip("/")
     except OSError:
         pass
-    return DEFAULT_URL
+    # The owner's devices: POWOS_STT_URL in the owner config (written by pairing with the owner's hub). No default
+    # server: unset = not configured (issue #1).
+    own = os.environ.get("POWOS_OWNER_CONF")
+    for path in [own] if own is not None else ["/etc/powos/owner.conf", os.path.expanduser("~/.config/powos/owner.conf")]:
+        try:
+            with open(path) as f:
+                vals = [v.strip().strip("\"'") for k, _, v in (l.strip().partition("=") for l in f) if k.strip() == "POWOS_STT_URL"]
+        except OSError:
+            continue
+        return vals[-1].rstrip("/") if vals and vals[-1] else ""
+    return ""
 
 
 def connect(url):
@@ -193,6 +203,8 @@ def main(argv):
     if fmt not in ("text", "json", "srt", "vtt"):
         fail(f"--format {fmt}: text, json, srt or vtt")
     url = server_url(url)
+    if not url:
+        fail("no speech server configured (--url, POWOS_STT_URL, or pair this device with the owner's hub)")
     h = health(url)
     if check:
         if not h:

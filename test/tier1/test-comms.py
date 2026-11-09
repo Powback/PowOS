@@ -240,8 +240,12 @@ class CliTests(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def _cli(self, *args, agent=""):
-        env = dict(os.environ, COMMS_ROOT=self.root, COMMS_AGENT_ID=agent)
+    def _cli(self, *args, agent="", **extra):
+        env = dict(os.environ, COMMS_ROOT=self.root, COMMS_AGENT_ID=agent, POWOS_PLATFORM="desktop",
+                   POWOS_OWNER_CONF=os.path.join(self.tmp, "no-owner.conf"),
+                   POWOS_AI_AGENTS_DIR=os.path.join(self.tmp, "agents"))
+        env.update(extra)
+        env.pop("POWOS_BOARD_REMOTE", None)
         return subprocess.run([sys.executable, SERVER, *args],
                              capture_output=True, text=True, env=env, timeout=30)
 
@@ -250,6 +254,42 @@ class CliTests(unittest.TestCase):
         out = self._cli("inbox", "--agent", "devops").stdout
         self.assertIn("hello world", out)
         self.assertIn("from user", out)  # a human at the CLI acts as 'user'
+
+    def test_send_says_who_reads_it(self):
+        """Issue #1: a fresh device took `comms send coder` silently into an inbox nothing read."""
+        r = self._cli("send", "coder", "fix it")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("no agent for this role here", r.stdout + r.stderr)
+        self.assertIn("fix it", self._cli("inbox", "--agent", "coder", "--peek").stdout)  # still kept
+        own = os.path.join(self.tmp, "owner.conf")
+        with open(own, "w") as f:
+            f.write("POWOS_BOARD_REMOTE=ssh hub '{cmd}'\n")
+        r = self._cli("send", "coder", "x", POWOS_OWNER_CONF=own)
+        self.assertIn("the owner's hub", r.stdout)
+        self.assertNotIn("no agent", r.stdout + r.stderr)
+        r = self._cli("send", "manager", "x", POWOS_PLATFORM="phone", XDG_RUNTIME_DIR=self.tmp)
+        self.assertIn("the manager (woken)", r.stdout)
+        self.assertTrue(os.listdir(os.path.join(self.tmp, "agent-wake")))
+        r = self._cli("send", "coder", "x", POWOS_PLATFORM="phone", XDG_RUNTIME_DIR=self.tmp)
+        self.assertIn("no agent for this role here", r.stdout)
+
+    def test_send_starts_a_local_agent_once(self):
+        bin_ = os.path.join(self.tmp, "bin")
+        os.makedirs(bin_)
+        os.makedirs(os.path.join(self.tmp, "agents", "devops"))
+        with open(os.path.join(self.tmp, "agents", "devops", "agent.conf"), "w") as f:
+            f.write("AGENT_NAME=devops\n")
+        log = os.path.join(self.tmp, "started")
+        with open(os.path.join(bin_, "powos"), "w") as f:
+            f.write(f"#!/bin/sh\necho \"$*\" >> {log}\nsleep 5\n")
+        os.chmod(os.path.join(bin_, "powos"), 0o755)
+        path = bin_ + os.pathsep + os.environ["PATH"]
+        self.assertIn("its agent (started)", self._cli("send", "devops", "a", PATH=path).stdout)
+        self.assertIn("its agent (running)", self._cli("send", "devops", "b", PATH=path).stdout)
+        import time
+        time.sleep(0.5)
+        with open(log) as f:
+            self.assertEqual(f.read().split("\n")[0], "ai --agent devops check your inbox and act on it")
 
     def test_agents_listing(self):
         self._cli("send", "coder", "x")

@@ -1,0 +1,35 @@
+#!/bin/sh
+# powos-device-context - the "This device" block every agent's context starts with (issue #1): what THIS device is,
+# from /etc/powos/platform + detection, so capabilities.md never has to say which phone "this phone" is.
+#   platform   /etc/powos/platform ($POWOS_PLATFORM), else the kernel's name
+#   model      Android's ro.product.model, else the device tree / DMI name ($POWOS_DEVICE_MODEL overrides)
+#   root       phone: rooted (Magisk + PowOS's own system, powos-supervisor) or no-root (the app's engine)
+#   owner      one of the owner's devices (an owner config: enrolled in the owner's realm) or standalone
+plat=${POWOS_PLATFORM:-$(cat /etc/powos/platform 2>/dev/null)}
+[ -n "$plat" ] || plat=$(uname -s | tr 'A-Z' 'a-z')
+model=${POWOS_DEVICE_MODEL:-}
+[ -n "$model" ] || model=$(getprop ro.product.model 2>/dev/null)
+[ -n "$model" ] || model=$( (tr -d '\0' < /sys/firmware/devicetree/base/model) 2>/dev/null)
+[ -n "$model" ] || model=$(cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null)
+[ -n "$model" ] || model=unknown
+oc=${POWOS_OWNER_CONF:-}
+if [ -z "${POWOS_OWNER_CONF+x}" ]; then
+  if [ -e /etc/powos/owner.conf ]; then oc=/etc/powos/owner.conf; else oc=$HOME/.config/powos/owner.conf; fi
+fi
+if [ -s "$oc" ]; then owner="one of the owner's devices (owner config $oc: its hub, board host and servers)"
+else owner="standalone (no owner config: no hub, board or speech server of anyone else's is used; its board is its own)"; fi
+echo "## This device"
+echo "- platform: $plat; model: $model"
+if [ "$plat" = phone ]; then
+  if [ -n "${POWOS_ROOTED:-}" ]; then root=$POWOS_ROOTED
+  elif [ -n "${FAKECHROOT:-}${FAKEROOTKEY:-}" ]; then root=no
+  elif command -v powos-supervisor >/dev/null 2>&1 || [ -d /data/powos/root ]; then root=yes
+  else root=no; fi
+  if [ "$root" = yes ]; then
+    echo "- rooted: PowOS's own Linux system on Android's kernel (Magisk su, real sudo, powos-supervisor system tier)"
+  else
+    echo "- no root: PowOS runs inside the app's engine (fakechroot/fakeroot): no su, no powos-supervisor, no system tier;"
+    echo "  the launcher runs SpacetimeDB and the App API itself. Root-only notes in capabilities.md don't apply here."
+  fi
+fi
+echo "- $owner"

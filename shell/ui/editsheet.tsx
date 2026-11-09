@@ -8,7 +8,7 @@ import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { tick } from "./haptics.ts";
 import { carry, editing, home, page, pages } from "../state.ts";
-import { openScreen } from "../screens.ts";
+import { act, openScreen } from "../screens.ts";
 import { AppWidgetPicker, picker } from "./appwidget.tsx";
 import { geometry, placeNew, placeNewCells } from "./grid.tsx";
 import { hasRecentsWidget, recentsSpot } from "./recentwidget.tsx";
@@ -167,6 +167,15 @@ function ShellAdds({ done, q }: { done: () => void; q: string }) {
         powos.home.addPanel("recents", spot.page, spot.cell);
       },
     });
+  // The terminal: the same built-in the widget store offers (screens.tsx Store "built in"), here too - it was only
+  // there, under All with no search, and "+ widget" never showed it (Powback/PowOS#7). Add as many as you like.
+  widgets.push({
+    key: "terminal",
+    label: "terminal",
+    desc: "a shell in ~ · 6x4 · tap one to type",
+    preview: <span class="aw-glyph">&gt;_</span>,
+    add: () => void act("store", "terminal"),
+  });
   const found = widgets.filter((w) => !q || `${w.label} ${w.desc} powos`.includes(q));
   const chip = (label: string, f: () => void) => (
     <button type="button" class="sheet-item" onClick={run(f)}>

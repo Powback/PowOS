@@ -1073,9 +1073,13 @@ def dispatch(a):
         else:
             runtime("config", a[2], "--app", a[1])
     elif c == "services":
+        # The system tier is powos-supervisor (rooted phones, desktops); tool() also finds the copy beside powos-app.
         sv = tool("powos-supervisor")
         # No root: the PowOS app starts the services (powos-noroot-services), not the supervisor (it needs root).
+        # A no-root build has none (issue #1: it was a traceback); print what this machine has instead.
         if not sv or noroot():
+            print("no system tier on this build (powos-supervisor isn't installed or can't run: without root the launcher "
+                  "runs SpacetimeDB and the App API itself)")
             for step, ok, how in capabilities():
                 if step in ("install", "services"):
                     print(f"{step:13} {'yes' if ok else 'no ':4} {how}")

@@ -244,8 +244,8 @@ Key facts an agent should CHECK before starting:
 ## Speech (speech to text)
 - `powos transcribe FILE|- [--lang xx] [--json] [--format srt|vtt]` (`powos transcribe --help`): any audio/video file
   to text on the GPU server, from any PowOS (desktop, phone, the Mac). Text streams as it's recognized; ~0.1 s for a
-  short clip, ~12 s for 12 minutes of speech. Endpoint: `POWOS_STT_URL` (env or /etc/powos/config), else
-  `http://stt.pow` (LAN + VPN only; no public route).
+  short clip, ~12 s for 12 minutes of speech. Endpoint: `POWOS_STT_URL` (env, /etc/powos/config, or the owner config
+  - the owner's devices: `http://stt.pow`, LAN + VPN only); none = "no speech server configured".
 - `stt.pow` is OpenAI-compatible (`POST /v1/audio/transcriptions`, multipart `file` + `language` + `response_format`
   json|text|verbose_json|srt|vtt, `stream=true` for SSE): whisper large-v3-turbo on gpu-195's GPU1 (unit `stt-batch`),
   500 MB uploads, 4 requests at a time (then 429/503: retry). Any tool that speaks the OpenAI audio API can use it.
@@ -255,11 +255,17 @@ Key facts an agent should CHECK before starting:
 ## PowOS on a phone (Android)
 
 You may be running on a phone: `/etc/powos/platform` reads `phone` and the session exports `POWOS_PLATFORM=phone`.
-Device in use: OnePlus Open (foldable, SM8550, Adreno 740), Android 16 / OxygenOS, unlocked + Magisk. Source:
+**Which device this is - rooted or not, its model, the owner's or standalone - is the "This device" block at the top of
+your context** (lib/ai/manager/powos-device-context, generated on the device), never this file: what follows covers
+every phone. Where a part says "rooted" or names the owner's OnePlus Open (foldable, SM8550, Adreno 740, Magisk; the
+owner's daily phone and the dev reference), it applies only there. A standalone device (no owner config) has no hub,
+no Mac, no `.pow` server and no board host of anyone else's: its board is its own (`powos agents`), mail to a role
+nobody here runs says so (`powos comms send`), and voice/speech is "not configured" until it enrolls in the owner's
+realm (`powos devices enroll`: the realm's owner bundle -> ~/.config/powos/owner.conf; unenroll removes it). Source:
 `targets/android/` (README.md there), the web shell `shell/`, design `docs/NATIVE-SYSTEM-UI.md`.
 
 ### Architecture
-- **Rooted mode (this phone)** ✅: PowOS's own Arch Linux ARM system in `/data/powos/root`, run on Android's kernel.
+- **Rooted mode (the owner's OnePlus)** ✅: PowOS's own Arch Linux ARM system in `/data/powos/root`, run on Android's kernel.
   Not a VM, kexec or dual-boot: `powos-start.sh` (Magisk boot service) mounts it, and the PowOS app starts the
   desktop with `su -c sh /data/powos/powos-session.sh …`, which pivots into its own mount namespace. The desktop runs
   as user `powos` (real sudo). KWin uses its Anland backend: the app owns the screen surface, touch, keys and audio,
@@ -268,7 +274,8 @@ Device in use: OnePlus Open (foldable, SM8550, Adreno 740), Android 16 / OxygenO
   restarts the whole desktop (~9 s to KWin, then Plasma). KWin gets the screen size from the daemon at startup; a
   daemon without `--screen` made it wait for the desktop to be opened (Plasma then started in front of the user).
 - **No-root mode** ⚠️ (Galaxy S25 Ultra, 2026-10-13): the same desktop inside the app through Andromarchy's engine
-  (patched loader, fakechroot, fakeroot). Not this phone's setup.
+  (patched loader, fakechroot, fakeroot): no su, no powos-supervisor (`powos app services`: "no system tier on this
+  build"), no /var/lib/powos/stdb module for the board (it keeps a local file store).
 - **Android stays in charge** of the kernel, display, notifications and Android apps. The PowOS app `com.powos.app`
   (Omalauncher + the Andromarchy engine) is the home app. As a privileged system app (Magisk module) it also holds
   the recents role.
@@ -289,7 +296,7 @@ Device in use: OnePlus Open (foldable, SM8550, Adreno 740), Android 16 / OxygenO
 | Hosted Android widgets | private virtual displays `powos-appwidget-N` (not the screen; don't capture them) |
 | Root | Magisk (`su`); SELinux enforcing |
 | App data backups | full: `/data/powos/backup/app-data-<time>.tar`; hourly layout + store: `/data/powos/root/var/backups/powos-app/light-<time>.tar` - `su -c "sh /data/powos/powos-appdata.sh list\|backup\|restore <tar>"` (`docs/APP-DATA-BACKUP.md`) |
-| adb | phone-local `127.0.0.1:5555` (rooted.sh wifi); LAN `192.168.50.239:5555`; VPN `10.13.13.7:5555`. On the phone itself `emulator-5554` is this same phone's adbd auto-detected on port 5555 (a bare `adb shell` then fails, "more than one device"): always pass `-s 127.0.0.1:5555`. An AVD only on the Mac |
+| adb (the owner's OnePlus) | phone-local `127.0.0.1:5555` (rooted.sh wifi); LAN `192.168.50.239:5555`; VPN `10.13.13.7:5555`. On the phone itself `emulator-5554` is this same phone's adbd auto-detected on port 5555 (a bare `adb shell` then fails, "more than one device"): always pass `-s 127.0.0.1:5555`. An AVD only on the Mac |
 
 ### Shipping a change (edit → test → ship → roll back)
 | Layer | Edit | Ship | Roll back |

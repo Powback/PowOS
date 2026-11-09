@@ -53,10 +53,30 @@ internal object SpeechEngines {
     /** The dictation under way (any window's), or null. */
     val current: SpeechSession? get() = slot.current?.session
 
-    fun choice(c: Context): String =
-        runCatching {
-            JSONObject(File(c.filesDir, "shell-data/speech.json").readText()).optString("engine", GPU)
-        }.getOrDefault(GPU).takeIf { it == ON_DEVICE || it == GPU_HTTP } ?: GPU
+    fun choice(c: Context): String {
+        val stored =
+            runCatching {
+                JSONObject(File(c.filesDir, "shell-data/speech.json").readText()).optString("engine", GPU)
+            }.getOrDefault(GPU)
+        // The servers are the owner config's (issue #1: none is a default). A device that isn't one of the owner's has
+        // none, so it dictates on-device.
+        val own = OwnerConfig.read(c)
+        SttServer.urlBase = own["POWOS_STT_URL"].orEmpty().trimEnd('/')
+        VoiceAgentProtocol.url = own["POWOS_VOICE_URL"].orEmpty()
+        return engineFor(stored, SttServer.urlBase.isNotEmpty(), VoiceAgentProtocol.url.isNotEmpty())
+    }
+
+    /** The engine dictation uses: the stored choice when its server is configured, else on-device. */
+    fun engineFor(
+        stored: String,
+        stt: Boolean,
+        voice: Boolean,
+    ): String =
+        when {
+            stored == ON_DEVICE -> ON_DEVICE
+            stored == GPU_HTTP -> if (stt) GPU_HTTP else ON_DEVICE
+            else -> if (voice) GPU else ON_DEVICE
+        }
 
     fun start(
         c: Context,
@@ -122,6 +142,7 @@ internal object SpeechEngines {
                 onEngine = { Log.i(TAG, "test ($mode): engine $it") },
             )
         val app = c.applicationContext
+        choice(app) // the owner config's servers, as a dictation reads them
         when (mode) {
             "down" -> {
                 cb.onEngine(ON_DEVICE)
@@ -154,13 +175,15 @@ internal object SpeechEngines {
 }
 
 /**
- * stt.pow (stt-batch: whisper-fast large-v3-turbo on gpu-195's GPU1, OpenAI-compatible; docs/GPU-SERVERS-PLAN.md).
+ * The speech server (the owner's: stt.pow, stt-batch: whisper-fast large-v3-turbo on gpu-195's GPU1, OpenAI-compatible;
+ * docs/GPU-SERVERS-PLAN.md), from the owner config.
  * Whether it's up is checked cheaply (GET /health, 400 ms to connect) and remembered 30 s, so a dictation on a phone
  * away from the LAN starts on-device at once instead of after a timeout.
  */
 internal object SttServer {
     private const val TAG = "speech"
-    const val URL_BASE = "http://stt.pow"
+    /** The owner config's POWOS_STT_URL ([SpeechEngines.choice] reads it); "" = none configured. */
+    @Volatile var urlBase = ""
     private const val HEALTH_TTL_MS = 30_000L
     const val CONNECT_MS = 400
 
@@ -187,7 +210,7 @@ internal object SttServer {
         io.execute {
             val ok =
                 runCatching {
-                    val h = URL("$URL_BASE/health").openConnection() as HttpURLConnection
+                    val h = URL("$urlBase/health").openConnection() as HttpURLConnection
                     h.connectTimeout = CONNECT_MS
                     h.readTimeout = 800
                     try {
@@ -246,7 +269,7 @@ internal object SttServer {
         body.write(wavHeader(pcm.size))
         body.write(pcm)
         body.write("\r\n--$boundary--\r\n".toByteArray())
-        val h = URL("$URL_BASE/v1/audio/transcriptions").openConnection() as HttpURLConnection
+        val h = URL("$urlBase/v1/audio/transcriptions").openConnection() as HttpURLConnection
         h.connectTimeout = CONNECT_MS
         h.readTimeout = readMs
         h.requestMethod = "POST"
@@ -765,7 +788,8 @@ internal class GpuSession(
  * first). Also `{"type":"state","phase":"listening"|"processing"|"idle"}` and `{"type":"error",...}`.
  */
 internal object VoiceAgentProtocol {
-    const val URL = "ws://voiceagent.pow/ws"
+    /** The owner config's POWOS_VOICE_URL (the owner's: ws://voiceagent.pow/ws); "" = none configured. */
+    @Volatile var url = ""
     const val CHUNK_BYTES = 1024
     const val START = """{"type":"start","mode":"transcription_only"}"""
     const val STOP = """{"type":"stop"}"""
@@ -865,7 +889,7 @@ internal class StreamSession(
 
     /** Connect, then every frame in order, then the stop: one thread, so nothing overtakes the handshake. */
     private val io = Executors.newSingleThreadExecutor { Thread(it, "voice-ws").apply { isDaemon = true } }
-    private val ws = VoiceSocket(VoiceAgentProtocol.URL, { t -> main.post { message(t) } }, { why -> main.post { dropped(why) } })
+    private val ws = VoiceSocket(VoiceAgentProtocol.url, { t -> main.post { message(t) } }, { why -> main.post { dropped(why) } })
 
     @Volatile private var up = false
     private val chunks = VoiceAgentProtocol.Rechunker { f -> send { ws.send(f) } }
@@ -1061,4 +1085,23 @@ internal class StreamSession(
         Log.i(TAG, "session #$id (gpu stream): end (${t.length} chars, ${finals.size} finals${if (partial.isNotBlank()) " + a partial" else ""}${if (why != null) ", $why" else ""})")
         cb.onEnd(t, why)
     }
+}
+
+/**
+ * The owner config (lib/devices/powos-deviced owner_apply: written when this device enrolls in the owner's realm,
+ * removed on unenroll; the launcher's copy is the app's files/run/owner.conf = /run/powos-app/owner.conf): KEY=value
+ * lines. A device that isn't one of the owner's has none, and every feature that needs an owner host is "not configured".
+ */
+internal object OwnerConfig {
+    fun parse(text: String): Map<String, String> =
+        text.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !it.startsWith("#") && '=' in it }
+            .associate { line ->
+                val v = line.substringAfter('=').trim()
+                line.substringBefore('=').trim() to
+                    (if (v.length > 1 && v.first() == v.last() && (v.first() == '"' || v.first() == '\'')) v.substring(1, v.length - 1) else v)
+            }
+
+    fun read(c: Context): Map<String, String> = runCatching { parse(File(c.filesDir, "run/owner.conf").readText()) }.getOrDefault(emptyMap())
 }

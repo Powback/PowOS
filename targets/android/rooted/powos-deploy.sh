@@ -411,6 +411,15 @@ if [ -s $T/ship-gate.conf ]; then
   cmp -s $T/ship-gate.conf $G/ship-gate.conf || { cp $T/ship-gate.conf $G/ship-gate.conf && chown $U:$U $G/ship-gate.conf && chmod 644 $G/ship-gate.conf && echo "ship gate: url configured"; }
 fi
 rm -f $T/ship-gate.secret $T/ship-gate.conf
+# The owner config (rooted.sh deploy renders it with powos-deviced owner-apply; HACK there): the session's one file
+# (~/.config/powos/owner.conf) and the launcher's copy (the app's files/run = /run/powos-app), only when different.
+if [ -s $T/owner.conf ]; then
+  mkdir -p $G && chown $U:$U $G
+  cmp -s $T/owner.conf $G/owner.conf || { cp $T/owner.conf $G/owner.conf && chown $U:$U $G/owner.conf && chmod 644 $G/owner.conf && echo "owner config: installed"; }
+  O=/data/data/com.powos.app/files/run
+  if [ -d $O ]; then cp $T/owner.conf $O/owner.conf && chown $U:$U $O/owner.conf && chmod 644 $O/owner.conf; fi
+fi
+rm -f $T/owner.conf
 # The units (lib/apps/powos-units): every file and process this deploy put on the phone, registered with its owner,
 # purpose, limits and how to remove it - PowOS's side in /etc/powos/units.d, Android's in /data/powos/units.d. Then the
 # running ones with limits go into cgroups of their own (the containers' hybrid cgroups). `powos units check` flags

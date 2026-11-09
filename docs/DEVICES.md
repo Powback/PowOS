@@ -22,6 +22,18 @@ describes what is deployed (owner 2026-11-07: keep the current setup, don't exte
 | registry | `~/.config/powos/units.d/powos-device.json` on the device (`powos units`), the realm's `registry.json` on PowStation (`powos devices registry`) | which devices exist, their caps and agent address, who approved them, what they hold |
 | Devices app | `apps/devices` (bundled, every surface) | paired devices with live status and actions; on an approver, new devices asking to join (Approve / Deny) and Revoke per device |
 
+## The owner config: standalone until enrolled (issue #1)
+
+A fresh device names none of the owner's hosts: its board is its own (`powos agents`, a local file store where no
+powos-agents module runs), mail to a role nobody runs here says "no agent for this role here", and the terminals'
+links, the ship gate, the root channel and the speech servers are "not configured". Enrolling hands it the realm's
+owner bundle (`ENROLL_ENDPOINTS` -> `endpoints.owner`, `{POWOS_*: value}`; the owner's values: `tools/phone/owner.json`),
+which `powos-deviced` writes to the one file every reader uses, `~/.config/powos/owner.conf` (`POWOS_OWNER_CONF`
+overrides; a phone also gets the launcher's copy in the app's `files/run/owner.conf`); `unenroll` removes it, and
+`powos devices owner-apply [FILE|-]` writes it again. Keys: `POWOS_BOARD_REMOTE` (the board host's command line,
+`{cmd}` = the powos command), `POWOS_ROOTSH_SHELL`, `POWOS_TERMS_LINKS` (`host=user@address,...`),
+`POWOS_SHIP_GATE_URL`, `POWOS_STT_URL`, `POWOS_VOICE_URL`. The realm must carry `owner` in `ENROLL_ENDPOINTS` for this.
+
 ## How a new device joins
 
 LAN/VPN only (owner 2026-11-07: "no public routes yet"): there is no `enroll.powback.com` and no web page. Approval

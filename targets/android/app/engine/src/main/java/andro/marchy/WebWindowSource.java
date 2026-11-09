@@ -278,7 +278,13 @@ public final class WebWindowSource {
     public static void stop(long handle) {
         if (handle == 0)
             return;
-        // Home's keyboard bound to it lets go first: no text is sent to a freed consumer.
+        // The keyboard bound to it lets go first: no text is sent to a freed consumer.
+        releaseKeyboard(handle);
+        Native.nativeStopWindow(handle);
+    }
+
+    /** Consumer [handle] is going: the keyboard typing into it lets go, its taps and its task host are forgotten. */
+    private static void releaseKeyboard(long handle) {
         boolean bound;
         synchronized (IME_LOCK) {
             liveHandles.remove(handle);
@@ -287,13 +293,76 @@ public final class WebWindowSource {
             if (bound)
                 imeHandle = 0;
         }
-        if (bound)
+        WeakReference<Activity> task = taskHosts.remove(handle);
+        Activity host = task == null ? null : task.get();
+        if (bound || host != null)
             onUi(() -> {
                 SystemIME i = ime;
-                if (i != null && i.ownsKeyboard())
+                if (bound && i != null && i.ownsKeyboard())
                     i.hideKeyboard();
+                // The task's own input goes with its consumer (a later show makes it again): no stale activity kept.
+                if (host != null && imeActivity == host)
+                    dropIme();
             });
-        Native.nativeStopWindow(handle);
+    }
+
+    // ---- Window tasks' keyboard (Powback/PowOS#12) ----
+
+    /**
+     * Window tasks (PowosWindowActivity: a Linux window as its own Android task) whose consumer hosts its window's
+     * keyboard: consumer handle -> that activity. Home's hidden input can't raise the keyboard while a task is in front
+     * (Android shows it for the focused window only), and before this a task's window never asked KWin for its own
+     * keyboard, so KWin sent the show to the desktop, which had no consumer on screen: no keyboard (Dolphin, 11-09).
+     */
+    private static final java.util.Map<Long, WeakReference<Activity>> taskHosts = new ConcurrentHashMap<>();
+
+    /**
+     * Window task [task]'s consumer [handle] for window [id] is live: KWin (cap window-ime) gives the window's
+     * keyboard to it, and [task] hosts the Android keyboard for it - shown on KWin's show after a tap, typing into
+     * the window's own connection, as web windows do ([ownKeyboard]). Older KWin: nothing (the desktop's path).
+     */
+    public static void ownTaskKeyboard(Activity task, int id, long handle) {
+        if (handle == 0 || !WindowTasks.kwinCan("window-ime"))
+            return;
+        synchronized (IME_LOCK) {
+            liveHandles.add(handle);
+        }
+        taskHosts.put(handle, new WeakReference<>(task));
+        WindowTasks.sendLine("ime\t" + id + "\t1");
+    }
+
+    /** The task's consumer [handle] stopped (PowosWindowActivity stops it itself): its keyboard lets go. Main thread. */
+    public static void releaseTaskKeyboard(long handle) {
+        if (handle != 0)
+            releaseKeyboard(handle);
+    }
+
+    /** A user's touch on window task consumer [handle] (PowosWindowActivity's own touch path): lets KWin's show raise it. */
+    public static void taskTouch(long handle, MotionEvent e) {
+        if (handle != 0 && taskHosts.containsKey(handle))
+            userTouch(handle, e.getActionMasked(), e);
+    }
+
+    /** The activity hosting [handle]'s keyboard: its window task's, else home's. */
+    private static Activity hostOf(long handle) {
+        WeakReference<Activity> task = taskHosts.get(handle);
+        Activity a = task == null ? null : task.get();
+        if (a != null && !a.isDestroyed())
+            return a;
+        WeakReference<Activity> ref = imeHome;
+        return ref == null ? null : ref.get();
+    }
+
+    /** The keyboard's hidden input off its activity (main thread). */
+    private static void dropIme() {
+        SystemIME i = ime;
+        if (i != null) {
+            android.view.View v = i.getInputView();
+            if (v.getParent() instanceof ViewGroup)
+                ((ViewGroup) v.getParent()).removeView(v);
+        }
+        ime = null;
+        imeActivity = null;
     }
 
     /**
@@ -350,10 +419,7 @@ public final class WebWindowSource {
     };
 
     private static void onUi(Runnable r) {
-        WeakReference<Activity> ref = imeHome;
-        Activity a = ref == null ? null : ref.get();
-        if (a != null)
-            a.runOnUiThread(r);
+        MAIN.post(r);
     }
 
     /**
@@ -361,8 +427,7 @@ public final class WebWindowSource {
      * Linux text field in that web window gained / lost the focus). Name and signature are fixed by the JNI side.
      */
     static void nativeKeyboard(long handle, boolean visible) {
-        WeakReference<Activity> ref = imeHome;
-        Activity a = ref == null ? null : ref.get();
+        Activity a = hostOf(handle);
         if (a == null) {
             Log.w(TAG, "keyboard " + (visible ? "show" : "hide") + " for a web window: no home to host it");
             return;
@@ -542,8 +607,7 @@ public final class WebWindowSource {
             t.down(now, e.getX(), e.getY());
         } else if (masked == MotionEvent.ACTION_UP && t.up(now, e.getX(), e.getY())) {
             MAIN.postDelayed(() -> {
-                WeakReference<Activity> ref = imeHome;
-                Activity a = ref == null ? null : ref.get();
+                Activity a = hostOf(handle);
                 if (a == null || !t.held() || taps.get(handle) != t)
                     return;
                 t.shown();

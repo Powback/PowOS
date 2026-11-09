@@ -1086,7 +1086,7 @@ class Mirror:
 
     @staticmethod
     def default_cmd(target, host):
-        # The phone over the dev channel the Mac already has: powos-vadb (adb over the user's WireGuard VPN), into the
+        # The phone over the dev channel the Mac already has (powos-rootsh's session: adb over the user's VPN), into the
         # PowOS app's run dir (/run/powos-app inside PowOS), written as root and read by the app. Only into the folder
         # the app made (AgentsSpool.kt): without it, an app that doesn't read it, nothing is written.
         d = "/data/data/com.powos.app/files/run/agents/mirror"
@@ -1095,9 +1095,9 @@ class Mirror:
         # Through powos-rootsh (next to this file): one long-lived su on the phone for every push instead of one su
         # (one Magisk toast) each. Tagged "mirror", so the powos-vadb health check sees when pushes stop landing.
         rootsh = os.path.join(os.path.dirname(os.path.abspath(__file__)), "powos-rootsh")
-        if os.access(rootsh, os.X_OK):
-            return [sys.executable, rootsh, "run", "-i", "--tag", "mirror", "--timeout", "30", "--", inner]
-        return ["docker", "exec", "-i", "powos-vadb", "adb", "shell", f"su -c '{inner}'"]
+        # Its root shell is the owner config's (POWOS_ROOTSH_SHELL): unset, the push answers "no session" and the
+        # mirror stays off - no default host to push to (issue #1).
+        return [sys.executable, rootsh, "run", "-i", "--tag", "mirror", "--timeout", "30", "--", inner]
 
     def due(self):
         return self.wanted and time.monotonic() - self.last >= MIRROR_EVERY_S
