@@ -14,7 +14,14 @@
 # files are rsynced over it (gitignored files - node_modules, build outputs - stay behind), so `git status/diff/
 # ls-files` match the Mac. The command runs there under `nice -n 10` pinned to OFFLOAD_CPUS (default 0-23 of 32: .58 is shared with another project).
 #
-# Exit codes: the command's own; 255 = ssh failed; 97 = setup (push/rsync) failed.
+# Concurrency (f466): two offloads from the SAME worktree at once (a ship step runs jvm-offload.sh and
+# TIER1_HOST=58 tier1.sh side by side) used to share one ref + one remote dir: one push died on "cannot lock ref",
+# and the rsyncs/runs clobbered each other. Each run now claims a SLOT, held by a remote `flock` for its whole
+# life: slot 1 is ~/offload/<name> (ref refs/offload/<name>), slot N>1 is ~/offload/<name>@N (refs/offload/<name>@N).
+# Slots persist so each keeps its gitignored caches (gradle build/, node_modules: 30-160 MB a slot); extra slots
+# idle for OFFLOAD_SLOT_TTL_DAYS (default 3) are swept on the next run. OFFLOAD_SLOTS (default 8) caps them.
+#
+# Exit codes: the command's own; 255 = ssh failed; 97 = setup (slot/push/rsync) failed, with a one-line reason.
 # Killing this script (e.g. by a ship step's `timeout`) kills the remote process group too.
 
 set -euo pipefail
@@ -27,8 +34,9 @@ BASE_REF=refs/remotes/origin/worktree-powos-multiplatform
 
 TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) ||
   { echo "offload.sh: cd into a git checkout first" >&2; exit 2; }
-NAME=$(basename "$TOPLEVEL" | tr -c 'A-Za-z0-9._\n-' _)
-RDIR="offload/$NAME"   # relative to the remote $HOME
+BASE_NAME=$(basename "$TOPLEVEL" | tr -c 'A-Za-z0-9._\n-' _)
+SLOTS=${OFFLOAD_SLOTS:-8}
+TTL_DAYS=${OFFLOAD_SLOT_TTL_DAYS:-3}
 SHA=$(git -C "$TOPLEVEL" rev-parse HEAD)
 # The command runs in the same subdirectory of the checkout as the caller.
 SUB=$(git rev-parse --show-prefix)
@@ -41,10 +49,66 @@ q() { printf '%q ' "$@"; }
 rssh "mkdir -p offload && { [ -d offload/shared.git ] || git init -q --bare offload/shared.git; }" ||
   { echo "offload.sh: $HOST unreachable" >&2; exit 255; }
 
+# Claim a slot: one ssh, kept open in the background for this script's lifetime, takes the first free
+# `flock -n offload/<slot>.lock` and then blocks on stdin, so the lock lives exactly as long as we do. Its stdin
+# is a pipe from a loop that ends when this script exits or its pid is gone (even after a SIGKILL): EOF -> lock released.
+# The same remote call sweeps extra slots (<name>@N) whose lock is free and older than TTL_DAYS.
+CLAIM=$(mktemp "${TMPDIR:-/tmp}/offload-claim.XXXXXX")
+# On exit: touch $CLAIM.done -> the stdin loop ends -> remote `cat` sees EOF -> lock released -> the holder ssh
+# exits; wait for that (5 s cap) so the slot is free by the time we return.
+cleanup() {
+  touch "$CLAIM.done"
+  if [ -n "${HOLD_PID:-}" ]; then
+    for _ in $(seq 50); do kill -0 "$HOLD_PID" 2>/dev/null || break; sleep 0.1; done
+    kill "$HOLD_PID" 2>/dev/null || true
+  fi
+  rm -f "$CLAIM" "$CLAIM.done"; return 0
+}
+trap cleanup EXIT
+CLAIM_SH='n=$1; slots=$2; ttl=$3; cd offload || exit 1
+for l in *@*.lock; do
+  [ -e "$l" ] || continue; s=${l%.lock}
+  [ -n "$(find "$l" -mtime +"$ttl" 2>/dev/null)" ] || continue
+  exec 8>>"$l"; flock -n 8 || { exec 8>&-; continue; }
+  git -C shared.git worktree remove -f "../$s" 2>/dev/null; rm -rf "$s" "$s.pid"
+  git -C shared.git update-ref -d "refs/offload/$s" 2>/dev/null; rm -f "$l"; exec 8>&-
+done
+git -C shared.git worktree prune 2>/dev/null
+i=1; while [ "$i" -le "$slots" ]; do
+  s=$n; [ "$i" -gt 1 ] && s="$n@$i"
+  exec 9>>"$s.lock"
+  if flock -n 9; then touch "$s.lock"; echo "$s"; exec cat >/dev/null; fi
+  exec 9>&-; i=$((i + 1))
+done
+echo "NONE"'
+me=$$
+rssh "bash -c $(q "$CLAIM_SH") _ $(q "$BASE_NAME" "$SLOTS" "$TTL_DAYS")" \
+  < <(while kill -0 "$me" 2>/dev/null && [ ! -e "$CLAIM.done" ]; do sleep 0.2; done) > "$CLAIM" 2>/dev/null & HOLD_PID=$!
+NAME=
+for _ in $(seq 150); do
+  NAME=$(head -n1 "$CLAIM" 2>/dev/null || true)
+  [ -n "$NAME" ] && break
+  kill -0 "$HOLD_PID" 2>/dev/null || { NAME=$(head -n1 "$CLAIM" 2>/dev/null || true); break; }
+  sleep 0.1
+done
+case "$NAME" in
+  "") echo "offload.sh: could not claim a slot on $HOST (no answer from flock in 15s)" >&2; exit 97 ;;
+  NONE) echo "offload.sh: all $SLOTS slots of $BASE_NAME on $HOST are busy (OFFLOAD_SLOTS raises the cap)" >&2; exit 97 ;;
+esac
+RDIR="offload/$NAME"   # relative to the remote $HOME
+
 REFS=("$SHA:refs/offload/$NAME")
 git -C "$TOPLEVEL" rev-parse -q --verify "$BASE_REF" >/dev/null && REFS+=("+$BASE_REF:$BASE_REF")
-GIT_SSH_COMMAND="ssh $(q "${CM[@]}")" git -C "$TOPLEVEL" push -q -f "$HOST:offload/shared.git" "${REFS[@]}" ||
-  { echo "offload.sh: git push to $HOST failed" >&2; exit 97; }
+# The base ref is shared by every worktree's push, so two pushes at once can still race on ITS lock; that race is
+# transient (both write the same value), so retry.
+pushed=false
+for try in 1 2 3 4 5; do
+  if GIT_SSH_COMMAND="ssh $(q "${CM[@]}")" git -C "$TOPLEVEL" push -q -f "$HOST:offload/shared.git" "${REFS[@]}"; then
+    pushed=true; break
+  fi
+  sleep "$try"
+done
+$pushed || { echo "offload.sh: git push to $HOST failed (5 tries)" >&2; exit 97; }
 
 # Remote tree := pushed HEAD, minus stale untracked files (git clean keeps ignored ones, i.e. its caches), minus
 # the files deleted in the local working tree; then rsync every tracked + untracked-not-ignored local file.
