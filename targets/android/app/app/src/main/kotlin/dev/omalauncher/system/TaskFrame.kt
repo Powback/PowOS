@@ -24,7 +24,7 @@ import android.view.SurfaceControlViewHost
  * Shown since SystemUI does the same for its own caption (SurfaceFlinger, 2026-10-28: "Decor container of Task=N", an
  * SCVH under "Task=N"; the task layer crops to its bounds, so the bar sits inside them).
  *
- * Off unless `settings put global powos_bar_in_task 1` (step 6 makes it the default). While this bar is up its
+ * On by default (unset = on); `settings put global powos_bar_in_task 0` keeps the overlay bar. While this bar is up its
  * WindowFrame drops its overlay bar ([WindowFrame.taskBar]); with no leash yet or a failed attach the overlay bar
  * stays, so a window always has exactly one bar. Logcat PowosTaskFrame. Main thread.
  */
@@ -91,7 +91,7 @@ class TaskFrame private constructor(
         private val frames = HashMap<Int, TaskFrame>()
         private var listening = false
 
-        fun enabled(context: Context) = android.provider.Settings.Global.getInt(context.contentResolver, "powos_bar_in_task", 0) == 1
+        fun enabled(context: Context) = android.provider.Settings.Global.getInt(context.contentResolver, "powos_bar_in_task", 1) != 0
 
         /**
          * Task [id]'s in-task bar made, moved or dropped to match its surface ([TaskSurfaces]) and its frame

@@ -7,7 +7,7 @@
 #   2. SurfaceFlinger's layer tree: a layer of the PowOS app's uid DIRECTLY under Task=N (sibling of SystemUI's
 #      "Decor container of Task=N"), i.e. in the task's own layer, after the transition ended;
 #   3. a tap at the probe strip (inside the task's top 18 dp) reaches it: logcat "touch at".
-# Always restores: the flag back to 0, Calculator stopped, home, `cmd device_state state reset`.
+# Always restores: the flag back to its default (unset = on), Calculator stopped, home, `cmd device_state state reset`.
 # Exit: 0 all passed; 1 a step failed; 3 a real touch / screen not awake; 5 can't run.
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
 OUT=${1:-$HOME/.cache/powos-verify/barprobe-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
@@ -15,7 +15,7 @@ L=$HOME/.cache/powos-verify.lock
 PKG=${TEST_APP:-com.oneplus.calculator}
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
-restore() { sh_ 'settings put global powos_bar_in_task 0'; [ "${TOUCHED:-0}" = 1 ] || return 0; release_pkgs; sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"; echo "restored"; }
+restore() { sh_ 'settings delete global powos_bar_in_task'; [ "${TOUCHED:-0}" = 1 ] || return 0; release_pkgs; sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"; echo "restored"; }
 . "$here/window-lock.sh"
 window_lock bar-in-task-probe.sh 120
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
@@ -58,12 +58,19 @@ sleep 3; chk launch
 # 1. The bar: its window's height, its frost.
 D=$(sh_ "wm density" | grep -oE '[0-9]+' | tail -1); px() { echo $(( $1 * D / 160 )); }
 
-sh_ "settings put global powos_bar_in_task 1; logcat -c"
+sh_ "settings put global powos_bar_in_task 1"
 D=$(sh_ "wm density" | grep -oE '[0-9]+' | tail -1); px() { echo $(( $1 * D / 160 )); }
-read -r BL BT BR BB <<<"$(wframe 'PowOS window bar')"
-[ -n "${BB:-}" ] || fail "no title bar window"
-BID=$(sh_ "dumpsys window windows" | grep -m1 -oE "PowOS window bar [0-9]+" | grep -oE "[0-9]+$")
-[ -n "$BID" ] || fail "no task id from the bar's window title"
+# The in-task bar is the default (unset = on): no overlay bar window; the task id from TaskFrame's log, the drag
+# from the task's top (its in-task bar). With the overlay bar (an older APK): its window, as before.
+BID=$(sh_ "logcat -d -s PowosTaskFrame:I" | grep -m1 -oE "task [0-9]+: bar in its own layer" | grep -oE "[0-9]+")
+if [ -n "$BID" ]; then
+  read -r BL BT BR BB <<<"$(wframe "$PKG")"; BB=$((BT + $(px 18)))
+else
+  read -r BL BT BR BB <<<"$(wframe 'PowOS window bar')"
+  BID=$(sh_ "dumpsys window windows" | grep -m1 -oE "PowOS window bar [0-9]+" | grep -oE "[0-9]+$")
+fi
+[ -n "${BB:-}" ] || fail "no title bar (neither in-task nor overlay)"
+[ -n "$BID" ] || fail "no task id (TaskFrame's log or the bar's window title)"
 # 1. A slow bar drag: a TaskLeash session (the probe attaches when its leashes come).
 X=$(((BL + BR) / 2)); Y=$(((BT + BB) / 2))
 sh_ "input swipe $X $Y $((X + $(px 60))) $((Y + $(px 40))) 1500"; sleep 2.5; chk drag
