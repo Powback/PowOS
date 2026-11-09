@@ -2866,8 +2866,16 @@ async function glassTintToneCheck() {
   const fails = [];
   const root = document.documentElement;
   root.classList.add("glass-native");
-  await window.__gw.settled(() => document.querySelector(".page .home-tile > .tile") && document.querySelector(".home .launcher-frame"));
-  for (const [fill, tone] of [["#f4f4f4", "light"], ["#101418", "dark"]]) fails.push(...(await glassTintIn(fill, tone)));
+  // The drawer open: home mounts its launcher (and its frame) only on the first open (home.tsx HomeLauncher).
+  const S = await window.__gw.mod("./state.ts");
+  S.drawer.value = 1;
+  const ready = () => document.querySelector(".page .home-tile > .tile") && document.querySelector(".home.open .launcher-frame");
+  if (!(await window.__gw.settled(ready))) return [`never ready: ${document.querySelector(".page .home-tile > .tile") ? "" : "no widget face; "}${document.querySelector(".home.open .launcher-frame") ? "" : "the drawer didn't open"}`];
+  try {
+    for (const [fill, tone] of [["#f4f4f4", "light"], ["#101418", "dark"]]) fails.push(...(await glassTintIn(fill, tone)));
+  } finally {
+    S.drawer.value = 0;
+  }
   return [...new Set(fails)].slice(0, 8);
 }
 
@@ -2888,9 +2896,11 @@ async function glassTintIn(fill, tone) {
   const probe = document.createElement("i");
   probe.style.cssText = "position:absolute;width:1px;height:1px;background:var(--text-fill)";
   document.querySelector(".home .launcher-frame").append(probe);
-  const a = /rgba?\(([^)]*)\)/.exec(getComputedStyle(probe).backgroundColor)?.[1].split(",").map(Number)[3] ?? 1;
+  // A color-mix computes to "color(srgb r g b / a)", a plain colour to "rgba(r, g, b, a)"; no alpha given is opaque.
+  const bg = getComputedStyle(probe).backgroundColor;
+  const a = Number(/\/\s*([\d.]+)\s*\)$/.exec(bg)?.[1] ?? /^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)$/.exec(bg)?.[1] ?? 1);
   probe.remove();
-  if (!(a < 0.95)) fails.push(`${where}: the drawer's fill is opaque (alpha ${a})`);
+  if (!(a < 0.95)) fails.push(`${where}: the drawer's fill is opaque (${bg})`);
   return fails;
 }
 
@@ -13852,7 +13862,11 @@ try {
     runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeCheck))));
     runs.push(open(browser, `${ORIGIN}/index.html`, "resume-theme-heal", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(resumeThemeHealCheck))));
   if (process.env.SHELL_PAGES !== "0")
-    runs.push(open(browser, `${ORIGIN}/index.html`, "glass-tint-tone", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(glassTintToneCheck))));
+    runs.push(open(browser, `${ORIGIN}/index.html`, "glass-tint-tone", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
+      // Its helper as the page's global (an evaluated function carries no closure).
+      await r.page.evaluate(String(glassTintIn));
+      return r.page.evaluate(glassTintToneCheck);
+    })));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "page-swipe-no-haptic", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(pageSwipeNoHapticCheck))));
   if (process.env.SHELL_PAGES !== "0")
