@@ -105,7 +105,10 @@ for t in "${TESTS[@]}"; do
         printf '  %s✗%s %-34s %s\n' "$RED" "$NC" "$b" "$RED$summary$NC"
         FAILED+=("$b")
         # Show what actually failed — a red line with no detail is useless in CI.
-        grep -iE '^\s*(FAIL|✗)' <<< "$out" | head -12 | sed 's/^/      /'
+        detail="$(grep -iE '^\s*(FAIL|✗)' <<< "$out" | head -12)"
+        # No FAIL line (a crash, a traceback, a timeout): its last lines instead.
+        [[ -n "$detail" ]] || detail="$(tail -n 12 <<< "$out")"
+        sed 's/^/      /' <<< "$detail"
     fi
 done
 

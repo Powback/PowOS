@@ -84,3 +84,40 @@ html.term-focus :is(.bar, .dock, .launcher, .launcher-frame) { visibility: hidde
 .term-key.sticky.on { color: var(--accent-text); }
 .term-key.sticky.locked { background: var(--color-accent); color: var(--color-background); }
 .term-arrow { display: inline-block; font-size: 16px; line-height: 1; }
+
+/* The paste picker (terminal.tsx ClipPicker): the clipboard's recent copies as cards, where the keyboard was. */
+.term-clips {
+  margin: 0 6px 6px;
+  padding: 6px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: max-content;
+  gap: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+.term-clip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  min-height: 64px;
+  padding: 8px 10px;
+  text-align: left;
+  color: var(--color-foreground);
+  touch-action: pan-y;
+}
+.term-clip:active { background: var(--color-border); }
+.term-clip-text {
+  font: var(--text-small) var(--font);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+.term-clip-at { font: var(--text-small) var(--font-body); }
+.term-clip.pending { grid-column: 1 / -1; opacity: 0.5; }
+.term-clips-empty { grid-column: 1 / -1; align-self: center; text-align: center; padding: 24px 0; font: var(--text-small) var(--font-body); }

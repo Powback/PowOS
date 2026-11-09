@@ -14,7 +14,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$here/../.." && pwd)
 jar=$REPO/targets/android/app/owl/build/cli/owl.jar
-[ -f "$jar" ] || { echo "sample-trees: no owl.jar - run shell/dev/preview.sh once (it builds it)" >&2; exit 1; }
+"$REPO/shell/dev/owl-jar.sh" "$REPO" >/dev/null || [ -f "$jar" ] || { echo "sample-trees: no owl.jar - run shell/dev/preview.sh once (it builds it)" >&2; exit 1; }
 A=$REPO/targets/android/app/app/src/main/assets/widgets
 TH=$REPO/targets/android/app/app/src/main/assets/themes
 D=$here/preview/data

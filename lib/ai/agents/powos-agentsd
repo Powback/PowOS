@@ -47,6 +47,10 @@ TASKS_PER_AGENT = 50
 MESSAGES = 200
 COALESCE_MS = 10_000
 SWEEP_S = 60
+# The board's janitor (powos-agents-cli janitor_decide: expired claims back to queued, done-by-the-facts closed): run
+# this often, on the host whose powos-agents module is local (the phone) - POWOS_AGENTS_REMOTE=0, so the Mac's copy
+# never takes the dev channel for it. POWOS_JANITOR_S overrides (0: off).
+JANITOR_S = float(os.environ.get("POWOS_JANITOR_S", "600"))
 IDLE_EXIT_S = 600
 # A working agent that went quiet: a long tool call says nothing until it ends, so this is generous.
 STALE_WORKING_MS = 30 * 60_000
@@ -368,6 +372,45 @@ def safe_file(agent_id):
     return re.sub(r"[^A-Za-z0-9._-]", "_", agent_id)[:150]
 
 
+def _refusal_hint(tool, inp):
+    """For permission refusals: the actual command/file (not description). For Bash, first ~160 chars of the
+    command with secrets redacted + cwd. For file tools, the file path. Otherwise tool name."""
+    inp = inp if isinstance(inp, dict) else {}
+    if tool == "Bash":
+        cmd = str(inp.get("command") or "")
+        # Redact secrets like retro.py does
+        cmd = _SECRET.sub("…", cmd)
+        cwd = str(inp.get("cwd") or "").rstrip("/")
+        # Extract just the root part of cwd (after ~/pw/)
+        if cwd.startswith(os.path.expanduser("~/pw/")):
+            cwd_short = "~/" + cwd[len(os.path.expanduser("~/pw/")): ].split("/")[0]
+        elif cwd.startswith("/var/tmp"):
+            cwd_short = "/var/tmp"
+        else:
+            cwd_short = cwd.split("/")[-1] if cwd else ""
+        result = clean(cmd, 160)
+        if cwd_short:
+            result = f"{result} @ {cwd_short}"
+        return result or tool
+    if tool in FILE_TOOLS:
+        return clean(str(inp.get("file_path") or inp.get("notebook_path") or ""), 80) or tool
+    return tool
+
+
+def _cmd_shape(refusal_hint):
+    """Group similar refusal_hints by shape (first two words + cwd root), normalize for comparison."""
+    # Extract first two words and cwd (look for " @ " separator)
+    if " @ " in refusal_hint:
+        cmd_part, cwd_part = refusal_hint.split(" @ ", 1)
+        words = cmd_part.split()[:2]
+        shape = " ".join(words) + " @ " + cwd_part.split()[0]
+    else:
+        words = refusal_hint.split()[:2]
+        shape = " ".join(words) if words else refusal_hint
+    # Normalize: numbers become #
+    return re.sub(r'[0-9a-f]{6,}|\d+', '#', shape)
+
+
 # ---- the fold ----------------------------------------------------------------------------------------------------
 
 
@@ -504,21 +547,26 @@ class Spool:
 
     def refusal(self, me, tool, rec, ts):
         """A tool call the permission system refused is friction (`powos friction add --kind refused`): logged once an
-        hour per (role, tool, hint) through the agents CLI, in the background. Only the whitelisted hint and the
-        refusal's own words (secrets cut) leave - never the tool's input or output."""
+        hour per (role, tool, command_shape) through the agents CLI, in the background. Records the actual command
+        (first ~160 chars with secrets redacted + cwd) for Bash; file path for file tools. Groups repeats by command
+        shape (first two words + cwd root) instead of description."""
         err = str(rec.get("error") or "")
         if rec.get("is_interrupt") or not REFUSAL.search(err):
             return
-        hint = hint_of(tool, rec.get("tool_input"))
+        hint = _refusal_hint(tool, rec.get("tool_input"))
         role = me.get("role") or "agent"
-        key = (role, tool, hint)
+        shape = _cmd_shape(hint)
+        key = (role, tool, shape)
         if key in self.refused and ts - self.refused[key] < 3600_000:
             return
         self.refused[key] = ts
-        word = (hint.split() or [tool])[0]
+        # Use the first word of the command as the label
+        label = (hint.split()[0] if hint else tool)[:40]
+        friction_title = f"{tool} refused by the permission system: {label}"
+        friction_repro = f"{role} ran {tool}: {hint}"
         cmd = friction_cmd() + ["--area", "permissions", "--kind", "refused",
-                                f"{tool} refused by the permission system: {word}",
-                                "--repro", f"{role} ran {tool}: {hint}", "--details", clean(scrub(err), 600), "--by", role]
+                                friction_title,
+                                "--repro", friction_repro, "--details", clean(scrub(err), 600), "--by", role]
         try:
             subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              start_new_session=True)
@@ -1148,6 +1196,28 @@ class Stdb:
                 self.warned = True
 
 
+def janitor_cmd():
+    """The CLI's `janitor` verb beside this file, local module only; None when there is no CLI."""
+    cli = os.path.join(os.path.dirname(os.path.abspath(__file__)), "powos-agents-cli")
+    return [sys.executable, cli, "janitor"] if os.path.exists(cli) else None
+
+
+def run_janitor(cmd=None, timeout=60):
+    """One janitor pass, detached from the fold loop's fate: an error or a module that isn't here is only logged."""
+    cmd = cmd or janitor_cmd()
+    if not cmd:
+        return None
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                           env=dict(os.environ, POWOS_AGENTS_REMOTE="0"))
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"powos-agentsd: janitor: {e!r}", file=sys.stderr)
+        return None
+    if r.returncode == 0 and "0 row(s)" not in r.stdout:
+        print(f"powos-agentsd: {r.stdout.strip()}", file=sys.stderr)
+    return r.returncode
+
+
 def main():
     import argparse
 
@@ -1181,6 +1251,7 @@ def main():
     watch = None if args.once else Watch(q)
     last_event = time.monotonic()
     next_sweep = time.monotonic()
+    next_janitor = time.monotonic() + 30   # after the first fold settles
     try:
         while True:
             got, waiting = read_queue(q, spool, now_ms())
@@ -1198,6 +1269,9 @@ def main():
             if time.monotonic() >= next_sweep:
                 s.sweep(now_ms())
                 next_sweep = time.monotonic() + SWEEP_S
+            if JANITOR_S > 0 and not args.once and stdb is not None and time.monotonic() >= next_janitor:
+                run_janitor()
+                next_janitor = time.monotonic() + JANITOR_S
             changed = s.flush(stdb)
             if mirror and changed:
                 mirror.wanted = True

@@ -231,6 +231,13 @@ widened first; out of scope here. `tools/emu/emu.sh` otherwise needed no change 
   --plan/--commit`; `--owner` claims nothing), `awaiting-check` (a phone check queued), `no-check` (nobody on it, no
   check queued, but a FAIL/INVALID/SKIP, an unclosed pass or a pushed fix), `stalled` (nothing: it needs an owner),
   `blocked` (blocked/waiting + the note as the reason), `done`. The status column is only what someone typed.
+- The status follows the truth (the user, 11-09: "the board becomes stale" - 51 rows working, 4 moved in 6 h): the
+  janitor (`powos agents janitor`, run by powos-agentsd every 10 min and by every `task list`) puts a `working` row
+  with no live claim and no heartbeat (task set / step / commit link) for POWOS_CLAIM_EXPIRE_H (default 4 h) back to
+  queued ("claim expired: <owner> silent since <t>"), and closes a row whose facts say done (a shipped PASS, its fix
+  landed, nothing open) with that evidence. A pushed fix with no check reads "needs a check" until one is queued.
+  An owner role's idle agent holds a task only while its heartbeat is inside that window. Keep claims alive: `task
+  set <id> --step` at every step.
 - Claim by moving: the first thing a fresh agent does is `task set <id> --owner <expert> --step "<what now>"`. A
   subagent's role is "general-purpose", so the owner-role fallback rarely finds it - the --step claim is what counts.
 - Multi-item batches live on the board, not in the brief: put the full item list on the task with

@@ -497,3 +497,52 @@ then the same with `env:FEX_TSOENABLED=1` for the A/B. Compare per run `prof pla
 (main ms/frame = main% x 10 / fps), the `layers play:` game fps, and bf-checker 0 dashes. Pass: ms/frame at least
 10 % lower than the TSO-on run at the same prime clock, and no crash/hang (game exits only by the run's stop).
 If a Mono game misbehaves (crash, freeze, corrupt state), that game gets TSO back via its launch options and a row here.
+
+## FEX per-app config + Unity workers (2026-11-04, agent bf-fps-fex)
+
+User 11-04: "when it does launch it totally works but the fps is really low". Measured read-only at 17:10-17:13 while
+the user played (pid 32648, x86 Proton Experimental under Valve's FEX compat tool FEX-2607-76-g37265b1, steam -33).
+
+**Correction:** `Broforce_beta.exe` is **x86-64** (PE machine 0x8664, `steam_api64.dll`), Unity **2017.4.7f1** - not
+32-bit. So FEX runs it in its 64-bit guest mode; "32-bit Unity" defaults don't apply to it.
+
+| what | measured | reading |
+|---|---|---|
+| fps (KWin `window task 72 frames`, 36 x 5 s = 3 min of play) | **mean 30.8, p50 32.0, min 21.8, max 36.2** | the base line for every A/B below |
+| main thread `Broforce_beta.e` | ~100 % of one core (10 s) | still the wall |
+| `UnityGfxDeviceW` / `dxvk-cs` / `dxvk-submit` | 36 / 18 / 11 % | wait on main |
+| 7 x `Worker Thread` | **~5 % each** | not spinning any more (18 % each on 11-03): fewer workers would buy little |
+| main-thread placement + clock (game-boost on) | pinned to cpu7, **1.36 GHz of 3.19** (policy3 1.65 of 2.80) | game-boost's log: `thermal cap 1363200 of hw 3187200 by horaeCb - kept` - the vendor thermal controller sets the clock; that lever is the vendor-game hook (task game-boost-loses-to-a-vendor-cpu-cap), not FEX |
+| FEX per-thread stats (`/dev/shm/fex-<pid>-stats`, 10 s delta, main thread) | JIT+lookup 3.70 M ticks of the 19.2 MHz counter = **~1.9 %**; 0 new blocks compiled; **SIGBUS 0, SMC 0, signal time 0, float fallbacks 0**; 3.5 k L1/L2 block-cache misses/s | FEX's runtime overhead outside the generated code is ~2 %: no SMC invalidation storm, no split-lock SIGBUS slow path (telemetry: one 64-byte split lock, ever) |
+
+Where FEX's config comes from for a Steam game (checked on the phone): `FEX_APP_CONFIG_LOCATION` =
+`compatdata/<appid>/fex-emu/` - `Config.json` there is rewritten from the compat tool's ConfigTemplate at every launch
+(only `X87ReducedPrecision 1`, RootFS, thunk paths, `ProfileStats 1`); `FEX_APP_CONFIG=/tmp/fex-app-config-<pid>.json`
+is Steam's per-game FEX setting (empty `{"Config": {}}`); `AppConfig/` is empty and left alone. FEX names the game's
+app config **`Broforce_beta.exe`** (its telemetry file is `Telemetry/Broforce_beta.exe.telem`), so a per-game file
+goes to `compatdata/274190/fex-emu/AppConfig/Broforce_beta.exe.json`; environment `FEX_*` (steam-env,
+proton-settings.json) still wins over it.
+
+What each candidate can still buy, from the numbers above:
+
+- **Multiblock, SMCChecks=mtrack, X87ReducedPrecision, VectorTSO/MemcpySetTSO/ParanoidTSO off**: already the effective
+  values (FEX-2607 defaults + the compat tool's template). Nothing to set; SMC events are 0 anyway.
+- **Code cache** (`FEX_ENABLECODECACHINGWIP=1`): steady state compiles 0 blocks and spends ~2 % in JIT/lookup, so it can
+  only shorten the launch (task broforce-launch-time), not raise fps. No FEX code cache exists today
+  (`~/.cache/fex-emu/codemap` 7 KB from 10-23; FEX_PORTABLE=1 for games).
+- **TSOEnabled=0**: the one FEX lever left on the main thread's generated code (every guest load/store is LDAPR/STLR
+  for x86 memory order today). Unsafe in general for a multi-threaded engine (Unity render + job threads share memory
+  with main), so per-game only and only after 2 stable runs. A/B queued: `bf-pacing.sh env:FEX_TSOENABLED=0` x2
+  (jobs 20261104-170903-22566, -170911-23319) vs `bf-pacing.sh base` (-170901-22327).
+- **Unity job workers**: Unity 2017.4 has no `-job-worker-count` (not in UnityPlayer.dll's strings; only
+  `-force-gfx-*`). Wine's `WINE_CPU_TOPOLOGY=4:0,1,2,7` caps what the game sees to 4 CPUs (3 workers on the little
+  cluster, main free for the prime) - A/B queued (job 20261104-171031-28324). Workers are ~5 % each now, so expect ~0.
+
+Status 17:15: the queue had not run (the user was playing: "no window / touched"); results go into the table below when
+the jobs land. Keep a setting only with >= +5 % mean fps over 2 runs and no crash / visual break.
+
+| mode (bf-pacing.sh) | fps (KWin commits/5 s) | main thread | stable |
+|---|---|---|---|
+| base (user's own play, read-only) | 30.8 mean / 32.0 p50 | ~100 % on cpu7 @ 1.36 GHz | yes |
+| env:FEX_TSOENABLED=0 run 1 / run 2 | queued | | |
+| env:WINE_CPU_TOPOLOGY=4:0,1,2,7 | queued | | |

@@ -111,6 +111,10 @@
 #               game gets the focus back when it closes; a game restored after its own minimize that has the focus and
 #               draws nothing for 3 s is minimized + restored again (HACK, twice at most; anland_task_policy.h,
 #               test/task-policy-test.cpp).
+#   0067        ours (3.75): the desktop's sound goes out on the desktop consumer's audio socket while it is live, else
+#               on a live window task's (the full-screen one first): a game full screen in its own task runs with no
+#               desktop consumer, and its sound reached anland-speaker but never Android (11-08 game-audio-flow D).
+#               The app listens on every connection's socket (native_audio.c audio_attach).
 #
 # HACK: same pkgname as Arch's kwin with pkgrel 3.1 (makepkg allows only integer[.integer]; ".1" = ours), so every Plasma package's
 # "depends=(kwin)" is satisfied by ours and pacman sees it as newer than 6.7.5-3. The real fix is
@@ -120,7 +124,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.74
+pkgrel=3.75
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -201,11 +205,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0063-backends-anland-a-web-window-s-popups-are-exported-as-surfaces-of-their-own.patch
           0064-backends-anland-a-web-window-s-popups-shown-by-the-app-placed-in-its-screen-area-and-dismissed-from-home.patch
           0065-X11-a-window-within-one-device-pixel-of-its-output-is-the-output-s-size.patch
-          0066-backends-anland-a-window-taking-a-full-screen-game-s-focus-opens-in-front-of-it.patch)
+          0066-backends-anland-a-window-taking-a-full-screen-game-s-focus-opens-in-front-of-it.patch
+          0067-backends-anland-the-sound-goes-out-on-a-live-window-task-s-socket-when-there-is-no-desktop.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver

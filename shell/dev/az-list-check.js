@@ -111,6 +111,8 @@ export async function azListScene() {
   Element.prototype.setPointerCapture = () => {};
   const launched = [], fails = [], notes = [];
   const was = powos.apps.launch;
+  // The user's own choice put back after (on the phone, tools/phone/verify/shell-check.sh: the toggle may be on).
+  const listWas = D.azList.value;
   powos.apps.launch = async (k) => void launched.push(k);
   try {
     S.drawer.value = 1;
@@ -125,7 +127,8 @@ export async function azListScene() {
     await liftScene(t);
   } finally {
     powos.apps.launch = was;
-    D.azList.value = "";
+    D.azList.value = listWas;
+    S.drawer.value = 0;
   }
   window.__azList = notes.join("; ");
   return fails;

@@ -24,6 +24,16 @@ class ClaudeSignInTest {
     }
 
     @Test
+    fun aLoginThatEndsSaysWhyFromItsStderr() {
+        // The non-root razr's old image (11-09): `powos manager` had no --fleet-login and ended with this on stderr.
+        assertEquals(
+            "the sign-in stopped: not signed in to Claude (powos manager --signin)",
+            ClaudeSignIn.stoppedMessage("manager: not signed in to Claude (powos manager --signin)"),
+        )
+        assertEquals("the sign-in stopped - try again", ClaudeSignIn.stoppedMessage("  "))
+    }
+
+    @Test
     fun anythingElseIsIgnored() {
         assertNull(ClaudeSignIn.event(""))
         assertNull(ClaudeSignIn.event("manager: installing Claude Code (first use)"))

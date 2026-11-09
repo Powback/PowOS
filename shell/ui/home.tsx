@@ -33,6 +33,7 @@ import { Drawer } from "./drawer.tsx";
 import { Pet } from "./pet.tsx";
 import { markClass, pageFocus } from "./pagemarks.ts";
 import { DockGroupCell, groupedKeys, unpinnedGroups } from "./dockgroups.tsx";
+import { entryKey, PairCell, recentEntries } from "./pairs.tsx";
 import { Recents } from "./recents.tsx";
 import { appOf, dockTap } from "./desktops.ts";
 import { overWindows } from "./panellift.ts";
@@ -429,16 +430,18 @@ function DockRecents({ count }: { count: number }) {
   // An app with a floating window is in the pinned dock already (DockWindows): never twice in the dock.
   // DG1: nor an app of a window group (its group's cell is the dock's, DockWindows).
   const pinned = new Set([...dock.value, ...windowed.value.keys(), ...groupedKeys.value]);
-  const shown = recent.value
-    .filter((k) => !pinned.has(k))
-    .map((k) => byKey.value.get(k))
-    .filter((a) => a != null)
-    .slice(0, count);
+  // A recent pair (ui/pairs.tsx) is one entry; not while it's a dock group (live: its group cell is the dock's).
+  const grouped = groupedKeys.value;
+  const shown = recentEntries(recent.value, pinned, (p) => p.keys.every((k) => grouped.has(k))).slice(0, count);
   return (
     <>
-      {shown.map((app) => (
-        <AppCell key={app.key} app={app} labels={false} class={markClass(app.key)} draggable onTap={tapDock} />
-      ))}
+      {shown.map((e) =>
+        e.pair ? (
+          <PairCell key={entryKey(e)} pair={e.pair} />
+        ) : (
+          <AppCell key={e.app.key} app={e.app} labels={false} class={markClass(e.app.key)} draggable onTap={tapDock} />
+        ),
+      )}
     </>
   );
 }
@@ -485,7 +488,7 @@ function DockWindows({ pinned }: { pinned: string[] }) {
   return (
     <>
       {unpinnedGroups(pinned).map((g) => (
-        <DockGroupCell key={`g ${g.ids.join()}`} group={g} />
+        <DockGroupCell key={`g ${g.native ? `split ${g.native.join()}` : g.ids.join()}`} group={g} />
       ))}
       {shown.map(([k, state]) => {
         const app = byKey.value.get(k);

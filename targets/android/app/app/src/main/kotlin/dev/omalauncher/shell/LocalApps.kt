@@ -24,6 +24,11 @@ object LocalApps {
 
     private fun installed(ctx: Context): List<String> = File(ctx.filesDir, "apps").list()?.filter { File(ctx.filesDir, "apps/$it/current/powos-app.json").isFile }.orEmpty()
 
+    private fun hasUi(
+        ctx: Context,
+        id: String,
+    ): Boolean = File(ctx.filesDir, "apps/$id/current/ui").isDirectory || runCatching { ctx.assets.list("$ASSETS/$id/ui") }.getOrNull().orEmpty().isNotEmpty()
+
     /** File [name] of app [id]'s UI: the installed one, else the APK's; null when neither has it. */
     fun open(
         ctx: Context,
@@ -61,14 +66,19 @@ object LocalApps {
         val o = JSONObject().put("rooted", rooted).put("stdb", if (rooted) "up" else EngineServices.state(ctx)).put("mb", JSONObject.NULL)
         // No root: SpacetimeDB for the page only through the token gate (the TCP port 3410 isn't there).
         if (!rooted) dev.omalauncher.linux.LoopbackGate.url(3410)?.let { o.put("stdbUrl", "ws" + it.removePrefix("http")) }
+        return o.put("apps", if (rooted) JSONArray() else rows(ctx))
+    }
+
+    /** The launcher's own apps as registry rows: the installed ones and the APK's, each once. */
+    private fun rows(ctx: Context): JSONArray {
         val apps = JSONArray()
-        if (!rooted) {
-            for (id in (installed(ctx) + bundled(ctx)).distinct()) {
-                val (text, suffix) = manifest(ctx, id) ?: continue
-                apps.put(row(id, text, suffix) ?: continue)
-            }
+        for (id in (installed(ctx) + bundled(ctx)).distinct()) {
+            // A module-only app (the registry, bundled for its database alone): nothing of it to show.
+            if (!hasUi(ctx, id)) continue
+            val (text, suffix) = manifest(ctx, id) ?: continue
+            apps.put(row(id, text, suffix) ?: continue)
         }
-        return o.put("apps", apps)
+        return apps
     }
 
     /** An app's registry row (shell/apps/registry.ts RegistryApp) from its manifest; null for a broken one. */

@@ -99,17 +99,29 @@ PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh
 grep -q "^ResolutionScale=SCALE_125" "$INI" && ok "100: a value we never wrote (in-game choice) stays" || bad "abzu user value" "$(cat "$INI")"
 st '{"apps": {"384190": {"fps": [{"fps": 19.6, "scale": 100}, {"fps": 27.3, "scale": 50}, {"fps": 40, "scale": 70}]}}}'
 PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh "$US" "$T/ue/AbzuGame.exe" > /dev/null 2> "$T/err"
-grep -q "render scale 50 auto: 27 fps at 50%, the lowest step\|render scale 50 auto" "$T/err" && grep -q "^ResolutionScale=SCALE_50" "$INI" \
-  && ok "auto, none held 55: the lowest step tried (50)" || bad "auto lowest" "$(cat "$T/err")"
+grep -q "render scale 35 auto: 27 fps at 50%, under 120" "$T/err" && grep -q "^ResolutionScale=SCALE_25" "$INI" \
+  && ok "auto, none held 120: one step under 50 (35 -> ABZU's SCALE_25)" || bad "auto under 50" "$(cat "$T/err")"
+st '{"apps": {"384190": {"fps": [{"fps": 19.6, "scale": 100}, {"fps": 27.3, "scale": 50}, {"fps": 36, "scale": 35}]}}}'
+PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh "$US" "$T/ue/AbzuGame.exe" > /dev/null 2> "$T/err"
+grep -q "render scale 35 auto: 36 fps at 35%, the lowest step" "$T/err" && ok "auto, none held 120: the lowest step (35)" || bad "auto lowest" "$(cat "$T/err")"
 st '{"apps": {"384190": {"fps": [{"fps": 30, "scale": 100}, {"fps": 31, "scale": 70}]}}}'
 PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh "$US" "$T/ue/AbzuGame.exe" > /dev/null 2> "$T/err"
 grep -q "render scale 100 auto: .*not GPU-bound" "$T/err" && ok "auto: lowering bought < 10 % -> back to 100 (CPU-bound)" || bad "auto cpu-bound" "$(cat "$T/err")"
-st '{"apps": {"384190": {"fps": [{"fps": 62, "scale": 70}]}}}'
+st '{"apps": {"384190": {"fps": [{"fps": 121, "scale": 70}]}}}'
 PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh "$US" "$T/ue/AbzuGame.exe" > /dev/null 2> "$T/err"
-grep -q "render scale 70 auto: 62 fps at 70%" "$T/err" && ok "auto: 70 held 55 -> stays 70" || bad "auto held" "$(cat "$T/err")"
+grep -q "render scale 70 auto: 121 fps at 70%" "$T/err" && ok "auto: 70 held 120 -> stays 70" || bad "auto held" "$(cat "$T/err")"
+st '{"apps": {"384190": {"target": 55, "fps": [{"fps": 62, "scale": 70}]}}}'
+PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh "$US" "$T/ue/AbzuGame.exe" > /dev/null 2> "$T/err"
+grep -q "render scale 70 auto: 62 fps at 70%" "$T/err" && ok "auto: a per-game target (55) held -> stays 70" || bad "auto target" "$(cat "$T/err")"
 st '{"apps": {"384190": {"fps": [{"fps": 30, "scale": 100}]}}}'
 PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh "$US" "$T/ue/AbzuGame.exe" > /dev/null 2> "$T/err"
-grep -q "render scale 85 auto: 30 fps at 100%, under 55" "$T/err" && ok "auto: 100 under 55 -> one step down (85)" || bad "auto step" "$(cat "$T/err")"
+grep -q "render scale 85 auto: 30 fps at 100%, under 120" "$T/err" && ok "auto: 100 under 120 -> one step down (85)" || bad "auto step" "$(cat "$T/err")"
+# A check holding the game's settings (bf-lib gus_set's .powos-gus-bak): unity-screen writes nothing, marks it held.
+st '{"apps": {"384190": {"scale": 50}}}'; sed -i.b 's/^ResolutionScale=.*/ResolutionScale=SCALE_75/' "$INI"; : > "$INI.powos-gus-bak"
+PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh "$US" "$T/ue/AbzuGame.exe" > /dev/null 2> "$T/err"
+grep -q "^ResolutionScale=SCALE_75" "$INI" && grep -q "a check holds" "$T/err" && [ "$(rec 384190 held)" = True ] \
+  && ok "a check's .powos-gus-bak: its ResolutionScale left as the check set it, record held" || bad "gus hold" "$(cat "$INI") / $(cat "$T/err")"
+rm -f "$INI.powos-gus-bak"
 CD2="$T/compat/9"; INI2="$CD2/pfx/drive_c/users/steamuser/AppData/Local/Proj/Saved/Config/WindowsNoEditor/GameUserSettings.ini"
 mkdir -p "$(dirname "$INI2")"; printf '[ScalabilityGroups]\nsg.ShadowQuality=3\n' > "$INI2"
 st '{"apps": {"9": {"scale": 70}}}'

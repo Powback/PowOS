@@ -241,7 +241,9 @@ install -m 755 $T/comms-mcp.py $R/usr/lib/powos/ai/comms/comms-mcp.py
 # The manager (unit ai-manager): PowOS AI's chat starts a turn of it per message.
 if [ -d $T/powos-manager ]; then
   mkdir -p $R/usr/lib/powos/ai/manager
-  install -m 644 $T/powos-manager/manager.py $T/powos-manager/manager.sh $R/usr/lib/powos/ai/manager/
+  # Every file of it: fleet_login.py (the native Claude sign-in, `powos manager --fleet-login`) was left out when only
+  # manager.py + manager.sh were named, so the sign-in's Login stopped at once ("the sign-in stopped - try again").
+  install -m 644 $T/powos-manager/*.py $T/powos-manager/*.sh $R/usr/lib/powos/ai/manager/
 fi
 rm -rf $T/powos-agents $T/comms-mcp.py $T/powos-manager
 # The manager's TypeScript sandbox (unit ai-sandbox): its sources plus its deps from its lock, which rooted.sh built
@@ -349,7 +351,7 @@ if [ -d $A ]; then
   # `powos terms` (the AI page's terminals: every linked host's tmux sessions, view-first) and `powos transcribe` (speech
   # to text on stt.pow). bin/powos runs both from here; test-powos-dispatch.py fails on a subcommand whose file no
   # deploy installs (2026-11-01: `powos terms list` failed on the phone, so the page showed only its own tmux).
-  for f in powos-terms powos-transcribe; do install -m 755 $A/$f $L/$f; done
+  for f in powos-terms powos-transcribe powos-progress-cli; do install -m 755 $A/$f $L/$f; done
   # `powos compose` (docs/COMPOSER.md): widgets made from building blocks, and the one module every composition runs
   # (apps/composed: its source, and its build when rooted.sh had one - then nothing builds per composition).
   install -m 755 $A/powos-compose $L/powos-compose
