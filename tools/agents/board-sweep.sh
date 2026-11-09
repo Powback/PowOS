@@ -8,6 +8,7 @@
 #   2. `powos agents sweep` on the phone: each task's true state from those facts and the live agents; the orphans
 #      (stalled, no-check: FAILs nobody picked up), the user's asks with no task and new/recurring friction - and ONE
 #      mail to the coordinator ("coder") with only what is new or changed since the last pass.
+#   3. GitHub issues <-> board: tools/agents/gh-issues-sync.py (imports new issues, closes ones whose task is done).
 # One adb call (tools/phone/user.sh: as the session user). The scan runs origin's current CLI (fetched, not a
 # checkout that may lag). Usage: board-sweep.sh [--dry-run] (no mail; the digest printed). Log: <dir>/sweep.log.
 set -uo pipefail
@@ -51,4 +52,8 @@ out=$(perl -e 'alarm 180; exec @ARGV' "$R/tools/phone/user.sh" "$S/run.sh" 2>&1)
 { echo "== $(date '+%F %T') rc=$rc$([ -n "$dry" ] && echo ' (dry run)')"; printf '%s\n' "$out" | grep -v 'file pushed'; } >> "$S/sweep.log"
 tail -c 2000000 "$S/sweep.log" > "$S/sweep.log.tmp" && mv "$S/sweep.log.tmp" "$S/sweep.log"
 printf '%s\n' "$out" | grep -v 'file pushed'
+# 3. GitHub issues <-> board (gh-issues-sync.py: new issues become tasks, a task done with evidence closes its issue).
+# Never fatal for the sweep; its own log.
+{ echo "== $(date '+%F %T')"; POWOS_AGENTS_CLI=$cli perl -e 'alarm 240; exec @ARGV' python3 "$here/gh-issues-sync.py" $dry; } \
+  >> "$S/gh-issues.log" 2>&1 || echo "$(date '+%F %T') gh-issues-sync failed (see $S/gh-issues.log)" >> "$S/sweep.log"
 exit $rc
