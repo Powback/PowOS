@@ -78,7 +78,7 @@ class Perf(
     /** The online cores, from /sys/devices/system/cpu/online ("0-7" or "0-3,6"). */
     private fun online(): List<Int> =
         read(File(sys, "devices/system/cpu/online"))?.trim()?.split(',')?.flatMap { r ->
-            val (a, b) = r.split('-').let { it[0] to it.getOrElse(1) { it[0] } }
+            val (a, b) = r.split('-').let { p -> p[0] to p.getOrElse(1) { p[0] } }
             val lo = a.toIntOrNull() ?: return@flatMap emptyList()
             (lo..(b.toIntOrNull() ?: lo)).toList()
         } ?: emptyList()
