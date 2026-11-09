@@ -86,7 +86,18 @@ class PowosUpdatesTest {
         assertNull(UpdatePlan.packages(0))
         assertNull(UpdatePlan.error(reached = true, linuxFailed = false))
         assertTrue(UpdatePlan.error(reached = false, linuxFailed = false)!!.contains("store"))
+        // Off the LAN with no VPN: the way to update is the PowOS VPN (issue #2); with one up, the VPN is the suspect.
+        assertTrue(UpdatePlan.error(reached = false, linuxFailed = false, vpn = false)!!.contains("connect the PowOS VPN"))
+        assertTrue(UpdatePlan.error(reached = false, linuxFailed = false, vpn = true)!!.contains("over the VPN"))
+        assertEquals(UpdatePlan.unreachable(false).replaceFirstChar { it.uppercase() }, UpdatePlan.summary(false, emptyList(), force = true))
         assertEquals(50, UpdatePlan.percent(50, 100))
         assertNull(UpdatePlan.percent(50, -1))
+    }
+
+    @Test
+    fun storeUrlsFallBackToTheHubByAddress() {
+        assertEquals("http://192.168.50.100/apk/powos.ver", UpdatePlan.viaHub("${UpdatePlan.STORE}/powos.ver"))
+        assertEquals("http://192.168.50.100/apk/powos-shell/abc.zip", UpdatePlan.viaHub("${UpdatePlan.STORE}/powos-shell/abc.zip"))
+        assertNull(UpdatePlan.viaHub("http://example.com/apk/powos.ver"))
     }
 }

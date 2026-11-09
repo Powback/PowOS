@@ -67,6 +67,20 @@ out=$(ARGS=--check run HAVE=1-1 REPO=2-1)
 ARGS=--system run HAVE=1-1 REPO=1-1 >/dev/null
 grep -q -- "--config $T/powos-full-pacman.conf -Syu" "$T/log" && ok "--system: the full config" || bad "--system: $(cat "$T/log")"
 
+# Off the LAN on the VPN (issue #2): android.pow doesn't resolve -> pacman downloads with the name pinned to the hub.
+cat > "$T/bin/getent" <<'S'
+#!/bin/sh
+[ -n "${RESOLVES:-}" ]
+S
+printf '#!/bin/sh\nexit 0\n' > "$T/bin/curl"; chmod +x "$T/bin/getent" "$T/bin/curl"
+printf '[options]\n\n[powos]\nServer = http://android.pow/apk/repo\n' > "$T/conf"
+out=$(run REPO=1-1 HAVE=1-1)
+{ grep -q -- "--config $T/powos-pinned-pacman.conf -Syu" "$T/log" && grep -q '^XferCommand = .*--resolve android.pow:80:192.168.50.100 ' "$T/powos-pinned-pacman.conf"; } &&
+  ok "unresolvable store: pacman via the hub's address" || bad "no hub fallback: $out / $(cat "$T/log")"
+rm -f "$T/powos-pinned-pacman.conf"; run RESOLVES=1 REPO=1-1 HAVE=1-1 >/dev/null
+grep -q -- "--config $T/conf -Syu" "$T/log" && ok "a resolving store: the plain config" || bad "pinned while it resolves: $(cat "$T/log")"
+printf '[options]\n\n[powos]\nServer = http://x\n' > "$T/conf"
+
 # 3. `powos update` on a phone goes to it.
 grep -q 'phone-update.sh" --check' "$ROOT/bin/powos" && ok "powos update check -> phone-update.sh" || bad "bin/powos doesn't route the phone"
 exit $fail

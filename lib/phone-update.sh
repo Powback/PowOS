@@ -59,6 +59,22 @@ if [ "$mode" = system ]; then
     /^\[/ && $0 != "[options]" && !done { printf "%s\n", r; done = 1 } { print }' /etc/pacman.conf > "$conf"
 fi
 
+# Away from home on the WireGuard VPN the store's name may not resolve (the non-root image's resolv.conf is a fixed
+# 8.8.8.8, Android's Private DNS, a tunnel without Pi-hole's DNS), while the hub itself answers: every peer routes
+# 192.168.50.0/24, and Traefik admits the VPN's addresses to .pow names. pacman then downloads through curl with the
+# name pinned to the hub's address (the Host header stays android.pow, which Traefik routes by). No public route (#2).
+# HACK: a fixed hub address (PowosUpdates.kt UpdatePlan.HUB, the same). Real fix: the host directory's hub row
+# (docs/REMOTE-POWOS.md §2) or the public release channel #2 plans for phones off the owner's VPN.
+HUB=${POWOS_UPDATE_HUB:-192.168.50.100}
+store_resolves() { getent hosts android.pow >/dev/null 2>&1; }
+if ! store_resolves && command -v curl >/dev/null 2>&1 && grep -q '^Server = http://android.pow/' "$conf"; then
+  echo "phone-update: android.pow doesn't resolve - the hub by address ($HUB)"
+  pinned=${TMPDIR:-/tmp}/powos-pinned-pacman.conf
+  awk -v x="XferCommand = /usr/bin/curl -fL -C - --connect-timeout 5 --retry 2 --resolve android.pow:80:$HUB -o %o %u" \
+    '{ print } /^\[options\]/ { print x }' "$conf" > "$pinned"
+  conf=$pinned
+fi
+
 if [ "$mode" = check ]; then
   t=$(mktemp -d "${TMPDIR:-/tmp}/powos-update-check.XXXXXX")
   ln -s /var/lib/pacman/local "$t/local"
@@ -68,7 +84,7 @@ if [ "$mode" = check ]; then
       sed -n 's/^Version *: */powos-core (not installed) -> /p' | head -1
     rm -rf "$t"; done_ ok
   fi
-  rm -rf "$t"; echo "phone-update: the repo isn't reachable (android.pow: LAN or VPN only)"; done_ fail
+  rm -rf "$t"; echo "phone-update: the repo isn't reachable (android.pow, or $HUB by address: home network or the PowOS VPN only)"; done_ fail
 fi
 
 echo "#step packages"

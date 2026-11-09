@@ -139,23 +139,7 @@ object PowosAiChat {
         authAsking = true
         authAgain = false
         Thread({
-            val word =
-                runCatching {
-                    val p = Guest.process("exec powos manager --auth", mergeErrors = false).start()
-                    p.outputStream.close()
-                    val out = StringBuilder()
-                    val reader = Thread({ runCatching { p.inputStream.bufferedReader().readText().let { synchronized(out) { out.append(it) } } } }, "powos-ai-auth-out")
-                    reader.start()
-                    if (!p.waitFor(AUTH_ASK_MS, TimeUnit.MILLISECONDS)) {
-                        p.destroyForcibly()
-                        Log.w(TAG, "auth check timed out after ${AUTH_ASK_MS} ms")
-                    }
-                    reader.join(1_000)
-                    authWord(synchronized(out) { out.toString() })
-                }.getOrElse {
-                    Log.w(TAG, "auth check failed", it)
-                    ""
-                }
+            val word = askAuth()
             post {
                 authAsking = false
                 if (word.isNotEmpty()) authIs(word)
@@ -163,6 +147,29 @@ object PowosAiChat {
             }
         }, "powos-ai-auth").start()
     }
+
+    /** `powos manager --auth`'s word ("" when it failed or hung past [AUTH_ASK_MS]); blocks, a background thread's. */
+    private fun askAuth(): String =
+        runCatching {
+            val p = Guest.process("exec powos manager --auth", mergeErrors = false).start()
+            p.outputStream.close()
+            val out = StringBuilder()
+            val reader =
+                Thread({
+                    val text = runCatching { p.inputStream.bufferedReader().readText() }.getOrDefault("")
+                    synchronized(out) { out.append(text) }
+                }, "powos-ai-auth-out")
+            reader.start()
+            if (!p.waitFor(AUTH_ASK_MS, TimeUnit.MILLISECONDS)) {
+                p.destroyForcibly()
+                Log.w(TAG, "auth check timed out after $AUTH_ASK_MS ms")
+            }
+            reader.join(1_000)
+            authWord(synchronized(out) { out.toString() })
+        }.getOrElse {
+            Log.w(TAG, "auth check failed", it)
+            ""
+        }
 
     /** A checkAuth that came while one ran: asked again once that one answers. */
     private var authAgain = false
