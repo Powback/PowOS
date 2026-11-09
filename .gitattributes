@@ -42,3 +42,4 @@ build_files/*   text eol=lf
 *.raw   binary
 *.img   binary
 *.qcow2 binary
+docs/REMOTE-POWOS.md merge=union   # HACK registry rows: two branches adding rows at the table top must both be kept

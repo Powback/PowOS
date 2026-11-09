@@ -120,6 +120,10 @@ new)
     "$bic" get steam-sysvipc-emu.tar.gz "$d/targets/android/pkgs/steam/sysvipc-emu.tar.gz" >/dev/null 2>&1 || true
     "$bic" get steam-proton-arm64-kernelbase.dll "$d/targets/android/pkgs/steam/proton-arm64-kernelbase.dll" >/dev/null 2>&1 || true
   fi
+  # The OWL CLI (targets/android/app/owl/build/cli/owl.jar, gitignored): the widget sweep (shell/dev/preview.sh)
+  # needs it and a fresh worktree's offline gradle can't build it (friction f402). owl-jar.sh puts in the one built
+  # from these exact sources - from the shared cache, or seeded from powos-multiplatform's when its sources match.
+  [ ! -x "$d/shell/dev/owl-jar.sh" ] || OWL_JAR_FROM=$PMP "$d/shell/dev/owl-jar.sh" "$d" >/dev/null 2>&1 || true
   echo "$d" ;;
 done)
   n=${2:?name}; d=$(find_wt "$n")
