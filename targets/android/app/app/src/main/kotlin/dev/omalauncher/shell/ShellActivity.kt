@@ -56,7 +56,7 @@ class ShellActivity : Activity() {
         Log.i(TAG, "home created: task $taskId, restored ${savedInstanceState != null}, intent ${intent.component?.shortClassName} ${intent.categories} ${intent.extras?.keySet()}, from ${referrer}")
         if (toHome()) return
         // A restored task's intent is the one it was made with, not a new ask (the stale-home check, [leaveStaleHome]).
-        arrived = if (savedInstanceState == null) intent else null
+        noteArrived(restored = savedInstanceState != null)
         dropOtherHomes()
         // The launcher's runtime (themes, widgets, the PowOS session); started once.
         runtime.start()
@@ -285,6 +285,10 @@ class ShellActivity : Activity() {
 
     /** The intent that brought this instance up since its last resume (null: none - raised with its task). */
     private var arrived: Intent? = null
+
+    private fun noteArrived(restored: Boolean) {
+        arrived = if (restored) null else intent
+    }
 
     /**
      * Home's task with PowOS no longer the default home ([staleHome]): the task goes, so the phone's own home and its
