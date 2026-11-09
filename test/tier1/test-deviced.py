@@ -226,7 +226,10 @@ class Realm(BaseHTTPRequestHandler):
                 return self.answer(400, {"error": "authorization_pending"})
             return self.answer(200, {"device": {**realm_log[0][1], "enrolled": 1794000000, "approved_by": "mats",
                                                 "holds": ["enroll:device-token", "claude-auth:default"]},
-                                     "device_token": "realm-tok", "endpoints": {"store": "http://android.pow"},
+                                     "device_token": "realm-tok",
+                                     "endpoints": {"store": "http://android.pow",
+                                                   "owner": {"POWOS_STT_URL": "http://stt.example", "bad key": "x",
+                                                             "POWOS_BOARD_REMOTE": "ssh hub '{cmd}'"}},
                                      "ai": {"base_url": "http://claude-auth.pow", "token": "powdev-secret", "tenant": "default"}})
         if self.path == "/v1/devices/self/unenroll":
             return self.answer(200 if self.headers.get("Authorization") == "Bearer realm-tok" else 401, {"revoked": True})
@@ -237,6 +240,10 @@ rs = _TS(("127.0.0.1", 0), Realm)
 threading.Thread(target=rs.serve_forever, daemon=True).start()
 realm = f"http://127.0.0.1:{rs.server_address[1]}"
 os.environ["POWOS_DEVICE_UNIT"] = os.path.join(work, "units.d", "powos-device.json")
+os.environ["POWOS_OWNER_CONF"] = os.path.join(work, "owner", "owner.conf")
+os.environ["POWOS_APP_RUN"] = os.path.join(work, "app-run")
+os.makedirs(os.environ["POWOS_APP_RUN"])
+check(not os.path.exists(os.environ["POWOS_OWNER_CONF"]), "standalone before enrolling: no owner config")
 rc = d.cli_enroll(["--realm", realm])
 check(rc == 0, f"enroll rc {rc}")
 sent = realm_log[0][1]
@@ -249,6 +256,13 @@ unit = open(os.environ["POWOS_DEVICE_UNIT"]).read()
 check("realm-tok" not in unit and "powdev-secret" not in unit and json.loads(unit)["device"]["approved_by"] == "mats",
       "the units.d record carries the device, never a token")
 check(json.loads(unit)["owner"] == "system:devices" and json.loads(unit)["kind"] == "system", "units.d record shape")
+# Issue #1: enrolling in the owner's realm is what makes it one of the owner's devices - its owner bundle lands in the
+# one owner config (and the launcher's copy), only POWOS_* keys; unenroll (below) makes it standalone again.
+oc = open(os.environ["POWOS_OWNER_CONF"]).read()
+check("POWOS_STT_URL=http://stt.example\n" in oc and "POWOS_BOARD_REMOTE=ssh hub '{cmd}'\n" in oc and "bad key" not in oc,
+      f"enroll writes the owner bundle as owner.conf: {oc!r}")
+check(open(os.path.join(os.environ["POWOS_APP_RUN"], "owner.conf")).read() == oc, "and the launcher's copy")
+check(os.environ["POWOS_OWNER_CONF"] in unit, "the units.d record lists the owner config")
 import io
 import contextlib
 out = io.StringIO()
@@ -261,6 +275,12 @@ with contextlib.redirect_stdout(io.StringIO()):
     d.main(["unenroll"])
 check(not os.path.exists(d.enrollment_path()) and not os.path.exists(os.environ["POWOS_DEVICE_UNIT"]),
       "unenroll drops the enrollment and its units.d record")
+check(not os.path.exists(os.environ["POWOS_OWNER_CONF"]) and
+      not os.path.exists(os.path.join(os.environ["POWOS_APP_RUN"], "owner.conf")), "unenroll removes the owner config")
+with contextlib.redirect_stdout(io.StringIO()):
+    open(os.path.join(work, "b.json"), "w").write('{"POWOS_TERMS_LINKS": "mac=me@hub"}')
+    d.main(["owner-apply", os.path.join(work, "b.json")])
+check(open(os.environ["POWOS_OWNER_CONF"]).read().endswith("POWOS_TERMS_LINKS=mac=me@hub\n"), "owner-apply FILE writes it")
 rs.shutdown()
 
 shutil.rmtree(work, ignore_errors=True)
