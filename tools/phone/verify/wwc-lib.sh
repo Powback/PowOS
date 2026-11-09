@@ -2,7 +2,8 @@
 # tools/phone/verify/wwc-lib.sh (sourced; set NAME first): the frame of the small web-window checks (switcher-launch,
 # ww-clamp, ww-close-min, ww-opens, ww-popup-x11, ww-stop) - ww-lib.sh's helpers plus what each would repeat: the free
 # window, the unfold, a verdict that is never a FAIL for a user's touch, and putting back ONLY what the check opened.
-#   wwc_start          idle 2+ min (idle.sh --wait), screen on; folded -> unfolded (cmd device_state, reset after)
+#   wwc_start          idle 2+ min (idle.sh --wait; the runner's window already is), screen on, home in front (its page
+#                      visible), folded -> unfolded (cmd device_state, reset after)
 #   wwc_pick a b ...   the first of those KDE apps the user isn't running (its process name), rc 1 when all run
 #   wwc_open <app>     opens org.kde.<app> through home's launch path (ww_open: live window), WID="w<id>"; closed after
 #   wwc_ses <cmd>      a command in the Plasma session's own environment (kwin-hung-client.sh's ses)
@@ -29,12 +30,26 @@ wwc_clean() { local w p
   [ "$UNFOLDED" = 1 ] && fold reset
   MINE_W="" MINE_P="" UNFOLDED=0; }
 trap wwc_clean EXIT
+# wwc_home: home's page in front and visible. Hidden (another activity in front - 11-09 21:52 a bare
+# PowosWindowActivity and PowTerm were) its page calls hang to cdp.sh's 120 s timeout and hcall makes each 4 times:
+# switcher-launch and ww-clamp spent their whole 300 s budget in ww_ready without a line of output. Short CDP
+# timeouts here, so a page that doesn't answer is a quick "not now", never the budget.
+wwc_vis() { CDP_TIMEOUT_S=15 ev "document.visibilityState"; }
+wwc_home() { local i
+  [ "$(wwc_vis)" = visible ] && return 0
+  say "home's page is $(wwc_vis | head -c 40) - bringing home to the front"
+  sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"
+  for i in 1 2 3; do sleep 1; [ "$(wwc_vis)" = visible ] && return 0; done; return 1; }
 wwc_start() { local s
-  "$T/idle.sh" --wait 120 1800 >/dev/null || { echo "SKIP phone busy (not idle 2 min within 30 min)"; exit 3; }
+  # The runner (LOCK_HELD=1) starts a check only in a free window it already waited for; waiting again for 2 idle
+  # minutes inside the check's 300 s budget can only spend it. Run by hand, the wait stays.
+  if [ "${LOCK_HELD:-0}" != 1 ]; then
+    "$T/idle.sh" --wait 120 1800 >/dev/null || { echo "SKIP phone busy (not idle 2 min within 30 min)"; exit 3; }; fi
   s=$("$T/idle.sh"); case $s in *screen=Awake*) ;; *) echo "SKIP screen not on ($s)"; exit 3 ;; esac
   T0=$SECONDS
-  ww_ready || { fold 3; UNFOLDED=1; sleep 3; }
-  ww_ready || wwc_skip "home shows no web windows even unfolded (web windows off?)"; }
+  wwc_home || wwc_skip "home's page isn't visible after going home ($(wwc_vis | head -c 60))"
+  CDP_TIMEOUT_S=20 ww_ready || { fold 3; UNFOLDED=1; sleep 3; }
+  CDP_TIMEOUT_S=20 ww_ready || wwc_skip "home shows no web windows even unfolded (web windows off?)"; }
 wwc_pick() { local a; for a in "$@"; do ww_running "$a" || { echo "$a"; return 0; }; done; return 1; }
 wwc_open() { MINE_P="$MINE_P $1"   # not in $(...): MINE_* must stay set for wwc_clean
   WID=$(ww_open "l:org.kde.$1" 45) || { bad "open $1: $WID"; WID=""; return 1; }

@@ -3,7 +3,9 @@
 # pad-slide.sh (board on-screen-game-controls-slide-a-finger-between-b; b6980d5b SlideButtons): ONE injected finger on the
 # on-screen controls: lands on B, slides to the B/Y border, back onto B, onto Y, onto B, off every button, onto B, lifts.
 # A new press is logged by powos-padd only after a release, so PASS = its log says exactly "B Y Y B B": the border
-# holds both (no new B on the way back), sliding onto a button presses it and off it releases it. B/Y, never A (Enter
+# holds both (no new B on the way back), sliding onto a button presses it and off it releases it. When B and Y sit
+# further apart than one fingertip spans (gap >= 1.6 x the 4 mm slop, as in the default layout) there is no border
+# spot and the path skips it: PASS = "B Y B B". B/Y, never A (Enter
 # in Steam's desktop config) into whatever has focus. No game. Overlay state restored. `--geom <l t r b> <wm density>`
 # (prefs XML on stdin) only prints the points: the fixture. Exit 0 PASS, 1 FAIL, 3 no window/touched, 5 SKIP.
 set -uo pipefail
@@ -37,7 +39,10 @@ trap 'hcall pad.overlay "[$was]" "v=>String(v)" >/dev/null; [ "${LOCK_HELD:-0}" 
 [ "$(hcall pad.overlay '[true]' 'v=>String(v)')" = true ] || { echo "FAIL: controller does not enable"; exit 1; }; sleep 1
 fr=$(sh_ 'dumpsys window windows' | awk '/^ *Window #/{f=(index($0,"PowOS controller")>0)} f' | grep -oE ' frame=\[[0-9,]+\]\[[0-9,]+\]' | head -1 | tr -c '0-9\n' ' ')
 [ -n "$(echo $fr)" ] || { echo "FAIL: controller enabled but has no window"; exit 1; }
-g=$(sh_ 'cat /data/data/com.powos.app/shared_prefs/powos_gamepad.xml' | geom "$fr" "$(sh_ 'wm density')" 2>&1) || { case $g in SKIP:*) echo "$g"; exit 5 ;; esac; echo "FAIL: geometry: $g"; exit 1; }
+# No saved layout yet (no powos_gamepad.xml: the user never edited it) = the default layout; read it on its own so a
+# missing file is not a pipeline failure under pipefail (job 20261109-162312-34543 failed exactly that way).
+prefs=$(sh_ 'cat /data/data/com.powos.app/shared_prefs/powos_gamepad.xml 2>/dev/null; true')
+g=$(printf '%s' "$prefs" | geom "$fr" "$(sh_ 'wm density')" 2>&1) || { case $g in SKIP:*) echo "$g"; exit 5 ;; esac; echo "FAIL: geometry: $g"; exit 1; }
 n=$(us 'wc -l < /run/powos-app/powos-padd.log'); [[ "$n" =~ ^[0-9]+$ ]] || { echo "SKIP: ENV: no powos-padd log ($n)"; exit 5; }
 IFS=';' read -ra P <<<"${g%|*}"; c="input motionevent DOWN ${P[0]}"; for p in "${P[@]:1}"; do c+="; sleep 0.35; input motionevent MOVE $p"; done
 sh_ "$(self_input_for 20)$c; sleep 0.35; input motionevent UP ${P[${#P[@]}-1]}"; sleep 1

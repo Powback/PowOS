@@ -639,7 +639,11 @@ EOS
   # logstep <log>: the log's last meaningful line (no adb push/pull noise, no blank or progress lines; bf-lib's
   # "-- 12:00:00 " prefix dropped), safe for put, at most 60 chars.
   # kill_step <log> <last step seen>: the step a budget-killed check was in (its last `pill` line, untruncated).
-  kill_step() { local s; s=$(grep -a '^-- [0-9:]\{8\} ' "$1" | tail -1 | sed 's/^-- [0-9:]* //'); echo "FAIL timeout at step: ${s:-${2:-unknown (no step published)}}"; }
+  # The runner's own "build: <sha> shell=<sha>" header as the last line = the check printed nothing (11-09: two wwc-lib
+  # checks read as stuck in a "build" step; they hung in their setup's page calls).
+  kill_step() { local s; s=$(grep -a '^-- [0-9:]\{8\} ' "$1" | tail -1 | sed 's/^-- [0-9:]* //')
+    case ${s:-${2:-}} in build:\ *|"") s=${s:-"unknown - no output after the runner's build header"} ;; esac
+    echo "FAIL timeout at step: ${s:-$2}"; }
   logstep() { tail -c 6000 "$1" 2>/dev/null | perl -CSD -ne 's/\r/\n/g; for (split /\n/) { s/\e\[[0-9;?]*[A-Za-z]//g;
       s/^-- \d\d:\d\d:\d\d //; s/[[:cntrl:]"\\|&]//g; s/^\s+|\s+$//g;
       next if $_ eq "" || /\d+ files? (pushed|pulled|skipped)|bytes in [\d.]+ ?s\)|^\[\s*\d+%\]|^adb: |Broken pipe|^\d+(\.\d+)? [KM]B\/s/; $l = $_ }

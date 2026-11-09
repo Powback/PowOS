@@ -15,10 +15,22 @@ OUT=$HOME/.cache/powos-verify/term-feel-$(date +%m%d-%H%M); mkdir -p "$OUT"
 . "$here/window-lock.sh"; window_lock term-feel 120; e2e_touchwatch >/dev/null 2>&1; I0=$(irq)
 trap 'ev "importShim(\"./state.ts\").then(m=>(m.closeSession(),\"ok\"))" >/dev/null; us "tmux kill-session -t $S" >/dev/null; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
 us "tmux kill-session -t $S 2>/dev/null; tmux new -d -s $S \"seq -f 'powos verify line %g' 3000; exec sleep 900\" && echo ok" | grep -q ok || { echo "SKIP: ENV: no tmux session"; exit 5; }
+vis() { CDP_TIMEOUT_S=15 ev "document.visibilityState"; }
+[ "$(vis)" = visible ] || { sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; }
+[ "$(vis)" = visible ] || { echo "SKIP: ENV: home's page isn't visible even after going home ($(vis))"; exit 5; }
 ev "importShim('./state.ts').then(m=>(m.openSession('$S',null),'ok'))" >/dev/null; sleep 4
 read -r x y w h <<<"$(ev "(()=>{const d=devicePixelRatio,r=[...document.querySelectorAll('.term-holder')].map(e=>e.getBoundingClientRect()).filter(r=>r.width>99&&r.height>99).sort((a,b)=>b.width*b.height-a.width*a.height)[0];return r?[r.left,r.top,r.width,r.height].map(v=>Math.round(v*d)).join(' '):'none'})()")"
 [[ "${h:-}" =~ ^[0-9]+$ ]] || { echo "FAIL: the session view shows no terminal (${x:-none})"; exit 1; }
-sh_ 'dumpsys activity top' | grep -qE 'com\.termux\.view\.TerminalView\{[0-9a-f]+ V' || { echo "FAIL: no PowTerm TerminalView shown - the page draws it (xterm)"; exit 1; }
+# PowTerm's view is placed from the page's frame loop (terminal.tsx placeNative): with home not in front the page is
+# hidden, no frame runs and no view is ever made - that's the run, not the code (job 20261109-162404-36737). Only
+# HomeShell's own hierarchy counts: PowTerm the app has a TerminalView of its own, which is not this.
+homeview() { sh_ 'dumpsys activity top' | awk '/^ *ACTIVITY /{f=(index($0,"com.powos.app/andro.marchy.HomeShell")>0)} f' | grep -qE 'com\.termux\.view\.TerminalView\{[0-9a-f]+ V'; }
+for i in 1 2 3 4 5 6; do homeview && break; sleep 1; done
+if ! homeview; then
+  v=$(vis); [ "$v" = visible ] || { echo "SKIP: ENV: home left the front during the run (page $v) - no frame places PowTerm's view"; exit 5; }
+  [ "$(ev "String(!!document.querySelector('.term-holder .xterm-screen'))")" = true ] && { echo "FAIL: the page draws the shell's terminal with xterm - no PowTerm TerminalView (term.view missing or refused)"; exit 1; }
+  echo "FAIL: no PowTerm TerminalView in HomeShell and no xterm either - the terminal draws nothing"; exit 1
+fi
 shot() { "$T/shot.sh" "$OUT/$1.png" >/dev/null && sips -s format bmp "$OUT/$1.png" --out "$OUT/$1.bmp" >/dev/null 2>&1; }
 moved() { python3 -c 'import sys,struct
 def L(p):
