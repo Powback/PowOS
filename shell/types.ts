@@ -435,9 +435,12 @@ export interface Chat {
   /**
    * How PowOS AI is signed in (`powos manager --auth`): "endpoint" the machine's fleet endpoint (the owner's devices),
    * "login" Claude Code's own login in the image (the user's own Claude account), "signin" neither - the page shows
-   * Sign in to Claude (powai.tsx SignIn). "" or absent: not known yet (an older host).
+   * Sign in to Claude (powai.tsx SignIn), "install" the manager's claude isn't installed (whatever the sign-in) - the
+   * page shows Install Claude (claudeinstall.tsx). "" or absent: not known yet (an older host).
    */
-  auth?: "endpoint" | "login" | "signin" | "relogin" | "";
+  auth?: "endpoint" | "login" | "signin" | "relogin" | "install" | "";
+  /** Install Claude's state (ClaudeInstall.json): [running], the installer's latest [line], why it failed. ?: older hosts. */
+  install?: { running: boolean; line: string; error: string };
   /** The native Claude sign-in (ClaudeSignIn.kt; claude-login through the fleet authority or in the image). ?: older hosts. */
   signin?: ClaudeSignInState;
 }
@@ -734,6 +737,8 @@ export interface Bridge {
     closeThread(): Promise<boolean>;
     /** Asks again how it's signed in (Chat.auth, as "ai.changed"): after the sign-in terminal ends. ?: older hosts. */
     auth?(): Promise<void>;
+    /** Install Claude (auth "install"): `powos manager --install`, its progress as Chat.install. ?: older hosts. */
+    install?(): Promise<void>;
     /** Settings > AI's Sign out: Claude Code's own logout in the image (never the endpoint's). ?: older hosts. */
     signOut?(): Promise<void>;
     /**

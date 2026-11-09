@@ -75,7 +75,8 @@ object PowosAiChat {
     /**
      * How the manager's claude is signed in (`powos manager --auth`): "endpoint" (the owner's devices: the machine's
      * fleet endpoint, unchanged), "login" (Claude Code's own login in the image: the buyer's account), "signin" (neither:
-     * the page shows Sign in to Claude, whose terminal runs `powos manager --signin`), "" not known yet. The credentials
+     * the page shows Sign in to Claude, whose terminal runs `powos manager --signin`), "install" (the manager's claude
+     * isn't installed, whatever the sign-in: the page's Install Claude, ClaudeInstall), "" not known yet. The credentials
      * stay in the image; this only ever sees the word.
      */
     var auth by mutableStateOf("")
@@ -143,6 +144,7 @@ object PowosAiChat {
             post {
                 authAsking = false
                 if (word.isNotEmpty()) authIs(word)
+                ClaudeInstall.authAnswered(word)
                 if (authAgain) checkAuth()
             }
         }, "powos-ai-auth").start()
@@ -211,7 +213,10 @@ object PowosAiChat {
     /** `powos manager --auth`'s word from its output; "" for anything else (an older image without the flag). */
     fun authWord(out: String): String = out.lineSequence().map { it.trim() }.lastOrNull { it.isNotEmpty() }?.takeIf { it in AUTH_WORDS } ?: ""
 
-    private val AUTH_WORDS = setOf("endpoint", "login", "signin", "relogin")
+    private val AUTH_WORDS = setOf("endpoint", "login", "signin", "relogin", "install")
+
+    /** The words a turn's status 4 already explains (manager.sh: the page shows that state, not an error line). */
+    private val NOT_READY = setOf("relogin", "signin", "install")
 
     private fun threadFile(context: Context) = File(context.filesDir, "powos-ai/thread.json")
 
@@ -375,6 +380,8 @@ object PowosAiChat {
                         "signin" -> post { authIs("signin") }
                         // The login the endpoint's tenant (or this image) has is missing or can't refresh: the sheet.
                         "relogin" -> post { authIs("relogin") }
+                        // Its claude isn't installed (and couldn't be had): the page's Install Claude.
+                        "install" -> post { authIs("install") }
                     }
                 }
                 process.waitFor()
@@ -386,7 +393,7 @@ object PowosAiChat {
             // The inbox's turn with nothing waiting (already read): nothing to say.
             // Not signed in (status 4, its "signin" event): the page shows Sign in to Claude, not an error line.
             val quiet = (prompt == null && exit == 0 && !answered) || exit == SIGNIN_EXIT
-            if (exit == SIGNIN_EXIT && auth != "relogin" && auth != "signin") authIs("signin")
+            if (exit == SIGNIN_EXIT && auth !in NOT_READY) authIs("signin")
             // A turn that failed otherwise (claude's 401 / "run /login" when the login lapsed mid-session): asked again.
             if (exit != 0 && exit != SIGNIN_EXIT) checkAuth()
             if (!quiet && (exit != 0 || !answered)) {

@@ -29,6 +29,7 @@ import { AiSegs, FleetPane, useAgentsInPane } from "./aipanes.tsx";
 import { AiStatus, noteAsked, openChat, OtherProjectsItem, otherProjectsCount } from "./aistatus.tsx";
 import { Icon } from "./icons.tsx";
 import { SignInSheet } from "./claudesignin.tsx";
+import { InstallClaude } from "./claudeinstall.tsx";
 import { usePresence } from "./reveal.tsx";
 
 // The board's state, for what reads it from here (perfrec, the gate, the renders): it lives in aiboard.tsx now.
@@ -189,6 +190,7 @@ function SignIn() {
 /** The chat pane: "Create app"'s own thread view (steps, the finished app) or the question that starts one, else the conversation. */
 function ChatPane({ shown }: { shown: boolean }) {
   useChatSync(shown);
+  if (chat.value.auth === "install") return <InstallClaude />;
   if (chat.value.auth === "signin" || chat.value.auth === "relogin") return <SignIn />;
   if (chat.value.thread?.kind === "app") return <AppBuild />;
   if (newAppAsk.value) return <NewAppAsk />;

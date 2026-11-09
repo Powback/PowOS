@@ -195,6 +195,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       newApp: (description) => call<boolean>("ai.newApp", description),
       closeThread: () => call<boolean>("ai.closeThread"),
       auth: () => call("ai.auth"),
+      install: () => call("ai.install"),
       signOut: () => call("ai.signOut"),
       signin: {
         status: () => call("ai.signin.status"),
@@ -726,6 +727,17 @@ function mock(): Bridge {
         w.__aiAuthAsked = (w.__aiAuthAsked ?? 0) + 1;
       },
       signOut: async () => void events.emit("ai.changed", (chat = { ...chat, auth: "signin" })),
+      // The mock's Install Claude, the host's steps (ClaudeInstall.kt): running, the installer's lines, then installed
+      // and signed out (auth "signin").
+      install: async () => {
+        const set = (install: NonNullable<Chat["install"]>, more: Partial<Chat> = {}) =>
+          events.emit("ai.changed", (chat = { ...chat, ...more, install }));
+        for (const line of ["Downloading Claude Code…", "Installing Claude Code native build…"]) {
+          set({ running: true, line, error: "" });
+          await new Promise((r) => setTimeout(r, 300));
+        }
+        set({ running: false, line: "", error: "" }, { auth: "signin" });
+      },
       // The mock's native sign-in, the host's phases (ClaudeSignIn.kt): the link after a beat, "good#state" signs in,
       // anything else is the authority's "invalid code". window.__signinOpened counts the links opened (the gate's
       // ai-native-signin scene).

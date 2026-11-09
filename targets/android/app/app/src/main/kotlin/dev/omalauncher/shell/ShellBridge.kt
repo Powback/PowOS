@@ -23,6 +23,7 @@ import dev.omalauncher.linux.Guest
 import dev.omalauncher.linux.matches
 import dev.omalauncher.system.RunningApps
 import kotlin.concurrent.thread
+import dev.omalauncher.ClaudeInstall
 import dev.omalauncher.ClaudeSignIn
 import dev.omalauncher.PowosAiChat
 import dev.omalauncher.Runtime
@@ -630,6 +631,8 @@ class ShellBridge(
             // How it's signed in, asked again (after the sign-in terminal ends); Settings > AI's Sign out.
             "ai.auth" -> PowosAiChat.checkAuth()
             "ai.signOut" -> PowosAiChat.signOut()
+            // Install Claude (auth "install"): `powos manager --install`, its progress as ai.changed's install.
+            "ai.install" -> ClaudeInstall.start()
             // The native Claude sign-in (ClaudeSignIn: claude-login through the fleet authority or in the image):
             // Login (the link opens in the browser, the page shows the code box), the pasted code, close, the link again.
             "ai.signin.status" -> ClaudeSignIn.refresh()
@@ -1649,6 +1652,7 @@ class ShellBridge(
             .put("queued", JSONArray(PowosAiChat.queued.map { it.json() }))
             .put("auth", PowosAiChat.auth)
             .put("signin", ClaudeSignIn.json())
+            .put("install", ClaudeInstall.json())
 
     /**
      * [key]'s icon ("a:<key>" / "l:<id>"): its file's URL (ShellIcons), the same until the icon changes. One never

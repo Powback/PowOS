@@ -396,6 +396,7 @@ function useAiTile(): [IconName, string, string, () => void] {
   const auth = chat.value.auth;
   if (auth === "login")
     return ["accountCircleOutline", "AI", confirm ? "tap again to sign out of Claude" : "signed in to Claude · sign out", () => (confirm ? (setConfirm(false), void powos.ai.signOut?.()) : setConfirm(true))];
+  if (auth === "install") return ["accountCircleOutline", "AI", "Claude isn't installed · install Claude", () => (closeScreens(), openPanel("ai"))];
   if (auth === "relogin") return ["accountCircleOutline", "AI", "Claude sign-in needed · log in", () => (closeScreens(), openPanel("ai"))];
   if (auth === "signin") return ["accountCircleOutline", "AI", "not signed in · sign in to Claude", () => (closeScreens(), openPanel("ai"))];
   return ["accountCircleOutline", "AI", auth === "endpoint" ? "this device's Claude endpoint" : "PowOS AI's Claude account", () => (closeScreens(), openPanel("ai"))];
