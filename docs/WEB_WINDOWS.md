@@ -185,6 +185,16 @@ frame of drag latency; measure it before turning it on for drags (animations fir
   is its resize (RZ7's own test), starts the way back where the zone IS, FAILs a drag that didn't resize, and prints
   the longest gap IN motion. Steam (FEX) resizing at 44/112 missed vs Calculator 9/121 is the next lead: the Linux
   client's relayout CPU against home's renderer.
+  Attribution, 11-09 (from the 16:51 run's own SF --latency columns: queued, presented, GPU-done): of its 76 missed
+  shell vsyncs, 60 had home's buffer GPU-done >= 2 ms before the vsync it missed ("held": kate corner 28/44, dolphin
+  corner 18/18, calc corner 9/9, calc edge 5/5) - the shell's layout/paint/render was NOT the late layer; its frames
+  waited 20-52 ms queue->present (3-6 vsyncs, growing through the drag = SF taking fewer than it was given). The 16
+  "late" ones are the gesture's first/last frames. An older window trace (window-core 10-27 calc+glass) shows SF
+  GPU-composites 360/361 display frames with a window open. ww-resize.sh now splits each way's misses into late/held
+  and records each way under perfetto; `resize-trace.py` prints SF's own per-frame jank types for home's layer and
+  the display frames (App Deadline Missed vs SurfaceFlinger GPU/CPU vs Display HAL), the GPU-composited count, SF/
+  RenderEngine slices and CPU per process over the drag, and one verdict. The fix waits for that verdict on a valid
+  run (the 16:51 one measured Steam; every rerun since SKIPped folded/dozing).
   Page side, 11-08 (RS5, gate `ww-resize-cost`, four windows, the top one's corner dragged; `GATE_PROFILE=1` prints the
   trace's self ms and style invalidations a move): renders read no layout per window (79 -> 11 reads a move); the
   windows under the dragged one no longer re-render for their masks (WebWindowsOn's `cutAll` writes them after the
@@ -193,6 +203,12 @@ frame of drag latency; measure it before turning it on for drags (animations fir
   CPU); the glass reads each window's rect once a measure, not per surface (its measure 1.7 -> 0.5 ms); the tick reads
   shared ancestors once for all windows. Host side: the app's relayouts were already paced (RS1: >= 3 frames, 40 ms;
   the final one on release) - the frame follows per move, the app's size at most 25 times a second.
+  RS5c (11-08): a resize move renders nothing (`resizeLive`): the dragged WebWin takes its frame in place (no webWins
+  write, so neither page's PageUnder/WebWindowsOn nor the window's tree re-render), and the move writes the frame's and
+  shadow's boxes, the outline's size text and the masks (lower windows', the page content's) to the DOM; the drag's end
+  commits one render. Renders a move 16 -> 0 (a snap change still renders the window: its outline class); gate trace
+  at 4x CPU: AsyncTask Run (Preact's render task) 50.8 -> 10.9 ms, restyled elements 20 -> 6 a move. Maximised frames
+  and zone heights near the system strips take the old path (a render).
 - [ ] **N5 - games**: windowed games are Linux windows (N1-N4 apply); full screen stays the direct-scanout task. Check:
   a windowed Proton game's menu (untyped override-redirect) shows (0062), fps x/120 unchanged by N1.
 

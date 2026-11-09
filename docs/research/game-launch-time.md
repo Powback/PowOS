@@ -430,3 +430,79 @@ rebuild was not needed. Re-basing on a new Proton: bump TAG, rebuild, update the
 A/B queued (jobs 20261105-183239..183312: bf-pacing base on Valve's dll, then the PowOS dll: bf-coldstart steam x2,
 bf-pacing base, bf-checker base, Valve's restored). Expected: ~1800 fewer wineserver requests/s in play (150 polls/s x
 12), ~0.2 s of main-thread load time.
+
+**Result (steam -37 installed, jobs 20261105-192135..192142):** the gate put the PowOS kernelbase in on the first launch
+(sha a3f08252, checked after each run). bf-coldstart steam, Valve dll: exe -> frame 10.8 s (frame 20.6 s from the tap),
+wineserver 0.8 core-s, main 6.4 s; PowOS dll #1 (first launch with the new dll: FEX re-stored blocks) wineserver 2.7,
+#2: exe -> frame 10.8 s (frame 19.1 s), wineserver 0.7 core-s, main 6.8 s. bf-pacing base 40.4 -> 41.2 fps, main thread
+29.2 -> 29.5 %, wineserver not among the top threads in play either way; bf-checker base 0 % checkered. So the call
+count halves, but it costs no measurable time on this phone: the ~0.4 s estimate did not hold. Kept, since it is exact
+and cheap; not a fps lever. Requests/s not counted directly (+server would distort the timing).
+
+## Unity window -> frame: sync path, thread placement, CPU topology, render thread (2026-11-05, agent/unity-sync)
+
+Broforce 274190, `powos-proton-arm64` (steam -36), `bf-coldstart steam` + a 50 Hz sampler of main/UnityPreload (state,
+syscall, CPU; scratch `us-run.sh`/`uswatch.py`, jobs 20261105-153856..155313). Window -> first frame, ms:
+
+| variant | run 1 | run 2 | mean | vs base |
+|---|---|---|---|---|
+| base | 8684 | 8358 | 8521 | - |
+| `WINE_CPU_TOPOLOGY=5:3,4,5,6,7` (5 big cores, Wine maps + pins) | 8373 | 8333 | 8353 | -0.17 s |
+| all game threads pinned to 3-7 at exe start | 8514 | 8377 | 8446 | -0.08 s |
+| main + UnityPreload pinned to 3-6 (one cpufreq domain, A715+A710) | 8675 | 8399 | 8537 | 0 |
+| Unity `-force-gfx-direct` (no render thread) | 8407 | 8445 | 8426 | -0.10 s |
+
+Nothing clears the 0.5 s bar (run-to-run noise is ~0.3 s), so nothing ships. Findings:
+- **ntsync: not available.** Kernel 5.15.180 GKI, no `/dev/ntsync`, no CONFIG_NTSYNC (mainline 6.10, usable 6.14); and
+  Proton Experimental `11.0-20261027b-arm64`'s ntdll has no ntsync support either (fsync only). A backport would be a
+  separate task: an out-of-tree ntsync.ko for this 5.15 (CONFIG_MODULE_SIG set but not forced) plus a Wine/Proton
+  ARM64 build with the ntsync client. Expected gain is small anyway (see the gfx-direct point below).
+- **Placement is already good.** Unscheduled, main is on 3-7 ~100 % of the time (X3 core 7 29-36 %), UnityPreload on
+  little cores 2-6 %; both migrate a lot (main ~300, UnityPreload ~170 per 16 s), but pinning them (to 3-7 or one
+  cpufreq domain 3-6) leaves the wait share unchanged (main W449 34-39 %, UnityPreload 57-63 %): cross-cluster wake
+  latency is not the cost. Note Proton on aarch64 already derives WINE_CPU_TOPOLOGY from its own affinity
+  (`get_current_cpu_affinity`), so a launcher affinity is the one knob if it ever pays.
+- **Main's futex_waitv is the render thread, not UnityPreload.** With `-force-gfx-direct` UnityGfxDeviceWorker is gone
+  and main's Wine-sync wait drops 39 % -> 6 %, but the same time reappears as plain futex (syscall 98, 28-31 %): DXVK's
+  own cs/submit threads' condition variables. So main is waiting on the D3D11 -> DXVK -> Turnip path (uploads/
+  resource creation during load) whichever thread drives it; the window->frame stays 8.4 s. Next lead: what DXVK's cs
+  thread is doing then (DXVK_HUD/`DXVK_LOG_LEVEL=debug` timings, Turnip BO alloc/upload cost on kgsl), not Wine sync.
+- Unity 2017.4 boot.config has only `wait-for-native-debugger=0`; gfx-jobs options are left untested (render-side
+  experimental path in 2017.4, visual risk, and the wait is in DXVK either way).
+
+## Unity window -> frame: what the render path does during the load (2026-11-05, agent/load-uploads)
+
+Broforce 274190, `powos-proton-arm64` (steam -36), DXVK v3.1.1-97 (Proton Experimental ARM64, aarch64 build), Turnip
+with `TU_DEBUG=noubwc`. `bf-coldstart steam` + a 20 Hz sampler from the exe's start (scratch `lu-run.sh`/`luwatch.py`):
+kgsl `gpu_busy_percentage` + `gpuclk`, the state/syscall/wchan of main, UnityGfxDeviceWorker, dxvk-cs, dxvk-submit,
+dxvk-queue, UnityPreload, and (one run) the DXVK debug log timestamped as it is written. Jobs 20261105-162655..163940.
+
+**The render path is idle for most of the 8.5 s.** Seconds from the exe (window ~1-2 s, first frame ~9.5-10.5 s):
+
+| span | GPU busy | GPU clock | dxvk-cs / submit / queue | main | DXVK log (debug) |
+|---|---|---|---|---|---|
+| 0-6.5 | **0-4 %** | 220 MHz (floor) | futex-idle 100 % | running ~90 % (3-7 s), Wine-sync waits at 1.5-2.5 s | 145 shader creates, all "Shader cache hit"; swapchain at 5.6 s; 5 memory chunks mapped |
+| 6.5-10.5 | 11-43 % | 220 MHz | queue: `adreno_drawctxt_wait` (GPU fences) ~25 % | Wine-sync waits ~60 % | a few shaders |
+| after the frame | 55-80 % | 295-680 MHz | | | |
+
+So it is not uploads, staging allocations or pipeline compiles: over the whole launch DXVK logs no pipeline compile,
+only 5 chunk allocations (`Mapped memory region`), dxvk-cs/submit are 85-87 % futex-idle (waiting for work), and the
+GPU does nothing until ~3 s before the first frame. The UBWC-off linear path can't matter either (no GPU work to slow
+down). Main's 39 % Wine-sync wait (agent/unity-sync) falls mostly in the last ~3 s, where UnityGfxDeviceWorker waits
+on DXVK (plain futex) and DXVK's queue thread on GPU fences: the first frames' GPU work, at the 220 MHz floor (the
+msm-adreno-tz governor ramps only after the frame). Before that, main runs emulated Mono/Unity code (the previous
+sections' cost); the dxvk.conf knobs (`d3d11.cachedDynamicResources`, `dxvk.numCompilerThreads`, staging size) have
+nothing to act on.
+
+**GPU floor during the load (A/B, `min_pwrlevel` 7 -> 2 = 550 MHz from the tap, restored after):**
+
+| variant | window -> frame run 1 | run 2 | mean |
+|---|---|---|---|
+| base | 8615 | 8479 | 8547 |
+| GPU min 550 MHz | 8299 | 8316 | 8308 (-0.24 s) |
+
+GPU busy in 6.5-10.5 s drops to 12-40 % at 550 MHz but the frame comes only ~0.24 s sooner: under the 0.5 s bar and
+inside run-to-run noise (~0.3 s), so nothing ships (it would also cost GPU power for every game launch). Conclusion:
+**window -> first frame is CPU on Unity's main thread (emulated Mono/Unity init), not the D3D11 -> DXVK -> Turnip
+path.** Next lead, if any: the emulated code itself (FEX: Mono's JIT output is uncachable; Unity 2017.4 player init) -
+e.g. FEX `SMCChecks`/`Multiblock`/`ParanoidTSO` costs on main, or simpleperf of main's JIT blocks by Mono symbol.

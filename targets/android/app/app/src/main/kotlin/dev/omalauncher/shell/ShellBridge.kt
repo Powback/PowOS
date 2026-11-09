@@ -74,6 +74,10 @@ class ShellBridge(
 
     /** The terminals drawn by PowTerm's terminal (Termux's view), over their elements ([ShellTermViews]). */
     private val termViews = ShellTermViews(context, runtime, web, terminals, ::emit)
+
+    /** The clipboard's recent copies, local only: the terminals' paste picker ([ClipHistory]). */
+    private val clips = ClipHistory.of(context)
+    private val clipChanged = ClipboardManager.OnPrimaryClipChangedListener { clips.add(ClipHistory.primaryText(context, clipboard())) }
     private val media = ShellMedia(context, runtime, scope, ::emit)
     /** Android apps as home elements (on unless Settings.Global powos_web_windows = 0; home's activity only). */
     private val webWindows by lazy { WebWindows(context, web, ::emit) }
@@ -296,6 +300,7 @@ class ShellBridge(
         runCatching { android.app.WallpaperManager.getInstance(context).addOnColorsChangedListener(wallpaperColors, main) }
         dev.omalauncher.theme.ThemeStore.changeListeners.add(themeChanged)
         dev.omalauncher.devices.LockAccess.listeners.add(lockChanged)
+        runCatching { clipboard().addPrimaryClipChangedListener(clipChanged) }
         // Live mode on or off (its consent answered, its capture stopped): the assistant's page follows.
         dev.omalauncher.assist.LiveCapture.onChange = { main.post { emit("assist.live", liveState()) } }
         // An agent told the user something: the PowOS AI page lists it.
@@ -825,11 +830,21 @@ class ShellBridge(
             "term.focus" -> termViews.focus(a.getString(0), a.getBoolean(1))
             "term.mods" -> termViews.mods(a.getInt(0), a.getInt(1))
             "term.paste" -> termViews.paste(a.getString(0))
+            "term.pasteText" -> termViews.pasteText(a.getString(0), a.getString(1))
             "term.copy" -> termViews.copy(a.getString(0))
             "term.key" -> termViews.key(a.getString(0), a.getString(1))
             "term.style" -> terminalStyle(if (a.isNull(0)) null else a.getDouble(0))
             "clipboard.read" -> clipboard().primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
-            "clipboard.write" -> clipboard().setPrimaryClip(ClipData.newPlainText("PowOS", a.getString(0)))
+            "clipboard.write" -> {
+                clipboard().setPrimaryClip(ClipData.newPlainText("PowOS", a.getString(0)))
+                clips.add(a.getString(0))
+            }
+            // The paste picker's cards: the clipboard now first (a copy made in another app, readable now home has
+            // the focus), then the rest of the local history (ClipHistory).
+            "clipboard.history" -> {
+                clips.add(ClipHistory.primaryText(context, clipboard()))
+                clips.toJson()
+            }
             else ->
                 when {
                     method.startsWith("remote.") -> remote.call(method.removePrefix("remote."), a)
@@ -1963,6 +1978,7 @@ class ShellBridge(
         speech.cancel()
         applyObserver.dispose()
         termViews.removeAll()
+        runCatching { clipboard().removePrimaryClipChangedListener(clipChanged) }
         terminals.closeAll()
         scope.cancel()
     }

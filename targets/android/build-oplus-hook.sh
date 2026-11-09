@@ -7,6 +7,10 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 AAD=${ANDROID_APP_DEV:-$HOME/Projects/android-app-dev}
+# android-app-dev's builder mounts only ~/Projects (as /Projects): from a checkout elsewhere (~/pw) the project link
+# would point nowhere (and repointing it breaks the next build from ~/Projects). Same guard as build-app.sh.
+case "$HERE/" in "$HOME/Projects/"*) ;; *)
+  echo "build-oplus-hook: refusing - $HERE is outside ~/Projects, the only dir the APK builder mounts" >&2; exit 5 ;; esac
 want=/Projects${HERE#$HOME/Projects}/oplus-hook
 link=$AAD/projects/powos-oplus-hook
 [ "$(readlink "$link" 2>/dev/null)" = "$want" ] || { rm -f "$link"; ln -s "$want" "$link"; }

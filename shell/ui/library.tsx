@@ -106,16 +106,24 @@ export const library = computed<LibraryFolder[]>(() => {
   return [...own.map((f) => ({ key: f.key, name: folderName(f.key), apps: f.apps!, own: true })), ...cats];
 });
 
-/** A folder on the library: its name and count, its first four apps small in a 2x2; a tap anywhere opens it. */
+/** A card shows its apps in a 2x2 up to this many; more, and it is a full-width card of all of them. */
+const SMALL_CARD = 4;
+
+/**
+ * A folder on the library: its name and count and EVERY app of it (board: "folder widget clips its apps, page leaves
+ * empty space" - 'Other (14)' showed four) - up to four small in a 2x2, more
+ * across the page's full width, as many rows as they take, so the page grows with them. A tap anywhere opens it.
+ */
 function Card({ f }: { f: LibraryFolder }) {
+  const wide = f.apps.length > SMALL_CARD;
   return (
-    <div class={`lib-card tile ${morphing.value === f.key ? "opened" : ""}`} data-key={f.key} onClick={() => (folder.value = f.key)}>
+    <div class={`lib-card tile ${wide ? "wide" : ""} ${morphing.value === f.key ? "opened" : ""}`} data-key={f.key} onClick={() => (folder.value = f.key)}>
       <div class="lib-name">
         <span>{f.name}</span>
         <span class="lib-count">{f.apps.length}</span>
       </div>
       <div class="lib-icons">
-        {f.apps.slice(0, 4).map((a) => {
+        {f.apps.map((a) => {
           const app = byKey.value.get(a.app);
           return app ? <AppIcon key={a.key} src={app.icon} label={a.label} app={app.key} /> : <div key={a.key} class="app-icon initials">{a.label[0]}</div>;
         })}
