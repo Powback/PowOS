@@ -16,6 +16,10 @@ if [ "${LOOPBACK_INNER:-}" != 1 ]; then
   if [ "$(uname -s)/$(uname -m)" = Linux/aarch64 ] && command -v cc >/dev/null && [ "$(id -u)" = 0 ]; then
     LOOPBACK_INNER=1 exec bash "$0"
   elif command -v docker >/dev/null && docker info >/dev/null 2>&1; then
+    # An x86 host without arm64 emulation (binfmt/qemu) can't start the image: exec format error, rc 255 with no
+    # output - that red-lined master CI for a week (issue #10). Probe once; the workflow installs qemu so CI runs it.
+    docker run --rm --platform linux/arm64 gcc:14 true >/dev/null 2>&1 || {
+      echo "SKIP test-loopback-unix: docker can't run linux/arm64 here (no qemu binfmt)"; exit 0; }
     exec docker run --rm --platform linux/arm64 -e LOOPBACK_INNER=1 -v "$HERE:$HERE:ro" gcc:14 bash "$HERE/test/tier1/test-loopback-unix.sh"
   fi
   echo "SKIP test-loopback-unix: no aarch64 Linux C compiler (cc as root, or docker with gcc:14)"

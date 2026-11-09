@@ -15,6 +15,9 @@ if [ "${PUBLISH_REPO_INNER:-}" != 1 ]; then
   if command -v repo-add >/dev/null && command -v vercmp >/dev/null; then
     PUBLISH_REPO_INNER=1 exec bash "$0"
   elif command -v docker >/dev/null && docker info >/dev/null 2>&1; then
+    # Without arm64 emulation (an x86 CI runner, no binfmt/qemu) the image can't start: rc 255, no output (issue #10).
+    docker run --rm --platform linux/arm64 menci/archlinuxarm:latest true >/dev/null 2>&1 || {
+      echo "SKIP test-publish-repo: docker can't run linux/arm64 here (no qemu binfmt)"; exit 0; }
     exec docker run --rm --platform linux/arm64 -e PUBLISH_REPO_INNER=1 -v "$HERE:$HERE:ro" menci/archlinuxarm:latest \
       bash "$HERE/test/tier1/test-publish-repo.sh"
   fi
