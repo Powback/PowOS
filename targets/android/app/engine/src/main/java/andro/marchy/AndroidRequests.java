@@ -13,7 +13,8 @@ import java.nio.file.Files;
  * Requests from the Linux session for things only Android can do, written to run/android-request by the
  * android-request helper (atomically, by rename): "wifi-panel", "open <package>" (full screen; a floating window on the unfolded home, [openOptions]), "split <package>" (beside Andromarchy), "float <package>" (floating window),
  * "launcher <apps|ai> [how json]" (PowOS's one launcher, [launcher]), "pack <name>" (add a part of PowOS the base image
- * left out, [Packs]; progress in run/pack-NAME.state).
+ * left out, [Packs]; progress in run/pack-NAME.state). A Linux job's progress is not a request but its own file,
+ * run/progress-ID.state ([Progress], the powos-progress helper; "progress" in the verbs file says it is served).
  */
 public final class AndroidRequests implements DirWatch.Listener {
     private static final String TAG = "AndroidRequests";
@@ -45,7 +46,7 @@ public final class AndroidRequests implements DirWatch.Listener {
      * Linux piece that lands before the APK keeps its own fallback instead of writing a request nobody serves.
      */
     private void writeVerbs() {
-        StringBuilder v = new StringBuilder("wifi-panel\nopen\nsplit\nfloat\npower\npack\n");
+        StringBuilder v = new StringBuilder("wifi-panel\nopen\nsplit\nfloat\npower\npack\nprogress\n");
         if (launcher != null)
             v.append("launcher\n");
         File out = new File(file.getParentFile(), "android-request.verbs");
@@ -133,6 +134,11 @@ public final class AndroidRequests implements DirWatch.Listener {
 
     @Override
     public void onEvent(int event, String path) {
+        // A Linux job's progress (powos-progress: run/progress-ID.state, Powback/PowOS#11): its own file per job.
+        if (Progress.idOf(path) != null) {
+            Progress.fromFile(ctx, new File(file.getParentFile(), path));
+            return;
+        }
         if (!"android-request".equals(path))
             return;
         String line;
