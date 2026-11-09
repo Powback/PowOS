@@ -33,6 +33,7 @@ import type {
   PrivacyList,
   PhoneNotification,
   RecentTask,
+  SplitPair,
   RunState,
   AppLinks,
   AppWindow,
@@ -356,6 +357,8 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       remove: (id) => call<boolean>("tasks.remove", id),
       split: (first, second) => call<boolean>("tasks.split", first, second),
       openSplit: (first, second) => call<boolean>("tasks.openSplit", first, second),
+      splitPair: () => call<SplitPair | null>("tasks.splitPair"), // detect: an older APK has none (ui/splitpair.ts)
+      launchPair: (first, second) => call<boolean>("tasks.launchPair", first, second),
       float: (id) => call<boolean>("tasks.float", id),
       desktopWindow: (id, on = true) => call<boolean>("tasks.desktopWindow", id, on),
       info: (id) => call<boolean>("tasks.info", id),

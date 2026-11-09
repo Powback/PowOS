@@ -869,6 +869,26 @@ With the APK shipped and the user idle, open two apps from the launcher (web win
 
 ---
 
+## A split pair is one app everywhere (2026-11-09, branch agent/split-apps)
+
+User ask 2026-10-31: "a split pair is ONE app entry everywhere (switcher, recents, ...)". Behaviours asked for, and status:
+
+- [x] Switcher: Android's split is one card (d985ffbd, bf8ba934: `ShellBridge.splitCard`), tap restores it, swipe closes both.
+- [x] Dock: Android's split is one group cell (`ui/dockgroups.tsx` `DockGroup.native`, from `ui/splitpair.ts` `livePair`),
+  as a web window tiling already was (DG1); a tap brings the split back (`tasks.openSplit`), never one app alone.
+- [x] Recents (dock recents page, recents widget): a pair used lately (Android's split, a 2-4 window tiling) is ONE entry
+  (`ui/pairs.tsx` `recentEntries`, `PairCell`); its apps get no entry of their own. Kept across restarts (store `pairs`,
+  6 at most); an app opened alone ends its pair (`state.ts launch` -> `forgetPairOf`).
+- [x] Launched together: a recent pair's tap -> the split back while it stands; web windows on -> tiled again
+  (`tileApps`); else `tasks.launchPair` (host): WM Shell's split of their tasks with the recents role, otherwise
+  Android's public `FLAG_ACTIVITY_LAUNCH_ADJACENT` in one `startActivities` (`Tasks.launchAdjacent`) - the non-root path.
+- [x] Closed together: the switcher's swipe removes both tasks (existing).
+- [ ] Switcher: a web window tiling as ONE card (today each tiled window has its own card).
+- [ ] Non-root: a way to MAKE a pair without the recents role (an app menu's "Split with..." -> `launchPair`); a non-root
+  install can't see WM Shell's split (`livePair` stays null), so its pairs come only from PowOS's own launches.
+- [ ] A pair pinned to the dock (a saved app pair, as Launcher3's).
+- Device check: `tools/phone/verify/board-look-windows.sh pair-entity` (dock cell, dock tap, recent pair, pair launch).
+
 ## An app into a desktop window (2026-10-30)
 
 One path makes a running app a web window: `ShellBridge.toWebWindow(task)`. A web window's full-screen app goes back

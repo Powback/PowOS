@@ -2,35 +2,36 @@
  * The recent apps: a row of the apps opened lately, last first (not those pinned to the dock, at hand already).
  *
  * A home widget of its own (a "panel" home item, "recents": moved and resized as any other), added from the edit
- * bar's picker; by default the recent apps are the dock's second page (home.tsx Dock).
+ * bar's picker; by default the recent apps are the dock's second page (home.tsx Dock). A pair used lately (Android's
+ * split, a web window tiling) is one entry (ui/pairs.tsx): a tap launches its apps together.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import { AppCell } from "./apps.tsx";
-import { byKey, dock, home, recent } from "../state.ts";
+import { dock, home, recent } from "../state.ts";
+import { entryKey, PairCell, recentEntries, type RecentEntry } from "./pairs.tsx";
 import type { Cell, HomeItem } from "../types.ts";
 
-/** The recent apps not pinned to the dock, newest first. */
+/** The recent apps not pinned to the dock, newest first; a recent pair as one entry (ui/pairs.tsx). */
 function recents() {
-  const pinned = new Set(dock.value);
-  return recent.value
-    .filter((k) => !pinned.has(k))
-    .map((k) => byKey.value.get(k))
-    .filter((a) => a != null);
+  return recentEntries(recent.value, new Set(dock.value));
 }
+
+/** An entry's cell: a pair's combined icon, or the app's. */
+const Entry = ({ e }: { e: RecentEntry }) => (e.pair ? <PairCell pair={e.pair} /> : <AppCell app={e.app} labels={false} draggable />);
 
 /** Six to a row's width, the rest a sideways scroll away; back at the newest whenever the list changes. */
 export function RecentRow() {
   const row = useRef<HTMLDivElement>(null);
   const shown = recents();
-  const first = shown[0]?.key;
+  const first = shown[0] && entryKey(shown[0]);
   useEffect(() => {
     row.current?.scrollTo({ left: 0 });
   }, [first]);
   return (
     <div class="strip" ref={row}>
-      {shown.map((app) => (
-        <AppCell key={app.key} app={app} labels={false} draggable />
+      {shown.map((e) => (
+        <Entry key={entryKey(e)} e={e} />
       ))}
     </div>
   );
@@ -80,8 +81,8 @@ export function RecentsPanel({ item }: { item: HomeItem }) {
     <div ref={face} class="tile recents-face fit" style={{ "--recent-c": best.c, "--recent-r": best.r, "--recent-icon": `${icon}px` }}>
       {W > 0 && (
         <div class="recents-grid">
-          {all.slice(0, n).map((app) => (
-            <AppCell key={app.key} app={app} labels={false} draggable />
+          {all.slice(0, n).map((e) => (
+            <Entry key={entryKey(e)} e={e} />
           ))}
         </div>
       )}
