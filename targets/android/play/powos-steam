@@ -16,6 +16,8 @@ set -euo pipefail
 powos-pack need gaming
 S=${STEAM_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/Steam}
 CDN=https://client-update.steamstatic.com
+# The notification for this first-run work (powos-progress, engine Progress.java); never fatal (an older image has none).
+progress() { command -v powos-progress >/dev/null && powos-progress "$@" >/dev/null 2>&1 || true; }
 
 bootstrap() {
   echo "powos-steam: fetching the ARM64 Steam client bootstrap" >&2
@@ -25,7 +27,20 @@ bootstrap() {
   # The package with steamrtarm64/steam and its updater; the client downloads the rest itself.
   f=$(printf '%s\n' "$manifest" | awk '/"bins_linuxarm64_linuxarm64"/ {p=1} p && /"file"/ {gsub(/"/, "", $2); print $2; exit}')
   [ -n "$f" ] || { echo "powos-steam: no bins_linuxarm64_linuxarm64 in Valve's manifest" >&2; exit 1; }
-  curl -fL --progress-bar -o "$S/.bootstrap.zip" "$CDN/$f"
+  # In the background, its size polled: the progress also shows as a notification (powos-progress, issue #11),
+  # not only on a stderr nobody sees when Steam starts from an icon.
+  local total got pid
+  total=$(curl -fsIL "$CDN/$f" | tr -d '\r' | awk 'tolower($1) == "content-length:" {n=$2} END {print n+0}')
+  curl -fsSL -o "$S/.bootstrap.zip" "$CDN/$f" & pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    got=$(stat -c %s "$S/.bootstrap.zip" 2>/dev/null || echo 0)
+    progress steam-setup "$got" "$total" "Downloading Steam ($((total >> 20)) MB)"
+    printf '\rpowos-steam: %d / %d MB ' $((got >> 20)) $((total >> 20)) >&2
+    sleep 1
+  done
+  wait "$pid" || { progress steam-setup failed "couldn't download Valve's Steam client"; echo >&2; exit 1; }
+  echo >&2
+  progress steam-setup 0 0 "Unpacking Steam"; fresh=1
   # Valve's zips use '\' separators in places and carry no permission bits (Steam's own unpacker handles both).
   python3 - "$S" <<'PY'
 import os, sys, zipfile
@@ -53,6 +68,27 @@ mkdir -p "$HOME/.steam" "$S/logs"
 ln -sfn "$S" "$HOME/.steam/steam"
 ln -sfn "$S" "$HOME/.steam/root"
 ln -sfn "$S/steamrtarm64" "$HOME/.steam/bin64"
+
+# Steam's own updater (first run ~650 MB, then each client update): its bootstrap_log.txt lines as the notification
+# (issue #11), from this start's lines on; gone when it is through, or when Steam exits.
+follow_update() {
+  local log=$S/logs/bootstrap_log.txt from shown=${fresh:-} line d t
+  from=$(( $(stat -c %s "$log" 2>/dev/null || echo 0) + 1 ))
+  while :; do
+    read -r -t 60 line || { [ -n "$shown" ] && progress steam-setup done; return; }
+    case $line in
+      *"Downloading update ("*" of "*" KB)"*)
+        d=${line#*Downloading update (}; t=${d#* of }; d=${d%% of *}; t=${t%% KB*}
+        d=${d//,/}; t=${t//,/}
+        [[ $d =~ ^[0-9]+$ && $t =~ ^[0-9]+$ ]] && { shown=1; progress steam-setup "$d" "$t" "Downloading Steam update ($((t >> 10)) MB)"; } ;;
+      *"Extracting package"*) shown=1; progress steam-setup 0 0 "Unpacking Steam" ;;
+      *"Verifying installation"*) shown=1; progress steam-setup 0 0 "Checking Steam" ;;
+      *"complete"*|*"launching"*|*"Launching"*) [ -n "$shown" ] && { progress steam-setup 0 0 "Starting Steam"; sleep 5; progress steam-setup done; }; return ;;
+    esac
+  done < <(tail -c +"$from" -F "$log" 2>/dev/null)
+}
+follow_update & follower=$!
+trap 'kill "$follower" 2>/dev/null; progress steam-setup done' EXIT
 
 cd "$S/steamrtarm64"
 # HACK: the dynamic loader is not fakechroot-aware: LD_LIBRARY_PATH entries must be HOST paths (the rootfs's own

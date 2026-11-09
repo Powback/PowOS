@@ -15,6 +15,9 @@ if [ "${PUBLISH_REPO_INNER:-}" != 1 ]; then
   if command -v repo-add >/dev/null && command -v vercmp >/dev/null; then
     PUBLISH_REPO_INNER=1 exec bash "$0"
   elif command -v docker >/dev/null && docker info >/dev/null 2>&1; then
+    # Without arm64 emulation (an x86 CI runner, no binfmt/qemu) the image can't start: rc 255, no output (issue #10).
+    docker run --rm --platform linux/arm64 menci/archlinuxarm:latest true >/dev/null 2>&1 || {
+      echo "SKIP test-publish-repo: docker can't run linux/arm64 here (no qemu binfmt)"; exit 0; }
     # label=disable: on an SELinux-enforcing engine (.58's podman) container_t may not read a $HOME bind mount
     # (bash: Permission denied, rc=126); a no-op on Colima. Never :z - that would relabel the checkout.
     # HACK: --user nobody - on an SELinux host every file carries security.selinux, repo-add's bsdtar archives it into

@@ -809,6 +809,11 @@ _ai_compose_prompt() {
     local context=""
     if [[ -n "${AGENT_CONTEXT_CMD:-}" ]]; then
         context=$(eval "$AGENT_CONTEXT_CMD" 2>/dev/null || true)
+        # What THIS device is (lib/ai/manager/powos-device-context): capabilities.md describes every device.
+        local _dc; _dc="$(sh "$(dirname "${BASH_SOURCE[0]}")/manager/powos-device-context" 2>/dev/null)"
+        [[ -z "$_dc" ]] || context="$_dc
+
+$context"
     fi
 
     # Build full prompt with context

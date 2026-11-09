@@ -74,7 +74,8 @@ area instead of the output's, for the window, its dialogs and their popups; the 
 Title bars (kwin 0026): a task shows the window's client area only, so the app's frame (WindowFrames) adds a bar -
 unless the window draws its own. KWin says which before `open` and whenever it changes: `decor <id> 1` (KWin's
 decoration: Kate, Dolphin) or `decor <id> 0` (client-side: Steam, GTK header bars - no frame bar, only the grip),
-again for every task on `hello`. A drag on a window's own bar asks KWin for an interactive move; KWin cancels it and
+again for every task on `hello`. `decor <id> 0 own` (0046) = it draws its own frame; plain `decor <id> 0` = a
+borderless window (a game's: Wine/Unity/SDL popups, fixed size or opened at the output's size; 0068) - it gets the bar. A drag on a window's own bar asks KWin for an interactive move; KWin cancels it and
 sends `move <id>`: the task's activity hands the rest of that touch to the frame's drag (KWin's touch lifted first).
 
 ## From the launcher

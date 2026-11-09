@@ -879,6 +879,26 @@ With the APK shipped and the user idle, open two apps from the launcher (web win
 
 ---
 
+## A split pair is one app everywhere (2026-11-09, branch agent/split-apps)
+
+User ask 2026-10-31: "a split pair is ONE app entry everywhere (switcher, recents, ...)". Behaviours asked for, and status:
+
+- [x] Switcher: Android's split is one card (d985ffbd, bf8ba934: `ShellBridge.splitCard`), tap restores it, swipe closes both.
+- [x] Dock: Android's split is one group cell (`ui/dockgroups.tsx` `DockGroup.native`, from `ui/splitpair.ts` `livePair`),
+  as a web window tiling already was (DG1); a tap brings the split back (`tasks.openSplit`), never one app alone.
+- [x] Recents (dock recents page, recents widget): a pair used lately (Android's split, a 2-4 window tiling) is ONE entry
+  (`ui/pairs.tsx` `recentEntries`, `PairCell`); its apps get no entry of their own. Kept across restarts (store `pairs`,
+  6 at most); an app opened alone ends its pair (`state.ts launch` -> `forgetPairOf`).
+- [x] Launched together: a recent pair's tap -> the split back while it stands; web windows on -> tiled again
+  (`tileApps`); else `tasks.launchPair` (host): WM Shell's split of their tasks with the recents role, otherwise
+  Android's public `FLAG_ACTIVITY_LAUNCH_ADJACENT` in one `startActivities` (`Tasks.launchAdjacent`) - the non-root path.
+- [x] Closed together: the switcher's swipe removes both tasks (existing).
+- [ ] Switcher: a web window tiling as ONE card (today each tiled window has its own card).
+- [ ] Non-root: a way to MAKE a pair without the recents role (an app menu's "Split with..." -> `launchPair`); a non-root
+  install can't see WM Shell's split (`livePair` stays null), so its pairs come only from PowOS's own launches.
+- [ ] A pair pinned to the dock (a saved app pair, as Launcher3's).
+- Device check: `tools/phone/verify/board-look-windows.sh pair-entity` (dock cell, dock tap, recent pair, pair launch).
+
 ## An app into a desktop window (2026-10-30)
 
 One path makes a running app a web window: `ShellBridge.toWebWindow(task)`. A web window's full-screen app goes back
@@ -1015,6 +1035,15 @@ With the APK installed, unfolded, `powos_web_windows` = 1 and the user idle: ope
   `moveresize <id> move|<edges>`: `WebWindows.linuxMoveResize` cancels the touch to KWin, the page's Body drives the
   frame with the same pointer (`appDragMove`: moves/untiles/snaps like the bar, resizes like an edge; held still 500 ms:
   the tile menu). Its maximize (button or double click on its tab strip) = PowOS full screen, minimize = the dock.
+- **Borderless is not a frame (kwin 0068 / 3.76, 2026-11-09):** of the windows without KWin's title bar, one that asked
+  for full screen has no frame at all (immersive/full screen), one that bypasses the WM (X11 override-redirect) is never
+  a window (a popup drawn into its app's task, 0062), and an undecorated one is `own` only with proof it draws a frame:
+  `_GTK_FRAME_EXTENTS`, an xdg toplevel's CSD, or it started its own move/resize. `_MOTIF_WM_HINTS` "no decorations"
+  alone (Steam's CEF window, and every game's borderless window: Wine `WS_POPUP`, Unity `-popupwindow`, SDL borderless)
+  counts only while the window is resizable and did not open at its output's size, so a game's window keeps PowOS's bar
+  (close, full screen, resize) by what it is, for every game (`AnlandTaskPolicy::drawsOwnFrame`; the user 11-08,
+  Broforce "without a title bar, so there's no way to resize it or make it fullscreen"). The app's
+  `WebWindows.pageOwnFrame` keeps a known game's (`isGame`) bar too, for a resizable borderless game.
 - **Content = the visible frame (kwin 0046):** an undecorated window is shown and sized by KWin's `frameGeometry` (the
   X11 client geometry includes `_GTK_FRAME_EXTENTS`, the shadow): before, Brave's frame sat ~16 logical px inside the
   body with a dark gutter left/right/bottom and KWin's refit loop ("took 543x628 itself, the task is 504x606").

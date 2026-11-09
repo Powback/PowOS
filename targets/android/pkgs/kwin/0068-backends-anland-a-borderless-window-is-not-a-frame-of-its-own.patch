@@ -1,0 +1,143 @@
+From fa7fae0b456f25166d21c8bea6170d8e1d397e79 Mon Sep 17 00:00:00 2001
+From: Mats Bakken <mats@powback.com>
+Date: Mon, 9 Nov 2026 05:26:23 +0100
+Subject: [PATCH] backends/anland: a borderless window is not a frame of its
+ own
+
+---
+ src/backends/anland/anland_task_policy.h   | 26 +++++++++++++++-
+ src/backends/anland/anland_window_task.cpp | 36 +++++++++++++++++-----
+ src/backends/anland/anland_window_task.h   |  3 ++
+ 3 files changed, 57 insertions(+), 8 deletions(-)
+
+diff --git a/src/backends/anland/anland_task_policy.h b/src/backends/anland/anland_task_policy.h
+index 551eb23..f84b90f 100644
+--- a/src/backends/anland/anland_task_policy.h
++++ b/src/backends/anland/anland_task_policy.h
+@@ -1,5 +1,5 @@
+ /*
+-    PowOS (0066): pure decisions of the window tasks around a full-screen task (a game), kept free of Qt and KWin so
++    PowOS (0066, 0068): pure decisions of the window tasks around a full-screen task (a game), kept free of Qt and KWin so
+     test/task-policy-test.cpp checks them without a KWin build.
+ */
+ #pragma once
+@@ -52,4 +52,28 @@ inline RestoreWatch restoreWatch(int64_t sinceMs, int64_t sinceCommitMs, bool ac
+     return sinceCommitMs >= restoreStallMs ? RestoreWatch::Kick : RestoreWatch::Wait;
+ }
+ 
++/**
++ * 0068: whether an undecorated window draws its own complete frame (title bar, close, edges: the app's page shows no
++ * PowOS bar over it) or is a BORDERLESS window that has none (PowOS's bar gives it close, full screen and resize).
++ * The three kinds of window without KWin's title bar are told apart here and before:
++ *  - full screen (the app asked: _NET_WM_STATE_FULLSCREEN, xdg set_fullscreen): no frame at all, never asked here;
++ *  - bypassing the window manager (X11 override-redirect): never a task, drawn into its app's task as a popup (0062);
++ *  - undecorated: this decision.
++ * Positive proof of a frame of its own: [clientSideDecorated] (X11 _GTK_FRAME_EXTENTS - GTK, Chrome, Brave; an xdg
++ * toplevel that kept client-side decorations), or [movedItself] (it started its own move/resize - a drag on a title bar
++ * it draws: _NET_WM_MOVERESIZE, xdg_toplevel.move). An X11 window that only asked for no decorations
++ * ([undecoratedByHints], _MOTIF_WM_HINTS) is ambiguous - Steam's CEF window draws a frame, a game's borderless window
++ * (Wine WS_POPUP, Unity -popupwindow, SDL_WINDOW_BORDERLESS) doesn't: it counts as framed only while [resizable] (a
++ * frame's edges need a size that can change; Wine pins a borderless popup's min = max size) and not [coversOutput] at
++ * its first map (a borderless full-screen game: Wine/Unity open their popup at the screen's size, which Wine then
++ * reports resizable). Every game's window gets PowOS's bar this way, by what it is, not by which game it is.
++ */
++inline bool drawsOwnFrame(bool clientSideDecorated, bool undecoratedByHints, bool resizable, bool coversOutput, bool movedItself)
++{
++    if (clientSideDecorated || movedItself) {
++        return true;
++    }
++    return undecoratedByHints && resizable && !coversOutput;
++}
++
+ } // namespace KWin::AnlandTaskPolicy
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 9d0262b..f9d8dab 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -144,6 +144,11 @@ AnlandWindowTask::AnlandWindowTask(AnlandWindowTasks *tasks, Window *window, uin
+         }
+         tellDecoration(false);
+     });
++    // 0068: its size hints changed (min = max size pinned or freed: allowed actions follow them) - a borderless
++    // window's frame verdict follows (drawsOwnFrame reads isResizable()).
++    connect(window, &Window::maximizeableChanged, this, [this]() {
++        tellDecoration(false);
++    });
+     tellDecoration(false);
+     // The window's own title bar dragged (a client-side one: Steam's, a GTK header bar) starts KWin's interactive move,
+     // on the hidden desktop where nothing shows it: the app moves the task instead (handOverMoveResize).
+@@ -347,15 +352,17 @@ void AnlandWindowTask::tellDecoration(bool again)
+     }
+     // Held "nodecor": KWin's border is off, but the window still needs a title bar - the frame's (still "1").
+     const int decorated = (m_window->isDecorated() || m_noBorderHeld) ? 1 : 0;
+-    if (!again && decorated == m_decorTold) {
++    // Undecorated: a normal window or dialog that draws its own complete frame (Brave, Chrome, Steam, a GTK header
++    // bar) says so ("own"): the app shows no second bar over it. Any other undecorated one (a game's borderless window,
++    // a splash) gets the app's bar (0068: AnlandTaskPolicy::drawsOwnFrame).
++    const bool own = !decorated && drawsOwnFrame();
++    if (!again && decorated == m_decorTold && int(own) == m_ownTold) {
+         return;
+     }
+     m_decorTold = decorated;
+-    // Undecorated: a normal window or dialog that draws its own complete frame (Brave, Chrome, Steam, a GTK header
+-    // bar) says so ("own"): the app shows no second bar over it. Anything else undecorated (a splash) has no bar at all.
+-    const bool own = !decorated && drawsOwnFrame();
++    m_ownTold = own ? 1 : 0;
+     qCInfo(KWIN_ANLAND) << "window task" << m_id
+-                        << (decorated ? "has KWin's title bar" : own ? "draws its own frame (client-side decorations)" : "has no title bar");
++                        << (decorated ? "has KWin's title bar" : own ? "draws its own frame (client-side decorations)" : "is borderless: no title bar of its own");
+     QStringList line{QStringLiteral("decor"), QString::number(m_id), QString::number(decorated)};
+     if (own) {
+         line.append(QStringLiteral("own"));
+@@ -461,6 +468,12 @@ void AnlandWindowTask::handOverMoveResize()
+         return;
+     }
+     const bool move = m_window->isInteractiveMove();
++    // 0068: a window that moves or resizes itself draws its own title bar or edges: it has a frame of its own (an
++    // undecorated window first taken for a borderless one loses the app's second bar now).
++    if (!m_movedItself) {
++        m_movedItself = true;
++        tellDecoration(false);
++    }
+     // Which edges a resize drags (its gravity), as the app's frame names them: n s e w ne nw se sw.
+     QString edges = QStringLiteral("move");
+     if (!move) {
+@@ -1053,10 +1066,19 @@ bool AnlandWindowTask::drawsOwnFrame() const
+         return false;
+     }
+     if (auto x11 = qobject_cast<const X11Window *>(m_window)) {
+-        return x11->isClientSideDecorated() || x11->noBorder();
++        // Whether it covered its output is read once, at its first map: a framed app later maximized to the output
++        // stays framed, a borderless full-screen game made smaller stays borderless.
++        if (m_coveredOutputAtMap < 0) {
++            const LogicalOutput *out = m_window->output();
++            const RectF frame = m_window->frameGeometry();
++            const RectF screen = out ? out->geometryF() : RectF();
++            m_coveredOutputAtMap = (!screen.isEmpty() && frame.width() >= screen.width() - 1 && frame.height() >= screen.height() - 1) ? 1 : 0;
++        }
++        return AnlandTaskPolicy::drawsOwnFrame(x11->isClientSideDecorated(), x11->noBorder(), x11->isResizable(),
++                                               m_coveredOutputAtMap == 1, m_movedItself);
+     }
+     // An undecorated xdg toplevel: KWin offered server-side decorations (xdg-decoration) and it kept its own.
+-    return qobject_cast<const XdgToplevelWindow *>(m_window) != nullptr;
++    return AnlandTaskPolicy::drawsOwnFrame(qobject_cast<const XdgToplevelWindow *>(m_window) != nullptr, false, false, false, m_movedItself);
+ }
+ 
+ void AnlandWindowTask::noteFrameStats()
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 518513a..54315db 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -252,6 +252,9 @@ private:
+     bool m_fullScreenAsked = false;
+     bool m_givingBack = false; // giveBack restoring the window's own maximize: not a request of its own
+     int m_decorTold = -1; // the last "decor" told: 1 KWin's title bar, 0 the window's own, -1 not yet
++    int m_ownTold = -1; // 0068: the last "decor 0" told "own" (1) or not (0), -1 not yet
++    mutable int m_coveredOutputAtMap = -1; // 0068: an undecorated X11 window covered its output when first asked (-1 not yet)
++    bool m_movedItself = false; // 0068: it started its own move/resize (its own title bar): it draws its own frame
+     bool m_noBorderHeld = false; // "nodecor": KWin's border taken off while a task (holdNoBorder)
+     bool m_noBorderBefore = false; // its noBorder before, restored on the desktop
+     bool m_ownKeyboard = false; // "ime <id> 1": the app's keyboard for this task listens on its connection
+-- 
+2.50.1 (Apple Git-155)
+

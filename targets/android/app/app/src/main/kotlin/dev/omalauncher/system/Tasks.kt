@@ -225,6 +225,34 @@ object Tasks {
     }
 
     /**
+     * Apps [first] (left / top) and [second] launched together as Android's split screen with the SDK's own API, no
+     * root and no recents role: [second] carries FLAG_ACTIVITY_LAUNCH_ADJACENT, so WM Shell (12L+) puts it beside
+     * [first] in its split. One startActivities call, so both start in one transaction: never [first] alone full
+     * screen for a moment and then the split. An app with a task already is brought into the split, not started twice
+     * (no MULTIPLE_TASK). The pair entity's launch (ShellBridge launchPair) when WM Shell's ISplitScreen isn't PowOS's.
+     */
+    fun launchAdjacent(
+        context: Context,
+        first: ComponentName,
+        second: ComponentName,
+    ): Boolean {
+        if (first.packageName == context.packageName || second.packageName == context.packageName || first == second) {
+            Log.w(TAG, "pair launch of $first and $second refused: home is never a side, nor one app twice")
+            return false
+        }
+        val main = { c: ComponentName ->
+            android.content.Intent(android.content.Intent.ACTION_MAIN)
+                .addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+                .setComponent(c)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        }
+        val adjacent = main(second).addFlags(android.content.Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
+        Log.i(TAG, "pair launch ${first.packageName} | ${second.packageName}: launch-adjacent")
+        return runCatching { context.startActivities(arrayOf(main(first), adjacent)) }
+            .onFailure { Log.w(TAG, "can't launch $first and $second together", it) }.isSuccess
+    }
+
+    /**
      * Task [id] in Android's own floating window: OnePlus' zoom window (WINDOWING_MODE_ZOOM, 100), exactly what the
      * "..." app handle's "Floating window" makes (OxygenOS 16 SystemUI FullscreenTaskOperations.moveTaskToFreeform:
      * startTask with android.activity.windowingMode 100 and flexibleStartFrom), so it carries OnePlus' own controls -

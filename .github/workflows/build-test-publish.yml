@@ -105,6 +105,14 @@ jobs:
       # now picked up the moment it lands, with nothing to remember.
       # Known-flaky / known-broken suites are declared with a reason in
       # run-all.sh; they still run and report, they just don't gate the build.
+      # Some suites run real aarch64 programs (the phone's loopback-unix shim, the Arch [powos] repo merge) in
+      # linux/arm64 containers; the x86 runner needs qemu binfmt for those, else docker dies with exec format error
+      # (rc 255) and master stayed red from 11-03 (issue #10).
+      - name: arm64 emulation for the aarch64 suites
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
       - name: Tier1 suite (auto-discovered)
         run: |
           pip install psutil rich 2>/dev/null || true

@@ -4402,8 +4402,12 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .ais-mic-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--color-foreground); opacity: 0.6; }
 .ais-mic.on .ais-mic-dot { background: var(--color-accent); opacity: 1; animation: aip-pulse 1.2s var(--ambient) infinite; }
 .ais-reply + .ais-mic { display: none; }
-/* Off screen, at rest: nothing on the page animates (the idle check; it never paints behind home). */
-.ai-screen.status:not(.shown) * { animation: none !important; transition: none !important; }
+/* Off screen, at rest: nothing on the page animates (the idle check; it never paints behind home) - each animation
+   ends at once (0 s), not removed. It was `animation: none` (GitHub Powback/PowOS#5): putting it back on every switch
+   started every section's entrance animation again (ais-rise / ais-in / aip-fill, 590 ms each) while the page slid in,
+   the hitch on each switch (dev/perf/ai-switch.js, PERF_TRACE=inv: their Animation invalidations). Its duration coming
+   back doesn't restart an animation that already ended: shown, the page is at rest. */
+.ai-screen.status:not(.shown) * { animation-duration: 0s !important; transition: none !important; }
 /* At rest on screen too: a working agent's dot is still (its bar and step move when it does). */
 :is(.ai-screen.status, .ai-left) .aip-dot.working { animation-iteration-count: 3; }
 /*

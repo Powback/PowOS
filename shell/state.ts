@@ -9,6 +9,7 @@ import { closeGlasses, glassesOpen } from "./glasses/open.ts";
 import { agentsView, closeAgents } from "./agents.ts";
 import { backScreen, closeScreens } from "./screens.ts";
 import { recentsBack, recentsHome, recentsLaunched } from "./ui/recents.tsx";
+import { forgetPairOf } from "./ui/splitpair.ts";
 import { stableRows } from "./apps/stable.ts";
 import { appView, closeApp, initPowosApps, mergeRecent, noteHostRecent, openApp, powosApps, PREFIX } from "./apps/pages.ts";
 import type { App, AppWindow, Chat, Home, HomeItem, WebWindowRect, WidgetScreen } from "./types.ts";
@@ -634,6 +635,8 @@ function openAsWebWindow(key: string): Promise<boolean> {
 export async function launch(key: string, { fullScreen = false }: { fullScreen?: boolean } = {}) {
   menu.value = null;
   recentsLaunched();
+  // Opened alone: its recent pair ends (ui/splitpair.ts) - unless that split still stands (it comes back as the split).
+  forgetPairOf(key);
   // A PowOS app: its page, full screen in this one (ui/appscreen.tsx).
   if (key.startsWith(PREFIX)) {
     openApp(key.slice(PREFIX.length));

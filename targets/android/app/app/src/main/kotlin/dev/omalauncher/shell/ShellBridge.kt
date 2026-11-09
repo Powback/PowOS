@@ -287,6 +287,10 @@ class ShellBridge(
     private val lockChanged: (JSONObject) -> Unit = { emit("devices.lock", it) }
 
     init {
+        // The games' built-in fps counter follows the fps meter's switch (store "perf.meter"), from the start.
+        andro.marchy.GameFpsCounter.on = runCatching {
+            store("perf.meter").takeIf { it.isFile }?.let { JSONObject(it.readText()).optBoolean("on") } ?: false
+        }.getOrDefault(false)
         // Home's bridge: an app the system's own window menu floats becomes a web window (SystemFloat, web windows on).
         if (activity != null) SystemFloat.start(context, systemFloat)
         if (activity != null) andro.marchy.WebWindowSource.host = linuxWindows
@@ -340,6 +344,12 @@ class ShellBridge(
             snapshotFlow { listOf(runtime.androidApps.apps.size, runtime.linuxApps.size, ShellIcons.version.intValue) }.drop(1).collect { emit("apps.changed", null) }
         }
         scope.launch { runtime.refreshApps() }
+        // Android's split formed or ended: the page's pair entity (ui/pairs.tsx: the dock's group cell, the recent pair).
+        scope.launch {
+            dev.omalauncher.system.SplitDrawer.pairs.drop(1).collect {
+                emit("tasks.splitPair", withContext(Dispatchers.Default) { splitPair() })
+            }
+        }
         // An app's task opened or gone, a Linux app's window, or its freeze or thaw: the running dots (ui/running.ts).
         scope.launch {
             snapshotFlow { RunningApps.tasks.value to RunningApps.linux.value }.drop(1).collect { emit("apps.running", running()) }
@@ -544,7 +554,11 @@ class ShellBridge(
             "store.set" -> {
                 store(a.getString(0)).writeText(a.get(1).let { if (it is String) JSONObject.quote(it) else it.toString() })
                 // The fps meter's switch takes effect in every shell window at once (status bar, home), not on its next poll.
-                if (a.getString(0) == "perf.meter") runCatching { JSONObject(a.get(1).toString()).toString() }.getOrNull()?.let { broadcast("perf.meter", it) }
+                if (a.getString(0) == "perf.meter") runCatching { JSONObject(a.get(1).toString()).toString() }.getOrNull()?.let {
+                    broadcast("perf.meter", it)
+                    // A game's window task shows its own counter (the bar's meter is hidden under a full-screen game).
+                    andro.marchy.GameFpsCounter.on = runCatching { JSONObject(it).optBoolean("on") }.getOrDefault(false)
+                }
                 Unit
             }
             // SI1: the one search/chat bar input home's bar (and its search widget) and the launcher overlay share (barsync.ts):
@@ -701,6 +715,8 @@ class ShellBridge(
             "tasks.remove" -> dev.omalauncher.system.Tasks.remove(context, a.getInt(0)).also { appWidgets.heal() }
             "tasks.split" -> dev.omalauncher.system.Tasks.splitApps(context, a.getInt(0), a.getInt(1))
             "tasks.openSplit" -> openSplit(a.getInt(0), a.getInt(1))
+            "tasks.splitPair" -> splitPair() ?: JSONObject.NULL
+            "tasks.launchPair" -> launchPair(a.getString(0), a.getString(1))
             "tasks.desktopWindow" -> desktopWindow(a.getInt(0), a.optBoolean(1, true))
             "tasks.float" -> dev.omalauncher.system.Tasks.float(context, a.getInt(0))
             "tasks.toWindow" -> toWebWindow(a.getInt(0)).also { if (it) dev.omalauncher.system.Switcher.hide() }
@@ -1139,6 +1155,49 @@ class ShellBridge(
         )
         val at = list.indexOfFirst { it.optInt("id") in pair }
         return list.filterNot { it.optInt("id") in pair }.toMutableList().apply { add(at, card) }
+    }
+
+    /**
+     * Android's split screen as the page's pair entity (ui/pairs.tsx): { ids, keys, layout } - its two tasks left /
+     * top first, their apps' drawer keys - or null when there's no split or a side isn't a drawer app.
+     */
+    private fun splitPair(): JSONObject? {
+        val pair = dev.omalauncher.system.SplitDrawer.pair
+        if (pair.size != 2) return null
+        val listed = dev.omalauncher.system.Tasks.list(context).associateBy { it.id }
+        val keys = pair.map { id -> listed[id]?.let { taskApp(it).first } ?: return null }
+        return JSONObject()
+            .put("ids", JSONArray(pair))
+            .put("keys", JSONArray(keys))
+            .put("layout", dev.omalauncher.system.SplitDrawer.layout(context))
+    }
+
+    /**
+     * The pair entity's launch (a recent pair's tap, ui/pairs.tsx): apps [first] (left / top) and [second] split
+     * together. Still split: the split back ([openSplit]). Both with a task and WM Shell's ISplitScreen PowOS's (the
+     * recents role, root): its split of the two ([Tasks.splitApps], one WM Shell transition). Otherwise - no root, or an
+     * app not running - Android's public launch-adjacent ([Tasks.launchAdjacent]). Android apps only ("a:" keys).
+     */
+    private fun launchPair(
+        first: String,
+        second: String,
+    ): Boolean {
+        val apps = listOf(first, second).map { k -> android(k) ?: return false.also { Log.w(TAG, "pair $first | $second: $k is no Android app") } }
+        listOf(first, second).forEach { runtime.usage.record(it) }
+        dev.omalauncher.system.Switcher.launched("launch pair $first | $second")
+        val ok = splitTasksOf(apps.map { it.component.packageName }) ?: dev.omalauncher.system.Tasks.launchAdjacent(context, apps[0].component, apps[1].component)
+        runtime.usage.settle()
+        return ok
+    }
+
+    /** [launchPair]'s split of packages [pkgs]' running tasks (the split back, or WM Shell's split); null: launch them instead. */
+    private fun splitTasksOf(pkgs: List<String>): Boolean? {
+        val tasks = dev.omalauncher.system.Tasks.list(context)
+        val ids = pkgs.map { p -> tasks.firstOrNull { it.component?.packageName == p }?.id ?: return null }
+        val pair = dev.omalauncher.system.SplitDrawer.pair
+        if (pair.toSet() == ids.toSet()) return openSplit(pair[0], pair[1])
+        if (dev.omalauncher.system.Tasks.splitScreen == null) return null
+        return dev.omalauncher.system.Tasks.splitApps(context, ids[0], ids[1])
     }
 
     /**

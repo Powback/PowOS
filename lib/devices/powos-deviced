@@ -22,6 +22,9 @@ devices ask for (lock, screen off/on, sleep, wake another device by Wake-on-LAN,
   powos-deviced registry                 every enrolled device of the realm (asks the realm with this device's token)
   powos-deviced unenroll                 leave the realm (revokes this device's realm and AI tokens there)
   powos-deviced ai-apply                 point this device's AI at claude-auth with ITS OWN token (endpoint.conf)
+  powos-deviced owner-apply [FILE|-]     the owner config (~/.config/powos/owner.conf: the owner's hosts this device uses)
+                                         again from this enrollment's bundle, or from a JSON {POWOS_*: value}; enroll
+                                         writes it, unenroll removes it ({} removes it too)
   powos-deviced pending                  devices waiting to join the realm (this device enrolled as an approver)
   powos-deviced approve [code] [--deny] [--tenant T] [--no-approver]   let one join (no code: the only one waiting,
                                          after a yes; check the code matches the one on the new device's screen)
@@ -57,6 +60,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import shutil
 import socket
@@ -811,6 +815,9 @@ def cli_call(argv):
 
 # ── enrollment: joining the realm, LAN/VPN only (PowStation powos-enroll, docs/DEVICES.md) ──────────────────────
 
+# HACK: the realm's address defaults to the owner's (enroll.pow, LAN/VPN only): enrolling is how a device becomes the
+# owner's, so there is nothing to read it from yet. Real fix: the realm found by discovery (mDNS on the LAN) or typed /
+# scanned at enroll (--realm, the QR), no default.
 REALM = os.environ.get("POWOS_ENROLL_URL", "http://enroll.pow")
 
 
@@ -838,7 +845,7 @@ def lan_address():
     """The address other devices reach this one's agent on (the interface the default route uses)."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        s.connect(("192.168.50.1", 9))
+        s.connect(("192.0.2.1", 9))   # any routable address (TEST-NET-1): no packet is sent, only the route chosen
         return s.getsockname()[0]
     except OSError:
         return None
@@ -888,12 +895,65 @@ def unit_record(e):
                        "enrolled": time.strftime("%F", time.localtime(d.get("enrolled", 0))),
                        "approved_by": d.get("approved_by"), "revoked": None, "holds": d.get("holds", [])},
             "installedBy": "powos devices enroll",
-            "files": [enrollment_path()],
+            "files": [enrollment_path(), owner_conf_path()],
             "remove": {"commands": ["powos devices unenroll"]}}
 
 
 def units_record_path():
     return os.path.expanduser(os.environ.get("POWOS_DEVICE_UNIT", "~/.config/powos/units.d/powos-device.json"))
+
+
+# ── the owner config: what makes a device one of the owner's (issue #1) ─────────────────────────────────────────
+# A fresh device runs standalone: no host of the owner's is a code default anywhere. Enrolling in the owner's realm
+# hands it the realm's owner bundle (enroll.pow's endpoints bundle, key "owner": {POWOS_*: value}) and this writes it
+# to the ONE file every reader looks at - powos agents (POWOS_BOARD_REMOTE), powos-rootsh (POWOS_ROOTSH_SHELL), powos
+# terms (POWOS_TERMS_LINKS), powos self push --ship (POWOS_SHIP_GATE_URL), powos transcribe (POWOS_STT_URL), the
+# launcher's voice (POWOS_STT_URL, POWOS_VOICE_URL); unenroll removes it (standalone again). On a phone it is copied
+# into the app's run dir (/run/powos-app = the app's files/run) for the launcher, which can't read the session's home.
+OWNER_KEY = re.compile(r"^POWOS_[A-Z0-9_]{1,48}$")
+
+
+def owner_conf_path():
+    return os.environ.get("POWOS_OWNER_CONF") or os.path.expanduser("~/.config/powos/owner.conf")
+
+
+def owner_copies():
+    run = os.environ.get("POWOS_APP_RUN", "/run/powos-app")
+    return [owner_conf_path()] + ([os.path.join(run, "owner.conf")] if os.path.isdir(run) else [])
+
+
+def owner_apply(bundle):
+    """Writes the owner bundle ({POWOS_*: value}; anything else is ignored) as KEY=value lines; {} / None removes the
+    file (and its copy). Returns the keys written."""
+    keys = {k: str(v) for k, v in (bundle or {}).items() if OWNER_KEY.match(str(k)) and "\n" not in str(v)}
+    for path in owner_copies():
+        if not keys:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            continue
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w") as f:
+            f.write("# The owner's settings for this device, from its realm enrollment (powos devices enroll); removed on\n"
+                    "# unenroll. Not a secret. lib/devices/powos-deviced owner_apply.\n")
+            f.writelines(f"{k}={v}\n" for k, v in sorted(keys.items()))
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+    return sorted(keys)
+
+
+def cli_owner_apply(argv):
+    """`owner-apply [FILE|-]`: the bundle again from this device's enrollment (no FILE), or a JSON object from FILE."""
+    if argv:
+        src = sys.stdin.read() if argv[0] == "-" else open(argv[0]).read()
+        bundle = json.loads(src)
+    else:
+        bundle = (enrolled().get("endpoints") or {}).get("owner") or {}
+    keys = owner_apply(bundle)
+    print(f"owner config: {', '.join(keys)} -> {owner_conf_path()}" if keys else "owner config: none (standalone)")
+    return 0
 
 
 def cli_enroll(argv):
@@ -929,10 +989,12 @@ def cli_enroll(argv):
     e = {"realm": realm, "device": r["device"], "device_token": r["device_token"], "ai": r.get("ai"),
          "endpoints": r.get("endpoints", {}), "at": int(now())}
     save_json(enrollment_path(), e)
+    owner = owner_apply((e["endpoints"] or {}).get("owner"))
     save_json(units_record_path(), unit_record(e))
     os.chmod(units_record_path(), 0o644)
     print(f"enrolled: {e['device']['name']} ({e['device']['id']}), approved by {e['device'].get('approved_by')}"
-          + (f"; AI: its own token for {e['ai']['tenant']} (powos devices ai-apply)" if e.get("ai") else "; no AI access"))
+          + (f"; AI: its own token for {e['ai']['tenant']} (powos devices ai-apply)" if e.get("ai") else "; no AI access")
+          + (f"; owner config: {', '.join(owner)}" if owner else ""))
     if "--apply-ai" in argv and e.get("ai"):
         return cli_ai_apply()
     return 0
@@ -1126,9 +1188,12 @@ def main(argv):
                 os.remove(f)
             except OSError:
                 pass
+        owner_apply(None)   # standalone again: no owner hosts
         print("unenrolled: this device's realm and AI tokens no longer work")
     elif cmd == "ai-apply":
         return cli_ai_apply()
+    elif cmd == "owner-apply":
+        return cli_owner_apply(rest)
     else:
         print(__doc__.split("Protocol")[0].strip())
         return 0 if cmd in ("help", "-h", "--help") else 2

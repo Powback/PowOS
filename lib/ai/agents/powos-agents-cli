@@ -21,7 +21,7 @@ import urllib.request
 # the Mac just finished validating for itself, and that parse error reads as a real bug. __cli_version__
 # (below) lets the Mac tell "phone copy is stale" apart from "the command itself is wrong" before passing
 # an error through.
-CLI_VERSION = 5   # 4: status queued (Up next); 5: friction link/--task, task set --friction, sweep --full
+CLI_VERSION = 6   # 4: status queued (Up next); 5: friction link/--task, task set --friction, sweep --full; 6: janitor
 
 DB = "powos-agents"
 SERVER = os.environ.get("POWOS_STDB", "http://127.0.0.1:3410")
@@ -139,6 +139,12 @@ The board shows each task's TRUE state, computed from facts - never from the sta
   queued          up next: accepted, waiting for an agent slot - never an orphan (#N: its place in line)
   blocked         status blocked or waiting (on the user), with the note as the reason
   done            closed (its check passed, or --no-check)
+`powos agents janitor [--dry-run]` (powos-agentsd every 10 min, and every `task list`): the stored status follows
+the truth - a "working" claim needs a live owner (an agent whose work is the task, or the owner role's agent while
+the row's heartbeat - any task set, step or commit link - is under POWOS_CLAIM_EXPIRE_H, default 4 h); past that
+with no check queued it goes back to queued, note "claim expired: <owner> silent since <t>"; a task the facts say
+is done (a PASS of a shipped build, its fix landed, nothing else open) closes itself with that evidence. A pushed
+fix with no check reads "needs a check" everywhere until one is queued.
 `powos agents sweep [--dry-run] [--full]` (every 10 min from the Mac: launchd com.powos.board-sweep ->
 tools/agents/board-sweep.sh) reads EVERY open task and open friction each pass: recomputes severity, resolves
 the dead-end states (leaked plan steps on a passed task, a PASS / no-check reason nobody closed, same-title
@@ -196,6 +202,10 @@ class Down(Exception):
     pass
 
 
+class NoModule(Down):
+    """The server answers but has no powos-agents module (a no-root phone's SpacetimeDB runs only the apps' ones)."""
+
+
 def http(path, body, ctype):
     tok = token()
     if not tok:
@@ -206,17 +216,23 @@ def http(path, body, ctype):
         with urllib.request.urlopen(req, timeout=5) as r:
             return r.read().decode()
     except urllib.error.HTTPError as e:
+        if e.code == 404 and f"/database/{DB}/" in path:
+            raise NoModule(f"no {DB} module at {SERVER}")
         die(f"{path.rsplit('/', 1)[-1]}: {e.read().decode(errors='replace').strip() or e}")
     except (urllib.error.URLError, OSError) as e:
         raise Down(str(e))
 
 
 def call(reducer, *args):
+    if FILE_STORE:
+        return fs_call(reducer, *args)
     http(f"/v1/database/{DB}/call/{reducer}", json.dumps(list(args)).encode(), "application/json")
 
 
 def table(name):
     """Every row of one of the module's tables, as dicts."""
+    if FILE_STORE:
+        return fs_table(name)
     out = json.loads(http(f"/v1/database/{DB}/sql", f"SELECT * FROM {name}".encode(), "text/plain"))
     res = out[0]
     names = [e["name"]["some"] for e in res["schema"]["elements"]]
@@ -225,6 +241,286 @@ def table(name):
 
 def rows():
     return table("work")
+
+
+# ---- this device's own board when there's no powos-agents module (issue #1) --------------------------------------
+# A fresh device, a no-root phone (no supervisor, no /var/lib/powos/stdb) or a desktop without the module published,
+# keeps its board in one plain JSON file instead of a dead outbox to someone else's phone: the same tables and the same
+# reducer rules as apps/agents/module/src/lib.rs (work_set ... user_ask_link, the done rule may_close, board_score),
+# under a lock. The remote path (remote()/handle_down) is only for a device the owner linked to a board host
+# (POWOS_BOARD_REMOTE in owner.conf). POWOS_AGENTS_STORE=file|stdb forces one.
+# HACK: a Python copy of the module's reducers, and the PowOS AI page (a SpacetimeDB subscription) doesn't show this
+# board. Real fix: the no-root launcher publishes the powos-agents module to its own SpacetimeDB (powos-noroot-services
+# BUNDLED_DIR) and the CLI writes there like everywhere else; then this store goes.
+STORE_FILE = os.environ.get("POWOS_AGENTS_STORE_FILE") or os.path.join(
+    os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "powos", "agents-board.json")
+FILE_STORE = os.environ.get("POWOS_AGENTS_STORE") == "file"
+TABLES = ("work", "work_check", "friction", "user_ask", "unit")
+WORK_DONE_KEEP_MS, WORK_MAX = 7 * 24 * 3600 * 1000, 200
+CHECK_STATES = ("queued", "running", "PASS", "FAIL", "SKIP", "INVALID", "none")
+FRICTION_KINDS = ("refused", "broken-tool", "flaky-check", "unclear-rule", "slow", "other")
+
+
+class Refused(Exception):
+    pass
+
+
+def _fs_load():
+    try:
+        with open(STORE_FILE) as f:
+            db = json.load(f)
+    except (OSError, ValueError):
+        db = {}
+    for t in TABLES:
+        db.setdefault(t, {})
+    return db
+
+
+def _fs_save(db):
+    os.makedirs(os.path.dirname(STORE_FILE), exist_ok=True)
+    tmp = f"{STORE_FILE}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(db, f, separators=(",", ":"))
+    os.replace(tmp, STORE_FILE)
+
+
+def _fs_now():
+    return int(time.time() * 1000)
+
+
+def _cut(s, n):
+    return str(s)[:n]
+
+
+def _one(s, n):
+    return _cut(" ".join(str(s).split()), n)
+
+
+def _norm(s):
+    words = [w for w in re.split(r"[\W_]+", s.lower()) if w]
+    return " ".join("#" if any(c.isdigit() for c in w) else w for w in words)
+
+
+def _fs_score(db, wid):
+    w = db["work"].get(wid)
+    if not w:
+        return
+    fr = sum(f["count"] for f in db["friction"].values() if f["task"] == wid)
+    broken = sum(1 for c in db["work_check"].values() if c["task"] == wid and c["name"] == "you" and c["state"] == "FAIL")
+    asks = sum(1 for a in db["user_ask"].values() if a["task"] == wid)
+    user = broken * SCORE_BROKEN + max(0, asks - 1) * SCORE_ASK
+    score = fr * SCORE_FRICTION + user
+    w.update(score=score, user_score=user, severity=max(w["severity"], 2 if score >= P0_AT else 1 if score >= P1_AT else 0))
+
+
+def _fs_may_close(db, wid):
+    kids = [w["id"] for w in db["work"].values() if w["parent"] == wid and w["status"] != "done"]
+    if kids:
+        raise Refused(f"'{wid}' can't be done: {len(kids)} open sub-task(s): {_cut(', '.join(kids), 200)} - each closes "
+                      "on its own check first")
+    w = db["work"].get(wid)
+    nxt = [s["text"] for s in (_jl(w["steps"]) if w else []) if s.get("state") == "next"]
+    if nxt:
+        raise Refused(f"'{wid}' can't be done: {len(nxt)} planned step(s) still open: {_cut('; '.join(nxt), 200)} - do "
+                      f"them, or drop them from the plan (task set {wid} --plan \"\")")
+    cs = [c for c in db["work_check"].values() if c["task"] == wid and c["state"] in ("PASS", "FAIL", "none")]
+    c = max(cs, key=lambda c: c["at"]) if cs else None
+    if c and (c["state"] == "none" or (c["state"] == "PASS" and c["shipped"])):
+        return
+    if c and c["state"] == "PASS":
+        raise Refused(f"'{wid}' can't be done: its check {c['name']} passed against a build that wasn't on the phone "
+                      "yet - queue it again after the ship")
+    if c:
+        raise Refused(f"'{wid}' can't be done: its last phone check {c['name']} FAILED ({_cut(c['line'], 120)}) - fix "
+                      "it and queue the check again")
+    raise Refused(f"'{wid}' can't be done: no phone check passed for it - queue one (queue.sh add --close {wid} "
+                  "<check>), or close it with --no-check \"<why no device check is possible>\"")
+
+
+def _fs_follow(db, wid, done):
+    for f in db["friction"].values():
+        if f["task"] != wid or (done and f["status"] == "fixed"):
+            continue
+        if done:
+            f.update(status="fixed", fix_note=_one(f"closed with task {wid}", 280), fixed_at=_fs_now())
+        else:
+            f.update(status="open", task="")
+
+
+def _fs_work(db, name, wid):
+    w = db["work"].get(wid)
+    if w is None:
+        raise Refused(f"{name}: no work item '{wid}'")
+    return w
+
+
+def _fs_check_row(c, now):
+    if c.get("state") not in CHECK_STATES:
+        raise Refused(f"check: state is one of {'|'.join(CHECK_STATES)}")
+    if not str(c.get("job", "")).strip() or not str(c.get("task", "")).strip():
+        raise Refused("check: a job and a task")
+    return {"job": _cut(c["job"].strip(), 120), "task": _cut(c["task"].strip(), 64), "name": _cut(c.get("name", ""), 64),
+            "state": c["state"], "line": _one(c.get("line", ""), 300), "at": int(c.get("at") or 0) or now,
+            "need": _cut(c.get("need", ""), 40), "shipped": bool(c.get("shipped", True))}
+
+
+def _fs_reduce(db, reducer, a):
+    now = _fs_now()
+    W, C, F, A = db["work"], db["work_check"], db["friction"], db["user_ask"]
+    if reducer == "work_set":
+        wid, title, owner, status, note, project = a
+        wid = _cut(wid.strip(), 64)
+        if not wid:
+            raise Refused("work_set: no id")
+        if status and status not in STATES:
+            raise Refused(f"work_set: status is one of {'|'.join(STATES)}")
+        o = W.get(wid)
+        if status == "done" and (o is None or o["status"] != "done"):
+            _fs_may_close(db, wid)
+            _fs_follow(db, wid, True)
+        if o is None:
+            if not title.strip():
+                raise Refused(f"work_set: no work item '{wid}' (a new one needs a title)")
+            o = {"id": wid, "title": "", "owner": "", "status": "working", "note": "", "created": now, "done": 0,
+                 "project": "", "progress_done": 0, "progress_total": 0, "step": "", "steps": "", "commits": "",
+                 "images": "", "parent": "", "try_line": "", "severity": 0, "score": 0, "user_score": 0}
+            W[wid] = o
+        for k, v, n in (("title", title.strip(), 100), ("owner", owner, 64), ("status", status, 16), ("note", note, 280),
+                        ("project", project, 64)):
+            if v:
+                o[k] = _cut(v, n)
+        o["done"] = (o["done"] or now) if o["status"] == "done" else 0
+        o["updated"] = o["activity"] = now
+        for k in [k for k, w in W.items() if w["done"] and now - w["done"] > WORK_DONE_KEEP_MS]:
+            del W[k]
+        for _, _, k in sorted((w["done"] == 0, w["updated"], k) for k, w in W.items())[:max(0, len(W) - WORK_MAX)]:
+            del W[k]
+    elif reducer == "work_track":
+        wid, pd, pt, step, steps, commits, images = a
+        o = _fs_work(db, "work_track", wid)
+        if pd > pt:
+            raise Refused(f"work_track: progress {pd}/{pt}")
+        cap = lambda s, n: json.dumps(json.loads(s)[-n:], separators=(",", ":")) if s.strip() else ""
+        o.update(progress_done=pd, progress_total=pt, step=_one(step, 200), steps=cap(steps, 100),
+                 commits=cap(commits, 50), images=cap(images, 20), updated=now, activity=now)
+    elif reducer == "work_parent":
+        wid, parent = a[0], a[1].strip()
+        o = _fs_work(db, "work_parent", wid)
+        if parent and parent not in W:
+            raise Refused(f"work_parent: no work item '{parent}'")
+        up, seen = parent, []
+        while up and len(seen) < 64 and up not in seen:
+            seen.append(up)
+            up = W.get(up, {}).get("parent", "")
+        if wid in seen:
+            raise Refused(f"work_parent: '{parent}' is '{wid}' or one of its sub-tasks")
+        o.update(parent=_cut(parent, 64), updated=now, activity=now)
+    elif reducer == "work_try":
+        _fs_work(db, "work_try", a[0]).update(try_line=_cut(a[1].strip(), 90), updated=now, activity=now)
+    elif reducer == "work_drop":
+        _fs_follow(db, a[0], False)
+        W.pop(a[0], None)
+    elif reducer == "work_score":
+        _fs_score(db, a[0])
+    elif reducer in ("check_set", "check_sync"):
+        rows_in = json.loads(a[0])
+        rows_in = [rows_in] if reducer == "check_set" else rows_in
+        new = [_fs_check_row(c, now) for c in rows_in]
+        if reducer == "check_sync":
+            have = {r["job"] for r in new}
+            for j in [j for j, c in C.items() if c["state"] in ("queued", "running") and j not in have]:
+                del C[j]
+        for r in new:
+            C[r["job"]] = r
+        for t in {r["task"] for r in new if r["name"] == "you"}:
+            _fs_score(db, t)
+    elif reducer == "friction_add":
+        f = json.loads(a[0])
+        if f.get("kind") not in FRICTION_KINDS:
+            raise Refused(f"friction: kind is one of {'|'.join(FRICTION_KINDS)}")
+        if not f.get("area", "").strip() or not _norm(f.get("title", "")):
+            raise Refused("friction: an area and a title")
+        key = f"{_norm(f['area'])}|{f['kind']}|{_norm(f['title'])}"
+        o = next((x for x in F.values() if x["key"] == key), None)
+        if o:
+            back = o["status"] == "fixed" and not f.get("fixed")
+            o.update(details=_cut(f["details"], 4000) if f.get("details", "").strip() else o["details"],
+                     repro=o["repro"] or _cut(f.get("repro", ""), 2000), evidence=_cut(f.get("evidence") or o["evidence"], 300),
+                     by=_cut(f.get("by") or o["by"], 64), count=o["count"] + 1, last=now,
+                     status="open" if back or o["status"] == "quiet" else o["status"], reopened=o["reopened"] + int(back))
+            if o["task"]:
+                _fs_score(db, o["task"])
+        else:
+            n = max([int(i[1:]) for i in F if i[1:].isdigit()] or [0]) + 1
+            fixed = bool(f.get("fixed"))
+            F[f"f{n}"] = {"id": f"f{n}", "key": key, "area": _cut(f["area"].strip().lower(), 48), "kind": f["kind"],
+                          "title": _one(f["title"], 160), "details": _cut(f.get("details", ""), 4000),
+                          "repro": _cut(f.get("repro", ""), 2000), "evidence": _cut(f.get("evidence", ""), 300),
+                          "by": _cut(f.get("by", ""), 64), "count": 1, "first": now, "last": now,
+                          "status": "fixed" if fixed else "open", "fix_commit": _cut(f.get("fixed", ""), 40),
+                          "fix_note": "", "fixed_at": now if fixed else 0, "reopened": 0, "task": ""}
+    elif reducer == "friction_fix":
+        fid, commit, note = a
+        if fid not in F:
+            raise Refused(f"friction_fix: no friction '{fid}'")
+        if not commit or not re.fullmatch(r"[0-9a-fA-F]+", commit):
+            raise Refused("friction_fix: --commit <sha> (the fix)")
+        F[fid].update(status="fixed", fix_commit=_cut(commit, 40), fix_note=_one(note, 280), fixed_at=now)
+    elif reducer == "friction_link":
+        fid, task = a
+        if fid not in F:
+            raise Refused(f"friction_link: no friction '{fid}'")
+        if task and task not in W:
+            raise Refused(f"friction_link: no task '{task}'")
+        was = F[fid]["task"]
+        F[fid]["task"] = _cut(task, 64)
+        for t in {was, task} - {""}:
+            _fs_score(db, t)
+    elif reducer == "friction_quiet":
+        if a[0] in F and F[a[0]]["status"] == "open":
+            F[a[0]]["status"] = "quiet"
+    elif reducer == "user_ask_add":
+        q = json.loads(a[0])
+        if not str(q.get("id", "")).strip() or not str(q.get("text", "")).strip():
+            raise Refused("ask: an id and the text")
+        if q["id"] not in A:
+            A[_cut(q["id"], 64)] = {"id": _cut(q["id"], 64), "at": int(q.get("at") or 0) or now,
+                                    "text": _cut(q["text"], 8000), "by": _cut(q.get("by", ""), 64), "task": "", "none": ""}
+    elif reducer == "user_ask_link":
+        aid, task, none = a
+        if aid not in A:
+            raise Refused(f"user_ask_link: no ask '{aid}' (powos agents ask list)")
+        if not task and not none.strip():
+            raise Refused("user_ask_link: a task, or why it isn't work")
+        if task:
+            A[aid]["task"] = _cut(task, 64)
+            _fs_score(db, task)
+        if none:
+            A[aid]["none"] = _one(none, 280)
+    elif reducer == "unit_sync":
+        host, units = a
+        db["unit"] = {k: u for k, u in db["unit"].items() if u.get("host") != host}
+        for i, u in enumerate(json.loads(units)):
+            db["unit"][f"{host}/{u.get('id', i)}"] = dict(u, host=host)
+    else:
+        raise Refused(f"{reducer}: not in this device's board")
+
+
+def fs_call(reducer, *args):
+    import fcntl
+    os.makedirs(os.path.dirname(STORE_FILE), exist_ok=True)
+    with open(STORE_FILE + ".lock", "w") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        db = _fs_load()
+        try:
+            _fs_reduce(db, reducer, args)
+        except Refused as e:
+            die(str(e))
+        _fs_save(db)
+
+
+def fs_table(name):
+    return list(_fs_load().get(name, {}).values())
 
 
 # The areas the PowOS AI page groups tasks by inside each section (shell/ui/powai.tsx AREAS, same names and order); a
@@ -930,6 +1226,8 @@ def task(argv):
         if o.get("state") and o["state"] not in TRUTH:
             die(f"--state is one of {' | '.join(TRUTH)}")
         ids = set(o.get("id") or [])
+        if os.environ.get("POWOS_JANITOR", "1") != "0":
+            janitor(quiet=bool(o.get("json")))   # every list: the stored status follows the truth first
         ws = [w for w in board_truth() if (ids or o.get("all") or w["status"] != "done")
               and (not ids or w["id"] in ids)
               and (not o.get("state") or w["truth"] == o["state"])
@@ -1057,8 +1355,15 @@ def truth(w, held, idle_roles, checks, now_ms=None, ws=()):
         # Accepted, not started: it waits for an agent slot, so it's nobody's orphan (an owner's idle agent doesn't
         # hold it either - the agent that takes it moves it, which sets it working; `task set` below).
         pos = queue_pos(w, ws)
-        return "queued", f"up next{f' (#{pos} in the queue)' if pos else ''}"
-    h = held.get(w["id"]) or (idle_roles.get(owner) if owner and owner not in GENERIC_OWNERS else None)
+        flag = (f"; needs a check: fix pushed ({len(_jl(w.get('commits', '')))} commit(s)), no check"
+                if _jl(w.get("commits", "")) and not checks else "")
+        return "queued", f"up next{f' (#{pos} in the queue)' if pos else ''}{flag}"
+    # A live claim: an agent whose `work` is this task (agentsd records each session's claim from its own `task set
+    # --step/--progress/--plan/--commit`), else - a role's idle agent - only while the row's own heartbeat is inside
+    # the claim window (the user, 11-09: 51 rows "working", 4 moved in 6 h - any live agent of the owner's role kept
+    # every task of that role "working" forever).
+    fresh = now_ms - heartbeat(w) < claim_expire_ms()
+    h = held.get(w["id"]) or (idle_roles.get(owner) if fresh and owner and owner not in GENERIC_OWNERS else None)
     if h:
         return "working", f"{h} has it"
     if status in ("blocked", "waiting"):
@@ -1092,9 +1397,95 @@ def truth(w, held, idle_roles, checks, now_ms=None, ws=()):
         return "no-check", f"no device check possible ({last.get('line', '')[:80]}) - close it"
     commits = _jl(w.get("commits", ""))
     if commits:
-        return "no-check", f"fix pushed ({len(commits)} commit{'s' if len(commits) != 1 else ''}), no phone check queued"
+        return "no-check", f"needs a check: fix pushed ({len(commits)} commit{'s' if len(commits) != 1 else ''}), no phone check queued"
     gone = f"; owner {owner} isn't running" if owner and owner not in GENERIC_OWNERS else ""
     return "stalled", f"nobody on it and no check{gone}"
+
+
+CLAIM_EXPIRE_H = 4.0            # a "working" claim with no heartbeat this long expires (POWOS_CLAIM_EXPIRE_H)
+
+
+def claim_expire_ms():
+    try:
+        h = float(os.environ.get("POWOS_CLAIM_EXPIRE_H") or CLAIM_EXPIRE_H)
+    except ValueError:
+        h = CLAIM_EXPIRE_H
+    return int(max(0.0, h) * 3600_000)
+
+
+def heartbeat(w):
+    """A row's last heartbeat (ms): any task set, step update or commit link moves the module's `activity`."""
+    return max(int(w.get("activity") or 0), int(w.get("updated") or 0))
+
+
+def _when(ms):
+    return time.strftime("%m-%d %H:%M", time.localtime(int(ms) / 1000)) if ms else "ever"
+
+
+def janitor_decide(ws, checks, agents, now_ms=None):
+    """The board's janitor (the user, 11-09: "fix the issue where the board becomes stale" - 51 rows said working, 4
+    had moved in 6 h; "a lot has been done just not marked as such"). Pure: [(kind, id, why, (reducer, *args))] for
+    the stored status to follow the truth, from the same facts as truth():
+      done    - open (working / queued / waiting), nothing else open on it, and the facts say done (a PASS of a shipped
+                build with the fix landed): closed with that evidence in the note - never over the user's own latest
+                "still broken" (check `you` FAIL), never a manager-owned row (the manager's own, left alone);
+      expired - status working, no live claim (no agent holds it, no check queued or running) and no heartbeat for
+                claim_expire_ms(): back to queued, note "claim expired: <owner> silent since <t>" (+ "needs a check"
+                when its fix is pushed with no check at all).
+    awaiting-check rows keep their claim: the verify queue holds them until the result, which then decides."""
+    now_ms = now_ms or int(time.time() * 1000)
+    held, idle_roles = holders(agents)
+    by = checks_by_task(checks)
+    out = []
+    for w in ws:
+        st, owner = w.get("status") or "working", (w.get("owner") or "")
+        if st in ("done", "blocked") or owner == "manager":
+            continue
+        cs = by.get(w["id"], [])
+        if st in ("working", "queued", "waiting") and not held.get(w["id"]):
+            # The facts alone: the row as if nobody held it and it were open (queued/waiting is someone's word on
+            # what comes next, not evidence against what already passed).
+            fact, why = truth(dict(w, status="working", owner=""), {}, {}, cs, now_ms, ws)
+            mine = [c for c in cs if c.get("name") == "you" and c.get("state") in ("PASS", "FAIL")]
+            if fact == "done" and not (mine and mine[-1]["state"] == "FAIL"):
+                out.append(("done", w["id"], why, ("work_set", w["id"], "", "", "done", f"board: done - {why}"[:280], "")))
+                continue
+        if st != "working":
+            continue
+        t, why = truth(w, held, idle_roles, cs, now_ms, ws)
+        beat = heartbeat(w)
+        if t in ("working", "awaiting-check", "done") or now_ms - beat < claim_expire_ms():
+            continue
+        who = owner or "nobody"
+        note = f"claim expired: {who} silent since {_when(beat)}"
+        if why.startswith("needs a check"):
+            note += f"; {why}"
+        elif t == "no-check":
+            note += f"; {why}"
+        out.append(("expired", w["id"], note, ("work_set", w["id"], "", "", "queued", note[:280], "")))
+    return out
+
+
+def janitor(now_ms=None, ws=None, checks=None, agents=None, quiet=False):
+    """Runs janitor_decide on the live board and applies it (one refused write - the module's own done rule - never
+    stops the rest). Returns the decisions applied. powos-agentsd runs it periodically; every `task list` runs it."""
+    ws = rows() if ws is None else ws
+    if checks is None:
+        try:
+            checks = table("work_check")
+        except (Down, SystemExit):
+            checks = []
+    agents = live_agents(now_ms) if agents is None else agents
+    done = []
+    for kind, wid, why, c in janitor_decide(ws, checks, agents, now_ms):
+        try:
+            call(*c)
+        except SystemExit:
+            continue
+        done.append((kind, wid, why))
+        if not quiet:
+            print(f"board janitor: {wid}: {kind} - {why}", file=sys.stderr)
+    return done
 
 
 def queue_of(ws):
@@ -1915,14 +2306,50 @@ def full_text(open_, decided):
     return "\n".join(out) + "\n"
 
 
+STDB_DATA = "/var/lib/powos/stdb"
+
+
+def owner_conf(key):
+    """One setting of the owner's devices: $KEY, else KEY=value in the owner config - $POWOS_OWNER_CONF, else
+    /etc/powos/owner.conf, else ~/.config/powos/owner.conf (the first that exists; powos-deviced writes it when the
+    device pairs with the owner's hub and removes it on unpair). A fresh device has none: "" = not configured."""
+    if os.environ.get(key):
+        return os.environ[key]
+    p = os.environ.get("POWOS_OWNER_CONF")
+    for path in [p] if p is not None else ["/etc/powos/owner.conf", os.path.expanduser("~/.config/powos/owner.conf")]:
+        try:
+            with open(path) as f:
+                lines = f.read().splitlines()
+        except OSError:
+            continue
+        val = ""
+        for line in lines:
+            k, sep, v = line.strip().partition("=")
+            if sep and k.strip() == key:
+                val = v.strip()
+        return val[1:-1] if len(val) > 1 and val[0] == val[-1] and val[0] in "\"'" else val
+    return ""
+
+
+def board_remote():
+    """The linked board host's command line, {cmd} = the powos command to run there (owner.conf POWOS_BOARD_REMOTE; the
+    owner's Mac: the OnePlus over powos-vadb), or "" when this device keeps its own board."""
+    return owner_conf("POWOS_BOARD_REMOTE")
+
+
 def _remote_run(argv, timeout=30):
-    """One round-trip to the phone's module over the dev channel (powos-vadb). Returns (rc, stdout, stderr), or
-    None if the attempt itself couldn't be made (no docker, or it timed out/erred before replying)."""
-    if not shutil.which("docker"):
-        return None
+    """One round-trip to the linked board host's module (board_remote()). Returns (rc, stdout, stderr), or None if the
+    attempt itself couldn't be made (no link, its program missing, or it timed out/erred before replying)."""
+    import shlex
+    tmpl = board_remote()
     b = base64.b64encode(json.dumps(argv).encode()).decode()
     inner = f"powos agents --argv-b64 {b}"
-    cmd = ["docker", "exec", "powos-vadb", "adb", "shell", f"su -c \"sh /data/powos/powos-run.sh '{inner}'\""]
+    try:
+        cmd = shlex.split(tmpl.replace("{cmd}", inner))
+    except ValueError:
+        return None
+    if not cmd or not shutil.which(cmd[0]):
+        return None
     try:
         r = subprocess.run(cmd, timeout=timeout, capture_output=True, text=True)
     except (OSError, subprocess.TimeoutExpired):
@@ -1958,8 +2385,8 @@ def _stale_phone_stderr(rc, stderr):
 
 def remote(argv):
     """HACK: off the phone (the Mac's agents, the manager's coders) there is no local powos-agents module yet, so the
-    command runs on the phone over the dev channel (powos-vadb). Real fix: each host's own module plus the Phase 2
-    mirror (docs/AGENTS-VIEW-DESIGN.md §8), the hub merging hosts' boards."""
+    command runs on the linked board host (owner.conf POWOS_BOARD_REMOTE: the phone over powos-vadb). Real fix:
+    each host's own module plus the Phase 2 mirror (docs/AGENTS-VIEW-DESIGN.md §8), the hub merging hosts' boards."""
     out = _remote_run(argv)
     if out is None:
         return False
@@ -2010,9 +2437,12 @@ def _adb_sh():
 
 
 def phone_reachable():
+    """The linked board host answers (never "I am the phone": with no link there is nothing to reach - issue #1)."""
+    if not board_remote():
+        return False
     adb = _adb_sh()
     if not os.path.exists(adb):
-        return True   # not the Mac (no adb.sh here, e.g. running ON the phone): let remote() try as before
+        return True   # linked, but no adb.sh here to judge the VPN by: let remote() try
     try:
         r = subprocess.run([adb, "--vpn-state"], capture_output=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired):
@@ -2102,6 +2532,26 @@ def handle_down(argv):
     die(f"the powos-agents module isn't reachable at {SERVER} (phone offline, no cached board yet)")
 
 
+def run_local(argv, run):
+    """[run] against this device's module; when that isn't there: the linked board host (owner.conf POWOS_BOARD_REMOTE:
+    remote()/outbox), else this device's own file store (issue #1: a fresh device never queues for the owner's phone).
+    A device that runs the module itself (/var/lib/powos/stdb) and can't reach it gets the error, not a second board."""
+    global FILE_STORE
+    try:
+        run()
+        return 0
+    except Down as e:
+        if os.environ.get("POWOS_AGENTS_REMOTE", "1") == "0":
+            die(f"the powos-agents module isn't reachable at {SERVER} ({e})")
+        if board_remote():
+            return handle_down(argv)
+        if not isinstance(e, NoModule) and os.path.isdir(STDB_DATA) and os.environ.get("POWOS_AGENTS_STORE") != "file":
+            die(f"this device's powos-agents module isn't answering at {SERVER} ({e})")
+    FILE_STORE = True
+    run()
+    return 0
+
+
 def inline_stdin(argv):
     """`--details -`, `ask add -`, `check sync <file|->`: the text read HERE, into argv - the command may run on the
     phone (remote()), where neither this stdin nor this file is."""
@@ -2134,18 +2584,29 @@ def main(argv):
             ql = queue_paused_line(min_s=0)   # f417: the Mac's verify queue, before the board (local or the phone's)
             if ql:
                 print(ql, flush=True)
-        try:
-            task(argv[1:])
-        except Down as e:
-            if os.environ.get("POWOS_AGENTS_REMOTE", "1") == "0":
-                die(f"the powos-agents module isn't reachable at {SERVER} ({e})")
-            return handle_down(argv)
-        return 0
+        return run_local(argv, lambda: task(argv[1:]))
     if argv[:2] == ["queue", "paused-line"]:   # local (board-sweep.sh, on the Mac): the line, "" if not paused 1 h
         print(queue_paused_line())
         return 0
     argv = inline_stdin(argv)
     sub = {"check": check_cmd, "checks": check_cmd, "ask": ask_cmd, "asks": ask_cmd, "friction": friction_cmd}
+    if argv[0] == "janitor":   # powos-agentsd's periodic pass (and by hand): the stored status follows the truth
+        o, _ = opts(argv[1:], ["dry-run!"])
+        try:
+            if o.get("dry-run"):
+                ws = rows()
+                try:
+                    cs = table("work_check")
+                except (Down, SystemExit):
+                    cs = []
+                for kind, wid, why, _c in janitor_decide(ws, cs, live_agents()):
+                    print(f"{wid}: {kind} - {why}")
+            else:
+                n = janitor(quiet=True)
+                print(f"board janitor: {len(n)} row(s) moved" + "".join(f"\n  {w}: {k} - {y}" for k, w, y in n))
+        except Down as e:
+            die(f"the powos-agents module isn't reachable at {SERVER} ({e})")
+        return 0
     if argv[0] in sub or argv[0] == "sweep":
         if argv[0] == "check" and argv[1:2] == ["scan"]:
             check_cmd(argv[1:])   # local: the Mac's queue dir
@@ -2153,18 +2614,14 @@ def main(argv):
         if argv[0] == "friction" and argv[1:2] in (["help"], ["--help"], ["-h"], []):
             print(FRICTION_HELP, end="")
             return 0
-        try:
+        def run():
             if argv[0] == "sweep":
                 o, _ = opts(argv[1:], ["dry-run!", "to", "full!"])
                 d = sweep(mail=not o.get("dry-run"), to=o.get("to") or "coder", full=bool(o.get("full")))
                 print(d or "board sweep: nothing new")
             else:
                 sub[argv[0]](argv[1:])
-        except Down as e:
-            if os.environ.get("POWOS_AGENTS_REMOTE", "1") == "0":
-                die(f"the powos-agents module isn't reachable at {SERVER} ({e})")
-            return handle_down(argv)
-        return 0
+        return run_local(argv, run)
     if argv[0] == "units":
         # powos units publish: one host's units (lib/apps/powos-units snapshot) replace that host's rows in the `unit`
         # table, which the PowOS AI page lists. argv: units sync <base64 of {"host", "units": [...]}>.
@@ -2172,14 +2629,11 @@ def main(argv):
             die("usage: powos agents units sync <base64 JSON> (powos units publish writes it)")
         try:
             body = json.loads(base64.b64decode(argv[2]))
-            call("unit_sync", body["host"], json.dumps(body["units"], separators=(",", ":")))
-        except Down as e:
-            if os.environ.get("POWOS_AGENTS_REMOTE", "1") == "0":
-                die(f"the powos-agents module isn't reachable at {SERVER} ({e})")
-            return handle_down(argv)
         except (ValueError, KeyError) as e:
             die(f"units sync: {e}")
-        return 0
+        if not isinstance(body, dict) or "host" not in body or "units" not in body:
+            die("units sync: a JSON object with host and units")
+        return run_local(argv, lambda: call("unit_sync", body["host"], json.dumps(body["units"], separators=(",", ":"))))
     die(f"unknown: {argv[0]} (powos agents help)")
 
 

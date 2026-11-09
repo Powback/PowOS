@@ -673,6 +673,8 @@ def cmd_watch_fps(appid, settle=45.0, span=30.0):
     log), median of the busiest task over `span` s after `settle` s, recorded at the scale the launch applied. Nothing
     recorded when the game closed meanwhile or fewer than 4 lines came (not in front: no frames, no number)."""
     time.sleep(settle)
+    if last_applied(appid).get("held"):
+        print("watch-fps %s: a check held the game's settings at launch - nothing recorded" % appid, file=sys.stderr); return 1
     try:
         f = open(SESSION_LOG, errors="replace"); f.seek(0, 2)
     except OSError as e:

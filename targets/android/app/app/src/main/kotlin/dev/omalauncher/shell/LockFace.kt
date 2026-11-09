@@ -2,6 +2,10 @@ package dev.omalauncher.shell
 
 import android.app.Activity
 import android.app.KeyguardManager
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -10,6 +14,8 @@ import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.ViewGroup
@@ -49,7 +55,10 @@ object LockFace {
                         Intent.ACTION_SCREEN_ON ->
                             if (app.getSystemService(KeyguardManager::class.java).isKeyguardLocked) show(app) else PowosLockActivity.current?.finish()
                         // Unlocked (by the face's handoff, the fingerprint, anything): the face goes.
-                        Intent.ACTION_USER_PRESENT -> PowosLockActivity.current?.finish()
+                        Intent.ACTION_USER_PRESENT -> {
+                            PowosLockActivity.current?.finish()
+                            shown(app)
+                        }
                     }
                 }
             },
@@ -63,11 +72,60 @@ object LockFace {
 
     private fun show(app: Context) {
         if (PowosLockActivity.current != null) return
-        app.startActivity(
-            Intent(app, PowosLockActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION),
-        )
+        app.startActivity(face(app))
+        // Without root a screen-off start is a background activity start: Android allows it only while a PowOS overlay
+        // window shows (BAL_ALLOW_NON_APP_VISIBLE_WINDOW), else refuses it silently (razr 11-08: BAL_BLOCK, result 102).
+        // Not up a moment later: the same face as a full-screen intent, which Android launches over its lock screen.
+        if (!andro.marchy.RootMode.enabled()) Handler(Looper.getMainLooper()).postDelayed({ fullScreen(app) }, FSI_AFTER_MS)
     }
+
+    private fun face(app: Context) =
+        Intent(app, PowosLockActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+
+    /**
+     * The face through a full-screen-intent notification (silent, on its own channel), only when Android lets PowOS use
+     * full-screen intents (Android 14+: Settings > Apps > special access; without it the notification would be a
+     * heads-up banner on every screen-off, so nothing is posted). Gone as the face shows ([shown]).
+     */
+    private fun fullScreen(app: Context) {
+        if (PowosLockActivity.current != null) return
+        // Unlocked meanwhile (screen back on before the lock): no face to show.
+        val on = app.getSystemService(android.os.PowerManager::class.java).isInteractive
+        if (on && !app.getSystemService(KeyguardManager::class.java).isKeyguardLocked) return
+        val nm = app.getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= 34 && !nm.canUseFullScreenIntent()) {
+            UnlockLog.mark("face start refused; full-screen intents not allowed for PowOS")
+            return
+        }
+        nm.createNotificationChannel(
+            NotificationChannel(FSI_CHANNEL, "Lock screen", NotificationManager.IMPORTANCE_HIGH).apply {
+                setSound(null, null)
+                enableVibration(false)
+                setShowBadge(false)
+            },
+        )
+        val pi = PendingIntent.getActivity(app, 0, face(app), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val n =
+            Notification.Builder(app, FSI_CHANNEL)
+                .setSmallIcon(android.R.drawable.ic_lock_lock)
+                .setContentTitle("PowOS")
+                .setCategory(Notification.CATEGORY_SYSTEM)
+                .setVisibility(Notification.VISIBILITY_SECRET)
+                .setOngoing(true)
+                .setFullScreenIntent(pi, true)
+                .build()
+        UnlockLog.mark("face start refused; full-screen intent")
+        nm.notify(FSI_ID, n)
+    }
+
+    /** The face is up: its full-screen notification (if one was posted) has done its job. */
+    internal fun shown(context: Context) {
+        runCatching { context.getSystemService(NotificationManager::class.java).cancel(FSI_ID) }
+    }
+
+    private const val FSI_AFTER_MS = 400L
+    private const val FSI_CHANNEL = "powos-lock-face"
+    private const val FSI_ID = 0x10c4
 
     /** The lock screen's page, kept warm (as the assistant's, AssistWeb): the face is there as the screen comes on. */
     private var host: ShellHost? = null
@@ -84,6 +142,7 @@ class PowosLockActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         current = this
+        LockFace.shown(this)
         setShowWhenLocked(true)
         // The face has already slid away under the finger by the time it goes (lock.tsx): no window animation after it.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)
