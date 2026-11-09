@@ -97,7 +97,7 @@ eq "runner.log line" "$(python3 -I "$util" --runner-log "$T/runner.log")" "utili
 
 # The runner records it: per job, per window, hourly, and in summary.
 for p in 'util_rec J "$t0" "$t1" "$uc" "$n"; util_hourly' 'trap '"'"'warm_stop; util_rec W "$wopen" "$(date +%s)"; wl_done; wl_release'"'"' EXIT' \
-         'select_jobs "$go"; order_jobs' 'util_line --since "$se"' 'QUEUE_NEXT_APP=$nextapp'; do
+         'order_quick; order_jobs' 'util_line --since "$se"' 'QUEUE_NEXT_APP=$nextapp'; do
   grep -qF "$p" "$src" && ok "runner: $p" || bad "runner wiring missing" "$p"; done
 
 echo; [ $fails = 0 ] && { echo "All tests passed"; exit 0; }; echo "$fails tests failed"; exit 1

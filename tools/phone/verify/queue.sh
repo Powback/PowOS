@@ -9,6 +9,8 @@
 #        --name: what the phone's status pill says is being tested (default: the script's name)
 #        --screen: the screen it needs (the pill asks to fold / unfold); default either
 #        --budget: seconds it may run (default 300); past it the runner kills it: "FAIL timeout" on the board and pill
+#             (the 300 s default follows the check's past runs: job_budget - shorter for a check that always finished fast,
+#             longer for one that passes past 240 s by design; QUEUE_HIST_BUDGET=0 turns it off)
 #        --dev emu: the EMULATOR lane (tools/emu/emu.sh, the AVD shaped like the Open's inner screen): runs at once, no
 #             free phone window waited for, with POWOS_DEVICE=emu (adb.sh & co. reach the emulator); the emulator is
 #             started from its snapshot and runs the APK of origin's tip (its build is the ship wait). One emu runner,
@@ -167,6 +169,41 @@ order_jobs() { local j k i m b out=() keys=() tasks=() placed=()
       b=0; for ((m = i + 1; m < j; m++)); do [ "${placed[$m]}" = 0 ] && [ "${tasks[$m]}" = "${tasks[$j]}" ] && { b=1; break; }; done
       [ $b = 1 ] || { out+=("${sel[$j]}"); placed[$j]=1; }
     done
+  done
+  sel=(${out[@]+"${out[@]}"}); }
+# hist_of <cmd...>: "<runs> <p50 s> <budget s>" of the check this command runs, from $HIST (queue-util.py --history:
+# "<script> <runs> <p50> <budget>" lines); empty when it has no history.
+hist_of() { [ -n "${HIST:-}" ] || return 0; local k
+  k=$(printf '%s ' "$@" | tr "\"'" '  ' | awk '{for (i = 1; i <= NF; i++) if ($i ~ /\.(sh|py)$/) { n = split($i, p, "/"); print p[n]; exit }}')
+  [ -n "$k" ] && printf '%s\n' "$HIST" | awk -v k="$k" '$1 == k { print $2, $3, $4; exit }'; :; }
+# job_budget <budget> <cmd...>: the budget the job runs with. Only the 300 s default (an explicit --budget other than
+# 300 is the caller's, kept) follows the check's history (queue-util.py budget_of): a check that always finished in
+# under a minute gets 2 x its longest + 60 s (a hang costs less), one that passes past 240 s by design gets 1.25 x its
+# longest pass (it was killed as "FAIL timeout"). Games/fps never get more (a slow launch is the FAIL). 11-09: 16% of
+# the idle windows' time went to 300 s timeout kills.
+job_budget() { local b=$1 h; shift
+  [ "$b" = 300 ] && [ "${QUEUE_HIST_BUDGET:-1}" = 1 ] || { echo "$b"; return; }
+  h=$(hist_of "$@" | awk '{print $3}'); [ -n "$h" ] && [ "$h" -gt 0 ] 2>/dev/null && b=$h; echo "$b"; }
+# order_quick: sel[] with the quickest checks first (their history's p50; a check with none counts as QUEUE_NEW_S, 150 s)
+# and installs (*-install.sh) before everything (other checks measure what they install). A job never runs ahead of
+# an earlier queued job of its own TASK (order_jobs' rule). Why (11-09): the idle windows are short (p50 16 s, p75
+# 100 s, 76 windows in 46 h) and end when the user picks the phone up - a 300 s check first in a 100 s window gave no
+# verdict and 12% of the window time was such touched runs; quick checks first turn the same windows into verdicts.
+order_quick() { local i j m a best bc c out=() costs=() tasks=() placed=() b
+  [ "${QUEUE_QUICK_FIRST:-1}" = 1 ] || return 0
+  for j in ${sel[@]+"${sel[@]}"}; do task=; cmd=(); . "$j"; tasks+=("$task"); placed+=(0)
+    c=$(hist_of ${cmd[@]+"${cmd[@]}"} | awk '$2 > 0 {print $2}'); [ -n "$c" ] || c=${QUEUE_NEW_S:-150}
+    for a in ${cmd[@]+"${cmd[@]}"}; do case $(basename -- "$a" 2>/dev/null) in *-install.sh) c=-1 ;; esac; done
+    costs+=("$c"); done
+  for _ in ${sel[@]+"${sel[@]}"}; do
+    best=-1; bc=
+    for i in "${!sel[@]}"; do
+      [ "${placed[$i]}" = 0 ] || continue
+      b=0; for ((m = 0; m < i; m++)); do [ "${placed[$m]}" = 0 ] && [ "${tasks[$m]}" = "${tasks[$i]}" ] && { b=1; break; }; done
+      [ $b = 0 ] || continue
+      { [ $best = -1 ] || [ "${costs[$i]}" -lt "$bc" ]; } && { best=$i; bc=${costs[$i]}; }
+    done
+    out+=("${sel[$best]}"); placed[$best]=1
   done
   sel=(${out[@]+"${out[@]}"}); }
 # rc3_waits <after> [now]: the job backs off (rc3_requeue) until then - not selected for a window yet.
@@ -625,7 +662,18 @@ EOS
   # The shell test also passes when the ship service PROCESSED an origin tip containing the commit and found
   # nothing to push (its <ship dir>/processed, written on "nothing differs from what's live" and on a live push) -
   # a held/failed shell ship never writes it.
-  shipped() {
+  # shipped <need> <qt>: shipped_git, remembered for the window ($SHIP_MEMO, a file: first_waiting asks from $( )
+  # subshells). Keyed by the commit AND the live/processed/installed records, so a ship mid-window is a new key, never a
+  # stale answer. Why (11-09): first_waiting re-asks job_held of every earlier held job before EACH job, and each
+  # shipped_git is 2-4 git calls of ~1 s on this CPU-starved Mac - the gaps between jobs were p50 6 s, 8% of the windows.
+  shipped() { [ -n "${SHIP_MEMO:-}" ] || { shipped_git "$@"; return; }
+    [ -n "$1" ] || return 0
+    [ $(( $(date +%s) - ${2:-0} )) -lt "${NEED_MAX_S:-7200}" ] || return 0
+    local sd=${SHIP_DIR:-$HOME/.cache/powos-ship-queue} key hit
+    key="$1,$(cat "$sd/live" "$sd/processed" "${INSTALLED_FILE:-$HOME/.cache/powos-installed-commit}" 2>/dev/null | tr -d '\r ' | tr '\n' ,)"
+    hit=$(grep -m1 -F "$key=" "$SHIP_MEMO" 2>/dev/null); [ -z "$hit" ] || return "${hit##*=}"
+    shipped_git "$@"; hit=$?; echo "$key=$hit" >> "$SHIP_MEMO"; return $hit; }
+  shipped_git() {
     local c=$1 live inst done_tip sd=${SHIP_DIR:-$HOME/.cache/powos-ship-queue}; [ -n "$c" ] || return 0
     [ $(( $(date +%s) - ${2:-0} )) -lt "${NEED_MAX_S:-7200}" ] || return 0
     git -C "$VR" cat-file -e "$c^{commit}" 2>/dev/null || return 0
@@ -723,7 +771,11 @@ EOS
       rm -f "$Q/paused"; RSTATE=running   # a go ends a pause
       go=; case "${WL_GOT:-}" in go=*) go=${WL_GOT#go=}; go=${go%% *} ;; esac
       AWAY=0; case "${WL_GOT:-}" in *game=away*) AWAY=1; echo "$(date +%T) a game is running with nobody playing: checks leave it alone" ;; esac
-      select_jobs "$go"; order_jobs
+      SHIP_MEMO=$Q/shipmemo; : > "$SHIP_MEMO" 2>/dev/null || SHIP_MEMO=   # shipped's memo: new for every window
+      # The checks' own history (queue-util.py --history over runner.log): expected run times for order_quick, realistic
+      # default budgets for job_budget. Once per window (~0.5 s).
+      HIST=$(python3 -I "$here/queue-util.py" --history "$Q/runner.log" 2>/dev/null)
+      select_jobs "$go"; order_quick; order_jobs
       # The window's span for the utilization ledger, and a game a job left warm for a next job that never came (the
       # window ended: an install, a touch) closed again - else idle.sh reads it as the user playing for GAME_IDLE_S.
       wopen=$(date +%s); trap 'warm_stop; util_rec W "$wopen" "$(date +%s)"; wl_done; wl_release' EXIT   # wl_release: this trap replaces window_lock's (one EXIT trap per shell) - without it the lock outlived the window (11-07 12:28)
@@ -781,6 +833,7 @@ EOS
           if wt_of "$cwd"; then relify "$wsub"; else relify ""; fi
         fi
         [ "$rel" = 1 ] && cwd=$VR/$cwd
+        hb=$(job_budget "$budget" "${cmd[@]}"); [ "$hb" = "$budget" ] || { echo "$(date +%T) $(basename "$j" .job): budget ${budget}s -> ${hb}s from its check's past runs (job_budget)"; budget=$hb; }
         # f106: a game check (Broforce etc, ~14 min) saw the screen go off mid-window - the runner only woke it once,
         # at the window's start (wl_wake, window-lock.sh). PowosWindowActivity's own keep-on only covers a
         # full-screen task once it has one; the setup/measure gaps around it need the same wl_wake, kept up for as
