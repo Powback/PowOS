@@ -139,6 +139,17 @@ class Fresh(unittest.TestCase):
             caps = f.read()
         self.assertNotIn("Device in use: OnePlus Open", caps)
 
+    def test_owner_json_board_remote_keeps_the_phone_command_whole(self):
+        """adb shell re-joins its arguments into the phone's shell line, so the whole `su -c "sh powos-run.sh '...'"`
+        must reach adb as ONE argument: unquoted, shlex split it and the phone ran a bare `powos` (its usage text came
+        back as the board; 11-09, after the owner.conf move)."""
+        import shlex
+        with open(os.path.join(ROOT, "tools", "phone", "owner.json")) as f:
+            tmpl = json.load(f)["POWOS_BOARD_REMOTE"]
+        argv = shlex.split(tmpl.replace("{cmd}", "powos agents --argv-b64 WzFd"))
+        self.assertEqual(argv[:5], ["docker", "exec", "powos-vadb", "adb", "shell"])
+        self.assertEqual(argv[5:], ["su -c \"sh /data/powos/powos-run.sh 'powos agents --argv-b64 WzFd'\""])
+
 
 if __name__ == "__main__":
     unittest.main()
