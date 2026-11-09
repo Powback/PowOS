@@ -81,8 +81,9 @@
 
     <!-- Uninstall from the app drawer's long-press menu (ACTION_DELETE). -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
-    <!-- Its own update from the PowApps store (upgrade/PowosUpdates, docs/PHONE-UPDATES.md): a user-confirmed install,
-         silent where Android lets the installer of record update itself. -->
+    <!-- Installs from the PowApps store: its own update (upgrade/PowosUpdates, docs/PHONE-UPDATES.md) and PowOS's swipe
+         keyboard (system/DefaultKeyboard.kt) - a user-confirmed install, silent where Android lets the installer of
+         record update itself; an appop the user grants once, not privileged, so not on the priv-app allowlist. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 

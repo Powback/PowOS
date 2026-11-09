@@ -139,6 +139,17 @@ registered with pacman; a package update re-extracts them.
    (Open the app once first if `Android/data/andro.marchy` doesn't exist yet, then back out at the form.)
 3. Open the app and go through the first-launch form. It installs our rootfs instead of downloading Omarchy.
 
+## PowOS's keyboard (swipe keyboard)
+
+The PowOS app installs the swipe keyboard (`com.swipekeyboard`, source in android-app-dev `projects/swipe-keyboard`)
+and makes it the default input method once per phone: `app/app/src/main/kotlin/dev/omalauncher/system/DefaultKeyboard.kt`,
+unit `units/phone-android/swipe-keyboard.json`. It tracks what `make build PROJECT=swipe-keyboard` last published
+(`http://android.pow/apk/swipe-keyboard.ver`/`.apk`), a minute after start and every 6 h: upgrades only, gated
+(package, version, input method service, signer), the previous APK kept as rollback. Rooted: `pm install` and the secure
+settings directly. No root: Android's PackageInstaller (the first install and "install unknown apps" are confirmed from
+a notification; later updates without a prompt where Android allows it) and one notification to pick the keyboard.
+A keyboard the user picks afterwards stays.
+
 ## Hacks (and why)
 
 Every workaround is marked `HACK:` at the spot in the code. Summary:
