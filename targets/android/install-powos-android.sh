@@ -52,6 +52,9 @@ fi
 
 # ── What the phone session itself needs (not PowOS content: the Plasma session on Android) ─────────────
 pacman -S --noconfirm --needed plasma-workspace xdg-desktop-portal-kde kscreen python zstd
+# `powos login github` / `powos self push` (units/phone/github-cli.json): the 11-04 and 11-08 images had no gh although
+# phone-rules.conf maps the Containerfile's gh to github-cli - the package manifest the resolver read predates it.
+pacman -S --noconfirm --needed github-cli
 
 # ── Our packages (build-pkgs.sh): KWin with the Anland backend, FEX, and PowOS packages Arch Linux ARM doesn't
 # build (recipes.list: upstream recipes built for aarch64). First, so the mapping below finds them.

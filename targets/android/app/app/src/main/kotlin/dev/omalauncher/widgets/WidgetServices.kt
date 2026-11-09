@@ -46,6 +46,7 @@ import dev.omalauncher.widgets.runtime.Alarm
 import dev.omalauncher.widgets.runtime.Media
 import dev.omalauncher.widgets.runtime.Modes
 import dev.omalauncher.widgets.runtime.Notifications
+import dev.omalauncher.widgets.runtime.Perf
 import dev.omalauncher.widgets.runtime.Services
 import dev.omalauncher.widgets.runtime.Streams
 import dev.omalauncher.widgets.runtime.Volume
@@ -94,6 +95,8 @@ class WidgetServices(
     private val volume = Volume(context)
     private val alarm = Alarm(context)
     private val modes = Modes(context)
+    /** CPU load and temperatures any app may read (no root, no Linux): `android.perf`. */
+    private val perf = Perf()
 
     /** Opens launcher screens ("style" or "themes", "agents", "drawer"); set by the UI. */
     var launcherAction: ((String) -> Unit)? = null
@@ -133,6 +136,7 @@ class WidgetServices(
             "volume" -> volume.value()
             "alarm" -> alarm.value()
             "modes" -> modes.value()
+            "perf" -> synchronized(perf) { perf.value() }
             else -> throw WidgetError("unknown android source $name")
         }
 

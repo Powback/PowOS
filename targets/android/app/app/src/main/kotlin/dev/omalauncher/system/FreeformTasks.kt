@@ -462,6 +462,13 @@ object FreeformTasks {
     @Volatile private var homeFocusTold: Boolean? = null
 
     /**
+     * Android refused to change home's focusability (a WindowContainerTransaction needs MANAGE_ACTIVITY_TASKS, which an
+     * unrooted app doesn't have): not asked again until the process restarts. 11-09 razr (no root): 136 refusals in
+     * window-log.txt, one per windows/typing change.
+     */
+    @Volatile private var homeFocusRefused = false
+
+    /**
      * Desktop mode (docs/DESKTOP-NATIVE.md step 7): PowOS's home task is non-focusable while desktop windows show, so a
      * tap on the wallpaper or home doesn't take the focus from them and hide them; focusable again when none show
      * (folded included) or while a shell text field takes the keyboard ([homeTyping]). WindowFrames' refresh, any thread.
@@ -503,13 +510,21 @@ object FreeformTasks {
     private fun applyHomeFocus(context: Context) {
         windowsFocus(context)
         val focusable = !windowsShown || homeTypingNow
-        if (focusable == homeFocusTold) return
+        if (focusable == homeFocusTold || homeFocusRefused) return
         val id = homeTaskId(context) ?: return
         runCatching { apply(token(context, id)) { wct, token -> TaskLeash.setFocusable(wct, token, focusable) } }
             .onSuccess {
                 homeFocusTold = focusable
                 WindowLog.i(TAG, "home task $id ${if (focusable) "focusable" else "non-focusable (desktop windows show)"}")
-            }.onFailure { WindowLog.w(TAG, "can't set home task $id focusable=$focusable", it) }
+            }.onFailure {
+                val denied = generateSequence(it) { e -> e.cause }.any { e -> e is SecurityException }
+                if (denied || !andro.marchy.RootMode.enabled()) {
+                    homeFocusRefused = true
+                    WindowLog.w(TAG, "can't set home task $id focusable=$focusable (not asked again: ${it.cause ?: it})")
+                } else {
+                    WindowLog.w(TAG, "can't set home task $id focusable=$focusable", it)
+                }
+            }
     }
 
     /**
