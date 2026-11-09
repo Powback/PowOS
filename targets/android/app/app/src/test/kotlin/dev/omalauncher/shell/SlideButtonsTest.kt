@@ -108,4 +108,87 @@ class SlideButtonsTest {
         p.up(0, s)
         assertTrue(p.setButtons(floatArrayOf()))
     }
+
+    // pad-slide.sh's phone run (job 20261109-230930-16340): the default layout on a 1116x2310 portrait overlay at
+    // 420 dpi, one finger B -> Y -> B -> off every button -> B. powos-padd logs one press per button going down.
+    private val pw = 1116f
+    private val ph = 2310f
+    private fun pc(x0: Float, y0: Float, x1: Float, y1: Float) =
+        floatArrayOf((x0 + x1) / 2 * pw, (y0 + y1) / 2 * ph, minOf((x1 - x0) * pw, (y1 - y0) * ph) / 2)
+    private val pb = pc(0.82f, 0.68f, 0.91f, 0.77f)
+    private val py = pc(0.74f, 0.58f, 0.83f, 0.67f)
+    private val off = floatArrayOf(0.97f * pw, 0.97f * ph)
+
+    private fun portrait(): SlideButtons = SlideButtons().apply {
+        slop = 4f / 25.4f * 420f
+        assertTrue(setButtons(pb + py))
+    }
+
+    /** "B" for button 0, "Y" for 1; presses only, like powos-padd's log. */
+    private class Presses : SlideButtons.Sink {
+        val pressed = mutableListOf<String>()
+        val held = sortedSetOf<String>()
+        override fun press(button: Int) { "BY"[button].toString().let { pressed += it; held += it } }
+        override fun release(button: Int) { held -= "BY"[button].toString() }
+    }
+
+    private fun path() = listOf(pb, py, pb, off, pb)
+
+    @Test
+    fun slidePathBYBOffBPressesBYBB() {
+        val p = portrait(); val s = Presses()
+        val pts = path()
+        assertTrue(p.down(0, pts[0][0], pts[0][1], s))
+        for (q in pts.drop(1)) {
+            p.slide(0, q[0], q[1], s)
+            if (q === off) assertTrue("off every button releases", s.held.isEmpty())
+        }
+        assertEquals("B Y B B", s.pressed.joinToString(" "))
+        p.up(0, s)
+        assertTrue(s.held.isEmpty())
+    }
+
+    @Test
+    fun fingerDroppedMidSlideIsPickedUpAgain() {
+        // releaseAll (a focus change switched the layout) forgets every finger mid-gesture; the next moves of the
+        // same finger must still press what it slides onto - the phone's "B Y" for "B Y B B".
+        val p = portrait(); val s = Presses()
+        p.down(0, pb[0], pb[1], s)
+        p.slide(0, py[0], py[1], s)
+        p.clear(); s.held.clear()
+        assertTrue(p.setButtons(pb + py))
+        for (q in listOf(pb, off, pb)) p.slide(0, q[0], q[1], s)
+        assertEquals("B Y B B", s.pressed.joinToString(" "))
+        assertEquals(setOf("B"), s.held)
+    }
+
+    @Test
+    fun fingerLandingOffButtonsPressesWhatItSlidesOnto() {
+        val p = portrait(); val s = Presses()
+        assertFalse(p.slide(0, off[0], off[1], s))
+        assertTrue(p.slide(0, py[0], py[1], s))
+        assertEquals(listOf("Y"), s.pressed)
+    }
+
+    @Test
+    fun twoFingersSlidePathKeepsTheOtherFingersButton() {
+        // Finger 0 rests on B; finger 1 runs the same path. B is held throughout (finger 0 never left it), so the
+        // only new presses are B (finger 0) and Y; finger 1 leaving B never releases finger 0's B.
+        val p = portrait(); val s = Presses()
+        p.down(0, pb[0], pb[1], s)
+        p.down(1, pb[0], pb[1], s)
+        for (q in path().drop(1)) {
+            p.slide(1, q[0], q[1], s)
+            assertTrue("B held by finger 0", "B" in s.held)
+        }
+        assertEquals("B Y", s.pressed.joinToString(" "))
+        p.up(0, s)
+        assertEquals(setOf("B"), s.held) // finger 1 is back on B
+        p.slide(1, off[0], off[1], s)
+        assertTrue(s.held.isEmpty())
+        p.slide(1, py[0], py[1], s)
+        p.up(1, s)
+        assertEquals("B Y Y", s.pressed.joinToString(" "))
+        assertTrue(s.held.isEmpty())
+    }
 }

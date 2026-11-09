@@ -68,6 +68,22 @@ public final class SlideButtons {
         if (fingers.containsKey(pointer)) apply(pointer, hits(x, y), s);
     }
 
+    /**
+     * A finger the overlay gives no other module moved: a tracked one slides (move), an untracked one is picked up
+     * the moment it touches a button, so sliding onto a button always presses it. A finger is untracked when it
+     * landed between the buttons, or when the overlay dropped every finger mid-gesture (clear(): a focus change
+     * switched the game's layout - Steam reacts to the B/Y the slide itself pressed); before this the dropped finger
+     * pressed nothing more until lifted (pad-slide job 20261109-230930-16340: B Y B off B gave "B Y").
+     * Returns whether the finger is tracked now.
+     */
+    public boolean slide(int pointer, float x, float y, Sink s) {
+        if (fingers.containsKey(pointer)) {
+            apply(pointer, hits(x, y), s);
+            return true;
+        }
+        return down(pointer, x, y, s);
+    }
+
     public void up(int pointer, Sink s) {
         if (!fingers.containsKey(pointer)) return;
         apply(pointer, 0, s);

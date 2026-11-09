@@ -1041,13 +1041,20 @@ public final class GamepadOverlay extends View {
                 follows = false;
                 for (int i = 0; i < e.getPointerCount(); i++) {
                     int id = e.getPointerId(i);
-                    if (slide.tracks(id)) {
+                    Module m = owner.get(id);
+                    if (m == null) {
+                        // Not held by a stick/d-pad/...: a button finger. An untracked one (landed between buttons,
+                        // or dropped by releaseAll mid-gesture) is picked up as it slides onto a button.
+                        if (!slide.tracks(id)) {
+                            Module under = moduleAt(e.getX(i), e.getY(i));
+                            if (under != null && !slides(under)) continue;
+                            syncSlideButtons();
+                        }
                         int before = state.buttons;
-                        slide.move(id, e.getX(i), e.getY(i), slideSink);
+                        slide.slide(id, e.getX(i), e.getY(i), slideSink);
                         changed |= state.buttons != before;
                         continue;
                     }
-                    Module m = owner.get(id);
                     if (m != null) {
                         changed |= m.move(e.getPointerId(i), e.getX(i), e.getY(i), state);
                         follows |= m instanceof StickModule;
