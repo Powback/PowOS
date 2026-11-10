@@ -32,9 +32,10 @@
 #      (dev/shots.mjs: PNGs + report.json with each text's measured contrast) - design QA's renders, never a pass/fail.
 #      SHOTS_THEME / SHOTS_ONLY / SHOTS_SCALE / SHOTS_PROBE / SHOTS_STRICT pass through (STRICT=1: overlapping tiles
 #      or missing glyphs fail it).
-# Exit 0: pass. 1: failed (the reasons on stdout). 2: couldn't run (no docker...). Time: ~5-10 s, the image cached.
+# Exit 0: pass. 1: failed (the reasons on stdout). 2: couldn't run (no docker, the job machine gone...). Time: ~5-10 s, the image cached.
 # The browser runs (scenes, retries, --shots) are the gate job of tools/jobs/compose.yml on the Docker context
-# POW_JOB_CONTEXT names (default pow58; unreachable in 5 s: the hub, said so), the composed tree baked into its image;
+# POW_JOB_CONTEXT names (default pow58; not answering: waits GATE_JOB_WAIT_S (900), then exit 2 - the hub can't pass the
+# gate; POW_JOB_CONTEXT=hub or GATE_HUB_FALLBACK=1 gate there with a load-sized deadline), the composed tree baked into its image;
 # report.json and the PNGs come back to --shots DIR. The widget sweep (dev/preview.sh) runs its browser passes in the same gate job. GATE_ONLY=<regex>: only the browser runs so named (a case worked on alone); GATE_PROFILE=1: a scene that can (ww-resize-cost) also prints a trace's top costs; GATE_SCENE_MS: the per-scene cap. GATE_THROTTLE=N: every page's CPU slowed
 # N times (a loaded Mac on demand: a case's waits must hold at 6). GATE_IMAGE overrides the Chromium image. Docker's
 # build cache and images are never pruned here.
@@ -301,7 +302,16 @@ fi
 JOB_ON="" nerd=""
 if [ -n "${GATE_STUB_SLEEP:-}" ]; then :; else
   nerd=$(cd "$SHELL_DIR/fonts" && cd "$(dirname "$(readlink nerd_symbols.ttf)")" 2>/dev/null && pwd -P)/nerd_symbols.ttf
+  # The hub can't pass this gate (11-10, POW_JOB_CONTEXT=hub at load 13-23: 335 PASS, 18 FAIL in 28 min - frame-timing
+  # and motion scenes that pass on .58; the reruns would add more). So a gate whose machine doesn't answer waits for
+  # it, GATE_JOB_WAIT_S (default 900 s), and then stops with exit 2 (no verdict) instead of false FAILs on the hub.
+  # POW_JOB_CONTEXT=hub still runs there on purpose (deadline sized below); GATE_HUB_FALLBACK=1 allows the fallback.
+  [ "${POW_JOB_CONTEXT:-}" = hub ] || [ -n "${GATE_HUB_FALLBACK:-}" ] || export JOB_WAIT_S=${GATE_JOB_WAIT_S:-900}
   job_init gate
+  if [ -n "$JOB_FELL_BACK" ] && [ -z "${GATE_HUB_FALLBACK:-}" ]; then
+    echo "gate: NO VERDICT - ${POW_JOB_CONTEXT:-pow58} did not answer within ${JOB_WAIT_S:-0} s, and the hub cannot pass the full gate (false timing FAILs under its load); bring it back, or GATE_HUB_FALLBACK=1 / POW_JOB_CONTEXT=hub to gate on the hub anyway"
+    exit 2
+  fi
   jc=$work/job
   mkdir -p "$jc/shell" "$jc/app" "$jc/apps" "$jc/fonts" "$jc/in"
   (cd "$S" && COPYFILE_DISABLE=1 tar --exclude ./node_modules -cf - .) | tar -xf - -C "$jc/shell"
@@ -310,6 +320,21 @@ if [ -n "${GATE_STUB_SLEEP:-}" ]; then :; else
   [ -z "$shots" ] || { [ ! -f "$nerd" ] || cp "$nerd" "$jc/fonts/"; [ -z "$wallpaper" ] || cp "$wallpaper" "$jc/in/wallpaper.jpg"; }
   if job_build gate "$jc"; then JOB_ON=1; echo "gate: browser runs on $JOB_CTX (gate job, its cpus cap)"
   else echo "gate: the gate job didn't build on $JOB_CTX - browser runs locally"; fi
+fi
+# The run's deadline (gate.mjs GATE_RUN_MS, default 900 s) is tuned for .58 (353 scenes in ~320 s, load ~2). The hub
+# (Colima: the job's fallback, or POW_JOB_CONTEXT=hub) runs them ~4x slower at its usual load 15-30: 11-10 it finished
+# ~240 of 353 in 900 s at load 19.8 and called the other 110 FAILs - a healthy tree failed every ship while .58 was
+# down. On the hub (gate job there, or the local container) it scales with the measured load per CPU:
+# 900 s x (1 + load/cpus), at most 45 min. .58 and an explicit GATE_RUN_MS are unchanged.
+if [ -z "${GATE_RUN_MS:-}" ] && { [ -z "$JOB_ON" ] || [ -n "$JOB_ON_HUB" ]; }; then
+  job_capacity
+  hub_cpus=${JOB_CPUS:-${host_cpus:-14}} hub_load=${JOB_LOAD:-$host_load}
+  GATE_RUN_MS=$(awk -v l="${hub_load:-0}" -v c="$hub_cpus" 'BEGIN { f = 1 + l / (c > 0 ? c : 1); ms = 900000 * f; if (ms > 2700000) ms = 2700000; printf "%d", ms }')
+  export GATE_RUN_MS
+  gc_cap_s=$(( GATE_RUN_MS / 1000 + 60 )); gc_cap=(-s KILL "$gc_cap_s")
+  echo "gate: deadline $(( GATE_RUN_MS / 1000 )) s - sized for the hub (load ${hub_load:-?} on $hub_cpus cpus; 900 s on .58)"
+else
+  echo "gate: deadline $(( ${GATE_RUN_MS:-900000} / 1000 )) s"
 fi
 # The Mac's load every 2 s for gate.mjs's scene concurrency (/cache/.hostload): it re-sizes as the load moves.
 # Its own temp name: gates run side by side on one $tx, and a shared .hostload.tmp lost the mv race, which ended this
@@ -335,7 +360,7 @@ browser_run() {
   # slots (GATE_SLOTS) that already cap how many gates run. GATE_BUILD_SLOT=1 brings it back.
   local envs=(-e READY_MS="$1" ${GATE_SCENES:+-e GATE_SCENES="$GATE_SCENES"} \
     ${GATE_SHELL_PAGES:+-e SHELL_PAGES="$GATE_SHELL_PAGES"} ${IDLE_MS:+-e IDLE_MS="$IDLE_MS"} ${IDLE_WAIT_MS:+-e IDLE_WAIT_MS="$IDLE_WAIT_MS"} ${GATE_SHARED_TX:+-e GATE_SHARED_TX="$GATE_SHARED_TX"} \
-    ${2:+-e GATE_ONLY="$2"} ${3:+-e GATE_BOOTS="$3"} ${GATE_THROTTLE:+-e GATE_THROTTLE="$GATE_THROTTLE"} ${GATE_PROFILE:+-e GATE_PROFILE="$GATE_PROFILE"} ${GATE_SCENE_MS:+-e GATE_SCENE_MS="$GATE_SCENE_MS"})
+    ${2:+-e GATE_ONLY="$2"} ${3:+-e GATE_BOOTS="$3"} ${GATE_THROTTLE:+-e GATE_THROTTLE="$GATE_THROTTLE"} ${GATE_PROFILE:+-e GATE_PROFILE="$GATE_PROFILE"} ${GATE_SCENE_MS:+-e GATE_SCENE_MS="$GATE_SCENE_MS"} ${GATE_RUN_MS:+-e GATE_RUN_MS="$GATE_RUN_MS"})
   # The gate job: the same run in its image (its own load and cores size the scene concurrency).
   if [ -n "$JOB_ON" ]; then
     job_run gate "${envs[@]}" --entrypoint timeout -- "${gc_cap[@]}" node gate.mjs

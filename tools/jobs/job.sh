@@ -8,8 +8,11 @@
 # on the far side - each job's image bakes the source (build:), so it runs on any engine that can build it.
 #
 # Machine: POW_JOB_CONTEXT (read here only; default pow58) - a Docker context name. It must answer within 5 s, else
-# the job runs on the hub (this shell's current context) and says so. Set it to the hub's context (colima) to force
-# the hub. A fleet scheduler will set it later; this file stays the one place that reads it.
+# the job runs on the hub (this shell's current context) and says so. `hub` (or the hub's own context name, colima)
+# forces the hub. A fleet scheduler will set it later; this file stays the one place that reads it.
+# Callers read the choice from JOB_CTX / JOB_ON_HUB (1: the hub, forced or fallen back to) / JOB_FELL_BACK (1: the
+# wanted machine didn't answer, after JOB_WAIT_S s of retries if the caller set it) and its size from
+# job_capacity (JOB_CPUS, JOB_LOAD): the hub is ~4x slower than .58 for the gate, so a job sizes its budget from it.
 #
 # Images are tagged powos-jobs-<svc>:<checkout>; a rebuild removes the previous tag's image when nothing else uses it
 # (its own image only - shared base layers, the build cache and every other image stay: nothing is pruned).
@@ -17,22 +20,43 @@
 # send every finished image back through this machine to load it (GBs for the APK builder).
 JOBS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 JOBS_COMPOSE=$JOBS_DIR/compose.yml
-JOB_CTX="" JOB_PROJECT="" JOB_TAG=""
+JOB_CTX="" JOB_PROJECT="" JOB_TAG="" JOB_ON_HUB="" JOB_FELL_BACK=${JOB_FELL_BACK:-} JOB_CPUS="" JOB_LOAD=""
 
 # job_context: sets JOB_CTX (once per process tree: exported as JOB_CTX_RESOLVED) and says which machine runs.
 job_context() {
   [ -z "$JOB_CTX" ] || return 0
-  if [ -n "${JOB_CTX_RESOLVED:-}" ]; then JOB_CTX=$JOB_CTX_RESOLVED; return 0; fi
   local want=${POW_JOB_CONTEXT:-pow58} hub
   hub=$(docker context show 2>/dev/null || echo default)
-  if [ "$want" = "$hub" ] || perl -e 'alarm 5; exec @ARGV' docker --context "$want" version --format '{{.Server.Version}}' >/dev/null 2>&1; then
-    JOB_CTX=$want
-  else
-    echo "job: $want did not answer within 5 s - running on the hub ($hub)" >&2
-    JOB_CTX=$hub
+  if [ -n "${JOB_CTX_RESOLVED:-}" ]; then
+    JOB_CTX=$JOB_CTX_RESOLVED; [ "$JOB_CTX" != "$hub" ] || JOB_ON_HUB=1; return 0
   fi
+  [ "$want" != hub ] || want=$hub
+  local waited=0 deadline=$(( SECONDS + ${JOB_WAIT_S:-0} ))
+  while :; do
+    if [ "$want" = "$hub" ] || perl -e 'alarm 5; exec @ARGV' docker --context "$want" version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+      JOB_CTX=$want; break
+    fi
+    # JOB_WAIT_S (a caller's choice, default 0): wait that long for the wanted machine before falling back.
+    if [ $SECONDS -lt $deadline ]; then
+      [ $waited = 1 ] || echo "job: $want does not answer - waiting up to ${JOB_WAIT_S} s for it (checked every 15 s)" >&2
+      waited=1; sleep 15; continue
+    fi
+    echo "job: $want did not answer within ${JOB_WAIT_S:-5} s - running on the hub ($hub)" >&2
+    JOB_CTX=$hub JOB_FELL_BACK=1; export JOB_FELL_BACK; break
+  done
+  [ "$JOB_CTX" != "$hub" ] || JOB_ON_HUB=1
   export JOB_CTX_RESOLVED=$JOB_CTX
-  echo "job: runs on $JOB_CTX" >&2
+  echo "job: runs on $JOB_CTX${JOB_ON_HUB:+ (the hub)}" >&2
+}
+
+# job_capacity: JOB_CPUS = the job machine's engine CPUs (docker info; "" if it doesn't say in 10 s), JOB_LOAD = its
+# 1-min load where this shell can see it (the hub: the Mac's own loadavg, which includes the Colima VM; elsewhere "").
+job_capacity() {
+  job_context
+  JOB_CPUS=$(perl -e 'alarm 10; exec @ARGV' docker --context "$JOB_CTX" info --format '{{.NCPU}}' 2>/dev/null) || JOB_CPUS=""
+  JOB_LOAD=""
+  [ -z "$JOB_ON_HUB" ] || JOB_LOAD=$(sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}')
+  [ -n "$JOB_LOAD" ] || [ -z "$JOB_ON_HUB" ] || JOB_LOAD=$(awk '{print $1}' /proc/loadavg 2>/dev/null)
 }
 
 # job_init SVC: the run's compose project (unique per run, so parallel runs never share containers) and image tag.
@@ -116,6 +140,7 @@ job_cleanup() {
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   case "${1:-}" in
     context) job_context; echo "$JOB_CTX" ;;
-    *) sed -n '2,20p' "$0"; exit 2 ;;
+    capacity) job_capacity; echo "$JOB_CTX hub=${JOB_ON_HUB:-0} cpus=${JOB_CPUS:-?} load=${JOB_LOAD:-?}" ;;
+    *) sed -n '2,22p' "$0"; exit 2 ;;
   esac
 fi
