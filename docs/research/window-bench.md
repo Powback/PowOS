@@ -107,6 +107,12 @@ never-live launches in a row end the storm (FAIL). Every part ends with a verdic
   first live try 105 ms) until it is a picture; the bench reads one line. Mac load no longer enters either number.
 - **A game up is noticed by every check:** `game-lib.sh` (`game_up`: Steam's `reaper SteamLaunch AppId=`, the queue's
   test) replaces `steam_app_` (missed Broforce, p2) and the per-script `SteamLaunch AppId=` counts.
+- **p3 part 1 "leaks" were the storm's own missed taps:** baseline 0 0 0 0, then switch/close "not within 2000 ms of
+  the tap" in cycles 3, 6, 10, 12 left windows 8 and 11 open (host 2, layers 5, tasks 1). The bar's left quarter and the
+  close button's centre lay under the window opened a moment before. Taps now go to an uncovered spot (`vispt`,
+  elementFromPoint); a close that still misses is the close metric's "-" and the host closes it (logged), so the leak
+  counts measure real leaks. Windows up before the bench are named in a NOTE and left alone (the queue closes a killed
+  job's own: `ww_close_new`).
 - Environment, not fixed here: one CDP eval is 2-8 s at Mac load ~35, setup (unfold, lock, home) took 2 min of
   part 1, and `drawn`/resize-settle are Mac-clock screencap polls (inflated the same way).
 

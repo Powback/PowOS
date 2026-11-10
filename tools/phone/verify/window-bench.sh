@@ -262,6 +262,10 @@ if [ "$GHALF" != 0 ]; then set -- $RUN; h=$((($# + 1) / 2))
 fi
 log "apps: $RUN"
 drawn_setup
+# Web windows up before the bench: named, never touched (the bench can't tell a killed check's from the user's - the
+# queue closes a killed job's own, ww_close_new); every leak number is the delta from this baseline.
+pre=$(hcall webwindows.list "[]" "l=>l.map(w=>w.id+':'+w.key).join(' ')")
+[ -n "$pre" ] && [ "${pre#ERR}" = "$pre" ] && note "up before the bench, left alone, outside the leak counts: $pre"
 
 # 0. THE STORM (the user 11-07: "rapidly opening and closing apps seeing how responsive everything is measuring
 # framedrops etc"): STRESS_N cycles at user speed (one per ~STRESS_PACE_S s). Cycle k opens app k (round robin over
@@ -298,9 +302,19 @@ hostgone() { printf '%s' "async()=>{const b=await importShim('./bridge.ts');cons
 ontop() { printf '%s' "async()=>{const [m]=await $WW;const t=m.webWins.value.at(-1);return !!t&&t.id===${1#w}}"; }
 # storm_switch <w-id>: a tap on its bar -> ms until it is on top ("-": not on top in 2 s, or no bar on screen).
 storm_switch() {
-  local p; p=$(barpt "$1"); [ -n "$p" ] || { echo -; return; }
+  local p; p=$(vispt "$1" .webwindow-title); [ -n "$p" ] || { echo "  switch $1: no uncovered spot on its bar" >&2; echo -; return; }
   ev "$(arm_js __wbSw "$(ontop "$1")")" >/dev/null
   set -- $p; sh_ "input tap $1 $2"; storm_read __wbSw
+}
+# vispt <w-id> <selector>: a spot of that element of the window that is the window's own on screen (elementFromPoint
+# lands in its frame), "x y" device px, or "". barpt/wwpt took the bar's left quarter and the button's centre, which the
+# window opened a moment before often covered: the tap went to that window, the switch and the close "missed" and the
+# storm's own windows were left open - read as leaks (11-10 p3 part 1: switch/close "not within 2000 ms of the tap" in
+# cycles 3, 6, 10, 12; windows 8 and 11 left; "leak-host-windows 2", "leak-ww-layers 5", "leak-tasks 1", from a clean
+# baseline 0 0 0 0).
+vispt() {
+  local v; v=$(wwel "$1" "e=>{const b=e.querySelector('$2');if(!b)return '';const r=b.getBoundingClientRect(),d=devicePixelRatio;for(const fy of [.5,.3,.7])for(const fx of [.5,.25,.75,.12,.88,.4,.6]){const x=r.left+r.width*fx,y=r.top+r.height*fy;if(x<1||y<1||x>innerWidth-1||y>innerHeight-1)continue;const h=document.elementFromPoint(x,y);if(h&&b.contains(h)&&h.closest('.webwindow')===e)return Math.round(x*d)+' '+Math.round(y*d)}return ''}")
+  [ "$v" = none ] || echo "$v"
 }
 # storm_read <var> [max ms]: the page's armed measurement once it resolved - one page call that waits for it (it was up to
 # ten polls, each a CDP hop of 2-8 s under Mac load: one storm cycle took 58 s, 11-10 p1).
@@ -311,10 +325,14 @@ storm_read() {
 }
 # storm_close <w-id>: a tap on its close button -> ms until its frame is gone ("-": no button, closed by the host).
 storm_close() {
-  local p; p=$(wwpt "$1" .ww-close)
-  [ -n "$p" ] || { hcall webwindows.close "[${1#w}]" "()=>'ok'" >/dev/null; echo -; return; }
-  ev "$(arm_js __wbCl "$(pagegone "$1")")" >/dev/null
-  set -- $p; offpill "$1" "$2" "close" && sh_ "input tap $1 $2"; storm_read __wbCl
+  local p v; p=$(vispt "$1" .ww-close)
+  if [ -n "$p" ]; then
+    ev "$(arm_js __wbCl "$(pagegone "$1")")" >/dev/null
+    set -- $p "$1"; offpill "$1" "$2" "close" && sh_ "input tap $1 $2"; v=$(storm_read __wbCl); set -- "$3"
+  else echo "  close $1: no uncovered spot on its close button" >&2; v=-; fi
+  # A close that didn't land is the close metric's "-" (a FAIL there), not a leak: the host closes it now, said so.
+  [ "$v" = - ] && [ "$(wwhost "$1" gone)" != true ] && { hcall webwindows.close "[${1#w}]" "()=>'ok'" >/dev/null; echo "  close $1: the tap didn't close it - closed by the host (not counted as a leak)" >&2; }
+  echo "$v"
 }
 # storm_cycle <i> <app>: open it, switch to the window the last cycle opened (PREVID) and close that; one storm.part row.
 storm_cycle() {
