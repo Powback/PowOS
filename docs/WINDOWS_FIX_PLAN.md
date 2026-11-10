@@ -69,7 +69,10 @@ The board shows window checks failing by timeout or waiting days for a free phon
   - **Alternative:** a second OnePlus Open as a test device (open decision below). Then no blocks are needed.
 - [ ] 0.5 Baseline run, recorded in `docs/research/window-bench.md`: pass/fail per check, `pf=` and `lag=` from the host's
   `w.f` log, missed vsyncs per resize from `ww-resize.sh`, the perfetto verdict from `resize-trace.py` (still owed).
-- [ ] 0.6 Each failing check on the board gets one line: real bug, check bug, or environment.
+- [x] 0.6 Each failing check on the board gets one line: real bug, check bug, or environment.
+  Done 11-10: seven board tasks got a "0.6" step line; the table is in `docs/research/window-bench.md` "11-10
+  baseline". None of the failures was a judged real bug: they were check bugs or the environment, most of them home's
+  page not answering CDP calls in the runner's window.
 
 Done when: every window check gives a verdict (PASS or a named FAIL) within its budget, on its lane.
 

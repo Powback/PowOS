@@ -79,3 +79,34 @@ now runs as `--round R --part K --of 4` (1 storm | 2 open gestures switch close 
 `--phases "..."` picks any set), same round folder. Each part keeps its own clock (`BENCH_BUDGET_S`, 255 s): a phase
 that would start past it FAILs naming it, the storm stops starting cycles at it (FAIL "k of N cycles"), and three
 never-live launches in a row end the storm (FAIL). Every part ends with a verdict, PASS or a named FAIL.
+
+## 11-10 baseline (WINDOWS_FIX_PLAN.md 0.5, 0.6): every window check's last verdict
+
+Read from the verify queue (`~/.cache/powos-verify-queue/runner.log` and `done/*.log`), 11-07..11-10. No window check
+has a PASS on the phone in that span. Kind (0.6): **real** = the bug the check exists for, **check** = the check
+itself, **env** = the phone/session at the time.
+
+| check | board task | last result | kind | why |
+|---|---|---|---|---|
+| `ww-clamp.sh` | a-window-can-land-out-of-bounds | 11-10 02:20 FAIL timeout | check | open judged ok; then home's page answered nothing for the screen size ("no bar point (544 448) or screen size") and the cleanup ran past 300 s |
+| `ww-stop.sh` | linux-web-window-stop-takes-2-1-s | 11-10 02:05 FAIL timeout | check | it runs all of `window-render --hidden`; the Android step (Calculator on a hidden display, "never mirrored") timed out at 210 s before the Linux step, so the Linux stop was never measured. The hidden-mirror hang may be a real bug of its own |
+| `switcher-launch.sh` | launch-closes-overview | 11-10 02:13 FAIL timeout | check/env | no output after the build header for 300 s: home's page calls hang inside `wwc_start` |
+| `plasma-modes.sh` | plasma-down | 11-10 01:3x FAIL timeout | check/env | home's `apps.launch` answered empty (kwin 3.74 running), then a touch-IRQ read hung |
+| `window-task-ime.sh` | linux-apps-opened-as-their-own-task | 11-10 02:31 SKIP | env | the running KWin has no window-ime cap (0043 not in the session) |
+| `kwin-hung-client.sh` | a-hung-game-crashes-kwin | 11-09 SKIP (ENV) | env | no `kwin_wayland` running at check time |
+| `ww-popups.sh` | native-windows | 11-08 FAIL precondition, then SKIP folded | check/env | setup failed three times with the phone idle; then the phone was folded |
+| `ww-resize.sh` | native-windows | 11-07 FAIL rc=1, then rc 3 (early) x5 | check | 11-07: `wwpt: command not found`; per-app jobs (kate, dolphin, calc, with resize-trace.py) queued 11-10 01:09, no verdict yet |
+| `window-bench.sh` | window-handling-benchmark | 11-08 FAIL timeout (x9) | check | the full bench needed ~2x the budget; split into 4 parts 11-10 (above), parts queued 11-10 02:50 |
+| `ww-opens.sh`, `ww-close-min.sh`, `ww-popup-x11.sh` | (three tasks) | queued 11-09 17:2x, rc 3 (touched/early) | - | no verdict yet: the user's phone was in use in every window |
+| `ww-glue.sh` | native-windows | none since 11-08 | - | queued 11-10 02:5x |
+
+Common cause of the check/env rows on 11-10's build 73df319d: **home's page stops answering CDP calls in the runner's
+window** (an empty reply or a hang): ww-clamp, switcher-launch and plasma-modes all stop there. This is the first thing
+to fix for phase 0's "done when" (a verdict within the budget), before any window bug can be judged.
+
+Numbers (`pf=`, `lag=`, missed vsyncs per resize, the perfetto verdict from `resize-trace.py`): none yet - they come
+from the queued `ww-resize` per-app jobs and window-bench parts 2-3; this section gets them when they land.
+
+The emulator lane (plan 0.2) ran no job from 11-08: its lock held "1 dead-holder", written into the real
+`~/.cache/powos-emu.lock` by `test/tier1/test-emu-lock.sh`, and pid 1 passes `kill -0` as root. Fixed on
+agent/windows-p0 (pid 1 / junk is never a holder; the test uses a private cache dir).
