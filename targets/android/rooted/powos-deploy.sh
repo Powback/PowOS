@@ -82,6 +82,10 @@ if ! cmp -s $T/android-nm $R/usr/local/bin/android-nm; then
   fi
 fi
 # The phone's controller (Steam Deck over uhid) and the focus watcher, which the session starts (powos-rooted-session).
+install -m 755 $T/powos-play $R/usr/bin/powos-play
+install -m 755 $T/powos-pack $R/usr/bin/powos-pack
+install -m 755 $T/powos-progress $R/usr/bin/powos-progress
+install -m 755 $T/powos-steam $R/usr/bin/powos-steam
 install -m 755 $T/powos-padd $R/usr/bin/powos-padd
 install -m 755 $T/powos-focus-watch $R/usr/bin/powos-focus-watch
 # Android's keyboard for X11 apps' text fields (unit x11-ime-bridge): IBus with powos-ime-bridge as its panel, started

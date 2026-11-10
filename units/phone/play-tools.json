@@ -1,0 +1,17 @@
+{
+  "id": "play-tools",
+  "name": "PowOS play tools",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "purpose": "The gaming pack's command-line tools in the PowOS image: powos-play (runs a Windows .exe through Proton without Steam's container), powos-pack (adds the packs the base image leaves out), powos-progress (one Android progress notification per long job: pack download/unpack, Steam bootstrap and self-update), powos-steam (Steam launcher). Command-line tools, nothing runs on its own.",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (targets/android/play/*), and install-powos-android.sh at image build",
+  "files": [
+    "/usr/bin/powos-play",
+    "/usr/bin/powos-pack",
+    "/usr/bin/powos-progress",
+    "/usr/bin/powos-steam"
+  ],
+  "remove": {
+    "commands": []
+  }
+}

@@ -123,6 +123,12 @@ deploy)
   done
   # PowOS's own scripts the phone's features rely on (shipped in the PowOS image - a rootfs from an older image
   # lacks their fixes): the start button's app grid, and the terminals' tmux shell (the launcher's terminal tiles).
+  # The play tools (the gaming pack's runner, pack manager, progress notifications, Steam launcher) were only
+  # installed at image build (install-powos-android.sh), so their fixes never reached a phone (11-10: #11's
+  # powos-progress was missing on the OnePlus). Pushed and installed by every rooted deploy now.
+  for f in powos-play powos-pack powos-progress powos-steam; do
+    adb push -q "$HERE/../play/$f" "/data/local/tmp/$f"
+  done
   adb push -q "$HERE/../../../bin/powos-panel-phone" /data/local/tmp/powos-panel-phone
   adb push -q "$HERE/../../../desktop/autostart/powos-panel-phone.desktop" /data/local/tmp/powos-panel-phone.desktop
   adb push -q "$HERE/../../../lib/powos-tmux-shell" /data/local/tmp/powos-tmux-shell

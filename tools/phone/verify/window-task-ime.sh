@@ -43,7 +43,7 @@ restore() {
   [ "$(ime)" = true ] && sh_ "input keyevent KEYCODE_BACK"
   if [ $STARTED = 1 ]; then
     us "pkill -f powos-ime-check-$N; rm -f $F; true" >/dev/null
-    [ -n "$KT" ] && sleep 1 && [ -n "$(sh_ "am stack list | grep -E \"taskId=$KT[^0-9]\"")" ] && sh_ "am stack remove $KT"
+    [ -n "$KT" ] && sleep 1 && [ -n "$(sh_ "am stack list | grep -E \"taskId=${KT}[^0-9]\"")" ] && sh_ "am stack remove $KT"
   fi
   sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"
   echo "restored; artefacts $OUT"
