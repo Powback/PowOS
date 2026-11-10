@@ -489,7 +489,24 @@ def session_alive(sid):
     return False
 
 
+def started_ms_ago():
+    """How long ago (ms) this process started (/proc/self/stat starttime): the interpreter's own start before main()."""
+    try:
+        with open("/proc/self/stat") as f:
+            start = int(f.read().rsplit(")", 1)[1].split()[19]) / os.sysconf("SC_CLK_TCK")
+        with open("/proc/uptime") as f:
+            return int((float(f.read().split()[0]) - start) * 1000)
+    except (OSError, ValueError, IndexError):
+        return -1
+
+
 def main():
+    t0, py_ms = time.monotonic(), started_ms_ago()
+    stages = {}  # stage -> ms since main(): the "timing" line (docs/research/linux-app-cold-start.md)
+
+    def stage(what):
+        stages.setdefault(what, int((time.monotonic() - t0) * 1000))
+
     args = sys.argv[1:]
     ids = set()
     while args and args[0] != "--":
@@ -514,6 +531,7 @@ def main():
 
     app = QCoreApplication(sys.argv[:1])
     bus = QDBusConnection.sessionBus()
+    stage("qt")
     name = f"org.powos.OpenTask.p{os.getpid()}"
     scripts = []
     # picked: the window being shown; shown: a window of ours was shown as a task (the status said "task"); tries: shows
@@ -532,6 +550,7 @@ def main():
         relay = OutputRelay(path) if fd is not None else None  # from here on: what this launch writes
         state["child"] = subprocess.Popen(["/bin/bash", "-c", "exec " + command], start_new_session=True,
                                           stdout=fd, stderr=fd)
+        stage("exec")
         if relay:
             os.close(fd)
             state["relay"] = relay
@@ -643,6 +662,7 @@ def main():
         if state["picked"]:
             return
         state["picked"], state["picked_at"], state["tries"] = window, time.monotonic(), 0
+        stage("window")
         wake(window)
         show(window)
 
@@ -739,6 +759,7 @@ def main():
 
         @Slot()
         def Listed(self):  # noqa: N802
+            stage("listed")
             window = resume() if game else None
             if window:
                 pick(window)
@@ -773,6 +794,10 @@ def main():
                 return
             # Shown: the caller hears "task" now; the helper stays until the window has lasted SETTLE_S.
             state["shown"] = True
+            stage("shown")
+            # Where a launch's time went, one line (stderr: the caller logs it, its status parse skips it).
+            print("powos-open-task: timing python=%d " % py_ms + " ".join(f"{k}={v}" for k, v in stages.items()),
+                  file=sys.stderr, flush=True)
             status("task")
             QTimer.singleShot(SETTLE_S * 1000, lambda w=window: settled(w))
 

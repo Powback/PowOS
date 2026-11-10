@@ -50,8 +50,15 @@ G=$( [ -n "$K" ] && tr '\0' '\n' < /proc/$K/environ 2>/dev/null |
 # the session's colour scheme (the PowOS launcher's, SystemTheme.kt) is dark (measured 2026-10-23: Breeze, #121212,
 # Noto Sans 10 with it). XDG_CONFIG_DIRS carries kdedefaults (the look-and-feel's defaults). Not XDG_SESSION_TYPE:
 # that would move Chromium/Brave from X11 to Wayland. From plasmashell's environment, else KDE 6's values.
+# XDG_DATA_DIRS too (the session's has /run/powos-app/share first): KDE names its service cache by it
+# (~/.cache/ksycoca6_<lang>_<sha1 of the data dirs>), so with bash -l's own value (flatpak.sh's, no /run/powos-app/share)
+# every app opened from the PowOS app used a second cache that kded6 never refreshes. After any change to an
+# applications dir (a package update, a deploy) the first app opened rebuilt it in-process before its window:
+# Dolphin 11-10 04:37:45 -> 04:38:04, cache written 04:38:04 (docs/research/linux-app-cold-start.md). With the
+# session's value it is kded6's cache, rebuilt in the background seconds after the change. flatpak.sh keeps it as is
+# (it only adds dirs not already there).
 D=$( [ -n "$P" ] && tr '\0' '\n' < /proc/$P/environ 2>/dev/null |
-  grep -E '^(XDG_CURRENT_DESKTOP|XDG_SESSION_DESKTOP|KDE_FULL_SESSION|KDE_SESSION_VERSION|XDG_MENU_PREFIX|XDG_CONFIG_DIRS)=' | tr '\n' ' ')
+  grep -E '^(XDG_CURRENT_DESKTOP|XDG_SESSION_DESKTOP|KDE_FULL_SESSION|KDE_SESSION_VERSION|XDG_MENU_PREFIX|XDG_CONFIG_DIRS|XDG_DATA_DIRS)=' | tr '\n' ' ')
 [ -n "$D" ] || D="XDG_CURRENT_DESKTOP=KDE XDG_SESSION_DESKTOP=KDE KDE_FULL_SESSION=true KDE_SESSION_VERSION=6 XDG_MENU_PREFIX=plasma- XDG_CONFIG_DIRS=/home/powos/.config/kdedefaults:/etc/xdg"
 # The session's open-file limit (see powos-rooted-session: Proton's esync needs >= 524288), raised while still root.
 ulimit -n 1048576 2>/dev/null
