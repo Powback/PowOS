@@ -110,8 +110,8 @@ shot() {   # shot NAME: raw screencap gzipped on the phone -> $OUT/NAME.raw.gz
 # falls back to), and the display is never mirrored (no element, no hole, no mirror under home). Checked:
 #   task     Calculator's task is on that display (`am stack list`);
 #   content  `screencap -d <that display>` is the app, not a flat fill (dominant colour < 97%, edges >= 0.3%), within 15 s;
-#   tap      `input -d <that display> tap` on its "7" (WR_TAP fx fy of the display, 0.14 0.69) changes the number area
-#            (top 55%): >= 0.2% of it differs and > 3x the noise of two shots without a tap.
+#   tap      `input -d <that display> tap` on its "7" (found by id in `uiautomator dump --windows`, any layout/width)
+#            changes its formula's text (the accessibility dump before vs after); the keystroke is then deleted again.
 #   linux    a Linux app (WR_LINUX_APP, foot) through the host's KWin -> web-window consumer path into an offscreen
 #            ImageReader, never offered to the page (webwindows.selftestLinux, LinuxSelftest.kt; see linux_step).
 # Then its task removed (`am stack remove`; a Calculator task the user had before is moved back to display 0, never
@@ -301,27 +301,37 @@ EOF
     to=$(sh_ "am stack list" | awk -v t="taskId=${task%% *}:" '/^RootTask id=/{d=$0;sub(/.*displayId=/,"",d);sub(/ .*/,"",d)} index($0,t){print d;exit}')
     for t in $task; do case "$pre" in *" $t "*) ;; *) sh_ "am stack remove $t" >/dev/null; log "task $t removed where it went (display ${to:-?})" ;; esac; done
     hfail "$APP's task $task left display $D $1 (to display ${to:-?}: PowOS's adopt of a full-screen task on another display - fixed in FreeformTasks.onMainDisplay)"; }
-  # (b) a tap on THAT display changes the app's number area. Calculator keeps its number across launches (each check
-  # added a 7): at its digit limit a 7 changes nothing (11-01 03:24, 15 sevens: 0.0013). So its AC key first (WR_CLEAR
-  # fx fy, 0.14 0.606: the key above the 7), then six 7s: the measured 7 shifts the whole number (a lone "0" -> "7" is
-  # ~0.002, at the threshold).
-  local cx cy kx ky; set -- ${WR_CLEAR:-0.14 0.606}; cx=$(awk "BEGIN{print int($W*$1)}"); cy=$(awk "BEGIN{print int($H*$2)}")
-  set -- ${WR_TAP:-0.14 0.69}; kx=$(awk "BEGIN{print int($W*$1)}"); ky=$(awk "BEGIN{print int($H*$2)}")
-  awake_or_nj "clear"; sh_ "input -d $D tap $cx $cy; for i in 1 2 3 4 5 6; do input -d $D tap $kx $ky; done" >/dev/null
-  sleep 1; stayed "after its content showed"; "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/clr.raw.gz" 2>/dev/null
-  sleep 0.5; "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/pre.raw.gz" 2>/dev/null
-  local A0=0 B0=$(( H * 55 / 100 ))
-  noise=$($PY diff "$OUT/clr.raw.gz" "$OUT/pre.raw.gz" 0 $A0 "$W" $B0)
-  set -- ${WR_TAP:-0.14 0.69}; fx=$1 fy=$2
-  local x y; x=$(awk "BEGIN{print int($W*$fx)}"); y=$(awk "BEGIN{print int($H*$fy)}")
-  awake_or_nj "tap"; sh_ "input -d $D tap $x $y" >/dev/null; log "tap: input -d $D tap $x $y ($fx,$fy)"
-  sleep 1.5; "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/tap.raw.gz" 2>/dev/null
-  d1=$($PY diff "$OUT/pre.raw.gz" "$OUT/tap.raw.gz" 0 $A0 "$W" $B0)
-  log "tap: $d1 of the number area changed (noise without a tap: $noise)"
+  # (b) a tap on THAT display reaches the app, judged on the app's own text. The key is read from the app's real layout
+  # (`uiautomator dump --windows`: every display's accessibility tree, this display's Calculator in it), its formula
+  # text before vs after. 11-11 ea2933b3: a fixed tap (0.14,0.69 of the display) hit the scientific layout's "log" key
+  # (the layout depends on the display width), the formula already held a long "log(log(..." of earlier checks, the
+  # appended text was off-screen and a pixel diff of the number area read 0.0005 -> a false "WINDOWS BROKEN". Nothing
+  # is cleared: the app's own formula (it may be the user's) gets one keystroke, undone with its delete key after.
+  # window-render.py calc picks "7" ("+" after a long number: the digit limit) and gives its centre on this display.
+  uidump() {   # uidump NAME: the accessibility dump of every display -> $OUT/NAME.xml (retried: the dump can miss idle)
+    local i; for i in 1 2 3; do
+      sh_ "uiautomator dump --windows $dir/ui.xml >/dev/null 2>&1 && cat $dir/ui.xml" > "$OUT/$1.xml"
+      grep -q "</displays>" "$OUT/$1.xml" && return 0; sleep 1
+    done; return 1; }
+  local plan key kx ky dx dy jr
+  sleep 1; stayed "after its content showed"; awake_or_nj "layout"
+  uidump ui-pre || hfail "no accessibility dump of display $D (uiautomator dump --windows)"
+  plan=$($PY calc "$OUT/ui-pre.xml" "$D" "$APP") || hfail "no key to tap in $APP's layout: $plan"
+  read -r key kx ky dx dy <<< "$(echo "$plan" | head -1)"
+  log "layout: $key at $kx,$ky, delete at $dx,$dy; formula before: $(echo "$plan" | sed -n 2p)"
+  awake_or_nj "tap"; sh_ "input -d $D tap $kx $ky" >/dev/null; log "tap: input -d $D tap $kx $ky ($key)"
+  sleep 1; "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/tap.raw.gz" 2>/dev/null
   stayed "by the tap"
-  for n in display tap; do $PY png "$OUT/$n.raw.gz" "$OUT/$n.png" 2>/dev/null && rm -f "$OUT/$n.raw.gz"; done; rm -f "$OUT/pre.raw.gz"
-  case "$d1$noise" in ""|*[!0-9.]*) hfail "a measurement is missing (tap=$d1 noise=$noise)" ;; esac
-  awk "BEGIN{exit !($d1 >= 0.002 && $d1 > 3 * $noise)}" || hfail "the tap changed nothing in the app ($d1 vs noise $noise)"
+  for n in display tap; do $PY png "$OUT/$n.raw.gz" "$OUT/$n.png" 2>/dev/null && rm -f "$OUT/$n.raw.gz"; done
+  uidump ui-tap || hfail "no accessibility dump of display $D after the tap"
+  jr=$($PY calcjudge "$OUT/ui-pre.xml" "$OUT/ui-tap.xml" "$D" "$APP" changed) || hfail "the tap changed nothing in the app ($key: $jr)"
+  log "tap: reached the app ($key: $jr)"
+  # Undo the keystroke (the formula as it was; not judged - the tap's proof is above).
+  if [ "$dx" != - ]; then
+    awake_or_nj "undo"; sh_ "input -d $D tap $dx $dy" >/dev/null; sleep 1
+    if uidump ui-undo && jr=$($PY calcjudge "$OUT/ui-pre.xml" "$OUT/ui-undo.xml" "$D" "$APP" same); then log "undo: delete tapped, formula as before"
+    else log "WARNING: the delete tap didn't restore the formula (${jr:-no dump})"; fi
+  fi
   # (c) a resize through the helper (as WebWindows.resizeContent sends it): dumpsys display shows the new size at the
   # SAME density (a window's density is fixed for its life, WindowDpi - 10-31 Chrome lost its desktop layout).
   vdinfo() { sh_ "dumpsys display" | grep -m1 "DisplayDeviceInfo{\"powos-ww-$tag\"" | sed -n 's/.*", \([0-9]*\) x \([0-9]*\),.* density \([0-9]*\),.*/\1 \2 \3/p'; }

@@ -10,10 +10,20 @@ Shots are `screencap` RAW (RGBA after a 12/16-byte header), gzipped on the phone
                                                                  (dominant < 0.97, colours >= 4) - run ON the phone by
                                                                  window-bench.sh's wb-drawn.sh (plain raw, step 8)
 The rect is device px, sampled every STEP (2) px each way.
+  window-render.py calc UI.xml DISPLAY PKG     the hidden check's tap plan, read from `uiautomator dump --windows` (the
+                                              app's real layout on that display, any width/layout): line 1
+                                              "KEY X Y DELX DELY" (the key to tap and its centre, the delete key's or
+                                              "- -"), line 2 the formula's text as JSON. Exit 1 (a reason) when the
+                                              display has no such app or key.
+  window-render.py calcjudge A.xml B.xml DISPLAY PKG changed|same   exit 0 when the formula text went from A to B as
+                                              asked ("formula 'a' -> 'b'" printed either way), 1 not, 2 unreadable
 """
 import gzip
+import json
+import re
 import struct
 import sys
+import xml.etree.ElementTree as ET
 import zlib
 
 STEP = 2
@@ -105,6 +115,82 @@ def png(shot, out, l=None, t=None, r=None, b=None):
         f.write(chunk(b"IEND", b""))
 
 
+# The hidden check's Calculator (com.android.calculator2 ids, the OnePlus build too): the key it taps and the text it
+# judges. The formula keeps every earlier keystroke (the app persists it), can scroll and its layout differs by width
+# (11-11 ea2933b3: a fixed 0.14,0.69 tap hit the scientific layout's "log" key, the appended "log(" was off-screen and
+# the pixel diff read 0.0005 -> a false "WINDOWS BROKEN"). So the key is found by id and the effect read as text.
+DIGIT_LIMIT = 10  # a trailing number this long may be at the app's digit limit (a 7 there changes nothing): tap "+".
+
+
+def ui_nodes(path, display, pkg):
+    """{resource-id suffix or 'text:<t>': (bounds, text)} of PKG's nodes on DISPLAY in a uiautomator dump."""
+    with open(path, "rb") as f:
+        blob = f.read()
+    at = blob.find(b"<?xml")  # uiautomator's own "UI hierchary dumped to" line may come first
+    root = ET.fromstring(blob[max(at, 0):].strip())
+    scopes = [d for d in root.iter("display") if d.get("id") == str(display)] if root.tag == "displays" else [root]
+    out = {}
+    for scope in scopes:
+        for n in scope.iter("node"):
+            if n.get("package") != pkg:
+                continue
+            m = re.match(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]", n.get("bounds", ""))
+            if not m:
+                continue
+            b = tuple(map(int, m.groups()))
+            rid = n.get("resource-id", "").rsplit(":id/", 1)[-1]
+            text = n.get("text", "")
+            if rid:
+                out.setdefault(rid, (b, text))
+            if text and n.get("clickable") == "true":
+                out.setdefault("text:" + text, (b, text))
+    return out
+
+
+def visible(b):
+    return b[2] > b[0] and b[3] > b[1] and b[0] >= 0 and b[1] >= 0
+
+
+def centre(b):
+    return (b[0] + b[2]) // 2, (b[1] + b[3]) // 2
+
+
+def formula(nodes):
+    """The expression the user/check typed (the formula; the result line where an app has no formula id), or None."""
+    for rid in ("formula", "result"):
+        if rid in nodes:
+            return nodes[rid][1]
+    return None
+
+
+def calc_plan(path, display, pkg):
+    nodes = ui_nodes(path, display, pkg)
+    if not nodes:
+        return 1, f"no {pkg} node on display {display} in the accessibility dump"
+    f = formula(nodes)
+    if f is None:
+        return 1, f"no formula/result text of {pkg} on display {display} (ids: {' '.join(sorted(nodes)[:12])})"
+    run = re.search(r"[0-9][0-9.,' \u00a0\u202f]*$", f)
+    digits = len(re.sub(r"[^0-9]", "", run.group(0))) if run else 0
+    want = [("op_add", "text:+"), ("digit_7", "text:7")] if digits >= DIGIT_LIMIT else [("digit_7", "text:7")]
+    for ids in want:
+        for k in ids:
+            if k in nodes and visible(nodes[k][0]):
+                x, y = centre(nodes[k][0])
+                d = nodes.get("del") or nodes.get("delete_button")
+                dx, dy = centre(d[0]) if d and visible(d[0]) else ("-", "-")
+                return 0, f"{ids[0]} {x} {y} {dx} {dy}\n{json.dumps(f)}"
+    return 1, f"no visible {' or '.join(i[0] for i in want)} key of {pkg} on display {display}"
+
+
+def calc_judge(a, b, display, pkg, want):
+    fa, fb = (formula(ui_nodes(p, display, pkg)) for p in (a, b))
+    if fa is None or fb is None:
+        return 2, f"formula unreadable (before {fa!r}, after {fb!r})"
+    msg = f"formula {fa!r} -> {fb!r}"
+    return (0 if (fa != fb) == (want == "changed") else 1), msg
+
+
 def main(a):
     global STEP
     if len(a) >= 3 and a[0] == "png":
@@ -133,6 +219,20 @@ def main(a):
                 return 1
         print(f"all {(len(a) - 3) // 4} drawn")
         return 0
+    elif len(a) == 4 and a[0] == "calc":
+        try:
+            rc, msg = calc_plan(a[1], a[2], a[3])
+        except (OSError, ET.ParseError) as e:
+            rc, msg = 1, f"dump unreadable: {e}"
+        print(msg)
+        return rc
+    elif len(a) == 6 and a[0] == "calcjudge" and a[5] in ("changed", "same"):
+        try:
+            rc, msg = calc_judge(*a[1:])
+        except (OSError, ET.ParseError) as e:
+            rc, msg = 2, f"dump unreadable: {e}"
+        print(msg)
+        return rc
     elif len(a) == 7 and a[0] == "diff":
         print(diff(load(a[1]), load(a[2]), *map(int, a[3:7])))
     else:
