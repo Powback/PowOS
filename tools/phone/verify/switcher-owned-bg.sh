@@ -61,7 +61,7 @@ for _ in $(seq 1 10); do [ -z "$(sh_ "pidof $pkg")" ] && break; sleep 1; done
 [ "$(sh_ 'pidof com.termux' || true)" = "$termux_before" ] || { echo 'FAIL: Termux process identity changed during check'; exit 1; }
 [ $(( $(date +%s) - started_at )) -lt 85 ] || { echo 'FAIL: cannot distinguish Stop from lease expiry'; exit 1; }
 tasks_snapshot after
-if [ "$(cat "$OUT/task-ids-after.txt")" != "$tasks_before" ]; then
+if ! python3 -I "$here/background-task-preservation.py" "$OUT/tasks-before.txt" "$OUT/tasks-after.txt"; then
   echo 'task identity delta (before -> after):'
   diff -u "$OUT/task-ids-before.txt" "$OUT/task-ids-after.txt" || true
   echo 'before task headers:'; grep 'Recent #[0-9].*Task{' "$OUT/tasks-before.txt" || true

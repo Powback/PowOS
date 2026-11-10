@@ -19,4 +19,24 @@ class Evidence(unittest.TestCase):
         self.assertIn('diff -u "$OUT/task-ids-before.txt" "$OUT/task-ids-after.txt"',src)
         self.assertIn('FAIL: pre-existing task identities changed',src)
 
+    def test_exact_empty_lock_only(self):
+        import runpy
+        m = runpy.run_path(str(ROOT / 'tools/phone/verify/background-task-preservation.py'))
+        def task(i, component, activities='[]'):
+            return f'  * Recent #2: Task{{769645c #{i} type=standard A=10359:.lock}}\n    mActivityComponent={component}\n    Activities={activities}\n'
+        lock = task(3422, m['LOCK'])
+        user = task(3414, 'com.termux/.app.TermuxActivity', '[ActivityRecord{150275071 u0 com.termux/.app.TermuxActivity t3414}]')
+        home = task(3363, 'com.powos.app/dev.omalauncher.shell.ShellActivity')
+        parse, compare = m['records'], m['compare']
+        notes, failures = compare(parse(lock+user+home), parse(user+home))
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(failures, [])
+        self.assertTrue(compare(parse(lock+user+home), parse(home))[1])
+        self.assertTrue(compare(parse(lock+user+home), parse(user))[1])
+        active_lock = task(3422, m['LOCK'], '[ActivityRecord{live}]')
+        self.assertTrue(compare(parse(active_lock+user), parse(user))[1])
+        spoof = task(3422, 'com.other/.lock')
+        self.assertTrue(compare(parse(spoof+user), parse(user))[1])
+        self.assertTrue(compare(parse(user), parse(lock+user))[1])
+
 if __name__ == '__main__': unittest.main()
