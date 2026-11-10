@@ -42,11 +42,15 @@ done
 set -- $go; [ "$2" = 0 ] && t0=$start || t0=$(rel "$2")
 [ "$3" = timeout ] && { shift 3; put "nogo page: $*"; }
 shift 2; rects="$*"   # one or more "l t r b": drawn when every one is
+# The stages ride along (p5 unfold 4870 ms: the page's go came ~1 s after the screen change, the rest was unaccounted):
+# go = ms from t0 to the go line seen, rounds = screenshots taken, flat = the last flat round's verdict.
+gm=$(( $(now) - t0 )); n=0; fl=""
 while :; do
-  ts=$(now)
+  ts=$(now); n=$((n + 1))
   screencap > $R$f 2>/dev/null
   st=$(chroot $R /usr/bin/python3 -I /tmp/window-render.py drawnall $f 8 $rects 2>&1); rc=$?
-  [ $rc = 0 ] && put "drawn $((ts - t0)) $st"
+  [ $rc = 0 ] && put "drawn $((ts - t0)) go $gm rounds $n round_ms $(( ($(now) - ts) )) last_flat ${fl:-none} - $st"
   [ $rc = 1 ] || put "error $st"
-  [ $(now) -gt $end ] && put "flat $((ts - t0)) $st"
+  fl="$((ts - t0))ms:$(echo $st | tr ' ' _)"
+  [ $(now) -gt $end ] && put "flat $((ts - t0)) go $gm rounds $n $st"
 done

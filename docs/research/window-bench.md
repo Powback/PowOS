@@ -123,6 +123,17 @@ never-live launches in a row end the storm (FAIL). Every part ends with a verdic
   the window; it now tests geometry (no window at or above its z-index covers the spot).
 - **leak-ww-layers 2 with 0 windows left:** read again for up to 10 s and named in `leak-layers.txt` (a late release
   vs a real leak; the names say whose).
+- **p5 (phone clock):** part 1 "ended early, 0 failed" was the bench itself: `storm_leaks` re-set its positional args and
+  died "$2: unbound variable" (fixed). The late layer was `Display 79 name="powos-ww-37"`: the last storm window's virtual
+  display, still in SurfaceFlinger 13 s after the host's "3/4 display 79 released" (10:08:27.262), gone later - the
+  helper now logs its release stages (touch device / display / reader ms).
+  Settings open (window 42): launch 10:10:05.608 -> window 05.614 -> display ready 06.023 (409 ms in the helper:
+  VirtualDisplay + placeholder touch device, now timed per stage) -> app started 06.063 -> first frame (live) 06.649 ->
+  drawn 08.227 (1.58 s of Settings' own blank first frames). Ours: the 409 ms display; building a pre-made display (pool
+  of one, with its touch device) would take it off every Android open.
+  Unfold: fold 10:10:18.420; screen back 22.722; home's layout for the inner screen 23.283 (560 ms, a ResizeObserver
+  loop error on the way); every window live and still 23.758; drawn at t0 + 4870 ms - the go-to-drawn part and the
+  command's own latency are now in the watcher's line (go / rounds / last flat), next run.
 - Environment, not fixed here: one CDP eval is 2-8 s at Mac load ~35, setup (unfold, lock, home) took 2 min of
   part 1, and `drawn`/resize-settle are Mac-clock screencap polls (inflated the same way).
 

@@ -147,6 +147,7 @@ object WebWindowsHost {
             val h = a[3].toInt()
             val dpi = a[4].toInt()
             val selftest = a.getOrNull(5) == "selftest"
+            val t0 = android.os.SystemClock.uptimeMillis()
             val r = ImageReader.newInstance(1, 1, PixelFormat.RGBA_8888, 2)
             var made: Vd? = null
             r.setOnImageAvailableListener({ made?.let(::framed) ?: it.acquireLatestImage()?.close() }, frames)
@@ -165,11 +166,15 @@ object WebWindowsHost {
                 r.close()
                 return
             }
+            val t1 = android.os.SystemClock.uptimeMillis()
             val touch = Touch.attach(vd.display)
+            val t2 = android.os.SystemClock.uptimeMillis()
             made = Vd(vd, r, touch)
             vds[vd.display.displayId] = made
             say("display $tag ${vd.display.displayId}")
-            say("log display ${vd.display.displayId} ${w}x$h dpi $dpi: sw ${minOf(w, h) * 160 / dpi}dp")
+            // The stages of a window's display (window-bench p5 11-10: Settings' window 42 waited 409 ms from "new window"
+            // to its display, before the app could even start - the virtual display, or the placeholder touch device).
+            say("log display ${vd.display.displayId} ${w}x$h dpi $dpi: sw ${minOf(w, h) * 160 / dpi}dp (display ${t1 - t0} ms, touch device ${t2 - t1} ms)")
         }
 
         private fun resize(
@@ -255,10 +260,19 @@ object WebWindowsHost {
             say("log $counts, settled $settled after release (display $id ${info.mode.physicalWidth}x${info.mode.physicalHeight})")
         }
 
+        /**
+         * Its stages timed into the window log (window-bench p5 11-10: display 79's layer was still in SurfaceFlinger
+         * 13 s after "3/4 display 79 released" - which stage holds it is what this line answers).
+         */
         private fun release(v: Vd) {
+            val id = v.display.display.displayId
+            val t0 = android.os.SystemClock.uptimeMillis()
             v.touch?.detach()
+            val t1 = android.os.SystemClock.uptimeMillis()
             v.display.release()
+            val t2 = android.os.SystemClock.uptimeMillis()
             v.reader.close()
+            say("log display $id: released (touch device ${t1 - t0} ms, display ${t2 - t1} ms, reader ${android.os.SystemClock.uptimeMillis() - t2} ms)")
         }
 
         fun releaseAll() = vds.values.forEach { runCatching { release(it) } }

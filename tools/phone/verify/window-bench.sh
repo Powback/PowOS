@@ -165,7 +165,8 @@ drawn_setup() {
 drawn_watch() { sh_ "nohup sh $WBD $1 $2 >/dev/null 2>&1 &"; }
 drawn_read() {
   local o; o=$(sh_ "sh $WBD read $1 $2")
-  case $o in "drawn "*) set -- $o; echo "$2" ;; *) log "drawn $1: ${o:-no answer}" >&2; return 1 ;; esac
+  echo "  drawn $1: ${o:-no answer}" >&2
+  case $o in "drawn "*) set -- $o; echo "$2" ;; *) return 1 ;; esac
 }
 # settle_arm <w-id>: the page logs settle:<w-id>'s go line two frames after the next pointerup (the resize's end).
 settle_arm() {
@@ -393,11 +394,13 @@ storm_leaks() {
   # Layers left 3 s after the last close (p3 part 1: 2, with 0 windows left) may be a release still on its way
   # (BLAST buffer queue children go with the app's last reference): read the count again for up to 10 s, and name what
   # stays ($OUT/leak-layers.txt) so a real leak says which window's layers.
-  local ly0 i n; ly0=$(set -- $1; echo "$3"); set -- $S1
-  if [ "$3" -gt "$ly0" ] 2>/dev/null; then
+  # (positional args kept: `set -- $S1` here lost the "before" line and the bench below died "$2: unbound variable",
+  # the part "ended early" with 0 FAILs - p5 part 1, 10:08.)
+  local B0=$1 ly0 ly1 i n; ly0=$(set -- $B0; echo "$3"); ly1=$(set -- $S1; echo "$3"); n=$ly1
+  if [ "$ly1" -gt "$ly0" ] 2>/dev/null; then
     for i in 1 2 3 4 5; do sleep 2; n=$(sh_ "dumpsys SurfaceFlinger --list" | grep -cE "powos-ww-[0-9]+"); [ "$n" -le "$ly0" ] && break; done
     sh_ "dumpsys SurfaceFlinger --list" | grep -E "powos-ww-[0-9]+" > "$OUT/leak-layers.txt"
-    log "storm: ww layers $3 -> $n after $((i * 2)) s more: $(tr '\n' ' ' < "$OUT/leak-layers.txt" | cut -c1-300)"
+    log "storm: ww layers $ly1 -> $n after $((i * 2)) s more: $(tr '\n' ' ' < "$OUT/leak-layers.txt" | cut -c1-300)"
     S1=$(set -- $S1; echo "$1 $2 $n $4 $5")
   fi
   set -- $1; b1=$1 b2=$2 b3=$3 b4=$4 b5=$5; set -- $S1
@@ -523,6 +526,7 @@ const f=()=>{if(performance.now()-t1>${SETTLE_MAX_S:-40}000)return console.info(
 rot_go() { sh_ "nohup sh $WBD $1 $3 >/dev/null 2>&1 & $2"; }
 rot_read() {
   local o; o=$(sh_ "sh $WBD read $1 $2")
+  echo "  settle $1: ${o:-no answer}" >&2
   case $o in "drawn "*) set -- $o; echo "$2" ;; *) echo "- (${o:-no answer})" ;; esac
 }
 if phase rotate; then chk rotate
