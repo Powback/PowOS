@@ -65,6 +65,27 @@ function bgRowFails(it, want) {
   return row.name !== want || !row.icon || !row.stop ? [`${want}'s row: ${JSON.stringify(row)} (wants its name, icon and a Stop)`] : [];
 }
 
+/** Dedicated companion only: real host data and the actual row's Stop, never a user's app. */
+export async function switcherOwnedBackgroundNow(label) {
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const before = await powos.apps.background();
+  const owned = before.find((a) => a.key.startsWith("a:com.powos.verifybackground/") && a.label === label);
+  if (!owned) return ["real host list has no dedicated companion"];
+  const failures = await switcherBackgroundNow(label);
+  if (failures.length) return failures;
+  const toggle = document.querySelector('.recents-bg-toggle');
+  if (toggle.getAttribute('aria-expanded') !== 'true') toggle.click();
+  const selector = `.recents-bg-app[data-key="${owned.key}"]`;
+  await window.__gw.until(() => document.querySelector(selector));
+  document.querySelector(selector).querySelector('.recents-bg-stop').click();
+  const gone = await window.__gw.until(() => !document.querySelector(`${selector}:not(.leaving)`), 100);
+  if (!gone) return ["Stop did not remove owned row within 100 ms"];
+  const stopped = await window.__gw.until(async () => !(await powos.apps.background()).some((a) => a.key === owned.key), 5000);
+  if (!stopped) return ["real host still lists workload after Stop"];
+  const after = new Set((await powos.apps.background()).map((a) => a.key));
+  return before.filter((a) => a.key !== owned.key && !after.has(a.key)).map((a) => `pre-existing background app disappeared: ${a.label}`);
+}
+
 /** The control center's privacy chips now: each one's app name and its line. */
 function privacyChips() {
   return [...document.querySelectorAll(".privacy-row .privacy-chip")].map((c) => ({ app: c.querySelector(".privacy-app")?.textContent ?? "", what: c.querySelector(".privacy-what")?.textContent ?? "" }));

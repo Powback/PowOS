@@ -1,0 +1,13 @@
+{
+  "id": "verify-background",
+  "name": "Background lifecycle verification companion",
+  "kind": "service",
+  "owner": "system:verification (tools/phone/verify/switcher-owned-bg.sh)",
+  "host": "phone-android",
+  "purpose": "Separately packaged real foreground service for background-list/Stop proof. No network, external data or production filter exception. One nonce-owned private heartbeat; refuses replacement; expires after 90 seconds; never starts at boot or restarts sticky.",
+  "installedBy": "Coordinator installs canonical targets/android/build-verify-background.sh output using tools/phone/adb.sh install -r; never auto-installed by checks",
+  "files": ["/data/user/0/com.powos.verifybackground", "/data/app/*/com.powos.verifybackground-*/base.apk"],
+  "unbounded": "Android-managed com.powos.verifybackground process/UID; one handler, one private heartbeat file, 90-second elapsed-time cap. Queue cleanup only with matching nonce and PID; Stop uses unchanged BackgroundApps.stop.",
+  "autosleep": "never",
+  "remove": {"commands": ["adb uninstall com.powos.verifybackground"], "keep": []}
+}
