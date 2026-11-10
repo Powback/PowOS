@@ -1055,7 +1055,7 @@ function ibGridFails(at, into, gutter, foot) {
   const fails = [];
   if (into(foot) > 0) fails.push(`${at}: the grid's last row ends ${into(foot)} px into the pill + ${gutter} px gutter`);
   if (tiles.length) fails.push(`${at}: ${tiles.length} tile(s) into the pill: ${tiles.join(", ")} px`);
-  if (dots?.height && into(dots) > gutter) fails.push(`${at}: the page dots ${into(dots) - gutter} px into the pill`);
+  if (dots?.height && into(dots) > 0) fails.push(`${at}: the page dots ${into(dots)} px into the pill + ${gutter} px gutter`);
   return fails;
 }
 

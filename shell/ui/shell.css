@@ -313,9 +313,10 @@
 /* Home's: at the stage's foot, in the gap above the pill / dock, over the pages' width only (the stage is already
    clear of a side dock); it fades with the pages as the launcher opens. */
 .home-dots { position: absolute; left: 0; right: 0; bottom: calc(var(--gap) / 2 - 7px); opacity: calc(1 - var(--p)); pointer-events: none; }
-/* Folded with the pill in the foot (not the docked button), the foot starts right at the stage's foot: the dots' usual
-   7px reach below it put them under the pill's top edge (gate edit-search: "the page dots overlap bar-pill"). */
-.home:not(.wide):has(> .bar .bar-pill) > .stage > .home-dots { bottom: var(--gap); }
+/* Any screen with the pill in the foot: keep the dots in the gutter above it, including a wide home with a side
+   dock. The wide exemption left their scaled active dot almost touching the pill (inner portrait) and overlapping
+   it at other sizes. This overlays the existing gutter; it does not reserve another empty grid row. */
+.home:has(> .bar .bar-pill) > .stage > .home-dots { bottom: var(--gap); }
 /* The launcher's: no row of their own - laid over the gap under the pages (the launcher's 16 px over the pill, or the
    recent row's margin), so the app grid runs down to it. The user, 2026-10-31: "The page indicator takes up a lot of
    space." They sit in the drawer's grid beside the pages (same cell), over the pages' last 6 px: not inside the pages
@@ -2692,6 +2693,7 @@ html:root .recents-menu.tile, html:root .ww-tile-menu.tile { --glass-blur-native
   align-self: center; margin-top: var(--gap); font: var(--text-small) var(--font-body); color: var(--color-muted);
   background: var(--soft-fill); border: none; border-radius: 999px; padding: 8px 18px; opacity: var(--rp);
 }
+.recents-bg-status { align-self: center; margin-top: var(--gap); font: var(--text-small) var(--font-body); color: var(--color-muted); }
 .recents-bg-toggle[aria-expanded="true"] { color: var(--color-foreground); }
 /* It comes after the switcher is up (the background list is read then) and goes when the last one is stopped (§6). */
 .recents-bg-toggle { animation: recents-rise-in var(--spring-fast-ms) var(--spring-fast) both; }

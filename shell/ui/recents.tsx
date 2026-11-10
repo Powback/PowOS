@@ -88,11 +88,30 @@ const backgroundOpen = signal(false);
 /** Background apps being stopped: gone from the list at once, back if the stop fails. */
 const stopping = signal<Set<string>>(new Set());
 
-/** The background list asked again (the switcher coming up, a stop done). An older host has none: nothing shown. */
+/** Loading is visible immediately, even on the first opening; a failed refresh keeps the last known apps. */
+const backgroundLoading = signal(false);
+const backgroundError = signal(false);
+let backgroundRequest = 0;
+
+/** Only the latest listing may replace the rows (a slow opening request must not resurrect a stopped app). */
 function askBackground() {
-  powos.apps.background?.().then(
-    (list) => (background.value = list ?? []),
-    () => (background.value = []),
+  const request = ++backgroundRequest;
+  backgroundLoading.value = true;
+  backgroundError.value = false;
+  Promise.resolve().then(() => {
+    if (!powos.apps.background) throw new Error("Background apps unavailable");
+    return powos.apps.background();
+  }).then(
+    (list) => {
+      if (request !== backgroundRequest) return;
+      background.value = list ?? [];
+      backgroundLoading.value = false;
+    },
+    () => {
+      if (request !== backgroundRequest) return;
+      backgroundLoading.value = false;
+      backgroundError.value = true;
+    },
   );
 }
 
@@ -105,7 +124,10 @@ function backgroundShown(list: RecentTask[]): BackgroundApp[] {
 /** Stops background app [b]: off the list at once; back, with a note, if it didn't stop. */
 function stopBackground(b: BackgroundApp) {
   const stop = powos.apps.stopBackground;
-  if (!stop) return;
+  if (!stop) { showNote("Stopping background apps is unavailable"); return; }
+  if (stopping.peek().has(b.key)) return;
+  ++backgroundRequest; // invalidate listings started before this stop
+  backgroundLoading.value = false;
   stopping.value = new Set(stopping.value).add(b.key);
   const done = (ok: boolean) => {
     const next = new Set(stopping.value);
@@ -115,7 +137,7 @@ function stopBackground(b: BackgroundApp) {
     if (!ok) showNote(`Couldn't stop ${b.label}`);
     else askBackground();
   };
-  stop(b.key).then((ok) => done(!!ok), () => done(false));
+  Promise.resolve().then(() => stop(b.key)).then((ok) => done(!!ok), () => done(false));
 }
 
 powos.store
@@ -798,6 +820,8 @@ function Background({ list }: { list: RecentTask[] }) {
   return (
     <>
       <BackgroundToggle count={apps.length} open={open} />
+      {backgroundLoading.value && <div class="recents-bg-status" role="status">Checking background apps…</div>}
+      {backgroundError.value && <button type="button" class="recents-bg-toggle" onClick={askBackground}>Couldn't check background apps · Retry</button>}
       {pop.on && (
         <div class={`recents-bg tile sheet ${pop.leaving ? "leaving" : ""}`} inert={pop.leaving || undefined} role="list" aria-label="Running in background">
           <div class="recents-bg-head">

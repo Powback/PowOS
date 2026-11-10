@@ -15,7 +15,7 @@ function switcherNow() {
     icon: !!r.querySelector("img.recents-bg-icon[src]"),
     stop: !!r.querySelector(".recents-bg-stop"),
   }));
-  return { empty: shown(empty) ? empty.textContent : "", toggle: shown(toggle) ? toggle.textContent : "", cards: document.querySelectorAll(".recents .card, .recents [data-task]").length, rows };
+  return { empty: shown(empty) ? empty.textContent : "", toggle: shown(toggle) ? toggle.textContent : "", cards: document.querySelectorAll(".recents .task[data-task]").length, rows };
 }
 
 /**
@@ -41,9 +41,15 @@ export async function switcherBackgroundNow(want = "Termux") {
     !s.cards && s.empty !== "No open apps" && `no cards but no "No open apps": ${JSON.stringify(s)}`,
     s.toggle !== `${bg.length} running in background` && `the toggle says "${s.toggle}", the host lists ${bg.length}`,
   ].filter(Boolean);
-  document.querySelector(".recents-bg-toggle").click();
-  await window.__gw.until(() => switcherNow().rows.length > 0, 3000);
-  return [...fails, ...bgRowFails(it, want)];
+  const toggle = document.querySelector(".recents-bg-toggle");
+  const wasOpen = toggle.getAttribute("aria-expanded") === "true";
+  try {
+    if (!wasOpen) toggle.click();
+    await window.__gw.until(() => switcherNow().rows.length > 0, 3000);
+    return [...fails, ...bgRowFails(it, want)];
+  } finally {
+    if (!wasOpen) document.querySelector(".recents-bg-hide")?.click();
+  }
 }
 
 /** Opened: [it]'s row there with its name, icon and Stop. */
