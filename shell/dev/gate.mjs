@@ -7847,20 +7847,32 @@ async function rs5Pass(r, m, glass, how) {
 /**
  * RS6 (11-11, the phone's resize trace: cc layers 566 `.page-under` and 567 `.page-windows` re-rastered 124 and 97
  * tiles over a 1.7 s drag - the per-move masks and the shadow's size - and the GPU thread's raster behind the 106 ms
- * drawGl): a resize move repaints no full-page layer. The moves' LayerTree.layerPainted events (the window passes mark
- * their moves: window.__rs5Mark "start"/"end"), each painted layer named by its element; a paint of `.page-under`,
- * `.page-windows` (or any layer over half the page) fails. judge(): the failures, one line with what painted.
+ * drawGl): a resize move repaints no page-wide content. The moves' LayerTree.layerPainted events (the window passes
+ * mark their moves: window.__rs5Mark "start"/"end"), each painted layer named by its element, "(mask)" when it is an
+ * element's second layer (Chromium paints the mask of an element with composited content into a layer of its own:
+ * `.page-under`'s and, while resizing, each shadow's - see shell.css RS6). A mask layer is solid fills (the phone:
+ * layer 566, 0.11 ms a tile, ~1 tile a frame); a content layer is the widgets / windows / blurs. Fails: a content layer
+ * of `.page-under` / `.page-windows`, or any content layer over half the page, painted on more than the drag's first
+ * moves ([rs6Fails]). judge(): the failures, and one line with what painted.
  */
-const RS6_FULL = /\bpage-windows\b/;
-// HACK: `.page-under` (the page's own content, masked where its windows are: underWindows) still repaints each move -
-// its mask follows the window and a CSS mask can't follow by transform; printed, not failed. Real fix: the page's
-// content cut by a composited hole (no per-move mask), then this joins RS6_FULL.
-const RS6_DEBT = /\bpage-under\b/;
+const RS6_FULL = /\bpage-(under|windows)\b/;
 /** A described DOM node as "tag.class.class" ("?" without one). */
 function rs6Name(n) {
   if (!n) return "?";
   const i = n.attributes?.indexOf("class") ?? -1;
   return n.localName + (i >= 0 ? "." + n.attributes[i + 1].trim().split(/\s+/).join(".") : "");
+}
+/** Layer [l] is an element's mask layer: the same element has a layer made before it ([layers]: all seen). */
+const rs6Mask = (l, layers) => !!l?.backendNodeId && [...layers.values()].some((o) => o.backendNodeId === l.backendNodeId && o.layerId < l.layerId);
+/**
+ * RS6's verdict on [by] (name -> {n, max, mask}) over [passes] drags on a page of [vw] px. A content layer may paint
+ * twice a drag (its first moves re-composite the windows: under load the gate saw `.page-under` 2x); a move's
+ * repaint is ~60x a drag.
+ */
+function rs6Fails(by, vw, passes) {
+  const pct = (a) => Math.round((a / vw) * 100);
+  const bad = [...by].filter(([k, v]) => !v.mask && v.n > 2 * passes && (RS6_FULL.test(k) || v.max > vw / 2));
+  return bad.length ? [`RS6: a resize move repainted page-wide content: ${bad.map(([k, v]) => `${k} ${v.n}x (max ${pct(v.max)}% of the page)`).join(", ")} - a move may repaint only the window's own layers and masks`] : [];
 }
 async function rs6Capture(r) {
   const cdp = await r.page.target().createCDPSession();
@@ -7876,7 +7888,8 @@ async function rs6Capture(r) {
   });
   const nameOf = async (l) => {
     if (!l?.backendNodeId) return l && !l.parentLayerId ? "root" : "?";
-    return rs6Name((await cdp.send("DOM.describeNode", { backendNodeId: l.backendNodeId }).catch(() => null))?.node);
+    const name = rs6Name((await cdp.send("DOM.describeNode", { backendNodeId: l.backendNodeId }).catch(() => null))?.node);
+    return rs6Mask(l, layers) ? `${name} (mask)` : name;
   };
   return {
     async judge() {
@@ -7884,14 +7897,12 @@ async function rs6Capture(r) {
       const by = new Map();
       for (const e of marks.flat()) {
         const name = await nameOf(layers.get(e.layerId));
-        const a = e.clip.width * e.clip.height;
-        const t = by.get(name) ?? { n: 0, max: 0, ids: new Set() };
-        by.set(name, { n: t.n + 1, max: Math.max(t.max, a), ids: t.ids.add(e.layerId) });
+        const t = by.get(name) ?? { n: 0, max: 0, mask: name.endsWith("(mask)") };
+        by.set(name, { ...t, n: t.n + 1, max: Math.max(t.max, e.clip.width * e.clip.height) });
       }
-      const list = [...by].map(([k, v]) => `${k} ${v.n}x max ${Math.round((v.max / vw) * 100)}% (${v.ids.size} layer${v.ids.size > 1 ? "s" : ""})`).join("; ");
+      const list = [...by].map(([k, v]) => `${k} ${v.n}x max ${Math.round((v.max / vw) * 100)}%`).join("; ");
       console.log(`ww-resize-cost RS6 paints over ${marks.length} passes of ${RS5_MOVES} moves: ${list || "none"}`);
-      const bad = [...by].filter(([k, v]) => RS6_FULL.test(k) || (v.max > vw / 2 && !RS6_DEBT.test(k)));
-      return bad.length ? [`RS6: a resize move repainted a full-page layer: ${bad.map(([k, v]) => `${k} ${v.n}x (max ${Math.round((v.max / vw) * 100)}% of the page)`).join(", ")} - a move must repaint only the window's own small layers`] : [];
+      return rs6Fails(by, vw, marks.length);
     },
   };
 }

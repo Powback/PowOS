@@ -167,6 +167,15 @@ The board shows window checks failing by timeout or waiting days for a free phon
     repaints only its own layer (120x at 33%); the 9-slice pieces paint once at the drag's start. Still left: the lower
     windows' frames and shadows, 360x each at up to 26% (their mask holes follow the dragged window), and
     `.page-under` 120x at 93% (its mask; printed, not failed - HACK in the gate).
+  - 11-11 RS6b: `.page-under` has two cc layers. Its content painted 0x over the moves; only its mask layer (+4 px,
+    solid fills) repaints, 0.11 ms a tile and ~1 tile a frame on the phone (layer 566: 13.9 ms of raster over 1.7 s).
+    The content layer 565 rastered 3-4 tiles. A hole that follows by transform can't be done with a CSS mask: it would
+    need a second copy of the page's content, or the app layer above home's surface for the drag (host side). Not
+    worth that cost. Shadows now keep their blur in a composited child while a window is resized (shell.css RS6), so
+    the lower windows' shadows repaint only their mask layer (360x at 26%; it was the blur itself). The gate
+    exemption HACK is gone: RS6 tells mask layers (an element's second layer) from content, and fails when page-wide
+    content repaints after a drag's first moves. Control: without the composited frames, `.page-windows` 120x -> FAIL.
+    Still repainting: the lower frames' own content, 360x at 16% (the frame's mask change invalidates it).
 - [x] 0.6 Each failing check on the board gets one line: real bug, check bug, or environment.
   Done 11-10: seven board tasks got a "0.6" step line; the table is in `docs/research/window-bench.md` "11-10
   baseline". None of the failures was a judged real bug: they were check bugs or the environment, most of them home's

@@ -3824,7 +3824,7 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-shadow > .ww-s9 { border-radius: 0; box-shadow: none; overflow: hidden; transform-origin: 0 0; will-change: transform; }
 .ww-s9-in { position: absolute; border-radius: var(--radius); box-shadow: var(--lift-window); }
 .ww-shadow.focused .ww-s9-in { box-shadow: var(--lift-window-focused); }
-.page-windows:has(.webwindow.ww-resizing) :is(.webwindow, .ww-shadow) { will-change: transform; }
+.page-windows:has(.webwindow.ww-resizing) :is(.webwindow, .ww-shadow, .ww-shadow > div:first-child, .webwindow > .webwindow-title) { will-change: transform; }
 .ww-tile-menu {
   position: absolute; top: 40px; right: 8px; z-index: 2; display: flex; flex-direction: column; min-width: 160px;
   padding: 6px; border-radius: var(--radius); box-shadow: var(--lift);
