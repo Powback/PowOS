@@ -27,7 +27,7 @@ close_shade() {
   sleep 1
 }
 shade_open() {
-  if sh_ "dumpsys window windows" | grep mCurrentFocus | grep -q "PowOS shade"; then echo true; else echo false; fi
+  if sh_ "dumpsys window windows" | grep mCurrentFocus | awk '/PowOS shade/{f=1} END{exit !f}'; then echo true; else echo false; fi
 }
 for state in 0 3; do
   close_shade

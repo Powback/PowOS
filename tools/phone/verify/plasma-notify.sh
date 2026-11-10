@@ -19,7 +19,7 @@ N=$(date +%s)$RANDOM
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 # A script run as the session user (its bus), through user.sh. Never sudo in it.
 ux() { printf '%s\n' "$1" >"$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | tr -d '\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 hcall() {
   "$T/cdp.sh" eval home "new Promise(ok=>{const h=window.__powosHost,P=window.PowosHost;if(!h||!P||!P.postMessage)return ok('ERR no bridge');const r=h.resolve,j=h.reject,id=910400+Math.floor(Math.random()*9000);const done=v=>{h.resolve=r;h.reject=j;ok(v)};h.resolve=(i,v)=>i===id?done(v):r(i,v);h.reject=(i,m)=>i===id?done('ERR '+m):j(i,m);setTimeout(()=>done('ERR no answer'),8000);P.postMessage(JSON.stringify([id,'$1',JSON.stringify($2)]))}).then(v=>typeof v==='string'&&v.startsWith('ERR')?v:($3)(v))" 2>&1 | tr -d '"\r' | tail -1
 }
@@ -41,7 +41,7 @@ pass() { echo "PASS: $*" | tee -a "$OUT/log.txt"; }
 
 # 1. The APK side, the bridge, and that it sleeps.
 # PlasmaBridge makes its channel when the app starts.
-sh_ "dumpsys notification" | grep -q "mId=.plasma-v1" || { echo "the installed APK has no PlasmaBridge yet (no plasma-v1 channel) - re-queued"; exit 3; }
+sh_ "dumpsys notification" | awk '/mId=.plasma-v1/{f=1} END{exit !f}' || { echo "the installed APK has no PlasmaBridge yet (no plasma-v1 channel) - re-queued"; exit 3; }
 pid() { sh_ "pgrep -f -d, \"^python3 /usr/local/bin/powos-plasma-bridge\""; }
 pids=$(pid)
 if [ -z "$pids" ]; then
@@ -49,7 +49,7 @@ if [ -z "$pids" ]; then
   [ -n "$pids" ] || fail "powos-plasma-bridge doesn't start: $(ux 'tail -5 /tmp/powos-plasma-bridge.log')"
   echo "started powos-plasma-bridge (the session predates its deploy)"
 fi
-t() { sh_ "for p in ${pids//,/ }; do awk '{s+=\$14+\$15} END{print s}' /proc/\$p/stat; done" | awk '{s+=$1} END{print s}'; }
+t() { sh_ "for p in ${pids//,/ }; do awk '\''{s+=\$14+\$15} END{print s}'\'' /proc/\$p/stat; done" | awk '{s+=$1} END{print s}'; }
 t0=$(t); sleep 5; t1=$(t)
 [ $((t1 - t0)) -le 1 ] || fail "powos-plasma-bridge used $((t1 - t0)) ticks in 5 s at rest"
 pass "bridge running ($pids), $((t1 - t0)) ticks in 5 s"
@@ -70,7 +70,7 @@ IFS='|' read -r app pkg ic key <<<"$item"
 [ "$app" = "PowOS check" ] || fail "the shade names it '$app', not the Linux app"
 [ "$pkg" != com.powos.app ] || fail "grouped as PowOS's own (pkg $pkg)"
 [ "$ic" = icon ] || fail "no icon"
-sh_ "dumpsys notification --noredact" | grep -q "tag=plasma.*id=$pid_n\|id=$pid_n.*tag=plasma" || echo "note: dumpsys shows no tag=plasma id=$pid_n line (format?)"
+sh_ "dumpsys notification --noredact" | awk -v re="tag=plasma.*id=$pid_n|id=$pid_n.*tag=plasma" '$0 ~ re{f=1} END{exit !f}' || echo "note: dumpsys shows no tag=plasma id=$pid_n line (format?)"
 "$T/shot.sh" "$OUT/posted.png" >/dev/null 2>&1
 pass "Plasma notification $pid_n is in the shade as '$app' ($pkg, with an icon)"
 

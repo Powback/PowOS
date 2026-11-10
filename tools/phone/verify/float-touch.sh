@@ -14,7 +14,7 @@ OUT=${1:-$HOME/.cache/powos-verify/float-touch-$(date +%m%d-%H%M)}; mkdir -p "$O
 L=$HOME/.cache/powos-verify.lock
 PKG=${TEST_APP:-com.oneplus.calculator}
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 restore() {
   [ "${TOUCHED:-0}" = 1 ] || return 0
   release_pkgs

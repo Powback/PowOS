@@ -273,7 +273,7 @@ long_menu() {
   # A finger on that part, the swipe ending far off the menu: the menu takes the touch, no item is chosen.
   my=$(( (bb2 + sy1) / 2 )); mx=$(( (sx0 + sx1) / 2 ))
   "$adb" shell "input swipe $mx $my $(( mx > 1200 ? mx - 900 : mx + 900 )) $my 400"; sleep 1.5
-  if "$adb" shell "logcat -d -T '$t0' -s PowosWebWindows:I" 2>/dev/null | grep -q 'a touch on its popup'; then
+  if "$adb" shell "logcat -d -T '$t0' -s PowosWebWindows:I" 2>/dev/null | awk '/a touch on its popup/{f=1} END{exit !f}'; then
     say "long: the host gave the touch on the menu's outside part to its window"
   else bad "long: the touch on the menu's outside part wasn't its window's"; fi
   rs "tail -n +$((k0 + 1)) /run/powos-app/hyprland.log | grep -a 'touch at' | tail -1" | cut -c1-200 | sed 's/^/long: KWin: /' | tee -a "$OUT/log.txt"

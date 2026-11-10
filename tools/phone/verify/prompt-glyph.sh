@@ -12,7 +12,7 @@ OUT=${1:-$HOME/.cache/powos-verify/prompt-glyph-$(date +%m%d-%H%M)}; mkdir -p "$
 L=$HOME/.cache/powos-verify.lock
 TASK=${BOARD_TASK:-prompt-glyph}
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 restore() { sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; echo "restored"; }
 . "$here/window-lock.sh"; window_lock prompt-glyph.sh 120
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT

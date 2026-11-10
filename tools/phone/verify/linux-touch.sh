@@ -16,7 +16,7 @@ OUT=${1:-$HOME/.cache/powos-verify/linux-touch-$(date +%m%d-%H%M)}; mkdir -p "$O
 L=$HOME/.cache/powos-verify.lock
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 RC=0; KL0=0; LEASH0=""; MINE=""; REC=""; PRE=""
 recstop() { [ -n "$REC" ] || return 0; sh_ "pkill -INT screenrecord"; sleep 2
   sh_ "chmod 644 /data/local/tmp/linux-touch-$REC.mp4"

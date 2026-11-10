@@ -24,7 +24,7 @@ read -r x y w h <<<"$(ev "(()=>{const d=devicePixelRatio,r=[...document.querySel
 # PowTerm's view is placed from the page's frame loop (terminal.tsx placeNative): with home not in front the page is
 # hidden, no frame runs and no view is ever made - that's the run, not the code (job 20261109-162404-36737). Only
 # HomeShell's own hierarchy counts: PowTerm the app has a TerminalView of its own, which is not this.
-homeview() { sh_ 'dumpsys activity top' | awk '/^ *ACTIVITY /{f=(index($0,"com.powos.app/andro.marchy.HomeShell")>0)} f' | grep -qE 'com\.termux\.view\.TerminalView\{[0-9a-f]+ V'; }
+homeview() { sh_ 'dumpsys activity top' | awk '/^ *ACTIVITY /{f=(index($0,"com.powos.app/andro.marchy.HomeShell")>0)} f' | awk '/com\.termux\.view\.TerminalView\{[0-9a-f]+ V/{f=1} END{exit !f}'; }
 for i in 1 2 3 4 5 6; do homeview && break; sleep 1; done
 if ! homeview; then
   v=$(vis); [ "$v" = visible ] || { echo "SKIP: ENV: home left the front during the run (page $v) - no frame places PowTerm's view"; exit 5; }

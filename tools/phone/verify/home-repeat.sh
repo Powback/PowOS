@@ -51,6 +51,6 @@ for offset in -250 250; do
   sleep 1
   chk bottom-dock
   [ "$(ev 'importShim("./state.ts").then(s=>String(s.drawer.value!==0||s.notif.value))')" = false ] || { echo 'FAIL: bottom dock opened launcher/shade'; exit 1; }
-  if sh_ 'dumpsys window windows' | grep mCurrentFocus | grep -q 'PowOS shade'; then echo 'FAIL: bottom dock opened native shade'; exit 1; fi
+  if sh_ 'dumpsys window windows' | grep mCurrentFocus | awk '/PowOS shade/{f=1} END{exit !f}'; then echo 'FAIL: bottom dock opened native shade'; exit 1; fi
 done
 echo "PASS: Home returns to main page then opens switcher; bottom dock gestures stay isolated. Visual: $OUT/switcher.png"

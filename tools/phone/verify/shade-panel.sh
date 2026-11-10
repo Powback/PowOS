@@ -14,7 +14,7 @@ here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
 OUT=${1:-$HOME/.cache/powos-verify/shade-panel-${POWOS_DEVICE:-phone}-$(date +%m%d-%H%M%S)}; mkdir -p "$OUT"
 L=$HOME/.cache/powos-verify.lock
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 restore() { sh_ "pkill -INT screenrecord; input keyevent 4; am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; }
 . "$here/window-lock.sh"; window_lock shade-panel 120 "${MAX_WAIT:-10800}"
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT

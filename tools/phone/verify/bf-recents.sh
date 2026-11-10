@@ -25,7 +25,7 @@ GAME=${GAME:-Broforce}
 log() { echo "$*" | tee -a "$R"; }
 fail() { log "FAIL $1: $2"; }
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 top() { sh_ "dumpsys activity activities | grep -m1 topResumedActivity"; }
 # A call on home's bridge exactly as the page makes it (linux-float.sh's / float-windows.sh's hcall).
 hcall() {

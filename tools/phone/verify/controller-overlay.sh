@@ -31,7 +31,7 @@ fi
 result=$(hcall pad.overlay '[false]' 'v=>String(v)')
 [ "$result" = false ] || { echo "FAIL: controller disable: $result"; exit 1; }
 sleep 0.3
-if sh_ 'dumpsys window windows' | grep -q 'PowOS controller'; then
+if sh_ 'dumpsys window windows' | awk '/PowOS controller/{f=1} END{exit !f}'; then
   echo "FAIL: controller window remains after disabling"
   exit 1
 fi

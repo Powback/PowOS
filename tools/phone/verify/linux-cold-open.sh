@@ -16,7 +16,7 @@ TSV=$OUT/bench.tsv; printf 'metric\tapp\tvalue\tbudget\tverdict\n' > "$TSV"
 L=$HOME/.cache/powos-verify.lock
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 log() { echo "$(date +%T) $*" | tee -a "$R"; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 tasks() { sh_ "am stack list | grep PowosWindowActivity" | grep -oE 'taskId=[0-9]+' | tr -dc '0-9\n' | sort -n; }
 FAILS=0
 bench() {  # bench <metric> <app> <ms|-> <budget|""> : a row, and a FAIL past the budget

@@ -19,7 +19,7 @@ L=$HOME/.cache/powos-verify.lock
 PKG=${TEST_APP:-com.oneplus.calculator}
 FF=$(command -v ffmpeg || echo /opt/homebrew/bin/ffmpeg)
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 restore() { [ "${TOUCHED:-0}" = 1 ] || return 0; [ -n "$CLAIMED" ] && sh_ "input keyevent BACK; sleep 0.5"; release_pkgs; sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"; echo "restored"; }
 . "$here/window-lock.sh"
 window_lock panel-lift.sh 120
@@ -93,7 +93,7 @@ if [ "$AL" -gt $((W - AR)) ]; then SX=$((AL / 2)); else SX=$(((AR + W) / 2)); fi
 # over well inside that longer window on the emulator's noisier logcat (far more Choreographer/Skia lines under its
 # software renderer), which lost the tagged line even though the SurfaceFlinger check right below it passed - a false
 # FAIL on the emulator lane, 2026-10-24 (panel-lift task desktop-mode-stabilisation-move-resize-maximise).
-MARK=$(sh_ "date +'%m-%d %H:%M:%S.000'")
+MARK=$(sh_ "date +\"%m-%d %H:%M:%S.000\"")
 sh_ "rm -f /data/local/tmp/pl-open.mp4; (screenrecord --time-limit 4 /data/local/tmp/pl-open.mp4 >/dev/null 2>&1 &)"; sleep 0.6
 sh_ "input swipe $SX $((H * 80 / 100)) $SX $((H * 30 / 100)) 220"
 sleep 3.6; chk drawer
@@ -101,7 +101,7 @@ st=$(homeState); echo "home: $st" | tee -a "$OUT/log.txt"
 case $st in open*) ;; *) fail "the swipe up beside the window didn't open the drawer ($st)" ;; esac
 "$T/shot.sh" "$OUT/1-drawer.png" >/dev/null 2>&1
 E1=$(edges "$OUT/1-drawer.png"); S1=$(estrip "$OUT/1-drawer.png"); echo "under the drawer: whole-window edge energy $E1 (icons count, not used); gutter strip $S0 -> $S1" | tee -a "$OUT/log.txt"
-sh_ "logcat -t '$MARK' -s PowosPanelLift:I PowosPanelLift:W" | tail -5 | tee -a "$OUT/log.txt" > "$OUT/lift-log.txt"
+sh_ "logcat -t \"$MARK\" -s PowosPanelLift:I PowosPanelLift:W" | tail -5 | tee -a "$OUT/log.txt" > "$OUT/lift-log.txt"
 [ "$(lifted open)" = yes ] && pass "drawer open: home's window is stacked over the task area (SurfaceFlinger: $(head -c 160 "$OUT/sf-open-rel.txt" | tr '\n' ' '))" ||
   fail "drawer open but home's window isn't relative to the anchor (sf-open.txt; PanelLift: $(tail -1 "$OUT/lift-log.txt"))"
 # The state above (home's surface relative to the anchor, from SurfaceFlinger) is the assertion; the log line is only
@@ -120,7 +120,7 @@ case $st in *over-windows*) pass "home's pages hidden over the window" ;; *) not
 } || note "no recording of the opening"
 
 # 2. Back closes it: home under the window again.
-MARK=$(sh_ "date +'%m-%d %H:%M:%S.000'")
+MARK=$(sh_ "date +\"%m-%d %H:%M:%S.000\"")
 sh_ "input keyevent BACK"; sleep 2; chk back
 st=$(homeState); echo "home: $st" | tee -a "$OUT/log.txt"
 case $st in shut*) ;; *) fail "Back didn't close the drawer ($st)" ;; esac
@@ -129,7 +129,7 @@ case $st in shut*) ;; *) fail "Back didn't close the drawer ($st)" ;; esac
 E2=$(edges "$OUT/2-shut.png"); echo "after close: edge energy $E2" | tee -a "$OUT/log.txt"
 awk -v a="$E0" -v b="$E2" 'BEGIN{exit !(b > a * 0.8)}' && pass "the window is sharp again (edge energy $E2, was $E0)" || fail "the window isn't sharp after the drawer closed (edge energy $E2, was $E0; 2-shut.png)"
 [ -n "$(wframe 'PowOS window bar')" ] && pass "its title bar is back" || fail "no title bar after the drawer closed"
-sh_ "logcat -t '$MARK' -s PowosPanelLift:I" | grep -q "home under the windows again" && pass "PanelLift: home under the windows again" || note "no 'home under the windows again' line in logcat (the z-order above is the check)"
+sh_ "logcat -t \"$MARK\" -s PowosPanelLift:I" | awk '/home under the windows again/{f=1} END{exit !f}' && pass "PanelLift: home under the windows again" || note "no 'home under the windows again' line in logcat (the z-order above is the check)"
 
 # 3. The shade over the window.
 sh_ "input swipe $SX 4 $SX $((H * 60 / 100)) 260"; sleep 1.8; chk shade

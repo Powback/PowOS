@@ -32,7 +32,7 @@ PT=/data/powos/root/tmp   # the chroot's /tmp, seen from Android
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 # As the session user (its bus): a script file run by tools/phone/user.sh. Never sudo through it.
 us_() { printf '%s\n' "$1" > "$OUT/us.sh"; "$T/user.sh" "$OUT/us.sh" 2>/dev/null | grep -av -e "locale" -e "Qt depends" -e "If this causes" -e "for more information" -e "pushed"; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 restore() { sh_ "am start -n com.powos.app/andro.marchy.HomeShell >/dev/null"; sh_ "rm -f $PT/pt-home.png $PT/pt-home2.png $PT/pt-desk.png $PT/pt-kwin.png $PT/pt-ui.txt"; echo "restored"; }
 # A file in the chroot (root-only dirs) to OUT on the Mac: the shots stay as evidence.
 pull() { sh_ "cp $PT/$1 /data/local/tmp/pt-pull && chmod 644 /data/local/tmp/pt-pull"; "$A" pull /data/local/tmp/pt-pull "$OUT/$1" >/dev/null 2>&1; sh_ "rm -f /data/local/tmp/pt-pull"; }

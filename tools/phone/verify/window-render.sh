@@ -70,7 +70,7 @@ except Exception:
 print(v if isinstance(v,str) else json.dumps(v))'
 ev() { CDP_TIMEOUT_S=${CDP_TIMEOUT_S:-20} "$T/cdp.sh" eval home "$1" 2>/dev/null | tr -d '\r' | tail -1 | python3 -c "$UNQ"; }
 WW='Promise.all([importShim("./state.ts"),importShim("./ui/webwindows.tsx")])'
-irq() { sh_ "awk '/touch-0/{for(i=2;i<=NF;i++) if(\$i ~ /^[0-9]+\$/) s+=\$i; else break} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{for(i=2;i<=NF;i++) if(\$i ~ /^[0-9]+\$/) s+=\$i; else break} END{print s}'\'' /proc/interrupts"; }
 ID= LOCKED= P0=
 cleanup() {
   if [ -n "$ID" ]; then
@@ -455,7 +455,7 @@ log "tap ($fx,$fy of the body): $tr_"
 sleep 1.5
 shot tap || { verdict FAIL; exit 1; }
 d1=$($PY diff "$OUT/pre.raw.gz" "$OUT/tap.raw.gz" $R)
-tl=$(sh_ "logcat -d -v time -T '$since' -s PowosWebWindows:I" | grep -E "input: window $ID |log touch" | tail -4)
+tl=$(sh_ "logcat -d -v time -T \"$since\" -s PowosWebWindows:I" | grep -E "input: window $ID |log touch" | tail -4)
 log "tap: $d1 of the body changed (noise without a tap: $noise)"; [ -n "$tl" ] && echo "$tl" | sed 's/^/  /' | tee -a "$OUT/log.txt"
 touched "the tap"
 

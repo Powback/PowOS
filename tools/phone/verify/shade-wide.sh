@@ -11,7 +11,7 @@ here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
 OUT=$HOME/.cache/powos-verify/shade-wide-$(date +%m%d-%H%M); mkdir -p "$OUT"
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 q() { "$T/cdp.sh" eval "$1" "$2" 2>/dev/null | tail -1 | tr -d '"\\\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 home() { sh_ "input keyevent 4; am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1; }
 trap home EXIT
 [ "$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")" = Awake ] || { echo "SKIP shade-wide: the screen is off - not woken (rule)"; exit 3; }

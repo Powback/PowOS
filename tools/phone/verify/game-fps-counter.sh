@@ -22,7 +22,7 @@ OUT=${1:-$HOME/.cache/powos-verify/game-fps-counter-$(date +%m%d-%H%M)}; mkdir -
 L=$HOME/.cache/powos-verify.lock
 log() { echo "$(date +%T) $*" | tee -a "$R"; }
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 top() { sh_ "dumpsys activity activities | grep -m1 topResumedActivity"; }
 ev() { "$T/cdp.sh" eval home "$1" 2>&1 | tr -d '\r' | tail -1; }
 meter_get() { ev 'importShim("./bridge.ts").then(b=>b.powos.store.get("perf.meter")).then(v=>JSON.stringify(v??null))'; }

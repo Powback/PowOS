@@ -13,7 +13,7 @@ here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
 OUT=${1:-$HOME/.cache/powos-verify/add-app-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
 L=$HOME/.cache/powos-verify.lock
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 q() { "$T/cdp.sh" eval home "$1" 2>/dev/null | tail -1 | tr -d '"\\\r'; }
 ADDED=""
 # The test tile goes again whatever happened (only its own key), then Back out of the picker and edit mode.
@@ -69,7 +69,7 @@ echo "search: $r" | tee -a "$OUT/log.txt"; case "$r" in ok*) ;; *) fail "search:
 # The keyboard stays up, as for the user: the picker sits above it (--inset-keyboard). The 01:04 FAIL tapped the
 # result where the keyboard was (the picker under it): the tap typed an "s", "Besieges" found nothing.
 kb=$(q 'getComputedStyle(document.documentElement).getPropertyValue("--inset-keyboard").trim()')
-echo "keyboard: $(sh_ "dumpsys input_method | grep -m1 -oE 'mInputShown=[a-z]+'") inset $kb" | tee -a "$OUT/log.txt"
+echo "keyboard: $(sh_ "dumpsys input_method | grep -m1 -oE \"mInputShown=[a-z]+\"") inset $kb" | tee -a "$OUT/log.txt"
 
 step "a tap on $NAME puts it on the page in view"
 HK=$(echo "$KEY" | sed -e 's/^a:/app:/' -e 's/^l:/linux:/')

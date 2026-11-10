@@ -21,7 +21,7 @@ RUN=/data/data/com.powos.app/files/run/powos-apps
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 # As the session user (its bus): powos-run.sh. Never sudo through it.
 us_() { "$A" shell "su -c \"sh /data/powos/powos-run.sh '$*'\"" 2>/dev/null | tr -d '\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 restore() { sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; echo "restored"; }
 . "$here/window-lock.sh"
 window_lock plasma-app.sh 120
@@ -37,7 +37,7 @@ hcall() {
 # 1. The watcher, and that it sleeps (ticks of its processes over 5 s).
 pids=$(sh_ "pgrep -f -d, \"^python3 /usr/local/bin/powos-apps-watch\"")
 [ -n "$pids" ] || fail "powos-apps-watch isn't running (rooted.sh deploy, then a new session start)"
-t() { sh_ "for p in ${pids//,/ }; do awk '{s+=\$14+\$15} END{print s}' /proc/\$p/stat; done" | awk '{s+=$1} END{print s}'; }
+t() { sh_ "for p in ${pids//,/ }; do awk '\''{s+=\$14+\$15} END{print s}'\'' /proc/\$p/stat; done" | awk '{s+=$1} END{print s}'; }
 t0=$(t); sleep 5; t1=$(t)
 [ $((t1 - t0)) -le 1 ] || fail "powos-apps-watch used $((t1 - t0)) ticks in 5 s at rest"
 pass "watcher running ($pids), $((t1 - t0)) ticks in 5 s"

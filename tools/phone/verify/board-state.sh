@@ -11,7 +11,7 @@ TITLE=${1:-Board shows real agent state}
 OUT=$HOME/.cache/powos-verify/board-state-$(date +%m%d-%H%M); mkdir -p "$OUT"
 L=$HOME/.cache/powos-verify.lock
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 restore() { sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; }
 . "$here/window-lock.sh"; window_lock board-state.sh 60
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT

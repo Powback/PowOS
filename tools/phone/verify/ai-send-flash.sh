@@ -12,7 +12,7 @@ OUT=${1:-$HOME/.cache/powos-verify/ai-send-flash-$(date +%m%d-%H%M)}; mkdir -p "
 L=$HOME/.cache/powos-verify.lock
 MSG="flash check from a test script, please ignore - just reply: ok"
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 home() { sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1.5; }
 . "$here/window-lock.sh"; window_lock ai-send-flash.sh 90
 trap 'home; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT

@@ -50,7 +50,7 @@ CALC=${TEST_APP:-com.oneplus.calculator}
 sh_() { "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
 rs() { printf '%s\n' "$1" > "$OUT/r.sh"; "$T/root.sh" "$OUT/r.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 log() { echo "$*" | tee -a "$OUT/log.txt"; }
 fail=0
 bad() { log "FAIL $*"; fail=1; }
@@ -82,7 +82,7 @@ chk() { [ "$(irq)" = "$I0" ] || { log "STOP: a real touch at $1 - restoring"; ex
 
 read -r screen < <("$T/idle.sh")
 case "$screen" in *screen=Awake*) ;; *) log "SKIP screen not on ($screen)"; exit 3 ;; esac
-sh_ "dumpsys device_state" | grep -q "mCommittedState=.*OPENED" || { log "SKIP folded (needs the inner screen)"; exit 3; }
+sh_ "dumpsys device_state" | awk '/mCommittedState=.*OPENED/{f=1} END{exit !f}' || { log "SKIP folded (needs the inner screen)"; exit 3; }
 # Home first (a check before this one may have left another app in front: home's page then didn't answer, 11-07).
 sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME" >/dev/null
 for i in $(seq 1 10); do

@@ -31,7 +31,7 @@ L=$HOME/.cache/powos-verify.lock
 KWIN_MIN=6.7.5-3.29; [ "$MODE" = popup ] && KWIN_MIN=6.7.5-3.31
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -av -e "file pushed" -e locale -e "Qt depends" -e "If this causes" -e "for more information" | tr -d '\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 RC=0; MINE=""
 fail() { echo "FAIL [$MODE] $*" | tee -a "$OUT/log.txt"; RC=1; }
 pass() { echo "PASS [$MODE] $*" | tee -a "$OUT/log.txt"; }

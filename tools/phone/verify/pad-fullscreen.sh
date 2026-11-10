@@ -15,7 +15,7 @@ OUT=${1:-$HOME/.cache/powos-verify/pad-fullscreen-$(date +%m%d-%H%M)}; mkdir -p 
 L=$HOME/.cache/powos-verify.lock
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 KATE_MINE=0
 restore() {
   [ "$(padflag)" = true ] && tap_desc "Game controls" >/dev/null 2>&1
@@ -30,7 +30,7 @@ I0=$(irq)
 fail() { echo "FAIL: $*" | tee -a "$OUT/log.txt"; "$T/shot.sh" "$OUT/fail.png" >/dev/null 2>&1; exit 1; }
 log() { echo "$*" | tee -a "$OUT/log.txt"; }
 # Per app (PadApps): the saved set gamepad_apps holds the app the controller was enabled in (Kate here).
-padflag() { sh_ "grep -A6 'gamepad_apps' /data/data/andro.marchy/shared_prefs/andromarchy_settings.xml" | grep -qi kate && echo true || echo false; }
+padflag() { sh_ "grep -A6 gamepad_apps /data/data/andro.marchy/shared_prefs/andromarchy_settings.xml" | grep -qi kate && echo true || echo false; }
 # shotdiff A B: per mille of the screen that differs
 shotdiff() { python3 - "$1" "$2" <<'PY'
 import subprocess,sys
@@ -101,6 +101,6 @@ dv=$(shotdiff "$OUT/home-on.png" "$OUT/home-2.png"); log "home twice: $dv per mi
 sh_ "am move-task $KT" >/dev/null 2>&1 || sh_ "cmd activity task-to-front $KT" >/dev/null 2>&1; sleep 3
 tap_desc "Game controls"; [ "$(padflag)" = false ] || fail "second tap did not turn the controls off"
 tap_desc Keyboard || fail "tap on Keyboard"; sleep 1
-sh_ "dumpsys input_method" | grep -q "mInputShown=true" || fail "Keyboard tapped, the IME is not shown"
+sh_ "dumpsys input_method" | awk '/mInputShown=true/{f=1} END{exit !f}' || fail "Keyboard tapped, the IME is not shown"
 tap_desc Keyboard 2>/dev/null; 
 echo "PASS: over full-screen Kate (task $KT) the Keyboard and Game controls buttons work, overlay draws"

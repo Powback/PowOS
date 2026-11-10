@@ -12,7 +12,7 @@ OUT=${1:-$HOME/.cache/powos-verify/chat-polish-$(date +%m%d-%H%M)}; mkdir -p "$O
 L=$HOME/.cache/powos-verify.lock
 TASK=agent-mail-in-chat-as-tidy-folded-cards
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 home() { sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1.5; }
 restore() { sh_ "input keyevent 4"; sleep 0.5; home; echo "restored"; }
 . "$here/window-lock.sh"; window_lock chat-polish.sh 120

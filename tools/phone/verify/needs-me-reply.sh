@@ -73,7 +73,7 @@ grant=$("$A" shell "su -c 'pm grant $PKG android.permission.POST_NOTIFICATIONS 2
 # The app-op too, per uid as well as per package: POST_NOTIFICATION is a uid-mode op ("Uid mode: POST_NOTIFICATION:
 # ignore" with the package mode allowed), and OxygenOS keeps its own switch for a fresh install beside the permission.
 sh_ "appops set $PKG POST_NOTIFICATION allow; appops set --uid $PKG POST_NOTIFICATION allow" >/dev/null
-sh_ "dumpsys package $PKG" | grep -qm1 'POST_NOTIFICATIONS: granted=true' || { fail "the test sender has no POST_NOTIFICATIONS after the root grant: ${grant:-no answer}"; exit 1; }
+sh_ "dumpsys package $PKG" | awk '/POST_NOTIFICATIONS: granted=true/{f=1} END{exit !f}' || { fail "the test sender has no POST_NOTIFICATIONS after the root grant: ${grant:-no answer}"; exit 1; }
 sh_ "rm -f /data/data/$PKG/files/last-reply"
 # posted: how many of the sender's notifications Android's notification service holds now (its own record, before any
 # listener or home's list: 0 = never posted, so the fault is the sender's start, not home).

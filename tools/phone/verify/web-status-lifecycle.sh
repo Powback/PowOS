@@ -8,7 +8,7 @@ adb() { tools/phone/adb.sh "$@"; }
 cdp() { CDP_TIMEOUT_S=6 tools/phone/cdp.sh eval statusbar "$1"; }
 OUT=${OUT:-$HOME/.cache/powos-verify/web-status-lifecycle-$(date +%m%d-%H%M%S)}
 mkdir -p "$OUT"
-flags() { adb shell dumpsys statusbar | sed -nE 's/.*mDisabled1=(0x[0-9a-fA-F]+).*/\1/p' | head -1; }
+flags() { adb shell dumpsys statusbar | sed -nE 's/.*mDisabled1=(0x[0-9a-fA-F]+).*/\1/p' | awk '!f{print; f=1}'; }
 wait_owner() {
   local want=$1 f
   for _ in 1 2 3 4 5 6 7 8 9 10; do
