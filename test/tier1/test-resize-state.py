@@ -13,47 +13,46 @@ m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
 
-def capture(round_=False, active=True, off=False, prop=None):
-    prop = int(round_) if prop is None else prop
+def capture(round_=True, active=True, off=False):
     radius = '    cornerRadius=< 33.15, 33.15 >\n' if round_ else ''
     states = '\n'.join('T ' + json.dumps(dict(at=t, active=active, epoch=1, off=off)) for t in (999, 1050, 1101))
-    return (f'WWR_BEGIN 1000\nWWR_PROP {prop}\nWWR_SF_BEGIN\n'
+    return ('WWR_BEGIN 1000\nWWR_SF_BEGIN\n'
             '  Layer [11887] powos-ww-4#11887\n    bounds={0,0,100,100}\n' + radius +
-            f'WWR_SF_END\nWWR_PROP {prop}\nWWR_END 1100\n' + states)
+            'WWR_SF_END\nWWR_END 1100\n' + states)
 
 
 class ResizeState(unittest.TestCase):
-    def test_square(self):
-        self.assertIn('VALID', m.validate(capture(), 'T', 4, False, True))
-
     def test_round(self):
-        self.assertIn('VALID', m.validate(capture(True), 'T', 4, True, True))
+        self.assertIn('VALID', m.validate(capture(), 'T', 4, True))
 
     def test_wrong_setting(self):
-        for text in (capture(prop=1), capture(off=True)):
-            with self.assertRaises(ValueError):
-                m.validate(text, 'T', 4, False, True)
+        with self.assertRaises(ValueError):
+            m.validate(capture(off=True), 'T', 4, True)
 
     def test_outside_drag(self):
         with self.assertRaisesRegex(ValueError, 'outside'):
-            m.validate(capture(active=False), 'T', 4, False, True)
+            m.validate(capture(active=False), 'T', 4, True)
 
-    def test_wrong_applied_radius(self):
+    def test_square_during_drag(self):
+        # RJ3 (square corners while resizing) is gone: a drag keeps the window's radius.
         with self.assertRaisesRegex(ValueError, 'radius'):
-            m.validate(capture(True, prop=0), 'T', 4, False, True)
+            m.validate(capture(False), 'T', 4, True)
+
+    def test_no_corner_property_in_probe(self):
+        self.assertNotIn('ww_drag_round', (V / 'ww-resize.sh').read_text())
 
     def test_blur(self):
         with self.assertRaisesRegex(ValueError, 'blur remains'):
-            m.validate(capture().replace('bounds=', 'blurRegions.size()=8 bounds='), 'T', 4, False, True)
+            m.validate(capture().replace('bounds=', 'blurRegions.size()=8 bounds='), 'T', 4, True)
 
     def test_missing_container(self):
         with self.assertRaisesRegex(ValueError, 'container'):
-            m.validate(capture().replace('powos-ww-4#', 'powos-ww-4-linux#'), 'T', 4, False, True)
+            m.validate(capture().replace('powos-ww-4#', 'powos-ww-4-linux#'), 'T', 4, True)
 
     def test_regrab(self):
         text = capture().replace('"at": 1101, "active": true, "epoch": 1', '"at": 1101, "active": true, "epoch": 3')
         with self.assertRaisesRegex(ValueError, 'outside'):
-            m.validate(text, 'T', 4, False, True)
+            m.validate(text, 'T', 4, True)
 
     def test_invalid_state_schema(self):
         good = dict(at=999, active=True, epoch=1, off=False)
@@ -63,9 +62,9 @@ class ResizeState(unittest.TestCase):
             invalid.append({**good, field: value})
         for value in invalid:
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'schema'):
-                m.validate(capture() + '\nT ' + json.dumps(value), 'T', 4, False, True)
+                m.validate(capture() + '\nT ' + json.dumps(value), 'T', 4, True)
         with self.assertRaisesRegex(ValueError, 'JSON'):
-            m.validate(capture() + '\nT {broken', 'T', 4, False, True)
+            m.validate(capture() + '\nT {broken', 'T', 4, True)
 
     def test_capture_delimiters(self):
         for text in (capture().replace('WWR_BEGIN 1000', 'WWR_BEGIN "1000"'),
@@ -74,7 +73,7 @@ class ResizeState(unittest.TestCase):
                      capture() + '\nWWR_BEGIN invalid',
                      capture().replace('WWR_END 1100', 'WWR_END 900')):
             with self.subTest(text=text), self.assertRaises(ValueError):
-                m.validate(text, 'T', 4, False, True)
+                m.validate(text, 'T', 4, True)
 
     def test_first_match_stops_idle_producer(self):
         # Producer emits once then blocks forever: no later write/SIGPIPE is available to reap it.
@@ -103,9 +102,9 @@ exit 0
         # Exact shape of both real files: only console states, no SF/timestamp markers.
         text = 'home LOG :18 WWR_59_241_37939 {"at":1794346946854,"active":false,"epoch":0,"off":false}'
         with self.assertRaisesRegex(ValueError, 'no active resize observed'):
-            m.validate(text, 'WWR_59_241_37939', 59, False, True)
+            m.validate(text, 'WWR_59_241_37939', 59, True)
         with self.assertRaisesRegex(ValueError, 'inspect diagnostic.stderr'):
-            m.validate('WWR_ERROR no-confirmed-resize\n' + text, 'WWR_59_241_37939', 59, False, True)
+            m.validate('WWR_ERROR no-confirmed-resize\n' + text, 'WWR_59_241_37939', 59, True)
 
     def test_short_mode_and_owned_input_guards(self):
         script = (V / 'ww-resize.sh').read_text()
@@ -130,9 +129,8 @@ exit 0
                 'su': '[ "$1" = -c ] && exec sh -c "$2"',
                 # Calls in order: watcher start, matched, BEGIN, END.
                 'date': 'case "$1" in +%s%3N) n=$(cat "$D/n" 2>/dev/null || echo 0); echo $((n + 1)) > "$D/n"; case $n in 0) echo 900 ;; 1) echo 950 ;; 2) echo 1000 ;; *) echo 1100 ;; esac ;; *) exec /bin/date "$@" ;; esac',
-                'getprop': 'echo 0',
                 'input': 'exit 0',
-                'dumpsys': "printf '  Layer [11887] powos-ww-61#11887\\n    bounds={0,0,100,100}\\n'",
+                'dumpsys': "printf '  Layer [11887] powos-ww-61#11887\\n    bounds={0,0,100,100}\\n    cornerRadius=< 33.15, 33.15 >\\n'",
                 # Without -T 1 a real logcat replays its buffer first (the 11-10 23:11/23:14 failure).
                 'logcat': 'case "$*" in *-d*) cat "$D/dump"; exit 0 ;; esac; case "$*" in *"-T 1"*) ;; *) cat "$D/backlog" ;; esac; cat "$D/stream"; exec sleep 30',
             }
@@ -163,18 +161,18 @@ exit 0
         token, out = self.device_run(True)
         self.assertEqual(out.stderr, '')
         self.assertNotIn('WWR_ERROR', out.stdout)
-        self.assertIn('VALID', m.validate(out.stdout, token, 61, False, True))
+        self.assertIn('VALID', m.validate(out.stdout, token, 61, True))
 
     def test_device_command_no_marker_fails_closed(self):
         token, out = self.device_run(False, '1')
         self.assertRegex(out.stdout, r'WWR_WATCH (deadline|read timed out or ended)')
         with self.assertRaisesRegex(ValueError, 'no confirmed resize'):
-            m.validate(out.stdout, token, 61, False, True)
+            m.validate(out.stdout, token, 61, True)
 
     def test_device_command_reaches_live_lines_past_backlog(self):
         token, out = self.device_run(True, '2')
         self.assertIn('WWR_WATCH matched', out.stdout)
-        self.assertIn('VALID', m.validate(out.stdout, token, 61, False, True))
+        self.assertIn('VALID', m.validate(out.stdout, token, 61, True))
 
     def test_backlog_replay_reproduces_deadline(self):
         # The pre-fix watcher (no -T 1): stuck in the replayed buffer, the marker after it never reached in time.
@@ -182,7 +180,7 @@ exit 0
         self.assertIn('WWR_WATCH deadline', out.stdout)
         self.assertNotIn('WWR_WATCH matched', out.stdout)
         with self.assertRaisesRegex(ValueError, 'no confirmed resize'):
-            m.validate(out.stdout, token, 61, False, True)
+            m.validate(out.stdout, token, 61, True)
 
     def test_helper_embeds_in_single_quotes(self):
         # 74811a87 follow-up: a comment apostrophe ended su -c early (syntax error on the device shell).

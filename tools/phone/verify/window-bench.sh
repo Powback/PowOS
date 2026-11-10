@@ -277,11 +277,17 @@ pre=$(hcall webwindows.list "[]" "l=>l.map(w=>w.id+':'+w.key).join(' ')")
 # whether it slows down (last third vs first third of open->live).
 STRESS_N=${STRESS_N:-20}; STRESS_PACE_S=${STRESS_PACE_S:-1.5}
 STORM_P95_MS=${STORM_P95_MS:-25}; STORM_DROP=${STORM_DROP:-6}; SLOWDOWN=${SLOWDOWN:-1.5}
+# A web window's layers: its own ("powos-ww-<id>", "-linux", "-fill", ...) and its display's. A display the helper took
+# from its pool keeps the name it was made with ("powos-ww-spare-<n>": a virtual display can't be renamed), so a
+# window opened on a pool hit had its display left out of the count (the 11-10 23:21 dump: powos-ww-spare-20 held
+# Termux). Counted with the spares: the pool holds exactly one untaken spare whenever it's sized (refilled ~0.4 s after
+# a take, SparePoolTest.aStormKeepsExactlyOneUntakenSpare), the same before and after, so a delta is the windows' only.
+WW_LAYERS="powos-ww-(spare-)?[0-9]+"
 leakstate() {   # "pagewins hostwins wwlayers tasks pss_kb"
   local pw hw ly tk ps
   pw=$(ev "document.querySelectorAll('.webwindow[data-wwid]').length")
   hw=$(hcall webwindows.list "[]" "l=>String(l.length)")
-  ly=$(sh_ "dumpsys SurfaceFlinger --list" | grep -cE "powos-ww-[0-9]+")
+  ly=$(sh_ "dumpsys SurfaceFlinger --list" | grep -cE "$WW_LAYERS")
   tk=$(tasks | grep -cE "$E2E_APPS")
   ps=$(sh_ "dumpsys meminfo com.powos.app" | awk '/TOTAL PSS:/{print $3; exit} /^ *TOTAL /{print $2; exit}')
   echo "$pw $hw $ly $tk ${ps:-0}"
@@ -398,8 +404,8 @@ storm_leaks() {
   # the part "ended early" with 0 FAILs - p5 part 1, 10:08.)
   local B0=$1 ly0 ly1 i n; ly0=$(set -- $B0; echo "$3"); ly1=$(set -- $S1; echo "$3"); n=$ly1
   if [ "$ly1" -gt "$ly0" ] 2>/dev/null; then
-    for i in 1 2 3 4 5; do sleep 2; n=$(sh_ "dumpsys SurfaceFlinger --list" | grep -cE "powos-ww-[0-9]+"); [ "$n" -le "$ly0" ] && break; done
-    sh_ "dumpsys SurfaceFlinger --list" | grep -E "powos-ww-[0-9]+" > "$OUT/leak-layers.txt"
+    for i in 1 2 3 4 5; do sleep 2; n=$(sh_ "dumpsys SurfaceFlinger --list" | grep -cE "$WW_LAYERS"); [ "$n" -le "$ly0" ] && break; done
+    sh_ "dumpsys SurfaceFlinger --list" | grep -E "$WW_LAYERS" > "$OUT/leak-layers.txt"
     log "storm: ww layers $ly1 -> $n after $((i * 2)) s more: $(tr '\n' ' ' < "$OUT/leak-layers.txt" | cut -c1-300)"
     S1=$(set -- $S1; echo "$1 $2 $n $4 $5")
   fi

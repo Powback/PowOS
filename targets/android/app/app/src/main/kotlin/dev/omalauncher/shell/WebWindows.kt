@@ -66,8 +66,9 @@ import java.io.OutputStreamWriter
  *
  * HACK: the root `input` fallback spawns a process per event (moves coalesced): taps work, drags are coarse. Real fix:
  * S4's injector (a persistent shell-uid helper holding INJECT_EVENTS - [WebWindowsHost] grows it).
- * HACK: IWindowManager.mirrorDisplay, the SurfaceControl() out-constructor, Transaction.setCornerRadius and the task
- * calls are hidden, reflected ([HiddenApi]). Real fix: none public for an app (a platform-signed system module).
+ * HACK: IWindowManager.mirrorDisplay, the SurfaceControl() out-constructor, Transaction.setCornerRadius, the resize
+ * fill's color layer (Builder.setEffectLayer, Transaction.setColor) and the task calls are hidden, reflected
+ * ([HiddenApi]). Real fix: none public for an app (a platform-signed system module).
  * Task reconcile ([reconcile]): a task stack listener (FreeformTasks.listen) re-checks every Android window's display
  * on each task change; a window whose display had its app and is empty now (the app finished, its task moved to another
  * display or was re-parented - OnePlus' Open Canvas took Chrome off its display into com.oplus.pscanvas, then removed
@@ -763,6 +764,9 @@ class WebWindows(
         var lastBh = 0
         var fill: SurfaceControl? = null
         var fillColor = 0
+
+        /** [fill] is a color layer ([colorFill]); false: the 1x1 buffer fallback. */
+        var fillSolid = false
         var fillUntil = 0L
         var fillPending = false
     }
@@ -1942,7 +1946,7 @@ class WebWindows(
         if (!c.isValid) return
         underRoot(t, win)
         frameAt(t, win, g)
-        cornerRadius(t, c, radiusOf(g))
+        cornerRadius(t, c, g.radius)
         // Every window's z is its page order, a Linux one's as an Android one's: one parent (the root), one z each.
         t.setLayer(c, g.z)
         t.setAlpha(c, g.alpha)
@@ -1995,9 +1999,9 @@ class WebWindows(
 
     /**
      * RS1: the theme's surface under the app's layer in [win]'s container - what a grow shows until the app draws at
-     * its new size (its last buffer anchored top left over it, never stretched). A 1x1 buffer scaled past any body; the
-     * container's crop clips it. Shown only while resizing and [FILL_HOLD_MS] after (an app's own translucency is never
-     * filled otherwise).
+     * its new size (its last buffer anchored top left over it, never stretched). A color layer ([colorFill]: no buffer,
+     * so HWC composes it as a solid color); the container's crop clips it. Shown only while resizing and
+     * [FILL_HOLD_MS] after (an app's own translucency is never filled otherwise).
      */
     private fun fillUnder(
         t: SurfaceControl.Transaction,
@@ -2009,7 +2013,7 @@ class WebWindows(
         val on = now < win.fillUntil
         if (!on && win.fill == null) return
         val f = win.fill ?: newFill(win) ?: return
-        if (win.fillColor != g.fill) paintFill(win, f, g.fill)
+        if (win.fillColor != g.fill) paintFill(t, win, f, g.fill)
         t.setLayer(f, -1)
         t.setVisibility(f, on)
         if (on && !win.fillPending) {
@@ -2025,20 +2029,50 @@ class WebWindows(
         SurfaceControl.Transaction().setVisibility(f, false).apply()
     }
 
+    /**
+     * [win]'s fill: a color layer (hidden Builder.setEffectLayer + Transaction.setColor, [colorFill]). It was a 1x1
+     * buffer drawn through Surface(SurfaceControl).lockCanvas and scaled by [FILL_SCALE]: that Surface is a BLAST queue
+     * whose CPU canvas never applies the display's transform hint (only HWUI/EGL pre-rotate), so its buffer went out
+     * with transform 0, and on a panel mounted rotated (the razr's main display: framebufferSpace ROTATION_270) SF hands
+     * HWC that buffer with the display's inverse, ROT_270; and the container's crop of a 1 px buffer scaled 8192x maps
+     * to ~0.12 px of it, a 0x0 source crop. HWC took neither: the fill was CLIENT (GPU) on every resize (11-10 23:21
+     * dump, "[BBQ] powos-ww-65-fill ... CLIENT ROT_270 ... 0.0 0.0 0.0 0.0"). A color layer has no buffer, transform
+     * or source crop: HWC's SOLID_COLOR.
+     */
     private fun newFill(win: Win): SurfaceControl? {
         if (!win.container.isValid) return null
-        val f = SurfaceControl.Builder().setName("powos-ww-${win.id}-fill").setParent(win.container).setBufferSize(1, 1).setOpaque(true).setHidden(true).build()
-        SurfaceControl.Transaction().setScale(f, FILL_SCALE, FILL_SCALE).apply()
+        val b = SurfaceControl.Builder().setName("powos-ww-${win.id}-fill").setParent(win.container).setHidden(true)
+        val solid = colorFill?.let { (layer, _) -> runCatching { layer.invoke(b) }.isSuccess } == true
+        val f = if (solid) b.build() else b.setBufferSize(1, 1).setOpaque(true).build()
+        if (!solid) SurfaceControl.Transaction().setScale(f, FILL_SCALE, FILL_SCALE).apply()
         win.fill = f
+        win.fillSolid = solid
+        win.fillColor = 0
         return f
     }
 
+    /** Hidden SurfaceControl.Builder.setEffectLayer (API 31+; setColorLayer on 30) and Transaction.setColor, reflected. */
+    private val colorFill by lazy {
+        runCatching {
+            HiddenApi.allow()
+            val bc = SurfaceControl.Builder::class.java
+            val layer = runCatching { bc.getMethod("setEffectLayer") }.getOrElse { bc.getMethod("setColorLayer") }
+            layer to SurfaceControl.Transaction::class.java.getMethod("setColor", SurfaceControl::class.java, FloatArray::class.java)
+        }.onFailure { WindowLog.w(TAG, "no color layer: the resize fill is a GPU-composed buffer", it) }.getOrNull()
+    }
+
     private fun paintFill(
+        t: SurfaceControl.Transaction,
         win: Win,
         f: SurfaceControl,
         argb: Int,
     ) {
         win.fillColor = argb
+        if (win.fillSolid) {
+            val rgb = floatArrayOf(((argb shr 16) and 0xff) / 255f, ((argb shr 8) and 0xff) / 255f, (argb and 0xff) / 255f)
+            runCatching { colorFill?.second?.invoke(t, f, rgb) }.onFailure { WindowLog.w(TAG, "window ${win.id}: fill color not set", it) }
+            return
+        }
         val surface = android.view.Surface(f)
         runCatching {
             val canvas = surface.lockCanvas(null)
@@ -2166,28 +2200,6 @@ class WebWindows(
             HiddenApi.allow()
             SurfaceControl.Transaction::class.java.getMethod("setCornerRadius", SurfaceControl::class.java, Float::class.javaPrimitiveType)
         }.onFailure { WindowLog.w(TAG, "no setCornerRadius: square windows", it) }.getOrNull()
-    }
-
-    /**
-     * HACK: (RJ3, 11-10) a window being resized (RS1's [Geo.resizing]) has square corners until it is let go. With
-     * home's blur regions off for the drag (RJ2) and the verify pill's off, the 10:07 kate drag still had 3 layers on
-     * the main display CLIENT ("mid-drag ... HWC layers CLIENT 11, DEVICE 15", 8 of the 11 the idle outer display's);
-     * a container with a corner radius (it and its fill and app layers under it) is composed by the GPU on this HWC.
-     * A/B: `setprop debug.powos.ww_drag_round 1` keeps the radius. Real fix: rounded corners the HWC composes - a
-     * corner mask drawn by home over the window (its layer is above) instead of the layer's radius.
-     */
-    private fun radiusOf(g: Geo): Float = if (g.resizing && dragSquare()) 0f else g.radius
-
-    private var squareAt = 0L
-    private var squareOn = true
-
-    private fun dragSquare(): Boolean {
-        val now = SystemClock.uptimeMillis()
-        if (now - squareAt > 1000) {
-            squareAt = now
-            squareOn = debugProp(DRAG_ROUND_PROP) != "1"
-        }
-        return squareOn
     }
 
     private fun cornerRadius(
@@ -4557,9 +4569,6 @@ class WebWindows(
         /** The debug property that has the host offer N2's frame-ahead geometry to the page ("w.ahead 1"): "1". */
         const val AHEAD_PROP = "debug.powos.ww_ahead"
 
-        /** RJ3 A/B: "1" keeps a resized window's corner radius through the drag ([dragSquare]). */
-        const val DRAG_ROUND_PROP = "debug.powos.ww_drag_round"
-
         /** A debug switch [name] is on: its property is "1" ([orderCheckOn]). */
         fun debugOn(name: String): Boolean = orderCheckOn(debugProp(name))
 
@@ -4974,7 +4983,7 @@ class WebWindows(
         /** RS1: the fill under a resized app stays this long after release (its final relayout's ~100-200 ms). */
         private const val FILL_HOLD_MS = 400L
 
-        /** The 1x1 fill's scale: past any body; the container's crop is its size. */
+        /** The 1x1 fill's scale (the no-color-layer fallback, [newFill]): past any body; the container's crop is its size. */
         private const val FILL_SCALE = 8192f
         /** After a task lands on a window's display (or a Linux consumer starts): its first frame is taken as drawn. */
         private const val LIVE_AFTER_MS = 250L

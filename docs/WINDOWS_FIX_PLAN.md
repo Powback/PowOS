@@ -124,6 +124,16 @@ The board shows window checks failing by timeout or waiting days for a free phon
     layers carry a corner radius: `cornerRadius` in WebWindows.place). RJ3 (`dragSquare`, HACK registered): square
     corners while RS1's `resizing` is set; A/B `WWR_DRAG_ROUND=1`. The probe (`sf-comp.awk`) now reads the main
     display only and names each CLIENT layer with its forced reason and "rounded"; the full mid-drag dump is saved.
+  - 11-10 23:21 (kate corner, SF dump taken during the confirmed drag, `ww-resize-1110-2321`): RJ3 square corners gave
+    nothing (timed 232558: 69 missed vsyncs, 45% janky; round 232612: 62, 35%). CLIENT on the main display: wallpaper
+    (OEM live wallpaper, ROT_270), Termux (the user's window, ROT_270), `powos-ww-54-linux`, and `powos-ww-65-fill`
+    (ROT_270, source crop 0x0). The fill was a 1x1 buffer drawn through Surface(SurfaceControl).lockCanvas: a CPU
+    canvas never applies the transform hint, so on the rotated-mounted panel (framebufferSpace ROTATION_270) SF gave
+    HWC the buffer with the display's inverse, and the container's crop of a 1 px buffer scaled 8192x was ~0.12 px =
+    a 0x0 crop. Fix: the fill is a color layer (`WebWindows.newFill`, hidden setEffectLayer + setColor: no buffer,
+    HWC SOLID_COLOR). RJ3 removed (code, HACK row, the probe's WWR_DRAG_ROUND; the validator now requires the
+    radius through the drag). window-bench's leak count now counts pool-taken displays (`powos-ww-spare-<n>` keeps
+    its name; WW_LAYERS, SparePoolTest.aStormKeepsExactlyOneUntakenSpare).
 - [x] 0.6 Each failing check on the board gets one line: real bug, check bug, or environment.
   Done 11-10: seven board tasks got a "0.6" step line; the table is in `docs/research/window-bench.md` "11-10
   baseline". None of the failures was a judged real bug: they were check bugs or the environment, most of them home's

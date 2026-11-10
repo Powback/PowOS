@@ -87,8 +87,6 @@ restore() {
   [ "${CALC_MINE:-0}" = 1 ] && sh_ "am force-stop $CALC"
   [ -n "${LOGPID:-}" ] && kill "$LOGPID" 2>/dev/null
   if [ "${OVERRIDES_SAVED:-0}" = 1 ]; then
-    sh_ "setprop debug.powos.ww_drag_round \"$PREV_DR\""
-    [ "$(sh_ "getprop debug.powos.ww_drag_round")" = "$PREV_DR" ] || bad "restore corner property"
     r=$(CDP_TIMEOUT_S=8 ev "globalThis.__wwResizeProbe?.stop();$RESTORE_GLASS;typeof globalThis.__glassDragOff+':'+String(globalThis.__glassDragOff)")
     [ "$r" = "$PREV_GP" ] || bad "restore glass override: $r (wanted $PREV_GP)"
   fi
@@ -125,10 +123,8 @@ done
 case $full in ok*) full=${full#ok} full=${full# } ;; *) log "SKIP home's bridge: $full"; exit 3 ;; esac
 [ -z "$full" ] || { log "SKIP a full-screen window is up ($full: a game left running) - not touched"; exit 3; }
 # RJ2 A/B (nativeglass.ts dragPause): WWR_GLASS_PAUSE=0 keeps home's blur regions through the drag, as before it.
-GP=${WWR_GLASS_PAUSE:-1}; DR=${WWR_DRAG_ROUND:-0}
-case "$GP:$DR" in 0:0|0:1|1:0|1:1) ;; *) bad "invalid resize switches"; exit 1 ;; esac
-PREV_DR=$(sh_ "getprop debug.powos.ww_drag_round") || { bad "cannot read corner property"; exit 1; }
-case "$PREV_DR" in ''|0|1) ;; *) bad "unexpected previous corner override: $PREV_DR"; exit 1 ;; esac
+GP=${WWR_GLASS_PAUSE:-1}
+case "$GP" in 0|1) ;; *) bad "invalid resize switch WWR_GLASS_PAUSE=$GP"; exit 1 ;; esac
 PREV_GP=$(ev "typeof globalThis.__glassDragOff+':'+String(globalThis.__glassDragOff)")
 case "$PREV_GP" in
   undefined:undefined) RESTORE_GLASS='delete globalThis.__glassDragOff' ;;
@@ -139,10 +135,8 @@ esac
 OVERRIDES_SAVED=1
 want=$([ "$GP" = 0 ] && echo true || echo false)
 effective_gp=$(ev "globalThis.__glassDragOff=$want;String(globalThis.__glassDragOff)")
-sh_ "setprop debug.powos.ww_drag_round $DR" || { bad "setprop failed"; exit 1; }
-effective_dr=$(sh_ "getprop debug.powos.ww_drag_round")
-printf 'requested round=%s pause=%s; effective property=%s glassDragOff=%s; previous property=%s glass=%s\n' "$DR" "$GP" "$effective_dr" "$effective_gp" "$PREV_DR" "$PREV_GP" | tee "$OUT/settings.txt"
-[ "$effective_dr" = "$DR" ] && [ "$effective_gp" = "$want" ] || { bad "switch readback mismatch (inconclusive A/B)"; exit 1; }
+printf 'requested pause=%s; glassDragOff=%s; previous glass=%s\n' "$GP" "$effective_gp" "$PREV_GP" | tee "$OUT/settings.txt"
+[ "$effective_gp" = "$want" ] || { bad "switch readback mismatch (inconclusive A/B)"; exit 1; }
 sleep 1
 "$A" shell "logcat -v time -s PowosWebWindows:I Andromarchy:I PowosShell:I" > "$OUT/logcat.txt" 2>/dev/null &
 LOGPID=$!
@@ -245,9 +239,9 @@ diag_device_cmd() {
   first_match=$(cat "$here/resize-first-match.sh")
   printf '%s' "su -c '$first_match
     ( resize_first_match \"$token\" &&
-    { sleep 0.15; echo WWR_BEGIN \$(date +%s%3N); echo WWR_PROP \$(getprop debug.powos.ww_drag_round);
+    { sleep 0.15; echo WWR_BEGIN \$(date +%s%3N);
       echo WWR_SF_BEGIN; dumpsys SurfaceFlinger; echo WWR_SF_END;
-      echo WWR_PROP \$(getprop debug.powos.ww_drag_round); echo WWR_END \$(date +%s%3N); } || echo WWR_ERROR no-confirmed-resize ) &
+      echo WWR_END \$(date +%s%3N); } || echo WWR_ERROR no-confirmed-resize ) &
     watcher=\$!; sleep 0.2; input swipe $x1 $y1 $x2 $y2 3000; wait \${watcher}; sleep 0.3
     logcat -d -v raw -s PowosShell:I | grep \"$token\"
     '"
@@ -273,7 +267,7 @@ diagnostic() {
   # Never blindly swipe back from an arithmetic endpoint; snap/min-size may put another window there.
   chk "$tag after diagnostic"
   ev "globalThis.__wwResizeProbe?.stop();'ok'" >/dev/null
-  result=$(python3 "$here/resize-state.py" "$OUT/$tag-diagnostic.txt" "$token" "$n" "$DR" "$GP")
+  result=$(python3 "$here/resize-state.py" "$OUT/$tag-diagnostic.txt" "$token" "$n" "$GP")
   local rc=$?
   echo "$result" | tee -a "$OUT/summary.txt"
   [ "$rc" = 0 ] || bad "$tag $result"

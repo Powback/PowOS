@@ -89,6 +89,28 @@ class SparePoolTest {
         assertEquals(listOf("d1@10x20/300"), dropped)
     }
 
+    /**
+     * window-bench's leak count (WW_LAYERS) counts the pool's displays by name with the windows' - a taken spare keeps
+     * its "powos-ww-spare-<n>" name - and relies on this: however many windows a storm opens on pool hits, once the
+     * pool has refilled exactly one display is untaken, so every other live display is a window's.
+     */
+    @Test
+    fun aStormKeepsExactlyOneUntakenSpare() {
+        pool.size(2268, 2440, 442)
+        run()
+        val taken = mutableListOf<String>()
+        repeat(20) {
+            taken += pool.take()!!
+            if (it % 2 == 0) taken += listOfNotNull(pool.take()) // a second open before the refill: a cold one
+            run()
+        }
+        val live = made.filterNot { it in dropped }
+        assertEquals(20, taken.size)
+        assertEquals(21, live.size)
+        assertEquals(1, live.filterNot { it in taken }.size)
+        assertTrue(pool.ready)
+    }
+
     @Test
     fun releaseAllDropsWhatIsHeld() {
         pool.size(10, 20, 300)

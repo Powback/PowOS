@@ -5,14 +5,13 @@ import re
 import sys
 
 
-def validate(text, token, wid, round_, pause):
+def validate(text, token, wid, pause):
     def reject(why):
         raise ValueError(why)
-    markers = re.findall(r'^WWR_(?:BEGIN|END|PROP|SF_BEGIN|SF_END)\b[^\n]*$', text, re.M)
-    if (len(markers) != 6 or not re.fullmatch(r'WWR_BEGIN [0-9]+', markers[0])
-            or not markers[1].startswith('WWR_PROP ') or markers[2] != 'WWR_SF_BEGIN'
-            or markers[3] != 'WWR_SF_END' or not markers[4].startswith('WWR_PROP ')
-            or not re.fullmatch(r'WWR_END [0-9]+', markers[5])):
+    markers = re.findall(r'^WWR_(?:BEGIN|END|SF_BEGIN|SF_END)\b[^\n]*$', text, re.M)
+    if (len(markers) != 4 or not re.fullmatch(r'WWR_BEGIN [0-9]+', markers[0])
+            or markers[1] != 'WWR_SF_BEGIN' or markers[2] != 'WWR_SF_END'
+            or not re.fullmatch(r'WWR_END [0-9]+', markers[3])):
         if 'WWR_ERROR no-confirmed-resize' in text:
             reject('device watcher observed no confirmed resize; inspect diagnostic.stderr')
         if not markers and re.search(r'"active"\s*:\s*false', text) and not re.search(r'"active"\s*:\s*true', text):
@@ -53,9 +52,6 @@ def validate(text, token, wid, round_, pause):
         reject('outside one confirmed resize')
     if any(s['off'] is not (not pause) for s in span):
         reject('wrong glass override')
-    props = re.findall(r'^WWR_PROP (.*)$', text, re.M)
-    if props != [str(int(round_)), str(int(round_))]:
-        reject('wrong corner property')
     if text.count('WWR_SF_BEGIN\n') != 1 or text.count('WWR_SF_END\n') != 1:
         reject('incomplete SF capture')
     sf = text.split('WWR_SF_BEGIN\n', 1)[1].split('WWR_SF_END', 1)[0]
@@ -65,17 +61,18 @@ def validate(text, token, wid, round_, pause):
     radii = [float(v) for block in blocks for v in re.findall(r'cornerRadius=<\s*([0-9.]+)', block)]
     # SF omits the radius line for zero. Require the container, not a similarly named buffer/mirror.
     radius = max(radii, default=0.0)
-    if (radius > 0) != round_:
-        reject('applied radius differs from requested arm')
+    # A window keeps its corner radius through a drag (RJ3's square-while-resizing was removed 11-10: no gain).
+    if radius <= 0:
+        reject('window container lost its corner radius during the drag')
     blur = bool(re.search(r'blurRegions.size\(\)=[1-9]', sf))
     if pause and blur:
         reject('blur remains while pause requested')
-    return f'VALID diagnostic only: window={wid} round={int(round_)} pause={int(pause)} radius={radius} blur={int(blur)} capture={begin}..{end}'
+    return f'VALID diagnostic only: window={wid} pause={int(pause)} radius={radius} blur={int(blur)} capture={begin}..{end}'
 
 
 if __name__ == '__main__':
     try:
-        print(validate(open(sys.argv[1]).read(), sys.argv[2], int(sys.argv[3]), bool(int(sys.argv[4])), bool(int(sys.argv[5]))))
+        print(validate(open(sys.argv[1]).read(), sys.argv[2], int(sys.argv[3]), bool(int(sys.argv[4]))))
     except (ValueError, KeyError, IndexError) as e:
         print(f'INCONCLUSIVE diagnostic: {e}')
         sys.exit(1)
