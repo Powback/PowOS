@@ -95,7 +95,8 @@ def check(cond, what):
 
 
 def helper(conf_path, *args, stdin=""):
-    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "POWOS_AI_ENDPOINT_FILE": conf_path}
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "POWOS_AI_ENDPOINT_FILE": conf_path,
+       "MANAGER_CLAUDE_CMD": "true"}   # claude "installed": the install word (missing CLI) is test-manager-auth's
     p = subprocess.run([sys.executable, HELPER, *args], input=stdin, capture_output=True, text=True, env=env, timeout=30)
     printed.append(p.stdout + p.stderr)
     return p
@@ -169,7 +170,7 @@ os.makedirs(bin_dir, exist_ok=True)
 broker = os.path.join(work, "broker.py")
 with open(broker, "w") as f:
     f.write('print("BROKER-RAN")\n')
-env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": work, "TMPDIR": work, "POWOS_AI_ENDPOINT_FILE": conf,
+env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": work, "TMPDIR": work, "MANAGER_CLAUDE_CMD": "true", "POWOS_AI_ENDPOINT_FILE": conf,
        "MANAGER_SERVER": broker, "MANAGER_SANDBOX": "/nonexistent", "AI_STATE_DIR": os.path.join(work, "state")}
 
 

@@ -516,7 +516,9 @@ def main():
   --safe          claude asks before acting (no --dangerously-skip-permissions)
   --no-sandbox    start without the TypeScript sandbox (same as POWOS_SANDBOX_ENABLED=0)
   --auth          how its claude is signed in: endpoint (the machine's endpoint.conf), login (Claude Code's
-                  own login in this image) or signin (neither: a turn prints {"kind": "signin"}, status 4)
+                  own login in this image) or signin (neither: a turn prints {"kind": "signin"}, status 4);
+                  install when claude itself isn't installed (whatever the sign-in)
+  --install       install Claude Code now (the AI page's Install Claude), its progress on stderr
   --signin        Claude Code's own login (claude auth login), in a terminal; --signout its logout
 
 MCP servers the launcher gives it (--mcp-config-file):

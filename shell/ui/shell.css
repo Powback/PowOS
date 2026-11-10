@@ -1901,9 +1901,13 @@ html:root .ai-board .tile { background: none; box-shadow: none; }
 .ai-note, .ai-thinking { font-size: var(--text-small); overflow-wrap: anywhere; }
 .ai-empty { padding: 30px 6px; text-align: center; font-size: var(--text-small); }
 /* Not signed in / the login lapsed (powai.tsx SignIn): the native sign-in sheet (claudesignin.tsx), centred. */
-.ai-signin { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 12px; text-align: center; }
+.ai-signin, .ai-install { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 12px; text-align: center; }
 .ai-signin-icon { color: var(--accent-text); }
 .ai-signin-sheet { width: 100%; max-width: 360px; text-align: left; }
+.ai-install .ai-signin-sheet { display: flex; flex-direction: column; gap: 10px; }
+.install-progress { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px; border-radius: var(--radius); background: var(--glass-fill); }
+.install-line { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.install-secs { font-size: var(--text-small); font-variant-numeric: tabular-nums; }
 /* The native Claude sign-in (claudesignin.tsx): Login, the code box, the result - on the AI page and a terminal tile. */
 .signin { display: flex; flex-direction: column; gap: 8px; font-family: var(--font-body); font-size: var(--text-body); color: var(--color-foreground); }
 .signin-head { display: flex; align-items: center; gap: 8px; }

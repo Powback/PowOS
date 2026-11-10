@@ -109,6 +109,39 @@ async function terminalFails(label) {
   return fails;
 }
 
+/** Install Claude tapped: progress at once, the installer's line, then the sign-in. */
+async function installTapFails(label, root, go) {
+  const fails = [];
+  await G().until(() => onScreen(go), 2000);
+  if (!onScreen(go)) fails.push(`${label}: the Install Claude button is off screen`);
+  go.click();
+  await G().frames(2);
+  if (!root.querySelector(".install-progress")) fails.push(`${label}: tapping Install Claude showed no progress at once`);
+  const line = () => /Downloading Claude Code/.test(root.querySelector(".install-line")?.textContent ?? "");
+  if (!(await G().until(line, 2000))) fails.push(`${label}: the installer's progress line never showed`);
+  if (!(await G().until(() => document.querySelector(".ai-screen .ai-signin"), 3000)))
+    fails.push(`${label}: installed, the page didn't move on to Sign in to Claude`);
+  return fails;
+}
+
+/**
+ * Claude not installed (auth "install"; the user, 11-10 razr: "it shouldnt say sign in to claude if claude is not
+ * installed, it should show install claude"): Install Claude, never the sign-in; the tap shows progress at once, the
+ * installer's lines live, then the sign-in.
+ */
+async function installFails(label) {
+  window.__mockChat({ busy: false, items: [], auth: "install", install: { running: false, line: "", error: "" }, signin: fresh("missing", "", "direct") });
+  await G().until(() => document.querySelector(".ai-screen .ai-install"), 4000);
+  const root = document.querySelector(".ai-screen .ai-install");
+  if (!root) return [`${label}: no Install Claude on the AI page with auth "install"`];
+  const fails = [];
+  if (/Sign in to Claude/.test(root.textContent ?? "")) fails.push(`${label}: Claude isn't installed but the page says Sign in to Claude`);
+  const go = root.querySelector(".install-go");
+  if (!go || !/Install Claude/.test(go.textContent ?? "")) return [...fails, `${label}: no Install Claude button`];
+  fails.push(...(await installTapFails(label, root, go)));
+  return fails;
+}
+
 /** The scene: its failures. */
 export async function aiSigninFails(label) {
   const S = await G().mod("./state.ts");
@@ -122,6 +155,7 @@ export async function aiSigninFails(label) {
   await G().frames(4);
   if (document.querySelector(".ai-screen .ai-signin")) fails.push(`${label}: the owner's working endpoint showed the sign-in`);
   fails.push(...(await terminalFails(label)));
+  fails.push(...(await installFails(label)));
   window.__mockChat(was);
   return fails;
 }

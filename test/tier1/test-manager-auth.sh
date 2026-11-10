@@ -7,6 +7,8 @@
 #   no endpoint, no login     -> "signin", the chat prints {"kind": "signin"}, status 4, the broker never starts
 #   Claude Code logged in     -> "login", the chat runs directly
 #   --signin / --signout      -> Claude Code's own `claude auth login` / `claude auth logout`
+#   claude not installed      -> "install" whatever the sign-in (the endpoint's too), ahead of "signin"; a turn whose
+#                                claude can't be had prints {"kind": "install"}, status 4; --install installs it
 #   nothing prints a credential's contents.
 set -u
 
@@ -29,10 +31,11 @@ printf 'import sys\nprint("BROKER-RAN")\n' > "$WORK/broker.py"
 chmod +x "$WORK/bin/claude"
 printf 'ANTHROPIC_BASE_URL=http://fixture.pow\nANTHROPIC_AUTH_TOKEN=fixture-tok\n' > "$WORK/endpoint.conf"
 
+RUN_ENV=()
 # run <endpoint file> <manager args...> -> its stdout, then "rc=N"
 run() {
     local ep="$1"; shift
-    env -i PATH="$WORK/bin:/usr/bin:/bin" HOME="$WORK/home" TMPDIR="$WORK" \
+    env -i PATH="$WORK/bin:/usr/bin:/bin" HOME="$WORK/home" TMPDIR="$WORK" ${RUN_ENV[@]+"${RUN_ENV[@]}"} \
         POWOS_AI_ENDPOINT_FILE="$ep" MANAGER_SERVER="$WORK/broker.py" MANAGER_SANDBOX=/nonexistent \
         AI_STATE_DIR="$WORK/state" \
         bash -c 'source "$1/lib/ai/agent.sh" >/dev/null 2>&1
@@ -80,6 +83,41 @@ run "$WORK/none.conf" --signin >/dev/null
 grep -qx "auth login --claudeai" "$WORK/claude.log" && ok "--signin runs claude auth login" || bad "--signin ran: $(cat "$WORK/claude.log")"
 run "$WORK/none.conf" --signout >/dev/null
 grep -qx "auth logout" "$WORK/claude.log" && ok "--signout runs claude auth logout" || bad "--signout ran: $(cat "$WORK/claude.log")"
+
+# --- claude not installed: the Install Claude state ------------------------------
+if PATH=/usr/bin:/bin command -v claude &>/dev/null; then
+    echo "  skip: a claude in /usr/bin or /bin on this host - the not-installed cases can't be staged"
+else
+    rm -f "$WORK/home/.claude/.credentials.json"
+    mv "$WORK/bin/claude" "$WORK/claude.real"
+    OUT=$(run "$WORK/none.conf" --auth)
+    [[ "$OUT" == $'install\nrc=0' ]] && ok "no claude, no login -> install (not signin)" || bad "install: got '$OUT'"
+    OUT=$(run "$WORK/endpoint.conf" --auth)
+    [[ "$OUT" == $'install\nrc=0' ]] && ok "no claude, endpoint -> install (the manager still needs claude)" || bad "endpoint install: got '$OUT'"
+    echo '{}' > "$WORK/home/.claude/.credentials.json"
+    OUT=$(run "$WORK/none.conf" --auth)
+    [[ "$OUT" == $'install\nrc=0' ]] && ok "no claude, a login -> install" || bad "login install: got '$OUT'"
+    rm -f "$WORK/home/.claude/.credentials.json"
+    # Its installer's place (~/.local/bin, not on PATH yet) counts as installed.
+    mkdir -p "$WORK/home/.local/bin"; cp "$WORK/claude.real" "$WORK/home/.local/bin/claude"
+    OUT=$(run "$WORK/none.conf" --auth)
+    [[ "$OUT" == $'signin\nrc=0' ]] && ok "claude in ~/.local/bin -> signin" || bad "local bin: got '$OUT'"
+    OUT=$(run "$WORK/none.conf" --install)
+    [[ "$OUT" == rc=0 ]] && ok "--install with claude there: status 0, nothing installed" || bad "--install present: got '$OUT'"
+    rm -f "$WORK/home/.local/bin/claude"
+    # MANAGER_CLAUDE_CMD naming a CLI that isn't there: install; its turn says so and never starts the broker (no
+    # network: _manager_ensure_claude runs the vendor installer only for claude itself).
+    RUN_ENV=(MANAGER_CLAUDE_CMD="no-such-claude --x")
+    mv "$WORK/claude.real" "$WORK/bin/claude"
+    OUT=$(run "$WORK/none.conf" --auth)
+    [[ "$OUT" == $'install\nrc=0' ]] && ok "MANAGER_CLAUDE_CMD missing -> install" || bad "cmd install: got '$OUT'"
+    OUT=$(run "$WORK/endpoint.conf" --once-stdin --json-events </dev/null)
+    [[ "$OUT" == $'{"kind": "install"}\nrc=4' ]] \
+      && ok "install: the turn says so (event + status 4), the broker never starts" || bad "install chat: got '$OUT'"
+    OUT=$(run "$WORK/none.conf" --install)
+    [[ "$OUT" == rc=1 ]] && ok "--install that can't install: status 1" || bad "--install missing: got '$OUT'"
+    RUN_ENV=()
+fi
 
 echo "  $pass passed, $fail failed"
 (( fail == 0 ))

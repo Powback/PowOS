@@ -85,6 +85,8 @@ _manager_ensure_claude() {
 #   relogin   the endpoint's tenant needs its login (missing, or the refresh failed): the native sign-in
 #             (powos manager --fleet-login status|start|complete; the authority's claude-login flow, never /login here)
 #   signin    neither: the AI page asks to sign in (powos manager --signin)
+#   install   the manager's claude isn't installed (whatever the sign-in): the AI page's Install Claude
+#             (powos manager --install), then it's asked again - an endpoint still needs claude to run the manager
 # Only file presence and variable names are looked at - never a credential's contents.
 # fleet_login.py's one state word (relogin, or anything else), capped at $1 s when given; "" when it can't run or fails -
 # never a failing status (errexit: a failed auth probe killed the whole chat turn, 11-09).
@@ -96,20 +98,58 @@ _manager_fleet_word() {
 
 _manager_auth() {
     declare -f _ai_ensure_config &>/dev/null && _ai_ensure_config
-    if [[ -r "${POWOS_AI_ENDPOINT_FILE:-/etc/powos/ai/endpoint.conf}" || -n "${ANTHROPIC_BASE_URL:-}" ]]; then
-        # relogin: the authority says this machine's tenant has no login, or its refresh failed (what claude itself
-        # reports as "run /login"): the page's native sign-in (fleet_login.py; the authority's claude-login flow).
-        # The authority unreachable or fine: endpoint, as before. Capped at a few seconds; only its state word is read.
-        [[ "$(_manager_fleet_word 12)" == relogin ]] && echo relogin || echo endpoint
-    elif [[ -n "${ANTHROPIC_API_KEY:-}" || -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" || -n "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
+    if ! _manager_has_claude; then
+        echo install
+    elif [[ -r "${POWOS_AI_ENDPOINT_FILE:-/etc/powos/ai/endpoint.conf}" || -n "${ANTHROPIC_BASE_URL:-}" ]]; then
+        _manager_endpoint_word
+    else
+        _manager_login_word
+    fi
+}
+
+# The manager's CLI (MANAGER_CLAUDE_CMD's first word, or claude on PATH or in ~/.local/bin where its installer puts it)
+# is there - looked at only, never installed (_manager_ensure_claude installs it).
+_manager_has_claude() {
+    local bin="${MANAGER_CLAUDE_CMD:-claude}"; bin="${bin%% *}"
+    command -v "$bin" &>/dev/null && return 0
+    [[ "$bin" == claude && -x "$HOME/.local/bin/claude" ]]
+}
+
+# With an endpoint: relogin when the authority says this machine's tenant has no login, or its refresh failed (what
+# claude itself reports as "run /login"): the page's native sign-in (fleet_login.py; the authority's claude-login flow).
+# The authority unreachable or fine: endpoint, as before. Capped at a few seconds; only its state word is read.
+_manager_endpoint_word() {
+    [[ "$(_manager_fleet_word 12)" == relogin ]] && echo relogin || echo endpoint
+}
+
+# Without one: login (a key/token the environment exports, or Claude Code's credentials file - relogin once it can't
+# refresh any more; fleet_login.py reads only its expiry and whether a refresh token is there), else signin.
+_manager_login_word() {
+    if [[ -n "${ANTHROPIC_API_KEY:-}" || -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" || -n "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
         echo login
     elif [[ -s "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json" ]]; then
-        # Its own login (direct mode): relogin once it can't refresh any more (fleet_login.py reads only its expiry
-        # and whether a refresh token is there).
         [[ "$(_manager_fleet_word)" == relogin ]] && echo relogin || echo login
     else
         echo signin
     fi
+}
+
+# powos manager --install: Claude Code installed now (the AI page's Install Claude button, 11-10 razr: "it shouldnt say
+# sign in to claude if claude is not installed, it should show install claude"). Its progress on stderr, line by line
+# (the page shows the latest); status 0 once claude is there.
+_manager_install() {
+    _manager_ensure_claude || return 1
+    echo "manager: Claude Code is installed" >&2
+}
+
+# The CLI, the AI config and the persona (_manager_load); its status. No claude after it (its install failed, or
+# MANAGER_CLAUDE_CMD names one that isn't there): the page's event ("install": its Install Claude state) and status 4,
+# as for signin. $@: the broker's flags.
+_manager_load_or_install() {
+    _manager_load && return 0
+    _manager_has_claude && return 1
+    [[ " $* " == *" --json-events "* ]] && echo '{"kind": "install"}'
+    return 4
 }
 
 # powos manager --signin: Claude Code's own login (`claude auth login`, the Claude subscription), run in the AI page's
@@ -138,12 +178,14 @@ _manager_load() {
 
 # powos ai manager [--safe] [--no-sandbox]  — start / resume the persistent manager session (--help: its flags).
 # The sign-in flags of manager_run, $1 the flag, the rest its args:
-#   --auth         how it's signed in (one word: endpoint / relogin / login / signin)
+#   --auth         how it's signed in (one word: install / endpoint / relogin / login / signin)
+#   --install      Claude Code installed now (its progress on stderr)
 #   --signin       Claude Code's login        --signout  its logout
 #   --fleet-login  the native fleet sign-in: status | start <tenant> | complete <tenant> (code#state on stdin); JSON out
 _manager_auth_cmd() {
     case "$1" in
         --auth) _manager_auth ;;
+        --install) _manager_install ;;
         --signin) _manager_signin ;;
         --fleet-login) shift; python3 "$_MANAGER_DIR/fleet_login.py" "$@" ;;
         --signout) _manager_signout ;;
@@ -166,7 +208,7 @@ manager_run() {
             # --help: the broker's own (manager.py), without the persona load below.
             -h|--help) python3 "$MANAGER_SERVER" --help; return ;;
             # How it's signed in, Claude Code's login, the native fleet sign-in, its logout (_manager_auth_cmd).
-            --auth|--signin|--fleet-login|--signout) _manager_auth_cmd "$@"; return ;;
+            --auth|--install|--signin|--fleet-login|--signout) _manager_auth_cmd "$@"; return ;;
             *) passthru+=("$1") ;;
         esac
         shift
@@ -190,7 +232,7 @@ manager_run() {
     # The AI config, the Anthropic endpoint included (/etc/powos/ai/endpoint.conf: the fleet's auth authority), so the
     # manager's claude uses it wherever it's started - not only from a session whose environment.d already has it
     # (a phone's PowOS session doesn't).
-    _manager_load || return 1
+    _manager_load_or_install "${passthru[@]}" || return
     _manager_signed_in "${passthru[@]}" || return 4
     _manager_chat "$store" "${passthru[@]}"
 }
