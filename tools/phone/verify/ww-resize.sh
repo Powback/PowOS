@@ -236,13 +236,15 @@ print("; ".join(dict.fromkeys(out)))' "$1"; }
 # captures SF with device wall timestamps, then validator requires the SAME resize around the entire dump.
 # No host sleep guesses; no screenrecord/perfetto during this diagnostic. Never performance evidence.
 diagnostic() {
-  local tag=$1 x1=$2 y1=$3 x2=$4 y2=$5 token js result
+  local tag=$1 x1=$2 y1=$3 x2=$4 y2=$5 token js result first_match
   token="WWR_${n}_${SECONDS}_$$"
   js=$(sed "s/TOKEN/\"$token\"/;s/WINDOW_ID/$n/" "$here/resize-state.js")
   [ "$(ev "$js")" = ok ] || { bad "$tag INCONCLUSIVE: cannot install resize observer"; return; }
   # A bounded device-side watcher, already listening before input starts. The token is unique;
   # logcat's backlog cannot satisfy this job. Timeout and missing/bracketing state fail closed.
-  sh_ "( timeout 8 logcat -v raw -s PowosShell:I | grep -m 1 -E \"$token .*active.:true\" >/dev/null &&
+  first_match=$(cat "$here/resize-first-match.sh")
+  sh_ "$first_match
+    ( resize_first_match \"$token\" &&
     { sleep 0.15; echo WWR_BEGIN \$(date +%s%3N); echo WWR_PROP \$(getprop debug.powos.ww_drag_round);
       echo WWR_SF_BEGIN; dumpsys SurfaceFlinger; echo WWR_SF_END;
       echo WWR_PROP \$(getprop debug.powos.ww_drag_round); echo WWR_END \$(date +%s%3N); } ) &

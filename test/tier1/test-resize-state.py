@@ -55,6 +55,50 @@ class ResizeState(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'outside'):
             m.validate(text, 'T', 4, False, True)
 
+    def test_invalid_state_schema(self):
+        good = dict(at=999, active=True, epoch=1, off=False)
+        invalid = [None, [], 'text', 42, {}, {'at': 999}]
+        for field, value in [('at', '999'), ('at', None), ('at', True), ('at', 1.5),
+                             ('epoch', '1'), ('epoch', False), ('active', 1), ('off', None)]:
+            invalid.append({**good, field: value})
+        for value in invalid:
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'schema'):
+                m.validate(capture() + '\nT ' + json.dumps(value), 'T', 4, False, True)
+        with self.assertRaisesRegex(ValueError, 'JSON'):
+            m.validate(capture() + '\nT {broken', 'T', 4, False, True)
+
+    def test_capture_delimiters(self):
+        for text in (capture().replace('WWR_BEGIN 1000', 'WWR_BEGIN "1000"'),
+                     capture().replace('WWR_END 1100', 'WWR_END null'),
+                     capture().replace('WWR_SF_BEGIN', 'TEMP').replace('WWR_SF_END', 'WWR_SF_BEGIN').replace('TEMP', 'WWR_SF_END'),
+                     capture() + '\nWWR_BEGIN invalid',
+                     capture().replace('WWR_END 1100', 'WWR_END 900')):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                m.validate(text, 'T', 4, False, True)
+
+    def test_first_match_stops_idle_producer(self):
+        # Producer emits once then blocks forever: no later write/SIGPIPE is available to reap it.
+        # An owned child execs node, so kill/wait targets the producer itself, not a shell grandchild.
+        helper = (V / 'resize-first-match.sh').read_text()
+        script = helper + '''
+logcat() { exec node -e 'console.log("T " + JSON.stringify({active:true})); setInterval(()=>{},1000)' ; }
+resize_first_match T || exit 1
+printf 'captured\\n'
+'''
+        result = subprocess.run(['bash', '-c', script], capture_output=True, text=True, timeout=3)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, 'captured\n')
+
+    def test_first_match_failure_is_bounded(self):
+        helper = (V / 'resize-first-match.sh').read_text().replace('+ 8 ))', '+ 1 ))')
+        script = helper + '''
+logcat() { exec node -e 'setInterval(()=>{},1000)' ; }
+resize_first_match T && exit 2
+exit 0
+'''
+        result = subprocess.run(['bash', '-c', script], capture_output=True, text=True, timeout=3)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_observer_actual_schema(self):
         # Lock this observer to entry()/sizeOf()/geometry(), not an invented export.
         source = (ROOT / 'shell/ui/webwindows.tsx').read_text()

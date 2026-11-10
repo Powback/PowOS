@@ -8,9 +8,13 @@ import sys
 def validate(text, token, wid, round_, pause):
     def reject(why):
         raise ValueError(why)
-    stamps = re.findall(r'^WWR_(BEGIN|END) (\d+)$', text, re.M)
-    if len(stamps) != 2 or [s[0] for s in stamps] != ['BEGIN', 'END']:
-        reject('missing device capture timestamps')
+    markers = re.findall(r'^WWR_(?:BEGIN|END|PROP|SF_BEGIN|SF_END)\b[^\n]*$', text, re.M)
+    if (len(markers) != 6 or not re.fullmatch(r'WWR_BEGIN [0-9]+', markers[0])
+            or not markers[1].startswith('WWR_PROP ') or markers[2] != 'WWR_SF_BEGIN'
+            or markers[3] != 'WWR_SF_END' or not markers[4].startswith('WWR_PROP ')
+            or not re.fullmatch(r'WWR_END [0-9]+', markers[5])):
+        reject('invalid capture delimiters or order')
+    stamps = re.findall(r'^WWR_(BEGIN|END) ([0-9]+)$', text, re.M)
     begin, end = [int(s[1]) for s in stamps]
     if end < begin:
         reject('capture clock moved backwards')
@@ -19,9 +23,17 @@ def validate(text, token, wid, round_, pause):
         if token + ' ' not in line:
             continue
         try:
-            states.append(json.loads(line.split(token + ' ', 1)[1]))
-        except (ValueError, IndexError):
-            continue
+            state = json.loads(line.split(token + ' ', 1)[1])
+        except ValueError:
+            reject('invalid page state JSON')
+        if (type(state) is not dict or set(state) != {'at', 'active', 'epoch', 'off'}
+                or type(state['at']) is not int or state['at'] < 0
+                or type(state['epoch']) is not int or state['epoch'] < 0
+                or type(state['active']) is not bool or type(state['off']) is not bool):
+            reject('invalid page state schema')
+        if states and state['at'] < states[-1]['at']:
+            reject('page clock moved backwards')
+        states.append(state)
     before = [s for s in states if s['at'] <= begin]
     after = [s for s in states if s['at'] >= end]
     if not before or not after:
