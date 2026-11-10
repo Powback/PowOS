@@ -18,7 +18,7 @@ cleanup() {
   else echo 'STOP: user touch/guard lost; no restore input'; fi
 }
 trap cleanup EXIT
-for step in setup mixed area rest task all collapse; do
+for step in open setup mixed area rest task all collapse; do
   guard || { echo "STOP: user touch/guard lost before $step"; exit 3; }
   r=$(shell_check home ai-area-device.js aiAreaDevice "$step")
   guard || { echo "STOP: user touch/guard lost during $step"; exit 3; }

@@ -9,6 +9,7 @@ export async function aiAreaDevice(step) {
   const row = (area) => `.ai-left .ais-area-row[data-area="${CSS.escape(area)}"]`;
   const detail = (area) => `.ai-left [data-area-detail="${CSS.escape(area)}"]`;
   const click = async (s) => { if (window.__aiAreaDevice?.touched) throw Error("STOP: user input"); if (!q(s)) throw Error(`missing ${s}`); q(s).click(); await G.sleep(700); };
+  if (step === "open") return aiAreaOpen({ S, A, q, G });
   if (step === "setup") return aiAreaSetup({ S, A, P, q, visible, row, G });
   const t = window.__aiAreaDevice;
   if (!t) return ["SKIP: no live board snapshot"];
@@ -74,15 +75,24 @@ const aiAreaSteps = {
 
 async function aiAreaSetup({ S, A, P, q, visible, row, G }) {
     if (innerWidth < 700) return ["SKIP: unfolded AI layout required; fold state left untouched"];
-    if (!P.boardSeen.value) return ["SKIP: live board has not loaded"];
+    const loaded = await G.until(() => P.boardSeen.value || window.__aiAreaDevice.touched, 12000);
+    if (window.__aiAreaDevice.touched) return ["SKIP: user input while waiting for live board"];
+    if (!loaded) return [`SKIP: live board subscription not ready after opening AI page (12s; page=${S.page.value}, rows=${P.board.value.length})`];
     const areas = A.areaStats().filter((a) => a.open.length);
     const mixed = areas.find((a) => a.open.some((w) => A.dotOf(w) === "stalled") && a.open.some((w) => A.dotOf(w) !== "stalled"));
     const idle = areas.find((a) => a.open.every((w) => A.dotOf(w) === "stalled"));
     if (!mixed || !idle) return ["SKIP: live board needs both a mixed active/idle area and an idle-only area"];
-    window.__aiAreaDevice = { mixed, idle, signature: JSON.stringify(areas.map((a) => [a.name, a.open.map((w) => [w.id, A.dotOf(w)])])), saved: [S.page.value, S.aiScreen.value, S.aiAgent.value, A.progressFocus.value], expanded: q('.ai-left .ais-area-row[aria-expanded="true"]')?.dataset.area };
-    window.__aiAreaDevice.onTouch = (e) => { if (e.isTrusted) window.__aiAreaDevice.touched = true; };
-    window.addEventListener("pointerdown", window.__aiAreaDevice.onTouch, true);
-    S.page.value = -1; S.aiAgent.value = null; S.aiScreen.value = "chat";
-    await G.sleep(700);
+    Object.assign(window.__aiAreaDevice, { mixed, idle, signature: JSON.stringify(areas.map((a) => [a.name, a.open.map((w) => [w.id, A.dotOf(w)])])) });
     return visible(row(mixed.name)) ? [] : ["By area not visible in live AI page"];
+}
+
+/** WorkFeed subscribes only while shown: open first, then wait in the separately hardware-guarded setup step. */
+async function aiAreaOpen({ S, A, q, G }) {
+  if (innerWidth < 700) return ["SKIP: unfolded AI layout required; fold state left untouched"];
+  window.__aiAreaDevice = { saved: [S.page.value, S.aiScreen.value, S.aiAgent.value, A.progressFocus.value], expanded: q('.ai-left .ais-area-row[aria-expanded="true"]')?.dataset.area };
+  window.__aiAreaDevice.onTouch = (e) => { if (e.isTrusted) window.__aiAreaDevice.touched = true; };
+  window.addEventListener("pointerdown", window.__aiAreaDevice.onTouch, true);
+  S.page.value = -1; S.aiAgent.value = null; S.aiScreen.value = "chat";
+  await G.sleep(700);
+  return [];
 }
