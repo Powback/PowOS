@@ -32,9 +32,11 @@
 #      (dev/shots.mjs: PNGs + report.json with each text's measured contrast) - design QA's renders, never a pass/fail.
 #      SHOTS_THEME / SHOTS_ONLY / SHOTS_SCALE / SHOTS_PROBE / SHOTS_STRICT pass through (STRICT=1: overlapping tiles
 #      or missing glyphs fail it).
-# Exit 0: pass. 1: failed (the reasons on stdout). 2: couldn't run (no docker, the job machine gone...). Time: ~5-10 s, the image cached.
+# Exit 0: pass. 1: failed (the reasons on stdout). 2: couldn't run - a usage/environment error (no docker, no such
+# shell file): a hard failure, fix it. 75 (EX_TEMPFAIL): NO VERDICT - only the job machine not answering (below); the
+# ship path defers on it (tools/phone/ship.sh gate_deferred) and never on 2. Time: ~5-10 s, the image cached.
 # The browser runs (scenes, retries, --shots) are the gate job of tools/jobs/compose.yml on the Docker context
-# POW_JOB_CONTEXT names (default pow58; not answering: waits GATE_JOB_WAIT_S (900), then exit 2 - the hub can't pass the
+# POW_JOB_CONTEXT names (default pow58; not answering: waits GATE_JOB_WAIT_S (900), then exit 75 - the hub can't pass the
 # gate; POW_JOB_CONTEXT=hub or GATE_HUB_FALLBACK=1 gate there with a load-sized deadline), the composed tree baked into its image;
 # report.json and the PNGs come back to --shots DIR. The widget sweep (dev/preview.sh) runs its browser passes in the same gate job. GATE_ONLY=<regex>: only the browser runs so named (a case worked on alone); GATE_PROFILE=1: a scene that can (ww-resize-cost) also prints a trace's top costs; GATE_SCENE_MS: the per-scene cap. GATE_THROTTLE=N: every page's CPU slowed
 # N times (a loaded Mac on demand: a case's waits must hold at 6). GATE_IMAGE overrides the Chromium image. Docker's
@@ -304,13 +306,13 @@ if [ -n "${GATE_STUB_SLEEP:-}" ]; then :; else
   nerd=$(cd "$SHELL_DIR/fonts" && cd "$(dirname "$(readlink nerd_symbols.ttf)")" 2>/dev/null && pwd -P)/nerd_symbols.ttf
   # The hub can't pass this gate (11-10, POW_JOB_CONTEXT=hub at load 13-23: 335 PASS, 18 FAIL in 28 min - frame-timing
   # and motion scenes that pass on .58; the reruns would add more). So a gate whose machine doesn't answer waits for
-  # it, GATE_JOB_WAIT_S (default 900 s), and then stops with exit 2 (no verdict) instead of false FAILs on the hub.
+  # it, GATE_JOB_WAIT_S (default 900 s), and then stops with exit 75 (no verdict) instead of false FAILs on the hub.
   # POW_JOB_CONTEXT=hub still runs there on purpose (deadline sized below); GATE_HUB_FALLBACK=1 allows the fallback.
   [ "${POW_JOB_CONTEXT:-}" = hub ] || [ -n "${GATE_HUB_FALLBACK:-}" ] || export JOB_WAIT_S=${GATE_JOB_WAIT_S:-900}
   job_init gate
   if [ -n "$JOB_FELL_BACK" ] && [ -z "${GATE_HUB_FALLBACK:-}" ]; then
     echo "gate: NO VERDICT - ${POW_JOB_CONTEXT:-pow58} did not answer within ${JOB_WAIT_S:-0} s, and the hub cannot pass the full gate (false timing FAILs under its load); bring it back, or GATE_HUB_FALLBACK=1 / POW_JOB_CONTEXT=hub to gate on the hub anyway"
-    exit 2
+    exit 75
   fi
   jc=$work/job
   mkdir -p "$jc/shell" "$jc/app" "$jc/apps" "$jc/fonts" "$jc/in"

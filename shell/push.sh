@@ -38,10 +38,12 @@ set -euo pipefail
 cd "$(dirname "$0")"
 force="" pregate="" pregated=""
 for a in "$@"; do case "$a" in --force) force=1 ;; --pre-gate) pregate=1 ;; --pre-gated=*) pregated=${a#--pre-gated=} ;; esac; done
-# dev/gate.sh exit 2 = NO VERDICT: its job machine (.58) didn't answer and the hub can't pass the full gate - neither a
+# dev/gate.sh exit 75 = NO VERDICT: its job machine (.58) didn't answer and the hub can't pass the full gate - neither a
 # pass nor a failure of these files. Then push.sh exits 75 (EX_TEMPFAIL) with "no gate verdict", never "refused" or
 # "failed", and pushes nothing (not even with --force: never ungated; GATE_HUB_FALLBACK=1 gates on the hub). The ship
 # service keeps the request and gates again once the machine answers (tools/phone/ship.sh gate_deferred).
+# Exit 2 is the gate's own usage/environment error (no docker, no such shell file): refused with its message, never deferred.
+gate_err() { echo "push.sh: refused - the gate couldn't run: $(echo "$1" | grep -m1 '^gate:' | cut -c1-200)" >&2; exit 1; }
 no_verdict() { echo "push.sh: no gate verdict - the gate's machine didn't answer (deferred: nothing failed, nothing pushed; GATE_HUB_FALLBACK=1 to gate on the hub)" >&2; exit 75; }
 # The shell files among the arguments (not the flags, not --note's text).
 shell_files() {
@@ -137,7 +139,8 @@ if [ -n "$pregate" ]; then
   fi
   set -e
   echo "$out"
-  [ $gate != 2 ] || no_verdict
+  [ $gate != 75 ] || no_verdict
+  [ $gate != 2 ] || gate_err "$out"
   [ $gate -eq 0 ] || { echo "push.sh: pre-gate failed (above)" >&2; exit 1; }
   mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/pregated"
   stamp=$(mktemp "${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/pregated/stamp.XXXXXX")
@@ -202,7 +205,8 @@ if [ "${1:-}" = "--vpn" ]; then
         gate=$?
       fi
       echo "$out"
-      [ $gate != 2 ] || { rm -rf "$ov"; no_verdict; }
+      [ $gate != 75 ] || { rm -rf "$ov"; no_verdict; }
+      [ $gate != 2 ] || { rm -rf "$ov"; gate_err "$out"; }
       # HEAD + the phone's overrides can be broken without this push (the APK on the phone isn't HEAD, other agents'
       # overrides are half a change): then only failures this push ADDS refuse it - the same gate without its files
       # is the baseline (failures compared without their timings).
@@ -210,7 +214,8 @@ if [ "${1:-}" = "--vpn" ]; then
         norm() { grep '^FAIL' | sed 's/ within [0-9]* ms//; s/([0-9]* ms)//' | sort -u; }
         bout=$(READY_MS=$slow dev/gate.sh "${ga[@]}" 2>&1); brc=$?
         # The baseline itself without a verdict: no baseline to compare with - deferred, not "this push adds all".
-        [ $brc != 2 ] || { rm -rf "$ov"; no_verdict; }
+        [ $brc != 75 ] || { rm -rf "$ov"; no_verdict; }
+        [ $brc != 2 ] || { rm -rf "$ov"; gate_err "$bout"; }
         base=$(echo "$bout" | norm)
         added=$(comm -13 <(echo "$base") <(echo "$out" | norm))
         if [ -z "$added" ]; then
@@ -316,7 +321,8 @@ if [ -z "${POWOS_GATE_DONE:-}" ]; then
   gate=$?
   set -e
   rm -rf "$ov"
-  [ $gate != 2 ] || no_verdict
+  [ $gate != 75 ] || no_verdict
+  [ $gate != 2 ] || { echo "push.sh: refused - the gate couldn't run (its gate: line above)" >&2; exit 1; }
   if [ $gate -ne 0 ]; then
     [ -n "$force" ] || { echo "push.sh: refused - the gate failed (above). Fix it, or --force to push anyway." >&2; exit 1; }
     echo "push.sh: the gate failed - pushing anyway (--force)" >&2

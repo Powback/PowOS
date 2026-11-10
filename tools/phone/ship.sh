@@ -38,7 +38,7 @@
 #     install at once instead of waiting for the user to be idle / the screen off. Delete the file to wait again.
 #   The notes of the requests a part finishes go into ONE update notification ("a; b"; all --silent = silent). The tip shipped
 #   goes to <queue>/live, a line to <queue>/shipped.log, the run's log to <queue>/done/. A failed ship mails the
-#   coder inbox and isn't retried until origin moves (a user who stayed active: retried). No gate verdict (gate.sh exit 2,
+#   coder inbox and isn't retried until origin moves (a user who stayed active: retried). No gate verdict (gate.sh exit 75,
 #   its job machine .58 gone; push.sh / apps/install.sh / ship-apk.sh exit 75) is no failure: that step is DEFERRED
 #   (gate_deferred: requests kept, no mail, one status line) and gated again once the machine answers. ship-apk.sh / push.sh
 #   refuse to run outside this service (POWOS_SHIP_SERVICE) unless --direct (emergencies; logged to <queue>/direct.log).
@@ -280,8 +280,9 @@ run)
   # offline_wait WHAT: logged once per tip and step - the step's requests stay pending, nothing is marked failed.
   offline_wait() { ! grep -qxF "$T $1" "$Q/offline-wait" 2>/dev/null || return 0; echo "$T $1" >> "$Q/offline-wait"
     echo "$(date +%T) ${T:0:9}: $1 waits for the phone (offline) - kept pending, it goes once the phone is back"; }
-  # NO GATE VERDICT (11-10): shell/dev/gate.sh exits 2 when its job machine (POW_JOB_CONTEXT, default pow58 = .58)
-  # didn't answer within GATE_JOB_WAIT_S - the hub can't pass the full gate, so there is no verdict; push.sh,
+  # NO GATE VERDICT (11-10): shell/dev/gate.sh exits 75 (only) when its job machine (POW_JOB_CONTEXT, default pow58 = .58)
+  # didn't answer within GATE_JOB_WAIT_S - the hub can't pass the full gate, so there is no verdict (its exit 2, a
+  # usage/environment error, stays a refusal: never deferred here); push.sh,
   # apps/install.sh and ship-apk.sh pass it on as exit 75 (GATE_NV). Not the commit's fault: no failed mark, no mail, no
   # REFUSED/FAILED wording, and nothing goes out ungated - the step's requests stay queued. $Q/gate-deferred/<step>
   # ("TIP EPOCH [files]") holds that step (ship.sh status says so) until the machine answers again (gate_up: probed at

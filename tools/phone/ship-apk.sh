@@ -15,7 +15,7 @@
 # Once, when the wait starts: a PowOS notification + a pet line "Update ready (N fixes): lock the screen to install".
 # A newer origin tip with APK inputs ends the wait (exit 8): the runner builds that one instead, which replaces this.
 # SHIP_WAIT_MIN=N (tests) gives up after N minutes with exit 4. --now skips the wait (only for urgent fixes).
-# Exit 75 = DEFERRED: the gate gave no verdict (shell/dev/gate.sh exit 2: its job machine, .58, didn't answer) - not
+# Exit 75 = DEFERRED: the gate gave no verdict (shell/dev/gate.sh exit 75: its job machine, .58, didn't answer) - not
 # a fault of this commit; nothing built in or installed, and the ship service gates it again once the machine is back.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -101,12 +101,16 @@ fi
 glog=${TMPDIR:-/tmp}/ship-apk-gate.log
 gate_head() { GATE_SCOPE=boot GATE_PRIORITY=ship READY_MS=$1 IDLE_MS=0 bash shell/dev/gate.sh > "$glog" 2>&1; }
 nv_exit() { echo "ship-apk: DEFERRED - no gate verdict: the gate's machine didn't answer ($1); this commit is neither passed nor failed, nothing installed - the ship service gates it again once the machine is back" >&2; exit 75; }
+# Exit 2: the gate couldn't run (no docker, a bad argument) - REFUSED with the gate's own message, not "doesn't load".
+gate_err() { echo "ship-apk: REFUSED - the gate couldn't run: $(grep -m1 '^gate:' "$glog" | cut -c1-200) (whole log $glog)" >&2; exit 3; }
 grc=0; gate_head "${READY_MS:-30000}" || grc=$?
-[ $grc != 2 ] || nv_exit "$(grep -m1 '^gate: NO VERDICT' "$glog" | cut -c1-160)"
+[ $grc != 75 ] || nv_exit "$(grep -m1 '^gate: NO VERDICT' "$glog" | cut -c1-160)"
+[ $grc != 2 ] || gate_err
 if [ $grc -ne 0 ] && grep -q '^FAIL' "$glog" && ! grep '^FAIL' "$glog" | grep -qv 'not ready'; then
   echo "ship-apk: only boot timeouts - the Mac is busy? gating once more with READY_MS=90000" >&2
   grc=0; gate_head 90000 || grc=$?
-  [ $grc != 2 ] || nv_exit "the boot-timeout retry"
+  [ $grc != 75 ] || nv_exit "the boot-timeout retry"
+  [ $grc != 2 ] || gate_err
 fi
 if [ $grc -ne 0 ]; then
   { grep -E '^FAIL|^gate:' "$glog" | head -12; grep -E '^(error|src/).*TS[0-9]' "$glog" | head -5; } >&2

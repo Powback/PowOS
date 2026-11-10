@@ -65,9 +65,10 @@ cat > shell/dev/gate.sh <<'EOF'
 #!/bin/bash
 # fake gate: logs, takes GATE_SLEEP seconds (a loaded Mac), fails on a file containing BROKEN
 echo "GATE $(ts) $*" >> "$LOG"; sleep "${GATE_SLEEP:-0}"
-# the gate's job machine (.58) gone: NO VERDICT, exit 2 - $HOME/gate-down for every gate, $HOME/gate-down-pre for a
-# gate of named files only (push.sh --pre-gate's)
-{ [ -e "$HOME/gate-down" ] || { [ -e "$HOME/gate-down-pre" ] && [ $# -gt 0 ]; }; } && { echo "gate: NO VERDICT - pow58 did not answer within 900 s"; exit 2; }
+# the gate's job machine (.58) gone: NO VERDICT, exit 75 - $HOME/gate-down for every gate, $HOME/gate-down-pre for a
+# gate of named files only (push.sh --pre-gate's); $HOME/gate-broken: the gate can't run at all (exit 2, a hard error)
+{ [ -e "$HOME/gate-down" ] || { [ -e "$HOME/gate-down-pre" ] && [ $# -gt 0 ]; }; } && { echo "gate: NO VERDICT - pow58 did not answer within 900 s"; exit 75; }
+[ -e "$HOME/gate-broken" ] && { echo "gate: no docker" >&2; exit 2; }
 for f in "$@"; do case "$f" in --*) ;; *) grep -q BROKEN "$f" 2>/dev/null && { echo "FAIL home: $f broken"; exit 1; } ;; esac; done
 echo "ok all pages"
 EOF
@@ -122,7 +123,7 @@ ship; rc=$?
 unset DURING_BUILD
 landB 'export const ai = "fixed"' fix >/dev/null
 
-# 2b. 11-10: the gate gives no verdict (gate.sh exit 2: its job machine didn't answer) - ship-apk exits 75 DEFERRED,
+# 2b. 11-10: the gate gives no verdict (gate.sh exit 75: its job machine didn't answer) - ship-apk exits 75 DEFERRED,
 #     never "REFUSED - this commit's shell doesn't load": nothing built or installed, no boot-timeout retry. Then the
 #     same for a no-verdict pre-gate of the newer shell files (built, kept, not installed).
 : > "$LOG"; rm -f "$HOME/.cache/powos-installed-commit"; touch "$HOME/gate-down"
@@ -134,6 +135,12 @@ export DURING_BUILD="cd $T/B && git pull -q --rebase && echo 'export const ai = 
 ship; rc=$?; rm -f "$HOME/gate-down-pre"; unset DURING_BUILD
 [ $rc -eq 75 ] && grep -q '^BUILD' "$LOG" && ! grep -q '^INSTALL' "$LOG" && grep -q "DEFERRED - no gate verdict" "$T/ship.out" &&
   ! grep -q "REFUSED\|pre-gate failed" "$T/ship.out" && ok "no gate verdict on the newer shell files: DEFERRED (75), not installed" || { bad "no-verdict pre-gate (rc $rc)"; cat "$LOG" "$T/ship.out"; }
+# 2c. The gate can't run (gate.sh exit 2: no docker, a bad argument) - a hard REFUSAL with the gate's own message,
+#     never deferred and never "this commit's shell doesn't load".
+: > "$LOG"; rm -f "$HOME/.cache/powos-installed-commit"; touch "$HOME/gate-broken"
+ship; rc=$?; rm -f "$HOME/gate-broken"
+[ $rc -eq 3 ] && ! grep -q '^BUILD\|^INSTALL' "$LOG" && grep -q "REFUSED - the gate couldn't run: gate: no docker" "$T/ship.out" &&
+  ! grep -q "DEFERRED\|doesn't load" "$T/ship.out" && ok "gate can't run (2): REFUSED with its message, not deferred" || { bad "gate rc 2 (rc $rc)"; cat "$LOG" "$T/ship.out"; }
 landB 'export const ai = "fixed"' "back to fixed" >/dev/null   # origin's ai.tsx as case 3 expects it
 
 # 3. The phone's copy is from a commit the pusher's base lacks.

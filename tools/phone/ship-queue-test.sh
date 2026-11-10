@@ -12,7 +12,7 @@ export SHIP_QUIET_S=2 SHIP_QUIET_SHELL_S=2 SHIP_POLL_S=0.2
 export SHIP_GATE_FIRST=1   # these tests cover the gate-then-push mode; deploy-first is the default
 # The phone's VPN link (ship.sh phone_offline): $HOME/phone-offline = adb.sh --vpn-state's rc 69 (handshake stale).
 export SHIP_PHONE_STATE=$T/bin/phone-state SHIP_OFFLINE_POLL_S=1
-# The gate's job machine (.58): $HOME/gate-down = it doesn't answer - the gate stub exits 2 (NO VERDICT), and the
+# The gate's job machine (.58): $HOME/gate-down = it doesn't answer - the gate stub exits 75 (NO VERDICT), and the
 # service's probe (ship.sh gate_up, SHIP_GATE_PROBE) says it's still gone.
 export SHIP_GATE_PROBE=$T/bin/gate-probe SHIP_GATE_PROBE_S=0
 unset POWOS_SHIP_SERVICE SHIP_AGENT
@@ -91,7 +91,9 @@ EOF
 cat > shell/dev/gate.sh <<'EOF'
 #!/bin/bash
 echo "GATE $*" >> "$LOG"
-[ -e "$HOME/gate-down" ] && { echo "gate: NO VERDICT - pow58 did not answer within 900 s, and the hub cannot pass the full gate"; exit 2; }
+[ -e "$HOME/gate-down" ] && { echo "gate: NO VERDICT - pow58 did not answer within 900 s, and the hub cannot pass the full gate"; exit 75; }
+# $HOME/gate-broken: the gate can't run (exit 2: no docker, a bad argument) - a hard refusal, never deferred
+[ -e "$HOME/gate-broken" ] && { echo "gate: no docker" >&2; exit 2; }
 for f in "$@"; do case "$f" in --*) ;; *) grep -q BROKEN "$f" 2>/dev/null && { echo "FAIL home: $f broken"; exit 1; } ;; esac; done
 echo "ok all pages"
 EOF
@@ -413,7 +415,7 @@ grep -q "the phone is offline (no WireGuard link)" "$Q/runner.log" && ! grep -q 
 rm -f "$HOME/phone-offline"
 drained 60 && grep -q "^APK $t16b" "$LOG" && grep -q "the phone is back online" "$Q/runner.log" && ok "VPN back: the APK ships" || { bad "VPN back"; cat "$LOG"; tail -8 "$Q/runner.log"; }
 
-# 17. 11-10: no gate verdict (gate.sh exit 2: its machine, .58, didn't answer) is DEFERRED, never a failure: no
+# 17. 11-10: no gate verdict (gate.sh exit 75: its machine, .58, didn't answer) is DEFERRED, never a failure: no
 #     FAILED/REFUSED, no mail, no failed mark, the request stays queued, `ship.sh status` says so in one line, nothing
 #     goes out ungated; once the machine answers the same tip gates again and ships. Shell (gated push), then APK.
 nv_ok() {   # STEP TIP: deferred and nothing else
@@ -429,6 +431,14 @@ nv_ok shell "$t17" && ! grep -q '^PUSH' "$LOG" && [ "$(grep -c '^GATE' "$LOG")" 
 rm -f "$HOME/gate-down"
 drained 30 && grep -q 'a = 17' "$PHONE/files/shell/ui/a.tsx" && ! bash tools/phone/ship.sh status | grep -q '^GATE DEFERRED' &&
   ok "gate machine back: the same tip gates and ships" || { bad "no ship after the gate came back"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+: > "$LOG"; touch "$HOME/gate-broken"
+# 17a. The gate can't run (exit 2) is NOT no-verdict: the ship FAILS (failed mark, mailed once), nothing deferred.
+land shell/ui/a.tsx 'export const a = 171' "a171"; req --note "seventeen a"; t17a=$(tip)
+for _ in $(seq 100); do [ "$(cat "$Q/failed" 2>/dev/null)" = "$t17a" ] && grep -q '^MAIL.*FAILED' "$LOG" && break; sleep 0.2; done
+[ "$(cat "$Q/failed" 2>/dev/null)" = "$t17a" ] && [ "$(grep -c '^MAIL.*FAILED' "$LOG")" = 1 ] && ! grep -q '^PUSH' "$LOG" &&
+  ! grep -q "${t17a:0:9}: shell DEFERRED" "$Q/runner.log" && ! bash tools/phone/ship.sh status | grep -q '^GATE DEFERRED' &&
+  ok "gate can't run (2): shell ship FAILED and mailed, not deferred" || { bad "gate rc 2 deferred"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+rm -f "$HOME/gate-broken"; land shell/ui/a.tsx 'export const a = 172' "a172"; drained 30 || bad "after gate rc 2"
 : > "$LOG"; touch "$HOME/gate-down"
 land targets/android/app/Main.kt 'class Main17' "kt17"; req --note "seventeen apk"; t17b=$(tip)
 for _ in $(seq 100); do grep -q "${t17b:0:9}: apk DEFERRED" "$Q/runner.log" && break; sleep 0.2; done; sleep 2
