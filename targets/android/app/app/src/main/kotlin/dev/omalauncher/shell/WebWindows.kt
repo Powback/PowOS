@@ -1934,7 +1934,7 @@ class WebWindows(
         if (!c.isValid) return
         underRoot(t, win)
         frameAt(t, win, g)
-        cornerRadius(t, c, if (g.resizing && dragSquare()) 0f else g.radius)
+        cornerRadius(t, c, radiusOf(g))
         // Every window's z is its page order, a Linux one's as an Android one's: one parent (the root), one z each.
         t.setLayer(c, g.z)
         t.setAlpha(c, g.alpha)
@@ -2168,6 +2168,8 @@ class WebWindows(
      * A/B: `setprop debug.powos.ww_drag_round 1` keeps the radius. Real fix: rounded corners the HWC composes - a
      * corner mask drawn by home over the window (its layer is above) instead of the layer's radius.
      */
+    private fun radiusOf(g: Geo): Float = if (g.resizing && dragSquare()) 0f else g.radius
+
     private var squareAt = 0L
     private var squareOn = true
 
