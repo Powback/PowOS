@@ -24,4 +24,10 @@ class VerifyPillGlassTest {
     fun noGlassOverAWebWindowGame() {
         assertFalse(VerifyRun.glassOver(homeInFront = true, webGame = "broforce"))
     }
+
+    @Test
+    fun noGlassWhileAWebWindowIsUp() {
+        // A window check (ww-resize) measures SF's composition: the pill's blur would make it all CLIENT.
+        assertFalse(VerifyRun.glassOver(homeInFront = true, webGame = null, webWindow = true))
+    }
 }

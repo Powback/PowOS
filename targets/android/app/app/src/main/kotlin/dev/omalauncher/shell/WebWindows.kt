@@ -3172,6 +3172,9 @@ class WebWindows(
     @Volatile private var focused = -1
 
     /** [GameBoost]'s game in front among these windows (its app id), null: none. Any thread. */
+    /** A web window up (not closed or minimised): its layer is under home's buffer, so a blur over home composes it. */
+    private fun anyShown(): Boolean = runCatching { wins.values.any { !it.closed && !it.minimised } }.getOrDefault(false)
+
     private fun frontGame(): String? {
         val all = runCatching { wins.values.toList() }.getOrNull() ?: return null
         val ws = all.mapNotNull { w -> w.linux?.let { GameBoost.WebWin(w.id, it.offer.appId, it.offer.game, w.closed, w.minimised, w.linuxFull || w.immersive) } }
@@ -4654,6 +4657,9 @@ class WebWindows(
 
         /** The game whose web window the user plays now ([GameBoost.webFront]), null: none, or no home. Any thread. */
         fun frontGame(): String? = current?.frontGame()
+
+        /** Any web window up on home ([anyShown]): VerifyRun's pill drops its glass then. */
+        fun anyShown(): Boolean = current?.anyShown() == true
 
         /** [key] to the web window the user is in ([windowKey]), from outside home (PowOS's edge back): false - none. */
         fun keyToWindow(key: WindowKeys.Key): Boolean = current?.windowKey(key) == true

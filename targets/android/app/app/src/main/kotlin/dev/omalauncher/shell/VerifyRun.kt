@@ -431,7 +431,7 @@ object VerifyRun {
          */
         private fun glass() {
             if (!added) return
-            val on = glassOver(WebWindowLaunch.homeInFront, runCatching { WebWindows.frontGame() }.getOrNull())
+            val on = glassOver(WebWindowLaunch.homeInFront, runCatching { WebWindows.frontGame() }.getOrNull(), runCatching { WebWindows.anyShown() }.getOrDefault(false))
             if (on == glass) return
             glass = on
             blur.set(if (on) 1f else 0f)
@@ -464,10 +464,14 @@ object VerifyRun {
      * each frame: the 11-05 03:40 Broforce soak (docs/research/broforce-fps.md "Present path") had every HWC layer
      * CLIENT with this pill the only blur owner - surfaceflinger 28-31 % of a core, and a measurement of the
      * compositor's cost that the measuring instrument itself caused.
+     * Nor while any web window is up ([webWindow]): 11-10 09:34 ww-resize, with home's own regions off for the drag
+     * (RJ2), SF still GPU-composed 87/88 display frames, the pill the one blur owner left - every window check's
+     * composition was the pill's.
      */
     internal fun glassOver(
         homeInFront: Boolean,
         webGame: String?,
-    ): Boolean = homeInFront && webGame == null
+        webWindow: Boolean = false,
+    ): Boolean = homeInFront && webGame == null && !webWindow
     private val INK = Color.argb(222, 255, 255, 255)
 }

@@ -111,6 +111,14 @@ The board shows window checks failing by timeout or waiting days for a free phon
     The 08:4x runs were killed at 300 s: a bare `wait` for the attribution also waited for the logcat reader. Now
     `wait` names its pids, a watchdog stops the check at 275 s (window-bench's pattern) and the EXIT trap closes its
     windows (and any new window of its apps' keys) in one page call on every path.
+  - 11-10 09:34-09:38 (RJ2 live): unchanged - 87/88 .. 137/138 display frames GPU-composited. RJ2 did run: blur draws in
+    SF's RenderEngine fell from 2.9 to 1.9 regions a frame over the drag (kate edge out, 0840 vs 0934), RenderEngine
+    4.8 -> 4.1 ms a frame. The blur owner left is the verify runner's own pill (`PowOS verify status`, VerifyRun.kt,
+    glass on over home's page): it alone forces every layer CLIENT, so no window check ever measured device
+    composition. Fix: the pill drops its glass while any web window is up (`WebWindows.anyShown`, test
+    VerifyPillGlassTest). RJ2 stays for one A/B: `WWR_GLASS_PAUSE=0` keeps home's regions through the drag; the
+    record pass logs "mid-drag: blur owners ...; HWC layers CLIENT n, DEVICE m". If on vs off shows no DEVICE gain, RJ2
+    goes.
 - [x] 0.6 Each failing check on the board gets one line: real bug, check bug, or environment.
   Done 11-10: seven board tasks got a "0.6" step line; the table is in `docs/research/window-bench.md` "11-10
   baseline". None of the failures was a judged real bug: they were check bugs or the environment, most of them home's

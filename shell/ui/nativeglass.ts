@@ -543,6 +543,8 @@ let dragPaused = false;
 const DRAG_PAUSE_MAX_MS = 15_000;
 let dragTimer = 0;
 function dragPause(on: boolean) {
+  // A/B (ww-resize.sh WWR_GLASS_PAUSE=0 sets it): the drag keeps its regions, as before RJ2.
+  if (on && (globalThis as { __glassDragOff?: boolean }).__glassDragOff) return;
   clearTimeout(dragTimer);
   if (on) dragTimer = window.setTimeout(() => dragPause(false), DRAG_PAUSE_MAX_MS);
   if (dragPaused === on || !nativeGlass.value) return void (dragPaused = on);

@@ -81,6 +81,7 @@ restore() {
   case " $APPS " in *" dolphin "*) [ "${DOLPHIN_MINE:-0}" = 1 ] && us "pkill -x dolphin" ;; esac
   [ "${CALC_MINE:-0}" = 1 ] && sh_ "am force-stop $CALC"
   [ -n "${LOGPID:-}" ] && kill "$LOGPID" 2>/dev/null
+  [ "${GP:-1}" = 0 ] && CDP_TIMEOUT_S=8 ev "globalThis.__glassDragOff=false;'ok'" >/dev/null 2>&1
   true
 }
 . "$here/window-lock.sh"
@@ -113,6 +114,10 @@ for i in $(seq 1 10); do
 done
 case $full in ok*) full=${full#ok} full=${full# } ;; *) log "SKIP home's bridge: $full"; exit 3 ;; esac
 [ -z "$full" ] || { log "SKIP a full-screen window is up ($full: a game left running) - not touched"; exit 3; }
+# RJ2 A/B (nativeglass.ts dragPause): WWR_GLASS_PAUSE=0 keeps home's blur regions through the drag, as before it.
+GP=${WWR_GLASS_PAUSE:-1}
+ev "globalThis.__glassDragOff=$([ "$GP" = 0 ] && echo true || echo false);'ok'" >/dev/null
+log "RJ2 glass pause: $([ "$GP" = 0 ] && echo off || echo on) for this run"
 sleep 1
 "$A" shell "logcat -v time -s PowosWebWindows:I Andromarchy:I PowosShell:I" > "$OUT/logcat.txt" 2>/dev/null &
 LOGPID=$!
@@ -215,8 +220,12 @@ record() {
   "$A" shell "su -c 'screenrecord --bit-rate 8000000 --time-limit 3 /data/local/tmp/wwr.mp4'" >/dev/null 2>&1 &
   local rp=$!
   sleep 0.6
+  # Mid-drag (the record pass only: a dumpsys during a measured way would load SF): the layers with blur regions and how
+  # many HWC layers are CLIENT - RJ2 / the pill's glass decide it (11-10: every layer clientType=BLUR).
+  ( sleep 0.4; sh_ "dumpsys SurfaceFlinger" | awk '/^  Layer \[/{n=substr($0, index($0, "]") + 2); gsub(/ /, "_", n)} /blurRegions.size\(\)=[1-9]/{b[n]=1} /hwc: layer=.*composition=CLIENT/{c++} /hwc: layer=.*composition=DEVICE/{d++} END{o="";for(k in b)o=o" "k; print "mid-drag: blur owners:" (o==""?" none":o) "; HWC layers CLIENT " c+0 ", DEVICE " d+0}' > "$OUT/.middrag" ) &
+  local mp=$!
   sh_ "input swipe $x1 $y1 $x2 $y2 700; sleep 0.25; input swipe $x2 $y2 $x1 $y1 700"
-  wait "$rp"
+  wait "$rp" "$mp"
   "$A" exec-out "su -c 'cat /data/local/tmp/wwr.mp4; rm -f /data/local/tmp/wwr.mp4'" > "$OUT/$tag.mp4" 2>/dev/null
   [ -s "$OUT/$tag.mp4" ] || { echo "no recording"; return; }
   python3 - "$OUT/$tag.mp4" "$sl" "$st" "$sr" "$sb" "$SW" <<'PY'
@@ -329,6 +338,7 @@ for app in $APPS; do
       # The part of the body inside the window through the whole drag (it shrinks by dx, dy first), inset 24 px.
       rec=$(record "$px" "$py" $((px + dx)) $((py + dy)) "$app-$g" $((bl + 24)) $((bt + 24)) $((br + dx - 24)) $((bb + dy - 24)))
       log "$app $g record: $rec"; echo "$app $g record: $rec" >> "$OUT/summary.txt"
+      [ -s "$OUT/.middrag" ] && { log "$app $g $(cat "$OUT/.middrag")"; cat "$OUT/.middrag" | sed "s/^/$app $g /" >> "$OUT/summary.txt"; }
       case $rec in *" 0 blank"*) ;; *blank*) bad "$app $g: blank frames in the window ($rec)" ;; esac
       chk "$app $g record"
     fi
