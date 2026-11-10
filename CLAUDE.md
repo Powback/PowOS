@@ -29,8 +29,8 @@ never add a blanket bypass. Service accounts do not grant fleet administration. 
 
 Storage classifications do not create quotas or backups. No automatic cleanup or data migration is enabled.
 PowCache contains durable media, scenes and backups as well as caches; never clear the whole share. PowStorage
-is not approved for Mac mounts/exports. PowCDN publication remains planned: no CDN controller/backend is running
-as a result of this integration. Do not advertise draft CDN labels or commands as implemented.
+is not approved for Mac mounts/exports. PowCDN's draft labels/publish API were dropped; what exists
+(2026-10-30) is the shared NAS folder `/mnt/nas/cdn` + read-only `cdn.pow` (see `PowCDN/docs/PLAN.md`).
 
 Changes require project `check`, the fleet check, and regeneration of that project's unit files under
 `PowOS/units/powstation/`. Existing containers receive label changes on their normal deployment, not by bulk
