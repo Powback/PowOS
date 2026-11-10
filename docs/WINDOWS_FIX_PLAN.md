@@ -67,10 +67,13 @@ Done when: every window check gives a verdict (PASS or a named FAIL) within its 
   - Landed 11-10: `orderCheckSoon` returns unless `debug.powos.ww_order_check` is `1` (read in-process,
     `SystemProperties`); `window-bench.sh`'s switch phase turns it on for two raises and FAILs on a divergence line.
     JVM: `WebWindowsLayerOrderTest.offByDefault`. Phone before/after numbers: owed (queued after the ship).
-- [ ] 1.2 **Touch injection on its own thread.** `helper.touch` posts to `io` (`WebWindows.kt:4113`), behind task polling
+- [x] 1.2 **Touch injection on its own thread.** `helper.touch` posts to `io` (`WebWindows.kt:4113`), behind task polling
   (`reconcileNow`, `:423`), mirror retries (`:1505`) and resizes. Give input a dedicated `HandlerThread`; keep ordering
   per window.
   - Check: a JVM test that a blocked `io` task does not delay a touch line; phone: touch-to-injection latency logged.
+  - Landed 11-10: `Helper.touch` posts to its own `powos-ww-input` thread (display priority); the helper's pipe is
+    shared under the Helper's lock; a down/up that waited > 8 ms for that thread logs "touch line waited N ms".
+    JVM: `WebWindowsInputThreadTest` (control: fails with `touch` back on `io`). Phone latency: owed (queued).
 - [ ] 1.3 **Frame prediction off, then measure.** Set `geometryChannel.ahead` off (the host stops sending `w.ahead 1`).
   Compare `pf=`, rAF `dt` and missed vsyncs over `ww-glue.sh` with it on and off. Keep N1 (main-thread slides).
   - If off is equal or better: delete `sendAhead`/`sampleAhead` (`webwindows.tsx:2709-2755`) and `FrameSync.ahead`/

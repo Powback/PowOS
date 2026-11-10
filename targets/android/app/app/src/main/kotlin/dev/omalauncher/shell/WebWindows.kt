@@ -93,6 +93,13 @@ class WebWindows(
     private val wins = LinkedHashMap<Int, Win>()
     private var nextId = 1
     private val io by lazy { Handler(HandlerThread("powos-webwindows").apply { start() }.looper) }
+
+    /**
+     * Body touches' lines to the helper ([Helper.touch]) only (docs/WINDOWS_FIX_PLAN.md 1.2, C4): on [io] they queued
+     * behind task polling, mirror retries, display resizes and the order check's dump - a hitch at the start of a drag.
+     * One thread, so a window's touches stay in order; at display priority, as the frames they answer.
+     */
+    private val input by lazy { Handler(HandlerThread("powos-ww-input", android.os.Process.THREAD_PRIORITY_DISPLAY).apply { start() }.looper) }
     private val sync = FrameSync(web, "ww")
 
     private val helper = Helper()
@@ -3996,10 +4003,11 @@ class WebWindows(
     /**
      * [WebWindowsHost] in its own long-lived `su 2000` (one superuser request when it starts, as RootShell's note asks
      * of long-lived root processes), started at the first window. Its stdin closing (this process gone) releases every
-     * display it made; it dying drops every window. All calls but [read] on [io].
+     * display it made; it dying drops every window. All calls but [read] and [touch] on [io]; [touch] on [input]. The
+     * pipe ([send], [ensure], [stop]) is shared by both, under the Helper's lock: each line goes out whole.
      */
     private inner class Helper {
-        private var process: Process? = null
+        @Volatile private var process: Process? = null
         private var writer: BufferedWriter? = null
         private val waiting = HashMap<String, (Int, String?) -> Unit>()
 
@@ -4009,7 +4017,7 @@ class WebWindows(
             ensure()
         }
 
-        /** Running, or null (logged). */
+        /** Running, or null (logged). Under the lock ([send]). */
         private fun ensure(): BufferedWriter? {
             writer?.let { if (process?.isAlive == true) return it }
             val apk = context.applicationInfo.sourceDir
@@ -4051,6 +4059,7 @@ class WebWindows(
             }
         }
 
+        @Synchronized
         private fun send(line: String): Boolean {
             val w = ensure() ?: return false
             return try {
@@ -4113,8 +4122,9 @@ class WebWindows(
         }
 
         /**
-         * A body touch injected on [displayId] by the helper (in order on [io]); false when no helper runs (the caller
-         * falls back). The helper answers "log touch ..." for every down/up (and any move it couldn't inject).
+         * A body touch injected on [displayId] by the helper (in order on [input], never behind [io]'s work); false when
+         * no helper runs (the caller falls back). The helper answers "log touch ..." for every down/up (and any move it
+         * couldn't inject); a down or up queued on [input] more than [INPUT_LATE_MS] logs its wait.
          */
         fun touch(
             w: Win,
@@ -4123,7 +4133,12 @@ class WebWindows(
         ): Boolean {
             if (process?.isAlive != true) return false
             val line = "touch ${w.displayId} $action ${w.downAt} " + pointers.joinToString(" ") { (id, x, y) -> "$id,$x,$y" }
-            io.post { if (!send(line)) WindowLog.w(TAG, "input: '$line' not sent") }
+            val queued = SystemClock.uptimeMillis()
+            input.post {
+                val late = SystemClock.uptimeMillis() - queued
+                if (late > INPUT_LATE_MS && action != MotionEvent.ACTION_MOVE) WindowLog.w(TAG, "input: window ${w.id} touch line waited $late ms for the input thread")
+                if (!send(line)) WindowLog.w(TAG, "input: '$line' not sent")
+            }
             return true
         }
 
@@ -4136,9 +4151,11 @@ class WebWindows(
 
         fun stop() =
             io.post {
-                runCatching { writer?.close() }
-                writer = null
-                process = null
+                synchronized(this) {
+                    runCatching { writer?.close() }
+                    writer = null
+                    process = null
+                }
             }
     }
 
@@ -4401,6 +4418,9 @@ class WebWindows(
 
         /** A Linux web window's switcher card id: this + its window id (no Android task id gets near it). */
         const val LINUX_CARD = 1 shl 29
+
+        /** A touch line that waited longer than this for [input] is logged ([Helper.touch]). */
+        const val INPUT_LATE_MS = 8L
 
         /** The debug property that turns the layer order check ([orderCheckSoon]) on: "1". Unset = off. */
         const val ORDER_CHECK_PROP = "debug.powos.ww_order_check"
