@@ -23,8 +23,19 @@ cleanup() {
 trap cleanup EXIT
 [ -n "$(sh_ "pm path $pkg")" ] || { echo 'SKIP: coordinator must install the registered background verification companion'; exit 5; }
 [ -z "$(sh_ "pidof $pkg")" ] || { echo 'SKIP: companion already running; not adopted'; exit 5; }
-tasks_snapshot() { sh_ 'dumpsys activity recents' | grep 'Recent #[0-9].*Task{' | grep -v "$pkg" | sed -E 's/^.*Task\{[^ ]+ #([0-9]+) .*$/\1/' | sort -n; }
-tasks_before=$(tasks_snapshot)
+# Keep raw evidence as well as stable sorted ids: a failure must identify the changed task, not guess at it.
+OUT=${OUT:-$HOME/.cache/powos-verify/switcher-owned-bg-$(date +%Y%m%d-%H%M%S)}
+mkdir -p "$OUT"
+echo "switcher-owned-bg evidence: $OUT"
+task_ids() {
+  grep 'Recent #[0-9].*Task{' | grep -v "$pkg" | sed -E 's/^.*Task\{[^ ]+ #([0-9]+) .*$/\1/' | sort -n
+}
+tasks_snapshot() {
+  sh_ 'dumpsys activity recents' > "$OUT/tasks-$1.txt"
+  task_ids < "$OUT/tasks-$1.txt" > "$OUT/task-ids-$1.txt"
+}
+tasks_snapshot before
+tasks_before=$(cat "$OUT/task-ids-before.txt")
 termux_before=$(sh_ 'pidof com.termux' || true)
 sh_ "am start -W -n $pkg/.StartActivity --es nonce $nonce"
 for _ in $(seq 1 10); do
@@ -49,5 +60,13 @@ for _ in $(seq 1 10); do [ -z "$(sh_ "pidof $pkg")" ] && break; sleep 1; done
 [ -z "$(sh_ "pidof $pkg")" ] || { echo 'FAIL: Stop did not end owned workload'; exit 1; }
 [ "$(sh_ 'pidof com.termux' || true)" = "$termux_before" ] || { echo 'FAIL: Termux process identity changed during check'; exit 1; }
 [ $(( $(date +%s) - started_at )) -lt 85 ] || { echo 'FAIL: cannot distinguish Stop from lease expiry'; exit 1; }
-[ "$(tasks_snapshot)" = "$tasks_before" ] || { echo 'FAIL: pre-existing task identities changed'; exit 1; }
+tasks_snapshot after
+if [ "$(cat "$OUT/task-ids-after.txt")" != "$tasks_before" ]; then
+  echo 'task identity delta (before -> after):'
+  diff -u "$OUT/task-ids-before.txt" "$OUT/task-ids-after.txt" || true
+  echo 'before task headers:'; grep 'Recent #[0-9].*Task{' "$OUT/tasks-before.txt" || true
+  echo 'after task headers:'; grep 'Recent #[0-9].*Task{' "$OUT/tasks-after.txt" || true
+  echo "FAIL: pre-existing task identities changed (raw evidence $OUT/tasks-{before,after}.txt)"
+  exit 1
+fi
 echo 'PASS: real owned background workload listed, optimistic Stop, host disappearance and process exit; Termux unchanged'
