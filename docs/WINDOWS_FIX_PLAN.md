@@ -89,10 +89,14 @@ Done when: every window check gives a verdict (PASS or a named FAIL) within its 
     `FULL_RESTATE_MS`/`restateNow` are gone. Kept on its own timers: the immersive status bar's re-hide
     (`IMMERSIVE_REHIDE_MS`, 250/1,000/3,000 ms) - a system bar state, not a layer write. JVM:
     `WebWindowsFullScreenRaceTest.aPlacementQueuedAfterTheFullScreenEndsWithIt` (control: fails without the rewrite).
-- [ ] 1.5 **Cheaper per-frame measure.** In `entry()` (`webwindows.tsx:2266`): read `--inset-top` and `--color-surface`
+- [x] 1.5 **Cheaper per-frame measure.** In `entry()` (`webwindows.tsx:2266`): read `--inset-top` and `--color-surface`
   once per tick, not per window (`mergeOf`, `fillOf`, `layoutSize`); call `document.getAnimations()` once per tick and
   share it between `glueFrame` and the ahead code.
   - Check: gate `ww-resize-cost` and `__ww.tickMs` p95 before and after.
+  - Landed 11-10: `geometry()` reads the root's tokens once (`rootTokens`), `send()` walks `getAnimations()` once
+    (`frameAnimations`). Gate `ww-idle-tick` now counts both (3 windows, N2 on): before 3 root style reads a measure and
+    2 walks a send (control run FAILs), after 1 and 1. `ww-resize-cost` (gate box, 4 windows): tick p50/p90 0.3/0.5 ms
+    before, 0.3/0.6 ms after - within the box's noise; the phone's `tickMs` is what counts (window-bench, queued).
 - [ ] 1.6 **Measure composition with glass off** (hypothesis: the blur over windows forces GPU composition; older trace:
   360 of 361 frames GPU-composited with a window open). Record composition types from `dumpsys SurfaceFlinger` with 1, 3
   and 6 windows, glass on and off. Decide from the numbers whether blur pauses while a window moves or resizes.

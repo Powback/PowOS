@@ -2254,7 +2254,7 @@ function mergeOf(w: WebWin, el: HTMLElement): string {
   if (!w.restore || tiledOn(w.id) != null) return "-1 -1";
   const title = el.querySelector(".ww-title-label")?.getBoundingClientRect();
   const controls = el.querySelector(".ww-controls")?.getBoundingClientRect();
-  const inset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--inset-top")) || TITLE;
+  const inset = rootTokens().inset || TITLE;
   return title && controls && title.top < inset ? `${px(title.right)} ${px(controls.left)}` : "-1 -1";
 }
 
@@ -2364,7 +2364,7 @@ function layoutSize(body: HTMLElement): [number, number] {
 let fillKey = "";
 let fillHex = "000000";
 function fillOf(): string {
-  const v = getComputedStyle(document.documentElement).getPropertyValue("--color-surface").trim();
+  const v = rootTokens().surface;
   if (v === fillKey) return fillHex;
   fillKey = v;
   const ctx = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
@@ -2384,14 +2384,27 @@ function fillOf(): string {
  */
 export const windowFrame = signal(0);
 
+/**
+ * Fix plan 1.5: the root's tokens every window's entry reads ([mergeOf]'s --inset-top, [fillOf]'s --color-surface),
+ * read once per measure ([geometry]) instead of a getComputedStyle of the root per window; outside one, read fresh.
+ */
+let tokensSeen: { inset: number; surface: string } | null = null;
+function rootTokens(): { inset: number; surface: string } {
+  if (tokensSeen) return tokensSeen;
+  const cs = getComputedStyle(document.documentElement);
+  return { inset: parseFloat(cs.getPropertyValue("--inset-top")) || 0, surface: cs.getPropertyValue("--color-surface").trim() };
+}
+
 /** "<dpr> <n> <entries...>": every window the page shows, bottom first (DOM order = z-order). */
 export function geometry(): string {
   const parts: string[] = [];
   ancestorsSeen = new Map();
+  tokensSeen = rootTokens();
   try {
     for (const w of webWins.value) entriesOf(w, parts);
   } finally {
     ancestorsSeen = null;
+    tokensSeen = null;
   }
   return [devicePixelRatio, parts.length, ...parts].join(" ");
 }
@@ -2502,7 +2515,7 @@ let episode = { frames: 0, offThread: 0, by: "" };
 
 /** The compositor-run animation moving a window this frame, as "<element>.<class> <property>", or "". */
 function offThreadMover(): string {
-  for (const a of document.getAnimations()) {
+  for (const a of frameAnimations()) {
     if (a.playState !== "running") continue;
     const t = (a.effect as KeyframeEffect | null)?.target;
     if (!t || !carriesWindow(t)) continue;
@@ -2629,8 +2642,27 @@ for (const type of ["transitionend", "transitioncancel", "animationend", "animat
 for (const type of ["resize", "scroll", "pointerup", "pointercancel"] as const) addEventListener(type, markDirty, true);
 visualViewport?.addEventListener("resize", markDirty);
 
+/**
+ * Fix plan 1.5: document.getAnimations() once per [send] - [glueFrame] (N1's off-thread check) and [sendAhead] (N2)
+ * both walk it; null outside a send (read fresh).
+ */
+let animsSeen: Animation[] | null = null;
+function frameAnimations(): Animation[] {
+  return animsSeen ?? (animsSeen = document.getAnimations());
+}
+
 /** [tick]'s send: the windows' geometry as one "w.f" line tagged with frame time [ts], when it changed. */
 function send(ts: number) {
+  animsSeen = null;
+  try {
+    sendFrame(ts);
+  } finally {
+    animsSeen = null;
+  }
+}
+
+/** [send]'s body: measure, send when changed, then N2's frame ahead. */
+function sendFrame(ts: number) {
   const g = geometry();
   if (g !== lastGeometry) {
     lastGeometry = g;
@@ -2698,7 +2730,7 @@ function geometryDiff(a: string, b: string): number {
 /** The running transitions that carry a window, when ALL of them run on the main thread (registered properties). */
 function aheadAnimations(): CSSTransition[] | null {
   const out: CSSTransition[] = [];
-  for (const a of document.getAnimations()) {
+  for (const a of frameAnimations()) {
     if (a.playState !== "running") continue;
     const t = (a.effect as KeyframeEffect | null)?.target;
     if (!t || !carriesWindow(t)) continue;
