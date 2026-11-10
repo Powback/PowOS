@@ -45,9 +45,10 @@ emu_lock_acquire() {
   mkdir -p "$(dirname "$lock")"
   for i in $(seq 240); do   # 4 min max
     if mkdir "$lock" 2>/dev/null; then echo $$ > "$lock/pid"; echo "$label" > "$lock/label"; return 0; fi
-    # Dead holder's lock is reclaimed.
+    # Dead holder's lock is reclaimed. pid 1 (launchd) or junk is never a holder: a hand-made lock "1 dead-holder"
+    # (11-08 18:27) passed kill -0 and blocked the whole emulator lane from 11-08 ("could not acquire emulator lock").
     local p; p=$(cat "$lock/pid" 2>/dev/null) || p=""
-    if [ -z "$p" ] || ! kill -0 "$p" 2>/dev/null; then rm -rf "$lock" 2>/dev/null; continue; fi
+    if ! [ "$p" -gt 1 ] 2>/dev/null || ! kill -0 "$p" 2>/dev/null; then rm -rf "$lock" 2>/dev/null; continue; fi
     sleep 1
   done
   return 1
