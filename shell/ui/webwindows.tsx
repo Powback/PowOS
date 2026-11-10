@@ -3810,7 +3810,7 @@ export function holes(cut: WebWin[], at: { x: number; y: number; s: number }): R
  * HOLE_STEP px: the hole always covers the frame (page content never paints over the app), and the masks change once
  * per HOLE_STEP px of drag, not on every move (~1 move in 10 at the check's 0.4 px/ms). The strip between the frame and
  * the stepped edge shows what is under home (the wallpaper), on the moving sides, until the drag ends ([resizeEnd]
- * writes the exact mask). Not a HACK: the hole is the exact frame whenever nothing moves it.
+ * writes the exact mask). The hole is the exact frame whenever nothing moves it.
  */
 const HOLE_STEP = 48;
 function holeBox(w: WebWin): Box {

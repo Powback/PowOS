@@ -89,6 +89,17 @@ The board shows window checks failing by timeout or waiting days for a free phon
     drawGl) and names other busy processes on the FAIL line ("load:"), so the next run decides it; fix after that.
     The check also ends inside its budget (`WWR_DEADLINE_S`, 250 s: a gesture it can't finish is a "FAIL budget" line)
     and its record pass works again (ffmpeg 9 dropped `-vsync`: "record: no frames" on every run).
+  - 11-10 06:39 trace (dolphin edge out, webview category): the 16 drawGl frames over 15 ms spent 484 of 543 ms with
+    home's RenderThread asleep (3.4 ms a frame running); WebView's in-process GPU thread (`Chrome_InProcGpuThread`) ran
+    513 ms in them (~32 ms CPU a frame), Blink's `CrRendererMain` ~17 ms a frame. The `webview` atrace category gave
+    no slice inside drawGl, so the trace now adds the `track_event` source (cc/viz/gpu/blink/skia) to name the raster.
+    Fix RJ1 (`holeBox`): a live-resized window's hole steps outward by 48 px, so the full-screen masks change once per
+    48 px of drag, not every move; `resizeEnd` writes the exact mask. "ahead" (0.6 %) is not addressed yet.
+    Check speed: a gesture took ~90-107 s (0602's file times: two adb.sh pushes ~6 s each, two 7-9 MB pulls ~10 s each
+    at 2 MB/s, attribution after the KWin wait, a 30 Mbit/s mp4 pulled). Now the config goes once over stdin, traces
+    come back gzip'd over exec-out (~3 MB), attribution overlaps the wait, and each gesture logs a "time:" line.
+  - The "ww-popup-probe.py popup" lines in ww-glue were `tail -3` of KWin's whole log (ww-popup-x11's 06:28 run; the
+    probe had quit): ww-glue now reads only its own run's lines; ww-popup-x11 removes its root-owned files as root.
 - [x] 0.6 Each failing check on the board gets one line: real bug, check bug, or environment.
   Done 11-10: seven board tasks got a "0.6" step line; the table is in `docs/research/window-bench.md` "11-10
   baseline". None of the failures was a judged real bug: they were check bugs or the environment, most of them home's
