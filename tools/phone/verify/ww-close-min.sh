@@ -1,6 +1,6 @@
 #!/bin/bash
 # lanes: phone
-# needs: kwin
+# needs: kwin home
 # ww-close-min.sh: a Linux web window's minimise and close work by touch (board task
 # regression-linux-window-close-minimise-stopped-w: the close button and the dock tap stopped working). On the unfolded
 # home, Kate (or Dolphin) opened through home's launch path, then real taps (Android `input tap`, never page events):

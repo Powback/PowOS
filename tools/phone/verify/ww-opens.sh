@@ -1,6 +1,6 @@
 #!/bin/bash
 # lanes: phone
-# needs: kwin
+# needs: kwin home
 # ww-opens.sh: a Linux app's launch opens its window as a web window, never on the Plasma desktop (board task
 # linux-app-opens-no-window-exists-in-kwin-but-nev, ccf90055: powos-open-task's "desktop" brought Plasma up over home
 # and the window "stayed on the desktop", no layer). On the unfolded home, for each of Kate and Dolphin the user isn't

@@ -10,10 +10,10 @@ fail=0
 ok() { echo "  ok   $1"; }
 bad() { echo "  FAIL $1"; fail=1; }
 
-# Fake adb: pidof answers $FAKE_PID; forward succeeds.
+# Fake adb: cdp.sh's devtools lookup answers pid=$FAKE_PID (no socket list: pidof's pid is used); forward succeeds.
 cat >"$T/adb" <<'EOF'
 #!/bin/bash
-case "$1 $2" in "shell pidof"*) echo "${FAKE_PID-4242}"; exit "${FAKE_ADB_RC:-0}" ;; esac
+case "$1" in shell) echo "pid=${FAKE_PID-4242}"; exit "${FAKE_ADB_RC:-0}" ;; esac
 exit 0
 EOF
 # Fake docker: state under $FAKE_D. Logs every call.

@@ -1,12 +1,16 @@
 #!/bin/bash
 # preflight.sh <check-cmd...>: is the phone's ENVIRONMENT able to run this check? 0 = yes; else prints
-# "ENV: <reason>" and exits 5 (queue.sh: "can't run", not a FAIL). Under 3 s, one adb call.
+# "ENV: <reason>" and exits 5 (queue.sh: "can't run", not a FAIL). Under 3 s, one adb call (plus home-front.sh for
+# `needs: home`).
 # A check declares what it needs in a header line (first 20 lines of the script):
 #   # needs: kwin ship:apps ship:shell py:numpy macpy:numpy
 #   kwin         the PowOS session's kwin_wayland is running (checks that drive Linux windows)
 #   ship:KIND    the build on the phone is not older than origin's tip for the paths of KIND: apps (apps/, marker
 #                apps-live), shell (shell/, marker live); a pending ship -> "waiting for ship of KIND"
 #   py:MOD       python3 in the PowOS root imports MOD;  macpy:MOD  the Mac's python3 does
+#   home         home's page in front and visible (tools/phone/home-front.sh: the lock face dismissed, home over any
+#                leftover activity) - every check that reads or drives home's page over CDP. Not reachable: exit 3
+#                (not now, again next window), never a FAIL: a hidden page's calls hang (11-10 window-bench triage)
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd -P); phone=$(cd "$here/.." && pwd -P)
 Q=${SHIP_DIR:-$HOME/.cache/powos-ship-queue}
@@ -39,9 +43,10 @@ phone_probe() { local mods=("$@") m cmd
     cmd+=" chroot /data/powos/root /usr/bin/env python3 -c 'import $m' >/dev/null 2>&1 && echo py:$m=1 || echo py:$m=0;"; done
   perl -e 'alarm shift; exec @ARGV' 12 "$phone/adb.sh" shell "su -c \"$cmd\"" 2>/dev/null | tr -d '\r'; }
 
-main() { local needs t mods=() out rc=0 w
+main() { local needs t mods=() w
   [ "${POWOS_PREFLIGHT:-1}" = 0 ] && exit 0
   needs=$(needs_of "$@"); [ -n "$needs" ] || exit 0
+  NEEDS=$needs
   for t in $needs; do
     case "$t" in
       ship:*) w=$(ship_pending "${t#ship:}"); [ -z "$w" ] || env_fail "$w" ;;
@@ -49,11 +54,19 @@ main() { local needs t mods=() out rc=0 w
       py:*) mods+=("${t#py:}") ;;
     esac
   done
-  case " $needs " in *" kwin "*|*" py:"*) ;; *) exit 0 ;; esac
+  case " $needs " in *" kwin "*|*" py:"*) phone_needs ${mods[@]+"${mods[@]}"} ;; esac
+  # Last: it may change what is in front, so only once everything else says the check can run.
+  case " $needs " in *" home "*)
+    w=$(perl -e 'alarm shift; exec @ARGV' "${PREFLIGHT_HOME_S:-60}" "${PREFLIGHT_HOME:-$phone/home-front.sh}") || { echo "NOT NOW: ${w:-home-front.sh gave no answer}"; exit 3; }
+    echo "$w" ;;
+  esac
+  exit 0; }
+phone_needs() { local needs mods=("$@") out rc=0 t
+  needs=$NEEDS
   out=$(phone_probe ${mods[@]+"${mods[@]}"}) || rc=$?
   [ -n "$out" ] || env_fail "phone unreachable over adb (rc $rc) - the VPN or adb server is down"
   case " $needs " in *" kwin "*) echo "$out" | grep -q '^kwin=1' || env_fail "no kwin_wayland running - the PowOS session is down or stale" ;; esac
   for t in ${mods[@]+"${mods[@]}"}; do
     echo "$out" | grep -q "^py:$t=1" || env_fail "python module '$t' missing in the PowOS root"; done
-  exit 0; }
+  return 0; }
 main "$@"

@@ -35,11 +35,9 @@ trap wwc_clean EXIT
 # switcher-launch and ww-clamp spent their whole 300 s budget in ww_ready without a line of output. Short CDP
 # timeouts here, so a page that doesn't answer is a quick "not now", never the budget.
 wwc_vis() { CDP_TIMEOUT_S=15 ev "document.visibilityState"; }
-wwc_home() { local i
-  [ "$(wwc_vis)" = visible ] && return 0
-  say "home's page is $(wwc_vis | head -c 40) - bringing home to the front"
-  sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"
-  for i in 1 2 3; do sleep 1; [ "$(wwc_vis)" = visible ] && return 0; done; return 1; }
+# The shared helper (tools/phone/home-front.sh): the lock face dismissed, home the top resumed activity, its page
+# visible over CDP.
+wwc_home() { local o; o=$("$T/home-front.sh"); local rc=$?; say "$o"; return $rc; }
 wwc_start() { local s
   # The runner (LOCK_HELD=1) starts a check only in a free window it already waited for; waiting again for 2 idle
   # minutes inside the check's 300 s budget can only spend it. Run by hand, the wait stays.

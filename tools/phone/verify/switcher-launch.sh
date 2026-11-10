@@ -1,6 +1,6 @@
 #!/bin/bash
 # lanes: phone
-# needs: kwin
+# needs: kwin home
 # switcher-launch.sh: a launch closes the switcher and comes up in front (board task launch-closes-overview, 25d51cc8),
 # on the unfolded home, through home's launch path (apps.launch, a tap's call):
 #   switcher  the switcher up (KEYCODE_APP_SWITCH), Kate launched: the overview closes (.recents.open gone, the window

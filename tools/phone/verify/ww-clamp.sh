@@ -1,6 +1,6 @@
 #!/bin/bash
 # lanes: phone
-# needs: kwin
+# needs: kwin home
 # ww-clamp.sh: no window lands out of reach (board task a-window-can-land-out-of-bounds-off-the-right-ed, a0f5bff9 WC1:
 # clampPlace against the work area, not the screen). On the unfolded home, with Kate (or Dolphin) opened through home's
 # launch path, its bar must stay reachable - at least a third of the frame's width (or the work area's) of the bar
