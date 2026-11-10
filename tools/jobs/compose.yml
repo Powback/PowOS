@@ -1,0 +1,112 @@
+# PowOS's heavy arch-neutral jobs, run through tools/jobs/job.sh on the Docker context POW_JOB_CONTEXT names (default
+# pow58; the hub when it doesn't answer). Each image bakes its source (build: context = a staged copy of the checkout's
+# working state, made by job.sh), so a job needs no bind mount and runs on any x86_64 or arm64 engine.
+#   tier1  test/tier1/run-all.sh                      (tools/agents/tier1.sh)
+#   gate   the shell gate's headless-Chromium runs    (shell/dev/gate.sh: gate.mjs scenes, shots.mjs renders)
+#   apk    the Android app's assembleDebug, unsigned  (targets/android/build-app.sh; signed on the hub, keys never leave it)
+# Limits: .58 is shared with other projects - these three together stay at 24 of its 32 threads.
+# Caches: one Gradle home, one npm cache and the gate's transpile cache per machine (named volumes, shared by every run).
+name: powos-jobs
+
+x-pow:
+  schema: powos.platform/v1
+  owner: user
+  host: any
+  lifecycleAuthority: powos-container
+  services:
+    tier1:
+      role: build-job
+      lifecycle:
+        policy: job
+      access:
+        exposure: none
+        authentication: none
+    gate:
+      role: build-job
+      lifecycle:
+        policy: job
+      access:
+        exposure: none
+        authentication: none
+    apk:
+      role: build-job
+      lifecycle:
+        policy: job
+      access:
+        exposure: none
+        authentication: none
+  datasets:
+    gradle:
+      role: cache
+      cleanup: allowed
+      mounts:
+        - {service: apk, target: /root/.gradle}
+    npm:
+      role: cache
+      cleanup: allowed
+      mounts:
+        - {service: tier1, target: /root/.npm}
+    gate-tx:
+      role: cache
+      cleanup: allowed
+      mounts:
+        - {service: gate, target: /cache}
+
+services:
+  tier1:
+    build:
+      context: ${POW_JOB_SRC:?set by tools/jobs/job.sh}
+      dockerfile: .jobs/Dockerfile
+    image: powos-jobs-tier1:${POW_JOB_TAG:-local}
+    cpus: 6
+    mem_limit: 8g
+    environment:
+      SHELL: /bin/bash
+    volumes:
+      - npm:/root/.npm
+    labels:
+      io.powos.unit: powos-jobs.tier1
+      io.powos.autosleep: never
+
+  gate:
+    build:
+      context: ${POW_JOB_SRC:?set by tools/jobs/job.sh}
+      dockerfile: .jobs/Dockerfile
+    image: powos-jobs-gate:${POW_JOB_TAG:-local}
+    cpus: 10
+    mem_limit: 12g
+    shm_size: 1g
+    init: true
+    environment:
+      GATE_HOST_CPUS: "10"
+    # gate.mjs's transpile cache (by source hash, so never stale).
+    volumes:
+      - gate-tx:/cache
+    labels:
+      io.powos.unit: powos-jobs.gate
+      io.powos.autosleep: never
+
+  apk:
+    build:
+      context: ${POW_JOB_SRC:?set by tools/jobs/job.sh}
+      dockerfile: .jobs/Dockerfile
+    image: powos-jobs-apk:${POW_JOB_TAG:-local}
+    cpus: 8
+    mem_limit: 12g
+    # The version stamp (as android-app-dev's build-gradle.sh: minutes since the epoch), set by apk-job.sh.
+    environment:
+      VERSION_CODE: ${VERSION_CODE:-1}
+      VERSION_NAME: ${VERSION_NAME:-job}
+    volumes:
+      - gradle:/root/.gradle
+    labels:
+      io.powos.unit: powos-jobs.apk
+      io.powos.autosleep: never
+
+volumes:
+  gradle:
+    name: powos-jobs-gradle
+  npm:
+    name: powos-jobs-npm
+  gate-tx:
+    name: powos-jobs-gate-tx

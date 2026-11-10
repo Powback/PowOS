@@ -33,9 +33,9 @@
 #      SHOTS_THEME / SHOTS_ONLY / SHOTS_SCALE / SHOTS_PROBE / SHOTS_STRICT pass through (STRICT=1: overlapping tiles
 #      or missing glyphs fail it).
 # Exit 0: pass. 1: failed (the reasons on stdout). 2: couldn't run (no docker...). Time: ~5-10 s, the image cached.
-# GATE_HOST=58 (or any ssh host; GATE_REMOTE is its older name): the browser runs (scenes, retries, widget sweep, --shots)
-# on that box over ssh at its native arch, at most GATE_HOST_CPUS (24) cpus under nice 10, not on the Mac; report.json
-# and the PNGs come back to --shots DIR (dev/gate-remote.sh; unreachable: local, said so). GATE_ONLY=<regex>: only the browser runs so named (a case worked on alone); GATE_PROFILE=1: a scene that can (ww-resize-cost) also prints a trace's top costs; GATE_SCENE_MS: the per-scene cap. GATE_THROTTLE=N: every page's CPU slowed
+# The browser runs (scenes, retries, --shots) are the gate job of tools/jobs/compose.yml on the Docker context
+# POW_JOB_CONTEXT names (default pow58; unreachable in 5 s: the hub, said so), the composed tree baked into its image;
+# report.json and the PNGs come back to --shots DIR. The widget sweep (dev/preview.sh) still follows GATE_HOST. GATE_ONLY=<regex>: only the browser runs so named (a case worked on alone); GATE_PROFILE=1: a scene that can (ww-resize-cost) also prints a trace's top costs; GATE_SCENE_MS: the per-scene cap. GATE_THROTTLE=N: every page's CPU slowed
 # N times (a loaded Mac on demand: a case's waits must hold at 6). GATE_IMAGE overrides the Chromium image. Docker's
 # build cache and images are never pruned here.
 set -euo pipefail
@@ -293,24 +293,23 @@ if [ -n "$app" ]; then
   [ -d "$app/out/ui" ] || { echo "FAIL app: $app/out/ui isn't built (apps/build.sh)"; exit 1; }
   mounts+=(-v "$app/powos-app.json:/apps/$id/powos-app.json:ro" -v "$app/out/ui:/apps/$id/ui:ro")
 fi
-# GATE_REMOTE=<ssh host> (dev/gate-remote.sh): the browser runs (here and the widget sweep's) on that box, the Mac's CPU
-# left to the agents. The composed tree goes to its slot's dir there (reused: a warm delta), the transpile cache stays
-# there. Unreachable: local, said so.
-. "$SHELL_DIR/dev/gate-remote.sh"
-gr_init "$IMAGE"
-gr_id=${slot:+$(basename "$slot")} gr_id=${gr_id:-dir} gr_mounts=() GR_PREFIX=powos-gate-$$-
-if [ -n "$GR_HOST" ]; then
-  gr_dir=run/$gr_id
-  if gr_push "$S" "$gr_dir/shell" --exclude /node_modules &&
-     gr_push "$SHELL_DIR/dev" "$gr_dir/dev" --include gate.mjs --include agents-fleet.mjs --include search-check.js --include shots.mjs --exclude '*' &&
-     { [ -z "$app" ] || { gr_push "$app/out/ui" "$gr_dir/app/ui" && gr_push "$app/powos-app.json" "$gr_dir/app/powos-app.json"; }; }; then
-    gr_mounts=(-v "@/$gr_dir/shell:/shell:ro" -v "@/$gr_dir/dev/gate.mjs:/usr/src/app/gate.mjs:ro" -v "@/$gr_dir/dev/agents-fleet.mjs:/usr/src/app/agents-fleet.mjs:ro"
-      -v "@/$gr_dir/dev/search-check.js:/usr/src/app/search-check.js:ro" -v "@/tx:/cache")
-    [ -z "$app" ] || gr_mounts+=(-v "@/$gr_dir/app/powos-app.json:/apps/$id/powos-app.json:ro" -v "@/$gr_dir/app/ui:/apps/$id/ui:ro")
-    export GATE_REMOTE_READY=$GR_HOST GATE_REMOTE_ID=$gr_id   # dev/preview.sh: the widget sweep's browser passes too
-  else
-    echo "gate: remote $GR_HOST: pushing the tree failed - running locally"; GR_HOST=""
-  fi
+# The browser half runs as the gate job (tools/jobs/compose.yml, tools/jobs/job.sh): the composed tree, gate.mjs & co.
+# baked into an image on the Docker context POW_JOB_CONTEXT names (default pow58: .58, the Mac's CPU left to the
+# agents; not answering within 5 s -> the hub, said so). tsc and the lints above stay here (they need node_modules).
+# A job that can't build: the local container below, as before.
+. "$SHELL_DIR/../tools/jobs/job.sh"
+JOB_ON="" nerd=""
+if [ -n "${GATE_STUB_SLEEP:-}" ]; then :; else
+  nerd=$(cd "$SHELL_DIR/fonts" && cd "$(dirname "$(readlink nerd_symbols.ttf)")" 2>/dev/null && pwd -P)/nerd_symbols.ttf
+  job_init gate
+  jc=$work/job
+  mkdir -p "$jc/shell" "$jc/app" "$jc/apps" "$jc/fonts" "$jc/in"
+  (cd "$S" && COPYFILE_DISABLE=1 tar --exclude ./node_modules -cf - .) | tar -xf - -C "$jc/shell"
+  cp "$SHELL_DIR/dev/gate.mjs" "$SHELL_DIR/dev/agents-fleet.mjs" "$SHELL_DIR/dev/search-check.js" "$SHELL_DIR/dev/shots.mjs" "$jc/app/"
+  if [ -n "$app" ]; then mkdir -p "$jc/apps/$id" && cp "$app/powos-app.json" "$jc/apps/$id/" && cp -R "$app/out/ui" "$jc/apps/$id/ui"; fi
+  [ -z "$shots" ] || { [ ! -f "$nerd" ] || cp "$nerd" "$jc/fonts/"; [ -z "$wallpaper" ] || cp "$wallpaper" "$jc/in/wallpaper.jpg"; }
+  if job_build gate "$jc"; then JOB_ON=1; echo "gate: browser runs on $JOB_CTX (gate job, its cpus cap)"
+  else echo "gate: the gate job didn't build on $JOB_CTX - browser runs locally"; fi
 fi
 # The Mac's load every 2 s for gate.mjs's scene concurrency (/cache/.hostload): it re-sizes as the load moves.
 # Its own temp name: gates run side by side on one $tx, and a shared .hostload.tmp lost the mv race, which ended this
@@ -322,7 +321,7 @@ hostload_pid=$!
 # its gate was stopped. dev/preview.sh's container takes the label too (GATE_RUN_LABEL).
 # (dev/gate-containers.sh: the label, gc_kill, and the reap of a SIGKILLed gate's containers at the next gate's start.)
 kill_containers() { gc_kill; }
-trap 'kill $hostload_pid 2>/dev/null || true; kill_containers; gr_cleanup; rm -rf "$work" ${slot:+"$slot"}' EXIT
+trap 'kill $hostload_pid 2>/dev/null || true; kill_containers; job_cleanup; rm -rf "$work" ${slot:+"$slot"}' EXIT
 set +e
 # The Mac-wide build slot (tools/agents/build-slot.sh): booting the pages competes for CPU with
 # compile-check/build-pkgs/warm-builder's docker runs, and a fixed READY_MS can't tell a slow page from a
@@ -337,11 +336,9 @@ browser_run() {
   local envs=(-e READY_MS="$1" ${GATE_SCENES:+-e GATE_SCENES="$GATE_SCENES"} \
     ${GATE_SHELL_PAGES:+-e SHELL_PAGES="$GATE_SHELL_PAGES"} ${IDLE_MS:+-e IDLE_MS="$IDLE_MS"} ${IDLE_WAIT_MS:+-e IDLE_WAIT_MS="$IDLE_WAIT_MS"} ${GATE_SHARED_TX:+-e GATE_SHARED_TX="$GATE_SHARED_TX"} \
     ${2:+-e GATE_ONLY="$2"} ${3:+-e GATE_BOOTS="$3"} ${GATE_THROTTLE:+-e GATE_THROTTLE="$GATE_THROTTLE"} ${GATE_PROFILE:+-e GATE_PROFILE="$GATE_PROFILE"} ${GATE_SCENE_MS:+-e GATE_SCENE_MS="$GATE_SCENE_MS"})
-  # GATE_REMOTE (dev/gate-remote.sh): the same run on the remote, over the tree pushed there; its own load and cores
-  # size the scene concurrency (the Mac's GATE_HOST_LOAD/CPUS don't apply there).
-  if [ -n "$GR_HOST" ]; then
-    gr_run "${GR_PREFIX}r$1" --shm-size 512m $cpu "${gr_mounts[@]}" "${envs[@]}" -e GATE_HOST_CPUS="$GR_NCPUS" \
-      -w /usr/src/app --entrypoint node "$GR_IMAGE" gate.mjs
+  # The gate job: the same run in its image (its own load and cores size the scene concurrency).
+  if [ -n "$JOB_ON" ]; then
+    job_run gate "${envs[@]}" --entrypoint timeout -- "${gc_cap[@]}" node gate.mjs
     return
   fi
   ${GATE_BUILD_SLOT:+"$SHELL_DIR/../tools/agents/build-slot.sh" "gate $base" --} \
@@ -449,19 +446,17 @@ if [ -n "$shots" ]; then
   [ -f "$nerd" ] && smounts+=(-v "$nerd:/fonts/nerd_symbols.ttf:ro")
   senvs=(${SHOTS_THEME:+-e SHOTS_THEME="$SHOTS_THEME"} ${SHOTS_ONLY:+-e SHOTS_ONLY="$SHOTS_ONLY"} ${SHOTS_SCALE:+-e SHOTS_SCALE="$SHOTS_SCALE"}
     ${SHOTS_PROBE:+-e SHOTS_PROBE="$SHOTS_PROBE"} ${SHOTS_STRICT:+-e SHOTS_STRICT="$SHOTS_STRICT"})
-  # GATE_HOST: rendered on the remote into its slot's shots/, then mirrored back into DIR (report.json + the PNGs).
-  shots_remote() {
-    local m=(-v "@/$gr_dir/shell:/shell:ro" -v "@/$gr_dir/dev/shots.mjs:/usr/src/app/shots.mjs:ro"
-      -v "@/$gr_dir/dev/agents-fleet.mjs:/usr/src/app/agents-fleet.mjs:ro" -v "@/$gr_dir/shots:/out") rc=0
-    perl -e 'alarm 60; exec @ARGV' "${GR_SSH[@]}" "$GR_HOST" "rm -rf $GR_ROOT/$gr_dir/shots && mkdir -p $GR_ROOT/$gr_dir/shots" || return 2
-    if [ -n "$wallpaper" ]; then gr_push "$wallpaper" "$gr_dir/wallpaper.jpg" || return 2; m+=(-v "@/$gr_dir/wallpaper.jpg:/wallpaper.jpg:ro"); fi
-    if [ -f "$nerd" ]; then gr_push "$nerd" "$gr_dir/nerd_symbols.ttf" || return 2; m+=(-v "@/$gr_dir/nerd_symbols.ttf:/fonts/nerd_symbols.ttf:ro"); fi
-    gr_run "${GR_PREFIX}shots" --shm-size 512m $cpu "${m[@]}" "${senvs[@]}" -w /usr/src/app --entrypoint node "$GR_IMAGE" shots.mjs || rc=$?
-    # Not mirrored (--delete): DIR may hold other files, as with a local run.
-    rsync -a -e "${GR_SSH[*]}" "$GR_HOST:$GR_ROOT/$gr_dir/shots/" "$shots/" || { echo "     shots: copying the renders back from $GR_HOST failed"; return 2; }
+  # The gate job: rendered into its container's /out, copied back into DIR (report.json + the PNGs), container removed.
+  shots_job() {
+    local rc=0 c="$JOB_PROJECT-shots"
+    job_dc run --no-deps -T --name "$c" ${senvs[@]+"${senvs[@]}"} --entrypoint timeout gate "${gc_cap[@]}" node shots.mjs < /dev/null 2>&1 |
+      grep -v -E '^ *(Container|Network|Volume) '
+    rc=${PIPESTATUS[0]}
+    job_docker cp "$c:/out/." "$shots/" >/dev/null || { echo "     shots: copying the renders back from $JOB_CTX failed"; rc=2; }
+    job_docker rm -f "$c" >/dev/null 2>&1 || true
     return $rc
   }
-  if [ -n "$GR_HOST" ]; then shots_remote
+  if [ -n "$JOB_ON" ]; then shots_job
   else docker run --rm "${gc_flags[@]}" --platform "$PLATFORM" --shm-size 512m $cpu "${smounts[@]}" "${senvs[@]}" -w /usr/src/app --entrypoint timeout "$IMAGE" "${gc_cap[@]}" node shots.mjs
   fi ||
     { echo "     shots: the render run failed$([ "${SHOTS_STRICT:-}" = 1 ] && echo " (strict: overlapping tiles or missing glyphs, report.json)")"

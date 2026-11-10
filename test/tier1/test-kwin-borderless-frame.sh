@@ -34,7 +34,7 @@ grep -q 'inline bool drawsOwnFrame' "$hdr" 2>/dev/null && ok "anland_task_policy
 
 cxx=$(command -v c++ || command -v g++ || command -v clang++ || true)
 if [ -z "$cxx" ]; then
-  bad "no C++ compiler to build task-policy-test.cpp (tools/agents/Dockerfile.tier1 installs g++)"
+  bad "no C++ compiler to build task-policy-test.cpp (tools/jobs/tier1.Dockerfile installs g++)"
 else
   if out=$("$cxx" -std=c++17 -Wall -Wextra -Werror -I"$T/tree/src/backends/anland" -o "$T/t" "$pk/test/task-policy-test.cpp" 2>&1); then
     out=$("$T/t" 2>&1) && ok "task-policy-test: $out" || bad "task-policy-test failed" "$out"

@@ -142,6 +142,17 @@ column names the file to load; `.claude/skills/<skill>/SKILL.md` has a `## <old-
 
 ## Testing
 - `tools/agents/tier1.sh [test…]` runs tier-1 in the right container; `tier1.sh` alone runs the whole suite, `tier1.sh test-land.sh` runs just one.
+- **Heavy jobs run on .58 (`tools/jobs/`).** tier-1 (`tools/agents/tier1.sh`), the shell gate's browser runs
+  (`shell/dev/gate.sh`: gate.mjs scenes + `--shots`) and the APK's Gradle build (`targets/android/build-app.sh` via
+  `targets/android/tools/apk-job.sh`) are Compose services in `tools/jobs/compose.yml` (x-pow lifecycle `job`, cpus +
+  mem_limit, together 24 of .58's 32 threads; named volumes `powos-jobs-gradle`/`-npm`/`-gate-tx` per machine). Each
+  image bakes the checkout's working state (tracked + modified + untracked-not-ignored; `tools/jobs/job.sh`), so no
+  bind mounts: `docker --context <ctx> compose` builds and runs it there and streams the output; the exit code is the
+  job's; artefacts come back with `docker compose cp`. Machine = `POW_JOB_CONTEXT` (a Docker context; default
+  `pow58`, read only in `tools/jobs/job.sh`); not answering in 5 s -> the hub, printed as `job: runs on <ctx>`.
+  `POW_JOB_CONTEXT=colima` forces the hub (the APK then uses the warm builder). The APK is signed on the hub only
+  (the `android-keystores` key never leaves it). Inside the tier1 job there is no docker socket: the complexity
+  detekt/clippy, loopback-unix and publish-repo tests SKIP.
 - Run single tests with `python3 test/tier1/x.py` or `bash test/tier1/x.sh` when they don't need bash 4.
 - Phone checks only via `tools/phone/verify/queue.sh`, with the emulator first (`--dev emu`).
 - Colima's docker socket to mount into containers is `/var/run/docker.sock` (inside the VM); `~/.colima/default/docker.sock` is a Mac-side relay and can't be mounted.

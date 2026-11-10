@@ -63,16 +63,26 @@ if [ "${POWOS_SKIP_APPS:-}" != 1 ]; then
   done
 fi
 AAD=${ANDROID_APP_DEV:-$HOME/Projects/android-app-dev}
-# android-app-dev's builder mounts only ~/Projects (as /Projects): a checkout elsewhere (~/pw) can't build there.
-case "$HERE/" in "$HOME/Projects/"*) ;; *)
-  echo "build-app: refusing - $HERE is outside ~/Projects, the only dir the APK builder mounts; build from a checkout under ~/Projects" >&2; exit 5 ;; esac
-want=/Projects${HERE#$HOME/Projects}/app
-link=$AAD/projects/powos
-[ "$(readlink "$link" 2>/dev/null)" = "$want" ] || { rm -f "$link"; ln -s "$want" "$link"; }
 # The APK's shell stamp (assets/shell/shell-build.txt via build.gradle.kts copyShell): "<commit time> <commit>", which
 # the app compares with the shipped layer's (shell/push.sh: files/shell-layer.txt) to serve the NEWER shell (ShellSource).
 git -C "$ROOT" log -1 --format='%ct %H' HEAD > "$HERE/app/app/shell-build.txt"
 stamp=$(mktemp)
+# The apk job (tools/jobs/compose.yml, tools/jobs/job.sh): Gradle runs on the Docker context POW_JOB_CONTEXT names
+# (default pow58: .58, 32 threads, not the Mac's loaded VM), over this checkout's app + shell + staged apps baked into
+# the job's image; tools/apk-job.sh brings the APK back and signs it HERE with the shared debug key (android-keystores:
+# the key never leaves the hub) into output/ as before (powos.apk + .ver + .pkg).
+# On the hub itself (POW_JOB_CONTEXT=colima, or .58 not answering) the warm builder below builds it, as before.
+. "$ROOT/tools/jobs/job.sh"
+job_context
+if [ "$JOB_CTX" != "$(docker context show 2>/dev/null)" ] && [ "${POWOS_COLD_BUILD:-}" != 1 ]; then
+  "$HERE/tools/apk-job.sh" "$AAD/output" || { echo "build-app: the apk job failed - see above" >&2; exit 1; }
+else
+# android-app-dev's builder mounts only ~/Projects (as /Projects): a checkout elsewhere (~/pw) can't build there.
+case "$HERE/" in "$HOME/Projects/"*) ;; *)
+  echo "build-app: refusing - $HERE is outside ~/Projects, the only dir the hub's APK builder mounts; build from a checkout under ~/Projects (or on .58: POW_JOB_CONTEXT=pow58)" >&2; exit 5 ;; esac
+want=/Projects${HERE#$HOME/Projects}/app
+link=$AAD/projects/powos
+[ "$(readlink "$link" 2>/dev/null)" = "$want" ] || { rm -f "$link"; ln -s "$want" "$link"; }
 # The warm builder (tools/warm-builder.sh, unit gradle-warm-mac: a long-lived Gradle daemon - no cold JVM, Gradle and
 # Kotlin daemon per APK) when it starts and answers; android-app-dev's cold `make build` otherwise, or with
 # POWOS_COLD_BUILD=1. Both publish output/powos.apk + .ver + .pkg the same way.
@@ -82,6 +92,7 @@ if [ "${POWOS_COLD_BUILD:-}" != 1 ] && "$HERE/tools/warm-builder.sh" start >/dev
 else
   echo "build-app: cold build (android-app-dev make build)"
   make -C "$AAD" build PROJECT=powos
+fi
 fi
 # HACK: android-app-dev's `make build` exits 0 when Gradle fails and leaves the previous output/powos.apk (seen
 # 2026-10-16: compile errors, "published" the old version code). Real fix: propagate the builder's exit status in
