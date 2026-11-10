@@ -57,10 +57,10 @@ focus() { sh_ "dumpsys window | grep -m1 mCurrentFocus" | sed 's/^ *//'; }
 
 # KWin's view (a script; its print() lands in KWin's stdout, /run/powos-app/hyprland.log): one line per application
 # window "PMW|caption|class|onCurrentDesktop|noBorder|x,y,w,h|maximized|popup|deleted" and "PMC|class|x,y,w,h" (its
-# client area), then "PMS|scale|current desktop".
+# client area), then "PMS|scale|current desktop|output w,h (logical)|active window caption/class".
 KJS='var cur = workspace.currentDesktop, scr = workspace.activeScreen, tag = "PMQ-" + Date.now();
 var sc = scr ? (2268 / scr.geometry.width) : 0;
-print("PMS|" + sc.toFixed(3) + "|" + (cur ? cur.name : "?"));
+print("PMS|" + sc.toFixed(3) + "|" + (cur ? cur.name : "?") + "|" + (scr ? scr.geometry.width + "," + scr.geometry.height : "?") + "|" + (workspace.activeWindow ? workspace.activeWindow.caption + "/" + workspace.activeWindow.resourceClass : "none"));
 workspace.windowList().forEach(function (w) {
   if (!(w.normalWindow || w.popupWindow || w.dialog) || w.specialWindow) return;
   var g = w.frameGeometry, m = workspace.clientArea(KWin.MaximizeArea, w);
@@ -89,8 +89,18 @@ tail -n +$((n + 1)) /run/powos-app/hyprland.log | grep -a -oE "PM[SWC]\|.*"' | a
 # matched and every mode said "no Kate window in KWin" while Kate's window was in the list (2026-10-24, kwin 3.31).
 win() { grep -aE "^PMW\|[^|]*\|([^|]*\.)?$2\|" "$OUT/kwin-$1.txt" | grep -avE "\|true\|[^|]*$" | grep -avE "\|true\|false\|[^|]*$" | head -1; }
 field() { cut -d'|' -f"$2" <<<"$1"; }
-SCALE=1
+SCALE=1 TOP=0
 px() { awk -v v="$1" -v s="$SCALE" 'BEGIN{printf "%d", v * s}'; }
+# A KWin y on the screen: Plasma's desktop surface starts below Android's status bar (its output is 2268x2314 in a
+# 2268x2440 screen, bottom-aligned: TOP = 126 px), so y * scale alone landed 126 px (56 logical) too high - the
+# title-bar drag at Kate's y+14 hit the desktop's widget above Kate, which took KWin's activation from Kate, and the
+# maximize shortcut that follows went to the desktop (2026-11-10 04:12, board plasma-down; also 11-08).
+py() { echo $(( $(px "$1") + TOP )); }
+desk_top() {  # $1 a kwin_q tag -> TOP (physical px above the desktop's output)
+  local sh oh; sh=$(sh_ "wm size" | tail -1 | sed 's/.*x//'); oh=$(grep -a '^PMS|' "$OUT/kwin-$1.txt" | cut -d'|' -f4 | cut -d, -f2)
+  TOP=0; [ -n "$sh" ] && [ -n "$oh" ] && TOP=$(awk -v s="$sh" -v h="$oh" -v k="$SCALE" 'BEGIN{t=s-int(h*k+0.5); printf "%d", t>0?t:0}')
+}
+active() { grep -a '^PMS|' "$OUT/kwin-$1.txt" | cut -d'|' -f5; }
 
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
@@ -128,32 +138,32 @@ mode_plasma() {
   open_plasma || return
   before=$(tasks); in_session kate
   wait_win kate kate || { fail "no Kate window in KWin within 25 s"; return; }
-  SCALE=$(grep -a '^PMS|' "$OUT/kwin-kate.txt" | cut -d'|' -f2); log "KWin scale $SCALE; Kate: $W"
+  SCALE=$(grep -a '^PMS|' "$OUT/kwin-kate.txt" | cut -d'|' -f2); desk_top kate; log "KWin scale $SCALE, desktop top $TOP px; Kate: $W"
   after=$(tasks); [ "$before" = "$after" ] && pass "Kate opened in Plasma is no Android window task" || fail "Kate opened in Plasma became a window task ($(comm -13 <(echo "$before") <(echo "$after") | tr '\n' ' '))"
   [ "$(field "$W" 4)" = true ] && pass "Kate is on Plasma's current desktop" || fail "Kate isn't on Plasma's current desktop: $W"
   [ "$(field "$W" 5)" = false ] && pass "Kate has KDE's decoration (noBorder false)" || fail "Kate has no KDE decoration: $W"
   IFS=, read -r x y w h <<<"$(field "$W" 6)"
-  newdoc "$(px $((x + w / 2)))" "$(px $((y + h / 2)))"; log "Kate's new document: '$c0'"
+  newdoc "$(px $((x + w / 2)))" "$(py $((y + h / 2)))"; log "Kate's new document: '$c0'"
   "$T/shot.sh" "$OUT/plasma-kate.png" >/dev/null 2>&1
-  typed "$(px $((x + w / 2)))" "$(px $((y + h / 2)))"; chk type
+  typed "$(px $((x + w / 2)))" "$(py $((y + h / 2)))"; chk type
   kwin_q typed >/dev/null; W=$(win typed kate)
   [ "$(field "$W" 2)" != "$c0" ] && pass "a tap + keys reached Kate (caption '$c0' -> '$(field "$W" 2)')" || fail "a tap + keys changed nothing in Kate's caption ('$c0')"
   IFS=, read -r x y w h <<<"$(field "$W" 6)"
-  tx=$(px $((x + w / 2))); ty=$(px $((y + 14)))
+  tx=$(px $((x + w / 2))); ty=$(py $((y + 14)))
   sh_ "input swipe $tx $ty $((tx + $(px 60))) $((ty + $(px 50))) 700"; sleep 2; chk move
-  kwin_q moved >/dev/null; W=$(win moved kate)
+  kwin_q moved >/dev/null; W=$(win moved kate); log "active after the drag: $(active moved)"
   [ "$(field "$W" 6)" != "$x,$y,$w,$h" ] && pass "a title-bar drag moved Kate ($x,$y -> $(field "$W" 6))" || fail "a title-bar drag didn't move Kate ($(field "$W" 6))"
   IFS=, read -r x y w h <<<"$(field "$W" 6)"
-  tx=$(px $((x + w / 2))); ty=$(px $((y + 14)))
+  tx=$(px $((x + w / 2))); ty=$(py $((y + 14)))
   # KWin's maximize window operation (performWindowOperation, the one the title bar's button / double tap run and
   # kwin 0014's platform hook sees); a double tap from `input` is two JVM starts apart, slower than a double click.
   us 'qdbus6 org.kde.kglobalaccel /component/kwin org.kde.kglobalaccel.Component.invokeShortcut "Window Maximize"' >/dev/null; sleep 2; chk maximize
   kwin_q max >/dev/null; W=$(win max kate)
-  [ "$(field "$W" 7)" = true ] && pass "KWin's maximize maximized Kate the KDE way ($(field "$W" 6))" || fail "KWin's maximize didn't maximize Kate in Plasma: $W"
+  [ "$(field "$W" 7)" = true ] && pass "KWin's maximize maximized Kate the KDE way ($(field "$W" 6))" || fail "KWin's maximize didn't maximize Kate in Plasma (active: $(active max)): $W"
   after=$(tasks); [ "$before" = "$after" ] && pass "maximized, Kate is still no Android task" || fail "maximize sent Kate out into an Android task"
   "$T/shot.sh" "$OUT/plasma-kate-max.png" >/dev/null 2>&1
   IFS=, read -r x y w h <<<"$(field "$W" 6)"
-  sh_ "input tap $(px $((x + w / 2))) $(px $((y + h / 2)))"; sleep 0.5; sh_ "input keyevent KEYCODE_MENU"; sleep 1.5; chk popup
+  sh_ "input tap $(px $((x + w / 2))) $(py $((y + h / 2)))"; sleep 0.5; sh_ "input keyevent KEYCODE_MENU"; sleep 1.5; chk popup
   kwin_q popup >/dev/null
   local p; p=$(grep -a '^PMW|' "$OUT/kwin-popup.txt" | awk -F'|' '$8=="true"' | head -1)
   if [ -z "$p" ]; then log "INFO no popup came up for the Menu key (nothing to measure)"
