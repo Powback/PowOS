@@ -2,7 +2,7 @@
   "id": "voice-tts",
   "name": "Voice TTS (Kokoro)",
   "kind": "container",
-  "host": "desktop",
+  "host": "gpu195",
   "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 nvidia-open, 2x RTX 3090)",
   "owner": "system:voice",
   "purpose": "the voice path's text to speech: Kokoro-FastAPI GPU build, voice bf_emma, resident; OpenAI /v1/audio/speech on :8880",

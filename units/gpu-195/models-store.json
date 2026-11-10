@@ -2,7 +2,7 @@
   "id": "models-store",
   "name": "Model store",
   "kind": "scratch",
-  "host": "desktop",
+  "host": "gpu195",
   "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 nvidia-open, 2x RTX 3090)",
   "owner": "system:voice",
   "purpose": "the box's one model store on the NVMe: /var/lib/powos/models/hf = the HF cache shared by vLLM and faster-whisper (and the VoiceAgent backend's sentence-transformers/speechbrain), torch = torch.hub (Silero VAD), vllm = vLLM's compile cache. One copy of each model; its users are voice-*, stt-batch and llm-pool",

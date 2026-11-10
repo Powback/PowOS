@@ -47,7 +47,8 @@ A manifest:
   owner: app:<id> | agent:<role> | user | system:<what installed it>.
 
 Hosts: phone (PowOS's root), phone-android (Android's side: Magisk, /data/powos, /data/local/tmp), colima (the Docker
-VM), mac, powstation (the Docker containers, checked where docker runs), desktop. POWOS_UNITS_HOST overrides it,
+VM), mac, powstation (the Docker containers, checked where docker runs), gpu195 (192.168.50.195), pow58
+(192.168.50.58), desktop (any other PowOS desktop). POWOS_UNITS_HOST overrides it,
 POWOS_UNITS_DIR the directory. Docs: config/ai/context/capabilities.md (Units).
 """
 import fnmatch
@@ -109,10 +110,27 @@ def detect_host():
         return "phone"
     if socket.gethostname().startswith("colima"):
         return "colima"
-    return plat or "desktop"
+    return plat or FLEET_IPS.get(lan_ip(), "desktop")
 
 
-HOSTS = ("phone", "phone-android", "mac", "colima", "powstation", "desktop")
+# Fleet servers by LAN address: both run PowOS desktop images with generic hostnames (bazzite, powos) and no
+# /etc/powos/platform, so they used to share the host id "desktop" and collide.
+# HACK: identity from the LAN IP (router DHCP reservation); the real fix is a host id written by each host's install
+# (hosts/<host>/install.sh -> /etc/powos/host-id; /etc/powos/platform means phone/desktop to other tools).
+FLEET_IPS = {"192.168.50.195": "gpu195", "192.168.50.58": "pow58"}
+
+
+def lan_ip():
+    """This machine's source address toward the LAN router; a UDP connect sends no packet."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("192.168.50.1", 9))
+            return s.getsockname()[0]
+    except OSError:
+        return ""
+
+
+HOSTS = ("phone", "phone-android", "mac", "colima", "powstation", "gpu195", "pow58", "desktop")
 HOST = detect_host()
 DIRS = {"phone-android": "/data/powos/units.d", "mac": os.path.expanduser("~/.config/powos/units.d")}
 UNITS_DIR = os.environ.get("POWOS_UNITS_DIR") or DIRS.get(HOST, "/etc/powos/units.d")
@@ -139,6 +157,7 @@ WATCH = {
             ("~/.claude/hooks", 1), ("~/.local/state/powos", 1), ("~/.local/bin", 1)],
     "desktop": [("/usr/local/bin", 1), ("/opt", 1), ("/etc/powos", 1), ("/etc/systemd/system", 1)],
 }
+WATCH["gpu195"] = WATCH["pow58"] = WATCH["desktop"]
 # Generated or managed in place by their owner; never drift.
 IGNORE = ("/etc/powos/units.d", "*/__pycache__", "*.pid", "*.lock", "*/.DS_Store", "/var/lib/powos/units*")
 
@@ -163,6 +182,8 @@ def norm(u, src=""):
     u.setdefault("name", u.get("id", "?"))
     u.setdefault("kind", "system")
     u.setdefault("host", HOST)
+    if u["host"] == "desktop" and HOST in FLEET_IPS.values():
+        u["host"] = HOST  # registered before the gpu195/pow58 split; reinstalls write the new id
     if u["host"] not in HOSTS:  # free text ("Colima VM (192.168.50.100)"): the host whose directory holds it
         u["hostNote"], u["host"] = u["host"], HOST
     if isinstance(u.get("owner"), dict):
@@ -545,7 +566,7 @@ def in_scope(p, host):
                 and not p["cmd"].startswith(("/System/", "/usr/libexec/", "/usr/sbin/", "/usr/bin/", "/Library/Apple",
                                              "/Applications/", "/Library/", "/opt/homebrew/Caskroom", "/private/"))
                 and ".app/Contents/" not in p["cmd"].split()[0])
-    if host in ("colima", "desktop"):
+    if host in ("colima", "desktop", "gpu195", "pow58"):
         cg = p["cg"]
         return not re.search(r"docker[-/]|containerd|/libpod", cg) and p["uid"] >= 0
     return False

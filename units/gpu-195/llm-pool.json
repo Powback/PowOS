@@ -2,7 +2,7 @@
   "id": "llm-pool",
   "name": "General LLM pool (llama-swap + vLLM, llm-gpu.pow)",
   "kind": "container",
-  "host": "desktop",
+  "host": "gpu195",
   "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 nvidia-open, 2x RTX 3090)",
   "owner": "system:llm",
   "purpose": "the general model pool on GPU1: llama-swap on :9292 (http://llm-gpu.pow via Traefik on .100, PowStation config/traefik/dynamic/llm-gpu.yml) starts vLLM per model on first request and unloads it after 10 idle minutes; models general (Qwen/Qwen3-14B-AWQ, 32k, tools, thinking; general-nothink = thinking off), vision (Qwen/Qwen2.5-VL-7B-Instruct-AWQ, 16k), embed (BAAI/bge-m3), ocr (PaddlePaddle/PaddleOCR-VL-1.6, 0.12, for PowScan); embed or ocr may sit beside general or vision, never general with vision; OpenAI API (/v1/chat/completions, /v1/embeddings, /v1/models); phase 4: the router's general/vision/embed",

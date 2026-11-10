@@ -27,7 +27,8 @@ The wrapper calls the same adapter as `PowOS/bin/pow-compose` and `powos platfor
 it does not start containers. `status` adds live container state and reports an error if the runtime is unavailable.
 `up/start/restart/run/create/unpause/scale` validate the contract, target host and LAN hostname ownership before
 invoking the engine. `POW_COMPOSE_FORCE=1` bypasses only DNS collisions, never contract or target-host errors.
-Read-only engine commands such as `logs`, and recovery commands such as `stop`, pass through unchanged.
+Read-only engine commands such as `logs`, and recovery commands such as `stop`, pass through unchanged, on the
+Docker context of the host the project is placed on (see *Placement on other machines*).
 
 Global Compose options precede the command and are included in both preflight and execution:
 
@@ -158,30 +159,54 @@ personalized responses. Do not create a PowAuth bypass solely to make an integra
 
 ## Host identity and offline operation
 
-The PowStation wrapper supplies `POW_PLATFORM_HOST=powstation` and `POW_SELF_IP=192.168.50.100`, the bridged VM's
-service address. The Mac is `.99`. Other devices configure their own engine/identity in
+The PowStation wrapper supplies `POW_PLATFORM_HOST=powstation` and `POW_SELF_IP=192.168.50.100`, the Colima VM's
+service address (vzNAT since 2026-11-09; the Mac proxy-ARPs `.100` to the VM). The Mac is `.99`. Other devices configure their own engine/identity in
 `~/.config/pow-compose.conf` or `/etc/pow-compose.conf` (system config wins):
 
 ```sh
-POW_PLATFORM_HOST=desktop
+POW_PLATFORM_HOST=pow58
 POW_SELF_IP=192.168.50.58
 POW_COMPOSE_ENGINE='podman-compose'
 ```
 
 These are explicit target-context declarations, not automatic verification of the selected engine's physical
-machine. Set them correctly when using remote Docker contexts. Contract `host` must match for starts and
-registration. Register units on the host whose registry owns the workloads; the Mac owns PowStation's Docker
+machine. Contract `host` must equal `POW_PLATFORM_HOST` or be a mapped fleet host (below) for starts;
+registration needs it to equal `POW_PLATFORM_HOST`. Fleet host ids: `powstation` (hub), `pow58` (.58),
+`gpu195` (gpu-195); `desktop` means any other PowOS desktop, never one of these two. Register units on the host
+whose registry owns the workloads; the Mac owns PowStation's Docker
 inventory. Do not install PowStation service manifests into a phone's registry.
 
 Essential boot files, runtime images, network configuration, recovery access, trust keys and selected offline
 assets must be local. DNS, ingress, PowAuth and PowCDN must start without fetching their own prerequisites
 from PowCDN. A central inventory outage must not stop already-running local workloads.
 
+## Placement on other machines
+
+Pinned placement: a project whose `x-pow.host` is another fleet host runs there through a stock Docker context
+(`docker --context <ctx> compose ...`); no daemon, inventory or new transport. The table lives in the adapter
+(`HOST_CONTEXTS`: `pow58` -> `pow58`, `gpu195` -> `gpu195`) and `POW_HOST_CONTEXTS="host=context,..."` in
+`pow-compose.conf` overrides or extends it. The contexts are on the Mac (`docker context ls`): `pow58` and `gpu195`
+are rootless Podman over SSH. `build:` contexts are uploaded and built on the target; `cpus`/`mem_limit` are
+enforced in the container cgroup there. `check` adds, for a project placed on another host:
+
+- No bind mounts: the target cannot see hub paths (`/Users/...`, no NAS mount there yet). Bake source in via
+  `build:`; cache/scratch are named volumes on the target.
+- `state`, `secret-state` and `durable` datasets must declare `host: <target>`: placement metadata never moves
+  data, so undeclared authoritative data would silently start empty. Move it first, then declare it.
+- `register` runs on the target itself (or commit `units --output` into `units/`).
+
+Every service with `lifecycle.policy: job` must declare `cpus` and `mem_limit` (or `deploy.resources.limits`),
+on every host: they are the job's resource request. .58 also runs other projects' work: keep its jobs at <= 24 CPUs
+in total. gpu-195 is the GPU host; keep CPU jobs off it.
+
+Jobs: dynamic placement across hub/.58/gpu-195 by a fleet scheduler is planned; this section gets filled when it
+lands. Until then pinned placement above is the only path, and the job limits are what the scheduler will request.
+
 ## PowCDN and the storage boundary
 
-PowCDN remains unimplemented. Publication notes identify candidates; the checker rejects `powcdn.enable=true`
-until there is a real controller. No CDN host, object store, NAS export, asset migration or cache allocation was
-created by this integration. Follow `../../PowCDN/docs/ROADMAP.md` for the storage/backend validation work.
+PowCDN exists since 2026-10-30 as the NAS folder `/mnt/nas/cdn/<project>/` (same path on the Mac and in every
+container) plus read-only `http://cdn.pow/` (LAN/VPN); see `../PowCDN/docs/PLAN.md`. There is no publish
+controller: the checker still rejects `powcdn.enable=true`, and a `/mnt/nas/cdn` mount as a `state` dataset.
 
 The NAS share named PowCache contains durable content and backups as well as caches. Never clear the whole
 share. PowStorage remains off limits for Mac mounts/exports. Local scratch, Colima free space, NAS capacity

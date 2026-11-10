@@ -635,6 +635,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `apps/powos-progress/ui/lib/progress.ts:55` | Progress sorts board tasks into lanes by status alone, not the AI page's full grouping (agent liveness, phone checks, the user's verdicts). | The grouping moved into a module both read, or the board publishing each task's lane as a column. |
 | `lib/apps/powos-progress-cli:272` | `powos progress` off the phone runs on the phone over powos-vadb: the Progress module lives on the phone only (C4/C7). | The hub's copy of the module and the M2 subscription. |
 | `test/tier1/test-publish-repo.sh:20` | The test's inner arm64 container runs as nobody: on an SELinux host (.58) repo-add's bsdtar archives each file's security.selinux into powos.db and, as root, fails to restore it on the next repo-add. | repo-merge.sh drops xattrs itself if publishing ever runs on an SELinux host. |
+| `lib/apps/powos-units:118` | gpu-195 and .58 run PowOS desktop images with generic hostnames and no /etc/powos/platform, so powos-units tells them apart (host ids gpu195/pow58) by their LAN IP. | Each host's install writes its fleet host id to /etc/powos/host-id and powos-units reads that first. |
 <!-- hack-registry:end -->
 
 ### 4.1 Device deploys and their undo

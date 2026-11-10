@@ -2,7 +2,7 @@
   "id": "llama-swap-58",
   "name": "llama-swap + vLLM coder-32b (.58 RTX 5090)",
   "kind": "service",
-  "host": "desktop",
+  "host": "pow58",
   "hostNote": "the 5090 box (192.168.50.58, Bazzite, RTX 5090 32 GB)",
   "owner": "system:llm",
   "purpose": "the big-model host: llama-swap v240 on :9292 starts vLLM Qwen/Qwen3-32B-AWQ (64k context, fp8 KV, YaRN x2, hermes tools, qwen3 reasoning) as qwen-32b-vllm / coder-32b (coder-32b-nothink through the router) on first request, through a VRAM gate (refuses below 30000 MiB free), and stops it after 300 idle seconds; the router llm.pow (PowStation config/litellm/config.yaml) serves it as coder-32b and falls back to gpu-195's general when it refuses or the box is off. Config, gate script and unit file live in the local-llm-stack checkout (powos/), deployed by its powos/install.sh",

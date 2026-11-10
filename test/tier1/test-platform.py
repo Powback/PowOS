@@ -62,6 +62,10 @@ class ContractTests(unittest.TestCase):
         model = fixture(); model["x-pow"]["datasets"]["data"]["role"] = "borrowed-state"
         self.assertIn("read-only", " ".join(p.inspect_model(model)["errors"]))
 
+    def test_cdn_share_is_not_state(self):
+        model = fixture(); model["services"]["web"]["volumes"][0].update(type="bind", source="/mnt/nas/cdn/demo/db")
+        self.assertIn("never state", " ".join(p.inspect_model(model)["errors"]))
+
     def test_state_never_evicted(self):
         model = fixture(); model["x-pow"]["datasets"]["data"]["cleanup"] = "lru"
         self.assertIn("cleanup=never", " ".join(p.inspect_model(model)["errors"]))
@@ -169,14 +173,14 @@ class CliTests(unittest.TestCase):
 
     def test_wrong_host_blocks_deployment(self):
         with patch.dict(os.environ, {"POW_PLATFORM_HOST": "phone"}), patch.object(p, "load_model", return_value=fixture()), patch.object(p.subprocess, "call") as call:
-            with self.assertRaisesRegex(p.Failure, "target host mismatch"):
+            with self.assertRaisesRegex(p.Failure, "neither POW_PLATFORM_HOST nor a known fleet host"):
                 p.main(["up", "-d"])
             call.assert_not_called()
 
-    def test_readonly_passes_without_render(self):
-        with patch.object(p, "load_model") as load_model, patch.object(p.subprocess, "call", return_value=0):
+    def test_passthrough_without_contract_stays_local(self):
+        with patch.object(p, "load_model", side_effect=p.Failure("no file")), patch.object(p.subprocess, "call", return_value=0) as call:
             self.assertEqual(p.main(["logs", "--tail", "10"]), 0)
-            load_model.assert_not_called()
+            call.assert_called_once_with(p.engine() + ["logs", "--tail", "10"])
 
     def test_engine_errors_do_not_leak_secrets(self):
         result = subprocess.CompletedProcess([], 1, "SECRET", "token=very-private")
@@ -207,6 +211,75 @@ class CliTests(unittest.TestCase):
             with patch.object(p, "load_model", side_effect=[model, other]): result = p.fleet(manifest)
         self.assertFalse(result["ok"])
         self.assertTrue(any("duplicate" in e for e in result["errors"]))
+
+
+def job_fixture(host="powstation"):
+    """A build job (android-app-dev's shape): job policy, limits, a source bind and a named cache volume."""
+    model = fixture()
+    model["x-pow"]["host"] = host
+    web = model["services"]["web"]
+    web["labels"] = {"io.powos.unit": "demo.web", "powos.autosleep": "never"}
+    web["cpus"], web["mem_limit"] = 8, "8589934592"
+    model["x-pow"]["services"]["web"] = {"role": "build-job", "lifecycle": {"policy": "job"}, "access": {"authentication": "none"}}
+    model["x-pow"]["datasets"]["data"]["role"] = "cache"
+    model["x-pow"]["datasets"]["data"]["cleanup"] = "lru"
+    return model
+
+
+class PlacementTests(unittest.TestCase):
+    def setUp(self):
+        env = patch.dict(os.environ, {"POW_PLATFORM_HOST": "powstation", "POW_HOST_CONTEXTS": ""})
+        env.start(); self.addCleanup(env.stop)
+
+    def errors(self, model):
+        return " ".join(p.inspect_model(model)["errors"])
+
+    def test_job_needs_cpus_and_mem_limit(self):
+        self.assertEqual(self.errors(job_fixture()), "")
+        model = job_fixture(); del model["services"]["web"]["cpus"]; del model["services"]["web"]["mem_limit"]
+        self.assertIn("job services must declare cpus and mem_limit", self.errors(model))
+        model["services"]["web"]["deploy"] = {"resources": {"limits": {"cpus": 2, "memory": "2147483648"}}}
+        self.assertEqual(self.errors(model), "")
+
+    def test_remote_rejects_hub_binds(self):
+        model = job_fixture("pow58")
+        self.assertEqual(self.errors(model), "")
+        model["services"]["web"]["volumes"].append({"type": "bind", "source": "/Users/macback/src", "target": "/src"})
+        model["x-pow"]["datasets"]["src"] = {"role": "source", "cleanup": "never", "mounts": [{"service": "web", "target": "/src"}]}
+        self.assertIn("hub path pow58 cannot see", self.errors(model))
+        model["x-pow"]["host"] = "powstation"
+        self.assertEqual(self.errors(model), "")
+
+    def test_state_never_moves_implicitly(self):
+        model = fixture(); model["x-pow"]["host"] = "pow58"
+        self.assertIn("placement never moves data", self.errors(model))
+        model["x-pow"]["datasets"]["data"]["host"] = "pow58"
+        self.assertNotIn("placement never moves data", self.errors(model))
+        model = fixture(); model["x-pow"]["datasets"]["data"]["host"] = "gpu195"
+        self.assertIn("lives on gpu195", self.errors(model))
+
+    def test_context_table_and_override(self):
+        self.assertIsNone(p.remote_context("powstation"))
+        self.assertEqual(p.remote_context("pow58"), "pow58")
+        self.assertEqual(p.engine("pow58")[:3], ["docker", "--context", "pow58"])
+        with patch.dict(os.environ, {"POW_HOST_CONTEXTS": "pow58=ryzen, lab=lab-ctx"}):
+            self.assertEqual((p.remote_context("pow58"), p.remote_context("lab")), ("ryzen", "lab-ctx"))
+        with patch.dict(os.environ, {"POW_HOST_CONTEXTS": "bad"}), self.assertRaises(p.Failure):
+            p.remote_context("pow58")
+
+    def test_remote_run_uses_context(self):
+        with patch.object(p, "load_model", return_value=job_fixture("pow58")), patch.object(p, "dns_guard"), patch.object(p.subprocess, "call", return_value=0) as call:
+            self.assertEqual(p.main(["run", "--rm", "--build", "web"]), 0)
+            self.assertEqual(p.main(["logs", "web"]), 0)
+        self.assertEqual(call.call_args_list[0].args[0], p.engine("pow58") + ["run", "--rm", "--build", "web"])
+        self.assertEqual(call.call_args_list[1].args[0], p.engine("pow58") + ["logs", "web"])
+
+    def test_remote_unit_stop_and_register(self):
+        model = job_fixture("pow58")
+        unit = p.unit_manifests(model, p.inspect_model(model), [])[0]
+        self.assertIn("--context pow58", unit["remove"]["stop"][0])
+        with patch.object(p, "load_model", return_value=model), self.assertRaisesRegex(p.Failure, "register on pow58"):
+            p.main(["register"])
 
 
 if __name__ == "__main__":

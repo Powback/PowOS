@@ -2,7 +2,7 @@
   "id": "voice-agent",
   "name": "VoiceAgent backend",
   "kind": "container",
-  "host": "desktop",
+  "host": "gpu195",
   "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 nvidia-open, 2x RTX 3090)",
   "owner": "system:voice",
   "purpose": "VoiceAgent's FastAPI server (~/Projects/VoiceAgent branch server-gpu195, image built on the box): /ws voice conversations, /transcribe; VAD, diarization, recall on the CPU; STT/TTS/LLM = voice-stt/-tts/-llm",

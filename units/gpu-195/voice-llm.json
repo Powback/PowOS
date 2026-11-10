@@ -2,7 +2,7 @@
   "id": "voice-llm",
   "name": "Voice LLM (vLLM Qwen3-8B-AWQ)",
   "kind": "container",
-  "host": "desktop",
+  "host": "gpu195",
   "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 nvidia-open, 2x RTX 3090)",
   "owner": "system:voice",
   "purpose": "the voice agent's fast LLM: vLLM Qwen/Qwen3-8B-AWQ (awq_marlin, hermes tool calls, 16k context, max 16 seqs, --gpu-memory-utilization 0.45), resident; OpenAI API on :8100 as qwen3-8b (phase 4: the router's voice-fast)",

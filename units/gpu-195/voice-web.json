@@ -2,7 +2,7 @@
   "id": "voice-web",
   "name": "VoiceAgent web UI",
   "kind": "container",
-  "host": "desktop",
+  "host": "gpu195",
   "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 nvidia-open, 2x RTX 3090)",
   "owner": "system:voice",
   "purpose": "VoiceAgent's Astro web UI (image built on the box from ~/Projects/VoiceAgent/VoiceAgentWeb) on :4321; Traefik on .100 routes voiceagent.pow here (/ws, /transcribe to voice-agent)",

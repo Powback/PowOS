@@ -26,17 +26,45 @@ COMMANDS = {"check", "plan", "units", "register", "status", "fleet"}
 MUTATIONS = {"up", "start", "restart", "run", "create", "unpause", "scale"}
 POLICIES = {"always", "http-idle", "follow-group", "job", "application-managed"}
 ROLES = {"state", "durable", "scratch", "cache", "source", "secret-state", "borrowed-state", "derived", "runtime"}
+# Data that exists in one place only. Placement metadata never copies it, so a project placed on another host must
+# say the data already lives there (dataset `host`), or it would silently start from an empty volume.
+PINNED_DATA = {"state", "secret-state", "durable"}
+# Pinned placement: fleet host id -> stock Docker context on the hub (`docker context ls`). The hub's own id is
+# POW_PLATFORM_HOST and runs on the current context. Override/extend in pow-compose.conf:
+# POW_HOST_CONTEXTS="pow58=pow58,gpu195=gpu195". Jobs will be placed dynamically by the fleet scheduler instead.
+HOST_CONTEXTS = {"pow58": "pow58", "gpu195": "gpu195"}
 
 
 class Failure(Exception):
     pass
 
 
-def engine():
+def engine(context=None):
     result = shlex.split(os.environ.get("POW_COMPOSE_ENGINE", "docker compose"))
     if not result:
         raise Failure("POW_COMPOSE_ENGINE is empty")
+    if context:
+        if Path(result[0]).name != "docker":
+            raise Failure("placement on another host needs the docker CLI (docker --context); set POW_COMPOSE_ENGINE")
+        result = result[:1] + ["--context", context] + result[1:]
     return result
+
+
+def host_contexts():
+    table = dict(HOST_CONTEXTS)
+    for pair in filter(None, re.split(r"[,\s]+", os.environ.get("POW_HOST_CONTEXTS", ""))):
+        host, _, context = pair.partition("=")
+        if not ID.fullmatch(host) or not ID.fullmatch(context):
+            raise Failure("POW_HOST_CONTEXTS must be comma-separated host=context pairs")
+        table[host] = context
+    return table
+
+
+def remote_context(host):
+    """The Docker context for a project placed on another fleet host; None when it runs on this one."""
+    if not host or host == os.environ.get("POW_PLATFORM_HOST"):
+        return None
+    return host_contexts().get(host)
 
 
 def split_args(argv):
@@ -141,6 +169,12 @@ def validate_lifecycle(name, service, config, host, errors):
         "infrastructure", "build-job", "backup-worker", "media-support"
     }:
         errors.append(f"{name}: this role needs an application activity/wake adapter before sleep")
+    if policy == "job":
+        limits = ((service.get("deploy") or {}).get("resources") or {}).get("limits") or {}
+        missing = [key for key, alt in (("cpus", "cpus"), ("mem_limit", "memory")) if service.get(key) is None and limits.get(alt) is None]
+        if missing:
+            errors.append(f"{name}: job services must declare {' and '.join(missing)} (the job's resource request; "
+                          "an unbounded job can take the whole host)")
     authority = host.get("lifecycleAuthority")
     if authority not in {"powstation-autosleep", "powos-container", "application"}:
         errors.append(f"{name}: unknown lifecycleAuthority")
@@ -217,6 +251,25 @@ def validate_access(name, service, config, errors, warnings):
             errors.append(f"{name}/{route['router']}: authenticate before waking")
 
 
+def validate_placement(model, policy, errors):
+    """A project pinned to another host: nothing from the hub's filesystem and no data moves with it."""
+    host = policy.get("host")
+    remote = remote_context(host) is not None
+    if remote:
+        for name, service in model["services"].items():
+            for mount in mount_rows(service):
+                if mount["type"] == "bind" or mount["type"] == "unresolved" and str(mount["source"]).startswith(("/", ".", "~")):
+                    errors.append(f"{name}:{mount['target']}: bind mount {mount['source']} is a hub path {host} cannot see; "
+                                  "bake source in via build:, use a named volume for cache/scratch")
+    for name, dataset in (policy.get("datasets") or {}).items():
+        if not isinstance(dataset, dict) or dataset.get("role") not in PINNED_DATA:
+            continue
+        lives = dataset.get("host", host if not remote else None)
+        if lives != host:
+            errors.append(f"dataset {name}: {dataset['role']} data " + (f"lives on {lives}" if lives else "has no declared host")
+                          + f" but the project is placed on {host}; placement never moves data (move it, then set dataset host)")
+
+
 def validate_datasets(model, policy, errors, warnings):
     datasets = policy.get("datasets", {})
     if not isinstance(datasets, dict):
@@ -240,6 +293,8 @@ def validate_datasets(model, policy, errors, warnings):
             match = next((m for m in mount_rows(service or {}) if m["target"] == pair[1]), None)
             if match is None:
                 errors.append(f"dataset {name}: no mount {pair[0]}:{pair[1]}")
+            elif dataset.get("role") in {"state", "secret-state"} and str(match["source"]).startswith("/mnt/nas/cdn"):
+                errors.append(f"dataset {name}: /mnt/nas/cdn is write-once bulk data (no backups, NAS may be down), never state")
             elif dataset.get("role") == "borrowed-state" and not match["read_only"]:
                 errors.append(f"dataset {name}: borrowed state must be mounted read-only")
         if dataset.get("budget"):
@@ -326,6 +381,7 @@ def inspect_model(model):
         if service["lifecycle"].get("policy") == "follow-group" and service["lifecycle"].get("group") not in groups:
             errors.append(f"{service['service']}: follower group has no HTTP wake owner in this project")
     datasets = validate_datasets(model, policy, errors, warnings)
+    validate_placement(model, policy, errors)
     return {"project": model.get("name", "unknown"), "managed": True, "owner": policy.get("owner"),
             "host": policy.get("host"), "lifecycleAuthority": policy.get("lifecycleAuthority"),
             "errors": errors, "warnings": warnings, "services": services, "datasets": datasets}
@@ -349,6 +405,7 @@ def unit_manifests(model, report, flags):
         raise Failure("units require a valid managed Compose contract")
     # Pin the source location/project so removal works from any working directory.
     persistent_flags = stable_flags(flags, report["project"])
+    context = remote_context(report["host"])
     result = []
     for row in report["services"]:
         name = row["service"]
@@ -361,7 +418,7 @@ def unit_manifests(model, report, flags):
                     "installedBy": "pow-compose register", "processes": [{"container": container}],
                     "autosleep": "never" if life["policy"] in {"always", "job", "application-managed"} else {"idle": life.get("idle", "15m"), "mode": "pause"},
                     "platform": {"schema": SCHEMA, "project": report["project"], "service": name, "lifecycleAuthority": report["lifecycleAuthority"], "lifecycle": life, "access": row["access"]},
-                    "remove": {"stop": [shlex.join(engine() + persistent_flags + ["stop", name])], "keep": [m["source"] for m in row["mounts"] if m["source"]]}}
+                    "remove": {"stop": [shlex.join(engine(context) + persistent_flags + ["stop", name])], "keep": [m["source"] for m in row["mounts"] if m["source"]]}}
         limits = {out: service[key] for key, out in {"mem_limit": "memory", "memswap_limit": "memory_swap", "cpus": "cpus", "pids_limit": "pids"}.items() if service.get(key) is not None}
         if limits:
             manifest["limits"] = limits
@@ -448,8 +505,14 @@ def dns_guard(model):
 
 
 def host_guard(report):
-    if report["managed"] and os.environ.get("POW_PLATFORM_HOST") != report.get("host"):
-        raise Failure("target host mismatch: set POW_PLATFORM_HOST to the intended engine host and use that host's contract")
+    """The Docker context to run on: None for this host, the mapped context for a pinned remote host."""
+    if not report["managed"] or os.environ.get("POW_PLATFORM_HOST") == report.get("host"):
+        return None
+    context = remote_context(report.get("host"))
+    if context is None:
+        raise Failure(f"target host {report.get('host')} is neither POW_PLATFORM_HOST nor a known fleet host "
+                      "(POW_HOST_CONTEXTS); use that host's contract")
+    return context
 
 
 def fleet(manifest_file):
@@ -507,7 +570,13 @@ def main(argv=None):
               "Other commands pass through to the Compose engine. See PowOS/docs/PLATFORM.md.")
         return 0
     if command not in COMMANDS and command not in MUTATIONS:
-        return subprocess.call(engine() + argv)
+        # logs/ps/down/build... go to the host the project is placed on; no contract (or no file) -> as before.
+        try:
+            report = inspect_model(load_model(flags))
+            context = host_guard(report) if not report["errors"] else None
+        except (Failure, ValueError):
+            context = None
+        return subprocess.call(engine(context) + argv)
     if command == "fleet":
         parser = argparse.ArgumentParser(prog="pow-compose fleet")
         parser.add_argument("--manifest", required=True); parser.add_argument("--json", action="store_true")
@@ -524,9 +593,9 @@ def main(argv=None):
     if command in MUTATIONS:
         if report["errors"]:
             report_text(report); return 1
-        host_guard(report)
+        context = host_guard(report)
         dns_guard(model)
-        return subprocess.call(engine() + argv)
+        return subprocess.call(engine(context) + argv)
     parser = argparse.ArgumentParser(prog="pow-compose " + command)
     parser.add_argument("--json", action="store_true")
     if command == "units": parser.add_argument("--output")
@@ -534,7 +603,8 @@ def main(argv=None):
     if command in {"units", "register"}:
         units = unit_manifests(model, report, flags)
         if command == "register":
-            host_guard(report)
+            if host_guard(report):
+                raise Failure(f"register on {report['host']} itself, or commit `units --output` into PowOS/units/")
             cli = Path(__file__).resolve().with_name("powos-units")
             if not cli.is_file(): raise Failure("powos-units is not installed alongside the platform adapter")
             for unit in units:
@@ -549,7 +619,7 @@ def main(argv=None):
         return 0
     if command == "status":
         try:
-            raw = capture(engine() + flags + ["ps", "--all", "--format", "json"])
+            raw = capture(engine(remote_context(report.get("host"))) + flags + ["ps", "--all", "--format", "json"])
             try: containers = json.loads(raw)
             except ValueError: containers = [json.loads(line) for line in raw.splitlines() if line.strip()]
             if isinstance(containers, dict): containers = [containers]

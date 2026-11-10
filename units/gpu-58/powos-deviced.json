@@ -2,7 +2,7 @@
   "id": "powos-deviced",
   "name": "PowOS device agent (Devices app control channel)",
   "kind": "service",
-  "host": "desktop",
+  "host": "pow58",
   "hostNote": "the 9950X3D/RTX 5090 box (192.168.50.58, Bazzite + KDE Plasma)",
   "owner": "system:devices",
   "purpose": "this device's card, live status (power, screen on/off, locked, what keeps it busy) and actions (lock, screen off/on, guarded sleep, wake another device) for the Devices app on the other PowOS devices; HTTPS :3416 with its own pinned certificate, every status/action call authenticated by a per-device token given at pairing (code shown on this screen); mDNS _powos._tcp. docs/research/device-ecosystem.md",

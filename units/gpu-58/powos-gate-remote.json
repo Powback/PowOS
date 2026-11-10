@@ -2,7 +2,7 @@
   "id": "powos-gate-remote",
   "name": "PowOS shell gate - remote browser runs (.58)",
   "kind": "container",
-  "host": "desktop",
+  "host": "pow58",
   "hostNote": "the 9950X3D box (192.168.50.58, Bazzite, 32 threads), idle most of the day",
   "owner": "system:powos-gate",
   "purpose": "the Mac's shell gate (shell/dev/gate.sh, dev/preview.sh) with GATE_HOST=58 (GATE_REMOTE=powos@192.168.50.58, the older name) runs its headless-Chromium work here instead of on the Mac: the scene run (gate.mjs) and the widget sweep's browser passes (preview.mjs), each a throwaway podman container of the same image the Mac uses, over the composed shell rsynced from the Mac. tsc, the lints and the OWL JVM step stay on the Mac. Started over ssh per gate run; nothing runs between gates",
