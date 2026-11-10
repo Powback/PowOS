@@ -70,3 +70,12 @@ prompt (`org.kde.kwin.eisprompter` in KWin's log, the same as broforce-fps.md 11
 answers, so no click arrived. The check now taps the way a finger does (`input tap` at the X point times the window's
 scale, the user's path for "steam menus") and dismisses menus with a tap on an empty spot of the page, so it uses no X
 input at all.
+
+## 11-10 budget: four parts, each with its own clock (agent/windows-epic)
+
+Every queued run since 11-07 ended `FAIL timeout` (300 s) without a verdict: the full bench (storm + per-app gestures +
+rotate + fold + five) needs ~2x the budget, and each never-live launch in the storm waited the full 20 s. The bench
+now runs as `--round R --part K --of 4` (1 storm | 2 open gestures switch close | 3 open rotate fold close | 4 five;
+`--phases "..."` picks any set), same round folder. Each part keeps its own clock (`BENCH_BUDGET_S`, 255 s): a phase
+that would start past it FAILs naming it, the storm stops starting cycles at it (FAIL "k of N cycles"), and three
+never-live launches in a row end the storm (FAIL). Every part ends with a verdict, PASS or a named FAIL.
