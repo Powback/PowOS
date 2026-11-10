@@ -1,5 +1,6 @@
 // CDP to the PowOS shell's WebView pages (run by tools/phone/cdp.sh inside powos-vadb's network, port 9333 forwarded).
 //   pages                      the pages (url, title)
+//   target [suffix]            the page eval/profile would pick (several can match: the attached, visible one wins)
 //   eval <suffix> <expr>       evaluate in the page whose url ends with <suffix> ("" = home: the url without ?mode)
 //   profile [secs] [page]       the page JS CPU profile: self and inclusive ms/s per function
 //   net [secs=10]               per page: WebSocket frames (by socket URL) and requests per second
@@ -49,7 +50,34 @@ class Session {
   }
 }
 
-const pick = (suffix: string) => pages.filter((p) => (suffix === "" ? short(p.url) === "home" : suffix ? p.url.endsWith(suffix) || short(p.url) === suffix : true));
+// Several pages can match one name (a home page left by a recreated activity, a web window on the shell's url): the
+// target resolved fresh per call is the live one - Android WebView's description says per page whether its view is
+// attached and visible: attached + non-empty first, then visible, then the list's order.
+const desc = (p: Page) => {
+  try {
+    return JSON.parse((p as any).description || "{}");
+  } catch {
+    return {};
+  }
+};
+const rank = (p: Page) => {
+  const d = desc(p);
+  return (d.attached && !d.empty ? 2 : 0) + (d.visible ? 1 : 0);
+};
+const pick = (suffix: string) =>
+  pages
+    .filter((p) => (suffix === "" ? short(p.url) === "home" : suffix ? p.url.endsWith(suffix) || short(p.url) === suffix : true))
+    .map((p, i) => ({ p, i, r: rank(p) }))
+    .sort((a, b) => b.r - a.r || a.i - b.i)
+    .map((x) => x.p);
+
+if (cmd === "target") {
+  // target [suffix]: the page eval would use, and why (its devtools description) - one line, "" = home.
+  const [p] = pick(a1 ?? "");
+  if (!p) (console.log("no page", pages.map((x) => x.url)), process.exit(1));
+  console.log(p.url, JSON.stringify(desc(p)));
+  process.exit(0);
+}
 
 if (cmd === "pages") {
   for (const p of pages) console.log(short(p.url).padEnd(10), p.url);

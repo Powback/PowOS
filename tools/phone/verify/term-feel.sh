@@ -1,5 +1,6 @@
 #!/bin/bash
 # lanes: phone
+# needs: home
 # term-feel.sh (board the-shell-s-terminal-renders-like-powterm-font-s; 7897328a ShellTermViews): the shell's terminal
 # as PowTerm's. On a FRESH tmux session of its own (never a live one), opened view-only on home (openSession):
 #   renderer - PowTerm's com.termux.view.TerminalView is up over the page (not xterm.js);
@@ -16,8 +17,7 @@ OUT=$HOME/.cache/powos-verify/term-feel-$(date +%m%d-%H%M); mkdir -p "$OUT"
 trap 'ev "importShim(\"./state.ts\").then(m=>(m.closeSession(),\"ok\"))" >/dev/null; us "tmux kill-session -t $S" >/dev/null; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
 us "tmux kill-session -t $S 2>/dev/null; tmux new -d -s $S \"seq -f 'powos verify line %g' 3000; exec sleep 900\" && echo ok" | grep -q ok || { echo "SKIP: ENV: no tmux session"; exit 5; }
 vis() { CDP_TIMEOUT_S=15 ev "document.visibilityState"; }
-[ "$(vis)" = visible ] || { sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; }
-[ "$(vis)" = visible ] || { echo "SKIP: ENV: home's page isn't visible even after going home ($(vis))"; exit 5; }
+hf=$("$here/../home-front.sh") || { echo "SKIP: ENV: home's page isn't visible even after going home ($hf)"; exit 5; }
 ev "importShim('./state.ts').then(m=>(m.openSession('$S',null),'ok'))" >/dev/null; sleep 4
 read -r x y w h <<<"$(ev "(()=>{const d=devicePixelRatio,r=[...document.querySelectorAll('.term-holder')].map(e=>e.getBoundingClientRect()).filter(r=>r.width>99&&r.height>99).sort((a,b)=>b.width*b.height-a.width*a.height)[0];return r?[r.left,r.top,r.width,r.height].map(v=>Math.round(v*d)).join(' '):'none'})()")"
 [[ "${h:-}" =~ ^[0-9]+$ ]] || { echo "FAIL: the session view shows no terminal (${x:-none})"; exit 1; }
