@@ -71,6 +71,13 @@ fi
 # Magisk's su: on PATH once Magisk finished its setup, always at /debug_ramdisk/su while it runs.
 SU=$(adb shell 'command -v su || echo /debug_ramdisk/su' | tr -d '\r')
 asu() { adb shell "$SU -c '$1'"; }
+# Args forwarded to a phone-side script inside asu's single-quoted su -c: plain tokens only (verbs, --flags, package
+# names), every one of them - never a dropped or a shell-interpreted one.
+phone_args() {
+  local x
+  for x in "$@"; do [[ "$x" =~ ^[A-Za-z0-9._/=-]+$ ]] || { echo "rooted.sh: refusing argument '$x' (plain tokens only)" >&2; return 1; }; done
+  echo "${*:-status}"
+}
 in_powos() { asu "chroot /data/powos/root /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/usr/sbin HOME=/root TERM=xterm-256color /bin/bash -lc \"$1\""; }
 
 case "${1:-}" in
@@ -273,20 +280,23 @@ app-ca)
   # ONLY its public cert into the system trust store so the on-device capture proxy can read HTTPS from apps the
   # owner ENABLED in the App API. The private key stays on the device (never pushed, printed or committed). The owner
   # runs this with the user present; installing the CA is this command + a reboot, never a silent side effect.
-  #   rooted.sh app-ca [gen|install|status|remove [--wipe-key]]      (status if omitted)
+  #   rooted.sh app-ca [gen|install|status|remove [--dry-run] [--wipe-key]]   (status if omitted; VERB --help)
+  a=$(phone_args "${@:2}") || exit 2
   adb push -q "$HERE/app-ca.sh" /data/local/tmp/app-ca.sh >/dev/null
-  asu "sh /data/local/tmp/app-ca.sh ${2:-status} ${3:-}; rm -f /data/local/tmp/app-ca.sh" ;;
+  asu "sh /data/local/tmp/app-ca.sh $a; rm -f /data/local/tmp/app-ca.sh" ;;
 app-frida)
   # The App API's on-demand IN-APP HOOK helper (unit app-frida): for an enabled app that pins/signs, read the
   # request the way the app itself builds it (reuse the app's own auth). Default STOPPED; runs only in a bounded
   # capture window for ONE enabled package. `install` stages the matching-arch binary this pushes.
-  #   rooted.sh app-frida install [BIN] | start PKG | stop | status | remove
+  #   rooted.sh app-frida install [BIN] | start PKG | stop | status | remove [--dry-run]   (VERB --help)
+  #   BIN = frida-server 16.6.6 android-arm64 (the pinned version; app-frida.sh install refuses any other)
   adb push -q "$HERE/app-frida.sh" /data/local/tmp/app-frida.sh >/dev/null
-  if [ "${2:-status}" = install ] && [ -n "${3:-}" ] && [ -f "${3:-}" ]; then
+  if [ "${2:-status}" = install ] && [ -n "${3:-}" ] && [ "${4:-}" = "" ] && [ -f "${3:-}" ]; then
     adb push -q "${3}" /data/local/tmp/frida-server-staged >/dev/null
     asu "sh /data/local/tmp/app-frida.sh install /data/local/tmp/frida-server-staged; rm -f /data/local/tmp/app-frida.sh /data/local/tmp/frida-server-staged"
   else
-    asu "sh /data/local/tmp/app-frida.sh ${2:-status} ${3:-}; rm -f /data/local/tmp/app-frida.sh"
+    a=$(phone_args "${@:2}") || exit 2
+    asu "sh /data/local/tmp/app-frida.sh $a; rm -f /data/local/tmp/app-frida.sh"
   fi ;;
 widevine-l3)
   # Netflix etc. in SD on the unlocked phone (Widevine L1 can't be provisioned): see targets/native/widevine-l3.sh.
