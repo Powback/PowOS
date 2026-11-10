@@ -39,7 +39,7 @@ grep -q '^popup-gone' <<<"$pl" || bad "gone: no \"popup-gone\" after the menu cl
 N=$(grep -m1 -oE 'exports popup [0-9]+' <<<"$kl" | grep -oE '[0-9]+$')
 if kwat 3.72; then
   grep -qE '^popup [0-9]+ layer up' <<<"$pl" || bad "layer: no \"popup N layer up\" ($kw)"
-  live=$([ -n "$N" ] && sh_ "tail -n +$((${k0:-0} + 1)) $HY | grep -a 'window task $N live' | tail -1")
+  live=$([ -n "$N" ] && sh_ "tail -n +$((${k0:-0} + 1)) $HY | grep -a \"window task $N live\" | tail -1")
   [ -n "$live" ] && say "buffer: $live" || bad "buffer: KWin's popup surface ${N:-?} never went live (no buffers from the app's layer)"
 else
   grep -qE '^popup [0-9]+ buffer' <<<"$pl" || bad "buffer: none of the menu's buffers reached the app"
