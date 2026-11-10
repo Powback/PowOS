@@ -2302,23 +2302,23 @@ const resizing = new Map<number, Resizing>();
 /** A resize grab on window [id] began: its app's size paced from now ([pace]) until [resizeEnd]. */
 function resizeStart(id: number) {
   resizing.set(id, { cw: -1, ch: -1, frame: 0, last: -Infinity, lastAt: -Infinity, steps: 0, reqs: 0 });
+  glassDrags.add(id);
+  glassDrag(true);
   kick();
 }
+
+/** RJ2: nativeglass.ts's blur regions off for a resize drag (its HACK note: they force SF GPU composition each frame). */
+const glassDrags = new Set<number>();
+const glassDrag = (on: boolean) => (globalThis as { __glassDrag?: (on: boolean) => void }).__glassDrag?.(on);
 
 /** The grab ended: the next "w.f" has the body's size as the app's (the final relayout); the counts kept for the gate. */
 function resizeEnd(id: number) {
   const r = resizing.get(id);
   if (!r) return;
   resizing.delete(id);
+  if (glassDrags.delete(id) && !glassDrags.size) glassDrag(false);
   // RS5c: the live frame committed (a new WebWin: the window's one render with it).
-  if (liveSized.delete(id)) {
-    const w = webWins.peek().find((v) => v.id === id);
-    update(id, {});
-    // The page content's exact mask: the live drag wrote a stepped hole ([holeBox]) straight to the DOM, and Preact
-    // diffs against its last vnode - a drag back to the start size gives the same vnode value, so it would not write.
-    const under = document.querySelector<HTMLElement>(`.webwindow[data-wwid="${id}"]`)?.closest(".page")?.querySelector<HTMLElement>(":scope > .page-under");
-    if (under && w) writeMask(under, underWindows(w.page));
-  }
+  if (liveSized.delete(id)) update(id, {});
   reach(id);
   lastResize = { id, steps: r.steps, reqs: r.reqs };
   resendGeometry();
@@ -3792,7 +3792,7 @@ export function frameBox(w: WebWin): Box {
 export function holes(cut: WebWin[], at: { x: number; y: number; s: number }): Record<string, string> | undefined {
   if (!cut.length) return undefined;
   const full = "linear-gradient(black, black)";
-  const boxes = cut.map(holeBox).map((b) => ({ x: (b.x - at.x) / at.s, y: (b.y - at.y) / at.s, w: b.w / at.s, h: b.h / at.s }));
+  const boxes = cut.map(frameBox).map((b) => ({ x: (b.x - at.x) / at.s, y: (b.y - at.y) / at.s, w: b.w / at.s, h: b.h / at.s }));
   return {
     maskImage: [full, ...boxes.map(() => full)].join(", "),
     maskSize: ["100% 100%", ...boxes.map((b) => `${px(b.w)}px ${px(b.h)}px`)].join(", "),
@@ -3800,25 +3800,6 @@ export function holes(cut: WebWin[], at: { x: number; y: number; s: number }): R
     maskRepeat: "no-repeat",
     maskComposite: ["subtract", ...boxes.map(() => "add")].join(", "),
   };
-}
-
-/**
- * RJ1 (11-10, ww-resize traces: WebViewFunctor::drawGl 20-62 ms a frame while a resize drag moves, 2-5 ms after; its
- * RenderThread sleeps ~90 % of it on WebView's in-process GPU thread, ~32 ms CPU a frame, with Blink's main thread
- * ~17 ms): every move rewrote the mask of .page-under (full screen, 2268x2440) and of the windows under the dragged
- * one, so the masked content re-rasters each frame. A window resized live ([liveSized]) cuts a hole STEPPED OUTWARD to
- * HOLE_STEP px: the hole always covers the frame (page content never paints over the app), and the masks change once
- * per HOLE_STEP px of drag, not on every move (~1 move in 10 at the check's 0.4 px/ms). The strip between the frame and
- * the stepped edge shows what is under home (the wallpaper), on the moving sides, until the drag ends ([resizeEnd]
- * writes the exact mask). The hole is the exact frame whenever nothing moves it.
- */
-const HOLE_STEP = 48;
-function holeBox(w: WebWin): Box {
-  const b = frameBox(w);
-  if (!liveSized.has(w.id)) return b;
-  const x = Math.floor(b.x / HOLE_STEP) * HOLE_STEP;
-  const y = Math.floor(b.y / HOLE_STEP) * HOLE_STEP;
-  return { x, y, w: Math.ceil((b.x + b.w) / HOLE_STEP) * HOLE_STEP - x, h: Math.ceil((b.y + b.h) / HOLE_STEP) * HOLE_STEP - y };
 }
 
 /** The page's own content (widgets, apps, its glass) masked where its windows are: grid.tsx's .page-under. */

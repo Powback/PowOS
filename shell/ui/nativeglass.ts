@@ -528,6 +528,33 @@ const MOVING_STILL_FRAMES = 60;
 const counts = { measured: 0, sent: 0, since: performance.now() };
 /** For CDP A/B only (`__glass.live.hold(true)`): measured as ever, but the regions not sent to the host. */
 let held = false;
+/**
+ * HACK: (RJ2, 11-10) no blur regions while a web window's resize drag moves ([dragPause], webwindows.tsx resizeStart/
+ * resizeEnd through globalThis.__glassDrag). Any blur region on home's layer makes SurfaceFlinger GPU-compose the
+ * whole stack under and over it every frame (dumpsys: wallpaper, powos-glass-under, every powos-ww layer, home, the
+ * bars all "forceClientComposition=true clientType=BLUR"); the 08:40-08:51 ww-resize traces had 86/87 display frames
+ * GPU-composited, RenderEngine ~5 ms a frame (max 11.5) beside WebView's raster on the same GPU, and 30-35 "held"
+ * frames a way (SF GPU deadline missed, buffer stuffing). Without regions HWC composes the layers in hardware. The
+ * glass shows unblurred (its fill and veil only) for the drag. Real fix: glass whose blur doesn't force client
+ * composition (home's own blurred backdrop in its buffer, or a blurred wallpaper layer redrawn only when it changes).
+ */
+let dragPaused = false;
+/** A drag whose end never came (its page reloaded, an exception) gets its glass back after this long. */
+const DRAG_PAUSE_MAX_MS = 15_000;
+let dragTimer = 0;
+function dragPause(on: boolean) {
+  clearTimeout(dragTimer);
+  if (on) dragTimer = window.setTimeout(() => dragPause(false), DRAG_PAUSE_MAX_MS);
+  if (dragPaused === on || !nativeGlass.value) return void (dragPaused = on);
+  dragPaused = on;
+  if (on) {
+    wake();
+    sendRegions(`${viewport().dpr} 0`);
+  }
+  last = "";
+  kick();
+}
+(globalThis as { __glassDrag?: (on: boolean) => void }).__glassDrag = dragPause;
 
 /**
  * Something that can move or fade glass: a surface itself, or an element holding one (its ancestors: the track, the
@@ -597,7 +624,7 @@ function measured() {
   if (text !== last) {
     last = text;
     still = 0;
-    if (!held) sendRegions(text);
+    if (!held && !dragPaused) sendRegions(text);
   } else {
     still++;
   }
@@ -645,7 +672,7 @@ const windowOnScreen = () =>
 /** The loop stopped: still in REST_MS unless something kicks it first. */
 function settle() {
   clearTimeout(restTimer);
-  if (mode !== "home" || !restOn || held) return;
+  if (mode !== "home" || !restOn || held || dragPaused) return;
   restTimer = window.setTimeout(() => {
     if (running || resting || !nativeGlass.value || document.hidden || windowOnScreen()) return;
     resting = true;

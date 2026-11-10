@@ -63,10 +63,20 @@ GEST_S=$(( 25 + 10 * ${WWR_REC:-1} ))
 . "$here/ww-lib.sh"
 plaunch() { ev "importShim('./state.ts').then(m=>m.launch('$1')).then(()=>'ok',e=>'ERR '+e)"; }
 MINE=""
+# restore: every exit path (EXIT trap; the watchdog's hard stop and a TERM/INT end through it). 11-10 08:40-08:56: the
+# queue's 300 s kill skipped it - 2 host windows, 5 ww layers and a task left, and window-bench p3's leak checks failed.
+# The windows: those it opened ($MINE) and any window of its apps' keys that wasn't up before it started ($BEFORE0) - a
+# launch whose window came after the poll gave up is closed too - in ONE page call with a short CDP clock.
+BEFORE0=""; KEYS=""
 restore() {
-  local w
+  local w ids
+  [ "${RESTORED:-0}" = 1 ] && return 0; RESTORED=1
   WW_DEADLINE=$((SECONDS + 40))   # the clean-up's own calls, past the steps' deadline
-  for w in $MINE; do hcall webwindows.close "[${w#w}]" "v=>String(v)" >/dev/null; done
+  [ -n "${WDOG:-}" ] && kill "$WDOG" 2>/dev/null
+  ids=$(for w in $MINE; do echo "${w#w}"; done; [ -n "$KEYS" ] && for k in $KEYS; do comm -13 <(echo "$BEFORE0") <(CDP_TIMEOUT_S=8 wwids "$k") | sed 's/^w//'; done)
+  ids=$(echo $ids | tr ' ' '\n' | sort -u | grep . | paste -sd, -)
+  [ -n "$ids" ] && CDP_TIMEOUT_S=8 ev "importShim('./bridge.ts').then(b=>Promise.all([$ids].map(i=>b.powos.webwindows.close(i)))).then(()=>'ok',e=>'ERR '+e)" >/dev/null 2>&1
+  MINE=""
   case " $APPS " in *" kate "*) [ "${KATE_MINE:-0}" = 1 ] && us "pkill -x kate" ;; esac
   case " $APPS " in *" dolphin "*) [ "${DOLPHIN_MINE:-0}" = 1 ] && us "pkill -x dolphin" ;; esac
   [ "${CALC_MINE:-0}" = 1 ] && sh_ "am force-stop $CALC"
@@ -77,6 +87,18 @@ restore() {
 window_lock ww-resize.sh 120
 log "time: window lock after ${SECONDS} s"   # 11-10 calc job: 207 s gone before its first gesture, nothing said where
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
+trap 'exit 1' TERM INT
+# The hard stop (window-bench's watchdog): at WWR_HARD_S (275) from the start, kill the running call with all its
+# descendants, then USR1: a FAIL naming the step, and exit through the EXIT trap's restore - never the queue's 300 s
+# kill. 11-10 08:41:45: a bare `wait` (for the attribution) also waited for the logcat reader, forever; the 250 s
+# deadline is checked only between steps, so nothing ended it.
+STEP=setup
+hard_stop() { trap - USR1; bad "hard deadline: ${WWR_HARD_S:-275} s reached in step '$STEP' - stopped, windows closed"; exit 1; }
+trap hard_stop USR1
+( sleep $(( ${WWR_HARD_S:-275} - SECONDS )); me=$(exec sh -c 'echo $PPID')
+  k=$(pgrep -P $$ | grep -vx "$me"); all=$k; while [ -n "$k" ]; do k=$(for c in $k; do pgrep -P "$c"; done); all="$all $k"; done
+  kill $all; kill -USR1 $$ ) >/dev/null 2>&1 &
+WDOG=$!
 I0=$(irq)
 chk() { [ "$(irq)" = "$I0" ] || { log "STOP: a real touch at $1 - restoring"; exit 3; }; }
 
@@ -241,7 +263,7 @@ for app in $APPS; do
       [ -z "$(sh_ "pidof $CALC")" ] && CALC_MINE=1 ;;
     *) log "unknown app $app"; continue ;;
   esac
-  before=$(wwids)
+  before=$(wwids); [ "${B0SET:-0}" = 1 ] || { BEFORE0=$before; B0SET=1; }; KEYS="$KEYS $key"; STEP="$app open"
   r=$(plaunch "$key"); [ "$r" = ok ] || { bad "$app: launch $key: $r"; continue; }
   id=$(wwnew 30 "$before" | tail -1)
   [ -n "$id" ] || id=$(hcall webwindows.list "[]" "l=>(l.find(w=>w.key==='$key'&&w.state==='floating')||{id:''}).id" | sed 's/^/w/')
@@ -267,7 +289,7 @@ for app in $APPS; do
     hit=$(wwhit "$id" "$zone" "$px" "$py")
     [ "$hit" = ok ] || { bad "$app $g: a press on its $zone at $px,$py isn't its resize: $hit - nothing measured"; continue; }
     read -r bl bt br bb <<<"$(wwbody "$id")"
-    k0=$(klines); g0=$SECONDS
+    k0=$(klines); g0=$SECONDS; STEP="$app $g"
     sh_ "dumpsys gfxinfo com.powos.app reset" >/dev/null
     way "$px" "$py" $((px + dx)) $((py + dy)) "$app-$g-in"
     sleep 0.25
@@ -280,7 +302,7 @@ for app in $APPS; do
     [ $((ow * 2)) -ge $((-dx)) ] && [ $((oh * 2)) -ge $((-dy)) ] || bad "$app $g: the drag didn't resize it (body $bl $bt $br $bb -> ${b2l:-?} ${b2t:-?} ${b2r:-?} ${b2b:-?})"
     # The traces' attribution runs on the Mac while KWin's next frame line comes (11-10: it ran after the wait, serially).
     gend=$SECONDS
-    for w_ in in out; do attrib "$app-$g-$w_" > "$OUT/.attrib-$w_" & done
+    ap=""; for w_ in in out; do attrib "$app-$g-$w_" > "$OUT/.attrib-$w_" & ap="$ap $!"; done
     # KWin writes its frame line every 5 s: one covering the gesture's end is out by then.
     wait_s=$([ "$app" = calc ] && echo 1.5 || echo 5.2); sleep "$(python3 -c "import sys; print(max(0.0, float(sys.argv[1]) - (int(sys.argv[2]) - int(sys.argv[3]))))" "$wait_s" "$SECONDS" "$gend")"; chk "$app $g"
     gfx=$(sh_ "dumpsys gfxinfo com.powos.app")
@@ -293,7 +315,7 @@ for app in $APPS; do
     hostl=$(grep -aE "window $n: (resize:|body outgrew)" "$OUT/logcat.txt" | tail -2 | sed -E 's/.*(window [0-9]+: )/\1/' | tr '\n' ';')
     line="$app $g: shell in $hi frames $mi missed ($li late, $di held; longest ${xi} ms), out $ho frames $mo missed ($lo late, $do_ held; longest ${xo} ms); gfxinfo janky ${jank:-?} p90 ${p90:-?} p99 ${p99:-?} | content in $ci frames (max gap ${cxi} ms), out $co (max gap ${cxo} ms) | kwin commits/drawn $kw, ${kr:-no resize line} | host $hostl"
     log "$line"; echo "$line" >> "$OUT/summary.txt"
-    wait
+    wait $ap   # these two only: a bare wait also waits for the logcat reader (forever, 11-10 08:41)
     for w_ in in out; do cat "$OUT/.attrib-$w_" | sed "s/^/$app $g $w_ trace: /" | tee -a "$OUT/summary.txt" >> "$OUT/log.txt"; done
     grep -h "^$app $g .* trace: verdict" "$OUT/summary.txt" | sed 's/^/  /'
     load=$(cpu_load "$app" "$app $g")

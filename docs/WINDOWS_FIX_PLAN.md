@@ -100,6 +100,17 @@ The board shows window checks failing by timeout or waiting days for a free phon
     come back gzip'd over exec-out (~3 MB), attribution overlaps the wait, and each gesture logs a "time:" line.
   - The "ww-popup-probe.py popup" lines in ww-glue were `tail -3` of KWin's whole log (ww-popup-x11's 06:28 run; the
     probe had quit): ww-glue now reads only its own run's lines; ww-popup-x11 removes its root-owned files as root.
+  - 11-10 08:40-08:51 (RJ1 live, kate/dolphin/calc, no game): drawGl p50 2.7-4.3 ms, p90 9-11 ms, 2-8 frames a way over
+    12 ms (RenderThread in `WaitSyncToken` on the GPU thread's tile raster, ~2 RasterTasks a frame); the missed vsyncs
+    are mostly "held" (30-35 a way): SF verdict surfaceflinger-gpu, 86/87 display frames GPU-composited, RenderEngine
+    ~5 ms a frame (max 11.5). dumpsys: every layer from the wallpaper through home and the bars is
+    `forceClientComposition=true clientType=BLUR` - home's blur regions force SF to GPU-compose the whole stack each
+    frame. RJ1 (stepped holes) was taken out: the mask was never shown to cost the time (no clean pre-RJ1 trace: all
+    had Broforce beside them) and it cost a visible strip. RJ2 (`nativeglass.ts dragPause`, HACK registered): no blur
+    regions while a resize drag moves, so HWC composes in hardware; the glass is unblurred for the drag.
+    The 08:4x runs were killed at 300 s: a bare `wait` for the attribution also waited for the logcat reader. Now
+    `wait` names its pids, a watchdog stops the check at 275 s (window-bench's pattern) and the EXIT trap closes its
+    windows (and any new window of its apps' keys) in one page call on every path.
 - [x] 0.6 Each failing check on the board gets one line: real bug, check bug, or environment.
   Done 11-10: seven board tasks got a "0.6" step line; the table is in `docs/research/window-bench.md` "11-10
   baseline". None of the failures was a judged real bug: they were check bugs or the environment, most of them home's
