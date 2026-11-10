@@ -101,6 +101,12 @@ never-live launches in a row end the storm (FAIL). Every part ends with a verdic
   stops a 30 s call), and six parts (`--of 6`, gestures split over two). Its 17 FAILs: open-drawn x3 and resize-settle
   x2 are Mac-clock screencap polls (8.7-10.9 s); drag/resize fps 30-44 and p95 50-100 ms x8 ran beside Broforce
   (p1 without a game: 58-95 fps), so not judged; switch "-" x2 (the reason is now logged); out of budget x2.
+- **open-drawn and resize-settle on the phone clock (agent/close-host, round 3):** `wb-drawn.sh` runs on the phone,
+  started before the action; the page logs `wb-go <tag> <epoch ms> <rect>` (open: at live; resize: two frames after the
+  pointerup) and the watcher screenshots that rect (screencap + `window-render.py drawn` in the chroot, ~0.3 s a round,
+  first live try 105 ms) until it is a picture; the bench reads one line. Mac load no longer enters either number.
+- **A game up is noticed by every check:** `game-lib.sh` (`game_up`: Steam's `reaper SteamLaunch AppId=`, the queue's
+  test) replaces `steam_app_` (missed Broforce, p2) and the per-script `SteamLaunch AppId=` counts.
 - Environment, not fixed here: one CDP eval is 2-8 s at Mac load ~35, setup (unfold, lock, home) took 2 min of
   part 1, and `drawn`/resize-settle are Mac-clock screencap polls (inflated the same way).
 

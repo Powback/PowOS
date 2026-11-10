@@ -108,7 +108,7 @@ active() { grep -a '^PMS|' "$OUT/kwin-$1.txt" | cut -d'|' -f5; }
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
 for p in kate dolphin; do [ -n "$(us "pgrep -x $p" | tail -1)" ] && { echo "$p already runs (maybe the user's): not now"; exit 3; }; done
-[ "$(us "pgrep -fc 'SteamLaunch AppId='" | tail -1)" = 0 ] || { echo "a game runs under Steam (the user's): not now"; exit 3; }
+GAME_GATE_PREFIX=""; . "$(dirname "$0")/game-lib.sh"; game_gate   # one test for every check (game-lib.sh)
 sh_ "cmd device_state state 3"; sleep 3; chk unfold
 if sh_ "dumpsys window policy | grep -m1 mIsShowing=" | grep -q true; then sh_ "wm dismiss-keyguard"; sleep 1.5; fi
 . "$here/kwin-up.sh"

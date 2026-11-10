@@ -65,6 +65,7 @@
 # came from is fine - push before you queue. The runner runs a private copy of that checkout's queue.sh.
 set -uo pipefail
 here=${QUEUE_HERE:-$(cd "$(dirname "$0")" && pwd -P)}; unset QUEUE_HERE; phone=${QUEUE_PHONE:-$(cd "$here/.." && pwd -P)}
+. "$here/game-lib.sh"   # game_up: the one "a game runs" test (queue and checks)
 BASE=worktree-powos-multiplatform
 REPO=$(cd "$here" && cd "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")" 2>/dev/null && pwd -P || true)
 [ "$REPO" = / ] && REPO=
@@ -139,12 +140,8 @@ warm_stop() { local a; a=$(cat "$Q/warm" 2>/dev/null); rm -f "$Q/warm"; case $a 
 # (rc 3) and the game stayed up - window-bench, ww-glue and ww-popups after it all SKIPped on "a game runs".
 warm_takes() { local d=$1 a f; shift; for a in "$@"; do [ "$(basename -- "$a" 2>/dev/null)" = bf-pacing.sh ] || continue; case $a in /*) f=$a ;; *) f=$d/$a ;; esac; grep -q 'powos-warm-' "$f" 2>/dev/null && return 0; done; return 1; }
 # --- game ownership: which game on the phone the queue started (test/tier1/test-queue-game-owner.sh extracts this) ---
-# game_up: the Steam app id of the game running on the phone now (Android's pgrep sees PowOS's processes).
-# "none" only when adb answered: a failed call prints "", which game_left never reads as "no game before" (it could be
-# the user's game).
-game_up() { local o; o=$(perl -e 'alarm shift; exec @ARGV' 10 "$phone/adb.sh" shell "pgrep -af '[r]eaper SteamLaunch AppId='; echo adb-ok" 2>/dev/null | tr -d '\r')
-  case $o in *adb-ok*) ;; *) return 0 ;; esac
-  o=$(sed -n 's/.*AppId=\([0-9][0-9]*\).*/\1/p' <<<"$o" | head -1); echo "${o:-none}"; }
+# game_up: the Steam app id of the game running on the phone now - from game-lib.sh (sourced at the top; the one test
+# every check uses).
 # game_since: "<app id> <start epoch>" of the game running now (its reaper's /proc start: boot time + starttime ticks,
 # the phone's clock), "none" when adb answered and no game runs, "" when adb failed.
 game_since() { local o

@@ -56,7 +56,7 @@ kw=$(us 'pacman -Q kwin' | tail -1)
 kwat() { python3 -c "import sys; r=sys.argv[1].split('-')[-1]; sys.exit(0 if tuple(map(int,r.split('.')))>=tuple(map(int,sys.argv[2].split('.'))) else 1)" "${kw:-x 0-0}" "$1" 2>/dev/null; }
 kwat 3.71 || { echo "SKIP $kw has no 0063 (popups as surfaces need kwin 3.71+)"; exit 3; }
 LAYERS=0; kwat 3.72 && LAYERS=1
-[ "$(us "pgrep -fc 'SteamLaunch AppId='" | tail -1)" = 0 ] || { echo "SKIP a game runs under Steam (the user's): not now"; exit 3; }
+GAME_GATE_PREFIX="SKIP "; . "$(dirname "$0")/game-lib.sh"; game_gate   # one test for every check (game-lib.sh)
 steamww() { hcall webwindows.list "[]" "l=>{const w=l.filter(w=>/steam/i.test(String(w.key))&&!/steam_app_/i.test(String(w.key))).at(-1);return w?'w'+w.id:'none'}"; }
 sw=$(steamww)
 # Steam's main X window "<id> <x> <y> <w> <h>" (as steam-tap.sh finds it), and the override-redirect windows viewable now.

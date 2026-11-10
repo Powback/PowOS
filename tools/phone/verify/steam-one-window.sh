@@ -25,7 +25,7 @@ printf 'v=$(pacman -Q kwin | cut -d" " -f2); echo "$v $(vercmp "$v" %s)"\n' "$MI
 kv=$("$T/root.sh" "$OUT/q.sh" 2>/dev/null | tail -1 | tr -d '\r'); log "kwin $kv (needs >= $MIN)"
 [ "${kv##* }" -ge 0 ] 2>/dev/null || fail "KWin ${kv%% *} older than $MIN (queue kwin-install.sh $MIN first)"
 unfolded_home
-[ "$(us "pgrep -fc 'SteamLaunch AppId='" | tail -1)" = 0 ] || { echo "a game runs under Steam (the user's): not now"; exit 3; }
+GAME_GATE_PREFIX=""; . "$(dirname "$0")/game-lib.sh"; game_gate   # one test for every check (game-lib.sh)
 
 hcall_page() { "$T/cdp.sh" eval home "$1" 2>&1 | tr -d '"\r' | tail -1; }
 # Every window home knows: "<web|task>:<id>:<key>" per line (web windows, then the old path's).

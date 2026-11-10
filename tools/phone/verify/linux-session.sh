@@ -73,7 +73,7 @@ home() {
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
 [ -z "$(us 'pgrep -x kate' | tail -1)" ] || { echo "kate already runs (maybe the user's): not now"; exit 3; }
-[ "$(us "pgrep -fc 'SteamLaunch AppId='" | tail -1)" = 0 ] || { echo "a game runs under Steam (the user's): not now"; exit 3; }
+GAME_GATE_PREFIX=""; . "$(dirname "$0")/game-lib.sh"; game_gate   # one test for every check (game-lib.sh)
 log "apk $(sh_ "dumpsys package com.powos.app | grep -m1 versionCode" | sed 's/^ *//')"
 
 # 1. KWin 3.28+ installed (kwin-up.sh: the newest built package, a rollback tar of the old files). By version, not a

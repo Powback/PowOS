@@ -119,11 +119,11 @@ linux() { case $1 in kate|dolphin|konsole) return 0 ;; esac; return 1; }
 # window: the launch only raises it) fails at 1.5 s saying so, not 20 s of "never live" (11-08 storm).
 open_js() {
   local keys; keys=$(printf "'%s'," "$@")
-  ev "$WW.then(([m,s])=>{const K=[${keys%,}],before=new Set(m.webWins.value.map(w=>w.id)),t0=performance.now(),r={};
+  ev "$WW.then(([m,s])=>{const K=[${keys%,}],before=new Set(m.webWins.value.map(w=>w.id)),t0=performance.now(),e0=Date.now(),r={},go=(k,id)=>{const b=document.querySelector('.webwindow[data-wwid=\"'+id+'\"] .webwindow-body');if(!b)return;const q=b.getBoundingClientRect(),d=devicePixelRatio;console.info('wb-go open:'+k+' '+e0+' '+[q.left,q.top,q.right,q.bottom].map(v=>Math.round(v*d)).join(' '))};
 for(const k of K){r[k]={frame:-1,live:-1,id:null,failed:''};s.launch(k)}
 return new Promise(ok=>{const tick=()=>{const t=Math.round(performance.now()-t0);
  for(const k of K){const w=m.webWins.value.filter(w=>String(w.key).startsWith(k)&&!before.has(w.id)).at(-1);if(!w){const o=m.webWins.value.find(w=>String(w.key).startsWith(k)&&before.has(w.id));if(o&&t>1500)r[k].failed='its window '+o.id+' from before is still open: the launch raised it (a close that missed)';continue}const o=r[k];o.id=w.id;
-  if(o.frame<0&&document.querySelector('.webwindow[data-wwid=\"'+w.id+'\"]'))o.frame=t;if(o.live<0&&w.live)o.live=t;if(w.failed)o.failed=String(w.failed)}
+  if(o.frame<0&&document.querySelector('.webwindow[data-wwid=\"'+w.id+'\"]'))o.frame=t;if(o.live<0&&w.live){o.live=t;go(k,w.id)}if(w.failed)o.failed=String(w.failed)}
  if(K.every(k=>r[k].live>=0||r[k].failed)||t>${LIVE_MAX_S}000)return ok(JSON.stringify(r));requestAnimationFrame(tick)};tick()})})"
 }
 jget() { python3 -c "import json,sys
@@ -151,6 +151,25 @@ until_drawn() {
     t=$(($(nowms) - t0)); [ $t -gt "$3" ] && return 1
     sleep 0.2
   done
+}
+# Phone-clock "drawn" (wb-drawn.sh, pushed at the start): drawn_watch <tag> <max ms> starts the phone's watcher before
+# the action; the page logs "wb-go <tag> <epoch ms> <rect>" when it starts the clock (open_js at live: open:<key>;
+# settle_arm at the resize's pointerup: settle:<w-id>); drawn_read <tag> <wait ms> -> ms from that clock to the first
+# screenshot that showed the body drawn, or "" (the reason logged).
+WBD=/data/local/tmp/wb-drawn.sh
+drawn_setup() {
+  "$A" push "$here/wb-drawn.sh" "$WBD" >/dev/null 2>&1 && "$A" push "$here/window-render.py" /data/local/tmp/window-render.py >/dev/null 2>&1 &&
+    sh_ "cp /data/local/tmp/window-render.py /data/powos/root/tmp/window-render.py; chmod 644 /data/powos/root/tmp/window-render.py; chmod 755 $WBD" ||
+    log "drawn: wb-drawn.sh not pushed - open-drawn/resize-settle will read -"
+}
+drawn_watch() { sh_ "nohup sh $WBD $1 $2 >/dev/null 2>&1 &"; }
+drawn_read() {
+  local o; o=$(sh_ "sh $WBD read $1 $2")
+  case $o in "drawn "*) set -- $o; echo "$2" ;; *) log "drawn $1: ${o:-no answer}" >&2; return 1 ;; esac
+}
+# settle_arm <w-id>: the page logs settle:<w-id>'s go line two frames after the next pointerup (the resize's end).
+settle_arm() {
+  ev "(()=>{document.addEventListener('pointerup',()=>{const e0=Date.now();requestAnimationFrame(()=>requestAnimationFrame(()=>{const b=document.querySelector('.webwindow[data-wwid=\"${1#w}\"] .webwindow-body');if(!b)return;const q=b.getBoundingClientRect(),d=devicePixelRatio;console.info('wb-go settle:${1#w} '+e0+' '+[q.left,q.top,q.right,q.bottom].map(v=>Math.round(v*d)).join(' '))}))},{capture:true,once:true});return 'armed'})()" >/dev/null
 }
 # blank_check <w-id> <app>: the "not loading" detector - live and drawn within BLANK_S s, else FAIL with evidence.
 blank_check() {
@@ -222,9 +241,8 @@ trap hard_stop USR1
   kill $all; kill -USR1 $$ ) >/dev/null 2>&1 &
 WDOG=$!
 [ "$(hcall webwindows.list "[]" "l=>'ok'")" = ok ] || { echo "ENV: home has no web windows here (folded, off)"; exit 5; }
-# "[s]team_app_", not steam_app_: pgrep -f matched the su/sh wrapping its own command line (it carries the pattern), so
-# every run SKIPped "a game runs: not now" with no game up (11-07). The bracket keeps the pattern out of that line.
-[ -z "$(sh_ "chroot /data/powos/root /usr/bin/pgrep -f \"[s]team_app_\" | head -1")" ] || e2e_skip "a game runs: not now"
+# A game up: not now (game-lib.sh, the queue's own test - `steam_app_` missed Broforce, 11-10 p2).
+. "$here/game-lib.sh"; g=$(game_up); [ "$g" = none ] || e2e_skip "a game runs${g:+ (Steam app $g)}: not now"
 log "apk $(sh_ "dumpsys package com.powos.app | grep -m1 versionName"), kwin $(sh_ "chroot /data/powos/root /usr/bin/pacman -Q kwin 2>/dev/null")"
 
 # The apps: one the user already runs is left out (its window could be theirs).
@@ -240,6 +258,7 @@ if [ "$GHALF" != 0 ]; then set -- $RUN; h=$((($# + 1) / 2))
   [ -n "$RUN" ] || { echo "ENV: no app left for this half (GHALF $GHALF)"; exit 5; }
 fi
 log "apps: $RUN"
+drawn_setup
 
 # 0. THE STORM (the user 11-07: "rapidly opening and closing apps seeing how responsive everything is measuring
 # framedrops etc"): STRESS_N cycles at user speed (one per ~STRESS_PACE_S s). Cycle k opens app k (round robin over
@@ -387,7 +406,7 @@ IT0=""
 phase open && for a in $RUN; do
   IT_S=$((SECONDS - ${IT0:-$SECONDS})); room "open $a" "$IT_S" || break; IT0=$SECONDS
   eval "k=\$KEY_$a"; chk "open $a"
-  t0=$(nowms); r=$(open_js "$k"); t1=$(nowms)
+  drawn_watch "open:$k" 30000; r=$(open_js "$k")
   id=$(jget "$r" "$k" id); fr=$(jget "$r" "$k" frame); lv=$(jget "$r" "$k" live); fl=$(jget "$r" "$k" failed)
   log "open $a: $r"
   [ -n "$id" ] && [ "$id" != None ] && { MINEW="$MINEW w$id"; eval "ID_$a=w\$id"; }
@@ -397,7 +416,7 @@ phase open && for a in $RUN; do
     fail "NOT LOADING $a: never live in ${LIVE_MAX_S} s${fl:+ ($fl)}"; continue
   fi
   bench open-live "$a" "$lv" "$(linux "$a" && echo $LIVE_LINUX_MS || echo $LIVE_ANDROID_MS)" le
-  d=$(until_drawn "w$id" "open-$a" 6000) && bench open-drawn "$a" $((t1 - t0 + d)) $((lv + DRAWN_SLACK_MS)) le || blank_check "w$id" "$a"
+  d=$(drawn_read "open:$k" 8000) && bench open-drawn "$a" "$d" $((lv + DRAWN_SLACK_MS)) le || blank_check "w$id" "$a"
   step "open-$a" "$a opened as a web window"
 done
 
@@ -410,8 +429,9 @@ phase gestures && for a in $RUN; do
   ev "$WW.then(([m])=>(m.raise(${id#w}),'ok'))" >/dev/null; sleep 0.4
   p=$(barpt "$id"); [ -n "$p" ] && { set -- $p; gesture drag "$id" "$a" "$1" "$2" $(($1 + $(dp 120))) $(($2 + $(dp 60))); sleep 0.6; }
   g=$(wwpt "$id" ".ww-grip-se"); [ -n "$g" ] || g=$(wwpt "$id" "[class*=grip][class*=se]")
-  if [ -n "$g" ]; then set -- $g; gesture resize "$id" "$a" "$1" "$2" $(($1 - $(dp 90))) $(($2 - $(dp 70)))
-    d=$(until_drawn "$id" "resize-$a" 4000) && bench resize-settle "$a" "$d" "$RESIZE_SETTLE_MS" le || blank_check "$id" "$a"
+  if [ -n "$g" ]; then set -- $g; drawn_watch "settle:${id#w}" 20000; settle_arm "$id"
+    gesture resize "$id" "$a" "$1" "$2" $(($1 - $(dp 90))) $(($2 - $(dp 70)))
+    d=$(drawn_read "settle:${id#w}" 8000) && bench resize-settle "$a" "$d" "$RESIZE_SETTLE_MS" le || blank_check "$id" "$a"
   else note "resize $a: no SE grip on its frame"; fi
   for dir in maximise restore; do
     ms=$(ev "$WW.then(([m])=>{const id=${id#w},q=()=>{const e=document.querySelector('.webwindow[data-wwid=\"'+id+'\"] .webwindow-body');if(!e)return '';const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height].map(Math.round).join(' ')},a=q(),t0=performance.now();m.toggleMaximise(id);

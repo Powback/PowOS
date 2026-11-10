@@ -5,6 +5,9 @@ Shots are `screencap` RAW (RGBA after a 12/16-byte header), gzipped on the phone
   window-render.py png SHOT.raw.gz OUT.png [l t r b CROP.png]   a viewable PNG of the shot (and of the body rect)
   window-render.py stats SHOT.raw.gz l t r b                     "dominant=<share> edges=<share> colours=<n>" of the rect
   window-render.py diff A.raw.gz B.raw.gz l t r b                "<share>" of the rect's pixels that differ (any channel > 24)
+  window-render.py drawn SHOT.raw[.gz] l t r b [step]             stats; exit 0 when the rect is a picture, not a flat fill
+                                                                 (dominant < 0.97, colours >= 4) - run ON the phone by
+                                                                 window-bench.sh's wb-drawn.sh (plain raw, step 8)
 The rect is device px, sampled every STEP (2) px each way.
 """
 import gzip
@@ -22,7 +25,13 @@ def load(path):
     # screencap's own warnings ("[Warning] Multiple displays were found...") may come first on its stdout.
     at = blob.find(b"\x1f\x8b")
     if at < 0:
-        raise SystemExit(f"window-render.py: {path}: no gzip stream ({blob[:80]!r})")
+        # Plain raw (on the phone, no gzip): skip any warning text before the header - the offset where w*h*4 plus a
+        # 12/16-byte header is exactly what is left.
+        for off in range(0, min(len(blob) - 8, 2048)):
+            w, h = struct.unpack_from("<II", blob, off)
+            if 0 < w < 10000 and 0 < h < 10000 and len(blob) - off - w * h * 4 in (12, 16):
+                return w, h, memoryview(blob)[len(blob) - w * h * 4:]
+        raise SystemExit(f"window-render.py: {path}: no gzip stream, not a raw screencap ({blob[:80]!r})")
     data = gzip.decompress(blob[at:])
     w, h = struct.unpack_from("<II", data, 0)
     head = len(data) - w * h * 4
@@ -103,6 +112,14 @@ def main(a):
             png(s, a[7], *map(int, a[3:7]))
     elif len(a) == 6 and a[0] == "stats":
         print(stats(load(a[1]), *map(int, a[2:6])))
+    elif len(a) in (6, 7) and a[0] == "drawn":
+        global STEP
+        if len(a) == 7:
+            STEP = int(a[6])
+        st = stats(load(a[1]), *map(int, a[2:6]))
+        print(st)
+        kv = dict(x.split("=") for x in st.split())
+        return 0 if float(kv["dominant"]) < 0.97 and int(kv["colours"]) >= 4 else 1
     elif len(a) == 7 and a[0] == "diff":
         print(diff(load(a[1]), load(a[2]), *map(int, a[3:7])))
     else:

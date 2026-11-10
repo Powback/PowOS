@@ -72,7 +72,7 @@ PRE=""
 for p in kate dolphin; do [ -n "$(us "pgrep -x $p" | tail -1)" ] && PRE="$PRE $p"; done
 [[ $PRE == *kate* ]] && { echo "kate already runs (maybe the user's): not now"; exit 3; }
 [ -n "$PRE" ] && echo "already running:$PRE (only our windows get closed)"
-[ "$(us "pgrep -fc 'SteamLaunch AppId='" | tail -1)" = 0 ] || { echo "a game runs under Steam (the user's): not now"; exit 3; }
+GAME_GATE_PREFIX=""; . "$(dirname "$0")/game-lib.sh"; game_gate   # one test for every check (game-lib.sh)
 sh_ "cmd device_state state 3"; sleep 3; chk unfold
 WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1); W=${WH% *}
 [ "${W:-0}" -gt 2000 ] || { echo "ENV: display is ${WH:-?}, not the unfolded inner screen"; exit 5; }
