@@ -317,20 +317,24 @@ run)
     pchg=; [ -n "$pbase" ] && git cat-file -e "$pbase^{commit}" 2>/dev/null && pchg=$(pkg_names "$pbase" "$h" | paste -sd' ' -)
     [ -n "$pchg" ] && [ "$(cat "$Q/failed-pkgs" 2>/dev/null)" != "$h" ]; }
   # The build runs BESIDE the loop (a KWin build is 20+ min; shell ships must not queue behind it), in its own checkout
-  # ($PK, as the APK's $SA), under the Mac's one heavy build slot. State in $Q/pkgs/: tip, names, pid, log, rc.
+  # ($PK, as the APK's $SA); build-pkgs.sh queues on the Mac's one heavy build slot. State in $Q/pkgs/: tip, names, pid, log, rc.
   PK=${POWOS_PKGS_RUN:-$POWOS_RUN_ROOT/ship-runner-pkgs}
   pkgs_alive() { [ -d "$Q/pkgs" ] && [ ! -f "$Q/pkgs/rc" ] || return 1
     kill -0 "$(cat "$Q/pkgs/pid" 2>/dev/null)" 2>/dev/null && return 0
-    echo 4 > "$Q/pkgs/rc"; return 1; }
+    # Gone without an rc: died with its runner (rc 4, it goes again). noclobber: a build that wrote its rc and exited
+    # between the two checks above keeps its own rc (a finished build was reaped as "stopped" and built twice).
+    (set -C; echo 4 > "$Q/pkgs/rc") 2>/dev/null; return 1; }
   pkgs_out() { pkgs_alive || [ -f "$Q/pkgs/rc" ]; }
   # pkgs_pending: a build out, or one due - the rooted deploy waits for it (it installs from out/pkgs).
   pkgs_pending() { pkgs_out || pkgs_due; }
-  # pkgs_build NAME...: in $PK - build-pkgs.sh (heavy build slot), publish-repo.sh ([powos] on android.pow: the non-root
+  # pkgs_build NAME...: in $PK - build-pkgs.sh (takes the heavy build slot itself), publish-repo.sh ([powos] on android.pow: the non-root
   # phones' phone-update.sh), then the new builds into the ship checkout's out/pkgs, where the rooted deploy finds them.
   # SHIP_PKGS_BUILD replaces the build + publish (tests).
   pkgs_build() {
     if [ -n "${SHIP_PKGS_BUILD:-}" ]; then $SHIP_PKGS_BUILD "$@" || return
-    else tools/agents/build-slot.sh "build-pkgs ship $*" -- targets/android/build-pkgs.sh "$@" && targets/android/publish-repo.sh || return; fi
+    # build-pkgs.sh takes the heavy build slot itself, per package: wrapping it in build-slot.sh too deadlocks (the outer
+    # holder waits on its own inner request forever, 11-10).
+    else targets/android/build-pkgs.sh "$@" && targets/android/publish-repo.sh || return; fi
     local n f; mkdir -p "$SR/targets/android/out/pkgs"
     for n in "$@"; do f=$(sh targets/android/tools/newest-pkgs.sh targets/android/out/pkgs "$n")
       [ -n "$f" ] && cp -p "$f" "$SR/targets/android/out/pkgs/" && echo "pkgs: ${f##*/} -> the ship checkout"; done; }

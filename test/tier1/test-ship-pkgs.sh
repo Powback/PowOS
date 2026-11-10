@@ -122,6 +122,11 @@ wait_for 'false' 4
 land targets/android/pkgs/kwin/PKGBUILD "$(printf 'pkgname=kwin\npkgrel=3.78')" "fixed kwin"; req --note "fix"; tf=$(tip)
 wait_for "grep -qx 'PKGS $tf kwin' \"\$LOG\"" 30 && wait_for "[ -e \"$SRP/kwin-1.0-3.78-aarch64.pkg.tar.xz\" ]" 5 && ok "the fix builds" || { bad "fix not built"; cat "$LOG"; tail -8 "$Q/runner.log"; }
 
+# 4. The real build path never wraps build-pkgs.sh in build-slot.sh: build-pkgs.sh takes the heavy slot itself, so an
+#    outer holder waits on its own inner request forever (11-10: a hand-run kwin build sat 50 min that way).
+grep -nE 'build-slot\.sh[^#]*build-pkgs\.sh' "$src/tools/phone/ship.sh" | grep -v '^[0-9]*: *#' && bad "ship.sh wraps build-pkgs.sh in build-slot.sh (deadlock)" ||
+  ok "build-pkgs.sh is not wrapped in build-slot.sh"
+grep -q 'build-slot' "$src/targets/android/build-pkgs.sh" && ok "build-pkgs.sh takes the slot itself" || bad "build-pkgs.sh no longer takes the build slot - ship.sh's packages build runs unslotted"
 for _ in $(seq 15); do [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 1; done
 echo "---"
 [ "$fails" = 0 ] && { echo "ALL PASS"; exit 0; } || { echo "$fails FAILED"; exit 1; }
