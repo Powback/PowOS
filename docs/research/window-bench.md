@@ -80,6 +80,24 @@ now runs as `--round R --part K --of 4` (1 storm | 2 open gestures switch close 
 that would start past it FAILs naming it, the storm stops starting cycles at it (FAIL "k of N cycles"), and three
 never-live launches in a row end the storm (FAIL). Every part ends with a verdict, PASS or a named FAIL.
 
+## 11-10 close-host and the part 1/2 timeouts (agent/close-host)
+
+- **close-host 1.5-3 s was the check, not the close.** p1 part 3 (05:38-05:39): calc's touch reached the app at
+  05:38:51.556 (PowosShade), the host closed window 10 at .566 and task 3246 was removed at .594: 38 ms touch to task
+  gone; settings 05:39:02.235 -> .275, 40 ms; Linux windows: KWin quit and "4/4" in 1 ms. The bench started its clock
+  on the Mac before `tap` (offpill's `dumpsys window windows` + `input tap`'s start) and polled `webwindows.list` from
+  the Mac, each poll a CDP hop of 2-8 s at Mac load 35. Now timed in the page: pointerdown -> the host's list (the
+  bridge, ~10 ms a call) no longer has it (`arm_js`/`hostgone`).
+- **Storm close "-" every cycle:** the page's 2 s limit ran from the arming, and offpill + `input tap` took > 2 s.
+  The limit now runs from the pointerdown (tier1 `test-window-bench-arm.sh`, control included).
+- **Part 1 timeout:** a storm cycle took 58 s (switch/close each polled up to 10 times, a CDP hop each) and the fixed
+  25 s left for the after step was 70+ s short. Reads are one waiting page call; the room kept is 2x the measured
+  leak count + 15 s, and a cycle starts only when the last cycle's length fits.
+- **Part 2 timeout:** five gesture rounds of 35-50 s each; `phase` checked only the phase's start. `room` now checks
+  each open/gestures/close item against the last one's length and FAILs "out of budget" instead of a 300 s kill.
+- Environment, not fixed here: one CDP eval is 2-8 s at Mac load ~35, setup (unfold, lock, home) took 2 min of
+  part 1, and `drawn`/resize-settle are Mac-clock screencap polls (inflated the same way).
+
 ## 11-10 baseline (WINDOWS_FIX_PLAN.md 0.5, 0.6): every window check's last verdict
 
 Read from the verify queue (`~/.cache/powos-verify-queue/runner.log` and `done/*.log`), 11-07..11-10. No window check

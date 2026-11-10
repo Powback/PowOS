@@ -54,6 +54,13 @@ if [ -z "$PHASES" ]; then
   else PHASES="storm open gestures switch rotate fold close five"; fi
 fi
 BENCH_BUDGET_S=${BENCH_BUDGET_S:-255}; T0S=$SECONDS
+# room <what> <s>: budget left to start one more item of a phase loop that should take <s> s (the last one's length);
+# else a FAIL naming it. phase() alone checked only a phase's start, so part 2's five 35-50 s gesture rounds ran past
+# the 300 s kill with no verdict (11-10 05:35, "FAIL timeout at step: gestures settings").
+room() {
+  [ $((SECONDS - T0S + ${2:-0})) -lt "$BENCH_BUDGET_S" ] && return 0
+  fail "out of budget: $1 not started, $((SECONDS - T0S)) s in, the last one took ${2:-0} s (BENCH_BUDGET_S $BENCH_BUDGET_S)"; return 1
+}
 # phase <name>: this part runs it, and there is budget left to start it (else a FAIL naming it, not a kill).
 phase() {
   [[ " $PHASES " == *" $1 "* ]] || return 1
@@ -215,19 +222,35 @@ leakstate() {   # "pagewins hostwins wwlayers tasks pss_kb"
   ps=$(sh_ "dumpsys meminfo com.powos.app" | awk '/TOTAL PSS:/{print $3; exit} /^ *TOTAL /{print $2; exit}')
   echo "$pw $hw $ly $tk ${ps:-0}"
 }
+# arm_js <var> <cond> [limit ms]: JS that has the page time the next tap - from its pointerdown (the page's clock) until
+# <cond> (an async JS function -> bool) holds, in ms -> window.<var>; "-" when it doesn't hold <limit> (2000) ms after the
+# tap, or no tap came in 30 s. The limit counts from the tap, not the arming: under Mac load the hops between arming and
+# the tap (offpill's dumpsys, `input tap`'s start) took > 2 s, so every storm close read "-" (11-10 p1: "close - ms"
+# in both cycles). A newer arming of the same var ends the older one (no late write into the next measurement).
+arm_js() {
+  printf '%s' "(()=>{const V='$1',A=(window.__wbArm=window.__wbArm||{}),g=(A[V]=(A[V]||0)+1),C=$2;window[V]=null;let t0=0;const d=e=>{t0=e.timeStamp};document.addEventListener('pointerdown',d,{capture:true,once:true});const t1=performance.now();const end=v=>{document.removeEventListener('pointerdown',d,{capture:true});if(A[V]===g)window[V]=v};(async()=>{for(;;){if(A[V]!==g)return;if(t0&&await C())return end(String(Math.round(performance.now()-t0)));const n=performance.now();if(t0?n-t0>${3:-2000}:n-t1>30000)return end('-');await new Promise(r=>requestAnimationFrame(r))}})();return 'armed'})()"
+}
+# The page and host conditions arm_js times: its frame gone from the page; gone from the host's list (webwindows.list,
+# the bridge from the page - the host's close on the phone's clock, not the Mac's: polled from the Mac each read was a
+# CDP hop of 2-8 s at load 35 and the tap's own `input tap` start, so close-host read 1.5-3 s for a close the host
+# finished 30 ms after the touch, 11-10 05:38:51.556 -> .594 for calc).
+pagegone() { printf '%s' "async()=>!document.querySelector('.webwindow[data-wwid=\"${1#w}\"]')"; }
+hostgone() { printf '%s' "async()=>{const b=await importShim('./bridge.ts');const l=await b.powos.webwindows.list();return !l.some(w=>w.id===${1#w})}"; }
+ontop() { printf '%s' "async()=>{const [m]=await $WW;const t=m.webWins.value.at(-1);return !!t&&t.id===${1#w}}"; }
 # storm_switch <w-id>: a tap on its bar -> ms until it is on top ("-": not on top in 2 s, or no bar on screen).
 storm_switch() {
   local p; p=$(barpt "$1"); [ -n "$p" ] || { echo -; return; }
-  ev "$WW.then(([m])=>{window.__wbSw=null;let t0=0;document.addEventListener('pointerdown',e=>{t0=e.timeStamp},{capture:true,once:true});const t1=performance.now();const f=()=>{const top=m.webWins.value.at(-1);if(t0&&top&&top.id===${1#w}){window.__wbSw=String(Math.round(performance.now()-t0));return}if(performance.now()-t1>2000){window.__wbSw='-';return}requestAnimationFrame(f)};requestAnimationFrame(f);return 'armed'})" >/dev/null
+  ev "$(arm_js __wbSw "$(ontop "$1")")" >/dev/null
   set -- $p; sh_ "input tap $1 $2"; storm_read __wbSw
 }
-# storm_read <var>: the page's armed measurement once it resolved (up to ~2.5 s; it gives "-" itself after 2 s).
-storm_read() { local v i; for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.25; v=$(ev "String(window.$1)"); [ "$v" != null ] && break; done; echo "${v:--}"; }
+# storm_read <var> [max ms]: the page's armed measurement once it resolved - one page call that waits for it (it was up to
+# ten polls, each a CDP hop of 2-8 s under Mac load: one storm cycle took 58 s, 11-10 p1).
+storm_read() { local v; v=$(ev "new Promise(ok=>{const t=performance.now();const f=()=>{const v=window.$1;if(v!=null)return ok(String(v));if(performance.now()-t>${2:-6000})return ok('-');setTimeout(f,25)};f()})"); echo "${v:--}"; }
 # storm_close <w-id>: a tap on its close button -> ms until its frame is gone ("-": no button, closed by the host).
 storm_close() {
   local p; p=$(wwpt "$1" .ww-close)
   [ -n "$p" ] || { hcall webwindows.close "[${1#w}]" "()=>'ok'" >/dev/null; echo -; return; }
-  ev "(()=>{window.__wbCl=null;let t0=0;document.addEventListener('pointerdown',e=>{t0=e.timeStamp},{capture:true,once:true});const t1=performance.now();const f=()=>{if(t0&&!document.querySelector('.webwindow[data-wwid=\"${1#w}\"]')){window.__wbCl=String(Math.round(performance.now()-t0));return}if(performance.now()-t1>2000){window.__wbCl='-';return}requestAnimationFrame(f)};requestAnimationFrame(f);return 'armed'})()" >/dev/null
+  ev "$(arm_js __wbCl "$(pagegone "$1")")" >/dev/null
   set -- $p; offpill "$1" "$2" "close" && sh_ "input tap $1 $2"; storm_read __wbCl
 }
 # storm_cycle <i> <app>: open it, switch to the window the last cycle opened (PREVID) and close that; one storm.part row.
@@ -292,16 +315,20 @@ storm() {
   local apps=() a i S0
   for a in $RUN; do apps+=("$a"); done
   [ ${#apps[@]} -ge 1 ] || return 0
-  chk "storm: leaks before"; S0=$(leakstate); log "storm: before (page host layers tasks pss) $S0"
+  local L0=$SECONDS; chk "storm: leaks before"; S0=$(leakstate); log "storm: before (page host layers tasks pss) $S0"
   sh_ "dumpsys gfxinfo com.powos.app reset" >/dev/null
   printf 'cycle\tapp\tframe_ms\tlive_ms\tswitch_ms\tclose_ms\tdrop\tjank\tp95\tp99\tfps\n' > "$OUT/storm.tsv"
   # home's frames through the whole storm, marked per cycle (window.__wbS).
   ev "(()=>{const S=window.__wbS={t:[],m:[],on:true};const f=n=>{S.t.push(n);if(S.on)requestAnimationFrame(f)};requestAnimationFrame(f);return 'on'})()" >/dev/null
-  PREVID=""; local dead=0 ran=0
-  # Room kept for the storm's own frames/trend/leak reads (~25 s) inside the part's budget.
+  PREVID=""; local dead=0 ran=0 c0 cyc_s=0 after_s
+  # Room kept for the storm's own frames/trend/leak reads inside the part's budget: twice what the leak count before
+  # took (it is the same reads again, plus the frames and the screenshot), at least 25 s - a fixed 25 s left the after
+  # step 70+ s short at Mac load 35 and the part was killed at 300 s with no verdict (11-10 05:13:37). A cycle starts
+  # only when it fits, at the last cycle's length.
+  after_s=$(( 2 * (SECONDS - L0) + 15 )); [ $after_s -ge 25 ] || after_s=25
   for i in $(seq 1 "$STRESS_N"); do
-    [ $((SECONDS - T0S)) -lt $((BENCH_BUDGET_S - 25)) ] || break
-    chk "storm $i"; a=${apps[$(((i - 1) % ${#apps[@]}))]}; storm_cycle "$i" "$a"; ran=$i
+    [ $((SECONDS - T0S + cyc_s)) -lt $((BENCH_BUDGET_S - after_s)) ] || break
+    c0=$SECONDS; chk "storm $i"; a=${apps[$(((i - 1) % ${#apps[@]}))]}; storm_cycle "$i" "$a"; ran=$i; cyc_s=$((SECONDS - c0))
     # A never-live launch costs LIVE_MAX_S; three in a row is the verdict (NOT LOADING), not a reason to time out.
     if tail -1 "$OUT/storm.part" | cut -f4 | grep -qx -- -; then dead=$((dead + 1)); else dead=0; fi
     [ $dead -ge 3 ] && { fail "storm stopped at cycle $i: three launches in a row never went live"; break; }
@@ -315,7 +342,9 @@ storm() {
 [ "${STRESS_N:-20}" -gt 0 ] && phase storm && storm
 
 # 1. open, one at a time (cold for Linux: no process yet), and the not-loading detector on each.
+IT0=""
 phase open && for a in $RUN; do
+  IT_S=$((SECONDS - ${IT0:-$SECONDS})); room "open $a" "$IT_S" || break; IT0=$SECONDS
   eval "k=\$KEY_$a"; chk "open $a"
   t0=$(nowms); r=$(open_js "$k"); t1=$(nowms)
   id=$(jget "$r" "$k" id); fr=$(jget "$r" "$k" frame); lv=$(jget "$r" "$k" live); fl=$(jget "$r" "$k" failed)
@@ -332,8 +361,10 @@ phase open && for a in $RUN; do
 done
 
 # 2. drag + resize + maximise/restore on each window, frame-timed.
+IT_S=0
 phase gestures && for a in $RUN; do
-  eval "id=\${ID_$a:-}"; [ -n "$id" ] || continue; chk "gestures $a"
+  eval "id=\${ID_$a:-}"; [ -n "$id" ] || continue
+  room "gestures $a" "$IT_S" || break; IT0=$SECONDS; chk "gestures $a"
   hcall webwindows.list "[]" "()=>'ok'" >/dev/null
   ev "$WW.then(([m])=>(m.raise(${id#w}),'ok'))" >/dev/null; sleep 0.4
   p=$(barpt "$id"); [ -n "$p" ] && { set -- $p; gesture drag "$id" "$a" "$1" "$2" $(($1 + $(dp 120))) $(($2 + $(dp 60))); sleep 0.6; }
@@ -347,7 +378,7 @@ return new Promise(ok=>{let last=a,same=0;const f=()=>{const t=performance.now()
     bench "$dir" "$a" "$ms" "$MAX_MS" le
     d=$(until_drawn "$id" "$dir-$a" 4000) && log "$dir $a: drawn again ${d} ms after (Mac clock)" || blank_check "$id" "$a"
   done
-  step "gestures-$a" "$a dragged, resized, maximised and restored"
+  step "gestures-$a" "$a dragged, resized, maximised and restored"; IT_S=$((SECONDS - IT0))
 done
 
 # 3. switching: a tap on the lower of two windows' bars puts it on top. The host's layer order check (SurfaceFlinger's
@@ -360,9 +391,9 @@ set -- $RUN; if [ $# -ge 2 ] && phase switch; then
     for pair in "$i1 $i2 $1" "$i2 $i1 $2"; do set -- $pair; chk switch
       ev "$WW.then(([m])=>(m.raise(${2#w}),'ok'))" >/dev/null; sleep 0.5
       p=$(barpt "$1"); [ -n "$p" ] || { note "switch: $1's bar not on screen (under the other)"; continue; }
-      ev "$WW.then(([m])=>{window.__wbSw=null;let t0=0;const d=e=>{t0=e.timeStamp};document.addEventListener('pointerdown',d,{capture:true,once:true});const t1=performance.now();const f=()=>{const top=m.webWins.value.at(-1);if(t0&&top&&top.id===${1#w}){window.__wbSw=String(Math.round(performance.now()-t0));return}if(performance.now()-t1>3000){window.__wbSw='-';return}requestAnimationFrame(f)};requestAnimationFrame(f);return 'armed'})" >/dev/null
-      set -- $p; tap "$1" "$2" "the lower window's bar"; sleep 0.8
-      bench switch "$3" "$(ev 'String(window.__wbSw)')" "$SWITCH_MS" le
+      ev "$(arm_js __wbSw "$(ontop "$1")" 3000)" >/dev/null
+      set -- $p "$1" "$3"; tap "$1" "$2" "the lower window's bar"
+      bench switch "$4" "$(storm_read __wbSw)" "$SWITCH_MS" le
     done
     # The order check, once per raise: on, raise each in turn (the check runs 300 ms after the apply), off again.
     sh_ "setprop debug.powos.ww_order_check 1"; OCON=1
@@ -406,16 +437,18 @@ if [ $FOLD = 1 ] && phase fold; then chk fold
   step unfolded "folded and unfolded"
 fi
 
-# 6. close every window by its close button, timed in the page.
+# 6. close every window by its close button, timed in the page: frame gone from the page, and gone from the host's
+# list (both from the tap's pointerdown, on the phone's clock - see hostgone).
+IT0=""
 phase close && CLOSED=1 && for a in $RUN; do
-  eval "id=\${ID_$a:-}"; [ -n "$id" ] || continue; chk "close $a"
+  eval "id=\${ID_$a:-}"; [ -n "$id" ] || continue
+  IT_S=$((SECONDS - ${IT0:-$SECONDS})); room "close $a" "$IT_S" || break; IT0=$SECONDS; chk "close $a"
   ev "$WW.then(([m])=>(m.raise(${id#w}),'ok'))" >/dev/null; sleep 0.4
   p=$(wwpt "$id" .ww-close); [ -n "$p" ] || { note "close $a: no close button on screen"; continue; }
-  ev "(()=>{window.__wbCl=null;let t0=0;document.addEventListener('pointerdown',e=>{t0=e.timeStamp},{capture:true,once:true});const t1=performance.now();const f=()=>{if(t0&&!document.querySelector('.webwindow[data-wwid=\"${id#w}\"]')){window.__wbCl=String(Math.round(performance.now()-t0));return}if(performance.now()-t1>3000){window.__wbCl='-';return}requestAnimationFrame(f)};requestAnimationFrame(f);return 'armed'})()" >/dev/null
-  t0=$(nowms); set -- $p; tap "$1" "$2" "$a's close button"
-  hg=-; for _ in $(seq 1 25); do [ "$(wwhost "$id" gone)" = true ] && { hg=$(($(nowms) - t0)); break; }; sleep 0.1; done
-  bench close "$a" "$(ev 'String(window.__wbCl)')" "$CLOSE_MS" le
-  bench close-host "$a" "$hg" "$CLOSE_HOST_MS" le
+  ev "[$(arm_js __wbCl "$(pagegone "$id")" 3000),$(arm_js __wbHg "$(hostgone "$id")" "$((CLOSE_HOST_MS * 3))")].join()" >/dev/null
+  set -- $p; tap "$1" "$2" "$a's close button"
+  bench close "$a" "$(storm_read __wbCl)" "$CLOSE_MS" le
+  bench close-host "$a" "$(storm_read __wbHg)" "$CLOSE_HOST_MS" le
 done
 # Only a close phase that ran hands the windows off; otherwise restore_bench closes what this part opened.
 [ "${CLOSED:-0}" = 1 ] && { MINEW=""; sleep 1.5; }
