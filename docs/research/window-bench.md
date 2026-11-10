@@ -107,6 +107,7 @@ to fix for phase 0's "done when" (a verdict within the budget), before any windo
 Numbers (`pf=`, `lag=`, missed vsyncs per resize, the perfetto verdict from `resize-trace.py`): none yet - they come
 from the queued `ww-resize` per-app jobs and window-bench parts 2-3; this section gets them when they land.
 
-The emulator lane (plan 0.2) ran no job from 11-08: its lock held "1 dead-holder", written into the real
-`~/.cache/powos-emu.lock` by `test/tier1/test-emu-lock.sh`, and pid 1 passes `kill -0` as root. Fixed on
-agent/windows-p0 (pid 1 / junk is never a holder; the test uses a private cache dir).
+The emulator lane (plan 0.2) ran no job since 10-28: nobody queued one (`queue.sh add --dev emu` starts its runner;
+two jobs of 10-28 still wait). Its lock also held "1 dead-holder", left in the real `~/.cache/powos-emu.lock` by
+`test/tier1/test-emu-lock.sh`; on the Mac pid 1 fails `kill -0` (EPERM) so it was reclaimed, but as root it would block.
+Hardened on agent/windows-p0 (pid 1 / junk is never a holder; the test uses a private cache dir).

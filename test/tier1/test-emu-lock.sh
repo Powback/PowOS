@@ -2,8 +2,8 @@
 # Test: the emulator lock (tools/emu/emu.sh and tools/phone/verify/queue-emu.sh emu_lock_acquire): a live holder is
 # waited for, a dead one is reclaimed, and pid 1 / junk is never a holder.
 # Runs the REAL functions (extracted from both scripts) against a private XDG_CACHE_HOME: the old version of this test
-# wrote "1 dead-holder" into the real ~/.cache/powos-emu.lock and left it there when pid 1 passed kill -0, which blocked
-# the whole emulator lane from 11-08 (docs/WINDOWS_FIX_PLAN.md 0.2).
+# wrote "1 dead-holder" into the real ~/.cache/powos-emu.lock (found there 11-10, dated 11-08); as root (a container)
+# pid 1 passes kill -0, so such a lock is never reclaimed there (docs/WINDOWS_FIX_PLAN.md 0.2).
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 export XDG_CACHE_HOME; XDG_CACHE_HOME=$(mktemp -d); trap 'rm -rf "$XDG_CACHE_HOME"' EXIT
