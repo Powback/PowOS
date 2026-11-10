@@ -46,14 +46,43 @@ Unverified parts are marked **hypothesis**. Measure before and after (user rule:
 
 The board shows window checks failing by timeout or waiting days for a free phone window. Fix that first.
 
-- [ ] 0.1 List every `ww-*.sh` and window check with its lane (`emu`, `phone`, `emu+phone`) in its `# lanes:` header.
+- [x] 0.1 List every `ww-*.sh` and window check with its lane (`emu`, `phone`, `emu+phone`) in its `# lanes:` header.
+  Done 11-10: `ww-drag-lag.sh`, `game-window.sh` (phone) and `window-dock.sh` (emu phone) had none; the table is in
+  `docs/AGENT-HANDBOOK.md` "The emulator lane" (window-check rows). Libraries (`ww-lib.sh`, `wwc-lib.sh`,
+  `window-lock.sh`) carry no marker, as the handbook's rule says.
 - [ ] 0.2 Move lifecycle and input checks to the emulator lane: `ww-opens`, `ww-close-min`, `ww-clamp`, `ww-stop`,
   `ww-popup-x11`. Linux web windows already draw there (CPU copy path, `docs/research/nonroot-parity.md` 11-04).
-- [ ] 0.3 Keep on the phone only what needs it: `ww-resize`, `ww-glue`, `ww-drag-lag`, `window-bench`, games.
+  **Blocked 11-10, needs the owner's OK for disk:** the lane's AVD has no Linux session. Probed on its snapshot
+  (`emu.sh start`, origin d2bce2f6): no `/data/powos/root`, no `kwin_wayland`, and `/data` is 5.8 GB with 4.7 GB free,
+  so the rootfs (6+ GB unpacked) can't be installed there. The 11-04 proof ran a hand-set-up session that the
+  snapshot never kept (every start is the snapshot of 10-24). The five checks keep `# lanes: phone` until then.
+  Proposal: `emu.sh create` with a 16 GB data partition, the base image and Kate/Dolphin installed through the normal
+  non-root first run, then the snapshot `powos-ready` taken with the session up (the AVD grows from ~14 GB to about
+  26 GB; the Mac has 74 GB free, `emu.sh` refuses below 25 GB). Then flip the five headers to `# lanes: emu phone` and
+  prove each with one `queue.sh add --dev emu` PASS. The lane's lock was also hardened (pid 1 / junk is never a
+  holder) and its tier-1 test no longer writes the real `~/.cache` lock.
+- [x] 0.3 Keep on the phone only what needs it: `ww-resize`, `ww-glue`, `ww-drag-lag`, `window-bench`, games.
+  Done 11-10: these four say `# lanes: phone` (frame timing, missed vsyncs, perfetto, real touch speed), games are
+  refused on the emulator by `queue.sh`'s HW_ONLY; the handbook row marks them phone-only for good.
 - [ ] 0.4 Agree fixed phone test blocks with the user (the phone is the daily driver), and run the phone checks there.
+  **Proposal (11-10, for the owner to accept or change; nothing is switched on yet):**
+  - **Nightly block, 02:00-05:00.** The phone lies unfolded on its charger. The runner takes only that block for the
+    window checks (`ww-resize`, `ww-glue`, `window-bench` parts 1-4, the `ww-*` lifecycle checks until 0.2's emulator
+    lane carries them): about 16 checks of at most 300 s, so at most 80 min a run and two full runs a night (the exit
+    bar's three passes in a row take two nights).
+  - **One daytime block of 20 min**, at a time the owner picks (for example 13:00), for a fix that needs a verdict the
+    same day. Outside both blocks the queue keeps its current rule (2+ idle minutes), for everything else.
+  - **What the owner does:** leave the phone unfolded on the charger at night. The runner wakes it and turns the
+    screen off again after (`window-lock.sh`'s `wl_wake`/`wl_sleep`, as now); Do Not Disturb for the block is new.
+  - **To build when accepted:** a `--block night|day` option for `queue.sh add` (a job waits for its block), and the
+    block hours in one setting on the phone (Settings > Developer), so the owner can move them without an agent.
+  - **Alternative:** a second OnePlus Open as a test device (open decision below). Then no blocks are needed.
 - [ ] 0.5 Baseline run, recorded in `docs/research/window-bench.md`: pass/fail per check, `pf=` and `lag=` from the host's
   `w.f` log, missed vsyncs per resize from `ww-resize.sh`, the perfetto verdict from `resize-trace.py` (still owed).
-- [ ] 0.6 Each failing check on the board gets one line: real bug, check bug, or environment.
+- [x] 0.6 Each failing check on the board gets one line: real bug, check bug, or environment.
+  Done 11-10: seven board tasks got a "0.6" step line; the table is in `docs/research/window-bench.md` "11-10
+  baseline". None of the failures was a judged real bug: they were check bugs or the environment, most of them home's
+  page not answering CDP calls in the runner's window.
 
 Done when: every window check gives a verdict (PASS or a named FAIL) within its budget, on its lane.
 

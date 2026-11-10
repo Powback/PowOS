@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # Web windows: how far a window's content trails its title bar during a move (docs/WEB_WINDOWS.md "Native frame and
 # move"). Needs one web window open on the page on screen (powos_web_windows=1, unfolded).
 #

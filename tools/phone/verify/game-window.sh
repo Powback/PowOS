@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # game-window.sh: read-only check of every running game window (WM_CLASS steam_app_*) in the phone's X session - run
 # after the user launched a game: `tools/phone/root.sh tools/phone/verify/game-window.sh` (runs in the Linux chroot).
 # PASS per window: not minimised (WM_STATE Normal, no _NET_WM_STATE_HIDDEN) and its size = the X screen's (the
