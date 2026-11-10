@@ -4,7 +4,10 @@
 #   tier1  test/tier1/run-all.sh                      (tools/agents/tier1.sh)
 #   gate   the shell gate's headless-Chromium runs    (shell/dev/gate.sh: gate.mjs scenes, shots.mjs renders)
 #   apk    the Android app's assembleDebug, unsigned  (targets/android/build-app.sh; signed on the hub, keys never leave it)
-# Limits: .58 is shared with other projects - these three together stay at 24 of its 32 threads.
+# Limits: .58 is shared with other projects - these three together stay at 24 of its 32 threads. cgroup_parent
+# nomad.slice puts every job under .58's one hard cap for all job work (the user unit nomad.slice: CPUQuota 2400%,
+# MemoryMax 128G, also where Nomad's podman jobs run; PowStation/docs/COMPUTE.md "Hard limits"); without it a job
+# lands in user.slice, uncapped. On the hub (Colima dockerd, cgroupfs driver) it is just a parent cgroup dir.
 # Caches: one Gradle home, one npm cache and the gate's transpile cache per machine (named volumes, shared by every run).
 name: powos-jobs
 
@@ -65,6 +68,7 @@ services:
       context: ${POW_JOB_SRC:?set by tools/jobs/job.sh}
       dockerfile: .jobs/Dockerfile
     image: powos-jobs-tier1:${POW_JOB_TAG:-local}
+    cgroup_parent: nomad.slice
     cpus: 6
     mem_limit: 8g
     environment:
@@ -92,6 +96,7 @@ services:
       context: ${POW_JOB_SRC:?set by tools/jobs/job.sh}
       dockerfile: .jobs/Dockerfile
     image: powos-jobs-gate:${POW_JOB_TAG:-local}
+    cgroup_parent: nomad.slice
     cpus: 10
     mem_limit: 12g
     shm_size: 1g
@@ -110,6 +115,7 @@ services:
       context: ${POW_JOB_SRC:?set by tools/jobs/job.sh}
       dockerfile: .jobs/Dockerfile
     image: powos-jobs-apk:${POW_JOB_TAG:-local}
+    cgroup_parent: nomad.slice
     cpus: 8
     mem_limit: 12g
     # The version stamp (as android-app-dev's build-gradle.sh: minutes since the epoch), set by apk-job.sh.
