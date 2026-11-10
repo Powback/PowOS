@@ -10,7 +10,19 @@
 ID=$1 EXE=$2 EXEC=$3 TAG=$4
 R=/data/powos/root; H=$R/run/powos-app/hyprland.log; C=$R/home/powos/.cache; O=/data/local/tmp/powos-cold-$TAG.out
 now() { echo $(( $(date +%s%N) / 1000000 )); }
-[ -z "$(pidof "$EXE")" ] || { echo "running=1"; exit 3; }
+# A process's start, as "<pid> <starttime ticks>" (pid reuse can't fake it).
+pst() { [ -r /proc/$1/stat ] && echo "$1 $(sed 's/.*) //' /proc/$1/stat | cut -d' ' -f20)"; }
+# Instances this check started in an earlier run (killed by its budget before its restore) are in MARK: closed here and
+# measured cold. Any other instance is the user's: never touched (running=1, exit 3).
+MARK=/data/local/tmp/powos-cold-open.started
+for p in $(pidof "$EXE"); do
+  grep -qxF "$(pst $p)" $MARK 2>/dev/null || { echo "running=1"; exit 3; }
+done
+if [ -n "$(pidof "$EXE")" ]; then
+  echo "leftover=$(pidof "$EXE")"; kill $(pidof "$EXE"); i=0
+  while [ -n "$(pidof "$EXE")" ] && [ $i -lt 60 ]; do sleep 0.05; i=$((i + 1)); done
+  [ -z "$(pidof "$EXE")" ] || kill -9 $(pidof "$EXE"); sleep 0.5
+fi
 L=$(tr '\0' '\n' < /proc/$(pidof kwin_wayland | cut -d' ' -f1)/environ 2>/dev/null | sed -n 's/^LANG=//p')
 syc0=$(cd $C && for f in ksycoca6_*; do echo "$(stat -c %Y "$f") $f"; done)
 k0=$(grep -a -c . $H)
@@ -31,8 +43,13 @@ while [ $(( $(now) - T0 )) -lt 30000 ]; do
 done
 exec_ms=-
 if [ -n "$pid" ] && [ -r /proc/$pid/stat ]; then
-  st=$(sed 's/.*) //' /proc/$pid/stat | cut -d' ' -f20); bt=$(sed -n 's/^btime //p' /proc/stat); hz=$(getconf CLK_TCK 2>/dev/null || echo 100)
-  exec_ms=$(( (bt * 1000 + st * 1000 / hz) - T0 ))
+  pst $pid >> $MARK
+  # starttime counts from boot on the boot clock, as /proc/uptime does: its age read against uptime at one instant,
+  # then placed on our own clock. (btime + starttime mixed the wall clock with the boot clock, which counts deep
+  # sleep: -1008393391 ms on 11-10.)
+  st=$(sed 's/.*) //' /proc/$pid/stat | cut -d' ' -f20); hz=$(getconf CLK_TCK 2>/dev/null || echo 100)
+  n=$(now); up=$(cut -d' ' -f1 /proc/uptime | tr -d .)  # centiseconds
+  exec_ms=$(( (n - T0) - (up * 10 - st * 1000 / hz) ))
 fi
 syc1=$(cd $C && for f in ksycoca6_*; do echo "$(stat -c %Y "$f") $f"; done)
 echo "exec=$exec_ms"; echo "task=${task:--}"; echo "live=${live:--}"; echo "status=${status:--}"; echo "pid=${pid:--}"

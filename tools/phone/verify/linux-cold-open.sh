@@ -31,7 +31,7 @@ WHY=""; STARTED_PIDS=""; NEWTASKS=""
 restore() {
   for p in $STARTED_PIDS; do sh_ "kill $p" >/dev/null; done
   sleep 1; for t in $NEWTASKS; do [ -n "$(sh_ "am stack list | grep -E \"taskId=${t}[^0-9]\"")" ] && sh_ "am stack remove $t"; done
-  sh_ "rm -f /data/local/tmp/powos-cold-*"
+  sh_ "rm -f /data/local/tmp/powos-cold-open.sh /data/local/tmp/powos-cold-*.out"  # not .started: leftovers stay known
   sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"
   echo "restored; artefacts $OUT"
 }
@@ -53,6 +53,7 @@ for a in $APPS; do
   chk "after $a"
   if grep -qx 'running=1' <<<"$r"; then log "$a already runs (maybe the user's): not cold, skipped"; continue; fi
   ran=$((ran + 1))
+  lo=$(sed -n 's/^leftover=//p' <<<"$r"); [ -n "$lo" ] && log "$a: closed this check's own leftover instance (pid $lo) from an earlier run, measured cold"
   g() { sed -n "s/^$1=//p" <<<"$r" | head -1; }
   p=$(g pid); [ "$p" != - ] && [ -n "$p" ] && STARTED_PIDS="$STARTED_PIDS $p"
   NEWTASKS="$NEWTASKS $(comm -13 <(echo "$before") <(tasks) | tr '\n' ' ')"
@@ -60,6 +61,11 @@ for a in $APPS; do
   bench cold-task "$a" "$(g task)" ""
   bench cold-status "$a" "$(g status)" ""
   bench cold-live "$a" "$(g live)" "$COLD_BUDGET_MS"
+  # The first frame is the user's result; cold-status is powos-open-task's "task" reply after its show script ran
+  # through KWin's D-Bus. Status after live is fine (the window is already up); live after status means the reply
+  # came before a frame did.
+  lv=$(g live); stv=$(g status)
+  [ "$lv" != - ] && [ "$stv" != - ] && log "$a: open call returned $((stv - lv)) ms $( [ "$stv" -ge "$lv" ] && echo after || echo BEFORE) the first frame"
   sy=$(g sycoca_rebuilt); [ -n "${sy// /}" ] && log "NOTE $a: this launch rebuilt ksycoca6 cache(s): $sy (a stale cache for the launch's XDG_DATA_DIRS)"
   h=$(g helper); [ -n "$h" ] && log "$a powos-open-task stages:$h"
   "$T/shot.sh" "$OUT/opened-$a.png" >/dev/null 2>&1

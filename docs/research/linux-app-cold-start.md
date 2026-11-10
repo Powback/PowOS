@@ -67,7 +67,7 @@ cache. It skips the placeholder tap itself (it is shown at once, logcat) and so 
 
 ## Still open
 
-- After numbers: the queue run above, after `rooted.sh deploy`. Expected cold-live ~1.5-2 s (0.5 s su/powos-run,
+- 11-10 06:19 after deploy: kate cold-task 299 ms, cold-live 560 ms (PASS, budget 2000), open call "task" at 1554 ms - about 1 s after the first frame: the helper's show-script D-Bus round trip, the user already sees the window. cold-exec was wrong (wall clock vs boot clock), fixed. Dolphin and Konsole were skipped as already running; the check now closes its own leftovers (marker of pid+starttime) and measures them cold.
   0.3 s Python, ~1.2 s Dolphin). If over 2000 ms, the next cut is the Python helper's start (PySide6 import) on the
   launch path: start Dolphin before the KWin script lists the windows when the app has no process.
 - The ten stale `ksycoca6_*` files in `~/.cache` are left alone (no cleanup without an OK).
