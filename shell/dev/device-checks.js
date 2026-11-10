@@ -41,12 +41,17 @@ export async function switcherBackgroundNow(want = "Termux") {
     !s.cards && s.empty !== "No open apps" && `no cards but no "No open apps": ${JSON.stringify(s)}`,
     s.toggle !== `${bg.length} running in background` && `the toggle says "${s.toggle}", the host lists ${bg.length}`,
   ].filter(Boolean);
+  return [...fails, ...(await inspectBackgroundRow(it, want))];
+}
+
+/** Inspect without changing the user's expanded/collapsed choice. */
+async function inspectBackgroundRow(it, want) {
   const toggle = document.querySelector(".recents-bg-toggle");
   const wasOpen = toggle.getAttribute("aria-expanded") === "true";
   try {
     if (!wasOpen) toggle.click();
     await window.__gw.until(() => switcherNow().rows.length > 0, 3000);
-    return [...fails, ...bgRowFails(it, want)];
+    return bgRowFails(it, want);
   } finally {
     if (!wasOpen) document.querySelector(".recents-bg-hide")?.click();
   }
