@@ -79,6 +79,16 @@ The board shows window checks failing by timeout or waiting days for a free phon
   - **Alternative:** a second OnePlus Open as a test device (open decision below). Then no blocks are needed.
 - [ ] 0.5 Baseline run, recorded in `docs/research/window-bench.md`: pass/fail per check, `pf=` and `lag=` from the host's
   `w.f` log, missed vsyncs per resize from `ww-resize.sh`, the perfetto verdict from `resize-trace.py` (still owed).
+  - 11-10 corner/edge resize (`ww-resize.sh`, jobs 20261110-010936 and 20261108-193450, KWin 3.77): 18-36 missed
+    shell vsyncs a drag. Not the main thread: home's main thread only waits (`postAndWait` = `draw-VRI` up to 50-60 ms);
+    the time is WebView's GPU work on home's RenderThread (`WebViewFunctor::drawGl` 20-62 ms frames while the finger
+    moves, 2-5 ms after it lifts) and SurfaceFlinger GPU-compositing every frame (56/56, RenderEngine up to 14 ms),
+    with a Broforce left running beside it in every run (1.0-2.5 cores of CPU and its GPU work). **Hypothesis:** the
+    per-move rewrite of `.page-under`'s full-screen CSS mask (`resizeLive` -> `writeMask`) re-rasters a 2268x2440 mask
+    and its render surface each frame. The check now traces the `webview` atrace category (Chromium's slices inside
+    drawGl) and names other busy processes on the FAIL line ("load:"), so the next run decides it; fix after that.
+    The check also ends inside its budget (`WWR_DEADLINE_S`, 250 s: a gesture it can't finish is a "FAIL budget" line)
+    and its record pass works again (ffmpeg 9 dropped `-vsync`: "record: no frames" on every run).
 - [x] 0.6 Each failing check on the board gets one line: real bug, check bug, or environment.
   Done 11-10: seven board tasks got a "0.6" step line; the table is in `docs/research/window-bench.md` "11-10
   baseline". None of the failures was a judged real bug: they were check bugs or the environment, most of them home's

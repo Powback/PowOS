@@ -30,6 +30,12 @@
 #               "late" (home's buffer not GPU-done 2 ms before it: the shell's layout/paint/render) or "held" (it was ready,
 #               the display showed it later: downstream of the shell - SF, a transaction, the display).
 #   WWR_APPS="kate dolphin calc" (default) | any subset;  WWR_REC=0 skips the record pass;  WWR_TRACE=0 no perfetto
+#   WWR_DEADLINE_S (default 250): a gesture that can't finish by then isn't started ("FAIL budget: ... not measured")
+#               and the page calls answer at once past it, so a FAIL lands with its clean-up inside the queue's 300 s
+#               (11-10 01:09: kate alone took ~280 s - ~95 s a gesture with its traces and recording - then the
+#               runner's kill; the default three apps never fit). Queue one app per job: WWR_APPS=kate.
+#   load        any other process busy for over half the drag (CPU over the drag, from the trace) is named on the
+#               FAIL line: 11-10 every kate drag ran beside a Broforce left running (1.0-2.5 cores and its GPU work).
 # Exit: 0 PASS; 1 FAIL; 3 not now (a real touch, busy, folded, a game up); 5 can't run.
 set -uo pipefail
 # WWR_HERE: the tools/phone/verify to use when this file runs from a copy outside a checkout (a check queued before
@@ -48,11 +54,16 @@ irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /p
 log() { echo "$*" | tee -a "$OUT/log.txt"; }
 fail=0
 bad() { log "FAIL $*"; fail=1; }
+# The steps' deadline (ww-lib.sh's WW_DEADLINE: page calls answer "ERR deadline" past it); a gesture costs ~GEST_S.
+WW_DEADLINE=${WWR_DEADLINE_S:-250}
+export CDP_TIMEOUT_S=${CDP_TIMEOUT_S:-20}
+GEST_S=$(( 60 + 30 * ${WWR_REC:-1} ))
 . "$here/ww-lib.sh"
 plaunch() { ev "importShim('./state.ts').then(m=>m.launch('$1')).then(()=>'ok',e=>'ERR '+e)"; }
 MINE=""
 restore() {
   local w
+  WW_DEADLINE=$((SECONDS + 40))   # the clean-up's own calls, past the steps' deadline
   for w in $MINE; do hcall webwindows.close "[${w#w}]" "v=>String(v)" >/dev/null; done
   case " $APPS " in *" kate "*) [ "${KATE_MINE:-0}" = 1 ] && us "pkill -x kate" ;; esac
   case " $APPS " in *" dolphin "*) [ "${DOLPHIN_MINE:-0}" = 1 ] && us "pkill -x dolphin" ;; esac
@@ -122,7 +133,7 @@ kwin_since() { rs "tail -n +$(( $1 + 1 )) $KLOG | grep -aE 'window task .* (fram
 # perfetto around one way (window-rec.sh's sources, the SF frame timeline among them); trace_off pulls it to $1.
 TCFG=$OUT/trace.cfg
 printf '%s\n' 'buffers { size_kb: 32768 fill_policy: RING_BUFFER }' 'buffers { size_kb: 4096 fill_policy: DISCARD }' \
-  'data_sources { config { name: "linux.ftrace" ftrace_config { ftrace_events: "sched/sched_switch" ftrace_events: "sched/sched_wakeup" ftrace_events: "power/cpu_frequency" atrace_categories: "gfx" atrace_categories: "view" atrace_categories: "input" atrace_apps: "com.powos.app" } } }' \
+  'data_sources { config { name: "linux.ftrace" ftrace_config { ftrace_events: "sched/sched_switch" ftrace_events: "sched/sched_wakeup" ftrace_events: "power/cpu_frequency" atrace_categories: "gfx" atrace_categories: "view" atrace_categories: "webview" atrace_categories: "input" atrace_apps: "com.powos.app" } } }' \
   'data_sources { config { name: "android.surfaceflinger.frametimeline" } }' \
   'data_sources { config { name: "linux.process_stats" target_buffer: 1 process_stats_config { scan_all_processes_on_start: true } } }' \
   'duration_ms: 10000' > "$TCFG"
@@ -148,6 +159,22 @@ way() {
   sh_ "dumpsys SurfaceFlinger --latency \"$CL\"" > "$OUT/$tag-content.lat"
 }
 
+# cpu_load <app> <tag>: the processes outside the shell's own pipeline busy for over half of either way's drag
+# (resize-trace.py's "CPU over the drag (D ms): name ms, ..." lines in summary.txt), "name N ms of D ms; ..." or "".
+cpu_load() { grep -h "^$2 .* trace: CPU over the drag" "$OUT/summary.txt" 2>/dev/null | python3 -c '
+import re, sys
+own = re.compile(r"com\.powos\.app|surfaceflinger|webview|system_server|app_process|logd|kwin|Xwayland|perfetto|traced|"
+                 r"composer|allocator|android\.hardware|" + re.escape(sys.argv[1]), re.I)
+out = []
+for l in sys.stdin:
+    m = re.search(r"CPU over the drag \((\d+) ms\): (.*)", l)
+    if not m: continue
+    d = int(m.group(1))
+    for part in m.group(2).split(", "):
+        name, _, ms = part.rpartition(" ")
+        if ms.isdigit() and int(ms) * 2 > d and not own.search(name): out.append(f"{name} {ms} ms of {d} ms")
+print("; ".join(dict.fromkeys(out)))' "$1"; }
+
 # record <x1 y1 x2 y2> <tag> <sample l t r b, device px>: the gesture under screenrecord, blank frames counted.
 record() {
   local x1=$1 y1=$2 x2=$3 y2=$4 tag=$5 sl=$6 st=$7 sr=$8 sb=$9
@@ -170,9 +197,11 @@ k = vw / sw
 cl, ct, cw, ch = int(l * k), int(t * k), max(8, int((r - l) * k)), max(8, int((b - t) * k))
 W = 96; H = max(8, int(ch * W / cw))
 raw = subprocess.run(["ffmpeg", "-v", "error", "-i", f, "-vf", f"crop={cw}:{ch}:{cl}:{ct},scale={W}:{H},format=gray",
-                      "-vsync", "passthrough", "-f", "rawvideo", "-"], capture_output=True).stdout
+                      "-fps_mode", "passthrough", "-f", "rawvideo", "-"], capture_output=True)
+err = raw.stderr.decode(errors="replace").strip().splitlines(); raw = raw.stdout
 n = W * H; fr = [raw[i:i + n] for i in range(0, len(raw) - n + 1, n)]
-if not fr: print("no frames"); sys.exit()
+# Its reason with it (11-10: ffmpeg 9 had dropped -vsync - "no frames" on every run, nothing said why).
+if not fr: print(f"no frames: crop {cw}x{ch}+{cl}+{ct} of {vw}x{pr['streams'][0].get('height', '?')}: " + (err[-1][:160] if err else "ffmpeg gave no output")); sys.exit()
 ref = fr[0]
 def stats(px):
     m = sum(px) / n; sd = (sum((v - m) ** 2 for v in px) / n) ** .5
@@ -192,6 +221,7 @@ PY
 : > "$OUT/summary.txt"
 SW=$(sh_ "wm size" | grep -oE '[0-9]+x[0-9]+' | tail -1 | cut -dx -f1)
 for app in $APPS; do
+  [ $((SECONDS + 20 + GEST_S)) -gt "$WW_DEADLINE" ] && { bad "budget: $app not measured - ${SECONDS}s in, the deadline is ${WW_DEADLINE}s (queue one app a job: WWR_APPS=$app)"; continue; }
   case $app in
     kate) key=l:org.kde.kate; [ "$(us 'pgrep -xc kate' | tail -1)" = 0 ] && KATE_MINE=1 ;;
     dolphin) key=l:org.kde.dolphin; [ "$(us 'pgrep -xc dolphin' | tail -1)" = 0 ] && DOLPHIN_MINE=1 ;;
@@ -216,6 +246,10 @@ for app in $APPS; do
   log "== $app: window $id ($key), home layer '$HL', content layer '$CL', body $(wwbody "$id")"
   for g in edge corner; do
     case $g in edge) zone=.ww-edge-e; dx=-300; dy=0 ;; corner) zone=.ww-edge-se; dx=-300; dy=-200 ;; esac
+    if [ $((SECONDS + GEST_S)) -gt "$WW_DEADLINE" ]; then
+      bad "budget: $app $g not measured - ${SECONDS}s in, a gesture takes ~${GEST_S}s, the deadline is ${WW_DEADLINE}s (queue one app a job: WWR_APPS=$app)"
+      continue
+    fi
     read -r px py <<<"$(wwpt "$id" "$zone")"
     [ -n "${py:-}" ] || { bad "$app $g: no $zone on screen"; continue; }
     hit=$(wwhit "$id" "$zone" "$px" "$py")
@@ -246,9 +280,12 @@ for app in $APPS; do
     log "$line"; echo "$line" >> "$OUT/summary.txt"
     for w_ in in out; do attrib "$app-$g-$w_" | sed "s/^/$app $g $w_ trace: /" | tee -a "$OUT/summary.txt" >> "$OUT/log.txt"; done
     grep -h "^$app $g .* trace: verdict" "$OUT/summary.txt" | sed 's/^/  /'
-    [ $((mi + mo)) -gt 0 ] && bad "$app $g: $((mi + mo)) missed shell vsyncs while the finger moved (want 0)"
+    load=$(cpu_load "$app" "$app $g")
+    [ $((mi + mo)) -gt 0 ] && bad "$app $g: $((mi + mo)) missed shell vsyncs while the finger moved (want 0)${load:+ - load: $load}"
     [ "$app" != calc ] && read -r kc kd <<<"$kw" && [ "${kc:-0}" -gt 0 ] && [ $((kc - kd)) -gt $((kc / 20 + 1)) ] && bad "$app $g: KWin drew $kd of $kc commits"
-    if [ "$REC" = 1 ]; then
+    if [ "$REC" = 1 ] && [ $((SECONDS + 30)) -gt "$WW_DEADLINE" ]; then
+      bad "budget: $app $g record pass not run - ${SECONDS}s in, the deadline is ${WW_DEADLINE}s"
+    elif [ "$REC" = 1 ]; then
       sleep 0.5
       read -r px py <<<"$(wwpt "$id" "$zone")"; read -r bl bt br bb <<<"$(wwbody "$id")"
       # The part of the body inside the window through the whole drag (it shrinks by dx, dy first), inset 24 px.
