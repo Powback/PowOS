@@ -87,7 +87,7 @@ printf 'captured\\n'
 '''
         result = subprocess.run(['bash', '-c', script], capture_output=True, text=True, timeout=3)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, 'captured\n')
+        self.assertTrue(result.stdout.endswith('WWR_WATCH matched ' + result.stdout.split('WWR_WATCH matched ')[1].split('\n')[0] + '\ncaptured\n'), result.stdout)
 
     def test_first_match_failure_is_bounded(self):
         helper = 'WWR_WATCH_S=1\n' + (V / 'resize-first-match.sh').read_text()
@@ -119,7 +119,7 @@ exit 0
         self.assertNotIn('input swipe $x2 $y2 $x1 $y1', diag)
         self.assertIn('2> "$OUT/$tag-diagnostic.stderr"', diag)
 
-    def device_run(self, stream_active, watch_s='8'):
+    def device_run(self, stream_active, watch_s='8', helper_edit=None):
         """Run diag_device_cmd's exact string through adb-shell -> su -c with stubbed device tools."""
         import os, tempfile
         token = 'WWR_61_76_66555'
@@ -128,20 +128,31 @@ exit 0
             b = Path(d, 'bin'); b.mkdir()
             stubs = {
                 'su': '[ "$1" = -c ] && exec sh -c "$2"',
-                'date': 'case "$1" in +%s%3N) n=$(cat "$D/n" 2>/dev/null || echo 0); echo $((n + 1)) > "$D/n"; [ "$n" = 0 ] && echo 1000 || echo 1100 ;; *) exec /bin/date "$@" ;; esac',
+                # Calls in order: watcher start, matched, BEGIN, END.
+                'date': 'case "$1" in +%s%3N) n=$(cat "$D/n" 2>/dev/null || echo 0); echo $((n + 1)) > "$D/n"; case $n in 0) echo 900 ;; 1) echo 950 ;; 2) echo 1000 ;; *) echo 1100 ;; esac ;; *) exec /bin/date "$@" ;; esac',
                 'getprop': 'echo 0',
                 'input': 'exit 0',
                 'dumpsys': "printf '  Layer [11887] powos-ww-61#11887\\n    bounds={0,0,100,100}\\n'",
-                'logcat': 'case "$*" in *-d*) cat "$D/dump"; exit 0 ;; esac; cat "$D/stream"; exec sleep 30',
+                # Without -T 1 a real logcat replays its buffer first (the 11-10 23:11/23:14 failure).
+                'logcat': 'case "$*" in *-d*) cat "$D/dump"; exit 0 ;; esac; case "$*" in *"-T 1"*) ;; *) cat "$D/backlog" ;; esac; cat "$D/stream"; exec sleep 30',
             }
             for name, body in stubs.items():
                 (b / name).write_text('#!/bin/sh\n' + body + '\n'); (b / name).chmod(0o755)
             Path(d, 'stream').write_text(raw.format(990, 'false', 0) + '\n' + raw.format(995, 'true', 1) + '\n'
                                          + (token + '_ACTIVE\n' if stream_active else ''))
+            # Verbatim lines of the real 23:11 capture (ww-resize-1110-2311), replayed as logcat's buffer.
+            real = ('home LOG :18 WWR_63_88_83918 {"at":1794348772161,"active":false,"epoch":0,"off":false}\n'
+                    'home LOG :18 WWR_63_88_83918 {"at":1794348778204,"active":true,"epoch":1,"off":false}\n'
+                    'home LOG :18 WWR_63_88_83918 {"at":1794348781179,"active":false,"epoch":2,"off":false}\n')
+            Path(d, 'backlog').write_text(real * 40000)
             Path(d, 'dump').write_text(''.join(raw.format(t, 'true', 1) + '\n' for t in (999, 1050, 1101)))
             fn = (V / 'ww-resize.sh').read_text()
             fn = fn[fn.index('diag_device_cmd() {'):]
             fn = fn[:fn.index('\n}\n') + 3]
+            if helper_edit:
+                v = Path(d, 'verify'); v.mkdir()
+                (v / 'resize-first-match.sh').write_text(helper_edit((V / 'resize-first-match.sh').read_text()))
+                fn = fn.replace('$here/resize-first-match.sh', str(v / 'resize-first-match.sh'))
             script = f'here={V}\n' + fn + f'diag_device_cmd {token} 1 2 3 4'
             cmd = subprocess.run(['bash', '-c', script], capture_output=True, text=True, check=True).stdout
             env = dict(os.environ, PATH=f'{b}:' + os.environ['PATH'], D=d, TMPDIR=d, WWR_WATCH_S=watch_s)
@@ -159,6 +170,23 @@ exit 0
         self.assertRegex(out.stdout, r'WWR_WATCH (deadline|read timed out or ended)')
         with self.assertRaisesRegex(ValueError, 'no confirmed resize'):
             m.validate(out.stdout, token, 61, False, True)
+
+    def test_device_command_reaches_live_lines_past_backlog(self):
+        token, out = self.device_run(True, '2')
+        self.assertIn('WWR_WATCH matched', out.stdout)
+        self.assertIn('VALID', m.validate(out.stdout, token, 61, False, True))
+
+    def test_backlog_replay_reproduces_deadline(self):
+        # The pre-fix watcher (no -T 1): stuck in the replayed buffer, the marker after it never reached in time.
+        token, out = self.device_run(True, '2', lambda h: h.replace('logcat -T 1 ', 'logcat '))
+        self.assertIn('WWR_WATCH deadline', out.stdout)
+        self.assertNotIn('WWR_WATCH matched', out.stdout)
+        with self.assertRaisesRegex(ValueError, 'no confirmed resize'):
+            m.validate(out.stdout, token, 61, False, True)
+
+    def test_helper_embeds_in_single_quotes(self):
+        # 74811a87 follow-up: a comment apostrophe ended su -c early (syntax error on the device shell).
+        self.assertNotIn("\'", (V / 'resize-first-match.sh').read_text())
 
     def test_observer_actual_schema(self):
         # Lock this observer to entry()/sizeOf()/geometry(), not an invented export.

@@ -249,7 +249,7 @@ diag_device_cmd() {
       echo WWR_SF_BEGIN; dumpsys SurfaceFlinger; echo WWR_SF_END;
       echo WWR_PROP \$(getprop debug.powos.ww_drag_round); echo WWR_END \$(date +%s%3N); } || echo WWR_ERROR no-confirmed-resize ) &
     watcher=\$!; sleep 0.2; input swipe $x1 $y1 $x2 $y2 3000; wait \${watcher}; sleep 0.3
-    logcat -d -v raw -s PowosShell:I | grep \"$token \"
+    logcat -d -v raw -s PowosShell:I | grep \"$token\"
     '"
 }
 # Separate slow diagnostic replay: device-side log observer waits for confirmed page resize,
