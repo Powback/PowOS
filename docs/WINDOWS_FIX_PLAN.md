@@ -68,11 +68,12 @@ The board shows window checks failing by timeout or waiting days for a free phon
   **Proposal (11-10, for the owner to accept or change; nothing is switched on yet):**
   - **Nightly block, 02:00-05:00.** The phone lies unfolded on its charger. The runner takes only that block for the
     window checks (`ww-resize`, `ww-glue`, `window-bench` parts 1-4, the `ww-*` lifecycle checks until 0.2's emulator
-    lane carries them): about 25 checks of up to 300 s each, so three runs of the exit bar fit in one night.
+    lane carries them): about 16 checks of at most 300 s, so at most 80 min a run and two full runs a night (the exit
+    bar's three passes in a row take two nights).
   - **One daytime block of 20 min**, at a time the owner picks (for example 13:00), for a fix that needs a verdict the
     same day. Outside both blocks the queue keeps its current rule (2+ idle minutes), for everything else.
-  - **What the owner does:** leave the phone unfolded on the charger at night; the runner wakes it, turns Do Not
-    Disturb on for the block and puts the screen and the settings back after (as `window-lock.sh` does now).
+  - **What the owner does:** leave the phone unfolded on the charger at night. The runner wakes it and turns the
+    screen off again after (`window-lock.sh`'s `wl_wake`/`wl_sleep`, as now); Do Not Disturb for the block is new.
   - **To build when accepted:** a `--block night|day` option for `queue.sh add` (a job waits for its block), and the
     block hours in one setting on the phone (Settings > Developer), so the owner can move them without an agent.
   - **Alternative:** a second OnePlus Open as a test device (open decision below). Then no blocks are needed.
