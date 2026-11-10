@@ -52,7 +52,7 @@ settings() {  # settings <K=V,K=V | empty>: the game's extra environment for thi
   "$A" push "$OUT/settings.json" /data/local/tmp/powos-settings.json >/dev/null
   "$A" shell "su -c 'd=\$(dirname $PS); mkdir -p \$d; cp /data/local/tmp/powos-settings.json $PS; chown \$(stat -c %u:%g \$d) $PS; chmod 644 $PS; rm /data/local/tmp/powos-settings.json'"; }
 LOG=/data/powos/root/run/powos-app/hyprland.log
-T0=$(date +%s) BUDGET_S=${BUDGET_S:-300}
+T0=$(date +%s) BUDGET_S=${BUDGET_S:-${QUEUE_BUDGET_S:-300}}  # the queue job's budget (queue.sh exports it)
 # After the window: settle 45 + measure 30 + collecting ~25 + restore ~25 + comparing ~25 s, and a margin (the screen
 # recording's pull + decode only when they fit too: rec below).
 AFTER_WIN_S=${AFTER_WIN_S:-165}
@@ -116,10 +116,23 @@ gus_set || { restore; exit 5; }
 # this run started and puts Steam + the front back, then ends as FAIL timeout (rc 124) with the step it was at. The
 # stopper TERMs the running adb call too, so bash runs this at once instead of after that call. Not for the queue's
 # kill itself: that TERMs the whole tree and gives 10 s, under restore's ~25 s (its game_left closes the game then).
-restored=0
-stopped_mac() { trap '' TERM INT HUP; echo "FAIL timeout: stopped from outside $(date +%T) - closing the game"
-  [ "$restored" = 1 ] || restore; exit 124; }
+restored=0 BF_STEP=start
+stopped_mac() { trap '' TERM INT HUP; echo "FAIL timeout: stopped from outside $(date +%T) at step \"$BF_STEP\" - closing the game"
+  [ "$restored" = 1 ] || restore; echo "FAIL timeout at step: $BF_STEP"; exit 124; }
 trap stopped_mac TERM INT HUP
+# Its own deadline (the game-input-alive pattern, a7821623), for a job queued as bf-pacing.sh itself: at BUDGET_S - 50 s
+# (BF_DEADLINE_S; 0 = none, a caller with its own deadline) a watcher TERMs what this script waits on (adb.sh -> docker
+# exec) and then this script, whose trap above closes the game (~25 s) and ends with the step - never the queue's
+# kill with the game up and no reason (broforce-fps 11-10 02:21: "into a level" took 89 s, killed while measuring).
+DL_S=${BF_DEADLINE_S:-$(( BUDGET_S - 50 ))}
+if [ "$DL_S" -gt 0 ]; then
+  # Its own process (bash -c: $$ there is the watcher, never TERMed with the rest; bash 3.2 has no BASHPID). The TERM
+  # goes first (bash holds it until the adb call returns), then that call's tree: the other order let the script run on.
+  /bin/bash -c 'kids() { local c; for c in $(pgrep -P "$1"); do kids "$c"; done; kill -TERM "$1" 2>/dev/null; }
+    sleep "$2"; kill -0 "$1" 2>/dev/null || exit 0
+    kill -TERM "$1"; for c in $(pgrep -P "$1"); do [ "$c" = $$ ] || kids "$c"; done' _ $$ "$(( T0 + DL_S - $(date +%s) ))" </dev/null >/dev/null 2>&1 &
+  WATCH=$!; trap 'trap "" TERM; c=$(pgrep -P $WATCH); kill $WATCH $c 2>/dev/null' EXIT  # its sleep too
+fi
 i0=$(irq); touched() { [ "$(irq)" != "$i0" ]; }
 abort() { echo "touch $(date +%T) - abort, restoring"; restore; exit 3; }
 # nap <secs>: one phone-side wait that returns early on a touch (bf-nap.sh).
@@ -219,10 +232,14 @@ for mode in "$@"; do
   rec=${BF_REC_S:-}
   if [ -z "$rec" ]; then rec=20; rl=$(( T0 + BUDGET_S - $(date +%s) )); need=$(( 110 + ${REC_COST_S:-110} ))
     [ "$rl" -ge "$need" ] || { rec=0; echo "$mode: no screen recording: ${rl} s of the ${BUDGET_S} s budget left, it needs ${need} s (dup/stale frames not measured)"; }; fi
-  input_inject 32
-  "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof; nohup sh /data/local/tmp/powos-bf-present.sh 30 \"PowosWindowActivity|SurfaceView|powos-direct|powos-ww-[0-9]+-linux|steam_app${WIN_NAME:+|$WIN_NAME}\" /data/local/tmp/bfp $rec >/dev/null 2>&1 &
-    nohup sh /data/local/tmp/powos-bf-prof.sh 30 /data/local/tmp/bfprof >/dev/null 2>&1 &'"
-  pill "$lbl: measuring frames (30 s)"; nap 30
+  # The measurement fits what's left before the deadline: collecting ~25 + restore ~30 + comparing ~25 s after it; 30 s
+  # when it fits, down to 10 s (a verdict on fewer frames, said so) - a slow "into a level" no longer costs the verdict.
+  ms=30; if [ "$DL_S" -gt 0 ]; then ml=$(( T0 + DL_S - $(date +%s) - 80 ))
+    [ "$ml" -lt 30 ] && { ms=$(( ml < 10 ? 10 : ml )); echo "$mode: measuring $ms s, not 30: ${ml} s left before the deadline"; }; fi
+  input_inject $(( ms + 2 ))
+  "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof; nohup sh /data/local/tmp/powos-bf-present.sh $ms \"PowosWindowActivity|SurfaceView|powos-direct|powos-ww-[0-9]+-linux|steam_app${WIN_NAME:+|$WIN_NAME}\" /data/local/tmp/bfp $rec >/dev/null 2>&1 &
+    nohup sh /data/local/tmp/powos-bf-prof.sh $ms /data/local/tmp/bfprof >/dev/null 2>&1 &'"
+  pill "$lbl: measuring frames ($ms s)"; nap $ms
   onscreen || invalid "during the measurement"
   pill "$lbl: collecting the numbers"
   # bf-present (its screen recording) and bf-prof finished, at most 30 s more; then the session log's Xwayland KGSL and

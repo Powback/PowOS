@@ -25,7 +25,15 @@ sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 top() { sh_ "dumpsys activity activities | grep -m1 topResumedActivity"; }
 ev() { "$T/cdp.sh" eval home "$1" 2>&1 | tr -d '\r' | tail -1; }
-meter_get() { ev 'importShim("./bridge.ts").then(b=>b.powos.store.get("perf.meter")).then(v=>JSON.stringify(v??null))'; }
+# cdp.ts prints an eval's value JSON-encoded, so the JSON.stringify'd meter arrives as a quoted string
+# ("{\"on\":true,...}", the 11-10 "unreadable" SKIP): decoded once here to the object's JSON.
+meter_get() {
+  ev 'importShim("./bridge.ts").then(b=>b.powos.store.get("perf.meter")).then(v=>JSON.stringify(v??null))' |
+    python3 -c 'import json,sys; s=sys.stdin.read().strip()
+try: v=json.loads(s)
+except ValueError: v=s
+print(v if isinstance(v,str) else json.dumps(v))'
+}
 meter_set() { ev "importShim('./bridge.ts').then(b=>b.powos.store.set('perf.meter',$1)).then(()=>'ok')" | tr -d '"'; }
 ph() { "$A" shell "su -c 'sh /data/powos/powos-run.sh \"APP=$APP bash /var/tmp/powos-bf-return-phone.sh $1\"'" 2>&1 | grep -v sysvipc | sed -l $'s/\r$//' | tee -a "$R"; }
 

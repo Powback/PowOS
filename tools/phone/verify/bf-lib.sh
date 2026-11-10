@@ -9,7 +9,7 @@ if [ -n "${BF_ADB:-}" ]; then
   # `BF_ADB=$A . bf-lib.sh` sets BF_ADB only while this file is sourced: kept for pill(), which runs later (under
   # set -u, "BF_ADB: unbound variable" failed every bf-pacing/bf-checker/bf-fold job, 2026-10-23 05:02).
   BF_ADB_PATH=$BF_ADB
-  pill() { local b; b=$(printf '%s\n' "$1" | base64 | tr -d '\n')
+  pill() { local b; BF_STEP=$1; b=$(printf '%s\n' "$1" | base64 | tr -d '\n')  # BF_STEP: the step a deadline stop names
     perl -e 'alarm shift; exec @ARGV' 15 "$BF_ADB_PATH" shell "su -c 'sh /data/powos/powos-run.sh \"umask 022; echo $b | base64 -d > /tmp/powos-verify-step\"'" >/dev/null 2>&1
     echo "-- $(date +%T) $1"; }
   # cfg:<x86|arm64> as a check's FIRST argument (bf-pacing.sh, bf-checker.sh): the game runs under that compat tool

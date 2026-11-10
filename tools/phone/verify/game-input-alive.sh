@@ -37,7 +37,7 @@ l0=$(rs "wc -l < $LOG" | tail -1); l0=${l0:-0}
 # keep bf-pacing's `| tr` waiting) - bash runs bf-pacing's trap only once that call returns.
 kids() { local c; for c in $(pgrep -P "$1"); do kids "$c"; done; kill -TERM "$1" 2>/dev/null; }
 dl=$(( T0 + BUDGET_S - 50 ))
-BF_REC_S=0 BUDGET_S=$(( dl - $(date +%s) )) INPUT=touch "$here/bf-pacing.sh" play > "$OUT/bf-pacing.txt" 2>&1 &
+BF_REC_S=0 BF_DEADLINE_S=0 BUDGET_S=$(( dl - $(date +%s) )) INPUT=touch "$here/bf-pacing.sh" play > "$OUT/bf-pacing.txt" 2>&1 &
 # Into the job log as it goes; not a `| tee` / >(tee): that tee would be under bf-pacing's pid and die with kids below.
 pid=$! late=; tail -n +1 -f "$OUT/bf-pacing.txt" & tl=$!
 while kill -0 $pid 2>/dev/null; do
