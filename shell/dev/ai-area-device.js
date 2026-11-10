@@ -4,12 +4,13 @@ export async function aiAreaDevice(step) {
   const S = await G.mod("./state.ts");
   const A = await G.mod("./ui/aiprogress.tsx");
   const P = await G.mod("./ui/powai.tsx");
+  const { aiAgent } = await G.mod("./agents.ts");
   const q = (s) => document.querySelector(s);
   const visible = (s) => (q(s)?.getBoundingClientRect().height ?? 0) > 0;
   const row = (area) => `.ai-left .ais-area-row[data-area="${CSS.escape(area)}"]`;
   const detail = (area) => `.ai-left [data-area-detail="${CSS.escape(area)}"]`;
   const click = async (s) => { if (window.__aiAreaDevice?.touched) throw Error("STOP: user input"); if (!q(s)) throw Error(`missing ${s}`); q(s).click(); await G.sleep(700); };
-  if (step === "open") return aiAreaOpen({ S, A, q, G });
+  if (step === "open") return aiAreaOpen({ S, A, q, G, aiAgent });
   if (step === "setup") return aiAreaSetup({ S, A, P, q, visible, row, G });
   const t = window.__aiAreaDevice;
   if (!t) return ["SKIP: no live board snapshot"];
@@ -21,7 +22,7 @@ export async function aiAreaDevice(step) {
     const open = q('.ai-left .ais-area-row[aria-expanded="true"]');
     if (open) await click(row(open.dataset.area));
     if (t.expanded) await click(row(t.expanded));
-    [S.page.value, S.aiScreen.value, S.aiAgent.value, A.progressFocus.value] = t.saved;
+    [S.page.value, S.aiScreen.value, aiAgent.value, A.progressFocus.value] = t.saved;
     window.removeEventListener("pointerdown", t.onTouch, true);
     delete window.__aiAreaDevice;
     return [];
@@ -87,12 +88,12 @@ async function aiAreaSetup({ S, A, P, q, visible, row, G }) {
 }
 
 /** WorkFeed subscribes only while shown: open first, then wait in the separately hardware-guarded setup step. */
-async function aiAreaOpen({ S, A, q, G }) {
+async function aiAreaOpen({ S, A, q, G, aiAgent }) {
   if (innerWidth < 700) return ["SKIP: unfolded AI layout required; fold state left untouched"];
-  window.__aiAreaDevice = { saved: [S.page.value, S.aiScreen.value, S.aiAgent.value, A.progressFocus.value], expanded: q('.ai-left .ais-area-row[aria-expanded="true"]')?.dataset.area };
+  window.__aiAreaDevice = { saved: [S.page.value, S.aiScreen.value, aiAgent.value, A.progressFocus.value], expanded: q('.ai-left .ais-area-row[aria-expanded="true"]')?.dataset.area };
   window.__aiAreaDevice.onTouch = (e) => { if (e.isTrusted) window.__aiAreaDevice.touched = true; };
   window.addEventListener("pointerdown", window.__aiAreaDevice.onTouch, true);
-  S.page.value = -1; S.aiAgent.value = null; S.aiScreen.value = "chat";
+  S.page.value = -1; aiAgent.value = null; S.aiScreen.value = "chat";
   await G.sleep(700);
   return [];
 }
