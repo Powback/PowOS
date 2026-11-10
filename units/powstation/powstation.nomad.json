@@ -1,0 +1,42 @@
+{
+  "id": "powstation.nomad",
+  "name": "powstation: nomad",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "infrastructure; Compose-managed by powstation",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "nomad"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "powstation",
+    "service": "nomad",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "application",
+      "exposure": "lan"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/PowStation -f /Users/macback/Projects/PowStation/docker-compose.yaml --project-name powstation stop nomad"
+    ],
+    "keep": [
+      "nomad-data",
+      "/Users/macback/Projects/PowStation/nomad/server.hcl",
+      "/Users/macback/Projects/PowStation/secrets/nomad"
+    ]
+  },
+  "limits": {
+    "memory": "1073741824",
+    "cpus": 1
+  }
+}

@@ -38,5 +38,8 @@
       "/Users/macback/Projects"
     ]
   },
-  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+  "limits": {
+    "memory": "12884901888",
+    "cpus": 8
+  }
 }

@@ -1,0 +1,40 @@
+{
+  "id": "android.android-builder-job",
+  "name": "android-builder-job: android-builder-job",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "build-job; Compose-managed by android-builder-job",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "android\\-builder\\-job[-_]android\\-builder\\-job[-_][0-9]+"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "android-builder-job",
+    "service": "android-builder-job",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "job"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/android-app-dev -f /Users/macback/Projects/android-app-dev/docker-compose.job.yml --project-name android-builder-job stop android-builder-job"
+    ],
+    "keep": [
+      "gradle-cache"
+    ]
+  },
+  "limits": {
+    "memory": "25769803776",
+    "cpus": 16
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "id": "powstation.web-search",
+  "name": "powstation: web-search",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "infrastructure; Compose-managed by powstation",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "powstation-web-search"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "powstation",
+    "service": "web-search",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "none",
+      "exposure": "device-local"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/PowStation -f /Users/macback/Projects/PowStation/docker-compose.yaml --project-name powstation stop web-search"
+    ],
+    "keep": [
+      "/Users/macback/Projects/PowStation/config/searxng/settings.yml"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}
