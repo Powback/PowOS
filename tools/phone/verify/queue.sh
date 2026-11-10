@@ -299,6 +299,18 @@ paused_info() {
 # runner's state word for the AI page goes to the phone's /data/local/tmp/powos-verify-runner first (its heartbeat).
 phone_sh() { local b; b=$(printf '%s\n' "$1" | base64 | tr -d '\n')
   perl -e 'alarm shift; exec @ARGV' 15 "$phone/adb.sh" shell "${RSTATE:+printf $RSTATE > /data/local/tmp/powos-verify-runner; }su -c 'sh /data/powos/powos-run.sh \"echo $b | base64 -d | bash\"'" 2>/dev/null; }
+# The generic restore of a killed job (budget, stop): home's web windows it opened. A check's own EXIT trap closes
+# them, but it gets 10 s from TERM to KILL (endjob) and a slow page outran that - the window bench's 06:39 kill left
+# Settings open in a web window, focused, and plasma-modes failed on it at 07:01 (board plasma-down). wwids: the open
+# ids ("none" = none open, "" = the page didn't answer: then nothing is closed - it can't tell which ones are new).
+wwids() { CDP_TIMEOUT_S=15 "$phone/cdp.sh" eval home "importShim('./bridge.ts').then(b=>b.powos.webwindows.list()).then(l=>l.map(w=>w.id).join(' ')||'none')" 2>/dev/null | tr -d '"\r' | tail -1 | grep -xE 'none|[0-9 ]+'; }
+# ww_close_new <ids before>: closes the windows opened since; prints their ids.
+ww_close_new() {
+  local now i new=""; [ -n "$1" ] || return 0; now=$(wwids); [ -n "$now" ] && [ "$now" != none ] || return 0
+  for i in $now; do [[ " $1 " == *" $i "* ]] || new="$new,$i"; done; new=${new#,}; [ -n "$new" ] || return 0
+  CDP_TIMEOUT_S=8 "$phone/cdp.sh" eval home "importShim('./bridge.ts').then(b=>Promise.all([$new].map(i=>b.powos.webwindows.close(i)))).then(()=>'ok')" >/dev/null 2>&1
+  echo "$new"
+}
 killtree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do killtree "$c" "${2:-TERM}"; done; kill -"${2:-TERM}" "$1" 2>/dev/null; }
 # endjob <pid>: TERM its tree, KILL what's left after 10 s (f44: 5 s cut off a check's restore
 # trap - EXIT/TERM traps that undo a setting change need real wall time to run their adb calls).
@@ -934,6 +946,8 @@ EOS
         ia=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null); lv=$(cat "${SHIP_DIR:-$HOME/.cache/powos-ship-queue}/live" 2>/dev/null)
         printf 'build: %s shell=%s\n' "${ia:--}" "${lv:--}" > "$log"
         [ -s "$log.tries" ] && echo "try $((tries + 1)): the earlier tries' logs (each ended rc 3) are in $log.tries" >> "$log"
+        # ww_close_new's "before", for a kill: read beside the job's start (no wait - a hidden page answers nothing).
+        rm -f "$Q/ww0"; ( wwids > "$Q/ww0" ) >/dev/null 2>&1 &
         ( cd "$cwd" && unset VERIFY_GO && export LOCK_HELD=1 QUEUE_NEXT_APP=$nextapp && "$here/preflight.sh" "${cmd[@]}" && exec "${cmd[@]}" ) >> "$log" 2>&1 & jp=$!   # preflight: rc 5 + "ENV: why" when the phone cannot run it
         # The heartbeat: every HB_S s the pill hears check, k/N, elapsed; a tap's stop flag or the budget ends the check.
         # The sub-step: the check's own (put) or its log's last line, timed from when that line first showed.
@@ -969,6 +983,7 @@ EOS
         if [ -n "$why" ]; then
           for a in "${cmd[@]}"; do case "$a" in *.sh) b=$(basename "$a" .sh)
             phone_sh "pkill -f '$b-phone.sh' 2>/dev/null; :" >/dev/null 2>&1 ;; esac; done
+          [ "$why" = touched ] || { wc_=$(ww_close_new "$(cat "$Q/ww0" 2>/dev/null)"); [ -n "$wc_" ] && echo "killed check's web windows closed by the queue: $wc_" >> "$log"; }
         fi
         # A check that had already stopped for the user (its last verdict line "SKIP:", e.g. e2e's "aborted - the user
         # touched the phone") and then ran past its budget in its own clean-up (11-01 17:58, round 204 part 1: FAIL

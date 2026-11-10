@@ -53,7 +53,12 @@ hcall() {
   "$T/cdp.sh" eval home "new Promise(ok=>{const h=window.__powosHost,P=window.PowosHost;if(!h||!P||!P.postMessage)return ok('ERR no bridge');const r=h.resolve,j=h.reject,id=911400+Math.floor(Math.random()*9000);const done=v=>{h.resolve=r;h.reject=j;ok(v)};h.resolve=(i,v)=>i===id?done(v):r(i,v);h.reject=(i,m)=>i===id?done('ERR '+m):j(i,m);setTimeout(()=>done('ERR no answer'),8000);P.postMessage(JSON.stringify([id,'$1',$2]))}).then(v=>typeof v==='string'&&v.startsWith('ERR')?v:'ok')" 2>&1 | tr -d '"\r' | tail -1
 }
 tasks() { sh_ "am stack list | grep PowosWindowActivity" | grep -oE 'taskId=[0-9]+' | tr -dc '0-9\n' | sort -n; }
-focus() { sh_ "dumpsys window | grep -m1 mCurrentFocus" | sed 's/^ *//'; }
+# focus: the focused window of the phone's own screen (display 0). `dumpsys window | grep -m1 mCurrentFocus` is the
+# top focused DISPLAY's - an Android app in a web window has its own virtual display, so a web window focused last
+# (11-10 07:01: the window bench's Settings, display 30, left open by its killed run) hid Plasma's desktop in front of
+# display 0 and the check failed "Plasma's desktop isn't in front". The check's first tap moves input to display 0.
+focus() { sh_ "dumpsys window displays" | awk '/Display: mDisplayId=0 /{p=1; next} /Display: mDisplayId=/{p=0} p && /mCurrentFocus=/{sub(/^ */, ""); print; exit}'; }
+gfocus() { sh_ "dumpsys window | grep -m1 mCurrentFocus" | sed 's/^ *//'; }
 
 # KWin's view (a script; its print() lands in KWin's stdout, /run/powos-app/hyprland.log): one line per application
 # window "PMW|caption|class|onCurrentDesktop|noBorder|x,y,w,h|maximized|popup|deleted" and "PMC|class|x,y,w,h" (its
@@ -121,7 +126,13 @@ in_session() { us "P=\$(pgrep -x plasmashell | head -1); while IFS= read -r -d '
 open_plasma() {
   local r; r=$(hcall apps.launch "['l:org.powos.plasma']"); [ "$r" = ok ] || { fail "apps.launch Plasma: $r"; return 1; }
   sleep 6; chk plasma
-  focus | grep -qE 'andro\.marchy\.(MainActivity|HomeDesktop)' || { fail "Plasma's desktop isn't in front: $(focus)"; return 1; }
+  # Not in front (a leftover over it, home raised late): the product's own path once more - apps.launch of Plasma is
+  # MainActivity.show, the mode switch - then a verdict. A touch on the way is the user's: chk stops (exit 3).
+  if ! focus | grep -qE 'andro\.marchy\.(MainActivity|HomeDesktop)'; then
+    log "Plasma's desktop not in front on display 0 ($(focus)); input focus: $(gfocus) - apps.launch Plasma again"
+    r=$(hcall apps.launch "['l:org.powos.plasma']"); sleep 4; chk plasma-again
+  fi
+  focus | grep -qE 'andro\.marchy\.(MainActivity|HomeDesktop)' || { fail "Plasma's desktop isn't in front on display 0: $(focus) (input focus: $(gfocus))"; return 1; }
 }
 wait_win() {  # $1 class, $2 tag -> W (its line) within 25 s
   W=""; for i in $(seq 8); do sleep 3; kwin_q "$2-$i" >/dev/null; W=$(win "$2-$i" "$1"); [ -n "$W" ] && { cp "$OUT/kwin-$2-$i.txt" "$OUT/kwin-$2.txt"; return 0; }; done; return 1

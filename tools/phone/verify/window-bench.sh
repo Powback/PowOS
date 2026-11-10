@@ -208,7 +208,10 @@ restore_bench() {
   [ $RB = 1 ] && return 0; RB=1
   local i
   [ "${OCON:-0}" = 1 ] && sh_ "setprop debug.powos.ww_order_check 0"
-  for i in $MINEW; do hcall webwindows.close "[${i#w}]" "()=>'ok'" >/dev/null 2>&1; done
+  # All of this part's windows in ONE page call, first: one hcall per window took longer than the queue's 10 s from
+  # TERM to KILL, so a budget-killed part left its last window open (11-10 06:39: Settings, w27 on display 30, still
+  # holding the input focus when plasma-modes ran at 07:01). The queue also closes a killed job's new windows itself.
+  [ -n "$MINEW" ] && CDP_TIMEOUT_S=8 ev "importShim('./bridge.ts').then(b=>Promise.all([$(echo $MINEW | sed 's/w//g; s/ /,/g')].map(i=>b.powos.webwindows.close(i)))).then(()=>'ok')" >/dev/null 2>&1
   [ -n "$ROT0" ] && { set -- $ROT0; sh_ "settings put system accelerometer_rotation $1; settings put system user_rotation $2"; log "rotation put back ($ROT0)"; ROT0=""; }
   sh_ "tail -n +$((H0 + 1)) $HYPR" > "$OUT/kwin.log" 2>/dev/null
   "$A" exec-out "su -c 'cat /data/data/com.powos.app/files/window-log.1.txt /data/data/com.powos.app/files/window-log.txt 2>/dev/null'" 2>/dev/null |
