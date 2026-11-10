@@ -3,7 +3,7 @@
   "name": "PowOS desktop session",
   "kind": "system",
   "owner": "system:powos-deploy",
-  "purpose": "the phone's KDE desktop session (kwin, plasmashell, Xwayland, pipewire) the PowOS app starts, the user's terminals and programs in it, and the desktop's PowOS layer (wallpaper, KWin script, widgets, launcher, picker key)",
+  "purpose": "the phone's KDE desktop session (kwin, plasmashell, Xwayland, pipewire) the PowOS app starts, the user's terminals and programs in it, and the desktop's PowOS layer (wallpaper, KWin script, widgets, launcher, picker key) powos-session-locale compiles the phone's locale (e.g. en_CH.UTF-8) from en_US data at session start so Qt apps keep LANG.",
   "installedBy": "targets/android/rooted/powos-deploy.sh (Xwayland, KWin and Turnip: our packages, targets/android/pkgs/xwayland-kgsl, pkgs/kwin and pkgs/vulkan-freedreno-kgsl, the patched Turnip Vulkan driver that replaces Arch's vulkan-freedreno)",
   "packages": [
     "foot",
@@ -31,7 +31,8 @@
     "/usr/share/plasma/plasmoids/com.powos.*",
     "/etc/xdg/breezerc",
     "/etc/xdg/ksplashrc",
-    "/etc/sudoers.d/10-wheel"
+    "/etc/sudoers.d/10-wheel",
+    "/usr/bin/powos-session-locale"
   ],
   "processes": [
     {
