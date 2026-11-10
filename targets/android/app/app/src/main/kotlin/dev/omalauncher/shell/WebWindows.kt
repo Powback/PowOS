@@ -2358,6 +2358,17 @@ class WebWindows(
      */
     private var gesture: MotionEvent? = null
 
+    /**
+     * The last gesture that ended (UP/CANCEL) before any window claimed it: its DOWN, its end and when, so a page answer
+     * ([forward] "down") that comes after the finger lifted still gives the Linux window the whole tap ([linuxClaim]).
+     * A quick tap (adb's `input tap`, a fast finger) ends before the page's pointerdown reaches the host: [gesture] was
+     * already null then and the tap went nowhere - home logged "gesture to KWin window" and KWin got nothing (11-10
+     * ww-popups: 15 gestures logged, 0 XI2 touches in Xwayland; one tap of 15 got through at 09:20).
+     */
+    private var endedDown: MotionEvent? = null
+    private var endedUp: MotionEvent? = null
+    private var endedAt = 0L
+
     /** The Linux window the current gesture belongs to (the page pressed its body), else null. */
     private var linuxTouch: Win? = null
 
@@ -2461,6 +2472,7 @@ class WebWindows(
         if (a == MotionEvent.ACTION_DOWN) {
             gesture?.recycle()
             gesture = MotionEvent.obtain(ev)
+            dropEnded()
             linuxTouch = null
             fullEdge = null
             // A full-screen Linux window's top / bottom edge strip stays home's (FL2): the status bar's pull-down and
@@ -2478,12 +2490,34 @@ class WebWindows(
         }
         // A full-screen Linux window is over all of home (nothing of the page is on screen): every other touch is its.
         fullLinux()?.let { return linuxInput(it, ev) }
-        linuxTouch?.let { linuxInput(it, ev) }
-        if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) {
-            gesture?.recycle()
-            gesture = null
-        }
+        val claimed = linuxTouch
+        claimed?.let { linuxInput(it, ev) }
+        if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) endGesture(ev, claimed != null)
         return false
+    }
+
+    /** The gesture ended at [ev]: kept ([endedDown]) when no window claimed it yet - the page's answer may still come. */
+    private fun endGesture(
+        ev: MotionEvent,
+        claimed: Boolean,
+    ) {
+        val g = gesture
+        gesture = null
+        dropEnded()
+        if (claimed || g == null) {
+            g?.recycle()
+            return
+        }
+        endedDown = g
+        endedUp = MotionEvent.obtain(ev)
+        endedAt = SystemClock.uptimeMillis()
+    }
+
+    private fun dropEnded() {
+        endedDown?.recycle()
+        endedUp?.recycle()
+        endedDown = null
+        endedUp = null
     }
 
     /** A gesture begun in a full-screen Linux window's edge strip ([fullEdgeAt]): its window, start and side (-1 top, 1 bottom). */
@@ -2634,8 +2668,38 @@ class WebWindows(
             andro.marchy.WebWindowSource.focus(src.kwin)
         }
         val g = win.geo
-        WindowLog.i(TAG, "window ${win.id}: gesture to KWin window ${src.kwin}${g?.let { " (body ${it.body.toShortString()} x${it.scale})" } ?: ""}${if (src.handle == 0L) ": its consumer isn't up, dropped" else ""}")
-        gesture?.let { linuxInput(win, it) }
+        val down = gesture
+        val late = down == null && endedDown != null && SystemClock.uptimeMillis() - endedAt <= LATE_CLAIM_MS
+        WindowLog.i(TAG, "window ${win.id}: gesture to KWin window ${src.kwin}${g?.let { " (body ${it.body.toShortString()} x${it.scale})" } ?: ""}${claimNote(src, down != null, late)}")
+        if (down != null) {
+            linuxInput(win, down)
+        } else if (late) {
+            replayEnded(win)
+        }
+    }
+
+    /** What [linuxClaim] gives KWin, for its log line. */
+    private fun claimNote(
+        src: LinuxSource,
+        live: Boolean,
+        late: Boolean,
+    ): String =
+        when {
+            src.handle == 0L -> ": its consumer isn't up, dropped"
+            live -> ""
+            late -> ": the finger lifted ${SystemClock.uptimeMillis() - endedAt} ms before the page's answer, its down and up replayed"
+            else -> ": no gesture to give it (it ended over $LATE_CLAIM_MS ms ago, or never began here), nothing sent"
+        }
+
+    /**
+     * The tap that ended before the page claimed it, to [win]: its DOWN, then its UP.
+     * HACK: the moves between them are not replayed (a tap has none worth keeping; a fast swipe lands as a tap at its
+     * start). Real fix: the page's hit regions on the host side (S4), deciding at the DOWN.
+     */
+    private fun replayEnded(win: Win) {
+        endedDown?.let { linuxInput(win, it) }
+        endedUp?.let { linuxInput(win, it) }
+        dropEnded()
     }
 
     /**
@@ -2951,6 +3015,7 @@ class WebWindows(
         homeIme(true)
         gesture?.recycle()
         gesture = null
+        dropEnded()
         // Linux windows keep running as their own tasks (home's page is going: nothing would show them); Android ones
         // close with their displays as before.
         wins.values.toList().forEach { drop(it, handBack = it.linux != null) }
@@ -4296,6 +4361,9 @@ class WebWindows(
 
         /** A task change's [reconcile] waits this long, and an empty display is read again this long after. */
         private const val RECONCILE_MS = 400L
+
+        /** How long after a gesture ended a page's "down" for it still gets it ([linuxClaim]): the page's answer is ~1-3 frames. */
+        private const val LATE_CLAIM_MS = 500L
 
         /** An empty display is read again this long after: a window closes only when its task was gone over a second. */
         private const val ORPHAN_CONFIRM_MS = 1000L
