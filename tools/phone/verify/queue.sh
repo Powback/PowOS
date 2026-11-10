@@ -138,22 +138,75 @@ warm_stop() { local a; a=$(cat "$Q/warm" 2>/dev/null); rm -f "$Q/warm"; case $a 
 # (~/.cache/abzu-tools, rsu-tools: no hand-over) were handed the running game, read it as "the user's AbzuGame is up"
 # (rc 3) and the game stayed up - window-bench, ww-glue and ww-popups after it all SKIPped on "a game runs".
 warm_takes() { local d=$1 a f; shift; for a in "$@"; do [ "$(basename -- "$a" 2>/dev/null)" = bf-pacing.sh ] || continue; case $a in /*) f=$a ;; *) f=$d/$a ;; esac; grep -q 'powos-warm-' "$f" 2>/dev/null && return 0; done; return 1; }
-# warm_after <log> <game key>: after a job. Its "WARM:" line hands the game on ($Q/warm = its app); anything else and a
-# game that was left warm for it is closed now - the job closed it itself (a no-op then) or never took it (an rc 3
-# before its setup, an old check): never a queue game left running into the next, unrelated job.
+# --- game ownership: which game on the phone the queue started (test/tier1/test-queue-game-owner.sh extracts this) ---
 # game_up: the Steam app id of the game running on the phone now (Android's pgrep sees PowOS's processes).
 # "none" only when adb answered: a failed call prints "", which game_left never reads as "no game before" (it could be
 # the user's game).
 game_up() { local o; o=$(perl -e 'alarm shift; exec @ARGV' 10 "$phone/adb.sh" shell "pgrep -af '[r]eaper SteamLaunch AppId='; echo adb-ok" 2>/dev/null | tr -d '\r')
   case $o in *adb-ok*) ;; *) return 0 ;; esac
   o=$(sed -n 's/.*AppId=\([0-9][0-9]*\).*/\1/p' <<<"$o" | head -1); echo "${o:-none}"; }
-# game_left <before> <job>: a game the job started (none ran before it) and didn't hand on warm is closed now (warm_stop's
-# close). 11-10 04:21: game-audio-flow was killed in its `sleep 40` (a touch), its own bf-stop never ran, Broforce stayed
-# up: idle.sh then held every window for GAME_IDLE_S (900 s, "game=away"), nine games jobs were skipped and the four
-# window-bench parts burnt ~40 s each to "a game runs: not now". The queue started it, so the queue closes it.
-game_left() { local g; [ "$1" = none ] || return 0; g=$(game_up); case $g in ''|none) return 0 ;; esac
+# game_since: "<app id> <start epoch>" of the game running now (its reaper's /proc start: boot time + starttime ticks,
+# the phone's clock), "none" when adb answered and no game runs, "" when adb failed.
+game_since() { local o
+  o=$(perl -e 'alarm shift; exec @ARGV' 10 "$phone/adb.sh" shell 'p=$(pgrep -f "[r]eaper SteamLaunch AppId=" | head -1); if [ -n "$p" ]; then a=$(tr "\0" " " < /proc/$p/cmdline | sed -n "s/.*AppId=\([0-9][0-9]*\).*/\1/p"); s=$(sed "s/.*) //" /proc/$p/stat | cut -d" " -f20); u=$(cut -d. -f1 /proc/uptime); echo "game $a $(( $(date +%s) - u + s / 100 ))"; fi; echo adb-ok' 2>/dev/null | tr -d '\r')
+  case $o in *adb-ok*) ;; *) return 0 ;; esac
+  o=$(sed -n 's/^game \([0-9][0-9]*\) \([0-9][0-9]*\)$/\1 \2/p' <<<"$o" | head -1); echo "${o:-none}"; }
+hms() { date -r "$1" +%T 2>/dev/null || date -d "@$1" +%T; }
+# The ownership ledger. $Q/job-game-before: the games job running now, "<job> <game before> <start> <budget>" (written
+# before it runs, gone once its game_left ran). $Q/job-windows.log: "<job> <start> <end>" of every games job that
+# ran with no game up before it - a game whose phone start time falls inside one of those runs is the queue's.
+# Why (11-10 05:04): game-input-alive started Broforce at 05:03:29, was stopped "touched" at 05:04:24 with powos-vadb
+# down - game_left's game_up got no answer and returned, the runner re-exec'd, and nothing remembered that the queue
+# started it: idle.sh said game=away, every games job and plasma-down was skipped for hours ("would close the game left
+# running"), the other checks measured beside a game eating 1-2.5 cores and the GPU.
+# game_left <before> <job> [start]: a game the job started (none ran before it) and didn't hand on warm is closed now
+# (warm_stop's close). 11-10 04:21: game-audio-flow was killed in its `sleep 40` (a touch), its own bf-stop never ran,
+# Broforce stayed up: idle.sh then held every window for GAME_IDLE_S (900 s, "game=away"), nine games jobs were skipped
+# and the four window-bench parts burnt ~40 s each to "a game runs: not now". The queue started it, so the queue closes
+# it - and when the phone doesn't answer now, game_adopt closes it later from the ledger line written here.
+game_left() { local g; rm -f "$Q/job-game-before"; [ "$1" = none ] || return 0
+  echo "$2 ${3:-$(date +%s)} $(date +%s)" >> "$Q/job-windows.log"
+  g=$(game_up); case $g in none) return 0 ;; '') echo "$(date +%T) $2: the phone didn't answer whether it left a game up - closed later if so (game_adopt)"; return 0 ;; esac
   [ "$(cat "$Q/warm" 2>/dev/null)" = "$g" ] && return 0
   echo "$g" > "$Q/warm"; warm_stop "$2 started it and left it running"; }
+# game_adopt <when>: no job runs now (runner start, a window's start). A job that never got to its game_left (the runner
+# stopped or re-exec'd mid-job) becomes a ledger line (its start .. start + budget + 60 s, at most now). Then the game up
+# now: started inside a queue job's run (GAME_OWN_SLACK_S, 5 s, either side) -> the queue's, closed the warm_stop way;
+# started outside every run (or up before the job: its start is earlier) -> the user's, never touched (said once).
+# 0 = it closed one.
+game_adopt() { local when=${1:-} o a s m r=$Q/job-game-before w=$Q/job-windows.log now rid rg rt rb e
+  now=$(date +%s)
+  if [ -s "$r" ]; then read -r rid rg rt rb < "$r"; rm -f "$r"
+    if [ "$rg" = none ] && [ -n "$rt" ]; then e=$((rt + ${rb:-300} + 60)); [ "$e" -le "$now" ] || e=$now
+      echo "$rid $rt $e" >> "$w"; echo "$(date +%T) $rid ended without its game look (runner stopped mid-job) - its run $(hms "$rt")-$(hms "$e") goes to the game ledger"; fi
+  fi
+  [ -s "$w" ] || return 1
+  [ "$(wc -l < "$w")" -le 400 ] || { tail -200 "$w" > "$w.tmp" && mv -f "$w.tmp" "$w"; }
+  o=$(game_since); case $o in ''|none) return 1 ;; esac
+  a=${o%% *}; s=${o#* }
+  m=$(awk -v s="$s" -v sl="${GAME_OWN_SLACK_S:-5}" 'NF >= 3 && $2 - sl <= s && s <= $3 + sl { m = $1 " " $2 " " $3 } END { if (m != "") print m }' "$w")
+  if [ -z "$m" ]; then
+    [ "$(cat "$Q/game-user" 2>/dev/null)" = "$a $s" ] || { echo "$a $s" > "$Q/game-user"
+      echo "$(date +%T) app $a has run since $(hms "$s"), outside every queue job: the user's - left alone"; }
+    return 1; fi
+  set -- $m
+  echo "$a" > "$Q/warm"; warm_stop "$1 started it at $(hms "$s") (inside its run $(hms "$2")-$(hms "$3")) and nothing closed it - the queue's game ($when)"
+  return 0; }
+# jw_seed: the ledger's first fill, from the runner's own job records ($Q/util.log "J <start> <end> <class> <job>",
+# the last 2 days): the games jobs among them (game_key of the job file's cmd, queued or done). Their "game before"
+# wasn't recorded - a game up before a job started before it, so the start-time test still tells them apart.
+jw_seed() { local s e c id f cmd n=0 since=$(( $(date +%s) - 172800 ))
+  [ -e "$Q/job-windows.log" ] && return 0; : > "$Q/job-windows.log"
+  while read -r _ s e c id; do
+    f=$Q/$id.job; [ -f "$f" ] || f=$Q/done/$id.job; [ -f "$f" ] || continue
+    [ -n "$( cmd=(); . "$f" >/dev/null 2>&1; game_key ${cmd[@]+"${cmd[@]}"} )" ] || continue
+    echo "$id $s $e" >> "$Q/job-windows.log"; n=$((n + 1))
+  done < <(awk -v t="$since" '$1 == "J" && $2 >= t && NF >= 5' "$Q/util.log" 2>/dev/null)
+  echo "$(date +%T) game ledger: $n games-job runs from util.log"; }
+# --- end game ownership ---
+# warm_after <log> <game key>: after a job. Its "WARM:" line hands the game on ($Q/warm = its app); anything else and a
+# game that was left warm for it is closed now - the job closed it itself (a no-op then) or never took it (an rc 3
+# before its setup, an old check): never a queue game left running into the next, unrelated job.
 warm_after() { if grep -q '^WARM: ' "$1" 2>/dev/null && [ -n "$2" ]; then echo "$2" > "$Q/warm"; else warm_stop "the job it was left warm for didn't hand it on"; fi; }
 # game_key <cmd...>: the Steam app a games check drives ("" for any other check): APP=<id> in its env, else a games
 # script's first numeric argument (game-resize.sh 384190), else Broforce (274190, bf-*.sh's default).
@@ -761,6 +814,9 @@ EOS
       job_held "$go" "$(basename "$j" .job)" && { held=$((held + 1)); continue; }
       sel+=("$j")
     done; }
+  # A game a job of an earlier runner started and nobody closed (killed mid-job, re-exec, the phone not answering at
+  # the job's end): closed now, from the game ledger (game_adopt); the first start fills the ledger from util.log.
+  jw_seed; game_adopt "runner start" || :
   # The runner stays while anything is queued (a "test now" needs one waiting): a window that didn't come is waited for again.
   while ls "$Q"/*.job >/dev/null 2>&1; do
     verify_tree
@@ -789,6 +845,8 @@ EOS
       rm -f "$Q/paused"; RSTATE=running   # a go ends a pause
       go=; case "${WL_GOT:-}" in go=*) go=${WL_GOT#go=}; go=${go%% *} ;; esac
       AWAY=0; case "${WL_GOT:-}" in *game=away*) AWAY=1; echo "$(date +%T) a game is running with nobody playing: checks leave it alone" ;; esac
+      # ... unless the queue started it (a job's run in the game ledger): closed now, the games checks run again.
+      [ "$AWAY" = 1 ] && game_adopt window && { AWAY=0; echo "$(date +%T) that game was the queue's own - closed, games checks run"; }
       SHIP_MEMO=$Q/shipmemo; : > "$SHIP_MEMO" 2>/dev/null || SHIP_MEMO=   # shipped's memo: new for every window
       # The checks' own history (queue-util.py --history over runner.log): expected run times for order_quick, realistic
       # default budgets for job_budget. Once per window (~0.5 s).
@@ -868,6 +926,9 @@ EOS
         nextapp=; [ -n "$gk" ] && [ "$nk" = "$gk" ] && nextapp=$gk
         [ -s "$Q/warm" ] && [ "$(cat "$Q/warm")" != "$gk" ] && warm_stop
         g0=-; { [ -n "$gk" ] || [ "$game" = 1 ]; } && g0=$(game_up)   # game_left's "before" (a games check only)
+        # Kept on disk before it runs: a job killed with the runner (TERM, crash) never reaches its game_left - the next
+        # game_adopt reads this and still knows the run's window.
+        [ "$g0" = - ] || echo "$n ${g0:-unknown} $(date +%s) $budget" > "$Q/job-game-before"
         echo "$(date +%T) run $n: ${cmd[*]}"
         js() { printf '{"name":%s,"task":%s,"k":%s,"n":%s,"screen":%s,"el":%s,"budget":%s,"prev":"@@HINT@@","step":"@@STEP@@","stepel":@@STEPEL@@}' \
           "$(jstr "${name:-$task}")" "$(jstr "$task")" $k $N "$(jstr "$screen")" "$1" "$budget"; }
@@ -928,11 +989,11 @@ EOS
         [ "$why" = touched ] && { echo "$(date +%T) $n: the user picked up the phone the queue woke - stopped, stays queued"; why=; rc=3; }
         if [ "$why" = stop ]; then
           echo "$(date +%T) $n: stopped from the phone - stays queued, paused"; util_rec J "$t0" "$(date +%s)" stopped "$n"
-          [ "$g0" = - ] || game_left "$g0" "$n"
+          [ "$g0" = - ] || game_left "$g0" "$n" "$t0"
           pause "Phone checks paused: $pass passed, $fail failed, $((N - k + 1)) still queued"
           exit 4
         fi
-        t1=$(date +%s); warm_after "$log" "$gk"; [ "$g0" = - ] || game_left "$g0" "$n"
+        t1=$(date +%s); warm_after "$log" "$gk"; [ "$g0" = - ] || game_left "$g0" "$n" "$t0"
         pfinal=
         if [ $rc = 3 ]; then
           # Touched or not comes from the input source (rc3_kind), read right after the check: idle shorter than its
