@@ -1,6 +1,7 @@
 package dev.omalauncher.shell
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -59,6 +60,25 @@ class WebWindowsFullScreenRaceTest {
         assertEquals("a restate still queued put the window back over everything", back, s.layer)
     }
 
+    /**
+     * Fix plan 1.4: a placement queued on home's draw AFTER the full-screen state (a page frame while the draw is held)
+     * landed last and undid it; the 250/1,000/3,000 ms direct restates papered over that. Now every placement
+     * transaction ends with the full-screen state itself, so the last write on every draw is right, timers or not.
+     */
+    @Test
+    fun aPlacementQueuedAfterTheFullScreenEndsWithIt() {
+        val placementOnly = Screen().apply { applyNow(full); queueOnDraw(full); queueOnDraw(pagePlaced); draw() }
+        assertEquals("the race the timers covered (game hidden until a restate)", pagePlaced, placementOnly.layer)
+        val oneWriter = Screen().apply { applyNow(full); queueOnDraw(full); queueOnDraw(pagePlaced); queueOnDraw(full); draw() }
+        assertEquals(full, oneWriter.layer)
+        val apply = body("private fun apply(")
+        val place = apply.indexOf("placeAll(t, geos)")
+        val rewrite = apply.indexOf("if (w.linuxFull && !w.closed) fullLayer(t, w)")
+        assertTrue("apply() no longer ends its transaction with every full-screen window's layer", rewrite > place && place >= 0)
+        assertTrue("the restate is written before the transaction goes out", rewrite < apply.indexOf("applyTransactionOnDraw(t)"))
+        assertFalse("the restate timers are back", src.contains("FULL_RESTATE_MS") || src.contains("restateNow("))
+    }
+
     /** WebWindows does what the model needs: one writer, queued on draw after the immediate write, the way out queued too. */
     @Test
     fun webWindowsKeepsTheOrder() {
@@ -68,10 +88,8 @@ class WebWindowsFullScreenRaceTest {
         val restate = body("private fun restateFull(")
         assertTrue("restateFull no longer rides home's next draw", restate.contains("applyTransactionOnDraw(t)"))
         assertTrue("restateFull doesn't ask home to draw", restate.contains("web.invalidate()"))
-        assertTrue("no direct restate after the draw path settles", restate.contains("FULL_RESTATE_MS") && restate.contains("restateNow("))
-        val now = body("private fun restateNow(")
-        assertTrue("a window that left full screen is restated", now.contains("it.linuxFull && !it.closed"))
-        assertTrue("the immersive status bar isn't asked hidden again", now.contains("statusBarHidden()"))
+        assertTrue("a window that left full screen is restated", restate.contains("it.linuxFull && !it.closed"))
+        assertTrue("the immersive status bar isn't asked hidden again", restate.contains("IMMERSIVE_REHIDE_MS") && body("private fun immersiveAgain(").contains("statusBarHidden()"))
         val again = body("private fun fullAgain(")
         assertTrue("home's new surface doesn't restate after its first draw", again.contains("restateFull("))
         val off = src.substringAfter("private fun linuxFullScreen(").substringBefore("\n    }\n")

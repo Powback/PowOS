@@ -59,30 +59,49 @@ Done when: every window check gives a verdict (PASS or a named FAIL) within its 
 
 ## Phase 1: quick wins (small, independent)
 
-- [ ] 1.1 **SurfaceFlinger order check off by default.** `orderCheckSoon` (`WebWindows.kt:1721`) runs
+- [x] 1.1 **SurfaceFlinger order check off by default.** `orderCheckSoon` (`WebWindows.kt:1721`) runs
   `dumpsys SurfaceFlinger`, through root when refused (`:1781`), 300 ms after every change of window order and every
   10 s with two or more windows. Gate it behind a debug property (for example `debug.powos.ww_order_check`), keep it in
   the verify scripts.
   - Check: `ww-drag-lag.sh` and `ww-resize.sh` before and after; no `dumpsys` child of the app during a drag.
-- [ ] 1.2 **Touch injection on its own thread.** `helper.touch` posts to `io` (`WebWindows.kt:4113`), behind task polling
+  - Landed 11-10: `orderCheckSoon` returns unless `debug.powos.ww_order_check` is `1` (read in-process,
+    `SystemProperties`); `window-bench.sh`'s switch phase turns it on for two raises and FAILs on a divergence line.
+    JVM: `WebWindowsLayerOrderTest.offByDefault`. Phone before/after numbers: owed (queued after the ship).
+- [x] 1.2 **Touch injection on its own thread.** `helper.touch` posts to `io` (`WebWindows.kt:4113`), behind task polling
   (`reconcileNow`, `:423`), mirror retries (`:1505`) and resizes. Give input a dedicated `HandlerThread`; keep ordering
   per window.
   - Check: a JVM test that a blocked `io` task does not delay a touch line; phone: touch-to-injection latency logged.
-- [ ] 1.3 **Frame prediction off, then measure.** Set `geometryChannel.ahead` off (the host stops sending `w.ahead 1`).
+  - Landed 11-10: `Helper.touch` posts to its own `powos-ww-input` thread (display priority); the helper's pipe is
+    shared under the Helper's lock; a down/up that waited > 8 ms for that thread logs "touch line waited N ms".
+    JVM: `WebWindowsInputThreadTest` (control: fails with `touch` back on `io`). Phone latency: owed (queued).
+- [x] 1.3 **Frame prediction off, then measure.** Set `geometryChannel.ahead` off (the host stops sending `w.ahead 1`).
   Compare `pf=`, rAF `dt` and missed vsyncs over `ww-glue.sh` with it on and off. Keep N1 (main-thread slides).
   - If off is equal or better: delete `sendAhead`/`sampleAhead` (`webwindows.tsx:2709-2755`) and `FrameSync.ahead`/
     `correct` (`FrameSync.kt`), and tick N2 as withdrawn in `docs/WEB_WINDOWS.md`.
-- [ ] 1.4 **One writer for full-screen layers.** `apply()` (`WebWindows.kt:1688`) restates every full-screen window's
+  - Landed 11-10 (off): the host sends `w.ahead 1` only with `debug.powos.ww_ahead=1`; `ww-glue.sh` takes
+    `WW_AHEAD=on|off` (the page's `__ww.aheadOn`, now readable) and reports home's rAF dt p50/p95 and missed vsyncs.
+    JVM: `WebWindowsAheadTest.aheadIsOffByDefault`. The A/B (on vs off) is queued; the deletion waits for it.
+- [x] 1.4 **One writer for full-screen layers.** `apply()` (`WebWindows.kt:1688`) restates every full-screen window's
   layer (`fullLayer`, idempotent) at the end of each geometry transaction, so the last write on every draw is right.
   Then remove the 250/1,000/3,000 ms restate timers (`restateFull`, `FULL_RESTATE_MS`).
   - Check: `WebWindowsFullScreenRaceTest` extended with "a placement queued before full screen lands after it".
-- [ ] 1.5 **Cheaper per-frame measure.** In `entry()` (`webwindows.tsx:2266`): read `--inset-top` and `--color-surface`
+  - Landed 11-10: `apply()` ends every geometry transaction with `fullLayer` of each full-screen window;
+    `FULL_RESTATE_MS`/`restateNow` are gone. Kept on its own timers: the immersive status bar's re-hide
+    (`IMMERSIVE_REHIDE_MS`, 250/1,000/3,000 ms) - a system bar state, not a layer write. JVM:
+    `WebWindowsFullScreenRaceTest.aPlacementQueuedAfterTheFullScreenEndsWithIt` (control: fails without the rewrite).
+- [x] 1.5 **Cheaper per-frame measure.** In `entry()` (`webwindows.tsx:2266`): read `--inset-top` and `--color-surface`
   once per tick, not per window (`mergeOf`, `fillOf`, `layoutSize`); call `document.getAnimations()` once per tick and
   share it between `glueFrame` and the ahead code.
   - Check: gate `ww-resize-cost` and `__ww.tickMs` p95 before and after.
+  - Landed 11-10: `geometry()` reads the root's tokens once (`rootTokens`), `send()` walks `getAnimations()` once
+    (`frameAnimations`). Gate `ww-idle-tick` now counts both (3 windows, N2 on): before 3 root style reads a measure and
+    2 walks a send (control run FAILs), after 1 and 1. `ww-resize-cost` (gate box, 4 windows): tick p50/p90 0.3/0.5 ms
+    before, 0.3/0.6 ms after - within the box's noise; the phone's `tickMs` is what counts (window-bench, queued).
 - [ ] 1.6 **Measure composition with glass off** (hypothesis: the blur over windows forces GPU composition; older trace:
   360 of 361 frames GPU-composited with a window open). Record composition types from `dumpsys SurfaceFlinger` with 1, 3
   and 6 windows, glass on and off. Decide from the numbers whether blur pauses while a window moves or resizes.
+  - 11-10: the A/B is `tools/phone/verify/ww-composition.sh` (glass switch: the page's `__glass.live.native(false)`,
+    put back after; rest and bar-drag samples per window count). Queued; nothing applied. Verdict owed.
 
 Done when: 1.1-1.5 landed with their before/after numbers in `window-bench.md`; 1.6 has a written verdict.
 

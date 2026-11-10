@@ -8600,6 +8600,47 @@ async function lockCardsScene() {
  * within 500 ms, and so does the host's "webwindows.resend" alone - neither waits for a frame.
  */
 /**
+ * Fix plan 1.5 (docs/WINDOWS_FIX_PLAN.md): a frame's measure reads the root's tokens once (one getComputedStyle of
+ * <html> per geometry(), not one per window) and walks document.getAnimations() once per send (N1's glue check and N2's
+ * ahead shared), with three windows open and N2 on. Before: 3 root style reads a measure, 2 animation walks a send.
+ * Put on the page as window.__wwMeasureOnce by ww-idle-tick's runner (page.evaluate sends one function's source).
+ */
+async function measureOncePerFrame(el) {
+  const fails = [];
+  const gcs = window.getComputedStyle;
+  const ga = document.getAnimations;
+  let roots = 0;
+  let walks = 0;
+  window.getComputedStyle = function (e, ...rest) {
+    if (e === document.documentElement) roots++;
+    return gcs.call(window, e, ...rest);
+  };
+  document.getAnimations = function () {
+    walks++;
+    return ga.call(document);
+  };
+  const ahead = window.__ww.aheadOn;
+  try {
+    window.__ww.geometry();
+    if (roots > 1) fails.push(`1.5: ${roots} getComputedStyle(<html>) in one measure of 3 windows (want 1)`);
+    window.__ww.aheadOn = true;
+    const sent = window.__ww.sent.length;
+    walks = 0;
+    el.style.translate = "12px 0px";
+    await window.__gw.frames(3);
+    const sends = window.__ww.sent.length - sent;
+    if (!sends) fails.push("1.5: a window moved and no w.f was sent (nothing measured)");
+    else if (walks > sends) fails.push(`1.5: ${walks} document.getAnimations() walks over ${sends} send(s) (want one a send)`);
+  } finally {
+    window.getComputedStyle = gcs;
+    document.getAnimations = ga;
+    window.__ww.aheadOn = ahead;
+    el.style.translate = "";
+  }
+  return fails;
+}
+
+/**
  * WT-IDLE (perf-1793458433606: tick 61-83 ms of script with nothing moving): with 3 windows open and still, the rAF
  * tick doesn't run (HP4, perf-1793970543446: no frame callback while nothing moves a window; at most 2 in 120 frames,
  * each a flag check), no "w.f" sent, no AppCell/Tile render in 60 frames - and a
@@ -8652,6 +8693,8 @@ async function webWindowIdleTick() {
     await window.__gw.frames(3);
     if (window.__ww.sent.at(-1) === was) fails.push("WT-IDLE: a window moved (its style) and no w.f was sent");
     el.style.translate = "";
+    await window.__gw.frames(3);
+    fails.push(...(await window.__wwMeasureOnce(el)));
     return fails;
   } finally {
     W.webWins.value = [];
@@ -13680,6 +13723,7 @@ try {
   // WT-IDLE: the web windows' rAF tick does nothing while no window moves (ww-idle-tick).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-idle-tick", { width: 900, height: 1000 }).then((r) => whenReady(r, async () => {
+      await r.page.evaluate(`window.__wwMeasureOnce = ${measureOncePerFrame}`);
       const fails = await r.page.evaluate(webWindowIdleTick);
       console.log(`     ww-idle-tick: ${await r.page.evaluate(() => window.__wwIdle).catch(() => "?")}`);
       return fails;

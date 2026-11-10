@@ -93,6 +93,13 @@ class WebWindows(
     private val wins = LinkedHashMap<Int, Win>()
     private var nextId = 1
     private val io by lazy { Handler(HandlerThread("powos-webwindows").apply { start() }.looper) }
+
+    /**
+     * Body touches' lines to the helper ([Helper.touch]) only (docs/WINDOWS_FIX_PLAN.md 1.2, C4): on [io] they queued
+     * behind task polling, mirror retries, display resizes and the order check's dump - a hitch at the start of a drag.
+     * One thread, so a window's touches stay in order; at display priority, as the frames they answer.
+     */
+    private val input by lazy { Handler(HandlerThread("powos-ww-input", android.os.Process.THREAD_PRIORITY_DISPLAY).apply { start() }.looper) }
     private val sync = FrameSync(web, "ww")
 
     private val helper = Helper()
@@ -1691,6 +1698,9 @@ class WebWindows(
     ) {
         val t = SurfaceControl.Transaction()
         placeAll(t, geos)
+        // Fix plan 1.4 (C3): the one writer of full-screen layers - every geometry transaction ends with every full-screen
+        // window's state ([fullLayer], idempotent), so whatever rode home's draw before it, the last write is right.
+        for (w in wins.values) if (w.linuxFull && !w.closed) fullLayer(t, w)
         val attached = web.rootSurfaceControl
         if (attached == null) {
             t.apply()
@@ -1717,9 +1727,12 @@ class WebWindows(
      * After [apply]: when the shown windows' page order changed (a raise, an open), or [ORDER_RECHECK_MS] after the last
      * check while two or more are shown, SurfaceFlinger's last composition is compared with the page's order
      * ([orderCheck]) a little later, once it has composed. Not every frame: a SurfaceFlinger dump takes its locks.
+     * Off unless [ORDER_CHECK_PROP] is "1" (docs/WINDOWS_FIX_PLAN.md 1.1, C4): the dump ran on [io], through root, 300 ms
+     * after every raise and every 10 s with two windows, ahead of touch injection and resizes. A diagnostic, so the
+     * verify scripts turn it on (window-bench.sh's switch phase: `setprop debug.powos.ww_order_check 1`).
      */
     private fun orderCheckSoon(geos: List<Geo>) {
-        if (orderCheckBroken) return
+        if (!orderCheckWanted()) return
         val order = geos.filter { g -> g.visible && wins[g.id]?.let { it.shown && !it.linuxFull && it.mirror != null } == true }.sortedBy { it.z }.map { it.id }
         val now = SystemClock.uptimeMillis()
         if (order.isEmpty()) {
@@ -1732,6 +1745,9 @@ class WebWindows(
         val names = order.associateWith { id -> wins[id]?.let(::layerKey) ?: "" }
         io.postDelayed({ orderCheck(order, names) }, ORDER_CHECK_DELAY_MS)
     }
+
+    /** The order check may run: it isn't broken (no dump) and [ORDER_CHECK_PROP] turns it on. */
+    private fun orderCheckWanted(): Boolean = !orderCheckBroken && orderCheckOn(debugProp(ORDER_CHECK_PROP))
 
     /** What names [win]'s content in SurfaceFlinger's output: its Linux layer, or its app's package (the mirror's clones). */
     private fun layerKey(win: Win): String = if (win.linux != null) "powos-ww-${win.id}-linux" else "${win.component.packageName}/"
@@ -3503,28 +3519,25 @@ class WebWindows(
      * window placed (or, not yet in the page's list, hidden) as a plain window - then landed AFTER the move and undid
      * it: layer, crop and visibility back to the page's, the game invisible. Broforce at 03:09 won the same race by
      * 50 ms. Now the full-screen state is queued on home's next draw too, AFTER anything queued before it (a later
-     * merge wins), home is asked to draw, and it is written again directly once the draw path settled
-     * ([FULL_RESTATE_MS]) - every write the same idempotent [fullLayer], skipped once the window left full screen. The
-     * immersive status bar is asked hidden again with it (asked during the surface's transition, it stayed up).
+     * merge wins), and home is asked to draw; every later page placement ends with it as well ([apply], fix plan 1.4),
+     * so the 250/1,000/3,000 ms direct restates that covered a late placement are gone. The immersive status bar is
+     * still asked hidden again on [IMMERSIVE_REHIDE_MS] (asked during the surface's transition, it stayed up): that is
+     * the system bar's own state, not a layer write, and no placement carries it.
      */
     private fun restateFull(why: String) {
         val t = SurfaceControl.Transaction()
-        val n = wins.values.count { it.linuxFull && !it.closed && fullLayer(t, it) }
-        if (n == 0) return
+        val full = wins.values.filter { it.linuxFull && !it.closed && fullLayer(t, it) }
+        if (full.isEmpty()) return
         val attached = web.rootSurfaceControl
         if (attached == null) t.apply() else attached.applyTransactionOnDraw(t)
         web.invalidate()
-        for (ms in FULL_RESTATE_MS) main.postDelayed({ restateNow(why) }, ms)
+        WindowLog.i(TAG, "full screen restated on home's next draw ($why): ${full.joinToString { "window ${it.id}" }}")
+        if (full.any { it.immersive }) for (ms in IMMERSIVE_REHIDE_MS) main.postDelayed({ immersiveAgain() }, ms)
     }
 
-    /** [restateFull]'s direct write: every full-screen window's layer and immersive status bar, applied now. */
-    private fun restateNow(why: String) {
-        val t = SurfaceControl.Transaction()
-        val full = wins.values.filter { it.linuxFull && !it.closed && fullLayer(t, it) }
-        if (full.isEmpty()) return
-        t.apply()
-        for (w in full) if (w.immersive) statusBarHidden()
-        WindowLog.i(TAG, "full screen restated ($why): ${full.joinToString { "window ${it.id}" }}")
+    /** [restateFull]'s status bar: hidden again while an immersive full-screen window is still up. */
+    private fun immersiveAgain() {
+        if (wins.values.any { it.linuxFull && !it.closed && it.immersive }) statusBarHidden()
     }
 
     /** Home's window's status bar asked hidden again for an immersive full screen (idempotent, not logged). */
@@ -3990,10 +4003,11 @@ class WebWindows(
     /**
      * [WebWindowsHost] in its own long-lived `su 2000` (one superuser request when it starts, as RootShell's note asks
      * of long-lived root processes), started at the first window. Its stdin closing (this process gone) releases every
-     * display it made; it dying drops every window. All calls but [read] on [io].
+     * display it made; it dying drops every window. All calls but [read] and [touch] on [io]; [touch] on [input]. The
+     * pipe ([send], [ensure], [stop]) is shared by both, under the Helper's lock: each line goes out whole.
      */
     private inner class Helper {
-        private var process: Process? = null
+        @Volatile private var process: Process? = null
         private var writer: BufferedWriter? = null
         private val waiting = HashMap<String, (Int, String?) -> Unit>()
 
@@ -4003,7 +4017,7 @@ class WebWindows(
             ensure()
         }
 
-        /** Running, or null (logged). */
+        /** Running, or null (logged). Under the lock ([send]). */
         private fun ensure(): BufferedWriter? {
             writer?.let { if (process?.isAlive == true) return it }
             val apk = context.applicationInfo.sourceDir
@@ -4045,6 +4059,7 @@ class WebWindows(
             }
         }
 
+        @Synchronized
         private fun send(line: String): Boolean {
             val w = ensure() ?: return false
             return try {
@@ -4107,8 +4122,9 @@ class WebWindows(
         }
 
         /**
-         * A body touch injected on [displayId] by the helper (in order on [io]); false when no helper runs (the caller
-         * falls back). The helper answers "log touch ..." for every down/up (and any move it couldn't inject).
+         * A body touch injected on [displayId] by the helper (in order on [input], never behind [io]'s work); false when
+         * no helper runs (the caller falls back). The helper answers "log touch ..." for every down/up (and any move it
+         * couldn't inject); a down or up queued on [input] more than [INPUT_LATE_MS] logs its wait.
          */
         fun touch(
             w: Win,
@@ -4117,7 +4133,12 @@ class WebWindows(
         ): Boolean {
             if (process?.isAlive != true) return false
             val line = "touch ${w.displayId} $action ${w.downAt} " + pointers.joinToString(" ") { (id, x, y) -> "$id,$x,$y" }
-            io.post { if (!send(line)) WindowLog.w(TAG, "input: '$line' not sent") }
+            val queued = SystemClock.uptimeMillis()
+            input.post {
+                val late = SystemClock.uptimeMillis() - queued
+                if (late > INPUT_LATE_MS && action != MotionEvent.ACTION_MOVE) WindowLog.w(TAG, "input: window ${w.id} touch line waited $late ms for the input thread")
+                if (!send(line)) WindowLog.w(TAG, "input: '$line' not sent")
+            }
             return true
         }
 
@@ -4130,9 +4151,11 @@ class WebWindows(
 
         fun stop() =
             io.post {
-                runCatching { writer?.close() }
-                writer = null
-                process = null
+                synchronized(this) {
+                    runCatching { writer?.close() }
+                    writer = null
+                    process = null
+                }
             }
     }
 
@@ -4396,6 +4419,28 @@ class WebWindows(
         /** A Linux web window's switcher card id: this + its window id (no Android task id gets near it). */
         const val LINUX_CARD = 1 shl 29
 
+        /** A touch line that waited longer than this for [input] is logged ([Helper.touch]). */
+        const val INPUT_LATE_MS = 8L
+
+        /** The debug property that turns the layer order check ([orderCheckSoon]) on: "1". Unset = off. */
+        const val ORDER_CHECK_PROP = "debug.powos.ww_order_check"
+
+        /** The debug property that has the host offer N2's frame-ahead geometry to the page ("w.ahead 1"): "1". */
+        const val AHEAD_PROP = "debug.powos.ww_ahead"
+
+        /** A debug switch [name] is on: its property is "1" ([orderCheckOn]). */
+        fun debugOn(name: String): Boolean = orderCheckOn(debugProp(name))
+
+        /** [ORDER_CHECK_PROP]'s value -> the check runs. Only an explicit "1": unset, "0" or unreadable = off. */
+        fun orderCheckOn(prop: String?): Boolean = prop?.trim() == "1"
+
+        private val sysPropGet by lazy {
+            runCatching { Class.forName("android.os.SystemProperties").getMethod("get", String::class.java, String::class.java) }.getOrNull()
+        }
+
+        /** A system property's value, read in-process (no getprop child); null when unreadable (JVM tests). */
+        fun debugProp(name: String): String? = runCatching { sysPropGet?.invoke(null, name, "") as String? }.getOrNull()
+
         /** The order check ([orderCheckSoon]) waits this long after the apply, for SurfaceFlinger to compose it. */
         private const val ORDER_CHECK_DELAY_MS = 300L
 
@@ -4486,10 +4531,10 @@ class WebWindows(
         const val FULL_REFIT_SETTLE_MS = 400L
 
         /**
-         * FS10: after a full screen or home's surface made again, the full-screen state written again directly this
-         * long after (ms): past a first-frame sync (100+ ms seen, 11-07 03:14) and a slow transition's.
+         * FS10: after an immersive full screen or home's surface made again, the status bar asked hidden again this long
+         * after (ms): past a first-frame sync (100+ ms seen, 11-07 03:14) and a slow transition's.
          */
-        val FULL_RESTATE_MS = longArrayOf(250L, 1_000L, 3_000L)
+        val IMMERSIVE_REHIDE_MS = longArrayOf(250L, 1_000L, 3_000L)
 
         /**
          * Whether the page leaves out PowOS's bar over a Linux window: KWin says it draws its own complete frame

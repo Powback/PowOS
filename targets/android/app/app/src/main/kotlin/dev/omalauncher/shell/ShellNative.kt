@@ -112,8 +112,11 @@ class ShellNative(
             val key = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
             geo.key = key
             mine.postMessage(WebMessage("w.key $key"))
-            // N2: this host binds "w.f" geometry measured one frame ahead (FrameSync.ahead): the page may send it.
-            mine.postMessage(WebMessage("w.ahead 1"))
+            // N2: this host binds "w.f" geometry measured one frame ahead (FrameSync.ahead): the page may send it. Off
+            // unless debug.powos.ww_ahead=1 (docs/WINDOWS_FIX_PLAN.md 1.3, C5: the prediction measures every window twice
+            // a frame; phone 11-07: 341 sent, 4 applied) until ww-glue.sh's A/B says it pays. The page's CDP knob
+            // (`__ww.aheadOn`) still turns it on for a run; the host binds an ahead frame whenever one comes.
+            if (WebWindows.debugOn(WebWindows.AHEAD_PROP)) mine.postMessage(WebMessage("w.ahead 1"))
             // A new page: its glass asks again (b.hello); the last page's regions go with it.
             glass?.reset()
         }

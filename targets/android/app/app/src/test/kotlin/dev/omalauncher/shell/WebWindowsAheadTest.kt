@@ -1,5 +1,6 @@
 package dev.omalauncher.shell
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -53,5 +54,18 @@ class WebWindowsAheadTest {
         assertTrue("FrameSync.ahead no longer binds to postVisualStateCallback", ahead.contains("web.postVisualStateCallback("))
         val native = File("src/main/kotlin/dev/omalauncher/shell/ShellNative.kt").readText()
         assertTrue("the host no longer tells the page it takes ahead frames", native.contains("WebMessage(\"w.ahead 1\")"))
+    }
+    /**
+     * Fix plan 1.3 (C5): the host no longer offers frame-ahead geometry by default - the prediction measured every
+     * window twice a frame and almost none applied (phone 11-07: 341 sent, 4). Only debug.powos.ww_ahead=1 offers it,
+     * for the A/B (ww-glue.sh WW_AHEAD); the host still binds an ahead frame whenever the page sends one.
+     */
+    @Test
+    fun aheadIsOffByDefault() {
+        val native = File("src/main/kotlin/dev/omalauncher/shell/ShellNative.kt").readText()
+        val offer = native.lines().single { it.contains("WebMessage(\"w.ahead 1\")") }
+        assertTrue("the offer is unconditional again: $offer", offer.trim().startsWith("if (WebWindows.debugOn(WebWindows.AHEAD_PROP))"))
+        assertEquals("debug.powos.ww_ahead", WebWindows.AHEAD_PROP)
+        assertFalse("unreadable property (no device) = off", WebWindows.debugOn(WebWindows.AHEAD_PROP))
     }
 }

@@ -1,6 +1,7 @@
 package dev.omalauncher.shell
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -67,5 +68,24 @@ class WebWindowsLayerOrderTest {
         assertTrue(src.contains("orderCheckSoon(geos)"))
         val place = src.substringAfter("private fun place(").substringBefore("private fun ")
         assertTrue("place() re-parents a stray container before its z", place.indexOf("underRoot(t, win)") in 0 until place.indexOf("t.setLayer(c, g.z)"))
+    }
+    /**
+     * Fix plan 1.1 (C4): the SurfaceFlinger dump (through root, on the io thread that also injects touches) ran 300 ms
+     * after every raise. It is now off unless debug.powos.ww_order_check=1; the verify scripts turn it on.
+     */
+    @Test
+    fun offByDefault() {
+        assertFalse("unset: off", WebWindows.orderCheckOn(null))
+        assertFalse("empty (getprop of an unset property): off", WebWindows.orderCheckOn(""))
+        assertFalse(WebWindows.orderCheckOn("0"))
+        assertTrue(WebWindows.orderCheckOn("1"))
+        assertNull("the JVM has no android.os.SystemProperties: unreadable = off", WebWindows.debugProp(WebWindows.ORDER_CHECK_PROP))
+        val src = File("src/main/kotlin/dev/omalauncher/shell/WebWindows.kt").readText()
+        val soon = src.substringAfter("private fun orderCheckSoon(").substringBefore("\n    }\n")
+        val gate = soon.indexOf("if (!orderCheckWanted()) return")
+        assertTrue("orderCheckSoon returns before anything when the property isn't 1", gate in 0 until soon.indexOf("io.postDelayed"))
+        val wanted = src.substringAfter("private fun orderCheckWanted(").substringBefore("\n")
+        assertTrue("orderCheckWanted reads the property", wanted.contains("orderCheckOn(debugProp(ORDER_CHECK_PROP))"))
+        assertTrue("nothing before the gate posts or measures", soon.substring(0, gate).let { !it.contains("postDelayed") && !it.contains("geos.filter") })
     }
 }
