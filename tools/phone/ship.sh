@@ -38,7 +38,9 @@
 #     install at once instead of waiting for the user to be idle / the screen off. Delete the file to wait again.
 #   The notes of the requests a part finishes go into ONE update notification ("a; b"; all --silent = silent). The tip shipped
 #   goes to <queue>/live, a line to <queue>/shipped.log, the run's log to <queue>/done/. A failed ship mails the
-#   coder inbox and isn't retried until origin moves (a user who stayed active: retried). ship-apk.sh / push.sh
+#   coder inbox and isn't retried until origin moves (a user who stayed active: retried). No gate verdict (gate.sh exit 2,
+#   its job machine .58 gone; push.sh / apps/install.sh / ship-apk.sh exit 75) is no failure: that step is DEFERRED
+#   (gate_deferred: requests kept, no mail, one status line) and gated again once the machine answers. ship-apk.sh / push.sh
 #   refuse to run outside this service (POWOS_SHIP_SERVICE) unless --direct (emergencies; logged to <queue>/direct.log).
 set -uo pipefail
 here=${SHIP_HERE:-$(cd "$(dirname "$0")" && pwd -P)}; unset SHIP_HERE
@@ -133,11 +135,14 @@ status)
   [ -s "$Q/rooted-pending" ] && { read -r rb rt < "$Q/rooted-pending"; echo "rooted deploy pending since ${rb:0:9} (origin ${rt:0:9}; runs after the APK, under the phone-busy rules)"; }
   [ -s "$Q/window-failed" ] && { read -r wt ww wf < "$Q/window-failed"; if [ "$wf" = render-watch ]; then echo "WINDOWS BROKEN: ${wt:0:9} ($ww) failed the passive window check (render-watch) - log $Q/done/render-watch-${wt:0:9}.log"; else echo "WINDOWS BROKEN: ${wt:0:9} ($ww) failed the device window check (verify/window-render.sh; changed: $wf) - log $Q/done/window-render-${wt:0:9}.log"; fi; }
   [ -s "$Q/window-gate.pid" ] && kill -0 "$(cat "$Q/window-gate.pid")" 2>/dev/null && echo "device window check running (pid $(cat "$Q/window-gate.pid"); hidden display, no wait)"
+  gd=$(for f in "$Q"/gate-deferred/*; do [ -s "$f" ] || continue; read -r gt ga _ < "$f"; echo "$(basename "$f") ${gt:0:9} since $(date -r "$ga" +%H:%M)"; done | paste -sd, - | sed 's/,/, /g')
+  [ -z "$gd" ] || echo "GATE DEFERRED (no verdict: the gate machine ${POW_JOB_CONTEXT:-pow58} didn't answer): $gd - nothing failed, requests kept; gated again once it answers"
   [ -d "$Q/apk" ] && echo "APK ship out: $(cut -c1-9 "$Q/apk/tip" 2>/dev/null) (log $(cat "$Q/apk/log" 2>/dev/null))"
   echo "last ships:"; tail -6 "$Q/shipped.log" 2>/dev/null | sed 's/^/  /' ;;
 run)
   [ -n "$REPO" ] || { echo "ship.sh run: not in a PowOS checkout"; exit 2; }
-  ls "$Q"/*.req >/dev/null 2>&1 || exit 0   # nothing requested (launchd starts it at load): gone at once
+  # Nothing requested (launchd starts it at load): gone at once - unless a post-deploy gate waits for its machine.
+  ls "$Q"/*.req >/dev/null 2>&1 || [ -s "$Q/gate-deferred/postgate" ] || exit 0
   [ -e "$Q/paused" ] && { echo "$(date +%T) paused - not starting (tools/phone/ship.sh resume)"; exit 0; }
   # ONE runner: the lock dir holds its pid (exec keeps it, so the private copy below holds it already).
   L=$Q/runner.lock
@@ -275,6 +280,31 @@ run)
   # offline_wait WHAT: logged once per tip and step - the step's requests stay pending, nothing is marked failed.
   offline_wait() { ! grep -qxF "$T $1" "$Q/offline-wait" 2>/dev/null || return 0; echo "$T $1" >> "$Q/offline-wait"
     echo "$(date +%T) ${T:0:9}: $1 waits for the phone (offline) - kept pending, it goes once the phone is back"; }
+  # NO GATE VERDICT (11-10): shell/dev/gate.sh exits 2 when its job machine (POW_JOB_CONTEXT, default pow58 = .58)
+  # didn't answer within GATE_JOB_WAIT_S - the hub can't pass the full gate, so there is no verdict; push.sh,
+  # apps/install.sh and ship-apk.sh pass it on as exit 75 (GATE_NV). Not the commit's fault: no failed mark, no mail, no
+  # REFUSED/FAILED wording, and nothing goes out ungated - the step's requests stay queued. $Q/gate-deferred/<step>
+  # ("TIP EPOCH [files]") holds that step (ship.sh status says so) until the machine answers again (gate_up: probed at
+  # most every SHIP_GATE_PROBE_S, 60 s) or SHIP_GATE_RETRY_S (1800) s passed; then it gates again.
+  GATE_NV=75 gate_probe_at=0 gate_probe_rc=1
+  gate_deferred() {   # STEP TIP [FILES...]
+    local st=$1 tp=$2; shift 2; mkdir -p "$Q/gate-deferred"
+    [ "$(cut -d' ' -f1 "$Q/gate-deferred/$st" 2>/dev/null)" = "$tp" ] ||
+      echo "$(date +%T) ${tp:0:9}: $st DEFERRED - no gate verdict (the gate machine ${POW_JOB_CONTEXT:-pow58} didn't answer): nothing failed, requests kept - gated again once it answers"
+    echo "$tp $(date +%s) $*" > "$Q/gate-deferred/$st"; }
+  gate_probe() { [ "${POW_JOB_CONTEXT:-pow58}" = hub ] && return 0
+    perl -e 'alarm 5; exec @ARGV' docker --context "${POW_JOB_CONTEXT:-pow58}" version --format '{{.Server.Version}}' >/dev/null 2>&1; }
+  gate_up() { local now; now=$(date +%s)
+    [ $((now - gate_probe_at)) -lt "${SHIP_GATE_PROBE_S:-60}" ] && return $gate_probe_rc
+    gate_probe_at=$now; ${SHIP_GATE_PROBE:-gate_probe}; gate_probe_rc=$?; return $gate_probe_rc; }
+  gate_clear() { rm -f "$Q/gate-deferred/$1"; }
+  gate_ready() {   # STEP: 0 = it may gate now (nothing deferred, or the machine is back / the retry is due)
+    local f=$Q/gate-deferred/$1 tp at; [ -s "$f" ] || return 0
+    read -r tp at _ < "$f"
+    if gate_up; then echo "$(date +%T) ${tp:0:9}: the gate machine answers again - $1 gates now"
+    elif [ $(( $(date +%s) - at )) -ge "${SHIP_GATE_RETRY_S:-1800}" ]; then echo "$(date +%T) ${tp:0:9}: $1 deferred ${SHIP_GATE_RETRY_S:-1800}+ s - gating again"
+    else return 1; fi
+    rm -f "$f"; }
   # rooted_due: rooted_inputs changed since the last rooted deploy ($Q/rooted-live) up to this checkout's HEAD, and
   # the deploy didn't fail on HEAD. Sets rbase/rchg; keeps $Q/rooted-pending ("BASE TIP", for status) in step.
   # It keeps the runner up until the deploy ran (2026-10-30: a tip with APK + rooted inputs installed its APK, which
@@ -300,7 +330,8 @@ run)
     [ -n "$(apk_inputs "$i" "$h")" ] && [ "$(cat "$Q/failed-apk" 2>/dev/null)" != "$h" ]; }
   rooted_go() { rooted_due && ! rooted_after_apk && ! pkgs_pending; }
   # bg_go: work the runner stays up for without a request - a rooted deploy due, or a packages build due / out.
-  bg_go() { rooted_go || pkgs_out || pkgs_due; }
+  # A post-deploy gate deferred for no verdict (post_gate_retry) keeps the runner up too, until it gates again.
+  bg_go() { rooted_go || pkgs_out || pkgs_due || [ -s "$Q/gate-deferred/postgate" ]; }
   # THE PACKAGES (11-10): kwin 3.76's PKGBUILD (patches 0067/0068) landed and shipped as "code", but no step ever built
   # or published a package - only an agent's hand-run build-pkgs.sh did, so the phone stayed on 3.74 and the game-audio
   # check failed on the missing KWin half. pkg_names A B: targets/android/pkgs/<name>/ dirs with a PKGBUILD at B whose
@@ -405,13 +436,28 @@ run)
     local old; old=$(cat "$Q/postgate.pid" 2>/dev/null) && [ -n "$old" ] && killtree "$old" 2>/dev/null
     ( gl=$Q/done/postgate-${t:0:9}.log
       ( cd shell && GATE_PRIORITY=ship IDLE_MS=0 READY_MS=${READY_MS:-60000} ./push.sh --pre-gate "$@" ) > "$gl" 2>&1; grc=$?
-      if [ $grc -ne 0 ] && ! grep '^FAIL' "$gl" | grep -qv 'not ready' ; then ( cd shell && GATE_PRIORITY=ship IDLE_MS=0 READY_MS=90000 ./push.sh --pre-gate "$@" ) > "$gl" 2>&1; grc=$?; fi
-      if [ $grc -ne 0 ]; then
+      if [ $grc = 1 ] && ! grep '^FAIL' "$gl" | grep -qv 'not ready' ; then ( cd shell && GATE_PRIORITY=ship IDLE_MS=0 READY_MS=90000 ./push.sh --pre-gate "$@" ) > "$gl" 2>&1; grc=$?; fi
+      # No verdict (the gate machine gone): not a FAIL - kept as deferred, gated again from the loop (post_gate_retry).
+      # The runner may have left meanwhile (the gate waited GATE_JOB_WAIT_S): started again, it retries (bg_go).
+      if [ $grc = $GATE_NV ]; then gate_deferred postgate "$t" "$@"
+        runner_up || agent_kick || { nohup bash "$here/ship.sh" run >> "$Q/runner.log" 2>&1 & }
+      elif [ $grc -ne 0 ]; then
         echo "$t" > "$Q/postgate-failed"
         mail "ship ${t:0:9} (shell) went live and its gate FAILED after: $(grep -E '^FAIL|REFUSED|pre-gate failed' "$gl" | head -2 | cut -c1-200 | paste -sd' ' -) - log $gl on the Mac; fix it on origin, then ship.sh request again"
       else rm -f "$Q/postgate-failed"; fi
       rm -f "$Q/postgate.pid" ) &
     echo $! > "$Q/postgate.pid"
+  }
+  # post_gate_retry: a post-deploy gate deferred for no verdict runs again once gate_ready says so, while that tip is
+  # still the live shell (a newer shell ship ran its own post_gate: dropped), on this checkout (origin's tip).
+  post_gate_retry() {
+    local f=$Q/gate-deferred/postgate tp at files
+    [ -s "$f" ] || return 0
+    [ -s "$Q/postgate.pid" ] && kill -0 "$(cat "$Q/postgate.pid")" 2>/dev/null && return 0
+    read -r tp at files < "$f"
+    [ "$(cat "$Q/live" 2>/dev/null)" = "$tp" ] || { rm -f "$f"; return 0; }
+    gate_ready postgate || return 0
+    post_gate "$tp" "" $files
   }
   # window_gate BASE TIP WHAT: a ship whose BASE..TIP diff touches web-window files (WINDOW_FILES) is checked ON THE
   # DEVICE once it's live, synchronously: verify/window-render.sh --hidden starts the APK's own window host
@@ -627,6 +673,8 @@ run)
       if link_down "$Q/modules-first.err" || phone_offline; then offline_wait "$1"; return 2; fi
       mrc=11; need="(unreadable)"
     else need=$(for a in $need; do first_done "$a" || echo "$a"; done | paste -sd' ' -); [ -n "$need" ] || return 0; fi
+    # A module publish deferred for no gate verdict (apps/install.sh exit 75): held, never published ungated.
+    [ $mrc != 0 ] || gate_ready modules || return 2
     if [ $mrc = 0 ] && [ "${2:-}" = lock ]; then
       if verify_held; then echo $$ > "$Q/wants-phone"; return 2; fi
       ship_lock || return 2; lk=1; echo $$ > "$Q/installing"
@@ -648,6 +696,7 @@ run)
     fi
     [ -z "$lk" ] || { rm -rf "$SL"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"; }
     if [ $mrc = 0 ]; then echo "$(date '+%F %T') ${T:0:9} apps-first ($need) for $who_s: before the $1" >> "$Q/shipped.log"; return 0; fi
+    if [ $mrc = $GATE_NV ]; then gate_deferred modules "$T"; return 2; fi
     # Published, then the phone dropped off before the re-check: what went out is recorded (apps-first), the rest waits.
     if [ $mrc = 12 ]; then offline_wait "$1"; return 2; fi
     # The phone WAS read and the bindings wouldn't decode its modules in a way no publish fixes (another shape, or bindings
@@ -719,9 +768,13 @@ run)
       [ -f "$Q/apk/window-wait" ] && [ $(( $(date +%s) - $(cat "$Q/apk/window-wait") )) -lt "${WINDOW_WAIT_S:-60}" ] && return 0
       A=$(cat "$Q/apk/tip") arc=$(cat "$Q/apk/rc") alog=$(cat "$Q/apk/log")
       if [ "$arc" = 0 ] || [ "$inst" = "$A" ]; then
+        gate_clear apk
         reap_apk_installed "$A" || [ $? != 2 ] || return 0
       elif [ "$arc" = 8 ]; then echo "$(date +%T) ${A:0:9}: a newer APK is wanted - the pending one is replaced"
       elif [ "$arc" = 4 ]; then echo "$(date +%T) ${A:0:9}: the user stayed active - the APK goes again"
+      # No gate verdict (ship-apk exit 75: the gate machine didn't answer): nothing installed, nothing failed - its
+      # requests stay and the APK step goes again once gate_ready says so.
+      elif [ "$arc" = "$GATE_NV" ]; then gate_deferred apk "$A"
       elif [ -e "$Q/paused" ]; then echo "$(date +%T) ${A:0:9}: APK ship stopped by pause (rc $arc) - its requests are kept"
       # Stopped WITH its runner (the TERM trap marked it before killing ship-apk, whose subshell still writes 143): not
       # a failure of this tip - it goes again, as one whose runner died without an rc does (apk_alive's rc 4).
@@ -874,7 +927,8 @@ run)
         [ "$(cat "$Q/shell-held" 2>/dev/null)" = "$T $cpl" ] || { echo "$T $cpl" > "$Q/shell-held"
           echo "$(date +%T) ${T:0:9}: shell held for its APK ${T:0:9} (APK inputs + shell in the same commit: $cpl) - they land together at the install"; }
       else rm -f "$Q/shell-held"; fi
-      if [ -n "$d" ] && [ -z "$cpl" ] && [ "$(cat "$Q/failed" 2>/dev/null)" != "$T" ]; then
+      post_gate_retry
+      if [ -n "$d" ] && [ -z "$cpl" ] && [ "$(cat "$Q/failed" 2>/dev/null)" != "$T" ] && gate_ready shell; then
         # Never inside a verify window. The phone is taken with $SL/phone while our own APK ship holds the ship
         # lock (ship-apk takes it for its install), else with the ship lock itself (a --direct ship).
         # Held: ask the verify queue to yield before its next check (queue.sh reads wants-phone, as for ship-apk) - it
@@ -936,7 +990,7 @@ run)
         fi
         rm -rf "$held"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"
         if [ $rc = 0 ]; then
-          echo "$T" > "$Q/live"; echo "$T" > "$Q/processed"; rm -f "$Q/failed"
+          echo "$T" > "$Q/live"; echo "$T" > "$Q/processed"; rm -f "$Q/failed"; gate_clear shell
           pull_publish shell "$log"
           post_gate "$T" "$log" $add
           # A shell whose tip also has APK inputs not yet installed is checked by that APK's ship, on the build it needs:
@@ -961,6 +1015,8 @@ run)
           git -C "$REPO" fetch -q origin "$BASE" 2>/dev/null
           if [ "$(git rev-parse "origin/$BASE")" != "$T" ]; then echo "$(date +%T) ${T:0:9}: shell ship ended rc $rc while origin moved on - shipping the new tip"; continue; fi
           if link_down "$log" || phone_offline; then offline_wait shell; continue; fi
+          # No gate verdict (SHIP_GATE_FIRST's gated push; push.sh exit 75): deferred, not failed - requests kept.
+          if [ $rc = $GATE_NV ]; then gate_deferred shell "$T"; continue; fi
           echo "$T" > "$Q/failed"
           echo "$(date +%T) ${T:0:9}: shell ship FAILED rc $rc (log $log) - waiting for a new origin commit"
           mail "ship ${T:0:9} (shell) FAILED rc $rc for $who_s: $(grep -E 'REFUSED|refused|FAIL|error' "$log" | tail -1 | cut -c1-200) - log $log on the Mac; fix it on origin, then ship.sh request again"
@@ -974,7 +1030,7 @@ run)
         [ ${#sreqs[@]} -gt 0 ] && echo "$(date +%T) ${T:0:9}: nothing differs from what's live - ${#sreqs[@]} request(s) done"
       fi
       # 2. The APK, beside the loop: once origin stayed QUIET s on the tip, one at a time, not again on a tip that failed.
-      if [ ${#areqs[@]} -gt 0 ] && ! apk_out && [ "$age" -ge "$QUIET" ] && [ "$(cat "$Q/failed-apk" 2>/dev/null)" != "$T" ]; then
+      if [ ${#areqs[@]} -gt 0 ] && ! apk_out && [ "$age" -ge "$QUIET" ] && [ "$(cat "$Q/failed-apk" 2>/dev/null)" != "$T" ] && gate_ready apk; then
         an=$(joined ${anotes[@]+"${anotes[@]}"})
         if [ -n "$an" ]; then na=(--note "$an"); else na=(--silent); fi
         why="no record of the installed build"; [ -n "$inst" ] && why="APK inputs changed: $(apk_inputs "$inst" "$T" | head -3 | paste -sd' ' -)"
@@ -1006,7 +1062,7 @@ run)
       if [ -n "$vwait" ] && [ -n "$achg" ]; then
         [ "$(cat "$Q/apps-held" 2>/dev/null)" = "$T" ] || { echo "$T" > "$Q/apps-held"
           echo "$(date +%T) ${T:0:9}: apps held - the shell's bindings for$vwait aren't live yet (the module goes first, with the shell's ship)"; }
-      elif [ -n "$achg" ] && ! apk_out && [ "$age" -ge "$QS" ] && [ "$(cat "$Q/failed-apps" 2>/dev/null)" != "$T" ]; then
+      elif [ -n "$achg" ] && ! apk_out && [ "$age" -ge "$QS" ] && [ "$(cat "$Q/failed-apps" 2>/dev/null)" != "$T" ] && gate_ready apps; then
         rm -f "$Q/apps-held"
         if verify_held; then echo $$ > "$Q/wants-phone"
         elif ship_lock; then
@@ -1026,8 +1082,9 @@ run)
           if [ $arc = 0 ] && [ -n "$vpub" ] && ! ${SHIP_BINDINGS_CHECK:-tools/phone/bindings-check.sh} --no-publish --vendor shell/vendor >> "$alog" 2>&1; then
             arc=10; echo "apps: the phone's modules and the shell's bindings don't match after the publish (above)" >> "$alog"; fi
           rm -rf "$SL"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"
-          if [ $arc = 0 ]; then
-            echo "$T" > "$Q/apps-live"; rm -f "$Q/failed-apps"
+          if [ $arc = $GATE_NV ]; then gate_deferred apps "$T"   # no gate verdict: not failed, gated again (gate_ready)
+          elif [ $arc = 0 ]; then
+            echo "$T" > "$Q/apps-live"; rm -f "$Q/failed-apps"; gate_clear apps
             echo "$(date '+%F %T') ${T:0:9} apps ($achg) for $who_s: $an" >> "$Q/shipped.log"
             units_publish
             echo "$(date +%T) ${T:0:9}: apps shipped ($achg)"

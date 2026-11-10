@@ -65,6 +65,9 @@ cat > shell/dev/gate.sh <<'EOF'
 #!/bin/bash
 # fake gate: logs, takes GATE_SLEEP seconds (a loaded Mac), fails on a file containing BROKEN
 echo "GATE $(ts) $*" >> "$LOG"; sleep "${GATE_SLEEP:-0}"
+# the gate's job machine (.58) gone: NO VERDICT, exit 2 - $HOME/gate-down for every gate, $HOME/gate-down-pre for a
+# gate of named files only (push.sh --pre-gate's)
+{ [ -e "$HOME/gate-down" ] || { [ -e "$HOME/gate-down-pre" ] && [ $# -gt 0 ]; }; } && { echo "gate: NO VERDICT - pow58 did not answer within 900 s"; exit 2; }
 for f in "$@"; do case "$f" in --*) ;; *) grep -q BROKEN "$f" 2>/dev/null && { echo "FAIL home: $f broken"; exit 1; } ;; esac; done
 echo "ok all pages"
 EOF
@@ -118,6 +121,20 @@ ship; rc=$?
 [ $rc -eq 3 ] && ! grep -q '^INSTALL' "$LOG" && grep -q "REFUSED - not installing" "$T/ship.out" && ok "failed pre-gate refuses the install" || { bad "failed pre-gate (rc $rc)"; cat "$LOG" "$T/ship.out"; }
 unset DURING_BUILD
 landB 'export const ai = "fixed"' fix >/dev/null
+
+# 2b. 11-10: the gate gives no verdict (gate.sh exit 2: its job machine didn't answer) - ship-apk exits 75 DEFERRED,
+#     never "REFUSED - this commit's shell doesn't load": nothing built or installed, no boot-timeout retry. Then the
+#     same for a no-verdict pre-gate of the newer shell files (built, kept, not installed).
+: > "$LOG"; rm -f "$HOME/.cache/powos-installed-commit"; touch "$HOME/gate-down"
+ship; rc=$?; rm -f "$HOME/gate-down"
+[ $rc -eq 75 ] && ! grep -q '^BUILD\|^INSTALL' "$LOG" && [ "$(grep -c '^GATE' "$LOG")" = 1 ] && grep -q "DEFERRED - no gate verdict" "$T/ship.out" &&
+  ! grep -q "REFUSED\|doesn't load" "$T/ship.out" && ok "no gate verdict on HEAD: DEFERRED (75), nothing built or installed" || { bad "no-verdict head gate (rc $rc)"; cat "$LOG" "$T/ship.out"; }
+: > "$LOG"; touch "$HOME/gate-down-pre"
+export DURING_BUILD="cd $T/B && git pull -q --rebase && echo 'export const ai = \"nv\"' > shell/ui/ai.tsx && git commit -qam nv && git push -q origin HEAD:worktree-powos-multiplatform"
+ship; rc=$?; rm -f "$HOME/gate-down-pre"; unset DURING_BUILD
+[ $rc -eq 75 ] && grep -q '^BUILD' "$LOG" && ! grep -q '^INSTALL' "$LOG" && grep -q "DEFERRED - no gate verdict" "$T/ship.out" &&
+  ! grep -q "REFUSED\|pre-gate failed" "$T/ship.out" && ok "no gate verdict on the newer shell files: DEFERRED (75), not installed" || { bad "no-verdict pre-gate (rc $rc)"; cat "$LOG" "$T/ship.out"; }
+landB 'export const ai = "fixed"' "back to fixed" >/dev/null   # origin's ai.tsx as case 3 expects it
 
 # 3. The phone's copy is from a commit the pusher's base lacks.
 (cd "$T/A" && git pull -q --ff-only 2>/dev/null); base=$(cd "$T/A" && git rev-parse HEAD)

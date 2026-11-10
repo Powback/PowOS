@@ -15,6 +15,8 @@
 # Once, when the wait starts: a PowOS notification + a pet line "Update ready (N fixes): lock the screen to install".
 # A newer origin tip with APK inputs ends the wait (exit 8): the runner builds that one instead, which replaces this.
 # SHIP_WAIT_MIN=N (tests) gives up after N minutes with exit 4. --now skips the wait (only for urgent fixes).
+# Exit 75 = DEFERRED: the gate gave no verdict (shell/dev/gate.sh exit 2: its job machine, .58, didn't answer) - not
+# a fault of this commit; nothing built in or installed, and the ship service gates it again once the machine is back.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 # Always the shared, current rules: each worktree has its own copy of this script, and an old copy skipped the
@@ -98,10 +100,13 @@ fi
 # the FAIL lines themselves (a tail of the console warnings hid them).
 glog=${TMPDIR:-/tmp}/ship-apk-gate.log
 gate_head() { GATE_SCOPE=boot GATE_PRIORITY=ship READY_MS=$1 IDLE_MS=0 bash shell/dev/gate.sh > "$glog" 2>&1; }
+nv_exit() { echo "ship-apk: DEFERRED - no gate verdict: the gate's machine didn't answer ($1); this commit is neither passed nor failed, nothing installed - the ship service gates it again once the machine is back" >&2; exit 75; }
 grc=0; gate_head "${READY_MS:-30000}" || grc=$?
+[ $grc != 2 ] || nv_exit "$(grep -m1 '^gate: NO VERDICT' "$glog" | cut -c1-160)"
 if [ $grc -ne 0 ] && grep -q '^FAIL' "$glog" && ! grep '^FAIL' "$glog" | grep -qv 'not ready'; then
   echo "ship-apk: only boot timeouts - the Mac is busy? gating once more with READY_MS=90000" >&2
   grc=0; gate_head 90000 || grc=$?
+  [ $grc != 2 ] || nv_exit "the boot-timeout retry"
 fi
 if [ $grc -ne 0 ]; then
   { grep -E '^FAIL|^gate:' "$glog" | head -12; grep -E '^(error|src/).*TS[0-9]' "$glog" | head -5; } >&2
@@ -145,7 +150,8 @@ if [ -n "$newer" ] && [ -n "${SHIP_GATE_FIRST:-}" ]; then
   git worktree add -q --detach "$t/tree" "$tip" 2>/dev/null || { echo "ship-apk: REFUSED - couldn't check out origin's tip to gate the newer shell files" >&2; exit 3; }
   [ -d shell/node_modules ] && ln -s "$PWD/shell/node_modules" "$t/tree/shell/node_modules"
   echo "ship-apk: gating the shell files the APK has differently from origin's tip $(git rev-parse --short "$tip"): $(echo $newer)"
-  pg=$(cd "$t/tree/shell" && GATE_PRIORITY=ship READY_MS=${READY_MS:-60000} ./push.sh --pre-gate $newer 2>&1 || true)
+  pgr=0; pg=$(cd "$t/tree/shell" && GATE_PRIORITY=ship READY_MS=${READY_MS:-60000} ./push.sh --pre-gate $newer 2>&1) || pgr=$?
+  [ $pgr != 75 ] || nv_exit "pre-gate of the newer shell files"
   stamp=$(echo "$pg" | sed -n 's/^pre-gated //p' | tail -1)
   if [ -z "$stamp" ]; then
     # Every FAIL line, not the last 8 lines: the pages' console noise (WebSocket retries) pushed the FAILs out (01:39).
@@ -296,7 +302,10 @@ if [ -n "$full" ]; then
   # || true: under set -e a refused push ended the ship right here, silently (rc 1) - before the retry, the WARNING,
   # the live record and the boot check below.
   out=$(rp) || true; echo "$out"
-  if ! echo "$out" | grep -q "^pushed "; then
+  # No gate verdict (SHIP_GATE_FIRST's gated push, the gate's machine gone): no retry - it would wait as long again.
+  if ! echo "$out" | grep -q "^pushed " && echo "$out" | grep -q "no gate verdict"; then
+    pushok=""; echo "ship-apk: WARNING - no gate verdict for origin's newer shell files (the gate's machine didn't answer): the phone runs the APK's own shell until the service pushes them: $(echo $full)" >&2
+  elif ! echo "$out" | grep -q "^pushed "; then
     echo "ship-apk: the push was refused - retrying once" >&2; out=$(READY_MS=90000 stamp= rp) || true; echo "$out"
     echo "$out" | grep -q "^pushed " || { pushok=""; echo "ship-apk: WARNING - the phone runs the APK's own shell, without origin's newer files: $(echo $full)" >&2; }
   fi

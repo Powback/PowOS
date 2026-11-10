@@ -38,6 +38,11 @@ set -euo pipefail
 cd "$(dirname "$0")"
 force="" pregate="" pregated=""
 for a in "$@"; do case "$a" in --force) force=1 ;; --pre-gate) pregate=1 ;; --pre-gated=*) pregated=${a#--pre-gated=} ;; esac; done
+# dev/gate.sh exit 2 = NO VERDICT: its job machine (.58) didn't answer and the hub can't pass the full gate - neither a
+# pass nor a failure of these files. Then push.sh exits 75 (EX_TEMPFAIL) with "no gate verdict", never "refused" or
+# "failed", and pushes nothing (not even with --force: never ungated; GATE_HUB_FALLBACK=1 gates on the hub). The ship
+# service keeps the request and gates again once the machine answers (tools/phone/ship.sh gate_deferred).
+no_verdict() { echo "push.sh: no gate verdict - the gate's machine didn't answer (deferred: nothing failed, nothing pushed; GATE_HUB_FALLBACK=1 to gate on the hub)" >&2; exit 75; }
 # The shell files among the arguments (not the flags, not --note's text).
 shell_files() {
   local skip="" a
@@ -127,11 +132,12 @@ if [ -n "$pregate" ]; then
   export GATE_PRIORITY=ship
   set +e
   out=$(dev/gate.sh "${pf[@]}" 2>&1); gate=$?
-  if [ $gate -ne 0 ] && ! echo "$out" | grep '^FAIL' | grep -qv 'not ready'; then
+  if [ $gate = 1 ] && ! echo "$out" | grep '^FAIL' | grep -qv 'not ready'; then
     out=$(READY_MS=$(( ${READY_MS:-0} > 30000 ? ${READY_MS:-0} : 30000 )) dev/gate.sh "${pf[@]}" 2>&1); gate=$?
   fi
   set -e
   echo "$out"
+  [ $gate != 2 ] || no_verdict
   [ $gate -eq 0 ] || { echo "push.sh: pre-gate failed (above)" >&2; exit 1; }
   mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/pregated"
   stamp=$(mktemp "${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/pregated/stamp.XXXXXX")
@@ -190,18 +196,22 @@ if [ "${1:-}" = "--vpn" ]; then
       gate=$?
       # Only "not ready" timeouts, no error at all: the Mac was loaded (concurrent builds/gates - 2026-10-21 every page
       # timed out at ~10 s while the same composition passed in 16 s a minute later). Once more with a longer wait.
-      if [ $gate -ne 0 ] && ! echo "$out" | grep '^FAIL' | grep -qv 'not ready'; then
+      if [ $gate = 1 ] && ! echo "$out" | grep '^FAIL' | grep -qv 'not ready'; then
         echo "push.sh: only boot timeouts - the Mac is busy? gating once more with READY_MS=$slow" >&2
         out=$(READY_MS=$slow dev/gate.sh ${ga[@]+"${ga[@]}"} "${gf[@]}" 2>&1)
         gate=$?
       fi
       echo "$out"
+      [ $gate != 2 ] || { rm -rf "$ov"; no_verdict; }
       # HEAD + the phone's overrides can be broken without this push (the APK on the phone isn't HEAD, other agents'
       # overrides are half a change): then only failures this push ADDS refuse it - the same gate without its files
       # is the baseline (failures compared without their timings).
       if [ $gate -ne 0 ] && [ ${#ga[@]} -gt 0 ]; then
         norm() { grep '^FAIL' | sed 's/ within [0-9]* ms//; s/([0-9]* ms)//' | sort -u; }
-        base=$(READY_MS=$slow dev/gate.sh "${ga[@]}" 2>&1 | norm)
+        bout=$(READY_MS=$slow dev/gate.sh "${ga[@]}" 2>&1); brc=$?
+        # The baseline itself without a verdict: no baseline to compare with - deferred, not "this push adds all".
+        [ $brc != 2 ] || { rm -rf "$ov"; no_verdict; }
+        base=$(echo "$bout" | norm)
         added=$(comm -13 <(echo "$base") <(echo "$out" | norm))
         if [ -z "$added" ]; then
           echo "push.sh: those failures are the phone's already (the same without these files) - this push adds none" >&2
@@ -306,6 +316,7 @@ if [ -z "${POWOS_GATE_DONE:-}" ]; then
   gate=$?
   set -e
   rm -rf "$ov"
+  [ $gate != 2 ] || no_verdict
   if [ $gate -ne 0 ]; then
     [ -n "$force" ] || { echo "push.sh: refused - the gate failed (above). Fix it, or --force to push anyway." >&2; exit 1; }
     echo "push.sh: the gate failed - pushing anyway (--force)" >&2

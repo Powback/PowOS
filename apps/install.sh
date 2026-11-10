@@ -84,7 +84,11 @@ if [ "$VERB" != publish ] && [ -d "$D/out/ui" ]; then
   # unrelated failing scene (shade-overpull, 2026-10-28) can't block an app deploy. The lints and the app's widget sweep
   # still run; ship.sh's post-deploy full gate reports the rest.
   GID=$(sed -n 's/^ *"id": *"\([^"]*\)".*/\1/p' "$D/powos-app.json" | head -1)
-  if ! GATE_ONLY="^app ${GID//./\\.}( |\$)" GATE_SHELL_PAGES=0 "$HERE/../shell/dev/gate.sh" --app "$D"; then
+  # gate.sh exit 2 = NO VERDICT (its job machine didn't answer): exit 75, "no gate verdict" - deferred, not failed, and
+  # never installed ungated (not even --force); the ship service keeps the request and gates again (ship.sh gate_deferred).
+  grc=0; GATE_ONLY="^app ${GID//./\\.}( |\$)" GATE_SHELL_PAGES=0 "$HERE/../shell/dev/gate.sh" --app "$D" || grc=$?
+  [ $grc != 2 ] || { echo "install.sh: no gate verdict - the gate's machine didn't answer (deferred: nothing failed, nothing installed; GATE_HUB_FALLBACK=1 to gate on the hub)" >&2; exit 75; }
+  if [ $grc != 0 ]; then
     [ -n "$FORCE" ] || { echo "install.sh: refused - the gate failed (above). Fix it, or --force to install anyway." >&2; exit 1; }
     echo "install.sh: the gate failed - installing anyway (--force)" >&2
   fi

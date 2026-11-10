@@ -12,6 +12,9 @@ export SHIP_QUIET_S=2 SHIP_QUIET_SHELL_S=2 SHIP_POLL_S=0.2
 export SHIP_GATE_FIRST=1   # these tests cover the gate-then-push mode; deploy-first is the default
 # The phone's VPN link (ship.sh phone_offline): $HOME/phone-offline = adb.sh --vpn-state's rc 69 (handshake stale).
 export SHIP_PHONE_STATE=$T/bin/phone-state SHIP_OFFLINE_POLL_S=1
+# The gate's job machine (.58): $HOME/gate-down = it doesn't answer - the gate stub exits 2 (NO VERDICT), and the
+# service's probe (ship.sh gate_up, SHIP_GATE_PROBE) says it's still gone.
+export SHIP_GATE_PROBE=$T/bin/gate-probe SHIP_GATE_PROBE_S=0
 unset POWOS_SHIP_SERVICE SHIP_AGENT
 Q=$SHIP_DIR
 stop_runner() { local p; p=$(cat "$Q/runner.lock/pid" 2>/dev/null) && kill "$p" 2>/dev/null; pkill -f "$T/" 2>/dev/null; }
@@ -48,6 +51,7 @@ case "$all" in
 esac
 exit 0
 EOF
+printf '#!/bin/bash\n[ ! -e "$HOME/gate-down" ]\n' > "$T/bin/gate-probe"
 printf '#!/bin/bash\n[ -e "$HOME/phone-offline" ] && { echo vpn=offline handshake=1913s; exit 69; }; echo vpn=up\n' > "$T/bin/phone-state"
 chmod +x "$T/bin/"*; export PATH="$T/bin:$PATH"
 git init -q --bare "$T/origin.git"
@@ -62,6 +66,8 @@ cat > tools/phone/ship-apk.sh <<'EOF'
 l=$HOME/.cache/powos-ship.lock; mkdir "$l" && echo "apk pid $$ x" > "$l/who"
 trap 'rm -rf "$l"; [ "$(cat "$SHIP_DIR/installing" 2>/dev/null)" = $$ ] && rm -f "$SHIP_DIR/installing"' EXIT
 echo "APKSTART $(git rev-parse HEAD)" >> "$LOG"
+# $HOME/gate-down: its gate on HEAD got no verdict (gate.sh exit 2) - ship-apk's DEFERRED exit 75, nothing built/installed
+[ -e "$HOME/gate-down" ] && { echo "gate: NO VERDICT - pow58 did not answer within 900 s"; echo "ship-apk: DEFERRED - no gate verdict: the gate's machine didn't answer" >&2; exit 75; }
 # $HOME/apk-link-drop N: the phone's adb link drops before the install N more times (ship-apk's snapshot refusal, rc 3)
 if [ -s "$HOME/apk-link-drop" ]; then d=$(cat "$HOME/apk-link-drop"); echo $((d-1)) > "$HOME/apk-link-drop"; [ "$d" -le 1 ] && rm -f "$HOME/apk-link-drop"
   echo "APKLINKDROP" >> "$LOG"; echo "adb.sh: phone unavailable after reconnect; not caching device state" >&2
@@ -85,6 +91,7 @@ EOF
 cat > shell/dev/gate.sh <<'EOF'
 #!/bin/bash
 echo "GATE $*" >> "$LOG"
+[ -e "$HOME/gate-down" ] && { echo "gate: NO VERDICT - pow58 did not answer within 900 s, and the hub cannot pass the full gate"; exit 2; }
 for f in "$@"; do case "$f" in --*) ;; *) grep -q BROKEN "$f" 2>/dev/null && { echo "FAIL home: $f broken"; exit 1; } ;; esac; done
 echo "ok all pages"
 EOF
@@ -405,6 +412,45 @@ grep -q "the phone is offline (no WireGuard link)" "$Q/runner.log" && ! grep -q 
   ok "VPN offline: the APK waits" || { bad "VPN offline wait"; cat "$LOG"; tail -8 "$Q/runner.log"; }
 rm -f "$HOME/phone-offline"
 drained 60 && grep -q "^APK $t16b" "$LOG" && grep -q "the phone is back online" "$Q/runner.log" && ok "VPN back: the APK ships" || { bad "VPN back"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+
+# 17. 11-10: no gate verdict (gate.sh exit 2: its machine, .58, didn't answer) is DEFERRED, never a failure: no
+#     FAILED/REFUSED, no mail, no failed mark, the request stays queued, `ship.sh status` says so in one line, nothing
+#     goes out ungated; once the machine answers the same tip gates again and ships. Shell (gated push), then APK.
+nv_ok() {   # STEP TIP: deferred and nothing else
+  local st; st=$(bash tools/phone/ship.sh status)
+  grep -q "${2:0:9}: $1 DEFERRED - no gate verdict" "$Q/runner.log" && ! grep -q '^MAIL' "$LOG" && ls "$Q"/*.req >/dev/null 2>&1 &&
+    ! grep -q "${2:0:9}.*\(FAILED\|REFUSED\)" "$Q/runner.log" && [ "$(cat "$Q/failed" "$Q/failed-apk" 2>/dev/null | grep -c "$2")" = 0 ] &&
+    [ "$(echo "$st" | grep -c '^GATE DEFERRED')" = 1 ] && echo "$st" | grep -q "^GATE DEFERRED (no verdict.*$1 ${2:0:9} since" || { echo "$st"; return 1; }; }
+: > "$LOG"; touch "$HOME/gate-down"
+land shell/ui/a.tsx 'export const a = 17' "a17"; req --note "seventeen"; t17=$(tip)
+for _ in $(seq 100); do grep -q "${t17:0:9}: shell DEFERRED" "$Q/runner.log" && break; sleep 0.2; done; sleep 2
+nv_ok shell "$t17" && ! grep -q '^PUSH' "$LOG" && [ "$(grep -c '^GATE' "$LOG")" = 1 ] &&
+  ok "no gate verdict: shell deferred (queued, not failed/mailed, status line, not re-gated while down)" || { bad "shell no-verdict"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+rm -f "$HOME/gate-down"
+drained 30 && grep -q 'a = 17' "$PHONE/files/shell/ui/a.tsx" && ! bash tools/phone/ship.sh status | grep -q '^GATE DEFERRED' &&
+  ok "gate machine back: the same tip gates and ships" || { bad "no ship after the gate came back"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+: > "$LOG"; touch "$HOME/gate-down"
+land targets/android/app/Main.kt 'class Main17' "kt17"; req --note "seventeen apk"; t17b=$(tip)
+for _ in $(seq 100); do grep -q "${t17b:0:9}: apk DEFERRED" "$Q/runner.log" && break; sleep 0.2; done; sleep 2
+nv_ok apk "$t17b" && [ "$(grep -c '^APKSTART' "$LOG")" = 1 ] && ! grep -q '^APK ' "$LOG" &&
+  ok "no gate verdict: APK deferred (queued, not failed/mailed, not relaunched while down)" || { bad "APK no-verdict"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+rm -f "$HOME/gate-down"
+drained 60 && grep -q "^APK $t17b svc=1 --note seventeen apk" "$LOG" && ! bash tools/phone/ship.sh status | grep -q '^GATE DEFERRED' &&
+  ok "gate machine back: the same tip's APK ships" || { bad "no APK after the gate came back"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+# 17b. Deploy-first (the default): the shell goes live, its post-deploy gate gets no verdict - deferred, not "went live
+#      and its gate FAILED" (no mail, no postgate-failed); the runner stays up for it and gates it once the machine is back.
+for _ in $(seq 100); do [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 0.2; done   # a runner without SHIP_GATE_FIRST
+: > "$LOG"; touch "$HOME/gate-down"
+( unset SHIP_GATE_FIRST; land shell/ui/b.tsx 'export const b = 17' "b17"; req --note "seventeen b" ); t17c=$(tip)
+for _ in $(seq 150); do grep -q "${t17c:0:9}: postgate DEFERRED" "$Q/runner.log" && break; sleep 0.2; done
+st=$(bash tools/phone/ship.sh status)
+grep -q 'b = 17' "$PHONE/files/shell/ui/b.tsx" && grep -q "${t17c:0:9}: postgate DEFERRED - no gate verdict" "$Q/runner.log" && ! grep -q '^MAIL' "$LOG" &&
+  [ ! -e "$Q/postgate-failed" ] && echo "$st" | grep -q "^GATE DEFERRED.*postgate ${t17c:0:9}" &&
+  ok "no gate verdict after a deploy-first push: post-gate deferred, not FAILED/mailed" || { bad "post-gate no-verdict"; echo "$st"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+rm -f "$HOME/gate-down"
+for _ in $(seq 150); do [ -s "$Q/gate-deferred/postgate" ] || [ -s "$Q/postgate.pid" ] || break; sleep 0.2; done
+[ "$(grep -c '^GATE' "$LOG")" = 2 ] && [ ! -s "$Q/gate-deferred/postgate" ] && [ ! -e "$Q/postgate-failed" ] && ! grep -q '^MAIL' "$LOG" &&
+  ok "gate machine back: the post-deploy gate runs again and passes" || { bad "post-gate not retried: $(grep -c '^GATE' "$LOG") gates"; cat "$LOG"; tail -8 "$Q/runner.log"; }
 
 for _ in $(seq 75); do [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 0.2; done
 runner_left=$(cat "$Q/runner.lock/pid" 2>/dev/null)
