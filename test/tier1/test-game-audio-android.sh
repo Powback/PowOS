@@ -26,6 +26,24 @@ o=$(python3 "$P" 999 "$T/a" "$T/b" "$T/audio"); ok "no track" "$o" "no AudioFlin
   printf '      Type     Id Active Client Session Port Id S  Flags   Format Chn mask  SRate ST Usg CT  G db  L dB  R dB  VS dB   Server FrmCnt  FrmRdy F Underruns  Flushed   Latency\n'
   printf '   11-08 18:36:18.739 AT::add  (0xb4)  110  no  12345/  10359  577  145 r  0x000 00000001 00000003  48000  3   1  2  -inf  0  0  0  00000000  2886  0 f  0  0  new\n\n'; } >"$T/l"
 o=$(python3 "$P" 12345 "$T/l" "$T/l" "$T/audio"); ok "local log is history" "$o" "no AudioFlinger track"
+# 11-10: media volume 0 (the user's slider, not Muted) -> SKIP rc 5, reason last; a real mute at volume > 0 stays FAIL
+printf -- '- STREAM_MUSIC:\n   Muted: false\n   Current: 2 (speaker): 0, 40000000 (default): 100\n   Devices: speaker(2)\n' >"$T/vol0"
+o=$(python3 "$P" 12345 "$T/a" "$T/m" "$T/vol0"); ok "vol0 skip last" "$(tail -1 <<<"$o")" "^D SKIP: media volume is 0 (user setting)"
+python3 "$P" 12345 "$T/a" "$T/m" "$T/vol0" >/dev/null; ok "rc skip" "$?" "^5$"
+printf -- '- STREAM_MUSIC:\n   Muted: true\n   Current: 2 (speaker): 0\n   Devices: speaker(2)\n' >"$T/mut"
+o=$(python3 "$P" 12345 "$T/a" "$T/m" "$T/mut"); ok "stream muted is FAIL" "$o" "D FAIL: the PowOS track is muted"
+# Android 14+ row: "Client(pid/uid)" header, "pid/  uid" value, PortVol/PortMuted columns carrying the stream volume
+a14() {  # <server frames> <L dB> <PortVol dB> <PortMuted>
+  printf 'Output thread 0x7a1 type 0 (MIXER):\n  Output devices: 0x2 (AUDIO_DEVICE_OUT_SPEAKER)\n'
+  printf '    Type     Id Active Client(pid/uid) Session Port Id S  Flags   Format Chn mask  SRate ST Usg CT  G db  L dB  R dB  VS dB  PortVol dB  PortMuted   Server FrmCnt  FrmRdy F Underruns  Flushed BitPerfect InternalMute   Latency\n'
+  printf '    104    yes   12345/  10359     521      97 A  0x000 00000001 00000003  48000  3   1  2  -inf  %s     0     0         %s       %s %08X   2886    2886 A         0        0      false        false  41.67 k\n\n' "$2" "$3" "$4" "$1"
+}
+a14 1000 0 -inf true >"$T/p1"; a14 97000 0 -inf true >"$T/p2"; a14 97000 0 0 false >"$T/p3"; a14 97000 -inf 0 false >"$T/p4"
+o=$(python3 "$P" 12345 "$T/p1" "$T/p2" "$T/vol0"); ok "a14 columns" "$o" "server_frames_advanced=96000"
+ok "a14 port vol0 skip" "$(tail -1 <<<"$o")" "^D SKIP"
+o=$(python3 "$P" 12345 "$T/p1" "$T/p2" "$T/audio"); ok "a14 port mute at vol>0 is FAIL" "$o" "D FAIL: the PowOS track is muted"
+o=$(python3 "$P" 12345 "$T/p1" "$T/p3" "$T/audio"); ok "a14 playing" "$o" "D PASS"
+o=$(python3 "$P" 12345 "$T/p1" "$T/p4" "$T/audio"); ok "a14 app mute at vol>0 is FAIL" "$o" "D FAIL: the PowOS track is muted"
 python3 "$P" 12345 "$T/a" "$T/b" "$T/audio" >/dev/null; ok "rc pass" "$?" "^0$"
 python3 "$P" 12345 "$T/a" "$T/a" "$T/audio" >/dev/null; ok "rc fail" "$?" "^1$"
 echo "test-game-audio-android: $pass passed, $fail failed"; [ "$fail" -eq 0 ]

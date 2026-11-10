@@ -6,7 +6,7 @@
 # then stage D on the Android side (game-audio-android.py: the PowOS app's AAudio track in AudioFlinger - frames consumed
 # across the run, underruns, L/R/VS gain - plus STREAM_MUSIC volume and the bridge's logcat), then closes the game it
 # started (Steam stays resident). rc = the flow check's (0 = sound reaches the loopback output), and FAIL when stage D
-# says Android doesn't play the bridge's track.
+# says Android doesn't play the bridge's track; SKIP (rc 5) when stage D can't judge (the user's media volume is 0).
 cd "$(dirname "$0")/../../.." || exit 3
 tools/phone/user.sh tools/phone/verify/bf-start.sh || { echo "FAIL setup: bf-start"; exit 3; }
 sleep 40
@@ -20,9 +20,13 @@ dv=$(python3 tools/phone/verify/game-audio-android.py "${app:-none}" "$D/af1" "$
 # The user's ask is sound out of the speaker, not just into the loopback: stage D failing is the verdict too (11-08 a
 # "PASS rc=0" run printed "D verdict: Android does NOT play the bridge's audio" - a false PASS).
 dfail=$(grep -m1 '^D FAIL' <<<"$dv")
+# 11-10: the user's media volume at 0 left the track at -inf (their setting, not a bug): stage D is a SKIP (rc 5,
+# reason printed last) unless the flow itself failed. Never touch the user's volume to make it judgeable.
+dskip=$(grep -m1 '^D SKIP' <<<"$dv")
 echo "D logcat (bridge):"; tools/phone/adb.sh shell 'logcat -d -s AndromarchyAudio:* | tail -12' | sed 's/^/   /'
 rm -rf "$D"
 tools/phone/user.sh tools/phone/verify/bf-stop.sh
 echo "RESULT game-audio-flow rc=$rc"
 [ -n "$dfail" ] && { echo "FAIL: stage D (Android) - ${dfail#D FAIL: }"; exit 1; }
+[ "$rc" = 0 ] && [ -n "$dskip" ] && { echo "SKIP: stage D (Android) - ${dskip#D SKIP: }"; exit 5; }
 exit $rc
