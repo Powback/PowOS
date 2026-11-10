@@ -94,7 +94,7 @@ part1_chrome() {
     p=$(pt "$cel")
     if [ "$(inlist)" = true ] && [ "$p" != off ]; then
       step drawer-chrome "Chrome's cell in the drawer's A-Z list"
-      set -- $p; tap "$1" "$2" "Chrome in the drawer"; sleep 3; chk chrome
+      set -- $p; tap "$1" "$2" "Chrome in the drawer"; chk chrome
       CH=$(waitwin $CHROME 8)
       step chrome "Chrome opened from the drawer"
       [ "$CH" != none ] && floating "$CH" Chrome && pass "Chrome opened as a floating window (task $CH)" || fail "Chrome from the drawer: window $CH, bounds $(tbounds "$CH")"
@@ -304,7 +304,7 @@ part2_shade() {
 
 part2() {
   dock_tap "a:$CALC/" Calculator || return
-  sleep 2.5; chk calc; CT=$(waitwin $CALC 6)
+  chk calc; CT=$(waitwin $CALC 6)
   step calculator "Calculator opened from the dock"
   [ "$CT" != none ] && floating "$CT" Calculator && pass "Calculator floats (task $CT, $(tbounds "$CT"))" || { fail "no floating Calculator ($CT)"; return; }
 
@@ -317,7 +317,7 @@ part2() {
 part3() {
   # Scrolling inside a window: Chrome's page, up and down (the touches the app's, not home's).
   dock_tap "a:$CHROME/" Chrome || return
-  sleep 3; chk chrome; CH=$(waitwin $CHROME 8)
+  chk chrome; CH=$(waitwin $CHROME 8)
   step chrome "Chrome opened from the dock"
   [ "$CH" != none ] && floating "$CH" Chrome && pass "Chrome floats (task $CH)" || fail "no floating Chrome ($CH)"
   if [ "$CH" != none ]; then

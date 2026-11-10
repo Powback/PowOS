@@ -69,7 +69,16 @@ cdp_warm_run() {
   local port=$1 src dst script mark rc
   shift
   [ "${CDP_WARM:-1}" = 0 ] && return 75
-  cdp_warm_ensure || return 75
+  # The ensure's docker inspect, once per CDP_WARM_OK_S (30) s, not per call (11-10: at Mac load ~24 each docker
+  # client call is 0.3-1 s and an e2e step makes 10-20 evals). A container gone meanwhile: the exec leaves no run
+  # marker (75), the stamp goes and the ensure runs once more.
+  local ok_at=0 fresh=0
+  read -r ok_at 2>/dev/null < "$CDP_WARM_DIR/ensured" || ok_at=0
+  if [ $(( $(date +%s) - ${ok_at:-0} )) -ge "${CDP_WARM_OK_S:-30}" ]; then
+    cdp_warm_ensure || return 75; fresh=1
+    date +%s > "$CDP_WARM_DIR/ensured" 2>/dev/null
+  else : > "$CDP_WARM_DIR/last" 2>/dev/null
+  fi
   # The caller's own cdp.ts (worktrees differ), copied into the shared dir under a name from its path, refreshed when
   # the source is newer: no per-worktree mounts, no hashing fork per call.
   src=${CDP_TS:-${BASH_SOURCE[0]%/*}/cdp.ts}
@@ -86,7 +95,9 @@ cdp_warm_run() {
     rm -f "$CDP_WARM_DIR/$mark"
     return $rc
   fi
-  return 75
+  rm -f "$CDP_WARM_DIR/ensured"
+  [ "$fresh" = 1 ] && return 75
+  cdp_warm_run "$port" "$@"
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

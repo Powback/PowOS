@@ -35,7 +35,7 @@ esac
 exit 0
 EOF
 chmod +x "$T/adb" "$T/docker"
-cdp() { rm -rf "$T/d"; mkdir -p "$T/d"; env -u PHONE_SERIAL -u POWOS_PHONE_ADDR -u POWOS_DEVICE CDP_ADB="$T/adb" CDP_DOCKER="$T/docker" \
+cdp() { rm -rf "$T/d"; mkdir -p "$T/d"; env -u PHONE_SERIAL -u POWOS_PHONE_ADDR -u POWOS_DEVICE CDP_FWD_CACHE_S=0 CDP_WARM_OK_S=0 CDP_ADB="$T/adb" CDP_DOCKER="$T/docker" \
   FAKE_D="$T/d" CDP_WARM_DIR="$T/w" CDP_WARM_NAME=warm-test "$@" "$P/cdp.sh" eval home 1 2>"$T/d/err"; }
 
 echo "cdp.sh: the devtools socket, fresh per call"

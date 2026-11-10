@@ -948,7 +948,7 @@ EOS
         [ -s "$log.tries" ] && echo "try $((tries + 1)): the earlier tries' logs (each ended rc 3) are in $log.tries" >> "$log"
         # ww_close_new's "before", for a kill: read beside the job's start (no wait - a hidden page answers nothing).
         rm -f "$Q/ww0"; ( wwids > "$Q/ww0" ) >/dev/null 2>&1 &
-        ( cd "$cwd" && unset VERIFY_GO && export LOCK_HELD=1 QUEUE_NEXT_APP=$nextapp && "$here/preflight.sh" "${cmd[@]}" && exec "${cmd[@]}" ) >> "$log" 2>&1 & jp=$!   # preflight: rc 5 + "ENV: why" when the phone cannot run it
+        ( cd "$cwd" && unset VERIFY_GO && export LOCK_HELD=1 QUEUE_NEXT_APP=$nextapp QUEUE_BUDGET_S=$budget && "$here/preflight.sh" "${cmd[@]}" && exec "${cmd[@]}" ) >> "$log" 2>&1 & jp=$!   # preflight: rc 5 + "ENV: why" when the phone cannot run it
         # The heartbeat: every HB_S s the pill hears check, k/N, elapsed; a tap's stop flag or the budget ends the check.
         # The sub-step: the check's own (put) or its log's last line, timed from when that line first showed.
         t0=$(date +%s); why=; ls_=; lt=$t0

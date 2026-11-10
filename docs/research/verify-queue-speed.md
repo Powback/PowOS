@@ -73,3 +73,49 @@ So one step really is ~1-3 s; the night was lost between steps and between windo
   hourly utilization line in runner.log is the measure to compare next night.
 
 Not changed: `WAKE_IDLE_S` (600 s after a real touch, the user's rule) and `GAME_IDLE_S` for a game the user started.
+
+## E2E journey steps: per-step time, before and after (2026-11-10)
+
+Round 252 of `e2e-desktop.sh` (board `manager-end-to-end-user-journeys-on-the-phone-qa`): parts 1 and 2 were killed
+by the queue at 450 s with every step passing; part 3 passed in 180 s. The logs had no timestamps, so the per-step
+times below come from the screenshots' mtimes on the phone (`ls --full-time .../design-qa/e2e-desktop/252/`).
+
+**Before** (Mac load 14-24):
+
+| part | setup (job start -> first shot) | per step |
+|---|---|---|
+| 1 | 93 s | 97, 33, 29, 69, 46, 40 s (7 steps by 08:02:23; killed in step 8's put-away at 450 s) |
+| 2 | 61 s | 37, 68, 48, 17, 9, 8, 10, 14, 13, 40, 30, 20, 17, 12, 11, 16, 16 s (killed at step 44's close) |
+| 3 | 29 s | 13, 17, 10, 12, 23, 14, 28, 6, 19 s |
+
+Where it went (measured on the Mac at load ~24, read-only calls):
+
+| call | cost | per step |
+|---|---|---|
+| `ev`/`hcall` (cdp.sh: adb.sh devtools lookup + adb.sh forward + warm-runner `docker inspect` + `docker exec bun` + python3) | 1.1-3.2 s | 5-20 calls (`win`, `waitwin` polls, `winrects`, `freept`, `put_away`'s 4 list reads) = 10-40 s |
+| step screenshot (`shot.sh --phone`: 2 adb calls; on the phone `screencap -p` ~2 s + a raw screencap + `dumpsys window`) | 3-4 s | 1 |
+| touch guard (`touched` = `useract`, an adb `dumpsys power` round trip) at every `chk` and `step` | 0.7-1.5 s | 2-4 = 2-5 s |
+| fixed settle sleeps (`sleep 1.2..3` after each input) | 1-3 s | 1-3 |
+
+So a step was 80-90 % Mac-side process/docker round trips around a phone that had long finished.
+
+**Changes** (generic, every e2e journey and every `cdp.sh` user):
+
+- `cdp.sh`: the devtools forward is cached (`CDP_FWD_CACHE_S`, 60 s, in `~/.cache/powos-cdp/fwd.<port>`); `cdp.ts`
+  exits 3 when its endpoint doesn't answer (a new app pid) and only then is the forward made afresh and the call run
+  again. `cdp-warm.sh`: the container check (`docker inspect`) once per `CDP_WARM_OK_S` (30 s), retried on a missing
+  container. Measured: an eval **1.1-1.5 s -> 0.2 s** (cached path).
+- `shot.sh --phone --bg`: the capture runs in the background ON the phone (one adb call, **0.6 s** instead of 3-4 s);
+  its verdict goes to `<dir>/.shots`, and `e2e-lib.sh` merges blank/refused verdicts into steps.txt at publish.
+- `e2e-lib.sh`: every injected input (`tap/swipe/press/mdown/mmove/mup/mpath` via `inj`) checks the touch watch's
+  count on the phone in the same adb call, so the separate `touched` read runs at most every 8 s
+  (`E2E_TOUCH_EVERY_S`). `waitwin` polls every 0.3 s; the fixed `sleep 3`/`2.5` before `waitwin` polls are gone.
+- Timestamps: every step line in the queue log reads `-- NN-step.png: ... [+<s since the last step> s, t=<s> s]`.
+- Budget: `queue.sh` exports `QUEUE_BUDGET_S`; no step or input starts after budget - 40 s (`E2E_RESERVE_S`); a
+  watchdog TERMs whatever Mac call is blocked at that moment; the part ends with `FAIL ... out of budget at step X`,
+  its restore closes what it opened and steps.txt is published (no more queue kill mid-step). If a part still can't
+  fit, raise `--of`.
+
+**After** (expected from the measured call costs; the next queued round's `[+N s]` lines are the measurement):
+a step of ~8 page reads + 1 shot + 1-2 inputs + its settle sleep: ~4 s + 0.6 + 1.5 + 1.5 = **~6-8 s at load ~24,
+3-5 s at a quiet Mac** (was 10-97 s). Part 1 (25 steps) fits 410 s even at the worst measured step costs of part 3.

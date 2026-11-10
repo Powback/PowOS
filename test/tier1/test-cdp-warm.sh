@@ -56,7 +56,7 @@ EOF
 chmod +x "$T/adb" "$T/docker"
 
 reset() { rm -rf "$T/d" "$T/w"; mkdir -p "$T/d"; echo vadb1 >"$T/d/vadb-id"; }
-run() { env CDP_ADB="$T/adb" CDP_DOCKER="$T/docker" FAKE_D="$T/d" CDP_WARM_DIR="$T/w" CDP_WARM_NAME=warm-test "$@" "$CDP" eval home '1+1'; }
+run() { env CDP_FWD_CACHE_S=0 CDP_WARM_OK_S=0 CDP_ADB="$T/adb" CDP_DOCKER="$T/docker" FAKE_D="$T/d" CDP_WARM_DIR="$T/w" CDP_WARM_NAME=warm-test "$@" "$CDP" eval home '1+1'; }
 starts() { [ -f "$T/d/starts" ] && wc -l <"$T/d/starts" | tr -d ' ' || echo 0; }
 
 echo "cdp warm runner"
@@ -99,6 +99,17 @@ out=$(run FAKE_PID= 2>&1) rc=$?
 [ $rc = 1 ] && [ "$(starts)" = 0 ] && ok "app not running: rc 1 as before" || bad "not running: rc=$rc"
 out=$(run FAKE_ADB_RC=3 2>&1) rc=$?
 [ $rc = 2 ] && ok "adb failure: rc 2 as before" || bad "adb fail: rc=$rc"
+
+# 11-10 caches (e2e journeys hit their 450 s budgets on per-eval docker/adb calls): the forward and the ensure are
+# reused within their windows; a dead endpoint (cdp.ts rc 3) re-forwards once and runs the call again.
+reset
+run CDP_FWD_CACHE_S=60 CDP_WARM_OK_S=30 >/dev/null
+n0=$(grep -c '^inspect' "$T/d/log")
+out=$(run CDP_FWD_CACHE_S=60 CDP_WARM_OK_S=30 CDP_ADB=/nonexistent) rc=$?
+[ $rc = 0 ] && [ "$out" = "warm: bun /s/cdp.ts eval home 1+1" ] && [ "$(grep -c '^inspect' "$T/d/log")" = "$n0" ] \
+  && ok "cached forward + ensure: no adb, no inspect on the next call" || bad "cache: rc=$rc out=$out inspects $n0 -> $(grep -c '^inspect' "$T/d/log")"
+out=$(run CDP_FWD_CACHE_S=60 CDP_WARM_OK_S=30 FAKE_RC=3) rc=$?
+[ "$(grep -c '^exec' "$T/d/log")" = 4 ] && ok "rc 3 (stale forward): re-forwarded and run once more" || bad "rc 3 retry: $(grep -c '^exec' "$T/d/log") execs"
 
 # The container's idle loop exits only once no bun runs and the last call is old.
 loop=$(bash -c '. "$1"; printf %s "$cdp_warm_loop"' _ "$ROOT/tools/phone/cdp-warm.sh")

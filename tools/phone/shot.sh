@@ -1,6 +1,6 @@
 #!/bin/bash
 # The one way to take a screencap of the phone (never a bare `screencap`):
-#   tools/phone/shot.sh OUT.png [--all] [--phone]
+#   tools/phone/shot.sh OUT.png [--all] [--phone [--bg]]
 # Picks the display that is ON now - the cover (folded) or the inner screen (unfolded); --all: every ON display, saved
 # as OUT-<cover|inner>.png - and refuses rather than saving black:
 #   exit 3  the screen is off/dozing (never woken: wait with `AWAKE_ONLY=1 tools/phone/idle.sh --wait 120 MAX`)
@@ -17,11 +17,36 @@
 # (DisplayDeviceInfo uniqueId local:<id> ... state ON|OFF), the same ids `dumpsys SurfaceFlinger --display-id` lists.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-out="" all="" onphone=""
-for a in "$@"; do case "$a" in --all) all=1 ;; --phone) onphone=1 ;; -h|--help) sed -n '2,19p' "$0"; exit 0 ;; *) out=$a ;; esac; done
+out="" all="" onphone="" bg=""
+for a in "$@"; do case "$a" in --all) all=1 ;; --phone) onphone=1 ;; --bg) bg=1 ;; -h|--help) sed -n '2,19p' "$0"; exit 0 ;; *) out=$a ;; esac; done
 [ -n "$out" ] || { sed -n '2,3p' "$0"; exit 2; }
 base=${out%.png}
 tag=powos-shot-$$
+# --phone --bg (11-10, e2e journeys: a step's screenshot cost ~3-4 s of Mac round trips while the phone sat idle): the
+# same capture, started in the background ON the phone by one adb call that returns at once. Its verdict goes to
+# <OUT's folder>/.shots, a line "<file> <rc> <why>" (rc 0 / 3 off / 4 blank, as above), for the caller to read later
+# (e2e-lib.sh e2e_shots). One display (the ON one; no --all).
+if [ -n "$bg" ] && [ -n "$onphone" ] && [ -z "$all" ]; then
+  d=${out%/*} f=${out##*/}
+  { printf 'D=%s\nF=%s\n' "$d" "$f"; cat <<'EOF'; } | "$here/adb.sh" shell "if command -v su >/dev/null 2>&1; then exec su -c 'sh -s'; else exec sh -s; fi" >/dev/null 2>&1 || { echo "shot: adb failed" >&2; exit 2; }
+mkdir -p "$D"
+cat > "$D/.$F.sh" <<'IN'
+r() { echo "$F $1 $2" >> "$D/.shots"; rm -f "$D/.$F.sh"; exit 0; }
+w=$(dumpsys power | sed -n "s/.*mWakefulness=//p" | head -1)
+[ "$w" = Awake ] || r 3 "screen-$w"
+id=$(dumpsys display | grep -E "^  DisplayDeviceInfo" | sed -nE 's/.*uniqueId="local:([0-9]+)", [0-9]+ x [0-9]+,.* state ON,.*/\1/p' | head -1)
+[ -n "$id" ] || r 3 no-display-on
+screencap -d "$id" -p "$D/.$F.tmp" && mv -f "$D/.$F.tmp" "$D/$F" || r 2 screencap-failed
+n=$(screencap -d "$id" | tail -c +17 | tr -d '\000\377' | head -c 1 | wc -c)
+if [ "$n" = 0 ]; then
+  if [ "$(dumpsys window windows | grep -cE 'fl=.*SECURE')" -gt 0 ]; then r 4 secure-window; else r 4 nothing-drawn; fi
+fi
+r 0 ok
+IN
+D=$D F=$F nohup setsid sh "$D/.$F.sh" </dev/null >/dev/null 2>&1 &
+EOF
+  echo "$out (background)"; exit 0
+fi
 # Root where the phone has it (the rooted OnePlus), else adb's own shell uid - screencap, dumpsys and /data/local/tmp
 # need nothing more, so an unrooted phone (PHONE_SERIAL=<the razr fold>) is shot the same way.
 asroot() { "$here/adb.sh" shell "if command -v su >/dev/null 2>&1; then su -c '$1'; else $1; fi"; }

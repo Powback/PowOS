@@ -21,7 +21,15 @@ const PORT = process.env.CDP_PORT ?? "9333";
 }
 
 type Page = { url: string; title: string; webSocketDebuggerUrl: string; type: string };
-const pages: Page[] = (await (await fetch(`http://127.0.0.1:${PORT}/json`)).json()).filter((p: Page) => p.type === "page");
+// rc 3 = the devtools endpoint didn't answer (a stale forward: the app's pid changed) - nothing was evaluated, so
+// cdp.sh may re-forward and run the same call again (its forward cache).
+let pages: Page[];
+try {
+  pages = (await (await fetch(`http://127.0.0.1:${PORT}/json`)).json()).filter((p: Page) => p.type === "page");
+} catch (e) {
+  console.log(`cdp: no devtools endpoint on port ${PORT} (${e})`);
+  process.exit(3);
+}
 const short = (u: string) => (u.match(/[?&]mode=([^&]+)/)?.[1] ?? (u.includes("index.html") ? "home" : u.slice(-40)));
 
 class Session {

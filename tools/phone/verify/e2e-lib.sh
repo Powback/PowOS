@@ -107,7 +107,12 @@ e2e_skip() {
 # from I0, its value at the start. Injected input, wakes, unfolds and app launches don't move it. Checked by chk and
 # before every step. Then: no more input, the journey's own put-away (e2e_abort -> e2e_restore), exit 3. The watcher
 # gone (-1): restarted and counted from there (logged), not taken as a touch.
+# Rate-limited (11-10 speed pass): a read is an adb round trip (~0.7-1.5 s at Mac load ~24) and chk + step made two
+# per step. The rule "no input after the user's touch" is kept by inj() instead, which checks the count on the phone
+# in the same call as each injected input; touched() runs at most every E2E_TOUCH_EVERY_S (8) s.
+TOUCH_AT=-100
 touched() {
+  [ $((SECONDS - TOUCH_AT)) -ge "${E2E_TOUCH_EVERY_S:-8}" ] || return 0; TOUCH_AT=$SECONDS
   local r q; r=$(useract); q=$(sed -nE 's/.*irq=(-?[0-9]+).*/\1/p' <<<"$r")
   if [ "$q" = -1 ] && [ -n "${I0:-}" ]; then e2e_touchwatch >/dev/null; I0=$(irq); log "touch watch was gone at ${1:-a step} - restarted (count $I0)"; return 0; fi
   if [ -n "$q" ] && [ -n "${I0:-}" ] && [ "$q" != "$I0" ]; then
@@ -116,8 +121,29 @@ touched() {
     e2e_skip "journey $(e2e_jname): aborted - the user touched the phone"
   fi
 }
-chk() { touched "$1"; }
+chk() { e2e_late "$1"; touched "$1"; }
 log() { echo "$*" | tee -a "$OUT/log.txt"; }
+# --- the part's budget (11-10: parts 1/2 of round 252 were killed by the queue at 450 s mid-step, the restore never
+# ran). E2E_DL = the queue's budget (QUEUE_BUDGET_S, queue.sh exports it; 450) - E2E_RESERVE_S (40): no step or input
+# starts past it - the part ends "out of budget at step X" through e2e_abort (its restore closes what it opened,
+# steps.txt published), exit 1. A watchdog (e2e_watchdog) kills whatever call is blocked at E2E_DL so the script
+# reaches that check; WW_DEADLINE (ww-lib.sh) makes every later hcall answer "ERR deadline" at once until the restore.
+E2E_DL=$(( ${QUEUE_BUDGET_S:-450} - ${E2E_RESERVE_S:-40} )); OUTOFBUDGET=
+e2e_late() {
+  [ -z "$OUTOFBUDGET" ] && [ "$RESTORED" = 0 ] && [ "$SECONDS" -ge "$E2E_DL" ] || return 0
+  OUTOFBUDGET="out of budget at step ${CUR%.png} ($SECONDS s of ${QUEUE_BUDGET_S:-450}, ${E2E_RESERVE_S:-40} s kept for the clean-up${1:+; at $1})"
+  sh_ "input motionevent CANCEL 1 1" >/dev/null 2>&1
+  log "$OUTOFBUDGET"; _res FAIL "$OUTOFBUDGET"; NFAIL=$((NFAIL + 1)); exit 1
+}
+# e2e_watchdog: one background timer per part; at E2E_DL it TERMs this script's child processes (a blocked adb/CDP
+# call; the script itself goes on to e2e_late). Stopped by e2e_restore.
+e2e_watchdog() {
+  local me=$$ left=$((E2E_DL - SECONDS)); [ "$left" -gt 0 ] || left=1
+  # (bash 3.2 has no BASHPID: the subshell's own pid is its exec'd command substitution's parent.)
+  ( self=$(exec sh -c 'echo $PPID'); sleep "$left" & sl=$!; trap 'kill $sl 2>/dev/null; exit 0' TERM; wait $sl
+    kids() { local c; for c in $(pgrep -P "$1"); do [ "$c" = "$self" ] || { kids "$c"; echo "$c"; }; done; }
+    for k in $(kids "$me"); do kill -TERM "$k" 2>/dev/null; done ) </dev/null >/dev/null 2>&1 &
+  WATCHDOG=$!; }
 
 . "$here/ww-lib.sh"  # ev, hcall, and the web-window helpers (WWRECTS, wwel, wwrect, wwhost)
 hemit() { ev "(window.__powosHost.emit('$1', $2), 'ok')" >/dev/null; sleep 1.2; }
@@ -138,14 +164,21 @@ offpill() {
   if [ "$1" -lt $(($4 - 48)) ] || [ "$1" -gt $(($6 + 48)) ] || [ "$2" -lt $(($5 - 48)) ] || [ "$2" -gt $(($7 + 48)) ]; then return 0; fi
   fail "not touched: $3 at $1,$2 is under the verify status pill ($4,$5 $6,$7)"; return 1
 }
-tap() { offpill "$1" "$2" "$3" || return 1; log "tap $3 at $1,$2"; sh_ "input tap $1 $2"; }
-swipe() { offpill "$1" "$2" "$6" || return 1; log "swipe $6 $1,$2 -> $3,$4 ($5 ms)"; sh_ "input swipe $1 $2 $3 $4 $5"; }
-press() { offpill "$1" "$2" "$4" || return 1; log "hold $4 at $1,$2 ($3 ms)"; sh_ "input swipe $1 $2 $1 $2 $3"; }
-mdown() { offpill "$1" "$2" "$3" || return 1; sh_ "input motionevent DOWN $1 $2"; }
-mmove() { sh_ "input motionevent MOVE $1 $2"; }
-mup() { sh_ "input motionevent UP $1 $2"; }
+# inj <input commands>: injected input, guarded on the phone in the SAME adb call: the touch watch's count moved from I0
+# (a real finger since the start) -> no input, the journey stops for the user (touched()'s rule, without its own round
+# trip before every tap). Past the budget (e2e_late) no input either.
+inj() { e2e_late "input"
+  case ${I0:-} in ""|-1) sh_ "$1"; return ;; esac
+  local o; o=$(sh_ "read c r < $E2E_TW; [ \"\$c\" = \"$I0\" ] || { echo TOUCHED \$c; exit 0; }; $1")
+  case $o in TOUCHED*) TOUCH_AT=-100; touched "input" ;; *) [ -z "$o" ] || printf '%s\n' "$o" ;; esac; }
+tap() { offpill "$1" "$2" "$3" || return 1; log "tap $3 at $1,$2"; inj "input tap $1 $2"; }
+swipe() { offpill "$1" "$2" "$6" || return 1; log "swipe $6 $1,$2 -> $3,$4 ($5 ms)"; inj "input swipe $1 $2 $3 $4 $5"; }
+press() { offpill "$1" "$2" "$4" || return 1; log "hold $4 at $1,$2 ($3 ms)"; inj "input swipe $1 $2 $1 $2 $3"; }
+mdown() { offpill "$1" "$2" "$3" || return 1; inj "input motionevent DOWN $1 $2"; }
+mmove() { inj "input motionevent MOVE $1 $2"; }
+mup() { inj "input motionevent UP $1 $2"; }
 # mpath <x0> <y0> <x1> <y1> <n>: n MOVEs from (x0,y0) towards (x1,y1), in one adb call (a finger, not a crawl).
-mpath() { local i c=""; for i in $(seq 1 "$5"); do c="$c input motionevent MOVE $(($1 + ($3 - $1) * i / $5)) $(($2 + ($4 - $2) * i / $5));"; done; sh_ "$c"; }
+mpath() { local i c=""; for i in $(seq 1 "$5"); do c="$c input motionevent MOVE $(($1 + ($3 - $1) * i / $5)) $(($2 + ($4 - $2) * i / $5));"; done; inj "$c"; }
 back() { sh_ "input keyevent 4"; sleep "${1:-0.8}"; }
 
 # pt <js expression of an element>: its centre in device px "x y", "none" (no element) or "off" (off screen / hidden).
@@ -207,7 +240,7 @@ win() {
   hcall windows.list "[]" "l=>{const w=l.find(w=>w.pkg==='$1'||w.app==='$1');if(!w)return 'none';const f='$2';return f==='bounds'?(w.bounds||[]).join(' '):f==='front'?String(l.find(x=>!x.minimised&&!x.away)===w):String(w[f])}"
 }
 # waitwin <key> <s>: up to s seconds for its window; prints its id (a task, or "w<id>" for a web window) or "none".
-waitwin() { local i id=none; for i in $(seq 1 "$2"); do id=$(win "$1" id); [ "$id" != none ] && [ -n "$id" ] && case $id in ERR*) ;; *) break ;; esac; id=none; sleep 1; done; echo "$id"; }
+waitwin() { local id=none end=$((SECONDS + $2)); while :; do id=$(win "$1" id); [ "$id" != none ] && [ -n "$id" ] && case $id in ERR*) ;; *) break ;; esac; id=none; [ "$SECONDS" -lt "$end" ] || break; sleep 0.3; done; echo "$id"; }
 # wgone <id>: true when that window is gone (a task: not in am stack list; a web window: not in webwindows.list).
 wgone() { case $1 in w*) [ "$(wwhost "$1" gone)" = true ] ;; *) [ -z "$(tasks | grep "^$1 ")" ] ;; esac; }
 # wframe <title text>: that window's frame (a plain substring: "PowOS window bar 12}" - the } ends the title).
@@ -269,19 +302,31 @@ e2e_init() {
   log "$JOURNEY round $ROUND part $PART of $LAST: steps $LO-$HI to $UDIR"
   # This part's earlier files (a re-queued try) go; the other parts' stay.
   ash <<EOF
-mkdir -p $PDIR; cd $PDIR && for f in [0-9][0-9]-*.png; do [ -e "\$f" ] || continue; n=\${f%%-*}; n=\${n#0}; [ "\$n" -ge $LO ] && [ "\$n" -le $HI ] && rm -f "\$f"; done; true
+mkdir -p $PDIR; cd $PDIR && for f in [0-9][0-9]-*.png; do [ -e "\$f" ] || continue; n=\${f%%-*}; n=\${n#0}; [ "\$n" -ge $LO ] && [ "\$n" -le $HI ] && rm -f "\$f"; done
+[ -f .shots ] && awk -v lo=$LO -v hi=$HI '{n=\$1; sub(/-.*/,"",n); n+=0} !(n>=lo && n<=hi)' .shots > .shots.n && mv -f .shots.n .shots; true
 EOF
 }
 # step <slug> <what the user does / sees>: the screenshot of this step, now.
+# Timed (11-10): "-- NN-step.png [+<s since the last step> s, t=<s into the part>]" - the queue log is where the
+# per-step cost is read (docs/research/verify-queue-speed.md). The screenshot is taken ON the phone in the background
+# (shot.sh --phone --bg: one adb call, ~0.6 s, not ~3-4 s); its verdict (blank / screen off) reaches steps.txt at
+# publish (e2e_shots).
+STEP_AT=0
 step() {
+  e2e_late "step $1"
   [ -n "${I0:-}" ] && touched "step $1"
   [ $N -lt $HI ] && N=$((N + 1)); CUR=$(printf '%02d-%s.png' "$N" "$1"); CURD=$2; CURN=0
-  echo "-- $CUR: $2"
-  "$T/shot.sh" --phone "$PDIR/$CUR" >/dev/null 2>&1; local rc=$?
-  [ $rc = 0 ] || { [ $rc = 4 ] && CURX=" (screenshot came back blank)" || CURX=" (no screenshot, rc $rc)"; }
-  [ $rc = 0 ] && CURX=""
+  echo "-- $CUR: $2 [+$((SECONDS - STEP_AT)) s, t=$SECONDS s]" | tee -a "$OUT/log.txt"; STEP_AT=$SECONDS
+  CURX=""; "$T/shot.sh" --phone --bg "$PDIR/$CUR" >/dev/null 2>&1 || CURX=" (no screenshot: adb failed)"
   [ -n "$APID0" ] || APID0=$(apppid)
 }
+# e2e_shots: the background screenshots' verdicts ($PDIR/.shots, shot.sh --bg) into this part's steps.txt lines: a
+# blank one "(screenshot came back blank)", a refused/failed one "(no screenshot, rc N)" after the step's text.
+e2e_shots() {
+  local v; v=$(sh_ "cat $PDIR/.shots 2>/dev/null"); [ -n "$v" ] || return 0
+  printf '%s\n' "$v" > "$OUT/shots.txt"
+  awk -F'\t' -v OFS='\t' 'NR==FNR{if($0 ~ / [1-9][0-9]* /){split($0,a," "); r[a[1]]=(a[2]==4?" (screenshot came back blank)":" (no screenshot, rc " a[2] ": " a[3] ")")} next}
+    ($1 in r) && index($2, "screenshot") == 0 {$2=$2 r[$1]} 1' "$OUT/shots.txt" "$STEPS" > "$STEPS.new" && mv -f "$STEPS.new" "$STEPS"; }
 # A detail with a newline (a page's innerText) was cut at it in steps.txt and the log: flatten control chars to spaces.
 _res() { local m=${2//[[:cntrl:]]/ }; printf '%s\t%s%s\t%s: %s\n' "$CUR" "$CURD" "$CURX" "$1" "$m" >> "$STEPS"; echo "$1: [${CUR%.png}] $m" | tee -a "$OUT/log.txt"; }
 pass() { NPASS=$((NPASS + 1)); _res PASS "$*"; }
@@ -344,6 +389,7 @@ fps_gate() {
 # steps.txt on the phone: the other parts' lines kept, this part's replaced; the folder the session user's.
 publish() {
   [ -n "${PDIR:-}" ] || return 0
+  e2e_shots
   local tmp=/data/local/tmp/e2e-steps-$$.txt
   "$A" push "$STEPS" "$tmp" >/dev/null 2>&1
   ash <<EOF
@@ -379,6 +425,7 @@ e2e_setup() {
   trap 'e2e_abort' EXIT
   e2e_idle_gate
   I0=$(irq)
+  e2e_watchdog; WW_DEADLINE=$E2E_DL
   e2e_logcat_start
   if [ "$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")" != Awake ]; then
     # The "never wake the screen" rule is for the PHONE - someone may genuinely be asleep next to it, and a check
@@ -427,6 +474,8 @@ e2e_setup() {
 RESTORED=0
 e2e_restore() {
   [ $RESTORED = 1 ] && return 0; RESTORED=1
+  # The budget's watchdog off and the deadline lifted: the restore's own calls must run.
+  [ -n "${WATCHDOG:-}" ] && kill "$WATCHDOG" 2>/dev/null; unset WW_DEADLINE
   e2e_logcat_stop
   # Setup never read the start state (the screen asleep, no window): nothing of the journey's to close - without
   # TASKS0 every task looked new and a user's Linux window was closed (resize-probe, 2026-10-23 18:38).
@@ -464,6 +513,7 @@ e2e_abort() {
   local rc=$?
   [ $DONE = 1 ] || { e2e_restore; publish; }
   [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"
+  [ -n "$OUTOFBUDGET" ] && echo "FAIL e2e-$JOURNEY part $PART/$LAST: $OUTOFBUDGET - $NPASS passed before it; cleaned up, raise --of for more parts"
   [ $DONE = 1 ] || echo "e2e-$JOURNEY part $PART ended early (rc $rc) - $NPASS passed, $NFAIL failed, ${NSKIP:-0} skipped (interrupted); steps so far in $UDIR"
 }
 # e2e_finish: the end step (after the restore: home as it started, nothing of the journey's left, the layout the same),
