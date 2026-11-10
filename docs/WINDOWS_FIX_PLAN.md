@@ -52,7 +52,9 @@ The board shows window checks failing by timeout or waiting days for a free phon
   `window-lock.sh`) carry no marker, as the handbook's rule says.
 - [ ] 0.2 Move lifecycle and input checks to the emulator lane: `ww-opens`, `ww-close-min`, `ww-clamp`, `ww-stop`,
   `ww-popup-x11`. Linux web windows already draw there (CPU copy path, `docs/research/nonroot-parity.md` 11-04).
-- [ ] 0.3 Keep on the phone only what needs it: `ww-resize`, `ww-glue`, `ww-drag-lag`, `window-bench`, games.
+- [x] 0.3 Keep on the phone only what needs it: `ww-resize`, `ww-glue`, `ww-drag-lag`, `window-bench`, games.
+  Done 11-10: these four say `# lanes: phone` (frame timing, missed vsyncs, perfetto, real touch speed), games are
+  refused on the emulator by `queue.sh`'s HW_ONLY; the handbook row marks them phone-only for good.
 - [ ] 0.4 Agree fixed phone test blocks with the user (the phone is the daily driver), and run the phone checks there.
 - [ ] 0.5 Baseline run, recorded in `docs/research/window-bench.md`: pass/fail per check, `pf=` and `lag=` from the host's
   `w.f` log, missed vsyncs per resize from `ww-resize.sh`, the perfetto verdict from `resize-trace.py` (still owed).
