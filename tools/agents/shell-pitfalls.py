@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""shell-pitfalls.py [file...] - lint the phone checks' shell for three pitfalls that produced false check FAILs.
+"""shell-pitfalls.py [file...] - lint the phone checks' shell for four pitfalls that produced false check FAILs.
 
 WHY (11-10): three checks FAILed on shell pitfalls, not product bugs; each cost a queue run plus an agent.
   awk-ternary   `printf "%d", t>0?t:0` - BSD awk (the Mac's, 20200816) parses `>` as an output redirect: syntax
@@ -12,6 +12,8 @@ WHY (11-10): three checks FAILed on shell pitfalls, not product bugs; each cost 
   nested-quote  a single quote inside an argument that ends up inside `su -c '...'` (sh_ "...", a literal
                 "su -c '...'") closes the su string early, so the command runs mangled. Use \\" or '\\''.
                 (ww-popup-x11)
+  logcat-dup-tag  one tag twice in a logcat filterspec (`-s Tag:I Tag:W`): the last spec wins, so `Tag:W` drops the
+                tag's I lines - the check reads nothing. `Tag:I` already includes W/E. (ww-popups 11-10 09:21)
 
 Escape a deliberate case with `# lint-ok: <why>` on the line (or on the line just above it).
 With no arguments it scans tools/phone/**/*.sh and tools/agents/*.sh. Exit 1 if anything is found.
@@ -461,6 +463,21 @@ def check_nested_quotes(text, lines):
     return sorted(set(hits))
 
 
+LOGCAT_SPEC = re.compile(r"(?<![\w.-])([A-Za-z][\w.]*):[VDIWEFS*]\b")
+
+
+def check_logcat_dup_tag(lines):
+    """Lines running logcat whose filterspecs name one tag twice (the last spec wins)."""
+    hits = []
+    for ln, s in logical_lines(lines):
+        for m in re.finditer(r"\blogcat\b", s):
+            seg = re.split(r"[|;&\n]", s[m.end():], maxsplit=1)[0]
+            tags = [t for t in LOGCAT_SPEC.findall(seg) if t != "*"]
+            if len(tags) != len(set(tags)):
+                hits.append(ln)
+    return sorted(set(hits))
+
+
 def lint_file(path):
     with open(path, encoding="utf-8", errors="replace") as f:
         text = f.read()
@@ -477,6 +494,10 @@ def lint_file(path):
     for ln in check_nested_quotes(text, lines):
         if not lint_ok(lines, ln):
             found.append((ln, "nested-quote", "single quote inside a su -c '...' string closes it early"))
+    for ln in check_logcat_dup_tag(lines):
+        if not lint_ok(lines, ln):
+            found.append((ln, "logcat-dup-tag", "a tag twice in a logcat filterspec: the last spec wins (Tag:W drops"
+                                                " its I lines); give it once, Tag:I includes W"))
     return sorted(set(found))
 
 

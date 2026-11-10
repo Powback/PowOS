@@ -101,7 +101,7 @@ st=$(homeState); echo "home: $st" | tee -a "$OUT/log.txt"
 case $st in open*) ;; *) fail "the swipe up beside the window didn't open the drawer ($st)" ;; esac
 "$T/shot.sh" "$OUT/1-drawer.png" >/dev/null 2>&1
 E1=$(edges "$OUT/1-drawer.png"); S1=$(estrip "$OUT/1-drawer.png"); echo "under the drawer: whole-window edge energy $E1 (icons count, not used); gutter strip $S0 -> $S1" | tee -a "$OUT/log.txt"
-sh_ "logcat -t \"$MARK\" -s PowosPanelLift:I PowosPanelLift:W" | tail -5 | tee -a "$OUT/log.txt" > "$OUT/lift-log.txt"
+sh_ "logcat -t \"$MARK\" -s PowosPanelLift:I" | tail -5 | tee -a "$OUT/log.txt" > "$OUT/lift-log.txt"
 [ "$(lifted open)" = yes ] && pass "drawer open: home's window is stacked over the task area (SurfaceFlinger: $(head -c 160 "$OUT/sf-open-rel.txt" | tr '\n' ' '))" ||
   fail "drawer open but home's window isn't relative to the anchor (sf-open.txt; PanelLift: $(tail -1 "$OUT/lift-log.txt"))"
 # The state above (home's surface relative to the anchor, from SurfaceFlinger) is the assertion; the log line is only

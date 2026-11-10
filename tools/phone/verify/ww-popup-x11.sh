@@ -13,7 +13,7 @@
 #   gone    "popup-gone" after it closed
 # Its app is quit after; nothing of the user's is touched. Exit 0 PASS, 1 FAIL, 3 not now / a KWin without 0063.
 set -uo pipefail
-NAME=ww-popup-x11; . "$(dirname "$0")/wwc-lib.sh"
+NAME=ww-popup-x11; . "$(dirname "$0")/wwc-lib.sh"; . "$(dirname "$0")/popup-proof.sh"
 HY=/data/powos/root/run/powos-app/hyprland.log
 # The probe's file is root's (copied in by sh_ below): the session user's rm left it behind on every run (11-10: still
 # in the rootfs's /tmp from 06:28). Its app quits by itself 6 s after the menu, or 120 s after start (the probe's own
@@ -40,11 +40,8 @@ grep -qE '^popup [0-9]+ [0-9]+ at ' <<<"$pl" || bad "popup: no \"popup P N at\" 
 grep -q 'insane' <<<"$pl" && bad "popup: $(grep -m1 insane <<<"$pl")"
 grep -q '^popup-gone' <<<"$pl" || bad "gone: no \"popup-gone\" after the menu closed"
 N=$(grep -m1 -oE 'exports popup [0-9]+' <<<"$kl" | grep -oE '[0-9]+$')
-if kwat 3.72; then
-  grep -qE '^popup [0-9]+ layer up' <<<"$pl" || bad "layer: no \"popup N layer up\" ($kw)"
-  live=$([ -n "$N" ] && sh_ "tail -n +$((${k0:-0} + 1)) $HY | grep -a \"window task $N live\" | tail -1")
-  [ -n "$live" ] && say "buffer: $live" || bad "buffer: KWin's popup surface ${N:-?} never went live (no buffers from the app's layer)"
-else
-  grep -qE '^popup [0-9]+ buffer' <<<"$pl" || bad "buffer: none of the menu's buffers reached the app"
+if [ -n "$N" ]; then
+  kwat 3.72 && L=1 || L=0
+  popup_proof "$N" "$L" "$pl" "$(sh_ "tail -n +$((${k0:-0} + 1)) $HY | grep -a \"window task $N live\"")"
 fi
 wwc_end "the X11 menu came through KWin as a popup surface with buffers ($kw) and went"

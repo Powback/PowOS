@@ -32,6 +32,7 @@
 set -uo pipefail
 T=$(cd "$(dirname "$0")/.." && pwd)
 . "$T/verify/ww-lib.sh"
+. "$T/verify/popup-proof.sh"
 adb="$T/adb.sh"
 OUT=${OUT:-$HOME/.cache/powos-verify/ww-popups-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
 fail=0
@@ -177,8 +178,8 @@ for y in 40 28 52; do
     [ -n "${CX:-}" ] || { CX=$x; CY=$y; }
     say "menu $opened: a tap at $x,$y opened X window $MW at $MX,$MY ${MWW}x$MWH"
     sleep 1.5
-    lines=$("$adb" shell "logcat -d -T '$since' -s PowosPopups:I PowosPopups:W" 2>/dev/null | tr -d '\r' | grep -oE 'popup.*')
-    exp=$(python3 -c "import sys; s=float(sys.argv[1]); a=list(map(int,sys.argv[2:])); print(round(a[2]*s), round(a[3]*s), round((a[0]-a[4])*s), round((a[1]-a[5])*s))" "$scale" "$MWW" "$MWH" "$MX" "$MY" "$SX" "$SY")
+    lines=$("$adb" shell "logcat -d -T '$since' -s PowosPopups:I" 2>/dev/null | tr -d '\r' | grep -oE 'popup.*')
+    exp=$(python3 -c "import sys; s=float(sys.argv[1]); a=list(map(int,sys.argv[2:])); print(round(a[0]*s), round(a[1]*s), round((a[2]-a[4])*s), round((a[3]-a[5])*s))" "$scale" "$MWW" "$MWH" "$MX" "$MY" "$SX" "$SY")
     read -r ew eh ex ey <<<"$exp"
     # The popup line whose size matches this menu's (the newest such).
     hit=$(echo "$lines" | awk -v ew="$ew" -v eh="$eh" '$1=="popup" && $4=="at" { split($6,s,"x"); if ((s[1]-ew)^2 <= 9 && (s[2]-eh)^2 <= 9) l=$0 } END { print l }')
@@ -191,15 +192,7 @@ for y in 40 28 52; do
       [ $(( (ax - ex) * (ax - ex) )) -le 36 ] && [ $(( (ay - ey) * (ay - ey) )) -le 36 ] ||
         bad "popup $N at $ax,$ay, want ~$ex,$ey (its X place against Steam's window x $scale, +-6 px)"
       echo "$lines" | grep -q "^popup $N insane" && bad "popup $N: $(echo "$lines" | grep "^popup $N insane" | tail -1)"
-      if [ $LAYERS = 1 ]; then
-        echo "$lines" | grep -q "^popup $N layer up" && say "layer: $(echo "$lines" | grep "^popup $N layer up" | tail -1)" ||
-          bad "layer: no layer consumer up for popup $N"
-        rs "tail -n +$((klog0 + 1)) /run/powos-app/hyprland.log | grep -a 'window task $N live'" | tail -1 | grep -q . ||
-          bad "layer: KWin's popup surface $N never went live (no buffers from the app)"
-      else
-        echo "$lines" | grep -q "^popup $N buffer #1 " && say "buffer: $(echo "$lines" | grep "^popup $N buffer #1 " | tail -1)" ||
-          bad "buffer: no buffer of popup $N reached the app's consumer"
-      fi
+      popup_proof "$N" "$LAYERS" "$lines" "$(rs "tail -n +$((klog0 + 1)) /run/powos-app/hyprland.log | grep -a 'window task $N live'")"
       rs "tail -n +$((klog0 + 1)) /run/powos-app/hyprland.log | grep -a 'exports popup $N '" | tail -1 | grep -q . &&
         say "kwin: $(rs "tail -n +$((klog0 + 1)) /run/powos-app/hyprland.log | grep -a 'exports popup $N '" | tail -1 | cut -c1-200)" ||
         bad "kwin: no \"exports popup $N\" line in KWin's log"
@@ -219,6 +212,9 @@ for y in 40 28 52; do
   done
 done
 [ -n "$scan_stop" ] && bad "scan stopped: $scan_stop"
+# The X input log always (11-10 09:21: a menu opened, so it was only read in the no-menu branch and never kept).
+xl=$(xiw); printf '%s\n' "$xl" > "$OUT/x-input.txt"
+[ -n "$xl" ] || say "note: the X input watcher logged nothing (did ww-xiw.py start? /tmp/ww-xiw.log empty)"
 if [ $opened -lt 1 ]; then
   # Which side failed: the taps never reached KWin, KWin exported a popup the X read missed, or Steam opened nothing.
   # Home's side: each tap's DOWN on the body logs "gesture to KWin window N" (WebWindows.linuxClaim). KWin's own "touch
@@ -235,7 +231,6 @@ if [ $opened -lt 1 ]; then
   over=$(xover)
   [ -n "$over" ] && why="taps reached KWin, but X window(s) over Steam's at the menu bar took them (Xwayland picks by X stacking): $over"
   [ "${hg:-0}" = 0 ] && why="home sent no gesture to KWin (the taps missed Steam's web window body, or something above it in the page took them)"
-  xl=$(xiw); printf '%s\n' "$xl" > "$OUT/x-input.txt"
   rt=$(grep -c ' raw RawTouchBegin' <<<"$xl"); rb=$(grep -c ' raw RawButtonPress' <<<"$xl"); en=$(grep -c ' window EnterNotify' <<<"$xl")
   fo=$(grep -oE 'raw Raw(TouchBegin|ButtonPress) focus 0x[0-9a-f]+' <<<"$xl" | awk '{print $4}' | sort | uniq -c | tr '\n' ' ')
   xs="X: raw touch begins $rt, raw button presses $rb, EnterNotify on Steam's window $en, X focus at them: ${fo:-?} (Steam's $SW; $OUT/x-input.txt)"
