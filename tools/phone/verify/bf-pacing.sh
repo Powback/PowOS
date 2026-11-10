@@ -7,7 +7,7 @@
 # ~/.config/powos/proton-settings.json, e.g. env:PROTON_USE_XALIA=0; gus:K=V[,K=V] anywhere = an Unreal game's own
 # GameUserSettings.ini keys for the whole check, e.g. gus:ResolutionScale=SCALE_75 for ABZU, bf-lib.sh), start the game (KWin shows it as its own task),
 # wait for its X window (+ its size vs the screen: unity-screen), 45 s settle, then 30 s of SurfaceFlinger present
-# times + a 20 s screenrecord (bf-present.sh), the same 30 s of per-thread CPU, cluster clocks and caps, GPU busy and
+# times + a 20 s screenrecord (bf-present.sh; BF_REC_S=<s>, 0 = none: no 48 MB pull + ffmpeg decode on the Mac), the same 30 s of per-thread CPU, cluster clocks and caps, GPU busy and
 # clock, temperatures (bf-prof.sh: "prof <mode>" lines), and the session log's "Xwayland KGSL" lines. bf-frames.py turns
 # that into fps / frame-time percentiles / % at 16.7 ms / dup + stale-back frames; its last line = the board result.
 # Before it, bf-layers.py's "layers <mode>:" line: every stage's rate at once (game presents, Xwayland commits + frame
@@ -91,6 +91,7 @@ fold=$(echo "$ph" | sed -nE "s/.*mCommittedState.*name='([A-Z_]+)'.*/\1/p")
 echo "front=${front:-?} steam_before=${steam_before:+yes} fold=$fold"
 input_check || exit 2
 restore() {  # restore [warm]: warm = the queue's next job is this game too (QUEUE_NEXT_APP): leave it running for it
+  restored=1
   if [ "${1:-}" = warm ] && [ "${QUEUE_NEXT_APP:-}" = "$APP" ] && [ $users = 0 ] && [ -z "$CFG_TO" ]; then
     pill "leaving $NAME up for the next check"
     "$A" shell "su -c 'pkill -f powos-bf-present.sh; pkill -f powos-bf-prof.sh; pkill -INT screenrecord; printf %s \"$mode|cfg:$CFG_TO\" > $WM; chmod 644 $WM
@@ -110,6 +111,14 @@ restore() {  # restore [warm]: warm = the queue's next job is this game too (QUE
 }
 cfg_set || exit 5
 gus_set || { restore; exit 5; }
+# A stop from outside (TERM: game-input-alive.sh's own deadline, ahead of the queue's budget kill) still closes the game
+# this run started and puts Steam + the front back, then ends as FAIL timeout (rc 124) with the step it was at. The
+# stopper TERMs the running adb call too, so bash runs this at once instead of after that call. Not for the queue's
+# kill itself: that TERMs the whole tree and gives 10 s, under restore's ~25 s (its game_left closes the game then).
+restored=0
+stopped_mac() { trap '' TERM INT HUP; echo "FAIL timeout: stopped from outside $(date +%T) - closing the game"
+  [ "$restored" = 1 ] || restore; exit 124; }
+trap stopped_mac TERM INT HUP
 i0=$(irq); touched() { [ "$(irq)" != "$i0" ]; }
 abort() { echo "touch $(date +%T) - abort, restoring"; restore; exit 3; }
 # nap <secs>: one phone-side wait that returns early on a touch (bf-nap.sh).
@@ -203,7 +212,7 @@ for mode in "$@"; do
   # xwayland 38" from before the stall while KWin got 0 commits; the stall read as the web window's consumer's).
   l1=$("$A" shell "su -c 'wc -l < $LOG'" | tr -d '\r ')
   input_inject 32
-  "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof; nohup sh /data/local/tmp/powos-bf-present.sh 30 \"PowosWindowActivity|SurfaceView|powos-direct|powos-ww-[0-9]+-linux|steam_app${WIN_NAME:+|$WIN_NAME}\" /data/local/tmp/bfp >/dev/null 2>&1 &
+  "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof; nohup sh /data/local/tmp/powos-bf-present.sh 30 \"PowosWindowActivity|SurfaceView|powos-direct|powos-ww-[0-9]+-linux|steam_app${WIN_NAME:+|$WIN_NAME}\" /data/local/tmp/bfp ${BF_REC_S:-20} >/dev/null 2>&1 &
     nohup sh /data/local/tmp/powos-bf-prof.sh 30 /data/local/tmp/bfprof >/dev/null 2>&1 &'"
   pill "$lbl: measuring frames (30 s)"; nap 30
   onscreen || invalid "during the measurement"
