@@ -134,6 +134,17 @@ The board shows window checks failing by timeout or waiting days for a free phon
     HWC SOLID_COLOR). RJ3 removed (code, HACK row, the probe's WWR_DRAG_ROUND; the validator now requires the
     radius through the drag). window-bench's leak count now counts pool-taken displays (`powos-ww-spare-<n>` keeps
     its name; WW_LAYERS, SparePoolTest.aStormKeepsExactlyOneUntakenSpare).
+  - 11-11 00:15/00:17 (APK 2226293a, `ww-resize-1111-0015` dump, `-0017` traces): the fill is a color layer now
+    (SOLID_COLOR, no BBQ) but CLIENT with clientType=ROUNDEDCORNER: it inherits the container's cornerRadius (33.1)
+    like the app layer (`powos-ww-8-linux` CLIENT, BLUR|ROUNDEDCORNER). The HWC table's ROT_270 / 0x0 crop for a
+    bufferless layer are only defaults. Moving it out from under the rounded container would show square
+    fill-colored corners, the same thing RJ3 showed, and it only removes 0.07 ms a frame. Measured (in / out ways): SF
+    drawLayersInternal p50 2.1/1.9 ms, p90 4.9/5.1 (CPU). Per frame: linux layer 0.49/0.67 ms, home 0.33/0.26, wallpaper
+    (OEM, always CLIENT) 0.16/0.17, fill 0.07/0.07 ms; SF GPU Deadline Missed on 18/116 and 15/129 display frames.
+    Home RenderThread: DrawFrame p50 5.9/6.7 ms, p90 14.6/12.2 ms (120 Hz budget 8.3 ms). WebViewFunctor::drawGl p50
+    2.7/3.9, p90 12.7/10.6, max 106/69 ms. 98/101 and 113/114 home frames were late. Next target: the shell's frame
+    (drawGl p90 and its 70-106 ms spikes), not composition. Our layers are about a quarter of the SF frame's CPU cost,
+    and that frame still runs on the GPU for the wallpaper.
 - [x] 0.6 Each failing check on the board gets one line: real bug, check bug, or environment.
   Done 11-10: seven board tasks got a "0.6" step line; the table is in `docs/research/window-bench.md` "11-10
   baseline". None of the failures was a judged real bug: they were check bugs or the environment, most of them home's
