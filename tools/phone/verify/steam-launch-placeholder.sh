@@ -5,7 +5,7 @@
 # we made?"). A game started as Steam's own UI starts it (`steam -applaunch` in the session, no PowOS launch path) must
 # show home's launch placeholder (webwindows.tsx steamLaunches: a pending window with steam set and Steam's phase)
 # within PLACEHOLDER_MS (default 3000) of the call, then the game's window takes it (a host id, the same element) and
-# draws (live) within WINDOW_S (default 150). Needs the unfolded inner screen (web windows). FOLDED=1 (queue with
+# draws (live) within WINDOW_S (default 150). Forces the inner screen (device_state 3, reset after: web windows). FOLDED=1 (queue with
 # --screen cover; the check folds to it itself - device_state 0 - and resets after): the cover screen, where the game's window is an Android task - its full-screen launch window
 # (SteamLaunchTasks -> LaunchWindows, logcat "its launch window") within PLACEHOLDER_MS, then the game's window
 # becomes THAT task ("launch window: now window"), no second task ("full screen (the app's own)"). The game (APP, default
@@ -39,6 +39,15 @@ if [ "${FOLDED:-0}" = 1 ]; then
   trap '"$A" shell cmd device_state state reset >/dev/null 2>&1' EXIT
   sleep 3
 else
+  # The inner screen made here too (device_state 3, as ai-wide.sh / unfolded-checks.sh), reset at the end: the 11-09
+  # 22:06 and 11-10 03:40 runs found the phone CLOSED on the desk (surface 1116x2484), where the launch's placeholder
+  # is rightly the game's own launch task (SteamLaunchTasks "its launch window" at 0.4 s) and home's page has none -
+  # FAIL no-placeholder from the check's screen, not the product.
+  "$A" shell cmd device_state state 3 >/dev/null 2>&1
+  trap '"$A" shell cmd device_state state reset >/dev/null 2>&1' EXIT
+  sleep 4
+  WH=$("$A" shell wm size | tr -d '\r' | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2/p' | tail -1)
+  [ "${WH:-0}" -gt 2000 ] || { echo "SKIP display 0 is ${WH:-?} wide, not the inner screen (the unfold didn't take)"; exit 3; }
   [ "$(ev "$WIN")" = none ] || { echo "SKIP a Steam launch's window is up already: $(ev "$WIN")"; exit 3; }
 fi
 "$A" logcat -c >/dev/null 2>&1
