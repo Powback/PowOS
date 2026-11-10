@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # window-dock.sh [OUT] (board floating-window-never-covers-dock; system/WindowFrame.kt moved): a floating window
 # dragged down by its title bar stops above home's bottom bar (the dock), so the dock stays tappable. Unfolds (cmd
 # device_state state 3), swipes the lock face, opens Calculator through home's launch call (as window-chrome.sh), then

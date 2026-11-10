@@ -46,7 +46,10 @@ Unverified parts are marked **hypothesis**. Measure before and after (user rule:
 
 The board shows window checks failing by timeout or waiting days for a free phone window. Fix that first.
 
-- [ ] 0.1 List every `ww-*.sh` and window check with its lane (`emu`, `phone`, `emu+phone`) in its `# lanes:` header.
+- [x] 0.1 List every `ww-*.sh` and window check with its lane (`emu`, `phone`, `emu+phone`) in its `# lanes:` header.
+  Done 11-10: `ww-drag-lag.sh`, `game-window.sh` (phone) and `window-dock.sh` (emu phone) had none; the table is in
+  `docs/AGENT-HANDBOOK.md` "The emulator lane" (window-check rows). Libraries (`ww-lib.sh`, `wwc-lib.sh`,
+  `window-lock.sh`) carry no marker, as the handbook's rule says.
 - [ ] 0.2 Move lifecycle and input checks to the emulator lane: `ww-opens`, `ww-close-min`, `ww-clamp`, `ww-stop`,
   `ww-popup-x11`. Linux web windows already draw there (CPU copy path, `docs/research/nonroot-parity.md` 11-04).
 - [ ] 0.3 Keep on the phone only what needs it: `ww-resize`, `ww-glue`, `ww-drag-lag`, `window-bench`, games.

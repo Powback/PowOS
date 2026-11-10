@@ -531,6 +531,7 @@ widened first; out of scope here. `tools/emu/emu.sh` otherwise needed no change 
 | `wide-home.sh` | emu + phone | the unfolded wide-home layout - device_state-simulated, web shell only |
 | `window-chrome.sh` | emu + phone | a floating window's chrome (bar/grip) on Calculator - Android app only |
 | `window-live.sh` | emu + phone | a floating window's live content follow, on Calculator only (E2E_APPS has no Linux entry) |
+| `window-dock.sh` | emu + phone | a floating Calculator dragged onto the dock - Android app only, like window-chrome.sh (not yet proven on the emulator) |
 | *(runs on the emulator only for an Android-only invocation - `--android-only` or, for window-max.sh, its STAGE)* |  |  |
 | `e2e-desktop.sh` | emu? + phone | `--android-only` skips part 1's Kate-from-search and Dolphin/Gwenview steps (a NOTE, not a FAIL); parts 2 (Calculator) and 3 (Chrome + drawer) need no Linux at all even without the flag - **proven: `--part 1 --android-only` and `--part 2`** |
 | `resize-probe.sh` | emu? + phone | its own `--apps` picks the app; `--apps calc` (or the new `--android-only`, same as `--apps "calc chrome"`) stays Android-only; default includes Kate (phone only) - **proven: `--apps calc`** |
@@ -538,6 +539,10 @@ widened first; out of scope here. `tools/emu/emu.sh` otherwise needed no change 
 | `window-rec.sh` | emu? + phone | `--app calc --two --android-only` opens Chrome instead of Kate as the second window; `--app kate`, or `--two` without the flag, still need Kate |
 | `window-scroll.sh` | emu? + phone | same `--apps` split as resize-probe.sh (`--android-only` = `--apps "calc chrome"`, drops Kate and Steam) - **proven: `--android-only`** |
 | *(phone only - Linux session, physical hardware, or a lane-only mechanism the emulator doesn't have)* |  |  |
+| `ww-opens.sh`, `ww-close-min.sh`, `ww-clamp.sh`, `ww-stop.sh`, `ww-popup-x11.sh` | phone only (emulator: docs/WINDOWS_FIX_PLAN.md 0.2) | Linux web windows (Kate, Dolphin, foot, a PySide6 probe) - need KWin and the session (`# needs: kwin`), which the emulator's snapshot doesn't carry |
+| `ww-resize.sh`, `ww-glue.sh`, `ww-drag-lag.sh`, `window-bench.sh` | phone only, for good (plan 0.3) | frame timing, missed vsyncs, perfetto, real touch speed - the phone's GPU and panel |
+| `ww-fill.sh`, `ww-popups.sh`, `window-render.sh`, `window-task-ime.sh`, `switcher-launch.sh` | phone only | Android web-window displays with OnePlus freeform, Steam's menus, the KWin consumer, a Linux task's IME, the recents overlay over Linux windows |
+| `kwin-restart-windows.sh`, `kwin-hung-client.sh`, `steam-one-window.sh`, `board-look-windows.sh`, `game-window.sh` | phone only | KWin restarts, a hung game, Steam, the board's window screenshots, a game's X window |
 | `bf-checker.sh` .. `bf-window.sh` (16 scripts) | phone only | Broforce run/measurement - phone hardware/GPU driver (queue.sh's HW_ONLY) |
 | `desk-probe.sh` | phone only | mostly Calculator, but one Dolphin section at the end - not split yet |
 | `float-windows.sh` | phone only | opens Dolphin/Kate as part of its run |
