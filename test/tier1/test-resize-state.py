@@ -99,6 +99,26 @@ exit 0
         result = subprocess.run(['bash', '-c', script], capture_output=True, text=True, timeout=3)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_inactive_device_capture(self):
+        # Exact shape of both real files: only console states, no SF/timestamp markers.
+        text = 'home LOG :18 WWR_59_241_37939 {"at":1794346946854,"active":false,"epoch":0,"off":false}'
+        with self.assertRaisesRegex(ValueError, 'no active resize observed'):
+            m.validate(text, 'WWR_59_241_37939', 59, False, True)
+        with self.assertRaisesRegex(ValueError, 'inspect diagnostic.stderr'):
+            m.validate('WWR_ERROR no-confirmed-resize\n' + text, 'WWR_59_241_37939', 59, False, True)
+
+    def test_short_mode_and_owned_input_guards(self):
+        script = (V / 'ww-resize.sh').read_text()
+        loop = script[script.index('  for g in $GESTURES; do'):]
+        short = loop.index('if [ "$DIAG_ONLY" = 1 ]')
+        self.assertLess(short, loop.index('k0=$(klines)'))
+        self.assertIn('continue', loop[short:loop.index('k0=$(klines)')])
+        self.assertIn('already belongs to user; not moved or resized', script)
+        diag = script[script.index('diagnostic() {'):script.index('# record <x1')]
+        self.assertEqual(diag.count('hit=$(wwhit'), 2)
+        self.assertNotIn('input swipe $x2 $y2 $x1 $y1', diag)
+        self.assertIn('2> "$OUT/$tag-diagnostic.stderr"', diag)
+
     def test_observer_actual_schema(self):
         # Lock this observer to entry()/sizeOf()/geometry(), not an invented export.
         source = (ROOT / 'shell/ui/webwindows.tsx').read_text()

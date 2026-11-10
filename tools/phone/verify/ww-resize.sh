@@ -46,6 +46,10 @@ L=$HOME/.cache/powos-verify.lock
 APPS=${WWR_APPS:-"kate dolphin calc"}
 REC=${WWR_REC:-1}
 TRACE=${WWR_TRACE:-1}
+# WWR_DIAGNOSTIC_ONLY=1: no timed/recording passes; WWR_GESTURES=corner for one short capture.
+DIAG_ONLY=${WWR_DIAGNOSTIC_ONLY:-0}
+GESTURES=${WWR_GESTURES:-"edge corner"}
+[ "$DIAG_ONLY" = 1 ] && { TRACE=0; REC=0; }
 CALC=${TEST_APP:-com.oneplus.calculator}
 sh_() { "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
@@ -59,7 +63,8 @@ WW_DEADLINE=${WWR_DEADLINE_S:-250}
 export CDP_TIMEOUT_S=${CDP_TIMEOUT_S:-20}
 # 11-10: was 60 + 30 (two pushes and two pulls a gesture, attribution after the KWin wait); now ~25 + 10 - the
 # "time:" line each gesture logs is the measure to set this from.
-GEST_S=$(( 40 + 10 * ${WWR_REC:-1} ))
+GEST_S=$(( 40 + 10 * REC ))
+[ "$DIAG_ONLY" = 1 ] && GEST_S=20
 . "$here/ww-lib.sh"
 plaunch() { ev "importShim('./state.ts').then(m=>m.launch('$1')).then(()=>'ok',e=>'ERR '+e)"; }
 MINE=""
@@ -237,20 +242,29 @@ print("; ".join(dict.fromkeys(out)))' "$1"; }
 # No host sleep guesses; no screenrecord/perfetto during this diagnostic. Never performance evidence.
 diagnostic() {
   local tag=$1 x1=$2 y1=$3 x2=$4 y2=$5 token js result first_match
+  chk "$tag before diagnostic"
+  # Recheck after installing the observer too: transport latency or prior passes may move the zone.
+  hit=$(wwhit "$id" "$zone" "$x1" "$y1")
+  [ "$hit" = ok ] || { bad "$tag INCONCLUSIVE: unsafe diagnostic zone: $hit"; return; }
   token="WWR_${n}_${SECONDS}_$$"
   js=$(sed "s/TOKEN/\"$token\"/;s/WINDOW_ID/$n/" "$here/resize-state.js")
   [ "$(ev "$js")" = ok ] || { bad "$tag INCONCLUSIVE: cannot install resize observer"; return; }
+  hit=$(wwhit "$id" "$zone" "$x1" "$y1")
+  [ "$hit" = ok ] || { ev "globalThis.__wwResizeProbe?.stop();'ok'" >/dev/null; bad "$tag INCONCLUSIVE: zone changed: $hit"; return; }
+  DIAGNOSTICS=$(( ${DIAGNOSTICS:-0} + 1 ))
   # A bounded device-side watcher, already listening before input starts. The token is unique;
   # logcat's backlog cannot satisfy this job. Timeout and missing/bracketing state fail closed.
   first_match=$(cat "$here/resize-first-match.sh")
-  sh_ "$first_match
+  "$A" shell "su -c '$first_match
     ( resize_first_match \"$token\" &&
     { sleep 0.15; echo WWR_BEGIN \$(date +%s%3N); echo WWR_PROP \$(getprop debug.powos.ww_drag_round);
       echo WWR_SF_BEGIN; dumpsys SurfaceFlinger; echo WWR_SF_END;
-      echo WWR_PROP \$(getprop debug.powos.ww_drag_round); echo WWR_END \$(date +%s%3N); } ) &
+      echo WWR_PROP \$(getprop debug.powos.ww_drag_round); echo WWR_END \$(date +%s%3N); } || echo WWR_ERROR no-confirmed-resize ) &
     watcher=\$!; sleep 0.2; input swipe $x1 $y1 $x2 $y2 3000; wait \${watcher}; sleep 0.3
     logcat -d -v raw -s PowosShell:I | grep \"$token \"
-    input swipe $x2 $y2 $x1 $y1 700" > "$OUT/$tag-diagnostic.txt"
+    '" </dev/null > "$OUT/$tag-diagnostic.txt" 2> "$OUT/$tag-diagnostic.stderr"
+  # Never blindly swipe back from an arithmetic endpoint; snap/min-size may put another window there.
+  chk "$tag after diagnostic"
   ev "globalThis.__wwResizeProbe?.stop();'ok'" >/dev/null
   result=$(python3 "$here/resize-state.py" "$OUT/$tag-diagnostic.txt" "$token" "$n" "$DR" "$GP")
   local rc=$?
@@ -320,7 +334,7 @@ for app in $APPS; do
   id=$(wwnew 30 "$before" | tail -1)
   [ -n "$id" ] || id=$(hcall webwindows.list "[]" "l=>(l.find(w=>w.key==='$key'&&w.state==='floating')||{id:''}).id" | sed 's/^/w/')
   [ "$id" != w ] && [ -n "$id" ] || { bad "$app: no web window within 30 s"; continue; }
-  case " $before " in *" $id "*) ;; *) MINE="$MINE $id" ;; esac
+  case " $before " in *" $id "*) log "SKIP $app: $id already belongs to user; not moved or resized"; continue ;; *) MINE="$MINE $id" ;; esac
   for i in $(seq 1 15); do [ "$(wwel "$id" "e=>e.querySelector('.webwindow-body.live')?'live':'no'")" = live ] && break; sleep 1; done
   sleep 2; chk "$app open"
   n=${id#w}
@@ -330,8 +344,8 @@ for app in $APPS; do
   sleep 1
   setup_s=$SECONDS
   log "== $app: window $id ($key), home layer '$HL', content layer '$CL', body $(wwbody "$id")"
-  for g in edge corner; do
-    case $g in edge) zone=.ww-edge-e; dx=-300; dy=0 ;; corner) zone=.ww-edge-se; dx=-300; dy=-200 ;; esac
+  for g in $GESTURES; do
+    case $g in edge) zone=.ww-edge-e; dx=-300; dy=0 ;; corner) zone=.ww-edge-se; dx=-300; dy=-200 ;; *) bad "unknown gesture $g"; continue ;; esac
     if [ $((SECONDS + GEST_S)) -gt "$WW_DEADLINE" ]; then
       bad "budget: $app $g not measured - ${SECONDS}s in, a gesture takes ~${GEST_S}s, the deadline is ${WW_DEADLINE}s (queue one app a job: WWR_APPS=$app)"
       continue
@@ -339,7 +353,12 @@ for app in $APPS; do
     read -r px py <<<"$(wwpt "$id" "$zone")"
     [ -n "${py:-}" ] || { bad "$app $g: no $zone on screen"; continue; }
     hit=$(wwhit "$id" "$zone" "$px" "$py")
-    [ "$hit" = ok ] || { bad "$app $g: a press on its $zone at $px,$py isn't its resize: $hit - nothing measured"; continue; }
+    [ "$hit" = ok ] || { log "SKIP $app $g: no safe resize zone: $hit; other windows untouched"; continue; }
+    if [ "$DIAG_ONLY" = 1 ]; then
+      diagnostic "$app-$g" "$px" "$py" $((px + dx)) $((py + dy))
+      chk "$app $g diagnostic"
+      continue
+    fi
     read -r bl bt br bb <<<"$(wwbody "$id")"
     k0=$(klines); g0=$SECONDS; STEP="$app $g"
     sh_ "dumpsys gfxinfo com.powos.app reset" >/dev/null
@@ -399,6 +418,7 @@ done
 # Closed windows leave no layer behind: each Linux window's content ("powos-ww-N-linux") and its BLAST queue
 # ("[BBQ] powos-ww-N-linux") are gone from SurfaceFlinger 3 s after its close (11-07: a consumer stop wedged on its
 # event thread kept "[BBQ] powos-ww-1-linux" alive for good, one per closed game window).
+[ "${DIAGNOSTICS:-0}" -gt 0 ] || bad "INCONCLUSIVE: no safe diagnostic captured"
 LIN=""
 for w in $MINE; do case $(wwhost "$w" key) in l:*) LIN="$LIN ${w#w}" ;; esac; done
 for w in $MINE; do hcall webwindows.close "[${w#w}]" "v=>String(v)" >/dev/null; done

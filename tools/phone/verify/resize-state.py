@@ -13,6 +13,10 @@ def validate(text, token, wid, round_, pause):
             or not markers[1].startswith('WWR_PROP ') or markers[2] != 'WWR_SF_BEGIN'
             or markers[3] != 'WWR_SF_END' or not markers[4].startswith('WWR_PROP ')
             or not re.fullmatch(r'WWR_END [0-9]+', markers[5])):
+        if 'WWR_ERROR no-confirmed-resize' in text:
+            reject('device watcher observed no confirmed resize; inspect diagnostic.stderr')
+        if not markers and re.search(r'"active"\s*:\s*false', text) and not re.search(r'"active"\s*:\s*true', text):
+            reject('no active resize observed; SF capture never started')
         reject('invalid capture delimiters or order')
     stamps = re.findall(r'^WWR_(BEGIN|END) ([0-9]+)$', text, re.M)
     begin, end = [int(s[1]) for s in stamps]
