@@ -308,7 +308,7 @@ if [ -n "${GATE_STUB_SLEEP:-}" ]; then :; else
   # and motion scenes that pass on .58; the reruns would add more). So a gate whose machine doesn't answer waits for
   # it, GATE_JOB_WAIT_S (default 900 s), and then stops with exit 75 (no verdict) instead of false FAILs on the hub.
   # POW_JOB_CONTEXT=hub still runs there on purpose (deadline sized below); GATE_HUB_FALLBACK=1 allows the fallback.
-  [ "${POW_JOB_CONTEXT:-}" = hub ] || [ -n "${GATE_HUB_FALLBACK:-}" ] || export JOB_WAIT_S=${GATE_JOB_WAIT_S:-900}
+  [ "${POW_JOB_CONTEXT:-}" = hub ] || [ -n "${GATE_HUB_FALLBACK:-}" ] || export JOB_WAIT_S=${GATE_JOB_WAIT_S:-900} JOB_NO_FALLBACK=1
   job_init gate
   if [ -n "$JOB_FELL_BACK" ] && [ -z "${GATE_HUB_FALLBACK:-}" ]; then
     echo "gate: NO VERDICT - ${POW_JOB_CONTEXT:-pow58} did not answer within ${JOB_WAIT_S:-0} s, and the hub cannot pass the full gate (false timing FAILs under its load); bring it back, or GATE_HUB_FALLBACK=1 / POW_JOB_CONTEXT=hub to gate on the hub anyway"

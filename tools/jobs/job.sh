@@ -51,8 +51,16 @@ job_context() {
       [ $waited = 1 ] || echo "job: $want does not answer - waiting up to ${JOB_WAIT_S} s for it (checked every 15 s)" >&2
       waited=1; sleep 15; continue
     fi
+    JOB_CTX=$hub JOB_FELL_BACK=1; export JOB_FELL_BACK
+    # JOB_NO_FALLBACK=1: the caller won't run on the hub (the gate: it can't pass there) and reports that itself, so
+    # don't announce a hub run that never happens.
+    if [ -n "${JOB_NO_FALLBACK:-}" ]; then
+      echo "job: $want did not answer within ${JOB_WAIT_S:-5} s" >&2
+      [ "$JOB_CTX" != "$hub" ] || JOB_ON_HUB=1
+      return 0
+    fi
     echo "job: $want did not answer within ${JOB_WAIT_S:-5} s - running on the hub ($hub)" >&2
-    JOB_CTX=$hub JOB_FELL_BACK=1; export JOB_FELL_BACK; break
+    break
   done
   [ "$JOB_CTX" != "$hub" ] || JOB_ON_HUB=1
   export JOB_CTX_RESOLVED=$JOB_CTX
