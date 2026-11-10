@@ -134,6 +134,11 @@ never-live launches in a row end the storm (FAIL). Every part ends with a verdic
   Unfold: fold 10:10:18.420; screen back 22.722; home's layout for the inner screen 23.283 (560 ms, a ResizeObserver
   loop error on the way); every window live and still 23.758; drawn at t0 + 4870 ms - the go-to-drawn part and the
   command's own latency are now in the watcher's line (go / rounds / last flat), next run.
+- **Display pool (product, after p5):** the helper keeps one spare virtual display + its placeholder touch device
+  (`SparePool`, `pool <w> <h> <dpi>` / `pool off`), made with no surface (composes nothing, no buffers) at the screen's
+  size, resized in place on a fold/rotate (the default display's change), refilled on its own thread after each take,
+  dropped when web windows are off or the helper exits. A take resizes it to the window and gives it its reader: the log
+  says "pool hit, N ms" or "cold create: display N ms, touch device N ms". JVM: `SparePoolTest`. Phone numbers: owed (p6).
 - Environment, not fixed here: one CDP eval is 2-8 s at Mac load ~35, setup (unfold, lock, home) took 2 min of
   part 1, and `drawn`/resize-settle are Mac-clock screencap polls (inflated the same way).
 

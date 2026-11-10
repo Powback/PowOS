@@ -128,9 +128,42 @@ object WebWindowsHost {
         private val frames: Handler,
     ) {
         private val vds = HashMap<Int, Vd>()
+
+        /** A made-ahead display plus its placeholder touch device, no surface until taken ([SparePool]). */
+        private class Spare(val display: VirtualDisplay, val touch: Touch?)
+
+        private val maker = Handler(HandlerThread("ww-pool").apply { start() }.looper)
+        private var spareSeq = 0
+        private val pool =
+            SparePool<Spare>(
+                make = { w, h, dpi -> makeSpare(w, h, dpi) },
+                resize = { s, w, h, dpi -> s.display.resize(w, h, dpi) },
+                drop = { s -> runCatching { s.touch?.detach() }; runCatching { s.display.release() } },
+                post = { maker.post(it) },
+            )
+
+        /** On [maker]: a display with no surface (no buffers: it composes nothing until a window takes it) + its touch. */
+        private fun makeSpare(
+            w: Int,
+            h: Int,
+            dpi: Int,
+        ): Spare? {
+            val t0 = android.os.SystemClock.uptimeMillis()
+            val vd =
+                runCatching { dm.createVirtualDisplay("powos-ww-spare-${++spareSeq}", w, h, dpi, null, FLAGS) }
+                    .onFailure { say("log pool: spare display refused: ${it.toString().replace('\n', ' ')}") }
+                    .getOrNull() ?: return null
+            val t1 = android.os.SystemClock.uptimeMillis()
+            val touch = Touch.attach(vd.display)
+            say("log pool: spare display ${vd.display.displayId} ${w}x$h dpi $dpi ready (display ${t1 - t0} ms, touch device ${android.os.SystemClock.uptimeMillis() - t1} ms)")
+            return Spare(vd, touch)
+        }
+
         fun command(a: List<String>) {
             when (a[0]) {
                 "create" -> create(a)
+                // `pool <w> <h> <dpi>`: keep a spare at the screen's size (sent again on a fold/rotate); `pool off`.
+                "pool" -> if (a.getOrNull(1) == "off") pool.off() else pool.size(a[1].toInt(), a[2].toInt(), a[3].toInt())
                 "resize" -> resize(a[1].toInt(), a[2].toInt(), a[3].toInt(), a[4].toInt())
                 "rebind" -> rebind(a[1].toInt())
                 "release" -> vds.remove(a[1].toInt())?.let(::release)
@@ -151,6 +184,17 @@ object WebWindowsHost {
             val r = ImageReader.newInstance(1, 1, PixelFormat.RGBA_8888, 2)
             var made: Vd? = null
             r.setOnImageAvailableListener({ made?.let(::framed) ?: it.acquireLatestImage()?.close() }, frames)
+            // The spare first (not for the self-test's own flags): sized to this window, given its surface.
+            val spare = if (selftest) null else pool.take()
+            if (spare != null) {
+                spare.display.resize(w, h, dpi)
+                spare.display.surface = r.surface
+                made = Vd(spare.display, r, spare.touch)
+                vds[spare.display.display.displayId] = made
+                say("display $tag ${spare.display.display.displayId}")
+                say("log display ${spare.display.display.displayId} ${w}x$h dpi $dpi: sw ${minOf(w, h) * 160 / dpi}dp (pool hit, ${android.os.SystemClock.uptimeMillis() - t0} ms)")
+                return
+            }
             val vd =
                 try {
                     val own =
@@ -174,7 +218,7 @@ object WebWindowsHost {
             say("display $tag ${vd.display.displayId}")
             // The stages of a window's display (window-bench p5 11-10: Settings' window 42 waited 409 ms from "new window"
             // to its display, before the app could even start - the virtual display, or the placeholder touch device).
-            say("log display ${vd.display.displayId} ${w}x$h dpi $dpi: sw ${minOf(w, h) * 160 / dpi}dp (display ${t1 - t0} ms, touch device ${t2 - t1} ms)")
+            say("log display ${vd.display.displayId} ${w}x$h dpi $dpi: sw ${minOf(w, h) * 160 / dpi}dp (cold create${if (selftest) ", self-test" else ""}: display ${t1 - t0} ms, touch device ${t2 - t1} ms)")
         }
 
         private fun resize(
@@ -275,7 +319,10 @@ object WebWindowsHost {
             say("log display $id: released (touch device ${t1 - t0} ms, display ${t2 - t1} ms, reader ${android.os.SystemClock.uptimeMillis() - t2} ms)")
         }
 
-        fun releaseAll() = vds.values.forEach { runCatching { release(it) } }
+        fun releaseAll() {
+            vds.values.forEach { runCatching { release(it) } }
+            pool.releaseAll()
+        }
     }
 
     /**

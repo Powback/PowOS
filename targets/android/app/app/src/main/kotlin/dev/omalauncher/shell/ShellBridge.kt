@@ -513,7 +513,7 @@ class ShellBridge(
             "apps.local" -> LocalApps.json(context)
             "apps.getLinux" -> runtime.installLinux(emptyList()).let { null }
             "apps.launch" -> launch(a.getString(0), a.optJSONObject(1)?.optBoolean("fullScreen") == true)
-            "webwindows.enabled" -> (activity != null && webWindows.also { webWindowsMade = true }.enabled()).also { if (it) webWindows.warmHelper() }
+            "webwindows.enabled" -> (activity != null && webWindows.also { webWindowsMade = true }.enabled()).also { if (it) webWindows.warmHelper() else if (webWindowsMade) webWindows.coolHelper() }
             "webwindows.open" ->
                 if (activity == null) -1
                 // A Linux window KWin opened ("webwindows.adopt" with its KWin id): its consumer in a web window.

@@ -133,6 +133,11 @@ class WebWindows(
         io.post { helper.warm() }
     }
 
+    /** Web windows off: the helper's spare display goes ([WebWindowsHost] "pool off"); a stopped helper has none. */
+    fun coolHelper() {
+        io.post { helper.poolOff() }
+    }
+
     /** Main thread: every window the page hasn't claimed since its load, hidden (layers only; its app keeps running). */
     private fun hideUnclaimed() {
         val left = wins.values.filter { !it.claimed && !it.closed && it.container.isValid && !it.linuxFull }
@@ -199,7 +204,10 @@ class WebWindows(
         object : DisplayManager.DisplayListener {
             override fun onDisplayAdded(displayId: Int) {}
 
-            override fun onDisplayChanged(displayId: Int) {}
+            // The screen's size changed (fold, rotate): the helper's spare display follows it (sent only on a change).
+            override fun onDisplayChanged(displayId: Int) {
+                if (displayId == android.view.Display.DEFAULT_DISPLAY) io.post { helper.pool() }
+            }
 
             override fun onDisplayRemoved(displayId: Int) {
                 wins.values.firstOrNull { it.displayId == displayId }?.let { w ->
@@ -4105,6 +4113,33 @@ class WebWindows(
         fun warm() {
             if (process?.isAlive != true) WindowLog.i(TAG, "display helper: started ahead of the first window")
             ensure()
+            pool()
+        }
+
+        /** The "pool" line last sent, and to which helper process (a new helper starts with no spare). */
+        private var poolSent: String? = null
+        private var poolTo: Process? = null
+
+        /**
+         * The helper's spare display at the screen's size now ([SparePool]: an Android window's open takes it instead of
+         * making a display, ~409 ms, window-bench p5 11-10). Sent only when the size or the helper changed. On [io].
+         */
+        fun pool() {
+            val b = context.getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
+            val line = "pool ${b.width()} ${b.height()} ${context.resources.displayMetrics.densityDpi}"
+            val p = process
+            if (line == poolSent && p != null && p === poolTo && p.isAlive) return
+            if (send(line)) {
+                poolSent = line
+                poolTo = process
+            }
+        }
+
+        /** No spare (web windows off). On [io]. */
+        fun poolOff() {
+            if (process?.isAlive != true) return
+            poolSent = null
+            send("pool off")
         }
 
         /** Running, or null (logged). Under the lock ([send]). */
@@ -4182,6 +4217,7 @@ class WebWindows(
         ) {
             synchronized(waiting) { waiting["$id"] = done }
             if (!send("create $id $size")) synchronized(waiting) { waiting.remove("$id") }?.invoke(-1, "no helper")
+            pool() // a helper started by this create has no spare yet; else a no-op
         }
 
         /** Coalesced: only the newest size per display goes out (a drag resizes every frame). */
