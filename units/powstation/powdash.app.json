@@ -1,0 +1,48 @@
+{
+  "id": "powdash.app",
+  "name": "powdash: powdash",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "infrastructure; Compose-managed by powdash",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "powdash"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "powdash",
+    "service": "powdash",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "none",
+      "exposure": "lan"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/PowDash -f /Users/macback/Projects/PowDash/docker-compose.yaml --project-name powdash stop powdash"
+    ],
+    "keep": [
+      "/var/run/docker.sock",
+      "/Users/macback/Projects/PowStation/logs",
+      "powdash-data",
+      "/Users/macback/Projects/PowDash/ops",
+      "/mnt/lima-colima/rancher",
+      "/etc/default",
+      "/mnt/nas",
+      "/Users/macback/pw",
+      "/Users/macback/Projects/PowDash/secrets/ssh",
+      "/Users/macback/Projects/PowDash/secrets/nomad"
+    ]
+  },
+  "limits": {
+    "memory": "805306368"
+  }
+}
