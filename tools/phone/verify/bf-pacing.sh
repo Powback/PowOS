@@ -53,7 +53,8 @@ settings() {  # settings <K=V,K=V | empty>: the game's extra environment for thi
   "$A" shell "su -c 'd=\$(dirname $PS); mkdir -p \$d; cp /data/local/tmp/powos-settings.json $PS; chown \$(stat -c %u:%g \$d) $PS; chmod 644 $PS; rm /data/local/tmp/powos-settings.json'"; }
 LOG=/data/powos/root/run/powos-app/hyprland.log
 T0=$(date +%s) BUDGET_S=${BUDGET_S:-300}
-# After the window: settle 45 + measure 30 + collecting ~25 + restore ~25 + comparing ~25 s, and a margin.
+# After the window: settle 45 + measure 30 + collecting ~25 + restore ~25 + comparing ~25 s, and a margin (the screen
+# recording's pull + decode only when they fit too: rec below).
 AFTER_WIN_S=${AFTER_WIN_S:-165}
 irq() { "$A" shell "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts" | tr -d '\r'; }
 # asuser <script> [args]: ASUSER_PRE = an adb shell prefix run first as shell (self_input_for: bf-play's pad presses are
@@ -211,8 +212,15 @@ for mode in "$@"; do
   # while something happens, so a stalled game leaves none in the window - the lines before it (11-08 02:02: "game 37 >
   # xwayland 38" from before the stall while KWin got 0 commits; the stall read as the web window's consumer's).
   l1=$("$A" shell "su -c 'wc -l < $LOG'" | tr -d '\r ')
+  # The screen recording only when what follows it still fits the budget: its ~48 MB pull (collecting) and its docker
+  # ffmpeg decode (comparing) cost ~REC_COST_S (110) s on top of measure 30 + collect 25 + restore 30 + compare 25. ABZU
+  # 11-10 07:21 (abz-has-low-fps, TU_DEBUG=startup): measuring at 99 s, collecting took 85 s, comparing started at 248 s
+  # and the queue killed it at 300 s mid-decode. BF_REC_S set = that, whatever the budget.
+  rec=${BF_REC_S:-}
+  if [ -z "$rec" ]; then rec=20; rl=$(( T0 + BUDGET_S - $(date +%s) )); need=$(( 110 + ${REC_COST_S:-110} ))
+    [ "$rl" -ge "$need" ] || { rec=0; echo "$mode: no screen recording: ${rl} s of the ${BUDGET_S} s budget left, it needs ${need} s (dup/stale frames not measured)"; }; fi
   input_inject 32
-  "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof; nohup sh /data/local/tmp/powos-bf-present.sh 30 \"PowosWindowActivity|SurfaceView|powos-direct|powos-ww-[0-9]+-linux|steam_app${WIN_NAME:+|$WIN_NAME}\" /data/local/tmp/bfp ${BF_REC_S:-20} >/dev/null 2>&1 &
+  "$A" shell "su -c 'rm -rf /data/local/tmp/bfp /data/local/tmp/bfprof; nohup sh /data/local/tmp/powos-bf-present.sh 30 \"PowosWindowActivity|SurfaceView|powos-direct|powos-ww-[0-9]+-linux|steam_app${WIN_NAME:+|$WIN_NAME}\" /data/local/tmp/bfp $rec >/dev/null 2>&1 &
     nohup sh /data/local/tmp/powos-bf-prof.sh 30 /data/local/tmp/bfprof >/dev/null 2>&1 &'"
   pill "$lbl: measuring frames (30 s)"; nap 30
   onscreen || invalid "during the measurement"
@@ -239,6 +247,11 @@ pill "comparing $(echo "$*" | sed 's/ / vs /g')"
 # uv runs it with its own numpy (the script's inline deps, uv's cache): nothing installed into the Mac's python.
 # The per-layer rate table (game > Xwayland > KWin > consumer > SurfaceFlinger > panel, skin), before the board line.
 python3 -I "$here/bf-layers.py" "$OUT" "$@"
+# The recordings' decode (docker ffmpeg, ~60 s for 20 s of 2440x2268) only while it still fits: a mode measured with
+# BF_REC_S set, or a slow restore, otherwise ran past the queue's budget kill (rec.mp4 kept, renamed: decode it by hand).
+cl=$(( T0 + BUDGET_S - $(date +%s) ))
+if [ "$cl" -lt "${REC_DECODE_S:-75}" ]; then for r in "$OUT"/*/rec.mp4; do [ -f "$r" ] || continue
+  mv "$r" "$r.undecoded"; echo "comparing: $(basename "$(dirname "$r")")'s screen recording not decoded: ${cl} s of the budget left (kept as rec.mp4.undecoded)"; done; fi
 # BF_APP: bf-frames.py compares the fps with this game's last PASSes (its history) and FAILs a measurement that isn't
 # the game on the screen (11-08 02:02: "PASS ... 2.3 fps ... front HomeShell" while the game made 37/s).
 BF_APP=$APP uv run --quiet --script "$here/bf-frames.py" "$OUT" "$@"

@@ -126,6 +126,9 @@
 #               resized the root before the window, or the other way: Besiege/Bananas fell to 1135x1365 unfolded, no
 #               full-screen layer); a game's own windowed toggle still leaves (src/utils/fullscreenleave.h,
 #               test/fullscreenleave-test.cpp).
+#   0070        ours (3.78): a task-kept full-screen window takes its task's own size ("size"), not that size bounded
+#               by buffers from before a rotation (no consumer reconnect): game-resize 11-10 rotated 2268x2268 of
+#               2440x2268, cover portrait 1116x1116; scaled into the old buffers until new ones come.
 #
 # HACK: same pkgname as Arch's kwin with pkgrel 3.1 (makepkg allows only integer[.integer]; ".1" = ours), so every Plasma package's
 # "depends=(kwin)" is satisfied by ours and pacman sees it as newer than 6.7.5-3. The real fix is
@@ -135,7 +138,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.77
+pkgrel=3.78
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -219,11 +222,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0066-backends-anland-a-window-taking-a-full-screen-game-s-focus-opens-in-front-of-it.patch
           0067-backends-anland-the-sound-goes-out-on-a-live-window-task-s-socket-when-there-is-no-desktop.patch
           0068-backends-anland-a-borderless-window-is-not-a-frame-of-its-own.patch
-          0069-X11-a-task-kept-full-screen-window-s-leave-at-a-stale-size-is-refused.patch)
+          0069-X11-a-task-kept-full-screen-window-s-leave-at-a-stale-size-is-refused.patch
+          0070-backends-anland-a-full-screen-task-s-window-takes-the-task-s-size-not-its-stale-buffers.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver

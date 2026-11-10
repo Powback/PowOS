@@ -25,6 +25,8 @@ reapers() { local p; for p in $(pgrep -f "SteamLaunch AppId=$APP( |\$)"); do gre
 pgrep -f powos-sleep-gui >/dev/null || { echo "FAIL setup: powos-sleep-gui isn't running (nothing announces launches)"; exit 1; }
 t0=$(date +%s%N); s0=$(( $(date +%s) - 1 ))
 setsid steam -applaunch "$APP" </dev/null >/dev/null 2>&1 &
+# The call's time on the phone's clock (epoch ms): the Mac side times home's placeholder against it, page-side.
+echo "CALL $(( t0 / 1000000 ))"
 # THIS run's launch: going on and started now ("since" >= the call) - an entry left by the run before (11-08 02:40:
 # "ended" at 10 ms, 03:32: "asking" since 03:20) is no announce of this one.
 fresh() { python3 -c 'import json,sys;l=json.load(open(sys.argv[1])).get("launches",{}).get(sys.argv[2]) or {};sys.exit(0 if l.get("state") in ("launching","running","asking") and int(l.get("since",0))>=int(sys.argv[3]) else 1)' "$F" "$APP" "$s0" 2>/dev/null; }

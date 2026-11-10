@@ -1,0 +1,20 @@
+--- a/src/backends/anland/anland_window_task.cpp	2026-11-10 08:06:07
++++ b/src/backends/anland/anland_window_task.cpp	2026-11-10 08:06:07
+@@ -1463,7 +1463,16 @@
+         return;
+     }
+     const qreal targetScale = m_window->targetScale();
+-    const QSize task = fullScreenTaskSize();
++    QSize task = fullScreenTaskSize();
++    // PowOS (0070): the task's own size ("size": its surface), not that size bounded by buffers from before a rotation.
++    // taskSize() keeps a task inside its buffers, which change only when the app's consumer reconnects: a rotation that
++    // brought no new buffers made the game's window the overlap of the old and the new screen (game-resize 11-10:
++    // rotated 2268x2268 of 2440x2268, cover portrait 1116x1116 of 1116x2484, unfolded again 2268x1116), and Unity laid
++    // itself out square. The window takes the container's size at once; render() scales it into the buffers it has
++    // (fitsWindow) until the consumer's new ones come.
++    if (!m_taskSize.isEmpty() && task == taskSize() && m_taskSize != task) {
++        task = m_taskSize;
++    }
+     if (task.isEmpty() || targetScale <= 0) {
+         return;
+     }

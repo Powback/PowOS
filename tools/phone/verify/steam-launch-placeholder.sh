@@ -51,6 +51,16 @@ else
   [ "$(ev "$WIN")" = none ] || { echo "SKIP a Steam launch's window is up already: $(ev "$WIN")"; exit 3; }
 fi
 "$A" logcat -c >/dev/null 2>&1
+# The placeholder's time is taken ON the page (PW_JS: webWins watched every 25 ms from before the call, its Date.now()
+# when the window appears) against the phone's own clock at the call (the phone side's "CALL <epoch ms>"). Polled from
+# the Mac it included each poll's CDP round trip over adb (~1.5-3 s, one slow eval more): 11-10 07:07 "7066 ms" FAIL
+# slow-placeholder where the earlier runs measured 1675-2655 ms the same way. The Mac-side poll below stays the fallback.
+PW_JS="new Promise(ok=>importShim('./ui/webwindows.tsx').then(m=>{const t=Date.now();window.__slpWatch=t;const f=()=>{const w=m.webWins.value.find(w=>w.steam);if(w)return ok(Date.now()+'|'+[w.id,!!w.pending,!!w.live,w.phase||''].join('|'));if(window.__slpWatch!==t||Date.now()-t>$((PLACEHOLDER_MS + 20000)))return ok('none');setTimeout(f,25)};f()},e=>ok('ERR '+e)))"
+pw=""
+if [ "${FOLDED:-0}" != 1 ]; then
+  rm -f "$OUT/page-watch.txt"; ( CDP_TIMEOUT_S=$((PLACEHOLDER_MS / 1000 + 30)) ev "$PW_JS" > "$OUT/page-watch.txt" ) & pw=$!
+  for _ in 1 2 3 4 5 6 7 8 9 10; do [ "$(ev '!!window.__slpWatch')" = true ] && break; sleep 0.5; done
+fi
 t0=$(python3 -c 'import time;print(time.time())')
 session "bash /var/tmp/powos-slp.sh $APP" | tee "$OUT/run.txt"
 grep -q "^SKIP" "$OUT/run.txt" && exit 3
@@ -76,7 +86,16 @@ if [ "${FOLDED:-0}" = 1 ]; then
 fi
 seen="" ; w=none
 while [ "$(since)" -lt $((PLACEHOLDER_MS + 15000)) ]; do w=$(ev "$WIN"); case $w in none|"") ;; *) seen=$(since); break ;; esac; sleep 0.3; done
-echo "placeholder: ${seen:-never} ms after the call ($w)" | tee -a "$OUT/run.txt"
+echo "placeholder (polled from the Mac, CDP round trips included): ${seen:-never} ms after the call ($w)" | tee -a "$OUT/run.txt"
+# The page's own time ([PW_JS]): the verdict when it has one.
+call=$(sed -n 's/^CALL \([0-9]*\).*/\1/p' "$OUT/run.txt" | head -1)
+# Its answer is due once the Mac poll saw the window (10 s at most for the eval's own hop); else it's stopped.
+[ -n "$pw" ] && { [ -n "$seen" ] && for _ in $(seq 1 20); do kill -0 "$pw" 2>/dev/null || break; sleep 0.5; done; kill "$pw" 2>/dev/null; }
+pg=$(cat "$OUT/page-watch.txt" 2>/dev/null); at=${pg%%|*}
+if [ -n "$call" ] && [ "${at:-x}" -gt 0 ] 2>/dev/null; then
+  seen=$((at - call)); [ "$seen" -ge 0 ] || seen=0
+  echo "placeholder: ${seen} ms after the call, on the page (${pg#*|})" | tee -a "$OUT/run.txt"
+else echo "placeholder: no page-side time (${pg:-no answer}${call:-, no CALL line}) - the Mac poll's counts" | tee -a "$OUT/run.txt"; fi
 fails=""
 [ -n "$seen" ] || fails="$fails no-placeholder"
 [ -n "$seen" ] && [ "$seen" -gt "$PLACEHOLDER_MS" ] && fails="$fails slow-placeholder"

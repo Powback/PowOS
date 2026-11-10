@@ -25,10 +25,10 @@
 # Rotation and device state are always put back. Not covered: a floating task's drag-resize (no scripted drag yet).
 #   G1 root: Xwayland's root (Wine's / Unity's monitor) IS the screen too (kwin 0061, 6.7.5-3.69: the output follows the
 #      app's "screen"): it stayed 2268x2440 in every state (11-07), a rotated game got 2268x2268 and Besiege left full screen.
-# Exit 3 = no window / user input. KWIN_MIN default 6.7.5-3.69 (queue kwin-install.sh 6.7.5-3.69 before it).
+# Exit 3 = no window / user input. KWIN_MIN default 6.7.5-3.78 (0070: the window takes the task size, not stale buffers; queue kwin-install.sh 6.7.5-3.78 before it).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); P=$here/..; A=$P/adb.sh
-APP=${1:-${APP:-}} WIN_NAME=${2:-${WIN_NAME:-}} MIN=${KWIN_MIN:-6.7.5-3.69} NAME=${CHECK_NAME:-game-resize}
+APP=${1:-${APP:-}} WIN_NAME=${2:-${WIN_NAME:-}} MIN=${KWIN_MIN:-6.7.5-3.78} NAME=${CHECK_NAME:-game-resize}
 case $APP in ""|*[!0-9]*) echo "usage: game-resize.sh <steam appid> [window name]"; exit 2 ;; esac
 case "$WIN_NAME" in *[!A-Za-z0-9_.-]*) echo "WIN_NAME: one word (letters, digits, _ . -)"; exit 2 ;; esac
 OUT=${OUT:-$HOME/.cache/powos-verify/$NAME-$APP-$(date +%F_%H%M)}; mkdir -p "$OUT"
@@ -115,6 +115,13 @@ probe() {  # probe <label>
 rebase() { I0=$(irq); }
 rotate() { "$A" shell "settings put system accelerometer_rotation 0; settings put system user_rotation $1"; sleep 5; rebase; }
 "$A" shell cmd device_state state 3; rotate 0; touched && { [ "$mine" = 1 ] && stop; exit 3; }
+# Evidence for a G1 miss: the app's surface/consumer lines and KWin's window-task lines of this run. 11-10 07:47/07:53
+# (346010, 557340): after a rotation KWin sized the window to the task's new size bounded by its OLD buffers
+# (taskSize() = task.boundedTo(buffers): 2440x2268 in 2268x2440 -> 2268x2268, cover portrait 1116x1116) and no new
+# consumer went live - logcat had rotated away by the time anyone looked, so it's kept here.
+lc0=$("$A" shell date "'+%m-%d %H:%M:%S.000'" | tr -d '\r'); kl0=$("$A" shell "su -c 'wc -l < /data/powos/root/run/powos-app/hyprland.log'" | tr -d '\r ')
+evidence() { "$A" logcat -d -v time -T "$lc0" -s PowosWindow:I WindowTasks:I Andromarchy:I > "$OUT/logcat.txt" 2>/dev/null
+  "$A" shell "su -c 'tail -n +$((${kl0:-0} + 1)) /data/powos/root/run/powos-app/hyprland.log | grep -E \"window task|app.s screen|output|imported buffer\" | grep -vE \"frames: last|draw: \"'" > "$OUT/kwin.txt" 2>/dev/null; }
 probe unfolded
 rotate 1; log "rotated landscape"; probe unfolded-landscape
 "$A" shell cmd device_state state 0; sleep 6; rebase; log "folded (cover)"; probe folded-landscape
@@ -122,6 +129,7 @@ rotate 0; log "cover portrait"; probe folded-portrait
 touched && { restore; [ "$mine" = 1 ] && stop; exit 3; }
 "$A" shell cmd device_state state 3; sleep 6; rebase; log "unfolded again"; probe unfolded-again
 restore
+evidence
 stop
 "$A" shell "su -c 'rm -f /data/local/tmp/powos-bf-* /data/powos/root/var/tmp/powos-bf-fold-phone.sh /data/powos/root/var/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-bf-xframes.py'"
 log "RESULT $NAME $APP: $([ $fails = 0 ] && echo PASS || echo "FAIL ($fails bad steps)") - window sizes:$sizes; artefacts $OUT"
