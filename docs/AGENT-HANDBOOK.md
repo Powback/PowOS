@@ -151,8 +151,11 @@ column names the file to load; `.claude/skills/<skill>/SKILL.md` has a `## <old-
   job's; artefacts come back with `docker compose cp`. Machine = `POW_JOB_CONTEXT` (a Docker context; default
   `pow58`, read only in `tools/jobs/job.sh`); not answering in 5 s -> the hub, printed as `job: runs on <ctx>`.
   `POW_JOB_CONTEXT=colima` forces the hub (the APK then uses the warm builder). The APK is signed on the hub only
-  (the `android-keystores` key never leaves it). Inside the tier1 job there is no docker socket: the complexity
-  detekt/clippy, loopback-unix and publish-repo tests SKIP.
+  (the `android-keystores` key never leaves it). The tier1 job gets its machine's own engine socket as DOCKER_HOST
+  (.58: rootless podman; the hub: dockerd); its `docker` is `tools/jobs/docker-sibling.sh` (bind mounts copied into
+  the sibling containers), so complexity detekt/clippy, loopback-unix and publish-repo run there. The widget sweep
+  (`shell/dev/preview.sh`) and the JVM tests (`tools/agents/jvm-offload.sh`) are jobs too (gate / apk services):
+  there is no ssh/rsync route to .58 any more (GATE_HOST and offload.sh are gone).
 - Run single tests with `python3 test/tier1/x.py` or `bash test/tier1/x.sh` when they don't need bash 4.
 - Phone checks only via `tools/phone/verify/queue.sh`, with the emulator first (`--dev emu`).
 - Colima's docker socket to mount into containers is `/var/run/docker.sock` (inside the VM); `~/.colima/default/docker.sock` is a Mac-side relay and can't be mounted.

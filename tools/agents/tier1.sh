@@ -15,8 +15,8 @@
 #   POW_JOB_CONTEXT=colima tools/agents/tier1.sh   # on the hub (the Mac's Colima VM)
 #
 # Gotchas baked in (friction f84, f122): SHELL=/bin/bash in the container (script -qec fixtures fall back to dash
-# otherwise, mangling $'...'). The image has no docker socket: the docker-using tests (complexity's detekt/clippy
-# lints, loopback-unix, publish-repo) SKIP on every machine alike - run those directly where docker is.
+# otherwise, mangling $'...'). The job has its machine's engine socket (compose.yml): the docker-using tests (complexity's detekt/clippy
+# lints, loopback-unix, publish-repo) run in it, their containers siblings of the job (tools/jobs/docker-sibling.sh).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

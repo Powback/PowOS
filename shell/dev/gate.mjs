@@ -12890,9 +12890,9 @@ async function desktopsReloaded() {
 // failed (or READY_MS passed), so the checks after boot still run side by side.
 const os = await import("node:os");
 // The load the gate sizes itself from: the larger of the VM's (this container's view) and the Mac's (gate.sh passes
-// GATE_HOST_LOAD/GATE_HOST_CPUS: the docker VM's loadavg misses the agents and builds running on the Mac itself).
-const LOAD = Math.max(os.loadavg()[0], Number(process.env.GATE_HOST_LOAD) || 0);
-const CORES = Math.min(os.cpus().length, Number(process.env.GATE_HOST_CPUS) || Infinity);
+// GATE_LOAD/GATE_CPUS: the docker VM's loadavg misses the agents and builds running on the Mac itself).
+const LOAD = Math.max(os.loadavg()[0], Number(process.env.GATE_LOAD) || 0);
+const CORES = Math.min(os.cpus().length, Number(process.env.GATE_CPUS) || Infinity);
 const BOOTS = Number(process.env.GATE_BOOTS) || Math.max(3, Math.min(12, Math.round(CORES - LOAD + 4)));
 // Scene slots (f30, 10-31): every scene's page used to be opened at once and kept to the end - ~190 live pages, each
 // drawing, polling and evaluating side by side. The boot slots above only spaced out the boots; after that all of them

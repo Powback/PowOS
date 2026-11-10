@@ -35,7 +35,7 @@
 # Exit 0: pass. 1: failed (the reasons on stdout). 2: couldn't run (no docker...). Time: ~5-10 s, the image cached.
 # The browser runs (scenes, retries, --shots) are the gate job of tools/jobs/compose.yml on the Docker context
 # POW_JOB_CONTEXT names (default pow58; unreachable in 5 s: the hub, said so), the composed tree baked into its image;
-# report.json and the PNGs come back to --shots DIR. The widget sweep (dev/preview.sh) still follows GATE_HOST. GATE_ONLY=<regex>: only the browser runs so named (a case worked on alone); GATE_PROFILE=1: a scene that can (ww-resize-cost) also prints a trace's top costs; GATE_SCENE_MS: the per-scene cap. GATE_THROTTLE=N: every page's CPU slowed
+# report.json and the PNGs come back to --shots DIR. The widget sweep (dev/preview.sh) runs its browser passes in the same gate job. GATE_ONLY=<regex>: only the browser runs so named (a case worked on alone); GATE_PROFILE=1: a scene that can (ww-resize-cost) also prints a trace's top costs; GATE_SCENE_MS: the per-scene cap. GATE_THROTTLE=N: every page's CPU slowed
 # N times (a loaded Mac on demand: a case's waits must hold at 6). GATE_IMAGE overrides the Chromium image. Docker's
 # build cache and images are never pruned here.
 set -euo pipefail
@@ -343,7 +343,7 @@ browser_run() {
   fi
   ${GATE_BUILD_SLOT:+"$SHELL_DIR/../tools/agents/build-slot.sh" "gate $base" --} \
   docker run --rm "${gc_flags[@]}" --platform "$PLATFORM" --shm-size 512m $cpu "${mounts[@]}" "${envs[@]}" \
-    ${host_load:+-e GATE_HOST_LOAD="$host_load"} ${host_cpus:+-e GATE_HOST_CPUS="$host_cpus"} \
+    ${host_load:+-e GATE_LOAD="$host_load"} ${host_cpus:+-e GATE_CPUS="$host_cpus"} \
     -w /usr/src/app --entrypoint timeout "$IMAGE" "${gc_cap[@]}" node gate.mjs
 }
 ready_ms=${READY_MS:-$ready_default}

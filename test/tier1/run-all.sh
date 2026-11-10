@@ -94,6 +94,9 @@ for t in "${TESTS[@]}"; do
     # Most suites print a "Results: N passed, M failed" line; surface it.
     summary="$(grep -Eio 'results:[^=]*' <<< "$out" | tail -1 | sed 's/[[:space:]]*$//')"
     [[ -n "$summary" ]] || summary="(no summary; rc=$rc)"
+    # A test that skipped (part of) itself passes with rc 0: say so, or a skip reads as a pass.
+    skip1="$(grep -Em1 '^[[:space:]]*SKIP\b' <<< "$out" | sed 's/^[[:space:]]*//' | cut -c1-90)"
+    [[ -z "$skip1" ]] || summary+=" [$(grep -Ec '^[[:space:]]*SKIP\b' <<< "$out") SKIP: $skip1]"
 
     if (( rc == 0 )); then
         printf '  %s✓%s %-34s %s\n' "$GREEN" "$NC" "$b" "$DIM$summary$NC"

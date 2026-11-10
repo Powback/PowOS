@@ -112,35 +112,46 @@ browser() { # PASS
   local envs=(-e PASS="$1" -e HOST_WORK="$work" -e PREVIEW_THEMES="$themes" \
     -e PREVIEW_LIVE="$live" -e PREVIEW_FAST="$fast" ${only:+-e PREVIEW_ONLY="$only"} ${PREVIEW_EMPTY:+-e PREVIEW_EMPTY="$PREVIEW_EMPTY"} \
     ${PREVIEW_JOBS:+-e PREVIEW_JOBS="$PREVIEW_JOBS"} ${PREVIEW_DEBUG:+-e PREVIEW_DEBUG=1} ${PREVIEW_DEBUG_KEY:+-e PREVIEW_DEBUG_KEY="$PREVIEW_DEBUG_KEY"} ${PREVIEW_BASELINE:+-e PREVIEW_BASELINE="$PREVIEW_BASELINE"})
-  if [ -n "$GR_HOST" ]; then browser_remote "$1" "${envs[@]}"; return; fi
+  if [ -n "$JOB_ON" ]; then browser_job "$1" "${envs[@]}"; return; fi
   docker run --rm "${gc_flags[@]}" --platform "$platform" --shm-size 1g ${GATE_CPU_SHARES:+--cpu-shares "$GATE_CPU_SHARES"} "${mounts[@]}" "${envs[@]}" \
     -w /usr/src/app --entrypoint timeout "$IMAGE" "${gc_cap[@]}" node preview.mjs
 }
-# GATE_HOST=58 / GATE_REMOTE (dev/gate-remote.sh): the browser passes on the remote. The OWL trees between them stay here (the JVM
-# image is the Mac's): /work goes up before each pass and comes back after it, with /out. HOST_WORK stays this $work,
-# the path the local JVM container sees.
-. "$SHELL_DIR/dev/gate-remote.sh"
-gr_init "$IMAGE"
-GR_PREFIX=powos-preview-$$- gr_dir=run/${GATE_REMOTE_ID:-preview}/pv
+# The browser passes run as the gate job (tools/jobs/compose.yml via tools/jobs/job.sh - the one remote route, as
+# dev/gate.sh's scenes): the shell, preview.mjs, the apps and the fonts baked into an image on the Docker context
+# POW_JOB_CONTEXT names (default pow58: .58; not answering within 5 s -> the hub, said so), one container kept up for
+# the three passes. The OWL trees between them stay here (the JVM image is the Mac's): /work goes in before each pass
+# and comes back after it, with /out. HOST_WORK stays this $work, the path the local JVM container sees.
+# A job that can't start, or PREVIEW_LOCAL=1: the local container above.
+. "$SHELL_DIR/../tools/jobs/job.sh"
+JOB_ON="" job_cid="" jc=$work.job
 trap 'exit 130' INT TERM HUP ALRM
-trap '[ "$GATE_PARENT_PID" != $$ ] || gc_kill; gr_cleanup; rm -rf "$work"' EXIT
-browser_remote() { # PASS ENVS...
-  local pass=$1 m; shift
-  m=(-v "@/$gr_dir/shell:/shell:ro" -v "@/$gr_dir/work:/work" -v "@/$gr_dir/out:/out" -v "@/$gr_dir/preview.mjs:/usr/src/app/preview.mjs:ro"
-    -v "@/$gr_dir/work/apps:/apps:ro" -v "@/$gr_dir/font:/targets/android/app/app/src/main/res/font:ro" -v "@/$gr_dir/preview:/shell/dev/preview:ro")
-  if [ "$pass" = plan ]; then
-    gr_push "$S" "$gr_dir/shell" --exclude /node_modules || return 2
-    gr_push "$SHELL_DIR/dev/preview" "$gr_dir/preview" && gr_push "$SHELL_DIR/dev/preview/preview.mjs" "$gr_dir/preview.mjs" &&
-      gr_push "$REPO/targets/android/app/app/src/main/res/font" "$gr_dir/font" --copy-links &&
-      gr_push "$out" "$gr_dir/out" || return 2
-    [ -z "$wallpaper" ] || gr_push "$wallpaper" "$gr_dir/wallpaper.jpg" || return 2
-  fi
-  [ -z "$wallpaper" ] || m+=(-v "@/$gr_dir/wallpaper.jpg:/wallpaper.jpg:ro")
-  gr_push "$work" "$gr_dir/work" || return 2
-  local rc=0
-  gr_run "${GR_PREFIX}$pass" --shm-size 1g ${GATE_CPU_SHARES:+--cpu-shares "$GATE_CPU_SHARES"} "${m[@]}" "$@" \
-    -w /usr/src/app --entrypoint node "$GR_IMAGE" preview.mjs || rc=$?
-  gr_pull "$gr_dir/work" "$work" && gr_pull "$gr_dir/out" "$out" || return 2
+trap '[ "$GATE_PARENT_PID" != $$ ] || gc_kill; job_cleanup; rm -rf "$work" "$jc"' EXIT
+if [ -z "${PREVIEW_LOCAL:-}" ]; then
+  job_init preview
+  # Its own image tag: the gate's scene image of this checkout differs, and job_build drops a tag's previous image.
+  JOB_TAG=$JOB_TAG-preview
+  mkdir -p "$jc/shell" "$jc/app" "$jc/apps" "$jc/fonts" "$jc/in"
+  (cd "$S" && COPYFILE_DISABLE=1 tar --exclude ./node_modules -cf - .) | tar -xf - -C "$jc/shell"
+  # The preview's own page and baseline, from here (as the local mounts: the shell checked may not carry them).
+  rm -rf "$jc/shell/dev/preview" && mkdir -p "$jc/shell/dev" && cp -R "$SHELL_DIR/dev/preview" "$jc/shell/dev/preview"
+  cp "$SHELL_DIR/dev/preview/preview.mjs" "$jc/app/"
+  cp -R "$work/apps/." "$jc/apps/"
+  # shell/fonts/nerd_symbols.ttf links to /targets/.../res/font, which the gate image points at /fonts.
+  cp -L "$REPO"/targets/android/app/app/src/main/res/font/* "$jc/fonts/" 2>/dev/null || true
+  [ -z "$wallpaper" ] || cp "$wallpaper" "$jc/in/wallpaper.jpg"
+  if job_build gate "$jc" && job_cid=$(job_dc run -d --no-deps --entrypoint sleep gate 86400 < /dev/null 2>/dev/null | tail -1) &&
+    [ -n "$job_cid" ] && job_docker exec -u root "$job_cid" sh -c 'mkdir -p /work /out && chown chrome /work /out'; then
+    JOB_ON=1; echo "     browser passes on $JOB_CTX (gate job)"
+  else echo "     the gate job didn't start on $JOB_CTX - browser passes run locally"; job_cleanup; fi
+fi
+browser_job() { # PASS ENVS...
+  local rc=0; shift
+  # In: this $work (the trees the last pass asked for). Out: /work and /out after the pass.
+  job_docker exec -u root "$job_cid" find /work -mindepth 1 -delete || return 2
+  (cd "$work" && COPYFILE_DISABLE=1 tar -cf - .) | job_docker exec -i -u root "$job_cid" sh -c 'tar -xf - -C /work && chown -R chrome /work' || return 2
+  job_docker exec -u chrome -w /usr/src/app "$@" "$job_cid" timeout "${gc_cap[@]}" node preview.mjs < /dev/null || rc=$?
+  { job_docker exec "$job_cid" tar -cf - -C /work . | tar -xf - -C "$work"; } &&
+    { job_docker exec "$job_cid" tar -cf - -C /out . | tar -xf - -C "$out"; } || return 2
   return $rc
 }
 step() { echo "     $1: $(($(date +%s) - t0)) s"; }

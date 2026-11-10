@@ -51,6 +51,13 @@ x-pow:
       cleanup: allowed
       mounts:
         - {service: gate, target: /cache}
+    engine-sock:
+      role: runtime
+      cleanup: never
+      backup: not-applicable
+      note: The job machine's own container engine socket (tier1's sibling test containers); no data.
+      mounts:
+        - {service: tier1, target: /run/engine.sock}
 
 services:
   tier1:
@@ -62,8 +69,20 @@ services:
     mem_limit: 8g
     environment:
       SHELL: /bin/bash
+      DOCKER_HOST: unix:///run/engine.sock
+    # The machine's own engine for the tests that start containers (complexity's detekt/clippy, loopback-unix,
+    # publish-repo): .58's rootless podman socket (Docker API), the hub's dockerd when the job falls back there -
+    # job.sh sets POW_JOB_ENGINE_SOCK per context. Siblings, not nested: tools/jobs/docker-sibling.sh copies bind
+    # sources into them. label=disable: SELinux (enforcing on .58) denies container_t the user's socket otherwise.
+    security_opt:
+      - label=disable
     volumes:
       - npm:/root/.npm
+      - type: bind
+        source: ${POW_JOB_ENGINE_SOCK:-/run/user/1000/podman/podman.sock}
+        target: /run/engine.sock
+        bind:
+          create_host_path: false
     labels:
       io.powos.unit: powos-jobs.tier1
       io.powos.autosleep: never
@@ -78,7 +97,7 @@ services:
     shm_size: 1g
     init: true
     environment:
-      GATE_HOST_CPUS: "10"
+      GATE_CPUS: "10"
     # gate.mjs's transpile cache (by source hash, so never stale).
     volumes:
       - gate-tx:/cache

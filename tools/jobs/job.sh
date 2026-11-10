@@ -44,8 +44,16 @@ job_init() {
   JOB_PROJECT=$(printf %s "$JOB_PROJECT" | tr 'A-Z.' 'a-z_')
 }
 
+# job_engine_sock: the engine's socket as a path ON the job's machine (compose.yml mounts it into the tier1 job):
+# the hub's Colima VM runs dockerd; every other fleet machine rootless podman as uid 1000. POW_JOB_ENGINE_SOCK wins.
+job_engine_sock() {
+  if [ -n "${POW_JOB_ENGINE_SOCK:-}" ]; then echo "$POW_JOB_ENGINE_SOCK"
+  elif [ "$JOB_CTX" = "$(docker context show 2>/dev/null)" ]; then echo /var/run/docker.sock
+  else echo /run/user/1000/podman/podman.sock; fi
+}
+
 job_dc() {
-  DOCKER_BUILDKIT=0 POW_JOB_TAG=$JOB_TAG POW_JOB_SRC=${JOB_SRC:-/nonexistent} \
+  DOCKER_BUILDKIT=0 POW_JOB_TAG=$JOB_TAG POW_JOB_SRC=${JOB_SRC:-/nonexistent} POW_JOB_ENGINE_SOCK=$(job_engine_sock) \
     docker --context "$JOB_CTX" compose -f "$JOBS_COMPOSE" -p "$JOB_PROJECT" "$@"
 }
 job_docker() { docker --context "$JOB_CTX" "$@"; }
