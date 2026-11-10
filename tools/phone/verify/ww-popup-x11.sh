@@ -15,7 +15,10 @@
 set -uo pipefail
 NAME=ww-popup-x11; . "$(dirname "$0")/wwc-lib.sh"
 HY=/data/powos/root/run/powos-app/hyprland.log
-wwc_extra() { ww_us "pkill -f ww-popup-probe.py; rm -f /tmp/wwc-popup.go /tmp/ww-popup-probe.py; true" >/dev/null; }
+# The probe's file is root's (copied in by sh_ below): the session user's rm left it behind on every run (11-10: still
+# in the rootfs's /tmp from 06:28). Its app quits by itself 6 s after the menu, or 120 s after start (the probe's own
+# clock), so a check killed before its EXIT trap still leaves nothing drawn.
+wwc_extra() { ww_us "pkill -f ww-popup-probe.py; true" >/dev/null; sh_ "rm -f /data/powos/root/tmp/wwc-popup.go /data/powos/root/tmp/ww-popup-probe.py /data/powos/root/tmp/wwc-popup.log"; }
 kw=$(ww_us 'pacman -Q kwin' | tail -1)
 kwat() { python3 -c "import sys; r=sys.argv[1].split('-')[-1]; sys.exit(0 if tuple(map(int,r.split('.')))>=tuple(map(int,sys.argv[2].split('.'))) else 1)" "${kw:-x 0-0}" "$1" 2>/dev/null; }
 kwat 3.71 || { echo "SKIP $kw has no 0063 (popups as surfaces need kwin 3.71+)"; exit 3; }

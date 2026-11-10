@@ -31,6 +31,10 @@
 set -uo pipefail
 T=$(cd "$(dirname "$0")/.." && pwd)
 . "$T/verify/ww-lib.sh"
+# KWin's log length at the start: the Steam lines below are this run's only. 11-10 (jobs 034944, 025644): "window task
+# 38 also draws override-redirect ... ww-popup-probe.py popup" read as a probe popup left drawn - it was `tail -3` of
+# the whole log, ww-popup-x11's 06:28 run (that probe had quit; its menu was gone).
+HYL0=$(printf '%s\n' 'wc -l < /run/powos-app/hyprland.log' > "${TMPDIR:-/tmp}/wwg-hy.$$"; "$T/root.sh" "${TMPDIR:-/tmp}/wwg-hy.$$" 2>/dev/null | tr -dc 0-9; rm -f "${TMPDIR:-/tmp}/wwg-hy.$$")
 adb="$T/adb.sh"
 PKG=com.powos.app
 fail=0
@@ -147,7 +151,7 @@ a=[int(v) for v in '$pf0'.split('/')]; b=[int(v) for v in '$pf1'.split('/')]; d=
 print('host: %d applies over the run, pf0..3 = %s (%.0f%% on the draw of their page frame)' % (n, '/'.join(map(str,d)), 100.0*d[0]/n if n else 0))"
 fi
 probe=$(mktemp -d)/steam-popups.sh
-echo 'grep -a "also draws override-redirect" /run/powos-app/hyprland.log | tail -3' > "$probe"
+echo "tail -n +\$(( ${HYL0:-0} + 1 )) /run/powos-app/hyprland.log | grep -a 'also draws override-redirect' | tail -3" > "$probe"
 "$T/root.sh" "$probe" 2>/dev/null | grep -v pushed | sed 's/^/steam: /'
 rm -rf "$(dirname "$probe")"
 [ "$fail" = 0 ] && echo PASS

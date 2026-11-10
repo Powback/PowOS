@@ -57,7 +57,9 @@ bad() { log "FAIL $*"; fail=1; }
 # The steps' deadline (ww-lib.sh's WW_DEADLINE: page calls answer "ERR deadline" past it); a gesture costs ~GEST_S.
 WW_DEADLINE=${WWR_DEADLINE_S:-250}
 export CDP_TIMEOUT_S=${CDP_TIMEOUT_S:-20}
-GEST_S=$(( 60 + 30 * ${WWR_REC:-1} ))
+# 11-10: was 60 + 30 (two pushes and two pulls a gesture, attribution after the KWin wait); now ~25 + 10 - the
+# "time:" line each gesture logs is the measure to set this from.
+GEST_S=$(( 25 + 10 * ${WWR_REC:-1} ))
 . "$here/ww-lib.sh"
 plaunch() { ev "importShim('./state.ts').then(m=>m.launch('$1')).then(()=>'ok',e=>'ERR '+e)"; }
 MINE=""
@@ -73,6 +75,7 @@ restore() {
 }
 . "$here/window-lock.sh"
 window_lock ww-resize.sh 120
+log "time: window lock after ${SECONDS} s"   # 11-10 calc job: 207 s gone before its first gesture, nothing said where
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
 I0=$(irq)
 chk() { [ "$(irq)" = "$I0" ] || { log "STOP: a real touch at $1 - restoring"; exit 3; }; }
@@ -135,15 +138,22 @@ TCFG=$OUT/trace.cfg
 printf '%s\n' 'buffers { size_kb: 32768 fill_policy: RING_BUFFER }' 'buffers { size_kb: 4096 fill_policy: DISCARD }' \
   'data_sources { config { name: "linux.ftrace" ftrace_config { ftrace_events: "sched/sched_switch" ftrace_events: "sched/sched_wakeup" ftrace_events: "power/cpu_frequency" atrace_categories: "gfx" atrace_categories: "view" atrace_categories: "webview" atrace_categories: "input" atrace_apps: "com.powos.app" } } }' \
   'data_sources { config { name: "android.surfaceflinger.frametimeline" } }' \
+  'data_sources { config { name: "track_event" track_event_config { enabled_categories: "cc" enabled_categories: "viz" enabled_categories: "gpu" enabled_categories: "blink" enabled_categories: "skia" enabled_categories: "benchmark" enabled_categories: "disabled-by-default-cc.debug" disabled_categories: "*" } } }' \
   'data_sources { config { name: "linux.process_stats" target_buffer: 1 process_stats_config { scan_all_processes_on_start: true } } }' \
   'duration_ms: 10000' > "$TCFG"
+# 11-10 speed (a gesture took ~90 s): the config goes to the phone ONCE, through adb shell's stdin (an adb.sh push is a
+# throwaway container, ~6 s each, two a gesture); the trace comes back gzip'd over exec-out (a pull was ~6 s of
+# container plus 7-9 MB at ~2 MB/s; gzip -1 makes it ~1/3), and the stop waits for perfetto to exit, not 1.2 s.
+# track_event: WebView's own Chromium slices (cc raster, viz draw, blink paint) - the "webview" atrace category gave
+# none inside WebViewFunctor::drawGl (11-10 0639 trace: 0 descendants), so which work drawGl waits on was unnamed.
+cfg_sent=0
 trace_on() { [ "$TRACE" = 1 ] || return 0
-  "$A" push "$TCFG" /data/local/tmp/wwr-trace.cfg >/dev/null 2>&1
-  sh_ "rm -f /data/misc/perfetto-traces/wwr.pftrace; cat /data/local/tmp/wwr-trace.cfg | perfetto --txt -c - -o /data/misc/perfetto-traces/wwr.pftrace --background" >/dev/null; sleep 0.6; }
+  [ "$cfg_sent" = 1 ] || { "$A" shell "su -c 'cat > /data/local/tmp/wwr-trace.cfg'" < "$TCFG" >/dev/null 2>&1; cfg_sent=1; }
+  sh_ "rm -f /data/misc/perfetto-traces/wwr.pftrace; perfetto --txt -c /data/local/tmp/wwr-trace.cfg -o /data/misc/perfetto-traces/wwr.pftrace --background" >/dev/null; sleep 0.4; }
 trace_off() { [ "$TRACE" = 1 ] || return 0
-  sh_ "pkill -INT -f wwr.pftrace"; sleep 1.2
-  sh_ "cp /data/misc/perfetto-traces/wwr.pftrace /data/local/tmp/wwr.pftrace; chmod 644 /data/local/tmp/wwr.pftrace"
-  "$A" pull /data/local/tmp/wwr.pftrace "$1" >/dev/null 2>&1 || rm -f "$1"; sh_ "rm -f /data/local/tmp/wwr.pftrace"; }
+  sh_ "pkill -INT -f wwr.pftrace; for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do pgrep -f wwr.pftrace >/dev/null || break; sleep 0.1; done"
+  "$A" exec-out "su -c 'gzip -1 -c /data/misc/perfetto-traces/wwr.pftrace; rm -f /data/misc/perfetto-traces/wwr.pftrace'" 2>/dev/null | gunzip > "$1" 2>/dev/null
+  [ -s "$1" ] || rm -f "$1"; }
 # attrib <tag>: resize-trace.py's lines for that way's trace (verdict first), the CSV beside it.
 attrib() { [ -s "$OUT/$1.pftrace" ] || { echo "verdict: no trace"; return; }
   uvx -q --with perfetto python3 "$here/resize-trace.py" "$OUT/$1.pftrace" "$OUT/$1-frames.csv" 2>&1 | tail -8; }
@@ -179,13 +189,14 @@ print("; ".join(dict.fromkeys(out)))' "$1"; }
 record() {
   local x1=$1 y1=$2 x2=$3 y2=$4 tag=$5 sl=$6 st=$7 sr=$8 sb=$9
   sh_ "rm -f /data/local/tmp/wwr.mp4"
-  "$A" shell "su -c 'screenrecord --bit-rate 30000000 --time-limit 4 /data/local/tmp/wwr.mp4'" >/dev/null 2>&1 &
+  # 8 Mbit/s (was 30): the check reads a 96 px wide gray crop; the file comes back over exec-out, not a pull (11-10).
+  "$A" shell "su -c 'screenrecord --bit-rate 8000000 --time-limit 3 /data/local/tmp/wwr.mp4'" >/dev/null 2>&1 &
   local rp=$!
-  sleep 0.8
-  sh_ "input swipe $x1 $y1 $x2 $y2 700"; sleep 0.25; sh_ "input swipe $x2 $y2 $x1 $y1 700"
-  wait "$rp"; sleep 0.5
-  sh_ "chmod 644 /data/local/tmp/wwr.mp4"
-  "$A" pull /data/local/tmp/wwr.mp4 "$OUT/$tag.mp4" >/dev/null 2>&1 || { echo "no recording"; return; }
+  sleep 0.6
+  sh_ "input swipe $x1 $y1 $x2 $y2 700; sleep 0.25; input swipe $x2 $y2 $x1 $y1 700"
+  wait "$rp"
+  "$A" exec-out "su -c 'cat /data/local/tmp/wwr.mp4; rm -f /data/local/tmp/wwr.mp4'" > "$OUT/$tag.mp4" 2>/dev/null
+  [ -s "$OUT/$tag.mp4" ] || { echo "no recording"; return; }
   python3 - "$OUT/$tag.mp4" "$sl" "$st" "$sr" "$sb" "$SW" <<'PY'
 import subprocess, sys, json
 f, l, t, r, b, sw = sys.argv[1], *map(int, sys.argv[2:])
@@ -243,6 +254,7 @@ for app in $APPS; do
   case $app in calc) CL=$(layer "${CALC//./\\.}/") ;; *) CL=$(layer "\\[BBQ\\] powos-ww-$n-linux") ;; esac
   c=$(wwclear "$id"); [ "$c" = ok ] || { bad "$app: placing $id clear of the others: $c"; continue; }
   sleep 1
+  setup_s=$SECONDS
   log "== $app: window $id ($key), home layer '$HL', content layer '$CL', body $(wwbody "$id")"
   for g in edge corner; do
     case $g in edge) zone=.ww-edge-e; dx=-300; dy=0 ;; corner) zone=.ww-edge-se; dx=-300; dy=-200 ;; esac
@@ -255,7 +267,7 @@ for app in $APPS; do
     hit=$(wwhit "$id" "$zone" "$px" "$py")
     [ "$hit" = ok ] || { bad "$app $g: a press on its $zone at $px,$py isn't its resize: $hit - nothing measured"; continue; }
     read -r bl bt br bb <<<"$(wwbody "$id")"
-    k0=$(klines)
+    k0=$(klines); g0=$SECONDS
     sh_ "dumpsys gfxinfo com.powos.app reset" >/dev/null
     way "$px" "$py" $((px + dx)) $((py + dy)) "$app-$g-in"
     sleep 0.25
@@ -266,8 +278,11 @@ for app in $APPS; do
     # The drag resized THIS window: its body's size followed the finger at least half its way.
     ow=$(( (br - bl) - (${b2r:-$br} - ${b2l:-$bl}) )); oh=$(( (bb - bt) - (${b2b:-$bb} - ${b2t:-$bt}) ))
     [ $((ow * 2)) -ge $((-dx)) ] && [ $((oh * 2)) -ge $((-dy)) ] || bad "$app $g: the drag didn't resize it (body $bl $bt $br $bb -> ${b2l:-?} ${b2t:-?} ${b2r:-?} ${b2b:-?})"
+    # The traces' attribution runs on the Mac while KWin's next frame line comes (11-10: it ran after the wait, serially).
+    gend=$SECONDS
+    for w_ in in out; do attrib "$app-$g-$w_" > "$OUT/.attrib-$w_" & done
     # KWin writes its frame line every 5 s: one covering the gesture's end is out by then.
-    [ "$app" = calc ] && sleep 1.5 || sleep 5.2; chk "$app $g"
+    wait_s=$([ "$app" = calc ] && echo 1.5 || echo 5.2); sleep "$(python3 -c "import sys; print(max(0.0, float(sys.argv[1]) - (int(sys.argv[2]) - int(sys.argv[3]))))" "$wait_s" "$SECONDS" "$gend")"; chk "$app $g"
     gfx=$(sh_ "dumpsys gfxinfo com.powos.app")
     jank=$(echo "$gfx" | grep -m1 'Janky frames:' | sed -E 's/.*Janky frames: ([0-9]+) \(([0-9.]+)%\).*/\1 (\2%)/')
     p90=$(echo "$gfx" | grep -m1 '90th percentile' | grep -oE '[0-9]+ms'); p99=$(echo "$gfx" | grep -m1 '99th percentile' | grep -oE '[0-9]+ms')
@@ -278,7 +293,8 @@ for app in $APPS; do
     hostl=$(grep -aE "window $n: (resize:|body outgrew)" "$OUT/logcat.txt" | tail -2 | sed -E 's/.*(window [0-9]+: )/\1/' | tr '\n' ';')
     line="$app $g: shell in $hi frames $mi missed ($li late, $di held; longest ${xi} ms), out $ho frames $mo missed ($lo late, $do_ held; longest ${xo} ms); gfxinfo janky ${jank:-?} p90 ${p90:-?} p99 ${p99:-?} | content in $ci frames (max gap ${cxi} ms), out $co (max gap ${cxo} ms) | kwin commits/drawn $kw, ${kr:-no resize line} | host $hostl"
     log "$line"; echo "$line" >> "$OUT/summary.txt"
-    for w_ in in out; do attrib "$app-$g-$w_" | sed "s/^/$app $g $w_ trace: /" | tee -a "$OUT/summary.txt" >> "$OUT/log.txt"; done
+    wait
+    for w_ in in out; do cat "$OUT/.attrib-$w_" | sed "s/^/$app $g $w_ trace: /" | tee -a "$OUT/summary.txt" >> "$OUT/log.txt"; done
     grep -h "^$app $g .* trace: verdict" "$OUT/summary.txt" | sed 's/^/  /'
     load=$(cpu_load "$app" "$app $g")
     [ $((mi + mo)) -gt 0 ] && bad "$app $g: $((mi + mo)) missed shell vsyncs while the finger moved (want 0)${load:+ - load: $load}"
@@ -292,8 +308,11 @@ for app in $APPS; do
       rec=$(record "$px" "$py" $((px + dx)) $((py + dy)) "$app-$g" $((bl + 24)) $((bt + 24)) $((br + dx - 24)) $((bb + dy - 24)))
       log "$app $g record: $rec"; echo "$app $g record: $rec" >> "$OUT/summary.txt"
       case $rec in *" 0 blank"*) ;; *blank*) bad "$app $g: blank frames in the window ($rec)" ;; esac
-      sleep 1; chk "$app $g record"
+      chk "$app $g record"
     fi
+    # The step's own time (11-10: ~90 s a gesture - two adb.sh pushes, two 7-9 MB pulls, the attribution after the
+    # wait; the user's bar is a few seconds a step): the drag's two ways, and the whole gesture with its record pass.
+    log "time: $app $g ways $((gend - g0)) s, gesture $((SECONDS - g0)) s (setup before the first: ${setup_s:-?} s)"
   done
 done
 # Closed windows leave no layer behind: each Linux window's content ("powos-ww-N-linux") and its BLAST queue
