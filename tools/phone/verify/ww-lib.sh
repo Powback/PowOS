@@ -16,7 +16,11 @@ ev() { "$T/cdp.sh" eval "${2:-home}" "$1" 2>/dev/null | tr -d '\r' | tail -1 | p
 hcall_once() {
   ev "new Promise(ok=>{const h=window.__powosHost,P=window.PowosHost;if(!h||!P||!P.postMessage)return ok('ERR no bridge');const r=h.resolve,j=h.reject,id=930300+Math.floor(Math.random()*9000);const done=v=>{h.resolve=r;h.reject=j;ok(v)};h.resolve=(i,v)=>i===id?done(v):r(i,v);h.reject=(i,m)=>i===id?done('ERR '+m):j(i,m);setTimeout(()=>done('ERR no answer'),8000);P.postMessage(JSON.stringify([id,'$1',JSON.stringify($2)]))}).then(v=>typeof v==='string'&&v.startsWith('ERR')?v:String(($3)(v)))"
 }
-hcall() { local v i; for i in 1 2 3 4; do v=$(hcall_once "$@"); case $v in ""|"cdp: adb"*|*"isn't running"*|"no page"*) sleep 2 ;; *) echo "$v"; return ;; esac; done; echo "ERR no answer (${v:-empty})"; }
+# WW_DEADLINE (a $SECONDS value, set by wwc-lib.sh): past it a call answers "ERR deadline" at once - a hidden home page
+# (another activity in front) answers no call, and 4 tries x the CDP timeout per poll spent switcher-launch's whole
+# 300 s budget in ww_open's wait (11-10 03:35 job) with no line saying where.
+ww_late() { [ -n "${WW_DEADLINE:-}" ] && [ "$SECONDS" -ge "$WW_DEADLINE" ]; }
+hcall() { local v i; for i in 1 2 3 4; do ww_late && { echo "ERR deadline"; return; }; v=$(hcall_once "$@"); case $v in ""|"cdp: adb"*|*"isn't running"*|"no page"*) sleep 2 ;; *) echo "$v"; return ;; esac; done; echo "ERR no answer (${v:-empty})"; }
 # Web windows (W1, docs/WEB_WINDOWS.md): their ids are "w<id>" here (the page's data-wwid), task ids stay plain numbers.
 # The truth is the host's list (webwindows.list: key "a:<drawer key>"/"l:<app>", state, task) and the page's element
 # (.webwindow[data-wwid]: where it is on screen now, device px). WWRECTS: every web window shown on screen, "l t r b,...".
@@ -63,6 +67,7 @@ ww_open() { local key=$1 s=$2 before r n="" i live=""
   before=$(wwids "$key")
   r=$(hcall apps.launch "['$key']" "()=>'ok'"); [ "$r" = ok ] || { echo "apps.launch $key: $r"; return 1; }
   for i in $(seq 1 "$s"); do
+    ww_late && { echo "no live $key window by the check's deadline (window ${n:-none} ${live:-})"; return 1; }
     sleep 1
     [ -n "$n" ] || n=$(comm -13 <(echo "$before") <(wwids "$key") | head -1)
     [ -n "$n" ] || continue

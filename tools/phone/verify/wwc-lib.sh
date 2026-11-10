@@ -14,7 +14,13 @@ T=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 A="$T/adb.sh"
 OUT=${OUT:-$HOME/.cache/powos-verify/$NAME-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
 NF=0 MINE_W="" MINE_P="" UNFOLDED=0 T0=0
-say() { echo "$*" | tee -a "$OUT/log.txt"; }
+# Every page call bounded (cdp.sh's default is 120 s) and the steps cut at WWC_DEADLINE_S (ww-lib.sh's WW_DEADLINE:
+# calls answer "ERR deadline" past it), so the verdict and the clean-up land inside the queue's 300 s budget and the
+# log says which step ran out - never a bare "FAIL timeout" (switcher-launch, 11-10 03:35: ww_open polled a hidden
+# home page for 5 min). Each line carries the check's elapsed seconds.
+export CDP_TIMEOUT_S=${CDP_TIMEOUT_S:-20}
+WW_DEADLINE=${WWC_DEADLINE_S:-230}
+say() { echo "$* [${SECONDS}s]" | tee -a "$OUT/log.txt"; }
 sh_() { "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
 bad() { say "FAIL $*"; NF=$((NF + 1)); }
 wwc_skip() { say "SKIP $*"; wwc_clean; exit 3; }
@@ -24,6 +30,7 @@ touched() { local i; i=$("$T/idle.sh" | sed -nE 's/.*idle=([0-9]+).*/\1/p'); [ -
 # moves the touch IRQs with no finger, which touched() would read as the user.
 fold() { sh_ "echo \$(( \$(date +%s) + 8 )) > /data/local/tmp/powos-selfinput; cmd device_state state $1"; }
 wwc_clean() { local w p
+  WW_DEADLINE=$((SECONDS + 40))   # the clean-up's own calls, past the steps' deadline
   for w in $MINE_W; do ww_close "$w"; done; [ -n "$MINE_W" ] && sleep 1.5
   for p in $MINE_P; do ww_us "pkill -x '$p'; true" >/dev/null; done
   declare -F wwc_extra >/dev/null && wwc_extra
@@ -54,6 +61,7 @@ wwc_open() { MINE_P="$MINE_P $1"   # not in $(...): MINE_* must stay set for wwc
   MINE_W="$MINE_W $WID"; say "opened $1 as $WID"; }
 wwc_ses() { ww_us "P=\$(pgrep -x plasmashell | head -1); while IFS= read -r -d '' kv; do export \"\$kv\"; done < /proc/\$P/environ; $1"; }
 wwc_end() {
+  ww_late && bad "deadline: the steps ran past ${WWC_DEADLINE_S:-230} s (page calls that never answered - the lines above say where)"
   if [ "$NF" = 0 ]; then say "PASS $NAME: $*"; exit 0; fi
   touched && { say "STOP: a real touch during the run - not judged, stays queued"; exit 3; }
   "$T/shot.sh" "$OUT/fail.png" >/dev/null 2>&1; say "RESULT $NAME: FAIL ($NF) - $OUT"; exit 1; }

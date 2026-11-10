@@ -925,7 +925,7 @@ EOS
           if [ "$kind" = precond ]; then
             pt=$(rc3_precond "$j")
             if [ "${pt:-0}" -ge "${QUEUE_PRECOND_MAX:-3}" ]; then
-              why3=$(grep -E '^(INVALID|SKIP|FAIL)' "$log" | tail -1 | cut -c1-160)
+              why3=$(grep -E '^([0-9:]+ )?(INVALID|SKIP|FAIL)' "$log" | tail -1 | sed -E 's/^[0-9:]+ //' | cut -c1-160)
               echo "FAIL precondition: ${why3:-exit 3 with no reason line} - $pt tries of $((t1 - t0)) s with nobody on the phone (each try: done/$n.log.tries)" >> "$log"
               echo "$(date +%T) $n: rc 3 with the phone idle $pt times (its setup fails, not a touch) - FAIL precondition, no more retries"
               rc=1; pfinal=1
@@ -962,7 +962,8 @@ EOS
         # the check's first verdict line saying "SKIP:" -> SKIP. Only rc 1 (and other real non-zero rcs) and timeouts FAIL.
         skipwhy=
         if [ $envskip = 0 ] && [ "$why" != timeout ]; then
-          if [ $rc = 5 ]; then skipwhy="test error (rc 5): $(grep -m1 -E '^(SKIP|ENV|FAIL)' "$log" | cut -c1-120)"
+          # A check's reason line may carry its own clock ("04:46:36 SKIP: ...", window-task-ime's log()): read past it.
+          if [ $rc = 5 ]; then skipwhy="test error (rc 5): $(grep -m1 -E '^([0-9:]+ )?(SKIP|ENV|FAIL)' "$log" | sed -E 's/^[0-9:]+ //' | cut -c1-120)"
           elif [ $rc = 137 ] || [ $rc = 143 ]; then skipwhy="killed (rc $rc)"
           elif grep -m1 -E '^(PASS|FAIL|SKIP)' "$log" | grep -q '^SKIP:'; then skipwhy="$(grep -m1 '^SKIP:' "$log" | cut -c7-126)"; fi
         fi

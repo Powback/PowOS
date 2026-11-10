@@ -38,7 +38,10 @@ tbounds() { sh_ "am stack list | grep -E \"taskId=$1[^0-9]\"" | grep -oE 'bounds
 
 . "$here/window-lock.sh"
 window_lock window-task-ime.sh 120
-STARTED=0; KT=""
+STARTED=0; KT="" WHY=""
+# skip <why>: SKIP (rc 5) with its reason as the run's LAST line (after restore's own lines), unstamped - queue.sh
+# reads "SKIP ..." from the line start (11-10 04:13 job: "04:46:36 SKIP: ..." then "restored; ..." gave an empty reason).
+skip() { WHY="SKIP: $*"; log "$WHY"; exit 5; }
 restore() {
   [ "$(ime)" = true ] && sh_ "input keyevent KEYCODE_BACK"
   if [ $STARTED = 1 ]; then
@@ -48,22 +51,26 @@ restore() {
   sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"
   echo "restored; artefacts $OUT"
 }
-trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
+trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"; [ -z "$WHY" ] || echo "$WHY"' EXIT
 I0=$(irq)
 chk() { [ "$(irq)" = "$I0" ] || { log "STOP: a real touch at $1 - restoring"; exit 3; }; }
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { log "the screen is $s - not woken (rule); nothing done"; exit 3; }
 if sh_ "dumpsys window policy | grep -m1 mIsShowing=" | grep -q true; then
   sh_ "wm dismiss-keyguard"; sleep 1.5
-  sh_ "dumpsys window policy | grep -m1 mIsShowing=" | grep -q true && { echo "ENV: the keyguard is up"; exit 5; }
+  sh_ "dumpsys window policy | grep -m1 mIsShowing=" | grep -q true && { WHY="ENV: the keyguard is up"; echo "$WHY"; exit 5; }
 fi
 
 # 1. Deployed? Not now?
-rs "k=\$(pgrep -x kwin_wayland | head -1); [ -n \"\$k\" ] && ! grep -q 'libkwin.*(deleted)' /proc/\$k/maps && grep -aq 'window-ime' /usr/lib/libkwin.so.6 && echo yes" | grep -q yes \
-  || { log "SKIP: the running KWin has no window-ime cap (pkgs/kwin 0043 not in the running session)"; exit 5; }
+# The caps list is one QStringLiteral: UTF-16 in the binary, so a plain grep never found "window-ime" (11-10 04:13: a
+# SKIP on KWin 6.7.5-3.77, which has it) - the NULs dropped first.
+kc=$(rs "k=\$(pgrep -x kwin_wayland | head -1); [ -n \"\$k\" ] || { echo none; exit; }; grep -q 'libkwin.*(deleted)' /proc/\$k/maps && { echo stale; exit; }; LC_ALL=C tr -d '\\000' < /usr/lib/libkwin.so.6 | LC_ALL=C grep -aq 'window-ime' && echo yes || echo nocap" | tail -1)
+case $kc in yes) ;; none) skip "KWin isn't running in the session" ;;
+  stale) skip "the running KWin is an older build than the installed one (libkwin deleted under it) - not restarted since the update" ;;
+  *) skip "the running KWin has no window-ime cap (pkgs/kwin 0043 not in the installed libkwin; rs said: ${kc:-nothing})" ;; esac
 [ -z "$(us "pgrep -x $APP" | tail -1)" ] || { log "$APP already runs (maybe the user's): not now"; exit 3; }
 us "command -v powos-open-task >/dev/null && command -v $APP >/dev/null && echo ok" | grep -q ok \
-  || { log "SKIP: powos-open-task or $APP isn't installed in the session"; exit 5; }
+  || skip "powos-open-task or $APP isn't installed in the session"
 log "apk $(sh_ "dumpsys package com.powos.app | grep -m1 versionName" | sed 's/ *//'), kwin $(us 'pacman -Q kwin' | tail -1)"
 
 # 2. Its own task, the drawer's way.
