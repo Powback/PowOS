@@ -98,7 +98,10 @@ px() { awk -v v="$1" -v s="$SCALE" 'BEGIN{printf "%d", v * s}'; }
 py() { echo $(( $(px "$1") + TOP )); }
 desk_top() {  # $1 a kwin_q tag -> TOP (physical px above the desktop's output)
   local sh oh; sh=$(sh_ "wm size" | tail -1 | sed 's/.*x//'); oh=$(grep -a '^PMS|' "$OUT/kwin-$1.txt" | cut -d'|' -f4 | cut -d, -f2)
-  TOP=0; [ -n "$sh" ] && [ -n "$oh" ] && TOP=$(awk -v s="$sh" -v h="$oh" -v k="$SCALE" 'BEGIN{t=s-int(h*k+0.5); printf "%d", t>0?t:0}')
+  # The ternary is parenthesized: macOS awk reads `printf "%d", t>0?...` as an output redirect, a syntax error that
+  # left TOP empty, so py() added nothing and the 11-10 05:01 drag still hit the desktop above Kate (plasma-down).
+  TOP=0; [ -n "$sh" ] && [ -n "$oh" ] && TOP=$(awk -v s="$sh" -v h="$oh" -v k="$SCALE" 'BEGIN{t=s-int(h*k+0.5); printf "%d", (t>0?t:0)}')
+  [[ "$TOP" =~ ^[0-9]+$ ]] || { fail "the desktop's top offset is no number ('$TOP', screen h '$sh', output h '$oh')"; TOP=0; }
 }
 active() { grep -a '^PMS|' "$OUT/kwin-$1.txt" | cut -d'|' -f5; }
 
