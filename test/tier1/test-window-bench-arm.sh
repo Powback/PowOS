@@ -46,5 +46,14 @@ case $v in [2-5][0-9]) ok "a prompt tap: $v ms" ;; *) bad "a prompt tap: '$v'" ;
 # Control: the old rule (limit from the arming, 2 s) reads "-" for the late tap - the check can fail.
 old=${js//n-t0>3000:n-t1>30000/n-t1>2000:n-t1>2000}
 v=$(node "$T/run.js" 2500 "$old")
-[ "$v" = - ] && ok "control: limit-from-arming reads '-' for the late tap" || bad "control: old rule gave '$v', not '-'"
+case $v in -*) true ;; *) false ;; esac && ok "control: limit-from-arming reads '-' for the late tap" || bad "control: old rule gave '$v', not '-'"
+# The hard deadline (11-10 p2 part 2 was killed at 300 s): the watchdog kills a blocking $(...) call with its children
+# and the USR1 trap runs at once - a 30 s call under a 2 s deadline ends in ~2 s.
+{ echo 'T0S=$SECONDS; BENCH_HARD_S=2'
+  echo 'hard_stop() { trap - USR1 EXIT; echo "stopped $((SECONDS - T0S))"; exit 1; }'; echo 'trap hard_stop USR1'
+  sed -n '/^( sleep \$((BENCH_HARD_S/,/^WDOG=/p' "$B"
+  echo 'v=$(sleep 30; echo late); echo "not stopped: $v"'; } > "$T/wd.sh"
+grep -q 'kill -USR1' "$T/wd.sh" || bad "watchdog block not found in window-bench.sh"
+t0=$SECONDS; o=$(bash "$T/wd.sh" 2>&1); dt=$((SECONDS - t0))
+case $o in stopped*) [ $dt -le 6 ] && ok "hard deadline: a blocking call stopped in $dt s ($o)" || bad "hard deadline: stopped only after $dt s" ;; *) bad "hard deadline: '$o' after $dt s" ;; esac
 exit $fail

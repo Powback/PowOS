@@ -30,6 +30,8 @@
 # Parts (11-10): the whole bench is ~2x the queue's 300 s budget, so every queued run timed out without a verdict. As
 # `--round R --part K --of 4` it runs as four jobs that each fit, same round folder (e2e-lib's parts):
 #   1 storm | 2 open gestures switch close | 3 open rotate fold close | 4 five       (--phases "..." picks any set)
+# --of 6 (11-10, use this): 1 storm | 2-3 open gestures, half the apps each | 4 open switch close | 5 open rotate
+# fold close | 6 five. Soft budget 210 s, hard stop 275 s (below).
 # Each part also keeps its own clock (BENCH_BUDGET_S, 255 s from the start, the restore's time left): a phase that
 # would start past it is a FAIL naming it, the storm stops starting cycles at it (FAIL: k of N cycles in budget), and
 # three launches in a row that never go live end the storm (FAIL) - 20 s each was what ate the budget on 11-07/08.
@@ -49,11 +51,21 @@ e2e_args ${ARGS[@]+"${ARGS[@]}"}
 PHASES=${PHASES:-}
 for ((i = 0; i < ${#ARGS[@]}; i++)); do [ "${ARGS[$i]}" = --phases ] && PHASES=${ARGS[$((i + 1))]:-}; done
 if [ -z "$PHASES" ]; then
-  if [ "$LAST" = 4 ]; then case $PART in 1) PHASES=storm ;; 2) PHASES="open gestures switch close" ;;
+  # Six parts (11-10 p2): at Mac load ~35 one gesture round took 56-76 s, so part 2 of four (open, gestures for every
+  # app, switch, close) could not fit; gestures now run in two parts over half the apps each (GHALF).
+  if [ "$LAST" = 6 ]; then case $PART in 1) PHASES=storm ;; 2) PHASES="open gestures"; GHALF=1 ;; 3) PHASES="open gestures"; GHALF=2 ;;
+    4) PHASES="open switch close" ;; 5) PHASES="open rotate fold close" ;; 6) PHASES=five ;; *) echo "bad --part $PART of 6"; exit 2 ;; esac
+  elif [ "$LAST" = 4 ]; then case $PART in 1) PHASES=storm ;; 2) PHASES="open gestures switch close" ;;
     3) PHASES="open rotate fold close" ;; 4) PHASES=five ;; *) echo "bad --part $PART of 4"; exit 2 ;; esac
   else PHASES="storm open gestures switch rotate fold close five"; fi
 fi
-BENCH_BUDGET_S=${BENCH_BUDGET_S:-255}; T0S=$SECONDS
+# The part's clocks, from the script's start: no new item after BENCH_BUDGET_S (soft: a FAIL naming what was not
+# started), and a hard stop at BENCH_HARD_S. The end (restore_bench, e2e_finish's restore, end shot, layout check,
+# publish) took > 43 s at Mac load ~35 (11-10 p2 part 2: work ended 257 s in, the queue killed it at 300 s), so the soft
+# budget leaves 90 s. The hard stop is the backstop for one blocking call that runs long: a watchdog kills the running
+# call and the script ends with a FAIL naming the step, the windows it opened closed in one host call - never the
+# queue's 300 s kill.
+BENCH_BUDGET_S=${BENCH_BUDGET_S:-210}; BENCH_HARD_S=${BENCH_HARD_S:-275}; T0S=$SECONDS; GHALF=${GHALF:-0}
 # room <what> <s>: budget left to start one more item of a phase loop that should take <s> s (the last one's length);
 # else a FAIL naming it. phase() alone checked only a phase's start, so part 2's five 35-50 s gesture rounds ran past
 # the 300 s kill with no verdict (11-10 05:35, "FAIL timeout at step: gestures settings").
@@ -188,7 +200,27 @@ restore_bench() {
 
 e2e_setup inner
 START=$(sh_ "date +\"%m-%d %H:%M:%S\""); H0=$(sh_ "wc -l < $HYPR"); H0=${H0:-0}
-trap 'restore_bench; e2e_abort' EXIT
+trap 'restore_bench; e2e_abort; [ -n "${WDOG:-}" ] && kill "$WDOG" 2>/dev/null' EXIT
+# hard_stop: the watchdog's USR1 (after it killed the running call): the FAIL, the windows closed in one call, rotation
+# and the lock put back, the steps published - no end screenshot or full restore (those are what ran out of time).
+hard_stop() {
+  trap - USR1 EXIT
+  fail "hard deadline: ${BENCH_HARD_S} s reached in step '${PHASE:-?}' - stopped there; the part's last items are not judged"
+  [ -n "$MINEW" ] && CDP_TIMEOUT_S=8 ev "importShim('./bridge.ts').then(b=>Promise.all([$(echo $MINEW | sed 's/w//g; s/ /,/g')].map(i=>b.powos.webwindows.close(i)))).then(()=>'ok')" >/dev/null 2>&1
+  [ "${OCON:-0}" = 1 ] && sh_ "setprop debug.powos.ww_order_check 0"
+  [ -n "$ROT0" ] && { set -- $ROT0; sh_ "settings put system accelerometer_rotation $1; settings put system user_rotation $2"; }
+  publish; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"
+  echo "FAIL e2e-$JOURNEY round $ROUND part $PART/$LAST: $NPASS passed, $NFAIL failed - hard deadline ${BENCH_HARD_S} s in '${PHASE:-?}' - $UDIR"
+  print_fails; exit 1
+}
+trap hard_stop USR1
+# The watchdog: at BENCH_HARD_S from the start, kill the script's running calls with all their descendants (killing
+# only a $(...) subshell left its child holding the pipe, so the call never returned; not the watchdog itself),
+# then USR1 (bash runs the trap once the foreground call has returned).
+( sleep $((BENCH_HARD_S - (SECONDS - T0S))); me=$(exec sh -c 'echo $PPID')
+  k=$(pgrep -P $$ | grep -vx "$me"); all=$k; while [ -n "$k" ]; do k=$(for c in $k; do pgrep -P "$c"; done); all="$all $k"; done
+  kill $all; kill -USR1 $$ ) >/dev/null 2>&1 &
+WDOG=$!
 [ "$(hcall webwindows.list "[]" "l=>'ok'")" = ok ] || { echo "ENV: home has no web windows here (folded, off)"; exit 5; }
 # "[s]team_app_", not steam_app_: pgrep -f matched the su/sh wrapping its own command line (it carries the pattern), so
 # every run SKIPped "a game runs: not now" with no game up (11-07). The bracket keeps the pattern out of that line.
@@ -202,6 +234,11 @@ RUN=""; for a in $APPS; do
   RUN="$RUN $a"; eval "KEY_$a=\$k"
 done
 [ -n "$RUN" ] || { echo "ENV: no app to bench"; exit 5; }
+# Gestures over half the apps (parts 2 and 3 of six): the first half rounded up, or the rest.
+if [ "$GHALF" != 0 ]; then set -- $RUN; h=$((($# + 1) / 2))
+  if [ "$GHALF" = 1 ]; then RUN=$(echo $RUN | cut -d' ' -f1-$h); else [ $# -gt $h ] && RUN=$(echo $RUN | cut -d' ' -f$((h + 1))-) || RUN=""; fi
+  [ -n "$RUN" ] || { echo "ENV: no app left for this half (GHALF $GHALF)"; exit 5; }
+fi
 log "apps: $RUN"
 
 # 0. THE STORM (the user 11-07: "rapidly opening and closing apps seeing how responsive everything is measuring
@@ -228,7 +265,7 @@ leakstate() {   # "pagewins hostwins wwlayers tasks pss_kb"
 # the tap (offpill's dumpsys, `input tap`'s start) took > 2 s, so every storm close read "-" (11-10 p1: "close - ms"
 # in both cycles). A newer arming of the same var ends the older one (no late write into the next measurement).
 arm_js() {
-  printf '%s' "(()=>{const V='$1',A=(window.__wbArm=window.__wbArm||{}),g=(A[V]=(A[V]||0)+1),C=$2;window[V]=null;let t0=0;const d=e=>{t0=e.timeStamp};document.addEventListener('pointerdown',d,{capture:true,once:true});const t1=performance.now();const end=v=>{document.removeEventListener('pointerdown',d,{capture:true});if(A[V]===g)window[V]=v};(async()=>{for(;;){if(A[V]!==g)return;if(t0&&await C())return end(String(Math.round(performance.now()-t0)));const n=performance.now();if(t0?n-t0>${3:-2000}:n-t1>30000)return end('-');await new Promise(r=>requestAnimationFrame(r))}})();return 'armed'})()"
+  printf '%s' "(()=>{const V='$1',A=(window.__wbArm=window.__wbArm||{}),g=(A[V]=(A[V]||0)+1),C=$2;window[V]=null;let t0=0;const d=e=>{t0=e.timeStamp};document.addEventListener('pointerdown',d,{capture:true,once:true});const t1=performance.now();const end=v=>{document.removeEventListener('pointerdown',d,{capture:true});if(A[V]===g)window[V]=v};(async()=>{for(;;){if(A[V]!==g)return;if(t0&&await C())return end(String(Math.round(performance.now()-t0)));const n=performance.now();if(t0?n-t0>${3:-2000}:n-t1>30000)return end(t0?'- (not within ${3:-2000} ms of the tap)':'- (no tap reached the page in 30 s)');await new Promise(r=>requestAnimationFrame(r))}})();return 'armed'})()"
 }
 # The page and host conditions arm_js times: its frame gone from the page; gone from the host's list (webwindows.list,
 # the bridge from the page - the host's close on the phone's clock, not the Mac's: polled from the Mac each read was a
@@ -245,7 +282,11 @@ storm_switch() {
 }
 # storm_read <var> [max ms]: the page's armed measurement once it resolved - one page call that waits for it (it was up to
 # ten polls, each a CDP hop of 2-8 s under Mac load: one storm cycle took 58 s, 11-10 p1).
-storm_read() { local v; v=$(ev "new Promise(ok=>{const t=performance.now();const f=()=>{const v=window.$1;if(v!=null)return ok(String(v));if(performance.now()-t>${2:-6000})return ok('-');setTimeout(f,25)};f()})"); echo "${v:--}"; }
+# A "-" says why on stderr (the job log): no tap reached the page, or the condition never held after it.
+storm_read() {
+  local v; v=$(ev "new Promise(ok=>{const t=performance.now();const f=()=>{const v=window.$1;if(v!=null)return ok(String(v));if(performance.now()-t>${2:-12000})return ok('- (not resolved in ${2:-12000} ms of reading)');setTimeout(f,25)};f()})")
+  case ${v:--} in -*) echo "  $1: ${v:-- (no answer from the page)}" >&2; echo - ;; *) echo "$v" ;; esac
+}
 # storm_close <w-id>: a tap on its close button -> ms until its frame is gone ("-": no button, closed by the host).
 storm_close() {
   local p; p=$(wwpt "$1" .ww-close)

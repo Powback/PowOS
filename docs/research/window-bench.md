@@ -95,6 +95,12 @@ never-live launches in a row end the storm (FAIL). Every part ends with a verdic
   leak count + 15 s, and a cycle starts only when the last cycle's length fits.
 - **Part 2 timeout:** five gesture rounds of 35-50 s each; `phase` checked only the phase's start. `room` now checks
   each open/gestures/close item against the last one's length and FAILs "out of budget" instead of a 300 s kill.
+- **p2 part 2 (47ddb09c, 06:28-06:33) still killed:** the guards worked (gestures settings and close FAILed "out of
+  budget"), but the work ended 257 s in and the end (restore, end shot, layout check, publish) took > 43 s. Now: soft
+  budget 210 s, a watchdog at 275 s that kills the running call tree and ends the part with a FAIL (tier1 checks it
+  stops a 30 s call), and six parts (`--of 6`, gestures split over two). Its 17 FAILs: open-drawn x3 and resize-settle
+  x2 are Mac-clock screencap polls (8.7-10.9 s); drag/resize fps 30-44 and p95 50-100 ms x8 ran beside Broforce
+  (p1 without a game: 58-95 fps), so not judged; switch "-" x2 (the reason is now logged); out of budget x2.
 - Environment, not fixed here: one CDP eval is 2-8 s at Mac load ~35, setup (unfold, lock, home) took 2 min of
   part 1, and `drawn`/resize-settle are Mac-clock screencap polls (inflated the same way).
 
