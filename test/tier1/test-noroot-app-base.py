@@ -55,8 +55,27 @@ class NoRootAppBase(unittest.TestCase):
 
     def test_build_app_accepts_a_module_only_app(self):
         text = (ROOT / 'targets/android/build-app.sh').read_text()
-        self.assertTrue(re.search(r'\[ ! -d "\$ROOT/apps/\$a/ui" \] \|\| \[ -d "\$ROOT/apps/\$a/out/ui" \]', text),
+        self.assertTrue(re.search(r'\[ ! -d "\$d/ui" \] \|\| \[ -d "\$d/out/ui" \]', text),
                         'build-app.sh must require out/ui only for an app with a ui/')
+
+    def test_bundled_apps_staged_inside_the_gradle_project(self):
+        # The warm builder mirrors only targets/android/app + shell into /work: copyApps must read a folder inside the
+        # Gradle project, never ../../../apps (11-10: every warm-built APK shipped no app and no starter).
+        gradle = (ROOT / 'targets/android/app/app/build.gradle.kts').read_text()
+        self.assertIn('from(file("bundled-apps"))', gradle)
+        self.assertNotIn('../../../apps', gradle)
+        self.assertNotIn('../../../lib', gradle)
+        text = (ROOT / 'targets/android/build-app.sh').read_text()
+        self.assertIn('STAGE=$HERE/app/app/bundled-apps', text)
+        self.assertIn('cp "$ROOT/lib/apps/powos-noroot-services" "$STAGE/"', text)
+        self.assertIn('the APK lacks assets/', text)
+
+    def test_bundled_list_lines_resolve(self):
+        # Each line: an app folder of apps/ or a path; the build stages them by their manifest id.
+        for line in (ROOT / 'apps/bundled.list').read_text().splitlines():
+            a = line.split('#', 1)[0].strip()
+            if a and '/' not in a:
+                self.assertTrue((ROOT / 'apps' / a / 'powos-app.json').is_file(), a)
 
 
 if __name__ == '__main__':

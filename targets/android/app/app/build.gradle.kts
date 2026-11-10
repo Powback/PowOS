@@ -104,29 +104,15 @@ val powtermJava: File =
         ?: error("PowTerm's source (android-app-dev/projects/powterm) not found above $rootDir: set POWTERM_SRC")
 android.sourceSets.getByName("main").java.srcDir(powtermJava)
 
-// PowOS apps the APK ships (the repo's apps/bundled.list), built by build-app.sh (apps/build.sh) just before: each as
-// assets/apps/<app id>/{powos-app.json, ui/, module.wasm} - the launcher's own apps on a phone without root, where no
-// `powos app install` runs (shell/LocalApps.kt). Versioned with the APK. Also the no-root services' starter
-// (lib/apps/powos-noroot-services, run in the PowOS image by linux/EngineServices.kt).
-val appsDir = rootProject.file("../../../apps")
+// PowOS apps the APK ships (the repo's apps/bundled.list) and the no-root services' starter, staged by build-app.sh in
+// bundled-apps/ (apps/build.sh just before): assets/apps/<app id>/{powos-app.json, ui/, module.wasm} - the launcher's
+// own apps on a phone without root, where no `powos app install` runs (shell/LocalApps.kt), versioned with the APK -
+// and assets/powos-noroot-services (lib/apps, run in the PowOS image by linux/EngineServices.kt). Inside this project,
+// not the repo's apps/: the warm builder mirrors only app/ and shell/ (tools/warm-builder.sh), and from there the APK
+// shipped none of them (11-10). build-app.sh checks the APK has each.
 val appsAssets = layout.buildDirectory.dir("generated/apps-assets").get().asFile
-val bundledApps =
-    appsDir.resolve("bundled.list").takeIf { it.isFile }?.readLines().orEmpty()
-        .map { it.substringBefore('#').trim() }
-        .filter { it.isNotEmpty() }
 val copyApps by tasks.registering(Sync::class) {
-    for (app in bundledApps) {
-        val dir = appsDir.resolve(app)
-        @Suppress("UNCHECKED_CAST")
-        val id = (groovy.json.JsonSlurper().parse(dir.resolve("powos-app.json")) as Map<String, Any?>)["id"] as String
-        from(dir.resolve("powos-app.json")) { into("apps/$id") }
-        from(dir.resolve("out/ui")) { into("apps/$id/ui") }
-        from(dir.resolve("out")) {
-            include("module.wasm")
-            into("apps/$id")
-        }
-    }
-    from(rootProject.file("../../../lib/apps/powos-noroot-services"))
+    from(file("bundled-apps"))
     into(appsAssets)
 }
 android.sourceSets.getByName("main").assets.srcDir(appsAssets)

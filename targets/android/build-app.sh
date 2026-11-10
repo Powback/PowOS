@@ -28,18 +28,39 @@ if [ "${POWOS_SKIP_COMPLEXITY:-}" != 1 ]; then
   cx=0; "$HERE/lint-complexity.sh" || cx=$?
   if [ "$cx" = 1 ]; then echo "build-app: refusing - the complexity lint failed (above)" >&2; exit 4; fi
 fi
-# The PowOS apps the APK ships (apps/bundled.list; app/build.gradle.kts copyApps): built now from this commit, so the
-# APK carries their UIs and modules at its own version - a phone without root has no `powos app install`
-# (docs/research/nonroot-parity.md #2). apps/build.sh's caches make an unchanged app quick. POWOS_SKIP_APPS=1 for a
-# deliberate local experiment (the APK then ships whatever apps/*/out holds).
+# The PowOS apps the APK ships (apps/bundled.list), built now from this commit, so the APK carries their UIs and modules
+# at its own version - a phone without root has no `powos app install` (docs/research/nonroot-parity.md #2). Each is
+# staged with the no-root services' starter in app/app/bundled-apps/ (gitignored), the one folder
+# app/build.gradle.kts copyApps packs as assets/apps/<app id>/{powos-app.json, ui/, module.wasm}: inside the Gradle
+# project, so the warm builder's /work mirror (tools/warm-builder.sh copies app/ and shell/ only) has them too - it
+# read apps/*/out from the repo before, which /work hasn't, and every APK from it shipped no app and no starter (razr
+# 11-10: no island, no service). A line of bundled.list is an app of apps/ or another repo's app folder (~/Projects/
+# lights). apps/build.sh's caches make an unchanged app quick. POWOS_SKIP_APPS=1 for a deliberate local experiment
+# (the APK then ships whatever bundled-apps/ holds).
+STAGE=$HERE/app/app/bundled-apps
+# An app's folder from its bundled.list line: a name under apps/, else a path (~ = $HOME).
+app_dir() { case $1 in */*) echo "${1/#\~/$HOME}" ;; *) echo "$ROOT/apps/$1" ;; esac; }
+# Builds the line's app and stages it by its id; fails (the build's tail on stderr) when it doesn't build complete.
+stage_app() {
+  local d id log
+  d=$(app_dir "$1"); log=$(mktemp)
+  [ -f "$d/powos-app.json" ] || { echo "build-app: $1: no powos-app.json at $d" >&2; return 1; }
+  "$ROOT/apps/build.sh" "$d" > "$log" 2>&1 || { tail -20 "$log" >&2; rm -f "$log"; return 1; }
+  rm -f "$log"
+  [ ! -d "$d/ui" ] || [ -d "$d/out/ui" ] || { echo "build-app: $1: no out/ui" >&2; return 1; }
+  [ ! -f "$d/module/Cargo.toml" ] || [ -f "$d/out/module.wasm" ] || { echo "build-app: $1: no out/module.wasm" >&2; return 1; }
+  id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$d/powos-app.json")
+  mkdir -p "$STAGE/apps/$id"
+  cp "$d/powos-app.json" "$STAGE/apps/$id/"
+  [ ! -d "$d/out/ui" ] || cp -R "$d/out/ui" "$STAGE/apps/$id/ui"
+  [ ! -f "$d/out/module.wasm" ] || cp "$d/out/module.wasm" "$STAGE/apps/$id/"
+}
 if [ "${POWOS_SKIP_APPS:-}" != 1 ]; then
-  alog=$(mktemp)
+  rm -rf "$STAGE" && mkdir -p "$STAGE/apps"
+  cp "$ROOT/lib/apps/powos-noroot-services" "$STAGE/"
   for a in $(sed 's/#.*//' "$ROOT/apps/bundled.list"); do
-    "$ROOT/apps/build.sh" "$a" > "$alog" 2>&1 && { [ ! -d "$ROOT/apps/$a/ui" ] || [ -d "$ROOT/apps/$a/out/ui" ]; } &&
-      { [ ! -f "$ROOT/apps/$a/module/Cargo.toml" ] || [ -f "$ROOT/apps/$a/out/module.wasm" ]; } ||
-      { tail -20 "$alog" >&2; rm -f "$alog"; echo "build-app: refusing - apps/build.sh $a failed (above): the APK would ship without it" >&2; exit 6; }
+    stage_app "$a" || { echo "build-app: refusing - apps/build.sh $a failed (above): the APK would ship without it" >&2; exit 6; }
   done
-  rm -f "$alog"
 fi
 AAD=${ANDROID_APP_DEV:-$HOME/Projects/android-app-dev}
 # android-app-dev's builder mounts only ~/Projects (as /Projects): a checkout elsewhere (~/pw) can't build there.
@@ -71,6 +92,13 @@ if [ ! "$AAD/output/powos.apk" -nt "$stamp" ]; then
   exit 1
 fi
 rm -f "$stamp"
+# Every staged app and the starter in the APK: a builder that couldn't see them shipped none, silently (11-10).
+if [ "${POWOS_SKIP_APPS:-}" != 1 ]; then
+  have=$(unzip -l "$AAD/output/powos.apk" 'assets/apps/*/powos-app.json' 'assets/powos-noroot-services' 2>/dev/null || true)
+  for want in powos-noroot-services $(cd "$STAGE/apps" && printf 'apps/%s/powos-app.json ' *); do
+    case $have in *"assets/$want"*) ;; *) echo "build-app: the APK lacks assets/$want (app/app/bundled-apps not packed)" >&2; exit 7 ;; esac
+  done
+fi
 echo "published: http://android.pow/apk/powos.apk (version code $(cat "$AAD/output/powos.ver"))"
 # The same commit's shell bundle and PowOS code (powos-core) for the phones that pull their updates (no adb: the S25,
 # the razr - docs/PHONE-UPDATES.md). Only from origin's history; a failure only warns: the APK stands.

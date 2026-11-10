@@ -20,3 +20,5 @@ store/collage/raw/
 # stamped by android-app-dev scripts/build-gradle.sh
 app/version.properties
 app/shell-build.txt
+# staged by targets/android/build-app.sh (apps/bundled.list + the no-root starter), packed by copyApps
+app/bundled-apps/
