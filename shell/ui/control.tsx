@@ -829,7 +829,8 @@ function Categories() {
       clearInterval(timer);
       picking.value = false;
       opened.value = null;
-      ccExpanded.value = false;
+      // The mode's own state, as the v3 layout's (S10: desktop never folds - false here opened it folded next time).
+      ccExpanded.value = expandedByDefault();
       ccEditing.value = false;
     };
   }, [open]);
