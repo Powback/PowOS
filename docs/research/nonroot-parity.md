@@ -24,7 +24,7 @@ feature calls `RootedGuest` - `su`, which isn't there.
 | # | feature | rooted | no root | why | fix |
 |---|---|---|---|---|---|
 | 1 | Home widgets with commands (fetch, games, performance, any store widget with `cmd`/`stream`) | works | **was broken (empty tile)** - fixed 11-03 | nothing called `widgets.linuxChanged(true)`; GuestShell/Streams ran proot on a rootfs that isn't there; the web home got no "waits for Linux" state and drew an empty tile | DONE (this change): `EngineGuest` runs them in the image via lotfix; `Runtime.onEngineReady`; tile says "needs the PowOS Linux image - Download (N MB)" (tap opens the download) or "starting PowOS Linux..." |
-| 2 | PowOS app islands on home: Agents, What needs me, Lights, Pet, Sketch, Health, Counter | works | **broken** | bundles live in `files/apps/<id>/current`, put there only by `powos app install` inside the rooted session (bind mount in `powos-session.sh`); their databases are SpacetimeDB at `127.0.0.1:3410`, started only by the rooted session (`powos-start.sh`) | PARTLY DONE 11-04 (nonroot-islands): the repo's apps (`apps/bundled.list`: What needs me, Pet, Health, Counter, Sketch, App API) ship built in the APK and show without the registry; What needs me needs no Linux; STDB apps' islands say "starting PowOS Linux…" / "needs the PowOS Linux image - Download" while `EngineServices` starts SpacetimeDB + the App API in the image and publishes the APK's modules. Left: Lights (own repo `~/Projects/lights`, DB `local-lights` for its pairing/prefs - bundle it + keep that state Android-side), Agents (needs powos-agentsd), check on an unrooted device |
+| 2 | PowOS app islands on home: Agents, What needs me, Lights, Pet, Sketch, Health, Counter | works | **broken** | bundles live in `files/apps/<id>/current`, put there only by `powos app install` inside the rooted session (bind mount in `powos-session.sh`); their databases are SpacetimeDB at `127.0.0.1:3410`, started only by the rooted session (`powos-start.sh`) | PARTLY DONE 11-04 (nonroot-islands): the repo's apps (`apps/bundled.list`: What needs me, Pet, Health, Counter, Sketch, App API) ship built in the APK and show without the registry; What needs me needs no Linux; STDB apps' islands say "starting PowOS Linux…" / "needs the PowOS Linux image - Download" while `EngineServices` starts SpacetimeDB + the App API in the image and publishes the APK's modules. 11-10 (nonroot-islands): the razr's APK carried none of it (warm builder, below) - fixed; Lights bundled from its repo; Agents' reporter set up by the starter. Left: a razr check after the next APK + a base image with SpacetimeDB (Pet, Lights' DB) |
 | 3 | PowOS Linux image download | n/a | heavy (one big tarball) | `powos-rootfs.tar.gz` is the whole desktop + gaming | task `powos-image-for-non-rooted-devices-is-too-heavy` (image-slim: base/gaming split) |
 | 4 | Linux apps in drawer/search, Linux app windows (web windows), Steam/games | works | via Guest (11-03 nonroot-session) | the PowOS app list is exported by the rooted session (`run/powos-apps`, `powos-apps-export`); `ShellActivity` starts `SessionService` only when rooted; launches go through `RootedGuest.openAsTask` | start `SessionService` from the launcher when the image is installed; app export + launch through `EngineGuest` (powos-apps-export in the image session); windows through the engine's display daemon |
 | 5 | Terminals (terminal tiles, Terminal app, `terms`/tmux list) | works | via Guest (11-03 nonroot-session) | `ShellTerminals`/`TerminalTiles` run `su -c powos-run.sh`; Omalauncher's foot-on-Wayland path is off with `onLinuxReady` | PtyTerminal on `liblotfixrun.so -c powos-tmux-shell` (EngineGuest) |
@@ -349,3 +349,30 @@ Changes:
 - **No services on a base without SpacetimeDB**: `EngineServices.state` said "missing" and kicked nothing, so the App
   API (python3 only) never started either; now the starter runs in "missing" too (every 10 min at most) and starts
   what the image has. SpacetimeDB itself comes with the next base (roots above) or the apps pack.
+
+## What changed 11-10 (nonroot-islands)
+
+Razr check (read-only adb, APK 2026.11.09-2257, base image from before 11-09): no island had anything because the APK
+had **no** `assets/apps/` and no `assets/powos-noroot-services` - `files/apps` and `run/powos-bundled` empty, no
+`/var/log/powos`. Cause: `tools/warm-builder.sh` mirrors only `targets/android/app` and `shell/` into `/work`, and
+`copyApps` read `../../../apps` and `../../../lib` from there (absent: Gradle's `from()` skips it silently). Every
+warm-built APK since 11-04 shipped without them.
+
+- `build-app.sh` stages each `apps/bundled.list` app (manifest, `out/ui`, `module.wasm`, by its id) and the starter in
+  `targets/android/app/app/bundled-apps/` (gitignored, inside the Gradle project: every builder sees it); `copyApps`
+  packs that; the build fails (exit 7) when the APK lacks any of them.
+- `bundled.list` takes another repo's app folder by path: `~/Projects/lights` (local.lights). Its `local-lights` DB is
+  published with the others by the starter; its bridge calls go through the page's net (no Linux).
+- Agents: the widget (`shell/ui/agents.tsx`) reads `AgentsSpool`, which already runs without root
+  (`App.startEngineWatchers`) on `files/run/agents`. Missing was the reporter: the image has `/usr/lib/powos/ai/agents`
+  but no claude hooks in `/root/.claude/settings.json`, so nothing ever started `powos-agentsd`. `powos-noroot-services`
+  now installs the hooks once (`install-hooks.py`, as `powos-deploy.sh` for ~powos) and starts `powos-agentsd`
+  (`XDG_RUNTIME_DIR/agents` = `files/run/agents`). Test: `test/tier1/test-noroot-agents.py`.
+
+| island | needs | status 11-10 |
+|---|---|---|
+| What needs me | APK assets only (no Linux) | works once an APK from this branch is installed |
+| Agents | APK starter + the image's `/usr/lib/powos/ai/agents` (razr has it) | hooks + agentsd from the starter; rows appear with the first claude run in the image |
+| Pet | APK module + SpacetimeDB in the image | razr's base has no SpacetimeDB (from before 11-09): "needs a newer image" until it's updated |
+| Lights | APK UI + module (bundled now); SpacetimeDB for its key/prefs | as Pet for its saved key; UI ships |
+
