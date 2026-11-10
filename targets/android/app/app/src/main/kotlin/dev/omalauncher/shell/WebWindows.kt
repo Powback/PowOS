@@ -1934,7 +1934,7 @@ class WebWindows(
         if (!c.isValid) return
         underRoot(t, win)
         frameAt(t, win, g)
-        cornerRadius(t, c, g.radius)
+        cornerRadius(t, c, if (g.resizing && dragSquare()) 0f else g.radius)
         // Every window's z is its page order, a Linux one's as an Android one's: one parent (the root), one z each.
         t.setLayer(c, g.z)
         t.setAlpha(c, g.alpha)
@@ -2158,6 +2158,26 @@ class WebWindows(
             HiddenApi.allow()
             SurfaceControl.Transaction::class.java.getMethod("setCornerRadius", SurfaceControl::class.java, Float::class.javaPrimitiveType)
         }.onFailure { WindowLog.w(TAG, "no setCornerRadius: square windows", it) }.getOrNull()
+    }
+
+    /**
+     * HACK: (RJ3, 11-10) a window being resized (RS1's [Geo.resizing]) has square corners until it is let go. With
+     * home's blur regions off for the drag (RJ2) and the verify pill's off, the 10:07 kate drag still had 3 layers on
+     * the main display CLIENT ("mid-drag ... HWC layers CLIENT 11, DEVICE 15", 8 of the 11 the idle outer display's);
+     * a container with a corner radius (it and its fill and app layers under it) is composed by the GPU on this HWC.
+     * A/B: `setprop debug.powos.ww_drag_round 1` keeps the radius. Real fix: rounded corners the HWC composes - a
+     * corner mask drawn by home over the window (its layer is above) instead of the layer's radius.
+     */
+    private var squareAt = 0L
+    private var squareOn = true
+
+    private fun dragSquare(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (now - squareAt > 1000) {
+            squareAt = now
+            squareOn = debugProp(DRAG_ROUND_PROP) != "1"
+        }
+        return squareOn
     }
 
     private fun cornerRadius(
@@ -4430,6 +4450,9 @@ class WebWindows(
 
         /** The debug property that has the host offer N2's frame-ahead geometry to the page ("w.ahead 1"): "1". */
         const val AHEAD_PROP = "debug.powos.ww_ahead"
+
+        /** RJ3 A/B: "1" keeps a resized window's corner radius through the drag ([dragSquare]). */
+        const val DRAG_ROUND_PROP = "debug.powos.ww_drag_round"
 
         /** A debug switch [name] is on: its property is "1" ([orderCheckOn]). */
         fun debugOn(name: String): Boolean = orderCheckOn(debugProp(name))

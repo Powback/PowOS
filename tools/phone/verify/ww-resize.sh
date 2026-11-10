@@ -81,6 +81,7 @@ restore() {
   case " $APPS " in *" dolphin "*) [ "${DOLPHIN_MINE:-0}" = 1 ] && us "pkill -x dolphin" ;; esac
   [ "${CALC_MINE:-0}" = 1 ] && sh_ "am force-stop $CALC"
   [ -n "${LOGPID:-}" ] && kill "$LOGPID" 2>/dev/null
+  [ "${DR:-0}" = 1 ] && sh_ "setprop debug.powos.ww_drag_round 0"
   [ "${GP:-1}" = 0 ] && CDP_TIMEOUT_S=8 ev "globalThis.__glassDragOff=false;'ok'" >/dev/null 2>&1
   true
 }
@@ -118,6 +119,10 @@ case $full in ok*) full=${full#ok} full=${full# } ;; *) log "SKIP home's bridge:
 GP=${WWR_GLASS_PAUSE:-1}
 ev "globalThis.__glassDragOff=$([ "$GP" = 0 ] && echo true || echo false);'ok'" >/dev/null
 log "RJ2 glass pause: $([ "$GP" = 0 ] && echo off || echo on) for this run"
+# RJ3 A/B (WebWindows.kt dragSquare): WWR_DRAG_ROUND=1 keeps the window's corner radius through the drag.
+DR=${WWR_DRAG_ROUND:-0}
+sh_ "setprop debug.powos.ww_drag_round $DR"
+log "RJ3 square corners while resizing: $([ "$DR" = 1 ] && echo off || echo on) for this run"
 sleep 1
 "$A" shell "logcat -v time -s PowosWebWindows:I Andromarchy:I PowosShell:I" > "$OUT/logcat.txt" 2>/dev/null &
 LOGPID=$!
@@ -222,7 +227,7 @@ record() {
   sleep 0.6
   # Mid-drag (the record pass only: a dumpsys during a measured way would load SF): the layers with blur regions and how
   # many HWC layers are CLIENT - RJ2 / the pill's glass decide it (11-10: every layer clientType=BLUR).
-  ( sleep 0.4; sh_ "dumpsys SurfaceFlinger" | awk '/^  Layer \[/{n=substr($0, index($0, "]") + 2); gsub(/ /, "_", n)} /blurRegions.size\(\)=[1-9]/{b[n]=1} /hwc: layer=.*composition=CLIENT/{c++} /hwc: layer=.*composition=DEVICE/{d++} END{o="";for(k in b)o=o" "k; print "mid-drag: blur owners:" (o==""?" none":o) "; HWC layers CLIENT " c+0 ", DEVICE " d+0}' > "$OUT/.middrag" ) &
+  ( sleep 0.4; sh_ "dumpsys SurfaceFlinger" > "$OUT/$tag-middrag-sf.txt"; awk -f "$here/sf-comp.awk" "$OUT/$tag-middrag-sf.txt" > "$OUT/.middrag" ) &
   local mp=$!
   sh_ "input swipe $x1 $y1 $x2 $y2 700; sleep 0.25; input swipe $x2 $y2 $x1 $y1 700"
   wait "$rp" "$mp"

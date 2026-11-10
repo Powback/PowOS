@@ -119,6 +119,11 @@ The board shows window checks failing by timeout or waiting days for a free phon
     VerifyPillGlassTest). RJ2 stays for one A/B: `WWR_GLASS_PAUSE=0` keeps home's regions through the drag; the
     record pass logs "mid-drag: blur owners ...; HWC layers CLIENT n, DEVICE m". If on vs off shows no DEVICE gain, RJ2
     goes.
+  - 11-10 10:07 (kate, pill and RJ2 on): "blur owners: none; HWC layers CLIENT 11, DEVICE 15" - that count took both
+    displays; the idle outer display's stale table alone has 8 CLIENT, so ~3 on the main one (the window's container
+    layers carry a corner radius: `cornerRadius` in WebWindows.place). RJ3 (`dragSquare`, HACK registered): square
+    corners while RS1's `resizing` is set; A/B `WWR_DRAG_ROUND=1`. The probe (`sf-comp.awk`) now reads the main
+    display only and names each CLIENT layer with its forced reason and "rounded"; the full mid-drag dump is saved.
 - [x] 0.6 Each failing check on the board gets one line: real bug, check bug, or environment.
   Done 11-10: seven board tasks got a "0.6" step line; the table is in `docs/research/window-bench.md` "11-10
   baseline". None of the failures was a judged real bug: they were check bugs or the environment, most of them home's
