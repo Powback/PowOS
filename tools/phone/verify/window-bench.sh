@@ -169,6 +169,7 @@ RB=0
 restore_bench() {
   [ $RB = 1 ] && return 0; RB=1
   local i
+  [ "${OCON:-0}" = 1 ] && sh_ "setprop debug.powos.ww_order_check 0"
   for i in $MINEW; do hcall webwindows.close "[${i#w}]" "()=>'ok'" >/dev/null 2>&1; done
   [ -n "$ROT0" ] && { set -- $ROT0; sh_ "settings put system accelerometer_rotation $1; settings put system user_rotation $2"; log "rotation put back ($ROT0)"; ROT0=""; }
   sh_ "tail -n +$((H0 + 1)) $HYPR" > "$OUT/kwin.log" 2>/dev/null
@@ -349,10 +350,13 @@ return new Promise(ok=>{let last=a,same=0;const f=()=>{const t=performance.now()
   step "gestures-$a" "$a dragged, resized, maximised and restored"
 done
 
-# 3. switching: a tap on the lower of two windows' bars puts it on top.
+# 3. switching: a tap on the lower of two windows' bars puts it on top. The host's layer order check (SurfaceFlinger's
+# composition against the page's z, WebWindows.orderCheckSoon) is off in daily use (docs/WINDOWS_FIX_PLAN.md 1.1); it
+# runs here, after the switch timings, and any "layer order != page order" line it logs is a FAIL.
 set -- $RUN; if [ $# -ge 2 ] && phase switch; then
   eval "i1=\${ID_$1:-}; i2=\${ID_$2:-}"
   if [ -n "$i1" ] && [ -n "$i2" ]; then
+    OC0=$(sh_ "date +\"%m-%d %H:%M:%S.000\"")
     for pair in "$i1 $i2 $1" "$i2 $i1 $2"; do set -- $pair; chk switch
       ev "$WW.then(([m])=>(m.raise(${2#w}),'ok'))" >/dev/null; sleep 0.5
       p=$(barpt "$1"); [ -n "$p" ] || { note "switch: $1's bar not on screen (under the other)"; continue; }
@@ -360,6 +364,13 @@ set -- $RUN; if [ $# -ge 2 ] && phase switch; then
       set -- $p; tap "$1" "$2" "the lower window's bar"; sleep 0.8
       bench switch "$3" "$(ev 'String(window.__wbSw)')" "$SWITCH_MS" le
     done
+    # The order check, once per raise: on, raise each in turn (the check runs 300 ms after the apply), off again.
+    sh_ "setprop debug.powos.ww_order_check 1"; OCON=1
+    for w in "$i1" "$i2"; do ev "$WW.then(([m])=>(m.raise(${w#w}),'ok'))" >/dev/null; sleep 1.2; done
+    sh_ "setprop debug.powos.ww_order_check 0"; OCON=0
+    oc=$(sh_ "logcat -d -v time -T \"$OC0\" -s PowosWebWindows:V" | grep -c "layer order != page order")
+    log "layer order check over the switch: ${oc:-0} divergence line(s)"
+    [ "${oc:-0}" = 0 ] || { sh_ "logcat -d -v time -T \"$OC0\" -s PowosWebWindows:V" | grep "layer order" > "$OUT/layer-order.txt"; bench layer-order all "$oc" 0 le; }
   fi
 fi
 

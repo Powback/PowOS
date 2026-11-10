@@ -59,11 +59,14 @@ Done when: every window check gives a verdict (PASS or a named FAIL) within its 
 
 ## Phase 1: quick wins (small, independent)
 
-- [ ] 1.1 **SurfaceFlinger order check off by default.** `orderCheckSoon` (`WebWindows.kt:1721`) runs
+- [x] 1.1 **SurfaceFlinger order check off by default.** `orderCheckSoon` (`WebWindows.kt:1721`) runs
   `dumpsys SurfaceFlinger`, through root when refused (`:1781`), 300 ms after every change of window order and every
   10 s with two or more windows. Gate it behind a debug property (for example `debug.powos.ww_order_check`), keep it in
   the verify scripts.
   - Check: `ww-drag-lag.sh` and `ww-resize.sh` before and after; no `dumpsys` child of the app during a drag.
+  - Landed 11-10: `orderCheckSoon` returns unless `debug.powos.ww_order_check` is `1` (read in-process,
+    `SystemProperties`); `window-bench.sh`'s switch phase turns it on for two raises and FAILs on a divergence line.
+    JVM: `WebWindowsLayerOrderTest.offByDefault`. Phone before/after numbers: owed (queued after the ship).
 - [ ] 1.2 **Touch injection on its own thread.** `helper.touch` posts to `io` (`WebWindows.kt:4113`), behind task polling
   (`reconcileNow`, `:423`), mirror retries (`:1505`) and resizes. Give input a dedicated `HandlerThread`; keep ordering
   per window.

@@ -1717,9 +1717,12 @@ class WebWindows(
      * After [apply]: when the shown windows' page order changed (a raise, an open), or [ORDER_RECHECK_MS] after the last
      * check while two or more are shown, SurfaceFlinger's last composition is compared with the page's order
      * ([orderCheck]) a little later, once it has composed. Not every frame: a SurfaceFlinger dump takes its locks.
+     * Off unless [ORDER_CHECK_PROP] is "1" (docs/WINDOWS_FIX_PLAN.md 1.1, C4): the dump ran on [io], through root, 300 ms
+     * after every raise and every 10 s with two windows, ahead of touch injection and resizes. A diagnostic, so the
+     * verify scripts turn it on (window-bench.sh's switch phase: `setprop debug.powos.ww_order_check 1`).
      */
     private fun orderCheckSoon(geos: List<Geo>) {
-        if (orderCheckBroken) return
+        if (!orderCheckWanted()) return
         val order = geos.filter { g -> g.visible && wins[g.id]?.let { it.shown && !it.linuxFull && it.mirror != null } == true }.sortedBy { it.z }.map { it.id }
         val now = SystemClock.uptimeMillis()
         if (order.isEmpty()) {
@@ -1732,6 +1735,9 @@ class WebWindows(
         val names = order.associateWith { id -> wins[id]?.let(::layerKey) ?: "" }
         io.postDelayed({ orderCheck(order, names) }, ORDER_CHECK_DELAY_MS)
     }
+
+    /** The order check may run: it isn't broken (no dump) and [ORDER_CHECK_PROP] turns it on. */
+    private fun orderCheckWanted(): Boolean = !orderCheckBroken && orderCheckOn(debugProp(ORDER_CHECK_PROP))
 
     /** What names [win]'s content in SurfaceFlinger's output: its Linux layer, or its app's package (the mirror's clones). */
     private fun layerKey(win: Win): String = if (win.linux != null) "powos-ww-${win.id}-linux" else "${win.component.packageName}/"
@@ -4395,6 +4401,19 @@ class WebWindows(
 
         /** A Linux web window's switcher card id: this + its window id (no Android task id gets near it). */
         const val LINUX_CARD = 1 shl 29
+
+        /** The debug property that turns the layer order check ([orderCheckSoon]) on: "1". Unset = off. */
+        const val ORDER_CHECK_PROP = "debug.powos.ww_order_check"
+
+        /** [ORDER_CHECK_PROP]'s value -> the check runs. Only an explicit "1": unset, "0" or unreadable = off. */
+        fun orderCheckOn(prop: String?): Boolean = prop?.trim() == "1"
+
+        private val sysPropGet by lazy {
+            runCatching { Class.forName("android.os.SystemProperties").getMethod("get", String::class.java, String::class.java) }.getOrNull()
+        }
+
+        /** A system property's value, read in-process (no getprop child); null when unreadable (JVM tests). */
+        fun debugProp(name: String): String? = runCatching { sysPropGet?.invoke(null, name, "") as String? }.getOrNull()
 
         /** The order check ([orderCheckSoon]) waits this long after the apply, for SurfaceFlinger to compose it. */
         private const val ORDER_CHECK_DELAY_MS = 300L
