@@ -195,6 +195,12 @@ frame of drag latency; measure it before turning it on for drags (animations fir
   the display frames (App Deadline Missed vs SurfaceFlinger GPU/CPU vs Display HAL), the GPU-composited count, SF/
   RenderEngine slices and CPU per process over the drag, and one verdict. The fix waits for that verdict on a valid
   run (the 16:51 one measured Steam; every rerun since SKIPped folded/dozing).
+  11-10: no traced run yet - job 20261109-111820 (all three apps, 300 s) has not had a phone window. The untraced 16:51
+  run already took ~300 s for three apps; a perfetto trace per way adds to that, so the traced run goes per app
+  (`env WWR_APPS=kate|dolphin|calc ww-resize.sh`, one job each) to get a verdict, not a timeout. Leads to check
+  against the verdict before changing anything: window layers carry `setCornerRadius` (WebWindows.cornerRadius) and
+  home carries blur regions (GlassBlur) - both force SF client (GPU) composition on most HWCs, matching the 360/361
+  GPU-composited frames of 10-27; and `linuxResize` sets the content layer's buffer size per relayout.
   Page side, 11-08 (RS5, gate `ww-resize-cost`, four windows, the top one's corner dragged; `GATE_PROFILE=1` prints the
   trace's self ms and style invalidations a move): renders read no layout per window (79 -> 11 reads a move); the
   windows under the dragged one no longer re-render for their masks (WebWindowsOn's `cutAll` writes them after the

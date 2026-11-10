@@ -27,6 +27,12 @@
 # Output: $OUT/bench.tsv (metric, app, value ms|fps, budget, PASS|FAIL), one "BENCH" line each in the log; the window
 # log / KWin log / logcat window tags since the start in $OUT. Only what it opened is closed; an app the user already
 # runs is left out (noted). Exit: 0 all within budget; 1 a FAIL; 3 the user touched it / not now (re-queued); 5 ENV.
+# Parts (11-10): the whole bench is ~2x the queue's 300 s budget, so every queued run timed out without a verdict. As
+# `--round R --part K --of 4` it runs as four jobs that each fit, same round folder (e2e-lib's parts):
+#   1 storm | 2 open gestures switch close | 3 open rotate fold close | 4 five       (--phases "..." picks any set)
+# Each part also keeps its own clock (BENCH_BUDGET_S, 255 s from the start, the restore's time left): a phase that
+# would start past it is a FAIL naming it, the storm stops starting cycles at it (FAIL: k of N cycles in budget), and
+# three launches in a row that never go live end the storm (FAIL) - 20 s each was what ate the budget on 11-07/08.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 APPS="kate dolphin konsole calc settings"; FOLD=1; ARGS=()
@@ -40,6 +46,20 @@ export CDP_TIMEOUT_S=${CDP_TIMEOUT_S:-20}
 eval "e2e_$(declare -f chk)"
 chk() { [ "$1" = "${PHASE:-}" ] || { PHASE=$1; echo "-- $(date +%T) $1"; }; e2e_chk "$1"; }
 e2e_args ${ARGS[@]+"${ARGS[@]}"}
+PHASES=${PHASES:-}
+for ((i = 0; i < ${#ARGS[@]}; i++)); do [ "${ARGS[$i]}" = --phases ] && PHASES=${ARGS[$((i + 1))]:-}; done
+if [ -z "$PHASES" ]; then
+  if [ "$LAST" = 4 ]; then case $PART in 1) PHASES=storm ;; 2) PHASES="open gestures switch close" ;;
+    3) PHASES="open rotate fold close" ;; 4) PHASES=five ;; *) echo "bad --part $PART of 4"; exit 2 ;; esac
+  else PHASES="storm open gestures switch rotate fold close five"; fi
+fi
+BENCH_BUDGET_S=${BENCH_BUDGET_S:-255}; T0S=$SECONDS
+# phase <name>: this part runs it, and there is budget left to start it (else a FAIL naming it, not a kill).
+phase() {
+  [[ " $PHASES " == *" $1 "* ]] || return 1
+  [ $((SECONDS - T0S)) -lt "$BENCH_BUDGET_S" ] && return 0
+  fail "out of budget: $1 not started, $((SECONDS - T0S)) s in (BENCH_BUDGET_S $BENCH_BUDGET_S) - a slower bench step before it"; return 1
+}
 E2E_APPS='com.oneplus.calculator|com.android.settings'
 E2E_LINUX='kate dolphin konsole'
 e2e_init window-bench
@@ -276,17 +296,25 @@ storm() {
   printf 'cycle\tapp\tframe_ms\tlive_ms\tswitch_ms\tclose_ms\tdrop\tjank\tp95\tp99\tfps\n' > "$OUT/storm.tsv"
   # home's frames through the whole storm, marked per cycle (window.__wbS).
   ev "(()=>{const S=window.__wbS={t:[],m:[],on:true};const f=n=>{S.t.push(n);if(S.on)requestAnimationFrame(f)};requestAnimationFrame(f);return 'on'})()" >/dev/null
-  PREVID=""
-  for i in $(seq 1 "$STRESS_N"); do chk "storm $i"; a=${apps[$(((i - 1) % ${#apps[@]}))]}; storm_cycle "$i" "$a"; done
+  PREVID=""; local dead=0 ran=0
+  # Room kept for the storm's own frames/trend/leak reads (~25 s) inside the part's budget.
+  for i in $(seq 1 "$STRESS_N"); do
+    [ $((SECONDS - T0S)) -lt $((BENCH_BUDGET_S - 25)) ] || break
+    chk "storm $i"; a=${apps[$(((i - 1) % ${#apps[@]}))]}; storm_cycle "$i" "$a"; ran=$i
+    # A never-live launch costs LIVE_MAX_S; three in a row is the verdict (NOT LOADING), not a reason to time out.
+    if tail -1 "$OUT/storm.part" | cut -f4 | grep -qx -- -; then dead=$((dead + 1)); else dead=0; fi
+    [ $dead -ge 3 ] && { fail "storm stopped at cycle $i: three launches in a row never went live"; break; }
+  done
+  [ $dead -ge 3 ] || [ "$ran" -ge "$STRESS_N" ] || fail "storm: $ran of $STRESS_N cycles in the part's ${BENCH_BUDGET_S} s - a cycle took $(( (SECONDS - T0S) / (ran > 0 ? ran : 1) )) s on average (pace ${STRESS_PACE_S} s)"
   [ -n "$PREVID" ] && { hcall webwindows.close "[${PREVID#w}]" "()=>'ok'" >/dev/null; }
   chk "storm: frames, trend, leaks after"; storm_frames; storm_trend; storm_leaks "$S0"
   MINEW=""
   step storm "after $STRESS_N open/switch/close cycles"
 }
-[ "${STRESS_N:-20}" -gt 0 ] && storm
+[ "${STRESS_N:-20}" -gt 0 ] && phase storm && storm
 
 # 1. open, one at a time (cold for Linux: no process yet), and the not-loading detector on each.
-for a in $RUN; do
+phase open && for a in $RUN; do
   eval "k=\$KEY_$a"; chk "open $a"
   t0=$(nowms); r=$(open_js "$k"); t1=$(nowms)
   id=$(jget "$r" "$k" id); fr=$(jget "$r" "$k" frame); lv=$(jget "$r" "$k" live); fl=$(jget "$r" "$k" failed)
@@ -303,7 +331,7 @@ for a in $RUN; do
 done
 
 # 2. drag + resize + maximise/restore on each window, frame-timed.
-for a in $RUN; do
+phase gestures && for a in $RUN; do
   eval "id=\${ID_$a:-}"; [ -n "$id" ] || continue; chk "gestures $a"
   hcall webwindows.list "[]" "()=>'ok'" >/dev/null
   ev "$WW.then(([m])=>(m.raise(${id#w}),'ok'))" >/dev/null; sleep 0.4
@@ -322,7 +350,7 @@ return new Promise(ok=>{let last=a,same=0;const f=()=>{const t=performance.now()
 done
 
 # 3. switching: a tap on the lower of two windows' bars puts it on top.
-set -- $RUN; if [ $# -ge 2 ]; then
+set -- $RUN; if [ $# -ge 2 ] && phase switch; then
   eval "i1=\${ID_$1:-}; i2=\${ID_$2:-}"
   if [ -n "$i1" ] && [ -n "$i2" ]; then
     for pair in "$i1 $i2 $1" "$i2 $i1 $2"; do set -- $pair; chk switch
@@ -348,7 +376,7 @@ settle_all() {   # settle_all <metric> <budget>: ms (Mac clock) until every benc
     sleep 0.3
   done
 }
-chk rotate
+if phase rotate; then chk rotate
 ROT0=$(sh_ "echo \$(settings get system accelerometer_rotation) \$(settings get system user_rotation)")
 for rot in 1 0; do
   sh_ "settings put system accelerometer_rotation 0; settings put system user_rotation $rot"; sleep 0.3
@@ -356,9 +384,10 @@ for rot in 1 0; do
 done
 set -- $ROT0; sh_ "settings put system accelerometer_rotation $1; settings put system user_rotation $2"; ROT0=""
 step rotated "rotated and back"
+fi
 
 # 5. fold 4 s, unfold: the windows come back.
-if [ $FOLD = 1 ]; then chk fold
+if [ $FOLD = 1 ] && phase fold; then chk fold
   device_state_set 0; sleep 4; device_state_set 3; sleep 0.3
   v=$(settle_all unfold "$UNFOLD_MS"); bench unfold all "${v%% *}" "$UNFOLD_MS" le; [ "${v%% *}" = - ] && log "unfold: $v"
   # The ids may be new after a fold (Linux windows handed back and adopted again): read them by key.
@@ -367,7 +396,7 @@ if [ $FOLD = 1 ]; then chk fold
 fi
 
 # 6. close every window by its close button, timed in the page.
-for a in $RUN; do
+phase close && CLOSED=1 && for a in $RUN; do
   eval "id=\${ID_$a:-}"; [ -n "$id" ] || continue; chk "close $a"
   ev "$WW.then(([m])=>(m.raise(${id#w}),'ok'))" >/dev/null; sleep 0.4
   p=$(wwpt "$id" .ww-close); [ -n "$p" ] || { note "close $a: no close button on screen"; continue; }
@@ -377,11 +406,11 @@ for a in $RUN; do
   bench close "$a" "$(ev 'String(window.__wbCl)')" "$CLOSE_MS" le
   bench close-host "$a" "$hg" "$CLOSE_HOST_MS" le
 done
-MINEW=""
-sleep 1.5
+# Only a close phase that ran hands the windows off; otherwise restore_bench closes what this part opened.
+[ "${CLOSED:-0}" = 1 ] && { MINEW=""; sleep 1.5; }
 
 # 7. five at once (warm: the Linux apps quit by their close a moment ago may still be ending).
-set -- $RUN; if [ $# -ge 2 ]; then chk five
+set -- $RUN; if [ $# -ge 2 ] && phase five; then chk five
   keys=(); for a in $RUN; do eval "keys+=(\"\$KEY_$a\")"; done
   t0=$(nowms); r=$(open_js "${keys[@]}"); t1=$(nowms); log "five: $r"
   worst=0; ok=1; for a in $RUN; do eval "k=\$KEY_$a"; id=$(jget "$r" "$k" id); lv=$(jget "$r" "$k" live)
