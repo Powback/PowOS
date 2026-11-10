@@ -130,6 +130,14 @@ menu_close() {
   if [ -n "$spot" ]; then "$adb" shell "input tap $spot"; echo "a tap on the page at $spot"
   elif [ -n "${2:-}" ]; then wtap "$2" "$3"; echo "its header ($2,$3) tapped again"
   else echo "nothing (no empty spot on the page)"; return 1; fi; }
+# xover: the viewable X windows stacked over Steam's main window at its menu bar (window px 110,40), "" when none.
+# Xwayland gives a touch to the X window on top at its root point (plain sprite trace, xwl_xy_to_window), so any such
+# window - KWin's root-sized InputOnly guard over a Kept (hidden-preview) task window was kwin 0022's bug - takes the
+# taps. xwininfo -children prints top first (XQueryTree's list reversed): the ones above Steam's come before it.
+# (11-10: an earlier version of this read the list bottom first and blamed the guard, which sits below Steam's.)
+xover() { us "$X; xwininfo -root -children 2>/dev/null | sed -n '/children:/,\$p' | tail -n +2 | awk '{print \$1}' | sed '/^$SW\$/,\$d' | while read -r w; do xwininfo -id \$w 2>/dev/null | awk -v w=\$w '/Map State/{m=\$3} /Class:/{c=\$2} /Override Redirect State/{o=\$4} /Absolute upper-left X/{ax=\$4} /Absolute upper-left Y/{ay=\$4} /Width:/{x=\$2} /Height:/{y=\$2} END{if(m==\"IsViewable\"&&ax<=$SX+110&&ay<=$SY+40&&ax+x>$SX+110&&ay+y>$SY+40)print w\" \"c\" or=\"o\" \"ax\",\"ay\" \"x\"x\"y}'; done" | grep . | tr '\n' ';'; }
+# Before any tap: an X window over Steam's menu bar (an InputOnly one above all) is a FAIL of its own - no tap can reach it.
+over0=$(xover); [ -z "$over0" ] || bad "X stacking: window(s) over Steam's main window $SW at its menu bar: $over0 (Xwayland would give them the taps)"
 open0=$(menus)
 [ -z "$open0" ] || { say "a Steam menu is open already ($open0): closed first ($(menu_close "$(echo "$open0" | head -1)"))"; sleep 1; }
 # A menu this opened never stays open: closed on the way out (whatever ended the run).
@@ -212,14 +220,11 @@ if [ $opened -lt 1 ]; then
   hg=$("$adb" shell "logcat -d -T '$since' -s PowosWebWindows:I" 2>/dev/null | tr -d '\r' | grep -c "gesture to KWin window")
   kt=$(rs "tail -n +$((klog0 + 1)) /run/powos-app/hyprland.log | grep -ac 'touch at'" | tail -1)
   kpop=$(popn)
-  # X's side: Xwayland gives a touch to the X window on top at its root point (plain sprite trace, xwl_xy_to_window),
-  # so a viewable window stacked over Steam's there takes it - KWin's root-sized InputOnly guard window above a Kept
-  # (hidden-preview) window is the kwin 0022 bug. XQueryTree lists bottom to top: every viewable one after Steam's.
-  over=$(us "$X; xwininfo -root -children 2>/dev/null | sed -n '/children:/,\$p' | tail -n +2 | awk '{print \$1}' | sed -n '/^$SW\$/,\$p' | tail -n +2 | while read -r w; do xwininfo -id \$w 2>/dev/null | awk -v w=\$w '/Map State/{m=\$3} /Class:/{c=\$2} /Override Redirect State/{o=\$4} /Absolute upper-left X/{ax=\$4} /Absolute upper-left Y/{ay=\$4} /Width:/{x=\$2} /Height:/{y=\$2} END{if(m==\"IsViewable\"&&ax<=$SX+110&&ay<=$SY+40&&ax+x>$SX+110&&ay+y>$SY+40)print w\" \"c\" or=\"o\" \"ax\",\"ay\" \"x\"x\"y}'; done" | grep . | tr '\n' ';')
   # screencap with several displays prints a warning before the PNG on stdout: only the PNG is kept.
   "$adb" exec-out screencap -p 2>/dev/null | python3 -c "import sys; d=sys.stdin.buffer.read(); i=d.find(b'\x89PNG'); sys.stdout.buffer.write(d[max(i,0):])" > "$OUT/no-menu.png"
   why="taps reached KWin, Steam opened no X menu"
   [ "${kpop:-0}" -gt 0 ] && why="KWin exported popups the X read didn't see"
+  over=$(xover)
   [ -n "$over" ] && why="taps reached KWin, but X window(s) over Steam's at the menu bar took them (Xwayland picks by X stacking): $over"
   [ "${hg:-0}" = 0 ] && why="home sent no gesture to KWin (the taps missed Steam's web window body, or something above it in the page took them)"
   bad "no tap on Steam's menu bar opened a menu ($taps taps; home gestures to KWin ${hg:-?}, KWin touch-at lines ${kt:-?}, app popup lines ${kpop:-?}; screen $OUT/no-menu.png): $why"
