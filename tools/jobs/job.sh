@@ -22,6 +22,16 @@ JOBS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 JOBS_COMPOSE=$JOBS_DIR/compose.yml
 JOB_CTX="" JOB_PROJECT="" JOB_TAG="" JOB_ON_HUB="" JOB_FELL_BACK=${JOB_FELL_BACK:-} JOB_CPUS="" JOB_LOAD=""
 
+# job_bounded <secs> <cmd...>: run cmd, kill it after <secs> s, rc 124 (docker's ssh helper is in its own group and exits
+# on its own ConnectTimeout, <=30 s later; nothing waits on it).
+# `perl -e 'alarm N; exec @ARGV' docker ...` was NOT bounded: docker ignores the inherited SIGALRM and its ssh helper
+# (ssh -o ConnectTimeout=30, overriding ~/.ssh/config) retries, so a "5 s" probe of an unreachable host took 92 s
+# (measured 2026-11-10). No coreutils `timeout` on macOS; same approach as EasyReverse tools/er-job.sh probe().
+job_bounded() {
+  perl -e 'my $t = shift; my $p = fork // exit 1; unless ($p) { setpgrp(0, 0); exec @ARGV or exit 127 }
+    $SIG{ALRM} = sub { kill -9, $p; kill 9, $p; exit 124 }; alarm $t; waitpid $p, 0; exit($? & 127 ? 1 : $? >> 8)' "$@"
+}
+
 # job_context: sets JOB_CTX (once per process tree: exported as JOB_CTX_RESOLVED) and says which machine runs.
 job_context() {
   [ -z "$JOB_CTX" ] || return 0
@@ -33,7 +43,7 @@ job_context() {
   [ "$want" != hub ] || want=$hub
   local waited=0 deadline=$(( SECONDS + ${JOB_WAIT_S:-0} ))
   while :; do
-    if [ "$want" = "$hub" ] || perl -e 'alarm 5; exec @ARGV' docker --context "$want" version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+    if [ "$want" = "$hub" ] || job_bounded 5 docker --context "$want" version --format '{{.Server.Version}}' >/dev/null 2>&1; then
       JOB_CTX=$want; break
     fi
     # JOB_WAIT_S (a caller's choice, default 0): wait that long for the wanted machine before falling back.
@@ -53,7 +63,7 @@ job_context() {
 # 1-min load where this shell can see it (the hub: the Mac's own loadavg, which includes the Colima VM; elsewhere "").
 job_capacity() {
   job_context
-  JOB_CPUS=$(perl -e 'alarm 10; exec @ARGV' docker --context "$JOB_CTX" info --format '{{.NCPU}}' 2>/dev/null) || JOB_CPUS=""
+  JOB_CPUS=$(job_bounded 10 docker --context "$JOB_CTX" info --format '{{.NCPU}}' 2>/dev/null) || JOB_CPUS=""
   JOB_LOAD=""
   [ -z "$JOB_ON_HUB" ] || JOB_LOAD=$(sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}')
   [ -n "$JOB_LOAD" ] || [ -z "$JOB_ON_HUB" ] || JOB_LOAD=$(awk '{print $1}' /proc/loadavg 2>/dev/null)
@@ -132,9 +142,9 @@ job_run() {
 job_cleanup() {
   [ -n "$JOB_PROJECT" ] && [ -n "$JOB_CTX" ] || return 0
   local ids
-  ids=$(perl -e 'alarm 30; exec @ARGV' docker --context "$JOB_CTX" ps -aq --filter "label=com.docker.compose.project=$JOB_PROJECT" 2>/dev/null) || ids=""
+  ids=$(job_bounded 30 docker --context "$JOB_CTX" ps -aq --filter "label=com.docker.compose.project=$JOB_PROJECT" 2>/dev/null) || ids=""
   # shellcheck disable=SC2086
-  [ -z "$ids" ] || perl -e 'alarm 60; exec @ARGV' docker --context "$JOB_CTX" rm -f $ids >/dev/null 2>&1 || true
+  [ -z "$ids" ] || job_bounded 60 docker --context "$JOB_CTX" rm -f $ids >/dev/null 2>&1 || true
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
