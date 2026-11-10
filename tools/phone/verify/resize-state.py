@@ -40,7 +40,9 @@ def validate(text, token, wid, round_, pause):
     props = re.findall(r'^WWR_PROP (.*)$', text, re.M)
     if props != [str(int(round_)), str(int(round_))]:
         reject('wrong corner property')
-    sf = text.split('WWR_SF_BEGIN\n', 1)[-1].split('WWR_SF_END', 1)[0]
+    if text.count('WWR_SF_BEGIN\n') != 1 or text.count('WWR_SF_END\n') != 1:
+        reject('incomplete SF capture')
+    sf = text.split('WWR_SF_BEGIN\n', 1)[1].split('WWR_SF_END', 1)[0]
     blocks = re.findall(r'^  Layer \[\d+\] powos-ww-' + str(wid) + r'#[^\n]*\n(.*?)(?=^  Layer |\Z)', sf, re.M | re.S)
     if not blocks:
         reject('missing exact window container')
