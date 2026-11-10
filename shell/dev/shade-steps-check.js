@@ -7,6 +7,8 @@
  *    folded AND expanded (f0f0361d: "the phone opens folded with its quick launchers shown").
  * S4 no CC card / no notification panel bg: the control center and the notifications' own panel paint no fill, edge,
  *    shadow or blur of their own - their tiles and cards float on the shade's one backdrop (05907ded, f0f0361d).
+ * S10 desktop never folds: on the inner screen a fold pull on the card (ccexpand.ts stretch/settle, gesture.ts's ccAll)
+ *    lets go whole, and a shade shut and opened again opens expanded. The cover is the control: the same pull folds it.
  */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Quick-page items resolve without an installed app (the gate's stub has none).
@@ -68,6 +70,32 @@ async function bothStates(E, at) {
   return fails;
 }
 
+const whole = () => !!document.querySelector(".notif-panel.shown .cc3-list.whole");
+
+/** S10's fold pull: past FOLD_AT on the card, let go; unfolded it settles whole, folded (the control) it folds. */
+async function foldPull(E, at) {
+  E.ccExpanded.value = true;
+  await window.__gw.settled();
+  E.stretch(-(E.FOLD_AT + 120));
+  E.settle(true);
+  await sleep(500);
+  await window.__gw.settled();
+  const [ex, wh] = [E.ccExpanded.value, whole()];
+  if (at === "unfolded") return ex && wh ? [] : [`${at}: S10: a fold pull folded the control center on the desktop screen (ccExpanded ${ex}, list whole ${wh})`];
+  return ex || wh ? [`${at}: S10 control: the same fold pull didn't fold it on the cover (ccExpanded ${ex}) - the check proves nothing`] : [];
+}
+
+/** S10's reopen: the shade shut and opened again opens in its mode's state (desktop expanded, cover folded). */
+async function reopened(E, S, at) {
+  const want = at === "unfolded";
+  S.notif.value = false;
+  await sleep(400);
+  S.notif.value = true;
+  await window.__gw.settled(() => document.querySelector(".notif-panel.shown .cc3-list"), ".notif-panel");
+  const ok = E.ccExpanded.value === want && whole() === want;
+  return ok ? [] : [`${at}: S10: shut and opened again, the control center opened ${E.ccExpanded.value ? "expanded" : "folded"} (want ${want ? "expanded" : "folded"})`];
+}
+
 /** S4: no card behind the controls, no panel behind the notifications. */
 function noCards(at) {
   const notifs = at === "folded" ? [".panel-body.together > .notif-own", "the notifications' panel"] : [".panel-body.two > .notif-col", "the notifications' column"];
@@ -84,7 +112,7 @@ export async function steps(at) {
     S.notif.value = true;
     await window.__gw.settled(() => document.querySelector(".notif-panel.shown .cc3-launchers .cc3-chip"), ".notif-panel");
     const first = opened(E, at);
-    return [...first, ...(await bothStates(E, at)), ...noCards(at)];
+    return [...first, ...(await bothStates(E, at)), ...noCards(at), ...(await foldPull(E, at)), ...(await reopened(E, S, at))];
   } finally {
     E.ccExpanded.value = E.expandedByDefault();
     await B.powos.store.set("controls.launchers", was ?? null);

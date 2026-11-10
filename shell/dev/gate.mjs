@@ -14605,7 +14605,8 @@ try {
       })));
   // The shade task's plan steps (dev/shade-steps-check.js): S1 the cover opens the control center folded, the inner
   // screen expanded; S3 the quick launchers on screen and on top folded and expanded; S4 no card behind the controls,
-  // no panel behind the notifications.
+  // no panel behind the notifications; S10 the inner screen never folds (a fold pull lets go whole, a shut + open opens
+  // expanded; the cover folds as the control).
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, `shade-steps-${label}`, viewport).then((r) => whenReady(r, () =>
