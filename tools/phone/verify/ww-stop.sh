@@ -20,6 +20,17 @@ judge() {  # judge <window-render output> <its rc>
   if [ "$ms" -ge 0 ] && [ "$ms" -lt "$MAX" ]; then echo "PASS ww-stop: the Linux consumer's stop took $ms ms (< $MAX; goal 0-100)"; return 0; fi
   echo "FAIL ww-stop: the Linux consumer's stop took $ms ms (want 0..$((MAX - 1)); -1 = still blocked after 3 s)"; return 1; }
 if [ "${1:-}" = --parse ]; then judge "$(cat "$2")" "${3:-0}"; exit $?; fi
+# Folded, the host refuses the Linux step ("web windows don't take Linux windows here") - found only after
+# window-render's other steps: 11-09 22:02 spent 218 s of an idle window for a precond rc 3. Unfold first, like
+# wwc-lib.sh's wwc_start (cmd device_state, marked as the tools' own input so the touch detection doesn't read the
+# panels' resume as the user), and give the hinge its own state back after.
+A="$here/../adb.sh"
+sh_() { "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
+case $(sh_ "dumpsys device_state | grep -m1 mCommittedState") in
+  *CLOSED*) sh_ "echo \$(( \$(date +%s) + 8 )) > /data/local/tmp/powos-selfinput; cmd device_state state 3" >/dev/null
+    trap 'sh_ "echo \$(( \$(date +%s) + 8 )) > /data/local/tmp/powos-selfinput; cmd device_state state reset" >/dev/null' EXIT
+    echo "ww-stop: the phone was folded - unfolded for the Linux step (reset after)"; sleep 3 ;;
+esac
 out=$("$here/window-render.sh" --hidden 2>&1); rc=$?
 printf '%s\n' "$out" | grep -E '^linux:|window-render: ' | cut -c1-240
 judge "$out" "$rc"

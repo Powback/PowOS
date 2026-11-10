@@ -12,7 +12,8 @@
 # (the shade is its own page, the meter takes only its renders), so the shade page's own rAF deltas are recorded beside
 # it with the list's scroll events, and the frames the list moved in are gated: FAIL when their fps p5 < 55 or any is
 # > 33 ms, or when the list didn't scroll (too few notifications). Long frames between the swipes are listed only.
-#   perf-scenarios.sh [--round R] [--only swipe|launcher|shade|shade-scroll] [--reps N] [--ab NAME=VALUE ...]
+#   perf-scenarios.sh [--round R] [--only swipe|launcher|shade|shade-scroll|trace] [--reps N] [--ab NAME=VALUE ...]
+# --only trace: one launcher open/shut recorded and its fields asserted (sc_trace; never part of the default run).
 # --ab (shade-scroll's A/B arms, repeatable): data-NAME="VALUE" on the shade page's root for the recording only, removed
 # after - scroll-fade=static|off (the list's scroll-driven edge mask: fixed / none), overscroll=none (no stretch).
 # shell.css matches only those attributes; nothing in the shell sets them. No --ab: the shipped behaviour.
@@ -104,7 +105,8 @@ sc_swipe() {
   step swipe "page swipes done ($REPS pairs)"; pass "recorded"
   surf_off
 }
-sc_launcher() {
+sc_launcher() { sc_launcher_rec launcher; step launcher "launcher opened and shut ($REPS times)"; pass "recorded"; }
+sc_launcher_rec() {
   local i p; rec_on
   for i in $(seq 1 "$REPS"); do
     chk launcher$i; p=$(freept "" 0 0 .54); [ "$p" != none ] && [ -n "$p" ] || { fail "launcher: no empty spot"; break; }
@@ -112,8 +114,19 @@ sc_launcher() {
     [ "$(isopen)" = true ] || note "rep $i: the drawer didn't open"
     back 1.5
   done
-  rec_off launcher
-  step launcher "launcher opened and shut ($REPS times)"; pass "recorded"
+  rec_off "$1"
+}
+# trace (board task perf-traces-the-user-sends-must-show-what-react): a short recording on a known scene - the launcher
+# opened and shut once - and its JSON held to what react-scan shows (perf-trace-fields.py): component renders by count
+# and time, slow commits with their duration and components, home's long-frame verdicts + pre-roll, the commit list.
+# A missing field is a FAIL: the user's own traces would lack it too.
+sc_trace() {
+  REPS=1 sc_launcher_rec trace
+  [ -s "$OUT/trace.json" ] || return 0
+  local r; r=$(python3 -I "$here/perf-trace-fields.py" "$OUT/trace.json"); local rc=$?; log "$r"
+  step trace-fields "the recording's summary carries renders, slow commits and frame verdicts"
+  [ $rc = 0 ] && pass "trace fields: $(grep -c '^ok' <<<"$r") present ($(grep -m1 'slowCommits' <<<"$r" | cut -c1-160))" \
+    || fail "trace fields missing: $(grep '^MISSING' <<<"$r" | tr '\n' ';' | cut -c1-400)"
 }
 sc_shade() {
   local i S=$((H / 100)) X=$((W * 8 / 10)); rec_on
@@ -232,8 +245,8 @@ print("%s shade page while scrolling: %d frames in %d scroll bursts, fps p50 %.1
   log "$r"
   case $r in OK*) pass "${r#OK }" ;; *) fail "${r#BAD } (want p5 >= 55 fps, no frame > 33 ms while the list moves, the list scrolled)" ;; esac
 }
-for s in swipe launcher shade shade-scroll; do
-  [ -z "$ONLY" ] || [ "$ONLY" = $s ] || continue
+for s in swipe launcher shade shade-scroll trace; do
+  if [ -z "$ONLY" ]; then [ $s = trace ] && continue; else [ "$ONLY" = $s ] || continue; fi
   "sc_${s//-/_}"; hemit system.home null
 done
 meter_back

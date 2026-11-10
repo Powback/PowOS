@@ -487,6 +487,9 @@ e2e_finish() {
   [ "$PART" = "$LAST" ] && mail_manager
   DONE=1
   local s="e2e-$JOURNEY round $ROUND part $PART/$LAST: $NPASS passed, $NFAIL failed, $NSKIP skipped (interrupted) - $UDIR"
+  # Mostly not judged is no verdict (11-08 03:48, round 251 part 1: the screen dozed, "2 passed, 0 failed, 6 skipped"
+  # went to done/ as a PASS that tested nothing, and the round never ran that part again): rc 3, re-queued.
+  [ $NFAIL = 0 ] && [ "${NSKIP:-0}" -gt 0 ] && [ "${NSKIP:-0}" -ge "$NPASS" ] && { echo "SKIP $s: most steps interrupted - not judged, re-queued"; exit 3; }
   [ $NFAIL = 0 ] && echo "PASS $s" || { echo "FAIL $s ($(grep -c FAIL "$STEPS") FAIL lines in steps.txt)"; print_fails; }
 }
 # print_fails: every FAIL step line of steps.txt, untruncated, so the done log says WHY (not only how many).

@@ -245,12 +245,17 @@ export function rendersIn(frames: { start: number; dur: number }[], shift = 0) {
     return { start: f.start, dur: f.dur, renderMs: r2(ms), components: top, handlers: handlersIn(f, shift) };
   });
 }
+/** react-scan's "slow commits": the most expensive commits of the whole recording (not only the last 600 the list
+ * keeps), slowest first, each with the components it rendered - what a sent trace's summary names first. */
+function slowCommits(shift: number, n = 8) {
+  return [...commits].sort((a, b) => b.ms - a.ms).slice(0, n).map((c) => ({ t: r1(c.t + shift), ms: c.ms, names: c.names }));
+}
 /** The trace's "renders" section: totals, the top lists, needless ones flagged, and per janky frame what rendered. */
 export function renderReport(janky: { start: number; dur: number }[] = [], shift = 0) {
   let renders = 0, needlessRenders = 0, ms = 0;
   for (const s of stats.values()) { renders += s.renders; needlessRenders += s.needless; ms += s.selfMs; }
   return { v: 1, durationMs: Math.round(performance.now() - t0), commits: commits.length, renders, needlessRenders, renderMs: r2(ms),
-    ...topRenders(), jankyFrames: rendersIn(janky, shift), handlers: topHandlers(),
+    ...topRenders(), jankyFrames: rendersIn(janky, shift), handlers: topHandlers(), slowCommits: slowCommits(shift),
     commitList: commits.slice(-600).map((c) => ({ ...c, t: r1(c.t + shift) })), handlerCalls: calls.slice(-400).map((c) => ({ ...c, t: r1(c.t + shift) })) };
 }
 
@@ -269,5 +274,7 @@ export function rendersSummary(r: Report | { error: string } | undefined) {
   return { renders: r.renders, needless: r.needlessRenders, renderMs: r.renderMs, commits: r.commits,
     byCount: r.byCount.slice(0, 5).map(row), byTime: r.byTime.slice(0, 5).map(row), needlessTop: r.needless.slice(0, 5).map(row),
     jankyFrames: [...r.jankyFrames].sort((a, b) => b.dur - a.dur).slice(0, 5),
-    handlers: (r.handlers ?? []).slice(0, 5).map((h) => `${h.name} ${h.calls}x ${h.totalMs}ms max ${h.maxMs}ms`) };
+    handlers: (r.handlers ?? []).slice(0, 5).map((h) => `${h.name} ${h.calls}x ${h.totalMs}ms max ${h.maxMs}ms`),
+    // "12.4ms at +3051ms: Pager x1 Icon x12" - a summary line per slow commit (a trace from before this has none)
+    slowCommits: (r.slowCommits ?? []).slice(0, 5).map((c) => `${c.ms}ms at ${c.t >= 0 ? "+" : ""}${c.t}ms: ${Object.entries(c.names).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${k} x${v}`).join(" ")}`) };
 }

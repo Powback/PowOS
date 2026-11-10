@@ -260,7 +260,7 @@ REC='(()=>{const r=document.querySelector(".status-rec-ring"),d=document.querySe
 # recread: the recording light on every shell page up now ("<page>: <ring|dot|none>", the first lit one, else the last).
 # Only the status chrome's pages (mode=statusbar) and home's: a hidden surface page (shade, pull) can hold CDP 120 s.
 recread() { local pg v out="none (no statusbar/home page)"; for pg in $("$T/cdp.sh" pages 2>/dev/null | awk '$1=="statusbar"||$1=="home"{print $1}' | sort -u); do
-    v=$(CDP_TIMEOUT_S=15 ev "$REC" "$pg"); case $v in ring*|dot*) echo "$pg: $v"; return ;; esac; out="$pg: $v"; done; echo "$out"; }
+    v=$(CDP_TIMEOUT_S=${RECREAD_T:-15} ev "$REC" "$pg"); case $v in ring*|dot*) echo "$pg: $v"; return ;; esac; out="$pg: $v"; done; echo "$out"; }
 # micrun: the packages Android has RECORD_AUDIO running for now (dumpsys appops), space-separated; empty: the mic rests.
 micrun() { sh_ "dumpsys appops --op RECORD_AUDIO" | python3 -c 'import sys,re
 pkg=None; out=[]
@@ -303,15 +303,20 @@ if [ "$CASE" = rec-light ]; then
     [ -n "$(micrun)" ] && { note "$fold: something already records ($(micrun)) - mic not checked"; continue; }
     case $r0 in *ring*|*dot*) fail "$fold: a recording light on with nothing recording ($r0)" ;; esac
     CAMT0=$(tasks); CAMON=1; sh_ "am start -n $MICAPP -a android.speech.action.RECOGNIZE_SPEECH >/dev/null"
-    seen=; ran=; for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 0.7; m=$(micrun); [ -n "$m" ] && ran=$m
-      r1=$(recread); case $r1 in *"ring mic"*|*"dot mic"*) seen=$r1; [ -n "$ran" ] && break ;; esac; done
+    # The poll is held to 20 s of wall time with 4 s CDP reads: with the speech-input activity in front, each 15 s
+    # read of the status pages could time out, so the 10 polls ran past the job's whole 420 s budget (11-10 01:05,
+    # FAIL timeout at "cover mic before", the check's last log line).
+    seen=; ran=; pe=$((SECONDS + 20)); for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 0.7; m=$(micrun); [ -n "$m" ] && ran=$m
+      r1=$(RECREAD_T=4 recread); case $r1 in *"ring mic"*|*"dot mic"*) seen=$r1; [ -n "$ran" ] && break ;; esac
+      [ $SECONDS -lt $pe ] || { log "$fold mic: poll stopped after 20 s (last read: $r1)"; break; }; done
     chk mic; step "mic-$fold" "$fold: speech input open ($MICAPP), recording: ${ran:-none}"
     log "$fold with the mic: ${seen:-$r1} (android running: ${ran:-none})"
     if [ -n "$seen" ]; then pass "$fold: orange ring while ${ran:-an app} records ($seen)"
     elif [ -n "$ran" ]; then fail "$fold: $ran recorded (RECORD_AUDIO running) but no mic ring ($r1)"
     else note "$fold: $MICAPP never started recording (no RECORD_AUDIO running) - mic not checked"; fi
     camclose; CAMON=; chk "mic closed"
-    off=; for _ in 1 2 3 4 5 6; do [ -z "$(micrun)" ] && { r2=$(recread); case $r2 in *ring*|*dot*) ;; *) off=1; break ;; esac; }; sleep 1; done
+    off=; pe=$((SECONDS + 20)); for _ in 1 2 3 4 5 6; do [ -z "$(micrun)" ] && { r2=$(RECREAD_T=4 recread); case $r2 in *ring*|*dot*) ;; *) off=1; break ;; esac; }
+      [ $SECONDS -lt $pe ] || break; sleep 1; done
     step "mic-closed-$fold" "$fold: speech input closed"
     if [ -n "$off" ]; then pass "$fold: light off once the mic stopped"
     elif [ -n "$(micrun)" ]; then note "$fold: RECORD_AUDIO still running after the close ($(micrun))"

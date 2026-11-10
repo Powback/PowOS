@@ -12,8 +12,12 @@ TASK=manager-end-to-end-user-journeys-on-the-phone-qa
 Q=${QUEUE_DIR:-$HOME/.cache/powos-verify-queue}
 idle=0 round=
 while [ $# -gt 0 ]; do case "$1" in --if-idle) idle=1; shift ;; --round) round=$2; shift 2 ;; *) echo "usage: e2e-queue.sh [--if-idle] [--round R]"; exit 2 ;; esac; done
-if [ $idle = 1 ] && grep -lsE 'e2e-(desktop|appapi)\.sh' "$Q"/*.job >/dev/null 2>&1; then
-  echo "e2e: a round is still queued ($(grep -lsE 'e2e-(desktop|appapi)\.sh' "$Q"/*.job | wc -l | tr -d ' ') jobs) - none added"; exit 0
+# A round = this task's own e2e jobs. Other tasks queue e2e-desktop.sh as their own check (11-08 19:35
+# regression-linux-window-close-...: need= a sha not yet live, so it waited 2 days) and counting those blocked every
+# round from 11-08 to 11-10 ("a round is still queued (1 jobs)" after every ship, round stuck at 250).
+own_jobs() { grep -lsx "task=$TASK" "$Q"/*.job 2>/dev/null | while read -r f; do grep -qsE 'e2e-(desktop|appapi)\.sh' "$f" && echo "$f"; done; }
+if [ $idle = 1 ] && [ -n "$(own_jobs)" ]; then
+  echo "e2e: a round is still queued ($(own_jobs | wc -l | tr -d ' ') jobs) - none added"; exit 0
 fi
 c=$HOME/.cache/powos-e2e; mkdir -p "$c"
 if [ -z "$round" ]; then round=$(( $(cat "$c/round" 2>/dev/null || echo 0) + 1 )); echo "$round" > "$c/round"; fi

@@ -84,6 +84,8 @@ W 1000 1500
 EOF
 out=$(python3 -I "$util" "$T/util.log")
 eq "util.log line" "$out" "utilization: 1 windows, 500s window time, 298s on 2 verdicts (59%); wasted 202s: early 8s, precond 85s, gaps 109s"
+printf 'J 1500 1800 timeout e\nW 1500 1800\n' >> "$T/util.log"
+eq "timeouts named" "$(python3 -I "$util" "$T/util.log")" "utilization: 2 windows, 800s window time, 598s on 3 verdicts (74% - 300s of it timeouts); wasted 202s: early 8s, precond 85s, gaps 109s"
 eq "--since drops older records" "$(python3 -I "$util" --since 5000 "$T/util.log")" "utilization: 0 windows, 0s window time, 0s on 0 verdicts (0%); wasted 0s: none, gaps 0s"
 # ... and from an old runner.log: an rc 3 followed by "still idle" counts as precond
 cat > "$T/runner.log" <<'EOF'

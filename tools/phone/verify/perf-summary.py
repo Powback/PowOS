@@ -63,6 +63,8 @@ def main():
         print(f"  renders: {r.get('renders')} ({r.get('needless')} needless, {r.get('renderMs')} ms, {r.get('commits')} commits)")
         print(f"    by time: {r.get('byTime')}")
         print(f"    by count: {r.get('byCount')}")
+        if r.get("slowCommits"):
+            print(f"    slow commits: {r.get('slowCommits')}")
     if s.get("surfaces"):
         print(f"  surfaces: {json.dumps(s['surfaces'])[:800]}")
 
