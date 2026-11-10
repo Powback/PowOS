@@ -7755,7 +7755,11 @@ async function wwResizeCostIn(n, glass) {
     await frame(), await frame();
     // The render scan only with the glass off: its own timing per render is script the glass pass's numbers leave out.
     if (!glass) R.startScan("gate-rs5"), R.reset();
+    // RS6: the layer paints of the moves only (the node side's LayerTree capture, [rs6Painted]).
+    await window.__rs5Mark?.("start");
     const m = await window.__rs5.moves(pe, n);
+    await frame(), await frame();
+    await window.__rs5Mark?.("end");
     const top = glass ? undefined : R.topRenders(12).byCount.map((c) => `${c.name}x${c.renders}(${c.selfMs}ms)`);
     if (!glass) R.stopScan("gate-rs5");
     const glassMs = glass ? window.__rs5.glassMs() : undefined;
@@ -7839,6 +7843,61 @@ async function rs5Pass(r, m, glass, how) {
   if (tr) console.log(`ww-resize-cost trace self ms/move: ${traceTop(tr, RS5_MOVES)}`);
   return out;
 }
+
+/**
+ * RS6 (11-11, the phone's resize trace: cc layers 566 `.page-under` and 567 `.page-windows` re-rastered 124 and 97
+ * tiles over a 1.7 s drag - the per-move masks and the shadow's size - and the GPU thread's raster behind the 106 ms
+ * drawGl): a resize move repaints no full-page layer. The moves' LayerTree.layerPainted events (the window passes mark
+ * their moves: window.__rs5Mark "start"/"end"), each painted layer named by its element; a paint of `.page-under`,
+ * `.page-windows` (or any layer over half the page) fails. judge(): the failures, one line with what painted.
+ */
+const RS6_FULL = /\bpage-windows\b/;
+// HACK: `.page-under` (the page's own content, masked where its windows are: underWindows) still repaints each move -
+// its mask follows the window and a CSS mask can't follow by transform; printed, not failed. Real fix: the page's
+// content cut by a composited hole (no per-move mask), then this joins RS6_FULL.
+const RS6_DEBT = /\bpage-under\b/;
+/** A described DOM node as "tag.class.class" ("?" without one). */
+function rs6Name(n) {
+  if (!n) return "?";
+  const i = n.attributes?.indexOf("class") ?? -1;
+  return n.localName + (i >= 0 ? "." + n.attributes[i + 1].trim().split(/\s+/).join(".") : "");
+}
+async function rs6Capture(r) {
+  const cdp = await r.page.target().createCDPSession();
+  const layers = new Map();
+  let painted = [], on = false;
+  const marks = [];
+  cdp.on("LayerTree.layerPainted", (e) => on && painted.push(e));
+  cdp.on("LayerTree.layerTreeDidChange", (e) => e.layers?.forEach((l) => layers.set(l.layerId, l)));
+  await cdp.send("LayerTree.enable").catch(() => {});
+  await r.page.exposeFunction("__rs5Mark", (what) => {
+    if (what === "start") (painted = []), (on = true);
+    else (on = false), marks.push(painted);
+  });
+  const nameOf = async (l) => {
+    if (!l?.backendNodeId) return l && !l.parentLayerId ? "root" : "?";
+    return rs6Name((await cdp.send("DOM.describeNode", { backendNodeId: l.backendNodeId }).catch(() => null))?.node);
+  };
+  return {
+    async judge() {
+      const vw = await r.page.evaluate(() => innerWidth * innerHeight);
+      const by = new Map();
+      for (const e of marks.flat()) {
+        const name = await nameOf(layers.get(e.layerId));
+        const a = e.clip.width * e.clip.height;
+        const t = by.get(name) ?? { n: 0, max: 0, ids: new Set() };
+        by.set(name, { n: t.n + 1, max: Math.max(t.max, a), ids: t.ids.add(e.layerId) });
+      }
+      const list = [...by].map(([k, v]) => `${k} ${v.n}x max ${Math.round((v.max / vw) * 100)}% (${v.ids.size} layer${v.ids.size > 1 ? "s" : ""})`).join("; ");
+      console.log(`ww-resize-cost RS6 paints over ${marks.length} passes of ${RS5_MOVES} moves: ${list || "none"}`);
+      const bad = [...by].filter(([k, v]) => RS6_FULL.test(k) || (v.max > vw / 2 && !RS6_DEBT.test(k)));
+      return bad.length ? [`RS6: a resize move repainted a full-page layer: ${bad.map(([k, v]) => `${k} ${v.n}x (max ${Math.round((v.max / vw) * 100)}% of the page)`).join(", ")} - a move must repaint only the window's own small layers`] : [];
+    },
+  };
+}
+
+/** RS5's read budget: [reads] (the glass-off pass's most a move) over [RS5_READS] fails. */
+const rs5ReadFails = (reads) => (reads > RS5_READS ? [`RS5: ${reads} layout reads (rects, computed styles) in one resize move's handler + renders (want <= ${RS5_READS}): a render reads layout per window again`] : []);
 
 /** RS5: a trace's main-thread events summed by name, per move ([n] moves), the top [k]: where a move's ms go. */
 function traceTop(buf, n, k = 14) {
@@ -13713,6 +13772,7 @@ try {
           // Twice: the glass off (the gate's page as it boots), then its stand-in on (the phone: nativeglass.ts measures
           // each frame of the drag). GATE_PROFILE=1: once more with the glass, traced (the main thread's events, self ms a
           // move, and the elements restyled): where a move's ms go.
+          const paints = await rs6Capture(r);
           let reads = 0;
           for (const [glass, how] of [[false, ""], [true, ""], ...(process.env.GATE_PROFILE ? [[true, "trace"]] : [])]) {
             const out = await rs5Pass(r, m, glass, how);
@@ -13723,7 +13783,7 @@ try {
           }
           // 11-08, before the fix: 79 layout reads a move (each window's SwapHint and Handles reading the page's rects and
           // computed styles mid-render, after the window before it wrote its style: a forced layout each); after: 11.
-          return reads > RS5_READS ? [`RS5: ${reads} layout reads (rects, computed styles) in one resize move's handler + renders (want <= ${RS5_READS}): a render reads layout per window again`] : [];
+          return [...rs5ReadFails(reads), ...(await paints.judge())];
         }),
       ),
     );

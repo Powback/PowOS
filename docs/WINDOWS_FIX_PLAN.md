@@ -159,6 +159,14 @@ The board shows window checks failing by timeout or waiting days for a free phon
     `logcat ... PowosShade:V ...` readers from another check.
     Next: keep the per-move raster off `.page-under` and `.page-windows`. Give the mask and the shadow their own small
     composited layers (a hole that follows by transform, a 9-slice shadow), so a move re-rasters no full-page layer.
+  - 11-11 RS6 (shell): during a resize drag the dragged window's shadow is a 9-slice of itself
+    (`webwindows.tsx sliceShadow`: 8 composited pieces, moved and stretched by transform, whole again at the end).
+    While any window on the page is being resized, every frame and shadow there is its own layer
+    (`.page-windows:has(.ww-resizing)`). Gate ww-resize-cost RS6 (LayerTree.layerPainted over 2x60 moves). Before:
+    `.page-under` 120x at 93% of the page, `.page-windows` 120x at 56%. After: `.page-windows` 0. The dragged frame
+    repaints only its own layer (120x at 33%); the 9-slice pieces paint once at the drag's start. Still left: the lower
+    windows' frames and shadows, 360x each at up to 26% (their mask holes follow the dragged window), and
+    `.page-under` 120x at 93% (its mask; printed, not failed - HACK in the gate).
 - [x] 0.6 Each failing check on the board gets one line: real bug, check bug, or environment.
   Done 11-10: seven board tasks got a "0.6" step line; the table is in `docs/research/window-bench.md` "11-10
   baseline". None of the failures was a judged real bug: they were check bugs or the environment, most of them home's

@@ -2317,6 +2317,7 @@ function resizeEnd(id: number) {
   if (!r) return;
   resizing.delete(id);
   if (glassDrags.delete(id) && !glassDrags.size) glassDrag(false);
+  unslice(id, webWins.peek().find((v) => v.id === id));
   // RS5c: the live frame committed (a new WebWin: the window's one render with it).
   if (liveSized.delete(id)) update(id, {});
   reach(id);
@@ -3306,7 +3307,7 @@ function writeFrame(frame: HTMLElement, w: WebWin) {
   setBox(frame, w);
   const shadow = frame.parentElement?.querySelector<HTMLElement>(`.ww-shadow[data-wwid="${w.id}"]`);
   const b = frameBox(w);
-  if (shadow) setBox(shadow, { x: b.x - SHADOW_PAD, y: b.y - SHADOW_PAD, w: b.w + 2 * SHADOW_PAD, h: b.h + 2 * SHADOW_PAD });
+  if (shadow) sliceShadow(shadow, w.id, { x: b.x - SHADOW_PAD, y: b.y - SHADOW_PAD, w: b.w + 2 * SHADOW_PAD, h: b.h + 2 * SHADOW_PAD });
   const size = frame.querySelector(".ww-outline-size");
   // Its text nodes' data (the size, " × ", the size): Preact keeps these nodes and diffs their text on its next render.
   if (size?.firstChild instanceof Text && size.lastChild instanceof Text) {
@@ -3314,6 +3315,68 @@ function writeFrame(frame: HTMLElement, w: WebWin) {
     size.lastChild.data = String(Math.round(b.h));
   }
 }
+/**
+ * RS6 (11-11, the phone's resize trace: the shadow's element resized every move re-rastered its blur into the page's
+ * windows layer, `.page-windows`, 97 tiles over a 1.7 s drag): through a resize drag a window's shadow is a 9-slice of
+ * itself as it was at the drag's start - 4 corners moved, 4 edges moved and stretched along their length (a box
+ * shadow's edge is the same all along it, so the stretch is exact), each its own composited layer: a move sets 8
+ * transforms and repaints nothing. The element keeps its start box until [unslice] at the drag's end (the commit render
+ * writes the final one). Not sliced: a shadow masked by a window above it (its mask would cut a piece past its box), or
+ * one too small for the corners.
+ */
+/** A 9-slice corner: the shadow's reach past the frame and the frame's rounded corner with room. */
+const S9_IN = 48;
+const S9_PIECES = [
+  ["nw", 0, 0], ["n", 1, 0], ["ne", 2, 0], ["w", 0, 1], ["e", 2, 1], ["sw", 0, 2], ["s", 1, 2], ["se", 2, 2],
+] as const;
+const S9 = () => SHADOW_PAD + S9_IN;
+type Slice = { el: HTMLElement; x: number; y: number; w: number; h: number; pieces: HTMLElement[] };
+const sliced = new Map<number, Slice>();
+function sliceShadow(shadow: HTMLElement, id: number, box: Box) {
+  let s = sliced.get(id);
+  if (!s) {
+    const st = shadow.style;
+    const r = { x: parseFloat(st.left), y: parseFloat(st.top), w: parseFloat(st.width), h: parseFloat(st.height) };
+    if (st.maskImage || !(r.w > 2 * S9() && r.h > 2 * S9() && box.w > 2 * S9() && box.h > 2 * S9())) return setBox(shadow, box);
+    s = { el: shadow, ...r, pieces: S9_PIECES.map(([, i, j]) => slicePiece(shadow, r, i, j)) };
+    shadow.classList.add("sliced");
+    sliced.set(id, s);
+  }
+  if (box.w <= 2 * S9() || box.h <= 2 * S9()) return; // MIN_W/MIN_H keep a frame past this; the last good place stays
+  const dx = box.x - s.x, dy = box.y - s.y, ew = box.w - s.w, eh = box.h - s.h;
+  const sx = (box.w - 2 * S9()) / (s.w - 2 * S9()), sy = (box.h - 2 * S9()) / (s.h - 2 * S9());
+  S9_PIECES.forEach(([, i, j], k) => {
+    const tx = dx + (i === 2 ? ew : 0), ty = dy + (j === 2 ? eh : 0);
+    s.pieces[k].style.transform = `translate(${tx}px, ${ty}px) scale(${i === 1 ? sx : 1}, ${j === 1 ? sy : 1})`;
+  });
+}
+/** One piece of [shadow]'s 9-slice (column [i], row [j]; 1 = the stretched middle) at its start box [r]. */
+function slicePiece(shadow: HTMLElement, r: Box, i: number, j: number): HTMLElement {
+  const at = (k: number, len: number) => (k === 0 ? 0 : k === 1 ? S9() : len - S9());
+  const size = (k: number, len: number) => (k === 1 ? len - 2 * S9() : S9());
+  const p = document.createElement("div");
+  p.className = "ww-s9";
+  const px = at(i, r.w), py = at(j, r.h);
+  setBox(p, { x: px, y: py, w: size(i, r.w), h: size(j, r.h) });
+  const inner = document.createElement("div");
+  inner.className = "ww-s9-in";
+  setBox(inner, { x: SHADOW_PAD - px, y: SHADOW_PAD - py, w: r.w - 2 * SHADOW_PAD, h: r.h - 2 * SHADOW_PAD });
+  p.append(inner);
+  shadow.append(p);
+  return p;
+}
+/** Window [id]'s shadow whole again at frame [w]'s box (the drag's end; the commit render writes the same box). */
+function unslice(id: number, w: WebWin | undefined) {
+  const s = sliced.get(id);
+  if (!s) return;
+  sliced.delete(id);
+  s.pieces.forEach((p) => p.remove());
+  s.el.classList.remove("sliced");
+  if (!w) return;
+  const b = frameBox(w);
+  setBox(s.el, { x: b.x - SHADOW_PAD, y: b.y - SHADOW_PAD, w: b.w + 2 * SHADOW_PAD, h: b.h + 2 * SHADOW_PAD });
+}
+
 /** Windows resized live ([resizeLive]) since their drag began: [resizeEnd] commits them. */
 const liveSized = new Set<number>();
 const setBox = (el: HTMLElement, b: { x: number; y: number; w: number; h: number }) => {
