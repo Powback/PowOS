@@ -41,6 +41,23 @@ sh_() {
             result = subprocess.run(['bash', '-c', script, 'test', d, scenario], capture_output=True, text=True)
             return result, (root / 'calls').read_text()
 
+    def test_rotation_rejects_wrong_screen_in_both_orientations(self):
+        source = (ROOT / 'tools/phone/verify/rotate-repro.sh').read_text()
+        body = source.split('assert_home_screen() {', 1)[1].split('\n}\n', 1)[0]
+        script = 'HOME_ICONS=1; QUEUE_SCREEN=$1; dims_test=$2; sh_() { echo "Physical size: $dims_test"; }; log() { :; }; assert_home_screen() {' + body + '\n}\nassert_home_screen'
+        for screen, dims, rc in [('cover', '2268x2440', 5), ('cover', '2440x2268', 5),
+                                  ('cover', '1116x2484', 0), ('cover', '2484x1116', 0),
+                                  ('inner', '2268x2440', 0), ('inner', '2440x2268', 0),
+                                  ('inner', '1116x2484', 5), ('', '1116x2484', 5),
+                                  ('cover', 'garbage', 5), ('cover', '1000x1000', 5)]:
+            with self.subTest(screen=screen, dims=dims):
+                result = subprocess.run(['bash', '-c', script, 'test', screen, dims], capture_output=True, text=True)
+                self.assertEqual(result.returncode, rc, result.stdout + result.stderr)
+        queue = (ROOT / 'tools/phone/verify/queue.sh').read_text()
+        self.assertIn('QUEUE_SCREEN="$screen"', queue)
+        self.assertIn('assert_home_screen\ne2e_setup\nassert_home_screen', source)
+        self.assertIn('chk "$name rotation $r"\n    assert_home_screen', source)
+
     def test_rotation_spacing_uses_existing_restoration_frame(self):
         source = (ROOT / 'tools/phone/verify/rotate-repro.sh').read_text()
         self.assertIn('--home-icons) HOME_ICONS=1', source)

@@ -23,7 +23,28 @@ ARGS=()
 while [ $# -gt 0 ]; do case $1 in --home-icons) HOME_ICONS=1; shift ;; --only) ONLY=$2; shift 2 ;; --hold) HOLD=$2; shift 2 ;; *) ARGS+=("$1"); shift ;; esac; done
 e2e_args "${ARGS[@]+"${ARGS[@]}"}"
 e2e_init rotate-repro
+# --screen is a requested screen, not permission to silently test whatever display is active.
+# The queue passes its metadata; never force a fold here or disturb the user's hinge state.
+assert_home_screen() {
+  [ "$HOME_ICONS" = 1 ] || return 0
+  case ${QUEUE_SCREEN:-} in inner|cover) ;; *) echo "SKIP: --home-icons needs queue --screen inner|cover (QUEUE_SCREEN metadata)"; exit 5 ;; esac
+  local dims w h actual
+  dims=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1)
+  w=${dims%% *}; h=${dims##* }
+  case $w:$h in *[!0-9:]*|:*) echo "SKIP: cannot identify active display: $dims"; exit 5 ;; esac
+  # OnePlus Open physical panel sizes, orientation independent. Unknown geometry is not evidence.
+  case $w:$h in
+    2268:2440|2440:2268) actual=inner ;;
+    1116:2484|2484:1116) actual=cover ;;
+    *) echo "SKIP: unrecognised OnePlus display $w x $h; requested $QUEUE_SCREEN"; exit 5 ;;
+  esac
+  [ "$actual" = "$QUEUE_SCREEN" ] || { echo "SKIP: requested $QUEUE_SCREEN but actual display is $actual ($w x $h); fold to the requested screen before rerunning"; exit 5; }
+  log "screen verified: requested=$QUEUE_SCREEN actual=$actual ($w x $h)"
+}
+# Before setup touches home, and again after setup and every turn: no wrong-screen PASS.
+assert_home_screen
 e2e_setup
+assert_home_screen
 
 # The rotation settings as they were, back in every exit (e2e_abort is the frame's own EXIT trap).
 AR0=$(sh_ "settings get system accelerometer_rotation"); UR0=$(sh_ "settings get system user_rotation")
@@ -99,6 +120,7 @@ variant() {
       if [ $((r % 2)) = 1 ]; then [ "$dir" != "$o0" ] && { ok=1; break; }; else [ "$dir" = "$o0" ] && { ok=1; break; }; fi
     done
     sleep "$HOLD"; chk "$name rotation $r"
+    assert_home_screen
     step "$name-rot$r" "$name: user_rotation $r by settings, $HOLD s later"
     st=$(ev "$STATE"); s=$(flat); fl=${s%% *}
     w=$(jget "$st" w); h=$(jget "$st" h); sw=$(jget "$st" sw); sh=$(jget "$st" sh); blank=$(jget "$st" blank)
