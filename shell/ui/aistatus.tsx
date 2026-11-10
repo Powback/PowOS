@@ -266,27 +266,64 @@ function CountItem({ w, d }: { w: WorkRow; d: Dot }) {
   );
 }
 
-/** An area opened: the tasks behind its counts, needs you and to check first; its idle ones as one line to Progress. */
+/** Progress with [area]'s card open (null: Progress as it is). */
+const toProgress = (area: string | null) => ((progressFocus.value = area ? { area, id: "" } : null), (aiAgent.value = null), (aiScreen.value = "progress"));
+
+/** One state's tasks in an opened area: its heading and count, then each task behind that count. */
+function CountGroup({ d, rows }: { d: Dot; rows: WorkRow[] }) {
+  return (
+    <section class="ais-ck-group" data-state={d} aria-label={STATE_HEAD[d]}>
+      <h4 class="ais-ck-h">
+        {STATE_HEAD[d]}
+        <span class="ais-n">{rows.length}</span>
+      </h4>
+      <ul class="ais-ck-list">
+        {rows.map((w) => (
+          <CountItem key={w.id} w={w} d={d} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * An area opened: the tasks behind EVERY count in its row, needs you and to check first, its idle ones last (the user,
+ * 11-03: "says 1 to check but which one???" - an idle count that only led to Progress named no task either), then the
+ * area's card in Progress.
+ */
 function AreaDetail({ a, you }: { a: AreaStat; you: Set<string> }) {
   const n = byState(a, you);
-  const shown = (["waiting", "check", "working"] as const).filter((d) => n[d].length > 0);
   return (
     <div class="ais-ck" data-area-detail={a.name}>
-      {shown.map((d) => (
-        <section key={d} class="ais-ck-group" data-state={d} aria-label={STATE_HEAD[d]}>
+      {(["waiting", "check", "working", "stalled"] as const).filter((d) => n[d].length > 0).map((d) => (
+        <CountGroup key={d} d={d} rows={n[d]} />
+      ))}
+      <button type="button" class="ais-more ais-ck-all" onClick={() => toProgress(a.name)}>
+        All of {a.name} in Progress
+      </button>
+    </div>
+  );
+}
+
+/** The calm last line opened: the idle tasks of the areas where nothing moves, area by area. */
+function RestDetail({ rest }: { rest: AreaStat[] }) {
+  return (
+    <div class="ais-ck" data-area-detail="rest">
+      {rest.map((a) => (
+        <section key={a.name} class="ais-ck-group" data-state="stalled" data-area={a.name} aria-label={a.name}>
           <h4 class="ais-ck-h">
-            {STATE_HEAD[d]}
-            <span class="ais-n">{n[d].length}</span>
+            {a.name}
+            <span class="ais-n">{a.open.length}</span>
           </h4>
           <ul class="ais-ck-list">
-            {n[d].map((w) => (
-              <CountItem key={w.id} w={w} d={d} />
+            {a.open.map((w) => (
+              <CountItem key={w.id} w={w} d="stalled" />
             ))}
           </ul>
         </section>
       ))}
-      <button type="button" class="ais-more ais-ck-all" onClick={() => ((progressFocus.value = null), (aiAgent.value = null), (aiScreen.value = "progress"))}>
-        {n.stalled.length ? `${n.stalled.length} idle · all of ${a.name} in Progress` : `All of ${a.name} in Progress`}
+      <button type="button" class="ais-more ais-ck-all" onClick={() => toProgress(null)}>
+        All areas in Progress
       </button>
     </div>
   );
@@ -294,6 +331,8 @@ function AreaDetail({ a, you }: { a: AreaStat; you: Set<string> }) {
 
 /** The area opened in By area (one at a time; kept while the page re-renders). */
 const areaOpen = signal<string | null>(null);
+/** [areaOpen] for the calm last line (the idle-only areas), never an area's name. */
+const REST = ":rest";
 
 /**
  * By area (unfolded; the user, 10-30 "let's group the PowOS AI in-progress things", 10-31 "categorizing them", 11-01
@@ -331,12 +370,16 @@ function ByArea() {
           </li>
         ))}
         {rest.length > 0 && (
-          <li>
-            <button type="button" class="ais-area-row rest" data-area="rest" onClick={() => ((progressFocus.value = null), (aiAgent.value = null), (aiScreen.value = "progress"))}>
+          <li class={`ais-area-item ${opened === REST ? "open" : ""}`}>
+            <button type="button" class="ais-area-row rest" data-area="rest" aria-expanded={opened === REST} onClick={() => (areaOpen.value = opened === REST ? null : REST)}>
               <span class="aip-dot stalled" aria-hidden="true" />
               <span class="ais-area-name">{stats.length ? `${rest.length} more area${rest.length === 1 ? "" : "s"}` : `${rest.length} area${rest.length === 1 ? "" : "s"}`}</span>
               <span class="ais-area-words">nothing moving · {idle} idle</span>
+              <span class="ais-chev" aria-hidden="true" />
             </button>
+            <Reveal open={opened === REST}>
+              <RestDetail rest={rest} />
+            </Reveal>
           </li>
         )}
       </ul>

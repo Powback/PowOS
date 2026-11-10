@@ -5281,6 +5281,7 @@ async function aiToCheckFacts(label) {
     t("tc4", "Window shadows on the wallpaper", { tryLine: "open two windows; each has a soft shadow" }),
     t("tc2", "Window title bar font", { status: "queued" }),
     t("tc3", "Dock bounce", { project: "Home & launcher", step: "writing the fix" }),
+    t("tc5", "Game controller mapping", { project: "Games", status: "queued" }),
   ];
   P.checks.value = [{ job: "jc1", task: "tc1", name: "snap-left", state: "running", line: "snap-left on the phone", at: now - 3e4, shipped: true }];
   P.boardSeen.value = true;
@@ -5338,10 +5339,57 @@ const aiToCheckWideFails = (f) => failsOf([
 
 const aiToCheckFails = (f) => (f.label === "folded" ? aiToCheckFoldedFails(f) : aiToCheckWideFails(f)).map((x) => `ai-to-check ${f.label}: ${x}`);
 
+/** Exercise the remaining counts after the active-task regression has populated the real UI. */
+async function aiIdleAreaFacts() {
+  const S = await window.__gw.mod("./state.ts");
+  const A = await window.__gw.mod("./ui/aiprogress.tsx");
+  const wait = () => new Promise((r) => setTimeout(r, 900));
+  const q = (selector) => document.querySelector(selector);
+  const shown = (selector) => (q(selector)?.getBoundingClientRect().height ?? 0) > 0;
+  const click = async (selector) => { q(selector).click(); await wait(); };
+  const chat = async () => { S.aiScreen.value = "chat"; await wait(); };
+  const route = (id) => ({ ...A.progressFocus.value, screen: S.aiScreen.value, shown: shown(`.aip-task[data-task="${id}"]`) });
+  const active = '.ai-left [data-area-detail="Windows"]';
+  const rest = '.ai-left [data-area-detail="rest"]';
+  const restRow = '.ai-left .ais-area-row[data-area="rest"]';
+  await chat();
+  const idleInActive = shown(`${active} .ais-ck-item[data-task="tc2"][data-dot="stalled"]`);
+  await click(`${active} .ais-ck-all`);
+  const areaRoute = route("tc2");
+  await chat();
+  await click(restRow);
+  const idle = `${rest} .ais-ck-item[data-task="tc5"]`;
+  const idleDetail = { expanded: q(restRow).getAttribute("aria-expanded"), shown: shown(idle),
+    area: q(idle).closest("section").dataset.area, title: q(`${idle} .ais-ck-title`).textContent,
+    mixed: !!q(`${rest} .ais-ck-item[data-task="tc2"]`),
+    activeClosed: q('.ai-left .ais-area-row[data-area="Windows"]').getAttribute("aria-expanded") };
+  await click(`${idle} .ais-ck-open`);
+  const idleRoute = { ...route("tc5"), focused: shown('.aip-task.focus[data-task="tc5"]') };
+  await chat();
+  await click(`${rest} .ais-ck-all`);
+  const allRoute = { screen: S.aiScreen.value, focus: A.progressFocus.value };
+  await chat();
+  await click(restRow);
+  const collapsed = { expanded: q(restRow).getAttribute("aria-expanded"), shown: shown(rest) };
+  return { idleInActive, areaRoute, idleDetail, idleRoute, allRoute, collapsed };
+}
+
+function aiIdleAreaFails(f) {
+  return failsOf([
+    [f.idleInActive, "mixed area's idle task is not revealed"],
+    [JSON.stringify(f.areaRoute) === JSON.stringify({ area: "Windows", id: "", screen: "progress", shown: true }), `area routing: ${JSON.stringify(f.areaRoute)}`],
+    [JSON.stringify(f.idleDetail) === JSON.stringify({ expanded: "true", shown: true, area: "Games", title: "Game controller mapping", mixed: false, activeClosed: "false" }), `idle detail: ${JSON.stringify(f.idleDetail)}`],
+    [JSON.stringify(f.idleRoute) === JSON.stringify({ area: "Games", id: "tc5", screen: "progress", shown: true, focused: true }), `idle task routing: ${JSON.stringify(f.idleRoute)}`],
+    [f.allRoute.screen === "progress" && f.allRoute.focus === null, "All areas does not clear progressFocus"],
+    [f.collapsed.expanded === "false" && !f.collapsed.shown, "idle drill-down does not collapse"],
+  ]).map((x) => `ai-idle-area: ${x}`);
+}
+
 async function aiToCheckCheck(page, label) {
   const f = await page.evaluate(aiToCheckFacts, label);
   await page.screenshot({ path: `/cache/ai-to-check-${label}.png` });
-  return aiToCheckFails(f);
+  const idle = label === "unfolded" ? aiIdleAreaFails(await page.evaluate(aiIdleAreaFacts)) : [];
+  return [...aiToCheckFails(f), ...idle];
 }
 
 async function aiWideClearCheck(page) {
