@@ -334,18 +334,20 @@ pass() { NPASS=$((NPASS + 1)); _res PASS "$*"; }
 # its own window/shell log ($PDIR/logcat-<part>.txt, e2e_logcat_start); a FAIL copies its last 400 lines next to the
 # step's screenshot (NN-step.logcat.txt) and names the file in the FAIL line.
 LOGCAT_TAGS="PowosShade:V PowosSwitcher:V PowosDock:V PowosWebWindows:V PowosWindowFrames:V WindowTasks:V PowosWindow:V PowosFreeform:V PowosPageSlide:V PowosRunning:V PowosShell:V chromium:D"
+# The reader is bounded (timeout 330: a part's budget is 300 s) and killed with its child: a runner killed before its
+# restore (the queue's SIGKILL) left it reading forever - 11-11 the phone had 5 of them, ppid 1, with 29 of ww-resize's.
 e2e_logcat_start() {
   [ -n "${PDIR:-}" ] || return 0
   ash <<EOF
-mkdir -p $PDIR; f=$PDIR/logcat-$PART.txt; [ -f \$f.pid ] && kill \$(cat \$f.pid) 2>/dev/null
-: > \$f; nohup logcat -v time -s $LOGCAT_TAGS > \$f 2>&1 < /dev/null &
+mkdir -p $PDIR; f=$PDIR/logcat-$PART.txt; [ -s \$f.pid ] && { pkill -P \$(cat \$f.pid); kill \$(cat \$f.pid); } 2>/dev/null
+: > \$f; nohup timeout 330 logcat -v time -s $LOGCAT_TAGS > \$f 2>&1 < /dev/null &
 echo \$! > \$f.pid; chmod a+r \$f
 EOF
 }
 e2e_logcat_stop() {
   [ -n "${PDIR:-}" ] || return 0
   ash <<EOF
-f=$PDIR/logcat-$PART.txt; [ -f \$f.pid ] && kill \$(cat \$f.pid) 2>/dev/null; : > \$f.pid; chmod -R a+rX $PDIR
+f=$PDIR/logcat-$PART.txt; [ -s \$f.pid ] && { pkill -P \$(cat \$f.pid); kill \$(cat \$f.pid); } 2>/dev/null; : > \$f.pid; chmod -R a+rX $PDIR
 EOF
 }
 # A step interrupted is not judged (round 203, 11-01: six FAILs from a doze, a user touch and an APK install that
