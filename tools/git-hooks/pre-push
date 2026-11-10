@@ -5,6 +5,10 @@
 # reads them from the working tree (push a clean tree). Wired for every worktree by `git config core.hooksPath
 # tools/git-hooks`. Skip once: GATE_LINT=0 git push.
 set -uo pipefail
+# 11-10 (owner OK): offload.sh pushes this tree to .58's private test mirror (~/offload/shared.git) - a test copy, not a
+# publish; the lint failed it for Kotlin changed anywhere on the integration branch ("detekt didn't run"). Pushes to that
+# mirror skip the lint; every other push (GitHub) is linted exactly as before.
+case "${2:-}" in *offload/shared.git*) exit 0 ;; esac
 root=$(git rev-parse --show-toplevel)
 zero=0000000000000000000000000000000000000000
 files=() apps="" kt=""
