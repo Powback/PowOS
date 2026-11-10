@@ -24,21 +24,35 @@ trap restore EXIT
 sh_() { "$T/adb.sh" shell "$*" 2>/dev/null | tr -d '\r'; }
 # Start a real terminal session via the supported exported activity, not its private service.
 # Only a fresh, single task created here is eligible for removal. Never alter an existing session/task.
-termux_tasks() {
-  sh_ "dumpsys activity recents" | awk '/Task\{/ { task=$0; sub(/^.*Task\{/, "", task) } /realActivity=com.termux\// { if (match(task, /#[0-9]+/)) print substr(task, RSTART+1, RLENGTH-1) }'
+# Parse each record independently: OxygenOS uses mActivityComponent in Task blocks and
+# realActivity={...} in RecentTaskInfo blocks. Never carry a Task id into the second section.
+termux_task_ids() {
+  awk '
+    /Task\{/ { id=""; t=$0; sub(/^.*Task\{/, "", t); if (match(t, /#[0-9]+/)) id=substr(t,RSTART+1,RLENGTH-1) }
+    /RecentTaskInfo #[0-9]+:/ { id="" }
+    /^[[:space:]]*id=[0-9]+ / { t=$0; sub(/^[[:space:]]*id=/,"",t); sub(/ .*/,"",t); id=t }
+    /mActivityComponent=com\.termux\/|realActivity=\{?com\.termux\// { if (id != "" && !seen[id]++) print id }
+  '
 }
+termux_tasks() { sh_ "dumpsys activity recents" | termux_task_ids; }
+
 [ -z "$(termux_tasks)" ] || { echo "SKIP: existing Termux task left untouched; background check needs no task"; exit 5; }
 if [ -z "$(sh_ pidof com.termux)" ]; then
   component=$(sh_ "cmd package resolve-activity --brief com.termux" | tail -1)
   case $component in com.termux/*) ;; *) echo "SKIP: no Termux launcher activity: $component"; exit 5 ;; esac
   [ -z "$(sh_ pidof com.termux)$(termux_tasks)" ] || { echo "SKIP: Termux started during setup; left untouched"; exit 5; }
-  STARTED=1
+  before=$(termux_tasks)
+  [ -z "$before" ] || { echo "SKIP: Termux task appeared before launch; left untouched"; exit 5; }
   launch=$(sh_ "am start -W -n $component" 2>&1)
   echo "switcher-bg launch: $launch"
+  # COLD plus an empty pre-launch task snapshot and one new id establish fixture ownership.
+  # A reused/hot task may belong to the user: no cleanup authority in that case.
+  grep -q '^LaunchState: COLD$' <<<"$launch" || { echo "SKIP: launch was not cold; leaving Termux untouched"; exit 5; }
   sleep 3
   [ -n "$(sh_ pidof com.termux)" ] || { echo "SKIP: Termux launcher did not start a process: $launch"; exit 5; }
   owned=$(termux_tasks)
   case $owned in ''|*[!0-9]*) STARTED=; echo "SKIP: cannot identify one owned Termux task; leaving it untouched"; exit 5 ;; esac
+  STARTED=1
   "$T/cdp.sh" eval home "importShim('./bridge.ts').then(m=>m.powos.tasks.remove($owned))"
   sleep 2
   [ -z "$(termux_tasks)" ] || { echo "SKIP: owned Termux task did not close"; exit 5; }

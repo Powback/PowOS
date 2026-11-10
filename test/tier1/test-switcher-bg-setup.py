@@ -33,7 +33,7 @@ sh_() {
  'pidof com.termux')
    if [ "$scenario" = existing-service ] || [ -f "$STATE/launched" ]; then echo 123; fi ;;
  'cmd package resolve-activity --brief com.termux') echo 'com.termux/.app.TermuxActivity' ;;
- 'am start -W -n com.termux/.app.TermuxActivity') touch "$STATE/launched"; echo 'Status: ok' ;;
+ 'am start -W -n com.termux/.app.TermuxActivity') touch "$STATE/launched"; if [ "$scenario" = hot ]; then printf 'Status: ok\nLaunchState: HOT\n'; else printf 'Status: ok\nLaunchState: COLD\n'; fi ;;
  *) echo "Unexpected: $*" >&2; exit 9 ;;
  esac
 }
@@ -68,11 +68,39 @@ sh_() {
         # Source the library in a subshell: its variables cannot overwrite e2e's state/restore paths.
         self.assertIn('icons=$(SHELL_CHECK_LIB=1 .', source)
 
+    def test_actual_oxygenos_task_records(self):
+        parser = SOURCE.split('termux_task_ids() {', 1)[1].split('\n}\n', 1)[0]
+        fixture = """  * Recent #1: Task{a202015 #3414 type=standard A=10362:com.termux}
+    mActivityComponent=com.termux/.app.TermuxActivity
+    taskId=3414 rootTaskId=3414
+  * Recent #2: Task{dee6929 #3417 type=standard A=10359:.lock}
+    mActivityComponent=com.powos.app/.lock
+  Visible recent tasks (most recent first):
+  * RecentTaskInfo #0:
+    id=3414 userId=0 hasTask=true lastActiveTime=70920284
+    realActivity={com.termux/com.termux.app.TermuxActivity}
+  * RecentTaskInfo #1:
+    id=3202 userId=0 hasTask=false
+    realActivity={com.oplus.pscanvas/.Canvas}
+"""
+        r = subprocess.run(['bash', '-c', parser], input=fixture, capture_output=True, text=True, check=True)
+        self.assertEqual(r.stdout.strip(), '3414')
+        # Legacy Android format and multiple sessions must remain distinct, never the Recent # index.
+        legacy = '* Recent #9: Task{abc #42 type=standard}\n realActivity=com.termux/.app.TermuxActivity\n* Recent #0: Task{def #55 type=standard}\n realActivity=com.termux/.app.TermuxActivity\n'
+        r = subprocess.run(['bash', '-c', parser], input=legacy, capture_output=True, text=True, check=True)
+        self.assertEqual(r.stdout.split(), ['42', '55'])
+
     def test_existing_task_untouched(self):
         r, calls = self.run_setup('existing-task')
         self.assertEqual(r.returncode, 5, r.stderr)
         self.assertNotIn('am start', calls)
         self.assertNotIn('remove-owned', calls)
+
+    def test_hot_launch_never_claimed(self):
+        r, calls = self.run_setup('hot')
+        self.assertEqual(r.returncode, 5, r.stderr)
+        self.assertNotIn('remove-owned', calls)
+        self.assertIn('leaving Termux untouched', r.stdout)
 
     def test_existing_service_reused(self):
         r, calls = self.run_setup('existing-service')
