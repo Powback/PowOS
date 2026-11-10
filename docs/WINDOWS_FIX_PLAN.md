@@ -56,6 +56,17 @@ The board shows window checks failing by timeout or waiting days for a free phon
   Done 11-10: these four say `# lanes: phone` (frame timing, missed vsyncs, perfetto, real touch speed), games are
   refused on the emulator by `queue.sh`'s HW_ONLY; the handbook row marks them phone-only for good.
 - [ ] 0.4 Agree fixed phone test blocks with the user (the phone is the daily driver), and run the phone checks there.
+  **Proposal (11-10, for the owner to accept or change; nothing is switched on yet):**
+  - **Nightly block, 02:00-05:00.** The phone lies unfolded on its charger. The runner takes only that block for the
+    window checks (`ww-resize`, `ww-glue`, `window-bench` parts 1-4, the `ww-*` lifecycle checks until 0.2's emulator
+    lane carries them): about 25 checks of up to 300 s each, so three runs of the exit bar fit in one night.
+  - **One daytime block of 20 min**, at a time the owner picks (for example 13:00), for a fix that needs a verdict the
+    same day. Outside both blocks the queue keeps its current rule (2+ idle minutes), for everything else.
+  - **What the owner does:** leave the phone unfolded on the charger at night; the runner wakes it, turns Do Not
+    Disturb on for the block and puts the screen and the settings back after (as `window-lock.sh` does now).
+  - **To build when accepted:** a `--block night|day` option for `queue.sh add` (a job waits for its block), and the
+    block hours in one setting on the phone (Settings > Developer), so the owner can move them without an agent.
+  - **Alternative:** a second OnePlus Open as a test device (open decision below). Then no blocks are needed.
 - [ ] 0.5 Baseline run, recorded in `docs/research/window-bench.md`: pass/fail per check, `pf=` and `lag=` from the host's
   `w.f` log, missed vsyncs per resize from `ww-resize.sh`, the perfetto verdict from `resize-trace.py` (still owed).
 - [ ] 0.6 Each failing check on the board gets one line: real bug, check bug, or environment.
