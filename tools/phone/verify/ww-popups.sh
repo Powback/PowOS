@@ -205,10 +205,24 @@ done
 [ -n "$scan_stop" ] && bad "scan stopped: $scan_stop"
 if [ $opened -lt 1 ]; then
   # Which side failed: the taps never reached KWin, KWin exported a popup the X read missed, or Steam opened nothing.
+  # Home's side: each tap's DOWN on the body logs "gesture to KWin window N" (WebWindows.linuxClaim). KWin's own "touch
+  # at" line is only for a touch that goes to a popup/dialog or lands outside the window's input region - a plain touch
+  # on the window logs nothing there, so its count is no proof the taps missed KWin (11-10 07:32 said so wrongly: home
+  # had logged all 15 gestures to KWin window 47).
+  hg=$("$adb" shell "logcat -d -T '$since' -s PowosWebWindows:I" 2>/dev/null | tr -d '\r' | grep -c "gesture to KWin window")
   kt=$(rs "tail -n +$((klog0 + 1)) /run/powos-app/hyprland.log | grep -ac 'touch at'" | tail -1)
   kpop=$(popn)
-  "$adb" exec-out screencap -p > "$OUT/no-menu.png" 2>/dev/null
-  bad "no tap on Steam's menu bar opened a menu ($taps taps; KWin touch lines ${kt:-?}, app popup lines ${kpop:-?}; screen $OUT/no-menu.png): $([ "${kt:-0}" = 0 ] && echo "the taps never reached KWin" || { [ "${kpop:-0}" -gt 0 ] && echo "KWin exported popups the X read didn't see" || echo "taps reached KWin, Steam opened no X menu"; })"
+  # X's side: Xwayland gives a touch to the X window on top at its root point (plain sprite trace, xwl_xy_to_window),
+  # so a viewable window stacked over Steam's there takes it - KWin's root-sized InputOnly guard window above a Kept
+  # (hidden-preview) window is the kwin 0022 bug. XQueryTree lists bottom to top: every viewable one after Steam's.
+  over=$(us "$X; xwininfo -root -children 2>/dev/null | sed -n '/children:/,\$p' | tail -n +2 | awk '{print \$1}' | sed -n '/^$SW\$/,\$p' | tail -n +2 | while read -r w; do xwininfo -id \$w 2>/dev/null | awk -v w=\$w '/Map State/{m=\$3} /Class:/{c=\$2} /Override Redirect State/{o=\$4} /Absolute upper-left X/{ax=\$4} /Absolute upper-left Y/{ay=\$4} /Width:/{x=\$2} /Height:/{y=\$2} END{if(m==\"IsViewable\"&&ax<=$SX+110&&ay<=$SY+40&&ax+x>$SX+110&&ay+y>$SY+40)print w\" \"c\" or=\"o\" \"ax\",\"ay\" \"x\"x\"y}'; done" | grep . | tr '\n' ';')
+  # screencap with several displays prints a warning before the PNG on stdout: only the PNG is kept.
+  "$adb" exec-out screencap -p 2>/dev/null | python3 -c "import sys; d=sys.stdin.buffer.read(); i=d.find(b'\x89PNG'); sys.stdout.buffer.write(d[max(i,0):])" > "$OUT/no-menu.png"
+  why="taps reached KWin, Steam opened no X menu"
+  [ "${kpop:-0}" -gt 0 ] && why="KWin exported popups the X read didn't see"
+  [ -n "$over" ] && why="taps reached KWin, but X window(s) over Steam's at the menu bar took them (Xwayland picks by X stacking): $over"
+  [ "${hg:-0}" = 0 ] && why="home sent no gesture to KWin (the taps missed Steam's web window body, or something above it in the page took them)"
+  bad "no tap on Steam's menu bar opened a menu ($taps taps; home gestures to KWin ${hg:-?}, KWin touch-at lines ${kt:-?}, app popup lines ${kpop:-?}; screen $OUT/no-menu.png): $why"
 fi
 
 # N3b: a menu taller than its window shows whole and takes touches (kwin 3.72+).
