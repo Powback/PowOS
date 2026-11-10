@@ -59,7 +59,7 @@ WW_DEADLINE=${WWR_DEADLINE_S:-250}
 export CDP_TIMEOUT_S=${CDP_TIMEOUT_S:-20}
 # 11-10: was 60 + 30 (two pushes and two pulls a gesture, attribution after the KWin wait); now ~25 + 10 - the
 # "time:" line each gesture logs is the measure to set this from.
-GEST_S=$(( 25 + 10 * ${WWR_REC:-1} ))
+GEST_S=$(( 40 + 10 * ${WWR_REC:-1} ))
 . "$here/ww-lib.sh"
 plaunch() { ev "importShim('./state.ts').then(m=>m.launch('$1')).then(()=>'ok',e=>'ERR '+e)"; }
 MINE=""
@@ -81,8 +81,12 @@ restore() {
   case " $APPS " in *" dolphin "*) [ "${DOLPHIN_MINE:-0}" = 1 ] && us "pkill -x dolphin" ;; esac
   [ "${CALC_MINE:-0}" = 1 ] && sh_ "am force-stop $CALC"
   [ -n "${LOGPID:-}" ] && kill "$LOGPID" 2>/dev/null
-  [ "${DR:-0}" = 1 ] && sh_ "setprop debug.powos.ww_drag_round 0"
-  [ "${GP:-1}" = 0 ] && CDP_TIMEOUT_S=8 ev "globalThis.__glassDragOff=false;'ok'" >/dev/null 2>&1
+  if [ "${OVERRIDES_SAVED:-0}" = 1 ]; then
+    sh_ "setprop debug.powos.ww_drag_round \"$PREV_DR\""
+    [ "$(sh_ "getprop debug.powos.ww_drag_round")" = "$PREV_DR" ] || bad "restore corner property"
+    r=$(CDP_TIMEOUT_S=8 ev "globalThis.__wwResizeProbe?.stop();$RESTORE_GLASS;typeof globalThis.__glassDragOff+':'+String(globalThis.__glassDragOff)")
+    [ "$r" = "$PREV_GP" ] || bad "restore glass override: $r (wanted $PREV_GP)"
+  fi
   true
 }
 . "$here/window-lock.sh"
@@ -116,13 +120,24 @@ done
 case $full in ok*) full=${full#ok} full=${full# } ;; *) log "SKIP home's bridge: $full"; exit 3 ;; esac
 [ -z "$full" ] || { log "SKIP a full-screen window is up ($full: a game left running) - not touched"; exit 3; }
 # RJ2 A/B (nativeglass.ts dragPause): WWR_GLASS_PAUSE=0 keeps home's blur regions through the drag, as before it.
-GP=${WWR_GLASS_PAUSE:-1}
-ev "globalThis.__glassDragOff=$([ "$GP" = 0 ] && echo true || echo false);'ok'" >/dev/null
-log "RJ2 glass pause: $([ "$GP" = 0 ] && echo off || echo on) for this run"
-# RJ3 A/B (WebWindows.kt dragSquare): WWR_DRAG_ROUND=1 keeps the window's corner radius through the drag.
-DR=${WWR_DRAG_ROUND:-0}
-sh_ "setprop debug.powos.ww_drag_round $DR"
-log "RJ3 square corners while resizing: $([ "$DR" = 1 ] && echo off || echo on) for this run"
+GP=${WWR_GLASS_PAUSE:-1}; DR=${WWR_DRAG_ROUND:-0}
+case "$GP:$DR" in 0:0|0:1|1:0|1:1) ;; *) bad "invalid resize switches"; exit 1 ;; esac
+PREV_DR=$(sh_ "getprop debug.powos.ww_drag_round") || { bad "cannot read corner property"; exit 1; }
+case "$PREV_DR" in ''|0|1) ;; *) bad "unexpected previous corner override: $PREV_DR"; exit 1 ;; esac
+PREV_GP=$(ev "typeof globalThis.__glassDragOff+':'+String(globalThis.__glassDragOff)")
+case "$PREV_GP" in
+  undefined:undefined) RESTORE_GLASS='delete globalThis.__glassDragOff' ;;
+  boolean:true) RESTORE_GLASS='globalThis.__glassDragOff=true' ;;
+  boolean:false) RESTORE_GLASS='globalThis.__glassDragOff=false' ;;
+  *) bad "cannot save glass override: $PREV_GP"; exit 1 ;;
+esac
+OVERRIDES_SAVED=1
+want=$([ "$GP" = 0 ] && echo true || echo false)
+effective_gp=$(ev "globalThis.__glassDragOff=$want;String(globalThis.__glassDragOff)")
+sh_ "setprop debug.powos.ww_drag_round $DR" || { bad "setprop failed"; exit 1; }
+effective_dr=$(sh_ "getprop debug.powos.ww_drag_round")
+printf 'requested round=%s pause=%s; effective property=%s glassDragOff=%s; previous property=%s glass=%s\n' "$DR" "$GP" "$effective_dr" "$effective_gp" "$PREV_DR" "$PREV_GP" | tee "$OUT/settings.txt"
+[ "$effective_dr" = "$DR" ] && [ "$effective_gp" = "$want" ] || { bad "switch readback mismatch (inconclusive A/B)"; exit 1; }
 sleep 1
 "$A" shell "logcat -v time -s PowosWebWindows:I Andromarchy:I PowosShell:I" > "$OUT/logcat.txt" 2>/dev/null &
 LOGPID=$!
@@ -217,6 +232,30 @@ for l in sys.stdin:
         if ms.isdigit() and int(ms) * 2 > d and not own.search(name): out.append(f"{name} {ms} ms of {d} ms")
 print("; ".join(dict.fromkeys(out)))' "$1"; }
 
+# Separate slow diagnostic replay: device-side log observer waits for confirmed page resize,
+# captures SF with device wall timestamps, then validator requires the SAME resize around the entire dump.
+# No host sleep guesses; no screenrecord/perfetto during this diagnostic. Never performance evidence.
+diagnostic() {
+  local tag=$1 x1=$2 y1=$3 x2=$4 y2=$5 token js result
+  token="WWR_${n}_${SECONDS}_$$"
+  js=$(sed "s/TOKEN/\"$token\"/;s/WINDOW_ID/$n/" "$here/resize-state.js")
+  [ "$(ev "$js")" = ok ] || { bad "$tag INCONCLUSIVE: cannot install resize observer"; return; }
+  # A bounded device-side watcher, already listening before input starts. The token is unique;
+  # logcat's backlog cannot satisfy this job. Timeout and missing/bracketing state fail closed.
+  sh_ "( timeout 8 logcat -v raw -s PowosShell:I | grep -m 1 -E \"$token .*active.:true\" >/dev/null &&
+    { sleep 0.15; echo WWR_BEGIN \$(date +%s%3N); echo WWR_PROP \$(getprop debug.powos.ww_drag_round);
+      echo WWR_SF_BEGIN; dumpsys SurfaceFlinger; echo WWR_SF_END;
+      echo WWR_PROP \$(getprop debug.powos.ww_drag_round); echo WWR_END \$(date +%s%3N); } ) &
+    watcher=\$!; sleep 0.2; input swipe $x1 $y1 $x2 $y2 3000; wait \${watcher}; sleep 0.3
+    logcat -d -v raw -s PowosShell:I | grep \"$token \"
+    input swipe $x2 $y2 $x1 $y1 700" > "$OUT/$tag-diagnostic.txt"
+  ev "globalThis.__wwResizeProbe?.stop();'ok'" >/dev/null
+  result=$(python3 "$here/resize-state.py" "$OUT/$tag-diagnostic.txt" "$token" "$n" "$DR" "$GP")
+  local rc=$?
+  echo "$result" | tee -a "$OUT/summary.txt"
+  [ "$rc" = 0 ] || bad "$tag $result"
+}
+
 # record <x1 y1 x2 y2> <tag> <sample l t r b, device px>: the gesture under screenrecord, blank frames counted.
 record() {
   local x1=$1 y1=$2 x2=$3 y2=$4 tag=$5 sl=$6 st=$7 sr=$8 sb=$9
@@ -225,12 +264,9 @@ record() {
   "$A" shell "su -c 'screenrecord --bit-rate 8000000 --time-limit 3 /data/local/tmp/wwr.mp4'" >/dev/null 2>&1 &
   local rp=$!
   sleep 0.6
-  # Mid-drag (the record pass only: a dumpsys during a measured way would load SF): the layers with blur regions and how
-  # many HWC layers are CLIENT - RJ2 / the pill's glass decide it (11-10: every layer clientType=BLUR).
-  ( sleep 0.4; sh_ "dumpsys SurfaceFlinger" > "$OUT/$tag-middrag-sf.txt"; awk -f "$here/sf-comp.awk" "$OUT/$tag-middrag-sf.txt" > "$OUT/.middrag" ) &
-  local mp=$!
+  # Recording has no composition probe: it changes SF's outputs, and is not the measured gesture.
   sh_ "input swipe $x1 $y1 $x2 $y2 700; sleep 0.25; input swipe $x2 $y2 $x1 $y1 700"
-  wait "$rp" "$mp"
+  wait "$rp"
   "$A" exec-out "su -c 'cat /data/local/tmp/wwr.mp4; rm -f /data/local/tmp/wwr.mp4'" > "$OUT/$tag.mp4" 2>/dev/null
   [ -s "$OUT/$tag.mp4" ] || { echo "no recording"; return; }
   python3 - "$OUT/$tag.mp4" "$sl" "$st" "$sr" "$sb" "$SW" <<'PY'
@@ -265,7 +301,7 @@ print(f"{len(fr)} frames, {blank} blank, {changed} changed >25%, worst diff {wor
 PY
 }
 
-: > "$OUT/summary.txt"
+cat "$OUT/settings.txt" > "$OUT/summary.txt"
 SW=$(sh_ "wm size" | grep -oE '[0-9]+x[0-9]+' | tail -1 | cut -dx -f1)
 for app in $APPS; do
   [ $((SECONDS + 20 + GEST_S)) -gt "$WW_DEADLINE" ] && { bad "budget: $app not measured - ${SECONDS}s in, the deadline is ${WW_DEADLINE}s (queue one app a job: WWR_APPS=$app)"; continue; }
@@ -343,10 +379,16 @@ for app in $APPS; do
       # The part of the body inside the window through the whole drag (it shrinks by dx, dy first), inset 24 px.
       rec=$(record "$px" "$py" $((px + dx)) $((py + dy)) "$app-$g" $((bl + 24)) $((bt + 24)) $((br + dx - 24)) $((bb + dy - 24)))
       log "$app $g record: $rec"; echo "$app $g record: $rec" >> "$OUT/summary.txt"
-      [ -s "$OUT/.middrag" ] && { log "$app $g $(cat "$OUT/.middrag")"; cat "$OUT/.middrag" | sed "s/^/$app $g /" >> "$OUT/summary.txt"; }
       case $rec in *" 0 blank"*) ;; *blank*) bad "$app $g: blank frames in the window ($rec)" ;; esac
       chk "$app $g record"
     fi
+    if [ $((SECONDS + 15)) -gt "$WW_DEADLINE" ]; then
+      bad "$app $g INCONCLUSIVE: no diagnostic budget"; continue
+    fi
+    read -r px py <<<"$(wwpt "$id" "$zone")"
+    [ -n "${px:-}" ] && [ -n "${py:-}" ] || { bad "$app $g INCONCLUSIVE: missing zone"; continue; }
+    diagnostic "$app-$g" "$px" "$py" $((px + dx)) $((py + dy))
+    chk "$app $g diagnostic"
     # The step's own time (11-10: ~90 s a gesture - two adb.sh pushes, two 7-9 MB pulls, the attribution after the
     # wait; the user's bar is a few seconds a step): the drag's two ways, and the whole gesture with its record pass.
     log "time: $app $g ways $((gend - g0)) s, gesture $((SECONDS - g0)) s (setup before the first: ${setup_s:-?} s)"
@@ -370,6 +412,7 @@ if [ -n "$LIN" ]; then
 fi
 grep -aE "consumer stop still blocked" "$OUT/logcat.txt" | sed 's/^/stop: /' | tee -a "$OUT/summary.txt"
 grep -aE "pacing:" "$OUT/logcat.txt" | tail -4 | sed 's/^/consumer: /' | tee -a "$OUT/summary.txt"
+restore
 log "summary: $OUT/summary.txt"
 [ "$fail" = 0 ] && log PASS
 exit "$fail"
