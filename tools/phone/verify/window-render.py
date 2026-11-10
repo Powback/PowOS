@@ -5,6 +5,7 @@ Shots are `screencap` RAW (RGBA after a 12/16-byte header), gzipped on the phone
   window-render.py png SHOT.raw.gz OUT.png [l t r b CROP.png]   a viewable PNG of the shot (and of the body rect)
   window-render.py stats SHOT.raw.gz l t r b                     "dominant=<share> edges=<share> colours=<n>" of the rect
   window-render.py diff A.raw.gz B.raw.gz l t r b                "<share>" of the rect's pixels that differ (any channel > 24)
+  window-render.py drawnall SHOT.raw[.gz] step l t r b [l t r b ...]   the same for several rects: 0 when every one is
   window-render.py drawn SHOT.raw[.gz] l t r b [step]             stats; exit 0 when the rect is a picture, not a flat fill
                                                                  (dominant < 0.97, colours >= 4) - run ON the phone by
                                                                  window-bench.sh's wb-drawn.sh (plain raw, step 8)
@@ -105,6 +106,7 @@ def png(shot, out, l=None, t=None, r=None, b=None):
 
 
 def main(a):
+    global STEP
     if len(a) >= 3 and a[0] == "png":
         s = load(a[1])
         png(s, a[2])
@@ -113,13 +115,24 @@ def main(a):
     elif len(a) == 6 and a[0] == "stats":
         print(stats(load(a[1]), *map(int, a[2:6])))
     elif len(a) in (6, 7) and a[0] == "drawn":
-        global STEP
         if len(a) == 7:
             STEP = int(a[6])
         st = stats(load(a[1]), *map(int, a[2:6]))
         print(st)
         kv = dict(x.split("=") for x in st.split())
         return 0 if float(kv["dominant"]) < 0.97 and int(kv["colours"]) >= 4 else 1
+    elif len(a) >= 7 and a[0] == "drawnall" and (len(a) - 3) % 4 == 0:
+        # drawnall SHOT step l t r b [l t r b ...]: exit 0 when every rect is drawn; prints the first flat one's stats.
+        STEP = int(a[2])
+        shot = load(a[1])
+        for i in range(3, len(a), 4):
+            st = stats(shot, *map(int, a[i:i + 4]))
+            kv = dict(x.split("=") for x in st.split())
+            if not (float(kv["dominant"]) < 0.97 and int(kv["colours"]) >= 4):
+                print(f"rect {(i - 3) // 4 + 1}: {st}")
+                return 1
+        print(f"all {(len(a) - 3) // 4} drawn")
+        return 0
     elif len(a) == 7 and a[0] == "diff":
         print(diff(load(a[1]), load(a[2]), *map(int, a[3:7])))
     else:

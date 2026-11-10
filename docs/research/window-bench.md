@@ -113,6 +113,16 @@ never-live launches in a row end the storm (FAIL). Every part ends with a verdic
   elementFromPoint); a close that still misses is the close metric's "-" and the host closes it (logged), so the leak
   counts measure real leaks. Windows up before the bench are named in a NOTE and left alone (the queue closes a killed
   job's own: `ww_close_new`).
+- **p3 rotate 23-30 s / unfold 33 s were the check's clock, not the product:** logcat 09:15:13.370 "screen 2440x2268"
+  -> home laid out at .534 (164 ms), no window errors after; the next rotation came 32 s later because `settle_all`
+  polled per window a host call, a page call and a Mac screenshot (2-8 s each). Not wb-drawn (rotate never used it).
+  Now `rot_arm`: the page waits for the new size, every bench window live and still for 3 frames, and logs their rects;
+  `wb-drawn.sh` (started in the same phone call as the rotation / unfold, its start the clock) waits until every rect is
+  drawn (`window-render.py drawnall`). KWin 3.78's rotation sizing is untested by this run (the APK was c669f861).
+- **Storm close "-" in all 20 cycles (p3 09:24):** `vispt`'s elementFromPoint found no spot even with nothing covering
+  the window; it now tests geometry (no window at or above its z-index covers the spot).
+- **leak-ww-layers 2 with 0 windows left:** read again for up to 10 s and named in `leak-layers.txt` (a late release
+  vs a real leak; the names say whose).
 - Environment, not fixed here: one CDP eval is 2-8 s at Mac load ~35, setup (unfold, lock, home) took 2 min of
   part 1, and `drawn`/resize-settle are Mac-clock screencap polls (inflated the same way).
 

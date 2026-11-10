@@ -3,7 +3,8 @@
 # fill) on the phone's clock. window-bench's open-drawn and resize-settle were Mac-clock screenshot polls (adb screencap
 # | gzip -> Mac -> python, 2-8 s a round trip at Mac load ~35: open-drawn read 8.7-10.9 s, 11-10 p2).
 #   wb-drawn.sh <tag> <max ms>     started in the background before the action. Waits for home's console line
-#                                  "wb-go <tag> <t0 epoch ms> <l> <t> <r> <b>" (logcat PowosShell; the page logs it when
+#                                  "wb-go <tag> <t0 epoch ms|0> <l> <t> <r> <b> [<l> <t> <r> <b>...]" (logcat PowosShell;
+#                                  t0 0 = the watcher's own start; every rect must be drawn; the page logs it when
 #                                  the window is live / the resize's pointer is up, with the body's rect in device px),
 #                                  then screenshots that rect until it is drawn.
 #   -> /data/local/tmp/wb-drawn-<tag>.out: "drawn <ms after t0> <stats>" | "flat <ms> <stats>" | "nogo" | "error <why>"
@@ -32,16 +33,19 @@ start=$(now); end=$((start + max)); since=$(date +'%m-%d %H:%M:%S.000')
 go=""
 while [ -z "$go" ]; do
   go=$(logcat -d -T "$since" -v raw -s PowosShell:I 2>/dev/null | grep -F "wb-go $tag " | tail -1 | sed 's/.*wb-go //')
-  if [ -n "$go" ]; then set -- $go; [ "$(rel "${2:-0}")" -ge $((start - 2000)) ] 2>/dev/null || go=""; fi
+  # t0 "0": the clock is this watcher's start (the bench starts it in the same phone call as the action: rotate, unfold).
+  if [ -n "$go" ]; then set -- $go; [ "${2:-0}" = 0 ] || [ "$(rel "${2:-0}")" -ge $((start - 2000)) ] 2>/dev/null || go=""; fi
   [ -n "$go" ] && break
   [ $(now) -gt $end ] && put "nogo"
   sleep 0.05
 done
-set -- $go; t0=$(rel "$2") l=$3 t=$4 r=$5 b=$6
+set -- $go; [ "$2" = 0 ] && t0=$start || t0=$(rel "$2")
+[ "$3" = timeout ] && { shift 3; put "nogo page: $*"; }
+shift 2; rects="$*"   # one or more "l t r b": drawn when every one is
 while :; do
   ts=$(now)
   screencap > $R$f 2>/dev/null
-  st=$(chroot $R /usr/bin/python3 -I /tmp/window-render.py drawn $f $l $t $r $b 8 2>&1); rc=$?
+  st=$(chroot $R /usr/bin/python3 -I /tmp/window-render.py drawnall $f 8 $rects 2>&1); rc=$?
   [ $rc = 0 ] && put "drawn $((ts - t0)) $st"
   [ $rc = 1 ] || put "error $st"
   [ $(now) -gt $end ] && put "flat $((ts - t0)) $st"

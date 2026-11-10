@@ -313,7 +313,10 @@ storm_switch() {
 # cycles 3, 6, 10, 12; windows 8 and 11 left; "leak-host-windows 2", "leak-ww-layers 5", "leak-tasks 1", from a clean
 # baseline 0 0 0 0).
 vispt() {
-  local v; v=$(wwel "$1" "e=>{const b=e.querySelector('$2');if(!b)return '';const r=b.getBoundingClientRect(),d=devicePixelRatio;for(const fy of [.5,.3,.7])for(const fx of [.5,.25,.75,.12,.88,.4,.6]){const x=r.left+r.width*fx,y=r.top+r.height*fy;if(x<1||y<1||x>innerWidth-1||y>innerHeight-1)continue;const h=document.elementFromPoint(x,y);if(h&&b.contains(h)&&h.closest('.webwindow')===e)return Math.round(x*d)+' '+Math.round(y*d)}return ''}")
+  # Geometry, not hit testing: elementFromPoint found no spot in any of p3 part 1's 20 cycles (09:24, every switch and
+  # close "no uncovered spot", windows not covered) - the page's own layering (.page-windows clip-path, page-under
+  # layers) answers it differently from where a touch lands. A spot counts when no web window at or above its z-index covers it.
+  local v; v=$(wwel "$1" "e=>{const b=e.querySelector('$2');if(!b)return '';const r=b.getBoundingClientRect(),d=devicePixelRatio,Z=x=>+getComputedStyle(x).zIndex||0,o=[...document.querySelectorAll('.webwindow[data-wwid]')].filter(x=>x!==e&&Z(x)>=Z(e)).map(x=>x.getBoundingClientRect()).filter(q=>q.width>1&&q.height>1);for(const fy of [.5,.3,.7])for(const fx of [.5,.25,.75,.12,.88,.4,.6]){const x=r.left+r.width*fx,y=r.top+r.height*fy;if(x<1||y<1||x>innerWidth-1||y>innerHeight-1)continue;if(o.some(q=>x>=q.left&&x<=q.right&&y>=q.top&&y<=q.bottom))continue;return Math.round(x*d)+' '+Math.round(y*d)}return ''}")
   [ "$v" = none ] || echo "$v"
 }
 # storm_read <var> [max ms]: the page's armed measurement once it resolved - one page call that waits for it (it was up to
@@ -387,6 +390,16 @@ print(s[len(s)//2], "%.2f" % (b/a if a else 1))' "$OUT/storm.tsv" $col)"
 storm_leaks() {
   local S1 b1 b2 b3 b4 b5
   sleep 3; S1=$(leakstate); log "storm: after (page host layers tasks pss) $S1 (before $1)"
+  # Layers left 3 s after the last close (p3 part 1: 2, with 0 windows left) may be a release still on its way
+  # (BLAST buffer queue children go with the app's last reference): read the count again for up to 10 s, and name what
+  # stays ($OUT/leak-layers.txt) so a real leak says which window's layers.
+  local ly0 i n; ly0=$(set -- $1; echo "$3"); set -- $S1
+  if [ "$3" -gt "$ly0" ] 2>/dev/null; then
+    for i in 1 2 3 4 5; do sleep 2; n=$(sh_ "dumpsys SurfaceFlinger --list" | grep -cE "powos-ww-[0-9]+"); [ "$n" -le "$ly0" ] && break; done
+    sh_ "dumpsys SurfaceFlinger --list" | grep -E "powos-ww-[0-9]+" > "$OUT/leak-layers.txt"
+    log "storm: ww layers $3 -> $n after $((i * 2)) s more: $(tr '\n' ' ' < "$OUT/leak-layers.txt" | cut -c1-300)"
+    S1=$(set -- $S1; echo "$1 $2 $n $4 $5")
+  fi
   set -- $1; b1=$1 b2=$2 b3=$3 b4=$4 b5=$5; set -- $S1
   bench leak-page-windows all $(($1 - b1)) 0 le " win"; bench leak-host-windows all $(($2 - b2)) 0 le " win"
   bench leak-ww-layers all $(($3 - b3)) 0 le " layers"; bench leak-tasks all $(($4 - b4)) 0 le " tasks"
@@ -488,23 +501,36 @@ set -- $RUN; if [ $# -ge 2 ] && phase switch; then
 fi
 
 # 4. rotate 90 deg and back: every window settled, live and drawn.
-settle_all() {   # settle_all <metric> <budget>: ms (Mac clock) until every bench window is live and drawn
-  local t0 left w; t0=$(nowms)
-  while :; do
-    left=""; for w in $MINEW; do
-      [ "$(wwhost "$w" gone)" = true ] && continue
-      [ "$(wwel "$w" "e=>e.querySelector('.webwindow-body.live')?'live':'no'")" = live ] && drawn "$w" "$1-$w" >/dev/null || left="$left $w"
-    done
-    [ -z "$left" ] && { echo $(($(nowms) - t0)); return 0; }
-    [ $(($(nowms) - t0)) -gt $(($2 * 3)) ] && { echo "- (not back:$left)"; return 1; }
-    sleep 0.3
-  done
+# Rotate / unfold, timed on the phone (11-10 p3: rotate 23-30 s, unfold 33 s were this loop's Mac clock - per window a
+# host call, a page call and a Mac screenshot, 2-8 s each at Mac load ~35; the page had laid out 164 ms after the
+# rotation, logcat 09:15:13.370 -> .534). rot_arm <tag> <swap|back> arms the page: it waits for its size to be the
+# rotated one (swap: width and height of now exchanged) or, after a fold, back to now's (back: after it has seen another
+# size or been hidden), then for every bench window live with its body still for 3 frames, and logs their rects as the
+# watcher's go line (t0 0: the watcher, started in the same phone call as the action, is the clock). rot_go <tag>
+# <action> <max ms> runs the action with the watcher; rot_read <tag> -> ms, or "- (why)".
+rot_arm() {
+  local keys; keys=$(for a in $RUN; do eval "printf \"'%s',\" \"\$KEY_$a\""; done)
+  ev "$WW.then(([m])=>{const K=[${keys%,}],T='$1',W0=innerWidth,H0=innerHeight,want=('$2'==='swap')?[H0,W0]:[W0,H0],t1=performance.now();let seen='$2'==='swap',last='',same=0;
+const hid=()=>{seen=true};document.addEventListener('visibilitychange',hid,{once:true});
+const f=()=>{if(performance.now()-t1>${SETTLE_MAX_S:-40}000)return console.info('wb-go '+T+' 0 timeout size '+innerWidth+'x'+innerHeight+' want '+want.join('x')+' seen '+seen);
+ if(innerWidth!==W0||innerHeight!==H0)seen=true;
+ if(!seen||innerWidth!==want[0]||innerHeight!==want[1]){same=0;return requestAnimationFrame(f)}
+ const ws=m.webWins.value.filter(w=>K.some(k=>String(w.key).startsWith(k))),d=devicePixelRatio;
+ const rs=ws.map(w=>{const b=document.querySelector('.webwindow[data-wwid=\"'+w.id+'\"] .webwindow-body.live');if(!b)return '';const q=b.getBoundingClientRect();return [q.left,q.top,q.right,q.bottom].map(v=>Math.round(Math.max(0,v)*d)).join(' ')});
+ const k=rs.join('|');if(rs.length&&!rs.includes('')&&k===last)same++;else same=0;last=k;
+ if(same>=3)return console.info('wb-go '+T+' 0 '+rs.join(' '));requestAnimationFrame(f)};requestAnimationFrame(f);return 'armed'})" >/dev/null
+}
+rot_go() { sh_ "nohup sh $WBD $1 $3 >/dev/null 2>&1 & $2"; }
+rot_read() {
+  local o; o=$(sh_ "sh $WBD read $1 $2")
+  case $o in "drawn "*) set -- $o; echo "$2" ;; *) echo "- (${o:-no answer})" ;; esac
 }
 if phase rotate; then chk rotate
 ROT0=$(sh_ "echo \$(settings get system accelerometer_rotation) \$(settings get system user_rotation)")
 for rot in 1 0; do
-  sh_ "settings put system accelerometer_rotation 0; settings put system user_rotation $rot"; sleep 0.3
-  v=$(settle_all "rotate$rot" "$ROTATE_MS"); bench "rotate-$rot" all "${v%% *}" "$ROTATE_MS" le; [ "${v%% *}" = - ] && log "rotate: $v"
+  rot_arm "rot$rot" swap
+  rot_go "rot$rot" "settings put system accelerometer_rotation 0; settings put system user_rotation $rot" $((ROTATE_MS * 8))
+  v=$(rot_read "rot$rot" $((ROTATE_MS * 8))); bench "rotate-$rot" all "${v%% *}" "$ROTATE_MS" le; [ "${v%% *}" = - ] && log "rotate: $v"
 done
 set -- $ROT0; sh_ "settings put system accelerometer_rotation $1; settings put system user_rotation $2"; ROT0=""
 step rotated "rotated and back"
@@ -512,8 +538,11 @@ fi
 
 # 5. fold 4 s, unfold: the windows come back.
 if [ $FOLD = 1 ] && phase fold; then chk fold
-  device_state_set 0; sleep 4; device_state_set 3; sleep 0.3
-  v=$(settle_all unfold "$UNFOLD_MS"); bench unfold all "${v%% *}" "$UNFOLD_MS" le; [ "${v%% *}" = - ] && log "unfold: $v"
+  rot_arm unfold back
+  device_state_set 0; sleep 4
+  if [ "${POWOS_DEVICE:-phone}" = emu ]; then device_state_set 3; v="- (emu)"; else
+    rot_go unfold "cmd device_state state 3" $((UNFOLD_MS * 6)); v=$(rot_read unfold $((UNFOLD_MS * 6))); fi
+  bench unfold all "${v%% *}" "$UNFOLD_MS" le; [ "${v%% *}" = - ] && log "unfold: $v"
   # The ids may be new after a fold (Linux windows handed back and adopted again): read them by key.
   for a in $RUN; do eval "k=\$KEY_$a"; n=$(wwids "$k" | tail -1); [ -n "$n" ] && { eval "ID_$a=\$n"; MINEW="$MINEW $n"; }; done
   step unfolded "folded and unfolded"
