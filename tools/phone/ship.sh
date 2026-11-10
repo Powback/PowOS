@@ -30,6 +30,10 @@
 #     (10-29 the overlay launcher shell broke the home swipe-up without its APK; 10-30 the web-windows shell left the
 #     phone with no floating windows). Shell-only tips, and Kotlin + shell in separate commits, still ship at once.
 #     Shown by status and the runner log: "shell held for its APK <sha>".
+#   - packages (11-10): targets/android/pkgs/<name>/ changed since the last packages build ($Q/pkgs-live): build-pkgs.sh
+#     <names> under the heavy build slot + publish-repo.sh ([powos] on android.pow, the non-root phones' updates), BESIDE
+#     the loop in its own checkout ($POWOS_RUN_ROOT/ship-runner-pkgs); the rooted deploy (which installs kwin etc. from
+#     out/pkgs) waits for it. Before, a PKGBUILD bump shipped as code only and no package was ever built (kwin 3.76).
 #   - ~/.config/powos/ship-no-idle-wait (the user's setting; file present = on): APK ships pass --now to ship-apk.sh -
 #     install at once instead of waiting for the user to be idle / the screen off. Delete the file to wait again.
 #   The notes of the requests a part finishes go into ONE update notification ("a; b"; all --silent = silent). The tip shipped
@@ -217,16 +221,18 @@ run)
     while read -r a; do [ -f "apps/$a/powos-app.json" ] && echo "$a"; done; }
   # rooted_inputs A B: what changed between A and B that targets/android/rooted/rooted.sh deploy installs (the
   # rooted-mode part only - its own scripts/session + the small PowOS-side pieces it pushes; the apps-tier pieces
-  # it also pushes, lib/apps/bin/powos/the spacetimedb/xwayland/kwin packages, are the "apps" kind above, f105 part
-  # 2 - this is part 1). `deploy`, never `install` (which also re-pushes the rootfs tarball - a human step).
+  # it also pushes, lib/apps/bin/powos, are the "apps" kind above, f105 part 2 - this is part 1; the spacetimedb/
+  # xwayland/kwin packages are BUILT by the "pkgs" step (pkgs_due, 11-10) and installed by this deploy). `deploy`, never `install` (which also re-pushes the rootfs tarball - a human step).
   # lib/apps/powos-terms + powos-transcribe: powos-deploy.sh installs them (e4bc7be0); a change to them alone must deploy
   # (11-01: the terminals view-only rewrite ec367873 changed only powos-terms and would never have reached the phone).
+  # targets/android/pkgs (all of it, 11-10): the deploy installs our packages (kwin, xwayland-kgsl, spacetimedb ...)
+  # from out/pkgs, which the "pkgs" step below builds first - a PKGBUILD change alone must deploy too.
   rooted_inputs() { git diff --name-only "$1" "$2" -- targets/android/rooted targets/android/session \
-    targets/android/pkgs/fex-emu bin/powos-panel-phone desktop/autostart/powos-panel-phone.desktop \
+    targets/android/pkgs bin/powos-panel-phone desktop/autostart/powos-panel-phone.desktop \
     lib/powos-tmux-shell lib/self-phone.sh config/etc/profile.d/60-powos-picker-key.sh lib/ai/agents lib/ai/comms/comms-mcp.py \
     tools/app-api lib/ai/manager lib/ai/sandbox desktop/plasmoid units/phone units/phone-android lib/apps/powos-units lib/apps/powos-terms lib/apps/powos-transcribe \
     targets/android/steam/unity-screen \
-    2>/dev/null | grep -v '^lib/ai/sandbox/node_modules/'; }
+    2>/dev/null | grep -v -e '^lib/ai/sandbox/node_modules/' -e '^targets/android/pkgs/[^/]*/test/'; }
   # units_gate: nothing ships to the phone that installs a file no unit claims (DU1: every ship registers what it
   # installs). test-units-registry.py reads every deploy script against units/; a FAIL refuses the rooted deploy.
   # test-powos-dispatch.py: every `powos <subcommand>`'s file is installed by the deploy (powos terms wasn't, 11-01).
@@ -292,7 +298,68 @@ run)
     i=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true); [ -n "$i" ] || return 1
     git merge-base --is-ancestor "$h" "$i" 2>/dev/null && return 1
     [ -n "$(apk_inputs "$i" "$h")" ] && [ "$(cat "$Q/failed-apk" 2>/dev/null)" != "$h" ]; }
-  rooted_go() { rooted_due && ! rooted_after_apk; }
+  rooted_go() { rooted_due && ! rooted_after_apk && ! pkgs_pending; }
+  # bg_go: work the runner stays up for without a request - a rooted deploy due, or a packages build due / out.
+  bg_go() { rooted_go || pkgs_out || pkgs_due; }
+  # THE PACKAGES (11-10): kwin 3.76's PKGBUILD (patches 0067/0068) landed and shipped as "code", but no step ever built
+  # or published a package - only an agent's hand-run build-pkgs.sh did, so the phone stayed on 3.74 and the game-audio
+  # check failed on the missing KWin half. pkg_names A B: targets/android/pkgs/<name>/ dirs with a PKGBUILD at B whose
+  # files (not their test/) changed between A and B.
+  pkg_names() { git diff --name-only "$1" "$2" -- targets/android/pkgs 2>/dev/null | grep -v '^targets/android/pkgs/[^/]*/test/' |
+    sed -n 's#^targets/android/pkgs/\([^/]*\)/.*#\1#p' | sort -u |
+    while read -r n; do git cat-file -e "$2:targets/android/pkgs/$n/PKGBUILD" 2>/dev/null && echo "$n"; done; }
+  # pkgs_due: packages changed since the last tip the pkgs step built ($Q/pkgs-live; none yet: the rooted deploy's or
+  # the installed APK's base, recorded at once) up to HEAD, and the build didn't fail on HEAD. Sets pbase/pchg.
+  pkgs_due() { local h; h=$(git rev-parse HEAD 2>/dev/null) || return 1
+    pbase=$(cat "$Q/pkgs-live" 2>/dev/null || true)
+    [ -n "$pbase" ] || { pbase=$(cat "$Q/rooted-live" 2>/dev/null || cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
+      [ -z "$pbase" ] || echo "$pbase" > "$Q/pkgs-live"; }
+    pchg=; [ -n "$pbase" ] && git cat-file -e "$pbase^{commit}" 2>/dev/null && pchg=$(pkg_names "$pbase" "$h" | paste -sd' ' -)
+    [ -n "$pchg" ] && [ "$(cat "$Q/failed-pkgs" 2>/dev/null)" != "$h" ]; }
+  # The build runs BESIDE the loop (a KWin build is 20+ min; shell ships must not queue behind it), in its own checkout
+  # ($PK, as the APK's $SA), under the Mac's one heavy build slot. State in $Q/pkgs/: tip, names, pid, log, rc.
+  PK=${POWOS_PKGS_RUN:-$POWOS_RUN_ROOT/ship-runner-pkgs}
+  pkgs_alive() { [ -d "$Q/pkgs" ] && [ ! -f "$Q/pkgs/rc" ] || return 1
+    kill -0 "$(cat "$Q/pkgs/pid" 2>/dev/null)" 2>/dev/null && return 0
+    echo 4 > "$Q/pkgs/rc"; return 1; }
+  pkgs_out() { pkgs_alive || [ -f "$Q/pkgs/rc" ]; }
+  # pkgs_pending: a build out, or one due - the rooted deploy waits for it (it installs from out/pkgs).
+  pkgs_pending() { pkgs_out || pkgs_due; }
+  # pkgs_build NAME...: in $PK - build-pkgs.sh (heavy build slot), publish-repo.sh ([powos] on android.pow: the non-root
+  # phones' phone-update.sh), then the new builds into the ship checkout's out/pkgs, where the rooted deploy finds them.
+  # SHIP_PKGS_BUILD replaces the build + publish (tests).
+  pkgs_build() {
+    if [ -n "${SHIP_PKGS_BUILD:-}" ]; then $SHIP_PKGS_BUILD "$@" || return
+    else tools/agents/build-slot.sh "build-pkgs ship $*" -- targets/android/build-pkgs.sh "$@" && targets/android/publish-repo.sh || return; fi
+    local n f; mkdir -p "$SR/targets/android/out/pkgs"
+    for n in "$@"; do f=$(sh targets/android/tools/newest-pkgs.sh targets/android/out/pkgs "$n")
+      [ -n "$f" ] && cp -p "$f" "$SR/targets/android/out/pkgs/" && echo "pkgs: ${f##*/} -> the ship checkout"; done; }
+  pkgs_launch() {   # $1 tip, rest: names
+    local a=$1; shift
+    if [ ! -e "$PK/.git" ]; then
+      git -C "$REPO" worktree add -q --detach "$PK" "$a" || return 1
+      echo "the packages ship service (tools/phone/ship.sh)" > "$PK/.powos-runner-checkout"
+    else git -C "$PK" reset -q --hard "$a" || return 1; fi
+    rm -rf "$Q/pkgs"; mkdir -p "$Q/pkgs"; echo "$a" > "$Q/pkgs/tip"; echo "$*" > "$Q/pkgs/names"
+    echo "$Q/done/$(date +%Y%m%d-%H%M%S)-${a:0:9}-pkgs.log" > "$Q/pkgs/log"
+    ( cd "$PK" && pkgs_build "$@" > "$(cat "$Q/pkgs/log")" 2>&1; echo $? > "$Q/pkgs/rc" ) &
+    echo $! > "$Q/pkgs/pid"; }
+  # reap_pkgs: a build that ended - built + published (pkgs-live; the rooted deploy goes next), or failed (mailed, not
+  # retried on that tip). rc 4: its runner died / was paused mid-build - it goes again.
+  reap_pkgs() { local A arc plog pn
+    [ -f "$Q/pkgs/rc" ] || return 0
+    A=$(cat "$Q/pkgs/tip") arc=$(cat "$Q/pkgs/rc") plog=$(cat "$Q/pkgs/log") pn=$(cat "$Q/pkgs/names")
+    if [ "$arc" = 0 ]; then
+      echo "$A" > "$Q/pkgs-live"; rm -f "$Q/failed-pkgs"
+      echo "$(date '+%F %T') ${A:0:9} pkgs ($pn) built + published" >> "$Q/shipped.log"
+      echo "$(date +%T) ${A:0:9}: packages built + published ($pn)"
+    elif [ "$arc" = 4 ] || [ -e "$Q/paused" ]; then echo "$(date +%T) ${A:0:9}: packages build stopped (rc $arc) - it goes again"
+    else
+      echo "$A" > "$Q/failed-pkgs"
+      echo "$(date +%T) ${A:0:9}: packages build FAILED rc $arc (log $plog) - waiting for a new origin commit"
+      mail "ship ${A:0:9} (pkgs:$pn) FAILED rc $arc: $(tail -1 "$plog" | cut -c1-200) - log $plog on the Mac; fix it on origin, then ship.sh request again"
+    fi
+    rm -rf "$Q/pkgs"; }
   # The APK ship runs BESIDE the loop, in its own checkout (it builds from it for minutes while ship_tree resets $SR),
   # so a shell change never queues behind an APK's build or idle wait (2026-10-23: shell fixes waited 25-30 min behind
   # one APK). State in $Q/apk/: tip, pid, rc (written when it ends).
@@ -722,12 +789,13 @@ run)
     return 1
   }
   reap_apk   # runner start: a previous runner's finished APK
+  reap_pkgs  # ... and packages build
   while :; do
-    while ls "$Q"/*.req >/dev/null 2>&1 || rooted_go; do
+    while ls "$Q"/*.req >/dev/null 2>&1 || bg_go; do
       ship_tree >/dev/null || { sleep "$POLL"; continue; }
       T=$(git rev-parse HEAD)
       inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
-      reap_apk
+      reap_apk; reap_pkgs
       nonroot_kick
       inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
       # Paused: nothing new starts; an APK ship still out (installing) is reaped first.
@@ -761,8 +829,8 @@ run)
           sreqs+=("$r")
         fi
       done
-      # No request covers this tip: only a pending rooted deploy keeps the loop here (rooted_go above).
-      [ ${#whos[@]} -gt 0 ] || rooted_go || { sleep "$POLL"; continue; }
+      # No request covers this tip: only a pending rooted deploy or packages build keeps the loop here (bg_go above).
+      [ ${#whos[@]} -gt 0 ] || bg_go || { sleep "$POLL"; continue; }
       who_s=$(printf '%s\n' ${whos[@]+"${whos[@]}"} | sed '/^$/d' | sort -u | paste -sd, -); who_s=${who_s:-"$(cut -c6- "$Q/rooted-note" 2>/dev/null | head -1)"}
       joined() { printf '%s\n' "$@" | sed '/^$/d' | paste -sd';' - | sed 's/;/; /g'; }
       # The apps step's changes (step 3), known up front: a vendored app's module change (vmods: "app db" lines) ties
@@ -967,6 +1035,12 @@ run)
           fi
         fi
       fi
+      # 3b. Packages (pkgs_due above): targets/android/pkgs/<name>/ changed since the last packages build - built and
+      #     published beside the loop, once origin stayed QUIET s on the tip; the rooted deploy below waits for it.
+      if ! pkgs_out && [ "$age" -ge "$QUIET" ] && pkgs_due; then
+        echo "$(date +%T) ship ${T:0:9} as packages ($pchg) - built beside the loop"
+        pkgs_launch "$T" $pchg || echo "$(date +%T) ${T:0:9}: couldn't check out $PK for the packages"
+      fi
       # 4. The rooted-mode deploy (targets/android/rooted/rooted.sh deploy, f105 part 1): rooted_inputs changed
       #    since the last rooted-mode ship, built... nothing to build, just pushed - after the APK, under the
       #    same debounce and phone-busy rules as the apps step above.
@@ -976,7 +1050,7 @@ run)
       if rooted_due; then
         [ -z "$rn" ] || printf 'who: %s\n%s\n' "$who_s" "$rn" > "$Q/rooted-note"
       else rchg=; fi
-      if [ -n "$rchg" ] && ! apk_out && ! rooted_after_apk && [ "$age" -ge "$QS" ]; then
+      if [ -n "$rchg" ] && ! apk_out && ! rooted_after_apk && ! pkgs_pending && [ "$age" -ge "$QS" ]; then
         if phone_offline; then offline_wait "rooted deploy"
         elif verify_held; then echo $$ > "$Q/wants-phone"
         elif ship_lock; then
@@ -1007,13 +1081,13 @@ run)
           fi
         fi
       fi
-      ! { ls "$Q"/*.req >/dev/null 2>&1 || rooted_go; } || sleep "$POLL"
+      ! { ls "$Q"/*.req >/dev/null 2>&1 || bg_go; } || sleep "$POLL"
     done
     # An APK ship still out: stay and reap it (the loop above reaps once its rc exists) before the idle exit.
     apk_alive && { sleep "$POLL"; continue; }
     [ -f "$Q/apk/rc" ] && { reap_apk; continue; }
     # A rooted deploy still due (its APK just installed, say): one more pass, never while paused.
-    [ ! -e "$Q/paused" ] && ship_tree >/dev/null && rooted_go && continue
+    [ ! -e "$Q/paused" ] && ship_tree >/dev/null && bg_go && continue
     [ -e "$Q/paused" ] || nonroot_kick --now
     rm -rf "$L"
     [ -e "$Q/paused" ] && break
