@@ -52,6 +52,15 @@ The board shows window checks failing by timeout or waiting days for a free phon
   `window-lock.sh`) carry no marker, as the handbook's rule says.
 - [ ] 0.2 Move lifecycle and input checks to the emulator lane: `ww-opens`, `ww-close-min`, `ww-clamp`, `ww-stop`,
   `ww-popup-x11`. Linux web windows already draw there (CPU copy path, `docs/research/nonroot-parity.md` 11-04).
+  **Blocked 11-10, needs the owner's OK for disk:** the lane's AVD has no Linux session. Probed on its snapshot
+  (`emu.sh start`, origin d2bce2f6): no `/data/powos/root`, no `kwin_wayland`, and `/data` is 5.8 GB with 4.7 GB free,
+  so the rootfs (6+ GB unpacked) can't be installed there. The 11-04 proof ran a hand-set-up session that the
+  snapshot never kept (every start is the snapshot of 10-24). The five checks keep `# lanes: phone` until then.
+  Proposal: `emu.sh create` with a 16 GB data partition, the base image and Kate/Dolphin installed through the normal
+  non-root first run, then the snapshot `powos-ready` taken with the session up (the AVD grows from ~14 GB to about
+  26 GB; the Mac has 74 GB free, `emu.sh` refuses below 25 GB). Then flip the five headers to `# lanes: emu phone` and
+  prove each with one `queue.sh add --dev emu` PASS. The lane's lock was also hardened (pid 1 / junk is never a
+  holder) and its tier-1 test no longer writes the real `~/.cache` lock.
 - [x] 0.3 Keep on the phone only what needs it: `ww-resize`, `ww-glue`, `ww-drag-lag`, `window-bench`, games.
   Done 11-10: these four say `# lanes: phone` (frame timing, missed vsyncs, perfetto, real touch speed), games are
   refused on the emulator by `queue.sh`'s HW_ONLY; the handbook row marks them phone-only for good.
