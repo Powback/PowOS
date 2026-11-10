@@ -7,15 +7,23 @@
 set -u
 cd "$(dirname "$0")/../../.." || exit 5
 ADB=${ADB:-$HOME/Library/Android/sdk/platform-tools/adb}
-export PHONE_SERIAL=${PHONE_SERIAL:-$("$ADB" devices | awk '/^192\.168\.50\.203:/{print $1; exit}')}
-[ -n "$PHONE_SERIAL" ] || { echo "SKIP: ENV: the razr isn't on the Mac's adb"; exit 5; }
+# The razr on the Mac's own adb (wireless debugging, paired with the Mac only - powos-vadb can't reach it): its mdns
+# serial, as nonroot-ports.sh (11-10: the old default matched only 192.168.50.203:, the razr was at .18 under its mdns
+# name, so this SKIPped and the board task sat at 3/4 without a check). CDP goes through the Mac's adb too (cdp.sh
+# CDP_MAC_ADB).
+export PHONE_SERIAL=${PHONE_SERIAL:-$("$ADB" devices | awk '/^(adb-ZY22MQL54Q[^ \t]*|192\.168\.50\.203:[0-9]+)[ \t]+device$/{print $1; exit}')}
+[ -n "$PHONE_SERIAL" ] || { echo "SKIP: ENV: the razr isn't on the Mac's adb (adb mdns services)"; exit 5; }
+export CDP_MAC_ADB=${CDP_MAC_ADB:-$ADB}
 js='JSON.stringify([...document.querySelectorAll(".home-tile")].filter(e=>e.getBoundingClientRect().height>0).map(e=>({t:(e.innerText||"").replace(/\s+/g," ").trim().slice(0,120),live:!!e.querySelector(".xterm-screen,canvas,video,img")})))'
 out=$(perl -e 'alarm 60; exec @ARGV' tools/phone/cdp.sh eval home "$js" 2>&1 | tr -d '\\' | tail -1)
 echo "widgets-nonroot ($PHONE_SERIAL): $out"
+# No answer: say what's in front (the home's WebView exists only while PowOS's home is up; 11-10 the razr's user was in
+# Motorola's own wallpaper/style panel, so the PowOS process ran without a page to read).
+case "$out" in *'['*) ;; *) echo "widgets-nonroot: in front: $("$ADB" -s "$PHONE_SERIAL" shell dumpsys activity activities 2>/dev/null | awk '/ResumedActivity/{for (i = 1; i <= NF; i++) if ($i ~ /\//) { print $i; exit }}')" ;; esac
 python3 - "$out" <<'PY'
 import sys,json,re
 m=re.search(r"\[.*\]",sys.argv[1])
-if not m: print("SKIP: ENV: no CDP answer from home"); sys.exit(5)
+if not m: print("SKIP: ENV: no CDP answer from home ("+sys.argv[1][-160:]+")"); sys.exit(5)
 tiles=json.loads(m[0]); f=[]
 if not tiles: print("FAIL: no widget tile on home"); sys.exit(1)
 for i,t in enumerate(tiles,1):

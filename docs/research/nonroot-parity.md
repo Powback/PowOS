@@ -376,3 +376,22 @@ warm-built APK since 11-04 shipped without them.
 | Pet | APK module + SpacetimeDB in the image | razr's base has no SpacetimeDB (from before 11-09): "needs a newer image" until it's updated |
 | Lights | APK UI + module (bundled now); SpacetimeDB for its key/prefs | as Pet for its saved key; UI ships |
 
+
+## 11-10 (board-nonroot): landing and verification follow-up
+
+- Islands `e47c8e59` / `bc29fe33` are already ancestors of integration; no duplicate cherry-pick. APK staging and
+  the Agents reporter remain intact. Needs APK plus the newer no-root base (SpacetimeDB for Pet/Lights).
+- Claude's installer was already in the image recipe (`bc051d1f`) but silently tolerated failure. It now requires
+  successful download/install and an executable; `units/phone/claude-code.json` is installed into the image's registry.
+  Base splitting keeps the native install. Login shells parse the existing endpoint.conf too (not just the manager),
+  so enrolled fleet devices use claude-auth.pow and their existing enrollment token, never a second login. No token
+  is baked into the image or replaced. Endpoint writes skip sudo when already root. Existing standalone behavior is
+  unchanged; the Razr must retain/adopt its fleet enrollment when the new base is synced.
+- The 105000% / 0 MHz bug already has the 11-09 sentinel/android.perf fix (`5dfc6115`, `81c31afc`, `723ec6d3`).
+  The remaining check was also looking only for .203 and forwarding through a different adb server: fixed with the
+  Mac-paired TLS serial and a local CDP transport. Last read-only observation: APK 2026.11.10-0353, Razr at .18,
+  Motorola CustomizationPanelLauncher foreground, no PowOS WebView endpoint: SKIP, not a pass. No input injected.
+- Validation: seven tier1 suites on pow58 (ai-endpoint, cdp-home, cdp-warm, check-shell-pitfalls, noroot-agents,
+  noroot-app-base, units-registry); JVM PerfTest and ExamplesTest via jvm-offload on pow58 passed. Live islands,
+  Claude version/proxy auth, and widget readings still need post-build verification; do not close from these tests.
+- Read-only widget queue after deployment: `tools/phone/verify/queue.sh add widgets-etc-don-t-work-in-powos-on-a-non-rooted tools/phone/verify/widgets-nonroot.sh`.

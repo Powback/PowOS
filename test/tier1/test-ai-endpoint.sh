@@ -113,6 +113,23 @@ grep -q 'cfg_endpoint_write "\$url" "\$1"' "$CONFIG" \
   && ok "each setter carries the other key through the rewrite" \
   || bad "a setter rewrites the file without preserving the other key"
 
+# --- login shells: a plain `claude` in a terminal uses the endpoint too ------
+# The phone's Linux has no systemd (no environment.d): /etc/profile.d/45-powos-claude-endpoint.sh exports the file, or a
+# terminal's claude ran its own login - a second refresher of the fleet grant (units/phone/claude-code.json).
+PROF="$REPO/config/etc/profile.d/45-powos-claude-endpoint.sh"
+prof() { env -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN "$@" sh -c '. "$1"; echo "${ANTHROPIC_BASE_URL:-}|${ANTHROPIC_AUTH_TOKEN:-}"' _ "$PROF"; }
+[ "$(prof POWOS_AI_ENDPOINT_FILE="$CONF")" = "http://fixture.pow|fixture-tok" ] \
+  && ok "profile.d exports the endpoint to login shells" || bad "profile.d: $(prof POWOS_AI_ENDPOINT_FILE="$CONF")"
+[ "$(prof POWOS_AI_ENDPOINT_FILE="$CONF" ANTHROPIC_BASE_URL=http://mine)" = "http://mine|fixture-tok" ] \
+  && ok "profile.d: an exported value wins" || bad "profile.d overrode an exported value"
+[ "$(prof POWOS_AI_ENDPOINT_FILE="$WORK/none")" = "|" ] \
+  && ok "profile.d: no endpoint.conf sets nothing (Claude Code's own sign-in)" || bad "profile.d set something without a file"
+printf 'ANTHROPIC_BASE_URL=http://x\n$(touch %s/PWNED2)\n' "$WORK" > "$WORK/evil.conf"
+prof POWOS_AI_ENDPOINT_FILE="$WORK/evil.conf" >/dev/null 2>&1
+[ ! -e "$WORK/PWNED2" ] && ok "profile.d parses, never sources" || bad "profile.d SOURCED the endpoint file"
+grep -q '45-powos-claude-endpoint.sh' "$REPO/targets/android/install-powos-android.sh" \
+  && ok "the phone image installs it" || bad "install-powos-android.sh doesn't install the profile.d snippet"
+
 echo
 echo "ai-endpoint: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

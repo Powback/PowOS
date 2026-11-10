@@ -61,6 +61,28 @@ printf '#!/bin/bash\nexec sleep 5\n' >"$T/hang"; chmod +x "$T/hang"
 s=$SECONDS; out=$(cdp CDP_ADB_TIMEOUT_S=1 CDP_ADB="$T/hang") rc=$?
 [ $rc = 2 ] && [ $((SECONDS - s)) -lt 4 ] && ok "a hung adb is cut at CDP_ADB_TIMEOUT_S" || bad "hang: rc=$rc $((SECONDS - s))s"
 
+# Mac-paired TLS devices must never use the container's adb server or cached forward.
+mkdir -p "$T/macbin" "$T/mac"
+cat >"$T/macbin/adb" <<'EOF'
+#!/bin/bash
+printf '%s\n' "$*" >>"$FAKE_D/adb.log"
+[ "$1" = -s ] && shift 2
+case "$1" in
+  shell) printf 'pid=77\n@webview_devtools_remote_77\n' ;;
+  forward) echo "$*" >"$FAKE_D/forward" ;;
+esac
+EOF
+cat >"$T/macbin/node" <<'EOF'
+#!/bin/bash
+printf 'local-node port=%s args=%s\n' "$CDP_PORT" "$*"
+EOF
+chmod +x "$T/macbin/adb" "$T/macbin/node"
+out=$(env PATH="$T/macbin:$PATH" CDP_MAC_ADB="$T/macbin/adb" PHONE_SERIAL=razr-tls FAKE_D="$T/mac" \
+  "$P/cdp.sh" eval home 1) rc=$?
+[ "$rc" = 0 ] && grep -q '^-s razr-tls shell ' "$T/mac/adb.log" && \
+  grep -q 'webview_devtools_remote_77$' "$T/mac/forward" && [[ "$out" == local-node*'eval home 1' ]] \
+  && ok "Mac-paired device: explicit serial and local node, no container" || bad "Mac lane: rc=$rc out=$out"
+
 # ── cdp.ts: the target ──────────────────────────────────────────────────────────────────────────────────────────
 echo "cdp.ts: the live target among several"
 if command -v node >/dev/null && node -e 'process.exit(Number(+process.versions.node.split(".")[0] < 22))'; then

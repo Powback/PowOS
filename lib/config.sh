@@ -250,9 +250,11 @@ cfg_endpoint_write() {  # cfg_endpoint_write <url> <token>
         echo "ANTHROPIC_BASE_URL=$url"
         echo "ANTHROPIC_AUTH_TOKEN=$token"
     } > "$tmp"
-    sudo mkdir -p "$(dirname "$CFG_ENDPOINT_FILE")" || { rm -f "$tmp"; return 1; }
-    sudo cp "$tmp" "$CFG_ENDPOINT_FILE" || { rm -f "$tmp"; return 1; }
-    sudo chmod 0644 "$CFG_ENDPOINT_FILE"
+    # Already root (e.g. the phone image's session, where a setuid sudo may not work): no sudo.
+    local su=(sudo); [[ ${EUID:-$(id -u)} -eq 0 ]] && su=()
+    ${su[@]+"${su[@]}"} mkdir -p "$(dirname "$CFG_ENDPOINT_FILE")" || { rm -f "$tmp"; return 1; }
+    ${su[@]+"${su[@]}"} cp "$tmp" "$CFG_ENDPOINT_FILE" || { rm -f "$tmp"; return 1; }
+    ${su[@]+"${su[@]}"} chmod 0644 "$CFG_ENDPOINT_FILE"
     rm -f "$tmp"
 
     local uenv; uenv="$(cfg_endpoint_user_env)"

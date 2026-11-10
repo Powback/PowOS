@@ -172,9 +172,17 @@ curl -fsSL -o /tmp/bun.zip https://github.com/oven-sh/bun/releases/latest/downlo
 bsdtar -xf /tmp/bun.zip -C /tmp && install -m 755 /tmp/bun-linux-aarch64/bun /usr/bin/bun && rm -rf /tmp/bun*
 # Claude Code out of the box (the user, 11-09 on the non-root razr: "claude is not installed"): the vendor's native
 # installer, the same one `powos ai install claude` and the manager's first use run, into the app user's home
-# (/root/.local/bin, on every login shell's PATH) so it keeps updating itself there. Not fatal: the first use installs
-# it again when the network was down here.
-HOME=/root bash -c 'curl -fsSL https://claude.ai/install.sh | bash' || echo "powos: Claude Code's installer failed - it installs on first use" >&2
+# (/root/.local/bin, on every login shell's PATH) so it keeps updating itself there. Fail the image build rather
+# than publish a base that still has no AI. pipefail catches a failed download even when bash consumes empty input.
+HOME=/root bash -o pipefail -c 'curl -fsSL https://claude.ai/install.sh | bash'
+test -x /root/.local/bin/claude || { echo "powos: Claude Code missing after installation" >&2; exit 1; }
+# ...and that claude signs in through this device's endpoint (unit claude-code): every login shell exports
+# /etc/powos/ai/endpoint.conf (the fleet's claude-auth.pow + the device's own token, written by enrollment's
+# `powos devices ai-apply`). No systemd here, so environment.d never reached a terminal's `claude`, which then ran its
+# own login. Without endpoint.conf (not one of the owner's devices) Claude Code's own sign-in stays.
+pe=$P/current/src/config/etc/profile.d/45-powos-claude-endpoint.sh
+install -Dm 644 "$pe" /etc/profile.d/45-powos-claude-endpoint.sh
+install -Dm 644 "$P/current/src/units/phone/claude-code.json" /etc/powos/units.d/claude-code.json
 # claude-login (~/Projects/claude-login, staged by build-rootfs.sh): the real `claude /login` run headless, which PowOS's
 # native Claude sign-in (lib/ai/manager/fleet_login.py, direct mode) drives. Without it the AI page's Login said "the
 # sign-in stopped - try again" at once. Node isn't in the image; bun runs its ES module as is (checked on the razr).

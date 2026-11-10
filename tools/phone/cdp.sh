@@ -8,9 +8,16 @@ here=$(cd "$(dirname "$0")" && pwd)
 # second phone on the same adb server (the razr) is never the one answering - exported for adb.sh.
 serial=${PHONE_SERIAL:-${POWOS_PHONE_ADDR:-10.13.13.7:5555}}
 export PHONE_SERIAL=$serial
+# CDP_MAC_ADB=<the Mac SDK's adb>: the phone is on the Mac's own adb server, not powos-vadb's - the razr fold over
+# wireless debugging (TLS, paired with the Mac only; its mdns serial adb-<id>._adb-tls-connect._tcp, its address and
+# port change with DHCP and every toggle). Its forward is the Mac's localhost, so cdp.ts runs here, as the emulator's.
+cdp_mac=${CDP_MAC_ADB:+1}
 # adb with a deadline (CDP_ADB_TIMEOUT_S, 30): a hung adb (VPN drop mid-call) otherwise held the check past its budget
 # before cdp.ts's own timeout even started.
-cadb() { perl -e 'alarm shift; exec @ARGV' "${CDP_ADB_TIMEOUT_S:-30}" "${CDP_ADB:-$here/adb.sh}" "$@"; }
+cadb() {
+  if [ -n "$cdp_mac" ]; then perl -e 'alarm shift; exec @ARGV' "${CDP_ADB_TIMEOUT_S:-30}" "$CDP_MAC_ADB" -s "$serial" "$@"
+  else perl -e 'alarm shift; exec @ARGV' "${CDP_ADB_TIMEOUT_S:-30}" "${CDP_ADB:-$here/adb.sh}" "$@"; fi
+}
 # The devtools socket, resolved fresh on every call in ONE adb call (11-10: an app restart or APK install gives a new
 # pid, so a socket name from before is a dead forward): com.powos.app's pid(s) and the webview devtools sockets that
 # exist. The socket used is one that exists for a running pid; none listed (an unreadable /proc/net/unix) -> pidof's
@@ -25,7 +32,7 @@ cadb() { perl -e 'alarm shift; exec @ARGV' "${CDP_ADB_TIMEOUT_S:-30}" "${CDP_ADB
 port=9333
 case "$serial" in 10.13.13.7:5555) ;; *) port=$((9340 + $(printf %s "$serial" | cksum | cut -d' ' -f1) % 50)) ;; esac
 fwd_cache=${CDP_WARM_DIR:-$HOME/.cache/powos-cdp}/fwd.$port
-if [ "${POWOS_DEVICE:-phone}" != emu ] && [ "${CDP_FWD_CACHE_S:-60}" -gt 0 ] && read -r f_at _ 2>/dev/null < "$fwd_cache" &&
+if [ "${POWOS_DEVICE:-phone}" != emu ] && [ -z "$cdp_mac" ] && [ "${CDP_FWD_CACHE_S:-60}" -gt 0 ] && read -r f_at _ 2>/dev/null < "$fwd_cache" &&
    [ $(( $(date +%s) - f_at )) -lt "${CDP_FWD_CACHE_S:-60}" ]; then
   . "$here/cdp-warm.sh"
   rc=0; res=$(cdp_warm_run "$port" "$@") || rc=$?
@@ -47,6 +54,10 @@ sock=webview_devtools_remote_$pid
 if [ "${POWOS_DEVICE:-phone}" = emu ]; then
   cadb forward tcp:9334 "localabstract:$sock" >/dev/null || { echo "cdp: adb forward failed" >&2; exit 2; }
   CDP_PORT=9334 exec node --no-warnings "$here/cdp.ts" "$@"
+fi
+if [ -n "$cdp_mac" ]; then
+  cadb forward tcp:$port "localabstract:$sock" >/dev/null || { echo "cdp: adb forward failed ($serial tcp:$port -> $sock)" >&2; exit 2; }
+  CDP_PORT=$port exec node --no-warnings "$here/cdp.ts" "$@"
 fi
 # A second phone (PHONE_SERIAL, e.g. the unrooted razr fold) forwards on its own port (set above): one adb server holds
 # both forwards, and reusing 9333 would re-point the OnePlus's checks at the other phone mid-run.

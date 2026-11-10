@@ -39,6 +39,20 @@ class NoRootAppBase(unittest.TestCase):
         self.assertEqual(home['brave-origin-bin'], 'apps')
         self.assertEqual(home['kate'], 'apps')
 
+    def test_claude_is_required_and_kept_in_base(self):
+        text = (ROOT / 'targets/android/install-powos-android.sh').read_text()
+        self.assertIn("bash -o pipefail -c 'curl -fsSL https://claude.ai/install.sh | bash'", text)
+        self.assertIn('test -x /root/.local/bin/claude ||', text)
+        self.assertIn('/etc/powos/units.d/claude-code.json', text)
+        self.assertNotIn("installer failed - it installs on first use", text)
+        where = split().classifier(split().rules(str(CONF)), {}, {})
+        for path in ('root/.local/bin/claude', 'root/.local/share/claude/versions/current',
+                     'etc/profile.d/45-powos-claude-endpoint.sh'):
+            self.assertEqual(where(path), 'base', path)
+        unit = json.loads((ROOT / 'units/phone/claude-code.json').read_text())
+        self.assertIn('/root/.local/bin/claude', unit['files'])
+        self.assertIn('/root/.local/share/claude', unit['files'])
+
     def test_no_pack_names_spacetimedb(self):
         # A package a pack names leaves the base even when a root depends on it (rootfs-packs.conf header).
         for k, name, how, ws in split().rules(str(CONF)):
