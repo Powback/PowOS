@@ -5,5 +5,5 @@
 # environment (KWin, the user's apps) as the user instead: tools/phone/adb.sh shell su -c "sh /data/powos/powos-run.sh '<cmd>'"
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd); s=$(cd "$(dirname "$1")" && pwd)/$(basename "$1"); n=powos-root-$$.sh
-"$here/adb.sh" push "$s" /data/local/tmp/$n >/dev/null
-"$here/adb.sh" shell "su -c 'cp /data/local/tmp/$n /data/powos/root/tmp/$n && rm /data/local/tmp/$n && chroot /data/powos/root /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/usr/sbin HOME=/root bash /tmp/$n; rc=\$?; rm -f /data/powos/root/tmp/$n; exit \$rc'"
+# One adb call, the script over stdin (user.sh's reason: a push from outside $HOME costs a throwaway container, ~1.7 s).
+"$here/adb.sh" shell "su -c 'cat > /data/powos/root/tmp/$n && chroot /data/powos/root /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/usr/sbin HOME=/root bash /tmp/$n </dev/null; rc=\$?; rm -f /data/powos/root/tmp/$n; exit \$rc'" < "$s"

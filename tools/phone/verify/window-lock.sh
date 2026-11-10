@@ -25,24 +25,47 @@ WL_WOKE=${WL_WOKE:-$HOME/.cache/powos-verify-woke}
 # pad presses of pad-lib.sh: powos-padd's controller is an input device idle.sh counts as a person's; bf-play).
 self_input_for() { printf 'echo $(( $(date +%%s) + %d )) > /data/local/tmp/powos-selfinput; ' "${1:-8}"; }
 SELF_INPUT=$(self_input_for 8)
+# wl_save <phone dir>: the user's brightness, its mode and the screen-off timeout saved to $WL_WOKE (once: a second
+# call keeps the first save) with at=<now>; rc 1 when they can't be read. HELD=1 marks a hold (wl_hold), not a wake.
+wl_save() { [ -s "$WL_WOKE" ] && return 0
+  local cur b m t
+  cur=$("$1/adb.sh" shell 'echo b=$(settings get system screen_brightness); echo m=$(settings get system screen_brightness_mode); echo t=$(settings get system screen_off_timeout)' 2>/dev/null | tr -d '\r')
+  b=$(sed -n 's/^b=\([0-9]*\)$/\1/p' <<<"$cur"); m=$(sed -n 's/^m=\([0-9]*\)$/\1/p' <<<"$cur"); t=$(sed -n 's/^t=\([0-9]*\)$/\1/p' <<<"$cur")
+  [ -n "$b" ] && [ -n "$m" ] && [ -n "$t" ] || return 1
+  mkdir -p "$(dirname "$WL_WOKE")"; printf 'b=%s\nm=%s\nt=%s\nat=%s\n%s' "$b" "$m" "$t" "$(date +%s)" "${HELD:+held=1
+}" > "$WL_WOKE"; }
+# wl_hold <phone dir>: a window that found the screen already on (nobody woke it) keeps it on: the user's screen-off
+# timeout saved (wl_save) and held at 30 min until wl_sleep/wl_restore put it back, brightness untouched. Without it
+# the window ran on the user's 30 s timeout: 11-10 04:46:58 the screen dozed between two checks, ww-clamp said "screen
+# not on" and the doze read as a touch, so the window ended with 25 jobs runnable. A touch since the hold stops the
+# check like one on a woken phone (wl_touched).
+wl_hold() {
+  [ -z "${GO_ONLY:-}" ] || return 0
+  [ -s "$WL_WOKE" ] && return 0
+  HELD=1 wl_save "$1" || return 0
+  "$1/adb.sh" shell "settings put system screen_off_timeout 1800000" >/dev/null 2>&1; }
 wl_wake() {
   [ -z "${GO_ONLY:-}" ] || return 0
-  local st i bat lvl pw cur b m t
+  local st i bat lvl pw
   st=$("$1/idle.sh" 2>/dev/null); i=$(sed -n 's/.*idle=\([0-9]*\).*/\1/p' <<<"$st")
   case "$st" in *screen=Awake*) return 0 ;; esac
-  [ -n "$i" ] && [ "$i" -ge "${WAKE_IDLE_S:-600}" ] || return 0
+  # Nobody touched the phone since the queue's last window opened ($WL_LASTWIN, written by queue.sh: that window began
+  # on an idle phone) -> that is enough, no fresh WAKE_IDLE_S: a short window (an install yield, a re-pick) put the
+  # screen back off, and the next one waited up to 600 s for a phone nobody had picked up (11-10).
+  local need=${WAKE_IDLE_S:-600} lw since
+  lw=$(cat "${WL_LASTWIN:-$HOME/.cache/powos-verify-lastwin}" 2>/dev/null); case $lw in ''|*[!0-9]*) lw=0 ;; esac
+  since=$(( $(date +%s) - lw ))
+  [ "$lw" -gt 0 ] && [ $since -ge 0 ] && [ $since -lt "$need" ] && need=$(( since > ${QUEUE_IDLE_S:-120} ? since : ${QUEUE_IDLE_S:-120} ))
+  [ -n "$i" ] && [ "$i" -ge "$need" ] || return 0
   bat=$("$1/adb.sh" shell 'dumpsys battery' 2>/dev/null | tr -d '\r')
   lvl=$(sed -n 's/^ *level: *\([0-9]*\).*/\1/p' <<<"$bat" | head -1)
   pw=0; grep -qE '^ *(AC|USB|Wireless|Dock) powered: true' <<<"$bat" && pw=1
   if [ "$pw" = 0 ] && [ -n "$lvl" ] && [ "$lvl" -lt "${WAKE_MIN_BATT:-20}" ]; then
     echo "not waking the phone: battery ${lvl}% and not charging"; return 0; fi
-  if [ ! -s "$WL_WOKE" ]; then   # the user's own settings, saved once per wake (a second wake keeps the first save)
-    cur=$("$1/adb.sh" shell 'echo b=$(settings get system screen_brightness); echo m=$(settings get system screen_brightness_mode); echo t=$(settings get system screen_off_timeout)' 2>/dev/null | tr -d '\r')
-    b=$(sed -n 's/^b=\([0-9]*\)$/\1/p' <<<"$cur"); m=$(sed -n 's/^m=\([0-9]*\)$/\1/p' <<<"$cur"); t=$(sed -n 's/^t=\([0-9]*\)$/\1/p' <<<"$cur")
-    [ -n "$b" ] && [ -n "$m" ] && [ -n "$t" ] || { echo "not waking the phone: can't read its brightness/timeout to restore later"; return 0; }
-    mkdir -p "$(dirname "$WL_WOKE")"; printf 'b=%s\nm=%s\nt=%s\nat=%s\n' "$b" "$m" "$t" "$(date +%s)" > "$WL_WOKE"
-  fi
-  "$1/adb.sh" shell "settings put system screen_brightness_mode 0; settings put system screen_brightness ${WAKE_BRIGHTNESS:-1}; settings put system screen_off_timeout 1800000; ${SELF_INPUT}input keyevent KEYCODE_WAKEUP; sleep 1; wm dismiss-keyguard" >/dev/null 2>&1
+  wl_save "$1" || { echo "not waking the phone: can't read its brightness/timeout to restore later"; return 0; }
+  # powos-queuewake: this wake is the queue's (idle.sh counts its Awake streak as served - no 120 s wait for a screen
+  # the queue itself turned on). Polled, not slept: wm dismiss-keyguard as soon as the screen reports Awake.
+  "$1/adb.sh" shell "settings put system screen_brightness_mode 0; settings put system screen_brightness ${WAKE_BRIGHTNESS:-1}; settings put system screen_off_timeout 1800000; date +%s > /data/local/tmp/powos-queuewake; ${SELF_INPUT}input keyevent KEYCODE_WAKEUP; for i in 1 2 3 4 5 6 7 8 9 10; do dumpsys power | grep -q mWakefulness=Awake && break; sleep 0.1; done; wm dismiss-keyguard" >/dev/null 2>&1
   WL_DID=1   # this window woke it (queue.sh's wl_done logs it even after a touch restored the settings early)
   echo "woke the phone at minimum brightness for the checks (idle ${i}s${lvl:+, battery ${lvl}%})"
 }
@@ -97,15 +120,19 @@ window_lock() {
   while :; do
     local left=$(( end - $(date +%s) ))
     [ $left -gt 0 ] || { echo "$name: no free window in ${max}s"; exit 3; }
-    # In 3-min chunks (the user, 2026-10-23: "the testing ... mostly waiting"; was 10 min / 5-min chunks): between them, a screen that is off with nobody touching it for WAKE_IDLE_S (600; 0 = never) is
+    # In WL_CHUNK_S (60 s) chunks (was 3 min until 11-10; the user, 2026-10-23: "the testing ... mostly waiting"; was 10 min / 5-min chunks): between them, a screen that is off with nobody touching it for WAKE_IDLE_S (600; 0 = never) is
     # woken and its keyguard dismissed (no PIN) - the user's ask, 2026-10-23 ("so wake the screen"): checks waited
     # all night for an Awake screen. The touch counters still decide idle, so any finger ends it as before.
-    local chunk=$left; [ "${WAKE_IDLE_S:-600}" -gt 0 ] && [ $chunk -gt 180 ] && chunk=180
+    # The wake is tried BEFORE each wait, in WL_CHUNK_S (60) s chunks: it used to come only after a whole 180 s chunk
+    # had timed out, so a window that ended with the phone untouched (idle already past WAKE_IDLE_S) paid 180 s of
+    # dark screen, then idle.sh's 120 s Awake streak, before the next check (11-10: ~5 min between windows).
+    local chunk=$left; [ "${WAKE_IDLE_S:-600}" -gt 0 ] && [ $chunk -gt "${WL_CHUNK_S:-60}" ] && chunk=${WL_CHUNK_S:-60}
+    [ "${WAKE_IDLE_S:-600}" -gt 0 ] && wl_wake "$phone"
     if ! s=$(AWAKE_ONLY=1 "$phone/idle.sh" --wait "$need" "$chunk"); then
       # The user came back to a phone the queue woke: their settings back at once (it's their phone now).
       wl_touched "$phone" && wl_restore "$phone"
       [ $chunk -lt $left ] || { echo "$name: no free window: $s"; exit 3; }
-      wl_wake "$phone"; continue
+      continue
     fi
     case "$s" in stop*) WL_GOT=$s; echo "$name: stopped from the phone"; exit 6 ;; esac
     wl_stale "$name"

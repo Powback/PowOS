@@ -76,4 +76,17 @@ grep -q 'wl_touched "$phone" && { why=touched; wl_restore' "$q" && grep -q '"$wh
 printf 'W 100 200\nJ 110 190 pass j1\nK 200 4\n' > "$T/util.log"
 u=$(python3 -I "$src/tools/phone/verify/queue-util.py" "$T/util.log")
 grep -q 'woke the phone 1 times for 4 jobs' <<<"$u" && ok "util line: woke the phone 1 times for 4 jobs" || bad "util line" "$u"
+# 5. wl_hold (11-10): a window that finds the screen on holds it at a 30 min timeout, brightness untouched, and the
+# window's end puts the user's timeout back - else it dozed mid-window on the user's 30 s.
+reset 200 80 false; echo Awake > "$T/wake"; lib wl_hold "$T/tools" >/dev/null
+[ "$(user_set)" = "87 1 1800000" ] && grep -q '^held=1$' "$T/woke" && grep -q '^t=60000$' "$T/woke" \
+  && ok "wl_hold: timeout held at 30 min, brightness untouched, the user's saved" || bad "wl_hold" "$(user_set)"$'\n'"$(cat "$T/woke" 2>&1)"
+echo 1200 > "$T/idle"; lib wl_sleep "$T/tools" >/dev/null
+[ "$(user_set)" = "87 1 60000" ] && [ ! -e "$T/woke" ] && ok "wl_hold: the window's end restores the timeout" || bad "wl_hold restore" "$(user_set)"
+grep -q 'wl_hold "$phone"' "$src/tools/phone/verify/queue.sh" && ok "queue.sh holds the screen once the window is taken" || bad "queue.sh wl_hold wiring"
+# 6. untouched since the queue's last window opened: woken without a fresh WAKE_IDLE_S; touched since: not.
+reset 300 80 false; echo $(( $(date +%s) - 250 )) > "$T/lastwin"; WL_LASTWIN=$T/lastwin lib wl_wake "$T/tools" >/dev/null
+[ "$(cat "$T/wake")" = Awake ] && grep -q powos-queuewake "$T/adb.log" && ok "idle 300 s, no touch since the last window opened 250 s ago: woken (marked as the queue's wake)" || bad "lastwin wake" "$(cat "$T/adb.log")"
+reset 300 80 false; echo $(( $(date +%s) - 400 )) > "$T/lastwin"; WL_LASTWIN=$T/lastwin lib wl_wake "$T/tools" >/dev/null
+[ "$(cat "$T/wake")" = Dozing ] && ok "idle 300 s, touched since the last window opened 400 s ago: not woken" || bad "lastwin touched not woken"
 [ $fails = 0 ] && echo "ALL PASS" || { echo "$fails FAILED"; exit 1; }

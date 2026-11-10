@@ -141,6 +141,19 @@ warm_takes() { local d=$1 a f; shift; for a in "$@"; do [ "$(basename -- "$a" 2>
 # warm_after <log> <game key>: after a job. Its "WARM:" line hands the game on ($Q/warm = its app); anything else and a
 # game that was left warm for it is closed now - the job closed it itself (a no-op then) or never took it (an rc 3
 # before its setup, an old check): never a queue game left running into the next, unrelated job.
+# game_up: the Steam app id of the game running on the phone now (Android's pgrep sees PowOS's processes).
+# "none" only when adb answered: a failed call prints "", which game_left never reads as "no game before" (it could be
+# the user's game).
+game_up() { local o; o=$(perl -e 'alarm shift; exec @ARGV' 10 "$phone/adb.sh" shell "pgrep -af '[r]eaper SteamLaunch AppId='; echo adb-ok" 2>/dev/null | tr -d '\r')
+  case $o in *adb-ok*) ;; *) return 0 ;; esac
+  o=$(sed -n 's/.*AppId=\([0-9][0-9]*\).*/\1/p' <<<"$o" | head -1); echo "${o:-none}"; }
+# game_left <before> <job>: a game the job started (none ran before it) and didn't hand on warm is closed now (warm_stop's
+# close). 11-10 04:21: game-audio-flow was killed in its `sleep 40` (a touch), its own bf-stop never ran, Broforce stayed
+# up: idle.sh then held every window for GAME_IDLE_S (900 s, "game=away"), nine games jobs were skipped and the four
+# window-bench parts burnt ~40 s each to "a game runs: not now". The queue started it, so the queue closes it.
+game_left() { local g; [ "$1" = none ] || return 0; g=$(game_up); case $g in ''|none) return 0 ;; esac
+  [ "$(cat "$Q/warm" 2>/dev/null)" = "$g" ] && return 0
+  echo "$g" > "$Q/warm"; warm_stop "$2 started it and left it running"; }
 warm_after() { if grep -q '^WARM: ' "$1" 2>/dev/null && [ -n "$2" ]; then echo "$2" > "$Q/warm"; else warm_stop "the job it was left warm for didn't hand it on"; fi; }
 # game_key <cmd...>: the Steam app a games check drives ("" for any other check): APP=<id> in its env, else a games
 # script's first numeric argument (game-resize.sh 384190), else Broforce (274190, bf-*.sh's default).
@@ -771,6 +784,7 @@ EOS
     wpp=; [ -n "${GO_ONLY:-}" ] || { wait_pill & wpp=$!; }
     ( export VERIFY_GO=1 WL_PHONE=$phone
       window_lock verify-queue "${QUEUE_IDLE_S:-120}" "$wmax" >/dev/null || exit 3
+      wl_hold "$phone"   # the screen stays on for the whole window, woken or not (window-lock.sh)
       [ -n "$wpp" ] && endjob "$wpp"
       rm -f "$Q/paused"; RSTATE=running   # a go ends a pause
       go=; case "${WL_GOT:-}" in go=*) go=${WL_GOT#go=}; go=${go%% *} ;; esac
@@ -782,10 +796,12 @@ EOS
       select_jobs "$go"; order_quick; order_jobs
       # The window's span for the utilization ledger, and a game a job left warm for a next job that never came (the
       # window ended: an install, a touch) closed again - else idle.sh reads it as the user playing for GAME_IDLE_S.
-      wopen=$(date +%s); trap 'warm_stop; util_rec W "$wopen" "$(date +%s)"; wl_done; wl_release' EXIT   # wl_release: this trap replaces window_lock's (one EXIT trap per shell) - without it the lock outlived the window (11-07 12:28)
+      wopen=$(date +%s); echo "$wopen" > "${WL_LASTWIN:-$HOME/.cache/powos-verify-lastwin}" 2>/dev/null; trap 'warm_stop; util_rec W "$wopen" "$(date +%s)"; wl_done; wl_release' EXIT   # wl_release: this trap replaces window_lock's (one EXIT trap per shell) - without it the lock outlived the window (11-07 12:28)
       # wl_done: the window ends - if the queue woke the phone (wl_wake), say for how many jobs (runner.log and the
       # util ledger's K line), then the user's settings back and the screen off again (wl_sleep: not after a touch).
-      wl_done() { [ -n "${WL_DID:-}" ] || [ -e "$WL_WOKE" ] || return 0; echo "$(date +%T) woke the phone for ${k:-0} jobs"; util_rec K "$(date +%s)" "${k:-0}"; wl_sleep "$phone"; }
+      wl_done() { [ -n "${WL_DID:-}" ] || [ -e "$WL_WOKE" ] || return 0
+        if [ -z "${WL_DID:-}" ] && grep -q '^held=1' "$WL_WOKE" 2>/dev/null; then echo "$(date +%T) held the screen on for ${k:-0} jobs"
+        else echo "$(date +%T) woke the phone for ${k:-0} jobs"; util_rec K "$(date +%s)" "${k:-0}"; fi; wl_sleep "$phone"; }
       N=${#sel[@]}; k=0; pass=0; fail=0; first=; prev=; results=
       [ $N -gt 0 ] || { status "" '{"done":true}' "rm -f /tmp/powos-verify-go"; [ $held = 0 ] && exit 5; exit 7; }
       # f317: what a "test all" costs, before it starts: the count and the summed budgets (an upper bound).
@@ -851,6 +867,7 @@ EOS
         gk=$(game_key "${cmd[@]}"); nk=; [ -n "$gk" ] && [ -n "${sel[$k]:-}" ] && nk=$( cmd=(); cwd=.; rel=0; . "${sel[$k]}"; [ "$rel" = 1 ] && cwd=$VR/$cwd; warm_takes "$cwd" "${cmd[@]}" && game_key "${cmd[@]}" )
         nextapp=; [ -n "$gk" ] && [ "$nk" = "$gk" ] && nextapp=$gk
         [ -s "$Q/warm" ] && [ "$(cat "$Q/warm")" != "$gk" ] && warm_stop
+        g0=-; { [ -n "$gk" ] || [ "$game" = 1 ]; } && g0=$(game_up)   # game_left's "before" (a games check only)
         echo "$(date +%T) run $n: ${cmd[*]}"
         js() { printf '{"name":%s,"task":%s,"k":%s,"n":%s,"screen":%s,"el":%s,"budget":%s,"prev":"@@HINT@@","step":"@@STEP@@","stepel":@@STEPEL@@}' \
           "$(jstr "${name:-$task}")" "$(jstr "$task")" $k $N "$(jstr "$screen")" "$1" "$budget"; }
@@ -911,10 +928,11 @@ EOS
         [ "$why" = touched ] && { echo "$(date +%T) $n: the user picked up the phone the queue woke - stopped, stays queued"; why=; rc=3; }
         if [ "$why" = stop ]; then
           echo "$(date +%T) $n: stopped from the phone - stays queued, paused"; util_rec J "$t0" "$(date +%s)" stopped "$n"
+          [ "$g0" = - ] || game_left "$g0" "$n"
           pause "Phone checks paused: $pass passed, $fail failed, $((N - k + 1)) still queued"
           exit 4
         fi
-        t1=$(date +%s); warm_after "$log" "$gk"
+        t1=$(date +%s); warm_after "$log" "$gk"; [ "$g0" = - ] || game_left "$g0" "$n"
         pfinal=
         if [ $rc = 3 ]; then
           # Touched or not comes from the input source (rc3_kind), read right after the check: idle shorter than its

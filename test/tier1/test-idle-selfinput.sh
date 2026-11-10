@@ -30,7 +30,8 @@ esac
 EOF2
 printf '#!/bin/sh\n[ "$1" = -c ] && exec sh -c "$2"\n' > "$T/bin/su"
 echo '  mOverrideState=Optional.empty' > "$T/ovr"
-printf '#!/bin/sh\necho "  lastUserActivityTime=1 (45000 ms ago)"\necho "  mWakefulness=Awake"\ncat %s/ovr\n' "$T" > "$T/bin/dumpsys"
+printf '  mWakefulness=Awake\n' > "$T/pw"
+printf '#!/bin/sh\necho "  lastUserActivityTime=1 (45000 ms ago)"\ncat %s/pw\ncat %s/ovr\n' "$T" "$T" > "$T/bin/dumpsys"
 printf '#!/bin/sh\necho "nohup $*" >> %s/restart.log\n' "$T" > "$T/bin/nohup"
 : > "$T/evsrc"
 printf '#!/bin/sh\nexec tail -n0 -F %s/evsrc 2>/dev/null\n' "$T" > "$T/bin/getevent"
@@ -76,6 +77,14 @@ echo '  mOverrideState=Optional.empty' > "$T/ovr"; sleep 1; irq 1050; sleep 3
 # 5c. The override unchanged for long: a finger counts again.
 sleep 10; settle; irq 1060; sleep 5
 [ "$(lt)" -gt 1 ] && ok "an unchanged override masks nothing" || bad "unchanged override masked a touch" "lasttouch=$(lt)"
+# 5d. The screen going off by the user's timeout (mLastSleepReason=timeout) suspends the panels: not a touch (11-10
+# 04:46:58: that doze ended a verify window with 25 jobs runnable). A power-key sleep is the user: it counts.
+settle; printf '  mWakefulness=Dozing\n  mLastSleepReason=timeout\n' > "$T/pw"; sleep 1; irq 1070; sleep 5
+[ "$(lt)" = 1 ] && ok "panel IRQs right after a screen-off by timeout: not a touch" || bad "timeout doze counted as a touch" "lasttouch=$(lt)"
+printf '  mWakefulness=Awake\n' > "$T/pw"; sleep 12; settle
+printf '  mWakefulness=Asleep\n  mLastSleepReason=power_button\n' > "$T/pw"; sleep 1; irq 1080; sleep 5
+[ "$(lt)" -gt 1 ] && ok "a power-key sleep still counts as the user" || bad "power-key sleep masked" "lasttouch=$(lt)"
+printf '  mWakefulness=Awake\n' > "$T/pw"
 kill $wp 2>/dev/null; wait $wp 2>/dev/null; wp=
 
 # 6. --ensure restarts a live watcher of an older version, lasttouch kept.
@@ -85,7 +94,7 @@ echo 777 > "$T/dlt/powos-touchmon.pid"; echo 1 > "$T/dlt/powos-touchmon.ver"; ec
 i=$(sed -n 's/^idle=\([0-9]*\) .*/\1/p' <<<"$out")
 grep -q powos-touchmon.sh "$T/restart.log" && [ -n "$i" ] && [ "$i" -ge 300 ] && [ "$i" -le 305 ] \
   && ok "old-version watcher: restarted, idle kept from its lasttouch ($i)" || bad "old-version watcher" "$out"$'\n'"$(cat "$T/restart.log")"
-echo 3 > "$T/dlt/powos-touchmon.ver"; echo 777 > "$T/dlt/powos-touchmon.pid"; : > "$T/restart.log"; bash "$T/tools/idle.sh" >/dev/null 2>&1
+sed -n 's/^V=//p' "$src/tools/phone/idle.sh" | head -1 > "$T/dlt/powos-touchmon.ver"; echo 777 > "$T/dlt/powos-touchmon.pid"; : > "$T/restart.log"; bash "$T/tools/idle.sh" >/dev/null 2>&1
 [ ! -s "$T/restart.log" ] && ok "current-version watcher: left running" || bad "current watcher restarted" "$(cat "$T/restart.log")"
 
 # 7. Every wake/sleep key the tools send carries the mark.

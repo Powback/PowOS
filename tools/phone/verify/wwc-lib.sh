@@ -31,7 +31,9 @@ touched() { local i; i=$("$T/idle.sh" | sed -nE 's/.*idle=([0-9]+).*/\1/p'); [ -
 fold() { sh_ "echo \$(( \$(date +%s) + 8 )) > /data/local/tmp/powos-selfinput; cmd device_state state $1"; }
 wwc_clean() { local w p
   WW_DEADLINE=$((SECONDS + 40))   # the clean-up's own calls, past the steps' deadline
-  for w in $MINE_W; do ww_close "$w"; done; [ -n "$MINE_W" ] && sleep 1.5
+  # The closes polled (gone from the host's list), not a fixed 1.5 s sleep, before the processes are ended.
+  for w in $MINE_W; do ww_close "$w"; done
+  [ -n "$MINE_W" ] && for _ in 1 2 3 4 5 6; do [ -z "$(comm -12 <(printf '%s\n' $MINE_W | sort) <(wwids))" ] && break; sleep 0.25; done
   for p in $MINE_P; do ww_us "pkill -x '$p'; true" >/dev/null; done
   declare -F wwc_extra >/dev/null && wwc_extra
   [ "$UNFOLDED" = 1 ] && fold reset
@@ -53,7 +55,8 @@ wwc_start() { local s
   s=$("$T/idle.sh"); case $s in *screen=Awake*) ;; *) echo "SKIP screen not on ($s)"; exit 3 ;; esac
   T0=$SECONDS
   wwc_home || wwc_skip "home's page isn't visible after going home ($(wwc_vis | head -c 60))"
-  CDP_TIMEOUT_S=20 ww_ready || { fold 3; UNFOLDED=1; sleep 3; }
+  # Unfolded: polled every 0.5 s (was a fixed 3 s sleep; the unfold usually lands in ~1 s).
+  CDP_TIMEOUT_S=20 ww_ready || { fold 3; UNFOLDED=1; for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do sleep 0.5; CDP_TIMEOUT_S=5 ww_ready && break; done; }
   CDP_TIMEOUT_S=20 ww_ready || wwc_skip "home shows no web windows even unfolded (web windows off?)"; }
 wwc_pick() { local a; for a in "$@"; do ww_running "$a" || { echo "$a"; return 0; }; done; return 1; }
 wwc_open() { MINE_P="$MINE_P $1"   # not in $(...): MINE_* must stay set for wwc_clean

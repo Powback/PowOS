@@ -63,7 +63,18 @@ if [ "${1:-}" = "--wait" ]; then
       case x\$l in x|x*[!0-9]*) ms=\$(dumpsys power | sed -n 's/.*lastUserActivityTime=[^(]*(\\([0-9]*\\) ms ago).*/\\1/p' | head -1)
         l=\$(( \$(date +%s) - \${ms:-0} / 1000 )) ;; esac
       t=\$(( \$(date +%s) - l ))
-      [ \$w = Awake ] && { [ \$on = 0 ] && on=\$(date +%s); } || on=0
+      # The Awake streak starts at the screen's real wake (dumpsys power mLastWakeTime), not at this call's first look:
+      # every --wait call (each window, each chunk) restarted it and spent IDLE_S (120) s of a screen that had been on,
+      # untouched, for long before (docs/research/verify-queue-speed.md, 11-10). The queue's own wake (wl_wake writes
+      # powos-queuewake) is no user picking the phone up: its streak counts as served.
+      if [ \$w = Awake ]; then
+        if [ \$on = 0 ]; then
+          wa=\$(dumpsys power | sed -n 's/.*mLastWakeTime=[0-9]* (\\([0-9]*\\) ms ago).*/\\1/p' | head -1)
+          on=\$(( \$(date +%s) - \${wa:-0} / 1000 ))
+          q=\$(cat /data/local/tmp/powos-queuewake 2>/dev/null); case x\$q in x|x*[!0-9]*) q=0 ;; esac
+          [ \$(( on - q )) -le 15 ] && [ \$(( q - on )) -le 15 ] && on=\$(( \$(date +%s) - $need ))
+        fi
+      else on=0; fi
       a=\$(( \$(date +%s) - on ))
       [ "$go" = 1 ] && { [ "$awake" != 1 ] || [ \$w = Awake ]; } && [ -s /data/powos/root/tmp/powos-verify-go ] && { echo go=\$(head -c 64 /data/powos/root/tmp/powos-verify-go | tr -cd 'A-Za-z0-9_.:-') screen=\$w; exit 0; }
       [ "$go" = 1 ] && [ "$only" != 1 ] && [ -e /data/powos/root/tmp/powos-verify-stop ] && { echo stop screen=\$w; exit 0; }
@@ -98,7 +109,7 @@ fi
 d=/data/local/tmp
 # The watcher's version: --ensure restarts a running watcher of another version (a long-lived watcher otherwise kept
 # the old logic until the phone rebooted - the file is rewritten under it but sh keeps what it already read).
-V=3
+V=4
 if [ "${1:-}" = --ensure ]; then
   now=$(date +%s); boot=$(( now - $(cut -d. -f1 /proc/uptime) ))
   p=$(cat $d/powos-touchmon.pid 2>/dev/null)
@@ -139,7 +150,7 @@ devs() { for e in /sys/class/input/event*; do
     case "$(readlink -f $e)" in */devices/virtual/input/*) echo "$n" | grep -qiE 'pad|controller|joystick|keyboard|mouse' || continue ;; esac
     echo "/dev/input/${e##*/}: "
   done > $d/powos-input.devs; }
-gp=; prev=""; i=0; po=
+gp=; prev=""; i=0; po=; pwf=
 while [ $(( $(date +%s) - $(stat -c %Y $d/powos-touchmon.ask 2>/dev/null || echo 0) )) -lt 1800 ]; do
   [ $(( i % 30 )) = 0 ] && devs; i=$(( i + 1 ))
   { [ -n "$gp" ] && kill -0 $gp 2>/dev/null; } || { : > $d/powos-input.ev; getevent -q >> $d/powos-input.ev 2>/dev/null & gp=$!; echo $gp > $d/powos-touchmon.gpid; }
@@ -158,6 +169,13 @@ while [ $(( $(date +%s) - $(stat -c %Y $d/powos-touchmon.ask 2>/dev/null || echo
   o=$(dumpsys device_state 2>/dev/null | grep -m1 mOverrideState=)
   [ -n "$po" ] && [ "$o" != "$po" ] && echo $(( $(date +%s) + 8 )) > $d/powos-selfinput
   po=${o:-none}
+  # The screen going off by itself (the user's screen-off timeout: mLastSleepReason=timeout) suspends the panels: their
+  # IRQ counters move with no finger (11-10 04:46:58: a doze mid-window read as a touch, the runner left the window and
+  # waited WAKE_IDLE_S for a phone nobody had touched). A sleep by the power key is a key event: still the user.
+  wf=$(dumpsys power 2>/dev/null | grep -m1 mWakefulness= | cut -d= -f2)
+  [ -n "$pwf" ] && [ "$wf" != "$pwf" ] && [ "$wf" != Awake ] && dumpsys power 2>/dev/null | grep -q 'mLastSleepReason=timeout' \
+    && echo $(( $(date +%s) + 8 )) > $d/powos-selfinput
+  pwf=$wf
   now=$(date +%s); sf=$(cat $d/powos-selfinput 2>/dev/null); case x$sf in x|x*[!0-9]*) sf=0 ;; esac
   if [ "$c" != "$prev" ] || [ $ev = 1 ]; then
     [ $now -le $(( sf + 3 )) ] || date +%s > $d/powos-lasttouch
