@@ -22,14 +22,17 @@ function switcherNow() {
  * The switcher on the phone (board "Switcher: empty state + list background-running apps with a close button", the
  * user 11-03: "I actually do have open apps, they're just running in the background ... like Termux"), opened by the
  * real recents key (switcher-bg.sh): the host's apps.background() names [want] (Termux running with no task); the
- * switcher says "No open apps" when it shows no card; "N running in background" counts the host's list; opened (a
+ * switcher says "No open apps" when it shows no card; "N running in background" counts host apps without a rendered card; opened (a
  * click on it), [want]'s row has its icon, its name and a Stop - never pressed here (it would end the user's session).
  */
 export async function switcherBackgroundNow(want = "Termux") {
   const { powos } = await window.__gw.mod("./bridge.ts");
   let bg;
   try {
-    bg = await powos.apps.background();
+    const listed = await powos.apps.background();
+    const state = await powos.recents.state();
+    const ids = [...document.querySelectorAll('.recents .task[data-task]')].map((e) => Number(e.dataset.task));
+    bg = backgroundWithoutCards(listed, state.tasks, ids);
   } catch (e) {
     return [`the host has no apps.background: ${e}`];
   }
@@ -44,6 +47,13 @@ export async function switcherBackgroundNow(want = "Termux") {
   return [...fails, ...(await inspectBackgroundRow(it, want))];
 }
 
+/** Host Linux entries include windowed apps; only cards actually rendered exclude a background row. */
+export function backgroundWithoutCards(listed, tasks, ids) {
+  const shown = new Set(ids);
+  const keys = new Set(tasks.filter((t) => shown.has(t.id)).map((t) => t.key).filter(Boolean));
+  return listed.filter((app) => !keys.has(app.key));
+}
+
 /** Inspect without changing the user's expanded/collapsed choice. */
 async function inspectBackgroundRow(it, want) {
   const toggle = document.querySelector(".recents-bg-toggle");
@@ -51,7 +61,10 @@ async function inspectBackgroundRow(it, want) {
   try {
     if (!wasOpen) toggle.click();
     await window.__gw.until(() => switcherNow().rows.length > 0, 3000);
-    return bgRowFails(it, want);
+    const rows = switcherNow().rows;
+    const count = Number(toggle.textContent.match(/^\d+/)?.[0]);
+    const fails = rows.length === count ? [] : [`opened: ${rows.length} rows but toggle counts ${count}`];
+    return [...fails, ...bgRowFails(it, want)];
   } finally {
     if (!wasOpen) document.querySelector(".recents-bg-hide")?.click();
   }
