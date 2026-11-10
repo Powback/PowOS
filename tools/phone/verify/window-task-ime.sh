@@ -11,6 +11,7 @@
 #   3. a tap in the middle of the task (the editor's text area) -> within 4 s the Android keyboard is up
 #      (dumpsys input_method mInputShown=true) for that task's window (mCurFocusedWindowName / the IME target names
 #      PowosWindowActivity); KWin's and the app's keyboard lines of the run are kept as evidence.
+# A window home took as a web window (web windows on, e.g. unfolded) is SKIP: no task to test.
 # Always restores: the keyboard hidden, only what this check started closed (its marker file in the command line),
 # its task removed, home. Exit: 0 PASS; 1 FAIL; 3 a real touch / not now; 5 SKIP/can't run (ENV).
 set -uo pipefail
@@ -80,9 +81,22 @@ before=$(tasks); KL0=$(us "grep -a -c . /run/powos-app/hyprland.log" | tail -1);
 t0=$(sh_ "date +\"%m-%d %H:%M:%S.000\"")
 STARTED=1
 us "printf 'PowOS keyboard check\n' > $F; setsid -f powos-open-task -- $APP $F >/tmp/powos-ime-check-$N.out 2>&1 </dev/null; echo started" >/dev/null
-for _ in $(seq 30); do sleep 1; KT=$(comm -13 <(echo "$before") <(tasks) | tail -1); [ -n "$KT" ] && break; done
+# powos-open-task's status: its own line ("task" = KWin showed the window: as its own task, or - unfolded, web windows
+# on - as a web window of home; "desktop"; "failed: ..."), read by line start, never the app's output around it
+# (11-10 05:52: Qt's locale notice was read as part of it and "task" taken for "no task").
+st() { us "grep -m1 -oE '^powos-open-task: (task|desktop|failed.*)' /tmp/powos-ime-check-$N.out" | tail -1 | sed 's/^powos-open-task: //'; }
+S=""
+for _ in $(seq 30); do sleep 1; KT=$(comm -13 <(echo "$before") <(tasks) | tail -1); [ -n "$KT" ] && break
+  S=$(st); case $S in desktop|failed*) break ;; esac; done
 chk launch
-[ -n "$KT" ] || fail "no window task for $APP in 30 s (powos-open-task: $(us "tail -3 /tmp/powos-ime-check-$N.out" | tr '\n' '|'))"
+if [ -z "$KT" ]; then
+  S=${S:-$(st)}
+  # Web windows on (unfolded), a new floating window is a web window of home, by design (WindowTasks.open, docs/WEB_WINDOWS.md): no
+  # PowosWindowActivity task to test - 11-10 05:52's "FAIL" was KWrite open and fine inside home.
+  [ "$S" = task ] && [ -z "$(tasks | comm -13 <(echo "$before") -)" ] && us "pgrep -x $APP" | grep -q . \
+    && skip "$APP opened as a web window of home (home took it: web windows on, e.g. unfolded), not as its own task - nothing for this check to test"
+  fail "no window task for $APP in 30 s (powos-open-task: ${S:-no status}; its output: $(us "tail -3 /tmp/powos-ime-check-$N.out" | tr '\n' '|'))"
+fi
 sleep 3
 tp=$(sh_ "dumpsys activity activities | grep -m1 topResumedActivity")
 case $tp in *PowosWindowActivity*" t$KT}"*) ;; *PowosWindowActivity*) log "note: top is $tp (task $KT expected)" ;;

@@ -48,13 +48,13 @@ class OpenTaskOutput(unittest.TestCase):
             os.write(fd2, b"this launch\n")
             os.write(fd, b"old steam still writing\n")  # O_APPEND: no overwrite, no hole
             r, w = os.pipe()
-            saved = os.dup(1)
-            os.dup2(w, 1)
+            saved = os.dup(2)
+            os.dup2(w, 2)
             try:
                 relay.pump()
             finally:
-                sys.stdout.flush()
-                os.dup2(saved, 1)
+                sys.stderr.flush()
+                os.dup2(saved, 2)
                 os.close(w)
             self.assertEqual(os.read(r, 4096), b"this launch\nold steam still writing\n")
             self.assertIn(b"earlier launch\nthis launch\nold steam", pathlib.Path(path).read_bytes())
@@ -68,6 +68,21 @@ class OpenTaskOutput(unittest.TestCase):
             fd, _ = mod.output_log("y")
             os.close(fd)
             self.assertEqual(os.path.getsize(path), 0)
+
+
+    def test_stdout_is_status_lines_only(self):
+        """COMMAND's noise (Qt's locale notice, a chunk without its newline) never reaches stdout: a caller reading
+        stdout gets exactly the status line (window-task-ime 11-10 05:52 read the notice as part of the status)."""
+        with tempfile.TemporaryDirectory() as run:
+            prog = ("import os, sys; os.environ['XDG_RUNTIME_DIR'] = %r\n"
+                    "import importlib.machinery as m, importlib.util as u\n"
+                    "l = m.SourceFileLoader('p', %r); mod = u.module_from_spec(u.spec_from_loader('p', l)); l.exec_module(mod)\n"
+                    "fd, path = mod.output_log('z'); r = mod.OutputRelay(path)\n"
+                    "os.write(fd, b'If this causes problems, reconfigure your locale.\\nno newline')\n"
+                    "r.pump(); mod.status('task')\n") % (run, str(SOURCE))
+            out = subprocess.run([sys.executable, "-c", prog], capture_output=True, timeout=20)
+            self.assertEqual(out.stdout, b"powos-open-task: task\n")
+            self.assertIn(b"reconfigure your locale", out.stderr)
 
 
 if __name__ == "__main__":

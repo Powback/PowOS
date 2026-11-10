@@ -58,6 +58,8 @@ if [ -e /usr/lib/dri/termuxva_drv_video.so ]; then
   export LIBVA_DRIVER_NAME=termuxva TERMUX_VA_BRIDGE=1 TERMUX_VA_GPU_BACKEND=kgsl TERMUX_VA_SOCKET="$R/termux-va.sock"
 fi
 export POWOS_SESSION_MODE=rooted
+# The session's language compiled before anything starts (Qt apps fell back to "C": powos-session-locale).
+powos-session-locale "${LANG:-}"
 # Open files: what systemd gives a desktop (DefaultLimitNOFILE=1024:524288) and more - Proton enables esync only with
 # a hard limit of at least 524288. Android's 32768 left Wine on wineserver round trips for every lock and event
 # (no fsync/ntsync on this 5.15 kernel): Besiege ran at ~6 fps with the GPU 40% idle. Raised as root, inherited by all.

@@ -34,6 +34,10 @@ install -m 755 $T/powos-periodic.sh /data/powos/powos-periodic.sh
 sh /data/powos/powos-periodic.sh stop
 (setsid sh /data/powos/powos-periodic.sh run > /dev/null 2>&1 < /dev/null &)
 install -m 755 $T/powos-rooted-session $R/usr/bin/powos-rooted-session
+install -m 755 $T/powos-session-locale $R/usr/bin/powos-session-locale
+# The running session's language compiled now (its apps restarted after this find it), not only at the next session start.
+SL=$(tr '\0' '\n' < /proc/$(cat /data/powos/session.pid 2>/dev/null)/environ 2>/dev/null | sed -n 's/^LANG=//p')
+[ -n "$SL" ] && chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /usr/bin/powos-session-locale "$SL" || true
 install -m 755 $T/powos-android-app $R/usr/local/bin/powos-android-app
 install -m 755 $T/powos-android-tasks $R/usr/local/bin/powos-android-tasks
 # PowOS's apps for Android: the PowOS app's drawer, search and Android shortcuts (it runs this, rooted mode).

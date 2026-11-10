@@ -1,0 +1,31 @@
+#!/bin/bash
+# /usr/bin/powos-session-locale <LANG> in /data/powos/root (rooted mode, as root): <LANG> usable by glibc.
+# Run by powos-rooted-session at each session start and by powos-deploy.sh for the running session.
+# The session's language (LANG: Android's, RootedGuest.locale(), e.g. en_CH.UTF-8) compiled into /usr/lib/locale as
+# root (the user can't write there). PowOS ships only C.utf8 and en_US.UTF-8 (no locale-archive),
+# and glibc has no en_CH source at all (de_CH/fr_CH/it_CH only), so every program fell back to "C": each Qt app wrote
+# 'Detected locale "C" ... reconfigure your locale' on start (window-task-ime 11-10 05:52, kwrite) and ran without
+# UTF-8. A locale glibc has a source for is compiled from it; one it hasn't is compiled under its own name from its
+# language's locale (en -> en_US, else ll_LL, else the language's first) - LANG keeps the user's name, so Qt/KDE (CLDR
+# has en_CH) still format for it, and glibc gets a real UTF-8 locale. Once per locale (~0.3 s); pkgs/steam/steam's
+# steam_locale maps the same way for the game containers.
+session_locale() {
+  local loc=$1 i=/usr/share/i18n/locales src l
+  case $loc in '' | C | C.* | POSIX | *..* | */*) return 0 ;; *.UTF-8 | *.utf8) ;; *) return 0 ;; esac
+  { [ -d "/usr/lib/locale/$loc" ] || [ -d "/usr/lib/locale/${loc%.*}.utf8" ]; } && return 0
+  command -v localedef >/dev/null || { echo "powos-session-locale: no localedef - LANG=$loc stays uncompiled" >&2; return 0; }
+  src=${loc%%.*}
+  if [ ! -f "$i/$src" ]; then
+    l=${src%%_*}
+    for src in $( [ "$l" = en ] && echo en_US ) "${l}_$(printf %s "$l" | tr a-z A-Z)" \
+               "$(cd "$i" 2>/dev/null && ls -d "${l}"_?? 2>/dev/null | head -1)"; do
+      [ -n "$src" ] && [ -f "$i/$src" ] && break; src=
+    done
+  fi
+  [ -n "$src" ] || { echo "powos-session-locale: no locale source for LANG=$loc - left as is" >&2; return 0; }
+  # Exit 1 = compiled with warnings (glibc's own sources give some); kept once LC_CTYPE is there.
+  localedef --no-archive -c -i "$src" -f UTF-8 "/usr/lib/locale/$loc" >/dev/null 2>&1
+  if [ -f "/usr/lib/locale/$loc/LC_CTYPE" ]; then echo "powos-session-locale: compiled locale $loc from $src" >&2
+  else echo "powos-session-locale: compiling locale $loc from $src failed" >&2; fi
+}
+session_locale "${1:-}"

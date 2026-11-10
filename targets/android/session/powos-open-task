@@ -48,7 +48,11 @@ forward instead of waiting for a window that won't come (the placeholder says "S
 powos-sleep-gui SteamLaunches).
 
 COMMAND's output goes to $XDG_RUNTIME_DIR/open-task/<app>.log, never to the caller's pipe; while this helper runs it
-relays that output to its own (the caller's "couldn't start: <why>" reads it). COMMAND outlives the helper and the
+relays that output to its own stderr (the caller's "couldn't start: <why>" reads it, stderr merged in). Stdout carries
+ONLY the status line(s) below, each a whole line: before, the relay wrote COMMAND's output to stdout too, so a caller
+that read stdout got Qt's locale notice mixed into its status ("If this causes problems, reconfigure your locale...|
+powos-open-task: task", window-task-ime 11-10 05:52), and a relayed chunk without its newline would have glued the
+status onto it. Stderr's own lines (relay, timing, notes) never start a stdout line. COMMAND outlives the helper and the
 caller: on the caller's pipe it would write into a pipe nobody reads once the caller goes (the PowOS app restarting for
 an update), and a Steam client cold-started here passes its output on to every game it launches after - Broforce
 2026-11-03 19:22-19:24: four launches after the 19:07 APK update each ended ~10 s in, with no window.
@@ -214,7 +218,8 @@ def output_log(key):
 
 
 class OutputRelay:
-    """Copies what COMMAND writes to its log onto our stdout while we run: the caller still gets its output."""
+    """Copies what COMMAND writes to its log onto our stderr while we run: the caller still gets its output, and our
+    stdout stays the status lines only (see the top)."""
 
     def __init__(self, path):
         self.path = path
@@ -235,8 +240,8 @@ class OutputRelay:
         if data:
             self.pos += len(data)
             try:
-                sys.stdout.buffer.write(data)
-                sys.stdout.buffer.flush()
+                sys.stderr.buffer.write(data)
+                sys.stderr.buffer.flush()
             except (OSError, ValueError):
                 pass
 

@@ -111,7 +111,7 @@ deploy)
   # The rooted-mode scripts (also part of install): the boot/mount script, the desktop session the PowOS app starts
   # (powos-session.sh -> /usr/bin/powos-rooted-session inside PowOS), and the flag the app checks
   # (persist.powos.root=1, set with Magisk's resetprop - readable without a root prompt).
-  for f in powos-start.sh powos-session.sh powos-run.sh powos-rooted-session powos-deploy.sh powos-appdata.sh \
+  for f in powos-start.sh powos-session.sh powos-run.sh powos-rooted-session powos-session-locale powos-deploy.sh powos-appdata.sh \
     powos-idle-sysupdate.sh powos-units.sh powos-vpn-keep.sh powos-periodic.sh adb-key-heal.sh powos-adbkey-heal.sh; do
     adb push -q "$HERE/$f" "/data/local/tmp/$f"
   done
