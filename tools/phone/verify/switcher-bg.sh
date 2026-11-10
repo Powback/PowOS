@@ -1,7 +1,7 @@
 #!/bin/bash
 # lanes: phone
 # switcher-bg.sh (board switcher-empty-state-list-background-running-app; shell ui/recents.tsx, host BackgroundApps.kt,
-# gate switcher-background-*): Termux running in the background with no task - started here as its service alone when
+# gate switcher-background-*): Termux running in the background with no task - started via its launcher activity when
 # it isn't running (the user's own Termux session is never touched: running already, it's used as it is) - then the
 # real switcher (the recents key): "No open apps" when no card shows, "N running in background" counting the host's
 # apps.background(), opened: Termux's row with icon, name and Stop (dev/device-checks.js switcherBackgroundNow; Stop is
@@ -22,13 +22,28 @@ restore() {
 }
 trap restore EXIT
 sh_() { "$T/adb.sh" shell "$*" 2>/dev/null | tr -d '\r'; }
+# Start a real terminal session via the supported exported activity, not its private service.
+# Only a fresh, single task created here is eligible for removal. Never alter an existing session/task.
+termux_tasks() {
+  sh_ "dumpsys activity recents" | awk '/Task\{/ { task=$0; sub(/^.*Task\{/, "", task) } /realActivity=com.termux\// { if (match(task, /#[0-9]+/)) print substr(task, RSTART+1, RLENGTH-1) }'
+}
+[ -z "$(termux_tasks)" ] || { echo "SKIP: existing Termux task left untouched; background check needs no task"; exit 5; }
 if [ -z "$(sh_ pidof com.termux)" ]; then
+  component=$(sh_ "cmd package resolve-activity --brief com.termux" | tail -1)
+  case $component in com.termux/*) ;; *) echo "SKIP: no Termux launcher activity: $component"; exit 5 ;; esac
+  [ -z "$(sh_ pidof com.termux)$(termux_tasks)" ] || { echo "SKIP: Termux started during setup; left untouched"; exit 5; }
   STARTED=1
-  sh_ "am start-foreground-service -n com.termux/.app.TermuxService" >/dev/null
+  launch=$(sh_ "am start -W -n $component" 2>&1)
+  echo "switcher-bg launch: $launch"
   sleep 3
-  [ -n "$(sh_ pidof com.termux)" ] || { echo "SKIP: Termux's service didn't start (is Termux installed?)"; exit 5; }
+  [ -n "$(sh_ pidof com.termux)" ] || { echo "SKIP: Termux launcher did not start a process: $launch"; exit 5; }
+  owned=$(termux_tasks)
+  case $owned in ''|*[!0-9]*) STARTED=; echo "SKIP: cannot identify one owned Termux task; leaving it untouched"; exit 5 ;; esac
+  "$T/cdp.sh" eval home "importShim('./bridge.ts').then(m=>m.powos.tasks.remove($owned))"
+  sleep 2
+  [ -z "$(termux_tasks)" ] || { echo "SKIP: owned Termux task did not close"; exit 5; }
+  [ -n "$(sh_ pidof com.termux)" ] || { echo "SKIP: Termux did not retain a terminal service (first-run setup may be needed)"; exit 5; }
 fi
-[ "$(sh_ "dumpsys activity recents | grep -c 'realActivity=com.termux'")" = 0 ] || echo "switcher-bg: note - Termux has a task too (its card, not a background row)"
 sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1.5
 sh_ "input keyevent KEYCODE_APP_SWITCH"; sleep 2
 r=$(shell_check home device-checks.js switcherBackgroundNow Termux)

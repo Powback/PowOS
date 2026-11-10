@@ -17,9 +17,10 @@
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/e2e-lib.sh"
-ONLY="" HOLD=3
+# Optional spacing proof reuses this check's rotation, touch-abort and restoration frame.
+ONLY="" HOLD=3 HOME_ICONS=0
 ARGS=()
-while [ $# -gt 0 ]; do case $1 in --only) ONLY=$2; shift 2 ;; --hold) HOLD=$2; shift 2 ;; *) ARGS+=("$1"); shift ;; esac; done
+while [ $# -gt 0 ]; do case $1 in --home-icons) HOME_ICONS=1; shift ;; --only) ONLY=$2; shift 2 ;; --hold) HOLD=$2; shift 2 ;; *) ARGS+=("$1"); shift ;; esac; done
 e2e_args "${ARGS[@]+"${ARGS[@]}"}"
 e2e_init rotate-repro
 e2e_setup
@@ -102,6 +103,14 @@ variant() {
     st=$(ev "$STATE"); s=$(flat); fl=${s%% *}
     w=$(jget "$st" w); h=$(jget "$st" h); sw=$(jget "$st" sw); sh=$(jget "$st" sh); blank=$(jget "$st" blank)
     note "$name rotation $r: $st, flat ${s:-unread}, window $(evidence "$r")"
+    if [ "$HOME_ICONS" = 1 ] && [ "$name" = home ]; then
+      local icons
+      icons=$(SHELL_CHECK_LIB=1 . "$here/shell-check.sh"; shell_check home dock-search-check.js homeIconsClearNow "$(phone_fold)-rotation-$r")
+      case $icons in
+        '[]') pass "home icons clear pill: rotation $r" ;;
+        *) fail "home icons rotation $r: $icons" ;;
+      esac
+    fi
     [ $ok = 1 ] && pass "$name rotation $r: the viewport followed within 2 s (${w}x${h}, screen ${sw}x${sh})" \
       || fail "$name rotation $r: the viewport did NOT follow the turn within 2 s (now ${w:-?}x${h:-?}, screen ${sw:-?}x${sh:-?}, rotation 0 was $o0)"
     if [ -z "$st" ]; then fail "$name rotation $r: home's page gave no answer over CDP"
