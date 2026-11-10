@@ -1,7 +1,8 @@
 # PowOS apps whose built UI (out/ui), manifest and module (out/module.wasm) ship inside the APK, one folder of apps/
-# per line: on a phone without root nothing runs `powos app install`, so these are the launcher's own apps there
-# (shell/LocalApps.kt, shell/apps/localapps.ts; docs/research/nonroot-parity.md #2). targets/android/build-app.sh builds
-# each with apps/build.sh before the APK; app/build.gradle.kts copyApps puts them in assets/apps/<app id>/.
+# per line, or another repo's app folder by its path (~ = $HOME): on a phone without root nothing runs `powos app
+# install`, so these are the launcher's own apps there (shell/LocalApps.kt, shell/apps/localapps.ts;
+# docs/research/nonroot-parity.md #2). targets/android/build-app.sh builds each with apps/build.sh and stages it in
+# targets/android/app/app/bundled-apps/; app/build.gradle.kts copyApps puts them in assets/apps/<app id>/.
 # Rooted phones keep using the installed copies (files/apps/<id>/current wins).
 needs-me
 pet
@@ -13,3 +14,6 @@ devices
 # The app registry (powos-registry), module only: published on first start without root (powos-noroot-services), so
 # `powos app install` registers apps there as on a rooted phone (gh#13). No UI: the launcher lists no row for it.
 registry
+# Lights (Hue rooms on home), its own repo: its database local-lights (the bridge's key, room prefs) is published
+# with the others once the image's SpacetimeDB is up; its calls to the bridge go through the page's net (no Linux).
+~/Projects/lights

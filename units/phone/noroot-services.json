@@ -3,11 +3,12 @@
   "name": "No-root services starter",
   "kind": "service",
   "owner": "system:launcher",
-  "purpose": "on a phone WITHOUT root: starts SpacetimeDB and the App API runtime in the PowOS image (their own units: dev.powos.spacetimedb, app-api) and publishes the APK's apps' modules - the rooted phone's powos-supervisor does this there (docs/research/nonroot-parity.md #2)",
+  "purpose": "on a phone WITHOUT root: starts SpacetimeDB and the App API runtime in the PowOS image (their own units: dev.powos.spacetimedb, app-api), the Agents view's reporter (unit agentsd: the claude hooks + powos-agentsd) and publishes the APK's apps' modules - the rooted phone's powos-supervisor and powos-deploy.sh do this there (docs/research/nonroot-parity.md #2)",
   "installedBy": "the APK (assets/powos-noroot-services from lib/apps/powos-noroot-services), copied to the engine's run dir and run through EngineGuest by linux/EngineServices.kt; nothing installed in the image",
   "files": [
     "/var/log/powos/dev.powos.spacetimedb.log",
     "/var/log/powos/app-api.log",
+    "/var/log/powos/agentsd.log",
     "/var/lib/powos/stdb/bundled"
   ],
   "processes": [
@@ -24,6 +25,12 @@
     "keep": [
       "/var/lib/powos/stdb"
     ],
-    "note": "a one-shot starter: it exits once the services are started; removing the launcher's assets removes it"
-  }
+    "note": "a one-shot starter: it exits once the services are started; removing the launcher's assets removes it",
+    "commands": [
+      "python3 /usr/lib/powos/ai/agents/install-hooks.py /root/.claude/settings.json --remove"
+    ]
+  },
+  "edits": [
+    "/root/.claude/settings.json"
+  ]
 }

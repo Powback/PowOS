@@ -11,6 +11,10 @@ Their "TCP" ports are private Unix sockets here (the launcher's loopback-unix.c 
 It reads the same service manifests (/usr/lib/powos/apps/services/<id>.json: exec, data, prepare, env) and starts
 each one that isn't listening, detached, logging to /var/log/powos/<id>.log. Idempotent: a service already listening
 is left alone.
+Then the Agents view's reporter (units/phone/agentsd.json), as powos-deploy.sh sets it up on a rooted phone: the claude
+hooks in the image's Claude settings (install-hooks.py, once - only when they aren't there) and powos-agentsd, which
+writes the spool the launcher's Agents widget reads (XDG_RUNTIME_DIR/agents = the app's files/run/agents,
+AgentsSpool.kt). It exits after 10 idle minutes; the hooks start it again with each claude.
 
 HACK: no budgets, restarts or idle unload here (powos-supervisor's job): the supervisor needs root (STATE in /run,
 user switches through powos-runtime). Real fix: powos-supervisor gets a no-root mode (its own uid, no user switch,
@@ -29,7 +33,7 @@ import urllib.request
 
 SERVICES = os.environ.get("POWOS_SERVICES", "/usr/lib/powos/apps/services")
 STDB = "http://127.0.0.1:3410"
-LOGS = "/var/log/powos"
+LOGS = os.environ.get("POWOS_LOGS", "/var/log/powos")
 # Which services, in order: SpacetimeDB first (the apps' modules publish to it).
 WANTED = ("spacetimedb", "app-api")
 # The App API's files where the rooted deploy puts them, else the image's baked source tree (lib/self-phone.sh).
@@ -120,8 +124,42 @@ def publish(bundled):
     return out
 
 
+AGENTS = os.environ.get("POWOS_AGENTS_LIB", "/usr/lib/powos/ai/agents")
+
+
+def claude_home():
+    """The image's Claude home: $HOME, else root's (no root: one uid, claude runs as the image's root)."""
+    h = os.environ.get("HOME", "")
+    return h if h not in ("", "/") and os.path.isdir(h) else "/root"
+
+
+def agents():
+    """The claude hooks in the image's Claude settings (when missing) and powos-agentsd started (its lock: one runs)."""
+    if not os.path.exists(os.path.join(AGENTS, "powos-agentsd")):
+        return ["agentsd: not in this image"]
+    out = []
+    settings = os.path.join(claude_home(), ".claude", "settings.json")
+    try:
+        have = "powos-agent-hook" in open(settings).read()
+    except OSError:
+        have = False
+    if not have:
+        os.makedirs(os.path.dirname(settings), exist_ok=True)
+        r = subprocess.run(["python3", os.path.join(AGENTS, "install-hooks.py"), settings,
+                            "--command", f"POWOS_AGENTS_HOST=phone {AGENTS}/powos-agent-hook",
+                            "--ask", f"POWOS_AGENTS_HOST=phone {AGENTS}/powos-agent-ask",
+                            "--backup", settings + ".bak-agents-view"], capture_output=True, text=True)
+        out.append("agents hooks: installed" if r.returncode == 0 else f"agents hooks: failed: {(r.stdout + r.stderr).strip()[-300:]}")
+    env = dict(os.environ, POWOS_AGENTS_HOST="phone", HOME=claude_home())
+    os.makedirs(LOGS, exist_ok=True)
+    log = open(os.path.join(LOGS, "agentsd.log"), "ab")
+    subprocess.Popen(["python3", os.path.join(AGENTS, "powos-agentsd")], env=env, stdin=subprocess.DEVNULL,
+                     stdout=log, stderr=log, start_new_session=True)
+    return out + ["agentsd: started"]
+
+
 def main():
-    for line in [start(s) for s in WANTED] + publish(sys.argv[1] if len(sys.argv) > 1 else ""):
+    for line in [start(s) for s in WANTED] + agents() + publish(sys.argv[1] if len(sys.argv) > 1 else ""):
         print(line, flush=True)
 
 
