@@ -23,7 +23,10 @@ src=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/powos-jobs-src.XXXXXX")
 trap 'job_cleanup; rm -rf "$src"' EXIT
 trap 'exit 130' INT TERM HUP
 # PowTerm's terminal glue is compiled into the app from android-app-dev's repo (app/build.gradle.kts, POWTERM_SRC).
-job_stage "$src" targets/android/app shell -- targets/android/app/app/bundled-apps targets/android/app/app/shell-build.txt &&
+# The unit tests also read sources beside the app (File("../../...") from targets/android/app/app): KWin's patches +
+# PKGBUILD, session/ scripts, the oplus hook - staged too, or those tests fail with FileNotFoundException
+# (WebWindowsSwipeCloseTest, GameBoostTest).
+job_stage "$src" targets/android/app shell targets/android/pkgs/kwin targets/android/session targets/android/oplus-hook -- targets/android/app/app/bundled-apps targets/android/app/app/shell-build.txt &&
   mkdir -p "$src/_powterm" && (cd "$AAD/projects/powterm/app/src/main/java" && COPYFILE_DISABLE=1 tar -cf - .) | tar -xf - -C "$src/_powterm" ||
   { echo "jvm-offload.sh: staging the source failed" >&2; exit 2; }
 job_build apk "$src" || exit 2
