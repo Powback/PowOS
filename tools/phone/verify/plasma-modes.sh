@@ -57,8 +57,10 @@ tasks() { sh_ "am stack list | grep PowosWindowActivity" | grep -oE 'taskId=[0-9
 # top focused DISPLAY's - an Android app in a web window has its own virtual display, so a web window focused last
 # (11-10 07:01: the window bench's Settings, display 30, left open by its killed run) hid Plasma's desktop in front of
 # display 0 and the check failed "Plasma's desktop isn't in front". The check's first tap moves input to display 0.
-focus() { sh_ "dumpsys window displays" | awk '/Display: mDisplayId=0 /{p=1; next} /Display: mDisplayId=/{p=0} p && /mCurrentFocus=/{sub(/^ */, ""); print; exit}'; }
-gfocus() { sh_ "dumpsys window | grep -m1 mCurrentFocus" | sed 's/^ *//'; }
+# Both read their input to the end, no awk `exit`: under pipefail a reader that quits early SIGPIPEs the adb pipe
+# into 141, so `focus | grep -q` was false while it printed MainActivity (11-10 07:17, plasma-down).
+focus() { sh_ "dumpsys window displays" | awk '/Display: mDisplayId=0 /{p=1; next} /Display: mDisplayId=/{p=0} p && !f && /mCurrentFocus=/{sub(/^ */, ""); print; f=1}'; }
+gfocus() { sh_ "dumpsys window" | awk '!f && /mCurrentFocus=/{sub(/^ */, ""); print; f=1}'; }
 
 # KWin's view (a script; its print() lands in KWin's stdout, /run/powos-app/hyprland.log): one line per application
 # window "PMW|caption|class|onCurrentDesktop|noBorder|x,y,w,h|maximized|popup|deleted" and "PMC|class|x,y,w,h" (its
