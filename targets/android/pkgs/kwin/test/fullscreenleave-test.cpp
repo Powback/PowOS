@@ -1,4 +1,4 @@
-// kwin 0069: a task-kept full-screen window's "leave full screen" at a stale size is refused
+// kwin 0069 + 0072: a task-kept full-screen window's "leave full screen" at a stale size is refused
 // (src/utils/fullscreenleave.h). Built by run.sh against the src-tree.sh tree, no Qt.
 #include "fullscreenleave.h"
 #include <cassert>
@@ -25,6 +25,14 @@ int main()
     assert(!staleSize(false, 496, 1104, 1008, 2440 / s, s));
     // no output: never refused
     assert(!staleSize(true, 496, 1104, 0, 0, s));
+    // 0072: the frame already the screen's, but the task resized it 400 ms ago (Wine's leave answers the root change)
+    assert(staleSize(true, 1008, 2440 / s, 1008, 2440 / s, s, 400));
+    // ... and the same leave 5 s after the last resize: the game's own toggle, it leaves
+    assert(!staleSize(true, 1008, 2440 / s, 1008, 2440 / s, s, 5000));
+    // never resized by its task (-1): only the size decides
+    assert(!staleSize(true, 1008, 2440 / s, 1008, 2440 / s, s, -1));
+    // not task-kept: the grace never applies
+    assert(!staleSize(false, 1008, 2440 / s, 1008, 2440 / s, s, 100));
     std::puts("fullscreenleave-test: ok");
     return 0;
 }

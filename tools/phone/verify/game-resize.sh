@@ -32,6 +32,13 @@ APP=${1:-${APP:-}} WIN_NAME=${2:-${WIN_NAME:-}} MIN=${KWIN_MIN:-6.7.5-3.78} NAME
 case $APP in ""|*[!0-9]*) echo "usage: game-resize.sh <steam appid> [window name]"; exit 2 ;; esac
 case "$WIN_NAME" in *[!A-Za-z0-9_.-]*) echo "WIN_NAME: one word (letters, digits, _ . -)"; exit 2 ;; esac
 OUT=${OUT:-$HOME/.cache/powos-verify/$NAME-$APP-$(date +%F_%H%M)}; mkdir -p "$OUT"
+# Its own deadline (the queue's 300 s default budget): a step that no longer fits with the close after it is "not
+# reached" (a FAIL with the step named), the game is closed in time. 11-10 09:40 (346010): start + ready took 2 min,
+# the queue killed it at 300 s "at step: closing the game" with the game left running. PROBE_S / CLOSE_S: a probe's
+# and the close's worst case.
+T0=$(date +%s) BUDGET_S=${BUDGET_S:-300} PROBE_S=${PROBE_S:-45} CLOSE_S=${CLOSE_S:-45}
+left() { echo $(( T0 + BUDGET_S - $(date +%s) )); }
+room() { [ "$(left)" -ge $(( PROBE_S + CLOSE_S + ${1:-0} )) ]; }
 rot0=$("$A" shell settings get system accelerometer_rotation | tr -d '\r'); urot0=$("$A" shell settings get system user_rotation | tr -d '\r')
 restore() { "$A" shell "cmd device_state state reset; settings put system user_rotation ${urot0:-0}; settings put system accelerometer_rotation ${rot0:-1}" >/dev/null 2>&1; }
 WL_TRAP='restore'
@@ -52,13 +59,13 @@ touched && exit 3
 pill "${WIN_NAME:-app $APP} up"
 r=$(ph start); echo "$r" >> "$OUT/run.txt"; mine=$([[ $r == *mine=1* ]] && echo 1 || echo 0)
 stop() { if [ "$mine" = 1 ]; then pill "closing the game"
-    log "closed: $("$A" shell "su -c 'sh /data/powos/powos-run.sh \"APP=$APP bash /var/tmp/powos-bf-stop.sh\"'" 2>&1 | tr -d '\r' | tail -1)"
+    log "closed: $("$A" shell "su -c 'sh /data/powos/powos-run.sh \"APP=$APP timeout 35 bash /var/tmp/powos-bf-stop.sh || echo stop: no answer in 35 s\"'" 2>&1 | tr -d '\r' | tail -1)"
   elif [[ $r == *mine=0* ]]; then log "the user's $WIN_NAME: $(ph refreeze | tail -1)"; fi; }
 [[ $r == *"user input"* ]] && { log "user input during the start"; exit 3; }
 [[ $r == *FAIL* || $r != *mine=* ]] && { log "FAIL: ${WIN_NAME:-app $APP} didn't come up: $(echo "$r" | grep -m1 FAIL)"; stop; exit 1; }
 # Ready: the window drawing before the first probe (a game's own load screen after its window maps - Besiege, 32-bit
 # Unity under x86 Proton + FEX, sat on a black 1135x1365 window for minutes), at most READY_S (90) s; logged.
-t0=$(date +%s); while [ $(($(date +%s) - t0)) -lt "${READY_S:-90}" ]; do c=$(ph changes 3); [ "${c#changes=}" -ge 3 ] 2>/dev/null && break; touched && { stop; exit 3; }; done
+t0=$(date +%s); while [ $(($(date +%s) - t0)) -lt "${READY_S:-90}" ] && room 60; do c=$(ph changes 3); [ "${c#changes=}" -ge 3 ] 2>/dev/null && break; touched && { stop; exit 3; }; done
 log "ready: $c after $(($(date +%s) - t0)) s; game args: $(ph args | tail -1)"
 bars() {  # black rows/columns at each edge of a screencap
   local r c
@@ -122,12 +129,13 @@ rotate() { "$A" shell "settings put system accelerometer_rotation 0; settings pu
 lc0=$("$A" shell date "'+%m-%d %H:%M:%S.000'" | tr -d '\r'); kl0=$("$A" shell "su -c 'wc -l < /data/powos/root/run/powos-app/hyprland.log'" | tr -d '\r ')
 evidence() { "$A" logcat -d -v time -T "$lc0" -s PowosWindow:I WindowTasks:I Andromarchy:I > "$OUT/logcat.txt" 2>/dev/null
   "$A" shell "su -c 'tail -n +$((${kl0:-0} + 1)) /data/powos/root/run/powos-app/hyprland.log | grep -E \"window task|app.s screen|output|imported buffer\" | grep -vE \"frames: last|draw: \"'" > "$OUT/kwin.txt" 2>/dev/null; }
-probe unfolded
-rotate 1; log "rotated landscape"; probe unfolded-landscape
-"$A" shell cmd device_state state 0; sleep 6; rebase; log "folded (cover)"; probe folded-landscape
-rotate 0; log "cover portrait"; probe folded-portrait
+skip() { fails=$((fails + 1)); sizes+=" $1=not-reached"; log "  $1 bad: not-reached ($(left) s of the ${BUDGET_S} s budget left)"; }
+if room; then probe unfolded; else skip unfolded; fi
+if room 6; then rotate 1; log "rotated landscape"; probe unfolded-landscape; else skip unfolded-landscape; fi
+if room 7; then "$A" shell cmd device_state state 0; sleep 6; rebase; log "folded (cover)"; probe folded-landscape; else skip folded-landscape; fi
+if room 6; then rotate 0; log "cover portrait"; probe folded-portrait; else skip folded-portrait; fi
 touched && { restore; [ "$mine" = 1 ] && stop; exit 3; }
-"$A" shell cmd device_state state 3; sleep 6; rebase; log "unfolded again"; probe unfolded-again
+if room 7; then "$A" shell cmd device_state state 3; sleep 6; rebase; log "unfolded again"; probe unfolded-again; else skip unfolded-again; fi
 restore
 evidence
 stop

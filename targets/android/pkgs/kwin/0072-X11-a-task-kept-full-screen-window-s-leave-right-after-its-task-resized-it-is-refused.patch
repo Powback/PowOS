@@ -1,0 +1,67 @@
+diff -ru a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+--- a/src/backends/anland/anland_window_task.cpp	2026-11-10 10:17:56
++++ b/src/backends/anland/anland_window_task.cpp	2026-11-10 10:18:15
+@@ -1484,6 +1484,9 @@
+                         << "for" << task;
+     m_resizeAsked = std::chrono::steady_clock::now();
+     m_resizeWanted = client;
++    // PowOS (kwin 0072): a client's "leave full screen" within FullScreenLeave::LeaveGraceMs of this answers the screen
++    // change, not the user (netinfo.cpp, src/utils/fullscreenleave.h).
++    m_window->setProperty("powosFullScreenResizedMs", qlonglong(std::chrono::duration_cast<std::chrono::milliseconds>(m_resizeAsked.time_since_epoch()).count()));
+     m_window->moveResize(RectF(m_window->frameGeometry().topLeft(), contentToFrameSize(client)));
+     markStale(); // PowOS: every buffer, at the new scale (no longer redrawn by a later offer by itself)
+     scheduleRender(); // drawn at the task's scale until the client commits its new size
+diff -ru a/src/netinfo.cpp b/src/netinfo.cpp
+--- a/src/netinfo.cpp	2026-11-10 10:17:55
++++ b/src/netinfo.cpp	2026-11-10 10:18:15
+@@ -22,6 +22,8 @@
+ // Qt
+ #include <QDebug>
+ 
++#include <chrono>
++
+ namespace KWin
+ {
+ 
+@@ -280,10 +282,14 @@
+         const LogicalOutput *output = m_client->moveResizeOutput();
+         const RectF frame = m_client->frameGeometry();
+         const RectF screen = output ? output->geometryF() : RectF();
++        // PowOS (kwin 0072): when the task last resized it to a new screen (anland fitFullScreen, steady clock ms).
++        const QVariant resizedAt = m_client->property("powosFullScreenResizedMs");
++        const long long nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
++        const long long since = resizedAt.isValid() ? nowMs - resizedAt.toLongLong() : -1;
+         if (output && FullScreenLeave::staleSize(m_client->isFullScreen() && m_client->property("powosKeepFullScreenGeometry").toBool(),
+-                                                 frame.width(), frame.height(), screen.width(), screen.height(), output->scale())) {
++                                                 frame.width(), frame.height(), screen.width(), screen.height(), output->scale(), since)) {
+             qCInfo(KWIN_CORE) << "PowOS: full screen kept:" << m_client->caption() << "asked to leave at" << frame.size()
+-                              << "on a" << screen.size() << "screen (a rotate/fold mid-way)";
++                              << "on a" << screen.size() << "screen (a rotate/fold mid-way," << since << "ms after its task resized it)";
+             mask &= ~NET::FullScreen;
+         } else {
+             m_client->setFullScreen(false);
+diff -ru a/src/utils/fullscreenleave.h b/src/utils/fullscreenleave.h
+--- a/src/utils/fullscreenleave.h	2026-11-10 10:17:55
++++ b/src/utils/fullscreenleave.h	2026-11-10 10:18:15
+@@ -19,11 +19,19 @@
+ {
+ 
+ // keptByTask: the window's size is its task's (powosKeepFullScreenGeometry). win*/out*: the window's frame and its
+-// output now, logical. True = refuse the client's leave: it differs from its screen by more than one device px.
+-inline bool staleSize(bool keptByTask, double winW, double winH, double outW, double outH, double scale)
++// output now, logical. sinceTaskResizeMs: how long ago the task last resized the window to a new screen (kwin 0072;
++// < 0 = never). True = refuse the client's leave: it differs from its screen by more than one device px, or the task
++// resized it within LeaveGraceMs - since 0070 the task resizes the window at once, so Wine's leave (asked when it saw
++// the root change before the window's configure) arrives with the frame already the screen's: game-resize 11-10 09:43
++// Besiege rotated, 09:49 Bananas cover portrait left full screen, their tasks closed, 1221x1262 / 393x2484 floats.
++inline constexpr long long LeaveGraceMs = 3000;
++inline bool staleSize(bool keptByTask, double winW, double winH, double outW, double outH, double scale, long long sinceTaskResizeMs = -1)
+ {
+     if (!keptByTask || outW <= 0 || outH <= 0) {
+         return false;
++    }
++    if (sinceTaskResizeMs >= 0 && sinceTaskResizeMs < LeaveGraceMs) {
++        return true;
+     }
+     const double tol = scale > 0 ? 1.0 / scale : 1.0;
+     return std::abs(winW - outW) > tol || std::abs(winH - outH) > tol;
