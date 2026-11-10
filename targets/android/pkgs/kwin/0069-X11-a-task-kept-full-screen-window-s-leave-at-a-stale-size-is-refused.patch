@@ -1,0 +1,105 @@
+From ddd99c00177cfb1bc0f848109994ad36111e422a Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Tue, 10 Nov 2026 01:09:39 +0100
+Subject: [PATCH] X11: a task-kept full-screen window's leave at a stale size
+ is refused
+
+A Wine game's borderless window is full screen while it covers Wine's monitor
+(the X root). On a rotate/fold the root (0061) and the window (0032) change one
+after the other; for that moment the window doesn't cover the root, winex11
+removes _NET_WM_STATE_FULLSCREEN, KWin restores the pre-full-screen geometry
+(Besiege/Bananas 1135x1365 on the unfolded 2268x2440 screen, 11-07 game-resize)
+and the task loses its full-screen layer for good.
+
+A window whose size the task keeps (powosKeepFullScreenGeometry) that asks to
+leave full screen while its frame is more than one device px off its output's
+stays full screen; the task sizes it. A game's own windowed toggle still covers
+its screen when it asks, so it still leaves (src/utils/fullscreenleave.h,
+test/fullscreenleave-test.cpp).
+---
+ src/netinfo.cpp             | 19 ++++++++++++++++++-
+ src/utils/fullscreenleave.h | 32 ++++++++++++++++++++++++++++++++
+ 2 files changed, 50 insertions(+), 1 deletion(-)
+ create mode 100644 src/utils/fullscreenleave.h
+
+diff --git a/src/netinfo.cpp b/src/netinfo.cpp
+index f0372db..5fac9aa 100644
+--- a/src/netinfo.cpp
++++ b/src/netinfo.cpp
+@@ -10,9 +10,11 @@
+ */
+ // own
+ #include "netinfo.h"
++#include "core/output.h"
+ // kwin
+ #include "rootinfo_filter.h"
+ #include "utils/envvar.h"
++#include "utils/fullscreenleave.h"
+ #include "virtualdesktops.h"
+ #include "waylandwindow.h"
+ #include "workspace.h"
+@@ -270,7 +272,22 @@ void WinInfo::changeState(NET::States state, NET::States mask)
+     state &= mask; // for safety, clear all other bits
+ 
+     if ((mask & NET::FullScreen) != 0 && (state & NET::FullScreen) == 0) {
+-        m_client->setFullScreen(false);
++        // PowOS (kwin 0069): a task-kept full-screen window that asks to leave while its size isn't its screen's
++        // asked because a rotate/fold is half done (src/utils/fullscreenleave.h); it stays full screen and the task
++        // sizes it (0032). HACK: inferred from the size because Wine says nothing about why it leaves; the real fix
++        // is the root and the window changing size in one step (Xwayland root + configure in one transaction), so the
++        // window never stops covering its monitor.
++        const LogicalOutput *output = m_client->moveResizeOutput();
++        const RectF frame = m_client->frameGeometry();
++        const RectF screen = output ? output->geometryF() : RectF();
++        if (output && FullScreenLeave::staleSize(m_client->isFullScreen() && m_client->property("powosKeepFullScreenGeometry").toBool(),
++                                                 frame.width(), frame.height(), screen.width(), screen.height(), output->scale())) {
++            qCInfo(KWIN_CORE) << "PowOS: full screen kept:" << m_client->caption() << "asked to leave at" << frame.size()
++                              << "on a" << screen.size() << "screen (a rotate/fold mid-way)";
++            mask &= ~NET::FullScreen;
++        } else {
++            m_client->setFullScreen(false);
++        }
+     }
+     if ((mask & NET::Max) == NET::Max) {
+         m_client->setMaximize(state & NET::MaxVert, state & NET::MaxHoriz);
+diff --git a/src/utils/fullscreenleave.h b/src/utils/fullscreenleave.h
+new file mode 100644
+index 0000000..7f2a228
+--- /dev/null
++++ b/src/utils/fullscreenleave.h
+@@ -0,0 +1,32 @@
++/*
++    PowOS (kwin 0069): a full-screen window's own "leave full screen" that only says its size went stale.
++
++    A Wine game's borderless window is full screen while it covers Wine's monitor (the X root): winex11 sets
++    _NET_WM_STATE_FULLSCREEN when the window's rect covers it and removes it when it doesn't. On a rotate or a fold
++    the root (the output, kwin 0061) and the window (its task's size, kwin 0032) change one after the other: for a
++    moment a 1116x2484 window sits in a 2268x2440 root, Wine asks to leave full screen, KWin restores the window's
++    pre-full-screen geometry (Besiege/Bananas 1135x1365 on the unfolded screen, 11-07 game-resize) and the task drops
++    its full-screen layer for good. A game that really leaves full screen (its own windowed toggle) still covers its
++    screen when it asks: it resizes after the state change, not before.
++
++    SPDX-License-Identifier: GPL-2.0-or-later
++*/
++#pragma once
++
++#include <cmath>
++
++namespace KWin::FullScreenLeave
++{
++
++// keptByTask: the window's size is its task's (powosKeepFullScreenGeometry). win*/out*: the window's frame and its
++// output now, logical. True = refuse the client's leave: it differs from its screen by more than one device px.
++inline bool staleSize(bool keptByTask, double winW, double winH, double outW, double outH, double scale)
++{
++    if (!keptByTask || outW <= 0 || outH <= 0) {
++        return false;
++    }
++    const double tol = scale > 0 ? 1.0 / scale : 1.0;
++    return std::abs(winW - outW) > tol || std::abs(winH - outH) > tol;
++}
++
++} // namespace KWin::FullScreenLeave
+-- 
+2.50.1 (Apple Git-155)
+
