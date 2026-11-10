@@ -141,8 +141,16 @@ over0=$(xover); [ -z "$over0" ] || bad "X stacking: window(s) over Steam's main 
 open0=$(menus)
 [ -z "$open0" ] || { say "a Steam menu is open already ($open0): closed first ($(menu_close "$(echo "$open0" | head -1)"))"; sleep 1; }
 # A menu this opened never stays open: closed on the way out (whatever ended the run).
-trap 'm=$(menus | head -1); [ "${opened:-0}" -gt 0 ] && [ -n "$m" ] && menu_close "$m" >/dev/null 2>&1; restore_steam' EXIT
+trap 'm=$(menus | head -1); [ "${opened:-0}" -gt 0 ] && [ -n "$m" ] && menu_close "$m" >/dev/null 2>&1; us "pkill -f ww-xiw.py; rm -f /tmp/ww-xiw.py /tmp/ww-xiw.log" >/dev/null; restore_steam' EXIT
 
+# A passive X input log for the scan (x-input-watch.py: XI2 raw events on the root, Enter/Focus on Steam's window, the
+# X focus at each press; it sends and grabs nothing): which hop drops a tap that home gave KWin - KWin -> Xwayland (no
+# RawTouchBegin), Xwayland's touch -> pointer emulation (raw touches, no RawButtonPress / EnterNotify), or Steam itself.
+us "$X; base64 -d > /tmp/ww-xiw.py <<'B64'
+$(base64 < "$(dirname "$0")/x-input-watch.py")
+B64
+setsid python3 /tmp/ww-xiw.py $SW $((DEADLINE - SECONDS + 5)) > /tmp/ww-xiw.log 2>&1 < /dev/null &" >/dev/null
+xiw() { us "cat /tmp/ww-xiw.log 2>/dev/null"; }
 since=$("$adb" shell 'date +%m-%d\ %H:%M:%S.000' | tr -d '\r')
 klog0=$(rs 'wc -l < /run/powos-app/hyprland.log' | tail -1)
 opened=0
@@ -227,7 +235,16 @@ if [ $opened -lt 1 ]; then
   over=$(xover)
   [ -n "$over" ] && why="taps reached KWin, but X window(s) over Steam's at the menu bar took them (Xwayland picks by X stacking): $over"
   [ "${hg:-0}" = 0 ] && why="home sent no gesture to KWin (the taps missed Steam's web window body, or something above it in the page took them)"
-  bad "no tap on Steam's menu bar opened a menu ($taps taps; home gestures to KWin ${hg:-?}, KWin touch-at lines ${kt:-?}, app popup lines ${kpop:-?}; screen $OUT/no-menu.png): $why"
+  xl=$(xiw); printf '%s\n' "$xl" > "$OUT/x-input.txt"
+  rt=$(grep -c ' raw RawTouchBegin' <<<"$xl"); rb=$(grep -c ' raw RawButtonPress' <<<"$xl"); en=$(grep -c ' window EnterNotify' <<<"$xl")
+  fo=$(grep -oE 'raw Raw(TouchBegin|ButtonPress) focus 0x[0-9a-f]+' <<<"$xl" | awk '{print $4}' | sort | uniq -c | tr '\n' ' ')
+  xs="X: raw touch begins $rt, raw button presses $rb, EnterNotify on Steam's window $en, X focus at them: ${fo:-?} (Steam's $SW; $OUT/x-input.txt)"
+  if [ "${hg:-0}" != 0 ] && [ -z "$over" ] && [ "${kpop:-0}" = 0 ] && grep -q ' start ' <<<"$xl"; then
+    if [ "$rt" = 0 ]; then why="taps reached KWin but no touch reached Xwayland (no XI2 RawTouchBegin): KWin's task touch -> wl_touch hop drops them"
+    elif [ "$rb" = 0 ]; then why="Xwayland got the touches but emulated no pointer press (Steam's CEF wants pointer events)"
+    else why="Xwayland gave Steam touches and pointer presses, Steam opened no menu (X focus: ${fo:-?})"; fi
+  fi
+  bad "no tap on Steam's menu bar opened a menu ($taps taps; home gestures to KWin ${hg:-?}, KWin touch-at lines ${kt:-?}, app popup lines ${kpop:-?}; screen $OUT/no-menu.png): $why; $xs"
 fi
 
 # N3b: a menu taller than its window shows whole and takes touches (kwin 3.72+).
