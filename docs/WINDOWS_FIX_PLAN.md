@@ -100,6 +100,8 @@ Done when: every window check gives a verdict (PASS or a named FAIL) within its 
 - [ ] 1.6 **Measure composition with glass off** (hypothesis: the blur over windows forces GPU composition; older trace:
   360 of 361 frames GPU-composited with a window open). Record composition types from `dumpsys SurfaceFlinger` with 1, 3
   and 6 windows, glass on and off. Decide from the numbers whether blur pauses while a window moves or resizes.
+  - 11-10: the A/B is `tools/phone/verify/ww-composition.sh` (glass switch: the page's `__glass.live.native(false)`,
+    put back after; rest and bar-drag samples per window count). Queued; nothing applied. Verdict owed.
 
 Done when: 1.1-1.5 landed with their before/after numbers in `window-bench.md`; 1.6 has a written verdict.
 
