@@ -22,6 +22,12 @@
 #          their frame (a0), when 20+ of them ran (an APK without N2 has none: reported, not failed)
 #   resize gfxinfo over the edge drag: janky frames <= 5 % (Android's own frame stats for home's window)
 # Steam (informative): KWin's "also draws override-redirect" lines (0062) - its menus drawn into its window.
+# raf    (informative) home's rAF frame times over the swipes: p50/p95/max dt and missed vsyncs (dt > 1.5 periods).
+# A/B of N2 (docs/WINDOWS_FIX_PLAN.md 1.3): WW_AHEAD=on|off sets the page's frame-ahead (`__ww.aheadOn`) for the run and
+# puts it back after; unset leaves it as the host offered it (off unless debug.powos.ww_ahead=1). Compare pf0, raf and
+# the resize's janky % of an "on" and an "off" run:
+#   queue.sh add ww-glue-ahead-on  env WW_AHEAD=on  tools/phone/verify/ww-glue.sh
+#   queue.sh add ww-glue-ahead-off env WW_AHEAD=off tools/phone/verify/ww-glue.sh
 set -uo pipefail
 T=$(cd "$(dirname "$0")/.." && pwd)
 . "$T/verify/ww-lib.sh"
@@ -42,7 +48,10 @@ closeup() { [ -n "$OPENED" ] || return 0
   ww_close "$OPENED"; sleep 1.5
   ww_us "pkill -x '$OPENED_PROC'; true" >/dev/null   # the app this started: its process too
   say "closed $OPENED ($OPENED_PROC): this check opened it"; OPENED=""; }
-trap closeup EXIT
+AH_WAS=""
+# The N2 knob put back as it was before the run (WW_AHEAD), then the window this check opened closed.
+restore_ahead() { [ -n "$AH_WAS" ] || return 0; ev "(window.__ww.aheadOn=$([ "$AH_WAS" = true ] && echo true || echo false),'ok')" >/dev/null; AH_WAS=""; }
+trap 'restore_ahead; closeup' EXIT
 setup_window() { local a key why
   rects=$(ev "$WWRECTS")
   [ -n "$rects" ] && [ "$rects" != null ] && { say "a web window on home's page already: $rects"; return 0; }
@@ -74,6 +83,15 @@ if [ "${1:-}" != --read ]; then
   [ -n "$at" ] || { echo "SKIP no empty spot on home's page to swipe from"; exit 3; }
   read -r x y <<<"$at"
   say "swipe from $x,$y (windows at $rects)"
+  case "${WW_AHEAD:-}" in
+    on|off) AH_WAS=$(ev "String(window.__ww.aheadOn)")
+      ev "(window.__ww.aheadOn=$([ "$WW_AHEAD" = on ] && echo true || echo false),String(window.__ww.aheadOn))" >/dev/null
+      say "N2 frame-ahead: $WW_AHEAD for this run (A/B)" ;;
+    "") say "N2 frame-ahead: as the host offered it (WW_AHEAD unset)" ;;
+    *) echo "FAIL WW_AHEAD=$WW_AHEAD (on|off)"; exit 1 ;;
+  esac
+  # Home's rAF times over the swipes (informative): the page's own frame pacing, ahead on or off.
+  ev "(()=>{const s=window.__wwDt=[];let l=0;window.__wwDtStop=false;const f=t=>{if(l)s.push(t-l);l=t;if(!window.__wwDtStop&&s.length<4000)requestAnimationFrame(f)};requestAnimationFrame(f);return 'ok'})()" >/dev/null
   "$adb" shell "input swipe $x $y $((x - 900)) $y 220"
   sleep 1.5
   "$adb" shell "input swipe $((x - 900)) $y $x $y 220"
@@ -83,6 +101,8 @@ if [ "${1:-}" != --read ]; then
   sleep 1.5
   "$adb" shell "input swipe $x $y $((x - 900)) $y 220"
   sleep 1.5
+  raf=$(ev "(()=>{window.__wwDtStop=true;const s=[...(window.__wwDt||[])].sort((a,b)=>a-b);if(s.length<10)return 'too few frames ('+s.length+')';const q=p=>s[Math.min(s.length-1,Math.floor(p*s.length))].toFixed(1),per=Math.min(...s.filter(v=>v>4))||16.7,miss=s.filter(v=>v>1.5*per).length;return 'n='+s.length+' dt p50 '+q(0.5)+' p95 '+q(0.95)+' max '+s.at(-1).toFixed(1)+' ms, missed vsyncs '+miss+' (period ~'+per.toFixed(1)+' ms)'})()")
+  say "raf: ${raf:-none} (N2 ${WW_AHEAD:-as offered})"
   # The resize: the top window's bottom-right grab, 300 px out and back, 1.2 s each, with home's frame stats reset.
   read -r l t r b <<<"$(echo "${rects##*,}")"
   "$adb" shell "dumpsys gfxinfo $PKG reset" >/dev/null

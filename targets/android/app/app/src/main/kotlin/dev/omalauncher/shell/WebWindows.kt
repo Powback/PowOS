@@ -4425,6 +4425,12 @@ class WebWindows(
         /** The debug property that turns the layer order check ([orderCheckSoon]) on: "1". Unset = off. */
         const val ORDER_CHECK_PROP = "debug.powos.ww_order_check"
 
+        /** The debug property that has the host offer N2's frame-ahead geometry to the page ("w.ahead 1"): "1". */
+        const val AHEAD_PROP = "debug.powos.ww_ahead"
+
+        /** A debug switch [name] is on: its property is "1" ([orderCheckOn]). */
+        fun debugOn(name: String): Boolean = orderCheckOn(debugProp(name))
+
         /** [ORDER_CHECK_PROP]'s value -> the check runs. Only an explicit "1": unset, "0" or unreadable = off. */
         fun orderCheckOn(prop: String?): Boolean = prop?.trim() == "1"
 

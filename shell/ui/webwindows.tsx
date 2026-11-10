@@ -2442,7 +2442,10 @@ const sent: string[] = [];
   get ahead() {
     return aheadStats;
   },
-  /** N2 without a host (the gate): compute and keep the frame-ahead geometry anyway. */
+  /** N2 without a host (the gate), or an A/B run (ww-glue.sh WW_AHEAD): compute and keep the frame-ahead geometry. */
+  get aheadOn() {
+    return geometryChannel.ahead;
+  },
   set aheadOn(on: boolean) {
     geometryChannel.ahead = on;
   },

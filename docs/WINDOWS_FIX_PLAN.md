@@ -74,10 +74,13 @@ Done when: every window check gives a verdict (PASS or a named FAIL) within its 
   - Landed 11-10: `Helper.touch` posts to its own `powos-ww-input` thread (display priority); the helper's pipe is
     shared under the Helper's lock; a down/up that waited > 8 ms for that thread logs "touch line waited N ms".
     JVM: `WebWindowsInputThreadTest` (control: fails with `touch` back on `io`). Phone latency: owed (queued).
-- [ ] 1.3 **Frame prediction off, then measure.** Set `geometryChannel.ahead` off (the host stops sending `w.ahead 1`).
+- [x] 1.3 **Frame prediction off, then measure.** Set `geometryChannel.ahead` off (the host stops sending `w.ahead 1`).
   Compare `pf=`, rAF `dt` and missed vsyncs over `ww-glue.sh` with it on and off. Keep N1 (main-thread slides).
   - If off is equal or better: delete `sendAhead`/`sampleAhead` (`webwindows.tsx:2709-2755`) and `FrameSync.ahead`/
     `correct` (`FrameSync.kt`), and tick N2 as withdrawn in `docs/WEB_WINDOWS.md`.
+  - Landed 11-10 (off): the host sends `w.ahead 1` only with `debug.powos.ww_ahead=1`; `ww-glue.sh` takes
+    `WW_AHEAD=on|off` (the page's `__ww.aheadOn`, now readable) and reports home's rAF dt p50/p95 and missed vsyncs.
+    JVM: `WebWindowsAheadTest.aheadIsOffByDefault`. The A/B (on vs off) is queued; the deletion waits for it.
 - [ ] 1.4 **One writer for full-screen layers.** `apply()` (`WebWindows.kt:1688`) restates every full-screen window's
   layer (`fullLayer`, idempotent) at the end of each geometry transaction, so the last write on every draw is right.
   Then remove the 250/1,000/3,000 ms restate timers (`restateFull`, `FULL_RESTATE_MS`).
