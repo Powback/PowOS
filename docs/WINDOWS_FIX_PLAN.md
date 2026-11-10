@@ -81,10 +81,14 @@ Done when: every window check gives a verdict (PASS or a named FAIL) within its 
   - Landed 11-10 (off): the host sends `w.ahead 1` only with `debug.powos.ww_ahead=1`; `ww-glue.sh` takes
     `WW_AHEAD=on|off` (the page's `__ww.aheadOn`, now readable) and reports home's rAF dt p50/p95 and missed vsyncs.
     JVM: `WebWindowsAheadTest.aheadIsOffByDefault`. The A/B (on vs off) is queued; the deletion waits for it.
-- [ ] 1.4 **One writer for full-screen layers.** `apply()` (`WebWindows.kt:1688`) restates every full-screen window's
+- [x] 1.4 **One writer for full-screen layers.** `apply()` (`WebWindows.kt:1688`) restates every full-screen window's
   layer (`fullLayer`, idempotent) at the end of each geometry transaction, so the last write on every draw is right.
   Then remove the 250/1,000/3,000 ms restate timers (`restateFull`, `FULL_RESTATE_MS`).
   - Check: `WebWindowsFullScreenRaceTest` extended with "a placement queued before full screen lands after it".
+  - Landed 11-10: `apply()` ends every geometry transaction with `fullLayer` of each full-screen window;
+    `FULL_RESTATE_MS`/`restateNow` are gone. Kept on its own timers: the immersive status bar's re-hide
+    (`IMMERSIVE_REHIDE_MS`, 250/1,000/3,000 ms) - a system bar state, not a layer write. JVM:
+    `WebWindowsFullScreenRaceTest.aPlacementQueuedAfterTheFullScreenEndsWithIt` (control: fails without the rewrite).
 - [ ] 1.5 **Cheaper per-frame measure.** In `entry()` (`webwindows.tsx:2266`): read `--inset-top` and `--color-surface`
   once per tick, not per window (`mergeOf`, `fillOf`, `layoutSize`); call `document.getAnimations()` once per tick and
   share it between `glueFrame` and the ahead code.

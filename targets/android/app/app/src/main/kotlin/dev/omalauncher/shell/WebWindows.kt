@@ -1698,6 +1698,9 @@ class WebWindows(
     ) {
         val t = SurfaceControl.Transaction()
         placeAll(t, geos)
+        // Fix plan 1.4 (C3): the one writer of full-screen layers - every geometry transaction ends with every full-screen
+        // window's state ([fullLayer], idempotent), so whatever rode home's draw before it, the last write is right.
+        for (w in wins.values) if (w.linuxFull && !w.closed) fullLayer(t, w)
         val attached = web.rootSurfaceControl
         if (attached == null) {
             t.apply()
@@ -3516,28 +3519,25 @@ class WebWindows(
      * window placed (or, not yet in the page's list, hidden) as a plain window - then landed AFTER the move and undid
      * it: layer, crop and visibility back to the page's, the game invisible. Broforce at 03:09 won the same race by
      * 50 ms. Now the full-screen state is queued on home's next draw too, AFTER anything queued before it (a later
-     * merge wins), home is asked to draw, and it is written again directly once the draw path settled
-     * ([FULL_RESTATE_MS]) - every write the same idempotent [fullLayer], skipped once the window left full screen. The
-     * immersive status bar is asked hidden again with it (asked during the surface's transition, it stayed up).
+     * merge wins), and home is asked to draw; every later page placement ends with it as well ([apply], fix plan 1.4),
+     * so the 250/1,000/3,000 ms direct restates that covered a late placement are gone. The immersive status bar is
+     * still asked hidden again on [IMMERSIVE_REHIDE_MS] (asked during the surface's transition, it stayed up): that is
+     * the system bar's own state, not a layer write, and no placement carries it.
      */
     private fun restateFull(why: String) {
         val t = SurfaceControl.Transaction()
-        val n = wins.values.count { it.linuxFull && !it.closed && fullLayer(t, it) }
-        if (n == 0) return
+        val full = wins.values.filter { it.linuxFull && !it.closed && fullLayer(t, it) }
+        if (full.isEmpty()) return
         val attached = web.rootSurfaceControl
         if (attached == null) t.apply() else attached.applyTransactionOnDraw(t)
         web.invalidate()
-        for (ms in FULL_RESTATE_MS) main.postDelayed({ restateNow(why) }, ms)
+        WindowLog.i(TAG, "full screen restated on home's next draw ($why): ${full.joinToString { "window ${it.id}" }}")
+        if (full.any { it.immersive }) for (ms in IMMERSIVE_REHIDE_MS) main.postDelayed({ immersiveAgain() }, ms)
     }
 
-    /** [restateFull]'s direct write: every full-screen window's layer and immersive status bar, applied now. */
-    private fun restateNow(why: String) {
-        val t = SurfaceControl.Transaction()
-        val full = wins.values.filter { it.linuxFull && !it.closed && fullLayer(t, it) }
-        if (full.isEmpty()) return
-        t.apply()
-        for (w in full) if (w.immersive) statusBarHidden()
-        WindowLog.i(TAG, "full screen restated ($why): ${full.joinToString { "window ${it.id}" }}")
+    /** [restateFull]'s status bar: hidden again while an immersive full-screen window is still up. */
+    private fun immersiveAgain() {
+        if (wins.values.any { it.linuxFull && !it.closed && it.immersive }) statusBarHidden()
     }
 
     /** Home's window's status bar asked hidden again for an immersive full screen (idempotent, not logged). */
@@ -4531,10 +4531,10 @@ class WebWindows(
         const val FULL_REFIT_SETTLE_MS = 400L
 
         /**
-         * FS10: after a full screen or home's surface made again, the full-screen state written again directly this
-         * long after (ms): past a first-frame sync (100+ ms seen, 11-07 03:14) and a slow transition's.
+         * FS10: after an immersive full screen or home's surface made again, the status bar asked hidden again this long
+         * after (ms): past a first-frame sync (100+ ms seen, 11-07 03:14) and a slow transition's.
          */
-        val FULL_RESTATE_MS = longArrayOf(250L, 1_000L, 3_000L)
+        val IMMERSIVE_REHIDE_MS = longArrayOf(250L, 1_000L, 3_000L)
 
         /**
          * Whether the page leaves out PowOS's bar over a Linux window: KWin says it draws its own complete frame
