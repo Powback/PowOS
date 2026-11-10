@@ -85,6 +85,8 @@ restore() {
   case " $APPS " in *" kate "*) [ "${KATE_MINE:-0}" = 1 ] && us "pkill -x kate" ;; esac
   case " $APPS " in *" dolphin "*) [ "${DOLPHIN_MINE:-0}" = 1 ] && us "pkill -x dolphin" ;; esac
   [ "${CALC_MINE:-0}" = 1 ] && sh_ "am force-stop $CALC"
+  local devlog; devlog=$(sed -n 's/^WWR_LOGPID \([0-9][0-9]*\).*/\1/p' "$OUT/logcat.txt" 2>/dev/null | head -1)
+  [ -n "$devlog" ] && sh_ "pkill -P $devlog; kill $devlog" >/dev/null
   [ -n "${LOGPID:-}" ] && kill "$LOGPID" 2>/dev/null
   if [ "${OVERRIDES_SAVED:-0}" = 1 ]; then
     r=$(CDP_TIMEOUT_S=8 ev "globalThis.__wwResizeProbe?.stop();$RESTORE_GLASS;typeof globalThis.__glassDragOff+':'+String(globalThis.__glassDragOff)")
@@ -138,7 +140,10 @@ effective_gp=$(ev "globalThis.__glassDragOff=$want;String(globalThis.__glassDrag
 printf 'requested pause=%s; glassDragOff=%s; previous glass=%s\n' "$GP" "$effective_gp" "$PREV_GP" | tee "$OUT/settings.txt"
 [ "$effective_gp" = "$want" ] || { bad "switch readback mismatch (inconclusive A/B)"; exit 1; }
 sleep 1
-"$A" shell "logcat -v time -s PowosWebWindows:I Andromarchy:I PowosShell:I" > "$OUT/logcat.txt" 2>/dev/null &
+# The reader's DEVICE pid is its first line: killing the host's adb ($LOGPID) left the device's logcat running - 11-11
+# 00:2x the phone had 7 orphaned copies of this reader, logd + logcat 2.0 s CPU over a 1.7 s drag in the timed trace
+# (more than home's renderer), skewing every later run. restore() kills it on the device; timeout bounds an abort.
+"$A" shell 'echo WWR_LOGPID $$; exec timeout 330 logcat -v time -s PowosWebWindows:I Andromarchy:I PowosShell:I' > "$OUT/logcat.txt" 2>/dev/null &
 LOGPID=$!
 
 # The SurfaceFlinger layer named <regex> (its name as --latency takes it, "name#id"), the newest one.

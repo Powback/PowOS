@@ -145,6 +145,20 @@ The board shows window checks failing by timeout or waiting days for a free phon
     2.7/3.9, p90 12.7/10.6, max 106/69 ms. 98/101 and 113/114 home frames were late. Next target: the shell's frame
     (drawGl p90 and its 70-106 ms spikes), not composition. Our layers are about a quarter of the SF frame's CPU cost,
     and that frame still runs on the GPU for the wallpaper.
+  - 11-11 page frame over the drag (`ww-resize-1111-0017` in, 1728 ms): the 106 ms drawGl is RenderThread in
+    WaitSyncToken (80.7 ms) behind Chrome_InProcGpuThread's RendererRasterWorker (28.4 ms, DoEndRasterCHROMIUM::Flush
+    21.5 ms). Tile raster by cc layer: 566 `.page-under` 124 tiles (21.6 MB), 567 `.page-windows` 97 tiles (4182x2115),
+    577/578 `.ww-outline` 29. The per-move mask writes (`resizeLive` -> `writeMask(.page-under)`, `cutAll`) and the
+    resized `.ww-shadow` box repaint and re-raster those whole layers on every move. GPU thread: 433 ms of GpuChannel
+    work over the drag. Renderer main thread: BeginMainFrame 826 ms over 284 frames; rAF callbacks 187 ms
+    (max 13.6 ms); NotifyResizeObservers 119 ms; paint 118 ms; commit 83 ms; style and layout about 60 ms. Forced
+    layouts in rAF are cheap (778, 6.7 ms in total).
+    Load the check itself caused: logd 1275 ms + logcat 729 ms of CPU over the drag. The phone had 7 orphaned
+    `logcat -v time -s PowosWebWindows:I ...` readers from ww-resize.sh (the host killed only its adb). Fixed: the
+    reader's device pid is killed in restore(), and timeout 330 bounds it (test-resize-state). Also there are 2 orphaned
+    `logcat ... PowosShade:V ...` readers from another check.
+    Next: keep the per-move raster off `.page-under` and `.page-windows`. Give the mask and the shadow their own small
+    composited layers (a hole that follows by transform, a 9-slice shadow), so a move re-rasters no full-page layer.
 - [x] 0.6 Each failing check on the board gets one line: real bug, check bug, or environment.
   Done 11-10: seven board tasks got a "0.6" step line; the table is in `docs/research/window-bench.md` "11-10
   baseline". None of the failures was a judged real bug: they were check bugs or the environment, most of them home's

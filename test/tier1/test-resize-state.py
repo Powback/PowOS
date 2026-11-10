@@ -38,6 +38,13 @@ class ResizeState(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'radius'):
             m.validate(capture(False), 'T', 4, True)
 
+    def test_device_logcat_reader_is_killed(self):
+        # 11-11: killing only the host's adb left the device's logcat running (7 orphans, ~1 core of logd+logcat).
+        script = (V / 'ww-resize.sh').read_text()
+        self.assertIn("echo WWR_LOGPID $$; exec timeout", script)
+        restore = script[script.index('restore() {'):script.index('\n}\n', script.index('restore() {'))]
+        self.assertIn('pkill -P $devlog; kill $devlog', restore)
+
     def test_no_corner_property_in_probe(self):
         self.assertNotIn('ww_drag_round', (V / 'ww-resize.sh').read_text())
 
