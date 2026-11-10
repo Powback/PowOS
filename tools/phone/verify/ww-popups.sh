@@ -212,6 +212,10 @@ for y in 40 28 52; do
   done
 done
 [ -n "$scan_stop" ] && bad "scan stopped: $scan_stop"
+# xsum <x-input lines>: rt/rb/en/fo and XS, what Xwayland made of the taps (x-input-watch.py's log). Also the long case's.
+xsum() { rt=$(grep -c ' raw RawTouchBegin' <<<"$1"); rb=$(grep -c ' raw RawButtonPress' <<<"$1"); en=$(grep -c ' window EnterNotify' <<<"$1")
+  fo=$(grep -oE 'raw Raw(TouchBegin|ButtonPress) focus 0x[0-9a-f]+' <<<"$1" | awk '{print $4}' | sort | uniq -c | tr '\n' ' ')
+  XS="X: raw touch begins $rt, raw button presses $rb, EnterNotify on Steam's window $en, X focus at them: ${fo:-?} (Steam's $SW)"; }
 # The X input log always (11-10 09:21: a menu opened, so it was only read in the no-menu branch and never kept).
 xl=$(xiw); printf '%s\n' "$xl" > "$OUT/x-input.txt"
 [ -n "$xl" ] || say "note: the X input watcher logged nothing (did ww-xiw.py start? /tmp/ww-xiw.log empty)"
@@ -231,9 +235,7 @@ if [ $opened -lt 1 ]; then
   over=$(xover)
   [ -n "$over" ] && why="taps reached KWin, but X window(s) over Steam's at the menu bar took them (Xwayland picks by X stacking): $over"
   [ "${hg:-0}" = 0 ] && why="home sent no gesture to KWin (the taps missed Steam's web window body, or something above it in the page took them)"
-  rt=$(grep -c ' raw RawTouchBegin' <<<"$xl"); rb=$(grep -c ' raw RawButtonPress' <<<"$xl"); en=$(grep -c ' window EnterNotify' <<<"$xl")
-  fo=$(grep -oE 'raw Raw(TouchBegin|ButtonPress) focus 0x[0-9a-f]+' <<<"$xl" | awk '{print $4}' | sort | uniq -c | tr '\n' ' ')
-  xs="X: raw touch begins $rt, raw button presses $rb, EnterNotify on Steam's window $en, X focus at them: ${fo:-?} (Steam's $SW; $OUT/x-input.txt)"
+  xsum "$xl"; xs="$XS ($OUT/x-input.txt)"
   if [ "${hg:-0}" != 0 ] && [ -z "$over" ] && [ "${kpop:-0}" = 0 ] && grep -q ' start ' <<<"$xl"; then
     if [ "$rt" = 0 ]; then why="taps reached KWin but no touch reached Xwayland (no XI2 RawTouchBegin): KWin's task touch -> wl_touch hop drops them"
     elif [ "$rb" = 0 ]; then why="Xwayland got the touches but emulated no pointer press (Steam's CEF wants pointer events)"
@@ -273,11 +275,20 @@ long_menu() {
   [ "${bb2:-$bb}" -lt "$bb" ] || { bad "long: the edge drag didn't make Steam's window shorter ($bb -> ${bb2:-?})"; return; }
   region save "$bl" "$bb2" "$br" "$((bb2 + 600))" >/dev/null
   read -r SW SX SY SWW SWH <<<"$(steamwin)"
+  # 11-10 09:21: this tap opened no menu and nothing said where it went. Steam's X window after the shrink (a stale or
+  # moved one would put the header elsewhere) and, on a miss, what Xwayland made of the tap.
+  say "long: Steam's X window after the shrink: $SW at $SX,$SY ${SWW}x$SWH (body $l2 $t2 $r2 $bb2)"
+  local x0; x0=$(xiw | wc -l)
   t0=$("$adb" shell 'date +%m-%d\ %H:%M:%S.000' | tr -d '\r'); k0=$(rs 'wc -l < /run/powos-app/hyprland.log' | tail -1)
   wtap "$CX" "$CY"; sleep 2
   lines=$("$adb" shell "logcat -d -T '$t0' -s PowosPopups:I" 2>/dev/null | tr -d '\r' | grep -oE 'popup.*')
   hit=$(echo "$lines" | grep -E '^popup [0-9]+ [0-9]+ at' | tail -1)
-  [ -n "$hit" ] || { bad "long: no popup line after the tap at $CX,$CY"; return; }
+  if [ -z "$hit" ]; then
+    local xt hg; xt=$(xiw | tail -n +$((x0 + 1))); printf '%s\n' "$xt" > "$OUT/x-input-long.txt"; xsum "$xt"
+    hg=$("$adb" shell "logcat -d -T '$t0' -s PowosWebWindows:I" 2>/dev/null | tr -d '\r' | grep -c "gesture to KWin window")
+    bad "long: no popup line after the tap at $CX,$CY (home gestures to KWin $hg, menus viewable: $(menus | wc -l | tr -d ' '); $XS; $OUT/x-input-long.txt)"
+    return
+  fi
   read -r _ P N _ at pw _ <<<"$hit"; ax=${at%,*}; ay=${at#*,}; ph=${pw#*x}; pw=${pw%x*}
   s=$(python3 -c "import sys; print('%.4f' % ((float(sys.argv[2]) - float(sys.argv[1])) / float(sys.argv[3])))" "$l2" "$r2" "$SWW")
   # Its part below the window on screen (device px): the window's body bottom .. the menu's bottom.
