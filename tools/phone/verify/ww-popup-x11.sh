@@ -6,8 +6,11 @@
 # own X11 app (ww-popup-probe.py, PySide6 over Xwayland) opens as a web window, then shows a menu with no parent (an
 # override-redirect window with no WM_TRANSIENT_FOR, as Steam's) for 4 s and closes it. PASS needs, for that menu:
 #   kwin    KWin's "exports popup" line (hyprland.log)       popup   "popup P N at ..." (PowosPopups), no "insane" line
-#   buffer  "popup N buffer #..."                             gone    "popup-gone" after it closed
+#   buffer  kwin < 3.72 (N3a): "popup N buffer #..." (PopupLog's offscreen reader counts them)
+#           kwin 3.72+ (N3b): KWin's "window task N live" - the layer's consumer hands its buffers to KWin, which logs
+#           it once it imported them; the app never sees a frame (they go straight to the layer), so no buffer line
 #   layer   with kwin 3.72+: "popup N layer up" (its own layer over home)
+#   gone    "popup-gone" after it closed
 # Its app is quit after; nothing of the user's is touched. Exit 0 PASS, 1 FAIL, 3 not now / a KWin without 0063.
 set -uo pipefail
 NAME=ww-popup-x11; . "$(dirname "$0")/wwc-lib.sh"
@@ -32,7 +35,13 @@ say "kwin: ${kl:-none}"; say "$(head -6 <<<"$pl")"
 [ -n "$kl" ] || bad "kwin: no \"exports popup\" line for the menu"
 grep -qE '^popup [0-9]+ [0-9]+ at ' <<<"$pl" || bad "popup: no \"popup P N at\" line (PowosPopups)"
 grep -q 'insane' <<<"$pl" && bad "popup: $(grep -m1 insane <<<"$pl")"
-grep -qE '^popup [0-9]+ buffer' <<<"$pl" || bad "buffer: none of the menu's buffers reached the app"
 grep -q '^popup-gone' <<<"$pl" || bad "gone: no \"popup-gone\" after the menu closed"
-kwat 3.72 && { grep -qE '^popup [0-9]+ layer up' <<<"$pl" || bad "layer: no \"popup N layer up\" ($kw)"; }
+N=$(grep -m1 -oE 'exports popup [0-9]+' <<<"$kl" | grep -oE '[0-9]+$')
+if kwat 3.72; then
+  grep -qE '^popup [0-9]+ layer up' <<<"$pl" || bad "layer: no \"popup N layer up\" ($kw)"
+  live=$([ -n "$N" ] && sh_ "tail -n +$((${k0:-0} + 1)) $HY | grep -a 'window task $N live' | tail -1")
+  [ -n "$live" ] && say "buffer: $live" || bad "buffer: KWin's popup surface ${N:-?} never went live (no buffers from the app's layer)"
+else
+  grep -qE '^popup [0-9]+ buffer' <<<"$pl" || bad "buffer: none of the menu's buffers reached the app"
+fi
 wwc_end "the X11 menu came through KWin as a popup surface with buffers ($kw) and went"
