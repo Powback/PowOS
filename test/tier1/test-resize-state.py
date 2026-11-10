@@ -81,7 +81,7 @@ class ResizeState(unittest.TestCase):
         # An owned child execs node, so kill/wait targets the producer itself, not a shell grandchild.
         helper = (V / 'resize-first-match.sh').read_text()
         script = helper + '''
-logcat() { exec node -e 'console.log("T " + JSON.stringify({active:true})); setInterval(()=>{},1000)' ; }
+logcat() { exec node -e 'console.log("T_ACTIVE"); setInterval(()=>{},1000)' ; }
 resize_first_match T || exit 1
 printf 'captured\\n'
 '''
@@ -90,7 +90,7 @@ printf 'captured\\n'
         self.assertEqual(result.stdout, 'captured\n')
 
     def test_first_match_failure_is_bounded(self):
-        helper = (V / 'resize-first-match.sh').read_text().replace('+ 8 ))', '+ 1 ))')
+        helper = 'WWR_WATCH_S=1\n' + (V / 'resize-first-match.sh').read_text()
         script = helper + '''
 logcat() { exec node -e 'setInterval(()=>{},1000)' ; }
 resize_first_match T && exit 2
@@ -119,20 +119,61 @@ exit 0
         self.assertNotIn('input swipe $x2 $y2 $x1 $y1', diag)
         self.assertIn('2> "$OUT/$tag-diagnostic.stderr"', diag)
 
+    def device_run(self, stream_active, watch_s='8'):
+        """Run diag_device_cmd's exact string through adb-shell -> su -c with stubbed device tools."""
+        import os, tempfile
+        token = 'WWR_61_76_66555'
+        raw = 'home LOG :18 ' + token + ' {{"at":{},"active":{},"epoch":{},"off":false}}'
+        with tempfile.TemporaryDirectory() as d:
+            b = Path(d, 'bin'); b.mkdir()
+            stubs = {
+                'su': '[ "$1" = -c ] && exec sh -c "$2"',
+                'date': 'case "$1" in +%s%3N) n=$(cat "$D/n" 2>/dev/null || echo 0); echo $((n + 1)) > "$D/n"; [ "$n" = 0 ] && echo 1000 || echo 1100 ;; *) exec /bin/date "$@" ;; esac',
+                'getprop': 'echo 0',
+                'input': 'exit 0',
+                'dumpsys': "printf '  Layer [11887] powos-ww-61#11887\\n    bounds={0,0,100,100}\\n'",
+                'logcat': 'case "$*" in *-d*) cat "$D/dump"; exit 0 ;; esac; cat "$D/stream"; exec sleep 30',
+            }
+            for name, body in stubs.items():
+                (b / name).write_text('#!/bin/sh\n' + body + '\n'); (b / name).chmod(0o755)
+            Path(d, 'stream').write_text(raw.format(990, 'false', 0) + '\n' + raw.format(995, 'true', 1) + '\n'
+                                         + (token + '_ACTIVE\n' if stream_active else ''))
+            Path(d, 'dump').write_text(''.join(raw.format(t, 'true', 1) + '\n' for t in (999, 1050, 1101)))
+            fn = (V / 'ww-resize.sh').read_text()
+            fn = fn[fn.index('diag_device_cmd() {'):]
+            fn = fn[:fn.index('\n}\n') + 3]
+            script = f'here={V}\n' + fn + f'diag_device_cmd {token} 1 2 3 4'
+            cmd = subprocess.run(['bash', '-c', script], capture_output=True, text=True, check=True).stdout
+            env = dict(os.environ, PATH=f'{b}:' + os.environ['PATH'], D=d, TMPDIR=d, WWR_WATCH_S=watch_s)
+            out = subprocess.run(['sh', '-c', cmd], capture_output=True, text=True, env=env, timeout=12)
+            return token, out
+
+    def test_device_command_matches_real_line(self):
+        token, out = self.device_run(True)
+        self.assertEqual(out.stderr, '')
+        self.assertNotIn('WWR_ERROR', out.stdout)
+        self.assertIn('VALID', m.validate(out.stdout, token, 61, False, True))
+
+    def test_device_command_no_marker_fails_closed(self):
+        token, out = self.device_run(False, '1')
+        self.assertRegex(out.stdout, r'WWR_WATCH (deadline|read timed out or ended)')
+        with self.assertRaisesRegex(ValueError, 'no confirmed resize'):
+            m.validate(out.stdout, token, 61, False, True)
+
     def test_observer_actual_schema(self):
         # Lock this observer to entry()/sizeOf()/geometry(), not an invented export.
         source = (ROOT / 'shell/ui/webwindows.tsx').read_text()
         self.assertIn('return `1 ${r.cw} ${r.ch}`', source)
         self.assertIn('...rects, RADIUS * scale, visible ? 1 : 0, px(alpha), px(scale), w.restore ? 1 : 0, mergeOf(w, el), sizeOf(w, body), fillOf()', source)
         observer = (V / 'resize-state.js').read_text().replace('TOKEN', '"T"').replace('WINDOW_ID', '4')
-        script = '''let sample, records=[]; globalThis.setInterval=f=>(sample=f,1); globalThis.clearInterval=()=>{};
+        script = '''let sample, records=[], markers=[]; globalThis.setInterval=f=>(sample=f,1); globalThis.clearInterval=()=>{};
 let entry=[4,...Array(12).fill(0),12,1,1,1,0,-1,-1,1,300,200,'ffffff'];
 globalThis.__ww={geometry:()=>[2.76,1,...entry].join(' '),lastResize:null};
 globalThis.__glassDrag=()=>{};globalThis.__glassDragOff=false;
-console.log=x=>records.push(JSON.parse(x.slice(2)));
+console.log=x=>x.endsWith('_ACTIVE')?markers.push(x):records.push(JSON.parse(x.slice(2)));
 ''' + observer + ''';
 sample();entry[20]=0;globalThis.__ww.lastResize={id:4};sample();
-if(!records[0].active || records[1].active || records[0].epoch===records[1].epoch) process.exit(1);
+if(!records[0].active || records[1].active || records[0].epoch===records[1].epoch || markers.join()!=='T_ACTIVE') process.exit(1);
 '''
         subprocess.run(['node', '-e', script], check=True)
 

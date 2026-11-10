@@ -237,11 +237,26 @@ for l in sys.stdin:
         if ms.isdigit() and int(ms) * 2 > d and not own.search(name): out.append(f"{name} {ms} ms of {d} ms")
 print("; ".join(dict.fromkeys(out)))' "$1"; }
 
+# diag_device_cmd <token> <x1 y1 x2 y2>: the one device command string (adb shell -> su -c), so the offline test
+# runs exactly what the phone gets. Watcher matches the quote-free <token>_ACTIVE marker (11-10 22:59/23:03: 159 and
+# 146 active JSON records, yet no match - the JSON-quoted pattern never fired on the device shell).
+diag_device_cmd() {
+  local token=$1 x1=$2 y1=$3 x2=$4 y2=$5 first_match
+  first_match=$(cat "$here/resize-first-match.sh")
+  printf '%s' "su -c '$first_match
+    ( resize_first_match \"$token\" &&
+    { sleep 0.15; echo WWR_BEGIN \$(date +%s%3N); echo WWR_PROP \$(getprop debug.powos.ww_drag_round);
+      echo WWR_SF_BEGIN; dumpsys SurfaceFlinger; echo WWR_SF_END;
+      echo WWR_PROP \$(getprop debug.powos.ww_drag_round); echo WWR_END \$(date +%s%3N); } || echo WWR_ERROR no-confirmed-resize ) &
+    watcher=\$!; sleep 0.2; input swipe $x1 $y1 $x2 $y2 3000; wait \${watcher}; sleep 0.3
+    logcat -d -v raw -s PowosShell:I | grep \"$token \"
+    '"
+}
 # Separate slow diagnostic replay: device-side log observer waits for confirmed page resize,
 # captures SF with device wall timestamps, then validator requires the SAME resize around the entire dump.
 # No host sleep guesses; no screenrecord/perfetto during this diagnostic. Never performance evidence.
 diagnostic() {
-  local tag=$1 x1=$2 y1=$3 x2=$4 y2=$5 token js result first_match
+  local tag=$1 x1=$2 y1=$3 x2=$4 y2=$5 token js result
   chk "$tag before diagnostic"
   # Recheck after installing the observer too: transport latency or prior passes may move the zone.
   hit=$(wwhit "$id" "$zone" "$x1" "$y1")
@@ -254,15 +269,7 @@ diagnostic() {
   DIAGNOSTICS=$(( ${DIAGNOSTICS:-0} + 1 ))
   # A bounded device-side watcher, already listening before input starts. The token is unique;
   # logcat's backlog cannot satisfy this job. Timeout and missing/bracketing state fail closed.
-  first_match=$(cat "$here/resize-first-match.sh")
-  "$A" shell "su -c '$first_match
-    ( resize_first_match \"$token\" &&
-    { sleep 0.15; echo WWR_BEGIN \$(date +%s%3N); echo WWR_PROP \$(getprop debug.powos.ww_drag_round);
-      echo WWR_SF_BEGIN; dumpsys SurfaceFlinger; echo WWR_SF_END;
-      echo WWR_PROP \$(getprop debug.powos.ww_drag_round); echo WWR_END \$(date +%s%3N); } || echo WWR_ERROR no-confirmed-resize ) &
-    watcher=\$!; sleep 0.2; input swipe $x1 $y1 $x2 $y2 3000; wait \${watcher}; sleep 0.3
-    logcat -d -v raw -s PowosShell:I | grep \"$token \"
-    '" </dev/null > "$OUT/$tag-diagnostic.txt" 2> "$OUT/$tag-diagnostic.stderr"
+  "$A" shell "$(diag_device_cmd "$token" "$x1" "$y1" "$x2" "$y2")" </dev/null > "$OUT/$tag-diagnostic.txt" 2> "$OUT/$tag-diagnostic.stderr"
   # Never blindly swipe back from an arithmetic endpoint; snap/min-size may put another window there.
   chk "$tag after diagnostic"
   ev "globalThis.__wwResizeProbe?.stop();'ok'" >/dev/null

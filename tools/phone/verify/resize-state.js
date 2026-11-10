@@ -16,6 +16,8 @@
     previous = globalThis.__ww.lastResize;
     was = active;
     console.log(token + ' ' + JSON.stringify({at: Date.now(), active, epoch, off: globalThis.__glassDragOff}));
+    // Quote-free marker for the device watcher; the JSON line stays the validator's evidence.
+    if (active) console.log(token + '_ACTIVE');
   }, 16);
   globalThis.__wwResizeProbe = {stop() { clearInterval(timer); delete globalThis.__wwResizeProbe; }};
   return 'ok';
