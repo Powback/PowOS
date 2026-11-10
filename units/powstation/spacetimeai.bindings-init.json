@@ -1,0 +1,40 @@
+{
+  "id": "spacetimeai.bindings-init",
+  "name": "spacetimeai: bindings-init",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "build-job; Compose-managed by spacetimeai",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "spacetimeai[-_]bindings\\-init[-_][0-9]+"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "spacetimeai",
+    "service": "bindings-init",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "job"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/SpaceTimeAI -f /Users/macback/Projects/SpaceTimeAI/docker-compose.yml --project-name spacetimeai stop bindings-init"
+    ],
+    "keep": [
+      "/Users/macback/Projects/SpaceTimeAI/.stdb-state/deploy/SpaceTimeAI"
+    ]
+  },
+  "limits": {
+    "memory": "536870912",
+    "cpus": 1
+  }
+}

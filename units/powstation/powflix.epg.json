@@ -34,5 +34,8 @@
       "epg-data"
     ]
   },
-  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+  "limits": {
+    "memory": "1073741824",
+    "cpus": 1
+  }
 }
