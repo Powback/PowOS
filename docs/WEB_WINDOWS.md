@@ -1008,6 +1008,13 @@ keeps its task where it is.
 
 ---
 
+### Display 0's rotation after a move (2026-11-11, board inner-screen-stays-landscape-after-an-app-moves)
+An app adopted from full screen (the camera at 11-11 21:45) can turn display 0 (rot 0 -> 1) before it moves into its
+window. Home asks UNSPECIFIED, and with auto-rotate on WM gives UNSPECIFIED the sensor's proposal - none while the
+phone lies flat - else the LAST rotation: the inner screen and home stayed landscape. Home's rotation at its pause is
+kept (shell/HomeRotation.kt); WebWindows.moveTask, taking a task off display 0, has home ask that rotation for a moment
+(NOSENSOR for 0) and give it up once display 0 is there (logcat PowosHomeRotation). Check: verify/inner-rotation-back.sh.
+
 ## S6: Linux windows as web windows (2026-10-30, branch ww-linux; first slice, not yet run on the phone)
 
 The user, 2026-10-30: **"The Linux windows are not launching like the other Android Windows with like the web OS

@@ -4061,6 +4061,7 @@ class WebWindows(
         displayId: Int,
     ): Boolean {
         HiddenApi.allow()
+        val from = taskDisplay(taskId)
         val moved =
             runCatching { atm().javaClass.getMethod("moveRootTaskToDisplay", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType).invoke(atm(), taskId, displayId) }
                 .onFailure { WindowLog.w(TAG, "moveRootTaskToDisplay($taskId, $displayId) refused: ${it.cause ?: it}") }.isSuccess
@@ -4073,6 +4074,10 @@ class WebWindows(
             now = taskDisplay(taskId)
         }
         WindowLog.i(TAG, "task $taskId to display $displayId: moveRootTaskToDisplay=$moved startActivityFromRecents=$started, now on display $now")
+        // Off display 0 into a window: a rotation it asked for there must not outlive it (HomeRotation).
+        if (now == displayId && from == android.view.Display.DEFAULT_DISPLAY && displayId != android.view.Display.DEFAULT_DISPLAY) {
+            main.post { activityOf(web.context)?.let { HomeRotation.back(it, "task $taskId moved to display $displayId") } }
+        }
         return now == displayId
     }
 

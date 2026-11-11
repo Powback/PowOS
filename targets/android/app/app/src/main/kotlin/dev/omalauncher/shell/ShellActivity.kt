@@ -197,6 +197,7 @@ class ShellActivity : Activity() {
     override fun onPause() {
         super.onPause()
         dockLog("paused")
+        HomeRotation.paused(this)
         inFront = false
         WebWindowLaunch.homeInFront = false
     }
