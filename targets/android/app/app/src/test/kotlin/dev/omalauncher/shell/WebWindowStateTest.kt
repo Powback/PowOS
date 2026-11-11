@@ -244,12 +244,13 @@ class WebWindowStateReconcileTest {
         assertTrue("another display", android().run(TaskEvent.TaskSeen(elsewhere, 2)).effects.isEmpty())
     }
 
-    /** SUSPECT: minimised while in PiP, then expanded: back in the window but still listed minimised. */
+    /** Suspect 1, a BUG fixed 11-11: minimised while in PiP, then expanded: back in the window, shown, listed floating. */
     @Test
-    fun aPipWindowMinimisedComesBackStillMinimised() {
+    fun aPipWindowMinimisedComesBackShown() {
         val s = android().run(TaskEvent.TaskSeen(main, 2), PageEvent.Minimise, TaskEvent.TaskSeen(own, 1))
         assertEquals(Phase.Live, s.state.phase)
-        assertEquals("minimised", s.state.listed)
+        assertEquals("floating", s.state.listed)
+        assertEquals(listOf(Effect(Fx.MARK_PIP, false), Effect(Fx.EMIT_STATE, false), Effect(Fx.EMIT_PIP, false)), s.effects)
     }
 
     @Test

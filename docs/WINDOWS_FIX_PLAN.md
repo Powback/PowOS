@@ -336,6 +336,8 @@ places, and the nine events and five timers above are gone.
        announces full on;
     5. `Follow.PIP` is unreachable in `follow` (`pipStep` takes every mode 2 first);
     6. a second `minimise` of a just-hidden (no-PiP) window starts `leaveNow` again.
+  - 11-11 suspects decided (`WebWindowStateTest`, each comment says why):
+    - 1 BUG, fixed: `pipLeave` clears `minimised` (`minimisedIs(w, false)`, as `backNow`); machine `pipOut` the same.
 - [ ] 3.4 **Derived predicates from the state only:** `listedState` (`:180`), `awayByChoice` (`:3859`), `gone` (`:594`),
   `taskDead` (`:443`), `staleFull` (`:2561`).
 - [ ] 3.5 The snapshot (phase 2) sends the state's name; the page stops deriving it from separate flags.

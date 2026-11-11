@@ -350,6 +350,9 @@ class WebWindows(
         w.pip = false
         w.followed = null
         WebWindowDisplays.pip(task, w.id, false)
+        // Back in its window = shown: a minimise while it was in PiP ends here too, as backNow's does (11-11, 3.3 suspect
+        // 1: it stayed listed "minimised" and the snapshot could hide the window the user just expanded).
+        minimisedIs(w, false)
         main.post { if (!w.closed) emit("webwindows.pip", mapOf("id" to w.id, "on" to false)) }
     }
 

@@ -462,9 +462,11 @@ object WebWindowMachine {
         at: WebWindows.Companion.At,
     ): Step = if (at == WebWindows.Companion.At.OWN) pipOut(s) else Step(s, listOf(Effect(Fx.PIP_MOVE_BACK)))
 
+    /** `pipLeave`'s back in its window: shown, so not minimised either (`minimisedIs(w, false)`, told on change). */
     private fun pipOut(s: WinState): Step {
-        val fx = listOf(Effect(Fx.MARK_PIP, false), Effect(Fx.EMIT_PIP, false))
-        return Step(s.copy(phase = Phase.Live, facts = s.facts.copy(followed = null)), fx)
+        val state = if (s.minimised) listOf(Effect(Fx.EMIT_STATE, false)) else emptyList()
+        val fx = listOf(Effect(Fx.MARK_PIP, false)) + state + Effect(Fx.EMIT_PIP, false)
+        return Step(s.copy(phase = Phase.Live, facts = s.facts.copy(followed = null), minimised = false), fx)
     }
 
     /** `follow`'s `followOf` part (:563-577). Follow.PIP can't come here: pipStep took every PiP (mode 2) first. */
