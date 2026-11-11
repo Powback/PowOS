@@ -2,7 +2,7 @@
 # lanes: phone
 # privacy-row.sh (board control-center-shows-what-is-using-the-mic-and-c; shell ui/privacy.tsx, host RecordingLight.kt,
 # gate privacy-row-*): the control center pulled down (the status bar's right half, as owed.sh) - idle: the host's
-# privacy.list has nothing in use and no chip says "now"; then PowOS's own dictation started (home's speech.start)
+# privacy.list has nothing in use and no chip says "now"; then PowOS's own dictation started (home's speech.start, held)
 # and the control center pulled again: the host names the mic's holder and a chip names it "Microphone · now"
 # (dev/device-checks.js privacyRowNow). Dictation cancelled, the shade closed (Back), home after.
 # Then, still dictating, the shade closed: the status bar's recording ring (the mic glow, chrome.tsx RecordingRing) tapped
@@ -33,7 +33,10 @@ idle=$(shell_check shade device-checks.js privacyRowNow idle)
 echo "privacy-row idle: $idle"
 sh_ "input keyevent KEYCODE_BACK"; sleep 1
 DICT=1
-"$T/cdp.sh" eval home 'importShim("./bridge.ts").then(b=>b.powos.speech.start(false)).then(()=>"ok",e=>"ERR "+e)' 2>&1 | tail -1
+# A HELD dictation (start(true)): a tap's (start(false)) with no voice ends itself after the tap's silence
+# (Speech.kt TAP_SILENCE_MS, 4 s) - before the pull and the read, so the row rightly showed PowOS's mic as ended
+# (FAIL on f743cdcb, 11-11). A hold listens until restore's cancel.
+"$T/cdp.sh" eval home 'importShim("./bridge.ts").then(b=>b.powos.speech.start(true)).then(()=>"ok",e=>"ERR "+e)' 2>&1 | tail -1
 sleep 2
 pull
 dict=$(shell_check shade device-checks.js privacyRowNow dictating)
