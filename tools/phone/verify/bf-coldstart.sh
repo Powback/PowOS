@@ -71,11 +71,16 @@ awk -v f="\$from" '(\$1 " " \$2) >= f' \$S/log 2>/dev/null | tail -n 30 | sed 's
 echo "hook \$(dumpsys package com.powos.oplushook 2>/dev/null | grep -m2 -E 'versionName|lastUpdateTime' | tr -s ' ' | tr '\n' ' ')"
 echo "battery_started \$(ps -A -o STIME,NAME 2>/dev/null | grep -m1 ' com.oplus.battery\$')"
 logcat -d -b all -v epoch -t $since.0 2>/dev/null | grep -E 'ThermalControllHandler: tempLevel|PowOS-oplushook' | tail -n 12 | sed 's/^ */vendor /'
+# The hook's own lines survive in Vector's module log (logcat's 256 KiB main buffer holds ~1 min: 11-11 21:30 "category: -"
+# was the wrap, the hook had answered appType 4); the clamp now, after the run, shows a cap that no category lifts.
+fromv=\$(echo "\$from" | tr ' ' T)
+cat /data/adb/lspd/log/modules_*.log 2>/dev/null | grep 'PowOS-oplushook: gameClass' | awk -v f="\$fromv" '\$2 >= f' | tail -n 6 | sed 's/^/hooklog /'
+echo "clamp_after \$(for p in /sys/devices/system/cpu/cpufreq/policy*; do printf '%s=%s/%s ' "\${p##*/}" "\$(cat \$p/scaling_max_freq)" "\$(cat \$p/cpuinfo_max_freq)"; done)"
 EOF
 "$A" push "$OUT/boost-probe.sh" /data/local/tmp/powos-bf-boost-probe.sh >/dev/null 2>&1 &&
   "$A" shell "su -c 'sh /data/local/tmp/powos-bf-boost-probe.sh; rm -f /data/local/tmp/powos-bf-boost-probe.sh'" 2>/dev/null | tr -d '\r' > "$OUT/boost.txt"
 grep -q '^holder .*boost\|^holder .*vendor game class on' "$OUT/boost.txt" && b=engaged || b="no holder line"
-echo "BOOST holder: $b; $(grep -m1 '^hook ' "$OUT/boost.txt"); $(grep -m1 '^battery_started' "$OUT/boost.txt"); category: $(grep -o 'configItemName=[a-z_0-9]*' "$OUT/boost.txt" | sort | uniq -c | tr -s ' ' | tr '\n' ' ')- $OUT/boost.txt"
+echo "BOOST holder: $b; $(grep -m1 '^hook ' "$OUT/boost.txt"); $(grep -m1 '^battery_started' "$OUT/boost.txt"); category: $(grep -o 'configItemName=[a-z_0-9]*' "$OUT/boost.txt" | sort | uniq -c | tr -s ' ' | tr '\n' ' ')- hook: $(grep -c 'appType 4' "$OUT/boost.txt") appType-4 answers; $(grep -m1 '^clamp_after' "$OUT/boost.txt") - $OUT/boost.txt"
 echo "artefacts: $OUT/run.txt"; cat "$OUT/shots.txt" 2>/dev/null
 grep -q "^RESULT" "$OUT/run.txt" || { grep -q "^user input\|^stopped from outside\|^not ready" "$OUT/run.txt" && exit 3; echo "FAIL run: no RESULT line"; exit 1; }
 grep "^RESULT" "$OUT/run.txt" | tail -1

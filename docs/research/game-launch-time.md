@@ -640,3 +640,40 @@ launch, or was not on the phone's copy (the STAGES "open-task:" field is truncat
 Next lever, in order: (1) install the 11-09 oplus-hook APK + restart com.oplus.battery (logged in REMOTE-POWOS.md 4.1),
 then rerun `bf-coldstart.sh steam` and read the BOOST line - expected ~17 s like 11-09 16:39; (2) check the prefetch ran
 (read_bytes should be ~0 MB, not 238 MB); (3) the frozen-Steam thaw at the tap (~0.5 s) and Wine boot pre-boot (above).
+
+### 11-11 22:15: the hook works; the cap is not the vendor's category table (agent/boost-cat)
+
+Re-read of the 21:30 bf-coldstart (`BOOST holder: engaged ... category: -`), read-only on the phone:
+- **Module active in com.oplus.battery.** Vector 2.2 (`/data/adb/lspd/cli modules ls` / `scope ls com.powos.oplushook`):
+  enabled, scope `com.android.systemui` + `com.oplus.battery` (no `com.android.launcher`: separate gap for the launcher
+  hooks). Vector's own log (`/data/adb/lspd/log/modules_<boot>.log`) has the battery process 30626 (started 11-10
+  02:35:22) loading the 11-09 APK: `gameClass: hooked G`, `the category is evaluated on every powos_game_front change`.
+- **The trigger fires.** game-boost.sh writes `Settings.Global powos_game_front` (VENDOR_GAME_KEY) and Hook.java observes
+  the same key; every engage since 11-10 has the pair `marker steam_app_<id>, category evaluated now` (main thread) +
+  `com.powos.app appType 4 (... boosted)` on thread 30922 = thermal_Controller_thread, i.e. q1() ran and asked the
+  hooked lookup. 21:32:51.067 on, 21:33:05.045 off. So the vendor DID evaluate with appType 4.
+- **"category: -" was logcat's wrap, not the vendor.** The main buffer is 256 KiB = ~1 min on this phone; the probe ran
+  minutes later. No ThermalControllHandler line from 21:32 survives anywhere.
+- **Root cause: the 1363/1651 MHz clamp is not ThermalControllHandler's table.** Every holder engage since the 11-10
+  01:16 boot logged `policy3 1651200 / policy7 1363200 by horaeCb` at skin 24.5-39.4 C (e.g. 17:06 at 27.8 C) - flat,
+  temperature-invariant. Right now (22:13, phone idle) the vendor logs `tempGear=[1], configItemName=common_config`
+  and the clamp is still policy3 1651200/2803200, policy7 1363200/3187200, policy0 uncapped. In
+  `/odm/etc/temperature_profile/sys_thermal_control_config_folding.xml` neither `common_config` (first cpu entry
+  gear 3) nor `category_4` (gear 5) caps anything at gears 1-2, so switching category cannot lift this clamp - the
+  hook is doing its job against the wrong lever. Before that boot (11-08 17:11 .. 11-09 23:27) the cap moved with
+  temperature/boost (1593-3187 MHz, the 11-09 16:39 run reached 2.23 GHz); the 1363 values then came at 41-43 C.
+  The values match thermal_cpulevel 5's big clusters (policy0's 1459200 not applied). Who holds it is still open:
+  Battery.apk's other horae users (`ThermalControlUtils` transacts: pkg name, folding mode 24, IPA 107, levels 108),
+  the PowerSave CpuLevelConfig (only with low_power=1: it is 0), OPlus perf HAL / ORMS / osense (`oplus_perf_service`,
+  `osensemanager`). A cap left from the 41-43 C stretch that the controller's release path (V1/U1 at gear < 3) never
+  cleared fits the "flat since the hot hour" pattern.
+- Second finding: the holder releases at the WINDOW (restore asked 21:33:04, ~13 s), the first frame came at 21.4 s;
+  the boost does not cover window -> frame (~9 s). GameBoost's end condition, separate fix.
+
+Fix landed (measurement): bf-coldstart's boost probe now reads the hook lines from Vector's module log since the
+check began (`hooklog`) and prints the clamp after the run (`clamp_after policyN=max/hw`); the BOOST line counts the
+hook's appType-4 answers. Test: test/tier1/test-bf-boost-probe.sh. No hook or holder code change: neither is wrong.
+Next (device, read-only first): find the clamp's writer - `dumpsys oplus_perf_service` / `osensemanager`, horae's
+binder clients, and whether a com.oplus.battery restart (the coordinator's call) clears the flat 1363 at gear 1; if it
+does, the cause is a stuck release after a hot gear and the hook can call the controller's release (V1) when the
+marker goes on at gear < 3.
