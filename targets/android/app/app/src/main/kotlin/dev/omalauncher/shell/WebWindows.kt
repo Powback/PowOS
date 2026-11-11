@@ -756,6 +756,9 @@ class WebWindows(
          */
         var underRoot = true
 
+        /** LH1: hung above home's buffer for a resize drag ([lift]): not under [root], at [LIFT_LAYER]. */
+        var lifted = false
+
         /** RS1: a resize drag's counts ([paced]), the last body size, and the fill under its app ([fillUnder]). */
         var resizing = false
         var steps = 0
@@ -854,6 +857,9 @@ class WebWindows(
          * 3 frames, ui/webwindows.tsx pace), the body only cropped and the last buffer anchored; else the body's own.
          */
         var resizing = false
+
+        /** LH1: the page lifted it over home for its resize drag (its hole is out of the page's masks): [lift]. */
+        var lifted = false
         var cw = 1
         var ch = 1
 
@@ -1676,7 +1682,8 @@ class WebWindows(
             maximised = c.word() == "1"
             titleEnd = c.x()
             controls = c.x()
-            resizing = c.word() == "1"
+            // LH1: 1 = resizing, 2 = resizing and lifted, 3 = lifted only (the drag's end until the page's hole is back).
+            resizeWord(c.word()).let { (r, l) -> resizing = r; lifted = l }
             val pw = c.word().toFloat()
             val ph = c.word().toFloat()
             appSize(pw * c.dpr, ph * c.dpr)
@@ -1780,7 +1787,8 @@ class WebWindows(
         }
         val at = order.associateWith { id -> names[id]?.takeIf { it.isNotEmpty() }?.let { n -> layers.indexOfFirst { it.contains(n) } } ?: -1 }
         val home = layers.indexOfFirst { it.contains("HomeShell") }
-        val divergence = orderDivergence(order, at) ?: overHome(at, home)
+        // LH1: a window lifted for its resize drag is over home's buffer on purpose (no page hole under it then).
+        val divergence = orderDivergence(order, at) ?: overHome(at.filterKeys { wins[it]?.lifted != true }, home)
         if (divergence == null) {
             if (!orderCheckOk) WindowLog.i(TAG, "layer order check: ok - page (bottom first) ${order.joinToString()} at output layers ${order.map { at[it] }}, home's buffer at $home (logged once)")
             orderCheckOk = true
@@ -1944,14 +1952,15 @@ class WebWindows(
     ) {
         val c = win.container
         if (!c.isValid) return
-        underRoot(t, win)
+        if (!lift(t, win, g)) underRoot(t, win)
         frameAt(t, win, g)
         cornerRadius(t, c, g.radius)
         // Every window's z is its page order, a Linux one's as an Android one's: one parent (the root), one z each.
-        t.setLayer(c, g.z)
+        t.setLayer(c, if (win.lifted) LIFT_LAYER else g.z)
         t.setAlpha(c, g.alpha)
-        // Hidden is the layer, never the display's surface (a null surface stops the app).
-        t.setVisibility(c, g.visible && !g.clip.isEmpty && win.mirror != null)
+        // Hidden is the layer, never the display's surface (a null surface stops the app). A lifted one is outside the
+        // root: hidden under the switcher itself.
+        t.setVisibility(c, g.visible && !g.clip.isEmpty && win.mirror != null && !(win.lifted && underSwitcher))
         fillUnder(t, win, g)
         val released = paced(win, g)
         // N3b: its popups' layers at its body in this same transaction (glued to it and its page), cut by the screen only.
@@ -2014,6 +2023,9 @@ class WebWindows(
         if (!on && win.fill == null) return
         val f = win.fill ?: newFill(win) ?: return
         if (win.fillColor != g.fill) paintFill(t, win, f, g.fill)
+        // LH1: the body only - a color layer is unbounded, and the container's crop starts a radius above the body (its
+        // round top corners hidden under the bar): lifted over home, a fill there would paint over the bar's bottom.
+        if (win.fillSolid) t.setCrop(f, Rect(0, 0, g.bw, g.bh))
         t.setLayer(f, -1)
         t.setVisibility(f, on)
         if (on && !win.fillPending) {
@@ -2096,7 +2108,37 @@ class WebWindows(
         if (!win.container.isValid) return
         t.reparent(win.container, r)
         win.underRoot = true
-        WindowLog.w(TAG, "window ${win.id}: its layer was outside the windows' root (left by full screen): back under it, at the page's z")
+        if (win.lifted) {
+            win.lifted = false
+            WindowLog.i(TAG, "window ${win.id}: resize drag over: back under home's buffer, at the page's z (LH1)")
+        } else {
+            WindowLog.w(TAG, "window ${win.id}: its layer was outside the windows' root (left by full screen): back under it, at the page's z")
+        }
+    }
+
+    /**
+     * LH1 (11-11, the phone's resize traces ww-resize-1111-00*: home's page frame was the cost - every move rewrote the
+     * CSS masks that cut the dragged window's hole, repainting `.page-under`'s mask and every lower window's frame):
+     * while the page says so ([Geo.lifted], ui/webwindows.tsx liftStart - only the top window of its page, for a resize
+     * drag), [win]'s container hangs ABOVE home's buffer (home's bounds layer, as [fullLayer]'s and the popups', at
+     * [LIFT_LAYER]: under both), so the page needs no hole for it and writes its masks once at the drag's start and once
+     * at its end. Same transaction as the page frame that dropped (or brought back) the hole; the page overlaps each
+     * switch by a few frames, lifted with the hole still cut, so a late apply never shows the page over the app.
+     * true: lifted (already, or now). [underRoot] brings it back once the page stops saying so.
+     */
+    private fun lift(
+        t: SurfaceControl.Transaction,
+        win: Win,
+        g: Geo,
+    ): Boolean {
+        if (!g.lifted || win.linuxFull) return false
+        if (win.lifted) return true
+        val move = web.rootSurfaceControl?.buildReparentTransaction(win.container) ?: return false
+        t.merge(move)
+        win.lifted = true
+        win.underRoot = false
+        WindowLog.i(TAG, "window ${win.id}: lifted over home's buffer for its resize drag (LH1)")
+        return true
     }
 
     /** A new body size ([bw]x[bh] px) to [win]'s source: KWin's window size, or its display's (the helper). */
@@ -3606,6 +3648,7 @@ class WebWindows(
         val move = web.rootSurfaceControl?.buildReparentTransaction(c) ?: return false
         t.merge(move)
         win.underRoot = false
+        win.lifted = false
         // FL5: the app's area starts below the status bar, never under it (the user, 10-30 22:19: Dolphin's toolbar
         // drawn through the clock and icons).
         val area = fullScreenArea(win.immersive)
@@ -4624,6 +4667,12 @@ class WebWindows(
 
         /** A full-screen Linux window's layer among the windows ([linuxFullScreen]): above every page-ordered one. */
         private const val FULL_LAYER = 1 shl 20
+
+        /** LH1: a resize drag's lifted window over home's buffer ([lift]): under a full-screen window and the popups. */
+        internal const val LIFT_LAYER = FULL_LAYER - 1
+
+        /** LH1: the page's <resizing> word as (resizing, lifted); an older page's "0"/"1" never lifts. */
+        internal fun resizeWord(w: String): Pair<Boolean, Boolean> = (w == "1" || w == "2") to (w == "2" || w == "3")
 
         /** A full-screen Linux window's edge strips stay home's at least this tall (dp): the status bar, the home gesture. */
         private const val EDGE_STRIP_DP = 24

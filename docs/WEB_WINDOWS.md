@@ -212,7 +212,10 @@ frame of drag latency; measure it before turning it on for drags (animations fir
   RS5c (11-08): a resize move renders nothing (`resizeLive`): the dragged WebWin takes its frame in place (no webWins
   write, so neither page's PageUnder/WebWindowsOn nor the window's tree re-render), and the move writes the frame's and
   shadow's boxes, the outline's size text and the masks (lower windows', the page content's) to the DOM; the drag's end
-  commits one render. Renders a move 16 -> 0 (a snap change still renders the window: its outline class); gate trace
+  commits one render. LH1 (11-11): the masks no longer follow - for the drag the top window's app layer is lifted
+  over home's buffer (`WebWindows.lift`, the "w.f" <resizing> word 2/3), its hole leaves the masks once at the start
+  and comes back exact once at the end; the bar is solid and the size label in the bar meanwhile (WINDOWS_FIX_PLAN 0.5).
+  Renders a move 16 -> 0 (a snap change still renders the window: its outline class); gate trace
   at 4x CPU: AsyncTask Run (Preact's render task) 50.8 -> 10.9 ms, restyled elements 20 -> 6 a move. Maximised frames
   and zone heights near the system strips take the old path (a render).
 - [ ] **N5 - games**: windowed games are Linux windows (N1-N4 apply); full screen stays the direct-scanout task. Check:

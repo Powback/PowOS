@@ -959,7 +959,7 @@ powos.on("webwindows.control", (m: { id: number; action: string }) => {
 function cutAll(box: HTMLElement | null, here: WebWin[]) {
   if (!box) return;
   here.forEach((w, i) => {
-    const above = here.slice(i + 1);
+    const above = here.slice(i + 1).filter(holed);
     const frame = box.querySelector<HTMLElement>(`.webwindow[data-wwid="${w.id}"]`);
     if (frame && !w.quick) setMask(frame, holes(above, { x: w.x, y: w.y, s: w.scale ?? 1 }));
     const shadow = box.querySelector<HTMLElement>(`.ww-shadow[data-wwid="${w.id}"]`);
@@ -2302,6 +2302,7 @@ const resizing = new Map<number, Resizing>();
 /** A resize grab on window [id] began: its app's size paced from now ([pace]) until [resizeEnd]. */
 function resizeStart(id: number) {
   resizing.set(id, { cw: -1, ch: -1, frame: 0, last: -Infinity, lastAt: -Infinity, steps: 0, reqs: 0 });
+  liftStart(id);
   glassDrags.add(id);
   glassDrag(true);
   kick();
@@ -2321,10 +2322,78 @@ function resizeEnd(id: number) {
   // RS5c: the live frame committed (a new WebWin: the window's one render with it).
   if (liveSized.delete(id)) update(id, {});
   reach(id);
+  liftEnd(id);
   lastResize = { id, steps: r.steps, reqs: r.reqs };
   resendGeometry();
 }
 let lastResize: { id: number; steps: number; reqs: number } | null = null;
+
+// ---- LH1: a resize drag's window lifted over home's surface: no hole in the page follows it -------------------------
+// The phone's resize traces (11-11, ww-resize-1111-00*): every move rewrote the CSS masks that cut the dragged window's
+// hole - `.page-under`'s mask layer and each lower window's frame (its own content, 360 paints at 16% of the page over
+// 2x60 moves) repainted and re-rastered per move, home's DrawFrame p90 12-15 ms against the 8.3 ms budget. A CSS mask
+// can't follow by transform. So for the drag the window's app layer goes ABOVE home's buffer (the host:
+// WebWindows.lift), where nothing of the page needs a hole, and its hole leaves the masks once; the drag's end writes
+// the exact masks once and the layer goes back under home. The page frame and the host's layer move together
+// (FrameSync), and each switch keeps a [LIFT_FRAMES] overlap where BOTH are true (lifted with its hole still cut: the
+// same pixels), so a geometry the host applies a frame late never shows the page over the app.
+// Only the top window of its page lifts (one under another would cover it); while lifted its bar is drawn solid (no
+// hole under its glass) and the live size label sits in the bar (shell.css LH1: DOM over the body is under the app).
+
+/**
+ * Page frames each lift switch overlaps (the hole kept after the lift, the lift kept after the hole is back).
+ * HACK: a frame count, not a confirmation - FrameSync applies a "w.f" on the draw of its page frame, but N2's
+ * predicted frames and a late page can put it a frame or two off. Real fix: the host acks the page frame its lift
+ * landed on ("webwindows.lifted <id> <frame>"), and the hole switches on that.
+ */
+const LIFT_FRAMES = 3;
+/** "up": lifted, hole still cut; "lifted": no hole; "down": hole back, still lifted ([LIFT_FRAMES] ticks). */
+type Lift = { phase: "up" | "lifted" | "down"; frames: number; page: number };
+const lifts = new Map<number, Lift>();
+/** [w]'s hole is cut from the page's masks (every window but a lifted one). */
+const holed = (w: WebWin) => lifts.get(w.id)?.phase !== "lifted";
+
+/** Window [id]'s resize drag began: lifted when it is the top window on its page, floating (not maximised, quick). */
+function liftStart(id: number) {
+  const w = webWins.peek().find((v) => v.id === id);
+  if (!w || w.restore || w.quick || w.full || lifts.has(id)) return;
+  const here = windowsHere(w.page);
+  if (here[here.length - 1]?.id !== id) return;
+  lifts.set(id, { phase: "up", frames: LIFT_FRAMES, page: w.page });
+}
+
+/** The drag ended: the exact hole now (this frame), the lift dropped [LIFT_FRAMES] page frames later ([liftTick]). */
+function liftEnd(id: number) {
+  const l = lifts.get(id);
+  if (!l || l.phase === "down") return;
+  if (l.phase === "up") return void lifts.delete(id);
+  l.phase = "down";
+  l.frames = LIFT_FRAMES;
+  recut(id, l.page);
+}
+
+/** Once per page frame, before the geometry goes out: each lift's next phase when its overlap ran out. */
+function liftTick() {
+  for (const [id, l] of lifts) {
+    if (l.phase !== "down" && !resizing.has(id)) {
+      liftEnd(id);
+      continue;
+    }
+    if (--l.frames > 0) continue;
+    if (l.phase === "up") (l.phase = "lifted"), recut(id, l.page);
+    else if (l.phase === "down") lifts.delete(id), resendGeometry();
+  }
+}
+
+/** Page [page]'s masks written again for window [id]'s lift (its hole out or back), its frame marked lifted or not. */
+function recut(id: number, page: number) {
+  const frame = document.querySelector<HTMLElement>(`.webwindow[data-wwid="${id}"]`);
+  if (frame) frame.toggleAttribute("data-lifted", lifts.get(id)?.phase === "lifted");
+  const box = frame?.closest<HTMLElement>(".page-windows") ?? null;
+  cutAll(box, windowsHere(page));
+  const under = box?.closest(".page")?.querySelector<HTMLElement>(":scope > .page-under");
+  if (under) writeMask(under, underWindows(page));
+}
 
 /** Once per page frame, before measuring: window [id]'s app size moves to its body's when its pace allows. */
 function pace(id: number, r: Resizing, now: number) {
@@ -2345,9 +2414,11 @@ function pace(id: number, r: Resizing, now: number) {
  */
 function sizeOf(w: WebWin, body: HTMLElement): string {
   const r = resizing.get(w.id);
-  if (r && r.cw > 0) return `1 ${r.cw} ${r.ch}`;
+  // LH1: 2 = resizing and lifted over home's surface, 3 = lifted only (the drag's end, until its exact hole is drawn).
+  const up = lifts.has(w.id);
+  if (r && r.cw > 0) return `${up ? 2 : 1} ${r.cw} ${r.ch}`;
   const [lw, lh] = layoutSize(body);
-  return `0 ${px(lw)} ${px(lh)}`;
+  return `${up ? 3 : 0} ${px(lw)} ${px(lh)}`;
 }
 
 /**
@@ -2495,6 +2566,7 @@ function tick(ts: number) {
   if (moving()) {
     dirty = false;
     for (const [id, r] of resizing) pace(id, r, ts);
+    liftTick();
     send(ts);
   } else glueEnd();
   tickMs.push(performance.now() - t0);
@@ -2579,7 +2651,7 @@ let ticks = 0;
 const winEls = document.getElementsByClassName("webwindow");
 
 function moving(): boolean {
-  if (dirty || resizing.size) return true;
+  if (dirty || resizing.size || lifts.size) return true;
   if (!running.size) return false;
   for (const t of running) if (!(t as Node).isConnected) running.delete(t);
   return running.size > 0;
@@ -3868,7 +3940,7 @@ export function holes(cut: WebWin[], at: { x: number; y: number; s: number }): R
 /** The page's own content (widgets, apps, its glass) masked where its windows are: grid.tsx's .page-under. */
 export function underWindows(page: number): Record<string, string> | undefined {
   return holes(
-    webWins.value.filter((w) => w.page === page && !w.minimised && !w.full && !hiddenTab(w.id)),
+    webWins.value.filter((w) => w.page === page && !w.minimised && !w.full && !hiddenTab(w.id) && holed(w)),
     { x: 0, y: 0, s: 1 },
   );
 }

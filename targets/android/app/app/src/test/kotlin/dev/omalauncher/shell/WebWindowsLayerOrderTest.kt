@@ -67,7 +67,7 @@ class WebWindowsLayerOrderTest {
         val src = File("src/main/kotlin/dev/omalauncher/shell/WebWindows.kt").readText()
         assertTrue(src.contains("orderCheckSoon(geos)"))
         val place = src.substringAfter("private fun place(").substringBefore("private fun ")
-        assertTrue("place() re-parents a stray container before its z", place.indexOf("underRoot(t, win)") in 0 until place.indexOf("t.setLayer(c, g.z)"))
+        assertTrue("place() re-parents a stray container before its z", place.indexOf("underRoot(t, win)") in 0 until place.indexOf("t.setLayer(c, if (win.lifted) LIFT_LAYER else g.z)"))
     }
     /**
      * Fix plan 1.1 (C4): the SurfaceFlinger dump (through root, on the io thread that also injects touches) ran 300 ms

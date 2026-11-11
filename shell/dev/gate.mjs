@@ -7872,8 +7872,22 @@ const rs6Mask = (l, layers) => !!l?.backendNodeId && [...layers.values()].some((
 function rs6Fails(by, vw, passes) {
   const pct = (a) => Math.round((a / vw) * 100);
   const bad = [...by].filter(([k, v]) => !v.mask && v.n > 2 * passes && (RS6_FULL.test(k) || v.max > vw / 2));
-  return bad.length ? [`RS6: a resize move repainted page-wide content: ${bad.map(([k, v]) => `${k} ${v.n}x (max ${pct(v.max)}% of the page)`).join(", ")} - a move may repaint only the window's own layers and masks`] : [];
+  const say = (l) => l.map(([k, v]) => `${k} ${v.n}x (max ${pct(v.max)}% of the page)`).join(", ");
+  const hole = [...by].filter(([k, v]) => !bad.some(([b]) => b === k) && LH1_HOLE(k) && v.n > LH1_EDGE * passes);
+  return [
+    ...(bad.length ? [`RS6: a resize move repainted page-wide content: ${say(bad)} - a move may repaint only the window's own layers and masks`] : []),
+    ...(hole.length ? [`LH1: a resize move repainted page layers for the dragged window's hole: ${say(hole)} - lifted over home for the drag, its hole leaves the masks once (webwindows.tsx liftStart) and nothing under it repaints per move`] : []),
+  ];
 }
+/**
+ * LH1 (11-11: the phone's traces after RS6 - each lower window's frame repainted its own content every move, 360x at
+ * 16% of the page, and `.page-under`'s mask layer every move): the layers a hole that follows the dragged window
+ * repaints - `.page-under`'s mask, a lower window's frame (content or mask), a lower window's shadow (named after the
+ * drag: the dragged window is the top one, `.focused`, its frame and shadow allowed; its bar is its own layer). Each may paint at the drag's start and end only:
+ * [LH1_EDGE] a pass (the lift's switch frames, webwindows.tsx LIFT_FRAMES), never once a move (60 a pass).
+ */
+const LH1_HOLE = (k) => /\bpage-under\b/.test(k) || (/^div\.webwindow(\.|$| )/.test(k) && !/\.focused\b/.test(k)) || (/^div\.ww-shadow(\.|$| )/.test(k) && !/\.focused\b/.test(k));
+const LH1_EDGE = 4;
 async function rs6Capture(r) {
   const cdp = await r.page.target().createCDPSession();
   const layers = new Map();

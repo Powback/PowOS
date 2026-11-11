@@ -176,6 +176,18 @@ The board shows window checks failing by timeout or waiting days for a free phon
     exemption HACK is gone: RS6 tells mask layers (an element's second layer) from content, and fails when page-wide
     content repaints after a drag's first moves. Control: without the composited frames, `.page-windows` 120x -> FAIL.
     Still repainting: the lower frames' own content, 360x at 16% (the frame's mask change invalidates it).
+  - 11-11 LH1 (host + shell): during a resize drag the top window's app layer is lifted ABOVE home's buffer (home's
+    bounds layer at `LIFT_LAYER` = FULL_LAYER - 1, under popups and full screen; `WebWindows.lift`), so no page hole has
+    to follow it: its hole leaves `.page-under`'s and the lower windows' masks once at the drag's start and the exact
+    masks are written once at its end (`webwindows.tsx liftStart/liftEnd/liftTick`). The page says it in the "w.f"
+    <resizing> word (2 = resizing + lifted, 3 = lifted only); each switch overlaps by LIFT_FRAMES page frames (lifted
+    with the hole still cut: same pixels), so a late apply never shows the page over the app (HACK: frame count, real
+    fix a host ack). While lifted the bar is drawn solid (no hole under its unblurred glass) and the size label sits in
+    the bar (DOM over the body is under the app). The resize fill is cropped to the body (lifted, it painted over the
+    bar's bottom radius band). Option (b), a hole layer moved by transform, is not possible with a CSS mask (RS6b).
+    Gate ww-resize-cost LH1 (lower frames, their shadows' masks, `.page-under`'s mask: at most 4 paints a pass):
+    before (HEAD) `.page-under` (mask) 121x, lower frames 180x + their masks 180x, lower shadows' masks 180x -> FAIL;
+    after 3x / 6x / 4x / 4x -> PASS. Owed: the phone's timed check (`ww-resize.sh`, kate corner).
 - [x] 0.6 Each failing check on the board gets one line: real bug, check bug, or environment.
   Done 11-10: seven board tasks got a "0.6" step line; the table is in `docs/research/window-bench.md` "11-10
   baseline". None of the failures was a judged real bug: they were check bugs or the environment, most of them home's

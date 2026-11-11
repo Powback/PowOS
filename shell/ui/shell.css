@@ -3786,6 +3786,13 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-outline.snapped { box-shadow: 0 0 0 var(--frame) var(--color-accent); opacity: 1; }
 .ww-outline.leaving { opacity: 0; }
 .ww-outline-size { padding: 6px 12px; border-radius: 999px; font: var(--text-small) var(--font-body); color: var(--color-foreground); }
+/* LH1 (webwindows.tsx liftStart): while a resize drag lifts the app's layer over home's surface, nothing of the page shows
+   over its body and no hole is under its bar. The bar is drawn solid in the theme's surface (no wallpaper or widget
+   pixels through an unblurred glass; the glass blur is off for the drag anyway, RJ2) and the size label sits in the bar,
+   not over the body (under the app there). */
+.webwindow[data-lifted] > .webwindow-title.tile { background: var(--color-surface); backdrop-filter: none; }
+.webwindow[data-lifted] > .ww-outline { place-items: start center; }
+.webwindow[data-lifted] > .ww-outline > .ww-outline-size { margin-top: calc(var(--frame) + 4px); padding-block: 4px; }
 /* GL1/WG1: every drop's ghost (webwindows.tsx DropPreview, dockout.tsx DockOutGhost) - the exact rect the window takes:
    a tile, an edge snap, the free region between the widgets or where it floats. One look: a ghost of glass (a faint
    fill, the accent ring - no blur of its own, §2), never a solid slab; a short spring as the target changes. Its fill is
