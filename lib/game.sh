@@ -293,6 +293,9 @@ Verbs (thin wrappers — each dispatches to the subsystem that owns it):
                           (written while Steam is off: at its next start)   → powos-steam-compat
   scale [auto|100|85|70|50]   Its render scale in % (Unity/Unreal: fewer pixels drawn, stretched to the screen);
                           auto = from its measured fps; from its next launch   → powos-steam-compat scale
+  window borderless|default   A Unity game that forces exclusive full screen (Besiege) runs windowed at the screen's
+                          size instead (its own settings set at each launch, at scale 100); default puts its own back
+                          → ~/.local/share/powos/unity-screen --window
 
 A Steam game out of sight for 15 s is frozen with Steam on its own and launching it again resumes it at once
 (units/phone/steam.json "games": "pause", docs/UNIFIED-SLEEP.md); freeze/thaw do it by hand.
@@ -334,7 +337,7 @@ cmd_game() {
 
     # A running Steam game's verbs (any installed Steam game, by name or appid - the mod registry not needed).
     case "${1:-}" in
-        freeze|thaw|compat|scale|stop|close) _game_steam_verb "$name" "$@"; return $? ;;
+        freeze|thaw|compat|scale|window|stop|close) _game_steam_verb "$name" "$@"; return $? ;;
     esac
 
     _game_need_mods
@@ -428,6 +431,10 @@ _game_steam_verb() {
         scale)
             command -v powos-steam-compat >/dev/null || { perr "powos-steam-compat isn't installed (package steam)"; return 1; }
             powos-steam-compat scale "$app" ${3:+"$3"} ;;
+        window)
+            local us="${XDG_DATA_HOME:-$HOME/.local/share}/powos/unity-screen"
+            [[ -x "$us" ]] || { perr "unity-screen isn't installed ($us; a rooted deploy copies it)"; return 1; }
+            "$us" --window "$app" "${3:-}" ;;
         *) _game_steam_close "$app" "$([[ "${3:-}" == --steam ]] && echo 1 || echo 0)" ;;
     esac
 }

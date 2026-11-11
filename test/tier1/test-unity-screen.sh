@@ -19,7 +19,7 @@ printf '#!/bin/sh\nfor a in "$@"; do echo "$a"; done\n' > "$T/game"; chmod +x "$
 # A python3 that answers the size query the way the libX11 snippet does (the container 2268x2440); the render-scale
 # snippet (STEPS in its code) runs on the real python3.
 RP=$(command -v python3)
-printf '#!/bin/sh\ncase "$2" in *STEPS*) exec %s "$@" ;; esac\necho "${FAKE_SIZE-2268 2440}"\n' "$RP" > "$T/bin/python3"; chmod +x "$T/bin/python3"
+printf '#!/bin/sh\ncase "$2" in *STEPS*|*WM_FILES*|*apps*) exec %s "$@" ;; esac\necho "${FAKE_SIZE-2268 2440}"\n' "$RP" > "$T/bin/python3"; chmod +x "$T/bin/python3"
 export XDG_DATA_HOME="$T/data" HOME="$T/home"; mkdir -p "$T/data/powos" "$T/home"
 
 args() { tr '\n' ' ' < "$T/out" | sed 's/ $//'; }
@@ -134,6 +134,41 @@ st '{"apps": {"8": {"scale": 70}}}'
 PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=8 STEAM_COMPAT_DATA_PATH="$T/compat/8" sh "$US" "$T/ue2/Proj/Binaries/Win64/Proj-Win64-Shipping.exe" > "$T/out" 2> "$T/err"
 [ "$(args)" = "-windowed -ResX=2268 -ResY=2440" ] && grep -q "70% not applied: no GameUserSettings.ini yet" "$T/err" && [ "$(rec 8 applied)" = False ] \
   && ok "no ini yet: says so, starts at full size" || bad "ue no ini" "$(args) / $(cat "$T/err")"
+
+# Window mode override (powos game <x> window borderless|default): the game's own settings say windowed at the
+# container's size for a scale-100 launch, the values before are put back by default / a launch with it off; a launch
+# at scale < 100 changes nothing.
+CDB="$T/compat/346010"; REGF="$CDB/pfx/user.reg"; mkdir -p "$CDB/pfx" "$T/bes/Besiege_Data"
+printf 'WINE REGISTRY Version 2\r\n\r\n[Software\\\\Spiderling Games\\\\Besiege] 1794305750\r\n#time=1dd\r\n"Screenmanager Is Fullscreen mode_h3981298716"=dword:00000001\r\n"Screenmanager Resolution Height_h2627697771"=dword:00000640\r\n"Screenmanager Resolution Width_h182942802"=dword:000008dc\r\n"UnityGraphicsQuality_h1669003810"=dword:00000003\r\n' > "$REGF"
+printf '<?xml version="1.0" encoding="Windows-1252"?>\r\n<BesiegeConfig>\r\n  <WindowedMode>false</WindowedMode>\r\n  <ScreenWidth>2560</ScreenWidth>\r\n  <ScreenHeight>1600</ScreenHeight>\r\n  <MasterVolume>75</MasterVolume>\r\n</BesiegeConfig>' > "$T/bes/Besiege_Data/Config.xml"
+cp "$T/game" "$T/bes/Besiege.exe"; cp "$REGF" "$T/reg0"; cp "$T/bes/Besiege_Data/Config.xml" "$T/xml0"
+bes() { PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=346010 STEAM_COMPAT_DATA_PATH="$CDB" sh "$US" "$T/bes/Besiege.exe" > "$T/out" 2> "$T/err"; }
+st '{"apps": {"346010": {"scale": 50}}}'
+PATH="$T/bin:$PATH" XDG_DATA_HOME="$T/data" HOME="$T/home" sh "$US" --window 346010 borderless > /dev/null
+bes
+cmp -s "$REGF" "$T/reg0" && cmp -s "$T/bes/Besiege_Data/Config.xml" "$T/xml0" && [ ! -e "$T/data/powos/window-mode/346010.json" ] \
+  && ok "window borderless at scale 50: user.reg and Config.xml untouched, no record" || bad "wm scale<100" "$(cat "$T/err")"
+python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); s["apps"]["346010"]["scale"]=100; json.dump(s,open(sys.argv[1],"w"))' "$T/data/powos/steam-compat.json"
+bes
+grep -q '"Screenmanager Is Fullscreen mode_h3981298716"=dword:00000000' "$REGF" && grep -q 'Width_h182942802"=dword:000008dc' "$REGF" \
+  && grep -q 'Height_h2627697771"=dword:00000988' "$REGF" && grep -q 'UnityGraphicsQuality_h1669003810"=dword:00000003' "$REGF" \
+  && ok "borderless at 100: Unity's Screenmanager keys windowed 2268x2440 (others kept)" || bad "wm reg" "$(cat "$REGF")"
+grep -q '<WindowedMode>true</WindowedMode>' "$T/bes/Besiege_Data/Config.xml" && grep -q '<ScreenWidth>2268</ScreenWidth>' "$T/bes/Besiege_Data/Config.xml" \
+  && grep -q '<ScreenHeight>2440</ScreenHeight>' "$T/bes/Besiege_Data/Config.xml" && grep -q '<MasterVolume>75' "$T/bes/Besiege_Data/Config.xml" \
+  && ok "borderless: Besiege's Config.xml WindowedMode=true at the container's size" || bad "wm xml" "$(cat "$T/bes/Besiege_Data/Config.xml")"
+[ "$(args)" = "-screen-fullscreen 0 -popupwindow -screen-width 2268 -screen-height 2440" ] && ok "borderless: the borderless-window arguments too" || bad "wm args" "$(args)"
+# The game changes another setting meanwhile (kept), and a second launch at another size keeps the FIRST originals.
+sed -i.b 's/<MasterVolume>75/<MasterVolume>40/' "$T/bes/Besiege_Data/Config.xml"
+FAKE_SIZE="1116 2484" bes
+PATH="$T/bin:$PATH" XDG_DATA_HOME="$T/data" HOME="$T/home" sh "$US" --window 346010 default > "$T/out2" 2>&1
+cmp -s "$REGF" "$T/reg0" && ok "default: user.reg byte for byte as before" || bad "wm reg restore" "$(diff "$T/reg0" "$REGF")"
+sed 's/<MasterVolume>75/<MasterVolume>40/' "$T/xml0" | cmp -s - "$T/bes/Besiege_Data/Config.xml" && [ ! -e "$T/data/powos/window-mode/346010.json" ] \
+  && ok "default: Config.xml's own values back, the game's later change kept, record gone" || bad "wm xml restore" "$(cat "$T/bes/Besiege_Data/Config.xml") / $(cat "$T/out2")"
+# POWOS_WINDOW_MODE (a check): this launch only - the setting stays default; the next launch puts the values back.
+POWOS_WINDOW_MODE=borderless bes
+grep -q '<WindowedMode>true' "$T/bes/Besiege_Data/Config.xml" && ok "POWOS_WINDOW_MODE=borderless: this launch" || bad "wm env" "$(cat "$T/err")"
+bes
+grep -q '<WindowedMode>false' "$T/bes/Besiege_Data/Config.xml" && cmp -s "$REGF" "$T/reg0" && ok "the next launch without it: values put back" || bad "wm env restore" "$(cat "$T/err")"
 
 # End to end with a real X server: the root's _POWOS_SCREEN_SIZE (kwin 0051) wins over the root size.
 if command -v Xvfb >/dev/null && command -v xprop >/dev/null && command -v python3 >/dev/null; then

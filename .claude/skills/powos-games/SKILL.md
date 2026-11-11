@@ -350,6 +350,18 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
       real task size: Wine reads that size in the app's fake-mode coordinates and scales it again. Next: one launch
       with WINE_DISABLE_FULLSCREEN_HACK=1 for 346010 (`powos game 346010` env / launch option) to see whether Xwayland's
       own RandR emulation keeps the window = task; only then decide the generic default for exclusive-fullscreen games.
+      Result (02:55): the hack off didn't help (870x5529 / 2484x2309 still, Unity still recreated its window) - rejected.
+- Window override (11-11, owner-approved option a): `powos game <appid> window borderless|default` (unity-screen
+  --window; steam-compat.json apps.<id>.window). For a Unity game that forces exclusive full screen itself (Besiege's
+  Config.xml beats -screen-fullscreen 0): at each launch at render scale 100, before the game starts, unity-screen sets
+  Unity's Screenmanager keys in the prefix's user.reg (windowed, the container's size; only keys already there) and the
+  game's own file from WM_FILES (Besiege only: Config.xml WindowedMode/ScreenWidth/ScreenHeight). Values before go to
+  ~/.local/share/powos/window-mode/<appid>.json; `default` puts them back (now, or at the next launch if it's running),
+  as does any launch with it off or at scale < 100 (left untouched otherwise). Key-level restore, never whole files;
+  not at exit (the game/wineserver write those files as they quit). Never launch options. Besiege's windowed window is
+  fixed-size: right size at launch, scaled+centred by KWin after a rotate/fold until the next launch. Check it for one
+  launch: `env WINDOW_MODE=borderless game-resize.sh 346010` (sets it, `default` after the close). Tier-1:
+  test-unity-screen.sh (round trip, scale 50 untouched). Deploy: rooted (unity-screen copy + lib/game.sh).
 - Besiege (346010, Unity 5.4.0f3, 32-bit, x86 Proton) 11-07: with or without unity-screen's args its only viewable X
   window is a FIXED-SIZE 1135x1365 (WM_NORMAL_HINTS min == max, motif no-resize) "Besiege", class steam_app_346010,
   shown as a floating web window (unfolded) / floating on the cover, black, never drawing (xframes 1 sample) while

@@ -26,7 +26,7 @@
 # Rotation and device state are always put back. Not covered: a floating task's drag-resize (no scripted drag yet).
 #   G1 root: Xwayland's root (Wine's / Unity's monitor) IS the screen too (kwin 0061, 6.7.5-3.69: the output follows the
 #      app's "screen"): it stayed 2268x2440 in every state (11-07), a rotated game got 2268x2268 and Besiege left full screen.
-# GAME_ENV=K=V[,K=V]: that environment for this one launch (below). Exit 3 = no window / user input. KWIN_MIN default 6.7.5-3.78 (0070: the window takes the task size, not stale buffers; queue kwin-install.sh 6.7.5-3.78 before it).
+# GAME_ENV=K=V[,K=V]: that environment for this one launch; WINDOW_MODE=borderless: that window override for it (below). Exit 3 = no window / user input. KWIN_MIN default 6.7.5-3.78 (0070: the window takes the task size, not stale buffers; queue kwin-install.sh 6.7.5-3.78 before it).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); P=$here/..; A=$P/adb.sh
 APP=${1:-${APP:-}} WIN_NAME=${2:-${WIN_NAME:-}} MIN=${KWIN_MIN:-6.7.5-3.78} NAME=${CHECK_NAME:-game-resize}
@@ -50,7 +50,13 @@ WL_TRAP='restore'
 # launch options or the prefix. A file already there (another check's) is never overwritten: exit 2.
 PS=/data/powos/root/home/powos/.config/powos/proton-settings.json ps_mine=
 env_off() { [ -n "$ps_mine" ] && "$A" shell "su -c 'rm -f $PS'" >/dev/null 2>&1; ps_mine=; }
-trap 'env_off; restore; [ "${WL_LOCK:-}" ] && rm -rf "$WL_LOCK"' EXIT
+# WINDOW_MODE=borderless: `powos game <appid> window borderless` (unity-screen --window) for this check's launch only -
+# set before the launch, `default` again after the check closed the game (puts the game's own values back at once).
+# Not when the user had it on already (left so), nor for a game already running (the user's: not launched here).
+US_BIN=/home/powos/.local/share/powos/unity-screen wm_mine=
+usw() { "$A" shell "su -c 'sh /data/powos/powos-run.sh \"$US_BIN --window $APP $1\"'" 2>&1 | tr -d '\r' | tail -1; }
+wm_off() { [ -n "$wm_mine" ] && log "window mode: $(usw default)"; wm_mine=; }
+trap 'wm_off; env_off; restore; [ "${WL_LOCK:-}" ] && rm -rf "$WL_LOCK"' EXIT
 log() { echo "$(date +%T) $*" | tee -a "$OUT/run.txt"; }
 BF_ADB=$A . "$here/bf-lib.sh"
 for f in bf-fold-phone.sh bf-stop.sh bf-lib.sh bf-xframes.py bf-onscreen.sh; do "$A" push "$here/$f" "/data/local/tmp/powos-$f" >/dev/null || { echo "ENV: can't push $f to the phone (a stale /data/local/tmp copy would run instead)"; exit 5; }; done
@@ -73,6 +79,15 @@ if [ -n "${GAME_ENV:-}" ]; then
   "$A" shell "su -c 'd=\$(dirname $PS); mkdir -p \$d; cp /data/local/tmp/powos-settings.json $PS; chown \$(stat -c %u:%g \$d) $PS; chmod 644 $PS; rm /data/local/tmp/powos-settings.json'"
   log "GAME_ENV for this launch: $(cat "$OUT/settings.json")"
 fi
+case ${WINDOW_MODE:-} in
+  '') ;;
+  borderless)
+    if [ "$(usw '')" = borderless ]; then log "window mode: already borderless (the user's setting, left on)"
+    elif [ "$(ph state | grep -o 'reaper=[^ ]*')" != reaper=- ]; then
+      log "window mode: the game is already running - WINDOW_MODE not applied"
+    else wm_mine=1; log "window mode for this launch: $(usw borderless)"; fi ;;
+  *) log "FAIL: WINDOW_MODE is borderless or unset, not '$WINDOW_MODE'"; exit 2 ;;
+esac
 r=$(ph start); echo "$r" >> "$OUT/run.txt"; mine=$([[ $r == *mine=1* ]] && echo 1 || echo 0)
 if [ -n "${GAME_ENV:-}" ]; then env_off
   [ "$mine" = 1 ] || log "  GAME_ENV not applied: the game was already running (the user's), not launched by this check"; fi
