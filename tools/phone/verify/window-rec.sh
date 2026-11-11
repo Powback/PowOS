@@ -76,8 +76,10 @@ recstop() {
   fi
 }
 touched() { sh_ "dumpsys input" | sed -n '/TouchStatesByDisplay/,/CursorStatesByDisplay/p' | grep -oE "name='[^']*'|pilferingPointerIds=[^,]*" | tr '\n' ' ' | cut -c1-600; }
-# A tap inside the window's content (a third down, a quarter in): which windows the finger went to.
-intap() { local b w=$2; b=$(tbounds "$1"); [ -n "$b" ] || return; set -- $b; local x=$(($1 + ($3 - $1) / 4)) y=$(($2 + ($4 - $2) / 3))
+# A tap inside the window's content (a sixth down, a quarter in: the formula/display area of Calculator, never a key -
+# a third down reached the keypad's top row on a short window; checks' keystrokes filled the user's formula, 11-11):
+# which windows the finger went to.
+intap() { local b w=$2; b=$(tbounds "$1"); [ -n "$b" ] || return; set -- $b; local x=$(($1 + ($3 - $1) / 4)) y=$(($2 + ($4 - $2) / 6))
   mdown $x $y "inside the window" || return; local t; t=$(touched); mup $x $y
   case $t in *PowosWindowActivity*|*calculator*|*Calculator*) pass "[$w] a tap inside goes to the app: $t" ;; *) fail "[$w] a tap inside did NOT reach the app's window: $t" ;; esac; sleep 0.6; }
 # perfetto around the swipes: scheduling, the framework's atrace (com.powos.app's too), SurfaceFlinger's frame timeline.
