@@ -13,7 +13,7 @@
 # Exit 0 PASS, 1 FAIL, 3 not now.
 set -uo pipefail
 NAME=inner-rotation-back; . "$(dirname "$0")/wwc-lib.sh"
-rot() { sh_ "dumpsys window displays" | awk '/Display: mDisplayId=/{on=($0 ~ /mDisplayId=0 /)} on && /^ *mRotation=[0-9]/{sub(/.*mRotation=/,""); print $1+0; exit}'; }
+rot() { sh_ "dumpsys window displays" | awk '/Display: mDisplayId=/{on=($0 ~ /mDisplayId=0 /)} on && !f && /^ *mRotation=[0-9]/{sub(/.*mRotation=/,""); r=$1+0; f=1} END{if (f) print r}'; }   # read to the end (no early exit: sigpipe under pipefail)
 CAMTASK="" STARTED=0
 wwc_extra() { if [ -n "$CAMTASK" ]; then sh_ "am stack remove $CAMTASK" >/dev/null; say "closed the camera's task $CAMTASK"
   elif [ "$STARTED" = 1 ]; then sh_ "am force-stop com.oplus.camera"; say "stopped the camera this check started"; fi
