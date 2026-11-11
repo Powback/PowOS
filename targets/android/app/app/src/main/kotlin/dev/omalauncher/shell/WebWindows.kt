@@ -87,8 +87,24 @@ import java.io.OutputStreamWriter
 class WebWindows(
     private val context: Context,
     private val web: WebView,
-    private val emit: (String, Any?) -> Unit,
+    sink: (String, Any?) -> Unit,
 ) {
+    /**
+     * Phase 2 (docs/WEB_WINDOWS.md "The host snapshot"): the snapshot's generation ([snapshot]), bumped on every state
+     * change - a per-fact event ([bumps]), a window opened or dropped, a Linux offer made or taken.
+     */
+    private val generation = java.util.concurrent.atomic.AtomicLong(0)
+
+    private fun changed() {
+        generation.incrementAndGet()
+    }
+
+    /** Every event to the page; a state event moves the snapshot's generation on first. */
+    private val emit: (String, Any?) -> Unit = { event, data ->
+        if (bumps(event)) changed()
+        sink(event, data)
+    }
+
     private val main = Handler(Looper.getMainLooper())
     private val dm = context.getSystemService(DisplayManager::class.java)
     private val wins = LinkedHashMap<Int, Win>()
@@ -164,6 +180,13 @@ class WebWindows(
         return out
     }
 
+    /**
+     * Phase 2: the host snapshot ("webwindows.list" true; docs/WEB_WINDOWS.md "The host snapshot"): [list]'s windows,
+     * the KWin windows offered and not opened yet ([pendingLinux]) and the generation they were read at. Main thread.
+     */
+    fun snapshot(appOf: (ComponentName) -> Pair<String, String>?): JSONObject =
+        snapshotJson(generation.get(), list(appOf), pendingLinux) { kwin, game -> pageOwnFrame(andro.marchy.WebWindowSource.ownFrame(kwin), game) }
+
     /** [listed]'s key and label of Android window [w]: a quick page's ("q:<token>"), else its app's. */
     private fun keyLabel(
         w: Win,
@@ -186,6 +209,7 @@ class WebWindows(
         val o = JSONObject().put("id", w.id).put("key", key).put("label", label).put("display", w.displayId).put("task", w.taskId).put("state", listedState(w)).put("live", w.live)
         if (w.zoom != 1.0) o.put("zoom", w.zoom)
         if (src != null) o.put("kwin", src.kwin).put("ownFrame", pageOwnFrame(andro.marchy.WebWindowSource.ownFrame(src.kwin), src.offer.game))
+        src?.failed?.let { o.put("failed", it) }
         w.geo?.let { g -> o.put("frame", css(g.frame)).put("body", css(g.body)).put("maximised", g.maximised) }
         return o
     }
@@ -807,6 +831,9 @@ class WebWindows(
 
         /** Rebinds so far ([consumerCheck]): a second one, or a start failing after one, says the window failed. */
         var rebinds = 0
+
+        /** [linuxFailed]'s reason ("webwindows.failed"), null while it works: the snapshot's "failed". */
+        @Volatile var failed: String? = null
     }
 
     /** A KWin window for a web window: its app id and caption (KWin's), its name and icon (PowOS's, for the bar). */
@@ -1046,6 +1073,7 @@ class WebWindows(
         win.apart = how is LaunchReuse.Decision.Apart
         win.another = how is LaunchReuse.Decision.Another
         wins[id] = win
+        changed()
         helper.create(win) { displayId, error ->
             if (displayId < 0) {
                 WindowLog.w(TAG, "window $id (${component.packageName}): no display: $error")
@@ -1229,6 +1257,7 @@ class WebWindows(
         }
         offer.key = key
         pendingLinux[kwin] = offer
+        changed()
         WindowLog.i(TAG, "KWin window $kwin (${offer.appId}, \"${offer.title}\"): offered to the page as $key")
         // "ownFrame": it draws its own complete frame (Brave, Steam, GTK CSD; kwin 0046) - the page shows no bar over it.
         // Never a game's ([pageOwnFrame]): its borderless window has no bar of its own.
@@ -1236,6 +1265,7 @@ class WebWindows(
         emit("webwindows.adopt", JSONObject().put("kwin", kwin).put("key", key).put("label", offer.label).put("ownFrame", own).put("alts", org.json.JSONArray(offer.alts)))
         main.postDelayed({
             pendingLinux.remove(kwin)?.let { p ->
+                changed()
                 WindowLog.w(TAG, "fallback: KWin window $kwin (${p.appId}): the page made no web window in $LINUX_ADOPT_MS ms, a task instead")
                 andro.marchy.WebWindowSource.fallback(context, kwin, p.appId, p.title)
             }
@@ -1277,6 +1307,7 @@ class WebWindows(
         rect: JSONObject,
     ): Int {
         val p = pendingLinux.remove(kwin) ?: return -1.also { WindowLog.w(TAG, "open KWin window $kwin: not offered (or taken already)") }
+        changed()
         val parent = root() ?: return -1.also { andro.marchy.WebWindowSource.fallback(context, kwin, p.appId, p.title) }
         val id = nextId++
         val d = density()
@@ -1303,6 +1334,7 @@ class WebWindows(
         win.mirror = content
         SurfaceControl.Transaction().setLayer(content, 0).setVisibility(content, true).setCrop(content, Rect(0, 0, 0, 0)).apply()
         wins[id] = win
+        changed()
         src.bw = bw
         src.bh = bh
         src.rate = web.display?.refreshRate ?: 0f
@@ -1410,6 +1442,7 @@ class WebWindows(
     ) {
         if (win.closed) return
         WindowLog.e(TAG, "window ${win.id}: KWin window ${win.linux?.kwin}'s consumer $why: shown as not responding")
+        win.linux?.failed = LINUX_NOT_RESPONDING
         emit("webwindows.failed", JSONObject().put("id", win.id).put("reason", LINUX_NOT_RESPONDING))
     }
 
@@ -1449,7 +1482,7 @@ class WebWindows(
 
     /** KWin closed window [kwin] (main thread): its web window goes, nothing told back. */
     fun linuxClosed(kwin: Int) {
-        pendingLinux.remove(kwin)
+        if (pendingLinux.remove(kwin) != null) changed()
         selftest?.takeIf { it.kwin == kwin }?.let { it.kwinClosed = true; WindowLog.i(TAG, "selftest: KWin closed window $kwin") }
         val w = wins.values.firstOrNull { it.linux?.kwin == kwin } ?: return
         w.linux?.kwinClosed = true
@@ -3092,7 +3125,7 @@ class WebWindows(
         // Linux windows keep running as their own tasks (home's page is going: nothing would show them); Android ones
         // close with their displays as before.
         wins.values.toList().forEach { drop(it, handBack = it.linux != null) }
-        pendingLinux.keys.toList().forEach { kwin -> pendingLinux.remove(kwin)?.let { andro.marchy.WebWindowSource.fallback(context, kwin, it.appId, it.title) } }
+        pendingLinux.keys.toList().forEach { kwin -> pendingLinux.remove(kwin)?.let { changed(); andro.marchy.WebWindowSource.fallback(context, kwin, it.appId, it.title) } }
         runCatching { dm.unregisterDisplayListener(displayListener) }
         runCatching { context.applicationContext.unregisterComponentCallbacks(trimWatch) }
         main.removeCallbacks(reconcileRun)
@@ -3112,6 +3145,7 @@ class WebWindows(
         handBack: Boolean = false,
     ) {
         if (wins.remove(w.id) == null) return
+        changed()
         w.closed = true
         logDrop(w, released)
         dropLinux(w, handBack)
@@ -4421,6 +4455,32 @@ class WebWindows(
     enum class LeaveStep { WAIT, HOME }
 
     companion object {
+        /** Phase 2: events that are per-frame or per-gesture traffic, not state: they never move the generation. */
+        internal val REALTIME = setOf("webwindows.moveresize", "webwindows.resend")
+
+        /** Phase 2: [event] is a state change of the snapshot (any web-window event but [REALTIME]). */
+        internal fun bumps(event: String) = event.startsWith("webwindows.") && event !in REALTIME
+
+        /**
+         * Phase 2: the host snapshot (docs/WEB_WINDOWS.md "The host snapshot"): {generation, windows, pendingLinux},
+         * each pending offer with its kwin id, key, label, ownFrame ([ownFrame] of its kwin id and game flag) and alts.
+         */
+        internal fun snapshotJson(
+            generation: Long,
+            windows: JSONArray,
+            pending: Map<Int, LinuxOffer>,
+            ownFrame: (Int, Boolean) -> Boolean,
+        ): JSONObject {
+            val offers = JSONArray()
+            pending.forEach { (kwin, o) ->
+                offers.put(
+                    JSONObject().put("kwin", kwin).put("key", o.key).put("label", o.label)
+                        .put("ownFrame", ownFrame(kwin, o.game)).put("alts", JSONArray(o.alts)),
+                )
+            }
+            return JSONObject().put("generation", generation).put("windows", windows).put("pendingLinux", offers)
+        }
+
         /** N2: "w.f"'s words [t], its windows read up to [end]: the third stamp after them is "1" for an ahead frame. */
         internal fun aheadFlag(
             t: List<String>,

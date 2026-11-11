@@ -253,8 +253,13 @@ and lose nothing.
   `webwindows.resend`, input.
   - 11-11: `docs/WEB_WINDOWS.md` "The host snapshot: the contract" - `webwindows.list(true)` = the object, the bare call
     keeps the array until 2.4.
-- [ ] 2.2 **Snapshot carries everything.** `list()` (`WebWindows.kt:146`) adds: pending Linux offers (`pendingLinux`,
+- [x] 2.2 **Snapshot carries everything.** `list()` (`WebWindows.kt:146`) adds: pending Linux offers (`pendingLinux`,
   `:806`) with their key, label, `ownFrame` and `alts`; `failed`; and the page's layout record per window.
+  - 11-11: `WebWindows.snapshot()` = `webwindows.list(true)`: `generation` (bumped by every state event but
+    moveresize/resend, every open/drop, every offer made/taken), `windows` (list(), each Linux one with `failed` once
+    its consumer gave up), `pendingLinux` [{kwin, key, label, ownFrame, alts}]. The bare `webwindows.list()` stays the
+    array (page unchanged). The layout record field comes with its writer in 2.3; `webwindows.changed` is emitted from
+    2.4 on. Check: `WebWindowsSnapshotTest` (control run with a wrong generation FAILs).
 - [ ] 2.3 **Layout record.** The page writes an opaque record per window (page, frame, restore, scale, tile slot, tab
   group) to the host on change (`webwindows.layout`), and one per page for tilings. The host stores and returns it,
   and persists it across an app restart (the store).

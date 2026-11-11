@@ -532,10 +532,18 @@ class ShellBridge(
                     webWindows.also { webWindowsMade = true }.open(app.component, a.getJSONObject(1), a.optInt(2, -1), a.optBoolean(4, false))
                 } ?: -1
             "webwindows.input" -> webWindowsMade && webWindows.input(a.getInt(0), a.getString(1), WebWindows.BodyTouch(a.getDouble(2), a.getDouble(3), a.optInt(4, 0)))
-            // RL1: a (re)loaded page's window list rebuilt from the host's live windows.
-            "webwindows.list" ->
-                if (!webWindowsMade) JSONArray()
-                else webWindows.list { c -> runtime.androidApps.apps.firstOrNull { it.component == c }?.let { "a:${it.key}" to it.label } }
+            // RL1: a (re)loaded page's window list rebuilt from the host's live windows. [0] true: the whole host
+            // snapshot (docs/WEB_WINDOWS.md "The host snapshot": generation, windows, pendingLinux); else the bare
+            // windows array the page reads until it moves to the snapshot (WINDOWS_FIX_PLAN 2.4).
+            "webwindows.list" -> {
+                val appOf: (android.content.ComponentName) -> Pair<String, String>? = { c -> runtime.androidApps.apps.firstOrNull { it.component == c }?.let { "a:${it.key}" to it.label } }
+                val whole = a.optBoolean(0, false)
+                when {
+                    !webWindowsMade -> if (whole) JSONObject().put("generation", 0).put("windows", JSONArray()).put("pendingLinux", JSONArray()) else JSONArray()
+                    whole -> webWindows.snapshot(appOf)
+                    else -> webWindows.list(appOf)
+                }
+            }
             "webwindows.close" -> webWindowsMade && webWindows.close(a.getInt(0))
             // The ship gate's hidden Linux check (window-render.sh --hidden): Linux app [0]'s next KWin window through
             // the web-window consumer offscreen - never on the page. "started", else why not.
