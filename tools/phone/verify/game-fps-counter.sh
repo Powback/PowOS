@@ -14,17 +14,28 @@
 #      PowosWindowActivity's views in the top-left quarter (its text unread, said so);
 #   4. the switch off -> the label gone (no "fps" text / the TextView not visible) within 3 s.
 # Always restores: perf.meter as it was, the game closed if this check started it (bf-return-phone.sh close), home.
+# The switch is set through the SHADE page's bridge, not home's: GQ1 (WebWindows.quietCheck) pauses home's WebView
+# under a game's immersive full screen, and an eval there never answers - the 11-11 14:56 run passed step 3, then hung
+# 93 s in store.set {on:false} on home and was killed at its 300 s budget ("FAIL timeout"). Every page's ShellBridge
+# runs the same store.set (GameFpsCounter.on is process-wide), and the shade overlay is never paused.
+# Own deadline (DEADLINE_S, 235 s of the 300 s budget): past it the step running is ended (its process tree TERMed),
+# the check FAILs naming that step, and the restore (meter back, the game closed) still fits the budget. The launch
+# waits on the phone (bf-lib.sh step_launch's poll) at most LAUNCH_S - what is left minus the reads after it; every
+# adb call, CDP eval and uiautomator dump has its own cap, so no one call can eat the budget.
 # Exit: 0 PASS; 1 FAIL; 3 a real touch / the user's game awake / not now; 5 can't run (ENV).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"; APP=${APP:-274190}
 case $APP in *[!0-9]*|"") echo "ENV: APP is a Steam app id ($APP)"; exit 5 ;; esac
 OUT=${1:-$HOME/.cache/powos-verify/game-fps-counter-$(date +%m%d-%H%M)}; mkdir -p "$OUT"; R=$OUT/log.txt
 L=$HOME/.cache/powos-verify.lock
+DEADLINE_S=${DEADLINE_S:-235}; PAGE=${METER_PAGE:-shade}; STEP=start; DL=$OUT/.deadline; rm -f "$DL"
+cap() { perl -e 'alarm shift; exec @ARGV' "$@"; }   # cap <s> cmd...: killed (SIGALRM) past <s> seconds
+step() { STEP=$*; }
 log() { echo "$(date +%T) $*" | tee -a "$R"; }
-sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
+sh_() { cap 45 "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 top() { sh_ "dumpsys activity activities | grep -m1 topResumedActivity"; }
-ev() { "$T/cdp.sh" eval home "$1" 2>&1 | tr -d '\r' | tail -1; }
+ev() { CDP_TIMEOUT_S=20 cap 40 "$T/cdp.sh" eval "$PAGE" "$1" 2>&1 | tr -d '\r' | tail -1; }
 # cdp.ts prints an eval's value JSON-encoded, so the JSON.stringify'd meter arrives as a quoted string
 # ("{\"on\":true,...}", the 11-10 "unreadable" SKIP): decoded once here to the object's JSON.
 meter_get() {
@@ -35,13 +46,14 @@ except ValueError: v=s
 print(v if isinstance(v,str) else json.dumps(v))'
 }
 meter_set() { ev "importShim('./bridge.ts').then(b=>b.powos.store.set('perf.meter',$1)).then(()=>'ok')" | tr -d '"'; }
-ph() { "$A" shell "su -c 'sh /data/powos/powos-run.sh \"APP=$APP bash /var/tmp/powos-bf-return-phone.sh $1\"'" 2>&1 | grep -v sysvipc | sed -l $'s/\r$//' | tee -a "$R"; }
+# ph <phase> <cap s>: a bf-return-phone.sh phase in the PowOS session, capped.
+ph() { cap "$2" "$A" shell "su -c 'sh /data/powos/powos-run.sh \"APP=$APP LAUNCH_S=${LAUNCH_S:-360} bash /var/tmp/powos-bf-return-phone.sh $1\"'" 2>&1 | grep -v sysvipc | sed -l $'s/\r$//' | tee -a "$R"; }
 
 # fps_label <l> <t> <r> <b>: the counter in the task (bounds l t r b) - "text=<N fps>" (uiautomator), "view=V" (dumpsys:
 # a visible TextView there, text unread), or "none <why>".
 fps_label() {
   local l=$1 t=$2 r=$3 b=$4 xml
-  xml=$(sh_ "uiautomator dump /data/local/tmp/gfc.xml >/dev/null 2>&1 && cat /data/local/tmp/gfc.xml; rm -f /data/local/tmp/gfc.xml")
+  xml=$(sh_ "timeout 20 uiautomator dump /data/local/tmp/gfc.xml >/dev/null 2>&1 && cat /data/local/tmp/gfc.xml; rm -f /data/local/tmp/gfc.xml")
   if [ -n "$xml" ]; then
     printf '%s' "$xml" > "$OUT/ui-$(date +%H%M%S).xml"
     printf '%s' "$xml" | python3 -c '
@@ -74,16 +86,23 @@ PY
 . "$here/window-lock.sh"
 window_lock game-fps-counter.sh 120
 METER0=; STARTED=0; closed=0
+# kill_tree <pid>: <pid>'s descendants TERMed, deepest first (the watchdog, $2, spared).
+# (The Mac's bash 3.2 has no $BASHPID: the watchdog learns its own pid as an exec'd sh's parent.)
+kill_tree() { local c; for c in $(pgrep -P "$1"); do [ "$c" = "$2" ] && continue; kill_tree "$c" "$2"; kill -TERM "$c" 2>/dev/null; done; }
+WD=
 finish() {
   [ $closed = 1 ] && return; closed=1
+  [ -n "$WD" ] && kill "$WD" 2>/dev/null
   [ -n "$METER0" ] && { log "perf.meter back to $METER0: $(meter_set "$METER0")"; }
-  [ $STARTED = 1 ] && ph close >/dev/null
+  [ $STARTED = 1 ] && ph close 90 >/dev/null
   sh_ "rm -f /data/local/tmp/powos-open-task /data/local/tmp/powos-bf-return-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-bf-xframes.py /data/powos/root/var/tmp/powos-bf-return-phone.sh /data/powos/root/var/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-bf-stop.sh /data/powos/root/var/tmp/powos-bf-xframes.py /data/powos/root/tmp/bf-return.env /data/local/tmp/gfc.xml" >/dev/null
   sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"
   echo "restored; artefacts $OUT"
 }
 trap 'finish; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
-trap 'log "stopped from outside"; exit 3' HUP TERM INT
+trap '[ -f "$DL" ] && { log "FAIL deadline: no verdict in ${DEADLINE_S} s - ended at step: $STEP (restoring: meter back, the game closed)"; exit 1; }; log "stopped from outside"; exit 3' HUP TERM INT
+# The watchdog: at the deadline the step running is ended and the TERM trap above FAILs with it.
+( sleep "$DEADLINE_S"; : > "$DL"; kill -TERM $$; kill_tree $$ "$(exec sh -c 'echo $PPID')" ) & WD=$!
 fail() { log "FAIL: $*"; "$T/shot.sh" "$OUT/fail.png" >/dev/null 2>&1; exit 1; }
 pass() { log "PASS: $*"; }
 I0=$(irq)
@@ -92,6 +111,7 @@ s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { log "the screen is $s - not woken (rule); nothing done"; exit 3; }
 
 # 1. The switch on (what it was is put back).
+step "perf.meter read/set on ($PAGE's bridge)"
 METER0=$(meter_get)
 case $METER0 in null|\{*) ;; *) METER0=; echo "ENV: perf.meter unreadable over CDP ($(meter_get | cut -c1-120))"; exit 5 ;; esac
 log "perf.meter at start: $METER0"
@@ -104,10 +124,15 @@ for f in bf-return-phone.sh bf-lib.sh bf-stop.sh bf-xframes.py; do
   "$A" push "$here/$f" /data/local/tmp/powos-$f >/dev/null || { echo "ENV: can't push $f"; exit 5; }; done
 sh_ "install -m 755 /data/local/tmp/powos-open-task /data/powos/root/usr/local/bin/powos-open-task && cp /data/local/tmp/powos-bf-return-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-bf-xframes.py /data/powos/root/var/tmp/ && chmod 644 /data/powos/root/var/tmp/powos-bf-*" >/dev/null
 STARTED=1
-ph launch >/dev/null
+# The launch's own wait (phone side): what's left of the deadline minus the reads after it (~60 s), at most 360.
+LAUNCH_S=$((DEADLINE_S - SECONDS - 60)); [ $LAUNCH_S -gt 360 ] && LAUNCH_S=360
+[ $LAUNCH_S -ge 30 ] || fail "no time left to launch the game ($SECONDS s of $DEADLINE_S s gone before the launch)"
+step "game launch (phone-side wait ${LAUNCH_S} s)"
+ph launch $((LAUNCH_S + 40)) >/dev/null
 grep -q '^SKIP\|^user input' "$R" && { log "not now: $(grep -m1 '^SKIP\|^user input' "$R")"; exit 3; }
 grep -q '^FAIL launch' "$R" && fail "the game didn't launch: $(grep -m1 '^FAIL launch' "$R")"
 chk launch
+step "game's window task in front"
 sleep 5   # past the window going full screen, the counter's first two ticks
 tp=$(top)
 case $tp in *PowosWindowActivity*) ;; *) fail "the game isn't in its own window task in front ($tp): the counter lives in PowosWindowActivity" ;; esac
@@ -119,6 +144,7 @@ fi
 log "game task $TID in front, bounds $l $t $r $b"
 
 # 3. The label, twice.
+step "fps label read (uiautomator)"
 got1=$(fps_label "$l" "$t" "$r" "$b"); chk read1; log "counter: $got1"
 "$T/shot.sh" "$OUT/on.png" >/dev/null 2>&1
 sleep 3
@@ -132,6 +158,7 @@ case $got2 in
 esac
 
 # 4. The switch off -> the label goes.
+step "perf.meter set off ($PAGE's bridge) + label gone"
 [ "$(meter_set "Object.assign({},$METER0,{on:false})")" = ok ] || fail "store.set perf.meter {on:false} failed"
 sleep 3; chk off
 off=$(fps_label "$l" "$t" "$r" "$b"); log "meter off: $off"
