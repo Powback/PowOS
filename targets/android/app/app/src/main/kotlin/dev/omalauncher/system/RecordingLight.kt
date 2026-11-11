@@ -158,23 +158,23 @@ class RecordingOps(private val clock: () -> Long = System::currentTimeMillis) {
      */
     fun chips(now: Long = clock()): List<Chip> {
         ended.entries.removeAll { now - it.value >= GRACE_MS }
-        anonymousEnded?.let { if (now - it >= GRACE_MS) anonymousEnded = null }
+        if (now - (anonymousEnded ?: now) >= GRACE_MS) anonymousEnded = null
         val apps = linkedMapOf<Pair<String, Int>, MutableList<Use>>()
         for (use in active + ended.keys) apps.getOrPut(use.pkg to use.uid) { mutableListOf() } += use
         return apps.map { (app, uses) ->
             val on = uses.any { it in active }
             val kinds = uses.mapNotNull { kind(it.op) }.toSet()
             Chip(app.first, app.second, Kind.values().filter { it in kinds }, on, if (on) null else uses.maxOf { ended[it] ?: 0L })
-        }.let { named ->
-            val anon =
-                when {
-                    anonymousShown.isNotEmpty() -> Chip(ANONYMOUS, -1, Kind.values().filter { it in anonymousShown }, true, null)
-                    anonymousEnded != null -> Chip(ANONYMOUS, -1, Kind.values().filter { it in anonymousEndedKinds }, false, anonymousEnded)
-                    else -> null
-                }
-            named + listOfNotNull(anon)
-        }.sortedWith(compareBy<Chip> { !it.active }.thenByDescending { it.ended ?: 0L })
+        }.plus(listOfNotNull(anonymousChip())).sortedWith(compareBy<Chip> { !it.active }.thenByDescending { it.ended ?: 0L })
     }
+
+    /** The anonymous captures' one chip ([ANONYMOUS]): on, greyed within its grace, or none. */
+    private fun anonymousChip(): Chip? =
+        when {
+            anonymousShown.isNotEmpty() -> Chip(ANONYMOUS, -1, Kind.values().filter { it in anonymousShown }, true, null)
+            anonymousEnded != null -> Chip(ANONYMOUS, -1, Kind.values().filter { it in anonymousEndedKinds }, false, anonymousEnded)
+            else -> null
+        }
 
     /** When the next recently-stopped chip leaves the row (epoch ms), or null when none waits. */
     fun nextExpiry(): Long? = (ended.values + listOfNotNull(anonymousEnded)).minOrNull()?.plus(GRACE_MS)
