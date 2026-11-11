@@ -26,7 +26,7 @@
 # Rotation and device state are always put back. Not covered: a floating task's drag-resize (no scripted drag yet).
 #   G1 root: Xwayland's root (Wine's / Unity's monitor) IS the screen too (kwin 0061, 6.7.5-3.69: the output follows the
 #      app's "screen"): it stayed 2268x2440 in every state (11-07), a rotated game got 2268x2268 and Besiege left full screen.
-# Exit 3 = no window / user input. KWIN_MIN default 6.7.5-3.78 (0070: the window takes the task size, not stale buffers; queue kwin-install.sh 6.7.5-3.78 before it).
+# GAME_ENV=K=V[,K=V]: that environment for this one launch (below). Exit 3 = no window / user input. KWIN_MIN default 6.7.5-3.78 (0070: the window takes the task size, not stale buffers; queue kwin-install.sh 6.7.5-3.78 before it).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); P=$here/..; A=$P/adb.sh
 APP=${1:-${APP:-}} WIN_NAME=${2:-${WIN_NAME:-}} MIN=${KWIN_MIN:-6.7.5-3.78} NAME=${CHECK_NAME:-game-resize}
@@ -44,7 +44,13 @@ rot0=$("$A" shell settings get system accelerometer_rotation | tr -d '\r'); urot
 restore() { "$A" shell "cmd device_state state reset; settings put system user_rotation ${urot0:-0}; settings put system accelerometer_rotation ${rot0:-1}" >/dev/null 2>&1; }
 WL_TRAP='restore'
 . "$here/window-lock.sh"; window_lock "$NAME.sh" 120
-trap 'restore; [ "${WL_LOCK:-}" ] && rm -rf "$WL_LOCK"' EXIT
+# GAME_ENV=K=V[,K=V]: extra environment for THIS launch only (e.g. GAME_ENV=WINE_DISABLE_FULLSCREEN_HACK=1), the
+# bf-pacing env: way - ~/.config/powos/proton-settings.json (steam's user_settings.py reads it at the game's start).
+# Written just before the launch, removed as soon as the start returns and again on every exit: never the user's Steam
+# launch options or the prefix. A file already there (another check's) is never overwritten: exit 2.
+PS=/data/powos/root/home/powos/.config/powos/proton-settings.json ps_mine=
+env_off() { [ -n "$ps_mine" ] && "$A" shell "su -c 'rm -f $PS'" >/dev/null 2>&1; ps_mine=; }
+trap 'env_off; restore; [ "${WL_LOCK:-}" ] && rm -rf "$WL_LOCK"' EXIT
 log() { echo "$(date +%T) $*" | tee -a "$OUT/run.txt"; }
 BF_ADB=$A . "$here/bf-lib.sh"
 for f in bf-fold-phone.sh bf-stop.sh bf-lib.sh bf-xframes.py bf-onscreen.sh; do "$A" push "$here/$f" "/data/local/tmp/powos-$f" >/dev/null || { echo "ENV: can't push $f to the phone (a stale /data/local/tmp copy would run instead)"; exit 5; }; done
@@ -58,7 +64,18 @@ kv=$("$P/root.sh" "$OUT/q.sh" 2>/dev/null | tail -1 | tr -d '\r'); log "kwin $kv
 
 touched && exit 3
 pill "${WIN_NAME:-app $APP} up"
+if [ -n "${GAME_ENV:-}" ]; then
+  [ -n "$("$A" shell "su -c 'ls $PS 2>/dev/null'" | tr -d '\r')" ] && { log "FAIL: $PS exists (another check's environment) - not overwritten"; exit 2; }
+  # Split only at a comma that starts the next K= (a value may hold commas, bf-pacing settings()).
+  printf '%s' "$GAME_ENV" | python3 -c 'import json,re,sys; print(json.dumps(dict(kv.split("=", 1) for kv in re.split(r",(?=[A-Za-z_][A-Za-z0-9_]*=)", sys.stdin.read()))))' > "$OUT/settings.json" && [ -s "$OUT/settings.json" ] || { log "FAIL: GAME_ENV: can't parse '$GAME_ENV'"; exit 2; }
+  "$A" push "$OUT/settings.json" /data/local/tmp/powos-settings.json >/dev/null || { log "ENV: can't push GAME_ENV"; exit 5; }
+  ps_mine=1
+  "$A" shell "su -c 'd=\$(dirname $PS); mkdir -p \$d; cp /data/local/tmp/powos-settings.json $PS; chown \$(stat -c %u:%g \$d) $PS; chmod 644 $PS; rm /data/local/tmp/powos-settings.json'"
+  log "GAME_ENV for this launch: $(cat "$OUT/settings.json")"
+fi
 r=$(ph start); echo "$r" >> "$OUT/run.txt"; mine=$([[ $r == *mine=1* ]] && echo 1 || echo 0)
+if [ -n "${GAME_ENV:-}" ]; then env_off
+  [ "$mine" = 1 ] || log "  GAME_ENV not applied: the game was already running (the user's), not launched by this check"; fi
 stop() { if [ "$mine" = 1 ]; then pill "closing the game"
     log "closed: $("$A" shell "su -c 'sh /data/powos/powos-run.sh \"APP=$APP timeout 35 bash /var/tmp/powos-bf-stop.sh || echo stop: no answer in 35 s\"'" 2>&1 | tr -d '\r' | tail -1)"
   elif [[ $r == *mine=0* ]]; then log "the user's $WIN_NAME: $(ph refreeze | tail -1)"; fi; }
