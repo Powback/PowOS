@@ -112,7 +112,7 @@ sleep 5   # past the window going full screen, the counter's first two ticks
 tp=$(top)
 case $tp in *PowosWindowActivity*) ;; *) fail "the game isn't in its own window task in front ($tp): the counter lives in PowosWindowActivity" ;; esac
 TID=$(echo "$tp" | grep -oE ' t[0-9]+' | tr -dc '0-9')
-read -r l t r b <<<"$(sh_ "am stack list | grep -E \"taskId=$TID[^0-9]\"" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' ')"
+read -r l t r b <<<"$(sh_ "am stack list | grep -E \"taskId=${TID}[^0-9]\"" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' ')"
 if [ -z "${b:-}" ] || [ "${r:-0}" -le "${l:-0}" ]; then  # a full-screen task reports no bounds: the display's
   read -r r b <<<"$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1)"; l=0; t=0
 fi
