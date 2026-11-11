@@ -304,10 +304,38 @@ places, and the nine events and five timers above are gone.
   `minimised`, `leftAt`, `landed`, `adopt`, `claimed`, `live`, `closed`, `followed`) with one sealed state plus its
   data: Opening, Live(floating), Minimised, MinimisedAsPip, FullAndroid, FullLinux(asked/confirmed/held, immersive),
   Pip, Closing.
-- [ ] 3.2 **Pure transition function** `(state, event) -> (state, effects)` in its own file, no Android imports.
+- [x] 3.2 **Pure transition function** `(state, event) -> (state, effects)` in its own file, no Android imports.
   Events: page asks, KWin lines, task changes, display changes, timers that are real waits (for example the PiP leave).
-- [ ] 3.3 **Port the existing tests** onto it (`WebWindowsFullScreenRaceTest`, `...SelfFullScreenTest`,
+  - 11-11: `WebWindowState.kt` (`WebWindowMachine.step`), not used by `WebWindows` yet (3.1's swap is next). Derived
+    from today's flag writes (KDoc cites WebWindows.kt lines); reuses the companion's pure rules (`pipStep`, `followOf`,
+    `orphaned`, `selfFullScreenNow`, `minimiseGoesPip`). Phases: Live, MinimisedAsPip (`leftAt`), Pip,
+    FullAndroid(moving), FullLinux(asked, immersive), Closed; 3.1's names derived (`WinState.name`: Opening = Live not
+    landed / adopting, Minimised = Live + minimised). `minimised` and `held` (`fullHeld`) stay booleans beside the
+    phase because today they are orthogonal to it (see 3.3's suspects); data: landed, adopt, claimed, live, followed.
+    Events - page: Minimise, Restore, FullScreen(kwinCan), ToWindow(kwinCan), Focus, Close, PageLoaded, Claimed, Drawn;
+    tasks: Launched, AdoptDone, DisplayTasks, OrphanConfirmed, TaskGone, TaskSeen(at, mode, float), PipBack,
+    FollowedBack, FullMoved, BackMoved, LeaveMoved, LeaveFront, LeftTaskSettled; KWin/timers: FullScreen(on, focused,
+    open, coming), ConfirmTimeout (1.5 s), ClaimTimeout. Effects: an `Fx` enum + optional `on` (emits, moves, marks,
+    cover/resize/place-back, status bar, timers, drop/remove). Not modelled: display changes (refillFull: a resize, not
+    a state change); a minimise or bar full screen of an Android window racing a move already in flight (today both
+    moves run).
+- [x] 3.3 **Port the existing tests** onto it (`WebWindowsFullScreenRaceTest`, `...SelfFullScreenTest`,
   `...MinimisePipTest`, `...ReconcileTest`, `...HomeReturnTest`, `...ImmersiveTest`) and add one per bug on the board.
+  - 11-11: `WebWindowStateTest.kt`, 7 classes / 31 tests (`WebWindowState{SelfFullScreen,MinimisePip,Reconcile,
+    HomeReturn,Immersive,FullScreenRace,Reload}Test`); the old 29 stay untouched and pass. Control: `kwinOn` covering
+    the screen regardless of `selfFullScreenNow` -> 3 FAIL (rc=1). HomeReturnTest's root-visibility rules
+    (`rootShownFor`, `swipeShowsHome`) are home's, not a window's state: ported only its window side (a home-gesture
+    minimise returns to its window). The source-pin checks (layer order, call sites) stay with the old tests.
+    Not yet: one test per board bug. Faithful but SUSPECT (each pinned by a test, not fixed):
+    1. a window minimised while its app is in PiP comes back from PiP still listed "minimised" (`pipLeave` keeps
+       `minimised`);
+    2. `restore` of a PiP window only clears the dock flag, the app stays in PiP (`restore` acts on `leftAt` only);
+    3. a held full screen (`fullHeld`) survives a minimise and the bar's full screen; the next `focus` puts the
+       minimised window full screen (only KWin's "0" or focus clears it);
+    4. "Back to window" while an Android full screen's move is in flight emits full off, then the move lands and
+       announces full on;
+    5. `Follow.PIP` is unreachable in `follow` (`pipStep` takes every mode 2 first);
+    6. a second `minimise` of a just-hidden (no-PiP) window starts `leaveNow` again.
 - [ ] 3.4 **Derived predicates from the state only:** `listedState` (`:180`), `awayByChoice` (`:3859`), `gone` (`:594`),
   `taskDead` (`:443`), `staleFull` (`:2561`).
 - [ ] 3.5 The snapshot (phase 2) sends the state's name; the page stops deriving it from separate flags.
