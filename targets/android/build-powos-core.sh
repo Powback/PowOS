@@ -18,7 +18,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 BASE=${POWOS_BASE_BRANCH:-worktree-powos-multiplatform}
 OUT=$HERE/out/powos-core
-PATHS=(bin lib targets/android/session targets/android/shims targets/android/play targets/android/install-powos-android.sh targets/android/tools/phone-files.sh)
+PATHS=(bin lib targets/android/session targets/android/shims targets/android/play targets/android/install-powos-android.sh targets/android/tools/phone-files.sh
+  config/etc/profile.d units/phone)
 publish=""; [ "${1:-}" = --publish ] && publish=1
 if [ -n "$publish" ] && [ -z "${PUBLISH_ANY_COMMIT:-}" ] && ! git -C "$ROOT" merge-base --is-ancestor HEAD "origin/$BASE" 2>/dev/null; then
   echo "build-powos-core: not published - $(git -C "$ROOT" rev-parse --short HEAD) isn't on origin/$BASE"

@@ -395,3 +395,22 @@ warm-built APK since 11-04 shipped without them.
   noroot-app-base, units-registry); JVM PerfTest and ExamplesTest via jvm-offload on pow58 passed. Live islands,
   Claude version/proxy auth, and widget readings still need post-build verification; do not close from these tests.
 - Read-only widget queue after deployment: `tools/phone/verify/queue.sh add widgets-etc-don-t-work-in-powos-on-a-non-rooted tools/phone/verify/widgets-nonroot.sh`.
+
+## 11-11 (nonroot-close): Claude image proof on the razr, widget check, VPN pairing
+
+- **Razr, read-only (adb TLS `adb-ZY22MQL54Q-XpSn2g`, now at 192.168.50.18; `run-as com.powos.app`)**: APK
+  2026.11.11-0354; Linux installed 11-09 from the base published 11-07 (predates `317536f0`); powos-core
+  4103.gba93f67eb (repo has 4182.g317536f0a). `/root/.local/bin/claude` -> 2.1.319 is there (the manager's first-use
+  install, 11-09 00:45), but no `/etc/profile.d/45-powos-claude-endpoint.sh`, no `/etc/powos/ai/endpoint.conf`, no
+  `/etc/powos/units.d/claude-code.json`.
+- **Gap found**: a new base is for fresh installs only (lib/phone-update.sh), and powos-core did not carry the profile.d
+  file or the unit (phone-files.sh mapped only session/shims/play; `config/`, `units/` weren't archived). So the 11-10
+  fix could never reach the razr. Fixed: phone-files.sh also maps `"$P/current/src/<config|units>/..."` install lines
+  (as `../../<path>`), build-powos-core.sh archives `config/etc/profile.d units/phone`; test-phone-update.sh checks both.
+- **Proof still missing**: on the razr after powos-core > 4182 lands (session start or Settings > check): the two files
+  present; `endpoint.conf` written by enrollment (`powos devices ai-apply`, the razr's fleet enrollment - not
+  re-enrolled here); a login shell's `claude --version` and one proxied reply via claude-auth.pow (no own login). The
+  base rebuild (build-rootfs.sh) is only for fresh installs (S25 etc.).
+- **VPN pairing** (board devices-pairing-doesn-t-discover-over-vpn): Add a device merges the realm registry (agent
+  addresses) with mDNS; `shell/test/devices-discover.test.ts`. Phone agents have no realm endpoint yet, so the phone's
+  own Devices app falls back to the address field over the VPN.

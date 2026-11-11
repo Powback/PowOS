@@ -1,19 +1,20 @@
 /**
- * Adding a device: the PowOS devices this network announces (mDNS _powos._tcp) and an address field; then the code
- * that device shows on its own screen, typed here. The token it answers with goes into host.net's secret for it.
+ * Adding a device: the PowOS devices this network announces (mDNS _powos._tcp), the realm's enrolled devices (through
+ * [realm], this device's enrolled agent: what lists them over the VPN, where mDNS doesn't reach) and an address field;
+ * then the code that device shows on its own screen, typed here. The token it answers with goes into host.net's secret for it.
  */
 import { useEffect, useState } from "preact/hooks";
-import { discover, info, pairConfirm, pairStart, urlOf, type Device, type Found, type Net } from "./devices";
+import { discover, enrolledDevices, info, pairConfirm, pairStart, urlOf, type Device, type Found, type Net } from "./devices";
 import { KIND, S } from "./ui";
 
 type Step = { url: string; name: string; request: string; id: string };
 
-export function AddDevice({ net, paired, added }: { net?: Net; paired: Device[]; added: (d: Device) => void }) {
+export function AddDevice({ net, paired, realm, added }: { net?: Net; paired: Device[]; realm?: Device | null; added: (d: Device) => void }) {
   const [found, setFound] = useState<Found[]>([]);
   const [step, setStep] = useState<Step | null>(null);
   const [err, setErr] = useState("");
   const [working, setWorking] = useState(false);
-  useEffect(() => void discover(net, paired).then(setFound), [net, paired.length]);
+  useEffect(() => void discover(net, paired, realm ? () => enrolledDevices(net, realm) : undefined).then(setFound), [net, paired.length, realm?.id]);
   const attempt = async (fn: () => Promise<void>) => {
     setErr("");
     setWorking(true);
@@ -52,11 +53,11 @@ function Pick({ found, working, start }: { found: Found[]; working: boolean; sta
     <>
       {found.map((f) => (
         <button key={f.id} style={S.found} data-found={f.id} disabled={working} onClick={() => start(f.url)}>
-          <span style={S.name}>{f.name}</span> <span style={S.muted}>{KIND[f.kind] ?? f.kind} on this network - pair</span>
+          <span style={S.name}>{f.name}</span> <span style={S.muted}>{KIND[f.kind] ?? f.kind} {f.via === "realm" ? "in your devices" : "on this network"} - pair</span>
         </button>
       ))}
       <div style={S.row}>
-        <input style={S.field} data-addr value={addr} placeholder="address, e.g. 192.168.50.58" onInput={(e) => setAddr((e.target as HTMLInputElement).value)} />
+        <input style={S.field} data-addr value={addr} placeholder="address, e.g. 192.168.50.58 (works over the VPN)" onInput={(e) => setAddr((e.target as HTMLInputElement).value)} />
         <button style={S.btn} data-pair disabled={working || !addr.trim()} onClick={() => start(urlOf(addr))}>{working ? "..." : "Pair"}</button>
       </div>
     </>

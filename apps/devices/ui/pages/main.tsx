@@ -7,7 +7,7 @@
  * On a device enrolled as an approver, lib/join.tsx: new devices asking to join (Approve / Deny) and Revoke per device.
  */
 import { useState } from "preact/hooks";
-import { act, approverOf, forget, load, save, type Cap, type Device, type Host, type Status } from "../lib/devices";
+import { act, approverOf, forget, load, realmAgentOf, save, type Cap, type Device, type Host, type Status } from "../lib/devices";
 import { canWake, useActions, useLive, type Live, type Pending } from "../lib/live";
 import { AddDevice } from "../lib/add";
 import { ThisPhone } from "../lib/thisphone";
@@ -40,7 +40,8 @@ export default function Main({ host, close }: Props) {
   const liveState = useLive(net, list, update);
   const live = liveState.live;
   const { pending, run, dismiss } = useActions(net, list, liveState);
-  const by = approverOf(list, Object.fromEntries(Object.entries(live).map(([k, v]) => [k, v.s])));
+  const liveS = Object.fromEntries(Object.entries(live).map(([k, v]) => [k, v.s]));
+  const by = approverOf(list, liveS);
   const realm = useRealm(net, by);
   const drop = (d: Device) => {
     update(list.filter((x) => x.id !== d.id));
@@ -77,7 +78,7 @@ export default function Main({ host, close }: Props) {
           }}
         />
       ))}
-      <AddDevice net={net} paired={list} added={(d) => update([...list.filter((x) => x.id !== d.id), d])} />
+      <AddDevice net={net} paired={list} realm={realmAgentOf(list, liveS)} added={(d) => update([...list.filter((x) => x.id !== d.id), d])} />
     </div>
   );
 }

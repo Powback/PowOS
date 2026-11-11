@@ -180,8 +180,8 @@ test -x /root/.local/bin/claude || { echo "powos: Claude Code missing after inst
 # /etc/powos/ai/endpoint.conf (the fleet's claude-auth.pow + the device's own token, written by enrollment's
 # `powos devices ai-apply`). No systemd here, so environment.d never reached a terminal's `claude`, which then ran its
 # own login. Without endpoint.conf (not one of the owner's devices) Claude Code's own sign-in stays.
-pe=$P/current/src/config/etc/profile.d/45-powos-claude-endpoint.sh
-install -Dm 644 "$pe" /etc/profile.d/45-powos-claude-endpoint.sh
+# Plain "$P/current/src/..." lines: tools/phone-files.sh maps them, so powos-core brings both to installed phones too.
+install -Dm 644 "$P/current/src/config/etc/profile.d/45-powos-claude-endpoint.sh" /etc/profile.d/45-powos-claude-endpoint.sh
 install -Dm 644 "$P/current/src/units/phone/claude-code.json" /etc/powos/units.d/claude-code.json
 # claude-login (~/Projects/claude-login, staged by build-rootfs.sh): the real `claude /login` run headless, which PowOS's
 # native Claude sign-in (lib/ai/manager/fleet_login.py, direct mode) drives. Without it the AI page's Login said "the

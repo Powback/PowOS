@@ -107,7 +107,12 @@ powos devices devices                              # what this CLI paired with
 powos devices peers                                # who may control THIS device
 ```
 
-The Devices app does the same from any PowOS device (pair from mDNS `_powos._tcp` or an address).
+The Devices app does the same from any PowOS device (pair from mDNS `_powos._tcp` or an address). mDNS is link-local and
+never crosses the WireGuard VPN, so Add a device also lists the realm's enrolled devices ("in your devices") at the agent
+address each gave at enrollment - read through this device's own enrolled agent (`/v1/enroll/devices`, callers on that
+device only); every VPN peer routes the LAN, so those addresses answer away from home. An mDNS answer wins for the same
+device; the address field takes anything else. The phone without root has no realm on its agent yet
+(DeviceAgentCore serves no `/v1/enroll/*`): there, over the VPN, it is the address field.
 
 ### Unlock (a desktop, its owner only)
 

@@ -65,8 +65,9 @@ export interface Waiting {
   /** Already paired with the approving device: a paired-only device upgrading to enrolled. */
   paired?: boolean;
 }
-export interface Enrolled { id: string; name: string; revoked?: number | null }
-export interface Found { name: string; url: string; id: string; kind: string }
+export interface Enrolled { id: string; name: string; kind?: string; agent?: string; revoked?: number | null }
+/** via: how it was found - "mdns" (announced on this network) or "realm" (the realm's registry: works over the VPN). */
+export interface Found { name: string; url: string; id: string; kind: string; via?: "mdns" | "realm" }
 
 const KEY = "powos.devices.v1";
 const SELF = "powos.devices.self";
@@ -108,8 +109,13 @@ const auth = (id: string) => ({ Authorization: `Bearer \${secret:${secretOf(id)}
 
 /** An error with the device's own words ("busy: llama-swap.service would stop") and its code. */
 export class DeviceError extends Error {
-  constructor(message: string, readonly code: string, readonly status: number) {
+  // Plain fields, not parameter properties: node --test strips types only (shell/test/devices-discover.test.ts).
+  readonly code: string;
+  readonly status: number;
+  constructor(message: string, code: string, status: number) {
     super(message);
+    this.code = code;
+    this.status = status;
   }
 }
 
@@ -176,14 +182,29 @@ export async function forget(net: Net | undefined, d: Device) {
   await net?.forget?.(APP, { secret: secretOf(d.id) });
 }
 
-/** PowOS devices on this network that aren't paired yet (mDNS _powos._tcp, TXT dev=<port>). */
-export async function discover(net: Net | undefined, paired: Device[]): Promise<Found[]> {
-  if (!net?.mdns) return [];
+/**
+ * PowOS devices not paired yet: the ones this network announces (mDNS _powos._tcp, TXT dev=<port>) and, from [registry],
+ * the realm's enrolled devices with the address their agent gave at enrollment. mDNS is link-local and never crosses
+ * the WireGuard VPN (board devices-pairing-doesn-t-discover-over-vpn), while every VPN peer routes the LAN: the
+ * registry is what lists the owner's devices away from home. An mDNS answer wins for the same device (its address
+ * now); revoked devices and the paired ones are left out. Either source failing just leaves the other.
+ */
+export async function discover(net: Net | undefined, paired: Device[], registry?: () => Promise<Enrolled[]>): Promise<Found[]> {
   const known = new Set(paired.map((d) => d.id));
-  const found = await net.mdns(APP, "_powos._tcp", 2500).catch(() => []);
-  return found
+  const [found, enrolled] = await Promise.all([
+    net?.mdns ? net.mdns(APP, "_powos._tcp", 2500).catch(() => []) : [],
+    registry ? registry().catch(() => [] as Enrolled[]) : [],
+  ]);
+  const out: Found[] = found
     .filter((s) => s.txt?.dev && s.txt?.id && !known.has(s.txt.id))
-    .map((s) => ({ name: s.name, id: s.txt.id, kind: s.txt.kind || "device", url: `https://${s.host}:${s.txt.dev}` }));
+    .map((s) => ({ name: s.name, id: s.txt.id, kind: s.txt.kind || "device", url: `https://${s.host}:${s.txt.dev}`, via: "mdns" as const }));
+  const seen = new Set(out.map((f) => f.id));
+  for (const e of enrolled) {
+    if (e.revoked || !e.id || !/^https:\/\/[^/]+$/.test(e.agent ?? "") || known.has(e.id) || seen.has(e.id)) continue;
+    seen.add(e.id);
+    out.push({ name: e.name || e.id, id: e.id, kind: e.kind || "device", url: e.agent!, via: "realm" });
+  }
+  return out;
 }
 
 /** An address the user typed ("192.168.50.58", "desk.pow:3416") as the agent's URL. */
@@ -221,6 +242,13 @@ export const waiting = (net: Net | undefined, by: Device) =>
     pending: r.pending ?? [],
     tenants: r.tenants ?? [],
   }));
+
+/**
+ * The paired agent on THIS device that is enrolled in the realm (approver or not): the one that can read the realm's
+ * registry for this app (/v1/enroll/devices answers only callers on its own device).
+ */
+export const realmAgentOf = (list: Device[], live: Record<string, Status | undefined>) =>
+  list.find((d) => live[d.id]?.online && live[d.id]?.realm?.enrolled && live[d.id]?.realm?.here) ?? null;
 
 export const enrolledDevices = (net: Net | undefined, by: Device) =>
   call<{ devices: Enrolled[] }>(net, `${by.url}/v1/enroll/devices`, { headers: auth(by.id) }).then((r) => r.devices ?? []);
