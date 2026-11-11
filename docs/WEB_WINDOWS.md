@@ -28,6 +28,46 @@ scope here, and `powos_desktop_mode` stays as it is (unchanged).
 
 ---
 
+## The host snapshot: the contract (WINDOWS_FIX_PLAN.md phase 2, 2026-11-11)
+
+The host (`WebWindows.kt`) owns which windows exist and their state; the page (`ui/webwindows.tsx`) owns layout. All
+the page needs to rebuild its windows lives in ONE host snapshot, so the page can reload at any moment and lose
+nothing.
+
+**Read:** `webwindows.list(true)` returns the snapshot object. `webwindows.list()` (no argument) keeps returning the bare
+`windows` array for the page as it is today, until the page reads the object (plan 2.4); then the bare form goes.
+
+```
+{
+  generation: number,        // bumped on every change below; never goes back within one app process
+  windows: [{                // every live web window, Android and Linux
+    id, key, label,          // window id; drawer key ("a:..", "l:..", "q:..", "w:..") and name
+    display, task,           // its virtual display and app task (-1 = none yet)
+    state,                   // "floating" | "minimised" | "pip" | "full"
+    live,                    // the app's content shows (placeholder dropped)
+    zoom?,                   // content zoom when not 1
+    kwin?, ownFrame?,        // Linux windows: KWin's window id; draws its own frame (no PowOS bar)
+    failed?,                 // Linux windows: why it is shown as not responding ("webwindows.failed")
+    frame?, body?, maximised?, // once the page placed it: CSS px
+    layout?                  // the page's own opaque record (page, frame, restore, scale, tile slot, tab group; plan 2.3)
+  }],
+  pendingLinux: [{           // KWin windows offered to the page ("webwindows.adopt") and not opened yet
+    kwin, key, label, ownFrame, alts
+  }]
+}
+```
+
+**Change:** `webwindows.changed <generation>` says the snapshot moved on. The page reads the snapshot on load, on
+every `webwindows.changed` whose generation is newer than the one it last read, and when its `native` port reconnects
+(plan 2.4: `rebuildFromHost` is the one sync, it adds, updates and removes). A change is anything a per-fact event
+reports today (`adopt`, `alive`, `closed`, `failed`, `frame`, `full`, `live`, `pip`, `show`, `state`, `control`) and
+a window opened or dropped. Those events stay until 2.4 is proven, then retire one at a time (2.5).
+
+**Real-time events stay events** (no generation, no snapshot): `webwindows.moveresize`, `webwindows.resend` and input.
+They are per-frame or per-gesture traffic, not state.
+
+---
+
 ## Native-glued windows (2026-11-07): audit, design, phases
 
 The user, 2026-11-07 03:3x: **"windows need to work fucking flawlessly on both android and linux apps and games. like I

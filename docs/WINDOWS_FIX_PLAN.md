@@ -248,9 +248,11 @@ Done when: 1.1-1.5 landed with their before/after numbers in `window-bench.md`; 
 Goal: the host owns which windows exist and their state; the page owns layout. The page can be reloaded at any time
 and lose nothing.
 
-- [ ] 2.1 **Write the contract** in `docs/WEB_WINDOWS.md`: one host snapshot (`webwindows.list`) with a generation
+- [x] 2.1 **Write the contract** in `docs/WEB_WINDOWS.md`: one host snapshot (`webwindows.list`) with a generation
   number, one event `webwindows.changed <generation>`. Real-time events that stay: `webwindows.moveresize`,
   `webwindows.resend`, input.
+  - 11-11: `docs/WEB_WINDOWS.md` "The host snapshot: the contract" - `webwindows.list(true)` = the object, the bare call
+    keeps the array until 2.4.
 - [ ] 2.2 **Snapshot carries everything.** `list()` (`WebWindows.kt:146`) adds: pending Linux offers (`pendingLinux`,
   `:806`) with their key, label, `ownFrame` and `alts`; `failed`; and the page's layout record per window.
 - [ ] 2.3 **Layout record.** The page writes an opaque record per window (page, frame, restore, scale, tile slot, tab
