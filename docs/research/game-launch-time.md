@@ -714,3 +714,52 @@ vs 12.7 / 21.4 s with Steam awake. Read-only off the phone (connection_log + pow
   nothing, lit restarts the window); control with the old link_watch: FAIL + 2 ERROR; now 18/18 (tier1 on .58).
 - Expected: `bf-coldstart.sh steam` handoff ~1 s (11-09: 1.1 s), frame ~21 s; still above the 10 s goal - the rest is
   container + Wine boot + window -> frame (resident game = the instant path).
+
+### 11-11 23:43: did the tap's prefetch cover the load? Window -> frame split (agent/bf-prefetch)
+
+Job 20261111-233653-94113 (`bf-coldstart.sh steam`, artefacts `~/.cache/powos-verify/bf-coldstart-2026-11-11_2339/`),
+Steam awake at the tap: handoff 1.2, reaper 3.0, pv 3.8, wineserver 4.7, exe 6.7, **window 8.8, frame 17.5 s**. Read-only
+re-read of LPROF + the 21:16/21:30/23:27 runs (same powos-open-task pushed by every job, prefetch code in):
+
+| run | game read | from storage | storage reads when |
+|---|---|---|---|
+| 21:16 (idle 814 s before) | 280 MB | **238 MB** | 15 MB by the exe (10.7 s), 130 MB in the asset load 17.8-21.4 s |
+| 21:30 (14 min after 21:16) | 251 MB | 193 MB | 110 MB in 19.0-20.8 s |
+| 23:27 (Steam frozen, handoff 9.6 s) | 248 MB | 2 MB | |
+| 23:39 (12 min after 23:27) | 328 MB | 20 MB | ~8 MB by 11.6 s, ~12 MB in the asset load 13.7-17.4 s |
+
+**Verdict (1): the prefetch ran but read almost nothing.** It had 18 s before the 21:16 asset load and the 1 GB /
+quarter-of-MemAvailable cap (6.3 GB available -> 1 GB) fits Broforce's whole 526 MB dir, so neither the cap nor the order
+was the problem: the kernel clamps every `fadvise(WILLNEED)` (and `readahead(2)`, `MADV_WILLNEED` on a file) to
+max(read_ahead_kb, max_sectors_kb) of the file's bdi (5.15 `force_page_cache_ra`); /data (dm-79, bdi 254:79) has 512 KiB
+for both, so the one `fadvise(fd, 0, 0)` per file read its first 512 KiB - 0.4 % of scenesmain (138 MB) /
+sharedsounds (144 MB) assetbundles, 2 % of UnityPlayer.dll (22 MB). The 23:27/23:39 low numbers are the page cache
+left by the run before, not the prefetch.
+Fix (`powos-open-task` `readahead_whole`): WILLNEED one bdi window per call over the whole file (window from
+`/sys/class/bdi/<maj:min>/read_ahead_kb`, 128 KiB if unreadable; ~1000 async calls for 526 MB), and the game's
+`steamapps/shadercache/<appid>` (FEX DiskCache .foz ~50 MB + Mesa cache, 85 MB here) right after the code, before the
+data; logs `powos-open-task: prefetch N files M MB queued in X ms` to stderr. Test: test-open-task-prefetch.py
+`test_whole_file_is_read_ahead_not_just_one_window` (kernel clamp modelled; FAILs on the old one-call code) + caches
+order. Not prefetched: Proton ARM64's runtime (`files/lib/wine/aarch64-windows` alone is 713 MB, read by wineboot/
+services, not the game; which files is not in the evidence - LPROF counts only the game's read_bytes).
+Expected: a cold-cache launch (the 21:16 case) loses most of its 238 MB from storage (-> < 20 MB), worth ~1-2 s (21:16
+was +2.1 s over 11-07 in container + Wine boot + exe, part of it Proton's own files); a warm launch ~0. Check: queue
+`bf-coldstart.sh steam` after the phone sat (or with `echo 1 > /proc/sys/vm/drop_caches` first): LPROF-SUM "from
+storage" and the prefetch line in the open-task output.
+
+**Split (2): window 8.8 -> frame 17.5 s (8.65 s), LPROF 4 Hz, clocks `?/2016/1651/1363` = the prime clamp all along.**
+
+| span (s from the tap) | s | what | evidence |
+|---|---|---|---|
+| 8.8-9.8 | 1.0 | UnityPreload alone 76-84 %, main idle | com.powos.app 42 % / plasmashell / steamwebhelper busy (window task going live) |
+| **10.0-13.7** | **3.7** | **Unity main thread, one core 69-99 %: emulated Unity/Mono player init under FEX** | rd flat 41.6 -> 50 MB, storage 5.6 -> 8.3 MB, GPU path idle |
+| 13.9-17.5 | 3.6 | first scene load: UnityPreload 15-72 %, main 26-41 %, GfxDevice 7-15 %, dxvk-cs/submit <= 11 % | rd 50 -> 328 MB at 1.1-2.2 cores; only 12 MB of it from storage |
+| sum | 8.65 | game 11.1 core-s (main 6.5, UnityPreload 2.0, GfxDevice 0.7) | wineserver 0.8 core-s; shader caches +12 KB (DXVK/Mesa all hits; dxvk-shader 15 % in one sample) |
+
+Disk: <= 0.3 s here (12 MB in the load phase; the 21:16 run's 130 MB from storage in the same phase cost ~0.35 s of
+window -> frame, 9.0 vs 8.65 s). wineserver: 0.8 core-s spread, not on the critical path. GPU shaders: none compiled.
+**Biggest remaining chunk: the 3.7 s single-thread emulated Unity/Mono init on main**, at a prime core clamped to
+1.36 GHz of 3.19 (the clamp writer is the open boost-cat item, out of scope here). Next lever, in order: (a) the clamp -
+11-05's caps-lifted A/B gave -2 to -3 s tap -> frame, most of it this span (CPU-bound, ~2.3x clock headroom on main);
+(b) nothing else PowOS-side clears 0.5 s in the window -> frame (FEX TSO/placement/GPU floor/gfx-direct all measured
+below the bar on 11-05); the < 10 s path stays resume.

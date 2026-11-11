@@ -77,6 +77,54 @@ class Prefetch(unittest.TestCase):
         self.mod.PREFETCH_MB = 0
         self.assertIsNone(self.mod.launch_prefetch("274190", str(self.steam)))
 
+    def test_caches_dir_goes_after_code_before_data(self):
+        cache = self.game.parent.parent / "shadercache/274190/fex-emu/DiskCache/h"
+        put(cache / "RWCacheDB_x.foz", 4000)
+        put(cache / "RWCacheDB_x_idx.foz", 50)
+        caches = self.mod.steam_shader_dir("274190", str(self.game))
+        self.assertEqual(caches, str(self.game.parent.parent / "shadercache/274190"))
+        self.assertIsNone(self.mod.steam_shader_dir("999", str(self.game)))
+        names = [os.path.basename(p) for p, _ in self.mod.prefetch_plan(str(self.game), 1 << 30, caches)]
+        self.assertEqual(names, ["Broforce_beta.exe", "UnityPlayer.dll", "mono.dll", "RWCacheDB_x.foz",
+                                 "RWCacheDB_x_idx.foz", "globalgamemanagers", "sharedassets0.assets",
+                                 "resources.assets"])
+
+    def test_whole_file_is_read_ahead_not_just_one_window(self):
+        """The kernel clamps one fadvise(WILLNEED) to the bdi's readahead window (5.15 force_page_cache_ra): one call
+        with len 0 reads only the first window. Model that clamp and require every byte of every planned file."""
+        if not hasattr(os, "posix_fadvise"):
+            self.skipTest("no posix_fadvise")
+        window = 1024
+        covered = {}
+        real = os.posix_fadvise
+
+        def fake(fd, off, length, advice):
+            self.assertEqual(advice, os.POSIX_FADV_WILLNEED)
+            name = os.path.basename(os.readlink(f"/proc/self/fd/{fd}")) if os.path.exists("/proc/self/fd") else str(fd)
+            size = os.fstat(fd).st_size
+            end = min(size, off + min(length or size, window))  # what the kernel actually reads
+            covered.setdefault(name, set()).update(range(off, end))
+
+        self.mod.readahead_window = lambda fd: window
+        self.mod.mem_available = lambda: 1 << 30
+        self.mod.PREFETCH_MB = 1
+        os.posix_fadvise = fake
+        try:
+            t = self.mod.launch_prefetch("274190", str(self.steam))
+            t.join(5)
+        finally:
+            os.posix_fadvise = real
+        if not os.path.exists("/proc/self/fd"):
+            self.skipTest("no /proc/self/fd to name the files")
+        self.assertEqual(len(covered["resources.assets"]), 5000, "resources.assets read ahead only partly")
+        self.assertEqual(len(covered["UnityPlayer.dll"]), 2000)
+
+    def test_window_from_the_bdi_with_a_floor(self):
+        with open(self.game / "Broforce_beta.exe", "rb") as f:
+            w = self.mod.readahead_window(f.fileno())
+        self.assertGreaterEqual(w, 16 << 10)
+        self.assertEqual(w % 1024, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
