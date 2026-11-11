@@ -12,12 +12,24 @@ fg=$($p/adb.sh shell "dumpsys activity activities | grep -m1 topResumedActivity"
 [[ "$fg" == *HomeShell* ]] || { echo "az-scrub: home isn't in front"; exit 3; }
 $p/cdp.sh eval home 'fetch("ui/drawer.tsx").then(r=>r.text()).then(t=>t.includes("data-lit"))' | grep -q true ||
   { echo "FAIL az-scrub: the phone serves a drawer.tsx without the highlight"; exit 1; }
+# AZ_LIST=1: the experimental list mode (Settings > style > experimental, drawer.azList; 14b92ebb): the letter's apps
+# as a centred card of whole names over the grid. The setting is read first, switched on for this run, and put back
+# on exit, so nothing persistent changes here either.
+LIST=${AZ_LIST:-0}
+if [ "$LIST" = 1 ]; then
+  AZ0=$($p/cdp.sh eval home 'importShim("./ui/drawer.tsx").then((m) => JSON.stringify(m.azList.value))' | sed 's/^"//; s/"$//; s/\\"/"/g')
+  case $AZ0 in '"'*'"') ;; *) echo "FAIL az-scrub: drawer.azList unreadable ($AZ0)"; exit 1 ;; esac
+  trap '$p/cdp.sh eval home "importShim(\"./ui/drawer.tsx\").then((m) => { m.azList.value = $AZ0; return \"ok\"; })" >/dev/null' EXIT
+  $p/cdp.sh eval home 'importShim("./ui/drawer.tsx").then((m) => { m.azList.value = "on"; return m.azList.value; })' | grep -q on ||
+    { echo "FAIL az-scrub: couldn't switch drawer.azList on"; exit 1; }
+fi
 read -r W H < <($p/cdp.sh eval home 'Math.round(innerWidth*devicePixelRatio)+" "+Math.round(innerHeight*devicePixelRatio)' | tr -d '"')
 $p/adb.sh shell input swipe $((W * 3 / 4)) $((H * 85 / 100)) $((W * 3 / 4)) $((H * 30 / 100)) 300
 sleep 1
 read -r X Y < <($p/cdp.sh eval home '(() => { const m = [...document.querySelectorAll(".letter-bar span")].find((s) => s.textContent === "M"); if (!m) return "0 0"; const r = m.getBoundingClientRect(), d = devicePixelRatio; return Math.round((r.x + r.width / 2) * d) + " " + Math.round((r.y + r.height / 2) * d); })()' | tr -d '"')
 [ "${X:-0}" -gt 0 ] || { $p/adb.sh shell input keyevent 4; echo "FAIL az-scrub: no A-Z bar after opening the drawer"; exit 1; }
 probe='JSON.stringify({scrub: !!document.querySelector(".az[data-scrub]"), lit: [...document.querySelectorAll(".az [data-lit] .app-label")].map((e) => e.textContent), dim: getComputedStyle(document.querySelector(".az .app:not([data-lit])") || document.body).opacity})'
+[ "$LIST" = 1 ] && probe='JSON.stringify((() => { const l = document.querySelector(".az-list:not(.leaving)"), c = l && l.querySelector(".az-list-card"), r = c && c.getBoundingClientRect(), n = [...document.querySelectorAll(".az-list:not(.leaving) .az-list-name")]; return { list: !!l, names: n.map((e) => e.textContent), allM: n.length > 0 && n.every((e) => (e.textContent || "").trim().toUpperCase().startsWith("M")), cut: n.filter((e) => e.scrollWidth > e.clientWidth + 1).length, centred: !!r && Math.abs(r.x + r.width / 2 - innerWidth / 2) <= 4 }; })())'
 $p/adb.sh shell input motionevent DOWN "$X" "$Y"
 sleep 0.5
 held=$($p/cdp.sh eval home "$probe" | tr -d '\\')
@@ -29,7 +41,14 @@ sleep 0.5
 after=$($p/cdp.sh eval home "$probe" | tr -d '\\')
 $p/adb.sh shell input keyevent 4
 echo "az-scrub: held=$held after=$after shot=$shot"
-if grep -q '"scrub":true' <<<"$held" && grep -q '"lit":\["' <<<"$held" && grep -q '"dim":"0.4"' <<<"$held" &&
+if [ "$LIST" = 1 ]; then
+  if grep -q '"list":true' <<<"$held" && grep -q '"allM":true' <<<"$held" && grep -q '"cut":0' <<<"$held" &&
+    grep -q '"centred":true' <<<"$held" && grep -q '"list":false' <<<"$after"; then
+    echo "PASS az-scrub list: the M apps as a centred list, every name whole, gone on release"
+  else
+    echo "FAIL az-scrub list: held=$held after=$after"
+  fi
+elif grep -q '"scrub":true' <<<"$held" && grep -q '"lit":\["' <<<"$held" && grep -q '"dim":"0.4"' <<<"$held" &&
   grep -q '"scrub":false' <<<"$after"; then
   echo "PASS az-scrub: the letter's apps lit, the rest at 0.4, cleared on release"
 else
