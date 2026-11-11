@@ -1,5 +1,6 @@
 // CDP diagnostic observer only; installed by ww-resize.sh outside timed gestures.
-// Actual __ww.geometry() schema: dpr, count, then 24 words per entry; resizing is word 20.
+// Actual __ww.geometry() schema: dpr, count, then 24 words per entry; resizing is word 20 (1, or 2 = resizing and
+// lifted over home - LH1; 3 = lifted only, the drag's end).
 ((token, id) => {
   if (!globalThis.__ww?.geometry || typeof globalThis.__glassDrag !== 'function') return 'ERR missing live schema';
   globalThis.__wwResizeProbe?.stop();
@@ -9,7 +10,7 @@
     let active = false;
     if (words.length !== 2 + Number(words[1]) * 24) return;
     for (let i = 2; i < words.length; i += 24) {
-      if (Number(words[i]) === id) active = words[i + 20] === '1';
+      if (Number(words[i]) === id) active = words[i + 20] === '1' || words[i + 20] === '2';
     }
     // lastResize changes even if a release/regrab happened between samples.
     if (previous !== globalThis.__ww.lastResize || active !== was) epoch++;

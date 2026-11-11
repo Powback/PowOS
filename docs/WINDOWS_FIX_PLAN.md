@@ -181,7 +181,7 @@ The board shows window checks failing by timeout or waiting days for a free phon
     to follow it: its hole leaves `.page-under`'s and the lower windows' masks once at the drag's start and the exact
     masks are written once at its end (`webwindows.tsx liftStart/liftEnd/liftTick`). The page says it in the "w.f"
     <resizing> word (2 = resizing + lifted, 3 = lifted only); each switch overlaps by LIFT_FRAMES page frames (lifted
-    with the hole still cut: same pixels), so a late apply never shows the page over the app (HACK: frame count, real
+    with the hole still cut: same pixels), so a late apply never shows the page over the app (a marked HACK, a frame count; real
     fix a host ack). While lifted the bar is drawn solid (no hole under its unblurred glass) and the size label sits in
     the bar (DOM over the body is under the app). The resize fill is cropped to the body (lifted, it painted over the
     bar's bottom radius band). Option (b), a hole layer moved by transform, is not possible with a CSS mask (RS6b).

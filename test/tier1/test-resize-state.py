@@ -196,7 +196,7 @@ exit 0
     def test_observer_actual_schema(self):
         # Lock this observer to entry()/sizeOf()/geometry(), not an invented export.
         source = (ROOT / 'shell/ui/webwindows.tsx').read_text()
-        self.assertIn('return `1 ${r.cw} ${r.ch}`', source)
+        self.assertIn('return `${up ? 2 : 1} ${r.cw} ${r.ch}`', source)
         self.assertIn('...rects, RADIUS * scale, visible ? 1 : 0, px(alpha), px(scale), w.restore ? 1 : 0, mergeOf(w, el), sizeOf(w, body), fillOf()', source)
         observer = (V / 'resize-state.js').read_text().replace('TOKEN', '"T"').replace('WINDOW_ID', '4')
         script = '''let sample, records=[], markers=[]; globalThis.setInterval=f=>(sample=f,1); globalThis.clearInterval=()=>{};
@@ -206,7 +206,10 @@ globalThis.__glassDrag=()=>{};globalThis.__glassDragOff=false;
 console.log=x=>x.endsWith('_ACTIVE')?markers.push(x):records.push(JSON.parse(x.slice(2)));
 ''' + observer + ''';
 sample();entry[20]=0;globalThis.__ww.lastResize={id:4};sample();
-if(!records[0].active || records[1].active || records[0].epoch===records[1].epoch || markers.join()!=='T_ACTIVE') process.exit(1);
+// LH1: 2 = resizing and lifted is a resize too; 3 = lifted only (the drag's end) is not.
+entry[20]=2;sample();entry[20]=3;sample();
+if(!records[0].active || records[1].active || records[0].epoch===records[1].epoch || markers.join()!=='T_ACTIVE,T_ACTIVE') process.exit(1);
+if(!records[2].active || records[3].active) process.exit(1);
 '''
         subprocess.run(['node', '-e', script], check=True)
 

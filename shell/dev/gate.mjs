@@ -7968,6 +7968,8 @@ const invalidationCause = (d) =>
  * release the last "w.f" says the drag ended with the body's final size.
  */
 async function webWindowResizeCheck() {
+  // LH1: a "w.f" entry's <resizing> word: "1", or "2" = resizing and lifted over home (the top window); "3" = lifted only.
+  const wfResizing = (e) => e[20] === "1" || e[20] === "2";
   const S = await window.__gw.mod("./state.ts");
   const W = await window.__gw.mod("./ui/webwindows.tsx");
   const fails = [];
@@ -7990,14 +7992,14 @@ async function webWindowResizeCheck() {
     const ours = (t) => [...Array(Math.floor(t.length / 24)).keys()].map((i) => t.slice(i * 24, i * 24 + 24)).find((e) => e[0] === "903");
     const mine = window.__ww.sent.slice(from).map((l) => ours(l.split(" ").slice(4))).filter(Boolean);
     const judge = (end) => {
-      const during = mine.filter((e) => e[20] === "1");
+      const during = mine.filter(wfResizing);
       const sizes = new Set(during.map((e) => `${e[21]}x${e[22]}`));
       const bodies = new Set(during.map((e) => `${e[7]}x${e[8]}`));
       const last = mine.at(-1) ?? [];
       return [
         bodies.size < FRAMES / 2 && `RS1: a 30-frame corner drag gave only ${bodies.size} body sizes (the frame must follow the finger each frame)`,
         sizes.size * 2 > during.length + 1 && `RS1: ${sizes.size} app resizes for ${during.length} drag frames (want <= 1 per 2 frames)`,
-        last[20] !== "0" && `RS1: after release the last w.f still says resizing (${last.slice(20).join(" ")}): no final resize`,
+        wfResizing(last) && `RS1: after release the last w.f still says resizing (${last.slice(20).join(" ")}): no final resize`,
         end?.w !== 360 + FRAMES * 6 && `RS1: the corner drag left the window ${end?.w} wide (want ${360 + FRAMES * 6})`,
         !/^[0-9a-f]{6}$/.test(last[23] ?? "") && `RS1: the fill colour in w.f is "${last[23]}" (want rrggbb)`,
       ].filter(Boolean);
@@ -12212,7 +12214,7 @@ function PINCH_HELPERS() {
     const bad = [Math.abs((pw.scale ?? 1) - 0.71) > 0.03 && `scale ${pw.scale} (want 0.71)`, (pw.w !== 400 || pw.h !== 320) && `size ${pw.w}x${pw.h} (want 400x320, unchanged)`,
       tf === "none" && "no transform on the frame (want the whole window zoomed)",
       Math.abs(body.getBoundingClientRect().width / body.offsetWidth - (pw.scale ?? 1)) > 0.01 && `a measured body scale ${body.getBoundingClientRect().width / body.offsetWidth} (the model's ${pw.scale})`,
-      entries.some((e) => e[20] === "1") && "an app resize (w.f said resizing)",
+      entries.some((e) => e[20] === "1" || e[20] === "2") && "an app resize (w.f said resizing)",
       sizes.size > 1 && `the app's size changed: ${[...sizes].join(", ")}`];
     return bad.filter(Boolean).map((b) => `a pinch from the bar left ${b}`);
   };
