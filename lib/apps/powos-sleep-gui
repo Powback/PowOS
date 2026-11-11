@@ -79,6 +79,12 @@ LINK_S = int(os.environ.get("POWOS_SLEEP_LINK_S", "5"))
 # again. Measured 2026-11-05 14:47: the server drops a frozen client's link 79 s after the freeze.
 LINK_PULSE_S = int(os.environ.get("POWOS_SLEEP_LINK_PULSE_S", "50"))
 LINK_PULSE_MS = int(os.environ.get("POWOS_SLEEP_LINK_PULSE_MS", "1500"))
+# ... also for LINK_DARK_S (wall clock) after the screen went dark: the user pockets the phone and comes back to a game
+# tap seconds after waking it, too soon for the screen-on reconnect (Steam's backoff is 7-22 s + ~2 s CM list; measured
+# 2026-11-11: reconnect-ahead took 5.0-25.6 s, the tap's handoff 9.6 s, tap -> frame 30.0 s vs 21.4 s with a live link).
+# Bounded: no pulse past the window (overnight costs nothing), and a pulse is a GLib timer - it never wakes a suspended
+# phone (CLOCK_MONOTONIC stops in suspend), so it only rides wake-ups that happen anyway. 0 = lit displays only.
+LINK_DARK_S = int(os.environ.get("POWOS_SLEEP_LINK_DARK_S", "900"))
 # The desktop shell (plasmashell) while PowOS is off screen (phone): frozen this long after PowOS went off screen
 # ("off": never), thawed the moment it's back, and for DESKTOP_DRAIN s every DESKTOP_AWAKE s meanwhile - long enough
 # to read what KWin sent it (a Wayland client that never reads its socket is disconnected once the buffer fills).
@@ -622,6 +628,7 @@ class Gui(dbus.service.Object):
         self.home = None  # the desktop home's (powos-shell, its whole tree) while frozen, with the desktop shell
         self.desk_timer = None
         self.pulse_at = {}  # a frozen game launcher's root -> when it was last frozen or pulsed (monotonic)
+        self.dark_since = None  # wall time all displays went dark (link_watch's screen-off keepalive window)
         self.screen = Screen(SCREEN_LOG, self.screen_changed)
         self.steam_launches = SteamLaunches(STEAM_LOG, RUNNING_DIR)  # SL1: the launch placeholder's phases
         self.desktop(self.screen.on)  # started while PowOS is off screen: the desktop shell sleeps too
@@ -934,13 +941,20 @@ class Gui(dbus.service.Object):
         every LINK_S from the kernel (no thaw, nothing read from the client): a dropped link -> thawed now, the backoff
         runs off the tap's path, asleep again once logged on (reconnect_poll). While a display is lit (PowOS on
         screen, or Android's home with the games widget: bf-coldstart frozen 15:06, PowOS off screen, handoff 17 s);
-        screen off: nothing (battery), the dropped link is found within LINK_S of the screen coming on. A link that is
-        still live costs one /proc read."""
+        screen off: keepalive pulses only, for LINK_DARK_S after it went dark (then nothing, battery); a link dropped
+        while dark is found within LINK_S of the screen coming on. A link that is still live costs one /proc read."""
         # HACK: a frozen Steam can't answer its CM server (dropped 79 s into a freeze, 2026-11-05 14:47), so it is thawed
         # for LINK_PULSE_MS every LINK_PULSE_S while a display is lit (its overdue heartbeat goes out) and thawed to
         # reconnect when the link died anyway. Real fix: Steam's client keeping its link from a small process of its
         # own (or a resume that skips the reconnect backoff), so the client could stay frozen.
-        if self.screen.on or display_on():
+        # Screen dark: pulses only (no reconnect: that is ~25 s awake) for LINK_DARK_S after it went dark, so a tap soon
+        # after waking the phone finds the link live (bf-coldstart 11-11 23:28: dark 95 s, link dropped, handoff 9.6 s).
+        lit = self.screen.on or display_on()
+        if lit:
+            self.dark_since = None
+        elif self.dark_since is None:
+            self.dark_since = time.time()
+        if lit or time.time() - self.dark_since < LINK_DARK_S:
             cl = os.path.expanduser("~/.local/share/Steam/logs/connection_log.txt")
             now = time.monotonic()
             for u in self.rules():
@@ -948,7 +962,8 @@ class Gui(dbus.service.Object):
                 if root is None:
                     continue
                 if steam_link(cl) == 1:
-                    self.reconnect(u, "link dropped while frozen")
+                    if lit:
+                        self.reconnect(u, "link dropped while frozen")
                 elif now - self.pulse_at.setdefault(root, now) >= LINK_PULSE_S > 0:
                     self.pulse_at[root] = now
                     self.thaw(root, "link keepalive", quiet=True)

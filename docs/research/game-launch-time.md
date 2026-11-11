@@ -692,3 +692,25 @@ log has `clocks restored` at 21:32:19 (tap 21:32:01, window 12.7 s, frame 21.4 s
 then the `boost` engage at 21:32:51 (50 s after the tap) and `restore asked` at 21:33:04 = the check closing the game -
 the "restore at ~13 s" above was the close, and no engage line at the tap is in the log. Next run's BOOST line should
 show one engage at the tap and `launch hold released: its first frame` in the app's PowosGameBoost log.
+
+### 11-11 23:45: Steam's reconnect off the launch path (agent/steam-cm)
+
+Job bf-coldstart-2026-11-11_2327 (`steam`, Steam FROZEN at the tap): **handoff 9.6 s, window 21.4 s, frame 30.0 s**
+vs 12.7 / 21.4 s with Steam awake. Read-only off the phone (connection_log + powos-sleep-gui.log):
+- Steam frozen 23:26:34, screen dark until the check woke it for the tap at 23:28:09 (95 s). The server had dropped the
+  silent client (79 s into a freeze, measured 11-05): `Disconnected By Remote Host` 23:28:09, `StartAutoReconnect()
+  will start in 7.0 seconds (attempt 1)`, GetCMListForConnect 23:28:16-18, Logged On 23:28:19 = the 9.6 s handoff
+  (/usr/bin/steam's forward waits for Logged On; skipping that wait is unsafe: the 10-24 cloud "syncfailed" prompt).
+- link_watch's keepalive pulse (1.5 s every 50 s) ran only while a display was lit, so 95 s dark = a dead link. Its
+  screen-on "reconnect ahead" fired at 23:28:09 together with the tap: no overlap. All reconnects logged on 11-11 took
+  5.0 / 21.4 / 25.6 / 23.6 / 9.5 s (attempt-1 delay is Steam's 7-22 s) - a user's wake -> tap (a few s) can never
+  hide that, so thawing earlier (games page, icon touch-down) can't either: the link must not die.
+- Decision (coordinator, b): the keepalive pulse also runs for 15 min after the screen went dark
+  (`POWOS_SLEEP_LINK_DARK_S=900`, wall clock), pulses only (no ~25 s reconnect while dark), nothing past the window.
+  Power: <= 18 pulses x 1.5 s per dark period, and GLib timers never wake a suspended phone (5580 suspends since boot),
+  so a pulse only rides wake-ups that happen anyway. A tap more than 15 min after the screen went dark (or after a long
+  suspend) still pays the reconnect, from the screen-on reconnect-ahead (unchanged).
+- Test: test/tier1/test-sleep-gui-screen.py LinkWatch.test_dark_screen_keeps_the_link_for_a_while (+ past-window costs
+  nothing, lit restarts the window); control with the old link_watch: FAIL + 2 ERROR; now 18/18 (tier1 on .58).
+- Expected: `bf-coldstart.sh steam` handoff ~1 s (11-09: 1.1 s), frame ~21 s; still above the 10 s goal - the rest is
+  container + Wine boot + window -> frame (resident game = the instant path).

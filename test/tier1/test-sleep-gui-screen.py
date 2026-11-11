@@ -163,6 +163,7 @@ class LinkWatch(unittest.TestCase):
         g.rules = lambda: [self.U]
         g.refused, g.calls = {}, []
         g.pulse_at = {100: time.monotonic() - frozen_for} if frozen else {}
+        g.dark_since = None
         g.reconnect = lambda u, why: g.calls.append(("reconnect", why))
         g.thaw = lambda pid, why, quiet=False: (g.frozen.pop(pid, None), g.calls.append(("thaw", why, quiet)))
         g.freeze = lambda pid, cpu, quiet=False: (g.frozen.update({pid: {}}), g.calls.append(("freeze", quiet)))
@@ -247,6 +248,34 @@ class LinkWatch(unittest.TestCase):
         with self.patched(link=0):
             g.link_watch()
         self.assertEqual(g.calls, [])
+
+    def test_dark_screen_keeps_the_link_for_a_while(self):
+        """Screen off, phone woken and a game tapped seconds later (bf-coldstart 11-11 23:28: Steam frozen 95 s in the
+        dark, link dropped, the tap waited Steam's reconnect: handoff 9.6 s, frame 30.0 s vs 21.4 s live): the
+        keepalive pulse runs in the dark too, within LINK_DARK_S of the screen going dark."""
+        self.timers, self.lit = [], False
+        g = self.gui(on=False, frozen_for=GUI.LINK_PULSE_S + 1)
+        with self.patched(link=0):
+            g.link_watch()
+        self.assertEqual(g.calls, [("thaw", "link keepalive", True)])
+        self.assertIsNotNone(g.dark_since)
+
+    def test_dark_screen_past_its_window_costs_nothing(self):
+        self.timers, self.lit = [], False
+        g = self.gui(on=False, frozen_for=GUI.LINK_PULSE_S + 1)
+        g.dark_since = time.time() - GUI.LINK_DARK_S - 1
+        with self.patched(link=0):
+            g.link_watch()
+        self.assertEqual(g.calls, [])
+
+    def test_lit_screen_restarts_the_dark_window(self):
+        self.timers, self.lit = [], True
+        g = self.gui(on=False, frozen_for=5)
+        g.dark_since = time.time() - GUI.LINK_DARK_S - 1
+        with self.patched(link=0):
+            g.link_watch()
+        self.assertIsNone(g.dark_since)
+
 
 if __name__ == "__main__":
     unittest.main()
