@@ -38,7 +38,7 @@ assert_home_screen() {
     1116:2484|2484:1116) actual=cover ;;
     *) echo "SKIP: unrecognised OnePlus display $w x $h; requested $QUEUE_SCREEN"; exit 5 ;;
   esac
-  [ "$actual" = "$QUEUE_SCREEN" ] || { echo "SKIP: requested $QUEUE_SCREEN but actual display is $actual ($w x $h); fold to the requested screen before rerunning"; exit 5; }
+  [ "$actual" = "$QUEUE_SCREEN" ] || { echo "SKIP: requested $QUEUE_SCREEN but actual display is $actual ($w x $h); fold to the requested screen before rerunning"; exit 3; }   # rc 3: the queue waits for that screen (screen_wrong)
   log "screen verified: requested=$QUEUE_SCREEN actual=$actual ($w x $h)"
 }
 # Before setup touches home, and again after setup and every turn: no wrong-screen PASS.

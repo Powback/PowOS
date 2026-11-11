@@ -8,7 +8,7 @@
                                                               <p50 s> <budget s>" (queue.sh's job_budget / order_quick)
 
 UTIL_LOG lines (queue.sh writes them):
-  J <start> <end> <class> <job>   one job: class pass | fail | skip | touched | precond | early | stopped | timeout
+  J <start> <end> <class> <job>   one job: class pass | fail | skip | touched | precond | early | screen | stopped | timeout
   W <open> <close>                one idle window: from window_lock's grant to its release
 Useful = pass + fail seconds (a job that produced a verdict). Everything else in a window is wasted: rc-3 tries
 (precond = nobody touched the phone and it still had no result; touched = the user came back; early = gave up at once),

@@ -273,6 +273,32 @@ order_quick() { local i j m a best bc c out=() costs=() tasks=() placed=() b
 # runner_sum <queue.sh copy>: what the runner runs - that queue.sh and the verify checkout's window-lock.sh it sources.
 runner_sum() { echo "$(cksum < "$1" 2>/dev/null) $(cksum < "$VR/tools/phone/verify/window-lock.sh" 2>/dev/null)"; }
 rc3_waits() { [ "${1:-0}" -gt "${2:-$(date +%s)}" ] 2>/dev/null; }
+# A job on the wrong screen WAITS - it's never a try. 11-11 06:55: ww-resize ended "SKIP folded (needs the inner
+# screen)" + rc 3 three times while the phone sat folded, and the runner gave job 20261111-034846-37174 "FAIL
+# precondition, no more retries". A job queued with --screen (or that once said it needs a screen: wscreen=, from
+# screen_wrong) is held while the other display is on; the queue never folds or unfolds anything.
+# screen_now: the active display from `wm size` (the Open's panels, as rotate-repro.sh reads them): inner | cover,
+# empty when unknown (phone gone, other geometry - then the job runs and says so itself). Cached QUEUE_SCREEN_TTL (5) s.
+screen_now() { local t= s= wh now; now=$(date +%s)
+  { read -r t s < "$Q/screen.now"; } 2>/dev/null
+  if [ -n "$t" ] && [ $((now - t)) -lt "${QUEUE_SCREEN_TTL:-5}" ] 2>/dev/null; then echo "$s"; return 0; fi
+  wh=$(perl -e 'alarm shift; exec @ARGV' 15 "$phone/adb.sh" shell wm size 2>/dev/null | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2:\3/p' | tail -1)
+  case $wh in 2268:2440|2440:2268) s=inner ;; 1116:2484|2484:1116) s=cover ;; *) s= ;; esac
+  echo "$now $s" > "$Q/screen.now" 2>/dev/null; echo "$s"; }
+# screen_wrong <log>: its last INVALID/SKIP/FAIL line says it ran on the wrong screen - prints the screen it needs.
+screen_wrong() { local l; l=$(grep -E '^([0-9:]+ )?(INVALID|SKIP|FAIL)' "$1" 2>/dev/null | tail -1)
+  case $l in
+    *"needs the inner screen"*|*"requested inner but actual display is"*) echo inner ;;
+    *"needs the cover screen"*|*"requested cover but actual display is"*) echo cover ;;
+    *) return 1 ;;
+  esac; }
+# screen_held <job name>: (the job's vars sourced) it needs the screen that's off - one line why, returns 0.
+screen_held() { local w=${screen:-${wscreen:-}} s; [ -n "$w" ] || return 1; s=$(screen_now)
+  [ -n "$s" ] && [ "$s" != "$w" ] || return 1
+  echo "$(date +%T) ${1:-job}: waits for the $w screen (phone $([ "$s" = cover ] && echo folded || echo unfolded)) - stays queued, no try counted"; }
+# job_wscreen <job> <screen>: remember the screen a check said it needs (screen_wrong) for the windows after.
+job_wscreen() { local tmp; tmp=$(mktemp "$1.XXXX") || return 1
+  { grep -v '^wscreen=' "$1"; printf 'wscreen=%s\n' "$2"; } > "$tmp" && mv -f "$tmp" "$1"; }
 # alive_runner <pid>: that pid runs a queue runner (not a recycled pid).
 alive_runner() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null && ps -p "$1" -o command= 2>/dev/null | grep -q queue; }
 runner_up() { alive_runner "$(cat "$Q/runner.lock/pid" 2>/dev/null || cat "$Q/runner.pid" 2>/dev/null)"; }
@@ -801,6 +827,7 @@ EOS
     if [ "$task" != "$go" ] && rc3_waits "$after"; then echo "$(date +%T) $n: exited 3 $tries times - stays queued, next try after $(date -r "$after" +%T 2>/dev/null || date -d "@$after" +%T)"; return 0; fi
     if [ -z "$go" ] && [ "${AWAY:-0}" = 1 ] && ( [ "$rel" = 1 ] && cd "$VR/$cwd" 2>/dev/null || cd "$cwd" 2>/dev/null; closes_game "${cmd[@]}" ); then
       echo "$(date +%T) $n: would close the game left running (nobody playing) - skipped, stays queued"; return 0; fi
+    screen_held "$n" && return 0
     if [ "$task" != "$go" ] && ! shipped "$need" "$qt"; then echo "$(date +%T) $n: waits for its ship (${need:0:9}) - skipped, the jobs behind it run"; return 0; fi
     return 1; }
   # first_waiting <job> <go>: a job sorting before <job>, not in this window's sel, that the next window would run
@@ -809,7 +836,7 @@ EOS
     for f in "$Q"/*.job; do
       [ "$f" \< "$j" ] || break
       case " ${sel[*]} " in *" $f "*) continue ;; esac
-      need=; qt=0; task=; after=0; tries=0; cwd=; rel=0; cmd=(); . "$f"
+      need=; qt=0; task=; after=0; tries=0; cwd=; rel=0; screen=; wscreen=; cmd=(); . "$f"
       # A task-specific test request must not yield forever to a job it cannot select next window.
       [ -z "$go" ] || [ "$go" = all ] || [ "$task" = "$go" ] || continue
       job_held "$go" >/dev/null && continue
@@ -818,7 +845,7 @@ EOS
   select_jobs() { local go=$1 j; sel=(); held=0
     for j in "$Q"/*.job; do
       [ -f "$j" ] || continue
-      task=; need=; qt=0; cwd=; rel=0; after=0; tries=0; cmd=(); . "$j"
+      task=; need=; qt=0; cwd=; rel=0; after=0; tries=0; screen=; wscreen=; cmd=(); . "$j"
       [ -z "$go" ] || [ "$go" = all ] || [ "$task" = "$go" ] || continue
       job_held "$go" "$(basename "$j" .job)" && { held=$((held + 1)); continue; }
       sel+=("$j")
@@ -914,7 +941,9 @@ EOS
         if ! perl -e 'alarm shift; exec @ARGV' 15 "$phone/adb.sh" shell true >/dev/null 2>&1; then
           echo "$(date +%T) the phone isn't reachable - leaving the window, jobs stay queued"; exit 3
         fi
-        task=; close=0; tries=0; after=0; cwd=$PWD; rel=0; from=; name=; screen=; budget=300; need=; qt=0; cmd=(); . "$j"
+        task=; close=0; tries=0; after=0; cwd=$PWD; rel=0; from=; name=; screen=; wscreen=; budget=300; need=; qt=0; cmd=(); . "$j"
+        # Folded / unfolded since the window picked it: it waits for its screen (screen_held), stays queued.
+        screen_held "$(basename "$j" .job)" && continue
         # A job from before repo-relative jobs: its worktree may be gone - run it in the verify checkout instead.
         if [ "$rel" != 1 ] && [[ "$cwd ${cmd[*]}" == *"$REPO/.claude/worktrees/"* ]]; then
           if wt_of "$cwd"; then relify "$wsub"; else relify ""; fi
@@ -1017,7 +1046,7 @@ EOS
           # run = a finger came. Nobody touched it and it burnt the phone's time: precond - at QUEUE_PRECOND_MAX (3)
           # tries a verdict ("FAIL precondition: <why>"), never an endless rc 3 loop while the phone sits idle.
           idl=$("$phone/idle.sh" 2>/dev/null | sed -n 's/.*idle=\([0-9]*\).*/\1/p')
-          kind=$(rc3_kind $((t1 - t0)) "$idl"); util_rec J "$t0" "$t1" "$kind" "$n"
+          kind=$(rc3_kind $((t1 - t0)) "$idl"); ws=$(screen_wrong "$log") && kind=screen; util_rec J "$t0" "$t1" "$kind" "$n"
           if [ "$kind" = precond ]; then
             pt=$(rc3_precond "$j")
             if [ "${pt:-0}" -ge "${QUEUE_PRECOND_MAX:-3}" ]; then
@@ -1029,6 +1058,10 @@ EOS
           fi
         fi
         if [ $rc = 3 ]; then
+          if [ "$kind" = screen ]; then   # the wrong screen: a wait, never a try (screen_held holds it from now on)
+            job_wscreen "$j" "$ws"; ph=folded; [ "$ws" = cover ] && ph=unfolded
+            echo "$(date +%T) $n: waits for the $ws screen (phone $ph) - stays queued, no try counted"
+          else
           aft=$(rc3_requeue "$j" "$log" "$tries")
           if [ "${aft:-0}" = 0 ]; then echo "$(date +%T) $n: rc 3 ($kind$([ "$kind" = precond ] && echo " $pt/${QUEUE_PRECOND_MAX:-3}: nobody touched the phone, its setup failed"; [ "$kind" = early ] && echo ": not ready yet")), again next window"
           else
@@ -1036,6 +1069,7 @@ EOS
             # The board hears it once, as a step (no check verdict: not a PASS, FAIL or SKIP - it still runs).
             [ $((tries + 1)) = 5 ] && user_sh "$(printf 'powos agents task set %q --step %q >/dev/null 2>&1 || true' "$task" \
               "$QUEUED_STEP: exited 3 five times ($(grep -E '^(INVALID|SKIP|FAIL)' "$log" | tail -1 | cut -c1-120)) - stays queued, retried every few min (log ~/.cache/powos-verify-queue/done/$n.log.tries)")" &
+          fi
           fi
           # Leave the window only when the user really came back (a finger in the last QUEUE_IDLE_S): rc 3 also means
           # "not on the phone yet" (plasma-notify: no PlasmaBridge in the APK), which ended every window at its first
