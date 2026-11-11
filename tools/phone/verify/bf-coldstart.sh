@@ -60,6 +60,22 @@ trap stop_phone TERM INT HUP; wait "$job"; trap - TERM INT HUP; kill "$shooter" 
 # A Steam dialog the phone side grabbed (no launch chain: what Steam asked).
 "$A" exec-out "su -c 'tar -C /data/powos/root/tmp -cz bf-cold-dialog 2>/dev/null; rm -rf /data/powos/root/tmp/bf-cold-dialog'" 2>/dev/null | tar -C "$OUT" -xzf - 2>/dev/null \
   && [ -d "$OUT/bf-cold-dialog" ] && echo "steam dialog: $OUT/bf-cold-dialog/"
+# The game boost's evidence for this launch (docs/research/game-launch-time.md 11-11: the LPROF clocks alone can't tell
+# "the holder never engaged" from "category_4 at a hot gear" from "a hook APK without reevaluateOnMarker"): the
+# holder's log, the oplus-hook APK on the phone, when com.oplus.battery started, every vendor category evaluation and
+# hook line since this check began. Read-only (Android side: the holder's own log, dumpsys, ps, logcat).
+since=$(( $(date +%s) - SECONDS - 5 ))
+cat > "$OUT/boost-probe.sh" <<EOF
+S=/data/powos/state/game-boost; from=\$(date -d @$since '+%F %T' 2>/dev/null || echo 0)
+awk -v f="\$from" '(\$1 " " \$2) >= f' \$S/log 2>/dev/null | tail -n 30 | sed 's/^/holder /'
+echo "hook \$(dumpsys package com.powos.oplushook 2>/dev/null | grep -m2 -E 'versionName|lastUpdateTime' | tr -s ' ' | tr '\n' ' ')"
+echo "battery_started \$(ps -A -o STIME,NAME 2>/dev/null | grep -m1 ' com.oplus.battery\$')"
+logcat -d -b all -v epoch -t $since.0 2>/dev/null | grep -E 'ThermalControllHandler: tempLevel|PowOS-oplushook' | tail -n 12 | sed 's/^ */vendor /'
+EOF
+"$A" push "$OUT/boost-probe.sh" /data/local/tmp/powos-bf-boost-probe.sh >/dev/null 2>&1 &&
+  "$A" shell "su -c 'sh /data/local/tmp/powos-bf-boost-probe.sh; rm -f /data/local/tmp/powos-bf-boost-probe.sh'" 2>/dev/null | tr -d '\r' > "$OUT/boost.txt"
+grep -q '^holder .*boost\|^holder .*vendor game class on' "$OUT/boost.txt" && b=engaged || b="no holder line"
+echo "BOOST holder: $b; $(grep -m1 '^hook ' "$OUT/boost.txt"); $(grep -m1 '^battery_started' "$OUT/boost.txt"); category: $(grep -o 'configItemName=[a-z_0-9]*' "$OUT/boost.txt" | sort | uniq -c | tr -s ' ' | tr '\n' ' ')- $OUT/boost.txt"
 echo "artefacts: $OUT/run.txt"; cat "$OUT/shots.txt" 2>/dev/null
 grep -q "^RESULT" "$OUT/run.txt" || { grep -q "^user input\|^stopped from outside\|^not ready" "$OUT/run.txt" && exit 3; echo "FAIL run: no RESULT line"; exit 1; }
 grep "^RESULT" "$OUT/run.txt" | tail -1

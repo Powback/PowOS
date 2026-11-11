@@ -594,3 +594,49 @@ live in the prefix registry; a Proton update keeps them, a rebuilt prefix change
 old-format records still match and are rewritten. Test: test-steam-iscript-skip.py (Proton update still skips, old
 record honoured). The dead CM link after a freeze (~13 s + ~7 s of post-logon prep) is the open unified-sleep item
 from 10-24 ("keeping a frozen Steam's CM link alive"), unchanged: manager decision.
+
+## 11-11 cold start after Steam 42 (agent/bf-launch-1111)
+
+Job 20261111-154535-55790 (`bf-coldstart.sh steam`, 21:16, steam 1.0.0.87-42, build 7e731aa1; artefacts
+`~/.cache/powos-verify/bf-coldstart-2026-11-11_2115/`): **window 12.4 s, frame 21.4 s**. Steam was *frozen* at the tap
+(11-07/11-09: awake); the phone was folded (outer screen, 1116x2484) and idle 814 s before the job. Phases from each
+run's STAGES line (ms from the tap; the 11-07 table above used slightly different cut points, so 11-07 is re-read here):
+
+| phase | 11-07 04:36 | 11-09 16:39 | 11-11 21:16 | what changed |
+|---|---|---|---|---|
+| launcher (tap -> handoff) | 0.8 | 1.1 | 1.3 | Steam thawed from frozen first |
+| Steam prep (handoff -> reaper) | 3.2 | 2.0 | 3.4 | evaluator **skipped** (iscript 2.8-3.3 s, "skipped before the container ... as at its last good run"): the pkgrel 42 key fix holds |
+| container (reaper -> wineserver) | 1.5 | 1.4 | 2.3 | |
+| Wine boot (wineserver -> exe) | 2.9 | 1.8 | 4.2 | |
+| engine init (exe -> window) | 2.1 | 2.3 | 1.2 | |
+| window -> first frame | 8.8 | 8.3 | 9.0 | |
+| **tap -> frame** | **19.3** | **17.0** | **21.4** | goal < 10 s |
+| prime clock (LPROF, MHz) | 1363 flat | 864-2227, governor-driven | 1363 flat | |
+| read from storage during load | 68 MB | | 238 MB | |
+
+**Boost: no lift.** LPROF read `?/2016/1651/1363` MHz in all 42 samples (10.8-21.5 s) - the prime held at 1.36 GHz, the
+same level-5 cap as 11-07 before the oplus-hook fix; 11-09 16:39 (3 min after the fixed hook APK was built) ran the prime
+up to 2.23 GHz and got 17.0 s. Whether the holder engaged, set `powos_game_front`, and whether com.oplus.battery
+answered `category_4` is **not in the evidence**: bf-coldstart recorded no boost status, holder log or vendor logcat. The
+precondition is **unverified**: the fixed APK (`android-app-dev/output/powos-oplus-hook.apk`, 11-09 16:36, after
+ded11835's NPE fix) exists, but the only recorded device deploy (REMOTE-POWOS.md 4.1) is 11-04's b05e2a6a build, which
+predates `reevaluateOnMarker` - no install/restart of com.oplus.battery is logged since. A flat 1.36 GHz also fits
+category_4 at gear 10 (a hot phone), or the folded-profile table; the run alone can't tell them apart.
+
+Code read (no defect found): powos-open-task writes run/game-launch/<id> at the tap, GameBoost engages a fresh mark
+(LAUNCH_S 60 s) while the screen is interactive, game-boost.sh sets the marker under horae (`vendor_game_class`), and the
+hook's ContentObserver re-evaluates on it. No code fix without device evidence.
+
+**Fix (measurement):** `bf-coldstart.sh` now pulls the boost's evidence after each run into `boost.txt` and prints a
+`BOOST holder: engaged|no holder line; hook <versionName lastUpdateTime>; battery_started <STIME>; category: N
+configItemName=...` line (holder log since the check began, `dumpsys package com.powos.oplushook`, com.oplus.battery's
+start time, ThermalControllHandler + PowOS-oplushook logcat since the check began). Read-only, Android side.
+
+Why the 2.1 s over 11-07 (same clocks): Steam frozen at the tap (+0.5 s thaw, steamwebhelper 72 % of a core at the start)
+and a cold page cache - 238 MB read from storage during the load vs 68 MB, landing in container + Wine boot (+2.1 s);
+engine init and window->frame are within noise. So the tap read-ahead (powos-open-task prefetch) did not cover this
+launch, or was not on the phone's copy (the STAGES "open-task:" field is truncated).
+
+Next lever, in order: (1) install the 11-09 oplus-hook APK + restart com.oplus.battery (logged in REMOTE-POWOS.md 4.1),
+then rerun `bf-coldstart.sh steam` and read the BOOST line - expected ~17 s like 11-09 16:39; (2) check the prefetch ran
+(read_bytes should be ~0 MB, not 238 MB); (3) the frozen-Steam thaw at the tap (~0.5 s) and Wine boot pre-boot (above).
