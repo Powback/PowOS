@@ -63,9 +63,16 @@ sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >
 # page never showed the layer, the check then read an empty page as "no running in background"). Read the PAGE's layer
 # (.recents.open), not only the host's flag: pressed again only while both say closed, never a toggle back. Host
 # open + page closed = the recents key would toggle a layer nobody sees: reported as itself, not as missing rows.
-sw_state() { "$T/cdp.sh" eval home "window.__gw.mod('./bridge.ts').then(async({powos})=>!!(await powos.recents.state())?.open+'/'+!!document.querySelector('.recents.open'))" 2>/dev/null | tail -1 | tr -d '"\r'; }
+# importShim, not window.__gw: __gw only exists once shell_check has injected it (a fresh page after an install has
+# none - 11-11 13:35, every probe a TypeError and three presses toggling blind).
+sw_state() { "$T/cdp.sh" eval home "importShim('./bridge.ts').then(async({powos})=>!!(await powos.recents.state())?.open+'/'+!!document.querySelector('.recents.open'))" 2>/dev/null | tail -1 | tr -d '"\r'; }
+# Home on home's main page opens the switcher itself (ShellActivity.homePressed): the "am start HOME" above can leave
+# it up already - the first recents press then CLOSED it (window log 12:50:48 up, 12:50:53 down: the original FAIL).
+# Already up on the page: no press.
 open_switcher() {
   local st= _p _w
+  st=$(sw_state)
+  case $st in */true) return 0 ;; true/false|false/false) ;; *) echo "can't read the switcher on home's page: ${st:-no answer}"; return 1 ;; esac
   for _p in 1 2 3; do
     sh_ "input keyevent KEYCODE_APP_SWITCH"
     for _w in 1 2 3 4 5 6; do

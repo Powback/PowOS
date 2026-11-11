@@ -131,21 +131,32 @@ sh_() {
             return r.returncode, r.stdout, int(f.read().strip() or 0)
 
     def test_switcher_opened_on_first_press(self):
-        self.assertEqual(self.run_open(['false/false', 'true/true'])[::2], (0, 1))
+        self.assertEqual(self.run_open(['false/false', 'false/false', 'true/true'])[::2], (0, 1))
 
     def test_lost_press_pressed_again_never_toggled_back(self):
-        rc, _, presses = self.run_open(['false/false'] * 6 + ['true/true'])
+        rc, _, presses = self.run_open(['false/false'] * 7 + ['true/true'])
         self.assertEqual((rc, presses), (0, 2))
 
     def test_never_opened_fails_named(self):
-        rc, out, presses = self.run_open([])
+        rc, out, presses = self.run_open(['false/false'] * 19)
         self.assertEqual((rc, presses), (1, 3))
         self.assertIn('opened no switcher', out)
 
     def test_host_open_page_closed_is_reported_not_retoggled(self):
-        rc, out, presses = self.run_open(['true/false'] * 6)
+        rc, out, presses = self.run_open(['false/false'] + ['true/false'] * 6)
         self.assertEqual((rc, presses), (1, 1))
         self.assertIn('recents key is dead', out)
+
+    def test_switcher_already_up_after_home_is_never_pressed_closed(self):
+        # Home on home's main page opens the switcher (ShellActivity.homePressed): a press then closed it (12:50 FAIL).
+        self.assertEqual(self.run_open(['false/true'])[::2], (0, 0))
+        self.assertEqual(self.run_open(['true/true'])[::2], (0, 0))
+
+    def test_unreadable_page_never_pressed_blind(self):
+        rc, out, presses = self.run_open(["TypeError: Cannot read properties of undefined (reading 'mod')"])
+        self.assertEqual((rc, presses), (1, 0))
+        self.assertIn("can't read the switcher", out)
+        self.assertNotIn('window.__gw', SOURCE.split('sw_state() {', 1)[1].split('\n', 1)[0])
 
     def test_check_reads_page_only_after_open(self):
         self.assertLess(SOURCE.index('if ! why=$(open_switcher)'), SOURCE.index('switcherBackgroundNow Termux'))
