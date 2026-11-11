@@ -380,6 +380,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       ready: () => call("recents.ready"),
       closed: (opening) => call("recents.closed", opening ?? null),
       state: () => call("recents.state"),
+      layer: (up) => call("recents.layer", up),
     },
     assist: {
       screen: () => call<AssistScreen | null>("assist.screen"),
@@ -979,6 +980,7 @@ function mock(): Bridge {
       ready: async () => {},
       closed: async () => {},
       state: async () => ({ open: false, from: null, tasks: [] }),
+      layer: async (up) => void ((window as unknown as { __recentsLayer?: boolean[] }).__recentsLayer ??= []).push(up),
     },
     // A screen it was opened over: some text, no screenshot.
     assist: {

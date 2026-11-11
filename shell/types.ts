@@ -1211,6 +1211,12 @@ export interface Bridge {
     closed(opening?: number): Promise<void>;
     /** Whether it's up, over what, with the tasks (a page that just loaded). */
     state(): Promise<{ open: boolean; from: number | null; tasks: RecentTask[] }>;
+    /**
+     * The page's layer as the user sees it (up: shown or being swiped up), on every change and at load: the host's
+     * recents key toggles from it, never from a flag of its own that may have gone stale. Optional: an older APK
+     * hasn't it (the call rejects; the page's own toggle fallback still opens a closed layer).
+     */
+    layer?(up: boolean): Promise<void>;
   };
   /** The theme: the colors in use ("theme.changed" brings them again), the ones to pick from, picking one. */
   theme: {

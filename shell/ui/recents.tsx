@@ -37,6 +37,15 @@ import { appView, closeApp, forgetOpened, mergeTasks, openApp, taskApp } from ".
 type Phase = "closed" | "drag" | "shown";
 
 const phase = signal<Phase>("closed");
+// The layer as the user sees it, told to the host on every change (and at load): its recents key toggles from this.
+// An older APK rejects the call - its own flag then decides, and switcher.toggle below still opens a closed layer.
+let reportedUp: boolean | null = null;
+phase.subscribe((p) => {
+  const up = p !== "closed";
+  if (up === reportedUp) return;
+  reportedUp = up;
+  powos.recents.layer?.(up)?.catch(() => {});
+});
 const tasks = signal<RecentTask[]>([]);
 /** The task it was opened over (null: home). */
 const from = signal<number | null>(null);

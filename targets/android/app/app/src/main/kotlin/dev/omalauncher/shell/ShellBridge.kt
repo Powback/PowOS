@@ -737,6 +737,7 @@ class ShellBridge(
             "recents.ready" -> dev.omalauncher.system.Switcher.ready(this)
             "recents.closed" -> dev.omalauncher.system.Switcher.closed(context, this, a.optInt(0, -1).takeIf { it >= 0 })
             "recents.state" -> dev.omalauncher.system.Switcher.state()
+            "recents.layer" -> dev.omalauncher.system.Switcher.layer(this, a.optBoolean(0))
             "assist.screen" -> assist?.screen()
             "assist.close" -> assist?.close()
             "assist.attach" -> assist?.attach(a.optString(0).takeIf { it.isNotEmpty() && it != "null" })

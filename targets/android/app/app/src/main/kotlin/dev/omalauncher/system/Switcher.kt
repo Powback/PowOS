@@ -510,10 +510,48 @@ object Switcher {
         }
     }
 
+    /**
+     * The page's layer as the user sees it ("recents.layer", shell/ui/recents.tsx: every change and at load); null
+     * until a page has said (an older shell). The recents key toggles from this, not from [open], which can go stale
+     * (OnePlus folded 11-11: host up + page closed = a dead key; page up + host closed = a press that re-showed it).
+     */
+    @Volatile
+    var pageLayer: Boolean? = null
+        private set
+
+    /** The page that reported [pageLayer]: a report from a page that is no longer home's counts for nothing. */
+    private var layerFrom: ShellBridge? = null
+
+    /** The page reported its layer: [open] follows it, outside a swipe (which owns the layer while it runs). */
+    fun layer(
+        bridge: ShellBridge,
+        up: Boolean,
+    ) {
+        if (bridge !== home) return
+        pageLayer = up
+        layerFrom = bridge
+        if (gesture || up == open) return
+        Log.w(TAG, "layer: the page says ${if (up) "up" else "closed"}, the host had ${if (open) "up" else "closed"} - following the page")
+        open = up
+        if (!up) from = null
+        depthTo(if (up) 1f else 0f)
+    }
+
     /** The overview button: the switcher; pressed again while it shows, the page decides (it switches back). */
     fun toggle(context: Context) {
-        if (open && homeVisible && !gesture) home?.emit("switcher.toggle", null) else show(context)
+        if (pageToggles(pageLayer.takeIf { layerFrom != null && layerFrom === home }, open, homeVisible, gesture)) home?.emit("switcher.toggle", null) else show(context)
     }
+
+    /**
+     * Whether the recents key goes to the page as "switcher.toggle" (the layer the user sees is up: it switches back or
+     * closes) rather than [show]: the page's own report first, the host's flag only for a page that never reported.
+     */
+    internal fun pageToggles(
+        pageLayer: Boolean?,
+        hostOpen: Boolean,
+        homeVisible: Boolean,
+        gesture: Boolean,
+    ): Boolean = !gesture && homeVisible && (pageLayer ?: hostOpen)
 
     /** Home over the open switcher (the home swipe): the layer collapses into home with its own spring. */
     fun close() {

@@ -2306,6 +2306,9 @@ async function switcherStaleToggle() {
   window.__mockEvents.emit("switcher.toggle", null);
   await wait(800);
   if (document.querySelector(".recents.open")) fails.push("stale toggle: a second press left the switcher open");
+  // The host's key toggles from the page's report (recents.layer): the last report matches what's on screen.
+  const told = window.__recentsLayer ?? [];
+  if (told.at(-1) !== false || !told.includes(true)) fails.push(`the page's layer reports (recents.layer) don't follow it: ${JSON.stringify(told)}`);
   return fails;
 }
 /** switcher-background's helpers, in the page (each step runs there on its own: page.evaluate). */
