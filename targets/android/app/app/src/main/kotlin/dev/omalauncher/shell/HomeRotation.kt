@@ -45,13 +45,24 @@ object HomeRotation {
         naturalPortrait: Boolean,
     ): Int? {
         if (before !in 0..3 || now !in 0..3 || before == now) return null
-        return when (before) {
-            Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_NOSENSOR
-            Surface.ROTATION_90 -> if (naturalPortrait) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            Surface.ROTATION_180 -> if (naturalPortrait) ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-            else -> if (naturalPortrait) ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
-        }
+        return (if (naturalPortrait) BY_ROTATION_PORTRAIT else BY_ROTATION_LANDSCAPE)[before]
     }
+
+    // Surface.ROTATION_0..270 -> the orientation WM turns to that rotation, for a natural portrait / landscape display.
+    private val BY_ROTATION_PORTRAIT =
+        intArrayOf(
+            ActivityInfo.SCREEN_ORIENTATION_NOSENSOR,
+            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+            ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT,
+            ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE,
+        )
+    private val BY_ROTATION_LANDSCAPE =
+        intArrayOf(
+            ActivityInfo.SCREEN_ORIENTATION_NOSENSOR,
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+            ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE,
+            ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT,
+        )
 
     /** Whether display 0 is taller than wide at ROTATION_0, from its size ([w] x [h]) at [rotation]. */
     fun naturalPortrait(
