@@ -41,6 +41,7 @@ DEADLINE_S=${DEADLINE_S:-235}; STEP=start; DL=$OUT/.deadline; rm -f "$DL"
 cap() { perl -e 'alarm shift; exec @ARGV' "$@"; }   # cap <s> cmd...: killed (SIGALRM) past <s> seconds
 step() { STEP=$*; }
 log() { echo "$(date +%T) $*" | tee -a "$R"; }
+note() { echo "$(date +%T) $*" >> "$R"; }   # the log file only (callers inside $(...) print their value on stdout)
 sh_() { cap 45 "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 top() { sh_ "dumpsys activity activities | grep -m1 topResumedActivity"; }
@@ -49,16 +50,24 @@ vis() { CDP_TIMEOUT_S=8 cap 15 "$T/cdp.sh" eval "$1" 'document.visibilityState' 
 # shadeup: "up" while PowOS's shade window shows and takes touch (e2e-lib.sh's), else "down".
 shadeup() { sh_ "dumpsys window windows" | awk '/^ *Window #/{f=(index($0,"PowOS shade}")>0)} f && / fl=/{nt=(index($0,"NOT_TOUCHABLE")>0)} f && !d && /mViewVisibility=/{print ((index($0,"mViewVisibility=0x0 ")>0 && !nt) ? "up" : "down"); d=1}'; }
 # shade_show: pulled down from the status bar at 30% of the width (board-look-shade.sh pullbar), until its page is visible.
+# Every sub-step is noted with its time; the visibility wait is capped (SHADE_VIS_S) so a stuck shade ends here, named.
+SHADE_VIS_S=${SHADE_VIS_S:-15}
 shade_show() {
-  local i W H
+  local i W H t0=$SECONDS t1
   read -r W H <<<"$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1)"
-  [ -n "${H:-}" ] || return 1
+  [ -n "${H:-}" ] || { note "shade: no display size (wm size)"; return 1; }
   for i in 1 2; do
     [ "$(shadeup)" = up ] && break
+    note "shade: pull $i (swipe from y=6)"
     sh_ "input swipe $((W * 30 / 100)) 6 $((W * 30 / 100)) $((H / 2)) 280" >/dev/null; sleep 1.4
   done
-  [ "$(shadeup)" = up ] || return 1
-  for i in 1 2 3 4 5 6 7 8; do [ "$(vis shade)" = visible ] && return 0; sleep 0.5; done
+  [ "$(shadeup)" = up ] || { note "shade: not up after 2 pulls ($((SECONDS - t0)) s)"; return 1; }
+  note "shade: up after $((SECONDS - t0)) s"; t1=$SECONDS
+  while [ $((SECONDS - t1)) -lt "$SHADE_VIS_S" ]; do
+    [ "$(vis shade)" = visible ] && { note "shade: page visible after $((SECONDS - t0)) s"; return 0; }
+    sleep 0.5
+  done
+  note "shade: up but its page not visible in ${SHADE_VIS_S} s"
   return 1
 }
 # shade_hide: put away - Back (the open shade has focus), then the shade's own settle-closed; never Home (the game).
@@ -74,9 +83,10 @@ shade_hide() {
 bridge_eval() {
   local v
   case "$(top)" in *PowosWindowActivity*) ;; *) [ "$(vis home)" = visible ] && { ev home "$1"; return; } ;; esac
-  if shade_show; then v=$(ev shade "$1"); else v=noshade; fi
-  shade_hide || echo "$(date +%T) the shade didn't go away (Back + shade.settle)" >> "$R"
-  echo "$(date +%T) bridge eval via the shade: ${v:0:120}" >> "$R"
+  local t0=$SECONDS
+  if shade_show; then v=$(ev shade "$1"); note "shade: eval -> ${v:0:120} ($((SECONDS - t0)) s in)"; else v=noshade; fi
+  shade_hide || note "the shade didn't go away (Back + shade.settle)"
+  note "bridge eval via the shade: ${v:0:120} ($((SECONDS - t0)) s with pull + put-away)"
   echo "$v"
 }
 # cdp.ts prints an eval's value JSON-encoded, so the JSON.stringify'd meter arrives as a quoted string
@@ -92,12 +102,15 @@ meter_set() { bridge_eval "importShim('./bridge.ts').then(b=>b.powos.store.set('
 # ph <phase> <cap s>: a bf-return-phone.sh phase in the PowOS session, capped.
 ph() { cap "$2" "$A" shell "su -c 'sh /data/powos/powos-run.sh \"APP=$APP LAUNCH_S=${LAUNCH_S:-360} bash /var/tmp/powos-bf-return-phone.sh $1\"'" 2>&1 | grep -v sysvipc | sed -l $'s/\r$//' | tee -a "$R"; }
 
-# fps_label <l> <t> <r> <b>: the counter in the task (bounds l t r b) - "text=<N fps>" (uiautomator), "view=V" (dumpsys:
-# a visible TextView there, text unread), or "none <why>".
+# fps_label <l> <t> <r> <b> [<s>]: the counter in the task (bounds l t r b) - "text=<N fps>" (uiautomator, given <s> s,
+# default 20), "view=V" (dumpsys: a visible TextView there, text unread), or "none <why>". uiautomator waits for the
+# window to idle and a running game rarely does (the 11-11 22:23 second read took 35 s and starved step 4), so the reads
+# after the first get a short cap and the cheap dumpsys fallback.
 fps_label() {
-  local l=$1 t=$2 r=$3 b=$4 xml
-  xml=$(sh_ "timeout 20 uiautomator dump /data/local/tmp/gfc.xml >/dev/null 2>&1 && cat /data/local/tmp/gfc.xml; rm -f /data/local/tmp/gfc.xml")
+  local l=$1 t=$2 r=$3 b=$4 u=${5:-20} xml t0=$SECONDS
+  xml=$(sh_ "timeout $u uiautomator dump /data/local/tmp/gfc.xml >/dev/null 2>&1 && cat /data/local/tmp/gfc.xml; rm -f /data/local/tmp/gfc.xml")
   if [ -n "$xml" ]; then
+    note "label read: uiautomator dump in $((SECONDS - t0)) s"
     printf '%s' "$xml" > "$OUT/ui-$(date +%H%M%S).xml"
     printf '%s' "$xml" | python3 -c '
 import re, sys
@@ -112,6 +125,7 @@ else:
     return
   fi
   # uiautomator gave nothing: the views of the top activity (PowosWindowActivity), a TextView in the top-left quarter.
+  note "label read: no uiautomator dump in $((SECONDS - t0)) s (cap $u s) - dumpsys activity top"
   sh_ "dumpsys activity top" | awk '/ACTIVITY .*PowosWindowActivity/{a=1} a' > "$OUT/top-$(date +%H%M%S).txt"
   python3 - "$OUT"/top-*.txt "$l" "$t" "$r" "$b" <<'PY'
 import re, sys
@@ -168,8 +182,9 @@ for f in bf-return-phone.sh bf-lib.sh bf-stop.sh bf-xframes.py; do
   "$A" push "$here/$f" /data/local/tmp/powos-$f >/dev/null || { echo "ENV: can't push $f"; exit 5; }; done
 sh_ "install -m 755 /data/local/tmp/powos-open-task /data/powos/root/usr/local/bin/powos-open-task && cp /data/local/tmp/powos-bf-return-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-bf-xframes.py /data/powos/root/var/tmp/ && chmod 644 /data/powos/root/var/tmp/powos-bf-*" >/dev/null
 STARTED=1
-# The launch's own wait (phone side): what's left of the deadline minus the reads after it (~60 s), at most 360.
-LAUNCH_S=$((DEADLINE_S - SECONDS - 60)); [ $LAUNCH_S -gt 360 ] && LAUNCH_S=360
+# The launch's own wait (phone side): what's left of the deadline minus the reads after it (~80 s: 2 reads ~20 s, the
+# shade's pull + eval + put-away ~35 s, the off read ~12 s; measured 11-11 22:23), at most 360.
+LAUNCH_S=$((DEADLINE_S - SECONDS - 80)); [ $LAUNCH_S -gt 360 ] && LAUNCH_S=360
 [ $LAUNCH_S -ge 30 ] || fail "no time left to launch the game ($SECONDS s of $DEADLINE_S s gone before the launch)"
 step "game launch (phone-side wait ${LAUNCH_S} s)"
 ph launch $((LAUNCH_S + 40)) >/dev/null
@@ -192,7 +207,7 @@ step "fps label read (uiautomator)"
 got1=$(fps_label "$l" "$t" "$r" "$b"); chk read1; log "counter: $got1"
 "$T/shot.sh" "$OUT/on.png" >/dev/null 2>&1
 sleep 3
-got2=$(fps_label "$l" "$t" "$r" "$b"); chk read2; log "counter 3 s later: $got2"
+got2=$(fps_label "$l" "$t" "$r" "$b" 10); chk read2; log "counter 3 s later: $got2"
 case $got2 in
   text=--*) fail "the counter shows no frames (\"$got2\" - the game's window presents nothing to its task?)" ;;
   text=0\ fps) fail "the counter reads 0 fps (the game stalled?)" ;;
@@ -204,10 +219,17 @@ esac
 # 4. The switch off -> the label goes.
 step "perf.meter set off (the shade's bridge, the game in front) + label gone"
 case "$(top)" in *PowosWindowActivity*) ;; *) fail "the game's window task left the front before the switch-off ($(top))" ;; esac
-[ "$(meter_set "Object.assign({},$METER0,{on:false})")" = ok ] || fail "store.set perf.meter {on:false} through the shade failed"
+log "step 4: $SECONDS s of $DEADLINE_S s gone; perf.meter off through the shade"
+v=$(meter_set "Object.assign({},$METER0,{on:false})")
+case $v in
+  ok) log "perf.meter off: ok ($SECONDS s gone)" ;;
+  noshade) "$T/shot.sh" "$OUT/noshade.png" >/dev/null 2>&1
+    log "ENV: shade didn't open over the game (2 pulls from the status bar; see log.txt's shade: lines, noshade.png)"; exit 5 ;;
+  *) fail "store.set perf.meter {on:false} through the shade failed (${v:0:120})" ;;
+esac
 case "$(top)" in *PowosWindowActivity*) ;; *) fail "the game's window task isn't in front after the shade went away ($(top))" ;; esac
 sleep 1.5; chk off   # + the shade's put-away (Back, >= 1.2 s) and the reads: ~3 s after the set
-off=$(fps_label "$l" "$t" "$r" "$b"); log "meter off: $off"
+off=$(fps_label "$l" "$t" "$r" "$b" 12); log "meter off: $off"
 case $off in
   text=*) fail "the counter stays with the meter off (\"${off#text=}\")" ;;
   view=V) fail "the label stays visible with the meter off" ;;
