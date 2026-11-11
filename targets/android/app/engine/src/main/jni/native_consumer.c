@@ -251,63 +251,87 @@ static int collect_dmabufs(struct consumer_state *s)
 
     LOGI("collecting %d dma-bufs via dequeue/queue", target);
 
-    for (int attempt = 0; attempt < target * 4 && found < target; attempt++) {
-        ANativeWindowBuffer *anb = NULL;
-        int fence = -1;
-        if (api.dequeueBuffer(win, &anb, &fence) != 0 || !anb) {
-            LOGE("dequeueBuffer failed on attempt %d", attempt);
-            if (fence >= 0)
-                close(fence);
-            break;
-        }
-        if (fence >= 0)
-            close(fence);   /* enumeration only: no need to wait the fence */
+    /* PowOS: rounds of dequeue-and-HOLD (as many as the queue lets this side hold: target - min undequeued), then
+     * all queued back. One dequeue/queue at a time only saw new slots while SurfaceFlinger happened to keep the
+     * queued ones: a dequeue takes an allocated FREE buffer before it allocates a new slot, and a queued buffer that
+     * replaces an unlatched one (droppable: a window's queue has a dequeue timeout) is free again at once. 11-11
+     * 01:28 Besiege rotated on the inner screen (un-rotated 2440x2268 buffers): "only collected 3/5" every 0.9 s for
+     * 40 s, the task never live again, black. Holding them, the queue has to hand out new slots. */
+    int min_undequeued = 0;
+    api.query(win, ANATIVEWINDOW_QUERY_MIN_UNDEQUEUED_BUFFERS, &min_undequeued);
+    int hold_max = target - min_undequeued;
+    if (hold_max < 1)
+        hold_max = 1;
+    if (hold_max > MAX_COLLECT_BUFS)
+        hold_max = MAX_COLLECT_BUFS;
+    ANativeWindowBuffer *held[MAX_COLLECT_BUFS];
 
-        if (!anb->handle || anb->handle->numFds < 1) {
-            LOGE("dequeued buffer has no dma-buf handle on attempt %d", attempt);
-            api.cancelBuffer(win, anb, -1);
-            continue;
-        }
-
-        int fd = anb->handle->data[0];   /* first fd backs the dma-buf */
-        int stride = anb->stride, width = anb->width, height = anb->height;
-
-        /* deduplicate by ANativeWindowBuffer pointer (stable per queue slot) */
-        bool dup_found = false;
-        for (int i = 0; i < found; i++) {
-            if (s->buf_anb[i] == anb) {
-                dup_found = true;
-                break;
+    for (int round = 0; round < target * 2 && found < target; round++) {
+        int nheld = 0;
+        bool failed = false;
+        for (int attempt = 0; attempt < hold_max * 2 && nheld < hold_max; attempt++) {
+            ANativeWindowBuffer *anb = NULL;
+            int fence = -1;
+            if (api.dequeueBuffer(win, &anb, &fence) != 0 || !anb) {
+                if (fence >= 0)
+                    close(fence);
+                if (nheld == 0) {
+                    LOGE("dequeueBuffer failed in round %d", round);
+                    failed = true;
+                }
+                break;  /* none more to hold now (the timeout): queue these back, next round */
             }
+            if (fence >= 0)
+                close(fence);   /* enumeration only: no need to wait the fence */
+
+            if (!anb->handle || anb->handle->numFds < 1) {
+                LOGE("dequeued buffer has no dma-buf handle in round %d", round);
+                api.cancelBuffer(win, anb, -1);
+                continue;
+            }
+            held[nheld++] = anb;
+
+            int fd = anb->handle->data[0];   /* first fd backs the dma-buf */
+            int stride = anb->stride, width = anb->width, height = anb->height;
+
+            /* deduplicate by ANativeWindowBuffer pointer (stable per queue slot) */
+            bool dup_found = false;
+            for (int i = 0; i < found; i++) {
+                if (s->buf_anb[i] == anb) {
+                    dup_found = true;
+                    break;
+                }
+            }
+            if (dup_found || found >= target)
+                continue;
+
+            /* PowOS: a GPU-less producer that can't map this buffer either draws into a CPU shadow (make_shadow). */
+            bool shadowed = producer_gpu_less() && api.getHardwareBuffer && !buffer_mappable(fd, stride, height);
+            int dup_fd = shadowed ? make_shadow(s, found, width, height) : dup(fd);
+            if (dup_fd < 0)
+                continue;
+            if (shadowed) {
+                stride = width;
+                LOGI("  buf[%d]: not mappable, the producer draws into a CPU shadow", found);
+            }
+
+            s->buf_anb[found] = anb;
+            s->dmabuf_fds[found] = dup_fd;
+            s->dmabuf_infos[found].stride = stride * 4;
+            s->dmabuf_infos[found].width  = width;
+            s->dmabuf_infos[found].height = height;
+            s->dmabuf_infos[found].format = PIXEL_FORMAT_RGBA_8888;
+            s->dmabuf_infos[found].modifier = 0;
+            s->dmabuf_infos[found].offset = 0;
+            LOGI("  buf[%d]: anb=%p fd=%d dup=%d %dx%d stride=%d",
+                 found, (void *)anb, fd, dup_fd, width, height, stride);
+            found++;
         }
-
-        /* post it back so the next dequeue rotates to another slot */
-        api.queueBuffer(win, anb, -1);
-
-        if (dup_found)
-            continue;
-
-        /* PowOS: a GPU-less producer that can't map this buffer either draws into a CPU shadow (make_shadow). */
-        bool shadowed = producer_gpu_less() && api.getHardwareBuffer && !buffer_mappable(fd, stride, height);
-        int dup_fd = shadowed ? make_shadow(s, found, width, height) : dup(fd);
-        if (dup_fd < 0)
-            continue;
-        if (shadowed) {
-            stride = width;
-            LOGI("  buf[%d]: not mappable, the producer draws into a CPU shadow", found);
-        }
-
-        s->buf_anb[found] = anb;
-        s->dmabuf_fds[found] = dup_fd;
-        s->dmabuf_infos[found].stride = stride * 4;
-        s->dmabuf_infos[found].width  = width;
-        s->dmabuf_infos[found].height = height;
-        s->dmabuf_infos[found].format = PIXEL_FORMAT_RGBA_8888;
-        s->dmabuf_infos[found].modifier = 0;
-        s->dmabuf_infos[found].offset = 0;
-        LOGI("  buf[%d]: anb=%p fd=%d dup=%d %dx%d stride=%d",
-             found, (void *)anb, fd, dup_fd, width, height, stride);
-        found++;
+        /* post them back so the next round's dequeues rotate to other slots */
+        for (int i = 0; i < nheld; i++)
+            api.queueBuffer(win, held[i], -1);
+        if (failed)
+            break;
     }
 
     if (found < target) {

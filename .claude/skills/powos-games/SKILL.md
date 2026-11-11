@@ -330,11 +330,17 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   Black after fold/unfold (11-11 01:15 run, BARS=note, kwin 3.79) - two separate breaks, neither the frame reader:
   (a) rotate on the inner screen: KWin "window task 70 in the background" and NO "live" for ~30 s, until the fold -
       the Android consumer never came back for the rotated task (game drew meanwhile: resized 1 commit, Xwayland 558
-      commits). Logcat had rotated away; game-resize.sh now keeps logcat-<step>.txt per step for the next run.
+      commits). Cause (01:28 run, logcat-unfolded-landscape.txt): the consumer's buffer enumeration - "collecting 5
+      dma-bufs via dequeue/queue ... only collected 3/5 ... reconnecting" every 0.9 s for 40 s. One dequeue+queue at a
+      time only finds new slots while SurfaceFlinger keeps the queued ones; with un-rotated 2440x2268 buffers it freed
+      them at once (a window queue with a dequeue timeout drops a replaced buffer) and the dequeue reused 3. Fix
+      (native_consumer.c collect_dmabufs): rounds of dequeue-and-HOLD (target - min undequeued), then queue all back.
   (b) unfold again (cover 1116 wide -> 2268): "Xwayland glamor: failed to import KGSL DRI3 dma-buf ... 4609x4959"
       x1000, then 0 commits. 4609x4959 = 2268x2440 x 2268/1116: Proton's fullscreen hack (the game's EXCLUSIVE full
       screen, from its Config.xml) scaled its present window by new/old monitor width - a stale fake mode. Wine side,
       only for exclusive-fullscreen games; borderless-windowed Unity (unity-screen's default, Bananas) never hits it.
+      Intermittent (not in the 01:25 run). Proton Experimental's winex11 has WINE_DISABLE_FULLSCREEN_HACK (strings), but
+      not as a generic default: Unity render scale < 100 relies on that hack to stretch its smaller frame - untested.
 - Besiege (346010, Unity 5.4.0f3, 32-bit, x86 Proton) 11-07: with or without unity-screen's args its only viewable X
   window is a FIXED-SIZE 1135x1365 (WM_NORMAL_HINTS min == max, motif no-resize) "Besiege", class steam_app_346010,
   shown as a floating web window (unfolded) / floating on the cover, black, never drawing (xframes 1 sample) while
