@@ -341,6 +341,15 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
       only for exclusive-fullscreen games; borderless-windowed Unity (unity-screen's default, Bananas) never hits it.
       Intermittent (not in the 01:25 run). Proton Experimental's winex11 has WINE_DISABLE_FULLSCREEN_HACK (strings), but
       not as a generic default: Unity render scale < 100 relies on that hack to stretch its smaller frame - untested.
+  (c) 11-11 02:44 run (unloaded phone, APK 44804a4f): rotate now draws (5 bufs collected). Cover portrait: Xwayland
+      "failed to import ... 2484x5529" (= 1116x2484 x 2484/1116, the same stale fshack ratio, other direction) ->
+      no frame, then Unity drops exclusive full screen and maps a NEW fixed-size 1135x1365 window (task 84: "full
+      screen true asked by the app" -> "floating again"), left 1135x1365 on unfold (G1). KWin 0037 makes a fixed-size
+      steam_app window full screen only from refit(); Wine then leaves full screen again (its Win32 rect is 1135x1365),
+      so a KWin-side force just fights Wine. Root = Proton's fullscreen hack + KWin resizing the hacked window to the
+      real task size: Wine reads that size in the app's fake-mode coordinates and scales it again. Next: one launch
+      with WINE_DISABLE_FULLSCREEN_HACK=1 for 346010 (`powos game 346010` env / launch option) to see whether Xwayland's
+      own RandR emulation keeps the window = task; only then decide the generic default for exclusive-fullscreen games.
 - Besiege (346010, Unity 5.4.0f3, 32-bit, x86 Proton) 11-07: with or without unity-screen's args its only viewable X
   window is a FIXED-SIZE 1135x1365 (WM_NORMAL_HINTS min == max, motif no-resize) "Besiege", class steam_app_346010,
   shown as a floating web window (unfolded) / floating on the cover, black, never drawing (xframes 1 sample) while
