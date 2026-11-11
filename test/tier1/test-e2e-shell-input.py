@@ -30,6 +30,33 @@ EOF
             )
             self.assertEqual(result.stdout.splitlines(), ["101", "102", "103"])
 
+    def test_tap_guards_pill_in_one_call(self):
+        """tap() checks the verify pill on the phone in its input's own adb call: refused near it, made elsewhere."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = pathlib.Path(tmp)
+            (t / "bin").mkdir()
+            (t / "bin" / "dumpsys").write_text("#!/bin/sh\necho '  Window #3 Window{a u0 PowOS verify status}:'\n"
+                                               "echo '    frame=[400,0][700,100] x'\n")
+            (t / "bin" / "input").write_text("#!/bin/sh\necho \"INPUT $*\"\n")
+            (t / "adb").write_text(f"#!/bin/bash\necho call >> {t}/calls\nPATH={t}/bin:$PATH sh -s\n")
+            for f in ("bin/dumpsys", "bin/input", "adb"):
+                (t / f).chmod(0o755)
+            (t / "tw").write_text("5 0 0\n")
+            result = subprocess.run(
+                ["bash", "-c", '''source "$1/tools/phone/verify/e2e-lib.sh"
+A=$2; OUT=$3; E2E_TW=$3/tw; RESTORED=0; CUR=x.png
+fail() { echo "FAIL $*"; }
+I0=5; tap 100 500 far; echo "rc=$?"; tap 550 120 near; echo "rc=$?"
+''', "test", str(ROOT), str(t / "adb"), str(t)],
+                text=True, capture_output=True, check=True,
+            )
+            out = result.stdout
+            self.assertIn("INPUT tap 100 500", out)
+            self.assertNotIn("INPUT tap 550 120", out)
+            self.assertIn("FAIL not touched: near at 550,120 is under the verify status pill (400,0 700,100)", out)
+            self.assertIn("rc=1", out)
+            self.assertEqual((t / "calls").read_text().count("call"), 2)  # one adb call per tap
+
 
 if __name__ == "__main__":
     unittest.main()

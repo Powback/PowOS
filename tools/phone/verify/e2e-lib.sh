@@ -156,25 +156,41 @@ ime() { sh_ "dumpsys input_method | grep -m1 -o mInputShown=[a-z]*"; }
 layout() { { hcall home.get "[]" "h=>JSON.stringify(h)"; hcall store.get "['home.wide']" "w=>JSON.stringify(w)"; } | cksum | cut -d' ' -f1; }
 
 # The status pill's window (left top right bottom), "" when it isn't up.
-pillrect() { sh_ "dumpsys window windows" | awk '/^ *Window #/{f=(index($0,"PowOS verify status")>0)} f' | grep -oE ' frame=\[-?[0-9]+,-?[0-9]+\]\[-?[0-9]+,-?[0-9]+\]' | head -1 | tr -c '0-9\n-' ' '; }
+# Filtered on the phone: the whole dump is ~90 KB through adb (seconds at Mac load), the frame line a few bytes.
+pillrect() { ash <<'EOF' | tr -c '0-9\n-' ' '
+dumpsys window windows | awk '/^ *Window #/{f=(index($0,"PowOS verify status")>0)} f' | grep -oE ' frame=\[-?[0-9]+,-?[0-9]+\]\[-?[0-9]+,-?[0-9]+\]' | head -1
+EOF
+}
 # offpill <x> <y> <what>: 0 when the spot is clear of the pill (48 px around it); else a FAIL line and 1 - no touch.
+# (A host-side read: the touch helpers below make the same check on the phone, in their input's own adb call.)
 offpill() {
   local r; r=$(pillrect); [ -n "$(echo $r)" ] || return 0
   set -- "$1" "$2" "$3" $r
   if [ "$1" -lt $(($4 - 48)) ] || [ "$1" -gt $(($6 + 48)) ] || [ "$2" -lt $(($5 - 48)) ] || [ "$2" -gt $(($7 + 48)) ]; then return 0; fi
   fail "not touched: $3 at $1,$2 is under the verify status pill ($4,$5 $6,$7)"; return 1
 }
-# inj <input commands>: injected input, guarded on the phone in the SAME adb call: the touch watch's count moved from I0
-# (a real finger since the start) -> no input, the journey stops for the user (touched()'s rule, without its own round
-# trip before every tap). Past the budget (e2e_late) no input either.
+# inj <input commands> [<x> <y> <what>]: injected input, guarded on the phone in the SAME adb call (one round trip):
+#   - the touch watch's count moved from I0 (a real finger since the start) -> no input, the journey stops for the user
+#     (touched()'s rule, without its own round trip before every tap);
+#   - with a spot: the verify pill's window frame read there (dumpsys + awk on the phone, ~50 ms) and a DOWN within 48 px
+#     of it refused (offpill()'s rule). 11-11 (e2e-appapi r261 out of budget at step 15): offpill's own `dumpsys window
+#     windows` pulled ~90 KB through adb before every tap - a second round trip of 1-6 s at Mac load ~40, the journey's
+#     biggest per-tap cost; the dumpsys itself is 44 ms on the phone.
+# Past the budget (e2e_late) no input either.
 inj() { e2e_late "input"
-  case ${I0:-} in ""|-1) sh_ "$1"; return ;; esac
-  local o; o=$(sh_ "read c r < $E2E_TW; [ \"\$c\" = \"$I0\" ] || { echo TOUCHED \$c; exit 0; }; $1")
-  case $o in TOUCHED*) TOUCH_AT=-100; touched "input" ;; *) [ -z "$o" ] || printf '%s\n' "$o" ;; esac; }
-tap() { offpill "$1" "$2" "$3" || return 1; log "tap $3 at $1,$2"; inj "input tap $1 $2"; }
-swipe() { offpill "$1" "$2" "$6" || return 1; log "swipe $6 $1,$2 -> $3,$4 ($5 ms)"; inj "input swipe $1 $2 $3 $4 $5"; }
-press() { offpill "$1" "$2" "$4" || return 1; log "hold $4 at $1,$2 ($3 ms)"; inj "input swipe $1 $2 $1 $2 $3"; }
-mdown() { offpill "$1" "$2" "$3" || return 1; inj "input motionevent DOWN $1 $2"; }
+  local o g=
+  [ $# -ge 4 ] && g="set -- \$(dumpsys window windows | awk '/^ *Window #/{f=(index(\$0,\"PowOS verify status\")>0)} f' | grep -oE ' frame=\\[-?[0-9]+,-?[0-9]+\\]\\[-?[0-9]+,-?[0-9]+\\]' | head -1 | tr -c '0-9\\n-' ' ')
+[ \$# -ge 4 ] && [ $2 -ge \$((\$1 - 48)) ] && [ $2 -le \$((\$3 + 48)) ] && [ $3 -ge \$((\$2 - 48)) ] && [ $3 -le \$((\$4 + 48)) ] && { echo PILL \$*; exit 0; }"
+  case ${I0:-} in ""|-1) o=$(printf '%s\n%s\n' "$g" "$1" | ash) ;;
+    *) o=$(printf '%s\nread c r < %s; [ "$c" = "%s" ] || { echo TOUCHED $c; exit 0; }\n%s\n' "$g" "$E2E_TW" "$I0" "$1" | ash) ;; esac
+  case $o in
+    TOUCHED*) TOUCH_AT=-100; touched "input" ;;
+    PILL*) set -- "$2" "$3" "$4" ${o#PILL }; fail "not touched: $3 at $1,$2 is under the verify status pill ($4,$5 $6,$7)"; return 1 ;;
+    *) [ -z "$o" ] || printf '%s\n' "$o" ;; esac; }
+tap() { log "tap $3 at $1,$2"; inj "input tap $1 $2" "$1" "$2" "$3"; }
+swipe() { log "swipe $6 $1,$2 -> $3,$4 ($5 ms)"; inj "input swipe $1 $2 $3 $4 $5" "$1" "$2" "$6"; }
+press() { log "hold $4 at $1,$2 ($3 ms)"; inj "input swipe $1 $2 $1 $2 $3" "$1" "$2" "$4"; }
+mdown() { inj "input motionevent DOWN $1 $2" "$1" "$2" "touch-down"; }
 mmove() { inj "input motionevent MOVE $1 $2"; }
 mup() { inj "input motionevent UP $1 $2"; }
 # mpath <x0> <y0> <x1> <y1> <n>: n MOVEs from (x0,y0) towards (x1,y1), in one adb call (a finger, not a crawl).

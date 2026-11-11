@@ -1,6 +1,6 @@
 #!/bin/bash
 # e2e-queue.sh [--if-idle] [--round R]: queue one round of the "use the phone like a user" journeys for the manager:
-# e2e-desktop.sh parts 1-3 (unfolded home: --screen inner) then e2e-appapi.sh, each its own job of <= 450 s on board
+# e2e-desktop.sh parts 1-3 (unfolded home: --screen inner) then e2e-appapi.sh parts 1-2, each its own job of <= 450 s on board
 # task manager-end-to-end-user-journeys-on-the-phone-qa (no --close: the manager reviews the screenshots). The round
 # number is the next of ~/.cache/powos-e2e/round; the screenshots go to /home/powos/design-qa/e2e-<journey>/<round>/
 # and the last part of each mails the manager "E2E round N ready: <dir>".
@@ -32,9 +32,10 @@ add() { local o rc; o=$(tools/phone/verify/queue.sh add --budget 450 "$@" 2>&1);
 add --name e2e-desktop --screen inner "$TASK" tools/phone/verify/e2e-desktop.sh --round "$round" --part 1 --of 3
 add --name e2e-desktop --screen inner "$TASK" tools/phone/verify/e2e-desktop.sh --round "$round" --part 2 --of 3
 add --name e2e-desktop --screen inner "$TASK" tools/phone/verify/e2e-desktop.sh --round "$round" --part 3 --of 3
-add --name e2e-appapi "$TASK" tools/phone/verify/e2e-appapi.sh --round "$round"
+add --name e2e-appapi "$TASK" tools/phone/verify/e2e-appapi.sh --round "$round" --part 1 --of 2
+add --name e2e-appapi "$TASK" tools/phone/verify/e2e-appapi.sh --round "$round" --part 2 --of 2
 if [ $refused != 0 ]; then
-  [ $refused = 4 ] && [ "$(cat "$c/round" 2>/dev/null)" = "$round" ] && echo $((round - 1)) > "$c/round"
-  echo "e2e round $round NOT queued: $refused of 4 jobs refused by queue.sh (above)" >&2; exit 1
+  [ $refused = 5 ] && [ "$(cat "$c/round" 2>/dev/null)" = "$round" ] && echo $((round - 1)) > "$c/round"
+  echo "e2e round $round NOT queued: $refused of 5 jobs refused by queue.sh (above)" >&2; exit 1
 fi
 echo "e2e round $round queued"
