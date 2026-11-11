@@ -84,19 +84,26 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
     var controls: List<android.graphics.Rect> = emptyList()
         private set
 
+    /** The recording light's region (data-action "privacy"), also in [controls]: it outranks app handles (BarHits). */
+    var lights: List<android.graphics.Rect> = emptyList()
+        private set
+
     override fun regions(regions: org.json.JSONArray) {
         val d = context.resources.displayMetrics.density
-        val list =
+        val all =
             (0 until regions.length()).mapNotNull { i ->
                 regions.optJSONObject(i)?.let { r ->
                     val x = r.optDouble("x").toFloat() * d
                     val y = r.optDouble("y").toFloat() * d
-                    android.graphics.Rect(x.toInt(), y.toInt(), Math.round(x + r.optDouble("width").toFloat() * d), Math.round(y + r.optDouble("height").toFloat() * d))
+                    r.optString("action") to android.graphics.Rect(x.toInt(), y.toInt(), Math.round(x + r.optDouble("width").toFloat() * d), Math.round(y + r.optDouble("height").toFloat() * d))
                 }
-            }.filter { !it.isEmpty }
+            }.filter { !it.second.isEmpty }
+        val list = all.map { it.second }
+        val light = all.filter { it.first == "privacy" }.map { it.second }
         web.post {
-            if (list == controls) return@post
+            if (list == controls && light == lights) return@post
             controls = list
+            lights = light
             web.rootView.requestLayout()
         }
     }
@@ -149,17 +156,37 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
         // meter "wasn't there" (the user, 2026-10-28). chrome.tsx keeps the meter left of it.
         val hole = cutout?.boundingRects?.filter { it.left >= width / 3 && it.right <= width * 2 / 3 }?.minByOrNull { it.left }
         if (hole != null) data.put("holeLeft", hole.left / d) else data.remove("holeLeft")
+        camera(insets, d)
+        publish()
+    }
+
+    private var cameraLogged = ""
+
+    /** The recording light's camera on this strip ("camera", CSS px; none: the dot) - [CameraCutout.onStrip]. */
+    private fun camera(
+        insets: WindowInsets,
+        d: Float,
+    ) {
         // The camera's own cutout (the cover's centred punch-hole folded, the inner screen's unfolded): the recording
-        // light rings it. The top edge's cutout, else the smallest one.
-        val camera = cutout?.boundingRectTop?.takeUnless { it.isEmpty }
-            ?: cutout?.boundingRects?.filter { !it.isEmpty }?.minByOrNull { it.width() * it.height() }
+        // light rings it - when it's on this strip. The window's cutout first, else the display's (this strip sits at
+        // the display's top left, so the same px): a window's cutout is dropped once the strip doesn't reach it.
+        val cutout = insets.displayCutout
+        val strip = insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top.takeIf { it > 0 } ?: web.height
+        val shown = cutout?.boundingRects.orEmpty().map { BarRect(it.left, it.top, it.right, it.bottom) }
+        val whole = runCatching { context.display?.cutout?.boundingRects }.getOrNull().orEmpty().map { BarRect(it.left, it.top, it.right, it.bottom) }
+        val camera = CameraCutout.onStrip(shown, whole, strip)
+        val key = "$camera/$whole/$strip"
+        if (key != cameraLogged) {
+            cameraLogged = key
+            android.util.Log.i("PowosStatus", "camera cutout on the strip: ${camera ?: "none (the light is a dot)"}; window's $shown, display's $whole, strip $strip px, rotation ${runCatching { context.display?.rotation }.getOrNull()}")
+        }
         if (camera != null) {
-            data.put("camera", JSONObject().put("x", camera.left / d).put("y", camera.top / d).put("width", camera.width() / d).put("height", camera.height() / d))
+            data.put("camera", JSONObject().put("x", camera.l / d).put("y", camera.t / d).put("width", (camera.r - camera.l) / d).put("height", (camera.b - camera.t) / d))
         } else {
             data.remove("camera")
         }
-        publish()
     }
+
     private fun recordingState(state: RecordingOps.State) {
         data.put("recording", state.ring?.key ?: JSONObject.NULL)
         data.put("recordingApps", org.json.JSONArray(state.apps))

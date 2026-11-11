@@ -81,4 +81,30 @@ class BarHitsTest {
         val touch = windows.substringAfter("private fun barTouch(ev: MotionEvent) {").substringBefore("\n    }\n")
         assertTrue("barTouch no longer reaches home's page", touch.contains("web.dispatchTouchEvent(e)"))
     }
+    /**
+     * The folded cover (1116 px, camera hole centred at 558): the camera app's centred "•••" handle [459,657) sits
+     * under the recording ring. rec-light 11-11 tapped the ring at 558,63 and the handle took it ("not pulling:
+     * claimed ... Rect(459, 0 - 657, 126)") - the control center never opened. The ring outranks it; the handle keeps
+     * its sides.
+     */
+    @Test
+    fun theRecordingRingOutranksACentredHandle() {
+        val handle = BarRect(459, 0, 657, 126)
+        val ring = BarRect(487, 0, 630, 135)
+        val claims = BarClaims(listOf(clock, icons, ring), listOf(handle), emptyList(), listOf(ring))
+        assertEquals(BarHit.CONTROL, BarHits.route(558, 63, claims))
+        assertTrue(BarHits.stripTakes(BarHits.route(558, 63, claims), monitored = true))
+        assertEquals("the handle keeps what the ring doesn't cover", BarHit.HANDLE, BarHits.route(470, 63, claims))
+        assertEquals(BarHit.HANDLE, BarHits.route(640, 63, claims))
+        val shade = File("src/main/kotlin/dev/omalauncher/system/ShadeHost.kt").readText()
+        val region = shade.substringAfter("private fun edgeRegion(").substringBefore("\n    }\n")
+        assertTrue(
+            "the strip's region no longer gives the ring back after the handles' holes",
+            region.indexOf("statusChrome?.lights") > region.indexOf("handles) region.op(r, android.graphics.Region.Op.DIFFERENCE)"),
+        )
+        val claimed = shade.substringAfter("private fun claimedOnBar(").substringBefore("\n    }\n")
+        assertTrue("a ring tap over a handle is judged a claim (no pull, no shade)", claimed.contains("hitAt(x, y) == BarHit.CONTROL"))
+        val chrome = File("src/main/kotlin/dev/omalauncher/system/StatusChrome.kt").readText()
+        assertTrue("StatusChrome no longer picks the ring's region out", chrome.contains("it.first == \"privacy\""))
+    }
 }

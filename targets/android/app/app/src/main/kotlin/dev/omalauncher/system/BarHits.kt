@@ -18,6 +18,13 @@ data class BarClaims(
     val controls: List<BarRect>,
     val handles: List<BarRect>,
     val windows: List<BarRect>,
+    /**
+     * The recording light (chrome.tsx RecordingRing, data-action "privacy"): drawn on the camera's cutout, so on the
+     * folded cover - camera hole centred - it sits where an app's centred "•••" handle is. It outranks handles and
+     * windows: the ring's tap opens the control center (rec-light 11-11: "not pulling: claimed (558,63) in
+     * Rect(459, 0 - 657, 126)", the camera's handle took it). The handle keeps its sides.
+     */
+    val lights: List<BarRect> = emptyList(),
 )
 
 /** Whose a finger down on the status bar strip is (spec G-R). */
@@ -28,7 +35,7 @@ enum class BarHit {
     /** A web window's title bar or controls (a maximised one's merged bar): home's, the strip takes it and hands it over. */
     WINDOW,
 
-    /** The status bar page's own control (the clock, the indicators, the FPS meter). */
+    /** The status bar page's own control (the clock, the indicators, the FPS meter; the recording light over all). */
     CONTROL,
 
     /** The rest of the bar: SystemUI's status bar (its live capsules); the pull comes from the input monitor. */
@@ -50,6 +57,7 @@ object BarHits {
         claims: BarClaims,
     ): BarHit =
         when {
+            claims.lights.any { it.contains(x, y) } -> BarHit.CONTROL
             claims.handles.any { it.contains(x, y) } -> BarHit.HANDLE
             claims.windows.any { it.contains(x, y) } -> BarHit.WINDOW
             claims.controls.any { it.contains(x, y) } -> BarHit.CONTROL
@@ -69,4 +77,25 @@ object BarHits {
 
     /** Whether a gesture that starts at [hit] is home's (forwarded to its page) rather than the strip page's. */
     fun forwards(hit: BarHit): Boolean = hit == BarHit.WINDOW
+}
+
+/**
+ * Where the recording light rings the camera on the status strip (chrome.tsx RecordingRing), display px; null: the
+ * camera isn't on the strip in this rotation (or there's no cutout) - the light is a dot by the status icons.
+ * [window]: the strip window's own cutout rects (the inner screen's top-right hole unfolded upright, the cover's centred
+ * one); [display]: the display's in its current rotation - the strip sits at the display's top left, so the same px.
+ * A cutout counts only where it reaches the strip ([strip] px tall): the top one first, else the smallest.
+ */
+object CameraCutout {
+    fun onStrip(
+        window: List<BarRect>,
+        display: List<BarRect>,
+        strip: Int,
+    ): BarRect? {
+        fun pick(rects: List<BarRect>) =
+            rects.filter { it.r > it.l && it.b > it.t && it.t < strip.coerceAtLeast(1) }
+                .sortedWith(compareBy({ it.t }, { (it.r - it.l) * (it.b - it.t) }))
+                .firstOrNull()
+        return pick(window) ?: pick(display)
+    }
 }

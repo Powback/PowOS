@@ -383,7 +383,12 @@ class ShadeHost(
     private fun hitAt(
         x: Float,
         y: Float,
-    ): BarHit = BarHits.route(x.toInt(), y.toInt(), BarClaims(statusChrome?.controls.orEmpty().map { it.bar() }, handles.map { it.bar() }, windowClaims().map { it.bar() }))
+    ): BarHit =
+        BarHits.route(
+            x.toInt(),
+            y.toInt(),
+            BarClaims(statusChrome?.controls.orEmpty().map { it.bar() }, handles.map { it.bar() }, windowClaims().map { it.bar() }, statusChrome?.lights.orEmpty().map { it.bar() }),
+        )
 
     private fun android.graphics.Rect.bar() = BarRect(left, top, right, bottom)
 
@@ -449,6 +454,8 @@ class ShadeHost(
         }
         if (barSink != null) for (r in windowClaims()) region.op(r, android.graphics.Region.Op.UNION)
         for (r in handles) region.op(r, android.graphics.Region.Op.DIFFERENCE)
+        // The recording light on the camera's cutout over all: a centred handle (the folded cover) left it a hole.
+        for (r in statusChrome?.lights.orEmpty()) region.op(r, android.graphics.Region.Op.UNION)
     }
 
     /** An app handle or a web window's bar/controls on the strip at ([x], [y]): the tap or drag is theirs (spec G-R). */
@@ -459,6 +466,8 @@ class ShadeHost(
         // On the strip the handles must be as they are now (a split just made).
         handlesAt = 0L
         refreshHandles()
+        // The recording light outranks a handle under it (BarHits.route): its tap is the strip page's.
+        if (hitAt(x, y) == BarHit.CONTROL) return false
         val r = barClaims().firstOrNull { it.contains(x.toInt(), y.toInt()) } ?: return false
         Log.i(TAG, "not pulling: claimed (${x.toInt()},${y.toInt()}) in $r")
         return true

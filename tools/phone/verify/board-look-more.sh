@@ -300,6 +300,22 @@ ringtap() { local at pg v
   v=$(CDP_TIMEOUT_S=20 sev "$CAMCHIP"); log "$1 ring tap: $v"
   case $v in PASS*) pass "$1: the ring's tap opened the control center naming the camera (${v#PASS })" ;; *) fail "$1: the ring's tap: $v" ;; esac
   shut; }
+# camspot: where display 0's camera cutout is in its CURRENT rotation (dumpsys window displays, display px) and
+# whether it reaches the status strip ("strip <rect>" | "off <rect>" | "none"): the ring is drawn on the strip, so a
+# camera turned onto another edge (the inner screen landscape: the camera app turned it, 11-11 21:45) is the dot by
+# design (StatusChrome CameraCutout.onStrip). The strip's height: the statusbar page's own (CSS px x dpr).
+camspot() { local h
+  h=$(CDP_TIMEOUT_S=15 ev 'Math.round(innerHeight*devicePixelRatio)' statusbar); case $h in [0-9]*) ;; *) h=126 ;; esac
+  sh_ "dumpsys window displays" | python3 -c 'import sys,re
+h=int(sys.argv[1]); on=False
+for l in sys.stdin:
+    if re.search(r"Display: mDisplayId=", l): on = "mDisplayId=0 " in l
+    if on and "mDisplayCutout=" in l:
+        r=[tuple(map(int,m)) for m in re.findall(r"Rect\((-?\d+), (-?\d+) - (-?\d+), (-?\d+)\)", l.split("boundingRect=",1)[-1].split("cutoutPathParserInfo",1)[0])]
+        r=[x for x in r if x[2]>x[0] and x[3]>x[1]]
+        s=[x for x in r if x[1]<h]
+        print(("strip %s" % (s[0],)) if s else ("off %s" % (r,)) if r else "none"); break
+else: print("none")' "$h"; }
 # camclose: the camera's tasks (any not there at the start of the case) closed.
 camclose() { local id pkg vis; while read -r id pkg vis; do [ -n "$id" ] || continue
     grep -q "^$id " <<<"$CAMT0" || { sh_ "am stack remove $id"; log "closed task $id ($pkg): the camera this case started"; }; done <<<"$(tasks)"; sleep 2; }
@@ -312,7 +328,12 @@ if [ "$CASE" = rec-light ]; then
     top=$(sh_ "dumpsys activity activities | grep -m1 topResumedActivity" | grep -oE '[a-zA-Z0-9_.]+/[a-zA-Z0-9_.]+' | head -1)
     step "camera-$fold" "$fold: the camera app started (STILL_IMAGE_CAMERA): $top"
     r1=$(recread); log "$fold with the camera: $r1"
-    case $r1 in *"ring camera at"*) pass "$fold: green ring on the cutout ($r1)"; ringtap $fold ;; *) fail "$fold: no camera ring with $top in front ($r1)" ;; esac
+    spot=$(camspot); log "$fold camera cutout now: $spot"
+    case $r1:$spot in
+      *"ring camera at"*) pass "$fold: green ring on the cutout ($r1)"; ringtap $fold ;;
+      *"dot camera"*:off*|*"dot camera"*:none) pass "$fold: the camera's cutout is off the status bar in this rotation ($spot): the green dot ($r1)" ;;
+      *) fail "$fold: no camera ring with $top in front ($r1; camera cutout: $spot)" ;;
+    esac
     camclose; CAMON=; sleep 2; chk "camera closed"
     step "closed-$fold" "$fold: the camera closed"
     r2=$(recread); log "$fold after: $r2"
