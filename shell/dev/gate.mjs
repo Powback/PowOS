@@ -2076,8 +2076,7 @@ async function windowClampScene(page) {
   const judge = (when) =>
     page.evaluate(async (when) => {
       const W = await window.__gw.mod("./ui/webwindows.tsx");
-      window.__mockEvents.emit("webwindows.full", { id: 967, on: false });
-      await window.__gw.frames(3);
+      await (window.__mockEvents.emit("webwindows.full", { id: 967, on: false }), window.__gw.frames(3));
       const a = W.workArea();
       const inset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--inset-top")) || 0;
       const bad = [];
