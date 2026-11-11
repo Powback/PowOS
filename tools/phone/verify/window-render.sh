@@ -164,7 +164,15 @@ hidden() {
   WOKE= WI0=
   wake_if_idle() {
     local need=${WR_WAKE_IDLE_S:-600} i
-    [ "$need" -gt 0 ] 2>/dev/null && asleep || return 0
+    [ "$need" -gt 0 ] 2>/dev/null || return 0
+    if ! asleep; then
+      # Awake but nobody on it for >= need s (an earlier attempt's wake, or a screen left on): this check keeps it awake
+      # like one it woke - else the 30 s screen timeout locks it mid-hold (11-11 22:04, f743cdcb: content + tap PASS,
+      # then "hold 10 s: the phone is locked" -> NOT JUDGED, every retry). A touch still hands it back (keep_awake).
+      i=$("$T/idle.sh" 2>/dev/null | sed -n 's/^idle=\([0-9]*\) .*/\1/p')
+      [ -n "$i" ] && [ "$i" -ge "$need" ] && { WOKE=1; WI0=$(irq); log "start: awake and idle $i s - kept awake through the check"; }
+      return 0
+    fi
     i=$("$T/idle.sh" 2>/dev/null | sed -n 's/^idle=\([0-9]*\) .*/\1/p')
     if [ -z "$i" ] || [ "$i" -lt "$need" ]; then log "start: the phone is $WAKE, the user touched it ${i:-?} s ago (< $need s) - not woken"; return 0; fi
     # The wake's own panel resume moves the touch IRQs (no finger): the baseline is read once it has settled, and the
