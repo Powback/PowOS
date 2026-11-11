@@ -8,7 +8,7 @@
 #              many times a night, a round is ~15 min of phone time - never more than one waiting)
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd -P)
-TASK=manager-end-to-end-user-journeys-on-the-phone-qa
+TASK=${E2E_TASK:-manager-end-to-end-user-journeys-on-the-phone-qa}   # E2E_TASK: another (open) board task, when that one is closed
 Q=${QUEUE_DIR:-$HOME/.cache/powos-verify-queue}
 idle=0 round=
 while [ $# -gt 0 ]; do case "$1" in --if-idle) idle=1; shift ;; --round) round=$2; shift 2 ;; *) echo "usage: e2e-queue.sh [--if-idle] [--round R]"; exit 2 ;; esac; done

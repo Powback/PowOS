@@ -10,7 +10,8 @@ try:
 except Exception:
     v=s
 print(v if isinstance(v,str) else json.dumps(v))'
-ev() { "$T/cdp.sh" eval "${2:-home}" "$1" 2>/dev/null | tr -d '\r' | tail -1 | python3 -c "$UNQ"; }
+ev() { sess_ev "${2:-home}" "$1" && return 0; [ $? = 75 ] || return 0
+  "$T/cdp.sh" eval "${2:-home}" "$1" 2>/dev/null | tr -d '\r' | tail -1 | python3 -c "$UNQ"; }
 # hcall <method> <JS args> <JS fn of the answer -> string>: a call on home's bridge as the page makes it
 # (float-windows.sh); an empty answer is a failed hop before the page, made again (up to 4 tries).
 hcall_once() {
@@ -77,3 +78,62 @@ ww_open() { local key=$1 s=$2 before r n="" i live=""
   echo "no live $key window ${s} s after apps.launch (window ${n:-none} ${live:-})"; return 1; }
 # ww_close <w-id>: the host's close (what its bar's close does: the app is asked to close that window).
 ww_close() { hcall webwindows.close "[${1#w}]" "()=>'ok'" >/dev/null 2>&1; }
+
+# --- Persistent sessions (11-11, e2e-desktop r262: every part out of budget at load ~40-48, each step 50-60 s where
+# 11-10's took 3-18 s). Every sh_/ash was its own `docker exec powos-vadb adb shell` (~3 s for the docker exec, ~2-3 s
+# for adb's connection) and every ev its own `docker exec` into the warm bun container plus bun's start; a step makes
+# 10-20 of them. sess_start opens ONE root shell on the phone (one adb) and ONE cdp.ts "serve" (one docker exec) that
+# the calls then talk to over two FIFO pairs: a round trip is the WireGuard RTT plus the command, not two process
+# starts. Off: E2E_SESS=0, the emulator, a second phone (their per-call paths are fast or differ). A call the session
+# can't carry (rc 75: none up, it died, the watchdog killed it) falls back to the per-call path, the same command; a
+# call sent but unanswered within SESS_TIMEOUT_S (rc 76) is not re-sent (an input must never run twice) - it answers
+# "" as a failed adb call did, and the session is stopped (its stream no longer trusted).
+# Framing: every request carries a tag; its answer ends with a line "<\001><tag> <rc>"; lines before a DIFFERENT tag's
+# end (a caller killed mid-read left them) are dropped, so one lost answer never shifts the next call's.
+SH_PID= CDP_PID= SESS_N=0
+_sess_fifos() { local d; d=$(mktemp -d "${TMPDIR:-/tmp}/sess.XXXXXX") && mkfifo "$d/i" "$d/o" && echo "$d"; }
+# _sess_read <fd> <tag>: the answer's lines (stdout), rc = the answer's rc, or 76 (timeout / EOF).
+_sess_read() { local line buf="" c=$'\001' rc
+  while IFS= read -r -t "${SESS_TIMEOUT_S:-40}" line <&"$1"; do line=${line%$'\r'}
+    case $line in
+      *"$c$2 "*) rc=${line##*"$c$2 "}; line=${line%"$c$2 "*}; [ -n "$line" ] && buf+="$line"$'\n'; printf '%s' "$buf"; return "${rc:-0}" ;;
+      *"$c"__s*) buf= ;;
+      *) buf+="$line"$'\n' ;;
+    esac
+  done; return 76; }
+# _sess_kill <pid>: a session's process and its children (adb.sh -> docker exec).
+_sess_kill() { [ -n "$1" ] || return 0; pkill -TERM -P "$1" 2>/dev/null; kill -TERM "$1" 2>/dev/null; return 0; }
+_sess_on() { [ "${E2E_SESS:-1}" = 1 ] && [ "${POWOS_DEVICE:-phone}" != emu ] && [ -z "${CDP_MAC_ADB:-}" ] &&
+  case ${PHONE_SERIAL:-${POWOS_PHONE_ADDR:-10.13.13.7:5555}} in 10.13.13.7:5555) true ;; *) false ;; esac; }
+# sess_sh <script text>: run it in the phone's root shell session (stdin /dev/null, stderr dropped: sh_/ash's own
+# rules), its stdout here. rc 75 = no session (nothing sent), 76 = sent, no answer.
+sess_sh() {
+  [ -n "$SH_PID" ] && kill -0 "$SH_PID" 2>/dev/null || return 75
+  SESS_N=$((SESS_N + 1)); local tag=__s$$_${SESS_N}_$RANDOM
+  ( trap '' PIPE; printf '(\n%s\n) </dev/null 2>/dev/null\nprintf "\\001%s %%s\\n" 0\n' "$1" "$tag" >&7 ) 2>/dev/null || return 75
+  _sess_read 8 "$tag"; local rc=$?; [ $rc = 76 ] && _sess_kill "$SH_PID"; return $rc; }
+# sess_ev <page> <js>: an eval through the cdp.ts serve session; its text as ev prints it. rc 75 = not sent, 3 = the
+# forward is stale (nothing evaluated: the per-call path re-forwards), 76 = no answer.
+sess_ev() {
+  [ -n "$CDP_PID" ] && kill -0 "$CDP_PID" 2>/dev/null || return 75
+  SESS_N=$((SESS_N + 1)); local tag=__s$$_${SESS_N}_$RANDOM n; n=$(LC_ALL=C; printf '%s' "${#2}")
+  ( trap '' PIPE; printf '%s\t%s\t%s\n%s' "$tag" "$1" "$n" "$2" >&5 ) 2>/dev/null || return 75
+  _sess_read 6 "$tag"; local rc=$?; case $rc in 76) _sess_kill "$CDP_PID" ;; 3) return 75 ;; esac; return 0; }
+# sess_start / sess_stop: both sessions up (each optional: one that doesn't answer its first call stays off, the
+# per-call path carries it). Called by e2e_setup before its watchdog (which spares them) and e2e_restore stops them.
+sess_start() {
+  _sess_on || return 0; sess_stop; local d
+  if d=$(_sess_fifos); then
+    "${A:-$T/adb.sh}" shell "su -c sh" <"$d/i" >"$d/o" 2>/dev/null & SH_PID=$!
+    exec 7>"$d/i" 8<"$d/o"; rm -rf "$d"
+    [ "$(SESS_TIMEOUT_S=30 sess_sh "echo ok")" = ok ] || { _sess_kill "$SH_PID"; SH_PID=; }
+  fi
+  [ "${SESS_CDP:-1}" = 1 ] || return 0
+  "$T/cdp.sh" eval home 1 >/dev/null 2>&1   # the warm container, the forward and its cdp.ts copy, as cdp.sh makes them
+  if d=$(_sess_fifos); then
+    ( . "$T/cdp-warm.sh"; src="$(cd "$T" && pwd)/cdp.ts"
+      exec "$CDP_DOCKER" exec -i -e CDP_PORT=9333 -e CDP_TIMEOUT_S "$CDP_WARM_NAME" bun "/s/cdp-${src//[^A-Za-z0-9]/_}.ts" serve ) <"$d/i" >"$d/o" 2>/dev/null & CDP_PID=$!
+    exec 5>"$d/i" 6<"$d/o"; rm -rf "$d"
+    [ "$(SESS_TIMEOUT_S=30 sess_ev home "'ok'")" = ok ] || { _sess_kill "$CDP_PID"; CDP_PID=; }
+  fi; }
+sess_stop() { _sess_kill "$SH_PID"; _sess_kill "$CDP_PID"; SH_PID= CDP_PID=; exec 5>&- 6<&- 7>&- 8<&-; return 0; }

@@ -14,7 +14,11 @@ const PORT = process.env.CDP_PORT ?? "9333";
 // A hard deadline for the whole run: an eval on a frozen/hidden WebView (or a promise that never settles) otherwise
 // waits forever - 2026-10-22 four such runs sat in bun containers for up to 31 h at ~80% of a Mac core each. Measuring
 // commands get their own duration + 60 s; anything else 120 s. CDP_TIMEOUT_S overrides (a deliberate long watch).
-{
+//   serve                      e2e sessions (verify/ww-lib.sh sess_start): evals read from stdin, one after another,
+//                              each "<tag>\t<page>\t<bytes>\n<expression>"; answered "<text>\n\x01<tag> <rc>\n" (a string
+//                              as is, else JSON; rc 3 = no devtools endpoint, nothing evaluated). One process and one
+//                              socket per page for a whole journey part, instead of a docker exec + bun start per eval.
+if (cmd !== "serve") {
   const secs = Number([a1, a2].find((x) => x !== undefined && /^\d+$/.test(x)) ?? 0);
   const limit = Number(process.env.CDP_TIMEOUT_S ?? (secs ? secs + 60 : 120));
   setTimeout(() => (console.log(`cdp: no answer within ${limit} s - gave up (CDP_TIMEOUT_S to wait longer)`), process.exit(124)), limit * 1000);
@@ -23,12 +27,14 @@ const PORT = process.env.CDP_PORT ?? "9333";
 type Page = { url: string; title: string; webSocketDebuggerUrl: string; type: string };
 // rc 3 = the devtools endpoint didn't answer (a stale forward: the app's pid changed) - nothing was evaluated, so
 // cdp.sh may re-forward and run the same call again (its forward cache).
-let pages: Page[];
-try {
-  pages = (await (await fetch(`http://127.0.0.1:${PORT}/json`)).json()).filter((p: Page) => p.type === "page");
-} catch (e) {
-  console.log(`cdp: no devtools endpoint on port ${PORT} (${e})`);
-  process.exit(3);
+let pages: Page[] = [];
+if (cmd !== "serve") {
+  try {
+    pages = (await (await fetch(`http://127.0.0.1:${PORT}/json`)).json()).filter((p: Page) => p.type === "page");
+  } catch (e) {
+    console.log(`cdp: no devtools endpoint on port ${PORT} (${e})`);
+    process.exit(3);
+  }
 }
 const short = (u: string) => (u.match(/[?&]mode=([^&]+)/)?.[1] ?? (u.includes("index.html") ? "home" : u.slice(-40)));
 
@@ -89,6 +95,49 @@ if (cmd === "target") {
 
 if (cmd === "pages") {
   for (const p of pages) console.log(short(p.url).padEnd(10), p.url);
+  process.exit(0);
+}
+
+if (cmd === "serve") {
+  // Bounded: a session whose caller died without closing stdin ends by itself (CDP_SERVE_LIFE_S, a part's budget x 2).
+  setTimeout(() => process.exit(0), Number(process.env.CDP_SERVE_LIFE_S ?? 900) * 1000);
+  const limit = Number(process.env.CDP_TIMEOUT_S ?? 30);
+  const socks = new Map<string, Session>();
+  const one = async (page: string, expr: string): Promise<[string, number]> => {
+    try {
+      pages = (await (await fetch(`http://127.0.0.1:${PORT}/json`)).json()).filter((p: Page) => p.type === "page");
+    } catch (e) {
+      return [`cdp: no devtools endpoint on port ${PORT} (${e})`, 3];
+    }
+    const [p] = pick(page);
+    if (!p) return [`no page ${JSON.stringify(pages.map((x) => x.url))}`, 1];
+    let s = socks.get(p.webSocketDebuggerUrl);
+    if (!s || s.ws.readyState > 1) socks.set(p.webSocketDebuggerUrl, (s = new Session(p.webSocketDebuggerUrl)));
+    try {
+      await s.open;
+    } catch (e) {
+      socks.delete(p.webSocketDebuggerUrl);
+      return [`cdp: page socket failed (${e})`, 1];
+    }
+    const v = await s.eval(expr);
+    return [typeof v === "string" ? v : JSON.stringify(v), 0];
+  };
+  let buf = Buffer.alloc(0);
+  for await (const chunk of Bun.stdin.stream()) {
+    buf = Buffer.concat([buf, Buffer.from(chunk)]);
+    for (;;) {
+      const nl = buf.indexOf(10);
+      if (nl < 0) break;
+      const [tag, page, len] = buf.subarray(0, nl).toString().split("\t");
+      const n = Number(len);
+      if (buf.length < nl + 1 + n) break;
+      const expr = buf.subarray(nl + 1, nl + 1 + n).toString();
+      buf = buf.subarray(nl + 1 + n);
+      const timeout = new Promise<[string, number]>((r) => setTimeout(() => r([`cdp: no answer within ${limit} s - gave up`, 124]), limit * 1000));
+      const [text, rc] = await Promise.race([one(page, expr).catch((e): [string, number] => [`cdp: ${e}`, 1]), timeout]);
+      process.stdout.write(`${text}\n\x01${tag} ${rc}\n`);
+    }
+  }
   process.exit(0);
 }
 

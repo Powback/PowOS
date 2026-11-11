@@ -1,6 +1,6 @@
 #!/bin/bash
 # The one way to take a screencap of the phone (never a bare `screencap`):
-#   tools/phone/shot.sh OUT.png [--all] [--phone [--bg]]
+#   tools/phone/shot.sh OUT.png [--all] [--phone [--bg [--script]]]
 # Picks the display that is ON now - the cover (folded) or the inner screen (unfolded); --all: every ON display, saved
 # as OUT-<cover|inner>.png - and refuses rather than saving black:
 #   exit 3  the screen is off/dozing (never woken: wait with `AWAKE_ONLY=1 tools/phone/idle.sh --wait 120 MAX`)
@@ -17,8 +17,8 @@
 # (DisplayDeviceInfo uniqueId local:<id> ... state ON|OFF), the same ids `dumpsys SurfaceFlinger --display-id` lists.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-out="" all="" onphone="" bg=""
-for a in "$@"; do case "$a" in --all) all=1 ;; --phone) onphone=1 ;; --bg) bg=1 ;; -h|--help) sed -n '2,19p' "$0"; exit 0 ;; *) out=$a ;; esac; done
+out="" all="" onphone="" bg="" script=""
+for a in "$@"; do case "$a" in --all) all=1 ;; --phone) onphone=1 ;; --bg) bg=1 ;; --script) script=1 ;; -h|--help) sed -n '2,19p' "$0"; exit 0 ;; *) out=$a ;; esac; done
 [ -n "$out" ] || { sed -n '2,3p' "$0"; exit 2; }
 base=${out%.png}
 tag=powos-shot-$$
@@ -27,8 +27,11 @@ tag=powos-shot-$$
 # <OUT's folder>/.shots, a line "<file> <rc> <why>" (rc 0 / 3 off / 4 blank, as above), for the caller to read later
 # (e2e-lib.sh e2e_shots). One display (the ON one; no --all).
 if [ -n "$bg" ] && [ -n "$onphone" ] && [ -z "$all" ]; then
+  # --script: the phone-side script printed instead of sent - the caller runs it as root in its own shell session
+  # (e2e-lib.sh step: the part's persistent shell, no adb call of its own).
   d=${out%/*} f=${out##*/}
-  { printf 'D=%s\nF=%s\n' "$d" "$f"; cat <<'EOF'; } | "$here/adb.sh" shell "if command -v su >/dev/null 2>&1; then exec su -c 'sh -s'; else exec sh -s; fi" >/dev/null 2>&1 || { echo "shot: adb failed" >&2; exit 2; }
+  sink() { if [ -n "$script" ]; then cat; else "$here/adb.sh" shell "if command -v su >/dev/null 2>&1; then exec su -c 'sh -s'; else exec sh -s; fi" >/dev/null 2>&1; fi; }
+  { printf 'D=%s\nF=%s\n' "$d" "$f"; cat <<'EOF'; } | sink || { echo "shot: adb failed" >&2; exit 2; }
 mkdir -p "$D"
 cat > "$D/.$F.sh" <<'IN'
 r() { echo "$F $1 $2" >> "$D/.shots"; rm -f "$D/.$F.sh"; exit 0; }
@@ -45,7 +48,7 @@ r 0 ok
 IN
 D=$D F=$F nohup setsid sh "$D/.$F.sh" </dev/null >/dev/null 2>&1 &
 EOF
-  echo "$out (background)"; exit 0
+  [ -n "$script" ] || echo "$out (background)"; exit 0
 fi
 # Root where the phone has it (the rooted OnePlus), else adb's own shell uid - screencap, dumpsys and /data/local/tmp
 # need nothing more, so an unrooted phone (PHONE_SERIAL=<the razr fold>) is shot the same way.

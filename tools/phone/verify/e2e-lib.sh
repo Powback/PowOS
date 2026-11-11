@@ -25,9 +25,12 @@ L=$HOME/.cache/powos-verify.lock
 TEST_APP=${TEST_APP:-com.oneplus.calculator}
 
 # Command-only calls must not drain a surrounding read loop (cleanup must visit every task).
-sh_() { "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
+# Both go through the part's root shell session when it is up (ww-lib.sh sess_start: no docker exec + adb connect per
+# call), else one adb call each - the same command either way.
+sh_() { sess_sh "$*" && return 0; [ $? = 75 ] || return 0; "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
 # ash: a script on stdin as Android root (any quoting inside).
-ash() { "$A" shell "su -c 'sh -s'" 2>/dev/null | tr -d '\r'; }
+ash() { local s; s=$(cat); sess_sh "$s" && return 0; [ $? = 75 ] || return 0
+  printf '%s\n' "$s" | "$A" shell "su -c 'sh -s'" 2>/dev/null | tr -d '\r'; }
 # device_state_set <state>: set fold state; on emu, state 3 (inner) is a no-op, state 0 (cover) prints SKIP.
 device_state_set() {
   case "${POWOS_DEVICE:-phone}" in
@@ -141,7 +144,8 @@ e2e_watchdog() {
   local me=$$ left=$((E2E_DL - SECONDS)); [ "$left" -gt 0 ] || left=1
   # (bash 3.2 has no BASHPID: the subshell's own pid is its exec'd command substitution's parent.)
   ( self=$(exec sh -c 'echo $PPID'); sleep "$left" & sl=$!; trap 'kill $sl 2>/dev/null; exit 0' TERM; wait $sl
-    kids() { local c; for c in $(pgrep -P "$1"); do [ "$c" = "$self" ] || { kids "$c"; echo "$c"; }; done; }
+    # The sessions (sess_start) are spared: the restore talks to the phone through them.
+    kids() { local c; for c in $(pgrep -P "$1"); do case " $self ${SH_PID:-} ${CDP_PID:-} " in *" $c "*) ;; *) kids "$c"; echo "$c" ;; esac; done; }
     for k in $(kids "$me"); do kill -TERM "$k" 2>/dev/null; done ) </dev/null >/dev/null 2>&1 &
   WATCHDOG=$!; }
 
@@ -333,7 +337,9 @@ step() {
   [ -n "${I0:-}" ] && touched "step $1"
   [ $N -lt $HI ] && N=$((N + 1)); CUR=$(printf '%02d-%s.png' "$N" "$1"); CURD=$2; CURN=0
   echo "-- $CUR: $2 [+$((SECONDS - STEP_AT)) s, t=$SECONDS s]" | tee -a "$OUT/log.txt"; STEP_AT=$SECONDS
-  CURX=""; "$T/shot.sh" --phone --bg "$PDIR/$CUR" >/dev/null 2>&1 || CURX=" (no screenshot: adb failed)"
+  CURX=""
+  if [ -n "$SH_PID" ]; then "$T/shot.sh" --phone --bg --script "$PDIR/$CUR" | ash >/dev/null
+  else "$T/shot.sh" --phone --bg "$PDIR/$CUR" >/dev/null 2>&1 || CURX=" (no screenshot: adb failed)"; fi
   [ -n "$APID0" ] || APID0=$(apppid)
 }
 # e2e_shots: the background screenshots' verdicts ($PDIR/.shots, shot.sh --bg) into this part's steps.txt lines: a
@@ -443,6 +449,7 @@ e2e_setup() {
   trap 'e2e_abort' EXIT
   e2e_idle_gate
   I0=$(irq)
+  sess_start; log "sessions: phone shell ${SH_PID:+up}${SH_PID:-off (per-call adb)}, cdp ${CDP_PID:+up}${CDP_PID:-off (per-call)}"
   e2e_watchdog; WW_DEADLINE=$E2E_DL
   e2e_logcat_start
   if [ "$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")" != Awake ]; then
@@ -530,6 +537,7 @@ e2e_restore() {
 e2e_abort() {
   local rc=$?
   [ $DONE = 1 ] || { e2e_restore; publish; }
+  sess_stop
   [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"
   [ -n "$OUTOFBUDGET" ] && echo "FAIL e2e-$JOURNEY part $PART/$LAST: $OUTOFBUDGET - $NPASS passed before it; cleaned up, raise --of for more parts"
   [ $DONE = 1 ] || echo "e2e-$JOURNEY part $PART ended early (rc $rc) - $NPASS passed, $NFAIL failed, ${NSKIP:-0} skipped (interrupted); steps so far in $UDIR"
