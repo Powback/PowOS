@@ -1956,11 +1956,10 @@ class WebWindows(
         frameAt(t, win, g)
         cornerRadius(t, c, g.radius)
         // Every window's z is its page order, a Linux one's as an Android one's: one parent (the root), one z each.
-        t.setLayer(c, if (win.lifted) LIFT_LAYER else g.z)
+        t.setLayer(c, zOf(win, g))
         t.setAlpha(c, g.alpha)
-        // Hidden is the layer, never the display's surface (a null surface stops the app). A lifted one is outside the
-        // root: hidden under the switcher itself.
-        t.setVisibility(c, g.visible && !g.clip.isEmpty && win.mirror != null && !(win.lifted && underSwitcher))
+        // Hidden is the layer, never the display's surface (a null surface stops the app).
+        t.setVisibility(c, layerShown(win, g))
         fillUnder(t, win, g)
         val released = paced(win, g)
         // N3b: its popups' layers at its body in this same transaction (glued to it and its page), cut by the screen only.
@@ -2115,6 +2114,18 @@ class WebWindows(
             WindowLog.w(TAG, "window ${win.id}: its layer was outside the windows' root (left by full screen): back under it, at the page's z")
         }
     }
+
+    /** [win]'s z: the page's, or [LIFT_LAYER] while lifted over home's buffer ([lift]). */
+    private fun zOf(
+        win: Win,
+        g: Geo,
+    ): Int = if (win.lifted) LIFT_LAYER else g.z
+
+    /** [win]'s layer shown for [g]; a lifted one is outside the root, so it is hidden under the switcher itself. */
+    private fun layerShown(
+        win: Win,
+        g: Geo,
+    ): Boolean = g.visible && !g.clip.isEmpty && win.mirror != null && !(win.lifted && underSwitcher)
 
     /**
      * LH1 (11-11, the phone's resize traces ww-resize-1111-00*: home's page frame was the cost - every move rewrote the
