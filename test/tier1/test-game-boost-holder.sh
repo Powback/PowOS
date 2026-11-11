@@ -70,7 +70,8 @@ echo 3187200 > $P/policy7/scaling_max_freq   # category_4 at a cool gear: horae 
 waitfor 15 is $P/policy7/scaling_min_freq 2476800
 ok "thermal: min follows a lifted cap to the boost step" "$(cat $P/policy7/scaling_min_freq) $(cat $P/policy7/scaling_max_freq)" "2476800 3187200"
 echo 1363200 > $P/policy7/scaling_max_freq; echo 1363200 > $P/policy7/scaling_min_freq   # hot: the cap comes down
-sleep 1.5
+# The holder's next tick logs the lowered cap (polled: a fixed 1.5 s sleep flaked on a loaded .58, 11-11).
+waitfor 15 eval '[ "$(grep -c "policy7: thermal cap" $T/state/log)" -ge 3 ]'
 ok "thermal: a lowered cap stands" "$(cat $P/policy7/scaling_max_freq)" 1363200
 ok "thermal: cap changes logged" "$(grep -c 'policy7: thermal cap' $T/state/log)" 3
 wait $h

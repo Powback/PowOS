@@ -677,3 +677,18 @@ Next (device, read-only first): find the clamp's writer - `dumpsys oplus_perf_se
 binder clients, and whether a com.oplus.battery restart (the coordinator's call) clears the flat 1363 at gear 1; if it
 does, the cause is a stuck release after a hot gear and the hook can call the controller's release (V1) when the
 marker goes on at gear < 3.
+
+### 11-11 23:00: the launch boost holds to the first frame (agent/boost-hold-frame)
+
+GameBoost.LaunchHold: a launch is the game in front from its tap until its **first frame** - its window task in front
+presenting new frames on 2 ticks in a row (`PowosWindowActivity.frontPresents`, the fps meter's counter; a map/clear of
+Wine's window is one or two presents) - or 30 s after its window with none (`FRAME_CAP_S`), or 60 s after the tap with
+no window (`LAUNCH_S`). Neither the launch mark going (powos-open-task drops it, or it ages out on a 55 s iscript launch)
+nor the front task reading null / a non-game while Unity re-creates its window ends it any more; screen off, another
+game in front and the holder's game-gone exit still do. Test: GameBoostTest.aLaunchIsBoostedToItsFirstFrameNotItsWindow
+(control with the old mark-only front: FAILS; now passes) + aLaunchHoldEndsAtItsCaps; jvm-offload on .58.
+Evidence caveat (re-read of bf-coldstart-2026-11-11_2130/boost.txt, same phone clock as run.txt's pills): the holder
+log has `clocks restored` at 21:32:19 (tap 21:32:01, window 12.7 s, frame 21.4 s: a release ~2 s before the frame),
+then the `boost` engage at 21:32:51 (50 s after the tap) and `restore asked` at 21:33:04 = the check closing the game -
+the "restore at ~13 s" above was the close, and no engage line at the tap is in the log. Next run's BOOST line should
+show one engage at the tap and `launch hold released: its first frame` in the app's PowosGameBoost log.

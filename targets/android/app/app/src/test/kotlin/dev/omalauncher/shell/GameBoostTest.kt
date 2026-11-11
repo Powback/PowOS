@@ -90,6 +90,65 @@ class GameBoostTest {
         assertEquals("its window task then takes over without a gap", Action.Renew, m.step(GameBoost.front(null, bf, bf) { cats[it] }, true))
     }
 
+    /**
+     * 11-11 (docs/research/game-launch-time.md): the boost released before the game's first frame - window 12.7 s,
+     * frame 21.4 s after the tap - so Unity's FEX-compiled load ran unboosted. The launch now holds from the tap to its
+     * first frame (presents rising on FRAME_TICKS ticks), whatever the mark or the front task say meanwhile.
+     */
+    @Test
+    fun aLaunchIsBoostedToItsFirstFrameNotItsWindow() {
+        val cats = mapOf("org.kde.kate" to "Utility;")
+        val c: (String) -> String? = { cats[it] }
+        val tap = 1_000_000L
+        val mark = bf to tap
+        val hold = GameBoost.LaunchHold()
+        val m = GameBoost.Machine()
+        fun tick(
+            s: Int,
+            mk: Pair<String, Long>?,
+            task: String?,
+            presents: Long?,
+        ) = m.step(GameBoost.tickFront(hold, GameBoost.Seen(mk, null, task, presents, tap + s * 1000L), c), true)
+        assertEquals("the tap", Action.Engage(bf), tick(0, mark, null, null))
+        for (s in 1..12) assertEquals("loading, no window ($s s)", Action.Renew, tick(s, mark, null, null))
+        // The window (13 s): Wine maps it, one present; then Unity's load draws nothing for ~9 s. The launch's mark is
+        // gone (powos-open-task's, or aged out), the front task reads the window's id, or nothing while it re-creates.
+        assertEquals("window up", Action.Renew, tick(13, null, bf, 1))
+        assertEquals("window re-created: no front task", Action.Renew, tick(14, null, null, null))
+        for (s in 15..21) assertEquals("window -> first frame ($s s): still boosted", Action.Renew, tick(s, null, "org.kde.kate", 0))
+        assertEquals("the hold stands without a task too", bf, hold.app)
+        // The first frame: presents rise tick after tick - the hold ends, the front rules alone from here.
+        assertEquals(Action.Renew, tick(22, null, bf, 3))
+        assertEquals(Action.Renew, tick(23, null, bf, 60))
+        assertNull("released at the first frame", hold.app)
+        assertEquals("its first frame", hold.released)
+        assertEquals("the game's window task holds it now", Action.Renew, tick(24, null, bf, 120))
+        assertEquals("then the window task alone: it left the front", Action.Restore("no game in front"), tick(25, null, null, null))
+        assertNull("a released launch never holds again", hold.step(GameBoost.Seen(mark, null, null, null, tap + 26_000)))
+    }
+
+    @Test
+    fun aLaunchHoldEndsAtItsCaps() {
+        val tap = 1_000_000L
+        val noFrame = GameBoost.LaunchHold()
+        assertEquals(bf, noFrame.step(GameBoost.Seen(bf to tap, null, null, null, tap)))
+        assertEquals(bf, noFrame.step(GameBoost.Seen(null, null, bf, 5, tap + 10_000)))
+        assertEquals("a static window: held to the cap", bf, noFrame.step(GameBoost.Seen(null, null, bf, 5, tap + 10_000 + GameBoost.FRAME_CAP_S * 1000)))
+        assertNull(noFrame.step(GameBoost.Seen(null, null, bf, 5, tap + 10_001 + GameBoost.FRAME_CAP_S * 1000)))
+        assertEquals("no first frame ${GameBoost.FRAME_CAP_S} s after its window", noFrame.released)
+        val noWindow = GameBoost.LaunchHold()
+        assertEquals(bf, noWindow.step(GameBoost.Seen(bf to tap, null, null, null, tap + GameBoost.LAUNCH_S * 1000)))
+        assertNull("no window: LAUNCH_S from the tap", noWindow.step(GameBoost.Seen(null, null, null, null, tap + GameBoost.LAUNCH_S * 1000 + 1)))
+        val oneOff = GameBoost.LaunchHold()
+        oneOff.step(GameBoost.Seen(bf to tap, null, bf, 0, tap))
+        oneOff.step(GameBoost.Seen(null, null, bf, 1, tap + 1000))
+        oneOff.step(GameBoost.Seen(null, null, bf, 1, tap + 2000))
+        assertEquals("one map/clear present is no first frame", bf, oneOff.step(GameBoost.Seen(null, null, bf, 2, tap + 3000)))
+        val next = GameBoost.LaunchHold()
+        next.step(GameBoost.Seen(bf to tap, null, null, null, tap))
+        assertEquals("a new tap holds its own game", "supertuxkart", next.step(GameBoost.Seen("supertuxkart" to tap + 5000, null, null, null, tap + 5000)))
+    }
+
     @Test
     fun onlyEngageAndRestoreCallRoot() {
         val s = "/data/user/0/com.powos.app/files/game-boost.sh"

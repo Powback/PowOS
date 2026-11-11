@@ -127,12 +127,110 @@ object GameBoost {
         marks: List<Pair<String, Long>>,
         nowMs: Long,
         categories: (String) -> String?,
-    ): String? =
+    ): String? = launchingMark(marks, nowMs, categories)?.first
+
+    /** [launching]'s mark itself: (app id, the tap's ms) - a launch's identity for [LaunchHold]. */
+    fun launchingMark(
+        marks: List<Pair<String, Long>>,
+        nowMs: Long,
+        categories: (String) -> String?,
+    ): Pair<String, Long>? =
         marks
             .filter { (id, at) -> id.isNotBlank() && nowMs - at in 0..LAUNCH_S * 1000 }
             .sortedByDescending { it.second }
             .firstOrNull { (id, _) -> WebWindows.isGame(id, categories(id)) }
-            ?.first
+
+    /** A launch's hold ends this long after its window came when no first frame was seen ([LaunchHold]). */
+    const val FRAME_CAP_S = 30L
+
+    /** The first frame: the game's window task presented new frames on this many ticks in a row ([LaunchHold]). */
+    const val FRAME_TICKS = 2
+
+    /**
+     * What a tick saw: the fresh launch [mark] ([launchingMark]), home's game web window [web], the front window task's
+     * app id [task] and its presented frames [presents] (null: none known), at [nowMs].
+     */
+    data class Seen(
+        val mark: Pair<String, Long>?,
+        val web: String?,
+        val task: String?,
+        val presents: Long?,
+        val nowMs: Long,
+    )
+
+    /**
+     * A launch boosted from its tap to its FIRST FRAME, not to its window (board broforce-launch-time,
+     * docs/research/game-launch-time.md 11-11): window -> first frame is ~9 s of Unity's load JIT-compiled through FEX,
+     * the most clock-bound part of the launch. The launch mark ([launchingMark]) alone ends LAUNCH_S after the tap and
+     * goes when powos-open-task drops it, whatever the game drew by then (11-11 Broforce: window 55 s after the tap
+     * when Steam re-ran its install scripts). So the launched game stays the one in front from its tap until:
+     * - its first frame: its window task in front presented new frames on [FRAME_TICKS] ticks in a row (a map / clear
+     *   of Wine's window is one or two presents, a drawing game presents every tick; a re-created window's counter
+     *   starts over, which never counts as a rise),
+     * - [FRAME_CAP_S] after its window came with no such frames (a game that never presents through a task: a web
+     *   window, a static menu),
+     * - [LAUNCH_S] after the tap with no window of it in front (the launch failed or went elsewhere).
+     * The screen going off and another game in front still win ([Machine], [front]); the holder still restores when the
+     * game's processes are gone. One launch at a time: a new tap (another mark) starts a new hold; a released launch
+     * never holds again.
+     */
+    class LaunchHold {
+        /** The game held now, null: none. */
+        var app: String? = null
+            private set
+
+        /** Why the last [step] released the hold (the log's), null: it didn't. */
+        var released: String? = null
+            private set
+
+        private var mark: Pair<String, Long>? = null
+        private var windowAt = -1L
+        private var last = -1L
+        private var rising = 0
+
+        /** One tick ([seen]): the launched game held now, null: none. */
+        fun step(seen: Seen): String? {
+            released = null
+            seen.mark?.takeIf { it != mark }?.let { start(it) }
+            val a = app ?: return null
+            if ((seen.web ?: seen.task) == a) window(seen.presents, seen.nowMs)
+            val why = why(seen.nowMs)
+            if (why != null) {
+                app = null
+                released = why
+            }
+            return app
+        }
+
+        private fun start(launch: Pair<String, Long>) {
+            mark = launch
+            app = launch.first
+            windowAt = -1
+            last = -1
+            rising = 0
+        }
+
+        /** Its window in front: when it came, and whether its presents rose since the last tick. */
+        private fun window(
+            presents: Long?,
+            nowMs: Long,
+        ) {
+            if (windowAt < 0) windowAt = nowMs
+            val p = presents ?: -1
+            rising = if (p >= 0 && last >= 0 && p > last) rising + 1 else 0
+            last = p
+        }
+
+        private fun why(nowMs: Long): String? {
+            val tap = mark?.second ?: nowMs
+            return when {
+                windowAt < 0 -> if (nowMs - tap > LAUNCH_S * 1000) "no window of it in $LAUNCH_S s" else null
+                rising >= FRAME_TICKS -> "its first frame"
+                nowMs - windowAt > FRAME_CAP_S * 1000 -> "no first frame $FRAME_CAP_S s after its window"
+                else -> null
+            }
+        }
+    }
 
     /**
      * The game in front: home's web window one ([web]), else the front window task's app ([task], KWin's app id) if it
@@ -176,7 +274,21 @@ object GameBoost {
 
     private fun shellQuote(s: String) = "'" + s.replace("'", "'\\''") + "'"
 
+    /**
+     * A tick's game in front: [front] with the launch [hold] ([LaunchHold]: the tap to the first frame) as the launch,
+     * else the fresh mark (as before the hold).
+     */
+    fun tickFront(
+        hold: LaunchHold,
+        seen: Seen,
+        categories: (String) -> String?,
+    ): String? {
+        val held = hold.step(seen)
+        return front(seen.web, seen.task, held ?: seen.mark?.first, categories)
+    }
+
     private val machine = Machine()
+    private val launchHold = LaunchHold()
     private var handler: Handler? = null
     private lateinit var script: File
     private lateinit var lease: File
@@ -224,17 +336,20 @@ object GameBoost {
         h.post(tick)
     }
 
+    /** The game in front now ([tickFront] over what the app sees). */
+    private fun frontNow(): String? {
+        val now = System.currentTimeMillis()
+        val mark = marks.listFiles()?.let { fs -> launchingMark(fs.map { it.name to it.lastModified() }, now, categoriesOf) }
+        val task = andro.marchy.PowosWindowActivity.frontAppId()
+        val presents = andro.marchy.PowosWindowActivity.frontPresents()?.get(1)
+        return tickFront(launchHold, Seen(mark, WebWindows.frontGame(), task, presents, now), categoriesOf)
+            .also { launchHold.released?.let { Log.i(TAG, "launch hold released: $it") } }
+    }
+
     private fun tick() {
         val h = handler ?: return
         val on = power.isInteractive
-        val front =
-            runCatching {
-                val launch =
-                    marks.listFiles()?.let { fs ->
-                        launching(fs.map { it.name to it.lastModified() }, System.currentTimeMillis(), categoriesOf)
-                    }
-                front(WebWindows.frontGame(), andro.marchy.PowosWindowActivity.frontAppId(), launch, categoriesOf)
-            }.getOrNull()
+        val front = runCatching { frontNow() }.getOrNull()
         val action = machine.step(front, on)
         when (action) {
             is Action.Engage -> runCatching { lease.writeText("${System.currentTimeMillis()}\n") }
