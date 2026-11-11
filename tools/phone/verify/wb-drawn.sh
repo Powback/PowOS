@@ -11,7 +11,7 @@
 #   wb-drawn.sh read <tag> <wait ms>   that file's line once written (waits up to <wait ms>; "none" if not), removed.
 # A round is one screencap + one python run in the chroot (~0.3 s); the time is taken just before the screencap that
 # showed it. Deps: the PowOS chroot's python3, window-render.py copied to its /tmp by window-bench.sh.
-outof() { echo "/data/local/tmp/wb-drawn-$(echo "$1" | tr -c 'A-Za-z0-9.\n' _).out"; }
+outof() { echo "${WBD_OUT_DIR:-/data/local/tmp}/wb-drawn-$(echo "$1" | tr -c 'A-Za-z0-9.\n' _).out"; }
 if [ "$1" = read ]; then
   o=$(outof "$2"); i=0; n=$(( ${3:-10000} / 100 ))
   while [ ! -s "$o" ] && [ $i -lt $n ]; do sleep 0.1; i=$((i + 1)); done
@@ -19,7 +19,18 @@ if [ "$1" = read ]; then
   exit 0
 fi
 tag=$1 max=${2:-20000}
-R=/data/powos/root; f=/tmp/wb-drawn-$$.raw; out=$(outof "$tag")
+# The hard cap: a watcher never outlives its max by more than WBD_SLACK_S (15 s). On 11-11 two watchers (tags test:x,
+# test:y - an ad-hoc try of a 11-10 ~06:30 draft whose epoch-ms now() overflowed mksh's 32-bit arithmetic, so its
+# end was never reached; no page logs those tags) had looped 19.5 h at ppid 1 spawning logcat dumps and held a game at
+# ~2 fps. Two independent bounds: timeout around the whole run (exec: the pid the bench recorded stays the watcher's),
+# and a $SECONDS deadline in each loop that does not depend on date parsing.
+case $max in ''|*[!0-9]*) max=20000 ;; esac
+cap=$(( max / 1000 + ${WBD_SLACK_S:-15} ))
+if [ -z "${WBD_CAPPED:-}" ] && command -v timeout >/dev/null 2>&1; then
+  export WBD_CAPPED=1; exec timeout -k 3 $cap sh "$0" "$tag" "$max"
+fi
+deadline=$(( SECONDS + cap ))
+R=${WBD_ROOT:-/data/powos/root}; f=/tmp/wb-drawn-$$.raw; out=$(outof "$tag")
 # Clock: ms since BASE (this run's start second). mksh's arithmetic is 32-bit: epoch ms overflowed (now() read 1484).
 BASE=$(date +%s)
 now() { set -- $(date '+%s %N'); echo $(( ($1 - BASE) * 1000 + 10#${2%??????} )); }
@@ -37,6 +48,7 @@ while [ -z "$go" ]; do
   if [ -n "$go" ]; then set -- $go; [ "${2:-0}" = 0 ] || [ "$(rel "${2:-0}")" -ge $((start - 2000)) ] 2>/dev/null || go=""; fi
   [ -n "$go" ] && break
   [ $(now) -gt $end ] && put "nogo"
+  [ $SECONDS -gt $deadline ] && put "nogo deadline"
   sleep 0.05
 done
 set -- $go; [ "$2" = 0 ] && t0=$start || t0=$(rel "$2")
@@ -53,4 +65,5 @@ while :; do
   [ $rc = 1 ] || put "error $st"
   fl="$((ts - t0))ms:$(echo $st | tr ' ' _)"
   [ $(now) -gt $end ] && put "flat $((ts - t0)) go $gm rounds $n $st"
+  [ $SECONDS -gt $deadline ] && put "flat deadline rounds $n $st"
 done

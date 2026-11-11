@@ -162,7 +162,17 @@ drawn_setup() {
     sh_ "cp /data/local/tmp/window-render.py /data/powos/root/tmp/window-render.py; chmod 644 /data/powos/root/tmp/window-render.py; chmod 755 $WBD" ||
     log "drawn: wb-drawn.sh not pushed - open-drawn/resize-settle will read -"
 }
-drawn_watch() { sh_ "nohup sh $WBD $1 $2 >/dev/null 2>&1 &"; }
+# WBD_PIDS: the watchers this run started (their phone pids); drawn_stop ends them - restore_bench and hard_stop run it,
+# so a killed or interrupted bench leaves none behind (11-11: two ran 19.5 h at ppid 1). Each watcher also caps itself
+# (wb-drawn.sh: timeout + deadline) and the queue sweeps leftovers past a job's budget (phone-orphans.sh).
+WBD_PIDS=""
+drawn_watch() { local p; p=$(sh_ "nohup sh $WBD $1 $2 >/dev/null 2>&1 & echo \$!"); case $p in ''|*[!0-9]*) ;; *) WBD_PIDS="$WBD_PIDS $p" ;; esac; }
+# drawn_stop: those pids only (cmdline still wb-drawn.sh - not a reused pid), each with its children; never by name.
+drawn_stop() {
+  [ -n "${WBD_PIDS// /}" ] || return 0
+  sh_ "for p in $WBD_PIDS; do grep -q wb-drawn.sh /proc/\$p/cmdline 2>/dev/null && { pkill -P \$p; kill \$p; }; done; :" >/dev/null 2>&1
+  WBD_PIDS=""
+}
 drawn_read() {
   local o; o=$(sh_ "sh $WBD read $1 $2")
   echo "  drawn $1: ${o:-no answer}" >&2
@@ -208,6 +218,7 @@ RB=0
 restore_bench() {
   [ $RB = 1 ] && return 0; RB=1
   local i
+  drawn_stop
   [ "${OCON:-0}" = 1 ] && sh_ "setprop debug.powos.ww_order_check 0"
   # All of this part's windows in ONE page call, first: one hcall per window took longer than the queue's 10 s from
   # TERM to KILL, so a budget-killed part left its last window open (11-10 06:39: Settings, w27 on display 30, still
@@ -232,6 +243,7 @@ hard_stop() {
   [ -n "$MINEW" ] && CDP_TIMEOUT_S=8 ev "importShim('./bridge.ts').then(b=>Promise.all([$(echo $MINEW | sed 's/w//g; s/ /,/g')].map(i=>b.powos.webwindows.close(i)))).then(()=>'ok')" >/dev/null 2>&1
   [ "${OCON:-0}" = 1 ] && sh_ "setprop debug.powos.ww_order_check 0"
   [ -n "$ROT0" ] && { set -- $ROT0; sh_ "settings put system accelerometer_rotation $1; settings put system user_rotation $2"; }
+  drawn_stop
   publish; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"
   echo "FAIL e2e-$JOURNEY round $ROUND part $PART/$LAST: $NPASS passed, $NFAIL failed - hard deadline ${BENCH_HARD_S} s in '${PHASE:-?}' - $UDIR"
   print_fails; exit 1

@@ -985,6 +985,11 @@ EOS
             phone_sh "pkill -f '$b-phone.sh' 2>/dev/null; :" >/dev/null 2>&1 ;; esac; done
           [ "$why" = touched ] || { wc_=$(ww_close_new "$(cat "$Q/ww0" 2>/dev/null)"); [ -n "$wc_" ] && echo "killed check's web windows closed by the queue: $wc_" >> "$log"; }
         fi
+        # Every job: phone-side check processes (wb-drawn.sh watchers, orphaned check logcat readers) older than this
+        # job's budget can't be its own live work - a killed or interrupted check left them (11-11: two watchers at ppid 1
+        # for 19.5 h held a game at ~2 fps). Only those exact command lines (phone-orphans.sh); each kill logged.
+        po_=$(PHONE_ADB="$phone/adb.sh" "$here/phone-orphans.sh" "$budget" /dev/stdout 2>/dev/null)
+        [ -n "$po_" ] && { printf '%s\n' "$po_" >> "$log"; printf '%s\n' "$po_" | sed "s/^/$n: /"; }
         # A check that had already stopped for the user (its last verdict line "SKIP:", e.g. e2e's "aborted - the user
         # touched the phone") and then ran past its budget in its own clean-up (11-01 17:58, round 204 part 1: FAIL
         # timeout at "SKIP: ... aborted") is what it said it was: rc 3, re-queued for the next window, not a FAIL.
