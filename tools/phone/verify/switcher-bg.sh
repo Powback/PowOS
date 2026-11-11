@@ -59,7 +59,28 @@ if [ -z "$(sh_ pidof com.termux)" ]; then
   [ -n "$(sh_ pidof com.termux)" ] || { echo "SKIP: Termux did not retain a terminal service (first-run setup may be needed)"; exit 5; }
 fi
 sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1.5
-sh_ "input keyevent KEYCODE_APP_SWITCH"; sleep 2
+# The real switcher (the recents key). A single press could be lost (OnePlus folded 11-11, job 20261111-124838: home's
+# page never showed the layer, the check then read an empty page as "no running in background"). Read the PAGE's layer
+# (.recents.open), not only the host's flag: pressed again only while both say closed, never a toggle back. Host
+# open + page closed = the recents key would toggle a layer nobody sees: reported as itself, not as missing rows.
+sw_state() { "$T/cdp.sh" eval home "window.__gw.mod('./bridge.ts').then(async({powos})=>!!(await powos.recents.state())?.open+'/'+!!document.querySelector('.recents.open'))" 2>/dev/null | tail -1 | tr -d '"\r'; }
+open_switcher() {
+  local st= _p _w
+  for _p in 1 2 3; do
+    sh_ "input keyevent KEYCODE_APP_SWITCH"
+    for _w in 1 2 3 4 5 6; do
+      sleep 0.5; st=$(sw_state)
+      case $st in */true) return 0 ;; esac
+    done
+    case $st in true/false) echo "the host has the switcher open but home's page shows no layer (the recents key is dead)"; return 1 ;; esac
+  done
+  echo "3 recents-key presses opened no switcher on home's page (host/page: ${st:-no answer})"; return 1
+}
+if ! why=$(open_switcher); then
+  "$T/shot.sh" "$OUT/switcher.png" >/dev/null 2>&1 || true
+  echo "FAIL switcher-bg: $why (shot $OUT/switcher.png)"; exit 1
+fi
+sleep 0.5
 r=$(shell_check home device-checks.js switcherBackgroundNow Termux)
 "$T/shot.sh" "$OUT/switcher.png" >/dev/null 2>&1 || true
 echo "switcher-bg: $r (shot $OUT/switcher.png)"

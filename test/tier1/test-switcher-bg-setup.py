@@ -117,6 +117,38 @@ sh_() {
         self.assertIn('powos.tasks.remove(42)', calls)
         self.assertNotIn('start-foreground-service', calls)
 
+    def run_open(self, states):
+        """open_switcher against scripted page answers (one per poll); returns (rc, stdout, presses)."""
+        body = SOURCE.split('open_switcher() {', 1)[1].split('\n}\n', 1)[0]
+        script = ('P=0; I=0; F=$2; read -ra S <<<"$1"; sleep() { :; }\n'
+                  'sh_() { [ "$*" = "input keyevent KEYCODE_APP_SWITCH" ] && P=$((P+1)) && echo $P > "$F"; }\n'
+                  'sw_state() { echo "${S[$I]:-false/false}"; }\n'
+                  'open_switcher() {' + body.replace('st=$(sw_state)', 'st=$(sw_state); I=$((I+1))') + '\n}\n'
+                  'open_switcher')
+        import tempfile
+        with tempfile.NamedTemporaryFile('r') as f:
+            r = subprocess.run(['bash', '-c', script, 'test', ' '.join(states), f.name], capture_output=True, text=True)
+            return r.returncode, r.stdout, int(f.read().strip() or 0)
+
+    def test_switcher_opened_on_first_press(self):
+        self.assertEqual(self.run_open(['false/false', 'true/true'])[::2], (0, 1))
+
+    def test_lost_press_pressed_again_never_toggled_back(self):
+        rc, _, presses = self.run_open(['false/false'] * 6 + ['true/true'])
+        self.assertEqual((rc, presses), (0, 2))
+
+    def test_never_opened_fails_named(self):
+        rc, out, presses = self.run_open([])
+        self.assertEqual((rc, presses), (1, 3))
+        self.assertIn('opened no switcher', out)
+
+    def test_host_open_page_closed_is_reported_not_retoggled(self):
+        rc, out, presses = self.run_open(['true/false'] * 6)
+        self.assertEqual((rc, presses), (1, 1))
+        self.assertIn('recents key is dead', out)
+
+    def test_check_reads_page_only_after_open(self):
+        self.assertLess(SOURCE.index('if ! why=$(open_switcher)'), SOURCE.index('switcherBackgroundNow Termux'))
 
 if __name__ == '__main__':
     unittest.main()
