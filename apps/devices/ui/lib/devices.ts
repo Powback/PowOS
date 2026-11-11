@@ -198,14 +198,18 @@ export async function discover(net: Net | undefined, paired: Device[], registry?
   const out: Found[] = found
     .filter((s) => s.txt?.dev && s.txt?.id && !known.has(s.txt.id))
     .map((s) => ({ name: s.name, id: s.txt.id, kind: s.txt.kind || "device", url: `https://${s.host}:${s.txt.dev}`, via: "mdns" as const }));
-  const seen = new Set(out.map((f) => f.id));
-  for (const e of enrolled) {
-    if (e.revoked || !e.id || !/^https:\/\/[^/]+$/.test(e.agent ?? "") || known.has(e.id) || seen.has(e.id)) continue;
-    seen.add(e.id);
-    out.push({ name: e.name || e.id, id: e.id, kind: e.kind || "device", url: e.agent!, via: "realm" });
-  }
-  return out;
+  const seen = new Set([...known, ...out.map((f) => f.id)]);
+  return [...out, ...enrolled.filter((e) => pairable(e, seen)).map(fromRealm)];
 }
+
+/** A registry row worth offering: not revoked, an agent origin (https://host:port, nothing after), not listed yet. */
+function pairable(e: Enrolled, seen: Set<string>): boolean {
+  if (e.revoked || !e.id || seen.has(e.id) || !/^https:\/\/[^/]+$/.test(e.agent ?? "")) return false;
+  seen.add(e.id);
+  return true;
+}
+
+const fromRealm = (e: Enrolled): Found => ({ name: e.name || e.id, id: e.id, kind: e.kind || "device", url: e.agent!, via: "realm" });
 
 /** An address the user typed ("192.168.50.58", "desk.pow:3416") as the agent's URL. */
 export function urlOf(text: string): string {
