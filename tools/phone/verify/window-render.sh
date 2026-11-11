@@ -54,13 +54,30 @@ OUT=${WR_OUT:-$HOME/.cache/powos-window-render}/$(date +%Y%m%d-%H%M%S); mkdir -p
 PY="python3 -I $here/window-render.py"
 L=$HOME/.cache/powos-verify.lock
 log() { echo "$*" | tee -a "$OUT/log.txt"; }
-sh_() { "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
+# >>> fifo-bounds (test/tier1/test-window-render-fifo.sh runs these two)
+# mt SECS CMD...: CMD bounded to SECS s, in a process group of its own: on the deadline (or a TERM/INT to mt) the whole
+# group gets TERM, then KILL 2 s later - a docker exec/adb child left alive keeps its pipe open and the reader (tr)
+# waiting. rc 124 on the deadline. 11-11 14:50: an unbounded adb call in the check's cleanup held the ship service 2.5 h.
+mt() { perl -e 'my $t = shift; my $p = fork(); defined $p or exit 127;
+  if (!$p) { setpgrp(0, 0); exec @ARGV; exit 127 }
+  setpgrp($p, $p); my $end = sub { kill "TERM", -$p;
+    for (1 .. 20) { last unless kill 0, -$p; select undef, undef, undef, 0.1 } kill "KILL", -$p; waitpid($p, 0); exit $_[0] };
+  $SIG{ALRM} = sub { $end->(124) }; $SIG{TERM} = sub { $end->(143) }; $SIG{INT} = sub { $end->(130) };
+  alarm $t; waitpid($p, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' "$@"; }
+# fifo_put_cmd DIR MSG: the phone-side sh for one line to the helper's stdin fifo DIR/in that can never block: skipped
+# ("gone") when the helper (DIR/helper: app_process's pid) has exited, and the fifo opened read-write (1<>), which never
+# waits for a reader as `> fifo` does. 11-11 14:50: `echo release 145 > .../in` after the helper (and its holder) had
+# exited blocked forever - the ship service's device window check, and every ship behind it, stuck for 2.5 h.
+fifo_put_cmd() { echo "p=\$(cat $1/helper 2>/dev/null); if [ -p $1/in ] && [ -n \"\$p\" ] && kill -0 \$p 2>/dev/null; then echo $2 1<>$1/in && echo sent; else echo gone; fi"; }
+# <<< fifo-bounds
+# sh_ CMD: one root shell command on the phone, bounded to SH_T (60) s (hclean: 15 s per call).
+sh_() { mt "${SH_T:-60}" "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
 # asleep: true when the phone's power state isn't Awake (Dozing/Asleep/Dreaming); WAKE is that state. Read-only
 # (dumpsys power) - it never wakes the screen. Unreadable (no answer) counts as awake: the step is judged as before.
-asleep() { WAKE=$("$A" shell "dumpsys power | grep -m1 mWakefulness=" </dev/null 2>/dev/null | tr -d '\r ' | cut -d= -f2); [ -n "$WAKE" ] && [ "$WAKE" != Awake ] && return 0
+asleep() { WAKE=$(mt "${SH_T:-60}" "$A" shell "dumpsys power | grep -m1 mWakefulness=" </dev/null 2>/dev/null | tr -d '\r ' | cut -d= -f2); [ -n "$WAKE" ] && [ "$WAKE" != Awake ] && return 0
   # Locked counts as asleep: the test display is in the default display group since 63cdfdb9, so it follows the
   # keyguard and draws no app (11-01 04:18: 16 colours, flat, the phone woken by keys but still on its swipe lock).
-  "$A" shell "dumpsys window | grep -m1 isKeyguardShowing" </dev/null 2>/dev/null | grep -q "isKeyguardShowing=true" && { WAKE=locked; return 0; }; return 1; }
+  mt "${SH_T:-60}" "$A" shell "dumpsys window | grep -m1 isKeyguardShowing" </dev/null 2>/dev/null | grep -q "isKeyguardShowing=true" && { WAKE=locked; return 0; }; return 1; }
 UNQ='import json,sys
 s=sys.stdin.read().strip()
 try:
@@ -116,7 +133,8 @@ shot() {   # shot NAME: raw screencap gzipped on the phone -> $OUT/NAME.raw.gz
 #            ImageReader, never offered to the page (webwindows.selftestLinux, LinuxSelftest.kt; see linux_step).
 # Then its task removed (`am stack remove`; a Calculator task the user had before is moved back to display 0, never
 # removed), the display released and the helper ended (its stdin closed: it releases what's left and exits; a holder
-# that keeps stdin open ends by itself after WR_HOLD_S, so a killed check leaves nothing either). Exit 0 PASS, 1 FAIL;
+# that keeps stdin open ends by itself after WR_HOLD_S (default WR_TIMEOUT_S + 60, plus the hold: never before the
+# check's own deadline), so a killed check leaves nothing either; every write to its stdin is fput's, never blocking). Exit 0 PASS, 1 FAIL;
 # the whole run is bounded by WR_TIMEOUT_S (210: the Linux step adds up to ~50 s; plus the hold): a timeout is a FAIL. Shots in WR_OUT/<stamp>/.
 # --hold S (HOLD): after content+tap pass, the PASS line is logged at once (ship.sh window_gate waits for it, then runs
 # its passive render_watch) and the display stays up S s with Calculator on it: every ~5 s its content is measured again
@@ -163,9 +181,16 @@ hidden() {
   awake_or_nj() { keep_awake; asleep && hnj "$1"; return 0; }
   # A failed step on a phone that fell asleep is not a window fault (10-31 a4dcb83b: the tap "changed nothing", Dozing).
   hfail() { asleep && hnj "FAIL ($*) while asleep"; log "FAIL: $*"; hclean; log "window-render: FAIL (hidden: $*) - $OUT"; exit 1; }
+  # fput MSG: one line to the helper's stdin, never blocking (fifo_put_cmd); prints sent or gone.
+  fput() { sh_ "$(fifo_put_cmd "$dir" "$*")"; }
+  # hclean: bounded as a whole - every phone call SH_T=15 s, and the run KILLed after WR_CLEAN_S (90) s whatever hangs
+  # (the check's watchdog is gone by now: it is what called us, or we stopped it). A hung cleanup is a FAIL, never a
+  # ship service waiting forever.
   hclean() {
     [ -n "${HCLEANED:-}" ] && return; HCLEANED=1
+    local SH_T=15 cwd
     [ -n "${wd:-}" ] && kill "$wd" 2>/dev/null
+    ( sleep "${WR_CLEAN_S:-90}"; echo "FAIL: cleanup hung > ${WR_CLEAN_S:-90} s - killed" >> "$OUT/log.txt"; echo "window-render: FAIL (hidden: cleanup hung > ${WR_CLEAN_S:-90} s) - $OUT"; kill -KILL $$ ) & cwd=$!
     if [ -n "$D" ]; then
       local t
       for t in $(tasks_on "$D"); do
@@ -174,7 +199,7 @@ hidden() {
           *) sh_ "am stack remove $t" >/dev/null; log "task $t removed" ;;
         esac
       done
-      sh_ "echo release $D > $dir/in" >/dev/null
+      log "release display $D: $(fput "release $D")"
     fi
     sh_ "kill \$(cat $dir/holder 2>/dev/null) 2>/dev/null; sleep 0.5; cat $dir/out 2>/dev/null; rm -rf $dir" | sed 's/^/  helper: /' >> "$OUT/log.txt"
     if [ -n "$D" ]; then
@@ -183,8 +208,9 @@ hidden() {
       if [ -z "$left" ]; then log "display $D released, no task left on it"; else log "WARNING: tasks still on display $D: $left"; fi
     fi
     if [ -n "$WOKE" ] && [ "$(irq)" = "$WI0" ]; then
-      "$A" shell 'echo $(( $(date +%s) + 8 )) > /data/local/tmp/powos-selfinput; input keyevent KEYCODE_SLEEP' </dev/null >/dev/null 2>&1; log "the screen this check woke: back to sleep"
+      mt 15 "$A" shell 'echo $(( $(date +%s) + 8 )) > /data/local/tmp/powos-selfinput; input keyevent KEYCODE_SLEEP' </dev/null >/dev/null 2>&1; log "the screen this check woke: back to sleep"
     fi; WOKE=
+    kill "$cwd" 2>/dev/null
   }
   # tasks_on DISPLAY: the task ids on a display; app_tasks: every task of $APP (any display).
   tasks_on() { sh_ "am stack list" | awk -v d="$1" '/^RootTask id=/{on=($0 ~ ("displayId=" d " "))} on && /^ *taskId=/{sub(/^ *taskId=/,"");sub(/:.*/,"");print}' | sort -u | paste -sd' ' -; }
@@ -257,11 +283,11 @@ except Exception: print('')"; }
   # holder keeps open for WR_HOLD_S; "selftest": own display group/focus/lock state (an older helper ignores it).
   cat > "$OUT/wrh.sh" <<EOF
 mkdir -p $dir && mkfifo $dir/in && chmod 777 $dir $dir/in || exit 1
-nohup sh -c 'exec sleep $(( ${WR_HOLD_S:-180} + HOLD )) > $dir/in' >/dev/null 2>&1 &
+nohup sh -c 'exec sleep $(( ${WR_HOLD_S:-$(( ${WR_TIMEOUT_S:-210} + 60 ))} + HOLD )) > $dir/in' >/dev/null 2>&1 &
 echo \$! > $dir/holder
-nohup su -g 2000 -G 3011 2000 -c "CLASSPATH='$apk' exec app_process /system/bin dev.omalauncher.shell.WebWindowsHost" < $dir/in > $dir/out 2>&1 &
+nohup su -g 2000 -G 3011 2000 -c "echo \\\$\\\$ > $dir/helper; CLASSPATH='$apk' exec app_process /system/bin dev.omalauncher.shell.WebWindowsHost" < $dir/in > $dir/out 2>&1 &
 for i in \$(seq 1 30); do grep -q '^hello' $dir/out && break; sleep 0.2; done
-echo "create $tag $W $H $dpi selftest" > $dir/in
+echo "create $tag $W $H $dpi selftest" 1<> $dir/in
 for i in \$(seq 1 30); do grep -qE '^(display|error) $tag' $dir/out && break; sleep 0.2; done
 cat $dir/out
 EOF
@@ -338,7 +364,7 @@ EOF
   awake_or_nj "resize"; local g0 g1 W2 H2; g0=$(vdinfo); log "display $D before the resize: ${g0:-unreadable} (w h dpi)"
   [ -n "$g0" ] || hfail "dumpsys display has no powos-ww-$tag"
   set -- $g0; W2=$(( $1 * 3 / 4 )); H2=$(( $2 * 3 / 4 ))
-  sh_ "echo resize $D $W2 $H2 $3 > $dir/in" >/dev/null
+  [ "$(fput "resize $D $W2 $H2 $3")" = sent ] || hfail "the helper is gone (resize not sent)"
   for _ in 1 2 3 4 5 6 7 8 9 10; do g1=$(vdinfo); [ "$g1" = "$W2 $H2 $3" ] && break; sleep 0.3; done
   log "display $D after 'resize $D $W2 $H2 $3': ${g1:-unreadable}"
   [ "$g1" = "$W2 $H2 $3" ] || hfail "display $D after the resize is '${g1:-unreadable}', not '$W2 $H2 $3' (size, density unchanged)"

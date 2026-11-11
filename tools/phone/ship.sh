@@ -59,7 +59,12 @@ LABEL=${SHIP_AGENT:-com.powos.ship-runner}
 QUIET=${SHIP_QUIET_S:-60} QS=${SHIP_QUIET_SHELL_S:-0} POLL=${SHIP_POLL_S:-3}
 alive_runner() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null && ps -p "$1" -o command= 2>/dev/null | grep -q ship; }
 runner_up() { alive_runner "$(cat "$Q/runner.lock/pid" 2>/dev/null)"; }
-killtree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do killtree "$c"; done; kill "$1" 2>/dev/null; }
+killtree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do killtree "$c" "${2:-TERM}"; done; kill -"${2:-TERM}" "$1" 2>/dev/null; }
+# gate_deadline SECS PID: PID's hard wall-clock deadline (backgrounded; $! is the watchdog): its whole tree TERMed after
+# SECS s, then - still there WINDOW_GATE_GRACE_S (30) s later - KILLed, tree re-read (a TERM trap's cleanup starts new
+# children after the first sweep). 11-11 14:50: window-render's cleanup wrote to a fifo with no reader after the TERM;
+# the single sweep had already run and `wait` held the ship service 2.5 h. test/tier1/test-window-render-fifo.sh.
+gate_deadline() { ( sleep "$1"; killtree "$2"; for _ in $(seq 1 "${WINDOW_GATE_GRACE_S:-30}"); do kill -0 "$2" 2>/dev/null || exit 0; sleep 1; done; killtree "$2" KILL ) & }
 # installing: an APK install (ship-apk) or a shell push is in flight - $Q/installing holds its pid. Its writer sets it,
 # THEN checks the pause flag; pause sets the flag, THEN reads it: one of the two always sees the other.
 installing() { local p; p=$(cat "$Q/installing" 2>/dev/null) && [ -n "$p" ] && kill -0 "$p" 2>/dev/null; }
@@ -496,7 +501,7 @@ run)
       echo "$(date +%T) ${t:0:9}: window files changed ($f) - device window check running ($wl)"
       WR_TOOLS=$here WR_OUT=$Q/window-render bash "$wb/window-render.sh" --hidden --hold "${RENDER_WATCH_S:-20}" >> "$wl" 2>&1 & gp=$!
       echo "$gp" > "$Q/window-gate.pid"
-      ( sleep "${WINDOW_GATE_TIMEOUT_S:-240}"; killtree "$gp" ) & wdg=$!
+      gate_deadline "${WINDOW_GATE_TIMEOUT_S:-240}" "$gp"; wdg=$!
       while kill -0 "$gp" 2>/dev/null && ! grep -q '^window-render: PASS' "$wl"; do sleep 1; done
       if grep -q '^window-render: PASS' "$wl"; then render_watch "$t" "$what"; RW_DONE=$t; fi
       wait "$gp"; wrc=$?
