@@ -1,0 +1,140 @@
+---- TIME 11.11.2026 04:49:42 ----
+ACTIVITY MANAGER RECENT TASKS (dumpsys activity recents)
+mRecentsUid=10359
+mRecentsComponent=ComponentInfo{com.powos.app/dev.omalauncher.shell.SwitcherActivity}
+mFreezeTaskListReordering=false
+mFreezeTaskListReorderingPendingTimeout=false
+  Recent tasks:
+  * Recent #0: Task{2455981 #3523 type=standard A=10359:.lock}
+    userId=0 effectiveUid=u0a359 mCallingUid=u0a359 mUserSetupComplete=true mCallingPackage=com.powos.app mCallingFeatureId=null
+    affinity=10359:.lock
+    intent={flg=0x10810000 xflg=0x4 cmp=com.powos.app/dev.omalauncher.shell.PowosLockActivity mCallingUid=10359}
+    mActivityComponent=com.powos.app/dev.omalauncher.shell.PowosLockActivity
+    rootWasReset=false mNeverRelinquishIdentity=true mReuseTask=false mLockTaskAuth=LOCK_TASK_AUTH_PINNABLE
+    Activities=[ActivityRecord{75402379 u0 com.powos.app/dev.omalauncher.shell.PowosLockActivity t3523}]
+    taskId=3523 rootTaskId=3523
+    hasChildPipActivity=false
+    mHasBeenVisible=true
+    mResizeMode=RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION mSupportsPictureInPicture=false isResizeable=true
+    isPerceptible=false
+    lastActiveTime=99052086 (inactive for 176s)
+    isTrimmable=true isForceHidden=false isForceExcludedFromRecents=false
+    mRootLockDeviceTask=false
+    mLaunchedFromMultiSearch=false
+  * Recent #1: Task{fe6c5ac #3510 type=undefined A=10359:com.powos.app.shell}
+    userId=0 effectiveUid=u0a359 mCallingUid=0 mUserSetupComplete=true mCallingPackage=null mCallingFeatureId=null
+    affinity=10359:com.powos.app.shell
+    intent={act=android.intent.action.MAIN cat=[android.intent.category.HOME] flg=0x10000100 cmp=com.powos.app/andro.marchy.HomeShell mCallingUid=1000}
+    origActivity=com.powos.app/andro.marchy.HomeShell
+    mActivityComponent=com.powos.app/dev.omalauncher.shell.ShellActivity
+    autoRemoveRecents=false isPersistable=true activityType=2
+    rootWasReset=false mNeverRelinquishIdentity=true mReuseTask=false mLockTaskAuth=LOCK_TASK_AUTH_PINNABLE
+    Activities=[ActivityRecord{208421886 u0 com.powos.app/andro.marchy.HomeShell t3510}]
+    mRootProcess=ProcessRecord{46c10f1 7803:com.powos.app/u0a359}
+    taskId=3510 rootTaskId=3509
+    hasChildPipActivity=false
+    mHasBeenVisible=true
+    mResizeMode=RESIZE_MODE_RESIZEABLE mSupportsPictureInPicture=false isResizeable=true
+    isPerceptible=false
+    lastActiveTime=99051930 (inactive for 176s)
+    isTrimmable=true isForceHidden=false isForceExcludedFromRecents=false
+    mRootLockDeviceTask=false
+    mLaunchedFromMultiSearch=false
+  * Recent #2: Task{a202015 #3414 type=standard A=10362:com.termux}
+    userId=0 effectiveUid=u0a362 mCallingUid=2000 mUserSetupComplete=true mCallingPackage=com.android.shell mCallingFeatureId=null
+    affinity=10362:com.termux
+    intent={flg=0x10000000 xflg=0x5 cmp=com.termux/.app.TermuxActivity mCallingUid=2000}
+    mActivityComponent=com.termux/.app.TermuxActivity
+    autoRemoveRecents=false isPersistable=true activityType=1
+    rootWasReset=false mNeverRelinquishIdentity=true mReuseTask=false mLockTaskAuth=LOCK_TASK_AUTH_PINNABLE
+    Activities=[]
+    mRootProcess=ProcessRecord{29148e7 25051:com.termux/u0a362}
+    taskId=3414 rootTaskId=3414
+    hasChildPipActivity=false
+    mHasBeenVisible=true
+    mResizeMode=RESIZE_MODE_RESIZEABLE mSupportsPictureInPicture=false isResizeable=true
+    isPerceptible=false
+    lastActiveTime=80210309 (inactive for 19018s)
+    isTrimmable=true isForceHidden=false isForceExcludedFromRecents=false
+    mRootLockDeviceTask=false
+    mLaunchedFromMultiSearch=false
+  * Recent #3: Task{96fa207 #2 type=undefined A=1000:com.android.settings.FallbackHome nonResizable}
+    userId=0 effectiveUid=1000 mCallingUid=0 mUserSetupComplete=true mCallingPackage=null mCallingFeatureId=null
+    affinity=1000:com.android.settings.FallbackHome
+    intent={act=android.intent.action.MAIN cat=[android.intent.category.HOME] flg=0x10800100 cmp=com.android.settings/.FallbackHome mCallingUid=1000}
+    mActivityComponent=com.android.settings/.FallbackHome
+    autoRemoveRecents=false isPersistable=false activityType=2
+    rootWasReset=false mNeverRelinquishIdentity=true mReuseTask=false mLockTaskAuth=LOCK_TASK_AUTH_PINNABLE
+    Activities=[]
+    taskId=2 rootTaskId=2
+    hasChildPipActivity=false
+    mHasBeenVisible=true
+    mResizeMode=RESIZE_MODE_UNRESIZEABLE mSupportsPictureInPicture=false isResizeable=false
+    isPerceptible=false
+    lastActiveTime=18256 (inactive for 99210s)
+    isTrimmable=true isForceHidden=false isForceExcludedFromRecents=false
+    mRootLockDeviceTask=false
+    mLaunchedFromMultiSearch=false
+  * Recent #4: Task{12fa090 #3202 type=undefined A=10290:com.oplus.pscanvas nonResizable}
+    userId=0 effectiveUid=u0a290 mCallingUid=1000 mUserSetupComplete=true mCallingPackage=android mCallingFeatureId=
+    affinity=10290:com.oplus.pscanvas
+    intent={act=oplus.intent.action.pocket.studio.canvas cat=[android.intent.category.DEFAULT] flg=0x18010000 cmp=com.oplus.pscanvas/.canvasmode.canvas.ContainerActivity oflg=0x14000}
+    mActivityComponent=com.oplus.pscanvas/.canvasmode.canvas.ContainerActivity
+    autoRemoveRecents=false isPersistable=true activityType=0
+    rootWasReset=false mNeverRelinquishIdentity=true mReuseTask=false mLockTaskAuth=LOCK_TASK_AUTH_PINNABLE
+    Activities=[]
+    taskId=3202 rootTaskId=3202
+    hasChildPipActivity=false
+    mHasBeenVisible=false
+    mResizeMode=RESIZE_MODE_UNRESIZEABLE mSupportsPictureInPicture=false isResizeable=false
+    isPerceptible=false
+    lastActiveTime=20289 (inactive for 99208s)
+    isTrimmable=true isForceHidden=false isForceExcludedFromRecents=false
+    mRootLockDeviceTask=false
+    mLaunchedFromMultiSearch=false
+  * Recent #5: Task{4b62f53 #1774 type=undefined I=com.android.settings/com.oplus.settings.feature.homepage.OplusDeepLinkHomepageActivity}
+    userId=0 effectiveUid=1000 mCallingUid=u0a330 mUserSetupComplete=true mCallingPackage=com.google.android.permissioncontroller mCallingFeatureId=
+    intent={act=android.settings.SETTINGS_EMBED_DEEP_LINK_ACTIVITY flg=0x10000000 cmp=com.android.settings/com.oplus.settings.feature.homepage.OplusDeepLinkHomepageActivity}
+    mActivityComponent=com.android.settings/com.oplus.settings.feature.homepage.OplusDeepLinkHomepageActivity
+    autoRemoveRecents=false isPersistable=true activityType=0
+    rootWasReset=false mNeverRelinquishIdentity=true mReuseTask=false mLockTaskAuth=LOCK_TASK_AUTH_PINNABLE
+    Activities=[]
+     inRecents=true isAvailable=false
+    taskId=1774 rootTaskId=1774
+    hasChildPipActivity=false
+    mHasBeenVisible=false
+    mResizeMode=RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION mSupportsPictureInPicture=false isResizeable=true
+    isPerceptible=false
+    lastActiveTime=20288 (inactive for 99208s)
+    isTrimmable=true isForceHidden=false isForceExcludedFromRecents=false
+    mRootLockDeviceTask=false
+    mLaunchedFromMultiSearch=false
+
+  Visible recent tasks (most recent first):
+  * RecentTaskInfo #0: 
+    id=3523 userId=0 hasTask=true lastActiveTime=99052086
+    baseIntent=Intent { flg=0x10810000 cmp=com.powos.app/dev.omalauncher.shell.PowosLockActivity mCallingUid=10359 }
+    baseActivity={com.powos.app/dev.omalauncher.shell.PowosLockActivity}
+    topActivity={com.powos.app/dev.omalauncher.shell.PowosLockActivity}
+    realActivity={com.powos.app/dev.omalauncher.shell.PowosLockActivity}
+    isExcluded=true activityType=standard windowingMode=fullscreen supportsMultiWindow=true
+    taskDescription { colorBackground=#ff303030 colorPrimary=#ff212121 iconRes=/0 iconBitmap=false resizeMode=RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION minWidth=-1 minHeight=-1 colorBackgroundFloating=#ff424242 }
+     * RecentTaskInfo #1: 
+    id=3414 userId=0 hasTask=false lastActiveTime=80210309
+    baseIntent=Intent { flg=0x10000000 cmp=com.termux/.app.TermuxActivity mCallingUid=2000 }
+    realActivity={com.termux/com.termux.app.TermuxActivity}
+    isExcluded=false activityType=standard windowingMode=fullscreen supportsMultiWindow=true
+    taskDescription { colorBackground=#ff121212 colorPrimary=#ffffffff iconRes=/0 iconBitmap=false resizeMode=RESIZE_MODE_RESIZEABLE minWidth=-1 minHeight=-1 colorBackgroundFloating=#ff424242 }
+     * RecentTaskInfo #2: 
+    id=3202 userId=0 hasTask=false lastActiveTime=20289
+    baseIntent=Intent { act=oplus.intent.action.pocket.studio.canvas cat=[android.intent.category.DEFAULT] flg=0x18010000 cmp=com.oplus.pscanvas/.canvasmode.canvas.ContainerActivity oflg=0x14000 }
+    realActivity={com.oplus.pscanvas/com.oplus.pscanvas.canvasmode.canvas.ContainerActivity}
+    isExcluded=false activityType=undefined windowingMode=undefined supportsMultiWindow=false
+    taskDescription { colorBackground=#fffafafa colorPrimary=#ffffffff iconRes=/0 iconBitmap=false resizeMode=RESIZE_MODE_RESIZEABLE minWidth=-1 minHeight=-1 colorBackgroundFloating=#ffffffff }
+     * RecentTaskInfo #3: 
+    id=1774 userId=0 hasTask=false lastActiveTime=20288
+    baseIntent=Intent { act=android.settings.SETTINGS_EMBED_DEEP_LINK_ACTIVITY flg=0x10000000 cmp=com.android.settings/com.oplus.settings.feature.homepage.OplusDeepLinkHomepageActivity }
+    realActivity={com.android.settings/com.oplus.settings.feature.homepage.OplusDeepLinkHomepageActivity}
+    isExcluded=false activityType=undefined windowingMode=undefined supportsMultiWindow=true
+    taskDescription { colorBackground=#ff1d2024 colorPrimary=#ff191c20 iconRes=/0 iconBitmap=false resizeMode=RESIZE_MODE_RESIZEABLE minWidth=-1 minHeight=-1 colorBackgroundFloating=#ff191c20 }
+   

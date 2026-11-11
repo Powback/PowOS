@@ -1,0 +1,11 @@
+ACTIVITY MANAGER RECENT TASKS (dumpsys activity recents)
+  * Recent #0: Task{2455981 #3523 type=standard A=10359:.lock}
+    mActivityComponent=com.powos.app/dev.omalauncher.shell.PowosLockActivity
+    Activities=[]
+  * Recent #1: Task{fe6c5ac #3510 type=undefined A=10359:com.powos.app.shell}
+    mActivityComponent=com.powos.app/dev.omalauncher.shell.ShellActivity
+    Activities=[ActivityRecord{208421886 u0 com.powos.app/andro.marchy.HomeShell t3510}]
+  * Recent #2: Task{96fa207 #2 type=undefined A=1000:com.android.settings.FallbackHome nonResizable}
+    mActivityComponent=com.android.settings/.FallbackHome
+    Activities=[]
+  Visible recent tasks (most recent first):

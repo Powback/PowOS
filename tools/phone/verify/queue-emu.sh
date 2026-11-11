@@ -109,7 +109,8 @@ while ls "$E"/*.job >/dev/null 2>&1; do
     wait $jp; rc=$?
     [ "$why" = timeout ] && { rc=124; echo "FAIL timeout: still running after its ${budget}s budget - killed" >> "$log"; }
     [ $rc = 0 ] && grep -q '^FAIL' "$log" && rc=1
-    if [ $rc = 0 ]; then r=PASS; elif [ $rc = 3 ]; then r="SKIP rc=3"; elif grep -q '^INVALID' "$log"; then r="INVALID rc=$rc"
+    # rc 5 = SKIP as on the phone's runner (shell-check.sh's and every check's "SKIP: <why>" exit) - it read "FAIL rc=5".
+    if [ $rc = 0 ]; then r=PASS; elif [ $rc = 3 ] || [ $rc = 5 ]; then r="SKIP rc=$rc"; elif grep -q '^INVALID' "$log"; then r="INVALID rc=$rc"
     elif [ "$why" = timeout ]; then r="FAIL timeout"; else r="FAIL rc=$rc"; fi
     echo "$r: $(tail -1 "$log")" >> "$log"
     mv "$j" "$Q/done/$n.job"

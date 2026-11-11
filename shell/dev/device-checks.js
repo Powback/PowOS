@@ -99,6 +99,29 @@ export async function switcherOwnedBackgroundNow(label) {
   return before.filter((a) => a.key !== owned.key && !after.has(a.key)).map((a) => `pre-existing background app disappeared: ${a.label}`);
 }
 
+/**
+ * The switcher with NO windowed task (switcher-empty.sh; it refuses on a device with user tasks): zero cards and "No
+ * open apps" on screen, then [label] - the companion the script started, a foreground service with no task - under
+ * "N running in background" with its icon, name and Stop (switcherBackgroundNow; Stop is pressed by switcher-owned-bg.sh,
+ * the script ends its own companion). A task the host still lists is a SKIP: nothing here closes it.
+ */
+export async function switcherEmptyNow(label) {
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const state = await powos.recents.state();
+  if (!Array.isArray(state?.tasks)) return [`SKIP: the host gave no task list: ${JSON.stringify(state)}`];
+  const { tasks } = state;
+  if (tasks.length) return [`SKIP: the host lists ${tasks.length} task(s): ${tasks.map((t) => t.key ?? t.id).join(", ")}`];
+  const shown = await window.__gw.until(() => switcherNow().empty === "No open apps", 4000);
+  const s = switcherNow();
+  const fails = [
+    s.cards !== 0 && `${s.cards} task card(s) with no task on the host`,
+    !shown && `no visible "No open apps": ${JSON.stringify(s)}`,
+  ].filter(Boolean);
+  if (fails.length) return fails;
+  const owned = (await powos.apps.background()).find((a) => a.key.startsWith("a:com.powos.verifybackground/") && a.label === label);
+  return owned ? switcherBackgroundNow(label) : [`the host's background list has no ${label}`];
+}
+
 /** The control center's privacy chips now: each one's app name and its line. */
 function privacyChips() {
   return [...document.querySelectorAll(".privacy-row .privacy-chip")].map((c) => ({ app: c.querySelector(".privacy-app")?.textContent ?? "", what: c.querySelector(".privacy-what")?.textContent ?? "" }));
