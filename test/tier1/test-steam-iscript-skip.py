@@ -60,12 +60,13 @@ class IscriptSkip(unittest.TestCase):
         return [sys.executable, str(self.tool), verb, "--", str(self.steam / "steamapps/common/SteamLinuxRuntime_4/_v2-entry-point"),
                 "--verb=" + verb, "--"] + (inner or self.evaluator_argv())
 
-    def key(self):
+    def key(self, with_version=False):
         h = hashlib.sha256()
         for a in self.evaluator_argv()[3:]:
             h.update(a.encode() + b"\0")
         h.update(self.script.read_bytes())
-        h.update((self.proton / "version").read_bytes())
+        if with_version:
+            h.update((self.proton / "version").read_bytes())
         st = os.stat(self.data / "pfx")
         h.update(("%d:%d" % (st.st_dev, st.st_ino)).encode())
         return h.hexdigest()
@@ -93,6 +94,30 @@ class IscriptSkip(unittest.TestCase):
         r = self.run_chain(self.chain())
         self.assertEqual(r.returncode, 7)
         self.assertIn("CHAIN STARTED", r.stdout)
+
+    def test_proton_update_still_skips(self):
+        # 11-11: Valve's Proton Experimental update re-ran the evaluator at each game's next tap (+20 s); the marks it
+        # checks live in the prefix, which the update keeps.
+        self.record()
+        (self.proton / "version").write_text("1794360000 experimental-11.0-next\n")
+        r = self.run_chain(self.chain())
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("CHAIN STARTED", r.stdout)
+
+    def test_old_record_with_version_honoured_and_rewritten(self):
+        self.record(self.key(with_version=True))
+        r = self.run_chain(self.chain())
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("CHAIN STARTED", r.stdout)
+        self.assertEqual((self.data / "powos-iscript.done").read_text().strip(), self.key())
+
+    def test_runs_when_prefix_replaced(self):
+        self.record()
+        shutil.rmtree(self.data / "pfx")
+        (self.data / "pfx").mkdir()
+        (self.data / "pfx/creation_sync_guard").touch()
+        r = self.run_chain(self.chain())
+        self.assertEqual(r.returncode, 7)
 
     def test_runs_without_record(self):
         r = self.run_chain(self.chain())
@@ -124,7 +149,7 @@ class IscriptSkip(unittest.TestCase):
         self.assertEqual((self.data / "powos-iscript.done").read_text().strip(), self.key())
         self.assertIn("exited 0, recorded", self.log())
         r = self.run_chain(argv)
-        self.assertIn("skipped: script, Proton and prefix", self.log())
+        self.assertIn("skipped: script and prefix", self.log())
 
 
 class Arm64Gate(IscriptSkip):

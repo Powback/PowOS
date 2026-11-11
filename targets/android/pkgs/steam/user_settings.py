@@ -78,17 +78,23 @@ except (OSError, ValueError, AttributeError):
 # Wine for it - under FEX on the phone that is 6-42 s (Broforce, 2026-10-23: ~29 s of a 82 s tap -> window), then the
 # game's `waitforexitandrun` waits for that Wine's wineserver to exit and boots Wine again. The evaluator only checks
 # registry keys its earlier run wrote (the redistributables' "installed" marks) and exits. So: after it exits 0, its
-# input is recorded (compatdata/<appid>/powos-iscript.done: the script's bytes, Proton's version, the prefix's inode);
-# the next launch with the same input exits 0 here at once, before Wine starts. Anything changed - Steam wrote a new
-# script, a Proton update, a new prefix, /usr/bin/steam's reg_guard restored or rebuilt the registry (it deletes the
-# record) - and the evaluator runs as always. Every decision goes to compatdata/<appid>/powos-iscript.log.
+# input is recorded (compatdata/<appid>/powos-iscript.done: the script's bytes and the prefix's inode); the next
+# launch with the same input exits 0 here at once, before Wine starts. Anything changed - Steam wrote a new script, a
+# new prefix, /usr/bin/steam's reg_guard restored or rebuilt the registry (it deletes the record) - and the evaluator
+# runs as always. Every decision goes to compatdata/<appid>/powos-iscript.log.
+# Proton's version is NOT part of the key (2026-11-11): the marks the evaluator checks live in the prefix's registry,
+# which a Proton update keeps (its upgrade_pfx/wineboot -u run in the game's own launch); a rebuilt prefix changes the
+# inode / drops creation_sync_guard. With the version in it, every Proton Experimental update (Valve's, ~weekly, in the
+# background) re-ran the evaluator at each game's next tap: +20 s on Broforce/ABZU 11-11 (ARM64 Proton 04:17 update).
+# Records written with the old key (version included) are still honoured when they match today's Proton, and rewritten.
 # For x86 Proton (Valve's FEX compat tool layer first) the skip happens even earlier, in that layer's own Python, before
 # FEX, the Steam Runtime container and Proton's Python (under FEX) start: /usr/lib/powos-steam/py/sitecustomize.py
 # calls iscript_skip_early() with the same key - that container alone took 7-33 s per launch (Broforce, 2026-11-04).
 # Real fix: Valve's client skipping an evaluator run whose script it already ran in this prefix (as it does on Windows,
 # where it reads the registry itself), or running it inside the game's own Wine session.
-def _iscript_key(argv, data, proton_dir=None):
+def _iscript_key(argv, data, proton_dir=None, with_version=False):
     # argv: [proton, "run", <iscriptevaluator.exe>, <script>...]; proton_dir: that Proton's directory.
+    # with_version: the pre-11-11 key (Proton's version file hashed in), only to honour records written with it.
     steam = os.environ.get("STEAM_COMPAT_CLIENT_INSTALL_PATH", "")
     h = hashlib.sha256()
     found = False
@@ -106,8 +112,9 @@ def _iscript_key(argv, data, proton_dir=None):
     if not found:
         return None  # no script to compare: can't tell whether it changed
     try:
-        with open(os.path.join(proton_dir or os.path.dirname(os.path.abspath(argv[0])), "version"), "rb") as f:
-            h.update(f.read())
+        if with_version:
+            with open(os.path.join(proton_dir or os.path.dirname(os.path.abspath(argv[0])), "version"), "rb") as f:
+                h.update(f.read())
         st = os.stat(os.path.join(data, "pfx"))
         h.update(("%d:%d" % (st.st_dev, st.st_ino)).encode())
     except OSError:
@@ -139,7 +146,23 @@ def _iscript_state(argv, proton_dir=None):
             last = f.read().strip()
     except OSError:
         last = ""
-    return data, _iscript_key(argv, data, proton_dir), last
+    key = _iscript_key(argv, data, proton_dir)
+    if key and last and last != key and last == _iscript_key(argv, data, proton_dir, with_version=True):
+        _iscript_record(data, key)  # a pre-11-11 record (version in its key) for this same input: carry it over
+        last = key
+    return data, key, last
+
+
+def _iscript_record(data, key):
+    done = os.path.join(data, "powos-iscript.done")
+    try:
+        with open(done + ".tmp", "w") as f:
+            f.write(key + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(done + ".tmp", done)
+    except OSError:
+        pass
 
 
 def iscript_skip_early(argv, proton_dir, where):
@@ -150,7 +173,7 @@ def iscript_skip_early(argv, proton_dir, where):
         return False
     data, key, last = _iscript_state(argv, proton_dir)
     if data and key and key == last:
-        _iscript_log(data, "skipped %s: script, Proton and prefix as at its last good run (%s)" % (where, key[:12]))
+        _iscript_log(data, "skipped %s: script and prefix as at its last good run (%s)" % (where, key[:12]))
         return True
     return False
 
@@ -162,13 +185,12 @@ def _iscript():
     data, key, last = _iscript_state(argv)
     if not data:
         return
-    done = os.path.join(data, "powos-iscript.done")
 
     def log(msg):
         _iscript_log(data, msg)
 
     if key and key == last:
-        log("skipped: script, Proton and prefix as at its last good run (%s)" % key[:12])
+        log("skipped: script and prefix as at its last good run (%s)" % key[:12])
         sys.stdout.flush()
         os._exit(0)
     log("running it (%s)" % ("no record" if not last else "input changed" if key else "can't compare"))
@@ -178,14 +200,7 @@ def _iscript():
 
     def exit_and_record(rc=0):  # Proton's last line: sys.exit(rc) with the evaluator's exit code
         if rc in (0, None):
-            try:
-                with open(done + ".tmp", "w") as f:
-                    f.write(key + "\n")
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.replace(done + ".tmp", done)
-            except OSError:
-                pass
+            _iscript_record(data, key)
         log("exited %s%s" % (rc, ", recorded" if rc in (0, None) else ""))
         real_exit(rc)
 

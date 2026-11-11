@@ -570,3 +570,27 @@ lowered cap stands; polls instead of fixed sleeps - it flaked on .58 under load)
 Expected: prime 1.98-3.19 GHz instead of 1.36-1.59 for the launch on a phone at gear <= 6; per the 11-05 caps-lifted A/B
 (14.8/16.2 vs 18.5 s) ~2-3 s off tap -> frame, 19.3 -> ~16-17 s. Check: `bf-coldstart.sh steam` after the ship (needs
 the oplus-hook APK installed and com.oplus.battery restarted), LPROF clocks + logcat `configItemName=category_4` at the tap.
+
+## 11-11 regression: Broforce tap -> window 55.4 s / frame 62.9 s (agent/launch-regress)
+
+Job 20261111-140919-1279 (game-fps-counter, bf-return-phone launch, Steam resident + sleepable), read off Steam's
+console_log/connection_log + compatdata/274190/powos-iscript.log; t0 = 14:54:38 (window 55382 ms after it):
+
+| phase | 11-07 (s) | 11-11 (s) | what |
+|---|---|---|---|
+| launcher -> handoff (ExecCommandLine) | 0.8 | ~13 | /usr/bin/steam's forward waits for Logged On: Steam's CM link was dead (Disconnected By Remote Host 14:53:19, GetCMListForConnect failed twice, reconnect backoff 8/16/26 s; logon 14:54:51) |
+| Steam prep (handoff -> evaluator) | 3.2 | ~10 | post-logon work right after the reconnect (CheckShaderDepotManifest, "Waiting for compat in post-logon" 1.5 s) |
+| install script evaluator | skipped | 22 | powos-iscript.log "running it (input changed)" 14:55:03 -> "exited 0, recorded" 14:55:23 |
+| cloud/stats/CreatingProcess -> reaper | (in prep) | 2 | |
+| reaper -> window (pv + Wine boot + init) | 6.5 | ~8 | unchanged within noise (unity-screen's `/bin/sh -c` wrapper visible, costs nothing) |
+| window -> first frame | 8.8 | 7.5 | unchanged |
+
+The window->frame and reaper->window phases (unity-screen a612f179/cb6fa290, KWin 3.79, collect_dmabufs 44804a4f) did
+NOT regress. The evaluator ran because Steam auto-updated **Proton Experimental (ARM64)** at 04:17 (its `version`
+mtime) and the skip's key hashed Proton's version: every game's first tap after a Valve Proton update paid a full
+evaluator Wine boot (ABZU 13:51:22-43 the same way - that is why bf-pacing saw no window in 20 s). Not a PowOS commit.
+Fix (steam pkgrel 42, user_settings.py): the key = script bytes + prefix inode only (the marks the evaluator checks
+live in the prefix registry; a Proton update keeps them, a rebuilt prefix changes the inode / creation_sync_guard);
+old-format records still match and are rewritten. Test: test-steam-iscript-skip.py (Proton update still skips, old
+record honoured). The dead CM link after a freeze (~13 s + ~7 s of post-logon prep) is the open unified-sleep item
+from 10-24 ("keeping a frozen Steam's CM link alive"), unchanged: manager decision.
