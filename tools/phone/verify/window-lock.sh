@@ -154,15 +154,30 @@ window_lock() {
 #   claim_pkg <pkg>: <pkg> must NOT be running at check start (a process or an `am stack` task) - else it may be the
 #     user's: print "<pkg> already runs (maybe the user's): not now", exit 3 (the EXIT trap's restore runs; it stops only
 #     claimed packages). Not running: recorded as ours in CLAIMED.
-#   release_pkgs [pkg...]: force-stop the claimed packages (only those among the args, if given). Others are never touched.
+#   release_pkgs [pkg...]: force-stop the claimed packages (only those among the args, if given), then remove the recents
+#     tasks of theirs that weren't there at the first claim (CLAIM_T0). A force-stop alone leaves the task in recents
+#     with no activities - the emulator kept a dead Calculator task (#15) from bar-in-task-probe.sh's FAIL run and the
+#     next job, switcher-empty.sh, refused to run beside it (11-11). Tasks that were there before (maybe the user's) and
+#     other packages' are never touched.
 CLAIMED=""
+CLAIM_T0=""
 TOUCHED=0
+# recent_task_ids [pkg]: the ids of the recents tasks (all, or those whose component or affinity is <pkg>'s).
+recent_task_ids() {
+  sh_ "dumpsys activity recents" | tr -d '\r' | awk -v p="${1:-}" '
+    function out() { if (id != "" && (p == "" || index(h, ":" p "}") || index(h, ":" p " ") || index(c, p "/") == 1)) print id }
+    /\* Recent #[0-9]+: Task\{/ { out(); h = $0; c = ""; match($0, / #[0-9]+ /); id = substr($0, RSTART + 2, RLENGTH - 3) }
+    /^ *mActivityComponent=/ { c = $0; sub(/^ *mActivityComponent=/, "", c) }
+    /Visible recent tasks/ { out(); id = ""; exit }
+    END { out() }'
+}
 claim_pkg() {
   local p=$1
   case " $CLAIMED " in *" $p "*) return 0 ;; esac
   if [ -n "$(sh_ "pidof $p")" ] || [ -n "$(sh_ "am stack list" | grep -F "$p")" ]; then
     echo "$p already runs (maybe the user's): not now"; exit 3
   fi
+  [ -n "$CLAIMED" ] || CLAIM_T0=" $(recent_task_ids | tr '\n' ' ')"
   CLAIMED="$CLAIMED $p"; TOUCHED=1
 }
 # claim_pkgs <pkg>...: all of them or none - every <pkg> is checked first (not running), and only then recorded as ours; a
@@ -178,9 +193,12 @@ claim_pkgs() {
   for p in "$@"; do claim_pkg "$p"; done
 }
 release_pkgs() {
-  local p w
+  local p w t
   for p in $CLAIMED; do
     if [ $# -gt 0 ]; then w=0; for a in "$@"; do [ "$a" = "$p" ] && w=1; done; [ $w = 1 ] || continue; fi
     sh_ "am force-stop $p"
+    for t in $(recent_task_ids "$p"); do
+      case "$CLAIM_T0" in *" $t "*) ;; *) sh_ "am stack remove $t" >/dev/null ;; esac
+    done
   done
 }

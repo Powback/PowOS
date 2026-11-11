@@ -1,5 +1,6 @@
 #!/bin/bash
 # lanes: emu phone
+# needs: clean-recents
 # switcher-empty.sh: the real switcher on a device with NO windowed tasks (board switcher-empty-state-list-background-
 # running-app): zero `.task[data-task]` cards AND "No open apps" visible, then a background-only workload the check
 # starts itself (the com.powos.verifybackground companion, a real foreground service with no task) listed under

@@ -16,6 +16,8 @@
 #                          phone) from a clean checkout of it (.claude/worktrees/emu-build) and `adb install -r` it over
 #                          the system copy, as the phone's installs go; its commit goes to /data/local/tmp on the emulator
 #   emu.sh remove          stop, then delete the AVD, its snapshot and the build checkout (the system image stays)
+#   emu.sh clean-recents   every recent task but PowOS's own removed (clean-recents.sh: emulator serial + qemu property
+#                          or it refuses) - queue-emu.sh runs it before a check whose header says `# needs: clean-recents`
 #   emu.sh wake            the screen kept on, now (queue-emu.sh runs this before each job: nobody is watching the
 #                          emulator, so unlike the phone it must never be left to decide a check can't run because
 #                          its screen slept)
@@ -369,6 +371,7 @@ install)
   trap 'emu_lock_release' EXIT
   running || die "not running: emu.sh start" 2; root_up; install "${2:-}"; grants_like_phone; stay_awake; home_ready ;;
 wake) running || die "not running: emu.sh start" 2; stay_awake ;;
+clean-recents) running || die "not running: emu.sh start" 2; ADB=$ADB SERIAL=$SERIAL "$here/clean-recents.sh" ;;
 remove)
   emu_lock_acquire "remove"
   trap 'emu_lock_release' EXIT

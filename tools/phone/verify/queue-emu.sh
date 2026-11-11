@@ -97,6 +97,11 @@ while ls "$E"/*.job >/dev/null 2>&1; do
     # screen on right before every job, not just at boot - the phone's "never wake the screen" rule in e2e-lib.sh
     # must never apply here (f72, 2026-10-24).
     emu wake
+    # A check that needs a task-free device (`# needs: clean-recents` in its first 20 lines, e.g. switcher-empty.sh):
+    # the emulator's leftover tasks from earlier jobs removed first (clean-recents.sh refuses anything not an emulator).
+    for a in "${cmd[@]}"; do f=$a; [ "${f#/}" = "$f" ] && f=$cwd/$a; [ -f "$f" ] || continue
+      sed -n '1,20s/^# needs:[[:space:]]*//p' "$f" | grep -qw clean-recents && { emu clean-recents || echo "$(date +%T) $(basename "$j" .job): clean-recents failed"; }
+      break; done
     # The ship wait: a job from a commit the emulator's build lacks (pushed after it) gets origin's newer tip first.
     if [ -n "$need" ] && git -C "$ER" cat-file -e "$need^{commit}" 2>/dev/null && ! git -C "$ER" merge-base --is-ancestor "$need" "$ec" 2>/dev/null; then
       verify_tree "$ET" >/dev/null 2>&1 || true; echo "$(date +%T) $n: needs ${need:0:9} - building origin's tip for the emulator"; emu install; ec=$(emu_commit)
