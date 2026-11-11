@@ -2286,6 +2286,26 @@ async function switcherBackgroundCheck(page) {
   fails.push(...(await page.evaluate(switcherBackgroundRows)));
   fails.push(...(await page.evaluate(switcherBackgroundStop)));
   await page.evaluate(() => window.__mockEvents.emit("recents.end", { to: "home" }));
+  fails.push(...(await page.evaluate(switcherStaleToggle)));
+  return fails;
+}
+/**
+ * The host's open flag gone stale (OnePlus folded 11-11): the layer closed, zero cards, the host still thinks it's up
+ * and sends "switcher.toggle" for the recents key. One press must open the switcher with "No open apps", never nothing.
+ */
+async function switcherStaleToggle() {
+  const { wait, visible, text } = window.__bgGate;
+  await wait(600);
+  if (document.querySelector(".recents.open")) return ["stale toggle: the layer is still open before the press"];
+  window.__mockEvents.emit("switcher.toggle", null);
+  await wait(1200);
+  const fails = [];
+  if (!document.querySelector(".recents.open")) fails.push("stale host flag: the recents key (switcher.toggle) opened no switcher");
+  if (text(".recents-empty") !== "No open apps" || !visible(document.querySelector(".recents-empty"))) fails.push(`stale toggle: "No open apps" not shown (${text(".recents-empty")})`);
+  // Pressed again, the open switcher closes (a toggle, never stuck open).
+  window.__mockEvents.emit("switcher.toggle", null);
+  await wait(800);
+  if (document.querySelector(".recents.open")) fails.push("stale toggle: a second press left the switcher open");
   return fails;
 }
 /** switcher-background's helpers, in the page (each step runs there on its own: page.evaluate). */

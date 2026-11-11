@@ -642,7 +642,16 @@ powos.on("recents.tasks", (e: { tasks: RecentTask[] }) => {
   prefetch(e.tasks);
 });
 // The overview button again: the task before the one it was opened over (or the newest, from home), as Android's.
+// The host sends it while ITS flag says the layer is up; the page's own layer decides. A stale host flag (the layer
+// closed without the host hearing of it) left the key dead with zero cards: close() on a closed layer is a no-op
+// (OnePlus folded 11-11). Closed here: the press opens it - the host's flag is already "open", now true again.
 powos.on("switcher.toggle", () => {
+  if (phase.value === "closed") {
+    console.warn("recents: toggle while the layer is closed (host flag stale) - shown");
+    const up = (s?: { from?: number | null; tasks?: RecentTask[] } | null) => void show({ from: s?.from ?? null, tasks: Array.isArray(s?.tasks) ? s.tasks : [] });
+    powos.recents.state().then(up, () => up(null));
+    return;
+  }
   const list = tasks.value;
   const next = list[0]?.id === lead.value ? list[1] : list[0];
   if (next) open(next.id, row?.querySelector<HTMLElement>(`.task[data-task="${next.id}"] .task-shot`) ?? undefined);
