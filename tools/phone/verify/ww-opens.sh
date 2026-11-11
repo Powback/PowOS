@@ -1,5 +1,6 @@
 #!/bin/bash
 # lanes: phone
+# screen: inner
 # needs: kwin home
 # ww-opens.sh: a Linux app's launch opens its window as a web window, never on the Plasma desktop (board task
 # linux-app-opens-no-window-exists-in-kwin-but-nev, ccf90055: powos-open-task's "desktop" brought Plasma up over home

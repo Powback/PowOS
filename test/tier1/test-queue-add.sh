@@ -146,6 +146,22 @@ out=$(QUEUE_DIR="$T/eq" bash "$E/tools/phone/verify/e2e-queue.sh" 2>&1); rc=$?
   && ok "f368: e2e-queue still queues a round (450 s parts) when every add succeeds" || bad "f368: e2e-queue happy path" "rc=$rc $out"
 
 # Final result
+# ============================================= 11-11: "# screen:" header ======================
+# A check whose header says "# screen: inner" is queued waiting for the inner screen without --screen; --screen wins.
+rm -f "$VQ"/*.job
+printf '#!/bin/bash\n# lanes: phone\n# screen: inner\necho hi\n' > "$VA/inner-check.sh"; chmod +x "$VA/inner-check.sh"
+out=$(run_queue add t2 inner-check.sh 2>&1); j=$(ls "$VQ"/*.job 2>/dev/null | head -1)
+{ [ -n "$j" ] && grep -q "^screen=inner$" "$j" && grep -q "needs the inner screen" <<<"$out"; } && ok "screen header: queued for the inner screen" || bad "screen header: queued for the inner screen" "$out $(cat "$j" 2>/dev/null)"
+rm -f "$VQ"/*.job
+out=$(run_queue add --screen cover t2 env X=1 inner-check.sh 2>&1); j=$(ls "$VQ"/*.job 2>/dev/null | head -1)
+{ [ -n "$j" ] && grep -q "^screen=cover$" "$j"; } && ok "screen header: --screen overrides it" || bad "screen header: --screen overrides it" "$out $(cat "$j" 2>/dev/null)"
+rm -f "$VQ"/*.job
+out=$(run_queue add t2 env X=1 inner-check.sh 2>&1); j=$(ls "$VQ"/*.job 2>/dev/null | head -1)
+{ [ -n "$j" ] && grep -q "^screen=inner$" "$j"; } && ok "screen header: found behind env" || bad "screen header: found behind env" "$out $(cat "$j" 2>/dev/null)"
+rm -f "$VQ"/*.job
+out=$(run_queue add t2 dummy.sh 2>&1); j=$(ls "$VQ"/*.job 2>/dev/null | head -1)
+{ [ -n "$j" ] && grep -q "^screen=''$" "$j"; } && ok "screen header: none -> either screen" || bad "screen header: none -> either screen" "$out $(cat "$j" 2>/dev/null)"
+
 echo ""
 if [ $fails -eq 0 ]; then
   echo "All tests passed"

@@ -1,5 +1,6 @@
 #!/bin/bash
 # lanes: phone
+# screen: inner
 # tools/phone/verify/ww-popups.sh: N3 of docs/WEB_WINDOWS.md "Native-glued windows" on the phone - a Linux web window's
 # popups are surfaces of their own (kwin 0063, pkgrel 3.71+): Steam's menus (X11 override-redirect POPUP_MENU windows, no
 # WM_TRANSIENT_FOR, 0062) each come to the app as "popup <window> <popup> x y w h" with their own buffers, and go as

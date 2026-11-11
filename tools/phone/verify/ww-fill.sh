@@ -1,5 +1,6 @@
 #!/bin/bash
 # lanes: phone
+# screen: inner
 # tools/phone/verify/ww-fill.sh: every Android web window's app fills its window's body - read-only (no input, nothing
 # opened or closed). Board "Hosted app window content is offset inside its frame": with freeform support on
 # (global enable_freeform_support=1) a task launched onto a web window's display got its freeform launch bounds -

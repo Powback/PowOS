@@ -1,5 +1,6 @@
 #!/bin/bash
 # lanes: phone
+# screen: inner
 # needs: kwin home
 # ww-popup-x11.sh: an X11 app's dropdown menu shows (board task linux-app-dropdown-popup-menus-don-t-show-overri: kwin
 # 0062-0064 surface override-redirect popups). ww-popups.sh proves it on Steam; this needs no Steam and no input: its

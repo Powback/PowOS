@@ -1,5 +1,6 @@
 #!/bin/bash
 # lanes: phone
+# screen: inner
 # needs: kwin home
 # ww-stop.sh: a Linux web window's consumer stops fast (board task linux-web-window-stop-takes-2-1-s-after-d9d7edcd,
 # af5ebd75: nativeStopWindow had joined a render thread blocked up to 5 s on an idle KWin window's next frame). Runs

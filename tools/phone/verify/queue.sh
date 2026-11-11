@@ -356,6 +356,12 @@ LINUX_ONLY='^(kate|dolphin|gwenview|ffplay|steam|kwin)$'
 # emulator as invoked, no further condition; "emu?" = only for an Android-only invocation (android_only_request);
 # plain "phone" = never (handbook "The emulator lane" has the table and why, per check).
 lanes_marker() { [ -f "$1" ] && awk 'NR<=6 && /^# lanes:/{sub(/^# lanes: */,""); print; exit}' "$1"; }
+# screen_marker <args...>: the first .sh among them with a "# screen: inner|cover" header line (first 6 lines) prints
+# that screen. A check that can only pass on one screen says so itself, so a plain `add` waits for that screen instead
+# of failing on the other (11-11 22:04: ww-close-min ran folded - web windows are unfolded-only - and FAILed "no live
+# kate window" on a build that was fine).
+screen_marker() { local a; for a in "$@"; do case $a in *.sh) [ -f "$a" ] || continue
+  awk 'NR<=6 && /^# screen: *(inner|cover) *$/{sub(/^# screen: */,""); sub(/ *$/,""); print; exit}' "$a"; return 0 ;; esac; done; }
 # android_only_request <script> <args...>: --dev auto's second condition - told, not guessed, that this run is
 # Android-only: a literal --android-only, or (window-max.sh) a first argument of calc or video; and no argument
 # names a Linux app/stage either way.
@@ -511,6 +517,7 @@ except Exception: pass' 2>/dev/null) || ids=
     fi
     echo "queue.sh: --dev auto picked $dev for $(basename -- "$1")"
   fi
+  [ -n "$screen" ] || [ "$dev" != phone ] || { screen=$(screen_marker "$@"); [ -z "$screen" ] || echo "queue.sh: $(basename -- "$1") needs the $screen screen (its # screen: header) - it waits for it"; }
   # The emulator has no phone hardware: a game, Steam, frame pacing, the hinge or the phone's kernel is the phone's.
   # Past the filename check (launch-window.sh's Steam cold-start stage isn't named steam-*): a check that carries its
   # OWN "# lanes:" marker and says "phone" only (no "emu") is refused too - the marker knows what the filename can't.

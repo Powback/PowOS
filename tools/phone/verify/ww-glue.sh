@@ -1,5 +1,6 @@
 #!/bin/bash
 # lanes: phone
+# screen: inner
 # tools/phone/verify/ww-glue.sh: N1 of docs/WEB_WINDOWS.md "Native-glued windows" on the phone - a web window stays glued
 # to its page through page switches (the user, 11-07: "the pages should have the windows absolutely glued to them ...
 # page switching etc works instantly and 100% natively no race condition in updating window positions"), and a resize

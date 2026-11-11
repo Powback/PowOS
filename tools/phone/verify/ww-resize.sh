@@ -1,5 +1,6 @@
 #!/bin/bash
 # lanes: phone
+# screen: inner
 # needs: kwin
 # tools/phone/verify/ww-resize.sh [OUT]: N4 of docs/WEB_WINDOWS.md "Native-glued windows" - a web window resizes with
 # no perf drop and no rendering issue (the user, 11-07: "I should be able to resize it flawlessly with no perf drop and

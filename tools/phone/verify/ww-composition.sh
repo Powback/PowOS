@@ -1,5 +1,6 @@
 #!/bin/bash
 # lanes: phone
+# screen: inner
 # tools/phone/verify/ww-composition.sh: docs/WINDOWS_FIX_PLAN.md 1.6 - how SurfaceFlinger composes home with web windows,
 # the compositor's glass blur on and off. HYPOTHESIS under test: the blur over windows forces GPU (CLIENT) composition
 # (an older trace: 360 of 361 frames GPU-composited with a window open). Measures only; it changes nothing for good.
