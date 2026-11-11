@@ -416,12 +416,18 @@ class WebWindowStateFullScreenRaceTest {
         assertEquals("move refused: still full", Phase.FullAndroid(), full.run(TaskEvent.BackMoved(alive = true, ok = false)).state.phase)
     }
 
-    /** SUSPECT: "back to window" while the full-screen move is in flight says "not full", then the move lands as full. */
+    /**
+     * Suspect 4, a BUG fixed 11-11: "back to window" while the full-screen move is in flight (its card exists from the
+     * map set before the move) was overruled when the move landed - the app stayed full screen. Now it goes back then.
+     */
     @Test
-    fun backToWindowDuringTheMoveIsOverruled() {
-        val s = android().run(PageEvent.FullScreen(), PageEvent.ToWindow(), TaskEvent.FullMoved(true, true))
-        assertEquals(Phase.FullAndroid(), s.state.phase)
-        assertEquals(listOf(Fx.FILL_SCREEN, Fx.EMIT_FULL), s.fx())
+    fun backToWindowDuringTheMoveGoesBackOnceItLands() {
+        val asked = android().run(PageEvent.FullScreen(), PageEvent.ToWindow())
+        assertEquals(listOf(Fx.EMIT_FULL), asked.fx())
+        val s = asked.state.run(TaskEvent.FullMoved(true, true))
+        assertEquals(listOf(Fx.FILL_SCREEN, Fx.EMIT_FULL, Fx.BACK_FROM_FULL), s.fx())
+        assertEquals(Phase.Live, s.state.run(TaskEvent.BackMoved(alive = true, ok = true)).state.phase)
+        assertEquals("the move failed: a window already", Phase.Live, asked.state.run(TaskEvent.FullMoved(true, false)).state.phase)
     }
 }
 

@@ -3985,9 +3985,20 @@ class WebWindows(
             if (w.linuxFull) linuxFullScreen(w, false) else emit("webwindows.full", mapOf("id" to w.id, "on" to false))
             return true
         }
-        if (!w.full) return true.also { emit("webwindows.full", mapOf("id" to w.id, "on" to false)) }
+        if (!w.full) return true.also { notFull(w) }
         io.post { toWindowNow(w) }
         return true
+    }
+
+    /**
+     * [toWindow] of Android window [w] not full screen: "webwindows.full" off. 11-11 (windows plan 3.3, suspect 4): asked
+     * while the bar's full-screen move is still on [io] (its card exists from the map set before the move), the move
+     * landing overruled it; now asked again once it landed - [io] runs fullScreenNow first, whose announce is posted to
+     * main before this re-ask.
+     */
+    private fun notFull(w: Win) {
+        emit("webwindows.full", mapOf("id" to w.id, "on" to false))
+        io.post { main.post { if (w.full && !w.closed) toWindow(w.id) } }
     }
 
     /** On [io]: [toWindow]'s move. */

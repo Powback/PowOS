@@ -36,8 +36,12 @@ object WebWindowMachine {
         /**
          * An Android window's app as a full-screen app on display 0 (`full`, :3629). [moving]: the bar's full screen asked
          * and its move on [WebWindows]' io thread not answered yet (`full` still false, the display map set, :3591).
+         * [back]: "Back to window" asked meanwhile - taken back once the move lands ([toWindow]'s deferred ask).
          */
-        data class FullAndroid(val moving: Boolean = false) : Phase
+        data class FullAndroid(
+            val moving: Boolean = false,
+            val back: Boolean = false,
+        ) : Phase
 
         /** A Linux window full screen (`linuxFull` and `full`, :3675/:3718); [asked]: `fullAsked` (:3570), KWin's answer due. */
         data class FullLinux(
@@ -315,7 +319,9 @@ object WebWindowMachine {
         kwinCan: Boolean,
     ): Step {
         if (s.kind.linux) return linuxToWindow(s, kwinCan)
-        if (s.phase != Phase.FullAndroid(moving = false)) return Step(s, listOf(Effect(Fx.EMIT_FULL, false)))
+        val p = s.phase as? Phase.FullAndroid ?: return Step(s, listOf(Effect(Fx.EMIT_FULL, false)))
+        // The move in flight: full off said now, the way back once it lands (`toWindow`'s io -> main re-ask).
+        if (p.moving) return Step(s.copy(phase = p.copy(back = true)), listOf(Effect(Fx.EMIT_FULL, false)))
         return Step(s, listOf(Effect(Fx.BACK_FROM_FULL)))
     }
 
@@ -502,9 +508,13 @@ object WebWindowMachine {
         s: WinState,
         e: TaskEvent.FullMoved,
     ): Step {
-        if (s.phase != Phase.FullAndroid(moving = true)) return Step(s)
+        val p = s.phase as? Phase.FullAndroid
+        if (p?.moving != true) return Step(s)
         val facts = if (e.task) s.facts.copy(landed = true) else s.facts
-        if (e.task && e.ok) return Step(s.copy(phase = Phase.FullAndroid(), facts = facts), listOf(Effect(Fx.FILL_SCREEN), Effect(Fx.EMIT_FULL, true)))
+        if (e.task && e.ok) {
+            val back = if (p.back) listOf(Effect(Fx.BACK_FROM_FULL)) else emptyList()
+            return Step(s.copy(phase = Phase.FullAndroid(), facts = facts), listOf(Effect(Fx.FILL_SCREEN), Effect(Fx.EMIT_FULL, true)) + back)
+        }
         val unmark = if (e.task) listOf(Effect(Fx.MARK_FULL_TASK, false)) else emptyList()
         return Step(s.copy(phase = Phase.Live, facts = facts), unmark + Effect(Fx.EMIT_FULL, false) + Effect(Fx.RESEND))
     }

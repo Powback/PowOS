@@ -340,6 +340,7 @@ places, and the nine events and five timers above are gone.
     - 1 BUG, fixed: `pipLeave` clears `minimised` (`minimisedIs(w, false)`, as `backNow`); machine `pipOut` the same.
     - 2 INTENDED: PP1 never pulls a PiP back; its own expand (or card) brings the window back (then 1 clears minimised).
     - 3 INTENDED: held = the app still full screen in KWin; the page focuses only a shown window, so restore + press = full.
+    - 4 BUG, fixed: `toWindow` during the bar's full-screen move re-asks after it (io then main); machine `FullAndroid.back`.
     - 5 KEPT dead code with a note: `followOf`'s PIP is a pinned rule, the branch = `pipEnter`, harmless.
     - 6 INTENDED: `leaveNow` re-checks PiP support (a log) or retries a failed move; never while a leave is under way.
 - [ ] 3.4 **Derived predicates from the state only:** `listedState` (`:180`), `awayByChoice` (`:3859`), `gone` (`:594`),
