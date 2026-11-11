@@ -469,7 +469,10 @@ object WebWindowMachine {
         return Step(s.copy(phase = Phase.Live, facts = s.facts.copy(followed = null), minimised = false), fx)
     }
 
-    /** `follow`'s `followOf` part (:563-577). Follow.PIP can't come here: pipStep took every PiP (mode 2) first. */
+    /**
+     * `follow`'s `followOf` part (:563-577). Follow.PIP can't come here: pipStep took every PiP (mode 2) first - kept as
+     * in WebWindows (same effect as pipIn; followOf is a pinned rule), see the plan's 3.3 suspect 5.
+     */
     private fun followOf(
         s: WinState,
         e: TaskEvent.TaskSeen,

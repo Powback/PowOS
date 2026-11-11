@@ -87,13 +87,22 @@ class WebWindowStateSelfFullScreenTest {
         assertTrue(dropped.effects.isEmpty())
     }
 
-    /** SUSPECT: a held full screen survives a minimise; the next focus puts the minimised window full screen. */
+    /**
+     * Suspect 3, INTENDED (11-11): a held full screen survives a minimise. "Held" means the app still IS full screen in
+     * KWin (no "fullscreen 0" came) and waits for the user (WebWindows.heldFullScreen: "held until the user comes to
+     * it"); a minimise is not leaving full screen. The page sends "focus" only on a press of a shown window (webwindows
+     * .tsx focusWin), so Focus while minimised is unreachable there; the real path is restore, then a press: full screen,
+     * which is what the app asked for. The first case (Focus while minimised) is the machine's literal transition.
+     */
     @Test
     fun aHeldFullScreenSurvivesAMinimise() {
         val s = linux(7).run(kwinOn(15, listOf(7, 15)), PageEvent.Minimise, PageEvent.Focus)
         assertTrue(s.state.minimised)
         assertTrue(s.state.phase is Phase.FullLinux)
         assertEquals("full", s.state.listed)
+        val back = linux(7).run(kwinOn(15, listOf(7, 15)), PageEvent.Minimise, PageEvent.Restore, PageEvent.Focus)
+        assertEquals("restored, then pressed: the app's own full screen now", "full", back.state.listed)
+        assertFalse(back.state.held)
     }
 
     @Test
@@ -158,12 +167,33 @@ class WebWindowStateMinimisePipTest {
         assertTrue("still in PiP: nothing", left.run(TaskEvent.LeftTaskSettled(alive = true, front = false)).effects.isEmpty())
     }
 
-    /** SUSPECT: a restore of a window whose app went to PiP by itself only clears the dock flag; the app stays in PiP. */
+    /**
+     * Suspect 2, INTENDED (11-11): a restore of a window whose app went to PiP by itself only clears the dock flag; the
+     * app stays in PiP. PP1 (WebWindows.follow/pipCheck): a PiP is the app leaving its window by the user's own choice -
+     * "tracked as PiP, never pulled back, back in the window when expanded" (the PiP's own expand, or its switcher card:
+     * pipLeave). The PiP stays on screen meanwhile, so nothing is lost; the window comes back on that expand (suspect 1's
+     * fix then also clears the minimise).
+     */
     @Test
     fun restoreOfAPipWindowOnlyClearsTheFlag() {
         val s = android().run(TaskEvent.TaskSeen(main, 2), PageEvent.Minimise, PageEvent.Restore)
         assertEquals(Phase.Pip, s.state.phase)
         assertEquals(listOf(Fx.EMIT_STATE), s.fx())
+    }
+
+    /**
+     * Suspect 6, INTENDED (11-11): a second minimise of a just-hidden window (no PiP: leaveNow found no picture-in-picture
+     * or its move failed, `leftAt` stays 0) starts leaveNow again. leaveNow re-reads the task and its PiP support and
+     * returns at once when there is still none (a log line, no move); after a FAILED move it is the retry. A leave already
+     * under way (`leftAt` set) is never started twice (minimiseGoesPip's `left`), and the page sends a minimise only on a
+     * change of its flag (webwindows.tsx update -> minimisedChanged), so this is a host-API repeat, not a user path.
+     */
+    @Test
+    fun aSecondMinimiseOfAHiddenWindowChecksPipAgain() {
+        val again = android().run(PageEvent.Minimise, PageEvent.Minimise)
+        assertEquals("told once, the leave asked again", listOf(Fx.START_LEAVE), again.fx())
+        assertEquals(listOf(Fx.START_LEAVE), android().run(PageEvent.Minimise, TaskEvent.LeaveMoved(false), PageEvent.Minimise).fx())
+        assertTrue("left already: never twice", android().run(PageEvent.Minimise, TaskEvent.LeaveMoved(true), PageEvent.Minimise).effects.isEmpty())
     }
 }
 
@@ -242,6 +272,23 @@ class WebWindowStateReconcileTest {
         assertEquals("back on its own display", Phase.Live, home.state.phase)
         assertEquals(listOf(Effect(Fx.MARK_PIP, false), Effect(Fx.EMIT_PIP, false)), home.effects)
         assertTrue("another display", android().run(TaskEvent.TaskSeen(elsewhere, 2)).effects.isEmpty())
+    }
+
+    /**
+     * Suspect 5, dead code KEPT with this note (11-11): `Follow.PIP` is never reached in `follow` - pipCheck (pipStep)
+     * runs first and takes every PiP (mode 2) on its own display or display 0 (ENTER, or "already PiP": follow stops),
+     * and followOf answers null for any other display. Not removed: followOf is a pinned pure rule
+     * (WebWindowsReconcileTest asserts its PIP), and the branch does the same as pipCheck (pipEnter), so it is harmless.
+     */
+    @Test
+    fun followPipIsUnreachableEveryPipIsPipChecksFirst() {
+        for (at in listOf(main, own)) {
+            for (start in listOf(android(), android().run(TaskEvent.TaskSeen(main, 2)).state)) {
+                val s = start.run(TaskEvent.TaskSeen(at, 2))
+                assertEquals(Phase.Pip, s.state.phase)
+                assertTrue("pipEnter's effects or none (already PiP)", s.fx().isEmpty() || s.fx() == listOf(Fx.MARK_PIP, Fx.HIDE_FRAME, Fx.EMIT_PIP))
+            }
+        }
     }
 
     /** Suspect 1, a BUG fixed 11-11: minimised while in PiP, then expanded: back in the window, shown, listed floating. */
