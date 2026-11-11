@@ -19,6 +19,7 @@
 #      edges, each > 1.5 % of that side and within a third of each other (Proton's fullscreen hack centres a game that
 #      renders a smaller / other-shaped mode than its window: Besiege's saved 2268x1600 in a 2268x2440 window). One
 #      dark edge alone is the game's art, logged only. BARS=note keeps bars a note (a game whose menu is black-framed).
+#      A wholly black screencap fails too (G3-black-frame).
 #   G2 input: the game's window is still KWin's active window after each change (focused=yes in its state line).
 # Also logged once: the game's own command line's size arguments (unity-screen / unreal's -ResX), from /proc.
 # G4 (controller layout per orientation) is pad-fullscreen.sh's.
@@ -112,6 +113,9 @@ probe() {  # probe <label>
   # Input after a rotation / fold (the user, 11-07: "rotating breaks the games"): the game's window is still KWin's
   # active one - its keys and the pad's events go to it (touch: G1's size = its input region).
   [[ $st == *focused=yes* ]] || bad+=" G2-input-not-the-game's($(echo "$st" | grep -o 'focused=[a-z]*'))"
+  # A wholly black screencap is no picture at all, not "no bars" (11-10 11:16 346010 unfolded-landscape: top=bottom=2268
+  # of 2268 passed G3). bars() returns the full side when no row is lit.
+  case $s in top=*) [ -n "$wh" ] && [ "$(echo "$s" | sed 's/^top=\([0-9]*\).*/\1/')" -ge "${wh#*x}" ] && bad+=" G3-black-frame" ;; esac
   [ -n "$box" ] && { if [ "${BARS:-verdict}" = note ]; then log "  $1 note: $box (BARS=note)"; else bad+=" G3-$box"; fi; }
   [ -n "$bad" ] && { fails=$((fails + 1)); log "  $1 bad:$bad"; }
   return 0

@@ -320,6 +320,13 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   options kept around it; `powos-steam-compat screen <appid> off` opts out. Unreal gets `-windowed -ResX -ResY`.
   Before: Besiege ran its saved 2268x1600 (user.reg Screenmanager) letterboxed in 2268x2440. Check any game:
   `game-resize.sh <appid>` (bf-resize.sh = it for 274190; G3 now FAILs a letterbox/pillarbox).
+  Besiege's letterbox is ITS OWN setting (11-10, kwin 3.79, window = screen in every state): Besiege_Data/Config.xml
+  (the game's options, not PlayerPrefs) has WindowedMode=false ScreenWidth=2560 ScreenHeight=1600, and the game applies
+  it after startup over unity-screen's `-screen-fullscreen 0 -popupwindow -screen-width/-height` (proof: user.reg
+  Screenmanager written at exit = 2268x1600 FULLSCREEN=1 - 2560 clamped to the 2268 desktop; the unfolded frame is
+  exactly 2268x1600 centred, 420+1600+420). Exclusive full screen keeps that render size, so a fold/rotate stretches
+  the whole 2268x2440 frame (folded-landscape bars 192/235 = 420/514 x 1116/2440; cover portrait squashed). Not a
+  launch-arg bug; the fix is the game's own Options (Windowed + resolution) or BARS=note for it, like ABZU's own sizing.
 - Besiege (346010, Unity 5.4.0f3, 32-bit, x86 Proton) 11-07: with or without unity-screen's args its only viewable X
   window is a FIXED-SIZE 1135x1365 (WM_NORMAL_HINTS min == max, motif no-resize) "Besiege", class steam_app_346010,
   shown as a floating web window (unfolded) / floating on the cover, black, never drawing (xframes 1 sample) while
