@@ -34,8 +34,9 @@ The host (`WebWindows.kt`) owns which windows exist and their state; the page (`
 the page needs to rebuild its windows lives in ONE host snapshot, so the page can reload at any moment and lose
 nothing.
 
-**Read:** `webwindows.list(true)` returns the snapshot object. `webwindows.list()` (no argument) keeps returning the bare
-`windows` array for the page as it is today, until the page reads the object (plan 2.4); then the bare form goes.
+**Read:** `webwindows.list(true)` returns the snapshot object; the page reads only that since plan 2.4 (11-11).
+`webwindows.list()` / `list(false)` still answers the bare `windows` array, and the page takes an array answer (a host
+from before 2.2, the gate's RL1/GH1 hosts) as "add what's missing" only - no removal, no generation.
 
 ```
 {
@@ -67,13 +68,32 @@ json|null)` sets a home page's. Writing one is not a state change: no generation
 `scale?`, `minimised?`, `tile? {layout, slot}` (slot = index in its page's tiling), `tab? {ids, active}`. Page record
 (`PageLayout`, `v: 1`): `tiling?` (the page's `Tiling`), `tabs` (the tab groups whose shown tab is on it). Records are
 in memory only: an app restart starts empty (window ids restart too; keyed records across restarts wait for 2.8).
-The page reads none of it yet (2.4 restores from it).
+Since 2.4 the page reads them for the windows a sync ADDS (a reload): the window record's page, frame, `restore`,
+`untiled` and `scale`, then each page record's tiling and tab groups whose windows came back (a page that has a tiling
+now keeps it). Host-owned state (minimised, full, PiP) comes from the snapshot's `state`, never from the record.
 
-**Change:** `webwindows.changed <generation>` says the snapshot moved on. The page reads the snapshot on load, on
-every `webwindows.changed` whose generation is newer than the one it last read, and when its `native` port reconnects
-(plan 2.4: `rebuildFromHost` is the one sync, it adds, updates and removes). A change is anything a per-fact event
-reports today (`adopt`, `alive`, `closed`, `failed`, `frame`, `full`, `live`, `pip`, `show`, `state`, `control`) and
-a window opened or dropped. Those events stay until 2.4 is proven, then retire one at a time (2.5).
+**Change:** `webwindows.changed <generation>` says the snapshot moved on. A change is anything a per-fact event
+reports today (`adopt`, `closed`, `failed`, `frame`, `full`, `live`, `pip`, `show`, `state`, `control`), a window
+opened or dropped, an offer made or taken. `alive` is no change (it restates the ids every 2 s heartbeat; opens and
+drops bumped already). The host emits it (2.4, 11-11) through `WebWindows.ChangedSignal`: every bump queues ONE event
+on the main looper (a burst of bumps in one turn = one event), carrying the generation as it is when it goes out, sent
+AFTER the per-fact event of the same bump. Never for `moveresize`/`resend`.
+
+**The page's sync (plan 2.4, `ui/webwindows.tsx` `rebuildFromHost`):** the one sync, run on load, on every `changed`
+newer than the applied generation, and when the `native` port reconnects (events sent while it was down are lost).
+One runs at a time; a trigger meanwhile runs it once more after. A snapshot whose generation is older than the last
+applied is ignored. It:
+- removes each page window (id >= 0, not a launch placeholder) the snapshot doesn't list - unless the host gave it to
+  the page after the snapshot was asked for (an open racing the read);
+- applies host facts - `state` (via the `full`/`pip`/`state` events' own handlers), `live` (true only), `failed`,
+  `ownFrame`, `task` - only where the fact CHANGED since the previous snapshot and the page differs. So the snapshot
+  does exactly what the lost event would have done; a fact the host kept is never re-applied over the page's own
+  change still on its way to the host (a minimise just tapped), and a late per-fact event after the snapshot is a
+  no-op (both write the same value). Zoom is the page's own call's (no event): never taken back from the snapshot;
+- adds the windows it lacks (the layout records above, else the host's last frame on the page on screen);
+- adopts each `pendingLinux` offer the page isn't adopting already (a lost `adopt`; the event's and the snapshot's
+  adoption share one in-flight guard per KWin id, and a late copy gets "not offered" (-1) from the host).
+The per-fact events stay until 2.5 retires them one at a time.
 
 **Real-time events stay events** (no generation, no snapshot): `webwindows.moveresize`, `webwindows.resend` and input.
 They are per-frame or per-gesture traffic, not state.

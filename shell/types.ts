@@ -543,6 +543,21 @@ export interface HostWebWindow {
   zoom?: number;
   /** Plan 2.3: the page's own layout record as it wrote it ("webwindows.layout"; ui/webwindows.tsx [WindowLayout]). */
   layout?: string;
+  /** Plan 2.2: a Linux window's failure ("webwindows.failed"), while it is shown as not responding. */
+  failed?: string;
+  kwin?: number;
+}
+
+/** A KWin window offered to the page and not opened yet (plan 2.2; "webwindows.adopt"). */
+export interface HostLinuxOffer { kwin: number; key: string; label: string; ownFrame?: boolean; alts?: string[] }
+
+/** The host snapshot, "webwindows.list" true (docs/WEB_WINDOWS.md "The host snapshot: the contract"). */
+export interface HostWebWindowsSnapshot {
+  generation: number;
+  windows: HostWebWindow[];
+  pendingLinux?: HostLinuxOffer[];
+  /** Plan 2.3: the page's record per home page with a tiling or a tab group, page number -> JSON. */
+  pages?: Record<string, string>;
 }
 
 export interface WebWindowRect { left: number; top: number; width: number; height: number }
@@ -1165,8 +1180,11 @@ export interface Bridge {
   };
   webwindows?: {
     enabled(): Promise<boolean>;
-    /** Host-optional (RL1): the host's live windows, for a (re)loaded page to rebuild its list (ui/webwindows.tsx). */
-    list?(): Promise<HostWebWindow[]>;
+    /**
+     * Host-optional (RL1): the host's live windows, for a (re)loaded page to rebuild its list (ui/webwindows.tsx).
+     * [whole] true (plan 2.4): the whole host snapshot; a host from before it answers the bare array either way.
+     */
+    list?(whole?: boolean): Promise<HostWebWindow[] | HostWebWindowsSnapshot>;
     /**
      * The app (an "a:" key) launched into a new window at [rect]: its id, or -1. [task]: its running task moved in instead.
      * [kwin]: a Linux window KWin opened ("l:" key, "webwindows.adopt" with its KWin id) shown in it (docs/WEB_WINDOWS.md S6).

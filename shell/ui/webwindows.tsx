@@ -13,7 +13,7 @@ import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
 // The shared spring's CSS vars (--spring / --spring-ms): a folded quick page's sheet rises on it.
 import "./spring.ts";
-import type { HostWebWindow, WebWindowRect } from "../types.ts";
+import type { HostWebWindow, HostWebWindowsSnapshot, WebWindowRect } from "../types.ts";
 import { Mark } from "./chrome.tsx";
 import { forgetQuickReturn, QuickBar, quickGone, quickIconKeys, quickPlace, quickShown, QUICK, type QuickInfo, type QuickRect } from "./quickpage.tsx";
 import { memo } from "./memo.ts";
@@ -544,6 +544,23 @@ export async function adoptWebWindow(
   m: { task?: number; kwin?: number; key: string; label: string; body?: WebWindowRect; ownFrame?: boolean; alts?: string[] },
   page: number,
 ): Promise<boolean> {
+  // Plan 2.4: one adoption per offer at a time - the event's and a snapshot's (its pendingLinux) are the same one. Once
+  // it's done the host has taken the offer (a late snapshot's copy only gets "not offered" back: -1, nothing made).
+  const kwin = m.kwin;
+  if (kwin == null) return adoptNow(m, page);
+  if (offersSeen.has(kwin)) return false;
+  offersSeen.add(kwin);
+  try {
+    return await adoptNow(m, page);
+  } finally {
+    offersSeen.delete(kwin);
+  }
+}
+
+async function adoptNow(
+  m: { task?: number; kwin?: number; key: string; label: string; body?: WebWindowRect; ownFrame?: boolean; alts?: string[] },
+  page: number,
+): Promise<boolean> {
   // KWin's stand-in for an Android app ("l:android-<package>", the Linux session's powos-android-tasks / scrcpy
   // window): the app's own window is it - never a second element (10-31 15:33, Termux's translucent ghost window).
   if (m.key.startsWith(ANDROID_STAND_IN)) return false;
@@ -578,25 +595,214 @@ export async function adoptWebWindow(
 /**
  * RL1 (the user, 10-31 14:19: "my widgets A window behind my widgets."): the page's list lives in memory only, and a
  * reload (a shell update) dropped it while the host kept the windows - their app layers under home with no frame, bar
- * or close. On load the page asks the host for its live windows ("webwindows.list") and rebuilds each on the page on
- * screen, at its last frame (clamped into the work area), in its state (minimised, full screen). Tilings and stacks are
- * the page's alone: they come back as floating windows at their last frames. The count of windows added.
+ * or close.
+ *
+ * Plan 2.4 (docs/WEB_WINDOWS.md "The host snapshot: the contract"): THE sync with the host. It reads the host snapshot
+ * ("webwindows.list" true) on load, on every "webwindows.changed <generation>" and when the native port reconnects, and
+ * makes the page agree with it: a window the page lacks is added (at its layout record's page and frame when the host
+ * has one, else on the page on screen at the host's last frame), a window the host no longer has goes, host-owned facts
+ * (state, live, failed, ownFrame, task) are applied, a KWin offer the page never got is adopted, and tilings and
+ * tab groups come back from the page records for the windows it added. One sync runs at a time (a change meanwhile
+ * runs it once more after); a snapshot older than the last applied is ignored. The count of windows added.
  */
-export async function rebuildFromHost(): Promise<number> {
-  const list = await powos.webwindows?.list?.().catch(() => [] as HostWebWindow[]);
-  if (!list?.length) return 0;
-  const have = new Set(webWins.value.map((w) => w.id));
+export function rebuildFromHost(): Promise<number> {
+  if (syncRun) {
+    syncAgain = true;
+    return syncRun;
+  }
+  syncRun = (async () => {
+    let added = 0;
+    do {
+      syncAgain = false;
+      added += await syncOnce();
+    } while (syncAgain);
+    return added;
+  })().finally(() => (syncRun = null));
+  return syncRun;
+}
+
+let syncRun: Promise<number> | null = null;
+let syncAgain = false;
+/** The generation of the last snapshot applied (-1: none yet): an older one is ignored. */
+let appliedGen = -1;
+/** The host's windows as the last applied snapshot had them: a host fact is applied when it CHANGED since ([hostFacts]). */
+let lastHost = new Map<number, HostWebWindow>();
+/** When the host gave the page each window (an open, an adoption): one given after a snapshot was asked for isn't in it. */
+const givenAt = new Map<number, number>();
+/** KWin windows the page is adopting now ([adoptWebWindow]): a snapshot's pending offer in flight isn't adopted twice. */
+const offersSeen = new Set<number>();
+
+/** For the gate: the last generation applied. */
+export const syncedGeneration = () => appliedGen;
+
+async function syncOnce(): Promise<number> {
+  const asked = performance.now();
+  const got = await powos.webwindows?.list?.(true).catch(() => null);
+  if (!got) return 0;
+  // A host from before the snapshot (and the gate's RL1/GH1 hosts): the bare array - add what's missing, as before.
+  if (Array.isArray(got)) return addMissing(got, new Map());
+  if (!Array.isArray(got.windows)) return 0;
+  if (got.generation < appliedGen) {
+    console.info(`[ww-sync] snapshot ${got.generation} ignored: ${appliedGen} applied already`);
+    return 0;
+  }
+  appliedGen = got.generation;
+  return applySnapshot(got, asked);
+}
+
+/** Snapshot [s] (asked for at [asked]) made the page's: removes, updates, adds, offers, tilings and tabs. */
+function applySnapshot(s: HostWebWindowsSnapshot, asked: number): number {
+  const gone = removeUnlisted(s.windows, asked);
+  const before = lastHost;
+  lastHost = new Map(s.windows.map((h) => [h.id, h]));
+  const updated = s.windows.filter((h) => hostFacts(h, before.get(h.id))).length;
+  const added = addMissing(s.windows, layoutsOf(s.windows));
+  if (added) restoreAdded(s.pages ?? {}, webWins.peek().slice(-added).map((w) => w.id));
+  for (const o of s.pendingLinux ?? []) if (!offersSeen.has(o.kwin)) void adoptWebWindow({ ...o, label: o.label || o.key }, shownPage());
+  if (gone + updated + added > 0) console.info(`[ww-sync] generation ${s.generation}: +${added} -${gone} ~${updated}`);
+  return added;
+}
+
+/**
+ * Page windows the snapshot [list] doesn't name, gone (a launch's placeholder is the page's own) - unless the host gave
+ * it to the page after the snapshot was [asked] for (an open racing the read). The host's ids set. The count removed.
+ */
+function removeUnlisted(list: HostWebWindow[], asked: number): number {
+  const listed = new Set(list.map((h) => h.id));
+  const late = (id: number) => (givenAt.get(id) ?? -1) > asked;
+  hostIds.value = new Set([...listed, ...[...givenAt.keys()].filter(late)]);
+  const gone = webWins.peek().filter((w) => w.id >= 0 && !w.pending && !listed.has(w.id) && !late(w.id));
+  gone.forEach((w) => forget(w.id));
+  return gone.length;
+}
+
+/** Windows [ids] a sync just added: their page records' tilings and tabs back, then each brought into reach. */
+function restoreAdded(pages: Record<string, string>, ids: number[]) {
+  const added = new Set(ids);
+  for (const [key, json] of Object.entries(pages)) {
+    const r = parsePage(json);
+    if (!r) continue;
+    if (r.tiling) restoreTiling(Number(key), r.tiling, added);
+    for (const g of r.tabs ?? []) restoreTabs(g, added);
+  }
+  // A record's frame from another screen (a fold since) comes back into reach, as a fold's own [reachAll] does.
+  ids.forEach(reach);
+}
+
+function parsePage(json: string): PageLayout | null {
+  try {
+    const r = JSON.parse(json) as PageLayout;
+    return r?.v === 1 ? r : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Page [page]'s recorded tiling [t] back, of the windows on that page and in no tiling - if it names one just [added] and the page has none. */
+function restoreTiling(page: number, t: Tiling, added: Set<number>) {
+  if (tilings.peek()[page] || !t.ids.some((id) => id != null && added.has(id))) return;
+  const on = new Set(webWins.peek().filter((w) => w.page === page && tiledOn(w.id) == null).map((w) => w.id));
+  const ids = t.ids.map((id) => (id != null && on.has(id) ? id : null));
+  if (ids.filter((v) => v != null).length >= 2) setTiling(page, { ...t, ids });
+}
+
+/** Recorded tab group [g] back, of its windows that are here and in no group - if it names one just [added]. */
+function restoreTabs(g: Stack, added: Set<number>) {
+  if (!g.ids.some((id) => added.has(id))) return;
+  const here = new Set(webWins.peek().map((w) => w.id));
+  const ids = g.ids.filter((id) => here.has(id) && !stackOf(id));
+  if (ids.length >= 2) setStacks([...stacks.peek(), { ids, active: ids.includes(g.active) ? g.active : ids[0] }]);
+}
+
+/** Host windows in [list] the page has no element for, added; [records]: their layout records by id. The count. */
+function addMissing(list: HostWebWindow[], records: Map<number, WindowLayout>): number {
+  if (!list.length) return 0;
+  const have = new Set(webWins.peek().map((w) => w.id));
   const page = shownPage();
   // One element per host window and task: a host window whose task the page shows already, or KWin's stand-in for an
   // Android app, is not a second one.
-  const tasks = new Set(webWins.value.map((w) => w.task).filter((t) => t != null));
+  const tasks = new Set(webWins.peek().map((w) => w.task).filter((t) => t != null));
   const add = list
     .filter((h) => h.id >= 0 && !have.has(h.id) && !h.key.startsWith(ANDROID_STAND_IN) && !(h.task != null && h.task >= 0 && tasks.has(h.task)))
-    .map((h) => fromHost(h, page));
+    .map((h) => withRecord(fromHost(h, page), records.get(h.id)));
   if (!add.length) return 0;
   add.forEach((w) => hostGave(w.id));
-  webWins.value = [...webWins.value, ...add];
+  webWins.value = [...webWins.peek(), ...add];
   return add.length;
+}
+
+/** Each host window's layout record (plan 2.3, [WindowLayout] v1), parsed; a bad one is skipped. */
+function layoutsOf(list: HostWebWindow[]): Map<number, WindowLayout> {
+  const out = new Map<number, WindowLayout>();
+  for (const h of list) {
+    if (!h.layout) continue;
+    try {
+      const r = JSON.parse(h.layout) as WindowLayout;
+      if (r?.v === 1 && r.frame && typeof r.page === "number") out.set(h.id, r);
+    } catch {}
+  }
+  return out;
+}
+
+/** Entry [w] at its record [r]'s page and frame (and its maximise / tile / scale memory); host-owned state stays. */
+function withRecord(w: WebWin, r: WindowLayout | undefined): WebWin {
+  if (!r) return w;
+  const { x, y, w: ww, h } = r.frame;
+  return { ...w, page: r.page, x, y, w: ww, h, restore: r.restore, untiled: r.untiled, scale: r.scale };
+}
+
+/**
+ * Host window [h]'s facts made the page's where they CHANGED since the last snapshot ([was]; undefined: the page never
+ * saw it from a snapshot) and the page differs - the same paths as their per-fact events, so a late event and the
+ * snapshot agree and either order ends the same (idempotent). A fact the host kept is never re-applied: the page's own
+ * change on its way to the host (a minimise just tapped) isn't undone by a snapshot read before the host took it.
+ * true: something changed.
+ */
+function hostFacts(h: HostWebWindow, was: HostWebWindow | undefined): boolean {
+  const w = webWins.peek().find((v) => v.id === h.id);
+  if (!w) return false;
+  const moved = (k: keyof HostWebWindow) => !was || was[k] !== h[k];
+  const change = factChange(w, h, moved);
+  const any = Object.keys(change).length > 0;
+  if (any) update(h.id, change);
+  const state = moved("state") && pageState(w) !== h.state;
+  if (state) toHostState(h.id, h.state, h.task);
+  return any || state;
+}
+
+/**
+ * [hostFacts]' field changes, as "webwindows.live" / ".failed" / ".frame" / ".full"'s task make them. Zoom is the
+ * page's own call's (no event): the page's newer value is never taken back.
+ */
+function factChange(w: WebWin, h: HostWebWindow, moved: (k: keyof HostWebWindow) => boolean): Partial<WebWin> {
+  const change: Partial<WebWin> = moved("live") || moved("failed") ? liveChange(w, h) : {};
+  if (moved("ownFrame") && !!w.ownFrame !== !!h.ownFrame) change.ownFrame = h.ownFrame || undefined;
+  const task = hostTask(h);
+  if (moved("task") && task != null && w.task !== task) change.task = task;
+  return change;
+}
+
+/** Host window [h]'s app task, undefined: none yet (-1). */
+const hostTask = (h: HostWebWindow) => (h.task != null && h.task >= 0 ? h.task : undefined);
+
+/** "webwindows.live" (true only) and ".failed" as the snapshot's [h] states them, where page window [w] differs. */
+function liveChange(w: WebWin, h: HostWebWindow): Partial<WebWin> {
+  if (h.failed) return w.failed === h.failed ? {} : { live: false, failed: h.failed };
+  return h.live && !w.live ? { live: true } : {};
+}
+
+/** Window [w]'s state as the host names it. */
+const pageState = (w: WebWin): HostWebWindow["state"] => (w.full ? "full" : w.pip ? "pip" : w.minimised ? "minimised" : "floating");
+
+/** Window [id] to the host's [state], through the per-fact events' own paths (full, pip, state). */
+function toHostState(id: number, state: HostWebWindow["state"], task?: number) {
+  const w = webWins.peek().find((v) => v.id === id);
+  if (!w) return;
+  if (w.full && state !== "full") onFull({ id, on: false });
+  if (w.pip && state !== "pip") onPip({ id, on: false });
+  if (state === "full") return onFull({ id, on: true, task: task != null && task >= 0 ? task : undefined });
+  if (state === "pip") return onPip({ id, on: true });
+  onHostMinimised({ id, minimised: state === "minimised" });
 }
 
 /** Host window [h] as the page's entry on [page]: its frame (the body plus its bar) where the host last had it. */
@@ -609,6 +815,7 @@ function fromHost(h: HostWebWindow, page: number): WebWin {
     id: h.id, key: h.key, label: h.label, page, x: vx - o.x, y: vy - o.y, w, h: hh,
     task: h.task != null && h.task >= 0 ? h.task : undefined,
     live: h.live || undefined, ownFrame: h.ownFrame || undefined,
+    failed: h.failed || undefined,
     quick: h.key.startsWith("q:") ? { token: h.key.slice(2), pkg: "" } : undefined,
     ...stateOf(h),
     zoom: zoomOf(h),
@@ -619,6 +826,11 @@ function fromHost(h: HostWebWindow, page: number): WebWin {
 /** Host window [h]'s state as the page's flags (minimised, full screen, PiP: PP1). */
 const stateOf = (h: HostWebWindow) => ({ minimised: h.state === "minimised" || undefined, full: h.state === "full" || undefined, pip: h.state === "pip" || undefined });
 const zoomOf = (h: HostWebWindow) => (h.zoom != null && h.zoom !== 1 ? h.zoom : undefined);
+// Plan 2.4: the host says its snapshot moved on - read it unless this generation is applied already.
+powos.on("webwindows.changed", (generation: number) => {
+  if (typeof generation === "number" && generation <= appliedGen && !syncRun) return;
+  void rebuildFromHost();
+});
 void rebuildFromHost();
 
 /** The pointer kept by its element (a synthetic or already-ended pointer can't be: the drag still works). */
@@ -661,6 +873,7 @@ export function raise(id: number) {
  */
 export const hostIds = signal<Set<number> | null>(null);
 function hostGave(id: number) {
+  givenAt.set(id, performance.now());
   const ids = hostIds.value;
   if (ids && !ids.has(id)) hostIds.value = new Set([...ids, id]);
 }
@@ -675,6 +888,7 @@ function forget(id: number) {
   if (token) quickGone(token, "closed");
   leaveStack(id);
   untile(id, "gone");
+  givenAt.delete(id);
   webWins.value = webWins.value.filter((w) => w.id !== id);
 }
 powos.on("webwindows.closed", (id: number) => {
@@ -748,13 +962,14 @@ export function dockToggle(key: string): boolean {
 }
 
 /** Its app became a full-screen app (the window hides, its place kept) or is back in the window (shown on its page). */
-powos.on("webwindows.full", (m: { id: number; on: boolean; task?: number }) => {
+powos.on("webwindows.full", (m: { id: number; on: boolean; task?: number }) => onFull(m));
+function onFull(m: { id: number; on: boolean; task?: number }) {
   // A tile going full screen leaves its tile (the others close up); back in a window, it floats at its old frame.
   if (m.on) untile(m.id, "float");
   update(m.id, { full: m.on, task: m.task ?? webWins.value.find((w) => w.id === m.id)?.task, minimised: false });
   if (!m.on) bringBack(m.id);
   resendGeometry();
-});
+}
 /** The host lost or re-made layer state (a mirror made again, home's surface re-attached): every window's state again. */
 powos.on("webwindows.resend", () => resendNow());
 /** Its app's first frame shows (WebWindows.liveWhenDrawn): the placeholder goes, the body is the app's. */
@@ -774,12 +989,13 @@ powos.on("webwindows.moveresize", (m: { id: number; edges: string }) => {
  * the host (it is the host's). e2e round 193: Calculator (no PiP) stayed "floating" in the host's list after its
  * minimise, and Chrome came back in front behind the page's back.
  */
-powos.on("webwindows.state", (m: { id: number; minimised: boolean }) => {
+powos.on("webwindows.state", (m: { id: number; minimised: boolean }) => onHostMinimised(m));
+function onHostMinimised(m: { id: number; minimised: boolean }) {
   const w = webWins.value.find((v) => v.id === m.id);
   if (!w || !!w.minimised === m.minimised) return;
   webWins.value = webWins.value.map((v) => (v.id === m.id ? { ...v, minimised: m.minimised } : v));
   if (!m.minimised) (reach(m.id), raise(m.id));
-});
+}
 /** Its switcher card tapped (ShellBridge.openTask): back where it was, floating, on its page. */
 powos.on("webwindows.show", (id: number) => bringBack(id));
 /**
@@ -787,10 +1003,12 @@ powos.on("webwindows.show", (id: number) => bringBack(id));
  * to Android's PiP / a floating window by itself (WebWindows.kt pipEnter) - its frame and bar go at once; back
  * ([m.on] false: the PiP expanded) it shows where it was. Never the minimise path: the host already moved nothing.
  */
-powos.on("webwindows.pip", (m: { id: number; on: boolean }) => {
+powos.on("webwindows.pip", (m: { id: number; on: boolean }) => onPip(m));
+function onPip(m: { id: number; on: boolean }) {
+  if (!!webWins.value.find((w) => w.id === m.id)?.pip === m.on) return;
   update(m.id, { pip: m.on || undefined });
   if (!m.on) bringBack(m.id);
-});
+}
 
 // ---- the work area, and the host's events ----------------------------------------------------------------------------
 
@@ -2204,6 +2422,8 @@ function DividerEl({ page, d, o }: { page: number; d: Divider; o: { x: number; y
 
 const px = (v: number) => (Math.round(v * 100) / 100).toString();
 let lastGeometry = "";
+/** The native port was up once: a later port is a reconnect (plan 2.4: sync). */
+let nativeSeen = false;
 let raf = 0;
 
 /** Overlays that cover all of home: a window under one is hidden (its layer, not only its pixels). */
@@ -2918,9 +3138,12 @@ webWins.subscribe(kick);
 tilings.subscribe(kick);
 stacks.subscribe(kick);
 // A new port (the page reloaded or the host came back): its layers know nothing yet.
-native.subscribe(() => {
+native.subscribe((port) => {
   lastGeometry = "";
   kick();
+  // Plan 2.4: events sent while the port was down are lost - the snapshot catches the page up.
+  if (port && nativeSeen) void rebuildFromHost();
+  nativeSeen ||= !!port;
 });
 
 // ---- the window element: DOM title bar, buttons, edges, tile menu, the body ------------------------------------------

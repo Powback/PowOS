@@ -9079,6 +9079,136 @@ async function webWindowGhostCheck() {
   }
 }
 
+/** SY1's helpers (each step is evaluated on its own: they go on window.__syg). */
+function SY_HELPERS() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  /** SY1's stubbed host: "webwindows.list" answers [h.snap], opens recorded (each gives 996). */
+  async function syncHost() {
+    const [S, W, H, B] = await Promise.all(["./state.ts", "./ui/webwindows.tsx", "./hosts/wide.ts", "./bridge.ts"].map((m) => window.__gw.mod(m)));
+    const had = B.powos.webwindows;
+    const was = { page: S.page.value, wide: H.wideHome.value };
+    S.page.value = 0;
+    H.wideHome.value = true;
+    await window.__gw.settled();
+    const h = { W, p: S.pages.value[0], snap: null, opens: [], g0: Math.max(0, W.syncedGeneration()) + 10 };
+    const ok = async () => true;
+    const list = async (whole) => (whole ? JSON.parse(JSON.stringify(h.snap)) : h.snap.windows);
+    const open = async (key, rect, task, kwin) => (h.opens.push({ key, kwin }), 996);
+    B.powos.webwindows = { ...had, enabled: ok, list, open, close: ok, minimise: ok, restore: ok, layout: ok, pageLayout: ok };
+    h.restore = () => {
+      B.powos.webwindows = had;
+      W.webWins.value = [];
+      W.tilings.value = {};
+      W.stacks.value = [];
+      W.hostIds.value = null;
+      H.wideHome.value = was.wide;
+      S.page.value = was.page;
+    };
+    W.webWins.value = [];
+    W.tilings.value = {};
+    W.stacks.value = [];
+    return h;
+  }
+  /** The host says it moved on to [s]; back once the page applied it (or 1.5 s passed). */
+  async function changed(h, s) {
+    h.snap = s;
+    window.__mockEvents.emit("webwindows.changed", s.generation);
+    const t0 = performance.now();
+    while (h.W.syncedGeneration() < s.generation && performance.now() - t0 < 1500) await sleep(20);
+    await window.__gw.settled();
+  }
+  /** The host windows: A (a layout record), B, C + D (tiled by the page record), E (new later). */
+  function fixtures(p) {
+    const frame = { left: 400, top: 160, width: 300, height: 240 };
+    const rec = (f, tile) => JSON.stringify({ v: 1, page: p, frame: { x: f[0], y: f[1], w: f[2], h: f[3] }, ...(tile ? { tile } : {}) });
+    const host = (id, extra) => ({ id, key: `a:gate.s${id}`, label: `S${id}`, state: "floating", live: true, frame, ...extra });
+    return {
+      A: host(991, { live: false, layout: rec([50, 150, 300, 240]) }),
+      B: host(992),
+      C: host(993, { layout: rec([0, 40, 300, 300], { layout: "2h", slot: 0 }) }),
+      D: host(994, { layout: rec([300, 40, 300, 300], { layout: "2h", slot: 1 }) }),
+      E: host(995),
+      pages: { [p]: JSON.stringify({ v: 1, tiling: { layout: "2h", ids: [993, 994], rx: 0.5, ry: 0.5 }, tabs: [] }) },
+    };
+  }
+  window.__syg = { syncHost, changed, fixtures };
+  return [];
+}
+
+/** SY1's steps (on window.__syg.steps), each (host, fixtures, want). */
+function SY_STEPS() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const { changed } = window.__syg;
+  const win = (W, id) => W.webWins.value.find((w) => w.id === id);
+  const ids = (W) => W.webWins.value.map((w) => w.id).sort().join(",");
+  /** (1) Added at the record's frame, the page record's tiling back. */
+  async function syncAdds(h, f, want) {
+    await changed(h, { generation: h.g0 + 1, windows: [f.A, f.B, f.C, f.D], pendingLinux: [], pages: f.pages });
+    want(ids(h.W) === "991,992,993,994", `SY1: snapshot ${h.g0 + 1} gave the page [${ids(h.W)}], want 991-994`);
+    const a = win(h.W, 991);
+    want(a?.page === h.p && a.x === 50 && a.y === 150, `SY1: window 991 at page ${a?.page} ${a?.x},${a?.y}, its layout record says page ${h.p} 50,150`);
+    const t = h.W.tilings.value[h.p];
+    want(t?.ids.includes(993) && t.ids.includes(994), `SY1: page ${h.p}'s tiling not restored from its record (${JSON.stringify(t ?? null)})`);
+  }
+  /** (2) Every per-fact event dropped (991 live + minimised, 992 closed, 995 opened): the snapshot alone brings it. */
+  async function syncDropped(h, f, want) {
+    f.A2 = { ...f.A, live: true, state: "minimised" };
+    await changed(h, { generation: h.g0 + 2, windows: [f.A2, f.C, f.D, f.E], pendingLinux: [], pages: f.pages });
+    want(win(h.W, 991)?.live, "SY1: window 991's dropped 'live' not taken from the snapshot");
+    want(win(h.W, 991)?.minimised, "SY1: window 991's dropped minimise not taken from the snapshot");
+    want(!win(h.W, 992), "SY1: window 992, gone from the host (its 'closed' dropped), is still on the page");
+    want(!document.querySelector('.webwindow[data-wwid="992"]'), "SY1: .webwindow 992 still shown");
+    want(win(h.W, 995), "SY1: window 995, new in the host (its open never told), is not on the page");
+  }
+  /** (3) The late per-fact events agree with the snapshot; (4) an older snapshot is ignored. */
+  async function syncLateAndOld(h, f, want) {
+    const before = JSON.stringify(h.W.webWins.value);
+    window.__mockEvents.emit("webwindows.state", { id: 991, minimised: true });
+    window.__mockEvents.emit("webwindows.live", 991);
+    window.__mockEvents.emit("webwindows.closed", 992);
+    await window.__gw.settled();
+    want(JSON.stringify(h.W.webWins.value) === before, "SY1: late per-fact events after the snapshot changed the page's windows");
+    h.snap = { generation: h.g0 + 1, windows: [f.A, f.B, f.C, f.D], pendingLinux: [], pages: f.pages };
+    window.__mockEvents.emit("webwindows.changed", h.g0 + 1);
+    await h.W.rebuildFromHost();
+    await window.__gw.settled();
+    want(!win(h.W, 992), `SY1: an older snapshot (${h.g0 + 1} after ${h.g0 + 2}) brought window 992 back`);
+    want(h.W.syncedGeneration() === h.g0 + 2, `SY1: applied generation ${h.W.syncedGeneration()} after an older snapshot, want ${h.g0 + 2}`);
+  }
+  /** (5) A KWin offer whose "webwindows.adopt" was lost: adopted from pendingLinux. */
+  async function syncOffer(h, f, want) {
+    const offer = { kwin: 77, key: "l:gate.sync", label: "Sync", ownFrame: false, alts: [] };
+    await changed(h, { generation: h.g0 + 3, windows: [f.A2, f.C, f.D, f.E], pendingLinux: [offer], pages: f.pages });
+    await sleep(50);
+    want(h.opens.some((o) => o.kwin === 77), `SY1: the snapshot's pending KWin offer 77 was not adopted (opens: ${JSON.stringify(h.opens)})`);
+    want(win(h.W, 996), "SY1: the adopted offer's window 996 is not on the page");
+  }
+  window.__syg.steps = [syncAdds, syncDropped, syncLateAndOld, syncOffer];
+  return [];
+}
+
+/**
+ * SY1 (windows plan 2.4, docs/WEB_WINDOWS.md "The host snapshot: the contract"): the page syncs from the host snapshot
+ * on "webwindows.changed <generation>". (1) A snapshot with layout records adds its windows at their recorded frame
+ * and brings back their page's tiling. (2) Every per-fact event dropped (a minimise, a first frame, a close, a new
+ * window): the next snapshot alone brings the page to the host's state. (3) The late per-fact events then change
+ * nothing (idempotent). (4) An older snapshot is ignored. (5) A KWin offer whose "webwindows.adopt" was lost is adopted
+ * from the snapshot's pendingLinux. Control: a page that ignores "webwindows.changed" fails every step.
+ */
+async function webWindowSnapshotSync() {
+  const g = window.__syg;
+  const h = await g.syncHost();
+  const fails = [];
+  const want = (ok, msg) => ok || fails.push(msg);
+  try {
+    const f = g.fixtures(h.p);
+    for (const step of g.steps) await step(h, f, want);
+    return fails;
+  } finally {
+    h.restore();
+  }
+}
+
 /** W-IN1, a floating window resized bigger: its grown corner is excluded, and drags from it (body, bar) stay the window's. */
 async function webWindowRegionsResized() {
   const S = await window.__gw.mod("./state.ts");
@@ -13834,7 +13964,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockToggleHost, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, SF_HELPERS, webWindowSnapFill, webWindowRelaunch, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck, GLUE_HELPERS, webWindowGlueCheck, webWindowGlueAiCheck, webWindowAheadCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, SY_HELPERS, SY_STEPS, webWindowSnapshotSync, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockToggleHost, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, SF_HELPERS, webWindowSnapFill, webWindowRelaunch, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck, GLUE_HELPERS, webWindowGlueCheck, webWindowGlueAiCheck, webWindowAheadCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }

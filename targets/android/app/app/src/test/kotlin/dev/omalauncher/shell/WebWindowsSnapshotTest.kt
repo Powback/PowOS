@@ -45,7 +45,7 @@ class WebWindowsSnapshotTest {
         assertFalse(WebWindows.bumps("webwindows.moveresize"))
         assertFalse(WebWindows.bumps("webwindows.resend"))
         assertFalse("not a web-window event", WebWindows.bumps("recents.drag"))
-        listOf("adopt", "alive", "closed", "failed", "frame", "full", "live", "pip", "show", "state", "control").forEach {
+        listOf("adopt", "closed", "failed", "frame", "full", "live", "pip", "show", "state", "control").forEach {
             assertTrue("webwindows.$it is state", WebWindows.bumps("webwindows.$it"))
         }
     }

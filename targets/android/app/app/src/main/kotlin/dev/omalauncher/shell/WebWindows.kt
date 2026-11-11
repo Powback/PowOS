@@ -95,8 +95,19 @@ class WebWindows(
      */
     private val generation = java.util.concurrent.atomic.AtomicLong(0)
 
+    private val main = Handler(Looper.getMainLooper())
+
+    /**
+     * Plan 2.4: "webwindows.changed <generation>" to the page after a bump - at most one per main-loop turn (a burst of
+     * bumps is one event, carrying the generation as it is when it goes out), never for moveresize/resend ([bumps]).
+     * The page reads the snapshot on it (ui/webwindows.tsx rebuildFromHost). Posted, so a per-fact event emitted with
+     * the bump always reaches the page first.
+     */
+    private val changedSignal = ChangedSignal({ main.post(it) }, { generation.get() }, sink)
+
     private fun changed() {
         generation.incrementAndGet()
+        changedSignal.bumped()
     }
 
     /** Every event to the page; a state event moves the snapshot's generation on first. */
@@ -105,7 +116,6 @@ class WebWindows(
         sink(event, data)
     }
 
-    private val main = Handler(Looper.getMainLooper())
     private val dm = context.getSystemService(DisplayManager::class.java)
     private val wins = LinkedHashMap<Int, Win>()
     private var nextId = 1
@@ -4510,12 +4520,44 @@ class WebWindows(
     /** [leaveStep]'s answer: keep waiting, or start home now. */
     enum class LeaveStep { WAIT, HOME }
 
+    /**
+     * Plan 2.4: coalesces generation bumps into one [CHANGED] event per [post] turn (the main looper: at most one per
+     * tick, whatever the number of bumps in it). Any thread may call [bumped]; the event carries [generation] as it is
+     * when it goes out, so the page never reads an older one than the last bump.
+     */
+    internal class ChangedSignal(
+        private val post: (Runnable) -> Unit,
+        private val generation: () -> Long,
+        private val sink: (String, Any?) -> Unit,
+    ) {
+        private val queued = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        fun bumped() {
+            if (!queued.compareAndSet(false, true)) return
+            post(
+                Runnable {
+                    queued.set(false)
+                    sink(CHANGED, generation())
+                },
+            )
+        }
+    }
+
     companion object {
         /** Phase 2: events that are per-frame or per-gesture traffic, not state: they never move the generation. */
         internal val REALTIME = setOf("webwindows.moveresize", "webwindows.resend")
 
-        /** Phase 2: [event] is a state change of the snapshot (any web-window event but [REALTIME]). */
-        internal fun bumps(event: String) = event.startsWith("webwindows.") && event !in REALTIME
+        /**
+         * Plan 2.4: events that state nothing new - "alive" restates the window ids every heartbeat ([HEARTBEAT_MS]; an
+         * open or a drop already bumped), "changed" is the bump's own signal ([ChangedSignal]).
+         */
+        internal val RESTATE = setOf("webwindows.alive", CHANGED)
+
+        /** Phase 2: [event] is a state change of the snapshot (any web-window event but [REALTIME] and [RESTATE]). */
+        internal fun bumps(event: String) = event.startsWith("webwindows.") && event !in REALTIME && event !in RESTATE
+
+        /** Plan 2.4: the event that says the snapshot moved on (its data: the generation). */
+        internal const val CHANGED = "webwindows.changed"
 
         /**
          * Phase 2: the host snapshot (docs/WEB_WINDOWS.md "The host snapshot"): {generation, windows, pendingLinux},

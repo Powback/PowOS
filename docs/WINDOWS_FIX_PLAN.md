@@ -270,9 +270,18 @@ and lose nothing.
     `WebWindowsLayoutTest` (control run with a wrong record FAILs). **Not done: persistence across an app restart** -
     window ids restart with the app (and KWin's with KWin), so a stored record has nothing stable to key on; do it
     with 2.8's session-scoped keys.
-- [ ] 2.4 **Page diffs the snapshot.** `rebuildFromHost` (`webwindows.tsx:585`) becomes the one sync: on load, on
+- [x] 2.4 **Page diffs the snapshot.** `rebuildFromHost` (`webwindows.tsx:585`) becomes the one sync: on load, on
   `webwindows.changed`, and on `native` reconnect. It adds, updates and removes; it restores tiles, tabs and pages
   from the layout records.
+  - 11-11: host emits `webwindows.changed <generation>` (`WebWindows.ChangedSignal`: one per main-loop turn, after the
+    bump's per-fact event; `alive` no longer bumps - it restated the ids every heartbeat). Page: `rebuildFromHost` reads
+    `list(true)`, one sync at a time, older generations ignored; removes, adds (layout record's page/frame, then the
+    page records' tilings + tab groups), applies host facts only where they changed since the previous snapshot (the
+    per-fact handlers' own paths: a late event is a no-op), adopts lost `pendingLinux` offers. Contract:
+    `docs/WEB_WINDOWS.md` "The page's sync". Checks: gate `webWindowSnapshotSync` (SY1: dropped minimise/live/close/
+    open, late events, older generation, lost adopt, tiling restore; control with the `changed` listener off FAILs),
+    JVM `WebWindowsChangedTest` (coalescing + generation; control with `changed()` not signalling FAILs).
+    Not proven on the device yet; 2.7's reload scene is still to write.
 - [ ] 2.5 **Retire the per-fact events** once 2.4 is proven: `webwindows.alive`, `.closed`, `.full`, `.state`, `.pip`,
   `.live`, `.frame`, `.failed`, `.adopt` (each becomes a field in the snapshot). One at a time, each with its gate.
 - [ ] 2.6 **Retire the timers that covered lost events:** `CLAIM_MS` hide (`WebWindows.kt:4271`), `LINUX_ADOPT_MS`
