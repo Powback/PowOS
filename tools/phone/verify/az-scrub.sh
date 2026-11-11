@@ -18,6 +18,8 @@ $p/cdp.sh eval home 'fetch("ui/drawer.tsx").then(r=>r.text()).then(t=>t.includes
 # AZ_LIST=1: the experimental list mode (Settings > style > experimental, drawer.azList; 14b92ebb): the letter's apps
 # as a centred card of whole names over the grid. The setting is read first, switched on for this run, and put back
 # on exit, so nothing persistent changes here either.
+# Centred = in .az-list's content box (its right padding keeps the A-Z bar clear - shell.css), not the screen's middle
+# (11-11 21:16: the card sat left of the screen's centre by design and read as a FAIL).
 LIST=${AZ_LIST:-0}
 if [ "$LIST" = 1 ]; then
   AZ0=$($p/cdp.sh eval home 'importShim("./ui/drawer.tsx").then((m) => JSON.stringify(m.azList.value))' | sed 's/^"//; s/"$//; s/\\"/"/g')
@@ -32,7 +34,7 @@ sleep 1
 read -r X Y < <($p/cdp.sh eval home '(() => { const m = [...document.querySelectorAll(".letter-bar span")].find((s) => s.textContent === "M"); if (!m) return "0 0"; const r = m.getBoundingClientRect(), d = devicePixelRatio; return Math.round((r.x + r.width / 2) * d) + " " + Math.round((r.y + r.height / 2) * d); })()' | tr -d '"')
 [ "${X:-0}" -gt 0 ] || { $p/adb.sh shell input keyevent 4; echo "FAIL az-scrub: no A-Z bar after opening the drawer"; exit 1; }
 probe='JSON.stringify({scrub: !!document.querySelector(".az[data-scrub]"), lit: [...document.querySelectorAll(".az [data-lit] .app-label")].map((e) => e.textContent), dim: getComputedStyle(document.querySelector(".az .app:not([data-lit])") || document.body).opacity})'
-[ "$LIST" = 1 ] && probe='JSON.stringify((() => { const l = document.querySelector(".az-list:not(.leaving)"), c = l && l.querySelector(".az-list-card"), r = c && c.getBoundingClientRect(), n = [...document.querySelectorAll(".az-list:not(.leaving) .az-list-name")]; return { list: !!l, names: n.map((e) => e.textContent), allM: n.length > 0 && n.every((e) => (e.textContent || "").trim().toUpperCase().startsWith("M")), cut: n.filter((e) => e.scrollWidth > e.clientWidth + 1).length, centred: !!r && Math.abs(r.x + r.width / 2 - innerWidth / 2) <= 4 }; })())'
+[ "$LIST" = 1 ] && probe='JSON.stringify((() => { const l = document.querySelector(".az-list:not(.leaving)"), c = l && l.querySelector(".az-list-card"), r = c && c.getBoundingClientRect(), n = [...document.querySelectorAll(".az-list:not(.leaving) .az-list-name")]; return { list: !!l, names: n.map((e) => e.textContent), allM: n.length > 0 && n.every((e) => (e.textContent || "").trim().toUpperCase().startsWith("M")), cut: n.filter((e) => e.scrollWidth > e.clientWidth + 1).length, centred: !!r && (() => { const b = l.getBoundingClientRect(), cs = getComputedStyle(l), pl = parseFloat(cs.paddingLeft), pr = parseFloat(cs.paddingRight); return Math.abs(r.x + r.width / 2 - (b.x + pl + (b.width - pl - pr) / 2)) <= 4; })() }; })())'
 $p/adb.sh shell input motionevent DOWN "$X" "$Y"
 sleep 0.5
 held=$($p/cdp.sh eval home "$probe" | tr -d '\\')
