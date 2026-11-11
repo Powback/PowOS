@@ -41,8 +41,9 @@
 #        live     the page marked it live ("webwindows.live": the host saw the app's first frame) within 15 s.
 #   5. a tap through the real body path: pointerdown/up dispatched ON .webwindow-body, so Body's own handler sends it
 #      (powos.webwindows.input -> WebWindows.forward -> the helper's injector, 1162412c) - on Calculator's "7" key
-#      (WR_TAP "fx fy" of the body). The app got it when its pixels changed for good (the 7 in its display): the body
-#      1.5 s after the tap vs just before differs by >= 0.1% and by more than 3x the noise of two shots without a tap.
+#      (the key read from its layout, see 5. below; WR_TAP "fx fy" of the body forces a fixed spot). The app got it when
+#      its formula text changed, or its pixels changed for good: the body 1.5 s after the tap vs just before differs by
+#      >= 0.1% and by more than 3x the noise of two shots without a tap. The keystroke is undone after (11-11).
 #      The helper's "log touch ... : ok" lines are reported beside it (the injection, not the reception).
 #   6. closes only its own window (webwindows.close <its id> - the host removes the task it made), and checks it's gone.
 # PASS = 4 and 5 all hold. Shots (PNG, whole screen + the body crop) and log.txt in WR_OUT/<stamp>/.
@@ -127,8 +128,9 @@ shot() {   # shot NAME: raw screencap gzipped on the phone -> $OUT/NAME.raw.gz
 # falls back to), and the display is never mirrored (no element, no hole, no mirror under home). Checked:
 #   task     Calculator's task is on that display (`am stack list`);
 #   content  `screencap -d <that display>` is the app, not a flat fill (dominant colour < 97%, edges >= 0.3%), within 15 s;
-#   tap      `input -d <that display> tap` on its "7" (found by id in `uiautomator dump --windows`, any layout/width)
-#            changes its formula's text (the accessibility dump before vs after); the keystroke is then deleted again.
+#   tap      `input -d <that display> tap` on its delete key (a formula ending in a typeable char) or "7" (found by id
+#            in `uiautomator dump --windows`, any layout/width) changes its formula's text (the accessibility dump before
+#            vs after); the keystroke is then undone (the char typed back / deleted) - see the 11-11 rule at (b).
 #   linux    a Linux app (WR_LINUX_APP, foot) through the host's KWin -> web-window consumer path into an offscreen
 #            ImageReader, never offered to the page (webwindows.selftestLinux, LinuxSelftest.kt; see linux_step).
 # Then its task removed (`am stack remove`; a Calculator task the user had before is moved back to display 0, never
@@ -335,31 +337,42 @@ EOF
   # text before vs after. 11-11 ea2933b3: a fixed tap (0.14,0.69 of the display) hit the scientific layout's "log" key
   # (the layout depends on the display width), the formula already held a long "log(log(..." of earlier checks, the
   # appended text was off-screen and a pixel diff of the number area read 0.0005 -> a false "WINDOWS BROKEN". Nothing
-  # is cleared: the app's own formula (it may be the user's) gets one keystroke, undone with its delete key after.
-  # window-render.py calc picks "7" ("+" after a long number: the digit limit) and gives its centre on this display.
+  # is cleared: the app's own formula (it may be the user's) gets one keystroke, undone after.
+  # 11-11 (rule): the judged keystroke is the DELETE key whenever the formula ends in a char that has a visible key -
+  # a delete changes ANY non-empty formula, even one at the app's max length (21:28 FAIL: the formula was full of the
+  # old fixed-fraction tap's "cos(log(log(..." leftovers, so a 7 changed nothing -> a false "WINDOWS BROKEN"); that char
+  # is typed back by its key after, and the formula judged equal to before. An empty formula (or one ending in a char
+  # with no key in this layout) gets "7" ("+" after a long number: the digit limit), undone with delete. Never cleared,
+  # never AC: the formula may be the user's. If that "7" changes nothing on a NON-empty formula, the formula may be at
+  # its max length with no restorable last char: NOT JUDGED (exit 2, a reason), not WINDOWS BROKEN - wiping it to judge
+  # would lose the user's text. window-render.py calc makes the plan from the app's layout on this display.
   uidump() {   # uidump NAME: the accessibility dump of every display -> $OUT/NAME.xml (retried: the dump can miss idle)
     local i; for i in 1 2 3; do
       sh_ "uiautomator dump --windows $dir/ui.xml >/dev/null 2>&1 && cat $dir/ui.xml" > "$OUT/$1.xml"
       grep -q "</displays>" "$OUT/$1.xml" && return 0; sleep 1
     done; return 1; }
-  local plan key kx ky dx dy jr
+  local plan key kx ky ukey dx dy jr f0
   sleep 1; stayed "after its content showed"; awake_or_nj "layout"
   uidump ui-pre || hfail "no accessibility dump of display $D (uiautomator dump --windows)"
   plan=$($PY calc "$OUT/ui-pre.xml" "$D" "$APP") || hfail "no key to tap in $APP's layout: $plan"
-  read -r key kx ky dx dy <<< "$(echo "$plan" | head -1)"
-  log "layout: $key at $kx,$ky, delete at $dx,$dy; formula before: $(echo "$plan" | sed -n 2p)"
+  read -r key kx ky ukey dx dy <<< "$(echo "$plan" | head -1)"; f0=$(echo "$plan" | sed -n 2p)
+  log "layout: $key at $kx,$ky, undo by $ukey at $dx,$dy; formula before: $f0"
   awake_or_nj "tap"; sh_ "input -d $D tap $kx $ky" >/dev/null; log "tap: input -d $D tap $kx $ky ($key)"
   sleep 1; "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/tap.raw.gz" 2>/dev/null
   stayed "by the tap"
   for n in display tap; do $PY png "$OUT/$n.raw.gz" "$OUT/$n.png" 2>/dev/null && rm -f "$OUT/$n.raw.gz"; done
   uidump ui-tap || hfail "no accessibility dump of display $D after the tap"
-  jr=$($PY calcjudge "$OUT/ui-pre.xml" "$OUT/ui-tap.xml" "$D" "$APP" changed) || hfail "the tap changed nothing in the app ($key: $jr)"
+  if ! jr=$($PY calcjudge "$OUT/ui-pre.xml" "$OUT/ui-tap.xml" "$D" "$APP" changed); then
+    [ "$key" != del ] && [ "$f0" != '""' ] && [ "${#f0}" -gt 40 ] && { log "the $key tap changed nothing on a long formula that ends in a char with no key here ($jr): may be at the app's max length - not judged (clearing it would lose it)"
+      hclean; log "window-render: NOT JUDGED ($APP's formula full, last char not restorable) - $OUT"; exit 2; }
+    hfail "the tap changed nothing in the app ($key: $jr)"
+  fi
   log "tap: reached the app ($key: $jr)"
-  # Undo the keystroke (the formula as it was; not judged - the tap's proof is above).
+  # Undo the keystroke (the formula as it was; not judged - the tap's proof is above, but a failed undo is loud).
   if [ "$dx" != - ]; then
     awake_or_nj "undo"; sh_ "input -d $D tap $dx $dy" >/dev/null; sleep 1
-    if uidump ui-undo && jr=$($PY calcjudge "$OUT/ui-pre.xml" "$OUT/ui-undo.xml" "$D" "$APP" same); then log "undo: delete tapped, formula as before"
-    else log "WARNING: the delete tap didn't restore the formula (${jr:-no dump})"; fi
+    if uidump ui-undo && jr=$($PY calcjudge "$OUT/ui-pre.xml" "$OUT/ui-undo.xml" "$D" "$APP" same); then log "undo: $ukey tapped, formula as before"
+    else log "WARNING: the undo ($ukey) didn't restore the formula (${jr:-no dump})"; fi
   fi
   # (c) a resize through the helper (as WebWindows.resizeContent sends it): dumpsys display shows the new size at the
   # SAME density (a window's density is fixed for its life, WindowDpi - 10-31 Chrome lost its desktop layout).
@@ -483,10 +496,21 @@ st=$($PY stats "$OUT/open.raw.gz" $R)
 dom=$(echo "$st" | sed -n 's/.*dominant=\([0-9.]*\).*/\1/p'); edg=$(echo "$st" | sed -n 's/.*edges=\([0-9.]*\).*/\1/p')
 log "content: $d0 of the body differs from before the open; $st"
 
-# 5. A tap on "7" through the body's own handler.
+# 5. A tap through the body's own handler. 11-11: on a key read from the app's layout on its window's display
+# (`uiautomator dump --windows`, window-render.py calcdisp + calc - the hidden check's plan and its 11-11 rule: the
+# delete key when the formula ends in a typeable char, else "7"), its formula judged as text too, and the keystroke
+# undone on that display after. The old fixed 0.36,0.62 tap was never undone: every run left a keystroke in the app.
+# WR_TAP (or no readable layout) keeps the fixed tap, judged by pixels only, with nothing undone (logged).
+vdump() { sh_ "uiautomator dump --windows /data/local/tmp/wr-ui.xml >/dev/null 2>&1 && cat /data/local/tmp/wr-ui.xml; rm -f /data/local/tmp/wr-ui.xml" > "$OUT/$1.xml"; grep -q "</displays>" "$OUT/$1.xml"; }
+VD= vplan= dw= ux=- tj=
+set -- ${WR_TAP:-0.36 0.62}; fx=$1 fy=$2
+if [ -z "${WR_TAP:-}" ] && vdump ui-pre && dw=$($PY calcdisp "$OUT/ui-pre.xml" "$APP") && vplan=$($PY calc "$OUT/ui-pre.xml" "${dw%% *}" "$APP"); then
+  set -- $dw; VD=$1; read -r vkey kx ky ukey ux uy <<< "$(echo "$vplan" | head -1)"
+  fx=$(awk "BEGIN{print $kx/$2}"); fy=$(awk "BEGIN{print $ky/$3}")
+  log "layout (display $VD): $vkey at $kx,$ky = $fx,$fy of the body, undo by $ukey at $ux,$uy; formula before: $(echo "$vplan" | sed -n 2p)"
+else log "WARNING: fixed tap $fx,$fy, nothing undone (no layout plan: ${vplan:-${dw:-no dump or WR_TAP set}})"; fi
 sleep 1; shot pre || { verdict FAIL; exit 1; }
 noise=$($PY diff "$OUT/open.raw.gz" "$OUT/pre.raw.gz" $R)
-set -- ${WR_TAP:-0.36 0.62}; fx=$1 fy=$2
 since=$(sh_ "date +%m-%d\ %H:%M:%S.000")
 touched "before the tap"
 tr_=$(ev "(async()=>{const b=document.querySelector('.webwindow[data-wwid=\"$ID\"] .webwindow-body');if(!b)return 'no body';const r=b.getBoundingClientRect(),x=r.left+r.width*$fx,y=r.top+r.height*$fy;const o={bubbles:true,cancelable:true,composed:true,pointerId:931,pointerType:'touch',isPrimary:true,clientX:x,clientY:y,button:0};b.dispatchEvent(new PointerEvent('pointerdown',{...o,buttons:1}));await new Promise(f=>setTimeout(f,90));b.dispatchEvent(new PointerEvent('pointerup',{...o,buttons:0}));return 'tapped '+Math.round(x*devicePixelRatio)+','+Math.round(y*devicePixelRatio)})()")
@@ -497,6 +521,15 @@ d1=$($PY diff "$OUT/pre.raw.gz" "$OUT/tap.raw.gz" $R)
 tl=$(sh_ "logcat -d -v time -T \"$since\" -s PowosWebWindows:I" | grep -E "input: window $ID |log touch" | tail -4)
 log "tap: $d1 of the body changed (noise without a tap: $noise)"; [ -n "$tl" ] && echo "$tl" | sed 's/^/  /' | tee -a "$OUT/log.txt"
 touched "the tap"
+if [ -n "$VD" ]; then
+  vdump ui-tap && tj=$($PY calcjudge "$OUT/ui-pre.xml" "$OUT/ui-tap.xml" "$VD" "$APP" changed) && log "tap: the formula changed ($tj)" || { log "tap: formula unchanged (${tj:-no dump})"; tj=; }
+  if [ -n "$tj" ] && [ "$ux" != - ]; then
+    sh_ "input -d $VD tap $ux $uy" >/dev/null; sleep 1
+    if vdump ui-undo && j=$($PY calcjudge "$OUT/ui-pre.xml" "$OUT/ui-undo.xml" "$VD" "$APP" same); then log "undo: $ukey tapped, formula as before"
+    else log "WARNING: the undo ($ukey) didn't restore the formula (${j:-no dump})"; fi
+    touched "the undo"
+  fi
+fi
 
 # PNGs to look at (whole screen + the body crop).
 for n in before open pre tap; do $PY png "$OUT/$n.raw.gz" "$OUT/$n.png" $R "$OUT/$n-body.png" && rm -f "$OUT/$n.raw.gz"; done
@@ -506,6 +539,6 @@ for v in "$d0" "$dom" "$edg" "$d1" "$noise"; do case $v in ""|*[!0-9.]*) log "FA
 [ "$live" = true ] || bad="$bad; never live (no first frame from the app in 15 s)"
 awk "BEGIN{exit !($d0 >= 0.35)}" || bad="$bad; the body looks like the page under it ($d0 differs, want >= 0.35): an empty hole"
 awk "BEGIN{exit !($dom < 0.97 && $edg >= 0.003)}" || bad="$bad; the body is a flat fill (dominant $dom, edges $edg)"
-awk "BEGIN{exit !($d1 >= 0.001 && $d1 > 3 * $noise)}" || bad="$bad; the tap changed nothing in the app ($d1 vs noise $noise)$(echo "$tl" | grep -q ': ok' && echo ' though the helper injected it ok')"
+[ -n "$tj" ] || awk "BEGIN{exit !($d1 >= 0.001 && $d1 > 3 * $noise)}" || bad="$bad; the tap changed nothing in the app ($d1 vs noise $noise)$(echo "$tl" | grep -q ': ok' && echo ' though the helper injected it ok')"
 if [ -z "$bad" ]; then verdict PASS; exit 0; fi
 log "FAIL:${bad#;}"; verdict FAIL; exit 1

@@ -12,9 +12,13 @@ Shots are `screencap` RAW (RGBA after a 12/16-byte header), gzipped on the phone
 The rect is device px, sampled every STEP (2) px each way.
   window-render.py calc UI.xml DISPLAY PKG     the hidden check's tap plan, read from `uiautomator dump --windows` (the
                                               app's real layout on that display, any width/layout): line 1
-                                              "KEY X Y DELX DELY" (the key to tap and its centre, the delete key's or
-                                              "- -"), line 2 the formula's text as JSON. Exit 1 (a reason) when the
-                                              display has no such app or key.
+                                              "KEY X Y UNDO UX UY" (the judged key and its centre, then the key that
+                                              undoes it or "- - -"), line 2 the formula's text as JSON. KEY is "del"
+                                              when the formula ends in a char with a visible key (UNDO = that key: the
+                                              char typed back), else digit_7/op_add (UNDO = del). Exit 1 (a reason)
+                                              when the display has no such app or key.
+  window-render.py calcdisp UI.xml PKG        "DISPLAY W H": the display PKG's nodes are on and its size (the visible
+                                              check's own window: it refuses to run while the app has a task), exit 1 none
   window-render.py calcjudge A.xml B.xml DISPLAY PKG changed|same   exit 0 when the formula text went from A to B as
                                               asked ("formula 'a' -> 'b'" printed either way), 1 not, 2 unreadable
 """
@@ -163,6 +167,16 @@ def formula(nodes):
     return None
 
 
+# The key that types each formula char back (11-11: the judged keystroke is a delete when the formula ends in one of
+# these - a delete changes ANY non-empty formula, even one at the app's max length, and its char is typed back after).
+# The OnePlus build stores functions as one char ("L" = log(, "c" = cos(): those have no key in the basic layout and are
+# typed back only when their key is visible.
+CHAR_KEYS = {**{str(d): ["digit_%d" % d, "text:%d" % d] for d in range(10)}, ".": ["dec_point", "text:."],
+             "+": ["op_add", "text:+"], "-": ["op_sub"], "\u2212": ["op_sub"], "*": ["op_mul"], "\u00d7": ["op_mul"],
+             "/": ["op_div"], "\u00f7": ["op_div"], "%": ["op_pct"], "(": ["lparen"], ")": ["rparen"],
+             "L": ["fun_log"], "c": ["fun_cos"], "s": ["fun_sin"], "t": ["fun_tan"], "l": ["fun_ln"]}
+
+
 def calc_plan(path, display, pkg):
     nodes = ui_nodes(path, display, pkg)
     if not nodes:
@@ -170,17 +184,35 @@ def calc_plan(path, display, pkg):
     f = formula(nodes)
     if f is None:
         return 1, f"no formula/result text of {pkg} on display {display} (ids: {' '.join(sorted(nodes)[:12])})"
+
+    def key(ids):
+        return next(((k, *centre(nodes[k][0])) for k in ids if k in nodes and visible(nodes[k][0])), None)
+
+    dl = key(["del", "delete_button"])
+    back = key(CHAR_KEYS.get(f[-1], [])) if f and dl else None
+    if back:  # the delete, judged; its char typed back by its own key
+        return 0, f"del {dl[1]} {dl[2]} {back[0]} {back[1]} {back[2]}\n{json.dumps(f)}"
     run = re.search(r"[0-9][0-9.,' \u00a0\u202f]*$", f)
     digits = len(re.sub(r"[^0-9]", "", run.group(0))) if run else 0
     want = [("op_add", "text:+"), ("digit_7", "text:7")] if digits >= DIGIT_LIMIT else [("digit_7", "text:7")]
     for ids in want:
-        for k in ids:
-            if k in nodes and visible(nodes[k][0]):
-                x, y = centre(nodes[k][0])
-                d = nodes.get("del") or nodes.get("delete_button")
-                dx, dy = centre(d[0]) if d and visible(d[0]) else ("-", "-")
-                return 0, f"{ids[0]} {x} {y} {dx} {dy}\n{json.dumps(f)}"
+        k = key(ids)
+        if k:
+            u = f"del {dl[1]} {dl[2]}" if dl else "- - -"
+            return 0, f"{ids[0]} {k[1]} {k[2]} {u}\n{json.dumps(f)}"
     return 1, f"no visible {' or '.join(i[0] for i in want)} key of {pkg} on display {display}"
+
+
+def calc_disp(path, pkg):
+    with open(path, "rb") as f:
+        blob = f.read()
+    root = ET.fromstring(blob[max(blob.find(b"<?xml"), 0):].strip())
+    for d in root.iter("display"):
+        bs = [tuple(map(int, re.findall(r"-?\d+", n.get("bounds", "")))) for n in d.iter("node") if n.get("package") == pkg]
+        bs = [b for b in bs if len(b) == 4]
+        if bs:
+            return 0, f"{d.get('id')} {max(b[2] for b in bs)} {max(b[3] for b in bs)}"
+    return 1, f"no display with {pkg} nodes"
 
 
 def calc_judge(a, b, display, pkg, want):
@@ -222,6 +254,13 @@ def main(a):
     elif len(a) == 4 and a[0] == "calc":
         try:
             rc, msg = calc_plan(a[1], a[2], a[3])
+        except (OSError, ET.ParseError) as e:
+            rc, msg = 1, f"dump unreadable: {e}"
+        print(msg)
+        return rc
+    elif len(a) == 3 and a[0] == "calcdisp":
+        try:
+            rc, msg = calc_disp(a[1], a[2])
         except (OSError, ET.ParseError) as e:
             rc, msg = 1, f"dump unreadable: {e}"
         print(msg)
