@@ -1,13 +1,16 @@
 #!/bin/bash
 # lanes: emu phone
 # A-Z scrub highlight (board "A-Z scrub highlights the letter's apps", drawer.tsx highlight) on the phone, in a free
-# window (run by queue.sh with LOCK_HELD=1): opens the drawer with a swipe, holds an injected finger on the A-Z bar at M,
+# window (run by queue.sh with LOCK_HELD=1): goes home, opens the drawer with a swipe, holds an injected finger on the A-Z bar at M,
 # reads which cells are lit / how dim the rest are, screencaps, lifts the finger, checks everything eased back, then
 # Back closes the drawer. Nothing persistent changes.
 set -u
 cd "$(dirname "$0")/../../.." || exit 1
 p=tools/phone
 [ -n "${LOCK_HELD:-}" ] || { echo "az-scrub: run it through tools/phone/verify/queue.sh add"; exit 3; }
+# Home first (a free window: the user isn't on the phone), then Back closes a switcher left over home - as bf-pacing.sh.
+# 11-11 21:01: an app in front made this exit 3 every window ("home isn't in front").
+$p/adb.sh shell "input keyevent 3; sleep 1; input keyevent 4" >/dev/null 2>&1; sleep 1
 fg=$($p/adb.sh shell "dumpsys activity activities | grep -m1 topResumedActivity")
 [[ "$fg" == *HomeShell* ]] || { echo "az-scrub: home isn't in front"; exit 3; }
 $p/cdp.sh eval home 'fetch("ui/drawer.tsx").then(r=>r.text()).then(t=>t.includes("data-lit"))' | grep -q true ||
