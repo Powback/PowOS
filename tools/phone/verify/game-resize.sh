@@ -118,6 +118,9 @@ probe() {  # probe <label>
   case $s in top=*) [ -n "$wh" ] && [ "$(echo "$s" | sed 's/^top=\([0-9]*\).*/\1/')" -ge "${wh#*x}" ] && bad+=" G3-black-frame" ;; esac
   [ -n "$box" ] && { if [ "${BARS:-verdict}" = note ]; then log "  $1 note: $box (BARS=note)"; else bad+=" G3-$box"; fi; }
   [ -n "$bad" ] && { fails=$((fails + 1)); log "  $1 bad:$bad"; }
+  # logcat per step: the end-of-run dump had rotated away everything before the last step (11-11 01:15 346010: why
+  # no consumer came back after the rotation was gone; logcat.txt started at the cover portrait).
+  "$A" logcat -d -v time -T "$lc0" -s PowosWindow:I WindowTasks:I Andromarchy:I > "$OUT/logcat-$1.txt" 2>/dev/null
   return 0
 }
 # rebase: the touch-interrupt baseline taken again after a fold / rotate this check made - the panels' own interrupts on a
@@ -132,7 +135,7 @@ rotate() { "$A" shell "settings put system accelerometer_rotation 0; settings pu
 # consumer went live - logcat had rotated away by the time anyone looked, so it's kept here.
 lc0=$("$A" shell date "'+%m-%d %H:%M:%S.000'" | tr -d '\r'); kl0=$("$A" shell "su -c 'wc -l < /data/powos/root/run/powos-app/hyprland.log'" | tr -d '\r ')
 evidence() { "$A" logcat -d -v time -T "$lc0" -s PowosWindow:I WindowTasks:I Andromarchy:I > "$OUT/logcat.txt" 2>/dev/null
-  "$A" shell "su -c 'tail -n +$((${kl0:-0} + 1)) /data/powos/root/run/powos-app/hyprland.log | grep -E \"window task|app.s screen|output|imported buffer\" | grep -vE \"frames: last|draw: \"'" > "$OUT/kwin.txt" 2>/dev/null; }
+  "$A" shell "su -c 'tail -n +$((${kl0:-0} + 1)) /data/powos/root/run/powos-app/hyprland.log | grep -E \"window task|app.s screen|output|imported buffer|Xwayland|minimi\" | grep -vE \"frames: last|draw: \"'" > "$OUT/kwin.txt" 2>/dev/null; }
 skip() { fails=$((fails + 1)); sizes+=" $1=not-reached"; log "  $1 bad: not-reached ($(left) s of the ${BUDGET_S} s budget left)"; }
 if room; then probe unfolded; else skip unfolded; fi
 if room 6; then rotate 1; log "rotated landscape"; probe unfolded-landscape; else skip unfolded-landscape; fi

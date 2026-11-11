@@ -327,6 +327,14 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   exactly 2268x1600 centred, 420+1600+420). Exclusive full screen keeps that render size, so a fold/rotate stretches
   the whole 2268x2440 frame (folded-landscape bars 192/235 = 420/514 x 1116/2440; cover portrait squashed). Not a
   launch-arg bug; the fix is the game's own Options (Windowed + resolution) or BARS=note for it, like ABZU's own sizing.
+  Black after fold/unfold (11-11 01:15 run, BARS=note, kwin 3.79) - two separate breaks, neither the frame reader:
+  (a) rotate on the inner screen: KWin "window task 70 in the background" and NO "live" for ~30 s, until the fold -
+      the Android consumer never came back for the rotated task (game drew meanwhile: resized 1 commit, Xwayland 558
+      commits). Logcat had rotated away; game-resize.sh now keeps logcat-<step>.txt per step for the next run.
+  (b) unfold again (cover 1116 wide -> 2268): "Xwayland glamor: failed to import KGSL DRI3 dma-buf ... 4609x4959"
+      x1000, then 0 commits. 4609x4959 = 2268x2440 x 2268/1116: Proton's fullscreen hack (the game's EXCLUSIVE full
+      screen, from its Config.xml) scaled its present window by new/old monitor width - a stale fake mode. Wine side,
+      only for exclusive-fullscreen games; borderless-windowed Unity (unity-screen's default, Bananas) never hits it.
 - Besiege (346010, Unity 5.4.0f3, 32-bit, x86 Proton) 11-07: with or without unity-screen's args its only viewable X
   window is a FIXED-SIZE 1135x1365 (WM_NORMAL_HINTS min == max, motif no-resize) "Besiege", class steam_app_346010,
   shown as a floating web window (unfolded) / floating on the cover, black, never drawing (xframes 1 sample) while
