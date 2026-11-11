@@ -44,6 +44,13 @@ class RecordingOps(private val clock: () -> Long = System::currentTimeMillis) {
      * blanked). They light the ring (no app named) and add no chip.
      */
     private var anonymousMic = 0
+    /**
+     * AudioManager's recordings have been reported at least once ([captures]): from then on an app's RECORD_AUDIO op lights
+     * the ring only while a capture really runs. AppOps keeps the op started for a client Android silences (a background
+     * app fed zeros) or one stuck between start and stop - the ring was on with the mic at rest (board task "mic/recording
+     * glow shows on when the mic isn't actually capturing"); SystemUI's own indicator filters it the same way.
+     */
+    private var recordingsKnown = false
 
     /** One callback: [op] started or stopped for [uid]/[pkg] (now). True when anything either view shows changed. */
     fun changed(op: String, uid: Int, pkg: String, on: Boolean): Boolean {
@@ -66,16 +73,26 @@ class RecordingOps(private val clock: () -> Long = System::currentTimeMillis) {
      */
     fun captures(recordings: List<Pair<Int, Boolean>>): Boolean {
         val was = anonymousMic > 0
+        val before = state()
+        recordingsKnown = true
         anonymousMic = recordings.count { (source, silenced) -> capturing(source, silenced) }
-        return was != (anonymousMic > 0)
+        return was != (anonymousMic > 0) || state() != before
     }
 
+    /**
+     * A use the ring shows now: an app's RECORD_AUDIO only while a real capture runs ([recordingsKnown]); a phone call's
+     * mic, the camera, the screen and location as AppOps says.
+     */
+    private fun lit(use: Use) = use.op != OP_RECORD_AUDIO || !recordingsKnown || anonymousMic > 0
+
     /** The ring's view: what's on now. Its apps: the ones using what lights it (location alone names no one there). */
-    fun state() =
-        State(
-            active.mapNotNull { kind(it.op) }.toSet() + (if (anonymousMic > 0) setOf(Kind.MIC) else emptySet()),
-            active.filter { kind(it.op)?.ring == true }.map { it.pkg }.distinct(),
+    fun state(): State {
+        val on = active.filter(::lit)
+        return State(
+            on.mapNotNull { kind(it.op) }.toSet() + (if (anonymousMic > 0) setOf(Kind.MIC) else emptySet()),
+            on.filter { kind(it.op)?.ring == true }.map { it.pkg }.distinct(),
         )
+    }
 
     /**
      * The row's view at [now]: one chip per app (package and uid), the ones still using something first (in the order
@@ -164,11 +181,13 @@ class RecordingWatcher private constructor(context: Context) {
     init {
         if (context.checkSelfPermission(WATCH_APPOPS) != PackageManager.PERMISSION_GRANTED) {
             Log.w(TAG, "no $WATCH_APPOPS: other apps' mic from AudioManager's recording callback (no app named), camera/screen PowOS's own only")
-            runCatching {
-                audio.registerAudioRecordingCallback(recordingCallback, main)
-                recordings(audio.activeRecordingConfigurations)
-            }.onFailure { Log.w(TAG, "can't watch recordings: ${it.message}") }
         }
+        // Always (with WATCH_APPOPS too): the mic lights only while a capture really runs ([RecordingOps.captures]) -
+        // an app's RECORD_AUDIO op alone stays started for a silenced client.
+        runCatching {
+            audio.registerAudioRecordingCallback(recordingCallback, main)
+            recordings(audio.activeRecordingConfigurations)
+        }.onFailure { Log.w(TAG, "can't watch recordings: ${it.message}") }
         // One op, one listener: an op this Android doesn't know (project_media is hidden) throws and mustn't take the
         // rest - and AppOps keeps a listener's first registration only, so each op needs its own.
         for (op in RecordingOps.WATCHED) {

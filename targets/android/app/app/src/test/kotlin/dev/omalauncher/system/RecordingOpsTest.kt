@@ -119,4 +119,24 @@ class RecordingOpsTest {
         assertTrue(ops.captures(emptyList()))
         assertNull(ops.state().ring)
     }
+
+    @Test fun anAppsMicOpLightsOnlyWhileACaptureReallyRuns() {
+        val ops = RecordingOps()
+        assertTrue(ops.changed(OP_RECORD_AUDIO, 10100, "recorder", true))
+        // Before AudioManager has reported anything, the op alone lights it (nothing better to go on).
+        assertEquals(Kind.MIC, ops.state().ring)
+        // The recordings say only a silenced client runs: the op is no capture - off, no one named.
+        assertTrue(ops.captures(listOf(6 to true)))
+        assertNull(ops.state().ring)
+        assertEquals(emptyList<String>(), ops.state().apps)
+        // It records for real: on, named.
+        assertTrue(ops.captures(listOf(6 to false)))
+        assertEquals(Kind.MIC, ops.state().ring)
+        assertEquals(listOf("recorder"), ops.state().apps)
+        // A phone call's mic is not gated by the recordings (telephony audio isn't one).
+        assertTrue(ops.captures(emptyList()))
+        ops.changed(OP_PHONE_CALL_MICROPHONE, 1001, "com.android.phone", true)
+        assertEquals(Kind.MIC, ops.state().ring)
+        assertEquals(listOf("com.android.phone"), ops.state().apps)
+    }
 }
