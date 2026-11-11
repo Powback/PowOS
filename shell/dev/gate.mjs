@@ -2069,8 +2069,7 @@ async function windowClampScene(page) {
         at(964, 200, innerHeight + 300),
         at(965, innerWidth - 40, innerHeight - 10),
         at(966, 0, 0, { w: 2400, h: 2400, restore: { x: 3000, y: 80, w: 360, h: 300 } }),
-        // Full screen through the screen change (reachAll skips it), back in its window after: its old frame clamped.
-        at(967, innerWidth + 300, 120, { full: true }),
+        at(967, innerWidth + 300, 120, { full: true }), // full screen through the change, back in its window after (judge)
       ];
       await window.__gw.settled();
     });
