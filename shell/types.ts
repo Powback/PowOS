@@ -541,6 +541,8 @@ export interface HostWebWindow {
   body?: WebWindowRect;
   /** TS1: its app's content zoom (its display's dpi over the window's own), when not 1. */
   zoom?: number;
+  /** Plan 2.3: the page's own layout record as it wrote it ("webwindows.layout"; ui/webwindows.tsx [WindowLayout]). */
+  layout?: string;
 }
 
 export interface WebWindowRect { left: number; top: number; width: number; height: number }
@@ -1191,6 +1193,13 @@ export interface Bridge {
     restore?(id: number): Promise<boolean>;
     /** Host-optional (TS1): its app at content zoom [k] - its display's size kept, its dpi x [k] (the app reconfigures). */
     zoom?(id: number, k: number): Promise<boolean>;
+    /**
+     * Host-optional (plan 2.3): window [id]'s layout record ([record]: JSON text the host stores and never reads; null:
+     * none), handed back as its `layout` in the snapshot (docs/WEB_WINDOWS.md "The host snapshot").
+     */
+    layout?(id: number, record: string | null): Promise<boolean>;
+    /** Host-optional (plan 2.3): home page [page]'s layout record (its tiling and tab groups), the snapshot's `pages`. */
+    pageLayout?(page: number, record: string | null): Promise<boolean>;
     /** Host-optional: window [id] pressed (its bar or body; -1: home outside every window) - Back / Forward go to it (WindowKeys.kt). */
     focus?(id: number): Promise<boolean>;
   };

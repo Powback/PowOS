@@ -539,12 +539,16 @@ class ShellBridge(
                 val appOf: (android.content.ComponentName) -> Pair<String, String>? = { c -> runtime.androidApps.apps.firstOrNull { it.component == c }?.let { "a:${it.key}" to it.label } }
                 val whole = a.optBoolean(0, false)
                 when {
-                    !webWindowsMade -> if (whole) JSONObject().put("generation", 0).put("windows", JSONArray()).put("pendingLinux", JSONArray()) else JSONArray()
+                    !webWindowsMade -> if (whole) JSONObject().put("generation", 0).put("windows", JSONArray()).put("pendingLinux", JSONArray()).put("pages", JSONObject()) else JSONArray()
                     whole -> webWindows.snapshot(appOf)
                     else -> webWindows.list(appOf)
                 }
             }
             "webwindows.close" -> webWindowsMade && webWindows.close(a.getInt(0))
+            // Plan 2.3: the page's opaque layout record of window [0] / home page [0] ([1]: its JSON text, null: none) -
+            // stored and handed back in the snapshot ("webwindows.list" true), never read by the host.
+            "webwindows.layout" -> webWindowsMade && webWindows.layout(a.getInt(0), a.optString(1).takeUnless { a.isNull(1) })
+            "webwindows.pageLayout" -> webWindowsMade && webWindows.pageLayout(a.getInt(0), a.optString(1).takeUnless { a.isNull(1) })
             // The ship gate's hidden Linux check (window-render.sh --hidden): Linux app [0]'s next KWin window through
             // the web-window consumer offscreen - never on the page. "started", else why not.
             "webwindows.selftestLinux" ->

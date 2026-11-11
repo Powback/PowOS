@@ -3977,3 +3977,109 @@ export function bodiesOver(el: Element, seen?: Map<Element, [number, Clip][]>): 
 }
 // To the glass (nativeglass.ts reads it; an import either way would close a module cycle through apps/native.ts).
 (globalThis as { __wwCutouts?: typeof bodiesOver }).__wwCutouts = bodiesOver;
+
+// ---- plan 2.3: the layout record (docs/WEB_WINDOWS.md "The host snapshot") ------------------------------------------
+// The page owns layout; the host keeps a copy it never reads, so a reloaded page can rebuild it (2.4, 2.7). One record
+// per window the host knows (id >= 0) and one per home page with a tiling or a tab group. Written [LAYOUT_QUIET] ms
+// after the last change (a drag or resize writes once, at its end - never per frame), and only what changed.
+
+/** Window [id]'s record: its page, frame, the frame to restore to (maximised), its floating frame before a tile, its
+ * scale, minimised, its tile (layout + slot index) and its tab group (ids in tab order + the shown tab). */
+export interface WindowLayout {
+  v: 1;
+  page: number;
+  frame: { x: number; y: number; w: number; h: number };
+  restore?: { x: number; y: number; w: number; h: number };
+  untiled?: { x: number; y: number; w: number; h: number };
+  scale?: number;
+  minimised?: true;
+  tile?: { layout: Layout; slot: number };
+  tab?: { ids: number[]; active: number };
+}
+/** Home page [page]'s record: its tiling and the tab groups of its windows. */
+export interface PageLayout {
+  v: 1;
+  tiling?: Tiling;
+  tabs: Stack[];
+}
+
+export const LAYOUT_QUIET = { ms: 400 };
+const sentWin = new Map<number, string>();
+const sentPage = new Map<number, string>();
+let layoutTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Window [w]'s record ([ts]/[ss]: the tilings and tab groups now). */
+function windowLayout(w: WebWin, ts: Record<number, Tiling>, ss: Stack[]): WindowLayout {
+  const r: WindowLayout = { v: 1, page: w.page, frame: { x: w.x, y: w.y, w: w.w, h: w.h } };
+  if (w.restore) r.restore = w.restore;
+  if (w.untiled) r.untiled = w.untiled;
+  if ((w.scale ?? 1) !== 1) r.scale = w.scale;
+  if (w.minimised) r.minimised = true;
+  return { ...r, ...tileTab(w, ts, ss) };
+}
+
+/** Window [w]'s tile (its page's layout + slot index) and tab group, where it has them. */
+function tileTab(w: WebWin, ts: Record<number, Tiling>, ss: Stack[]): Pick<WindowLayout, "tile" | "tab"> {
+  const t = ts[w.page];
+  const slot = t?.ids.indexOf(w.id) ?? -1;
+  const s = ss.find((x) => x.ids.includes(w.id));
+  return { ...(t && slot >= 0 ? { tile: { layout: t.layout, slot } } : {}), ...(s ? { tab: { ids: s.ids, active: s.active } } : {}) };
+}
+
+/** Each page with a tiling or a tab group (a group is on its shown tab's page): page -> JSON. */
+function pageLayouts(ts: Record<number, Tiling>, ss: Stack[]): Map<number, string> {
+  const pageOf = new Map(webWins.peek().map((w) => [w.id, w.page]));
+  const tabsOn = new Map<number, Stack[]>();
+  for (const s of ss) {
+    const p = pageOf.get(s.active);
+    if (p != null) tabsOn.set(p, [...(tabsOn.get(p) ?? []), s]);
+  }
+  const pages = new Map<number, string>();
+  for (const p of new Set([...Object.keys(ts).map(Number), ...tabsOn.keys()])) {
+    pages.set(p, JSON.stringify({ v: 1, tiling: ts[p], tabs: tabsOn.get(p) ?? [] } satisfies PageLayout));
+  }
+  return pages;
+}
+
+/** The records as they stand now: window id -> JSON (windows the host knows), page -> JSON. */
+export function layoutRecords(): { windows: Map<number, string>; pages: Map<number, string> } {
+  const ts = tilings.peek();
+  const ss = stacks.peek();
+  const known = webWins.peek().filter((w) => w.id >= 0 && !w.pending);
+  const windows = new Map(known.map((w) => [w.id, JSON.stringify(windowLayout(w, ts, ss))]));
+  return { windows, pages: pageLayouts(ts, ss) };
+}
+
+/** [now]'s records that differ from [sent] go to [write] (and into [sent]); [gone] gets each one no longer there. */
+function sendChanged(now: Map<number, string>, sent: Map<number, string>, write: (k: number, r: string) => void, gone: (k: number) => void) {
+  for (const [k, r] of now) {
+    if (sent.get(k) === r) continue;
+    sent.set(k, r);
+    write(k, r);
+  }
+  for (const k of [...sent.keys()].filter((k) => !now.has(k))) {
+    sent.delete(k);
+    gone(k);
+  }
+}
+
+/** Sends the host every record that changed since the last write, and null for a page's that's gone. */
+export function flushLayout() {
+  layoutTimer = undefined;
+  const ww = powos.webwindows;
+  if (!ww?.layout) return;
+  const { windows, pages } = layoutRecords();
+  const quiet = (p: Promise<boolean> | undefined) => void p?.catch(() => {});
+  // A window gone: the host drops its record with it - only forgotten here.
+  sendChanged(windows, sentWin, (id, r) => quiet(ww.layout?.(id, r)), () => {});
+  sendChanged(pages, sentPage, (p, r) => quiet(ww.pageLayout?.(p, r)), (p) => quiet(ww.pageLayout?.(p, null)));
+}
+
+// Subscribes only: the records are built once the changes stop (a drag's frames each just push the timer on).
+effect(() => {
+  void webWins.value;
+  void tilings.value;
+  void stacks.value;
+  if (layoutTimer !== undefined) clearTimeout(layoutTimer);
+  layoutTimer = setTimeout(flushLayout, LAYOUT_QUIET.ms);
+});

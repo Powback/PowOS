@@ -260,9 +260,16 @@ and lose nothing.
     its consumer gave up), `pendingLinux` [{kwin, key, label, ownFrame, alts}]. The bare `webwindows.list()` stays the
     array (page unchanged). The layout record field comes with its writer in 2.3; `webwindows.changed` is emitted from
     2.4 on. Check: `WebWindowsSnapshotTest` (control run with a wrong generation FAILs).
-- [ ] 2.3 **Layout record.** The page writes an opaque record per window (page, frame, restore, scale, tile slot, tab
+- [x] 2.3 **Layout record.** The page writes an opaque record per window (page, frame, restore, scale, tile slot, tab
   group) to the host on change (`webwindows.layout`), and one per page for tilings. The host stores and returns it,
   and persists it across an app restart (the store).
+  - 11-11: `webwindows.layout(id, json)` / `webwindows.pageLayout(page, json)` (`WebWindows.LayoutRecords`): stored
+    as written, never parsed, no generation bump; snapshot `windows[].layout` + `pages`; a window's record goes in
+    `drop()`. Page: `WindowLayout` {page, frame, restore, untiled, scale, minimised, tile {layout, slot}, tab {ids,
+    active}} + `PageLayout` {tiling, tabs}, written 400 ms after the last change, only what changed. Check:
+    `WebWindowsLayoutTest` (control run with a wrong record FAILs). **Not done: persistence across an app restart** -
+    window ids restart with the app (and KWin's with KWin), so a stored record has nothing stable to key on; do it
+    with 2.8's session-scoped keys.
 - [ ] 2.4 **Page diffs the snapshot.** `rebuildFromHost` (`webwindows.tsx:585`) becomes the one sync: on load, on
   `webwindows.changed`, and on `native` reconnect. It adds, updates and removes; it restores tiles, tabs and pages
   from the layout records.

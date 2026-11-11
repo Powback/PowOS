@@ -49,13 +49,25 @@ nothing.
     kwin?, ownFrame?,        // Linux windows: KWin's window id; draws its own frame (no PowOS bar)
     failed?,                 // Linux windows: why it is shown as not responding ("webwindows.failed")
     frame?, body?, maximised?, // once the page placed it: CSS px
-    layout?                  // the page's own opaque record (page, frame, restore, scale, tile slot, tab group; plan 2.3)
+    layout?                  // the page's own record as it wrote it (a JSON string; plan 2.3, below)
   }],
   pendingLinux: [{           // KWin windows offered to the page ("webwindows.adopt") and not opened yet
     kwin, key, label, ownFrame, alts
-  }]
+  }],
+  pages: { [page]: string }  // the page's own record per home page with a tiling or a tab group (plan 2.3)
 }
 ```
+
+**Layout records (plan 2.3):** the page writes them, the host stores them as strings and never parses them.
+`webwindows.layout(id, json|null)` sets window `id`'s record (gone with the window); `webwindows.pageLayout(page,
+json|null)` sets a home page's. Writing one is not a state change: no generation, no event. The page
+(`ui/webwindows.tsx` "plan 2.3") writes only what changed, `LAYOUT_QUIET` (400 ms) after the last change to
+`webWins`/`tilings`/`stacks` - a drag or resize writes once, at its end. Window record (`WindowLayout`, `v: 1`):
+`page`, `frame {x,y,w,h}`, `restore?` (maximised: the frame to go back to), `untiled?` (tiled: its floating frame),
+`scale?`, `minimised?`, `tile? {layout, slot}` (slot = index in its page's tiling), `tab? {ids, active}`. Page record
+(`PageLayout`, `v: 1`): `tiling?` (the page's `Tiling`), `tabs` (the tab groups whose shown tab is on it). Records are
+in memory only: an app restart starts empty (window ids restart too; keyed records across restarts wait for 2.8).
+The page reads none of it yet (2.4 restores from it).
 
 **Change:** `webwindows.changed <generation>` says the snapshot moved on. The page reads the snapshot on load, on
 every `webwindows.changed` whose generation is newer than the one it last read, and when its `native` port reconnects

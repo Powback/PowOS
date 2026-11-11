@@ -185,7 +185,25 @@ class WebWindows(
      * the KWin windows offered and not opened yet ([pendingLinux]) and the generation they were read at. Main thread.
      */
     fun snapshot(appOf: (ComponentName) -> Pair<String, String>?): JSONObject =
-        snapshotJson(generation.get(), list(appOf), pendingLinux) { kwin, game -> pageOwnFrame(andro.marchy.WebWindowSource.ownFrame(kwin), game) }
+        withLayouts(snapshotJson(generation.get(), list(appOf), pendingLinux) { kwin, game -> pageOwnFrame(andro.marchy.WebWindowSource.ownFrame(kwin), game) }, layouts)
+
+    /**
+     * Plan 2.3: the page's own layout records (docs/WEB_WINDOWS.md "The host snapshot"), per window and per home page,
+     * stored as the page wrote them and never read here. Not state: writing one moves no generation.
+     */
+    private val layouts = LayoutRecords()
+
+    /** "webwindows.layout": window [id]'s record ([record] null or "": none). False: no such window. */
+    fun layout(
+        id: Int,
+        record: String?,
+    ): Boolean = wins[id]?.takeIf { !it.closed } != null && layouts.window(id, record)
+
+    /** "webwindows.pageLayout": home page [page]'s record (its tiling and tab groups; null or "": none). */
+    fun pageLayout(
+        page: Int,
+        record: String?,
+    ): Boolean = layouts.page(page, record)
 
     /** [listed]'s key and label of Android window [w]: a quick page's ("q:<token>"), else its app's. */
     private fun keyLabel(
@@ -834,6 +852,43 @@ class WebWindows(
 
         /** [linuxFailed]'s reason ("webwindows.failed"), null while it works: the snapshot's "failed". */
         @Volatile var failed: String? = null
+    }
+
+    /**
+     * Plan 2.3: the page's opaque layout records - one per window id (page, frame, restore, scale, tile slot, tab group)
+     * and one per home page (its tiling, its tab groups). The host keeps the strings as written and never parses them;
+     * a window's goes with the window ([drop]). Any thread (the bridge writes, the main thread reads).
+     */
+    class LayoutRecords {
+        private val windows = java.util.concurrent.ConcurrentHashMap<Int, String>()
+        private val pages = java.util.concurrent.ConcurrentHashMap<Int, String>()
+
+        /** Window [id]'s record set ([record] null or blank: removed). */
+        fun window(
+            id: Int,
+            record: String?,
+        ): Boolean {
+            if (record.isNullOrBlank()) windows.remove(id) else windows[id] = record
+            return true
+        }
+
+        fun window(id: Int): String? = windows[id]
+
+        /** Home page [page]'s record set ([record] null or blank: removed). */
+        fun page(
+            page: Int,
+            record: String?,
+        ): Boolean {
+            if (record.isNullOrBlank()) pages.remove(page) else pages[page] = record
+            return true
+        }
+
+        /** Every page's record, page number (as a string) -> record. */
+        fun pages(): JSONObject = JSONObject().also { o -> pages.toSortedMap().forEach { (p, r) -> o.put(p.toString(), r) } }
+
+        fun drop(id: Int) {
+            windows.remove(id)
+        }
     }
 
     /** A KWin window for a web window: its app id and caption (KWin's), its name and icon (PowOS's, for the bar). */
@@ -3146,6 +3201,7 @@ class WebWindows(
     ) {
         if (wins.remove(w.id) == null) return
         changed()
+        layouts.drop(w.id)
         w.closed = true
         logDrop(w, released)
         dropLinux(w, handBack)
@@ -4479,6 +4535,19 @@ class WebWindows(
                 )
             }
             return JSONObject().put("generation", generation).put("windows", windows).put("pendingLinux", offers)
+        }
+
+        /** Plan 2.3: [snapshot] with the page's layout records - each window's `layout` (if it has one) and `pages`. */
+        internal fun withLayouts(
+            snapshot: JSONObject,
+            layouts: LayoutRecords,
+        ): JSONObject {
+            val windows = snapshot.getJSONArray("windows")
+            for (i in 0 until windows.length()) {
+                val w = windows.getJSONObject(i)
+                layouts.window(w.getInt("id"))?.let { w.put("layout", it) }
+            }
+            return snapshot.put("pages", layouts.pages())
         }
 
         /** N2: "w.f"'s words [t], its windows read up to [end]: the third stamp after them is "1" for an ahead frame. */
