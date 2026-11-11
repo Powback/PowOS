@@ -180,7 +180,10 @@ hidden() {
   }
   awake_or_nj() { keep_awake; asleep && hnj "$1"; return 0; }
   # A failed step on a phone that fell asleep is not a window fault (10-31 a4dcb83b: the tap "changed nothing", Dozing).
-  hfail() { asleep && hnj "FAIL ($*) while asleep"; log "FAIL: $*"; hclean; log "window-render: FAIL (hidden: $*) - $OUT"; exit 1; }
+  # A phone that left adb (VPN dropped, out of range) is not a window verdict (11-11 17:25: 93d0ab881 mailed WINDOWS
+  # BROKEN for "no phone (adb get-state)"): NOT JUDGED, ship.sh keeps the request and retries.
+  no_phone() { "$A" get-state >/dev/null 2>&1 && return 1; log "$1: no phone (adb get-state) - not judged"; hclean; log "window-render: NOT JUDGED (no phone: adb unreachable) - $OUT"; exit 2; }
+  hfail() { no_phone "FAIL ($*)"; asleep && hnj "FAIL ($*) while asleep"; log "FAIL: $*"; hclean; log "window-render: FAIL (hidden: $*) - $OUT"; exit 1; }
   # fput MSG: one line to the helper's stdin, never blocking (fifo_put_cmd); prints sent or gone.
   fput() { sh_ "$(fifo_put_cmd "$dir" "$*")"; }
   # hclean: bounded as a whole - every phone call SH_T=15 s, and the run KILLed after WR_CLEAN_S (90) s whatever hangs
@@ -263,11 +266,11 @@ except Exception: print('')"; }
   trap 'hclean' EXIT
   # A timeout while the phone sleeps is the sleep, not the windows (10-31 17:57, 1943e3e5: an adb su call hung with the
   # phone Dozing after passing the start check) - NOT JUDGED like every other asleep path.
-  trap 'if asleep; then log "window-render: NOT JUDGED (the phone is $WAKE; timed out after ${WR_TIMEOUT_S:-210} s) - $OUT"; hclean; exit 2; fi; log "FAIL: timeout (${WR_TIMEOUT_S:-210} s)"; hclean; log "window-render: FAIL (hidden: timeout) - $OUT"; exit 1' TERM INT
+  trap '"$A" get-state >/dev/null 2>&1 || { log "window-render: NOT JUDGED (no phone: adb unreachable; timed out) - $OUT"; hclean; exit 2; }; if asleep; then log "window-render: NOT JUDGED (the phone is $WAKE; timed out after ${WR_TIMEOUT_S:-210} s) - $OUT"; hclean; exit 2; fi; log "FAIL: timeout (${WR_TIMEOUT_S:-210} s)"; hclean; log "window-render: FAIL (hidden: timeout) - $OUT"; exit 1' TERM INT
   # The watchdog: kills whatever adb call hangs (bash runs the trap only once its foreground child is gone), then us.
   ( sleep $(( ${WR_TIMEOUT_S:-210} + HOLD )); pkill -P $$ 2>/dev/null; kill -TERM $$ 2>/dev/null ) & wd=$!
 
-  "$A" get-state >/dev/null 2>&1 || hfail "no phone (adb get-state)"
+  no_phone "start"
   wake_if_idle
   awake_or_nj "start"
   dpi=$(sh_ "wm density" | sed -n 's/^Override density: //p'); [ -n "$dpi" ] || dpi=$(sh_ "wm density" | sed -n 's/^Physical density: //p')
