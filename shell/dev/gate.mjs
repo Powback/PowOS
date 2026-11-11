@@ -2069,17 +2069,20 @@ async function windowClampScene(page) {
         at(964, 200, innerHeight + 300),
         at(965, innerWidth - 40, innerHeight - 10),
         at(966, 0, 0, { w: 2400, h: 2400, restore: { x: 3000, y: 80, w: 360, h: 300 } }),
+        // Full screen through the screen change (reachAll skips it), back in its window after: its old frame clamped.
+        at(967, innerWidth + 300, 120, { full: true }),
       ];
       await window.__gw.settled();
     });
   const judge = (when) =>
     page.evaluate(async (when) => {
       const W = await window.__gw.mod("./ui/webwindows.tsx");
+      window.__mockEvents.emit("webwindows.full", { id: 967, on: false });
       await window.__gw.frames(3);
       const a = W.workArea();
       const inset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--inset-top")) || 0;
       const bad = [];
-      for (const id of [961, 962, 963, 964, 965, 966]) {
+      for (const id of [961, 962, 963, 964, 965, 966, 967]) {
         const bar = document.querySelector(`.webwindow[data-wwid="${id}"] .webwindow-title`)?.getBoundingClientRect();
         if (!bar) {
           bad.push(`${when}: window ${id} has no bar on the page`);

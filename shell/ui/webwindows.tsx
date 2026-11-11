@@ -703,6 +703,9 @@ function bringBack(id: number) {
   const w = webWins.value.find((v) => v.id === id);
   if (!w) return;
   update(id, { minimised: false });
+  // WC1: back from full screen / PiP / minimised - reachAll skips full-screen and PiP frames, so one kept across a
+  // fold or rotation comes back on the old screen's coordinates.
+  reach(id);
   raise(id);
   toPage(w.page);
 }
@@ -775,7 +778,7 @@ powos.on("webwindows.state", (m: { id: number; minimised: boolean }) => {
   const w = webWins.value.find((v) => v.id === m.id);
   if (!w || !!w.minimised === m.minimised) return;
   webWins.value = webWins.value.map((v) => (v.id === m.id ? { ...v, minimised: m.minimised } : v));
-  if (!m.minimised) raise(m.id);
+  if (!m.minimised) (reach(m.id), raise(m.id));
 });
 /** Its switcher card tapped (ShellBridge.openTask): back where it was, floating, on its page. */
 powos.on("webwindows.show", (id: number) => bringBack(id));
@@ -1329,6 +1332,8 @@ function refloat(id: number) {
   const w = webWins.value.find((v) => v.id === id);
   if (!w) return;
   update(id, { ...(w.untiled ?? {}), untiled: undefined });
+  // WC1: the floating frame kept from before its tile may be the old screen's (a fold / rotation while tiled).
+  reach(id);
   raise(id);
 }
 
@@ -1697,6 +1702,8 @@ function release(id: number, x: number, y: number) {
 /** Window [id] let go on home's free space: the free region's ghost filled; floating it stays (its frame is the ghost). */
 function landPlace(id: number, place: (Place & { id: number }) | null) {
   if (place?.kind === "region" && place.id === id) placeWindow(id, place.rect);
+  // WC1: a floating drag's end - the moves clamp the unscaled width, a pinch-zoomed frame can still end out of reach.
+  reach(id);
 }
 
 /** The previewed drop made: the new tiling, a swapped-out window floating again, the tiles re-flowing ([reflow]). */
@@ -1933,6 +1940,7 @@ function undock(id: number) {
   const size = from.restore ?? from;
   leaveStack(id);
   update(id, { page: from.page, w: size.w, h: size.h, scale: from.scale, restore: undefined, untiled: undefined, minimised: false });
+  reach(id);
   raise(id);
   hapticTick();
 }
