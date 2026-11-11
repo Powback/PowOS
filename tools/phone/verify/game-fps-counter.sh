@@ -4,20 +4,29 @@
 # tools/phone/verify/game-fps-counter.sh) a game's window task shows the built-in fps counter (GameFpsCounter, f5e7696c:
 # an "N fps" label top left of PowosWindowActivity) while the fps meter's switch (store perf.meter "on") is on, and
 # hides it when the switch goes off. In one free window:
-#   1. perf.meter read (kept), then set on ({...it, on: true}) through home's bridge (store.set: ShellBridge sets
-#      GameFpsCounter.on);
+#   1. home brought in front, perf.meter read (kept), then set on ({...it, on: true}) through home's bridge (store.set:
+#      ShellBridge sets GameFpsCounter.on);
 #   2. the game (APP, default 274190 Broforce) started the user's way - bf-return-phone.sh launch (powos-open-task; a
 #      Broforce the user left frozen is used and frozen again, one running awake = not now, exit 3);
 #   3. the game's window task in front (topResumedActivity PowosWindowActivity), then the label: uiautomator's dump
 #      (its text "N fps" with N > 0, in the task's top-left quarter), read twice 3 s apart; a dump that fails (a busy
 #      game window can keep uiautomator from idling) falls back to `dumpsys activity top` - a visible TextView in
 #      PowosWindowActivity's views in the top-left quarter (its text unread, said so);
-#   4. the switch off -> the label gone (no "fps" text / the TextView not visible) within 3 s.
+#   4. the switch off with the game in front - through the SHADE, pulled down the user's way - then the label gone (no
+#      "fps" text / the TextView not visible) 3 s after the set.
 # Always restores: perf.meter as it was, the game closed if this check started it (bf-return-phone.sh close), home.
-# The switch is set through the SHADE page's bridge, not home's: GQ1 (WebWindows.quietCheck) pauses home's WebView
-# under a game's immersive full screen, and an eval there never answers - the 11-11 14:56 run passed step 3, then hung
-# 93 s in store.set {on:false} on home and was killed at its 300 s budget ("FAIL timeout"). Every page's ShellBridge
-# runs the same store.set (GameFpsCounter.on is process-wide), and the shade overlay is never paused.
+# Which page's bridge (bridge_eval): every page's ShellBridge runs the same store.set (GameFpsCounter.on is process-wide),
+# but a page's bridge (a PowosNative message port, async) only answers while that page is VISIBLE:
+# - home's, when home is in front and visible (step 1, after the launch's restore): an importShim eval answers in 0.6 s;
+#   under a game's immersive full screen GQ1 (WebWindows.quietCheck) pauses home's WebView and an eval never answers
+#   (the 11-11 14:56 run hung 93 s in store.set {on:false} on home, killed at its 300 s budget, "FAIL timeout");
+# - the shade's, only while it is DOWN: measured 11-11 21:3x (home in front, no game) the shade page hidden
+#   (visibilityState "hidden") still answers `1+1` (6.8 s) but its bridge eval never does (40 s) - the earlier
+#   premise here, "the shade overlay is never paused", was wrong (every run SKIPped "perf.meter unreadable over CDP").
+#   So with a game in front (step 4, or a restore mid-game) the shade is pulled down from the status bar the way the
+#   user flips the meter (board-look-shade.sh pullbar; twice at most - an immersive game's first pull may only bring
+#   the bars), the eval waits for its page's visibilityState "visible", and the shade is put away again by Back
+#   (e2e-lib.sh shade_shut), then its own shade.settle close (side-dock-layout.sh) - never Home, that would hide the game.
 # Own deadline (DEADLINE_S, 235 s of the 300 s budget): past it the step running is ended (its process tree TERMed),
 # the check FAILs naming that step, and the restore (meter back, the game closed) still fits the budget. The launch
 # waits on the phone (bf-lib.sh step_launch's poll) at most LAUNCH_S - what is left minus the reads after it; every
@@ -28,24 +37,58 @@ here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"; APP=${APP:-27419
 case $APP in *[!0-9]*|"") echo "ENV: APP is a Steam app id ($APP)"; exit 5 ;; esac
 OUT=${1:-$HOME/.cache/powos-verify/game-fps-counter-$(date +%m%d-%H%M)}; mkdir -p "$OUT"; R=$OUT/log.txt
 L=$HOME/.cache/powos-verify.lock
-DEADLINE_S=${DEADLINE_S:-235}; PAGE=${METER_PAGE:-shade}; STEP=start; DL=$OUT/.deadline; rm -f "$DL"
+DEADLINE_S=${DEADLINE_S:-235}; STEP=start; DL=$OUT/.deadline; rm -f "$DL"
 cap() { perl -e 'alarm shift; exec @ARGV' "$@"; }   # cap <s> cmd...: killed (SIGALRM) past <s> seconds
 step() { STEP=$*; }
 log() { echo "$(date +%T) $*" | tee -a "$R"; }
 sh_() { cap 45 "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 top() { sh_ "dumpsys activity activities | grep -m1 topResumedActivity"; }
-ev() { CDP_TIMEOUT_S=20 cap 40 "$T/cdp.sh" eval "$PAGE" "$1" 2>&1 | tr -d '\r' | tail -1; }
+ev() { CDP_TIMEOUT_S=20 cap 40 "$T/cdp.sh" eval "$1" "$2" 2>&1 | tr -d '\r' | tail -1; }   # ev <page> <js>
+vis() { CDP_TIMEOUT_S=8 cap 15 "$T/cdp.sh" eval "$1" 'document.visibilityState' 2>&1 | tr -d '\r"' | tail -1; }
+# shadeup: "up" while PowOS's shade window shows and takes touch (e2e-lib.sh's), else "down".
+shadeup() { sh_ "dumpsys window windows" | awk '/^ *Window #/{f=(index($0,"PowOS shade}")>0)} f && / fl=/{nt=(index($0,"NOT_TOUCHABLE")>0)} f && !d && /mViewVisibility=/{print ((index($0,"mViewVisibility=0x0 ")>0 && !nt) ? "up" : "down"); d=1}'; }
+# shade_show: pulled down from the status bar at 30% of the width (board-look-shade.sh pullbar), until its page is visible.
+shade_show() {
+  local i W H
+  read -r W H <<<"$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1)"
+  [ -n "${H:-}" ] || return 1
+  for i in 1 2; do
+    [ "$(shadeup)" = up ] && break
+    sh_ "input swipe $((W * 30 / 100)) 6 $((W * 30 / 100)) $((H / 2)) 280" >/dev/null; sleep 1.4
+  done
+  [ "$(shadeup)" = up ] || return 1
+  for i in 1 2 3 4 5 6 7 8; do [ "$(vis shade)" = visible ] && return 0; sleep 0.5; done
+  return 1
+}
+# shade_hide: put away - Back (the open shade has focus), then the shade's own settle-closed; never Home (the game).
+shade_hide() {
+  [ "$(shadeup)" = up ] || return 0
+  sh_ "input keyevent 4" >/dev/null; sleep 1.2
+  [ "$(shadeup)" = up ] || return 0
+  ev shade '(window.__powosHost.emit("shade.settle",{open:false}),"closed")' >/dev/null; sleep 1
+  [ "$(shadeup)" = down ]
+}
+# bridge_eval <js>: evaluated on home's page when home is in front and visible, else on the shade's, shown for it.
+# Prints the eval's last line ("noshade" when the shade wouldn't come down/visible); notes go to the log file only.
+bridge_eval() {
+  local v
+  case "$(top)" in *PowosWindowActivity*) ;; *) [ "$(vis home)" = visible ] && { ev home "$1"; return; } ;; esac
+  if shade_show; then v=$(ev shade "$1"); else v=noshade; fi
+  shade_hide || echo "$(date +%T) the shade didn't go away (Back + shade.settle)" >> "$R"
+  echo "$(date +%T) bridge eval via the shade: ${v:0:120}" >> "$R"
+  echo "$v"
+}
 # cdp.ts prints an eval's value JSON-encoded, so the JSON.stringify'd meter arrives as a quoted string
 # ("{\"on\":true,...}", the 11-10 "unreadable" SKIP): decoded once here to the object's JSON.
 meter_get() {
-  ev 'importShim("./bridge.ts").then(b=>b.powos.store.get("perf.meter")).then(v=>JSON.stringify(v??null))' |
+  bridge_eval 'importShim("./bridge.ts").then(b=>b.powos.store.get("perf.meter")).then(v=>JSON.stringify(v??null))' |
     python3 -c 'import json,sys; s=sys.stdin.read().strip()
 try: v=json.loads(s)
 except ValueError: v=s
 print(v if isinstance(v,str) else json.dumps(v))'
 }
-meter_set() { ev "importShim('./bridge.ts').then(b=>b.powos.store.set('perf.meter',$1)).then(()=>'ok')" | tr -d '"'; }
+meter_set() { bridge_eval "importShim('./bridge.ts').then(b=>b.powos.store.set('perf.meter',$1)).then(()=>'ok')" | tr -d '"'; }
 # ph <phase> <cap s>: a bf-return-phone.sh phase in the PowOS session, capped.
 ph() { cap "$2" "$A" shell "su -c 'sh /data/powos/powos-run.sh \"APP=$APP LAUNCH_S=${LAUNCH_S:-360} bash /var/tmp/powos-bf-return-phone.sh $1\"'" 2>&1 | grep -v sysvipc | sed -l $'s/\r$//' | tee -a "$R"; }
 
@@ -111,9 +154,10 @@ s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { log "the screen is $s - not woken (rule); nothing done"; exit 3; }
 
 # 1. The switch on (what it was is put back).
-step "perf.meter read/set on ($PAGE's bridge)"
+step "perf.meter read/set on (home's bridge)"
+sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1.5
 METER0=$(meter_get)
-case $METER0 in null|\{*) ;; *) METER0=; echo "ENV: perf.meter unreadable over CDP ($(meter_get | cut -c1-120))"; exit 5 ;; esac
+case $METER0 in null|\{*) ;; *) m=$METER0; METER0=; echo "ENV: perf.meter unreadable over CDP (${m:0:120})"; exit 5 ;; esac
 log "perf.meter at start: $METER0"
 [ "$(meter_set "Object.assign({},$METER0,{on:true})")" = ok ] || fail "store.set perf.meter {on:true} failed"
 
@@ -158,9 +202,11 @@ case $got2 in
 esac
 
 # 4. The switch off -> the label goes.
-step "perf.meter set off ($PAGE's bridge) + label gone"
-[ "$(meter_set "Object.assign({},$METER0,{on:false})")" = ok ] || fail "store.set perf.meter {on:false} failed"
-sleep 3; chk off
+step "perf.meter set off (the shade's bridge, the game in front) + label gone"
+case "$(top)" in *PowosWindowActivity*) ;; *) fail "the game's window task left the front before the switch-off ($(top))" ;; esac
+[ "$(meter_set "Object.assign({},$METER0,{on:false})")" = ok ] || fail "store.set perf.meter {on:false} through the shade failed"
+case "$(top)" in *PowosWindowActivity*) ;; *) fail "the game's window task isn't in front after the shade went away ($(top))" ;; esac
+sleep 1.5; chk off   # + the shade's put-away (Back, >= 1.2 s) and the reads: ~3 s after the set
 off=$(fps_label "$l" "$t" "$r" "$b"); log "meter off: $off"
 case $off in
   text=*) fail "the counter stays with the meter off (\"${off#text=}\")" ;;
