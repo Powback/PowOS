@@ -3,6 +3,7 @@ package dev.omalauncher.system
 import android.app.AppOpsManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.media.AudioRecordingConfiguration
 import android.os.Handler
@@ -41,7 +42,7 @@ class RecordingOps(private val clock: () -> Long = System::currentTimeMillis) {
     /**
      * Live mic captures Android names no app for - the non-root path ([captures]): without WATCH_APPOPS AppOps reports
      * PowOS's own uid only, but AudioManager's recording callback still reports every app's capture (uid and package
-     * blanked). They light the ring (no app named) and add no chip.
+     * blanked). They light the ring (no app named) and, non-root ([anonymousChips]), one "An app" chip.
      */
     private var anonymousMic = 0
     /**
@@ -51,6 +52,20 @@ class RecordingOps(private val clock: () -> Long = System::currentTimeMillis) {
      * glow shows on when the mic isn't actually capturing"); SystemUI's own indicator filters it the same way.
      */
     private var recordingsKnown = false
+    /**
+     * Cameras some client holds that no AppOps callback named - the non-root camera path ([cameras]): CameraManager's
+     * availability callback says to any app when a camera is opened, not by whom. Lights the green ring.
+     */
+    private var anonymousCameras = 0
+    /** The anonymous chip's kinds as last shown, and when it went (epoch ms; null: on, or none) - its grace, like a named one's. */
+    private var anonymousShown = emptySet<Kind>()
+    private var anonymousEnded: Long? = null
+    private var anonymousEndedKinds = emptySet<Kind>()
+    /**
+     * Whether captures Android names no app for get a chip of their own ("An app"). Off where AppOps names every holder
+     * (WATCH_APPOPS: the watcher turns it off) - there AudioManager's count is only the mic-really-runs check.
+     */
+    var anonymousChips = true
 
     /** One callback: [op] started or stopped for [uid]/[pkg] (now). True when anything either view shows changed. */
     fun changed(op: String, uid: Int, pkg: String, on: Boolean): Boolean {
@@ -58,10 +73,49 @@ class RecordingOps(private val clock: () -> Long = System::currentTimeMillis) {
         val use = Use(op, uid, pkg)
         if (on) {
             ended -= use
-            return active.add(use)
+            return active.add(use) or anonymous()
         }
         if (!active.remove(use)) return false
         ended[use] = clock()
+        anonymous()
+        return true
+    }
+
+    /**
+     * The cameras open right now by someone AppOps didn't name ([open]: how many) - CameraManager's availability, the
+     * non-root path. True when whether one is open changed or the row's anonymous chip did.
+     */
+    fun cameras(open: Int): Boolean {
+        val was = anonymousCameras > 0
+        anonymousCameras = open
+        return (was != (open > 0)) or anonymous()
+    }
+
+    /**
+     * What the anonymous captures use beyond the named ones: AudioManager / CameraManager count PowOS's own use too
+     * (its dictation, named through its own uid's AppOps), so only a capture beyond the named uses of that kind is
+     * another app's.
+     */
+    private fun anonymousKinds(): Set<Kind> {
+        if (!anonymousChips) return emptySet()
+        val named = active.mapNotNull { kind(it.op) }.groupingBy { it }.eachCount()
+        return buildSet {
+            if (anonymousCameras > (named[Kind.CAMERA] ?: 0)) add(Kind.CAMERA)
+            if (anonymousMic > (named[Kind.MIC] ?: 0)) add(Kind.MIC)
+        }
+    }
+
+    /** Follows the anonymous chip on/off (its stop time for the grace). True when it changed. */
+    private fun anonymous(): Boolean {
+        val now = anonymousKinds()
+        if (now == anonymousShown) return false
+        if (now.isEmpty()) {
+            anonymousEnded = clock()
+            anonymousEndedKinds = anonymousShown
+        } else {
+            anonymousEnded = null
+        }
+        anonymousShown = now
         return true
     }
 
@@ -76,7 +130,7 @@ class RecordingOps(private val clock: () -> Long = System::currentTimeMillis) {
         val before = state()
         recordingsKnown = true
         anonymousMic = recordings.count { (source, silenced) -> capturing(source, silenced) }
-        return was != (anonymousMic > 0) || state() != before
+        return (was != (anonymousMic > 0)) or (state() != before) or anonymous()
     }
 
     /**
@@ -89,32 +143,48 @@ class RecordingOps(private val clock: () -> Long = System::currentTimeMillis) {
     fun state(): State {
         val on = active.filter(::lit)
         return State(
-            on.mapNotNull { kind(it.op) }.toSet() + (if (anonymousMic > 0) setOf(Kind.MIC) else emptySet()),
+            on.mapNotNull { kind(it.op) }.toSet() +
+                (if (anonymousMic > 0) setOf(Kind.MIC) else emptySet()) +
+                (if (anonymousCameras > 0) setOf(Kind.CAMERA) else emptySet()),
             on.filter { kind(it.op)?.ring == true }.map { it.pkg }.distinct(),
         )
     }
 
     /**
      * The row's view at [now]: one chip per app (package and uid), the ones still using something first (in the order
-     * they started), then the recently stopped, the latest first. A stop older than [GRACE_MS] is gone.
+     * they started), then the recently stopped, the latest first. A stop older than [GRACE_MS] is gone. Captures Android
+     * names no app for (non-root: AudioManager / CameraManager) are one chip of their own, package "" and uid -1
+     * ([ANONYMOUS]), after the named ones in use.
      */
     fun chips(now: Long = clock()): List<Chip> {
         ended.entries.removeAll { now - it.value >= GRACE_MS }
+        anonymousEnded?.let { if (now - it >= GRACE_MS) anonymousEnded = null }
         val apps = linkedMapOf<Pair<String, Int>, MutableList<Use>>()
         for (use in active + ended.keys) apps.getOrPut(use.pkg to use.uid) { mutableListOf() } += use
         return apps.map { (app, uses) ->
             val on = uses.any { it in active }
             val kinds = uses.mapNotNull { kind(it.op) }.toSet()
             Chip(app.first, app.second, Kind.values().filter { it in kinds }, on, if (on) null else uses.maxOf { ended[it] ?: 0L })
+        }.let { named ->
+            val anon =
+                when {
+                    anonymousShown.isNotEmpty() -> Chip(ANONYMOUS, -1, Kind.values().filter { it in anonymousShown }, true, null)
+                    anonymousEnded != null -> Chip(ANONYMOUS, -1, Kind.values().filter { it in anonymousEndedKinds }, false, anonymousEnded)
+                    else -> null
+                }
+            named + listOfNotNull(anon)
         }.sortedWith(compareBy<Chip> { !it.active }.thenByDescending { it.ended ?: 0L })
     }
 
     /** When the next recently-stopped chip leaves the row (epoch ms), or null when none waits. */
-    fun nextExpiry(): Long? = ended.values.minOrNull()?.plus(GRACE_MS)
+    fun nextExpiry(): Long? = (ended.values + listOfNotNull(anonymousEnded)).minOrNull()?.plus(GRACE_MS)
 
     companion object {
         /** How long a stopped use stays in the shade's row, greyed ("Xs ago") - long enough to see who it was. */
         const val GRACE_MS = 15_000L
+
+        /** The anonymous chip's package: a capture Android names no app for (non-root). */
+        const val ANONYMOUS = ""
 
         const val OP_CAMERA = "android:camera" // AppOpsManager.OPSTR_CAMERA
         const val OP_PHONE_CALL_CAMERA = "android:phone_call_camera" // OPSTR_PHONE_CALL_CAMERA
@@ -161,7 +231,8 @@ class RecordingOps(private val clock: () -> Long = System::currentTimeMillis) {
  * read the same [RecordingOps]. Seeing other apps' ops takes WATCH_APPOPS (signature|privileged: the system module's
  * privapp allowlist); without it Android quietly reports only PowOS's own uid - then (non-root: no module) the mic comes
  * from AudioManager's recording callback instead, which reports every app's capture to any app, uid and package blanked:
- * the ring lights, naming no one.
+ * the ring lights, naming no one; the camera likewise from CameraManager's availability callback (any client's open,
+ * no one named). Both anonymous uses are one "An app" chip in the row.
  */
 class RecordingWatcher private constructor(context: Context) {
     private val appOps = context.getSystemService(AppOpsManager::class.java)
@@ -175,12 +246,40 @@ class RecordingWatcher private constructor(context: Context) {
         object : AudioManager.AudioRecordingCallback() {
             override fun onRecordingConfigChanged(configs: List<AudioRecordingConfiguration>) = recordings(configs)
         }
+    private val cameraManager = context.getSystemService(CameraManager::class.java)
+    /** Cameras seen free once (a camera never reported free - held by a system service from boot - never lights it). */
+    private val camerasSeenFree = mutableSetOf<String>()
+    private val camerasOpen = mutableSetOf<String>()
+    /**
+     * The non-root camera source (no WATCH_APPOPS): any client opening a camera makes it unavailable to everyone, and
+     * CameraManager says so to any app, naming no one - see [RecordingOps.cameras]. Main thread ([main] handler).
+     */
+    private val cameraCallback =
+        object : CameraManager.AvailabilityCallback() {
+            override fun onCameraAvailable(id: String) {
+                camerasSeenFree += id
+                camerasOpen -= id
+                cameras()
+            }
+
+            override fun onCameraUnavailable(id: String) {
+                // HACK: only a camera first seen free counts as opened - a vendor camera id some service holds for good
+                // (or one already open when PowOS starts) would light the ring forever. Real fix: AppOps with
+                // WATCH_APPOPS, which names the holder (the rooted path).
+                if (id in camerasSeenFree) camerasOpen += id
+                cameras()
+            }
+        }
     /** A stopped use's chip leaving the row once its grace is up: the views hear it then, not at the next op. */
     private val expire = Runnable { tell() }
 
     init {
         if (context.checkSelfPermission(WATCH_APPOPS) != PackageManager.PERMISSION_GRANTED) {
-            Log.w(TAG, "no $WATCH_APPOPS: other apps' mic from AudioManager's recording callback (no app named), camera/screen PowOS's own only")
+            Log.w(TAG, "no $WATCH_APPOPS: other apps' mic from AudioManager's recording callback, the camera from CameraManager's availability (no app named), screen PowOS's own only")
+            runCatching { cameraManager.registerAvailabilityCallback(cameraCallback, main) }
+                .onFailure { Log.w(TAG, "can't watch cameras: ${it.message}") }
+        } else {
+            ops.anonymousChips = false
         }
         // Always (with WATCH_APPOPS too): the mic lights only while a capture really runs ([RecordingOps.captures]) -
         // an app's RECORD_AUDIO op alone stays started for a silenced client.
@@ -208,6 +307,10 @@ class RecordingWatcher private constructor(context: Context) {
     /** Main thread: the callback's handler is [main], the first read is in init (shared() is made on the main thread). */
     private fun recordings(configs: List<AudioRecordingConfiguration>) {
         if (ops.captures(configs.map { it.clientAudioSource to it.isClientSilenced })) tell()
+    }
+
+    private fun cameras() {
+        if (ops.cameras(camerasOpen.size)) tell()
     }
 
     fun state() = ops.state()

@@ -257,7 +257,10 @@ async function recordingRingCheck(hole) {
       small ? `${kind}: ring ${r.width}x${r.height} doesn't go round the ${hole.width}x${hole.height} cutout` : "",
     ];
   };
-  /** The ring for [kind]: round the cutout, centred on it, in [token], untouchable, saying who records. */
+  /**
+   * The ring for [kind]: round the cutout, centred on it, in [token], saying who records; a tap opens the control center
+   * (its privacy row names who: action "privacy", its region sent so the strip takes the touch).
+   */
   const ringFails = (kind, token) => {
     const ring = document.querySelector(".status-rec-ring");
     if (!ring) return [`${kind}: no ring`];
@@ -266,9 +269,20 @@ async function recordingRingCheck(hole) {
     return [
       ...placeFails(kind, ring.getBoundingClientRect()),
       css.borderTopColor === colour(token) ? "" : `${kind}: ring ${css.borderTopColor}, want ${token} ${colour(token)}`,
-      css.pointerEvents === "none" ? "" : `${kind}: the ring takes touches`,
+      ...tapFails(kind, ring, css),
       ring.getAttribute("aria-label")?.includes("org.example.rec") ? "" : `${kind}: ring doesn't say who uses it`,
     ].filter(Boolean);
+  };
+  /** The ring takes touches (its region sent to the host) and its tap asks for the control center ("privacy"). */
+  const tapFails = (kind, ring, css) => {
+    const n = (window.__chromeActions ??= []).length;
+    ring.click();
+    const tapped = window.__chromeActions.length === n + 1 && window.__chromeActions[n] === "privacy";
+    return [
+      css.pointerEvents !== "none" && ring.dataset.action === "privacy" ? "" : `${kind}: the ring isn't tappable (pointer-events ${css.pointerEvents}, action ${ring.dataset.action})`,
+      (window.__chromeRegions ?? []).some((r) => r.action === "privacy") ? "" : `${kind}: the ring's region never reached the host (${JSON.stringify(window.__chromeRegions)})`,
+      tapped ? "" : `${kind}: a tap on the ring didn't open the control center (actions ${JSON.stringify(window.__chromeActions)})`,
+    ];
   };
   const fail = [];
   await show({ recording: null });
@@ -356,6 +370,26 @@ async function privacyGrace() {
   for (let t = 0; t < 2000 && document.querySelector(".privacy-row"); t += 50) await P.sleep(50);
   fails.push([!document.querySelector(".privacy-row"), "the row stayed with nothing in use"]);
   return fails.filter(([ok]) => !ok).map(([, why]) => why);
+}
+
+/**
+ * Non-root: a capture Android names no app for (AudioManager / CameraManager) is one "An app" chip; its tap opens
+ * Android's privacy settings (privacy.open("")).
+ */
+async function privacyAnonymous() {
+  const P = window.__privacy;
+  await P.feed([P.use("", "An app", ["camera", "mic"], { uid: -1, anonymous: true })]);
+  const chip = P.chip("");
+  const text = P.text(""); // before the tap: it closes the shade
+  const opened = (window.__privacyOpened ??= []).length;
+  chip?.click();
+  await P.sleep(50);
+  return [
+    [chip, "no chip for an anonymous capture"],
+    [text.includes("An app") && text.includes("Camera, Microphone · now"), `the anonymous chip reads "${text}"`],
+    [chip?.getAttribute("aria-label")?.includes("privacy settings"), `the anonymous chip's label: ${chip?.getAttribute("aria-label")}`],
+    [window.__privacyOpened.length === opened + 1 && window.__privacyOpened[opened] === "", `its tap opened ${JSON.stringify(window.__privacyOpened)}`],
+  ].filter(([ok]) => !ok).map(([, why]) => why);
 }
 
 /** PowOS's own dictation on the mic: its chip stops it (no permission page). */
@@ -14776,7 +14810,7 @@ try {
       runs.push(
         open(browser, `${ORIGIN}/index.html?mode=shade`, `privacy-row-${label}`, viewport).then(async (r) => {
           await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
-          for (const step of [privacyKit, privacyShows, privacyPlace, privacyGrace, privacyOwnStop]) {
+          for (const step of [privacyKit, privacyShows, privacyPlace, privacyGrace, privacyOwnStop, privacyAnonymous]) {
             r.problems.push(...((await r.page.evaluate(step).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])) ?? []));
             if (r.problems.length) break;
           }

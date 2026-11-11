@@ -93,7 +93,7 @@ export function StatusBar({ state, action }: { state: ChromeState; action: Chrom
     <button class="status-indicators" data-action="controls" aria-label={statusLabel(state, battery)} onClick={() => action("controls")}>
       <Indicators state={state} battery={battery} />
     </button>
-    <RecordingLight state={state} />
+    <RecordingLight state={state} action={action} />
   </div>;
 }
 
@@ -103,18 +103,20 @@ function recordingLabel(kind: NonNullable<ChromeState["recording"]>, apps?: stri
 }
 
 /** The recording light on the camera's cutout (none on this screen: [Indicators]' dot). */
-function RecordingLight({ state }: { state: ChromeState }) {
-  return state.recording && state.camera ? <RecordingRing kind={state.recording} camera={state.camera} apps={state.recordingApps} /> : null;
+function RecordingLight({ state, action }: { state: ChromeState; action: ChromeAction }) {
+  return state.recording && state.camera ? <RecordingRing kind={state.recording} camera={state.camera} apps={state.recordingApps} action={action} /> : null;
 }
 
 /**
  * The recording light: a ring around the camera's cutout while an app uses the camera (green), captures the screen
  * (red) or records audio (orange) - StatusChrome.kt's AppOps watch. Drawn where the camera is on this screen (cover
- * folded, inner unfolded); never touchable.
+ * folded, inner unfolded). A tap opens the control center, whose privacy row (ui/privacy.tsx) names who uses it
+ * (data-action "privacy": the host makes it touchable on the strip, StatusChrome.action).
  */
-export function RecordingRing({ kind, camera, apps }: { kind: NonNullable<ChromeState["recording"]>; camera: NonNullable<ChromeState["camera"]>; apps?: string[] }) {
+export function RecordingRing({ kind, camera, apps, action }: { kind: NonNullable<ChromeState["recording"]>; camera: NonNullable<ChromeState["camera"]>; apps?: string[]; action?: ChromeAction }) {
   const size = Math.max(camera.width, camera.height) + 6;
-  return <span class="status-rec-ring" data-kind={kind} role="img" aria-label={recordingLabel(kind, apps)}
+  return <button type="button" class="status-rec-ring" data-kind={kind} data-action="privacy" aria-label={`${recordingLabel(kind, apps)}. Show who`}
+    onClick={() => action?.("privacy")}
     style={{ left: `${camera.x + camera.width / 2 - size / 2}px`, top: `${camera.y + camera.height / 2 - size / 2}px`, width: `${size}px`, height: `${size}px` }} />;
 }
 

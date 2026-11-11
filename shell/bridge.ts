@@ -605,8 +605,9 @@ function mock(): Bridge {
     chrome: {
       state: async () => ({ kind: new URLSearchParams(location.search).get("mode") === "statusbar" ? "status" : new URLSearchParams(location.search).get("mode") === "windowgrip" ? "grip" : "window", title: "Calculator", maximised: false }),
       ready: async () => {},
-      action: async (action) => { console.log("[mock] chrome", action); },
-      regions: async () => {},
+      // Recorded for the gate (rec-light: the ring's tap and region).
+      action: async (action) => { console.log("[mock] chrome", action); ((window as unknown as { __chromeActions?: string[] }).__chromeActions ??= []).push(action); },
+      regions: async (regions) => { (window as unknown as { __chromeRegions?: unknown }).__chromeRegions = regions; },
     },
     apps: {
       list: async () => apps,
@@ -998,7 +999,7 @@ function mock(): Bridge {
     // Nothing in use: a check feeds uses by hand (__mockEvents.emit("privacy.changed", ...), gate.mjs privacyRowCheck).
     privacy: {
       list: async () => ({ now: Date.now(), items: [] }),
-      open: async (pkg) => (console.log("[mock] permissions of", pkg), true),
+      open: async (pkg) => (console.log("[mock] permissions of", pkg), ((window as unknown as { __privacyOpened?: string[] }).__privacyOpened ??= []).push(pkg), true),
     },
     // A few made-up notifications; dismissing and clearing work on them.
     notifications: (() => {

@@ -521,6 +521,8 @@ export interface PrivacyUse {
   ended: number | null;
   /** PowOS itself (its dictation): the chip stops it rather than opening a permission page. */
   own: boolean;
+  /** A capture Android names no app for (non-root: AudioManager / CameraManager) - pkg "", "An app"; opens privacy settings. */
+  anonymous?: boolean;
 }
 export interface PrivacyList { now: number; items: PrivacyUse[] }
 export interface ChromeRegion { action: string; x: number; y: number; width: number; height: number }

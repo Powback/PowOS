@@ -48,6 +48,12 @@ function tap(u: PrivacyUse) {
   notif.value = false;
 }
 
+/** What a tap on [u]'s chip does, as its label says it. */
+function tapWord(u: PrivacyUse, stop: boolean) {
+  if (stop) return "Tap to stop";
+  return u.anonymous ? "Open privacy settings" : "Open its permissions";
+}
+
 function Chip({ u, now }: { u: PrivacyUse; now: number }) {
   const stop = u.own && u.active && u.kinds.includes("mic");
   const line = privacyLine(u, now);
@@ -57,7 +63,8 @@ function Chip({ u, now }: { u: PrivacyUse; now: number }) {
       class="privacy-chip tile"
       data-active={u.active ? "" : undefined}
       data-pkg={u.pkg}
-      aria-label={`${u.app}: ${line}${stop ? ". Tap to stop" : ". Open its permissions"}`}
+      data-anonymous={u.anonymous ? "" : undefined}
+      aria-label={`${u.app}: ${line}. ${tapWord(u, stop)}`}
       onClick={() => tap(u)}
     >
       {u.icon ? (

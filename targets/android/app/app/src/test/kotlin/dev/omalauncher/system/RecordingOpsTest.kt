@@ -84,7 +84,8 @@ class RecordingOpsTest {
         assertTrue(ops.captures(listOf(1 to false)))
         assertEquals(Kind.MIC, ops.state().ring)
         assertEquals(emptyList<String>(), ops.state().apps)
-        assertEquals(emptyList<RecordingOps.Chip>(), ops.chips())
+        // The row: one anonymous chip ("An app"), no package.
+        assertEquals(listOf(RecordingOps.Chip(RecordingOps.ANONYMOUS, -1, listOf(Kind.MIC), true, null)), ops.chips())
         // A second capture joins: still on, nothing the ring shows changed.
         assertFalse(ops.captures(listOf(1 to false, 7 to false)))
         assertTrue(ops.captures(emptyList()))
@@ -138,5 +139,18 @@ class RecordingOpsTest {
         ops.changed(OP_PHONE_CALL_MICROPHONE, 1001, "com.android.phone", true)
         assertEquals(Kind.MIC, ops.state().ring)
         assertEquals(listOf("com.android.phone"), ops.state().apps)
+    }
+
+    // The non-root camera (no WATCH_APPOPS): CameraManager's availability, how many cameras are open, by no one named.
+    @Test fun anOpenCameraLightsGreenNamingNoOne() {
+        val ops = RecordingOps()
+        assertFalse(ops.cameras(0))
+        assertTrue(ops.cameras(1))
+        assertEquals(Kind.CAMERA, ops.state().ring)
+        assertEquals(emptyList<String>(), ops.state().apps)
+        assertTrue(ops.captures(listOf(1 to false))) // a video call: the mic too - the camera still wins
+        assertEquals(Kind.CAMERA, ops.state().ring)
+        assertTrue(ops.cameras(0))
+        assertEquals(Kind.MIC, ops.state().ring)
     }
 }

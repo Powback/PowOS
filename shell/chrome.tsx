@@ -21,12 +21,22 @@ const action = (name: string) => { void powos.chrome.action(name).catch(console.
 function draw(state: ChromeState) {
   render(state.kind === "status" ? <StatusBar state={state} action={action} /> : state.kind === "grip" ? <WindowGrip /> : <WindowBar state={state} action={action} />, document.body);
 }
-powos.on("chrome.changed", draw);
+// The recording ring (a [data-action] fixed on the cutout) comes and goes without resizing the body: its region is
+// re-sent once it's drawn, so the strip takes its tap (StatusChrome.regions).
+let lastRecording: ChromeState["recording"];
+powos.on("chrome.changed", (state: ChromeState) => {
+  draw(state);
+  if ((state.recording ?? null) === (lastRecording ?? null)) return;
+  lastRecording = state.recording;
+  requestAnimationFrame(() => { void regions().catch(console.error); });
+});
 draw(await powos.chrome.state());
-const regions = () => powos.chrome.regions([...document.querySelectorAll<HTMLElement>("[data-action]")].map((e) => {
-  const r = e.getBoundingClientRect();
-  return { action: e.dataset.action!, x: r.x, y: r.y, width: r.width, height: r.height };
-}));
+function regions() {
+  return powos.chrome.regions([...document.querySelectorAll<HTMLElement>("[data-action]")].map((e) => {
+    const r = e.getBoundingClientRect();
+    return { action: e.dataset.action!, x: r.x, y: r.y, width: r.width, height: r.height };
+  }));
+}
 const observer = new ResizeObserver(() => { void regions().catch(console.error); });
 observer.observe(document.body);
 window.addEventListener("fps-layout", () => { requestAnimationFrame(() => { void regions().catch(console.error); }); });

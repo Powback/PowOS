@@ -27,7 +27,9 @@
 #                   STILL_IMAGE_CAMERA) -> a green ring (data-kind camera) on the camera cutout in the status chrome,
 #                   unfolded (inner) then folded (cover); the camera's task closed -> the ring gone. Then the mic: the
 #                   system's speech input (RECOGNIZE_SPEECH, another app) opened -> an orange ring (data-kind mic) while
-#                   Android has its RECORD_AUDIO running, folded then unfolded; closed -> off once the mic rests;
+#                   Android has its RECORD_AUDIO running, folded then unfolded; closed -> off once the mic rests.
+#                   With the camera's ring lit, the ring tapped -> the control center's privacy row names the camera
+#                   "now" (control-center-shows-what-is-using-the-mic-and-c);
 #   term-remote     (native-terminals-rebuilt-on-powterm-s-code-fit-w, 179a9012 + 050a553d): a REMOTE host's session
 #                   opened view-only (never a local tmux session, never taken over; every write to it dropped and
 #                   counted): the WebGL renderer, a monospace face, an injected 4-row drag scrolls its scrollback 4 rows
@@ -284,6 +286,20 @@ recwait() { local pg v out="none (no statusbar/home page)" t=$2
     t=0; out="$pg: $v"
     case $1:$v in mic:ring\ mic*|mic:dot\ mic*|off:ring*|off:dot*) break ;; esac
   done; echo "$out"; }
+# ringtap: the ring tapped where it's drawn (the status strip spans the screen's top from 0,0: CSS px x dpr), then the
+# control center's privacy row read, waited on in the shade's page up to 4 s - "PASS <chip text>" for a chip naming the
+# camera "now", else what it shows. control-center-shows-what-is-using-the-mic-and-c: the glow's tap opens who uses it.
+RINGAT='(()=>{const r=document.querySelector(".status-rec-ring");if(!r)return "none";const b=r.getBoundingClientRect(),d=devicePixelRatio;return Math.round((b.left+b.width/2)*d)+" "+Math.round((b.top+b.height/2)*d)})()'
+CAMCHIP='new Promise(res=>{const end=Date.now()+4000,g=()=>{const p=document.querySelector(".notif-panel.shown"),c=[...document.querySelectorAll(".notif-panel.shown .privacy-chip")].map(e=>e.textContent.trim()),hit=c.find(t=>/Camera/.test(t)&&/now/.test(t));if(hit)res("PASS "+hit);else if(Date.now()>end)res(p?"chips: "+JSON.stringify(c):"shade not open");else setTimeout(g,200)};g()})'
+ringtap() { local at pg v
+  pg=$("$T/cdp.sh" pages 2>/dev/null | awk '$1=="statusbar"{print $1; exit}')
+  [ -n "$pg" ] || { note "$1: no statusbar page - ring tap not checked"; return; }
+  at=$(CDP_TIMEOUT_S=15 ev "$RINGAT" "$pg"); case $at in [0-9]*\ [0-9]*) ;; *) fail "$1: no ring to tap ($at)"; return ;; esac
+  tap ${at% *} ${at#* } "the recording ring" || { note "$1: ring tap refused ($at)"; return; }
+  sleep 1.2; chk "ring tapped"; step "ring-tap-$1" "$1: the ring tapped - the control center, who uses the camera"
+  v=$(CDP_TIMEOUT_S=20 sev "$CAMCHIP"); log "$1 ring tap: $v"
+  case $v in PASS*) pass "$1: the ring's tap opened the control center naming the camera (${v#PASS })" ;; *) fail "$1: the ring's tap: $v" ;; esac
+  shut; }
 # camclose: the camera's tasks (any not there at the start of the case) closed.
 camclose() { local id pkg vis; while read -r id pkg vis; do [ -n "$id" ] || continue
     grep -q "^$id " <<<"$CAMT0" || { sh_ "am stack remove $id"; log "closed task $id ($pkg): the camera this case started"; }; done <<<"$(tasks)"; sleep 2; }
@@ -296,7 +312,7 @@ if [ "$CASE" = rec-light ]; then
     top=$(sh_ "dumpsys activity activities | grep -m1 topResumedActivity" | grep -oE '[a-zA-Z0-9_.]+/[a-zA-Z0-9_.]+' | head -1)
     step "camera-$fold" "$fold: the camera app started (STILL_IMAGE_CAMERA): $top"
     r1=$(recread); log "$fold with the camera: $r1"
-    case $r1 in *"ring camera at"*) pass "$fold: green ring on the cutout ($r1)" ;; *) fail "$fold: no camera ring with $top in front ($r1)" ;; esac
+    case $r1 in *"ring camera at"*) pass "$fold: green ring on the cutout ($r1)"; ringtap $fold ;; *) fail "$fold: no camera ring with $top in front ($r1)" ;; esac
     camclose; CAMON=; sleep 2; chk "camera closed"
     step "closed-$fold" "$fold: the camera closed"
     r2=$(recread); log "$fold after: $r2"

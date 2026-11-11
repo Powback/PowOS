@@ -95,4 +95,39 @@ class PrivacyChipsTest {
         ops.changed(OP_CAMERA, 2, "b", false)
         assertEquals(listOf("b", "a"), ops.chips(now = 3_000).map { it.pkg })
     }
+
+    // Non-root: AudioManager / CameraManager report captures naming no app - one "An app" chip, with the same grace.
+    @Test fun anonymousCapturesAreOneChipWithTheGrace() {
+        val ops = RecordingOps { t }
+        t = 1_000
+        ops.captures(listOf(1 to false))
+        ops.cameras(1)
+        assertEquals(listOf(Chip(RecordingOps.ANONYMOUS, -1, listOf(Kind.CAMERA, Kind.MIC), true, null)), ops.chips())
+        t = 2_000
+        ops.cameras(0)
+        assertEquals(listOf(Chip(RecordingOps.ANONYMOUS, -1, listOf(Kind.MIC), true, null)), ops.chips())
+        t = 3_000
+        ops.captures(emptyList())
+        assertEquals(listOf(Chip(RecordingOps.ANONYMOUS, -1, listOf(Kind.MIC), false, 3_000)), ops.chips())
+        assertEquals(3_000 + GRACE_MS, ops.nextExpiry())
+        t = 3_000 + GRACE_MS
+        assertEquals(emptyList<Chip>(), ops.chips())
+        assertNull(ops.nextExpiry())
+    }
+
+    // PowOS's own dictation is counted by AudioManager too (anonymous) and named by its own uid's AppOps: one chip, its
+    // own - another app's chip only for a capture beyond the named ones.
+    @Test fun ownDictationIsNotAlsoAnAnonymousChip() {
+        val ops = RecordingOps { t }
+        t = 1_000
+        ops.changed(OP_RECORD_AUDIO, 10100, "com.powos.app", true)
+        ops.captures(listOf(6 to false))
+        assertEquals(listOf(Chip("com.powos.app", 10100, listOf(Kind.MIC), true, null)), ops.chips())
+        t = 2_000
+        ops.captures(listOf(6 to false, 1 to false)) // another app records as well
+        assertEquals(
+            listOf(Chip("com.powos.app", 10100, listOf(Kind.MIC), true, null), Chip(RecordingOps.ANONYMOUS, -1, listOf(Kind.MIC), true, null)),
+            ops.chips(),
+        )
+    }
 }

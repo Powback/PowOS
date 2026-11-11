@@ -123,7 +123,7 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
         publish()
     }
 
-    override fun action(name: String) { when (name) { "notifications" -> open(false); "controls" -> open(true) } }
+    override fun action(name: String) { when (name) { "notifications" -> open(false); "controls", "privacy" -> open(true) } } // privacy: the recording ring's tap - the control center, its privacy row
     private fun connection() {
         val caps = connectivity.getNetworkCapabilities(connectivity.activeNetwork)
         val kind = when {

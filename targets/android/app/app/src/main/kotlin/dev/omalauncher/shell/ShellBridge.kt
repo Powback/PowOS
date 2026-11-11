@@ -2119,6 +2119,12 @@ class ShellBridge(
 
     private fun privacyItem(chip: dev.omalauncher.system.RecordingOps.Chip): JSONObject {
         val own = chip.pkg == context.packageName
+        // Non-root: a capture Android names no app for (RecordingOps.ANONYMOUS) - said as such, no icon.
+        if (chip.pkg == dev.omalauncher.system.RecordingOps.ANONYMOUS) {
+            return JSONObject().put("pkg", chip.pkg).put("uid", chip.uid).put("app", "An app").put("icon", JSONObject.NULL)
+                .put("kinds", JSONArray(chip.kinds.map { it.key })).put("active", chip.active)
+                .put("ended", chip.ended ?: JSONObject.NULL).put("own", false).put("anonymous", true)
+        }
         val user = android.os.UserHandle.getUserHandleForUid(chip.uid)
         val apps = runtime.androidApps.apps.filter { it.component.packageName == chip.pkg }
         val app = apps.firstOrNull { it.user == user } ?: apps.firstOrNull()
@@ -2148,7 +2154,9 @@ class ShellBridge(
     private fun openPermissions(pkg: String): Boolean =
         runCatching {
             context.startActivity(
-                android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", pkg, null))
+                // The anonymous chip (pkg ""): Android's privacy settings, where its own dashboard names the app.
+                (if (pkg.isEmpty()) android.content.Intent(android.provider.Settings.ACTION_PRIVACY_SETTINGS)
+                else android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", pkg, null)))
                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
             )
         }.onFailure { Log.w(TAG, "can't open $pkg's permissions", it) }.isSuccess
