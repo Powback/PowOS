@@ -84,6 +84,16 @@ caches left behind are only read with the option on. Note: FEX keeps the cache u
 `STEAM_COMPAT_SHADER_PATH/fex-emu` (shadercache/<id>/fex-emu), not compatdata - bf-coldstart's fexcache now compiles
 and lists that dir.
 
+## Engine-side levers (2026-11-12): see broforce-engine-init.md
+
+Ranked there with evidence: (1) a Wine session pre-booted at the tap (`run_wineboot` + services' serial autostart
+are skipped by a process joining a live session; Proton's `waitforexitandrun` must become `run`): ~1.5-2 s tap -> exe,
+every Proton game; (2) Mono AOT images for legacy-Mono Unity games: Unity 2017.4's mono.dll DOES load
+`<assembly>.dll.dll` (GUID-checked) - the 11-05 "Mono AOT can't apply" note below is wrong; ~0.5-1.5 s window -> frame;
+(3) FEX arm64ec mapped code cache: in Proton's FEX-2610-175 but its generator (fexofflinecompiler64.exe) isn't shipped.
+Also new there: window -> frame is the same 8.5 s with the prime at 3.19 GHz as clamped at 1.36 GHz - the "busy" main
+thread is not clock-bound; measure what it is first (FEX ProfileStats counters, schedstat, IPC).
+
 ## Next candidates, ranked (measure each with bf-coldstart.sh before it lands)
 
 1. Wine boot under FEX, 11.8 s (Proton -> exe): FEX code cache crashes (above); left: ARM64 Proton for the game
@@ -369,7 +379,7 @@ below is from that run; the warm FEX split is from job 105337 (symbolised the sa
 
 - **Managed code is small**: Mono's JIT output runs 0.39 s and mono.dll 0.57 s on main; the emulated time is mostly
   UnityPlayer's own native init. Mono AOT can't apply (Unity 2017.4's embedded mono.dll, no AOT/`MONO_ENV_OPTIONS` for
-  an embedder), and the managed share it could cut is < 0.5 s anyway.
+  an embedder; **corrected 11-12**: the runtime's own assembly-load hook loads `<assembly>.dll.dll`, broforce-engine-init.md), and the managed share it could cut is < 0.5 s anyway.
 - **Main idles while UnityPreload works** (sample bins: one 1 s span with 11 main samples and UnityPreload 76 %), and in
   the last ~3 s main is 25-30 % busy (the GPU work agent/load-uploads saw): the hand-off, not one slow loop.
 - **The main thread's server calls are mostly Steam's**: of 58k wineserver requests by the main thread before the first
