@@ -451,6 +451,10 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   cooling devices all 0, uag soft_limit off: an OPlus scene cap (perf HAL), not thermal. /proc/game_opt (game_pid,
   disable_cpufreq_limit, cpu_max_freq) is OPlus's game hook - game_pid=-1: PowOS games are not known to it. Check the
   cap DURING a game (prof cluster lines) before acting.
+- 11-12: the process holding every policy's scaling_min/max_freq open is oiface (main thread comm "horaeCb", fds
+  read-only) - NOT horae (which writes and closes). sysfs scaling_max_freq reads back the effective max and is one
+  shared request: never save-and-restore it as a value (that planted the flat 1.65/1.36 GHz clamp). game-boost.sh now
+  finds horae by name and lifts a controller's max once per hold (docs/research/game-launch-time.md 11-12).
 - Frame callbacks of a window task (kwin 0013 AnlandWindowTask::render): KWin sends them after every frame it draws
   into the task's buffer (framePainted), paced by the consumer offering a buffer (native_consumer.c render thread:
   dequeueBuffer -> select_dmabuf -> refresh_done). No task surface (activity stopped: screen off, task behind) = task

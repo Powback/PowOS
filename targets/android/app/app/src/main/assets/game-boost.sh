@@ -21,8 +21,9 @@
 # userspace thermal controller that writes scaling_min/max_freq itself (OxygenOS: horae, holding them open, applies
 # com.oplus.battery's ThermalController gear - skin temperature -> a cpu level from
 # /odm/etc/temperature_profile/sys_thermal_control_config*.xml; measured 11-03: gear 3-8 at 35-39 C put
-# 1.79-2.05 / 1.59-1.71 GHz on gold/prime) owns that policy's max: the boost never raises it (it did, every second,
-# and horae wrote its cap back - the "set back by someone else" fights), only holds the min up to its cap. While it
+# 1.79-2.05 / 1.59-1.71 GHz on gold/prime) owns that policy's max: the boost lifts it once at the start (a stale
+# request goes, freqs_unstale) and never again (it did, every second, and horae wrote its cap back - the "set back by
+# someone else" fights), then only holds the min up to the controller's cap. While it
 # holds under such a controller the vendor classes the front app as a game (vendor_game_class), so the controller's
 # own game table applies; normal PowOS use stays on its default table.
 #
@@ -119,15 +120,17 @@ ticks() {
   done; done
 }
 
-# The userspace thermal controller writing the cpufreq limits, if any: the comm of a process (not this one) holding
-# a policy's scaling_max_freq open, when it is a thermal daemon (horae = OxygenOS' skin-temperature controller,
-# thermal*). Looked up once per hold (a /proc fd scan).
+# The userspace thermal controller writing the cpufreq limits, if any: OxygenOS' horae (found by its program name), or
+# a process (not this one) holding a policy's scaling_max_freq open FOR WRITING. Not a reader: oiface (OnePlus' game
+# daemon) holds every policy's scaling_min/max_freq open read-only and its main thread is named "horaeCb" - the comm
+# match this had until 11-12 took it for horae (measured 11-12: oiface pid 6394, comm horaeCb, all its cpufreq fds
+# lr-x; horae pid 6382 holds none, it writes and closes). Looked up once per hold (a /proc fd scan).
 thermal_owner() {
+  pidof horae > /dev/null 2>&1 && { echo horae; return; }
   for d in /proc/[0-9]*; do
     [ "${d#/proc/}" = $$ ] && continue
-    ls -l $d/fd 2>/dev/null | grep -q "cpufreq/policy[0-9]*/scaling_max_freq" || continue
-    c=$(cat $d/comm 2>/dev/null)
-    case "$c" in horae*|thermal*) echo "$c"; return ;; esac
+    ls -l $d/fd 2>/dev/null | grep -Eq "^l.w.* -> .*cpufreq/policy[0-9]+/scaling_max_freq" || continue
+    cat $d/comm 2>/dev/null; return
   done
 }
 
@@ -151,6 +154,25 @@ freqs_save() {
   [ -s "$S/freqs" ] && return   # a killed holder's: those are the originals, not what it set
   for p in $BOOSTED; do echo "$p $(cat $P/$p/scaling_min_freq) $(cat $P/$p/scaling_max_freq)"; done > "$S/freqs"
 }
+# Under a thermal controller: its max request is lifted to the hw max ONCE, at the hold's start, then never again. The
+# sysfs scaling_max_freq is one request shared by every writer, and reading it gives the effective max - so a value
+# read and written back later (a restore of a cap seen at save time, a killed holder's leftovers) became a request of
+# its own that no controller lifts again: 11-12 the OnePlus sat at gold/prime 1.65/1.36 GHz (vendor cpu level 5 on
+# those two, the little cluster uncapped - no level of the vendor table) from the 11-10 boot on at skin 26 C, through
+# every boosted launch, because the boost "kept" it as the controller's. A live gear cap is re-applied by the
+# controller itself (11-06: horae set a lifted max back within a second) and from then on stands; a stale one is gone.
+# HACK: a blind one-shot lift because the controller's live gear isn't readable here (horae has no query; its gear is
+# com.oplus.battery's). Real fix: read the controller's current cpu level (or have it publish one) and lift only when
+# that level is uncapped.
+freqs_unstale() {
+  for p in $BOOSTED; do
+    eval hw=\$HW_$p; read -r cap < $P/$p/scaling_max_freq
+    [ "$cap" = "$hw" ] && continue
+    echo $hw > $P/$p/scaling_max_freq; read -r now < $P/$p/scaling_max_freq
+    log "$p: max $cap lifted to hw $hw once (now $now) - $THERMAL re-applies a live gear cap, which then stands"
+  done
+}
+
 # Lift - max first, the min then fits under it - and re-assert each second.
 # HACK: raw cpufreq sysfs writes, re-asserted every second, where no thermal controller owns the limits. On OxygenOS
 # the owner is horae (thermal_owner): it applies com.oplus.battery's skin-temperature gear through the app's thermal
@@ -167,7 +189,8 @@ freqs_lift() {
       # The thermal controller's cap stands; the min goes up to it (never past: a min above the max is refused).
       [ "$lo" -gt "$cap" ] && lo=$cap
       eval was=\${CAP_$p:-}
-      [ "$was" != "$cap" ] && eval CAP_$p=$cap && log "$p: thermal cap $cap of hw $hw by $THERMAL$(skin) - kept"
+      [ "$was" != "$cap" ] && eval CAP_$p=$cap && if [ "$cap" = "$hw" ]; then log "$p: no thermal cap (hw $hw) under $THERMAL$(skin)"
+        else log "$p: thermal cap $cap of hw $hw by $THERMAL$(skin) - kept"; fi
       # Heat is what moves the controller's gear: only the main thread's policy (the prime core) holds its min up;
       # the other big clusters (render/dxvk/workers, none pegged) clock on demand - their threads' uclamp.min 75 asks
       # schedutil for the clock while they run - instead of idling at the capped top voltage (BOOST_MIN_ALL=1: all).
@@ -190,6 +213,10 @@ restore_all() {
     # Under a thermal controller its max is live (it may be lower now): only the min goes back, never above that max.
     th=$(cat "$S/thermal" 2>/dev/null)
     while read -r p lo hi; do
+      # A saved min pinned to a capped max (min == max < hw) is a snapshot of an earlier boost's min clamped under that
+      # cap (the leftovers 11-12 found: policy3 1651200 1651200, policy7 1363200 1363200 - every restore put the
+      # gold/prime clusters back at a fixed clock), not anyone's request: the policy's floor instead.
+      [ "$lo" = "$hi" ] && [ "$hi" -lt "$(cat $P/$p/cpuinfo_max_freq)" ] && lo=$(cat $P/$p/cpuinfo_min_freq)
       if [ -n "$th" ]; then cap=$(cat $P/$p/scaling_max_freq); [ "$lo" -gt "$cap" ] && lo=$cap; echo $lo > $P/$p/scaling_min_freq
       else echo $lo > $P/$p/scaling_min_freq; echo $hi > $P/$p/scaling_max_freq; fi
     done < "$S/freqs"
@@ -230,11 +257,14 @@ hold() {
   echo $$ > "$S/holder.pid"; echo "$APP" > "$S/app"; : > "$S/tids"
   trap 'log "$APP: restore asked"; restore_all; exit 0' TERM INT HUP
   topology || { log "$APP: no cpufreq policies"; restore_all; exit 1; }
+  # The controller first, then the originals: a holder killed in between (the /proc scan takes a while) left saved
+  # freqs without the controller, and the next restore wrote its capped max back as a request of its own.
+  THERMAL=${GAME_BOOST_OWNER-$(thermal_owner)}; echo "$THERMAL" > "$S/thermal"
   freqs_save
   # The holder itself on the little cores: its 1 s loop never shares the prime / gold cores with the game (11-06 14:25
   # live capture: an unpinned sh at 10.5 % on cpu7).
   [ -n "$LITTLE_MASK" ] && taskset -p $LITTLE_MASK $$ > /dev/null 2>&1
-  THERMAL=${GAME_BOOST_OWNER-$(thermal_owner)}; echo "$THERMAL" > "$S/thermal"
+  [ -n "$THERMAL" ] && freqs_unstale
   [ -n "$THERMAL" ] && vendor_game_class "$APP"
   mkdir -p $CG && echo $BOOST_UCLAMP > $CG/cpu.uclamp.min 2>/dev/null
   log "$APP: boost (policies $(echo $BOOSTED | tr '\n' ' '), prime cpu$PRIME, rest mask ${REST_MASK:-none}, uclamp.min $(cat $CG/cpu.uclamp.min 2>/dev/null), thermal controller ${THERMAL:-none}$([ -n "$THERMAL" ] && [ "$BOOST_MIN_ALL" != 1 ] && echo ": min held on $TOP only"), holder on mask ${LITTLE_MASK:-?})"

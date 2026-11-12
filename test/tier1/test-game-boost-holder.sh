@@ -46,35 +46,58 @@ ok "policy7 restored" "$(cat $P/policy7/scaling_min_freq) $(cat $P/policy7/scali
 ok "fight logged" "$(grep -c 'policy7: max set back to 1708800 by someone else' $T/state/log)" 1
 ok "stale lease logged" "$(grep -c 'restore - the app.s lease is' $T/state/log)" 1
 ok "no controller: no vendor game class" "$(cat $T/global_powos_game_front 2>/dev/null || echo unset)" unset
+# A fake thermal controller (horae): while $T/gear holds a cap, it writes that cap into policy7's (and policy3's
+# gold one, from $T/gear3) scaling_max_freq whenever it differs - horae set a lifted max back within a second (11-06).
+ctl() { while [ -f $T/ctl.on ]; do for g in 7 3; do c=$(cat $T/gear$g 2>/dev/null) || continue
+  [ "$(cat $P/policy$g/scaling_max_freq)" = "$c" ] || echo $c > $P/policy$g/scaling_max_freq
+  # The kernel clamps the effective min under the max (a plain file doesn't): what scaling_min_freq then reads.
+  [ "$(cat $P/policy$g/scaling_min_freq)" -gt "$c" ] && echo $c > $P/policy$g/scaling_min_freq; done; sleep 0.2; done; }
 # Under a thermal controller (horae on OxygenOS): its cap stands and only the prime policy's min goes up to it - the
 # gold cluster clocks on demand (less heat, which is what moves the controller's gear).
 cp $T/state/log $T/log.before; rm -f $T/state/log; touch $T/lease
 echo 1920000 > $P/policy3/scaling_max_freq; echo 1708800 > $P/policy7/scaling_max_freq
-GAME_BOOST_OWNER=horaeCb sh "$GB" hold steam_app_999999999 $T/lease &
-h=$!; waitfor 15 is $P/policy7/scaling_min_freq 1708800
+echo 1708800 > $T/gear7; echo 1920000 > $T/gear3; touch $T/ctl.on; ctl & c=$!
+GAME_BOOST_OWNER=horae sh "$GB" hold steam_app_999999999 $T/lease &
+h=$!; waitfor 15 eval '[ "$(cat $P/policy7/scaling_min_freq) $(cat $P/policy7/scaling_max_freq)" = "1708800 1708800" ]'
 # The vendor game class is on from the hold's start (the tap, for a launch): the oplus-hook's observer re-evaluates
 # com.oplus.battery's thermal category on this change, so its game table (category_4) applies at once.
 ok "thermal: vendor game class on while held" "$(cat $T/global_powos_game_front 2>/dev/null)" steam_app_999999999
-ok "thermal: prime min up to its cap" "$(cat $P/policy7/scaling_min_freq) $(cat $P/policy7/scaling_max_freq)" "1708800 1708800"
+ok "thermal: a live cap re-applied by the controller stands" "$(cat $P/policy7/scaling_min_freq) $(cat $P/policy7/scaling_max_freq)" "1708800 1708800"
 ok "thermal: gold min left on demand" "$(cat $P/policy3/scaling_min_freq) $(cat $P/policy3/scaling_max_freq)" "614400 1920000"
 ok "thermal: logged prime-only" "$(grep -c 'min held on policy7 only' $T/state/log)" 1
+ok "thermal: lifted once only" "$(grep -c 'policy7: max 1708800 lifted to hw' $T/state/log)" 1
 wait $h
 ok "thermal: prime min restored" "$(cat $P/policy7/scaling_min_freq)" 864000
 ok "thermal: vendor game class off after" "$(cat $T/global_powos_game_front 2>/dev/null || echo unset)" unset
 ok "thermal: class on/off logged" "$(grep -c 'vendor game class o[nf]' $T/state/log)" 2
 # The vendor's table switch lowers / raises its cap mid-hold: the holder follows (min up to the new cap), never past it.
-rm -f $T/state/log; touch $T/lease; echo 1708800 > $P/policy7/scaling_max_freq
-GAME_BOOST_OWNER=horaeCb sh "$GB" hold steam_app_999999999 $T/lease &
-h=$!; waitfor 15 is $P/policy7/scaling_min_freq 1708800
-echo 3187200 > $P/policy7/scaling_max_freq   # category_4 at a cool gear: horae lifts its cap
+rm -f $T/state/log; touch $T/lease
+GAME_BOOST_OWNER=horae sh "$GB" hold steam_app_999999999 $T/lease &
+h=$!; waitfor 15 eval '[ "$(cat $P/policy7/scaling_min_freq) $(cat $P/policy7/scaling_max_freq)" = "1708800 1708800" ]'
+echo 3187200 > $T/gear7   # category_4 at a cool gear: horae lifts its cap
 waitfor 15 is $P/policy7/scaling_min_freq 2476800
 ok "thermal: min follows a lifted cap to the boost step" "$(cat $P/policy7/scaling_min_freq) $(cat $P/policy7/scaling_max_freq)" "2476800 3187200"
-echo 1363200 > $P/policy7/scaling_max_freq; echo 1363200 > $P/policy7/scaling_min_freq   # hot: the cap comes down
-# The holder's next tick logs the lowered cap (polled: a fixed 1.5 s sleep flaked on a loaded .58, 11-11).
-waitfor 15 eval '[ "$(grep -c "policy7: thermal cap" $T/state/log)" -ge 3 ]'
-ok "thermal: a lowered cap stands" "$(cat $P/policy7/scaling_max_freq)" 1363200
-ok "thermal: cap changes logged" "$(grep -c 'policy7: thermal cap' $T/state/log)" 3
+echo 1363200 > $T/gear7   # hot: the cap comes down (and the kernel clamps the min under it)
+waitfor 5 is $P/policy7/scaling_max_freq 1363200
+waitfor 15 logged 'policy7: thermal cap 1363200'
+sleep 1.5
+ok "thermal: a lowered cap stands (never re-lifted)" "$(cat $P/policy7/scaling_max_freq)" 1363200
+ok "thermal: the lift happened once" "$(grep -c 'lifted to hw' $T/state/log | tr -d ' ')" 2
 wait $h
+rm -f $T/ctl.on $T/gear7 $T/gear3; wait $c
+# 11-12: a stale cap the controller does NOT assert - gold/prime 1651200/1363200 with the min pinned to it (an earlier
+# boost's leftovers), skin 26 C. The boost lifts it (was: "kept" through every launch), and the restore neither
+# writes it back as a max nor pins the min to it again.
+rm -f $T/state/log; touch $T/lease
+echo 1651200 > $P/policy3/scaling_max_freq; echo 1651200 > $P/policy3/scaling_min_freq
+echo 1363200 > $P/policy7/scaling_max_freq; echo 1363200 > $P/policy7/scaling_min_freq
+GAME_BOOST_OWNER=horae sh "$GB" hold steam_app_999999999 $T/lease &
+h=$!; waitfor 15 is $P/policy7/scaling_min_freq 2476800
+ok "stale cap: prime lifted to hw, min to the boost step" "$(cat $P/policy7/scaling_min_freq) $(cat $P/policy7/scaling_max_freq)" "2476800 3187200"
+ok "stale cap: gold max lifted" "$(cat $P/policy3/scaling_max_freq)" 2803200
+wait $h
+ok "stale cap: prime not re-capped by the restore" "$(cat $P/policy7/scaling_min_freq) $(cat $P/policy7/scaling_max_freq)" "300000 3187200"
+ok "stale cap: gold not re-capped by the restore" "$(cat $P/policy3/scaling_min_freq) $(cat $P/policy3/scaling_max_freq)" "300000 2803200"
 # Placement: a busy game thread is pinned to the prime core, and pinned again when its mask is reset under it (the
 # kernel does that on a cpuset change; 11-06 live play had the main thread on cpu4 with Cpus_allowed 0-7). Needs a
 # second cpu to tell the prime from the rest.

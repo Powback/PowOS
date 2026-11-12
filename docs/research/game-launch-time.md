@@ -763,3 +763,38 @@ window -> frame, 9.0 vs 8.65 s). wineserver: 0.8 core-s spread, not on the criti
 11-05's caps-lifted A/B gave -2 to -3 s tap -> frame, most of it this span (CPU-bound, ~2.3x clock headroom on main);
 (b) nothing else PowOS-side clears 0.5 s in the window -> frame (FEX TSO/placement/GPU floor/gfx-direct all measured
 below the bar on 11-05); the < 10 s path stays resume.
+
+### 11-12: the flat 1.36/1.65 GHz clamp is game-boost's own leftover, "kept" because oiface looked like horae (agent/oiface-cap)
+
+Read-only on the phone (03:1x and 19:1x, skin 26 C): policy3 min=max=1651200 of 2803200, policy7 min=max=1363200 of
+3187200, policy0 2016000 (hw, uncapped). Findings:
+- **The "horaeCb" holder is oiface, and it only reads.** `/proc/6394` = `/system_ext/bin/oiface`, its main thread is
+  named `horaeCb`; every cpufreq fd it holds is `lr-x` (read-only). horae itself (pid 6382) holds none: it writes and
+  closes. game-boost.sh's `thermal_owner` matched the comm `horae*` on the fd holder, so every boost since e98986ba
+  took oiface for the thermal controller and "kept" its cap - only the min went up to 1363200. That is why no boosted
+  launch ever lifted the clamp (bf-coldstart LPROF: prime 1.36 GHz throughout). oiface's game hook (game_pid=-1) is not
+  the limiter; registering the game with it would change nothing here.
+- **The clamp matches no vendor level.** thermal_cpulevel 5 = 1459200,1651200,1363200 - policy0 would be 1459200, it
+  is 2016000. msm_performance's own request (`/sys/kernel/msm_performance/parameters/cpu_max_freq`: gold 1785600,
+  prime 2227200) is above it, and at gear 1 neither common_config nor category_4 caps anything. So the binding request
+  is the sysfs scaling_max_freq itself, with a value no controller is asserting.
+- **How it got there: the boost wrote it.** sysfs scaling_max_freq is one request shared by all writers and reads back
+  the EFFECTIVE max. The holder saved the originals (`freqs`) before the slow /proc fd scan that names the controller,
+  so a holder TERMed in that window (rapid engage/restore at a launch) restored with no controller on record and wrote
+  the saved max - horae's 41-43 C cap of 11-09 - back as a request of its own. Nothing lifts that later. The min was
+  pinned the same way: every save read min=max (an earlier boost's min clamped under the cap), every restore put
+  policy3/7 back to a fixed clock (`clocks restored: policy3 1651200 1651200;policy7 1363200 1363200` in every log
+  line since 11-07).
+- **Fix (game-boost.sh):** the controller is horae by name (`pidof horae`) or a process holding scaling_max_freq open
+  for WRITING, never a reader; it is looked up and recorded before the originals are saved; under it the boost lifts
+  each big policy's max to hw ONCE at the hold's start (`freqs_unstale`, HACK row in REMOTE-POWOS §4) and never again
+  - a live gear cap is re-applied by horae within a second (11-06 fights) and then stands, the min follows it as
+  before; restore treats a saved min pinned to a capped max (min == max < hw) as clamped, not a request, and puts the
+  policy's floor back. Thermal safety unchanged: horae's re-applied cap and every kernel QoS cap (thermal-engine,
+  msm_performance, LMH) still win - the kernel takes the lowest request; no cooling device touched.
+- Test: test/tier1/test-game-boost-holder.sh (fake controller re-asserting its cap; the 11-12 stale state lifted and not
+  re-planted on restore) 33/33 on .58; control (old script, same test) 6 failures incl. `stale cap: prime lifted:
+  got '1363200 1363200'`.
+- Expect after deploy: the first boost logs `policy7: max 1363200 lifted to hw 3187200 once (now 3187200)` and, cool,
+  `no thermal cap`; after the restore policy3/policy7 min back at their cpuinfo_min_freq, max at hw.
+
