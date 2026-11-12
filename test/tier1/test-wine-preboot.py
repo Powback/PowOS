@@ -206,9 +206,19 @@ class WinePreboot(unittest.TestCase):
         self.log.unlink()
         Path(str(self.log) + ".entry").unlink()
 
-    def test_off_by_default(self):
+    def test_on_by_default(self):
+        """Default ON since the 11-12 A/B: no switch set -> start boots the session."""
         self.first_launch()
-        k = self.start()
+        k = self.start()  # self.env has no POWOS_WINE_PREBOOT
+        self.wait_state("up")
+        r = self.gate()
+        self.assertEqual(r.returncode, 7, r.stderr)
+        self.assertIn("run session=up cmd=game.exe", self.lines(), "no switch set: the launch joined the pre-booted session")
+        self.assertEqual(k.wait(5), 0)
+
+    def test_off_when_switched_off(self):
+        self.first_launch()
+        k = self.start(dict(self.env, POWOS_WINE_PREBOOT="0"))
         self.assertEqual(k.wait(10), 0)
         self.assertIsNone(self.session())
         self.assertEqual(self.lines(), [])  # nothing booted
@@ -310,9 +320,9 @@ class WinePreboot(unittest.TestCase):
         self.assertEqual(k.wait(5), 0)
         self.assertIsNone(self.session())
 
-    def test_early_off_by_default(self):
+    def test_early_off_when_switched_off(self):
         self.first_launch()
-        self.assertEqual(self.early().wait(10), 0)
+        self.assertEqual(self.early(dict(self.env, POWOS_WINE_PREBOOT="0")).wait(10), 0)
         self.assertIsNone(self.session())
         self.assertEqual(self.lines(), [])
 

@@ -9,7 +9,7 @@
 # Real fix: Proton/Steam booting the prefix's session while the client prepares a launch (or a wineboot that doesn't
 # serialise the autostart services) - then drop this file, the gate's join and /usr/bin/steam's `start` call.
 #
-# Off by default. On: POWOS_WINE_PREBOOT=1 (~/.config/powos/steam-env, or a check's env:) for every game, or per game
+# On by default (11-12 A/B: ~2.6 s off tap->frame). Off: POWOS_WINE_PREBOOT=0; formerly on: POWOS_WINE_PREBOOT=1 (~/.config/powos/steam-env, or a check's env:) for every game, or per game
 # `powos game <appid> preboot on|off|default` (steam-compat.json apps.<id>.preboot, beats the global switch).
 #
 # The pieces:
@@ -107,7 +107,9 @@ def enabled(appid, env=None):
             return v == "on"
     except (OSError, ValueError, AttributeError):
         pass
-    return env.get("POWOS_WINE_PREBOOT", "0") == "1"
+    # Default ON since 11-12 21:51 (A/B on the OnePlus, Broforce: off 16.4/16.8 s -> on 15.3/13.5/13.2 s tap->frame,
+    # window ~3 s earlier; docs/research/broforce-engine-init.md). POWOS_WINE_PREBOOT=0 or per game "off" turns it off.
+    return env.get("POWOS_WINE_PREBOOT", "1") != "0"
 
 
 def mapped_tool(appid, steam=None):
