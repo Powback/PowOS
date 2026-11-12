@@ -13,12 +13,24 @@
 # `powos game <appid> preboot on|off|default` (steam-compat.json apps.<id>.preboot, beats the global switch).
 #
 # The pieces:
+#   early          (powos-sleep-gui when PowOS comes on screen; 11-12): the same as `start`, BEFORE the tap, for the
+#                  game last launched through the gate (newest env.json) - the tap-time start overlapped Steam's own
+#                  prep and saved ~0.3 s (11-12 21:15). Bounded: a lit display and a running Steam that runs no game,
+#                  one session at a time (any other app's unclaimed one is ended), EARLY_GAP_S between early boots,
+#                  ended unclaimed after EARLY_IDLE_S, as soon as every display is dark, or when Steam exits. Not ended
+#                  when Steam is frozen: Steam freezes 15 s out of sight, i.e. before nearly every tap, and the session's
+#                  processes block (wineserver in epoll, services/winedevice/explorer in waits) - no CPU while idle.
 #   start <appid>  (/usr/bin/steam on a steam://rungameid/<id> forward, in the background): replays the environment of
 #                  the game's last launch through the gate (snapshot, written by the gate) and runs, in Valve's own
 #                  runtime + Proton, `proton runinprefix cmd.exe /c set /p ...` - the first Wine process boots the
-#                  session (wineserver, wineboot --init, services); cmd then waits on its stdin, a pipe this keeper
-#                  holds. That cmd is the session's "holder": a user process, so Wine doesn't shut the session down.
-#                  Nobody claims it within IDLE_S -> the pipe is closed, cmd exits, Wine ends the session by itself.
+#                  session (wineserver, wineboot --init, services); cmd then waits on its stdin, a FIFO this keeper
+#                  holds open. That cmd is the session's "holder": a user process, so Wine doesn't shut the session down.
+#                  Nobody claims it within IDLE_S -> the FIFO is closed, cmd exits, Wine ends the session by itself.
+#                  The FIFO is opened as stdin INSIDE the container (`/bin/sh -c 'exec "$@" <fifo'`): pressure-vessel-wrap
+#                  replaces the stdin it is given with /dev/null unless --terminal=tty (wrap.c "Cannot replace stdin
+#                  with /dev/null"; `--verb=run` = PRESSURE_VESSEL_BATCH=1 forces --terminal=none, and tty would open
+#                  /dev/tty, which a background keeper has none of) - with a pipe on the keeper's side cmd read EOF at
+#                  once and the session ended ~1 s after booting (11-12 21:09, 21:12: "holder exited (rc 0)").
 #   claim  (the gate, arm64-gate-entry, on the game's waitforexitandrun): a live, unclaimed session for this prefix,
 #                  booted by the same Proton with the same Wine-relevant environment -> claimed, and the game runs with
 #                  Proton's `run` verb (joins it). Anything else -> the session is told to end, and the launch runs
@@ -41,6 +53,9 @@ import time
 
 GATE = "powos-proton-arm64"
 IDLE_S = float(os.environ.get("POWOS_WINE_PREBOOT_IDLE_S", "90"))   # unclaimed: Steam's prep is 2-30 s (reconnect)
+EARLY_IDLE_S = float(os.environ.get("POWOS_WINE_PREBOOT_EARLY_IDLE_S", "180"))  # booted ahead: on screen -> tap
+EARLY_GAP_S = float(os.environ.get("POWOS_WINE_PREBOOT_EARLY_GAP_S", "60"))  # screen on/off churn: one boot a minute
+BACKLIGHT = os.environ.get("POWOS_BACKLIGHT_GLOB", "/sys/class/backlight/*/brightness")
 END_WAIT_S = float(os.environ.get("POWOS_WINE_PREBOOT_END_S", "30"))  # the session's own shutdown, then we stop waiting
 HOLD = "POWOS_WINE_PREBOOT_HOLD"
 # Environment the booted processes (services, winedevice, explorer) keep for the session's life: a launch whose value
@@ -138,6 +153,44 @@ def proc_start(pid):
 
 def alive(pid, start):
     return bool(pid) and proc_start(int(pid)) == start
+
+
+def display_lit():
+    """Any backlight above 0 (the phone's inner and cover panels are 0 while the screen is off); none at all = lit (as
+    powos-sleep-gui's display_on)."""
+    import glob
+    vals = []
+    for p in glob.glob(BACKLIGHT):
+        try:
+            with open(p) as f:
+                vals.append(int(f.read().strip() or 0))
+        except (OSError, ValueError):
+            pass
+    return not vals or any(v > 0 for v in vals)
+
+
+def steam_client():
+    """(pid, start) of the running Steam client (~/.steam/steam.pid), else None."""
+    try:
+        with open(os.environ.get("POWOS_STEAM_PIDFILE") or os.path.expanduser("~/.steam/steam.pid")) as f:
+            pid = int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+    st = proc_start(pid)
+    return (pid, st) if st else None
+
+
+def game_running():
+    """A game's launch is live (Steam's `reaper SteamLaunch AppId=...`)."""
+    for p in os.listdir("/proc"):
+        if p.isdigit():
+            try:
+                with open("/proc/%s/cmdline" % p, "rb") as f:
+                    if b"SteamLaunch\0AppId=" in f.read():
+                        return True
+            except OSError:
+                pass
+    return False
 
 
 def server_dir(pfx):
@@ -275,10 +328,83 @@ def release_and_wait(appid, env, s, timeout=END_WAIT_S + 15):
 
 
 # ---- the keeper ----
-def start(appid):
+def end_others(appid, steam, why):
+    """One pre-boot at a time: another app's unclaimed session is told to end (a claimed one is a running game's)."""
+    root = os.path.join(steam, "steamapps/compatdata")
+    try:
+        apps = [a for a in os.listdir(root) if a.isdigit() and a != str(appid)]
+    except OSError:
+        return
+    for a in apps:
+        d = os.path.join(root, a, "powos-preboot")
+        if not os.path.isfile(os.path.join(d, "session.json")):
+            continue
+        with Locked(d) as L:
+            s = L.read()
+            if s and s.get("state") in ("booting", "up") and alive(s.get("pid"), s.get("start")):
+                s["state"] = "ending"
+                L.write(s)
+                os.kill(int(s["pid"]), signal.SIGTERM)
+                log(d, "ended: %s" % why)
+
+
+def last_played(steam):
+    """The game last launched through the gate: the newest env.json snapshot whose pre-boot is switched on."""
+    root = os.path.join(steam, "steamapps/compatdata")
+    best = (0, None)
+    try:
+        apps = [a for a in os.listdir(root) if a.isdigit()]
+    except OSError:
+        return None
+    for a in apps:
+        try:
+            t = os.stat(os.path.join(root, a, "powos-preboot/env.json")).st_mtime
+        except OSError:
+            continue
+        if t > best[0] and enabled(a):
+            best = (t, a)
+    return best[1]
+
+
+def early():
+    """PowOS came on screen: the last-played game's session booted ahead of the tap (bounded, see the header)."""
+    steam = steam_dir()
+    appid = last_played(steam)
+    if appid is None:
+        return 0  # switch off for every game, or nothing launched through the gate yet: silent (runs at every screen-on)
+    _, d = dirs(appid, steam)
+    why = None
+    client = steam_client()
+    if not display_lit():
+        why = "the screen is off"
+    elif client is None:
+        why = "Steam is not running (the pre-boot never starts it)"
+    elif game_running():
+        why = "a game is running"
+    else:
+        try:
+            with open(os.path.join(d, "early")) as f:
+                last = float(f.read().strip() or 0)
+        except (OSError, ValueError):
+            last = 0
+        if time.time() - last < EARLY_GAP_S:
+            why = "an early pre-boot %.0f s ago (one per %.0f s)" % (time.time() - last, EARLY_GAP_S)
+    if why:
+        log(d, "early: skipped, " + why)
+        return 0
+    try:
+        with open(os.path.join(d, "early"), "w") as f:
+            f.write("%f\n" % time.time())
+    except OSError:
+        pass
+    return start(appid, early=client)
+
+
+def start(appid, early=None):
     appid = str(appid)
     steam = steam_dir()
     cd, d = dirs(appid, steam)
+    end_others(appid, steam, "app %s is being launched (one pre-boot at a time)" % appid)
     if not enabled(appid):
         return 0
     try:
@@ -313,35 +439,47 @@ def start(appid):
         t0 = time.time()
         wine_env = {k: v for k, v in snap["env"].items() if WINE_KEYS.match(k)}
         s = {"pid": os.getpid(), "start": proc_start(os.getpid()), "state": "booting", "proton": proton,
-             "envkey": env_key(snap["env"]), "wine_env": wine_env, "t0": t0, "up_ms": None}
+             "envkey": env_key(snap["env"]), "wine_env": wine_env, "t0": t0, "up_ms": None,
+             "early": early is not None}
         L.write(s)
-    return keep(appid, d, pfx, env, proton, slr, s)
+    return keep(appid, d, pfx, env, proton, slr, s, early)
 
 
-def keep(appid, d, pfx, env, proton, slr, s):
+def keep(appid, d, pfx, env, proton, slr, s, early=None):
     flags = {"release": False, "end": False}
     signal.signal(signal.SIGHUP, signal.SIG_IGN)
-    r, w = os.pipe()
-    entry = os.path.join(slr, "_v2-entry-point")
-    cmd = [entry, "--verb=run", "--", os.path.join(proton, "proton"), "runinprefix",
-           "cmd.exe", "/c", "set /p %s=" % HOLD]
+    idle = EARLY_IDLE_S if early else IDLE_S
+    # The holder's stdin: a FIFO in the prefix's compatdata (pressure-vessel shares that path), opened inside the
+    # container by sh - pressure-vessel-wrap puts /dev/null on the stdin it is given (the header). The keeper's end is
+    # O_RDWR (no blocking open, and sh's open finds a writer) and not inherited by the child: closing it = EOF to cmd.
+    fifo = os.path.join(d, "hold.fifo")
     try:
+        os.unlink(fifo)
+    except OSError:
+        pass
+    entry = os.path.join(slr, "_v2-entry-point")
+    cmd = [entry, "--verb=run", "--", "/bin/sh", "-c", 'exec "$@" <"$0"', fifo, os.path.join(proton, "proton"),
+           "runinprefix", "cmd.exe", "/c", "set /p %s=" % HOLD]
+    try:
+        os.mkfifo(fifo, 0o600)
+        w = os.open(fifo, os.O_RDWR | os.O_CLOEXEC)
         out = open(os.path.join(d, "boot.log"), "w")
-        child = subprocess.Popen(cmd, stdin=r, stdout=out, stderr=out, env=env, start_new_session=True)
+        child = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=out, env=env,
+                                 start_new_session=True)
     except OSError as e:
         with Locked(d) as L:
             L.write(None)
         log(d, "start: failed: %s" % e)
         return 1
-    os.close(r)
     # Signals taken synchronously (blocked only now: the child must not inherit the mask): USR1 = the game's launch
     # released it, TERM = end it. Polls at 10 Hz while booting/unclaimed, 1 Hz while the game runs (no busy keeper).
     sigs = {signal.SIGUSR1, signal.SIGTERM}
     signal.pthread_sigmask(signal.SIG_BLOCK, sigs)
-    log(d, "start: booting the session (%s)" % os.path.basename(proton))
+    log(d, "start: booting the session (%s%s)" % (os.path.basename(proton), ", early: before the tap" if early else ""))
     why, st = None, "booting"
     while why is None:
-        got = signal.sigtimedwait(sigs, 1.0 if st == "claimed" else 0.1)
+        # 10 Hz only while booting (services.exe looked for); then 1 Hz - claim/release don't wait on this loop
+        got = signal.sigtimedwait(sigs, 0.1 if st == "booting" else 1.0)
         if got:
             flags["release" if got.si_signo == signal.SIGUSR1 else "end"] = True
         if child.poll() is not None:
@@ -361,14 +499,22 @@ def keep(appid, d, pfx, env, proton, slr, s):
                 why = "released by the game's launch"
             elif st == "claimed" and not alive(cur.get("claimed_by"), cur.get("claimed_start")):
                 why = "the game's launch (gate %s) is gone" % cur.get("claimed_by")
-            elif st in ("booting", "up") and time.time() - s["t0"] > IDLE_S:
-                why = "not claimed in %.0f s" % IDLE_S
+            elif st in ("booting", "up") and time.time() - s["t0"] > idle:
+                why = "not claimed in %.0f s" % idle
+            elif early and st in ("booting", "up") and not display_lit():
+                why = "the screen went off"
+            elif early and st in ("booting", "up") and not alive(*early):
+                why = "Steam exited"
             elif st == "ending":
                 why = "ending"
             if why:
                 cur["state"] = "ending"
                 L.write(cur)
     os.close(w)  # cmd's `set /p` reads EOF -> exits -> no user process left -> Wine ends the session
+    try:
+        os.unlink(fifo)
+    except OSError:
+        pass
     t = time.time()
     try:
         child.wait(END_WAIT_S)
@@ -408,7 +554,9 @@ def stop(appid):
 def main(a):
     if len(a) == 2 and a[0] in ("start", "status", "stop") and a[1].isdigit():
         return {"start": start, "status": status, "stop": stop}[a[0]](a[1])
-    sys.stderr.write("usage: powos_preboot.py start|status|stop <appid>\n")
+    if a == ["early"]:
+        return early()
+    sys.stderr.write("usage: powos_preboot.py start|status|stop <appid> | early\n")
     return 2
 
 

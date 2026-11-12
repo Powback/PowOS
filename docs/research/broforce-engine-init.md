@@ -198,3 +198,38 @@ at the `steam://rungameid` tap, so it overlaps Steam's own prep instead of remov
 last-played game's prefix) AND the holder survives pressure-vessel - both open. Tap -> frame is now ~14.5 s warm
 (clocks unclamped, Steam CM link kept, prefetch whole files); the rest is Unity/Mono init + first scene (~8.5 s,
 not clock-bound) and Steam prep (~5 s).
+
+## 11-12 21:40 - lever 1 fixed: holder survives pressure-vessel, session booted before the tap (Steam 45, still off)
+
+**Why the holder died.** pressure-vessel-wrap replaces the stdin it is given with `/dev/null` unless
+`--terminal=tty` (steam-runtime-tools `pressure-vessel/wrap.c`: `glnx_openat_rdonly("/dev/null")` + `dup2(fd,
+STDIN_FILENO)`, "Cannot replace stdin with /dev/null", for any terminal mode but TTY). The keeper ran the holder with
+`_v2-entry-point --verb=run`, which exports `PRESSURE_VESSEL_BATCH=1` (the SLR 4 arm64 script on the phone, pv
+0.20261007.0), and batch forces `--terminal=none`. TTY would not help: `pv_wrap_adverb_assign_stdio` then opens
+`/dev/tty`, which a background keeper has none of (`wrap-adverb.c`). Proton's `runinprefix` inherits stdin
+(`run_proc` = `subprocess.call(..., stdout/stderr=log)`). So `cmd.exe /c set /p` read EOF from /dev/null as soon as
+it ran, ~1 s after the boot: "holder exited (rc 0)" in all three 21:09-21:15 runs (in the joined one too - it died at
+21:15:06, the 30 s "STILL UP" was the game's own session).
+**Fix:** the holder's stdin is a FIFO (`compatdata/<id>/powos-preboot/hold.fifo`, a path pressure-vessel shares)
+opened INSIDE the container: `_v2-entry-point --verb=run -- /bin/sh -c 'exec "$@" <"$0"' <fifo> proton runinprefix
+cmd.exe /c "set /p ..."`. For Wine it is the same kind of stdin as the pipe the design assumed (S_IFIFO; Wine's
+server types a non-regular, non-dir file as FD_TYPE_CHAR and ntdll read()s it blocking). The keeper keeps its end
+O_RDWR + O_CLOEXEC (no blocking open, not inherited): closing it (release, timeout, keeper killed) = EOF = the session
+ends as before. Test: the fake runtime now puts /dev/null on stdin like pv-wrap; `test_holder_survives_pv_stdin`
+(up and unclaimed 2 s later) and `test_env_mismatch_falls_back` fail on Steam 44's keeper.
+
+**Booted before the tap.** `powos_preboot.py early`, asked by powos-sleep-gui whenever PowOS comes on screen with
+Steam's client running (`Gui.preboot_ahead`, next to the CM-link reconnect-ahead): the game last launched through
+the gate (newest `env.json`, switch on for it) gets its session booted then. The tap's own `start` finds it and
+leaves it; the gate claims it as before. Bounds (one lifecycle controller, the keeper): switch off -> nothing (silent);
+needs a lit display (any backlight > 0), a running Steam (`~/.steam/steam.pid`) and no game running; one early boot
+per 60 s (`POWOS_WINE_PREBOOT_EARLY_GAP_S`, screen on/off churn); unclaimed it ends after 180 s
+(`..._EARLY_IDLE_S`), within 1 s of every display going dark, or when Steam exits. One session at a time: any
+launch's `start` ends another app's unclaimed session first. Not ended when Steam freezes: Steam freezes 15 s out of
+sight, so before nearly every tap (the tap thaws it), which would end the session before it could be used.
+Idle cost from the code: the boot itself (services up in 0.74-0.85 s wall, 11-12) once per screen-on at most once a
+minute; then the keeper wakes at 1 Hz (was 10 Hz for the whole wait: a session file read under flock, a backlight
+glob, one /proc stat), and the session's processes (wineserver in epoll, services/winedevice/plugplay/explorer in
+waits, cmd in read) take no CPU while idle. Its RAM (the session's RSS) is not measured yet - read it in the A/B.
+Switch stays OFF until the A/B (`bf-coldstart.sh steam` with PowOS on screen > 2 s before the tap, pre-boot on/off)
+shows the >= 0.5 s bar. Needs Steam pkgrel 45 + powos-sleep-gui (lib-install.sh apps/powos-sleep-gui).

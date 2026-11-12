@@ -277,5 +277,34 @@ class LinkWatch(unittest.TestCase):
         self.assertIsNone(g.dark_since)
 
 
+
+class PrebootAhead(unittest.TestCase):
+    """PowOS on screen with Steam running asks powos_preboot.py `early` (the last-played game's Wine session booted
+    before the tap; the keeper bounds it); no Steam / no keeper installed -> nothing spawned."""
+
+    U = LinkWatch.U
+
+    def run_ahead(self, root=100, installed=True):
+        from unittest import mock
+        g = object.__new__(GUI.Gui)
+        g.rules = lambda: [self.U]
+        spawned = []
+        with mock.patch.object(GUI, "unit_root", lambda u: root), \
+                mock.patch.object(GUI.os.path, "isfile", lambda p: installed), \
+                mock.patch.object(GUI.subprocess, "Popen", lambda argv, **kw: spawned.append(argv) or
+                                  types.SimpleNamespace(pid=1)), \
+                mock.patch.object(GUI.GLib, "child_watch_add", lambda *a: None, create=True), \
+                mock.patch.object(GUI.GLib, "PRIORITY_DEFAULT", 0, create=True):
+            g.preboot_ahead()
+        return spawned
+
+    def test_steam_running_asks_early(self):
+        self.assertEqual([a[1:] for a in self.run_ahead()], [[GUI.PREBOOT, "early"]])
+
+    def test_no_steam_or_not_installed_spawns_nothing(self):
+        self.assertEqual(self.run_ahead(root=None), [])
+        self.assertEqual(self.run_ahead(installed=False), [])
+
+
 if __name__ == "__main__":
     unittest.main()

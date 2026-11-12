@@ -103,6 +103,9 @@ SCREEN_LOG = os.environ.get("POWOS_SLEEP_SCREEN_LOG", f"{RUN}/andromarchy.log")
 RUNNING_DIR = f"{RUN}/running"  # the PowOS app makes it (and watches it); none on the desktop, nothing written
 # Steam's console log: every game launch's steps as they happen (SteamLaunches)
 STEAM_LOG = os.environ.get("POWOS_STEAM_LOG", os.path.expanduser("~/.local/share/Steam/logs/console_log.txt"))
+# A game's Wine session booted ahead of the tap (pkgs/steam powos_preboot.py `early`, off unless its switch is on): asked
+# when PowOS comes on screen with a game launcher (Steam) running; the keeper decides and bounds the rest itself.
+PREBOOT = os.environ.get("POWOS_WINE_PREBOOT_PY", "/usr/lib/powos-steam/py/powos_preboot.py")
 
 
 def log(msg):
@@ -901,6 +904,20 @@ class Gui(dbus.service.Object):
         self.desktop(on)
         if on:
             self.reconnect_ahead()
+            self.preboot_ahead()
+
+    def preboot_ahead(self):
+        """PowOS on screen with Steam running: the last-played game's Wine session booted now, so its launch joins a
+        live session instead of booting one (lever 1, docs/research/broforce-engine-init.md 11-12). One lifecycle
+        controller: the keeper (its switch, one session, idle timeout, screen dark, Steam exit); this only asks."""
+        if not os.path.isfile(PREBOOT) or not any(game_launcher(u) and unit_root(u) for u in self.rules()):
+            return
+        try:
+            p = subprocess.Popen([sys.executable, PREBOOT, "early"], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            GLib.child_watch_add(GLib.PRIORITY_DEFAULT, p.pid, lambda *_: None)  # reaped when its keeper ends
+        except OSError as e:
+            log(f"wine pre-boot: {e}")
 
     # Steam's link, restored before the tap ---------------------------------------
     def reconnect_ahead(self):

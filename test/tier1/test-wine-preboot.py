@@ -16,6 +16,9 @@ Covers:
 - the gate's env snapshot is written by every launch; no snapshot -> `start` boots nothing
 - a session the launch can't join (environment differs) is ended and the launch falls back to waitforexitandrun
 - an unclaimed session ends by itself after the idle timeout; a game not on powos-proton-arm64 is never pre-booted
+- the holder outlives pressure-vessel's /dev/null stdin (its FIFO is opened inside the container)
+- `early` (PowOS on screen, before the tap): boots the last-played game's session only with the switch on, a lit
+  display, Steam running and one early boot per gap; ends when the screen goes dark or Steam exits; a launch joins it
 """
 
 import json
@@ -32,10 +35,12 @@ REPO = Path(__file__).resolve().parents[2]
 PKG = REPO / "targets/android/pkgs/steam"
 APP = "274190"
 
+# As pressure-vessel-wrap: the command's stdin is /dev/null (wrap.c, unless --terminal=tty) - the pre-boot's holder
+# can't wait on a stdin given from outside the container (11-12: it read EOF and the session ended ~1 s after booting).
 ENTRY = r"""#!/bin/sh
 v=${1#--verb=}; shift; [ "$1" = -- ] && shift
 echo "$v" >> "$POWOS_TEST_LOG.entry"
-exec "$@"
+exec "$@" </dev/null
 """
 
 # Fake Proton: CURRENT_PREFIX_VERSION as Valve's script has it (powos_preboot.prefix_current reads it).
@@ -137,8 +142,15 @@ class WinePreboot(unittest.TestCase):
                         POWOS_STEAM_PY=str(PKG), WINEDLLOVERRIDES="steam.exe=b")
         self.env.pop("POWOS_WINE_PREBOOT", None)
         self.keepers = []
+        self.backlight = self.t / "backlight"
+        self.backlight.write_text("120\n")
+        self.steam_proc = subprocess.Popen(["sleep", "60"])  # the Steam client (~/.steam/steam.pid)
+        (self.t / "steam.pid").write_text("%d\n" % self.steam_proc.pid)
+        self.env.update(POWOS_BACKLIGHT_GLOB=str(self.backlight), POWOS_STEAM_PIDFILE=str(self.t / "steam.pid"))
 
     def tearDown(self):
+        self.steam_proc.kill()
+        self.steam_proc.wait()
         for k in self.keepers:
             if k.poll() is None:
                 k.kill()
@@ -159,6 +171,11 @@ class WinePreboot(unittest.TestCase):
 
     def start(self, env=None):
         k = subprocess.Popen([sys.executable, str(PKG / "powos_preboot.py"), "start", APP], env=env or self.env)
+        self.keepers.append(k)
+        return k
+
+    def early(self, env=None):
+        k = subprocess.Popen([sys.executable, str(PKG / "powos_preboot.py"), "early"], env=env or self.env)
         self.keepers.append(k)
         return k
 
@@ -267,6 +284,74 @@ class WinePreboot(unittest.TestCase):
         self.assertIsNone(self.session())
         self.assertIn("holder exit", self.lines())
         self.assertIn("not claimed in 1 s", self.preboot_log())
+
+    def test_holder_survives_pv_stdin(self):
+        """The session stays up while unclaimed: the holder's stdin is not pressure-vessel's /dev/null."""
+        self.first_launch()
+        k = self.start(dict(self.env, POWOS_WINE_PREBOOT="1"))
+        self.wait_state("up")
+        time.sleep(2)
+        self.assertIsNone(k.poll(), "keeper ended: %s" % self.preboot_log())
+        self.assertEqual(self.session()["state"], "up")
+        self.assertNotIn("holder exit", self.lines())
+        self.assertNotIn("holder exited", self.preboot_log())
+
+    def test_early_boots_last_played_and_launch_joins(self):
+        self.first_launch()
+        k = self.early(dict(self.env, POWOS_WINE_PREBOOT="1"))
+        s = self.wait_state("up")
+        self.assertTrue(s["early"])
+        self.assertIn("early: before the tap", self.preboot_log())
+        # the tap's own start finds it and leaves it alone
+        self.assertEqual(self.start(dict(self.env, POWOS_WINE_PREBOOT="1")).wait(10), 0)
+        r = self.gate()
+        self.assertEqual(r.returncode, 7, r.stderr)
+        self.assertIn("run session=up cmd=game.exe", self.lines())
+        self.assertEqual(k.wait(5), 0)
+        self.assertIsNone(self.session())
+
+    def test_early_off_by_default(self):
+        self.first_launch()
+        self.assertEqual(self.early().wait(10), 0)
+        self.assertIsNone(self.session())
+        self.assertEqual(self.lines(), [])
+
+    def test_early_needs_screen_and_steam(self):
+        self.first_launch()
+        env = dict(self.env, POWOS_WINE_PREBOOT="1")
+        self.backlight.write_text("0\n")
+        self.assertEqual(self.early(env).wait(10), 0)
+        self.assertIn("early: skipped, the screen is off", self.preboot_log())
+        self.backlight.write_text("80\n")
+        self.assertEqual(self.early(dict(env, POWOS_STEAM_PIDFILE=str(self.t / "none.pid"))).wait(10), 0)
+        self.assertIn("early: skipped, Steam is not running", self.preboot_log())
+        self.assertIsNone(self.session())
+        self.assertEqual(self.lines(), [])
+
+    def test_early_ends_when_screen_off(self):
+        self.first_launch()
+        k = self.early(dict(self.env, POWOS_WINE_PREBOOT="1"))
+        self.wait_state("up")
+        self.backlight.write_text("0\n")
+        self.assertEqual(k.wait(10), 0)
+        self.assertIsNone(self.session())
+        self.assertIn("the screen went off", self.preboot_log())
+        self.assertIn("holder exit", self.lines())
+
+    def test_early_ends_when_steam_exits_and_gap(self):
+        self.first_launch()
+        env = dict(self.env, POWOS_WINE_PREBOOT="1")
+        k = self.early(env)
+        self.wait_state("up")
+        self.steam_proc.kill()
+        self.steam_proc.wait()
+        self.assertEqual(k.wait(10), 0)
+        self.assertIn("Steam exited", self.preboot_log())
+        self.steam_proc = subprocess.Popen(["sleep", "60"])
+        (self.t / "steam.pid").write_text("%d\n" % self.steam_proc.pid)
+        self.assertEqual(self.early(env).wait(10), 0)  # screen on again at once: one early boot per gap
+        self.assertIn("early: skipped, an early pre-boot", self.preboot_log())
+        self.assertIsNone(self.session())
 
 
 class MappedTool(unittest.TestCase):
