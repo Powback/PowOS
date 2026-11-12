@@ -11,6 +11,9 @@
 #   FEX_ENABLECODECACHINGWIP=1           measured 2026-11-05 (FEX-2607): the launch dies right after pressure-vessel
 #                                        (exit -1, no window, 2 of 2) once FEX generated caches (shadercache/<id>/
 #                                        fex-emu/cache: ntdll.so, steamclient.so, ...) - unusable until FEX fixes it
+#   POWOS_WINE_PREBOOT=1                 2026-11-12: a game's Wine session booted while Steam prepares its launch,
+#                                        joined through the ARM64 gate (powos_preboot.py); per game: `powos game <id>
+#                                        preboot on|off`. NOT set until bf-coldstart's A/B shows the tap -> exe gain
 
 # HACK: GL_ARB_buffer_storage on the phone's freedreno: the lfdevs Mesa (freedreno_screen.c fd_init_screen_caps) turns
 # buffer_map_persistent_coherent off on KGSL ("KGSL mappings are not coherent"), so GL stops at 4.3 without

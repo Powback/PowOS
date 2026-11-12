@@ -212,6 +212,11 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
 - Still open: FEX code cache (fexcache never measured), pressure-vessel locale-gen (PRESSURE_VESSEL_GENERATE_LOCALES=0),
   Steam's CheckShaderDepotManifest 2 s. Persistent wineserver: Proton's waitforexitandrun waits for the prefix's
   wineserver to exit, so a resident one blocks the launch - a resident (frozen) game is the instant path.
+- Pre-booted Wine session (11-12, steam pkgrel 43, OFF until its A/B): /usr/bin/steam's rungameid forward starts
+  pkgs/steam/powos_preboot.py (boots the prefix's session from the last launch's env snapshot, held by a `cmd.exe /c
+  set /p` on a pipe); the ARM64 gate claims it and runs Proton `run` (container verb unchanged), then ends it and waits
+  for the wineserver. Switch: `POWOS_WINE_PREBOOT=1` (steam-env / bf-coldstart `env:`), `powos game <id> preboot on|off`.
+  Why a launch didn't join: compatdata/<id>/powos-preboot/log. Test: test/tier1/test-wine-preboot.py (fake runtime).
 - Verify queue gate: a job waits until its commit is in the live shell / installed APK; only shell/ and the APK's
   inputs count (queue.sh ship_paths). A commit with others' unshipped shell/Kotlin still waits: queue a `git archive
   <commit> tools/phone targets/android/session` copy (as bf-checker's job did) when the check needs only scripts.

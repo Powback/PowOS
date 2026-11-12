@@ -35,6 +35,8 @@ while Steam runs (set, a failed launch) is applied at its next start (`powos gam
     powos-steam-compat scales                       JSON {appid: {name, engine, setting, scale, why, fps}} (the widget)
     powos-steam-compat fps <appid> <fps> [--scale N]   a measured fps at a scale (default: what the last launch applied)
     powos-steam-compat watch-fps <appid>            after a launch: KWin's window task fps (45 s settle, 30 s) -> fps
+    powos-steam-compat preboot <appid> [on|off|default]   its Wine session pre-booted at the tap (powos_preboot.py);
+                                                    default = the global POWOS_WINE_PREBOOT (steam-env, off)
 
 Screen size (apply, every installed game): a Unity or Unreal game (detected from its install folder) gets the wrapper
 ~/.local/share/powos/unity-screen (targets/android/steam/unity-screen, copied there on every deploy) in its
@@ -726,6 +728,13 @@ def main(a):
     if c == "scale" and len(a) == 2:
         s = load(); print(s["apps"].get(a[1], {}).get("scale", "auto")); return 0
     if c == "scales": return cmd_scales()
+    if c == "preboot" and len(a) in (2, 3) and (len(a) == 2 or a[2] in ("on", "off", "default")):
+        s = load(); e = app_entry(s, a[1])
+        if len(a) == 3:
+            if a[2] == "default": e.pop("preboot", None)
+            else: e["preboot"] = a[2]
+            save(s)
+        print("%s: preboot %s - from its next launch" % (a[1], e.get("preboot", "default"))); return 0
     if c == "fps" and len(a) >= 3:
         return cmd_fps(a[1], a[2], a[a.index("--scale") + 1] if "--scale" in a else None)
     if c == "watch-fps" and len(a) == 2:  # POWOS_WATCH_FPS="<settle>,<span>" s (tests)

@@ -298,6 +298,14 @@ cm_link() {  # 0 logged on over a live link, 1 not yet (reconnecting, or its lin
   awk -v p=":$(printf '%04X' "$lp")" 'FNR > 1 && substr($2, length($2) - 4) == p && $4 == "01" { f = 1 } END { exit !f }' \
     /proc/net/tcp /proc/net/tcp6 2>/dev/null || return 1
 }
+# A pre-booted Wine session for the game (/usr/lib/powos-steam/py/powos_preboot.py, off unless POWOS_WINE_PREBOOT=1 or
+# `powos game <appid> preboot on`): booted while Steam prepares the launch, joined by the game through the ARM64 gate.
+# In the background; it decides itself whether it applies (switch, the game on powos-proton-arm64, a prior launch).
+case " $* " in
+  *" steam://rungameid/"*)
+    pb=/usr/lib/powos-steam/py/powos_preboot.py pa=${*##*steam://rungameid/}; pa=${pa%% *}
+    case $pa in *[!0-9]* | '') ;; *) [ -f "$pb" ] && setsid -f python3 "$pb" start "$pa" </dev/null >/dev/null 2>&1 ;; esac ;;
+esac
 case " $* " in
   *" steam://rungameid/"*)
     case $(readlink "/proc/${steam_pid:-0}/exe" 2>/dev/null) in */steamrtarm64/steam)

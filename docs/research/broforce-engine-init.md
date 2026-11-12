@@ -31,7 +31,7 @@ The first measurement in the plan below is there to settle this.
 
 | # | lever | span | expected gain | generic? | risk | state |
 |---|---|---|---|---|---|---|
-| 1 | Wine session pre-booted at the tap (wineserver + wineboot --init + services up before Proton's `run`) | tap -> exe | **-1.5 to -2.0 s** (wineserver -> exe is 2.0 s today, 1.6-4.2 s in earlier runs) | every Proton ARM64 game (and x86, where the boot runs under FEX: 8-11 s) | medium: env of the pre-booted services, Steam's process tree, stop/freeze keys | design below; not a config switch |
+| 1 | Wine session pre-booted at the tap (wineserver + wineboot --init + services up before Proton's `run`) | tap -> exe | **-1.5 to -2.0 s** (wineserver -> exe is 2.0 s today, 1.6-4.2 s in earlier runs) | every Proton ARM64 game (and x86, where the boot runs under FEX: 8-11 s) | medium: env of the pre-booted services, Steam's process tree, stop/freeze keys | built 11-12, off by default (steam pkgrel 43, `POWOS_WINE_PREBOOT=1` / `powos game <id> preboot on`); A/B pending: game-launch-time.md "11-12: a pre-booted Wine session" |
 | 2 | Mono AOT images (`<assembly>.dll.dll`) built with the game's own mono.dll | window -> frame (+ play stutter) | -0.5 to -1.5 s, upper bound from the 11-05 symbol split; how much is wall time depends on the clock finding above | every Unity game on legacy Mono (`*_Data/Mono/EmbedRuntime/mono.dll`, Unity <= 2018.x .NET 3.5); MonoBleedingEdge unverified | high: Mono 2.x's Win64 AOT path is untested, a bad image can crash (GUID/version checks refuse stale ones) | evidence below; offline toolchain needed |
 | 3 | FEX arm64ec mapped code cache (`EnableCodeCachingWIP` + `EnableLazyCodeCachingWIP`) | exe -> frame | <= 0.3-0.5 s (what is left of FEX compile with the DiskCache warm: 0.85 s on main, 11-05) | every arm64ec game | low as a switch, **but not testable**: the generator `fexofflinecompiler64.exe` is not in Proton ARM64 | wait for Valve to ship it, or build it at eff9f45 |
 | 4 | Steam's own prep (handoff -> reaper) | tap -> reaper | 2-3 s of variance: 5.2 s today vs 2.0-3.4 s on 11-07/09/11, with steamwebhelper 3.6 core-s | every Steam game | - | not engine-side: split it from console_log first |
@@ -61,7 +61,8 @@ Evidence, Valve's Wine `experimental_11.0`:
   verb. `powos-proton-arm64`'s entry (`arm64-gate-entry`) is the place to choose it, since it already picks the verb
   and execs `_v2-entry-point`.
 
-Design sketch (not built here; it needs device iteration):
+Design sketch (built 11-12 with changes - the session is held by a `cmd.exe` user process the keeper ends, not
+`wineserver -p`, and the gate waits for its end after the game; see game-launch-time.md "11-12: a pre-booted Wine session"):
 - At the tap, `powos-open-task` already knows the app id and runs during Steam's 2-5 s of prep. It asks the gate to
   pre-boot the prefix: `_v2-entry-point --verb=run -- proton run wineboot.exe --init`, with the game's compat env and
   a wineserver kept alive a short while after its last client (`wineserver -p<sec>`), so it survives until the game connects.

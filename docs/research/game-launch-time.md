@@ -808,3 +808,50 @@ Read-only on the phone (03:1x and 19:1x, skin 26 C): policy3 min=max=1651200 of 
 - Expect after deploy: the first boost logs `policy7: max 1363200 lifted to hw 3187200 once (now 3187200)` and, cool,
   `no thermal cap`; after the restore policy3/policy7 min back at their cpuinfo_min_freq, max at hw.
 
+## 11-12: a pre-booted Wine session, built, off by default (agent/wine-preboot, steam pkgrel 43)
+
+Lever 1 of broforce-engine-init.md, generic for every game on `powos-proton-arm64`. Not measured yet: A/B below.
+
+How it works (targets/android/pkgs/steam/powos_preboot.py, its HACK note; the gate's join in arm64-gate-entry):
+- **When**: at the tap. `/usr/bin/steam` gets every launch path's `steam://rungameid/<id>` forward (drawer, widget,
+  open-task, bf-coldstart) and starts `powos_preboot.py start <id>` in the background, before its logon wait. Steam's
+  own prep (handoff -> reaper) is 2-5 s warm, the session's boot runs inside it. Earlier triggers (Steam awake + the
+  last-played game, the games page) are the same `start` call; not wired until the tap's A/B says the boot doesn't fit.
+- **What**: the environment of the game's last launch (the gate snapshots it into compatdata/<id>/powos-preboot/env.json
+  on every launch) replayed through Valve's runtime + Proton: `_v2-entry-point --verb=run -- proton runinprefix
+  cmd.exe /c set /p ...`. The first Wine process boots the session (wineserver, wineboot --init, services' autostart);
+  cmd then waits on its stdin, a pipe the keeper holds = the session's user process ("holder").
+- **Join**: the gate, on the game's `waitforexitandrun`, claims a live session for the prefix booted by the same Proton
+  with the same Wine-relevant environment (WINE*/PROTON_*/DXVK_*/VKD3D*/FEX_*/TU_*/MESA_*/PRESSURE_VESSEL_*, locale,
+  LD_PRELOAD, the compat paths) and runs Proton's `run` verb in it. The container keeps `--verb=waitforexitandrun`
+  (SLR's entry point turns `run` into batch mode): only Proton's verb changes.
+- **What waitforexitandrun guaranteed, kept** (read in Proton experimental_11.0's `proton` main): the two verbs differ only
+  in `wineserver -w` before the game and `run`'s setup_game_dir_drive/setup_steam_dir_drive (s:/t: symlinks, only with
+  the gamedrive/steamdrive compat options, else stale ones removed). After the game (Proton's `run` returns when its
+  steam.exe does), the gate closes the holder's pipe and waits for the keeper, which exits only after the prefix's
+  wineserver is gone (registry saved): Steam's reaper sees the launch end after the session, as before, so the game's
+  "Remove from running list", the reaper and the cloud sync after exit come in the same order.
+- **Not joined** (other Proton, env differs, prefix needing Proton's upgrade, game not on powos-proton-arm64, no snapshot
+  yet, a session already up): the pre-boot is told to end and the launch runs `waitforexitandrun` as always (which waits
+  for that end, ~0.3-1 s - the cost of a wrong guess). Logged in compatdata/<id>/powos-preboot/log with the reason.
+- **Teardown**: unclaimed for POWOS_WINE_PREBOOT_IDLE_S (90 s: a tap that hit a Steam prompt, a reconnect) -> pipe closed,
+  cmd exits, Wine ends the session by itself; the gate gone without releasing (claimed_by dead); the holder dying;
+  `powos game <id> stop` (the session's processes carry the game's SteamAppId/WINEPREFIX); SIGTERM to the keeper.
+- **Switch**: off. Global `POWOS_WINE_PREBOOT=1` (~/.config/powos/steam-env, or a check's `env:`), per game
+  `powos game <id> preboot on|off|default` (steam-compat.json apps.<id>.preboot, beats the global).
+
+Cost, from the code (nothing measured on the phone yet): the processes the game's launch would boot anyway (wineserver,
+services, winedevice, plugplay, svchost) start ~2-5 s earlier; extra for the game's life: the holder (cmd.exe), its
+Proton python + pv-adverb, the keeper (python, 1 Hz wake-ups once claimed, 10 Hz only while booting/unclaimed). A tap
+that never becomes a launch costs one booted session for <= 90 s. Idle CPU: all of them block (stdin, epoll, waits).
+Unified sleep: the keeper is the session's one lifecycle controller until the game claims it, the game's gate after;
+the session's processes are outside Steam's tree, so a frozen game leaves them awake (idle) - check with `frozen`/`resume`.
+
+bf-coldstart's STAGES with it on: `wineserver` = the reaper's time (a session is already up) - compare reaper -> exe
+(today ~2.8 s, of which wineserver -> exe 2.0 s), tap -> exe/window/frame. The first launch after installing pkgrel 43
+writes the snapshot, so the "on" job's first run may boot nothing (its log says "no launch environment yet").
+
+A/B (steam pkgrel 43 installed first; Broforce on powos-proton-arm64):
+- off: `tools/phone/verify/queue.sh add --close broforce-launch-time bf-coldstart.sh steam steam steam`
+- on:  `tools/phone/verify/queue.sh add --close broforce-launch-time bf-coldstart.sh env:POWOS_WINE_PREBOOT=1 steam steam steam`
+Bar: >= 0.5 s on tap -> exe/window over runs 2-3, no failed launch; then `frozen` + `resume` + a second ARM64 game.

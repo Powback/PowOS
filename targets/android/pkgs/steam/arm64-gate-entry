@@ -15,13 +15,13 @@ import importlib.util
 HERE = os.path.dirname(os.path.realpath(__file__))
 
 
-def _tools():
-    """powos_steam_tools (pkgs/steam/powos_steam_tools.py): next to this file in the repo, /usr/lib/powos-steam/py on
-    the phone (this file runs from Steam's compatibilitytools.d copy)."""
+def _tools(name="powos_steam_tools"):
+    """A PowOS module (pkgs/steam/<name>.py): next to this file in the repo, /usr/lib/powos-steam/py on the phone (this
+    file runs from Steam's compatibilitytools.d copy)."""
     for d in (HERE, os.environ.get("POWOS_STEAM_PY", "/usr/lib/powos-steam/py")):
-        f = os.path.join(d, "powos_steam_tools.py")
+        f = os.path.join(d, name + ".py")
         if os.path.isfile(f):
-            spec = importlib.util.spec_from_file_location("powos_steam_tools", f)
+            spec = importlib.util.spec_from_file_location(name, f)
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
             return mod
@@ -126,7 +126,48 @@ def main():
     paths = [PROTON, SLR] + [p for p in os.environ.get("STEAM_COMPAT_TOOL_PATHS", "").split(":") if p]
     os.environ["STEAM_COMPAT_TOOL_PATHS"] = ":".join(dict.fromkeys(paths))
     entry = os.path.join(SLR, "_v2-entry-point")
+    session = None
+    if verb == "waitforexitandrun":
+        try:
+            session = preboot_join()
+        except Exception as e:  # never break a launch over the pre-boot
+            sys.stderr.write("powos-entry: preboot: %s\n" % e)
+    if session:
+        sys.exit(run_in_session(entry, cmd, *session))
     os.execv(entry, [entry, "--verb=" + verb, "--", os.path.join(PROTON, "proton"), verb] + cmd)
+
+
+# A pre-booted Wine session (powos_preboot.py, its HACK note): every game launch leaves its environment for the next
+# pre-boot; a live, matching session is joined with Proton's `run` verb instead of `waitforexitandrun` (whose
+# `wineserver -w` would wait for that very session to end). The container keeps --verb=waitforexitandrun: the
+# pressure-vessel side of the launch (main, not batch; its logs) stays what Steam asked for, only Proton's verb changes.
+# Proton's two verbs differ in nothing else but `run`'s setup_game_dir_drive/setup_steam_dir_drive (s:/t: symlinks,
+# only with the gamedrive/steamdrive compat options; otherwise it removes stale ones).
+def preboot_join():
+    P = _tools("powos_preboot")
+    app = os.environ.get("STEAM_COMPAT_APP_ID") or os.environ.get("SteamAppId")
+    if P is None or not app or not app.isdigit():
+        return None
+    P.snapshot(app, os.environ, PROTON, SLR)
+    s = P.claim(app, os.environ, PROTON)
+    return (P, app, s) if s else None
+
+
+def run_in_session(entry, cmd, P, app, s):
+    """Proton `run` as a child; after it (the game exited) the session ends and this waits for it, so Steam's reaper sees
+    the launch end after the prefix's wineserver, as with waitforexitandrun."""
+    import signal
+    import subprocess
+    child = subprocess.Popen([entry, "--verb=waitforexitandrun", "--", os.path.join(PROTON, "proton"), "run"] + cmd)
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, lambda n, f: child.send_signal(n))
+    rc = child.wait()
+    rc = 128 - rc if rc < 0 else rc  # killed by a signal: the shell's convention, as the exec'd chain would give
+    try:
+        P.release_and_wait(app, os.environ, s)
+    except Exception as e:
+        sys.stderr.write("powos-entry: preboot release: %s\n" % e)
+    return rc
 
 
 if __name__ == "__main__":

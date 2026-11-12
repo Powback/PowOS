@@ -293,6 +293,8 @@ Verbs (thin wrappers — each dispatches to the subsystem that owns it):
                           (written while Steam is off: at its next start)   → powos-steam-compat
   scale [auto|100|85|70|50]   Its render scale in % (Unity/Unreal: fewer pixels drawn, stretched to the screen);
                           auto = from its measured fps; from its next launch   → powos-steam-compat scale
+  preboot [on|off|default]   Its Wine session booted while Steam prepares the launch (ARM64 Proton games;
+                          default = POWOS_WINE_PREBOOT in ~/.config/powos/steam-env, off)   → powos-steam-compat preboot
   window borderless|default   A Unity game that forces exclusive full screen (Besiege) runs windowed at the screen's
                           size instead (its own settings set at each launch, at scale 100); default puts its own back
                           → ~/.local/share/powos/unity-screen --window
@@ -337,7 +339,7 @@ cmd_game() {
 
     # A running Steam game's verbs (any installed Steam game, by name or appid - the mod registry not needed).
     case "${1:-}" in
-        freeze|thaw|compat|scale|window|stop|close) _game_steam_verb "$name" "$@"; return $? ;;
+        freeze|thaw|compat|scale|window|preboot|stop|close) _game_steam_verb "$name" "$@"; return $? ;;
     esac
 
     _game_need_mods
@@ -431,6 +433,9 @@ _game_steam_verb() {
         scale)
             command -v powos-steam-compat >/dev/null || { perr "powos-steam-compat isn't installed (package steam)"; return 1; }
             powos-steam-compat scale "$app" ${3:+"$3"} ;;
+        preboot)
+            command -v powos-steam-compat >/dev/null || { perr "powos-steam-compat isn't installed (package steam)"; return 1; }
+            powos-steam-compat preboot "$app" ${3:+"$3"} ;;
         window)
             local us="${XDG_DATA_HOME:-$HOME/.local/share}/powos/unity-screen"
             [[ -x "$us" ]] || { perr "unity-screen isn't installed ($us; a rooted deploy copies it)"; return 1; }
