@@ -178,3 +178,23 @@ and no fps or visual regression.
 - FEX PR #6072 "Code cache wow64 fixes" (search snippet: offline compiler process-all on Windows, WoW64 cache load) - https://github.com/FEX-Emu/FEX/pull/6072
 - FEX-2611.1 code-cache rework (search snippet) - https://www.linuxcompatible.org/story/fex26111-stable-patch-ships-with-codecache-rework-and-steam-frame-crash-fix
 - Valve enables FEX code cache for Proton on Arm, plans Steam pre-caching - https://windowsforum.com/news/valve-enables-fex-code-cache-for-proton-on-arm-plans-steam-pre-caching.451345/
+
+## 11-12 21:16 - lever 1 (pre-booted Wine session) measured: no gain, stays off
+
+Steam 44 (ee6c42d8: `mapped_tool` read only the first CompatToolMapping app, so Steam 43's A/B pre-booted nothing).
+`bf-coldstart.sh steam`, one launch per job, Steam awake:
+
+| run | pre-boot | window (s) | frame (s) |
+|---|---|---|---|
+| 20:09 | off | 6.3 | 14.5 |
+| 21:09 | on (holder exited at boot, nothing joined) | 6.8 | 15.1 |
+| 21:12 | on (holder exited at boot, nothing joined) | 6.8 | 15.2 |
+| 21:15 | on (claimed 1.8 s after the pre-boot started) | 5.9 | 14.2 |
+
+Two of three sessions ended ~1 s after booting ("holder exited (rc 0)"): the holder's stdin pipe is not kept under
+pressure-vessel, the open question the implementation noted. The one joined launch saved ~0.3 s: the pre-boot starts
+at the `steam://rungameid` tap, so it overlaps Steam's own prep instead of removing Wine boot from the path. Verdict:
+`POWOS_WINE_PREBOOT` stays off. Worth it only if the session is booted BEFORE the tap (e.g. while Steam idles with the
+last-played game's prefix) AND the holder survives pressure-vessel - both open. Tap -> frame is now ~14.5 s warm
+(clocks unclamped, Steam CM link kept, prefetch whole files); the rest is Unity/Mono init + first scene (~8.5 s,
+not clock-bound) and Steam prep (~5 s).
