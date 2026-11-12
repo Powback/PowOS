@@ -269,5 +269,30 @@ class WinePreboot(unittest.TestCase):
         self.assertIn("not claimed in 1 s", self.preboot_log())
 
 
+class MappedTool(unittest.TestCase):
+    """config.vdf's CompatToolMapping: the game's entry is found wherever it sits in the block (11-12: Broforce after
+    346010/294100 read as None - a lazy regex stopped at the first app's closing brace)."""
+
+    def test_app_after_others(self):
+        sys.path.insert(0, str(PKG))
+        import powos_preboot
+        d = tempfile.mkdtemp()
+        try:
+            os.makedirs(os.path.join(d, "config"))
+            vdf = ('"InstallConfigStore"\n{\n\t"Software"\n\t{\n\t\t"Valve"\n\t\t{\n\t\t\t"Steam"\n\t\t\t{\n'
+                   '\t\t\t\t"CompatToolMapping"\n\t\t\t\t{\n'
+                   '\t\t\t\t\t"346010"\n\t\t\t\t\t{\n\t\t\t\t\t\t"name"\t\t"proton_experimental"\n\t\t\t\t\t}\n'
+                   '\t\t\t\t\t"294100"\n\t\t\t\t\t{\n\t\t\t\t\t\t"name"\t\t"proton_9"\n\t\t\t\t\t}\n'
+                   '\t\t\t\t\t"274190"\n\t\t\t\t\t{\n\t\t\t\t\t\t"name"\t\t"powos-proton-arm64"\n\t\t\t\t\t}\n'
+                   '\t\t\t\t}\n\t\t\t\t"ShaderCacheSize"\n\t\t\t\t{\n\t\t\t\t\t"274190"\n\t\t\t\t\t{\n'
+                   '\t\t\t\t\t\t"name"\t\t"wrong-block"\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n')
+            Path(d, "config/config.vdf").write_text(vdf)
+            self.assertEqual(powos_preboot.mapped_tool(APP, d), "powos-proton-arm64")
+            self.assertEqual(powos_preboot.mapped_tool("346010", d), "proton_experimental")
+            self.assertIsNone(powos_preboot.mapped_tool("999", d))
+        finally:
+            shutil.rmtree(d)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

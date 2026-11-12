@@ -102,8 +102,16 @@ def mapped_tool(appid, steam=None):
             t = f.read()
     except OSError:
         return None
-    m = re.search(r'"CompatToolMapping"\s*\{(.*?)\n\t*\}', t, re.S | re.I)
-    m = m and re.search(r'"%s"\s*\{[^{}]*?"name"\s*"([^"]*)"' % re.escape(str(appid)), m.group(1), re.S)
+    # The whole block by brace depth: a lazy "(.*?)\n\t*}" stopped at the FIRST app's closing brace, so only the first
+    # mapped app was ever found (11-12: Broforce after 346010/294100 -> "runs on None", every preboot skipped).
+    m = re.search(r'"CompatToolMapping"\s*\{', t, re.I)
+    if not m:
+        return None
+    i, depth = m.end(), 1
+    while i < len(t) and depth:
+        depth += {"{": 1, "}": -1}.get(t[i], 0)
+        i += 1
+    m = re.search(r'"%s"\s*\{[^{}]*?"name"\s*"([^"]*)"' % re.escape(str(appid)), t[m.end():i], re.S)
     return m.group(1) if m else None
 
 
