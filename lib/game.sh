@@ -295,6 +295,9 @@ Verbs (thin wrappers — each dispatches to the subsystem that owns it):
                           auto = from its measured fps; from its next launch   → powos-steam-compat scale
   preboot [on|off|default]   Its Wine session booted while Steam prepares the launch (ARM64 Proton games;
                           default = POWOS_WINE_PREBOOT in ~/.config/powos/steam-env, off)   → powos-steam-compat preboot
+  aot [status|on|off]     Mono AOT images (legacy-Mono Unity games, off by default): on places the images built off the
+                          phone (tools/games/mono-aot.sh) beside the game's assemblies, skipping any whose assembly
+                          changed since; off removes exactly those (manifest), never a game file   (from its next launch)
   window borderless|default   A Unity game that forces exclusive full screen (Besiege) runs windowed at the screen's
                           size instead (its own settings set at each launch, at scale 100); default puts its own back
                           → ~/.local/share/powos/unity-screen --window
@@ -339,7 +342,7 @@ cmd_game() {
 
     # A running Steam game's verbs (any installed Steam game, by name or appid - the mod registry not needed).
     case "${1:-}" in
-        freeze|thaw|compat|scale|window|preboot|stop|close) _game_steam_verb "$name" "$@"; return $? ;;
+        freeze|thaw|compat|scale|window|preboot|aot|stop|close) _game_steam_verb "$name" "$@"; return $? ;;
     esac
 
     _game_need_mods
@@ -440,6 +443,7 @@ _game_steam_verb() {
             local us="${XDG_DATA_HOME:-$HOME/.local/share}/powos/unity-screen"
             [[ -x "$us" ]] || { perr "unity-screen isn't installed ($us; a rooted deploy copies it)"; return 1; }
             "$us" --window "$app" "${3:-}" ;;
+        aot) _game_aot "$app" "${3:-status}" ;;
         *) _game_steam_close "$app" "$([[ "${3:-}" == --steam ]] && echo 1 || echo 0)" ;;
     esac
 }
@@ -487,6 +491,73 @@ _game_steam_reaper() {  # bin/powos: errexit + pipefail
         done
     done
     pgrep -f "SteamLaunch AppId=$1( --|\$)" | head -1 || true
+}
+
+# ── Mono AOT images (docs/research/broforce-engine-init.md lever 2; built by tools/games/mono-aot.sh) ──────────────
+# Unity 2017.4's Mono opens "<assembly>.dll" beside each assembly (aot-runtime.c load_aot_module) and ignores it on a
+# GUID / AOT version / runtime mismatch. The store holds what the build made; `on` places them in the game dir.
+#   store  $POWOS_MONO_AOT_DIR/<appid>/ (default ~/.local/share/powos/mono-aot/<appid>/)
+#          images/<path in game dir>.dll   images.tsv: <image path> \t <sha256 of its assembly> \t <GUID>
+#          installed.tsv: <image path> \t <sha256 of the placed image>   (what `off` removes; nothing else)
+_game_aot_store() { echo "${POWOS_MONO_AOT_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/powos/mono-aot}/$1"; }
+
+_game_steam_dir() {  # <appid> -> the game's install dir
+    local lib d
+    while read -r lib; do
+        [[ -f "$lib/appmanifest_$1.acf" ]] || continue
+        d=$(awk -F'"' '$2 == "installdir" {print $4; exit}' "$lib/appmanifest_$1.acf")
+        [[ -n "$d" && -d "$lib/common/$d" ]] && { echo "$lib/common/$d"; return 0; }
+    done < <(_game_steam_libs | sort -u)
+    return 1
+}
+
+_game_aot() {  # <appid> status|on|off
+    local app=$1 st g rel sha guid n=0 stale=0 placed=0 kept=0 cur
+    st=$(_game_aot_store "$app")
+    g=$(_game_steam_dir "$app") || { perr "Steam game $app isn't installed"; return 1; }
+    case "$2" in
+        status)
+            if [[ -s "$st/installed.tsv" ]]; then
+                pok "aot on: $(wc -l < "$st/installed.tsv") images in $g"
+            else
+                if [[ -f "$st/images.tsv" ]]; then plog "aot off ($(wc -l < "$st/images.tsv") images built in $st)"
+                else plog "aot off (nothing built: tools/games/mono-aot.sh all $app)"; fi
+            fi ;;
+        on)
+            [[ -f "$st/images.tsv" ]] || { perr "No AOT images for $app in $st (build them: tools/games/mono-aot.sh all $app)"; return 1; }
+            _game_aot "$app" off >/dev/null || return 1
+            : > "$st/installed.tsv.new"
+            while IFS=$'\t' read -r rel sha guid; do
+                [[ -n "$rel" && "$rel" != *..* && -f "$st/images/$rel" ]] || continue
+                n=$((n + 1))
+                # A changed assembly (a game update: new GUID too) makes its image stale: Mono would ignore it, so
+                # don't place it at all.
+                cur=$(sha256sum < "$g/${rel%.dll}" 2>/dev/null | cut -d' ' -f1 || true)
+                [[ "$cur" == "$sha" ]] || { stale=$((stale + 1)); continue; }
+                # A file of that name that isn't ours (the game's own) is never replaced.
+                [[ -e "$g/$rel" ]] && { kept=$((kept + 1)); continue; }
+                ln "$st/images/$rel" "$g/$rel" 2>/dev/null || cp "$st/images/$rel" "$g/$rel" || continue
+                printf '%s\t%s\n' "$rel" "$(sha256sum < "$g/$rel" | cut -d' ' -f1)" >> "$st/installed.tsv.new"
+                placed=$((placed + 1))
+            done < "$st/images.tsv"
+            mv "$st/installed.tsv.new" "$st/installed.tsv"
+            local msg="aot on: $placed of $n images placed in $g"
+            (( stale )) && msg+=", $stale stale (assembly changed: rebuild with tools/games/mono-aot.sh all $app)"
+            (( kept )) && msg+=", $kept not placed (a file of that name is already there)"
+            pok "$msg"
+            [[ $placed -gt 0 ]] ;;
+        off)
+            [[ -f "$st/installed.tsv" ]] || { plog "aot off (nothing placed)"; return 0; }
+            while IFS=$'\t' read -r rel sha; do
+                [[ -n "$rel" && "$rel" != *..* ]] || continue
+                [[ -e "$g/$rel" ]] || continue
+                if [[ "$(sha256sum < "$g/$rel" | cut -d' ' -f1)" == "$sha" ]]; then rm -f "$g/$rel"; n=$((n + 1))
+                else pwarn "kept $g/$rel: changed since aot on placed it"; fi
+            done < "$st/installed.tsv"
+            rm -f "$st/installed.tsv"
+            pok "aot off: $n images removed from $g" ;;
+        *) perr "powos game <name> aot [status|on|off]"; return 2 ;;
+    esac
 }
 
 # Which way a Steam game runs (native Linux build / ARM64 Proton / x86 Proton): the steam package's per-game policy.

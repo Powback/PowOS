@@ -32,7 +32,7 @@ The first measurement in the plan below is there to settle this.
 | # | lever | span | expected gain | generic? | risk | state |
 |---|---|---|---|---|---|---|
 | 1 | Wine session pre-booted at the tap (wineserver + wineboot --init + services up before Proton's `run`) | tap -> exe | **-1.5 to -2.0 s** (wineserver -> exe is 2.0 s today, 1.6-4.2 s in earlier runs) | every Proton ARM64 game (and x86, where the boot runs under FEX: 8-11 s) | medium: env of the pre-booted services, Steam's process tree, stop/freeze keys | built 11-12, off by default (steam pkgrel 43, `POWOS_WINE_PREBOOT=1` / `powos game <id> preboot on`); A/B pending: game-launch-time.md "11-12: a pre-booted Wine session" |
-| 2 | Mono AOT images (`<assembly>.dll.dll`) built with the game's own mono.dll | window -> frame (+ play stutter) | -0.5 to -1.5 s, upper bound from the 11-05 symbol split; how much is wall time depends on the clock finding above | every Unity game on legacy Mono (`*_Data/Mono/EmbedRuntime/mono.dll`, Unity <= 2018.x .NET 3.5); MonoBleedingEdge unverified | high: Mono 2.x's Win64 AOT path is untested, a bad image can crash (GUID/version checks refuse stale ones) | evidence below; offline toolchain needed |
+| 2 | Mono AOT images (`<assembly>.dll.dll`) built with the game's own mono.dll | window -> frame (+ play stutter) | -0.5 to -1.5 s, upper bound from the 11-05 symbol split; how much is wall time depends on the clock finding above | every Unity game on legacy Mono (`*_Data/Mono/EmbedRuntime/mono.dll`, Unity <= 2018.x .NET 3.5); MonoBleedingEdge unverified | high: Mono 2.x's Win64 AOT path is untested, a bad image can crash (GUID/version checks refuse stale ones) | **feasible (11-12, section 2a)**: all 107 assemblies compile + load in the game's mono.dll under Wine, same results; `powos game 274190 aot on`, A/B on the phone pending |
 | 3 | FEX arm64ec mapped code cache (`EnableCodeCachingWIP` + `EnableLazyCodeCachingWIP`) | exe -> frame | <= 0.3-0.5 s (what is left of FEX compile with the DiskCache warm: 0.85 s on main, 11-05) | every arm64ec game | low as a switch, **but not testable**: the generator `fexofflinecompiler64.exe` is not in Proton ARM64 | wait for Valve to ship it, or build it at eff9f45 |
 | 4 | Steam's own prep (handoff -> reaper) | tap -> reaper | 2-3 s of variance: 5.2 s today vs 2.0-3.4 s on 11-07/09/11, with steamwebhelper 3.6 core-s | every Steam game | - | not engine-side: split it from console_log first |
 | 5 | `ProfileStats` off (`FEX_PROFILESTATS=0`; Proton's Config.json sets it to 1) | all emulated code | small (< 0.2 s expected): per-thread counters + cycle-counter reads around each JIT/cache lookup | every arm64ec game | low | A/B command below; no code needed |
@@ -121,6 +121,55 @@ Risks: Mono 2.x's Win64 AOT was never a shipped configuration (the compiler's Wi
 alone first) and keep `.dll.dll` out of the dir to roll back. Unity's MonoBleedingEdge (`mono-2.0-bdwgc.dll`) has the
 same loader convention in upstream Mono, but whether Unity built it with AOT is **not verified** (check its strings
 the same way).
+
+### 2a. Feasibility: proven off the phone (2026-11-12, task broforce-launch-time)
+
+Built and run on .58 (x86-64 Wine 11.20, Fedora 44 container) with the phone's own copy of the game's
+`Broforce_beta_Data/{Managed,Mono}` (read-only tar, kept at `/mnt/nas/cdn/powos/mono-aot/274190/game`):
+- **Compile.** mono.dll exports `mono_main`, `mono_set_dirs`, `mono_set_assemblies_path` (`objdump -p`). A 20-line
+  loader (`tools/games/mono-aot/loader.c`) calls them; `--aot=asmonly,nodebug,outfile=X.s` compiles **every** one of
+  the 107 `Managed/*.dll` at 100 % (Assembly-CSharp: "Compiled 40545 out of 40545 methods", 2.2 s JIT; whole game
+  ~10 s on 12 jobs). The option is spelled `asmonly` in this Mono (aot-compiler.c `mono_aot_parse_options`;
+  `asm-only` is "Unknown argument").
+- **Assemble/link, two fixes** (aot-compiler.c / image-writer.c of dnSpy-Unity-mono `unity-2017.4.7`):
+  1. The Win32 asm writer still emits ELF-only `.local X` / `.size X,.-X` (`emit_local_symbol`; `write_symbols` is
+     forced TRUE at aot-compiler.c:5781): COFF gas rejects 13203 of them in CoreModule. They are symbol metadata
+     only; build.sh deletes those lines (HACK, the compiler is the game's binary and must stay that build).
+  2. Globals are emitted as `.globl _mono_assembly_guid` (x86 Win32 underscore), but `find_symbol` ->
+     `mono_dl_symbol` -> `w32_find_symbol` (utils/mono-dl.c) is a plain `GetProcAddress(module, "mono_assembly_guid")`.
+     A generated `.def` exports each bare name as an alias of the `_` one (30 symbols: methods, got_info,
+     mono_aot_file_info, mono_aot_version "66", mono_assembly_guid, ...).
+  Then `x86_64-w64-mingw32-gcc -shared -nostdlib` + a 1-line DllMainCRTStartup links a PE `.dll.dll` with no
+  imports (the AOT code reaches the runtime only through its GOT/PLT, patched at load).
+- **Loader rules** (aot-runtime.c): `mono_aot_init()` installs `load_aot_module` unconditionally; it opens
+  `<image->name>.dll` (SHARED_EXT ".dll" under PLATFORM_WIN32) beside the assembly, or `MONO_AOT_CACHE`'s cache (keep
+  that unset: on a miss it spawns `mono`); usable only if `mono_aot_version == MONO_AOT_FILE_VERSION`, the
+  `mono_assembly_guid` equals the loaded image's GUID, and `mono_runtime_version` is empty or equals
+  `mono_get_runtime_build_info()` (our images record "", no `bind-to-runtime-version`); a full-AOT image is refused
+  outside aot-only mode, and an image whose dependency's GUID changed is "unusable because a dependency is
+  out-of-date". So a game update cannot load a stale image; it only wastes a dlopen.
+- **Runs, same result.** A test exe (generics, Dictionary, LINQ, a caught NullReferenceException = SEH fault inside
+  AOT code, throw/catch, IndexOutOfRange, UnityEngine.Vector3/Mathf, `Assembly.Load("Assembly-CSharp")`) run by the
+  game's mono.dll: JIT only `result 56475`; with the 107 images beside the assemblies `result 56475`, and
+  `MONO_LOG_MASK=aot` shows "AOT loaded AOT Module for ...mscorlib/System/System.Core/UnityEngine.CoreModule/
+  Assembly-CSharp" (34 modules) and 276 "AOT FOUND AOT compiled code for ..." (e.g. `UnityEngine.Vector3:op_Addition`).
+  Not proven yet: Unity's own player under FEX/arm64ec Proton on the phone (icall-heavy code, Unity's embedding calls
+  `mono_jit_init_version` with its own domain setup), and the wall-time gain. That is the A/B.
+
+Tooling (default off, per game):
+- `tools/games/mono-aot.sh all <appid>` (Mac): `fetch` the game's Managed+Mono from the phone to the NAS, `build` on
+  .58 (`tools/games/mono-aot/{Containerfile,build.sh,loader.c}`, image `localhost/powos-mono-aot:1`) into
+  `/mnt/nas/cdn/powos/mono-aot/<appid>/build/{images/,images.tsv}`, `push` to the phone's store
+  `~/.local/share/powos/mono-aot/<appid>/` (not the game dir). Broforce: 107 images, 160 MB, pushed 2026-11-12.
+- `powos game <appid> aot on|off|status` (lib/game.sh `_game_aot`): `on` hard-links (else copies) each image beside
+  its assembly, skipping images whose assembly's sha256 differs from the build's (game update = stale) and any name
+  that already exists; `installed.tsv` lists what it placed with its sha256; `off` removes exactly those still
+  unchanged. Steam's verify/update never touches extra files, and Mono ignores stale ones anyway.
+  Tests: test/tier1/test-game-mono-aot.sh (20 checks; control: comparing presence instead of sha = 5 FAIL).
+- A/B (game launch, coordinator): `powos game 274190 aot on`, `bf-coldstart.sh steam` x3; `powos game 274190 aot off`,
+  `bf-coldstart.sh steam` x3. Then FEX's DiskCache is cold for the new file-backed code on the first "on" run: compare
+  runs 2-3. A crash at start with "on" = Win64 AOT codegen problem: bisect with fewer images (delete rows from
+  images.tsv in the store, `aot on` again; Assembly-CSharp alone first).
 
 ## 3. FEX arm64ec code cache (what FEX-2610-175 ships)
 

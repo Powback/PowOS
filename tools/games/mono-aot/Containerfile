@@ -1,0 +1,6 @@
+# Mono AOT build env for legacy-Mono Unity games (tools/games/mono-aot.sh): x86-64 Wine runs the game's OWN mono.dll
+# (its built-in AOT compiler, so the images match its runtime), mingw assembles + links the .s into <assembly>.dll.dll.
+# wine-common: Fedora's wine-core lacks /usr/share/wine/winmd, and wineboot's wine.inf copy then loops on "need media"
+# forever (every wine call waited the 5-min wineboot timeout). Xvfb: wineboot needs a display.
+FROM registry.fedoraproject.org/fedora:44
+RUN dnf -y -q install wine-core wine-common mingw64-gcc mingw64-binutils xorg-x11-server-Xvfb && dnf clean all
