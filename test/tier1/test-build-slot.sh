@@ -44,6 +44,7 @@ waitfor 'grep -q "waiting for heavy" "$L.h2.err"'
 ok "second heavy waits" '[ ! -f "$L.h2" ] && grep -q "waiting for heavy" "$L.h2.err"'
 touch "$R.q1" "$R.h1"; waitfor '[ -f "$L.h2" ]'; ok "second heavy ran after" '[ -f "$L.h2" ]'
 touch "$R.h2"; wait
+echo "$EPOCHREALTIME test phase-2 start" >> "$BUILD_SLOT_TRACE"
 
 # quick lane: three at once, exactly two hold (which two is a race - count, don't name), the third waits
 rm -f "$L".*.err
