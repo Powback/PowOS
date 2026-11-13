@@ -593,7 +593,17 @@ except Exception: pass' 2>/dev/null) || ids=
   if [ "$dev" = emu ] && [ -z "${QUEUE_NO_RUN:-}" ]; then
     ( user_sh "$(printf 'powos agents task set %q --step %q >/dev/null 2>&1 || true\npowos agents check set %q %q queued --name %q --need %q >/dev/null 2>&1 || true' \
         "$task" "emulator check queued" "$task" "$(basename "$j" .job)" "emu:$name" "$need")" & ) >/dev/null 2>&1
-    alive_runner "$(cat "$E/runner.lock/pid" 2>/dev/null)" || { nohup "$0" run-emu >> "$E/runner.log" 2>&1 & }
+    # Separate launchd supervision: an emulator lock timeout must leave a wake source,
+    # never kick the phone runner for emulator work. Same isolated-queue guard as phone.
+    alive_runner "$(cat "$E/runner.lock/pid" 2>/dev/null)" || (
+      LABEL=${QUEUE_EMU_AGENT:-com.powos.verify-emu-runner}
+      QUEUE_AGENT=${QUEUE_EMU_AGENT:-}
+      if [ -n "${QUEUE_DIR:-}" ] && [ -z "${QUEUE_EMU_AGENT:-}" ]; then
+        nohup "$0" run-emu >> "$E/runner.log" 2>&1 &
+      else
+        agent_kick || { nohup "$0" run-emu >> "$E/runner.log" 2>&1 & }
+      fi
+    )
   elif [ -z "${QUEUE_NO_RUN:-}" ]; then
     # The board marker: the AI page offers "test now" on a task whose step says so (the result's step replaces it).
     # And the check itself (the board's work_check: its truthful "awaiting-check", and the done rule's facts).

@@ -1,6 +1,7 @@
 #!/bin/bash
-# tools/phone/verify/runner-deploy.sh [install|remove|status] (Mac): the verify queue's runner as the launchd agent
-# com.powos.verify-runner (its plist next to this; unit units/mac/verify-runner-mac.json).
+# tools/phone/verify/runner-deploy.sh [install|remove|status] [phone|emu] (Mac): one verify lane as a launchd agent.
+# Default phone: com.powos.verify-runner; emu: com.powos.verify-emu-runner.
+# Plists next to this; ownership: units/mac/verify{,-emu}-runner-mac.json. Install lanes separately.
 #   install  the plist into ~/Library/LaunchAgents (paths filled in), the hand-started runner stopped (its TERM trap
 #            leaves its job queued; nothing else touches the queue), the agent (re)loaded - it starts at once when
 #            jobs are queued. Re-run after changing the plist.
@@ -12,15 +13,26 @@
 # Test agents: QUEUE_AGENT=<label> with QUEUE_DIR/HOME of their own (never the real queue or a second real runner).
 # powos-units: deploy host=mac
 set -euo pipefail
-L=com.powos.verify-runner
+# Optional second argument selects the separately owned emulator lane (default: phone).
+lane=${2:-phone}
+case "$lane" in
+  phone) L=com.powos.verify-runner; tree=verify-runner ;;
+  emu) L=com.powos.verify-emu-runner; tree=emu-runner ;;
+  *) echo 'usage: runner-deploy.sh [install|remove|status] [phone|emu]'; exit 2 ;;
+esac
 here=$(cd "$(dirname "$0")" && pwd -P)
 REPO=$(cd "$(dirname "$(git -C "$here" rev-parse --path-format=absolute --git-common-dir)")" && pwd -P)
 # This checkout is moving to $POWOS_RUN_ROOT/verify-runner (wt-move-rest) - prefer that, fall back to the old
 # $REPO/.claude/worktrees/verify-runner while it still has the real checkout (so install still works mid-move).
 POWOS_RUN_ROOT=${POWOS_RUN_ROOT:-$HOME/pw}
-VR=$POWOS_RUN_ROOT/verify-runner
-[ -e "$VR/.git" ] || [ ! -e "$REPO/.claude/worktrees/verify-runner/.git" ] || VR=$REPO/.claude/worktrees/verify-runner
+VR=$POWOS_RUN_ROOT/$tree
+# The emulator runner resolves its checkout from POWOS_RUN_ROOT only; never install
+# its agent against an old fallback directory that queue.sh would not actually use.
+if [ "$lane" = phone ]; then
+  [ -e "$VR/.git" ] || [ ! -e "$REPO/.claude/worktrees/$tree/.git" ] || VR=$REPO/.claude/worktrees/$tree
+fi
 Q=$HOME/.cache/powos-verify-queue
+[ "$lane" != emu ] || Q=$Q/emu
 P=$HOME/Library/LaunchAgents/$L.plist
 D=user/$(id -u)   # headless Mac: no gui domain; the plist is LimitLoadToSessionType Background
 loaded() { launchctl print "$D/$L" >/dev/null 2>&1; }
@@ -33,10 +45,12 @@ hand_runner() {
 }
 case "${1:-install}" in
 install)
+  mkdir -p "$(dirname "$VR")"
   [ -e "$VR/.git" ] || git -C "$REPO" worktree add -q --detach "$VR" origin/main
   [ -f "$VR/tools/phone/verify/queue.sh" ] || { echo "runner-deploy: $VR has no queue.sh (push it, then queue.sh run once)"; exit 1; }
   mkdir -p "$Q/done" "$HOME/Library/LaunchAgents"
-  sed -e "s#@HOME@#$HOME#g" -e "s#@VR@#$VR#g" "$here/$L.plist" > "$P"
+  # powos-units: ~/Library/LaunchAgents/com.powos.verify-runner.plist ~/Library/LaunchAgents/com.powos.verify-emu-runner.plist
+  sed -e "s#@HOME@#$HOME#g" -e "s#@VR@#$VR#g" -e "s#@RUN_ROOT@#$POWOS_RUN_ROOT#g" "$here/$L.plist" > "$P"
   plutil -lint "$P" >/dev/null
   # Migrate: the hand-started runner goes first (TERM: its check stays queued, the lock is freed), so the agent is the
   # only runner - the job files themselves are never moved.

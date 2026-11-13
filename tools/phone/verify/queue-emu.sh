@@ -18,6 +18,8 @@ if [ "$(cat "$L/pid" 2>/dev/null)" != $$ ]; then
   fi
   echo $$ > "$L/pid"
 fi
+# Failed checkout/copy setup must not strand the lane lock either.
+trap 'rm -rf "${QUEUE_COPY:-}" "$L"' EXIT
 # A private copy (bash reads a script as it runs; checkouts get pulled into) from the lane's checkout at origin's tip.
 if [ -z "${QUEUE_COPY:-}" ]; then
   cd "$HOME" || exit 1
@@ -53,7 +55,11 @@ emu_lock_acquire() {
   done
   return 1
 }
-emu_lock_release() { rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/powos-emu.lock" 2>/dev/null; }
+emu_lock_release() {
+  local lock="${XDG_CACHE_HOME:-$HOME/.cache}/powos-emu.lock"
+  # A timeout never owned this lock: leave the live emulator owner's lock alone.
+  [ "$(cat "$lock/pid" 2>/dev/null)" != "$$" ] || rm -rf "$lock" 2>/dev/null
+}
 export LOCK_HELD=1  # signal to emu.sh and job checks that we hold the lock
 # flush: the results the board hasn't taken yet, oldest first (the phone may be off the VPN).
 flush() { local f
@@ -75,7 +81,7 @@ flush
 if ! emu_lock_acquire "queue-emu.sh"; then
   echo "$(date +%T) could not acquire emulator lock - aborting"; exit 1
 fi
-trap 'emu_lock_release' EXIT
+# Keep the combined EXIT cleanup above: both locks and the private copy belong to this runner.
 while ls "$E"/*.job >/dev/null 2>&1; do
   verify_tree "$ET" >/dev/null 2>&1 || true
   echo "$(date +%T) emulator up (origin's tip)"

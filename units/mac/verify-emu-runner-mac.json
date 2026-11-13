@@ -1,0 +1,13 @@
+{
+  "id": "verify-emu-runner-mac",
+  "name": "Emulator verify runner (Mac launchd agent)",
+  "kind": "service",
+  "owner": "system:powos-verify",
+  "host": "mac",
+  "purpose": "Separate emulator queue supervisor com.powos.verify-emu-runner, running queue.sh run-emu from ~/pw/emu-runner (or POWOS_RUN_ROOT/emu-runner). Enqueue kickstarts it; loading recovers persisted jobs. Nonzero exits, including bounded emulator lock timeouts, are restarted by launchd. Empty queues exit successfully without polling. Phone jobs and supervision are unchanged.",
+  "installedBy": "tools/phone/verify/runner-deploy.sh install emu",
+  "files": ["~/Library/LaunchAgents/com.powos.verify-emu-runner.plist"],
+  "processes": [{"match": "powos-queue-emu\\.[A-Za-z0-9]+/queue.sh run-emu"}],
+  "unbounded": "macOS has no cgroups; one bash runner, bounded four-minute emulator lock waits, one emulator owner; launchd throttles restart attempts and no process remains when idle",
+  "remove": {"commands": ["tools/phone/verify/runner-deploy.sh remove emu"]}
+}

@@ -126,6 +126,11 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
   WatchPaths never fired in this domain (FSEvents; dir or file) - don't rely on it. Restart on new code:
   `kill $(cat ~/.cache/powos-verify-queue/runner.pid)` (TERM trap: check stays queued, locks freed; launchd restarts
   it). Stop for a while: `launchctl bootout user/$(id -u)/com.powos.verify-runner`; remove: `runner-deploy.sh remove`.
+- Emulator runner supervision is separate: `runner-deploy.sh install|remove|status emu` owns
+  `com.powos.verify-emu-runner` (unit `units/mac/verify-emu-runner-mac.json`). Explicit install required;
+  enqueue kicks it, load recovers existing jobs, nonzero lock-timeout/crash exits restart, idle exits 0.
+  Isolated launchd tests use `QUEUE_EMU_AGENT`, never the phone's `QUEUE_AGENT`. Device-free regression:
+  `python3 -I test/tier1/test-queue-emu-supervision.py` (creates its own HOME/cache/queue; no adb/launchctl).
 - Mac: `journey.sh` (one wait + verify lock + gest.sh runs + pull, `RUNS="A B C D"`), `frames.sh` (gaps / sheet / overview),
   `bf-run.sh` (Broforce ~10 min check; `NO_START=1` while the user plays it themselves).
 - Phone (pushed by the above, or `adb.sh push` + `su -c sh`): `gest.sh`, `cpu-sample.sh`, `bf-sample.sh`, `sf-latency.sh`;

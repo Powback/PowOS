@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Separate emulator lane; install explicitly with runner-deploy.sh install emu.
+     KeepAlive recovers bounded lock timeouts/crashes. Idle exits 0, without polling.
+     RunAtLoad recovers persisted jobs after loading, without needing a new enqueue. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.powos.verify-emu-runner</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@VR@/tools/phone/verify/queue.sh</string>
+    <string>run-emu</string>
+  </array>
+  <key>WorkingDirectory</key><string>@VR@</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>ExitTimeOut</key><integer>30</integer>
+  <key>LimitLoadToSessionType</key><string>Background</string>
+  <key>ProcessType</key><string>Standard</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>@HOME@/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>POWOS_RUN_ROOT</key><string>@RUN_ROOT@</string>
+  </dict>
+  <key>StandardOutPath</key><string>@HOME@/.cache/powos-verify-queue/emu/runner.log</string>
+  <key>StandardErrorPath</key><string>@HOME@/.cache/powos-verify-queue/emu/runner.log</string>
+</dict>
+</plist>
