@@ -113,7 +113,7 @@ def classify(row: dict | None) -> tuple[str, str]:
 
 
 def status(url: str, token: str) -> dict:
-    out: dict = {"mode": "authority", "state": "unknown", "tenant": None, "why": "", "canLogin": False, "candidates": []}
+    out: dict = {"mode": "authority", "state": "unknown", "tenant": None, "why": "", "canLogin": False}
     code, check = call(url, token, "GET", "/auth/check", timeout=4)
     if code == 0:
         out["why"] = check.get("error", "")
@@ -124,19 +124,10 @@ def status(url: str, token: str) -> dict:
         name = str(check["tenant"])
         out["tenant"], out["canLogin"] = name, True
     elif code == 200:
-        # HACK: an authority older than claude-rate-limiter agent/native-claude-signin (ab1c334) answers /auth/check
-        # without the tenant's name. The tenants that need a login are offered and the authority 403s a wrong pick
-        # (a secret only re-logs its own tenant). Real fix: that branch deployed; then drop this. docs/REMOTE-POWOS.md §4.
-        out["canLogin"] = True
-        out["candidates"] = [r.get("name") for r in rows if classify(r)[0] in ("missing", "refresh")]
-        if len(out["candidates"]) == 1:
-            name = out["candidates"][0]
-            out["tenant"] = name
-        else:
-            out["why"] = "pick the account to sign in"
-            if out["candidates"]:
-                out["state"] = "refresh"
-            return out
+        # An authority older than claude-rate-limiter ab1c334 (live since 11-07) doesn't name the tenant: nothing to
+        # pick from here, the admin signs in on the authority.
+        out["why"] = "this claude-auth doesn't say whose account this is (older than ab1c334): sign in at " + url + "/manage"
+        return out
     else:
         # Not a tenant secret: the proxy routes it to the default subscription, which only the admin can re-login.
         name = next((r.get("name") for r in rows if r.get("isDefault")), None)

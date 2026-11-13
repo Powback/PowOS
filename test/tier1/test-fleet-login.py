@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PowOS's native Claude sign-in (lib/ai/manager/fleet_login.py) against a fake fleet authority.
 
-Pinned: whose tenant the secret is (/auth/check's name, the HACK fallback for an old authority, the default for a
+Pinned: whose tenant the secret is (/auth/check's name, unknown with /manage for an old authority, the default for a
 non-tenant secret); both states the user can hit - sign-in missing (no creds) and needs refresh (refresh failed) -
 and ok; start/complete relay the authority's claude-login flow with the tenant's own secret (the code from stdin, not
 argv); `powos manager --auth` says relogin and a chat turn emits {"kind": "relogin"} with status 4; the secret is
@@ -126,7 +126,7 @@ check(helper(conf, "word").stdout.strip() == "ok", "word: ok (not relogin)")
 STATE["name_tenant"] = False
 STATE["auth"] = {"ok": False, "hasCreds": True, "needsReauth": True, "lastError": "x"}
 s = status()
-check(s["tenant"] == "powback" and s["state"] == "refresh", "old authority (no tenant name): the one tenant needing a login")
+check(s["tenant"] is None and s["state"] == "unknown" and not s["canLogin"] and "/manage" in s["why"], "old authority (no tenant name): unknown, sign in at /manage")
 STATE["name_tenant"] = True
 
 s = status(other)
