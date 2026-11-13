@@ -10,6 +10,8 @@ Covers:
 - the game's own launch (waitforexitandrun) and any other Python: untouched
 - Proton's own import (module name user_settings) still skips + records as before; loading it under another name
   (what sitecustomize does) runs nothing
+- a prefix deleted and recreated (even with the same inode, as ext4 hands back) never matches the old record: the
+  key holds pfx/powos-prefix-id, a token made per prefix; records from before it (inode/version keys) run it once
 """
 
 import hashlib
@@ -60,15 +62,20 @@ class IscriptSkip(unittest.TestCase):
         return [sys.executable, str(self.tool), verb, "--", str(self.steam / "steamapps/common/SteamLinuxRuntime_4/_v2-entry-point"),
                 "--verb=" + verb, "--"] + (inner or self.evaluator_argv())
 
-    def key(self, with_version=False):
+    def key(self, old_format=False):
+        # old_format: the pre-11-13 key (pfx's inode instead of its id token).
         h = hashlib.sha256()
         for a in self.evaluator_argv()[3:]:
             h.update(a.encode() + b"\0")
         h.update(self.script.read_bytes())
-        if with_version:
-            h.update((self.proton / "version").read_bytes())
-        st = os.stat(self.data / "pfx")
-        h.update(("%d:%d" % (st.st_dev, st.st_ino)).encode())
+        if old_format:
+            st = os.stat(self.data / "pfx")
+            h.update(("%d:%d" % (st.st_dev, st.st_ino)).encode())
+        else:
+            idf = self.data / "pfx/powos-prefix-id"
+            if not idf.exists():
+                idf.write_text("0123456789abcdef0123456789abcdef\n")
+            h.update(("prefix-id:" + idf.read_text().strip()).encode())
         return h.hexdigest()
 
     def record(self, key=None):
@@ -104,20 +111,16 @@ class IscriptSkip(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertNotIn("CHAIN STARTED", r.stdout)
 
-    def test_old_record_with_version_honoured_and_rewritten(self):
-        self.record(self.key(with_version=True))
+    def test_old_format_record_runs_once(self):
+        # A pre-11-13 record (pfx's inode in the key) can't tell a rebuilt prefix from the old one: run it once.
+        self.record(self.key(old_format=True))
         r = self.run_chain(self.chain())
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertNotIn("CHAIN STARTED", r.stdout)
-        self.assertEqual((self.data / "powos-iscript.done").read_text().strip(), self.key())
+        self.assertEqual(r.returncode, 7)
+        self.assertTrue((self.data / "pfx/powos-prefix-id").read_text().strip())
 
     def test_runs_when_prefix_replaced(self):
         self.record()
-        # The new prefix is made while the old one still exists (moved aside), so it surely has another inode: on ext4
-        # (CI's runner, 11-13) an rmtree + mkdir got the freed inode back, the key matched and the skip was taken
-        # (overlayfs, the tier1 container, never reuses one). That inode reuse is the key's known limit: a prefix
-        # rebuilt after a full delete can keep its inode (user_settings.py _iscript_key; reg_guard's delete covers
-        # the registry case).
+        # Another inode here (made while the old one still exists); the same inode: test_prefix_rebuilt_same_inode.
         (self.data / "pfx").rename(self.data / "pfx.old")
         (self.data / "pfx").mkdir()
         (self.data / "pfx/creation_sync_guard").touch()
@@ -125,6 +128,41 @@ class IscriptSkip(unittest.TestCase):
         shutil.rmtree(self.data / "pfx.old")
         r = self.run_chain(self.chain())
         self.assertEqual(r.returncode, 7)
+
+    def proton_stub(self, same_inode=False):
+        # Inside Proton: sys.argv = proton's, `import user_settings` from its dir. same_inode: every stat of pfx
+        # reports one fixed inode - what ext4 does to an rmtree'd + recreated prefix (CI 11-13).
+        prot = self.proton / "proton"
+        fake = ""
+        if same_inode:
+            fake = ("import os\n_st = os.stat\n"
+                    "def _fake(p, *a, **k):\n"
+                    "    r = _st(p, *a, **k)\n"
+                    "    if str(p).rstrip('/').endswith('/pfx'):\n"
+                    "        r = os.stat_result((r.st_mode, 4242) + tuple(r)[2:10])\n"
+                    "    return r\n"
+                    "os.stat = _fake\n")
+        prot.write_text(fake + "import sys\nsys.path.insert(0, %r)\nimport user_settings\nsys.exit(0)\n" % str(self.proton))
+        return [sys.executable, str(prot)] + self.evaluator_argv()[1:]
+
+    def test_prefix_rebuilt_same_inode(self):
+        argv = self.proton_stub(same_inode=True)
+        r = self.run_chain(argv)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("exited 0, recorded", self.log())
+        shutil.rmtree(self.data / "pfx")  # Steam's/the user's prefix delete; Proton makes a new one
+        (self.data / "pfx").mkdir()
+        (self.data / "pfx/creation_sync_guard").touch()
+        log0 = len(self.log())
+        # The x86 FEX-tool path (sitecustomize, before the container): the chain runs.
+        r = self.run_chain(self.chain())
+        self.assertEqual(r.returncode, 7)
+        # Proton's own import: the evaluator runs (and records the new prefix).
+        r = self.run_chain(argv)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("skipped", self.log()[log0:])
+        self.assertIn("running it (input changed)", self.log()[log0:])
+        self.assertIn("exited 0, recorded", self.log()[log0:])
 
     def test_runs_without_record(self):
         r = self.run_chain(self.chain())
@@ -146,11 +184,7 @@ class IscriptSkip(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), "other")
 
     def test_proton_import_still_skips_and_records(self):
-        # Inside Proton: sys.argv = proton's, `import user_settings` from its dir.
-        # sys.argv[0] must be the proton script (its dir holds "version"): a stand-in named proton.
-        prot = self.proton / "proton"
-        prot.write_text("import sys\nsys.path.insert(0, %r)\nimport user_settings\nsys.exit(0)\n" % str(self.proton))
-        argv = [sys.executable, str(prot)] + self.evaluator_argv()[1:]
+        argv = self.proton_stub()
         r = self.run_chain(argv)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual((self.data / "powos-iscript.done").read_text().strip(), self.key())
@@ -189,6 +223,9 @@ class Arm64Gate(IscriptSkip):
         self.assertIn("TOOLS=%s:%s" % (self.proton, self.entry.parent), r.stdout)
 
     def test_proton_import_still_skips_and_records(self):
+        pass  # Proton's own import: covered by IscriptSkip
+
+    def test_prefix_rebuilt_same_inode(self):
         pass  # Proton's own import: covered by IscriptSkip
 
 

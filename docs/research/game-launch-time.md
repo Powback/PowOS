@@ -32,8 +32,8 @@ ARM64 Proton (no FEX layer, native pv + Python) does the same chain in ~3 s; und
 `targets/android/pkgs/steam/sitecustomize.py` (installed as `/usr/lib/powos-steam/py/sitecustomize.py`, put on
 `PYTHONPATH` by `steam-env`) runs at the start of Valve's FEX compat tool's own (host, native) Python - the FIRST
 layer of every x86 Proton launch. For an evaluator run (`proton run iscriptevaluator.exe ...` in its argv) it loads
-that Proton's PowOS `user_settings.py` and asks `iscript_skip_early()`: the same key (script bytes, Proton version,
-prefix inode) and the same record (`compatdata/<id>/powos-iscript.done`) Proton's in-container skip uses. Match ->
+that Proton's PowOS `user_settings.py` and asks `iscript_skip_early()`: the same key (script bytes, the prefix's
+id token pfx/powos-prefix-id) and the same record (`compatdata/<id>/powos-iscript.done`) Proton's in-container skip uses. Match ->
 exit 0 before FEX, pressure-vessel and Proton start. Anything changed / no record / the user's own user_settings.py /
 any error -> nothing happens and the chain runs as before (Proton still records after a real run). Logged in
 `powos-iscript.log` as "skipped before the container (FEX compat tool)". Generic: every x86 Proton game.
@@ -604,6 +604,10 @@ live in the prefix registry; a Proton update keeps them, a rebuilt prefix change
 old-format records still match and are rewritten. Test: test-steam-iscript-skip.py (Proton update still skips, old
 record honoured). The dead CM link after a freeze (~13 s + ~7 s of post-logon prep) is the open unified-sleep item
 from 10-24 ("keeping a frozen Steam's CM link alive"), unchanged: manager decision.
+2026-11-13 (steam pkgrel 47): the prefix inode was not enough - ext4 hands a freed inode straight back, so a prefix
+deleted and recreated matched its old record and the evaluator (redist installs, registry marks) was skipped. The key
+now holds pfx/powos-prefix-id, a random token user_settings.py writes the first time it keys that prefix (a new pfx
+has none -> new token; Proton updates keep it). Older records run the evaluator once. Test: test_prefix_rebuilt_same_inode.
 
 ## 11-11 cold start after Steam 42 (agent/bf-launch-1111)
 
