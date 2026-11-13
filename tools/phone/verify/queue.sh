@@ -903,7 +903,7 @@ EOS
       wl_done() { [ -n "${WL_DID:-}" ] || [ -e "$WL_WOKE" ] || return 0
         if [ -z "${WL_DID:-}" ] && grep -q '^held=1' "$WL_WOKE" 2>/dev/null; then echo "$(date +%T) held the screen on for ${k:-0} jobs"
         else echo "$(date +%T) woke the phone for ${k:-0} jobs"; util_rec K "$(date +%s)" "${k:-0}"; fi; wl_sleep "$phone"; }
-      N=${#sel[@]}; k=0; pass=0; fail=0; first=; prev=; results=
+      N=${#sel[@]}; k=0; pass=0; fail=0; skipped=0; first=; prev=; results=
       [ $N -gt 0 ] || { status "" '{"done":true}' "rm -f /tmp/powos-verify-go"; [ $held = 0 ] && exit 5; exit 7; }
       # f317: what a "test all" costs, before it starts: the count and the summed budgets (an upper bound).
       est=0; for j in "${sel[@]}"; do b=$(sed -n 's/^budget=//p' "$j" | head -1); est=$((est + ${b:-300})); done
@@ -1111,7 +1111,9 @@ EOS
         r=$([ $rc = 0 ] && echo PASS || { [ "$why" = timeout ] && echo "FAIL timeout" || echo "FAIL rc=$rc"; }); fi; echo "$r: $(tail -1 "$log")" >> "$log"
         prev="${name:-$task}: $r"
         img=
-        if [ $rc != 0 ] && [ $rc != 3 ] && [ $envskip = 0 ]; then
+        if [ $envskip = 1 ]; then
+          results="${results:-}${name:-$task}"$'\t'"S"$'\n'; skipped=$(( ${skipped:-0} + 1 ))
+        elif [ $rc != 0 ] && [ $rc != 3 ]; then
           results="${results:-}${name:-$task}"$'\t'"F"$'\n'; fail=$((fail + 1)); [ -n "$first" ] || first=${name:-$task}$([ "$why" = timeout ] && echo ": timeout")
           # What the screen showed when it failed: the board task's review image (the pill keeps out of screencaps).
           f=verify-$(printf %s "$n" | tr -c 'A-Za-z0-9._-' '-').png
@@ -1132,10 +1134,11 @@ EOS
       # Only the LATEST result per check counts: a check that failed and then passed in this same window (a re-queue)
       # is a pass, not a stale fail in the notification.
       if [ -n "${results:-}" ]; then
-        read -r pass fail first <<<"$(printf '%s' "$results" | awk -F'\t' '{r[$1]=$2} END {p=0;f=0;fs=""; for(k in r){ if(r[k]=="P")p++; else {f++; if(fs=="")fs=k}} print p, f, (fs==""?"-":fs)}')"
+        read -r pass fail skipped first <<<"$(printf '%s' "$results" | awk -F'\t' '{r[$1]=$2} END {p=0;f=0;s=0;fs=""; for(k in r){ if(r[k]=="P")p++; else if(r[k]=="S")s++; else {f++; if(fs=="")fs=k}} print p, f, s, (fs==""?"-":fs)}')"
         [ "$first" != - ] || first=
       fi
       sum="Phone checks: $pass passed"; [ $fail = 0 ] || sum="$sum, $fail failed ($first$([ $fail -gt 1 ] && echo ", ..."))"
+      [ $skipped = 0 ] || sum="$sum, $skipped skipped (not judged)"
       status "" "{\"done\":true,\"summary\":$(jstr "$sum")}" ) & wait $!
     rc=$?; [ -n "$wpp" ] && endjob "$wpp"   # the wait ended without a window (exit 3/6): its pill writes end before pause's
     [ -e "$WL_WOKE" ] && wl_sleep "$phone"   # woken but no window came (or the window's own wl_done couldn't): settings back

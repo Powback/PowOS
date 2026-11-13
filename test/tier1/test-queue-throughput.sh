@@ -100,4 +100,22 @@ for p in 'util_rec J "$t0" "$t1" "$uc" "$n"; util_hourly' 'trap '"'"'warm_stop; 
          'order_quick; order_jobs' 'util_line --since "$se"' 'QUEUE_NEXT_APP=$nextapp'; do
   grep -qF "$p" "$src" && ok "runner: $p" || bad "runner wiring missing" "$p"; done
 
+# A skipped check is NOT a passing check. Execute the runner's actual accounting branch without a device.
+# This includes rc=0 + SKIP: (a check may skip successfully), not just environment errors.
+account=$(sed -n '/^        if \[ \$envskip = 1 \]; then$/,/^        else results=.*pass=.*fi$/p' "$src")
+summary=$(grep 'read -r pass fail skipped first' "$src")
+[ -n "$account" ] && [ -n "$summary" ] || { bad "runner skip accounting found"; exit 1; }
+for rc in 0 5 137 143; do
+  results=; name=window-check; task=windows; pass=0; fail=0; skipped=0; envskip=1
+  eval "$account"
+  eval "$summary"
+  eq "SKIP rc=$rc never becomes PASS or FAIL" "$pass:$fail:$skipped" "0:0:1"
+done
+# Only the latest attempt per name counts, including a skip after a pass and a real pass after a skip.
+results=$'window-check\tP\nwindow-check\tS\nother-check\tF\n'; eval "$summary"
+eq "latest SKIP supersedes earlier PASS" "$pass:$fail:$skipped:$first" "0:1:1:other-check"
+results=$'window-check\tS\nwindow-check\tP\n'; eval "$summary"
+eq "real retry PASS supersedes SKIP" "$pass:$fail:$skipped:$first" "1:0:0:-"
+grep -qF '$skipped skipped (not judged)' "$src" && ok "notification names unjudged checks" || bad "notification names unjudged checks"
+
 echo; [ $fails = 0 ] && { echo "All tests passed"; exit 0; }; echo "$fails tests failed"; exit 1
