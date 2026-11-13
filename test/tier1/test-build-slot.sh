@@ -22,6 +22,7 @@ diag() {
   printf '; err:'; for f in "$L".*.err; do [ -s "$f" ] && printf ' %s=%s' "$(basename "$f" .err)" "$(tr '\n' '|' < "$f")"; done
   printf '; locks:'; for d in "$XDG_CACHE_HOME"/powos-build-slot*; do [ -e "$d" ] && printf ' %s(pid=%s label=%s)' \
     "${d##*/}" "$(cat "$d/pid" 2>/dev/null)" "$(cat "$d/label" 2>/dev/null)"; done
+  printf '; procs:'; ps -eo pid=,args= 2>/dev/null | grep '[b]uild-slot.sh' | awk '{printf " %s(%s %s)", $1, $4, $5}'
 }
 # waitfor <cond>: poll until <cond> is true, up to $T s. Events, not durations.
 waitfor() { local i=0; while ! eval "$1"; do i=$((i+1)); [ "$i" -le $((T*20)) ] || return 1; sleep 0.05; done; }

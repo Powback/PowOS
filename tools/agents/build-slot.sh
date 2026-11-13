@@ -54,9 +54,11 @@ while :; do
     # older than a minute (holder killed in that gap) is reclaimed.
     if [ -z "$p" ]; then
       [ -n "$(find "$l" -maxdepth 0 -mmin +1 2>/dev/null)" ] || continue
+      echo "build-slot: reclaimed $l (no pid for over a minute)" >&2
       rm -rf "$l" 2>/dev/null; continue 2
     fi
-    if ! kill -0 "$p" 2>/dev/null; then rm -rf "$l" 2>/dev/null; continue 2; fi
+    # Said on stderr: a reclaim of a live holder's slot is the one way a lane admits one job too many.
+    if ! kill -0 "$p" 2>/dev/null; then echo "build-slot: reclaimed $l (holder pid $p not running)" >&2; rm -rf "$l" 2>/dev/null; continue 2; fi
   done
   [ -z "$lock" ] || break
   if [ -z "$said" ]; then
